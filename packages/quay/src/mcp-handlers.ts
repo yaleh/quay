@@ -17,8 +17,9 @@ import { QUAY_VERSION } from "./version.ts";
 import { runGate } from "./gate/engine.ts";
 import { resolveGateLogPath, runGateLogQuery } from "./gate/gate-log.ts";
 import { listGates } from "./gate/registry.ts";
-import { runComplete, runAdjudicate, runPromote, runRetreat } from "./gate/lifecycle.ts";
+import { runComplete, runAdjudicate, runPromote, runRetreat, runCompleteOutOfBand } from "./gate/lifecycle.ts";
 import { validateConfig } from "./config-validate.ts";
+import { TASK_STATUS } from "./abi.ts";
 
 export interface ConnectedProvider {
   id: string;
@@ -291,6 +292,21 @@ export function registerTaskHandlers(
   // Provider's own manifest, same discipline as bin/quay.js's `task edit`).
   // QX-031: description updated to document expectedStatus CAS semantics and
   // label array type. No logic changes.
+  //
+  // SILENT-COMPLETION GUARD (gap-silent-completion-path-writes-no-gate-event, 2026-09-30):
+  // the generic passthrough above has ONE semantic arm — reaching `done`. The invariant
+  // "landing ⇒ a `complete` GateEvent" is asserted after the fact by `gate-event-coverage-check`,
+  // which is fail-closed and runs BEFORE the suite in the static gate chain. On 2026-09-30 a bare
+  // `task_write` flipping `needs-human → done` wrote ZERO events, so that judge reddened the next
+  // day and every code delta's fan-in aborted at the static gate — the suite never ran. A detector
+  // whose cost is a day of stopped landings is not a harmless red reading: the invariant has to
+  // hold on the WRITE side.
+  //
+  // So a patch whose `status` is `done` is REFUSED unless it carries the explicit out-of-band
+  // channel (`completeReason`), which routes through `runCompleteOutOfBand` — the one primitive
+  // that writes the status AND the `complete` event together. The guard lives HERE, in Core, and
+  // not in a Provider: "reaching done is gated" is task-lifecycle semantics, and pushing it into
+  // each backend would leak gate meaning into every Provider (the ABI stays provider-agnostic).
   server.registerTool(
     "task_write",
     {
@@ -299,13 +315,15 @@ export function registerTaskHandlers(
         "Only provided fields are updated; omitted fields are left unchanged. " +
         "Supply `expectedStatus` for optimistic-locking (CAS): if the task's current status does not match, returns isError:true without writing. " +
         "`labels` is an array of strings (replaces the full label set). " +
-        "Returns the updated task object on success, or isError:true on CAS conflict or other failure. " +
-        "Proxies the Provider's own task_write tool.",
+        "`status:'done'` is REFUSED unless `completeReason` is supplied: reaching done must carry a `complete` GateEvent, and a bare status write produces none. " +
+        "`completeReason` (required with status=done, ≥8 non-whitespace chars) is the explicit out-of-band completion channel — it writes status=done AND appends the `complete` pass event in one step, recording your reason as its evidence. Use it for a task the normal gate cannot judge (e.g. `needs-human`, or no acceptance meter); use `lifecycle_complete` for a `ready` task with a meter. " +
+        "Returns the updated task object on success, or isError:true on CAS conflict, refusal, or other failure. " +
+        "Proxies the Provider's own task_write tool (except for the status=done arm, which Core gates).",
       inputSchema: {
         provider: z.string().optional().describe("Provider id to write to (defaults to the first-enabled Provider in .quay/config.yml)."),
         id: z.string().describe("Task id to write/patch (e.g. 'QX-029')."),
         title: z.string().optional().describe("New title. Omit to leave unchanged."),
-        status: z.string().optional().describe("New status ('todo', 'ready', 'needs-human', 'done', 'superseded'). Omit to leave unchanged."),
+        status: z.string().optional().describe("New status ('todo', 'ready', 'needs-human', 'done', 'superseded'). Omit to leave unchanged. 'done' requires completeReason."),
         labels: z.array(z.string()).optional().describe("Replacement label array (replaces all existing labels). Omit to leave unchanged."),
         parent: z.string().nullable().optional().describe("Parent task id, or null to clear. Omit to leave unchanged."),
         children: z.array(z.string()).optional().describe("Replacement children array. Omit to leave unchanged."),
@@ -314,11 +332,54 @@ export function registerTaskHandlers(
         body: z.string().optional().describe("Full replacement body (markdown). Omit to leave unchanged."),
         extra: z.record(z.string(), z.any()).optional().describe("Extra frontmatter fields as a key/value map."),
         expectedStatus: z.string().optional().describe("Optimistic-locking guard: if task's current status differs from this value, the write is refused with isError:true (no mutation). Omit to skip the check."),
+        completeReason: z.string().optional().describe("The out-of-band completion channel, required when status='done': why this task reaches done without a gate verdict (≥8 non-whitespace chars). Written as the `complete` GateEvent's `verifiedBy` evidence. Never forwarded to the Provider — it is a Core-side lifecycle instruction, not a task field."),
       },
     },
-    async ({ provider, id, ...patch }) => {
+    async ({ provider, id, completeReason, ...patch }) => {
       const { client } = await getClient(provider);
       try {
+        if ((patch as { status?: string }).status === TASK_STATUS.DONE) {
+          if (typeof completeReason !== "string" || completeReason.trim() === "") {
+            return {
+              isError: true,
+              content: [
+                {
+                  type: "text" as const,
+                  text:
+                    `refused: task_write cannot set status=done without the completion channel (${id}).\n` +
+                    `Reaching done must carry a \`complete\` GateEvent — a bare status write produces none, and ` +
+                    `gate-event-coverage-check (fail-closed, ahead of the suite) then stalls every landing.\n` +
+                    `Two sanctioned routes:\n` +
+                    `  (a) lifecycle_complete — runs the acceptance gate; requires status=ready and a meter (the normal path).\n` +
+                    `  (b) task_write with completeReason:"<why>" — the explicit out-of-band channel for a task that cannot ` +
+                    `be gated (needs-human, no acceptance meter). It writes status=done AND the complete event itself, ` +
+                    `recording your reason as evidence.`,
+                },
+              ],
+            };
+          }
+          const cfg = loadConfig();
+          const logPath = resolveGateLogPath(cfg.workspaceRoot, {});
+          const result = await runCompleteOutOfBand({
+            client: client as unknown as Parameters<typeof runCompleteOutOfBand>[0]["client"],
+            id,
+            logPath,
+            workspaceRoot: cfg.workspaceRoot,
+            reason: completeReason,
+            expectedStatus: (patch as { expectedStatus?: string }).expectedStatus,
+          });
+          process.exitCode = 0; // MCP is long-running: never leak the lifecycle helper's exitCode
+          if (!result.ok) {
+            return { isError: true, content: [{ type: "text" as const, text: result.reason }] };
+          }
+          // Same response shape as every other task_write arm (`structuredContent.task`) — the
+          // completion channel is a route for one field, not a differently-shaped verb.
+          const completed = await client.taskGet(id);
+          return {
+            content: [{ type: "text" as const, text: JSON.stringify(completed, null, 2) }],
+            structuredContent: { task: completed, complete: result },
+          };
+        }
         const task = await client.taskWrite({ id, ...patch });
         return {
           content: [{ type: "text" as const, text: JSON.stringify(task, null, 2) }],

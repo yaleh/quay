@@ -40,6 +40,17 @@
 // **变异检验**：把该分支改回 `&& /: storing ref\s*$/.test(s)` ⇒ 这些断言必须变红（否则它只是回声，
 // 硬规则④推论三）。
 //
+// releaseBump 结构分类（gap-ac194-release-bump-classified-as-bypass，本判据第四次变假）：SPEC §4.3/§12
+// 的 release-cut step-5「下一版 bump」按设计直落 develop（release-cut.mjs:514-524）——旧判据把它判 bypass
+// ⇒ AC-194 恒 fail。本文件钉住谓词式分类（⛔ 非 sha 表）：
+//   · PURE `RELEASE_BUMP_SUBJECT_RE`（生成器唯一模板，整串锚定）与 `extractCutParents`（只认 form:"cut"
+//     ∧ base 匹配）；
+//   · PURE `classifyReleaseBumpCommit` 三谓词合取 + 第三态（来源读不出 ⇒ null，⛔ 不与 false 同形）；
+//   · CLI：生产形态（模板 subject + cut-ledger 直接子提交 + 载体集子集）⇒ exit 0 / RELEASE-BUMP 可见；
+//     **负控**：同 subject 夹带一个载体外 code-surface 文件（plugin/scripts/x.ts）⇒ 仍 exit 1
+//     direct-commit-bypasses-fan-in；ledger 缺席 ⇒ releaseBump 未评估且仍 RED（fail-closed）。
+// **变异检验**（AC5）：把谓词改成「只匹配 subject」（丢掉 ②/③）⇒ 上面的负控断言必须变红。
+//
 // Run:
 //   scripts/test.sh plugin/test/direct-to-develop-bypass-check.test.mjs
 //   node --test plugin/test/direct-to-develop-bypass-check.test.mjs
@@ -74,6 +85,9 @@ import {
   classifyLandingMode,
   buildRefMoveBrackets,
   classifySpineLandingMode,
+  RELEASE_BUMP_SUBJECT_RE,
+  extractCutParents,
+  classifyReleaseBumpCommit,
 } from "../scripts/direct-to-develop-bypass-check.ts";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -669,6 +683,224 @@ test("AC2 回放·CLI — b67a91cf exit 0（ruledHistorical 可见 + README.md �
   assert.equal(out.evaluated, true);
   assert.equal(out.denominator.ruledHistoricalCommits, 1, "b67a91cf 计入 ruledHistorical（AC2 快修可见）");
   assert.equal(out.denominator.codeSurfaceCommits, 0, "README.md 设计内 ⇒ 非代码面（AC1 根修）");
+});
+
+// ── releaseBump 结构分类（tasks/gap-ac194-release-bump-classified-as-bypass）───────────────────────
+// SPEC §4.3/§12 的 release-cut step-5「下一版 bump」**按设计直落 develop**（release-cut.mjs:514-524），
+// 而本检测器把任何非 design-internal 直投一律判 bypass ⇒ 每次切版 AC-194 变假（第四次同一形态；前三次靠
+// 人手往 ruled 表加一行吸收）。修法 = **谓词式**结构分类（⛔ 非 sha 表）：subject 模板 ∧ cut-ledger 直接
+// 子提交 ∧ 版本载体集子集。钉子：生产形态 ⇒ releaseBump（非 bypass）；负控（同 subject 夹带载体外
+// code-surface 文件）⇒ 仍 bypass。
+// **变异检验**（AC5）：把谓词临时改回「只匹配 subject 字符串」（丢掉 ②/③）⇒ 下面的负控断言必须变红。
+
+const RELEASE_BUMP_SUBJECT =
+  "release: bump version to 0.14.0 after v0.13.0 (SPEC §12: VERSION + stamp + closure-ratchet re-anchor)";
+const RELEASE_BUMP_CUT_SHA = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
+/** 载体集 fixture —— 与 `scripts/version-carriers.ts` 的 versionBearingPaths() 同形（10 载体 + 源）。
+ *  ⛔ 这里是**测试 fixture**不是生产清单：生产路径由单源表派生（见 CLI releaseBump sources 读数）。 */
+const RELEASE_BUMP_CARRIERS = new Set([
+  "VERSION",
+  "delivery-manifest.json",
+  "package-lock.json",
+  "packages/quay/package.json",
+  "packages/quay-native/package.json",
+  "packages/quay-github/package.json",
+  "packages/quay-backlog/package.json",
+  "plugin/.claude-plugin/plugin.json",
+  "plugin/README.md",
+  "plugin/VERSION",
+  "plugin/vendor/quay/package.json",
+]);
+const RELEASE_BUMP_CTX = { carrierPaths: RELEASE_BUMP_CARRIERS, cutParents: new Set([RELEASE_BUMP_CUT_SHA]) };
+
+test("PURE RELEASE_BUMP_SUBJECT_RE — 命中生成器唯一模板；近似形不命中（只认字面模板）", () => {
+  assert.equal(RELEASE_BUMP_SUBJECT_RE.test(RELEASE_BUMP_SUBJECT), true);
+  assert.equal(
+    RELEASE_BUMP_SUBJECT_RE.test("release: bump version to 0.14.0-dev after v0.13.0 (SPEC §12: VERSION + stamp + closure-ratchet re-anchor)"),
+    true,
+    "可选 prerelease 后缀被容忍（生成器未来小改动不绊倒）",
+  );
+  assert.equal(RELEASE_BUMP_SUBJECT_RE.test("release: bump version"), false);
+  assert.equal(RELEASE_BUMP_SUBJECT_RE.test(`${RELEASE_BUMP_SUBJECT} and more`), false, "整串锚定（尾随内容不放过）");
+  assert.equal(RELEASE_BUMP_SUBJECT_RE.test("release: bump version to 0.14.0 after 0.13.0 (SPEC §12: VERSION + stamp + closure-ratchet re-anchor)"), false, "tag 缺 v 前缀");
+});
+
+test("PURE extractCutParents — 只认 form:'cut' ∧ base 匹配；其余 form / 他 base / 非法 sha 形状都排除", () => {
+  const events = [
+    { form: "cut", base: "develop", sha: "a71a7b816d32aa8f632dd8eaa189722633ac18b6" },
+    { form: "merged", base: "develop", sha: "7d10a1d2d287820fa970c7c4c9a23e0775a44664" },
+    { form: "tagged", base: "develop", sha: "deadbeefdeadbeefdeadbeefdeadbeefdeadbeef" },
+    { form: "cut", base: "master", sha: "cccccccccccccccccccccccccccccccccccccccc" },
+    { form: "cut", base: "develop", sha: "not-a-sha" },
+    { form: "refused-no-license", base: "develop", sha: "3f470613bfeb9edb65f36251ecf05c95e4b5c165" },
+  ];
+  const s = extractCutParents(events, "develop");
+  assert.deepEqual([...s], ["a71a7b816d32aa8f632dd8eaa189722633ac18b6"], "只有唯一一条合法 cut 记录入选");
+  assert.equal(extractCutParents(null, "develop").size, 0);
+});
+
+test("PURE classifyReleaseBumpCommit — 三谓词合取；第三态（来源读不出 ⇒ null，⛔ 不与 false 同形）", () => {
+  const prod = { subject: RELEASE_BUMP_SUBJECT, files: ["VERSION", "plugin/VERSION"], parent: RELEASE_BUMP_CUT_SHA };
+  const r = classifyReleaseBumpCommit(prod, RELEASE_BUMP_CTX);
+  assert.equal(r.releaseBump, true);
+  assert.equal(r.subjectMatches, true);
+  assert.equal(r.cutParentMatches, true);
+  assert.equal(r.carrierSubset, true);
+  assert.deepEqual(r.offCarrierFiles, []);
+
+  // 谓词③假：同 subject，但夹带一个载体外 code-surface 文件 ⇒ releaseBump=false（负控，仍 bypass）。
+  const neg = classifyReleaseBumpCommit(
+    { subject: RELEASE_BUMP_SUBJECT, files: ["VERSION", "plugin/scripts/x.ts"], parent: RELEASE_BUMP_CUT_SHA },
+    RELEASE_BUMP_CTX,
+  );
+  assert.equal(neg.releaseBump, false);
+  assert.equal(neg.carrierSubset, false);
+  assert.deepEqual(neg.offCarrierFiles, ["plugin/scripts/x.ts"]);
+
+  // 谓词①假：subject 不是生成器模板。
+  assert.equal(
+    classifyReleaseBumpCommit({ subject: "release: bump version to 0.14.0", files: ["VERSION"], parent: RELEASE_BUMP_CUT_SHA }, RELEASE_BUMP_CTX).releaseBump,
+    false,
+  );
+  // 谓词②假：parent 不命中 cut-ledger（含 null）。
+  assert.equal(
+    classifyReleaseBumpCommit({ subject: RELEASE_BUMP_SUBJECT, files: ["VERSION"], parent: "f".repeat(40) }, RELEASE_BUMP_CTX).releaseBump,
+    false,
+  );
+  assert.equal(
+    classifyReleaseBumpCommit({ subject: RELEASE_BUMP_SUBJECT, files: ["VERSION"], parent: null }, RELEASE_BUMP_CTX).releaseBump,
+    false,
+  );
+  // design-internal 文件不需要载体成员资格（谓词③只看 code-surface）。
+  assert.equal(
+    classifyReleaseBumpCommit({ subject: RELEASE_BUMP_SUBJECT, files: ["VERSION", "tasks/x.md"], parent: RELEASE_BUMP_CUT_SHA }, RELEASE_BUMP_CTX).releaseBump,
+    true,
+  );
+
+  // 第三态（硬规则 3b）：任一条来源读不出 ⇒ null（⛔ 不与 false 同形）。
+  assert.equal(classifyReleaseBumpCommit(prod, { carrierPaths: null, cutParents: new Set([RELEASE_BUMP_CUT_SHA]) }).releaseBump, null);
+  assert.equal(classifyReleaseBumpCommit(prod, { carrierPaths: RELEASE_BUMP_CARRIERS, cutParents: null }).releaseBump, null);
+  assert.equal(classifyReleaseBumpCommit(prod, undefined).releaseBump, null);
+  assert.equal(classifyReleaseBumpCommit(prod, {}).releaseBump, null);
+});
+
+test("PURE classifyCommit/checkDirectCommits — releaseBump ⇒ 非 bypass 且计入 releaseBumpCommits；负控仍 bypass", () => {
+  const prodCommit = { sha: "rel1", subject: RELEASE_BUMP_SUBJECT, files: ["VERSION", "plugin/VERSION"], epoch: 1, action: "commit", parent: RELEASE_BUMP_CUT_SHA };
+  const negCommit = { sha: "neg1", subject: RELEASE_BUMP_SUBJECT, files: ["VERSION", "plugin/scripts/x.ts"], epoch: 1, action: "commit", parent: RELEASE_BUMP_CUT_SHA };
+
+  const prod = classifyCommit(prodCommit, [], RELEASE_BUMP_CTX);
+  assert.equal(prod.releaseBump, true);
+  assert.equal(prod.bypass, false, "release bump 不再是 bypass");
+
+  const neg = classifyCommit(negCommit, [], RELEASE_BUMP_CTX);
+  assert.equal(neg.releaseBump, false);
+  assert.equal(neg.bypass, true, "夹带载体外 code-surface 文件 ⇒ 仍 RED");
+
+  const v = checkDirectCommits([prodCommit, negCommit], [], RELEASE_BUMP_CTX);
+  assert.equal(v.releaseBumpCommits, 1);
+  assert.equal(v.violations.length, 1);
+  assert.equal(v.violations[0].sha, "neg1");
+
+  // 未评估：无 ctx（来源读不出）⇒ releaseBump=null，bypass 仍真（fail-closed），独立计数。
+  const vNoCtx = checkDirectCommits([{ sha: "rel2", subject: RELEASE_BUMP_SUBJECT, files: ["VERSION"], epoch: 1 }], []);
+  assert.equal(vNoCtx.classified[0].releaseBump, null);
+  assert.equal(vNoCtx.classified[0].bypass, true, "未评估仍 fail-closed（bypass 真）");
+  assert.equal(vNoCtx.releaseBumpCommits, 0);
+  assert.equal(vNoCtx.releaseBumpNotEvaluatedCommits, 1);
+});
+
+test("CLI releaseBump — 生产形态（subject 模板 + cut-ledger parent + 载体集子集）⇒ exit 0 且 RELEASE-BUMP 可见", () => {
+  const dir = makeTmp("relbump");
+  try {
+    initRepo(dir);
+    const parent = gitCmd(dir, "rev-parse", "HEAD").stdout.trim();
+    // cut-ledger：一条 form:"cut" ∧ base:"develop" 记录，sha = bump 的父提交（切版落地 commit）。
+    fs.mkdirSync(path.join(dir, ".quay"), { recursive: true });
+    fs.writeFileSync(
+      path.join(dir, ".quay", "release-branch-finish.jsonl"),
+      JSON.stringify({
+        ts: "2026-10-01T05:33:00Z", branch: "release/v0.13.0", sha: parent, form: "cut", tag: "v0.13.0",
+        base: "develop", result: "deleted-local", remote_result: "remote-already-clean", exit: 0,
+      }) + "\n",
+      "utf8",
+    );
+    // 下一版 bump：只触及版本载体（源 VERSION + plugin/VERSION）。
+    fs.writeFileSync(path.join(dir, "VERSION"), "0.14.0\n", "utf8");
+    fs.mkdirSync(path.join(dir, "plugin"), { recursive: true });
+    fs.writeFileSync(path.join(dir, "plugin", "VERSION"), "0.14.0\n", "utf8");
+    gitCmd(dir, "add", "-A");
+    gitCommitFixed(dir, FIXED_PAST, RELEASE_BUMP_SUBJECT);
+
+    const r = runChecker(["--root", dir]);
+    assert.equal(r.status, 0, `release bump 必须 GREEN(exit 0): ${r.stdout}${r.stderr}`);
+    const out = jsonOut(r);
+    assert.equal(out.ok, true);
+    assert.equal(out.reason, "release-bump-direct-commits-only");
+    assert.equal(out.denominator.releaseBumpCommits, 1);
+    assert.equal(out.denominator.releaseBumpNotEvaluatedCommits, 0);
+    assert.equal(out.candidates.length, 1);
+    assert.equal(out.candidates[0].releaseBump, true);
+    assert.equal(out.candidates[0].confirmedBypass, false);
+    assert.deepEqual(out.candidates[0].releaseBumpEvidence, {
+      subjectMatches: true, cutParentMatches: true, carrierSubset: true, offCarrierFiles: [], notEvaluated: false,
+    });
+    assert.equal(out.releaseBump.evaluated, true, "两条来源都可读 ⇒ releaseBump 可评估");
+    assert.ok(out.releaseBump.carrierPaths >= 10, `载体集由单源表派生（≥10 条）: ${out.releaseBump.carrierPaths}`);
+    assert.equal(out.releaseBump.cutParents, 1);
+  } finally {
+    cleanup(dir);
+  }
+});
+
+test("CLI releaseBump 负控 — 同 subject 夹带载体外 code-surface 文件 ⇒ 仍 exit 1 direct-commit-bypasses-fan-in", () => {
+  const dir = makeTmp("relbumpneg");
+  try {
+    initRepo(dir);
+    const parent = gitCmd(dir, "rev-parse", "HEAD").stdout.trim();
+    fs.mkdirSync(path.join(dir, ".quay"), { recursive: true });
+    fs.writeFileSync(
+      path.join(dir, ".quay", "release-branch-finish.jsonl"),
+      JSON.stringify({ ts: "2026-10-01T05:33:00Z", branch: "release/v0.13.0", sha: parent, form: "cut", tag: "v0.13.0", base: "develop", result: "deleted-local", remote_result: "remote-already-clean", exit: 0 }) + "\n",
+      "utf8",
+    );
+    fs.writeFileSync(path.join(dir, "VERSION"), "0.14.0\n", "utf8");
+    fs.mkdirSync(path.join(dir, "plugin", "scripts"), { recursive: true });
+    fs.writeFileSync(path.join(dir, "plugin", "scripts", "bad.ts"), "export const bad = 1;\n", "utf8");
+    gitCmd(dir, "add", "-A");
+    gitCommitFixed(dir, FIXED_PAST, RELEASE_BUMP_SUBJECT);
+
+    const r = runChecker(["--root", dir]);
+    assert.equal(r.status, 1, `同 subject 夹带载体外文件必须仍 RED(exit 1): ${r.stdout}${r.stderr}`);
+    const out = jsonOut(r);
+    assert.equal(out.reason, "direct-commit-bypasses-fan-in");
+    assert.equal(out.candidates.length, 1);
+    assert.equal(out.candidates[0].releaseBump, false, "谓词③假 ⇒ 不是 releaseBump");
+    assert.equal(out.candidates[0].confirmedBypass, true);
+    assert.deepEqual(out.candidates[0].releaseBumpEvidence.offCarrierFiles, ["plugin/scripts/bad.ts"]);
+  } finally {
+    cleanup(dir);
+  }
+});
+
+test("CLI releaseBump — ledger 缺席 ⇒ releaseBump 未评估（null，独立第三态）且真直投仍 RED", () => {
+  const dir = makeTmp("relbumpne");
+  try {
+    initRepo(dir);
+    // ⛔ 不写 cut-ledger：cutParents 读不出 ⇒ releaseBump=null；即使 subject 与文件都像 bump，仍 fail-closed。
+    fs.writeFileSync(path.join(dir, "VERSION"), "0.14.0\n", "utf8");
+    gitCmd(dir, "add", "-A");
+    gitCommitFixed(dir, FIXED_PAST, RELEASE_BUMP_SUBJECT);
+
+    const r = runChecker(["--root", dir]);
+    assert.equal(r.status, 1, `来源读不出 ⇒ 不得洗成合格: ${r.stdout}${r.stderr}`);
+    const out = jsonOut(r);
+    assert.equal(out.reason, "direct-commit-bypasses-fan-in");
+    assert.equal(out.candidates[0].releaseBump, null, "第三态：未评估（⛔ 不与 false 同形）");
+    assert.equal(out.candidates[0].confirmedBypass, true);
+    assert.equal(out.denominator.releaseBumpNotEvaluatedCommits, 1);
+  } finally {
+    cleanup(dir);
+  }
 });
 
 test("AC3 回放·CLI — 全量扫描（生产基线 b11ce720）NOT-EVALUATED：reflog 被 gc 剪 ⇒ 不伪装成「未发现 direct」", (t) => {
