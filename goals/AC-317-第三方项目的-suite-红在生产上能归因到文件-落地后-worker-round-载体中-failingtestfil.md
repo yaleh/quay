@@ -2,7 +2,7 @@
 id: AC-317
 title: 第三方项目的 suite 红在生产上能归因到文件——落地后 worker-round 载体中 failingTestFiles 非空
   ≥1（落地前基线 51 次 / 0 次）
-status: active
+status: achieved
 kind: criterion
 goal: GOAL-027
 criterion: >-
@@ -81,6 +81,11 @@ statusLog:
     to: active
     actor: goal-driver
     reason: "triage: activate"
+  - at: 2026-10-01T18:09:47.973Z
+    from: active
+    to: achieved
+    actor: goal-driver
+    reason: "I2: criterion pass"
 fidelity:
   verdict: faithful
   reason: "fidelity judge: faithful"
