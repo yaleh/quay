@@ -18,7 +18,10 @@
 // SPLIT from ready-pool-check.test.mjs by gap-suite-split-15-over-30s-test-files — shard 22/22 (8 tests). Shared fixtures: ./helpers/ready-pool-check-harness.mjs (single source).
 
 import { test } from "node:test";
-import { analyzeTasks, assert, buildGitHistoryIndex, cacheFixtureBody, fs, loadLandingIndex, loadParsedTaskStoreAtRef, makeGitWorkspace, normIndex, normStore, path, readTaskStatusAtRef, refTaskIds, rpCachePath, withCacheOff, writeTask } from "./helpers/ready-pool-check-harness.mjs";
+import { analyzeTasks, assert, buildGitHistoryIndex, cacheFixtureBody, fs, loadLandingIndex, loadParsedTaskStoreAtRef, makeGitWorkspace, makeWorkspace, normIndex, normStore, path, readTaskStatusAtRef, refTaskIds, rpCachePath, withCacheOff, writeTask } from "./helpers/ready-pool-check-harness.mjs";
+// The new judgment is imported DIRECTLY from the script under test (the shared harness above is out
+// of this task's ## Touches, so it must not be edited to re-export it).
+import { judgeUnsatisfiableUnannotatedAc, UNSATISFIABLE_AC_DECLARATION_PHRASES } from "../scripts/ready-pool-check.ts";
 
 test("store cache is CONTENT-KEYED: a task whose blob changed is re-read on the very next call", (t) => {
   const { root, git } = makeGitWorkspace("store-ck", { n: 3 });
@@ -229,4 +232,156 @@ test("AC5 regression: on an N=2000 store the cached call must beat the uncached 
     tCached < tUncached * 0.75,
     `cached analyzeTasks must beat the uncached baseline on an N=2000 store: cached=${tCached}ms uncached=${tUncached}ms ratio=${ratio.toFixed(2)} (pre-fix ratio ≈ 1.0)`,
   );
+});
+
+// ── executor-unsatisfiable AC, unannotated (gap-executor-unsatisfiable-ac-unannotated-burns-rounds) ──
+// An AC whose OWN text declares that the executor structurally cannot satisfy it ("only a human
+// writes this line", "after it is merged into develop", "measure again after landing") but which
+// carries NO `（待外部）` annotation. The fail-closed default of the AC-completion gate (unannotated
+// ⇒ 待本任务) is CORRECT and unchanged; the defect was on the authoring side, so such a task entered
+// `ready`, a worker finished everything else, and every round ended「AC 未全勾」with the whole round
+// discarded (生产读数 38 轮 / 其中 10 轮 6 个任务属于此族). The new todo→ready check intercepts it
+// BEFORE a worker round is burned, naming the offending item.
+//
+// The five fixtures below are the production samples VERBATIM (three human-gate + two after-landing).
+
+const VERBATIM_UNSAT_AC_SAMPLES = [
+  // 人工关卡 / 只能由人写入 — the three verbatim samples from the production readings
+  "AC9 人评审门：ADR 的评审裁定已由人给出…这条 AC 不得由执行者代写",
+  "AC7 人工关卡——冒烟验收已由人确认：grep -q '^冒烟验收：通过' …该行只能由人 yale 写入，执行者不得代写",
+  "人工关卡——忙时输入基准已由人确认…该行只能由人 yale 写入",
+  // 落地后才能满足 — the two verbatim samples of the second family
+  "AC6 真实落地（合入 develop 并推送 yaleh 之后）：触发 Desktop Release…",
+  "落地后实测复查：sqlite3 … 里 agent 档不再增长",
+];
+
+/** A minimal contract-shape todo body whose `## Acceptance Criteria` items are supplied verbatim.
+ *  `touched` injects the self-touch (`tasks/<id>.md` in `## Touches`) the promotion gate's C8 needs. */
+function unsatAcBody(id, acItems, { proposalExtra = "", acExtra = [] } = {}) {
+  return [
+    "**type:** execution",
+    "## Proposal",
+    "A real proposal paragraph that is definitely more than forty non-whitespace chars.",
+    ...(proposalExtra ? [proposalExtra] : []),
+    "## Contract",
+    "measure   ready_pool = `node plugin/scripts/ready-pool-check.ts` stdout 的 pool 字段",
+    "band      ready_pool = ≥3",
+    "invoke    `node plugin/scripts/ready-pool-check.ts`",
+    "control   pool<3 有合格候选 ⇒ 推荐；否则不推荐",
+    "resume    分两次提交",
+    "## Touches",
+    `- tasks/${id}.md`,
+    "## Acceptance Criteria",
+    ...acItems.map((it) => `- [ ] ${it}`),
+    ...acExtra,
+    "## Definition of Done",
+    "standard DoD — the five clauses; meta-enforcer fixture-pinned, definitely long enough content.",
+  ].join("\n");
+}
+
+test("unsatisfiable-AC judge: the 5 verbatim production samples are HIT unannotated, CLEARED by （待外部） at the item's first-line end (AC1)", () => {
+  // Pin the closed enum lives in ONE place and covers the four declared families.
+  assert.ok(Array.isArray(UNSATISFIABLE_AC_DECLARATION_PHRASES) && UNSATISFIABLE_AC_DECLARATION_PHRASES.length > 0, "the declaration phrase enum is a non-empty array (single source)");
+
+  const body = unsatAcBody("gap-unsat-ac", VERBATIM_UNSAT_AC_SAMPLES);
+  const v = judgeUnsatisfiableUnannotatedAc(body);
+  assert.equal(v.evaluated, true, "an AC section IS present ⇒ evaluated");
+  assert.equal(v.status, "hit", "unannotated executor-unsatisfiable items ⇒ hit");
+  assert.equal(v.hits.length, VERBATIM_UNSAT_AC_SAMPLES.length, `every verbatim sample must be named, got ${JSON.stringify(v.hits)}`);
+  for (const s of VERBATIM_UNSAT_AC_SAMPLES) {
+    assert.ok(v.hits.includes(s), `hits must name the offending item VERBATIM: ${s}`);
+  }
+
+  // The SAME items with `（待外部）` appended at the item's first-line end ⇒ no longer blocked.
+  const annotated = unsatAcBody("gap-unsat-ac", VERBATIM_UNSAT_AC_SAMPLES.map((s) => `${s}（待外部）`));
+  const va = judgeUnsatisfiableUnannotatedAc(annotated);
+  assert.equal(va.evaluated, true);
+  assert.equal(va.status, "clean", "the （待外部） annotation clears the item");
+  assert.deepEqual(va.hits, [], "no item is named once annotated");
+});
+
+test("unsatisfiable-AC gate: an unannotated sample blocks todo→ready and NAMES the item; its annotated twin is promoted-eligible (AC1)", (t) => {
+  const root = makeWorkspace("unsat-ac");
+  t.after(() => fs.rmSync(root, { recursive: true, force: true }));
+  writeTask(root, "gap-unsat-ac", { status: "todo", labels: ["gap"], body: unsatAcBody("gap-unsat-ac", [VERBATIM_UNSAT_AC_SAMPLES[1]]) });
+  writeTask(root, "gap-unsat-ac-ok", { status: "todo", labels: ["gap"], body: unsatAcBody("gap-unsat-ac-ok", [`${VERBATIM_UNSAT_AC_SAMPLES[1]}（待外部）`]) });
+
+  const r = analyzeTasks({ tasksDir: path.join(root, "tasks"), root });
+  const blocked = r.candidates.find((c) => c.id === "gap-unsat-ac");
+  const ok = r.candidates.find((c) => c.id === "gap-unsat-ac-ok");
+
+  assert.equal(blocked.eligible, false, "an unannotated executor-unsatisfiable AC must NOT be promotion-eligible");
+  assert.equal(blocked.unsatisfiableUnannotatedAc.status, "hit");
+  assert.ok(blocked.unsatisfiableUnannotatedAc.hits.includes(VERBATIM_UNSAT_AC_SAMPLES[1]), "the --json candidate NAMES the offending item verbatim");
+  const intercepted = r.intercepted.find((i) => i.id === "gap-unsat-ac");
+  assert.ok(intercepted && intercepted.reason === "unsatisfiable-ac-unannotated", "the blocked promotion is a TRACEABLE decision (intercepted), not a silent skip");
+  assert.ok(intercepted.hits.includes(VERBATIM_UNSAT_AC_SAMPLES[1]), "the intercepted entry carries the item text too");
+
+  assert.equal(ok.eligible, true, "the SAME item annotated （待外部） is promotion-eligible (the check is not a blanket block)");
+  assert.equal(ok.unsatisfiableUnannotatedAc.status, "clean");
+});
+
+test("unsatisfiable-AC negative control: a plain executable AC is NOT hit — the check must not block every unchecked item (AC2)", (t) => {
+  const PLAIN = "node scripts/asr-second-adapter-check.mjs 退出 0";
+  const v = judgeUnsatisfiableUnannotatedAc(unsatAcBody("gap-plain-ac", [PLAIN]));
+  assert.equal(v.evaluated, true);
+  assert.deepEqual(v.hits, [], "an ordinary executable AC carries no declaration ⇒ no hit");
+
+  const root = makeWorkspace("unsat-ac-plain");
+  t.after(() => fs.rmSync(root, { recursive: true, force: true }));
+  writeTask(root, "gap-plain-ac", { status: "todo", labels: ["gap"], body: unsatAcBody("gap-plain-ac", [PLAIN]) });
+  const r = analyzeTasks({ tasksDir: path.join(root, "tasks"), root });
+  const c = r.candidates.find((x) => x.id === "gap-plain-ac");
+  assert.equal(c.eligible, true, "the plain-AC task stays promotion-eligible (negative control)");
+  assert.equal(r.intercepted.some((i) => i.id === "gap-plain-ac" && i.reason === "unsatisfiable-ac-unannotated"), false);
+});
+
+test("unsatisfiable-AC position judgment: a declaration in ## Proposal prose or inside a code fence is NOT an AC item hit (AC3)", () => {
+  // (a) the phrase in the Proposal paragraph only; the AC item itself is plain.
+  const inProposal = judgeUnsatisfiableUnannotatedAc(
+    unsatAcBody("gap-pos", ["node scripts/asr-second-adapter-check.mjs 退出 0"], {
+      proposalExtra: "Note: the line 该行只能由人 yale 写入 is a QUOTE of another task's AC, not this one's.",
+    }),
+  );
+  assert.deepEqual(inProposal.hits, [], "a declaration in ## Proposal prose must not be read as an AC item hit");
+
+  // (b) the phrase inside a FENCED code block that lives INSIDE the AC section, with a plain item
+  //     outside it — a quoted sample is not the AC's own text.
+  const fenced = judgeUnsatisfiableUnannotatedAc(
+    unsatAcBody("gap-fence", ["node scripts/asr-second-adapter-check.mjs 退出 0"], {
+      acExtra: ["", "```text", "AC7 人工关卡——该行只能由人 yale 写入，执行者不得代写", "```"],
+    }),
+  );
+  assert.deepEqual(fenced.hits, [], "a declaration inside a fenced block must not be read as an AC item hit");
+
+  // control: the SAME phrase as an actual (unfenced) AC item IS a hit — so (a)/(b) prove position,
+  // not a broken matcher.
+  const real = judgeUnsatisfiableUnannotatedAc(unsatAcBody("gap-real", ["AC7 人工关卡——该行只能由人 yale 写入，执行者不得代写"]));
+  assert.equal(real.hits.length, 1, "the same phrase as a real AC item is a hit (the position tests above are not vacuous)");
+});
+
+test("unsatisfiable-AC third state: a body with no recognizable AC/DoD section is NOT-EVALUATED, never 'clean' (AC4)", () => {
+  const noSections = [
+    "**type:** execution",
+    "## Proposal",
+    "A real proposal paragraph that is definitely more than forty non-whitespace chars.",
+    "## Contract",
+    "measure   ready_pool = `node plugin/scripts/ready-pool-check.ts` stdout 的 pool 字段",
+    "band      ready_pool = ≥3",
+    "invoke    `node plugin/scripts/ready-pool-check.ts`",
+    "control   pool<3 有合格候选 ⇒ 推荐；否则不推荐",
+    "resume    分两次提交",
+  ].join("\n");
+  const v = judgeUnsatisfiableUnannotatedAc(noSections);
+  assert.equal(v.evaluated, false, "no AC/DoD section ⇒ not evaluated");
+  assert.equal(v.status, "not-evaluated");
+  assert.notEqual(v.status, "clean", "未评估 must NOT share the '合格' value (硬规则③b)");
+  assert.notEqual(v.status, "hit");
+  assert.equal(v.reason, "no-ac-or-dod-section");
+
+  // The contrast: a body WITH a clean AC section reports the distinct 'clean' value.
+  const clean = judgeUnsatisfiableUnannotatedAc(unsatAcBody("gap-clean", ["node scripts/asr-second-adapter-check.mjs 退出 0"]));
+  assert.equal(clean.evaluated, true);
+  assert.equal(clean.status, "clean");
+  assert.notEqual(clean.status, v.status, "the two states are distinguishable");
 });

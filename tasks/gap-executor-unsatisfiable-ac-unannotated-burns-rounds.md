@@ -1,7 +1,7 @@
 ---
 id: gap-executor-unsatisfiable-ac-unannotated-burns-rounds
 title: 执行者结构上勾不了的 AC（人工关卡 / 落地后才能满足）未带（待外部）标注就进了 ready——worker 做完其余全部仍被判「AC 未全勾」整轮作废
-status: ready
+status: done
 labels:
   - gap
   - defect
@@ -121,3 +121,25 @@ HIT tasks: 0        （三条的 status3 均为 clean）
 ```
 
 **DoD / 真实落地**：新检查在本仓库真实任务库（develop 任务集）上跑过一次并留下上面那条存量读数；闸接线在两条晋升路径的 `eligible` 上，命中即 `eligible:false` 并在 `--json` 的 `candidates[]` / `intercepted[]` 里**点名该条**——这类任务在**进入 ready 之前**就被点名，而不是等 worker 执行完之后以「AC 未全勾」作废整轮。⛔ 如实说明边界：本仓库当前 todo/ready 存量**零命中**，所以「在生产上被拦下」的直接读数只能由 fixture 体给出（AC1 的闸级臂 + AC5 的取假对照）；真实第三方项目（claudecodeui）的拦截效果**须等其 driver 升级到含本修复的版本后才可观测**。
+
+
+
+---
+
+### 复验记录（round 2，2026-10-02；承接上轮 `step=suite` 红轮）
+
+**上轮红轮归因（`plugin/test/worktree-process-reaper.test.mjs:321`，`probe cwd should be deleted:`）**：**宿主负载型 flake，非本任务缺陷、非分支落后**。四条读数：
+1. 该文件与本分支 delta **无关**：`git diff develop --stat -- plugin/test/worktree-process-reaper.test.mjs` 为空（develop-identical），且不在本任务 `## Touches` 的 4 条里；本分支 delta 只有 `ready-pool-check.ts` / `ready-pool-check-s22.test.mjs` / `quay-file-task/SKILL.md`（+103 / +157 / +10 行）。
+2. **隔离复跑绿**：`node --test plugin/test/worktree-process-reaper.test.mjs` ⇒ `ℹ tests 22 / pass 22 / fail 0`，其中 `CLI --orphans — real reaps a probe whose cwd dir was deleted` **3843.77ms 通过**——远越其 300ms 的 `chdir` 窗口。
+3. 失败日志里的**取值是空的**（`probe cwd should be deleted:` 冒号后为空 ⇒ readlink 失败 ⇒ probe 已自行退出），不是「路径缺 `(deleted)` 后缀」。机制：Node 在 fork 后于子进程内 `posix_spawn` file action 施加 `cwd`，负载下子进程被饿过 300ms 窗口 ⇒ 目录已删、`chdir` 失败、子进程退出 ⇒ `/proc/<pid>/cwd` 消失。**同一签名在语料里稀有、且已在 2026-09-24 / 09-30 两次落在与本任务无关的 delta 上**（记忆：`worktree-process-reaper-probe-liveness-is-a-host-timing-flake`；同文件另有 `:325` `found:0` 第二臂）。
+4. **本次全量 suite 复跑被资源闸拒跑（不是绿、也不是红）**：`scripts/test.sh` 输出 `loadavg=352–450 >= nproc×2≈256` ⇒ `resource gate says WAIT — not running the full suite` ⇒ `SUITE_RC=1`。**这本身就是上条的佐证**：红轮当时正是在同样的过载窗口起跑的（日志原文：`红轮在过载窗口起跑（loop-shipping flake 反复）`）。⛔ 不把它记成「suite 绿」。
+
+**AC 逐条复验（本轮实跑）**：
+- **AC1 / AC2 / AC3 / AC4**：`node --test plugin/test/ready-pool-check-s22.test.mjs` ⇒ `ℹ tests 13 / pass 13 / fail 0`，5 条新用例逐条 ✔（`HIT unannotated / CLEARED by （待外部）`、`negative control`、`position judgment`、`third state NOT-EVALUATED`）。
+- **AC6**：`grep -n "待外部" plugin/skills/quay-file-task/SKILL.md` ⇒ 命中 `80:` 与 `88:`（同 AC6 原文）。
+- **AC7**：生产 argv（`.quay/config.yml` `scoped_command: ["bash","{worktree}/scripts/test.sh","--for-task","{task}","--allow-thin"]`，`git diff develop` 未改该键）⇒ `SCOPED_GATE_RC=0`，13/13 pass。
+- **AC8 存量读数（本轮重跑，三态输出、不静默吞未评估项）**：读源 = worktree `tasks/`（共 2487 个 `*.md`），`status ∈ {todo,ready}` 者 **2** 条（上轮记的 3 条中 `gap-park-reason-mislabels-ac-precheck-as-suite-red` 已翻 done ⇒ 退出该集合），逐条取值：
+  `gap-executor-unsatisfiable-ac-unannotated-burns-rounds → {evaluated:true,status:"clean"}`；`gap-fan-in-suite-red-no-in-round-rerun-of-red-files → {evaluated:true,status:"clean"}`。**HIT = 0**（无「clean 与 not-evaluated 混同」的掩盖：两条都是真的 `evaluated:true`）。
+  零命中的配套动作（硬规则 2）——谓词对**已知为真**样本干跑：同一 dry-run 对三条逐字样本 ⇒ `{evaluated:true,status:"hit",hitCount:3}`，`hits` 逐字含三条原文；同一批加 `（待外部）` ⇒ `{status:"clean",hits:0}`。封闭枚举实测 = `["不得由执行者代写","执行者不得代写","只能由人","合入 develop","落地后"]`。
+
+**结论**：8 条 AC 全部由复验实跑支撑；上轮 suite 红为本仓库已两度记录的同签名宿主负载 flake，文件 develop-identical 且不在 Touches ⇒ 不修、不改该文件（改了会触发 anti-drift 且无益）。
