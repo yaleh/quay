@@ -2,7 +2,7 @@
 id: AC-314
 title: shell 层收敛 5.1 残余：quay-init.sh 不再内嵌 python3（8 个 heredoc 收进原生
   init.ts；自举不可替代者须如实标注；由 sh-census-check 读出）
-status: draft
+status: active
 kind: criterion
 goal: GOAL-026
 criterion: |-
@@ -15,4 +15,15 @@ expect: exit 0（sh-census-check --json 的 evaluated===true，且 quay-init.sh 
 origin: gap-quay-init-native-reconcile（done）的 DoD 明写「载体迁移暂缓」。实测（2026-09-20）：1332
   有效行、embedded=[node,python3]、8 个 python3 heredoc；承载 task =
   gap-arch-quay-init-sh-python-heredocs-to-native。
+activatedAt: 2026-10-01T18:02:37.069Z
+statusLog:
+  - at: 2026-10-01T18:02:37.069Z
+    from: draft
+    to: active
+    actor: goal-driver
+    reason: "triage: activate"
+fidelity:
+  verdict: faithful
+  reason: "fidelity judge: faithful"
+  at: 2026-10-01T18:02:37.069Z
 ---
