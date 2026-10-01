@@ -1,12 +1,21 @@
 ---
 id: GOAL-027
 title: 第三方项目的 fan-in 契约显式声明——不再按「有没有 scripts/test.sh」推断本仓库形态
-status: draft
+status: active
 kind: goal
 origin: 立条依据：2026-09-23 对第三方项目
   /data/home/yale/work/claudecodeui（CloudCLI，2026-09-20→09-23，worker-driven
   inner，142 条任务）的驱动过程复盘。人 2026-09-23 裁定：「本仓库形态靠文件是否存在来判断」立为 goal，第 1/2/6 项作为其实例
   task，其余缺陷立独立 task（「按你的意见执行」）。
+activatedAt: 2026-10-01T17:56:12.953Z
+statusLog:
+  - at: 2026-10-01T17:56:12.953Z
+    from: draft
+    to: active
+    actor: goal-cli
+    reason: 人 2026-10-02 裁定激活：与 GOAL-026 同因——draft GOAL 名下的 AC
+      不在分诊对象集内（goal-driver.ts:2254-2256），AC-316/317/318 自 09-23 起惰性。其中
+      AC-317（第三方 suite 红可归因到文件）是 2026-10-01 效率调查的一手发现，应进入判定与派发域。
 ---
 ## 背景
 
