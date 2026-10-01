@@ -110,10 +110,19 @@
 //      给出每次移动带入窗内的 first-parent sha 清单 + code-surface 标记，rewind 单列
 //      `classification.nonForwardRefMoves`（传入集为空），⛔ 都不并入 fan-in 计数。
 //
+// releaseBump 结构分类（tasks/gap-ac194-release-bump-classified-as-bypass，本判据第四次变假）：SPEC
+//   §4.3/§12 的 release-cut step-5「下一版 bump」**按设计直落 develop**（release-cut.mjs:514-524），而本
+//   检测器把任何非 design-internal 直投一律判 bypass ⇒ 每次切版 AC-194 变假。前三次各靠人手往 ruled 表
+//   加一条 one-off sha 行吸收（正是本条要消灭的形态）。修法 = 一个**谓词式**（⛔ 非 sha 表）的结构分类
+//   `releaseBump`（形态对齐 `ac65Authorized`：可见 + 独立计数，输出行 RELEASE-BUMP 可区分于 AC65-AUTHORIZED
+//   / RULED-HISTORICAL），三谓词合取（⛔ 不放松 DESIGN_INTERNAL_RE、⛔ 不动 fan-in 锁、⛔ 不再加 ruled 行）：
+//     ① subject 命中生成器唯一模板；② 它是 release-branch-finish.jsonl 一条 form:"cut" 记录的直接子提交；
+//     ③ code-surface 文件集 ⊆ 版本载体集（单源 scripts/version-carriers.ts）。任一不成立仍 RED。
+//
 // Run:
 //   node --experimental-strip-types direct-to-develop-bypass-check.ts --root <dir>
-//       [--develop <ref>] [--baseline <ref>] [--lock-events <file>] [--commits <csv>]
-//       [--json] [--help]
+//       [--develop <ref>] [--baseline <ref>] [--lock-events <file>] [--release-ledger <file>]
+//       [--commits <csv>] [--json] [--help]
 
 // (no `node:fs` import: the only fs call was inside the now-extracted `readJsonlLines`)
 import path from "node:path";
@@ -130,6 +139,18 @@ import { fileURLToPath } from "node:url";
 // (see the boundary test in plugin/test/gate-script-base.test.mjs).
 import { isDirectEntry, flagValue, readJsonlLines } from "./gate-script-base.ts";
 import { buildLockHoldIntervals } from "./fan-in-ff-protocol-check.ts";
+import { mainCheckoutRoot } from "./repo-root.ts";
+
+// ── releaseBump 的结构分类：版本载体集（单源派生，⛔ 不手抄文件名清单）───────────────────────────────
+// The set of paths a release-cut next-version bump may touch is DERIVED from the single table
+// (`scripts/version-carriers.ts`) — the same table `stamp-version.ts` (the generator) and
+// `version-consistency-check.ts` (the judge) import. This checker lives under `plugin/scripts/` and the
+// table under the REPO TREE's `scripts/` (a sibling of `plugin/`, never shipped), so the module is
+// resolved by URL and its ABSENCE is a DISTINCT third state (hard rule 3b) — never silently folded into
+// "not a release bump". A dynamic import (not a top-level static one) keeps that absence catchable.
+const CARRIER_MODULE = await import(
+  new URL("../../scripts/version-carriers.ts", import.meta.url).href
+).catch(() => null);
 
 // ── Constants ─────────────────────────────────────────────────────────────────────────────────────────
 
@@ -413,6 +434,85 @@ export function findRuledHistoricalEntry(sha, table = RULED_HISTORICAL_COMMITS) 
   return (table ?? []).find((e) => e && sha.startsWith(e.sha));
 }
 
+// ── releaseBump 结构分类（tasks/gap-ac194-release-bump-classified-as-bypass）──────────────────────
+//
+// 缺陷（第四次同一形态）：SPEC §4.3/§12 规定 release-cut 的 step-5「下一版 bump」**直落 develop**
+//   （`release-cut.mjs:514-524`，人侧动作已机械化），而本检测器把任何非 design-internal 直投一律判 bypass
+//   ⇒ 每次切版 AC-194 变假。前三次各靠人手往 `RULED_HISTORICAL_COMMITS` 加一条 one-off sha 行吸收——
+//   正是本条要消灭的形态（硬规则 12：新前置必须先给出发生率；此处发生率 = 4）。
+//
+// 修法 = 一个**结构判定**的直投类别（谓词式，⛔ 非 sha 表），形态对齐既有 `ac65Authorized`：分类可见 +
+//   独立计数（进 denominator，输出行可区分于 AC65-AUTHORIZED / RULED-HISTORICAL），⛔ 非静默掩盖。
+//   三条**相互独立、可机核**的事实合取（任一不成立仍 RED——负控能取假）：
+//     ① subject 命中 release-cut 生成器的唯一字面模板（`release-cut.mjs:516` 是唯一生成处：
+//        `release: bump version to ${nextVersion} after ${tag} (SPEC §12: VERSION + stamp + closure-ratchet re-anchor)`）；
+//     ② 该提交是 `.quay/release-branch-finish.jsonl` 中一条 `form:"cut"` ∧ `base:<develop>` 记录的
+//        **直接子提交**（parent == 该记录的 sha）——即它确实紧跟一次落痕在案的切版；
+//     ③ 它触及的 **code-surface 文件集 ⊆ 版本载体集**（从单源 `scripts/version-carriers.ts` 派生，
+//        ⛔ 不手抄文件名清单）。
+//   ⇒ 三条同时成立才 `releaseBump`（非 bypass）；⛔ 不放松 DESIGN_INTERNAL_RE、⛔ 不动 fan-in 锁机制、
+//     ⛔ 不用「往 ruled 表再加一行」收尾。
+
+/**
+ * release-cut 的 step-5 bump subject 模板（`release-cut.mjs:516` 的唯一生成处逐字转写）。
+ * `nextVersion` 是 `X.(Y+1).0`（裸 semver），`tag` 是 `vX.Y.Z`——两处都容许可选的 prerelease 后缀以
+ * 不被生成器的未来小改动绊倒，但整串必须锚定在字面模板上（否则「只匹配标题」的放行形可被随意伪造）。
+ */
+export const RELEASE_BUMP_SUBJECT_RE =
+  /^release: bump version to \d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)? after v\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)? \(SPEC §12: VERSION \+ stamp \+ closure-ratchet re-anchor\)$/;
+
+/**
+ * 从 `.quay/release-branch-finish.jsonl` 记录集中取「cut 落地 commit」sha 集（`form:"cut"` ∧ `base` 匹配）。
+ * 该字段是 `release-branch-finish.sh` 在 `--cut` 成功时写的 merge point（= 切版那一刻 base 的 tip）；一次
+ * 切版之后的 bump 提交是它的**直接子提交** ⇒ bump.parent 命中此集。PURE。
+ * ⛔ 只认 `cut`（`merged`/`tagged`/`refused-*` 都不是直落 bump 的前驱）；sha 形状校验与 `extractFanInLandedShas` 同形。
+ */
+export function extractCutParents(events, base = "develop") {
+  const shas = new Set();
+  for (const e of events ?? []) {
+    if (!e || e.form !== "cut" || e.base !== base) continue;
+    if (typeof e.sha === "string" && /^[0-9a-f]{7,40}$/i.test(e.sha)) shas.add(e.sha);
+  }
+  return shas;
+}
+
+/**
+ * 一条提交的 releaseBump 结构判定。PURE——测试注入 {subject, files, parent} 与
+ * {carrierPaths, cutParents}（两者均为 Set<string>；缺任一 ⇒ not-evaluated）。
+ * 返回 `releaseBump: true | false | null`：
+ *   · `true`  = 三条谓词全成立（subject 模板 ∧ cut-ledger parent ∧ 载体集子集）⇒ 非 bypass；
+ *   · `false` = 至少一条不成立且**两条来源都可读** ⇒ 真直投（仍 RED）；
+ *   · `null`  = 版本载体表 / cut-ledger **读不出** ⇒ 未评估（独立取值，⛔ 不与「非 release bump」同形，
+ *               硬规则 3b）。null 时 `bypass` 仍为真（fail-closed：读不出不得洗成合格）。
+ */
+export function classifyReleaseBumpCommit(commit, ctx) {
+  const carrierPaths = ctx?.carrierPaths instanceof Set ? ctx.carrierPaths : null;
+  const cutParents = ctx?.cutParents instanceof Set ? ctx.cutParents : null;
+  const files = Array.isArray(commit?.files) ? commit.files : [];
+  const subjectMatches = RELEASE_BUMP_SUBJECT_RE.test(String(commit?.subject ?? ""));
+  const parent = commit?.parent ?? null;
+  const cutParentMatches = Boolean(parent) && cutParents !== null && cutParents.has(parent);
+  // 谓词③：**code-surface** 文件集须 ⊆ 载体集（design-internal 文件本就在代码面之外，无需成员资格）。
+  const offCarrierFiles =
+    carrierPaths === null ? null : files.filter((f) => !isDesignInternalPath(f) && !carrierPaths.has(f));
+  const carrierSubset = offCarrierFiles !== null && offCarrierFiles.length === 0;
+  const notEvaluated = carrierPaths === null || cutParents === null;
+  const releaseBump = notEvaluated ? null : subjectMatches && cutParentMatches && carrierSubset;
+  return {
+    releaseBump,
+    subjectMatches,
+    cutParentMatches,
+    carrierSubset,
+    offCarrierFiles,
+    notEvaluated,
+    reason: notEvaluated
+      ? "release-bump-not-evaluated (version-carrier table and/or release-branch-finish ledger unreadable)"
+      : releaseBump
+        ? "release-cut-bump: subject template ∧ cut-ledger parent ∧ version-carrier subset"
+        : null,
+  };
+}
+
 // ── 三态判定（gap-direct-to-develop-check-reflog-to-revlist）──────────────────────────────────────
 // fan-in 落地的持久化 ledger（release 事件上的 landedSha 字段，与 acquire/release 写在同一个
 // .quay/fan-in-merge-lock-events.jsonl 里）+ develop reflog 回退 + NOT-EVALUATED。reflog 会被 gc 剪，
@@ -605,8 +705,10 @@ export function classifyLandingMode(sha, ledgerShas, reflogIndex) {
   return "unclassifiable";
 }
 
-/** 一个直接提交的判定。PURE——测试注入 {sha, files, epoch, subject, message, action}。 */
-export function classifyCommit(commit, lockHoldIntervals) {
+/** 一个直接提交的判定。PURE——测试注入 {sha, files, epoch, subject, message, action, parent}。
+ *  `releaseBumpCtx` = `{carrierPaths: Set|null, cutParents: Set|null}`（releaseBump 结构判定的两条来源）；
+ *  缺省 ⇒ 两条来源都不可读 ⇒ releaseBump = null（独立第三态，硬规则 3b——⛔ 不与「非 release bump」同形）。 */
+export function classifyCommit(commit, lockHoldIntervals, releaseBumpCtx) {
   const files = Array.isArray(commit?.files) ? commit.files : [];
   const codeSurfaceFiles = files.filter((f) => !isDesignInternalPath(f));
   const inLockWindow =
@@ -625,6 +727,9 @@ export function classifyCommit(commit, lockHoldIntervals) {
   // 非入表新直投仍红（能取假）。
   const ruledEntry = findRuledHistoricalEntry(commit?.sha);
   const ruledHistorical = Boolean(ruledEntry);
+  // releaseBump 结构分类（三谓词合取，谓词式非 sha 表）——SPEC §4.3/§12 的 step-5 bump 直落 develop
+  // 不再被判 bypass。null = 未评估（独立第三态）；`!== true` 使 null 仍 fail-closed（bypass 为真）。
+  const releaseBump = classifyReleaseBumpCommit(commit, releaseBumpCtx);
   return {
     sha: commit?.sha ?? "?",
     subject: commit?.subject ?? "",
@@ -638,7 +743,17 @@ export function classifyCommit(commit, lockHoldIntervals) {
     ac65Evidence: ac65Authorized ? extractAc65Evidence(commit?.message) : null,
     ruledHistorical,
     ruledReason: ruledEntry?.reason ?? null,
-    bypass: !designInternal && !inLockWindow && !ac65Authorized && !ruledHistorical,
+    releaseBump: releaseBump.releaseBump,
+    releaseBumpReason: releaseBump.reason,
+    releaseBumpEvidence: {
+      subjectMatches: releaseBump.subjectMatches,
+      cutParentMatches: releaseBump.cutParentMatches,
+      carrierSubset: releaseBump.carrierSubset,
+      offCarrierFiles: releaseBump.offCarrierFiles,
+      notEvaluated: releaseBump.notEvaluated,
+    },
+    bypass:
+      !designInternal && !inLockWindow && !ac65Authorized && !ruledHistorical && releaseBump.releaseBump !== true,
   };
 }
 
@@ -647,14 +762,20 @@ export function classifyCommit(commit, lockHoldIntervals) {
  * ⇒ 不在此处），本函数只产出分类明细 + denominator 计数（AC3 的排除集谓词对应的是
  * `codeSurfaceCommits` 口径，见头注释）。PURE。
  */
-export function checkDirectCommits(commits, lockHoldIntervals) {
-  const classified = (commits ?? []).map((c) => classifyCommit(c, lockHoldIntervals));
+export function checkDirectCommits(commits, lockHoldIntervals, releaseBumpCtx) {
+  const classified = (commits ?? []).map((c) => classifyCommit(c, lockHoldIntervals, releaseBumpCtx));
   const violations = classified.filter((c) => c.bypass);
   const codeSurfaceCommits = classified.filter((c) => c.codeSurfaceFiles.length > 0);
   const designInternalCommits = classified.filter((c) => c.designInternal);
   const inLockWindowCommits = classified.filter((c) => c.inLockWindow);
   const ac65AuthorizedCommits = classified.filter((c) => c.ac65Authorized);
   const ruledHistoricalCommits = classified.filter((c) => c.ruledHistorical);
+  const releaseBumpCommits = classified.filter((c) => c.releaseBump === true);
+  // 未评估的 releaseBump（载体表/ledger 读不出）——只在 code-surface 候选上计（设计内提交无此问题），
+  // 与「非 release bump」独立（硬规则 3b）。
+  const releaseBumpNotEvaluatedCommits = classified.filter(
+    (c) => c.releaseBump === null && c.codeSurfaceFiles.length > 0,
+  );
   return {
     violations,
     reason: violations.length > 0 ? "direct-commit-bypasses-fan-in" : "no-direct-bypass",
@@ -664,6 +785,8 @@ export function checkDirectCommits(commits, lockHoldIntervals) {
     inLockWindowCommits: inLockWindowCommits.length,
     ac65AuthorizedCommits: ac65AuthorizedCommits.length,
     ruledHistoricalCommits: ruledHistoricalCommits.length,
+    releaseBumpCommits: releaseBumpCommits.length,
+    releaseBumpNotEvaluatedCommits: releaseBumpNotEvaluatedCommits.length,
     classified,
   };
 }
@@ -700,6 +823,29 @@ export function gitCommitEpoch(root, sha) {
   } catch {
     return null;
   }
+}
+
+/** 一条 commit 的**第一父** sha（`%P` 的首个 token）；root commit / 读不出 ⇒ null。
+ *  releaseBump 谓词②（cut-ledger 直接子提交）的 git 读取面。 */
+function gitCommitParent(root, sha) {
+  try {
+    const first = git(root, ["log", "-1", "--format=%P", sha]).trim().split(" ").filter(Boolean)[0];
+    return first ?? null;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * release ledger 的默认落点 = **共享 git dir 的属主检出**（主检出）的 `.quay/release-branch-finish.jsonl`
+ * ——与 `release-branch-finish.sh` 的 `ledger_root_of` **同一条规则**（AC-320）：ledger 与 `<root>` 同住只在
+ * 主检出上成立，一个 linked worktree 的 `<worktree>/.quay/` 里**没有**这个文件。用属主解析使 worktree 内的
+ * 运行看到主检出的 ledger（而不是空文件）；属主派不出时退回 `<root>`（此时 worktree 读不到 ⇒ 未评估，⛔ 不
+ * 静默放行）。`--release-ledger` 仍可显式覆盖。
+ */
+function defaultReleaseLedgerPath(root) {
+  const owner = mainCheckoutRoot(root) || root;
+  return path.join(owner, ".quay", "release-branch-finish.jsonl");
 }
 
 function gitCommitSubject(root, sha) {
@@ -889,7 +1035,8 @@ export function gitDevelopDirectCommits(root, develop, baseline, ledgerShas) {
     if (epoch === null) continue;
     const subject = gitCommitSubject(root, sha);
     const message = gitCommitMessage(root, sha); // AC65 验证证据读取面
-    direct.push({ sha, subject, action: "commit", epoch, files, message });
+    const parent = gitCommitParent(root, sha); // releaseBump 谓词②（cut-ledger 直接子提交）
+    direct.push({ sha, subject, action: "commit", epoch, files, message, parent });
   }
 
   // 未分类 action 形的点名（AC2「根因在失败那一刻可见」）：unclassifiable 的 spine commit 若**有自己的
@@ -951,11 +1098,17 @@ const usage = `direct-to-develop-bypass-check.ts — 直接提交 develop 绕过
   · Ruled-historical 豁免 = sha 前缀命中 RULED_HISTORICAL_COMMITS（manager 裁定 one-off，先例
     fan-in-workflow-check RULED_HISTORICAL_GAPS）⇒ 报为 ruledHistorical（可见分类，非 bypass、非
     ac65Authorized——两类输出可区分：AC65-AUTHORIZED vs RULED-HISTORICAL）。豁免表有界，非入表新直投仍红
+  · releaseBump 结构分类 = SPEC §4.3/§12 的 release-cut step-5 下一版 bump（release-cut.mjs:514-524 按
+    设计直落 develop）⇒ 报为 releaseBump（可见分类，非 bypass、非 ac65Authorized、非 ruledHistorical——
+    输出行可区分：RELEASE-BUMP）。三谓词合取（任一不成立仍 RED）：subject 命中生成器唯一模板 ∧ 该提交是
+    .quay/release-branch-finish.jsonl 一条 form:"cut" ∧ base:<develop> 记录的直接子提交 ∧ code-surface
+    文件集 ⊆ 版本载体集（单源 scripts/version-carriers.ts 派生，⛔ 不手抄文件名清单）。两条来源任一读不出
+    ⇒ releaseBump 未评估（null，独立第三态，⛔ 不与「非 release bump」同形）且 bypass 仍真（fail-closed）
 
 Usage:
   node --experimental-strip-types direct-to-develop-bypass-check.ts [--root <dir>]
-      [--develop <ref>] [--baseline <ref>] [--lock-events <file>] [--commits <csv>]
-      [--json] [--help]
+      [--develop <ref>] [--baseline <ref>] [--lock-events <file>] [--release-ledger <file>]
+      [--commits <csv>] [--json] [--help]
 
   --root <dir>         repo root (default: cwd). develop reflog + lock events resolve under it.
   --develop <ref>      the merge-target ref to scan (default: develop)
@@ -965,6 +1118,11 @@ Usage:
   --lock-events <file> the fan-in-ff-merge.sh lock-event log (default <root>/.quay/
                        fan-in-merge-lock-events.jsonl). Lock events unpaired ⇒ the window
                        sub-check is NOT-EVALUATED (never conflated with green, 硬规则 3b).
+  --release-ledger <file> the release-branch-finish.sh trace (default: the SHARED git dir OWNER's
+                       .quay/release-branch-finish.jsonl — the main checkout, the same rule the
+                       carrier itself follows; falls back to <root> when the owner is unresolvable).
+                       form:"cut" records give the releaseBump predicate its cut-parent set;
+                       unreadable ⇒ releaseBump NOT-EVALUATED.
   --commits <csv>      replay: scan EXACTLY these commit shas (reads files+epoch from git;
                        bypasses reflog scanning). The real-sample replay seam (AC3).
   --json               machine-readable output { evaluated, ok, violations:[...], ... }
@@ -986,6 +1144,9 @@ export function main(argv) {
   const develop = flagValue(args, "--develop") ?? "develop";
   const baseline = flagValue(args, "--baseline");
   const lockEventsFile = path.resolve(flagValue(args, "--lock-events") ?? path.join(root, ".quay", "fan-in-merge-lock-events.jsonl"));
+  const releaseLedgerFile = path.resolve(
+    flagValue(args, "--release-ledger") ?? defaultReleaseLedgerPath(root),
+  );
   const commitsArg = flagValue(args, "--commits");
   const asJson = args.includes("--json");
 
@@ -1027,6 +1188,19 @@ export function main(argv) {
     }
   }
 
+  // ── releaseBump 的两条来源（版本载体集单源派生 + cut-ledger）──────────────────────────────────
+  // 两条来源任一读不出 ⇒ releaseBump 未评估（独立第三态，硬规则 3b）——⛔ 不与「非 release bump」同形，
+  // 且 bypass 仍为真（fail-closed：读不出不得洗成合格）。载体表来自单源 `scripts/version-carriers.ts`
+  // （动态 import，见文件头 CARRIER_MODULE）；cut-ledger 是 `.quay/release-branch-finish.jsonl`
+  // （`form:"cut"` 记录的 sha = 切版落地 commit，bump 是它的直接子提交）。
+  const releaseLedgerEvents = readJsonlLines(releaseLedgerFile);
+  const cutParents =
+    releaseLedgerEvents && !releaseLedgerEvents.some((e) => e && e.__unparseable)
+      ? extractCutParents(releaseLedgerEvents, develop)
+      : null;
+  const carrierPathsSet = CARRIER_MODULE ? new Set(CARRIER_MODULE.versionBearingPaths()) : null;
+  const releaseBumpCtx = { carrierPaths: carrierPathsSet, cutParents };
+
   // ── 收集直接提交（rev-list 三态扫描 或 --commits 回放）──────────────────────────────────────
   if (commitsArg !== undefined) {
     const shas = commitsArg.split(",").map((s) => s.trim()).filter(Boolean);
@@ -1034,7 +1208,7 @@ export function main(argv) {
       const files = gitCommitFiles(root, sha);
       const epoch = gitCommitEpoch(root, sha);
       if (files === null || epoch === null) return null;
-      return { sha, subject: gitCommitSubject(root, sha), action: "commit", epoch, files, message: gitCommitMessage(root, sha) };
+      return { sha, subject: gitCommitSubject(root, sha), action: "commit", epoch, files, message: gitCommitMessage(root, sha), parent: gitCommitParent(root, sha) };
     }).filter(Boolean);
     totalScanned = commits.length;
     if (commits.length === 0) {
@@ -1064,7 +1238,7 @@ export function main(argv) {
     unclassifiedActionForms = collected.unclassifiedActionForms ?? [];
   }
 
-  const verdict = checkDirectCommits(commits, lockHoldIntervals);
+  const verdict = checkDirectCommits(commits, lockHoldIntervals, releaseBumpCtx);
 
   // ── 硬判定 / NOT-EVALUATED 裁定（硬规则 3b：读不懂输入不得返回与合格同形的值）──────────────
   // RED = 直接提交 ∧ 代码/断言面 ∧ 已确认不在锁窗内（锁窗需可评估）。
@@ -1075,21 +1249,28 @@ export function main(argv) {
   // commits 已成功收集（reflog 可读 / --commits 已解析）⇒ 扫描本身是评估，空的扫描范围 = 可读的空
   // 结果（evaluated:true），不是「读不懂」——「读不懂」只发生在 reflog 不可读（早退）或锁窗 malformed。
   const codeSurfaceCandidates = verdict.classified.filter((c) => c.codeSurfaceFiles.length > 0);
-  // 需要锁窗判定的候选 = 代码面 ∧ 非 AC65 授权直修 ∧ 非 ruled-historical 豁免（两者都是无条件豁免，
-  // 不依赖锁窗）。
-  const needLockWindow = codeSurfaceCandidates.some((c) => !c.ac65Authorized && !c.ruledHistorical);
+  // 需要锁窗判定的候选 = 代码面 ∧ 非 AC65 授权直修 ∧ 非 ruled-historical 豁免 ∧ 非 releaseBump（三者都是
+  // 无条件豁免，不依赖锁窗；releaseBump 只有 `=== true` 才是豁免——null 未评估仍走锁窗/红灯，fail-closed）。
+  const needLockWindow = codeSurfaceCandidates.some(
+    (c) => !c.ac65Authorized && !c.ruledHistorical && c.releaseBump !== true,
+  );
   if (codeSurfaceCandidates.length === 0) {
     evaluated = true;
     ok = true;
     reason = verdict.totalCommits === 0 ? "no-direct-commits-in-range" : "no-code-surface-direct-commits";
   } else if (!needLockWindow) {
-    // 所有代码面直接提交都是 AC65 授权直修 或 ruled-historical 豁免（可见+可审计 carve-out）——无 bypass
-    // 可能。全 AC65 时保持既有 reason（既有测试断言 "ac65-authorized-direct-fix-only"）；含 ruled 时给
-    // 可区分的 reason。
+    // 所有代码面直接提交都是 AC65 授权直修 / ruled-historical 豁免 / releaseBump（可见+可审计 carve-out）
+    // ——无 bypass 可能。全 AC65 时保持既有 reason（既有测试断言 "ac65-authorized-direct-fix-only"）；
+    // 全 releaseBump 时给可区分的 reason；其余（含 ruled）保持既有混合 reason。
     const allAc65 = codeSurfaceCandidates.every((c) => c.ac65Authorized);
+    const allReleaseBump = codeSurfaceCandidates.every((c) => c.releaseBump === true);
     evaluated = true;
     ok = true;
-    reason = allAc65 ? "ac65-authorized-direct-fix-only" : "ac65-authorized-or-ruled-historical-only";
+    reason = allAc65
+      ? "ac65-authorized-direct-fix-only"
+      : allReleaseBump
+        ? "release-bump-direct-commits-only"
+        : "ac65-authorized-or-ruled-historical-only";
   } else if (!lockSubEvaluated) {
     evaluated = false;
     ok = true;
@@ -1165,6 +1346,10 @@ export function main(argv) {
       inLockWindowCommits: verdict.inLockWindowCommits,
       ac65AuthorizedCommits: verdict.ac65AuthorizedCommits,
       ruledHistoricalCommits: verdict.ruledHistoricalCommits,
+      // releaseBump 结构分类（独立第三类 carve-out）——可见 + 独立计数，⛔ 不并入 fan-in 计数，
+      // ⛔ 不静默掩盖。`releaseBumpNotEvaluatedCommits` 是「两条来源读不出」的独立计数（硬规则 3b）。
+      releaseBumpCommits: verdict.releaseBumpCommits,
+      releaseBumpNotEvaluatedCommits: verdict.releaseBumpNotEvaluatedCommits,
       unclassifiableCommits: unclassifiable.length,
       classifiedCommits: classified,
       totalScannedCommits: totalScanned,
@@ -1173,6 +1358,14 @@ export function main(argv) {
       predicate: "design-internal exclusion set (see header / task body): tasks/ docs/ orchestration/ adr/ .quay/ plugin/loop/ measurements/ milestones/ .claude/ plugin/skills/manager/ plugin/skills/init/ CLAUDE.md README.md .gitignore .gitattributes .npmrc .github/ plugin/scripts/fan-in-* plugin/test/fan-in-*",
       ac65CarveOut: "AC65-authorized direct-fix (two predicates; sha table retired to display-only): commit message has AC65 declaration (/^AC65:/m) AND verification artifact (/AC65-Verified:/m) ⇒ ac65AuthorizedDirectFix (visible, NOT bypass); declaration with no verification artifact ⇒ RED (criterion-3); no declaration code-surface direct commit ⇒ RED. Legacy 02b2b2fc form (AC65 一条命令验证：<output>) tolerated. NOT a plugin/scripts/* filename exemption.",
       ruledHistoricalCarveOut: "RULED_HISTORICAL_COMMITS one-off exemption (manager 2026-08-15 ruling, tasks/gap-direct-to-develop-ruled-historical-cddc55e2): sha prefix match on the bounded ruled table ⇒ ruledHistorical (visible, NOT bypass, NOT ac65Authorized); any non-table direct commit still RED (exemption cannot be silently extended). Criterion-3 (declaration without verification ⇒ RED) unchanged.",
+      releaseBumpCarveOut: "releaseBump structural classification (tasks/gap-ac194-release-bump-classified-as-bypass): the SPEC §4.3/§12 release-cut step-5 next-version bump (release-cut.mjs:514-524) commits DIRECTLY to develop by design. Conjunction of three independently checkable facts ⇒ releaseBump (visible, NOT bypass, NOT ac65Authorized, NOT ruledHistorical): (1) subject matches the generator's ONLY literal template (release-cut.mjs:516); (2) the commit is a DIRECT CHILD of a .quay/release-branch-finish.jsonl record with form:'cut' ∧ base:<develop> (parent == that record's sha); (3) its code-surface file set ⊆ the version-bearing path set derived from the single table scripts/version-carriers.ts (carrierPaths() ∪ VERSION source). ANY of the three false ⇒ RED (e.g. same subject carrying one off-carrier code-surface file still bypasses). A source that cannot be READ ⇒ releaseBump=null (NOT-EVALUATED, distinct from false) and bypass stays true (fail-closed). ⛔ Not a sha table, ⛔ not a DESIGN_INTERNAL_RE relaxation.",
+    },
+    releaseBump: {
+      // 两条来源的读数（⛔ 不只报结论）：载体表条目数 / cut-ledger 命中数 / ledger 路径 / 是否可评估。
+      carrierPaths: carrierPathsSet ? carrierPathsSet.size : null,
+      cutParents: cutParents ? cutParents.size : null,
+      ledgerFile: releaseLedgerFile,
+      evaluated: carrierPathsSet !== null && cutParents !== null,
     },
     lockWindow: { evaluated: lockSubEvaluated, reason: lockSubReason },
     candidates: codeSurfaceCandidates.map((c) => ({
@@ -1185,6 +1378,9 @@ export function main(argv) {
       ac65Evidence: c.ac65Evidence,
       ruledHistorical: c.ruledHistorical,
       ruledReason: c.ruledReason,
+      releaseBump: c.releaseBump,
+      releaseBumpReason: c.releaseBumpReason,
+      releaseBumpEvidence: c.releaseBumpEvidence,
     })),
   };
 
@@ -1192,7 +1388,8 @@ export function main(argv) {
     process.stdout.write(JSON.stringify(result, null, 2) + "\n");
   } else {
     console.log(`direct-to-develop-bypass-check: evaluated=${evaluated} ok=${ok} (${reason})`);
-    console.log(`  denominator: total=${verdict.totalCommits} code-surface=${verdict.codeSurfaceCommits} design-internal=${verdict.designInternalCommits} in-lock-window=${verdict.inLockWindowCommits} ac65-authorized=${verdict.ac65AuthorizedCommits} ruled-historical=${verdict.ruledHistoricalCommits} unclassifiable=${unclassifiable.length}`);
+    console.log(`  denominator: total=${verdict.totalCommits} code-surface=${verdict.codeSurfaceCommits} design-internal=${verdict.designInternalCommits} in-lock-window=${verdict.inLockWindowCommits} ac65-authorized=${verdict.ac65AuthorizedCommits} ruled-historical=${verdict.ruledHistoricalCommits} release-bump=${verdict.releaseBumpCommits} release-bump-not-evaluated=${verdict.releaseBumpNotEvaluatedCommits} unclassifiable=${unclassifiable.length}`);
+    console.log(`  release-bump sources: carrier-paths=${carrierPathsSet ? carrierPathsSet.size : "unreadable"} cut-parents=${cutParents ? cutParents.size : "unreadable"} (${releaseLedgerFile})`);
     console.log(`  classification: classified=${classified} total=${totalScanned} first-parent=${firstParentCommits} off-spine=${offSpineCommits ?? "n/a"} ratio=${totalScanned > 0 ? (classified / totalScanned).toFixed(4) : "n/a"}`);
     console.log(`  lock-window: evaluated=${lockSubEvaluated} (${lockSubReason})`);
     // ref-level 落地可见性（AC5/AC6）：⛔ 这几行只是读数，不参与 RED/GREEN 判定。
@@ -1208,11 +1405,23 @@ export function main(argv) {
       console.log(`  unsupported reflog action forms: ${unclassifiedActionForms.map((f) => `${f.form}×${f.count}`).join(", ")}`);
     }
     for (const c of codeSurfaceCandidates) {
-      const tag = c.ruledHistorical ? "RULED-HISTORICAL" : c.bypass ? "RED" : c.ac65Authorized ? "AC65-AUTHORIZED" : c.inLockWindow ? "SKIP(in-lock-window)" : "design-internal";
+      const tag = c.ruledHistorical
+        ? "RULED-HISTORICAL"
+        : c.ac65Authorized
+          ? "AC65-AUTHORIZED"
+          : c.releaseBump === true
+            ? "RELEASE-BUMP"
+            : c.bypass
+              ? "RED"
+              : c.inLockWindow
+                ? "SKIP(in-lock-window)"
+                : "design-internal";
       console.log(`  ${tag} ${c.sha} — ${c.subject}`);
       for (const f of c.codeSurfaceFiles) console.log(`      ${f}`);
       if (c.ruledHistorical && c.ruledReason) console.log(`      ruled reason: ${c.ruledReason}`);
       if (c.ac65Authorized && c.ac65Evidence) console.log(`      evidence: ${c.ac65Evidence}`);
+      if (c.releaseBump === true && c.releaseBumpReason) console.log(`      release-bump reason: ${c.releaseBumpReason}`);
+      if (c.releaseBump === null && c.releaseBumpReason) console.log(`      release-bump NOT-EVALUATED: ${c.releaseBumpReason}`);
     }
     if (verdict.totalCommits === 0) console.log("  (no direct commits in scan range)");
   }

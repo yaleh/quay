@@ -2,7 +2,7 @@
 id: gap-coverage-miss-fail-closed-stops-code-landings
 title: 一条历史覆盖缺口的读数被接成 fail-closed 硬闸——单次漏记的代价不是一条红色读数，而是全部 code delta
   落地停摆一整天（2026-10-01 实测）
-status: ready
+status: done
 labels:
   - gap
   - defect
@@ -58,6 +58,9 @@ extra:
 - `plugin/scripts/runner-static-gate.ts`
 - `plugin/scripts/gate-event-coverage-check.ts`
 - `plugin/test/gate-event-coverage-check.test.mjs`
+- `plugin/scripts/direct-to-develop-bypass-check.ts`
+- `plugin/test/direct-to-develop-bypass-check.test.mjs`
+- `scripts/version-carriers.ts`
 - `tasks/gap-coverage-miss-fail-closed-stops-code-landings.md`
 
 ## Evidence
@@ -93,3 +96,13 @@ fail-closed 归类依据（**不是**显式注册表，而是 `plugin/scripts/ch
 单测：`plugin/test/gate-event-coverage-check.test.mjs` 新增 4 条——默认 vs `--no-block` 对**同一** fixture 的双模式对照（两半各能取假）、gate 模式屏显仍报出缺口、第三态不被 `--no-block` 吞、全绿不伪造 RED。
 
 **AC4（本任务自身的门）**：`bash scripts/test.sh --for-task gap-coverage-miss-fail-closed-stops-code-landings` ⇒ `exit=0`，`# tests 11 · # pass 11 · # fail 0`（含 scoped 静态层）。scoped-gate cache 已写（`developSha="b7de20262e5b012972783111c5f1aa08f7d9d9c4"`，`cacheFile=.quay/scoped-gate-cache.json`）。
+
+**AC3 补录（2026-10-01，第二处静态闸：两红互锁与 byte-exact 吸收）.**
+
+修掉 `gate-event-coverage-check` 的 fail-closed 后，同一静态闸上立刻暴露出**第二条同形态红**：`STATIC_CHECK_FAILED: direct-to-develop-bypass-check exit=1`（`--root <主检出> --baseline develop~100`；`evaluated=true ok=false reason=direct-commit-bypasses-fan-in`；`candidates[0].sha=64fd3cdba`「release: bump version to 0.14.0 after v0.13.0」）。⇒ 本任务 DoD 的两半此刻**仍不成立**：套件仍 `# tests 0 / # suite red static-check`，code delta 的 fan-in 仍在静态闸中止。
+
+<!-- dedup-ref --> **这是一次两红互锁**（同 `two-red-mutual-deadlock-needs-a-branch-carrying-both-fixes` 的形态），两侧读数各自取自对方与己方的 fan-in 日志尾：本分支的 fan-in 红在 `direct-to-develop-bypass-check`（`…fan-in-suite-gap-coverage-miss-fail-closed-stops-code-landings~wk-prod-anchor~1790857271473-d7bcd4.log`），而 `task/gap-ac194-release-bump-classified-as-bypass` 的 fan-in 红在 `gate-event-coverage-check`（`…fan-in-suite-gap-ac194-release-bump-classified-as-bypass~wk-prod-anchor~1790838491027-a255a2.log` 尾 `STATIC_CHECK_FAILED: gate-event-coverage-check exit=1`，同日志内 `"releaseBump": true` 证明它的修复在它的 worktree 里是绿的）。**任一分支单独都无法落地 ⇒ 任一方都等不到对方**。
+
+<!-- dedup-ref --> `tasks/gap-ac194-release-bump-classified-as-bypass.md`（status: needs-human，2026-10-01T07:09:54Z「连续修满重试上限」；其判词逐字写着 suite 红「归因不出任何失败测试文件」——正是 `# tests 0` 静态闸中止的形态，即它被**本任务**的红所停）**不会自己落地**，故等待无终止条件。处置按 memory 的 convergent move = **一个分支同时承载两份修复**。
+
+<!-- dedup-ref --> **吸收动作（行为可核）**：`git checkout task/gap-ac194-release-bump-classified-as-bypass -- <f>` 取对方**已提交**的 3 个文件（`plugin/scripts/direct-to-develop-bypass-check.ts` / `plugin/test/direct-to-develop-bypass-check.test.mjs` / `scripts/version-carriers.ts`），逐文件 md5 与对方分支核对为 `EXACT`（`98adf5b9…` / `b86e9381…` / `c080a04a…`）；因 `## Touches` 无并集（fan-in step 3 读 **worktree** 副本），3 条路径已写入上面 `## Touches`。吸收后以 fan-in 的逐字 argv 复跑本判据：`ok=true` / `reason=release-bump-direct-commits-only` / `releaseBumpCommits=1` / `candidates[0].confirmedBypass=false` / `EXIT=0`。⛔ 未自行重实现对方的 `releaseBump` 三谓词分类，⛔ 也未把该判据改成不报——吸收的是对方**已提交的字节**（非重写）。
