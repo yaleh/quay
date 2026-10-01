@@ -2,7 +2,7 @@
 id: AC-313
 title: shell 层收敛 5.3：develop-deliver-tgz.sh 不再内嵌 python3（10 个 heredoc 抽成
   .ts，编排保留 bash；由 sh-census-check 读出）
-status: active
+status: achieved
 kind: criterion
 goal: GOAL-026
 criterion: |-
@@ -22,6 +22,11 @@ statusLog:
     to: active
     actor: goal-driver
     reason: "triage: activate"
+  - at: 2026-10-01T18:08:42.649Z
+    from: active
+    to: achieved
+    actor: goal-driver
+    reason: "I2: criterion pass"
 fidelity:
   verdict: faithful
   reason: "fidelity judge: faithful"
