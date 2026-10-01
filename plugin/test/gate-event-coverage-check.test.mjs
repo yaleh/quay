@@ -23,6 +23,7 @@ import {
   collectLandings,
   computeCoverage,
   readCompleteEvents,
+  readNonBlockLedger,
   windowBounds,
 } from "../scripts/gate-event-coverage-check.ts";
 
@@ -338,4 +339,120 @@ test("--no-block 不伪造 RED：全绿时不落 ledger、exit 0", () => {
   assert.equal(r.code, 0);
   assert.match(r.out, /^PASS:/m);
   assert.ok(!fs.existsSync(path.join(root, LEDGER_REL)), "全绿不得写 ledger（--no-block 只在 RED 时记账）");
+});
+
+// ── 读侧：--no-block 台账的消费者 (gap-coverage-nonblock-ledger-has-no-consumer) ────────────────────
+// 本次改动前这份台账**只有写者**：RED 落进一份没人打开的 jsonl，而 --no-block 下 run_checker 按
+// exit 0 把 cost 行记成 `verdict:"pass"` ⇒ 取值轴只剩它 ⇒ 「有人报过」与「没人报过」同形（硬规则 9）。
+// 下面每条断言都配一个「若它不成立结果会不同」的对照；三态是本组核心（硬规则 3b）：
+//   读到 / 缺席 / 读不懂，三者必须两两不同形，且**只有第一种**才带「未处置条数」这个取值。
+
+const ENTRY_AT = `${D2}T12:00:00.000Z`; // 记账时刻（写侧记这一条时，同任务**没有**晚于落地的 complete 事件）
+
+function writeLedger(root, entries) {
+  const p = path.join(root, LEDGER_REL);
+  fs.mkdirSync(path.dirname(p), { recursive: true });
+  fs.writeFileSync(p, entries.map((e) => JSON.stringify(e)).join("\n") + "\n");
+  return p;
+}
+
+function ledgerEntry(task, extra = {}) {
+  return { day: DAY, task, sha: "deadbeef", coverage: 0.9, threshold: 95, at: ENTRY_AT, ...extra };
+}
+
+test("读侧 arm①：台账里有未处置条目 ⇒ 报出（枚举形态：未处置数 + day|task 清单，⛔ 不是布尔）", () => {
+  const { root } = makeRepo();
+  // 别的任务的一条已覆盖事件 —— 对照：它不该让本条目算「已处置」（按 task 匹配，⛔ 不是按时间全局匹配）
+  writeEvent(root, "t-other", `${D2}T12:30:00.000Z`);
+  writeLedger(root, [ledgerEntry("t-open")]);
+
+  const r = readNonBlockLedger(root);
+  assert.equal(r.evaluated, true, "读到台账 ⇒ evaluated:true");
+  assert.equal(r.carrier, "read");
+  assert.equal(r.entries, 1);
+  assert.deepEqual(r.unresolved.map((e) => e.task), ["t-open"], "未处置清单必须点名具体任务");
+  assert.equal(r.disposed, 0);
+});
+
+test("读侧 arm②（能取假）：同任务出现 ts ≥ 记账时刻的 complete 事件 ⇒ 该条目不再被报", () => {
+  const { root } = makeRepo();
+  writeEvent(root, "t-other", `${D2}T11:00:00.000Z`); // 让 gate-events 载体可读（与 t-open 无关）
+  writeLedger(root, [ledgerEntry("t-open")]);
+  // 前置半边：不加事件时必须**报出**（否则本测试恒绿、证明不了任何事）
+  assert.equal(readNonBlockLedger(root).unresolved.length, 1, "前置：补贴事件前该条目必须被报出");
+
+  writeEvent(root, "t-open", `${D2}T12:30:00.000Z`); // 记账之后补上的 complete 事件
+
+  const r = readNonBlockLedger(root);
+  assert.equal(r.evaluated, true);
+  assert.equal(r.unresolved.length, 0, "已补上 complete 事件的条目不得再被报");
+  assert.equal(r.disposed, 1);
+});
+
+test("读侧 处置下界（负控制）：同任务**早于**记账时刻的 complete 事件不得把条目判成已处置", () => {
+  const { root } = makeRepo();
+  writeLedger(root, [ledgerEntry("t-open")]);
+  // 这条事件早于记账时刻 —— 写侧记这一条时它就已经存在、且当时没让它算 covered（半开边界 60s 外）
+  // ⇒ 它必须**不能**让条目静默关闭。若把下界写成「同任务有任意 complete 事件」，本测试会变绿。
+  writeEvent(root, "t-open", `${D2}T11:00:00.000Z`);
+
+  const r = readNonBlockLedger(root);
+  assert.equal(r.unresolved.length, 1, "早于记账时刻的事件不能算处置（否则每一条历史缺口都会被静默关闭）");
+  assert.equal(r.disposed, 0);
+});
+
+test("读侧 arm③a：台账**缺席** ⇒ 独立的未评估取值（⛔ 不与「零未处置」同形）", () => {
+  const { root } = makeRepo(); // 无 .quay/gate-event-coverage-nonblock-ledger.jsonl
+  const r = readNonBlockLedger(root);
+  assert.equal(r.evaluated, false, "载体缺席是未评估，⛔ 不是「查过且零未处置」");
+  assert.equal(r.carrier, "absent");
+  assert.equal(r.unresolved, null, "未评估时未处置清单必须是 null —— 空数组会被读成「查过且干净」");
+  assert.match(r.reason, /NOT-EVALUATED/);
+});
+
+test("读侧 arm③b：台账存在但**全部**行不可解析 ⇒ 读不懂（独立取值，⛔ 不伪装成空台账）", () => {
+  const { root } = makeRepo();
+  fs.writeFileSync(path.join(root, LEDGER_REL), "not json at all\n{{{\n");
+  const r = readNonBlockLedger(root);
+  assert.equal(r.evaluated, false);
+  assert.equal(r.carrier, "unreadable");
+  assert.equal(r.unresolved, null);
+  assert.equal(r.malformedLines, 2);
+});
+
+test("读侧 arm③c：gate-events 载体读不到 ⇒ 处置不可判 ⇒ 未评估（⛔ 不是「都处置了」）", () => {
+  const { root } = makeRepo();
+  writeLedger(root, [ledgerEntry("t-open")]); // 有台账，但没写任何 gate-events.jsonl
+  const r = readNonBlockLedger(root);
+  assert.equal(r.evaluated, false, "处置判不了 ⇒ 未评估；伪装成 0 条未处置会把缺口静默丢掉");
+  assert.equal(r.unresolved, null);
+  assert.match(r.reason, /NOT-EVALUATED/);
+});
+
+test("读侧 坏行不掩好行：坏行计数、好行照判（一行噪声不得把整份读数判成不可得）", () => {
+  const { root } = makeRepo();
+  writeEvent(root, "t-other", `${D2}T11:00:00.000Z`); // 让 gate-events 载体可读
+  const p = writeLedger(root, [ledgerEntry("t-open")]);
+  fs.appendFileSync(p, "half a line\n");
+  const r = readNonBlockLedger(root);
+  assert.equal(r.evaluated, true);
+  assert.equal(r.malformedLines, 1);
+  assert.equal(r.unresolved.length, 1);
+  assert.equal(r.entries, 1);
+});
+
+test("读侧 CLI `--ledger`：exit 0 = 读到、exit 3 = 未评估（三态在退出码上也可区分）", () => {
+  const { root } = makeRepo();
+  writeEvent(root, "t-other", `${D2}T11:00:00.000Z`); // 让 gate-events 载体可读
+  const missing = runRaw(["--root", root, "--ledger", "--json"]);
+  assert.equal(missing.code, 3, "台账缺席 ⇒ exit 3（与「读到且零未处置」的 exit 0 不同形）");
+  assert.equal(JSON.parse(missing.out).evaluated, false);
+  assert.equal(JSON.parse(missing.out).carrier, "absent");
+
+  writeLedger(root, [ledgerEntry("t-open")]);
+  const read = runRaw(["--root", root, "--ledger", "--json"]);
+  assert.equal(read.code, 0);
+  const parsed = JSON.parse(read.out);
+  assert.equal(parsed.evaluated, true);
+  assert.deepEqual(parsed.unresolved.map((e) => e.task), ["t-open"]);
 });

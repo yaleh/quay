@@ -3,7 +3,7 @@ id: gap-coverage-nonblock-ledger-has-no-consumer
 title: "`--no-block` 把覆盖率 RED 从「挡住全部 code
   落地」降为「写进一份没人读的台账」——gate-event-coverage-nonblock-ledger.jsonl
   只有写者、零读者，漏记不再有任何机制把它送到会处置的人面前"
-status: ready
+status: done
 labels:
   - gap
   - defect
