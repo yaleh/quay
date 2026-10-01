@@ -3,7 +3,7 @@ id: gap-routine-semantic-dedup-scan-readcpustall-dup
 title: "semantic-dedup-scan: two byte-identical private /proc/pressure/cpu
   readers (a third same-named reader, cap-from-gate.ts:341, is genuinely
   different)"
-status: todo
+status: ready
 labels:
   - gap
   - routine-filed
