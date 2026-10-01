@@ -99,6 +99,7 @@ import { classifyFile } from "./runner-grouping.ts";
 import { windowMeanStall } from "./psi-window-join.ts";
 import { resolveCarrierRoot } from "./perfile-failure-rate.ts";
 import { readJsonLines } from "./gate-script-base.ts";
+import { readCpuStall } from "./suite-load-sampler.ts";
 
 type Sample = { t: number; cpu_stall: number };
 type PerFileRec = { file: string; startedAtMs: number; endedAtMs: number; passed: boolean };
@@ -220,15 +221,11 @@ function parseArgs(argv: string[]) {
 // finding `resolve-carrier-root-three-byte-identical-silent-zero`); three homes for one rule meant a
 // change to the resolution order landing in one copy only, silently, in the other two.
 
-function readCpuStall(): number | null {
-  try {
-    const line = fs.readFileSync("/proc/pressure/cpu", "utf8").split("\n")[0] ?? "";
-    const m = line.match(/avg10=([0-9]+(?:\.[0-9]+)?)/);
-    return m ? Number(m[1]) : null;
-  } catch {
-    return null;
-  }
-}
+// readCpuStall is IMPORTED (single definition in suite-load-sampler.ts, the module that owns the
+// three structural-signal readings). This file used to carry one of two byte-identical private copies
+// of it (.quay/routine-findings.jsonl finding `readcpustall-dup`, routine `semantic-dedup-scan`) —
+// two homes for one PSI parse meant a change landing in one copy only, silently desynchronising this
+// tool's window from the recorded load curve.
 
 // /proc/<pid>/schedstat field 2 = run_delay (ns): cumulative time the task was runnable but not
 // scheduled (waiting on a runqueue). This is the DIRECT causal quantity the Proposal's hypothesis
