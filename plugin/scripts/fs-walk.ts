@@ -27,6 +27,10 @@
 // (byte-identical in two more) and the `scanSurface` table + skip-set of the two identity checkers.
 // Those live here too — see the sections below. The same non-goal applies: their POLICY parameters
 // (the per-caller SKIP_DIRS) stayed with the callers because those genuinely differ.
+//
+// A still-later finding (`readgitignorebasenames-dup`, runId `semantic-dedup-scan-1790851304231`)
+// added the gitignore-basename reader the two stale-path detectors had each kept a byte-identical
+// copy of; it sits beside `gitVisiblePaths`, the gitignore-awareness face of the same family.
 
 import fs from "node:fs";
 import path from "node:path";
@@ -77,6 +81,35 @@ export function visibleDirPrefixes(paths: Iterable<string>): Set<string> {
     }
   }
   return dirs;
+}
+
+/** Basenames named in the repo's `.gitignore` — a BARE reference to one of these is a known
+ *  runtime/ignored artifact (`tick-log.md`, `gate-events.jsonl`, `full-suite-state.json` /
+ *  `batch2-queue-state.md`), not a stale SOURCE path. `git check-ignore` cannot match a bare
+ *  basename against a prefixed pattern (`orchestration/tick-log.md`), so this is the bare-name
+ *  companion to `gitignoredPaths`.
+ *
+ *  SINGLE DEFINITION (`.quay/routine-findings.jsonl` finding `readgitignorebasenames-dup`, routine
+ *  `semantic-dedup-scan`, runId `semantic-dedup-scan-1790851304231`): threshold-scope-check.ts and
+ *  tick-core-static-check.ts each carried a byte-identical 474-char copy (the second's own JSDoc
+ *  admitted it "mirrors" the first), so the runtime-artifact heuristic could drift between the two
+ *  stale-path detectors. Moved here BYTE-FOR-BYTE (⛔ pure refactor — no regex/logic edits); both
+ *  checkers import it and re-export it so their public surfaces are unchanged. It lives beside
+ *  `gitVisiblePaths` because it is the same gitignore-awareness face, one notch coarser (a bare
+ *  basename rather than a full relative path). */
+export function readGitignoreBasenames(root: string): Set<string> {
+  const p = path.join(root, ".gitignore");
+  if (!fs.existsSync(p)) return new Set();
+  const out = new Set<string>();
+  for (const line of fs.readFileSync(p, "utf8").split(/\r?\n/)) {
+    const t = line.trim();
+    if (!t || t.startsWith("#")) continue;
+    const seg = t.split("/").pop() || "";
+    const base = seg.replace(/[*?]/g, "").trim();
+    const dot = base.lastIndexOf(".");
+    if (dot > 0 && dot < base.length - 1 && /^[A-Za-z0-9_@-]/.test(base.slice(0, dot))) out.add(base);
+  }
+  return out;
 }
 
 /** A gitignore-driven skip face tied to the root its paths are relative to — the pair `walkFiles`
