@@ -1,7 +1,7 @@
 ---
 id: gap-park-reason-mislabels-ac-precheck-as-suite-red
 title: AC 预检失败被 judgeRetryExemption 归入「suite 红归因不出」——两轮即停派，停派注记与提交消息恒写「重试上限」而真因不是
-status: todo
+status: ready
 labels:
   - gap
   - defect
