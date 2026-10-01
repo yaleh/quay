@@ -35,8 +35,8 @@ extract — shared psi helper
 - [x] 处置结论可核：要么修掉，要么写明「已有机制在管、失败在哪一步」，⛔ 不以「已注意到」结案
 
 ## DoD
-- [ ] 上面的判据实跑通过
-- [ ] ⛔ 探针只立案不执行：本任务若需要跑产出者/修复，由派发链执行，⛔ 不由例程代跑
+- [x] 上面的判据实跑通过
+- [x] ⛔ 探针只立案不执行：本任务若需要跑产出者/修复，由派发链执行，⛔ 不由例程代跑
 
 ## Evidence
 **复核（finding 属实）**：两处 private `readCpuStall` 函数体逐字节相同（`psi-failure-correlation-check.ts:223` / `suite-load-sampler.ts:52`），kind `byte-identical-body`、verdict `real-duplication` 与 finding 一致。
@@ -56,6 +56,8 @@ extract — shared psi helper
 **运行对照（若「已是单一实现」为假则结果会不同）**：直接 import 共享 reader 并与独立解析 `/proc/pressure/cpu` 对比 ⇒ 两侧同为 `0.77`（原始行 `some avg10=0.77 …`）。另在本 Node 上验证「具名 import 不存在」会在 link 期抛 `SyntaxError: The requested module … does not provide an export named …`；`psi-failure-correlation-check.ts` 无本地定义且能正常加载 ⇒ 其调用点全部解析到该唯一导出，而非残留私有副本。
 
 **scoped gate**：`scripts/test.sh --for-task gap-routine-semantic-dedup-scan-readcpustall-dup --allow-thin` ⇒ **exit 0**（static 检查全 PASS）。⚠️ 诚实标注：selector 选中 **0 个测试文件**（thin 允许）⇒ 该绿**不构成**对本次 delta 的测试覆盖，全量 suite 在 fan-in 跑；上面的运行对照是本轮对 delta 的直接验证。
+
+**续做轮复核（2026-10-01）**：重跑上述两条 `grep` 判据，结果不变 —— `/proc/pressure/cpu` 逐字节 reader 仍为 1（`suite-load-sampler.ts`）、`readCpuStall` 定义仍为 1（`suite-load-sampler.ts:63`），`psi-failure-correlation-check.ts` 无本地定义且 import 该唯一导出。据此勾选 AC/DoD。
 
 ## Touches
 - `plugin/scripts/psi-failure-correlation-check.ts`
