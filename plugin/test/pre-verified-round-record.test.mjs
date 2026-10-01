@@ -720,6 +720,51 @@ test("AC1 — the concurrency helpers read the host + QUAY_MAX_CONCURRENT_SUITES
   }
 });
 
+// gap-routine-semantic-dedup-scan-hostparallelism-missed-import — the SSOT ratchet for hostParallelism.
+// THE DEFECT: this module re-declared hostParallelism's body while runner-concurrency.ts (the module
+// full-suite-runner.ts re-exports from) already held the one definition ⇒ two homes for one read-host
+// expression, free to drift on any seam change. The fix is a re-export; this test makes "exactly one
+// home" executable so a future local re-declaration goes RED instead of silently forking the expression.
+//
+// 按位置判定 (硬规则 2): the scan reads real `export function <name>(` DECLARATIONS at line start —
+// a mention in a comment/string is not a match.
+function scanExportFunctionDecls(dir, name) {
+  const hits = [];
+  for (const f of fs.readdirSync(dir)) {
+    if (!f.endsWith(".ts")) continue;
+    const src = fs.readFileSync(path.join(dir, f), "utf8");
+    for (const m of src.matchAll(new RegExp(`^export function ${name}\\s*\\(`, "gm"))) {
+      hits.push({ file: f, line: src.slice(0, m.index).split("\n").length });
+    }
+  }
+  return hits;
+}
+
+test("SSOT — hostParallelism has exactly ONE definition point (runner-concurrency.ts) and this module re-exports it", async () => {
+  const scriptDir = path.join(REPO_ROOT, "plugin", "scripts");
+  const decls = scanExportFunctionDecls(scriptDir, "hostParallelism");
+  // 硬规则 2: print what was matched (via the assertion message) before trusting the count.
+  assert.deepEqual(decls.map((d) => d.file), ["runner-concurrency.ts"],
+    `hostParallelism must be DECLARED in exactly one place — actual declarations: ${JSON.stringify(decls)}`);
+
+  // Consumer side: this module must reach the SAME binding (function object), not a copy — a local
+  // re-declaration is a different object and takes this RED.
+  const rc = await import("../scripts/runner-concurrency.ts");
+  assert.strictEqual(hostParallelism, rc.hostParallelism,
+    "pre-verified-round-record.hostParallelism must BE runner-concurrency.hostParallelism (re-export), never a re-declaration");
+
+  // Negative control for the SCANNER (the "exactly one" arm must be able to take false): a synthetic
+  // second declaration IS detected — otherwise the invariant would be vacuous (硬规则 4 推论三).
+  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "pvr-ssot-scan-"));
+  try {
+    fs.writeFileSync(path.join(tmp, "fake-copy.ts"), "export function hostParallelism() {\n  return 1;\n}\n", "utf8");
+    assert.equal(scanExportFunctionDecls(tmp, "hostParallelism").length, 1,
+      "scanner negative control: a real second declaration IS seen");
+  } finally {
+    fs.rmSync(tmp, { recursive: true, force: true });
+  }
+});
+
 test("AC1 — concurrentSuitesRunning=2 when another suite holds a slot [negative control, FULL_SUITE_LOCK_FILE seam]", async () => {
   const lockDir = fs.mkdtempSync(path.join(os.tmpdir(), "pvr-held-"));
   _tmpDirs.push(lockDir);
