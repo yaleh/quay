@@ -2,7 +2,7 @@
 id: AC-315
 title: shell 层棘轮不回升：内嵌解释器行数/重复副本数不高于基线、基线未被调高、例外清单 exceptionLines 不高于 7500（由
   sh-census-check 读出）
-status: draft
+status: active
 kind: criterion
 goal: GOAL-026
 criterion: |-
@@ -15,5 +15,16 @@ expect: exit 0（sh-census-check --json 的 evaluated===true，verdict.ok===true
 origin: SPEC-architecture-consolidation §10.3：会回退的量必须 long-term。7500 =
   2026-09-20 例外清单 7 个文件的 exceptionLines
   实测（6293+207+194+146+192+297+171），用来堵「把文件加进例外清单以逃棘轮」。会回升，故 long-term:true。
+activatedAt: 2026-10-01T18:04:26.240Z
+statusLog:
+  - at: 2026-10-01T18:04:26.240Z
+    from: draft
+    to: active
+    actor: goal-driver
+    reason: "triage: activate"
 long-term: true
+fidelity:
+  verdict: faithful
+  reason: "fidelity judge: faithful"
+  at: 2026-10-01T18:04:26.240Z
 ---
