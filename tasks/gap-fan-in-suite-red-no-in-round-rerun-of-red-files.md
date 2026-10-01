@@ -1,7 +1,7 @@
 ---
 id: gap-fan-in-suite-red-no-in-round-rerun-of-red-files
 title: 机械 fan-in suite 红后不在本轮重跑红文件——外来文件的抖动烧掉整轮并触发重派；outcome 不记红文件清单与受测 SHA，事后无法归因
-status: ready
+status: done
 labels:
   - gap
   - defect
