@@ -2,7 +2,7 @@
 id: AC-312
 title: shell 层收敛 5.2：integration-batch-merge / checker-mutation-check /
   cross-machine-verify 三个 .sh 收成 ≤25 有效行的薄入口或已删除（由 sh-census-check 读出）
-status: draft
+status: active
 kind: criterion
 goal: GOAL-026
 criterion: |-
@@ -15,4 +15,15 @@ expect: exit 0（sh-census-check --json 的 evaluated===true，且三个脚本�
 origin: SPEC-architecture-consolidation §5 Phase 5.2。实测（2026-09-20）：697/490/489
   有效行；承载 task =
   gap-arch-tsify-{integration-batch-merge,checker-mutation-check,cross-machine-verify}-sh。
+activatedAt: 2026-10-01T18:00:58.937Z
+statusLog:
+  - at: 2026-10-01T18:00:58.937Z
+    from: draft
+    to: active
+    actor: goal-driver
+    reason: "triage: activate"
+fidelity:
+  verdict: faithful
+  reason: "fidelity judge: faithful"
+  at: 2026-10-01T18:00:58.936Z
 ---
