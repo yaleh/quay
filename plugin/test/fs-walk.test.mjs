@@ -20,7 +20,8 @@ import assert from "node:assert/strict";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
-import { walkFiles, buildFileIndex, scanRoots, collectShellScripts, listExecutableFiles, scanKernelSurface } from "../scripts/fs-walk.ts";
+import { execFileSync } from "node:child_process";
+import { walkFiles, buildFileIndex, scanRoots, collectShellScripts, listExecutableFiles, scanKernelSurface, gitIgnoredPaths } from "../scripts/fs-walk.ts";
 
 // tmp-leak-pairing-check requires the created dirs to live in a module-level ARRAY that the
 // after-hook references (a value returned out of a helper is not seen by the check).
@@ -263,4 +264,90 @@ test("scanKernelSurface: plugin/scripts top level + packages/quay/src recursive,
     "plugin/scripts/a.ts",
     "plugin/scripts/b.mjs",
   ]);
+});
+
+// ── gitIgnoredPaths: the artifact roots no hardcoded skip-set can name ───────────────────────────
+// A disk walk descends into whatever is on disk — including what git does NOT consider part of the
+// repo. Those roots are named per project (.quality, .next, target, …), which is exactly why the
+// project already stated them in `.gitignore` and why asking git beats growing a skip-set. Measured
+// on a real workspace whose run-artifact root held 192,665 entries: 457,174 files / 2,379ms per
+// walk unpruned, vs 979 files / 9ms once ignored paths are pruned.
+function gitInit(root) {
+  execFileSync("git", ["-C", root, "init", "-q"], { stdio: "ignore" });
+}
+
+test("gitIgnoredPaths: folds an ignored dir into ONE trailing-slash entry, lists ignored files singly", () => {
+  const root = mkTree({
+    ".gitignore": "artifacts/\n*.log\n",
+    "keep.ts": "x",
+    "artifacts/a.bin": "x",
+    "artifacts/nested/deep.bin": "x",
+    "debug.log": "x",
+  });
+  gitInit(root);
+  const ignored = gitIgnoredPaths(root);
+  assert.ok(ignored.has("artifacts/"), "a wholly-ignored dir is ONE entry, not one per file inside");
+  assert.ok(ignored.has("debug.log"), "an ignored file is listed on its own");
+  assert.ok(!ignored.has("keep.ts"), "a repo file is not ignored");
+});
+
+test("gitIgnoredPaths: EMPTY outside a git repo — callers degrade to their own skip-set, never throw", () => {
+  const root = mkTree({ "artifacts/a.bin": "x", "keep.ts": "x" });
+  assert.equal(gitIgnoredPaths(root).size, 0);
+});
+
+test("gitIgnoredPaths: ignores by PATH — a same-named dir elsewhere stays visible", () => {
+  const root = mkTree({
+    ".gitignore": "examples/.quality/\n",
+    "examples/.quality/big.bin": "x",
+    ".quality/big.bin": "x",
+  });
+  gitInit(root);
+  const ignored = gitIgnoredPaths(root);
+  assert.ok(ignored.has("examples/.quality/"), "the NESTED artifact root is the ignored one");
+  assert.ok(
+    !ignored.has(".quality/"),
+    "an identical basename elsewhere is NOT ignored — this is why prune receives relPath, not a basename",
+  );
+});
+
+test("walkFiles: prune receives the root-relative POSIX path of nested entries", () => {
+  const root = mkTree({ "a/b/deep.ts": "x", "a/top.ts": "x" });
+  const seen = [];
+  walkFiles(root, {
+    sort: false,
+    prune: (name, isDir, rel) => {
+      seen.push(rel);
+      return false;
+    },
+  });
+  assert.ok(seen.includes("a"), "top-level dir");
+  assert.ok(seen.includes("a/b"), "nested dir is root-relative, not just its basename");
+  assert.ok(seen.includes("a/b/deep.ts"), "nested file is root-relative");
+});
+
+test("walkFiles + gitIgnoredPaths: BOTH layers are load-bearing end-to-end", () => {
+  const root = mkTree({
+    ".gitignore": ".quality/\n",
+    ".quality/runs/raw/big.bin": "x",
+    ".quality/snapshots/s.json": "x",
+    "src/keep.ts": "x",
+  });
+  gitInit(root);
+  const ignored = gitIgnoredPaths(root);
+  // Mirrors the callers exactly: their own skip-set OR git's answer. Neither alone suffices —
+  // git never reports its OWN internals as ignored (`.git/` is not a .gitignore match), so the
+  // `.git` entry in SKIP_DIRS is what keeps the repo metadata out; and `.quality` is knowable only
+  // to git, since no hardcoded list can name every project's artifact root.
+  const SKIP_DIRS = new Set([".git", "node_modules", ".quay"]);
+  const survivors = walkFiles(root, {
+    sort: false,
+    prune: (name, isDir, rel) =>
+      (isDir && SKIP_DIRS.has(name)) || ignored.has(rel) || ignored.has(`${rel}/`),
+  });
+  assert.deepEqual(
+    survivors,
+    [".gitignore", "src/keep.ts"],
+    "the artifact root is gone wholesale while repo files survive (`.gitignore` is itself a repo file — it is not ignored by its own rules) — drop either layer and this fails",
+  );
 });

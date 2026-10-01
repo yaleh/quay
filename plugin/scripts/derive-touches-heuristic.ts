@@ -37,7 +37,7 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { isOverbroadDeclaration, normalizePath } from "./touches-orthogonality-check.ts";
 import { isDirectEntry } from "./gate-script-base.ts";
-import { walkFiles } from "./fs-walk.ts";
+import { walkFiles, gitIgnoredPaths } from "./fs-walk.ts";
 
 // Recognized file extensions for a BARE token (no "/") to be considered path-shaped at all.
 const EXT_RE = /\.(ts|tsx|js|jsx|mjs|cjs|md|yml|yaml|sh|json|py|txt|sql|css|html)$/i;
@@ -83,12 +83,17 @@ export function extractPathTokens(text: string): string[] {
 }
 
 // ── walkRepo ─────────────────────────────────────────────────────────────────────────────────────
-// Repo-relative POSIX paths of every regular file under `root`, skipping SKIP_DIR_NAMES.
+// Repo-relative POSIX paths of every regular file under `root`, skipping SKIP_DIR_NAMES and
+// whatever git reports ignored (see `gitIgnoredPaths` in fs-walk.ts — the skip-set names the
+// traversal-specific dirs; `.gitignore` covers the project's own artifact roots, which no
+// hardcoded list can enumerate).
 export function walkRepo(root: string): string[] {
   // Unsorted on purpose (callers index this list); traversal is fs-walk.ts, the skip-set local.
+  const ignored = gitIgnoredPaths(root);
   return walkFiles(root, {
     sort: false,
-    prune: (name, isDir) => isDir && SKIP_DIR_NAMES.has(name),
+    prune: (name, isDir, rel) =>
+      (isDir && SKIP_DIR_NAMES.has(name)) || ignored.has(rel) || ignored.has(`${rel}/`),
     include: (_name, _ext, entry) => entry!.isFile(),
   });
 }

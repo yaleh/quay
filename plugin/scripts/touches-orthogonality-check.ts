@@ -19,7 +19,7 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { helpExit, isDirectEntry } from "./gate-script-base.ts";
 import { acquireCoreSrc } from "./core-src-import.ts";
-import { walkFiles as walkFilesShared } from "./fs-walk.ts";
+import { walkFiles as walkFilesShared, gitIgnoredPaths } from "./fs-walk.ts";
 // The ONE "is this path a quay runtime artifact?" implementation + the manifest reader (Core, shared
 // with fan-in/ff-merge.ts's clean-tree check). tasks/gap-quay-init-gitignore-misses-quay-runtime-
 // artifacts-outside-dot-quay: the `.quay/`-only口径 used to live in BOTH judges; only the ff's half was
@@ -159,10 +159,17 @@ function globToRegExp(glob) {
 const SKIP_DIRS = new Set([".git", "node_modules", ".quay"]);
 // Traversal is fs-walk.ts (aliased — this module's own export is also named `walkFiles` and is
 // imported by slot-refill.ts / ready-pool-check.ts, so that name must not move).
+//
+// Skipped = SKIP_DIRS OR whatever git reports ignored. The skip-set stays for what is
+// semantically out of scope for Touches; `.gitignore` covers the project-specific artifact roots
+// whose names this module cannot know (a disk-only walk descends into them and dominates the call —
+// see `gitIgnoredPaths` in fs-walk.ts for the measurement).
 export function walkFiles(root) {
+  const ignored = gitIgnoredPaths(root);
   const rels = walkFilesShared(root, {
     sort: false,
-    prune: (name, isDir) => isDir && SKIP_DIRS.has(name),
+    prune: (name, isDir, rel) =>
+      (isDir && SKIP_DIRS.has(name)) || ignored.has(rel) || ignored.has(`${rel}/`),
     include: (_name, _ext, entry) => entry.isFile() || entry.isSymbolicLink(),
   });
   return rels.filter((rel) => {
