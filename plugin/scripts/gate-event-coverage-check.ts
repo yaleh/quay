@@ -45,6 +45,21 @@
 //   fail-closed（mutation case 与按需诊断走的正是默认模式——它必须仍能报红）。同形态先例：
 //   task-contract-check / suite-duration-exceed-check / instrument-decay-check 的 --no-block 接线。
 //
+// 读侧 (gap-coverage-nonblock-ledger-has-no-consumer): `--no-block` 把代价从「过高」改成了「为零」——
+//   ledger 建好、写入、可审计，但**零读者**：套件日志里那行 NON-BLOCKING 会滚走，台账没人打开
+//   ⇒ 「有人报过」与「没人报过」在任何会被读的记录上同形（硬规则 9：可见性 ≠ 执行）。同一次 --no-block
+//   下 run_checker 按 exit 0 把 cost 行记成 `verdict:"pass"`，所以**取值轴只**剩这份台账。
+//   `readNonBlockLedger()`（本文件）把它变成一条**三态**读数，由 manager tick 每轮报出（reader =
+//   `manager-tick-readings.ts` 的 `gate_event_coverage_nonblock.*` 行，落点是每轮会被处置的面）。
+//   **处置（处置 ≠ 手维护豁免 id 表）是推导出来的**：条目已处置 ⇔ 载体里已有同任务的
+//   `gate:"complete"`+`pass` 事件、且其 ts ≥ 该条目自己的记账时刻 `at`。
+//   为什么 `at` 是正确的下界：写侧**只在**「当时该任务没有 ≥ flip 时刻的 complete 事件（60s 容差）」
+//   时才记这一条（否则它会被算成 covered 而不入 ledger）⇒ 任何满足 ts ≥ at 的事件必然是**事后补上**
+//   的，即缺口已被填补。（裁定同理：只接受落进载体的带理由事件，⛔ 不接受代码里的 id 白名单。）
+//   **三态（硬规则 3b）**：台账**缺席**不是「零未处置」——写侧把缺席当作「尚无条目」（它做的是去重读），
+//   读侧不行：「没有人报过」与「报过且都处置了」正是这份读者存在的理由。同理，gate-events 载体读不到
+//   ⇒ 处置不可判 ⇒ NOT-EVALUATED；台账存在但**全部**行不可解析 ⇒ 读不懂，也不与空台账同形。
+//
 // Exit codes: 0 = PASS（窗口内每个非豁免日覆盖率 ≥ 阈值）;
 //             1 = RED（至少一个非豁免日覆盖率 < 阈值）—— 仅默认模式;
 //             2 = usage/environment error;
@@ -388,6 +403,140 @@ export function recordNonBlockReport(
   return { path: p, recorded: fresh.length };
 }
 
+// ── Reading side: the consumer of the --no-block ledger ─────────────────────────────────────────────
+// (gap-coverage-nonblock-ledger-has-no-consumer —— 本文件头注释「读侧」一段是这段代码的正本.)
+// 这份文件此前只有写者：`recordNonBlockReport` 往 ledger 里写，**没有任何东西读它**。下面这个函数
+// 把台账变成一条**三态**读数；消费方是 `manager-tick-readings.ts`（每轮 manager tick 报到处置面）。
+
+/** 台账载体的读取状态。⛔ `absent`/`unreadable` 不得与「读过且零未处置」共用一个取值（硬规则 3b）。 */
+export type LedgerCarrierState = "read" | "absent" | "unreadable";
+
+export interface NonBlockLedgerReading {
+  /** false ⇒ 本条读数**不携带可用取值**（⛔ 绝不等价于「0 条未处置」）。 */
+  evaluated: boolean;
+  carrier: LedgerCarrierState;
+  /** `null` ⇔ `!evaluated` —— ⛔ 不是 `[]`：空数组会被读成「查过且干净」。 */
+  unresolved: NonBlockLedgerEntry[] | null;
+  /** 已处置条目数（同任务已有 ts ≥ 该条目 `at` 的 complete+pass 事件）。 */
+  disposed: number;
+  entries: number;
+  malformedLines: number;
+  reason: string;
+  ledger: string;
+  eventsCarrier: string;
+}
+
+/**
+ * Read the `--no-block` ledger and judge each entry's DISPOSITION. PURE w.r.t. its inputs (reads two
+ * files, writes nothing). Three states, never collapsed (硬规则 3b):
+ *   - ledger absent            ⇒ `evaluated:false, carrier:"absent"`     （⛔ 不是「零未处置」）
+ *   - ledger present, all bad  ⇒ `evaluated:false, carrier:"unreadable"`
+ *   - gate-events unreadable   ⇒ `evaluated:false`（处置不可判）
+ *   - otherwise                ⇒ `evaluated:true` + `unresolved` 清单
+ * DISPOSITION is derived, never a hand-maintained id table: an entry is disposed ⇔ the gate-events
+ * carrier holds a `complete`+`pass` event for the same task with ts ≥ the entry's own `at`. `at` is
+ * the correct floor because the writer records an entry ONLY when no such event existed at that
+ * moment — so any event at/after `at` necessarily appeared afterwards (i.e. the gap was filled).
+ * An entry with an unparseable/absent `at` cannot be shown disposed ⇒ it stays in `unresolved`
+ * (the safe direction: a visible stale entry costs noise, a silently-dropped one re-opens the hole).
+ */
+export function readNonBlockLedger(root: string): NonBlockLedgerReading {
+  const ledger = path.join(root, NO_BLOCK_LEDGER_REL);
+  const eventsCarrier = path.join(root, ".quay", "gate-events.jsonl");
+  const base = { unresolved: null, disposed: 0, entries: 0, malformedLines: 0, ledger, eventsCarrier };
+  let raw: string;
+  try {
+    raw = fs.readFileSync(ledger, "utf8");
+  } catch {
+    return {
+      ...base,
+      evaluated: false,
+      carrier: "absent",
+      reason: `NOT-EVALUATED: --no-block 台账载体缺席（${ledger}）——「没有人报过」⛔ 不与「报过且都处置了」同形`,
+    };
+  }
+
+  const entries: NonBlockLedgerEntry[] = [];
+  let malformed = 0;
+  for (const line of raw.split("\n")) {
+    if (!line.trim()) continue;
+    let e: Partial<NonBlockLedgerEntry>;
+    try {
+      e = JSON.parse(line) as Partial<NonBlockLedgerEntry>;
+    } catch {
+      malformed++;
+      continue;
+    }
+    if (typeof e?.day !== "string" || typeof e?.task !== "string") {
+      malformed++;
+      continue;
+    }
+    entries.push({
+      day: e.day,
+      task: e.task,
+      sha: typeof e.sha === "string" ? e.sha : "",
+      coverage: typeof e.coverage === "number" ? e.coverage : NaN,
+      threshold: typeof e.threshold === "number" ? e.threshold : NaN,
+      at: typeof e.at === "string" ? e.at : "",
+    });
+  }
+  if (entries.length === 0 && malformed > 0) {
+    return {
+      ...base,
+      evaluated: false,
+      carrier: "unreadable",
+      malformedLines: malformed,
+      reason: `NOT-EVALUATED: 台账存在但 ${malformed} 行全部不可解析（读不懂 ⛔ 不等于零未处置）`,
+    };
+  }
+
+  const events = readCompleteEvents(eventsCarrier);
+  if (events === null) {
+    return {
+      ...base,
+      evaluated: false,
+      carrier: "read",
+      entries: entries.length,
+      malformedLines: malformed,
+      reason: `NOT-EVALUATED: 载体读不到（${eventsCarrier}）⇒ 无法判「已处置」，⛔ 不与「零未处置」同形`,
+    };
+  }
+
+  const unresolved: NonBlockLedgerEntry[] = [];
+  let disposed = 0;
+  for (const e of entries) {
+    const floor = Date.parse(e.at);
+    const hit = Number.isFinite(floor) && events.some((ev) => ev.task === e.task && Date.parse(ev.ts) >= floor);
+    if (hit) disposed++;
+    else unresolved.push(e);
+  }
+  return {
+    evaluated: true,
+    carrier: "read",
+    unresolved,
+    disposed,
+    entries: entries.length,
+    malformedLines: malformed,
+    reason: unresolved.length
+      ? `${unresolved.length} 条未处置（已处置 ${disposed}/${entries.length}）`
+      : `零未处置（${disposed}/${entries.length} 条均已处置）`,
+    ledger,
+    eventsCarrier,
+  };
+}
+
+/** Human-readable form of a ledger reading (⚠️ `not-evaluated` 有独立一行，⛔ 不打印成 0). */
+export function formatNonBlockLedger(r: NonBlockLedgerReading): string {
+  if (!r.evaluated) return `${r.reason}\n  carrier=${r.carrier} ledger=${r.ledger}`;
+  const head = `gate-event-coverage-nonblock ledger — ${r.ledger}`;
+  const body = `entries=${r.entries} disposed=${r.disposed} unresolved=${r.unresolved!.length} malformed_lines=${r.malformedLines}`;
+  const detail = r.unresolved!.map(
+    (e) =>
+      `  UNRESOLVED ${e.day} ${e.task} — coverage ${Number.isFinite(e.coverage) ? `${e.coverage * 100 < 100 ? (e.coverage * 100).toFixed(0) : "100"}` : "?"}% < ${Number.isFinite(e.threshold) ? e.threshold : "?"}% · sha=${e.sha || "(none)"} · recorded ${e.at || "(no at)"}`,
+  );
+  return [head, body, ...detail].join("\n");
+}
+
 function usage(): void {
   console.log(
     "gate-event-coverage-check — 每日「落地 ⇒ complete GateEvent」覆盖率判据\n" +
@@ -399,8 +548,10 @@ function usage(): void {
       "  --json                  机器可读输出\n" +
       "  --gate                  静态门模式：只打印判定行 + 失败/例外明细\n" +
       "  --no-block              RED 只报出 + 记账（grow-only ledger），不 exit 1；默认仍 fail-closed\n" +
+      "  --ledger                读侧模式：读 --no-block 台账并判每条目的处置态（三态；不跑覆盖率判据）\n" +
       "exit 0=PASS · 1=RED（仅默认模式）· 2=usage · 3=NOT-EVALUATED（载体/git/落地读数不可得）\n" +
-      "  --no-block 下 RED ⇒ exit 0（取值 RED、阻断关闭；判定行照打 + 落 ledger）",
+      "  --no-block 下 RED ⇒ exit 0（取值 RED、阻断关闭；判定行照打 + 落 ledger）\n" +
+      "  --ledger 下：0=读到（未处置数见输出）· 3=未评估（台账缺席/不可解析 · gate-events 读不到）",
   );
 }
 
@@ -415,6 +566,13 @@ async function main(): Promise<number> {
   // --no-block: 取值轴保留（RED 照报 + 记账），阻断轴关闭（RED 不 exit 1）。默认 fail-closed 不变。
   const noBlock = args.includes("--no-block");
   const root = path.resolve(flagValue(args, "--root") ?? process.cwd());
+  // --ledger: 读侧模式 —— 只读台账、判处置态，⛔ 不跑覆盖率判据、不写任何东西。它存在的理由是让
+  // 「台账有没有人读」这件事本身可被一条命令取到读数（AC2/AC3 取证 + manager 面之外的手工复核）。
+  if (args.includes("--ledger")) {
+    const reading = readNonBlockLedger(root);
+    console.log(json ? JSON.stringify(reading, null, 2) : formatNonBlockLedger(reading));
+    return reading.evaluated ? 0 : 3;
+  }
   const mergeTarget = flagValue(args, "--merge-target") ?? "develop";
   const daysRaw = flagValue(args, "--days");
   const days: number | "all" = args.includes("--all") ? "all" : daysRaw ? Number(daysRaw) : 3;

@@ -216,6 +216,17 @@ packages/quay/plugin/
 **/.quay/manager-next-a20.txt
 **/.quay/manager-unescalated.txt
 **/.quay/task-file-violation-ledger.jsonl
+# gap-coverage-nonblock-ledger-has-no-consumer (2026-10-01): the `--no-block` coverage ledger
+# (.quay/gate-event-coverage-nonblock-ledger.jsonl) — one grow-only line per (day|task) landing whose
+# `complete` event is missing (written by gate-event-coverage-check.ts's recordNonBlockReport, read by
+# readNonBlockLedger via manager-tick-readings.ts). Same gitignored runtime-state family as
+# gate-events.jsonl (which it is derived from) and as the sibling task-file-violation-ledger above.
+# Before this rule it showed up as an untracked path in `git status` in the main checkout.
+# Not `@quay-runtime-artifact`-marked on purpose, same as the sibling `**/.quay/*` entries above:
+# quay-init already writes the covering `.quay/*` rule into a consumer project's .gitignore, so
+# listing it in quay-runtime-artifacts.txt would contradict that file's stated policy (and break the
+# marked-set == manifest-set binding asserted by gitignore-runtime-coverage-check.ts).
+**/.quay/gate-event-coverage-nonblock-ledger.jsonl
 **/.quay/orphaned-full-suite-runner-*.diff
 # gap-sweeptmp-pkill-kills-live-observers-two-layer-blind (2026-08-08): the observer self-registry
 # files session-liveness.sh writes on resident start (candidate-D death detection). Per-pid
