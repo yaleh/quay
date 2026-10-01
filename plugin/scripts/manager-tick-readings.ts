@@ -11,9 +11,12 @@
 // 用法:
 //   node --experimental-strip-types plugin/scripts/quay-session.ts manager-tick-readings
 //   node --experimental-strip-types plugin/scripts/manager-tick-readings.ts        # 等价直接运行
+//   node --experimental-strip-types plugin/scripts/manager-tick-readings.ts nonblock-ledger  # 只读台账读数
 //
 // 测试/环境接缝（生产调用不设 → 行为不变）:
 //   MTR_PROJECTS           项目表 name=dir 空格分隔（默认 quay/archguard/meta-cc 于 /home/yale/work）
+//   MTR_REPO_ROOT          主检出 root（默认 moduleRepoRoot()）——台账读数读 <root>/.quay/…；
+//                          一次性 verify worktree 里 .quay/ 运行时载体结构上不存在 ⇒ 取证时要显式指主检出
 //
 // 2026-09-06 退役 `outer.liveness`（gap-manager-liveness-field-outer-tmux-gone，方案 A）：
 //   outer 独立 tmux 会话/窗口已由 gap-retire-outer-tmux-window-logic 删除，`outer.liveness` 字段结构上
@@ -29,9 +32,18 @@ import { fileURLToPath } from "node:url";
 import { isDirectEntry } from "./gate-script-base.ts";
 import { readProcCmdline } from "../../packages/quay/src/kernel/proc-identity.ts";
 import { repoRoot as moduleRepoRoot } from "./repo-root.ts";
+// 读侧消费（gap-coverage-nonblock-ledger-has-no-consumer）：`--no-block` 覆盖率台账此前只有写者，
+// 没有读者 —— RED 落进一份没人打开的 jsonl，等于取值轴断开（硬规则 9）。本文件是它**唯一的**消费面：
+// manager tick 每轮读一次，未处置条目以显式标签行报到管理者面前。⛔ 本读数**不**阻断任何东西
+// （断言：它不在 run_static_checks 的 run_checker 名单里），它只让「有未处置条目」这件事每轮可见。
+import { readNonBlockLedger } from "./gate-event-coverage-check.ts";
 
 export const NAME = "manager-tick-readings";
 export const PROJECTS_SEAM = "MTR_PROJECTS";
+/** 主检出 root 的测试/取证接缝（生产不设 ⇒ `moduleRepoRoot()`，与既有行为一致）。
+ *  它存在的理由：一次性 verify worktree 里 `.quay/` 运行时载体**结构上不存在**（台账必然缺席），
+ *  而这份读数的对象是**主检出**的运行态 ⇒ 没有这个缝，在 worktree 里跑永远只得 not-evaluated。 */
+export const REPO_ROOT_SEAM = "MTR_REPO_ROOT";
 
 export interface Project {
   name: string;
@@ -292,11 +304,39 @@ export function render(projects: Project[], opts: RenderOpts): string {
   lines.push(`resource.node_dual_read ${resources.nodeInstrumentFailure ? "INSTRUMENT-FAILURE" : "ok"}`);
   lines.push(`resource.mem_available_mb ${resources.memAvailMb}`);
   for (const p of projects) lines.push(`outer.ticklog ${p.name} ${latestTickLog(p, 200, { full: true })}`);
+  lines.push(...nonBlockCoverageLines(opts.repoRoot));
   return `${lines.join("\n")}\n`;
 }
 
+/** `--no-block` 覆盖率台账的读取行（每轮报到处置面）。
+ *
+ *  三态**在标签行里显式区分**（硬规则 3b）：`not_evaluated` 有自己的一行取值，⛔ 绝不把
+ *  「台账缺席 / 读不懂」印成 `0` —— 那样「没评估」与「查过且干净」在记录上同形。
+ *  处置是推导的（见 gate-event-coverage-check.ts 的 `readNonBlockLedger`），⛔ 不是豁免 id 表：
+ *  某条目一旦有了对应的 `complete` 事件就不再出现在 `unresolved`。
+ *  这些行落在 manager tick 的机械读数里 —— 每轮都读、且管理者有处置动作（立案/补写事件），
+ *  这正是「把未处置条目送到处置面」。 */
+export function nonBlockCoverageLines(repoRoot: string): string[] {
+  const r = readNonBlockLedger(repoRoot);
+  if (!r.evaluated) {
+    return [
+      `gate_event_coverage_nonblock.state not_evaluated`,
+      `gate_event_coverage_nonblock.unresolved -`,
+      `gate_event_coverage_nonblock.detail ${r.carrier} — ${r.reason}`,
+    ];
+  }
+  const detail = r.unresolved!.length
+    ? r.unresolved!.map((e) => `${e.day}|${e.task}`).join(",")
+    : "none";
+  return [
+    `gate_event_coverage_nonblock.state ${r.unresolved!.length ? "UNRESOLVED" : "ok"}`,
+    `gate_event_coverage_nonblock.unresolved ${r.unresolved!.length} (entries ${r.entries}, disposed ${r.disposed})`,
+    `gate_event_coverage_nonblock.detail ${detail}`,
+  ];
+}
+
 /** 单读数子命令（Contract invoke）：`manager-tick-readings.ts outer.ticklog [name…]`。 */
-export function renderSelected(cmd: string, args: string[], projects: Project[]): string {
+export function renderSelected(cmd: string, args: string[], projects: Project[], repoRoot?: string): string {
   const lines: string[] = [];
 
   if (cmd === "outer.ticklog") {
@@ -306,17 +346,21 @@ export function renderSelected(cmd: string, args: string[], projects: Project[])
       lines.push(`outer.ticklog ${p.name} ${latestTickLog(p, 200, { full: true })}`);
     }
   }
+  // 按需复核对读侧读数（同一实现，⛔ 不另写一份判定）：manager 想单独看台账时用。
+  if (cmd === "nonblock-ledger" && repoRoot) {
+    lines.push(...nonBlockCoverageLines(repoRoot));
+  }
   return `${lines.join("\n")}\n`;
 }
 
 export function main(argv: string[], opts?: { env?: NodeJS.ProcessEnv }): number {
   const env = opts?.env ?? process.env;
-  const repoRoot = moduleRepoRoot();
+  const repoRoot = env[REPO_ROOT_SEAM]?.trim() || moduleRepoRoot();
   const projects = parseProjects(env);
   const args = argv.slice(2);
   const cmd = args[0] ?? "";
-  if (cmd === "outer.ticklog") {
-    process.stdout.write(renderSelected(cmd, args.slice(1), projects));
+  if (cmd === "outer.ticklog" || cmd === "nonblock-ledger") {
+    process.stdout.write(renderSelected(cmd, args.slice(1), projects, repoRoot));
     return 0;
   }
   process.stdout.write(render(projects, { repoRoot }));
