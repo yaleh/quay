@@ -3,7 +3,7 @@ id: gap-routine-semantic-dedup-scan-hostparallelism-missed-import
 title: "semantic-dedup-scan: runner-concurrency.ts already exports
   hostParallelism as the shared home (re-exported by full-suite-runner.ts) yet
   pre-verified-round-record.ts re-declares it "
-status: todo
+status: ready
 labels:
   - gap
   - routine-filed
