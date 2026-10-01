@@ -2,7 +2,7 @@
 id: AC-313
 title: shell 层收敛 5.3：develop-deliver-tgz.sh 不再内嵌 python3（10 个 heredoc 抽成
   .ts，编排保留 bash；由 sh-census-check 读出）
-status: draft
+status: active
 kind: criterion
 goal: GOAL-026
 criterion: |-
@@ -15,4 +15,15 @@ expect: exit 0（sh-census-check --json 的 evaluated===true，且
 origin: SPEC-architecture-consolidation §5 Phase 5.3 第一阶段。实测（2026-09-20）：2354
   有效行、embedded=[python3]、10 个 python3 heredoc；承载 task =
   gap-arch-tsify-develop-deliver-tgz-python-heredocs。
+activatedAt: 2026-10-01T18:01:36.566Z
+statusLog:
+  - at: 2026-10-01T18:01:36.566Z
+    from: draft
+    to: active
+    actor: goal-driver
+    reason: "triage: activate"
+fidelity:
+  verdict: faithful
+  reason: "fidelity judge: faithful"
+  at: 2026-10-01T18:01:36.566Z
 ---
