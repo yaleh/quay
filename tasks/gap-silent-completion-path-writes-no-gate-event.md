@@ -2,7 +2,7 @@
 id: gap-silent-completion-path-writes-no-gate-event
 title: 静默完成路径仍在——裸 `task_write` 把 status 改成 done 产出零 `complete`
   GateEvent；2026-09-30 那条唯一的漏记使次日全部 code delta 的 fan-in 在静态闸中止（套件根本没跑）
-status: ready
+status: done
 labels:
   - gap
   - defect
