@@ -357,13 +357,46 @@ async function main() {
   // ---- 7. task_write expectedStatus (CAS) passthrough, live (QN-043) ----
   {
     // MCP-A1's status is currently "ready" (set by step 6 above).
+
+    // SILENT-COMPLETION GUARD (gap-silent-completion-path-writes-no-gate-event): a bare
+    // status:"done" write produces ZERO `complete` GateEvents — the 2026-09-30 defect that stalled
+    // every code delta's fan-in for a day. Core now refuses that shape and points at the two
+    // sanctioned routes (lifecycle_complete / the completeReason channel). Negative control: the
+    // refusal must be isError:true AND leave the task untouched.
+    const refusedResult = await core.callTool({
+      name: "task_write",
+      arguments: { id: "MCP-A1", status: "done", provider: "native" },
+    });
+    assert(
+      refusedResult.isError === true,
+      "task_write via `quay mcp` with status:'done' and NO completeReason is refused (isError:true)"
+    );
+    assert(
+      /complete\b/.test(refusedResult.content?.[0]?.text ?? "") && /completeReason/.test(refusedResult.content?.[0]?.text ?? ""),
+      `the refusal names the completion channel (got: ${refusedResult.content?.[0]?.text ?? ""})`
+    );
+    const afterRefusal = await core.callTool({ name: "task_get", arguments: { id: "MCP-A1", provider: "native" } });
+    assert(
+      afterRefusal.structuredContent.task.status === "ready",
+      "the refused done-write left MCP-A1 at 'ready' (refusal is not a silent write)"
+    );
+
+    // The sanctioned out-of-band channel: same write, but it must say WHY. It writes the status AND
+    // the `complete` GateEvent itself, so the landing is covered by construction.
+    const gateLog = path.join(workspaceRoot, ".quay", "gate-events.jsonl");
+    const before = fs.existsSync(gateLog) ? fs.readFileSync(gateLog, "utf8") : "";
     const okResult = await core.callTool({
       name: "task_write",
-      arguments: { id: "MCP-A1", status: "done", expectedStatus: "ready", provider: "native" },
+      arguments: { id: "MCP-A1", status: "done", expectedStatus: "ready", completeReason: "QN-043 CAS regression: completion channel", provider: "native" },
     });
     assert(
       okResult.structuredContent?.task?.status === "done",
       "task_write via `quay mcp` with a matching expectedStatus (ready) succeeds and persists the new status (done)"
+    );
+    const appended = (fs.existsSync(gateLog) ? fs.readFileSync(gateLog, "utf8") : "").slice(before.length);
+    assert(
+      /"gate":\s*"complete"/.test(appended) && /"verdict":\s*"pass"/.test(appended) && /QN-043 CAS regression/.test(appended),
+      `the completion channel wrote a complete/pass GateEvent carrying the reason (appended: ${appended})`
     );
 
     // Now MCP-A1 is "done". Attempt a CAS write premised on a stale

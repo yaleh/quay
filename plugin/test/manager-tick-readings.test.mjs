@@ -19,6 +19,7 @@ import {
   latestTickLog,
   latestTickLogReading,
   goalReading,
+  nonBlockCoverageLines,
   render,
   renderSelected,
 } from "../scripts/manager-tick-readings.ts";
@@ -241,4 +242,48 @@ test("manager-tick-readings: registered behind quay-session and dispatched with 
   assert.equal(record[0].command, process.execPath);
   assert.ok(record[0].argv[2].endsWith("manager-tick-readings.ts"), record[0].argv.join(" "));
   assert.deepEqual(record[0].argv.slice(3), ["--x"]);
+});
+
+// ── 读侧消费：--no-block 覆盖率台账 (gap-coverage-nonblock-ledger-has-no-consumer) ──────────────────
+// 本文件是该台账的**唯一**消费面（此前零读者）。三条断言各自能取假，且三态两两不同形（硬规则 3b）。
+
+test("manager-tick-readings: nonBlockCoverageLines 报出未处置条目（台账的消费者落地）", (t) => {
+  const dir = tmpdir(t);
+  write(dir, ".quay/gate-events.jsonl", JSON.stringify({ item_id: "t-other", gate: "complete", verdict: "pass", timestamp: "2026-09-30T09:00:00.000Z" }) + "\n");
+  write(dir, ".quay/gate-event-coverage-nonblock-ledger.jsonl",
+    JSON.stringify({ day: "2026-09-30", task: "t-open", sha: "abc", coverage: 0.9, threshold: 95, at: "2026-09-30T12:00:00.000Z" }) + "\n");
+  const lines = nonBlockCoverageLines(dir);
+  assert.equal(lines[0], "gate_event_coverage_nonblock.state UNRESOLVED", lines.join(";"));
+  assert.match(lines[1], /^gate_event_coverage_nonblock\.unresolved 1 /, lines.join(";"));
+  assert.match(lines[2], /2026-09-30\|t-open/, "清单必须点名 day|task（可机械去重/立案）");
+});
+
+test("manager-tick-readings: 条目被处置（同任务有 ts ≥ 记账时刻的 complete 事件）⇒ 不再报出", (t) => {
+  const dir = tmpdir(t);
+  write(dir, ".quay/gate-event-coverage-nonblock-ledger.jsonl",
+    JSON.stringify({ day: "2026-09-30", task: "t-open", sha: "abc", coverage: 0.9, threshold: 95, at: "2026-09-30T12:00:00.000Z" }) + "\n");
+  write(dir, ".quay/gate-events.jsonl", JSON.stringify({ item_id: "t-open", gate: "complete", verdict: "pass", timestamp: "2026-09-30T13:00:00.000Z" }) + "\n");
+  const lines = nonBlockCoverageLines(dir);
+  assert.equal(lines[0], "gate_event_coverage_nonblock.state ok", lines.join(";"));
+  assert.equal(lines[2], "gate_event_coverage_nonblock.detail none");
+});
+
+test("manager-tick-readings 负控制：台账缺席时报 not_evaluated + `unresolved -`，⛔ 绝不印 0（硬规则 3b）", (t) => {
+  const dir = tmpdir(t); // 无台账
+  const lines = nonBlockCoverageLines(dir);
+  assert.equal(lines[0], "gate_event_coverage_nonblock.state not_evaluated", lines.join(";"));
+  assert.equal(lines[1], "gate_event_coverage_nonblock.unresolved -", "「没评估」与「零未处置」不得同形");
+  // 对照：有台账且零未处置时第一行是 ok —— 两态确实不同形（若上面写成 0，这条对照就失去意义）
+  write(dir, ".quay/gate-events.jsonl", JSON.stringify({ item_id: "t-x", gate: "complete", verdict: "pass", timestamp: "2026-09-30T09:00:00.000Z" }) + "\n");
+  write(dir, ".quay/gate-event-coverage-nonblock-ledger.jsonl",
+    JSON.stringify({ day: "2026-09-30", task: "t-x", sha: "abc", coverage: 0.9, threshold: 95, at: "2026-09-30T08:00:00.000Z" }) + "\n");
+  assert.equal(nonBlockCoverageLines(dir)[0], "gate_event_coverage_nonblock.state ok");
+});
+
+test("manager-tick-readings: render 把台账读数并入固定标签结构（每轮都报到处置面）", (t) => {
+  const dir = tmpdir(t);
+  const out = render(parseProjects({ MTR_PROJECTS: "quay=" + dir }), { repoRoot: dir });
+  assert.match(out, /^gate_event_coverage_nonblock\.state /m, out);
+  assert.match(out, /^gate_event_coverage_nonblock\.unresolved /m, out);
+  assert.match(out, /^gate_event_coverage_nonblock\.detail /m, out);
 });
