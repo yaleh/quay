@@ -1,7 +1,7 @@
 ---
 id: AC-318
 title: 第三方 delta 分类不依赖 quay 检查注册表——项目不再提交注册表副本，且落地后分类失败 = 0
-status: draft
+status: active
 kind: criterion
 goal: GOAL-027
 criterion: >-
@@ -73,6 +73,17 @@ origin: 立条依据：2026-09-23 对第三方项目
   inner，142 条任务）的驱动过程复盘。人 2026-09-23 裁定：「本仓库形态靠文件是否存在来判断」立为 goal，第 1/2/6 项作为其实例
   task，其余缺陷立独立 task（「按你的意见执行」）。 对应 GOAL-027 范围③；复盘第 2 项的遗留部分（上游 caeca6f9c 只修了
   ff-merge 证书闸，fan-in 第 4 步仍在 worktree 里找注册表）。
+activatedAt: 2026-10-01T18:07:03.567Z
+statusLog:
+  - at: 2026-10-01T18:07:03.567Z
+    from: draft
+    to: active
+    actor: goal-driver
+    reason: "triage: activate"
+fidelity:
+  verdict: faithful
+  reason: "fidelity judge: faithful"
+  at: 2026-10-01T18:07:03.567Z
 ---
 **判据（能取假）**：①第三方项目 git 里不再跟踪 `plugin/scripts/runner-static-gate.ts`（证明不是靠模仿 quay 形态过关）；②`gap-fan-in-delta-classify-declared-doc-surfaces` 落地 develop 之后，第三方 `.quay/fan-in-*.log` 中 `step:"delta"` 的记录至少 1 条，且 reason 含 `classify failed` 的为 0 条。
 
