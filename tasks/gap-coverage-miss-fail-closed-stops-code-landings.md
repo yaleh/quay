@@ -2,7 +2,7 @@
 id: gap-coverage-miss-fail-closed-stops-code-landings
 title: 一条历史覆盖缺口的读数被接成 fail-closed 硬闸——单次漏记的代价不是一条红色读数，而是全部 code delta
   落地停摆一整天（2026-10-01 实测）
-status: ready
+status: done
 labels:
   - gap
   - defect
