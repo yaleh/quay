@@ -2,7 +2,7 @@
 id: AC-314
 title: shell 层收敛 5.1 残余：quay-init.sh 不再内嵌 python3（8 个 heredoc 收进原生
   init.ts；自举不可替代者须如实标注；由 sh-census-check 读出）
-status: active
+status: achieved
 kind: criterion
 goal: GOAL-026
 criterion: |-
@@ -22,6 +22,11 @@ statusLog:
     to: active
     actor: goal-driver
     reason: "triage: activate"
+  - at: 2026-10-01T18:08:50.035Z
+    from: active
+    to: achieved
+    actor: goal-driver
+    reason: "I2: criterion pass"
 fidelity:
   verdict: faithful
   reason: "fidelity judge: faithful"
