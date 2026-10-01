@@ -654,3 +654,85 @@ test("AC4（判词不得再说假话）— 已归因的静态相位红 ⇒ 判�
   assert.doesNotMatch(d.reason, /infra\/contract suspected/, "⛔ 已归因时不得再报「基建/契约疑似」");
   assert.doesNotMatch(d.reason, /not an implementable defect/, "⛔ 已归因时不得再断言「非可修缺陷」（真因就在日志里）");
 });
+
+// ════════════════════════════════════════════════════════════════════════════════════════════════════
+// gap-park-reason-mislabels-ac-precheck-as-suite-red — AC 未全勾短路被下游误判为「suite 红归因不出」
+//
+// 缺陷：AC 未全勾短路（worker exit 0 但【未 spawn】机械 fan-in）产出一条【没有 mechanical_fan_in】的
+// outcome ⇒ 旧实现让它与「fan-in 跑过但归因不出」同形（都落 insufficient-data-fallback）⇒
+// decideExitedNotLandedAction 把它当「suite 红但归因不出」，已有 1 条同类 prior 即 stop-terminal ⇒
+// 停派注记写「suite 红归因不出任何失败测试文件」，而真因是 AC 未勾选、根本没有 suite 跑过（硬规则 3b）。
+//
+// 本段测【判定与动作接线】；真实第三方项目载体上的读数见任务 AC7（⛔ fixture 不算测量，硬规则 4 推论三）。
+// ════════════════════════════════════════════════════════════════════════════════════════════════════
+
+/** 一条 AC 未全勾短路 outcome：无 mechanical_fan_in + 结构化标记 short_circuit + failure_reason 含真因。 */
+function acShortCircuitOutcome(ts, reason = "AC 未全勾（checked 2/7，剩余未勾 5）——续做只需验证并勾选 AC") {
+  return { ts, final_state: "exited-not-landed", failure_reason: reason, short_circuit: "ac-not-checked" };
+}
+
+/** 追加一条 AC 未全勾短路 outcome 到生产载体（driver 的历史来源）。 */
+function appendAcShortCircuitOutcome(root, taskId, ts) {
+  fs.mkdirSync(path.join(root, ".quay"), { recursive: true });
+  fs.appendFileSync(
+    path.join(root, WORKER_OUTCOME_REL),
+    JSON.stringify({ ...acShortCircuitOutcome(ts), task: taskId, run_id: `r-${ts}`, session_id: "s" }) + "\n",
+    "utf8",
+  );
+}
+
+test("AC1 — AC 未全勾短路（无 mechanical_fan_in + 已有 1 条同类 prior）⇒ verdict 独立，动作 count-and-retry（⛔ 不进 stop-terminal）", (t) => {
+  const root = makeRoot("rcl-acsc");
+  t.after(() => rmSafe(root));
+  writeTaskWithTouches(root, "gap-a", ["plugin/scripts/worker-driver.ts"]);
+  // 上一轮【同为 AC 未全勾短路】（真实载体）。旧实现下 `unattributablePriorAttempts` 会把它算成一条
+  // 「归因不出」的 prior ⇒ 第二次即 stop-terminal；本任务要求新分支走 count-and-retry。
+  appendAcShortCircuitOutcome(root, "gap-a", T0);
+
+  const outcome = acShortCircuitOutcome(T1);
+  const j = judgeRetryExemption(root, "gap-a", outcome, { nowMs: NOW });
+  assert.notEqual(j.verdict, "insufficient-data-fallback", "AC 短路不得落 insufficient-data-fallback（⛔ 与「读不懂/没跑过 suite」同形）");
+  assert.equal(j.verdict, "ac-not-checked-shortcircuit", "AC 短路是独立取值（硬规则 3b）");
+  assert.match(j.reason, /AC 未全勾/, "判词写明真因是 AC 未勾选");
+  assert.match(j.reason, /没有 suite 跑过/, "判词点名「没有 suite 跑过」（与真因一致）");
+
+  const d = decideExitedNotLandedAction(root, "gap-a", outcome, j, { nowMs: NOW });
+  assert.equal(d.kind, "count-and-retry", "已有 1 条同类 prior 仍走 count-and-retry（⛔ 不进 stop-terminal）");
+  assert.notEqual(d.kind, "stop-terminal", "AC 短路的动作不得与「suite 红归因不出」共用 stop-terminal");
+  assert.doesNotMatch(d.reason, /suite red/i, "⛔ 没有 suite 跑过，判词不得出现「suite red」");
+});
+
+test("AC1（旧记录·只有文本）— 无 short_circuit 字段、failure_reason 含「AC 未全勾」⇒ 仍独立分类（历史记录可判）", (t) => {
+  const root = makeRoot("rcl-acsc-legacy");
+  t.after(() => rmSafe(root));
+  writeTaskWithTouches(root, "gap-a", ["plugin/scripts/worker-driver.ts"]);
+  // 历史记录没有结构化字段——只有文本。判据两路之一（reason 含「AC 未全勾」）必须覆盖它。
+  const outcome = { ts: T0, final_state: "exited-not-landed", failure_reason: "AC 未全勾（checked 0/6）——续做只需验证并勾选 AC" };
+  const j = judgeRetryExemption(root, "gap-a", outcome, { nowMs: NOW });
+  assert.equal(j.verdict, "ac-not-checked-shortcircuit", "只有文本的历史记录也必须被正确分类（⛔ 不依赖新字段）");
+});
+
+test("AC1（双向控制）— 无 mechanical_fan_in 且【非】AC 短路 ⇒ 仍 insufficient-data-fallback，但 stop 判词不含「suite red」", (t) => {
+  const root = makeRoot("rcl-acsc-neg");
+  t.after(() => rmSafe(root));
+  writeTaskWithTouches(root, "gap-a", ["plugin/scripts/worker-driver.ts"]);
+  // 一条既无 mechanical_fan_in、也与 AC 短路无关的失败（例如 worker exit 0 但状态未 done）。
+  const noFanIn = (ts) => ({ ts, final_state: "exited-not-landed", failure_reason: "task status=ready (not done)" });
+  fs.mkdirSync(path.join(root, ".quay"), { recursive: true });
+  fs.appendFileSync(
+    path.join(root, WORKER_OUTCOME_REL),
+    JSON.stringify({ ...noFanIn(T0), task: "gap-a", run_id: `r-${T0}`, session_id: "s" }) + "\n",
+    "utf8",
+  );
+
+  const outcome = noFanIn(T1);
+  const j = judgeRetryExemption(root, "gap-a", outcome, { nowMs: NOW });
+  assert.equal(j.verdict, "insufficient-data-fallback", "非 AC 短路、无 fan-in ⇒ 保持「无法评估」的独立取值");
+  assert.notEqual(j.verdict, "ac-not-checked-shortcircuit", "⛔ 不得把无关失败当 AC 短路");
+
+  const d = decideExitedNotLandedAction(root, "gap-a", outcome, j, { nowMs: NOW });
+  assert.equal(d.kind, "stop-terminal", "已有 1 条 prior ⇒ 仍按既有「无法归因」路径停（行为不变）");
+  assert.doesNotMatch(d.reason, /suite red/i, "point 2：没有 suite 跑过 ⇒ 判词不得出现「suite 红」");
+  assert.match(d.reason, /no suite ran/, "判词如实说「没有 suite 跑过」（⛔ 不是把没发生的相位写成成因）");
+});
+

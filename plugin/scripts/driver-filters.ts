@@ -863,6 +863,28 @@ export function lastExitedNotLandedReason(root: string, taskId: string): string 
 // （⛔ 不批量改任务文件，硬规则 11b）。注记里的事实行（阻碍原因 / 失败步判词 / run_id / session_id /
 // suite 日志 / fan-in 日志）全部保留。完整被删符号清单见任务体。
 
+// gap-park-reason-mislabels-ac-precheck-as-suite-red 点 3：`## Needs-Human` 小标题与提交消息过去【恒写】
+// 「重试上限」——实测（claudecodeui 2026-09-24→10-01）73 段小标题 + 73 条提交消息全写「重试上限」，而
+// 走 RETRY-CAP(3) 路径的停派【0 条】；真因（AC 未全勾短路被误判为「suite 红归因不出」而两轮停派）恒被
+// 写错。⇒ 由调用方传入【停派种类】，小标题/提交消息按种类选择（⛔ 不再写死一个词）。
+/** needs-human 停派种类：`retry-cap` = 达重试上限而翻转；`stop-terminal` = 失败无法归因而停（与重试上限
+ *  无关）；`other` = 其它机械停派。 */
+export type NeedsHumanKind = "retry-cap" | "stop-terminal" | "other";
+
+/** `## Needs-Human` 段小标题（按停派种类选择；⛔ 不写死）。 */
+export function needsHumanHeading(kind: NeedsHumanKind): string {
+  if (kind === "retry-cap") return "连续修满重试上限仍不合格（标 needs-human）";
+  if (kind === "stop-terminal") return "停派终止（失败无法归因，⛔ 不再重派）";
+  return "机械停派（标 needs-human）";
+}
+
+/** needs-human 提交消息里的【停派】标签（按种类选择；⛔ 不写死「重试上限」）。 */
+function needsHumanCommitLabel(kind: NeedsHumanKind): string {
+  if (kind === "retry-cap") return "重试上限机械翻转";
+  if (kind === "stop-terminal") return "归因不出机械停派";
+  return "机械停派";
+}
+
 /** 把修满/派满上限仍不合格的任务标 needs-human（status todo/ready → needs-human）+ 追加一条
  *  `## Needs-Human` 审计记录（grep-able 原因，⛔ 静默翻转）。worker 派发的是 ready 任务、promotion
  *  修的是 todo 任务 ⇒ 两者都可翻 needs-human；其它状态（needs-human/done/superseded…）拒写。
@@ -874,7 +896,7 @@ export function lastExitedNotLandedReason(root: string, taskId: string): string 
  *  ⛔ 不再写成因类 frontmatter 字段、⛔ 不再返回 cause（gap-retire-needs-human-cause-enumeration：
  *  三态成因枚举已整套退役——零非测试读者、零 blocked-outside-task 生产样本；人的裁定「needs-human
  *  本来就不应该有『可机械再入队』的路径」。⛔ 不引入任何替代分类）。 */
-export function markNeedsHuman(root: string, id: string, reason: string): { id: string; ok: boolean; reason: string; committed: boolean } {
+export function markNeedsHuman(root: string, id: string, reason: string, kind: NeedsHumanKind = "retry-cap"): { id: string; ok: boolean; reason: string; committed: boolean } {
   const file = path.join(root, "tasks", `${id}.md`);
   if (!fs.existsSync(file)) return { id, ok: false, reason: "missing", committed: false };
   const raw = fs.readFileSync(file, "utf8");
@@ -896,7 +918,7 @@ export function markNeedsHuman(root: string, id: string, reason: string): { id: 
   const lastAttempt = attempts.length > 0 ? attempts[attempts.length - 1] : null;
   const stepVerdict = lastAttempt ? lastAttempt.reason : null;
   const record =
-    `\n## Needs-Human\n\n**执行 ${new Date().toISOString()} — 连续修满重试上限仍不合格（标 needs-human）**\n\n` +
+    `\n## Needs-Human\n\n**执行 ${new Date().toISOString()} — ${needsHumanHeading(kind)}**\n\n` +
     `- 阻碍原因：${reason}\n` +
     (stepVerdict ? `- 失败步/判词：${stepVerdict}\n` : "") +
     (lastAttempt?.runId ? `- run_id：${lastAttempt.runId}\n` : "") +
@@ -907,10 +929,11 @@ export function markNeedsHuman(root: string, id: string, reason: string): { id: 
   const rel = path.join("tasks", `${id}.md`);
   // FIRST-REGISTRATION JUDGMENT (gap-promotion-commit-message-misleading-on-first-track)：目标文件此前
   // 从未提交（本次提交是其 git 诞生提交，谈不上 todo→needs-human「翻转」）⇒ 如实标「首次登记」，不得
-  // 沿用暗示翻转发生的「重试上限机械翻转」措辞。已有提交历史 ⇒ 真实翻转，沿用原有文案。
+  // 沿用暗示翻转发生的旧措辞。已有提交历史 ⇒ 真实翻转，按【停派种类】选措辞
+  // （gap-park-reason-mislabels-ac-precheck-as-suite-red 点 3：⛔ 不再恒写「重试上限」）。
   const message = hasPriorCommit(root, rel)
-    ? `tasks: ${id} ${from}→needs-human（重试上限机械翻转）`
-    : `tasks: ${id} 首次登记（status=needs-human，重试上限机械落盘）`;
+    ? `tasks: ${id} ${from}→needs-human（${needsHumanCommitLabel(kind)}）`
+    : `tasks: ${id} 首次登记（status=needs-human，${kind === "retry-cap" ? "重试上限机械落盘" : "机械停派落盘"}）`;
   const committed = commitTaskFile(root, rel, message);
   syncDocDevelopBidirectional(root); // 分歧检测双向同步（⛔ 不依赖 committed 翻转）
   return { id, ok: true, reason, committed };
