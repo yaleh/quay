@@ -957,7 +957,23 @@ run_static_checks() {
   #   --days 1 —— AC4 的字面读法是**当日**覆盖率。窗口 3 天会把某一天的漏记变成持续 3 天的红、挡住
   #     无关任务的 fan-in（本仓已记过这类「成本落在无关任务头上」的缺陷）；1 天把影响面限制在次日。
   #   无载体 / 零落地 ⇒ exit 3（run_checker 认第三态，不 fail-closed 不 abort 套件）。
-  run_checker "gate-event-coverage-check" node --no-warnings --experimental-strip-types "${repo_root}/plugin/scripts/gate-event-coverage-check.ts" --root "${main_root}" --days 1 --gate
+  #   --no-block (gap-coverage-miss-fail-closed-stops-code-landings): 本检查是 @static-tier **change**
+  #     （上面那行），所以它跑在**每一条** code delta 的 fan-in 上；而它判的是一条**历史**事实（前一天的
+  #     落地漏写 complete 事件），与**当轮** delta 结构上无关。默认模式下这一条 RED ⇒ exit 1 ⇒
+  #     run_checker fail-closed ⇒ **当天全部 code 落地在静态闸中止、套件根本不跑**（2026-10-01 实测：
+  #     `.quay/full-suite-state.json` reason=static-check；日志尾 `# tests 0 · # fail 46 · # suite red
+  #     static-check`）。上面 `--days 1` 那一段已验证「成本不该落在无关任务头上」——但它只施于【窗口
+  #     宽度】这一维；这次把同一条原则施到【fail-closed 与否】这一维：**取值与阻断解耦**。
+  #     RED 照常打印（判定行 + UNCOVERED 明细，还在套件日志里）并记入 grow-only ledger
+  #     `<main_root>/.quay/gate-event-coverage-nonblock-ledger.jsonl`（取值轴的持久载体，⛔ 不是「改成
+  #     不报」），只是不再 exit 1。**默认模式保持 fail-closed**（mutation case 与按需诊断走的正是默认
+  #     模式，必须仍能报红）。「闸坏了」（载体读不到 ⇒ 仍 exit 3 ⇒ run_checker 记 not-evaluated）与
+  #     「昨天漏记了一条」（RED：报出 + 记账，不挡当轮）**可区分**（硬规则 3b）。
+  #     ⚠️ 代价已知并接受：--no-block 下 run_checker 按 exit 0 把 cost 行记成 `verdict:"pass"`——
+  #     取值轴因此**不**靠 cost 行，而靠上面那行打印 + ledger（这正是「解耦」的字面含义）。
+  #     ⛔ 同形态先例（本文件内）：suite-duration-exceed-check / instrument-decay-check 的 --no-block——
+  #     两者都因「一个 PAST 读数不该把 CURRENT 套件判红」而用同一手法。
+  run_checker "gate-event-coverage-check" node --no-warnings --experimental-strip-types "${repo_root}/plugin/scripts/gate-event-coverage-check.ts" --root "${main_root}" --days 1 --gate --no-block
   # ── RETIRED 2026-09-16: release-test-client-close-check ─────────────────────────────────────────
   # Its object was release.yml's `release` job and the test glob that job's `Run tests` step ran —
   # and that job was one of the six removed by the 2026-09-16 human ruling cancelling the npm-pack /

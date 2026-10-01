@@ -30,17 +30,34 @@
 //   run_checker 认 exit 3 为第三态（不 fail-closed、不 abort 套件），消费方工作区（无 .quay/
 //   gate-events.jsonl、无 develop）必须能把「这里没评估」与「这里评估过且合格」区分开。
 //
+// --no-block (gap-coverage-miss-fail-closed-stops-code-landings): **取值与阻断解耦**。
+//   本判据的对象是一条**历史**事实（前一天的落地漏写 complete 事件），与**当轮**任何 delta 无关。
+//   默认（无 --no-block）下 RED ⇒ exit 1，而 run_checker 对 exit 1 fail-closed ⇒ **当天每一条 code
+//   delta 的 fan-in 都在静态闸中止、套件根本不跑**（2026-10-01 实测：`.quay/full-suite-state.json`
+//   `reason=static-check` / 日志尾 `# tests 0 · # fail 46 · # suite red static-check`）。这正是本仓
+//   已记过的「成本落在无关任务头上」缺陷——此前只把窗口从 3 天收到 1 天缩小了影响面，**没有动
+//   fail-closed 这一维**。
+//   --no-block 把两个轴分开：**取值轴**仍是 pass / red / not-evaluated（打印 + 记入 grow-only ledger
+//   `.quay/gate-event-coverage-nonblock-ledger.jsonl`，可审计、不消失）；**阻断轴**关掉（RED 不再
+//   exit 1）。⇒ 「闸坏了」（载体读不到 ⇒ 仍 exit 3，run_checker 记 not-evaluated）与「昨天漏记了一条」
+//   （RED：报出 + 记账，但不挡当轮）**可区分**（硬规则 3b）。
+//   ⛔ 不是「改成不报」：RED 的判定行与 UNCOVERED 明细照常打印，且落 ledger；默认模式**保持**
+//   fail-closed（mutation case 与按需诊断走的正是默认模式——它必须仍能报红）。同形态先例：
+//   task-contract-check / suite-duration-exceed-check / instrument-decay-check 的 --no-block 接线。
+//
 // Exit codes: 0 = PASS（窗口内每个非豁免日覆盖率 ≥ 阈值）;
-//             1 = RED（至少一个非豁免日覆盖率 < 阈值）;
+//             1 = RED（至少一个非豁免日覆盖率 < 阈值）—— 仅默认模式;
 //             2 = usage/environment error;
-//             3 = NOT-EVALUATED（载体/git/落地读数不可得）.
+//             3 = NOT-EVALUATED（载体/git/落地读数不可得）—— --no-block 下**照旧** exit 3;
+//             0 = RED 且 --no-block（取值 RED、阻断关闭；已打印 + 已记账）.
 //
 // Usage:
 //   node --experimental-strip-types gate-event-coverage-check.ts [--root <dir>] [--merge-target <ref>]
-//     [--days <N> | --all | --since <ISO> --until <ISO>] [--threshold <pct>] [--json] [--gate]
+//     [--days <N> | --all | --since <ISO> --until <ISO>] [--threshold <pct>] [--json] [--gate] [--no-block]
 //   --days N    最近 N 个**完整**日（UTC，不含今天；缺省 3）——静态门的常规窗口
 //   --all       自载体最早一条 complete 事件起，逐日评估（取证/复核用；在修复前数据上必须报红）
 //   --gate      静态门接线模式：只输出一行判定 + 失败明细（缺省非 gate 打印完整逐日表）
+//   --no-block  RED 只报出 + 记账，不 exit 1（默认模式仍 fail-closed）
 import fs from "node:fs";
 import path from "node:path";
 import { execFileSync } from "node:child_process";
@@ -303,6 +320,74 @@ export function computeCoverage(opts: {
   return { windowFrom: from, windowTo: to, threshold, bootstrapCutoff, days, worstCoverage, verdict, reason };
 }
 
+// ── --no-block grow-only ledger ─────────────────────────────────────────────────────────────────────
+// (gap-coverage-miss-fail-closed-stops-code-landings, 对齐 task-contract-check 的 --no-block ledger.)
+// 取值轴与阻断轴解耦后，RED 不再 exit 1 ⇒ 若只靠「套件日志里那行」承载取值，取值就退回**可滚动
+// 丢失的屏显**（硬规则 9：可见性≠执行）。这份 ledger 是取值轴的**持久载体**：每条未覆盖落地一行，
+// 纯追加、按 `day|task` 去重（同一缺口反复报出不会把它刷爆），best-effort（ledger I/O 失败不得把
+// 一个**故意不阻断**的检查变红——同 task-contract-check:596 的纪律）。
+export const NO_BLOCK_LEDGER_REL = ".quay/gate-event-coverage-nonblock-ledger.jsonl";
+
+export interface NonBlockLedgerEntry {
+  day: string;
+  task: string;
+  sha: string;
+  coverage: number;
+  threshold: number;
+  at: string;
+}
+
+/**
+ * Append this run's RED reading (every uncovered landing) to the grow-only ledger, deduped by
+ * `day|task`. Pure append of NEW keys only (a re-run of the same gap records nothing new).
+ * Returns the ledger path + the number of NEW entries written.
+ */
+export function recordNonBlockReport(
+  root: string,
+  report: CoverageReport,
+  landings: Landing[],
+  nowIso: string,
+): { path: string; recorded: number } {
+  const p = path.join(root, NO_BLOCK_LEDGER_REL);
+  const shaByKey = new Map<string, string>();
+  for (const l of landings) shaByKey.set(`${l.day}|${l.task}`, l.sha);
+  const seen = new Set<string>();
+  try {
+    for (const line of fs.readFileSync(p, "utf8").split("\n")) {
+      if (!line.trim()) continue;
+      try {
+        const e = JSON.parse(line) as { day?: unknown; task?: unknown };
+        if (typeof e.day === "string" && typeof e.task === "string") seen.add(`${e.day}|${e.task}`);
+      } catch {
+        continue; // 坏行：跳过单条，不让一行噪声把整份 ledger 判成不可读
+      }
+    }
+  } catch {
+    /* 载体缺席 ⇒ 尚无已记条目（⛔ 不是「读不懂」——新 ledger 首次运行时本就为空） */
+  }
+  const fresh: NonBlockLedgerEntry[] = [];
+  for (const d of report.days) {
+    for (const task of d.uncovered) {
+      const key = `${d.day}|${task}`;
+      if (seen.has(key)) continue;
+      seen.add(key);
+      fresh.push({
+        day: d.day,
+        task,
+        sha: shaByKey.get(key) ?? "",
+        coverage: d.coverage,
+        threshold: report.threshold,
+        at: nowIso,
+      });
+    }
+  }
+  if (fresh.length) {
+    fs.mkdirSync(path.dirname(p), { recursive: true });
+    fs.appendFileSync(p, `${fresh.map((e) => JSON.stringify(e)).join("\n")}\n`);
+  }
+  return { path: p, recorded: fresh.length };
+}
+
 function usage(): void {
   console.log(
     "gate-event-coverage-check — 每日「落地 ⇒ complete GateEvent」覆盖率判据\n" +
@@ -313,7 +398,9 @@ function usage(): void {
       "  --threshold <pct>       覆盖率阈值（缺省 95）\n" +
       "  --json                  机器可读输出\n" +
       "  --gate                  静态门模式：只打印判定行 + 失败/例外明细\n" +
-      "exit 0=PASS · 1=RED · 2=usage · 3=NOT-EVALUATED（载体/git/落地读数不可得）",
+      "  --no-block              RED 只报出 + 记账（grow-only ledger），不 exit 1；默认仍 fail-closed\n" +
+      "exit 0=PASS · 1=RED（仅默认模式）· 2=usage · 3=NOT-EVALUATED（载体/git/落地读数不可得）\n" +
+      "  --no-block 下 RED ⇒ exit 0（取值 RED、阻断关闭；判定行照打 + 落 ledger）",
   );
 }
 
@@ -325,6 +412,8 @@ async function main(): Promise<number> {
   }
   const json = args.includes("--json");
   const gate = args.includes("--gate");
+  // --no-block: 取值轴保留（RED 照报 + 记账），阻断轴关闭（RED 不 exit 1）。默认 fail-closed 不变。
+  const noBlock = args.includes("--no-block");
   const root = path.resolve(flagValue(args, "--root") ?? process.cwd());
   const mergeTarget = flagValue(args, "--merge-target") ?? "develop";
   const daysRaw = flagValue(args, "--days");
@@ -365,8 +454,21 @@ async function main(): Promise<number> {
 
   const report = computeCoverage({ landings, events, threshold, from, to });
 
+  // --no-block 且 RED ⇒ 先把取值落 ledger（持久载体），再决定阻断。ledger 写入是 best-effort：
+  // I/O 失败只告警，⛔ 绝不把一个有意不阻断的检查变成红（同 task-contract-check finish()）。
+  let ledger: { path: string; recorded: number } | null = null;
+  if (noBlock && report.verdict === "red") {
+    try {
+      ledger = recordNonBlockReport(root, report, landings, new Date().toISOString());
+    } catch (e) {
+      console.error(`gate-event-coverage-check: ledger write failed (non-blocking, ignored): ${(e as Error)?.message ?? e}`);
+    }
+  }
+  const blocked = report.verdict === "red" && !noBlock;
+
   if (json) {
-    console.log(JSON.stringify(report, null, 2));
+    // 取值轴（verdict/days/…）与阻断轴（noBlock/blocked）分列，消费方可各自读；ledger 是取值载体。
+    console.log(JSON.stringify({ ...report, noBlock, blocked, ledger }, null, 2));
   } else if (!gate) {
     console.log(`gate-event-coverage-check — 窗口 ${report.windowFrom} .. ${report.windowTo}，阈值 ${threshold}%`);
     console.log(`bootstrap cutoff（载体中第一条 quay-driver complete 事件）: ${report.bootstrapCutoff ?? "（无 ⇒ 无豁免）"}`);
@@ -380,6 +482,7 @@ async function main(): Promise<number> {
       if (d.exempt.length) console.log(`    EXEMPT(bootstrap): ${d.exempt.join(", ")}`);
     }
     console.log(`${report.verdict.toUpperCase()}: ${report.reason}`);
+    if (noBlock && report.verdict === "red") printNonBlockLine(ledger);
   } else {
     console.log(`${report.verdict.toUpperCase()}: ${report.reason}`);
     for (const d of report.days) {
@@ -388,9 +491,18 @@ async function main(): Promise<number> {
     for (const d of report.days) {
       if (d.exempt.length) console.log(`  EXEMPT ${d.day} (bootstrap, < ${report.bootstrapCutoff}): ${d.exempt.join(", ")}`);
     }
+    if (noBlock && report.verdict === "red") printNonBlockLine(ledger);
   }
 
-  return report.verdict === "red" ? 1 : report.verdict === "not-evaluated" ? 3 : 0;
+  if (report.verdict === "red") return blocked ? 1 : 0;
+  return report.verdict === "not-evaluated" ? 3 : 0;
+}
+
+/** --no-block 的显式、可搜索标记行：取值 RED 已报出 + 已记账，但**不**阻断当轮（硬规则 3b：
+ *  与「闸坏了」exit 3 的 NOT-EVALUATED 不同形，也与 PASS 的静默不同形）。 */
+function printNonBlockLine(ledger: { path: string; recorded: number } | null): void {
+  const rec = ledger ? `recorded ${ledger.recorded} new entry(s) → ${ledger.path}` : "ledger unavailable (write failed — see stderr)";
+  console.log(`NON-BLOCKING (--no-block): verdict RED is reported + ${rec}; blocking is OFF for this round. The RED is a PREVIOUS-day landing-coverage fact, unrelated to the current delta; the DEFAULT mode still exits 1.`);
 }
 
 // expectedBase 是**必填**的（见 gate-script-base.ts —— 裸 isDirectEntry(import.meta) 在 bundled
