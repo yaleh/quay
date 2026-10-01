@@ -156,7 +156,6 @@
 //   2  usage / environment error (missing/invalid field, unresolvable shared checkout) — nothing written
 
 import fs from "node:fs";
-import os from "node:os";
 import path from "node:path";
 import { execFileSync } from "node:child_process";
 // getArgValue now lives in gate-script-base.ts as `flagValue` (it was one of the byte-identical
@@ -171,6 +170,12 @@ import { parsePerFileLines } from "./measure-trend-check.ts";
 // runner-red-parse.ts module (its only runtime import is tmux-leak-fail-re.ts; the full-suite-runner
 // types it imports are `import type` — erased — so this writer never pulls the heavy hub at runtime).
 import { isFailureLine } from "./runner-red-parse.ts";
+// hostParallelism's single definition point — runner-concurrency.ts is the lightweight SSOT home
+// full-suite-runner.ts re-exports from (`.quay/routine-findings.jsonl` finding
+// `hostparallelism-missed-import`, routine `semantic-dedup-scan`, runId
+// semantic-dedup-scan-1790851304231): the local re-declaration here was byte-identical to
+// runner-concurrency.ts:43 ⇒ two homes for one read-host expression, free to drift on any seam change.
+import { hostParallelism } from "./runner-concurrency.ts";
 
 const COMMIT_RE = /^[0-9a-f]{40}$/i;
 
@@ -193,10 +198,14 @@ const NOT_EVALUATED_TOKEN_RE = /^[a-z][a-z0-9-]*$/;
 // contract, same as the *_phase_ms spreads at :3696-3699): `static_phase_ms` ← `run_static_checks`,
 // plus serial/lowconc/main. A missing/unreadable log → NO phase fields (never fabricated).
 //
-// Concurrency helpers below are THIN LOCAL REPLICAS of full-suite-runner's single-definition-point
-// expressions (hostParallelism :1580, concurrentSuiteSlots :1536, countHeldSuiteLocks :1638) — kept
-// local so the thin writer never imports the heavy full-suite-runner module; the expressions are
-// byte-identical so the record is 同口径.
+// Concurrency helpers: the record must carry the SAME 口径 as full-suite-runner's single-definition-point
+// expressions, but this writer must not import the heavy full-suite-runner module.
+//   hostParallelism      → IMPORTED from runner-concurrency.ts (the extracted lightweight SSOT home
+//                          full-suite-runner re-exports from) — no longer a local replica.
+//   concurrentSuiteSlots → delegates to suiteLockSlotCount() (suite-lock-slots.ts), the same delegation
+//                          runner-concurrency.concurrentSuiteSlots makes.
+//   countHeldSuiteLocks  → still a thin local replica of full-suite-runner.ts:669 (its only home is the
+//                          heavy module); byte-identical so the record stays 同口径.
 
 const PHASE_OVERHEAD_RE = /^__OVERHEAD__\s+([A-Za-z0-9_]+)_ms=(\d+)(?:\s+partial=1)?$/;
 
@@ -511,15 +520,12 @@ export function parseRedFailures(suiteLog) {
   return { staticCheck: failClosed.length > 0, failClosed, failureLines };
 }
 
-/** Host parallelism (nproc) — the same read-host expression as full-suite-runner.hostParallelism
- *  (RESOURCE_GATE_NPROC seam → os.availableParallelism() → os.cpus().length, floored at 1). */
-export function hostParallelism() {
-  const ncpuRaw = process.env.RESOURCE_GATE_NPROC ?? String(
-    typeof os.availableParallelism === "function" ? os.availableParallelism() : os.cpus().length,
-  );
-  const ncpu = Number(ncpuRaw);
-  return Number.isFinite(ncpu) && ncpu >= 1 ? ncpu : 1;
-}
+/** Host parallelism (nproc) — re-exported from runner-concurrency.ts (the SSOT home; full-suite-runner.ts
+ *  re-exports the same binding, so all three surfaces read ONE expression:
+ *  RESOURCE_GATE_NPROC seam → os.availableParallelism() → os.cpus().length, floored at 1).
+ *  Kept exported here for this module's existing consumers/tests — the body is NOT re-declared
+ *  (gap-routine-semantic-dedup-scan-hostparallelism-missed-import). */
+export { hostParallelism };
 
 /** Effective parallelism = cpu_time_s ÷ wall-seconds — the observability-holes AC4 "did the suite
  *  optimization help" KPI, same 口径 as full-suite-runner.effectiveParallelism (:1300). Returns null
