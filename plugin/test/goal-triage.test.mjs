@@ -138,6 +138,56 @@ test('AC1 对象集扩展：active GOAL 名下 draft AC 跑一轮后轮记录 fa
   }
 });
 
+// ── ⑩ 不可达的 draft：draft GOAL 及其名下 draft AC 落进轮记录 ─────────────────────────────
+
+test('AC1（能取假）：draft GOAL 名下的 draft AC 出现在 value.unreachableDrafts，且不出现在 triage', async () => {
+  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'goal-unreachable-drafts-'));
+  try {
+    fs.mkdirSync(path.join(tmp, 'goals'), { recursive: true });
+    fs.mkdirSync(path.join(tmp, 'tasks'), { recursive: true });
+    // 不可达：GOAL-026 是 draft ⇒ 它的子 AC 不在分诊对象集（分诊只收 active GOAL 名下的 draft AC）。
+    writeGoalFile(tmp, { id: 'GOAL-026', status: 'draft', kind: 'goal' });
+    writeGoalFile(tmp, { id: 'AC-912', status: 'draft', kind: 'criterion', goal: 'GOAL-026', criterion: 'true' });
+    writeGoalFile(tmp, { id: 'AC-913', status: 'draft', kind: 'criterion', goal: 'GOAL-026', criterion: 'true' });
+    // 负控制：同名的 draft AC 若挂在 active GOAL 下 ⇒ 它是分诊对象集成员，⛔ 不得进 unreachableDrafts。
+    writeGoalFile(tmp, { id: 'GOAL-009', status: 'active', kind: 'goal' });
+    writeGoalFile(tmp, { id: 'AC-900', status: 'draft', kind: 'criterion', goal: 'GOAL-009', criterion: 'true' });
+
+    const roundLog = path.join(tmp, GOAL_ROUND_REL);
+    const code = await runResidentQualityGateLoop({
+      root: tmp,
+      intervalMs: 1,
+      once: true,
+      maxRounds: null,
+      roundLogFile: roundLog,
+      runId: 't',
+      json: false,
+      routines: goalDriverRoutines(tmp, { scriptRoot: repoRoot, gapWorkerCmd: 'true', resourceGateArgv: ['true'] }),
+    });
+    assert.equal(code, 0, 'resident loop 一轮应正常退出');
+
+    const lines = fs.readFileSync(roundLog, 'utf8').trim().split('\n');
+    const rec = JSON.parse(lines[lines.length - 1]);
+    const goalFact = rec.facts.find((f) => f.name === 'goal-ring');
+    assert.ok(goalFact, '轮记录含 goal-ring fact');
+
+    const u = goalFact.value.unreachableDrafts;
+    assert.ok(u && typeof u === 'object', 'value.unreachableDrafts 存在');
+    assert.equal(u.evaluated, true, 'evaluated 显式为 true（⛔ 与「读不到」不同形）');
+    assert.deepEqual(u.goals, ['GOAL-026'], 'draft GOAL 被列出');
+    assert.deepEqual([...u.acs].sort(), ['AC-912', 'AC-913'], 'draft GOAL 名下的 draft AC 被列出');
+
+    // 负控制：active GOAL 名下的 draft AC 不在本读数里（它是分诊对象集成员，那条路径负责它）。
+    assert.ok(!u.acs.includes('AC-900'), 'active GOAL 名下的 draft AC ⛔ 不得进 unreachableDrafts');
+
+    // 同时确认它确实没有被分诊看见——这正是「不可达」的定义。
+    const triaged = (goalFact.value.triage ?? []).map((t) => t.ac);
+    assert.ok(!triaged.includes('AC-912'), 'draft GOAL 的 AC ⛔ 不进 triage（否则本条读数没有存在理由）');
+  } finally {
+    fs.rmSync(tmp, { recursive: true, force: true });
+  }
+});
+
 // ── 硬规则 3b：无 draft AC ⇒ triage 为 []，且字段仍在（与「未跑分诊」按字段存在性区分）──────
 
 test('无 draft AC ⇒ value.triage 为 []（字段仍在——「查过且零条」与「未跑分诊」不同形，硬规则 3b）', async () => {

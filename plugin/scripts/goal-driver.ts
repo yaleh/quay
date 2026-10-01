@@ -2915,6 +2915,10 @@ export interface GoalRoundReadings {
    *  {ac, decision, reason}（decision ∈ 四态；ac 唯一）。无 draft AC ⇒ 空数组——字段仍在，
    *  「查过且零条」与「未跑分诊」按字段存在性区分（硬规则 3b）。 */
   triage: Array<TriageEntry>;
+  /** ⑩ 不可达的 draft：draft GOAL 及其名下 draft AC。⛔ 本字段存在的理由：`goalCount` 只数 active
+   *  goal，`triage` 只收 active GOAL 名下的 draft AC——于是一个 draft GOAL 连同它吞掉的 N 条 AC
+   *  **在任何既有 field 里都不存在**（「被静默吞掉」与「不存在」同形，硬规则 3b）。 */
+  unreachableDrafts: UnreachableDraftsReading;
   /** ⑥b 充分性卡死信号（AC1~AC3）：本轮 insufficient 实例数 / 计时中 / 已 file 过 / 新 file 数 /
    *  被 halt·资源门·上限挡下数 / 逐条 spawn 诊断。⛔ 每轮都产出（`insufficient: 0` 是一个**测量**，
    *  不是「没跑这条」——本 pass 无条件执行，硬规则 3b）。 */
@@ -2924,6 +2928,26 @@ export interface GoalRoundReadings {
    *  ⛔ 恒非 null：没跑这条读数时它是显式的 `disabled`，⛔ 不与「采集了零条」同形（硬规则 3b）。
    *  它是 AC-265 判据**本地载体**的活性证明，也是该判据「采集停了」与「CI 真红」的分界。 */
   ciRuns: CiRunsRoundReading;
+}
+
+/** ⑩ 不可达的 draft：draft GOAL 及其名下的 draft AC（gap-goal-driver-draft-ac-invisible-yet-blocking
+ *  的读数半边）。
+ *
+ *  分诊（⑦）的对象集是【active GOAL 名下】的 draft AC，且 ⑧ 只消费 `activate` 一态；
+ *  **没有任何路径激活一个 draft GOAL 本身**。⇒ draft GOAL 的子 AC 落在分诊集合之外：它们不进
+ *  `gaps`（`computeGoalGaps` 只数 active AC）、不进 `triage`（父 GOAL 非 active）、也不进
+ *  `closeBlocks`（关闭判定只见 active GOAL）。⇒ `spawned: 0` 与「真的全达成」同形，
+ *  而实际可能是「若干条判据被一个 draft GOAL 静默吞着」。
+ *  ⛔ 纯读数：不改任何 spawn / flip / 分诊判定；只为让该形态在轮记录里可读。 */
+export interface UnreachableDraftsReading {
+  /** draft GOAL 的 id（kind=goal ∧ status=draft）。 */
+  goals: string[];
+  /** 父 GOAL ∈ `goals` 的 draft AC 的 id（kind=criterion ∧ status=draft ∧ goal 指向 draft GOAL）。 */
+  acs: string[];
+  /** 恒 true —— 本字段只在 records 读取成功后构造。⛔ `{goals:[],acs:[]}` 是「查过且无不可达
+   *  draft」，与「records 读不到」不同形：后者整轮走 list-failed 分支，`value` 根本不构造、
+   *  本字段不出现（硬规则 3b）。 */
+  evaluated: boolean;
 }
 
 export interface GoalRoundOptions {
@@ -3059,6 +3083,17 @@ export async function runGoalRound(root: string, opts: GoalRoundOptions = {}): P
   const isGoal = (r: Record<string, unknown>): boolean => String(r.id ?? "").startsWith("GOAL-");
   const isAc = (r: Record<string, unknown>): boolean => String(r.id ?? "").startsWith("AC-");
   const activeGoals = records.filter((r) => isGoal(r) && r.status === "active");
+  // ⑩ 不可达的 draft（纯读数）：draft GOAL 名下的 draft AC。分诊对象集是「active GOAL 名下的 draft
+  // AC」，故这些 AC 既不被分诊、也不被 computeGoalGaps 计数 ⇒ 不出现在任何既有 field 里。
+  const draftGoalIds = records.filter((r) => isGoal(r) && r.status === "draft").map((r) => String(r.id));
+  const draftGoalIdSet = new Set(draftGoalIds);
+  const unreachableDrafts: UnreachableDraftsReading = {
+    goals: draftGoalIds,
+    acs: records
+      .filter((r) => isAc(r) && r.status === "draft" && draftGoalIdSet.has(String(r.goal ?? "")))
+      .map((r) => String(r.id)),
+    evaluated: true,
+  };
   const activeGoalIds = activeGoalIdsOf(records);
   const criteria: GoalRoundReadings["criteria"] = [];
   const flips: GoalRoundReadings["flips"] = [];
@@ -3421,6 +3456,7 @@ export async function runGoalRound(root: string, opts: GoalRoundOptions = {}): P
     standingRecheck,
     gaps,
     triage,
+    unreachableDrafts,
     spawned: spawnPass.spawned,
     llm_invoked: spawnPass.llmInvoked,
     gap_spawns: spawnPass.outcomes,
