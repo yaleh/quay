@@ -1,7 +1,7 @@
 ---
 id: gap-done-unresolved-conflates-workable-with-world-gated
 title: done-unresolved 把「工作产物型」与「生产事件型」缺口压成一态——后者永远静默，无人立案
-status: todo
+status: ready
 labels:
   - gap
   - defect
