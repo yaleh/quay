@@ -3,7 +3,7 @@ id: gap-ac194-release-bump-classified-as-bypass
 title: AC-194 判据第四次变假（真 RED 非 NOT-EVALUATED）：release-cut 的 SPEC §4.3/§12 step-5
   版本 bump 直落 develop 被 bypass-check 判为 direct-commit-bypasses-fan-in；前三次靠人手加
   ruled one-off 行吸收，机制缺一个结构分类
-status: ready
+status: needs-human
 labels:
   - gap
   - defect
@@ -133,3 +133,14 @@ goal_ac: AC-194
 - scripts/version-carriers.ts
 - scripts/version-consistency-check.ts
 - tasks/gap-ac194-release-bump-classified-as-bypass.md
+
+## Needs-Human
+
+**执行 2026-10-01T07:09:54.655Z — 连续修满重试上限仍不合格（标 needs-human）**
+
+- 阻碍原因：suite 红但归因不出任何失败测试文件（基建/契约疑似，非实现缺陷）——停止重派，⛔ 不再拿新会话撞同一堵墙：suite red could not be attributed to any failing test file in 2 consecutive rounds (bounded to at most one retry) — infra/contract suspected, not an implementable defect (parser attributed no failing file (failure-line count unavailable on this judgment)); stopping instead of spending another worker session
+- 失败步/判词：step=suite: # fail 45
+- run_id：wk-prod-anchor
+- session_id：78b0318f-0117-4e68-b12c-81c367c15a6e
+- suite 日志：/data/home/yale/work/quay/.quay/fan-in-suite-gap-ac194-release-bump-classified-as-bypass~wk-prod-anchor~1790838491027-a255a2.log
+- fan-in 日志：/data/home/yale/work/quay/.quay/fan-in-gap-ac194-release-bump-classified-as-bypass-wk-prod-anchor.log
