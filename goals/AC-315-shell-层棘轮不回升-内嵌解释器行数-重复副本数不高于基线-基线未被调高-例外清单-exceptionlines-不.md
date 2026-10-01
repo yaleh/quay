@@ -2,7 +2,7 @@
 id: AC-315
 title: shell 层棘轮不回升：内嵌解释器行数/重复副本数不高于基线、基线未被调高、例外清单 exceptionLines 不高于 7500（由
   sh-census-check 读出）
-status: active
+status: achieved
 kind: criterion
 goal: GOAL-026
 criterion: |-
@@ -22,6 +22,11 @@ statusLog:
     to: active
     actor: goal-driver
     reason: "triage: activate"
+  - at: 2026-10-01T18:08:52.699Z
+    from: active
+    to: achieved
+    actor: goal-driver
+    reason: "I2: criterion pass"
 long-term: true
 fidelity:
   verdict: faithful
