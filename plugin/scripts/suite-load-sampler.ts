@@ -48,8 +48,19 @@ function readLoadavg(): number | null {
   }
 }
 
-/** /proc/pressure/cpu line 1 `some avg10=X` (PSI CPU stall %, 10s window). */
-function readCpuStall(): number | null {
+/**
+ * /proc/pressure/cpu line 1 `some avg10=X` (PSI CPU stall %, 10s window).
+ *
+ * SINGLE IMPLEMENTATION (.quay/routine-findings.jsonl finding `readcpustall-dup`, routine
+ * `semantic-dedup-scan`): this reader previously existed as two byte-identical private copies — here
+ * and in psi-failure-correlation-check.ts — so a change to the PSI parse/口径 could land in one copy
+ * only, silently desynchronising the correlation window from the recorded load curve. It lives HERE
+ * because this module owns the three structural-signal readings (readLoadavg / readCpuStall /
+ * readMemAvailMb); psi-failure-correlation-check.ts now imports it instead of re-declaring it.
+ * A third same-named reader (cap-from-gate.ts `readCpuStallFromGate`) is deliberately NOT unified: it
+ * does not parse /proc itself but reads through resource-gate.sh, the canonical shell implementation.
+ */
+export function readCpuStall(): number | null {
   try {
     const line = fs.readFileSync("/proc/pressure/cpu", "utf8").split("\n")[0] ?? "";
     const m = line.match(/avg10=([0-9]+(?:\.[0-9]+)?)/);
