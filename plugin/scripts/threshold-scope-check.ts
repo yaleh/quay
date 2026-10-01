@@ -78,7 +78,7 @@ import path from "node:path";
 import { spawnSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
 import { helpExit, isDirectEntry } from "./gate-script-base.ts";
-import { buildFileIndex, type FileIndex } from "./fs-walk.ts";
+import { buildFileIndex, type FileIndex, readGitignoreBasenames } from "./fs-walk.ts";
 import { readRatchetBaseline, writeRatchetBaseline } from "./ratchet-baseline.ts";
 
 export const DATA_FILE_REL = "docs/analysis/threshold-scope-violations.md";
@@ -240,24 +240,12 @@ export function gitignoredPaths(root: string, missingPaths: string[]): Set<strin
   return new Set(res.stdout.split("\n").map((s) => s.trim()).filter(Boolean));
 }
 
-/** Basenames mentioned in the repo's `.gitignore` — a bare reference to one of these is a known
- *  runtime/ignored artifact (`tick-log.md`, `gate-events.jsonl`, `full-suite-state.json`), not a
- *  stale SOURCE path. `git check-ignore` cannot match a bare basename against a prefixed pattern
- *  (`orchestration/tick-log.md`), so this is the bare-name companion to gitignoredPaths. */
-export function readGitignoreBasenames(root: string): Set<string> {
-  const p = path.join(root, ".gitignore");
-  if (!fs.existsSync(p)) return new Set();
-  const out = new Set<string>();
-  for (const line of fs.readFileSync(p, "utf8").split(/\r?\n/)) {
-    const t = line.trim();
-    if (!t || t.startsWith("#")) continue;
-    const seg = t.split("/").pop() || "";
-    const base = seg.replace(/[*?]/g, "").trim();
-    const dot = base.lastIndexOf(".");
-    if (dot > 0 && dot < base.length - 1 && /^[A-Za-z0-9_@-]/.test(base.slice(0, dot))) out.add(base);
-  }
-  return out;
-}
+// readGitignoreBasenames now lives in fs-walk.ts (it was byte-identical to tick-core-static-check's
+// copy apart from the JSDoc — .quay/routine-findings.jsonl finding `readgitignorebasenames-dup`,
+// runId `semantic-dedup-scan-1790851304231`). Re-exported so this module's public surface is
+// unchanged. It moved to the same leaf that already owns the gitignore-aware traversal face
+// (`buildFileIndex` / `gitVisiblePaths`), which both checkers already import.
+export { readGitignoreBasenames };
 
 // ── The per-doc scan ─────────────────────────────────────────────────────────────────────────────────
 export interface ThresholdHit {
