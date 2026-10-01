@@ -20,12 +20,27 @@
 // uses — so the plugin's `build-plugin-dist` esbuild bundle does NOT try to resolve
 // `../../packages/...` (the plugin bundle is staged WITHOUT the packages/ tree).
 //
+// OUT-OF-BAND MODE (gap-silent-completion-path-writes-no-gate-event, 2026-09-30): the ready→done
+// path above is gated — it refuses anything that is not `ready`, and `runComplete` refuses a task
+// with no acceptance meter. The 2026-09-30 incident was a `needs-human` task that HAD to reach done
+// (its blocker was infrastructure, not the implementation) and whose completion therefore went
+// through a bare `task_write` — ZERO GateEvents, and the next day's fail-closed coverage judge
+// stalled every code delta's fan-in. The workaround that existed (retreat → promote → complete) was
+// a three-step, memory-dependent path that nobody walked. So `--out-of-band --reason "<why>"` is
+// that path as ONE call: it routes through `runCompleteOutOfBand` (lifecycle.ts), which writes
+// status=done AND the `complete` pass GateEvent itself — the same primitive Core's MCP
+// `task_write.completeReason` channel uses, so a forced completion has ONE definition and one
+// ledger shape wherever it is issued from. The reason is REQUIRED (≥8 non-whitespace chars).
+//
 // Usage:
 //   node --no-warnings --experimental-strip-types plugin/scripts/loop-complete-task.ts \
 //     --root <repo-root> --task <id> [--verified-by "<evidence>"] [--actor <actor>]
+//   node --no-warnings --experimental-strip-types plugin/scripts/loop-complete-task.ts \
+//     --root <repo-root> --task <id> --out-of-band --reason "<why this bypasses the gate>"
 //
 // Exit: 0 = completed (status done + complete pass event written); 1 = not completed
-// (non-ready task, or an acceptance meter that failed); 2 = usage error.
+// (non-ready task, an acceptance meter that failed, or a missing/short out-of-band reason);
+// 2 = usage error.
 
 import path from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
@@ -40,7 +55,8 @@ const repoRoot = moduleRepoRoot();
 
 function usage() {
   process.stderr.write(
-    "Usage: loop-complete-task.ts --root <repo-root> --task <id> [--verified-by <evidence>] [--actor <actor>]\n"
+    "Usage: loop-complete-task.ts --root <repo-root> --task <id> [--verified-by <evidence>] [--actor <actor>]\n" +
+    "       loop-complete-task.ts --root <repo-root> --task <id> --out-of-band --reason \"<why>\"\n"
   );
 }
 
@@ -50,11 +66,15 @@ export async function main(argv: string[]): Promise<number> {
   let id: string | null = null;
   let verifiedBy: string | undefined;
   let actor: string | undefined;
+  let outOfBand = false;
+  let reason: string | undefined;
   for (let i = 0; i < args.length; i++) {
     if (args[i] === "--root") { root = args[++i]; continue; }
     if (args[i] === "--task") { id = args[++i]; continue; }
     if (args[i] === "--verified-by") { verifiedBy = args[++i]; continue; }
     if (args[i] === "--actor") { actor = args[++i]; continue; }
+    if (args[i] === "--out-of-band") { outOfBand = true; continue; }
+    if (args[i] === "--reason") { reason = args[++i]; continue; }
   }
   if (!id) {
     usage();
@@ -67,7 +87,7 @@ export async function main(argv: string[]): Promise<number> {
   const { createStore } = await import(
     pathToFileURL(path.join(repoRoot, "packages/quay-native/src/store.ts")).href
   );
-  const { runCompleteLoop } = await import(
+  const { runCompleteLoop, runCompleteOutOfBand } = await import(
     pathToFileURL(path.join(repoRoot, "packages/quay/src/gate/lifecycle.ts")).href
   );
   const { DEFAULT_GATE_LOG_RELATIVE_PATH } = await import(
@@ -114,6 +134,20 @@ export async function main(argv: string[]): Promise<number> {
       return 1;
     }
   }
+  // OUT-OF-BAND: reach done from ANY status (the 2026-09-30 shape was `needs-human`) in ONE call.
+  // `runCompleteOutOfBand` writes the status AND the `complete` event itself, so the escape hatch
+  // cannot become a silent path — which is exactly what the memory-dependent retreat→promote→complete
+  // route turned into. Same primitive as Core's MCP `task_write.completeReason` channel.
+  if (outOfBand) {
+    if (!reason) {
+      usage();
+      return 2;
+    }
+    const r = await runCompleteOutOfBand({ client, id, logPath, actor: actor ?? "quay-loop", workspaceRoot, reason });
+    process.exitCode = 0;
+    return r.exitCode;
+  }
+
   const r = await runCompleteLoop({ client, id, logPath, actor: actor ?? "quay-loop", workspaceRoot, verifiedBy });
   // runCompleteLoop sets process.exitCode for CLI backward-compat; reset it so a
   // long-running parent (outer session) isn't polluted, and use the returned field.
