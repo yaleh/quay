@@ -2001,7 +2001,7 @@
     "verification-marginal-return.ts": "谁按：任何要判「某道检查器/闸值不值它的成本」的人/层，在提「砍掉某个检查器」之前先跑一次（node --experimental-strip-types plugin/scripts/verification-marginal-return.ts --root <主检出>，要机器可读加 --json）；条件=要把某道闸/checker 的累计成本与它实际拦下的缺陷数对起来，或要给 ADR-005「验证是绑定约束」取一个数",
     "vmeta-lag-check.ts": "谁按：同上（canonical 算术面）；条件=要量 V_meta 滞后",
     "verify-deliver-coldstart.sh": "谁按：AC88 跨主机验证驱动者按（develop-deliver-tgz.sh --verify-coldstart 或 AC88 驱动方在跨主机交付验证时）；条件=要可重复地验证 ①装 tgz →②项目内 quay-init →③冷启动（outer 窗口 + inner 层）三步并产出 AC5 证据（build commit sha + 产物 sha256，达成=新于 2026-08-16 阶段切换）",
-    "task-contract-check.ts": "消费方：manager/outer 每轮读 .quay/task-file-violation-ledger.jsonl（grow-only 账本），新违规进账本绝不静默；--no-block 故不阻产品验证轮（task-file 语法≠产品可用性）",
+    "task-contract-check.ts": "消费方：manager tick 每轮读 .quay/task-file-violation-ledger.jsonl —— 落点是 manager-tick-readings.ts 的 task_file_violation_ledger.* 标签行（未处置条目每轮报到管理者面前）；条目「此刻还成不成立」由读者对全量 store 重算得出（task-contract-check 的 collectContractViolations 与 task-ac-carryover-check 的 collectUnownedAcs，与写侧同一实现），⛔ 不是手维护的豁免 id 表。新违规进账本绝不静默；--no-block 故不阻产品验证轮（task-file 语法≠产品可用性）",
     "task-ac-carryover-check.ts": "消费方：manager 在翻 done 前读同一 grow-only 账本，新未继承 AC 进账本并据此决定是否阻止合入；--no-block 不阻轮",
     "tick-core-static-check.ts": "消费方：pre-commit gate（run_doc_checks → precommit-guard.ts）——--check-drift 是 HARD 闸（gap-ac90-delivery-copy-drift-gate 收口），任一副本-正本对漂移（改正本而副本不落地 / 副本单边编辑）即 block 提交；reconcile 前的 --no-block 窗口已关闭",
     "worker-driver.ts": "谁按：inner 派发器在要驱动单个 claude -p worker 跑完整任务时按（AC115 阶段 1 显式 --task）；条件=任务要被机械驱动跑完 select→worktree→develop→suite→ff 并落盘结构化 outcome 到 .quay/worker-outcome.jsonl",

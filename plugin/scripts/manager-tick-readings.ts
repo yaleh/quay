@@ -29,7 +29,7 @@
 import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import { isDirectEntry } from "./gate-script-base.ts";
+import { isDirectEntry, flagValue } from "./gate-script-base.ts";
 import { readProcCmdline } from "../../packages/quay/src/kernel/proc-identity.ts";
 import { repoRoot as moduleRepoRoot } from "./repo-root.ts";
 // 读侧消费（gap-coverage-nonblock-ledger-has-no-consumer）：`--no-block` 覆盖率台账此前只有写者，
@@ -37,6 +37,12 @@ import { repoRoot as moduleRepoRoot } from "./repo-root.ts";
 // manager tick 每轮读一次，未处置条目以显式标签行报到管理者面前。⛔ 本读数**不**阻断任何东西
 // （断言：它不在 run_static_checks 的 run_checker 名单里），它只让「有未处置条目」这件事每轮可见。
 import { readNonBlockLedger } from "./gate-event-coverage-check.ts";
+// 读侧消费（gap-task-file-violation-ledger-has-no-consumer）：第二份 grow-only `--no-block` 台账
+// （`.quay/task-file-violation-ledger.jsonl`）此前同样只有写者 —— 而且它由**两个**写者共用
+// （task-contract-check + task-ac-carryover-check），所以读取面既不属于其中任何一个，也就一直没人接。
+// 两个 collector 是写侧那套谓词的**同一实现**（提取自各自 runCli），读者据此判「条目还在不在」。
+import { NO_BLOCK_LEDGER_REL, listTaskFiles, collectContractViolations } from "./task-contract-check.ts";
+import { collectUnownedAcs } from "./task-ac-carryover-check.ts";
 
 export const NAME = "manager-tick-readings";
 export const PROJECTS_SEAM = "MTR_PROJECTS";
@@ -305,6 +311,7 @@ export function render(projects: Project[], opts: RenderOpts): string {
   lines.push(`resource.mem_available_mb ${resources.memAvailMb}`);
   for (const p of projects) lines.push(`outer.ticklog ${p.name} ${latestTickLog(p, 200, { full: true })}`);
   lines.push(...nonBlockCoverageLines(opts.repoRoot));
+  lines.push(...taskFileViolationLedgerLines(opts.repoRoot));
   return `${lines.join("\n")}\n`;
 }
 
@@ -335,6 +342,181 @@ export function nonBlockCoverageLines(repoRoot: string): string[] {
   ];
 }
 
+// ── 任务文件违规台账的读侧（gap-task-file-violation-ledger-has-no-consumer） ────────────────────────
+// 处置轴选型 = ②（本任务 AC2；③②① 的取舍与反例见任务体）：**台账不再是「只增不减的账」，
+// 而是「曾经记过什么」的集合；一条条目此刻还成不成立，由读者**对全量 store 重算**得出。**
+//
+// 为什么不是 ①（写者追加 resolved）：写者的作用域**不是 store**。`runner-static-gate.ts:226` 的
+// `@static-scoped-mode subset-touched` 会在 scoped 层把该 checker 收窄成
+// `--strict-subset <touched task files>`（select-static-checks-for-touches.ts:708）——子集运行里
+// 「没看见」既可能是「已修」也可能是「根本没扫」，写者拿不到这个区分（硬规则 4c：这个 bit 在到达
+// 写者之前就被中间层抹掉了）⇒ 照 ① 做会把未扫描的条目静默标成已处置。选 ② 的读侧形态绕开了它：
+// **读者自己跑全量**，与最近一次写入者跑的是不是子集无关。
+//
+// 处置 = 「曾经记过 ∧ 此刻不再成立」。它是**推导量**，⛔ 不是手维护的豁免 id 表：把违规真修掉
+// （或该任务文件消失 / 该 done 任务不再 done），条目下一轮就落到 disposed，读者不再报它。
+// 生产证据：2026-10-01 的 230 条里，58 条已经这样沉默（修复前记过、现在不再成立）。
+//
+// 三态（硬规则 3b，⛔ 不与「零未处置」同形）：
+//   absent      —— 载体缺席（「没有人报过」⛔ 不等于「报过且都处置了」）
+//   unreadable  —— 载体在、但**全部**行不可解析（读不懂 ⛔ 不等于零未处置）
+//   read        —— 读到且判定完成（`unresolved` 此时才是一个数组）
+// 另有第四态 `live-unavailable`：台账读到了、但全量重算跑不成（store 读不了）⇒ 处置不可判，
+// 同样 not-evaluated（「查不成」⛔ 不等于「查过且干净」）。
+export interface TaskFileViolationLedgerEntry {
+  key: string;
+  checker: string;
+  violation: string;
+  at: string;
+}
+
+export interface TaskFileViolationLedgerReading {
+  evaluated: boolean;
+  carrier: "absent" | "unreadable" | "read";
+  ledger: string;
+  entries: number;
+  disposed: number;
+  /** ⛔ null 表示「未评估」——**不是** `[]`（空数组会被读成「查过且干净」）。 */
+  unresolved: TaskFileViolationLedgerEntry[] | null;
+  malformedLines: number;
+  /** 台账里出现过、但读者没有对应重算器的 checker 名 —— 保守计入 unresolved，绝不静默判 disposed。 */
+  unknownCheckers: string[];
+  reason: string;
+}
+
+/** 全量重算：checker 名 → 此刻仍然成立的 violation 字符串集合。两个 collector 都与写侧同一实现。 */
+function liveViolationsByChecker(root: string): Map<string, Set<string>> {
+  return new Map<string, Set<string>>([
+    ["task-contract-check", new Set(collectContractViolations(root, listTaskFiles(root, [])).entries)],
+    ["task-ac-carryover-check", new Set(collectUnownedAcs(root).entries)],
+  ]);
+}
+
+export function readTaskFileViolationLedger(root: string): TaskFileViolationLedgerReading {
+  const ledger = path.join(root, NO_BLOCK_LEDGER_REL);
+  const base = { ledger, entries: 0, disposed: 0, unresolved: null, malformedLines: 0, unknownCheckers: [] as string[] };
+  let raw: string;
+  try {
+    raw = fs.readFileSync(ledger, "utf8");
+  } catch {
+    return {
+      ...base,
+      evaluated: false,
+      carrier: "absent",
+      reason: `NOT-EVALUATED: 违规台账载体缺席（${ledger}）——「没有人报过」⛔ 不与「报过且都处置了」同形`,
+    };
+  }
+
+  const entries: TaskFileViolationLedgerEntry[] = [];
+  let malformed = 0;
+  for (const line of raw.split("\n")) {
+    if (!line.trim()) continue;
+    let d: any;
+    try {
+      d = JSON.parse(line);
+    } catch {
+      malformed++;
+      continue;
+    }
+    if (typeof d?.key !== "string" || typeof d?.checker !== "string" || typeof d?.violation !== "string") {
+      malformed++;
+      continue;
+    }
+    entries.push({ key: d.key, checker: d.checker, violation: d.violation, at: typeof d.at === "string" ? d.at : "" });
+  }
+  if (entries.length === 0 && malformed > 0) {
+    return {
+      ...base,
+      evaluated: false,
+      carrier: "unreadable",
+      malformedLines: malformed,
+      reason: `NOT-EVALUATED: 台账存在但 ${malformed} 行全部不可解析（读不懂 ⛔ 不等于零未处置）`,
+    };
+  }
+
+  let live: Map<string, Set<string>>;
+  try {
+    live = liveViolationsByChecker(root);
+  } catch (e: any) {
+    return {
+      ...base,
+      evaluated: false,
+      carrier: "read",
+      entries: entries.length,
+      malformedLines: malformed,
+      reason: `NOT-EVALUATED: 全量重算跑不成（${e?.message ?? e}）⇒ 处置不可判，⛔ 不与「零未处置」同形`,
+    };
+  }
+
+  const unresolved: TaskFileViolationLedgerEntry[] = [];
+  const unknown = new Set<string>();
+  let disposed = 0;
+  for (const e of entries) {
+    const set = live.get(e.checker);
+    if (!set) {
+      // 读者没有这个 checker 的重算器 ⇒ 处置**不可判**。保守计入 unresolved 并点名，⛔ 不算 disposed
+      //（把「没查成」印成「已处置」正是硬规则 3b 禁的那一侧）。
+      unknown.add(e.checker);
+      unresolved.push(e);
+      continue;
+    }
+    if (set.has(e.violation)) unresolved.push(e);
+    else disposed++;
+  }
+  const unknownCheckers = [...unknown].sort();
+  return {
+    evaluated: true,
+    carrier: "read",
+    unresolved,
+    disposed,
+    entries: entries.length,
+    malformedLines: malformed,
+    unknownCheckers,
+    ledger,
+    reason:
+      (unresolved.length ? `${unresolved.length} 条未处置（已处置 ${disposed}/${entries.length}）` : `零未处置（${disposed}/${entries.length} 条均已处置）`) +
+      (unknownCheckers.length ? ` · ⚠️ 无重算器的 checker: ${unknownCheckers.join(", ")}（保守计入未处置）` : ""),
+  };
+}
+
+/** 人可读形态（⚠️ `not-evaluated` 有独立一行取值，⛔ 不打印成 0）。 */
+export function formatTaskFileViolationLedger(r: TaskFileViolationLedgerReading): string {
+  if (!r.evaluated) return `${r.reason}\n  carrier=${r.carrier} ledger=${r.ledger}`;
+  const head = `task-file-violation ledger — ${r.ledger}`;
+  const body = `entries=${r.entries} disposed=${r.disposed} unresolved=${r.unresolved!.length} malformed_lines=${r.malformedLines}`;
+  const detail = r.unresolved!.map((e) => `  UNRESOLVED ${e.checker} ${e.violation} · recorded ${e.at || "(no at)"}`);
+  return [head, body, ...detail].join("\n");
+}
+
+/** 台账的 tick 标签行（每轮报到处置面）。
+ *
+ *  与 `nonBlockCoverageLines` 同形：三态**在标签行里显式区分**（硬规则 3b），未评估有自己的一行取值，
+ *  ⛔ 绝不印成 `0`。明细**有界**（前 12 条 + 余数）——tick 面是「队列」不是「全文」，全量清单由
+ *  `--ledger` 子命令给出；计数始终是**全量计数**，不是被截断后的长度。 */
+export function taskFileViolationLedgerLines(repoRoot: string): string[] {
+  return taskFileViolationLedgerLinesFrom(readTaskFileViolationLedger(repoRoot));
+}
+
+export function taskFileViolationLedgerLinesFrom(r: TaskFileViolationLedgerReading): string[] {
+  if (!r.evaluated) {
+    return [
+      `task_file_violation_ledger.state not_evaluated`,
+      `task_file_violation_ledger.unresolved -`,
+      `task_file_violation_ledger.detail ${r.carrier} — ${r.reason}`,
+    ];
+  }
+  const head = r.unresolved!.slice(0, 12).map((e) => e.key);
+  const detail = r.unresolved!.length
+    ? head.join(",") + (r.unresolved!.length > head.length ? `,…(+${r.unresolved!.length - head.length})` : "")
+    : "none";
+  return [
+    `task_file_violation_ledger.state ${r.unresolved!.length ? "UNRESOLVED" : "ok"}`,
+    `task_file_violation_ledger.unresolved ${r.unresolved!.length} (entries ${r.entries}, disposed ${r.disposed})`,
+    `task_file_violation_ledger.detail ${detail}`,
+    ...(r.unknownCheckers.length ? [`task_file_violation_ledger.unknown_checkers ${r.unknownCheckers.join(",")}`] : []),
+  ];
+}
+
 /** 单读数子命令（Contract invoke）：`manager-tick-readings.ts outer.ticklog [name…]`。 */
 export function renderSelected(cmd: string, args: string[], projects: Project[], repoRoot?: string): string {
   const lines: string[] = [];
@@ -350,6 +532,15 @@ export function renderSelected(cmd: string, args: string[], projects: Project[],
   if (cmd === "nonblock-ledger" && repoRoot) {
     lines.push(...nonBlockCoverageLines(repoRoot));
   }
+  // 任务文件违规台账：取证/复核用的单读数出口。默认打印**与 tick 面逐字相同**的标签行
+  //（面与命令一致 ⇒ 贴出来的读数就是管理者看到的那几行），`--root <dir>` 换载体，`--json` 出机器形。
+  if (cmd === "task-file-violation-ledger") {
+    const root = flagValue(args, "--root") ?? repoRoot;
+    if (root) {
+      const r = readTaskFileViolationLedger(root);
+      lines.push(...(args.includes("--json") ? [JSON.stringify(r, null, 2)] : taskFileViolationLedgerLinesFrom(r)));
+    }
+  }
   return `${lines.join("\n")}\n`;
 }
 
@@ -359,8 +550,14 @@ export function main(argv: string[], opts?: { env?: NodeJS.ProcessEnv }): number
   const projects = parseProjects(env);
   const args = argv.slice(2);
   const cmd = args[0] ?? "";
-  if (cmd === "outer.ticklog" || cmd === "nonblock-ledger") {
+  if (cmd === "outer.ticklog" || cmd === "nonblock-ledger" || cmd === "task-file-violation-ledger") {
     process.stdout.write(renderSelected(cmd, args.slice(1), projects, repoRoot));
+    // 台账读数：读到 ⇒ 0；**未评估**（载体缺席 / 读不懂 / 全量重算跑不成）⇒ 3，与「零未处置」分形
+    //（硬规则 3b；同 gate-event-coverage-check --ledger 的既有约定）。
+    if (cmd === "task-file-violation-ledger") {
+      const root = flagValue(args.slice(1), "--root") ?? repoRoot;
+      if (root && !readTaskFileViolationLedger(root).evaluated) return 3;
+    }
     return 0;
   }
   process.stdout.write(render(projects, { repoRoot }));

@@ -467,6 +467,68 @@ export function recordNoBlockLedger(root, checker, violations, { at = new Date()
   return { recorded: rows.length, ledgerPath: p, rows };
 }
 
+// ── Ledger READER support (the consumer side of --no-block) ─────────────────────────────────────────
+// gap-task-file-violation-ledger-has-no-consumer: the ledger above had a writer and NO reader — a
+// `--no-block` violation was recorded and then never surfaced to anything that could dispose of it,
+// so the count axis was cut (hard rule 9: visibility ≠ execution). The reader itself lives in
+// manager-tick-readings.ts (the per-round surface) because this ledger has TWO writers
+// (task-contract-check + task-ac-carryover-check), so neither owns the read; NO_BLOCK_LEDGER_REL
+// above stays the single source for the path, and the two collectors below are the single source for
+// the *liveness* predicate — ⛔ the reader must not carry a second parser of task files.
+
+/** The task-file list a scan covers — `runCli`'s own list rule, extracted so the ledger reader
+ *  re-evaluates exactly the universe the writer scanned. */
+export function listTaskFiles(wsRoot, scanFiles) {
+  if (scanFiles.length > 0) return scanFiles;
+  const tasksDir = path.join(wsRoot, "tasks");
+  return fs.readdirSync(tasksDir).filter((f) => f.endsWith(".md")).map((f) => path.join(tasksDir, f)).sort();
+}
+
+/** The CURRENT violation universe of `task-contract-check`: one `<task-file>: <code>` per violation,
+ *  de-duplicated and sorted — i.e. exactly the strings `recordNoBlockLedger` keys on, re-derived
+ *  through the same `scanTaskText` predicate. Extracted from `runCli` (which now calls it) so the
+ *  ledger reader can answer "does this recorded violation still reproduce?" without a second
+ *  implementation drifting from this one. The ratchet baselines come back too — `runCli` still needs
+ *  them for the grandfather ceilings. */
+export function collectContractViolations(wsRoot, list) {
+  const allViolations = [];
+  const allInfo = [];
+  const perTask = [];
+  // Check 6 (dod-suite-line): the shrink-only grandfather list. Files on it keep their legacy DoD
+  // full-suite demand; a file NOT on it with the demand is a NEW occurrence. Ceiling breach (the list
+  // itself grew past its baseline-count header) is a ratchet violation independent of task violations.
+  const dodBaseline = readDodSuiteLineBaseline(wsRoot);
+  // Check 7 (bare-dir-uncertain-touch): the shrink-only grandfather list for the bare-directory +
+  // uncertain-annotation Touches pattern (gap-touches-bare-dir-uncertain-declaration-drags-the-pool).
+  const bareDirBaseline = readBareDirTouchesBaseline(wsRoot);
+  // Check 8 (wiring-claim-ac-no-probe): the shrink-only grandfather list for the wiring/reachability
+  // declaration without a real input probe (gap-wiring-claim-ac-requires-real-input-probe).
+  const wiringClaimAcProbeBaseline = readWiringClaimAcProbeBaseline(wsRoot);
+  for (const file of list) {
+    const rel = path.relative(wsRoot, file);
+    const text = fs.readFileSync(file, "utf8");
+    const res = scanTaskText(text, rel, {
+      dodSuiteLineBaseline: dodBaseline.baseline,
+      bareDirTouchesBaseline: bareDirBaseline.baseline,
+      wiringClaimAcProbeBaseline: wiringClaimAcProbeBaseline.baseline,
+      root: wsRoot,
+    });
+    for (const v of res.violations) allViolations.push(`${rel}: ${v.code}`);
+    allInfo.push(...res.info.map((i) => ({ file: rel, ...i })));
+    if (res.violations.length > 0 || res.info.length > 0) {
+      perTask.push({ file: rel, taskId: res.taskId, violations: res.violations, info: res.info });
+    }
+  }
+  return {
+    entries: [...new Set(allViolations)].sort(),
+    perTask,
+    allInfo,
+    dodBaseline,
+    bareDirBaseline,
+    wiringClaimAcProbeBaseline,
+  };
+}
+
 // ── CLI ──────────────────────────────────────────────────────────────────────────────────────────────
 export function runCli(argv) {
   const args = argv.slice();
@@ -502,38 +564,18 @@ export function runCli(argv) {
     console.error(`task-contract-check: no <task-file> args and no tasks/ dir at ${wsRoot}`);
     process.exit(2);
   }
-  const list = scanFiles.length > 0
-    ? scanFiles
-    : fs.readdirSync(tasksDir).filter((f) => f.endsWith(".md")).map((f) => path.join(tasksDir, f)).sort();
+  const list = listTaskFiles(wsRoot, scanFiles);
 
-  const allViolations = [];
-  const allInfo = [];
-  const perTask = [];
-  // Check 6 (dod-suite-line): the shrink-only grandfather list. Files on it keep their legacy DoD
-  // full-suite demand; a file NOT on it with the demand is a NEW occurrence. Ceiling breach (the list
-  // itself grew past its baseline-count header) is a ratchet violation independent of task violations.
-  const dodBaseline = readDodSuiteLineBaseline(wsRoot);
-  // Check 7 (bare-dir-uncertain-touch): the shrink-only grandfather list for the bare-directory +
-  // uncertain-annotation Touches pattern (gap-touches-bare-dir-uncertain-declaration-drags-the-pool).
-  const bareDirBaseline = readBareDirTouchesBaseline(wsRoot);
-  // Check 8 (wiring-claim-ac-no-probe): the shrink-only grandfather list for the wiring/reachability
-  // declaration without a real input probe (gap-wiring-claim-ac-requires-real-input-probe).
-  const wiringClaimAcProbeBaseline = readWiringClaimAcProbeBaseline(wsRoot);
-  for (const file of list) {
-    const rel = path.relative(wsRoot, file);
-    const text = fs.readFileSync(file, "utf8");
-    const res = scanTaskText(text, rel, {
-      dodSuiteLineBaseline: dodBaseline.baseline,
-      bareDirTouchesBaseline: bareDirBaseline.baseline,
-      wiringClaimAcProbeBaseline: wiringClaimAcProbeBaseline.baseline,
-      root: wsRoot,
-    });
-    for (const v of res.violations) allViolations.push(`${rel}: ${v.code}`);
-    allInfo.push(...res.info.map((i) => ({ file: rel, ...i })));
-    if (res.violations.length > 0 || res.info.length > 0) {
-      perTask.push({ file: rel, taskId: res.taskId, violations: res.violations, info: res.info });
-    }
-  }
+  // Single-source: the scan + the de-duplicated violation set live in collectContractViolations, so
+  // the ledger reader re-derives liveness through THIS predicate rather than a parallel copy.
+  const {
+    entries: currentEntries,
+    perTask,
+    allInfo,
+    dodBaseline,
+    bareDirBaseline,
+    wiringClaimAcProbeBaseline,
+  } = collectContractViolations(wsRoot, list);
   const dodCeilingBreach =
     dodBaseline.baselineCount !== null && dodBaseline.baseline.size > dodBaseline.baselineCount;
   if (dodCeilingBreach) {
@@ -559,7 +601,6 @@ export function runCli(argv) {
       : `task-contract-check: wiring-claim-ac-probe baseline CEILING BREACH — docs/analysis/wiring-claim-ac-probe-baseline.md has ${wiringClaimAcProbeBaseline.baseline.size} entries but baseline-count: ${wiringClaimAcProbeBaseline.baselineCount}; the grandfather list can only get SHORTER (gap-wiring-claim-ac-requires-real-input-probe)`);
   }
 
-  const currentEntries = [...new Set(allViolations)].sort();
   // SUBSET MODE (explicit <task-file> args): the ratchet comparison is only meaningful over the full
   // store — a per-file run would misreport every baseline entry not in the subset as "resolved"
   // (REFUTE round-1 MINOR 2). In subset mode we skip the ratchet entirely (report-only, exit 0).

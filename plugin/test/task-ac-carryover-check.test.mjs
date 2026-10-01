@@ -35,6 +35,7 @@ import {
   writeBaseline,
   formatJsonReport,
   BASELINE_FILE_REL,
+  collectUnownedAcs,
 } from "../scripts/task-ac-carryover-check.ts";
 
 import { makeTmpDir } from "./helpers/tmp-workspace.mjs";
@@ -394,3 +395,25 @@ test("REAL-STORE: no unowned ACs beyond the baselined legacy set", { skip: !REAL
   assert.equal(report.ratchet.newViolations.length, 0, `new unowned ACs: ${report.ratchet.newViolations.join(", ")}`);
 });
 
+
+// ── Ledger READER support (gap-task-file-violation-ledger-has-no-consumer) ─────────────────────────
+// 该台账有两个写者，读取面在 manager-tick-readings.ts；它判「条目还在不在」靠这个 export（与
+// runCli 同一实现）。⛔ 刻意**不做 baseline 减法**：`newViolations` 是相对祖父表的，一旦有人
+// `--reset-baseline`，整批条目会瞬间变成「已处置」——那是空转，不是处置（硬规则 4c）。
+
+test("collectUnownedAcs: `<task-id>: <AC-id>` 全量集合（⛔ 不做 baseline 减法）", () => {
+  const dir = makeTmpDir("tacc-collect-");
+  fs.mkdirSync(path.join(dir, "tasks"), { recursive: true });
+  fs.writeFileSync(path.join(dir, "tasks", "gap-a.md"), acTask("gap-a", "done", 3, 2));
+  // 非 done ⇒ 不在机制作用域内（对照：证明上面的命中不是因为「扫到了就算」）
+  fs.writeFileSync(path.join(dir, "tasks", "gap-b.md"), acTask("gap-b", "todo", 2, 2));
+  const { entries, scanned } = collectUnownedAcs(dir);
+  assert.equal(scanned, 2);
+  assert.deepEqual(entries, ["gap-a: AC1", "gap-a: AC2"]);
+  // 负控制：真把 AC 勾上 ⇒ 同一条目消失（这就是读者判「已处置」的依据）
+  fs.writeFileSync(path.join(dir, "tasks", "gap-a.md"), acTask("gap-a", "done", 3, 1));
+  assert.deepEqual(collectUnownedAcs(dir).entries, ["gap-a: AC1"]);
+  // 且有 Carries 后继时也不再算 —— 与 runCli 同一条判定路径
+  fs.writeFileSync(path.join(dir, "tasks", "gap-c.md"), carriesTask("gap-c", "gap-a", "AC1"));
+  assert.deepEqual(collectUnownedAcs(dir).entries, []);
+});

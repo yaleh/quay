@@ -47,6 +47,8 @@ import {
   DATA_FILE_REL,
   DOD_SUITE_LINE_BASELINE_REL,
   WIRING_CLAIM_AC_PROBE_BASELINE_REL,
+  listTaskFiles,
+  collectContractViolations,
 } from "../scripts/task-contract-check.ts";
 import { repoRoot } from "../scripts/repo-root.ts";
 import { checkWiringClaimAcProbe } from "../scripts/wiring-coverage-check.ts";
@@ -956,3 +958,45 @@ test("AC6 real-store: backfilled case tasks + this task are violation-free", { s
   }
 });
 
+
+// ── Ledger READER support (gap-task-file-violation-ledger-has-no-consumer) ─────────────────────────
+// The --no-block ledger had a writer and no reader. The reader (manager-tick-readings.ts) answers
+// "does this recorded violation still reproduce?" by re-running the store through THESE exports —
+// extracted from runCli so there is exactly ONE builder of the `<file>: <code>` strings the ledger
+// keys on (⛔ a second parser here would drift from the writer and silently mis-classify as disposed).
+
+test("collectContractViolations: 产出与台账键同形的 `<file>: <code>` 集合，去重且有序", () => {
+  const root = makeGitRoot("collect");
+  fs.writeFileSync(path.join(root, "tasks", "t-bad.md"), taskBody({
+    labels: ["gap"],
+    contract: "```\nmeasure x = 1\nthis line is not a known key\n```",
+  }));
+  const list = listTaskFiles(root, []);
+  assert.deepEqual(list.map((f) => path.basename(f)), ["t-bad.md"]);
+  const { entries } = collectContractViolations(root, list);
+  assert.ok(entries.includes("tasks/t-bad.md: contract-line-unknown"), entries.join(";"));
+  assert.deepEqual(entries, [...new Set(entries)].sort(), "规范形：去重 + 有序（台账键即取自此）");
+});
+
+test("collectContractViolations 负控制：**subset 清单**里看不见违规 ⇒ ⛔ 不等于「已修」", () => {
+  const root = makeGitRoot("collect-subset");
+  fs.writeFileSync(path.join(root, "tasks", "clean.md"), taskBody({ labels: ["gap"] }));
+  fs.writeFileSync(path.join(root, "tasks", "bad.md"), taskBody({
+    labels: ["gap"],
+    contract: "```\nnot-a-known-key\n```",
+  }));
+  const subset = [path.join(root, "tasks", "clean.md")];
+  assert.deepEqual(collectContractViolations(root, subset).entries, [],
+    "子集运行里「没看见」既可能是已修、也可能是根本没扫 —— 这正是写者不能判处置的理由");
+  assert.ok(collectContractViolations(root, listTaskFiles(root, [])).entries.length > 0,
+    "同一时刻的全量重算看得见它 ⇒ 读者必须自己跑全量");
+});
+
+test("listTaskFiles: 显式清单原样返回（subset 形态）；缺省扫 tasks/*.md 且按路径有序", () => {
+  const root = makeGitRoot("listfiles");
+  fs.writeFileSync(path.join(root, "tasks", "b.md"), taskBody({ labels: ["gap"] }));
+  fs.writeFileSync(path.join(root, "tasks", "a.md"), taskBody({ labels: ["gap"] }));
+  assert.deepEqual(listTaskFiles(root, []).map((f) => path.basename(f)), ["a.md", "b.md"]);
+  const explicit = [path.join(root, "tasks", "b.md")];
+  assert.deepEqual(listTaskFiles(root, explicit), explicit);
+});

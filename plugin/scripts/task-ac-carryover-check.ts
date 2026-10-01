@@ -208,6 +208,26 @@ export function scanStore({ repoRoot, tasksDir = path.join(repoRoot, "tasks"), f
   return { blocked, carries, staleCarries, unnamed, scanned: texts.size };
 }
 
+/** The CURRENT unowned-AC universe: one `<task-id>: <AC-id>` per unowned AC, sorted — exactly the
+ *  strings this file hands to `recordNoBlockLedger` as `newOnes`, but WITHOUT the baseline
+ *  subtraction. The ledger reader (manager-tick-readings.ts) uses this to answer "does this recorded
+ *  violation still reproduce?"; ⛔ not `newViolations`, which is baseline-relative and would flip a
+ *  whole batch to "disposed" the moment anyone re-anchors the grandfather list. Extracted from
+ *  `runCli` (which now calls it) so there is exactly one builder of this set. */
+export function collectUnownedAcs(repoRoot, { filePaths = null } = {}) {
+  const scan = scanStore({
+    repoRoot,
+    tasksDir: path.join(repoRoot, "tasks"),
+    filePaths,
+  });
+  const entries = [];
+  for (const b of scan.blocked) {
+    for (const ac of b.missing) entries.push(`${b.taskId}: ${ac}`);
+  }
+  entries.sort();
+  return { entries, scanned: scan.scanned };
+}
+
 // ── Ratchet data file (AC7: shrink-only legacy baseline) ──────────────────────────────────────────
 export const BASELINE_FILE_REL = "docs/analysis/task-ac-carryover-baseline.md";
 
@@ -338,11 +358,9 @@ export function runCli(argv) {
   }
   const scan = scanStore({ repoRoot: wsRoot, tasksDir, filePaths: subset ? scanFiles : null });
 
-  const currentEntries = [];
-  for (const b of scan.blocked) {
-    for (const ac of b.missing) currentEntries.push(`${b.taskId}: ${ac}`);
-  }
-  currentEntries.sort();
+  // Single-source: the unowned-AC set comes from collectUnownedAcs (also used by the ledger reader),
+  // ⛔ not from a second inline copy that could drift.
+  const { entries: currentEntries } = collectUnownedAcs(wsRoot, { filePaths: subset ? scanFiles : null });
   const { baseline, baselineCount } = readBaseline(wsRoot);
   const firstBaseline = baselineCount === null;
   const newOnes = currentEntries.filter((e) => !baseline.has(e));

@@ -20,6 +20,9 @@ import {
   latestTickLogReading,
   goalReading,
   nonBlockCoverageLines,
+  readTaskFileViolationLedger,
+  taskFileViolationLedgerLines,
+  formatTaskFileViolationLedger,
   render,
   renderSelected,
 } from "../scripts/manager-tick-readings.ts";
@@ -286,4 +289,141 @@ test("manager-tick-readings: render 把台账读数并入固定标签结构（�
   assert.match(out, /^gate_event_coverage_nonblock\.state /m, out);
   assert.match(out, /^gate_event_coverage_nonblock\.unresolved /m, out);
   assert.match(out, /^gate_event_coverage_nonblock\.detail /m, out);
+});
+
+// ── 任务文件违规台账的读侧（gap-task-file-violation-ledger-has-no-consumer） ────────────────────────
+// 处置轴 = 「曾经记过 ∧ 此刻不再成立」，由**读者对全量 store 重算**得出（⛔ 不是写者追加 resolved：
+// scoped 层把该 checker 收窄成 --strict-subset <touched files>，写者拿不到「没看见」与「没扫」的区分）。
+
+const LEDGER_REL = path.join(".quay", "task-file-violation-ledger.jsonl");
+/** 一个 `status: done` 且 AC 未勾选、无 Carries 后继的任务 —— task-ac-carryover-check 的确定违规。 */
+const DONE_TASK_UNCHECKED = (id) => `---\nid: ${id}\ntitle: ${id}\nstatus: done\n---\n## Acceptance Criteria\n\n- [ ] AC1: something undone\n`;
+const LEDGER_ROW = (checker, violation) =>
+  JSON.stringify({ key: `${checker}|${violation}`, checker, violation, at: "2026-08-12T03:23:09.779Z" }) + "\n";
+
+test("台账读侧 ①有未处置：条目仍在 ⇒ UNRESOLVED 且逐条列出（⛔ 不是布尔）", (t) => {
+  const dir = tmpdir(t);
+  write(dir, "tasks/t-alpha.md", DONE_TASK_UNCHECKED("t-alpha"));
+  write(dir, LEDGER_REL, LEDGER_ROW("task-ac-carryover-check", "t-alpha: AC1"));
+  const r = readTaskFileViolationLedger(dir);
+  assert.equal(r.evaluated, true);
+  assert.equal(r.carrier, "read");
+  assert.equal(r.entries, 1);
+  assert.equal(r.disposed, 0);
+  assert.deepEqual(r.unresolved.map((e) => e.violation), ["t-alpha: AC1"]);
+  const lines = taskFileViolationLedgerLines(dir);
+  assert.equal(lines[0], "task_file_violation_ledger.state UNRESOLVED");
+  assert.equal(lines[1], "task_file_violation_ledger.unresolved 1 (entries 1, disposed 0)");
+  assert.match(lines[2], /t-alpha: AC1/);
+});
+
+test("台账读侧 ②已处置：**同一份台账**、store 修好 ⇒ 不再被报（处置轴真的会缩，不是只增不减）", (t) => {
+  const dir = tmpdir(t);
+  write(dir, LEDGER_REL, LEDGER_ROW("task-ac-carryover-check", "t-alpha: AC1"));
+  write(dir, "tasks/t-alpha.md", DONE_TASK_UNCHECKED("t-alpha"));
+  assert.equal(readTaskFileViolationLedger(dir).unresolved.length, 1, "前提：修之前确实是未处置");
+  // 处置 = 把违规真修掉（勾上那个 AC）。⛔ 不是豁免 id 表、⛔ 不是删台账行。
+  write(dir, "tasks/t-alpha.md", DONE_TASK_UNCHECKED("t-alpha").replace("- [ ] AC1", "- [x] AC1"));
+  const after = readTaskFileViolationLedger(dir);
+  assert.equal(after.entries, 1, "台账文件本身没被动过 —— 变的只有 store");
+  assert.equal(after.disposed, 1);
+  assert.deepEqual(after.unresolved, [], "同一份台账，修好后不再出现在 unresolved");
+  assert.equal(taskFileViolationLedgerLines(dir)[0], "task_file_violation_ledger.state ok");
+  // 负控制：台账行**仍在**（若上面的 ok 是因为行被删掉了，这条会红）
+  assert.match(fs.readFileSync(path.join(dir, LEDGER_REL), "utf8"), /t-alpha: AC1/);
+});
+
+test("台账读侧 ③a 载体缺席 ⇒ not_evaluated（⛔ 绝不印成 0；「没人报过」≠「报过且都处置了」）", (t) => {
+  const dir = tmpdir(t);
+  write(dir, "tasks/t-alpha.md", DONE_TASK_UNCHECKED("t-alpha"));
+  const r = readTaskFileViolationLedger(dir);
+  assert.equal(r.evaluated, false);
+  assert.equal(r.carrier, "absent");
+  assert.equal(r.unresolved, null, "未评估必须是 null，⛔ 不是 [] （空数组会被读成「查过且干净」）");
+  const lines = taskFileViolationLedgerLines(dir);
+  assert.equal(lines[0], "task_file_violation_ledger.state not_evaluated");
+  assert.equal(lines[1], "task_file_violation_ledger.unresolved -");
+  // 对照：载体在场时第一行不是 not_evaluated —— 两态确实不同形
+  write(dir, LEDGER_REL, LEDGER_ROW("task-ac-carryover-check", "t-alpha: AC1"));
+  assert.notEqual(taskFileViolationLedgerLines(dir)[0], "task_file_violation_ledger.state not_evaluated");
+});
+
+test("台账读侧 ③b 载体在但全部行不可解析 ⇒ unreadable（读不懂 ⛔ 不等于零未处置）", (t) => {
+  const dir = tmpdir(t);
+  write(dir, "tasks/t-alpha.md", DONE_TASK_UNCHECKED("t-alpha"));
+  write(dir, LEDGER_REL, "{not json\n\nalso not json\n");
+  const r = readTaskFileViolationLedger(dir);
+  assert.equal(r.evaluated, false);
+  assert.equal(r.carrier, "unreadable");
+  assert.equal(r.malformedLines, 2);
+  assert.equal(r.unresolved, null);
+  assert.match(taskFileViolationLedgerLines(dir)[1], /^task_file_violation_ledger\.unresolved -$/);
+});
+
+test("台账读侧 ④台账读到了但全量重算跑不成 ⇒ not_evaluated（「查不成」⛔ 不等于「查过且干净」）", (t) => {
+  const dir = tmpdir(t); // 有台账、**没有 tasks/** ⇒ 重算抛错
+  write(dir, LEDGER_REL, LEDGER_ROW("task-ac-carryover-check", "t-alpha: AC1"));
+  const r = readTaskFileViolationLedger(dir);
+  assert.equal(r.evaluated, false);
+  assert.equal(r.carrier, "read", "载体本身读到了 —— 未评估的理由是重算，不是载体");
+  assert.equal(r.entries, 1);
+  assert.equal(r.unresolved, null);
+  assert.match(r.reason, /全量重算跑不成/);
+});
+
+test("台账读侧：无重算器的 checker 保守计入未处置并点名（⛔ 不静默判 disposed）", (t) => {
+  const dir = tmpdir(t);
+  write(dir, "tasks/t-alpha.md", DONE_TASK_UNCHECKED("t-alpha"));
+  write(dir, LEDGER_REL, LEDGER_ROW("some-future-checker", "whatever: X1"));
+  const r = readTaskFileViolationLedger(dir);
+  assert.equal(r.evaluated, true);
+  assert.equal(r.disposed, 0, "没有重算器 ⇒ 处置不可判 ⇒ ⛔ 不算 disposed");
+  assert.deepEqual(r.unknownCheckers, ["some-future-checker"]);
+  assert.deepEqual(r.unresolved.map((e) => e.violation), ["whatever: X1"]);
+  assert.match(taskFileViolationLedgerLines(dir).join("\n"), /unknown_checkers some-future-checker/);
+});
+
+test("台账读侧：tick 明细有界但**计数是全量**（截断不得把 20 条印成 12 条）", (t) => {
+  const dir = tmpdir(t);
+  // 20 个各自独立的任务，每个都真的还有一条未处置违规 —— 与台账 20 行一一对应。
+  const ids = Array.from({ length: 20 }, (_, i) => `t-${String(i).padStart(2, "0")}`);
+  for (const id of ids) write(dir, `tasks/${id}.md`, DONE_TASK_UNCHECKED(id));
+  write(dir, LEDGER_REL, ids.map((id) => LEDGER_ROW("task-ac-carryover-check", `${id}: AC1`)).join(""));
+  const lines = taskFileViolationLedgerLines(dir);
+  assert.equal(lines[1], "task_file_violation_ledger.unresolved 20 (entries 20, disposed 0)", "计数必须是全量");
+  assert.match(lines[2], /…\(\+8\)$/, "明细截到 12 条并显式标出余数：" + lines[2]);
+  assert.equal(lines[2].split(",").length, 13, "12 条明细 + 1 个余数后缀");
+  // 负控制：把其中 10 条真的处置掉 ⇒ 计数随之降到 10（证明截断的是明细、不是判定）
+  for (const id of ids.slice(0, 10)) {
+    write(dir, `tasks/${id}.md`, DONE_TASK_UNCHECKED(id).replace("- [ ] AC1", "- [x] AC1"));
+  }
+  assert.equal(
+    taskFileViolationLedgerLines(dir)[1],
+    "task_file_violation_ledger.unresolved 10 (entries 20, disposed 10)",
+  );
+});
+
+test("台账读侧：render 把台账读数并入固定标签结构（每轮都报到处置面）", (t) => {
+  const dir = tmpdir(t);
+  write(dir, "tasks/t-alpha.md", DONE_TASK_UNCHECKED("t-alpha"));
+  write(dir, LEDGER_REL, LEDGER_ROW("task-ac-carryover-check", "t-alpha: AC1"));
+  const out = render(parseProjects({ MTR_PROJECTS: "quay=" + dir }), { repoRoot: dir });
+  assert.match(out, /^task_file_violation_ledger\.state UNRESOLVED$/m, out);
+  assert.match(out, /^task_file_violation_ledger\.unresolved 1 \(entries 1, disposed 0\)$/m, out);
+  assert.match(out, /^task_file_violation_ledger\.detail /m, out);
+});
+
+test("台账读侧：renderSelected 子命令与 format 出口（取证用，同一实现）", (t) => {
+  const dir = tmpdir(t);
+  write(dir, "tasks/t-alpha.md", DONE_TASK_UNCHECKED("t-alpha"));
+  write(dir, LEDGER_REL, LEDGER_ROW("task-ac-carryover-check", "t-alpha: AC1"));
+  const sel = renderSelected("task-file-violation-ledger", ["--root", dir], [], dir);
+  assert.match(sel, /^task_file_violation_ledger\.state UNRESOLVED$/m, sel);
+  const txt = formatTaskFileViolationLedger(readTaskFileViolationLedger(dir));
+  assert.match(txt, /entries=1 disposed=0 unresolved=1 malformed_lines=0/);
+  assert.match(txt, /UNRESOLVED task-ac-carryover-check t-alpha: AC1/);
+  // 未评估形态：有独立一行取值，⛔ 不打印成 0
+  const absent = formatTaskFileViolationLedger(readTaskFileViolationLedger(tmpdir(t)));
+  assert.match(absent, /^NOT-EVALUATED: /);
+  assert.match(absent, /carrier=absent/);
 });
