@@ -3,7 +3,7 @@ id: gap-routine-semantic-dedup-scan-readcpustall-dup
 title: "semantic-dedup-scan: two byte-identical private /proc/pressure/cpu
   readers (a third same-named reader, cap-from-gate.ts:341, is genuinely
   different)"
-status: ready
+status: needs-human
 labels:
   - gap
   - routine-filed
@@ -63,3 +63,13 @@ extract — shared psi helper
 - `plugin/scripts/psi-failure-correlation-check.ts`
 - `plugin/scripts/suite-load-sampler.ts`
 - `tasks/gap-routine-semantic-dedup-scan-readcpustall-dup.md`
+## Needs-Human
+
+**执行 2026-10-01T10:55:04.528Z — 连续修满重试上限仍不合格（标 needs-human）**
+
+- 阻碍原因：suite 红但归因不出任何失败测试文件（基建/契约疑似，非实现缺陷）——停止重派，⛔ 不再拿新会话撞同一堵墙：suite red could not be attributed to any failing test file in 2 consecutive rounds (bounded to at most one retry) — infra/contract suspected, not an implementable defect (parser attributed no failing file (failure-line count unavailable on this judgment)); stopping instead of spending another worker session
+- 失败步/判词：step=suite: # fail 46
+- run_id：wk-prod-anchor
+- session_id：372ddc35-65e5-4bdc-a524-f9da896dca30
+- suite 日志：/data/home/yale/work/quay/.quay/fan-in-suite-gap-routine-semantic-dedup-scan-readcpustall-dup~wk-prod-anchor~1790852035798-669a78.log
+- fan-in 日志：/data/home/yale/work/quay/.quay/fan-in-gap-routine-semantic-dedup-scan-readcpustall-dup-wk-prod-anchor.log
