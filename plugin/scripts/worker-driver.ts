@@ -316,9 +316,17 @@ import {
   writeScopedGateCache,
   scopedGateCacheWriteSignature,
   resolveScopedGateCommand,
+  // suite 日志失败行解析（gap-suite-failure-attribution-third-party-layout 的实现）随本模块对 fan-in 的
+  // 反向依赖迁到 worker-fan-in.ts —— 机械 fan-in 的【本轮重跑失败文件】也要这份读数，而 worker-fan-in
+  // ⛔ 不能 import 本文件（值环）。单一真相源住在被依赖的下层，本文件只 re-export 给既有消费者。
+  parseSuiteLogFailures,
+  failingTestFilesFromSuiteLog,
   type MechanicalFanInResult,
 } from "./worker-fan-in.ts";
 export {
+  parseSuiteLogFailures,
+  failingTestFilesFromSuiteLog,
+  type SuiteLogFailureParse,
   resolveScopedGateCommand,
   scopedGateCommandFor,
   resolveDocCheckCommand,
@@ -1915,151 +1923,12 @@ export interface RelatednessSignal {
   reason: string;
 }
 
-// ── suite 失败行解析（gap-suite-failure-attribution-third-party-layout）─────────────────────────────
-// 上游缺陷：本函数曾把【本仓库的测试布局】写死进判据——前缀只认 `(packages|plugin|experiments)/`、
-// 后缀只认 `.test.mjs`。第三方项目（`server/**/*.test.ts`、`src/**/*.test.tsx`）匹配恒为 0 ⇒ 返回
-// `[]` ⇒ judgeRetryExemption 判 insufficient-data-fallback ⇒ park 时的判词写成「the suite log names
-// nothing a worker could fix」——**一个肯定断言，而它的依据只是「解析器没读懂」**（硬规则 3b 的镜像：
-// 读不懂 ⇒ 伪装成判定）。生产读数（claudecodeui `.quay/worker-round.jsonl`，2026-09-20→09-23）：51 次
-// retry_exemptions 中 failingTestFiles 非空 **0 次**，波及 29 个任务；其中一例真凶是一条可一行修的
-// barrel 导入 lint 错误（`not ok - lint: server/…/model-context-window.test.ts:10:49: …`）。
-//
-// 修法：⛔ 不再按路径前缀/后缀白名单判定，改为**按 token 的形态**分三类（硬规则 3b 要求「读不懂」有
-// 独立取值，⛔ 不与「合格」同形）：
-//   - 带路径分隔符的 token ⇒ 真实文件位置（`server/x/y.test.ts`、worktree 绝对路径形态都算）
-//   - 无路径且无扩展名的 token ⇒ **伪阶段名**（`lint` / `typecheck`——runner 的 per-file 记录里它们
-//     占同一字段位，但它们不是文件；旧实现会把 `lint` 当测试文件）
-//   - 其余（含句子碎片、无路径又非测试后缀的 token）⇒ **无法识别**，原样留证，⛔ 不混进 files
-/** suite 日志失败行的解析结果。三态可区分（硬规则 3b）。 */
-export interface SuiteLogFailureParse {
-  /** 归因到的失败文件（repo-relative；worktree 绝对路径形态按 root 归一）。 */
-  files: string[];
-  /** 解析器识别出的失败行数 N（`__PERFILE__ … passed=false` 与 `not ok - …` 两类之和）——
-   *  唯一能区分「日志里没有失败行」与「有失败行但解析器读不懂」的量（⛔ 旧实现两者同形）。 */
-  failingLines: number;
-  /** 识别为伪阶段名的 token（`lint` / `typecheck` 等）——⛔ 不是测试文件。 */
-  pseudoStages: string[];
-  /** 既非真实文件也非伪阶段名 ⇒ 读不懂的 token（原样留证）。 */
-  unclassified: string[];
-}
-
-/** 测试文件后缀（node:test 的 `*.test.*` 与 jest/vitest 的 `*.spec.*`；本仓库自身用 .test.mjs）。 */
-const SUITE_TEST_FILE_RE = /\.(?:test|spec)\.(?:mjs|cjs|js|ts|tsx|jsx|mts|cts)$/i;
-/** 路径 token 的合法字符集——挡掉 `boundaries(dependencies):` 这类句子碎片混进文件名（那是"读不懂"）。 */
-const SUITE_PATH_TOKEN_RE = /^[\w./@~+-]+$/;
-
-/** 单个 token 的形态分类。⛔ 不查 worktree 是否存在：第三方日志里的失败文件常常不在本 worktree
- *  （其它模块/并行分支），存在性检查会把真实文件误判成读不懂（且 AC 用例的假 root 里文件不存在）。 */
-function classifySuiteToken(token: string): "file" | "pseudo-stage" | "unclassified" {
-  const t = String(token ?? "").trim().replace(/[,;]+$/, "");
-  if (!t) return "unclassified";
-  if (!SUITE_PATH_TOKEN_RE.test(t)) return "unclassified";
-  if (t.includes("/")) return "file";
-  if (!t.includes(".")) return "pseudo-stage";
-  return SUITE_TEST_FILE_RE.test(t) ? "file" : "unclassified";
-}
-
-/** token → repo-relative；定位不出 ⇒ null（**读不懂的独立取值**，硬规则 3b）。
- *  绝对路径的 repo 根【只能】由 root 给出（生产里 `measure-suite-reporter` 发的是 full-path，而 suite
- *  在任务 worktree 里跑、调用方拿的是主检出 root）：先按 root 前缀剥离，不在 root 下则取「在 root 下
- *  真实存在」的最长后缀——存在性是判据。⛔ 不按 `packages|plugin|experiments` 关键词猜前缀（那正是本
- *  缺陷的成因）；⛔ 也不在无 root 时把绝对路径削成「看着像 repo-relative」的假路径——它会被当成已归因，
- *  直接污染 AC-317 的读数（假在产物字段上 ⇒ 比读不懂更坏）。 */
-function toRepoRelToken(token: string, root: string | null): string | null {
-  const raw = String(token ?? "").replace(/\\/g, "/").trim();
-  if (!raw.startsWith("/")) return normalizeRel(raw) || null;
-  const rootAbs = root ? `/${normalizeRel(root)}` : "";
-  if (!rootAbs || rootAbs === "/") return null;
-  if (raw === rootAbs || raw.startsWith(`${rootAbs}/`)) return normalizeRel(raw.slice(rootAbs.length)) || null;
-  const parts = raw.split("/").filter(Boolean);
-  for (let i = 1; i < parts.length; i += 1) {
-    const cand = parts.slice(i).join("/");
-    try {
-      if (fs.statSync(path.join(rootAbs, cand)).isFile()) return cand;
-    } catch { /* 该后缀不存在，继续缩短 */ }
-  }
-  return null;
-}
-
-/** `__PERFILE__ duration_ms=… <token> passed=false …` 的 <token> = `passed=false` 前那个字段。 */
-function suiteTokenBeforePassedFalse(line: string): string | null {
-  const idx = line.indexOf("passed=false");
-  if (idx < 0) return null;
-  const parts = line.slice(0, idx).trim().split(/\s+/);
-  return parts.length ? parts[parts.length - 1] : null;
-}
-
-/** `not ok - <rest>` 的 <rest>（兼容 TAP 的 `not ok 1 - name` 编号形态）。无该形态 / 空 ⇒ null。
- *  ⛔ 这一个正则就是「什么算 not ok 行」的唯一定义：下面的 head / 指名文件两个读者共用它。 */
-function suiteNotOkRest(line: string): string | null {
-  const m = /^not ok\b(?:\s+\d+)?\s*-\s*(.*)$/i.exec(line);
-  if (!m) return null;
-  return m[1].trim() || null;
-}
-
-/** `<rest>` 里 `:` 之前的头部 token（`lint` / `server/a/b.test.ts`）；空 ⇒ ""（调用方按 unclassified 处置）。 */
-function suiteNotOkHead(rest: string): string {
-  const ci = rest.indexOf(":");
-  return (ci < 0 ? rest : rest.slice(0, ci)).trim();
-}
-
-/** 伪阶段名后指名的真实文件：`lint: <rel>:<line>:<col>: <msg>` ⇒ `<rel>`。
- *  只在确实像路径/测试文件时返回（⛔ 不把 `not ok - lint: 5 problems` 的 `5` 当文件）。 */
-function suiteFileNamedAfterStage(rest: string): string | null {
-  const ci = rest.indexOf(":");
-  if (ci < 0) return null;
-  const chunk = (rest.slice(ci + 1).trim().split(/\s+/)[0] ?? "").replace(/(?::\d+){1,2}:?$/, "").replace(/:$/, "");
-  if (!chunk) return null;
-  if (!chunk.includes("/") && !SUITE_TEST_FILE_RE.test(chunk)) return null;
-  return chunk;
-}
-
-/** suite 日志 → 失败行解析（三态）。N = 失败行数（`__PERFILE__ … passed=false` + `not ok - …`）。
- *  ⛔ N 与 files 分开返回：调用方据此把「日志里没有失败行」与「有 N 行但一行也归因不出」写成不同的判词
- *  （旧实现两者都只说「提取不出」，与「真的没有可修对象」同形）。 */
-export function parseSuiteLogFailures(logText: string, root?: string | null): SuiteLogFailureParse {
-  const files: string[] = [];
-  const pseudoStages: string[] = [];
-  const unclassified: string[] = [];
-  let failingLines = 0;
-  const notePseudo = (t: string): void => { if (t && !pseudoStages.includes(t)) pseudoStages.push(t); };
-  const noteUnclassified = (t: string): void => { if (t && !unclassified.includes(t)) unclassified.push(t); };
-  const addFile = (token: string): void => {
-    // 定位不出 repo-relative（如无 root 的绝对路径）⇒ 归入「读不懂」，⛔ 不冒充已归因（硬规则 3b）。
-    const rel = toRepoRelToken(token, root ?? null);
-    if (!rel) { noteUnclassified(token); return; }
-    if (!files.includes(rel)) files.push(rel);
-  };
-
-  for (const raw of String(logText ?? "").split("\n")) {
-    const line = raw.trim();
-    if (line.includes("passed=false")) {
-      const token = suiteTokenBeforePassedFalse(line);
-      if (!token) continue;
-      failingLines += 1;
-      const cls = classifySuiteToken(token);
-      if (cls === "file") addFile(token);
-      else if (cls === "pseudo-stage") notePseudo(token);
-      else noteUnclassified(token);
-      continue;
-    }
-    const rest = suiteNotOkRest(line);
-    if (rest === null) continue;
-    failingLines += 1;
-    const head = suiteNotOkHead(rest);
-    const cls = classifySuiteToken(head);
-    if (cls === "file") { addFile(head); continue; }
-    if (cls === "pseudo-stage") notePseudo(head);
-    else noteUnclassified(head);
-    // `not ok - <stage>: <rel>:<line>:<col>` 行把阶段失败【指名】到了真实文件上 ⇒ 归因到它。
-    const named = suiteFileNamedAfterStage(rest);
-    if (named !== null) {
-      if (classifySuiteToken(named) === "file") addFile(named);
-      else noteUnclassified(named);
-    }
-  }
-  return { files, failingLines, pseudoStages, unclassified };
-}
+// ── suite 失败行解析 → 已迁往 worker-fan-in.ts（**单一真相源**）────────────────────────────────────
+// gap-fan-in-suite-red-no-in-round-rerun-of-red-files：机械 fan-in 的「suite 红后本轮重跑【日志点名的】
+// 失败文件」也要这份读数，而 worker-fan-in.ts ⛔ 不能值 import 本文件（本文件已值 import 它 ⇒ 值环，
+// import-graph-check 的 valueSccs 基线为 0）。修法是【把实现搬到被依赖的下层】，本文件反向 import 并
+// re-export（见文件顶部两条语句）——既有消费者（judgeRetryExemption / stop-terminal 判词 / 既有测试）
+// 的 import 面逐字不变，⛔ 不复制第二份解析器（复制 = 两处漂移源）。
 
 /** 判词的「读到了什么」半边：伪阶段名 + 读不懂的 token 摘要（judgeRetryExemption 与 stop-terminal 判词
  *  共用一份措辞，⛔ 不各写一遍——两份措辞就是两处漂移）。 */
@@ -2068,13 +1937,6 @@ function suiteTokenDetail(pseudoStages: string[], unclassified: string[]): strin
   if (pseudoStages.length) extra.push(`pseudo-stage tokens: ${pseudoStages.slice(0, 5).join(", ")}`);
   if (unclassified.length) extra.push(`unrecognized tokens: ${unclassified.slice(0, 5).join(", ")}`);
   return extra.length ? `; ${extra.join("; ")}` : "";
-}
-
-/** 从 suite 日志文本提取失败测试文件（repo-relative）。见 parseSuiteLogFailures。
- *  读不出 ⇒ []（不伪造；空列表与「读懂了但无失败」同形，调用方据 continueSuiteLogNote 的有无判定
- *  是否 suite 红，或据 parseSuiteLogFailures().failingLines 把两者分开）。 */
-export function failingTestFilesFromSuiteLog(logText: string, root?: string | null): string[] {
-  return parseSuiteLogFailures(logText, root).files;
 }
 
 // ── 静态相位失败的归因（gap-suite-red-attribution-blind-to-static-phase）────────────────────────────
@@ -2479,6 +2341,80 @@ export function assertionSignaturesFromSuiteLog(logText: string): string[] {
     if (!out.includes(sig)) out.push(sig);
   }
   return out;
+}
+
+// ── gap-fan-in-suite-red-no-in-round-rerun-of-red-files：只读仪器（按失败测试文件聚合）──────────────
+// 用途：把「少数脆弱文件在数天内反复红、每次换一个受害任务」这个形态变成一份可排序的清单（redRounds
+// 降序），据此决定该修哪个文件。⛔ 它是**只读观测面**，不参与任何控制流（不是判据输入、不拦截 fan-in）；
+// 数据源是唯一的耐久台账 `.quay/worker-outcome.jsonl`（suite 尝试日志会在落地时被删，台账不会）。
+//
+// 三态（硬规则 3b）：`evaluated:true` 的文件进 rows；`evaluated:false` 的轮次单独计进
+// `notEvaluatedRounds`（那是「suite 红但解析不出失败文件」，⛔ 不与 redRounds 混计）；`failedTestFiles`
+// 为 null（suite 从未红 ⇒ 不适用）的记录两边都不进。台账缺失/坏行 ⇒ 跳过（⛔ 不伪造）。
+/** 一条失败测试文件的跨任务聚合读数。 */
+export interface RerunFlakeRow {
+  file: string;
+  /** 被点名为失败文件的轮次数。 */
+  redRounds: number;
+  /** 波及的不同任务（首次出现序）。 */
+  tasks: string[];
+  /** 首红 / 末红（台账记录的 ts；取字典序 min/max —— ISO-8601 ⇒ 与时间序一致）。 */
+  firstRedTs: string;
+  lastRedTs: string;
+  /** 其中【本轮内重跑转绿】的轮次数——真正的 flake 证据（该文件在同一棵合并树上红转绿过）。 */
+  rerunGreenRounds: number;
+}
+
+/** 按失败测试文件聚合 fan-in 的 suite 红记录（只读）。返回 rows 按 redRounds 降序（同数按文件名升序）。 */
+export function aggregateRerunFlakes(root: string): {
+  rows: RerunFlakeRow[];
+  notEvaluatedRounds: number;
+  scannedRounds: number;
+} {
+  let text: string;
+  try {
+    text = fs.readFileSync(path.join(root, WORKER_OUTCOME_REL), "utf8");
+  } catch {
+    return { rows: [], notEvaluatedRounds: 0, scannedRounds: 0 };
+  }
+  const acc = new Map<string, RerunFlakeRow>();
+  let notEvaluatedRounds = 0;
+  let scannedRounds = 0;
+  for (const line of text.split("\n")) {
+    const trimmed = line.trim();
+    if (!trimmed) continue;
+    let rec: { task?: unknown; ts?: unknown; mechanical_fan_in?: unknown };
+    try {
+      rec = JSON.parse(trimmed);
+    } catch {
+      continue; // 坏行 ⇒ 跳过（⛔ 不伪造成一条读数）
+    }
+    if (!rec || typeof rec !== "object") continue;
+    const mfi = rec.mechanical_fan_in as { failedTestFiles?: unknown; rerun?: unknown } | undefined;
+    if (!mfi || typeof mfi !== "object") continue;
+    const ftf = mfi.failedTestFiles as { evaluated?: unknown; files?: unknown } | undefined;
+    if (!ftf || typeof ftf !== "object") continue; // suite 从未红 ⇒ 不适用（⛔ 不进口径）
+    scannedRounds += 1;
+    const files = Array.isArray(ftf.files) ? ftf.files.filter((f): f is string => typeof f === "string" && f !== "") : [];
+    if (ftf.evaluated !== true || files.length === 0) {
+      notEvaluatedRounds += 1;
+      continue;
+    }
+    const task = typeof rec.task === "string" ? rec.task : "";
+    const ts = typeof rec.ts === "string" ? rec.ts : "";
+    const rerunGreen = (mfi.rerun as { state?: unknown } | undefined)?.state === "rerun-green";
+    for (const file of files) {
+      const row = acc.get(file) ?? { file, redRounds: 0, tasks: [], firstRedTs: ts, lastRedTs: ts, rerunGreenRounds: 0 };
+      row.redRounds += 1;
+      if (task && !row.tasks.includes(task)) row.tasks.push(task);
+      if (ts && (row.firstRedTs === "" || ts < row.firstRedTs)) row.firstRedTs = ts;
+      if (ts && (row.lastRedTs === "" || ts > row.lastRedTs)) row.lastRedTs = ts;
+      if (rerunGreen) row.rerunGreenRounds += 1;
+      acc.set(file, row);
+    }
+  }
+  const rows = [...acc.values()].sort((a, b) => b.redRounds - a.redRounds || a.file.localeCompare(b.file));
+  return { rows, notEvaluatedRounds, scannedRounds };
 }
 
 /** 窗口内全部 suite-red exited-not-landed 尝试（跨任务，⛔ 非 per-task）。读 WORKER_OUTCOME_REL 一次，
@@ -5058,6 +4994,7 @@ export async function main(argv: string[]): Promise<number> {
   let scopedGateCacheDevelopSha: string | undefined;
   let appendCompleteGateEventFlag = false;
   let appendCompleteActor: string | undefined;
+  let fanInFlakeReport = false;
 
   for (let i = 0; i < args.length; i++) {
     const a = args[i];
@@ -5090,6 +5027,7 @@ export async function main(argv: string[]): Promise<number> {
     else if (a === "--develop-sha") scopedGateCacheDevelopSha = args[++i];
     else if (a === "--append-complete-gate-event") appendCompleteGateEventFlag = true;
     else if (a === "--actor") appendCompleteActor = args[++i];
+    else if (a === "--fan-in-flake-report") fanInFlakeReport = true;
     else if (a === "--help" || a === "-h") {
       console.log(
         "worker-driver — SPEC §5 阶段 2+3+4：spawn 多 worker（并发 N + 超时 SIGTERM + ⛔ 不 stash 主检出 + MCP 控制面 + 常驻选择环）\n" +
@@ -5107,6 +5045,7 @@ export async function main(argv: string[]): Promise<number> {
           "  --mechanical-fan-in --task <id> --worktree <path>  每任务新进程入口：加载当前代码跑机械 fan-in，stdout 单行 JSON result（exit 0=landed / 2=red）\n" +
           "  --write-scoped-gate-cache --task <id> --develop-sha <sha>  写 scoped-gate 缓存（worker 退出前跑绿后调用；stdout 单行 JSON）\n" +
           "  --append-complete-gate-event --task <id> [--actor <a>]  写 `complete` pass GateEvent 到 <root>/.quay/gate-events.jsonl（语义 fan-in workflow 的 flip 落地补写；exit 0=已写 / 2=缺参）\n" +
+          "  --fan-in-flake-report [--root <repo>] [--json]  只读：按失败测试文件聚合 .quay/worker-outcome.jsonl 里的 suite 红轮次（redRounds / tasks / 首红→末红 / rerunGreenRounds），stdout 单行 JSON\n" +
           "  ⛔ 无 --serve：MCP 控制面（halt / setPreference / forceDispatch）已上收进 Layer 0——由每个 kind 的\n" +
           "     supervisor（driver-runtime.ts runSupervisor）起，逐 kind 写 <prefix>-control-plane.json 回读面",
       );
@@ -5139,6 +5078,14 @@ export async function main(argv: string[]): Promise<number> {
     });
     process.stdout.write(`${JSON.stringify(result)}\n`);
     return result.outcome === "landed" ? 0 : 2;
+  }
+
+  // --fan-in-flake-report：只读仪器（gap-fan-in-suite-red-no-in-round-rerun-of-red-files 的 Proposal §4）。
+  // ⛔ 不参与任何控制流、不写任何文件——只回答「哪些失败测试文件在反复红、波及几个任务、有没有在同一棵树
+  // 上红转绿过」。stdout 单行 JSON（同本文件其它 --flag 入口的形态）。
+  if (fanInFlakeReport) {
+    process.stdout.write(`${JSON.stringify(aggregateRerunFlakes(rootDir))}\n`);
+    return 0;
   }
 
   // --write-scoped-gate-cache：worker 退出前跑绿 scoped 门后，机械写 (task, developSha, pass) 到

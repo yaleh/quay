@@ -46,6 +46,9 @@ import {
 } from "./driver-runtime.ts";
 import { spawnSuiteAndWait, type SuiteOutcome, type SuiteRunResult } from "./suite-driver.ts";
 import { suiteLockBase } from "./suite-lock-slots.ts";
+// gate-script-base 是叶子（只 import node 内建）——⛔ 不成环。normalizeRel 供本文件的 suite 日志
+// 失败行解析（自 worker-driver.ts 迁入，见该簇的注释）。
+import { normalizeRel } from "./gate-script-base.ts";
 import { computeDocCheckFaceKey, readDocCheckCache, writeDocCheckCache } from "./doc-check-cache.ts";
 import { buildMirrorState, writeMirrorState, shouldSkipMirrorWrite, readCurrentState } from "./mirror-full-suite-state.ts";
 import { defaultLaneCount, readLoadAvg } from "./full-suite-runner.ts";
@@ -136,6 +139,12 @@ export interface LoopFanInContract {
   scopedCommand: CapabilityDecl<string[]>;
   /** `doc_check_command`: doc-check 的 argv 模板（`{worktree}` 占位符）。未声明 ⇒ 同上。 */
   docCheckCommand: CapabilityDecl<string[]>;
+  /** `rerun_command`: **本轮重跑失败文件**的 argv 模板（`{worktree}` 占位符 + `{files}` 整元素占位符——
+   *  该元素被失败文件列表**逐个替换**）。**项目声明**，产品代码不含任何项目知识（⛔ 不引入「已知负载
+   *  敏感族」名单：那条路已于 2026-09-03 被人裁定取消，`gap-fan-in-suite-red-load-sensitive-flaky-no-
+   *  isolate-rerun`）。未声明 ⇒ 该能力「未提供」（独立取值 `no-rerun-command-declared`，重跑结果取
+   *  `rerun-not-evaluated`，⛔ 不与「重跑跑了且红」同形）。 */
+  rerunCommand: CapabilityDecl<string[]>;
   /** `loop.test_command`：本项目声明的全量测试命令。未声明 ⇒ null。 */
   testCommand: string | null;
 }
@@ -164,6 +173,7 @@ export function readLoopFanInContract(dir: string): LoopFanInContract {
     suiteRunner,
     scopedCommand: readArgvTemplate(loop, "scoped_command"),
     docCheckCommand: readArgvTemplate(loop, "doc_check_command"),
+    rerunCommand: readArgvTemplate(loop, "rerun_command"),
     testCommand: readLoopTestCommand(dir),
   };
 }
@@ -235,6 +245,41 @@ export function resolveDocCheckCommand(capabilityDir: string, argvDir: string): 
 export function docCheckCommandFor(worktree: string): string[] | null {
   const r = resolveDocCheckCommand(worktree, worktree);
   return r.kind === "run" ? r.argv : null;
+}
+
+/** argv 模板的**文件列表**占位符替换：与 applyTemplate 同法（逐元素整串替换，⛔ 不经 shell 求值），
+ *  但 `{files}` 是**整元素**占位符——那个 argv 元素被失败文件列表**逐个替换**（splice），而不是拼成
+ *  一个字符串（argv 元素即一个路径；拼串会把路径切碎——那是注入面）。⛔ 嵌在字符串里的 `{files}`
+ *  （如 `--files={files}`）**不**展开：形状歧义会被静默当成字面量，故本模板不定义该形态。其余元素
+ *  走 `{worktree}` 替换。 */
+function applyFileTemplate(argv: string[], vars: { worktree: string; files: string[] }): string[] {
+  const out: string[] = [];
+  for (const a of argv) {
+    if (a === "{files}") out.push(...vars.files);
+    else out.push(a.split("{worktree}").join(vars.worktree));
+  }
+  return out;
+}
+
+/** 本轮重跑命令的解析（gap-fan-in-suite-red-no-in-round-rerun-of-red-files）。⛔ 与 `ScopedGateResolution`
+ *  分开：重跑**没有** fail-closed 的门语义——`not-evaluated` 是【如实】的取值（「这个项目没声明怎么按
+ *  文件重跑」不是错误），调用方据此写 `rerun-not-evaluated` 并要求【suite 仍红】（⛔ 不放行）。
+ *  `invalid`（声明了但读不懂）与 `absent` 在这里都落 not-evaluated，但 reason token 不同——硬规则 3b：
+ *  两者的成因必须在记录上可分。 */
+export function resolveRerunCommand(
+  capabilityDir: string,
+  argvDir: string,
+  files: string[],
+): { kind: "run"; argv: string[] } | { kind: "not-evaluated"; reason: string } {
+  const decl = readLoopFanInContract(capabilityDir).rerunCommand;
+  if (decl.state === "declared") return { kind: "run", argv: applyFileTemplate(decl.value, { worktree: argvDir, files }) };
+  if (decl.state === "invalid") {
+    return {
+      kind: "not-evaluated",
+      reason: `rerun-command-declaration-unreadable: loop.rerun_command = ${decl.raw}（须是非空字符串列表；⛔ 不静默当成「没声明」）`,
+    };
+  }
+  return { kind: "not-evaluated", reason: "no-rerun-command-declared" };
 }
 
 /** fan-in 的 delta 判定「没判出来」哨兵：分类器非零退出（它没能给出结论）⇒ 本轮 fail-closed 跑全量
@@ -390,6 +435,11 @@ export interface MechanicalFanInOptions {
   ffMergeModule?: string;
   /** 权威 suite 状态载体 full-suite-state.json 的路径（D7 测试缝）；缺省 = <root>/.quay/full-suite-state.json。 */
   suiteStateFile?: string;
+  /** 本轮重跑命令（测试缝）；缺省 = resolveRerunCommand(worktree, worktree, <失败文件>)（读
+   *  `<worktree>/.quay/config.yml` 的 `loop.rerun_command`，`{files}` 整元素被文件列表 splice）。 */
+  rerunCommand?: string[];
+  /** 重跑子进程的墙钟上限（测试缝）；缺省 RERUN_TIMEOUT_MS。⛔ 被中止 ⇒ rerun-not-evaluated（不放行）。 */
+  rerunTimeoutMs?: number;
 }
 
 /** 机械 fan-in 单步失败的【结构化 verdict】（D6）：⛔ 不再是 `(stderr||stdout).trim()` 裸流。
@@ -402,6 +452,26 @@ export interface MechanicalFanInStepVerdict {
   exitCode: number | null;
   summary: string;
   logFile: string | null;
+}
+
+/** 本轮重跑的三态结果（gap-fan-in-suite-red-no-in-round-rerun-of-red-files，硬规则 3b）。
+ *  ⛔ 三态不得压平：`rerun-green`（点名文件全绿 ⇒ 按绿继续落地）/ `rerun-red`（仍红 ⇒ 维持 red）/
+ *  `rerun-not-evaluated`（没有可用的重跑命令 / 解析不出文件 / 重跑自身被 watchdog 中止）。 */
+export type RerunState = "rerun-green" | "rerun-red" | "rerun-not-evaluated";
+
+/** 本轮重跑的读数（落进 mechanical_fan_in.rerun）。 */
+export interface RerunReading {
+  state: RerunState;
+  /** `rerun-not-evaluated` 的成因 token（该态时非空；green/red 时 null）。⛔ 不与「跑了且绿/红」同形。 */
+  reason: string | null;
+  /** 本次重跑点名的失败文件（green/red 时非空；not-evaluated 时为空）。 */
+  files: string[];
+  /** 重跑子进程退出码（被 watchdog 中止 / 未跑 ⇒ null）。 */
+  exitCode: number | null;
+  /** 重跑结束 epoch（秒）；未跑 ⇒ null。 */
+  finishedEpoch: number | null;
+  /** 重跑输出的落盘文件名（`.quay/` 下的 basename；未跑/写失败 ⇒ null）。 */
+  log: string | null;
 }
 
 /** 机械 fan-in 的三态结果（landed / red）。not-evaluated 由调用方按「未落地」处理（硬规则 3b）。
@@ -439,6 +509,18 @@ export interface MechanicalFanInResult {
    *  的裁定与理由）。`null` = 本次 fan-in 在探针之前就失败了（**未评估**，⛔ 与「探过且可用」不同形——
    *  硬规则 3b）；对象内部各自的 `evaluated:false` 才是「探过、判不出」。 */
   instruments?: InstrumentProbe | null;
+  /** 受测的**合并树** SHA（worktree 在 merge 之后的 HEAD；suite 跑过时非 null）。取证缺口
+   *  （gap-fan-in-suite-red-no-in-round-rerun-of-red-files）：旧 outcome 不记它，任务分支落地即删 ⇒
+   *  「同一棵树上红转绿」事后无法证明。 */
+  mergeTreeSha: string | null;
+  /** 受测当时的 **develop SHA**（mergeTarget tip，ff 之前）——与 mergeTreeSha 配对，说明这棵树是
+   *  对哪个基线跑的。取不到 ⇒ null（⛔ 不伪造成 mergeTreeSha 的别名）。 */
+  developSha: string | null;
+  /** suite 日志点名的失败测试文件读数；`null` = suite 从未红（**不适用**，⛔ 不是「未评估」——
+   *  未评估在 `evaluated:false` 上）。 */
+  failedTestFiles: FailedTestFilesReading | null;
+  /** 本轮内重跑读数；`null` = suite 从未红（不适用）。suite 红 ⇒ 恒非 null（三态必有其一）。 */
+  rerun: RerunReading | null;
 }
 
 /** runAsync 的结果收窄为「成/败 + 输出」，机械 fan-in 各步骤的共用判定（⛔ 不各写一遍 status!==0）。 */
@@ -632,6 +714,186 @@ export function extractFirstFailureLine(combined: string): string {
     if (hit) return hit;
   }
   return lines.find(isFailureSignalLine) ?? "";
+}
+
+// ── suite 失败行解析（gap-suite-failure-attribution-third-party-layout；本簇自 worker-driver.ts 迁入）──
+// 【为什么住在这里】机械 fan-in 的「suite 红后本轮内重跑【日志点名的】失败文件」需要这份读数，而本模块
+// ⛔ 不能 import worker-driver.ts（本模块被它值 import ⇒ 成值环，import-graph-check 的 valueSccs 基线为
+// 0）。单一真相源 ⇒ 实现落在【被依赖的下层】本文件，worker-driver.ts 反向 import 并 re-export 给既有
+// 消费者（judgeRetryExemption / stop-terminal 判词 / 既有测试），⛔ 不复制第二份解析器。
+//
+// 上游缺陷（原文）：本解析曾把【本仓库的测试布局】写死进判据——前缀只认 `(packages|plugin|experiments)/`、
+// 后缀只认 `.test.mjs`。第三方项目（`server/**/*.test.ts`、`src/**/*.test.tsx`）匹配恒为 0 ⇒ 返回
+// `[]` ⇒ judgeRetryExemption 判 insufficient-data-fallback ⇒ park 时的判词写成「the suite log names
+// nothing a worker could fix」——**一个肯定断言，而它的依据只是「解析器没读懂」**（硬规则 3b 的镜像：
+// 读不懂 ⇒ 伪装成判定）。生产读数（claudecodeui `.quay/worker-round.jsonl`，2026-09-20→09-23）：51 次
+// retry_exemptions 中 failingTestFiles 非空 **0 次**，波及 29 个任务；其中一例真凶是一条可一行修的
+// barrel 导入 lint 错误（`not ok - lint: server/…/model-context-window.test.ts:10:49: …`）。
+//
+// 修法：⛔ 不再按路径前缀/后缀白名单判定，改为**按 token 的形态**分三类（硬规则 3b 要求「读不懂」有
+// 独立取值，⛔ 不与「合格」同形）：
+//   - 带路径分隔符的 token ⇒ 真实文件位置（`server/x/y.test.ts`、worktree 绝对路径形态都算）
+//   - 无路径且无扩展名的 token ⇒ **伪阶段名**（`lint` / `typecheck`——runner 的 per-file 记录里它们
+//     占同一字段位，但它们不是文件；旧实现会把 `lint` 当测试文件）
+//   - 其余（含句子碎片、无路径又非测试后缀的 token）⇒ **无法识别**，原样留证，⛔ 不混进 files
+/** suite 日志失败行的解析结果。三态可区分（硬规则 3b）。 */
+export interface SuiteLogFailureParse {
+  /** 归因到的失败文件（repo-relative；worktree 绝对路径形态按 root 归一）。 */
+  files: string[];
+  /** 解析器识别出的失败行数 N（`__PERFILE__ … passed=false` 与 `not ok - …` 两类之和）——
+   *  唯一能区分「日志里没有失败行」与「有失败行但解析器读不懂」的量（⛔ 旧实现两者同形）。 */
+  failingLines: number;
+  /** 识别为伪阶段名的 token（`lint` / `typecheck` 等）——⛔ 不是测试文件。 */
+  pseudoStages: string[];
+  /** 既非真实文件也非伪阶段名 ⇒ 读不懂的 token（原样留证）。 */
+  unclassified: string[];
+}
+
+/** 测试文件后缀（node:test 的 `*.test.*` 与 jest/vitest 的 `*.spec.*`；本仓库自身用 .test.mjs）。 */
+const SUITE_TEST_FILE_RE = /\.(?:test|spec)\.(?:mjs|cjs|js|ts|tsx|jsx|mts|cts)$/i;
+/** 路径 token 的合法字符集——挡掉 `boundaries(dependencies):` 这类句子碎片混进文件名（那是"读不懂"）。 */
+const SUITE_PATH_TOKEN_RE = /^[\w./@~+-]+$/;
+
+/** 单个 token 的形态分类。⛔ 不查 worktree 是否存在：第三方日志里的失败文件常常不在本 worktree
+ *  （其它模块/并行分支），存在性检查会把真实文件误判成读不懂（且 AC 用例的假 root 里文件不存在）。 */
+function classifySuiteToken(token: string): "file" | "pseudo-stage" | "unclassified" {
+  const t = String(token ?? "").trim().replace(/[,;]+$/, "");
+  if (!t) return "unclassified";
+  if (!SUITE_PATH_TOKEN_RE.test(t)) return "unclassified";
+  if (t.includes("/")) return "file";
+  if (!t.includes(".")) return "pseudo-stage";
+  return SUITE_TEST_FILE_RE.test(t) ? "file" : "unclassified";
+}
+
+/** token → repo-relative；定位不出 ⇒ null（**读不懂的独立取值**，硬规则 3b）。
+ *  绝对路径的 repo 根【只能】由 root 给出（生产里 `measure-suite-reporter` 发的是 full-path，而 suite
+ *  在任务 worktree 里跑、调用方拿的是主检出 root）：先按 root 前缀剥离，不在 root 下则取「在 root 下
+ *  真实存在」的最长后缀——存在性是判据。⛔ 不按 `packages|plugin|experiments` 关键词猜前缀（那正是本
+ *  缺陷的成因）；⛔ 也不在无 root 时把绝对路径削成「看着像 repo-relative」的假路径——它会被当成已归因，
+ *  直接污染 AC-317 的读数（假在产物字段上 ⇒ 比读不懂更坏）。 */
+function toRepoRelToken(token: string, root: string | null): string | null {
+  const raw = String(token ?? "").replace(/\\/g, "/").trim();
+  if (!raw.startsWith("/")) return normalizeRel(raw) || null;
+  const rootAbs = root ? `/${normalizeRel(root)}` : "";
+  if (!rootAbs || rootAbs === "/") return null;
+  if (raw === rootAbs || raw.startsWith(`${rootAbs}/`)) return normalizeRel(raw.slice(rootAbs.length)) || null;
+  const parts = raw.split("/").filter(Boolean);
+  for (let i = 1; i < parts.length; i += 1) {
+    const cand = parts.slice(i).join("/");
+    try {
+      if (fs.statSync(path.join(rootAbs, cand)).isFile()) return cand;
+    } catch { /* 该后缀不存在，继续缩短 */ }
+  }
+  return null;
+}
+
+/** `__PERFILE__ duration_ms=… <token> passed=false …` 的 <token> = `passed=false` 前那个字段。 */
+function suiteTokenBeforePassedFalse(line: string): string | null {
+  const idx = line.indexOf("passed=false");
+  if (idx < 0) return null;
+  const parts = line.slice(0, idx).trim().split(/\s+/);
+  return parts.length ? parts[parts.length - 1] : null;
+}
+
+/** `not ok - <rest>` 的 <rest>（兼容 TAP 的 `not ok 1 - name` 编号形态）。无该形态 / 空 ⇒ null。
+ *  ⛔ 这一个正则就是「什么算 not ok 行」的唯一定义：下面的 head / 指名文件两个读者共用它。 */
+function suiteNotOkRest(line: string): string | null {
+  const m = /^not ok\b(?:\s+\d+)?\s*-\s*(.*)$/i.exec(line);
+  if (!m) return null;
+  return m[1].trim() || null;
+}
+
+/** `<rest>` 里 `:` 之前的头部 token（`lint` / `server/a/b.test.ts`）；空 ⇒ ""（调用方按 unclassified 处置）。 */
+function suiteNotOkHead(rest: string): string {
+  const ci = rest.indexOf(":");
+  return (ci < 0 ? rest : rest.slice(0, ci)).trim();
+}
+
+/** 伪阶段名后指名的真实文件：`lint: <rel>:<line>:<col>: <msg>` ⇒ `<rel>`。
+ *  只在确实像路径/测试文件时返回（⛔ 不把 `not ok - lint: 5 problems` 的 `5` 当文件）。 */
+function suiteFileNamedAfterStage(rest: string): string | null {
+  const ci = rest.indexOf(":");
+  if (ci < 0) return null;
+  const chunk = (rest.slice(ci + 1).trim().split(/\s+/)[0] ?? "").replace(/(?::\d+){1,2}:?$/, "").replace(/:$/, "");
+  if (!chunk) return null;
+  if (!chunk.includes("/") && !SUITE_TEST_FILE_RE.test(chunk)) return null;
+  return chunk;
+}
+
+/** suite 日志 → 失败行解析（三态）。N = 失败行数（`__PERFILE__ … passed=false` + `not ok - …`）。
+ *  ⛔ N 与 files 分开返回：调用方据此把「日志里没有失败行」与「有 N 行但一行也归因不出」写成不同的判词
+ *  （旧实现两者都只说「提取不出」，与「真的没有可修对象」同形）。 */
+export function parseSuiteLogFailures(logText: string, root?: string | null): SuiteLogFailureParse {
+  const files: string[] = [];
+  const pseudoStages: string[] = [];
+  const unclassified: string[] = [];
+  let failingLines = 0;
+  const notePseudo = (t: string): void => { if (t && !pseudoStages.includes(t)) pseudoStages.push(t); };
+  const noteUnclassified = (t: string): void => { if (t && !unclassified.includes(t)) unclassified.push(t); };
+  const addFile = (token: string): void => {
+    // 定位不出 repo-relative（如无 root 的绝对路径）⇒ 归入「读不懂」，⛔ 不冒充已归因（硬规则 3b）。
+    const rel = toRepoRelToken(token, root ?? null);
+    if (!rel) { noteUnclassified(token); return; }
+    if (!files.includes(rel)) files.push(rel);
+  };
+
+  for (const raw of String(logText ?? "").split("\n")) {
+    const line = raw.trim();
+    if (line.includes("passed=false")) {
+      const token = suiteTokenBeforePassedFalse(line);
+      if (!token) continue;
+      failingLines += 1;
+      const cls = classifySuiteToken(token);
+      if (cls === "file") addFile(token);
+      else if (cls === "pseudo-stage") notePseudo(token);
+      else noteUnclassified(token);
+      continue;
+    }
+    const rest = suiteNotOkRest(line);
+    if (rest === null) continue;
+    failingLines += 1;
+    const head = suiteNotOkHead(rest);
+    const cls = classifySuiteToken(head);
+    if (cls === "file") { addFile(head); continue; }
+    if (cls === "pseudo-stage") notePseudo(head);
+    else noteUnclassified(head);
+    // `not ok - <stage>: <rel>:<line>:<col>` 行把阶段失败【指名】到了真实文件上 ⇒ 归因到它。
+    const named = suiteFileNamedAfterStage(rest);
+    if (named !== null) {
+      if (classifySuiteToken(named) === "file") addFile(named);
+      else noteUnclassified(named);
+    }
+  }
+  return { files, failingLines, pseudoStages, unclassified };
+}
+
+/** 从 suite 日志文本提取失败测试文件（repo-relative）。见 parseSuiteLogFailures。
+ *  读不出 ⇒ []（不伪造；空列表与「读懂了但无失败」同形，调用方据 continueSuiteLogNote 的有无判定
+ *  是否 suite 红，或据 parseSuiteLogFailures().failingLines 把两者分开）。 */
+export function failingTestFilesFromSuiteLog(logText: string, root?: string | null): string[] {
+  return parseSuiteLogFailures(logText, root).files;
+}
+
+// ── gap-fan-in-suite-red-no-in-round-rerun-of-red-files：本轮重跑要的【三态读数】──────────────────
+// 重跑只在「日志点名了 ≥1 个失败测试文件」时才有对象。`failingTestFilesFromSuiteLog` 返回的 `[]` 把
+// 两种完全不同的情形压成同一个值——「读懂了，日志里没有失败行」与「有失败行但一个也归因不出」/「日志
+// 读不出」（硬规则 3b 的镜像：读不懂 ⇒ 伪装成「没有可重跑的对象」）。故这里另给一个三态读面：
+//   evaluated:true  ⇒ files 非空（≥1 个点名文件）——重跑有对象；
+//   evaluated:false ⇒ **未评估**（成因 token 在 reason 里）——重跑结果必须取 rerun-not-evaluated。
+export type FailedTestFilesReading =
+  | { evaluated: true; files: string[] }
+  | { evaluated: false; reason: string };
+
+/** suite 日志 → 失败测试文件清单三态读数（重跑的唯一输入）。⛔ 空清单不是「没有失败文件」，是
+ *  **未评估**——`reason` 区分成因，⛔ 不与 evaluated:true 共用取值。 */
+export function readFailedTestFiles(logText: string, root?: string | null): FailedTestFilesReading {
+  if (String(logText ?? "").trim() === "") return { evaluated: false, reason: "suite-log-unreadable" };
+  const parsed = parseSuiteLogFailures(logText, root);
+  if (parsed.files.length > 0) return { evaluated: true, files: parsed.files };
+  return {
+    evaluated: false,
+    reason: parsed.failingLines === 0 ? "no-failing-lines-in-suite-log" : "failing-lines-unattributable-to-files",
+  };
 }
 
 /** 读 fan-in 锁事件里本任务+runId 的持有时长（AC1/AC2 判据输入，纯文件读）。 */
@@ -1275,6 +1537,11 @@ export function scopedGateVerdict(o:
   return { verdict: "green", reason: null };
 }
 
+/** 本轮重跑子进程的墙钟上限（gap-fan-in-suite-red-no-in-round-rerun-of-red-files 的测试缝
+ *  `opts.rerunTimeoutMs` 的缺省）。重跑只跑【日志点名的失败文件】（通常远小于全量 suite 的 9-11min），
+ *  但给足余量：它不是正确性闸，长一点只花时间；⛔ 被中止 ⇒ `rerun-not-evaluated`（fail-closed，不放行）。 */
+export const RERUN_TIMEOUT_MS = 300_000;
+
 /**
  * driver 机械跑通一次无失败 fan-in 的 happy path（锁/merge/delta/typecheck/scoped门/suite/ff）。
  * ⛔ 语义失败点（merge 冲突 / anti-drift HARD FAIL / typecheck 红 / suite 红 / ff 失败）一律返回
@@ -1340,6 +1607,9 @@ export async function runMechanicalFanIn(opts: MechanicalFanInOptions): Promise<
       suiteFinishedEpoch: null, suiteOutcome: null, suitePid: null, landedSha: null,
       suiteLog: null,
       fanInLog: path.basename(fanInLog),
+      // suite 红之外的失败步：重跑不适用（`null` = 不适用，⛔ 不是「未评估」）；受测树 SHA 见
+      // mergeTreeSha/developSha（suite 跑过才有值）。
+      mergeTreeSha, developSha, failedTestFiles, rerun,
     } as unknown as MechanicalFanInResult; // 锁字段在 finally release 后填（见 pendingRed）
     pendingRed = r;
     return r;
@@ -1439,6 +1709,7 @@ export async function runMechanicalFanIn(opts: MechanicalFanInOptions): Promise<
       suiteFinishedEpoch: null, suiteOutcome: null, suitePid: null, landedSha: null,
       suiteLog: null,
       fanInLog: path.basename(fanInLog),
+      mergeTreeSha: null, developSha: null, failedTestFiles: null, rerun: null,
     };
   }
   const releaseLock = async (): Promise<void> => {
@@ -1456,6 +1727,13 @@ export async function runMechanicalFanIn(opts: MechanicalFanInOptions): Promise<
   // A（gap-worker-execution-history-index-not-reachable-from-task）：suite 红时 verdict.logFile 指向
   // .quay/fan-in-suite-*.log（真因文件，⛔ 不再 null——旧一路 logFile:null 让 183KB 真因只能靠命名约定
   // 猜）+ suiteLog 落 mechanical_fan_in（与 fanInLog 同形的 basename，web/续做/needs-human 据此构造绝对路径）。
+  // 受测合并树 / develop 基线 SHA + suite 红的取证读数（gap-fan-in-suite-red-no-in-round-rerun-of-red-files）。
+  // suite 还没跑 ⇒ null；suite 红 ⇒ 下面逐条填（⛔ 三态：`null` = 不适用，`evaluated:false` = 未评估）。
+  let mergeTreeSha: string | null = null;
+  let developSha: string | null = null;
+  let failedTestFiles: FailedTestFilesReading | null = null;
+  let rerun: RerunReading | null = null;
+
   const failSuite = (summary: string, exitCode: number | null): MechanicalFanInResult => {
     const r = {
       outcome: "red",
@@ -1464,9 +1742,51 @@ export async function runMechanicalFanIn(opts: MechanicalFanInOptions): Promise<
       suiteFinishedEpoch: null, suiteOutcome: null, suitePid: null, landedSha: null,
       suiteLog: path.basename(suiteLogFile),
       fanInLog: path.basename(fanInLog),
+      mergeTreeSha, developSha, failedTestFiles, rerun,
     } as unknown as MechanicalFanInResult; // 锁字段在 finally release 后填（见 pendingRed）
     pendingRed = r;
     return r;
+  };
+
+  // ── 本轮内重跑（gap-fan-in-suite-red-no-in-round-rerun-of-red-files）──────────────────────────────
+  // 病根：suite 步一旦红就直接 outcome:"red" 返回，本轮内没有任何重跑——任何再尝试都是一次【新的 worker
+  // 派发】（续做 prompt + 重新 fan-in），而生产上的 suite 红多数不是该任务引入的。
+  // 修法：suite 红且【日志点名了 ≥1 个失败测试文件】时，在【同一轮、同一把 fan-in 锁内、同一棵合并树上】
+  // 只重跑这些文件；全绿 ⇒ 按绿继续落地（并记 rerun-green），仍有红 ⇒ 维持 red。
+  // ⛔ 零项目知识：重跑对象只取自 suite 日志本身点名的文件；重跑命令由项目在 .quay/config.yml 的
+  // `loop.rerun_command` 里【自己声明】（⛔ 产品代码不含任何「已知负载敏感族」名单——那条路
+  // 2026-09-03 已被人裁定取消，gap-fan-in-suite-red-load-sensitive-flaky-no-isolate-rerun）。
+  // ⛔ 三态不得压平（硬规则 3b）：没有可用的重跑命令 / 解析不出文件 / 重跑自身被 watchdog 中止 ⇒
+  // `rerun-not-evaluated`，行为与修改前逐字一致（仍 return failSuite，⛔ 不放行）。
+  const runInRoundRerun = async (failed: FailedTestFilesReading): Promise<RerunReading> => {
+    const t0 = Date.now();
+    const notEvaluated = (reason: string): RerunReading => {
+      traceSuiteEvent("rerun", { exit: 0, wall_ms: 0, ok: false, reason: `rerun-not-evaluated: ${reason}` });
+      return { state: "rerun-not-evaluated", reason, files: [], exitCode: null, finishedEpoch: null, log: null };
+    };
+    if (!failed.evaluated) return notEvaluated(failed.reason);
+    const resolved = opts.rerunCommand !== undefined
+      ? { kind: "run" as const, argv: opts.rerunCommand }
+      : resolveRerunCommand(worktree, worktree, failed.files);
+    if (resolved.kind !== "run") return notEvaluated(resolved.reason);
+    // 重跑日志与 suite attempt 日志同族（同前缀 `fan-in-suite-<task>~` ⇒ 落地时被 pruneTaskSuiteLogs
+    // 一并轮转，⛔ 不新增一族无人清理的孤儿日志）。
+    const logFile = path.join(root, ".quay", suiteLogFileName(task, runId, `rerun-${newSuiteLogAttemptSuffix()}`));
+    const r = await mechSh(resolved.argv, opts.rerunTimeoutMs ?? RERUN_TIMEOUT_MS);
+    const finishedEpoch = Math.floor(Date.now() / 1000);
+    try {
+      fs.mkdirSync(path.dirname(logFile), { recursive: true });
+      fs.writeFileSync(logFile, combinedOutput(r.stdout, r.stderr), "utf8");
+    } catch { /* 日志 best-effort：写失败不改变三态判定（判定只看退出码） */ }
+    // 三态判定：0 ⇒ 绿；非 0 ⇒ 红；status===null（mechSh 墙钟到点组 kill）⇒ **未评估**（⛔ 被中止的重跑
+    // 不得当成「仍然红」也不得当成「转绿」——两者都是伪造结论）。
+    const state: RerunState = r.status === 0 ? "rerun-green" : r.status === null ? "rerun-not-evaluated" : "rerun-red";
+    const reason = state === "rerun-not-evaluated" ? "rerun-aborted" : null;
+    traceSuiteEvent("rerun", {
+      exit: r.status, wall_ms: Date.now() - t0, ok: state === "rerun-green",
+      state, namedFiles: failed.files.length, ...(reason === null ? {} : { reason }),
+    });
+    return { state, reason, files: failed.files, exitCode: r.status, finishedEpoch, log: path.basename(logFile) };
   };
 
   try {
@@ -1627,6 +1947,12 @@ export async function runMechanicalFanIn(opts: MechanicalFanInOptions): Promise<
 
     // 7. suite（driver 子进程 + 异步 poll，⛔ 不 detach——AC3）。suite_head 在 merge + 各闸之后取。
     const suiteHead = (await mechSh(["git", "-C", worktree, "rev-parse", "HEAD"], 30_000)).stdout.trim();
+    // 取证（gap-fan-in-suite-red-no-in-round-rerun-of-red-files）：把【受测合并树 SHA】与【当时的
+    // develop SHA】变成读数。旧 outcome 不记它们，而任务分支落地即删 ⇒ 「同一棵树上红转绿」事后无法
+    // 证明（suite 尝试日志也被落地时的 pruneTaskSuiteLogs 删掉，幸存集被失败偏置）。两读都在 ff 之前
+    // 取 ⇒ developSha 就是这棵树【当时对着哪个基线】跑的（⛔ 不是 ff 之后的新 tip）。
+    mergeTreeSha = suiteHead || null;
+    developSha = (await mechSh(["git", "-C", root, "rev-parse", mergeTarget], 30_000)).stdout.trim() || null;
     // gap-verification-round-bound-to-quay-shaped-suite-entry — 第三方路径（suite 由项目自己的
     // loop.test_command 跑，不经 full-suite-runner）的 verification-round 入账。绿/红共用这一处
     // （⛔ 不两条分支各写一份——那正是硬规则 5b 的成簇漏改形态）。声明了 suite_runner: quay-buckets ⇒
@@ -1730,6 +2056,24 @@ export async function runMechanicalFanIn(opts: MechanicalFanInOptions): Promise<
           return failSuite(`suite NOT run (refused) — ${refusalLine}`, sr.exitCode);
         }
         const firstFailure = extractFirstFailureLine(suiteLogText);
+        // ── 本轮内重跑（gap-fan-in-suite-red-no-in-round-rerun-of-red-files）──────────────────────────
+        // 【先解析「日志点名了哪些失败测试文件」，再决定有没有重跑对象】——三态读数（evaluated:false =
+        // 未评估，⛔ 不是一个空清单）。重跑在【同一把 fan-in 锁内、同一棵合并树上】跑（仍在 try 内 ⇒
+        // finally 的 release 在它之后，锁的 release epoch 必 ≥ 重跑结束时刻）。
+        // rerun-green ⇒ **不 return**，落到下面的绿块（本轮终态是绿；⛔ 不双写 round——红色轮次记录在
+        // 重跑绿的情形下【不写】，因为本轮没有红的结论，红的证据在 rerun.files / 重跑日志里）。
+        // ⚠️ 落到绿块后 `recordDelegatedRound("green", …)` 仍以【原 suite 日志】为轮次日志（该调用点
+        // 不在本任务的 ## Touches 内，⛔ 不改它的签名）：第三方项目的这一轮会从那份红日志里解析出
+        // fail>0 的计数。已知且有意——轮次【状态】是对的（本轮终态确实是绿），而计数描述的是本轮真正
+        // 跑过的那次 suite；重跑的分母写在 outcome 的 rerun 字段里，⛔ 不在这里另造一套。
+        failedTestFiles = readFailedTestFiles(suiteLogText, worktree);
+        rerun = await runInRoundRerun(failedTestFiles);
+        if (rerun.state === "rerun-green") {
+          traceSuiteEvent("suite-rerun-green", {
+            exit: 0, wall_ms: 0, ok: true,
+            reason: `in-round rerun green on ${rerun.files.length} named file(s) — landing as green`,
+          });
+        } else {
         // gap-verification-round-bound-to-quay-shaped-suite-entry：第三方路径的红轮同样入账
         // （「跑了且红」必须与「没跑过」可分，硬规则 3b；与 full-suite-runner 的红绿皆入账契约一致）。
         // gap-watchdog-killed-round-writes-no-verification-round-record — `hung`（看门狗 SIGKILL 整组）
@@ -1745,6 +2089,7 @@ export async function runMechanicalFanIn(opts: MechanicalFanInOptions): Promise<
             : sr.spawnFailed === true ? { force: true, notEvaluated: "spawn-failed" }
               : undefined);
         return failSuite(firstFailure || `suite ${sr.outcome}${sr.error ? `: ${sr.error}` : ""}`, sr.exitCode);
+        }
       }
       writeSuiteCapture(suiteCapture, {
         full_suite_ran: "true", skip_reason: "", suite_exit: "0",
@@ -1849,6 +2194,9 @@ export async function runMechanicalFanIn(opts: MechanicalFanInOptions): Promise<
   return {
     outcome: "landed", verdict: null, step: null, reason: null,
     ...lock, suiteFinishedEpoch, suiteOutcome, suitePid, landedSha,
+    // rerun-green 落地时四个取证读数随成功结果一起写（AC：这些字段在 suite 红【与】rerun-green 落地
+    // 两种情形下都写）；普通绿落地 ⇒ failedTestFiles/rerun 保持 null（不适用，⛔ 不是「未评估」）。
+    mergeTreeSha, developSha, failedTestFiles, rerun,
     suiteLog: null,
     fanInLog: path.basename(fanInLog),
     instruments,
@@ -1892,6 +2240,8 @@ export async function spawnMechanicalFanIn(opts: MechanicalFanInOptions): Promis
     suiteLog: null,
     // spawn 未起/输出不可解析 ⇒ 探针从未跑过（未评估，⛔ 不是「探过且判不出」）。
     instruments: null,
+    // suite 从未跑过（连 fan-in 进程都没起）⇒ 重跑不适用（`null`，⛔ 不是「未评估」）。
+    mergeTreeSha: null, developSha: null, failedTestFiles: null, rerun: null,
   });
   if (r.status === null) {
     return red("spawn-mechanical-fan-in", r.error?.message ?? `fresh mechanical fan-in process failed: ${r.stderr || "no output"}`);
