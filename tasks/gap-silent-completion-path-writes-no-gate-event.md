@@ -70,6 +70,7 @@ develop 上 2026-09-30（UTC）共 **17 次落地**；按**写入路径**分组�
 
 ## Touches
 
+- `packages/quay/test/mcp-server.test.mjs`
 - `packages/quay/src/mcp-handlers.ts`
 - `packages/quay/src/gate/lifecycle.ts`
 - `plugin/scripts/loop-complete-task.ts`
