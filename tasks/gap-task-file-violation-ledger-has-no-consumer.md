@@ -1,7 +1,7 @@
 ---
 id: gap-task-file-violation-ledger-has-no-consumer
 title: "`--no-block 的任务文件违规台账（task-file-violation-ledger.jsonl）只有写者、零读者`"
-status: ready
+status: done
 labels:
   - gap
   - defect
