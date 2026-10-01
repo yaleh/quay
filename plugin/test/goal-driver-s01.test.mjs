@@ -11,7 +11,7 @@
 // SPLIT from goal-driver.test.mjs by gap-suite-split-15-over-30s-test-files — shard 1/6 (16 tests). Shared fixtures: ./helpers/goal-driver-harness.mjs (single source).
 
 import { test } from "node:test";
-import { GAP_WORKER_TIMEOUT_MS_DEFAULT, GOAL_SPAWN_CAP_DEFAULT, assert, buildGapWorkerPrompt, computeGoalGaps, fs, goalAchievedFromRecords, goalGapWorkerTimeoutMs, goalSpawnCap, isTaskStuck, os, path, readTaskFacts, runGapSpawnPass, spawn } from "./helpers/goal-driver-harness.mjs";
+import { CRITERION_KINDS, GAP_WORKER_TIMEOUT_MS_DEFAULT, GOAL_SPAWN_CAP_DEFAULT, assert, buildGapWorkerPrompt, classifyCriterionKind, computeGoalGaps, fs, goalAchievedFromRecords, goalGapWorkerTimeoutMs, goalSpawnCap, isFilingGapState, isTaskStuck, os, path, productionCarriersOf, readTaskFacts, readsProductionCarrier, runGapSpawnPass, spawn } from "./helpers/goal-driver-harness.mjs";
 
 test('goalAchievedFromRecords: 零 AC ⇒ false；全 achieved ⇒ true；有未达成 ⇒ false', () => {
   assert.equal(goalAchievedFromRecords([], 'GOAL-001'), false, '零 AC 不可达成（与 goal-store.isGoalAchieved 同源）');
@@ -220,16 +220,16 @@ test('AC2: 负控制——三态两两不等（needs-human ⇒ stalled；ready �
 });
 
 
-test('关联任务全为 done ⇒ done-unresolved（⛔ 不再 gap/不再每轮 spawn）；零关联任务 ⇒ gap（负控制）', () => {
-  const records = [{ id: 'AC-X', goal: 'GOAL-001', status: 'active' }];
-  // 正：关联任务全部 done ⇒ done-unresolved（工作已做过，⛔ 不再 spawn 立案），taskCount=关联数（枚举，非布尔化）。
+test('关联任务全为 done：判据只读工作产物 ⇒ workable（照常立案）；零关联任务 ⇒ gap（负控制）', () => {
+  const records = [{ id: 'AC-X', goal: 'GOAL-001', status: 'active', criterion: 'test -f src/x.ts' }];
+  // 正：关联任务全部 done + 判据只读仓库内工作产物 ⇒ workable（还有 worker 能改变它），taskCount=关联数（枚举，非布尔化）。
   const gaps = computeGoalGaps(records, [{ id: 't', status: 'done', goalAc: 'AC-X' }]);
   assert.equal(gaps.length, 1);
-  assert.equal(gaps[0].state, 'done-unresolved');
+  assert.equal(gaps[0].state, 'workable');
   assert.equal(gaps[0].taskCount, 1);
-  // superseded 同理——有关联任务但无牵引（工作已关闭）⇒ done-unresolved，⛔ 不再与「零关联」同判 gap。
+  // superseded 同理——有关联任务但无牵引（工作已关闭）⇒ workable，⛔ 不再与「零关联」同判 gap。
   const gaps2 = computeGoalGaps(records, [{ id: 't', status: 'superseded', goalAc: 'AC-X' }]);
-  assert.equal(gaps2[0].state, 'done-unresolved');
+  assert.equal(gaps2[0].state, 'workable');
   assert.equal(gaps2[0].taskCount, 1);
   // 负控制：零关联任务（goal_ac 指向别处）⇒ gap（真缺口不被误放）。
   const gaps3 = computeGoalGaps(records, [{ id: 'other', status: 'todo', goalAc: 'AC-OTHER' }]);
@@ -237,23 +237,107 @@ test('关联任务全为 done ⇒ done-unresolved（⛔ 不再 gap/不再每轮 
   assert.equal(gaps3[0].taskCount, 0);
 });
 
-// ── gap-goal-gap-done-task-not-traction-respawns-every-round：done 不再每轮 spawn ─────────────
-// 关联任务翻 done 后 computeGoalGaps 不再报 gap（=每轮 spawn 立案），而是 done-unresolved（有关联
-// 任务但无牵引）。与「零关联任务 ⇒ gap」不同形（硬规则 3：枚举不布尔，两种成因不同处置）。
+// ── gap-done-unresolved-conflates-workable-with-world-gated：有关联任务但全非牵引时，按【判据载体】
+//    机械三分（workable / world-gated / unclassified），⛔ 不再压成一个 done-unresolved（终点黑洞）──
+
+test('AC1：判据读生产载体（.quay/<file>）⇒ world-gated（独立取值，⛔ 不立案）', () => {
+  const records = [{
+    id: 'AC-X', goal: 'GOAL-001', status: 'active',
+    criterion: 'python3 - <<P\nimport json\nfor ln in open(".quay/ci-runs.jsonl"):\n  print(json.loads(ln))\nP',
+  }];
+  const gaps = computeGoalGaps(records, [{ id: 't', status: 'done', goalAc: 'AC-X' }]);
+  assert.equal(gaps[0].state, 'world-gated', '判据读生产载体 ⇒ 真值是未来生产事件 ⇒ world-gated');
+  assert.equal(gaps[0].taskCount, 1, 'taskCount 枚举关联数（⛔ 非布尔化）');
+  assert.equal(isFilingGapState(gaps[0].state), false, 'world-gated ⛔ 不消耗 spawn 名额（无 worker 能产出该事件）');
+});
+
+test('AC5：「读不到 / 解析不出判据」⇒ unclassified（既不与 workable 也不与 world-gated 同形，硬规则 3b）', () => {
+  const records = [{ id: 'AC-X', goal: 'GOAL-001', status: 'active' }]; // criterion 缺失 ⇒ 读不到
+  const gaps = computeGoalGaps(records, [{ id: 't', status: 'done', goalAc: 'AC-X' }]);
+  assert.equal(gaps[0].state, 'unclassified');
+  assert.equal(gaps[0].taskCount, 1);
+  assert.equal(isFilingGapState(gaps[0].state), false, 'unclassified ⛔ 不消耗 spawn 名额');
+});
+
+test('AC1/AC3/AC5 三态逐一不同形：workable / world-gated / unclassified 互不相等', () => {
+  const mk = (criterion) => ({ id: 'AC-X', goal: 'GOAL-001', status: 'active', ...(criterion === undefined ? {} : { criterion }) });
+  const done = [{ id: 't', status: 'done', goalAc: 'AC-X' }];
+  const workable = computeGoalGaps([mk('test -f src/x.ts')], done)[0];
+  const world = computeGoalGaps([mk('cat .quay/release-branch-finish.jsonl')], done)[0];
+  const unk = computeGoalGaps([mk(undefined)], done)[0];
+  assert.equal(workable.state, 'workable');
+  assert.equal(world.state, 'world-gated');
+  assert.equal(unk.state, 'unclassified');
+  assert.equal(new Set([workable.state, world.state, unk.state]).size, 3, '三态互不同形（硬规则 3b）');
+  // 立案面：只有 workable 该立案（AC2 的正半边 + AC1/AC5 的负半边）
+  assert.deepEqual([workable, world, unk].map((g) => isFilingGapState(g.state)), [true, false, false]);
+});
+
+test('AC1 谓词（按位置判定）：readsProductionCarrier 只认 `.quay/<file>` 路径 token', () => {
+  assert.equal(readsProductionCarrier('cat .quay/ci-runs.jsonl'), true);
+  assert.equal(readsProductionCarrier('T=/x; for f in $T/.quay/fan-in-*.log; do :; done'), true, '第三方项目里的 .quay/ 载体同样算');
+  assert.equal(readsProductionCarrier('d="$T/.quay"; glob(d + "/fan-in-*.log")'), true, '`.quay` 目录本身（+ 其下 glob）也算——AC-318 的形态');
+  assert.equal(readsProductionCarrier('test -f src/x.ts && exit 0'), false, '仓库内工作产物不是生产载体');
+  assert.equal(readsProductionCarrier('grep -c my.quay/x notes.md'), false, '成词要求：`my.quay/` 这个子串不算');
+  assert.equal(readsProductionCarrier('grep -c .quayx notes.md'), false, '成词要求：`.quayx` 这个子串不算');
+  assert.equal(readsProductionCarrier(''), false);
+  assert.deepEqual(productionCarriersOf('a .quay/ci-runs.jsonl b .quay/ci-runs.jsonl c .quay/release-branch-finish.jsonl'),
+    ['.quay/ci-runs.jsonl', '.quay/release-branch-finish.jsonl'], '去重保序');
+  assert.equal(classifyCriterionKind(undefined), 'unclassified');
+  assert.equal(classifyCriterionKind('   '), 'unclassified', '空/纯空白 ⇒ 读不到 ⇒ unclassified');
+  assert.equal(classifyCriterionKind('exit 1'), 'workable');
+  assert.deepEqual([...CRITERION_KINDS].sort(), ['unclassified', 'workable', 'world-gated']);
+});
+
+test('AC2：workable 进入 runGapSpawnPass 选取面；world-gated / unclassified 不进入', () => {
+  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'goal-driver-3way-'));
+  try {
+    const records = [
+      { id: 'GOAL-001', title: 'g', status: 'active' },
+      { id: 'AC-W', goal: 'GOAL-001', title: 'w', expect: 'e', status: 'active', criterion: 'test -f src/x.ts' },
+      { id: 'AC-G', goal: 'GOAL-001', title: 'g2', expect: 'e', status: 'active', criterion: 'cat .quay/ci-runs.jsonl' },
+      { id: 'AC-U', goal: 'GOAL-001', title: 'u', expect: 'e', status: 'active' },
+    ];
+    const taskFacts = [
+      { id: 't-w', status: 'done', goalAc: 'AC-W' },
+      { id: 't-g', status: 'done', goalAc: 'AC-G' },
+      { id: 't-u', status: 'done', goalAc: 'AC-U' },
+    ];
+    const gaps = computeGoalGaps(records, taskFacts);
+    assert.deepEqual(gaps.map((g) => g.state), ['workable', 'world-gated', 'unclassified'], '三条各落一态、逐条不同形');
+    const r = runGapSpawnPass(gaps, records, tmp, { gapWorkerCmd: 'true', resourceGateArgv: ['true'], spawnCap: 5 });
+    assert.deepEqual(r.outcomes.map((o) => o.ac), ['AC-W'], '选取面 = 只要 workable（AC2 正控制 + AC1/AC5 负控制）');
+  } finally {
+    fs.rmSync(tmp, { recursive: true, force: true });
+  }
+});
+
+// ── 关联任务翻 done 后 computeGoalGaps 不再报 gap（=每轮 spawn 立案）；具体落哪个非牵引态由
+//    判据载体决定（workable / world-gated / unclassified，见上面三态分叉的用例）。与「零关联任务
+//    ⇒ gap」不同形（硬规则 3：枚举不布尔，每种成因不同处置）。
+//    （gap-goal-gap-done-task-not-traction-respawns-every-round +
+//      gap-done-unresolved-conflates-workable-with-world-gated）
 
 
-test('AC2 词表可区分：GapState 含 done-unresolved，与 gap/in-progress 两两不同（读源 + 行为判定）', () => {
+test('AC2 词表可区分：GapState 含 workable/world-gated/unclassified，与 gap/in-progress 两两不同（读源 + 行为判定）', () => {
   const src = fs.readFileSync(new URL('../scripts/goal-driver.ts', import.meta.url), 'utf8');
-  assert.match(src, /export type GapState = "in-progress" \| "gap" \| "done-unresolved" \| "stalled" \| "not-evaluated"/, 'GapState 词表含 done-unresolved');
-  const records = [{ id: 'AC-X', goal: 'GOAL-001', status: 'active' }];
-  const done = computeGoalGaps(records, [{ id: 't', status: 'done', goalAc: 'AC-X' }])[0];
-  const gap = computeGoalGaps(records, [{ id: 'other', status: 'todo', goalAc: 'AC-OTHER' }])[0];
-  const inProg = computeGoalGaps(records, [{ id: 't', status: 'ready', goalAc: 'AC-X' }], { eligibleTodoIds: new Set(), excludedReadyIds: new Set() })[0];
-  assert.equal(done.state, 'done-unresolved');
+  assert.match(src, /export type GapState = "in-progress" \| "gap" \| "workable" \| "world-gated" \| "unclassified" \| "stalled" \| "not-evaluated"/, 'GapState 词表含 workable/world-gated/unclassified');
+  const workRec = { id: 'AC-X', goal: 'GOAL-001', status: 'active', criterion: 'test -f src/x.ts' };
+  const worldRec = { id: 'AC-X', goal: 'GOAL-001', status: 'active', criterion: 'cat .quay/ci-runs.jsonl' };
+  const unkRec = { id: 'AC-X', goal: 'GOAL-001', status: 'active' };
+  const done = [{ id: 't', status: 'done', goalAc: 'AC-X' }];
+  const workable = computeGoalGaps([workRec], done)[0];
+  const world = computeGoalGaps([worldRec], done)[0];
+  const unk = computeGoalGaps([unkRec], done)[0];
+  const gap = computeGoalGaps([workRec], [{ id: 'other', status: 'todo', goalAc: 'AC-OTHER' }])[0];
+  const inProg = computeGoalGaps([workRec], [{ id: 't', status: 'ready', goalAc: 'AC-X' }], { eligibleTodoIds: new Set(), excludedReadyIds: new Set() })[0];
+  assert.equal(workable.state, 'workable');
+  assert.equal(world.state, 'world-gated');
+  assert.equal(unk.state, 'unclassified');
   assert.equal(gap.state, 'gap');
   assert.equal(inProg.state, 'in-progress');
-  assert.notEqual(done.state, gap.state, 'done-unresolved ≠ gap');
-  assert.notEqual(done.state, inProg.state, 'done-unresolved ≠ in-progress');
+  const all = [workable.state, world.state, unk.state, gap.state, inProg.state];
+  assert.equal(new Set(all).size, 5, '五个取值两两不同形（硬规则 3b：⛔ 不给两种成因共用输出）');
 });
 
 

@@ -1871,21 +1871,38 @@ export async function objectiveSufficiencyVerdict(
   return (await objectiveSufficiencyVerdictDetail(goal, inScopeAcs, evidence, root, opts)).verdict;
 }
 
-// ── 缺口五态（G7 + G9 stalled + done-unresolved，硬规则 3b：读不懂输入不得返回与「合格」同形——
-//    「缺口」/「无牵引」/「未评估」分离；硬规则 3：枚举不布尔——「零关联」与「全 done」两种成因不同处置）──
+// ── 缺口态族（G7 + G9 stalled + done-unresolved 三分，硬规则 3b：读不懂输入不得返回与「合格」同形——
+//    「缺口」/「无牵引」/「未评估」分离；硬规则 3：枚举不布尔——每一种成因一个不同形的取值）──
 
-/** 单条 AC 的缺口态（七态并存，not-evaluated 保留——读不到 tasks 输入与「缺口/无牵引」不同形，硬规则 3b）：
+/** 单条 AC 的缺口态（十态并存，not-evaluated 保留——读不到 tasks 输入与「缺口/无牵引」不同形，硬规则 3b）：
  *  in-progress       有任务推进（todo/ready/needs-human 有牵引）
  *  gap               真缺口：零关联任务（无任何 goal_ac==ac 的任务）⇒ 该 spawn 立案
- *  done-unresolved   有关联任务、但全部为非牵引态（done/superseded 等）而 AC 判据仍未达成——工作已做过，
- *                    缺的是复验或工作量不足，⛔ 不该再每轮 spawn 同一条任务（gap-goal-gap-done-task-not-
- *                    traction-respawns-every-round；与 gap「零关联」不同形，硬规则 3）
+ *  workable          **有关联任务、但全部为非牵引态**（done/superseded 等）而 AC 判据仍未达成，**且判据的
+ *                    真值是一个仓库内的工作产物**（代码/文件/测试——`classifyCriterionKind` 判它**不**读
+ *                    生产载体）⇒ 还有一个 worker 能改变它 ⇒ 该 spawn 立案。补上 standing-violated /
+ *                    frozen-violated 已有的那道守卫的另一半：曾经 done 的关联任务**不覆盖回归**（那正是
+ *                    「回归后再无人立案」的成因），只有 todo/ready/needs-human 才算有人接手
+ *                    （gap-done-unresolved-conflates-workable-with-world-gated）。⛔ 与 `gap` 不同形：
+ *                    这边有关联任务（taskCount ≥ 1），那边零关联（taskCount 0）。
+ *  world-gated       **有关联任务、但全部为非牵引态**而判据仍未达成，**且判据读生产载体**
+ *                    （`.quay/<file>`——由生产写入、不在仓库工作产物内，见 `readsProductionCarrier`）：
+ *                    它的真值是**立案之后的未来生产事件**（CI 跑了一次、切了一个 release tag），
+ *                    **没有任何 worker 能产出它** ⇒ ⛔ 不 spawn worker（派了也产不出该事件，是浪费名额），
+ *                    改由「每轮 gate 复读 + 轮记录留痕的路由」接住（见 `worldGatedRoutes`）。
+ *                    ⛔ 与 `workable` **不同形**：把两者压成一态（旧的 `done-unresolved`）会让 world-gated
+ *                    落成终点黑洞——任务做完了、判据仍红、机制按设计不立案 ⇒ 永久静默、无人立案
+ *                    （硬规则 3b：一个判定的输出词表里没有「谁去复读生产事件」这一态，就无法区分
+ *                    「工作没做够」与「等世界变化」）。
+ *  unclassified      **判别器读不到 / 解析不出判据载体**（criterion 缺失或为空 ⇒ 无法机械判定它读不读生产
+ *                    载体）⇒ 独立取值。⛔ 既不与 `workable` 也不与 `world-gated` 同形，且**不消耗 spawn
+ *                    名额**（硬规则 3b：读不懂不得冒充任一实质态；也⛔ 不得静默——静默会与「无工作可立」
+ *                    同形）。
  *  stalled           有任务但都无法自行前进（G9 结构判据）
  *  not-evaluated     读不到 tasks 输入（taskFacts==null），或 **AC-216 复验域**读不到 I5 读数（standings==null）
  *  standing-ok       **AC-216 复验域**专有：常设不变式（achieved ∧ long-term ∧ GOAL 非 active）此刻
  *                    **成立**（I5 没把它列进 achievedButFailing）⇒ 无工作可立，⛔ 不 spawn
  *  standing-violated **AC-216 复验域**专有：常设不变式**此刻违反**（I5 列出了它）且**没有任何在飞任务**在
- *                    处理它 ⇒ 该 spawn 立案。⛔ 与 done-unresolved 不同形：曾经 done 的关联任务**不覆盖回归**
+ *                    处理它 ⇒ 该 spawn 立案。⛔ 与 `workable` 不同形：曾经 done 的关联任务**不覆盖回归**
  *                    （那正是「回归后再无人立案」的成因），只有 todo/ready/needs-human 才算有人接手
  *                    （gap-meta-computegoalgaps；硬规则 3 同族——同一容器两类 population，
  *                    用只覆盖一类的工具判空会把「无人处理」读成「已解决」）。
@@ -1893,7 +1910,7 @@ export async function objectiveSufficiencyVerdict(
  *                    `long-term`），而台账尾读数说它**此刻为假**，且**没有任何在飞任务**在处理它 ⇒ 该 spawn
  *                    立案。⛔ 与 standing-violated 是**两个** population（域内/域外），故取值必须不同形——
  *                    合并会把「离开域后就没人管」这条正好要修的形态重新藏起来（硬规则 3b）。
- *                    ⛔ 与 done-unresolved 不同形：曾经 done 的关联任务**不覆盖**「此刻仍为假」，
+ *                    ⛔ 与 `workable` 不同形：曾经 done 的关联任务**不覆盖**「此刻仍为假」，
  *                    只有 todo/ready/needs-human 才算有人接手。
  *  derived-routed    **AC-216 复验域内【真值派生自 ③ 主体population】的判据专有**（本任务缺陷①）：该常设
  *                    判据此刻**违反**，但它的 criterion 读的就是 ③ 的输入面（`check --stale-pass`，
@@ -1908,7 +1925,60 @@ export async function objectiveSufficiencyVerdict(
  *                    ⚠️ 退路（⛔ 闸不恒开）：若 ③ 本轮读不到 / 未评估 / 并未判 violated，则派生条件
  *                    不成立 ⇒ 回落 `standing-violated` 照旧立案（成因不明时仍要有人看）。
  */
-export type GapState = "in-progress" | "gap" | "done-unresolved" | "stalled" | "not-evaluated" | "standing-ok" | "standing-violated" | "frozen-violated" | "derived-routed";
+export type GapState = "in-progress" | "gap" | "workable" | "world-gated" | "unclassified" | "stalled" | "not-evaluated" | "standing-ok" | "standing-violated" | "frozen-violated" | "derived-routed";
+
+/** 生产载体（production carrier）路径的机械判别——**判据文本里出现的一个 `.quay/<file>` 路径 token**。
+ *
+ *  为什么需要它（gap-done-unresolved-conflates-workable-with-world-gated）：一条 active AC 的缺口，
+ *  当关联任务全部非牵引（done/superseded）而判据仍未达成时，**成因有两种、处置相反**：
+ *    · 判据的真值是一个**仓库内的工作产物**（代码/文件/测试）⇒ 还有 worker 能改变它 ⇒ 该立案（workable）；
+ *    · 判据读的是 `.quay/<file>` 这类**由生产写入、不在仓库工作产物内**的载体（ci-runs.jsonl /
+ *      release-branch-finish.jsonl …）⇒ 它的真值是**立案之后的未来生产事件**，没有任何 worker
+ *      能产出它 ⇒ ⛔ 不 spawn，改由复读路由接住（world-gated）。
+ *  两者此前被压成同一个 `done-unresolved` ⇒ 后者是终点黑洞（永久静默、无人立案）。
+ *
+ *  判定**按位置**（硬规则 2）：输入不是散文，是**可执行的判据文本**本身——`.quay/…` 作为路径
+ *  token 出现在判据里就是「这条判据会去读那个载体」，不是「某处提到过」。与 goal-store 的
+ *  `readsFrozenPopulation` 同一手法（criterion 文本切词后判 token），⛔ 不重推一套与判据无关的启发式。
+ *  `.quay` 必须**成词**出现（前/后一字符都不是 `[\w.-]`）⇒ `my.quay/x`、`.quayx` 这类子串不算。
+ *  ⚠️ **目录本身也算**（`(?:\/[\w.*-]+)?` 可省）：生产判据常写成「`.quay` 目录 + 其下的 glob」，
+ *  例如第三方项目的 `d = "$T/.quay"` + `glob("fan-in-*.log")`（本仓实测 AC-318）——只认 `.quay/<file>`
+ *  会漏掉这一形态，把它误判成 workable 而每轮派一个产不出该事件的 worker。
+ *
+ *  ⛔ 误判的代价是**有界的**且方向单一：把一条工作产物型判据误判成 world-gated ⇒ 它**不 spawn**
+ *  （少派一个 worker，但那条 AC 仍在每轮 gate 集合里被判据复读，且路由留痕可见）；把 world-gated
+ *  误判成 workable ⇒ 多派一个 worker（浪费名额，但不会造成永久静默）。两个方向都比「永久静默」轻。 */
+export const PRODUCTION_CARRIER_TOKEN_RE = /(?:^|[^\w.-])(\.quay(?:\/[\w.*-]+)?)(?![\w.-])/g;
+
+/** 判据文本里读到的生产载体路径（去重、保序）。⛔ 非判据（缺字段/非字符串）⇒ 空数组。 */
+export function productionCarriersOf(criterion: unknown): string[] {
+  const s = typeof criterion === "string" ? criterion : "";
+  const out: string[] = [];
+  for (const m of s.matchAll(PRODUCTION_CARRIER_TOKEN_RE)) {
+    if (!out.includes(m[1])) out.push(m[1]);
+  }
+  return out;
+}
+
+/** 这条判据是否读生产载体（`productionCarriersOf` 非空）。 */
+export function readsProductionCarrier(criterion: unknown): boolean {
+  return productionCarriersOf(criterion).length > 0;
+}
+
+/** 判据载体的三分类——**与 `GapState` 的三个取值逐字同名**（单一真相源，⛔ 不另立一套词表）。
+ *  · world-gated  判据读 `.quay/<file>` 生产载体 ⇒ 真值是未来生产事件（⛔ 无 worker 能产出）。
+ *  · workable     判据只读仓库内工作产物 ⇒ 还有 worker 能改变它。
+ *  · unclassified **读不到 / 解析不出判据载体**（criterion 缺失或空）⇒ 独立取值（硬规则 3b：
+ *                 读不懂不得冒充任一实质态）。 */
+export const CRITERION_KINDS = ["world-gated", "workable", "unclassified"] as const;
+export type CriterionKind = (typeof CRITERION_KINDS)[number];
+
+/** 一条 AC 的判据属哪一类载体（见 `CRITERION_KINDS`）。空/非字符串 criterion ⇒ `unclassified`。 */
+export function classifyCriterionKind(criterion: unknown): CriterionKind {
+  const s = typeof criterion === "string" ? criterion.trim() : "";
+  if (s === "") return "unclassified";
+  return readsProductionCarrier(s) ? "world-gated" : "workable";
+}
 
 /** 一条 AC 的缺口读数。taskCount 只在 not-evaluated 时为 null（⛔ 与 0 不同形）。 */
 export interface GoalGap {
@@ -1976,11 +2046,14 @@ export function standingReverifyAcs(
  *  的 achieved AC】出恰好一条读数。两类 population 的问句不同（硬规则 5 同族：同一个容器里装两类
  *  population 时，只用覆盖一类的工具判空会把非空读成空）：
  *
- *  ① active AC —— 问「有没有牵引」。五态：gap（零关联任务——真缺口）/ done-unresolved（有关联任务但
- *  全部非牵引——done/superseded 等，工作已做过、⛔ 不再 spawn 立案）/ stalled（有牵引任务但全都无法
- *  自行前进——G9，judgment 提供结构量；⚠️ needs-human 亦属 stalled：已离开 todo/ready、需人处理，有
- *  处理者但不能自行前进，且与 judgment 无关）/ in-progress（有牵引且可前进）/ not-evaluated
- *  （taskFacts == null）。
+ *  ① active AC —— 问「有没有牵引」。七态：gap（零关联任务——真缺口 ⇒ 立案）/ **有关联任务但全部非牵引
+ *  （done/superseded 等）、判据仍未达成——按判据载体再三分（`classifyCriterionKind`，硬规则 3b 三个取值
+ *  互不同形，gap-done-unresolved-conflates-workable-with-world-gated）**：workable（判据只读仓库内工作
+ *  产物 ⇒ 还有 worker 能改变它 ⇒ 立案）/ world-gated（判据读 `.quay/<file>` 生产载体 ⇒ 真值是立案之后
+ *  的未来生产事件、无 worker 能产出 ⇒ ⛔ 不 spawn，走复读路由）/ unclassified（读不到/解析不出判据 ⇒
+ *  独立取值、⛔ 不消耗名额）；另加 stalled（有牵引任务但全都无法自行前进——G9，judgment 提供结构量；
+ *  ⚠️ needs-human 亦属 stalled：已离开 todo/ready、需人处理，有处理者但不能自行前进，且与 judgment 无关）
+ *  / in-progress（有牵引且可前进）/ not-evaluated（taskFacts == null）。
  *  judgment===null（读不到 ready-pool-check）⇒ 不判 stalled（⛔ 不把「读不懂」伪装成「卡住」，
  *  也不伪装成「推进中」——stalled 只是对 in-progress 的细化，读不懂时回到 in-progress），
  *  ⛔ 例外：关联集合全为 needs-human 时无论 judgment 有无都判 stalled（needs-human 不需要
@@ -1989,6 +2062,8 @@ export function standingReverifyAcs(
  *  {todo, ready, needs-human}（单一真相源 = isTractionStatus）。done/superseded 等非牵引态
  *  不再与「零关联任务」同判 gap（gap-goal-gap-done-task-not-traction-respawns-every-round）；
  *  draft/superseded/retired 的 AC 不是缺口对象（未激活 / 已放弃）。
+ *  ⚠️ workable / world-gated / unclassified 三态**共用同一前置**（有关联任务、全非牵引、判据未达成），
+ *  分歧点**只在判据载体**（`classifyCriterionKind`）——⛔ 不是三条独立的启发式。
  *
  *  ② AC-216 复验域（achieved ∧ long-term ∧ GOAL 非 active，`standingReverifyAcs`）—— 问「此刻成立吗」
  *  （`standings` = I5 `check --achieved-failing` 的读数，goal-store 单一实现）。三态：standing-ok
@@ -2160,8 +2235,8 @@ export function computeGoalGaps(
         continue;
       }
       // 此刻违反 ⇒ 要有人做。**只有「在飞任务」才压下新一轮立案**：done/superseded 的关联任务
-      // ⛔ 不压下（它不覆盖回归——那正是「回归后再无人立案」的成因，⛔ 不与 ① 的 done-unresolved
-      // 同判）。有一条在飞任务被立案后即由下面的牵引态接手，故不会每轮重复 spawn。
+      // ⛔ 不压下（它不覆盖回归——那正是「回归后再无人立案」的成因，与 ① 的 `workable` 同一条守卫）。
+      // 有一条在飞任务被立案后即由下面的牵引态接手，故不会每轮重复 spawn。
       const inFlight = taskFacts.filter((t) => t.goalAc === id && isTractionStatus(t.status));
       if (inFlight.length === 0) {
         out.push({ goal, ac: id, state: "standing-violated", taskCount: 0 });
@@ -2189,7 +2264,15 @@ export function computeGoalGaps(
       state = "gap";                  // 真缺口：零关联任务 ⇒ 该 spawn 立案
       taskCount = 0;
     } else if (count === 0) {
-      state = "done-unresolved";      // 有关联任务但全部非牵引（done/superseded）——工作已做过，⛔ 不再 spawn
+      // 有关联任务但全部非牵引（done/superseded）而判据仍未达成 ⇒ 按**判据载体**机械三分
+      // （gap-done-unresolved-conflates-workable-with-world-gated；此前压成一个 done-unresolved，
+      // 使生产事件型落成终点黑洞：任务做完了、判据仍红、机制按设计不立案 ⇒ 永久静默）：
+      //   workable     —— 判据只读仓库内工作产物 ⇒ 还有 worker 能改变它 ⇒ 立案（isFilingGapState）。
+      //   world-gated  —— 判据读 `.quay/<file>` 生产载体 ⇒ 真值是立案之后的未来生产事件、
+      //                   ⛔ 无 worker 能产出 ⇒ 不消耗名额，走 `worldGatedRoutes` 的复读路由并留痕。
+      //   unclassified —— 读不到/解析不出判据（criterion 缺失或空）⇒ 独立取值（硬规则 3b），⛔ 不 spawn。
+      // ⛔ 三态共用同一前置、只分歧在载体 ⇒ 不是三条独立启发式（单一真相源 = classifyCriterionKind）。
+      state = classifyCriterionKind(r.criterion);
       taskCount = allAssociated.length; // 枚举关联数（⛔ 非布尔化，硬规则 3）
     } else if (traction.every((t) => t.status === "needs-human")) {
       state = "stalled";
@@ -2325,12 +2408,16 @@ export function triageDraftAc(
  *  readTaskFacts 独立复核（⛔ 不信 agent 自述）。
  *
  *  去重规则**按成因分叉**（`gap.state`）：`gap` 是「从未有人处理」（任何状态的既有认领都算重复）；
- *  `standing-violated` / `frozen-violated` 是「判据此刻为假」（done 的既有认领恰恰是**回归的证据**，
- *  ⛔ 不是重复——按 `gap` 的口径去重会让 agent 每轮都拒绝立案，该缺口就永远没有执行者）。 */
+ *  `workable` / `standing-violated` / `frozen-violated` 是「判据此刻为假而既有认领已 done」
+ *  （done 的既有认领恰恰是**回归 / 修得不彻底**的证据，⛔ 不是重复——按 `gap` 的口径去重会让 agent
+ *  每轮都拒绝立案，该缺口就永远没有执行者）。
+ *  ⛔ 只对**可立案态**（`isFilingGapState`）有意义：`world-gated`（无 worker 能产出该生产事件）与
+ *  `unclassified`（判据读不到）**不该**走到这里（`runGapSpawnPass` 的选取面已排除它们）。 */
 export function buildGapWorkerPrompt(gap: GoalGap, goalTitle: string, acTitle: string, acExpect: string, root: string): string {
   const standing = gap.state === "standing-violated";
   const frozen = gap.state === "frozen-violated";
-  const regressed = standing || frozen;
+  const workable = gap.state === "workable";
+  const regressed = standing || frozen || workable;
   return [
     frozen
       // ⛔ 口径必须是**可核的**：这里曾逐字写「No other mechanism re-runs it, so without a task it
@@ -2347,7 +2434,12 @@ export function buildGapWorkerPrompt(gap: GoalGap, goalTitle: string, acTitle: s
       // 正是前者被当成后者）。
       : standing
         ? "You are a gap-filing agent in the quay repo. A STANDING goal criterion (AC) — declared `long-term: true`, already achieved — now FAILS again: the guarantee it asserts has regressed. This round RE-RAN the criterion before filing and it failed a SECOND time, so the regression is confirmed by two independent measurements, not by a single reading."
-        : "You are a gap-filing agent in the quay repo. A goal criterion (AC) has a structural gap: no todo/ready/needs-human task advances it.",
+        : workable
+          // ⛔ 与 `gap` 的口径必须分开：`workable` 的关联任务**存在但全已 done/superseded**——工作做过了、
+          // 判据仍未达成（做的不够 / 复验没过）。按 `gap`「从未有人处理」的去重口径立案会被 agent 每轮
+          // 拒绝（既有认领已存在），缺口就永远没有执行者。
+          ? "You are a gap-filing agent in the quay repo. A goal criterion (AC) is still FALSE while every task that claimed it is already done/superseded — the earlier work did NOT hold. Its truth is a repo working product (code / file / test), so a new task CAN still change it. No todo/ready/needs-human task advances it right now."
+          : "You are a gap-filing agent in the quay repo. A goal criterion (AC) has a structural gap: no todo/ready/needs-human task advances it.",
     `Repo root: ${root}.`,
     `goal_id=${gap.goal} goal_title=${goalTitle}`,
     `ac_id=${gap.ac} ac_title=${acTitle}`,
@@ -2519,15 +2611,17 @@ export interface GapSpawnPassResult {
 }
 
 /** spawn 选取面：哪些缺口态该立案（**单一真相源**——`runGapSpawnPass` 与判据都读它，⛔ 不各写一份谓词）。
- *  三态该立案，且成因不同：`gap`（active AC 零关联任务）+ `standing-violated`（AC-216 复验域内常设不变式
+ *  四态该立案，且成因不同：`gap`（active AC 零关联任务）+ `workable`（active AC 有关联任务但全非牵引、
+ *  判据只读**仓库内工作产物** ⇒ 还有 worker 能改变它）+ `standing-violated`（AC-216 复验域内常设不变式
  *  此刻违反且无在飞任务）+ `frozen-violated`（**冻结population**：已离开复验域、台账尾读数说此刻为假、
  *  且无在飞任务——⛔ 与 standing-violated 是两个 population（域外/域内），合并即把「离开域后没人管」
  *  这条正好要修的形态重新藏起来）。其余态⛔ 不消耗 spawn 名额：stalled/in-progress 已有人在处理，
- *  done-unresolved/standing-ok 无工作要立，not-evaluated 是读不到而不是缺口（硬规则 3b），
- *  `derived-routed` 的红归 ③ 的主体 AC、⛔ 不归这条元判据（为它立案会每轮造一条关不掉的任务——
- *  它的复绿条件在别的 AC 的域内，见 GapState 的该条注释）。 */
+ *  `world-gated`（判据读生产载体 ⇒ 真值是未来生产事件、⛔ 无 worker 能产出它——见 `worldGatedRoutes` 的
+ *  复读路由）、`unclassified` 是**读不到判据载体**（硬规则 3b），standing-ok 无工作要立，
+ *  not-evaluated 是读不到 tasks/I5 而不是缺口，`derived-routed` 的红归 ③ 的主体 AC、⛔ 不归这条元判据
+ *  （为它立案会每轮造一条关不掉的任务——它的复绿条件在别的 AC 的域内，见 GapState 的该条注释）。 */
 export function isFilingGapState(state: GapState): boolean {
-  return state === "gap" || state === "standing-violated" || state === "frozen-violated";
+  return state === "gap" || state === "workable" || state === "standing-violated" || state === "frozen-violated";
 }
 
 /** `goal-gaps` fact 的名字——与 goal-ring / goal-sufficiency / goal-objective / goal-target-health 并列
@@ -2536,11 +2630,37 @@ export const GOAL_GAPS_FACT_NAME = "goal-gaps";
 
 /** 视图滤掉的「安静态」——**单一真相源**（⛔ 不在消费方各写一份谓词）。
  *  `in-progress`（已有人在推进）与 `standing-ok`（常设判据此刻成立）都是「本轮没有信号要给谁看」。
- *  **其余七态各是一条要被看见的读数**，尤其 `done-unresolved`：它有 done/superseded 任务认领、判据
- *  依然为假、**且没有任何机制会再碰它**——`isFilingGapState` 有意把它排除在 spawn 之外（见其注释，
- *  那是防噪音的设计、不是缺陷）：driver 每轮都算出了这个事实，此前却只活在当轮进程内存里，人要看得
- *  自己写外部脚本把同一套推导重做一遍。 */
+ *  **其余各态每一个都是一条要被看见的读数**，尤其 `world-gated`：它有 done/superseded 任务认领、判据
+ *  依然为假、**且没有任何 worker 能改变它**（真值是未来生产事件）——`isFilingGapState` 有意把它排除在
+ *  spawn 之外（见其注释，那是防浪费的设计、不是缺陷）：driver 每轮都算出了这个事实，此前却与 workable
+ *  压成同一个 `done-unresolved`、只活在当轮进程内存里，人要看得自己写外部脚本把同一套推导重做一遍。
+ *  ⛔ `world-gated` / `unclassified` / `workable` 都是非安静态（各自要被看见）。 */
 export const GAP_VIEW_QUIET_STATES: readonly GapState[] = ["in-progress", "standing-ok"];
+
+/** `world-gated` 缺口的**路由去向**——「谁会在世界变化后复读它」。这是一句**可核的**陈述，不是修辞：
+ *  一条 world-gated 的 AC 仍是 active GOAL 的判据 ⇒ 它**仍在每轮 gate 集合（pass 1 的 `criteria`）里**，
+ *  每轮都会被重新执行一次；世界一变（CI 跑完 / release tag 切出），下一轮读数自然转绿。
+ *  ⛔ 本路由**不 spawn worker**（无 worker 能产出该生产事件——派了是浪费名额）。
+ *  ⛔ 它不是「无事可做」：路由本身是本 fact 里一条**留痕**（`value.routed`），使人/常设例程能看见
+ *  「这条 AC 等的是世界、不是工人」。 */
+export const WORLD_GATED_ROUTE = "round-gate-reread";
+
+/** 本轮 world-gated 缺口的**路由留痕**：逐条带出 `{goal, ac, carriers, route}`（硬规则 3 枚举不布尔）。
+ *  `carriers` = 该 AC 判据文本里读到的生产载体路径（`productionCarriersOf`，去重保序）——人据此知道
+ *  它在等哪个生产事件。⛔ 纯派生读数，不进任何 spawn/flip 判定。 */
+export function worldGatedRoutes(
+  gaps: Array<GoalGap>,
+  records: Array<Record<string, unknown>>,
+): Array<{ goal: string; ac: string; carriers: string[]; route: string }> {
+  return gaps
+    .filter((g) => g.state === "world-gated")
+    .map((g) => ({
+      goal: g.goal,
+      ac: g.ac,
+      carriers: productionCarriersOf(records.find((r) => String(r.id ?? "") === g.ac)?.criterion),
+      route: WORLD_GATED_ROUTE,
+    }));
+}
 
 /** 本轮缺口读数的**视图**：只保留非安静态，逐条带出 `{goal, ac, state, taskCount}`。
  *  ⛔ 这是一条**派生视图**，不是第二处计算：输入就是 `computeGoalGaps` 的同一个返回数组
@@ -2560,17 +2680,27 @@ export function gapViewEntries(
  *  · 没算成（`evaluated: false`，成因在 `cause`）⇒ `value.gaps` 恒为 `[]`，由这两个字段把它与
  *    「查过且零条」分开——⛔ 绝不让「读不到缺口」长得像「没有缺口」。
  *  ⛔ 本 fact **不参与任何判定**：它由 `gaps` 单向派生，spawn 决策读的仍是原数组
- *  （`runGapSpawnPass(gaps, …)`）——新增本 fact 前后 spawn 结果逐字节相同（单测的负控制钉的就是这条）。 */
-export function gapViewFact(gaps: Array<GoalGap> | null, cause: string | null = null): Fact<Record<string, unknown>> {
+ *  （`runGapSpawnPass(gaps, …)`）——新增本 fact 前后 spawn 结果逐字节相同（单测的负控制钉的就是这条）。
+ *
+ *  `records`（可选）= 判据文本的来源，用于给 `world-gated` 缺口算出 `value.routed`（路由留痕，见
+ *  `worldGatedRoutes`）。⛔ 不传 ⇒ `value.routed: null`（「没算」与「算过且零条」不同形，硬规则 3b），
+ *  **绝不**落成 `[]`（那会与「查过且无 world-gated」同形）。 */
+export function gapViewFact(
+  gaps: Array<GoalGap> | null,
+  cause: string | null = null,
+  records: Array<Record<string, unknown>> | null = null,
+): Fact<Record<string, unknown>> {
   if (gaps === null) {
     return {
       name: GOAL_GAPS_FACT_NAME,
-      value: { gaps: [], evaluated: false, cause: cause ?? "gaps-not-computed" },
+      value: { gaps: [], routed: null, evaluated: false, cause: cause ?? "gaps-not-computed" },
       state: "not-evaluated",
       reason: `未评估（cause=${cause ?? "gaps-not-computed"}）——⛔ 不是「零缺口」`,
     };
   }
   const entries = gapViewEntries(gaps);
+  // world-gated 的路由留痕：不传 records ⇒ null（没算），传了 ⇒ 逐条 `{goal, ac, carriers, route}`。
+  const routed = records === null ? null : worldGatedRoutes(gaps, records);
   // 逐态计数（按态名排序 ⇒ 同一份输入恒得同一串，便于人读与 diff）。
   const counts = new Map<GapState, number>();
   for (const e of entries) counts.set(e.state, (counts.get(e.state) ?? 0) + 1);
@@ -2580,10 +2710,13 @@ export function gapViewFact(gaps: Array<GoalGap> | null, cause: string | null = 
     .join(" ");
   return {
     name: GOAL_GAPS_FACT_NAME,
-    value: { gaps: entries, evaluated: true, cause: null },
+    value: { gaps: entries, routed, evaluated: true, cause: null },
     state: "verified",
     // 分母（本轮 computeGoalGaps 的总条数）一并带出，使「视图滤掉了多少」当场可核。
-    reason: `非安静态 ${entries.length}/${gaps.length} 条${summary ? `：${summary}` : ""}`,
+    // world-gated 的路由条数一并带出 ⇒ 「等世界的那几条有没有被接住」当场可核（⛔ 不是只落在 value 里）。
+    reason:
+      `非安静态 ${entries.length}/${gaps.length} 条${summary ? `：${summary}` : ""}` +
+      (routed !== null && routed.length > 0 ? `；world-gated 路由 ${routed.length} 条（${WORLD_GATED_ROUTE}，⛔ 不 spawn）` : ""),
   };
 }
 
@@ -3428,9 +3561,11 @@ export async function runGoalRound(root: string, opts: GoalRoundOptions = {}): P
     ciRuns,
   };
   // ⑥c 缺口可见性 fact（gap-goal-driver-computed-gaps-never-surfaced-as-a-round-fact）：`gaps` 在 ⑤ 算出后
-  // 此前只喂 `runGapSpawnPass`，本 fact 把它（非安静态子集）落进轮记录 ⇒ 「哪条 AC 卡在 done-unresolved
-  // 没人管」当场可查。⛔ 单向派生、⛔ 不改任何 spawn/flip 判定（spawn 读的仍是原 gaps）。
-  const gapFacts = [gapViewFact(gaps)];
+  // 此前只喂 `runGapSpawnPass`，本 fact 把它（非安静态子集）落进轮记录 ⇒ 「哪条 AC 卡在 workable /
+  // world-gated 没人管」当场可查；`value.routed` 另行带出 world-gated 的**复读路由留痕**（值在等哪个
+  // 生产载体、去向是 round-gate-reread——本任务 AC 之一）。⛔ 单向派生、⛔ 不改任何 spawn/flip 判定
+  // （spawn 读的仍是原 gaps）。
+  const gapFacts = [gapViewFact(gaps, null, records)];
   if (staleness === null) {
     return {
       fact: {

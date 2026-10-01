@@ -44,6 +44,14 @@ import {
   gapViewEntries,
   gapViewFact,
   GOAL_GAPS_FACT_NAME,
+  // 缺口态按判据载体的机械三分（gap-done-unresolved-conflates-workable-with-world-gated）
+  classifyCriterionKind,
+  readsProductionCarrier,
+  productionCarriersOf,
+  worldGatedRoutes,
+  CRITERION_KINDS,
+  WORLD_GATED_ROUTE,
+  PRODUCTION_CARRIER_TOKEN_RE,
   sweepFrozenAcs,
   goalDriverRoutines,
   runGoalRound,
@@ -245,8 +253,8 @@ function derivedCriterionRecords() {
 
 const derivedByAc = (gaps) => new Map(gaps.map((g) => [g.ac, g]));
 
-const ALL_GAP_STATES = ['gap', 'done-unresolved', 'stalled', 'not-evaluated', 'standing-violated', 'frozen-violated', 'derived-routed', 'in-progress', 'standing-ok'];
+const ALL_GAP_STATES = ['gap', 'workable', 'world-gated', 'unclassified', 'stalled', 'not-evaluated', 'standing-violated', 'frozen-violated', 'derived-routed', 'in-progress', 'standing-ok'];
 
 const QUIET_GAP_STATES = ['in-progress', 'standing-ok'];
 
-export { ALL_GAP_STATES, DELIVERED_VERSION, DRIVER_KINDS, mkGitFixtureRoot, readRecheckRootFreshness, GAP_WORKER_TIMEOUT_MS_DEFAULT, GOAL_ACCEPTANCE_ACTIVE_ENV, GOAL_CONTROL_STATE_REL, GOAL_GAPS_FACT_NAME, GOAL_ROUND_REL, GOAL_SPAWN_CAP_DEFAULT, HEALTH_OBSERVED_CARRIERS, HEALTH_REQUIRED_CARRIERS, HEALTH_WINDOW_SEC_DEFAULT, KINDS, KNOWN_KINDS, OBJECTIVE_ACS, OBJECTIVE_ASSERTION_FIELDS, OBJECTIVE_EVIDENCE_CARRIERS, OBJECTIVE_GOAL, PRE_CHANGE_ENTRY, QUIET_GAP_STATES, TARGET_HEALTH_FACT_NAME, assert, buildGapWorkerPrompt, buildHealthProbeArgv, cannedProbePrefix, checkAchievedFailing, checkStaleness, collectObjectiveEvidence, computeGoalGaps, declaredTargetBinding, deriveTargetHealth, derivedByAc, derivedCriterionRecords, evRecord, fileURLToPath, fs, gapViewEntries, gapViewFact, goalAchievedFromRecords, goalCiRunsCollect, goalCiRunsThrottleMs, goalCliResolvable, goalCloseBlockFromRecords, goalDriverRoutines, goalFlipDecision, goalGapWorkerTimeoutMs, goalSpawnCap, goalStoreAbs, goalStoreArgv, goalSufficiencyVerdict, hasPrefilingEvidence, isFilingGapState, isTaskStuck, judgeCmd, mkTargetRoot, objectiveAssertionCommand, objectiveCacheKey, objectiveEvidenceProfile, objectiveSufficiencyVerdict, objectiveSufficiencyVerdictDetail, os, parseFrozenFailingReading, parseHealthProbe, path, probeLedger, readDeliveredPluginVersion, readFrozenFailing, readHostHealth, readReadyPoolJudgment, readTaskFacts, readsFrozenPopulation, recheckFrozenFailing, recheckStandingFailing, repoRoot, resetObjectiveCacheForTest, resetObjectiveTestState, resetSufficiencyCacheForTest, resolveTargetBinding, runGapSpawnPass, runGoalRound, runResidentQualityGateLoop, semanticSufficiencyVerdict, spawn, spawnSync, spawnTargetDriverFixture, sweepFrozenAcs, targetHealthFact, test, verifyObjectiveAssertion, waitForProcessVisible, writeEvidenceCarrier, writeGoalFile, writeStandingGoalFile };
+export { ALL_GAP_STATES, CRITERION_KINDS, DELIVERED_VERSION, DRIVER_KINDS, WORLD_GATED_ROUTE, PRODUCTION_CARRIER_TOKEN_RE, classifyCriterionKind, productionCarriersOf, readsProductionCarrier, worldGatedRoutes, mkGitFixtureRoot, readRecheckRootFreshness, GAP_WORKER_TIMEOUT_MS_DEFAULT, GOAL_ACCEPTANCE_ACTIVE_ENV, GOAL_CONTROL_STATE_REL, GOAL_GAPS_FACT_NAME, GOAL_ROUND_REL, GOAL_SPAWN_CAP_DEFAULT, HEALTH_OBSERVED_CARRIERS, HEALTH_REQUIRED_CARRIERS, HEALTH_WINDOW_SEC_DEFAULT, KINDS, KNOWN_KINDS, OBJECTIVE_ACS, OBJECTIVE_ASSERTION_FIELDS, OBJECTIVE_EVIDENCE_CARRIERS, OBJECTIVE_GOAL, PRE_CHANGE_ENTRY, QUIET_GAP_STATES, TARGET_HEALTH_FACT_NAME, assert, buildGapWorkerPrompt, buildHealthProbeArgv, cannedProbePrefix, checkAchievedFailing, checkStaleness, collectObjectiveEvidence, computeGoalGaps, declaredTargetBinding, deriveTargetHealth, derivedByAc, derivedCriterionRecords, evRecord, fileURLToPath, fs, gapViewEntries, gapViewFact, goalAchievedFromRecords, goalCiRunsCollect, goalCiRunsThrottleMs, goalCliResolvable, goalCloseBlockFromRecords, goalDriverRoutines, goalFlipDecision, goalGapWorkerTimeoutMs, goalSpawnCap, goalStoreAbs, goalStoreArgv, goalSufficiencyVerdict, hasPrefilingEvidence, isFilingGapState, isTaskStuck, judgeCmd, mkTargetRoot, objectiveAssertionCommand, objectiveCacheKey, objectiveEvidenceProfile, objectiveSufficiencyVerdict, objectiveSufficiencyVerdictDetail, os, parseFrozenFailingReading, parseHealthProbe, path, probeLedger, readDeliveredPluginVersion, readFrozenFailing, readHostHealth, readReadyPoolJudgment, readTaskFacts, readsFrozenPopulation, recheckFrozenFailing, recheckStandingFailing, repoRoot, resetObjectiveCacheForTest, resetObjectiveTestState, resetSufficiencyCacheForTest, resolveTargetBinding, runGapSpawnPass, runGoalRound, runResidentQualityGateLoop, semanticSufficiencyVerdict, spawn, spawnSync, spawnTargetDriverFixture, sweepFrozenAcs, targetHealthFact, test, verifyObjectiveAssertion, waitForProcessVisible, writeEvidenceCarrier, writeGoalFile, writeStandingGoalFile };
