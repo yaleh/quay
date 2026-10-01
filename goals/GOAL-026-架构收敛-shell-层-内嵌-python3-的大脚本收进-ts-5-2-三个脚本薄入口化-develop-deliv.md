@@ -2,7 +2,7 @@
 id: GOAL-026
 title: 架构收敛（shell 层）：内嵌 python3 的大脚本收进 TS——5.2 三个脚本薄入口化、develop-deliver-tgz 与
   quay-init 不再内嵌 python3、shell 层棘轮不回升
-status: active
+status: achieved
 kind: goal
 origin: SPEC-architecture-consolidation §10.2 第二个 GOAL（Phase 5；GOAL-025 已
   achieved，Phase 0 基线已出）。人 2026-09-20 指示 GOAL-B 应由 Claude 自行查
@@ -16,6 +16,11 @@ statusLog:
     reason: 人 2026-10-02 裁定激活：该 draft GOAL 及其子 AC 因分诊对象集只覆盖 active GOAL 名下的 draft AC
       而永久不可达（goal-driver.ts:2254-2256），9 条 draft 自 09-21/09-23 起惰性。激活使其子 AC
       进入分诊与判定域。
+  - at: 2026-10-01T18:11:22.588Z
+    from: active
+    to: achieved
+    actor: goal-driver
+    reason: "I2: all ACs achieved + sufficiency covered"
 ---
 ## 背景
 
