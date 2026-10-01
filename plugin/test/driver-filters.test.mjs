@@ -1356,3 +1356,58 @@ test("AC4 (端到端负控制) — meta-cc 副本形态上跑一次【真实任�
   const refused = syncEvents(root).find((e) => e.event === "doc-develop-sync-semantic-take-develop-refused");
   assert.ok(refused, "破坏性终局解被拒绝（落痕）");
 });
+
+// ════════════════════════════════════════════════════════════════════════════════════════════════════
+// gap-park-reason-mislabels-ac-precheck-as-suite-red 点 3 — markNeedsHuman 的小标题与提交消息必须由
+// 【停派种类】决定，⛔ 不再恒写「重试上限」。
+//
+// 实测（claudecodeui 2026-09-24→10-01）：stop-terminal 停派 75 条，而走 RETRY-CAP(3) 路径的 0 条；
+// 73 段 ## Needs-Human 小标题与 73 条提交消息【全部】写「重试上限」——真因是 AC 未全勾短路被误判为
+// 「suite 红归因不出」，与重试上限毫无关系（停派注记在对人撒谎）。
+// ════════════════════════════════════════════════════════════════════════════════════════════════════
+
+test("AC3 — kind=stop-terminal：## Needs-Human 段与提交消息都不含「重试上限」", (t) => {
+  const root = makeGitRoot("nh-kind-st");
+  t.after(() => fs.rmSync(root, { recursive: true, force: true }));
+  writeTask(root, "gap-nh", "---\nid: gap-nh\nstatus: ready\n---");
+  git(root, "add", "--", "tasks/gap-nh.md");
+  git(root, "commit", "-q", "-m", "baseline");
+
+  const res = markNeedsHuman(root, "gap-nh", "exited-not-landed 失败无法归因（基建/契约疑似）——停止重派", "stop-terminal");
+  assert.equal(res.ok, true);
+  assert.equal(res.committed, true);
+  const body = fs.readFileSync(path.join(root, "tasks", "gap-nh.md"), "utf8");
+  assert.match(body, /^## Needs-Human$/m, "注记段存在");
+  assert.doesNotMatch(body, /重试上限/, "stop-terminal 注记不得写「重试上限」（真因与重试上限无关）");
+  assert.match(body, /停派/, "注记仍写明是停派");
+  const subject = git(root, "log", "-1", "--format=%s").trim();
+  assert.doesNotMatch(subject, /重试上限/, "stop-terminal 提交消息不得写「重试上限」");
+  assert.match(subject, /needs-human/, "提交消息仍如实标出 needs-human 翻转");
+});
+
+test("AC3（首次登记臂）— kind=stop-terminal 且文件从未提交 ⇒ 首次登记消息也不含「重试上限」", (t) => {
+  const root = makeGitRoot("nh-kind-st-first");
+  t.after(() => fs.rmSync(root, { recursive: true, force: true }));
+  writeTask(root, "gap-nh", "---\nid: gap-nh\nstatus: todo\n---"); // 写盘但【不提交】
+
+  const res = markNeedsHuman(root, "gap-nh", "无法归因——停止重派", "stop-terminal");
+  assert.equal(res.committed, true);
+  const subject = git(root, "log", "-1", "--format=%s").trim();
+  assert.match(subject, /首次登记/, "未提交文件走首次登记措辞");
+  assert.doesNotMatch(subject, /重试上限/, "首次登记臂也不得沾「重试上限」（旧文案在此恒写「重试上限机械落盘」）");
+});
+
+test("AC3（负控制，retry-cap 臂）— kind=retry-cap：小标题与提交消息仍含「重试上限」", (t) => {
+  const root = makeGitRoot("nh-kind-rc");
+  t.after(() => fs.rmSync(root, { recursive: true, force: true }));
+  writeTask(root, "gap-nh", "---\nid: gap-nh\nstatus: ready\n---");
+  git(root, "add", "--", "tasks/gap-nh.md");
+  git(root, "commit", "-q", "-m", "baseline");
+
+  const res = markNeedsHuman(root, "gap-nh", "worker-driver 连续 3 次 exited-not-landed 未落地（重试上限）", "retry-cap");
+  assert.equal(res.committed, true);
+  const body = fs.readFileSync(path.join(root, "tasks", "gap-nh.md"), "utf8");
+  assert.match(body, /连续修满重试上限仍不合格/, "retry-cap 臂的小标题含「重试上限」（负控制）");
+  const subject = git(root, "log", "-1", "--format=%s").trim();
+  assert.match(subject, /重试上限机械翻转/, "retry-cap 臂的提交消息含「重试上限」（负控制）");
+});
