@@ -288,6 +288,85 @@ export async function runCompleteLoop({ client, id, logPath, actor = "quay-loop"
   return { ok: true, reason: acceptanceReason, exitCode: 0 };
 }
 
+/** Minimum non-whitespace length for a forced-completion reason (`runCompleteOutOfBand`). The reason
+ *  IS the deliverable of the out-of-band channel — a blank/one-word justification must not be
+ *  enough to force a task to `done` with no gate verdict behind it. Kept here (not in the MCP
+ *  handler) so every caller of the channel — MCP `task_write` today, any future surface — validates
+ *  the same way, one definition. */
+export const MIN_COMPLETE_REASON_CHARS = 8;
+
+export interface OutOfBandCompleteArgs extends LifecycleArgs {
+  /** REQUIRED: why this task is being forced to `done` without a gate verdict. Recorded in the
+   *  `complete` event payload as `verifiedBy`, so the forced completion is auditable after the
+   *  fact — the ledger entry is the point of the channel, not a side effect. */
+  reason: string;
+  /** Optional CAS guard. Omitted ⇒ the status READ from the task is used, which is the same
+   *  compare-and-swap every other lifecycle write performs. Supplied ⇒ the caller's expectation
+   *  wins, so a stale `expectedStatus` still fails closed (ConflictError) instead of being silently
+   *  re-based on the current read. */
+  expectedStatus?: string;
+}
+
+/**
+ * The explicit OUT-OF-BAND completion channel
+ * (gap-silent-completion-path-writes-no-gate-event).
+ *
+ * WHY THIS EXISTS: the invariant "reaching `done` implies a `complete` GateEvent" is asserted after
+ * the fact by `gate-event-coverage-check`, but a bare Provider-ABI status write produces a `done`
+ * task with ZERO events — measured 2026-09-30 (`gap-ac292-…`, a `task_write` that flipped
+ * `needs-human → done`): the coverage judge is fail-closed and sits BEFORE the suite in the static
+ * gate chain, so one unrecorded landing stalled every code delta's fan-in for a full day. A
+ * detection that costs a day of throughput is not a "harmless red reading"; the invariant has to
+ * hold on the WRITE side too.
+ *
+ * WHAT IT IS: the ONE sanctioned way to reach `done` without a gate verdict. It writes
+ * `status=done` AND appends the `complete` pass GateEvent ITSELF, so a caller cannot separate the
+ * status write from its ledger entry — that inseparability IS the mechanism. `reason` is REQUIRED
+ * (see MIN_COMPLETE_REASON_CHARS); too short ⇒ refuse with NO write and NO event.
+ *
+ * DELIBERATELY NOT `runComplete`: that path (and `runCompleteLoop`) requires `ready` and runs the
+ * acceptance meter. The whole point of this channel is to reach `done` from a state the normal
+ * promote path refuses — `needs-human` (where a task legitimately ends up after its block is
+ * resolved) or a meterless task whose completion evidence is the verification round. Forcing those
+ * through retreat→promote→complete is a three-step, memory-dependent path; this is the one call.
+ *
+ * It still honours the ADR-007 dark-axis precondition that both sibling completion paths enforce —
+ * "forced" must not mean "a way around the dark axes".
+ */
+export async function runCompleteOutOfBand({ client, id, logPath, actor = "quay-cli", workspaceRoot, reason, expectedStatus }: OutOfBandCompleteArgs): Promise<LifecycleResult> {
+  const reasonChars = typeof reason === "string" ? reason.replace(/\s+/g, "").length : 0;
+  if (reasonChars < MIN_COMPLETE_REASON_CHARS) {
+    const r = `out-of-band completion refused: reason must carry ≥${MIN_COMPLETE_REASON_CHARS} non-whitespace chars (got ${reasonChars}) — a forced completion must record WHY it bypassed the gate`;
+    console.log(r);
+    // @deprecated — process.exitCode set for CLI backward-compat; MCP callers should
+    // read the returned exitCode field and reset process.exitCode after the call.
+    process.exitCode = 1;
+    return { ok: false, reason: r, exitCode: 1 };
+  }
+  const task = await client.taskGet(id);
+  if (!task) throw new Error(`no such task: ${id}`);
+
+  // Same ADR-007 precondition as runComplete / runCompleteLoop: forcing done is not a way AROUND the
+  // dark-axis requirement. No-op unless the workspace declares ADR-007.
+  const darkAxisFail = await enforceDarkAxis({ client, id, logPath, actor, workspaceRoot });
+  if (darkAxisFail) return darkAxisFail;
+
+  const from = task.status;
+  await client.taskWrite({ id, status: TASK_STATUS.DONE, expectedStatus: expectedStatus ?? from });
+  appendGateEvent(
+    logPath,
+    mkLifecycleEvent({
+      id,
+      gate: "complete",
+      actor,
+      verdict: "pass",
+      payload: { from, to: TASK_STATUS.DONE, verifiedBy: reason, via: "out-of-band" },
+    })
+  );
+  console.log(`PASS — status=done (out-of-band, ${from} → done)`);
+  return { ok: true, reason, exitCode: 0 };
+}
+
 /**
  * `quay adjudicate <task>` — independent, read-only audit pass. Records the
  * mechanical state it can observe (`client.taskCheck`) as an `audit` GateEvent,

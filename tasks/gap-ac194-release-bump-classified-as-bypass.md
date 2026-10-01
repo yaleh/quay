@@ -3,7 +3,7 @@ id: gap-ac194-release-bump-classified-as-bypass
 title: AC-194 判据第四次变假（真 RED 非 NOT-EVALUATED）：release-cut 的 SPEC §4.3/§12 step-5
   版本 bump 直落 develop 被 bypass-check 判为 direct-commit-bypasses-fan-in；前三次靠人手加
   ruled one-off 行吸收，机制缺一个结构分类
-status: needs-human
+status: ready
 labels:
   - gap
   - defect

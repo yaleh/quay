@@ -10,6 +10,8 @@
 //      「枚举所有会把任务翻 done 的路径」的机械版；按提交信息扫会**一条都看不见**（实测 09-04~09-14
 //      有 3 条这种落地）。
 // 三态：载体读不到 ⇒ exit 3 NOT-EVALUATED，与控制流上的 PASS（exit 0）可区分。
+// ③ --no-block（gap-coverage-miss-fail-closed-stops-code-landings）：取值轴与阻断轴解耦 —— RED 照报
+//    + 落 ledger 但不 exit 1；默认模式仍 fail-closed。对照 = 同一 fixture 跑两种模式，两半都能取假。
 import { test, after } from "node:test";
 import assert from "node:assert/strict";
 import fs from "node:fs";
@@ -238,4 +240,102 @@ test("端到端：真 git 仓 + 真载体 —— 全绿时 exit 0，删掉一条
   assert.equal(parsed.verdict, "red");
   assert.deepEqual(parsed.days[0].uncovered, ["t-2"]);
   assert.deepEqual(parsed.days[0].exempt, [], "⛔ 不得落进 bootstrap 豁免——落进去这条负控制就恒绿了");
+});
+
+// ── --no-block: 取值轴与阻断轴解耦 (gap-coverage-miss-fail-closed-stops-code-landings AC3) ──────────
+// 两半都必须能取假，故本组测试对**同一** fixture 跑两种模式：
+//   默认 ⇒ exit 1（阻断轴默认开：证明被修的不是「判据不报红了」）
+//   --no-block ⇒ exit 0 且 RED 仍打印 + 落 ledger（取值轴保留：证明被修的不是「把它改成不报」）
+function runRaw(argv) {
+  try {
+    const out = execFileSync("node", ["--no-warnings", "--experimental-strip-types", CHECKER, ...argv], {
+      encoding: "utf8",
+      stdio: ["ignore", "pipe", "pipe"],
+    });
+    return { code: 0, out };
+  } catch (e) {
+    return { code: e.status, out: (e.stdout ?? "").toString(), err: (e.stderr ?? "").toString() };
+  }
+}
+
+/** 两条落地、t-2 晚于 cutoff 且无事件 ⇒ 一条历史覆盖缺口（RED）。返回该 fixture。 */
+function makeGapRepo() {
+  const { root, git } = makeRepo();
+  const cases = [
+    { id: "t-1", at: `${D2}T08:00:00Z`, ev: `${D2}T08:05:00Z`, has: true },
+    { id: "t-2", at: `${D2}T10:00:00Z`, ev: `${D2}T10:05:00Z`, has: false },
+  ];
+  for (const { id, at, ev, has } of cases) {
+    writeTask(root, id, "ready");
+    commitAt(git, "seed", at);
+    writeTask(root, id, "done");
+    commitAt(git, `tasks: 翻 ${id} done（driver 机械 fan-in）`, at);
+    if (has) writeEvent(root, id, ev);
+  }
+  return root;
+}
+
+const LEDGER_REL = path.join(".quay", "gate-event-coverage-nonblock-ledger.jsonl");
+
+test("--no-block：同一 fixture 默认 exit 1（阻断轴默认开）、--no-block exit 0 且 RED 照报 + 落 ledger（取值轴保留）", () => {
+  const root = makeGapRepo();
+
+  // 半 1（阻断轴默认开，能取假）：默认模式下这条缺口**必须**仍 exit 1。
+  const def = runChecker(root, ["--days", "3"]);
+  assert.equal(def.code, 1, `默认模式必须仍 fail-closed，实得 ${def.code}：${def.out}`);
+
+  // 半 2（取值轴保留，能取假）：--no-block 下不阻断，但判定**仍是 RED**（⛔ 不是被改成 pass）。
+  const nb = runChecker(root, ["--days", "3", "--no-block"]);
+  assert.equal(nb.code, 0, `--no-block 下 RED 不得阻断，实得 ${nb.code}：${nb.out}${nb.err ?? ""}`);
+  const parsed = JSON.parse(nb.out);
+  assert.equal(parsed.verdict, "red", "取值轴必须仍是 RED");
+  assert.equal(parsed.noBlock, true);
+  assert.equal(parsed.blocked, false);
+  assert.deepEqual(parsed.days[0].uncovered, ["t-2"], "缺口必须仍被点名");
+
+  // 持久载体：取值轴落 ledger（硬规则 9 —— 屏显会滚走，ledger 不会）
+  const ledgerPath = path.join(root, LEDGER_REL);
+  assert.ok(fs.existsSync(ledgerPath), "RED 必须落 ledger");
+  const rows = fs
+    .readFileSync(ledgerPath, "utf8")
+    .trim()
+    .split("\n")
+    .map((l) => JSON.parse(l));
+  assert.deepEqual(rows.map((e) => e.task), ["t-2"]);
+  assert.equal(rows[0].day, DAY);
+  assert.ok(rows[0].sha, "ledger 条目须带落地 sha（可回溯到具体落地提交）");
+
+  // 去重（grow-only、按 day|task）：同一缺口再跑一次不得重复记账
+  const nb2 = runChecker(root, ["--days", "3", "--no-block"]);
+  assert.equal(nb2.code, 0);
+  assert.equal(fs.readFileSync(ledgerPath, "utf8").trim().split("\n").length, 1, "同一 day|task 不得重复记账");
+});
+
+test("--no-block gate 模式的**屏显**仍报出缺口（判定行 + UNCOVERED + NON-BLOCKING 标记都在日志里）", () => {
+  const root = makeGapRepo();
+  const g = runRaw(["--root", root, "--merge-target", "develop", "--days", "3", "--gate", "--no-block"]);
+  assert.equal(g.code, 0, `gate --no-block 应 exit 0，实得 ${g.code}：${g.out}${g.err ?? ""}`);
+  assert.match(g.out, /^RED:/m, "判定行必须仍打印 RED");
+  assert.match(g.out, /UNCOVERED .*t-2/, "UNCOVERED 明细必须仍打印（这是「仍被报出」的屏显半边）");
+  assert.match(g.out, /NON-BLOCKING \(--no-block\)/, "须有显式的非阻断标记，可搜索");
+});
+
+test("--no-block 不减损第三态：载体读不到仍 exit 3（⛔ 不被 --no-block 吞成 exit 0）", () => {
+  const { root } = makeRepo(); // 无 .quay/gate-events.jsonl
+  const r = runRaw(["--root", root, "--merge-target", "develop", "--all", "--no-block"]);
+  assert.equal(r.code, 3, `--no-block 下读不到载体仍必须 exit 3，实得 ${r.code}`);
+  assert.match(r.out + (r.err ?? ""), /NOT-EVALUATED/);
+});
+
+test("--no-block 不伪造 RED：全绿时不落 ledger、exit 0", () => {
+  const { root, git } = makeRepo();
+  writeTask(root, "t-g", "ready");
+  commitAt(git, "seed", `${D2}T08:00:00Z`);
+  writeTask(root, "t-g", "done");
+  commitAt(git, "tasks: 翻 t-g done（driver 机械 fan-in）", `${D2}T08:00:00Z`);
+  writeEvent(root, "t-g", `${D2}T08:05:00Z`);
+  const r = runRaw(["--root", root, "--merge-target", "develop", "--days", "3", "--gate", "--no-block"]);
+  assert.equal(r.code, 0);
+  assert.match(r.out, /^PASS:/m);
+  assert.ok(!fs.existsSync(path.join(root, LEDGER_REL)), "全绿不得写 ledger（--no-block 只在 RED 时记账）");
 });
