@@ -1,7 +1,7 @@
 ---
 id: AC-316
 title: fan-in/suite 调度面上按 scripts/test.sh 是否存在推断「本仓库形态」的调用点 = 0（静态枚举，按代码位置判定）
-status: active
+status: achieved
 kind: criterion
 goal: GOAL-027
 criterion: >-
@@ -56,6 +56,11 @@ statusLog:
     to: active
     actor: goal-driver
     reason: "triage: activate"
+  - at: 2026-10-01T18:09:45.941Z
+    from: active
+    to: achieved
+    actor: goal-driver
+    reason: "I2: criterion pass"
 fidelity:
   verdict: faithful
   reason: "fidelity judge: faithful"
