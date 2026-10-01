@@ -890,6 +890,74 @@ export function isPendingImplementationItem(text) {
   return !isExternalVerificationItem(text);
 }
 
+// ── EXECUTOR-UNSATISFIABLE AC, UNANNOTATED (gap-executor-unsatisfiable-ac-unannotated-burns-rounds) ──
+// The gap: an AC whose OWN TEXT declares that the executor cannot satisfy it ("the human gives the
+// ruling — this AC must not be written by the executor", "only a human yale writes this line",
+// "after it is merged into develop", "measure again after landing") but which does NOT carry the
+// `（待外部）` annotation. The fail-closed default of the AC-completion gate (unannotated ⇒ 待本任务)
+// is CORRECT and is NOT changed here; the defect is on the AUTHORING side — the todo→ready gate did
+// not intercept such a task, so it entered `ready`, a worker did everything else, and every round
+// ended「AC 未全勾」with the whole round discarded (生产读数 38 轮 / 其中 10 轮 6 个任务属于此族).
+//
+// 判据 (position-based, 硬规则② — the ONLY surface read is the TEXT of unchecked AC/DoD list items,
+// never `## Proposal` prose, never a fenced code block, never a quote):
+//   hit ⟺ the item is UNCHECKED ∧ it is NOT annotated `（待外部）` ∧ its text carries one of the
+//   declaration phrases below. The phrase list is a CLOSED ENUM in ONE place (this array).
+//
+// Why the annotation is not "guessed": the existing ruling (gap-ready-pool-remaining-external-vs-
+// implementation, 人 2026-08-12) is 判据只读注解、不猜. This check does not ADD a new judgment about
+// what an item MEANS — it only reads the author's OWN words in the item text and asks whether the
+// author also wrote the machine-readable annotation that says "the executor is not the one who
+// finishes this". The annotation stays the author's to write; ⛔ a worker must never add it itself
+// (that would be a self-exemption, and the fix for a hit is to rewrite the AC or annotate it — a
+// HUMAN/authoring decision, not a worker's).
+export const UNSATISFIABLE_AC_DECLARATION_PHRASES = Object.freeze([
+  // ① the executor may not write the line on the human's behalf (verbatim sample:
+  //    `AC9 人评审门：…这条 AC 不得由执行者代写` / `…该行只能由人 yale 写入，执行者不得代写`)
+  "不得由执行者代写",
+  "执行者不得代写",
+  "只能由人",
+  // ② satisfiable only AFTER this task lands (verbatim samples: `AC6 真实落地（合入 develop 并推送
+  //    yaleh 之后）：触发 Desktop Release…` / `落地后实测复查：sqlite3 … 里 agent 档不再增长`)
+  "合入 develop",
+  "落地后",
+]);
+
+/** Does the ITEM TEXT itself declare that the executor structurally cannot satisfy it? Position-based
+ *  (硬规则②): the caller must have already restricted the argument to a single list-item's text. */
+export function declaresUnsatisfiableByExecutor(text) {
+  return UNSATISFIABLE_AC_DECLARATION_PHRASES.some((p) => text.includes(p));
+}
+
+/** Strip fenced code blocks from a section before its list items are read (位置判定, 硬规则②): a
+ *  declaration QUOTED inside a fence (documentation of this very check, a pasted sample) is not the
+ *  AC's own text and must not be a hit. */
+function stripFencedBlocks(section) {
+  return section.replace(/^[ \t]*```[^\n]*\n[\s\S]*?^[ \t]*```[ \t]*$/gm, "");
+}
+
+/** The three-valued judgment (硬规则③b — a structure that could not find what it judges must NOT
+ *  print the passing value):
+ *    { evaluated:true,  status:"clean",        hits:[] }     — AC/DoD read, every unchecked item clean
+ *    { evaluated:true,  status:"hit",          hits:[…] }    — ≥1 unchecked item declares executor-
+ *                                                              unsatisfiability without `（待外部）`
+ *    { evaluated:false, status:"not-evaluated",hits:[], reason:"no-ac-or-dod-section" }
+ *      — no recognizable AC/DoD section ⇒ 未评估, a value DISTINCT from "clean" (never folded into it).
+ *  `hits` carries the offending item TEXTS verbatim so the consumer can name WHICH item blocked. */
+export function judgeUnsatisfiableUnannotatedAc(body) {
+  const acSection = extractSectionByShape(body, "ac");
+  const dodSection = extractSectionByShape(body, "dod");
+  if (acSection === null && dodSection === null) {
+    return { evaluated: false, status: "not-evaluated", hits: [], reason: "no-ac-or-dod-section" };
+  }
+  const items = [
+    ...uncheckedItems(stripFencedBlocks(acSection ?? "")),
+    ...uncheckedItems(stripFencedBlocks(dodSection ?? "")),
+  ];
+  const hits = items.filter((it) => isPendingImplementationItem(it) && declaresUnsatisfiableByExecutor(it));
+  return { evaluated: true, status: hits.length > 0 ? "hit" : "clean", hits };
+}
+
 // ── TOUCH-ABSENT-FROM-REF VETO (gap-nyf-doneflipready-arm-bypasses-leftover-worktree-exemption) ─────
 // The landed signals (taskWorkLanded's symbol-resolution / touch-file existence) read the main
 // checkout's DISK working tree — a file the task EDITS already exists there regardless of whether THIS
@@ -2211,6 +2279,11 @@ function buildCandidate(id, task, root, allTasks, poolParsed, inFlightParsed, ex
   const depsReadiness = depsReadinessFor(task, allTasks, root, develop);
   const depsReady = depsReadiness.ready;
   const four = artifactsComplete(task.body);
+  // EXECUTOR-UNSATISFIABLE AC, UNANNOTATED (gap-executor-unsatisfiable-ac-unannotated-burns-rounds):
+  // an unchecked AC/DoD item whose own text declares the executor cannot satisfy it, with no
+  // `（待外部）` annotation ⇒ never promotion-eligible. The whole point is to intercept at
+  // todo→ready, BEFORE the task burns a worker round on「AC 未全勾」.
+  const unsatisfiableAc = judgeUnsatisfiableUnannotatedAc(task.body);
   const parsed = parseTouches(task.body);
   // AC1 (gap-ac46-pool-criteria-in-gate): the pool-layer static criteria that slot-refill's step-4
   // used to check AFTER promotion now gate the todo→ready promotion ITSELF — a task is rejected at
@@ -2322,6 +2395,10 @@ function buildCandidate(id, task, root, allTasks, poolParsed, inFlightParsed, ex
     selfTouchOk: selfTouch.ok,
     // PROSE-PREREQUISITE GAP (AC3): prose-declared prereqs with no relation edge — never eligible.
     prosePrereqGap: prosePrereqGapIds,
+    // EXECUTOR-UNSATISFIABLE AC, UNANNOTATED: the three-valued reading (evaluated / status / hits) —
+    // `hits` names the offending item(s) verbatim, so a blocked promotion is a traceable decision
+    // (点名是哪一条), never a silent skip. `evaluated:false` ⇒ 未评估 (no AC/DoD section read).
+    unsatisfiableUnannotatedAc: unsatisfiableAc,
     // BODY-FRESHNESS (gap-ready-pool-body-still-read-from-stale-main-checkout): the three-valued
     // freshness of the body the checks above were computed from, plus the boolean the `eligible`
     // conjunction consumes. `fresh` is the ONLY value that lets the body verdicts stand; the other
@@ -2351,7 +2428,13 @@ function buildCandidate(id, task, root, allTasks, poolParsed, inFlightParsed, ex
     // on that judgment. It is NOT a goal-derived term (the invariant above is untouched) and it is
     // fail-closed only toward WITHHOLDING a promotion, never toward a needs-human flip: the consumer
     // (promotion-driver) treats it as its own class, not as a fixable defect.
-    eligible: depsReady && four.complete && touchesResolve && touchesNarrow.narrow && !retiredMechanism && !superseded && prosePrereqGapIds.length === 0 && !compound && selfTouch.ok && bodyEvaluated,
+    // EXECUTOR-UNSATISFIABLE AC, UNANNOTATED: `unsatisfiableAc.hits.length === 0` is ADDED — an AC the
+    // executor structurally cannot tick, with no `（待外部）` annotation, must never enter `ready`
+    // (otherwise the worker finishes everything else and every round is discarded on「AC 未全勾」).
+    // A clean OR not-evaluated reading does NOT block (only a real `hit` does): a task body with no
+    // AC/DoD section already fails `four.complete` above, so the not-evaluated state can never be a
+    // back door, and it must not be conflated with a hit (硬规则③b).
+    eligible: depsReady && four.complete && touchesResolve && touchesNarrow.narrow && !retiredMechanism && !superseded && prosePrereqGapIds.length === 0 && !compound && selfTouch.ok && bodyEvaluated && unsatisfiableAc.hits.length === 0,
   };
 }
 
@@ -2463,8 +2546,12 @@ export function buildTargetedPromotion(id, task, root, allTasks, develop = "deve
   // PROSE-PREREQUISITE GAP (AC3): targeted promotion must NOT advance a task whose prose-declared
   // prereqs have no relation edge — same fail-closed as the bulk path.
   const prosePrereqGapIds = prosePrereqGap(task.body, task.frontmatterRaw, path.join(root, "tasks"));
+  // EXECUTOR-UNSATISFIABLE AC, UNANNOTATED: the outer's stage-goal selection gates on the SAME
+  // judgment as the bulk path — an AC the executor cannot tick (no `（待外部）`) must not be promoted
+  // by either path.
+  const unsatisfiableAc = judgeUnsatisfiableUnannotatedAc(task.body);
   // No goal-derived term in the membership conjunction (invariant above).
-  const eligible = four.complete && depsReady && touchesResolve && touchesNarrow.narrow && prosePrereqGapIds.length === 0 && !compound && selfTouch.ok;
+  const eligible = four.complete && depsReady && touchesResolve && touchesNarrow.narrow && prosePrereqGapIds.length === 0 && !compound && selfTouch.ok && unsatisfiableAc.hits.length === 0;
   const checks = {
     fourArtifacts: four.complete,
     missingArtifacts: four.missing,
@@ -2478,6 +2565,9 @@ export function buildTargetedPromotion(id, task, root, allTasks, develop = "deve
     touchesNarrow: touchesNarrow.narrow,
     wideTouches: touchesNarrow.wideGlobs,
     prosePrereqGap: prosePrereqGapIds,
+    // EXECUTOR-UNSATISFIABLE AC, UNANNOTATED: the three-valued reading on the targeted path too —
+    // `hits` names the offending item(s) verbatim.
+    unsatisfiableUnannotatedAc: unsatisfiableAc,
     notFixture: true,
     notParked: true,
     superseded: false,
@@ -2497,7 +2587,8 @@ export function buildTargetedPromotion(id, task, root, allTasks, develop = "deve
       ? `${id}: targeted promotion (outer stage-goal selection) — mechanically eligible; run \`quay promote ${id}\``
       : `${id}: not eligible · four-artifacts ${four.complete ? "complete" : `missing ${four.missing.join(",")}`} · ` +
         `deps ${depsReady ? (depsReadiness.supersededDeps.length > 0 ? `ready(retired: ${depsReadiness.supersededDeps.join(",")})` : "ready") : `NOT-ready(${depsReadiness.blockingDeps.join(",")})`} · touches ${touchesResolve ? "resolve" : "MISSING"} · ` +
-        `prose-prereq ${prosePrereqGapIds.length === 0 ? "ok" : `GAP(${prosePrereqGapIds.join(",")})`}`,
+        `prose-prereq ${prosePrereqGapIds.length === 0 ? "ok" : `GAP(${prosePrereqGapIds.join(",")})`} · ` +
+        `unsatisfiable-ac ${unsatisfiableAc.hits.length === 0 ? (unsatisfiableAc.evaluated ? "ok" : "not-evaluated") : `UNANNOTATED(${unsatisfiableAc.hits.join(" | ")})`}`,
   };
 }
 
@@ -3388,6 +3479,12 @@ export function analyzeTasks({ tasksDir, root, cap = CONCURRENCY_CAP_DEFAULT, fl
     // traceable decision. The reason carries the freshness value + its cause, so `stale-suspected`
     // (measured) is never confusable with `unknown` (unmeasurable).
     if (!c.bodyEvaluated) intercepted.push({ id: c.id, reason: `body-not-evaluated (${c.bodyFreshness}: ${c.bodyFreshnessReason})` });
+    // EXECUTOR-UNSATISFIABLE AC, UNANNOTATED (gap-executor-unsatisfiable-ac-unannotated-burns-rounds):
+    // the blocked promotion is recorded here too, WITH the offending item texts — so「为什么这个 todo
+    // 一直不晋升」is answerable from the ledger (点名是哪一条), not a silent stay-in-todo.
+    if (c.unsatisfiableUnannotatedAc.hits.length > 0) {
+      intercepted.push({ id: c.id, reason: "unsatisfiable-ac-unannotated", hits: c.unsatisfiableUnannotatedAc.hits });
+    }
   }
   // BODY-FRESHNESS — the output's OWN word-list entry for the third state (AC2 of
   // gap-ready-pool-body-still-read-from-stale-main-checkout): the candidates whose body dimensions

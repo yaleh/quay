@@ -77,6 +77,16 @@ ready-made body.
    equivalently mechanical grep/query — never a bare prose claim). `## DoD` states the
    real-landing bar (an object actually operated through the mechanism — artifacts/fixtures are
    necessary-not-sufficient, DIR-026 Reading A), not "tests exist."
+   - **An AC the executor structurally CANNOT satisfy must carry the `（待外部）` annotation, at the
+     item's first-line end.** If the item's own text says a human must supply/write it (`人工关卡` /
+     `只能由人写入` / `执行者不得代写`), or it can only be satisfied after this task lands
+     (`合入 develop 之后` / `落地后实测`), then leaving it unannotated makes the task
+     promotion-INELIGIBLE and burns rounds: the todo→ready gate (`ready-pool-check.ts`
+     `judgeUnsatisfiableUnannotatedAc`) now blocks it, and even if it reached `ready` a worker would
+     finish everything else and every round would end「AC 未全勾」with the whole round discarded
+     (gap-executor-unsatisfiable-ac-unannotated-burns-rounds). Write the annotation yourself:
+     `- [ ] …该行只能由人 yale 写入（待外部）`. ⛔ Never let a worker add the annotation to an AC it
+     was given — self-annotating is a self-exemption, not a fix.
 
 4. **Write `## Touches`.** List the SPECIFIC files this task will touch — never a bare directory
    (a directory-level Touches asymmetrically locks concurrent work and fails the narrowness
