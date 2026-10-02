@@ -36,3 +36,15 @@ extra:
 - plugin/scripts/goal-driver.ts
 - plugin/test/goal-triage.test.mjs
 - tasks/gap-goal-round-records-unreachable-drafts.md
+
+## 执行期记录（执行者，2026-10-02）
+
+**AC1 突变对照（实测）**：`cp` 备份 `plugin/scripts/goal-driver.ts` 后，删掉 `return {…}` 里的 `unreachableDrafts,` 一行 ⇒ `node --test plugin/test/goal-triage.test.mjs` 得 **7 pass / 1 fail**，唯一转红的正是新增那条；`cp` 还原后 8/8 绿。
+
+**AC2 负控制突变对照（实测）**：把 `acs` 的筛选条件从 `isAc ∧ status=draft ∧ 父GOAL ∈ draftGoalIds` 放松为 `isAc ∧ status=draft` ⇒ 同一条转红——证明负控制断言 `!u.acs.includes('AC-900')` 非空转（fixture 里 `acs` 同时含 AC-912/AC-913，筛选确有区分力）。
+
+**AC3**：`node --test plugin/test/goal*.test.mjs` ⇒ **240 pass / 0 fail**（develop 合并后计数由授权时记录的 234 增至 240）。⚠️ 必须在**干净 env** 下读：本 worker 会话进程自带 `QUAY_GOAL_ACCEPTANCE_ACTIVE=1`，未清时该族 **43 红**，`env -u QUAY_GOAL_ACCEPTANCE_ACTIVE` 后 **0 红** —— 红全部是 env 污染，与本 delta 无关（`scripts/test.sh` 入口已 unset 该变量，故 scoped 门不受影响）。
+
+**scoped 门**：`bash scripts/test.sh --for-task gap-goal-round-records-unreachable-drafts --allow-thin` ⇒ **exit 0 绿**（8/8）；已写 scoped-gate-cache，developSha `a4e358c6e`。
+
+**AC4（待外部，落地后复核）**：本轮读 `<root>/.quay/goal-round.jsonl` 最新轮（`2026-10-02T02:13:44Z`）的 `goal-ring` fact，`value` 键表**不含** `unreachableDrafts` —— 符合预期：本 delta 尚未落地，生产跑的是 develop 上的旧代码。落地并经过一次真实生产轮后，该字段应以 `evaluated === true` 出现（并枚举 draft GOAL 及其名下 draft AC）。
