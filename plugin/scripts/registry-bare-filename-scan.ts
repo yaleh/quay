@@ -207,11 +207,21 @@ export function listScriptBasenames(root: string): string[] {
     .sort();
 }
 
-function dirContainsSkip(fullDir: string): boolean {
-  return fullDir.split(path.sep).some((seg) => SKIP_DIR_NAMES.has(seg));
+/**
+ * 目录是否为跳过目录：判定只作用于 `root` **之下**的路径段，⛔ 不看绝对路径的祖先链。
+ *
+ * 此前按 `fullDir.split(path.sep)` 逐段匹配**绝对路径** —— 于是只要 `root` 自身的祖先链里出现任一
+ * 禁名段（Claude Code 的 `.claude/worktrees/` 同时命中 `worktrees` 与 `.claude`），`listFiles()` 就
+ * 一次都不下降、载体枚举静默归零，fan-in 静态相位以「已知样本找不到」的形式假红（指向错误方向）。
+ * 枚举本来就知道 `root`，所以跳过集必须相对它求值：只有 root 之下的段参与匹配。
+ * (gap-registry-scan-skip-predicate-matches-absolute-path)
+ */
+function dirContainsSkip(root: string, fullDir: string): boolean {
+  const rel = path.relative(root, fullDir);
+  return rel.split(path.sep).some((seg) => SKIP_DIR_NAMES.has(seg));
 }
 
-/** 递归列出 root 下的普通文件（绝对路径，排序），跳过 skip 目录与符号链接。 */
+/** 递归列出 root 下的普通文件（绝对路径，排序），跳过 root 之下的 skip 目录与符号链接。 */
 function listFiles(root: string, exts: Set<string>): string[] {
   const out: string[] = [];
   const stack: string[] = [root];
@@ -227,7 +237,7 @@ function listFiles(root: string, exts: Set<string>): string[] {
       const full = path.join(current, e.name);
       if (e.isSymbolicLink()) continue;
       if (e.isDirectory()) {
-        if (!SKIP_DIR_NAMES.has(e.name) && !dirContainsSkip(full)) stack.push(full);
+        if (!SKIP_DIR_NAMES.has(e.name) && !dirContainsSkip(root, full)) stack.push(full);
       } else if (e.isFile() && exts.has(path.extname(e.name))) {
         out.push(full);
       }

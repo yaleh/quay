@@ -29,6 +29,7 @@ import {
   scanCarrier,
   scanBareFilenameRefs,
   listScriptBasenames,
+  listCarrierFiles,
   computeKept,
   buildReferenceMap,
   main,
@@ -102,6 +103,92 @@ test("AC1: the capability-catalog DECLARATION DATA is excluded as a carrier (pop
       assert.ok(!c.file.endsWith("capability-catalog-declarations.json"),
         `${ref.script} must not be "referenced" by the catalog's declaration data`);
     }
+  }
+});
+
+// ── 跳过谓词相对 root（gap-registry-scan-skip-predicate-matches-absolute-path）────────────────────────
+// 旧缺陷：跳过判定按【绝对路径】逐段匹配 ⇒ root 祖先链里出现禁名段（Claude Code 的 `.claude/worktrees/`
+// 同时命中 `worktrees` 与 `.claude`）时，listFiles() 一次都不下降、载体枚举静默归零，fan-in 静态相位
+// 以「已知样本找不到」的形式假红。判据钉在【载体枚举数量】这个量上 —— 不是断言某个函数返回值。
+
+/** 同步捕获 process.stdout.write（main 的 --scan --json 输出面）。node:test 顶层用例串行，安全。 */
+function captureStdout(fn) {
+  const orig = process.stdout.write.bind(process.stdout);
+  let out = "";
+  process.stdout.write = (chunk) => { out += typeof chunk === "string" ? chunk : chunk.toString(); return true; };
+  try { fn(); } finally { process.stdout.write = orig; }
+  return out;
+}
+
+/** fixture：plugin/scripts/quay-deliver.ts（代码载体）+ sub/registry.json（JSON 载体），共 2 个载体。 */
+function buildSkipFixture(root) {
+  fs.mkdirSync(path.join(root, "plugin", "scripts"), { recursive: true });
+  fs.mkdirSync(path.join(root, "sub"), { recursive: true });
+  fs.writeFileSync(path.join(root, "plugin", "scripts", "foo.sh"), "#!/usr/bin/env bash\n:\n");
+  fs.writeFileSync(
+    path.join(root, "plugin", "scripts", "quay-deliver.ts"),
+    'export const MEMBERS = [{ name: "x", file: "foo.sh" }];\n',
+  );
+  fs.writeFileSync(path.join(root, "sub", "registry.json"), '{\n  "scripts": ["foo.sh"]\n}\n');
+}
+
+test("AC1/AC4: carrier enumeration does not depend on skip-named segments in the ancestor path", () => {
+  const base = fs.mkdtempSync(path.join(os.tmpdir(), "registry-skip-ancestor-"));
+  try {
+    // 同一份 fixture 放在三种祖先路径下：无禁名段 / 含 `worktrees` / 含 `.claude`。
+    const plain = path.join(base, "plain", "wt-a", "fixture");
+    const worktreesAncestor = path.join(base, "worktrees", "wt-a", "fixture");
+    const claudeAncestor = path.join(base, ".claude", "w", "fixture");
+    for (const r of [plain, worktreesAncestor, claudeAncestor]) buildSkipFixture(r);
+
+    const expected = 2; // quay-deliver.ts + registry.json（fixture 定义的载体数）
+    const plainCount = scanBareFilenameRefs(plain).carrierCount;
+    // 非零锚：防止两个 fixture 都枚举成 0 时 0==0 恒真（硬规则 4c 的空转半边）。
+    assert.equal(plainCount, expected, "fixture defines exactly two carriers (guards against a vacuous 0==0)");
+
+    for (const [label, root] of [["worktrees", worktreesAncestor], [".claude", claudeAncestor]]) {
+      const got = scanBareFilenameRefs(root).carrierCount;
+      assert.equal(
+        got,
+        plainCount,
+        `carrier count must not depend on a skip-named segment in the ancestor path (${label}): got ${got}, want ${plainCount}`,
+      );
+    }
+
+    // `--scan --json` 走的就是 scanBareFilenameRefs；逐字确认 CLI 面同读数。
+    const cliJson = captureStdout(() => main(["--scan", "--json", "--root", worktreesAncestor]));
+    assert.equal(JSON.parse(cliJson).carrierCount, expected, "--scan --json carrierCount must match under a skip ancestor");
+  } finally {
+    fs.rmSync(base, { recursive: true, force: true });
+  }
+});
+
+test("AC2 negative control: node_modules/dist/vendor below root are still skipped", () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "registry-skip-below-"));
+  try {
+    fs.mkdirSync(path.join(root, "plugin", "scripts"), { recursive: true });
+    fs.writeFileSync(path.join(root, "plugin", "scripts", "foo.sh"), "#!/usr/bin/env bash\n:\n");
+    fs.writeFileSync(path.join(root, "manifest.json"), '{\n  "scripts": ["foo.sh"]\n}\n');
+    for (const d of ["node_modules", "dist", "vendor"]) {
+      fs.mkdirSync(path.join(root, d), { recursive: true });
+      fs.writeFileSync(path.join(root, d, "manifest.json"), '{\n  "scripts": ["foo.sh"]\n}\n');
+    }
+    const rel = listCarrierFiles(root).map((f) => path.relative(root, f).split(path.sep).join("/")).sort();
+    assert.deepEqual(rel, ["manifest.json"], "only the root-level carrier is enumerated");
+    for (const d of ["node_modules", "dist", "vendor"]) {
+      // 零计数的配套动作：谓词对着一个【已知为真】的样本干跑——磁盘上确有该 .json，跳过才是真跳过。
+      assert.ok(
+        fs.existsSync(path.join(root, d, "manifest.json")),
+        `fixture precondition: ${d}/manifest.json exists on disk (0 must be a real skip, not an absent input)`,
+      );
+      assert.equal(
+        rel.filter((c) => c.split("/").includes(d)).length,
+        0,
+        `${d}/ below root must remain skipped`,
+      );
+    }
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
   }
 });
 
