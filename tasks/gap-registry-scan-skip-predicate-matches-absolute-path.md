@@ -2,7 +2,7 @@
 id: gap-registry-scan-skip-predicate-matches-absolute-path
 title: registry-bare-filename-scan 的跳过谓词按【绝对路径】逐段匹配——worktree
   只要位于带禁名的路径下，载体枚举就静默归零、fan-in 静态相位整片转红
-status: ready
+status: done
 labels:
   - gap
   - defect
