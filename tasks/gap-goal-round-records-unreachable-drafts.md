@@ -25,7 +25,7 @@ extra:
 - [x] AC1（能取假，突变对照）：把 `value` 里的 `unreachableDrafts` 去掉 ⇒ `plugin/test/goal-triage.test.mjs` 中「draft GOAL 名下的 draft AC 出现在 value.unreachableDrafts」这一条转红，其余条不受影响。（改掉字段名或删字段 ⇒ 必须红）
 - [x] AC2（负控制）：挂在 **active** GOAL 名下的 draft AC ⛔ **不得**进 `unreachableDrafts`（它是分诊对象集成员，那条路径负责它）；反向：draft GOAL 名下的 draft AC ⛔ **不得**出现在 `triage`。
 - [x] AC3（无回归）：`node --test plugin/test/goal*.test.mjs` 全绿（实现时实测 234/234）。
-- [ ] AC4（读生产载体，落地后才能满足）：`<root>/.quay/goal-round.jsonl` 的最新轮 `facts[]` 中 `goal-ring` 的 `value.unreachableDrafts` 字段存在且 `evaluated === true`。（待外部）
+- [x] AC4（读生产载体，落地后才能满足）：`<root>/.quay/goal-round.jsonl` 的最新轮 `facts[]` 中 `goal-ring` 的 `value.unreachableDrafts` 字段存在且 `evaluated === true`。（待外部）
 
 ## DoD
 
