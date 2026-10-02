@@ -1,73 +1,120 @@
 ---
 id: AC-318
-title: 第三方 delta 分类不依赖 quay 检查注册表——项目不再提交注册表副本，且落地后分类失败 = 0
+title: delta 分类不依赖 quay 检查注册表——无注册表的树落声明面/保守缺省而非分类失败，本仓库落 registry（判据已改为本仓可自证）
 status: active
 kind: criterion
 goal: GOAL-027
 criterion: >-
   set -u
 
+
   root=$(git rev-parse --show-toplevel 2>/dev/null) || { echo "NOT-EVALUATED: 不在
   git 仓库内" >&2; exit 3; }
 
+
   cd "$root"
 
-  T="${QUAY_THIRD_PARTY_ROOT:-/data/home/yale/work/claudecodeui}"
 
-  [ -d "$T/.quay" ] || { echo "NOT-EVALUATED: 第三方项目不存在：$T（用
-  QUAY_THIRD_PARTY_ROOT 指定）" >&2; exit 3; }
+  C=plugin/scripts/select-static-checks-for-touches.ts
 
-  [ -e "$T/packages/quay-native" ] && { echo "NOT-EVALUATED: $T 是 quay
-  自身形态，不是第三方项目" >&2; exit 3; }
 
-  if git -C "$T" ls-files --error-unmatch plugin/scripts/runner-static-gate.ts
-  >/dev/null 2>&1; then
-    echo "CAUSE=第三方项目仍提交着 quay 的检查注册表副本 plugin/scripts/runner-static-gate.ts（模仿 quay 形态才能分类，契约未声明化）" >&2; exit 1
-  fi
+  [ -f "$C" ] || { echo "CAUSE=classifier-missing — $C 不存在，本量无法读取（不是 0）" >&2;
+  exit 1; }
 
-  since=$(git log develop
-  --grep='gap-fan-in-delta-classify-declared-doc-surfaces' --format=%cI
-  2>/dev/null | tail -1)
 
-  [ -n "$since" ] || { echo "CAUSE=delta 分类声明化尚未落地 develop（没有提及
-  gap-fan-in-delta-classify-declared-doc-surfaces 的提交）" >&2; exit 1; }
+  own=$(node --experimental-strip-types "$C" --classify-delta --root "$root"
+  --resolution 2>/dev/null | tail -1)
 
-  python3 - "$T/.quay" "$since" <<'P'
 
-  import glob, json, os, sys
+  printf '%s' "$own" | grep -q '"mode":"registry"' || { echo
+  "CAUSE=own-tree-not-registry — 本仓库携带注册表，应落 registry，实得：$own" >&2; exit 1; }
 
-  from datetime import datetime
 
-  d, since = sys.argv[1], datetime.fromisoformat(sys.argv[2])
+  T=$(mktemp -d)
 
-  ok = failed = 0
 
-  for f in glob.glob(os.path.join(d, "fan-in-*.log")):
-      for line in open(f, encoding="utf-8", errors="replace"):
-          if '"step":"delta"' not in line:
-              continue
-          try:
-              r = json.loads(line)
-              ts = datetime.fromisoformat(str(r["ts"]).replace("Z", "+00:00"))
-          except Exception:
-              continue
-          if r.get("step") != "delta" or ts <= since:
-              continue
-          if "classify failed" in str(r.get("reason", "")):
-              failed += 1
-          else:
-              ok += 1
-  print(f"窗口 >{since.isoformat()}：delta 分类成功={ok} 分类失败={failed}")
+  mkdir -p "$T/.quay" "$T/tasks"
 
-  if ok + failed == 0:
-      sys.stderr.write("NOT-EVALUATED: 落地后该第三方项目尚无 fan-in delta 判定，窗口内无样本\n"); sys.exit(3)
-  if failed:
-      sys.stderr.write(f"CAUSE=落地后仍有 {failed} 次 delta 分类失败（回落为无条件跑全量 suite）\n"); sys.exit(1)
-  sys.exit(0)
 
-  P
-expect: exit 0（第三方项目未跟踪 plugin/scripts/runner-static-gate.ts，且实现落地后其 fan-in 日志里
-  delta 判定 ≥1 次、classify failed 0 次）；窗口无样本 ⇒ exit 3
+  printf 'name: t\n' > "$T/.quay/config.yml"
+
+
+  printf 'x\n' > "$T/tasks/a.md"
+
+
+  git -C "$T" init -q
+
+
+  git -C "$T" -c user.email=c@l -c user.name=c add -A
+
+
+  git -C "$T" -c user.email=c@l -c user.name=c commit -qm base
+
+
+  printf 'y\n' >> "$T/tasks/a.md"
+
+
+  bare=$(node --experimental-strip-types "$C" --classify-delta --root "$T"
+  --resolution 2>/dev/null | tail -1)
+
+
+  printf '%s' "$bare" | grep -q '"mode":"conservative-default"' || { echo
+  "CAUSE=no-registry-tree-did-not-fall-to-conservative-default —
+  无注册表的树不得分类失败：$bare" >&2; exit 1; }
+
+
+  printf '%s' "$bare" | grep -q '"registryPath":null' || { echo
+  "CAUSE=no-registry-tree-claims-a-registry — 无注册表的树 registryPath 应为 null：$bare"
+  >&2; exit 1; }
+
+
+  printf '%s' "$bare" | grep -q '"docSurfaces":\["tasks","goals",".quay"\]' || {
+  echo "CAUSE=conservative-surfaces-wrong — 保守缺省面应为 tasks/goals/.quay：$bare"
+  >&2; exit 1; }
+
+
+  printf 'name: t\nloop:\n  doc_surfaces:\n    - tasks/\n    - docs/\n' >
+  "$T/.quay/config.yml"
+
+
+  git -C "$T" -c user.email=c@l -c user.name=c add -A
+
+
+  git -C "$T" -c user.email=c@l -c user.name=c commit -qm decl
+
+
+  printf 'z\n' >> "$T/tasks/a.md"
+
+
+  decl=$(node --experimental-strip-types "$C" --classify-delta --root "$T"
+  --resolution 2>/dev/null | tail -1)
+
+
+  printf '%s' "$decl" | grep -q '"mode":"declared"' || { echo
+  "CAUSE=declared-doc-surfaces-not-honoured — 声明了 loop.doc_surfaces 的树应落
+  declared：$decl" >&2; exit 1; }
+
+
+  printf '%s' "$decl" | grep -q '"docs"' || { echo
+  "CAUSE=declared-surfaces-ignored — 声明的前缀未进入 docSurfaces：$decl" >&2; exit 1; }
+
+
+  rm -rf "$T"
+
+
+  echo "own=$own"
+
+  echo "bare=$bare"
+
+  echo "decl=$decl"
+
+
+  exit 0
+expect: exit 0（三态互不同形：本仓库 --classify-delta 落 mode=registry；无注册表但
+  .quay/config.yml 声明 loop.doc_surfaces 的树落 declared 且声明前缀进入
+  docSurfaces；两者都没有的树落 conservative-default 且
+  registryPath=null、docSurfaces=[tasks,goals,.quay]）。任一方向塌陷（无注册表当失败 / 本仓也判保守缺省 /
+  声明面被忽略）⇒ exit 1 且 stderr 带 CAUSE=…。检查器不存在 ⇒ exit 1（不是 0）。
 origin: 立条依据：2026-09-23 对第三方项目
   /data/home/yale/work/claudecodeui（CloudCLI，2026-09-20→09-23，worker-driven
   inner，142 条任务）的驱动过程复盘。人 2026-09-23 裁定：「本仓库形态靠文件是否存在来判断」立为 goal，第 1/2/6 项作为其实例
