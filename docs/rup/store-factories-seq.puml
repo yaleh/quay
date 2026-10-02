@@ -1,0 +1,57 @@
+@startuml store-factories-seq
+' 一次 taskWrite 经过提议结构。步骤顺序对应现状 store.ts:1614-1788 的 write()，
+' 拆分不改变顺序：先锁、再 CAS/创建守卫、序列化、写盘、失效缓存、校验(回滚)、关系同步、解锁，最后(锁外)提交。
+' 未渲染校验：本机无 java/plantuml，仅人工核对括号与配对。
+title taskWrite 经提议结构的时序（行为与现状等价）
+
+participant "Core\nProviderClient.taskWrite" as Core
+participant "quay-native\nmcp-server.ts" as MCP
+participant "store 门面\ncreateStore()" as Fac
+participant "TaskWriter" as W
+participant "TaskLock" as L
+participant "TaskReader" as R
+participant "TaskCodec" as C
+participant "ParseCache" as PC
+participant "TaskRelations" as Rel
+participant "TaskCommitter" as TCm
+participant "store-commit.ts" as SC
+
+Core -> MCP : callTool task_write {id, ...patch}
+MCP -> Fac : store.write(id, patch)
+Fac -> W : write(id, patch, opts)
+W -> W : 校验 status 词表
+W -> Rel : findCurrentParents(id) (仅当 parent 被写; 无锁预扫描)
+W -> L : withLocks([id, oldParents, newParent]) 排序后依次获取
+
+group 持锁区 (回调由 TaskWriter 执行)
+  W -> R : readRaw(id)
+  alt 文件已存在
+    W -> C : parse(existingRaw)
+    W -> W : expectedStatus 不符则 throw ConflictError (name 不变)
+  else 文件不存在
+    W -> W : create 守卫 / 套用默认 status
+  end
+  W -> C : serialize(frontmatter, body)
+  W -> W : classifyTaskWriteChange(before, after)
+  W -> W : fs.writeFileSync(task file)
+  W -> PC : invalidate(id)
+  W -> C : validateWrittenYaml
+  alt 校验失败 或 AC-190 write face 拒绝
+    W -> W : 回滚(恢复旧内容/删除新文件) 后 throw
+  end
+  opt parent 被写
+    W -> Rel : removeChildRef(oldParents) / addChildRef(newParent)
+    Rel -> PC : invalidate(parentId)
+  end
+  W -> R : get(id)
+end
+
+L --> W : 释放锁 (逆序)
+W -> TCm : commitTaskWrite(id, task_write, changeKind) 锁外执行
+TCm -> SC : commitStoreWrite(relPath, propagate none)
+TCm -> TCm : 分支感知: task/* 不推; self-only 不推; 其余 ff 到 develop; 记 propagation 日志
+TCm --> W : committed, propagated, status
+W --> Fac : Task 或 null
+Fac --> MCP : Task
+MCP --> Core : structuredContent task (ConflictError 时为 isError 结构体, 与现状一致)
+@enduml

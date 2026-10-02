@@ -1,0 +1,69 @@
+@startuml store-factories-current
+' 现状：5 个工厂 + 已存在的共享底座。行数为实测（见 store-factories.md 第 1 节）。
+' 未渲染校验：本机无 java/plantuml，仅人工核对括号与配对。
+title 现状：5 个 store/client 工厂与共享底座（行数 = 含注释的物理行）
+
+package "packages/quay-native/src/store.ts (2170 行)" {
+  component "createStore\n413-2170 = 1758 行 (代码约 958)\n返回 12 个成员" as CS
+  note right of CS
+    闭包内 10 组职责:
+    路径安全 / 文件锁 / 编解码 / 两级解析缓存 /
+    视图模型 / 查询 / 关系完整性 / 写事务 /
+    git 提交传播策略 / 生命周期闸(check)
+    唯一共享可变状态:
+    parsedCache, persistentCache,
+    persistentCacheLoaded/Dirty, _gitRoot
+  end note
+}
+
+package "packages/quay/src/goal-store.ts (3411 行)" {
+  component "createGoalStore\n1543-2763 = 1221 行 (代码约 746)\n返回 14 个成员" as GS
+  component "模块级: 判据归因 lint ~640 行\n账本读取 ~270 行\n陈旧信号载体 ~140 行\n配置/保真度胶水/CLI ~760 行\n(按函数边界估计)" as GMOD
+  note right of GS
+    闭包状态仅 4 个不可变常量:
+    goalDir, cap, staleMs, storeFidelityJudge
+    write() 单函数 578 行 (3 个阶段)
+    全局可变: process.env[GOAL_ACCEPTANCE_ACTIVE_ENV]
+  end note
+}
+
+package "packages/quay/src (小 store)" {
+  component "createAdrStore 154 行" as ADR
+  component "createMetaStore 110 行" as META
+  component "createDocumentStore 103 行" as DOC
+}
+
+package "packages/quay-github/src/github-client.ts (1025 行)" {
+  component "createGithubClient\n656-1025 = 370 行\n闭包仅 owner/repo/maxIssues" as GH
+  component "模块级 checkGate / childrenStatus /\ngateArtifactSections (415-655)" as GHGATE
+}
+
+package "共享底座(已存在)" {
+  component "frontmatter-store-base.ts 124 行\nparse/serialize/slugify/\nfileNameForId/withFileLock" as BASE
+  component "store-commit.ts 220 行\ncommitStoreWrite / resolveGitRoot" as SC
+  component "task-parsing.ts 108 行\nparseFrontmatterCompletely" as TP
+  component "kernel/shape-sections.ts" as SS
+}
+
+ADR ..> BASE
+META ..> BASE
+DOC ..> BASE
+GS ..> BASE
+ADR ..> SC
+META ..> SC
+DOC ..> SC
+GS ..> SC
+CS ..> SC : commitStoreWrite\n(自带 resolveGitRoot 副本)
+CS ..> TP
+CS ..> SS
+CS -[#red]-> CS : 自带锁(.md.lock)/serialize/\nFRONTMATTER_RE, 未用 BASE
+GHGATE -[#red]-> CS : 语义复制, 非引用\n(AC 勾选规则已分叉)
+GH --> GHGATE
+
+note bottom of BASE
+  4 个 store 各有同形的 7 个骨架标志:
+  assertSafeId / assertSafeStatus / stat→updatedAt /
+  sort-by-id / existingFile / OWNED_KEYS 排序 / action 推导
+  以及 4 份 commitXxxFile 包装 (adr:239 meta:80 doc:176 goal:1519)
+end note
+@enduml

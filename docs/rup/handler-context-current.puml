@@ -1,0 +1,93 @@
+@startuml handler-context-current
+title 现状：serve 侧上下文类型 vs 参数团（实测自 packages/quay/src）
+
+package "serve.ts（进程生命周期）" {
+  class startServer <<control>> {
+    routeCfg = {workspaceRoot, identity:null}
+    listen 之后才 routeCfg.identity = serveIdentity(...)
+  }
+}
+
+package "serve-handlers.ts（路由分发）" {
+  class handleAllRoutes <<control>> {
+    new URL(req.url)  （serve.ts 已解析过一次）
+    resolveLang()  -> lang（唯一调用点）
+    reqCfg = {...cfg, lang}
+    ~30 个 if/regex 分支，顺序即语义
+  }
+}
+
+package "serve-render.ts" {
+  class ServePageCfg <<context>> {
+    workspaceRoot : string  [进程级]
+    identity? : ServeIdentity | null  [进程级，listen 后才绑定]
+    lang? : Lang  [请求级，可缺省 -> DEFAULT_LANG]
+  }
+  class ServeIdentity <<entity>> {
+    projectName, projectRoot, host, port
+    hostname, deliveredPluginVersion, initPluginVersion
+    branches : BranchModel
+  }
+}
+
+package "serve-*.ts 页面 handler（boundary）" {
+  class "handleLive/Journal/System/Manager/Architecture\n(req,res,cfg)" as G1 <<boundary>>
+  class "handleDocList/GitHistory/GitHistoryJson/Tests\n(req,res,cfg,url)" as G2 <<boundary>>
+  class "handleDashboard/NeedsHuman\n(req,res,client,manifest,cfg)" as G3 <<boundary>>
+  class "handleTaskList\n(req,res,url,client,manifest,cfg)" as G4 <<boundary>>
+  class "handleSession*/handleGoalDetail/handleDocDetail ...\n(位置各异的 id 参数)" as G5 <<boundary>>
+}
+
+package "render 函数（view）" {
+  class "renderXPage(data, identity, lang)\n共 10 个函数带 (identity,lang) 对" as R1 <<view>>
+  class "renderSiteNav/pageTitle/... (…, lang = DEFAULT_LANG)\n76 处默认值" as R2 <<view>>
+}
+
+class ProviderClient <<entity>>
+class Manifest <<entity>>
+
+startServer ..> ServePageCfg : 创建，之后 mutate identity
+startServer --> handleAllRoutes
+handleAllRoutes ..> ServePageCfg : 浅拷贝覆盖 lang
+handleAllRoutes --> G1
+handleAllRoutes --> G2
+handleAllRoutes --> G3
+handleAllRoutes --> G4
+handleAllRoutes --> G5
+ServePageCfg o-- ServeIdentity
+G1 ..> ServePageCfg
+G2 ..> ServePageCfg
+G3 ..> ServePageCfg
+G4 ..> ServePageCfg
+G5 ..> ServePageCfg
+G3 ..> ProviderClient
+G4 ..> ProviderClient
+G4 ..> Manifest
+G1 ..> R1 : cfg.identity, cfg.lang 拆开传
+G4 ..> R2
+
+note right of ServePageCfg
+  三种生命周期混在一个包里：
+  workspaceRoot 构造即定
+  identity 进程级但晚绑定(可变)
+  lang 每请求不同
+end note
+
+note bottom of G1
+  32 个 handler 中 24 个的函数体
+  从未提到 req（实测，文本扫描）
+end note
+
+package "cli/（对照，保持分离）" {
+  class CliCtx <<context>> {
+    argv, sub, rest
+    flags, positional, wantsJson
+  }
+  class "handleGate/handleComplete/... ({sub,rest,...}: CliCtx)" as C1 <<boundary>>
+}
+C1 ..> CliCtx
+note bottom of CliCtx
+  纯 argv 派生；无 I/O 句柄，无 workspaceRoot
+  (cli/ 内 process.cwd() 出现 10 处)
+end note
+@enduml

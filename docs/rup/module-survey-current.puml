@@ -1,0 +1,61 @@
+@startuml module-survey-current
+title 当前模块划分与依赖边（实体级边数取自任务给定；红边 = Top10 涉及依赖结构的问题）
+left to right direction
+
+package "packages/quay (Core)" {
+  component [core-cli\ncli/** 26 files] as cli
+  component [core-root\nsrc/*.ts (serve-*, init, mcp-*, stores, abi, config)] as root
+  component [core-gate\ngate/** (engine, lifecycle, factories, config)] as gate
+  component [core-kernel\nkernel/** (leaf)] as kernel
+  component [core-fan-in\nfan-in/ff-merge.ts 1071 lines] as fanin
+}
+package "packages/*" {
+  component [provider-native] as pnative
+  component [provider-github] as pgithub
+  component [provider-backlog] as pbacklog
+}
+component [orchestration scripts\nplugin/scripts (276 ts)\nworker-driver 5240 / driver-runtime 3991\ngoal-driver 4492 / ready-pool-check 3937] as orch
+
+cli --> root : 30
+cli --> gate : 22
+cli --> fanin : 3
+root --> gate : 19
+root --> kernel : 8
+gate --> root : 10
+root --> cli : 1
+pnative --> root : 6
+pnative --> gate : 5
+pnative --> kernel : 2
+pgithub --> root : 3
+pbacklog --> root : 2
+orch --> root : ~22 files (19 by static-import grep)
+orch --> kernel : 10 importers of proc-identity
+orch ..> fanin : dynamic import (worker-fan-in.ts:2133)
+root ..> orch : runtime spawn via plugin-root.ts (9 files)
+fanin ..> orch : spawn sibling scripts (SIBLING_SCRIPTS x5)
+
+gate -[#red]-> root : P6 root<->gate dir cycle
+root -[#red]-> gate : P6
+root -[#red]-> cli : P6 serve-sessions:20, serve:50
+fanin -[#red]-> orch : P2 Core hosts orchestration
+
+note bottom of gate
+  P6 gate/config <-> gate/factories dir cycle
+  (2 dead shims factories/loader.ts, utils.ts)
+  P7 lifecycle.ts console.log x13 / exitCode x8
+end note
+note bottom of root
+  P1 serve-sessions: unauth POST /sessions/new spawns claude
+  P4 config.yml parsed at >=14 sites in 9 files
+  P5 stripHeadings x2 (semantics differ), task-list filter x4
+  P9 serve-i18n 2779 / serve-render 1317 / init 1721
+end note
+note bottom of orch
+  P3 five mega files, fns up to 655 lines
+  P10 median x5, git() x14, sleep x6
+end note
+note bottom of pnative
+  P8 14+ relative ../../quay/src imports
+  56 hand-written MCP text wrappers in 3 providers
+end note
+@enduml

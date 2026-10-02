@@ -1,0 +1,50 @@
+@startuml module-survey-proposed
+title 提议的目标分层（只允许自上而下依赖；这是提议，未经人拍板）
+top to bottom direction
+
+package "L4 surfaces (boundary)" {
+  component [cli/**] as cli
+  component [web: serve-*] as web
+  component [mcp: mcp-server + handlers] as mcp
+}
+package "L3 services (control)" {
+  component [task-query\n(single list/filter/search/page)] as tq
+  component [driver-control\n(extracted from cli/driver.ts)] as dc
+  component [observation / branch-model] as obs
+  component [gate-wiring\n(registry + factories, injects stores)] as gw
+}
+package "L2 gate-engine" {
+  component [engine / lifecycle (pure result,\nno console / exitCode)\nacceptance-runner / gate-event-store] as ge
+}
+package "L1 stores (entity)" {
+  component [adr / document / goal / meta\nfrontmatter-base / task-parsing] as stores
+}
+package "L0 kernel (leaf)" {
+  component [abi + config-reader (ONE parser)\nkernel/* + text utils (stripHeadings, median...)] as k
+}
+package "providers (ABI only)" {
+  component [native / github / backlog\n+ shared mcp-scaffold helper] as prov
+}
+package "orchestration (plugin/scripts)" {
+  component [drivers split by duty\n+ fan-in/ff-merge moved here] as orch
+}
+
+cli --> tq
+cli --> dc
+web --> tq
+web --> dc
+web --> obs
+mcp --> tq
+mcp --> gw
+tq --> k
+dc --> k
+obs --> k
+gw --> ge
+gw --> stores
+ge --> k
+stores --> k
+prov --> k : package exports only
+prov --> stores : package exports only
+orch --> k : package exports only
+orch --> ge : package exports only
+@enduml

@@ -1,0 +1,100 @@
+@startuml observation-split-proposed
+' 提议：15 个 observation-*.ts 模块 + barrel(observation.ts) + 外部 ttl-cache。未渲染校验（本机无 plantuml）。
+' 依赖边来自 analysis.mjs proposal edges（value 图与 value+type 图的 SCC 均为 0）。
+' 实线 = value 依赖；虚线 = 仅 type 依赖（import type）；点线 = 计划中的 TtlCache 使用。
+title observation split — proposed modules (layers L0..L4) and consumers
+
+package "consumers (unchanged imports)" {
+  component "serve-*.ts (12 files)" as cServe
+  component "cli/driver.ts, mcp-server.ts" as cCli
+  component "46 test files" as cTests
+}
+
+component "observation.ts\nbarrel: export * from 15 modules\n(147 runtime keys must stay identical)" as OBS
+
+component "ttl-cache.ts\n(separate design: createTtlCache)" as TTL
+
+package "L0 leaves" {
+  component "observation-base\nObservationStatus, jsonNum,\nscriptBasename, session id primitives" as base
+  component "observation-exec\nrunScriptBounded, runPluginScript" as exec
+  component "observation-outcomes\nworker-outcome + FanInAttempt\n+ promotion-outcome ledger" as outcomes
+  component "observation-task-at-ref\n3 caches + 4 counters" as tar
+  component "observation-tests\n1 cache" as tests
+}
+
+package "L1" {
+  component "observation-live-types\n(type only)" as lt
+  component "observation-journal" as journal
+  component "observation-repo\nhistory, remotes, branch, architecture\n1 cache" as repo
+  component "observation-sessions" as sessions
+  component "observation-system\nsystem probes + manager + driver status\n2 caches + dynamic import" as system
+}
+
+package "L2" {
+  component "observation-blocking" as blocking
+  component "observation-run-liveness\nworktreeFallbackWarned" as rl
+  component "observation-worker-runtime\nround, lock, suite, /proc scan" as wr
+}
+
+package "L3 / L4 aggregators" {
+  component "observation-live\nreadLive (hub)" as live
+  component "observation-board\nlanding + execution\n1 cache + 1 counter" as board
+}
+
+' barrel -> every module (drawn for the two aggregators + a note for the rest)
+OBS ..> live
+OBS ..> board
+note right of OBS
+  also re-exports the other 13 modules
+  (arrows omitted for readability)
+end note
+
+cServe --> OBS
+cCli --> OBS
+cTests --> OBS
+
+' --- value dependencies ---
+live --> base
+live --> blocking
+live --> outcomes
+live --> rl
+live --> tar
+live --> wr
+wr --> base
+wr --> outcomes
+board --> base
+board --> live
+sessions --> base
+sessions --> exec
+system --> base
+system --> exec
+journal --> base
+repo --> base
+
+' --- type-only dependencies ---
+live ..> lt : types
+blocking ..> lt : types
+rl ..> lt : types
+wr ..> lt : types
+board ..> lt : types
+lt ..> base : ObservationStatus
+
+' --- planned TtlCache users (see ttl-cache.md) ---
+tar ..> TTL
+board ..> TTL
+repo ..> TTL
+system ..> TTL
+tests ..> TTL
+
+note bottom of lt
+  Required: without this module the
+  value+type graph has an SCC
+  {run-liveness, worker-runtime, live, blocking}
+  (negative control, NO_LIVE_TYPES=1).
+end note
+
+note bottom of rl
+  Moved out of the old "landing/exec" section.
+  This removes the only cycle (live <-> board).
+end note
+@enduml

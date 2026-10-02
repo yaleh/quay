@@ -1,0 +1,88 @@
+@startuml handler-context-proposed
+title 提议：进程级 ServeApp + 请求级 RequestCtx + 渲染级 PageEnv，路由表驱动
+
+package "serve-context.ts（新，仅类型 + 小函数）" {
+  interface ServeApp <<context>> {
+    readonly workspaceRoot : string
+    readonly client : ProviderClient
+    readonly manifest : Manifest
+    identity() : ServeIdentity
+  }
+  interface RequestCtx <<context>> {
+    readonly app : ServeApp
+    readonly req : IncomingMessage
+    readonly res : ServerResponse
+    readonly url : URL
+    readonly lang : Lang
+    readonly params : readonly string[]
+  }
+  interface PageEnv <<value>> {
+    readonly identity : ServeIdentity | null
+    readonly lang : Lang
+  }
+  class "sendHtml / sendJson / redirect / notFound\n（普通函数，接收 RequestCtx）" as Helpers <<helper>>
+  class "pageEnv(rc) : PageEnv" as PE <<helper>>
+}
+
+package "serve-router.ts（新）" {
+  class Route <<entity>> {
+    method : GET | POST
+    pattern : string | RegExp
+    handler : (rc) => Promise<void>
+  }
+  class "routes : Route[]\n顺序即语义，沿用现有分支顺序" as Table <<control>>
+  class "dispatch(rc)" as Dispatch <<control>>
+}
+
+package "serve-handlers.ts（保留文件与导出名）" {
+  class "handleAllRoutes(req,res,client,manifest,cfg)\n适配层：构造 ServeApp+RequestCtx 后 dispatch" as Adapter <<control>>
+}
+
+package "页面 handler（boundary）" {
+  class "xxxHandler(rc : RequestCtx)" as H <<boundary>>
+  class "旧导出 handleXxx(req,res,cfg,...)\n薄包装，保留给 14 个直调测试文件" as Legacy <<boundary>>
+}
+
+package "render（view，不依赖 req/res）" {
+  class "renderXPage(data, env : PageEnv)" as R <<view>>
+}
+
+class ServePageCfg <<deprecated>> {
+  workspaceRoot, identity?, lang?
+}
+
+Adapter ..> ServeApp : 创建
+Adapter --> Dispatch
+Dispatch --> Table
+Table --> Route
+Route --> H : handler(rc)
+H ..> RequestCtx
+H ..> Helpers
+H --> PE
+PE ..> PageEnv
+H --> R : env
+RequestCtx o-- ServeApp
+Legacy ..> ServePageCfg
+Legacy --> H : 由 cfg 合成 RequestCtx
+note right of RequestCtx
+  lang 必填：缺省不再静默变 en
+  （旧 ServePageCfg.lang? 缺省走 DEFAULT_LANG）
+end note
+note right of ServeApp
+  identity() 是函数：吸收 listen 之后才绑定
+  的晚绑定，handler 不再看到可变共享对象
+end note
+note bottom of Legacy
+  迁移期适配层；全部调用方迁完后删除
+end note
+
+package "cli/（保持分离）" {
+  interface CliCtx <<context>> {
+    argv, sub, rest, flags, positional, wantsJson
+  }
+}
+note bottom of CliCtx
+  不与 serve 共享抽象：字段无交集。
+  可选后续：加 root，替代 10 处 process.cwd()
+end note
+@enduml

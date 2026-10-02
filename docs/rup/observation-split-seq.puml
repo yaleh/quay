@@ -1,0 +1,72 @@
+@startuml observation-split-seq
+' 典型消费者：serve-dashboard.ts 的 buildDashboardSnapshot（读过 serve-dashboard.ts:1773-1811 的取数顺序）。
+' 简化：真实代码经 readDashboardSystem/ManagerLight/Live 三个包装函数，它们在 serve-dashboard 里还有各自的缓存，此处省略。
+' 经过提议结构：消费者仍 import observation.ts（barrel），调用落到各模块。未渲染校验。
+title buildDashboardSnapshot through the proposed observation modules
+
+participant "serve-dashboard.ts\nbuildDashboardSnapshot" as D
+participant "observation.ts\n(barrel)" as B
+participant "observation-system" as SYS
+participant "observation-exec" as EX
+participant "observation-tests" as T
+participant "observation-live" as L
+participant "observation-run-liveness" as RL
+participant "observation-worker-runtime" as WR
+participant "observation-outcomes" as OC
+participant "observation-task-at-ref" as TAR
+participant "observation-repo" as R
+participant "ttl-cache.ts" as C
+
+note over D
+  readLive is called with computeBlocking:false
+  (serve-dashboard.ts:1594), so observation-blocking
+  is not on this path.
+end note
+
+D -> B : readSystem(root) and readManagerLight(root)\nstarted first, not awaited yet
+B -> SYS : (re-export, no logic)
+SYS -> EX : runPluginScript(resource-gate, process-budget)
+SYS -> EX : runPluginScript(loop-driver-check)
+SYS -> C : driverStatusCache.get(root)
+note right of SYS
+  dynamic import of the driver kernel stays here:
+  the "no static plugin import" rule is local to this module
+end note
+
+D -> D : await yieldToEventLoop()
+D -> B : readTestsNonBlocking(root)
+B -> T : (re-export)
+T -> C : verificationRoundCache.get(root)
+alt miss
+  T -> T : read .quay/verification-round.jsonl in chunks
+  T -> C : set(root, result)
+end
+T --> D : TestsResult
+
+D -> D : await yieldToEventLoop()
+D -> B : readLive(root, {computeBlocking:false})
+B -> L : (re-export)
+L -> L : pairInFlight(events)
+L -> RL : runProcessAliveSync / taskWorktreeOpen
+L -> OC : readWorkerOutcomeText + parseWorkerOutcomeRecords
+L -> WR : round tasks, /proc worker scan, driver online/active
+WR -> OC : readWorkerOutcomeText
+L -> TAR : readTaskStatusForLive(root, task)
+TAR -> C : peek / get status map at develop
+L -> WR : fan-in lock + suite state, deriveInFlightPhase
+L --> D : LiveResult
+
+D -> D : await yieldToEventLoop()
+D -> B : readGitHistory(root)
+B -> R : (re-export)
+R -> C : gitHistoryCache.get(key)
+R --> D : GitHistoryResult
+D -> B : readCurrentSuiteRun(root)
+B -> WR : (re-export)
+WR --> D : CurrentSuiteRun
+D -> B : readWorkerOutcomeRecords(root)
+B -> OC : (re-export)
+OC --> D : WorkerOutcomeRecord[]
+
+SYS --> D : SystemResult and ManagerResult (awaited last)
+@enduml

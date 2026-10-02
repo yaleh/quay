@@ -1,0 +1,108 @@
+@startuml observation-split-current
+' 现状：observation.ts 内部分节（S0-S14）+ 14 个生产消费者。未渲染校验（本机无 plantuml）。
+' 依据：analysis.mjs edges（节→节 11 条真实跨域边）、consumers（60 个文件，此处只画 14 个生产消费者）。
+title observation.ts (4750 lines) — current internal sections and consumers
+
+package "serve / cli / mcp consumers (production .ts)" {
+  component "serve-dashboard.ts" as cDash
+  component "serve-live.ts" as cLive
+  component "serve-board.ts" as cBoard
+  component "serve-task.ts" as cTask
+  component "serve-sessions.ts" as cSess
+  component "serve-send.ts" as cSend
+  component "serve-system.ts" as cSys
+  component "serve-tests.ts" as cTests
+  component "serve-git.ts" as cGit
+  component "serve-architecture.ts" as cArch
+  component "serve-needs-human.ts" as cNeeds
+  component "serve.ts" as cServe
+  component "cli/driver.ts" as cDriver
+  component "mcp-server.ts" as cMcp
+}
+
+package "observation.ts (one file)" {
+  component "S0 shared\nObservationStatus, consts" as S0
+  component "S10a script runner\nrunScriptBounded" as S10a
+  component "S1 telemetry/activity\npairInFlight, Live types" as S1
+  component "S2 blocking" as S2
+  component "S3 worker carriers\n(outcome, round, lock, suite, proc)" as S3
+  component "S4 promotion-outcome" as S4
+  component "S5 task-at-ref\n3 caches + 4 counters" as S5
+  component "S6 readLive (hub)" as S6
+  component "S7 journal" as S7
+  component "S8 landing/exec/liveness\n1 cache + 1 counter + 1 Set" as S8
+  component "S9 git history\n1 cache" as S9
+  component "S10b system probes" as S10b
+  component "S11 manager/pool/driver\n2 caches + dyn import" as S11
+  component "S12 tests ledger\n1 cache" as S12
+  component "S13 sessions + session id" as S13
+  component "S14 architecture/branch" as S14
+}
+
+' --- 节内真实跨域依赖（11 条非共享边）---
+S6 --> S1 : 8 symbols
+S6 --> S2 : computeInFlightBlocking
+S6 --> S3 : 13 symbols
+S6 --> S5 : readTaskStatusForLive
+S6 --> S8 : classifyRunLiveness\nrunProcessAliveSync\ntaskWorktreeOpen
+S8 --> S6 : readBoardExecution\n-> readLive
+S2 ..> S1 : type InFlightTask
+S3 ..> S1 : types
+S3 --> S13 : liveSessionIdForPid\n-> isValidSessionId
+S8 ..> S1 : type InFlightTask
+S8 --> S10b : TASK_STATUS_DRIFT_CHECK_REL
+
+' --- 共享件（12 条）---
+S10b --> S10a : runPluginScript
+S11 --> S10a : runPluginScript
+S13 --> S10a : runScriptBounded
+S1 ..> S0
+S7 ..> S0
+note as N0
+  9 sections reference S0 (S1,S6,S7,S8,S9,S10b,S11,S13,S14);
+  only 2 are drawn to keep the picture readable.
+end note
+
+note right of S8
+  S6 <-> S8 is the only cycle (measured).
+  The 3 liveness helpers are used only by readLive:
+  they are misplaced, not coupled.
+end note
+
+note bottom of S5
+  16 mutable bindings in total,
+  each referenced by exactly one section.
+end note
+
+' --- 消费者 -> 节（按 import 位置）---
+cDash --> S1
+cDash --> S3
+cDash --> S6
+cDash --> S9
+cDash --> S10b
+cDash --> S11
+cDash --> S12
+cLive --> S1
+cLive --> S6
+cLive --> S7
+cBoard --> S5
+cBoard --> S8
+cBoard --> S10b
+cBoard --> S12
+cTask --> S3
+cTask --> S5
+cTask --> S13
+cSess --> S13
+cSend --> S13
+cSys --> S10b
+cSys --> S11
+cTests --> S12
+cGit --> S9
+cArch --> S14
+cNeeds --> S3
+cNeeds --> S4
+cServe --> S5
+cServe --> S14
+cDriver --> S3
+cMcp --> S3
+@enduml

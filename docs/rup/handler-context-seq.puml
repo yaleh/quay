@@ -1,0 +1,38 @@
+@startuml handler-context-seq
+title 提议版：一次 GET /tasks?lang=zh 从路由分发到 handler
+
+actor Browser
+participant "http.Server\nrequestHandler (serve.ts)" as Srv
+participant "handleAllRoutes\n（适配层）" as Adp
+participant "makeRequestCtx" as Mk
+participant "resolveLang\n（serve-lang.ts，唯一调用点）" as Lng
+participant "dispatch / routes" as Rt
+participant "taskListHandler(rc)" as H
+participant "ProviderClient" as Cl
+participant "renderTaskListPage(data, env)" as Rn
+
+Browser -> Srv : GET /tasks?lang=zh  Cookie
+Srv -> Srv : /health、/favicon 先行截走
+Srv -> Adp : (req, res, client, manifest, appCfg)
+Adp -> Mk : (app, req, res)
+Mk -> Mk : url = new URL(req.url)  只解析一次
+Mk -> Lng : queryLang, cookieLang
+Lng --> Mk : lang, setCookie
+Mk -> Mk : res.setHeader Set-Cookie / Vary: Cookie
+Mk --> Adp : rc = {app, req, res, url, lang, params:[]}
+Adp -> Rt : dispatch(rc)
+Rt -> Rt : 按声明顺序匹配 method + pattern
+Rt -> H : handler({...rc, params})
+H -> Cl : rc.app.client.taskList()
+Cl --> H : tasks
+H -> Rn : data, pageEnv(rc)
+Rn --> H : html
+H -> H : sendHtml(rc, html)
+H --> Rt : void
+Rt --> Adp : void
+alt 无匹配
+  Rt -> Rt : notFound(rc)  404 text/plain
+end
+Adp --> Srv : void
+Srv --> Browser : 200 text/html
+@enduml

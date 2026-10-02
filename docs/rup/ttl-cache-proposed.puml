@@ -1,0 +1,64 @@
+@startuml ttl-cache-proposed
+title TTL cache - proposed (closure factory returning a plain interface)
+skinparam classAttributeIconSize 0
+
+interface "TtlCache<V>" as TtlCache {
+  +get(key, o?) : V | undefined
+  +peek(key) : Entry | undefined
+  +set(key, value, o?) : V
+  +getOrLoad(key, loader) : V
+  +getOrLoadAsync(key, loader) : Promise
+  +delete(key) : boolean
+  +clear() : void
+  +stats() : CacheStats
+}
+
+class Entry {
+  +value : V
+  +at : number
+}
+
+class CacheStats {
+  +hits : number
+  +misses : number
+  +loads : number
+  +joins : number
+}
+
+class TtlCacheOptions {
+  +ttlMs : number
+  +now? : function
+  +maxEntries? : number
+  +cacheIf? : function
+}
+
+class "createTtlCache()" as Factory <<factory function>> {
+  closure state: Map, inflight Map, generation
+}
+
+Factory ..> TtlCacheOptions : takes
+Factory ..> TtlCache : returns
+TtlCache o-- Entry
+TtlCache ..> CacheStats : stats()
+
+package "call sites (module-level const, one per former Map)" {
+  class "taskStatusRefCache / taskTitleRefCache\nttl 2000" as U1
+  class "taskCommitTimesRefCache\nttl 2000, uses peek + set" as U2
+  class "landingCache\ncacheIf ok or timedOut, getOrLoadAsync" as U3
+  class "gitHistoryCache, verificationRoundCache,\nlive and summary caches" as U4
+  class "poolMetricsCache\ncacheIf status ok" as U5
+  class "driverStatusCache, sys, mgrLight\nown ttl constants" as U6
+}
+U1 ..> TtlCache
+U2 ..> TtlCache
+U3 ..> TtlCache
+U4 ..> TtlCache
+U5 ..> TtlCache
+U6 ..> TtlCache
+
+note bottom of Factory
+  New leaf module packages/quay/src/ttl-cache.ts, no imports.
+  Domain counters (subprocess spawns, walk kinds) stay in the domain code.
+  Only counters that equal "loads" may later read stats().loads.
+end note
+@enduml

@@ -1,0 +1,39 @@
+@startuml ttl-cache-seq
+title getOrLoadAsync with concurrent in-flight de-duplication
+participant "Caller A" as A
+participant "Caller B" as B
+participant "TtlCache" as C
+participant "loader (subprocess / IO)" as L
+
+A -> C : getOrLoadAsync(key, loader)
+C -> C : entry fresh? (now - at < ttl)
+note right of C : miss, no in-flight for key
+C -> C : gen = generation
+C -> L : loader()
+C -> C : inflight.set(key, promise)
+
+B -> C : getOrLoadAsync(key, loader)
+C -> C : entry fresh? no
+C -> C : inflight.has(key)? yes
+C --> B : same promise (stats.joins++)
+
+L --> C : value
+alt cacheIf(value) true and gen == generation
+  C -> C : set(key, value, at = now())
+else not cacheable or cache was cleared meanwhile
+  C -> C : skip write
+end
+C -> C : inflight.delete(key)
+C --> A : value
+C --> B : value
+
+== loader rejects ==
+L --> C : throw
+C -> C : inflight.delete(key), nothing cached
+C --> A : rethrow
+C --> B : rethrow
+
+== later call within TTL ==
+A -> C : getOrLoadAsync(key, loader)
+C --> A : cached value, same object identity (stats.hits++)
+@enduml

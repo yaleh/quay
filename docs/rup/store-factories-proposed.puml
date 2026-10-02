@@ -1,0 +1,87 @@
+@startuml store-factories-proposed
+' 提议：形态 A = 协作对象/纯函数 + 薄门面。createStore / createGoalStore 的签名与返回成员不变。
+' 未渲染校验：本机无 java/plantuml，仅人工核对括号与配对。
+title 提议：按职责拆分 + 薄门面（对外签名不变）
+
+package "Core 共享层 (packages/quay/src, 新增/扩展)" {
+  component "frontmatter-store-base.ts\n(已有, 扩展)" as BASE
+  component "frontmatter-record-store.ts\n(新) createRecordStore(spec)\nid/status 守卫, get, list, write 骨架,\nOWNED_KEYS 排序, action 推导, commit 包装" as REC
+  component "kernel/task-gate.ts\n(新, 纯函数)\ncheckTaskGate / artifactSections /\nchildrenStatus(getChild 注入)" as TG
+  component "store-commit.ts (已有)" as SC
+}
+
+package "quay-native 任务 store (store.ts 变门面 + store/*.ts)" {
+  component "store.ts 门面\ncreateStore(tasksDir, opts)\n只做装配, 约 40 行, 12 个成员不变" as FAC
+  component "task-codec.ts (纯)\nparse / serialize / validateWrittenYaml" as CODEC
+  component "task-paths.ts (纯)\nassertSafeId / filePathFor / lockPathFor" as PATHS
+  component "task-lock.ts (无状态)\nwithLock / withLocks" as LOCK
+  interface "ParseCache" as IPC
+  component "parse-cache.ts (有状态 #1)\ncreateParseCache(tasksDir)\nget/set/invalidate/ensureLoaded/flush" as PC
+  component "task-view.ts (纯)\ntoViewModel / matchesListFilter" as VIEW
+  component "task-reader.ts\ncreateTaskReader(dir, cache)\nget / getMeta / listIds / readRaw" as RD
+  component "task-query.ts\nlist / listWithMalformed / queryPage" as Q
+  component "task-relations.ts\nfindCurrentParents / add,removeChildRef" as REL
+  component "task-change-class.ts (纯)\nclassifyTaskWriteChange" as CC
+  component "task-committer.ts (有状态 #2)\ncreateTaskCommitter(tasksDir)\n记忆 gitRoot; 分支感知传播" as TC
+  component "task-writer.ts\nwrite / deleteTask / appendNote\n(锁 + CAS + 回滚 + AC-190 + 关系同步)" as WR
+}
+
+package "quay-native MCP 层 (不变)" {
+  component "mcp-server.ts\n15 个 tool + manifest" as MCP
+}
+
+package "goal-store (goal-store.ts 变门面 + goal/*.ts)" {
+  component "createGoalStore 门面\n(goalDir,cap,staleMs,judge)→14 成员不变" as GF
+  component "goal-read.ts\ntoViewModel/get/list + annotate" as GR
+  component "goal-checks.ts (纯读)\nactiveGoals.. checkStaleness,\ncheckReverifyScope, checkStalePass" as GC
+  component "criterion-runner.ts\nwithReentrancyGuard(run)\n(目前 2 处手写 env 设置/还原)" as CR
+  component "goal-sweep.ts\nsweepFrozen / checkAchievedFailing" as GSW
+  component "goal-write.ts\nvalidateGoalWrite → activationGates\n→ assemble/persist/commit" as GW
+  component "goal-criterion-lint.ts / goal-ledger.ts /\ngoal-staleness-carrier.ts / goal-cli.ts\n(模块级函数, 纯搬文件)" as GFILES
+}
+
+package "quay-github" {
+  component "createGithubClient (保持, 370 行)\n仅把 checkGate 等改为引用 TG" as GH
+}
+
+FAC --> RD
+FAC --> Q
+FAC --> WR
+FAC --> TG : check()
+RD ..> IPC
+PC ..|> IPC
+RD --> CODEC
+RD --> VIEW
+Q --> RD
+WR --> LOCK
+WR --> RD
+WR --> REL
+WR --> CC
+WR --> TC
+WR --> CODEC
+WR --> IPC : invalidate
+LOCK --> PATHS
+RD --> PATHS
+TC --> SC
+MCP --> FAC : store.write(id, patch)\n(ConflictError.name 不变)
+
+GF --> GR
+GF --> GC
+GF --> GSW
+GF --> GW
+GSW --> CR
+GW --> CR
+GR --> BASE
+GW --> BASE
+GW --> SC
+REC ..> BASE
+REC ..> SC
+note bottom of REC
+  adr/meta/doc 三个 store 改为
+  createRecordStore(spec) 的 spec 声明
+  (idRe, statuses, ownedKeys, 默认状态, toViewModel, kind)
+  goal-store 是否迁入 = 开放问题 (见文档第 5 节)
+end note
+
+GH ..> TG : 取代 github-client.ts:415-655 的复制
+@enduml

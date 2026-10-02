@@ -1,0 +1,39 @@
+@startuml ttl-cache-current
+title TTL cache - current state (12 hand-rolled copies, no shared abstraction)
+skinparam classAttributeIconSize 0
+
+package "observation.ts (8 caches)" {
+  class "taskStatusRefCache\nTTL 2000, key root+ref" as C1
+  class "taskTitleRefCache\nTTL 2000, key root+ref" as C2
+  class "taskCommitTimesRefCache\nTTL 2000, +head, peek ignores TTL" as C3
+  class "landingCache\nTTL 30000, key root, async" as C4
+  class "gitHistoryCache\nTTL 30000, key root+limit+before+skip" as C5
+  class "poolMetricsCache\nTTL 30000, only success cached" as C6
+  class "driverStatusCache\nTTL 30000 (borrows POOL const), async" as C7
+  class "verificationRoundCache\nTTL 30000, sync + async writers" as C8
+}
+
+package "serve-dashboard.ts (4 caches)" {
+  class "taskSummaryCache\nTTL 30000, async" as D1
+  class "dashboardLiveCache\nTTL 30000, sync" as D2
+  class "dashboardSysCache\nTTL 30000 (borrows LIVE const), async" as D3
+  class "dashboardMgrLightCache\nTTL 30000 (borrows LIVE const), async" as D4
+}
+
+package "adjacent but NOT TTL (not counted in the 12)" {
+  class "dashboardSnapshots + Rebuilds + FollowUps\n(timer refresh, in-flight Promise map)" as S1
+  class "boardSnapshots + Rebuilds\n(serve-board.ts)" as S2
+  class "parsedCache (quay-native store.ts)\nkeyed by mtime+size" as S3
+}
+
+note bottom of C1
+  Each box repeats the same inline pattern:
+  Map<string,{at,value}> + get + Date.now()-at < TTL + set + clearXxxCache()
+  Counters (test seam) live beside 3 of them, as module-level let.
+end note
+
+note right of S1
+  Only place with in-flight dedup today.
+  The 12 TTL caches have none.
+end note
+@enduml
