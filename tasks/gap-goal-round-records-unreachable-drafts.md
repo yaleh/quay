@@ -2,7 +2,7 @@
 id: gap-goal-round-records-unreachable-drafts
 title: draft GOAL 及其名下 draft AC 在任何轮记录 field 里都不存在——goalCount 只数 active，分诊只收
   active GOAL 名下的 draft，该形态被静默吞掉
-status: todo
+status: ready
 labels:
   - gap
   - defect
