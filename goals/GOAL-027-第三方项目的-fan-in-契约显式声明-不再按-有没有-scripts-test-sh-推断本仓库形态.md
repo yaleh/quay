@@ -1,7 +1,7 @@
 ---
 id: GOAL-027
 title: 第三方项目的 fan-in 契约显式声明——不再按「有没有 scripts/test.sh」推断本仓库形态
-status: active
+status: achieved
 kind: goal
 origin: 立条依据：2026-09-23 对第三方项目
   /data/home/yale/work/claudecodeui（CloudCLI，2026-09-20→09-23，worker-driven
@@ -16,6 +16,11 @@ statusLog:
     reason: 人 2026-10-02 裁定激活：与 GOAL-026 同因——draft GOAL 名下的 AC
       不在分诊对象集内（goal-driver.ts:2254-2256），AC-316/317/318 自 09-23 起惰性。其中
       AC-317（第三方 suite 红可归因到文件）是 2026-10-01 效率调查的一手发现，应进入判定与派发域。
+  - at: 2026-10-02T02:59:32.165Z
+    from: active
+    to: achieved
+    actor: goal-driver
+    reason: "I2: all ACs achieved + sufficiency covered"
 ---
 ## 背景
 
