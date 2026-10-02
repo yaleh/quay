@@ -220,3 +220,40 @@ test('派生判据的识别式：按【位置】（判据里成词出现）判�
   assert.equal(readsFrozenPopulation('python3 - <<\'P\'\nimport json\nP'), false);
 });
 
+
+
+// ── gap-done-unresolved-conflates-workable-with-world-gated：①（active AC）这一 population 的
+//    「曾经 done 不覆盖回归」守卫（standing/frozen 早已有）现在按判据载体分叉：workable 立案、
+//    world-gated 走复读路由。本用例在状态侧 shard 里逐条枚举**全词表的立案面**，钉住分叉。
+
+test('AC3 全词表立案面：workable 与 gap/standing-violated/frozen-violated 同列立案；world-gated/unclassified ⛔ 不立案', () => {
+  // ① 三条 active AC，关联任务全部 done，只分歧在判据载体。
+  const records = [
+    { id: 'GOAL-001', title: 'g', status: 'active' },
+    { id: 'AC-W', goal: 'GOAL-001', status: 'active', criterion: 'test -f src/x.ts' },
+    { id: 'AC-G', goal: 'GOAL-001', status: 'active', criterion: 'cat .quay/ci-runs.jsonl' },
+    { id: 'AC-U', goal: 'GOAL-001', status: 'active' },
+  ];
+  const tasks = [
+    { id: 't-w', status: 'done', goalAc: 'AC-W' },
+    { id: 't-g', status: 'done', goalAc: 'AC-G' },
+    { id: 't-u', status: 'done', goalAc: 'AC-U' },
+  ];
+  const by = derivedByAc(computeGoalGaps(records, tasks));
+  assert.equal(by.get('AC-W').state, 'workable');
+  assert.equal(by.get('AC-G').state, 'world-gated');
+  assert.equal(by.get('AC-U').state, 'unclassified');
+  assert.notEqual(by.get('AC-W').state, by.get('AC-G').state, 'workable ≠ world-gated（硬规则 3b）');
+  assert.notEqual(by.get('AC-G').state, by.get('AC-U').state, 'world-gated ≠ unclassified（硬规则 3b）');
+  assert.notEqual(by.get('AC-W').state, by.get('AC-U').state, 'workable ≠ unclassified（硬规则 3b）');
+  // runGapSpawnPass 选取面 = 只有 workable 一条（⛔ world-gated/unclassified 空耗名额）。
+  const r = runGapSpawnPass(computeGoalGaps(records, tasks), records, os.tmpdir(),
+    { gapWorkerCmd: 'true', resourceGateArgv: ['true'], spawnCap: 5 });
+  assert.deepEqual(r.outcomes.map((o) => o.ac), ['AC-W']);
+  // 与另外两个 population 对照：standing-violated / frozen-violated 同样立案（四态同列，workable ⛔ 不独占）。
+  assert.deepEqual(
+    ['gap', 'workable', 'world-gated', 'unclassified', 'standing-violated', 'frozen-violated', 'stalled', 'not-evaluated', 'standing-ok', 'derived-routed', 'in-progress']
+      .filter((s) => isFilingGapState(s)).sort(),
+    ['frozen-violated', 'gap', 'standing-violated', 'workable'],
+    '立案面恰为四态（⛔ 不多不少——world-gated/unclassified 被有意排除）');
+});
