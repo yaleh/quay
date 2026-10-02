@@ -48,6 +48,7 @@ allowed:   # 2026-10-02 在 packages 内部实测到的方向（来自 overview/
   - provider-backlog -> core-root
   - orchestration-scripts -> core-kernel   # 22 个文件 import packages/quay/src/**（kernel/proc-identity 最多）
   - orchestration-scripts -> core-root
+  - orchestration-scripts -> core-gate     # plugin/scripts/dark-axis-record-check.ts 引用 gate/dark-axis-record.ts（初版漏列）
 
 # 目标方向（尚未成立，供人裁决）：Core 与 provider 不得依赖 orchestration-scripts；
 # provider 之间互不依赖；provider 只依赖 Core。
