@@ -75,10 +75,10 @@ STATIC_CHECK_FAILED: registry-bare-filename-scan exit=1
 
 ## AC
 
-- [ ] AC1（能取假，点名枚举数量，⛔ 不是断言函数返回值）：造一个 fixture 根，其**祖先路径**含禁名段（例如 `.../worktrees/x/` 或 `.../.claude/w/`），该 fixture 下应被枚举的载体必须被枚举出来——断言 `listFiles()`/`--scan --json` 枚举出的**载体数量**等于同一 fixture 放在不含禁名祖先时枚举出的载体数量；把跳过判定改回按绝对路径求值 ⇒ 必须红。
-- [ ] AC2（负控制，另一半）：`root` **之下**名为 `node_modules`/`dist`/`vendor` 的目录**仍然**被跳过（改过头把跳过集废掉 ⇒ 红）——同一 fixture 下断言这些目录里的被枚举文件计数为 0。
-- [ ] AC3（无回归）：在本仓库真实 root 上 `registry-bare-filename-scan.ts --check` 仍 PASS，且 `--scan --json` 的 `carrierCount` 与修改前一致（实测 418 量级；⛔ 不写死数字，写成「与基线一致」并在实现时贴实测基线值）。
-- [ ] AC4（能取假，单测）：在 `plugin/test/registry-bare-filename-scan.test.mjs` 里断言「祖先含禁名段时载体数 == 不含时载体数」，把修复改掉 ⇒ 红。
+- [x] AC1（能取假，点名枚举数量，⛔ 不是断言函数返回值）：造一个 fixture 根，其**祖先路径**含禁名段（例如 `.../worktrees/x/` 或 `.../.claude/w/`），该 fixture 下应被枚举的载体必须被枚举出来——断言 `listFiles()`/`--scan --json` 枚举出的**载体数量**等于同一 fixture 放在不含禁名祖先时枚举出的载体数量；把跳过判定改回按绝对路径求值 ⇒ 必须红。
+- [x] AC2（负控制，另一半）：`root` **之下**名为 `node_modules`/`dist`/`vendor` 的目录**仍然**被跳过（改过头把跳过集废掉 ⇒ 红）——同一 fixture 下断言这些目录里的被枚举文件计数为 0。
+- [x] AC3（无回归）：在本仓库真实 root 上 `registry-bare-filename-scan.ts --check` 仍 PASS，且 `--scan --json` 的 `carrierCount` 与修改前一致（实测 418 量级；⛔ 不写死数字，写成「与基线一致」并在实现时贴实测基线值）。
+- [x] AC4（能取假，单测）：在 `plugin/test/registry-bare-filename-scan.test.mjs` 里断言「祖先含禁名段时载体数 == 不含时载体数」，把修复改掉 ⇒ 红。
 
 ## DoD
 
