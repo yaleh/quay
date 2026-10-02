@@ -1,0 +1,82 @@
+# layers.yml — DRAFT (2026-10-02). 层映射的唯一正本：glob → 层，以及允许的依赖方向。
+#
+# 状态：draft。尚无检查脚本消费本文件；没有消费者之前，它只是声明，不是不变量。
+# 取证来源（均于 2026-10-02 实测，非推断）：
+#   - archguard_analyze（scope 075f2c0c = packages，4747cc54 = plugin/scripts，两个独立 scope）
+#   - archguard 的 packageGraph 能力对两个 scope 均为 false；plugin/scripts 被当成单个 "(root)" 包
+#     （276 个文件、无目录分层），所以 ArchGuard 看不到 plugin/scripts 内部的层，
+#     也看不到两个 scope 之间的边。跨 scope 的边由 grep import 路径补查，不是 ArchGuard 输出。
+#   - detect_cycles（packages，package 粒度）= []，但这不代表无环：见 known_violations 里的目录级互指。
+#
+# 方向约定：edge "A -> B" 表示 A 的代码 import B。allowed 里没列的方向 = 禁止。
+
+layers:
+  # —— 代码依赖层（ArchGuard 能看见） ——
+  core-kernel:
+    globs: ["packages/quay/src/kernel/**"]
+  core-gate:
+    globs: ["packages/quay/src/gate/**"]          # 含 gate/config、gate/factories
+  core-fan-in:
+    globs: ["packages/quay/src/fan-in/**"]
+  core-cli:
+    globs: ["packages/quay/src/cli/**", "packages/quay/bin/**"]
+  core-root:
+    globs: ["packages/quay/src/*.ts"]             # serve / mcp-server / goal-store 等；862 实体里 822 在此，是最大块
+  provider-native:
+    globs: ["packages/quay-native/**"]
+  provider-github:
+    globs: ["packages/quay-github/**"]
+  provider-backlog:
+    globs: ["packages/quay-backlog/**"]
+  # —— 编排脚本层（单个扁平目录，内部分层未推导） ——
+  orchestration-scripts:
+    globs: ["plugin/scripts/**"]
+    note: "276 个 .ts 平铺，前缀只能粗分（suite/task/fan/runner/driver/checker…）；内部子层待人审后再拆，不要从文件名前缀自动推。"
+
+allowed:   # 2026-10-02 在 packages 内部实测到的方向（来自 overview/package.json 的目录级边）
+  - core-cli -> core-gate
+  - core-cli -> core-fan-in
+  - core-cli -> core-root
+  - core-root -> core-gate
+  - core-root -> core-kernel
+  - core-root -> core-cli          # 实测存在（src -> cli）；见 known_violations，建议收紧
+  - core-gate -> core-root
+  - provider-native -> core-root
+  - provider-native -> core-gate
+  - provider-native -> core-kernel
+  - provider-github -> core-root
+  - provider-backlog -> core-root
+  - orchestration-scripts -> core-kernel   # 22 个文件 import packages/quay/src/**（kernel/proc-identity 最多）
+  - orchestration-scripts -> core-root
+
+# 目标方向（尚未成立，供人裁决）：Core 与 provider 不得依赖 orchestration-scripts；
+# provider 之间互不依赖；provider 只依赖 Core。
+forbidden:
+  - core-kernel -> orchestration-scripts
+  - core-gate -> orchestration-scripts
+  - core-root -> orchestration-scripts
+  - provider-native -> orchestration-scripts
+  - provider-github -> provider-native
+  - provider-native -> provider-github
+
+known_violations:   # 已实测存在；检查脚本落地时应以此为棘轮基线，只许减不许增
+  - edge: "core-gate -> orchestration-scripts"
+    evidence: "packages/quay/src/gate/lifecycle.ts imports plugin/scripts/ready-pool-check.ts"
+  - edge: "core-root -> orchestration-scripts"
+    evidence: "packages/quay/src/observation.ts imports plugin/scripts/ready-pool-check.ts"
+  - edge: "core-kernel -> orchestration-scripts"
+    evidence: "packages/quay/src/kernel/shape-sections.ts imports plugin/scripts/ready-pool-check.ts"
+  - edge: "provider-native -> orchestration-scripts"
+    evidence: "packages/quay-native/src/store.ts imports plugin/scripts/ready-pool-check.ts"
+  - edge: "core-gate <-> gate/config <-> gate/factories (目录级互指)"
+    evidence: "overview 中 gate -> gate/config、gate/config -> gate、gate/factories -> gate 同时存在；detect_cycles(package) 仍报 []，说明该检测在这个粒度上看不见它"
+  - edge: "core-root <-> core-cli"
+    evidence: "quay/src -> quay/src/cli 与 quay/src/cli -> quay/src 同时存在"
+
+# 不在 import 图里的"层"：运行时/编排层（manager → worker-driver → worker；author ↔ develop 分支；
+# tasks/*.md 状态机）。它们靠进程、markdown、git 连接，ArchGuard 看不见，也不在上面的方向检查范围内。
+# 这些层的声明应落在文档里，并由检查器核对其引用的路径/脚本是否存在；本文件不覆盖。
+runtime_layers_not_covered: true
+
+# 测试方向：packages/*/test 大量 import plugin/test/helpers（实测 52 处）。这是测试依赖，
+# 未纳入 layers，避免把测试 helper 当成生产层违例。
