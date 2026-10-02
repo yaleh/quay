@@ -59,15 +59,12 @@ forbidden:
   - provider-github -> provider-native
   - provider-native -> provider-github
 
+# 更正（2026-10-02）：本文件初版曾列出 4 条 "Core/provider -> orchestration-scripts" 方向违例，
+# 证据是 grep "plugin/scripts/ready-pool-check" 命中 gate/lifecycle.ts、observation.ts、
+# kernel/shape-sections.ts、quay-native/src/store.ts。这些命中全部是【注释里提到该文件名】，不是 import
+# （按位置而非关键词判定后，packages 非测试代码对 plugin/ 的 import/require/动态 import = 0 条）。
+# 所以 forbidden 里的 *-> orchestration-scripts 目前没有已知违例，已从 known_violations 删除。
 known_violations:   # 已实测存在；检查脚本落地时应以此为棘轮基线，只许减不许增
-  - edge: "core-gate -> orchestration-scripts"
-    evidence: "packages/quay/src/gate/lifecycle.ts imports plugin/scripts/ready-pool-check.ts"
-  - edge: "core-root -> orchestration-scripts"
-    evidence: "packages/quay/src/observation.ts imports plugin/scripts/ready-pool-check.ts"
-  - edge: "core-kernel -> orchestration-scripts"
-    evidence: "packages/quay/src/kernel/shape-sections.ts imports plugin/scripts/ready-pool-check.ts"
-  - edge: "provider-native -> orchestration-scripts"
-    evidence: "packages/quay-native/src/store.ts imports plugin/scripts/ready-pool-check.ts"
   - edge: "core-gate <-> gate/config <-> gate/factories (目录级互指)"
     evidence: "overview 中 gate -> gate/config、gate/config -> gate、gate/factories -> gate 同时存在；detect_cycles(package) 仍报 []，说明该检测在这个粒度上看不见它"
   - edge: "core-root <-> core-cli"
@@ -78,5 +75,7 @@ known_violations:   # 已实测存在；检查脚本落地时应以此为棘轮�
 # 这些层的声明应落在文档里，并由检查器核对其引用的路径/脚本是否存在；本文件不覆盖。
 runtime_layers_not_covered: true
 
-# 测试方向：packages/*/test 大量 import plugin/test/helpers（实测 52 处）。这是测试依赖，
-# 未纳入 layers，避免把测试 helper 当成生产层违例。
+# 测试方向：packages/*/test 大量 import plugin/test/helpers，另有少量测试文件 import
+# plugin/scripts/ready-pool-check.ts。这些是测试依赖，未纳入 layers，避免把测试当成生产层违例。
+# 未核实项：目录互指是否由 type-only import 造成；orchestration-scripts -> core 的 22 个文件里
+# type-only 与值依赖各占多少。
