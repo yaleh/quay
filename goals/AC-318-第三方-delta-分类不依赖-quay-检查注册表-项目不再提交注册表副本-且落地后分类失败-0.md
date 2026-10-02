@@ -1,7 +1,7 @@
 ---
 id: AC-318
 title: delta 分类不依赖 quay 检查注册表——无注册表的树落声明面/保守缺省而非分类失败，本仓库落 registry（判据已改为本仓可自证）
-status: active
+status: achieved
 kind: criterion
 goal: GOAL-027
 criterion: >-
@@ -127,6 +127,11 @@ statusLog:
     to: active
     actor: goal-driver
     reason: "triage: activate"
+  - at: 2026-10-02T02:57:13.247Z
+    from: active
+    to: achieved
+    actor: goal-driver
+    reason: "I2: criterion pass"
 fidelity:
   verdict: faithful
   reason: "fidelity judge: faithful"
