@@ -2,7 +2,7 @@
 id: gap-goal-branch-goal-flips-achieved-before-its-branch-merges
 title: branch-mode goal 在 goal 分支并入 develop 之前就被 goal-driver 翻成 achieved，随后 quay
   goal merge 因非 active 被拒——死结（GOAL-904 演练读到）
-status: todo
+status: ready
 labels:
   - gap
   - defect
