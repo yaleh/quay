@@ -1,7 +1,7 @@
 ---
 id: gap-goal904-merge-drill-record-doc
 title: GOAL-904 合并演练：新增托管文档 DOC-904（演练记录），必须经 goal/GOAL-904 分支落地
-status: needs-human
+status: todo
 labels:
   - gap
 parent: null
@@ -21,7 +21,7 @@ goal_ac: AC-904
 
 ## AC
 
-- [ ] `node --experimental-strip-types -e 'import("./packages/quay/src/document-store.ts").then((m)=>{const d=m.createDocumentStore("docs-managed").get("DOC-904");if(!d||d.title!=="goal 分支合并演练记录"||d.status!=="draft"){console.error("DOC-904 unreadable or wrong frontmatter");process.exit(1)}console.log("ok",d.id)})'` 退出 0（文档能被托管文档存储读出，且 title 与 status 如上）。
+- [ ] `node --experimental-strip-types -e 'import(\"./packages/quay/src/document-store.ts\").then((m)=>{const d=m.createDocumentStore(\"docs-managed\").get(\"DOC-904\");if(!d||d.title!==\"goal 分支合并演练记录\"||d.status!==\"draft\"){console.error(\"DOC-904 unreadable or wrong frontmatter\");process.exit(1)}console.log(\"ok\",d.id)})'` 退出 0（文档能被托管文档存储读出，且 title 与 status 如上）。
 - [ ] `bash scripts/test.sh --static-checks-doc` 退出 0（文档类静态检查对这份新文档通过）。
 - [ ] `git diff --name-only develop...HEAD` 只列出 `docs-managed/DOC-904-goal-branch-merge-drill-record.md` 与 `tasks/gap-goal904-merge-drill-record-doc.md` 两个文件（演练不得夹带别的改动）。
 
