@@ -2,7 +2,7 @@
 id: gap-provider-client-list-masks-call-failure-as-empty
 title: provider-client 的 adr/goal/meta List 把 isError 降级成 [] ——
   调用失败与「没有记录」同形（硬规则 3b），taskList 已修而三个兄弟未修
-status: ready
+status: todo
 labels:
   - gap
 parent: null
