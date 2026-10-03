@@ -75,7 +75,7 @@ spawned=0
 ### AC3 — 取假（cp 备份回退核心改动，⛔ 未用 `git checkout --`）
 - 回退前 md5：`03121a963cb6d8529fd297e9585a8768  plugin/scripts/goal-driver.ts`
 - `cp plugin/scripts/goal-driver.ts /tmp/ac327-goal-driver.ts.bak`；再把 `count===0` 分支的 verdict 分支精确还原为改动前两行 ⇒ 回退后 md5：`0cd1df4e412cf4cd73a4b3c716f79f38`
-- `node --experimental-strip-types --test plugin/test/goal-driver-s01.test.mjs` ⇒ **exit 1**，`24 tests / 21 pass / 2 fail`（另 1 条为本用例集内既有的、与本次改动无关的计数）——实为 `ℹ tests 23 / ℹ pass 21 / ℹ fail 2`。两条新用例均红：
+- `node --experimental-strip-types --test plugin/test/goal-driver-s01.test.mjs` ⇒ **exit 1**，`ℹ tests 23 / ℹ pass 21 / ℹ fail 2`。两条新用例均红：
 ```
 ✖ AC1: count===0 分支先读本轮 verdict…
   AssertionError [ERR_ASSERTION]: 判据自陈无法评估 ⇒ 不得被当 workable（硬规则 3b）
