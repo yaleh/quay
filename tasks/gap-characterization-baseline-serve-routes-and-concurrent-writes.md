@@ -1,7 +1,7 @@
 ---
 id: gap-characterization-baseline-serve-routes-and-concurrent-writes
 title: 特征化基线：web 路由响应快照 + 任务 store 写入字节金样 / 多进程写对拍——后续 store/handler 重构「行为等价」的证据前置
-status: todo
+status: ready
 labels:
   - gap
 parent: null
@@ -40,7 +40,7 @@ extra:
 ## Touches
 
 - tasks/gap-characterization-baseline-serve-routes-and-concurrent-writes.md
-- packages/quay/test/characterization-serve-routes.test.mjs
-- packages/quay/test/fixtures/characterization/serve-routes.snapshot.json
-- packages/quay-native/test/characterization-store-write.test.mjs
-- packages/quay-native/test/fixtures/characterization/store-write.golden.json
+- packages/quay/test/characterization-serve-routes.test.mjs (new)
+- packages/quay/test/fixtures/characterization/serve-routes.snapshot.json (new)
+- packages/quay-native/test/characterization-store-write.test.mjs (new)
+- packages/quay-native/test/fixtures/characterization/store-write.golden.json (new)

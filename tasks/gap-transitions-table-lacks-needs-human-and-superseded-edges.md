@@ -2,7 +2,7 @@
 id: gap-transitions-table-lacks-needs-human-and-superseded-edges
 title: TRANSITIONS 补全：把生产上真实出现的 needs-human / superseded 边声明进转移表（只加声明，不改
   promote/retreat 行为）
-status: todo
+status: ready
 labels:
   - gap
 parent: null
