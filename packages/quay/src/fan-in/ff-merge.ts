@@ -132,7 +132,10 @@ function epoch(now: Date): number {
 // `--source-ref` override (a ref or a raw SHA), else the task branch `refs/heads/task/<task>`. SINGLE
 // source for every site that used to hard-code `refs/heads/task/${task}` (硬规则 5b — one rule, four
 // call sites: the cert-gate tip, the pre-flight existence check, the ff refspec/arg, the post-check).
-function sourceRefOf(args: FfMergeArgs): string {
+// `sourceRefOf` is exported so its unit test (`packages/quay/test/ff-merge.test.mjs`) asserts on THE
+// resolver the call sites use, ⛔ never a second copy of the default/override rule (硬规则 5b) — the
+// same reason `siblingScriptArgv` / `siblingScriptCandidates` are exported.
+export function sourceRefOf(args: FfMergeArgs): string {
   const override = args.sourceRef?.trim();
   return override ? override : `refs/heads/task/${args.task}`;
 }
