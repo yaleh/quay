@@ -43,6 +43,12 @@ import fs from "node:fs";
 import path from "node:path";
 import { isDirectEntry } from "./gate-script-base.ts";
 import { escapeRegExp } from "./regex-escape.ts";
+// The recursive walk over the scan roots lives in fs-walk.ts (was a byte-identical private copy here
+// and in serve-binding-literal-check.ts / worktree-namespace-literal-check.ts — finding
+// `walkFiles-scan-surface-family`, routine `semantic-dedup-scan`, runId
+// `semantic-dedup-scan-1790995446200`). Only the traversal moved; SCAN_ROOTS and SKIP_DIRS are this
+// checker's own.
+import { listFilesInRoots } from "./fs-walk.ts";
 // The registry's location has ONE owner — this module. The needle below is DERIVED from it, never
 // spelled out (硬规则 1 用机件不手搓 / 5b 单源).
 import { REGISTRY_BASENAME, REGISTRY_REL_CANDIDATES } from "./select-static-checks-for-touches.ts";
@@ -88,23 +94,6 @@ export function registryPathPattern(): RegExp | null {
   return new RegExp(parts.join("\\s*,\\s*"));
 }
 
-function walkFiles(absDir: string, out: string[]): void {
-  let entries: fs.Dirent[];
-  try {
-    entries = fs.readdirSync(absDir, { withFileTypes: true });
-  } catch {
-    return;
-  }
-  for (const e of entries) {
-    if (e.isDirectory()) {
-      if (SKIP_DIRS.has(e.name)) continue;
-      walkFiles(path.join(absDir, e.name), out);
-    } else if (e.isFile()) {
-      out.push(path.join(absDir, e.name));
-    }
-  }
-}
-
 /**
  * Scan `root` for a second copy of the registry path. PURE w.r.t. the filesystem reads it performs;
  * never throws (an unreadable file is skipped).
@@ -129,9 +118,7 @@ export function checkRegistryPathLiteral(root: string): RegistryLiteralReport {
   const rootAbs = path.resolve(root);
   const hits: LiteralHit[] = [];
   const advisory: LiteralHit[] = [];
-  const files: string[] = [];
-  for (const rel of SCAN_ROOTS) walkFiles(path.join(rootAbs, rel), files);
-  files.sort();
+  const files = listFilesInRoots(rootAbs, SCAN_ROOTS, SKIP_DIRS);
   for (const abs of files) {
     let text: string;
     try {
