@@ -43,7 +43,7 @@
 import fs from "node:fs";
 import path from "node:path";
 import { spawn } from "node:child_process";
-import { goalCriterionWorktreeDir } from "./goal-store.ts";
+import { goalCriterionWorktreeDir, realpathOrSelf } from "./goal-store.ts";
 import { readServerState, pidAlive } from "./server-state.ts";
 
 /** The serve-lock file, restated from `serve.ts`'s `SERVE_LOCK_REL` — see the header. Not imported
@@ -93,11 +93,10 @@ export interface QuaySnapshotReading {
 }
 
 function samePath(a: string, b: string): boolean {
-  try {
-    return fs.realpathSync(a) === fs.realpathSync(b);
-  } catch {
-    return path.resolve(a) === path.resolve(b);
-  }
+  // 两侧都取 realpathOrSelf（而非 realpathSync + path.resolve 回落）：别名 root 下 `path.resolve` 不解析
+  // 符号链接，一侧不存在时会把同一目录读成两个路径
+  // （gap-goal-criterion-worktree-registered-check-blind-to-symlinked-root，同 criterionWorktreeRegistered）。
+  return realpathOrSelf(a) === realpathOrSelf(b);
 }
 
 /**

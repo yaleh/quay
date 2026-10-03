@@ -427,3 +427,112 @@ test("AC-phase-i2: achieved 判定仍要求全部 AC（含 post-merge）达成�
     "全部达成 + covered ⇒ flip",
   );
 });
+
+// ── gap-goal-criterion-worktree-registered-check-blind-to-symlinked-root ────────────────────────
+//
+// 上面的 AC3 用例用 /tmp 的**真实路径**作 root，覆盖不到这条：`git worktree add` 登记的登记面是**真实
+// 路径**（`/data/home/yale/...`），而 `goalCriterionWorktreeDir` 从配置解析出的是**别名**
+// （`/home/yale/...`，指向它的符号链接）⇒ 旧实现两侧都用 `path.resolve`（不解析符号链接）⇒ 永远判
+// 「未登记」⇒ 已登记的 worktree 每轮被重 `add`，`already exists` 失败 ⇒ `state: failed`，判据树冻结
+// 在首次 tip。第一次创建时目录尚不存在 ⇒ `add` 成功（登记成真实路径），此后每轮都 failed。
+//
+// 本用例用**真符号链接 root**（临时目录里真目录 + 指向它的链接，以**链接路径**作 root）跑两轮：第一轮
+// 创建，让 `goal/GOAL-901` 前进一个提交，第二轮必须 `refreshed`、HEAD == 新 tip（⛔ 不是 failed）。同一
+// 夹具以**真实路径**作 root 时行为一致——两种 root 形态各跑一遍，断言读数逐项相等。
+
+/** 真目录 `real/` + 指向它的符号链接 `link/`。`loop.worktree_root` 用**相对**值（`wt-ns`）⇒ 无论以哪条
+ *  root 传入，命名空间都留在该 root 之下，别名得以一直传到 `goalCriterionWorktreeDir`。 */
+function mkSymlinkRootFixture() {
+  const base = fs.mkdtempSync(path.join(os.tmpdir(), "goal-crit-sym-"));
+  const real = path.join(base, "real");
+  const link = path.join(base, "link");
+  fs.mkdirSync(real, { recursive: true });
+  fs.symlinkSync(real, link, "dir");
+  fs.mkdirSync(path.join(real, "goals"), { recursive: true });
+  fs.mkdirSync(path.join(real, ".quay"), { recursive: true });
+  fs.writeFileSync(path.join(real, ".gitignore"), ".quay/\nwt-ns/\n", "utf8");
+  fs.writeFileSync(path.join(real, ".quay", "config.yml"), "loop:\n  worktree_root: wt-ns\n", "utf8");
+  const git = mkGitFixtureRoot(real);
+  writeGoalRecord(real, { id: GOAL, status: "active", branch: true });
+  // AC-904 看 `GOAL_ONLY_FILE_2`——它只在【前进】那一提交才出现 ⇒ 第 1 轮 fail、刷新后 pass（刷新真的
+  // 对求值生效的直接量，⛔ 不采信处置读数自述）。
+  writeAcRecord(real, { id: "AC-904", goal: GOAL, status: "active", criterion: `test -f ${GOAL_ONLY_FILE_2}` });
+  git(["add", "-A"]);
+  git(["commit", "-m", "base"]);
+  git(["branch", "develop"]);
+  git(["checkout", "-q", "-b", BRANCH]);
+  git(["checkout", "-q", "main"]);
+  return { base, real, link, git };
+}
+
+/** 以 `rootPath`（真实或别名）跑两轮：本轮创建 ⇒ 分支前进一提交 ⇒ 次轮刷新。返回两组读数 + 两个直接量
+ *  （worktree 自己的 HEAD、git 登记面）。 */
+async function runSymlinkRefreshScenario(fixture, rootPath) {
+  const ns = path.join(rootPath, "wt-ns");
+  const wtPath = path.join(ns, `goal-${GOAL}`);
+  const r1 = await runGoalRound(rootPath, ROUND_OPTS);
+  const wt1 = r1.fact.value.criterionWorktrees.find((w) => w.goal === GOAL);
+  const criteria1 = new Map(r1.fact.value.criteria.map((c) => [c.id, c]));
+  const tip1 = fixture.git(["-C", wtPath, "rev-parse", "HEAD"]);
+
+  fixture.git(["checkout", "-q", BRANCH]);
+  fs.writeFileSync(path.join(fixture.real, GOAL_ONLY_FILE_2), "added on the goal branch later\n", "utf8");
+  fixture.git(["add", GOAL_ONLY_FILE_2]);
+  fixture.git(["commit", "-m", "advance the goal branch"]);
+  const tip2 = fixture.git(["rev-parse", "HEAD"]);
+  fixture.git(["checkout", "-q", "main"]);
+
+  const r2 = await runGoalRound(rootPath, ROUND_OPTS);
+  const wt2 = r2.fact.value.criterionWorktrees.find((w) => w.goal === GOAL);
+  const criteria2 = new Map(r2.fact.value.criteria.map((c) => [c.id, c]));
+  const head = fixture.git(["-C", wtPath, "rev-parse", "HEAD"]);
+  const registered = fixture.git(["worktree", "list", "--porcelain"])
+    .split("\n")
+    .filter((l) => l.startsWith("worktree "))
+    .map((l) => l.slice("worktree ".length).trim());
+  return { wt1, wt2, criteria1, criteria2, tip1, tip2, head, wtPath, registered };
+}
+
+test("符号链接 root：判据 worktree 已登记后分支前进 ⇒ 次轮 refreshed（⛔ 不是 failed），HEAD 追上新 tip；真实路径 root 行为一致", async () => {
+  const results = {};
+  for (const form of ["real", "link"]) {
+    const fixture = mkSymlinkRootFixture();
+    try {
+      const rootPath = form === "real" ? fixture.real : fixture.link;
+      const r = await runSymlinkRefreshScenario(fixture, rootPath);
+      results[form] = r;
+
+      assert.ok(r.wt1, `${form}: 第 1 轮必须有处置读数`);
+      assert.equal(r.wt1.state, "created", `${form}: 第 1 轮 = created（实测 state=${r.wt1.state} reason=${r.wt1.reason}）`);
+      assert.equal(r.wt1.headSha, r.tip1, `${form}: 第 1 轮处置读数 HEAD = tip1`);
+      assert.equal(r.criteria1.get("AC-904")?.verdict, "fail", `${form}: 第 1 轮判据为假（正控制，⛔ 不是恒真）`);
+
+      // 直接量：git 登记的是【真实路径】——这正是别名比较失败的原因，也是本用例成立的机制。
+      assert.ok(
+        r.registered.includes(fs.realpathSync(r.wtPath)),
+        `${form}: git 登记真实路径（实测 ${JSON.stringify(r.registered)}）`,
+      );
+      if (form === "link") {
+        assert.ok(
+          !r.registered.includes(r.wtPath),
+          `link: 登记的【不是】别名路径 ${r.wtPath}（别名只存在于推导侧，⛔ 不在 git 登记侧）`,
+        );
+      }
+
+      // 核心断言：次轮必须刷新到新 tip，⛔ 不是连续 failed。
+      assert.equal(r.wt2.state, "refreshed", `${form}: 第 2 轮 = refreshed（实测 state=${r.wt2.state} reason=${r.wt2.reason}）`);
+      assert.equal(r.wt2.headSha, r.tip2, `${form}: 处置读数 HEAD = 新 tip`);
+      assert.equal(r.head, r.tip2, `${form}: 判据 worktree 的实际 HEAD == 新 tip（下一轮求值看到新提交）`);
+      assert.equal(r.criteria2.get("AC-904")?.verdict, "pass", `${form}: 次轮判据转绿（刷新真的对求值生效）`);
+    } finally {
+      fs.rmSync(fixture.base, { recursive: true, force: true });
+    }
+  }
+  // 「同一用例在真实路径作 root 时行为一致」——逐项比较两形态的读数（sha 因夹具不同而不同，比较态与判决）。
+  assert.equal(results.link.wt2.state, results.real.wt2.state, "别名与真实 root 的次轮处置态一致");
+  assert.equal(
+    results.link.criteria2.get("AC-904")?.verdict,
+    results.real.criteria2.get("AC-904")?.verdict,
+    "别名与真实 root 的次轮判据判决一致",
+  );
+});

@@ -460,7 +460,7 @@ export { createMetaStore } from "../../packages/quay/src/meta-store.ts";
 // (`goalCriterionWorktreeDir`, derived from the config-resolved worktree namespace) and this module
 // is where the driver-side symbols are surfaced — ⛔ goal-driver never spells a Core source-tree
 // literal itself (AC-262; same reason the two re-exports above exist).
-export { goalCriterionWorktreeDir } from "../../packages/quay/src/goal-store.ts";
+export { goalCriterionWorktreeDir, realpathOrSelf } from "../../packages/quay/src/goal-store.ts";
 export { goalBranchName, goalBranchRefExists, goalBranchTip } from "../../packages/quay/src/branch-model.ts";
 // goal-preview (SPEC-goal-branch-2026-10-03 §4.10, rulings ㉒㉓): the criterion worktree IS the
 // preview instance, so goal-driver (which owns the worktree's lifecycle) must take its `.quay/`

@@ -170,6 +170,41 @@ export function evaluationContext(root: string): { evaluationRoot: string; treeS
   return { evaluationRoot, treeSha: gitTreeSha(evaluationRoot) };
 }
 
+/** `fs.realpathSync`, but NEVER throws and resolves a path that does not exist yet.
+ *
+ *  When `p` (or a suffix of it) is absent, resolve the symlinks of the **longest existing ancestor**
+ *  and re-append the remaining segments — so a normal `<namespace>/goal-<id>` worktree dir resolves
+ *  to the SAME string git will record for it. This is the fix for
+ *  `gap-goal-criterion-worktree-registered-check-blind-to-symlinked-root`: `git worktree add` records
+ *  the **realpath** (`/data/home/yale/...`) while `goalCriterionWorktreeDir` derives the **alias**
+ *  (`/home/yale/...`, a symlink to it), so a `path.resolve` comparison never matched, the registered
+ *  worktree was re-`add`ed each round and failed (`already exists`) — the criterion tree froze on its
+ *  first tip. Both sides of that comparison now go through here.
+ *
+ *  ⛔ Never throws (hard rule 3b): an unresolvable path falls back to its `path.resolve` form, so
+ *  "could not resolve" is never conflated with "resolved to a different place". */
+export function realpathOrSelf(p: string): string {
+  const resolved = path.resolve(p);
+  try {
+    return fs.realpathSync(resolved);
+  } catch {
+    // ENOENT/EACCES on the leaf — walk up to the nearest existing ancestor below.
+  }
+  let head = resolved;
+  const tail: string[] = [];
+  for (;;) {
+    const parent = path.dirname(head);
+    if (parent === head) return resolved; // hit the filesystem root without resolving anything
+    tail.unshift(path.basename(head));
+    head = parent;
+    try {
+      return path.join(fs.realpathSync(head), ...tail);
+    } catch {
+      // this ancestor is absent too — keep walking up
+    }
+  }
+}
+
 // ── WHICH TREE a BRANCH-MODE goal's criteria run on (SPEC-goal-branch-2026-10-03 §5 B1, ruling ⑩) ─
 //
 // THE DEFECT (B1): a criterion's cwd was unconditionally the MAIN checkout's git root. The main

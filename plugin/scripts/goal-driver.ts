@@ -77,7 +77,7 @@ import { parse as parseYaml } from "yaml";
 //
 // ⚠️ 从 driver-runtime（Layer 0）取这两个核心符号，⛔ 不在此处直接写 Core 源码树的 import 字面量：
 // 「Core 的源码树在哪」是布局知识，唯一落点是 Layer 0（driver-runtime 的 Core 导入面）。
-import { inAchievedReverifyScope, readsFrozenPopulation, GOAL_ACCEPTANCE_ACTIVE_ENV, goalCriterionWorktreeDir, goalBranchName, goalBranchRefExists, goalBranchTip, snapshotQuayDirInto, stopPreviewServe, type QuaySnapshotReading, type PreviewStopReading } from "./driver-runtime.ts";
+import { inAchievedReverifyScope, readsFrozenPopulation, GOAL_ACCEPTANCE_ACTIVE_ENV, goalCriterionWorktreeDir, goalBranchName, goalBranchRefExists, goalBranchTip, realpathOrSelf, snapshotQuayDirInto, stopPreviewServe, type QuaySnapshotReading, type PreviewStopReading } from "./driver-runtime.ts";
 
 // ⑨ CI run 载体的**生产调用点**（tasks/gap-develop-ci-first-decisive-green Requested action 2）。
 // ⛔ 本 driver 是 AC-265 的评估者，而 AC-265 读的是 `.quay/ci-runs.jsonl` 这个**本地载体**——
@@ -3126,14 +3126,20 @@ function gitIn(cwd: string, args: string[]): { ok: boolean; stdout: string; stde
 }
 
 /** 一个 goal 的判据 worktree 是否存在（`git worktree list --porcelain` 的登记面，⛔ 不是「目录在不在」：
- *  目录被手工删掉而登记还在时，`git worktree add` 会因「already registered」拒绝）。 */
+ *  目录被手工删掉而登记还在时，`git worktree add` 会因「already registered」拒绝）。
+ *
+ *  ⛔ 两侧都取 `realpathOrSelf`，⛔ 不用 `path.resolve`：`git worktree add` 登记的是**真实路径**
+ *  （`/data/home/yale/...`）而 `goalCriterionWorktreeDir` 推导的是**别名**（`/home/yale/...`，指向它的
+ *  符号链接），`path.resolve` 不解析符号链接 ⇒ 永远不等 ⇒ 已登记的 worktree 每轮被当「未登记」重
+ *  `add` ⇒ `already exists` 失败 ⇒ 判据树冻结在首次 tip
+ *  （gap-goal-criterion-worktree-registered-check-blind-to-symlinked-root）。 */
 function criterionWorktreeRegistered(root: string, wtPath: string): boolean {
   const r = gitIn(root, ["worktree", "list", "--porcelain"]);
   if (!r.ok) return false;
-  const target = path.resolve(wtPath);
+  const target = realpathOrSelf(wtPath);
   for (const line of r.stdout.split("\n")) {
     if (!line.startsWith("worktree ")) continue;
-    if (path.resolve(line.slice("worktree ".length).trim()) === target) return true;
+    if (realpathOrSelf(line.slice("worktree ".length).trim()) === target) return true;
   }
   return false;
 }
