@@ -1,7 +1,7 @@
 ---
 id: gap-goal-branch-done-means-landed-on-merge-target
 title: 落到 goal 分支的任务把 done 同时写到 develop——done 的语义改为「已落到它的 mergeTarget」，否则任务被反复派发（B2）
-status: todo
+status: ready
 labels:
   - gap
 parent: null
