@@ -37,6 +37,12 @@
 import fs from "node:fs";
 import path from "node:path";
 import { isDirectEntry } from "./gate-script-base.ts";
+// The recursive walk over SCAN_ROOTS lives in fs-walk.ts (was a byte-identical private copy here and
+// in registry-path-literal-check.ts / worktree-namespace-literal-check.ts — finding
+// `walkFiles-scan-surface-family`, routine `semantic-dedup-scan`, runId
+// `semantic-dedup-scan-1790995446200`). Only the traversal moved; SCAN_ROOTS and SKIP_DIRS are this
+// checker's own.
+import { listFilesInRoots } from "./fs-walk.ts";
 import { SERVE_BINDING_FALLBACK } from "../../packages/quay/src/serve-binding.ts";
 import { CONTROL_PLANE_DEFAULT_HOST } from "../../packages/quay/src/kernel/control-plane-http.ts";
 
@@ -108,23 +114,6 @@ export interface ServeBindingLiteralReport {
   reason: string;
 }
 
-function walkFiles(absDir: string, out: string[]): void {
-  let entries: fs.Dirent[];
-  try {
-    entries = fs.readdirSync(absDir, { withFileTypes: true });
-  } catch {
-    return;
-  }
-  for (const e of entries) {
-    if (e.isDirectory()) {
-      if (SKIP_DIRS.has(e.name)) continue;
-      walkFiles(path.join(absDir, e.name), out);
-    } else if (e.isFile()) {
-      out.push(path.join(absDir, e.name));
-    }
-  }
-}
-
 /**
  * Scan `root` for the serve-binding literal. Pure w.r.t. the filesystem reads it performs; never
  * throws (an unreadable file is skipped, an unreadable doc surface is NOT-EVALUATED, not "ok").
@@ -136,9 +125,7 @@ export function checkServeBindingLiteral(root: string): ServeBindingLiteralRepor
   const quoted = names.map((n) => JSON.stringify(n));
   const allow = new Set(ADVISORY_ALLOWLIST.map((a) => a.rel));
 
-  const files: string[] = [];
-  for (const rel of SCAN_ROOTS) walkFiles(path.join(rootAbs, rel), files);
-  files.sort();
+  const files = listFilesInRoots(rootAbs, SCAN_ROOTS, SKIP_DIRS);
 
   const hits: LiteralHit[] = [];
   const advisory: LiteralHit[] = [];
