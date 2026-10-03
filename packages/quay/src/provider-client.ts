@@ -174,14 +174,56 @@ export async function connectProvider({ command, args, env, cwd }: ConnectProvid
     return r.structuredContent ?? null;
   }
 
+  // ── ADR / Goal / Meta list verbs — "failure is loud, empty/unsupported are not" ──
+  // gap-provider-client-list-masks-call-failure-as-empty: these three used to
+  // coerce a failed call to a silent empty array, collapsing a GENUINE call failure into
+  // "there are no records" — the exact 硬规则 3b shape (a judge whose "could not
+  // read the input" answer is byte-identical to its "clean, empty" answer).
+  // taskList() was already fixed to THROW on isError
+  // (gap-one-unparseable-task-takes-down-the-whole-board AC5); this applies the
+  // SAME ruling to the three siblings, so the four kinds share one semantics:
+  //
+  //   failure     — the provider's tool ANSWERED with isError ⇒ throw. Never [].
+  //   empty       — the tool answered with zero records       ⇒ [].  (≠ failure)
+  //   unsupported — the provider does not do this kind        ⇒ [].  (≠ failure)
+  //
+  // "unsupported" must NOT be conflated with "failure" (AC6/DoD3). A provider
+  // says "I don't do this kind" in one of two ways, BOTH of which resolve to []
+  // rather than throwing:
+  //   ① it registers the tool and returns a clean NON-error empty — github's
+  //      adr_list/goal_list stubs (`{adrs:[]}` / `{goals:[]}`, isError falsy); or
+  //   ② it never registers the tool at all — github has no `meta_list`. The MCP
+  //      SDK's server-side tools/call handler flattens BOTH a missing tool and a
+  //      thrown handler into the SAME `{isError:true, content:[{text}]}` shape
+  //      (see @modelcontextprotocol/sdk server/mcp.js's CallToolRequestSchema),
+  //      so the only discriminator left at this layer is the SDK's own
+  //      `Tool <name> not found` text (JSON-RPC -32602 InvalidParams). We match
+  //      that EXACT signature for the EXACT tool name; a genuine handler failure
+  //      carries the handler's own message instead, so it still throws. If the
+  //      signature ever drifts, the failure direction is fail-LOUD (throw, not a
+  //      silent []) — the safe direction under 硬规则 3b.
+  function isUnsupportedToolCall(r: { content?: unknown }, toolName: string): boolean {
+    const text = (r.content as Array<{ text?: string }> | undefined)?.[0]?.text;
+    return text === `MCP error -32602: Tool ${toolName} not found`;
+  }
+  /** Shared unwrap for the three OPTIONAL-kind list verbs: throw on a genuine
+   *  call failure; resolve to [] for both "empty" and "unsupported". */
+  function unwrapKindList<T>(r: { isError?: boolean; content?: unknown; structuredContent?: unknown }, toolName: string, key: string): T[] {
+    if (r.isError) {
+      if (isUnsupportedToolCall(r, toolName)) return [];
+      throw new Error((r.content as Array<{ text?: string }>)?.[0]?.text ?? `${toolName} failed`);
+    }
+    return ((r.structuredContent as Record<string, T[]> | undefined)?.[key]) ?? [];
+  }
+
   // ── ADR ABI (separate object kind — a provider MAY support ADRs; the native
-  // provider does, the github provider declares them unsupported). adrList
-  // degrades to [] on isError so an ADR-less provider renders cleanly; adrGet
+  // provider does, the github provider declares them unsupported). adrList now
+  // THROWS on a genuine call failure (see unwrapKindList above, same ruling as
+  // taskList) and resolves to [] only for "empty" or "unsupported"; adrGet
   // returns null on isError (mirrors taskGet); adrWrite throws (mirrors taskWrite).
   async function adrList(filter: Record<string, unknown> = {}): Promise<AdrRecord[]> {
     const r = await client.callTool({ name: "adr_list", arguments: filter });
-    if (r.isError) return [];
-    return (r.structuredContent as {adrs?: AdrRecord[]})?.adrs ?? [];
+    return unwrapKindList<AdrRecord>(r, "adr_list", "adrs");
   }
 
   async function adrGet(id: string): Promise<AdrRecord> {
@@ -197,14 +239,15 @@ export async function connectProvider({ command, args, env, cwd }: ConnectProvid
   }
 
   // ── Goal ABI (separate object kind — provider-backed storage, SPEC §5.2). Same
-  // graceful-degradation contract as ADR: goalList degrades to [] on isError so a
-  // goal-less provider (github stub, backlog) renders cleanly; goalGet returns null
-  // on isError (mirrors adrGet); goalWrite throws (mirrors adrWrite); goalGate
-  // returns the provider's gate verdict, throwing on isError (mirrors taskCheck).
+  // contract as ADR: goalList THROWS on a genuine call failure (unwrapKindList,
+  // the same ruling as taskList) and resolves to [] only for "empty" or
+  // "unsupported" (github's goal_list stub returns a clean non-error empty);
+  // goalGet returns null on isError (mirrors adrGet); goalWrite throws (mirrors
+  // adrWrite); goalGate returns the provider's gate verdict, throwing on isError
+  // (mirrors taskCheck).
   async function goalList(filter: Record<string, unknown> = {}): Promise<GoalRecord[]> {
     const r = await client.callTool({ name: "goal_list", arguments: filter });
-    if (r.isError) return [];
-    return (r.structuredContent as {goals?: GoalRecord[]})?.goals ?? [];
+    return unwrapKindList<GoalRecord>(r, "goal_list", "goals");
   }
 
   async function goalGet(id: string): Promise<GoalRecord> {
@@ -226,13 +269,14 @@ export async function connectProvider({ command, args, env, cwd }: ConnectProvid
   }
 
   // ── Meta ABI (separate object kind — message→meta-driver, answered on the same record). Same
-  // graceful-degradation contract as ADR/goal: metaList degrades to [] on isError so a meta-less
-  // provider renders cleanly; metaGet returns null on isError (mirrors goalGet); metaWrite throws
-  // (mirrors goalWrite).
+  // contract as ADR/goal: metaList THROWS on a genuine call failure (unwrapKindList, the same
+  // ruling as taskList) and resolves to [] only for "empty" or "unsupported" — github registers
+  // no meta_list at all, which arrives as the SDK's `Tool meta_list not found` isError and is
+  // classified as unsupported (≠ failure) by unwrapKindList; metaGet returns null on isError
+  // (mirrors goalGet); metaWrite throws (mirrors goalWrite).
   async function metaList(filter: Record<string, unknown> = {}): Promise<MetaRecord[]> {
     const r = await client.callTool({ name: "meta_list", arguments: filter });
-    if (r.isError) return [];
-    return (r.structuredContent as {metas?: MetaRecord[]})?.metas ?? [];
+    return unwrapKindList<MetaRecord>(r, "meta_list", "metas");
   }
 
   async function metaGet(id: string): Promise<MetaRecord> {
