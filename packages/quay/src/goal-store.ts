@@ -95,6 +95,7 @@ import { mergeEnv } from "./kernel/env-merge.ts";
 // each primitive: a goal's status flip is the only event that creates (§4.2: lazy, on `active`) or
 // discards (§4.2: `retired`/`superseded`) `goal/<id>`.
 import { ensureGoalBranch, discardGoalBranch, goalBranchName, goalBranchRefExists, goalBranchTip } from "./branch-model.ts";
+import { resolveWorktreeNamespace } from "./worktree-namespace.ts";
 
 // ADR-036 (枚举事实的单一真源): the goal-status vocabulary is DEFINED ONCE, in the ABI declaration
 // (`abi.ts:GOAL_STATUSES`), and this store derives from it — ⛔ not a second hand-copied literal.
@@ -158,6 +159,85 @@ export function evaluationContext(root: string): { evaluationRoot: string; treeS
     // rather than dropping the field (硬规则 3/3b — "could not read" must have its own value).
   }
   return { evaluationRoot, treeSha: gitTreeSha(evaluationRoot) };
+}
+
+// ── WHICH TREE a BRANCH-MODE goal's criteria run on (SPEC-goal-branch-2026-10-03 §5 B1, ruling ⑩) ─
+//
+// THE DEFECT (B1): a criterion's cwd was unconditionally the MAIN checkout's git root. The main
+// checkout follows `develop`, while a branch-mode goal's code lives only on `goal/<id>` until it is
+// merged. A pre-merge AC whose criterion reads a goal-branch file therefore could never pass ⇒ the
+// goal could never reach `achieved` ⇒ §4.7's merge never triggers ⇒ **deadlock, not delay**. The I5
+// sweep (checkAchievedFailing) had the same cwd, so it re-ran ALREADY-ACHIEVED criteria on the main
+// checkout, reported them all as achieved-but-failing, and filed a batch of phantom gaps.
+//
+// THE FIX: one DETACHED criterion worktree per branch-mode goal (`goal-driver` owns its lifecycle —
+// create / refresh / delete, ruling ㉒), and the criterion cwd is chosen per AC from the AC's GOAL:
+// branch-mode ∧ `goal/<id>` still exists ⇒ the worktree; anything else ⇒ the main root (which is
+// also what a MERGED goal falls back to, §4.2: branch gone ⇒ back to the main checkout).
+// ⛔ The worktree is DETACHED, never a checkout of `goal/<id>` itself — a branch checked out in a
+// second worktree cannot be pushed to (`git push . <sha>:refs/heads/goal/<id>` is refused for the
+// checked-out branch), which would break the goal branch's own fast-forward.
+// ⛔ The path is DERIVED from the config-resolved worktree namespace (`loop.worktree_root`), never
+// from a hardcoded `quay-worktrees` segment (worktree-namespace.ts is the ONE resolution).
+
+/** Directory-name prefix of a goal's criterion worktree inside the worktree namespace:
+ *  `<namespace>/goal-<GOAL-NNN>`. Sibling of the task worktrees, in the SAME resolved namespace. */
+export const GOAL_CRITERION_WORKTREE_PREFIX = "goal-";
+
+/** The criterion worktree path for `goalId` — derived, ⛔ never stored (hard rule 4b: the branch name
+ *  and its worktree are both functions of the goal id + the workspace's worktree namespace). */
+export function goalCriterionWorktreeDir(root: string, goalId: string): string {
+  return path.join(resolveWorktreeNamespace(root).dir, `${GOAL_CRITERION_WORKTREE_PREFIX}${goalId}`);
+}
+
+/** Where an AC's criterion ran: `goal-worktree` (branch-mode goal, branch still present) or `main`
+ *  (everything else — incl. a branch-mode goal whose branch is already merged/discarded). */
+export type CriterionRootSource = "main" | "goal-worktree";
+
+export interface CriterionRoot {
+  cwd: string;
+  source: CriterionRootSource;
+}
+
+/** Resolve ONE goal's criterion root. `mainRoot` is the main checkout's git root (⛔ the caller
+ *  already resolved it robustly; this never re-derives it with `path.dirname`). */
+export function resolveCriterionRoot(
+  mainRoot: string,
+  goal: { id?: unknown; branch?: unknown } | null | undefined,
+): CriterionRoot {
+  const id = typeof goal?.id === "string" ? goal.id : "";
+  if (goal?.branch !== true || !isGoalId(id)) return { cwd: mainRoot, source: "main" };
+  // Branch gone (merged per §4.7, or discarded per §4.2) ⇒ the goal's code is on the main checkout
+  // again. ⛔ Derived from git, never from a stored flag: after an external `git branch -D` the
+  // stored bit would still say `true` while the reading must already be the main root.
+  if (!goalBranchRefExists(mainRoot, id)) return { cwd: mainRoot, source: "main" };
+  return { cwd: goalCriterionWorktreeDir(mainRoot, id), source: "goal-worktree" };
+}
+
+/** Per-GOAL resolution map for a whole listing — one `git` probe per GOAL, not one per AC (the sweep
+ *  and I5 walk every achieved AC, and a per-AC probe would spawn a process per record). */
+export function buildCriterionRoots(
+  mainRoot: string,
+  goals: Array<Record<string, unknown>>,
+): Map<string, CriterionRoot> {
+  const byGoal = new Map<string, CriterionRoot>();
+  for (const g of goals) {
+    const id = String(g.id ?? "");
+    if (!isGoalId(id)) continue;
+    byGoal.set(id, resolveCriterionRoot(mainRoot, g as { id?: unknown; branch?: unknown }));
+  }
+  return byGoal;
+}
+
+/** The criterion cwd for one AC row, given its goal's resolved root (absent goal id / unknown goal
+ *  ⇒ the main root — the same tree today's behaviour used). */
+export function criterionCwdFor(
+  mainRoot: string,
+  byGoal: Map<string, CriterionRoot>,
+  ac: { goal?: unknown },
+): string {
+  const gid = typeof ac.goal === "string" ? ac.goal : "";
+  return byGoal.get(gid)?.cwd ?? mainRoot;
 }
 
 // ── AC-242 successor: the FROZEN population and its bounded rotation re-verification ──────────────
@@ -1857,9 +1937,10 @@ export function createGoalStore(
     // and all passed" (hard rule 3b — ⛔ not an empty array masquerading as "no achieved-but-failing
     // AC"). The enumeration is done before the guard check so the guard path's `scopeSize` is truthful
     // too (it refuses to RUN, but it still knows the scope).
-    const activeGoalIds = new Set(activeGoals().map((g) => String(g.id)));
+    const all = list();
+    const activeGoalIds = new Set(all.filter((g) => isGoalId(String(g.id)) && g.status === "active").map((g) => String(g.id)));
     const inScope: GoalViewModel[] = [];
-    for (const ac of list()) {
+    for (const ac of all) {
       if (!isCriterionId(String(ac.id))) continue;
       if (ac.status !== "achieved") continue;
       // AC-216 — in scope ⟺ (under an ACTIVE goal) OR (explicit `long-term: true`): a long-term
@@ -1879,8 +1960,11 @@ export function createGoalStore(
     }
     const achievedButFailing: string[] = [];
     // Criterion cwd = the git root (robust rev-parse, ⛔ not path.dirname — hard rule 4 corollary 2),
-    // falling back to goalDir's parent only when not inside a git work tree.
+    // falling back to goalDir's parent only when not inside a git work tree. A BRANCH-MODE goal's ACs
+    // run on that goal's criterion worktree instead (§5 B1) — without it every re-verification of a
+    // goal-branch-backed AC reports achieved-but-failing and files phantom gaps.
     const root = resolveGitRoot(goalDir) ?? path.dirname(goalDir);
+    const criterionRoots = buildCriterionRoots(root, all as unknown as Array<Record<string, unknown>>);
     const prev = process.env[GOAL_ACCEPTANCE_ACTIVE_ENV];
     process.env[GOAL_ACCEPTANCE_ACTIVE_ENV] = "1";
     try {
@@ -1888,7 +1972,8 @@ export function createGoalStore(
         const criterion = typeof ac.criterion === "string" ? ac.criterion : "";
         // Resolved deadline (env > gates timeoutMs > default) — ⛔ NOT a private literal, which is
         // what made this entry point immune to every configuration knob (see the constant's tombstone).
-        const res = runAcceptance({ command: criterion, cwd: root, timeoutMs: resolveAcceptanceTimeoutMs() });
+        const cwd = criterionCwdFor(root, criterionRoots, ac);
+        const res = runAcceptance({ command: criterion, cwd, timeoutMs: resolveAcceptanceTimeoutMs() });
         if (!res.ok) achievedButFailing.push(String(ac.id));
       }
     } finally {
@@ -2143,6 +2228,9 @@ export function createGoalStore(
     const { appendGateEvent } = await import("./gate/gate-event-store.ts");
     const logPath = path.join(path.dirname(goalDir), ".quay", "gate-events.jsonl");
     const root = resolveGitRoot(goalDir) ?? path.dirname(goalDir);
+    // §5 B1 — the rotation re-verifies a branch-mode goal's frozen AC on that goal's criterion
+    // worktree, not on the main checkout (which does not carry the goal branch's code at all).
+    const criterionRoots = buildCriterionRoots(root, list() as unknown as Array<Record<string, unknown>>);
     const startedAt = Date.now();
     const ran: Array<{ id: string; verdict: "pass" | "fail" | "not-evaluated"; reason: string; ms: number }> = [];
     const prev = process.env[GOAL_ACCEPTANCE_ACTIVE_ENV];
@@ -2156,9 +2244,13 @@ export function createGoalStore(
         }
         const criterion = String(byId.get(id)?.criterion ?? "");
         const t0 = Date.now();
+        // A branch-mode goal's frozen AC is re-verified on ITS criterion worktree (§5 B1) — the same
+        // per-AC cwd choice the gate and I5 entry points make. ⛔ Resolved per PICKED id (≤budget),
+        // never per frozen record.
+        const cwd = criterionCwdFor(root, criterionRoots, byId.get(id) ?? {});
         // The DEADLINE is `resolveAcceptanceTimeoutMs()` — the shared config-surface chain, ⛔ not a
         // private literal (gap-goal-criterion-timeout-hardcoded-60s-ignores-acceptance-timeout).
-        const res = runAcceptance({ command: criterion, cwd: root, timeoutMs: resolveAcceptanceTimeoutMs() });
+        const res = runAcceptance({ command: criterion, cwd, timeoutMs: resolveAcceptanceTimeoutMs() });
         // ⛔ Through the ONE mapping (gap-goal-gate-verdict-single-mapping-not-evaluated). Before it,
         // this site recognised only exit 3 and recorded a timeout / spawn failure / exit 126-127 as
         // `fail` — i.e. asserted "this criterion is FALSE" about a criterion that never got to say
@@ -2187,9 +2279,9 @@ export function createGoalStore(
             reason: v.reason,
             ...(v.cause ? { cause: v.cause } : {}),
             criterionHash: criterionFingerprint(criterion),
-            // WHICH tree this rotation re-verified on (SPEC §7 辛) — `root` here is the criterion cwd
+            // WHICH tree this rotation re-verified on (SPEC §7 辛) — `cwd` here is the criterion cwd
             // passed to `runAcceptance` above, so the two name the same tree by construction.
-            ...evaluationContext(root),
+            ...evaluationContext(cwd),
           },
         });
       }
@@ -3410,6 +3502,15 @@ export async function runGoalStoreCli(argv: string[]): Promise<number> {
       // is the only place a goal's own deadline can be declared, and the goal path reads no gates.yml).
       const t = resolveAcceptanceTimeout((rec as unknown as { timeoutMs?: unknown }).timeoutMs);
       const timeoutMs = t.timeoutMs;
+      // §5 B1 — an AC under a BRANCH-MODE goal is evaluated on that goal's criterion worktree (its
+      // code lives only on `goal/<id>` until the merge); every other AC keeps the main checkout root.
+      // ⛔ The gate EVENT still lands on the MAIN root's ledger below: `logPath` was derived from
+      // `root`, not from this cwd — only the criterion's working tree moves, never the record's.
+      const gateCwd = criterionCwdFor(
+        root,
+        buildCriterionRoots(root, store.list() as unknown as Array<Record<string, unknown>>),
+        rec,
+      );
       if (typeof criterion !== "string" || criterion.trim() === "") {
         // AC2 — empty criterion FAILS CLOSED (red), never a silent PASS.
         verdict = "fail";
@@ -3422,7 +3523,7 @@ export async function runGoalStoreCli(argv: string[]): Promise<number> {
         // (gap-goal-gate-verdict-single-mapping-not-evaluated; the hint below is the one that does).
         const result = runAcceptance({
           command: criterion,
-          cwd: root,
+          cwd: gateCwd,
           timeoutMs: t.timeoutMs,
           timeoutKnob: timeoutKnobHint(t),
         });
@@ -3444,8 +3545,9 @@ export async function runGoalStoreCli(argv: string[]): Promise<number> {
         timestamp: new Date().toISOString(),
         // `cause` only when there is one — see the sweep site's note on the payload shape.
         // `evaluationRoot`/`treeSha` name WHICH tree this verdict was obtained on (SPEC §7 辛):
-        // `root` is the criterion cwd passed to `runAcceptance` above, so the two are the same tree.
-        payload: { reason, ...(cause ? { cause } : {}), ...evaluationContext(root) },
+        // `gateCwd` is the criterion cwd passed to `runAcceptance` above, so the two are the same tree
+        // (the criterion worktree for a branch-mode goal, the main checkout otherwise).
+        payload: { reason, ...(cause ? { cause } : {}), ...evaluationContext(gateCwd) },
       };
       // P9 dry-run: run the criterion but do NOT append the gate event (persist nothing).
       if (!dryRun) appendGateEvent(logPath, event);

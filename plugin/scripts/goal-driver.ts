@@ -77,7 +77,7 @@ import { parse as parseYaml } from "yaml";
 //
 // ⚠️ 从 driver-runtime（Layer 0）取这两个核心符号，⛔ 不在此处直接写 Core 源码树的 import 字面量：
 // 「Core 的源码树在哪」是布局知识，唯一落点是 Layer 0（driver-runtime 的 Core 导入面）。
-import { inAchievedReverifyScope, readsFrozenPopulation, GOAL_ACCEPTANCE_ACTIVE_ENV } from "./driver-runtime.ts";
+import { inAchievedReverifyScope, readsFrozenPopulation, GOAL_ACCEPTANCE_ACTIVE_ENV, goalCriterionWorktreeDir, goalBranchName, goalBranchRefExists, goalBranchTip } from "./driver-runtime.ts";
 
 // ⑨ CI run 载体的**生产调用点**（tasks/gap-develop-ci-first-decisive-green Requested action 2）。
 // ⛔ 本 driver 是 AC-265 的评估者，而 AC-265 读的是 `.quay/ci-runs.jsonl` 这个**本地载体**——
@@ -3022,12 +3022,130 @@ export function runSufficiencyFollowupPass(
   };
 }
 
+// ── 判据 worktree（SPEC-goal-branch-2026-10-03 §5 B1 / §4.10，裁定⑩㉒）─────────────────────────
+//
+// B1：AC 判据的 cwd 曾是主检出的 git root，而主检出跟 `develop`——branch-mode goal 的代码只在
+// `goal/<id>` 上 ⇒ 判据看不到 ⇒ AC 永不 achieved ⇒ goal 永不并入。**是死锁，不是延迟。**
+//
+// 本条兑现裁定⑩的「每个 branch-mode goal 一个 detached 判据 worktree」，并把它按裁定㉒ 归给
+// goal-driver：创建 / 刷新 / 删除都在这里（store 只按 AC 的 GOAL 选 cwd，⛔ 不自己建）。
+// ⛔ **detached，⛔ 不检出 `goal/<id>` 本身**：一个分支被第二个 worktree 检出后，
+// `git push . <sha>:refs/heads/goal/<id>` 会被拒（「branch is checked out」），而那正是 goal 分支
+// 自己快进的通道——detached 是这个选择成立的前提，不是风格。
+// ⛔ 路径经 `goalCriterionWorktreeDir`（Core 单一推导：配置解析出的 worktree 命名空间 + `goal-<id>`），
+// goal-driver 不自己拼「quay-worktrees」这类字面量。
+//
+// **刷新与求值串行**（§4.10）：本函数在 runGoalRound 的 pass 1 之前【同步】跑完，故判据绝不会跑在
+// 半更新的树上。**存在性 = 分支存在性**（单一谓词，⛔ 不另存一个「该不该有 worktree」的标志）：
+// `goal/<id>` 在 ⇒ 该有 worktree；分支已删（并入 §4.7 / 废弃 §4.2）⇒ 删掉 worktree，判据自动回到
+// 主检出（与 store 侧 `resolveCriterionRoot` 的同一条派生规则互为镜像）。
+
+/** 一条判据 worktree 的本轮处置读数。`state` 是枚举（硬规则 3）：⛔ 不折成布尔——「本来就不该有」
+ *  （no-branch）与「该有却建不出来」（failed）必须可区分，否则失败会伪装成正常。 */
+export interface CriterionWorktreeReading {
+  goal: string;
+  branch: string;
+  path: string;
+  state: "created" | "refreshed" | "current" | "removed" | "no-branch" | "failed";
+  /** worktree 处置后其 HEAD 的 sha；null = 读不到（⛔ 与「没有 worktree」不同形，硬规则 3b）。 */
+  headSha: string | null;
+  reason: string | null;
+}
+
+/** git 的机械调用（同步、无 shell）。⛔ 失败不抛——调用方要看的是读数，不是异常。 */
+function gitIn(cwd: string, args: string[]): { ok: boolean; stdout: string; stderr: string } {
+  const r = spawnSync("git", ["-C", cwd, ...args], { encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] });
+  if (r.error) return { ok: false, stdout: "", stderr: r.error.message };
+  return { ok: r.status === 0, stdout: String(r.stdout ?? "").trim(), stderr: String(r.stderr ?? "").trim() };
+}
+
+/** 一个 goal 的判据 worktree 是否存在（`git worktree list --porcelain` 的登记面，⛔ 不是「目录在不在」：
+ *  目录被手工删掉而登记还在时，`git worktree add` 会因「already registered」拒绝）。 */
+function criterionWorktreeRegistered(root: string, wtPath: string): boolean {
+  const r = gitIn(root, ["worktree", "list", "--porcelain"]);
+  if (!r.ok) return false;
+  const target = path.resolve(wtPath);
+  for (const line of r.stdout.split("\n")) {
+    if (!line.startsWith("worktree ")) continue;
+    if (path.resolve(line.slice("worktree ".length).trim()) === target) return true;
+  }
+  return false;
+}
+
+/** 让一个 branch-mode goal 的判据 worktree 停在该分支 tip 上（建/刷）。返回处置读数。 */
+function ensureGoalCriterionWorktree(root: string, goalId: string): CriterionWorktreeReading {
+  const branch = goalBranchName(goalId);
+  const wtPath = goalCriterionWorktreeDir(root, goalId);
+  const tip = goalBranchTip(root, goalId);
+  const base = { goal: goalId, branch, path: wtPath, headSha: null as string | null, reason: null as string | null };
+  if (tip === null) return { ...base, state: "no-branch", reason: `branch ${branch} not resolvable` };
+
+  const registered = criterionWorktreeRegistered(root, wtPath);
+  if (!registered) {
+    const add = gitIn(root, ["worktree", "add", "--detach", wtPath, tip]);
+    if (add.ok) return { ...base, state: "created", headSha: tip };
+    // 「already registered」而登记表里没有 = 陈旧登记（目录被手工删过）⇒ prune 后重试一次。
+    gitIn(root, ["worktree", "prune"]);
+    const retry = gitIn(root, ["worktree", "add", "--detach", wtPath, tip]);
+    if (retry.ok) return { ...base, state: "created", headSha: tip };
+    return { ...base, state: "failed", reason: `worktree add failed: ${retry.stderr.slice(0, 200)}` };
+  }
+
+  const head = gitIn(wtPath, ["rev-parse", "HEAD"]);
+  if (head.ok && head.stdout === tip) return { ...base, state: "current", headSha: tip };
+
+  // 刷新：detached 移动 HEAD 到新 tip。`--force` 丢弃 worktree 里的本地改动——判据 worktree 是**一次性的
+  // 求值面**（§4.10：预览内的写操作随刷新丢弃），保留它们只会让下一轮判据跑在一棵混合树上。
+  const co = gitIn(wtPath, ["checkout", "--detach", "--force", tip]);
+  if (co.ok) return { ...base, state: "refreshed", headSha: tip };
+
+  // 刷新失败（例如未跟踪文件挡路）⇒ 拆掉重建，⛔ 不把失败留在原地当「已刷新」。
+  gitIn(root, ["worktree", "remove", "--force", wtPath]);
+  const readd = gitIn(root, ["worktree", "add", "--detach", wtPath, tip]);
+  if (readd.ok) return { ...base, state: "created", headSha: tip };
+  return { ...base, state: "failed", reason: `refresh failed (${co.stderr.slice(0, 120)}) and re-add failed (${readd.stderr.slice(0, 120)})` };
+}
+
+/** 本轮处置：branch:true 的每个 GOAL 一条读数（⛔ 只扫 branch:true——普通 goal 结构上没有判据 worktree，
+ *  逐条探 200 个 goal 的分支存在性是白花的 git 调用）。 */
+export function syncGoalCriterionWorktrees(
+  root: string,
+  goals: Array<Record<string, unknown>>,
+): CriterionWorktreeReading[] {
+  const out: CriterionWorktreeReading[] = [];
+  for (const g of goals) {
+    if (g.branch !== true) continue;
+    const gid = String(g.id ?? "");
+    if (!gid.startsWith("GOAL-")) continue;
+    const wtPath = goalCriterionWorktreeDir(root, gid);
+    const exists = goalBranchRefExists(root, gid);
+    if (!exists) {
+      // 分支已删（并入 §4.7 / 废弃 §4.2）⇒ 判据回主检出；留在盘上的 worktree 是孤儿，删掉。
+      // ⛔ state=removed 与 no-branch 分开：前者是「本轮真删了一个」，后者是「本来就没有」。
+      if (criterionWorktreeRegistered(root, wtPath)) {
+        const rm = gitIn(root, ["worktree", "remove", "--force", wtPath]);
+        if (rm.ok) { gitIn(root, ["worktree", "prune"]); out.push({ goal: gid, branch: goalBranchName(gid), path: wtPath, state: "removed", headSha: null, reason: null }); }
+        else out.push({ goal: gid, branch: goalBranchName(gid), path: wtPath, state: "failed", headSha: null, reason: `worktree remove failed: ${rm.stderr.slice(0, 200)}` });
+      } else {
+        out.push({ goal: gid, branch: goalBranchName(gid), path: wtPath, state: "no-branch", headSha: null, reason: null });
+      }
+      continue;
+    }
+    out.push(ensureGoalCriterionWorktree(root, gid));
+  }
+  return out;
+}
+
 // ── 一轮（机械环）─────────────────────────────────────────────────────────────────────────
 
 /** 一轮的读数。 */
 export interface GoalRoundReadings {
   goalCount: number;
   criterionCount: number;
+  /** 判据 worktree（SPEC-goal-branch §5 B1，裁定⑩㉒）的本轮处置读数：branch:true 的每个 GOAL 一条。
+   *  ⛔ 空数组 = 本轮没有 branch-mode goal（「查过且零条」），不是「没跑这条」——本 pass 无条件执行。
+   *  state ∈ 枚举（created/refreshed/current/removed/no-branch/failed），⛔ 不折成布尔（硬规则 3）。 */
+  criterionWorktrees: CriterionWorktreeReading[];
   criteria: Array<{ id: string; goal: string; status: string; verdict: "pass" | "fail" | "not-evaluated"; reason: string }>;
   /** 本轮 driver 做的全部状态翻写：I2 达成翻转（to=achieved）+ ⑧ 分诊 activate 执行（to=active）。
    *  ⛔ 分诊不翻其余三态（re-anchor / needs-human / hold 只落痕，AC-219）。 */
@@ -3254,6 +3372,10 @@ export async function runGoalRound(root: string, opts: GoalRoundOptions = {}): P
     evaluated: true,
   };
   const activeGoalIds = activeGoalIdsOf(records);
+  // §5 B1 —— 判据 worktree 的建立 / 刷新 / 删除**先于任何判据求值**（§4.10「刷新与求值串行」）：
+  // 下面 pass 1 的每条 criterion 都以 `goal/<id>` 的代码为 cwd（store 侧 resolveCriterionRoot 派生），
+  // 树没就位就会跑在主检出上——正是本任务要消灭的那个死锁。⛔ 不计入本轮的失败态：它是处置读数。
+  const criterionWorktrees = syncGoalCriterionWorktrees(dataRoot, records);
   const criteria: GoalRoundReadings["criteria"] = [];
   const flips: GoalRoundReadings["flips"] = [];
   const closeBlocks: GoalRoundReadings["closeBlocks"] = [];
@@ -3610,6 +3732,7 @@ export async function runGoalRound(root: string, opts: GoalRoundOptions = {}): P
   const value: GoalRoundReadings = {
     goalCount: activeGoals.length,
     criterionCount: criteria.length,
+    criterionWorktrees,
     criteria,
     flips,
     closeBlocks,
