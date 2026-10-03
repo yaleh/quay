@@ -85,8 +85,8 @@ node packages/quay/bin/quay.js goal gate AC-326 --dry-run --json --root $R
 ## Touches
 
 - `packages/quay/test/ac326-criterion-branch-discard.test.mjs` (new)
-- `goals/AC-901-*.md` (new)
-- `goals/GOAL-901-*.md` (new)
+- `goals/AC-901-goal.md` (new)
+- `goals/GOAL-901-ac-326-废弃演练-drill-只用于跑一次-goal-分支丢弃路径-不是真实开发方向.md` (new)
 - `tasks/gap-ac326-branch-discard-drill-real-reading.md`
 
 （说明：前两条 `(new)` 是演练要写的两条 store 记录——经 `quay goal write --store --root /data/home/yale/work/quay` 落在主检出，再按仓库既有做法把同一份字节带进本任务 worktree，使它们进入本分支的 delta；第三条是绑定判据的夹具；最后一条是 self-touch。⛔ 不改 `packages/quay/src/**`、⛔ 不改任何 `plugin/scripts/**`、⛔ 不改任何既有 goal 记录。）
