@@ -44,6 +44,7 @@ import {
   resolveKernelPluginRoot,
   resolveKernelShellSibling,
   resolveQuaySrcModule,
+  ensureWorktreeNodeModules,
 } from "./driver-runtime.ts";
 import { spawnSuiteAndWait, type SuiteOutcome, type SuiteRunResult } from "./suite-driver.ts";
 import { suiteLockBase } from "./suite-lock-slots.ts";
@@ -2553,6 +2554,11 @@ export async function runGoalMergeFanIn(opts: GoalMergeFanInOptions): Promise<Go
     tmpWorktree = path.join(fs.mkdtempSync(path.join(os.tmpdir(), `goal-merge-${goalId}-`)), "wt");
     const add = await mechSh(["git", "-C", root, "worktree", "add", "--detach", tmpWorktree, "develop"], 60_000);
     if (!add.ok) return red("worktree-add", (add.stderr || add.stdout || "git worktree add failed").trim());
+    // 依赖装配（与判据/预览 worktree 同一实现）：裸 `git worktree add` 不带 gitignored 的
+    // `node_modules`，而 `git merge --no-ff` 会触发 pre-merge-commit 钩子、suite 也会跑构建——
+    // 没有依赖时钩子/构建会 ERR_MODULE_NOT_FOUND 把合并中止（GOAL-904 演练读到的那次）。
+    // 主检出没有依赖时不建链（读数由 merge 结果本身如实反映），⛔ 不抛。
+    ensureWorktreeNodeModules(root, tmpWorktree);
     const mergeMsg = `merge: ${branch} into develop (request ${request.eventId})`;
     const merge = await mechSh(["git", "-C", tmpWorktree, "merge", "--no-ff", branch, "-m", mergeMsg], 120_000);
     if (!merge.ok) {

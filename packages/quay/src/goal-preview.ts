@@ -78,6 +78,65 @@ export function previewWorktreeDir(mainRoot: string, goalId: string): string {
   return goalCriterionWorktreeDir(mainRoot, goalId);
 }
 
+// ── worktree dependency provisioning ─────────────────────────────────────────────────────────────
+//
+// A plain `git worktree add` carries the TRACKED tree only: `node_modules` is gitignored, so any
+// `node` process started inside the fresh worktree (the preview serve, a git hook such as
+// `pre-merge-commit`, the build phase of `scripts/test.sh`) dies with ERR_MODULE_NOT_FOUND. Task
+// worktrees get their deps from `plugin/scripts/dispatch-worktree-setup.sh`; the goal-side worktrees
+// are created by bare `git worktree add`, so they take the SAME zero-copy link here — ONE function,
+// ⛔ not a copy per caller (criterion worktree + merge-verification temp worktree both call it).
+//
+// Semantics are ENUMERATED and never throw (硬规则 3/3b): a "no deps at the source" case must read as
+// itself, never as a silent success; an already-provisioned worktree is a no-op, never an error.
+//   linked        — the main checkout had `node_modules` and the symlink was created
+//   present       — the worktree already carried a `node_modules` entry (kept untouched, idempotent)
+//   source-absent — the main checkout has no `node_modules`: NO link is created, read honestly
+//   failed        — the symlink could not be created (readable reason, still ⛔ does not throw)
+export interface WorktreeNodeModulesReading {
+  state: "linked" | "present" | "source-absent" | "failed";
+  /** `<worktreeRoot>/node_modules` — where the link lives (or would live). */
+  linkPath: string;
+  /** The main checkout's `node_modules` the link points at; null when nothing was linked. */
+  target: string | null;
+  reason: string | null;
+}
+
+/** True for ANY directory entry (file, dir, symlink — including a dangling symlink): `fs.existsSync`
+ *  follows symlinks and would read a broken link as "absent", re-linking over it. */
+function entryExists(p: string): boolean {
+  try {
+    fs.lstatSync(p);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * Give `worktreeRoot` the main checkout's dependencies as a zero-copy symlink, the same mechanism
+ * task worktrees get from `dispatch-worktree-setup.sh`. Idempotent and non-throwing; returns an
+ * enumerated reading (see `WorktreeNodeModulesReading`).
+ */
+export function ensureWorktreeNodeModules(mainRoot: string, worktreeRoot: string): WorktreeNodeModulesReading {
+  const linkPath = path.join(worktreeRoot, "node_modules");
+  if (entryExists(linkPath)) return { state: "present", linkPath, target: null, reason: null };
+  const target = path.join(mainRoot, "node_modules");
+  let st: fs.Stats;
+  try {
+    st = fs.statSync(target); // follows a symlinked main's node_modules too
+  } catch {
+    return { state: "source-absent", linkPath, target: null, reason: `no node_modules at ${target}` };
+  }
+  if (!st.isDirectory()) return { state: "source-absent", linkPath, target: null, reason: `${target} is not a directory` };
+  try {
+    fs.symlinkSync(target, linkPath, "dir");
+  } catch (err) {
+    return { state: "failed", linkPath, target, reason: String((err as Error)?.message ?? err) };
+  }
+  return { state: "linked", linkPath, target, reason: null };
+}
+
 // ── the `.quay/` snapshot ────────────────────────────────────────────────────────────────────────
 
 export interface QuaySnapshotReading {

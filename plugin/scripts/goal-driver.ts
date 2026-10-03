@@ -77,7 +77,7 @@ import { parse as parseYaml } from "yaml";
 //
 // ⚠️ 从 driver-runtime（Layer 0）取这两个核心符号，⛔ 不在此处直接写 Core 源码树的 import 字面量：
 // 「Core 的源码树在哪」是布局知识，唯一落点是 Layer 0（driver-runtime 的 Core 导入面）。
-import { inAchievedReverifyScope, readsFrozenPopulation, GOAL_ACCEPTANCE_ACTIVE_ENV, goalCriterionWorktreeDir, goalBranchName, goalBranchRefExists, goalBranchTip, realpathOrSelf, snapshotQuayDirInto, stopPreviewServe, type QuaySnapshotReading, type PreviewStopReading } from "./driver-runtime.ts";
+import { inAchievedReverifyScope, readsFrozenPopulation, GOAL_ACCEPTANCE_ACTIVE_ENV, goalCriterionWorktreeDir, goalBranchName, goalBranchRefExists, goalBranchTip, realpathOrSelf, snapshotQuayDirInto, stopPreviewServe, ensureWorktreeNodeModules, type QuaySnapshotReading, type PreviewStopReading, type WorktreeNodeModulesReading } from "./driver-runtime.ts";
 
 // ⑨ CI run 载体的**生产调用点**（tasks/gap-develop-ci-first-decisive-green Requested action 2）。
 // ⛔ 本 driver 是 AC-265 的评估者，而 AC-265 读的是 `.quay/ci-runs.jsonl` 这个**本地载体**——
@@ -3116,6 +3116,11 @@ export interface CriterionWorktreeReading {
   /** §4.10 裁定㉒ —— 删 worktree **之前**停掉其上 serve 的读数；null = 本轮没有删除（不适用）。
    *  ⛔ 与「删了但没有 serve」不同形：后者是 `not-running` 的显式读数。 */
   previewStop: PreviewStopReading | null;
+  /** 判/预览 worktree 的依赖装配读数（`ensureWorktreeNodeModules`，单一实现）：一个裸
+   *  `git worktree add` 不带 gitignored 的 `node_modules`，预览 serve / 判据求值都会
+   *  ERR_MODULE_NOT_FOUND。建/刷/沿用（current）时处置并如实记读数；null = 本轮没走到处置
+   *  （no-branch/failed/removed），⛔ 与「处置了且主检出没有依赖」（source-absent）不同形（硬规则 3b）。 */
+  nodeModules: WorktreeNodeModulesReading | null;
 }
 
 /** git 的机械调用（同步、无 shell）。⛔ 失败不抛——调用方要看的是读数，不是异常。 */
@@ -3153,34 +3158,34 @@ function ensureGoalCriterionWorktree(root: string, goalId: string): CriterionWor
   const branch = goalBranchName(goalId);
   const wtPath = goalCriterionWorktreeDir(root, goalId);
   const tip = goalBranchTip(root, goalId);
-  const base = { goal: goalId, branch, path: wtPath, headSha: null as string | null, reason: null as string | null, quaySnapshot: null as QuaySnapshotReading | null, previewStop: null as PreviewStopReading | null };
+  const base = { goal: goalId, branch, path: wtPath, headSha: null as string | null, reason: null as string | null, quaySnapshot: null as QuaySnapshotReading | null, previewStop: null as PreviewStopReading | null, nodeModules: null as WorktreeNodeModulesReading | null };
   if (tip === null) return { ...base, state: "no-branch", reason: `branch ${branch} not resolvable` };
 
   const registered = criterionWorktreeRegistered(root, wtPath);
   if (!registered) {
     const add = gitIn(root, ["worktree", "add", "--detach", wtPath, tip]);
-    if (add.ok) return { ...base, state: "created", headSha: tip, quaySnapshot: snapshotQuayDirInto(root, wtPath) };
+    if (add.ok) return { ...base, state: "created", headSha: tip, quaySnapshot: snapshotQuayDirInto(root, wtPath), nodeModules: ensureWorktreeNodeModules(root, wtPath) };
     // 「already registered」而登记表里没有 = 陈旧登记（目录被手工删过）⇒ prune 后重试一次。
     gitIn(root, ["worktree", "prune"]);
     const retry = gitIn(root, ["worktree", "add", "--detach", wtPath, tip]);
-    if (retry.ok) return { ...base, state: "created", headSha: tip, quaySnapshot: snapshotQuayDirInto(root, wtPath) };
+    if (retry.ok) return { ...base, state: "created", headSha: tip, quaySnapshot: snapshotQuayDirInto(root, wtPath), nodeModules: ensureWorktreeNodeModules(root, wtPath) };
     return { ...base, state: "failed", reason: `worktree add failed: ${retry.stderr.slice(0, 200)}` };
   }
 
   const head = gitIn(wtPath, ["rev-parse", "HEAD"]);
-  if (head.ok && head.stdout === tip) return { ...base, state: "current", headSha: tip };
+  if (head.ok && head.stdout === tip) return { ...base, state: "current", headSha: tip, nodeModules: ensureWorktreeNodeModules(root, wtPath) };
 
   // 刷新：detached 移动 HEAD 到新 tip。`--force` 丢弃 worktree 里的本地改动——判据 worktree 是**一次性的
   // 求值面**（§4.10：预览内的写操作随刷新丢弃），保留它们只会让下一轮判据跑在一棵混合树上。
   const co = gitIn(wtPath, ["checkout", "--detach", "--force", tip]);
-  if (co.ok) return { ...base, state: "refreshed", headSha: tip, quaySnapshot: snapshotQuayDirInto(root, wtPath) };
+  if (co.ok) return { ...base, state: "refreshed", headSha: tip, quaySnapshot: snapshotQuayDirInto(root, wtPath), nodeModules: ensureWorktreeNodeModules(root, wtPath) };
 
   // 刷新失败（例如未跟踪文件挡路）⇒ 拆掉重建，⛔ 不把失败留在原地当「已刷新」。
   // ⛔ 删之前先停 serve（§4.10）：否则留下一个 cwd 已被删除的孤儿进程。
   const previewStop = stopPreviewServe(wtPath);
   gitIn(root, ["worktree", "remove", "--force", wtPath]);
   const readd = gitIn(root, ["worktree", "add", "--detach", wtPath, tip]);
-  if (readd.ok) return { ...base, state: "created", headSha: tip, quaySnapshot: snapshotQuayDirInto(root, wtPath), previewStop };
+  if (readd.ok) return { ...base, state: "created", headSha: tip, quaySnapshot: snapshotQuayDirInto(root, wtPath), previewStop, nodeModules: ensureWorktreeNodeModules(root, wtPath) };
   return { ...base, state: "failed", reason: `refresh failed (${co.stderr.slice(0, 120)}) and re-add failed (${readd.stderr.slice(0, 120)})`, previewStop };
 }
 
@@ -3205,10 +3210,10 @@ export function syncGoalCriterionWorktrees(
         // 读的是【该 root 自己】的 .quay/server.json（⛔ 不是主检出的登记），停不掉时读数照实带出。
         const previewStop = stopPreviewServe(wtPath);
         const rm = gitIn(root, ["worktree", "remove", "--force", wtPath]);
-        if (rm.ok) { gitIn(root, ["worktree", "prune"]); out.push({ goal: gid, branch: goalBranchName(gid), path: wtPath, state: "removed", headSha: null, reason: null, quaySnapshot: null, previewStop }); }
-        else out.push({ goal: gid, branch: goalBranchName(gid), path: wtPath, state: "failed", headSha: null, reason: `worktree remove failed: ${rm.stderr.slice(0, 200)}`, quaySnapshot: null, previewStop });
+        if (rm.ok) { gitIn(root, ["worktree", "prune"]); out.push({ goal: gid, branch: goalBranchName(gid), path: wtPath, state: "removed", headSha: null, reason: null, quaySnapshot: null, previewStop, nodeModules: null }); }
+        else out.push({ goal: gid, branch: goalBranchName(gid), path: wtPath, state: "failed", headSha: null, reason: `worktree remove failed: ${rm.stderr.slice(0, 200)}`, quaySnapshot: null, previewStop, nodeModules: null });
       } else {
-        out.push({ goal: gid, branch: goalBranchName(gid), path: wtPath, state: "no-branch", headSha: null, reason: null, quaySnapshot: null, previewStop: null });
+        out.push({ goal: gid, branch: goalBranchName(gid), path: wtPath, state: "no-branch", headSha: null, reason: null, quaySnapshot: null, previewStop: null, nodeModules: null });
       }
       continue;
     }

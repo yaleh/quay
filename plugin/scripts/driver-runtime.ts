@@ -471,8 +471,10 @@ export {
   snapshotQuayDirInto,
   stopPreviewServe,
   previewWorktreeDir,
+  ensureWorktreeNodeModules,
   type QuaySnapshotReading,
   type PreviewStopReading,
+  type WorktreeNodeModulesReading,
 } from "../../packages/quay/src/goal-preview.ts";
 
 // `pidAlive`：**本文件曾是它的第四份副本**，且是唯一把 EPERM（exists-but-not-ours）读成 DEAD 的一份

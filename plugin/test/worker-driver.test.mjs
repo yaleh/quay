@@ -3876,3 +3876,31 @@ test("goal-merge e2e — GOAL-028's AC-325 and AC-327 criteria pass on the succe
     }
   } finally { gmCleanup(root); }
 });
+
+// ── gap-goal-branch-worktrees-lack-node-modules — 并入临时 worktree 的依赖装配 ─────────────────────
+//
+// GOAL-904 演练逐字读到：`git merge --no-ff` 触发的 `pre-merge-commit` 钩子在 mkdtemp 出的临时
+// worktree 里崩于 `Cannot find package 'yaml' … Not committing merge; use 'git commit' to complete the
+// merge.`——合并被中止。本用例给夹具装一个「cwd 没有 node_modules 就非 0 退出」的 pre-merge-commit
+// 钩子，复刻那次中止的形态：并入执行必须先把主检出的 node_modules 装配进临时 worktree，钩子才放行、
+// 合并才落地。⛔ 不是注入 seam——钩子读的是磁盘上的真实目录，正是生产那次失败本身。
+test("goal-merge e2e — 临时验证 worktree 被装配依赖：要求 node_modules 的 pre-merge-commit 钩子放行，合并落地", async () => {
+  const root = makeGoalMergeRepo("nm-hook");
+  try {
+    // 主检出有一个 node_modules 目录（装配的源）。空目录即可——钩子只 `[ -d node_modules ]`。
+    fs.mkdirSync(path.join(root, "node_modules"));
+    // pre-merge-commit 钩子：merge 提交所在的工作树 cwd 没有 node_modules 就非 0 退出（复刻 GOAL-904 的中止）。
+    const hook = path.join(root, ".git", "hooks", "pre-merge-commit");
+    fs.mkdirSync(path.dirname(hook), { recursive: true });
+    fs.writeFileSync(hook, '#!/bin/sh\n# 复刻 GOAL-904：没有依赖就把合并中止\n[ -d node_modules ] || { echo "no node_modules in $PWD" >&2; exit 1; }\n', { mode: 0o755 });
+
+    const pending = pendingGoalMerges(root);
+    assert.equal(pending.length, 1, "请求挂起");
+    const r = await runGoalMergeFanIn({ ...gmOpts(root, ["bash", "-c", "exit 0"]), request: pending[0].request });
+    assert.equal(r.outcome, "landed", `依赖装配后钩子放行、合并落地（实测 step=${r.step} reason=${r.reason}）`);
+    const merges = execFileSync("git", ["-C", root, "log", "develop", "--first-parent", "--merges", "--format=%s"], { encoding: "utf8" })
+      .trim().split("\n").filter(Boolean);
+    assert.equal(merges.length, 1, "develop 首父链上恰有一个合并提交");
+    assert.match(merges[0], /^merge: goal\/GOAL-901 into develop \(request /, `合并 subject 形态（实测 ${merges[0]}）`);
+  } finally { gmCleanup(root); }
+});

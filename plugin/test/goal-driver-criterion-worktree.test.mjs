@@ -26,6 +26,9 @@ import {
   assert, fs, mkGitFixtureRoot, os, path, repoRoot, runGoalRound, spawnSync,
   goalAchievedFromRecords, goalFlipDecision,
 } from "./helpers/goal-driver-harness.mjs";
+// 本任务的核心实现（单一落点）：判据/预览 worktree 的依赖装配。测试直接调它做 idempotent 臂的断言，
+// 并对 runGoalRound 的处置读数交叉验证（⛔ 不重写一份等价逻辑）。
+import { ensureWorktreeNodeModules } from "../../packages/quay/src/goal-preview.ts";
 
 const GOAL = "GOAL-901";
 const BRANCH = "goal/GOAL-901";
@@ -65,11 +68,14 @@ function writeAcRecord(root, { id, goal, status, criterion, phase }) {
  * 判据 worktree 的命名空间走 `.quay/config.yml` 的 `loop.worktree_root`（**配置解析出的**基目录，
  * ⛔ 不是 `<parent>/quay-worktrees` 那个共享约定目录——测试绝不能往 /tmp/quay-worktrees 里写）。
  */
-function mkCriterionWorktreeFixture({ withPlainGoal }) {
+function mkCriterionWorktreeFixture({ withPlainGoal, withNodeModules = false }) {
   const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "goal-criterion-wt-"));
   const ns = fs.mkdtempSync(path.join(os.tmpdir(), "goal-criterion-ns-"));
   fs.mkdirSync(path.join(tmp, "goals"), { recursive: true });
   fs.mkdirSync(path.join(tmp, ".quay"), { recursive: true });
+  // 依赖装配的源：主检出有一个 `node_modules/` 目录（空目录——git 不跟踪空目录，故不进任何提交）。
+  // 判据/预览 worktree 建在主仓库之外（`ns/`），故这条装配只能来自 goal-driver 的显式处置。
+  if (withNodeModules) fs.mkdirSync(path.join(tmp, "node_modules"), { recursive: true });
   fs.writeFileSync(path.join(tmp, ".gitignore"), ".quay/\n", "utf8");
   fs.writeFileSync(path.join(tmp, ".quay", "config.yml"), `loop:\n  worktree_root: ${ns}\n`, "utf8");
   const git = mkGitFixtureRoot(tmp);
@@ -535,4 +541,71 @@ test("符号链接 root：判据 worktree 已登记后分支前进 ⇒ 次轮 re
     results.real.criteria2.get("AC-904")?.verdict,
     "别名与真实 root 的次轮判据判决一致",
   );
+});
+
+// ── gap-goal-branch-worktrees-lack-node-modules — 判据/预览 worktree 的依赖装配 ────────────────────
+//
+// 裸 `git worktree add` 只带 tracked 树：`node_modules` 是 gitignored，于是预览 serve / 判据求值 /
+// 任何在该 worktree 里跑的 node 都 `ERR_MODULE_NOT_FOUND`（GOAL-904 演练逐字读到：`Cannot find
+// package 'yaml' imported from …/goal-GOAL-904/packages/quay/src/config.ts`，预览 30 秒超时）。
+// 判据 worktree 建在主仓库之外（`loop.worktree_root` 的 `ns/`），故依赖只能来自 goal-driver 的显式
+// 处置——这里断言【建】与【刷】两条路径都经同一处装配（符号链接到主检出 node_modules），且处置
+// idempotent、主检出无依赖时如实读 source-absent（⛔ 不抛、⛔ 不伪装成成功）。
+
+test("AC-nm: 判据 worktree 建/刷时装配 node_modules（符号链接到主检出、realpath 相等；再次处置不改动）", async () => {
+  const { tmp, ns, git, tip: tip1 } = mkCriterionWorktreeFixture({ withPlainGoal: false, withNodeModules: true });
+  const wtPath = criterionWorktreePath(ns);
+  const mainNm = path.join(tmp, "node_modules");
+  const wtNm = path.join(wtPath, "node_modules");
+  try {
+    const r1 = await runGoalRound(tmp, ROUND_OPTS);
+    const wt1 = r1.fact.value.criterionWorktrees.find((w) => w.goal === GOAL);
+    assert.equal(wt1.state, "created", `首轮创建（实测 state=${wt1.state} reason=${wt1.reason}）`);
+    assert.equal(wt1.nodeModules?.state, "linked", `处置读数应为 linked，实测=${JSON.stringify(wt1.nodeModules)}`);
+    // 直接量（⛔ 不采信处置读数自述）：磁盘上真有一条指向主检出 node_modules 的符号链接，realpath 相等。
+    assert.ok(fs.lstatSync(wtNm).isSymbolicLink(), "worktree/node_modules 必须是一条符号链接");
+    assert.equal(fs.realpathSync(wtNm), fs.realpathSync(mainNm), "realpath(node_modules) == realpath(主检出 node_modules)");
+
+    // 已存在 ⇒ 再次处置不报错、不改动（idempotent：同一 inode / mtime）。
+    const before = fs.lstatSync(wtNm);
+    const again = ensureWorktreeNodeModules(tmp, wtPath);
+    assert.equal(again.state, "present", `再次处置应为 present（⛔ 不重建），实测=${JSON.stringify(again)}`);
+    const after = fs.lstatSync(wtNm);
+    assert.equal(after.ino, before.ino, "再次处置不得改动这条链接（inode 不变）");
+    assert.equal(after.mtimeMs, before.mtimeMs, "再次处置不得改动这条链接（mtime 不变）");
+
+    // 分支前进 ⇒ 下一轮 refreshed，依赖装配仍在（刷新不会把 gitignored 的链接清掉）。
+    const tip2 = advanceGoalBranch({ tmp, git });
+    assert.notEqual(tip2, tip1, "夹具必须真的前进了（否则本轮断言空转）");
+    const r2 = await runGoalRound(tmp, ROUND_OPTS);
+    const wt2 = r2.fact.value.criterionWorktrees.find((w) => w.goal === GOAL);
+    assert.equal(wt2.state, "refreshed", `次轮刷新（实测 state=${wt2.state} reason=${wt2.reason}）`);
+    assert.ok(fs.lstatSync(wtNm).isSymbolicLink(), "刷新后 node_modules 链接仍在");
+    assert.equal(fs.realpathSync(wtNm), fs.realpathSync(mainNm), "刷新后 realpath 仍等于主检出 node_modules");
+  } finally {
+    fs.rmSync(tmp, { recursive: true, force: true });
+    fs.rmSync(ns, { recursive: true, force: true });
+  }
+});
+
+test("AC-nm-absent: 主检出没有 node_modules ⇒ 不建链、处置读数如实（source-absent）、不抛", async () => {
+  const { tmp, ns } = mkCriterionWorktreeFixture({ withPlainGoal: false }); // 无 node_modules
+  const wtPath = criterionWorktreePath(ns);
+  try {
+    const r1 = await runGoalRound(tmp, ROUND_OPTS);
+    const wt1 = r1.fact.value.criterionWorktrees.find((w) => w.goal === GOAL);
+    assert.equal(wt1.state, "created", "worktree 本身照建（依赖缺失不阻塞建树）");
+    assert.equal(wt1.nodeModules?.state, "source-absent", `应如实读 source-absent，实测=${JSON.stringify(wt1.nodeModules)}`);
+    assert.equal(fs.existsSync(path.join(wtPath, "node_modules")), false, "主检出没有依赖 ⇒ 不得建链");
+
+    // 直接调用也不抛，且仍如实读 source-absent（⛔ 不伪装成成功）。
+    let reading;
+    assert.doesNotThrow(() => { reading = ensureWorktreeNodeModules(tmp, wtPath); });
+    assert.equal(reading.state, "source-absent");
+    assert.equal(reading.target, null);
+    assert.ok(reading.reason, "source-absent 必须带可读原因（⛔ 不是沉默）");
+  } finally {
+    fs.rmSync(tmp, { recursive: true, force: true });
+    fs.rmSync(ns, { recursive: true, force: true });
+  }
 });
