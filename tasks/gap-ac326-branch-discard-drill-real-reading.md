@@ -3,7 +3,7 @@ id: gap-ac326-branch-discard-drill-real-reading
 title: AC-326 停在 exit 3：机制已落地但 goal 分支的丢弃路径从未在生产上跑过——在真实 store 上执行 GOAL-028
   退出条件② 的废弃演练（draft+branch:true → active 懒建 goal/GOAL-901 → retired 记 tip +
   删分支），并新增逐字绑定该判据的三态夹具
-status: ready
+status: done
 labels:
   - gap
 parent: null
