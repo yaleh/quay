@@ -2340,7 +2340,20 @@ export function computeGoalGaps(
       // 硬规则 3b），`fail`/读不到回落下面的文本分类（⛔ 缺值 ≠ 为假，硬规则 6）。
       // （gap-goal-active-ac-gap-classification-ignores-round-verdict）
       const roundVerdict = verdicts === null ? null : verdicts.get(id) ?? null;
-      if (roundVerdict === "not-evaluated") {
+      // ⚠️ 形态二（gap-ac903-retired-goal-active-ac-phantom-workable-spawn）：AC 的**所属 GOAL 已在 store 里
+      // 是一条非 active 的记录**（retired/achieved/superseded/draft）⇒ pass 1 的 gate 集合只遍历【active
+      // GOAL 的 AC】（见本文件 pass 1 `for (const goal of activeGoals)`，:3479 一带）⇒ 这条 AC **本轮结构上
+      // 从不被 gate** ⇒ `verdicts` 里**根本没有这个键**。这不是「判据为假」（fail），是「判据根本没被问过」
+      // （缺值）——硬规则 6：缺值 = 未查 ≠ 为假。给它独立取值 `not-evaluated`（taskCount null，⛔ 与
+      // `workable`/`gap` 都不同形），**绝不**回落文本分类产出一个可立案的 `workable`：那正是本形态每轮
+      // 空转 spawn 一条产不出任何东西的 worker 的成因（上一条已修的是「判据自陈无法评估」，那条在
+      // `verdicts` 里是**有键且值为 not-evaluated**；本条是**缺键**，两者同族但机制不同）。
+      // ⛔ 判据是「GOAL **记录存在**且其 status ≠ active」——GOAL 记录**整个缺失**是另一种形态（真正的缺值，
+      // 硬规则 6：不从「找不到 GOAL」推断「GOAL 已 retired」），保持今日行为（回落文本分类）。
+      const goalId = String(r.goal ?? "");
+      const goalRec = records.find((x) => String(x.id ?? "") === goalId && goalId.startsWith("GOAL-"));
+      const neverGated = roundVerdict === null && goalRec !== undefined && String(goalRec.status ?? "") !== "active";
+      if (roundVerdict === "not-evaluated" || neverGated) {
         state = "not-evaluated";
         taskCount = null;
       } else {
