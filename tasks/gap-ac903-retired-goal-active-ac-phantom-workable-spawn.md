@@ -3,7 +3,7 @@ id: gap-ac903-retired-goal-active-ac-phantom-workable-spawn
 title: AC-903 判据已 exit 0 却被 goal-driver 每轮判 workable 并空转 spawn：GOAL-903 已
   retired 而 AC-903 仍 active ⇒ 从不被 gate（verdict 缺值）⇒ 文本回落 workable；修分类器（缺值≠为假）+ 把
   AC-903 收尾为 achieved
-status: todo
+status: ready
 labels:
   - gap
   - defect
