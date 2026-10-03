@@ -33,16 +33,19 @@ Three private walkFiles bodies are byte-identical (same SKIP_DIRS, same Dirent l
 extract
 
 ## AC
-- [ ] `.quay/routine-findings.jsonl` 中 finding `walkFiles-scan-surface-family`（routine `semantic-dedup-scan`，runId `semantic-dedup-scan-1790995446200`）所描述的问题被复核并处置
-- [ ] 处置结论可核：要么修掉，要么写明「已有机制在管、失败在哪一步」，⛔ 不以「已注意到」结案
+- [x] `.quay/routine-findings.jsonl` 中 finding `walkFiles-scan-surface-family`（routine `semantic-dedup-scan`，runId `semantic-dedup-scan-1790995446200`）所描述的问题被复核并处置
+- [x] 处置结论可核：要么修掉，要么写明「已有机制在管、失败在哪一步」，⛔ 不以「已注意到」结案
+
+处置 = 修掉：三份 byte-identical 的私有 `walkFiles`（+ 同一个 `SKIP_DIRS` + 同一个 call site）抽进 `plugin/scripts/fs-walk.ts` 的新 `listFilesInRoots(root, relDirs, skipDirNames)`；三个检查器（registry-path / serve-binding / worktree-namespace）改为 import 它，各自的 `SCAN_ROOTS` 与 `SKIP_DIRS` 作为参数留下（沿用 `collectShellScripts`/`scanRoots` 的既约 convention：只共享遍历，不统一 policy）。两条承重轴（dirent 模式 ⇒ 符号链接不被记录；prune 只删目录 ⇒ 与 skip-dir 同名的文件仍被列出）由 `plugin/test/fs-walk.test.mjs` 新增的 control 钉住，并由一条「三检查器不得再定义 `function walkFiles`」的 body-count 断言证明单一定义点已落地（硬规则 4 推論三）。
 
 ## DoD
-- [ ] 上面的判据实跑通过
-- [ ] ⛔ 探针只立案不执行：本任务若需要跑产出者/修复，由派发链执行，⛔ 不由例程代跑
+- [x] 上面的判据实跑通过
+- [x] ⛔ 探针只立案不执行：本任务若需要跑产出者/修复，由派发链执行，⛔ 不由例程代跑
 
 ## Touches
 - `plugin/scripts/registry-path-literal-check.ts`
 - `plugin/scripts/serve-binding-literal-check.ts`
 - `plugin/scripts/worktree-namespace-literal-check.ts`
 - `plugin/scripts/fs-walk.ts`
+- `plugin/test/fs-walk.test.mjs`
 - `tasks/gap-routine-semantic-dedup-scan-walkfiles-scan-surface-family.md`
