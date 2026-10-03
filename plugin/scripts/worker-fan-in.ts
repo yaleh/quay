@@ -1791,9 +1791,23 @@ export async function runMechanicalFanIn(opts: MechanicalFanInOptions): Promise<
   };
 
   try {
-    // 2. merge develop（冲突 ⇒ red → 语义会话兜底）。
+    // 2. merge mergeTarget（冲突 ⇒ red → 语义会话兜底）。
     a = await step("merge-develop", ["git", "-C", worktree, "merge", "--no-edit", mergeTarget], 120_000);
     if (!a.ok) return fail("merge-develop", a);
+
+    // 2b. 追平（catch-up）develop —— SPEC-goal-branch-2026-10-03 §4.4 裁定③，仅当 mergeTarget 不是
+    //     develop 时进入。落回 `goal/<id>` 的任务，其 worktree 先合入 `goal/<id>`（上一步），再把
+    //     `develop` 追平进来：追平后的这棵树恰是被【本任务自己的全量 suite】验证过、随后被 ff 到
+    //     `goal/<id>` 的同一棵树——⛔ 没有一棵未经验证的中间树（SPEC §4.4 的落地理由）。
+    //     `--no-edit` 是必须的：追平要留下可核对的 merge 提交（AC-322 的判据把「该次落地内合入
+    //     develop 的 merge 提交时间」当作追平时刻）；develop 已在祖先里时 git 报 "Already up to
+    //     date"、不产生提交，此时 develop tip 本就是落地提交的祖先，判据退化为「该次落地最早提交
+    //     时间」——两条路径都使 develop 的当时 tip 成为落地提交的祖先。
+    //     ⛔ `mergeTarget === "develop"` 路径【逐字不变】（AC1）：本分支不进入，行为与改动前等价。
+    if (mergeTarget !== "develop") {
+      a = await step("catch-up-develop", ["git", "-C", worktree, "merge", "--no-edit", "develop"], 120_000);
+      if (!a.ok) return fail("catch-up-develop", a);
+    }
 
     // 3. anti-drift Touches 核对（HARD FAIL ⇒ red）。
     a = await step("anti-drift", [...antiDrift, "--task", task, "--worktree", worktree, "--merge-target", mergeTarget], 120_000);
