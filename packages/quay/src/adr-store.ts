@@ -28,6 +28,7 @@ import {
   fileNameForId as sharedFileNameForId,
   withFileLock,
   slugify,
+  makeAssertSafeStatus,
 } from "./frontmatter-store-base.ts";
 import { commitStoreWrite, resolveGitRoot, type CommitOutcome } from "./store-commit.ts";
 
@@ -85,11 +86,7 @@ export function createAdrStore(adrDir: string) {
     return id;
   }
 
-  function assertSafeStatus(status: string | undefined) {
-    if (status !== undefined && !VALID_ADR_STATUSES.includes(status)) {
-      throw new Error(`invalid ADR status "${status}" — must be one of ${VALID_ADR_STATUSES.join(", ")}`);
-    }
-  }
+  const assertSafeStatus = makeAssertSafeStatus("ADR", VALID_ADR_STATUSES);
 
   // Files are `ADR-NNN-<slug>.md` but the logical id is `ADR-NNN`. Resolve the
   // on-disk filename for an id by exact or `<id>-` prefix match (the dash

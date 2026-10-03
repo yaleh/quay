@@ -67,6 +67,7 @@ import {
   fileNameForId,
   withFileLock,
   slugify,
+  makeAssertSafeStatus,
 } from "./frontmatter-store-base.ts";
 import {
   runAcceptance,
@@ -1558,13 +1559,7 @@ export function createGoalStore(
     return id;
   }
 
-  function assertSafeStatus(status: string | undefined) {
-    if (status !== undefined && !VALID_GOAL_STATUSES.includes(status)) {
-      throw new Error(
-        `invalid goal status "${status}" — must be one of ${VALID_GOAL_STATUSES.join(", ")}`
-      );
-    }
-  }
+  const assertSafeStatus = makeAssertSafeStatus("goal", VALID_GOAL_STATUSES);
 
   function toViewModel(
     frontmatter: GoalFrontmatter,

@@ -33,6 +33,7 @@ import {
   fileNameForId as sharedFileNameForId,
   withFileLock,
   slugify,
+  makeAssertSafeStatus,
 } from "./frontmatter-store-base.ts";
 import { commitStoreWrite, resolveGitRoot, type CommitOutcome } from "./store-commit.ts";
 
@@ -102,11 +103,7 @@ export function createMetaStore(metaDir: string) {
     return id;
   }
 
-  function assertSafeStatus(status: string | undefined) {
-    if (status !== undefined && !VALID_META_STATUSES.includes(status)) {
-      throw new Error(`invalid meta status "${status}" — must be one of ${VALID_META_STATUSES.join(", ")}`);
-    }
-  }
+  const assertSafeStatus = makeAssertSafeStatus("meta", VALID_META_STATUSES);
 
   function fileNameForId(id: string) {
     return sharedFileNameForId(metaDir, id);

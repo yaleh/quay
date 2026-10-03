@@ -40,6 +40,29 @@ export function serializeFrontmatter(frontmatter, body) {
 }
 
 /**
+ * Build the per-kind `assertSafeStatus(status)` guard shared by every sibling
+ * store (ADR / document / goal / meta). Those four bodies were identical apart
+ * from the kind word and the VALID_* set, so only those two inputs stay
+ * per-kind — the check itself lives here. The SCHEMA (which statuses are valid,
+ * and the error's kind word) stays independent per kind; only the MECHANICS are
+ * shared, matching this module's own header rule.
+ *
+ * `undefined` is allowed (status is optional on write); any other value must be
+ * in `validStatuses` or the guard throws, enumerating the allowed set (hard
+ * rule 3: report the actionable list, never a bare boolean).
+ * @param {string} kind singular kind word used in the error message (e.g. "ADR")
+ * @param {readonly string[]} validStatuses the kind's allowed status set
+ * @returns {(status: string | undefined) => void}
+ */
+export function makeAssertSafeStatus(kind, validStatuses) {
+  return function assertSafeStatus(status) {
+    if (status !== undefined && !validStatuses.includes(status)) {
+      throw new Error(`invalid ${kind} status "${status}" — must be one of ${validStatuses.join(", ")}`);
+    }
+  };
+}
+
+/**
  * Lowercase, collapse non-alphanumeric runs to '-', trim leading/trailing '-',
  * cap at 60 chars; falls back to `fallback` (default "adr") when the title is
  * empty/undefined so callers never emit a blank slug segment.

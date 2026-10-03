@@ -25,6 +25,7 @@ import {
   fileNameForId,
   withFileLock,
   slugify,
+  makeAssertSafeStatus,
 } from "./frontmatter-store-base.ts";
 import { commitStoreWrite, resolveGitRoot, type CommitOutcome } from "./store-commit.ts";
 
@@ -73,13 +74,7 @@ export function createDocumentStore(docDir: string) {
     return id;
   }
 
-  function assertSafeStatus(status: string | undefined) {
-    if (status !== undefined && !VALID_DOCUMENT_STATUSES.includes(status)) {
-      throw new Error(
-        `invalid document status "${status}" — must be one of ${VALID_DOCUMENT_STATUSES.join(", ")}`
-      );
-    }
-  }
+  const assertSafeStatus = makeAssertSafeStatus("document", VALID_DOCUMENT_STATUSES);
 
   function toViewModel(frontmatter: DocFrontmatter, body: string, updatedAt?: number): DocViewModel {
     const vm: DocViewModel = {
