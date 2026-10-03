@@ -4,13 +4,14 @@
 //
 // Byte-identical mirror: plugin/scripts/build-evidence-gate.ts
 
-import { execSync } from "node:child_process";
 import fs from "node:fs";
 import path from "node:path";
 // argvFlag (below) reads its tokens straight out of process.argv; the indexOf+next-arg algorithm now
 // lives in gate-script-base.ts as `flagValue` (one of the copies in plugin/scripts;
 // .quay/routine-findings.jsonl finding `arg-parsing-helper-family`, routine `semantic-dedup-scan`).
-import { flagValue } from "./gate-script-base.ts";
+// `git` likewise comes from gate-script-base.ts (finding `git-helper-collector-gate`, runId
+// semantic-dedup-scan-1790995446200) — this file's byte-identical private copy was removed.
+import { flagValue, git } from "./gate-script-base.ts";
 import type {
   BuildEvidenceManifest,
   EvidenceClass,
@@ -69,22 +70,9 @@ const REASON_CODES = {
   GATE_INTERNAL_ERROR: "gate-internal-error",
 } as const;
 
-// ── git helpers (inline; same as collector — fail-closed: distinguishes failure from empty) ─────────
-
-interface GitResult {
-  ok: boolean;
-  stdout: string;
-  error?: string;
-}
-
-function git(args: string[], cwd: string): GitResult {
-  try {
-    const stdout = execSync(`git ${args.join(" ")}`, { cwd, encoding: "utf8", timeout: 10_000 }).trim();
-    return { ok: true, stdout };
-  } catch (e) {
-    return { ok: false, stdout: "", error: (e as Error).message };
-  }
-}
+// ── git helpers — the fail-closed `git(args, cwd): GitResult` now lives in gate-script-base.ts
+// (finding `git-helper-collector-gate`, routine semantic-dedup-scan, runId
+// semantic-dedup-scan-1790995446200; this file's byte-identical local copy was removed) ─────────────
 
 // ── Main gate function ──────────────────────────────────────────────────────────────────────────────
 

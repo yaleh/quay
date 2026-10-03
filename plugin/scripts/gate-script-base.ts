@@ -2,8 +2,9 @@
 // Import the functions/classes you need from this module.
 //
 // Usage:
-//   import { parseArgs, flagValue, readFrontmatter, emitPass, emitFail, emitNotEvaluated, emitVerdict, requireArg, isDirectEntry } from "./gate-script-base.ts";
+//   import { parseArgs, flagValue, readFrontmatter, emitPass, emitFail, emitNotEvaluated, emitVerdict, requireArg, isDirectEntry, git } from "./gate-script-base.ts";
 
+import { execSync } from "node:child_process";
 import fs from "node:fs";
 import path from "node:path";
 
@@ -495,6 +496,34 @@ export function isDirectEntry(importMeta: ImportMeta, argv1: string | undefined,
   const entry = argv1 || process.argv[1];
   if (!entry) return false;
   return path.basename(entry).replace(/\.(?:js|ts|mjs)$/, "") === expectedBase;
+}
+
+// ── git helpers ─────────────────────────────────────────────────────────────────────────────────────
+// The ONE in-process `git <args...>` runner for gate scripts. Extracted (routine `semantic-dedup-scan`,
+// finding `git-helper-collector-gate`, runId `semantic-dedup-scan-1790995446200`, verdict
+// real-duplication, suggestedAction extract) from build-evidence-collector.ts / build-evidence-gate.ts,
+// which each carried a byte-identical private copy of `GitResult` + `git()`.
+//
+// FAIL-CLOSED by contract: a git command failure is a DISTINGUISHABLE result (`ok:false` + `error`),
+// never conflated with a legitimately empty diff (`ok:true` + empty stdout) — hard rule 3b. This module
+// deliberately exports only the fail-closed form, so no caller can mistake "git could not run" for
+// "git said nothing".
+
+export interface GitResult {
+  ok: boolean;
+  stdout: string;
+  error?: string;
+}
+
+/** Run `git <args...>` in `cwd`. Returns trimmed stdout on success; a failed invocation is a RESULT
+ *  (`ok:false`, `error` = the exec error message), not an exception. */
+export function git(args: string[], cwd: string): GitResult {
+  try {
+    const stdout = execSync(`git ${args.join(" ")}`, { cwd, encoding: "utf8", timeout: 10_000 }).trim();
+    return { ok: true, stdout };
+  } catch (e) {
+    return { ok: false, stdout: "", error: (e as Error).message };
+  }
 }
 
 // ── Selftest harness (ADR-018 selfcheck-fixture pattern) ─────────────────────────────────────────────
