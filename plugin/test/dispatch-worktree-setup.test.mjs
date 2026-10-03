@@ -356,6 +356,39 @@ t("AC-284 AC5 — no develop ref ⇒ fork-point NOT-EVALUATED (a distinct value)
   }
 });
 
+// ── 0b′. goal-branch base（SPEC-goal-branch-2026-10-03 §4.3）────────────────────────────────────
+// 一个 branch-mode goal 的任务其 worktree 必须从 `goal/<GOAL-NNN>` 分叉，故派发 prompt 把解析出的
+// mergeTarget 作为 `--base` 传给本脚本。此处钉住：`--base goal/GOAL-901` 下，从 goal 分支分叉的
+// worktree 自检 **PASS** 并正常 provisioning（⛔ 不是 NOT-EVALUATED——base ref 必须可解析）。
+t("goal-branch base — a worktree cut from goal/GOAL-901 passes `--base goal/GOAL-901` (exit 0 + fork-point PASS)", () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "dispatch-goalbase-"));
+  const git = (...args) => {
+    const r = spawnSync("git", args, { cwd: root, encoding: "utf8" });
+    assert.equal(r.status, 0, `git ${args.join(" ")} failed: ${r.stderr ?? ""}`);
+    return r.stdout.trim();
+  };
+  try {
+    git("init", "-q");
+    git("config", "user.email", "t@test");
+    git("config", "user.name", "t");
+    git("symbolic-ref", "HEAD", "refs/heads/develop"); // 钉默认分支，宿主无关
+    fs.writeFileSync(path.join(root, "README.md"), "# repo\n");
+    git("add", "-A");
+    git("commit", "-q", "-m", "baseline");
+    git("branch", "goal/GOAL-901", "develop"); // branch-mode goal 的派生分支
+    fs.mkdirSync(path.join(root, "node_modules"), { recursive: true });
+    const wt = path.join(root, "wt");
+    git("worktree", "add", "-q", "-b", "task/gap-goalbase", wt, "goal/GOAL-901");
+    const r = bash(SETUP, [wt, "--root", root, "--base", "goal/GOAL-901"]);
+    assert.equal(r.status, 0, `a goal-branch fork under --base goal/GOAL-901 must exit 0, got ${r.status}: ${r.stdout} ${r.stderr}`);
+    assert.match(r.stdout, /fork-point PASS/, "goal-branch fork must PASS its own base check");
+    assert.doesNotMatch(r.stderr, /REFUSED/);
+    assert.ok(fs.lstatSync(path.join(wt, "node_modules")).isSymbolicLink(), "must provision");
+  } finally {
+    rmrf(root);
+  }
+});
+
 // ── AC1 install path ────────────────────────────────────────────────────────────────────────────
 
 t("AC1 install path — main has NO node_modules ⇒ npm install inside the worktree (stub npm)", () => {
@@ -549,7 +582,9 @@ t("AC2 wiring — worker-driver.ts (the LIVE dispatch path) wires dispatch-workt
   // 位置在 worktree 创建之后这一结构针在 worker-driver.test.mjs 对运行时 prompt 串逐字断言（源码里 helper
   // 定义在 buildWorkerPrompt 之前，源码级 indexOf 顺序不是该语义的正确载体）。
   assert.match(workerDriver, /dispatchSetupSignature\(root, "<the worktree path/, "create prompt calls the setup helper (step-1 placeholder)");
-  assert.match(workerDriver, /dispatchSetupSignature\(root, wt\)/, "continue prompt calls the setup helper with the concrete worktree path");
+  // gap-goal-branch-dispatch-wiring-and-task-fan-in：两个调用点现把解析出的 mergeTarget 作为 base 传入
+  // （branch-mode goal 的任务从 goal/<id> 分叉）。断言放宽为「helper 被调用 + 传了 base」的形状。
+  assert.match(workerDriver, /dispatchSetupSignature\(root, wt, resolveTaskMergeTarget\(task, root\)\)/, "continue prompt calls the setup helper with the concrete worktree path + resolved base");
 });
 
 // ── worktree-include.sh: SIGPIPE-141 primary resolution + the failure face ──────────────────────

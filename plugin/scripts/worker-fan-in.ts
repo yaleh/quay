@@ -46,6 +46,11 @@ import {
 } from "./driver-runtime.ts";
 import { spawnSuiteAndWait, type SuiteOutcome, type SuiteRunResult } from "./suite-driver.ts";
 import { suiteLockBase } from "./suite-lock-slots.ts";
+// SPEC-goal-branch-2026-10-03 §4.6：goal 分支有【自己的】fan-in 锁（裁定⑥），锁文件名是派生量——
+// `goal/<GOAL-NNN>` → `fan-in.goal-<GOAL>.lock`。goalIdFromBranchToken 是「该 token 是不是 goal 分支、
+// 叫什么 GOAL」的单一实现（与 §4.8 身份检查同源，⛔ 不写第二份正则）。budget-model.ts 是 leaf（只
+// import node 内建），无反向边。
+import { goalIdFromBranchToken } from "../../packages/quay/src/branch-model.ts";
 // gate-script-base 是叶子（只 import node 内建）——⛔ 不成环。normalizeRel 供本文件的 suite 日志
 // 失败行解析（自 worker-driver.ts 迁入，见该簇的注释）。
 import { normalizeRel } from "./gate-script-base.ts";
@@ -900,25 +905,28 @@ export function readFailedTestFiles(logText: string, root?: string | null): Fail
   };
 }
 
-/** 读 fan-in 锁事件里本任务+runId 的持有时长（AC1/AC2 判据输入，纯文件读）。 */
+/** 读 fan-in 锁事件里本任务+runId 的持有时长（AC1/AC2 判据输入，纯文件读）。`lock` = 本次 acquire
+ *  的锁域标签（锁文件 basename，SPEC-goal-branch §4.6），使「这次落地用了哪把锁」事后可核；缺字段
+ *  （老事件）⇒ null（⛔ 不伪造成 fan-in.lock——硬规则 3b）。 */
 export function readFanInLockHold(
   root: string,
   task: string,
   runId: string,
-): { lockHoldSecs: number | null; lockAcquireEpoch: number | null; lockReleaseEpoch: number | null } {
+): { lockHoldSecs: number | null; lockAcquireEpoch: number | null; lockReleaseEpoch: number | null; lock: string | null } {
   const file = path.join(root, ".quay", "fan-in-lock-events.jsonl");
   let text = "";
   try {
     text = fs.readFileSync(file, "utf8");
   } catch {
-    return { lockHoldSecs: null, lockAcquireEpoch: null, lockReleaseEpoch: null };
+    return { lockHoldSecs: null, lockAcquireEpoch: null, lockReleaseEpoch: null, lock: null };
   }
   let acquire: number | null = null;
   let release: number | null = null;
+  let lock: string | null = null;
   for (const line of text.split("\n")) {
     const t = line.trim();
     if (!t) continue;
-    let rec: { event?: unknown; taskId?: unknown; runId?: unknown; epoch?: unknown };
+    let rec: { event?: unknown; taskId?: unknown; runId?: unknown; epoch?: unknown; lock?: unknown };
     try {
       rec = JSON.parse(t);
     } catch {
@@ -927,11 +935,13 @@ export function readFanInLockHold(
     if (rec.taskId !== task) continue;
     if (rec.runId !== runId) continue;
     if (typeof rec.epoch !== "number") continue;
-    if (rec.event === "acquire") acquire = rec.epoch;
-    else if (rec.event === "release") release = rec.epoch;
+    if (rec.event === "acquire") {
+      acquire = rec.epoch;
+      if (typeof rec.lock === "string") lock = rec.lock;
+    } else if (rec.event === "release") release = rec.epoch;
   }
   const lockHoldSecs = acquire !== null && release !== null ? Math.max(0, release - acquire) : null;
-  return { lockHoldSecs, lockAcquireEpoch: acquire, lockReleaseEpoch: release };
+  return { lockHoldSecs, lockAcquireEpoch: acquire, lockReleaseEpoch: release, lock };
 }
 
 // ── fan-in 锁：driver 自身经非分离直接子进程持锁（ADR-034）────────────────────────────
@@ -950,25 +960,39 @@ export function readFanInLockHold(
 // .quay/fan-in-lock-events.jsonl，fan-in-ff-protocol-check 判据4 与 readFanInLockHold
 // 继续读同一载体。
 
-/** fan-in 锁文件路径（git common dir 下的 fan-in.lock，与 suite 锁同目录不同文件）。
+/** fan-in 锁文件路径（git common dir 下，与 suite 锁同目录不同文件）。
  *  解析 git-common-dir（⛔ 不读 FULL_SUITE_LOCK_FILE env——那是 suite 锁的 seam，不属于 fan-in 锁）。 */
-export function fanInLockFile(root: string): string {
+export function fanInLockFileNamed(root: string, name: string): string {
   const r = spawnSync("git", ["rev-parse", "--git-common-dir"], { cwd: root, encoding: "utf8" });
   const commonDir = r.status === 0 && !r.error ? (r.stdout ?? "").trim() : "";
-  return path.join(path.resolve(root, commonDir || ".git"), "fan-in.lock");
+  return path.join(path.resolve(root, commonDir || ".git"), name);
+}
+
+/** develop 落地的 fan-in 锁文件（`fan-in.lock`）——今天的唯一锁域，逐字不变。 */
+export function fanInLockFile(root: string): string {
+  return fanInLockFileNamed(root, "fan-in.lock");
+}
+
+/** SPEC-goal-branch-2026-10-03 §4.6（裁定⑥）：每个 goal 分支有【自己】的 fan-in 锁
+ *  `<git-common-dir>/fan-in.goal-<GOAL-NNN>.lock`，使一个方向的落地不阻塞别的方向的落地。develop
+ *  目标 ⇒ 仍取 `fan-in.lock`（⛔ 逐字不变）。锁域由【派生】的 mergeTarget 决定，⛔ 不新增 stored flag。 */
+export function fanInLockFileForMergeTarget(root: string, mergeTarget: string): string {
+  const goalId = goalIdFromBranchToken(mergeTarget);
+  return goalId === null ? fanInLockFile(root) : fanInLockFileNamed(root, `fan-in.goal-${goalId}.lock`);
 }
 
 /** 持锁 holder 的 bash 脚本（非分离直接子进程；`cat >/dev/null` 阻塞在 stdin，driver 死 ⇒ EOF ⇒ 释放）。
- *  参数：$1=锁文件 $2=taskId $3=runIdJson（已编码 `"r"` 或 `null`）$4=agentIdJson $5=事件文件。 */
+ *  参数：$1=锁文件 $2=taskId $3=runIdJson（已编码 `"r"` 或 `null`）$4=agentIdJson $5=事件文件
+ *  $6=锁域标签（锁文件 basename，供 readFanInLockHold/事后核对「用了哪把锁」——§4.6 的 `lock` 字段）。 */
 const FAN_IN_LOCK_HOLDER = `exec {fd}>"$1" || exit 2
 flock -x "$fd" || exit 2
 _emit() {
-  printf '{"event":"%s","ts":"%s","epoch":%s,"taskId":"%s","pid":%s,"runId":%s,"agentId":%s}\\n' "$1" "$(date -u +%Y-%m-%dT%H:%M:%SZ)" "$(date +%s)" "$2" "$$" "$3" "$4"
+  printf '{"event":"%s","ts":"%s","epoch":%s,"taskId":"%s","pid":%s,"runId":%s,"agentId":%s,"lock":"%s"}\\n' "$1" "$(date -u +%Y-%m-%dT%H:%M:%SZ)" "$(date +%s)" "$2" "$$" "$3" "$4" "$5"
 }
-_emit acquire "$2" "$3" "$4" >> "$5"
-_emit acquire "$2" "$3" "$4"
+_emit acquire "$2" "$3" "$4" "$6" >> "$5"
+_emit acquire "$2" "$3" "$4" "$6"
 cat >/dev/null
-_emit release "$2" "$3" "$4" >> "$5"
+_emit release "$2" "$3" "$4" "$6" >> "$5"
 flock -u "$fd" 2>/dev/null || true
 exit 0`;
 
@@ -994,11 +1018,13 @@ export function acquireFanInLock(opts: {
   const eventsFile = opts.eventsFile ?? path.join(opts.root, ".quay", "fan-in-lock-events.jsonl");
   const runIdJson = opts.runId ? JSON.stringify(opts.runId) : "null";
   const agentIdJson = opts.agentId ? JSON.stringify(opts.agentId) : "null";
+  // §4.6：把锁域标签（锁文件 basename）写进事件——事后可核「这次落地用了哪把锁」（goal 锁 vs develop 锁）。
+  const lockLabel = path.basename(lockFile);
   fs.mkdirSync(path.dirname(eventsFile), { recursive: true });
 
   const child = spawn(
     "bash",
-    ["-c", FAN_IN_LOCK_HOLDER, "fan-in-lock-holder", lockFile, opts.task, runIdJson, agentIdJson, eventsFile],
+    ["-c", FAN_IN_LOCK_HOLDER, "fan-in-lock-holder", lockFile, opts.task, runIdJson, agentIdJson, eventsFile, lockLabel],
     { stdio: ["pipe", "pipe", "pipe"] },
   );
 
@@ -1744,7 +1770,9 @@ export async function runMechanicalFanIn(opts: MechanicalFanInOptions): Promise<
   let fanInLock: FanInLockHandle;
   const acquireT0 = Date.now();
   try {
-    fanInLock = await acquireFanInLock({ root, task, runId });
+    // SPEC-goal-branch §4.6（裁定⑥）：锁域随 mergeTarget 派生——goal 分支落地持自己的
+    // `fan-in.goal-<GOAL>.lock`，develop 落地持 `fan-in.lock`（逐字不变），使一个方向的落地不阻塞别的。
+    fanInLock = await acquireFanInLock({ root, task, runId, lockFile: fanInLockFileForMergeTarget(root, mergeTarget) });
     trace({ step: "acquire-fan-in-lock", exit: 0, wall_ms: Date.now() - acquireT0, ok: true });
   } catch (e) {
     trace({ step: "acquire-fan-in-lock", exit: 1, wall_ms: Date.now() - acquireT0, ok: false, reason: (e as Error)?.message ?? "acquire failed" });
