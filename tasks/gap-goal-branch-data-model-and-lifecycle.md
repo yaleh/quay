@@ -148,6 +148,44 @@ SCOPED_GATE_EXIT=0
 ✔ goal branch — draft opt-in reads true, is NOT created at birth, created lazily on activation, then locked
 ✔ goal-branch token: LEGAL while the GOAL is a live branch-mode goal (exit 0)
 ```
-并已写 scoped-gate-cache：`developSha 9373dc740e793f17f2bd9c72c812b51cd4108e21`（`git merge-base --is-ancestor` HEAD ⇒ OK）。
+并已写 scoped-gate-cache（第 2 轮重写，见下）：`developSha fe56d7c8e3ba36e1de04bf76870d4e1ec0491715`（`git merge-base --is-ancestor` HEAD ⇒ OK）。
 
 CLI 面端到端（临时仓库）：`quay goal write GOAL-901 … --branch true` ⇒ `branch: true` 落到 frontmatter；`--status active` 后 `git branch --list 'goal/GOAL-901'` 出现；`--branch yes` ⇒ exit 2（严格 true|false）。
+
+### 第 2 轮 — 收上一次 fan-in 的 ts-typecheck 红
+
+上一轮 fan-in 在 suite 步失败（`step=suite: AssertionError`）。真实成因不是 flake，而是**本任务新增的代码本身**：
+`ensureGoalBranch` / `discardGoalBranch` 用 `if (!x.ok)` 去取 `.err`，而本仓库根 tsconfig 是 `strict: false`
+—— 布尔判别联合的**否定分支不被收窄**，`npx tsc --noEmit` 报 TS2339（`branch-model.ts(1150,107)` / `(1186,111)`）。
+同一文件 `:430` 的注释早已记下这条约束并给出正确写法（`r.ok === true`），新代码没有照它写。
+
+**修法**：两处改为 `created.ok === false` / `del.ok === false`（沿用该文件既有写法）。纯类型层修复，运行时行为不变。
+
+这一条同时解释了 4 条 suite 红里的 3 条：三份 `ts-typecheck-gate-*` 测试正是「对本仓库真跑 tsc」，因此全红。
+第 4 条 `packages/quay-native/test/relation-sync.test.mjs` 是 `@load-sensitive` 的负载型 flake，与本次改动无关：
+隔离跑 10/10 全 PASS。
+
+第 2 轮读数（合并 develop 后、写入本 Evidence 之前）：
+
+```
+$ npx tsc --noEmit
+exit 0（0 错误）
+
+$ node --test packages/quay/test/ts-typecheck-gate-{config-wiring,pass,cli-event}.test.mjs
+ℹ tests 3 · pass 3 · fail 0
+✔ M63 D1: ts-typecheck gate PASSes against THIS repo's own real .quay/config.yml gates: wiring
+✔ M63 A2: ts-typecheck gate PASSes for real against THIS repo's own root tsconfig.json
+✔ M63 C1: `quay gate <task> --gate ts-typecheck` PASSes for real against this repo
+
+$ node --test packages/quay-native/test/relation-sync.test.mjs     # 隔离
+All M35-native-relation-sync tests passed.  → pass 1 · fail 0（内部断言 22/22 PASS）
+
+$ bash scripts/test.sh --for-task gap-goal-branch-data-model-and-lifecycle --allow-thin
+SCOPED_GATE_EXIT=0
+ℹ tests 256 · pass 256 · fail 0        # 非 thin：本任务 3 个测试文件都真跑了，例：
+✔ goal branch — name is DERIVED (goal/<id>) and the token parser accepts only GOAL-<3+digits>
+✔ goal branch — draft opt-in reads true, is NOT created at birth, created lazily on activation, then locked
+✔ goal branch — retiring a branch-mode goal deletes the branch and leaves the tip SHA in the retired statusLog entry
+✔ goal-branch token: LEGAL while the GOAL is a live branch-mode goal (exit 0)
+```
+并已重写 scoped-gate-cache：`developSha fe56d7c8e3ba36e1de04bf76870d4e1ec0491715`（`git merge-base --is-ancestor` HEAD ⇒ OK）。
