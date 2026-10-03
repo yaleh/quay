@@ -113,7 +113,7 @@ $ node --test plugin/test/worker-fan-in.test.mjs    # 恢复态
 
 ### AC4 scoped 门（`bash scripts/test.sh --for-task gap-goal-branch-done-means-landed-on-merge-target`，**非 thin**）
 
-退出 0；选中并执行了 42 个测试文件、71 个测试，其中**含本任务新增的** `plugin/test/worker-fan-in.test.mjs`（及其配对 `plugin/test/worker-fan-in-catch-up.test.mjs`）。选中清单（节选，`+` 为 test.sh 打印的选中项）：
+退出 0；选中并执行了 37 个测试文件、71 个测试，其中**含本任务新增的** `plugin/test/worker-fan-in.test.mjs`（及其配对 `plugin/test/worker-fan-in-catch-up.test.mjs`）。选中清单（节选，`+` 为 test.sh 打印的选中项）：
 
 ```
   + plugin/test/worker-fan-in-catch-up.test.mjs
@@ -129,3 +129,5 @@ $ node --test plugin/test/worker-fan-in.test.mjs    # 恢复态
 ```
 
 （完整输出见 `.quay/gap-doneface-evidence/scoped-gate-notthin.txt`。）同一轮的 scoped 静态检查（含 `import-graph-check`：valueSccs/typeSccs/reverseEdges 均 0，本任务新增的 `worker-fan-in → driver-filters` 值边未成环；`task-contract-check`、`anti-drift-touches-check` 等）全部通过。
+
+**AC 勾选如何到达 fan-in（本任务实测的一处已知坑）**：本任务的 `task_write` 是 `changeKind: "self-only"`（纯勾选 + Evidence，`maskSelfOnlyBody` 归一化复选框后无实质 body 变更）⇒ 按设计**不** ff 到 develop（`.quay/store-commit-propagation.jsonl` 记 `{"changeKind":"self-only","branchClass":"other","propagated":false}`），落在主检出 `author`（commit `df6be82cb`）。fan-in 的 ac-precheck 读「worktree 副本 ∪ `develop:tasks/<id>.md`」的并集，而 step 8 的 ac-gate **只**读 worktree 副本 ⇒ 勾选必须进 worktree。按既有认可做法（transport，非手搓勾选字符）把 ABI 写出的那份文件搬到 task 分支：`git -C <worktree> checkout author -- tasks/<id>.md`（与 author 逐字节一致，diff 仅 4 行 `- [ ]`→`- [x]`）后提交。复核用真实判据：`fan-in-ac-completion-gate.ts --task <id> --worktree <worktree> --json` ⇒ `{"ok":true,"status":"pass","total":4,"checked":4}` exit 0。
