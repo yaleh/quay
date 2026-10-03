@@ -27,13 +27,13 @@ statusLog:
 ## 范围与非目标
 
 范围（每项对应 AC）：
-① 隔离：branch-mode goal 的任务落地不出现在 develop 的 first-parent 链上——**AC-321**；
+① 隔离：未放弃的 branch-mode goal 的任务只经其 goal 分支（或并入它的那个合并提交）进入 develop，不直落 develop——**AC-321**；
 ② 追平：每次 goal 分支落地都包含其追平时刻的 develop——**AC-322**；
 ③ 不重派：落到 goal 分支的任务不再被派发（`done` = 已落到 mergeTarget + 状态双写）——**AC-323**；
 ④ 并入前可见：pre-merge AC 在并入前就能被判为 pass（判据在 goal 的判据 worktree 上求值）——**AC-324**；
 ⑤ 人工并入：develop 上每个 goal 合并提交都有一条先于它的人工并入请求，且 goal 的 achieved 晚于并入——**AC-325**；
 ⑥ 废弃：被 retired/superseded 的 branch-mode goal 分支已删除，被丢弃的 tip SHA 留在 statusLog——**AC-326**；
-⑦ 混入度：每个并入的 goal 在 develop first-parent 链上恰为一个提交——**AC-327**；
+⑦ 混入度：每个并入的 goal 经恰好一个合并提交进入 develop，并入前的任务落地都只经它进入——**AC-327**；
 ⑧ 并入前试用：live-probe 类 pre-merge AC 在预览实例上 pass 之后才并入——**AC-328**。
 
 非目标（⛔ 有意排除）：
@@ -43,9 +43,11 @@ statusLog:
 
 ## 判据形态
 
+> **2026-10-03 更正**：初稿的 AC-321/325/327 用了 develop 的 first-parent 链，真实 fan-in 会把多数提交挤出该链（实测 32 条里 22 条），AC-321 因此对直落 develop 的演练任务误判通过，AC-322/323 读到的也不是 goal 分支落地。已改为祖先关系并重开 AC-321/322/323；落地只计经 goal 分支的。夹具按真实 fan-in 形状重造，含反例臂。详见 SPEC §7「判据的拓扑前提」。
+
 - 8 条判据全部读**生产载体**（硬规则 4 推论三）：git 提交图与 `develop` reflog、`goals/*.md` frontmatter、`.quay/gate-events.jsonl`、`.quay/worker-round.jsonl` 的 `in_flight_task_starts`。⛔ 没有一条读夹具或注入数据。
 - **三态**：exit 0 = 成立；exit 1 = 违反，同一行输出 `CAUSE=`；exit 3 = 未评估（无 branch-mode goal / 尚无落地 / 尚无并入 / 载体缺字段）。**在第一个试点 goal 跑起来之前，全部 8 条读 exit 3 是正确输出，不是缺陷。**
-- 识别规则（判据与实现之间的契约，实现须遵守）：branch-mode = goal frontmatter 中独立一行 `branch: true`；opt-in 时刻 = 首次引入该行的提交时间（`git log -S`）；任务落地 = 现有 `flipTaskDone` 的提交消息 `tasks: 翻 <id> done（driver 机械 fan-in）`；goal 合并提交 = develop first-parent 上 subject 含 `goal/GOAL-NNN` 的 merge commit；人工并入请求 = gate-events 中 `gate: "goal-merge-request"`、`item_id: GOAL-NNN`；预览求值根 = goal gate 事件 `payload.evaluationRoot`。
+- 识别规则（判据与实现之间的契约，实现须遵守）：branch-mode = goal frontmatter 中独立一行 `branch: true`；任务落地 = 现有 `flipTaskDone` 的提交消息 `tasks: 翻 <id> done（driver 机械 fan-in）`；goal 合并提交 = develop 上（⛔ 按祖先关系找，不用 first-parent）subject 形如 `merge: goal/GOAL-NNN into develop` 的 merge commit；opt-in 的起算时刻 = goal 的 `activatedAt`；已放弃（retired/superseded）的 goal 不计；人工并入请求 = gate-events 中 `gate: "goal-merge-request"`、`item_id: GOAL-NNN`；预览求值根 = goal gate 事件 `payload.evaluationRoot`。
 - 落笔当轮的读数（2026-10-03，主检出，`/bin/sh` 执行）：8 条全部 exit 3。每条的通过臂与违反臂都在合成 git 仓库上实跑过（可控的提交与 reflog 时间）：AC-321/327 直落 develop 的任务 ⇒ exit 1；AC-322 不追平 ⇒ exit 1；AC-323 落地后再派发 ⇒ exit 1；AC-324 并入前无 pass ⇒ exit 1；AC-325 无请求 / achieved 早于并入 ⇒ exit 1；AC-326 分支未删 / 未记 SHA ⇒ exit 1；AC-328 求值根为主检出 ⇒ exit 1；各自的通过场景 exit 0。
 - ⚠️ 已知局限：AC-322 依赖 `develop` 的 reflog（默认 90 天过期）；过期后读不到的落地被跳过，全部读不到时 exit 3，⛔ 不会误判通过。AC-328 用判据文本含 `quay.ts serve` 选出 live-probe 样本——这只用于选样本，不用于给 AC 分相（分相靠显式 `phase` 字段，SPEC §4.7）。
 
