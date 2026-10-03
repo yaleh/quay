@@ -1,7 +1,7 @@
 ---
 id: AC-904
 title: 演练：提供本 workspace 的 quay serve 实例，其 /doc 页列出演练记录 DOC-904（并入前由预览实例满足、并入后由生产实例满足）
-status: active
+status: achieved
 kind: criterion
 goal: GOAL-904
 criterion: >-
@@ -44,6 +44,11 @@ statusLog:
     actor: cli
     reason: 人 2026-10-03 裁定做 goal 分支合并演练；承接任务 gap-goal904-merge-drill-record-doc
       已立（needs-human 停放，待 goal 分支出现后放行），激活本 AC 不会触发乱序自动立案
+  - at: 2026-10-03T17:48:54.559Z
+    from: active
+    to: achieved
+    actor: goal-driver
+    reason: "I2: criterion pass"
 fidelity:
   verdict: faithful
   reason: "fidelity judge: faithful"
