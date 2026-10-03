@@ -1136,6 +1136,71 @@ test("AC-longterm-4 — 创建时即可声明（create 路径）且 commit subje
   assert.equal(JSON.parse(n(["get", "AC-001"]).stdout).longTerm, true, "落盘后回读可见");
 });
 
+// ── SPEC-goal-branch-2026-10-03 §4.7 `phase`（裁定⑭⑮）──────────────────────────────────────────
+// An AC's evaluation phase is DECLARED by the author (⛔ never inferred from the criterion's text,
+// hard rule 2). These tests pin the three properties the store owns: the value is writable+readable,
+// the default (absent) projects as `pre-merge`, and any other token is REFUSED (fail-closed — an
+// unknown value must not be silently projected as the default, hard rule 3b).
+
+test("AC-phase-1 — `--phase post-merge` 写入并经 get 回读；缺省读作 pre-merge；省略保留（patch）", () => {
+  const root = tmpDir("phase-write");
+  fs.mkdirSync(path.join(root, ".quay"), { recursive: true });
+  fs.mkdirSync(path.join(root, "goals"), { recursive: true });
+  const n = (cmd) => runCli(["--root", root, ...cmd]);
+  seedAcCli(n, "GOAL-001");
+  n(["write", "GOAL-001", "--title", "p", "--status", "active", "--origin", "o", "--body", GOAL_BODY]);
+  n(["write", "AC-001", "--title", "a", "--status", "active", "--goal", "GOAL-001", "--criterion", "true", "--origin", "o", "--expect", EXPECT]);
+  // 缺省 = 未声明 ⇒ 投影 pre-merge（⛔ 不是 undefined）。
+  assert.equal(JSON.parse(n(["get", "AC-001"]).stdout).phase, "pre-merge", "缺省（未声明）读作 pre-merge");
+  const w = n(["write", "AC-001", "--phase", "post-merge"]);
+  assert.equal(w.status, 0, `--phase post-merge 必须 exit 0:\n${w.stdout}${w.stderr}`);
+  const rec = JSON.parse(n(["get", "AC-001"]).stdout);
+  assert.equal(rec.phase, "post-merge", "get 回读 phase===post-merge（view-model 投影，⛔ 不 grep 文件字面）");
+  assert.equal(rec.criterion, "true", "patch 语义：criterion 未被清空");
+  // 省略 flag 的无关写 ⇒ 保留已声明相位。
+  n(["write", "AC-001", "--title", "a2"]);
+  assert.equal(JSON.parse(n(["get", "AC-001"]).stdout).phase, "post-merge", "省略 --phase ⇒ patch 语义保留已声明的值");
+  // 显式写回 pre-merge 同样可写（⛔ 不是只能进不能出）。
+  const back = n(["write", "AC-001", "--phase", "pre-merge"]);
+  assert.equal(back.status, 0, back.stdout + back.stderr);
+  assert.equal(JSON.parse(n(["get", "AC-001"]).stdout).phase, "pre-merge", "显式 pre-merge 可写回");
+});
+
+test("AC-phase-2 — 非法 phase 被拒（CLI exit 2 且不落变更；store API 同样 fail-closed）", () => {
+  const root = tmpDir("phase-strict");
+  fs.mkdirSync(path.join(root, ".quay"), { recursive: true });
+  fs.mkdirSync(path.join(root, "goals"), { recursive: true });
+  const n = (cmd) => runCli(["--root", root, ...cmd]);
+  seedAcCli(n, "GOAL-001");
+  n(["write", "GOAL-001", "--title", "p", "--status", "active", "--origin", "o", "--body", GOAL_BODY]);
+  n(["write", "AC-001", "--title", "a", "--status", "active", "--goal", "GOAL-001", "--criterion", "true", "--origin", "o", "--expect", EXPECT]);
+  for (const bad of ["postmerge", "POST-MERGE", "pre", "before", "pre-merge ", ""]) {
+    const w = n(["write", "AC-001", "--phase", bad]);
+    assert.equal(w.status, 2, `--phase ${JSON.stringify(bad)} 必须 exit 2（fail-closed）:\n${w.stdout}${w.stderr}`);
+    assert.match(w.stderr, /--phase must be exactly pre-merge or post-merge/, "错误信息点名该 flag 与合法取值");
+  }
+  assert.equal(JSON.parse(n(["get", "AC-001"]).stdout).phase, "pre-merge", "被拒的写不落任何变更（phase 仍为缺省 pre-merge）");
+  // 缺值（末参数）同样 exit 2——⛔ 不得静默写成缺省。
+  const missing = runCli(["--root", root, "write", "AC-001", "--phase"], { encoding: "utf8" });
+  assert.equal(missing.status, 2, "缺值 ⇒ exit 2");
+  // store API 是同一道闸（⛔ CLI 只是个更早点名的前端）：直接调用同样拒绝、且不改动记录。
+  const s = createGoalStore(path.join(root, "goals"));
+  assert.throws(() => s.write("AC-001", { phase: "nope" }), /phase must be one of pre-merge \| post-merge/, "store API fail-closed");
+  assert.equal(s.get("AC-001").phase, "pre-merge", "被拒的 API 写同样不落变更");
+});
+
+test("AC-phase-3 — phase 是 AC 的属性：GOAL 记录不得携带它（与 criterion 同一条拒绝纪律）", () => {
+  const s = createGoalStore(tmpDir("phase-goal"));
+  seedAc(s, "GOAL-001"); // 名下一条 draft AC-901（P6-goal 激活闸要求 ≥1 条 AC 指名的 GOAL）
+  s.write("GOAL-001", { title: "p", status: "active", origin: "o", body: GOAL_BODY });
+  assert.throws(() => s.write("GOAL-001", { phase: "pre-merge" }), /GOAL record and cannot carry a `phase` field/, "GOAL 携带 phase 必须被拒");
+  // 负控制：同一条 GOAL 若不带 phase 则通过（证明拒绝来自 phase，⛔ 不是别的字段）。
+  assert.doesNotThrow(() => s.write("GOAL-001", { title: "p2" }));
+  // 正控制：AC 携带同一取值则通过。
+  assert.doesNotThrow(() => s.write("AC-901", { phase: "post-merge" }));
+  assert.equal(s.get("AC-901").phase, "post-merge", "AC 上同值可写");
+});
+
 // ── gap-closed-goal-acs-leave-reverify-scope-standing-invariants-undeclared ───────────────────────
 // The defect: GOAL-009 (17 ACs) + GOAL-015 (4 ACs) closed on 2026-09-11 and their achieved ACs left
 // the I5 reverify scope wholesale. Which of them are STANDING guarantees (and must keep being

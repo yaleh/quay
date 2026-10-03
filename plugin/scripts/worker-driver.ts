@@ -126,7 +126,26 @@ import { spawn, spawnSync } from "node:child_process";
 import { isDirectEntry, normalizeRel } from "./gate-script-base.ts";
 import { readProcCmdlineText } from "../../packages/quay/src/kernel/proc-identity.ts";
 import { TASK_STATUS } from "./task-status.ts";
-import { extractSection, countAcCheckboxes, fetchTaskStatusAtRef } from "./task-schema.ts";
+import { extractSection, countAcCheckboxes, fetchTaskStatusAtRef, parseFrontmatterCompletely, frontmatterGoalAc } from "./task-schema.ts";
+// goal 分支派发接线（SPEC-goal-branch-2026-10-03 §4.3）：解析链 task→goal_ac→AC.goal→GOAL 需要
+// ① 按 id 找到 `<root>/goals/<AC-NNN>-*.md`（frontmatter-store-base 的 fileNameForId，四个 store 共用）；
+// ② 读该 GOAL 的 status/branch（复用 §4.8 身份检查的 lookupGoalBranchMode——「活跃 branch-mode GOAL」
+// 这一问的单一实现，⛔ 不在本文件重写一份谓词）；③ 派生分支名与存在性（branch-model 的
+// goalBranchName/goalBranchRefExists，均为 leaf：只 import node 内建，无反向边 ⇒ 不新增值 SCC）。
+import { fileNameForId } from "../../packages/quay/src/frontmatter-store-base.ts";
+import { goalBranchName, goalBranchRefExists, goalIdFromBranchToken } from "../../packages/quay/src/branch-model.ts";
+// goal→develop 最终 fan-in（SPEC-goal-branch-2026-10-03 §4.7）：请求/结果事件形状与「待执行」派生读数
+// 的单一实现住在 Core（`quay goal merge` 与测试共用同一份，⛔ 本文件不重写）。执行侧（runGoalMergeFanIn）
+// 住在 worker-fan-in.ts（同机械 fan-in 的锁/suite/ff 基建），本文件每轮调它。
+import {
+  pendingGoalMerges,
+  readGoalMergeRequests,
+  readGoalMergeResults,
+  type GoalMergeRequest,
+  type GoalMergeResult,
+  type PendingGoalMerge,
+} from "../../packages/quay/src/goal-merge.ts";
+import { lookupGoalBranchMode } from "./target-identity-literal-check.ts";
 // gap-task-ops-consolidate-driver-frontmatter-writers：flipTaskDone 的 status 读/写经 task-ops.ts
 // （splitTaskFile / statusFromFrontmatter / patchStatusField，单一 parser，⛔ 不再手搓 status 行正则）。
 import { splitTaskFile, statusFromFrontmatter, patchStatusField } from "./task-ops.ts";
@@ -321,7 +340,26 @@ import {
   // ⛔ 不能 import 本文件（值环）。单一真相源住在被依赖的下层，本文件只 re-export 给既有消费者。
   parseSuiteLogFailures,
   failingTestFilesFromSuiteLog,
+  runGoalMergeFanIn,
+  appendGoalMergeResultEvent,
+  type GoalMergeFanInOptions,
+  type GoalMergeFanInResult,
   type MechanicalFanInResult,
+} from "./worker-fan-in.ts";
+// 复用给测试/消费者的 import 面：goal-merge 事件读数 + 待执行派生 + 执行侧（同机械 fan-in 的既有面）。
+export {
+  pendingGoalMerges,
+  readGoalMergeRequests,
+  readGoalMergeResults,
+  type GoalMergeRequest,
+  type GoalMergeResult,
+  type PendingGoalMerge,
+} from "../../packages/quay/src/goal-merge.ts";
+export {
+  runGoalMergeFanIn,
+  appendGoalMergeResultEvent,
+  type GoalMergeFanInOptions,
+  type GoalMergeFanInResult,
 } from "./worker-fan-in.ts";
 export {
   parseSuiteLogFailures,
@@ -347,6 +385,8 @@ export {
   extractFirstFailureLine,
   readFanInLockHold,
   fanInLockFile,
+  fanInLockFileNamed,
+  fanInLockFileForMergeTarget,
   type FanInLockHandle,
   acquireFanInLock,
   readPreviousGreenSuiteCommit,
@@ -1523,6 +1563,12 @@ export function computeWorkerRoundRecord(opts: {
   /** 本轮 push 滞后检查的读数（gap-fan-in-push-silently-fails-no-detection AC7）。缺省 null = 本轮
    *  **没跑**该步（⛔ 与「跑了且 in-sync」可区分——同 supersededReclaim 的约定，硬规则 4 推论三）。 */
   pushLag?: PushLagRoundRecord | null;
+  /** SPEC-goal-branch §4.3：本轮在飞任务各自解析出的落地目标（task id → "develop" / "goal/<id>"），
+   *  使「这个任务落到了哪条线」事后可查（直接回答裁定②的「无法区分」）。空 = 本轮无在飞任务。 */
+  mergeTargets?: Record<string, string>;
+  /** SPEC-goal-branch §4.9（裁定⑧⑰）：本轮检出的「无 goal_ac 且 Touches 与 branch-mode goal 在飞任务
+   *  重叠」读数（只报告不阻塞）。空数组 = 跑过且无重叠（⛔ 与「没跑」可区分——后者为 null）。 */
+  goalBranchUntaggedOverlaps?: GoalBranchUntaggedOverlap[] | null;
 }) {
   return {
     ts: opts.at,
@@ -1551,6 +1597,10 @@ export function computeWorkerRoundRecord(opts: {
     // gap-fan-in-push-silently-fails-no-detection AC7：本轮 push 滞后检查读数（in-sync 也记，
     // ⛔ 不省略——「跑过且无滞后」与「没跑该步」在载体上可区分；后者为 null）。
     push_lag: opts.pushLag ?? null,
+    // SPEC-goal-branch §4.3：本轮在飞任务解析出的落地目标（事后可查「落到哪条线」）。
+    merge_targets: opts.mergeTargets ?? {},
+    // SPEC-goal-branch §4.9：未标注重叠读数（空数组 = 跑过且无；null = 没跑该步）。
+    goal_branch_untagged_overlaps: opts.goalBranchUntaggedOverlaps ?? null,
   };
 }
 
@@ -1648,16 +1698,169 @@ function preMergeNote(task: string, root: string, worktree: string): string {
   return lines.join(" ");
 }
 
+// ── goal 分支的 mergeTarget 解析（SPEC-goal-branch-2026-10-03 §4.3，裁定①③⑥）───────────────────
+//
+// 【单一解析函数，三处共用】——worktree 分叉点（`dispatch-worktree-setup.sh --base`）、机械 fan-in 的
+// `mergeTarget`、fan-in 锁文件。三处各自解析 ⇒ 分叉点与落点可能不一致（§4.3 原话）。
+//
+// 解析链 `task → goal_ac → AC.goal → GOAL` 是 schema 里已有的（§3）。一条任务落到 `goal/<GOAL-NNN>`
+// 当且仅当该 GOAL 为 `active` ∧ 声明 `branch: true` ∧ 派生分支确实存在；否则 `develop`——即 SPEC 的
+// 缺省 = 今天的行为：无 `goal_ac`（或指向非 branch-mode goal）的任务派发路径逐字不变（裁定④ opt-in）。
+//
+// 分支名是【派生量，不存储】（裁定④/硬规则 4b，`goalBranchName`），存在性是**活的 git 读**
+// （`goalBranchRefExists`）——⛔ 不读任何自称的 stored flag（硬规则 4b）。
+
+/** `resolveTaskMergeTargetDetail` 为何返回该结果——分类器，供派发记录区分「本就该落 develop」与
+ *  「本意是 goal 分支但条件不满足」（缺值不得与「查过且无」同形，硬规则 3b）。 */
+export type MergeTargetReason =
+  | "goal-branch" // active ∧ branch:true ∧ 分支存在 ⇒ goal/<GOAL>
+  | "no-goal-ac" // 任务无 goal_ac ⇒ develop（opt-in 缺省）
+  | "task-unreadable" // tasks/<id>.md 读不到 ⇒ develop
+  | "ac-unreadable" // goal_ac 有值但 AC 记录缺失/无 goal 字段 ⇒ develop
+  | "goal-unreadable" // AC 找到了但 GOAL 记录缺失/读不到 ⇒ develop
+  | "goal-not-active" // GOAL 非 active（draft/achieved/superseded/retired）⇒ develop
+  | "not-branch-mode" // GOAL 活跃但未声明 branch: true ⇒ develop
+  | "branch-absent"; // active ∧ branch-mode 但 goal/<GOAL> 不存在 ⇒ develop
+
+export interface TaskMergeTargetResolution {
+  /** `"develop"` 或 `"goal/<GOAL-NNN>"`。 */
+  mergeTarget: string;
+  /** mergeTarget 是 goal 分支时的 GOAL id；develop ⇒ null。 */
+  goalId: string | null;
+  reason: MergeTargetReason;
+}
+
+/** 经【单一 frontmatter 解析器】（`parseFrontmatterCompletely`，四个 store 的 reader 都委托到它）读一个
+ *  `goals/` 记录。返回 null = 文件缺失 / 读不到 / 无 frontmatter 围栏（⛔ 与「读到且为空」同形——
+ *  调用方一律按「未查」处理，硬规则 6）。 */
+function goalsRecordFrontmatter(root: string, id: string): Record<string, unknown> | null {
+  let file: string | null;
+  try {
+    file = fileNameForId(path.join(root, "goals"), id);
+  } catch {
+    return null; // goals/ 缺失/不可读 ⇒ 未查，⛔ 不当作「记录不在」
+  }
+  if (file === null) return null;
+  let raw: string;
+  try {
+    raw = fs.readFileSync(path.join(root, "goals", file), "utf8");
+  } catch {
+    return null;
+  }
+  const split = splitTaskFile(raw);
+  if (split === null) return null;
+  try {
+    return parseFrontmatterCompletely(split.frontmatterRaw) as Record<string, unknown>;
+  } catch {
+    return null;
+  }
+}
+
+/** 解析一条任务的落地目标（§4.3）。任何一环读不到或条件不满足 ⇒ `develop`（fail-safe：opt-in 的
+ *  安全侧是「照旧落 develop」，⛔ 不是「猜一个 goal 分支」）。 */
+export function resolveTaskMergeTargetDetail(task: string, root: string): TaskMergeTargetResolution {
+  const develop = (reason: MergeTargetReason): TaskMergeTargetResolution => ({ mergeTarget: "develop", goalId: null, reason });
+  const taskFm = readTaskFrontmatter(root, task);
+  if (taskFm === null) return develop("task-unreadable");
+  const goalAc = frontmatterGoalAc(taskFm);
+  if (goalAc === null) return develop("no-goal-ac");
+  const acFm = goalsRecordFrontmatter(root, goalAc);
+  if (acFm === null) return develop("ac-unreadable");
+  const goalIdRaw = acFm.goal;
+  const goalId = typeof goalIdRaw === "string" && goalIdRaw.trim() !== "" ? goalIdRaw.trim() : null;
+  if (goalId === null) return develop("ac-unreadable");
+  // 「活跃 branch-mode GOAL」这一问的单一实现（§4.8 身份检查的 lookupGoalBranchMode）——⛔ 不重写谓词。
+  const lookup = lookupGoalBranchMode(root, goalId);
+  if (!lookup.readable || lookup.goal === null) return develop("goal-unreadable");
+  if (lookup.goal.status !== "active") return develop("goal-not-active");
+  if (lookup.goal.branch !== true) return develop("not-branch-mode");
+  if (!goalBranchRefExists(root, goalId)) return develop("branch-absent");
+  return { mergeTarget: goalBranchName(goalId), goalId, reason: "goal-branch" };
+}
+
+/** 任务文件的 frontmatter（`tasks/<id>.md` 精确名，与 taskTouches 同读法）。null = 读不到/无围栏。 */
+function readTaskFrontmatter(root: string, task: string): Record<string, unknown> | null {
+  let raw: string;
+  try {
+    raw = fs.readFileSync(path.join(root, "tasks", `${task}.md`), "utf8");
+  } catch {
+    return null;
+  }
+  const split = splitTaskFile(raw);
+  if (split === null) return null;
+  try {
+    return parseFrontmatterCompletely(split.frontmatterRaw) as Record<string, unknown>;
+  } catch {
+    return null;
+  }
+}
+
+/** 一条任务的落地目标：`"develop"` 或 `"goal/<GOAL-NNN>"`（§4.3 的单一解析函数）。 */
+export function resolveTaskMergeTarget(task: string, root: string): string {
+  return resolveTaskMergeTargetDetail(task, root).mergeTarget;
+}
+
+// ── §4.9 `goal_ac` 纪律读数：无 goal_ac 的任务与 branch-mode goal 在飞任务 Touches 重叠 ────────────
+//
+// 无 `goal_ac` 的任务，其 `## Touches` 若与一条【落到 goal 分支】的在飞任务重叠，正是裁定⑧ 警告的
+// 静默绕过形态：它的变更直落 develop，绕开了隔离。首版是**报告，不阻塞**（裁定⑰）——每次派发这样一条
+// 任务就写一条 `goal-branch-untagged-overlap` 读数；升级为阻塞与否等实测发生率（硬规则 12）。
+
+/** 一条未标注重叠读数（kind 是记录里的可 grep token，AC3 的判据面）。 */
+export interface GoalBranchUntaggedOverlap {
+  kind: "goal-branch-untagged-overlap";
+  task: string;
+  peer: string;
+  goal: string;
+  overlap: string[];
+}
+
+/** 纯核：一个未标注任务的 Touches 与在飞任务的交集。两侧 Touches 都必须可读——读不到的一侧不贡献
+ *  任何读数（缺值 = 未查，⛔ 不报成「查过且无重叠」，硬规则 6/3b）。 */
+export function untaggedGoalBranchOverlaps(opts: {
+  task: string;
+  taskTouches: string[] | null;
+  peers: Array<{ id: string; mergeTarget: string; touches: string[] | null }>;
+}): GoalBranchUntaggedOverlap[] {
+  if (opts.taskTouches === null || opts.taskTouches.length === 0) return [];
+  const mine = new Set(opts.taskTouches);
+  const out: GoalBranchUntaggedOverlap[] = [];
+  for (const p of opts.peers) {
+    if (p.id === opts.task) continue;
+    const goalId = goalIdFromBranchToken(p.mergeTarget);
+    if (goalId === null) continue; // 对端不落 goal 分支 ⇒ 不在本读数的域内
+    if (p.touches === null) continue; // 对端 Touches 读不到 ⇒ 未查
+    const overlap = p.touches.filter((t) => mine.has(t));
+    if (overlap.length > 0) out.push({ kind: "goal-branch-untagged-overlap", task: opts.task, peer: p.id, goal: goalId, overlap });
+  }
+  return out;
+}
+
+/** 从盘上装配一个未标注任务的读数：读它的 Touches + 每个在飞对端的（解析出的 mergeTarget, Touches）。
+ *  任务自身有 `goal_ac` ⇒ 不适用（它已被标注，不在本读数域内）⇒ 返回 []。 */
+export function findGoalBranchUntaggedOverlap(root: string, task: string, peerTaskIds: string[]): GoalBranchUntaggedOverlap[] {
+  const taskFm = readTaskFrontmatter(root, task);
+  if (taskFm === null || frontmatterGoalAc(taskFm) !== null) return [];
+  const mine = taskTouches(root, task);
+  const peers = peerTaskIds
+    .filter((id) => id !== task)
+    .map((id) => ({ id, mergeTarget: resolveTaskMergeTarget(id, root), touches: taskTouches(root, id) }));
+  return untaggedGoalBranchOverlaps({ task, taskTouches: mine, peers });
+}
+
 /** dispatch-worktree-setup.sh 调用签名（gap-dispatch-worktree-setup-zero-production-callers）：每个
  *  被派发的 worktree 创建后【必须】跑一次（node_modules symlink-or-install + config.yml 经
  *  worktree-include.sh），机制接管 bootstrap——worker 不再手工 `ln -s`/`cp config.yml`（正是该脚本被
- *  写出来要消灭的 AGENT-REMEMBERING 失败模式）。脚本幂等：已 provision 的 worktree 重跑是 no-op。 */
-function dispatchSetupSignature(root: string, worktree: string): string {
+ *  写出来要消灭的 AGENT-REMEMBERING 失败模式）。脚本幂等：已 provision 的 worktree 重跑是 no-op。
+ *  `base`（缺省 develop）：goal 分支任务的 worktree 必须从 `goal/<id>` 分叉，故把解析出的 mergeTarget
+ *  作为 `--base` 传入，使 fork-point 自检针对正确的基线而不是永远针对 develop。 */
+function dispatchSetupSignature(root: string, worktree: string, base?: string): string {
   // ⛔ 非 root/plugin/scripts/（第三方项目无 plugin/）——resolveKernelShellSibling 锚在本 kernel 安装
   // 位置；缺 ⇒ 回退 kernel plugin root 下的同路径（运行期 `bash <缺失路径>` 报错 ⇒ fail-closed）。
   const setupScript = resolveKernelShellSibling("dispatch-worktree-setup.sh")
     ?? path.join(resolveKernelPluginRoot(), "scripts", "dispatch-worktree-setup.sh");
-  return `bash ${setupScript} ${worktree}`;
+  const baseArg = base && base !== "develop" ? ` --base ${base}` : "";
+  return `bash ${setupScript} ${worktree}${baseArg}`;
 }
 
 /** 创建 prompt（无保留 worktree 时的 implement-only prompt，单一真相源）。续做 prompt 见
@@ -1666,11 +1869,19 @@ function dispatchSetupSignature(root: string, worktree: string): string {
  *  fan-in workflow），driver 接手 worktree 机械跑 fan-in——取代旧「worker 以 scriptPath 调
  *  fan-in-execute workflow 子代理」的全链式 prompt（fanInSignature 已退役）。 */
 export function buildWorkerPrompt(task: string, root: string): string {
+  // SPEC-goal-branch §4.3：分叉点由【同一解析函数】给出——branch-mode goal 的任务其 worktree 必须从
+  // `goal/<id>` 分叉（⛔ 不是 develop），并把该 base 传给 provisioning 的 fork-point 自检。非 goal 任务
+  // （mergeTarget === "develop"）两条 prompt 文本逐字不变（opt-in 缺省 = 今天行为，AC1）。
+  const mergeTarget = resolveTaskMergeTarget(task, root);
+  const baseNote =
+    mergeTarget !== "develop"
+      ? `rooted at \`${mergeTarget}\` (git worktree add -b task/${task} <path> ${mergeTarget}), `
+      : "";
   return [
     `You are a per-task worker in the quay repo (SPEC-worker-driven-inner §5 阶段 2).`,
     `Task: ${task}. Repo root: ${root}.`,
-    `Run the implementation chain: (1) create an isolated git worktree for ${task}, then immediately`,
-    `provision it by running \`${dispatchSetupSignature(root, "<the worktree path you created in step 1>")}\``,
+    `Run the implementation chain: (1) create an isolated git worktree for ${task}, ${baseNote}then immediately`,
+    `provision it by running \`${dispatchSetupSignature(root, "<the worktree path you created in step 1>", mergeTarget)}\``,
     `(node_modules symlink-to-main + config.yml via worktree-include — the mechanism, not agent-remembering);`,
     `(2) implement the task per its Proposal/Plan/AC/DoD, committing your implementation on the task branch; ${acCheckNote()}`,
     `(2b) ${preMergeNote(task, root, "<the worktree path you created in step 1>")}`,
@@ -2950,7 +3161,7 @@ export function buildContinueWorkerPrompt(task: string, root: string, state: Con
     `${continueSuiteLogNote(attempts)}`,
     `${continueRelatednessNote(root, task, attempts)}`,
     `${continueConflictResolutionNote()}`,
-    `Re-provision the existing worktree first (idempotent, no-op if already set up): \`${dispatchSetupSignature(root, wt)}\`.`,
+    `Re-provision the existing worktree first (idempotent, no-op if already set up): \`${dispatchSetupSignature(root, wt, resolveTaskMergeTarget(task, root))}\`.`,
     `Run the remaining chain in the existing worktree: (1) continue implementing per the task's`,
     `Proposal/Plan/AC/DoD (⛔ do not redo the ${commits} commits already on the branch); ${acCheckNote()}`,
     `(1b) ${preMergeNote(task, root, wt)}`,
@@ -4235,7 +4446,13 @@ function runOneWorker({
             // 锁半（acquireFanInLock）与编排半（ff-merge.ts 模块）同源（都在 worktree），改了
             // worker-driver.ts 的任务 fan-in 不再用旧锁/旧编排。⛔ 不是 token 闸一例，是「fan-in 脚本从
             // worktree 加载、发起者从主检出旧进程运行」的架构错位整个类。
-            mechResult = await spawnMechanicalFanIn({ task: taskId, worktree: paths[0], root: rootDir, runId });
+            //
+            // SPEC-goal-branch §4.3：落地目标由【同一解析函数】给出——branch-mode goal 的任务 fan-in
+            // 到 `goal/<id>`（并在 fan-in 内追平 develop），非 goal 任务仍落 develop（opt-in 缺省）。
+            mechResult = await spawnMechanicalFanIn({
+              task: taskId, worktree: paths[0], root: rootDir, runId,
+              mergeTarget: resolveTaskMergeTarget(taskId, rootDir),
+            });
             if (json) {
               process.stdout.write(
                 `${JSON.stringify({ event: "mechanical-fan-in", task: taskId, wall_clock_ms: Date.now() - startMechMs, ...mechResult })}\n`,
@@ -4423,7 +4640,31 @@ export async function runResidentLoop(opts: ResidentOptions): Promise<number> {
   // 且错误轮（janitor 步【之后】才抛错）也能带上「本轮真跑过」的读数（⛔ 不抹成 null = 不让「跑过」
   // 与「没跑」在错误轮上不可区分，硬规则 3b）。⛔ 缺省 null = 没跑该步 ≠ evaluated:true+branchCount:0。
   let releaseBranchJanitorResult: JanitorResult | null = null;
+  // 本轮 goal 分支读数（SPEC-goal-branch-2026-10-03 §4.3/§4.9）：① 每个在飞任务解析出的落地目标
+  // （task id → "develop" / "goal/<id>"，回答裁定②的「无法区分」）；② 无 goal_ac 且 Touches 与
+  // branch-mode goal 在飞任务重叠的未标注读数（裁定⑧⑰：只报告不阻塞）。声明位置与 pushLagReading 同族
+  // （while 之外 + 每轮开头复位）⇒ writeRound / writeErrorRound 从闭包读，两处签名逐字不变；
+  // ⛔ 缺省 null = 没跑该步 ≠ {} / []（跑过且为空）——硬规则 3b。
+  let goalBranchTargets: Record<string, string> | null = null;
+  let goalBranchOverlaps: GoalBranchUntaggedOverlap[] | null = null;
   const inFlightTasks = (): string[] => running.map((r) => r.task).concat([...coldInflight]);
+  // 装配本轮的 goal 分支读数（在飞任务少 ⇒ 每轮现读代价小）。读不懂的下游一律按「未查」处理
+  // （resolveTaskMergeTarget 内部 fail-safe 落 develop；Touches 读不到即跳过，⛔ 不报成「无重叠」）。
+  const computeGoalBranchReading = (): void => {
+    try {
+      const ids = inFlightTasks();
+      const targets: Record<string, string> = {};
+      for (const id of ids) targets[id] = resolveTaskMergeTarget(id, rootDir);
+      goalBranchTargets = targets;
+      const overlaps: GoalBranchUntaggedOverlap[] = [];
+      for (const id of ids) overlaps.push(...findGoalBranchUntaggedOverlap(rootDir, id, ids));
+      goalBranchOverlaps = overlaps;
+    } catch {
+      // 读不懂 ⇒ 保持 null（未查），⛔ 不伪装成「跑过且为空」。
+      goalBranchTargets = null;
+      goalBranchOverlaps = null;
+    }
+  };
   // gap-live-fan-in-window-elapsed-zero：每任务派发时刻（task id → ISO 起始）。只覆盖内存 running
   // （driver 派发时已知 startedAtMs）；冷启动在飞 task 无起点 ⇒ 不入图（readLive 对缺起点回退 nowMs，
   // 诚实「刚起步」而非伪造长时长）。
@@ -4437,6 +4678,7 @@ export async function runResidentLoop(opts: ResidentOptions): Promise<number> {
   // status 的 last_record_ts（读全载体 max）误读为「死亡」；round 每轮循环无条件写一条作 liveness 直接量。
   const roundFile = path.join(rootDir, WORKER_ROUND_REL);
   const writeRound = (round: number, inFlight: number, pool: number | null, reason: string | null, liveness: LivenessResult | null, reconciled: string[], supersededReclaim: ReclaimSupersededResult | null): void => {
+    computeGoalBranchReading(); // SPEC-goal-branch §4.3/§4.9：写记录前现读本轮在飞任务的落地目标与未标注重叠
     const record = computeWorkerRoundRecord({
       round,
       runId: runId ?? runPrefix,
@@ -4471,6 +4713,9 @@ export async function runResidentLoop(opts: ResidentOptions): Promise<number> {
       releaseBranchJanitor: releaseBranchJanitorResult,
       // gap-fan-in-push-silently-fails-no-detection AC7（闭包读，见 pushLagReading 的声明注释）。
       pushLag: pushLagReading,
+      // SPEC-goal-branch §4.3/§4.9（闭包读，见 goalBranchTargets 的声明注释）。
+      mergeTargets: goalBranchTargets ?? {},
+      goalBranchUntaggedOverlaps: goalBranchOverlaps,
     });
     try { appendRoundToFile(roundFile, record); } catch { /* 记录写失败不致命（运行时日志，⛔ 不因日志炸循环） */ }
     if (json) process.stdout.write(`${JSON.stringify({ event: "round", ...record })}\n`);
@@ -4481,6 +4726,7 @@ export async function runResidentLoop(opts: ResidentOptions): Promise<number> {
    *  一轮抛错而判「死亡」（AC3：生产 round 无停写窗口），且 error/error_step/stop_reason 指到具体步骤
    *  （AC1 定位）。⛔ 写失败不致命（运行时日志）。 */
   const writeErrorRound = (round: number, step: string, message: string, stack: string, liveness: LivenessResult | null, pool: number | null, inFlight: number): void => {
+    computeGoalBranchReading(); // 同 writeRound：错误轮也带本轮 goal 读数（⛔ 不因 error 抹成 null）
     const record = computeWorkerRoundRecord({
       round,
       runId: runId ?? runPrefix,
@@ -4506,6 +4752,9 @@ export async function runResidentLoop(opts: ResidentOptions): Promise<number> {
       // gap-ac271-finish-step-needs-self-acting-carrier：同款——janitor 步【之后】才抛错时，本轮
       // 确实跑过它 ⇒ 带上读数（⛔ 不抹成 null）。
       releaseBranchJanitor: releaseBranchJanitorResult,
+      // SPEC-goal-branch §4.3/§4.9：同款——已跑过该步（闭包非 null）则带上，⛔ 不因 error 抹成 null。
+      mergeTargets: goalBranchTargets ?? {},
+      goalBranchUntaggedOverlaps: goalBranchOverlaps,
     });
     try { appendRoundToFile(roundFile, record); } catch { /* 记录写失败不致命（运行时日志，⛔ 不因日志炸循环） */ }
     if (json) process.stdout.write(`${JSON.stringify({ event: "round", ...record })}\n`);
@@ -4766,6 +5015,8 @@ export async function runResidentLoop(opts: ResidentOptions): Promise<number> {
     let supersededReclaimResult: ReclaimSupersededResult | null = null;
     pushLagReading = null; // 每轮复位（见上面的声明注释）
     releaseBranchJanitorResult = null; // 每轮复位（同上：⛔ 上一轮的读数不漏进本轮）
+    goalBranchTargets = null; // 每轮复位（同上：⛔ 上一轮的 goal 读数不漏进本轮）
+    goalBranchOverlaps = null;
     let poolSeen: number | null = null;
     let waitReason: string | null = null;
     let step = "start";
@@ -4859,6 +5110,25 @@ export async function runResidentLoop(opts: ResidentOptions): Promise<number> {
       pushLagReading = runPushLagPass(rootDir, pushBranch, pushRemote, reconcileMs);
       if (json && pushLagReading && pushLagReading.verdict !== "in-sync") {
         process.stdout.write(`${JSON.stringify({ event: "push-lag", ...pushLagReading })}\n`);
+      }
+
+      // 1d. goal→develop 最终 fan-in（SPEC-goal-branch-2026-10-03 §4.7，裁定⑭⑳）：人在终端跑
+      //   `quay goal merge` 只【记录请求】；真正把 goal/<id> --no-ff 并入 develop、验证、ff、删分支的是
+      //   本驱动（task 落地机制的所有者，DIR-131）。每轮从 ledger 重派生「待执行」（⛔ 不存状态）：
+      //   有请求 ∧ 分支存在 ∧ 非 develop 祖先 ∧ tip 前进过（tip 不变不重跑，裁定⑳）。执行本身持
+      //   goal 锁 + develop 锁（固定顺序）并跑全量 suite——代价高，但只在有请求时发生。
+      //   ⛔ 本步失败绝不能让整轮抛错（下一轮重派生重试，不是错误轮）；读数进 round（唯一观测载体）。
+      step = "goal-merge";
+      try {
+        const pending = pendingGoalMerges(rootDir);
+        for (const p of pending) {
+          // runId / scriptsDir 缺省由执行侧解析（⛔ 不把驻留环的变量名假设带进去）。
+          const r = await runGoalMergeFanIn({ root: rootDir, goalId: p.goalId, request: p.request });
+          if (json) process.stdout.write(`${JSON.stringify({ event: "goal-merge", goalId: p.goalId, outcome: r.outcome, step: r.step, reason: r.reason, landedSha: r.landedSha })}\n`);
+        }
+      } catch (e: any) {
+        // 执行侧已自行 try/catch 并落事件；此处只兜「派生/装配」的意外抛错（⛔ 不成错误轮，下一轮重试）。
+        if (json) process.stdout.write(`${JSON.stringify({ event: "goal-merge-instrument-failure", cause: `CAUSE=goal-merge-step-threw — ${e?.message ?? String(e)}` })}\n`);
       }
 
       // 2. 池非空且未达 cap 且未判停 ⇒ 走选择环起下一个。

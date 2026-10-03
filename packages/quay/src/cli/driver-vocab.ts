@@ -15,12 +15,14 @@
 
 /** `quay driver <verb>` 的全部 verb。
  *
- *  ⚠️ `log` 与其余六个 verb 的**类别不同**：那六个是 supervisor kernel 的**控制面**动词（start/stop/
- *  drain/resume/status/restart 都要落到常驻进程上），`log` 是**只读的载体读取**——它不 spawn kernel、
- *  也不碰任何控制态。它仍在此表里，是因为用户找它的位置就是 `quay driver`（人 2026-09-20 的裁定把
- *  「driver 应当记录的日志」的可达面点名在 quay cli/mcp/web 上）；cli/driver.ts 在委派 kernel 之前
- *  截住它（见那里的 `runDriverLog`）。 */
-export const VERBS = ["start", "stop", "drain", "resume", "status", "restart", "log"];
+ *  ⚠️ `log` / `live` 与其余六个 verb 的**类别不同**：那六个是 supervisor kernel 的**控制面**动词
+ *  （start/stop/drain/resume/status/restart 都要落到常驻进程上），`log` 与 `live` 是**只读**的——
+ *  它们不 spawn kernel、也不碰任何控制态。`log` 读 driver 的**记录载体**；`live` 读**当前在飞 worker
+ *  集合**（`.quay/worker-*.jsonl` + host-global `/proc`，经 observation.readLive，⛔ 不是第二份扫描）。
+ *  两者仍在此表里，是因为用户找它们的位置就是 `quay driver`（人 2026-09-20 的裁定把「driver 应当记录的
+ *  日志」的可达面点名在 quay cli/mcp/web 上）；cli/driver.ts 在委派 kernel 之前截住它们
+ *  （见那里的 `runDriverLog` / `runDriverLive`）。 */
+export const VERBS = ["start", "stop", "drain", "resume", "status", "restart", "log", "live"];
 
 // ⛔ 白名单必须与 kernel 的 DRIVER_KINDS 一致（suite 已按人 2026-09-07 裁定退役移除）。导出供
 // goal-driver.test.mjs 断言两者集合相等（gap-goal-driver-mechanical-ring AC6），并作为帮助文本

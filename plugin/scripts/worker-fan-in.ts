@@ -31,6 +31,7 @@
 // writeScopedGateCache / MechanicalFanInResult）另经普通 import 取——`export { … } from` 不建立本地绑定。
 
 import fs from "node:fs";
+import os from "node:os";
 import path from "node:path";
 import { pathToFileURL } from "node:url";
 import { randomUUID } from "node:crypto";
@@ -46,6 +47,18 @@ import {
 } from "./driver-runtime.ts";
 import { spawnSuiteAndWait, type SuiteOutcome, type SuiteRunResult } from "./suite-driver.ts";
 import { suiteLockBase } from "./suite-lock-slots.ts";
+// SPEC-goal-branch-2026-10-03 §4.6：goal 分支有【自己的】fan-in 锁（裁定⑥），锁文件名是派生量——
+// `goal/<GOAL-NNN>` → `fan-in.goal-<GOAL>.lock`。goalIdFromBranchToken 是「该 token 是不是 goal 分支、
+// 叫什么 GOAL」的单一实现（与 §4.8 身份检查同源，⛔ 不写第二份正则）。budget-model.ts 是 leaf（只
+// import node 内建），无反向边。
+import { goalIdFromBranchToken, goalBranchName, goalBranchRefExists } from "../../packages/quay/src/branch-model.ts";
+// SPEC-goal-branch-2026-10-03 §4.7 (裁定⑫⑲⑳): the goal→develop merge executor is the worker-driver
+// (DIR-131). The REQUEST/RESULT event shapes + the derived-pending reader live in Core (ONE definition,
+// shared with `quay goal merge` and the tests); ⛔ this module never re-declares them.
+import {
+  GOAL_MERGE_RESULT_GATE,
+  type GoalMergeRequest,
+} from "../../packages/quay/src/goal-merge.ts";
 // gate-script-base 是叶子（只 import node 内建）——⛔ 不成环。normalizeRel 供本文件的 suite 日志
 // 失败行解析（自 worker-driver.ts 迁入，见该簇的注释）。
 import { normalizeRel } from "./gate-script-base.ts";
@@ -54,8 +67,13 @@ import { buildMirrorState, writeMirrorState, shouldSkipMirrorWrite, readCurrentS
 import { defaultLaneCount, readLoadAvg } from "./full-suite-runner.ts";
 import { SUITE_LOG_NOT_RUN_PREFIX, SUITE_LOG_RUN_START_PREFIX } from "./full-suite-runner.ts";
 import { buildPreVerifiedRoundRecord, appendPreVerifiedRound } from "./pre-verified-round-record.ts";
-import { splitTaskFile, statusFromFrontmatter, patchStatusField } from "./task-ops.ts";
+import { splitTaskFile, statusFromFrontmatter, patchStatusField, commitTaskFile } from "./task-ops.ts";
 import { fetchTaskStatusAtRef } from "./task-schema.ts";
+// B2 (SPEC-goal-branch-2026-10-03 §5): the doc-face write path — main-checkout commit +
+// propagateDocBranchToDevelop (ff-only + semantic fallback). Importing it (⛔ not re-implementing
+// the push/semantic-fallback machinery) is safe for the import-graph ratchet: driver-filters.ts
+// does not reach back to this module, so this is not an SCC edge.
+import { propagateDocBranchToDevelop } from "./driver-filters.ts";
 // ⛔ `import type`（编译期擦除）——运行期符号仍经 loadFfMergeModule 的动态 import 取（见其注释）；若改成
 // 值 import，Core 源码树字面量就会以【静态边】进入本 kernel 的 bundle，而它必须仍由 coreSrcAliasPlugin
 // 按同一处 specifier 内联。
@@ -895,25 +913,28 @@ export function readFailedTestFiles(logText: string, root?: string | null): Fail
   };
 }
 
-/** 读 fan-in 锁事件里本任务+runId 的持有时长（AC1/AC2 判据输入，纯文件读）。 */
+/** 读 fan-in 锁事件里本任务+runId 的持有时长（AC1/AC2 判据输入，纯文件读）。`lock` = 本次 acquire
+ *  的锁域标签（锁文件 basename，SPEC-goal-branch §4.6），使「这次落地用了哪把锁」事后可核；缺字段
+ *  （老事件）⇒ null（⛔ 不伪造成 fan-in.lock——硬规则 3b）。 */
 export function readFanInLockHold(
   root: string,
   task: string,
   runId: string,
-): { lockHoldSecs: number | null; lockAcquireEpoch: number | null; lockReleaseEpoch: number | null } {
+): { lockHoldSecs: number | null; lockAcquireEpoch: number | null; lockReleaseEpoch: number | null; lock: string | null } {
   const file = path.join(root, ".quay", "fan-in-lock-events.jsonl");
   let text = "";
   try {
     text = fs.readFileSync(file, "utf8");
   } catch {
-    return { lockHoldSecs: null, lockAcquireEpoch: null, lockReleaseEpoch: null };
+    return { lockHoldSecs: null, lockAcquireEpoch: null, lockReleaseEpoch: null, lock: null };
   }
   let acquire: number | null = null;
   let release: number | null = null;
+  let lock: string | null = null;
   for (const line of text.split("\n")) {
     const t = line.trim();
     if (!t) continue;
-    let rec: { event?: unknown; taskId?: unknown; runId?: unknown; epoch?: unknown };
+    let rec: { event?: unknown; taskId?: unknown; runId?: unknown; epoch?: unknown; lock?: unknown };
     try {
       rec = JSON.parse(t);
     } catch {
@@ -922,11 +943,13 @@ export function readFanInLockHold(
     if (rec.taskId !== task) continue;
     if (rec.runId !== runId) continue;
     if (typeof rec.epoch !== "number") continue;
-    if (rec.event === "acquire") acquire = rec.epoch;
-    else if (rec.event === "release") release = rec.epoch;
+    if (rec.event === "acquire") {
+      acquire = rec.epoch;
+      if (typeof rec.lock === "string") lock = rec.lock;
+    } else if (rec.event === "release") release = rec.epoch;
   }
   const lockHoldSecs = acquire !== null && release !== null ? Math.max(0, release - acquire) : null;
-  return { lockHoldSecs, lockAcquireEpoch: acquire, lockReleaseEpoch: release };
+  return { lockHoldSecs, lockAcquireEpoch: acquire, lockReleaseEpoch: release, lock };
 }
 
 // ── fan-in 锁：driver 自身经非分离直接子进程持锁（ADR-034）────────────────────────────
@@ -945,25 +968,39 @@ export function readFanInLockHold(
 // .quay/fan-in-lock-events.jsonl，fan-in-ff-protocol-check 判据4 与 readFanInLockHold
 // 继续读同一载体。
 
-/** fan-in 锁文件路径（git common dir 下的 fan-in.lock，与 suite 锁同目录不同文件）。
+/** fan-in 锁文件路径（git common dir 下，与 suite 锁同目录不同文件）。
  *  解析 git-common-dir（⛔ 不读 FULL_SUITE_LOCK_FILE env——那是 suite 锁的 seam，不属于 fan-in 锁）。 */
-export function fanInLockFile(root: string): string {
+export function fanInLockFileNamed(root: string, name: string): string {
   const r = spawnSync("git", ["rev-parse", "--git-common-dir"], { cwd: root, encoding: "utf8" });
   const commonDir = r.status === 0 && !r.error ? (r.stdout ?? "").trim() : "";
-  return path.join(path.resolve(root, commonDir || ".git"), "fan-in.lock");
+  return path.join(path.resolve(root, commonDir || ".git"), name);
+}
+
+/** develop 落地的 fan-in 锁文件（`fan-in.lock`）——今天的唯一锁域，逐字不变。 */
+export function fanInLockFile(root: string): string {
+  return fanInLockFileNamed(root, "fan-in.lock");
+}
+
+/** SPEC-goal-branch-2026-10-03 §4.6（裁定⑥）：每个 goal 分支有【自己】的 fan-in 锁
+ *  `<git-common-dir>/fan-in.goal-<GOAL-NNN>.lock`，使一个方向的落地不阻塞别的方向的落地。develop
+ *  目标 ⇒ 仍取 `fan-in.lock`（⛔ 逐字不变）。锁域由【派生】的 mergeTarget 决定，⛔ 不新增 stored flag。 */
+export function fanInLockFileForMergeTarget(root: string, mergeTarget: string): string {
+  const goalId = goalIdFromBranchToken(mergeTarget);
+  return goalId === null ? fanInLockFile(root) : fanInLockFileNamed(root, `fan-in.goal-${goalId}.lock`);
 }
 
 /** 持锁 holder 的 bash 脚本（非分离直接子进程；`cat >/dev/null` 阻塞在 stdin，driver 死 ⇒ EOF ⇒ 释放）。
- *  参数：$1=锁文件 $2=taskId $3=runIdJson（已编码 `"r"` 或 `null`）$4=agentIdJson $5=事件文件。 */
+ *  参数：$1=锁文件 $2=taskId $3=runIdJson（已编码 `"r"` 或 `null`）$4=agentIdJson $5=事件文件
+ *  $6=锁域标签（锁文件 basename，供 readFanInLockHold/事后核对「用了哪把锁」——§4.6 的 `lock` 字段）。 */
 const FAN_IN_LOCK_HOLDER = `exec {fd}>"$1" || exit 2
 flock -x "$fd" || exit 2
 _emit() {
-  printf '{"event":"%s","ts":"%s","epoch":%s,"taskId":"%s","pid":%s,"runId":%s,"agentId":%s}\\n' "$1" "$(date -u +%Y-%m-%dT%H:%M:%SZ)" "$(date +%s)" "$2" "$$" "$3" "$4"
+  printf '{"event":"%s","ts":"%s","epoch":%s,"taskId":"%s","pid":%s,"runId":%s,"agentId":%s,"lock":"%s"}\\n' "$1" "$(date -u +%Y-%m-%dT%H:%M:%SZ)" "$(date +%s)" "$2" "$$" "$3" "$4" "$5"
 }
-_emit acquire "$2" "$3" "$4" >> "$5"
-_emit acquire "$2" "$3" "$4"
+_emit acquire "$2" "$3" "$4" "$6" >> "$5"
+_emit acquire "$2" "$3" "$4" "$6"
 cat >/dev/null
-_emit release "$2" "$3" "$4" >> "$5"
+_emit release "$2" "$3" "$4" "$6" >> "$5"
 flock -u "$fd" 2>/dev/null || true
 exit 0`;
 
@@ -989,11 +1026,13 @@ export function acquireFanInLock(opts: {
   const eventsFile = opts.eventsFile ?? path.join(opts.root, ".quay", "fan-in-lock-events.jsonl");
   const runIdJson = opts.runId ? JSON.stringify(opts.runId) : "null";
   const agentIdJson = opts.agentId ? JSON.stringify(opts.agentId) : "null";
+  // §4.6：把锁域标签（锁文件 basename）写进事件——事后可核「这次落地用了哪把锁」（goal 锁 vs develop 锁）。
+  const lockLabel = path.basename(lockFile);
   fs.mkdirSync(path.dirname(eventsFile), { recursive: true });
 
   const child = spawn(
     "bash",
-    ["-c", FAN_IN_LOCK_HOLDER, "fan-in-lock-holder", lockFile, opts.task, runIdJson, agentIdJson, eventsFile],
+    ["-c", FAN_IN_LOCK_HOLDER, "fan-in-lock-holder", lockFile, opts.task, runIdJson, agentIdJson, eventsFile, lockLabel],
     { stdio: ["pipe", "pipe", "pipe"] },
   );
 
@@ -1143,6 +1182,52 @@ async function flipTaskDone(
     return commitTaskStatusChange(worktree, task, file, rebuild(flipped.fm), `tasks: 翻 ${task} done（driver 机械 fan-in）`);
   }
   return { ok: false, reason: `expected status 'ready' or 'done', got ${from === null ? "none" : JSON.stringify(from)}` };
+}
+
+/**
+ * B2 状态双写（SPEC-goal-branch-2026-10-03 §5，裁定⑪）：`done` 的语义是「已落到它的 mergeTarget」。
+ *  mergeTarget 是一条 goal 分支时，代码照常 ff 到 `goal/<id>`（上一步），但合并【目标】不在 develop——而
+ *  【派发/晋升读的是主检出盘上的 tasks/*.md，主检出跟随 develop】（CLAUDE.md 硬规则 11b）。若不把同一个
+ *  done 翻转也写到 develop，worktree 回收后 develop 上仍是 ready ⇒ 任务被【反复派发】（本 gap 的缺陷）。
+ *
+ *  写路径 = 现有文档面写路径（⛔ 不自造）：主检出（root）上把 tasks/<task>.md 翻成 done 并 pathspec 限定
+ *  提交（commitTaskFile，⛔ 不裸 commit 扫共享 index）→ propagateDocBranchToDevelop（ff-only + 语义兜底，
+ *  把 doc 分支推到 develop）。主检出已是 done（上一轮部分成功的残留）⇒ 不重复提交，仅再同步一次。
+ *
+ *  ⛔ 只在 `mergeTarget !== "develop"` 时调用（develop 目标路径逐字不变，AC1）：develop 目标下 done 随
+ *  ff 直接落到 develop，不需要也不得产生额外的文档面提交。
+ *
+ *  拒绝取值（硬规则 3b/6）：主检出任务文件读不到 / 无 frontmatter / 状态非 ready|done / 提交失败 /
+ *  propagate 返回 false ⇒ {ok:false, reason}（⛔ 不与「已同步」同形）。
+ */
+async function syncDoneToDocFace(root: string, task: string): Promise<{ ok: boolean; reason: string | null }> {
+  const rel = `tasks/${task}.md`;
+  const file = path.join(root, rel);
+  let text: string;
+  try {
+    text = fs.readFileSync(file, "utf8");
+  } catch (e) {
+    return { ok: false, reason: `doc-face task file unreadable: ${(e as Error).message}` };
+  }
+  const split = splitTaskFile(text);
+  if (!split) return { ok: false, reason: "doc-face task file has no frontmatter" };
+  const from = statusFromFrontmatter(split.frontmatterRaw);
+  if (from !== "ready" && from !== "done") {
+    return { ok: false, reason: `doc-face status expected 'ready'/'done', got ${from === null ? "none" : JSON.stringify(from)}` };
+  }
+  if (from === "ready") {
+    const flipped = patchStatusField(split.frontmatterRaw, "done");
+    if (!flipped.ok) return { ok: false, reason: `doc-face flip failed: ${flipped.reason}` };
+    const nextText = `${split.open}${flipped.fm}${split.close}${split.body}`;
+    fs.writeFileSync(file, nextText, "utf8");
+    if (!commitTaskFile(root, rel, `tasks: 翻 ${task} done（goal 分支落地，状态双写 develop）`)) {
+      return { ok: false, reason: "doc-face commit failed" };
+    }
+  }
+  if (!propagateDocBranchToDevelop(root)) {
+    return { ok: false, reason: "propagateDocBranchToDevelop failed (doc→develop ff-only ∧ semantic fallback both failed)" };
+  }
+  return { ok: true, reason: null };
 }
 
 /** 解析 `packages/quay/src/` 子树下一模块（shipped 感知，⛔ 硬编码 packages/quay/src 布局锚点）：
@@ -1693,7 +1778,9 @@ export async function runMechanicalFanIn(opts: MechanicalFanInOptions): Promise<
   let fanInLock: FanInLockHandle;
   const acquireT0 = Date.now();
   try {
-    fanInLock = await acquireFanInLock({ root, task, runId });
+    // SPEC-goal-branch §4.6（裁定⑥）：锁域随 mergeTarget 派生——goal 分支落地持自己的
+    // `fan-in.goal-<GOAL>.lock`，develop 落地持 `fan-in.lock`（逐字不变），使一个方向的落地不阻塞别的。
+    fanInLock = await acquireFanInLock({ root, task, runId, lockFile: fanInLockFileForMergeTarget(root, mergeTarget) });
     trace({ step: "acquire-fan-in-lock", exit: 0, wall_ms: Date.now() - acquireT0, ok: true });
   } catch (e) {
     trace({ step: "acquire-fan-in-lock", exit: 1, wall_ms: Date.now() - acquireT0, ok: false, reason: (e as Error)?.message ?? "acquire failed" });
@@ -2158,6 +2245,23 @@ export async function runMechanicalFanIn(opts: MechanicalFanInOptions): Promise<
     trace({ step: "ff", exit: ff.code, wall_ms: ffDurMs, ok: ff.code === 0, ...(ff.code === 0 ? {} : { reason: (ff.stderr || ff.stdout || "").trim() || `exit ${ff.code}` }) });
     if (ff.code !== 0) return fail("ff", { ok: false, status: ff.code, stdout: ff.stdout, stderr: ff.stderr, error: null });
 
+    // 9.3 状态双写（B2，SPEC-goal-branch-2026-10-03 §5 裁定⑪）：`done` = 已落到它的 mergeTarget。
+    //     mergeTarget 非 develop（goal 分支）时，done 只落在 goal/<id>；而派发/晋升读 develop 上的
+    //     tasks/*.md ⇒ 不双写则 develop 仍 ready ⇒ worktree 回收后任务被反复派发。ff 成功后经现有文档面
+    //     写路径（主检出提交 + propagateDocBranchToDevelop）把同一个 done 也写到 develop。
+    //     ⛔ 失败即 red（fail-closed，硬规则 3b）：状态没双写进 develop 就不能声称本轮落地完成——
+    //     worktree 保留，下一轮 flipTaskDone 见 mergeTarget 已 done 而 skip、ff 幂等，只重试本步。
+    //     ⛔ mergeTarget === "develop" 时【逐字不变】：本分支不进入，develop 目标下不产生额外文档面提交。
+    if (mergeTarget !== "develop") {
+      const docT0 = Date.now();
+      const docSync = await syncDoneToDocFace(root, task);
+      trace({
+        step: "doc-face-done-sync", exit: docSync.ok ? 0 : 1, wall_ms: Date.now() - docT0, ok: docSync.ok,
+        ...(docSync.ok ? {} : { reason: docSync.reason ?? "doc-face done sync failed" }),
+      });
+      if (!docSync.ok) return failClean("doc-face-done-sync", docSync.reason ?? "doc-face done sync failed");
+    }
+
     // 9.4b 写 complete pass GateEvent（gap-mechanical-fan-in-writes-no-complete-gateevent AC2）：机械
     // fan-in 此前绕过 gate 引擎（runMechanicalFanIn/flipTaskDone 全文零 GateEvent），.quay/gate-events.jsonl
     // 里 complete 单路缺席——stale-ready-audit 的 bypassComplete 每轮报 9 条真阳性被当噪声。现在经既有
@@ -2325,5 +2429,190 @@ export function mirrorMechanicalFanInSuiteState(opts: {
     writeMirrorState(opts.stateFile, built.state);
   } catch {
     // best-effort：镜像写失败 ≠ fan-in 失败（mfi 仍是权威）。
+  }
+}
+
+// ── goal→develop 最终 fan-in 的执行侧（SPEC-goal-branch-2026-10-03 §4.7，裁定⑭⑲⑳）────────────────
+//
+// 执行者是 worker-driver（task 落地机制的所有者，DIR-131）——⛔ 不是 goal-driver。人在终端里跑
+// `quay goal merge` 只【记录请求】（Core `packages/quay/src/goal-merge.ts`）；本函数是每轮把仍
+// 「待执行」的请求真正并入 develop 的那一半。
+//
+// 与 `runMechanicalFanIn` 的关系：**同一套机械（锁 → merge → 验证 → ff），源分支参数化**。
+//   · 持锁顺序固定「goal 锁 → develop 锁」（§4.6，避免死锁）。
+//   · 临时 worktree 检出 develop（detached），`git merge --no-ff goal/<id>` 造【一个】合并提交
+//     （裁定⑲）——develop 本身仍只做 ff，故「develop 上每个提交都是被验证过的树」不变。
+//   · 验证（typecheck / scoped 门 / 全量 suite）跑在临时 worktree 上；绿 ⇒ 用 ff-merge 的【源参数】
+//     （gap-goal-branch-ff-merge-source-param 的 `sourceRef`）把 develop ff 到该合并提交，删 goal 分支。
+//   · 红或冲突 ⇒ 不动任何 ref，释放锁，写 `goal-merge-result`；请求仍「待执行」（tip 前进后自动重试，
+//     裁定⑳）——重试由 `pendingGoalMerges`（Core）派生，⛔ 本函数不存状态。
+
+/** 写一条 `goal-merge-result` GateEvent（§4.7 裁定⑫：worker-driver 把结果写成 goal 侧可读的事件，
+ *  由现有 gap-filing 立「有请求 ∧ 最近一次执行红」的 gap——⛔ 事件里不含任何 fan-in 载体路径，
+ *  以过 `goal-driver-task-boundary-check.ts`）。与 appendCompleteGateEvent 同款动态 import（shipped
+ *  bundle 由 coreSrcAliasPlugin 内联）。best-effort：写失败返回 {ok:false}，不抛。 */
+export async function appendGoalMergeResultEvent(
+  root: string,
+  goalId: string,
+  payload: Record<string, unknown>,
+  actor = "quay-driver",
+): Promise<{ ok: boolean; reason: string | null }> {
+  try {
+    const { appendGateEvent } = await import(
+      "../../packages/quay/src/gate/gate-event-store.ts"
+    ) as { appendGateEvent: (logPath: string, event: unknown) => void };
+    appendGateEvent(path.join(root, ".quay", "gate-events.jsonl"), {
+      id: randomUUID(),
+      item_id: goalId,
+      pipeline_id: goalId,
+      gate: GOAL_MERGE_RESULT_GATE,
+      actor,
+      verdict: payload.outcome === "landed" ? "pass" : "fail",
+      timestamp: new Date().toISOString(),
+      payload,
+    });
+    return { ok: true, reason: null };
+  } catch (e) {
+    return { ok: false, reason: (e as Error)?.message ?? String(e) };
+  }
+}
+
+export interface GoalMergeFanInOptions {
+  root: string;
+  goalId: string;
+  request: GoalMergeRequest;
+  runId?: string;
+  perSuiteRunId?: string;
+  /** 注入可控 suite 结果（hermetic 测试缝；缺省 = 复用 defaultMechanicalSuiteCommand，与本仓 fan-in 同源）。 */
+  suiteCommand?: string[];
+  suiteLogFile?: string;
+  suiteCapture?: string;
+  suiteStateFile?: string;
+  slotBase?: string;
+  slotLib?: string;
+  scriptsDir?: string;
+  ffMergeModule?: string;
+  /** 可选的额外验证步（生产接线；缺省跳过并以 not-evaluated 记入 trace）。 */
+  typecheckCommand?: string[] | null;
+  antiDriftCommand?: string[] | null;
+  now?: () => Date;
+}
+
+export interface GoalMergeFanInResult {
+  outcome: "landed" | "red";
+  step: string | null;
+  reason: string | null;
+  tipSha: string;
+  landedSha: string | null;
+  mergeCommitSha: string | null;
+  requestEventId: string;
+}
+
+/** 把仍「待执行」的一条 goal 合并请求机械执行一次。⛔ 不调 LLM、不做语义修复；失败即 red + 落事件。 */
+export async function runGoalMergeFanIn(opts: GoalMergeFanInOptions): Promise<GoalMergeFanInResult> {
+  const { root, goalId, request } = opts;
+  const branch = goalBranchName(goalId);
+  const runId = opts.runId ?? `gm-${goalId}-${Date.now()}`;
+  const perSuiteRunId = opts.perSuiteRunId ?? newMechanicalSuiteRunId(goalId);
+  const tipSha = request.tipSha || (await mechSh(["git", "-C", root, "rev-parse", branch], 30_000)).stdout.trim();
+  const suiteCapture = opts.suiteCapture ?? path.join(root, ".quay", `goal-merge-suite-${goalId}.env`);
+  const suiteStateFile = opts.suiteStateFile ?? path.join(root, ".quay", "full-suite-state.json");
+  const suiteLogFile = opts.suiteLogFile ?? path.join(root, ".quay", `goal-merge-suite-${goalId}-${runId.replace(/[^A-Za-z0-9_.-]/g, "_")}.log`);
+  const scriptsDir = opts.scriptsDir ?? resolveKernelScriptsDir();
+
+  const red = async (step: string | null, reason: string): Promise<GoalMergeFanInResult> => {
+    await appendGoalMergeResultEvent(root, goalId, {
+      outcome: "red", step, reason, tipSha, requestEventId: request.eventId, landedSha: null,
+    });
+    return { outcome: "red", step, reason, tipSha, landedSha: null, mergeCommitSha: null, requestEventId: request.eventId };
+  };
+
+  // 固定加锁顺序：goal 锁 → develop 锁（§4.6）。任一 acquire 失败 ⇒ red（⛔ 不动任何 ref）。
+  let goalLock: FanInLockHandle | null = null;
+  let developLock: FanInLockHandle | null = null;
+  let tmpWorktree: string | null = null;
+  try {
+    try {
+      goalLock = await acquireFanInLock({ root, task: goalId, runId, lockFile: fanInLockFileForMergeTarget(root, branch) });
+    } catch (e) {
+      return red("acquire-goal-lock", (e as Error)?.message ?? String(e));
+    }
+    try {
+      developLock = await acquireFanInLock({ root, task: goalId, runId, lockFile: fanInLockFile(root) });
+    } catch (e) {
+      return red("acquire-develop-lock", (e as Error)?.message ?? String(e));
+    }
+
+    // develop 在锁内不会动——记下基线，ff 前复核（CAS 的另一半；⛔ 不假设）。
+    const developBase = (await mechSh(["git", "-C", root, "rev-parse", "develop"], 30_000)).stdout.trim();
+    if (!developBase) return red("read-develop", "develop ref does not resolve");
+
+    // 2. 临时 worktree 检出 develop（detached），造 --no-ff 合并提交（裁定⑲）。
+    //    路径用 mkdtemp 的【子目录】——`git worktree add <dir>` 要求目标不存在（mkdtemp 自身建的空目录
+    //    会让 git 报 "already exists"）。
+    tmpWorktree = path.join(fs.mkdtempSync(path.join(os.tmpdir(), `goal-merge-${goalId}-`)), "wt");
+    const add = await mechSh(["git", "-C", root, "worktree", "add", "--detach", tmpWorktree, "develop"], 60_000);
+    if (!add.ok) return red("worktree-add", (add.stderr || add.stdout || "git worktree add failed").trim());
+    const mergeMsg = `merge: ${branch} into develop (request ${request.eventId})`;
+    const merge = await mechSh(["git", "-C", tmpWorktree, "merge", "--no-ff", branch, "-m", mergeMsg], 120_000);
+    if (!merge.ok) {
+      await mechSh(["git", "-C", tmpWorktree, "merge", "--abort"], 30_000);
+      return red("merge-conflict", (merge.stderr || merge.stdout || "merge failed").trim());
+    }
+    const mergeCommitSha = (await mechSh(["git", "-C", tmpWorktree, "rev-parse", "HEAD"], 30_000)).stdout.trim();
+    if (!mergeCommitSha) return red("merge-commit", "merge produced no commit sha");
+
+    // 3. 验证（typecheck / scoped 门 / 全量 suite）——全部跑在临时 worktree（受测树 = 合并提交）。
+    if (opts.antiDriftCommand) {
+      const a = await mechSh(opts.antiDriftCommand, 120_000);
+      if (!a.ok) return red("anti-drift", (a.stderr || a.stdout || `exit ${a.status}`).trim());
+    }
+    if (opts.typecheckCommand) {
+      const t = await mechSh(opts.typecheckCommand, 180_000);
+      if (!t.ok) return red("typecheck", (t.stderr || t.stdout || `exit ${t.status}`).trim());
+    }
+    const suiteCommand = opts.suiteCommand ?? defaultMechanicalSuiteCommand({
+      task: goalId, worktree: tmpWorktree, root, suiteLogFile, runId: perSuiteRunId,
+    });
+    const suite = await mechSh(suiteCommand, 30 * 60_000);
+    if (!suite.ok) return red("suite", extractFailureSummary(combinedOutput(suite.stdout, suite.stderr)) || `exit ${suite.status}`);
+
+    // suite 绿：写证书（suite_head = 合并提交 = 待 ff tip ⇒ delta 空 ⇒ 证书闸放行，同 runMechanicalFanIn）。
+    writeSuiteCapture(suiteCapture, { full_suite_ran: "true", suite_exit: "0", suite_head: mergeCommitSha });
+
+    // 4. 绿 ⇒ ff-only develop 到该合并提交（ff-merge 的【源参数】），删 goal 分支。
+    const ffMod = await loadFfMergeModule(opts.ffMergeModule);
+    const ff = await ffMod.ffMerge({
+      task: goalId, root, mergeTarget: "develop", sourceRef: mergeCommitSha,
+      runId, attemptKey: perSuiteRunId, worktree: tmpWorktree, suiteCapture, suiteState: suiteStateFile,
+      lockWaitSecs: 30, token: randomUUID(), scriptsDir,
+    });
+    if (ff.code !== 0) return red("ff", (ff.stderr || ff.stdout || `exit ${ff.code}`).trim());
+    const landedSha = ff.landedSha ?? (await mechSh(["git", "-C", root, "rev-parse", "develop"], 30_000)).stdout.trim();
+
+    // 删 goal 分支（+ 判据 worktree，若存在）。best-effort：删不动 ⇒ 落痕但仍是 landed（判据是
+    // 「Develop 上出现合并提交」，分支删除是收尾——残留分支不使已落地的合并消失）。
+    const criterionWt = path.join(root, ".quay", `goal-criterion-${goalId}`);
+    await mechSh(["git", "-C", root, "worktree", "remove", "--force", criterionWt], 60_000);
+    const del = await mechSh(["git", "-C", root, "branch", "-D", branch], 60_000);
+    if (!del.ok) {
+      await appendGoalMergeResultEvent(root, goalId, {
+        outcome: "landed", step: "branch-delete", reason: (del.stderr || "branch -D failed").trim(),
+        tipSha, requestEventId: request.eventId, landedSha,
+      });
+    }
+    await appendGoalMergeResultEvent(root, goalId, {
+      outcome: "landed", step: null, reason: null, tipSha, requestEventId: request.eventId, landedSha,
+    });
+    return { outcome: "landed", step: null, reason: null, tipSha, landedSha, mergeCommitSha, requestEventId: request.eventId };
+  } catch (e) {
+    return red("exception", (e as Error)?.message ?? String(e));
+  } finally {
+    if (tmpWorktree) {
+      await mechSh(["git", "-C", root, "worktree", "remove", "--force", tmpWorktree], 60_000);
+      try { fs.rmSync(tmpWorktree, { recursive: true, force: true }); } catch { /* best-effort */ }
+    }
+    if (developLock) await developLock.release();
+    if (goalLock) await goalLock.release();
   }
 }

@@ -7,6 +7,7 @@ import os from "node:os";
 import path from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { execFileSync, spawn, spawnSync } from "node:child_process";
+import YAML from "yaml";
 
 import {
   computeOutcome,
@@ -152,7 +153,17 @@ import {
   suiteRedAttemptsInWindow,
   assertionSignaturesFromSuiteLog,
   RETRY_EXEMPTION_WINDOW_MS_DEFAULT,
+  resolveTaskMergeTarget,
+  resolveTaskMergeTargetDetail,
+  untaggedGoalBranchOverlaps,
+  findGoalBranchUntaggedOverlap,
+  fanInLockFileForMergeTarget,
+  // SPEC-goal-branch §4.7：goal→develop 最终 fan-in 的执行侧 + 派生读数（worker-driver 的 re-export 面）。
+  runGoalMergeFanIn,
+  pendingGoalMerges,
+  readGoalMergeResults,
 } from "../scripts/worker-driver.ts";
+import { recordGoalMergeRequest } from "../../packages/quay/src/goal-merge.ts";
 import { defaultLaneCount } from "../scripts/full-suite-runner.ts";
 import { spawnSuiteAndWait } from "../scripts/suite-driver.ts";
 import { suiteLockBase, suiteLockSlotPaths } from "../scripts/suite-lock-slots.ts";
@@ -3493,4 +3504,355 @@ test("withRecordedSuiteSignatures — 三态写入（不适用 / 读不出 / 读
   assert.strictEqual(legacy.suiteSignatures, null);
   assert.strictEqual(recorded.suiteSignaturesRecorded, true, "新记录：签名已留存");
   assert.deepEqual(recorded.suiteSignatures, [AC_UNRELATED_SIG]);
+});
+
+// ── gap-goal-branch-dispatch-wiring-and-task-fan-in ──────────────────────────────────────────────
+// SPEC-goal-branch-2026-10-03 §4.3/§4.6/§4.9（裁定①③⑥⑧⑰）：派发接线——`resolveTaskMergeTarget` 的
+// 单一解析结果同时用于【worktree 分叉点 / fan-in 落点 / fan-in 锁文件】，并产出未标注重叠读数。
+// fixtures 用真 git 仓：分支存在性是活的 git 读（§3「分支名是派生量、存在性读 git」），⛔ 不是 stored flag。
+
+const GBR_SCRIPTS_DIR = path.join(REPO_ROOT, "plugin", "scripts");
+const GBR_FF_MERGE_MODULE = path.join(REPO_ROOT, "packages", "quay", "src", "fan-in", "ff-merge.ts");
+const GBR_SLOT_LIB = path.join(GBR_SCRIPTS_DIR, "suite-slot-lib.sh");
+const GBR_TASK = "gap-gb-e2e";
+const GBR_GOAL = "GOAL-901";
+const GBR_AC = "AC-901";
+
+/** 一个带 goals/ 的真 git 仓（可含 `goal/GOAL-901` 分支）。develop 是初始分支。 */
+function makeGoalBranchRepo({ withBranch = false } = {}) {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "goalbranch-"));
+  const repo = path.join(dir, "repo");
+  fs.mkdirSync(repo, { recursive: true });
+  const g = (...a) => {
+    const r = spawnSync("git", ["-C", repo, ...a], { encoding: "utf8" });
+    assert.equal(r.status, 0, `git ${a.join(" ")} failed: ${r.stderr ?? ""}`);
+    return (r.stdout ?? "").trim();
+  };
+  g("init", "-q");
+  g("config", "user.email", "gb@test");
+  g("config", "user.name", "gb");
+  g("symbolic-ref", "HEAD", "refs/heads/develop"); // 钉默认分支，⛔ 不受宿主 init.defaultBranch 影响
+  fs.mkdirSync(path.join(repo, "goals"), { recursive: true });
+  fs.mkdirSync(path.join(repo, "tasks"), { recursive: true });
+  fs.mkdirSync(path.join(repo, "scripts"), { recursive: true });
+  fs.writeFileSync(path.join(repo, "scripts", "test.sh"), "#!/usr/bin/env bash\nexit 0\n", "utf8");
+  fs.writeFileSync(path.join(repo, "README.md"), "# repo\n", "utf8");
+  g("add", "-A");
+  g("commit", "-q", "-m", "base");
+  if (withBranch) g("branch", `goal/${GBR_GOAL}`, "develop");
+  return { repo, dir, g };
+}
+
+/** 写 GOAL/AC/task 三件套：AC.goal → GOAL（active ∧ branch:true），task.goal_ac → AC。 */
+function writeGoalBranchRecords(repo, { goalStatus = "active", branch = true, taskTouches = "- docs/feature.md\n- tasks/" + GBR_TASK + ".md" } = {}) {
+  fs.writeFileSync(
+    path.join(repo, "goals", `${GBR_GOAL}-x.md`),
+    `---\nid: ${GBR_GOAL}\ntitle: goal\nstatus: ${goalStatus}\nkind: goal\n${branch ? "branch: true\n" : ""}---\n\n## 背景\n\nbody\n`,
+    "utf8",
+  );
+  fs.writeFileSync(
+    path.join(repo, "goals", `${GBR_AC}-x.md`),
+    `---\nid: ${GBR_AC}\ntitle: ac\nstatus: active\nkind: criterion\ngoal: ${GBR_GOAL}\n---\n\nbody\n`,
+    "utf8",
+  );
+  fs.writeFileSync(
+    path.join(repo, "tasks", `${GBR_TASK}.md`),
+    `---\nid: ${GBR_TASK}\ntitle: t\nstatus: ready\ngoal_ac: ${GBR_AC}\n---\n\n## Proposal\n\nprose\n\n## Touches\n\n${taskTouches}\n\n## Acceptance Criteria\n\n- [x] AC1 done\n\n## Definition of Done\n\n- [x] landed\n`,
+    "utf8",
+  );
+  fs.writeFileSync(path.join(repo, "README.md"), "# repo\n", "utf8");
+}
+
+test("AC1 — resolveTaskMergeTarget：无 goal_ac / draft goal / branch 不存在 ⇒ develop；全满足 ⇒ goal/<id>", (t) => {
+  const { repo, dir } = makeGoalBranchRepo({ withBranch: true });
+  t.after(() => rmSafe(dir));
+
+  // ① 无 goal_ac ⇒ develop（opt-in 缺省，路径逐字不变）。
+  fs.writeFileSync(path.join(repo, "tasks", "gbr-plain.md"), `---\nid: gbr-plain\nstatus: ready\n---\n\n## Proposal\n\nx\n`, "utf8");
+  assert.equal(resolveTaskMergeTarget("gbr-plain", repo), "develop", "无 goal_ac ⇒ develop");
+
+  // ② goal 为 draft ⇒ develop（⛔ 不因 branch:true 就放行）。
+  writeGoalBranchRecords(repo, { goalStatus: "draft" });
+  assert.equal(resolveTaskMergeTarget(GBR_TASK, repo), "develop", "draft goal ⇒ develop");
+  assert.equal(resolveTaskMergeTargetDetail(GBR_TASK, repo).reason, "goal-not-active");
+
+  // ③ active + branch:true 但分支不存在 ⇒ develop（存在性是活的 git 读）。
+  writeGoalBranchRecords(repo, { goalStatus: "active", branch: true });
+  const noBranch = makeGoalBranchRepo({ withBranch: false });
+  fs.mkdirSync(path.join(noBranch.repo, "goals"), { recursive: true });
+  writeGoalBranchRecords(noBranch.repo);
+  t.after(() => rmSafe(noBranch.dir));
+  assert.equal(resolveTaskMergeTarget(GBR_TASK, noBranch.repo), "develop", "branch 不存在 ⇒ develop");
+  assert.equal(resolveTaskMergeTargetDetail(GBR_TASK, noBranch.repo).reason, "branch-absent");
+
+  // ④ 全部满足 ⇒ goal/<id>。
+  assert.equal(resolveTaskMergeTarget(GBR_TASK, repo), `goal/${GBR_GOAL}`, "active ∧ branch:true ∧ 分支存在 ⇒ goal/<id>");
+  const detail = resolveTaskMergeTargetDetail(GBR_TASK, repo);
+  assert.equal(detail.reason, "goal-branch");
+  assert.equal(detail.goalId, GBR_GOAL);
+});
+
+test("AC1b — 非 branch-mode（branch:false）与未声明 branch 均 ⇒ develop", (t) => {
+  const a = makeGoalBranchRepo({ withBranch: true });
+  t.after(() => rmSafe(a.dir));
+  writeGoalBranchRecords(a.repo, { branch: false });
+  assert.equal(resolveTaskMergeTarget(GBR_TASK, a.repo), "develop", "branch:false ⇒ develop");
+  assert.equal(resolveTaskMergeTargetDetail(GBR_TASK, a.repo).reason, "not-branch-mode");
+
+  const b = makeGoalBranchRepo({ withBranch: true });
+  t.after(() => rmSafe(b.dir));
+  // GOAL 文件不带 branch 行（缺省 false）。
+  fs.mkdirSync(path.join(b.repo, "goals"), { recursive: true });
+  fs.writeFileSync(path.join(b.repo, "goals", `${GBR_GOAL}-x.md`), `---\nid: ${GBR_GOAL}\nstatus: active\nkind: goal\n---\n\nbody\n`, "utf8");
+  fs.writeFileSync(path.join(b.repo, "goals", `${GBR_AC}-x.md`), `---\nid: ${GBR_AC}\nkind: criterion\ngoal: ${GBR_GOAL}\n---\n\nbody\n`, "utf8");
+  fs.writeFileSync(path.join(b.repo, "tasks", `${GBR_TASK}.md`), `---\nid: ${GBR_TASK}\nstatus: ready\ngoal_ac: ${GBR_AC}\n---\n\nprose\n`, "utf8");
+  assert.equal(resolveTaskMergeTarget(GBR_TASK, b.repo), "develop", "未声明 branch ⇒ develop");
+});
+
+test("AC2 — e2e：goal 分支任务的 worktree 从 goal/<id> 分叉、fan-in 落 goal/<id>、develop 看不到它、锁是 goal 锁", async (t) => {
+  const { repo, dir, g } = makeGoalBranchRepo({ withBranch: true });
+  t.after(() => rmSafe(dir));
+  writeGoalBranchRecords(repo);
+  g("add", "-A");
+  g("commit", "-q", "-m", "task + goals");
+  // goal 分支带上任务记录（从 base 分叉，任务文件在 base 之后的这条提交里 ⇒ 让 goal 分支包含它）。
+  g("branch", "-f", `goal/${GBR_GOAL}`, "develop");
+
+  const wt = path.join(dir, "wt");
+  g("worktree", "add", "-q", "-b", `task/${GBR_TASK}`, wt, `goal/${GBR_GOAL}`);
+  // develop 脱离主检出（ff 退化为纯 ref 更新）。
+  g("checkout", "-q", "-b", "develop-work");
+
+  // 派发 prompt 把 base 指名给 worker（§4.3 的 fork 点接线）。
+  const prompt = buildWorkerPrompt(GBR_TASK, repo);
+  assert.match(prompt, /goal\/GOAL-901/, "创建 prompt 必须指名 goal base");
+  assert.match(prompt, /--base goal\/GOAL-901/, "provisioning 签名必须把 goal base 传给 fork-point 自检");
+
+  // 实现提交（doc 面）。
+  fs.mkdirSync(path.join(wt, "docs"), { recursive: true });
+  fs.writeFileSync(path.join(wt, "docs", "feature.md"), "# feature\n", "utf8");
+  const wg = (...a) => {
+    const r = spawnSync("git", ["-C", wt, ...a], { encoding: "utf8" });
+    assert.equal(r.status, 0, `git(wt) ${a.join(" ")}: ${r.stderr ?? ""}`);
+  };
+  wg("add", "-A");
+  wg("commit", "-q", "-m", "implement feature");
+
+  // 解析出的落点 = goal 分支（同一函数三处共用）。
+  const mergeTarget = resolveTaskMergeTarget(GBR_TASK, repo);
+  assert.equal(mergeTarget, `goal/${GBR_GOAL}`);
+  assert.equal(fanInLockFileForMergeTarget(repo, mergeTarget), path.join(repo, ".git", `fan-in.goal-${GBR_GOAL}.lock`));
+
+  const slotBase = path.join(dir, "full-suite.lock");
+  const capture = path.join(dir, "suite.env");
+  const suiteLog = path.join(dir, "suite.log");
+  const runId = "gb-e2e-1";
+  const r = await runMechanicalFanIn({
+    task: GBR_TASK,
+    worktree: wt,
+    root: repo,
+    runId,
+    mergeTarget,
+    forceSuite: true,
+    scriptsDir: GBR_SCRIPTS_DIR,
+    ffMergeModule: GBR_FF_MERGE_MODULE,
+    slotBase,
+    slotLib: GBR_SLOT_LIB,
+    silenceMs: 5000,
+    suiteCapture: capture,
+    suiteLogFile: suiteLog,
+    suiteCommand: ["bash", "-c", "echo suite-running; exit 0"],
+    scopedGateCommand: ["true"],
+    docCheckCommand: ["true"],
+  });
+  assert.equal(r.outcome, "landed", `fan-in must land on the goal branch: ${JSON.stringify(r)}`);
+
+  // 落点：goal/<id> 上有实现 + done；develop 上看不到该实现。
+  const goalHasImpl = spawnSync("git", ["-C", repo, "cat-file", "-e", `goal/${GBR_GOAL}:docs/feature.md`], { encoding: "utf8" });
+  assert.equal(goalHasImpl.status, 0, "goal/<id> 上有该任务的实现");
+  assert.match(g("show", `goal/${GBR_GOAL}:tasks/${GBR_TASK}.md`), /^status: done$/m, "done 落在 goal 分支");
+  const developHasImpl = spawnSync("git", ["-C", repo, "cat-file", "-e", "develop:docs/feature.md"], { encoding: "utf8" });
+  assert.notEqual(developHasImpl.status, 0, "develop 上看不到该任务的实现（隔离）");
+  const isAncestor = spawnSync("git", ["-C", repo, "merge-base", "--is-ancestor", `goal/${GBR_GOAL}`, "develop"], { encoding: "utf8" });
+  assert.notEqual(isAncestor.status, 0, "goal 分支尚未并入 develop");
+
+  // develop 的 first-parent 链上没有【机械 fan-in 翻 done】提交（任务分支的落地提交没进 develop）。
+  const firstParent = g("log", "--first-parent", "--format=%s", "develop");
+  assert.doesNotMatch(firstParent, /driver 机械 fan-in/, "develop first-parent 链上不得有该任务的机械翻 done 提交");
+
+  // 锁域：用的正是 goal 锁。
+  const lock = readFanInLockHold(repo, GBR_TASK, runId);
+  assert.equal(lock.lock, `fan-in.goal-${GBR_GOAL}.lock`, "fan-in 必须持 goal 分支自己的锁");
+});
+
+test("AC3 — 未标注读数：无 goal_ac 且 Touches 与 branch-mode goal 在飞任务重叠 ⇒ goal-branch-untagged-overlap", (t) => {
+  const { repo, dir } = makeGoalBranchRepo({ withBranch: true });
+  t.after(() => rmSafe(dir));
+  writeGoalBranchRecords(repo, { taskTouches: "- plugin/scripts/shared.ts\n- tasks/" + GBR_TASK + ".md" });
+  // 一条【已标注】的任务（落 goal 分支）——在飞对端。
+  const peer = "gap-gb-peer";
+  fs.writeFileSync(
+    path.join(repo, "tasks", `${peer}.md`),
+    `---\nid: ${peer}\nstatus: ready\ngoal_ac: ${GBR_AC}\n---\n\n## Proposal\n\nx\n\n## Touches\n\n- plugin/scripts/shared.ts\n`,
+    "utf8",
+  );
+  assert.equal(resolveTaskMergeTarget(peer, repo), `goal/${GBR_GOAL}`, "fixture premise：对端确实落 goal 分支");
+
+  // ① 重叠 ⇒ 有读数，token 可 grep。
+  const untagged = "gap-gb-untagged";
+  fs.writeFileSync(
+    path.join(repo, "tasks", `${untagged}.md`),
+    `---\nid: ${untagged}\nstatus: ready\n---\n\n## Proposal\n\nx\n\n## Touches\n\n- plugin/scripts/shared.ts\n`,
+    "utf8",
+  );
+  const hits = findGoalBranchUntaggedOverlap(repo, untagged, [untagged, peer]);
+  assert.equal(hits.length, 1, "重叠 ⇒ 一条读数");
+  assert.equal(hits[0].kind, "goal-branch-untagged-overlap");
+  assert.equal(hits[0].goal, GBR_GOAL);
+  assert.deepEqual(hits[0].overlap, ["plugin/scripts/shared.ts"]);
+  assert.match(JSON.stringify(hits), /goal-branch-untagged-overlap/, "记录含可 grep token");
+
+  // ② 不重叠 ⇒ 不含（记录为空，⛔ 不是「没查」）。
+  const disjoint = "gap-gb-disjoint";
+  fs.writeFileSync(
+    path.join(repo, "tasks", `${disjoint}.md`),
+    `---\nid: ${disjoint}\nstatus: ready\n---\n\n## Proposal\n\nx\n\n## Touches\n\n- plugin/scripts/other.ts\n`,
+    "utf8",
+  );
+  assert.deepEqual(findGoalBranchUntaggedOverlap(repo, disjoint, [disjoint, peer]), [], "不重叠 ⇒ 无读数");
+
+  // ③ 已标注的任务不进入本读数域（它有 goal_ac）。
+  assert.deepEqual(findGoalBranchUntaggedOverlap(repo, peer, [peer, untagged]), [], "已标注任务不产生未标注读数");
+
+  // ④ 纯核：对端不落 goal 分支 ⇒ 不在域内。
+  assert.deepEqual(
+    untaggedGoalBranchOverlaps({
+      task: "t",
+      taskTouches: ["a.ts"],
+      peers: [{ id: "p", mergeTarget: "develop", touches: ["a.ts"] }],
+    }),
+    [],
+    "对端落 develop ⇒ 无读数",
+  );
+});
+
+// ── SPEC-goal-branch-2026-10-03 §4.7 — goal→develop 最终 fan-in 执行侧（裁定⑭⑲⑳）──────────────────
+//
+// 端到端（临时仓库 + 注入可控 suite 结果）：人在终端 `quay goal merge` 只记录请求；worker-driver 每轮
+// 从 ledger 重派生「待执行」并执行 --no-ff 合并 + 验证 + ff + 删分支。⛔ 这些用例断言的是【git ref
+// 的实际走向】（合并提交在 develop first-parent 上、develop 被 ff 到它、goal 分支消失）与【失败时 ref
+// 不动 + 落 goal-merge-result 事件】——不是返回值自述，因为落地与否的直接量就是 git 本身。
+const FF_MERGE_MODULE_ABS = path.join(REPO_ROOT, "packages", "quay", "src", "fan-in", "ff-merge.ts");
+const GM_GOAL = "GOAL-901";
+
+function makeGoalMergeRepo(tag) {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), `goal-merge-e2e-${tag}-`));
+  const g = (...a) => execFileSync("git", ["-C", root, ...a], { encoding: "utf8" });
+  g("init", "-q"); g("config", "user.email", "t@example.com"); g("config", "user.name", "T");
+  g("branch", "-M", "develop");
+  fs.writeFileSync(path.join(root, ".gitignore"), ".quay/\n");
+  fs.mkdirSync(path.join(root, "goals"), { recursive: true });
+  fs.writeFileSync(path.join(root, "goals", `${GM_GOAL}-a-goal.md`),
+    `---\nid: ${GM_GOAL}\ntitle: a goal\nstatus: active\nkind: directive\nbranch: true\n---\n\nbody long enough for the fixture to parse as a goal record yes indeed\n`);
+  g("add", "-A"); g("commit", "-q", "-m", "base");
+  g("checkout", "-q", "-b", `goal/${GM_GOAL}`);
+  fs.writeFileSync(path.join(root, "work.txt"), "goal work\n");
+  g("add", "-A"); g("commit", "-q", "-m", "goal work");
+  g("checkout", "-q", "-b", "develop-work"); // develop 脱离主检出 ⇒ ff 退化为纯 ref 更新
+  // 请求时间回拨 2 分钟：AC-325 判据把请求事件的毫秒时间戳与合并提交的【秒级】%ct 比较
+  // （`Date.parse(ts) < ct*1000`），同秒会误判「无请求」。生产里人请求与 driver 执行相隔数分钟，
+  // 夹具把这一形态显式造出来（⛔ 不是放宽判据）。
+  recordGoalMergeRequest({ root, goalId: GM_GOAL, reason: "tried it in the preview, mature enough", now: () => new Date(Date.now() - 120_000) });
+  return root;
+}
+
+/** 从 `goals/<AC-NNN>-*.md` 的 criterion 字段取出判据文本并按 `sh -c` 在 `repo` 内执行。 */
+function runGoalCriterion(repo, acId) {
+  const dir = path.join(REPO_ROOT, "goals");
+  const file = fs.readdirSync(dir).find((f) => f.startsWith(`${acId}-`) && f.endsWith(".md"));
+  const raw = fs.readFileSync(path.join(dir, file), "utf8");
+  const fm = YAML.parse(/^---\n([\s\S]*?)\n---/.exec(raw)[1]);
+  const r = spawnSync("sh", ["-c", fm.criterion], { cwd: repo, encoding: "utf8" });
+  return { status: r.status, stdout: r.stdout, stderr: r.stderr };
+}
+
+const gmOpts = (root, suiteCommand) => ({
+  root, goalId: GM_GOAL, suiteCommand,
+  ffMergeModule: FF_MERGE_MODULE_ABS,
+  scriptsDir: path.join(REPO_ROOT, "plugin", "scripts"),
+});
+
+function gmCleanup(root) {
+  try { fs.rmSync(root, { recursive: true, force: true }); } catch { /* best-effort */ }
+}
+
+test("goal-merge e2e — green suite: develop gets exactly ONE goal/GOAL-901 merge commit on its first-parent chain, develop is ff'd to it, the goal branch is deleted", async () => {
+  const root = makeGoalMergeRepo("green");
+  try {
+    const pending = pendingGoalMerges(root);
+    assert.equal(pending.length, 1, "the recorded request is pending");
+    const r = await runGoalMergeFanIn({ ...gmOpts(root, ["bash", "-c", "exit 0"]), request: pending[0].request });
+    assert.equal(r.outcome, "landed");
+    const merges = execFileSync("git", ["-C", root, "log", "develop", "--first-parent", "--merges", "--format=%H %s"], { encoding: "utf8" })
+      .trim().split("\n").filter(Boolean);
+    assert.equal(merges.length, 1, "exactly one merge commit on develop's first-parent chain");
+    assert.match(merges[0], /goal\/GOAL-901/, "the merge subject names the goal branch");
+    const devTip = execFileSync("git", ["-C", root, "rev-parse", "develop"], { encoding: "utf8" }).trim();
+    assert.equal(r.landedSha, devTip, "develop was ff'd to the merge commit");
+    assert.equal(merges[0].split(" ")[0], devTip, "the ff'd tip IS the merge commit");
+    assert.throws(
+      () => execFileSync("git", ["-C", root, "rev-parse", "--verify", "goal/GOAL-901"], { stdio: "ignore" }),
+      "the goal branch was deleted",
+    );
+    assert.equal(pendingGoalMerges(root).length, 0, "a landed merge is no longer pending");
+  } finally { gmCleanup(root); }
+});
+
+test("goal-merge e2e — red suite: all refs unchanged, a goal-merge-result is written, and it retries only after the tip advances", async () => {
+  const root = makeGoalMergeRepo("red");
+  try {
+    const devBefore = execFileSync("git", ["-C", root, "rev-parse", "develop"], { encoding: "utf8" }).trim();
+    const tip = execFileSync("git", ["-C", root, "rev-parse", "goal/GOAL-901"], { encoding: "utf8" }).trim();
+    const pending = pendingGoalMerges(root);
+    const r = await runGoalMergeFanIn({ ...gmOpts(root, ["bash", "-c", "echo boom; exit 1"]), request: pending[0].request });
+    assert.equal(r.outcome, "red");
+    assert.equal(r.step, "suite");
+    assert.equal(execFileSync("git", ["-C", root, "rev-parse", "develop"], { encoding: "utf8" }).trim(), devBefore, "develop unchanged on red");
+    assert.equal(execFileSync("git", ["-C", root, "rev-parse", "goal/GOAL-901"], { encoding: "utf8" }).trim(), tip, "goal branch unchanged on red");
+    const results = readGoalMergeResults(root);
+    assert.equal(results.length, 1);
+    assert.equal(results[0].outcome, "red");
+    assert.equal(results[0].tipSha, tip, "the result carries the attempted tip");
+
+    // tip 不变 ⇒ 下一轮不重试；tip 前进 ⇒ 重试（裁定⑳：人批准的是业务目标，不是某一棵树）。
+    assert.equal(pendingGoalMerges(root).length, 0, "tip unchanged ⇒ not retried");
+    const g = (...a) => execFileSync("git", ["-C", root, ...a], { encoding: "utf8" });
+    g("checkout", "-q", `goal/${GM_GOAL}`);
+    fs.writeFileSync(path.join(root, "fix.txt"), "fix\n");
+    g("add", "-A"); g("commit", "-q", "-m", "fix the suite");
+    g("checkout", "-q", "develop-work");
+    const retry = pendingGoalMerges(root);
+    assert.equal(retry.length, 1, "tip advanced ⇒ retried");
+
+    const r2 = await runGoalMergeFanIn({ ...gmOpts(root, ["bash", "-c", "exit 0"]), request: retry[0].request });
+    assert.equal(r2.outcome, "landed", "the retry after the fix lands");
+    assert.match(execFileSync("git", ["-C", root, "log", "develop", "--first-parent", "--merges", "--format=%s"], { encoding: "utf8" }), /goal\/GOAL-901/);
+  } finally { gmCleanup(root); }
+});
+
+// AC3（本任务 gap-goal-branch-human-merge-verb-and-execution）：用成功场景的临时仓库跑 GOAL-028 的
+// 真实判据 AC-325 / AC-327，两者都退出 0。⛔ 判据文本从 `goals/AC-*.md` 的 criterion 字段【取出原文】
+// 执行（硬规则 4 推论三：读生产载体，不是我在测试里重写一份等价的断言）。
+test("goal-merge e2e — GOAL-028's AC-325 and AC-327 criteria pass on the success-scenario repo (the real criterion text, run with sh)", async () => {
+  const root = makeGoalMergeRepo("ac-criteria");
+  try {
+    const pending = pendingGoalMerges(root);
+    const r = await runGoalMergeFanIn({ ...gmOpts(root, ["bash", "-c", "exit 0"]), request: pending[0].request });
+    assert.equal(r.outcome, "landed");
+    for (const acId of ["AC-325", "AC-327"]) {
+      const res = runGoalCriterion(root, acId);
+      assert.equal(res.status, 0, `${acId} must exit 0 — stdout=${res.stdout} stderr=${res.stderr}`);
+      assert.match(res.stdout, /^PASS:/, `${acId} prints its PASS line`);
+    }
+  } finally { gmCleanup(root); }
 });
