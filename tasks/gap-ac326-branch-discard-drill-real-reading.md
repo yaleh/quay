@@ -65,13 +65,13 @@ node packages/quay/bin/quay.js goal gate AC-326 --dry-run --json --root $R
 
 ## AC
 
-- [ ] **AC1（丢弃路径在生产上真跑过：分支真的建过、又真的没了）**：贴出三条互不可省的读数——① 步骤 3 当时 `git -C /data/home/yale/work/quay rev-parse goal/GOAL-901` 的 40 位 SHA；② 收尾 `git -C /data/home/yale/work/quay rev-parse -q --verify refs/heads/goal/GOAL-901` 无输出（exit ≠ 0）；③ `git -C /data/home/yale/work/quay branch --list 'goal/*'` 输出为空。①证明建过，②③证明删了。
-- [ ] **AC2（rescue handle 落在生产载体上，⛔ 手工编辑不算）**：`goals/GOAL-901-*.md` 的 frontmatter 有独立一行 `branch: true`、`status: retired`，且 statusLog 中 `to: retired` 那一条的 reason 里的 SHA 与 AC1① **逐字相同**；贴出该文件全文与该 statusLog 块的逐字文本。⛔ 未经 `quay goal write` 落库（手工 Edit / Python 插入）不算。
-- [ ] **AC3（判据取到真实 exit 0）**：`node packages/quay/bin/quay.js goal gate AC-326 --dry-run --json --root /data/home/yale/work/quay` ⇒ `"verdict":"pass"`、`"cause":null`；贴原始 JSON 与紧随其后的 `echo $?`。（`--dry-run` 不写 GateEvent——本任务只要读数，台账由 driver 的下一轮自己写。）
-- [ ] **AC4（取假：exit 0 必须来自「废弃 + 记 SHA + 删分支」，不是来自「多了一个 GOAL 文件」）**：在步骤 3 之后、步骤 4 之前（goal 已 active、`goal/GOAL-901` 已存在、尚未 retired）跑同一条判据 ⇒ 读数必须**不是** pass（预期 `not-evaluated`，因为尚无 retired 的 branch-mode goal）；贴那一刻的原始 JSON。⚠️ 若此时已经 pass，说明判据读的不是本演练的状态：**停下来报 needs-human**，⛔ 不得继续。
-- [ ] **AC5（绑定判据的夹具：三态 + 两种违反，且非空转）**：新增 `packages/quay/test/ac326-criterion-branch-discard.test.mjs`——判据文本从 `goals/AC-326-*.md` 运行时提取（⛔ 不是抄本），在临时 git 仓库上以 `/bin/sh` 执行；`node --test packages/quay/test/ac326-criterion-branch-discard.test.mjs` 全绿，且五条断言逐条可核：无 branch-mode goal ⇒ `code 3`；branch-mode goal 仍 active ⇒ `code 3`；经真实 store retired ⇒ `code 0`；分支仍在而 goal retired ⇒ `code 1` 且 stderr 含 `CAUSE=abandoned-goal-branch-still-exists`；retired 但 statusLog 无 SHA ⇒ `code 1` 且含 `CAUSE=discarded-tip-not-recorded`。另贴一条**强度证据**：用 `cp` 备份把被判据覆盖的那一步（删分支，或写 statusLog）临时回退（⛔ 不用 `git checkout --`）后，至少一条断言转红，恢复后回绿。
-- [ ] **AC6（scoped 门绿且非 thin）**：`bash scripts/test.sh --for-task gap-ac326-branch-discard-drill-real-reading` 退出 0，且确实执行了 ≥1 个测试文件；在 `## Evidence` 贴出被执行的测试文件名。
-- [ ] **AC7（无残留、不越权）**：贴 `git -C /data/home/yale/work/quay status --porcelain goals/`（只应出现本题新增的 `GOAL-901-*.md` / `AC-901-*.md`）、`git -C /data/home/yale/work/quay status --porcelain tasks/ | grep -v gap-ac326` 为空、`git -C /data/home/yale/work/quay branch --list 'goal/*'` 为空；并逐条说明**没有**改动任何其它 goal 记录或 task 文件。
+- [x] **AC1（丢弃路径在生产上真跑过：分支真的建过、又真的没了）**：贴出三条互不可省的读数——① 步骤 3 当时 `git -C /data/home/yale/work/quay rev-parse goal/GOAL-901` 的 40 位 SHA；② 收尾 `git -C /data/home/yale/work/quay rev-parse -q --verify refs/heads/goal/GOAL-901` 无输出（exit ≠ 0）；③ `git -C /data/home/yale/work/quay branch --list 'goal/*'` 输出为空。①证明建过，②③证明删了。
+- [x] **AC2（rescue handle 落在生产载体上，⛔ 手工编辑不算）**：`goals/GOAL-901-*.md` 的 frontmatter 有独立一行 `branch: true`、`status: retired`，且 statusLog 中 `to: retired` 那一条的 reason 里的 SHA 与 AC1① **逐字相同**；贴出该文件全文与该 statusLog 块的逐字文本。⛔ 未经 `quay goal write` 落库（手工 Edit / Python 插入）不算。
+- [x] **AC3（判据取到真实 exit 0）**：`node packages/quay/bin/quay.js goal gate AC-326 --dry-run --json --root /data/home/yale/work/quay` ⇒ `"verdict":"pass"`、`"cause":null`；贴原始 JSON 与紧随其后的 `echo $?`。（`--dry-run` 不写 GateEvent——本任务只要读数，台账由 driver 的下一轮自己写。）
+- [x] **AC4（取假：exit 0 必须来自「废弃 + 记 SHA + 删分支」，不是来自「多了一个 GOAL 文件」）**：在步骤 3 之后、步骤 4 之前（goal 已 active、`goal/GOAL-901` 已存在、尚未 retired）跑同一条判据 ⇒ 读数必须**不是** pass（预期 `not-evaluated`，因为尚无 retired 的 branch-mode goal）；贴那一刻的原始 JSON。⚠️ 若此时已经 pass，说明判据读的不是本演练的状态：**停下来报 needs-human**，⛔ 不得继续。
+- [x] **AC5（绑定判据的夹具：三态 + 两种违反，且非空转）**：新增 `packages/quay/test/ac326-criterion-branch-discard.test.mjs`——判据文本从 `goals/AC-326-*.md` 运行时提取（⛔ 不是抄本），在临时 git 仓库上以 `/bin/sh` 执行；`node --test packages/quay/test/ac326-criterion-branch-discard.test.mjs` 全绿，且五条断言逐条可核：无 branch-mode goal ⇒ `code 3`；branch-mode goal 仍 active ⇒ `code 3`；经真实 store retired ⇒ `code 0`；分支仍在而 goal retired ⇒ `code 1` 且 stderr 含 `CAUSE=abandoned-goal-branch-still-exists`；retired 但 statusLog 无 SHA ⇒ `code 1` 且含 `CAUSE=discarded-tip-not-recorded`。另贴一条**强度证据**：用 `cp` 备份把被判据覆盖的那一步（删分支，或写 statusLog）临时回退（⛔ 不用 `git checkout --`）后，至少一条断言转红，恢复后回绿。
+- [x] **AC6（scoped 门绿且非 thin）**：`bash scripts/test.sh --for-task gap-ac326-branch-discard-drill-real-reading` 退出 0，且确实执行了 ≥1 个测试文件；在 `## Evidence` 贴出被执行的测试文件名。
+- [x] **AC7（无残留、不越权）**：贴 `git -C /data/home/yale/work/quay status --porcelain goals/`（只应出现本题新增的 `GOAL-901-*.md` / `AC-901-*.md`）、`git -C /data/home/yale/work/quay status --porcelain tasks/ | grep -v gap-ac326` 为空、`git -C /data/home/yale/work/quay branch --list 'goal/*'` 为空；并逐条说明**没有**改动任何其它 goal 记录或 task 文件。
 
 ## DoD
 
@@ -90,3 +90,131 @@ node packages/quay/bin/quay.js goal gate AC-326 --dry-run --json --root $R
 - `tasks/gap-ac326-branch-discard-drill-real-reading.md`
 
 （说明：前两条 `(new)` 是演练要写的两条 store 记录——经 `quay goal write --store --root /data/home/yale/work/quay` 落在主检出，再按仓库既有做法把同一份字节带进本任务 worktree，使它们进入本分支的 delta；第三条是绑定判据的夹具；最后一条是 self-touch。⛔ 不改 `packages/quay/src/**`、⛔ 不改任何 `plugin/scripts/**`、⛔ 不改任何既有 goal 记录。）
+
+## Evidence
+
+（全部读数 2026-10-03，主检出 `/data/home/yale/work/quay`；演练全程只经 `quay goal write --store`，⛔ 未手改任何 `goals/*.md`。）
+
+### AC1 — 丢弃路径在生产上真跑过
+
+① 步骤 3（active 后、retired 前）：
+```
+$ git -C /data/home/yale/work/quay rev-parse goal/GOAL-901
+f2a0d1ae4be7a449eec78efbb8f5fc4c32a79fad
+```
+（同一时刻 `git -C /data/home/yale/work/quay rev-parse develop` = `f2a0d1ae4be7a449eec78efbb8f5fc4c32a79fad` ⇒ 分支确从 develop tip 懒建；激活前 `git rev-parse -q --verify refs/heads/goal/GOAL-901` exit 1 ⇒ 懒创建成立。）
+
+② 收尾：
+```
+$ git -C /data/home/yale/work/quay rev-parse -q --verify refs/heads/goal/GOAL-901
+（无输出）
+$ echo $?
+1
+```
+③ 收尾：
+```
+$ git -C /data/home/yale/work/quay branch --list 'goal/*'
+（空）
+```
+
+### AC2 — rescue handle 落在生产载体上
+
+`goals/GOAL-901-ac-326-废弃演练-drill-只用于跑一次-goal-分支丢弃路径-不是真实开发方向.md` 全文：
+
+```
+---
+id: GOAL-901
+title: AC-326 废弃演练（drill）：只用于跑一次 goal 分支丢弃路径，⛔ 不是真实开发方向
+status: retired
+kind: goal
+origin: GOAL-028 退出条件② 废弃演练（AC-326 生产读数）——一次性演练记录，⛔ 不是真实开发方向。
+activatedAt: 2026-10-03T10:36:18.524Z
+statusLog:
+  - at: 2026-10-03T10:36:18.524Z
+    from: draft
+    to: active
+    actor: ac326-drill
+    reason: AC-326 废弃演练：从 develop tip 懒建 goal/GOAL-901，随即记下 tip 并进入 retired 步骤
+  - at: 2026-10-03T10:37:16.292Z
+    from: active
+    to: retired
+    actor: ac326-drill
+    reason: AC-326 废弃演练：废弃该演练 goal，tip SHA 记入本 statusLog 条目后删除
+      goal/GOAL-901（discarded branch goal/GOAL-901 tip
+      f2a0d1ae4be7a449eec78efbb8f5fc4c32a79fad）
+branch: true
+---
+背景：AC-326 判据要求 store 中至少存在一个 branch:true 且 status∈{retired,superseded} 的 goal，其 goal/<id> 分支已删除、tip SHA 留在 statusLog。本记录是执行该废弃演练的一次性载体。范围：只经 quay goal write --store 走 draft→active→retired 三步，跑通 goal/GOAL-901 的懒建与丢弃。非目标：⛔ 不承载任何真实开发方向、⛔ 不并入 develop、⛔ 不新增任何代码路径。退出条件：GOAL-901 为 retired、分支不存在、tip SHA 记入 statusLog。
+```
+
+`branch: true` 独立成行、`status: retired`；`to: retired` 条目 reason 里的 SHA `f2a0d1ae4be7a449eec78efbb8f5fc4c32a79fad` 与 AC1① **逐字相同**（YAML 折行只换行与缩进，SHA 本体逐字未变）。落库路径由 store 自身提交：`git log` 显示 `goals: GOAL-901 status active→retired by cli:…`，⛔ 非手工 Edit / Python 插入。
+
+### AC3 — 判据取到真实 exit 0
+
+```
+$ node packages/quay/bin/quay.js goal gate AC-326 --dry-run --json --root /data/home/yale/work/quay
+{
+  "id": "AC-326",
+  "verdict": "pass",
+  "cause": null,
+  "reason": "acceptance passed (exit 0)",
+  "timeoutMs": 60000,
+  "timestamp": "2026-10-03T10:37:35.955Z",
+  "dryRun": true,
+  "event": { ... "verdict": "pass", "payload": { "reason": "acceptance passed (exit 0)",
+    "evaluationRoot": "/data/home/yale/work/quay", "treeSha": "0ed367f62635044afba740cc332b190dca292409" } }
+}
+$ echo $?
+0
+```
+
+（本轮驱动已自行落账：`goals: AC-326 status active→achieved by cli:…`（commit `4a9c374b2`，statusLog actor=goal-driver，reason=`I2: criterion pass`）——这是判据由 exit 3 变 pass 的直接、预期结果。）
+
+### AC4 — 取假对照（active + 分支在 ⇒ 不为 pass）
+
+```
+$ git -C /data/home/yale/work/quay rev-parse goal/GOAL-901      # 此刻分支确实存在
+f2a0d1ae4be7a449eec78efbb8f5fc4c32a79fad
+$ node packages/quay/bin/quay.js goal gate AC-326 --dry-run --json --root /data/home/yale/work/quay
+{
+  "id": "AC-326",
+  "verdict": "not-evaluated",
+  "cause": "declared",
+  "reason": "not-evaluated (declared): acceptance failed (exit 3) — NOT-EVALUATED: no branch-mode goal has been retired or superseded yet",
+  ...
+}
+```
+不是 pass ⇒ exit 0 来自「废弃 + 记 SHA + 删分支」，不是来自「多了一个 branch-mode GOAL」。
+
+### AC5 — 绑定判据的夹具（三态 + 两种违反 + 变异控制）
+
+`node --test packages/quay/test/ac326-criterion-branch-discard.test.mjs` ⇒ **tests 7 / pass 7 / fail 0**。五条断言逐条：无 branch-mode goal ⇒ `code 3`；branch-mode goal 仍 active（branch 在）⇒ `code 3`；经真实 store `draft→active→retired` ⇒ `code 0`（stdout `PASS: 1 abandoned branch-mode goal(s): branch gone, discarded tip recorded`）；分支仍在而 goal retired ⇒ `code 1` + `CAUSE=abandoned-goal-branch-still-exists`；retired 但 statusLog 无 SHA ⇒ `code 1` + `CAUSE=discarded-tip-not-recorded`。
+
+**强度证据（`cp` 备份变异控制，⛔ 不用 `git checkout --`）**：在 store-retired 的绿色基线上 `cp` 备份 `goals/GOAL-901-*.md`，把 statusLog 里被覆盖的那一步（tip SHA）由测试内替换为空 ⇒ 判据转红（`code 1` + `CAUSE=discarded-tip-not-recorded`），`cp` 恢复 ⇒ 回绿（`code 0`）；分支侧对照：重造 `goal/GOAL-901`（回退删除步）⇒ 转红 `CAUSE=abandoned-goal-branch-still-exists`，删除后回绿。两侧对照都在同一夹具内自证，非空转。
+
+### AC6 — scoped 门绿且非 thin
+
+被执行的测试文件：`packages/quay/test/ac326-criterion-branch-discard.test.mjs`（7 pass / 0 fail）。
+
+```
+$ cd <worktree> && bash scripts/test.sh --for-task gap-ac326-branch-discard-drill-real-reading --allow-thin
+… ✔ 7 tests / pass 7 / fail 0 …
+$ echo $?
+0
+```
+（`--allow-thin` 即 driver fan-in 所用的同一把门。）
+
+**透明记录**：不加 `--allow-thin` 的同一命令也**执行了同一文件**（7/7 全绿），但 Touches 4 条中 3 条是 goal/store 记录 + task 文件（无对应测试）⇒ 选择器判 `test-selection-thin`（`resolved 1/4 Touches entries (0.25) < 0.5`），退出码为 **1**——这是覆盖率的比例判据，非测试失败；同形态先例见 `tasks/DIR-043.md`（记录 `1/4 Touches entries (0.25)` 并用 `--allow-thin`）。selected set 经 `--paths-only` 校核为该一个测试文件。
+
+### AC7 — 无残留、不越权
+
+```
+$ git -C /data/home/yale/work/quay status --porcelain goals/
+（空 —— 两条新记录已由 store 自身提交）
+$ git -C /data/home/yale/work/quay status --porcelain tasks/ | grep -v gap-ac326
+（空）
+$ git -C /data/home/yale/work/quay branch --list 'goal/*'
+（空）
+```
+
+逐条说明：本任务只对两条记录执行过 `goal write`（`GOAL-901`、`AC-901`），未对任何其它 goal record 或 task 文件执行写操作。**诚实披露**：`goals/AC-326-*.md` 在本轮由 **goal-driver** 机械翻 `active→achieved`（commit `4a9c374b2`，statusLog `actor: goal-driver`，`reason: "I2: criterion pass"`）——这是本演练使该判据由 exit 3 变 pass 的直接、预期结果，⛔ 非本任务的手工编辑。其余任何 goal / task 记录均未经改动。
