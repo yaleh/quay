@@ -2,7 +2,7 @@
 id: gap-goal-branch-ac-phase-field-and-split-evaluation
 title: AC 的 phase 字段（pre-merge / post-merge）与 goal-driver 分相求值——post-merge AC
   并入前不求值、不进 gap
-status: ready
+status: done
 labels:
   - gap
 parent: null
