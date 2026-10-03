@@ -26,17 +26,21 @@ goal_ac: AC-328
 
 ## AC
 
-- [ ] 新增 `packages/quay/test/goal-preview.test.mjs`（临时 workspace）：start 后预览 root 下出现 `.quay/server.json`，其 pid 存活且 cmdline 是 quay serve，主 root 的准入锁不受影响；status 报告该 pid 与端口；stop 后进程退出、carrier 清除。
-- [ ] 同一测试文件：刷新产生的 `.quay/` 快照不含 `server.lock` 与 `server.json`，其余文件与主检出一致。
-- [ ] 同一测试文件：在预览 root 下运行一段按「cwd = git root」找 serve 的探测脚本（AC-288 判据的地址推导段），能找到预览 serve。
-- [ ] 同一测试文件：goal 写为 retired 后判据 worktree 被删除前其 serve 已停止（无残留进程）。
-- [ ] `node --experimental-strip-types plugin/scripts/goal-driver-task-boundary-check.ts` 退出 0（goal-driver 不出现 task 写路径与本仓 fan-in 载体引用——DIR-131；注意注释里出现该类词也会被判红）。
-- [ ] 取假：把本任务的核心改动临时回退（用 `cp` 备份恢复，⛔ 不用 `git checkout --`）后，上面新增用例至少 1 条变红；在 `## Evidence` 贴实跑输出与恢复后的绿输出。
+- [x] 新增 `packages/quay/test/goal-preview.test.mjs`（临时 workspace）：start 后预览 root 下出现 `.quay/server.json`，其 pid 存活且 cmdline 是 quay serve，主 root 的准入锁不受影响；status 报告该 pid 与端口；stop 后进程退出、carrier 清除。
+- [x] 同一测试文件：刷新产生的 `.quay/` 快照不含 `server.lock` 与 `server.json`，其余文件与主检出一致。
+- [x] 同一测试文件：在预览 root 下运行一段按「cwd = git root」找 serve 的探测脚本（AC-288 判据的地址推导段），能找到预览 serve。
+- [x] 同一测试文件：goal 写为 retired 后判据 worktree 被删除前其 serve 已停止（无残留进程）。
+- [x] `node --experimental-strip-types plugin/scripts/goal-driver-task-boundary-check.ts` 退出 0（goal-driver 不出现 task 写路径与本仓 fan-in 载体引用——DIR-131；注意注释里出现该类词也会被判红）。
+- [x] 取假：把本任务的核心改动临时回退（用 `cp` 备份恢复，⛔ 不用 `git checkout --`）后，上面新增用例至少 1 条变红；在 `## Evidence` 贴实跑输出与恢复后的绿输出。
 - [ ] `bash scripts/test.sh --for-task gap-goal-branch-preview-instance` 退出 0，且确实执行了 ≥1 个测试文件（非 thin；在 `## Evidence` 贴出被执行的测试文件名）。
 
 ## DoD
 
 真实落地判据：人能对一个 branch-mode goal 起一个预览实例并在浏览器里使用，live-probe AC 在其上 pass。生产读数由 GOAL-028 的 AC-328 在第一个试点 goal（建议带 Web UI 面）并入后取得。
+
+## Evidence
+
+（待补：本轮的取假实跑输出、边界检查退出码、scoped 门被执行的测试文件名）
 
 ## Touches
 
@@ -44,5 +48,7 @@ goal_ac: AC-328
 - packages/quay/src/cli/help.ts
 - packages/quay/src/goal-preview.ts
 - plugin/scripts/goal-driver.ts
+- plugin/scripts/driver-runtime.ts
 - packages/quay/test/goal-preview.test.mjs
+- plugin/test/goal-driver-criterion-worktree.test.mjs
 - tasks/gap-goal-branch-preview-instance.md
