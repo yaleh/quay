@@ -133,6 +133,10 @@ function writeGoal(root, id, { status, branch = false }) {
     `status: ${status}`,
     "kind: goal",
     "origin: ac322-criterion fixture",
+    // Since the 2026-10-03 rewrite, `live_goals()` requires `activatedAt:` (the ancestor-based version
+    // uses it as the time floor of `act_epoch`). A branch-mode goal without it is invisible to the
+    // criterion, so the fixture must carry it or every arm reads the same "nothing to judge" exit 3.
+    `activatedAt: ${new Date().toISOString()}`,
     ...(branch ? ["branch: true"] : []),
     "---",
     "",
@@ -235,9 +239,17 @@ function buildLanding(root, { task = "TT-001", goal = "GOAL-001", stale = false 
   git(root, ["checkout", "-q", `goal/${goal}`]);
   git(root, ["merge", "-q", "--ff-only", "landing"]); // ff the goal branch to the landing
   if (!stale) {
-    // Production cleanup (SPEC-goal-branch §收尾): ff develop to the goal branch, then discard it.
+    // Cross a wall-clock second before develop advances: the criterion reads the develop tip through
+    // `git reflog show --date=unix` (SECOND resolution) at the catch-up merge's commit time. If this
+    // merge lands in the SAME second as that merge, `dev_at` sees it and reports develop's post-landing
+    // tip instead of the tip current AT the catch-up — a fixture artifact, not a real missed catch-up.
+    settle();
+    // Production 收尾 (SPEC-goal-branch §4.7 裁定⑲): develop receives the goal branch through ONE
+    // `--no-ff` merge commit whose subject names `goal/<id>` — that is the commit the criterion's
+    // `goal_merges()` reads to classify this landing as `via`. ⛔ A plain `--ff-only` would leave NO
+    // merge commit, so `classify()` would read `direct` and the landing would not be counted at all.
     git(root, ["checkout", "-q", "develop"]);
-    git(root, ["merge", "-q", "--ff-only", `goal/${goal}`]);
+    git(root, ["merge", "-q", "--no-ff", "--no-edit", `goal/${goal}`]);
     git(root, ["branch", "-D", `goal/${goal}`]);
   }
   // Back to `develop` (⛔ not `main`, which does not carry the goal/AC/task records and would wipe
@@ -261,7 +273,9 @@ test("criterion is extracted VERBATIM from goals/AC-322-*.md (not a copy that ca
   const text = criterionText();
   for (const needle of [
     "CAUSE=landing-missed-develop-catch-up",
-    "NOT-EVALUATED: no goal record carries branch: true yet",
+    // The 2026-10-03 rewrite deleted the old `no goal record carries branch: true yet` message and added
+    // `activatedAt:` as a live_goals() precondition — pin the NEW shape, not the retired one.
+    "^activatedAt: ",
     "NOT-EVALUATED: no goal-branch landing could be checked against the develop reflog",
     "PASS: $checked goal-branch landing(s) each contained develop as of their",
   ]) {
@@ -274,14 +288,17 @@ test("criterion is extracted VERBATIM from goals/AC-322-*.md (not a copy that ca
 
 // ── exit 3: the not-evaluated arm ───────────────────────────────────────────────────────────────────
 
-test("no branch-mode goal ⇒ exit 3 (nothing to judge yet, not a pass and not a failure)", () => {
+test("no branch-mode goal ⇒ exit 3 (nothing to judge — same not-evaluated reading as an unlanded branch-mode goal)", () => {
   const root = mkRoot("no-branch-mode");
   writeGoal(root, "GOAL-001", { status: "active" }); // NO branch: true
   writeAc(root, "AC-001", "GOAL-001");
   writeTask(root, "TT-001", "AC-001");
   const r = runCriterion(root);
   assert.equal(r.code, 3, `expected exit 3, got ${r.code}: ${r.stdout}${r.stderr}`);
-  assert.match(r.stderr, /NOT-EVALUATED: no goal record carries branch: true yet/);
+  // The 2026-10-03 rewrite deleted the old dedicated `no goal record carries branch: true yet` message:
+  // `live_goals()` now filters on branch-mode ∧ non-retired ∧ `activatedAt:`, and an empty set simply
+  // means there is no landing to check — the SAME not-evaluated reading as an unlanded branch-mode goal.
+  assert.match(r.stderr, /NOT-EVALUATED: no goal-branch landing could be checked against the develop reflog/);
   assert.equal(r.stdout, "", "nothing to judge must not also print a PASS");
 });
 
@@ -309,7 +326,12 @@ test("branch-mode goal + landing whose catch-up merge pulled the CURRENT develop
     true,
     "premise: the goal branch was discarded (production 收尾)",
   );
-  assert.equal(git(root, ["rev-parse", "develop"]), c, "premise: the landing is reachable from develop");
+  // The landing is reachable from develop THROUGH the goal merge commit (develop is advanced by a
+  // `--no-ff` merge), so the flip commit `c` is an ancestor of develop rather than its tip.
+  assert.doesNotThrow(
+    () => git(root, ["merge-base", "--is-ancestor", c, "develop"]),
+    "premise: the landing is reachable from develop",
+  );
 
   const r = runCriterion(root);
   assert.equal(r.code, 0, `expected exit 0, got ${r.code}: ${r.stdout}${r.stderr}`);
@@ -358,7 +380,8 @@ test("mutation control (cp backup): reverting the branch: true write flips the c
 
     const red = runCriterion(root);
     assert.equal(red.code, 3, `the reverted branch-mode write must flip the criterion red, got ${red.code}: ${red.stdout}${red.stderr}`);
-    assert.match(red.stderr, /NOT-EVALUATED: no goal record carries branch: true yet/);
+    // Stripping `branch: true` empties `live_goals()` ⇒ the same "no landing could be checked" exit 3.
+    assert.match(red.stderr, /NOT-EVALUATED: no goal-branch landing could be checked against the develop reflog/);
   } finally {
     fs.copyFileSync(backup, goalFile);
   }
