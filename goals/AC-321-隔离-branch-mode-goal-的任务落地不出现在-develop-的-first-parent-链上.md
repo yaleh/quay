@@ -1,7 +1,7 @@
 ---
 id: AC-321
 title: 隔离：branch-mode goal 的任务落地不出现在 develop 的 first-parent 链上
-status: draft
+status: active
 kind: criterion
 goal: GOAL-028
 criterion: >-
@@ -70,4 +70,15 @@ expect: exit 0 = 至少 1 个 branch-mode goal 在 opt-in 之后有任务落地�
 origin: 人 2026-10-01「为 goal 提供一个单独的 branch」→ 三轮讨论成文
   orchestration/SPEC-goal-branch-2026-10-03.md（d4b7ca1c2，裁定①–㉓）；人
   2026-10-03「按上面的建议，新建一个 GOAL，同时手工预先立好 §10 的任务」。
+activatedAt: 2026-10-03T08:21:38.011Z
+statusLog:
+  - at: 2026-10-03T08:21:38.011Z
+    from: draft
+    to: active
+    actor: goal-driver
+    reason: "triage: activate"
+fidelity:
+  verdict: faithful
+  reason: "fidelity judge: faithful"
+  at: 2026-10-03T08:21:38.011Z
 ---
