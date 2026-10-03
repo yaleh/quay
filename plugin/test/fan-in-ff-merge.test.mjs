@@ -2335,3 +2335,96 @@ test("gap-fan-in-instrument-availability-self-check AC1 — reaper: resolvable �
     cleanup(emptyScriptsDir);
   }
 });
+
+// ── gap-goal-branch-ff-merge-source-param: the ff SOURCE is no longer hard-wired to task/<id> ─────────
+// SPEC-goal-branch-2026-10-03 §4.7 (裁定⑲): a goal merge runs `git merge --no-ff goal/<id>` in a temp
+// worktree to build a MERGE COMMIT (first parent = the develop tip), then `develop` fast-forwards to
+// that commit — develop itself still only ever does ff. ff-merge.ts hard-coded `refs/heads/task/<task>`
+// as the source at four sites; `--source-ref <ref|sha>` parameterizes it. This covers the task's three
+// AC arms:
+//   ① omitted ⇒ the task path is byte-for-byte unchanged (also proven by the 54 cases above);
+//   ② source = a merge commit whose first parent IS the develop tip ⇒ develop ff'd to that SHA, exit 0;
+//   ③ source is NOT a descendant of the merge target ⇒ non-zero exit, develop AND the source ref
+//      both unchanged (the existing ff-failure path — git refuses a non-ff — is what enforces it; a
+//      pre-flight ancestry refusal would wrongly conflate "bad source" with "develop advanced", which
+//      must stay a RETRYABLE exit 1 for the goal-merge auto-retry, 裁定⑳).
+
+/** Build the §4.7-step-2 goal-merge shape: a commit on `goal/<id>`, then `--no-ff` merged onto a
+ *  DETACHED HEAD at the develop tip, so the merge commit's FIRST parent IS the develop tip while
+ *  `develop` itself stays put (a raw SHA survives the checkout back to develop). */
+function makeGoalMergeCommit(dir, goalId) {
+  const developTip = gitCmd(dir, "rev-parse", "develop").stdout.trim();
+  gitCmd(dir, "checkout", "-q", "-b", `goal/${goalId}`);
+  fs.writeFileSync(path.join(dir, "goal.txt"), `goal ${goalId} work\n`, "utf8");
+  gitCmd(dir, "add", "-A");
+  gitCmd(dir, "commit", "-q", "-m", `goal ${goalId} work`);
+  gitCmd(dir, "checkout", "-q", "--detach", developTip);
+  gitCmd(dir, "merge", "--no-ff", "--no-edit", "-m", `Merge goal/${goalId}`, `goal/${goalId}`);
+  const mergeSha = gitCmd(dir, "rev-parse", "HEAD").stdout.trim();
+  gitCmd(dir, "checkout", "-q", "develop"); // develop ref is STILL at developTip
+  return { developTip, mergeSha };
+}
+
+test("gap-goal-branch-ff-merge-source-param — --source-ref ff's develop to a merge commit; a non-descendant source refuses touching no ref; the omitted source is unchanged", () => {
+  // ② source = a merge commit whose first parent is the develop tip.
+  {
+    const dir = makeTmp("srcref");
+    const st = stateDir("srcref");
+    try {
+      initRepo(dir);
+      const { developTip, mergeSha } = makeGoalMergeCommit(dir, "g1");
+      assert.equal(gitCmd(dir, "rev-parse", `${mergeSha}^1`).stdout.trim(), developTip, "the merge commit's first parent IS the develop tip");
+      assert.notEqual(mergeSha, developTip, "the source is a NEW merge commit, not the develop tip");
+      // The suite ran ON the merge commit (suite_head = the source tip) — the cert gate pins THIS source.
+      const capArgs = captureArgs(st, "goal-g1", mergeSha);
+      const events = path.join(st, "events.jsonl");
+      const retries = path.join(st, "retries.jsonl");
+      const r = runMerge(["--task", "goal-g1", "--root", dir, "--source-ref", mergeSha, ...capArgs, "--lock-events", events, "--retry-record", retries]);
+      assert.equal(r.status, 0, `ff to the merge commit must succeed:\n${r.stdout}${r.stderr}`);
+      assert.equal(gitCmd(dir, "rev-parse", "develop").stdout.trim(), mergeSha, "② develop ff'd to the merge-commit SHA");
+      assert.equal(gitCmd(dir, "rev-list", "--parents", "-n", "1", "develop").stdout.trim().split(" ").length, 3, "the landed tip IS the merge commit (2 parents) — no extra commit");
+      const rel = JSON.parse(fs.readFileSync(events, "utf8").trim().split("\n").filter(Boolean).at(-1));
+      assert.equal(rel.landedSha, mergeSha, "landedSha is the merge-commit source tip");
+      assert.ok(!fs.existsSync(retries), "no retry record");
+    } finally { cleanup(dir); cleanup(st); }
+  }
+
+  // ③ a source that is NOT a descendant of the merge target: refuse, touch NO ref.
+  {
+    const dir = makeTmp("srcneg");
+    const st = stateDir("srcneg");
+    try {
+      initRepo(dir);
+      const srcTip = makeTaskBranch(dir, "srcneg"); // task/srcneg forked off develop
+      fs.writeFileSync(path.join(dir, "adv.txt"), "develop advanced\n", "utf8");
+      gitCmd(dir, "add", "-A");
+      gitCmd(dir, "commit", "-q", "-m", "develop advanced");
+      const devHead = gitCmd(dir, "rev-parse", "develop").stdout.trim();
+      assert.equal(gitCmd(dir, "merge-base", "--is-ancestor", devHead, srcTip).status, 1, "precondition: the source is NOT a descendant of develop");
+      const capArgs = captureArgs(st, "srcneg", srcTip);
+      const events = path.join(st, "events.jsonl");
+      const retries = path.join(st, "retries.jsonl");
+      const r = runMerge(["--task", "srcneg", "--root", dir, "--source-ref", "refs/heads/task/srcneg", ...capArgs, "--lock-events", events, "--retry-record", retries]);
+      assert.notEqual(r.status, 0, `a non-descendant source must refuse (non-zero):\n${r.stdout}${r.stderr}`);
+      assert.equal(gitCmd(dir, "rev-parse", "develop").stdout.trim(), devHead, "③ develop unchanged");
+      assert.equal(gitCmd(dir, "rev-parse", "refs/heads/task/srcneg").stdout.trim(), srcTip, "③ source ref unchanged");
+    } finally { cleanup(dir); cleanup(st); }
+  }
+
+  // ① the default source (no --source-ref) is still the task branch — the same fixture lands.
+  {
+    const dir = makeTmp("srcdef");
+    const st = stateDir("srcdef");
+    try {
+      initRepo(dir);
+      const tip = makeTaskBranch(dir, "srcdef");
+      const capArgs = captureArgs(st, "srcdef", tip);
+      const events = path.join(st, "events.jsonl");
+      const retries = path.join(st, "retries.jsonl");
+      const r = runMerge(["--task", "srcdef", "--root", dir, ...capArgs, "--lock-events", events, "--retry-record", retries]);
+      assert.equal(r.status, 0, `the no-source task path must be unchanged:\n${r.stdout}${r.stderr}`);
+      assert.match(r.stdout, /fast-forwarded to task\/srcdef/, "the default source label is still task/<id>");
+      assert.equal(gitCmd(dir, "rev-parse", "develop").stdout.trim(), tip, "① develop ff'd to the task tip (default source)");
+    } finally { cleanup(dir); cleanup(st); }
+  }
+});

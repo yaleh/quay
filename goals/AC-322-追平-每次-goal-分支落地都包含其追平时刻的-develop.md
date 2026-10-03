@@ -1,7 +1,7 @@
 ---
 id: AC-322
 title: 追平：每次 goal 分支落地都包含其追平时刻的 develop
-status: draft
+status: active
 kind: criterion
 goal: GOAL-028
 criterion: >-
@@ -87,4 +87,16 @@ expect: exit 0 = 每次 goal 分支落地的提交都以 develop 在其追平时
 origin: 人 2026-10-01「为 goal 提供一个单独的 branch」→ 三轮讨论成文
   orchestration/SPEC-goal-branch-2026-10-03.md（d4b7ca1c2，裁定①–㉓）；人
   2026-10-03「按上面的建议，新建一个 GOAL，同时手工预先立好 §10 的任务」。
+activatedAt: 2026-10-03T08:34:23.928Z
+statusLog:
+  - at: 2026-10-03T08:34:23.928Z
+    from: draft
+    to: active
+    actor: cli
+    reason: 人 2026-10-03 裁定激活 GOAL-028；goal-driver 分诊已判 activate，但其激活写入两轮均被 120s
+      spawn 超时 SIGKILL（round 633/634），改由 CLI 执行同一激活（保真性闸照常运行）
+fidelity:
+  verdict: faithful
+  reason: "fidelity judge: faithful"
+  at: 2026-10-03T08:34:23.927Z
 ---

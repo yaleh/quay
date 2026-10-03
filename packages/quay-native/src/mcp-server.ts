@@ -27,6 +27,9 @@ import { runAcceptance, resolveAcceptanceTimeout, timeoutKnobHint, verdictFromAc
 // …and records the verdict in the SAME ledger `quay goal gate` appends to, so the two entry points
 // for one criterion leave the same durable evidence (gap-goal-gate-verdict-single-mapping-not-evaluated).
 import { appendGateEvent } from "../../quay/src/gate/gate-event-store.ts";
+// The "which tree was this evaluated on" payload fragment (SPEC-goal-branch-2026-10-03 §7 辛), shared
+// with the `goal gate` CLI / sweep writers so all three entry points record the same shape (硬规则 5b).
+import { evaluationContext } from "../../quay/src/goal-store.ts";
 import { randomUUID } from "node:crypto";
 
 // ── task_list's text/content budget ────────────────────────────────────────────────────────────
@@ -494,6 +497,9 @@ export async function startMcpServer({ tasksDir, adrDir, goalDir, metaDir, defau
       }
       if (!goal) return { isError: true, content: [{ type: "text", text: `no such goal: ${id}` }] };
       const criterion = (goal as unknown as Record<string, unknown>).criterion;
+      // The criterion cwd (the workspace root) — the SAME path names the gate event's evaluation
+      // root, so a reader can tell WHICH tree this verdict was obtained on (SPEC §7 辛).
+      const evalRoot = path.dirname(resolvedGoalDir);
       let verdict: string;
       let reason: string;
       let cause: string | null = null;
@@ -512,7 +518,7 @@ export async function startMcpServer({ tasksDir, adrDir, goalDir, metaDir, defau
         const t = resolveAcceptanceTimeout((goal as unknown as { timeoutMs?: unknown }).timeoutMs);
         const result = runAcceptance({
           command: criterion,
-          cwd: path.dirname(resolvedGoalDir),
+          cwd: evalRoot,
           timeoutMs: t.timeoutMs,
           timeoutKnob: timeoutKnobHint(t),
         });
@@ -527,7 +533,7 @@ export async function startMcpServer({ tasksDir, adrDir, goalDir, metaDir, defau
       // tool response: a criterion that could not be evaluated left NO evidence, while the CLI
       // entry point for the same criterion did (hard rule 5b — the cluster, not the reported site).
       const timestamp = new Date().toISOString();
-      appendGateEvent(path.join(path.dirname(resolvedGoalDir), ".quay", "gate-events.jsonl"), {
+      appendGateEvent(path.join(evalRoot, ".quay", "gate-events.jsonl"), {
         id: randomUUID(),
         item_id: id,
         pipeline_id: id,
@@ -535,7 +541,10 @@ export async function startMcpServer({ tasksDir, adrDir, goalDir, metaDir, defau
         actor: "goal-mcp",
         verdict,
         timestamp,
-        payload: { reason, ...(cause ? { cause } : {}) },
+        // `evaluationRoot`/`treeSha` name WHICH tree this verdict was obtained on (SPEC §7 辛) — the
+        // same cwd the criterion ran in above, so the preview worktree stays distinguishable from the
+        // main checkout (硬规则 5b: this is the CLUSTER, not just the `goal gate` CLI site).
+        payload: { reason, ...(cause ? { cause } : {}), ...evaluationContext(evalRoot) },
       });
       const out = { id, verdict, cause, reason, timestamp };
       return {
