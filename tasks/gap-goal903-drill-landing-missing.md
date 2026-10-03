@@ -2,7 +2,7 @@
 id: gap-goal903-drill-landing-missing
 title: AC-903 停在 exit 1：GOAL-903 演练任务的翻 done 提交从未产生（落地副本被预置为 done，且含追平的 goal
   分支落地被 anti-drift BASELINE-MISMATCH 挡死）——跑完一次真实机械 fan-in 落地并使判据读 exit 0
-status: todo
+status: ready
 labels:
   - gap
 parent: null
