@@ -70,7 +70,13 @@ packages/quay/src/meta-store.ts:106:  const assertSafeStatus = makeAssertSafeSta
 
 **硬规则 5b（同一载体里的其它适用点）**：`grep -rn "function assertSafeId"` 在四个 store 里亦有 4 处（adr:82 / document:70 / goal:1553 / meta:99），同样近似。**本次不动**：goal 变体结构上不同（`GOAL_ID_RE.test(id) || AC_ID_RE.test(id)`，双正则 OR，报错语法为 "GOAL-NNN or AC-NNN"），不是同一 clone 家族；其余三处是另一个候选 finding，不在本 finding 点名的 `assertSafeStatus` 符号内。
 
+**Touches 增补（anti-drift 修复）**：首轮 fan-in 的 `anti-drift-touches-check` 报 1 violation ——
+`out-of-declared: task wrote packages/quay/src/frontmatter-store-base.ts (matches no declared Touches glob)`。
+该文件正是本 finding 点名的提取落点（`Requested action: extract` 的目标载体），属「声明过窄」而非越界写；
+按检查器自身 header 的指引补进 `## Touches`，未回退任何合法改动。
+
 ## Touches
+- `packages/quay/src/frontmatter-store-base.ts`
 - `packages/quay/src/adr-store.ts`
 - `packages/quay/src/document-store.ts`
 - `packages/quay/src/goal-store.ts`
