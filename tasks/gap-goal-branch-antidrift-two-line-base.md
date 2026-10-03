@@ -1,7 +1,7 @@
 ---
 id: gap-goal-branch-antidrift-two-line-base
 title: goal 分支任务的 anti-drift 比较基准只计任务自身变更——追平合入的 develop 变更不得被判越界
-status: ready
+status: done
 labels:
   - gap
 parent: null

@@ -1,7 +1,7 @@
 ---
 id: gap-goal-branch-ff-merge-source-param
 title: ff-merge 的源不再写死 task/<id>——支持把目标分支 ff 到一个指定提交（goal 并入的 --no-ff 合并提交）
-status: ready
+status: done
 labels:
   - gap
 parent: null
