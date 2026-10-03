@@ -278,3 +278,20 @@ branch: true
 - 首轮演练分支 `goal/GOAL-902` 已丢弃（tip `571c5666…`，是 develop 的祖先，无信息丢失）。
 - 无残留 worktree 需要手工清理：drill worktree 在 `/home/yale/work/quay-worktrees/gap-goal902-drill-catchup-landing`（首轮 fan-in 死在 anti-drift，清理步未执行）。
 - 夹具的**持久取用点**（⛔ 不依赖 worktree 目录是否还在）：分支 `task/gap-ac322-goal-branch-catchup-landing-real-reading` 的提交 26b71a089 已提交该文件；且该文件已随修复任务并入 **develop**（`git -C /data/home/yale/work/quay show develop:packages/quay/test/ac322-criterion-catchup.test.mjs`）。
+
+### 续做轮：收窄 `## Touches` 的过宽声明（前一轮 fan-in 的 anti-drift 阻断的修复）✔
+
+前一轮 fan-in 停在 `anti-drift`：`overbroad-declaration: task declares "goals/AC-902-*.md"`。
+`isOverbroadDeclaration`（`plugin/scripts/touches-orthogonality-check.ts`）要求通配符前有 ≥2 个具体路径段；
+`goals/AC-902-*.md`（及 `goals/GOAL-902-*.md`）的通配符前只有 `goals` 一段，故整条判 HARD FAIL。
+修复＝把两条通配声明换成**它们实际指向的精确路径**（两文件均已在 develop，`git ls-tree -r develop -- goals/` 可核）——
+是提精度，不是改范围：
+
+```
+- `goals/AC-902-*.md` (new)   → - `goals/AC-902-goal.md` (new)
+- `goals/GOAL-902-*.md` (new) → - `goals/GOAL-902-ac-322-…-不是真实开发方向.md` (new)
+```
+
+收窄后 `anti-drift-touches-check.ts --task <id> --worktree <wt> --merge-target develop` ⇒
+`ANTI-DRIFT OK: task … — 1 actual file(s), all within declared Touches (5 glob(s))`，exit 0。
+（本条为文档性记录，⛔ 不含任何 `- [ ]`/`- [x]` 勾选行，AC 计数不变。）
