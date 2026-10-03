@@ -29,7 +29,7 @@
 //
 // Run: node --test packages/quay/test/goal-preview.test.mjs
 
-import { test } from "node:test";
+import { test, after } from "node:test";
 import assert from "node:assert/strict";
 import fs from "node:fs";
 import os from "node:os";
@@ -100,11 +100,24 @@ function git(cwd, args) {
   return execFileSync("git", ["-C", cwd, ...args], { encoding: "utf8" }).trim();
 }
 
+/** Every mkdtemp'd dir is pushed into this carrier and removed in ONE `after()` hook — the
+ *  documented `tmp-leak-pairing-check` carrier pattern (a per-test `finally` alone is not
+ *  statically associable with the mkdtemp result). */
+const _created = [];
+after(() => {
+  for (const d of _created) fs.rmSync(d, { recursive: true, force: true });
+});
+function mkTmpDir(prefix) {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), prefix));
+  _created.push(dir);
+  return dir;
+}
+
 /** A real git repo: `main` carries the serve-shaped entry, `goal/GOAL-901` adds a branch-only file,
  *  and the main checkout's `.quay/` carries BOTH instance-identity files and ordinary files. */
 function mkPreviewFixture() {
-  const root = fs.mkdtempSync(path.join(os.tmpdir(), "goal-preview-"));
-  const ns = fs.mkdtempSync(path.join(os.tmpdir(), "goal-preview-ns-"));
+  const root = mkTmpDir("goal-preview-");
+  const ns = mkTmpDir("goal-preview-ns-");
   fs.mkdirSync(path.join(root, "goals"), { recursive: true });
   fs.mkdirSync(path.join(root, ".quay"), { recursive: true });
   fs.mkdirSync(path.join(root, "packages", "quay", "bin"), { recursive: true });

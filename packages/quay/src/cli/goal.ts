@@ -179,6 +179,9 @@ export async function handleGoal({ sub, positional, flags, wantsJson, rest }: Cl
     }
     const mainRoot = (flags.root as string | undefined) ?? (storeWorkspaceRoot() as string);
     const { previewWorktreeDir, startPreviewServe, stopPreviewServe, readPreviewStatus } = await import("../goal-preview.ts");
+    // ⛔ The displayed bind fallback is DERIVED from the ONE definition point — spelling a host
+    // literal here is the second copy `serve-binding-literal-check` exists to catch.
+    const hostFallback = (await import("../serve-binding.ts")).SERVE_BINDING_FALLBACK.host;
     const previewRoot = previewWorktreeDir(mainRoot, id);
     if (action === "start") {
       const rawPort = flags.port;
@@ -187,7 +190,7 @@ export async function handleGoal({ sub, positional, flags, wantsJson, rest }: Cl
       const r = await startPreviewServe({ previewRoot, port, host });
       if (wantsJson) printJson({ goal: id, action, previewRoot, ...r });
       else if (r.state === "failed") console.error(`preview start FAILED: ${r.detail}`);
-      else console.log(`${r.state === "already-running" ? "already running" : "started"}: ${id} preview at ${previewRoot} — http://${host ?? "127.0.0.1"}:${r.port} (pid ${r.pid})`);
+      else console.log(`${r.state === "already-running" ? "already running" : "started"}: ${id} preview at ${previewRoot} — http://${r.host ?? hostFallback}:${r.port} (pid ${r.pid})`);
       if (r.state === "failed") process.exitCode = 1;
       return;
     }
@@ -200,7 +203,7 @@ export async function handleGoal({ sub, positional, flags, wantsJson, rest }: Cl
     }
     const r = readPreviewStatus(previewRoot);
     if (wantsJson) printJson({ goal: id, action, previewRoot, ...r });
-    else if (r.state === "running") console.log(`running: ${id} preview pid ${r.pid} on http://${r.host ?? "127.0.0.1"}:${r.port} (${previewRoot})`);
+    else if (r.state === "running") console.log(`running: ${id} preview pid ${r.pid} on http://${r.host ?? hostFallback}:${r.port} (${previewRoot})`);
     else console.log(`preview ${r.state}: ${id} (${r.detail})`);
     if (r.state === "not-evaluated") process.exitCode = 3;
     return;
