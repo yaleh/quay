@@ -206,3 +206,6 @@ branch: true
 - 演练分支 `goal/GOAL-902` 已丢弃（tip `571c5666…`，是 develop 的祖先，无信息丢失）。
 - 无残留 worktree 需要手工清理：drill worktree 在 `/home/yale/work/quay-worktrees/gap-goal902-drill-catchup-landing`（fan-in 死在 anti-drift，清理步未执行）。
 - 重跑配方见 `tasks/gap-goal-branch-catchup-blocked-by-antidrift-baseline-mismatch.md` 的 `## Plan` 第 3 条。
+
+
+夹具的**持久取用点**（⛔ 不依赖 worktree 目录是否还在）：分支 `task/gap-ac322-goal-branch-catchup-landing-real-reading` 的提交 26b71a089 已提交该文件，可 `git -C /data/home/yale/work/quay show task/gap-ac322-goal-branch-catchup-landing-real-reading:packages/quay/test/ac322-criterion-catchup.test.mjs` 取全文；同分支的后续提交 72126e488 是它与 develop 的合并。若该分支已被回收，按本任务 `## Evidence` 的「AC4」节规格重写（判据文本运行时从 goals/AC-322-*.md 提取，⛔ 不抄）。
