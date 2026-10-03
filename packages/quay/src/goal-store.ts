@@ -1614,25 +1614,66 @@ export function createGoalStore(
     return vm;
   }
 
-  function list(filter: GoalFilter = {}): GoalViewModel[] {
+  // gap-store-list-all-or-nothing-unparseable-file-kills-whole-listing: the
+  // TOLERANT walk. A carrier file whose NAME matches the collection predicate
+  // (GOAL-* / AC-*) but whose CONTENT carries no frontmatter block poisons
+  // exactly its own entry — never the whole listing. Same shape as the three
+  // sibling stores (adr / document / meta); the failure list is the SAME
+  // `{ file, error }` shape the task board returns from `listWithMalformed()`
+  // (DoD2/DoD3).
+  //
+  // Collect-vs-throw is decided by TYPE of failure (AC4):
+  //   - `readdirSync` is NOT caught — a missing/unreadable carrier DIRECTORY
+  //     still throws; a loud failure must never degrade into an empty listing.
+  //   - `readFileSync` is NOT caught — an unreadable FILE (EACCES/ENOENT) is a
+  //     real read failure and still throws. It is not a parse failure.
+  //   - ONLY the frontmatter parse is caught → collected as a malformed entry.
+  //
+  // The malformed files are excluded BEFORE the derived annotations, which keep
+  // running over the FULL parseable list (a bad sibling file must not change
+  // what a healthy goal's progress/staleness reads as — hard rule 3b).
+  function listWithMalformed(filter: GoalFilter = {}): {
+    items: GoalViewModel[];
+    malformed: Array<{ file: string; error: string }>;
+  } {
     const evidenceMap = ledgerEvidenceMap(goalDir);
-    const all = fs
-      .readdirSync(goalDir)
-      .filter((f) => f.endsWith(".md") && (f.startsWith("GOAL-") || f.startsWith("AC-")))
-      .map((f) => {
-        const { frontmatter, body } = parseFrontmatter(fs.readFileSync(path.join(goalDir, f), "utf8"));
-        return toViewModel(frontmatter as GoalFrontmatter, body, evidenceMap, fs.statSync(path.join(goalDir, f)).mtimeMs);
-      });
+    const malformed: Array<{ file: string; error: string }> = [];
+    const all: GoalViewModel[] = [];
+    for (const f of fs.readdirSync(goalDir)) {
+      if (!(f.endsWith(".md") && (f.startsWith("GOAL-") || f.startsWith("AC-")))) continue;
+      const p = path.join(goalDir, f);
+      const raw = fs.readFileSync(p, "utf8");
+      let parsed: { frontmatter: GoalFrontmatter; body: string } | null = null;
+      try {
+        parsed = parseFrontmatter(raw) as { frontmatter: GoalFrontmatter; body: string };
+      } catch (err) {
+        malformed.push({ file: f, error: (err as Error).message });
+      }
+      if (!parsed) continue;
+      let updatedAt: number | undefined;
+      try { updatedAt = fs.statSync(p).mtimeMs; } catch { /* optional mtime, same as get() */ }
+      all.push(toViewModel(parsed.frontmatter, parsed.body, evidenceMap, updatedAt));
+    }
     // GOAL rows' time is derived from their ACs — computed over the FULL list before any filter.
     annotateGoalProgress(all);
     // …and their staleness is derived from the side carrier, over the SAME full list (a filter must
     // never be able to change what a goal's staleness reads as — hard rule 3b).
     annotateGoalStaleness(all, goalDir);
-    return all
-      .filter((g) => (filter.status ? g.status === filter.status : true))
-      .filter((g) => (filter.kind ? g.kind === filter.kind : true))
-      .filter((g) => (filter.goal ? g.goal === filter.goal : true))
-      .sort((a, b) => String(a.id).localeCompare(String(b.id)));
+    return {
+      items: all
+        .filter((g) => (filter.status ? g.status === filter.status : true))
+        .filter((g) => (filter.kind ? g.kind === filter.kind : true))
+        .filter((g) => (filter.goal ? g.goal === filter.goal : true))
+        .sort((a, b) => String(a.id).localeCompare(String(b.id))),
+      malformed,
+    };
+  }
+
+  // The plain ARRAY view of the SAME walk: one unparseable carrier file must
+  // not take down the listing. Callers that must not lose a file — that need
+  // to know WHICH file was skipped and WHY — use listWithMalformed().
+  function list(filter: GoalFilter = {}): GoalViewModel[] {
+    return listWithMalformed(filter).items;
   }
 
   // I1: the (at most one) currently-active GOAL. Derived from stored status, never hand-listed.
@@ -2754,7 +2795,7 @@ export function createGoalStore(
     return results;
   }
 
-  return { list, get, write, writeBatch, activeGoals, listActiveCriteria, isGoalAchieved, checkWithinCap, checkStaleness, checkAchievedFailing, checkReverifyScope, frozenAchievedAcs, checkStalePass, sweepFrozen };
+  return { list, listWithMalformed, get, write, writeBatch, activeGoals, listActiveCriteria, isGoalAchieved, checkWithinCap, checkStaleness, checkAchievedFailing, checkReverifyScope, frozenAchievedAcs, checkStalePass, sweepFrozen };
 }
 
 // ── Direct-invocation entry (Contract invoke: `node packages/quay/src/goal-store.ts`) ──────────────

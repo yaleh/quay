@@ -128,3 +128,79 @@ test("DOC-001 does not collide with DOC-0011 (dash-delimited id-prefix match, sh
   assert.equal(s.get("DOC-001").title, "one");
   assert.equal(s.get("DOC-0011").title, "eleven");
 });
+
+// ── gap-store-list-all-or-nothing-unparseable-file-kills-whole-listing ──────────────────────────
+// Same mechanism as the ADR sibling: a `DOC-*.md` file with no frontmatter block used to take
+// down the ENTIRE document listing (readdirSync().map(裸调 parseFrontmatter)).
+function writeRawDoc(dir, fileName, status = "active") {
+  const id = fileName.slice(0, 7);
+  fs.writeFileSync(path.join(dir, fileName), `---\nid: ${id}\ntitle: t-${id}\nstatus: ${status}\nkind: skill\n---\nbody\n`);
+}
+
+test("AC1: list() returns the remaining documents when one matched file has no frontmatter", () => {
+  const dir = tmpDir();
+  const s = createDocumentStore(dir);
+  writeRawDoc(dir, "DOC-001-a.md");
+  writeRawDoc(dir, "DOC-002-b.md", "draft");
+  fs.writeFileSync(path.join(dir, "DOC-003-notes.md"), "# notes\n\nprose, no frontmatter.\n");
+  const listed = s.list();
+  assert.deepEqual(listed.map((d) => d.id), ["DOC-001", "DOC-002"]);
+  assert.deepEqual(listed.map((d) => d.status), ["active", "draft"]);
+});
+
+test("AC2: listWithMalformed() enumerates the bad file with the parser's own error", () => {
+  const dir = tmpDir();
+  const s = createDocumentStore(dir);
+  writeRawDoc(dir, "DOC-001-a.md");
+  fs.writeFileSync(path.join(dir, "DOC-002-notes.md"), "# notes\n\nprose, no frontmatter.\n");
+  const { items, malformed } = s.listWithMalformed();
+  assert.equal(items.length, 1);
+  assert.deepEqual(malformed, [
+    { file: "DOC-002-notes.md", error: "malformed file: missing YAML frontmatter block" },
+  ]);
+});
+
+test("AC3: bidirectional negative control — inject ⇒ N-1 good + 1 malformed; remove ⇒ N-1 good + 0", () => {
+  const dir = tmpDir();
+  const s = createDocumentStore(dir);
+  writeRawDoc(dir, "DOC-001-a.md");
+  writeRawDoc(dir, "DOC-002-b.md");
+  writeRawDoc(dir, "DOC-003-c.md");
+  const badPath = path.join(dir, "DOC-004-notes.md");
+  fs.writeFileSync(badPath, "no frontmatter\n");
+
+  const injected = s.listWithMalformed();
+  assert.equal(injected.items.length, 3);
+  assert.equal(injected.malformed.length, 1);
+  assert.equal(injected.malformed[0].file, "DOC-004-notes.md");
+  assert.equal(s.list().length, 3);
+
+  fs.rmSync(badPath);
+  const restored = s.listWithMalformed();
+  assert.equal(restored.items.length, 3);
+  assert.deepEqual(restored.malformed, []);
+});
+
+test("AC4: a real READ failure still throws — never an empty listing / all-malformed", () => {
+  const dir = tmpDir();
+  const s = createDocumentStore(dir);
+  writeRawDoc(dir, "DOC-001-a.md");
+  fs.rmSync(dir, { recursive: true, force: true });
+  assert.throws(() => s.list(), /ENOENT/);
+  assert.throws(() => s.listWithMalformed(), /ENOENT/);
+});
+
+test("AC4: an unreadable carrier FILE still throws (a read failure is not a parse failure)", () => {
+  const dir = tmpDir();
+  const s = createDocumentStore(dir);
+  writeRawDoc(dir, "DOC-001-a.md");
+  const p = path.join(dir, "DOC-002-secret.md");
+  fs.writeFileSync(p, "---\nid: DOC-002\ntitle: s\nstatus: active\nkind: skill\n---\nb\n");
+  fs.chmodSync(p, 0o000);
+  try {
+    assert.throws(() => s.list(), /EACCES/);
+    assert.throws(() => s.listWithMalformed(), /EACCES/);
+  } finally {
+    fs.chmodSync(p, 0o600);
+  }
+});

@@ -163,3 +163,88 @@ test("list({ appliesTo }) filters to ADRs whose applies-to glob-matches the give
   const matchedNone = s.list({ appliesTo: "packages/quay/src/gate/registry.js" });
   assert.deepEqual(matchedNone.map((a) => a.id), []);
 });
+
+// ── gap-store-list-all-or-nothing-unparseable-file-kills-whole-listing ──────────────────────────
+// A carrier file whose NAME matches the collection predicate but whose CONTENT carries no
+// frontmatter block must poison exactly its own row, never the whole listing. The real-world
+// trigger (third-party workspace /data/home/yale/work/claudecodeui/adr/) is an ADR companion
+// note `ADR-003-验证记录.md`: it starts with `ADR-` and ends with `.md` but is prose, so the
+// old `readdirSync().map(裸调 parse)` threw and the ENTIRE ADR list came back as an error.
+function writeRawAdr(dir, fileName, status = "proposed") {
+  const id = fileName.slice(0, 7);
+  fs.writeFileSync(
+    path.join(dir, fileName),
+    `---\nid: ${id}\ntitle: t-${id}\nstatus: ${status}\n---\n## Decision\nd\n`
+  );
+}
+
+test("AC1: list() returns the remaining ADRs when one matched file has no frontmatter", () => {
+  const dir = tmpDir();
+  const s = createAdrStore(dir);
+  writeRawAdr(dir, "ADR-001-a.md", "accepted");
+  writeRawAdr(dir, "ADR-002-b.md", "proposed");
+  writeRawAdr(dir, "ADR-003-c.md", "superseded");
+  fs.writeFileSync(path.join(dir, "ADR-003-验证记录.md"), "# 验证记录\n\n不是该 ADR 的一部分。\n");
+  const listed = s.list();
+  assert.deepEqual(listed.map((a) => a.id), ["ADR-001", "ADR-002", "ADR-003"]);
+  assert.deepEqual(listed.map((a) => a.status), ["accepted", "proposed", "superseded"]);
+});
+
+test("AC2: listWithMalformed() enumerates the bad file with the parser's own error", () => {
+  const dir = tmpDir();
+  const s = createAdrStore(dir);
+  writeRawAdr(dir, "ADR-001-a.md");
+  fs.writeFileSync(path.join(dir, "ADR-002-验证记录.md"), "# 验证记录\n\nprose, no frontmatter.\n");
+  const { items, malformed } = s.listWithMalformed();
+  assert.equal(items.length, 1);
+  assert.deepEqual(malformed, [
+    { file: "ADR-002-验证记录.md", error: "malformed ADR file: missing YAML frontmatter block" },
+  ]);
+});
+
+test("AC3: bidirectional negative control — inject ⇒ N-1 good + 1 malformed; remove ⇒ N-1 good + 0", () => {
+  const dir = tmpDir();
+  const s = createAdrStore(dir);
+  writeRawAdr(dir, "ADR-001-a.md", "accepted");
+  writeRawAdr(dir, "ADR-002-b.md", "proposed");
+  writeRawAdr(dir, "ADR-003-c.md", "proposed");
+  const badPath = path.join(dir, "ADR-004-验证记录.md");
+  fs.writeFileSync(badPath, "no frontmatter\n");
+
+  const injected = s.listWithMalformed();
+  assert.equal(injected.items.length, 3, "the 3 healthy ADRs survive");
+  assert.equal(injected.malformed.length, 1, "exactly the injected file is reported");
+  assert.equal(injected.malformed[0].file, "ADR-004-验证记录.md");
+  assert.equal(s.list().length, 3, "list() agrees with the array view");
+
+  fs.rmSync(badPath);
+  const restored = s.listWithMalformed();
+  assert.equal(restored.items.length, 3);
+  assert.deepEqual(restored.malformed, [], "no failure entry once the bad file is gone");
+  assert.equal(s.list().length, 3);
+});
+
+test("AC4: a real READ failure still throws — never an empty listing / all-malformed", () => {
+  const dir = tmpDir();
+  const s = createAdrStore(dir);
+  writeRawAdr(dir, "ADR-001-a.md");
+  // Carrier DIRECTORY gone: readdirSync is deliberately outside the try → throws.
+  fs.rmSync(dir, { recursive: true, force: true });
+  assert.throws(() => s.list(), /ENOENT/);
+  assert.throws(() => s.listWithMalformed(), /ENOENT/);
+});
+
+test("AC4: an unreadable carrier FILE still throws (a read failure is not a parse failure)", () => {
+  const dir = tmpDir();
+  const s = createAdrStore(dir);
+  writeRawAdr(dir, "ADR-001-a.md");
+  const p = path.join(dir, "ADR-002-secret.md");
+  fs.writeFileSync(p, "---\nid: ADR-002\ntitle: s\nstatus: proposed\n---\nb\n");
+  fs.chmodSync(p, 0o000);
+  try {
+    assert.throws(() => s.list(), /EACCES/);
+    assert.throws(() => s.listWithMalformed(), /EACCES/);
+  } finally {
+    fs.chmodSync(p, 0o600); // restore so the file-level after() cleanup can remove the dir
+  }
+});

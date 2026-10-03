@@ -1476,3 +1476,87 @@ test("AC-242 —— `---` 落在 criterion 块标量内时，其后声明的 lon
   assert.deepEqual(j2.failing, ["AC-900"], "域外 + 尾事件 fail ⇒ 必须报出（与 (c) 结果不同）");
   assert.equal(n(["check", "--stale-pass"]).status, 1);
 });
+
+// ── gap-store-list-all-or-nothing-unparseable-file-kills-whole-listing ──────────────────────────
+// Same mechanism as the ADR / document / meta siblings: a carrier file matching the collection
+// predicate (`GOAL-*` / `AC-*`) with no frontmatter block used to take down the ENTIRE goal
+// listing — and through it every derived reader (activeGoals / listActiveCriteria / staleness).
+function writeRawGoal(dir, id, status = "active") {
+  const kind = id.startsWith("GOAL-") ? "goal" : "criterion";
+  const goal = id.startsWith("GOAL-") ? "" : "goal: GOAL-001\n";
+  fs.writeFileSync(
+    path.join(dir, `${id}-t.md`),
+    `---\nid: ${id}\ntitle: t-${id}\nstatus: ${status}\nkind: ${kind}\n${goal}---\nbody\n`
+  );
+}
+
+test("AC1: list() returns the remaining goal records when one matched file has no frontmatter", () => {
+  const dir = tmpDir("malformed");
+  const s = createGoalStore(dir);
+  writeRawGoal(dir, "GOAL-001", "active");
+  writeRawGoal(dir, "GOAL-002", "draft");
+  writeRawGoal(dir, "AC-001", "active");
+  fs.writeFileSync(path.join(dir, "GOAL-003-验证记录.md"), "# 验证记录\n\nprose, no frontmatter.\n");
+  const listed = s.list();
+  assert.deepEqual(listed.map((g) => g.id), ["AC-001", "GOAL-001", "GOAL-002"]);
+  assert.deepEqual(listed.map((g) => g.status), ["active", "active", "draft"]);
+});
+
+test("AC2: listWithMalformed() enumerates the bad file with the parser's own error", () => {
+  const dir = tmpDir("malformed");
+  const s = createGoalStore(dir);
+  writeRawGoal(dir, "GOAL-001");
+  fs.writeFileSync(path.join(dir, "AC-002-notes.md"), "# notes\n\nprose, no frontmatter.\n");
+  const { items, malformed } = s.listWithMalformed();
+  assert.equal(items.length, 1);
+  assert.deepEqual(malformed, [
+    { file: "AC-002-notes.md", error: "malformed file: missing YAML frontmatter block" },
+  ]);
+});
+
+test("AC3: bidirectional negative control — inject ⇒ N-1 good + 1 malformed; remove ⇒ N-1 good + 0", () => {
+  const dir = tmpDir("malformed");
+  const s = createGoalStore(dir);
+  writeRawGoal(dir, "GOAL-001");
+  writeRawGoal(dir, "GOAL-002");
+  writeRawGoal(dir, "GOAL-003");
+  const badPath = path.join(dir, "GOAL-004-验证记录.md");
+  fs.writeFileSync(badPath, "no frontmatter\n");
+
+  const injected = s.listWithMalformed();
+  assert.equal(injected.items.length, 3);
+  assert.equal(injected.malformed.length, 1);
+  assert.equal(injected.malformed[0].file, "GOAL-004-验证记录.md");
+  assert.equal(s.list().length, 3);
+
+  fs.rmSync(badPath);
+  const restored = s.listWithMalformed();
+  assert.equal(restored.items.length, 3);
+  assert.deepEqual(restored.malformed, []);
+  // The DERIVED readers sit on the same walk — they agree with the plain list.
+  assert.equal(s.activeGoals().length, 3);
+});
+
+test("AC4: a real READ failure still throws — never an empty listing / all-malformed", () => {
+  const dir = tmpDir("malformed");
+  const s = createGoalStore(dir);
+  writeRawGoal(dir, "GOAL-001");
+  fs.rmSync(dir, { recursive: true, force: true });
+  assert.throws(() => s.list(), /ENOENT/);
+  assert.throws(() => s.listWithMalformed(), /ENOENT/);
+});
+
+test("AC4: an unreadable carrier FILE still throws (a read failure is not a parse failure)", () => {
+  const dir = tmpDir("malformed");
+  const s = createGoalStore(dir);
+  writeRawGoal(dir, "GOAL-001");
+  const p = path.join(dir, "GOAL-002-secret.md");
+  fs.writeFileSync(p, "---\nid: GOAL-002\ntitle: s\nstatus: active\nkind: goal\n---\nb\n");
+  fs.chmodSync(p, 0o000);
+  try {
+    assert.throws(() => s.list(), /EACCES/);
+    assert.throws(() => s.listWithMalformed(), /EACCES/);
+  } finally {
+    fs.chmodSync(p, 0o600);
+  }
+});

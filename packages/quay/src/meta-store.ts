@@ -135,17 +135,53 @@ export function createMetaStore(metaDir: string) {
     return toViewModel(frontmatter as MetaFrontmatter, body, updatedAt);
   }
 
+  // gap-store-list-all-or-nothing-unparseable-file-kills-whole-listing: the
+  // TOLERANT walk. A carrier file whose NAME matches the collection predicate
+  // but whose CONTENT carries no frontmatter block poisons exactly its own
+  // entry — never the whole listing. Same shape as the three sibling stores
+  // (adr / document / goal); the failure list is the SAME `{ file, error }`
+  // shape the task board returns from `listWithMalformed()` (DoD2/DoD3).
+  //
+  // Collect-vs-throw is decided by TYPE of failure (AC4):
+  //   - `readdirSync` is NOT caught — a missing/unreadable carrier DIRECTORY
+  //     still throws; a loud failure must never degrade into an empty listing.
+  //   - `readFileSync` is NOT caught — an unreadable FILE (EACCES/ENOENT) is a
+  //     real read failure and still throws. It is not a parse failure.
+  //   - ONLY the frontmatter parse is caught → collected as a malformed entry.
+  function listWithMalformed(filter: MetaFilter = {}): {
+    items: MetaViewModel[];
+    malformed: Array<{ file: string; error: string }>;
+  } {
+    const malformed: Array<{ file: string; error: string }> = [];
+    const items: MetaViewModel[] = [];
+    for (const f of fs.readdirSync(metaDir)) {
+      if (!(f.endsWith(".md") && f.startsWith("META-"))) continue;
+      const p = path.join(metaDir, f);
+      const raw = fs.readFileSync(p, "utf8");
+      let parsed: { frontmatter: MetaFrontmatter; body: string } | null = null;
+      try {
+        parsed = parseFrontmatter(raw) as { frontmatter: MetaFrontmatter; body: string };
+      } catch (err) {
+        malformed.push({ file: f, error: (err as Error).message });
+      }
+      if (!parsed) continue;
+      let updatedAt: number | undefined;
+      try { updatedAt = fs.statSync(p).mtimeMs; } catch { /* optional mtime, same as get() */ }
+      items.push(toViewModel(parsed.frontmatter, parsed.body, updatedAt));
+    }
+    return {
+      items: items
+        .filter((m) => (filter.status ? m.status === filter.status : true))
+        .sort((a, b) => String(a.id).localeCompare(String(b.id))),
+      malformed,
+    };
+  }
+
+  // The plain ARRAY view of the SAME walk: one unparseable carrier file must
+  // not take down the listing. Callers that must not lose a file — that need
+  // to know WHICH file was skipped and WHY — use listWithMalformed().
   function list(filter: MetaFilter = {}) {
-    return fs
-      .readdirSync(metaDir)
-      .filter((f) => f.endsWith(".md") && f.startsWith("META-"))
-      .map((f) => {
-        const p = path.join(metaDir, f);
-        const { frontmatter, body } = parseFrontmatter(fs.readFileSync(p, "utf8"));
-        return toViewModel(frontmatter as MetaFrontmatter, body, fs.statSync(p).mtimeMs);
-      })
-      .filter((m) => (filter.status ? m.status === filter.status : true))
-      .sort((a, b) => String(a.id).localeCompare(String(b.id)));
+    return listWithMalformed(filter).items;
   }
 
   function write(id: string, { title, status, handler, reply, body }: {
@@ -197,7 +233,7 @@ export function createMetaStore(metaDir: string) {
     });
   }
 
-  return { list, get, write };
+  return { list, listWithMalformed, get, write };
 }
 
 // ── Direct-invocation entry (`node packages/quay/src/meta-store.ts`) ──────────────────────────────
