@@ -39,6 +39,21 @@ AC3：**分支提交完成时**（doc 提交 + 本任务文件的勾选提交，
 
 > ⚠️ AC3 的读数时点须说清（硬规则 4c：判据点名的量要穿过所有中间层还取得到）：worker 规程第 2b 步要求随后把 `develop` 并入 worktree。并入之后本任务文件与 develop 收敛（diff 变为仅 `docs-managed/DOC-904-goal-branch-merge-drill-record.md` 一个文件）——因为**任务文件（状态/勾选）的写面在 author→develop 基线上，不在 goal 分支的 delta 内**（CLAUDE.md「写面保留 author」、2026-08-31 人裁定）。故演练相对 develop 的净新增仅 DOC-904；「不得夹带别的改动」成立，两个文件的完整读数取在分支提交完成、尚未并入 develop 的那一刻。
 
+### 阻断解除：AC-904 判据内联活宿主载体（develop-wide 静态红）的修复（2026-10-04）
+
+上一轮 `exited-not-landed` 的真因**不在本任务 delta**，而是 **develop-wide 静态红**：`criterion-carrier-inline-check`（`goals/*.md` 的 criterion 文本不得点名活宿主载体文件）在 `goals/AC-904-*.md` 的 criterion 段命中该字面量 ⇒ 任何 **code-delta** 的 fan-in 全量 suite 在静态层 fail-closed abort（签名 `# tests 0 · # pass 0 · # fail 72 · # suite red static-check`；真因尾部 `STATIC_CHECK_FAILED: criterion-carrier-inline-check exit=1`）。
+
+反例对照（硬规则 4 推论四）——该红与「本任务 delta」无关：
+- 主检出（author==develop）上直跑 `node --no-warnings --experimental-strip-types plugin/scripts/criterion-carrier-inline-check.ts --root .` ⇒ exit 1，点名 `AC-904 (goals/AC-904-…md)`；
+- `git cat-file -e develop:goals/AC-904-…md` 命中 ⇒ **在 develop 自身字节上就红**，不依赖本分支任何提交；
+- `git rev-list --count develop..HEAD` 中本任务的净新增只有 `docs-managed/DOC-904-…md`（`docs-managed/` 不在 DOC_SURFACES，故被判 code ⇒ 触发全量 suite，进而撞上该静态红；其余任务若 code-delta 同样会撞）。
+
+修法（**离分支**，经 goal ABI 的写面 author→develop，⛔ 不入本任务 delta，故 AC3 仍成立）：把 AC-904 的 criterion 从「内联读活宿主载体」改为**调用**单一定义点 `plugin/scripts/live-web-address.ts`（语义等价：仍取本 root 存活 serve 的 `host:port`，再 `curl /doc` 判 `DOC-904`；载体缺席/不可读/无 web ⇒ exit 3，web down ⇒ exit 1）。命令：`quay goal write AC-904 --criterion "<新判据>"`。落库提交 `1aec2bd8b goals: AC-904 field:criterion by cli:403681`，随 author→develop 同步进入 develop（`git rev-list --count develop..author` 归 0 后复核）。
+
+复核读数：修复后 `criterion-carrier-inline-check --root .` ⇒ **exit 0**（`0 criterion(s) inline "server.json"`）；本任务 worktree 并入 develop 后同判 ⇒ exit 0。此红与派发接线（mergeTarget）无关，但曾使本演练的 fan-in 无法变绿。
+
+本任务 worktree 本轮复核：`bash scripts/test.sh --for-task gap-goal904-merge-drill-record-doc --allow-thin` ⇒ exit 0；scoped-gate cache 以 develop sha `1aec2bd8b` 写入。
+
 ## Touches
 
 - docs-managed/DOC-904-goal-branch-merge-drill-record.md
