@@ -1,7 +1,7 @@
 ---
 id: GOAL-904
 title: goal 分支合并演练（drill）——只用于跑一次 goal→develop 并入路径，不是真实开发方向
-status: achieved
+status: active
 kind: goal
 origin: 人 2026-10-03「第二步先做合并演练再做试点」：对 GOAL-028 跑一遍 goal
   分支完整路径（演练，非真实开发方向）；判据能在生产实例上判假（落笔当轮读数：生产 /doc 无 DOC-904 ⇒ exit 1）
@@ -18,6 +18,14 @@ statusLog:
     to: achieved
     actor: goal-driver
     reason: "I2: all ACs achieved + sufficiency covered"
+  - at: 2026-10-03T19:29:19.922Z
+    from: achieved
+    to: active
+    actor: cli
+    reason: 人 2026-10-03 裁定重开（合并演练）：GOAL-904 在 goal 分支并入之前被 goal-driver 提前翻成
+      achieved，导致 quay goal merge 因非 active
+      被拒；gap-goal-branch-goal-flips-achieved-before-its-branch-merges 已落地且
+      driver 已加载（19:27Z），重开后应由 blocked-unmerged-branch 挡住再次提前 achieved，直到并入完成
 branch: true
 ---
 ## 背景
