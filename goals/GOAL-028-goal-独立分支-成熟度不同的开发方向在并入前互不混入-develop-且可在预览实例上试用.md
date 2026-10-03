@@ -60,3 +60,31 @@ statusLog:
 ## 承载 task
 
 AC-321 ← `gap-goal-branch-dispatch-wiring-and-task-fan-in`；AC-322 ← `gap-goal-branch-antidrift-two-line-base`；AC-323 ← `gap-goal-branch-done-means-landed-on-merge-target`；AC-324 ← `gap-goal-branch-criteria-evaluated-on-goal-worktree`、`gap-goal-branch-ac-phase-field-and-split-evaluation`；AC-325 ← `gap-goal-branch-human-merge-verb-and-execution`；AC-326 ← `gap-goal-branch-data-model-and-lifecycle`；AC-327 ← `gap-goal-branch-ff-merge-source-param`；AC-328 ← `gap-goal-branch-reaper-accepts-preview-serve`、`gap-goal-branch-gate-event-evaluation-root`、`gap-goal-branch-preview-instance`。依赖顺序见各任务的 `depends_on`（SPEC §10：B1/B2 落地前 ⛔ 不接线）。
+
+## 演练证据（2026-10-03/04，GOAL-904 合并演练）
+
+**结论**：8 条 AC 的判据在一次真实的 goal→develop 并入上全部读到 exit 0（AC-321…328）。演练载体是 GOAL-904（`branch: true`，一个任务、一条 live-probe AC，内容为一份说明演练的托管文档 DOC-904）。
+
+| 读数 | 值 |
+|---|---|
+| 任务落点 | 翻 done 提交 `774f9c137` 经 `goal/GOAL-904` 落地，不在 develop 上；develop 的 `docs-managed/` 在并入前没有 DOC-904 |
+| 追平 | 任务分支在 fan-in 内合入了 develop（新增的 `catch-up-develop` 步骤） |
+| 锁 | `fan-in.goal-GOAL-904.lock`，事件带 `lock` 字段 |
+| 试用 | 预览 `http://172.28.0.1:20204/doc` 列出 DOC-904，生产 `/doc` 不列；AC-904 的判据在预览 worktree 上 PASS（`evaluationRoot` = 判据 worktree，树 `23fa265f`→`0d5e13ef`）、在生产上 exit 1 |
+| 并入 | 合并提交 `0e5c76a94`（`merge: goal/GOAL-904 into develop (request effad792…)`），第二父 = goal tip `774f9c137`；任务翻 done 提交只经第二父可达 |
+| 顺序 | 并入先于 achieved：GOAL-904 在并入后的下一轮才翻 achieved（20:23Z），晚于合并提交；并入后 goal 分支、判据 worktree、预览实例均被清理 |
+
+**演练暴露并已修的缺陷**（每条都有任务，单测都覆盖不到）：
+1. 判据 worktree 在符号链接 root（`/home/yale`→`/data/home/yale`）下永远刷不新：`gap-goal-criterion-worktree-registered-check-blind-to-symlinked-root`。
+2. 判据/预览 worktree 与并入临时 worktree 缺 `node_modules`（预览 serve 起不来、`pre-merge-commit` 钩子崩）：`gap-goal-branch-worktrees-lack-node-modules`。
+3. 并入的非冲突失败被标成 `merge-conflict`，且同一 tip 上人重发请求不会被重试：`gap-goal-merge-infra-red-mislabelled-and-rerequest-never-retries`。
+4. 设计漏洞：branch-mode goal 在并入之前就被 goal-driver 翻成 achieved，随后 `quay goal merge` 因非 active 被拒（死结）：`gap-goal-branch-goal-flips-achieved-before-its-branch-merges`，规则已补进 SPEC §4.7（close-block `blocked-unmerged-branch`）。
+5. 本 GOAL 初稿判据依赖 develop 的 first-parent 链（真实 fan-in 把 69% 的落地挤出该链），改判据又打红了消费这些判据文本的测试（`gap-goal-criterion-rewrite-stale-test-fixtures`）。
+
+**⚠️ 演练期间的手工操作与未被生产读数覆盖的部分**（不假装机制自己跑通了）：
+- 手工把判据 worktree 刷新到新 tip（`checkout --detach --force`）——当时自动刷新因缺陷 1 失效。修复落地后，生产读数只出现过 `current`，**「刷新到新 tip」这条分支（`refreshed`）没有在生产上被读到过**。
+- 手工把主检出的 `node_modules` 链接进判据 worktree 才起得了预览——**修复 2 的「判据/预览 worktree 自动装配依赖」没有在生产上被读到过**（并入临时 worktree 的装配则被真实执行：并入在没有任何手工干预下越过钩子并成功）。
+- 样本很薄：AC-321/322/323/327 各只读到一个任务的落地；演练内容只是一份文档，没有覆盖「多任务落地到同一 goal 分支」与「goal 分支落后 develop 很多」。
+- `plugin/test/live-web-address.test.mjs` 把语料数量钉死为字面量 18，之后每多一条用该 helper 的 AC 它会再次 develop-wide 变红（后续项）。
+
+**仍未发生的退出条件**：上面「退出条件」第 1 条的**真实试点**（一个真实的较大改进开 `branch: true`）还没有做；本次演练只证明了机制能走通。
