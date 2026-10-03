@@ -7,6 +7,7 @@ import os from "node:os";
 import path from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { execFileSync, spawn, spawnSync } from "node:child_process";
+import YAML from "yaml";
 
 import {
   computeOutcome,
@@ -157,7 +158,12 @@ import {
   untaggedGoalBranchOverlaps,
   findGoalBranchUntaggedOverlap,
   fanInLockFileForMergeTarget,
+  // SPEC-goal-branch §4.7：goal→develop 最终 fan-in 的执行侧 + 派生读数（worker-driver 的 re-export 面）。
+  runGoalMergeFanIn,
+  pendingGoalMerges,
+  readGoalMergeResults,
 } from "../scripts/worker-driver.ts";
+import { recordGoalMergeRequest } from "../../packages/quay/src/goal-merge.ts";
 import { defaultLaneCount } from "../scripts/full-suite-runner.ts";
 import { spawnSuiteAndWait } from "../scripts/suite-driver.ts";
 import { suiteLockBase, suiteLockSlotPaths } from "../scripts/suite-lock-slots.ts";
@@ -3728,4 +3734,125 @@ test("AC3 — 未标注读数：无 goal_ac 且 Touches 与 branch-mode goal 在
     [],
     "对端落 develop ⇒ 无读数",
   );
+});
+
+// ── SPEC-goal-branch-2026-10-03 §4.7 — goal→develop 最终 fan-in 执行侧（裁定⑭⑲⑳）──────────────────
+//
+// 端到端（临时仓库 + 注入可控 suite 结果）：人在终端 `quay goal merge` 只记录请求；worker-driver 每轮
+// 从 ledger 重派生「待执行」并执行 --no-ff 合并 + 验证 + ff + 删分支。⛔ 这些用例断言的是【git ref
+// 的实际走向】（合并提交在 develop first-parent 上、develop 被 ff 到它、goal 分支消失）与【失败时 ref
+// 不动 + 落 goal-merge-result 事件】——不是返回值自述，因为落地与否的直接量就是 git 本身。
+const FF_MERGE_MODULE_ABS = path.join(REPO_ROOT, "packages", "quay", "src", "fan-in", "ff-merge.ts");
+const GM_GOAL = "GOAL-901";
+
+function makeGoalMergeRepo(tag) {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), `goal-merge-e2e-${tag}-`));
+  const g = (...a) => execFileSync("git", ["-C", root, ...a], { encoding: "utf8" });
+  g("init", "-q"); g("config", "user.email", "t@example.com"); g("config", "user.name", "T");
+  g("branch", "-M", "develop");
+  fs.writeFileSync(path.join(root, ".gitignore"), ".quay/\n");
+  fs.mkdirSync(path.join(root, "goals"), { recursive: true });
+  fs.writeFileSync(path.join(root, "goals", `${GM_GOAL}-a-goal.md`),
+    `---\nid: ${GM_GOAL}\ntitle: a goal\nstatus: active\nkind: directive\nbranch: true\n---\n\nbody long enough for the fixture to parse as a goal record yes indeed\n`);
+  g("add", "-A"); g("commit", "-q", "-m", "base");
+  g("checkout", "-q", "-b", `goal/${GM_GOAL}`);
+  fs.writeFileSync(path.join(root, "work.txt"), "goal work\n");
+  g("add", "-A"); g("commit", "-q", "-m", "goal work");
+  g("checkout", "-q", "-b", "develop-work"); // develop 脱离主检出 ⇒ ff 退化为纯 ref 更新
+  // 请求时间回拨 2 分钟：AC-325 判据把请求事件的毫秒时间戳与合并提交的【秒级】%ct 比较
+  // （`Date.parse(ts) < ct*1000`），同秒会误判「无请求」。生产里人请求与 driver 执行相隔数分钟，
+  // 夹具把这一形态显式造出来（⛔ 不是放宽判据）。
+  recordGoalMergeRequest({ root, goalId: GM_GOAL, reason: "tried it in the preview, mature enough", now: () => new Date(Date.now() - 120_000) });
+  return root;
+}
+
+/** 从 `goals/<AC-NNN>-*.md` 的 criterion 字段取出判据文本并按 `sh -c` 在 `repo` 内执行。 */
+function runGoalCriterion(repo, acId) {
+  const dir = path.join(REPO_ROOT, "goals");
+  const file = fs.readdirSync(dir).find((f) => f.startsWith(`${acId}-`) && f.endsWith(".md"));
+  const raw = fs.readFileSync(path.join(dir, file), "utf8");
+  const fm = YAML.parse(/^---\n([\s\S]*?)\n---/.exec(raw)[1]);
+  const r = spawnSync("sh", ["-c", fm.criterion], { cwd: repo, encoding: "utf8" });
+  return { status: r.status, stdout: r.stdout, stderr: r.stderr };
+}
+
+const gmOpts = (root, suiteCommand) => ({
+  root, goalId: GM_GOAL, suiteCommand,
+  ffMergeModule: FF_MERGE_MODULE_ABS,
+  scriptsDir: path.join(REPO_ROOT, "plugin", "scripts"),
+});
+
+function gmCleanup(root) {
+  try { fs.rmSync(root, { recursive: true, force: true }); } catch { /* best-effort */ }
+}
+
+test("goal-merge e2e — green suite: develop gets exactly ONE goal/GOAL-901 merge commit on its first-parent chain, develop is ff'd to it, the goal branch is deleted", async () => {
+  const root = makeGoalMergeRepo("green");
+  try {
+    const pending = pendingGoalMerges(root);
+    assert.equal(pending.length, 1, "the recorded request is pending");
+    const r = await runGoalMergeFanIn({ ...gmOpts(root, ["bash", "-c", "exit 0"]), request: pending[0].request });
+    assert.equal(r.outcome, "landed");
+    const merges = execFileSync("git", ["-C", root, "log", "develop", "--first-parent", "--merges", "--format=%H %s"], { encoding: "utf8" })
+      .trim().split("\n").filter(Boolean);
+    assert.equal(merges.length, 1, "exactly one merge commit on develop's first-parent chain");
+    assert.match(merges[0], /goal\/GOAL-901/, "the merge subject names the goal branch");
+    const devTip = execFileSync("git", ["-C", root, "rev-parse", "develop"], { encoding: "utf8" }).trim();
+    assert.equal(r.landedSha, devTip, "develop was ff'd to the merge commit");
+    assert.equal(merges[0].split(" ")[0], devTip, "the ff'd tip IS the merge commit");
+    assert.throws(
+      () => execFileSync("git", ["-C", root, "rev-parse", "--verify", "goal/GOAL-901"], { stdio: "ignore" }),
+      "the goal branch was deleted",
+    );
+    assert.equal(pendingGoalMerges(root).length, 0, "a landed merge is no longer pending");
+  } finally { gmCleanup(root); }
+});
+
+test("goal-merge e2e — red suite: all refs unchanged, a goal-merge-result is written, and it retries only after the tip advances", async () => {
+  const root = makeGoalMergeRepo("red");
+  try {
+    const devBefore = execFileSync("git", ["-C", root, "rev-parse", "develop"], { encoding: "utf8" }).trim();
+    const tip = execFileSync("git", ["-C", root, "rev-parse", "goal/GOAL-901"], { encoding: "utf8" }).trim();
+    const pending = pendingGoalMerges(root);
+    const r = await runGoalMergeFanIn({ ...gmOpts(root, ["bash", "-c", "echo boom; exit 1"]), request: pending[0].request });
+    assert.equal(r.outcome, "red");
+    assert.equal(r.step, "suite");
+    assert.equal(execFileSync("git", ["-C", root, "rev-parse", "develop"], { encoding: "utf8" }).trim(), devBefore, "develop unchanged on red");
+    assert.equal(execFileSync("git", ["-C", root, "rev-parse", "goal/GOAL-901"], { encoding: "utf8" }).trim(), tip, "goal branch unchanged on red");
+    const results = readGoalMergeResults(root);
+    assert.equal(results.length, 1);
+    assert.equal(results[0].outcome, "red");
+    assert.equal(results[0].tipSha, tip, "the result carries the attempted tip");
+
+    // tip 不变 ⇒ 下一轮不重试；tip 前进 ⇒ 重试（裁定⑳：人批准的是业务目标，不是某一棵树）。
+    assert.equal(pendingGoalMerges(root).length, 0, "tip unchanged ⇒ not retried");
+    const g = (...a) => execFileSync("git", ["-C", root, ...a], { encoding: "utf8" });
+    g("checkout", "-q", `goal/${GM_GOAL}`);
+    fs.writeFileSync(path.join(root, "fix.txt"), "fix\n");
+    g("add", "-A"); g("commit", "-q", "-m", "fix the suite");
+    g("checkout", "-q", "develop-work");
+    const retry = pendingGoalMerges(root);
+    assert.equal(retry.length, 1, "tip advanced ⇒ retried");
+
+    const r2 = await runGoalMergeFanIn({ ...gmOpts(root, ["bash", "-c", "exit 0"]), request: retry[0].request });
+    assert.equal(r2.outcome, "landed", "the retry after the fix lands");
+    assert.match(execFileSync("git", ["-C", root, "log", "develop", "--first-parent", "--merges", "--format=%s"], { encoding: "utf8" }), /goal\/GOAL-901/);
+  } finally { gmCleanup(root); }
+});
+
+// AC3（本任务 gap-goal-branch-human-merge-verb-and-execution）：用成功场景的临时仓库跑 GOAL-028 的
+// 真实判据 AC-325 / AC-327，两者都退出 0。⛔ 判据文本从 `goals/AC-*.md` 的 criterion 字段【取出原文】
+// 执行（硬规则 4 推论三：读生产载体，不是我在测试里重写一份等价的断言）。
+test("goal-merge e2e — GOAL-028's AC-325 and AC-327 criteria pass on the success-scenario repo (the real criterion text, run with sh)", async () => {
+  const root = makeGoalMergeRepo("ac-criteria");
+  try {
+    const pending = pendingGoalMerges(root);
+    const r = await runGoalMergeFanIn({ ...gmOpts(root, ["bash", "-c", "exit 0"]), request: pending[0].request });
+    assert.equal(r.outcome, "landed");
+    for (const acId of ["AC-325", "AC-327"]) {
+      const res = runGoalCriterion(root, acId);
+      assert.equal(res.status, 0, `${acId} must exit 0 — stdout=${res.stdout} stderr=${res.stderr}`);
+      assert.match(res.stdout, /^PASS:/, `${acId} prints its PASS line`);
+    }
+  } finally { gmCleanup(root); }
 });
