@@ -2,7 +2,7 @@
 id: gap-goal-branch-worktrees-lack-node-modules
 title: goal 分支的判据/预览 worktree 与并入临时 worktree 都是裸 git worktree add 建的、没有
   node_modules——预览 serve 起不来、并入时 pre-merge-commit 钩子找不到 yaml 而中止（GOAL-904 演练读到）
-status: ready
+status: done
 labels:
   - gap
   - defect
