@@ -1,7 +1,7 @@
 ---
 id: gap-carrier-registry-declaration-with-unregistered-red-check
 title: 载体注册表（仅声明）：.quay/* 持久载体名 → 声明所有者/种类，漏登记即红——让「谁写谁读」从词法猜测变成可核对的声明
-status: ready
+status: done
 labels:
   - gap
 parent: null
@@ -27,11 +27,11 @@ extra:
 
 ## AC
 
-- [ ] 注册表覆盖当前全部载体：`scripts/test.sh plugin/test/carrier-registry-completeness.test.mjs` exit 0（意味着「代码里的载体名 ⊆ 注册表」且「无陈旧条目」）
-- [ ] 漏登记即红（负对照）：把 docs/carrier-registry.json 临时删掉任一条目（先 cp 备份），重跑上条命令必须 exit 非 0 且输出里含被删的载体名；还原后 exit 0；两次 exit 码进 Evidence（⛔ 不用 git checkout 还原）
-- [ ] 谓词对真样本命中：测试内含一条对 `worker-outcome.jsonl` 的「必须被抽到」断言；临时把名字谓词改坏（cp 备份）重跑必须 exit 非 0 且报「谓词失效」类原因，而不是通过
-- [ ] 已声明所有者的 14 个载体与 DRIVER_KINDS 一致：测试从 plugin/scripts/driver-runtime.ts 的 DRIVER_KINDS 读出每个 kind 的 carriers+controlFile，断言注册表里对应条目的 owner 等于该 kind 的 driver 文件（不一致即红）
-- [ ] `unowned-yet` 数量被读出并记录而不是被隐藏：`node -e` 一行统计 docs/carrier-registry.json 中 owner=="unowned-yet" 的条数，贴进 Evidence（不设阈值——此前从未测量，先出读数；若后续要设棘轮另立任务）
+- [x] 注册表覆盖当前全部载体：`scripts/test.sh plugin/test/carrier-registry-completeness.test.mjs` exit 0（意味着「代码里的载体名 ⊆ 注册表」且「无陈旧条目」）
+- [x] 漏登记即红（负对照）：把 docs/carrier-registry.json 临时删掉任一条目（先 cp 备份），重跑上条命令必须 exit 非 0 且输出里含被删的载体名；还原后 exit 0；两次 exit 码进 Evidence（⛔ 不用 git checkout 还原）
+- [x] 谓词对真样本命中：测试内含一条对 `worker-outcome.jsonl` 的「必须被抽到」断言；临时把名字谓词改坏（cp 备份）重跑必须 exit 非 0 且报「谓词失效」类原因，而不是通过
+- [x] 已声明所有者的 14 个载体与 DRIVER_KINDS 一致：测试从 plugin/scripts/driver-runtime.ts 的 DRIVER_KINDS 读出每个 kind 的 carriers+controlFile，断言注册表里对应条目的 owner 等于该 kind 的 driver 文件（不一致即红）
+- [x] `unowned-yet` 数量被读出并记录而不是被隐藏：`node -e` 一行统计 docs/carrier-registry.json 中 owner=="unowned-yet" 的条数，贴进 Evidence（不设阈值——此前从未测量，先出读数；若后续要设棘轮另立任务）
 
 ## DoD
 
@@ -42,3 +42,21 @@ extra:
 - tasks/gap-carrier-registry-declaration-with-unregistered-red-check.md
 - docs/carrier-registry.json (new)
 - plugin/test/carrier-registry-completeness.test.mjs (new)
+
+## Evidence
+
+实测 2026-10-03，worktree `quay-worktrees/gap-carrier-registry-declaration-with-unregistered-red-check`。
+
+**谓词（唯一实现，在测试里）**：字符串/模板字面量内、以 `/` 或字符串边界分隔的路径段，整段匹配 `^[.]?<name>(.jsonl|-control.json|-state.json|-desired.json|-takeover.json)$`，外加固定名 anchor.json / server.json / full-suite-state.json / worker-dispatch.json。注释先经 `source-text-lib.ts#maskComments`（词法状态机）抹掉——注释里提到不算命中（硬规则 2）。
+
+**AC1**：`bash scripts/test.sh plugin/test/carrier-registry-completeness.test.mjs` → **exit 0**（5/5 pass）。测试进入默认套件：`scripts/test.sh --list-files | grep -c carrier-registry-completeness` = **1**。
+
+**AC2（负对照，删条目）**：cp 备份（md5 `ea0404dd4ae684f660949ba2ba5da22c`）→ 删 `gate-events.jsonl` 一条 → 重跑 **exit 1**，断言报文含 `gate-events.jsonl (first seen packages/quay/src/gate/gate-log.ts:11)`；从 cp 备份还原（md5 不变，⛔ 未用 git checkout）→ 重跑 **exit 0**。
+
+**AC3（真样本 + 改坏谓词）**：测试内含 `worker-outcome.jsonl` 必须被抽到的断言；把谓词 `[.]jsonl` 改成 `[.]jsonlX`（cp 备份测试文件）→ 重跑 **exit 1**，报文 `谓词失效 / PREDICATE-FAILED: the known-true sample "worker-outcome.jsonl" ... was NOT extracted`；还原 → **exit 0**。
+
+**AC4（DRIVER_KINDS 一致）**：测试从 DRIVER_KINDS 读 6 个 kind 的 carriers+controlFile（共 14 个），断言注册表对应条目 owner == `plugin/scripts/<driver>`。负对照：把 `worker-outcome.jsonl` 的 owner 改成 `promotion-driver.ts` → **exit 1**（`worker: worker-outcome.jsonl owner="...promotion-driver.ts" but this kind's driver is "...worker-driver.ts"`）；还原 → exit 0。
+
+**AC5（unowned-yet 读数）**：`node -e` 统计 → **unowned-yet = 69**（total = 83，declared = 14）。
+
+**读数说明**：注册表实测 **83** 条（提案背景写 84，差 1）。段边界谓词把 `transcript.jsonl` 排除——它只出现在 `--check <transcript.jsonl>` 用法串里（占位符），不是固定载体名；同族被正确排除的还有 `${id}.audit.jsonl`、`<target>-observer-state.json`、fixture 串里的 `g.jsonl`、错误报文里的 `merge-lock-events.jsonl`。注册表包含真实 dotfile 载体 `.ruling-observer-state.json`（`RULING_OBSERVER_STATE_FILE`）。`lock` 类在 AC 谓词下暂无成员（`.lock` 不在谓词内）；如需纳入另立任务。

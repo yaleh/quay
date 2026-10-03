@@ -1,0 +1,503 @@
+{
+  "description": "Carrier registry (DECLARATION ONLY). Every persistent carrier name that appears as a string/template literal in non-test packages/*/src + plugin/scripts code, with its declared writer owner. owner='unowned-yet' is an honest NOT-EVALUATED value, deliberately distinct from a declared owner path. Enforced by plugin/test/carrier-registry-completeness.test.mjs (code names must be a subset of this registry, and this registry must not be stale).",
+  "carriers": [
+    {
+      "name": ".ruling-observer-state.json",
+      "kind": "state-json",
+      "owner": "unowned-yet",
+      "readers": "unaudited"
+    },
+    {
+      "name": "anchor-desired.json",
+      "kind": "state-json",
+      "owner": "unowned-yet",
+      "readers": "unaudited"
+    },
+    {
+      "name": "anchor-takeover.json",
+      "kind": "state-json",
+      "owner": "unowned-yet",
+      "readers": "unaudited"
+    },
+    {
+      "name": "anchor.json",
+      "kind": "state-json",
+      "owner": "unowned-yet",
+      "readers": "unaudited"
+    },
+    {
+      "name": "architecture-review-round.jsonl",
+      "kind": "jsonl-log",
+      "owner": "unowned-yet",
+      "readers": "unaudited"
+    },
+    {
+      "name": "architecture-review-submissions.jsonl",
+      "kind": "jsonl-log",
+      "owner": "unowned-yet",
+      "readers": "unaudited"
+    },
+    {
+      "name": "blocked-escalations.jsonl",
+      "kind": "jsonl-log",
+      "owner": "unowned-yet",
+      "readers": "unaudited"
+    },
+    {
+      "name": "channel-probe-evidence.jsonl",
+      "kind": "jsonl-log",
+      "owner": "unowned-yet",
+      "readers": "unaudited"
+    },
+    {
+      "name": "checker-cost.jsonl",
+      "kind": "jsonl-log",
+      "owner": "unowned-yet",
+      "readers": "unaudited"
+    },
+    {
+      "name": "ci-runs-collect-state.json",
+      "kind": "state-json",
+      "owner": "unowned-yet",
+      "readers": "unaudited"
+    },
+    {
+      "name": "ci-runs.jsonl",
+      "kind": "jsonl-log",
+      "owner": "unowned-yet",
+      "readers": "unaudited"
+    },
+    {
+      "name": "concurrency-cap-state.json",
+      "kind": "state-json",
+      "owner": "unowned-yet",
+      "readers": "unaudited"
+    },
+    {
+      "name": "cron-registry-events.jsonl",
+      "kind": "jsonl-log",
+      "owner": "unowned-yet",
+      "readers": "unaudited"
+    },
+    {
+      "name": "dispatch-record.jsonl",
+      "kind": "jsonl-log",
+      "owner": "unowned-yet",
+      "readers": "unaudited"
+    },
+    {
+      "name": "doc-develop-sync.jsonl",
+      "kind": "jsonl-log",
+      "owner": "unowned-yet",
+      "readers": "unaudited"
+    },
+    {
+      "name": "events.jsonl",
+      "kind": "jsonl-log",
+      "owner": "unowned-yet",
+      "readers": "unaudited"
+    },
+    {
+      "name": "fan-in-ff-escalations.jsonl",
+      "kind": "jsonl-log",
+      "owner": "unowned-yet",
+      "readers": "unaudited"
+    },
+    {
+      "name": "fan-in-lock-events.jsonl",
+      "kind": "jsonl-log",
+      "owner": "unowned-yet",
+      "readers": "unaudited"
+    },
+    {
+      "name": "fan-in-merge-lock-events.jsonl",
+      "kind": "jsonl-log",
+      "owner": "unowned-yet",
+      "readers": "unaudited"
+    },
+    {
+      "name": "fan-in-push-lag.jsonl",
+      "kind": "jsonl-log",
+      "owner": "unowned-yet",
+      "readers": "unaudited"
+    },
+    {
+      "name": "fan-in-retries.jsonl",
+      "kind": "jsonl-log",
+      "owner": "unowned-yet",
+      "readers": "unaudited"
+    },
+    {
+      "name": "fan-in-step-trace.jsonl",
+      "kind": "jsonl-log",
+      "owner": "unowned-yet",
+      "readers": "unaudited"
+    },
+    {
+      "name": "full-suite-state.json",
+      "kind": "state-json",
+      "owner": "unowned-yet",
+      "readers": "unaudited"
+    },
+    {
+      "name": "gate-event-coverage-nonblock-ledger.jsonl",
+      "kind": "jsonl-log",
+      "owner": "unowned-yet",
+      "readers": "unaudited"
+    },
+    {
+      "name": "gate-events.jsonl",
+      "kind": "jsonl-log",
+      "owner": "unowned-yet",
+      "readers": "unaudited"
+    },
+    {
+      "name": "goal-control.json",
+      "kind": "control-json",
+      "owner": "plugin/scripts/goal-driver.ts",
+      "readers": "unaudited"
+    },
+    {
+      "name": "goal-round.jsonl",
+      "kind": "jsonl-log",
+      "owner": "plugin/scripts/goal-driver.ts",
+      "readers": "unaudited"
+    },
+    {
+      "name": "goal-staleness-signal.jsonl",
+      "kind": "jsonl-log",
+      "owner": "unowned-yet",
+      "readers": "unaudited"
+    },
+    {
+      "name": "guard.jsonl",
+      "kind": "jsonl-log",
+      "owner": "unowned-yet",
+      "readers": "unaudited"
+    },
+    {
+      "name": "halt-events.jsonl",
+      "kind": "jsonl-log",
+      "owner": "unowned-yet",
+      "readers": "unaudited"
+    },
+    {
+      "name": "heavy-op-token-events.jsonl",
+      "kind": "jsonl-log",
+      "owner": "unowned-yet",
+      "readers": "unaudited"
+    },
+    {
+      "name": "inner-idle-log.jsonl",
+      "kind": "jsonl-log",
+      "owner": "unowned-yet",
+      "readers": "unaudited"
+    },
+    {
+      "name": "inner-tick-log.jsonl",
+      "kind": "jsonl-log",
+      "owner": "unowned-yet",
+      "readers": "unaudited"
+    },
+    {
+      "name": "inner-wakeup-heartbeat-refusals.jsonl",
+      "kind": "jsonl-log",
+      "owner": "unowned-yet",
+      "readers": "unaudited"
+    },
+    {
+      "name": "inner-wakeup-heartbeat.jsonl",
+      "kind": "jsonl-log",
+      "owner": "unowned-yet",
+      "readers": "unaudited"
+    },
+    {
+      "name": "malformed.jsonl",
+      "kind": "jsonl-log",
+      "owner": "unowned-yet",
+      "readers": "unaudited"
+    },
+    {
+      "name": "measure-history.jsonl",
+      "kind": "jsonl-log",
+      "owner": "unowned-yet",
+      "readers": "unaudited"
+    },
+    {
+      "name": "message-receipts.jsonl",
+      "kind": "jsonl-log",
+      "owner": "unowned-yet",
+      "readers": "unaudited"
+    },
+    {
+      "name": "meta-control.json",
+      "kind": "control-json",
+      "owner": "plugin/scripts/meta-driver.ts",
+      "readers": "unaudited"
+    },
+    {
+      "name": "meta-driver-round.jsonl",
+      "kind": "jsonl-log",
+      "owner": "plugin/scripts/meta-driver.ts",
+      "readers": "unaudited"
+    },
+    {
+      "name": "meta-driver-state.json",
+      "kind": "state-json",
+      "owner": "unowned-yet",
+      "readers": "unaudited"
+    },
+    {
+      "name": "metrics-history.jsonl",
+      "kind": "jsonl-log",
+      "owner": "unowned-yet",
+      "readers": "unaudited"
+    },
+    {
+      "name": "obligation-ledger.jsonl",
+      "kind": "jsonl-log",
+      "owner": "unowned-yet",
+      "readers": "unaudited"
+    },
+    {
+      "name": "outer-control.json",
+      "kind": "control-json",
+      "owner": "plugin/scripts/outer-driver.ts",
+      "readers": "unaudited"
+    },
+    {
+      "name": "outer-round.jsonl",
+      "kind": "jsonl-log",
+      "owner": "plugin/scripts/outer-driver.ts",
+      "readers": "unaudited"
+    },
+    {
+      "name": "peer-identity-probe-evidence.jsonl",
+      "kind": "jsonl-log",
+      "owner": "unowned-yet",
+      "readers": "unaudited"
+    },
+    {
+      "name": "per-task-suite-records.jsonl",
+      "kind": "jsonl-log",
+      "owner": "unowned-yet",
+      "readers": "unaudited"
+    },
+    {
+      "name": "pool-quality-judge-state.json",
+      "kind": "state-json",
+      "owner": "unowned-yet",
+      "readers": "unaudited"
+    },
+    {
+      "name": "productization-verification.jsonl",
+      "kind": "jsonl-log",
+      "owner": "unowned-yet",
+      "readers": "unaudited"
+    },
+    {
+      "name": "promotion-control.json",
+      "kind": "control-json",
+      "owner": "plugin/scripts/promotion-driver.ts",
+      "readers": "unaudited"
+    },
+    {
+      "name": "promotion-outcome.jsonl",
+      "kind": "jsonl-log",
+      "owner": "plugin/scripts/promotion-driver.ts",
+      "readers": "unaudited"
+    },
+    {
+      "name": "promotion-round.jsonl",
+      "kind": "jsonl-log",
+      "owner": "plugin/scripts/promotion-driver.ts",
+      "readers": "unaudited"
+    },
+    {
+      "name": "pty-keys-audit.jsonl",
+      "kind": "jsonl-log",
+      "owner": "unowned-yet",
+      "readers": "unaudited"
+    },
+    {
+      "name": "quality-control.json",
+      "kind": "control-json",
+      "owner": "plugin/scripts/quality-gate-driver.ts",
+      "readers": "unaudited"
+    },
+    {
+      "name": "quality-round.jsonl",
+      "kind": "jsonl-log",
+      "owner": "plugin/scripts/quality-gate-driver.ts",
+      "readers": "unaudited"
+    },
+    {
+      "name": "quay-init-state.json",
+      "kind": "state-json",
+      "owner": "unowned-yet",
+      "readers": "unaudited"
+    },
+    {
+      "name": "quay-session-send-audit.jsonl",
+      "kind": "jsonl-log",
+      "owner": "unowned-yet",
+      "readers": "unaudited"
+    },
+    {
+      "name": "reconcile-invocations.jsonl",
+      "kind": "jsonl-log",
+      "owner": "unowned-yet",
+      "readers": "unaudited"
+    },
+    {
+      "name": "release-branch-finish.jsonl",
+      "kind": "jsonl-log",
+      "owner": "unowned-yet",
+      "readers": "unaudited"
+    },
+    {
+      "name": "release-branch-janitor.jsonl",
+      "kind": "jsonl-log",
+      "owner": "unowned-yet",
+      "readers": "unaudited"
+    },
+    {
+      "name": "release-reading-sandbox.jsonl",
+      "kind": "jsonl-log",
+      "owner": "unowned-yet",
+      "readers": "unaudited"
+    },
+    {
+      "name": "routine-findings.jsonl",
+      "kind": "jsonl-log",
+      "owner": "unowned-yet",
+      "readers": "unaudited"
+    },
+    {
+      "name": "self-report-vocab-state.json",
+      "kind": "state-json",
+      "owner": "unowned-yet",
+      "readers": "unaudited"
+    },
+    {
+      "name": "semantic-face-dispatch-record.jsonl",
+      "kind": "jsonl-log",
+      "owner": "unowned-yet",
+      "readers": "unaudited"
+    },
+    {
+      "name": "server.json",
+      "kind": "state-json",
+      "owner": "unowned-yet",
+      "readers": "unaudited"
+    },
+    {
+      "name": "session-send-audit.jsonl",
+      "kind": "jsonl-log",
+      "owner": "unowned-yet",
+      "readers": "unaudited"
+    },
+    {
+      "name": "stage-journal.jsonl",
+      "kind": "jsonl-log",
+      "owner": "unowned-yet",
+      "readers": "unaudited"
+    },
+    {
+      "name": "store-commit-propagation.jsonl",
+      "kind": "jsonl-log",
+      "owner": "unowned-yet",
+      "readers": "unaudited"
+    },
+    {
+      "name": "suite-bucket-effective.jsonl",
+      "kind": "jsonl-log",
+      "owner": "unowned-yet",
+      "readers": "unaudited"
+    },
+    {
+      "name": "suite-bucket-reattribution.jsonl",
+      "kind": "jsonl-log",
+      "owner": "unowned-yet",
+      "readers": "unaudited"
+    },
+    {
+      "name": "suite-fs-trace.jsonl",
+      "kind": "jsonl-log",
+      "owner": "unowned-yet",
+      "readers": "unaudited"
+    },
+    {
+      "name": "suite-round.jsonl",
+      "kind": "jsonl-log",
+      "owner": "unowned-yet",
+      "readers": "unaudited"
+    },
+    {
+      "name": "suite-state-events.jsonl",
+      "kind": "jsonl-log",
+      "owner": "unowned-yet",
+      "readers": "unaudited"
+    },
+    {
+      "name": "supervisor-preempt-ledger.jsonl",
+      "kind": "jsonl-log",
+      "owner": "unowned-yet",
+      "readers": "unaudited"
+    },
+    {
+      "name": "task-file-violation-ledger.jsonl",
+      "kind": "jsonl-log",
+      "owner": "unowned-yet",
+      "readers": "unaudited"
+    },
+    {
+      "name": "test.jsonl",
+      "kind": "jsonl-log",
+      "owner": "unowned-yet",
+      "readers": "unaudited"
+    },
+    {
+      "name": "two-phase-state.json",
+      "kind": "state-json",
+      "owner": "unowned-yet",
+      "readers": "unaudited"
+    },
+    {
+      "name": "unified-server-verification.jsonl",
+      "kind": "jsonl-log",
+      "owner": "unowned-yet",
+      "readers": "unaudited"
+    },
+    {
+      "name": "verification-round.jsonl",
+      "kind": "jsonl-log",
+      "owner": "unowned-yet",
+      "readers": "unaudited"
+    },
+    {
+      "name": "worker-control.json",
+      "kind": "control-json",
+      "owner": "plugin/scripts/worker-driver.ts",
+      "readers": "unaudited"
+    },
+    {
+      "name": "worker-dispatch.json",
+      "kind": "state-json",
+      "owner": "unowned-yet",
+      "readers": "unaudited"
+    },
+    {
+      "name": "worker-outcome.jsonl",
+      "kind": "jsonl-log",
+      "owner": "plugin/scripts/worker-driver.ts",
+      "readers": "unaudited"
+    },
+    {
+      "name": "worker-round.jsonl",
+      "kind": "jsonl-log",
+      "owner": "plugin/scripts/worker-driver.ts",
+      "readers": "unaudited"
+    }
+  ]
+}
