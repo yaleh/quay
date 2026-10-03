@@ -208,7 +208,13 @@ export async function connectProvider({ command, args, env, cwd }: ConnectProvid
   }
   /** Shared unwrap for the three OPTIONAL-kind list verbs: throw on a genuine
    *  call failure; resolve to [] for both "empty" and "unsupported". */
-  function unwrapKindList<T>(r: { isError?: boolean; content?: unknown; structuredContent?: unknown }, toolName: string, key: string): T[] {
+  // The `[x: string]: unknown` index signature is REQUIRED, not cosmetic: the
+  // SDK's `client.callTool` return type is a UNION whose compatibility member
+  // (`{ toolResult }`) shares NONE of isError/content/structuredContent. A
+  // property-only all-optional parameter type is a "weak type", and TS rejects
+  // assigning that union to it (TS2345 "no properties in common"). The index
+  // signature mirrors the SDK's own shape and lets the union assign cleanly.
+  function unwrapKindList<T>(r: { [x: string]: unknown; isError?: boolean; content?: unknown; structuredContent?: unknown }, toolName: string, key: string): T[] {
     if (r.isError) {
       if (isUnsupportedToolCall(r, toolName)) return [];
       throw new Error((r.content as Array<{ text?: string }>)?.[0]?.text ?? `${toolName} failed`);
