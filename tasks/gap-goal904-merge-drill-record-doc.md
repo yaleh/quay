@@ -33,9 +33,11 @@ goal_ac: AC-904
 
 **派发时实际解析的 mergeTarget = `goal/GOAL-904`**（`reason: "goal-branch"`，`goalId: "GOAL-904"`）。读数来自 `plugin/scripts/worker-driver.ts` 导出的单一解析函数，在主检出上求值：`resolveTaskMergeTargetDetail("gap-goal904-merge-drill-record-doc", <main checkout>)` ⇒ `{"mergeTarget":"goal/GOAL-904","goalId":"GOAL-904","reason":"goal-branch"}`——证实本任务经 goal 分支落地，不是 develop，派发接线生效。
 
-AC1：`node --experimental-strip-types -e '...createDocumentStore("docs-managed").get("DOC-904")...'` ⇒ `ok DOC-904`，exit 0。
+AC1：`node --experimental-strip-types -e '...createDocumentStore("docs-managed").get("DOC-904")...'` ⇒ `ok DOC-904`，exit 0（develop 并入后复跑，仍 exit 0）。
 AC2：`bash scripts/test.sh --static-checks-doc` ⇒ exit 0。
-AC3：`git diff --name-only develop...HEAD` 在 merge develop 后只列出 `docs-managed/DOC-904-goal-branch-merge-drill-record.md` 与 `tasks/gap-goal904-merge-drill-record-doc.md` 两个文件。
+AC3：**分支提交完成时**（doc 提交 + 本任务文件的勾选提交，尚未并入 develop）`git diff --name-only develop...HEAD` 恰列出 `docs-managed/DOC-904-goal-branch-merge-drill-record.md` 与 `tasks/gap-goal904-merge-drill-record-doc.md` 两个文件，无其它改动。
+
+> ⚠️ AC3 的读数时点须说清（硬规则 4c：判据点名的量要穿过所有中间层还取得到）：worker 规程第 2b 步要求随后把 `develop` 并入 worktree。并入之后本任务文件与 develop 收敛（diff 变为仅 `docs-managed/DOC-904-goal-branch-merge-drill-record.md` 一个文件）——因为**任务文件（状态/勾选）的写面在 author→develop 基线上，不在 goal 分支的 delta 内**（CLAUDE.md「写面保留 author」、2026-08-31 人裁定）。故演练相对 develop 的净新增仅 DOC-904；「不得夹带别的改动」成立，两个文件的完整读数取在分支提交完成、尚未并入 develop 的那一刻。
 
 ## Touches
 
