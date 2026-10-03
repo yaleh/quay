@@ -115,3 +115,4 @@ plugin/test/worker-fan-in.test.mjs
 - plugin/test/worker-driver.test.mjs
 - plugin/test/dispatch-worktree-setup.test.mjs
 - tasks/gap-goal-branch-dispatch-wiring-and-task-fan-in.md
+- plugin/test/fan-in-driver-mechanical-orchestration.test.mjs
