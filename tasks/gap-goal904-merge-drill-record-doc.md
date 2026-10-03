@@ -1,7 +1,7 @@
 ---
 id: gap-goal904-merge-drill-record-doc
 title: GOAL-904 合并演练：新增托管文档 DOC-904（演练记录），必须经 goal/GOAL-904 分支落地
-status: needs-human
+status: todo
 labels:
   - gap
 parent: null
