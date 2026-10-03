@@ -22,7 +22,7 @@ goal_ac: AC-323
 
 ## AC
 
-- [ ] 新增 `plugin/test/worker-fan-in.test.mjs`（临时仓库，直接调用机械 fan-in 的落地段）：mergeTarget = `goal/GOAL-901` 时落地后 `git show develop:tasks/<id>.md` 与主检出上的任务文件都是 `status: done`，代码只在 `goal/GOAL-901` 上；mergeTarget = develop 时不产生额外的文档面提交。
+- [ ] 新增 `plugin/test/worker-fan-in.test.mjs`（临时仓库，直接调用机械 fan-in 的落地段）：mergeTarget = `goal/GOAL-901` 时，测试里的机械 fan-in 跑完之后 `git show develop:tasks/<id>.md` 与主检出上的任务文件都是 `status: done`，代码只在 `goal/GOAL-901` 上；mergeTarget = develop 时不产生额外的文档面提交。
 - [ ] 取假：把本任务的核心改动临时回退（用 `cp` 备份恢复，⛔ 不用 `git checkout --`）后，上面新增用例至少 1 条变红；在 `## Evidence` 贴实跑输出与恢复后的绿输出。
 - [ ] Evidence 中给出上面 grep 的完整分类表（文件:行、类别、处理），命中数与 2026-10-03 的 20 处对账（不同则说明差异）；Touches 外需要改的点逐条写明，留给后续任务。
 - [ ] `bash scripts/test.sh --for-task gap-goal-branch-done-means-landed-on-merge-target` 退出 0，且确实执行了 ≥1 个测试文件（非 thin；在 `## Evidence` 贴出被执行的测试文件名）。

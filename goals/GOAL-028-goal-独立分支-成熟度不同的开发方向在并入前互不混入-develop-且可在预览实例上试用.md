@@ -1,11 +1,20 @@
 ---
 id: GOAL-028
 title: goal 独立分支——成熟度不同的开发方向在并入前互不混入 develop，且可在预览实例上试用
-status: draft
+status: active
 kind: goal
 origin: 人 2026-10-01「为 goal 提供一个单独的 branch」→ 三轮讨论成文
   orchestration/SPEC-goal-branch-2026-10-03.md（d4b7ca1c2，裁定①–㉓）；人
   2026-10-03「按上面的建议，新建一个 GOAL，同时手工预先立好 §10 的任务」。
+activatedAt: 2026-10-03T07:49:29.821Z
+statusLog:
+  - at: 2026-10-03T07:49:29.821Z
+    from: draft
+    to: active
+    actor: cli
+    reason: 人 2026-10-03 裁定立条并激活（「新建一个 GOAL，同时手工预先立好 §10 的任务」）：11
+      个承载任务已立，AC-321..328 各有至少一个 goal_ac 关联任务，激活不会触发乱序自动立案；draft GOAL 名下的 AC
+      不在分诊对象集内，故须显式激活
 ---
 ## 背景
 
