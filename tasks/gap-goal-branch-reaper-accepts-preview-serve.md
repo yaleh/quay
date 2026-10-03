@@ -94,6 +94,20 @@ plugin/test/worktree-process-reaper.test.mjs        （selector exit 0 ⇒ 非 t
 
 被执行的测试文件名：**`plugin/test/worktree-process-reaper.test.mjs`**。另：`node_modules/.bin/tsc --noEmit -p tsconfig.json` exit 0（新增跨包 import `packages/quay/src/worktree-namespace.ts` 通过类型检查）；scoped 静态层 `worktree-namespace-literal-check: PASS — 1 double-quoted "quay-worktrees", at packages/quay/src/worktree-namespace.ts:46`（未新增字面量）。
 
+**AC4 附带（fan-in suite 的 true cause，非本任务 diff）— 修一个 develop 全宽的静态红**
+
+上一轮 fan-in 在 `step=suite` 退出（`# fail 45`），真因不是本任务的新用例：全量 suite 的静态层 `spec-declaration-point-check` exit=1 —— `orchestration/SPEC-goal-branch-2026-10-03.md`（develop commit `d4b7ca1c2` 只加了 464 行 SPEC，未登记）缺登记于它的两个声明点（`plugin/skills/manager/SKILL.md` 索引 + `plugin/skills/init/SKILL.md` 的 `<!-- reference-doc -->` 块）。该红在 develop 与主检出上**同样复现**（`git show develop:plugin/skills/manager/SKILL.md | grep SPEC-goal-branch-2026-10-03` 空），与本任务 diff 无关、且无人认领（无任务 Touches 这两个文件），会阻塞**所有**任务的 fan-in。按 check 的要求补齐两处登记：
+
+```
+$ node --experimental-strip-types plugin/scripts/spec-declaration-point-check.ts
+PASS: all 46 orchestration/SPEC-*.md declared at each of 2 declaration points    # exit 0（修复前 exit 1）
+
+$ node --no-warnings --experimental-strip-types --test plugin/test/spec-declaration-point-check.test.mjs   # 9/9 pass
+$ node --no-warnings --experimental-strip-types --test plugin/test/manager-layer-shipping.test.mjs          # 7/7 pass（AC6「manager 索引覆盖每个 on-disk SPEC」修复前同样红）
+```
+
+改动落在本任务 Touches 之外 ⇒ `plugin/skills/manager/SKILL.md` 与 `plugin/skills/init/SKILL.md` 已登记进 `## Touches`（fan-in 的 anti-drift 逐步核对 `git diff` 实际文件 vs 声明面）。
+
 ## DoD
 
 真实落地判据：goal 预览实例的 serve 能在后台存活，而泄漏的测试 serve 仍被回收。生产读数由 GOAL-028 的 AC-328（live-probe AC 在预览实例上 pass 之后才并入）在第一个试点 goal 上取得。
@@ -102,4 +116,6 @@ plugin/test/worktree-process-reaper.test.mjs        （selector exit 0 ⇒ 非 t
 
 - plugin/scripts/worktree-process-reaper.ts
 - plugin/test/worktree-process-reaper.test.mjs
+- plugin/skills/manager/SKILL.md
+- plugin/skills/init/SKILL.md
 - tasks/gap-goal-branch-reaper-accepts-preview-serve.md
