@@ -72,6 +72,22 @@ AC3：**分支提交完成时**（doc 提交 + 本任务文件的勾选提交，
 
 本任务 AC1/AC2/AC3 复跑均成立（AC1 ⇒ `ok DOC-904` exit 0；AC2 `scripts/test.sh --static-checks-doc` ⇒ exit 0；AC3 `git diff --name-only develop...HEAD` 列单文件 `docs-managed/DOC-904-…md`，为允许两文件的子集）。scoped 门 `scripts/test.sh --for-task gap-goal904-merge-drill-record-doc --allow-thin` ⇒ exit 0（selector 选 0 个测试文件，thin allowed）；scoped-gate cache 以 develop sha `0cec238b9` 写入（`git merge-base --is-ancestor 0cec238b9 HEAD` 为真）。⇒ 上一轮记录的三簇 develop-wide 常红已不再是本任务 fan-in 的阻断。
 
+### 本轮复核（2026-10-04 第二次）：唯一红 = `build-dist-smoke` (b) 的 serve 绑定超时（load-shaped，非本任务 delta）
+
+上一轮（run `wk-prod-anchor`，suite 日志 `.quay/fan-in-suite-gap-goal904-merge-drill-record-doc~wk-prod-anchor~1791047080806-636f1c.log`）机械 fan-in 的全量 suite：`# tests 10055 / # pass 10054 / # fail 1`，三簇旧红已清零；唯一红是 `packages/quay/test/build-dist-smoke.test.mjs:122` 的 `(b) serve --port + HTTP GET returns 200`（15138ms，100×150ms 轮询从未 bind，断言处得 `undefined !== 200`）。
+
+**delta 相关性**：该文件不在本任务 Touches/diff（本任务 delta 仍仅 `docs-managed/DOC-904-…md` + 任务文件，`git diff --stat develop..HEAD` = 2 files / 20 insertions，**`packages/` 与 develop 逐字节相同**）；机检判 UNRELATED。
+
+**复核动作与对照（硬规则 4 推论四）**——同一 worktree（内容==develop）内：
+- 单独跑 `node --test packages/quay/test/build-dist-smoke.test.mjs` ⇒ **连跑 3 次全绿**，`(b)` 各约 320ms（对照：失败时为 15092ms）；整文件 1.7s（失败时 16.2s）。
+- 与测试同参数（绝对 `nativeProviderDir` + `nativeBin=QUAY_NATIVE_CLI`）的独立复现脚本 spawn 该 bundle 的 `serve` ⇒ `quay serve: listening on http://0.0.0.0:<port>`、`GET /tasks → 200`。
+- 该测试自身 `stdio: "ignore"`，无 serve 子进程 stderr 可读；一次早期的复现脚本因**误传相对 `nativeProviderDir`**（`providerDir=path.resolve(workspaceRoot, "./packages/quay-native/bin")` 指向工作区下不存在的目录 ⇒ `spawn node ENOENT`）而假红，改用测试同款绝对路径后即 200——这条弯路本身也是「cwd 不存在 ⇒ spawn ENOENT」的形态，⛔ 不是本红成因。
+
+⇒ 该红**不可确定性复现**，判为 **load-shaped 计时 flake**：该文件 `@test-group product`＝主组（本轮 `__GROUP__ concurrency=127 files=842`），而其 15s 窗口的注释是按 `--test-concurrency=8` 标定的（Aug-25 `8d0920765` 把它从 `lowconc` 移入默认组）。与本任务 delta 无因果关系；受 AC3 约束不夹带修，留作独立观察项。
+
+**本轮 scoped 门与缓存**：先 `git merge --no-edit develop`（并入 `21313a412` 等 3 个 develop 提交，无冲突，任务文件 `status: ready` 取 develop 值、3 条 AC 保持 `[x]`）；`bash scripts/test.sh --for-task gap-goal904-merge-drill-record-doc --allow-thin` ⇒ exit 0（selector 选 0 个测试文件，thin allowed）；scoped-gate cache 以 develop sha `21313a412` 写入。AC1 复跑 ⇒ `ok DOC-904` exit 0；AC3 `git diff --name-only develop...HEAD` 列两文件（doc + 任务文件），仍满足。
+
+
 ## Touches
 
 - docs-managed/DOC-904-goal-branch-merge-drill-record.md
