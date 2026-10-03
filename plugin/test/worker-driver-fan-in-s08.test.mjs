@@ -47,7 +47,9 @@ test("AC_B1 接线 (gap-worker-ac-check-shortcircuit) — finishAsync 在 spawn 
   assert.match(src, /const sc = acShortCircuitVerdict\(paths\[0\], taskId\);/, "finishAsync calls acShortCircuitVerdict before spawning fan-in");
   assert.match(src, /if \(sc\.shortCircuit\) \{\s*\n\s*shortCircuitReason = sc\.reason;/, "short-circuit sets shortCircuitReason instead of spawning");
   // spawnMechanicalFanIn 只在 else 分支（shortCircuit:false）调用 ⇒ 短路时 spawn 计数 0。
-  assert.match(src, /mechResult = await spawnMechanicalFanIn\(\{ task: taskId, worktree: paths\[0\], root: rootDir, runId \}\)/, "fan-in spawns only when not short-circuited");
+  // gap-goal-branch-dispatch-wiring-and-task-fan-in：spawn 调用现在多带 mergeTarget（SPEC-goal-branch
+  // §4.3）——放宽为「以同一调用点 spawn fresh 进程」的形状，⛔ 不钉死单行文本。
+  assert.match(src, /mechResult = await spawnMechanicalFanIn\(\{[\s\S]{0,200}?task: taskId, worktree: paths\[0\], root: rootDir, runId[\s\S]{0,200}?\}\)/, "fan-in spawns only when not short-circuited");
   // 短路原因线程进 finish → computeOutcome（landed:false + landReason 含「AC 未全勾」）。
   assert.match(src, /landed: shortCircuitReason != null \? false/, "short-circuit forces landed=false (exited-not-landed)");
   assert.match(src, /landReason: shortCircuitReason != null \? shortCircuitReason/, "short-circuit reason is threaded as landReason (failure_reason)");

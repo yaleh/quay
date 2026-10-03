@@ -47,7 +47,6 @@
 
 import fs from "node:fs";
 import path from "node:path";
-import { fileURLToPath } from "node:url";
 import { buildNonCodeMask } from "./checker-lib.ts";
 import { scanKernelSurface as scanSurface } from "./fs-walk.ts";
 // The goal-branch token pattern is DEFINED ONCE in Core's branch model (ADR-004) — this checker asks
@@ -56,7 +55,7 @@ import { goalIdFromBranchToken } from "../../packages/quay/src/branch-model.ts";
 // parseArg now lives in gate-script-base.ts as `flagValue` (it was one of the byte-identical
 // copies of the indexOf+next-arg idiom in plugin/scripts; .quay/routine-findings.jsonl finding
 // `arg-parsing-helper-family`, routine `semantic-dedup-scan`).
-import { flagValue } from "./gate-script-base.ts";
+import { flagValue, isDirectEntry } from "./gate-script-base.ts";
 import { repoRoot } from "./repo-root.ts";
 // lineOf / snippetOf now live once in source-text-lib.ts (semantic-dedup-scan `lineof-lineat`).
 import { lineOf, snippetOf } from "./source-text-lib.ts";
@@ -327,8 +326,12 @@ usage: node --no-warnings --experimental-strip-types plugin/scripts/target-ident
   return res.ok ? 0 : 1;
 }
 
-// ⛔ argv1 必须留 undefined（让它读 process.argv[1]）：传本模块自身路径会使 basename 恒等于
-// 入口判定 ⇒ 被 import 时就跑一整轮（kernel-sibling-resolution-check.ts 同款注释）。
-if (process.argv[1] && fileURLToPath(import.meta.url) === process.argv[1]) {
+// 入口判定用 3 参 isDirectEntry（名字形，⛔ 非 URL 形）：本模块被 worker-driver.ts 静态 import
+// （SPEC-goal-branch-2026-10-03 §4.3 复用 lookupGoalBranchMode）⇒ URL 形守卫会被 esbuild 内联进
+// worker-driver 的 bundle，并在该 bundle 的入口处误跑本 checker 的 main（build-plugin-dist 的
+// inlined entry-guard hijack 闸会拒绝打包）。名字形被内联时 basename(argv1) 是宿主入口名（≠ 本模块名）
+// ⇒ 惰性不触发；直接执行本文件时 basename 命中 ⇒ main 照跑（行为不变）。argv1 仍留 undefined（读
+// process.argv[1]，⛔ 不传本模块自身路径——那会让 basename 恒等于入口判定 ⇒ 被 import 时就跑一整轮）。
+if (isDirectEntry(import.meta, undefined, "target-identity-literal-check")) {
   process.exitCode = main(process.argv.slice(2));
 }
