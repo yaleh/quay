@@ -1,7 +1,7 @@
 ---
 id: gap-store-list-all-or-nothing-unparseable-file-kills-whole-listing
 title: 一个文件解析失败拖垮整个 carrier 列表 —— adr/goal/meta/document 四个 store 的 list() 都是全有全无
-status: ready
+status: todo
 labels:
   - gap
 parent: null
