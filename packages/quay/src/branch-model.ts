@@ -1144,7 +1144,10 @@ export function ensureGoalBranch(root: string, goalId: string): GoalBranchReport
     );
   }
   const created = git(root, ["branch", name, base]);
-  if (!created.ok) {
+  // `=== true`, not `!created.ok`: this repo's root tsconfig is `strict: false`, under which the
+  // NEGATIVE branch of a boolean-discriminant union is NOT narrowed — `created.err` below would be
+  // TS2339, which the fan-in ts-typecheck gate rejects. Same form as every other `.ok` union here.
+  if (created.ok === false) {
     return {
       ...base0, action: "blocked", ok: false, notEvaluated: false,
       detail: `could not create '${name}' at ${base.slice(0, 8)}: git branch returned non-zero: ${created.err}`,
@@ -1179,7 +1182,8 @@ export function discardGoalBranch(
     return { removed: false, tipSha: null, detail: `'${name}' does not exist — nothing to discard` };
   }
   const del = git(root, ["branch", "-D", name]);
-  if (!del.ok) {
+  // `=== false`, not `!del.ok` — see the narrowing note in ensureGoalBranch above.
+  if (del.ok === false) {
     return {
       removed: false,
       tipSha,
