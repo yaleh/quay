@@ -29,7 +29,8 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { spawnSync, execFileSync } from "node:child_process";
 
-import { computeActualFiles, computeTaskOwnedFiles } from "../scripts/anti-drift-touches-check.ts";
+import { computeActualFiles, computeTaskOwnedFiles, isProjectGoalLine } from "../scripts/anti-drift-touches-check.ts";
+import { classifyBranch, detectDefaultBranch } from "../../packages/quay/src/branch-model.ts";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const REPO_ROOT = path.resolve(__dirname, "..", "..");
@@ -78,12 +79,21 @@ const taskBody = (extraTouches = []) => [
  *        └── goal/GOAL-901 (forked BEFORE X; optionally carries its own prior change W)
  *              └── task/<id>: Y (declared Touches) [+ Z when taskOutside]
  *  then the catch-up the task worktree performs: `git merge goal/GOAL-901` (no-op) → `git merge develop`. */
-function makeFixture({ taskOutside = false, goalOwnChange = false } = {}) {
+function makeFixture({ taskOutside = false, goalOwnChange = false, resolvesDefaultBranch = false } = {}) {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), "adgb-"));
   tempDirs.push(root);
   execFileSync("git", ["init", "-q", "-b", "develop", root]);
   git(root, "config", "user.email", "test@example.com");
   git(root, "config", "user.name", "Test");
+  if (resolvesDefaultBranch) {
+    // Make `detectDefaultBranch` resolve `develop` EXACTLY like the real repo does (an `origin/HEAD`
+    // symbolic ref pointing at the develop line). Without this the fixture's `detectDefaultBranch`
+    // returns null and `classifyBranch` reports `unreadable` — so the BASELINE-MISMATCH precondition
+    // (which only fires on `divergent`) never runs and the defect is invisible. That null shape is
+    // precisely what hid this defect in the pre-existing fixtures (gap-goal-branch-catchup-blocked-
+    // by-antidrift-baseline-mismatch).
+    git(root, "symbolic-ref", "refs/remotes/origin/HEAD", "refs/remotes/origin/develop");
+  }
 
   fs.writeFileSync(path.join(root, "base.txt"), "base\n");
   git(root, "add", "base.txt");
@@ -244,3 +254,103 @@ test("conflicting catch-up merge — the task's own file is judged; develop's is
   const r = runChecker(root, "goal/GOAL-901");
   assert.equal(r.status, 0, `declared C.txt/Y.txt must pass after a conflicting catch-up:\n${r.stdout}${r.stderr}`);
 });
+
+// ═══════════════════════════════════════════════════════════════════════════════════════════════════
+// BASELINE-MISMATCH carve-out — gap-goal-branch-catchup-blocked-by-antidrift-baseline-mismatch (AC1/AC2)
+//
+// The tests above all run with `detectDefaultBranch` returning null (no origin/HEAD) ⇒ `classifyBranch`
+// reports `unreadable`, and the BASELINE-MISMATCH precondition (`state === "divergent"`) NEVER fires.
+// That degenerate fixture is why the defect went unseen: in the REAL repo `detectDefaultBranch`
+// resolves `develop` (origin/HEAD → origin/develop), so a `goal/*` target that does not contain the
+// develop tip is `divergent` — and the pre-fix code hard-failed it (exit 3) BEFORE the two-line base
+// could run, even though step 2b (the catch-up) exists for exactly that shape. These tests build the
+// resolved-default fixture so the precondition really fires.
+// ═══════════════════════════════════════════════════════════════════════════════════════════════════
+
+/** Non-vacuity: the fixture really reproduces the production shape (default branch RESOLVED). */
+test("AC2 (取假前提) — the resolved-default fixture really reports the goal line divergent", () => {
+  const root = makeFixture({ resolvesDefaultBranch: true });
+  assert.equal(detectDefaultBranch(root, { allowCurrentBranch: false }), "develop");
+  const cls = classifyBranch(root, "goal/GOAL-901", "develop");
+  assert.equal(cls.state, "divergent", `pre-fix trigger must be live: ${cls.detail}`);
+  assert.equal(cls.aheadOfDefault, 0, "fresh goal line is a develop ANCESTOR (behind)");
+  assert.equal(isProjectGoalLine(root, "goal/GOAL-901"), true);
+});
+
+// AC1/AC2: a goal line behind develop ⇒ the carve-out applies ⇒ exit 0 (was exit 3 before the fix).
+test("AC1/AC2 — a goal/* merge target behind develop passes (carve-out; exit 0, not BASELINE-MISMATCH)", () => {
+  const root = makeFixture({ resolvesDefaultBranch: true });
+  const r = runChecker(root, "goal/GOAL-901");
+  assert.equal(r.status, 0, `expected the catch-up landing to pass, got exit ${r.status}:\n${r.stdout}${r.stderr}`);
+  assert.match(r.stdout, /ANTI-DRIFT OK/);
+  assert.ok(!r.stdout.includes("BASELINE-MISMATCH"), r.stdout);
+  // The develop-only file X (brought in by the catch-up) must not be judged, and the two-line base
+  // is what produced the pass — not a skipped check.
+  assert.ok(!r.stdout.includes("X.txt"), r.stdout);
+  // The relaxation is ENUMERATED, not silent (hard rule 3).
+  assert.match(r.stdout, /BASELINE: merge target 'goal\/GOAL-901' is a goal line behind the landing baseline/);
+
+  // Direct: the two-line base is used for the goal target (files = the task's own, not the goal's W).
+  assert.deepEqual(computeActualFiles(root, "goal/GOAL-901").sort(), [`tasks/${TASK_ID}.md`, "Y.txt"].sort());
+});
+
+// AC1: a goal line that ALREADY carries its own landings (a divergent SIBLING of develop) also passes.
+// This is the shape every landing AFTER the first one takes — a fix that only accepted a strict
+// ancestor would unblock the first landing and re-block the second.
+test("AC1 — a goal/* line WITH its own landed commits (divergent sibling) still passes", () => {
+  const root = makeFixture({ resolvesDefaultBranch: true, goalOwnChange: true });
+  // Premise: this shape IS divergent and is NOT a strict ancestor (ahead > 0) — the harder half.
+  const cls = classifyBranch(root, "goal/GOAL-901", "develop");
+  assert.equal(cls.state, "divergent", cls.detail);
+  assert.ok(cls.aheadOfDefault > 0, `expected the goal's own landed commit, got ahead=${cls.aheadOfDefault}`);
+  assert.equal(isProjectGoalLine(root, "goal/GOAL-901"), true);
+
+  const r = runChecker(root, "goal/GOAL-901");
+  assert.equal(r.status, 0, `expected exit 0, got ${r.status}:\n${r.stdout}${r.stderr}`);
+  assert.match(r.stdout, /ANTI-DRIFT OK/);
+  // The goal's own prior landing W is not this task's write and must stay out of the judged set.
+  assert.ok(!r.stdout.includes("W.txt"), r.stdout);
+});
+
+// AC1: the relaxation is goal-SPECIFIC — a non-goal branch behind develop still fail-closes.
+test("AC1 — a NON-goal branch behind develop still reports BASELINE-MISMATCH (exit 3)", () => {
+  const root = makeFixture({ resolvesDefaultBranch: true });
+  git(root, "branch", "release/old", "develop~1"); // an ancestor line, but NOT a goal line
+  assert.equal(isProjectGoalLine(root, "release/old"), false);
+  const r = runChecker(root, "release/old");
+  assert.equal(r.status, 3, `expected BASELINE-MISMATCH, got ${r.status}:\n${r.stdout}${r.stderr}`);
+  assert.match(r.stdout, /BASELINE-MISMATCH/);
+  assert.match(r.stdout, /'release\/old' is not a continuation/);
+});
+
+// AC1: a goal-NAMED but FOREIGN (unrelated-root) fork must still fail-closed — the carve-out is not a
+// name match (hard rule 3b: an unreadable/unrelated line is not "a goal line we couldn't judge").
+test("AC1 — a goal-NAMED unrelated-root fork still fail-closes (exit 3)", () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "adgb-orphan-"));
+  tempDirs.push(root);
+  execFileSync("git", ["init", "-q", "-b", "develop", root]);
+  git(root, "config", "user.email", "test@example.com");
+  git(root, "config", "user.name", "Test");
+  git(root, "symbolic-ref", "refs/remotes/origin/HEAD", "refs/remotes/origin/develop");
+  fs.writeFileSync(path.join(root, "base.txt"), "base\n");
+  git(root, "add", "-A");
+  git(root, "commit", "-q", "--no-verify", "-m", "base");
+  // an ORPHAN line named exactly like a goal branch — shares NO ancestry with develop.
+  git(root, "checkout", "-q", "--orphan", "goal/GOAL-999");
+  fs.writeFileSync(path.join(root, "foreign.txt"), "unrelated\n");
+  git(root, "add", "-A");
+  git(root, "commit", "-q", "--no-verify", "-m", "unrelated root");
+  git(root, "checkout", "-q", "-b", `task/${TASK_ID}`, "goal/GOAL-999");
+  fs.mkdirSync(path.join(root, "tasks"), { recursive: true });
+  fs.writeFileSync(path.join(root, "tasks", `${TASK_ID}.md`), taskBody());
+  fs.writeFileSync(path.join(root, "Y.txt"), "Y\n");
+  git(root, "add", "-A");
+  git(root, "commit", "-q", "--no-verify", "-m", "task work");
+  git(root, "merge", "-q", "--no-edit", "--allow-unrelated-histories", "develop"); // a catch-up that can never connect the lines
+
+  assert.equal(isProjectGoalLine(root, "goal/GOAL-999"), false, "no merge base ⇒ not a project goal line");
+  const r = runChecker(root, "goal/GOAL-999");
+  assert.equal(r.status, 3, `expected BASELINE-MISMATCH, got ${r.status}:\n${r.stdout}${r.stderr}`);
+  assert.match(r.stdout, /BASELINE-MISMATCH/);
+});
+
