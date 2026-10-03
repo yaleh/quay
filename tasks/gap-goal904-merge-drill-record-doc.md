@@ -87,6 +87,7 @@ AC3：**分支提交完成时**（doc 提交 + 本任务文件的勾选提交，
 
 **本轮 scoped 门与缓存**：先 `git merge --no-edit develop`（并入 `21313a412` 等 3 个 develop 提交，无冲突，任务文件 `status: ready` 取 develop 值、3 条 AC 保持 `[x]`）；`bash scripts/test.sh --for-task gap-goal904-merge-drill-record-doc --allow-thin` ⇒ exit 0（selector 选 0 个测试文件，thin allowed）；scoped-gate cache 以 develop sha `21313a412` 写入。AC1 复跑 ⇒ `ok DOC-904` exit 0；AC3 `git diff --name-only develop...HEAD` 列两文件（doc + 任务文件），仍满足。
 
+
 ## Touches
 
 - docs-managed/DOC-904-goal-branch-merge-drill-record.md
