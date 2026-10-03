@@ -59,6 +59,14 @@ AssertionError [ERR_ASSERTION]: post-merge AC 并入前必须 not-evaluated，�
   - `packages/quay/test/goal-store.test.mjs`（实跑输出含 `✔ AC-phase-1` / `✔ AC-phase-2` / `✔ AC-phase-3`）
   - `plugin/test/goal-driver-criterion-worktree.test.mjs`（实跑输出含 `✔ AC-phase-split` / `✔ AC-phase-i2`，以及既有 AC1+AC2 / AC3 两条）
 
+- **并入后复验（2026-10-03，`git merge develop` 后分支 = develop + 本实现；merge 提交 `bdf1d23e8`）** — 逐条复跑，结论与上一致：
+  - AC1：`env -u QUAY_GOAL_ACCEPTANCE_ACTIVE node --experimental-strip-types --test packages/quay/test/goal-store.test.mjs` ⇒ `ℹ tests 84 / pass 84 / fail 0`。
+  - AC2/AC3：`env -u QUAY_GOAL_ACCEPTANCE_ACTIVE node --experimental-strip-types --test plugin/test/goal-driver-criterion-worktree.test.mjs` ⇒ `ℹ tests 5 / pass 5 / fail 0`。
+  - AC4：`node --experimental-strip-types plugin/scripts/goal-driver-task-boundary-check.ts` ⇒ exit 0（同上 PASS 行）。
+  - AC5：再次取假（`cp` 备份 → `preMergePhaseExcludedAcIds` 返回空集 → `✖ AC-phase-split` 红；`cp` 恢复后 5/5 绿）。
+  - AC6：`bash scripts/test.sh --for-task ...`（⛔ 无 `--allow-thin`）⇒ exit 0，`ℹ tests 179 / pass 179 / fail 0`。
+  - ⚠️ **环境陷阱（供后来读者）**：worker 会话自身的 shell 携带 `QUAY_GOAL_ACCEPTANCE_ACTIVE=1`（goal 判据重入闸的泄漏），**裸 `node --test packages/quay/test/goal-store.test.mjs` 会假红 8 条**（I5×3、AC4 负控制、AC-242×4）——它们是**拒跑**（`sweepFrozen` ⇒ `refused:true`）而非代码回归，`env -u QUAY_GOAL_ACCEPTANCE_ACTIVE` 下 84/84 全绿。`scripts/test.sh:216` 的入口归一化已 `unset QUAY_GOAL_ACCEPTANCE_ACTIVE`，故 AC6 走 test.sh 不受影响；直调 `node --test` 需前缀 `env -u QUAY_GOAL_ACCEPTANCE_ACTIVE`。
+
 ## Touches
 
 - packages/quay/src/goal-store.ts
