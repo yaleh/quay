@@ -81,7 +81,7 @@ extra:
 ## DoD
 
 - [ ] DoD1（真实落地读数）：在**有真实 worker 在飞**的时刻真跑一次，输出里出现该 worker 的记录（贴实跑输出）。本任务自身的执行 worker 就是一个真实在飞 worker（同一 `--root`），可直接作为观察对象。**只被 fixture / `liveWorkers` 注入 seam 满足的判据不算测量**（硬规则 4 推论三：实现了、测试绿了、生产没跑过 ⇒ 与没实现同形）。
-- [ ] DoD2（无第二份扫描）：确认没有产生第二份 `/proc` 扫描实现。给出「同形状命中数」：在 `packages/quay/src` 下枚举 `/proc` 扫描形状（如 `readdirSync("/proc"` / `readdirSync(procDir`），**立案实测该形状只有 `observation.ts` 一处**（`readLiveWorkerProcesses`，`:962`）；落地后该数必须仍为 1。
+- [ ] DoD2（无第二份扫描）：确认没有产生第二份 `/proc` 扫描实现。给出「同形状命中数」：在 `packages/quay/src` 下枚举 `/proc` 扫描形状（如 `readdirSync("/proc"` / `readdirSync(procDir`），**立案实测该形状只有 `observation.ts` 一处**（`readLiveWorkerProcesses`，`:962`）；本任务完成后该数必须仍为 1（⛔ 不得新增第二处 `/proc` 扫描实现）。
 - [ ] DoD3（负控留痕）：root 过滤的负控（AC2 两向）实际跑过并留痕，不得只贴绿侧。
 - [ ] DoD4（不依赖 serve）：证明该 verb 在**没有 serve 进程**时也能给出读数（纯函数路径）。贴无 serve 时刻的实跑输出，或一条明确不 import serve 模块的测试。
 
