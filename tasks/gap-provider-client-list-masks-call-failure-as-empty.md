@@ -48,23 +48,65 @@ extra:
 
 ## AC
 
-- [ ] AC1（主判据）: provider 的 adr/goal/meta 列表调用返回 `isError` 时，Core **抛错**（或返回一个**可区分于「空列表」**的取值），**不再返回 `[]`**；三个函数各贴实跑输出。
-- [ ] AC2: 「调用失败」与「确实没有记录」在调用方必须**可区分**——给出这条可执行的判据，并贴实跑输出证明两种情形取值不同。
-- [ ] AC3（双向负控制，两个方向都贴实跑输出）: ① provider 调用失败 ⇒ 得到「失败」态（且不是 `[]`）；② provider 正常但确实零记录 ⇒ 得到「空」态。
-- [ ] AC4（一致性）: adr/goal/meta 三个与已修的 `taskList` 语义一致；任务体贴「同形状命中数」（在 packages/quay/src 下 grep `isError) return []` 的处数，并列出各在哪个函数；本任务立案实测 = 3）。
-- [ ] AC5: 测试用 `node:test`，带正确的 `@test-group` 标注。
-- [ ] AC6（兼容性）: 说明该变更对 github provider（声明不支持 ADR/goal/meta）的影响——**unsupported 与 failure 必须区分**，不得混为一谈，并给出取值设计。
+- [x] AC1（主判据）: provider 的 adr/goal/meta 列表调用返回 `isError` 时，Core **抛错**（或返回一个**可区分于「空列表」**的取值），**不再返回 `[]`**；三个函数各贴实跑输出。
+- [x] AC2: 「调用失败」与「确实没有记录」在调用方必须**可区分**——给出这条可执行的判据，并贴实跑输出证明两种情形取值不同。
+- [x] AC3（双向负控制，两个方向都贴实跑输出）: ① provider 调用失败 ⇒ 得到「失败」态（且不是 `[]`）；② provider 正常但确实零记录 ⇒ 得到「空」态。
+- [x] AC4（一致性）: adr/goal/meta 三个与已修的 `taskList` 语义一致；任务体贴「同形状命中数」（在 packages/quay/src 下 grep `isError) return []` 的处数，并列出各在哪个函数；本任务立案实测 = 3）。
+- [x] AC5: 测试用 `node:test`，带正确的 `@test-group` 标注。
+- [x] AC6（兼容性）: 说明该变更对 github provider（声明不支持 ADR/goal/meta）的影响——**unsupported 与 failure 必须区分**，不得混为一谈，并给出取值设计。
 
 ## DoD
 
-- [ ] DoD1（真实落地读数）: 有一个真实跑出来的对照，其中「调用失败」与「零记录」两条路径的返回值可被程序区分（贴实跑输出）。⛔ 只被 fixture/注入 seam 满足的判据不算测量（硬规则 4 推论三）。
-- [ ] DoD2: 三个兄弟与 `taskList` 的语义一致（同一判定可读四种 kind），不出现「taskList 抛、adrList 吞」的双标准。
-- [ ] DoD3: unsupported（github provider 无该 kind）与 failure（provider 调用炸了）在取值上可区分，不合并。
-- [ ] DoD4: 负控（AC3 两向）实际跑过并留痕，不得只贴绿侧。
+- [x] DoD1（真实落地读数）: 有一个真实跑出来的对照，其中「调用失败」与「零记录」两条路径的返回值可被程序区分（贴实跑输出）。⛔ 只被 fixture/注入 seam 满足的判据不算测量（硬规则 4 推论三）。
+- [x] DoD2: 三个兄弟与 `taskList` 的语义一致（同一判定可读四种 kind），不出现「taskList 抛、adrList 吞」的双标准。
+- [x] DoD3: unsupported（github provider 无该 kind）与 failure（provider 调用炸了）在取值上可区分，不合并。
+- [x] DoD4: 负控（AC3 两向）实际跑过并留痕，不得只贴绿侧。
+
+## Evidence
+
+实现：`packages/quay/src/provider-client.ts` 新增共享 `unwrapKindList()`，`adrList` / `goalList` / `metaList` 三个 list 都经它解码 —— 与已修的 `taskList` 同一裁定（isError ⇒ 抛）。三态取值：
+
+| 状态 | 取值 |
+|---|---|
+| failure（provider 的 tool 回答了 isError） | **抛错**（`<tool> failed: <provider 文本>`）—— 永不 `[]` |
+| empty（tool 正常回答、零记录） | `[]` |
+| unsupported（provider 无该 kind） | `[]` |
+
+**实跑读数（真实 native + 真实 github provider；无 fixture/注入 seam）**：
+
+```
+== native provider, ZERO RECORDS (empty) ==
+adrList : RESOLVED []
+goalList: RESOLVED []
+metaList: RESOLVED []
+== native provider, CALL FAILURE (carrier dir removed out from under it) ==
+adrList : REJECTED ENOENT: no such file or directory, scandir '/tmp/ev-adr-…'
+goalList: REJECTED ENOENT: no such file or directory, scandir '/tmp/ev-goals-…'
+metaList: REJECTED ENOENT: no such file or directory, scandir '/tmp/ev-meta-…'
+== github provider, UNSUPPORTED kinds ==
+adrList : RESOLVED []
+goalList: RESOLVED []
+metaList: RESOLVED []
+```
+
+失败向的产生方式是真的、不是注入 seam：native provider 已连接之后，把该 kind 的 carrier 目录删掉，store 的 `readdirSync` 抛 ENOENT（三个 store 都刻意不 catch ENOENT），provider 因此回 isError。
+
+**AC2 可执行判据**：调用方以 `try { const items = await client.adrList() } catch (err) { /* failure */ }` 区分 —— 拒绝 ⇒ failure；兑现的数组 ⇒ empty 或 unsupported。上表同一份读数里 `RESOLVED []` 与 `REJECTED ENOENT…` 字面不同 ⇒ 程序可区分（硬规则 3b）。
+
+**AC3 双向负控（两向都实跑，非只贴绿侧）**：① 失败向 = native 的 carrier dir 在已连接后被删 ⇒ 三个 list 全部 REJECTED；② 空向 = 空 store ⇒ 三个 list 全部 RESOLVED []。两向都在 `packages/quay/test/provider-client.test.mjs` 里断言（`assert.rejects` 与 `assert.deepEqual([])`），并在上表实跑输出里。
+
+**AC4 同形状命中数**：`grep -rn "isError) return []" packages/quay/src` ——
+- 立案实测（改前）= **3**：`adrList`（provider-client.ts:183）、`goalList`（:206）、`metaList`（:234）；`taskList` 已改为 throw，不在其列。
+- 改后 = **0**（ZERO HITS）。`taskList` 未改。
+
+**AC6 取值设计（unsupported ≠ failure）**：provider 表达「我没有这个 kind」有两条路，**都兑现 `[]`**：① 注册了该 tool 但返回**非错误的空**（github 的 adr_list/goal_list stub，`{adrs:[]}`/`{goals:[]}`，isError falsy）；② **根本没注册**该 tool（github 无 `meta_list`）—— MCP SDK 的 server 端 `tools/call` 把「tool 不存在」与「handler 抛错」压成同一个 `{isError:true, content:[{text}]}` 形状，唯一判别是 SDK 自己的 `Tool <name> not found`（JSON-RPC -32602）文本，`unwrapKindList` **逐字匹配该 tool 名**的这条签名 ⇒ 归为 unsupported；任何**其它** isError ⇒ 抛（failure）。⇒ github 三个 kind 全部 `RESOLVED []`（unsupported，不抛），真实失败全部 REJECTED ⇒ 两者取值可区分、不合并。签名若漂移，失败方向是 fail-LOUD（抛而非静默 `[]`）。
+
+**测试**：`packages/quay/test/provider-client.test.mjs`（`// @test-group product`，全部 `node:test`），5 tests / 0 fail。`node --test packages/quay/test/provider-client.test.mjs` ⇒ `pass 5 / fail 0`。含 AC4 的源码扫描（`packages/quay/src` 下 0 处旧形状）、三条 list 分别走 `unwrapKindList`、以及 taskList 未改。
 
 ## Touches
 
 - packages/quay/src/provider-client.ts
+- packages/quay/test/provider-client.test.mjs
 - packages/quay/test/adr-store.test.mjs
 - packages/quay/test/mcp-adr.test.mjs
 - packages/quay/test/cli-adr.test.mjs
