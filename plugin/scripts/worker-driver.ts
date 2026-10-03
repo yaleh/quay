@@ -134,6 +134,17 @@ import { extractSection, countAcCheckboxes, fetchTaskStatusAtRef, parseFrontmatt
 // goalBranchName/goalBranchRefExists，均为 leaf：只 import node 内建，无反向边 ⇒ 不新增值 SCC）。
 import { fileNameForId } from "../../packages/quay/src/frontmatter-store-base.ts";
 import { goalBranchName, goalBranchRefExists, goalIdFromBranchToken } from "../../packages/quay/src/branch-model.ts";
+// goal→develop 最终 fan-in（SPEC-goal-branch-2026-10-03 §4.7）：请求/结果事件形状与「待执行」派生读数
+// 的单一实现住在 Core（`quay goal merge` 与测试共用同一份，⛔ 本文件不重写）。执行侧（runGoalMergeFanIn）
+// 住在 worker-fan-in.ts（同机械 fan-in 的锁/suite/ff 基建），本文件每轮调它。
+import {
+  pendingGoalMerges,
+  readGoalMergeRequests,
+  readGoalMergeResults,
+  type GoalMergeRequest,
+  type GoalMergeResult,
+  type PendingGoalMerge,
+} from "../../packages/quay/src/goal-merge.ts";
 import { lookupGoalBranchMode } from "./target-identity-literal-check.ts";
 // gap-task-ops-consolidate-driver-frontmatter-writers：flipTaskDone 的 status 读/写经 task-ops.ts
 // （splitTaskFile / statusFromFrontmatter / patchStatusField，单一 parser，⛔ 不再手搓 status 行正则）。
@@ -329,7 +340,26 @@ import {
   // ⛔ 不能 import 本文件（值环）。单一真相源住在被依赖的下层，本文件只 re-export 给既有消费者。
   parseSuiteLogFailures,
   failingTestFilesFromSuiteLog,
+  runGoalMergeFanIn,
+  appendGoalMergeResultEvent,
+  type GoalMergeFanInOptions,
+  type GoalMergeFanInResult,
   type MechanicalFanInResult,
+} from "./worker-fan-in.ts";
+// 复用给测试/消费者的 import 面：goal-merge 事件读数 + 待执行派生 + 执行侧（同机械 fan-in 的既有面）。
+export {
+  pendingGoalMerges,
+  readGoalMergeRequests,
+  readGoalMergeResults,
+  type GoalMergeRequest,
+  type GoalMergeResult,
+  type PendingGoalMerge,
+} from "../../packages/quay/src/goal-merge.ts";
+export {
+  runGoalMergeFanIn,
+  appendGoalMergeResultEvent,
+  type GoalMergeFanInOptions,
+  type GoalMergeFanInResult,
 } from "./worker-fan-in.ts";
 export {
   parseSuiteLogFailures,
@@ -5080,6 +5110,25 @@ export async function runResidentLoop(opts: ResidentOptions): Promise<number> {
       pushLagReading = runPushLagPass(rootDir, pushBranch, pushRemote, reconcileMs);
       if (json && pushLagReading && pushLagReading.verdict !== "in-sync") {
         process.stdout.write(`${JSON.stringify({ event: "push-lag", ...pushLagReading })}\n`);
+      }
+
+      // 1d. goal→develop 最终 fan-in（SPEC-goal-branch-2026-10-03 §4.7，裁定⑭⑳）：人在终端跑
+      //   `quay goal merge` 只【记录请求】；真正把 goal/<id> --no-ff 并入 develop、验证、ff、删分支的是
+      //   本驱动（task 落地机制的所有者，DIR-131）。每轮从 ledger 重派生「待执行」（⛔ 不存状态）：
+      //   有请求 ∧ 分支存在 ∧ 非 develop 祖先 ∧ tip 前进过（tip 不变不重跑，裁定⑳）。执行本身持
+      //   goal 锁 + develop 锁（固定顺序）并跑全量 suite——代价高，但只在有请求时发生。
+      //   ⛔ 本步失败绝不能让整轮抛错（下一轮重派生重试，不是错误轮）；读数进 round（唯一观测载体）。
+      step = "goal-merge";
+      try {
+        const pending = pendingGoalMerges(rootDir);
+        for (const p of pending) {
+          // runId / scriptsDir 缺省由执行侧解析（⛔ 不把驻留环的变量名假设带进去）。
+          const r = await runGoalMergeFanIn({ root: rootDir, goalId: p.goalId, request: p.request });
+          if (json) process.stdout.write(`${JSON.stringify({ event: "goal-merge", goalId: p.goalId, outcome: r.outcome, step: r.step, reason: r.reason, landedSha: r.landedSha })}\n`);
+        }
+      } catch (e: any) {
+        // 执行侧已自行 try/catch 并落事件；此处只兜「派生/装配」的意外抛错（⛔ 不成错误轮，下一轮重试）。
+        if (json) process.stdout.write(`${JSON.stringify({ event: "goal-merge-instrument-failure", cause: `CAUSE=goal-merge-step-threw — ${e?.message ?? String(e)}` })}\n`);
       }
 
       // 2. 池非空且未达 cap 且未判停 ⇒ 走选择环起下一个。
