@@ -698,13 +698,14 @@ export function detectShape(body) {
   return "unknown";
 }
 
-// `escapeRegExp` (imported above) escapes regex-special characters so a heading is matched
-// LITERALLY: `extractSection` builds its heading regex from the caller's string — without escaping,
-// a heading like `AC (draft)` would be interpreted as a capture group and never match the literal
-// `## AC (draft)` line. All registered headings are plain section names; escaping is a no-op for them.
+// `extractSection` matches its heading LITERALLY (it escapes the heading itself — task
+// gap-extract-section-heading-interpolated-unescaped-into-regexp), so callers here pass the raw
+// registered heading: a heading like `AC (draft)` matches the literal `## AC (draft)` line without
+// this module escaping it first. Callers must NOT pre-escape — doing so would double-escape the
+// backslashes and break the match.
 
 function sectionNonWsLength(body, heading) {
-  const sec = extractSection(body, escapeRegExp(heading));
+  const sec = extractSection(body, heading);
   return sec === null ? 0 : sec.replace(/\s/g, "").length;
 }
 
@@ -726,7 +727,10 @@ export function artifactsComplete(body) {
 }
 
 function readFrontField(frontmatterRaw, key) {
-  const m = frontmatterRaw.match(new RegExp(`^${key}:\\s*(\\S+)`, "m"));
+  // `key` is interpolated into a regex, so it is escaped first (same metacharacter-literal rule as
+  // extractSection above — task gap-extract-section-heading-interpolated-unescaped-into-regexp, 5b
+  // sibling). All current callers pass plain field names, so this is a no-op for them.
+  const m = frontmatterRaw.match(new RegExp(`^${escapeRegExp(key)}:\\s*(\\S+)`, "m"));
   return m ? m[1].replace(/^["']|["']$/g, "") : null;
 }
 
@@ -810,7 +814,7 @@ function extractSectionByShape(body, kind) {
   // — unknown shape — still has its `## Acceptance Criteria` section read; the no-AC fallback must not
   // fire on a task that HAS checkboxes under a shape-less heading).
   for (const h of [...headings, literal]) {
-    const sec = extractSection(body, escapeRegExp(h));
+    const sec = extractSection(body, h);
     if (sec !== null) return sec;
   }
   return null;
