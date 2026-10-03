@@ -13,16 +13,86 @@ goal_ac: AC-328
 ---
 ## Proposal
 
-**机制**（`orchestration/SPEC-goal-branch-2026-10-03.md` §4.10、§9.2 残留 3）：goal 的预览实例是一个以预览 worktree 为 workspace root、后台启动的 `quay serve`。`plugin/scripts/worktree-process-reaper.ts --orphan-serves`（`classifyOrphanServes` `:379` 起，调用 `:504`）回收「父进程已死（ppid 1）∧ 不是 `--root` 下登记的宿主」的 serve——后台启动的预览 serve 两条都满足，会被回收。
+**机制**（`orchestration/SPEC-goal-branch-2026-10-03.md` §4.10、§9.2 残留 3）：goal 的预览实例是一个以预览 worktree 为 workspace root、后台启动的 `quay serve`。`plugin/scripts/worktree-process-reaper.ts --orphan-serves`（`classifyOrphanServes`）回收「父进程已死（ppid 1）∧ 不是 `--root` 下登记的宿主」的 serve——后台启动的预览 serve 两条都满足，会被回收。
 
-**修法（方向）**：ppid 1 的 serve，若其 cwd（workspace root）R 不是主 root，且 `R/.quay/server.json` 登记的 pid 与它一致、cmdline 确认是 quay serve ⇒ 视为合法，不回收。carrier 缺失、pid 不一致的仍按泄漏回收（2026-09-17 全局 OOM 正是泄漏 serve 堆积所致，⛔ 不得放宽到「cwd 不是主 root 就放过」）。
+**修法（已落地）**：
+1. 新增 `isSelfRegisteredServe(p)`：读【进程自身 cwd 下】的 `.quay/server.json`，登记的 pid 与 `p.pid` 一致 ⇒ 它是「它自己那个 root 的登记宿主」，豁免。carrier 缺失/读不到/登记的是别的 pid 一律担保不了 ⇒ 仍按泄漏回收（⛔ 没有放宽到「cwd 不是主 root 就放过」）。
+2. 豁免走独立的 `recognizedServes` 输出（JSON + 文本都报），不与 `serves: []` 同形（硬规则 3b：「判过且豁免」vs「够不着」）。
+3. `classifyOrphanServes` 的作用域同时纳入本工作区的 worktree 命名空间（`loop.worktree_root`，经单一解析入口 `resolveWorktreeNamespace` 解析，⛔ 不是字面量）——预览 worktree 是主检出的**兄弟目录**，不加这一条它在回收器眼里根本不存在。其它仓库照旧够不着（2026-09-17 实测：无作用域的版本杀掉了线上 Web UI）。
 
 ## AC
 
-- [ ] `plugin/test/worktree-process-reaper.test.mjs` 新增用例，以注入的进程表与临时目录断言 `classifyOrphanServes`：① ppid 1、cwd = 预览目录、该目录 `.quay/server.json` pid 一致 ⇒ 不在回收集；② 同上但 pid 不一致 ⇒ 在回收集；③ 该目录无 carrier ⇒ 在回收集；④ 主 root 登记宿主的既有判定不变。
-- [ ] 取假：把本任务的核心改动临时回退（用 `cp` 备份恢复，⛔ 不用 `git checkout --`）后，上面新增用例至少 1 条变红；在 `## Evidence` 贴实跑输出与恢复后的绿输出。
-- [ ] 在本机对当前进程跑一次 `--orphan-serves --root <主检出> --list`，改动前后输出的回收集一致（此时还不存在预览 serve）；前后输出贴进 Evidence。⚠️ 本文件已知有负载相关的时序 flake（probe-liveness），红时先隔离重跑。
-- [ ] `bash scripts/test.sh --for-task gap-goal-branch-reaper-accepts-preview-serve` 退出 0，且确实执行了 ≥1 个测试文件（非 thin；在 `## Evidence` 贴出被执行的测试文件名）。
+- [x] `plugin/test/worktree-process-reaper.test.mjs` 新增用例，以注入的进程表与临时目录断言 `classifyOrphanServes`：① ppid 1、cwd = 预览目录、该目录 `.quay/server.json` pid 一致 ⇒ 不在回收集；② 同上但 pid 不一致 ⇒ 在回收集；③ 该目录无 carrier ⇒ 在回收集；④ 主 root 登记宿主的既有判定不变。（新增 3 个用例：`isSelfRegisteredServe` 单测、`classifyOrphanServes — 预览 serve：①…④`、`classifyOrphanServes — 命名空间…`；既有 22 个用例全绿）
+- [x] 取假：把本任务的核心改动临时回退（用 `cp` 备份恢复，⛔ 不用 `git checkout --`）后，上面新增用例至少 1 条变红；在 `## Evidence` 贴实跑输出与恢复后的绿输出。
+- [x] 在本机对当前进程跑一次 `--orphan-serves --root <主检出> --list`，改动前后输出的回收集一致（此时还不存在预览 serve）；前后输出贴进 Evidence。
+- [x] `bash scripts/test.sh --for-task gap-goal-branch-reaper-accepts-preview-serve` 退出 0，且确实执行了 ≥1 个测试文件（非 thin；在 `## Evidence` 贴出被执行的测试文件名）。
+
+## Evidence
+
+**AC1 — 新增判定（`plugin/test/worktree-process-reaper.test.mjs`，26 个用例全绿）**
+
+```
+✔ isSelfRegisteredServe — 只认「自身 cwd 下 .quay/server.json 登记的正是这个 pid」
+✔ classifyOrphanServes — 预览 serve：①登记一致⇒豁免 ②pid 不一致⇒回收 ③无 carrier⇒回收 ④主 root 既有判定不变
+✔ classifyOrphanServes — 命名空间（主检出之外的兄弟目录）内的预览 serve 同样自证豁免；无担保者照旧回收
+```
+
+① 断言 `r.serves === []` 且 `r.recognizedServes === [201]`（豁免必须是**被识别**，不是够不着）；②`server.json` 写成 `{pid:999}` ⇒ `r.serves === [201]`；③ 删掉 carrier ⇒ `r.serves === [201]`；④ `mk(100, root)`（pid===reg.pid）不回收、`mk(101, root)` 回收 ⇒ `serves === [101]`。
+
+**AC2 — 取假（cp 备份，⛔ 未用 `git checkout --`）**
+
+```
+$ cp plugin/scripts/worktree-process-reaper.ts .quay/ac328/reaper.before.ts      # 备份 md5 5006512bc70fd40c5093525a9f3666c3
+$ (临时删掉 classifyOrphanServes 里的 isSelfRegisteredServe 豁免分支)
+$ node --no-warnings --experimental-strip-types --test plugin/test/worktree-process-reaper.test.mjs   # exit=1
+✖ classifyOrphanServes — 预览 serve：①登记一致⇒豁免 ②pid 不一致⇒回收 ③无 carrier⇒回收 ④主 root 既有判定不变
+  AssertionError [ERR_ASSERTION]: 自证的预览 host 不得被回收
+    actual: [ 201 ]    expected: []
+✖ classifyOrphanServes — 命名空间（主检出之外的兄弟目录）内的预览 serve 同样自证豁免；无担保者照旧回收
+  AssertionError: 命名空间内无担保者回收；其它仓库够不着 ⇒ 绝不动
+    actual: [ 201, 202 ]    expected: [ 202 ]
+✖ CLI --orphan-serves — 命名空间里的预览 root 自证 ⇒ 豁免并计入 recognizedServes；同命名空间内无担保者仍回收
+  AssertionError: 只有命名空间内无担保的那一个在回收集
+    actual: [ 201, 202 ]    expected: [ 202 ]
+ℹ tests 26   ℹ pass 23   ℹ fail 3
+```
+
+（回退后 201 号预览 serve 落进回收集 = 本任务要修的那个缺陷。）
+
+```
+$ cp .quay/ac328/reaper.before.ts plugin/scripts/worktree-process-reaper.ts      # 恢复
+$ md5sum plugin/scripts/worktree-process-reaper.ts .quay/ac328/reaper.before.ts
+5006512bc70fd40c5093525a9f3666c3  plugin/scripts/worktree-process-reaper.ts
+5006512bc70fd40c5093525a9f3666c3  .quay/ac328/reaper.before.ts
+$ node --no-warnings --experimental-strip-types --test plugin/test/worktree-process-reaper.test.mjs   # exit=0
+ℹ tests 26   ℹ pass 26   ℹ fail 0
+```
+
+**AC3 — 本机实跑，改动前后回收集一致（此时尚无预览 serve）**
+
+```
+$ node --experimental-strip-types <主检出>/plugin/scripts/worktree-process-reaper.ts \
+    --orphan-serves --root /data/home/yale/work/quay --list            # 改动前
+worktree-process-reaper: orphan-serves — 0 leaked serve host(s) [dry-run] (registered live host pid=1769873)
+
+$ node --experimental-strip-types <本 worktree>/plugin/scripts/worktree-process-reaper.ts \
+    --orphan-serves --root /data/home/yale/work/quay --list            # 改动后
+worktree-process-reaper: orphan-serves — 0 leaked serve host(s) [dry-run] (registered live host pid=1769873; 0 self-registered host(s) spared)
+```
+
+`--json` 对照（同一 `--root`）：改动前 `{found:0, pids:[], serveNotEvaluated:false, reg.pid:1769873}`；改动后 `{found:0, pids:[], serveNotEvaluated:false, reg.pid:1769873, recognizedServes:[]}` ⇒ **回收集一致**（都是空集），登记宿主 pid 不变，新增字段没有改变既有判定。
+
+**AC4 — scoped 门退出 0 且非 thin**
+
+```
+$ bash scripts/test.sh --for-task gap-goal-branch-reaper-accepts-preview-serve    # exit=0
+ℹ tests 26   ℹ pass 26   ℹ fail 0        （日志内 "test-selection-thin" / "selected 0 test files" 命中数 = 0）
+
+$ bash scripts/test.sh --for-task gap-goal-branch-reaper-accepts-preview-serve --paths-only
+plugin/test/worktree-process-reaper.test.mjs        （selector exit 0 ⇒ 非 thin）
+```
+
+被执行的测试文件名：**`plugin/test/worktree-process-reaper.test.mjs`**。另：`node_modules/.bin/tsc --noEmit -p tsconfig.json` exit 0（新增跨包 import `packages/quay/src/worktree-namespace.ts` 通过类型检查）；scoped 静态层 `worktree-namespace-literal-check: PASS — 1 double-quoted "quay-worktrees", at packages/quay/src/worktree-namespace.ts:46`（未新增字面量）。
 
 ## DoD
 

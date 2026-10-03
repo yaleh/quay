@@ -1,7 +1,7 @@
 ---
 id: gap-carrier-registry-declaration-with-unregistered-red-check
 title: 载体注册表（仅声明）：.quay/* 持久载体名 → 声明所有者/种类，漏登记即红——让「谁写谁读」从词法猜测变成可核对的声明
-status: todo
+status: ready
 labels:
   - gap
 parent: null
@@ -40,5 +40,5 @@ extra:
 ## Touches
 
 - tasks/gap-carrier-registry-declaration-with-unregistered-red-check.md
-- docs/carrier-registry.json
-- plugin/test/carrier-registry-completeness.test.mjs
+- docs/carrier-registry.json (new)
+- plugin/test/carrier-registry-completeness.test.mjs (new)
