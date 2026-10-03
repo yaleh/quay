@@ -1,6 +1,6 @@
 ---
 id: AC-902
-status: active
+status: retired
 kind: criterion
 goal: GOAL-902
 criterion: >-
@@ -32,6 +32,11 @@ statusLog:
     to: active
     actor: goal-driver
     reason: "triage: activate"
+  - at: 2026-10-03T11:22:42.097Z
+    from: active
+    to: retired
+    actor: ac322-drill
+    reason: AC-322 追平落地演练：随其 goal 一并 retired（演练被 BASELINE-MISMATCH 阻断，未落地）
 fidelity:
   verdict: faithful
   reason: "fidelity judge: faithful"
