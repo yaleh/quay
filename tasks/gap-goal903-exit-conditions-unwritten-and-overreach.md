@@ -4,7 +4,7 @@ title: GOAL-903 充分性判官判 insufficient 跨一整个 judge+look 周期�
   节（机械层 `hasExitConditions` 读不到 ⇒ 恒 insufficient，加新 AC 改不动它），且其中两条（`判据 AC-322 读
   exit 0`、`无 goal/* 残留分支`）超出本目标可控范围 ⇒ 提 option (b)：重排成节并把退出条件收窄为在域 AC-903
   能裁定的那一条
-status: ready
+status: needs-human
 labels:
   - gap
   - defect
@@ -230,3 +230,11 @@ git branch --list 'goal/*' => (空, count=0)
 - 写盘（两处，均经 goal store CLI，⛔ 未手改）：worktree `ffd5845d2 goals: GOAL-903 field:body`；主检出 `862026686 goals: GOAL-903 field:body`（按仓库既有「goal 写入需两处根」实践）。
 - **状态未动**：GOAL-903 仍 `status: retired`（由兄弟任务 `bdb1dd0ce` 设置，本任务未写 status 字段）；AC-903 仍 `active`（本任务未写 AC 任何字段）。
 - 本 task 分支的落地对象 = `goals/GOAL-903-*.md` 的 body 节重排（见 AC4 diff）。
+## Needs-Human
+
+**执行 2026-10-03T13:23:54.153Z — 连续修满重试上限仍不合格（标 needs-human）**
+
+- 阻碍原因：worker-driver 连续 3 次 exited-not-landed 未落地（重试上限）
+- 失败步/判词：AC 未全勾（checked 3/5，剩余未勾 2）——续做只需验证并勾选 AC
+- run_id：wk-prod-anchor
+- session_id：10ce83ee-ba3f-4e3b-8ce7-7619070745ee
