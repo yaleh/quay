@@ -3,7 +3,7 @@ id: gap-routine-semantic-dedup-scan-store-assertsafestatus-quad
 title: "semantic-dedup-scan: Four near-identical bodies differing only in the
   VALID_* status-constant name and the kind word; the shared
   frontmatter-store-base.ts already exists and is imp"
-status: ready
+status: done
 labels:
   - gap
   - routine-filed
