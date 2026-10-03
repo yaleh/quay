@@ -20,7 +20,7 @@ import assert from "node:assert/strict";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
-import { walkFiles, buildFileIndex, scanRoots, collectShellScripts, listExecutableFiles, scanKernelSurface, readGitignoreBasenames } from "../scripts/fs-walk.ts";
+import { walkFiles, buildFileIndex, scanRoots, collectShellScripts, listExecutableFiles, listFilesInRoots, scanKernelSurface, readGitignoreBasenames } from "../scripts/fs-walk.ts";
 
 // tmp-leak-pairing-check requires the created dirs to live in a module-level ARRAY that the
 // after-hook references (a value returned out of a helper is not seen by the check).
@@ -309,5 +309,65 @@ test("readGitignoreBasenames is DEFINED once (fs-walk.ts); the two checkers only
     const src = fs.readFileSync(new URL(checker, scriptsDir), "utf8");
     assert.ok(src.includes('readGitignoreBasenames } from "./fs-walk.ts"'), `${checker} must import it`);
     assert.ok(src.includes("export { readGitignoreBasenames };"), `${checker} must re-export it`);
+  }
+});
+
+// ── listFilesInRoots (the whole-file surface of the three literal checkers) ──────────────────────
+// finding `walkFiles-scan-surface-family`, runId `semantic-dedup-scan-1790995446200`. The three
+// checkers (registry-path / serve-binding / worktree-namespace) had each kept a byte-identical private
+// walker + call site; only the traversal + call site moved, so here we pin the two axes that a naive
+// "just reuse scanRoots" (stat mode / name-only prune) would silently flip — 硬规则 3b: a checker that
+// reads the wrong file set returns the PASS shape (silent false-green across the literal-checker tier).
+test("listFilesInRoots: ABSOLUTE + sorted across roots; the skip-set is the caller's own parameter", () => {
+  const root = mkTree({
+    "plugin/scripts/a.ts": "x",
+    "plugin/scripts/skipme/s.ts": "x",
+    "packages/quay/src/b.ts": "x",
+  });
+  assert.deepEqual(
+    listFilesInRoots(root, ["plugin/scripts", "packages/quay/src"], new Set()),
+    [
+      path.join(root, "packages/quay/src/b.ts"),
+      path.join(root, "plugin/scripts/a.ts"),
+      path.join(root, "plugin/scripts/skipme/s.ts"),
+    ],
+  );
+  // the skip-set is a PARAMETER (each caller's policy): passing it prunes the whole subtree.
+  assert.deepEqual(
+    listFilesInRoots(root, ["plugin/scripts"], new Set(["skipme"])),
+    [path.join(root, "plugin/scripts/a.ts")],
+  );
+});
+
+test("listFilesInRoots: dirent + isFile → symlinks dropped; prune is DIRECTORIES-ONLY", () => {
+  const root = mkTree({
+    "real.ts": "x",
+    "linkfile.ts": "LINK:real.ts", // symlink to a real file — must NOT be listed
+    "dirlink": "LINK:sub", // symlink to a dir — neither listed nor descended
+    "sub/inner.ts": "x",
+    ".git": "x", // a FILE whose name matches the skip-set — STILL listed (prune only drops dirs)
+    "node_modules/n.ts": "x", // the skip-DIR is pruned
+  });
+  const out = listFilesInRoots(root, ["."], new Set(["node_modules", ".git"]));
+  assert.deepEqual(out, [path.join(root, ".git"), path.join(root, "real.ts"), path.join(root, "sub/inner.ts")]);
+  // the symlink axis, stated as its own reading: NEITHER link survives (a bare "not a directory" test
+  // would have listed both — the exact silently-wrong surface the module header warns about).
+  assert.equal(out.some((p) => p.includes("link")), false);
+});
+
+test("listFilesInRoots is the ONLY whole-file walker the three literal checkers use (硬规则 4 推論三)", () => {
+  // A body-count over the real carriers: none of the three may define its own `function walkFiles`,
+  // and each must import the shared listFilesInRoots. If one re-grows a copy, this goes red.
+  const scriptsDir = new URL("../scripts/", import.meta.url);
+  for (const checker of [
+    "registry-path-literal-check.ts",
+    "serve-binding-literal-check.ts",
+    "worktree-namespace-literal-check.ts",
+  ]) {
+    const src = fs.readFileSync(new URL(checker, scriptsDir), "utf8");
+    assert.equal(/(?:^|\n)\s*function\s+walkFiles\b/.test(src), false,
+      `${checker} must not carry its own walkFiles`);
+    assert.ok(src.includes('import { listFilesInRoots } from "./fs-walk.ts"'),
+      `${checker} must import the shared listFilesInRoots`);
   }
 });

@@ -31,6 +31,11 @@
 // A still-later finding (`readgitignorebasenames-dup`, runId `semantic-dedup-scan-1790851304231`)
 // added the gitignore-basename reader the two stale-path detectors had each kept a byte-identical
 // copy of; it sits beside `gitVisiblePaths`, the gitignore-awareness face of the same family.
+//
+// The latest finding in the family (`walkFiles-scan-surface-family`, runId
+// `semantic-dedup-scan-1790995446200`) landed `listFilesInRoots` — the whole-file scan surface the
+// three literal checkers (registry-path / serve-binding / worktree-namespace) had each kept a
+// byte-identical private walker AND call site for.
 
 import fs from "node:fs";
 import path from "node:path";
@@ -299,6 +304,51 @@ export function listExecutableFiles(dir: string): string[] {
     prune: (name) => EXEC_SKIP_NAMES.has(name),
     include: (_name, ext, entry) => entry !== null && entry.isFile() && EXEC_EXTENSIONS.has(ext),
   });
+}
+
+/**
+ * List EVERY regular file under each of `relDirs` (repo-relative directories of `root`), as ABSOLUTE
+ * paths, sorted.
+ *
+ * Was a private `walkFiles(absDir, out)` — a byte-identical `readdirSync(dir, {withFileTypes:true})`
+ * + `Dirent` loop — together with a byte-identical call site, in three literal checkers:
+ * registry-path-literal-check.ts, serve-binding-literal-check.ts and
+ * worktree-namespace-literal-check.ts (`.quay/routine-findings.jsonl`, finding
+ * `walkFiles-scan-surface-family`, routine `semantic-dedup-scan`, runId
+ * `semantic-dedup-scan-1790995446200`). They are the un-extracted remainder of the scan-surface
+ * family whose predicate-carrying sibling `scanRoots` already absorbed the other members. Only the
+ * traversal AND its call site moved here; each caller keeps its OWN roots list and skip-set.
+ *
+ * Two axes are inherited from the originals and are load-bearing (硬规则 3b: a checker that scans the
+ * wrong surface returns the PASS shape, so silently changing WHICH files are read is a silent
+ * false-green across the whole literal-checker tier — pinned by plugin/test/fs-walk.test.mjs):
+ *   • `entryKind: "dirent"` — the originals used `readdirSync(dir, {withFileTypes:true})`, so a
+ *     SYMLINK (dangling or not) is neither descended nor recorded. This is deliberately NOT
+ *     `scanRoots`, which is `"stat"`; the module header's dirent-vs-stat warning applies verbatim.
+ *   • prune is DIRECTORIES ONLY (`isDir && skipDirNames.has(name)`) — the originals tested the skip
+ *     set INSIDE the `isDirectory()` branch, so a *file* whose basename collides with a skip-dir name
+ *     is still listed.
+ *
+ * `skipDirNames` stays a PARAMETER, not a shared constant — the same convention as
+ * `collectShellScripts` above. The three callers agree today (`{node_modules, .git}`), but the set is
+ * each caller's own policy; a shared constant would hide the day one needs to differ.
+ */
+export function listFilesInRoots(
+  root: string,
+  relDirs: readonly string[],
+  skipDirNames: ReadonlySet<string>,
+): string[] {
+  const out: string[] = [];
+  for (const rel of relDirs) {
+    out.push(
+      ...walkFiles(path.join(root, rel), {
+        absolute: true,
+        prune: (name, isDir) => isDir && skipDirNames.has(name),
+        include: (_name, _ext, entry) => entry !== null && entry.isFile(),
+      }),
+    );
+  }
+  return out.sort();
 }
 
 /**
