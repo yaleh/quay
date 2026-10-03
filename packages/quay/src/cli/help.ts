@@ -78,6 +78,7 @@ Usage:
   quay goal gate <id> [--dry-run] [--json] [--root <path>]
   quay goal check [--staleness|--achieved-failing|--stale-pass [--sweep]|--reverify-scope] [--json] [--root <path>]
   quay goal batch --json '<array>' [--root <path>]
+  quay goal preview <GOAL-NNN> start|stop|status [--port <n>] [--host <h>] [--root <path>] [--json]
   quay meta list [--status <status>] [--json] [--root <path>]
   quay meta show <id> [--json] [--root <path>]
   quay meta write <id> --title <title> [--status <status>] [--handler <handler>] [--reply <text>] [--body <text>|--body-file <path>] [--json] [--root <path>]
