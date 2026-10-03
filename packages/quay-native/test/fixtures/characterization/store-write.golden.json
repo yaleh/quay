@@ -1,0 +1,34 @@
+{
+  "steps": [
+    {
+      "name": "01-create",
+      "id": "CHAR-1",
+      "file": "CHAR-1.md",
+      "bytes": "---\nid: CHAR-1\ntitle: Characterization task\nstatus: todo\nlabels:\n  - alpha\n  - beta\nparent: null\nchildren: []\nextra: {}\n---\n## Proposal\n\n中文段落：这是一段用于特征化基线的说明，包含标点、全角字符（括号）与数字 123。\n\n```js\nconst answer = 42; // fenced code inside the body\n```\n"
+    },
+    {
+      "name": "02-status",
+      "id": "CHAR-1",
+      "file": "CHAR-1.md",
+      "bytes": "---\nid: CHAR-1\ntitle: Characterization task\nstatus: ready\nlabels:\n  - alpha\n  - beta\nparent: null\nchildren: []\nextra: {}\n---\n## Proposal\n\n中文段落：这是一段用于特征化基线的说明，包含标点、全角字符（括号）与数字 123。\n\n```js\nconst answer = 42; // fenced code inside the body\n```\n"
+    },
+    {
+      "name": "03-body",
+      "id": "CHAR-1",
+      "file": "CHAR-1.md",
+      "bytes": "---\nid: CHAR-1\ntitle: Characterization task\nstatus: ready\nlabels:\n  - alpha\n  - beta\nparent: null\nchildren: []\nextra: {}\n---\n## Proposal\n\n第二版正文：状态翻转之后的 body。\n\n## Plan\n\n```sh\necho 'still fenced';\n```\n\n结尾行。\n"
+    },
+    {
+      "name": "04-extra-labels",
+      "id": "CHAR-1",
+      "file": "CHAR-1.md",
+      "bytes": "---\nid: CHAR-1\ntitle: Characterization task\nstatus: ready\nlabels:\n  - beta\n  - gamma\nparent: null\nchildren: []\nextra:\n  acceptance: \"true\"\n  depends_on:\n    - CHAR-0\n---\n## Proposal\n\n第二版正文：状态翻转之后的 body。\n\n## Plan\n\n```sh\necho 'still fenced';\n```\n\n结尾行。\n"
+    },
+    {
+      "name": "05-children",
+      "id": "CHAR-1",
+      "file": "CHAR-1.md",
+      "bytes": "---\nid: CHAR-1\ntitle: Characterization task\nstatus: ready\nlabels:\n  - beta\n  - gamma\nparent: null\nchildren:\n  - CHAR-2\n  - CHAR-3\nextra:\n  acceptance: \"true\"\n  depends_on:\n    - CHAR-0\n---\n## Proposal\n\n第二版正文：状态翻转之后的 body。\n\n## Plan\n\n```sh\necho 'still fenced';\n```\n\n结尾行。\n"
+    }
+  ]
+}
