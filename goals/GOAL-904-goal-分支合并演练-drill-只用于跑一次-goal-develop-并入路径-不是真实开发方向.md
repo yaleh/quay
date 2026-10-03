@@ -1,7 +1,7 @@
 ---
 id: GOAL-904
 title: goal 分支合并演练（drill）——只用于跑一次 goal→develop 并入路径，不是真实开发方向
-status: active
+status: achieved
 kind: goal
 origin: 人 2026-10-03「第二步先做合并演练再做试点」：对 GOAL-028 跑一遍 goal
   分支完整路径（演练，非真实开发方向）；判据能在生产实例上判假（落笔当轮读数：生产 /doc 无 DOC-904 ⇒ exit 1）
@@ -13,6 +13,11 @@ statusLog:
     actor: cli
     reason: 人 2026-10-03 裁定做 goal 分支合并演练；AC-904 已激活，承接任务已立并停放；激活 GOAL 即从 develop tip
       懒建 goal/GOAL-904
+  - at: 2026-10-03T17:50:56.622Z
+    from: active
+    to: achieved
+    actor: goal-driver
+    reason: "I2: all ACs achieved + sufficiency covered"
 branch: true
 ---
 ## 背景
