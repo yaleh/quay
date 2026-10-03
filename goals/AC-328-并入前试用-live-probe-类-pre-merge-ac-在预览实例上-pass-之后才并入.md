@@ -1,7 +1,7 @@
 ---
 id: AC-328
 title: 并入前试用：live-probe 类 pre-merge AC 在预览实例上 pass 之后才并入
-status: active
+status: achieved
 kind: criterion
 goal: GOAL-028
 criterion: >-
@@ -93,6 +93,11 @@ statusLog:
     to: active
     actor: goal-driver
     reason: "triage: activate"
+  - at: 2026-10-03T20:21:22.125Z
+    from: active
+    to: achieved
+    actor: goal-driver
+    reason: "I2: criterion pass"
 fidelity:
   verdict: faithful
   reason: "fidelity judge: faithful"
