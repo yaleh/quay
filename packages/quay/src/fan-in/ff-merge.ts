@@ -56,6 +56,13 @@ export interface FfMergeArgs {
   root?: string;
   /** the branch the task fast-forwards into. Default `develop`. */
   mergeTarget?: string;
+  /** the SOURCE the merge target fast-forwards TO — a ref (`refs/heads/…` / short name) or a raw commit
+   *  SHA. Absent ⇒ `refs/heads/task/<task>`, the task branch (the existing path, byte-for-byte
+   *  unchanged). Present ⇒ that source is what `develop` (the merge target) fast-forwards to; the
+   *  existence / ancestry / post-check all apply to IT (gap-goal-branch-ff-merge-source-param; SPEC-goal-
+   *  branch-2026-10-03 §4.7, 裁定⑲). A goal merge passes the `--no-ff` MERGE COMMIT built in the temp
+   *  worktree — `develop` still only fast-forwards, its source is a commit rather than a task tip. */
+  sourceRef?: string | null;
   runId?: string | null;
   /** per-dispatch attempt key (gap-ff-retry-counter-runid-no-longer-per-dispatch): the retry counter's
    *  grouping key. `runId` became a driver-process-lifetime id (`wk-prod-<epoch>`, constant across
@@ -118,6 +125,19 @@ function iso(now: Date): string {
 }
 function epoch(now: Date): number {
   return Math.floor(now.getTime() / 1000);
+}
+
+// ── the ff SOURCE (the ref run before this task was fixed to `refs/heads/task/<task>`) ───────────────
+// gap-goal-branch-ff-merge-source-param: the source the merge target fast-forwards to is the
+// `--source-ref` override (a ref or a raw SHA), else the task branch `refs/heads/task/<task>`. SINGLE
+// source for every site that used to hard-code `refs/heads/task/${task}` (硬规则 5b — one rule, four
+// call sites: the cert-gate tip, the pre-flight existence check, the ff refspec/arg, the post-check).
+// `sourceRefOf` is exported so its unit test (`packages/quay/test/ff-merge.test.mjs`) asserts on THE
+// resolver the call sites use, ⛔ never a second copy of the default/override rule (硬规则 5b) — the
+// same reason `siblingScriptArgv` / `siblingScriptCandidates` are exported.
+export function sourceRefOf(args: FfMergeArgs): string {
+  const override = args.sourceRef?.trim();
+  return override ? override : `refs/heads/task/${args.task}`;
 }
 
 // ── git-common-dir / ff-mode ──────────────────────────────────────────────────────────────────────────
@@ -559,7 +579,7 @@ function suiteCertGate(args: FfMergeArgs, root: string): { ok: boolean; reason: 
   const capture = args.suiteCapture ?? `/tmp/fan-in-suite-${args.task}.env`;
   let suiteExit = readCaptureField(capture, "suite_exit");
   let suiteHead = readCaptureField(capture, "suite_head");
-  const suiteTip = git(root, "rev-parse", `refs/heads/task/${args.task}`).stdout.trim();
+  const suiteTip = git(root, "rev-parse", sourceRefOf(args)).stdout.trim();
   const exists = fs.existsSync(capture) ? "yes" : "no";
   if (!fs.existsSync(capture)) {
     const stateFile = args.suiteState ?? path.join(root, ".quay", "full-suite-state.json");
@@ -821,9 +841,12 @@ export async function ffMerge(args: FfMergeArgs): Promise<FfMergeResult> {
     return { code: 2, stdout: "", stderr: `fan-in-ff-merge: not a git repo: ${root}`, landedSha: null };
   }
 
-  // task branch pre-flight.
-  if (git(root, "rev-parse", "--verify", "--quiet", `refs/heads/task/${args.task}`).status !== 0) {
-    return { code: 2, stdout: "", stderr: `fan-in-ff-merge: task branch task/${args.task} not found in ${root}`, landedSha: null };
+  // source pre-flight (gap-goal-branch-ff-merge-source-param): the ref/sha being ff'd must resolve.
+  // The default source is the task branch, so its refusal stays byte-for-byte the historical message.
+  const sourceRef = sourceRefOf(args);
+  if (git(root, "rev-parse", "--verify", "--quiet", sourceRef).status !== 0) {
+    const what = args.sourceRef ? `source ref ${sourceRef}` : `task branch task/${args.task}`;
+    return { code: 2, stdout: "", stderr: `fan-in-ff-merge: ${what} not found in ${root}`, landedSha: null };
   }
 
   // ff-mode auto-selection (merge = target still checked out; push = pure ref update).
@@ -908,8 +931,8 @@ export async function ffMerge(args: FfMergeArgs): Promise<FfMergeResult> {
   let mergeErr = "";
 
   const ffCmd = ffMode === "push"
-    ? ["git", "-C", root, "push", ".", `refs/heads/task/${args.task}:refs/heads/${mergeTarget}`]
-    : ["git", "-C", root, "merge", "--ff-only", `task/${args.task}`];
+    ? ["git", "-C", root, "push", ".", `${sourceRef}:refs/heads/${mergeTarget}`]
+    : ["git", "-C", root, "merge", "--ff-only", sourceRef];
   const m = sh(ffCmd);
   if (m.status !== 0) {
     mergeRc = 1;
@@ -975,11 +998,12 @@ export async function ffMerge(args: FfMergeArgs): Promise<FfMergeResult> {
     return { code: 1, stdout: out.join("\n"), stderr: err.join("\n"), landedSha: null };
   }
 
-  // POST-state sanity check (the merge target must now be at the task tip).
+  // POST-state sanity check (the merge target must now be at the SOURCE tip).
   const postHead = git(root, "rev-parse", mergeTarget).stdout.trim() || "unresolvable";
-  const taskTip = git(root, "rev-parse", `refs/heads/task/${args.task}`).stdout.trim() || "unresolvable";
-  if (postHead !== taskTip) {
-    err.push(`fan-in-ff-merge: post-check FAILED — ${mergeTarget} is at ${postHead}, expected task tip ${taskTip}; needs human`);
+  const sourceTip = git(root, "rev-parse", sourceRef).stdout.trim() || "unresolvable";
+  if (postHead !== sourceTip) {
+    const expected = args.sourceRef ? `source tip ${sourceTip}` : `task tip ${sourceTip}`;
+    err.push(`fan-in-ff-merge: post-check FAILED — ${mergeTarget} is at ${postHead}, expected ${expected}; needs human`);
     return { code: 1, stdout: out.join("\n"), stderr: err.join("\n"), landedSha: null };
   }
 
@@ -989,7 +1013,8 @@ export async function ffMerge(args: FfMergeArgs): Promise<FfMergeResult> {
     runId: runIdJson, agentId: agentIdJson, mergeTarget,
   }) + "\n");
 
-  out.push(`fan-in-ff-merge: OK — ${mergeTarget} fast-forwarded to task/${args.task} (${postHead}) [before ${developHeadBefore}]${args.runId ? ` (runId: ${args.runId})` : ""}`);
+  const sourceLabel = args.sourceRef ?? `task/${args.task}`;
+  out.push(`fan-in-ff-merge: OK — ${mergeTarget} fast-forwarded to ${sourceLabel} (${postHead}) [before ${developHeadBefore}]${args.runId ? ` (runId: ${args.runId})` : ""}`);
   out.push("fan-in-ff-merge: measure ff_only_locked=true");
   return { code: 0, stdout: out.join("\n"), stderr: err.join("\n"), landedSha };
 }
@@ -1008,6 +1033,7 @@ function parseArgv(argv: string[]): { args: FfMergeArgs; help: boolean } {
       case "--task": args.task = next(); break;
       case "--root": args.root = next(); break;
       case "--merge-target": args.mergeTarget = next(); break;
+      case "--source-ref": args.sourceRef = next(); break;
       case "--run-id": args.runId = next(); break;
       case "--attempt-key": args.attemptKey = next(); break;
       case "--agent-id": args.agentId = next(); break;
@@ -1034,7 +1060,7 @@ function parseArgv(argv: string[]): { args: FfMergeArgs; help: boolean } {
 const HELP = `fan-in-ff-merge (TS module) — AC62 持锁段: a merge lock that wraps ONLY the ff.
 Usage:
   node --experimental-strip-types packages/quay/src/fan-in/ff-merge.ts --task <taskId> [--root <repo>]
-    [--merge-target <branch>] [--run-id <runId>] [--attempt-key <key>] [--agent-id <id>] [--token <token>] [--suite-capture <file>]
+    [--merge-target <branch>] [--source-ref <ref|sha>] [--run-id <runId>] [--attempt-key <key>] [--agent-id <id>] [--token <token>] [--suite-capture <file>]
     [--lock-events <file>] [--retry-record <file>] [--escalations <file>] [--lock-wait <secs>] [--worktree <path>]
     [--no-flip-identity-shortcut]
 Exit codes: 0 = ff performed; 1 = develop advanced (retry); 2 = usage/env/token; 3 = anti-livelock.

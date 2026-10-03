@@ -46,7 +46,8 @@
 //   worktree-process-reaper.ts --help
 //
 // --orphan-serves: reap leaked `quay … serve` WEB-UI HOSTS — a serve whose parent is dead
-// (ppid === 1) and which is NOT the host named by <root>/.quay/server.json. Each one holds
+// (ppid === 1), which is under <root> OR under the workspace's worktree namespace, and which
+// nothing vouches for. Each one holds
 // 0.65–1.7 GB, so a few of them exhaust a 16 GB box (2026-09-17: three such leaks contributed to a
 // global OOM whose victims were dbus-daemon/systemd/an unrelated chrome batch). The leak's ROOT
 // CAUSE — the `bin/quay.js` shim blocking in `spawnSync`, so it could never forward the signal that
@@ -58,6 +59,19 @@
 //   `.quay/server.json` on startup, so a transient host hijacks the registration — measured, the
 //   orphan that prompted this work had left it pointing at its own dead pid. In that state a live
 //   host and a leaked one are indistinguishable, and killing on a guess would take down the UI.
+//
+//   ⚠️ A `quay serve` started in the BACKGROUND has ppid === 1 whether it is a legitimate host of
+//   some OTHER workspace root or a leak — the dead parent alone cannot separate them. The voucher
+//   is the registration at the process's OWN root: when `<its cwd>/.quay/server.json` names that
+//   very pid, it is the registered host of the workspace it runs in and is spared. This is what
+//   makes a goal preview instance survivable — a serve whose workspace root is the preview
+//   worktree, started detached (SPEC-goal-branch-2026-10-03 §4.10): the `--root` registration
+//   cannot vouch for it (different root), so the old rule reaped it. Such processes are reported
+//   under `recognizedServes` — never silently dropped (硬规则 3b: "evaluated and spared" must not
+//   share an output with "never looked at").
+//   ⛔ A MISSING or unreadable carrier, or one naming a DIFFERENT pid, vouches for nothing: the
+//   process stays in the reap set. This is NOT "cwd != main root ⇒ let it go" (2026-09-17: a global
+//   OOM whose victims were dbus-daemon/systemd came from exactly the un-vouched leaked hosts).
 //
 // --stale-lock-holders-only (with --orphans): reclaim ONLY stale full-suite.lock holders for the
 // given --root (cwd deleted + holding one of <root>'s lock files open), skipping the global
@@ -84,6 +98,12 @@ import { isDirectEntry } from "./gate-script-base.ts";
 // definition point). fullSuiteLockFiles() reads it so the stale-lock reclaim covers ALL S slots
 // (S=3 ⇒ `.2` stale holders are reclaimable, never invisible to the fixed `.0`/`.1` list).
 import { suiteLockSlotPaths, suiteLockBase } from "./suite-lock-slots.ts";
+// The workspace's worktree namespace (loop.worktree_root from .quay/config.yml, falling back to the
+// historical <parent-of-root>/quay-worktrees convention) — where this repo's goal-preview worktrees
+// live (SPEC-goal-branch-2026-10-03 §4.10). Resolved through the SINGLE resolver the read side
+// (observation.ts) and fast-mode-telemetry.ts already share: spelling the segment as a literal here
+// would be exactly the drift `worktree-namespace-literal-check.ts` exists to catch.
+import { resolveWorktreeNamespace } from "../../packages/quay/src/worktree-namespace.ts";
 // The two process-IDENTITY predicates (`readProcCmdline` / `isQuayServe`, re-exported below for
 // every existing caller) now live in the kernel leaf `packages/quay/src/kernel/proc-identity.ts`
 // (tasks/gap-arch-reverse-edges-zero). They are the ONLY part of this file `packages/quay/src/
@@ -369,6 +389,12 @@ export function readServeRegistration(root: string): ServeRegistration {
 
 export interface OrphanServeClassification {
   serves: ProcInfo[];
+  /** ppid === 1 `quay … serve` processes that ARE in this workspace's scope but were SPARED because
+   *  the registration at their OWN workspace root (their cwd) names this very pid — a goal preview
+   *  instance (§4.10), or any other background host that is the registered host of the root it runs
+   *  in. Reported separately so "evaluated and spared" is distinguishable from "never looked at"
+   *  (硬规则 3b). ⛔ Never merged into `serves`. */
+  recognizedServes: ProcInfo[];
   /** true ⇔ the predicate could not be evaluated at all ⇒ the caller must kill NOTHING.
    *  ⛔ Distinct from `serves: []` + `notEvaluated: false`, which means "evaluated, nothing found"
    *  (硬规则 3b: an unevaluable predicate must not share an output with a clean one). */
@@ -376,24 +402,54 @@ export interface OrphanServeClassification {
   reason?: string;
 }
 
+/** Is this process the REGISTERED host of the workspace it is running in — i.e. does
+ *  `<its cwd>/.quay/server.json` name this very pid?
+ *
+ *  ⛔ Read from the process's OWN cwd (its workspace root), not from the `--root` we were asked
+ *  about: those are the same file only when the process runs in the main checkout. That difference
+ *  is the whole point — a goal preview instance's root is the preview worktree, so the `--root`
+ *  registration can never vouch for it.
+ *
+ *  ⛔ Deliberately does NOT require the registration to be "alive": the process IS this pid and it
+ *  is in the proc table, so a matching registration is a live self-registration by construction.
+ *  Requiring the `process.kill(pid, 0)` ping would add nothing and would make the pure predicate
+ *  untestable with injected (non-existent) pids.
+ *  ⛔ `absent` / `unreadable` / a different pid all return false — a carrier that cannot name this
+ *  pid vouches for nothing, and the process stays in the reap set. */
+export function isSelfRegisteredServe(p: ProcInfo): boolean {
+  if (!p.cwd) return false;
+  const own = readServeRegistration(p.cwd);
+  return own.state === "present" && own.pid === p.pid;
+}
+
 /** Reap candidates for `--orphan-serves`: a `quay … serve` process whose PARENT IS DEAD
- *  (ppid === 1) and which is not the host the registration names.
+ *  (ppid === 1), which is in THIS workspace's scope, and which nothing vouches for.
  *
  *  WHY THE REGISTRATION GATE IS LOAD-BEARING: the orphan state alone is NOT enough. A legitimate
  *  host is spawned `detached: true` + `unref()` (server.ts `spawnHost`), so its parent is ALSO
- *  gone — it is ppid === 1 too. What separates the two is ownership, and the only owner-of-record
- *  is `.quay/server.json`. When that registration is missing, unreadable, or names a dead pid, the
+ *  gone — it is ppid === 1 too. What separates the two is ownership, and the owner-of-record is
+ *  `.quay/server.json`. When that registration is missing, unreadable, or names a dead pid, the
  *  reaper CANNOT tell them apart and refuses (see readServeRegistration for the hijack that makes
- *  the dead-pid case real). ⛔ Never widen this to "any ppid === 1 quay serve" — that kills the UI. */
+ *  the dead-pid case real). ⛔ Never widen this to "any ppid === 1 quay serve" — that kills the UI.
+ *
+ *  `worktreeNamespace` (the workspace's `loop.worktree_root`, resolved by the caller through the
+ *  single resolver — null ⇒ not consulted) widens the SCOPE, not the voucher: goal preview
+ *  instances live in that namespace as SIBLINGS of the main checkout, so without it a preview
+ *  serve is not even a candidate. Once in scope, though, the same rule decides its fate as for any
+ *  other candidate — a preview serve is spared only because it registers ITSELF at ITS OWN root
+ *  (isSelfRegisteredServe); a namespace sibling that registers nothing is still residue and is
+ *  reaped. */
 export function classifyOrphanServes(
   procs: ProcInfo[],
   reg: ServeRegistration,
   exclude: Set<number>,
   root: string,
+  worktreeNamespace: string | null = null,
 ): OrphanServeClassification {
   if (reg.state !== "present" || reg.pid === null) {
     return {
       serves: [],
+      recognizedServes: [],
       notEvaluated: true,
       reason: `serve registration is ${reg.state}${reg.detail ? ` (${reg.detail})` : ""} — without it a leaked host is indistinguishable from the live one`,
     };
@@ -401,11 +457,12 @@ export function classifyOrphanServes(
   if (!reg.alive) {
     return {
       serves: [],
+      recognizedServes: [],
       notEvaluated: true,
       reason: `serve registration names pid ${reg.pid}, which is DEAD — a stale registration cannot vouch for any live host, so nothing may be reaped (this is precisely the state a hijacking transient host leaves behind)`,
     };
   }
-  // ⚠️ `cwdUnder(p.cwd, root)` IS LOAD-BEARING, and its absence was MEASURED, not theorised.
+  // ⚠️ The SCOPE gate is LOAD-BEARING, and its absence was MEASURED, not theorised.
   //
   // The enumeration is SYSTEM-WIDE (every pid), while the registration gate only vouches for hosts
   // of THIS root. Without a scope, every OTHER repository's legitimately-running serve — and this
@@ -414,17 +471,28 @@ export function classifyOrphanServes(
   // run: the reaper killed the live production Web UI (bound to the tailnet address, serving real
   // traffic) while the deliberate orphan it was aimed at survived untouched.
   //
-  // ⇒ A candidate must belong to the repo we were asked about. The registration gate then answers
-  // the only remaining question — is it the host of THIS repo, or residue under it.
-  const serves = procs.filter(
-    (p) =>
-      !exclude.has(p.pid) &&
-      p.pid !== reg.pid &&
-      p.ppid === 1 &&
-      cwdUnder(p.cwd, root) &&
-      isQuayServe(p.cmdline),
-  );
-  return { serves, notEvaluated: false };
+  // ⇒ A candidate must belong to the workspace we were asked about: under `root`, or under that
+  // workspace's worktree namespace (where its task AND goal-preview worktrees live). Foreign
+  // repositories match neither and are never candidates. The voucher (isSelfRegisteredServe) then
+  // answers the only remaining question — is it the host of its own root, or residue.
+  const ns = worktreeNamespace ? path.resolve(worktreeNamespace) : null;
+  const serves: ProcInfo[] = [];
+  const recognizedServes: ProcInfo[] = [];
+  for (const p of procs) {
+    if (exclude.has(p.pid)) continue;
+    if (p.pid === reg.pid) continue; // the --root's own registered host
+    if (p.ppid !== 1) continue; // parent alive ⇒ not an orphan
+    if (!isQuayServe(p.cmdline)) continue; // not a serve host
+    const underRoot = cwdUnder(p.cwd, root);
+    const underNamespace = ns !== null && cwdUnder(p.cwd, ns);
+    if (!underRoot && !underNamespace) continue; // another repo we were not asked about
+    if (isSelfRegisteredServe(p)) {
+      recognizedServes.push(p); // its own root's carrier vouches for it (preview instance etc.)
+      continue;
+    }
+    serves.push(p);
+  }
+  return { serves, recognizedServes, notEvaluated: false };
 }
 
 /** The repo's full-suite lock files for --orphans: the CANONICAL slot implementation
@@ -548,6 +616,7 @@ export function main(argv: string[]): number {
   let serveReg: ServeRegistration | null = null;
   let serveNotEvaluated = false;
   let serveReason: string | undefined;
+  let recognizedServes: ProcInfo[] = [];
 
   if (orphanMode) {
     lockFiles = fullSuiteLockFiles(root);
@@ -563,9 +632,13 @@ export function main(argv: string[]): number {
       return 2;
     }
     serveReg = readServeRegistration(root);
-    const cls = classifyOrphanServes(procs, serveReg, exclude, root);
+    // The worktree namespace is resolved THROUGH THE SINGLE RESOLVER (never a literal): it is where
+    // goal preview instances live, and `classifyOrphanServes` must see them in order to RECOGNIZE
+    // them (a preview serve's own root registrar vouches for it) rather than reap them (§4.10).
+    const cls = classifyOrphanServes(procs, serveReg, exclude, root, resolveWorktreeNamespace(root).dir);
     serveNotEvaluated = cls.notEvaluated;
     serveReason = cls.reason;
+    recognizedServes = cls.recognizedServes;
     targets = cls.serves;
   } else {
     const worktree = path.resolve(argv[wtIdx + 1] ?? "");
@@ -596,6 +669,11 @@ export function main(argv: string[]): number {
       serveRegistration: orphanServeMode && serveReg ? serveReg : undefined,
       serveNotEvaluated: orphanServeMode ? serveNotEvaluated : undefined,
       serveNotEvaluatedReason: orphanServeMode ? serveReason : undefined,
+      // In-scope candidates that were SPARED because their own root's registration names them
+      // (硬规则 3b: "evaluated and spared" must be readable, not inferred from an absence).
+      recognizedServes: orphanServeMode
+        ? recognizedServes.map((p) => ({ pid: p.pid, cwd: p.cwd, argv0: p.argv0, state: p.state }))
+        : [],
       probes: orphanMode ? probes.map((p) => ({ pid: p.pid, cwd: p.cwd, argv0: p.argv0, state: p.state })) : [],
       staleLockHolders: orphanMode ? staleLockHolders.map((p) => ({ pid: p.pid, cwd: p.cwd, argv0: p.argv0, state: p.state })) : [],
       lockFiles: orphanMode ? lockFiles : [],
@@ -616,7 +694,7 @@ export function main(argv: string[]): number {
         );
       } else {
         process.stdout.write(
-          `worktree-process-reaper: orphan-serves — ${targets.length} leaked serve host(s)${listOnly ? " [dry-run]" : ""} (registered live host pid=${serveReg?.pid ?? "?"})\n`,
+          `worktree-process-reaper: orphan-serves — ${targets.length} leaked serve host(s)${listOnly ? " [dry-run]" : ""} (registered live host pid=${serveReg?.pid ?? "?"}; ${recognizedServes.length} self-registered host(s) spared)\n`,
         );
       }
     } else {
