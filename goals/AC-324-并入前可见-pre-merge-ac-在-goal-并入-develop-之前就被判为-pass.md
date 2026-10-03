@@ -1,7 +1,7 @@
 ---
 id: AC-324
 title: 并入前可见：pre-merge AC 在 goal 并入 develop 之前就被判为 pass
-status: active
+status: achieved
 kind: criterion
 goal: GOAL-028
 criterion: >-
@@ -88,6 +88,11 @@ statusLog:
     to: active
     actor: goal-driver
     reason: "triage: activate"
+  - at: 2026-10-03T20:21:11.960Z
+    from: active
+    to: achieved
+    actor: goal-driver
+    reason: "I2: criterion pass"
 fidelity:
   verdict: faithful
   reason: "fidelity judge: faithful"
