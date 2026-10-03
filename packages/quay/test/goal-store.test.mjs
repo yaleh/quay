@@ -1560,3 +1560,82 @@ test("AC4: an unreadable carrier FILE still throws (a read failure is not a pars
     fs.chmodSync(p, 0o600);
   }
 });
+
+// ── gap-goal-branch-data-model-and-lifecycle: `branch` field + goal-branch lifecycle ─────────────
+// SPEC-goal-branch-2026-10-03.md §4.1 (data model) / §4.2 (lazy create on active, discard on
+// retired/superseded with the tip SHA recorded in the statusLog). The tests below are the AC1/AC3
+// carriers for this task; the AC2 carrier (branch-model primitives) lives in branch-model.test.mjs
+// and the AC4 carrier (identity rule) in plugin/test/target-identity-literal-check.test.mjs.
+
+// A repo WITH a `develop` branch and one commit — the goal branch is forked from the develop tip, so
+// the plain `gitRepo` (no commit, no develop) cannot observe creation at all.
+function gitRepoWithDevelop(tag = "goal-branch") {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), `goal-store-git-${tag}-`));
+  _createdDirs.push(dir);
+  const run = (...args) => execFileSync("git", ["-C", dir, ...args], { encoding: "utf8" });
+  run("init", "-q", "-b", "main");
+  run("config", "user.email", "t@t");
+  run("config", "user.name", "t");
+  fs.mkdirSync(path.join(dir, "goals"), { recursive: true });
+  fs.mkdirSync(path.join(dir, ".quay"), { recursive: true });
+  fs.writeFileSync(path.join(dir, "seed.txt"), "seed\n");
+  run("add", "-A");
+  run("commit", "-q", "-m", "seed");
+  run("branch", "develop");
+  return { root: dir, run, goalsDir: path.join(dir, "goals") };
+}
+
+test("goal branch — draft opt-in reads true, is NOT created at birth, created lazily on activation, then locked", () => {
+  const { run, goalsDir } = gitRepoWithDevelop("gb-create");
+  const s = createGoalStore(goalsDir, {});
+  seedAc(s, "GOAL-901"); // AC-first: a draft GOAL cannot carry zero ACs (store invariant)
+
+  const draft = s.write("GOAL-901", { title: "branch-mode goal", status: "draft", origin: "fixture", body: GOAL_BODY, branch: true });
+  assert.equal(draft.branch, true, "an explicit `branch: true` is stored and projected");
+  // ⛔ LAZY: no branch at birth — a draft goal may sit unactivated for a long time (§4.1).
+  assert.equal(run("branch", "--list", "goal/GOAL-901").trim(), "", "no branch is created while draft");
+
+  const developTip = run("rev-parse", "develop").trim();
+  const active = s.write("GOAL-901", { status: "active", origin: "fixture", body: GOAL_BODY });
+  assert.equal(active.branch, true);
+  assert.equal(run("rev-parse", "goal/GOAL-901").trim(), developTip, "forked from the CURRENT develop tip on activation");
+
+  // Idempotent: activating again neither errors nor re-points the branch.
+  s.write("GOAL-901", { status: "active", origin: "fixture", body: GOAL_BODY });
+  assert.equal(run("rev-parse", "goal/GOAL-901").trim(), developTip, "an existing branch is reused, ⛔ never re-pointed");
+
+  // The field is LOCKED once the branch exists (§4.1/§4.11) — flipping it would move the merge target
+  // under an in-flight task.
+  assert.throws(
+    () => s.write("GOAL-901", { branch: false, origin: "fixture", body: GOAL_BODY }),
+    /branch.*locked|locked once the branch/i,
+  );
+});
+
+test("goal branch — an UNDECLARED `branch` reads as false and no branch is ever created for it", () => {
+  const { run, goalsDir } = gitRepoWithDevelop("gb-default");
+  const s = createGoalStore(goalsDir, {});
+  seedAc(s, "GOAL-902");
+  const draft = s.write("GOAL-902", { title: "ordinary goal", status: "draft", origin: "fixture", body: GOAL_BODY });
+  assert.equal(draft.branch, false, "undeclared reads as false (缺省 = 现状)");
+  const active = s.write("GOAL-902", { status: "active", origin: "fixture", body: GOAL_BODY });
+  assert.equal(active.branch, false);
+  assert.equal(run("branch", "--list", "goal/GOAL-902").trim(), "", "a non-branch goal never gets a branch");
+});
+
+test("goal branch — retiring a branch-mode goal deletes the branch and leaves the tip SHA in the retired statusLog entry", () => {
+  const { run, goalsDir } = gitRepoWithDevelop("gb-discard");
+  const s = createGoalStore(goalsDir, {});
+  seedAc(s, "GOAL-903");
+  s.write("GOAL-903", { title: "branch-mode goal", status: "draft", origin: "fixture", body: GOAL_BODY, branch: true });
+  s.write("GOAL-903", { status: "active", origin: "fixture", body: GOAL_BODY });
+  const tip = run("rev-parse", "goal/GOAL-903").trim();
+
+  const retired = s.write("GOAL-903", { status: "retired", origin: "fixture", body: GOAL_BODY, reason: "direction abandoned" });
+  assert.equal(run("branch", "--list", "goal/GOAL-903").trim(), "", "§4.2: the branch is discarded on retire");
+  const entry = retired.statusLog[retired.statusLog.length - 1];
+  assert.equal(entry.to, "retired");
+  // The tip SHA is the ONLY rescue handle (git branch <name> <sha>) — it must be a full 40-char sha.
+  assert.ok(entry.reason.includes(tip), `reason must carry the discarded tip ${tip}: ${entry.reason}`);
+  assert.match(entry.reason, /\b[0-9a-f]{40}\b/);
+});

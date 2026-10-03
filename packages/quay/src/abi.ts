@@ -72,6 +72,12 @@ export interface GoalRecord {
   evidence?: { at?: string; verdict?: string; reading?: string };
   supersedes: string[];
   supersededBy: string[];
+  /** OPT-IN isolation declaration (SPEC-goal-branch-2026-10-03.md §4.1): `true` on a GOAL means its
+   *  tasks land on the DERIVED branch `goal/<id>` instead of directly on the landing baseline, so a
+   *  direction with a different maturity level stops mixing into `develop`. ⛔ The branch NAME is
+   *  never stored or caller-supplied — only this "open or not" gate is. Absent/false = today's
+   *  behavior. Locked once the branch exists (§4.11): a goal gets one branch history, no re-open. */
+  branch?: boolean;
   body: string;
   updatedAt?: number;
   /** Derived by the PROVIDER (never stored): whether this GOAL's own `status` field may no longer

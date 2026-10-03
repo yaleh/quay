@@ -1030,3 +1030,71 @@ test("the shipped entry relays the SAME marker the report prints (a rename must 
   assert.match(sh, /\*"\[FAILED\] baseline-checkout"\*\)/, "quay-init.sh must relay this exact token");
   assert.doesNotMatch(sh, /\*"\[NOOP\] baseline-checkout"\*\)/, "the success/no-op markers are not refusals");
 });
+
+// ── GOAL BRANCH role (SPEC-goal-branch-2026-10-03.md §4.1/§4.2) ───────────────────────────────────
+// The goal-branch primitives are the AC2 carrier for gap-goal-branch-data-model-and-lifecycle: the
+// create function forks `goal/<id>` from the CURRENT develop tip and is idempotent; the discard
+// function removes it. The store's ONE call site of each is exercised in goal-store.test.mjs — this
+// file tests the primitives directly, in a hermetic repo.
+import {
+  ensureGoalBranch,
+  discardGoalBranch,
+  goalBranchName,
+  goalBranchRefExists,
+  goalBranchTip,
+  goalIdFromBranchToken,
+} from "../src/branch-model.ts";
+
+test("goal branch — name is DERIVED (goal/<id>) and the token parser accepts only GOAL-<3+digits>", () => {
+  assert.equal(goalBranchName("GOAL-901"), "goal/GOAL-901");
+  assert.equal(goalIdFromBranchToken("goal/GOAL-901"), "GOAL-901");
+  assert.equal(goalIdFromBranchToken("goal/GOAL-9"), null, "fewer than 3 digits is not the vocabulary");
+  assert.equal(goalIdFromBranchToken("author"), null);
+  assert.equal(goalIdFromBranchToken("goal/AC-901"), null);
+});
+
+test("goal branch — create forks the CURRENT develop tip, is idempotent, and discard removes it", () => {
+  const dir = newRepo("goal-branch");
+  fs.writeFileSync(path.join(dir, "f.txt"), "x");
+  commit(dir, "seed");
+  git(dir, ["branch", "develop"]);
+  const base = git(dir, ["rev-parse", "develop"]);
+
+  assert.equal(goalBranchRefExists(dir, "GOAL-901"), false);
+  assert.equal(goalBranchTip(dir, "GOAL-901"), null);
+
+  const created = ensureGoalBranch(dir, "GOAL-901");
+  assert.equal(created.action, "created");
+  assert.equal(created.sha, base);
+  assert.equal(git(dir, ["rev-parse", "goal/GOAL-901"]), base, "forked from the develop tip");
+
+  // Idempotent: a second call reuses the ref and NEVER re-points it (a re-point would throw away
+  // landed work on the branch).
+  const reused = ensureGoalBranch(dir, "GOAL-901");
+  assert.equal(reused.action, "reused");
+  assert.equal(reused.sha, base);
+  assert.equal(git(dir, ["rev-parse", "goal/GOAL-901"]), base);
+
+  assert.equal(goalBranchRefExists(dir, "GOAL-901"), true);
+  assert.equal(goalBranchTip(dir, "GOAL-901"), base);
+
+  const del = discardGoalBranch(dir, "GOAL-901");
+  assert.equal(del.removed, true);
+  assert.equal(del.tipSha, base, "the discarded tip is returned — the rescue handle for the statusLog");
+  assert.equal(goalBranchRefExists(dir, "GOAL-901"), false);
+
+  const again = discardGoalBranch(dir, "GOAL-901");
+  assert.equal(again.removed, false, "discarding an absent branch is a NORMAL no-op, not an error");
+  assert.equal(again.tipSha, null);
+});
+
+test("goal branch — a repo with no resolvable develop withholds the verdict, never forks from HEAD", () => {
+  const dir = newRepo("goal-branch-nodev");
+  fs.writeFileSync(path.join(dir, "f.txt"), "x");
+  commit(dir, "seed"); // no `develop` branch exists
+  const r = ensureGoalBranch(dir, "GOAL-903");
+  assert.equal(r.action, "unreadable", "⛔ not 'blocked' — the input could not be read, not a refusal");
+  assert.equal(r.ok, true);
+  assert.equal(r.notEvaluated, true);
+  assert.equal(goalBranchRefExists(dir, "GOAL-903"), false, "nothing was created");
+});

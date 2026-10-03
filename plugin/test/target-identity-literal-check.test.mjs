@@ -196,3 +196,71 @@ test("CLI --root over the REAL repo: exit 0 (本仓库枚举归零 — AC2)", ()
   assert.equal(d.status, "pass");
   assert.equal(d.violations.length, 0, "本仓库必须枚举归零（DOC_BRANCH 残量已消除）");
 });
+
+// ── goal-branch token rule (SPEC-goal-branch-2026-10-03.md §4.8) ──────────────────────────────────
+// `goal/<GOAL-NNN>` is a DERIVED branch name, so a literal spelling one is legal ONLY while the GOAL
+// it names is a live branch-mode goal (exists ∧ `branch: true` ∧ not superseded/retired). An
+// unreadable goal store WITHHOLDS the verdict (exit 3) — ⛔ never admitted as legal (hard rule 3b).
+
+/** A temp root carrying a kernel fixture with a bare `goal/GOAL-901` literal + an optional goal store. */
+function goalBranchFixture({ status = "active", branch = "true", withGoals = true, record = true } = {}) {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "tid-goal-branch-"));
+  fs.mkdirSync(path.join(dir, "plugin", "scripts"), { recursive: true });
+  fs.writeFileSync(
+    path.join(dir, "plugin", "scripts", "fixture.ts"),
+    'export const GOAL_BRANCH = "goal/GOAL-901";\n',
+    "utf8",
+  );
+  if (withGoals) {
+    fs.mkdirSync(path.join(dir, "goals"), { recursive: true });
+    if (record) {
+      fs.writeFileSync(
+        path.join(dir, "goals", "GOAL-901-fixture.md"),
+        `---\nid: GOAL-901\nstatus: ${status}\nkind: goal\nbranch: ${branch}\norigin: fixture\n---\nbody\n`,
+        "utf8",
+      );
+    }
+  }
+  return dir;
+}
+
+test("goal-branch token: LEGAL while the GOAL is a live branch-mode goal (exit 0)", (t) => {
+  const dir = goalBranchFixture({ status: "active", branch: "true" });
+  t.after(() => fs.rmSync(dir, { recursive: true, force: true }));
+  const { result, stdout } = captureConsole(() => main(["--root", dir, "--json"]));
+  assert.equal(result, 0, stdout);
+  const d = JSON.parse(stdout);
+  assert.equal(d.status, "pass");
+  assert.equal(d.violations.length, 0);
+});
+
+test("goal-branch token: ILLEGAL once the GOAL is retired or superseded (its branch must be gone)", (t) => {
+  for (const status of ["retired", "superseded"]) {
+    const dir = goalBranchFixture({ status, branch: "true" });
+    t.after(() => fs.rmSync(dir, { recursive: true, force: true }));
+    const { result, stdout } = captureConsole(() => main(["--root", dir, "--json"]));
+    assert.equal(result, 1, `${status}: ${stdout}`);
+    const d = JSON.parse(stdout);
+    assert.equal(d.status, "fail", status);
+    assert.equal(d.violations.length, 1, status);
+    assert.equal(d.violations[0].value, "goal/GOAL-901", status);
+  }
+});
+
+test("goal-branch token: ILLEGAL when the GOAL is absent (readable store, no record) or not branch-mode", (t) => {
+  for (const opts of [{ record: false }, { branch: "false" }]) {
+    const dir = goalBranchFixture(opts);
+    t.after(() => fs.rmSync(dir, { recursive: true, force: true }));
+    const { result, stdout } = captureConsole(() => main(["--root", dir, "--json"]));
+    assert.equal(result, 1, `${JSON.stringify(opts)}: ${stdout}`);
+    assert.equal(JSON.parse(stdout).violations.length, 1, JSON.stringify(opts));
+  }
+});
+
+test("goal-branch token: an UNREADABLE goal store withholds the verdict (exit 3, never 'legal')", (t) => {
+  const dir = goalBranchFixture({ withGoals: false }); // no `goals/` dir at all
+  t.after(() => fs.rmSync(dir, { recursive: true, force: true }));
+  const { result, stdout } = captureConsole(() => main(["--root", dir, "--json"]));
+  assert.equal(result, 3, stdout);
+  assert.equal(JSON.parse(stdout).status, "not-evaluated");
+});

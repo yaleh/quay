@@ -396,12 +396,17 @@ Environment contract — when the default 'acceptance' gate spawns a command:
 Usage:
   quay goal list [--status <status>] [--kind <kind>] [--goal <goal-id>] [--json] [--root <path>]
   quay goal show <id> [--json] [--root <path>]
-  quay goal write <id> --origin <text> [--title <title>] [--status <status>] [--goal <goal-id>] [--criterion <cmd>] [--json] [--root <path>]
+  quay goal write <id> --origin <text> [--title <title>] [--status <status>] [--goal <goal-id>] [--criterion <cmd>] [--branch true|false] [--json] [--root <path>]
   quay goal gate <id> [--timeout <ms>] [--dry-run] [--json] [--root <path>]
   quay goal check [--staleness|--achieved-failing|--stale-pass [--sweep]|--reverify-scope] [--json] [--root <path>]
   quay goal batch --json '<array-of-records>' [--root <path>]
 
   list / show / write   Read and write records through the Provider ABI (SPEC-goal-mechanism §5.2).
+                        write --branch true|false  Opt a GOAL into its own isolation branch
+                        (SPEC-goal-branch §4.1). The branch NAME is DERIVED — 'goal/<GOAL-NNN>' —
+                        ⛔ never a flag. It is created lazily from the develop tip when the goal
+                        becomes active, and discarded (tip SHA recorded in statusLog) when the goal
+                        is retired/superseded. The field is LOCKED once the branch exists.
   gate <id>             Run the record's 'criterion' via the acceptance runner and append ONE
                         GateEvent to <root>/.quay/gate-events.jsonl. Exit 0 = pass, 1 = fail,
                         2 = usage (no such record / bad args). An EMPTY criterion fails closed.
