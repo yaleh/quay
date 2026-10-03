@@ -2070,7 +2070,7 @@ export function standingReverifyAcs(
  *  它的真值（真值等的是世界/人的动作）⇒ 每轮空转一个名额。三个取值互不同形（硬规则 3b）：
  *    · `verdicts.get(ac) === "not-evaluated"` ⇒ `state: "not-evaluated"`、`taskCount: null`
  *      （⛔ 不与 `workable` 同形；`isFilingGapState` 为 false ⇒ 不 spawn）。
- *    · `"fail"` / 读不到（`nil`/map 无此项）⇒ **回落今日行为**（按判据载体分类）——⛔ 缺值 ≠ 为假
+ *    · `"fail"` / 读不到（`null`/map 无此项）⇒ **回落今日行为**（按判据载体分类）——⛔ 缺值 ≠ 为假
  *      （硬规则 6），不得静默变成「查不成 ⇒ 不立案」。
  *    · `"pass"` 到不了这里：pass 1 已把 `verdict==="pass" && status==="active"` 的 AC 机械翻 achieved
  *      （下面的 `status !== "active"` 已跳过它）。
