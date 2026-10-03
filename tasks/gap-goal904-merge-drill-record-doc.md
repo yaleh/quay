@@ -54,6 +54,18 @@ AC3：**分支提交完成时**（doc 提交 + 本任务文件的勾选提交，
 
 本任务 worktree 本轮复核：`bash scripts/test.sh --for-task gap-goal904-merge-drill-record-doc --allow-thin` ⇒ exit 0；scoped-gate cache 以 develop sha `1aec2bd8b` 写入。
 
+### 本轮复核（2026-10-04）：develop 全量 suite 的三簇常红（不在本任务 delta）
+
+本轮 `bash scripts/test.sh --for-task gap-goal904-merge-drill-record-doc --allow-thin` ⇒ exit 0（selector 选 0 个测试文件，thin allowed）；scoped-gate cache 以 develop sha `5c4631db8` 写入。AC1/AC2/AC3 复跑均成立（AC3 现列出单文件 `docs-managed/DOC-904-…md`，为允许两文件的子集）。
+
+但机械 fan-in 的全量 suite 在 **develop（`5c4631db8`）自身字节**上常红 **9 条**（+ `ready-pool-check-s22` 计时 flake 1 条），**三簇均与本任务 delta（一份 `docs-managed/` 文档）无关**，已在 worktree（内容 == develop）逐个复现：
+
+1. `packages/quay/test/ac322-criterion-catchup.test.mjs` 5 红 —— AC-322 判据 2026-10-03T15:42Z（`d5c3df8d0`）改为祖先关系版后，`live_goals()` 要求 goal frontmatter 含 `activatedAt:`，夹具 `writeGoal()` 不写 ⇒ `live_goals()` 恒空 ⇒ `checked=0` ⇒ 恒 exit 3；同时该测试仍期待被删去的 `NOT-EVALUATED: no goal record carries branch: true yet`。
+2. `plugin/test/worker-driver.test.mjs` 1 红（goal-merge e2e AC-327）—— 同源：`makeGoalMergeRepo()` 的 `goals/GOAL-901-*.md` 有 `branch: true` 无 `activatedAt:` ⇒ AC-327 exit 3（期待 0）。
+3. `plugin/test/live-web-address.test.mjs` 3 红 —— AC-904 判据（2026-10-04T00:15Z，`1aec2bd8b`）调用 `plugin/scripts/live-web-address.ts`，被语料谓词 `criterion.includes("live-web-address.ts")` 收进「17 条」语料（实得 18）；且其语义在合成夹具 `enPage()` 上不可满足、拒绝词不匹配 mutant arm。
+
+⇒ 三簇均需改**测试夹具/语料**（非本任务 delta；也非判据本身必错）。本任务受 AC3（delta 仅 DOC-904 + 任务文件）约束，不得夹带，故在 develop 修好这三簇前无法变绿。已单独立任务 `gap-goal-criterion-rewrite-stale-test-fixtures` 收口。⛔ 下一轮请勿重复实现本任务 delta——本任务实现早已完成（AC 全勾、scoped 门绿）。
+
 ## Touches
 
 - docs-managed/DOC-904-goal-branch-merge-drill-record.md
