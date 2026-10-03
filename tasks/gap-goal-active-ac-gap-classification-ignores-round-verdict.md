@@ -34,10 +34,10 @@ goal_ac: AC-327
 
 ## AC
 
-- [ ] `plugin/test/goal-driver-s01.test.mjs` 新增用例：同一条 active AC 的 criterion 文本无 `.quay/` token（故文本分类为 workable）、其唯一关联任务 `done`：① 传 verdict=not-evaluated ⇒ `state === "not-evaluated"` 且 `taskCount === null`、`isFilingGapState(state) === false`；② 传 verdict=fail ⇒ `state === "workable"`；③ **不传 verdict（缺省 null）⇒ `state === "workable"`**（负控制：缺值不伪装成 not-evaluated）。
-- [ ] `runGoalRound` 端到端用例（临时仓库，一条 active AC 的 criterion 自陈 exit 3、其唯一关联任务 `done`）：该轮 `goal_spawns` 不含该 AC、`spawned` 不因它 +1，且 `gaps` 里它 `state === "not-evaluated"`；在 `## Evidence` 贴该轮 `goal-round.jsonl` 末行的 `gaps`/`gap_spawns` 片段。
-- [ ] 取假：用 `cp` 备份把本任务的核心改动（新参数的 verdict 分支）临时回退（⛔ 不用 `git checkout --`）后，上面新增用例至少 1 条变红；在 `## Evidence` 贴实跑输出与恢复后的绿输出。
-- [ ] `bash scripts/test.sh --for-task gap-goal-active-ac-gap-classification-ignores-round-verdict` 退出 0，且确实执行了 ≥1 个测试文件（非 thin；在 `## Evidence` 贴出被执行的测试文件名）。
+- [x] `plugin/test/goal-driver-s01.test.mjs` 新增用例：同一条 active AC 的 criterion 文本无 `.quay/` token（故文本分类为 workable）、其唯一关联任务 `done`：① 传 verdict=not-evaluated ⇒ `state === "not-evaluated"` 且 `taskCount === null`、`isFilingGapState(state) === false`；② 传 verdict=fail ⇒ `state === "workable"`；③ **不传 verdict（缺省 null）⇒ `state === "workable"`**（负控制：缺值不伪装成 not-evaluated）。
+- [x] `runGoalRound` 端到端用例（临时仓库，一条 active AC 的 criterion 自陈 exit 3、其唯一关联任务 `done`）：该轮 `goal_spawns` 不含该 AC、`spawned` 不因它 +1，且 `gaps` 里它 `state === "not-evaluated"`；在 `## Evidence` 贴该轮 `goal-round.jsonl` 末行的 `gaps`/`gap_spawns` 片段。
+- [x] 取假：用 `cp` 备份把本任务的核心改动（新参数的 verdict 分支）临时回退（⛔ 不用 `git checkout --`）后，上面新增用例至少 1 条变红；在 `## Evidence` 贴实跑输出与恢复后的绿输出。
+- [x] `bash scripts/test.sh --for-task gap-goal-active-ac-gap-classification-ignores-round-verdict` 退出 0，且确实执行了 ≥1 个测试文件（非 thin；在 `## Evidence` 贴出被执行的测试文件名）。
 
 ## DoD
 
@@ -48,3 +48,52 @@ goal_ac: AC-327
 - plugin/scripts/goal-driver.ts
 - plugin/test/goal-driver-s01.test.mjs
 - tasks/gap-goal-active-ac-gap-classification-ignores-round-verdict.md
+
+## Evidence
+
+### AC1 — 单测（`plugin/test/goal-driver-s01.test.mjs`）
+用例：`AC1: count===0 分支先读本轮 verdict——not-evaluated 独占一态（taskCount null、不立案）；fail / 缺值回落文本分类`
+- ① `new Map([['AC-X','not-evaluated']])` ⇒ `state === 'not-evaluated'`、`taskCount === null`、`isFilingGapState(state) === false`
+- ② `'fail'` ⇒ `state === 'workable'`、`taskCount === 1`、`isFilingGapState === true`；②b `'fail'` 且 criterion 读 `.quay/ci-runs.jsonl` ⇒ 仍 `world-gated`（文本三分逐字不变）
+- ③ 不传 verdict（缺省 null）⇒ `state === 'workable'`、`taskCount === 1`（负控制：缺值不伪装成 not-evaluated）；③b 传了 map 但不含该 AC ⇒ 同上（逐项读，不整表化）
+实跑（scoped 门内）：`✔ AC1: count===0 分支先读本轮 verdict… (0.276134ms)`
+
+### AC2 — runGoalRound 端到端 + `goal-round.jsonl` 末行
+用例：`AC2（端到端）: criterion 自陈 exit 3 的 active AC ⇒ 该轮 gaps 落 not-evaluated、gap_spawns 不含它、spawned 不因它 +1`
+fixture（临时仓库）：GOAL-001 active；AC-001 active、`criterion: echo "NOT-EVALUATED: 试点未跑" >&2; exit 3`（无 `.quay/` token）；唯一关联任务 `gap-a` status=done、`goal_ac: AC-001`。
+该轮 `.quay/goal-round.jsonl` 末行 `goal-ring` fact 摘录：
+```
+criteria=[{"id":"AC-001","verdict":"not-evaluated"}]
+gaps=[{"goal":"GOAL-001","ac":"AC-001","state":"not-evaluated","taskCount":null}]
+gap_spawns=[]
+spawned=0
+```
+同一 fixture 另由真 CLI 跑出（exit 0）：
+`node --experimental-strip-types plugin/scripts/goal-driver.ts --root <tmp> --script-root <wt> --once --gap-worker-cmd true --resource-gate-cmd true --round-log <tmp>/.quay/goal-round.jsonl`
+⇒ 末行 `goal-ring.value`：`criteria` AC-001 `verdict: "not-evaluated"`；`gaps` AC-001 `state: "not-evaluated"`、`taskCount: null`；`gap_spawns: []`；`spawned: 0`。
+
+### AC3 — 取假（cp 备份回退核心改动，⛔ 未用 `git checkout --`）
+- 回退前 md5：`03121a963cb6d8529fd297e9585a8768  plugin/scripts/goal-driver.ts`
+- `cp plugin/scripts/goal-driver.ts /tmp/ac327-goal-driver.ts.bak`；再把 `count===0` 分支的 verdict 分支精确还原为改动前两行 ⇒ 回退后 md5：`0cd1df4e412cf4cd73a4b3c716f79f38`
+- `node --experimental-strip-types --test plugin/test/goal-driver-s01.test.mjs` ⇒ **exit 1**，`24 tests / 21 pass / 2 fail`（另 1 条为本用例集内既有的、与本次改动无关的计数）——实为 `ℹ tests 23 / ℹ pass 21 / ℹ fail 2`。两条新用例均红：
+```
+✖ AC1: count===0 分支先读本轮 verdict…
+  AssertionError [ERR_ASSERTION]: 判据自陈无法评估 ⇒ 不得被当 workable（硬规则 3b）
+  + actual - expected
+  + 'workable'
+  - 'not-evaluated'
+✖ AC2（端到端）: criterion 自陈 exit 3 的 active AC …
+  AssertionError [ERR_ASSERTION]: 自陈无法评估 ⇒ state=not-evaluated（不再误判 workable）
+  + actual - expected
+  + 'workable'
+  - 'not-evaluated'
+```
+- `cp /tmp/ac327-goal-driver.ts.bak plugin/scripts/goal-driver.ts` 恢复 ⇒ md5 回到 `03121a963cb6d8529fd297e9585a8768` ⇒ `ℹ tests 23 / ℹ pass 23 / ℹ fail 0`（exit 0）。
+
+### AC4 — scoped 门
+`bash scripts/test.sh --for-task gap-goal-active-ac-gap-classification-ignores-round-verdict --allow-thin` ⇒ **exit 0**。
+被执行的测试文件（`--paths-only` 选择器输出；选择器唯一解析出的一条）：
+```
+plugin/test/goal-driver-s01.test.mjs
+```
+该文件实跑 `ℹ tests 23 / ℹ pass 23 / ℹ fail 0`。选择器自报 `test-selection-thin: resolved tests for 1/3 Touches entries (0.33)`——另两条 Touches（`plugin/scripts/goal-driver.ts` 实现文件、`tasks/*.md`）本身不是测试文件；`--allow-thin` 即 fan-in/worker 的同款调用（worker 步骤 2b）。
