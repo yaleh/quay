@@ -13,7 +13,7 @@ extra:
 
 ## Proposal
 
-背景（实测 2026-10-03，词法扫描 396 个非测试 .ts）：仓库里出现 83 个持久载体名（*.jsonl，以及 *-control/state/desired/takeover.json、anchor.json、server.json、full-suite-state.json 这几类 .json）。进程之间没有 RPC，耦合全经这些文件，静态 import 图看不见它们。只有 14 个在 plugin/scripts/driver-runtime.ts 的 DRIVER_KINDS 里有声明所有者（且其中 4 个的所有者源码里根本不出现该字面量，路径经 registry/argv 传入）；其余 69 个没有任何声明式所有者；24 个载体有 ≥2 个「可写方候选」（只是上界：非注释代码提到该载体且文件内有任一写 API，不代表真写）。结果是「谁写谁读」只能靠词法猜，架构不可观测。
+背景（实测 2026-10-03，词法扫描 396 个非测试 .ts）：仓库里出现 84 个持久载体名（*.jsonl，以及 *-control/state/desired/takeover.json、anchor.json、server.json、full-suite-state.json 这几类 .json）。进程之间没有 RPC，耦合全经这些文件，静态 import 图看不见它们。只有 14 个在 plugin/scripts/driver-runtime.ts 的 DRIVER_KINDS 里有声明所有者（且其中 4 个的所有者源码里根本不出现该字面量，路径经 registry/argv 传入）；其余 70 个没有任何声明式所有者；26 个载体有 ≥2 个「可写方候选」（只是上界：非注释代码提到该载体且文件内有任一写 API，不代表真写）。结果是「谁写谁读」只能靠词法猜，架构不可观测。（注：初版读数 83 / 69 / 24 偏低，原因是扫描器的注释剥离用了朴素正则，被字符串里的 `/*` 与后面的 `*/` 错配，吞掉了其间的真实代码；已改用词法状态机重测得 84 / 70 / 26。DRIVER_KINDS 声明的 14 个不变。）
 
 <!-- dedup-ref -->
 相关但机制不同：DRIVER_KINDS.carriers 是 6 个 driver 的局部声明；goal-025 的 import-graph 仪器只看 import 边。本任务做**全局、仅声明**的注册表，**不改任何写者/读者行为**（零行为风险，先让结构可被机器读出）。
