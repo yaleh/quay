@@ -1,7 +1,7 @@
 ---
 id: AC-325
 title: 人工并入：每个 goal 合并提交先有人工并入请求，且 goal 的 achieved 晚于并入
-status: draft
+status: active
 kind: criterion
 goal: GOAL-028
 criterion: >-
@@ -77,4 +77,15 @@ expect: exit 0 = develop first-parent 上每个 subject 含 goal/GOAL-NNN 的合
 origin: 人 2026-10-01「为 goal 提供一个单独的 branch」→ 三轮讨论成文
   orchestration/SPEC-goal-branch-2026-10-03.md（d4b7ca1c2，裁定①–㉓）；人
   2026-10-03「按上面的建议，新建一个 GOAL，同时手工预先立好 §10 的任务」。
+activatedAt: 2026-10-03T08:26:42.755Z
+statusLog:
+  - at: 2026-10-03T08:26:42.755Z
+    from: draft
+    to: active
+    actor: goal-driver
+    reason: "triage: activate"
+fidelity:
+  verdict: faithful
+  reason: "fidelity judge: faithful"
+  at: 2026-10-03T08:26:42.754Z
 ---
