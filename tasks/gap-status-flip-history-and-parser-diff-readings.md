@@ -2,7 +2,7 @@
 id: gap-status-flip-history-and-parser-diff-readings
 title: 取证读数：git 历史状态翻转对照 TRANSITIONS（17.7% 表外，缺的是 needs-human/superseded 边）+ 两份
   Task 解析器在全部任务文件上零分叉
-status: todo
+status: ready
 labels:
   - gap
 parent: null
