@@ -26,13 +26,28 @@ extra:
 
 ## AC
 
-- [ ] 改动后 `node --test packages/quay/test/ac322-criterion-catchup.test.mjs` 全 pass。
-- [ ] 改动后 `node --test plugin/test/worker-driver.test.mjs` 全 pass。
-- [ ] 改动后 `node --test plugin/test/live-web-address.test.mjs` 全 pass。
+- [x] 改动后 `node --test packages/quay/test/ac322-criterion-catchup.test.mjs` 全 pass。
+- [x] 改动后 `node --test plugin/test/worker-driver.test.mjs` 全 pass。
+- [x] 改动后 `node --test plugin/test/live-web-address.test.mjs` 全 pass。
 
 ## DoD
 
 develop 上直跑上述三个测试文件全绿，使 `gap-goal904-merge-drill-record-doc`（及任何 code-delta 任务）的机械 fan-in 不再被这三簇常红阻塞。
+
+## Evidence
+
+选【测试侧】（Proposal 的倾向）：三簇夹具都确实缺新判据要求的前置，且判据侧改动须动 `goals/*.md`（本任务 Touches 未含）。三个文件逐个验证全绿（在工作树 `gap-goal-criterion-rewrite-stale-test-fixtures`，merge develop `9082f8c8d` 后）：
+
+- `node --test packages/quay/test/ac322-criterion-catchup.test.mjs` ⇒ `tests 6 / pass 6 / fail 0`。
+- `node --test plugin/test/worker-driver.test.mjs` ⇒ `tests 118 / pass 118 / fail 0`。
+- `node --test plugin/test/live-web-address.test.mjs` ⇒ `tests 17 / pass 17 / fail 0`。
+- scoped 门 `scripts/test.sh --for-task gap-goal-criterion-rewrite-stale-test-fixtures --allow-thin` ⇒ `tests 141 / pass 141 / fail 0`；选择面含 `packages/quay/test/ac322-criterion-catchup.test.mjs`、`plugin/test/live-web-address.test.mjs` 与 worker-driver 的 goal-merge e2e。
+
+三簇各自的修法（均为夹具补齐 + 期待对齐，未改判据）：
+
+1. **ac322**：`writeGoal()` 补 `activatedAt:`（`live_goals()` 新前置）；pass 臂改用生产形态（SPEC-goal-branch §4.7 裁定⑲）的 `git merge --no-ff goal/<id>` 落地——`goal_merges()` 只认 develop 上具名 `goal/<id>` 的合并提交，`classify()` 据此判 `via`（旧夹具用 `--ff-only` 直落 develop，无合并提交 ⇒ 判 `direct` ⇒ 落地不计入、恒 exit 3）。另在 develop 合并前补一次 `settle()`：判据的 `dev_at()` 经 `git reflog show --date=unix` 读【秒级】tip，若合并提交与追平 merge 同秒，`dev_at` 会取到落地【之后】的 tip 而误报 CAUSE（fixture artifact，非真漏追平——实测 1791046177 同秒命中）。被删的旧消息 A 的四处期待改为新读数 B（`no goal-branch landing could be checked…`），并 pin 新前置 `activatedAt:`。
+2. **worker-driver**：`makeGoalMergeRepo()` 的 GOAL-901 补 `activatedAt:`（回拨 5 分钟）；并按 AC-327 改写后新增的「至少一条可归因于该次 merge 的 `via` 落地，否则 exit 3（zero would be vacuous）」补齐语料——base 提交上加 `goals/AC-901-*.md`（`goal: GOAL-901`，`phase: post-merge` 以免 `recordGoalMergeRequest` 的 pre-merge AC 闸拒绝）与 `tasks/TT-901.md`（`goal_ac: AC-901`），goal 分支上加逐字 subject `tasks: 翻 TT-901 done（driver 机械 fan-in）` 的翻转提交。Proposal 第 2 条只记到 `activatedAt:` 一处即可解除——补齐后实测：仅补 `activatedAt:` 会由 `merged=0` 的 exit 3 换成 `via=0` 的 exit 3（同码不同因），故语料一并补齐。
+3. **live-web-address**：语料谓词 `criterion.includes("live-web-address.ts")` 是活的（收进一切调用该助手的判据），AC-904 增设后实得 18 ⇒ 计数 17→18（标题/断言/`codes.length` 同步）。夹具 HTTP server 对 `GET /doc` 追加 `<div id="doc-index">DOC-904</div>`（在 `<nav>` 之外，17 条的 nav/title 断言不受影响）使 real arm 可评估；mutant 拒绝词白名单补 AC-904 的措辞 `no live web address for`。
 
 ## Touches
 
