@@ -209,3 +209,5 @@ branch: true
 
 
 夹具的**持久取用点**（⛔ 不依赖 worktree 目录是否还在）：分支 `task/gap-ac322-goal-branch-catchup-landing-real-reading` 的提交 26b71a089 已提交该文件，可 `git -C /data/home/yale/work/quay show task/gap-ac322-goal-branch-catchup-landing-real-reading:packages/quay/test/ac322-criterion-catchup.test.mjs` 取全文；同分支的后续提交 72126e488 是它与 develop 的合并。若该分支已被回收，按本任务 `## Evidence` 的「AC4」节规格重写（判据文本运行时从 goals/AC-322-*.md 提取，⛔ 不抄）。
+
+**② 的「复用已存在的 branch-mode goal」条款：执行时确实命中，但复用结构上不可能——记录在案。** 立案时 `grep -l "^branch: true" goals/GOAL-*.md` 为 0；执行时已为 1：AC-326 的 drill 已先跑，留下 `GOAL-901`（`branch: true`，`status: retired`，`goal/GOAL-901` 已被 `discardGoalBranch` 删除）。复用它需要「该 goal 名下 AC 对应的任务落到其分支上」，而：① 它的分支必须**保持不存在**——`goals/AC-901-*.md` 的判据（AC-326，`status: achieved`）明确以 `CAUSE=goal-branch-still-exists ⇒ exit 1` 钉死这一点，重建 `goal/GOAL-901` 会**打破一个已 achieved 的 AC**；② 分支不存在时判据的 `goal_refs` 退化为只查 develop，落地退化成一次普通 develop 落地，**不经过任何 goal 分支**，AC1① 要的「步骤 3 当时的 goal 分支 SHA」无从取得（`GOAL-901` 的 tip 只作为 rescue handle 留在 statusLog 里，那是 AC-326 那次动作的产物，不是本任务的动作）。⇒ 复用不可行，遂按本题 ① 的主配方新建 `GOAL-902`（并已按 ② 收尾丢弃，`git branch --list "goal/*"` 为空）。若人认为此处应改用别的处置（例如等一个有活分支的真实试点），本题该被 superseded。
