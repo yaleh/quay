@@ -907,12 +907,18 @@ function ledgerTailVerdict(ac: Record<string, unknown>): string | null {
   return typeof v === "string" ? v : null;
 }
 
-/** 关闭阻塞三态词表（⛔ 加态即改 AC-242 之外的判据集合）：
- *  clear             台账可读且该 GOAL 名下没有「achieved ∧ 尾 fail ∧ 未声明 long-term」的 AC ⇒ 放行关闭；
+/** 关闭阻塞四态词表（⛔ 加态即改 AC-242 之外的判据集合）：
+ *  clear             台账可读且该 GOAL 名下没有「achieved ∧ 尾 fail ∧ 未声明 long-term」的 AC，
+ *                    且 branch-mode goal 的分支已并入（或不存在）⇒ 放行关闭；
  *  blocked-failing-ac 存在这样的 AC（枚举在 `acs`）⇒ 关闭被拒；
  *  not-evaluated     台账读不到（成因在 `cause`）⇒ 关闭被拒（⛔ 不与 clear 同形，硬规则 3b：
- *                    读不懂输入不得返回与合格同形的值——否则删掉台账就能把任何红 AC 静默冻结）。 */
-export type GoalCloseBlockVerdict = "clear" | "blocked-failing-ac" | "not-evaluated";
+ *                    读不懂输入不得返回与合格同形的值——否则删掉台账就能把任何红 AC 静默冻结）；
+ *  blocked-unmerged-branch branch-mode goal 的 `goal/<id>` 仍存在且不是 `develop` 的祖先
+ *                    （分支 tip 枚举在 `branchTip`）⇒ 关闭被拒
+ *                    （gap-goal-branch-goal-flips-achieved-before-its-branch-merges：并入之前
+ *                    不许把 goal 翻成 achieved——提前 achieved 会让 `quay goal merge` 因
+ *                    「只允许 active」拒绝，分支永远并不进去的死结）。 */
+export type GoalCloseBlockVerdict = "clear" | "blocked-failing-ac" | "not-evaluated" | "blocked-unmerged-branch";
 
 /** not-evaluated 的成因（⛔ 两种成因仍都是 not-evaluated，只是【可区分】——硬规则 3b /
  *  cause-carrier-must-be-distinguishable）：
@@ -974,6 +980,59 @@ export function goalCloseBlockFromRecords(
     .sort();
   if (acs.length > 0) return { verdict: "blocked-failing-ac", acs, cause: null };
   return { verdict: "clear", acs: [], cause: null };
+}
+
+/** `git` 的退出码探针（⛔ 与 `gitIn` 分开：`merge-base --is-ancestor` 的 exit 1「不是祖先」与
+ *  exit ≥2「git 报错」是【两个方向】，折进 `ok` 布尔会把前者伪装成后者或反之，硬规则 3b）。
+ *  返回 `null` = spawn 失败（git 不可用）；否则为进程退出码。 */
+function gitExit(cwd: string, args: string[]): number | null {
+  const r = spawnSync("git", ["-C", cwd, ...args], { encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] });
+  if (r.error) return null;
+  return r.status;
+}
+
+/** `goal/<id>` 分支的并入态读数（gap-goal-branch-goal-flips-achieved-before-its-branch-merges）。
+ *
+ *  缺陷（2026-10-04 GOAL-904 合并演练，生产直接量）：branch-mode goal 的 `achieved` 翻转
+ *  （`goalFlipDecision` + `writeGoalStatus(…"achieved"…)`）只看 I2（全部 AC achieved）与 sufficiency
+ *  （covered），**不看它的 goal 分支是否已并入 develop**。`orchestration/SPEC-goal-branch-2026-10-03.md`
+ *  §4.7 的生命周期是「pre-merge AC 全部达成 → 人触发并入 → 并入后再判 post-merge AC → achieved」，
+ *  它默认 goal 至少带一条 post-merge AC；一个 AC 全是 pre-merge 的 branch-mode goal 在并入之前就满足
+ *  I2 与 sufficiency ⇒ 被提前翻成 `achieved`，随后 `quay goal merge` 因 `goal-not-active` 被拒
+ *  ⇒ 分支永远并不进去的死结（`goal-merge.ts` 只允许 active）。
+ *
+ *  三态（硬规则 3b：⛔ 不折成布尔）：
+ *    unmerged       分支存在且不是 `develop` 的祖先（带分支名与 tip sha）⇒ 关闭前置【拦】；
+ *    settled        非 branch-mode / 分支不存在（从未创建或并入后已删）/ 已是 `develop` 的祖先
+ *                   ⇒ 不拦（与本次改动前的行为逐字一致）；
+ *    not-evaluated  `develop` 引用解析不出（或 git 不可用）⇒ 不拦，但取值与 settled【不同形】——
+ *                   不把「读不出」伪装成「查过且已并入」。判定与消费分开：本函数只如实分类，
+ *                   消费方（runGoalRound）决定不拦（保留改动前的放行方向，避免在无 develop 的
+ *                   仓库里凭空造出一个新死结）。
+ *  ⛔ 只读 git 引用；⛔ 只对 `goal.branch === true` 的 goal 探分支（非 branch-mode 结构上直接 settled）。 */
+export type GoalBranchMergeState =
+  | { state: "unmerged"; branch: string; tip: string }
+  | { state: "settled" }
+  | { state: "not-evaluated"; reason: string };
+
+export function goalBranchMergeState(root: string, goal: Record<string, unknown>): GoalBranchMergeState {
+  if (goal.branch !== true) return { state: "settled" };
+  const goalId = String(goal.id ?? "");
+  if (!goalBranchRefExists(root, goalId)) return { state: "settled" };
+  // `develop` 必须先能解析：`merge-base --is-ancestor <branch> <missing-ref>` 以 exit ≥2 结束，与
+  // 「确实不是祖先」的 exit 1 若共用「非零 ⇒ 非祖先」的读法，就会在无 develop 的仓库里凭空拦下
+  // 每一个 branch-mode goal（一个新死结）。先探 develop，把「读不出」独立成 not-evaluated。
+  if (gitExit(root, ["rev-parse", "--verify", "--quiet", "develop^{commit}"]) !== 0) {
+    return { state: "not-evaluated", reason: "develop ref unresolved" };
+  }
+  const branch = goalBranchName(goalId);
+  const code = gitExit(root, ["merge-base", "--is-ancestor", branch, "develop"]);
+  if (code === 0) return { state: "settled" }; // exit 0 = 是祖先（已并入）
+  if (code !== 1) return { state: "not-evaluated", reason: `merge-base exit ${code === null ? "spawn-error" : code}` };
+  // exit 1 = 不是祖先。分支在两次 git 调用之间消失（并发删除）⇒ 再次确认 tip 可读，读不出视同不存在。
+  const tip = goalBranchTip(root, goalId);
+  if (tip === null) return { state: "settled" };
+  return { state: "unmerged", branch, tip };
 }
 
 /** 一个被抽出的节：`heading` = 标题行去掉前导 `##`/空白后的**逐字**文本（含标题自带的后缀限定语，
@@ -3244,11 +3303,15 @@ export interface GoalRoundReadings {
   /** 本轮 driver 做的全部状态翻写：I2 达成翻转（to=achieved）+ ⑧ 分诊 activate 执行（to=active）。
    *  ⛔ 分诊不翻其余三态（re-anchor / needs-human / hold 只落痕，AC-219）。 */
   flips: Array<{ id: string; to: string; ok: boolean; reason: string }>;
-  /** 关闭前置读数（gap-goal-closure-freezes-failing-ac-outside-reverify-scope）：每条 active GOAL 一条
-   *  `{goal, verdict, acs, cause}`。verdict ∈ 三态 clear / blocked-failing-ac / not-evaluated（⛔ 三态
-   *  互不同形：blocked 带被点名 AC 清单、not-evaluated 带台账成因、clear 两者皆空）。空数组 = 本轮无
-   *  active GOAL——「查过且零条」与「未跑该判定」按字段存在性区分（硬规则 3b）。 */
-  closeBlocks: Array<{ goal: string; verdict: GoalCloseBlockVerdict; acs: string[]; cause: GoalCloseBlockCause | null }>;
+  /** 关闭前置读数（gap-goal-closure-freezes-failing-ac-outside-reverify-scope；branch 半边
+   *  gap-goal-branch-goal-flips-achieved-before-its-branch-merges）：每条 active GOAL 一条
+   *  `{goal, verdict, acs, cause}`（blocked-unmerged-branch 时多一个 `branchTip`）。verdict ∈ 四态
+   *  clear / blocked-failing-ac / not-evaluated / blocked-unmerged-branch（⛔ 互不同形：blocked-failing-ac
+   *  带被点名 AC 清单、not-evaluated 带台账成因、blocked-unmerged-branch 带分支 tip、clear 三者皆空）。
+   *  空数组 = 本轮无 active GOAL——「查过且零条」与「未跑该判定」按字段存在性区分（硬规则 3b）。
+   *  ⚠️ `branchTip` 是【可选键】：非 blocked-unmerged-branch 的条目与本次改动前的形状逐字相同
+   *  （既有消费方按四键 deepEqual 的判据不受影响）。 */
+  closeBlocks: Array<{ goal: string; verdict: GoalCloseBlockVerdict; acs: string[]; cause: GoalCloseBlockCause | null; branchTip?: string }>;
   /** I3 三桶 + I4 分歧；null = check --staleness 读不到（⛔ 与「零 stale」不同形，硬规则 3b）。
    *  scopeSize = 枚举出的 active goal 数（作用域规模）；evaluated = scopeSize > 0。0 active goal ⇒
    *  evaluated:false、scopeSize:0——空作用域与「查过且全过」按字段区分（⛔ 同形，硬规则 3b）。 */
@@ -3671,8 +3734,22 @@ export async function runGoalRound(root: string, opts: GoalRoundOptions = {}): P
     // ⛔ 追加前置（gap-goal-closure-freezes-failing-ac-outside-reverify-scope）：上述两项都满足也**不得**
     // 在该 GOAL 名下有「achieved ∧ 台账尾 fail ∧ 未声明 long-term」的 AC 时关闭——否则该 AC 随 GOAL 离开
     // 每轮 gate 循环，其失败被永久冻结在复验域之外，且 AC-241 结构上永不通过。
+    // ⛔ 第二条追加前置（gap-goal-branch-goal-flips-achieved-before-its-branch-merges）：branch-mode goal
+    // 的分支仍存在且不是 develop 的祖先 ⇒ 同样不得关闭（并入之前 achieved 会让 `quay goal merge` 因
+    // 「只允许 active」拒绝 ⇒ 分支永远并不进去的死结）。⛔ 只读 git 引用，⛔ 不动 I2 / sufficiency 判据。
     const closeBlock = goalCloseBlockFromRecords(records, gid, ledger);
-    closeBlocks.push({ goal: gid, verdict: closeBlock.verdict, acs: closeBlock.acs, cause: closeBlock.cause });
+    const branchMerge = goalBranchMergeState(dataRoot, goal);
+    const unmerged = branchMerge.state === "unmerged" ? branchMerge : null;
+    closeBlocks.push({
+      goal: gid,
+      // 台账判定优先（既有读数形状与语义逐字保留）：台账非 clear ⇒ 报台账成因；台账 clear 而分支未并入
+      // ⇒ 报 blocked-unmerged-branch。两者同时成立时台账成因更可操作（点名具体红 AC），且这样退回改动
+      // 不改变既有判据读到的任何一条 closeBlock 取值。
+      verdict: closeBlock.verdict !== "clear" ? closeBlock.verdict : unmerged !== null ? "blocked-unmerged-branch" : "clear",
+      acs: closeBlock.acs,
+      cause: closeBlock.cause,
+      ...(unmerged !== null ? { branchTip: unmerged.tip } : {}),
+    });
     if (goal.status === "active" && goalFlipDecision(records, gid, { verdict: sufficiency })) {
       if (closeBlock.verdict !== "clear") {
         // 关闭【被拒】——落痕用独立成因取值（⛔ 不与 insufficient / not-evaluated-充分性 同形）：
@@ -3685,6 +3762,14 @@ export async function runGoalRound(root: string, opts: GoalRoundOptions = {}): P
           reason: closeBlock.verdict === "blocked-failing-ac"
             ? `blocked-failing-ac: ${closeBlock.acs.join(", ")}`
             : `not-evaluated: close-block ${closeBlock.cause}`,
+        });
+      } else if (unmerged !== null) {
+        // 关闭【被拒，分支未并入】——独立成因取值（⛔ 不与充分性 / 台账成因同形），点名分支与 tip。
+        flips.push({
+          id: gid,
+          to: "achieved",
+          ok: false,
+          reason: `blocked-unmerged-branch: ${unmerged.branch} @ ${unmerged.tip}`,
         });
       } else {
         const w = await writeGoalStatus(scriptRoot, gid, "achieved", dataRoot, { actor: "goal-driver", reason: "I2: all ACs achieved + sufficiency covered" });

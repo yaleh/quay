@@ -46,10 +46,12 @@ const POST_MERGE_FILE = "post-merge-production-only.txt";
 const criterionWorktreePath = (ns, goalId = GOAL) => path.join(ns, `goal-${goalId}`);
 
 /** 只写 frontmatter，不经过 store 的写面——夹具要直接控制 `branch` / `status`（⛔ 不触发激活闸）。 */
-function writeGoalRecord(root, { id, status, branch }) {
+function writeGoalRecord(root, { id, status, branch, body = "## body\nx" }) {
   const lines = ["---", `id: ${id}`, `title: ${id} fixture`, `status: ${status}`, "kind: goal"];
   if (branch !== undefined) lines.push(`branch: ${branch}`);
-  lines.push("origin: test fixture", "---", "", "## body", "x", "");
+  lines.push("origin: test fixture", "---", "");
+  for (const l of body.split("\n")) lines.push(l);
+  lines.push("");
   fs.writeFileSync(path.join(root, "goals", `${id}-fixture.md`), lines.join("\n"), "utf8");
 }
 
@@ -604,6 +606,115 @@ test("AC-nm-absent: 主检出没有 node_modules ⇒ 不建链、处置读数如
     assert.equal(reading.state, "source-absent");
     assert.equal(reading.target, null);
     assert.ok(reading.reason, "source-absent 必须带可读原因（⛔ 不是沉默）");
+  } finally {
+    fs.rmSync(tmp, { recursive: true, force: true });
+    fs.rmSync(ns, { recursive: true, force: true });
+  }
+});
+
+// ── gap-goal-branch-goal-flips-achieved-before-its-branch-merges ───────────────────────────────
+//
+// 回答的问题：**branch-mode goal 能否在它的 `goal/<id>` 并入 develop 之前就被翻成 achieved。**
+// SPEC-goal-branch §4.7 的生命周期默认 goal 至少带一条 post-merge AC（并入后才达成）；一个 AC 全为
+// pre-merge 的 branch-mode goal 在并入之前就满足 I2 + sufficiency ⇒ 旧实现提前翻 achieved ⇒
+// `quay goal merge` 因「只允许 active」拒绝 ⇒ 分支永远并不进去的死结。GOAL-904 演练逐字读到：
+// `from: active to: achieved actor: goal-driver reason: "I2: all ACs achieved + sufficiency covered"`
+// 而 `git merge-base --is-ancestor goal/GOAL-904 develop` 为假。
+//
+// 本用例一个夹具里三件事：①全 pre-merge 且全 achieved 的 branch-mode goal 在并入前【不】翻 achieved，
+// closeBlocks 落 blocked-unmerged-branch 并点名分支 tip；②把分支并入 develop 后【下一轮】才翻 achieved；
+// ③同一夹具里【非】branch-mode 的同条件 goal 照常被翻 achieved（负控制：拦截只针对 branch-mode）。
+
+const BRANCH_GOAL = "GOAL-910";
+const BRANCH_GOAL_BRANCH = `goal/${BRANCH_GOAL}`;
+const PLAIN_GOAL_2 = "GOAL-911";
+const EXIT_BODY = "## 退出条件\n\n1. 条件一\n";
+
+/** 夹具：BRANCH_GOAL（branch:true，两条 pre-merge AC 已 achieved）+ PLAIN_GOAL_2（branch:false，
+ *  一条已 achieved AC）。两者 body 都有 `## 退出条件` ⇒ 充分性走语义判定 seam（COVERED_OPTS 判 covered）。
+ *  `goal/GOAL-910` 在 base 之上多一个提交且**未并入 develop**。 */
+function mkUnmergedBranchFixture() {
+  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "goal-unmerged-"));
+  const ns = fs.mkdtempSync(path.join(os.tmpdir(), "goal-unmerged-ns-"));
+  fs.mkdirSync(path.join(tmp, "goals"), { recursive: true });
+  fs.mkdirSync(path.join(tmp, ".quay"), { recursive: true });
+  fs.writeFileSync(path.join(tmp, ".gitignore"), ".quay/\n", "utf8");
+  fs.writeFileSync(path.join(tmp, ".quay", "config.yml"), `loop:\n  worktree_root: ${ns}\n`, "utf8");
+  const git = mkGitFixtureRoot(tmp);
+
+  writeGoalRecord(tmp, { id: BRANCH_GOAL, status: "active", branch: true, body: EXIT_BODY });
+  writeAcRecord(tmp, { id: "AC-910", goal: BRANCH_GOAL, status: "achieved", phase: "pre-merge", criterion: "true" });
+  writeAcRecord(tmp, { id: "AC-911", goal: BRANCH_GOAL, status: "achieved", phase: "pre-merge", criterion: "true" });
+
+  writeGoalRecord(tmp, { id: PLAIN_GOAL_2, status: "active", branch: false, body: EXIT_BODY });
+  writeAcRecord(tmp, { id: "AC-912", goal: PLAIN_GOAL_2, status: "achieved", criterion: "true" });
+
+  git(["add", "-A"]);
+  git(["commit", "-m", "base"]);
+  git(["branch", "develop"]);
+  git(["checkout", "-q", "-b", BRANCH_GOAL_BRANCH]);
+  fs.writeFileSync(path.join(tmp, GOAL_ONLY_FILE), "on the goal branch only\n", "utf8");
+  git(["add", GOAL_ONLY_FILE]);
+  git(["commit", "-m", "goal-branch-only file"]);
+  const tip = git(["rev-parse", "HEAD"]);
+  git(["checkout", "-q", "main"]);
+  return { tmp, ns, git, tip };
+}
+
+/** 充分性判官 seam：判 covered（否则机械层恒 not-evaluated ⇒ 根本走不到 I2 的 flip 判定那条路）。 */
+const COVERED_OPTS = {
+  ...ROUND_OPTS,
+  sufficiencyCmd: ["node", "-e", 'process.stdout.write(JSON.stringify({verdict:"covered"}))'],
+};
+
+/** goal frontmatter 的 status 字段（直接读盘，⛔ 不采信任何自述读数）。 */
+const goalStatus = (root, id) =>
+  fs.readFileSync(path.join(root, "goals", `${id}-fixture.md`), "utf8").match(/^status: (.+)$/m)?.[1];
+
+/** `git merge-base --is-ancestor` 的退出码（⛔ 不经过会抛的 mkGitFixtureRoot 运行器——那条对非零即抛）。 */
+const isAncestorExit = (root, ancestor, descendant) =>
+  spawnSync("git", ["-C", root, "merge-base", "--is-ancestor", ancestor, descendant]).status;
+
+test("branch-mode goal 在 goal/<id> 并入 develop 之前不得被翻 achieved（closeBlocks=blocked-unmerged-branch + 点名分支 tip）；并入后下一轮才翻；非 branch-mode 同条件照常翻", async () => {
+  const { tmp, ns, git, tip } = mkUnmergedBranchFixture();
+  try {
+    // 直接量（⛔ 不采信被测代码自述）：并入前 goal/GOAL-910 不是 develop 的祖先。
+    assert.notEqual(isAncestorExit(tmp, BRANCH_GOAL_BRANCH, "develop"), 0, "夹具前置：goal/GOAL-910 尚未并入 develop（否则本用例空转）");
+
+    const r1 = await runGoalRound(tmp, COVERED_OPTS);
+    const b1 = r1.fact.value.closeBlocks.find((b) => b.goal === BRANCH_GOAL);
+    assert.ok(b1, `closeBlocks 必须为 ${BRANCH_GOAL} 落一条（实测=${JSON.stringify(r1.fact.value.closeBlocks)}）`);
+    assert.equal(b1.verdict, "blocked-unmerged-branch", `实测=${JSON.stringify(b1)}`);
+    assert.equal(b1.branchTip, tip, "读数必须点名分支 tip（⛔ 不是只报一个布尔）");
+    assert.equal(goalStatus(tmp, BRANCH_GOAL), "active", "并入前 branch-mode goal 必须仍是 active（⛔ 不提前 achieved）");
+    const refused1 = r1.fact.value.flips.find((f) => f.id === BRANCH_GOAL && f.to === "achieved");
+    assert.ok(refused1 && refused1.ok === false, `必须有一条 ok:false 的关闭尝试（实测=${JSON.stringify(r1.fact.value.flips)}）`);
+    assert.match(
+      refused1.reason,
+      new RegExp(`^blocked-unmerged-branch: goal/${BRANCH_GOAL} @ `),
+      "拒绝理由带独立成因取值 + 分支 tip（⛔ 不与台账/充分性成因同形）",
+    );
+
+    // 负控制：同一夹具里【非】branch-mode 的同条件 goal 照常被翻 achieved；它的 closeBlock 是 clear 且
+    // 【没有】branchTip 键（拦截只针对 branch-mode 的未并入分支，clear 条目形状与改动前逐字相同）。
+    assert.equal(goalStatus(tmp, PLAIN_GOAL_2), "achieved", "非 branch-mode 的同条件 goal 不受影响（照常 achieved）");
+    const plain1 = r1.fact.value.closeBlocks.find((b) => b.goal === PLAIN_GOAL_2);
+    assert.equal(plain1.verdict, "clear", `非 branch-mode goal 的 closeBlock 应为 clear（实测=${JSON.stringify(plain1)}）`);
+    assert.equal("branchTip" in plain1, false, "clear 条目不得多出 branchTip 键");
+
+    // ── 并入（ff）后【下一轮】才翻 achieved ────────────────────────────────────────────────────
+    git(["checkout", "-q", "develop"]);
+    git(["merge", "--ff-only", "-q", BRANCH_GOAL_BRANCH]);
+    git(["checkout", "-q", "main"]);
+    assert.equal(isAncestorExit(tmp, BRANCH_GOAL_BRANCH, "develop"), 0, "并入后直接量：goal/GOAL-910 已是 develop 的祖先");
+
+    const r2 = await runGoalRound(tmp, COVERED_OPTS);
+    assert.equal(goalStatus(tmp, BRANCH_GOAL), "achieved", "并入后下一轮 branch-mode goal 才被翻 achieved");
+    const flipped = r2.fact.value.flips.find((f) => f.id === BRANCH_GOAL && f.to === "achieved");
+    assert.ok(flipped && flipped.ok === true, `并入后应有一条 ok:true 的 achieved 翻写（实测=${JSON.stringify(r2.fact.value.flips)}）`);
+    const b2 = r2.fact.value.closeBlocks.find((b) => b.goal === BRANCH_GOAL);
+    assert.equal(b2.verdict, "clear", `并入后 closeBlock 恢复 clear（实测=${JSON.stringify(b2)}）`);
+    assert.equal("branchTip" in b2, false, "clear 条目不带 branchTip 键");
   } finally {
     fs.rmSync(tmp, { recursive: true, force: true });
     fs.rmSync(ns, { recursive: true, force: true });

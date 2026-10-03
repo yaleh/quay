@@ -184,6 +184,21 @@ pre-merge AC 全部 achieved（在判据 worktree 上求值）
 **⊢ I2 不需要改**：achieved 仍然要求**全部** AC achieved（裁定⑤ 的「现有元语」原样管 achieved）。变的只是**并入的前置条件**用一个子集（pre-merge AC）——
 这比 §9.2 原 Q5-c 的描述代价小：原描述说「要改 I2」，在「并入先于 achieved」的顺序下不成立。
 
+**⊢ 关闭前置多一条分支前置（2026-10-04 增补；来源：GOAL-904 合并演练直接量）**：上面的顺序图里「全部 AC
+在主检出上照常求值 → 写 achieved」在**一个 AC 全是 pre-merge 的 branch-mode goal** 上会**先于并入**发生——
+它并入之前就满足 I2 ∧ sufficiency `covered` ⇒ `goalFlipDecision` 把它提前翻成 `achieved` ⇒ `quay goal merge`
+因 `goal-not-active`（只允许 active 的 goal 可并入）被拒 ⇒ **分支永远并不进去的死结**；人手工重开 `achieved →
+active`，下一轮又被翻回。实测读数（GOAL-904）：statusLog `from: active to: achieved actor: goal-driver
+reason: "I2: all ACs achieved + sufficiency covered"`，而同一时刻 `git merge-base --is-ancestor goal/GOAL-904
+develop` 为假。
+⇒ `goalFlipDecision` 的**调用处**多一条 close-block：goal 的 `branch: true` ∧ `goal/<id>` 仍存在 ∧ 又不是
+`develop` 的祖先 ⇒ **不翻**，本轮读数在 `closeBlocks` 记一条 `blocked-unmerged-branch`（点名 goal 与分支 tip）；
+分支不存在（从未创建 / 并入后已删）或已是 `develop` 的祖先 ⇒ 不拦（行为与现状一致）。
+⛔ 不动 I2、⛔ 不动 sufficiency 判据、⛔ 非 branch-mode 的 goal 行为逐字不变；⛔ goal-driver 只读 git 引用，不读本仓落地载体（DIR-131）。
+判据：`plugin/test/goal-driver-criterion-worktree.test.mjs` 的「并入 develop 之前不得被翻 achieved」用例
+（三臂：并入前 `blocked-unmerged-branch` ∧ 仍 active；并入后下一轮才翻 `achieved`；同夹具里非 branch-mode
+的同条件 goal 照常翻——负控制证明拦截只针对 branch-mode 的未并入分支）。
+
 **AC 分类**（新字段，AC 记录上）：`phase: pre-merge | post-merge`，缺省 `pre-merge`。
 **⑮ 之后的分界（10-03 修订）**：pre-merge AC 在**预览实例**（§4.10）上求值——预览实例有在跑的 serve，**live-probe AC 因此回到 pre-merge**。
 post-merge 只留给「必须由**真实生产**跑过一段时间才产生读数」的 AC（典型：生产账本在落地后时间窗内记录数 ≥ N，硬规则 4 推论三）。
