@@ -112,6 +112,15 @@ export const VALID_GOAL_STATUSES: string[] = [...GOAL_STATUSES];
 // test asserts the SAME threshold the store enforces (never a second, divergent literal).
 export const MIN_GOAL_BODY_CHARS = 40;
 
+// SPEC-goal-branch-2026-10-03 §4.7 (裁定⑭⑮) — an AC's evaluation PHASE, declared by the person/agent
+// who files it (⛔ never inferred from the criterion's text — hard rule 2). `pre-merge` is the default
+// because the misclassification directions are asymmetric: a post-merge AC left unmarked is
+// not-evaluable on the criterion worktree ⇒ the merge precondition can never be met ⇒ STUCK AND
+// VISIBLE; a pre-merge AC marked post-merge silently skips the isolation check. The default picks the
+// side that fails loudly. Only meaningful under a `branch: true` goal (a plain goal ignores it).
+export const VALID_CRITERION_PHASES: string[] = ["pre-merge", "post-merge"];
+export type CriterionPhase = "pre-merge" | "post-merge";
+
 const GOAL_ID_RE = /^GOAL-\d{3,}$/;
 const AC_ID_RE = /^AC-\d{3,}$/;
 
@@ -483,6 +492,9 @@ const OWNED_KEYS = new Set([
   // ⛔ never a stored field: storing it would make "which branch does this goal land on" a
   // human-writable arbitrary string, which is exactly what §4.8's identity rule forbids.
   "branch",
+  // SPEC-goal-branch §4.7 (裁定⑭⑮) — an AC's evaluation phase. Declared, never inferred from the
+  // criterion's text (hard rule 2); projected as `pre-merge` when absent.
+  "phase",
 ]);
 
 // ── evidence is ledger-DERIVED (gap-goal-evidence-cache-should-not-enter-git) ───────────────────
@@ -798,6 +810,9 @@ interface GoalFrontmatter {
    *  Absent/false = today's behavior. Only the "open or not" bit is stored; the branch NAME is
    *  derived (⛔ never persisted, ⛔ never caller-supplied). */
   branch?: boolean;
+  /** SPEC-goal-branch §4.7 (裁定⑭⑮) — CRITERION records only: the phase at which this AC is
+   *  evaluated. Absent ⇒ projected as `pre-merge`. Stored verbatim when explicitly declared. */
+  phase?: string;
 }
 
 interface GoalFilter {
@@ -831,6 +846,11 @@ interface GoalViewModel {
    *  ⛔ `false`, never `undefined`: "the field is absent" and "the goal declined a branch" are the
    *  same answer to the ABI consumer ("this goal lands on the landing baseline"). */
   branch: boolean;
+  /** SPEC-goal-branch §4.7 (裁定⑭⑮) — the AC's evaluation phase (frontmatter `phase` projection).
+   *  ⛔ Always one of `pre-merge` / `post-merge`, never `undefined`: "the field is absent" and "the
+   *  author declared pre-merge" are the same answer to the driver. The store refuses to persist any
+   *  other value (hard rule 3b — an unreadable value must not project as `pre-merge`). */
+  phase: CriterionPhase;
   /** 保真性闸（GOAL-013）——激活期保真性判定的结果与理由（frontmatter `fidelity` 投影）。 */
   fidelity: unknown;
   body: string;
@@ -1716,6 +1736,10 @@ export function createGoalStore(
       // Undeclared reads as `false` (SPEC §4.1: 「缺省 = false = 现状」) — a three-state answer here
       // would put the two consumers that must treat them identically (branch or not) at odds.
       branch: frontmatter.branch === true,
+      // SPEC-goal-branch §4.7: undeclared reads as `pre-merge` (the failure-visible default). The
+      // write path refuses any other value, so a legacy/hand-written file carrying an unknown token
+      // also projects as `pre-merge` — never as an `undefined` a driver would have to guess at.
+      phase: frontmatter.phase === "post-merge" ? "post-merge" : "pre-merge",
       fidelity: frontmatter.fidelity,
       evidence,
       // Own-record time (a criterion): lastProgressAt = its LAST gate=goal event, firstEvidenceAt =
@@ -2346,7 +2370,7 @@ export function createGoalStore(
 
   function write(id: string, {
     title, status, goal, criterion, expect, origin,
-    supersedes, supersededBy, body, disposeOld, longTerm, branch,
+    supersedes, supersededBy, body, disposeOld, longTerm, branch, phase,
     force = false,
     actor,
     reason,
@@ -2377,6 +2401,10 @@ export function createGoalStore(
      *  `goal/<id>` branch exists, because moving the merge target under an in-flight task is the
      *  damage class this lock exists to stop (§4.11). The branch NAME is derived, ⛔ never given here. */
     branch?: boolean;
+    /** SPEC-goal-branch §4.7 (裁定⑭⑮) — a CRITERION record's evaluation phase. `undefined` ⇒ patch
+     *  semantics (keep the stored value; absent projects as `pre-merge`). Any other string is
+     *  REFUSED — the phase is a declared fact, ⛔ not inferred from the criterion's text. */
+    phase?: string;
     /** P6b: a per-call fidelity judge overriding the store-level seam (the CLI's
      *  `--fidelity-judge-argv` path). `undefined` ⇒ fall back to the store-level `fidelityJudge`. */
     fidelityJudge?: FidelityInvokeJudge;
@@ -2408,6 +2436,20 @@ export function createGoalStore(
     if (isGoalRecord && criterion !== undefined) {
       throw new Error(
         `${id} is a GOAL record and cannot carry a \`criterion\` field — a goal is judged by the conjunction of its ACs`
+      );
+    }
+    // SPEC-goal-branch §4.7: `phase` lives on a CRITERION record. The store validates the VALUE
+    // (fail-closed — an unknown token is refused rather than projected as the default, hard rule 3b)
+    // and refuses the field on a GOAL record (same "refusing beats silently dropping" discipline as
+    // `criterion` above). ⛔ Not inferred from the criterion's text (hard rule 2).
+    if (phase !== undefined && !VALID_CRITERION_PHASES.includes(phase)) {
+      throw new Error(
+        `${id}: phase must be one of ${VALID_CRITERION_PHASES.join(" | ")} (got ${JSON.stringify(phase)}) — the phase is DECLARED by the author, never inferred from the criterion text`
+      );
+    }
+    if (isGoalRecord && phase !== undefined) {
+      throw new Error(
+        `${id} is a GOAL record and cannot carry a \`phase\` field — phase is an AC property (a goal is judged by the conjunction of its ACs, each with its own phase)`
       );
     }
     return withFileLock(goalDir, id, () => {
@@ -2487,6 +2529,9 @@ export function createGoalStore(
       // value. The lock above already refused any CHANGE once the ref exists; a repeated `true` on a
       // branch-mode goal is a no-op, and `false` on a never-branched goal clears an unset field.
       if (branch !== undefined) frontmatter.branch = branch;
+      // `phase` (SPEC-goal-branch §4.7): patch semantics like `long-term`/`branch` — omitted keeps the
+      // stored value (which projects as `pre-merge` when absent). Validated above, before the lock.
+      if (phase !== undefined) frontmatter.phase = phase;
       const statusChanged = prevStatus !== undefined && nextStatus !== prevStatus;
       // ⛔ "activation" here is ANY transition INTO active (SPEC §6 裁定 3: activation is manual; the
       // goal-driver never flips INTO active). Reopen paths — achieved→active, needs-human→active,
@@ -2883,7 +2928,7 @@ export function createGoalStore(
       const ordered: GoalFrontmatter = {};
       for (const k of [
         "id", "title", "status", "kind", "goal", "criterion", "expect", "origin", "activatedAt", "statusLog",
-        "labels", "posture", "supersedes", "superseded-by", "long-term", "fidelity", "timeoutMs", "branch",
+        "labels", "posture", "supersedes", "superseded-by", "long-term", "fidelity", "timeoutMs", "branch", "phase",
       ]) {
         if (frontmatter[k] !== undefined) ordered[k] = frontmatter[k];
       }
@@ -2997,6 +3042,8 @@ export function createGoalStore(
     supersedes?: string[];
     supersededBy?: string[];
     body?: string;
+    /** SPEC-goal-branch §4.7 (裁定⑭⑮) — an AC's declared evaluation phase (validated by `write`). */
+    phase?: string;
     force?: boolean;
     actor?: string;
     reason?: string;
@@ -3015,6 +3062,7 @@ export function createGoalStore(
         title: r.title, status: r.status, goal: r.goal, criterion: r.criterion,
         expect: r.expect, origin: r.origin, supersedes: r.supersedes,
         supersededBy: r.supersededBy, body: r.body, force: r.force,
+        phase: r.phase,
         actor: r.actor, reason: r.reason, commit: false, dryRun,
       });
       results.push(vm);
@@ -3048,6 +3096,8 @@ export function createGoalStore(
 //              [--expect-absent] [--expect-existing] [--fidelity-judge-argv '<json argv array>']
 //              [--branch true|false]  (GOAL opt-in isolation gate — locked once `goal/<id>` exists;
 //              the branch NAME is derived, ⛔ never a flag)
+//              [--phase pre-merge|post-merge]  (AC evaluation phase, SPEC-goal-branch §4.7; declared
+//              by the author, ⛔ never inferred from the criterion's text)
 //              (--expect-absent = create intent, refuse if it exists; --expect-existing =
 //              update intent, refuse if absent — the goal store's expectedStatus-CAS counterpart)
 //   batch --json '<array>' [--dry-run]
@@ -3342,6 +3392,18 @@ export async function runGoalStoreCli(argv: string[]): Promise<number> {
           i++;
           continue;
         }
+        if (key === "phase") {
+          // SPEC-goal-branch §4.7 — the AC evaluation phase, machine-writable. Strict enum, ⛔ no
+          // coercion/aliasing: an unknown token must not reach the file to be silently projected as
+          // the `pre-merge` default (the write path refuses it too — this names the flag earlier).
+          if (!VALID_CRITERION_PHASES.includes(String(v))) {
+            console.error(`goal-store: --phase must be exactly ${VALID_CRITERION_PHASES.join(" or ")}`);
+            return 2;
+          }
+          opts["phase"] = v;
+          i++;
+          continue;
+        }
         if (key === "title" || key === "status" || key === "goal" || key === "criterion" ||
             key === "expect" || key === "origin" || key === "body" || key === "superseded-by" ||
             key === "supersedes" ||
@@ -3399,6 +3461,9 @@ export async function runGoalStoreCli(argv: string[]): Promise<number> {
           // `--branch true|false` (SPEC-goal-branch §4.1). `false` is MEANINGFUL (explicitly decline)
           // — the `!== undefined` guard preserves the patch semantics in `write`, exactly like longTerm.
           branch: opts["branch"] as boolean | undefined,
+          // `--phase pre-merge|post-merge` (SPEC-goal-branch §4.7). `undefined` (omitted) preserves
+          // patch semantics; the value was validated against the enum above, before the call.
+          phase: opts["phase"] as string | undefined,
           force,
           actor: opts.actor as string | undefined,
           reason: opts.reason as string | undefined,
@@ -3450,6 +3515,9 @@ export async function runGoalStoreCli(argv: string[]): Promise<number> {
             // SPEC-goal-branch §4.1 — batch records carry the opt-in gate the same way `write` does
             // (patch semantics on a boolean, ⛔ not a truthy coercion).
             branch: typeof o.branch === "boolean" ? o.branch : undefined,
+            // SPEC-goal-branch §4.7 — batch records carry the AC phase the same way `write` does;
+            // `write` validates the enum, so a bad token is refused rather than stored.
+            phase: typeof o.phase === "string" ? o.phase : undefined,
             force: o.force === true,
             actor: o.actor as string | undefined,
             reason: o.reason as string | undefined,

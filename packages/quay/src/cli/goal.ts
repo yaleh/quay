@@ -86,6 +86,10 @@ const STORE_ONLY_WRITE_FLAGS = [
   // `long-term`: the ABI `goal_write` view-model has no `branch` field, and forwarding it through
   // the ABI would DROP it silently. The branch NAME is derived (`goal/<id>`), ⛔ not a flag.
   "branch",
+  // SPEC-goal-branch §4.7 (裁定⑭⑮) — the AC evaluation phase. Store-only for the same reason: the
+  // ABI `goal_write` view-model has no `phase` field, so the ABI route would silently drop a
+  // `--phase post-merge` and the AC would be evaluated as the default `pre-merge`.
+  "phase",
 ] as const;
 
 /** The goal store's CLI verbs — store-level BY NATURE: they have no Provider ABI counterpart at all
