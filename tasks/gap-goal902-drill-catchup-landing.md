@@ -1,7 +1,7 @@
 ---
 id: gap-goal902-drill-catchup-landing
 title: GOAL-902 追平落地演练：让 goal/GOAL-902 经历一次含追平的机械 fan-in 落地（AC-322 生产读数载体）
-status: done
+status: superseded
 labels: []
 parent: null
 children: []
@@ -10,25 +10,25 @@ goal_ac: AC-902
 ---
 ## Contract
 
-一次性的落地演练载体任务。它存在的唯一目的，是让 `goal/GOAL-902` 这条 goal 分支经历一次**含追平（catch-up）的机械 fan-in 落地**，从而让 AC-322 判据在真实 store 上取到 exit 0（DIR-026 Reading A：真实机制产生的真实读数）。⛔ 不承载任何真实开发方向、⛔ 不新增任何代码路径、⛔ 不改任何既有 goal/task 记录。
+一次性的落地演练载体任务（原建为 `status: done` 以避开派发竞态）。它的唯一目的是让 `goal/GOAL-902` 经历一次**含追平的机械 fan-in 落地**，从而让 AC-322 判据在真实 store 上取到 exit 0。
+
+**结果：未达成。** 2026-10-03 的演练里，`runMechanicalFanIn --merge-target goal/GOAL-902` 的 step 2b **真的造出了追平 merge 提交**（`97f4e5a59 Merge branch 'develop' into task/gap-goal902-drill-catchup-landing`），随后被 `anti-drift` 的 BASELINE-MISMATCH 判死（exit 3，因为它要求 merge target 含 develop 的 tip，而那正是追平要修的状态）⇒ **无 flip 提交**。
 
 ## Plan
 
-1. 由 `quay goal write --store` 建出 GOAL-902（`branch: true`）并激活，store 从 develop tip 懒建 `goal/GOAL-902`。
-2. 本任务在独立 worktree 上跑 `runMechanicalFanIn`（`--merge-target goal/GOAL-902`）：先合 goal 分支，再合 develop（追平，step 2b），suite 绿后 ff 回 goal 分支并翻 done。
-3. 收尾：主检出 `git merge --ff-only goal/GOAL-902` 并入 develop 后删除该分支。
+本记录不再执行任何步骤。承载它的演练配方与完整读数在 `tasks/gap-ac322-goal-branch-catchup-landing-real-reading.md` 的 `## Evidence`；阻断的修复与重跑立案在 `tasks/gap-goal-branch-catchup-blocked-by-antidrift-baseline-mismatch.md`（其 `## Plan` 第 3 条即重跑配方）。
 
 ## Touches
 
 - tasks/gap-goal902-drill-catchup-landing.md
-- goals/GOAL-902-*.md
-- goals/AC-902-*.md
+
+（无代码改动：本任务从未产生任何 delta。）
 
 ## Acceptance Criteria
 
-- [x] AC1（演练落地发生）：`git log develop --fixed-strings --grep="翻 gap-goal902-drill-catchup-landing done（driver 机械 fan-in）"` 非空。
-- [x] AC2（落地含追平）：追平 merge 之前记下的 `git rev-parse develop` 是翻 done 提交的祖先（`git merge-base --is-ancestor` ⇒ 0）。
+- [ ] AC1（演练落地发生）：`git log develop --fixed-strings --grep="翻 gap-goal902-drill-catchup-landing done（driver 机械 fan-in）"` 非空。 —— **未满足**：fan-in 死在 anti-drift，从未走到 flip。
+- [ ] AC2（落地含追平）：追平 merge 之前记下的 `git rev-parse develop` 是翻 done 提交的祖先。 —— **未满足**：不存在翻 done 提交。
 
 ## Definition of Done
 
-本任务在 `goal/GOAL-902` 上完成一次含追平的机械 fan-in 落地，翻 done 提交可核；⛔ 不留任何代码改动、⛔ 不留残留分支。
+⛔ 未达成：`goal/GOAL-902` 已被丢弃（tip `571c566621ec087649c3c987465627be64750b10`，statusLog 有记录），无落地、无 flip 提交。本记录标记为 `superseded` —— 演练由 `gap-goal-branch-catchup-blocked-by-antidrift-baseline-mismatch` 修复阻断后重跑。
