@@ -1,7 +1,7 @@
 ---
 id: gap-goal-branch-catch-up-develop-at-landing
 title: goal 分支落地的追平：fan-in 落回 goal 分支前合入追平时刻的 develop（AC-322 承载）
-status: ready
+status: done
 labels:
   - gap
 parent: null
