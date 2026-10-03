@@ -214,7 +214,7 @@ post-merge 只留给「必须由**真实生产**跑过一段时间才产生读�
 4. 绿 ⇒ ff-only `develop` 到该合并提交（锁内 develop 不会动，ff-only 必然可行）；释放锁；删除 `goal/<id>` 与判据 worktree
 5. 红或冲突 ⇒ 不落地，释放锁；请求仍「待执行」
 
-**为什么是 `--no-ff`（⑲）**：整个 goal 在 `git log --first-parent develop` 上是一个提交 ⇒ §7 庚直接可读；需要整体撤出时 `git revert -m 1 <合并提交>` 一步完成（§4.11）。develop 本身仍只做 ff——合并提交是在锁内、在临时 worktree 里造好并经全量 suite 验证后，develop 再 ff 到它，「develop 上每个提交都是被验证过的树」不变。
+**为什么是 `--no-ff`（⑲）**：整个 goal 经**一个合并提交**进入 develop ⇒ §7 庚可由祖先关系直接读（该合并提交的第二父含全部并入前落地、第一父不含）；需要整体撤出时 `git revert -m 1 <合并提交>` 一步完成（§4.11）。develop 本身仍只做 ff——合并提交是在锁内、在临时 worktree 里造好并经全量 suite 验证后，develop 再 ff 到它，「develop 上每个提交都是被验证过的树」不变。
 **实现代价**：`fan-in/ff-merge.ts` 今天只会「把目标分支 ff 到 `task/<id>` tip」（`:911`），需要支持「源 = 临时 worktree 里造出的合并提交」。
 
 **落地与否读直接量**：`git merge-base --is-ancestor goal/<id> develop`（或分支已删除）。⛔ 不新增 `landed` 之类的自维护字段（硬规则 4b）。
@@ -359,16 +359,17 @@ I2 要求**所有** in-scope AC 为 achieved ⇒ **只要 goal 带一个 live-pr
 
 每条都必须读**生产载体**、且只计实现落地之后的时间窗（硬规则 4 推论三）：
 
-- **甲**（隔离）：存在一个 `branch: true` 的 goal，其至少 1 个任务落地后，`git log develop` 中不含该任务的提交，`git log goal/<id>` 含。
+- **甲**（隔离）：存在一个 `branch: true` 且未放弃的 goal，其至少 1 个任务落地后：未并入时该任务的翻 done 提交是 `goal/<id>` 的祖先而不是 develop 的祖先；已并入时它经合并提交的第二父可达、不经第一父可达。
 - **乙**（追平）：同上 goal 的每次任务落地后，`git merge-base --is-ancestor develop@{落地时刻} goal/<id>` 为真。
 - **丙**（状态不重派）：该任务落地后 24h 内，`orchestration/dispatch-record.jsonl` 中该任务 id 的派发记录数 = 1。
 - **丁**（判据可见，B1）：该 goal 的至少 1 个 pre-merge AC 在 goal 并入 develop **之前**被 goal-driver 写为 `achieved`（gate-events 中有对应 pass，且时间早于并入提交）。
-- **戊**（人工并入）：gate-events 中存在该 goal 的 `goal-merge-request`，其后 `develop` 包含该分支 tip，`goal/<id>` 已删除；且**不存在**无请求事件的 goal 并入（`git log --first-parent develop` 中每个 `goal/` 合并提交都能对上一条请求）。
+- **戊**（人工并入）：gate-events 中存在该 goal 的 `goal-merge-request`，其后 `develop` 包含该分支 tip，`goal/<id>` 已删除；且**不存在**无请求事件的 goal 并入（develop 上每个 subject 形如 `merge: goal/GOAL-NNN into develop` 的合并提交都能对上一条先于它的请求；⛔ 按祖先关系查找，不用 `--first-parent`，见 §7 末「判据的拓扑前提」）。
 - **戊′**（顺序）：该 goal 的 `achieved` 写入时刻晚于并入提交时刻。
 - **己**（放弃）：一个 `branch: true` 的 goal 被 `retired` 后，分支不存在，其 `statusLog` 含被删 tip 的 SHA。
-- **庚**（混入度，§2.1 的对照量）：一个 branch-mode goal 并入后，按 §2.1 同一方法统计，该 goal 在 develop 上的连续段数 = 1。
+- **庚**（混入度，§2.1 的对照量）：一个 branch-mode goal 并入后，develop 上恰有 1 个提到 `goal/<id>` 的合并提交，该 goal 并入前的全部任务落地都只经它进入 develop。
 - **辛**（并入前试用，⑮）：至少 1 个 live-probe AC 的 pass GateEvent 早于其 goal 的并入提交，且该次求值的 `cwd` 是预览 worktree（不是主检出）。
   ⚠️ **现有 goal GateEvent 不记录 cwd**【实测 2026-10-03，`.quay/gate-events.jsonl` 的 `AC-272` 事件：字段只有 `id/item_id/gate/actor/verdict/timestamp/payload.reason`】⇒ 按硬规则 4c，这个量今天穿不过载体。实现须在 payload 里加 `evaluationRoot`（及求值时的 tree SHA），否则辛无法判。
+- **判据的拓扑前提（2026-10-03 更正）**：⛔ 判据**不得**依赖 `git log --first-parent develop`。真实 fan-in 的形状是「任务分支先 merge develop 再 ff」，develop 的 first-parent 链因此会走进任务分支自己的历史，develop 一侧的提交落到第二父上——实测 2026-10-02 以来 32 个机械 fan-in 翻 done 提交中 **22 个（69%）不在 first-parent 链上**；goal 合并提交也会被后续落地挤出该链。本 SPEC 初稿的甲/戊/庚就是按 first-parent 写的，只在线性历史的合成夹具上验证过，所以：AC-321 对直落 develop 的演练任务误判通过，AC-325/327 在合并提交被挤出后会读成未评估。修订后判据一律用祖先关系（`merge-base --is-ancestor`），夹具一律按真实 fan-in 形状造（任务分支合 develop、后续落地挤出合并提交），并必须含「直落 develop 的任务后来被挤出 first-parent」这一反例臂。
 - **反例检查**：关掉 §4.3 的解析（强制 mergeTarget=develop）后甲、庚必须变红——否则它们是回声。
 
 ---
@@ -433,7 +434,7 @@ I2 要求**所有** in-scope AC 为 achieved ⇒ **只要 goal 带一个 live-pr
 - **sufficiency 判据**（现有 LLM judge，判「AC 集是否覆盖退出条件」）：起草者建议**只展示不拦**——它在并入后仍会拦 achieved；并入时再拦一次等于让机器替人判成熟度，与⑭ 的「人工触发」意图冲突。
 
 **Q8：并入的提交形态**。建议 `--no-ff` 产生一个合并提交（再把 develop ff 到它，develop 仍只做 ff）：
-- 整个 goal 在 `git log --first-parent develop` 上是**一个提交** ⇒ §7 庚（连续段 = 1）直接可读；
+- 整个 goal 经**一个合并提交**进入 develop ⇒ §7 庚（单一入口）可由祖先关系直接读；
 - post-merge AC 失败、要把整个 goal 撤出时，`git revert -m 1 <合并提交>` 一步完成——Q5-c 丢掉的隔离由此部分补回；
 - 代价：与现有 task fan-in「纯 ff、无合并提交」的形态不一致；`ff-merge.ts` 需支持「先造合并提交再 ff」。
 
