@@ -994,7 +994,7 @@ function gitExit(cwd: string, args: string[]): number | null {
 /** `goal/<id>` 分支的并入态读数（gap-goal-branch-goal-flips-achieved-before-its-branch-merges）。
  *
  *  缺陷（2026-10-04 GOAL-904 合并演练，生产直接量）：branch-mode goal 的 `achieved` 翻转
- *  （`goalFlipDecision` + `writeGoalStatus(…"achieved"…)`）只看 I2（全部 AC achieved）与 sufficiency
+ *  （`goalFlipDecision` 及其 `writeGoalStatus` 写 `"achieved"` 的调用点）只看 I2（全部 AC achieved）与 sufficiency
  *  （covered），**不看它的 goal 分支是否已并入 develop**。`orchestration/SPEC-goal-branch-2026-10-03.md`
  *  §4.7 的生命周期是「pre-merge AC 全部达成 → 人触发并入 → 并入后再判 post-merge AC → achieved」，
  *  它默认 goal 至少带一条 post-merge AC；一个 AC 全是 pre-merge 的 branch-mode goal 在并入之前就满足
