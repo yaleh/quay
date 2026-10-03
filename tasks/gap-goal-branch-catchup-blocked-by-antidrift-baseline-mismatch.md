@@ -2,7 +2,7 @@
 id: gap-goal-branch-catchup-blocked-by-antidrift-baseline-mismatch
 title: goal 分支的追平落地被 anti-drift 的 BASELINE-MISMATCH 结构性阻断：落后 develop 的 merge
   target 先被判死，§4.4 的 step 2b 永远无法完成
-status: todo
+status: ready
 labels: []
 parent: null
 children: []
