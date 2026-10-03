@@ -58,13 +58,13 @@ fact goal-gaps  {"goal":"GOAL-903","ac":"AC-903","state":"workable","taskCount":
 
 ## AC
 
-- [ ] AC1（复现：判据为真 + 被分类为 workable，两条直接量并列）。逐字跑 `goals/AC-903-*.md` 的判据 ⇒ `PASS: GOAL-903 drill landing present` 且 `$?`=0；`quay goal gate AC-903 --json` ⇒ `"verdict":"pass"`、exit 0；并贴 `.quay/goal-round.jsonl` 中 AC-903 的 `goal-gaps` 记录（`"state":"workable"`）。三者原始输出并列。
-- [ ] AC2（根因直接量 + 对照）。以 `node --experimental-strip-types` 直接 import `computeGoalGaps`（`plugin/scripts/goal-driver.ts`），喂最小输入：AC-903 记录 `status:active`、其 GOAL 非 active、`verdicts` 不含 AC-903、两条 `goal_ac: AC-903` 的 done 关联任务 ⇒ 该条 `state === "workable"`；对照：同一输入但 `verdicts.set("AC-903","not-evaluated")` ⇒ `state === "not-evaluated"`。贴两次调用与逐字输出，并引 `goal-driver.ts` 的分支行号。
-- [ ] AC3（class 修复 + 变异对照）。`computeGoalGaps` 对「所属 GOAL 非 active 的 active AC 且 verdict 缺值」不再产出可立案的 `workable`（新落点与 `fail` 不同形）；单测覆盖该形态（修复前该断言红、修复后绿）；另用 `cp` 备份把修复临时回退（⛔ 不用 `git checkout --`）⇒ ≥1 条断言转红，恢复 ⇒ 回绿。贴单测输出与变异读数。
-- [ ] AC4（instance 收尾）。`quay goal show AC-903 --json` 的 `status` 为 `achieved`（经 `quay goal write AC-903 --origin "…" --status achieved` 写入，⛔ 非手改 `goals/*.md`）；贴 `git diff -- goals/AC-903-*.md` 证明 `criterion` 文本逐字未动、仅 `status`/`statusLog` 变更。
-- [ ] AC5（可观察地关闭）。用**修复后**的 `computeGoalGaps` 重算 AC-903 ⇒ 输出里没有 filing-state 的该条（`workable`/`gap`/`standing-violated`/`frozen-violated` 皆非，取到 `not-evaluated` 或该条根本不入 `gaps`）；并贴 `quay goal list --status active --kind criterion --json` 证明 AC-903 已不在 active AC 清单。贴两条原始输出。
-- [ ] AC6（scoped 门绿且非空转）。`bash scripts/test.sh --for-task gap-ac903-retired-goal-active-ac-phantom-workable-spawn --allow-thin` 退出 0，且**确实执行了** ≥1 个测试文件；按 `scoped-log-per-file-line-is-not-how-you-tell-a-file-ran` 的教训，用 `--paths-only`/`--json` 或按 case 名确认后贴被执行文件名。
-- [ ] AC7（不越权、无残留）。`git diff develop --stat` 仅含本任务 `## Touches` 声明的文件；`quay goal list --json` 逐条对比证明除 AC-903 外无任何 AC/GOAL 记录变更；`git branch --list 'goal/*'` 仍为空。
+- [x] AC1（复现：判据为真 + 被分类为 workable，两条直接量并列）。逐字跑 `goals/AC-903-*.md` 的判据 ⇒ `PASS: GOAL-903 drill landing present` 且 `$?`=0；`quay goal gate AC-903 --json` ⇒ `"verdict":"pass"`、exit 0；并贴 `.quay/goal-round.jsonl` 中 AC-903 的 `goal-gaps` 记录（`"state":"workable"`）。三者原始输出并列。
+- [x] AC2（根因直接量 + 对照）。以 `node --experimental-strip-types` 直接 import `computeGoalGaps`（`plugin/scripts/goal-driver.ts`），喂最小输入：AC-903 记录 `status:active`、其 GOAL 非 active、`verdicts` 不含 AC-903、两条 `goal_ac: AC-903` 的 done 关联任务 ⇒ 该条 `state === "workable"`；对照：同一输入但 `verdicts.set("AC-903","not-evaluated")` ⇒ `state === "not-evaluated"`。贴两次调用与逐字输出，并引 `goal-driver.ts` 的分支行号。
+- [x] AC3（class 修复 + 变异对照）。`computeGoalGaps` 对「所属 GOAL 非 active 的 active AC 且 verdict 缺值」不再产出可立案的 `workable`（新落点与 `fail` 不同形）；单测覆盖该形态（修复前该断言红、修复后绿）；另用 `cp` 备份把修复临时回退（⛔ 不用 `git checkout --`）⇒ ≥1 条断言转红，恢复 ⇒ 回绿。贴单测输出与变异读数。
+- [x] AC4（instance 收尾）。`quay goal show AC-903 --json` 的 `status` 为 `achieved`（经 `quay goal write AC-903 --origin "…" --status achieved` 写入，⛔ 非手改 `goals/*.md`）；贴 `git diff -- goals/AC-903-*.md` 证明 `criterion` 文本逐字未动、仅 `status`/`statusLog` 变更。
+- [x] AC5（可观察地关闭）。用**修复后**的 `computeGoalGaps` 重算 AC-903 ⇒ 输出里没有 filing-state 的该条（`workable`/`gap`/`standing-violated`/`frozen-violated` 皆非，取到 `not-evaluated` 或该条根本不入 `gaps`）；并贴 `quay goal list --status active --kind criterion --json` 证明 AC-903 已不在 active AC 清单。贴两条原始输出。
+- [x] AC6（scoped 门绿且非空转）。`bash scripts/test.sh --for-task gap-ac903-retired-goal-active-ac-phantom-workable-spawn --allow-thin` 退出 0，且**确实执行了** ≥1 个测试文件；按 `scoped-log-per-file-line-is-not-how-you-tell-a-file-ran` 的教训，用 `--paths-only`/`--json` 或按 case 名确认后贴被执行文件名。
+- [x] AC7（不越权、无残留）。`git diff develop --stat` 仅含本任务 `## Touches` 声明的文件；`quay goal list --json` 逐条对比证明除 AC-903 外无任何 AC/GOAL 记录变更；`git branch --list 'goal/*'` 仍为空。
 
 ## DoD
 
@@ -84,3 +84,49 @@ fact goal-gaps  {"goal":"GOAL-903","ac":"AC-903","state":"workable","taskCount":
 - plugin/test/goal-driver-s01.test.mjs
 - goals/AC-903-goal-903-演练落地存在.md
 - tasks/gap-ac903-retired-goal-active-ac-phantom-workable-spawn.md
+
+## Evidence
+
+**本轮直接量**（worktree `/data/home/yale/work/quay-worktrees/gap-ac903-retired-goal-active-ac-phantom-workable-spawn`，分支 `task/gap-ac903-retired-goal-active-ac-phantom-workable-spawn`；主检出 `/data/home/yale/work/quay`）
+
+### AC1（复现：判据为真 + 被分类为 workable / goal-gaps 读数）
+
+判据逐字跑（worktree）：`PASS: GOAL-903 drill landing present`，`$?`=0。`quay goal gate AC-903 --json` ⇒ `"verdict":"pass","reason":"acceptance passed (exit 0)"`，exit 0。`.quay/goal-round.jsonl` 的 goal-gaps 逐字（主检出，round 6，ts `2026-10-03T13:16:47.387Z`）：`{"goal":"GOAL-903","ac":"AC-903","state":"workable","taskCount":2}`（round 5 同形）。
+
+### AC2（根因直接量 + 对照）
+
+`node --experimental-strip-types .quay/ac903-repro.mjs`（直接 import `computeGoalGaps`，最小输入 = AC-903 `status:active`、GOAL-903 `retired`、`verdicts` 不含 AC-903、两条 `goal_ac: AC-903` 的 done 任务）：
+
+```
+verdict-missing      : [{"goal":"GOAL-903","ac":"AC-903","state":"workable","taskCount":2}]     ← 修复前
+verdict-not-evaluated: [{"goal":"GOAL-903","ac":"AC-903","state":"not-evaluated","taskCount":null}]
+```
+
+对照（`verdicts.set("AC-903","not-evaluated")`）⇒ `state === "not-evaluated"`。分支行号（修复前）：`plugin/scripts/goal-driver.ts:2342`（`roundVerdict` 取值）、`:2343`（只认显式 not-evaluated）、`:2346-2348`（回落 `classifyCriterionKind`）；pass 1 只遍历 active GOAL 的 AC：`:3479`。
+
+### AC3（class 修复 + 变异对照）
+
+新增单测 `AC903: 所属 GOAL 非 active 的 active AC + verdict 缺键 ⇒ not-evaluated`（`plugin/test/goal-driver-s01.test.mjs`）。修复后 `node --test --experimental-strip-types plugin/test/goal-driver-s01.test.mjs` ⇒ `tests 24 / pass 24 / fail 0`。变异对照（`cp` 备份 `.quay/ac903-mutation-backup-goal-driver.ts`，把 `neverGated` 临时置 `false`）⇒ 该单测转红：`✖ AC903 … AssertionError: 从未被 gate 的缺键不得回落文本分类成 workable（硬规则 6）`（`tests 24 / pass 23 / fail 1`）；`cp` 恢复（md5 `218de188…` 一致）⇒ 回绿。
+
+### AC4（instance 收尾）
+
+`quay goal write AC-903 --status achieved --reason "…"`（经 goal store CLI，⛔ 非手改）。worktree 提交 `9d405f431`：`git show HEAD -- goals/AC-903-*.md` 仅 `status: active→achieved` + 一条 `statusLog` 追加（`reason` = 写入理由）；`criterion` 与 `origin` 逐字未动。主检出同款写入提交 `ba0906caa`（author → driver 的 doc-branch 同步落 develop `27551b07e`）。
+
+### AC5（可观察地关闭）
+
+`node --experimental-strip-types .quay/ac903-ac5-recompute.mjs <worktree>`（修复后的 `computeGoalGaps` 对**真实 records**）：
+
+```
+(A) real-state AC-903 gaps entry: [{"goal":"GOAL-903","ac":"AC-903","state":"not-evaluated","taskCount":null}]
+(B) active-AC903 + done-only (pre-fix shape) gaps entry: [{"goal":"GOAL-903","ac":"AC-903","state":"not-evaluated","taskCount":null}]
+```
+
+两条皆非 filing-state（`workable`/`gap`/`standing-violated`/`frozen-violated` 皆非）。`quay goal list --status active --kind criterion --json` ⇒ `['AC-281','AC-320','AC-324','AC-325','AC-327','AC-328']`，AC-903 已不在 active AC 清单。
+
+### AC6（scoped 门绿且非空转）
+
+`bash scripts/test.sh --for-task gap-ac903-retired-goal-active-ac-phantom-workable-spawn --allow-thin` ⇒ exit 0（`.quay/ac903-scoped-gate.txt`）。**确实执行了**测试文件 `plugin/test/goal-driver-s01.test.mjs`（24 个 case 全绿），按 case 名确认（`scoped-log-per-file-line-is-not-how-you-tell-a-file-ran`），含新增 `✔ AC903: 所属 GOAL 非 active 的 active AC + verdict 缺键 ⇒ not-evaluated`。
+
+### AC7（不越权、无残留）
+
+`git diff develop --stat`（worktree）仅 3 条：`goals/AC-903-*.md`（1 行 statusLog 时间戳）、`plugin/scripts/goal-driver.ts`、`plugin/test/goal-driver-s01.test.mjs`——全部在 `## Touches` 声明内（task 文件本身亦在 Touches）；`goals/` 下无其它 AC/GOAL 记录变更。`git branch --list 'goal/*'` ⇒ 空。`quay goal list --json`：220 条记录，AC-903 `achieved`、GOAL-903 `retired`。
