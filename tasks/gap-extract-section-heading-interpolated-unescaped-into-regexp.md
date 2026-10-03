@@ -2,7 +2,7 @@
 id: gap-extract-section-heading-interpolated-unescaped-into-regexp
 title: extractSection 把 heading 原样拼进 RegExp——含 ( ) | + 的标题被当正则（两份副本相同）；加固并把
   parity 测试扩到全部真实任务文件
-status: ready
+status: done
 labels:
   - gap
 parent: null
