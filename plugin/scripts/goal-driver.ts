@@ -77,7 +77,7 @@ import { parse as parseYaml } from "yaml";
 //
 // ⚠️ 从 driver-runtime（Layer 0）取这两个核心符号，⛔ 不在此处直接写 Core 源码树的 import 字面量：
 // 「Core 的源码树在哪」是布局知识，唯一落点是 Layer 0（driver-runtime 的 Core 导入面）。
-import { inAchievedReverifyScope, readsFrozenPopulation, GOAL_ACCEPTANCE_ACTIVE_ENV, goalCriterionWorktreeDir, goalBranchName, goalBranchRefExists, goalBranchTip } from "./driver-runtime.ts";
+import { inAchievedReverifyScope, readsFrozenPopulation, GOAL_ACCEPTANCE_ACTIVE_ENV, goalCriterionWorktreeDir, goalBranchName, goalBranchRefExists, goalBranchTip, snapshotQuayDirInto, stopPreviewServe, type QuaySnapshotReading, type PreviewStopReading } from "./driver-runtime.ts";
 
 // ⑨ CI run 载体的**生产调用点**（tasks/gap-develop-ci-first-decisive-green Requested action 2）。
 // ⛔ 本 driver 是 AC-265 的评估者，而 AC-265 读的是 `.quay/ci-runs.jsonl` 这个**本地载体**——
@@ -282,18 +282,21 @@ export async function gateCriterion(
   scriptRoot: string | null,
   id: string,
   dataRoot: string,
-): Promise<{ verdict: "pass" | "fail" | "not-evaluated"; reason: string }> {
+): Promise<{ verdict: "pass" | "fail" | "not-evaluated"; reason: string; cause: string | null }> {
   const r = await runAsync(goalStoreArgv(scriptRoot, ["gate", id], dataRoot), { timeoutMs: CRITERION_TIMEOUT_MS, collectStderr: true });
-  if (r.error) return { verdict: "not-evaluated", reason: `gate spawn error: ${r.error.message}` };
+  if (r.error) return { verdict: "not-evaluated", reason: `gate spawn error: ${r.error.message}`, cause: "spawn" };
   // exit 0 = pass, 1 = fail（含空 criterion 的 fail-closed）, 2 = 用法/记录不存在 ⇒ 无法评估。
-  if (r.status === 2) return { verdict: "not-evaluated", reason: `gate usage error: ${(r.stderr || "").trim().slice(0, 200)}` };
+  if (r.status === 2) return { verdict: "not-evaluated", reason: `gate usage error: ${(r.stderr || "").trim().slice(0, 200)}`, cause: "usage" };
   try {
     const out = JSON.parse(String(r.stdout ?? "").trim());
     const v = out.verdict === "pass" ? "pass" : out.verdict === "fail" ? "fail" : "not-evaluated";
-    return { verdict: v, reason: String(out.reason ?? "").slice(0, 500) };
+    // `cause` travels beside the verdict (goal-store's own NotEvaluatedCause: "declared" = the
+    // criterion exited 3 — this repo's "I cannot evaluate this HERE" convention). It is what lets the
+    // round tell a criterion that declared carrier-absence from one that merely failed (硬规则 3b).
+    return { verdict: v, reason: String(out.reason ?? "").slice(0, 500), cause: typeof out.cause === "string" ? out.cause : null };
   } catch {
     // 读不懂输出 ≠ 合格（硬规则 3b）——给它一个独立取值，不与 pass/fail 共用。
-    return { verdict: "not-evaluated", reason: `unparseable gate output (exit ${r.status})` };
+    return { verdict: "not-evaluated", reason: `unparseable gate output (exit ${r.status})`, cause: "unreadable" };
   }
 }
 
@@ -2103,6 +2106,38 @@ export function standingReverifyAcs(
  *  ⛔ 成本上界与 AC-242 判据同量级（纯读台账 + frontmatter，零 criterion 执行）——⛔ 不是把 78 条
  *  域外 AC 无差别纳入每轮复跑（那是 AC-216 已裁定的成本边界之外的放宽；重跑归**有界轮转**
  *  `sweepFrozenAcs`，它每轮至多 budget 条）。 */
+
+/**
+ * SPEC-goal-branch §4.7 (裁定⑭⑮) — the AC ids EXCLUDED from evaluation before the merge: a
+ * `phase: post-merge` AC whose owning GOAL is branch-mode AND whose `goal/<id>` branch still exists.
+ * Pre-merge these read `not-evaluated` (`pre-merge-phase`) and ⛔ do not enter the gap reading; once
+ * the branch is gone (merged §4.7 / discarded §4.2) the SAME AC is evaluated normally.
+ *
+ * Pure over `records` + an injected `branchExists` predicate (git is the caller's concern), so the
+ * split rule is unit-testable without a repository — the same discipline `resolveCriterionRoot` uses
+ * on the store side (branch existence is derived from git, never from a stored flag).
+ */
+export function preMergePhaseExcludedAcIds(
+  records: Array<Record<string, unknown>>,
+  branchExists: (goalId: string) => boolean,
+): Set<string> {
+  const branchGoals = new Set<string>();
+  for (const r of records) {
+    const id = String(r.id ?? "");
+    if (!id.startsWith("GOAL-") || r.branch !== true) continue;
+    if (branchExists(id)) branchGoals.add(id);
+  }
+  const out = new Set<string>();
+  for (const r of records) {
+    const id = String(r.id ?? "");
+    // Only an explicitly-declared `post-merge` is excluded — the projected default (`pre-merge`, or a
+    // legacy/hand-written token) is evaluated on the criterion worktree as before.
+    if (!id.startsWith("AC-") || r.phase !== "post-merge") continue;
+    if (branchGoals.has(String(r.goal ?? ""))) out.add(id);
+  }
+  return out;
+}
+
 export function computeGoalGaps(
   records: Array<Record<string, unknown>>,
   taskFacts: Array<{ id: string; status: string | null; goalAc: string | null }> | null,
@@ -2112,8 +2147,16 @@ export function computeGoalGaps(
   frozenRecheck: PrefilingRecheckReading | null = null,
   standingRecheck: PrefilingRecheckReading | null = null,
   verdicts: Map<string, "pass" | "fail" | "not-evaluated"> | null = null,
+  preMergePhaseAcIds: Set<string> | null = null,
 ): Array<GoalGap> {
   const activeGoalIds = activeGoalIdsOf(records);
+  // SPEC-goal-branch §4.7 (裁定⑭⑮) — a post-merge AC under a branch-mode goal whose branch still
+  // exists is NOT evaluated before the merge (its truth needs real production running the code after
+  // landing), so it must NOT enter this gap reading: filing a task for an AC that is structurally
+  // impossible to satisfy yet would be a false gap, every round, forever. The caller computes the set
+  // (it needs git for branch existence — this function stays pure); `null` (the default) means "no
+  // phase split", so the pre-existing behaviour is unchanged for every existing caller/unit test.
+  const phaseExcluded = preMergePhaseAcIds;
   // 三类 population 落在同一个 gaps 读数里（⚠️ 但判据不同——见上）：
   //   ① active AC：牵引四态（G7/G9）。
   //   ② AC-216 复验域的常设不变式：按 I5 复验读数判「此刻成立 / 此刻违反 / 读不到」。
@@ -2140,6 +2183,10 @@ export function computeGoalGaps(
   for (const r of records) {
     const id = String(r.id ?? "");
     if (!id.startsWith("AC-")) continue;
+    // SPEC-goal-branch §4.7: pre-merge, a post-merge AC is not evaluated ⇒ no gap entry at all
+    // (⛔ not a `not-evaluated` entry either — that would still be a per-round reading demanding
+    // attention; the AC is simply out of scope until the branch is gone).
+    if (phaseExcluded !== null && phaseExcluded.has(id)) continue;
     const goal = String(r.goal ?? "");
     // ③ 冻结population：问句是「此刻为假吗」，⛔ 不是「有没有任务」。先于 ① 判定（③ 的成员在 ① 里
     // 本就被 `status !== "active"` 排除，顺序不影响结果；放在前面只为让「谁在管这条 AC」一目了然）。
@@ -2293,7 +2340,20 @@ export function computeGoalGaps(
       // 硬规则 3b），`fail`/读不到回落下面的文本分类（⛔ 缺值 ≠ 为假，硬规则 6）。
       // （gap-goal-active-ac-gap-classification-ignores-round-verdict）
       const roundVerdict = verdicts === null ? null : verdicts.get(id) ?? null;
-      if (roundVerdict === "not-evaluated") {
+      // ⚠️ 形态二（gap-ac903-retired-goal-active-ac-phantom-workable-spawn）：AC 的**所属 GOAL 已在 store 里
+      // 是一条非 active 的记录**（retired/achieved/superseded/draft）⇒ pass 1 的 gate 集合只遍历【active
+      // GOAL 的 AC】（见本文件 pass 1 `for (const goal of activeGoals)`，:3479 一带）⇒ 这条 AC **本轮结构上
+      // 从不被 gate** ⇒ `verdicts` 里**根本没有这个键**。这不是「判据为假」（fail），是「判据根本没被问过」
+      // （缺值）——硬规则 6：缺值 = 未查 ≠ 为假。给它独立取值 `not-evaluated`（taskCount null，⛔ 与
+      // `workable`/`gap` 都不同形），**绝不**回落文本分类产出一个可立案的 `workable`：那正是本形态每轮
+      // 空转 spawn 一条产不出任何东西的 worker 的成因（上一条已修的是「判据自陈无法评估」，那条在
+      // `verdicts` 里是**有键且值为 not-evaluated**；本条是**缺键**，两者同族但机制不同）。
+      // ⛔ 判据是「GOAL **记录存在**且其 status ≠ active」——GOAL 记录**整个缺失**是另一种形态（真正的缺值，
+      // 硬规则 6：不从「找不到 GOAL」推断「GOAL 已 retired」），保持今日行为（回落文本分类）。
+      const goalId = String(r.goal ?? "");
+      const goalRec = records.find((x) => String(x.id ?? "") === goalId && goalId.startsWith("GOAL-"));
+      const neverGated = roundVerdict === null && goalRec !== undefined && String(goalRec.status ?? "") !== "active";
+      if (roundVerdict === "not-evaluated" || neverGated) {
         state = "not-evaluated";
         taskCount = null;
       } else {
@@ -3050,6 +3110,12 @@ export interface CriterionWorktreeReading {
   /** worktree 处置后其 HEAD 的 sha；null = 读不到（⛔ 与「没有 worktree」不同形，硬规则 3b）。 */
   headSha: string | null;
   reason: string | null;
+  /** §4.10 裁定㉓ —— 建/刷时对判据 worktree 做的 `.quay/` 只读快照读数；null = 本轮没做快照
+   *  （`current`/`no-branch`/`failed`），⛔ 与「做了且零文件」不同形（硬规则 3b）。 */
+  quaySnapshot: QuaySnapshotReading | null;
+  /** §4.10 裁定㉒ —— 删 worktree **之前**停掉其上 serve 的读数；null = 本轮没有删除（不适用）。
+   *  ⛔ 与「删了但没有 serve」不同形：后者是 `not-running` 的显式读数。 */
+  previewStop: PreviewStopReading | null;
 }
 
 /** git 的机械调用（同步、无 shell）。⛔ 失败不抛——调用方要看的是读数，不是异常。 */
@@ -3072,22 +3138,26 @@ function criterionWorktreeRegistered(root: string, wtPath: string): boolean {
   return false;
 }
 
-/** 让一个 branch-mode goal 的判据 worktree 停在该分支 tip 上（建/刷）。返回处置读数。 */
+/** 让一个 branch-mode goal 的判据 worktree 停在该分支 tip 上（建/刷）。返回处置读数。
+ *
+ *  §4.10 裁定㉓：建/刷之后立刻做一次主检出 `.quay/` 的**只读快照**（快照语义与排除项在 Core
+ *  `snapshotQuayDirInto` 单一实现里）。⛔ 只在建/刷时做，`current` 不做——每轮对 5G 级的 `.quay/`
+ *  重拷是把「快照」变成一次事故，而 refresh 正是「树变了、副本该重来」的那一次。 */
 function ensureGoalCriterionWorktree(root: string, goalId: string): CriterionWorktreeReading {
   const branch = goalBranchName(goalId);
   const wtPath = goalCriterionWorktreeDir(root, goalId);
   const tip = goalBranchTip(root, goalId);
-  const base = { goal: goalId, branch, path: wtPath, headSha: null as string | null, reason: null as string | null };
+  const base = { goal: goalId, branch, path: wtPath, headSha: null as string | null, reason: null as string | null, quaySnapshot: null as QuaySnapshotReading | null, previewStop: null as PreviewStopReading | null };
   if (tip === null) return { ...base, state: "no-branch", reason: `branch ${branch} not resolvable` };
 
   const registered = criterionWorktreeRegistered(root, wtPath);
   if (!registered) {
     const add = gitIn(root, ["worktree", "add", "--detach", wtPath, tip]);
-    if (add.ok) return { ...base, state: "created", headSha: tip };
+    if (add.ok) return { ...base, state: "created", headSha: tip, quaySnapshot: snapshotQuayDirInto(root, wtPath) };
     // 「already registered」而登记表里没有 = 陈旧登记（目录被手工删过）⇒ prune 后重试一次。
     gitIn(root, ["worktree", "prune"]);
     const retry = gitIn(root, ["worktree", "add", "--detach", wtPath, tip]);
-    if (retry.ok) return { ...base, state: "created", headSha: tip };
+    if (retry.ok) return { ...base, state: "created", headSha: tip, quaySnapshot: snapshotQuayDirInto(root, wtPath) };
     return { ...base, state: "failed", reason: `worktree add failed: ${retry.stderr.slice(0, 200)}` };
   }
 
@@ -3097,13 +3167,15 @@ function ensureGoalCriterionWorktree(root: string, goalId: string): CriterionWor
   // 刷新：detached 移动 HEAD 到新 tip。`--force` 丢弃 worktree 里的本地改动——判据 worktree 是**一次性的
   // 求值面**（§4.10：预览内的写操作随刷新丢弃），保留它们只会让下一轮判据跑在一棵混合树上。
   const co = gitIn(wtPath, ["checkout", "--detach", "--force", tip]);
-  if (co.ok) return { ...base, state: "refreshed", headSha: tip };
+  if (co.ok) return { ...base, state: "refreshed", headSha: tip, quaySnapshot: snapshotQuayDirInto(root, wtPath) };
 
   // 刷新失败（例如未跟踪文件挡路）⇒ 拆掉重建，⛔ 不把失败留在原地当「已刷新」。
+  // ⛔ 删之前先停 serve（§4.10）：否则留下一个 cwd 已被删除的孤儿进程。
+  const previewStop = stopPreviewServe(wtPath);
   gitIn(root, ["worktree", "remove", "--force", wtPath]);
   const readd = gitIn(root, ["worktree", "add", "--detach", wtPath, tip]);
-  if (readd.ok) return { ...base, state: "created", headSha: tip };
-  return { ...base, state: "failed", reason: `refresh failed (${co.stderr.slice(0, 120)}) and re-add failed (${readd.stderr.slice(0, 120)})` };
+  if (readd.ok) return { ...base, state: "created", headSha: tip, quaySnapshot: snapshotQuayDirInto(root, wtPath), previewStop };
+  return { ...base, state: "failed", reason: `refresh failed (${co.stderr.slice(0, 120)}) and re-add failed (${readd.stderr.slice(0, 120)})`, previewStop };
 }
 
 /** 本轮处置：branch:true 的每个 GOAL 一条读数（⛔ 只扫 branch:true——普通 goal 结构上没有判据 worktree，
@@ -3123,11 +3195,14 @@ export function syncGoalCriterionWorktrees(
       // 分支已删（并入 §4.7 / 废弃 §4.2）⇒ 判据回主检出；留在盘上的 worktree 是孤儿，删掉。
       // ⛔ state=removed 与 no-branch 分开：前者是「本轮真删了一个」，后者是「本来就没有」。
       if (criterionWorktreeRegistered(root, wtPath)) {
+        // §4.10 裁定㉒：**先停 serve 再删 worktree**——否则留下一个 cwd 已被删除的孤儿进程。
+        // 读的是【该 root 自己】的 .quay/server.json（⛔ 不是主检出的登记），停不掉时读数照实带出。
+        const previewStop = stopPreviewServe(wtPath);
         const rm = gitIn(root, ["worktree", "remove", "--force", wtPath]);
-        if (rm.ok) { gitIn(root, ["worktree", "prune"]); out.push({ goal: gid, branch: goalBranchName(gid), path: wtPath, state: "removed", headSha: null, reason: null }); }
-        else out.push({ goal: gid, branch: goalBranchName(gid), path: wtPath, state: "failed", headSha: null, reason: `worktree remove failed: ${rm.stderr.slice(0, 200)}` });
+        if (rm.ok) { gitIn(root, ["worktree", "prune"]); out.push({ goal: gid, branch: goalBranchName(gid), path: wtPath, state: "removed", headSha: null, reason: null, quaySnapshot: null, previewStop }); }
+        else out.push({ goal: gid, branch: goalBranchName(gid), path: wtPath, state: "failed", headSha: null, reason: `worktree remove failed: ${rm.stderr.slice(0, 200)}`, quaySnapshot: null, previewStop });
       } else {
-        out.push({ goal: gid, branch: goalBranchName(gid), path: wtPath, state: "no-branch", headSha: null, reason: null });
+        out.push({ goal: gid, branch: goalBranchName(gid), path: wtPath, state: "no-branch", headSha: null, reason: null, quaySnapshot: null, previewStop: null });
       }
       continue;
     }
@@ -3147,6 +3222,14 @@ export interface GoalRoundReadings {
    *  state ∈ 枚举（created/refreshed/current/removed/no-branch/failed），⛔ 不折成布尔（硬规则 3）。 */
   criterionWorktrees: CriterionWorktreeReading[];
   criteria: Array<{ id: string; goal: string; status: string; verdict: "pass" | "fail" | "not-evaluated"; reason: string }>;
+  /** SPEC-goal-branch §4.7 (裁定⑭⑮) — branch-mode goals whose ACs are split by phase.
+   *  `excluded`: this round's post-merge ACs NOT evaluated before the merge (their `criteria` entry is
+   *  `not-evaluated` / `pre-merge-phase`, and they are absent from `gaps`). `maybePostMerge`: a
+   *  pre-merge AC that declared carrier-absence (exit 3 ⇒ cause `declared`) on the goal-branch tree —
+   *  a HINT that it may actually belong to `post-merge`. ⛔ A hint only: it never reclassifies the AC
+   *  (that is the author's declaration), it just makes the misclassification visible.  Both are empty
+   *  arrays when there are no branch-mode goals — "no split" is not the same shape as "not run". */
+  phaseSplit: { excluded: string[]; maybePostMerge: string[] };
   /** 本轮 driver 做的全部状态翻写：I2 达成翻转（to=achieved）+ ⑧ 分诊 activate 执行（to=active）。
    *  ⛔ 分诊不翻其余三态（re-anchor / needs-human / hold 只落痕，AC-219）。 */
   flips: Array<{ id: string; to: string; ok: boolean; reason: string }>;
@@ -3376,6 +3459,19 @@ export async function runGoalRound(root: string, opts: GoalRoundOptions = {}): P
   // 下面 pass 1 的每条 criterion 都以 `goal/<id>` 的代码为 cwd（store 侧 resolveCriterionRoot 派生），
   // 树没就位就会跑在主检出上——正是本任务要消灭的那个死锁。⛔ 不计入本轮的失败态：它是处置读数。
   const criterionWorktrees = syncGoalCriterionWorktrees(dataRoot, records);
+  // SPEC-goal-branch §4.7 (裁定⑭⑮) — the pre-merge/post-merge split. `preMergePhaseAcIds` are the
+  // post-merge ACs of branch-mode goals whose branch still exists ⇒ they are NOT evaluated this round
+  // (and ⛔ do not enter the gap reading). `branchModeGoalIds` is the same "branch-mode ∧ branch
+  // exists" predicate, kept so pass 1 can also raise the `maybe-post-merge` hint below. Branch
+  // existence is read from git (⛔ never from a stored flag) — one probe per branch-mode GOAL.
+  const branchModeGoalIds = new Set<string>();
+  for (const r of records) {
+    const gid = String(r.id ?? "");
+    if (!gid.startsWith("GOAL-") || r.branch !== true) continue;
+    if (goalBranchRefExists(dataRoot, gid)) branchModeGoalIds.add(gid);
+  }
+  const preMergePhaseAcIds = preMergePhaseExcludedAcIds(records, (gid) => branchModeGoalIds.has(gid));
+  const phaseSplit: GoalRoundReadings["phaseSplit"] = { excluded: [...preMergePhaseAcIds], maybePostMerge: [] };
   const criteria: GoalRoundReadings["criteria"] = [];
   const flips: GoalRoundReadings["flips"] = [];
   const closeBlocks: GoalRoundReadings["closeBlocks"] = [];
@@ -3398,8 +3494,22 @@ export async function runGoalRound(root: string, opts: GoalRoundOptions = {}): P
     const acs = records.filter((r) => isAc(r) && String(r.goal ?? "") === gid);
     for (const ac of acs) {
       const id = String(ac.id);
-      const { verdict, reason } = await gateCriterion(scriptRoot, id, dataRoot);
+      // SPEC-goal-branch §4.7 (裁定⑭⑮) — pre-merge, a post-merge AC is NOT evaluated: its reading is
+      // `not-evaluated` with the exact reason `pre-merge-phase`, and it is neither flipped nor gapped.
+      // ⛔ `not-evaluated` (not `fail`) so a reader can tell "waiting for the merge" from "false".
+      if (preMergePhaseAcIds.has(id)) {
+        criteria.push({ id, goal: gid, status: String(ac.status ?? ""), verdict: "not-evaluated", reason: "pre-merge-phase" });
+        continue;
+      }
+      const { verdict, reason, cause } = await gateCriterion(scriptRoot, id, dataRoot);
       criteria.push({ id, goal: gid, status: String(ac.status ?? ""), verdict, reason });
+      // SPEC-goal-branch §4.7 裁定⑮ 辅助读数: a PRE-merge AC under a branch-mode goal that ended in
+      // carrier-absence (exit 3 ⇒ cause `declared`) on the goal-branch tree is a HINT that it may
+      // really be post-merge. ⛔ A hint only — the phase is declared by the author, never reclassified
+      // here (hard rule 2); this just makes the misclassification visible in the round reading.
+      if (branchModeGoalIds.has(gid) && ac.phase !== "post-merge" && verdict === "not-evaluated" && cause === "declared") {
+        phaseSplit.maybePostMerge.push(id);
+      }
       // I2（AC 层）：判据 pass 且 AC 为 active ⇒ 机械 flip active→achieved（裁定 5 的确定性推导，不算自动晋升）。
       // ⛔ 裁定 3：draft→active（激活）是人/manager 手动——本驱动不得把 draft（或 superseded/retired）AC 翻成 achieved。
       if (verdict === "pass" && ac.status === "active") {
@@ -3615,7 +3725,7 @@ export async function runGoalRound(root: string, opts: GoalRoundOptions = {}): P
   // 不再按文本误判成 `workable` 每轮空转 spawn（见 computeGoalGaps 的 `count === 0` 分支）。
   // ⛔ 单向输入：只读 pass 1 已算出的读数，⛔ 不重跑任何判据、⛔ 不改 spawn/flip 判定面。
   const verdictByAc = new Map<string, "pass" | "fail" | "not-evaluated">(criteria.map((c) => [c.id, c.verdict]));
-  const gaps = computeGoalGaps(records, taskFacts, judgment, achievedFailing, frozenFailing, frozenRecheck, standingRecheck, verdictByAc);
+  const gaps = computeGoalGaps(records, taskFacts, judgment, achievedFailing, frozenFailing, frozenRecheck, standingRecheck, verdictByAc, preMergePhaseAcIds);
 
   // ⑦ draft AC 分诊（GOAL-010 范围② / AC-210）：对 active GOAL 名下每条 draft AC 出四态判决并逐条
   // 落痕。分诊循环只【产出判决】，⛔ 不 flip 任何 AC status——判决的消费在 ⑧（仅 activate 一态被
@@ -3734,6 +3844,7 @@ export async function runGoalRound(root: string, opts: GoalRoundOptions = {}): P
     criterionCount: criteria.length,
     criterionWorktrees,
     criteria,
+    phaseSplit,
     flips,
     closeBlocks,
     staleness,

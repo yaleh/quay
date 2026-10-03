@@ -457,6 +457,58 @@ test('AC1: count===0 分支先读本轮 verdict——not-evaluated 独占一态�
   assert.notEqual(ne.state, missing.state, 'not-evaluated ≠ 缺值的回落落点');
 });
 
+// ── gap-ac903-retired-goal-active-ac-phantom-workable-spawn：① active-AC 缺口分类（count===0 分支）
+//    必须按【GOAL 记录】区分「所属 GOAL 非 active ⇒ 本轮从不被 gate」。pass 1 只遍历【active GOAL 的 AC】
+//    （`goal-driver.ts` 的 `for (const goal of activeGoals)`，:3479 一带）⇒ 一条 retired/achieved GOAL 名下
+//    的 active AC **结构上从不被 gate**，`verdicts` 里**根本没有它的键**（⛔ 不是值为 `not-evaluated`）。
+//    旧实现把这个「缺键」与 `fail` 一起回落文本分类（`classifyCriterionKind`）⇒ 判成 `workable` ⇒ 每轮
+//    spawn 一条**无论产出什么都改不了它真值**的 worker（实测 AC-903，2026-10-03，每轮
+//    `goal-gaps {"ac":"AC-903","state":"workable","taskCount":2}`，而判据此刻 exit 0）。硬规则 6：
+//    缺值 = 未查 ≠ 为假 ⇒ 独立取值 `not-evaluated`（taskCount null，⛔ 不立案）。
+//    ⛔ 闭环的另一半：判据只在 **GOAL 记录存在且非 active** 时成立；GOAL 记录**整个缺失**是真正的缺值，
+//    保持今日行为（回落）——由上面 AC1 用例的 ③/③b 负控制钉住（那条 fixture 不含 GOAL 记录）。
+
+test('AC903: 所属 GOAL 非 active 的 active AC + verdict 缺键 ⇒ not-evaluated（⛔ 不回落成可立案 workable）', () => {
+  // 判据正文无 `.quay/` token ⇒ 文本分类会是 `workable`（本用例的对照基线：新旧实现的唯一分歧就在这里）。
+  const retiredGoal = [
+    { id: 'GOAL-903', kind: 'goal', status: 'retired' },
+    { id: 'AC-903', goal: 'GOAL-903', status: 'active', criterion: 'test -f src/x.ts' },
+  ];
+  const done = [
+    { id: 'T-903-drill', status: 'done', goalAc: 'AC-903' },
+    { id: 'gap-goal903-drill-landing-missing', status: 'done', goalAc: 'AC-903' },
+  ];
+
+  // ① 本轮 verdicts 不含 AC-903（该键结构上缺失）⇒ 独立取值 not-evaluated（taskCount null）+ ⛔ 不立案。
+  const g = computeGoalGaps(retiredGoal, done, null, null, null, null, null, new Map())[0];
+  assert.equal(g.state, 'not-evaluated', '从未被 gate 的缺键不得回落文本分类成 workable（硬规则 6）');
+  assert.equal(g.taskCount, null, 'not-evaluated 的 taskCount 是 null（⛔ 与 0 不同形）');
+  assert.equal(isFilingGapState(g.state), false, 'not-evaluated ⛔ 不消耗 spawn 名额（本任务要消除的空转面）');
+  // 不传 verdicts（缺省 null）是同一形态：GOAL 非 active ⇒ 该 AC 本就从不被 gate ⇒ 同样 not-evaluated。
+  const gDefault = computeGoalGaps(retiredGoal, done)[0];
+  assert.equal(gDefault.state, 'not-evaluated', '未传 verdicts 也是同一形态（GOAL 非 active ⇒ 结构上从不被 gate）');
+  assert.equal(gDefault.taskCount, null);
+
+  // ② 负控制 A：GOAL 记录**整个缺失**（不是「一条非 active 的已知记录」）⇒ 保持今日行为（回落文本分类 = workable）。
+  //    ⛔ 不从「找不到 GOAL」推断「GOAL 已 retired」（缺值 = 未查 ≠ 为假，硬规则 6）。
+  const noGoalRecord = [{ id: 'AC-X', goal: 'GOAL-404', status: 'active', criterion: 'test -f src/x.ts' }];
+  const orphan = computeGoalGaps(noGoalRecord, [{ id: 't', status: 'done', goalAc: 'AC-X' }])[0];
+  assert.equal(orphan.state, 'workable', 'GOAL 记录缺失 ⇒ 真缺值，回落今日行为（⛔ 不伪装成 retired）');
+
+  // ③ 负控制 B：GOAL **存在且 active** ⇒ 缺键照旧回落文本分类（pass 1 本会 gate 它，缺键是异常，⛔ 不一律 not-evaluated）。
+  const activeGoal = [
+    { id: 'GOAL-001', kind: 'goal', status: 'active' },
+    { id: 'AC-X', goal: 'GOAL-001', status: 'active', criterion: 'test -f src/x.ts' },
+  ];
+  const active = computeGoalGaps(activeGoal, [{ id: 't', status: 'done', goalAc: 'AC-X' }], null, null, null, null, null, new Map())[0];
+  assert.equal(active.state, 'workable', 'GOAL active ⇒ 缺键回落文本分类（⛔ 不是「凡缺键 ⇒ not-evaluated」）');
+
+  // 三态互不同形（硬规则 3b）：not-evaluated 与两个 workable 回落取值可区分。
+  assert.notEqual(g.state, orphan.state);
+  assert.notEqual(g.state, active.state);
+  assert.equal(orphan.state, active.state, '两个 workable 回落取值同形是预期的（同一条回落路径）');
+});
+
 test('AC2（端到端）: criterion 自陈 exit 3 的 active AC ⇒ 该轮 gaps 落 not-evaluated、gap_spawns 不含它、spawned 不因它 +1', async () => {
   const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'goal-driver-acverdict-'));
   try {

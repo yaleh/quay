@@ -78,6 +78,7 @@ Usage:
   quay goal gate <id> [--dry-run] [--json] [--root <path>]
   quay goal check [--staleness|--achieved-failing|--stale-pass [--sweep]|--reverify-scope] [--json] [--root <path>]
   quay goal batch --json '<array>' [--root <path>]
+  quay goal preview <GOAL-NNN> start|stop|status [--port <n>] [--host <h>] [--root <path>] [--json]
   quay meta list [--status <status>] [--json] [--root <path>]
   quay meta show <id> [--json] [--root <path>]
   quay meta write <id> --title <title> [--status <status>] [--handler <handler>] [--reply <text>] [--body <text>|--body-file <path>] [--json] [--root <path>]
@@ -400,6 +401,7 @@ Usage:
   quay goal gate <id> [--timeout <ms>] [--dry-run] [--json] [--root <path>]
   quay goal check [--staleness|--achieved-failing|--stale-pass [--sweep]|--reverify-scope] [--json] [--root <path>]
   quay goal batch --json '<array-of-records>' [--root <path>]
+  quay goal preview <GOAL-NNN> start|stop|status [--port <n>] [--host <h>] [--root <path>] [--json]
 
   list / show / write   Read and write records through the Provider ABI (SPEC-goal-mechanism §5.2).
                         write --branch true|false  Opt a GOAL into its own isolation branch
@@ -430,6 +432,25 @@ Usage:
                         ⛔ Three-state on purpose: "looked and all clean" and "could not evaluate" are
                         DIFFERENT exit codes, never the same value.
   batch --json '<array>'  Write N records in ONE commit (each: id + the write fields).
+  preview <id> start|stop|status
+                        The PREVIEW INSTANCE of a branch-mode goal (SPEC-goal-branch §4.10): the
+                        goal's criterion worktree plus a 'quay serve' whose workspace root IS that
+                        worktree. Try the goal's changes here BEFORE the merge; the pre-merge ACs are
+                        evaluated on this same tree, so what you try and what the criterion verifies
+                        are one object. The WORKTREE belongs to goal-driver (it creates/refreshes/
+                        deletes it); the SERVE belongs to you — these three verbs are that half.
+                          start  Run the preview worktree's OWN quay code ('node --watch … serve')
+                                 with the worktree as workspace root. --port <n≥1> is REQUIRED and
+                                 explicit: a preview on a kernel-assigned port cannot be addressed.
+                          stop   Stop it by reading ITS OWN .quay/server.json (⛔ never a pattern
+                                 kill — the supervisor's argv contains the pattern you searched for).
+                          status Read that same carrier (running | stale | not-running | not-evaluated).
+                        ⛔ A preview never reads or writes production data: it starts with a
+                        read-only SNAPSHOT of the main checkout's .quay/ (instance-identity files —
+                        server.lock / server.json / server-services.json — excluded), and its writes
+                        are discarded on the next refresh. ⛔ No preview serve running ⇒ a live-probe
+                        AC reads not-evaluated ⇒ 'quay goal merge' refuses (that IS the "the human
+                        really tried it" precondition — there is no separate flag for it).
 
 Options:
   --store               Run the goal-store dialect instead of the Provider ABI for list/show/write.
@@ -449,7 +470,7 @@ Options:
                         <root>/goals, <root>/.quay/gate-events.jsonl.
 `);
   } else if (sub === "driver") {
-    process.stdout.write(`quay driver — start/stop/drain/resume/status/restart the resident quay drivers (AC139)
+    process.stdout.write(`quay driver — ${VERBS.join("/")} the resident quay drivers (AC139)
 
 Usage:
   quay driver <${VERBS.join("|")}> --kind <${KINDS.join("|")}> [--root <path>] [flags]
@@ -466,8 +487,19 @@ Usage:
              last_record_ts} — last_record_ts is the carrier's last-record timestamp (not just a
              record count, which cannot distinguish "growing" from "stalled").
   restart    stop then start.
+  log        READ-ONLY: print the driver's recorded per-attempt log (the RAW failure text of each
+             attempt — never classified, never interpreted), through observation.readFanInAttempts
+             (the same single reader the web /needs-human page uses). ⛔ Does NOT spawn the kernel.
+  live       READ-ONLY: print the CURRENT in-flight worker set as JSON — the machine-readable
+             counterpart to the web dashboard's "Loop pulse" card. Reuses observation.readLive's ONE
+             call chain (⛔ no second /proc scan); scoped to THIS workspace (each scanned process must
+             declare its own \`Repo root:\` marker equal to --root). Always JSON. Reports
+             workerSignal.evaluated so "NOT evaluated" (the driver is inactive ⇒ the /proc scan never
+             ran) is DISTINCT from "zero in flight". ⛔ Needs no serve process.
 
-  --kind <${KINDS.join("|")}>   Required. Which driver the command targets.
+  --kind <${KINDS.join("|")}>   Which driver the command targets. Required for the control verbs
+             (start/stop/drain/resume/status/restart); optional for the read-only \`live\` (defaults to
+             \`worker\`).
   --root <path>               Workspace root (default: discovered via .quay/config.yml from cwd).
   --confirm-timeout <s>       (start/restart) Liveness-confirmation window (default 30). \`start\` reports
                               success ONLY after supervisor+driver are both confirmed alive; a supervisor

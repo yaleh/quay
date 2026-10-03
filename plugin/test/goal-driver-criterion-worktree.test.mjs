@@ -22,7 +22,10 @@
 // Run: node --test plugin/test/goal-driver-criterion-worktree.test.mjs
 
 import { test } from "node:test";
-import { assert, fs, mkGitFixtureRoot, os, path, repoRoot, runGoalRound, spawnSync } from "./helpers/goal-driver-harness.mjs";
+import {
+  assert, fs, mkGitFixtureRoot, os, path, repoRoot, runGoalRound, spawnSync,
+  goalAchievedFromRecords, goalFlipDecision,
+} from "./helpers/goal-driver-harness.mjs";
 
 const GOAL = "GOAL-901";
 const BRANCH = "goal/GOAL-901";
@@ -31,6 +34,9 @@ const PLAIN_GOAL = "GOAL-902";
 const GOAL_ONLY_FILE = "only-on-goal-branch.txt";
 /** 第二个只在 goal 分支上的文件，**后一个提交**才出现（AC3 的刷新读数靠它）。 */
 const GOAL_ONLY_FILE_2 = "second-on-goal-branch.txt";
+/** SPEC-goal-branch §4.7 相位夹具用：post-merge 判据看的文件，**任何树上都不存在** ⇒ 一旦被求值必
+ *  为 fail（因此「not-evaluated」只能来自相位排除，⛔ 不是来自文件恰好缺失）。 */
+const POST_MERGE_FILE = "post-merge-production-only.txt";
 
 /** 判据 worktree 的路径 —— 与 Core 的 `goalCriterionWorktreeDir` 同构（命名空间 + `goal-<id>`）。
  *  ⛔ 这里**重算**而不是 import，正是因为要独立复核：若被测实现换了推导，本断言必须变红。 */
@@ -44,11 +50,13 @@ function writeGoalRecord(root, { id, status, branch }) {
   fs.writeFileSync(path.join(root, "goals", `${id}-fixture.md`), lines.join("\n"), "utf8");
 }
 
-function writeAcRecord(root, { id, goal, status, criterion }) {
+function writeAcRecord(root, { id, goal, status, criterion, phase }) {
   const lines = [
     "---", `id: ${id}`, `title: ${id} fixture`, `status: ${status}`, "kind: criterion", `goal: ${goal}`,
-    "criterion: |", `  ${criterion}`, "origin: test fixture", "---", "", "## body", "x", "",
   ];
+  // SPEC-goal-branch §4.7 — the AC's declared evaluation phase (absent ⇒ the store projects pre-merge).
+  if (phase !== undefined) lines.push(`phase: ${phase}`);
+  lines.push("criterion: |", `  ${criterion}`, "origin: test fixture", "---", "", "## body", "x", "");
   fs.writeFileSync(path.join(root, "goals", `${id}-fixture.md`), lines.join("\n"), "utf8");
 }
 
@@ -231,9 +239,31 @@ test("AC3: goal 分支前进一个提交后，下一轮求值看到新提交（�
     );
     assert.equal(c2.get("AC-904")?.verdict, "pass", "第 2 轮：新提交带来了该文件 ⇒ 判据转绿（刷新真的对求值生效）");
 
-    // 刷新不得毁掉 worktree 与主 root 的关系：账本仍在主 root，worktree 里仍无账本。
-    assert.ok(fs.existsSync(path.join(tmp, ".quay", "gate-events.jsonl")), "主 root 的账本存在");
-    assert.equal(fs.existsSync(path.join(wtPath, ".quay", "gate-events.jsonl")), false, "worktree 里无账本");
+    // 刷新不得毁掉 worktree 与主 root 的关系：账本仍**写**在主 root。
+    // ⚠️ SPEC-goal-branch §4.10 裁定㉓（gap-goal-branch-preview-instance）之后，判据 worktree 同时是
+    // 该 goal 的**预览实例**，建/刷时会拿到一份主检出 `.quay/` 的**只读快照** ⇒ worktree 里现在**有**
+    // 一个账本文件。这正是本断言必须换判据的原因（旧判据「worktree 里无账本」描述的是快照落地前的
+    // 世界）：有账本 ≠ 事件写进了 worktree。真正的判据是——worktree 里那份是**冻结在快照时刻的副本**，
+    // 本轮 append 的事件只在主 root 的账本里。
+    const mainLedger = path.join(tmp, ".quay", "gate-events.jsonl");
+    const wtLedger = path.join(wtPath, ".quay", "gate-events.jsonl");
+    assert.ok(fs.existsSync(mainLedger), "主 root 的账本存在");
+    assert.ok(fs.existsSync(wtLedger), "worktree 里是主检出账本的只读快照（§4.10 ㉓；刷新写入的 .quay/ 副本）");
+    assert.notEqual(
+      fs.statSync(wtLedger).ino,
+      fs.statSync(mainLedger).ino,
+      "快照是【副本】（独立 inode），⛔ 不是同一文件/硬链——预览内的写操作必须落在副本上",
+    );
+    const mainLedgerText = fs.readFileSync(mainLedger, "utf8");
+    const wtLedgerText = fs.readFileSync(wtLedger, "utf8");
+    assert.ok(
+      mainLedgerText.startsWith(wtLedgerText),
+      "worktree 的账本是主 root 账本在快照时刻的【前缀】：快照之后本轮 append 的事件只在主 root",
+    );
+    assert.ok(
+      wtLedgerText.length < mainLedgerText.length,
+      `快照必须【旧于】主账本（wt=${wtLedgerText.length}B main=${mainLedgerText.length}B）——否则本轮事件写进了 worktree`,
+    );
   } finally {
     fs.rmSync(tmp, { recursive: true, force: true });
     fs.rmSync(ns, { recursive: true, force: true });
@@ -272,4 +302,128 @@ test("判据 worktree 的路径由【配置解析出的】worktree 基目录派�
   } finally {
     for (const d of [rootA, rootB, nsA, nsB]) fs.rmSync(d, { recursive: true, force: true });
   }
+});
+
+// ── SPEC-goal-branch-2026-10-03 §4.7 (裁定⑭⑮) — AC 的 phase 与分相求值 ─────────────────────────
+//
+// 回答的问题：**一条「只能并入后判」的 AC，在并入前是否被当成本轮要达成的目标。** 若被求值，它在判据
+// worktree 上恒为 not-evaluated（它的载体只在生产跑起来后才有）⇒ 并入前置条件永不满足、goal 永远卡住；
+// 若进 gap 计算，gap-filing 会为一个结构上还不可能通过的 AC 立任务。故：并入前 post-merge AC 不求值、
+// 不进 gaps，理由记 `pre-merge-phase`；并入后（分支已删）照常求值。`phase` 由**作者显式声明**，
+// ⛔ 不按判据文本推断（硬规则 2）。
+
+/** 相位夹具：branch-mode GOAL-901 下三条 AC ——
+ *  · AC-901  pre-merge，判据看只有 goal 分支才有的文件 ⇒ 求值 pass（正控制）。
+ *  · AC-905  post-merge，判据看的文件**任何树上都没有** ⇒ 一旦被求值必 fail（故 not-evaluated 只可能
+ *            来自相位排除，⛔ 不是文件恰好缺失）。
+ *  · AC-906  pre-merge，判据自陈载体缺席（exit 3）⇒ 应产生 maybe-post-merge 提示。 */
+function mkPhaseFixture() {
+  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "goal-phase-"));
+  const ns = fs.mkdtempSync(path.join(os.tmpdir(), "goal-phase-ns-"));
+  fs.mkdirSync(path.join(tmp, "goals"), { recursive: true });
+  fs.mkdirSync(path.join(tmp, ".quay"), { recursive: true });
+  fs.writeFileSync(path.join(tmp, ".gitignore"), ".quay/\n", "utf8");
+  fs.writeFileSync(path.join(tmp, ".quay", "config.yml"), `loop:\n  worktree_root: ${ns}\n`, "utf8");
+  const git = mkGitFixtureRoot(tmp);
+
+  writeGoalRecord(tmp, { id: GOAL, status: "active", branch: true });
+  writeAcRecord(tmp, { id: "AC-901", goal: GOAL, status: "active", criterion: `test -f ${GOAL_ONLY_FILE}` });
+  writeAcRecord(tmp, {
+    id: "AC-905", goal: GOAL, status: "active", phase: "post-merge",
+    criterion: `test -f ${POST_MERGE_FILE}`,
+  });
+  writeAcRecord(tmp, {
+    id: "AC-906", goal: GOAL, status: "active",
+    criterion: 'echo "NOT-EVALUATED: production carrier absent on this tree" >&2; exit 3',
+  });
+
+  git(["add", "-A"]);
+  git(["commit", "-m", "base"]);
+  git(["branch", "develop"]);
+  git(["checkout", "-q", "-b", BRANCH]);
+  fs.writeFileSync(path.join(tmp, GOAL_ONLY_FILE), "on the goal branch only\n", "utf8");
+  git(["add", GOAL_ONLY_FILE]);
+  git(["commit", "-m", "goal-branch-only file"]);
+  const tip = git(["rev-parse", "HEAD"]);
+  git(["checkout", "-q", "main"]);
+  return { tmp, ns, git, tip };
+}
+
+test("AC-phase-split: 并入前 post-merge AC 读 not-evaluated/pre-merge-phase 且不进 gaps；pre-merge AC exit 3 ⇒ maybe-post-merge 提示；并入后同一 AC 被求值", async () => {
+  const { tmp, ns, git } = mkPhaseFixture();
+  try {
+    const r1 = await runGoalRound(tmp, ROUND_OPTS);
+    const c1 = new Map(r1.fact.value.criteria.map((c) => [c.id, c]));
+
+    // 正控制：pre-merge AC 在判据 worktree 上求值并通过（证明本轮 gate 真的跑了，⛔ 不是整轮空转）。
+    assert.equal(c1.get("AC-901")?.verdict, "pass", `pre-merge AC 应在 goal 分支树上 pass，实测=${JSON.stringify(c1.get("AC-901"))}`);
+    // post-merge AC：并入前不求值 ⇒ 读数恰为 not-evaluated + 理由 pre-merge-phase。
+    assert.equal(c1.get("AC-905")?.verdict, "not-evaluated", `post-merge AC 并入前必须 not-evaluated，实测=${JSON.stringify(c1.get("AC-905"))}`);
+    assert.equal(c1.get("AC-905")?.reason, "pre-merge-phase", "理由必须精确是 pre-merge-phase（可归因，⛔ 不是笼统 not-evaluated）");
+
+    // 不进 gaps：该 AC 不出现在本轮缺口读数的【任何】态里。
+    const gaps1 = r1.fact.value.gaps;
+    assert.equal(
+      gaps1.some((g) => g.ac === "AC-905"),
+      false,
+      `post-merge AC 不得进 gaps（否则会对结构上不可能通过的 AC 立案），实测 gaps=${JSON.stringify(gaps1.filter((g) => g.ac === "AC-905"))}`,
+    );
+    // 负控制：同为 active 的 pre-merge 兄弟 AC-906 仍在 gaps 里 ⇒ 上面的「缺席」来自相位排除，
+    // ⛔ 不是因为整个 gaps 读数空了。
+    assert.equal(
+      gaps1.some((g) => g.ac === "AC-906"),
+      true,
+      `pre-merge AC（exit 3）应仍参与缺口读数——证明 gaps 非空转，实测=${JSON.stringify(gaps1)}`,
+    );
+
+    // 相位读数（枚举，⛔ 布尔）：excluded 点名本轮被排除的 post-merge AC；maybePostMerge 点名提示。
+    assert.deepEqual(r1.fact.value.phaseSplit.excluded, ["AC-905"], "本轮排除集恰为 post-merge AC");
+    assert.deepEqual(r1.fact.value.phaseSplit.maybePostMerge, ["AC-906"], "exit 3 的 pre-merge AC 产生 maybe-post-merge 提示");
+
+    // ── 并入后（分支删除，§4.7/§4.2）⇒ 同一 AC 照常求值 ─────────────────────────────────────
+    git(["branch", "-D", BRANCH]);
+    const r2 = await runGoalRound(tmp, ROUND_OPTS);
+    const c2 = new Map(r2.fact.value.criteria.map((c) => [c.id, c]));
+    assert.equal(
+      c2.get("AC-905")?.verdict,
+      "fail",
+      `并入后 post-merge AC 必须被【求值】：判据看的文件不存在 ⇒ fail（⛔ 不再是 not-evaluated），实测=${JSON.stringify(c2.get("AC-905"))}`,
+    );
+    assert.deepEqual(r2.fact.value.phaseSplit.excluded, [], "分支已删 ⇒ 本轮无相位排除");
+  } finally {
+    fs.rmSync(tmp, { recursive: true, force: true });
+    fs.rmSync(ns, { recursive: true, force: true });
+  }
+});
+
+test("AC-phase-i2: achieved 判定仍要求全部 AC（含 post-merge）达成——只有 pre-merge 全达成时不被判为 achieved", () => {
+  // I2 是【纯】判定（不跑任何判据）：records 由 status 直接表达。post-merge AC 只是多了一个 phase 字段，
+  // ⛔ 不该改变「全部 AC 达成」这条语义（裁定⑤：achieved 的元语原样保留）。
+  const mkRecords = (postMergeStatus) => [
+    { id: "GOAL-901", status: "active", kind: "goal" },
+    { id: "AC-901", goal: "GOAL-901", status: "achieved", phase: "pre-merge" },
+    { id: "AC-905", goal: "GOAL-901", status: postMergeStatus, phase: "post-merge" },
+  ];
+  // 只有 pre-merge 全达成（post-merge 仍未达成）⇒ 不达成、且即便充分性 covered 也不 flip。
+  assert.equal(
+    goalAchievedFromRecords(mkRecords("active"), "GOAL-901"),
+    false,
+    "post-merge AC 未达成 ⇒ 「全部 AC achieved」为假（phase 不豁免它）",
+  );
+  assert.equal(
+    goalFlipDecision(mkRecords("active"), "GOAL-901", { verdict: "covered" }),
+    false,
+    "I2 为假 ⇒ 即便 sufficiency=covered 也不写 achieved",
+  );
+  // 反向控制（证明上面的 false 来自 post-merge 那条，⛔ 不是恒 false）：把同一条改成 achieved ⇒ 达成。
+  assert.equal(
+    goalAchievedFromRecords(mkRecords("achieved"), "GOAL-901"),
+    true,
+    "含 post-merge 的【全部】AC 达成 ⇒ 达成（负控制：判定不是恒 false）",
+  );
+  assert.equal(
+    goalFlipDecision(mkRecords("achieved"), "GOAL-901", { verdict: "covered" }),
+    true,
+    "全部达成 + covered ⇒ flip",
+  );
 });

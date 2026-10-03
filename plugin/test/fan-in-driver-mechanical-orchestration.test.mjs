@@ -374,7 +374,10 @@ test("AC1 (gap-fan-in-token-gate-version-mismatch-self-lock) — 每任务新进
   const src = fs.readFileSync(DRIVER_SRC, "utf8");
   // spawnMechanicalFanIn 本体已迁 worker-fan-in.ts ⇒ 它的两条断言按【代码所在模块】读。
   const fanSrc = fs.readFileSync(FANIN_SRC, "utf8");
-  assert.match(src, /mechResult = await spawnMechanicalFanIn\(\{ task: taskId, worktree: paths\[0\], root: rootDir, runId \}\)/, "finishAsync must spawn a fresh mechanical fan-in process (⛔ in-process runMechanicalFanIn)");
+  // gap-goal-branch-dispatch-wiring-and-task-fan-in：spawn 调用现在多带 mergeTarget（SPEC-goal-branch
+  // §4.3 的落地目标解析）——断言放宽为「以同一调用点 spawn fresh 进程」的形状，⛔ 不钉死单行文本。
+  assert.match(src, /mechResult = await spawnMechanicalFanIn\(\{[\s\S]{0,200}?task: taskId, worktree: paths\[0\], root: rootDir, runId[\s\S]{0,200}?\}\)/, "finishAsync must spawn a fresh mechanical fan-in process (⛔ in-process runMechanicalFanIn)");
+  assert.match(src, /spawnMechanicalFanIn\(\{[\s\S]{0,200}?mergeTarget: resolveTaskMergeTarget\(taskId, rootDir\)/, "finishAsync passes the resolved mergeTarget (SPEC-goal-branch §4.3 wiring)");
   assert.match(fanSrc, /const entry = kernelSiblingArgv\("worker-driver\.ts"\)/, "spawnMechanicalFanIn anchors the executor at the kernel install location (⛔ opts.root/plugin/scripts/worker-driver.ts — gap-plugin-root-resolution-remaining-callsites-round2)");
   assert.match(fanSrc, /process\.execPath, \.\.\.entry,\s*\n\s*"--mechanical-fan-in"/, "the fresh process is node <kernel-sibling>/worker-driver.(ts|js) --mechanical-fan-in");
   assert.match(src, /if \(mechanicalFanIn\) \{\s*\n\s*const task = tasks\[0\]/, "--mechanical-fan-in mode exists in main()");

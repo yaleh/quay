@@ -2,7 +2,7 @@
 id: gap-goal-branch-human-merge-verb-and-execution
 title: quay goal merge 人工并入请求 + worker-driver 以 --no-ff 合并提交执行 goal→develop
   并入、失败后在 tip 前进时自动重试
-status: todo
+status: ready
 labels:
   - gap
 parent: null
