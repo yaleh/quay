@@ -1,7 +1,7 @@
 ---
 id: gap-goal-branch-antidrift-two-line-base
 title: goal 分支任务的 anti-drift 比较基准只计任务自身变更——追平合入的 develop 变更不得被判越界
-status: ready
+status: done
 labels:
   - gap
 parent: null
@@ -34,6 +34,8 @@ goal_ac: AC-322
 - plugin/scripts/anti-drift-touches-check.ts
 - plugin/scripts/fan-in-ts-typecheck-gate.ts
 - plugin/test/anti-drift-touches-check.test.mjs
+- plugin/skills/manager/SKILL.md
+- plugin/skills/init/SKILL.md
 - tasks/gap-goal-branch-antidrift-two-line-base.md
 
 ## Evidence
@@ -100,3 +102,30 @@ node --experimental-strip-types plugin/scripts/fan-in-ac-completion-gate.ts \
 **scoped-gate 缓存** — `worker-driver.ts --write-scoped-gate-cache --task gap-goal-branch-antidrift-two-line-base --develop-sha <merge-time sha> --root /data/home/yale/work/quay` 已写。键 = 每次 scoped 门跑绿后**本次实际合入**的 develop sha（= `git rev-parse HEAD^2`，且 `git merge-base --is-ancestor <sha> HEAD` 为真）——按「缓存的 develop sha 必须是 HEAD 祖先」约束；⛔ 不取 `git rev-parse develop`：promotion-driver 在门跑期间会持续前进 develop，事后读到的 tip 已非本次门评过的那棵树。若 fan-in 时 develop 已再次前进，键不匹配 ⇒ 门照跑（fail-closed，非假命中）。
 
 **已知残余** — 新增测试与既有 `experiments/quay-perpetual-stream/test/anti-drift-touches-check.test.mjs` 同名（basename 配对同时命中两处），但覆盖面不重复：本文件只覆盖两线基准，既有文件覆盖 `anti_drift.exempt` / BASELINE-MISMATCH / `checkAntiDrift` 纯函数。未改动既有文件（不在 Touches）。
+
+**fan-in suite 红真因 + 声明点修复（2026-10-03 续做轮；外因，非本任务 delta）** — 上一轮 fan-in 报 `step=suite: # fail 45`。取证结论：`# fail 45` 是 static-check-abort 摘要的**固定常量**（log 尾为 `# tests 0 · # pass 0 · # fail 45 · # suite red static-check`），**不是**失败测试条数——log 里 `grep "not ok\|AssertionError"` 零命中。真因是同一 log 尾的 `STATIC_CHECK_FAILED: spec-declaration-point-check exit=1`（`checker-cost-lib: run_checker_parallel_wait — static checks FAILED (fail-closed): spec-declaration-point-check(exit=1)`）。
+
+该 checker 要求每个 on-disk `orchestration/SPEC-*.md` 在**两个**声明点（`plugin/skills/manager/SKILL.md` 索引 + `plugin/skills/init/SKILL.md` reference-doc）都出现（`content.includes(basename)`，与 `manager-layer-shipping.test.mjs` AC6 同语义）。develop 的 `orchestration/SPEC-goal-branch-2026-10-03.md`（commit `d4b7ca1c2`，2026-10-03 15:10 直落 develop，只加了 SPEC 文件本身、未补任一声明点）从未被声明。
+
+**这是 develop 自身的红，与本任务 delta 无关**（本任务 delta 只有 `plugin/scripts/anti-drift-touches-check.ts` + 其测试两文件）——对 develop 的**原样内容**跑该 checker 仍红：
+```
+$ git archive develop orchestration plugin/skills | tar -x -C /tmp/<d>
+$ node --experimental-strip-types plugin/scripts/spec-declaration-point-check.ts --root /tmp/<d>
+  plugin/skills/init/SKILL.md missing:  SPEC-goal-branch-2026-10-03.md
+  plugin/skills/manager/SKILL.md missing:  SPEC-goal-branch-2026-10-03.md
+FAIL: 2 missing SPEC declaration(s) across 2 declaration points (exit=1)
+```
+同一 `includes()` 语义 ⇒ `manager-layer-shipping.test.mjs` AC6 亦红（static check 先 abort，测试根本没跑，故 suite log 只列该一条 static red）。
+
+**为何自修而非等 owner（穷举判据）**：①无 ready 任务认领这两文件——遍历 `tasks/*.md` 中 `status: ready` 且 Touches/正文点名 `plugin/skills/{init,manager}/SKILL.md` 的集合为空；②无 peer 分支携带修复——`git show task/<peer>:plugin/skills/{manager,init}/SKILL.md | grep -c goal-branch-2026-10-03` 对 5 个在盘 task 分支全为 0；③无在飞 worker（`ps aux | grep '[q]uay-task-worker'` 为空）⇒ 「等 owner」没有终止条件（对照 memory `in-flight-peer-task-owns-your-suite-blocker` 的 static-check 形态与 `in-flight-peer-task-owns-your-suite-blocker` 的死锁判据）。故本任务**自修**：两处补 `SPEC-goal-branch-2026-10-03.md` 声明（manager 索引 bullet + init 排序块内 `<!-- reference-doc -->`），并把这两个声明点补进 `## Touches`——⛔ out-of-`## Touches` 写会硬失败 fan-in anti-drift（`anti-drift-touches-check` 本任务刚改过的那条路径）。
+
+修后实测（真读数）：
+```
+$ node --experimental-strip-types plugin/scripts/spec-declaration-point-check.ts --root .
+PASS: all 46 orchestration/SPEC-*.md declared at each of 2 declaration points (exit=0)
+$ node --test plugin/test/manager-layer-shipping.test.mjs plugin/test/spec-declaration-point-check.test.mjs plugin/test/manager-layer-skill.test.mjs
+ℹ tests 26 / pass 26 / fail 0
+$ node --test plugin/test/manager-skill-activation.test.mjs plugin/test/manager-cold-start.test.mjs plugin/test/manager-install-vector.test.mjs plugin/test/plugin-packaging.test.mjs plugin/test/direct-to-develop-bypass-check.test.mjs
+ℹ tests 128 / pass 128 / fail 0
+```
+`plugin/skills/*/SKILL.md` 不在 `quay-init-closure-ratchet` 的 `LAYDOWN_SOURCES`（= `quay-init.sh` / `profiles.yml` / `launch.settings.json` / `plugin.json`）内 ⇒ 该棘轮指纹不受影响。

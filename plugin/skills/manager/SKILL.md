@@ -217,6 +217,7 @@ rules* but does not re-implement each SPEC. Index (under `orchestration/` in the
 - `orchestration/SPEC-state-crystallization-2026-08-05.md` — state crystallization
 - `orchestration/SPEC-three-layer-unified-architecture-2026-08-09.md` — the three-layer unified architecture (manager/outer/inner minimal unified architecture; AC28–AC34, P0 wiring = SPEC-carrying first-lines + ledger A + parallel-comparison rounds)
 - `orchestration/SPEC-goal-store-2026-08-09.md` — the goal-store spec (phase goals/ACs are a THIRD sibling kind: criterion shell-runnable + status(achieved) + phase derivable + origin required; web `/goal`+`/doc`; gate-staleness self-check)
+- `orchestration/SPEC-goal-branch-2026-10-03.md` — goal 独立分支（goal branch）：成熟度不同的开发方向互不混入 develop（§4.4 落地任务在自己的 worktree 里先 merge `goal/<id>` 再 merge develop；追平带入的 develop 变更不得被判写出 Touches 之外）
 - `orchestration/SPEC-suite-speed.md` — suite speed
 - `orchestration/SPEC-typed-axes-and-standing-dynamics.md` — typed axes + standing dynamics
 - `orchestration/SPEC-per-task-suite-verification-2026-08-13.md` — per-task suite verification (人 2026-08-13 裁定：取消 integration，每任务从 develop 开 worktree 跑全量 suite 迭代至绿再 merge；suite 不得有 commit 知识；锁容量 2 + cgroup 读宿主；verification-round 降为任务粒度。**取代** `SPEC-branching-model-integration-branch-2026-08-05.md` 的解法而非其诊断；阶段 AC42-AC49）
@@ -231,6 +232,7 @@ rules* but does not re-implement each SPEC. Index (under `orchestration/` in the
 - `orchestration/SPEC-store-commit-unification-2026-09-08.md` — 五 store kind 提交面统一（单一 commitStoreWrite 原语：四态返回 committed/unchanged/not-in-git/failed、rev-parse root、pathspec 限定 add+commit；三阶段 ①原语+五 kind 接线 ②传播按读者归位 ③驱动侧直写点）
 - `orchestration/SPEC-quay-init-reconcile-and-native-implementation-2026-09-18.md` — `quay-init` 退役 shell 脚本、改 CLI/MCP 原生实现；`/quay:init` 语义从「存在即跳过」改为「reconcile 到当前版本默认值」（人 2026-09-18 三条原则扩展为规格；讨论结论 + 已核实的现状事实（文件/行号），AC/DoD 与是否立案由外层判断，本文件不建）
 - `orchestration/SPEC-context-injection-slimming-2026-09-19.md` — 常驻注入上下文瘦身：`CLAUDE.md`（57KB）+ auto-memory `MEMORY.md`（21KB）压到约 21KB，其余改为「索引 → 按需读」并保证被删内容全部有家（人 2026-09-19 裁定范围：本期只做 P0 + P1 + P2 + 新构造任务验证 V，P3–P5 推迟待观察期读数；任务 P0/P1/P2/V 已立）
+- `orchestration/SPEC-goal-branch-2026-10-03.md` — goal 独立分支（goal branch）：以 `goal_ac` 识别的任务从 `goal/<GOAL-NNN>` 分支开 worktree、fan-in 回该分支并顺带追平 develop；人触发并入时经一次全量验证 `--no-ff` 合回 develop（含预览实例、per-AC phase 求值、anti-drift 两行 base、孤儿 serve 回收豁免）（ruled·人 2026-10-01→10-03 裁定；§9.2 只剩实现期残留）
 
 Cross-references:
 - `orchestration/REVIEW-cadence.md` — the daily-review cadence mechanism (this skill's cadence hook)

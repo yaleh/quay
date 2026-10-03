@@ -62,7 +62,7 @@ import { mainCheckoutRoot } from "./repo-root.ts";
 // `arg-parsing-helper-family`, routine `semantic-dedup-scan`).
 import { isDirectEntry, helpExit, flagValue } from "./gate-script-base.ts";
 import { matchGlob, isOverbroadDeclaration, normalizePath, parseTouches } from "./touches-orthogonality-check.ts";
-import { classifyBranch, detectDefaultBranch } from "../../packages/quay/src/branch-model.ts";
+import { classifyBranch, detectDefaultBranch, LANDING_BASELINE_ROLE } from "../../packages/quay/src/branch-model.ts";
 
 // normalizePath (canonical: strips ./, collapses //, resolves ./.. segments, drops trailing /, case
 // preserved for the case-significant Linux repo) is single-source in touches-orthogonality-check.mjs
@@ -221,17 +221,39 @@ export function checkAntiDrift(builds, opts) {
 //        [--merge-target <ref>]
 // The classic-loop driver (the since-deleted anti-drift-touches-check.sh — its callers now invoke
 // this module directly, SPEC Phase 1c) supplied a pre-computed manifest from
-// `git diff --numstat`; THIS driver computes the actual diff itself (`git diff --name-only
-// <merge-target>...HEAD` — the task's own commits, i.e. exactly what fan-in-ff-merge would land)
+// `git diff --numstat`; THIS driver computes the actual file set itself — `git diff --name-only
+// <merge-target>...HEAD` when the merge target IS the landing baseline, else the task's own commits
+// only (the two-line base when a `goal/<id>` catch-up merged develop in; see computeActualFiles) —
 // and reads the declared globs from the task body (the ONE touches-parser). The judgment — one
 // build whose every actual file must fall within a declared glob — is the SAME checkAntiDrift as
 // the manifest-file mode (a single build cannot cross-build-overlap; out-of-declared and
 // overbroad-declaration are HARD FAIL). The judgment logic is UNCHANGED; only the input surface is new.
 
-/** Compute the files the fan-in would land: `git diff --name-only <merge-target>...HEAD` in the
- *  worktree. After the fan-in workflow's step-1 merge of the merge-target into the task worktree,
- *  this is exactly the set of files the ff-merge would move onto the merge target. Fail-closed: a
- *  git error THROWS — the caller maps it to a usage/env error (exit 2), never a silent OK.
+/** Compute the files the fan-in would land — the set judged against the declared `## Touches`.
+ *  Fail-closed: a git error THROWS — the caller maps it to a usage/env error (exit 2), never a
+ *  silent OK.
+ *
+ *  TWO base shapes, dispatched on whether the merge target IS the landing baseline:
+ *
+ *  · `mergeTarget === develop` (the existing, unchanged path): `git diff --name-only
+ *    <merge-target>...HEAD`. After the fan-in's step-1 merge of the merge-target into the task
+ *    worktree, this is exactly the set of files the ff-merge would move onto the merge target.
+ *    Behavior is byte-identical to before this function gained the second shape.
+ *
+ *  · `mergeTarget` is a NON-default line (a `goal/<id>` branch — SPEC-goal-branch-2026-10-03 §4.4):
+ *    the task worktree first merges `goal/<id>` then merges `develop` (the per-landing catch-up,
+ *    ruling ③). The `goal...HEAD` diff would then contain every develop change the catch-up brought
+ *    in — and the goal branch's own prior changes — none of which the task wrote, so EVERY catch-up
+ *    would be judged `out-of-declared` (hard fail; this task's reason to exist). The judged set is
+ *    instead the TASK'S OWN changes: the files changed by commits reachable from HEAD but from
+ *    NEITHER `mergeTarget` NOR the landing baseline. `git log --name-only HEAD --not <mergeTarget>
+ *    <develop>` yields exactly that union (deduped via a Set — one file may appear in several task
+ *    commits). Merge commits contribute nothing here: git suppresses their file list by default, so
+ *    a catch-up merge's brought-in changes are excluded, while any conflict resolution the task
+ *    itself committed is already covered by that task commit's own entry. Measured both directions
+ *    (a develop-only file and a goal-only file each stay excluded; the task's own file is reported)
+ *    — see plugin/test/anti-drift-touches-check.test.mjs.
+ *
  *  ⚠️ `-c core.quotepath=false`：git 默认对含非 ASCII 的文件名输出 C-quoted 形态（前导引号 +
  *  `\ooo` 八进制转义），使本函数的逐字节 `--name-only` 结果与声明 `## Touches` 的真实 UTF-8
  *  文件名无法匹配 ⇒ 非 ASCII 文件被误判 out-of-declared（gap-branch-rename-manager-doc-to-author
@@ -239,10 +261,30 @@ export function checkAntiDrift(builds, opts) {
  *  字节，恢复对非 ASCII 路径的精确匹配（同 direct-to-develop-bypass-check.ts gitCommitFiles 的
  *  修法）。 */
 export function computeActualFiles(worktree, mergeTarget) {
+  if (mergeTarget !== LANDING_BASELINE_ROLE) {
+    return computeTaskOwnedFiles(worktree, mergeTarget, LANDING_BASELINE_ROLE);
+  }
   const out = execFileSync("git", ["-C", worktree, "-c", "core.quotepath=false", "diff", "--name-only", `${mergeTarget}...HEAD`], {
     encoding: "utf8", timeout: 30_000, stdio: ["ignore", "pipe", "ignore"],
   });
   return out.split(/\r?\n/).map((l) => l.trim()).filter(Boolean);
+}
+
+/** The files changed by commits reachable from HEAD but from NEITHER `mergeTarget` NOR
+ *  `landingBaseline` — i.e. the task's OWN commits once the line(s) it was cut from are excluded.
+ *  Exported for its own test (the two-line base is the whole point of this task). */
+export function computeTaskOwnedFiles(worktree, mergeTarget, landingBaseline = LANDING_BASELINE_ROLE) {
+  const out = execFileSync(
+    "git",
+    ["-C", worktree, "-c", "core.quotepath=false", "log", "--format=", "--name-only", "HEAD", "--not", mergeTarget, landingBaseline],
+    { encoding: "utf8", timeout: 30_000, stdio: ["ignore", "pipe", "ignore"] },
+  );
+  const seen = new Set();
+  for (const line of out.split(/\r?\n/)) {
+    const f = line.trim();
+    if (f) seen.add(f);
+  }
+  return [...seen];
 }
 
 /** Build the single-build manifest a task fan-in must satisfy: the declared `## Touches` globs vs
