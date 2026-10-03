@@ -40,5 +40,5 @@ extra:
 ## Touches
 
 - tasks/gap-carrier-registry-declaration-with-unregistered-red-check.md
-- docs/carrier-registry.json
-- plugin/test/carrier-registry-completeness.test.mjs
+- docs/carrier-registry.json (new)
+- plugin/test/carrier-registry-completeness.test.mjs (new)
