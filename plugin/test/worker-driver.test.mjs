@@ -3904,3 +3904,52 @@ test("goal-merge e2e — 临时验证 worktree 被装配依赖：要求 node_mod
     assert.match(merges[0], /^merge: goal\/GOAL-901 into develop \(request /, `合并 subject 形态（实测 ${merges[0]}）`);
   } finally { gmCleanup(root); }
 });
+
+// ── gap-goal-merge-infra-red-mislabelled-and-rerequest-never-retries — 并入失败不得同形 ────────────
+//
+// GOAL-904 演练逐字读到：并入的真因是 pre-merge-commit 钩子因缺依赖崩了（`ERR_MODULE_NOT_FOUND
+// … Not committing merge; use 'git commit' to complete the merge.`），却被写成 `step: "merge-conflict"`
+// ——读 step 的人（和下游 gap-filing）被引去找根本不存在的冲突（硬规则 3b）。下面两臂把两种成因
+// 并排造出来：真实内容冲突仍必须是 `merge-conflict`；钩子失败必须是独立取值且 reason 保留钩子原文。
+test("goal-merge e2e — 失败分类两臂：真实内容冲突写 merge-conflict；pre-merge-commit 钩子失败写 merge-failed 且 reason 带钩子原文", async () => {
+  // Arm ① — a REAL content conflict: develop and the goal branch both add work.txt with different bytes.
+  {
+    const root = makeGoalMergeRepo("classify-conflict");
+    try {
+      const g = (...a) => execFileSync("git", ["-C", root, ...a], { encoding: "utf8" });
+      g("checkout", "-q", "develop");
+      fs.writeFileSync(path.join(root, "work.txt"), "develop version\n");
+      g("add", "-A"); g("commit", "-q", "-m", "conflicting develop change");
+      g("checkout", "-q", "develop-work");
+
+      const pending = pendingGoalMerges(root);
+      assert.equal(pending.length, 1, "请求挂起");
+      const r = await runGoalMergeFanIn({ ...gmOpts(root, ["bash", "-c", "exit 0"]), request: pending[0].request });
+      assert.equal(r.outcome, "red");
+      assert.equal(r.step, "merge-conflict", `真实内容冲突必须写 merge-conflict（实测 step=${r.step} reason=${r.reason}）`);
+    } finally { gmCleanup(root); }
+  }
+
+  // Arm ② — a FAILING pre-merge-commit hook (infrastructure, NOT a conflict). The content merges
+  // cleanly; only the hook aborts the commit, so there are NO unmerged paths and `step` must say so.
+  {
+    const root = makeGoalMergeRepo("classify-hook");
+    try {
+      const devBefore = execFileSync("git", ["-C", root, "rev-parse", "develop"], { encoding: "utf8" }).trim();
+      const tipBefore = execFileSync("git", ["-C", root, "rev-parse", "goal/GOAL-901"], { encoding: "utf8" }).trim();
+      const hook = path.join(root, ".git", "hooks", "pre-merge-commit");
+      fs.mkdirSync(path.dirname(hook), { recursive: true });
+      fs.writeFileSync(hook, '#!/bin/sh\necho "HOOK-BLEW-UP: simulated missing deps" >&2\nexit 1\n', { mode: 0o755 });
+
+      const pending = pendingGoalMerges(root);
+      assert.equal(pending.length, 1, "请求挂起");
+      const r = await runGoalMergeFanIn({ ...gmOpts(root, ["bash", "-c", "exit 0"]), request: pending[0].request });
+      assert.equal(r.outcome, "red");
+      assert.notEqual(r.step, "merge-conflict", `钩子失败不得被标成内容冲突（实测 step=${r.step}）`);
+      assert.equal(r.step, "merge-failed", `钩子失败写独立取值（实测 step=${r.step}）`);
+      assert.match(String(r.reason), /HOOK-BLEW-UP/, `reason 保留钩子的原始输出（实测 reason=${r.reason}）`);
+      assert.equal(execFileSync("git", ["-C", root, "rev-parse", "develop"], { encoding: "utf8" }).trim(), devBefore, "红：develop 不动");
+      assert.equal(execFileSync("git", ["-C", root, "rev-parse", "goal/GOAL-901"], { encoding: "utf8" }).trim(), tipBefore, "红：goal 分支不动");
+    } finally { gmCleanup(root); }
+  }
+});

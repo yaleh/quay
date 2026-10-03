@@ -43,6 +43,18 @@ function appendGoalEvent(root, acId, verdict) {
   }) + "\n");
 }
 
+/** Append a `goal-merge-result` event as the worker-driver's fan-in writes it (the shape
+ *  `readGoalMergeResults` reads back). Lets a test stage an infrastructure-red ledger without running
+ *  the whole merge. */
+function appendGoalMergeResult(root, { goalId = "GOAL-900", tipSha, requestEventId, timestamp, step = "suite" }) {
+  fs.mkdirSync(path.join(root, ".quay"), { recursive: true });
+  fs.appendFileSync(ledgerPath(root), JSON.stringify({
+    id: `res-${requestEventId}`, item_id: goalId, pipeline_id: goalId, gate: "goal-merge-result",
+    actor: "quay-driver", verdict: "fail", timestamp,
+    payload: { outcome: "red", step, reason: "boom", tipSha, requestEventId, landedSha: null },
+  }) + "\n");
+}
+
 /** A git repo with a GOAL record, a develop branch, and (unless `branchRef:false`) a `goal/GOAL-900`
  *  branch carrying one commit. `merged:true` first merges that branch into develop (⇒ already-merged). */
 function makeRepo({ tag, goalStatus = "active", branch = true, branchRef = true, merged = false } = {}) {
@@ -170,6 +182,44 @@ test("pendingGoalMerges derives the request, and stops reporting it once merged 
   // simulate a landed merge: merge the branch into develop (ancestor) ⇒ no longer pending.
   git(root, ["merge", "-q", "--no-ff", "goal/GOAL-900", "-m", "merge goal"]);
   assert.equal(pendingGoalMerges(root).length, 0, "an ancestor goal branch is not pending");
+});
+
+test("pendingGoalMerges: a red result at a frozen tip does NOT retry, but a request NEWER than that result does (explicit human retry)", () => {
+  const root = makeRepo({ tag: "explicit-retry" });
+  const tip = git(root, ["rev-parse", "goal/GOAL-900"]).trim();
+
+  // T0: a request, then a RED result at the SAME tip — an infrastructure red leaves the tip frozen, so
+  // the tip will never "advance to fix it" (the GOAL-904 shape this task is about).
+  recordGoalMergeRequest({ root, goalId: "GOAL-900", reason: "first request", now: () => new Date("2026-01-01T00:00:00.000Z") });
+  const firstReq = requestEvents(root)[0];
+  assert.ok(firstReq?.payload?.eventId, "the first request carries an eventId");
+  appendGoalMergeResult(root, {
+    tipSha: tip, requestEventId: firstReq.payload.eventId, timestamp: "2026-01-01T00:05:00.000Z",
+  });
+
+  // No new request ∧ tip unchanged ⇒ NOT pending (ruling ⑳: re-running the same tree is a flake roll).
+  assert.equal(pendingGoalMerges(root).length, 0, "tip unchanged + no new request ⇒ not retried");
+
+  // A strictly-LATER request event (same tip) IS the human's explicit retry ⇒ pending.
+  recordGoalMergeRequest({ root, goalId: "GOAL-900", reason: "retry after the infra red", now: () => new Date("2026-01-01T00:10:00.000Z") });
+  const pendingAfterRerequest = pendingGoalMerges(root);
+  assert.equal(pendingAfterRerequest.length, 1, "a request newer than the last red result is an explicit retry");
+  assert.equal(pendingAfterRerequest[0].goalId, "GOAL-900");
+
+  // The re-request is consumed once a NEWER result records that it ran (same tip, so nothing pends).
+  const latestReq = requestEvents(root).at(-1);
+  appendGoalMergeResult(root, {
+    tipSha: tip, requestEventId: latestReq.payload.eventId, timestamp: "2026-01-01T00:15:00.000Z",
+  });
+  assert.equal(pendingGoalMerges(root).length, 0, "the re-request was consumed by a newer result at the same tip");
+
+  // Ruling ⑳'s other half is UNCHANGED: advancing the tip retries even with no new request.
+  git(root, ["checkout", "-q", "goal/GOAL-900"]);
+  fs.writeFileSync(path.join(root, "fix.txt"), "fix\n");
+  git(root, ["add", "-A"]);
+  git(root, ["commit", "-q", "-m", "fix the suite"]);
+  git(root, ["checkout", "-q", "develop"]);
+  assert.equal(pendingGoalMerges(root).length, 1, "tip advanced ⇒ retried (existing rule unchanged)");
 });
 
 test("readGoalMergeRequests reads back the recorded request", () => {

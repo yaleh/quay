@@ -2562,8 +2562,14 @@ export async function runGoalMergeFanIn(opts: GoalMergeFanInOptions): Promise<Go
     const mergeMsg = `merge: ${branch} into develop (request ${request.eventId})`;
     const merge = await mechSh(["git", "-C", tmpWorktree, "merge", "--no-ff", branch, "-m", mergeMsg], 120_000);
     if (!merge.ok) {
+      // 失败分类（硬规则 3b）：`git merge` 非 0 有两种成因——内容冲突与基础设施失败（钩子崩了、spawn
+      // 失败等），⛔ 不得同形。只有【退出码 1 ∧ 索引里确有未合并路径】才是 `merge-conflict`；其余写
+      // `merge-failed`，`reason` 保留 git 原文（GOAL-904 演练里 pre-merge-commit 钩子 ERR_MODULE_NOT_FOUND
+      // 被误标成 merge-conflict，读 step 的人被引去找冲突）。
+      const unmerged = (await mechSh(["git", "-C", tmpWorktree, "diff", "--name-only", "--diff-filter=U"], 30_000)).stdout.trim();
+      const step = merge.status === 1 && unmerged !== "" ? "merge-conflict" : "merge-failed";
       await mechSh(["git", "-C", tmpWorktree, "merge", "--abort"], 30_000);
-      return red("merge-conflict", (merge.stderr || merge.stdout || "merge failed").trim());
+      return red(step, (merge.stderr || merge.stdout || "merge failed").trim());
     }
     const mergeCommitSha = (await mechSh(["git", "-C", tmpWorktree, "rev-parse", "HEAD"], 30_000)).stdout.trim();
     if (!mergeCommitSha) return red("merge-commit", "merge produced no commit sha");

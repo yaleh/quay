@@ -349,12 +349,37 @@ export interface PendingGoalMerge {
 }
 
 /**
+ * Whether `request` is a retry the human EXPLICITLY asked for AFTER `result` was recorded — a request
+ * event strictly later than the last execution. A re-request is a human assertion ("try the merge
+ * again now"), ⛔ NOT satisfied by "the tip did not move": an infrastructure red (a hook that crashed,
+ * a spawn failure) leaves the tip frozen, so relying on the tip alone wedges the request forever.
+ *
+ * Direct measure first (硬规则 4b): the result records WHICH request it executed (`requestEventId`), so
+ * a DIFFERENT eventId means this request has never been attempted. `requestEventId` is also already
+ * written into the payload by `runGoalMergeFanIn`, so this is not a new field — it is the same carrier,
+ * read as identity. The timestamp is the fallback for a legacy result missing the id (or an id that
+ * does not parse) — a strictly-later request time still counts, equal/absent times do not (⛔ no
+ * fail-open: an unreadable pair keeps the old "no retry" behavior rather than retrying on a coin flip).
+ */
+function requestSupersedesResult(request: GoalMergeRequest, result: GoalMergeResult): boolean {
+  if (result.requestEventId !== "" && request.eventId !== "" && request.eventId !== result.requestEventId) {
+    return true;
+  }
+  const rq = Date.parse(request.timestamp);
+  const rs = Date.parse(result.timestamp);
+  return Number.isFinite(rq) && Number.isFinite(rs) && rq > rs;
+}
+
+/**
  * The DERIVED set of merge requests still to execute (⛔ no stored state — SPEC §4.7 硬规则 4b):
  *   a request exists ∧ `goal/<id>` exists ∧ it is not yet an ancestor of develop
- *   ∧ the tip has ADVANCED past (or was never attempted at) the last recorded execution.
+ *   ∧ (the tip has ADVANCED past the last recorded execution ∨ the request is newer than that result).
  *
- * The last clause is ruling ⑳'s auto-retry rule: a red attempt is retried only when a fix moved the
- * tip. Re-running the same tree would only re-roll the suite flake. The LATEST request per goal wins.
+ * The tip clause is ruling ⑳'s auto-retry rule: a red attempt is retried when a fix moved the tip.
+ * Re-running the SAME tree with no new request would only re-roll the suite flake, so that alone still
+ * does not retry. The request-time clause is the human's explicit re-request: it is what rescues a goal
+ * wedged on an infrastructure red (the tip will never advance to "fix" a crashed hook). The LATEST
+ * request per goal wins.
  */
 export function pendingGoalMerges(root: string): PendingGoalMerge[] {
   const requests = readGoalMergeRequests(root);
@@ -373,7 +398,8 @@ export function pendingGoalMerges(root: string): PendingGoalMerge[] {
     const tipSha = git(root, ["rev-parse", branch]).stdout;
     if (!tipSha) continue;
     const prev = lastResult.get(goalId);
-    if (prev && prev.tipSha === tipSha) continue; // tip unchanged since last attempt ⇒ no retry
+    // tip 未变【且】没有晚于该结果的请求 ⇒ 不重跑（裁定⑳，同一棵树重跑只是在赌偶发）。
+    if (prev && prev.tipSha === tipSha && !requestSupersedesResult(request, prev)) continue;
     out.push({ goalId, request, tipSha });
   }
   return out;
