@@ -40,6 +40,7 @@ goal_ac: AC-325
 
 ## Touches
 
+- packages/quay/src/goal-merge.ts
 - packages/quay/src/cli/goal.ts
 - packages/quay/src/cli/help.ts
 - plugin/scripts/worker-driver.ts
@@ -50,7 +51,7 @@ goal_ac: AC-325
 
 ## Evidence
 
-worktree `gap-goal-branch-human-merge-verb-and-execution`；提交 `88c8283c0`（实现）+ `3bf6c92dd`（help 反引号修复）；2026-10-03。
+worktree `gap-goal-branch-human-merge-verb-and-execution`；提交 `88c8283c0`（实现）+ `3bf6c92dd`（help 反引号修复）+ `1c058e644`（merge develop，带入 ABI 勾选的 task 文件）；2026-10-03。
 
 ### AC1 — `packages/quay/test/goal-merge.test.mjs`（9 例全绿）
 四类必拦各一条（non-active / not-branch-mode / branch-missing / already-merged）均被拒且 ledger 无 `goal-merge-request`；pre-merge AC 未达成无 override 被拒、带 override 写出的事件含 override 理由与 `unmetAcs: ["AC-901"]`；成功事件含 tip SHA。`ℹ tests 9 / pass 9 / fail 0`。
@@ -96,4 +97,4 @@ exit=0
 - `packages/quay/test/goal-merge.test.mjs`（9 例，含上面 8 条 goal merge 用例）
 - `plugin/test/worker-driver.test.mjs`（含 `goal-merge e2e` 3 例）
 
-驱动侧同一门（`--allow-thin`）退出 0；scoped-gate 缓存已写（`--write-scoped-gate-cache --develop-sha 5e46b5169f8ad1149ae90da47da419652a5f6e3c`）。
+驱动侧同一门（`--allow-thin`）退出 0；scoped-gate 缓存已写（`--write-scoped-gate-cache --develop-sha 90c1921ef61f534289970e51a33772c043342bfc`，= 合并时 develop tip）。
