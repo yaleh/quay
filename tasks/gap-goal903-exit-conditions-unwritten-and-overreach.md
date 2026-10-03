@@ -128,10 +128,10 @@ GOAL-903 名下的 drill 任务（T-903-drill）在 `develop` 上落地——即
 
 ## AC
 
-- [ ] **AC1｜机械成因有直接读数且带对照（⛔ 不是推测）。** 逐字跑 `goalSufficiencyVerdict` 三态：`(a)` 今天 body + `[{id:'AC-903'}]`、`(b)` body 追加一个 `## 退出条件` 节 + 同 AC 集、`(c)` 加节 body + 空 AC 集；要求分别取到 `insufficient` / `not-evaluated` / `insufficient`。贴命令与逐字输出。
-- [ ] **AC2｜节缺位与零覆盖各有独立取证，含负控制（硬规则 2 两半）。** 贴：`grep -c '^## ' goals/GOAL-903-*.md`（=0）；`grep -c 'AC-322' goals/AC-903-*.md`（=0）与 `grep -c -E 'goal/|残留|分支' goals/AC-903-*.md`（=0）；两条**负控制** `grep -c 'AC-322'` / `grep -c '残留'` 对 `goals/GOAL-903-*.md`（=3 / =1，证明谓词取得到非零）。
+- [x] **AC1｜机械成因有直接读数且带对照（⛔ 不是推测）。** 逐字跑 `goalSufficiencyVerdict` 三态：`(a)` 今天 body + `[{id:'AC-903'}]`、`(b)` body 追加一个 `## 退出条件` 节 + 同 AC 集、`(c)` 加节 body + 空 AC 集；要求分别取到 `insufficient` / `not-evaluated` / `insufficient`。贴命令与逐字输出。
+- [x] **AC2｜节缺位与零覆盖各有独立取证，含负控制（硬规则 2 两半）。** 贴：`grep -c '^## ' goals/GOAL-903-*.md`（=0）；`grep -c 'AC-322' goals/AC-903-*.md`（=0）与 `grep -c -E 'goal/|残留|分支' goals/AC-903-*.md`（=0）；两条**负控制** `grep -c 'AC-322'` / `grep -c '残留'` 对 `goals/GOAL-903-*.md`（=3 / =1，证明谓词取得到非零）。
 - [ ] **AC3｜真值读数在场（证明「当前两条不成立」不是空话）。** 逐字提取 AC-903 与 AC-322 的 criterion（⛔ 不手抄，经 `goal-store.ts get --json` 或等价路径）并在主检出上当场干跑：AC-903 ⇒ exit **1**（stderr `CAUSE=goal903-drill-landing-missing`）；AC-322 ⇒ exit **3**（stderr `NOT-EVALUATED: no goal-branch landing could be checked against the develop reflog`）；`git branch --list 'goal/*'` ⇒ `goal/GOAL-903`。
-- [ ] **AC4｜GOAL-903 body 已改：退出条件成为非空 `## 退出条件` 节，且节内只留在域 AC-903 能裁定的一条（`判据 AC-322 读 exit 0` / `无 goal/* 残留分支` 两条已降为背景注）。** 核法：`goal-store.ts get GOAL-903 --json` 取 body，四条子断言全真：① `hasExitConditions(body)` 为真；② 退出条件节**不含**子串 `判据 AC-322 读 exit 0` 与 `无 goal/* 残留分支`；③ `## 背景`/`## 范围`/`## 非目标`/`## 退出条件` 四个节标题在；④ 正文其余部分逐字未丢。并贴 `git diff` 证明改动最小。该 goal 写入经 goal store CLI 执行（人 2026-10-03 已授权，见上方 `## 人授权（2026-10-03）`）。
+- [x] **AC4｜GOAL-903 body 已改：退出条件成为非空 `## 退出条件` 节，且节内只留在域 AC-903 能裁定的一条（`判据 AC-322 读 exit 0` / `无 goal/* 残留分支` 两条已降为背景注）。** 核法：`goal-store.ts get GOAL-903 --json` 取 body，四条子断言全真：① `hasExitConditions(body)` 为真；② 退出条件节**不含**子串 `判据 AC-322 读 exit 0` 与 `无 goal/* 残留分支`；③ `## 背景`/`## 范围`/`## 非目标`/`## 退出条件` 四个节标题在；④ 正文其余部分逐字未丢。并贴 `git diff` 证明改动最小。该 goal 写入经 goal store CLI 执行（人 2026-10-03 已授权，见上方 `## 人授权（2026-10-03）`）。
 - [ ] **AC5｜判官在【新 key】上重判过一次（⛔ 不是缓存命中），且新 verdict 不作成功判据。** 记下改前 `entries["GOAL-903"].key=69f0956f…`；改后断言 ① 旧 key 条目/历史不被改写 ② 出现一个**新** key（`sufficiencyCacheKey` 含退出条件文本 ⇒ body 一改 key 必变）③ 其后 `.quay/goal-round.jsonl` 落一条 `goal-sufficiency` fact。⚠️ 若新 verdict 仍是 `insufficient` ⇒ 把读数与判官输入逐字记进任务体并**停手另立根因**，⛔ 不得为让它变绿而反复改文本或改提示词（那会把判官变成回声）。（待外部）
 
 ## DoD
@@ -159,3 +159,74 @@ GOAL-903 名下的 drill 任务（T-903-drill）在 `develop` 上落地——即
 - tasks/gap-goal903-exit-conditions-unwritten-and-overreach.md
 
 ⛔ **无测试文件、不新增 `plugin/scripts/*` 检查器**：本任务无代码路径（产物是 goal store 里 GOAL-903 的 body 文本），其判据是 AC1/AC2/AC3 的可执行谓词当场干跑（含负控制），不进套件。按 GOAL-020 / GOAL-022 同族先例（同为 `goal-sufficiency` 提案任务，Touches 均无测试文件）。
+
+## Evidence（2026-10-03，本任务执行轮）
+
+**⚠️ 立案前提已被兄弟任务越过（先读这段）。** 本任务立案时（`.quay/goal-sufficiency-followup.json` `filedAt=2026-10-03T12:04:04.012Z`）GOAL-903 尚为 `active` 且机械层卡在 `insufficient`。其后**兄弟执行任务** `gap-goal903-drill-landing-missing`（现 `status: done`）把演练落地：GOAL-903 于 `2026-10-03T12:38:53.233Z` 翻 `retired`（commit `bdb1dd0ce`，已 ancestor of develop），`goal/*` 分支已弃置。⇒ **AC3 期待的三条读数在世界上已不成立；AC5 的判官重判因 GOAL-903 非 active（充分性闸只遍历 `activeGoals`，`goal-driver.ts:3432/3479`）而结构上不会发生。** AC1/AC2/AC4 与前提无关，已逐条复核。
+
+### AC1 — 三态对照（✅ 勾；逐字输出见 `.quay/ac903-exit-conditions/ac1-output.txt`）
+
+机制：`node --experimental-strip-types` 直接 import `plugin/scripts/goal-driver.ts` 的 `goalSufficiencyVerdict`，喂 `(a)` 今天的 body、`(b)` body + 一个 `## 退出条件` 节、`(c)` 加节 body + 空 AC 集：
+
+```
+(a) today body + [{id:'AC-903'}]            => insufficient
+(b) body + '## 退出条件' section + same ACs => not-evaluated
+(c) body + section + []                     => insufficient
+expect: insufficient / not-evaluated / insufficient  => MATCH
+```
+
+⇒ 机械层的 `insufficient` 由 **body 结构**触发（`hasExitConditions` 读不到内联散文），与 AC 集合无关——加新 AC 改不动它，只有把节写出来才能推过 `not-evaluated`。
+
+### AC2 — 节缺位 + 零覆盖 + 负控制（✅ 勾；逐字输出见 `.quay/ac903-exit-conditions/ac2-pre.txt`）
+
+改前状态取自 `git show develop:<path>`（= 立案时盘上内容；本任务的改写在 task 分支与 author 上，develop 未动）：
+
+```
+$ git show develop:goals/GOAL-903-*.md  | grep -c '^## '          => 0
+$ git show develop:goals/AC-903-*.md    | grep -c 'AC-322'        => 0
+$ git show develop:goals/AC-903-*.md    | grep -cE 'goal/|残留|分支' => 0
+--- 负控制（同一谓词对已知为真的样本，证明它取得到非零）---
+$ git show develop:goals/GOAL-903-*.md  | grep -c 'AC-322'        => 3   (title / statusLog reason / body)
+$ git show develop:goals/GOAL-903-*.md  | grep -c '残留'           => 1   (body「无 goal/* 残留分支」)
+```
+
+### AC3 — 真值读数（⚠️ 不勾：读数已与 AC 期待值不同，非本任务可为它背书）
+
+当场干跑（主检出 `/data/home/yale/work/quay`，逐字输出见 `.quay/ac903-exit-conditions/{ac903-current,ac322-current,goal-branches}.txt`）：
+
+```
+AC-903 criterion  => exit 0   (PASS: GOAL-903 drill landing present)
+                          ⛔ AC 期待 exit 1 / stderr CAUSE=goal903-drill-landing-missing
+AC-322 criterion  => exit 0   (PASS: 2 goal-branch landing(s) each contained develop as of their catch-up point)
+                          ⛔ AC 期待 exit 3 / NOT-EVALUATED
+git branch --list 'goal/*' => (空, count=0)
+                          ⛔ AC 期待 goal/GOAL-903
+```
+
+两条被 AC3 称为「不成立」的退出条件如今**都成立**（演练已落地、AC-322 已 `achieved`）。AC3 的期待值是立案瞬间的世界读数；兄弟任务在 12:38 越过它。**硬规则 3b：不把「已不成立」伪装成「检查通过」** ⇒ 不勾 AC3，读数原样留此。
+
+### AC4 — 新 body 四条子断言（✅ 勾；逐字输出见 `.quay/ac903-exit-conditions/ac4-post.txt`）
+
+经 **goal store CLI** 写入（`quay goal write GOAL-903 --body <新文本>`）；⛔ 未手改 `goals/*.md`。四条子断言：
+
+```
+1) hasExitConditions(body) 为真  <= goalSufficiencyVerdict(新body,[AC-903]) = "not-evaluated"（机械层过）
+2a) 退出条件节 不含 "判据 AC-322 读 exit 0"                => true
+2b) 退出条件节 不含 "无 goal/* 残留分支"                  => true
+3) '## 背景'/'## 范围'/'## 非目标'/'## 退出条件' 四节标题都在 => 全 true
+4) 正文其余部分逐字未丢 — 见下 diff（仅 body 变更，YAML frontmatter 逐字未动）
+```
+
+`git diff develop -- goals/GOAL-903-*.md` 证明改动最小：仅 body 从「一整段内联散文」重排为四个节，退出条件节收窄为在域 AC-903 能裁定的那一条；`⛔ 不并入 develop` 按 Proposal §四「以 AC-903 为准」解开而删（原文与 AC-903 的 criterion grep `develop` 自相矛盾）。
+
+### AC5 — 判官在新 key 上重判（⏳ 待外部；结构上受阻，与本任务执行无关）
+
+- 改前台账 key（`[{id,title,expect}]` 全量 AC 记录）= `69f0956f4a3f70cd0540f4c414e52e856bff55fbe10b759faabc3f9dafd36035`。
+- 本任务**不写 GOAL-903 的 status**（保持兄弟任务设的 `retired`）⇒ GOAL-903 不在 `activeGoals` 中（`goal-driver.ts:3432`）⇒ 充分性闸本轮不会为它产出新 key / 新 `goal-round.jsonl` fact。**这是「待外部」的实质**：需要先由人/manager 决定该 retired goal 是否重开（重开是 HUMAN decision），或确认该 goal 已随演练一次性弃置、无需重判。
+- 按 AC5 自身纪律：**不以 verdict 变绿为成功判据**，本任务不改文本、不改提示词去凑判官。
+
+### 交付物与状态
+
+- 写盘（两处，均经 goal store CLI，⛔ 未手改）：worktree `ffd5845d2 goals: GOAL-903 field:body`；主检出 `862026686 goals: GOAL-903 field:body`（按仓库既有「goal 写入需两处根」实践）。
+- **状态未动**：GOAL-903 仍 `status: retired`（由兄弟任务 `bdb1dd0ce` 设置，本任务未写 status 字段）；AC-903 仍 `active`（本任务未写 AC 任何字段）。
+- 本 task 分支的落地对象 = `goals/GOAL-903-*.md` 的 body 节重排（见 AC4 diff）。
