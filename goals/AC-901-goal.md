@@ -1,6 +1,6 @@
 ---
 id: AC-901
-status: draft
+status: retired
 kind: criterion
 goal: GOAL-901
 criterion: >-
@@ -35,4 +35,10 @@ criterion: >-
 expect: exit 0 = GOAL-901 已 retired 且 goal/GOAL-901 分支不存在、frontmatter 含 40 位 tip
   SHA；exit 1 = 分支仍在或未记 SHA；exit 3 = 尚未废弃或记录缺失。
 origin: GOAL-028 退出条件② 废弃演练（AC-326 生产读数）——一次性演练记录，非真实开发方向。
+statusLog:
+  - at: 2026-10-03T10:37:17.279Z
+    from: draft
+    to: retired
+    actor: ac326-drill
+    reason: AC-326 废弃演练：随其 goal 一并 retired
 ---
