@@ -1,7 +1,7 @@
 ---
 id: AC-904
 title: 演练：提供本 workspace 的 quay serve 实例，其 /doc 页列出演练记录 DOC-904（并入前由预览实例满足、并入后由生产实例满足）
-status: draft
+status: active
 kind: criterion
 goal: GOAL-904
 criterion: >-
@@ -49,4 +49,16 @@ expect: exit 0 = 本 workspace root 下登记在册且存活的 quay.ts serve �
   下没有登记在册且存活的 serve 实例（预览实例没起，或生产 serve 不在）。
 origin: 人 2026-10-03「第二步先做合并演练再做试点」：对 GOAL-028 跑一遍 goal
   分支完整路径（演练，非真实开发方向）；判据能在生产实例上判假（落笔当轮读数：生产 /doc 无 DOC-904 ⇒ exit 1）
+activatedAt: 2026-10-03T15:49:27.656Z
+statusLog:
+  - at: 2026-10-03T15:49:27.656Z
+    from: draft
+    to: active
+    actor: cli
+    reason: 人 2026-10-03 裁定做 goal 分支合并演练；承接任务 gap-goal904-merge-drill-record-doc
+      已立（needs-human 停放，待 goal 分支出现后放行），激活本 AC 不会触发乱序自动立案
+fidelity:
+  verdict: faithful
+  reason: "fidelity judge: faithful"
+  at: 2026-10-03T15:49:27.655Z
 ---
