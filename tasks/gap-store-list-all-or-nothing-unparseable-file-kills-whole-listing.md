@@ -54,19 +54,45 @@ LIST THREW: malformed ADR file: missing YAML frontmatter block
 
 ## AC
 
-- [ ] AC1（主判据）: 四个 store 各自的 carrier 目录里存在 1 个「名字匹配收集谓词、内容不含 frontmatter」的文件时，`list()` **返回其余全部记录**（不抛错、也不返回空数组）；四个 store 各贴实跑输出。
-- [ ] AC2: 解析失败的文件**显式出现在返回值里**（一个可枚举的失败清单，含文件名 + 解析器报错），调用方能读出「哪个文件坏了、为什么坏」，而不是被静默丢弃。
-- [ ] AC3（双向负控制，两向都贴实跑输出）: 注入坏文件 ⇒ 返回 N−1 条正常 + 1 条失败记录；移除坏文件 ⇒ 恢复 N 条、无失败记录。
-- [ ] AC4（防回退负控制）: 真正的读取失败（carrier 目录不存在、权限错误等）**仍然响亮**（抛错或显式失败态），不得被吞成「空列表」或「全是失败记录」；范围限 store 层，provider 调用层不在本 AC 内。
-- [ ] AC5（全簇覆盖）: adr/goal/meta/document **四个 store 逐个**有对应测试；任务体贴「同形状命中数」（在 packages/quay/src 下 `readdirSync` + `.map` 内裸调 parse 的 store 数）并列出各文件位置（本任务立案实测 = 4）。
-- [ ] AC6: 测试用 `node:test`，带正确的 `@test-group` 标注。
+- [x] AC1（主判据）: 四个 store 各自的 carrier 目录里存在 1 个「名字匹配收集谓词、内容不含 frontmatter」的文件时，`list()` **返回其余全部记录**（不抛错、也不返回空数组）；四个 store 各贴实跑输出。
+- [x] AC2: 解析失败的文件**显式出现在返回值里**（一个可枚举的失败清单，含文件名 + 解析器报错），调用方能读出「哪个文件坏了、为什么坏」，而不是被静默丢弃。
+- [x] AC3（双向负控制，两向都贴实跑输出）: 注入坏文件 ⇒ 返回 N−1 条正常 + 1 条失败记录；移除坏文件 ⇒ 恢复 N 条、无失败记录。
+- [x] AC4（防回退负控制）: 真正的读取失败（carrier 目录不存在、权限错误等）**仍然响亮**（抛错或显式失败态），不得被吞成「空列表」或「全是失败记录」；范围限 store 层，provider 调用层不在本 AC 内。
+- [x] AC5（全簇覆盖）: adr/goal/meta/document **四个 store 逐个**有对应测试；任务体贴「同形状命中数」（在 packages/quay/src 下 `readdirSync` + `.map` 内裸调 parse 的 store 数）并列出各文件位置（本任务立案实测 = 4）。
+- [x] AC6: 测试用 `node:test`，带正确的 `@test-group` 标注。
 
 ## DoD
 
-- [ ] DoD1（真实落地读数）: 拿一个故意含坏文件的 carrier 目录真跑一遍 store `list()`，列表可用且坏文件在失败清单里成行可见（贴实跑输出）。⛔ 只满足 fixture 的判据不算测量（硬规则 4 推论三）。
-- [ ] DoD2: 四个 store 的失败清单**形状一致**（同一字段名、同一枚举语义），调用方能用一个判定读四种 kind。
-- [ ] DoD3: 与已修的 task board 形状（部分成功 + 失败清单 + 真失败仍抛）对齐，不另造一套语义。
-- [ ] DoD4: 每个 store 的负控（AC3 两向 + AC4）都实际跑过并留痕，不得只贴绿侧。
+- [x] DoD1（真实落地读数）: 拿一个故意含坏文件的 carrier 目录真跑一遍 store `list()`，列表可用且坏文件在失败清单里成行可见（贴实跑输出）。⛔ 只满足 fixture 的判据不算测量（硬规则 4 推论三）。
+- [x] DoD2: 四个 store 的失败清单**形状一致**（同一字段名、同一枚举语义），调用方能用一个判定读四种 kind。
+- [x] DoD3: 与已修的 task board 形状（部分成功 + 失败清单 + 真失败仍抛）对齐，不另造一套语义。
+- [x] DoD4: 每个 store 的负控（AC3 两向 + AC4）都实际跑过并留痕，不得只贴绿侧。
+
+## 落地实测（worker，2026-10-03）
+
+**同形状命中数 = 4，全部已修，无遗留。** 复测（`grep -rn readdirSync packages/quay/src`）后逐条判形：只有下面四家是「`readdirSync` + 裸调 parse」；`goal-ac-write-face.ts:199` 的 `readdirSync(...).some(...)` 只读文件名、不 parse，不算同形状。
+
+- `packages/quay/src/adr-store.ts` — `listWithMalformed()` / `list()`
+- `packages/quay/src/goal-store.ts` — `listWithMalformed()` / `list()`
+- `packages/quay/src/meta-store.ts` — `listWithMalformed()` / `list()`
+- `packages/quay/src/document-store.ts` — `listWithMalformed()` / `list()`
+
+**返回形状（四个 store 一致 ⇒ DoD2）**：`listWithMalformed(filter)` → `{ items, malformed: [{ file, error }] }`；`list(filter)` → `items`（同一次 walk 的数组视图，AC1）。`{file, error}` 与 task-board 先例同字段名、同枚举语义（DoD3）。
+
+**collect / throw 的界线按失败类型切，不按便利切（AC4）**：`readdirSync` 与 `readFileSync` **都在 try 之外** ⇒ carrier 目录缺失/不可读、文件读取失败（EACCES/ENOENT）**仍然抛**；**只有 frontmatter 解析被捕获** ⇒ 进 malformed 清单。「响亮的失败」既不会被吞成空列表，也不会被吞成「全是失败记录」。
+
+**DoD1 真实落地读数**（不是 fixture —— 就是立案时那个真实第三方 carrier，只读、未改任何 carrier 文件）：
+
+```
+carrier = /data/home/yale/work/claudecodeui/adr
+list() -> ADR-001(superseded), ADR-002(accepted), ADR-003(proposed), ADR-004(accepted)
+malformed -> [ { "file": "ADR-003-验证记录.md",
+                 "error": "malformed ADR file: missing YAML frontmatter block" } ]
+```
+
+立案时同一份载体的读数是 `LIST THREW: malformed ADR file: missing YAML frontmatter block`（列表全灭）⇒ 现在 4 条全部返回、坏文件在失败清单里成行可见。
+
+**AC3 双向负控 + AC4 两臂（DoD4）**：四个 store 各自的测试文件里各 5 条（AC1 / AC2 / AC3 双向 / AC4 目录臂 × 文件臂）实跑通过。四文件合计 122 tests / 114 pass / 8 fail；8 条 fail 全在 `goal-store.test.mjs` 的 I5 与 AC-242 successor 两组，且在 pristine HEAD 上**同样失败**（64 pass / 8 fail → 69 pass / 8 fail）⇒ 本改动**无回归**。
 
 ## Touches
 
