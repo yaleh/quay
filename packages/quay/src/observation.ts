@@ -2159,6 +2159,66 @@ export function readLive(
   return { status, reason, inFlight, concurrencyCap, cpuPressure, liveState, liveExplanation, activity };
 }
 
+/**
+ * The read-only "current in-flight workers" reading (gap-no-readonly-surface-for-live-inflight-workers):
+ * the machine-readable counterpart to the web dashboard's "Loop pulse" card. It is a THIN wrapper over
+ * `readLive` — the SAME call chain the dashboard card uses (`readLive(root, {computeBlocking:false})`),
+ * so there is no second in-flight implementation to drift. Its ONE addition over `readLive` is the
+ * tri-state that readLive keeps private: whether the host-global `/proc` worker-process signal was
+ * actually consulted.
+ *
+ * ⛔ WHY `workerSignal.evaluated` EXISTS (hard rule 3b). readLive gates its `/proc` scan on
+ * `workerDriverActive(root)` (`liveWorkers ?? (workerDriverActive(root) ? readLiveWorkerProcesses(
+ * "/proc", {root}) : [])`). When this workspace's driver is inactive the scan NEVER RUNS, so an empty
+ * `inFlight` there means "not evaluated", NOT "zero workers" — collapsing the two would let a dead
+ * driver read as a healthy idle loop, which is exactly the failure this task exists to prevent.
+ * `evaluated:false` carries that distinction (with `reason` saying why).
+ *
+ * `telemetry` is a SEPARATE axis: readLive's own workflow-events read (ok / empty / error). A
+ * `status === "error"` there also empties the events half of `inFlight`, and it is reported as itself,
+ * never folded into "zero workers".
+ *
+ * `inFlight` is readLive's OWN `InFlightTask` objects, verbatim. ⛔ No projection and no re-derivation
+ * here — the JSON shape a CLI consumer sees is the caller's job. `blocks`/`blockedBy` are left empty
+ * because `computeBlocking` is OFF (the dashboard card's own cost decision; that scan grows with the
+ * task store) — a consumer that needs them asks for the full `/live` path, not this one.
+ */
+export interface LiveWorkersReading {
+  root: string;
+  workerSignal: { evaluated: boolean; reason: string | null };
+  telemetry: { status: ObservationStatus; reason: string | null };
+  inFlight: InFlightTask[];
+}
+
+/** Compute the read-only in-flight-worker reading for `root`. Pure I/O (carriers + `/proc`), never
+ *  network, never a serve dependency — so it works with no `serve` process running. `quay driver live`
+ *  and any future consumer share this ONE implementation. `liveWorkers` is the SAME test seam `readLive`
+ *  exposes: when injected (non-null) the caller supplies the worker set, so the `/proc` gate is bypassed
+ *  and the signal counts as evaluated. */
+export function readLiveWorkers(
+  root: string,
+  { nowMs = Date.now(), liveWorkers = null }:
+    { nowMs?: number; liveWorkers?: LiveWorker[] | null } = {},
+): LiveWorkersReading {
+  const res = readLive(root, { nowMs, liveWorkers, computeBlocking: false });
+  // This gate MIRRORS readLive's own (two lines above its /proc loop): the scan runs iff a seam was
+  // injected or the driver is active. ⛔ Kept in THIS file beside readLive precisely so the two stay
+  // one edit apart — if readLive's gate ever changes, this is the same line region to update.
+  const evaluated = liveWorkers != null || workerDriverActive(root);
+  return {
+    root,
+    workerSignal: {
+      evaluated,
+      reason: evaluated
+        ? null
+        : `worker driver is not active for ${root} (neither ${WORKER_OUTCOME_REL} nor ${WORKER_ROUND_REL} exists), ` +
+          `so the /proc worker-process scan was NOT run — this is "not evaluated", NOT "zero in flight"`,
+    },
+    telemetry: { status: res.status, reason: res.reason },
+    inFlight: res.inFlight,
+  };
+}
+
 /** Read a file, splitting it into `## `-headed sections and keeping the most recent `max` sections. */
 function readRecentSections(root: string, relFile: string, max: number): JournalSection {
   const abs = path.join(root, relFile);
