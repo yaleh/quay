@@ -119,6 +119,43 @@ const AC_ID_RE = /^AC-\d{3,}$/;
 // can `env -u` it to prove the observation measures real behavior.
 export const GOAL_ACCEPTANCE_ACTIVE_ENV = "QUAY_GOAL_ACCEPTANCE_ACTIVE";
 
+// ── WHICH TREE a goal verdict was obtained on (SPEC-goal-branch-2026-10-03 §7 辛 / §9.2-2, 硬规则 4c) ─
+// §7 辛 ("至少 1 个 live-probe AC 的 pass GateEvent 早于其 goal 的并入提交，且该次求值的 cwd 是预览
+// worktree，不是主检出") is unjudgeable while a goal GateEvent names no cwd: measured 2026-10-03, the
+// `AC-272` event carried only `id/item_id/gate/actor/verdict/timestamp/payload.reason` — the "which
+// tree" reading does not survive the carrier (硬规则 4c). EVERY writer of a `gate:"goal"` event now
+// records this fragment; ⛔ without a value in the CARRIER, the reading is only assumed.
+
+/** `git rev-parse HEAD^{tree}` at `cwd`, or null when it cannot be read (not a git work tree, or no
+ *  HEAD yet). ⛔ null is a VALUE meaning "the tree could not be read" — never an omitted field
+ *  (硬规则 3/3b: an absent `treeSha` would be indistinguishable from a pre-change event). */
+export function gitTreeSha(cwd: string): string | null {
+  const r = spawnSync("git", ["-C", cwd, "rev-parse", "HEAD^{tree}"], {
+    encoding: "utf8",
+    stdio: ["ignore", "pipe", "ignore"],
+  });
+  if (r.status !== 0 || typeof r.stdout !== "string") return null;
+  const sha = r.stdout.trim();
+  return sha === "" ? null : sha;
+}
+
+/** The payload fragment naming WHERE a goal criterion was evaluated — the quantity §7 辛 reads to
+ *  tell a preview-worktree pass from a main-checkout one. `evaluationRoot` is the criterion cwd's
+ *  **realpath**: ⛔ the unresolved path is not recorded, because this host's `/home/yale` is a symlink
+ *  to `/data/home/yale` and an unresolved reading would make the preview worktree and the main
+ *  checkout indistinguishable by string comparison. `treeSha` is the tree at that root (null when
+ *  unreadable). */
+export function evaluationContext(root: string): { evaluationRoot: string; treeSha: string | null } {
+  let evaluationRoot = root;
+  try {
+    evaluationRoot = fs.realpathSync(root);
+  } catch {
+    // A missing/unresolvable root keeps the given path; `treeSha: null` still marks it unreadable
+    // rather than dropping the field (硬规则 3/3b — "could not read" must have its own value).
+  }
+  return { evaluationRoot, treeSha: gitTreeSha(evaluationRoot) };
+}
+
 // ── AC-242 successor: the FROZEN population and its bounded rotation re-verification ──────────────
 // gap-achieved-ac-rot-invisible-when-ledger-tail-is-stale-pass. An AC `status: achieved` whose GOAL
 // is no longer `active` and which does NOT declare `long-term: true` leaves BOTH mechanisms at once:
@@ -2131,6 +2168,9 @@ export function createGoalStore(
             reason: v.reason,
             ...(v.cause ? { cause: v.cause } : {}),
             criterionHash: criterionFingerprint(criterion),
+            // WHICH tree this rotation re-verified on (SPEC §7 辛) — `root` here is the criterion cwd
+            // passed to `runAcceptance` above, so the two name the same tree by construction.
+            ...evaluationContext(root),
           },
         });
       }
@@ -3274,7 +3314,9 @@ export async function runGoalStoreCli(argv: string[]): Promise<number> {
         verdict,
         timestamp: new Date().toISOString(),
         // `cause` only when there is one — see the sweep site's note on the payload shape.
-        payload: { reason, ...(cause ? { cause } : {}) },
+        // `evaluationRoot`/`treeSha` name WHICH tree this verdict was obtained on (SPEC §7 辛):
+        // `root` is the criterion cwd passed to `runAcceptance` above, so the two are the same tree.
+        payload: { reason, ...(cause ? { cause } : {}), ...evaluationContext(root) },
       };
       // P9 dry-run: run the criterion but do NOT append the gate event (persist nothing).
       if (!dryRun) appendGateEvent(logPath, event);
