@@ -23,7 +23,7 @@ goal_ac: AC-328
 - [x] `node --test packages/quay/test/goal-gate-verdict-mapping.test.mjs` 退出 0。 —— `tests 17 / pass 17 / fail 0`（MCP `goal_gate` 台账仍断言 `payload.cause`，新字段是**追加**的）。
 - [x] 取假：把本任务的核心改动临时回退（用 `cp` 备份恢复，⛔ 不用 `git checkout --`）后，上面新增用例至少 1 条变红；在 `## Evidence` 贴实跑输出与恢复后的绿输出。 —— 见 Evidence：回退后 1 红（`evaluationRoot` undefined），`cp` 恢复后 1 绿。
 - [x] 5b 邻近扫描：grep 其它追加 `gate: "goal"` 事件的写入点，命中数与前 3 条贴进 Evidence，逐条确认已带上两个字段或写明为何不需要。 —— 全仓命中 **3** 条，**三条全部已带** `evaluationContext`；见 Evidence（⛔ 无一需要「为何不需要」）。
-- [ ] `bash scripts/test.sh --for-task gap-goal-branch-gate-event-evaluation-root` 退出 0，且确实执行了 ≥1 个测试文件（非 thin；在 `## Evidence` 贴出被执行的测试文件名）。 —— 待跑（见 Evidence）。
+- [x] `bash scripts/test.sh --for-task gap-goal-branch-gate-event-evaluation-root` 退出 0，且确实执行了 ≥1 个测试文件（非 thin；在 `## Evidence` 贴出被执行的测试文件名）。 —— **EXIT=0**；selector 选中 **11** 个测试文件（⛔ **未**加 `--allow-thin` ⇒ 非 thin）、全部执行、`tests 175 / pass 175 / fail 0`；清单见 Evidence。
 
 ## DoD
 
@@ -85,6 +85,27 @@ count = 3        # 全文 20 处「gate: "goal"」提及，其余 17 处是注�
 3. `packages/quay-native/src/mcp-server.ts:540` —— MCP `goal_gate` 写点 → 已带（`mcp-server.ts:547`，共享 `evaluationContext`）。
 `packages/*/src` 之外无第四处**真实写点**；`plugin/vendor/*/dist/*.js` 的命中是上面两个源的**构建产物**，⛔ 非独立写点。⇒ **三个写点全部带字段，无一需要「为何不需要」**。
 
-**AC1/2/3 的环境注记（防后人误诊）**：worker 会话自身 shell 带 `QUAY_GOAL_ACCEPTANCE_ACTIVE=1`（goal-store 的重入哨兵）。直接 `node --test packages/quay/test/goal-store.test.mjs` 会红 **8** 条（I5 ×3 / `AC4 负控制` / `AC-242 successor` ×4）——`env -u` 后 **78/78 绿**；且这同一组 8 条在**pristine develop** 上以**完全相同的形态**红（77 tests / 8 fail）⇒ 与本 delta 无关。`scripts/test.sh` 入口已 `unset` 该变量（`gap-goal-acceptance-active-leaks-into-suite-via-driver-anchor-env`，已 done）。
+**AC5 —— scoped gate（`--for-task`，⛔ 未加 `--allow-thin` ⇒ 非 thin）**
+```
+$ bash scripts/test.sh --for-task gap-goal-branch-gate-event-evaluation-root    # EXIT=0
+... ℹ tests 175   ℹ pass 175   ℹ fail 0
+```
+被执行的测试文件 = selector（`select-tests-for-touches.ts --paths-only`）选中的 **11** 条，全部真跑：
+```
+packages/quay-backlog/test/mcp-server.test.mjs
+packages/quay-github/test/mcp-server.test.mjs
+packages/quay/test/adr-gate.test.mjs
+packages/quay/test/adr-store.test.mjs
+packages/quay/test/build-dist.test.mjs
+packages/quay/test/cli-adr.test.mjs
+packages/quay/test/goal-store.test.mjs        ← 含本任务新增 AC1 用例（✔ AC1 — goal gate records …）
+packages/quay/test/mcp-adr.test.mjs
+packages/quay/test/mcp-server.test.mjs
+packages/quay/test/npm-pack-e2e.test.mjs
+plugin/test/plugin-packaging.test.mjs
+```
+（先前在裸 `node --test` 下因泄漏 env 而红的 `I5 …` / `AC-242 successor …` 数条，在此**全绿**。）
+
+**AC1/2/3 的环境注记（防后人误诊）**：worker 会话自身 shell 带 `QUAY_GOAL_ACCEPTANCE_ACTIVE=1`（goal-store 的重入哨兵）。直接 `node --test packages/quay/test/goal-store.test.mjs` 会红 **8** 条（I5 ×3 / `AC4 负控制` / `AC-242 successor` ×4）——`env -u` 后 **78/78 绿**；且这同一组 8 条在**pristine develop** 上以**完全相同的形态**红（77 tests / 8 fail）⇒ 与本 delta 无关。`scripts/test.sh` 入口已 `unset` 该变量（`gap-goal-acceptance-active-leaks-into-suite-via-driver-anchor-env`，已 done），故 AC5 的 scoped gate 不受影响。
 
 **DoD（落地后读数）**：本 delta 尚未落地，故生产账本 `tail` 还读不到新字段；`evaluationContext` 已在真实 git-rooted workspace 上经 `goal gate` 端到端产出（AC1），落地后 goal-driver 每次 `goal gate` 即写入。
