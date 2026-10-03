@@ -62,7 +62,7 @@ import { mainCheckoutRoot } from "./repo-root.ts";
 // `arg-parsing-helper-family`, routine `semantic-dedup-scan`).
 import { isDirectEntry, helpExit, flagValue } from "./gate-script-base.ts";
 import { matchGlob, isOverbroadDeclaration, normalizePath, parseTouches } from "./touches-orthogonality-check.ts";
-import { classifyBranch, detectDefaultBranch, LANDING_BASELINE_ROLE } from "../../packages/quay/src/branch-model.ts";
+import { classifyBranch, detectDefaultBranch, GOAL_BRANCH_RE, LANDING_BASELINE_ROLE } from "../../packages/quay/src/branch-model.ts";
 
 // normalizePath (canonical: strips ./, collapses //, resolves ./.. segments, drops trailing /, case
 // preserved for the case-significant Linux repo) is single-source in touches-orthogonality-check.mjs
@@ -287,6 +287,57 @@ export function computeTaskOwnedFiles(worktree, mergeTarget, landingBaseline = L
   return [...seen];
 }
 
+/** Is `mergeTarget` a **project goal line** — this repo's `goal/<GOAL-NNN>` branch, i.e. a landing
+ *  target that legitimately does NOT (yet) contain the develop tip?
+ *
+ *  ── why this exists (SPEC-goal-branch-2026-10-03 §4.4 ruling ③) ──────────────────────────────────
+ *  A branch-mode goal's tasks land on `goal/<id>`, and every landing first catches `develop` up into
+ *  the task worktree (worker-fan-in step 2b: merge the goal line, THEN merge develop). That step
+ *  exists for exactly one reason: the goal line does NOT contain the develop tip. Requiring
+ *  `mergeTarget` to contain the develop tip (the `divergent` verdict) therefore makes step 2b's own
+ *  precondition unsatisfiable: the catch-up merge is built, then judged a BASELINE defect — and the
+ *  two-line base (`computeTaskOwnedFiles`, written FOR the merged shape) is never reached. This is
+ *  that contradiction's fix.
+ *
+ *  TWO shapes a goal line takes, both outside `classifyBranch`'s `compatible`:
+ *    · **behind (fresh line)** — `ensureGoalBranch` forks it from the develop tip CURRENT AT OPT-IN
+ *      (`branch-model.ts`), and the goal's activation record is then propagated develop-ward, so a
+ *      goal branch is an ANCESTOR of develop almost immediately (`aheadOfDefault === 0`);
+ *    · **behind WITH its own landings** — after the first task lands, the goal line carries the
+ *      landed work (its catch-up merge pulled that landing's develop tip in) and develop has since
+ *      advanced, so it is a divergent SIBLING: `aheadOfDefault > 0` (its landed tasks) AND
+ *      `behindDefault > 0` (develop's later work). A fix that only accepted `aheadOfDefault === 0`
+ *      would unblock the first landing and re-block every subsequent one.
+ *
+ *  Both are judged by the SAME two-line base: the files changed by commits reachable from HEAD but
+ *  from NEITHER line. The goal line's own landed commits are unreachable from develop and are
+ *  excluded — correct, they are prior tasks' work, not this task's writes.
+ *
+ *  ── fail-closed, and what is NOT relaxed (hard rule 3b: "could not read it" ≠ "fine") ───────────
+ *  `true` requires a POSITIVE determination on every axis:
+ *    ① the ref NAME is a goal-branch token (`GOAL_BRANCH_RE`, the quay protocol's own vocabulary,
+ *       shared with `branch-model`'s goal lifecycle — not a per-project name);
+ *    ② the ref RESOLVES to a commit here (an unresolvable name is "no such line", not a goal line);
+ *    ③ its ancestry is CONNECTED to the landing baseline — a merge base exists. An unrelated-root
+ *       fork (`git checkout --orphan`) shares no merge base and is refused. If the merge base cannot
+ *       be computed, the answer is `false` (⇒ the caller's `divergent ⇒ BASELINE-MISMATCH` path), so
+ *       "could not decide" never reads as a pass.
+ *  A foreign branch — not a goal line (③ unaffected), or a non-goal line that does not contain the
+ *  develop tip — still fails closed. */
+export function isProjectGoalLine(worktree, mergeTarget) {
+  if (typeof mergeTarget !== "string" || !GOAL_BRANCH_RE.test(mergeTarget)) return false;
+  const here = classifyBranch(worktree, mergeTarget, LANDING_BASELINE_ROLE);
+  if (here.sha === null) return false; // absent / unreadable ⇒ not a goal line we can vouch for
+  try {
+    const mb = execFileSync("git", ["-C", worktree, "merge-base", mergeTarget, LANDING_BASELINE_ROLE], {
+      encoding: "utf8", timeout: 30_000, stdio: ["ignore", "pipe", "ignore"],
+    });
+    return mb.trim().length > 0;
+  } catch {
+    return false; // no common ancestor, or undecidable ⇒ fail-closed
+  }
+}
+
 /** Build the single-build manifest a task fan-in must satisfy: the declared `## Touches` globs vs
  *  the ACTUAL files the fan-in would land. `parseTouches` (the ONE parser) resolves a missing Touches
  *  section to [] — fail-closed: any actual file then violates (an undeclared write is drift). */
@@ -330,7 +381,8 @@ function usage() {
  *  file within the declared Touches, declaration not overbroad); 1 = HARD FAIL (out-of-declared
  *  write or overbroad declaration); 2 = usage/env error (task file missing / git diff unavailable /
  *  MALFORMED `anti_drift.exempt` in the workspace-root config — fail-closed, never a silent OK);
- *  3 = BASELINE-MISMATCH (the merge target is not a continuation of the default branch). */
+ *  3 = BASELINE-MISMATCH (the merge target is not a continuation of the default branch AND is not a
+ *      project goal line — see isProjectGoalLine; a goal line is judged by the two-line base). */
 function runTaskDriver({ taskId, worktree, mergeTarget, allowEmpty }) {
   const taskPath = path.join(worktree, "tasks", `${taskId}.md`);
   if (!fs.existsSync(taskPath)) {
@@ -352,7 +404,14 @@ function runTaskDriver({ taskId, worktree, mergeTarget, allowEmpty }) {
   // proxy (using it would invert the predicate and misreport every healthy fan-in).
   const defaultBranch = detectDefaultBranch(worktree, { allowCurrentBranch: false });
   const baseline = classifyBranch(worktree, mergeTarget, defaultBranch);
-  if (baseline.state === "divergent") {
+  // ── the `goal/<id>` catch-up carve-out (SPEC §4.4 ruling ③; see isProjectGoalLine) ─────────────
+  // A goal line is `divergent` by construction (it does not contain the develop tip) — and that is
+  // the only shape worker-fan-in step 2b (the per-landing catch-up) exists for. It is a valid
+  // landing target, judged by the two-line base, NOT a BASELINE defect. The determination is
+  // POSITIVE and fail-closed: a non-goal line, an unrelated-root fork, or an undecidable ancestry
+  // still takes the `divergent ⇒ BASELINE-MISMATCH` path below unchanged (hard rule 3b).
+  const goalLine = baseline.state === "divergent" && isProjectGoalLine(worktree, mergeTarget);
+  if (baseline.state === "divergent" && !goalLine) {
     process.stdout.write(
       `BASELINE-MISMATCH: merge target '${mergeTarget}' is not a continuation of the project's ` +
       `default branch '${defaultBranch}' — ${baseline.detail}.\n` +
@@ -364,6 +423,16 @@ function runTaskDriver({ taskId, worktree, mergeTarget, allowEmpty }) {
       `then re-dispatch the task.\n`,
     );
     return 3;
+  }
+  if (goalLine) {
+    // Enumeration, not silence: the relaxation is a DECISION and must be visible in the verdict
+    // stream (hard rule 3 — "relaxed" must be distinguishable from "never divergent").
+    process.stdout.write(
+      `BASELINE: merge target '${mergeTarget}' is a goal line behind the landing baseline ` +
+      `'${LANDING_BASELINE_ROLE}' (${baseline.behindDefault ?? "?"} commit(s) behind, ` +
+      `${baseline.aheadOfDefault ?? "?"} landed commit(s) of its own) — a valid catch-up landing; ` +
+      `judging task ${taskId}'s own commits (two-line base).\n`,
+    );
   }
   let actualFiles;
   try {

@@ -1,7 +1,7 @@
 ---
 id: AC-322
 title: 追平：每次 goal 分支落地都包含其追平时刻的 develop
-status: active
+status: achieved
 kind: criterion
 goal: GOAL-028
 criterion: >-
@@ -95,6 +95,11 @@ statusLog:
     actor: cli
     reason: 人 2026-10-03 裁定激活 GOAL-028；goal-driver 分诊已判 activate，但其激活写入两轮均被 120s
       spawn 超时 SIGKILL（round 633/634），改由 CLI 执行同一激活（保真性闸照常运行）
+  - at: 2026-10-03T12:15:17.828Z
+    from: active
+    to: achieved
+    actor: goal-driver
+    reason: "I2: criterion pass"
 fidelity:
   verdict: faithful
   reason: "fidelity judge: faithful"

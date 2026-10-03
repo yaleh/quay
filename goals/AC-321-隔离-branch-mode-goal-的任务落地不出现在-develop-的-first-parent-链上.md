@@ -1,7 +1,7 @@
 ---
 id: AC-321
 title: 隔离：branch-mode goal 的任务落地不出现在 develop 的 first-parent 链上
-status: active
+status: achieved
 kind: criterion
 goal: GOAL-028
 criterion: >-
@@ -77,6 +77,11 @@ statusLog:
     to: active
     actor: goal-driver
     reason: "triage: activate"
+  - at: 2026-10-03T12:15:14.110Z
+    from: active
+    to: achieved
+    actor: goal-driver
+    reason: "I2: criterion pass"
 fidelity:
   verdict: faithful
   reason: "fidelity judge: faithful"
