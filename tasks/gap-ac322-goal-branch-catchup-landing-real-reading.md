@@ -2,7 +2,7 @@
 id: gap-ac322-goal-branch-catchup-landing-real-reading
 title: AC-322 停在 exit 3：追平机制已落地但从未在 goal 分支的生产落地上跑过——在真实 store 上完成一次含追平的 goal
   分支落地使 AC-322 取到真实 exit 0，并新增逐字绑定该判据的三态夹具
-status: todo
+status: ready
 labels:
   - gap
 parent: null
