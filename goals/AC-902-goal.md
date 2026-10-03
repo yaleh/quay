@@ -1,6 +1,6 @@
 ---
 id: AC-902
-status: draft
+status: active
 kind: criterion
 goal: GOAL-902
 criterion: >-
@@ -25,4 +25,15 @@ criterion: >-
 expect: exit 0 = 演练任务的翻 done 提交已在 develop 上（落地发生了）；exit 3 = 尚未落地（无提交可核）
 origin: GOAL-028 退出条件① 的 AC-322
   生产读数（gap-ac322-goal-branch-catchup-landing-real-reading 的一次性落地演练）
+activatedAt: 2026-10-03T11:21:52.345Z
+statusLog:
+  - at: 2026-10-03T11:21:52.345Z
+    from: draft
+    to: active
+    actor: goal-driver
+    reason: "triage: activate"
+fidelity:
+  verdict: faithful
+  reason: "fidelity judge: faithful"
+  at: 2026-10-03T11:21:52.345Z
 ---
