@@ -1,7 +1,7 @@
 ---
 id: gap-goal-branch-gate-event-evaluation-root
 title: goal gate 事件记录判据在哪棵树上求值——payload 增加 evaluationRoot 与 treeSha
-status: todo
+status: ready
 labels:
   - gap
 parent: null
