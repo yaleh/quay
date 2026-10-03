@@ -92,7 +92,11 @@ malformed -> [ { "file": "ADR-003-验证记录.md",
 
 立案时同一份载体的读数是 `LIST THREW: malformed ADR file: missing YAML frontmatter block`（列表全灭）⇒ 现在 4 条全部返回、坏文件在失败清单里成行可见。
 
-**AC3 双向负控 + AC4 两臂（DoD4）**：四个 store 各自的测试文件里各 5 条（AC1 / AC2 / AC3 双向 / AC4 目录臂 × 文件臂）实跑通过。四文件合计 122 tests / 114 pass / 8 fail；8 条 fail 全在 `goal-store.test.mjs` 的 I5 与 AC-242 successor 两组，且在 pristine HEAD 上**同样失败**（64 pass / 8 fail → 69 pass / 8 fail）⇒ 本改动**无回归**。
+**AC3 双向负控 + AC4 两臂（DoD4）**：四个 store 各自的测试文件里各 5 条（AC1 / AC2 / AC3 双向 / AC4 目录臂 × 文件臂）实跑通过——`env -u QUAY_GOAL_ACCEPTANCE_ACTIVE node --test <四个 test 文件>` 全绿；`goal-store.test.mjs` 单文件 **77/77 pass**（含本任务新增的 5 条）。
+
+⚠️ **一个只影响读数、不影响结论的环境坑（留痕以便后来者不误判 develop 红）**：本 worker 会话的 shell 里泄漏了 `QUAY_GOAL_ACCEPTANCE_ACTIVE=1`（`env | grep QUAY_` 可见），它会毒化 goal 判据读数 —— 带着它跑 `goal-store.test.mjs` 会看到 8 条红（I5 与 AC-242 successor 两组），**去掉即全绿**，因此那是**环境读数**，不是 develop 红、也不是本改动引入。pristine HEAD 在同一污染环境下同样 8 红（64 pass/8 fail → 69 pass/8 fail）⇒ 本改动**无回归**。
+
+**scoped 门（`scripts/test.sh --for-task <id> --allow-thin`）**：**exit 0，205 tests / 205 pass / 0 fail**；其中本任务新增的 AC1/AC2/AC3 用例 **12 条**明确出现在选择集内（按用例名 grep 复核，⛔ 不看文件路径行）。
 
 ## Touches
 
