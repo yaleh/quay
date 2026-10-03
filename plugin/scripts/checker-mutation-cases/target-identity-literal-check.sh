@@ -15,6 +15,10 @@
 #   inject (tasks-dir)     `export const tasks_dir = "my-tasks"` → RED (1)
 #   restore   clean → GREEN (0)
 #   inject (legal defaults) develop/integration/master/tasks 裸字面量 → GREEN (0) — 合法默认值不误报
+#   restore   clean → GREEN (0)
+#   inject (goal branch, live)     `GOAL_BRANCH = "goal/GOAL-901"` + GOAL-901 active+branch:true → GREEN (0)
+#   inject (goal branch, retired)  same literal, GOAL-901 retired → RED (1)
+#   remove goal store              same literal, no goals/ → exit 3 (NOT-EVALUATED, ⛔ never legal)
 #   restore   clean → GREEN (0, final)
 set -u
 name="target-identity-literal-check"
@@ -108,10 +112,68 @@ if checker_cmd; then :; else
   exit 4
 fi
 
-# RESTORE: clean again → GREEN (final).
+# RESTORE: clean again → GREEN.
 write_clean
 if checker_cmd; then :; else
   echo "ALWAYS-RED — restoring the clean file after the legal-default inject still reddens the checker" >&2
+  exit 4
+fi
+
+# ── goal-branch token rule (SPEC-goal-branch §4.8) ──────────────────────────────────────────────
+# `goal/<GOAL-NNN>` is a DERIVED branch name: a literal spelling one is legal ONLY while the GOAL it
+# names is a live branch-mode goal. The three phases below pin the whole rule:
+#   (a) GOAL live (active + branch:true) → GREEN
+#   (b) GOAL retired                    → RED   (its branch must be gone)
+#   (c) no goal store at all            → exit 3 NOT-EVALUATED (⛔ never admitted as legal)
+write_goal_literal() {
+  cat > plugin/scripts/fixture.ts <<'EOF'
+export const GOAL_BRANCH = "goal/GOAL-901";
+EOF
+}
+write_goal_record() {
+  mkdir -p goals
+  cat > goals/GOAL-901-fixture.md <<EOF
+---
+id: GOAL-901
+title: mutation fixture
+status: $1
+kind: goal
+branch: true
+origin: mutation case
+---
+body
+EOF
+}
+
+write_goal_literal
+write_goal_record active
+if checker_cmd; then :; else
+  echo 'FALSE-RED — a bare `goal/GOAL-901` literal with GOAL-901 recorded active+branch:true reddened the checker (the derived goal-branch identity must be LEGAL while the goal is live)' >&2
+  exit 4
+fi
+
+write_goal_record retired
+checker_cmd; rc=$?
+if [ "$rc" -eq 0 ]; then
+  echo 'STAYED-GREEN — a `goal/GOAL-901` literal with GOAL-901 RETIRED did not redden the checker (a literal naming a discarded branch slips through)' >&2
+  exit 3
+fi
+if [ "$rc" -ne 1 ]; then
+  echo "UNEXPECTED-RC — expected RED (1) for a retired-goal branch literal, got ${rc}" >&2
+  exit 2
+fi
+
+rm -rf goals
+checker_cmd; rc=$?
+if [ "$rc" -ne 3 ]; then
+  echo "WRONG-WITHHOLD — an unreadable goal store must withhold the verdict (exit 3), got ${rc}" >&2
+  exit 2
+fi
+
+# RESTORE: clean again → GREEN (final).
+write_clean
+if checker_cmd; then :; else
+  echo "ALWAYS-RED — restoring the clean file after the goal-branch injects still reddens the checker" >&2
   exit 4
 fi
 

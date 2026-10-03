@@ -91,6 +91,10 @@ import { criterionFidelityVerdict, type FidelityInvokeJudge } from "./criterion-
 import { resolvePluginRoot } from "./plugin-root.ts";
 import { GOAL_STATUSES } from "./abi.ts";
 import { mergeEnv } from "./kernel/env-merge.ts";
+// Goal-branch lifecycle (SPEC-goal-branch-2026-10-03.md §4.1/§4.2). The store is the ONE caller of
+// each primitive: a goal's status flip is the only event that creates (§4.2: lazy, on `active`) or
+// discards (§4.2: `retired`/`superseded`) `goal/<id>`.
+import { ensureGoalBranch, discardGoalBranch, goalBranchName, goalBranchRefExists, goalBranchTip } from "./branch-model.ts";
 
 // ADR-036 (枚举事实的单一真源): the goal-status vocabulary is DEFINED ONCE, in the ABI declaration
 // (`abi.ts:GOAL_STATUSES`), and this store derives from it — ⛔ not a second hand-copied literal.
@@ -395,6 +399,10 @@ export interface StalePassReading {
 const OWNED_KEYS = new Set([
   "id", "title", "status", "kind", "goal", "criterion", "expect", "origin", "activatedAt", "statusLog",
   "labels", "posture", "supersedes", "superseded-by", "long-term", "fidelity", "timeoutMs",
+  // SPEC-goal-branch §4.1 — the opt-in isolation gate. The branch NAME is derived (`goal/<id>`),
+  // ⛔ never a stored field: storing it would make "which branch does this goal land on" a
+  // human-writable arbitrary string, which is exactly what §4.8's identity rule forbids.
+  "branch",
 ]);
 
 // ── evidence is ledger-DERIVED (gap-goal-evidence-cache-should-not-enter-git) ───────────────────
@@ -706,6 +714,10 @@ interface GoalFrontmatter {
   "long-term"?: boolean;
   /** 保真性闸（GOAL-013）——激活（任何进入 active 的转换）时保真性判定的结果与理由，落在记录自身（⛔ 不只 stderr）。 */
   fidelity?: { verdict: string; reason: string; at: string };
+  /** SPEC-goal-branch §4.1 — opt-in: the goal's tasks land on the DERIVED branch `goal/<id>`.
+   *  Absent/false = today's behavior. Only the "open or not" bit is stored; the branch NAME is
+   *  derived (⛔ never persisted, ⛔ never caller-supplied). */
+  branch?: boolean;
 }
 
 interface GoalFilter {
@@ -735,6 +747,10 @@ interface GoalViewModel {
   supersededBy: unknown[];
   /** AC-216：`long-term: true` 的 achieved AC 跨 GOAL 关闭仍在 I5 复验域（frontmatter `long-term` 投影）。 */
   longTerm: unknown;
+  /** SPEC-goal-branch §4.1 — opt-in isolation gate, projected from the `branch` frontmatter field.
+   *  ⛔ `false`, never `undefined`: "the field is absent" and "the goal declined a branch" are the
+   *  same answer to the ABI consumer ("this goal lands on the landing baseline"). */
+  branch: boolean;
   /** 保真性闸（GOAL-013）——激活期保真性判定的结果与理由（frontmatter `fidelity` 投影）。 */
   fidelity: unknown;
   body: string;
@@ -1617,6 +1633,9 @@ export function createGoalStore(
       posture: frontmatter.posture,
       timeoutMs: frontmatter.timeoutMs,
       longTerm: frontmatter["long-term"] === true,
+      // Undeclared reads as `false` (SPEC §4.1: 「缺省 = false = 现状」) — a three-state answer here
+      // would put the two consumers that must treat them identically (branch or not) at odds.
+      branch: frontmatter.branch === true,
       fidelity: frontmatter.fidelity,
       evidence,
       // Own-record time (a criterion): lastProgressAt = its LAST gate=goal event, firstEvidenceAt =
@@ -2181,6 +2200,17 @@ export function createGoalStore(
     return { evaluated: frozen.length > 0, refused: false, eligible: eligible.length, ran, stoppedBy };
   }
 
+  /** The ONE call site of `discardGoalBranch` (SPEC-goal-branch §4.2): delete a discarded goal's
+   *  branch and surface a failed delete (硬规则 3b — a statusLog that claims a rescued tip must not
+   *  coexist with a branch that is still there). `tipSha === null` (non-branch goal / already gone)
+   *  is a normal no-op and deliberately does not log. */
+  function discardGoalBranchNow(root: string, id: string): void {
+    const del = discardGoalBranch(root, id);
+    if (!del.removed && del.tipSha !== null) {
+      console.error(`goal-store: ${id} was discarded but its branch was NOT deleted — ${del.detail}`);
+    }
+  }
+
   /** Direct read-modify-write of the old goal's file (inside the NEW goal's write lock). */
   function flipGoal(oldId: string, patch: { status: string; supersededBy?: string[] }) {
     const file = fileNameForId(goalDir, oldId);
@@ -2191,6 +2221,26 @@ export function createGoalStore(
     const prevStatus = String(fm.status ?? "");
     fm.status = patch.status;
     if (patch.supersededBy !== undefined) fm["superseded-by"] = patch.supersededBy;
+    // SPEC-goal-branch §4.2 — the supersedes/disposeOld path reaches `superseded` WITHOUT going
+    // through write(), so it must record + discard here too, or a branch-mode goal disposed by a
+    // successor would leave an orphan branch and an empty statusLog (the AC-326 defect shape).
+    // Reads the tip BEFORE the deletion, exactly like write(); only fires when the goal is
+    // branch-mode (⛔ no new statusLog entries for ordinary goals — this path never wrote one).
+    const root = fm.branch === true ? resolveGitRoot(goalDir) : null;
+    let discardTipSha: string | null = null;
+    if (root !== null && (patch.status === "superseded" || patch.status === "retired")) {
+      discardTipSha = goalBranchTip(root, oldId);
+      if (discardTipSha !== null) {
+        const prior = Array.isArray(fm.statusLog) ? fm.statusLog : [];
+        fm.statusLog = [...prior, {
+          at: new Date().toISOString(),
+          from: prevStatus,
+          to: patch.status,
+          actor: "goal-store",
+          reason: `discarded branch ${goalBranchName(oldId)} tip ${discardTipSha}`,
+        }];
+      }
+    }
     fs.writeFileSync(p, serializeFrontmatter(fm, body), "utf8");
     const outcome = commitGoalFile(goalDir, file, oldId, `status ${prevStatus}→${patch.status}`);
     if (outcome === "failed") {
@@ -2199,11 +2249,12 @@ export function createGoalStore(
       // "unchanged"/"not-in-git" are expected no-ops and deliberately do NOT log.
       console.error(`goal-store: commit of "${oldId}" failed — the file was written to disk but is not on any branch's history`);
     }
+    if (root !== null && discardTipSha !== null) discardGoalBranchNow(root, oldId);
   }
 
   function write(id: string, {
     title, status, goal, criterion, expect, origin,
-    supersedes, supersededBy, body, disposeOld, longTerm,
+    supersedes, supersededBy, body, disposeOld, longTerm, branch,
     force = false,
     actor,
     reason,
@@ -2229,6 +2280,11 @@ export function createGoalStore(
      *  whether the AC leaves the reverify scope with its GOAL. `undefined` ⇒ patch semantics
      *  (keep the stored value); `false` ⇒ explicitly clear it. */
     longTerm?: boolean;
+    /** SPEC-goal-branch §4.1 — the opt-in isolation gate (GOAL records only). `undefined` ⇒ patch
+     *  semantics (keep the stored value); `true`/`false` requests a change — REFUSED once the goal's
+     *  `goal/<id>` branch exists, because moving the merge target under an in-flight task is the
+     *  damage class this lock exists to stop (§4.11). The branch NAME is derived, ⛔ never given here. */
+    branch?: boolean;
     /** P6b: a per-call fidelity judge overriding the store-level seam (the CLI's
      *  `--fidelity-judge-argv` path). `undefined` ⇒ fall back to the store-level `fidelityJudge`. */
     fidelityJudge?: FidelityInvokeJudge;
@@ -2296,11 +2352,35 @@ export function createGoalStore(
       // The criterion AS STORED, captured BEFORE this write's `criterion` param overwrites it — the
       // basis for the write-side attribution gate's shrink-only comparison (see below).
       const priorCriterion = frontmatter.criterion;
+      // ── goal-branch lifecycle pre-computation (SPEC-goal-branch §4.1/§4.2) ──────────────────────
+      // All of it is read-only and happens before any mutation, so a refused write leaves nothing.
+      // `root` is the git root of the goals dir (⛔ not `path.dirname` — hard rule 4 corollary 2);
+      // null outside a work tree, in which case the lifecycle is honestly SKIPPED (never faked).
+      const branchGitRoot = isGoalRecord ? resolveGitRoot(goalDir) : null;
+      const priorBranch = frontmatter.branch === true;
+      // Does the DERIVED ref already exist? This is the LOCK (§4.1: the field is mutable only while
+      // the branch does not exist) — read from git, ⛔ never from a stored flag, so it stays true
+      // across the store process boundary and after an external `git branch -D`.
+      const branchRefExists = branchGitRoot !== null && goalBranchRefExists(branchGitRoot, id);
+      if (isGoalRecord && branch !== undefined && branchRefExists && branch !== priorBranch) {
+        throw new Error(
+          `refusing to change ${id}'s \`branch\` field: the derived branch '${goalBranchName(id)}' already ` +
+            `exists — the field is locked once the branch is created (SPEC-goal-branch §4.1/§4.11); ` +
+            `it cannot be flipped under an in-flight task's merge target`,
+        );
+      }
       // Apply owned fields (preserving any unknown frontmatter keys verbatim).
       frontmatter.id = id;
       if (title !== undefined) frontmatter.title = title;
       const nextStatus = status ?? frontmatter.status ?? "draft";
       frontmatter.status = nextStatus;
+      // The discarded tip sha, read BEFORE any mutation so it can be written into the statusLog entry
+      // (§4.2: the statusLog reason is the ONLY rescue handle — the branch is deleted right after the
+      // record lands). Read-only and null for a non-branch goal / already-discarded ref.
+      const discarding =
+        isGoalRecord && (nextStatus === "superseded" || nextStatus === "retired") &&
+        prevStatus !== nextStatus && priorBranch && branchGitRoot !== null;
+      const discardTipSha = discarding ? goalBranchTip(branchGitRoot as string, id) : null;
       // `kind` is derived from the id prefix — never caller-supplied.
       frontmatter.kind = isGoalRecord ? "goal" : "criterion";
       if (goal !== undefined) frontmatter.goal = goal;
@@ -2311,6 +2391,10 @@ export function createGoalStore(
       if (supersededBy !== undefined) frontmatter["superseded-by"] = supersededBy;
       // `long-term` is a stored DECLARATION (AC-216), so unlike `evidence` it is written verbatim.
       if (longTerm !== undefined) frontmatter["long-term"] = longTerm;
+      // `branch` (SPEC-goal-branch §4.1): patch semantics like `long-term` — omitted keeps the stored
+      // value. The lock above already refused any CHANGE once the ref exists; a repeated `true` on a
+      // branch-mode goal is a no-op, and `false` on a never-branched goal clears an unset field.
+      if (branch !== undefined) frontmatter.branch = branch;
       const statusChanged = prevStatus !== undefined && nextStatus !== prevStatus;
       // ⛔ "activation" here is ANY transition INTO active (SPEC §6 裁定 3: activation is manual; the
       // goal-driver never flips INTO active). Reopen paths — achieved→active, needs-human→active,
@@ -2652,12 +2736,20 @@ export function createGoalStore(
       }
       if (statusChanged) {
         const prior = Array.isArray(frontmatter.statusLog) ? frontmatter.statusLog : [];
+        // SPEC-goal-branch §4.2 — when a branch-mode goal is discarded (retired/superseded), the
+        // branch tip SHA is appended to THIS entry's reason. It is the ONLY rescue handle: the branch
+        // is deleted moments later, and `git branch <name> <sha>` is how a human gets it back.
+        // ⛔ The reason is written BEFORE the deletion (the deletion happens after this file lands).
+        const discardNote = discardTipSha !== null ? `discarded branch ${goalBranchName(id)} tip ${discardTipSha}` : "";
+        const entryReason = discardNote === ""
+          ? (reason ?? "")
+          : (reason === undefined || reason.trim() === "" ? discardNote : `${reason}（${discardNote}）`);
         frontmatter.statusLog = [...prior, {
           at: new Date().toISOString(),
           from: prevStatus as string,
           to: nextStatus,
           actor: actor ?? "goal-cli",
-          reason: reason ?? "",
+          reason: entryReason,
         }];
       }
 
@@ -2699,7 +2791,7 @@ export function createGoalStore(
       const ordered: GoalFrontmatter = {};
       for (const k of [
         "id", "title", "status", "kind", "goal", "criterion", "expect", "origin", "activatedAt", "statusLog",
-        "labels", "posture", "supersedes", "superseded-by", "long-term", "fidelity", "timeoutMs",
+        "labels", "posture", "supersedes", "superseded-by", "long-term", "fidelity", "timeoutMs", "branch",
       ]) {
         if (frontmatter[k] !== undefined) ordered[k] = frontmatter[k];
       }
@@ -2776,6 +2868,23 @@ export function createGoalStore(
           console.error(`goal-store: commit of "${id}" failed — the file was written to disk but is not on any branch's history`);
         }
       }
+      // ── goal-branch lifecycle effects (SPEC-goal-branch §4.2) ───────────────────────────────────
+      // AFTER the record lands on disk (the statusLog reason already carries the discarded tip), and
+      // ONLY here — this is the one create call site and the one discard call site. `dryRun` returned
+      // above, so nothing is persisted-adjacent; `branchGitRoot === null` (not a work tree) skips the
+      // whole thing honestly rather than inventing a branch somewhere else.
+      if (branchGitRoot !== null) {
+        const enteringActive = nextStatus === "active" && prevStatus !== "active";
+        const branchJustSet = branch === true && !priorBranch;
+        if (isGoalRecord && nextStatus === "active" && frontmatter.branch === true && !branchRefExists &&
+            (enteringActive || branchJustSet)) {
+          const rep = ensureGoalBranch(branchGitRoot, id);
+          if (rep.action === "blocked" || rep.action === "unreadable") {
+            console.error(`goal-store: ${id} is branch-mode but '${rep.name}' was NOT created — ${rep.detail}`);
+          }
+        }
+        if (discarding && discardTipSha !== null) discardGoalBranchNow(branchGitRoot, id);
+      }
       return get(id) as GoalViewModel;
     });
   }
@@ -2845,6 +2954,8 @@ export function createGoalStore(
 //   write <id> [--title ...] [--status ...] [--goal ...] [--criterion ...] [--expect ...]
 //              [--origin ...] [--body ...] [--actor ...] [--reason ...] [--force] [--dry-run]
 //              [--expect-absent] [--expect-existing] [--fidelity-judge-argv '<json argv array>']
+//              [--branch true|false]  (GOAL opt-in isolation gate — locked once `goal/<id>` exists;
+//              the branch NAME is derived, ⛔ never a flag)
 //              (--expect-absent = create intent, refuse if it exists; --expect-existing =
 //              update intent, refuse if absent — the goal store's expectedStatus-CAS counterpart)
 //   batch --json '<array>' [--dry-run]
@@ -3127,6 +3238,18 @@ export async function runGoalStoreCli(argv: string[]): Promise<number> {
           i++;
           continue;
         }
+        if (key === "branch") {
+          // SPEC-goal-branch §4.1 — the opt-in isolation gate, machine-writable. Strict `true|false`
+          // (⛔ no truthy coercion: `--branch yes` must not silently write `branch: yes`, which the
+          // view-model projects as false — the long-term flag's exact failure class).
+          if (v !== "true" && v !== "false") {
+            console.error("goal-store: --branch must be exactly true or false");
+            return 2;
+          }
+          opts["branch"] = v === "true";
+          i++;
+          continue;
+        }
         if (key === "title" || key === "status" || key === "goal" || key === "criterion" ||
             key === "expect" || key === "origin" || key === "body" || key === "superseded-by" ||
             key === "supersedes" ||
@@ -3181,6 +3304,9 @@ export async function runGoalStoreCli(argv: string[]): Promise<number> {
           // (explicitly clear the declaration) — hence the `!== undefined` guard, not a truthiness
           // test: passing the boolean straight through preserves the patch semantics in `write`.
           longTerm: opts["long-term"] as boolean | undefined,
+          // `--branch true|false` (SPEC-goal-branch §4.1). `false` is MEANINGFUL (explicitly decline)
+          // — the `!== undefined` guard preserves the patch semantics in `write`, exactly like longTerm.
+          branch: opts["branch"] as boolean | undefined,
           force,
           actor: opts.actor as string | undefined,
           reason: opts.reason as string | undefined,
@@ -3229,6 +3355,9 @@ export async function runGoalStoreCli(argv: string[]): Promise<number> {
             expect: o.expect as string | undefined,
             origin: o.origin as string | undefined,
             body: o.body as string | undefined,
+            // SPEC-goal-branch §4.1 — batch records carry the opt-in gate the same way `write` does
+            // (patch semantics on a boolean, ⛔ not a truthy coercion).
+            branch: typeof o.branch === "boolean" ? o.branch : undefined,
             force: o.force === true,
             actor: o.actor as string | undefined,
             reason: o.reason as string | undefined,

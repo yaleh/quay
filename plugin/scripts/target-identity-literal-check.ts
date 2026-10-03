@@ -50,6 +50,9 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { buildNonCodeMask } from "./checker-lib.ts";
 import { scanKernelSurface as scanSurface } from "./fs-walk.ts";
+// The goal-branch token pattern is DEFINED ONCE in Core's branch model (ADR-004) — this checker asks
+// the same module that CREATES `goal/<id>` whether a literal spells one, ⛔ never a second regex.
+import { goalIdFromBranchToken } from "../../packages/quay/src/branch-model.ts";
 // parseArg now lives in gate-script-base.ts as `flagValue` (it was one of the byte-identical
 // copies of the indexOf+next-arg idiom in plugin/scripts; .quay/routine-findings.jsonl finding
 // `arg-parsing-helper-family`, routine `semantic-dedup-scan`).
@@ -87,6 +90,66 @@ export interface IdentityCheckResult {
   notEvaluated: boolean;
   surface: string[];
   violations: IdentityViolation[];
+  /** Why the verdict is WITHHELD (only when `notEvaluated`) — e.g. an unreadable goal store. The
+   *  CLI prints it so "no scannable surface" is not the only NOT-EVALUATED cause a reader sees. */
+  notEvaluatedReason?: string;
+}
+
+// ── goal-branch token rule (SPEC-goal-branch-2026-10-03.md §4.8) ──────────────────────────────────
+//
+// `goal/<GOAL-NNN>` is a DERIVED branch name, so a literal spelling one is legal ONLY while the
+// GOAL it names is actually a live branch-mode goal — i.e. the record exists, declares
+// `branch: true`, and is not `superseded`/`retired`. A retired goal's branch is gone (§4.2), so a
+// literal still pointing at it names a branch that must not exist. ⛔ When the goal store cannot be
+// READ, the verdict is withheld (exit 3), never "legal" (hard rule 3b).
+//
+// Read DIRECTLY from `<root>/goals` (⛔ not via `createGoalStore`, whose first act is
+// `mkdirSync(goalDir)` — it would CREATE the directory it is asked to read, making "unreadable"
+// structurally indistinguishable from "empty store").
+
+type GoalBranchLookup =
+  | { readable: true; goal: { status: string; branch: boolean } | null }
+  | { readable: false; reason: string };
+
+/** Look up one GOAL record's `status` + `branch` in the workspace at `root`. */
+export function lookupGoalBranchMode(root: string, goalId: string): GoalBranchLookup {
+  const goalsDir = path.join(root, "goals");
+  let entries: string[];
+  try {
+    if (!fs.statSync(goalsDir).isDirectory()) return { readable: false, reason: `${goalsDir} is not a directory` };
+    entries = fs.readdirSync(goalsDir);
+  } catch (e) {
+    return { readable: false, reason: `goal store ${goalsDir} is unreadable (${(e as Error).message})` };
+  }
+  const file = entries.find((n) => n === `${goalId}.md` || n.startsWith(`${goalId}-`));
+  if (file === undefined) return { readable: true, goal: null }; // readable, and the GOAL is not there
+  let raw: string;
+  try {
+    raw = fs.readFileSync(path.join(goalsDir, file), "utf8");
+  } catch (e) {
+    return { readable: false, reason: `goal record ${file} is unreadable (${(e as Error).message})` };
+  }
+  const block = /^---\r?\n([\s\S]*?)\r?\n---/.exec(raw);
+  if (!block) return { readable: false, reason: `goal record ${file} carries no frontmatter block` };
+  const fm = block[1];
+  const status = (fm.match(/^\s*status:\s*(\S+)\s*$/m)?.[1] ?? "").replace(/^["']|["']$/g, "");
+  const branch = (fm.match(/^\s*branch:\s*(true|false)\s*$/m)?.[1] ?? "false") === "true";
+  return { readable: true, goal: { status, branch } };
+}
+
+/** A goal-branch token is legal iff its GOAL is a live branch-mode goal. Pure — takes a lookup so
+ *  the rule is testable without a filesystem. */
+export function isLegalGoalBranchToken(
+  token: string,
+  lookup: (goalId: string) => GoalBranchLookup,
+): { legal: boolean; notEvaluated: boolean; reason?: string } {
+  const goalId = goalIdFromBranchToken(token);
+  if (goalId === null) return { legal: false, notEvaluated: false };
+  const found = lookup(goalId);
+  if (!found.readable) return { legal: false, notEvaluated: true, reason: found.reason };
+  const g = found.goal;
+  const legal = g !== null && g.branch === true && g.status !== "superseded" && g.status !== "retired";
+  return { legal, notEvaluated: false };
 }
 
 /** 规范化标识符/键名：小写 + 去 `_`/`-`——`DOC_BRANCH`→`docbranch`、`test_command`→`testcommand`、
@@ -178,13 +241,18 @@ export function scanText(src: string): IdentityViolation[] {
  *  ⛔ 不再留一份可漂移的 body。 */
 export { scanSurface };
 
-/** 组合判定（含扫描面读取）。RED(1) > NOT-EVALUATED(3) > PASS(0)。 */
+/** 组合判定（含扫描面读取）。RED(1) > NOT-EVALUATED(3) > PASS(0)。
+ *
+ *  goal-branch tokens (`goal/<GOAL-NNN>`) are resolved against the workspace's goal store: a token
+ *  naming a live branch-mode GOAL is a legal, derived identity (SPEC-goal-branch §4.8), anything
+ *  else stays a violation. When the store cannot be read the token is neither legal nor illegal —
+ *  the whole verdict is WITHHELD (exit 3), ⛔ never silently admitted as legal. */
 export function runCheck(root: string): IdentityCheckResult {
   const surface = scanSurface(root);
   if (surface.length === 0) {
-    return { ok: true, notEvaluated: true, surface, violations: [] };
+    return { ok: true, notEvaluated: true, surface, violations: [], notEvaluatedReason: `no scannable surface under ${root}` };
   }
-  const violations: IdentityViolation[] = [];
+  const candidates: IdentityViolation[] = [];
   for (const rel of surface) {
     const abs = path.join(root, rel);
     let src: string;
@@ -194,10 +262,33 @@ export function runCheck(root: string): IdentityCheckResult {
       continue; // 并发删除（硬规则 6 缺值=未查，不崩溃整轮）
     }
     for (const v of scanText(src)) {
-      violations.push({ ...v, snippet: `${rel}:${v.line} ${v.snippet}` });
+      candidates.push({ ...v, snippet: `${rel}:${v.line} ${v.snippet}` });
     }
   }
-  return { ok: violations.length === 0, notEvaluated: false, surface, violations };
+  const violations: IdentityViolation[] = [];
+  let notEvaluatedReason: string | null = null;
+  const lookup = (goalId: string) => lookupGoalBranchMode(root, goalId);
+  for (const v of candidates) {
+    const verdict = isLegalGoalBranchToken(v.value, lookup);
+    if (verdict.notEvaluated) {
+      // Withheld — the token is NOT counted as a violation (we cannot say it is wrong), but the
+      // pass/fail verdict cannot be issued either (hard rule 3b).
+      notEvaluatedReason = notEvaluatedReason ?? `goal store unreadable while judging ${JSON.stringify(v.value)}: ${verdict.reason}`;
+      continue;
+    }
+    if (verdict.legal) continue;
+    violations.push(v);
+  }
+  // RED wins over NOT-EVALUATED: a definite violation is a definite answer even if another token
+  // could not be judged (keeping the module's documented 1 > 3 > 0 precedence).
+  const notEvaluated = violations.length === 0 && notEvaluatedReason !== null;
+  return {
+    ok: violations.length === 0,
+    notEvaluated,
+    surface,
+    violations,
+    ...(notEvaluated ? { notEvaluatedReason: notEvaluatedReason as string } : {}),
+  };
 }
 
 export function main(argv: string[]): number {
@@ -218,7 +309,9 @@ usage: node --no-warnings --experimental-strip-types plugin/scripts/target-ident
       `${JSON.stringify({ status: res.notEvaluated ? "not-evaluated" : res.ok ? "pass" : "fail", ok: res.ok, surface: res.surface, violations: res.violations, total: res.violations.length })}\n`,
     );
   } else if (res.notEvaluated) {
-    process.stderr.write(`target-identity-literal-check: NOT-EVALUATED — no scannable surface under ${root}\n`);
+    process.stderr.write(
+      `target-identity-literal-check: NOT-EVALUATED — ${res.notEvaluatedReason ?? `no scannable surface under ${root}`}\n`,
+    );
   } else if (res.ok) {
     process.stdout.write(`target-identity-literal-check: PASS — ${res.surface.length} kernel file(s) scanned, 0 override-less identity literal(s)\n`);
   } else if (noBlock) {
