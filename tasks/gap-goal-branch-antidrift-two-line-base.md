@@ -90,6 +90,13 @@ experiments/quay-perpetual-stream/test/anti-drift-touches-check.test.mjs
 ```
 （第 1 条为本任务新增；第 3 条是既有的、同被测脚本的测试文件，其 `anti_drift.exempt` / `BASELINE-MISMATCH` / `checkAntiDrift` 用例在本轮全绿，证明现有消费方不受影响。）
 
-**scoped-gate 缓存** — `node --experimental-strip-types worker-driver.ts --write-scoped-gate-cache --task gap-goal-branch-antidrift-two-line-base --develop-sha … --root /data/home/yale/work/quay` 已写，键 `gap-goal-branch-antidrift-two-line-base\t8a21f22211ee8f37dcc2f7f5c99921c57d114777`。注：promotion-driver 在门跑期间把 develop 又推进会（`git rev-parse develop` 事后读到 `d2cb9146…`，已非本次门评过的树），故键取**本次实际合入且为 HEAD 祖先**的 develop sha（`8a21f222…`，`git merge-base --is-ancestor <sha> HEAD` 为真）——按「缓存的 develop sha 必须是 HEAD 祖先」约束；若 fan-in 时 develop 已前进，键不匹配 ⇒ 门照跑（fail-closed，非假命中）。
+**tick 落地到 fan-in 读面** — MCP `task_write` 落主检出（`author`），记录为 `changeKind:self-only`，由 driver 的 `propagateDocBranchToDevelop` 异步带上 `develop`（实测：写完后 `git merge-base --is-ancestor <write-sha> develop` 由 NO 变 YES）。而 fan-in 的 ac-precheck 读的是 **worktree 副本**（`fan-in-ac-completion-gate.ts:110` 解析 `path.join(worktree,"tasks",<id>".md")`，由 `worker-fan-in.ts:1997` 以 `--worktree` 传入）。故 tick 后执行 `git -C <worktree> merge --no-edit develop` 把带 tick 的 body 带进 worktree。真闸实跑（非代理量）：
+```
+node --experimental-strip-types plugin/scripts/fan-in-ac-completion-gate.ts \
+  --task gap-goal-branch-antidrift-two-line-base --worktree <worktree> --json
+⇒ {"ok":true,"status":"pass","total":5,"checked":5,"unchecked":0,"message":"AC 全勾（5/5）——可翻 done"}
+```
+
+**scoped-gate 缓存** — `worker-driver.ts --write-scoped-gate-cache --task gap-goal-branch-antidrift-two-line-base --develop-sha <merge-time sha> --root /data/home/yale/work/quay` 已写。键 = 每次 scoped 门跑绿后**本次实际合入**的 develop sha（= `git rev-parse HEAD^2`，且 `git merge-base --is-ancestor <sha> HEAD` 为真）——按「缓存的 develop sha 必须是 HEAD 祖先」约束；⛔ 不取 `git rev-parse develop`：promotion-driver 在门跑期间会持续前进 develop，事后读到的 tip 已非本次门评过的那棵树。若 fan-in 时 develop 已再次前进，键不匹配 ⇒ 门照跑（fail-closed，非假命中）。
 
 **已知残余** — 新增测试与既有 `experiments/quay-perpetual-stream/test/anti-drift-touches-check.test.mjs` 同名（basename 配对同时命中两处），但覆盖面不重复：本文件只覆盖两线基准，既有文件覆盖 `anti_drift.exempt` / BASELINE-MISMATCH / `checkAntiDrift` 纯函数。未改动既有文件（不在 Touches）。
