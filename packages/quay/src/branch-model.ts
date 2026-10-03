@@ -1033,3 +1033,162 @@ export function formatDocBranchReport(report: DocBranchReport): string {
     `  [${mark}] doc-branch -> ${report.name === "" ? "(none)" : report.name} — ${report.detail}`,
   ].join("\n");
 }
+
+// ── GOAL BRANCH role (orchestration/SPEC-goal-branch-2026-10-03.md §4.1/§4.2) ─────────────────────
+//
+// A goal may opt in to its own isolation branch (`branch: true` on the goal record): its tasks land
+// on `goal/<GOAL-NNN>` instead of directly on `develop`, so a direction with a different maturity
+// level stops mixing into the release line. This section owns the ONE place the branch is created
+// and the ONE place it is discarded — `goal-store.write()` is the only caller of each, because the
+// goal record's status flip is the only event that may create or discard the ref (§4.1: the field is
+// mutable only while the branch does not exist; §4.2: retired/superseded discards it).
+//
+// ⛔ The name is DERIVED, never stored (hard rule 4b): `goal/<GOAL-NNN>`. Storing it would let a
+// human point a goal at an arbitrary branch, and it is exactly that constraint that makes
+// `target-identity-literal-check.ts`'s "pattern + existence" rule (§4.8) decidable.
+
+/**
+ * The goal-branch name for a goal id — a DERIVED quantity (⛔ never persisted, ⛔ never caller-supplied).
+ *
+ * @param goalId the GOAL record id (e.g. `GOAL-028`).
+ */
+export function goalBranchName(goalId: string): string {
+  return `goal/${goalId}`;
+}
+
+/** Goal-branch name pattern (quay-protocol-derived, ⛔ not a per-project name) — shared with
+ *  `target-identity-literal-check.ts` so the identity rule and the lifecycle agree on what a
+ *  goal-branch token IS. At least three digits, matching the store's own id vocabulary. */
+export const GOAL_BRANCH_RE = /^goal\/GOAL-\d{3,}$/;
+
+/** True iff `value` is a goal-branch token; returns the GOAL id it names, or null. */
+export function goalIdFromBranchToken(value: string): string | null {
+  if (!GOAL_BRANCH_RE.test(value)) return null;
+  return value.slice("goal/".length);
+}
+
+/** What `ensureGoalBranch` did (or refused to do). A CLASSIFICATION, never a bare boolean. */
+export type GoalBranchAction = "created" | "reused" | "blocked" | "unreadable";
+
+export interface GoalBranchReport {
+  action: GoalBranchAction;
+  /** ⛔ False ONLY for `blocked`; `unreadable` is a WITHHELD verdict (hard rule 3b), not a failure. */
+  ok: boolean;
+  /** True iff `action === "unreadable"` — distinct from `ok === true`. */
+  notEvaluated: boolean;
+  /** The derived branch name (`goal/<id>`). */
+  name: string;
+  /** The ref's sha after the call (the ref that was reused, or the newly created one's). */
+  sha: string | null;
+  /** The base sha the branch was created from (`develop` tip), null on reuse/unreadable. */
+  base: string | null;
+  detail: string;
+}
+
+/**
+ * True iff `goal/<id>` resolves to a commit in `root`. Read-only; false when the repo is unknown
+ * (⛔ not a "no branch" claim — callers that must distinguish use `ensureGoalBranch`'s report).
+ */
+export function goalBranchRefExists(root: string, goalId: string): boolean {
+  const r = git(root, ["rev-parse", "--verify", "--quiet", `${goalBranchName(goalId)}^{commit}`]);
+  return r.ok && r.out.trim() !== "";
+}
+
+/**
+ * The tip sha of `goal/<id>`, or null when the ref does not resolve. This is the value the store
+ * writes into the discarded goal's statusLog before deleting the branch — the ONE rescue handle for
+ * a human (`git branch <name> <sha>`), so it must be read BEFORE the deletion (§4.2).
+ */
+export function goalBranchTip(root: string, goalId: string): string | null {
+  return resolveSha(root, goalBranchName(goalId));
+}
+
+/**
+ * LAZILY create `goal/<id>` from the CURRENT `develop` tip — idempotent: an existing ref is reported
+ * `reused` and left untouched (its tip may have advanced with landed tasks; re-pointing it would
+ * throw that work away).
+ *
+ * ⛔ This is the ONE creation call site (invoked only by `goal-store.write()` on the transition that
+ * leaves a branch-mode goal `active`). A goal's branch must NOT be created at birth: a draft goal may
+ * sit unactivated for a long time, and a branch forked from a stale develop is worse than none.
+ *
+ * A repo with no resolvable `develop` (or no git at all) is reported `unreadable`/`blocked` and
+ * nothing is created — ⛔ never a silent fallback to HEAD, which would fork the goal from a
+ * tree the landing baseline never contained.
+ */
+export function ensureGoalBranch(root: string, goalId: string): GoalBranchReport {
+  const name = goalBranchName(goalId);
+  const base0 = { name, sha: null as string | null, base: null as string | null };
+  const unreadable = (detail: string): GoalBranchReport => ({
+    ...base0, action: "unreadable", ok: true, notEvaluated: true, detail,
+  });
+
+  const insideRepo = git(root, ["rev-parse", "--is-inside-work-tree"]);
+  if (!insideRepo.ok || insideRepo.out.trim() !== "true") {
+    return unreadable(`${root} is not inside a git work tree — '${name}' cannot be created there`);
+  }
+
+  const existing = resolveSha(root, name);
+  if (existing !== null) {
+    return {
+      ...base0, action: "reused", ok: true, notEvaluated: false, sha: existing,
+      detail: `'${name}' already exists at ${existing.slice(0, 8)} — reused, ⛔ never re-pointed`,
+    };
+  }
+
+  const base = resolveSha(root, LANDING_BASELINE_ROLE);
+  if (base === null) {
+    return unreadable(
+      `'${name}' does not exist and the landing baseline '${LANDING_BASELINE_ROLE}' does not ` +
+        `resolve — the goal branch cannot be forked from a ref that is not there (⛔ not fallen back to HEAD)`,
+    );
+  }
+  const created = git(root, ["branch", name, base]);
+  // `=== true`, not `!created.ok`: this repo's root tsconfig is `strict: false`, under which the
+  // NEGATIVE branch of a boolean-discriminant union is NOT narrowed — `created.err` below would be
+  // TS2339, which the fan-in ts-typecheck gate rejects. Same form as every other `.ok` union here.
+  if (created.ok === false) {
+    return {
+      ...base0, action: "blocked", ok: false, notEvaluated: false,
+      detail: `could not create '${name}' at ${base.slice(0, 8)}: git branch returned non-zero: ${created.err}`,
+    };
+  }
+  return {
+    ...base0, action: "created", ok: true, notEvaluated: false, sha: base, base,
+    detail: `created '${name}' at '${LANDING_BASELINE_ROLE}' tip ${base.slice(0, 8)}`,
+  };
+}
+
+/**
+ * DISCARD `goal/<id>`: delete the ref and return its tip sha (the rescue handle the caller has
+ * already written into the goal's statusLog before calling this).
+ *
+ * ⛔ This is the ONE deletion call site (invoked only by `goal-store.write()` / `flipGoal()` when a
+ * branch-mode goal transitions to `retired`/`superseded`). `tipSha: null` means there was nothing to
+ * delete (a non-branch goal, or one already discarded) — a NORMAL result, ⛔ not an error.
+ *
+ * The ref is deleted with `-D` (force): a discarded direction's work is deliberately unmerged, so an
+ * ancestry-based refusal would leave exactly the branches this mechanism exists to remove. When the
+ * ref is checked out in a worktree git refuses the delete and `removed` stays false with a reason —
+ * the caller surfaces it (硬规则 3b) rather than reporting a discard that did not happen.
+ */
+export function discardGoalBranch(
+  root: string,
+  goalId: string,
+): { removed: boolean; tipSha: string | null; detail: string } {
+  const name = goalBranchName(goalId);
+  const tipSha = resolveSha(root, name);
+  if (tipSha === null) {
+    return { removed: false, tipSha: null, detail: `'${name}' does not exist — nothing to discard` };
+  }
+  const del = git(root, ["branch", "-D", name]);
+  // `=== false`, not `!del.ok` — see the narrowing note in ensureGoalBranch above.
+  if (del.ok === false) {
+    return {
+      removed: false,
+      tipSha,
+      detail: `could not delete '${name}' (tip ${tipSha.slice(0, 8)}): git branch -D returned non-zero: ${del.err}`,
+    };
+  }
+  return { removed: true, tipSha, detail: `deleted '${name}' (tip ${tipSha})` };
+}

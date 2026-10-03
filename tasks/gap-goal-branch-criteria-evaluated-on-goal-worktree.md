@@ -1,7 +1,7 @@
 ---
 id: gap-goal-branch-criteria-evaluated-on-goal-worktree
 title: branch-mode goal 的判据在 detached 判据 worktree 上求值——否则 goal 代码只在 goal 分支上时永远判不过（B1）
-status: todo
+status: ready
 labels:
   - gap
 parent: null

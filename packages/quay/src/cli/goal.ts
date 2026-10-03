@@ -82,6 +82,10 @@ const STORE_ONLY_WRITE_FLAGS = [
   "actor", "reason", "force", "dry-run", "long-term",
   "expect-absent", "expect-existing", "dispose-old", "dispose-to", "fidelity-judge-argv",
   "supersedes",
+  // SPEC-goal-branch §4.1 — the goal-branch opt-in gate. Store-only for the same reason as
+  // `long-term`: the ABI `goal_write` view-model has no `branch` field, and forwarding it through
+  // the ABI would DROP it silently. The branch NAME is derived (`goal/<id>`), ⛔ not a flag.
+  "branch",
 ] as const;
 
 /** The goal store's CLI verbs — store-level BY NATURE: they have no Provider ABI counterpart at all
