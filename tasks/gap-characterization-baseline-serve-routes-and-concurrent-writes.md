@@ -40,7 +40,7 @@ extra:
 ## Touches
 
 - tasks/gap-characterization-baseline-serve-routes-and-concurrent-writes.md
-- packages/quay/test/characterization-serve-routes.test.mjs
-- packages/quay/test/fixtures/characterization/serve-routes.snapshot.json
-- packages/quay-native/test/characterization-store-write.test.mjs
-- packages/quay-native/test/fixtures/characterization/store-write.golden.json
+- packages/quay/test/characterization-serve-routes.test.mjs (new)
+- packages/quay/test/fixtures/characterization/serve-routes.snapshot.json (new)
+- packages/quay-native/test/characterization-store-write.test.mjs (new)
+- packages/quay-native/test/fixtures/characterization/store-write.golden.json (new)
