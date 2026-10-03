@@ -39,7 +39,7 @@ goal_ac: AC-324
 
 ## Evidence
 
-**修复落点**：`git worktree add` 登记的是**真实路径**（`/data/home/yale/...`），而 `goalCriterionWorktreeDir` 经配置解析出的是**别名**（`/home/yale/...`，指向它的符号链接）。新增 `realpathOrSelf`（`packages/quay/src/goal-store.ts`，`fs.realpathSync` + 最近存在祖先回退，⛔ 不因 ENOENT 抛），`criterionWorktreeRegistered`（`plugin/scripts/goal-driver.ts`）两侧都改用它；`goal-preview.ts` 的 `samePath` 一并统一（5b）。
+**修复落点**：`git worktree add` 登记的是**真实路径**（`/data/home/yale/...`），而 `goalCriterionWorktreeDir` 经配置解析出的是**别名**（`/home/yale/...`，指向它的符号链接）。新增 `realpathOrSelf`（`packages/quay/src/goal-store.ts`，`fs.realpathSync` + 最近存在祖先回退，⛔ 不因 ENOENT 抛），`criterionWorktreeRegistered`（`plugin/scripts/goal-driver.ts`）两侧都改用它；`goal-preview.ts` 的 `samePath` 一并统一（5b）。`realpathOrSelf` 经 `plugin/scripts/driver-runtime.ts` 的 goal-store re-export 面导出（goal-driver ⛔ 不直接写 Core 源码树 import 字面量，AC-262）——该 Layer-0 管线文件因此进入 `## Touches`。
 
 **AC1/AC4 —— 新用例 + 全文件绿**（`node --test plugin/test/goal-driver-criterion-worktree.test.mjs`，worktree 内实跑）：
 ```
@@ -94,6 +94,7 @@ EXIT=0
 ## Touches
 
 - plugin/scripts/goal-driver.ts
+- plugin/scripts/driver-runtime.ts
 - packages/quay/src/goal-preview.ts
 - packages/quay/src/goal-store.ts
 - plugin/test/goal-driver-criterion-worktree.test.mjs
