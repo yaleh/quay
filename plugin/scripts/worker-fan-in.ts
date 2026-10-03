@@ -54,8 +54,13 @@ import { buildMirrorState, writeMirrorState, shouldSkipMirrorWrite, readCurrentS
 import { defaultLaneCount, readLoadAvg } from "./full-suite-runner.ts";
 import { SUITE_LOG_NOT_RUN_PREFIX, SUITE_LOG_RUN_START_PREFIX } from "./full-suite-runner.ts";
 import { buildPreVerifiedRoundRecord, appendPreVerifiedRound } from "./pre-verified-round-record.ts";
-import { splitTaskFile, statusFromFrontmatter, patchStatusField } from "./task-ops.ts";
+import { splitTaskFile, statusFromFrontmatter, patchStatusField, commitTaskFile } from "./task-ops.ts";
 import { fetchTaskStatusAtRef } from "./task-schema.ts";
+// B2 (SPEC-goal-branch-2026-10-03 §5): the doc-face write path — main-checkout commit +
+// propagateDocBranchToDevelop (ff-only + semantic fallback). Importing it (⛔ not re-implementing
+// the push/semantic-fallback machinery) is safe for the import-graph ratchet: driver-filters.ts
+// does not reach back to this module, so this is not an SCC edge.
+import { propagateDocBranchToDevelop } from "./driver-filters.ts";
 // ⛔ `import type`（编译期擦除）——运行期符号仍经 loadFfMergeModule 的动态 import 取（见其注释）；若改成
 // 值 import，Core 源码树字面量就会以【静态边】进入本 kernel 的 bundle，而它必须仍由 coreSrcAliasPlugin
 // 按同一处 specifier 内联。
@@ -1145,6 +1150,52 @@ async function flipTaskDone(
   return { ok: false, reason: `expected status 'ready' or 'done', got ${from === null ? "none" : JSON.stringify(from)}` };
 }
 
+/**
+ * B2 状态双写（SPEC-goal-branch-2026-10-03 §5，裁定⑪）：`done` 的语义是「已落到它的 mergeTarget」。
+ *  mergeTarget 是一条 goal 分支时，代码照常 ff 到 `goal/<id>`（上一步），但合并【目标】不在 develop——而
+ *  【派发/晋升读的是主检出盘上的 tasks/*.md，主检出跟随 develop】（CLAUDE.md 硬规则 11b）。若不把同一个
+ *  done 翻转也写到 develop，worktree 回收后 develop 上仍是 ready ⇒ 任务被【反复派发】（本 gap 的缺陷）。
+ *
+ *  写路径 = 现有文档面写路径（⛔ 不自造）：主检出（root）上把 tasks/<task>.md 翻成 done 并 pathspec 限定
+ *  提交（commitTaskFile，⛔ 不裸 commit 扫共享 index）→ propagateDocBranchToDevelop（ff-only + 语义兜底，
+ *  把 doc 分支推到 develop）。主检出已是 done（上一轮部分成功的残留）⇒ 不重复提交，仅再同步一次。
+ *
+ *  ⛔ 只在 `mergeTarget !== "develop"` 时调用（develop 目标路径逐字不变，AC1）：develop 目标下 done 随
+ *  ff 直接落到 develop，不需要也不得产生额外的文档面提交。
+ *
+ *  拒绝取值（硬规则 3b/6）：主检出任务文件读不到 / 无 frontmatter / 状态非 ready|done / 提交失败 /
+ *  propagate 返回 false ⇒ {ok:false, reason}（⛔ 不与「已同步」同形）。
+ */
+async function syncDoneToDocFace(root: string, task: string): Promise<{ ok: boolean; reason: string | null }> {
+  const rel = `tasks/${task}.md`;
+  const file = path.join(root, rel);
+  let text: string;
+  try {
+    text = fs.readFileSync(file, "utf8");
+  } catch (e) {
+    return { ok: false, reason: `doc-face task file unreadable: ${(e as Error).message}` };
+  }
+  const split = splitTaskFile(text);
+  if (!split) return { ok: false, reason: "doc-face task file has no frontmatter" };
+  const from = statusFromFrontmatter(split.frontmatterRaw);
+  if (from !== "ready" && from !== "done") {
+    return { ok: false, reason: `doc-face status expected 'ready'/'done', got ${from === null ? "none" : JSON.stringify(from)}` };
+  }
+  if (from === "ready") {
+    const flipped = patchStatusField(split.frontmatterRaw, "done");
+    if (!flipped.ok) return { ok: false, reason: `doc-face flip failed: ${flipped.reason}` };
+    const nextText = `${split.open}${flipped.fm}${split.close}${split.body}`;
+    fs.writeFileSync(file, nextText, "utf8");
+    if (!commitTaskFile(root, rel, `tasks: 翻 ${task} done（goal 分支落地，状态双写 develop）`)) {
+      return { ok: false, reason: "doc-face commit failed" };
+    }
+  }
+  if (!propagateDocBranchToDevelop(root)) {
+    return { ok: false, reason: "propagateDocBranchToDevelop failed (doc→develop ff-only ∧ semantic fallback both failed)" };
+  }
+  return { ok: true, reason: null };
+}
+
 /** 解析 `packages/quay/src/` 子树下一模块（shipped 感知，⛔ 硬编码 packages/quay/src 布局锚点）：
  *  源树上下文（base 是 quay 源树，含 packages/quay/src/<rel>）⇒ base/packages/quay/src/<rel>；
  *  shipped 上下文（npm 包把 packages/quay/ 打平到包根、base 无 packages/）⇒ <包根>/src/<rel>。
@@ -2157,6 +2208,23 @@ export async function runMechanicalFanIn(opts: MechanicalFanInOptions): Promise<
     appendFanInStepTrace(root, task, runId, "ff", "end", { ok: ff.code === 0, durationMs: ffDurMs });
     trace({ step: "ff", exit: ff.code, wall_ms: ffDurMs, ok: ff.code === 0, ...(ff.code === 0 ? {} : { reason: (ff.stderr || ff.stdout || "").trim() || `exit ${ff.code}` }) });
     if (ff.code !== 0) return fail("ff", { ok: false, status: ff.code, stdout: ff.stdout, stderr: ff.stderr, error: null });
+
+    // 9.3 状态双写（B2，SPEC-goal-branch-2026-10-03 §5 裁定⑪）：`done` = 已落到它的 mergeTarget。
+    //     mergeTarget 非 develop（goal 分支）时，done 只落在 goal/<id>；而派发/晋升读 develop 上的
+    //     tasks/*.md ⇒ 不双写则 develop 仍 ready ⇒ worktree 回收后任务被反复派发。ff 成功后经现有文档面
+    //     写路径（主检出提交 + propagateDocBranchToDevelop）把同一个 done 也写到 develop。
+    //     ⛔ 失败即 red（fail-closed，硬规则 3b）：状态没双写进 develop 就不能声称本轮落地完成——
+    //     worktree 保留，下一轮 flipTaskDone 见 mergeTarget 已 done 而 skip、ff 幂等，只重试本步。
+    //     ⛔ mergeTarget === "develop" 时【逐字不变】：本分支不进入，develop 目标下不产生额外文档面提交。
+    if (mergeTarget !== "develop") {
+      const docT0 = Date.now();
+      const docSync = await syncDoneToDocFace(root, task);
+      trace({
+        step: "doc-face-done-sync", exit: docSync.ok ? 0 : 1, wall_ms: Date.now() - docT0, ok: docSync.ok,
+        ...(docSync.ok ? {} : { reason: docSync.reason ?? "doc-face done sync failed" }),
+      });
+      if (!docSync.ok) return failClean("doc-face-done-sync", docSync.reason ?? "doc-face done sync failed");
+    }
 
     // 9.4b 写 complete pass GateEvent（gap-mechanical-fan-in-writes-no-complete-gateevent AC2）：机械
     // fan-in 此前绕过 gate 引擎（runMechanicalFanIn/flipTaskDone 全文零 GateEvent），.quay/gate-events.jsonl
