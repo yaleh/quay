@@ -2,7 +2,7 @@
 id: gap-dist-rewrite-injects-live-interpolation-into-workflow-js
 title: dist 重写器把 ${CLAUDE_PLUGIN_ROOT} 注入 workflow 的 .js 模板串——4/6 已发布 workflow
   在消费工作区 eval 即 ReferenceError
-status: todo
+status: ready
 labels:
   - gap
   - defect
