@@ -434,14 +434,14 @@ Usage:
                         DIFFERENT exit codes, never the same value.
   batch --json '<array>'  Write N records in ONE commit (each: id + the write fields).
   merge <GOAL-NNN>      Record a HUMAN merge request for a branch-mode goal so the worker-driver
-                        executes `goal/<GOAL-NNN>` → develop (SPEC-goal-branch §4.7). It ⛔ does NOT
-                        merge: it appends ONE `goal-merge-request` GateEvent (actor / reason / the
+                        executes 'goal/<GOAL-NNN>' → develop (SPEC-goal-branch §4.7). It ⛔ does NOT
+                        merge: it appends ONE 'goal-merge-request' GateEvent (actor / reason / the
                         goal/<id> tip the human previewed) to .quay/gate-events.jsonl and returns.
-                        Refusals (fail-closed, no event written): goal not `active`; not branch-mode
-                        (`branch: true`); `goal/<id>` missing; already an ancestor of develop; a
+                        Refusals (fail-closed, no event written): goal not 'active'; not branch-mode
+                        ('branch: true'); 'goal/<id>' missing; already an ancestor of develop; a
                         pre-merge AC not achieved (pass --override '<why>' to wave it through — the
                         override reason and the unmet AC list are recorded). The sufficiency verdict
-                        is PRINTED only, never a blocker here (it still gates `achieved`).
+                        is PRINTED only, never a blocker here (it still gates 'achieved').
   preview <id> start|stop|status
                         The PREVIEW INSTANCE of a branch-mode goal (SPEC-goal-branch §4.10): the
                         goal's criterion worktree plus a 'quay serve' whose workspace root IS that
