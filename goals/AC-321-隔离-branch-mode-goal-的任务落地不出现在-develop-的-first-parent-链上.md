@@ -1,7 +1,7 @@
 ---
 id: AC-321
 title: 隔离：branch-mode goal 的任务落地不出现在 develop 的 first-parent 链上
-status: active
+status: achieved
 kind: criterion
 goal: GOAL-028
 criterion: >-
@@ -98,6 +98,11 @@ statusLog:
     reason: 人 2026-10-03 裁定「改判据并重开 321–323」：旧判据依赖 develop first-parent 链，真实 fan-in
       会把多数提交挤出该链（实测 32 条里 22 条），导致 AC-321 对直落 develop 的演练任务误判通过、AC-322/323 读到的并非
       goal 分支落地。改为基于祖先关系，只计经 goal 分支的落地，并排除 retired/superseded 的 goal
+  - at: 2026-10-03T17:24:06.219Z
+    from: active
+    to: achieved
+    actor: goal-driver
+    reason: "I2: criterion pass"
 fidelity:
   verdict: faithful
   reason: "fidelity judge: faithful"
