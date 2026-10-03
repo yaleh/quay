@@ -48,7 +48,7 @@ function git(root, ...args) {
 }
 
 const TASK_ID = "gap-goal-branch-antidrift-two-line-base-fixture";
-const TASK_BODY = [
+const taskBody = (extraTouches = []) => [
   "---",
   `id: ${TASK_ID}`,
   "title: fixture task",
@@ -69,6 +69,7 @@ const TASK_BODY = [
   "",
   "- Y.txt",
   `- tasks/${TASK_ID}.md`,
+  ...extraTouches.map((t) => `- ${t}`),
   "",
 ].join("\n");
 
@@ -104,7 +105,7 @@ function makeFixture({ taskOutside = false, goalOwnChange = false } = {}) {
 
   git(root, "checkout", "-q", "-b", `task/${TASK_ID}`);
   fs.mkdirSync(path.join(root, "tasks"), { recursive: true });
-  fs.writeFileSync(path.join(root, "tasks", `${TASK_ID}.md`), TASK_BODY);
+  fs.writeFileSync(path.join(root, "tasks", `${TASK_ID}.md`), taskBody());
   fs.writeFileSync(path.join(root, "Y.txt"), "Y\n");
   git(root, "add", "-A");
   git(root, "commit", "-q", "--no-verify", "-m", "task: Y (declared Touches)");
@@ -197,4 +198,49 @@ test("two-line base — a GOAL branch's own prior change does not leak into the 
   const r = runChecker(root, "goal/GOAL-901");
   assert.equal(r.status, 0, r.stdout + r.stderr);
   assert.ok(!r.stdout.includes("W.txt"), r.stdout);
+});
+
+// ── the Proposal's conflict-resolution question: how does a CONFLICTING catch-up count? ─────────────
+// Decision (recorded in the task's ## Evidence): a catch-up merge commit contributes NO file list of
+// its own — `git log --name-only` suppresses merge diffs by default — so the conflict RESOLUTION is
+// counted exactly to the extent the task's OWN commits already carry the file. That keeps the judged
+// set = "what the task committed", never "what the catch-up happened to touch".
+test("conflicting catch-up merge — the task's own file is judged; develop's is still excluded", () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "adgb-conflict-"));
+  tempDirs.push(root);
+  execFileSync("git", ["init", "-q", "-b", "develop", root]);
+  git(root, "config", "user.email", "test@example.com");
+  git(root, "config", "user.name", "Test");
+
+  fs.writeFileSync(path.join(root, "base.txt"), "base\n");
+  fs.writeFileSync(path.join(root, "C.txt"), "base\n");
+  git(root, "add", "-A");
+  git(root, "commit", "-q", "--no-verify", "-m", "base");
+  // develop changes C.txt AND adds X.txt.
+  fs.writeFileSync(path.join(root, "C.txt"), "develop\n");
+  fs.writeFileSync(path.join(root, "X.txt"), "X\n");
+  git(root, "add", "-A");
+  git(root, "commit", "-q", "--no-verify", "-m", "develop: C + X");
+  // goal forks BEFORE that; the task changes the SAME file C.txt (declared) plus Y.
+  git(root, "checkout", "-q", "-b", "goal/GOAL-901", "HEAD~1");
+  git(root, "checkout", "-q", "-b", `task/${TASK_ID}`);
+  fs.mkdirSync(path.join(root, "tasks"), { recursive: true });
+  fs.writeFileSync(path.join(root, "tasks", `${TASK_ID}.md`), taskBody(["C.txt"]));
+  fs.writeFileSync(path.join(root, "C.txt"), "task\n");
+  fs.writeFileSync(path.join(root, "Y.txt"), "Y\n");
+  git(root, "add", "-A");
+  git(root, "commit", "-q", "--no-verify", "-m", "task: C + Y");
+  git(root, "merge", "-q", "--no-edit", "goal/GOAL-901");
+  // the catch-up CONFLICTS on C.txt — resolve it on the task's side and complete the merge.
+  const mergeR = spawnSync("git", ["-C", root, "merge", "--no-edit", "develop"], { encoding: "utf8" });
+  assert.notEqual(mergeR.status, 0, "fixture must actually conflict on C.txt");
+  fs.writeFileSync(path.join(root, "C.txt"), "resolved\n");
+  git(root, "add", "C.txt");
+  git(root, "commit", "-q", "--no-verify", "--no-edit");
+
+  const files = computeActualFiles(root, "goal/GOAL-901");
+  assert.ok(files.includes("C.txt"), `the task's own file must be judged: ${JSON.stringify(files)}`);
+  assert.ok(!files.includes("X.txt"), `develop's file must stay excluded: ${JSON.stringify(files)}`);
+  const r = runChecker(root, "goal/GOAL-901");
+  assert.equal(r.status, 0, `declared C.txt/Y.txt must pass after a conflicting catch-up:\n${r.stdout}${r.stderr}`);
 });
