@@ -146,6 +146,13 @@ GOAL-903 名下的 drill 任务（T-903-drill）在 `develop` 上落地——即
 
 ⛔ **本任务不翻任何状态**：不写 GOAL-903 的 `status`（保持 `active`）、不写 AC-903 的任何字段（保持 `active`）、不 retire / achieve 任何 GOAL 或 AC。
 
+## 人授权（2026-10-03）
+
+人 2026-10-03 在 manager 会话中明确授权执行本任务的 **option (b)**：可经 goal store CLI 写 `GOAL-903` 的 body（加非空 `## 退出条件` 节，并把退出条件收窄为在域 AC-903 能裁定的那一条）。
+
+⇒ AC4 末尾的 `（待外部）` 约束已解除——**本任务的执行者可执行该 goal 写入**（不再是"只能由人"）。
+⚠️ AC5 的判官重判仍须在 AC4 完成后另跑，⛔ 不以 verdict 变绿为成功判据。
+
 ## Touches
 
 - goals/GOAL-903-ac-322-追平落地演练-drill-2-只用于跑一次含追平的-goal-分支落地-不是真实开发方向.md
