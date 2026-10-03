@@ -2,7 +2,7 @@
 id: gap-no-readonly-surface-for-live-inflight-workers
 title: 没有任何只读出口能拿到「当前在飞 worker」——`driver status` 不扫在飞 worker
   子进程（只报载体字段），外部消费者只能自己扫 `/proc`
-status: ready
+status: done
 labels:
   - gap
 parent: null
