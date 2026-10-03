@@ -2,7 +2,7 @@
 id: gap-goal-merge-infra-red-mislabelled-and-rerequest-never-retries
 title: goal 并入的非冲突失败被标成 merge-conflict，且 tip
   未变时人重发请求也不会被重试——基础设施红之后请求永久卡死（GOAL-904 演练读到）
-status: ready
+status: done
 labels:
   - gap
   - defect
