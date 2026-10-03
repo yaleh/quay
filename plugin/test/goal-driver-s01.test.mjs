@@ -11,7 +11,7 @@
 // SPLIT from goal-driver.test.mjs by gap-suite-split-15-over-30s-test-files — shard 1/6 (16 tests). Shared fixtures: ./helpers/goal-driver-harness.mjs (single source).
 
 import { test } from "node:test";
-import { CRITERION_KINDS, GAP_WORKER_TIMEOUT_MS_DEFAULT, GOAL_SPAWN_CAP_DEFAULT, assert, buildGapWorkerPrompt, classifyCriterionKind, computeGoalGaps, fs, goalAchievedFromRecords, goalGapWorkerTimeoutMs, goalSpawnCap, isFilingGapState, isTaskStuck, os, path, productionCarriersOf, readTaskFacts, readsProductionCarrier, runGapSpawnPass, spawn } from "./helpers/goal-driver-harness.mjs";
+import { CRITERION_KINDS, GAP_WORKER_TIMEOUT_MS_DEFAULT, GOAL_SPAWN_CAP_DEFAULT, assert, buildGapWorkerPrompt, classifyCriterionKind, computeGoalGaps, fs, goalAchievedFromRecords, goalGapWorkerTimeoutMs, goalSpawnCap, isFilingGapState, isTaskStuck, os, path, productionCarriersOf, readTaskFacts, readsProductionCarrier, repoRoot, runGapSpawnPass, runGoalRound, spawn, writeStandingGoalFile } from "./helpers/goal-driver-harness.mjs";
 
 test('goalAchievedFromRecords: 零 AC ⇒ false；全 achieved ⇒ true；有未达成 ⇒ false', () => {
   assert.equal(goalAchievedFromRecords([], 'GOAL-001'), false, '零 AC 不可达成（与 goal-store.isGoalAchieved 同源）');
@@ -408,4 +408,85 @@ test('buildGapWorkerPrompt: 含 quay-file-task 去重指令 + 顶层 goal_ac 指
   assert.ok(p.includes('MECHANISM-BASED dedup'), 'prompt 必须含按机制去重指令');
   assert.ok(p.includes('goal_ac: AC-185'), 'prompt 必须要求顶层 goal_ac');
   assert.ok(p.includes('needs-human'), 'prompt 必须说明 needs-human 也不重复立案');
+});
+
+// ── gap-goal-active-ac-gap-classification-ignores-round-verdict：① active-AC 缺口分类（count===0
+//    分支）必须【先读本轮判据读数】，而不是只按判据文本。
+//
+//    形态（2026-10-03 实测 AC-327）：一条判据可以在正文里【没有任何 `.quay/` token】的情况下**自陈无法
+//    评估**——criterion exit 3 ⇒ `gateCriterion` 判 `not-evaluated`（真值等的是世界/人的动作：人跑完试点
+//    后 develop first-parent 上出现恰一个 `goal/<id>` 合并提交）。旧实现只做文本分类（`classifyCriterionKind`）
+//    ⇒ 判成 `workable` ⇒ 每轮立案一个**无论产出什么都改不了它真值**的 gap worker。实测同一轮
+//    `.quay/goal-round.jsonl`：`criteria` 里 AC-327 `verdict: "not-evaluated"`，`gaps` 里却 `state: "workable"`、
+//    `spawned: 1`。⇒ count===0 分支新增前置：`verdicts` 入参（pass 1 的 `criteria[]` 投影）。
+//    ⛔ 三态互不同形（硬规则 3b），且缺值回落今日行为（⛔ 缺值 ≠ 为假，硬规则 6）。
+
+test('AC1: count===0 分支先读本轮 verdict——not-evaluated 独占一态（taskCount null、不立案）；fail / 缺值回落文本分类', () => {
+  // criterion 无 `.quay/` token ⇒ 文本分类会是 `workable`（本用例的对照基线：新旧实现的唯一分歧就在这里）。
+  const records = [{ id: 'AC-X', goal: 'GOAL-001', status: 'active', criterion: 'test -f src/x.ts' }];
+  const done = [{ id: 't', status: 'done', goalAc: 'AC-X' }];
+
+  // ① 本轮 verdict=not-evaluated ⇒ 独立取值 not-evaluated（taskCount null）+ ⛔ 不消耗 spawn 名额。
+  const ne = computeGoalGaps(records, done, null, null, null, null, null, new Map([['AC-X', 'not-evaluated']]))[0];
+  assert.equal(ne.state, 'not-evaluated', '判据自陈无法评估 ⇒ 不得被当 workable（硬规则 3b）');
+  assert.equal(ne.taskCount, null, 'not-evaluated 的 taskCount 是 null（⛔ 与 0 不同形）');
+  assert.equal(isFilingGapState(ne.state), false, 'not-evaluated ⛔ 不 spawn（这正是本任务要消除的空转面）');
+
+  // ② 本轮 verdict=fail ⇒ 维持今日行为（按判据载体三分），逐字不变 ⇒ 无生产载体 ⇒ workable（照常立案）。
+  const fail = computeGoalGaps(records, done, null, null, null, null, null, new Map([['AC-X', 'fail']]))[0];
+  assert.equal(fail.state, 'workable', 'fail ⇒ 回落文本分类（⛔ 不与 not-evaluated 同形）');
+  assert.equal(fail.taskCount, 1, 'taskCount 仍是枚举关联数');
+  assert.equal(isFilingGapState(fail.state), true);
+  // ②b fail 分支逐字不变：判据读生产载体时仍按文本判 world-gated（⛔ 不是「fail ⇒ 一律 workable」）。
+  const worldRec = [{ id: 'AC-X', goal: 'GOAL-001', status: 'active', criterion: 'cat .quay/ci-runs.jsonl' }];
+  const wf = computeGoalGaps(worldRec, done, null, null, null, null, null, new Map([['AC-X', 'fail']]))[0];
+  assert.equal(wf.state, 'world-gated', 'fail ⇒ 仍走 classifyCriterionKind 三分（text 载体判 world-gated）');
+
+  // ③ 负控制：不传 verdict（缺省 null）⇒ workable（⛔ 缺值 ≠ 为假，硬规则 6——「查不成」不得静默变成「不立案」）。
+  const missing = computeGoalGaps(records, done)[0];
+  assert.equal(missing.state, 'workable', '缺值回落今日行为，⛔ 不伪装成 not-evaluated');
+  assert.equal(missing.taskCount, 1);
+
+  // ③b 同形负控制：传了 map 但不含这一项 ⇒ 同样回落（⛔ 不是「map 存在 ⇒ 一律 not-evaluated」）。
+  const absent = computeGoalGaps(records, done, null, null, null, null, null, new Map())[0];
+  assert.equal(absent.state, 'workable', 'map 里没有该 AC ⇒ 回落文本分类（逐项读，⛔ 不整表化）');
+  assert.equal(absent.taskCount, 1);
+
+  // 三态互不同形（硬规则 3b）：not-evaluated 与两个 workable 回落取值可区分。
+  assert.notEqual(ne.state, fail.state, 'not-evaluated ≠ fail 的回落落点');
+  assert.notEqual(ne.state, missing.state, 'not-evaluated ≠ 缺值的回落落点');
+});
+
+test('AC2（端到端）: criterion 自陈 exit 3 的 active AC ⇒ 该轮 gaps 落 not-evaluated、gap_spawns 不含它、spawned 不因它 +1', async () => {
+  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'goal-driver-acverdict-'));
+  try {
+    fs.mkdirSync(path.join(tmp, 'goals'), { recursive: true });
+    fs.mkdirSync(path.join(tmp, 'tasks'), { recursive: true });
+    fs.mkdirSync(path.join(tmp, '.quay'), { recursive: true });
+    writeStandingGoalFile(tmp, { id: 'GOAL-001', status: 'active', kind: 'goal' });
+    // 唯一 active AC：criterion 自陈无法评估（exit 3 ⇒ goal-store gate 判 not-evaluated），正文无 `.quay/` token。
+    writeStandingGoalFile(tmp, { id: 'AC-001', status: 'active', kind: 'criterion', goal: 'GOAL-001', criterion: 'echo "NOT-EVALUATED: 试点未跑" >&2; exit 3' });
+    // 唯一关联任务 `done` ⇒ count===0（旧实现据此文本分类成 workable ⇒ 每轮空转 spawn）。
+    fs.writeFileSync(path.join(tmp, 'tasks', 'gap-a.md'), '---\nid: gap-a\nstatus: done\ngoal_ac: AC-001\n---\nbody\n', 'utf8');
+
+    const { fact } = await runGoalRound(tmp, {
+      scriptRoot: repoRoot, gapWorkerCmd: 'true', resourceGateArgv: ['true'],
+    });
+    const v = fact.value;
+    // 前置自检：判据这一轮真的跑出了 not-evaluated（⛔ 不是「判据根本没被 gate」——那是另一种成因）。
+    const crit = v.criteria.find((c) => c.id === 'AC-001');
+    assert.ok(crit, `AC-001 必须在本轮 criteria 里（实测 criteria=${v.criteria.map((c) => c.id).join(',')}）`);
+    assert.equal(crit.verdict, 'not-evaluated', 'criterion exit 3 ⇒ 本轮 verdict=not-evaluated');
+
+    const gap = v.gaps.find((g) => g.ac === 'AC-001');
+    assert.ok(gap, 'AC-001 必须在 gaps 里');
+    assert.equal(gap.state, 'not-evaluated', '自陈无法评估 ⇒ state=not-evaluated（不再误判 workable）');
+    assert.equal(gap.taskCount, null, 'taskCount null（⛔ 与 0 不同形）');
+
+    // spawn 面：该 AC 不进选取面 ⇒ spawned 不因它 +1（本 fixture 里它是唯一候选 ⇒ 恒 0）。
+    assert.deepEqual(v.gap_spawns.map((o) => o.ac), [], `gap_spawns 不含该 AC（实测 ${JSON.stringify(v.gap_spawns.map((o) => o.ac))}）`);
+    assert.equal(v.spawned, 0, 'spawned=0（⛔ 不因一条自陈无法评估的判据空转一个名额）');
+  } finally {
+    fs.rmSync(tmp, { recursive: true, force: true });
+  }
 });
