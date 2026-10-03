@@ -3,7 +3,7 @@ id: gap-routine-semantic-dedup-scan-walkfiles-scan-surface-family
 title: "semantic-dedup-scan: Three private walkFiles bodies are byte-identical
   (same SKIP_DIRS, same Dirent loop, same call site) and are the un-extracted
   remainder of the scan-surface fam"
-status: ready
+status: done
 labels:
   - gap
   - routine-filed
