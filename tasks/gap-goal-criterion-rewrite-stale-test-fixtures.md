@@ -2,7 +2,7 @@
 id: gap-goal-criterion-rewrite-stale-test-fixtures
 title: 判据改写（AC-322/AC-327，2026-10-03T15:42Z）与 AC-904 新增后，三个测试夹具/语料未同步 ⇒ develop
   全量 suite 常红 9 条，阻塞所有 code-delta fan-in
-status: ready
+status: done
 labels:
   - gap
 parent: null

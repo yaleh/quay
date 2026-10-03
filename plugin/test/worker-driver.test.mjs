@@ -3744,6 +3744,8 @@ test("AC3 — 未标注读数：无 goal_ac 且 Touches 与 branch-mode goal 在
 // 不动 + 落 goal-merge-result 事件】——不是返回值自述，因为落地与否的直接量就是 git 本身。
 const FF_MERGE_MODULE_ABS = path.join(REPO_ROOT, "packages", "quay", "src", "fan-in", "ff-merge.ts");
 const GM_GOAL = "GOAL-901";
+const GM_AC = "AC-901";
+const GM_TASK = "TT-901";
 
 function makeGoalMergeRepo(tag) {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), `goal-merge-e2e-${tag}-`));
@@ -3752,12 +3754,30 @@ function makeGoalMergeRepo(tag) {
   g("branch", "-M", "develop");
   fs.writeFileSync(path.join(root, ".gitignore"), ".quay/\n");
   fs.mkdirSync(path.join(root, "goals"), { recursive: true });
+  fs.mkdirSync(path.join(root, "tasks"), { recursive: true });
+  // activatedAt 回拨 5 分钟：AC-322/325/327 的判据改写（2026-10-03）后 live_goals() 要求 branch-mode
+  // goal 的前置里含 `activatedAt:`，并用它做时间下界（`[ "$ct" -ge "$a" ]`）。夹具必须显式造出这一形态
+  // （⛔ 不是放宽判据），且它要早于下面的翻转提交与 goal→develop 合并提交。
+  const activatedAt = new Date(Date.now() - 300_000).toISOString();
   fs.writeFileSync(path.join(root, "goals", `${GM_GOAL}-a-goal.md`),
-    `---\nid: ${GM_GOAL}\ntitle: a goal\nstatus: active\nkind: directive\nbranch: true\n---\n\nbody long enough for the fixture to parse as a goal record yes indeed\n`);
+    `---\nid: ${GM_GOAL}\ntitle: a goal\nstatus: active\nkind: directive\nactivatedAt: ${activatedAt}\nbranch: true\n---\n\nbody long enough for the fixture to parse as a goal record yes indeed\n`);
+  // AC-327 改写后新增要求：该 goal 的 merge 必须至少有一条【可归因的 via 落地】，否则 exit 3
+  // （"zero would be vacuous"）。判据从 worktree 的 `goals/AC-*.md`（`goal:` 行）与 `tasks/*.md`
+  // （`goal_ac:` 行）读语料，翻转提交（下面）则在 goal 分支上 —— 故三类文件都建在 base 提交上，
+  // 各分支（含 develop-work 主检出）都继承。
+  fs.writeFileSync(path.join(root, "goals", `${GM_AC}-a-criterion.md`),
+    `---\nid: ${GM_AC}\nstatus: active\nkind: criterion\ngoal: ${GM_GOAL}\nphase: post-merge\ncriterion: "exit 0"\n---\n\nfixture criterion attributable to ${GM_GOAL}\n`);
+  fs.writeFileSync(path.join(root, "tasks", `${GM_TASK}.md`),
+    `---\nid: ${GM_TASK}\ntitle: fixture task\nstatus: ready\ngoal_ac: ${GM_AC}\n---\n\nfixture task that lands through the goal branch\n`);
   g("add", "-A"); g("commit", "-q", "-m", "base");
   g("checkout", "-q", "-b", `goal/${GM_GOAL}`);
   fs.writeFileSync(path.join(root, "work.txt"), "goal work\n");
   g("add", "-A"); g("commit", "-q", "-m", "goal work");
+  // 任务落地：用机械 fan-in 的【逐字】翻转 subject 提交，使这条落地可归因于本 goal 的唯一 merge 提交，
+  // 并被 classify() 判为 `via`（在 goal 分支一侧，不在 develop 的 merge 前链上）。
+  const taskFile = path.join(root, "tasks", `${GM_TASK}.md`);
+  fs.writeFileSync(taskFile, fs.readFileSync(taskFile, "utf8").replace(/^status: ready$/m, "status: done"));
+  g("add", "-A"); g("commit", "-q", "-m", `tasks: 翻 ${GM_TASK} done（driver 机械 fan-in）`);
   g("checkout", "-q", "-b", "develop-work"); // develop 脱离主检出 ⇒ ff 退化为纯 ref 更新
   // 请求时间回拨 2 分钟：AC-325 判据把请求事件的毫秒时间戳与合并提交的【秒级】%ct 比较
   // （`Date.parse(ts) < ct*1000`），同秒会误判「无请求」。生产里人请求与 driver 执行相隔数分钟，

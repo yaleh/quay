@@ -238,9 +238,9 @@ test("usage: no root ⇒ exit 2 and a usage line on stderr", () => {
   assert.match(out.join(""), /usage: live-web-address\.ts/);
 });
 
-// ── AC5: the 17 criteria really CALL the helper (mutation + deletion control) ─────────────────────
+// ── AC5: every criterion that CALLS the helper really depends on it (mutation + deletion control) ──
 //
-// WHY THIS IS THE LOAD-BEARING CONTROL. "17 criteria were edited to call the helper" is a claim about
+// WHY THIS IS THE LOAD-BEARING CONTROL. "the criteria were edited to call the helper" is a claim about
 // TEXT; the claim that matters is that the call is LOAD-BEARING — that mutating the helper changes
 // every criterion's verdict. So this section runs the SHIPPED criterion texts (extracted from
 // `goals/`, ⛔ never a copy) against a fixture root that is otherwise identical in three modes:
@@ -252,9 +252,9 @@ test("usage: no root ⇒ exit 2 and a usage line on stderr", () => {
 // The `real` arm is what makes the other two discriminating: without it, a "no candidate here" root
 // would give exit 3 in all three modes and the control would prove nothing (硬规则 4 推论三).
 //
-// The fixture page is GENERIC on purpose: its English nav carries every label the 17 criteria assert
-// on, and its zh face carries none of them with a changed <title>. One page, 17 subjects — the arm
-// under test is the DERIVATION, not the page.
+// The fixture page is GENERIC on purpose: its English nav carries every label the criteria assert on,
+// and its zh face carries none of them with a changed <title>. One page, every subject — the arm under
+// test is the DERIVATION, not the page (the `/doc` index AC-904 reads is appended outside `<nav>`).
 
 const MUTANT_HELPER = `process.stderr.write("carrier-unreadable\\n");\nprocess.exit(3);\n`;
 
@@ -300,10 +300,17 @@ async function makeHarness(mode) {
   if (mode === "mutant") fs.writeFileSync(path.join(root, "plugin", "scripts", "live-web-address.ts"), MUTANT_HELPER);
 
   const server = http.createServer((req, res) => {
-    const wantsZh = /(?:^|;\s*)lang=zh(?:;|$)/.test(String(req.headers.cookie ?? "")) || /lang=zh/.test(String(req.url ?? ""));
+    const url = String(req.url ?? "");
+    const wantsZh = /(?:^|;\s*)lang=zh(?:;|$)/.test(String(req.headers.cookie ?? "")) || /lang=zh/.test(url);
     res.setHeader("content-type", "text/html; charset=utf-8");
-    if (/lang=zh/.test(String(req.url ?? ""))) res.setHeader("set-cookie", "lang=zh; Path=/");
-    res.end(wantsZh ? ZH_PAGE : enPage());
+    if (/lang=zh/.test(url)) res.setHeader("set-cookie", "lang=zh; Path=/");
+    let body = wantsZh ? ZH_PAGE : enPage();
+    // AC-904 (the GOAL-904 drill) is satisfied by `GET /doc` LISTING its managed record `DOC-904`, so the
+    // `/doc` response carries a doc-index element. Appended OUTSIDE `<nav>`: the other criteria assert on
+    // the nav region + `<title>` (both unchanged), so this stays one generic page serving every subject —
+    // the arm under test is the DERIVATION, not the page content (硬规则 4 推论三).
+    if (/^\/doc(?:[?#]|$)/.test(url)) body = body.replace("</body>", `<div id="doc-index">DOC-904</div></body>`);
+    res.end(body);
   });
   await new Promise((r) => server.listen(0, "127.0.0.1", r));
   const pagePort = server.address().port;
@@ -354,8 +361,12 @@ function runCriterionText(root, criterion) {
   });
 }
 
-test("AC5: the corpus really is the 17 converged criteria (guard against a vacuous control)", () => {
-  assert.equal(CRITERIA.length, 17, `expected the 17 converged criteria, found ${CRITERIA.length}: ${CRITERIA.map((c) => c.id).join(",")}`);
+test("AC5: the corpus really is every goal criterion that calls the helper (guard against a vacuous control)", () => {
+  // 18 = the 17 converged criteria (gap-criterion-live-web-address-derivation-17-copies-to-one) + AC-904,
+  // the GOAL-904 drill criterion added 2026-10-04 (`1aec2bd8b`) that calls the helper directly. The
+  // predicate is deliberately live (the criterion TEXT names the helper), so the count is the guard
+  // against a vacuous (empty/one-element) control and must move whenever a new caller joins the set.
+  assert.equal(CRITERIA.length, 18, `expected every criterion that calls the helper, found ${CRITERIA.length}: ${CRITERIA.map((c) => c.id).join(",")}`);
   assert.ok(LABELS.length >= 14, `the English nav must carry every asserted label, found ${LABELS.length}`);
 });
 
@@ -394,7 +405,7 @@ test("AC5 (mutant arm): a helper that always reports NOT-EVALUATED makes EVERY c
       assert.doesNotMatch(r.stdout, /^OK -- /m, `${c.id} printed a PASS while the derivation was not evaluable: ${r.stdout.slice(0, 200)}`);
       assert.match(
         r.stderr,
-        /no-derivable-serve-address|no-derivable-address|no live candidate exposed a derivable address/,
+        /no-derivable-serve-address|no-derivable-address|no live candidate exposed a derivable address|no live web address for/,
         `${c.id} must NAME the underivable-address refusal: ${r.stderr.slice(0, 300)}`,
       );
     }
@@ -402,7 +413,7 @@ test("AC5 (mutant arm): a helper that always reports NOT-EVALUATED makes EVERY c
     await h.cleanup();
   }
   // Enumerate, don't boolean (硬规则 3): the per-criterion codes are part of the reading.
-  assert.equal(codes.length, 17, codes.join(" "));
+  assert.equal(codes.length, 18, codes.join(" "));
 });
 
 test("AC5 (missing arm): with the helper DELETED every criterion exits NON-ZERO (the call is real)", async () => {
