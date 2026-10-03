@@ -337,6 +337,39 @@ test("AC3 — a goal gate run leaves a verdict+timestamp event in .quay/gate-eve
   assert.equal(rec.evidence.at, tail.timestamp, "evidence.at must equal the ledger tail timestamp (source = ledger, not the file)");
 });
 
+// gap-goal-branch-gate-event-evaluation-root AC1 — the ledger must name WHICH TREE a verdict came from.
+// SPEC-goal-branch-2026-10-03 §7 辛 is unjudgeable while a goal GateEvent records no cwd (硬规则 4c):
+// before this, the tail carried only `id/item_id/gate/actor/verdict/timestamp/payload.reason`. The
+// root is passed through a SYMLINK so the assertion distinguishes the REALPATH from the path as given
+// — the whole point (this host's `/home/yale` is a symlink to `/data/home/yale`), and ⛔ not a vacuous
+// `realpath(x) === x` that holds the moment /tmp is canonical.
+test("AC1 — goal gate records payload.evaluationRoot (realpath) and payload.treeSha (HEAD^{tree})", () => {
+  const { root, run } = gitRepo("eval-root");
+  const holder = tmpDir("eval-root-alias");
+  const link = path.join(holder, "alias");
+  fs.symlinkSync(root, link); // the same tree, reached under a different spelling
+  const cli = new URL("../src/goal-store.ts", import.meta.url).pathname;
+  const n = (cmd) => spawnSync("node", ["--experimental-strip-types", cli, "--root", link, ...cmd], { encoding: "utf8" });
+  seedAcCli(n, "GOAL-001");
+  n(["write", "GOAL-001", "--title", "p", "--status", "active", "--origin", "o", "--body", GOAL_BODY]);
+  n(["write", "AC-028", "--title", "a", "--status", "active", "--goal", "GOAL-001", "--criterion", "true", "--origin", "o", "--expect", EXPECT]);
+  // Freeze a tree: the event must name exactly this tree, and `gate` writes no goal file (so HEAD
+  // cannot move between the reading and the run).
+  run("add", "-A");
+  run("commit", "-q", "--allow-empty", "-m", "fixture");
+  const expectedTree = run("rev-parse", "HEAD^{tree}").trim();
+  const g = spawnSync("node", ["--experimental-strip-types", cli, "gate", "AC-028", "--root", link], { encoding: "utf8" });
+  assert.equal(g.status, 0, "criterion `true` must pass:\n" + g.stdout + g.stderr);
+  const ledger = fs.readFileSync(path.join(root, ".quay", "gate-events.jsonl"), "utf8").trim().split("\n");
+  const tail = JSON.parse(ledger[ledger.length - 1]);
+  assert.equal(tail.gate, "goal");
+  assert.equal(tail.actor, "goal-cli");
+  assert.equal(tail.verdict, "pass", "the fields are ADDITIVE — the verdict is unchanged");
+  assert.equal(tail.payload.evaluationRoot, fs.realpathSync(root), "evaluationRoot must be the criterion cwd's realpath");
+  assert.notEqual(tail.payload.evaluationRoot, link, "the unresolved (symlinked) path must NOT be recorded");
+  assert.equal(tail.payload.treeSha, expectedTree, "treeSha must be `git rev-parse HEAD^{tree}` at that root");
+});
+
 test("goal-store list/get/write round-trip through the CLI (invoke surface)", () => {
   const root = tmpDir("cli-list");
   fs.mkdirSync(path.join(root, "goals"), { recursive: true });

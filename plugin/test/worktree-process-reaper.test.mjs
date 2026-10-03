@@ -33,6 +33,7 @@ import {
   isQuayServe,
   readServeRegistration,
   classifyOrphanServes,
+  isSelfRegisteredServe,
 } from "../scripts/worktree-process-reaper.ts";
 import { suiteLockSlotCount } from "../scripts/suite-lock-slots.ts";
 
@@ -436,6 +437,87 @@ test("classifyOrphanServes — 只回收【本仓库】的孤儿；登记不能�
   }
 });
 
+// ── 预览实例（goal preview，SPEC-goal-branch §4.10）：后台 serve 以【自身 root】的登记自证 ────────
+//
+// 预览 serve 与泄漏 host 在 /proc 里同形：都是 ppid === 1 的 `quay … serve`。分开二者的是
+// 【它自己那个 root 的 .quay/server.json 有没有登记它】——`--root` 的登记担保不了别的 root。
+
+test("isSelfRegisteredServe — 只认「自身 cwd 下 .quay/server.json 登记的正是这个 pid」", () => {
+  const dir = tmp("selfreg");
+  try {
+    const p = (pid, cwd) => ({ pid, cwd, cwdDeleted: false, argv0: "node", state: "R", ppid: 1, openFiles: [], cmdline: null });
+    // 无 carrier ⇒ 不担保
+    assert.equal(isSelfRegisteredServe(p(201, dir)), false, "无 carrier 担保不了任何 pid");
+    mkdirSync(join(dir, ".quay"), { recursive: true });
+    writeFileSync(join(dir, ".quay", "server.json"), JSON.stringify({ pid: 201 }));
+    assert.equal(isSelfRegisteredServe(p(201, dir)), true, "登记的就是它 ⇒ 自证");
+    assert.equal(isSelfRegisteredServe(p(202, dir)), false, "登记的是别的 pid ⇒ 担保不了");
+    assert.equal(isSelfRegisteredServe(p(201, null)), false, "cwd 读不到 ⇒ 无法担保");
+  } finally {
+    cleanup(dir);
+  }
+});
+
+test("classifyOrphanServes — 预览 serve：①登记一致⇒豁免 ②pid 不一致⇒回收 ③无 carrier⇒回收 ④主 root 既有判定不变", () => {
+  const dir = tmp("serve-preview");
+  try {
+    const root = join(dir, "main");
+    const preview = join(root, "goal-preview-wt"); // 预览 worktree = root 下的另一个 workspace root
+    mkdirSync(join(preview, ".quay"), { recursive: true });
+    const carrier = join(preview, ".quay", "server.json");
+    const serve = ["node", join(preview, "packages", "quay", "bin", "quay.ts"), "serve", "--port", "4180"];
+    const mk = (pid, cwd) => ({ pid, cwd, cwdDeleted: false, argv0: "node", state: "R", ppid: 1, openFiles: [], cmdline: serve });
+    const reg = { state: "present", pid: 100, alive: true };
+
+    // ① 它自己 root 的 carrier 登记的就是它 ⇒ 不在回收集，且被【正面识别】
+    writeFileSync(carrier, JSON.stringify({ pid: 201 }));
+    let r = classifyOrphanServes([mk(201, preview)], reg, new Set(), root);
+    assert.equal(r.notEvaluated, false);
+    assert.deepEqual(r.serves.map((p) => p.pid), [], "自证的预览 host 不得被回收");
+    assert.deepEqual(r.recognizedServes.map((p) => p.pid), [201], "豁免必须是【被识别】而非「够不着」（硬规则 3b）");
+
+    // ② carrier 登记的是【别的】pid ⇒ 按泄漏回收
+    writeFileSync(carrier, JSON.stringify({ pid: 999 }));
+    r = classifyOrphanServes([mk(201, preview)], reg, new Set(), root);
+    assert.deepEqual(r.serves.map((p) => p.pid), [201], "登记的不是它 ⇒ 按泄漏回收");
+    assert.deepEqual(r.recognizedServes, []);
+
+    // ③ 该目录没有 carrier ⇒ 无人担保 ⇒ 回收
+    rmSync(carrier);
+    r = classifyOrphanServes([mk(201, preview)], reg, new Set(), root);
+    assert.deepEqual(r.serves.map((p) => p.pid), [201], "无 carrier 的 ppid-1 serve = 无主 ⇒ 回收");
+
+    // ④ 主 root 登记宿主不回收、本 root 下无担保的孤儿回收 —— 既有判定不变
+    const r4 = classifyOrphanServes([mk(100, root), mk(101, root)], reg, new Set(), root);
+    assert.deepEqual(r4.serves.map((p) => p.pid), [101], "pid===reg.pid 的登记宿主不回收；本 root 下无担保者回收");
+    assert.deepEqual(r4.recognizedServes, [], "主 root 的登记宿主走的是 reg.pid 这条路，不是自证那条");
+  } finally {
+    cleanup(dir);
+  }
+});
+
+test("classifyOrphanServes — 命名空间（主检出之外的兄弟目录）内的预览 serve 同样自证豁免；无担保者照旧回收", () => {
+  const dir = tmp("serve-ns");
+  try {
+    const root = join(dir, "main");
+    const ns = join(dir, "worktrees");
+    const preview = join(ns, "goal-GOAL-028");
+    mkdirSync(join(preview, ".quay"), { recursive: true });
+    writeFileSync(join(preview, ".quay", "server.json"), JSON.stringify({ pid: 201 }));
+    const orphan = join(ns, "goal-GOAL-029"); // 命名空间内、但无 carrier
+    mkdirSync(orphan, { recursive: true });
+    const serve = ["node", "/x/packages/quay/bin/quay.ts", "serve", "--port", "1"];
+    const mk = (pid, cwd) => ({ pid, cwd, cwdDeleted: false, argv0: "node", state: "R", ppid: 1, openFiles: [], cmdline: serve });
+    const reg = { state: "present", pid: 100, alive: true };
+
+    const r = classifyOrphanServes([mk(201, preview), mk(202, orphan), mk(203, "/other/repo")], reg, new Set(), root, ns);
+    assert.deepEqual(r.serves.map((p) => p.pid), [202], "命名空间内无担保者回收；其它仓库够不着 ⇒ 绝不动");
+    assert.deepEqual(r.recognizedServes.map((p) => p.pid), [201], "命名空间内的自证预览 host 豁免");
+  } finally {
+    cleanup(dir);
+  }
+});
+
 test("CLI --orphan-serves --list — 只报本仓库泄漏的 host（seam，不触碰真实进程）", () => {
   const dir = tmp("serve-reap");
   try {
@@ -455,6 +537,39 @@ test("CLI --orphan-serves --list — 只报本仓库泄漏的 host（seam，不�
     assert.equal(payload.found, 1);
     assert.deepEqual(payload.pids, [101]);
     assert.equal(payload.serveNotEvaluated, false);
+  } finally {
+    cleanup(dir);
+  }
+});
+
+test("CLI --orphan-serves — 命名空间里的预览 root 自证 ⇒ 豁免并计入 recognizedServes；同命名空间内无担保者仍回收", () => {
+  const dir = tmp("serve-preview-cli");
+  try {
+    const root = join(dir, "main");
+    mkdirSync(join(root, ".quay"), { recursive: true });
+    writeFileSync(join(root, ".quay", "server.json"), JSON.stringify({ pid: process.pid }));
+    // 命名空间由 .quay/config.yml 的 loop.worktree_root 解析（单一解析入口，不是字面量）
+    const ns = join(dir, "worktrees");
+    writeFileSync(join(root, ".quay", "config.yml"), `loop:\n  worktree_root: ${ns}\n`);
+    // 预览 worktree 在主检出【之外】（兄弟目录），其 .quay/server.json 由预览 serve 自己写
+    const preview = join(ns, "goal-GOAL-028");
+    mkdirSync(join(preview, ".quay"), { recursive: true });
+    writeFileSync(join(preview, ".quay", "server.json"), JSON.stringify({ pid: 201 }));
+
+    const serve = ["node", "/x/packages/quay/bin/quay.ts", "serve", "--port", "1"];
+    const seam = writeSeam(dir, [
+      seamLineCmd(201, preview, "node", "R", 1, "", serve), // 自证的预览 host → 豁免
+      seamLineCmd(202, join(ns, "goal-GOAL-029"), "node", "R", 1, "", serve), // 无 carrier → 回收
+      seamLineCmd(203, "/other/repo", "node", "R", 1, "", serve), // 其它仓库 → 够不着
+    ]);
+    const res = run(["--orphan-serves", "--root", root, "--list", "--json"], { WORKTREE_PROCESS_REAPER_PS_SOURCE: seam });
+    assert.equal(res.status, 0, res.stderr);
+    const payload = JSON.parse(res.stdout);
+    assert.deepEqual(payload.pids, [202], "只有命名空间内无担保的那一个在回收集");
+    assert.deepEqual(payload.recognizedServes.map((p) => p.pid), [201], "自证的预览 host 被正面识别，不是静默丢弃");
+    // 人类可读输出也要说清「豁免了几个」——否则「判过且干净」与「豁免了预览实例」同形（硬规则 3b）
+    const text = run(["--orphan-serves", "--root", root, "--list"], { WORKTREE_PROCESS_REAPER_PS_SOURCE: seam });
+    assert.match(text.stdout, /1 self-registered host\(s\) spared/, text.stdout);
   } finally {
     cleanup(dir);
   }

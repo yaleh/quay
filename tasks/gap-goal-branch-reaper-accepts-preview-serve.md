@@ -1,7 +1,7 @@
 ---
 id: gap-goal-branch-reaper-accepts-preview-serve
 title: 孤儿 serve 回收器认可在自身 root 登记过的 serve——否则 goal 预览实例会被当泄漏杀掉
-status: ready
+status: done
 labels:
   - gap
 parent: null
