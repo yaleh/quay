@@ -53,6 +53,8 @@ extra:
 
 读数已作为任务体存入任务库、可被 `quay task get` 读回，不再只存在于未提交的 worktree 文件里；四个依据本读数的后续任务各自引用本任务 id 作为证据来源。本任务不改任何源码，所以不跑 suite；真实落地 = 读数进入了生产载体（任务库）。
 
+该轴仍暗,理由:本任务只存档只读取证读数、不改任何源码，L_D/L_G 均未被触及。
+
 ## Touches
 
 - tasks/gap-status-flip-history-and-parser-diff-readings.md
