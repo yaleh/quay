@@ -391,6 +391,7 @@ The init skill is a SPEC declaration point (`spec-declaration-point-check`): eve
 <!-- reference-doc: orchestration/SPEC-fan-in-driver-mechanical-orchestration-2026-08-27.md -->
 <!-- reference-doc: orchestration/SPEC-fan-in-ff-merge-lock-2026-08-14.md -->
 <!-- reference-doc: orchestration/SPEC-fan-in-workflow-lock-and-S1-2026-08-26.md -->
+<!-- reference-doc: orchestration/SPEC-goal-branch-2026-10-03.md -->
 <!-- reference-doc: orchestration/SPEC-goal-mechanism-2026-09-06.md -->
 <!-- reference-doc: orchestration/SPEC-goal-store-2026-08-09.md -->
 <!-- reference-doc: orchestration/SPEC-in-flight-semantics-2026-08-14.md -->
