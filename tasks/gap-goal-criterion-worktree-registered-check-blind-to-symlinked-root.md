@@ -2,7 +2,7 @@
 id: gap-goal-criterion-worktree-registered-check-blind-to-symlinked-root
 title: 判据 worktree 的「已登记」判定用 path.resolve 比较，符号链接 root（/home/yale →
   /data/home/yale）下永远判未登记——worktree 建好后再也刷新不了（GOAL-904 演练读到，连续 failed）
-status: ready
+status: done
 labels:
   - gap
   - defect
