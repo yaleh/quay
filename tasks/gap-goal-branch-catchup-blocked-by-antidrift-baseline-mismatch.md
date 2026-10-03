@@ -9,6 +9,10 @@ children: []
 extra: {}
 goal_ac: AC-322
 ---
+## Proposal
+
+把 `anti-drift-touches-check.ts` 的 BASELINE-MISMATCH 前置接到**它已经实现、却永远到不了**的两线基准上：当 `--merge-target` 解析为本项目的 `goal/*` 线（branch-model 的 goal 角色）时，基线判据从「merge target 必须含 develop 的 tip」放宽为「该分支可以是 develop 的后代或祖先线」，让落后 develop 的 goal 分支走完 fan-in step 2b 的追平 merge，再由 `computeTaskOwnedFiles` 两线基准判定 task 是否真的越出声明的 `## Touches`。⛔ 不动的三处：`--merge-target develop` 的既有行为、真正外来分支的 fail-closed、以及「线角色判不出时 fail-closed」的姿态（硬规则 3b：读不懂 ≠ 合格）。配套补一条 `detectDefaultBranch` 解析出 `develop` 的取假夹具——本缺陷只在真实仓库形态下出现，现有夹具（`detectDefaultBranch` 为 null）看不见它。
+
 ## Contract
 
 **被阻塞的机制**：`orchestration/SPEC-goal-branch-2026-10-03.md` §4.4 裁定③ 的「每次任务落地顺带追平 develop」——`plugin/scripts/worker-fan-in.ts` 的 fan-in step 2b（`mergeTarget !== "develop"` 时追加一次 `git merge develop`）。
