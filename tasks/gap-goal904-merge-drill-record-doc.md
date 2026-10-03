@@ -76,3 +76,14 @@ AC3：**分支提交完成时**（doc 提交 + 本任务文件的勾选提交，
 
 - docs-managed/DOC-904-goal-branch-merge-drill-record.md
 - tasks/gap-goal904-merge-drill-record-doc.md
+
+## Needs-Human
+
+**执行 2026-10-03T17:07:36.213Z — 连续修满重试上限仍不合格（标 needs-human）**
+
+- 阻碍原因：worker-driver 连续 3 次 exited-not-landed 未落地（重试上限）
+- 失败步/判词：step=suite: AssertionError [ERR_ASSERTION]: GET /tasks on the standalone-bundle server must return 200
+- run_id：wk-prod-anchor
+- session_id：f88c02cb-c64d-4929-9b0b-0011a5451a29
+- suite 日志：/data/home/yale/work/quay/.quay/fan-in-suite-gap-goal904-merge-drill-record-doc~wk-prod-anchor~1791047080806-636f1c.log
+- fan-in 日志：/data/home/yale/work/quay/.quay/fan-in-gap-goal904-merge-drill-record-doc-wk-prod-anchor.log
