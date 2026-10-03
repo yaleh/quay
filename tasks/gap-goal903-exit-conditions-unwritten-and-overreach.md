@@ -4,7 +4,7 @@ title: GOAL-903 充分性判官判 insufficient 跨一整个 judge+look 周期�
   节（机械层 `hasExitConditions` 读不到 ⇒ 恒 insufficient，加新 AC 改不动它），且其中两条（`判据 AC-322 读
   exit 0`、`无 goal/* 残留分支`）超出本目标可控范围 ⇒ 提 option (b)：重排成节并把退出条件收窄为在域 AC-903
   能裁定的那一条
-status: ready
+status: done
 labels:
   - gap
   - defect
