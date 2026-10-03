@@ -3,7 +3,7 @@ id: gap-routine-semantic-dedup-scan-git-helper-collector-gate
 title: "semantic-dedup-scan: Identical 8-line git(args,cwd):GitResult (execSync,
   timeout 10_000, same ok/stdout/error shape) defined locally in two sibling
   scripts; neither imports a share"
-status: ready
+status: done
 labels:
   - gap
   - routine-filed
