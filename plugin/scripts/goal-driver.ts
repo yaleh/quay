@@ -2064,6 +2064,18 @@ export function standingReverifyAcs(
  *  draft/superseded/retired 的 AC 不是缺口对象（未激活 / 已放弃）。
  *  ⚠️ workable / world-gated / unclassified 三态**共用同一前置**（有关联任务、全非牵引、判据未达成），
  *  分歧点**只在判据载体**（`classifyCriterionKind`）——⛔ 不是三条独立的启发式。
+ *  ⚠️ 上述「判据载体三分」在**先读本轮判据读数**之后才轮得到（`verdicts` 入参）：
+ *  一条判据可以在正文里【没有任何 `.quay/` token】的情况下**自陈无法评估**（criterion exit 3 ⇒
+ *  `gateCriterion` 判 `not-evaluated`），此时按文本把它当 `workable` 立出的 worker 无论产出什么都改不了
+ *  它的真值（真值等的是世界/人的动作）⇒ 每轮空转一个名额。三个取值互不同形（硬规则 3b）：
+ *    · `verdicts.get(ac) === "not-evaluated"` ⇒ `state: "not-evaluated"`、`taskCount: null`
+ *      （⛔ 不与 `workable` 同形；`isFilingGapState` 为 false ⇒ 不 spawn）。
+ *    · `"fail"` / 读不到（`nil`/map 无此项）⇒ **回落今日行为**（按判据载体分类）——⛔ 缺值 ≠ 为假
+ *      （硬规则 6），不得静默变成「查不成 ⇒ 不立案」。
+ *    · `"pass"` 到不了这里：pass 1 已把 `verdict==="pass" && status==="active"` 的 AC 机械翻 achieved
+ *      （下面的 `status !== "active"` 已跳过它）。
+ *  `verdicts === null`（缺省；既有调用方/单测不传）⇒ 逐字节保持今日行为。
+ *  （gap-goal-active-ac-gap-classification-ignores-round-verdict）
  *
  *  ② AC-216 复验域（achieved ∧ long-term ∧ GOAL 非 active，`standingReverifyAcs`）—— 问「此刻成立吗」
  *  （`standings` = I5 `check --achieved-failing` 的读数，goal-store 单一实现）。三态：standing-ok
@@ -2099,6 +2111,7 @@ export function computeGoalGaps(
   frozen: FrozenFailingReading | null = null,
   frozenRecheck: PrefilingRecheckReading | null = null,
   standingRecheck: PrefilingRecheckReading | null = null,
+  verdicts: Map<string, "pass" | "fail" | "not-evaluated"> | null = null,
 ): Array<GoalGap> {
   const activeGoalIds = activeGoalIdsOf(records);
   // 三类 population 落在同一个 gaps 读数里（⚠️ 但判据不同——见上）：
@@ -2259,7 +2272,9 @@ export function computeGoalGaps(
     const traction = allAssociated.filter((t) => isTractionStatus(t.status));
     const count = traction.length;
     let state: GapState;
-    let taskCount: number;
+    // ⛔ `number | null`：not-evaluated 时 taskCount 是 null（⛔ 与 0 不同形，硬规则 3b）——「有几条任务
+    // 是它的」这个问句在「没查成」时没有答案。
+    let taskCount: number | null;
     if (allAssociated.length === 0) {
       state = "gap";                  // 真缺口：零关联任务 ⇒ 该 spawn 立案
       taskCount = 0;
@@ -2272,8 +2287,19 @@ export function computeGoalGaps(
       //                   ⛔ 无 worker 能产出 ⇒ 不消耗名额，走 `worldGatedRoutes` 的复读路由并留痕。
       //   unclassified —— 读不到/解析不出判据（criterion 缺失或空）⇒ 独立取值（硬规则 3b），⛔ 不 spawn。
       // ⛔ 三态共用同一前置、只分歧在载体 ⇒ 不是三条独立启发式（单一真相源 = classifyCriterionKind）。
-      state = classifyCriterionKind(r.criterion);
-      taskCount = allAssociated.length; // 枚举关联数（⛔ 非布尔化，硬规则 3）
+      // ⚠️ 先读**本轮判据读数**（`verdicts`，pass 1 的 criteria[] 投影）：判据可以自陈无法评估（exit 3）
+      // 而正文里没有任何 `.quay/` token ⇒ 文本分类会误判成 workable（每轮空转一个 worker，而它的真值
+      // 等的是世界/人的动作）。⇒ `not-evaluated` 独占一态（taskCount null，⛔ 不与 workable 同形，
+      // 硬规则 3b），`fail`/读不到回落下面的文本分类（⛔ 缺值 ≠ 为假，硬规则 6）。
+      // （gap-goal-active-ac-gap-classification-ignores-round-verdict）
+      const roundVerdict = verdicts === null ? null : verdicts.get(id) ?? null;
+      if (roundVerdict === "not-evaluated") {
+        state = "not-evaluated";
+        taskCount = null;
+      } else {
+        state = classifyCriterionKind(r.criterion);
+        taskCount = allAssociated.length; // 枚举关联数（⛔ 非布尔化，硬规则 3）
+      }
     } else if (traction.every((t) => t.status === "needs-human")) {
       state = "stalled";
       taskCount = count;
@@ -3462,7 +3488,12 @@ export async function runGoalRound(root: string, opts: GoalRoundOptions = {}): P
   const taskFacts = await readTaskFacts(dataRoot);
   const hasGoalAcTasks = taskFacts !== null && taskFacts.some((t) => t.goalAc !== null);
   const judgment = hasGoalAcTasks ? await readReadyPoolJudgment(root, opts.readyPoolCmd) : null;
-  const gaps = computeGoalGaps(records, taskFacts, judgment, achievedFailing, frozenFailing, frozenRecheck, standingRecheck);
+  // ① 缺口分类读取**本轮判据读数**（gap-goal-active-ac-gap-classification-ignores-round-verdict）：pass 1
+  // 刚跑出的 `criteria`（AC id → 本轮 verdict）投影成 map 传入 ⇒ 一条【自陈无法评估】的判据（exit 3）
+  // 不再按文本误判成 `workable` 每轮空转 spawn（见 computeGoalGaps 的 `count === 0` 分支）。
+  // ⛔ 单向输入：只读 pass 1 已算出的读数，⛔ 不重跑任何判据、⛔ 不改 spawn/flip 判定面。
+  const verdictByAc = new Map<string, "pass" | "fail" | "not-evaluated">(criteria.map((c) => [c.id, c.verdict]));
+  const gaps = computeGoalGaps(records, taskFacts, judgment, achievedFailing, frozenFailing, frozenRecheck, standingRecheck, verdictByAc);
 
   // ⑦ draft AC 分诊（GOAL-010 范围② / AC-210）：对 active GOAL 名下每条 draft AC 出四态判决并逐条
   // 落痕。分诊循环只【产出判决】，⛔ 不 flip 任何 AC status——判决的消费在 ⑧（仅 activate 一态被
