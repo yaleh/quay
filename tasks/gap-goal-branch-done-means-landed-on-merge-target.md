@@ -1,7 +1,7 @@
 ---
 id: gap-goal-branch-done-means-landed-on-merge-target
 title: 落到 goal 分支的任务把 done 同时写到 develop——done 的语义改为「已落到它的 mergeTarget」，否则任务被反复派发（B2）
-status: ready
+status: needs-human
 labels:
   - gap
 parent: null
@@ -76,6 +76,8 @@ $ node --test plugin/test/worker-fan-in.test.mjs    # 恢复态
 
 ⇒ ① 随核心改动在/不在 变绿/变红（可证伪），② 两态恒绿（develop 路径逐字不变）。
 
+**2026-10-03 续做轮独立复核**（同一 `cp` 备份协议，未用 `git checkout --`）：备份 md5 `55b4a99d570946e015eb8b8bb9970bc6` → 定点改 `:2219`（⛔ 非 `:1858` 的 catch-up-develop 块，那处属既有实现）为 `if (false && mergeTarget !== "develop")`（md5 `0da833d94c6d85dfc598e0bddeeb1270`）⇒ `node --test plugin/test/worker-fan-in.test.mjs` exit 1、① 红（`'ready' !== 'done'`）、② 仍绿 ⇒ `cp` 还原（md5 复核回 `55b4a99d…`、`git diff HEAD -- plugin/scripts/worker-fan-in.ts` 空）⇒ 再跑 exit 0、2/2 绿。与上表逐字一致。
+
 ### AC3 grep 分类表（2026-10-03 命中 20 处；本任务改后同一 grep 仍命中 20 处）
 
 对账：**命中数相同（20）**。行号漂移两处：`anti-drift-touches-check.ts` `:405→:447`（其间其它任务落地所致）、`worker-fan-in.ts` `:1557→:1608`（**本任务自己新增 import/helper 所致**）；其余行号不变（`defect-latency-pair.ts:755`、`quay-init.sh:1927` 与 SPEC 前 3 条一致）。SPEC「前 3 条」的顺序按 grep 参数顺序（plugin/scripts 在前）而异，非集合差异。
@@ -113,12 +115,14 @@ $ node --test plugin/test/worker-fan-in.test.mjs    # 恢复态
 
 ### AC4 scoped 门（`bash scripts/test.sh --for-task gap-goal-branch-done-means-landed-on-merge-target`，**非 thin**）
 
-退出 0；选中并执行了 37 个测试文件、71 个测试，其中**含本任务新增的** `plugin/test/worker-fan-in.test.mjs`（及其配对 `plugin/test/worker-fan-in-catch-up.test.mjs`）。选中清单（节选，`+` 为 test.sh 打印的选中项）：
+退出 0；选择器选中并执行了 **2 个测试文件**（`plugin/test/driver-filters.test.mjs`、`plugin/test/worker-fan-in.test.mjs`），共 71 个测试。**非 thin**：不带 `--allow-thin` 直接跑 `--paths-only` 亦退出 0、`--json` 不带 thin 判词。选中清单（由 `bash scripts/test.sh --for-task <id> --paths-only` 原样打印）：
 
 ```
-  + plugin/test/worker-fan-in-catch-up.test.mjs
-  + plugin/test/worker-fan-in.test.mjs
+plugin/test/driver-filters.test.mjs
+plugin/test/worker-fan-in.test.mjs
 ```
+
+⛔ 本段此前写作「37 个测试文件」并把 `worker-fan-in-catch-up.test.mjs` 列为选中项——那个 37 是同一日志里 `task-file-bypass-check` 的 `PASS: no new task-file bypass — 37 hit(s)`，那两行 `+` 来自 `test-file-snapshot` 的 additions 块，**两者都不是选中清单**（硬规则 2「按位置判定，不按关键词」的反例）。2026-10-03 续做轮以选择器自身输出（`--paths-only` / `--json`）改正。
 
 该门实跑末尾：
 
@@ -131,3 +135,10 @@ $ node --test plugin/test/worker-fan-in.test.mjs    # 恢复态
 （完整输出见 `.quay/gap-doneface-evidence/scoped-gate-notthin.txt`。）同一轮的 scoped 静态检查（含 `import-graph-check`：valueSccs/typeSccs/reverseEdges 均 0，本任务新增的 `worker-fan-in → driver-filters` 值边未成环；`task-contract-check`、`anti-drift-touches-check` 等）全部通过。
 
 **AC 勾选如何到达 fan-in（本任务实测的一处已知坑）**：本任务的 `task_write` 是 `changeKind: "self-only"`（纯勾选 + Evidence，`maskSelfOnlyBody` 归一化复选框后无实质 body 变更）⇒ 按设计**不** ff 到 develop（`.quay/store-commit-propagation.jsonl` 记 `{"changeKind":"self-only","branchClass":"other","propagated":false}`），落在主检出 `author`（commit `df6be82cb`）。fan-in 的 ac-precheck 读「worktree 副本 ∪ `develop:tasks/<id>.md`」的并集，而 step 8 的 ac-gate **只**读 worktree 副本 ⇒ 勾选必须进 worktree。按既有认可做法（transport，非手搓勾选字符）把 ABI 写出的那份文件搬到 task 分支：`git -C <worktree> checkout author -- tasks/<id>.md`（与 author 逐字节一致，diff 仅 4 行 `- [ ]`→`- [x]`）后提交。复核用真实判据：`fan-in-ac-completion-gate.ts --task <id> --worktree <worktree> --json` ⇒ `{"ok":true,"status":"pass","total":4,"checked":4}` exit 0。
+## Needs-Human
+
+**执行 2026-10-03T10:20:12.902Z — 停派终止（失败无法归因，⛔ 不再重派）**
+
+- 阻碍原因：exited-not-landed 失败无法归因（基建/契约疑似，非实现缺陷）——停止重派，⛔ 不再拿新会话撞同一堵墙：the exited-not-landed failure could not be attributed in 2 consecutive rounds (bounded to at most one retry; no mechanical fan-in result on the outcome ⇒ no suite ran) — infra/contract suspected, not an implementable defect (parser attributed no failing file (failure-line count unavailable on this judgment)); stopping instead of spending another worker session
+- 失败步/判词：adopted orphan worker exited (exit code unobservable) — task status=ready (not done) and leftover worktree task/gap-goal-branch-done-means-landed-on-merge-target still present
+- run_id：wk-prod-anchor
