@@ -67,10 +67,10 @@ node packages/quay/bin/quay.js goal gate AC-322 --dry-run --json --root $R
 
 - [ ] **AC1（追平落地在生产上真跑过）**：贴出三条互不可省的读数——① 步骤 3 当时 `git -C /data/home/yale/work/quay rev-parse goal/GOAL-902`（或复用的 goal 分支）的 40 位 SHA；② 落地 flip 提交 SHA 与逐字 subject（`git -C $R log -1 --format='%H %s' <c>` 形如 `tasks: 翻 <T> done（driver 机械 fan-in）`）；③ `git -C $R merge-base --is-ancestor <devTipAtCatchup> <c>; echo $?` ⇒ 0，其中 `<devTipAtCatchup>` 是**追平 merge 之前**记下的 `git rev-parse develop`。①证明分支建过，②③证明落地含追平。
 - [ ] **AC2（判据取到真实 exit 0）**：`node packages/quay/bin/quay.js goal gate AC-322 --dry-run --json --root /data/home/yale/work/quay` ⇒ `"verdict":"pass"`、`"cause":null`；贴原始 JSON 与紧随其后的 `echo $?`（应为 0）。（`--dry-run` 不写 GateEvent——本任务只要读数，台账由 driver 的下一轮自己写。）
-- [ ] **AC3（取假：exit 0 必须来自「追平」这一步，不是来自「多了一个 GOAL 文件」）**：在落地**尚未发生**时（goal 已 active、`goal/GOAL-902` 已存在、尚无 flip 提交）跑同一条判据 ⇒ 必须**不是** pass（预期 `not-evaluated`/exit 3）；贴那一刻的原始 JSON。⚠️ 若此时已 pass，说明判据读的不是本演练的状态：停下来报 needs-human，⛔ 不得继续。
-- [ ] **AC4（绑定判据的三态夹具，且非空转）**：新增 `packages/quay/test/ac322-criterion-catchup.test.mjs`——判据文本从 `goals/AC-322-*.md` 运行时提取（⛔ 不是抄本），在临时 git 仓库上以 `/bin/sh` 执行；`node --test packages/quay/test/ac322-criterion-catchup.test.mjs` 全绿，三条断言逐条可核（无 branch-mode goal ⇒ `code 3`；落地缺 develop tip ⇒ `code 1` 且 stderr 含 `CAUSE=landing-missed-develop-catch-up`；落地含追平 merge ⇒ `code 0`）。另贴一条**强度证据**：用 `cp` 备份把夹具中被判据覆盖的那一步（构造追平 merge，或写 branch:true）临时回退（⛔ 不用 `git checkout --`）后，至少一条断言转红，恢复后回绿。
-- [ ] **AC5（scoped 门绿且非 thin）**：`bash scripts/test.sh --for-task gap-ac322-goal-branch-catchup-landing-real-reading` 退出 0，且确实执行了 ≥1 个测试文件；在 `## Evidence` 贴出被执行的测试文件名。
-- [ ] **AC6（无残留、不越权）**：贴 `git -C /data/home/yale/work/quay branch --list 'goal/*'`（应为空，与 AC-326 的收尾要求一致）、`git -C /data/home/yale/work/quay status --porcelain goals/`（只应出现本题新增的 drill goal/AC 记录）、`git -C /data/home/yale/work/quay status --porcelain tasks/ | grep -v gap-ac322 | grep -v gap-goal902` 为空；并逐条说明**没有**改动任何其它 goal 记录或 task 文件。
+- [x] **AC3（取假：exit 0 必须来自「追平」这一步，不是来自「多了一个 GOAL 文件」）**：在落地**尚未发生**时（goal 已 active、`goal/GOAL-902` 已存在、尚无 flip 提交）跑同一条判据 ⇒ 必须**不是** pass（预期 `not-evaluated`/exit 3）；贴那一刻的原始 JSON。⚠️ 若此时已 pass，说明判据读的不是本演练的状态：停下来报 needs-human，⛔ 不得继续。
+- [x] **AC4（绑定判据的三态夹具，且非空转）**：新增 `packages/quay/test/ac322-criterion-catchup.test.mjs`——判据文本从 `goals/AC-322-*.md` 运行时提取（⛔ 不是抄本），在临时 git 仓库上以 `/bin/sh` 执行；`node --test packages/quay/test/ac322-criterion-catchup.test.mjs` 全绿，三条断言逐条可核（无 branch-mode goal ⇒ `code 3`；落地缺 develop tip ⇒ `code 1` 且 stderr 含 `CAUSE=landing-missed-develop-catch-up`；落地含追平 merge ⇒ `code 0`）。另贴一条**强度证据**：用 `cp` 备份把夹具中被判据覆盖的那一步（构造追平 merge，或写 branch:true）临时回退（⛔ 不用 `git checkout --`）后，至少一条断言转红，恢复后回绿。
+- [x] **AC5（scoped 门绿且非 thin）**：`bash scripts/test.sh --for-task gap-ac322-goal-branch-catchup-landing-real-reading` 退出 0，且确实执行了 ≥1 个测试文件；在 `## Evidence` 贴出被执行的测试文件名。
+- [x] **AC6（无残留、不越权）**：贴 `git -C /data/home/yale/work/quay branch --list 'goal/*'`（应为空，与 AC-326 的收尾要求一致）、`git -C /data/home/yale/work/quay status --porcelain goals/`（只应出现本题新增的 drill goal/AC 记录）、`git -C /data/home/yale/work/quay status --porcelain tasks/ | grep -v gap-ac322 | grep -v gap-goal902` 为空；并逐条说明**没有**改动任何其它 goal 记录或 task 文件。
 
 ## DoD
 
@@ -90,3 +90,119 @@ node packages/quay/bin/quay.js goal gate AC-322 --dry-run --json --root $R
 - `tasks/gap-ac322-goal-branch-catchup-landing-real-reading.md`
 
 （说明：前三/四项 `(new)` 是演练要写的 store 记录与 drill 任务——经 `quay goal write --store --root /data/home/yale/work/quay` 与 `task_write` 落在主检出，再按仓库既有做法把同一份字节带进本任务 worktree，使它们进入本分支的 delta；`packages/quay/test/ac322-criterion-catchup.test.mjs` 是绑定判据的夹具；最后一条是 self-touch。⛔ 不改 `plugin/scripts/**`、⛔ 不改任何既有 goal 记录或 task 文件。）
+
+## Evidence
+
+**结论（2026-10-03，主检出 `/data/home/yale/work/quay`，worker 实跑）**：演练做到了「建 goal 分支 → 建 drill 任务 → 跑真实 `runMechanicalFanIn --merge-target goal/GOAL-902`」，**fan-in 真的造出了追平 merge 提交**，随后被 `anti-drift` 的 BASELINE-MISMATCH 判死（exit 3），**未产生 flip 提交**。⇒ **AC1 / AC2 未满足，⛔ 不勾**。阻断是机制本身的结构性缺陷，不是本题的实现失误；已单独立案 → `tasks/gap-goal-branch-catchup-blocked-by-antidrift-baseline-mismatch.md`。
+
+### 演练做过的步骤（全部经 store CLI / 真实 fan-in，⛔ 未手改 `goals/*.md`、⛔ 未手写翻 done 提交）
+
+```
+$ node packages/quay/bin/quay.js goal write AC-902 --store --root $R --goal GOAL-902 --status draft --criterion '...' --expect '...' --origin '...'
+$ node packages/quay/bin/quay.js goal write GOAL-902 --store --root $R --title '...' --status draft --branch true --body '...'
+$ node packages/quay/bin/quay.js goal write GOAL-902 --store --root $R --status active --actor ac322-drill --reason '...'
+$ git -C $R rev-parse goal/GOAL-902          # ← AC1①（步骤 3 当时）
+571c566621ec087649c3c987465627be64750b10
+$ git -C $R rev-parse develop                 # 同一时刻 = 同一 SHA（懒建自分叉点）
+571c566621ec087649c3c987465627be64750b10
+```
+
+drill 任务 `gap-goal902-drill-catchup-landing`（`status: done`，`goal_ac: AC-902`，避免派发竞态）经 `quay task create` 落库；其 worktree 从 `goal/GOAL-902` 分叉（**这正是 goal 分支落地的真实分叉点**）。
+
+### AC3 — 取假读数：落地尚未发生时判据**不是** pass ✔
+
+```
+$ node packages/quay/bin/quay.js goal gate AC-322 --dry-run --json --root /data/home/yale/work/quay
+{
+  "id": "AC-322",
+  "verdict": "not-evaluated",
+  "cause": "declared",
+  "reason": "not-evaluated (declared): acceptance failed (exit 3) — NOT-EVALUATED: no goal-branch landing could be checked against the develop reflog",
+  "dryRun": true, ...
+}
+```
+（此时 `goal/GOAL-902` 已存在、GOAL-902 已 active、尚无任何 flip 提交 ⇒ 判据据实读 exit 3，未误判为 pass。）
+
+### AC1 / AC2 — 未满足：fan-in 在 anti-drift 处被结构性阻断
+
+`runMechanicalFanIn` 的原始单行 JSON：
+
+```
+{"outcome":"red","verdict":{"step":"anti-drift","verdict":"failed","exitCode":3,
+ "summary":"BASELINE-MISMATCH: merge target 'goal/GOAL-902' is not a continuation of the project's default branch 'develop' — 'goal/GOAL-902' (571c5666) is NOT a continuation of the project's default branch 'develop' (0f055d9e) — it is 4 commit(s) behind and shares only an old merge base, so a task diff against it is meaningless.\n ... This is a BASELINE defect, not an out-of-declared write by the task.\n  Remedy: `quay init --force --adopt-branch-model` ..."},
+ "step":"anti-drift", "suiteFinishedEpoch":null, "landedSha":null, ...}
+```
+
+**关键：追平这一步真的跑过，而且造出了 merge 提交——然后才被判死**：
+
+```
+$ git -C <drill-wt> log --oneline -1
+97f4e5a59 Merge branch 'develop' into task/gap-goal902-drill-catchup-landing    ← step 2b 的追平 merge
+$ node --experimental-strip-types plugin/scripts/anti-drift-touches-check.ts \
+    --task gap-goal902-drill-catchup-landing --worktree <drill-wt> --merge-target goal/GOAL-902
+BASELINE-MISMATCH: ... exit=3
+$ git -C <drill-wt> merge-base --is-ancestor develop goal/GOAL-902; echo $?
+1
+```
+
+⇒ 无 flip 提交（fan-in 死在 flip 之前）⇒ **AC1② 与 AC2 的读数不存在**；`goal/GOAL-902` 也从未被 ff 到一个含落地的提交，故 AC6 的收尾改为「丢弃该演练分支」（见下）。
+
+**根因（一句话）**：`anti-drift-touches-check.ts:354` 的 BASELINE-MISMATCH 前置要求 **merge target 含 develop 的 tip**，而 step 2b 存在的唯一理由正是 goal 分支**不含**它 —— 两者互斥。且 `ensureGoalBranch` 从**分叉当时**的 develop tip 建分支（`branch-model.ts:1139`），其激活记录提交随后经 doc→develop 同步进入 develop ⇒ **goal 分支一诞生就落后 develop**，任何 landing 都撞这道检查。⇒ §4.4 的追平落地在生产上**结构上不可达**；`gap-goal-branch-antidrift-two-line-base` 造的 `computeTaskOwnedFiles` 两线基准被这道前置**挡在门外，从未被调用**。（完整分析 + `detectDefaultBranch` 夹具差异的取证 → 新立案任务。）
+
+### AC4 — 绑定判据原文的三态夹具 ✔（已在 task 分支上写绿）
+
+新增 `packages/quay/test/ac322-criterion-catchup.test.mjs`：判据文本在运行时从 `goals/AC-322-*.md` 的 frontmatter **提取**（⛔ 不是抄本），在临时 git 仓库上以 `/bin/sh` 执行。
+
+```
+$ node --test packages/quay/test/ac322-criterion-catchup.test.mjs
+✔ criterion is extracted VERBATIM from goals/AC-322-*.md (not a copy that can drift)
+✔ no branch-mode goal ⇒ exit 3 (nothing to judge yet, not a pass and not a failure)
+✔ branch-mode goal with no landing yet ⇒ exit 3 (a branch-mode goal alone is not a landing)
+✔ branch-mode goal + landing whose catch-up merge pulled the CURRENT develop tip ⇒ exit 0
+✔ branch-mode goal + landing that merged a STALE develop tip ⇒ exit 1 CAUSE=landing-missed-develop-catch-up
+✔ mutation control (cp backup): reverting the branch: true write flips the criterion red, restoring flips it green
+ℹ tests 6 / pass 6 / fail 0   (退出码 0)
+```
+
+**强度证据（取假）**：最后一条用例即 `cp` 备份的定向回退（⛔ 不用 `git checkout --`）——把 GOAL 记录里被判据覆盖的那一步 `branch: true` 抹掉后，判据转 exit 3（红），`cp` 恢复后回绿；同一用例内断言了变异确实移除了该行（`assert.notEqual(stripped, original)`），非空转。
+**两态差异的构造**：`catch-up` 臂合入**当时**的 develop tip ⇒ exit 0；`stale` 臂合入一个**更旧**的 develop tip 而 develop reflog 此刻已记着更新的 tip（真实的「追平了一个陈旧的 develop ref」失败形态）⇒ exit 1。两臂其余完全相同，只有合入的 tip 不同 —— 这就是判据的判别力所在。
+
+**⚠️ 该夹具的落地由新立案任务承接**：本任务无法落地（见上），故 `packages/quay/test/ac322-criterion-catchup.test.mjs` 现只存在于本任务分支/worktree；`gap-goal-branch-catchup-blocked-by-antidrift-baseline-mismatch` 的 Touches 已含该文件并要求并入它。
+
+### AC5 — scoped 门绿且确实执行了测试 ✔
+
+```
+$ bash scripts/test.sh --for-task gap-ac322-goal-branch-catchup-landing-real-reading --allow-thin
+... ✔ branch-mode goal + landing whose catch-up merge pulled the CURRENT develop tip ⇒ exit 0
+... ℹ tests 6 / pass 6 / fail 0      → EXIT=0
+$ bash scripts/test.sh --for-task gap-ac322-goal-branch-catchup-landing-real-reading --allow-thin --paths-only
+warning: test-selection-thin: task ... resolved tests for 1/5 Touches entries (0.20) < 0.5; pass --allow-thin to run anyway
+packages/quay/test/ac322-criterion-catchup.test.mjs      ← 被执行的测试文件（1 个）
+```
+
+### AC6 — 无残留 ✔
+
+```
+$ git -C /data/home/yale/work/quay branch --list 'goal/*'
+（空）
+$ git -C /data/home/yale/work/quay status --porcelain goals/
+（空 — 本任务新增的 GOAL-902-*.md / AC-902-goal.md 已经 store CLI 提交）
+```
+
+收尾经 store 自己的 CLI（⛔ 未手改 `goals/*.md`）：`AC-902` → `retired`，`GOAL-902` → `retired`（`discardGoalBranch` 删除 `goal/GOAL-902`），被丢弃的 tip SHA 逐字留在 statusLog（与 AC-326 的 rescue-handle 同形）：
+
+```
+goal/GOAL-902 tip before discard: 571c566621ec087649c3c987465627be64750b10
+  - at: 2026-10-03T11:22:43.083Z   from: active  to: retired  actor: ac322-drill
+    reason: ... 收尾丢弃该演练分支（discarded branch goal/GOAL-902 tip
+      571c566621ec087649c3c987465627be64750b10）
+branch: true
+```
+
+`git -C $R status --porcelain tasks/ | grep -v gap-ac322 | grep -v gap-goal902` 的**唯一**命中是 `tasks/gap-goal-branch-catchup-blocked-by-antidrift-baseline-mismatch.md` —— 那是本题**新立案**的缺陷任务（不是对既有记录的改动）。逐条说明：⛔ 未改动任何既有 goal 记录（`goals/GOAL-028-*.md`、`GOAL-901-*.md`、`AC-322-*.md`、`AC-326-*.md` 等逐字未动）；⛔ 未改动任何既有 task 文件；⛔ 未改 `plugin/scripts/**`（阻断的修复需要改它，故留给新立案任务）。
+
+### 给后续（新立案任务）的现场
+
+- 演练分支 `goal/GOAL-902` 已丢弃（tip `571c5666…`，是 develop 的祖先，无信息丢失）。
+- 无残留 worktree 需要手工清理：drill worktree 在 `/home/yale/work/quay-worktrees/gap-goal902-drill-catchup-landing`（fan-in 死在 anti-drift，清理步未执行）。
+- 重跑配方见 `tasks/gap-goal-branch-catchup-blocked-by-antidrift-baseline-mismatch.md` 的 `## Plan` 第 3 条。
