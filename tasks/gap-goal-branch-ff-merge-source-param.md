@@ -33,6 +33,8 @@ goal_ac: AC-327
 - packages/quay/src/fan-in/ff-merge.ts
 - packages/quay/test/ff-merge.test.mjs
 - plugin/test/fan-in-ff-merge.test.mjs
+- plugin/skills/init/SKILL.md
+- plugin/skills/manager/SKILL.md
 - tasks/gap-goal-branch-ff-merge-source-param.md
 
 ## Evidence
@@ -72,3 +74,11 @@ goal_ac: AC-327
 - 被执行的测试文件（selector `--paths-only`，非 thin，coverage 2/3）：`packages/quay/test/adr-gate.test.mjs`、`packages/quay/test/adr-store.test.mjs`、`packages/quay/test/build-dist.test.mjs`、`packages/quay/test/cli-adr.test.mjs`、**`packages/quay/test/ff-merge.test.mjs`**、`packages/quay/test/mcp-adr.test.mjs`、`packages/quay/test/npm-pack-e2e.test.mjs`、**`plugin/test/fan-in-ff-merge.test.mjs`**、`plugin/test/plugin-packaging.test.mjs`。
 - 输出中确认执行到本任务的两条：`✔ sourceRefOf — absent/blank --source-ref falls back to the task branch; a ref or SHA overrides`、`✔ ff success — develop fast-forwards to the task tip…`、`✔ gap-goal-branch-ff-merge-source-param — --source-ref ff's develop to a merge commit…`。
 - 说明：本模块的集成测试历史名为 `plugin/test/fan-in-ff-merge.test.mjs`（basename 与源 `ff-merge.ts` 不配对），**仅它一项时 selector 判 thin（1/3 < 0.5）**。新增 `packages/quay/test/ff-merge.test.mjs`（按仓库 `<source>.test.mjs` 约定，单测 `sourceRefOf` 的缺省/覆盖规则）后 coverage = 2/3 ≥ 0.5 ⇒ 非 thin。
+
+**解除 develop 级静态阻断（边缘修复，非本任务 AC；见 `## Touches` 末两条的追加）**
+- 阻断形态：fan-in 静态相位 `STATIC_CHECK_FAILED: spec-declaration-point-check exit=1` ⇒ suite 未跑（`# tests 0` / `# suite red static-check`），**任何**任务的 fan-in 都在 suite 之前失败。
+- 复现（对 develop 检出直接跑该 checker）：`node --experimental-strip-types plugin/scripts/spec-declaration-point-check.ts` ⇒ `plugin/skills/init/SKILL.md missing: SPEC-goal-branch-2026-10-03.md`、`plugin/skills/manager/SKILL.md missing: SPEC-goal-branch-2026-10-03.md` ⇒ `FAIL: 2 missing SPEC declaration(s) across 2 declaration points`（exit 1）。
+- 根因：`orchestration/SPEC-goal-branch-2026-10-03.md`（本 task 的机制正本，`d4b7ca1c2` 落 develop）未在两处 SPEC 声明点声明——正是该 checker 要拦的形态。
+- 修法：`plugin/skills/init/SKILL.md` 的 `<!-- reference-doc: -->` 块加一行 + `plugin/skills/manager/SKILL.md` 的 SPEC 索引加一条（均为 doc-surface 增量，零行为改动）。
+- 修后读数：`PASS: all 46 orchestration/SPEC-*.md declared at each of 2 declaration points`（exit 0）。
+- 归属核实：全库 grep `tasks/*.md` 的 `## Touches`，无其它 `todo`/`ready` 任务持有该修复 ⇒ 按 anti-drift 的「声明过窄」臂如实追加两个路径进 `## Touches`（同 `plugin/scripts/direct-to-develop-bypass-check.ts:370/:383` 记载的历史止损先例）。
