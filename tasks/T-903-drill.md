@@ -1,7 +1,7 @@
 ---
 id: T-903-drill
 title: GOAL-903 追平落地演练任务（AC-322 生产读数载体）
-status: done
+status: ready
 labels: []
 parent: null
 children: []
