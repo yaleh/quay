@@ -239,9 +239,31 @@ test("AC3: goal 分支前进一个提交后，下一轮求值看到新提交（�
     );
     assert.equal(c2.get("AC-904")?.verdict, "pass", "第 2 轮：新提交带来了该文件 ⇒ 判据转绿（刷新真的对求值生效）");
 
-    // 刷新不得毁掉 worktree 与主 root 的关系：账本仍在主 root，worktree 里仍无账本。
-    assert.ok(fs.existsSync(path.join(tmp, ".quay", "gate-events.jsonl")), "主 root 的账本存在");
-    assert.equal(fs.existsSync(path.join(wtPath, ".quay", "gate-events.jsonl")), false, "worktree 里无账本");
+    // 刷新不得毁掉 worktree 与主 root 的关系：账本仍**写**在主 root。
+    // ⚠️ SPEC-goal-branch §4.10 裁定㉓（gap-goal-branch-preview-instance）之后，判据 worktree 同时是
+    // 该 goal 的**预览实例**，建/刷时会拿到一份主检出 `.quay/` 的**只读快照** ⇒ worktree 里现在**有**
+    // 一个账本文件。这正是本断言必须换判据的原因（旧判据「worktree 里无账本」描述的是快照落地前的
+    // 世界）：有账本 ≠ 事件写进了 worktree。真正的判据是——worktree 里那份是**冻结在快照时刻的副本**，
+    // 本轮 append 的事件只在主 root 的账本里。
+    const mainLedger = path.join(tmp, ".quay", "gate-events.jsonl");
+    const wtLedger = path.join(wtPath, ".quay", "gate-events.jsonl");
+    assert.ok(fs.existsSync(mainLedger), "主 root 的账本存在");
+    assert.ok(fs.existsSync(wtLedger), "worktree 里是主检出账本的只读快照（§4.10 ㉓；刷新写入的 .quay/ 副本）");
+    assert.notEqual(
+      fs.statSync(wtLedger).ino,
+      fs.statSync(mainLedger).ino,
+      "快照是【副本】（独立 inode），⛔ 不是同一文件/硬链——预览内的写操作必须落在副本上",
+    );
+    const mainLedgerText = fs.readFileSync(mainLedger, "utf8");
+    const wtLedgerText = fs.readFileSync(wtLedger, "utf8");
+    assert.ok(
+      mainLedgerText.startsWith(wtLedgerText),
+      "worktree 的账本是主 root 账本在快照时刻的【前缀】：快照之后本轮 append 的事件只在主 root",
+    );
+    assert.ok(
+      wtLedgerText.length < mainLedgerText.length,
+      `快照必须【旧于】主账本（wt=${wtLedgerText.length}B main=${mainLedgerText.length}B）——否则本轮事件写进了 worktree`,
+    );
   } finally {
     fs.rmSync(tmp, { recursive: true, force: true });
     fs.rmSync(ns, { recursive: true, force: true });

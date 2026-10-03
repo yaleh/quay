@@ -154,6 +154,57 @@ export async function handleGoal({ sub, positional, flags, wantsJson, rest }: Cl
     process.exitCode = await runGoalStoreCli(argv);
     return;
   }
+  if (sub === "preview") {
+    // SPEC-goal-branch-2026-10-03 §4.10 (rulings ⑮⑫㉒㉓): `quay goal preview <GOAL-NNN> start|stop|status`.
+    // The preview WORKTREE belongs to goal-driver; the preview SERVE belongs to the human — this verb
+    // is that half. `start` runs the preview worktree's OWN quay code with that worktree as the
+    // workspace root, at an EXPLICIT port; `stop` stops it by reading ITS OWN `.quay/server.json`
+    // (⛔ never a pattern kill); `status` reads the same carrier.
+    const id = positional[0];
+    const action = positional[1];
+    if (!id || !/^GOAL-\d+$/.test(id)) {
+      console.error("quay goal preview: usage: quay goal preview <GOAL-NNN> start|stop|status [--port <n>] [--host <h>] [--root <path>] [--json]");
+      process.exitCode = 2;
+      return;
+    }
+    if (action !== "start" && action !== "stop" && action !== "status") {
+      console.error(`quay goal preview: unknown action "${action ?? ""}" (expected start|stop|status)`);
+      process.exitCode = 2;
+      return;
+    }
+    if (flags.root !== undefined && typeof flags.root !== "string") {
+      console.error("Error: --root requires a value (e.g., --root /path/to/workspace)");
+      process.exitCode = 1;
+      return;
+    }
+    const mainRoot = (flags.root as string | undefined) ?? (storeWorkspaceRoot() as string);
+    const { previewWorktreeDir, startPreviewServe, stopPreviewServe, readPreviewStatus } = await import("../goal-preview.ts");
+    const previewRoot = previewWorktreeDir(mainRoot, id);
+    if (action === "start") {
+      const rawPort = flags.port;
+      const port = rawPort === undefined ? Number.NaN : Number(rawPort);
+      const host = typeof flags.host === "string" ? flags.host : undefined;
+      const r = await startPreviewServe({ previewRoot, port, host });
+      if (wantsJson) printJson({ goal: id, action, previewRoot, ...r });
+      else if (r.state === "failed") console.error(`preview start FAILED: ${r.detail}`);
+      else console.log(`${r.state === "already-running" ? "already running" : "started"}: ${id} preview at ${previewRoot} — http://${host ?? "127.0.0.1"}:${r.port} (pid ${r.pid})`);
+      if (r.state === "failed") process.exitCode = 1;
+      return;
+    }
+    if (action === "stop") {
+      const r = stopPreviewServe(previewRoot);
+      if (wantsJson) printJson({ goal: id, action, previewRoot, ...r });
+      else console.log(`preview ${r.state}: ${id} (${r.detail})`);
+      if (r.state === "failed" || r.state === "not-evaluated") process.exitCode = r.state === "not-evaluated" ? 3 : 1;
+      return;
+    }
+    const r = readPreviewStatus(previewRoot);
+    if (wantsJson) printJson({ goal: id, action, previewRoot, ...r });
+    else if (r.state === "running") console.log(`running: ${id} preview pid ${r.pid} on http://${r.host ?? "127.0.0.1"}:${r.port} (${previewRoot})`);
+    else console.log(`preview ${r.state}: ${id} (${r.detail})`);
+    if (r.state === "not-evaluated") process.exitCode = 3;
+    return;
+  }
   if (sub === "list") {
     await withProvider(async (client) => {
       const filter: Record<string, unknown> = {};
@@ -215,7 +266,7 @@ export async function handleGoal({ sub, positional, flags, wantsJson, rest }: Cl
     }, { providerId: flags.provider, root: flags.root });
     return;
   }
-  console.error(`unknown goal subcommand: ${sub} (try: list, show, write, gate, check, batch)`);
+  console.error(`unknown goal subcommand: ${sub} (try: list, show, write, gate, check, batch, preview)`);
   process.exitCode = 1;
   return;
 }
