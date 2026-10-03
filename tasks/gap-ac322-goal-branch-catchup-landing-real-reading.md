@@ -84,8 +84,8 @@ node packages/quay/bin/quay.js goal gate AC-322 --dry-run --json --root $R
 ## Touches
 
 - `packages/quay/test/ac322-criterion-catchup.test.mjs` (new)
-- `goals/AC-902-*.md` (new)
-- `goals/GOAL-902-*.md` (new)
+- `goals/AC-902-goal.md` (new)
+- `goals/GOAL-902-ac-322-追平落地演练-drill-只用于跑一次-goal-分支的追平落地-不是真实开发方向.md` (new)
 - `tasks/gap-goal902-drill-catchup-landing.md` (new — drill 落地任务)
 - `tasks/gap-ac322-goal-branch-catchup-landing-real-reading.md`
 
