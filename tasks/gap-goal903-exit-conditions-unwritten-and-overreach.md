@@ -4,7 +4,7 @@ title: GOAL-903 充分性判官判 insufficient 跨一整个 judge+look 周期�
   节（机械层 `hasExitConditions` 读不到 ⇒ 恒 insufficient，加新 AC 改不动它），且其中两条（`判据 AC-322 读
   exit 0`、`无 goal/* 残留分支`）超出本目标可控范围 ⇒ 提 option (b)：重排成节并把退出条件收窄为在域 AC-903
   能裁定的那一条
-status: todo
+status: ready
 labels:
   - gap
   - defect
@@ -131,7 +131,7 @@ GOAL-903 名下的 drill 任务（T-903-drill）在 `develop` 上落地——即
 - [ ] **AC1｜机械成因有直接读数且带对照（⛔ 不是推测）。** 逐字跑 `goalSufficiencyVerdict` 三态：`(a)` 今天 body + `[{id:'AC-903'}]`、`(b)` body 追加一个 `## 退出条件` 节 + 同 AC 集、`(c)` 加节 body + 空 AC 集；要求分别取到 `insufficient` / `not-evaluated` / `insufficient`。贴命令与逐字输出。
 - [ ] **AC2｜节缺位与零覆盖各有独立取证，含负控制（硬规则 2 两半）。** 贴：`grep -c '^## ' goals/GOAL-903-*.md`（=0）；`grep -c 'AC-322' goals/AC-903-*.md`（=0）与 `grep -c -E 'goal/|残留|分支' goals/AC-903-*.md`（=0）；两条**负控制** `grep -c 'AC-322'` / `grep -c '残留'` 对 `goals/GOAL-903-*.md`（=3 / =1，证明谓词取得到非零）。
 - [ ] **AC3｜真值读数在场（证明「当前两条不成立」不是空话）。** 逐字提取 AC-903 与 AC-322 的 criterion（⛔ 不手抄，经 `goal-store.ts get --json` 或等价路径）并在主检出上当场干跑：AC-903 ⇒ exit **1**（stderr `CAUSE=goal903-drill-landing-missing`）；AC-322 ⇒ exit **3**（stderr `NOT-EVALUATED: no goal-branch landing could be checked against the develop reflog`）；`git branch --list 'goal/*'` ⇒ `goal/GOAL-903`。
-- [ ] **AC4｜GOAL-903 body 已改：退出条件成为非空 `## 退出条件` 节，且节内只留在域 AC-903 能裁定的一条（`判据 AC-322 读 exit 0` / `无 goal/* 残留分支` 两条已降为背景注）。** 核法：`goal-store.ts get GOAL-903 --json` 取 body，四条子断言全真：① `hasExitConditions(body)` 为真；② 退出条件节**不含**子串 `判据 AC-322 读 exit 0` 与 `无 goal/* 残留分支`；③ `## 背景`/`## 范围`/`## 非目标`/`## 退出条件` 四个节标题在；④ 正文其余部分逐字未丢。并贴 `git diff` 证明改动最小。⛔ **该 goal 写入只能由人（或人授权）经 goal store CLI 执行——本任务执行者不得代写 `goals/*.md`**（待外部）。
+- [ ] **AC4｜GOAL-903 body 已改：退出条件成为非空 `## 退出条件` 节，且节内只留在域 AC-903 能裁定的一条（`判据 AC-322 读 exit 0` / `无 goal/* 残留分支` 两条已降为背景注）。** 核法：`goal-store.ts get GOAL-903 --json` 取 body，四条子断言全真：① `hasExitConditions(body)` 为真；② 退出条件节**不含**子串 `判据 AC-322 读 exit 0` 与 `无 goal/* 残留分支`；③ `## 背景`/`## 范围`/`## 非目标`/`## 退出条件` 四个节标题在；④ 正文其余部分逐字未丢。并贴 `git diff` 证明改动最小。该 goal 写入经 goal store CLI 执行（人 2026-10-03 已授权，见上方 `## 人授权（2026-10-03）`）。
 - [ ] **AC5｜判官在【新 key】上重判过一次（⛔ 不是缓存命中），且新 verdict 不作成功判据。** 记下改前 `entries["GOAL-903"].key=69f0956f…`；改后断言 ① 旧 key 条目/历史不被改写 ② 出现一个**新** key（`sufficiencyCacheKey` 含退出条件文本 ⇒ body 一改 key 必变）③ 其后 `.quay/goal-round.jsonl` 落一条 `goal-sufficiency` fact。⚠️ 若新 verdict 仍是 `insufficient` ⇒ 把读数与判官输入逐字记进任务体并**停手另立根因**，⛔ 不得为让它变绿而反复改文本或改提示词（那会把判官变成回声）。（待外部）
 
 ## DoD
@@ -150,7 +150,7 @@ GOAL-903 名下的 drill 任务（T-903-drill）在 `develop` 上落地——即
 
 人 2026-10-03 在 manager 会话中明确授权执行本任务的 **option (b)**：可经 goal store CLI 写 `GOAL-903` 的 body（加非空 `## 退出条件` 节，并把退出条件收窄为在域 AC-903 能裁定的那一条）。
 
-⇒ AC4 末尾的 `（待外部）` 约束已解除——**本任务的执行者可执行该 goal 写入**（不再是"只能由人"）。
+⇒ AC4 末尾的 `（待外部）` 约束已解除——**本任务的执行者可执行该 goal 写入**（不再是仅限人执行）。
 ⚠️ AC5 的判官重判仍须在 AC4 完成后另跑，⛔ 不以 verdict 变绿为成功判据。
 
 ## Touches

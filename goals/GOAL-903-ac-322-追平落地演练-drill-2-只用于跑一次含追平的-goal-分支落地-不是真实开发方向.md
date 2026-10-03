@@ -22,4 +22,20 @@ statusLog:
       e3b52327fe1aa9576621136116239313e62b1b61）
 branch: true
 ---
-背景：AC-322 判据要求至少一个 branch:true 的 goal 有 ≥1 次含追平 merge 的落地。范围：只经 store CLI 走 draft→active，从 develop tip 懒建 goal/GOAL-903，一次含追平的机械 fan-in 落地后 ff 回 goal 分支并丢弃。非目标：⛔ 不承载任何真实开发方向、⛔ 不并入 develop、⛔ 不新增任何代码路径。退出条件：GOAL-903 名下的 drill 任务落地、判据 AC-322 读 exit 0、无 goal/* 残留分支。
+## 背景
+
+AC-322 判据要求至少一个 branch:true 的 goal 有 ≥1 次含追平 merge 的落地。
+
+## 范围
+
+只经 store CLI 走 draft→active，从 develop tip 懒建 goal/GOAL-903，一次含追平的机械 fan-in 落地后
+ff 进 develop 并丢弃该 goal 分支。
+
+## 非目标
+
+⛔ 不承载任何真实开发方向、⛔ 不新增任何代码路径。
+
+## 退出条件
+
+GOAL-903 名下的 drill 任务（T-903-drill）在 `develop` 上落地——即存在 subject 逐字为
+`tasks: 翻 T-903-drill done（driver 机械 fan-in）` 的提交（由 AC-903 判据裁定，exit 0）。
