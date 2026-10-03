@@ -66,6 +66,12 @@ AC3：**分支提交完成时**（doc 提交 + 本任务文件的勾选提交，
 
 ⇒ 三簇均需改**测试夹具/语料**（非本任务 delta；也非判据本身必错）。本任务受 AC3（delta 仅 DOC-904 + 任务文件）约束，不得夹带，故在 develop 修好这三簇前无法变绿。已单独立任务 `gap-goal-criterion-rewrite-stale-test-fixtures` 收口。⛔ 下一轮请勿重复实现本任务 delta——本任务实现早已完成（AC 全勾、scoped 门绿）。
 
+### 收口（2026-10-04 本轮）：兄弟任务已落地，三簇红清零
+
+上一轮点名的兄弟任务 `gap-goal-criterion-rewrite-stale-test-fixtures` 已按 fan-in 落地 develop（`0cec238b9`）。本 worktree 并入该 develop 后逐个复跑三簇夹具，**全绿**：`packages/quay/test/ac322-criterion-catchup.test.mjs` 6/6、`plugin/test/live-web-address.test.mjs` 17/17、`plugin/test/worker-driver.test.mjs` 118/118。
+
+本任务 AC1/AC2/AC3 复跑均成立（AC1 ⇒ `ok DOC-904` exit 0；AC2 `scripts/test.sh --static-checks-doc` ⇒ exit 0；AC3 `git diff --name-only develop...HEAD` 列单文件 `docs-managed/DOC-904-…md`，为允许两文件的子集）。scoped 门 `scripts/test.sh --for-task gap-goal904-merge-drill-record-doc --allow-thin` ⇒ exit 0（selector 选 0 个测试文件，thin allowed）；scoped-gate cache 以 develop sha `0cec238b9` 写入（`git merge-base --is-ancestor 0cec238b9 HEAD` 为真）。⇒ 上一轮记录的三簇 develop-wide 常红已不再是本任务 fan-in 的阻断。
+
 ## Touches
 
 - docs-managed/DOC-904-goal-branch-merge-drill-record.md
