@@ -12,9 +12,16 @@ criterion: >-
 
   cd "$root"
 
-  bm_goals() { for f in goals/GOAL-*.md; do [ -f "$f" ] || continue; sed -n
-  '2,/^---$/p' "$f" | grep -qx 'branch: true' && basename "$f" | cut -d- -f1-2;
-  done; }
+  fm() { sed -n '2,/^---$/p' "$1"; }
+
+  live_goals() { for f in goals/GOAL-*.md; do [ -f "$f" ] || continue; m=$(fm
+  "$f"); echo "$m" | grep -qx 'branch: true' || continue; st=$(echo "$m" | sed
+  -n 's/^status: //p' | head -1); case "$st" in retired|superseded) continue ;;
+  esac; echo "$m" | grep -q '^activatedAt: ' || continue; basename "$f" | cut
+  -d- -f1-2; done; }
+
+  act_epoch() { a=$(fm goals/"$1"-*.md | sed -n 's/^activatedAt: //p' | head -1
+  | tr -d '"'); date -d "$a" +%s 2>/dev/null; }
 
   goal_acs() { grep -lx "goal: $1" goals/AC-*.md 2>/dev/null | xargs -r -n1
   basename | cut -d- -f1-2; }
@@ -22,25 +29,29 @@ criterion: >-
   ac_tasks() { grep -lE "^goal_ac: [\"']?$1[\"']?\$" tasks/*.md 2>/dev/null |
   xargs -r -n1 basename | sed 's/\.md$//'; }
 
-  bm_start() { git log --format=%ct -S'branch: true' -- goals/"$1"-*.md | tail
-  -1; }
-
   goal_refs() { r=develop; git rev-parse -q --verify "refs/heads/goal/$1"
   >/dev/null && r="$r goal/$1"; echo "$r"; }
 
   flip_of() { git log $2 --fixed-strings --grep="翻 $1 done（driver 机械 fan-in）"
   --format='%H %ct' | head -1; }
 
-  on_fp() { git log develop --first-parent --format=%s | grep -qxF "tasks: 翻 $1
-  done（driver 机械 fan-in）"; }
+  goal_merges() { git log develop --merges --format='%H %ct %s' | grep -E
+  "goal/$1([^0-9]|\$)"; }
 
-  goal_merges() { git log develop --first-parent --merges --format='%H %ct %s' |
-  grep -E "goal/$1([^0-9]|\$)"; }
+  classify() { F=$1; Mg=$2; if [ -n "$Mg" ]; then if git merge-base
+  --is-ancestor "$F" "$Mg"; then if git merge-base --is-ancestor "$F" "$Mg^1";
+  then echo direct; else echo via; fi; else echo post; fi; else if git
+  merge-base --is-ancestor "$F" develop; then echo direct; else echo via; fi;
+  fi; }
 
-  landings() { s=$(bm_start "$1"); [ -n "$s" ] || return 0; refs=$(goal_refs
-  "$1"); for ac in $(goal_acs "$1"); do for t in $(ac_tasks "$ac"); do
-  l=$(flip_of "$t" "$refs"); [ -n "$l" ] || continue; [ "${l#* }" -ge "$s" ] ||
-  continue; echo "$t $l"; done; done; }
+  tasks_classified() { G=$1; a=$(act_epoch "$G"); [ -n "$a" ] || return 0;
+  refs=$(goal_refs "$G"); Mg=$(goal_merges "$G" | tail -1 | cut -d' ' -f1); for
+  ac in $(goal_acs "$G"); do for t in $(ac_tasks "$ac"); do l=$(flip_of "$t"
+  "$refs"); [ -n "$l" ] || continue; F=${l% *}; ct=${l#* }; [ "$ct" -ge "$a" ]
+  || continue; echo "$t $F $ct $(classify "$F" "$Mg")"; done; done; }
+
+  via_landings() { tasks_classified "$1" | awk '$4=="via"{print $1" "$2" "$3}';
+  }
 
   E=.quay/gate-events.jsonl
 
@@ -50,12 +61,12 @@ criterion: >-
   not record evaluationRoot yet — preview evaluation is unreadable" >&2; exit 3;
   }
 
-  bm=$(bm_goals); counted=0
+  counted=0
 
-  for G in $bm; do
+  for G in $(live_goals); do
     m=$(goal_merges "$G" | tail -1); [ -n "$m" ] || continue
     mct=$(echo "$m" | cut -d' ' -f2)
-    lp=""; for ac in $(goal_acs "$G"); do f=$(ls goals/"$ac"-*.md); sed -n '2,/^---$/p' "$f" | grep -qx 'phase: post-merge' && continue; grep -q 'quay.ts serve' "$f" && lp="$lp $ac"; done
+    lp=""; for ac in $(goal_acs "$G"); do f=$(ls goals/"$ac"-*.md); fm "$f" | grep -qx 'phase: post-merge' && continue; grep -q 'quay.ts serve' "$f" && lp="$lp $ac"; done
     [ -n "$lp" ] || continue
     n=$(node -e '(() => { const fs = require("fs"); const acs = new Set(process.argv[2].split(" ").filter(Boolean)); const lim = Number(process.argv[3]) * 1000; const main = process.argv[4]; let n = 0;
       for (const l of fs.readFileSync(process.argv[1], "utf8").split("\n")) { if (!l.includes("evaluationRoot")) continue; let e; try { e = JSON.parse(l); } catch { continue; }
