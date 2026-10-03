@@ -4,7 +4,7 @@ title: GOAL-903 充分性判官判 insufficient 跨一整个 judge+look 周期�
   节（机械层 `hasExitConditions` 读不到 ⇒ 恒 insufficient，加新 AC 改不动它），且其中两条（`判据 AC-322 读
   exit 0`、`无 goal/* 残留分支`）超出本目标可控范围 ⇒ 提 option (b)：重排成节并把退出条件收窄为在域 AC-903
   能裁定的那一条
-status: needs-human
+status: todo
 labels:
   - gap
   - defect
@@ -145,6 +145,13 @@ GOAL-903 名下的 drill 任务（T-903-drill）在 `develop` 上落地——即
 5. **证据留痕**：上述读数写成任务体 evidence 或 `.quay/ac903-*` 证据文件，可被下一轮独立复算。
 
 ⛔ **本任务不翻任何状态**：不写 GOAL-903 的 `status`（保持 `active`）、不写 AC-903 的任何字段（保持 `active`）、不 retire / achieve 任何 GOAL 或 AC。
+
+## 人授权（2026-10-03）
+
+人 2026-10-03 在 manager 会话中明确授权执行本任务的 **option (b)**：可经 goal store CLI 写 `GOAL-903` 的 body（加非空 `## 退出条件` 节，并把退出条件收窄为在域 AC-903 能裁定的那一条）。
+
+⇒ AC4 末尾的 `（待外部）` 约束已解除——**本任务的执行者可执行该 goal 写入**（不再是"只能由人"）。
+⚠️ AC5 的判官重判仍须在 AC4 完成后另跑，⛔ 不以 verdict 变绿为成功判据。
 
 ## Touches
 
