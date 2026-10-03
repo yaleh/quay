@@ -1,7 +1,7 @@
 ---
 id: gap-goal-branch-data-model-and-lifecycle
 title: goal 的 branch 字段、goal 分支生命周期（懒创建 / 废弃时记 tip 后删除）与身份检查认可 goal/GOAL-NNN
-status: todo
+status: ready
 labels:
   - gap
 parent: null
