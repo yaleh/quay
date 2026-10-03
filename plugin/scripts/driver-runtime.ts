@@ -454,6 +454,26 @@ export function resolveQuaySrcModule(rel: string, codeRoot: string | null = reso
 // store 侧改名后 driver 会**静默停止守闸**（硬规则 5b 的形态），故走单一导入面。
 export { inAchievedReverifyScope, readsFrozenPopulation, stripEvidenceTimestamp, GOAL_ACCEPTANCE_ACTIVE_ENV } from "../../packages/quay/src/goal-store.ts";
 export { createMetaStore } from "../../packages/quay/src/meta-store.ts";
+// goal-branch (SPEC-goal-branch-2026-10-03 §5 B1, ruling ⑩): the goal-driver OWNS the criterion
+// worktree's lifecycle (create / refresh / delete, ruling ㉒) while the criterion's cwd is chosen by
+// the store. Both sides must name the SAME path, so the derivation lives in Core once
+// (`goalCriterionWorktreeDir`, derived from the config-resolved worktree namespace) and this module
+// is where the driver-side symbols are surfaced — ⛔ goal-driver never spells a Core source-tree
+// literal itself (AC-262; same reason the two re-exports above exist).
+export { goalCriterionWorktreeDir } from "../../packages/quay/src/goal-store.ts";
+export { goalBranchName, goalBranchRefExists, goalBranchTip } from "../../packages/quay/src/branch-model.ts";
+// goal-preview (SPEC-goal-branch-2026-10-03 §4.10, rulings ㉒㉓): the criterion worktree IS the
+// preview instance, so goal-driver (which owns the worktree's lifecycle) must take its `.quay/`
+// SNAPSHOT on create/refresh and STOP the preview serve before it deletes the worktree. Both live
+// in Core (`goal-preview.ts`) and are surfaced here for exactly the reason above — the driver never
+// spells a Core source-tree literal, and a third-party layout has no `packages/quay/src` to spell.
+export {
+  snapshotQuayDirInto,
+  stopPreviewServe,
+  previewWorktreeDir,
+  type QuaySnapshotReading,
+  type PreviewStopReading,
+} from "../../packages/quay/src/goal-preview.ts";
 
 // `pidAlive`：**本文件曾是它的第四份副本**，且是唯一把 EPERM（exists-but-not-ours）读成 DEAD 的一份
 // ⇒ `rmCarrierUnlessForeignLive`（存在的理由正是「别删掉一个外来的活进程在盘上唯一的记录」）与

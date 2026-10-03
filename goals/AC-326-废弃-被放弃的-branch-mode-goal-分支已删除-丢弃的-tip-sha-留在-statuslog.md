@@ -1,7 +1,7 @@
 ---
 id: AC-326
 title: 废弃：被放弃的 branch-mode goal 分支已删除，丢弃的 tip SHA 留在 statusLog
-status: active
+status: achieved
 kind: criterion
 goal: GOAL-028
 criterion: >-
@@ -72,6 +72,11 @@ statusLog:
     to: active
     actor: goal-driver
     reason: "triage: activate"
+  - at: 2026-10-03T10:41:24.504Z
+    from: active
+    to: achieved
+    actor: goal-driver
+    reason: "I2: criterion pass"
 fidelity:
   verdict: faithful
   reason: "fidelity judge: faithful"

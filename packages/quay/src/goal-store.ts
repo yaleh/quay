@@ -95,6 +95,7 @@ import { mergeEnv } from "./kernel/env-merge.ts";
 // each primitive: a goal's status flip is the only event that creates (§4.2: lazy, on `active`) or
 // discards (§4.2: `retired`/`superseded`) `goal/<id>`.
 import { ensureGoalBranch, discardGoalBranch, goalBranchName, goalBranchRefExists, goalBranchTip } from "./branch-model.ts";
+import { resolveWorktreeNamespace } from "./worktree-namespace.ts";
 
 // ADR-036 (枚举事实的单一真源): the goal-status vocabulary is DEFINED ONCE, in the ABI declaration
 // (`abi.ts:GOAL_STATUSES`), and this store derives from it — ⛔ not a second hand-copied literal.
@@ -110,6 +111,15 @@ export const VALID_GOAL_STATUSES: string[] = [...GOAL_STATUSES];
 // Mirrors the task side's MIN_SECTION_CHARS = 40 (ready-pool-check.ts). Exported so the falsifiability
 // test asserts the SAME threshold the store enforces (never a second, divergent literal).
 export const MIN_GOAL_BODY_CHARS = 40;
+
+// SPEC-goal-branch-2026-10-03 §4.7 (裁定⑭⑮) — an AC's evaluation PHASE, declared by the person/agent
+// who files it (⛔ never inferred from the criterion's text — hard rule 2). `pre-merge` is the default
+// because the misclassification directions are asymmetric: a post-merge AC left unmarked is
+// not-evaluable on the criterion worktree ⇒ the merge precondition can never be met ⇒ STUCK AND
+// VISIBLE; a pre-merge AC marked post-merge silently skips the isolation check. The default picks the
+// side that fails loudly. Only meaningful under a `branch: true` goal (a plain goal ignores it).
+export const VALID_CRITERION_PHASES: string[] = ["pre-merge", "post-merge"];
+export type CriterionPhase = "pre-merge" | "post-merge";
 
 const GOAL_ID_RE = /^GOAL-\d{3,}$/;
 const AC_ID_RE = /^AC-\d{3,}$/;
@@ -158,6 +168,85 @@ export function evaluationContext(root: string): { evaluationRoot: string; treeS
     // rather than dropping the field (硬规则 3/3b — "could not read" must have its own value).
   }
   return { evaluationRoot, treeSha: gitTreeSha(evaluationRoot) };
+}
+
+// ── WHICH TREE a BRANCH-MODE goal's criteria run on (SPEC-goal-branch-2026-10-03 §5 B1, ruling ⑩) ─
+//
+// THE DEFECT (B1): a criterion's cwd was unconditionally the MAIN checkout's git root. The main
+// checkout follows `develop`, while a branch-mode goal's code lives only on `goal/<id>` until it is
+// merged. A pre-merge AC whose criterion reads a goal-branch file therefore could never pass ⇒ the
+// goal could never reach `achieved` ⇒ §4.7's merge never triggers ⇒ **deadlock, not delay**. The I5
+// sweep (checkAchievedFailing) had the same cwd, so it re-ran ALREADY-ACHIEVED criteria on the main
+// checkout, reported them all as achieved-but-failing, and filed a batch of phantom gaps.
+//
+// THE FIX: one DETACHED criterion worktree per branch-mode goal (`goal-driver` owns its lifecycle —
+// create / refresh / delete, ruling ㉒), and the criterion cwd is chosen per AC from the AC's GOAL:
+// branch-mode ∧ `goal/<id>` still exists ⇒ the worktree; anything else ⇒ the main root (which is
+// also what a MERGED goal falls back to, §4.2: branch gone ⇒ back to the main checkout).
+// ⛔ The worktree is DETACHED, never a checkout of `goal/<id>` itself — a branch checked out in a
+// second worktree cannot be pushed to (`git push . <sha>:refs/heads/goal/<id>` is refused for the
+// checked-out branch), which would break the goal branch's own fast-forward.
+// ⛔ The path is DERIVED from the config-resolved worktree namespace (`loop.worktree_root`), never
+// from a hardcoded `quay-worktrees` segment (worktree-namespace.ts is the ONE resolution).
+
+/** Directory-name prefix of a goal's criterion worktree inside the worktree namespace:
+ *  `<namespace>/goal-<GOAL-NNN>`. Sibling of the task worktrees, in the SAME resolved namespace. */
+export const GOAL_CRITERION_WORKTREE_PREFIX = "goal-";
+
+/** The criterion worktree path for `goalId` — derived, ⛔ never stored (hard rule 4b: the branch name
+ *  and its worktree are both functions of the goal id + the workspace's worktree namespace). */
+export function goalCriterionWorktreeDir(root: string, goalId: string): string {
+  return path.join(resolveWorktreeNamespace(root).dir, `${GOAL_CRITERION_WORKTREE_PREFIX}${goalId}`);
+}
+
+/** Where an AC's criterion ran: `goal-worktree` (branch-mode goal, branch still present) or `main`
+ *  (everything else — incl. a branch-mode goal whose branch is already merged/discarded). */
+export type CriterionRootSource = "main" | "goal-worktree";
+
+export interface CriterionRoot {
+  cwd: string;
+  source: CriterionRootSource;
+}
+
+/** Resolve ONE goal's criterion root. `mainRoot` is the main checkout's git root (⛔ the caller
+ *  already resolved it robustly; this never re-derives it with `path.dirname`). */
+export function resolveCriterionRoot(
+  mainRoot: string,
+  goal: { id?: unknown; branch?: unknown } | null | undefined,
+): CriterionRoot {
+  const id = typeof goal?.id === "string" ? goal.id : "";
+  if (goal?.branch !== true || !isGoalId(id)) return { cwd: mainRoot, source: "main" };
+  // Branch gone (merged per §4.7, or discarded per §4.2) ⇒ the goal's code is on the main checkout
+  // again. ⛔ Derived from git, never from a stored flag: after an external `git branch -D` the
+  // stored bit would still say `true` while the reading must already be the main root.
+  if (!goalBranchRefExists(mainRoot, id)) return { cwd: mainRoot, source: "main" };
+  return { cwd: goalCriterionWorktreeDir(mainRoot, id), source: "goal-worktree" };
+}
+
+/** Per-GOAL resolution map for a whole listing — one `git` probe per GOAL, not one per AC (the sweep
+ *  and I5 walk every achieved AC, and a per-AC probe would spawn a process per record). */
+export function buildCriterionRoots(
+  mainRoot: string,
+  goals: Array<Record<string, unknown>>,
+): Map<string, CriterionRoot> {
+  const byGoal = new Map<string, CriterionRoot>();
+  for (const g of goals) {
+    const id = String(g.id ?? "");
+    if (!isGoalId(id)) continue;
+    byGoal.set(id, resolveCriterionRoot(mainRoot, g as { id?: unknown; branch?: unknown }));
+  }
+  return byGoal;
+}
+
+/** The criterion cwd for one AC row, given its goal's resolved root (absent goal id / unknown goal
+ *  ⇒ the main root — the same tree today's behaviour used). */
+export function criterionCwdFor(
+  mainRoot: string,
+  byGoal: Map<string, CriterionRoot>,
+  ac: { goal?: unknown },
+): string {
+  const gid = typeof ac.goal === "string" ? ac.goal : "";
+  return byGoal.get(gid)?.cwd ?? mainRoot;
 }
 
 // ── AC-242 successor: the FROZEN population and its bounded rotation re-verification ──────────────
@@ -403,6 +492,9 @@ const OWNED_KEYS = new Set([
   // ⛔ never a stored field: storing it would make "which branch does this goal land on" a
   // human-writable arbitrary string, which is exactly what §4.8's identity rule forbids.
   "branch",
+  // SPEC-goal-branch §4.7 (裁定⑭⑮) — an AC's evaluation phase. Declared, never inferred from the
+  // criterion's text (hard rule 2); projected as `pre-merge` when absent.
+  "phase",
 ]);
 
 // ── evidence is ledger-DERIVED (gap-goal-evidence-cache-should-not-enter-git) ───────────────────
@@ -718,6 +810,9 @@ interface GoalFrontmatter {
    *  Absent/false = today's behavior. Only the "open or not" bit is stored; the branch NAME is
    *  derived (⛔ never persisted, ⛔ never caller-supplied). */
   branch?: boolean;
+  /** SPEC-goal-branch §4.7 (裁定⑭⑮) — CRITERION records only: the phase at which this AC is
+   *  evaluated. Absent ⇒ projected as `pre-merge`. Stored verbatim when explicitly declared. */
+  phase?: string;
 }
 
 interface GoalFilter {
@@ -751,6 +846,11 @@ interface GoalViewModel {
    *  ⛔ `false`, never `undefined`: "the field is absent" and "the goal declined a branch" are the
    *  same answer to the ABI consumer ("this goal lands on the landing baseline"). */
   branch: boolean;
+  /** SPEC-goal-branch §4.7 (裁定⑭⑮) — the AC's evaluation phase (frontmatter `phase` projection).
+   *  ⛔ Always one of `pre-merge` / `post-merge`, never `undefined`: "the field is absent" and "the
+   *  author declared pre-merge" are the same answer to the driver. The store refuses to persist any
+   *  other value (hard rule 3b — an unreadable value must not project as `pre-merge`). */
+  phase: CriterionPhase;
   /** 保真性闸（GOAL-013）——激活期保真性判定的结果与理由（frontmatter `fidelity` 投影）。 */
   fidelity: unknown;
   body: string;
@@ -1636,6 +1736,10 @@ export function createGoalStore(
       // Undeclared reads as `false` (SPEC §4.1: 「缺省 = false = 现状」) — a three-state answer here
       // would put the two consumers that must treat them identically (branch or not) at odds.
       branch: frontmatter.branch === true,
+      // SPEC-goal-branch §4.7: undeclared reads as `pre-merge` (the failure-visible default). The
+      // write path refuses any other value, so a legacy/hand-written file carrying an unknown token
+      // also projects as `pre-merge` — never as an `undefined` a driver would have to guess at.
+      phase: frontmatter.phase === "post-merge" ? "post-merge" : "pre-merge",
       fidelity: frontmatter.fidelity,
       evidence,
       // Own-record time (a criterion): lastProgressAt = its LAST gate=goal event, firstEvidenceAt =
@@ -1857,9 +1961,10 @@ export function createGoalStore(
     // and all passed" (hard rule 3b — ⛔ not an empty array masquerading as "no achieved-but-failing
     // AC"). The enumeration is done before the guard check so the guard path's `scopeSize` is truthful
     // too (it refuses to RUN, but it still knows the scope).
-    const activeGoalIds = new Set(activeGoals().map((g) => String(g.id)));
+    const all = list();
+    const activeGoalIds = new Set(all.filter((g) => isGoalId(String(g.id)) && g.status === "active").map((g) => String(g.id)));
     const inScope: GoalViewModel[] = [];
-    for (const ac of list()) {
+    for (const ac of all) {
       if (!isCriterionId(String(ac.id))) continue;
       if (ac.status !== "achieved") continue;
       // AC-216 — in scope ⟺ (under an ACTIVE goal) OR (explicit `long-term: true`): a long-term
@@ -1879,8 +1984,11 @@ export function createGoalStore(
     }
     const achievedButFailing: string[] = [];
     // Criterion cwd = the git root (robust rev-parse, ⛔ not path.dirname — hard rule 4 corollary 2),
-    // falling back to goalDir's parent only when not inside a git work tree.
+    // falling back to goalDir's parent only when not inside a git work tree. A BRANCH-MODE goal's ACs
+    // run on that goal's criterion worktree instead (§5 B1) — without it every re-verification of a
+    // goal-branch-backed AC reports achieved-but-failing and files phantom gaps.
     const root = resolveGitRoot(goalDir) ?? path.dirname(goalDir);
+    const criterionRoots = buildCriterionRoots(root, all as unknown as Array<Record<string, unknown>>);
     const prev = process.env[GOAL_ACCEPTANCE_ACTIVE_ENV];
     process.env[GOAL_ACCEPTANCE_ACTIVE_ENV] = "1";
     try {
@@ -1888,7 +1996,8 @@ export function createGoalStore(
         const criterion = typeof ac.criterion === "string" ? ac.criterion : "";
         // Resolved deadline (env > gates timeoutMs > default) — ⛔ NOT a private literal, which is
         // what made this entry point immune to every configuration knob (see the constant's tombstone).
-        const res = runAcceptance({ command: criterion, cwd: root, timeoutMs: resolveAcceptanceTimeoutMs() });
+        const cwd = criterionCwdFor(root, criterionRoots, ac);
+        const res = runAcceptance({ command: criterion, cwd, timeoutMs: resolveAcceptanceTimeoutMs() });
         if (!res.ok) achievedButFailing.push(String(ac.id));
       }
     } finally {
@@ -2143,6 +2252,9 @@ export function createGoalStore(
     const { appendGateEvent } = await import("./gate/gate-event-store.ts");
     const logPath = path.join(path.dirname(goalDir), ".quay", "gate-events.jsonl");
     const root = resolveGitRoot(goalDir) ?? path.dirname(goalDir);
+    // §5 B1 — the rotation re-verifies a branch-mode goal's frozen AC on that goal's criterion
+    // worktree, not on the main checkout (which does not carry the goal branch's code at all).
+    const criterionRoots = buildCriterionRoots(root, list() as unknown as Array<Record<string, unknown>>);
     const startedAt = Date.now();
     const ran: Array<{ id: string; verdict: "pass" | "fail" | "not-evaluated"; reason: string; ms: number }> = [];
     const prev = process.env[GOAL_ACCEPTANCE_ACTIVE_ENV];
@@ -2156,9 +2268,13 @@ export function createGoalStore(
         }
         const criterion = String(byId.get(id)?.criterion ?? "");
         const t0 = Date.now();
+        // A branch-mode goal's frozen AC is re-verified on ITS criterion worktree (§5 B1) — the same
+        // per-AC cwd choice the gate and I5 entry points make. ⛔ Resolved per PICKED id (≤budget),
+        // never per frozen record.
+        const cwd = criterionCwdFor(root, criterionRoots, byId.get(id) ?? {});
         // The DEADLINE is `resolveAcceptanceTimeoutMs()` — the shared config-surface chain, ⛔ not a
         // private literal (gap-goal-criterion-timeout-hardcoded-60s-ignores-acceptance-timeout).
-        const res = runAcceptance({ command: criterion, cwd: root, timeoutMs: resolveAcceptanceTimeoutMs() });
+        const res = runAcceptance({ command: criterion, cwd, timeoutMs: resolveAcceptanceTimeoutMs() });
         // ⛔ Through the ONE mapping (gap-goal-gate-verdict-single-mapping-not-evaluated). Before it,
         // this site recognised only exit 3 and recorded a timeout / spawn failure / exit 126-127 as
         // `fail` — i.e. asserted "this criterion is FALSE" about a criterion that never got to say
@@ -2187,9 +2303,9 @@ export function createGoalStore(
             reason: v.reason,
             ...(v.cause ? { cause: v.cause } : {}),
             criterionHash: criterionFingerprint(criterion),
-            // WHICH tree this rotation re-verified on (SPEC §7 辛) — `root` here is the criterion cwd
+            // WHICH tree this rotation re-verified on (SPEC §7 辛) — `cwd` here is the criterion cwd
             // passed to `runAcceptance` above, so the two name the same tree by construction.
-            ...evaluationContext(root),
+            ...evaluationContext(cwd),
           },
         });
       }
@@ -2254,7 +2370,7 @@ export function createGoalStore(
 
   function write(id: string, {
     title, status, goal, criterion, expect, origin,
-    supersedes, supersededBy, body, disposeOld, longTerm, branch,
+    supersedes, supersededBy, body, disposeOld, longTerm, branch, phase,
     force = false,
     actor,
     reason,
@@ -2285,6 +2401,10 @@ export function createGoalStore(
      *  `goal/<id>` branch exists, because moving the merge target under an in-flight task is the
      *  damage class this lock exists to stop (§4.11). The branch NAME is derived, ⛔ never given here. */
     branch?: boolean;
+    /** SPEC-goal-branch §4.7 (裁定⑭⑮) — a CRITERION record's evaluation phase. `undefined` ⇒ patch
+     *  semantics (keep the stored value; absent projects as `pre-merge`). Any other string is
+     *  REFUSED — the phase is a declared fact, ⛔ not inferred from the criterion's text. */
+    phase?: string;
     /** P6b: a per-call fidelity judge overriding the store-level seam (the CLI's
      *  `--fidelity-judge-argv` path). `undefined` ⇒ fall back to the store-level `fidelityJudge`. */
     fidelityJudge?: FidelityInvokeJudge;
@@ -2316,6 +2436,20 @@ export function createGoalStore(
     if (isGoalRecord && criterion !== undefined) {
       throw new Error(
         `${id} is a GOAL record and cannot carry a \`criterion\` field — a goal is judged by the conjunction of its ACs`
+      );
+    }
+    // SPEC-goal-branch §4.7: `phase` lives on a CRITERION record. The store validates the VALUE
+    // (fail-closed — an unknown token is refused rather than projected as the default, hard rule 3b)
+    // and refuses the field on a GOAL record (same "refusing beats silently dropping" discipline as
+    // `criterion` above). ⛔ Not inferred from the criterion's text (hard rule 2).
+    if (phase !== undefined && !VALID_CRITERION_PHASES.includes(phase)) {
+      throw new Error(
+        `${id}: phase must be one of ${VALID_CRITERION_PHASES.join(" | ")} (got ${JSON.stringify(phase)}) — the phase is DECLARED by the author, never inferred from the criterion text`
+      );
+    }
+    if (isGoalRecord && phase !== undefined) {
+      throw new Error(
+        `${id} is a GOAL record and cannot carry a \`phase\` field — phase is an AC property (a goal is judged by the conjunction of its ACs, each with its own phase)`
       );
     }
     return withFileLock(goalDir, id, () => {
@@ -2395,6 +2529,9 @@ export function createGoalStore(
       // value. The lock above already refused any CHANGE once the ref exists; a repeated `true` on a
       // branch-mode goal is a no-op, and `false` on a never-branched goal clears an unset field.
       if (branch !== undefined) frontmatter.branch = branch;
+      // `phase` (SPEC-goal-branch §4.7): patch semantics like `long-term`/`branch` — omitted keeps the
+      // stored value (which projects as `pre-merge` when absent). Validated above, before the lock.
+      if (phase !== undefined) frontmatter.phase = phase;
       const statusChanged = prevStatus !== undefined && nextStatus !== prevStatus;
       // ⛔ "activation" here is ANY transition INTO active (SPEC §6 裁定 3: activation is manual; the
       // goal-driver never flips INTO active). Reopen paths — achieved→active, needs-human→active,
@@ -2791,7 +2928,7 @@ export function createGoalStore(
       const ordered: GoalFrontmatter = {};
       for (const k of [
         "id", "title", "status", "kind", "goal", "criterion", "expect", "origin", "activatedAt", "statusLog",
-        "labels", "posture", "supersedes", "superseded-by", "long-term", "fidelity", "timeoutMs", "branch",
+        "labels", "posture", "supersedes", "superseded-by", "long-term", "fidelity", "timeoutMs", "branch", "phase",
       ]) {
         if (frontmatter[k] !== undefined) ordered[k] = frontmatter[k];
       }
@@ -2905,6 +3042,8 @@ export function createGoalStore(
     supersedes?: string[];
     supersededBy?: string[];
     body?: string;
+    /** SPEC-goal-branch §4.7 (裁定⑭⑮) — an AC's declared evaluation phase (validated by `write`). */
+    phase?: string;
     force?: boolean;
     actor?: string;
     reason?: string;
@@ -2923,6 +3062,7 @@ export function createGoalStore(
         title: r.title, status: r.status, goal: r.goal, criterion: r.criterion,
         expect: r.expect, origin: r.origin, supersedes: r.supersedes,
         supersededBy: r.supersededBy, body: r.body, force: r.force,
+        phase: r.phase,
         actor: r.actor, reason: r.reason, commit: false, dryRun,
       });
       results.push(vm);
@@ -2956,6 +3096,8 @@ export function createGoalStore(
 //              [--expect-absent] [--expect-existing] [--fidelity-judge-argv '<json argv array>']
 //              [--branch true|false]  (GOAL opt-in isolation gate — locked once `goal/<id>` exists;
 //              the branch NAME is derived, ⛔ never a flag)
+//              [--phase pre-merge|post-merge]  (AC evaluation phase, SPEC-goal-branch §4.7; declared
+//              by the author, ⛔ never inferred from the criterion's text)
 //              (--expect-absent = create intent, refuse if it exists; --expect-existing =
 //              update intent, refuse if absent — the goal store's expectedStatus-CAS counterpart)
 //   batch --json '<array>' [--dry-run]
@@ -3250,6 +3392,18 @@ export async function runGoalStoreCli(argv: string[]): Promise<number> {
           i++;
           continue;
         }
+        if (key === "phase") {
+          // SPEC-goal-branch §4.7 — the AC evaluation phase, machine-writable. Strict enum, ⛔ no
+          // coercion/aliasing: an unknown token must not reach the file to be silently projected as
+          // the `pre-merge` default (the write path refuses it too — this names the flag earlier).
+          if (!VALID_CRITERION_PHASES.includes(String(v))) {
+            console.error(`goal-store: --phase must be exactly ${VALID_CRITERION_PHASES.join(" or ")}`);
+            return 2;
+          }
+          opts["phase"] = v;
+          i++;
+          continue;
+        }
         if (key === "title" || key === "status" || key === "goal" || key === "criterion" ||
             key === "expect" || key === "origin" || key === "body" || key === "superseded-by" ||
             key === "supersedes" ||
@@ -3307,6 +3461,9 @@ export async function runGoalStoreCli(argv: string[]): Promise<number> {
           // `--branch true|false` (SPEC-goal-branch §4.1). `false` is MEANINGFUL (explicitly decline)
           // — the `!== undefined` guard preserves the patch semantics in `write`, exactly like longTerm.
           branch: opts["branch"] as boolean | undefined,
+          // `--phase pre-merge|post-merge` (SPEC-goal-branch §4.7). `undefined` (omitted) preserves
+          // patch semantics; the value was validated against the enum above, before the call.
+          phase: opts["phase"] as string | undefined,
           force,
           actor: opts.actor as string | undefined,
           reason: opts.reason as string | undefined,
@@ -3358,6 +3515,9 @@ export async function runGoalStoreCli(argv: string[]): Promise<number> {
             // SPEC-goal-branch §4.1 — batch records carry the opt-in gate the same way `write` does
             // (patch semantics on a boolean, ⛔ not a truthy coercion).
             branch: typeof o.branch === "boolean" ? o.branch : undefined,
+            // SPEC-goal-branch §4.7 — batch records carry the AC phase the same way `write` does;
+            // `write` validates the enum, so a bad token is refused rather than stored.
+            phase: typeof o.phase === "string" ? o.phase : undefined,
             force: o.force === true,
             actor: o.actor as string | undefined,
             reason: o.reason as string | undefined,
@@ -3410,6 +3570,15 @@ export async function runGoalStoreCli(argv: string[]): Promise<number> {
       // is the only place a goal's own deadline can be declared, and the goal path reads no gates.yml).
       const t = resolveAcceptanceTimeout((rec as unknown as { timeoutMs?: unknown }).timeoutMs);
       const timeoutMs = t.timeoutMs;
+      // §5 B1 — an AC under a BRANCH-MODE goal is evaluated on that goal's criterion worktree (its
+      // code lives only on `goal/<id>` until the merge); every other AC keeps the main checkout root.
+      // ⛔ The gate EVENT still lands on the MAIN root's ledger below: `logPath` was derived from
+      // `root`, not from this cwd — only the criterion's working tree moves, never the record's.
+      const gateCwd = criterionCwdFor(
+        root,
+        buildCriterionRoots(root, store.list() as unknown as Array<Record<string, unknown>>),
+        rec,
+      );
       if (typeof criterion !== "string" || criterion.trim() === "") {
         // AC2 — empty criterion FAILS CLOSED (red), never a silent PASS.
         verdict = "fail";
@@ -3422,7 +3591,7 @@ export async function runGoalStoreCli(argv: string[]): Promise<number> {
         // (gap-goal-gate-verdict-single-mapping-not-evaluated; the hint below is the one that does).
         const result = runAcceptance({
           command: criterion,
-          cwd: root,
+          cwd: gateCwd,
           timeoutMs: t.timeoutMs,
           timeoutKnob: timeoutKnobHint(t),
         });
@@ -3444,8 +3613,9 @@ export async function runGoalStoreCli(argv: string[]): Promise<number> {
         timestamp: new Date().toISOString(),
         // `cause` only when there is one — see the sweep site's note on the payload shape.
         // `evaluationRoot`/`treeSha` name WHICH tree this verdict was obtained on (SPEC §7 辛):
-        // `root` is the criterion cwd passed to `runAcceptance` above, so the two are the same tree.
-        payload: { reason, ...(cause ? { cause } : {}), ...evaluationContext(root) },
+        // `gateCwd` is the criterion cwd passed to `runAcceptance` above, so the two are the same tree
+        // (the criterion worktree for a branch-mode goal, the main checkout otherwise).
+        payload: { reason, ...(cause ? { cause } : {}), ...evaluationContext(gateCwd) },
       };
       // P9 dry-run: run the criterion but do NOT append the gate event (persist nothing).
       if (!dryRun) appendGateEvent(logPath, event);

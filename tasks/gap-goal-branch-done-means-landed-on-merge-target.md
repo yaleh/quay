@@ -135,3 +135,10 @@ plugin/test/worker-fan-in.test.mjs
 （完整输出见 `.quay/gap-doneface-evidence/scoped-gate-notthin.txt`。）同一轮的 scoped 静态检查（含 `import-graph-check`：valueSccs/typeSccs/reverseEdges 均 0，本任务新增的 `worker-fan-in → driver-filters` 值边未成环；`task-contract-check`、`anti-drift-touches-check` 等）全部通过。
 
 **AC 勾选如何到达 fan-in（本任务实测的一处已知坑）**：本任务的 `task_write` 是 `changeKind: "self-only"`（纯勾选 + Evidence，`maskSelfOnlyBody` 归一化复选框后无实质 body 变更）⇒ 按设计**不** ff 到 develop（`.quay/store-commit-propagation.jsonl` 记 `{"changeKind":"self-only","branchClass":"other","propagated":false}`），落在主检出 `author`（commit `df6be82cb`）。fan-in 的 ac-precheck 读「worktree 副本 ∪ `develop:tasks/<id>.md`」的并集，而 step 8 的 ac-gate **只**读 worktree 副本 ⇒ 勾选必须进 worktree。按既有认可做法（transport，非手搓勾选字符）把 ABI 写出的那份文件搬到 task 分支：`git -C <worktree> checkout author -- tasks/<id>.md`（与 author 逐字节一致，diff 仅 4 行 `- [ ]`→`- [x]`）后提交。复核用真实判据：`fan-in-ac-completion-gate.ts --task <id> --worktree <worktree> --json` ⇒ `{"ok":true,"status":"pass","total":4,"checked":4}` exit 0。
+## Needs-Human
+
+**执行 2026-10-03T10:20:12.902Z — 停派终止（失败无法归因，⛔ 不再重派）**
+
+- 阻碍原因：exited-not-landed 失败无法归因（基建/契约疑似，非实现缺陷）——停止重派，⛔ 不再拿新会话撞同一堵墙：the exited-not-landed failure could not be attributed in 2 consecutive rounds (bounded to at most one retry; no mechanical fan-in result on the outcome ⇒ no suite ran) — infra/contract suspected, not an implementable defect (parser attributed no failing file (failure-line count unavailable on this judgment)); stopping instead of spending another worker session
+- 失败步/判词：adopted orphan worker exited (exit code unobservable) — task status=ready (not done) and leftover worktree task/gap-goal-branch-done-means-landed-on-merge-target still present
+- run_id：wk-prod-anchor
