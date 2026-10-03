@@ -2,7 +2,7 @@
 id: gap-goal-branch-preview-instance
 title: goal 预览实例：quay goal preview start|stop|status 在判据 worktree 上起停
   serve，.quay/ 用主检出只读快照
-status: todo
+status: ready
 labels:
   - gap
 parent: null
