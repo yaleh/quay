@@ -1,7 +1,7 @@
 ---
 id: AC-323
 title: 不重派：落到 goal 分支的任务此后不再被派发
-status: achieved
+status: active
 kind: criterion
 goal: GOAL-028
 criterion: >-
@@ -12,9 +12,16 @@ criterion: >-
 
   cd "$root"
 
-  bm_goals() { for f in goals/GOAL-*.md; do [ -f "$f" ] || continue; sed -n
-  '2,/^---$/p' "$f" | grep -qx 'branch: true' && basename "$f" | cut -d- -f1-2;
-  done; }
+  fm() { sed -n '2,/^---$/p' "$1"; }
+
+  live_goals() { for f in goals/GOAL-*.md; do [ -f "$f" ] || continue; m=$(fm
+  "$f"); echo "$m" | grep -qx 'branch: true' || continue; st=$(echo "$m" | sed
+  -n 's/^status: //p' | head -1); case "$st" in retired|superseded) continue ;;
+  esac; echo "$m" | grep -q '^activatedAt: ' || continue; basename "$f" | cut
+  -d- -f1-2; done; }
+
+  act_epoch() { a=$(fm goals/"$1"-*.md | sed -n 's/^activatedAt: //p' | head -1
+  | tr -d '"'); date -d "$a" +%s 2>/dev/null; }
 
   goal_acs() { grep -lx "goal: $1" goals/AC-*.md 2>/dev/null | xargs -r -n1
   basename | cut -d- -f1-2; }
@@ -22,42 +29,44 @@ criterion: >-
   ac_tasks() { grep -lE "^goal_ac: [\"']?$1[\"']?\$" tasks/*.md 2>/dev/null |
   xargs -r -n1 basename | sed 's/\.md$//'; }
 
-  bm_start() { git log --format=%ct -S'branch: true' -- goals/"$1"-*.md | tail
-  -1; }
-
   goal_refs() { r=develop; git rev-parse -q --verify "refs/heads/goal/$1"
   >/dev/null && r="$r goal/$1"; echo "$r"; }
 
   flip_of() { git log $2 --fixed-strings --grep="翻 $1 done（driver 机械 fan-in）"
   --format='%H %ct' | head -1; }
 
-  on_fp() { git log develop --first-parent --format=%s | grep -qxF "tasks: 翻 $1
-  done（driver 机械 fan-in）"; }
+  goal_merges() { git log develop --merges --format='%H %ct %s' | grep -E
+  "goal/$1([^0-9]|\$)"; }
 
-  goal_merges() { git log develop --first-parent --merges --format='%H %ct %s' |
-  grep -E "goal/$1([^0-9]|\$)"; }
+  classify() { F=$1; Mg=$2; if [ -n "$Mg" ]; then if git merge-base
+  --is-ancestor "$F" "$Mg"; then if git merge-base --is-ancestor "$F" "$Mg^1";
+  then echo direct; else echo via; fi; else echo post; fi; else if git
+  merge-base --is-ancestor "$F" develop; then echo direct; else echo via; fi;
+  fi; }
 
-  landings() { s=$(bm_start "$1"); [ -n "$s" ] || return 0; refs=$(goal_refs
-  "$1"); for ac in $(goal_acs "$1"); do for t in $(ac_tasks "$ac"); do
-  l=$(flip_of "$t" "$refs"); [ -n "$l" ] || continue; [ "${l#* }" -ge "$s" ] ||
-  continue; echo "$t $l"; done; done; }
+  tasks_classified() { G=$1; a=$(act_epoch "$G"); [ -n "$a" ] || return 0;
+  refs=$(goal_refs "$G"); Mg=$(goal_merges "$G" | tail -1 | cut -d' ' -f1); for
+  ac in $(goal_acs "$G"); do for t in $(ac_tasks "$ac"); do l=$(flip_of "$t"
+  "$refs"); [ -n "$l" ] || continue; F=${l% *}; ct=${l#* }; [ "$ct" -ge "$a" ]
+  || continue; echo "$t $F $ct $(classify "$F" "$Mg")"; done; done; }
+
+  via_landings() { tasks_classified "$1" | awk '$4=="via"{print $1" "$2" "$3}';
+  }
 
   W=.quay/worker-round.jsonl
 
   [ -s "$W" ] || { echo "NOT-EVALUATED: $W absent or empty — dispatch carrier
   unreadable" >&2; exit 3; }
 
-  bm=$(bm_goals); [ -n "$bm" ] || { echo "NOT-EVALUATED: no goal record carries
-  branch: true yet" >&2; exit 3; }
-
   pairs=""
 
-  for G in $bm; do pairs="$pairs$(landings "$G" | awk '{print $1" "$3}')
+  for G in $(live_goals); do pairs="$pairs$(via_landings "$G" | awk '{print $1"
+  "$3}')
 
   "; done
 
   [ -n "$(printf '%s' "$pairs" | tr -d '[:space:]')" ] || { echo "NOT-EVALUATED:
-  branch-mode goals have no landed task yet" >&2; exit 3; }
+  no task has landed via a goal branch yet" >&2; exit 3; }
 
   printf '%s' "$pairs" | node -e '(() => {
     const fs = require("fs");
@@ -76,11 +85,12 @@ criterion: >-
       if (after.length) { console.error("CAUSE=redispatched-after-goal-branch-landing — " + t + " dispatched " + after.length + " time(s) after it landed on its goal branch"); process.exit(1); }
       ok++;
     }
-    if (!ok) { console.error("NOT-EVALUATED: no landed task has its own dispatch start in the carrier (zero would be vacuous)"); process.exit(3); }
+    if (!ok) { console.error("NOT-EVALUATED: no goal-branch landing has its own dispatch start in the carrier (zero would be vacuous)"); process.exit(3); }
     console.log("PASS: " + ok + " goal-branch landing(s) never re-dispatched");
   })()' "$W"
-expect: exit 0 = 每个落到 goal 分支、且在 worker-round 载体里能找到自身派发起点的任务，其落地时刻之后的派发起点数为
-  0；exit 1 = 有任务在落地后再次被派发；exit 3 = 尚无落地，或落地任务在载体中没有自身的派发记录（此时零是空转）。
+expect: exit 0 = 每个经 goal 分支落地、且在 worker-round 载体里能找到自身派发起点的任务，其落地时刻之后的派发起点数为
+  0；落地只计经 goal 分支的（与 AC-321 同一分类）；exit 1 = 有任务在落地后再次被派发；exit 3 = 尚无经 goal
+  分支的落地，或落地任务在载体中没有自身的派发记录（此时零是空转）。
 origin: 人 2026-10-01「为 goal 提供一个单独的 branch」→ 三轮讨论成文
   orchestration/SPEC-goal-branch-2026-10-03.md（d4b7ca1c2，裁定①–㉓）；人
   2026-10-03「按上面的建议，新建一个 GOAL，同时手工预先立好 §10 的任务」。
@@ -97,8 +107,15 @@ statusLog:
     to: achieved
     actor: goal-driver
     reason: "I2: criterion pass"
+  - at: 2026-10-03T15:37:35.440Z
+    from: achieved
+    to: active
+    actor: cli
+    reason: 人 2026-10-03 裁定「改判据并重开 321–323」：旧判据依赖 develop first-parent 链，真实 fan-in
+      会把多数提交挤出该链（实测 32 条里 22 条），导致 AC-321 对直落 develop 的演练任务误判通过、AC-322/323 读到的并非
+      goal 分支落地。改为基于祖先关系，只计经 goal 分支的落地，并排除 retired/superseded 的 goal
 fidelity:
   verdict: faithful
   reason: "fidelity judge: faithful"
-  at: 2026-10-03T08:35:52.782Z
+  at: 2026-10-03T15:37:35.440Z
 ---
