@@ -2,7 +2,7 @@
 id: gap-goal-active-ac-gap-classification-ignores-round-verdict
 title: ① active-AC 缺口分类须读本轮判据读数：declared NOT-EVALUATED 的 AC 不得被当 workable 每轮空转
   spawn（AC-327 实测）
-status: ready
+status: done
 labels:
   - gap
 parent: null
