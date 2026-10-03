@@ -1,7 +1,7 @@
 ---
 id: AC-326
 title: 废弃：被放弃的 branch-mode goal 分支已删除，丢弃的 tip SHA 留在 statusLog
-status: draft
+status: active
 kind: criterion
 goal: GOAL-028
 criterion: >-
@@ -65,4 +65,15 @@ expect: "exit 0 = 每个 status 为 retired/superseded 且 branch: true 的 goal
 origin: 人 2026-10-01「为 goal 提供一个单独的 branch」→ 三轮讨论成文
   orchestration/SPEC-goal-branch-2026-10-03.md（d4b7ca1c2，裁定①–㉓）；人
   2026-10-03「按上面的建议，新建一个 GOAL，同时手工预先立好 §10 的任务」。
+activatedAt: 2026-10-03T08:28:39.483Z
+statusLog:
+  - at: 2026-10-03T08:28:39.483Z
+    from: draft
+    to: active
+    actor: goal-driver
+    reason: "triage: activate"
+fidelity:
+  verdict: faithful
+  reason: "fidelity judge: faithful"
+  at: 2026-10-03T08:28:39.483Z
 ---
