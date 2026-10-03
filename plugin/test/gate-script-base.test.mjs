@@ -30,6 +30,7 @@ import {
   createSelftest,
   readJsonLines,
   readJsonlLines,
+  git,
 } from "../scripts/gate-script-base.ts";
 
 /** plugin/scripts — derived from THIS file's location so the source-scan control below cannot drift. */
@@ -708,3 +709,75 @@ function fileOf(text) {
   fs.writeFileSync(file, text);
   return file;
 }
+
+// ── git: the fail-closed runner is a single source (finding `git-helper-collector-gate`) ───────────
+//
+// The finding (routine `semantic-dedup-scan`, runId `semantic-dedup-scan-1790995446200`,
+// verdict real-duplication, suggestedAction extract) named a byte-identical private
+// `git(args, cwd): GitResult` in build-evidence-collector.ts / build-evidence-gate.ts. Both copies
+// now import it from gate-script-base.ts (this file lives next to the `readJsonLines` /
+// `readJsonlLines` single-source ratchets above — same shape).
+//
+// ⚠️ The pin keys on the CONTRACT, not the bare name `git`: other plugin/scripts files legitimately
+// define a `git()` with a DIFFERENT signature/contract (release-branch-janitor.ts /
+// release-reading-sandbox.ts take `(cwd, args)`, spawnSync, and return a status triple) — a
+// name-based `function git(` scan would sweep them in and read a false two-definition red.
+const FAIL_CLOSED_GIT_RE = /function git\(args: string\[\], cwd: string\): GitResult \{/;
+const GIT_FORMER_CARRIERS = ["build-evidence-collector.ts", "build-evidence-gate.ts"];
+
+test("git: the fail-closed (args, cwd) runner is defined exactly ONCE under plugin/scripts", () => {
+  const defs = scriptTsFiles().filter((f) => FAIL_CLOSED_GIT_RE.test(sourceOf(f)));
+  assert.deepEqual(
+    defs,
+    ["gate-script-base.ts"],
+    `the fail-closed git runner must have a single definition; found: ${defs.length ? defs.join(", ") : "none"}`,
+  );
+});
+
+test("git: neither former carrier re-defines it, and each IMPORTS the shared one", () => {
+  for (const f of GIT_FORMER_CARRIERS) {
+    assert.doesNotMatch(sourceOf(f), FAIL_CLOSED_GIT_RE, `${f} must not redefine the fail-closed git runner`);
+    // Deleting the private copy without importing the shared one would still pass the line above, so
+    // this half is not redundant — it distinguishes "extracted" from "deleted" (same shape as the
+    // readJsonLines negative control above).
+    assert.match(
+      sourceOf(f),
+      /import \{[^}]*\bgit\b[^}]*\} from "\.\/gate-script-base\.ts"/,
+      `${f} does not import git from the base`,
+    );
+  }
+});
+
+test("git: success / empty-diff / failure are three DISTINGUISHABLE outcomes (硬规则 3b)", () => {
+  // success — a real repo resolves a 40-hex sha.
+  const ok = git(["rev-parse", "HEAD"], SCRIPTS_DIR);
+  assert.equal(ok.ok, true, `rev-parse must succeed: ${ok.error ?? ""}`);
+  assert.match(ok.stdout, /^[0-9a-f]{40}$/);
+  assert.equal(ok.error, undefined);
+  // a legitimately EMPTY diff is NOT a failure — ok:true with empty stdout.
+  const empty = git(["diff", "--numstat", "HEAD..HEAD"], SCRIPTS_DIR);
+  assert.equal(empty.ok, true);
+  assert.equal(empty.stdout, "");
+  // a git command that CANNOT RUN is ok:false + error — distinguishable from the empty arm above.
+  // If these two ever collapse to the same shape, the collector's fail-closed derivation is a lie.
+  const bad = git(["rev-parse", "HEAD"], path.join(os.tmpdir(), "definitely-not-a-repo-xyz"));
+  assert.equal(bad.ok, false);
+  assert.equal(bad.stdout, "");
+  assert.ok(bad.error, "a failed invocation must carry an error message");
+});
+
+test("git: deleting the shared export makes a consumer import fail (the mechanism is real)", () => {
+  withTempDir("git-negctl-", (dir) => {
+    fs.writeFileSync(path.join(dir, "gate-script-base.ts"), "export const OTHER = 1;\n");
+    fs.writeFileSync(
+      path.join(dir, "consumer.ts"),
+      'import { git } from "./gate-script-base.ts";\nconsole.log(git);\n',
+    );
+    const missing = spawnSync("node", ["--experimental-strip-types", "consumer.ts"], { cwd: dir, encoding: "utf8" });
+    assert.notEqual(missing.status, 0, "a consumer importing an absent export must fail to link");
+
+    fs.writeFileSync(path.join(dir, "gate-script-base.ts"), "export function git() { return {}; }\n");
+    const present = spawnSync("node", ["--experimental-strip-types", "consumer.ts"], { cwd: dir, encoding: "utf8" });
+    assert.equal(present.status, 0, "the same consumer links once the export is present");
+  });
+});
