@@ -230,3 +230,15 @@ git branch --list 'goal/*' => (空, count=0)
 - 写盘（两处，均经 goal store CLI，⛔ 未手改）：worktree `ffd5845d2 goals: GOAL-903 field:body`；主检出 `862026686 goals: GOAL-903 field:body`（按仓库既有「goal 写入需两处根」实践）。
 - **状态未动**：GOAL-903 仍 `status: retired`（由兄弟任务 `bdb1dd0ce` 设置，本任务未写 status 字段）；AC-903 仍 `active`（本任务未写 AC 任何字段）。
 - 本 task 分支的落地对象 = `goals/GOAL-903-*.md` 的 body 节重排（见 AC4 diff）。
+
+---
+_2026-10-03T13:22:32.744Z_: Round 3 (worker attempt 3) — re-ran every reading on the same worktree; results are identical to the prior round ⇒ this is a DETERMINISTIC block, not flakiness.
+
+- Deliverable is landed on develop: commit 862026686 「goals: GOAL-903 field:body」; develop copy has all four sections (背景/范围/非目标/退出条件), status: retired.
+- The mechanical layer already moved past `insufficient`: goalSufficiencyVerdict(GOAL-903 new body, {AC-903}) = not-evaluated (production predicate reused; see .quay/ac903-exit-conditions/round3-verify.txt).
+- AC3's expected values were overtaken by the sibling landing: AC-903 criterion ⇒ exit 0 (AC expects 1); AC-322 criterion ⇒ exit 0 (AC expects 3); `git branch --list 'goal/*'` ⇒ empty (AC expects goal/GOAL-903).
+- AC5 is structurally unreachable: GOAL-903 status=retired ⇒ not in activeGoals (goal-driver.ts:3432) ⇒ no new sufficiencyCacheKey / no new goal-round.jsonl fact. The new key computes as 5c102cd8422aab3d2c49e5706949e2195d90990262fdd2c411fef9aba20ab116 (≠ the ledger's old 69f0956f…), proving the "body change ⇒ key changes" mechanism holds — but the judge never runs to it.
+
+⇒ AC3/AC5 fit none of the closed four-way fan-in gate vocabulary (flipAcGateVerdict / fan-in-ac-completion-gate.ts): they are neither tickable (the asserted values are false) nor （待外部） (no external event will satisfy AC3). This worker will NOT rewrite the AC text nor add a （待外部） annotation itself — that is a self-exemption / authoring decision (ready-pool-check.ts:915-917).
+
+Suggested close-out (HUMAN / manager, not a worker): follow the GOAL-022 sibling precedent (gap-goal022-scope-item3-prereq-reinstall-uncovered) — out-of-band completion with the stale ACs left unchecked as the honest signal; the deliverable is already on develop.
