@@ -470,7 +470,7 @@ Options:
                         <root>/goals, <root>/.quay/gate-events.jsonl.
 `);
   } else if (sub === "driver") {
-    process.stdout.write(`quay driver — start/stop/drain/resume/status/restart the resident quay drivers (AC139)
+    process.stdout.write(`quay driver — ${VERBS.join("/")} the resident quay drivers (AC139)
 
 Usage:
   quay driver <${VERBS.join("|")}> --kind <${KINDS.join("|")}> [--root <path>] [flags]
@@ -487,8 +487,19 @@ Usage:
              last_record_ts} — last_record_ts is the carrier's last-record timestamp (not just a
              record count, which cannot distinguish "growing" from "stalled").
   restart    stop then start.
+  log        READ-ONLY: print the driver's recorded per-attempt log (the RAW failure text of each
+             attempt — never classified, never interpreted), through observation.readFanInAttempts
+             (the same single reader the web /needs-human page uses). ⛔ Does NOT spawn the kernel.
+  live       READ-ONLY: print the CURRENT in-flight worker set as JSON — the machine-readable
+             counterpart to the web dashboard's "Loop pulse" card. Reuses observation.readLive's ONE
+             call chain (⛔ no second /proc scan); scoped to THIS workspace (each scanned process must
+             declare its own \`Repo root:\` marker equal to --root). Always JSON. Reports
+             workerSignal.evaluated so "NOT evaluated" (the driver is inactive ⇒ the /proc scan never
+             ran) is DISTINCT from "zero in flight". ⛔ Needs no serve process.
 
-  --kind <${KINDS.join("|")}>   Required. Which driver the command targets.
+  --kind <${KINDS.join("|")}>   Which driver the command targets. Required for the control verbs
+             (start/stop/drain/resume/status/restart); optional for the read-only \`live\` (defaults to
+             \`worker\`).
   --root <path>               Workspace root (default: discovered via .quay/config.yml from cwd).
   --confirm-timeout <s>       (start/restart) Liveness-confirmation window (default 30). \`start\` reports
                               success ONLY after supervisor+driver are both confirmed alive; a supervisor

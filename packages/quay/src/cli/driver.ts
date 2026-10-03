@@ -31,7 +31,7 @@ import { execFileSync, spawnSync } from "node:child_process";
 import { parseFlags, resolveJsonFlag } from "./flags.ts";
 import { findConfig } from "../config.ts";
 import { resolvePluginScriptExec } from "../plugin-root.ts";
-import { readFanInAttempts, type FanInAttemptsResult } from "../observation.ts";
+import { readFanInAttempts, readLiveWorkers, type FanInAttemptsResult, type InFlightTask } from "../observation.ts";
 // gap-fan-in-instrument-availability-self-check AC3：`quay driver status --kind worker` 也报这两个 fan-in
 // 仪器的当前读数。⛔ 只读（探针不写任何 quay 状态）、⛔ 不改退出码——它是**事实**，不是拦截信号。
 import { probeInstruments, type InstrumentProbe, type InstrumentReading } from "../fan-in/ff-merge.ts";
@@ -76,7 +76,7 @@ export async function handleDriver({ sub, rest, positional }: CliCtx) {
   const { flags } = parseFlags([sub, ...rest].filter((a) => a !== undefined));
 
   if (sub === "--help" || sub === "-h" || flags.help) {
-    process.stdout.write(`quay driver — start/stop/drain/resume/status/restart the resident quay drivers (AC139)
+    process.stdout.write(`quay driver — ${VERBS.join("/")} the resident quay drivers (AC139)
 
 Usage:
   quay driver <${VERBS.join("|")}> --kind <${KINDS.join("|")}> [--root <path>] [flags]
@@ -107,8 +107,17 @@ Usage:
              carrier through observation.readFanInAttempts, the same single reader the web
              /needs-human page and the MCP \`driver_log\` tool use. ⛔ Does NOT start/stop anything
              and does not spawn the supervisor kernel.
+  live       READ-ONLY: print the CURRENT in-flight worker set as JSON — the machine-readable
+             counterpart to the web dashboard's "Loop pulse" card. Reuses observation.readLive's ONE
+             call chain (⛔ no second /proc scan); scoped to THIS workspace (each scanned process must
+             declare its own \`Repo root:\` marker equal to --root). Always JSON. Reports
+             workerSignal.evaluated so "NOT evaluated" (this workspace's driver is inactive, so the
+             /proc scan never ran) is DISTINCT from "zero in flight" — never the same value. ⛔ Does
+             NOT start/stop/spawn anything and needs no serve process.
 
-  --kind <${KINDS.join("|")}>   Required. Which driver the command targets.
+  --kind <${KINDS.join("|")}>   Which driver the command targets. Required for the control verbs
+             (start/stop/drain/resume/status/restart); optional for the read-only \`live\` (defaults to
+             \`worker\`, the only kind with in-flight worker processes).
              For \`log\`, only \`worker\` is covered today: the per-attempt fan-in records live in the
              worker driver's outcome carrier. Another kind is reported as not-covered (exit 1), never
              as an empty log.
@@ -131,13 +140,24 @@ carried from the workspace root (main checkout), not a short-lived worktree.
     return;
   }
 
-  // `log` is the ONE read-only verb: it is intercepted HERE, before the kernel delegation below,
-  // because it has no kernel counterpart (no supervisor, no control state, no spawn). ⛔ It also does
-  // NOT go through the worktree-root rejection — that guard protects a RESIDENT PROCESS from being
-  // carried by a short-lived worktree, and reading a log from one is harmless (and useful: an
-  // operator debugging a worktree reads its log there).
+  // `log` / `live` are the TWO read-only verbs: intercepted HERE, before the kernel delegation below,
+  // because they have no kernel counterpart (no supervisor, no control state, no spawn). ⛔ Neither
+  // goes through the worktree-root rejection — that guard protects a RESIDENT PROCESS from being
+  // carried by a short-lived worktree, and reading a log / the in-flight set from one is harmless (and
+  // useful: an operator debugging a worktree reads it there).
   if (sub === "log") {
     const r = runDriverLog(flags, resolveRoot(flags.root));
+    if (r.stdout) process.stdout.write(r.stdout);
+    if (r.reason) process.stderr.write(r.reason + "\n");
+    process.exitCode = r.exitCode;
+    return;
+  }
+
+  // gap-no-readonly-surface-for-live-inflight-workers: `live` is the machine-readable counterpart to
+  // the web dashboard's "Loop pulse" card — the current in-flight worker set, as JSON, with NO new
+  // /proc scan (it reuses observation.readLive's chain). ⛔ Read-only: it never starts/stops/spawns.
+  if (sub === "live") {
+    const r = runDriverLive(flags, resolveRoot(flags.root));
     if (r.stdout) process.stdout.write(r.stdout);
     if (r.reason) process.stderr.write(r.reason + "\n");
     process.exitCode = r.exitCode;
@@ -205,6 +225,60 @@ export function runDriverLog(
   // and `malformed-lines` still delivered the attempts that DID parse (both exit 0 — a caller that
   // needs the distinction reads `status` in the output, which is present in BOTH arms).
   return { stdout, reason: null, exitCode: res.status === "carrier-unreadable" ? 1 : 0 };
+}
+
+/** Project a `readLive` InFlightTask to the exact fields the `quay driver live` JSON exposes.
+ *  ⛔ `blocks`/`blockedBy` are OMITTED on purpose: readLive only populates them from its full
+ *  task-store scan (`computeBlocking`), which this surface deliberately skips (the same cost decision
+ *  the dashboard live card makes). Emitting `[]` there would read as "nothing blocks" — a value the
+ *  reader never computed (hard rule 3b: 读不懂 ⇒ 不得返回与合格同形的值). */
+function projectInFlight(t: InFlightTask): Record<string, unknown> {
+  return {
+    taskId: t.taskId,
+    runId: t.runId,
+    pid: t.pid,
+    sessionId: t.sessionId,
+    startedAtMs: t.startedAtMs,
+    implCompletedAtMs: t.implCompletedAtMs,
+    status: t.status,
+    phase: t.phase,
+    suite: t.suite,
+    minutes: t.minutes,
+    liveness: t.liveness,
+  };
+}
+
+/** The `quay driver live` body — a pure function of (flags, resolved root), the `runDriverLog` pattern.
+ *  Prints the current in-flight worker reading as JSON (ALWAYS JSON: it is the machine-readable
+ *  counterpart to the web dashboard's "Loop pulse" card). Read-only — never starts/stops/spawns, never
+ *  needs a serve process — and it reuses observation.readLive's ONE call chain (⛔ no second /proc scan).
+ *  `root` is null when no `.quay/config.yml` was found (reported, never guessed).
+ *
+ *  Exit code is 0 for EVERY evaluated reading — including an empty in-flight set. "Not evaluated" is
+ *  NOT an error here; it is carried by `workerSignal.evaluated === false` + a non-null `reason`, the
+ *  independent value that separates it from "zero in flight" (hard rule 3b). */
+export function runDriverLive(
+  flags: Record<string, any>,
+  root: string | null,
+): { stdout: string; reason: string | null; exitCode: number } {
+  if (!root) {
+    return { stdout: "", reason: `quay driver live: no .quay/config.yml found (searched from ${flags.root ?? process.cwd()} upward). Run from a quay workspace root, or pass --root <workspace-root>.`, exitCode: 1 };
+  }
+  // `--kind` is optional for `live` and only `worker` is covered (the only kind with in-flight worker
+  // processes). An explicit other kind is refused rather than silently answered with worker data.
+  const kind = typeof flags.kind === "string" ? flags.kind : "";
+  if (kind !== "" && kind !== "worker") {
+    return { stdout: "", reason: `quay driver live: --kind ${kind} is not covered by this reader (only \`worker\` has in-flight worker processes). Refusing to answer with worker data for a different kind.`, exitCode: 1 };
+  }
+  const reading = readLiveWorkers(root);
+  const out = {
+    root: reading.root,
+    kind: "worker",
+    workerSignal: reading.workerSignal,
+    telemetry: reading.telemetry,
+    inFlight: reading.inFlight.map(projectInFlight),
+  };
+  return { stdout: JSON.stringify(out, null, 2) + "\n", reason: null, exitCode: 0 };
 }
 
 /**
