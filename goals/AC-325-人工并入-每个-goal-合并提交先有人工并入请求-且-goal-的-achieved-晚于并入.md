@@ -1,7 +1,7 @@
 ---
 id: AC-325
 title: 人工并入：每个 goal 合并提交先有人工并入请求，且 goal 的 achieved 晚于并入
-status: active
+status: achieved
 kind: criterion
 goal: GOAL-028
 criterion: >-
@@ -96,6 +96,11 @@ statusLog:
     to: active
     actor: goal-driver
     reason: "triage: activate"
+  - at: 2026-10-03T20:26:39.456Z
+    from: active
+    to: achieved
+    actor: goal-driver
+    reason: "I2: criterion pass"
 fidelity:
   verdict: faithful
   reason: "fidelity judge: faithful"
