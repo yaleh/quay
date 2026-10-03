@@ -49,7 +49,12 @@ function mkCarriers(tag) {
   const adrDir = fs.mkdtempSync(path.join(os.tmpdir(), `pc-${tag}-adr-`));
   const goalDir = fs.mkdtempSync(path.join(os.tmpdir(), `pc-${tag}-goals-`));
   const metaDir = fs.mkdtempSync(path.join(os.tmpdir(), `pc-${tag}-meta-`));
-  _tmpDirs.push(tasksDir, adrDir, goalDir, metaDir);
+  // One-identifier pushes: tmp-leak-pairing's carrier matcher is `arr.push(<name>)`
+  // — a multi-arg `push(a, b, c)` is NOT recognised, so each dir is pushed alone.
+  _tmpDirs.push(tasksDir);
+  _tmpDirs.push(adrDir);
+  _tmpDirs.push(goalDir);
+  _tmpDirs.push(metaDir);
   return { tasksDir, adrDir, goalDir, metaDir };
 }
 
