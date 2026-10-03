@@ -80,8 +80,13 @@ const STATUS_WORDS = "pending|resolved|deferred|applied|rejected";
 // Depth-aware: match the heading line, capture its `#` depth, stop the body at the next line whose
 // heading is at the SAME OR SHALLOWER depth (so a `## X` section extends through its nested `### `
 // subheadings and stops only at the next `## ` or shallower — never silently truncated).
+// `heading` is matched LITERALLY — escaped through `escapeRegExp` (imported above) before it is
+// interpolated into the heading regex, so `Plan (draft)` matches its own line instead of being read
+// as the capture group `Plan draft`, and an unbalanced `(` cannot throw. Escaping is a no-op for plain
+// section names; plugin/test/task-parsing-parity.test.mjs pins the behavior against the product copy
+// (packages/quay/src/task-parsing.ts). Task gap-extract-section-heading-interpolated-unescaped-into-regexp.
 export function extractSection(fullText, heading) {
-  const headingLineRe = new RegExp(`^(##+)\\s*${heading}\\s*$`, "im");
+  const headingLineRe = new RegExp(`^(##+)\\s*${escapeRegExp(heading)}\\s*$`, "im");
   const headingMatch = fullText.match(headingLineRe);
   if (!headingMatch) return null;
   const depth = headingMatch[1].length;
@@ -682,8 +687,12 @@ export function checkTouchesPostContent(task) {
 // (the gap-dispatch-gate task's own Chosen mechanism does) and that MUST NOT be read as a real section.
 // A real section's heading sits at column 0 outside any fence; the resource-awareness task's real
 // ## Contract has its ENTRIES fenced but its heading outside — both cases are handled here.
+// Same literal-heading rule as extractSection above (hard rule 5b sibling — the identical
+// `new RegExp(\`^(##+)\\s*${heading}\\s*$\`)` interpolation lived here too): `heading` is escaped so a
+// metacharacter-bearing (or unbalanced) heading cannot be read as a pattern. No-op for the plain
+// literals current callers pass.
 export function extractSectionFenceAware(fullText, heading) {
-  const headingLineRe = new RegExp(`^(##+)\\s*${heading}\\s*$`, "im");
+  const headingLineRe = new RegExp(`^(##+)\\s*${escapeRegExp(heading)}\\s*$`, "im");
   const lines = fullText.split(/\r?\n/);
   let inFence = false;
   let startIdx = -1;

@@ -28,15 +28,24 @@
 // cited as "the self-bootstrap gap is solved".
 
 import { parse as parseYaml } from "yaml";
+import { escapeRegExp } from "./kernel/regex-escape.ts";
 
 /**
- * Depth-aware section extractor (moved verbatim from task-schema.ts). Match the heading line, capture
+ * Depth-aware section extractor. Match the heading line, capture
  * its `#` depth, stop the body at the next line whose heading is at the SAME OR SHALLOWER depth (so a
  * `## X` section extends through its nested `### ` subheadings and stops only at the next `## ` or
  * shallower — never silently truncated).
+ *
+ * `heading` is matched LITERALLY: it is escaped through the kernel's `escapeRegExp` before it is
+ * interpolated into the heading regex. Without that, a heading carrying a regex metacharacter would be
+ * read as a pattern — `Plan (draft)` would become the capture group `Plan draft` and never match the
+ * literal `## Plan (draft)` line, and an unbalanced `(` would throw at `new RegExp`. Escaping is a
+ * no-op for the plain section names most callers pass, so their behavior is unchanged; the
+ * metacharacter-heading case is pinned by plugin/test/task-parsing-parity.test.mjs. (Task
+ * gap-extract-section-heading-interpolated-unescaped-into-regexp.)
  */
 export function extractSection(fullText, heading) {
-  const headingLineRe = new RegExp(`^(##+)\\s*${heading}\\s*$`, "im");
+  const headingLineRe = new RegExp(`^(##+)\\s*${escapeRegExp(heading)}\\s*$`, "im");
   const headingMatch = fullText.match(headingLineRe);
   if (!headingMatch) return null;
   const depth = headingMatch[1].length;
