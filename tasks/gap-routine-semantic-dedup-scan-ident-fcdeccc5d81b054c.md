@@ -3,7 +3,7 @@ id: gap-routine-semantic-dedup-scan-ident-fcdeccc5d81b054c
 title: "semantic-dedup-scan: Identical execSync git args inline wrapper with
   same cwd/encoding/timeout, explicitly annotated same shape as
   build-evidence-gate.ts."
-status: ready
+status: done
 labels:
   - gap
   - routine-filed
