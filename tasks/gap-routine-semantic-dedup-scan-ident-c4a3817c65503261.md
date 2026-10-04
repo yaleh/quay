@@ -48,6 +48,9 @@ extract
 - [x] 上面的判据实跑通过 —— 上述命令均实跑：`node --test`（两载体 19/19、`capability-catalog.test.mjs` 18/18）、`capability-catalog.sh`（365/365/0，exit 0）、scoped 门 `scripts/test.sh --for-task gap-routine-semantic-dedup-scan-ident-c4a3817c65503261 --allow-thin`（exit 0）。
 - [x] ⛔ 探针只立案不执行：本任务若需要跑产出者/修复，由派发链执行，⛔ 不由例程代跑 —— 例程只产出 finding 记录并经 `plugin/scripts/routine-file-gate.ts` 机械立案（同轮 `filing-round` 记录逐字：`runId=semantic-dedup-scan-1791142275270`、`filed=[gap-routine-semantic-dedup-scan-near-25, gap-routine-semantic-dedup-scan-ident-c4a3817c65503261, gap-routine-semantic-dedup-scan-ident-fcdeccc5d81b054c]`、`escalated=[]`）；提取与验证由本 worker（派发链）执行，例程未跑修复、未改代码。
 
+## Test-Files
+- `plugin/test/capability-catalog.test.mjs`
+
 ## Touches
 - `plugin/scripts/release-branch-janitor.ts`
 - `plugin/scripts/release-reading-sandbox.ts`
