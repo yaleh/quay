@@ -89,46 +89,10 @@ import { appendFileSync, mkdirSync } from 'node:fs';
 import { spawnSync } from 'node:child_process';
 import { tmpdir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
+import { enumerateReleaseRefs, git, revParseSha } from './git-runner.ts';
 
-// ── git helpers ──────────────────────────────────────────────────────────────────────────────────
-
-interface Ran {
-  status: number;
-  stdout: string;
-  stderr: string;
-}
-
-function git(cwd: string, args: string[]): Ran {
-  const r = spawnSync('git', ['-C', cwd, ...args], { encoding: 'utf8' });
-  return { status: r.status ?? -1, stdout: r.stdout ?? '', stderr: r.stderr ?? '' };
-}
-
-/** Resolve a rev to a full sha in `root`. `null` = NOT DETERMINABLE (never an empty stand-in). */
-function revParse(root: string, rev: string): string | null {
-  const r = git(root, ['rev-parse', '--verify', '--quiet', `${rev}^{commit}`]);
-  if (r.status !== 0) return null;
-  const sha = r.stdout.trim();
-  return sha.length > 0 ? sha : null;
-}
-
-/**
- * The source repo's release-shaped branch namespace — the SAME enumeration AC-271's criterion makes
- * (`for-each-ref refs/heads/release-* refs/heads/release/*`). `null` = the enumeration could not be
- * PERFORMED (hard rule 3b: "could not look" must not be printed as "none").
- */
-function sourceReleaseRefs(root: string): string[] | null {
-  const r = git(root, [
-    'for-each-ref',
-    '--format=%(refname:short)',
-    'refs/heads/release-*',
-    'refs/heads/release/*',
-  ]);
-  if (r.status !== 0) return null;
-  return r.stdout
-    .split('\n')
-    .map((s) => s.trim())
-    .filter((s) => s.length > 0);
-}
+// ── git helpers (the runner + sha resolver + release-ref enumeration arrive from git-runner.ts —
+//    the SINGLE implementation this script and release-branch-janitor.ts share; ⛔ do not re-copy) ──
 
 /** A release-shaped branch NAME — the same prefix rule resolve-version judges by. */
 const RELEASE_BRANCH_RE = /^release[\/-]/;
@@ -180,7 +144,7 @@ function buildSandbox(
           `${fetch.stderr.trim()} => the reading cannot be taken on a real object`,
       };
     }
-    const fetched = revParse(dir, 'FETCH_HEAD');
+    const fetched = revParseSha(dir, 'FETCH_HEAD^{commit}');
     if (fetched === null) {
       return { error: `the sandbox fetched ${sha} but FETCH_HEAD does not resolve to a commit` };
     }
@@ -369,7 +333,7 @@ function main(argv: string[]): number {
 
   // The source namespace is read BEFORE anything is built, and again AFTER — the same run certifies
   // both halves (the DoD asks for them to be certified together, not in two separate runs).
-  const before = sourceReleaseRefs(root);
+  const before = enumerateReleaseRefs(root);
   if (before === null) {
     process.stderr.write(
       `CAUSE=release-reading-source-unreadable — could not enumerate refs/heads/release-* in ` +
@@ -378,7 +342,7 @@ function main(argv: string[]): number {
     return 2;
   }
 
-  const sha = revParse(root, rev);
+  const sha = revParseSha(root, `${rev}^{commit}`);
   if (sha === null) {
     process.stderr.write(
       `CAUSE=release-reading-rev-unresolvable — '${rev}' does not resolve to a commit in '${root}'; ` +
@@ -409,7 +373,7 @@ function main(argv: string[]): number {
     }
   }
 
-  const after = sourceReleaseRefs(root);
+  const after = enumerateReleaseRefs(root);
   const shape = shapeOf(branch);
   const result: TraceLine['result'] =
     reading.exit === 3 ? 'not-evaluated' : reading.exit === 0 ? 'taken' : 'reading-error';
