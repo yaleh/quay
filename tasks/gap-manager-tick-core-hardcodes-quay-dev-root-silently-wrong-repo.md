@@ -34,6 +34,8 @@ extra:
 
 **首报来源**：另一个消费工作区（`claudecodeui`，`.quay/config.yml` 钉 quay 0.10.0）的 manager 会话。它当场遇到 `ReferenceError`（见 sister task `gap-dist-rewrite-injects-live-interpolation-into-workflow-js`），修复插值后才发现第 ② 层——即**修好崩溃反而让它变成静默指错仓库**。
 
+**本轮续做新增（suite 阻断项，硬规则 5b）**：本任务的 fan-in 全量 suite 红在同一处——`plugin/test/adr016-screen-use-check.test.mjs` 的 walk→read race 用例（`the vanished file must be RETURNED, not swallowed`）。根因不在本任务的 delta：扫全仓的 `plugin/scripts/adr016-screen-use-check.ts` **没有排除 gitignored 的 npm-pack 暂存镜像 `packages/quay/plugin/`**（`package.sh` / `delivery-standalone-smoke.sh:51` 在 `npm pack` 期间物化它、随后 rm -rf）。镜像在场时它是 repo-root `plugin/` 的第二份拷贝：walk 同时列出 `packages/quay/plugin/scripts/*.sh` 与 `plugin/scripts/*.sh`，前者被 staging 的 rm -rf 摘掉后又被记为第二个「消失文件」⇒ 断言（期望恰好 1 条）红。同一缺陷在正常 band 判定下还会**双计** plugin/ 里的每个命中（band 只有 0..1），是真实红风险，不只是测试脆弱。修法：把镜像前缀从 walk 结果里滤掉（basename 型的 SKIP_DIRS 收不了它——会连真的 `plugin/` 一起丢）。属 AC7「既有测试绿」范围。
+
 ## Acceptance Criteria
 
 - [x] AC1 复现固化：在**非** `/home/yale/work/quay` 的工作区形态下调用该 workflow，断言它要么显式拒绝、要么使用传入的 workspaceRoot；⛔ 不得产出关于 `/home/yale/work/quay` 的读数。当前基线：产出后者的读数（或 ReferenceError，取决于是否已修 sister task）。→ 证据：臂① 拒绝、臂② 消费工作区形态用传入 root，两臂均无 `/home/yale/work/quay` 读数（见 Evidence）。
@@ -42,7 +44,7 @@ extra:
 - [x] AC4 意图判定落到载体：读 `plugin/skills/manager/SKILL.md:16` 的「not a quay-local artifact」声称，作出二选一并在任务证据里记下结论——(a) manager 本意可安装 ⇒ 缺口是移植（criteria/closing/sending/anchor-check 必须 ship 或改为工作区本地可解析路径）；(b) 本意即 quay-dev-only ⇒ 交付面必须显式标注，且 AC2 的守卫成为唯一正确形态。⛔ 不得两边都不选而留着矛盾。→ 判定 **(b)**，落载 `plugin/loop/manager-tick-core.md` + workflow meta（见 Evidence）。
 - [x] AC5 同类扫描（硬规则 5b 的产物）：对全部 6 个 `plugin/workflows/*.js` 扫两类命中——引用 `orchestration/` 路径、硬编码宿主绝对路径（`/home/yale` 等）。把**命中数与前 3 条实际命中**贴进证据；⛔ 只修被报出来的 `manager-tick-core` ⇒ 本 AC 不满足。→ 全 6 文件已扫，读数+前 3 条见 Evidence（B 类除 manager-tick-core 外 0 实例）。
 - [x] AC6 测试缺口补上：现 `plugin/test/manager-tick-core.test.mjs` 只读 `orchestration/manager-tick-core.md`（`:26`），**对 workflow `.js` 零覆盖**——这正是硬编码 ROOT 长期未被发现的原因。补一条读 `.js` 的用例覆盖 AC2/AC3。→ 新增 5 条 vm-执行真实 `.js` 的用例（见 Evidence）。
-- [x] AC7 不回归：既有测试绿；`--for-task` scoped 门绿。→ `scripts/test.sh --for-task … --allow-thin` EXIT=0（见 Evidence）。
+- [x] AC7 不回归：既有测试绿；`--for-task` scoped 门绿。→ `scripts/test.sh --for-task … --allow-thin` EXIT=0（见 Evidence）；全量 suite 唯一红项（adr016 staging-mirror 竞态，foreign file）已定位根因并修复（见 Evidence「AC7 — 全量 suite 红项」）。
 
 ## DoD
 
@@ -108,9 +110,26 @@ spawned agents: **0**（拒绝时绝不 spawn readings/audit——否则会对�
 
 `bash scripts/test.sh --for-task gap-manager-tick-core-hardcodes-quay-dev-root-silently-wrong-repo --allow-thin` ⇒ **EXIT=0**（绿）：含 delivery-inventory drift gate PASS、checked-in-tree writes PASS、quay-init closure-ratchet fresh PASS、本任务 10/10 测试通过；drift check 4 pairs / 4 consistent。
 
+### AC7 — 全量 suite 红项（foreign file）的复现、根因与修法
+
+**红项签名**（`fan-in-suite-gap-manager-tick-core-hardcodes-quay-dev-root-silently-wrong-repo~wk-prod-anchor~1791071913041-0d056b.log:15043`）：`plugin/test/adr016-screen-use-check.test.mjs` 的 walk→read race 用例，`AssertionError: the vanished file must be RETURNED, not swallowed`；`actual` 两条 `unreadable`（`packages/quay/plugin/scripts/drivable-workspace-check.sh` + `plugin/scripts/drivable-workspace-check.sh`），`expected` 一条。
+
+**归属读数（是读数，不是判决）**：本任务 delta = `plugin/workflows/manager-tick-core.js` + `plugin/loop/manager-tick-core.md` + `plugin/test/manager-tick-core.test.mjs`，与 `adr016-screen-use-check` 的文件及其直接 import 均不相交；132 个 fan-in suite 日志中含【两测试同轮】的 6 个里只有本任务这一次红。⇒ 按 worker 约定「复现即当真」，本轮按真实缺陷处理而非当作环境抖动。
+
+**机制（读码 + 确定性复现）**：`.gitignore:26` 钉 `packages/quay/plugin/`；`packages/quay/test/delivery-standalone-smoke.sh:51` `STAGED_PLUGIN="$ROOT/packages/quay/plugin"`（`:52` rm -rf、`:55` npm pack、`:56` rm -rf），`packages/quay/scripts/package.sh` 同款 ⇒ `npm pack` 期间工作树里真实存在一份 plugin/ 的 .sh 拷贝。而 `collectShellScripts(root, SKIP_DIRS)` 的 SKIP_DIRS 按 **basename** 剪枝（`fs-walk.ts:268`），`dist/` 有、该镜像没有 ⇒ 被扫（这正是硬规则 5b 的兄弟漏项：上一次修 walk→read ENOENT 时没扫扫描面）。
+
+**能取假（负控制，两臂；⛔ 未用 `git stash`——repo-global 会被同仓他处偷走）**：在 worktree 暂存镜像（`mkdir -p packages/quay/plugin/scripts && cp plugin/scripts/drivable-workspace-check.sh packages/quay/plugin/scripts/`）后跑该测试文件——
+- 臂①（PRE-FIX）：`node --no-warnings --experimental-strip-types --test plugin/test/adr016-screen-use-check.test.mjs` ⇒ `pass 17 / fail 1`，唯一红项与 suite 日志**逐字同签名**（`actual` 两条、`expected` 一条）⇒ 复现成立且**确定性**（不依赖调度巧合）。
+- 臂②（POST-FIX，同一镜像仍在场）：⇒ `tests 18 / pass 18 / fail 0`，EXIT=0；新增的第 18 条即本修复的 pin。
+- CLI 同条件：`… adr016-screen-use-check.ts --root .` ⇒ `155 file(s) scanned` / `violations: 0` / `unreadable: 0` / EXIT=0（镜像在场时仍报与干净树相同的 155，证明镜像确实没进扫描面）；`--selftest` 8 passed / 0 failed。
+
+**修法**：`plugin/scripts/adr016-screen-use-check.ts` 新增纯函数 `isGeneratedMirrorPath(rel)`（导出，供无 fs 的纯测试 pin）并在 `scanForScreenHashViolations` 里 `collectShellScripts(...).filter((rel) => !isGeneratedMirrorPath(rel))`；路径**段**感知（`packages/quay/plugin-snapshot/` 不误伤，真 `plugin/` 不被滤）。`plugin/test/adr016-screen-use-check.test.mjs` 加一条纯函数用例覆盖两面。
+
 ## Touches
 
 - plugin/workflows/manager-tick-core.js（`:57` ROOT + 拒绝分支 + 需同步的 prompt 文本）
 - plugin/loop/manager-tick-core.md（若 AC4 判定为「显式标注 quay-dev-only」）
 - plugin/test/manager-tick-core.test.mjs（AC6：新增读 `.js` 的用例）
+- plugin/scripts/adr016-screen-use-check.ts（AC7 全量 suite 红项：滤掉 gitignored 的 npm-pack 暂存镜像 packages/quay/plugin/）
+- plugin/test/adr016-screen-use-check.test.mjs（AC7：pin isGeneratedMirrorPath 的两面）
 - tasks/gap-manager-tick-core-hardcodes-quay-dev-root-silently-wrong-repo.md（自身：勾 AC + 贴证据）
