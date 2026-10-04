@@ -59,7 +59,7 @@ extra:
 - [x] AC3 守卫（防第 5 个 workflow）：构建/发布路径上一条机械检查——重写后的 `.js` 若含**未转义**的 `${CLAUDE_PLUGIN_ROOT}` 即 fail loud。⛔ 不得用「扫到就算过」的同形谓词（硬规则 3b）。→ `scanJsCarrierAnchors()`（返回 `scanned` 计数 + violations）+ `assertJsCarrierAnchorsInert()`（零载体 = **NOT-EVALUATED** 独立态，拒绝；有违规 = FAILED）。接入点：`--rewrite` 分支（`package.sh:182` 的发布入口）与 `rewriteInvokers()` 末尾；输出见 E4，scoped 门内运行见 E5。
 - [x] AC4 能取假（负控制）：把 AC2 的修法还原成当前坏形 ⇒ AC1/AC3 变红；修法在位 ⇒ 绿。把两条实际输出贴进证据。→ E2（坏形 ⇒ `ReferenceError: CLAUDE_PLUGIN_ROOT is not defined`；修法在位 ⇒ `eval OK`）+ E4（坏形 ⇒ 守卫 FAILED；折叠形 ⇒ 0 violations）。落成用例：`AC4 — negative control …`。
 - [x] AC5 全量面：6 个 workflow 重写产物逐个在 sandbox globals 下加载，`manager-tick-core` / `pool-quality-judge` / `fan-in-execute` / `execute-suite-fix` 四个均为 0 活跃插值（`drain-directives` / `run-routines` 保持 0）。→ E2 全表：6/6 `eval OK`，活跃插值 0/0/0/0/0/0（折叠数 2/4/22/3/0/0）。
-- [x] AC6 不回归：`packages/quay/test/build-plugin-dist.test.mjs` 全绿 + 新增用例覆盖 AC1/AC3；`--for-task` scoped 门绿。→ E5：43/43 pass、EXIT=0；新增 7 条用例（AC1 沙箱加载 / AC2 双模板串+①泄漏 / AC4 负控制 / AC5 六文件全量 / AC3 守卫三态 / AC3 真实根正控制 / AC2 幂等）。
+- [x] AC6 不回归：`packages/quay/test/build-plugin-dist.test.mjs` 全绿 + 新增用例覆盖 AC1/AC3；`--for-task` scoped 门绿。→ E5：43/43 pass、EXIT=0；新增 7 条用例（AC1 沙箱加载 / AC2 双模板串+①泄漏 / AC4 负控制 / AC5 六文件全量 / AC3 守卫三态 / AC3 真实根正控制 / AC2 幂等）。E7：随 develop 合并重跑，`build-plugin-dist.test.mjs` 仍 43/43、scoped 门 46/46。
 
 ## DoD
 
@@ -146,7 +146,7 @@ $ bash scripts/test.sh --for-task gap-dist-rewrite-injects-live-interpolation-in
 ✔ AC3 — positive control on the REAL plugin root: the guard reads all six shipped carriers and reports inert
 ```
 
-scoped-gate cache 已写（`develop` sha `2ee5b3fe4`，为 HEAD 祖先）。
+scoped-gate cache 本轮重写为 `develop` sha `4d67f5a13`（为 HEAD 祖先；上一轮是 `2ee5b3fe4`）。
 
 ### E6 — fan-in suite 解阻：特征化基线把 `Date.now()` 派生的相对时间也归一化（Touches 追加 2 文件）
 
@@ -167,12 +167,27 @@ $ git diff --word-diff 基线：仅 4 处 0s ago → ⟨REL⟩，无其它改动
 $ 规则族：0s/1s/59s/2m/3h/10d ago 全部 → ⟨REL⟩（单跑实测）
 ```
 
-⛔ 不是「把红改绿」的放水：该规则与测试自身的头注 ②（volatile timestamps → 稳定标记）一致，且只折叠时间派生量。**负控制（cp 备份改基线，非 git checkout）**：把基线 `⟨REL⟩` 反改成 `⟨MUTATED⟩` ⇒ `✖ route snapshot … / pass 2 fail 1`；还原 ⇒ `pass 3 fail 0`——断言仍能取假。
+⛔ 不是「把红改绿」的放水：该规则与测试自身的头注 ②（volatile timestamps → 稳定标记）一致，且只折叠时间派生量。**负控制（cp 备份改基线，非 git checkout）**：把基线 `⟨REL⟩` 反改成 `⟨MUTATED⟩` ⇒ `✖ route snapshot … / pass 2 fail 1`；还原 ⇒ `pass 3 fail 0`——断言仍能取假。提交 `0a0d655dc`。
+
+### E7 — develop 合并适配：sandbox 加载器补 `args.workspaceRoot`（保住 AC1/AC4/AC5 非空转）
+
+本工作树 `git merge develop` 带进 `a84cc33bb`（`gap-manager-tick-core-hardcodes-quay-dev-root-silently-wrong-repo`）：`plugin/workflows/manager-tick-core.js` 新增一条守卫——`args.workspaceRoot` 缺失/非绝对路径 ⇒ **提前 `return { evaluated:false }`**，绝不 spawn agent、绝不落回硬编码路径。该句出现在 `READ_CMD` 与返回指令块**之前**。
+
+**后果（scoped 门实测）**：加载器原以 `args = {}` 起 workflow ⇒ manager-tick-core 在**求值任何模板串之前**就返回 ⇒ 被投毒的 `${CLAUDE_PLUGIN_ROOT}` 字面量**从未被求值** ⇒ AC4/AC5 的 pre-fix 负控制读到 `NO ERROR`（`the pre-fix carrier must fail loudly … got NO ERROR` / `manager-tick-core.js: pre-fix must reproduce the recorded ReferenceError`），而 AC1 的 post-fix 断言退化为恒真。这是硬规则 3b 的同形陷阱：**「没求值」伪装成「安全」**。
+
+**修法**：`loadWorkflowInSandbox(text, argsValue = { workspaceRoot: "/w" })` —— 真实调用方**总会**传 `args.workspaceRoot`（这正是 a84cc33bb 的设计），加载器照此建模；其余 5 个 workflow 不读 args，无影响。
+
+```
+$ 未适配（args={}）⇒ ✖ AC4 … got NO ERROR / ✖ AC5 … pre-fix must reproduce ⇒ 46 tests, pass 44 fail 2（scoped 门 EXIT=1）
+$ 适配后         ⇒ pass 46 fail 0（scoped 门 EXIT=0；build-plugin-dist.test.mjs 单跑 43/43）
+```
+
+提交 `4f3834486`。
 
 ## Touches
 
 - packages/quay/scripts/build-plugin-dist.mjs（`rewriteInvokers`/`rewriteMarkdown` 的 `.js` 载体规则 + 守卫）
-- packages/quay/test/build-plugin-dist.test.mjs（AC1/AC3/AC4 用例）
+- packages/quay/test/build-plugin-dist.test.mjs（AC1/AC3/AC4 用例；E7 sandbox 加载器 `args.workspaceRoot`）
 - packages/quay/test/characterization-serve-routes.test.mjs（E6：相对时间归一化——解阻 fan-in suite 的无主负载形红）
 - packages/quay/test/fixtures/characterization/serve-routes.snapshot.json（E6：基线 4 处 `0s ago` → `⟨REL⟩`）
 - tasks/gap-dist-rewrite-injects-live-interpolation-into-workflow-js.md（自身：勾 AC + 贴证据）
