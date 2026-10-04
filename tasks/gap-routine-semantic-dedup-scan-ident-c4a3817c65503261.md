@@ -3,7 +3,7 @@ id: gap-routine-semantic-dedup-scan-ident-c4a3817c65503261
 title: "semantic-dedup-scan: Both bodies are spawnSync(git,[-C,cwd,...args]) to
   {status,stdout,stderr}; same git-runner in the two release-* scripts which
   also duplicate the Ran interface "
-status: ready
+status: done
 labels:
   - gap
   - routine-filed
