@@ -148,8 +148,31 @@ $ bash scripts/test.sh --for-task gap-dist-rewrite-injects-live-interpolation-in
 
 scoped-gate cache 已写（`develop` sha `2ee5b3fe4`，为 HEAD 祖先）。
 
+### E6 — fan-in suite 解阻：特征化基线把 `Date.now()` 派生的相对时间也归一化（Touches 追加 2 文件）
+
+前两轮 fan-in 在同一处退出未落地：`step=suite: AssertionError [ERR_ASSERTION]: route snapshot: 1 route(s) changed vs the baseline`，指向 `packages/quay/test/characterization-serve-routes.test.mjs`（本任务 delta 之外，一跳导入亦不相交——delta-relatedness 复算 = UNRELATED；该文件并已 `@load-sensitive` 注册）。
+
+**真因（实测，非推测）**：该基线的 `normalize()` 头注声称把所有 **volatile timestamps** 换成稳定标记，但**漏了相对时间族**——`serve-task.ts:863`（`/task/:param` 的 `last updated:`）与列表页 updated 列 / dashboard 卡片渲染的 `relativeTime(ts)`（`serve-render.ts:760`）= `Date.now() - ts`，产出 `"0s ago"` / `"1s ago"` / `"2m ago"`…。基线里固化的是 **`0s ago`（4 处）**。fan-in 全量 suite（127 路并发）下，fixture 写入 → `/task/:param` 渲染的间隔越过 1 秒 ⇒ 实际渲染 `1s ago` ⇒ 逐字节比对红。
+
+**隔离复现（本工作树）**：单跑该文件 **绿**（捕获 135ms，仍 `0s ago`）；suite 日志里该文件 `__PERFILE__ … passed=false`，失败点逐字 `last updated: 0s ago`(期望) vs `1s ago`(实际) ⇒ 隔离不出现、满负载出现的**负载形**红。（owner 任务 `gap-characterization-baseline-serve-routes-and-concurrent-writes` = done ⇒ 无主红，本任务就地修。）
+
+**修法**：给 `normalize()` 增一条与既有 ISO/epoch 规则同族的相对时间规则 `s.replace(/\b\d+[smhd] ago\b/g, "⟨REL⟩")`，并按 `UPDATE_SNAPSHOT=1` 重生成基线（4 处 `0s ago` → `⟨REL⟩`）。
+
+```
+$ git diff --word-diff 基线：仅 4 处 0s ago → ⟨REL⟩，无其它改动（4 insertions / 4 deletions）
+-class="col-updated">0s ago              +class="col-updated">⟨REL⟩
+-font-size:0.7rem">0s ago</div>           +font-size:0.7rem">⟨REL⟩</div>
+-\">0s ago</div>                          +\">⟨REL⟩</div>
+-0s ago</p>                               +⟨REL⟩</p>
+$ 规则族：0s/1s/59s/2m/3h/10d ago 全部 → ⟨REL⟩（单跑实测）
+```
+
+⛔ 不是「把红改绿」的放水：该规则与测试自身的头注 ②（volatile timestamps → 稳定标记）一致，且只折叠时间派生量。**负控制（cp 备份改基线，非 git checkout）**：把基线 `⟨REL⟩` 反改成 `⟨MUTATED⟩` ⇒ `✖ route snapshot … / pass 2 fail 1`；还原 ⇒ `pass 3 fail 0`——断言仍能取假。
+
 ## Touches
 
 - packages/quay/scripts/build-plugin-dist.mjs（`rewriteInvokers`/`rewriteMarkdown` 的 `.js` 载体规则 + 守卫）
 - packages/quay/test/build-plugin-dist.test.mjs（AC1/AC3/AC4 用例）
+- packages/quay/test/characterization-serve-routes.test.mjs（E6：相对时间归一化——解阻 fan-in suite 的无主负载形红）
+- packages/quay/test/fixtures/characterization/serve-routes.snapshot.json（E6：基线 4 处 `0s ago` → `⟨REL⟩`）
 - tasks/gap-dist-rewrite-injects-live-interpolation-into-workflow-js.md（自身：勾 AC + 贴证据）
