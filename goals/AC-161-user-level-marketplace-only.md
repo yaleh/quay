@@ -15,8 +15,13 @@ criterion: >-
 
   except Exception as e:
       sys.stderr.write("CAUSE=settings-unreadable — cannot read user-level ~/.claude/settings.json: %r\n" % (e,)); sys.exit(1)
-  if any('quay' in k for k in (d.get('enabledPlugins') or {})):
-      sys.stderr.write("CAUSE=user-enabled-plugins — user-level enabledPlugins still enables quay plugin(s): %s\n" % ",".join(k for k in (d.get('enabledPlugins') or {}) if 'quay' in k)); sys.exit(1)
+  RELEASE={'quay@quay'}
+
+  bad=[k for k in (d.get('enabledPlugins') or {}) if 'quay' in k and k not in
+  RELEASE]
+
+  if bad:
+      sys.stderr.write("CAUSE=user-enabled-dev-channel — user-level enabledPlugins enables quay DEV/directory-channel plugin(s): %s — the release channel (quay@quay) is allowed, the dev channel is not\n" % ",".join(bad)); sys.exit(1)
   if 'quay' in json.dumps(d.get('env') or {}):
       sys.stderr.write("CAUSE=user-env-quay-path — user-level settings.json 'env' still carries a quay path in key(s): %s\n" % ",".join(k for k,v in (d.get('env') or {}).items() if 'quay' in str(v))); sys.exit(1)
   sys.exit(0)
