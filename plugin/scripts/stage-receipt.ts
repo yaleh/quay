@@ -40,7 +40,7 @@ import fs from "node:fs";
 import path from "node:path";
 import { createHash } from "node:crypto";
 import { execSync } from "node:child_process";
-import { createSelftest } from "./gate-script-base.ts";
+import { createSelftest, parseJsonArg } from "./gate-script-base.ts";
 import {
   SCHEMA_VERSION as A1_SCHEMA_VERSION,
   VALID_STAGES,
@@ -816,17 +816,6 @@ function printJson(obj: unknown): void {
   console.log(JSON.stringify(obj));
 }
 
-function parseJsonArg(raw: string): unknown {
-  let s = raw;
-  if (s.startsWith("'") && s.endsWith("'")) s = s.slice(1, -1);
-  if (s.startsWith('"') && s.endsWith('"')) s = s.slice(1, -1);
-  try {
-    return JSON.parse(s);
-  } catch {
-    throw receiptError("invalid-json", `invalid JSON argument: ${raw}`);
-  }
-}
-
 function usage(): string {
   return [
     "stage-receipt.ts — versioned stage-receipt contract module (DIR-124-B2 / M254)",
@@ -851,11 +840,11 @@ export function main(argv: string[]): number {
       const idx = args.indexOf("--validate-receipt");
       const raw = args[idx + 1];
       if (raw == null) throw receiptError("validate-input-missing", "--validate-receipt requires a '<receipt-json>' argument");
-      const receipt = parseJsonArg(raw);
+      const receipt = parseJsonArg(raw, receiptError);
       let expected: { baseCommit?: string; candidateCommit?: string; workflowSourceHash?: string; runtimeGeneration?: string; materialInputHashes?: Record<string, string> } | undefined;
       const expIdx = args.indexOf("--expected");
       if (expIdx !== -1 && args[expIdx + 1] != null) {
-        expected = parseJsonArg(args[expIdx + 1]) as typeof expected;
+        expected = parseJsonArg(args[expIdx + 1], receiptError) as typeof expected;
       }
       const result = validateReceipt(receipt, expected);
       printJson(result);
@@ -866,7 +855,7 @@ export function main(argv: string[]): number {
       const idx = args.indexOf("--evidence-manifest-ref");
       const raw = args[idx + 1];
       if (raw == null) throw receiptError("ref-input-missing", "--evidence-manifest-ref requires a '<{path,sha256}>' argument");
-      const ref = parseJsonArg(raw) as { path: string; sha256?: string; hash?: string };
+      const ref = parseJsonArg(raw, receiptError) as { path: string; sha256?: string; hash?: string };
       const result = validateEvidenceManifestRef(ref);
       printJson(result);
       return result.ok ? 0 : 1;
@@ -876,7 +865,7 @@ export function main(argv: string[]): number {
       const idx = args.indexOf("--migrate-prepare-ledger");
       const raw = args[idx + 1];
       if (raw == null) throw receiptError("migrate-input-missing", "--migrate-prepare-ledger requires a '<entry-json>' argument");
-      const entry = parseJsonArg(raw) as Record<string, unknown>;
+      const entry = parseJsonArg(raw, receiptError) as Record<string, unknown>;
       const result = migratePrepareLedger(entry);
       printJson(result);
       return result.ok ? 0 : 1;

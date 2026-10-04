@@ -32,7 +32,7 @@ import fs from "node:fs";
 import path from "node:path";
 import { createHash } from "node:crypto";
 import { execSync } from "node:child_process";
-import { createSelftest } from "./gate-script-base.ts";
+import { createSelftest, parseJsonArg } from "./gate-script-base.ts";
 
 // ── Types ───────────────────────────────────────────────────────────────────────────────────────────
 
@@ -501,17 +501,6 @@ function usage(): string {
   ].join("\n");
 }
 
-function parseJsonArg(raw: string): unknown {
-  let s = raw;
-  if (s.startsWith("'") && s.endsWith("'")) s = s.slice(1, -1);
-  if (s.startsWith('"') && s.endsWith('"')) s = s.slice(1, -1);
-  try {
-    return JSON.parse(s);
-  } catch {
-    throw identityError("invalid-json", `invalid JSON argument: ${raw}`);
-  }
-}
-
 const RUN_IDENTITY_FIELDS = [
   "schemaVersion",
   "runId",
@@ -546,7 +535,7 @@ function validateRunIdentityShape(obj: unknown): RunIdentity {
 }
 
 function requireIdentity(raw: string): RunIdentity {
-  return validateRunIdentityShape(parseJsonArg(raw));
+  return validateRunIdentityShape(parseJsonArg(raw, identityError));
 }
 
 /** Sole `process.exit()` owner (via process.exitCode in the direct-entry guard). */
@@ -561,7 +550,7 @@ export function main(argv: string[]): number {
       const idx = args.indexOf("--create");
       const raw = args[idx + 1];
       if (raw == null) throw identityError("create-input-missing", "--create requires a '<json>' argument");
-      const input = parseJsonArg(raw) as MintRunIdentityInput;
+      const input = parseJsonArg(raw, identityError) as MintRunIdentityInput;
       const identity = mintRunIdentity(input);
       console.log(serializeIdentity(identity));
       return 0;

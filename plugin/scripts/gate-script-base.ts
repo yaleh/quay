@@ -183,6 +183,40 @@ export function resolveRoot(rootArg: string | undefined): string {
   return path.resolve(rootArg ?? process.cwd());
 }
 
+// ── parseJsonArg ────────────────────────────────────────────────────────────────────────────────────
+// Parse a CLI `<json>` argument: strip ONE layer of matching single/double quotes (the shell keeps the
+// quotes when a caller writes `--x '{...}'`) then `JSON.parse`. The quote-strip-then-parse body was
+// carried byte-identically by five `plugin/scripts/*.ts` entry points; only the failure mode differed
+// (semantic-dedup-scan routine, runId `semantic-dedup-scan-1791142275270`, findingId `near-25`,
+// verdict `real-duplication`, suggestedAction `extract`). Three threw a typed structured error
+// (`identityError` / `receiptError` / a plain `invalid-json:` Error) and two let JSON.parse's
+// SyntaxError escape. All five ALREADY imported this module, so — as with flagValue / resolveRoot
+// above — the shared home existed and the copies were pure maintainability debt.
+//
+// THE CALLER OWNS HOW A PARSE FAILURE SURFACES, via `makeError(code, message)`, so each CLI keeps its
+// exact error contract without re-copying the logic. run-identity in particular must pass
+// `identityError`: plugin/test/run-identity.test.mjs pins `code: "invalid-json"` on malformed input,
+// and the default (plain Error, no `.code`) would degrade it to `run-identity-error`.
+//
+// ⛔ Callers that pass NO factory get a plain `Error` with the `invalid JSON argument: <raw>` message.
+// That is a DELIBERATE unification for the two former bare copies (execution-policy /
+// finding-backpropagate), which previously let JSON.parse throw an unadorned SyntaxError: both read
+// fail-closed either way (the process exits non-zero), so no caller's control flow changes — only the
+// message gains the offending argument.
+export type JsonArgErrorFactory = (code: string, message: string) => Error;
+
+export function parseJsonArg(raw: string, makeError?: JsonArgErrorFactory): unknown {
+  let s = raw;
+  if (s.startsWith("'") && s.endsWith("'")) s = s.slice(1, -1);
+  if (s.startsWith('"') && s.endsWith('"')) s = s.slice(1, -1);
+  try {
+    return JSON.parse(s);
+  } catch {
+    const message = `invalid JSON argument: ${raw}`;
+    throw makeError ? makeError("invalid-json", message) : new Error(message);
+  }
+}
+
 // ── readFrontmatter ─────────────────────────────────────────────────────────────────────────────────
 // Read and parse YAML frontmatter from a markdown file.
 // Returns a Record of key→value for simple scalar/list fields, or null if no frontmatter found.

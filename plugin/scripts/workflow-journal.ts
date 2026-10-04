@@ -38,7 +38,7 @@ import fs from "node:fs";
 import path from "node:path";
 import { execSync } from "node:child_process";
 import { validateEvent, emitEvent, VALID_STAGES } from "./workflow-event-schema.mjs";
-import { createSelftest } from "./gate-script-base.ts";
+import { createSelftest, parseJsonArg } from "./gate-script-base.ts";
 import {
   sha256File,
   serializeReceipt,
@@ -608,16 +608,8 @@ function printJson(obj: unknown): void {
   console.log(JSON.stringify(obj));
 }
 
-function parseJsonArg(raw: string): unknown {
-  let s = raw;
-  if (s.startsWith("'") && s.endsWith("'")) s = s.slice(1, -1);
-  if (s.startsWith('"') && s.endsWith('"')) s = s.slice(1, -1);
-  try {
-    return JSON.parse(s);
-  } catch {
-    throw new Error(`invalid-json: invalid JSON argument: ${raw}`);
-  }
-}
+/** This module's historical CLI-JSON error text: `invalid-json: <message>` (kept verbatim). */
+const journalJsonError = (code: string, message: string) => new Error(`${code}: ${message}`);
 
 export function main(argv: string[]): number {
   const args = argv.slice(2);
@@ -635,7 +627,7 @@ export function main(argv: string[]): number {
       const idx = args.indexOf("--append-stage");
       const raw = args[idx + 1];
       if (raw == null) throw new Error("append-input-missing: --append-stage requires a '<json>' argument");
-      const event = parseJsonArg(raw) as Record<string, unknown>;
+      const event = parseJsonArg(raw, journalJsonError) as Record<string, unknown>;
       const store = new StageJournalStore({ milestoneId, cwd });
       const result = store.appendStage(event);
       printJson(result);
@@ -646,7 +638,7 @@ export function main(argv: string[]): number {
       const idx = args.indexOf("--persist-verify-cache");
       const raw = args[idx + 1];
       if (raw == null) throw new Error("cache-input-missing: --persist-verify-cache requires a '<updates-json>' argument");
-      const updates = parseJsonArg(raw) as Record<string, Record<string, unknown>>;
+      const updates = parseJsonArg(raw, journalJsonError) as Record<string, Record<string, unknown>>;
       const store = new StageJournalStore({ milestoneId, cwd });
       const result = store.persistVerifyCache(updates);
       printJson(result);
@@ -657,7 +649,7 @@ export function main(argv: string[]): number {
       const idx = args.indexOf("--load-validated-verify-cache");
       const raw = args[idx + 1];
       if (raw == null) throw new Error("cache-input-missing: --load-validated-verify-cache requires a '<runIdentity-json>' argument");
-      const identity = parseJsonArg(raw) as Record<string, unknown>;
+      const identity = parseJsonArg(raw, journalJsonError) as Record<string, unknown>;
       const store = new StageJournalStore({ milestoneId, cwd });
       const result = store.loadValidatedVerifyCache(identity);
       printJson(result);
@@ -674,7 +666,7 @@ export function main(argv: string[]): number {
         printJson(store.recordAbsentMigration("dir124a"));
         return 0;
       }
-      const event = parseJsonArg(raw) as Record<string, unknown>;
+      const event = parseJsonArg(raw, journalJsonError) as Record<string, unknown>;
       const store = new StageJournalStore({ milestoneId, cwd });
       const result = store.migrateDir124AEvent(event);
       printJson(result);
@@ -690,7 +682,7 @@ export function main(argv: string[]): number {
         printJson(store.recordAbsentMigration("dir126d"));
         return 0;
       }
-      const record = parseJsonArg(raw) as Record<string, unknown>;
+      const record = parseJsonArg(raw, journalJsonError) as Record<string, unknown>;
       const store = new StageJournalStore({ milestoneId, cwd });
       const result = store.migrateDir126DTelemetry(record);
       printJson(result);

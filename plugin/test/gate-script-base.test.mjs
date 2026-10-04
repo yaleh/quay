@@ -27,6 +27,7 @@ import {
   VERDICT_EXIT_CODE,
   flagValue,
   resolveRoot,
+  parseJsonArg,
   createSelftest,
   readJsonLines,
   readJsonlLines,
@@ -267,6 +268,110 @@ test("resolveRoot: the extracted body lives in the base ONLY — the five caller
     const src = fs.readFileSync(path.join(SCRIPTS_DIR, caller), "utf8");
     assert.match(src, /import \{[^}]*\bresolveRoot\b[^}]*\} from "\.\/gate-script-base\.ts"/, `${caller} does not import resolveRoot from the base`);
   }
+});
+
+// ── parseJsonArg ────────────────────────────────────────────────────────────────────────────────────
+// The extraction under task gap-routine-semantic-dedup-scan-near-25 (semantic-dedup-scan finding
+// `near-25`, runId `semantic-dedup-scan-1791142275270`, verdict `real-duplication`, suggestedAction
+// `extract`): five entry points carried the same quote-strip-then-JSON.parse body, differing only in
+// HOW a parse failure surfaced. These pin the PARSE RULE and the ERROR CONTRACT each call site
+// inherited (not just "it compiles"), plus the mechanical single-source ratchet.
+
+test("parseJsonArg: strips ONE layer of matching single/double quotes, then parses", () => {
+  assert.deepEqual(parseJsonArg("'{\"a\":1}'"), { a: 1 }); // single-quoted arg => {"a":1}
+  assert.deepEqual(parseJsonArg('"[1,2]"'), [1, 2]);
+});
+
+test("parseJsonArg: bare JSON (no surrounding quotes) parses unchanged", () => {
+  assert.deepEqual(parseJsonArg('{"a":1}'), { a: 1 });
+  assert.deepEqual(parseJsonArg("[1,2]"), [1, 2]);
+  assert.equal(parseJsonArg("3"), 3);
+});
+
+test("parseJsonArg: a MISMATCHED quote pair is not stripped (only a matching pair is)", () => {
+  // `'{...}"` has a single opening and a double closing quote — neither arm fires, so the raw text
+  // reaches JSON.parse and fails. Recorded so the strip is a known rule, not "strips any quotes".
+  assert.throws(() => parseJsonArg("'{\"a\":1}\""), /invalid JSON argument/);
+});
+
+test("parseJsonArg: invalid JSON throws — the DEFAULT is a plain Error naming the raw arg", () => {
+  let err;
+  try {
+    parseJsonArg("{not valid json");
+  } catch (e) {
+    err = e;
+  }
+  assert.ok(err instanceof Error);
+  assert.equal(err.constructor, Error, "no factory ⇒ the base must not invent a typed error");
+  assert.equal(err.code, undefined, "the default carries no `.code` — that is the caller's to supply");
+  assert.match(err.message, /invalid JSON argument: \{not valid json/);
+});
+
+test("parseJsonArg: a supplied factory receives ('invalid-json', message) — the typed contract run-identity/stage-receipt depend on", () => {
+  // This is the whole point of the factory parameter: run-identity's CLI pins `code: "invalid-json"`
+  // (plugin/test/run-identity.test.mjs), so the shared body must hand the code AND the message to the
+  // caller's error constructor rather than hardcoding either.
+  const seen = [];
+  const factory = (code, message) => {
+    seen.push(code);
+    const e = new Error(message);
+    e.code = code;
+    return e;
+  };
+  let err;
+  try {
+    parseJsonArg("'<bad>'", factory);
+  } catch (e) {
+    err = e;
+  }
+  assert.deepEqual(seen, ["invalid-json"]);
+  assert.equal(err.code, "invalid-json");
+  assert.match(err.message, /invalid JSON argument: '<bad>'/, "the message names the ORIGINAL raw arg, quotes intact");
+});
+
+test("parseJsonArg: the shared body lives in the base ONLY — the five former carriers carry no private copy", () => {
+  // The mechanical statement of the finding, kept as a regression guard: if a carrier re-inlines the
+  // body (or a sixth appears), this goes RED instead of quietly regrowing the duplication the routine
+  // filed. The predicate is POSITIONAL (the exact strip statement), so a comment mentioning it — or
+  // inner-wakeup-heartbeat.ts's unrelated same-named export (no quote-strip) — does not count.
+  const STRIP = `if (s.startsWith("'") && s.endsWith("'")) s = s.slice(1, -1);`;
+  const carriers = [
+    "run-identity.ts",
+    "stage-receipt.ts",
+    "workflow-journal.ts",
+    "execution-policy.ts",
+    "finding-backpropagate.ts",
+  ];
+
+  const hits = (file) => fs.readFileSync(path.join(SCRIPTS_DIR, file), "utf8").split("\n").filter((l) => l.trim() === STRIP).length;
+
+  for (const carrier of carriers) {
+    assert.equal(hits(carrier), 0, `${carrier} re-inlined the parse body instead of importing parseJsonArg`);
+  }
+  assert.equal(hits("gate-script-base.ts"), 1, "the base must hold the body exactly once");
+
+  // ... and each carrier must actually IMPORT the shared one (a carrier that merely deleted the
+  // private copy without importing would still pass the count above, so this half is not redundant).
+  for (const carrier of carriers) {
+    const src = fs.readFileSync(path.join(SCRIPTS_DIR, carrier), "utf8");
+    assert.match(src, /import \{[^}]*\bparseJsonArg\b[^}]*\} from "\.\/gate-script-base\.ts"/, `${carrier} does not import parseJsonArg from the base`);
+  }
+});
+
+test("parseJsonArg: deleting the shared export makes a consumer import fail (the mechanism is real)", () => {
+  withTempDir("parsejsonarg-negctl-", (dir) => {
+    fs.writeFileSync(path.join(dir, "gate-script-base.ts"), "export const OTHER = 1;\n");
+    fs.writeFileSync(
+      path.join(dir, "consumer.ts"),
+      'import { parseJsonArg } from "./gate-script-base.ts";\nconsole.log(parseJsonArg);\n',
+    );
+    const missing = spawnSync("node", ["--experimental-strip-types", "consumer.ts"], { cwd: dir, encoding: "utf8" });
+    assert.notEqual(missing.status, 0, "a consumer importing an absent export must fail to link");
+
+    fs.writeFileSync(path.join(dir, "gate-script-base.ts"), "export function parseJsonArg() { return {}; }\n");
+    const present = spawnSync("node", ["--experimental-strip-types", "consumer.ts"], { cwd: dir, encoding: "utf8" });
+    assert.equal(present.status, 0, "the same consumer links once the export is present");
+  });
 });
 
 // ── createSelftest ──────────────────────────────────────────────────────────────────────────────────

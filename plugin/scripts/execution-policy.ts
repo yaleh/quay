@@ -30,7 +30,7 @@
 // Byte-identical mirror: plugin/scripts/execution-policy.ts
 
 import { createHash } from "node:crypto";
-import { createSelftest } from "./gate-script-base.ts";
+import { createSelftest, parseJsonArg } from "./gate-script-base.ts";
 
 // ── Contract version ───────────────────────────────────────────────────────────────────────────────
 
@@ -397,13 +397,6 @@ export function selftest(): boolean {
 }
 
 // ── CLI entry ─────────────────────────────────────────────────────────────────────────────────────────
-
-function parseJsonArg(raw: string): unknown {
-  let s = raw;
-  if (s.startsWith("'") && s.endsWith("'")) s = s.slice(1, -1);
-  if (s.startsWith('"') && s.endsWith('"')) s = s.slice(1, -1);
-  return JSON.parse(s);
-}
 
 function usage(): string {
   return [

@@ -40,7 +40,7 @@ import fs from "node:fs";
 import path from "node:path";
 import type { FindingEnvelope } from "./stage-receipt.ts";
 import { sha256OfString, migratePrepareLedger } from "./stage-receipt.ts";
-import { createSelftest } from "./gate-script-base.ts";
+import { createSelftest, parseJsonArg } from "./gate-script-base.ts";
 import {
   authorizeActivation,
   revokeActivation,
@@ -804,13 +804,6 @@ function rebuildActivePolicy(base: PolicyDocument, newHash: string, det: Detecto
 }
 
 // ── CLI entry ─────────────────────────────────────────────────────────────────────────────────────────
-
-function parseJsonArg(raw: string): unknown {
-  let s = raw;
-  if (s.startsWith("'") && s.endsWith("'")) s = s.slice(1, -1);
-  if (s.startsWith('"') && s.endsWith('"')) s = s.slice(1, -1);
-  return JSON.parse(s);
-}
 
 function usage(): string {
   return [
