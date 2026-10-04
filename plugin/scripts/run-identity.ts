@@ -32,7 +32,7 @@ import fs from "node:fs";
 import path from "node:path";
 import { createHash } from "node:crypto";
 import { execSync } from "node:child_process";
-import { createSelftest, parseJsonArg } from "./gate-script-base.ts";
+import { createSelftest, parseJsonArg, git, gitLastCommitForPath } from "./gate-script-base.ts";
 
 // ── Types ───────────────────────────────────────────────────────────────────────────────────────────
 
@@ -93,29 +93,21 @@ function sha256OfBuffer(buf: Buffer): string {
   return createHash("sha256").update(buf).digest("hex");
 }
 
-// ── git helpers (inline; same shape as build-evidence-gate.ts) ──────────────────────────────────────
-
-function git(args: string[], cwd: string): string {
-  return execSync(`git ${args.join(" ")}`, { cwd, encoding: "utf8", timeout: 10_000 }).trim();
-}
+// ── git helpers — the shared fail-closed `git(args, cwd): GitResult` and `gitLastCommitForPath` now
+// live in gate-script-base.ts. This file's byte-identical private `git()` and `deriveWorkflowSourceCommit`
+// copies were removed (routine `semantic-dedup-scan`, finding `ident-fcdeccc5d81b054c`, runId
+// `semantic-dedup-scan-1791142275270`) — the same extraction the sibling finding `git-helper-collector-gate`
+// executed for build-evidence-collector.ts / build-evidence-gate.ts. ───────────────────────────────
 
 function deriveBaseCommit(cwd: string): string {
-  try {
-    return git(["rev-parse", "HEAD"], cwd);
-  } catch {
+  const result = git(["rev-parse", "HEAD"], cwd);
+  if (!result.ok) {
     throw identityError(
       "base-commit-unresolved",
       `git rev-parse HEAD failed in ${cwd} — an unbindable identity is a validation failure`
     );
   }
-}
-
-function deriveWorkflowSourceCommit(workflowSourcePath: string, cwd: string): string {
-  try {
-    return git(["log", "-1", "--format=%H", "--", workflowSourcePath], cwd);
-  } catch {
-    return "";
-  }
+  return result.stdout;
 }
 
 // ── DD6 mirror derivation (`.claude/workflows/` ↔ `plugin/workflows/`) ─────────────────────────────
@@ -239,7 +231,7 @@ export function mintRunIdentity(input: MintRunIdentityInput): RunIdentity {
   }
   const baseCommit = derivedBaseCommit;
 
-  const workflowSourceCommit = deriveWorkflowSourceCommit(input.workflowSourcePath, cwd);
+  const workflowSourceCommit = gitLastCommitForPath(cwd, input.workflowSourcePath);
 
   // ── taskHash — sha256 over task-file bytes concatenated in sorted-taskId order (deterministic) ──
   const sortedPairs = input.taskIds

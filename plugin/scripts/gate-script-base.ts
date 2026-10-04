@@ -2,7 +2,7 @@
 // Import the functions/classes you need from this module.
 //
 // Usage:
-//   import { parseArgs, flagValue, readFrontmatter, emitPass, emitFail, emitNotEvaluated, emitVerdict, requireArg, isDirectEntry, git } from "./gate-script-base.ts";
+//   import { parseArgs, flagValue, readFrontmatter, emitPass, emitFail, emitNotEvaluated, emitVerdict, requireArg, isDirectEntry, git, gitLastCommitForPath } from "./gate-script-base.ts";
 
 import { execSync } from "node:child_process";
 import fs from "node:fs";
@@ -558,6 +558,18 @@ export function git(args: string[], cwd: string): GitResult {
   } catch (e) {
     return { ok: false, stdout: "", error: (e as Error).message };
   }
+}
+
+/** The last commit that touched `relPath` (repo-relative) in `cwd`, or "" when git cannot answer.
+ *  Extracted (routine `semantic-dedup-scan`, finding `ident-fcdeccc5d81b054c`, runId
+ *  `semantic-dedup-scan-1791142275270`, verdict real-duplication, suggestedAction extract) from
+ *  run-identity.ts / stage-receipt.ts, which each carried a byte-identical `deriveWorkflowSourceCommit`
+ *  wrapping the same `git log -1 --format=%H -- <path>` invocation. Both callers returned "" on a
+ *  failed invocation, so a never-committed path and an un-runnable git stay one "" result — this
+ *  helper preserves exactly that. */
+export function gitLastCommitForPath(cwd: string, relPath: string): string {
+  const result = git(["log", "-1", "--format=%H", "--", relPath], cwd);
+  return result.ok ? result.stdout : "";
 }
 
 // ── Selftest harness (ADR-018 selfcheck-fixture pattern) ─────────────────────────────────────────────

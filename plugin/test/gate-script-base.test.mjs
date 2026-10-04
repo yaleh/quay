@@ -886,3 +886,34 @@ test("git: deleting the shared export makes a consumer import fail (the mechanis
     assert.equal(present.status, 0, "the same consumer links once the export is present");
   });
 });
+
+// ── git: the THROWING `(args, cwd): string` form is gone (finding `ident-fcdeccc5d81b054c`) ─────────
+//
+// run-identity.ts / stage-receipt.ts each carried a byte-identical private
+// `function git(args: string[], cwd: string): string` that THREW on failure (routine
+// `semantic-dedup-scan`, runId `semantic-dedup-scan-1791142275270`, verdict real-duplication,
+// suggestedAction extract). Both now import the fail-closed `git` above, and their sibling
+// `deriveWorkflowSourceCommit` (also byte-identical) collapsed into `gitLastCommitForPath`. The pin
+// keys on the THROWING signature — a bare `function git(` scan would sweep in the legitimately
+// different-contract `git()` definitions elsewhere under plugin/scripts (phase-declare.ts,
+// dev-stats-collect.ts, …) and read a false red.
+const THROWING_GIT_RE = /function git\(args: string\[\], cwd: string\): string \{/;
+const GIT_THROWING_FORMER_CARRIERS = ["run-identity.ts", "stage-receipt.ts"];
+
+test("git: the throwing (args, cwd): string form has NO remaining definition under plugin/scripts", () => {
+  const defs = scriptTsFiles().filter((f) => THROWING_GIT_RE.test(sourceOf(f)));
+  assert.deepEqual(defs, [], `no file may keep the throwing git form; found: ${defs.length ? defs.join(", ") : "none"}`);
+});
+
+test("git: both throwing-form former carriers now IMPORT the shared fail-closed runner", () => {
+  for (const f of GIT_THROWING_FORMER_CARRIERS) {
+    assert.doesNotMatch(sourceOf(f), THROWING_GIT_RE, `${f} must not redefine the throwing git form`);
+    // Deleting the private copy without importing the shared one would still pass the line above, so
+    // this half distinguishes "extracted" from "deleted" (same shape as the GitResult pair above).
+    assert.match(
+      sourceOf(f),
+      /import \{[^}]*\bgit\b[^}]*\} from "\.\/gate-script-base\.ts"/,
+      `${f} does not import git from the base`,
+    );
+  }
+});

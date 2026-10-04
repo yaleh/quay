@@ -40,7 +40,7 @@ import fs from "node:fs";
 import path from "node:path";
 import { createHash } from "node:crypto";
 import { execSync } from "node:child_process";
-import { createSelftest, parseJsonArg } from "./gate-script-base.ts";
+import { createSelftest, parseJsonArg, git, gitLastCommitForPath } from "./gate-script-base.ts";
 import {
   SCHEMA_VERSION as A1_SCHEMA_VERSION,
   VALID_STAGES,
@@ -240,29 +240,21 @@ export function serializeReceipt(receipt: StageReceiptEnvelope): string {
   return JSON.stringify(sorted);
 }
 
-// ── git helpers (inline; same shape as run-identity.ts / build-evidence-gate.ts) ───────────────────
-
-function git(args: string[], cwd: string): string {
-  return execSync(`git ${args.join(" ")}`, { cwd, encoding: "utf8", timeout: 10_000 }).trim();
-}
-
-function deriveWorkflowSourceCommit(workflowSourcePath: string, cwd: string): string {
-  try {
-    return git(["log", "-1", "--format=%H", "--", workflowSourcePath], cwd);
-  } catch {
-    return "";
-  }
-}
+// ── git helpers — the shared fail-closed `git(args, cwd): GitResult` and `gitLastCommitForPath` now
+// live in gate-script-base.ts. This file's byte-identical private `git()` and `deriveWorkflowSourceCommit`
+// copies were removed (routine `semantic-dedup-scan`, finding `ident-fcdeccc5d81b054c`, runId
+// `semantic-dedup-scan-1791142275270`) — the same extraction the sibling finding `git-helper-collector-gate`
+// executed for build-evidence-collector.ts / build-evidence-gate.ts. ───────────────────────────────
 
 function deriveBaseCommit(cwd: string): string {
-  try {
-    return git(["rev-parse", "HEAD"], cwd);
-  } catch {
+  const result = git(["rev-parse", "HEAD"], cwd);
+  if (!result.ok) {
     throw receiptError(
       "base-commit-unresolved",
       `git rev-parse HEAD failed in ${cwd} — an unbindable receipt is a validation failure`
     );
   }
+  return result.stdout;
 }
 
 // ── buildReceiptEnvelope / bindReceipt (AC2) ───────────────────────────────────────────────────────
@@ -295,7 +287,7 @@ export function buildReceiptEnvelope(input: BindReceiptInput): StageReceiptEnvel
     throw receiptError("workflow-source-missing", `workflow source not found: ${input.workflowSourcePath}`);
   }
   const workflowSourceHash = sha256File(workflowSourceAbs);
-  const workflowSourceCommit = deriveWorkflowSourceCommit(input.workflowSourcePath, cwd);
+  const workflowSourceCommit = gitLastCommitForPath(cwd, input.workflowSourcePath);
   const runtimeGeneration = input.runtimeGeneration || sha256OfString(workflowSourceHash).slice(0, 12);
 
   const candidateCommit = input.candidateCommit ?? null;
@@ -698,7 +690,7 @@ export function selftest(): boolean {
     execSync("git commit -q -m fixture", { cwd: fixtureDir });
     process.chdir(fixtureDir);
 
-    const baseCommit = git(["rev-parse", "HEAD"], fixtureDir);
+    const baseCommit = deriveBaseCommit(fixtureDir);
     const input: BindReceiptInput = {
       runId: "M254::DIR-124-B2::1",
       candidateId: "M254",
