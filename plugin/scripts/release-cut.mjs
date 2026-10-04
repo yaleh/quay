@@ -121,6 +121,32 @@ function run(cmd, args, opts = {}) {
   return { status: r.status ?? (r.error ? 127 : 1), stdout: r.stdout ?? "", stderr: r.stderr ?? "" };
 }
 
+/**
+ * The tail of a failed child's OWN diagnostic output, for folding into the caller's `CAUSE=`.
+ *
+ * ⛔ BOTH streams are read, deliberately. A repo checker built on `gate-script-base.ts`'s
+ * `emitVerdict` family reports on **stdout** by default (`NOT-EVALUATED: …` / `FAIL: …`), while Node
+ * and `bash` report their own errors on stderr. Capturing only one half would make the CAUSE text
+ * depend on which stream the child happened to pick — and a child that is silent on the half you
+ * captured reads exactly like a child that said nothing at all (硬规则 5: a search is only
+ * conclusive over a COMPLETE source; 硬规则 3b: "could not read the reason" must not share an output
+ * shape with "there was no reason"). Measured 2026-10-04: `quay-init-closure-ratchet.ts --reanchor`
+ * puts the ONLY copy of its reason on stdout and exits 3 — capturing stderr alone would have shown
+ * just Node's MODULE_TYPELESS warning.
+ *
+ * `(no output on stdout or stderr)` is its own value, never conflated with a short-but-real tail.
+ */
+function diagnosticTail(r, max = 800) {
+  const out = typeof r.stdout === "string" ? r.stdout.trim() : "";
+  const err = typeof r.stderr === "string" ? r.stderr.trim() : "";
+  const parts = [];
+  if (out) parts.push(`stdout: ${out}`);
+  if (err) parts.push(`stderr: ${err}`);
+  if (parts.length === 0) return "the child wrote nothing to stdout or stderr";
+  const joined = parts.join(" | ");
+  return joined.length > max ? `…${joined.slice(-max)}` : joined;
+}
+
 const git = (dir, ...args) => run("git", ["-C", dir, ...args]);
 
 /**
@@ -447,6 +473,11 @@ if (doPush) {
 
 // ── step 4: dispatch release.yml on the tag, and echo the run URL ─────────────────────────────
 if (doDispatch) {
+  // ⛔ `ignore` is KEPT here, and it is the only all-ignore left in this file: this is a pure
+  // EXISTENCE probe whose whole signal is the exit status. `command -v` writes the resolved path to
+  // stdout and NOTHING to stderr on failure, so there is no diagnostic to fold in — the CAUSE
+  // below already states the fact the probe measured ("'gh' is not on PATH"). Contrast the three
+  // sites further down, where a FAILED command has its own reason to report.
   if (run("bash", ["-c", "command -v gh"], { stdio: ["ignore", "ignore", "ignore"] }).status !== 0) {
     fail(
       "release-cut-dispatch-unavailable",
@@ -454,10 +485,11 @@ if (doDispatch) {
       1,
     );
   }
-  if (run("gh", ["workflow", "run", "release.yml", "-f", `tag=${tag}`], { stdio: ["ignore", "ignore", "ignore"] }).status !== 0) {
+  const dispatched = run("gh", ["workflow", "run", "release.yml", "-f", `tag=${tag}`], { stdio: ["ignore", "pipe", "pipe"] });
+  if (dispatched.status !== 0) {
     fail(
       "release-cut-dispatch-failed",
-      `'gh workflow run release.yml -f tag=${tag}' failed; the cut itself is complete. Dispatch by hand and record the run id`,
+      `'gh workflow run release.yml -f tag=${tag}' failed (gh exited ${dispatched.status}); the cut itself is complete. Dispatch by hand and record the run id. gh's own reason — ${diagnosticTail(dispatched)}`,
       1,
     );
   }
@@ -497,17 +529,19 @@ try {
 } catch (err) {
   fail("release-cut-bump-write-failed", `could not write VERSION=${nextVersion} in '${worktree}': ${err.message}`, 1);
 }
-if (run("node", ["--experimental-strip-types", stamper, "--root", worktree], { stdio: ["ignore", "ignore", "ignore"] }).status !== 0) {
+const stamped = run("node", ["--experimental-strip-types", stamper, "--root", worktree], { stdio: ["ignore", "pipe", "pipe"] });
+if (stamped.status !== 0) {
   fail(
     "release-cut-bump-stamp-failed",
-    `scripts/stamp-version.ts failed against '${worktree}'; the cut itself is complete (tag ${tag}), but the next-version bump did NOT land — 'develop' still advertises ${version}`,
+    `scripts/stamp-version.ts failed against '${worktree}' (exited ${stamped.status}); the cut itself is complete (tag ${tag}), but the next-version bump did NOT land — 'develop' still advertises ${version}. stamp-version's own reason — ${diagnosticTail(stamped)}`,
     1,
   );
 }
-if (run("node", ["--experimental-strip-types", ratchet, "--reanchor", "--root", worktree], { stdio: ["ignore", "ignore", "ignore"] }).status !== 0) {
+const reanchored = run("node", ["--experimental-strip-types", ratchet, "--reanchor", "--root", worktree], { stdio: ["ignore", "pipe", "pipe"] });
+if (reanchored.status !== 0) {
   fail(
     "release-cut-bump-ratchet-failed",
-    `the closure-ratchet baseline could not be re-anchored in '${worktree}'; committing now would leave the pre-commit guard rejecting later commits, so the bump is NOT committed`,
+    `the closure-ratchet baseline could not be re-anchored in '${worktree}' (ratchet exited ${reanchored.status}); committing now would leave the pre-commit guard rejecting later commits, so the bump is NOT committed. The ratchet's own verdict — ${diagnosticTail(reanchored)}`,
     1,
   );
 }
