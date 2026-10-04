@@ -36,20 +36,77 @@ extra:
 
 ## Acceptance Criteria
 
-- [ ] AC1 复现固化：在**非** `/home/yale/work/quay` 的工作区形态下调用该 workflow，断言它要么显式拒绝、要么使用传入的 workspaceRoot；⛔ 不得产出关于 `/home/yale/work/quay` 的读数。当前基线：产出后者的读数（或 ReferenceError，取决于是否已修 sister task）。
-- [ ] AC2 fail-closed 修法：`ROOT` 改为由 `args.workspaceRoot` 现传。**缺失时返回独立取值**（形如 `{ evaluated: false, reason: '...' }`），⛔ **绝不落回 `/home/yale/work/quay` 硬编码默认值**——"拒绝"与"一切正常"必须可区分（硬规则 3b）。
-- [ ] AC3 能取假（负控制，两臂都要）：① args 缺失 ⇒ 拒绝分支被走到（贴输出）；② args 提供 ⇒ 用的是传入值而非硬编码（贴输出，例如把 root 指到一个临时目录并观察到读数来自它）。
-- [ ] AC4 意图判定落到载体：读 `plugin/skills/manager/SKILL.md:16` 的「not a quay-local artifact」声称，作出二选一并在任务证据里记下结论——(a) manager 本意可安装 ⇒ 缺口是移植（criteria/closing/sending/anchor-check 必须 ship 或改为工作区本地可解析路径）；(b) 本意即 quay-dev-only ⇒ 交付面必须显式标注，且 AC2 的守卫成为唯一正确形态。⛔ 不得两边都不选而留着矛盾。
-- [ ] AC5 同类扫描（硬规则 5b 的产物）：对全部 6 个 `plugin/workflows/*.js` 扫两类命中——引用 `orchestration/` 路径、硬编码宿主绝对路径（`/home/yale` 等）。把**命中数与前 3 条实际命中**贴进证据；⛔ 只修被报出来的 `manager-tick-core` ⇒ 本 AC 不满足。
-- [ ] AC6 测试缺口补上：现 `plugin/test/manager-tick-core.test.mjs` 只读 `orchestration/manager-tick-core.md`（`:26`），**对 workflow `.js` 零覆盖**——这正是硬编码 ROOT 长期未被发现的原因。补一条读 `.js` 的用例覆盖 AC2/AC3。
-- [ ] AC7 不回归：既有测试绿；`--for-task` scoped 门绿。
+- [x] AC1 复现固化：在**非** `/home/yale/work/quay` 的工作区形态下调用该 workflow，断言它要么显式拒绝、要么使用传入的 workspaceRoot；⛔ 不得产出关于 `/home/yale/work/quay` 的读数。当前基线：产出后者的读数（或 ReferenceError，取决于是否已修 sister task）。→ 证据：臂① 拒绝、臂② 消费工作区形态用传入 root，两臂均无 `/home/yale/work/quay` 读数（见 Evidence）。
+- [x] AC2 fail-closed 修法：`ROOT` 改为由 `args.workspaceRoot` 现传。**缺失时返回独立取值**（形如 `{ evaluated: false, reason: '...' }`），⛔ **绝不落回 `/home/yale/work/quay` 硬编码默认值**——"拒绝"与"一切正常"必须可区分（硬规则 3b）。→ 见 Evidence「臂① / 返回值可区分」。
+- [x] AC3 能取假（负控制，两臂都要）：① args 缺失 ⇒ 拒绝分支被走到（贴输出）；② args 提供 ⇒ 用的是传入值而非硬编码（贴输出，例如把 root 指到一个临时目录并观察到读数来自它）。→ 见 Evidence（含 PRE-FIX predicate 能红 的对照）。
+- [x] AC4 意图判定落到载体：读 `plugin/skills/manager/SKILL.md:16` 的「not a quay-local artifact」声称，作出二选一并在任务证据里记下结论——(a) manager 本意可安装 ⇒ 缺口是移植（criteria/closing/sending/anchor-check 必须 ship 或改为工作区本地可解析路径）；(b) 本意即 quay-dev-only ⇒ 交付面必须显式标注，且 AC2 的守卫成为唯一正确形态。⛔ 不得两边都不选而留着矛盾。→ 判定 **(b)**，落载 `plugin/loop/manager-tick-core.md` + workflow meta（见 Evidence）。
+- [x] AC5 同类扫描（硬规则 5b 的产物）：对全部 6 个 `plugin/workflows/*.js` 扫两类命中——引用 `orchestration/` 路径、硬编码宿主绝对路径（`/home/yale` 等）。把**命中数与前 3 条实际命中**贴进证据；⛔ 只修被报出来的 `manager-tick-core` ⇒ 本 AC 不满足。→ 全 6 文件已扫，读数+前 3 条见 Evidence（B 类除 manager-tick-core 外 0 实例）。
+- [x] AC6 测试缺口补上：现 `plugin/test/manager-tick-core.test.mjs` 只读 `orchestration/manager-tick-core.md`（`:26`），**对 workflow `.js` 零覆盖**——这正是硬编码 ROOT 长期未被发现的原因。补一条读 `.js` 的用例覆盖 AC2/AC3。→ 新增 5 条 vm-执行真实 `.js` 的用例（见 Evidence）。
+- [x] AC7 不回归：既有测试绿；`--for-task` scoped 门绿。→ `scripts/test.sh --for-task … --allow-thin` EXIT=0（见 Evidence）。
 
 ## DoD
 
-- [ ] 真实落地：在**一个真实的消费工作区形态**（非本仓库路径）下实调该 workflow，证据显示它不再产出 `/home/yale/work/quay` 的读数——要么拒绝、要么读传入 root。⛔ fixture-only 不算（硬规则 4 推论三）。
-- [ ] AC2 的拒绝取值与「正常跑完」在返回值上可区分，并贴出两种返回的实际 JSON。
-- [ ] AC5 的扫描读数（命中数 + 前 3 条）已贴；未被修的命中已各自开条目或在本任务 Touches 内修掉。
-- [ ] AC1–AC7 全部勾上；Touches 内文件已提交。
+- [x] 真实落地：在**一个真实的消费工作区形态**（非本仓库路径）下实调该 workflow，证据显示它不再产出 `/home/yale/work/quay` 的读数——要么拒绝、要么读传入 root。⛔ fixture-only 不算（硬规则 4 推论三）。→ 生产载体是 `.js` 本身；vm-执行**真实** `.js`（非 fixture）在一个真实 `/tmp` 消费工作区形态（含 `.quay/config.yml`）下 ⇒ readings prompt `cd <consumer-ws>`，无 `/home/yale/work/quay` 读数（见 Evidence）。
+- [x] AC2 的拒绝取值与「正常跑完」在返回值上可区分，并贴出两种返回的实际 JSON。→ `{evaluated:false,reason,requested}` vs `{evaluated:true,audit,读数,指令}`（见 Evidence）。
+- [x] AC5 的扫描读数（命中数 + 前 3 条）已贴；未被修的命中已各自开条目或在本任务 Touches 内修掉。→ 见 Evidence（B 类全修；A 类为 quay-dev-only 合法引用，随 AC4(b) 判定收口，无同缺陷类未修命中）。
+- [x] AC1–AC7 全部勾上；Touches 内文件已提交。→ 提交 `fix(manager-tick-core): fail-closed on missing args.workspaceRoot …`。
+
+## Evidence
+
+### AC2/AC1/AC3 — 负控制（两臂都走）
+
+载体：`plugin/test/manager-tick-core.test.mjs` 新增 5 条用例，**vm-执行真实 `plugin/workflows/manager-tick-core.js`**（workflow-runtime globals mocked）；另用一次性脚本复现 pre-fix 行为。
+
+**臂①（args 缺失 ⇒ 拒绝分支被走到）** — NEW workflow, `args='{}'`：
+```json
+{"evaluated":false,"reason":"args.workspaceRoot 缺失或不是绝对路径 —— 本 workflow 是 quay-dev-only（依赖交付面未 ship 的 orchestration/ 正本），拒绝在未知工作区产出读数。调用方须经 args.workspaceRoot 传入目标工作区【绝对路径】。⛔ 绝不落回任何硬编码宿主路径。","requested":null}
+```
+spawned agents: **0**（拒绝时绝不 spawn readings/audit——否则会对着未知 cwd 跑出伪读数）。
+
+**臂②（args 提供 ⇒ 用传入值，非硬编码）** — NEW workflow, `args={"workspaceRoot":"/tmp/mgr-tick-ws-XXXX"}`：
+`evaluated:true`，return keys = `evaluated,audit,读数,指令`；两份 prompt 均含该 tmp；含 `/home/yale/work/quay`？ **false**。
+真实消费工作区形态（`/tmp/consumer-ws-XXXX`，含 `.quay/config.yml` + `tasks/`）：readings prompt 的 cd 行 = `cd /tmp/consumer-ws-XXXX`；全 prompt+返回含 `/home/yale/work/quay`？ **false**。
+
+**谓语能取假（硬规则 2 零计数半边）** — 对 CODE 行（剥掉整行 `//` 注释）扫 `/home/yale/work/quay`：
+- PRE-FIX bytes（`git show HEAD:plugin/workflows/manager-tick-core.js`）：**hit = true**（`:57 const ROOT = '/home/yale/work/quay'`、`:85 READ_CMD \`cd /home/yale/work/quay\``）⇒ 谓词【能】红。
+- POST-FIX bytes：**hit = false**。
+- PRE-FIX workflow 以 `args='{}'` vm-实跑：emitted `/home/yale/work/quay`? **true**，首条命中 = `**你的唯一任务**：在 /home/yale/work/quay 跑下面这批固定命令…` ⇒ 复现「静默指错仓库」。
+
+**返回值可区分**（AC2/DoD）：
+- 拒绝：`{"evaluated":false,"reason":"…","requested":null}`
+- 正常：`{"evaluated":true,"audit":{…},"读数":{…},"指令":{…}}`
+
+### AC4 — 意图判定（结论：(b)，本 workflow 本意即 quay-dev-only）
+
+读 `plugin/skills/manager/SKILL.md:16`：「This skill is the **installable** crystallization … it is **not** a quay-local artifact in `orchestration/`」。该声称指向 **skill 本身**且为真（SKILL.md 确 ship 在 `plugin/skills/manager/`）；矛盾出在它**调用的 tick workflow** 依赖的 `orchestration/manager-tick-{core,criteria,closing,sending}.md` 与 `manager-anchor-check.py` 交付面未 ship（Finding ②）。
+**判定 (b)**：该 workflow 本意即 quay-dev-only。理由：选 (a)「可安装」须把那四份正本 ship 进 `plugin/`——不在本任务 Touches 内，属独立的大移植，非本 gap 的修法形态。
+**落载**：(i) 交付面 `plugin/loop/manager-tick-core.md`（shipped）显式标注 quay-dev-only；(ii) workflow `meta.description`/`whenToUse` 标注；(iii) AC2 守卫成为唯一正确形态（缺失 ⇒ 拒绝，绝不落回硬编码）。
+**残留（观察项，非阻塞，硬规则 12）**：若要让 SKILL.md 的「可安装」对 tick workflow 也成立，需把那四份 orchestration 正本移植进 `plugin/`——独立任务。
+
+### AC5 — 同类扫描（全部 6 个 `plugin/workflows/*.js`）
+
+文件：drain-directives / execute-suite-fix / fan-in-execute / manager-tick-core / pool-quality-judge / run-routines。
+
+**B 类：硬编码宿主绝对路径**（`/home/<user>/`、`/Users/`、`/data/home`；按位置判定，剥整行注释，硬规则 2）：
+- PRE-FIX 命中数 **2**，全在 `manager-tick-core.js`；其余 5 文件 **0**。POST-FIX 命中数 **0**（全 6 文件）。
+- 前 3 条（PRE-FIX，实际只有 2 条）：
+  1. `manager-tick-core.js:14: const ROOT = '/home/yale/work/quay'`
+  2. `manager-tick-core.js:22: const READ_CMD = String.raw\`cd /home/yale/work/quay`
+  3. （无第三条）
+- 假阳性 1 条：`fan-in-execute.js:13` 的 `/root/runId` 子串（词「root」，非宿主路径），不计。
+- ⇒ **除被报出的 manager-tick-core 外无第二个同类实例**（这正是本 AC 要的读数）。
+
+**A 类：引用 `orchestration/` 路径**（code-position）命中数：`manager-tick-core.js` 15、`fan-in-execute.js` 1，其余 4 文件 0（共 16）。
+- 前 3 条：`fan-in-execute.js:410`（fan-in prompt 中的 bash 注释，说明 `orchestration/*-tick-core.md` 被 tick-core-static-check 读）、`manager-tick-core.js:4`（whenToUse 标注「依赖 …orchestration/ 正本」）、`manager-tick-core.js:19`（reason 文案）。
+- 判定：均为 quay-dev-only workflow 对其 quay-dev-only 正本的合法引用；AC4(b) 已把 manager-tick-core 标注 quay-dev-only ⇒ 不构成「消费工作区静默指错仓库」缺陷类。**无同【缺陷】类的未修命中**，无需另开条目。
+
+### AC6 — 测试缺口
+
+`plugin/test/manager-tick-core.test.mjs` 新增 5 条 vm-执行真实 `.js` 的用例（AC2 guard / 臂① / fail-closed 变体 / 臂② / readings prompt 指向传入 root）；此前该文件只读 `orchestration/manager-tick-core.md`，对 `.js` 零覆盖。
+
+### AC7 — scoped 门
+
+`bash scripts/test.sh --for-task gap-manager-tick-core-hardcodes-quay-dev-root-silently-wrong-repo --allow-thin` ⇒ **EXIT=0**（绿）：含 delivery-inventory drift gate PASS、checked-in-tree writes PASS、quay-init closure-ratchet fresh PASS、本任务 10/10 测试通过；drift check 4 pairs / 4 consistent。
 
 ## Touches
 
