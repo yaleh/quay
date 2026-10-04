@@ -30,6 +30,7 @@ import {
   detectFileViolations,
   detectTickDocViolations,
   scanForScreenHashViolations,
+  isGeneratedMirrorPath,
   stripShellComments,
   judgeBand,
   judgeScreenHashScan,
@@ -111,6 +112,20 @@ test("AC3/AC7: the checker scans shell scripts + tick-doc bash blocks — .md pr
   const { violations, retired } = scanForScreenHashViolations(repoRoot);
   assert.equal(violations.length, 0, JSON.stringify(violations.map((v) => `${v.rel}:${v.line}`)));
   assert.equal(retired.length, 0);
+});
+
+test("AC3: the gitignored npm-pack staging mirror packages/quay/plugin/ is NOT part of the scan surface (otherwise every plugin/ pattern is double-counted and its transient copy skews the walk)", () => {
+  // The mirror is staged by package.sh / delivery-standalone-smoke.sh for the duration of `npm pack`
+  // and rm -rf'd right after. While it exists it is a second copy of plugin/ — a scan that lists it
+  // reports every real plugin/ file twice (and, in the walk→read test below, a phantom second
+  // "vanished" file). It is untracked, so excluding it never changes a clean checkout's surface.
+  assert.equal(isGeneratedMirrorPath("packages/quay/plugin/scripts/drivable-workspace-check.sh"), true);
+  assert.equal(isGeneratedMirrorPath("packages/quay/plugin/loop/fast-mode-tick-core.md"), true);
+  // The REAL tree is the source of truth and must never be filtered — path-segment aware, so a
+  // basename collision (a sibling directory that merely starts with the same characters) is kept.
+  assert.equal(isGeneratedMirrorPath("plugin/scripts/drivable-workspace-check.sh"), false);
+  assert.equal(isGeneratedMirrorPath("packages/quay/plugin-snapshot/x.sh"), false);
+  assert.equal(isGeneratedMirrorPath("packages/quay/plugin"), false);
 });
 
 test("walk→read race: a listed .sh that vanishes before its read is SKIPPED and REPORTED, never a crash (npm-pack staging rm -rf's packages/quay/plugin/ mid-suite)", (t) => {
