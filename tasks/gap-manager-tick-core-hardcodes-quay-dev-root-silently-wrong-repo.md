@@ -2,7 +2,7 @@
 id: gap-manager-tick-core-hardcodes-quay-dev-root-silently-wrong-repo
 title: manager-tick-core 硬编码 ROOT=/home/yale/work/quay 且读未 ship 的
   orchestration/——在任何消费工作区静默指错仓库
-status: ready
+status: done
 labels:
   - gap
   - defect

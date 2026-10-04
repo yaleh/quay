@@ -1,7 +1,7 @@
 export const meta = {
   name: 'manager-tick-core',
-  description: '管理者 tick 的持久化核：独立自我审计 + 把"该跑什么/该判什么"作为指令交还主循环',
-  whenToUse: '每次 manager tick 的第一步，也是主循环唯一需要记住的一条：调它，然后照它返回的指令做',
+  description: '管理者 tick 的持久化核：独立自我审计 + 把"该跑什么/该判什么"作为指令交还主循环（quay-dev-only：须经 args.workspaceRoot 传入工作区绝对路径，缺失即拒绝）',
+  whenToUse: '每次 manager tick 的第一步，也是主循环唯一需要记住的一条：调它，然后照它返回的指令做。【⚠️ 仅限 quay 开发工作区】——本 workflow 是 quay-dev-only（依赖交付面未 ship 的 orchestration/ 正本）；调用方必须传 args.workspaceRoot=<目标工作区绝对路径>，缺失即返回 {evaluated:false} 拒绝，⛔ 绝不落回硬编码宿主路径',
   phases: [
     { title: 'Readings', detail: '在新鲜上下文里跑固定读数命令集，只回结构化 facts（SPEC-tick-mechanical-checks-mcp §8.3 阶段1）' },
     { title: 'Audit', detail: '用 meta-cc 独立审计管理者本轮行为（含"判准有没有真被应用"）' },
@@ -54,10 +54,36 @@ export const meta = {
 //    合理性依赖当前环境的字面量，换个环境静默失效）。
 //    ⇒ 修法同源：不钉别名，改继承会话模型（undefined = 不传 model 字段）。
 const MODEL = undefined
-const ROOT = '/home/yale/work/quay'
+// ══ 第四次同形（硬规则 5b：兄弟实例常在同一文件；硬规则 4 推论二：钉死字面量换环境静默失效）════
+// 上面 :51-56 的 MODEL 固定别名、下面 :78 起的 session id / name 记录的是同一教训的【前三次】——
+// 钉死一个"依赖当前宿主/环境"的字面量，换环境即静默失效。这里【曾经】是第四次：
+//   const ROOT = '/home/yale/work/quay'
+// 实测存在于【全部】已发布 cache（0.9.0/0.10.0/0.11.0/0.12.0-dev）与 origin/dist-plugin 同一行——
+// 不是某版的漂移，是一开始就没搬。后果：任何装了 quay 插件【但不在 /home/yale/work/quay】的消费
+// 工作区调用本 workflow，拿到的不是崩溃，而是【关于 /home/yale/work/quay 的读数】——静默指错仓库，
+// 比崩溃更坏（硬规则 3b：读不懂/不适用必须与合格可区分）。
+// 本 workflow 零 I/O（见 :38-42），【无法】用 fs 自检工作区 ⇒ 守卫不能是"自己查一下 orchestration/
+// 在不在"，必须是【由 args 现传、缺失即拒绝】——与 managerSessionId（:78 起）已采用的修法同形。
+// ⇒ 缺失 / 非绝对路径 ⇒ 直接返回独立取值 { evaluated:false, reason }，⛔ 绝不落回硬编码默认值，
+//   且【不 spawn 任何 agent】（否则 readings/audit agent 会对着未知 cwd 跑并产出伪读数）。
+// 交付面同时显式标注本 workflow 为 quay-dev-only：plugin/loop/manager-tick-core.md。
+// ⚠️ 本 workflow 依赖 orchestration/manager-tick-{core,criteria,closing,sending}.md 与
+//    orchestration/manager-anchor-check.py —— 全部【只在 quay 开发工作区存在，交付面未 ship】。
+//    本任务判定其本意即 quay-dev-only（非"可安装"），见 task
+//    gap-manager-tick-core-hardcodes-quay-dev-root-silently-wrong-repo 的 AC4。
 // args 到达时是【字符串】不是对象（实测 wf_6f8cc053-f52）：直接 args.x 会静默 undefined。
 // 提到 MGR_SESSION_LOOKUP 之前先定义——后者要读 A.managerSessionId（2026-08-18 08:3x 修复引入）。
 const A = (() => { try { return typeof args === 'string' ? JSON.parse(args) : (args ?? {}) } catch { return {} } })()
+// 工作区根：只接受【调用方现传的绝对路径】，否则拒绝。⛔ 绝不落回任何硬编码宿主路径。
+const WORKSPACE_ROOT = typeof A.workspaceRoot === 'string' && A.workspaceRoot.startsWith('/') ? A.workspaceRoot : null
+if (!WORKSPACE_ROOT) {
+  return {
+    evaluated: false,
+    reason: 'args.workspaceRoot 缺失或不是绝对路径 —— 本 workflow 是 quay-dev-only（依赖交付面未 ship 的 orchestration/ 正本），拒绝在未知工作区产出读数。调用方须经 args.workspaceRoot 传入目标工作区【绝对路径】。⛔ 绝不落回任何硬编码宿主路径。',
+    requested: typeof A.workspaceRoot === 'string' ? A.workspaceRoot : null,
+  }
+}
+const ROOT = WORKSPACE_ROOT
 // ⚠️ 2026-08-14 14:3xZ：这里【曾经写死】一个 session id `b8dc91a6-…`，而它在 transcript 存储里
 //    【根本不存在】（find ~/.claude/projects -iname '*b8dc91a6*' ⇒ 0 命中）。审计 agent 每轮拿到坏 id，
 //    靠自己比对 SendMessage 前缀与 git 时间戳才找回真会话——**它足够聪明，所以我们一直没发现**。
@@ -82,7 +108,7 @@ const PRIOR = A.prior ? `\n上一轮读数（只报差异）：\n${A.prior}\n` :
 
 // ══ 交还给主循环的指令 ①：该跑什么 ══════════════════════════════════════════
 // 判据的单一来源。改判据改这里，主循环照抄——它不需要记住任何一条命令。
-const READ_CMD = String.raw`cd /home/yale/work/quay
+const READ_CMD = String.raw`cd ${ROOT}
 # ══ 2026-08-14 SPEC-tick-read-path-slimming §2-D：本块已瘦身 ══════════════════════════
 # 【为什么】原块 95 行，与 A0 + 核里的五项手跑大面积重叠：A0 覆盖 5 项、五项手跑覆盖 7 项、
 # 无人覆盖仅 2 项。两份各自演化的代价已实证——死命令
@@ -377,7 +403,10 @@ const 读数 = readings
   ? { facts: readings.facts ?? [], notEvaluated: readings.notEvaluated ?? [], 来源: 'readings subagent（新鲜上下文）' }
   : { facts: [], notEvaluated: [{ name: '__all__', reason: 'readings subagent 未返回（null）——本轮读数缺席' }], 来源: 'ABSENT' }
 
+// ⚠️ 硬规则 3b：正常跑完的返回带 evaluated:true，与上方【拒绝分支】的 evaluated:false 可区分——
+//    调用方一眼能判"这是本 workflow 在 workspaceRoot=X 上跑出的读数"还是"它拒绝了"。
 return {
+  evaluated: true,
   audit: 自审,
   读数,
   指令: {
