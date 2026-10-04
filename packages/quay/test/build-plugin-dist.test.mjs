@@ -34,6 +34,11 @@ import { fileURLToPath } from "node:url";
 
 import {
   rewriteMarkdown,
+  rewriteJs,
+  escapeJsCarrier,
+  JS_ROOT_ANCHOR,
+  scanJsCarrierAnchors,
+  assertJsCarrierAnchorsInert,
   rewriteShell,
   rewriteInvokers,
   deriveEntries,
@@ -56,6 +61,61 @@ const REPO_ROOT = path.resolve(__dirname, "..", "..", "..");
 function tmp(prefix = "build-plugin-dist-") {
   return fs.mkdtempSync(path.join(os.tmpdir(), prefix));
 }
+
+// ── the Workflow sandbox (AC1) ─────────────────────────────────────────────────────────────────────
+// A shipped workflow is evaluated with ONLY the globals its own probe recorded
+// (plugin/workflows/manager-tick-core.js:38-42, probe wf_af76a6df-2c3). There is no
+// CLAUDE_PLUGIN_ROOT binding and no `process`, so `${CLAUDE_PLUGIN_ROOT}` inside a template literal
+// is a ReferenceError at load. This harness reproduces exactly that evaluation surface.
+const WORKFLOW_SANDBOX_GLOBALS = [
+  "log", "phase", "budget", "setTimeout", "clearTimeout", "agent", "parallel", "pipeline", "workflow", "args",
+];
+const AsyncFunction = Object.getPrototypeOf(async function () {}).constructor;
+
+/** The exact failure the defect produced: not "some error", THIS error. */
+function isAnchorReferenceError(err) {
+  return err instanceof ReferenceError && /CLAUDE_PLUGIN_ROOT is not defined/.test(err.message);
+}
+
+/** A stub that answers every shape the workflows ask of a sandbox global — called, destructured,
+ *  awaited, property-read — so the body runs to its own `return` instead of dying on the harness. */
+function universalSandboxStub() {
+  const fn = function () { return proxy; };
+  const proxy = new Proxy(fn, {
+    get(_t, prop) {
+      if (prop === Symbol.iterator) return function* () {};
+      if (prop === "then") return undefined; // `await proxy` yields the proxy, not a thenable
+      if (prop === "length") return 0;
+      if (prop === Symbol.toPrimitive) return () => 0;
+      if (prop === "toString") return () => "";
+      return proxy;
+    },
+    apply() { return proxy; },
+    construct() { return proxy; },
+  });
+  return proxy;
+}
+
+/**
+ * Evaluate a workflow file's body with only the sandbox globals in scope. Returns the error (if
+ * any) so the caller classifies it instead of collapsing "evaluated" and "harness gave up" into one
+ * pass-shaped result (硬规则 3b).
+ */
+async function loadWorkflowInSandbox(text) {
+  const body = text.replace(/^export const meta =/m, "const meta =");
+  const values = WORKFLOW_SANDBOX_GLOBALS.map((n) => (n === "args" ? {} : universalSandboxStub()));
+  try {
+    await new AsyncFunction(...WORKFLOW_SANDBOX_GLOBALS, body)(...values);
+    return { error: null };
+  } catch (err) {
+    return { error: err };
+  }
+}
+
+const WORKFLOW_DIR = path.join(REPO_ROOT, "plugin", "workflows");
+const readWorkflow = (f) => fs.readFileSync(path.join(WORKFLOW_DIR, f), "utf8");
+const countActive = (text) => (text.match(/(?<!\\)\$\{CLAUDE_PLUGIN_ROOT\}/g) || []).length;
+const countFolded = (text) => (text.split(JS_ROOT_ANCHOR).length - 1);
 
 // ── AC1: the closure regex survives rewriteShell multi-segment + prefix-strip ──────────────────────
 test("AC1 — rewriteShell(isQuayInit=true) preserves the two-segment closure regex (dist/X.js tolerant + ${SCRIPT_DIR} prefix-strip)", () => {
@@ -121,10 +181,14 @@ test("AC-workflows — rewriteInvokers rewrites plugin/workflows/*.js plugin/scr
     const touched = rewriteInvokers(dir);
     assert.equal(touched, 1, "the workflow .js must be counted as a rewritten invoker");
     const out = fs.readFileSync(path.join(wfDir, "fan-in-execute.js"), "utf8");
-    assert.ok(out.includes("${CLAUDE_PLUGIN_ROOT}/scripts/dist/anti-drift-touches-check.js"),
+    // A `.js` carrier gets the JS-EVALUABLE anchor form, not the plain text one: `${…}` here is a
+    // template substitution the Workflow sandbox cannot resolve (see JS_ROOT_ANCHOR's docstring).
+    assert.ok(out.includes(`${JS_ROOT_ANCHOR}/scripts/dist/anti-drift-touches-check.js`),
       "the node --experimental-strip-types invocation must point at the anchored dist bundle");
-    assert.ok(out.includes("${CLAUDE_PLUGIN_ROOT}/scripts/dist/per-task-suite-record.js"),
+    assert.ok(out.includes(`${JS_ROOT_ANCHOR}/scripts/dist/per-task-suite-record.js`),
       "the comment reference must point at the anchored dist bundle");
+    assert.doesNotMatch(out, /(?<!\\)\$\{CLAUDE_PLUGIN_ROOT\}/,
+      "no ACTIVE anchor may appear in a .js carrier — a JS engine evaluates it");
     assert.ok(!out.includes("anti-drift-touches-check.ts"),
       "no plugin/scripts/*.ts reference may survive in the shipped workflow");
     assert.ok(!/plugin\/(scripts|gate-scripts)\/dist\//.test(out),
@@ -132,11 +196,145 @@ test("AC-workflows — rewriteInvokers rewrites plugin/workflows/*.js plugin/scr
     assert.ok(out.includes("experiments/quay-perpetual-stream/scripts/drain-scheduler.ts"),
       "a dev-repo experiments/...ts path (not a plugin mechanism) must be left untouched");
     // The flag is dropped only because the target really became a bundle.
-    assert.ok(out.includes("node ${CLAUDE_PLUGIN_ROOT}/scripts/dist/anti-drift-touches-check.js"),
+    assert.ok(out.includes(`node ${JS_ROOT_ANCHOR}/scripts/dist/anti-drift-touches-check.js`),
       "the strip-types flag must be gone once the reference names a bundled .js");
   } finally {
     fs.rmSync(dir, { recursive: true, force: true });
   }
+});
+
+// ── AC1/AC4/AC5: the `.js` carrier must not hand a JS engine an interpolated anchor ───────────────
+// gap-dist-rewrite-injects-live-interpolation-into-workflow-js. The finding: the publish rewrite
+// injected `${CLAUDE_PLUGIN_ROOT}` into plugin/workflows/*.js, where a JS engine evaluates it —
+// 4/6 shipped workflows loaded to `ReferenceError: CLAUDE_PLUGIN_ROOT is not defined`.
+
+test("AC1 — the PRODUCTION rewrite of the real manager-tick-core.js evaluates end-to-end under the sandbox globals", async () => {
+  const out = rewriteJs(readWorkflow("manager-tick-core.js"), () => true);
+  const { error } = await loadWorkflowInSandbox(out);
+  assert.equal(error, null, `the rewritten workflow must evaluate — got ${error ? `${error.name}: ${error.message}` : "no error"}`);
+  // Non-vacuous: the reference is still THERE, just no longer an interpolation.
+  assert.ok(countFolded(out) >= 1, "the rewritten carrier must still name the tick read command's script");
+});
+
+test("AC2 — both template-literal flavors evaluate to the PLAIN anchor (a `\\${…}` escape would leak a backslash through String.raw)", async () => {
+  // Both tag flavors appear in the shipped set: manager-tick-core.js builds its tick command block
+  // with String.raw (:85) and its returned instruction block with an untagged template (:247). The
+  // evaluated text is what the consumer's shell expands, so it must be identical from both.
+  const src = [
+    "export const meta = { name: 'x' }",
+    "const READ_CMD = String.raw`# A0 node plugin/scripts/quay-session.ts manager-tick-readings`",
+    "const TPL = `run: node plugin/scripts/quay-session.ts --root /w`",
+    "return { READ_CMD, TPL }",
+  ].join("\n");
+  const out = rewriteJs(src, () => true);
+  assert.equal(countActive(out), 0);
+  const r = await new AsyncFunction(out.replace(/^export const meta =/m, "const meta ="))();
+  assert.equal(r.READ_CMD, "# A0 node ${CLAUDE_PLUGIN_ROOT}/scripts/dist/quay-session.js manager-tick-readings");
+  assert.equal(r.TPL, "run: node ${CLAUDE_PLUGIN_ROOT}/scripts/dist/quay-session.js --root /w");
+  assert.doesNotMatch(r.READ_CMD, /\\/, "a backslash here means the escape leaked through String.raw — the shell would not expand it");
+  // Negative control for THIS contract: the escape form (AC2 option ①) compiles and loads, yet its
+  // String.raw output is wrong — which is exactly why the rewriter emits the substitution form.
+  const escaped = out.replace(new RegExp(JS_ROOT_ANCHOR.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"), "g"), "\\${CLAUDE_PLUGIN_ROOT}");
+  const rEsc = await new AsyncFunction(escaped.replace(/^export const meta =/m, "const meta ="))();
+  assert.equal(rEsc.TPL, "run: node ${CLAUDE_PLUGIN_ROOT}/scripts/dist/quay-session.js --root /w", "untagged: the escape cooks fine");
+  assert.equal(rEsc.READ_CMD, "# A0 node \\${CLAUDE_PLUGIN_ROOT}/scripts/dist/quay-session.js manager-tick-readings",
+    "String.raw: the escape LEAKS — silent wrongness, not a load failure");
+});
+
+test("AC4 — negative control: the PRE-FIX rule (rewriteMarkdown on a .js carrier) reproduces `ReferenceError: CLAUDE_PLUGIN_ROOT is not defined`", async () => {
+  const preFix = rewriteMarkdown(readWorkflow("manager-tick-core.js"), () => true);
+  assert.ok(countActive(preFix) > 0, "the pre-fix rule must produce active anchors (otherwise this control is vacuous)");
+  const { error } = await loadWorkflowInSandbox(preFix);
+  assert.ok(isAnchorReferenceError(error),
+    `the pre-fix carrier must fail loudly with the recorded error, got ${error ? `${error.name}: ${error.message}` : "NO ERROR"}`);
+  // …and the fix removes exactly that outcome, leaving the reference count unchanged.
+  const fixed = rewriteJs(readWorkflow("manager-tick-core.js"), () => true);
+  assert.equal(countActive(fixed), 0);
+  assert.equal(countFolded(fixed), countActive(preFix), "every pre-fix anchor must be folded, none dropped");
+  assert.ok(!isAnchorReferenceError((await loadWorkflowInSandbox(fixed)).error));
+});
+
+test("AC5 — all six shipped workflows fold to ZERO active anchors and evaluate in the sandbox", async () => {
+  const expected = {
+    "manager-tick-core.js": 2,
+    "pool-quality-judge.js": 4,
+    // 22 occurrences on 21 lines: the finding counted the published artifact, built with the real
+    // bundle predicate (one reference there is not a bundle entry); the unit-level rewrite with
+    // bundleExists=()=>true folds that one too.
+    "fan-in-execute.js": 22,
+    "execute-suite-fix.js": 3,
+    "drain-directives.js": 0,
+    "run-routines.js": 0,
+  };
+  for (const [file, n] of Object.entries(expected)) {
+    const src = readWorkflow(file);
+    const pre = rewriteMarkdown(src, () => true);
+    const post = rewriteJs(src, () => true);
+    assert.equal(countActive(pre), n, `${file}: pre-fix anchor count changed — the measurement drifted`);
+    assert.equal(countActive(post), 0, `${file}: no active anchor may survive the rewrite`);
+    assert.equal(countFolded(post), n, `${file}: the ${n} pre-fix anchor(s) must be folded, not deleted`);
+    assert.equal((await loadWorkflowInSandbox(post)).error, null, `${file}: the rewritten carrier must evaluate cleanly`);
+  }
+  // AC1's baseline, re-measured on the two carriers whose poisoned literals execute eagerly: the
+  // pre-fix rule really does stop them at load (the other two hold theirs behind control flow the
+  // stub never enters — that is a static-count measurement, not an execution one).
+  for (const file of ["manager-tick-core.js", "pool-quality-judge.js"]) {
+    const { error } = await loadWorkflowInSandbox(rewriteMarkdown(readWorkflow(file), () => true));
+    assert.ok(isAnchorReferenceError(error), `${file}: pre-fix must reproduce the recorded ReferenceError`);
+  }
+  // The baseline side of the same measurement: the SOURCE (unrewritten) forms carry no anchor at
+  // all, so the predicate above only fires on the rewrite — proving it measures the rewrite, not
+  // something every workflow already satisfies.
+  for (const file of Object.keys(expected)) {
+    assert.equal(countActive(readWorkflow(file)), 0, `${file}: source form must be anchor-free`);
+  }
+});
+
+test("AC3 — the guard takes FALSE on an active anchor, TRUE on the folded form, and refuses NOT-EVALUATED", () => {
+  const dir = tmp();
+  try {
+    const wfDir = path.join(dir, "workflows");
+    fs.mkdirSync(wfDir, { recursive: true });
+    const carrier = path.join(wfDir, "x.js");
+    // (a) the defect shape — fail loud
+    fs.writeFileSync(carrier, 'const cmd = `node ${CLAUDE_PLUGIN_ROOT}/scripts/dist/y.js`;\n', "utf8");
+    const bad = scanJsCarrierAnchors(dir);
+    assert.equal(bad.scanned, 1, "the guard must report how many carriers it actually read");
+    assert.equal(bad.violations.length, 1, "an ACTIVE anchor is a violation");
+    assert.throws(() => assertJsCarrierAnchorsInert(dir), /js-carrier anchor gate FAILED/);
+    // (b) the shipped shape — pass
+    fs.writeFileSync(carrier, `const cmd = \`node ${JS_ROOT_ANCHOR}/scripts/dist/y.js\`;\n`, "utf8");
+    assert.equal(scanJsCarrierAnchors(dir).violations.length, 0);
+    assert.equal(assertJsCarrierAnchorsInert(dir), 1);
+    // (c) the legacy escape is inert (a JS engine does not interpolate `\\${…}` in an untagged
+    //     template) — tolerated by the "active" predicate, though the rewriter emits JS_ROOT_ANCHOR
+    //     because String.raw defeats the escape.
+    fs.writeFileSync(carrier, "const cmd = `node \\${CLAUDE_PLUGIN_ROOT}/scripts/dist/y.js`;\n", "utf8");
+    assert.equal(scanJsCarrierAnchors(dir).violations.length, 0);
+    // (d) NOT-EVALUATED is its own outcome: zero carriers must never read as "clean"
+    fs.rmSync(wfDir, { recursive: true, force: true });
+    assert.equal(scanJsCarrierAnchors(dir).scanned, 0);
+    assert.throws(() => assertJsCarrierAnchorsInert(dir), /NOT-EVALUATED/);
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("AC3 — positive control on the REAL plugin root: the guard reads all six shipped carriers and reports inert", () => {
+  const pluginRoot = path.join(REPO_ROOT, "plugin");
+  const { scanned, violations } = scanJsCarrierAnchors(pluginRoot);
+  assert.equal(scanned, 6, "the real surface ships six .js carriers — a different count means the guard is blind or vacuous");
+  assert.deepEqual(violations, []);
+  assert.equal(assertJsCarrierAnchorsInert(pluginRoot), 6);
+});
+
+test("AC2 — escapeJsCarrier is idempotent and leaves an already-escaped anchor alone", () => {
+  assert.equal(escapeJsCarrier("run ${CLAUDE_PLUGIN_ROOT}/scripts/dist/x.js"), `run ${JS_ROOT_ANCHOR}/scripts/dist/x.js`);
+  assert.equal(escapeJsCarrier(`run ${JS_ROOT_ANCHOR}/scripts/dist/x.js`), `run ${JS_ROOT_ANCHOR}/scripts/dist/x.js`);
+  assert.equal(escapeJsCarrier("run \\${CLAUDE_PLUGIN_ROOT}/scripts/dist/x.js"), "run \\${CLAUDE_PLUGIN_ROOT}/scripts/dist/x.js");
+  // A `.md` carrier is untouched by the fold (its `${…}` is expanded by the shell, not a JS engine).
+  const md = rewriteMarkdown("`${CLAUDE_PLUGIN_ROOT}/scripts/dist/x.js`");
+  assert.equal(md, "`${CLAUDE_PLUGIN_ROOT}/scripts/dist/x.js`");
 });
 
 // ── AC5: rewriteMarkdown rewrites the cold-start SKILL.md PRECONDITION's path form ─────────────────

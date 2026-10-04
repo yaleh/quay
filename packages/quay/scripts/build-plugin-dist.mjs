@@ -647,6 +647,41 @@ export function verifyDistClosureDir(publishRoot, sourcePluginRoot) {
 const ROOT_ANCHOR = "${CLAUDE_PLUGIN_ROOT}";
 
 /**
+ * The `.js`-carrier spelling of the same anchor: a JS expression that EVALUATES to the anchor
+ * text instead of INTERPOLATING it.
+ *
+ * WHY a second spelling exists (gap-dist-rewrite-injects-live-interpolation-into-workflow-js).
+ * The rewrite above is textual, so it lands `${CLAUDE_PLUGIN_ROOT}` into every carrier it touches —
+ * and the carriers do not share a semantics for `${}`. In `.md`/`.sh` the sequence is inert text
+ * that the shell (or the agent's Bash tool) expands; in a `.js` template literal it is a
+ * substitution, and the Workflow sandbox has no `CLAUDE_PLUGIN_ROOT` binding — so the shipped
+ * `workflows/*.js` threw `ReferenceError: CLAUDE_PLUGIN_ROOT is not defined` at load and NO agent
+ * ever started. The old rule's safety argument ("rewriteMarkdown's rules only touch paths") held
+ * for the paths but not for the carrier's evaluation semantics (硬规则 4c).
+ *
+ * WHY this spelling and not the obvious `\${CLAUDE_PLUGIN_ROOT}` escape: `\$` is cooked by an
+ * UNTAGGED template literal (→ `${…}`) but is returned VERBATIM by a `String.raw` one (→ `\${…}`,
+ * a stray backslash inside the command block). `String.raw` is not hypothetical — it is how
+ * `plugin/workflows/manager-tick-core.js` builds the tick command block (`READ_CMD`, :85). So the
+ * escape fixes the class for every carrier except the one most load-bearing file uses, and does so
+ * SILENTLY (the artifact still loads; only the emitted shell text is wrong) — the failure mode this
+ * repo treats as the dangerous one (硬规则 3b). This form evaluates to `$` from a substitution and
+ * leaves `{CLAUDE_PLUGIN_ROOT}` as raw text, so BOTH tag flavors produce exactly `${CLAUDE_PLUGIN_ROOT}`,
+ * byte-identical to what the `.md`/`.sh` carriers emit.
+ *
+ * The form is chosen so the SUBSTRING `${CLAUDE_PLUGIN_ROOT}` never appears in the emitted text:
+ * that keeps the guard below (and every downstream `grep`-shaped reader) able to decide "active
+ * anchor present / absent" with one exact predicate, instead of a family of accepted spellings.
+ * `plugins/vendor`-style plain-string and comment carriers are inert for ANY `${` and simply show
+ * the expression as text — cosmetic, never a ReferenceError.
+ */
+export const JS_ROOT_ANCHOR = '${"$"}{CLAUDE_PLUGIN_ROOT}';
+
+/** An anchor a JS engine would EVALUATE. `\${…}` is deliberately excluded: it is inert, and the
+ *  legacy escape stays readable to a `grep`-shaped reader that only knows the escaped form. */
+const ACTIVE_ROOT_ANCHOR_RE = /(?<!\\)\$\{CLAUDE_PLUGIN_ROOT\}/;
+
+/**
  * Rewrite every plugin-script reference in `text` to the plugin-root-anchored bundled form.
  *
  * Three input shapes, one root cause (the rewriter did not know the anchor existed):
@@ -719,6 +754,24 @@ export function rewriteMarkdown(text, bundleExists) {
 }
 
 /**
+ * Fold every ACTIVE anchor in a `.js` carrier into the JS-evaluable spelling (see JS_ROOT_ANCHOR).
+ * Runs AFTER rewriteMarkdown on purpose: `stripTypesFlagForBundles` keys on the plain
+ * `${CLAUDE_PLUGIN_ROOT}/…/dist/` path form, so escaping first would leave the now-bundle-dead
+ * `--experimental-strip-types` flag in place.
+ *
+ * An already-escaped `\${CLAUDE_PLUGIN_ROOT}` is left alone: it is inert in an untagged template,
+ * and re-escaping it (`\${"$"}{…}`) would emit `$` twice.
+ */
+export function escapeJsCarrier(text) {
+  return text.replace(/(?<!\\)\$\{CLAUDE_PLUGIN_ROOT\}/g, () => JS_ROOT_ANCHOR);
+}
+
+/** Rewrite a shipped workflow `.js` — same path rules as .md, plus the JS-carrier anchor fold. */
+export function rewriteJs(text, bundleExists) {
+  return escapeJsCarrier(rewriteMarkdown(text, bundleExists));
+}
+
+/**
  * Rewrite a shell file's plugin .ts delegation references to the bundled dist entrypoints.
  * @param {string} text
  * @param {boolean} isQuayInit apply quay-init.sh's derivation/mechanism-specific fixes
@@ -765,19 +818,83 @@ export function rewriteShell(text, isQuayInit = false, bundleExists) {
   return text;
 }
 
+// The dirs rewriteInvokers owns. Named at module scope so the AC3 guard below scans EXACTLY the
+// carriers the rewriter writes — a guard over a different set would be a second, driftable copy of
+// this list (硬规则 5b: the defect is a family, not the one site that reported it).
+const INVOKER_MD_DIRS = ["skills", "loop", "probes", "agents", "workflows"];
+const INVOKER_SH_DIRS = ["scripts", "gate-scripts"];
+
+// Hermetic FIXTURE trees are not invokers. `scripts/checker-mutation-cases/*.sh` BUILD their own
+// throwaway `<workdir>/plugin/scripts/…` layout, so a `plugin/` prefix *inside them* means "the
+// fixture's fake repo root" — not this repo. Rewriting them re-points the fixture at the installed
+// plugin and corrupts what it constructs (the old extension rules already re-targeted the very
+// files they write: `cat > plugin/scripts/X.ts` became `…/dist/X.js`). They reference nothing the
+// artifact ships, so leaving them byte-identical to the source is both correct and the safe
+// default; AC-260's carrier scan reaches them (硬规则 5b) and finds no `dist/*.js` reference in
+// the untouched form.
+const isFixture = (f) => f.includes(`${path.sep}checker-mutation-cases${path.sep}`);
+
+/**
+ * Every `.js` carrier under the invoker dirs, paired with any ACTIVE `${CLAUDE_PLUGIN_ROOT}` it
+ * carries. Returns the scan count alongside the violations so "clean" and "nothing scanned" stay
+ * distinguishable values rather than collapsing into one pass-shaped output (硬规则 3b).
+ *
+ * @returns {{scanned: number, violations: Array<{file: string, line: number, text: string}>}}
+ */
+export function scanJsCarrierAnchors(pluginRoot) {
+  const violations = [];
+  let scanned = 0;
+  for (const dir of INVOKER_MD_DIRS) {
+    const abs = path.join(pluginRoot, dir);
+    if (!fs.existsSync(abs)) continue;
+    for (const f of walk(abs)) {
+      if (!f.endsWith(".js")) continue;
+      if (isFixture(f)) continue;
+      scanned++;
+      const text = fs.readFileSync(f, "utf8");
+      text.split("\n").forEach((line, i) => {
+        if (ACTIVE_ROOT_ANCHOR_RE.test(line)) violations.push({ file: f, line: i + 1, text: line.trim() });
+      });
+    }
+  }
+  return { scanned, violations };
+}
+
+/**
+ * AC3 guard: no shipped `.js` carrier may hold an anchor a JS engine would EVALUATE.
+ *
+ * Fail-closed on BOTH outcomes, and they are different errors on purpose:
+ *   - `scanned === 0` is NOT-EVALUATED, not "clean" — a predicate that reads "found nothing" as
+ *     "passed" is the same shape as one that never ran (硬规则 3b). This is the shape that let the
+ *     defect ship four times: nothing in the pipeline was looking at `.js` evaluation at all.
+ *   - any violation is the defect itself: the file loads to a `ReferenceError` in the Workflow
+ *     sandbox and no agent starts.
+ *
+ * @returns {number} how many `.js` carriers were actually inspected (for the caller to report).
+ */
+export function assertJsCarrierAnchorsInert(pluginRoot) {
+  const { scanned, violations } = scanJsCarrierAnchors(pluginRoot);
+  if (scanned === 0) {
+    throw new Error(
+      `js-carrier anchor gate NOT-EVALUATED: no .js carrier found under ${INVOKER_MD_DIRS.join("/")} in ${pluginRoot} — ` +
+        `"nothing scanned" must not read as "nothing to fix" (硬规则 3b)`
+    );
+  }
+  if (violations.length) {
+    const head = violations.slice(0, 8).map((v) => `  ${path.relative(pluginRoot, v.file)}:${v.line}  ${v.text.slice(0, 120)}`);
+    throw new Error(
+      `js-carrier anchor gate FAILED: ${violations.length} active \${CLAUDE_PLUGIN_ROOT} occurrence(s) in ${scanned} scanned .js carrier(s) — ` +
+        `a JS engine evaluates these as template substitutions and the Workflow sandbox has no such binding (ReferenceError at load). ` +
+        `Rewriters must emit the JS_ROOT_ANCHOR form:\n${head.join("\n")}`
+    );
+  }
+  return scanned;
+}
+
 /** Rewrite a staged plugin copy's invokers (markdown docs + shell wrappers) to the dist bundles. */
 export function rewriteInvokers(pluginRoot) {
-  const mdDirs = ["skills", "loop", "probes", "agents", "workflows"];
-  const shDirs = ["scripts", "gate-scripts"];
-  // Hermetic FIXTURE trees are not invokers. `scripts/checker-mutation-cases/*.sh` BUILD their own
-  // throwaway `<workdir>/plugin/scripts/…` layout, so a `plugin/` prefix *inside them* means "the
-  // fixture's fake repo root" — not this repo. Rewriting them re-points the fixture at the installed
-  // plugin and corrupts what it constructs (the old extension rules already re-targeted the very
-  // files they write: `cat > plugin/scripts/X.ts` became `…/dist/X.js`). They reference nothing the
-  // artifact ships, so leaving them byte-identical to the source is both correct and the safe
-  // default; AC-260's carrier scan reaches them (硬规则 5b) and finds no `dist/*.js` reference in
-  // the untouched form.
-  const isFixture = (f) => f.includes(`${path.sep}checker-mutation-cases${path.sep}`);
+  const mdDirs = INVOKER_MD_DIRS;
+  const shDirs = INVOKER_SH_DIRS;
   // Whether the staged root really carries a bundle — the build+strip ran before this, so a `.ts`
   // that survived is one the bundler never inlined (runner-static-gate.ts) and keeps its raw form.
   const bundleExists = (kind, name) => fs.existsSync(path.join(pluginRoot, kind, "dist", `${name}.js`));
@@ -789,14 +906,14 @@ export function rewriteInvokers(pluginRoot) {
       // fan-in-execute.js runs `node --experimental-strip-types plugin/scripts/X.ts`). Without this
       // rewrite the packaged artifact's workflows point at raw .ts that package.sh DELETED, so the
       // installed `.claude/workflows/*.js` fail AND verify_referenced_landed's refs scan (which
-      // covers workflows/*.js) names them referenced-not-landed. rewriteMarkdown's path/node rules
-      // are safe on .js (only touch `plugin/{scripts,gate-scripts}/X.ts` and the
-      // node --experimental-strip-types invocation forms; dev-repo `experiments/...ts` and bare-name
-      // prose refs are deliberately left untouched).
+      // covers workflows/*.js) names them referenced-not-landed.
+      // ⛔ The `.js` half must go through rewriteJs, NOT rewriteMarkdown: the path/node rules are
+      // safe on .js, but the ANCHOR they emit is not — `${…}` is a substitution to a JS engine
+      // (gap-dist-rewrite-injects-live-interpolation-into-workflow-js). The extension picks the rule.
       if (!f.endsWith(".md") && !f.endsWith(".js")) continue;
       if (isFixture(f)) continue;
       const text = fs.readFileSync(f, "utf8");
-      const out = rewriteMarkdown(text, bundleExists);
+      const out = f.endsWith(".js") ? rewriteJs(text, bundleExists) : rewriteMarkdown(text, bundleExists);
       if (out !== text) {
         fs.writeFileSync(f, out);
         filesTouched++;
@@ -815,6 +932,19 @@ export function rewriteInvokers(pluginRoot) {
         filesTouched++;
       }
     }
+  }
+  // AC3 belt-and-braces: the rewrite above is what CREATES the `.js` anchors, so it is also the
+  // last place that can refuse to hand a poisoned tree to the caller. Violations only — the
+  // NOT-EVALUATED (zero-carrier) refusal belongs to assertJsCarrierAnchorsInert, which the publish
+  // path calls on a root that always ships workflows/ (a synthetic tree with no carrier dir is a
+  // legitimate caller of this function, not a silently-empty guard).
+  const { violations } = scanJsCarrierAnchors(pluginRoot);
+  if (violations.length) {
+    const head = violations.slice(0, 8).map((v) => `  ${path.relative(pluginRoot, v.file)}:${v.line}  ${v.text.slice(0, 120)}`);
+    throw new Error(
+      `js-carrier anchor gate FAILED after rewrite: ${violations.length} active \${CLAUDE_PLUGIN_ROOT} occurrence(s) ` +
+        `survived in the .js carriers (they would be evaluated as JS template substitutions):\n${head.join("\n")}`
+    );
   }
   console.log(`build-plugin-dist: rewrote ${filesTouched} staged invokers to reference dist bundles`);
   return filesTouched;
@@ -1081,6 +1211,10 @@ if (invokedAsScript) {
   (async () => {
     if (rewrite) {
       await rewriteInvokers(pluginRoot);
+      // The staged plugin ALWAYS ships workflows/, so zero scanned carriers here means the guard,
+      // not the tree, is broken — refuse rather than report a clean publish (硬规则 3b).
+      const scanned = assertJsCarrierAnchorsInert(pluginRoot);
+      console.log(`build-plugin-dist: js-carrier anchor gate OK — ${scanned} .js carrier(s) inert`);
     } else if (verifyClosure) {
       const tarball = positional[1];
       if (!tarball) {
