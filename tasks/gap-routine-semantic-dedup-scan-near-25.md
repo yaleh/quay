@@ -2,7 +2,7 @@
 id: gap-routine-semantic-dedup-scan-near-25
 title: "semantic-dedup-scan: Byte-identical quote-strip-then-JSON.parse CLI arg
   parsing, fail-closed invalid-json; only the typed error factory differs."
-status: todo
+status: ready
 labels:
   - gap
   - routine-filed
