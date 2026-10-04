@@ -168,6 +168,13 @@ function normalize(text, ctx) {
   s = s.replace(/\b\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?Z?\b/g, "⟨TS⟩");
   s = s.replace(/\b\d{4}-\d{2}-\d{2}T\d{2}:\d{2}(?:\.\d+)?Z?\b/g, "⟨TS⟩");
   s = s.replace(/\b\d{4}-\d{2}-\d{2}\b/g, "⟨DATE⟩");
+  // Relative-time renders (`relativeTime()` → "0s ago" / "2m ago" / "1h ago" / "3d ago") are a
+  // Date.now()-derived value: the elapsed count depends on WHEN the capture runs. A byte-exact
+  // baseline that keeps them flakes the moment the fixture-write → render gap crosses a second
+  // boundary — measured: green in isolation (135ms capture), red under the full suite's 127-way
+  // concurrency (the /task/:param page, captured late, renders "1s ago" not "0s ago"). Normalize
+  // the whole family, exactly as the ISO/epoch rules above already do for absolute timestamps.
+  s = s.replace(/\b\d+[smhd] ago\b/g, "⟨REL⟩");
   s = s.replace(/\b\d{12,13}\b/g, "⟨EPOCH_MS⟩");
   s = s.replace(/\b\d{9,11}\b/g, "⟨EPOCH_S⟩");
   s = s.replace(/\b[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\b/g, "⟨UUID⟩");
