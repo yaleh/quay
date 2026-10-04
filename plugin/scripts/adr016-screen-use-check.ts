@@ -94,6 +94,32 @@ const SKIP_DIRS = new Set([
   "worktrees",
 ]);
 
+/** Gitignored trees that MIRROR a tree this scan already walks. These cannot be pruned via
+ * SKIP_DIRS: its entries are matched by BASENAME at every depth, so "plugin" would also drop the
+ * real repo-root plugin/ tree (the source of truth). They are filtered out of the walk RESULT
+ * instead.
+ *
+ * `packages/quay/plugin/` is a generated SNAPSHOT of the repo-root plugin/ bundle: package.sh
+ * materializes it right before `npm pack` (npm pack's `files` whitelist cannot reach the sibling
+ * `../plugin`) and package.sh / delivery-standalone-smoke.sh rm -rf it again after the pack
+ * (packages/quay/scripts/package.sh, packages/quay/test/delivery-standalone-smoke.sh:51).
+ * Scanning it double-counts every pattern the real plugin/ scripts carry — the same reason dist/
+ * is a skip-dir (see SKIP_DIRS) — and while the snapshot exists it injects an extra copy of every
+ * plugin/scripts/*.sh into the walk: a whole-repo walk that lists
+ * `packages/quay/plugin/scripts/x.sh` and then reads it after the staging `rm -rf` reports a
+ * second, phantom "vanished" file. It is untracked (.gitignore: `packages/quay/plugin/`), so
+ * filtering it out never changes what a clean checkout scans. */
+const GENERATED_MIRROR_PREFIXES: readonly string[] = ["packages/quay/plugin"];
+
+/** True iff `rel` (repo-relative, as returned by collectShellScripts) lives inside a gitignored
+ * generated mirror of a tree this scan already walks. PURE (no fs), so the scan-surface decision
+ * is pinned by a test without staging a directory. Path-segment aware: `packages/quay/plugin-x/`
+ * and `packages/quay/plugin/` are different trees; only the latter is a mirror. */
+export function isGeneratedMirrorPath(rel: string): boolean {
+  const norm = rel.split(path.sep).join("/");
+  return GENERATED_MIRROR_PREFIXES.some((p) => norm.startsWith(`${p}/`));
+}
+
 /** Known RETIRED whole-screen-hash implementations: files whose capture-pane→md5 flow is a known
  * retired artifact, reported but NOT counted against the band (not a "new" violation). The sole
  * retired observer, send-keys-verified.sh (superseded under outer ruling F 2026-08-04), was
@@ -243,11 +269,11 @@ export function scanForScreenHashViolations(root: string): ScanResult {
   // prunes `vendor` instead. ⛔ The two stay apart (fs-walk.ts#collectShellScripts) — merging them
   // would change which files each scans, and a checker reading the wrong surface passes silently
   // (硬规则 3b).
-  // Walk→read is two steps and the tree can move between them: the npm-pack / delivery-smoke path
-  // stages a mirror of plugin/ into packages/quay/plugin/ and rm -rf's it while the suite runs, so a
-  // listed .sh can vanish before it is read. A vanished file is skipped and RETURNED in `unreadable`
-  // (same convention as dead-code-after-return-check.ts#scanTree); a non-ENOENT error still throws.
-  const files = collectShellScripts(root, SKIP_DIRS);
+  // Walk→read is two steps and the tree can move between them: any listed .sh can vanish before it
+  // is read (a class of its own, not just the staging mirror — see GENERATED_MIRROR_PREFIXES). A
+  // vanished file is skipped and RETURNED in `unreadable` (same convention as
+  // dead-code-after-return-check.ts#scanTree); a non-ENOENT error still throws.
+  const files = collectShellScripts(root, SKIP_DIRS).filter((rel) => !isGeneratedMirrorPath(rel));
   const violations: Violation[] = [];
   const retired: Violation[] = [];
   const absorb = (rel: string, found: Violation[]) => {
