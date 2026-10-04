@@ -101,9 +101,14 @@ function universalSandboxStub() {
  * any) so the caller classifies it instead of collapsing "evaluated" and "harness gave up" into one
  * pass-shaped result (硬规则 3b).
  */
-async function loadWorkflowInSandbox(text) {
+async function loadWorkflowInSandbox(text, argsValue = { workspaceRoot: "/w" }) {
   const body = text.replace(/^export const meta =/m, "const meta =");
-  const values = WORKFLOW_SANDBOX_GLOBALS.map((n) => (n === "args" ? {} : universalSandboxStub()));
+  // args.workspaceRoot is what a real caller passes: manager-tick-core.js now fail-closes with an
+  // early `return { evaluated:false }` when it is missing (gap-manager-tick-core-hardcodes-quay-
+  // dev-root-silently-wrong-repo, develop a84cc33bb) — without it the workflow returns BEFORE the
+  // poisoned template literal is evaluated, so the AC1/AC4/AC5 anchor controls would go vacuous
+  // (a "no error" that measures a skipped literal, not a safe one). The other carriers ignore args.
+  const values = WORKFLOW_SANDBOX_GLOBALS.map((n) => (n === "args" ? argsValue : universalSandboxStub()));
   try {
     await new AsyncFunction(...WORKFLOW_SANDBOX_GLOBALS, body)(...values);
     return { error: null };
