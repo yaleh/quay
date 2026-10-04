@@ -108,6 +108,7 @@ import { spawnSync } from 'node:child_process';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { isDirectEntry } from './gate-script-base.ts';
+import { enumerateReleaseRefs, git, nonEmptyLines, revParseSha } from './git-runner.ts';
 
 // ── the declared vocabulary (single source; `--vocabulary-json` and the test read THIS) ──────────
 export const JANITOR_RECORD_KEYS = [
@@ -149,61 +150,21 @@ const OUTCOME_FINISHED = 10;
 const OUTCOME_FINISH_FAILED = 11;
 const OUTCOME_LEFT_ALONE = 13;
 
-// ── git helpers ──────────────────────────────────────────────────────────────────────────────────
-
-interface Ran {
-  status: number;
-  stdout: string;
-  stderr: string;
-}
-
-function git(cwd: string, args: string[]): Ran {
-  const r = spawnSync('git', ['-C', cwd, ...args], { encoding: 'utf8' });
-  return { status: r.status ?? -1, stdout: r.stdout ?? '', stderr: r.stderr ?? '' };
-}
-
-function lines(s: string): string[] {
-  return s
-    .split('\n')
-    .map((x) => x.trim())
-    .filter((x) => x.length > 0);
-}
-
-/**
- * The release-shaped branch namespace — the SAME enumeration AC-271's criterion makes (and the same
- * one `release-reading-sandbox.ts` reads). `null` = the enumeration could not be PERFORMED; it is
- * never an empty stand-in for "none there" (hard rule 3b).
- */
-function enumerateReleaseBranches(root: string): string[] | null {
-  const r = git(root, [
-    'for-each-ref',
-    '--format=%(refname:short)',
-    'refs/heads/release-*',
-    'refs/heads/release/*',
-  ]);
-  if (r.status !== 0) return null;
-  return lines(r.stdout).sort();
-}
-
-function tipSha(root: string, branch: string): string | null {
-  const r = git(root, ['rev-parse', '--verify', '--quiet', `refs/heads/${branch}`]);
-  if (r.status !== 0) return null;
-  const sha = r.stdout.trim();
-  return sha.length > 0 ? sha : null;
-}
+// ── git helpers (the runner + release-ref enumeration arrive from git-runner.ts — the SINGLE
+//    implementation this script and release-reading-sandbox.ts share; ⛔ do not re-copy one here) ──
 
 /** Tags whose object IS exactly the branch tip. `null` = the scan could not be performed. */
 function tagsPointingAt(root: string, branch: string): string[] | null {
   const r = git(root, ['tag', '--points-at', `refs/heads/${branch}`]);
   if (r.status !== 0) return null;
-  return lines(r.stdout);
+  return nonEmptyLines(r.stdout);
 }
 
 /** Tags that CONTAIN the branch tip. `null` = the scan could not be performed. */
 function tagsContaining(root: string, branch: string): string[] | null {
   const r = git(root, ['tag', '--contains', `refs/heads/${branch}`]);
   if (r.status !== 0) return null;
-  return lines(r.stdout);
+  return nonEmptyLines(r.stdout);
 }
 
 /** Commits in `base..branch`. `null` = the count could not be taken (never read as 0). */
@@ -218,8 +179,7 @@ function countAhead(root: string, base: string, branch: string): number | null {
 function resolveBase(root: string, explicit: string): string | null {
   const candidates = explicit !== '' ? [explicit] : ['develop', 'origin/develop'];
   for (const c of candidates) {
-    const r = git(root, ['rev-parse', '--verify', '--quiet', `${c}^{commit}`]);
-    if (r.status === 0 && r.stdout.trim().length > 0) return c;
+    if (revParseSha(root, `${c}^{commit}`) !== null) return c;
   }
   return null;
 }
@@ -290,7 +250,7 @@ export function runReleaseBranchJanitor(root: string, opts: JanitorOptions = {})
     carrierCalls: [],
   });
 
-  const branches = enumerateReleaseBranches(root);
+  const branches = enumerateReleaseRefs(root);
   if (branches === null) {
     return empty(
       'instrument-failure',
@@ -313,7 +273,7 @@ export function runReleaseBranchJanitor(root: string, opts: JanitorOptions = {})
   const carrierCalls: JanitorResult['carrierCalls'] = [];
 
   for (const branch of branches) {
-    const sha = tipSha(root, branch) ?? '';
+    const sha = revParseSha(root, `refs/heads/${branch}`) ?? '';
 
     const pointed = tagsPointingAt(root, branch);
     if (pointed === null) {
@@ -516,7 +476,7 @@ function logMode(traceFile: string): number {
     );
     return 5;
   }
-  const rows = lines(text);
+  const rows = nonEmptyLines(text);
   for (const raw of rows) {
     let rec: any = null;
     try {
