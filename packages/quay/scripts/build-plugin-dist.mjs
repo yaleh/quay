@@ -672,8 +672,8 @@ const ROOT_ANCHOR = "${CLAUDE_PLUGIN_ROOT}";
  * The form is chosen so the SUBSTRING `${CLAUDE_PLUGIN_ROOT}` never appears in the emitted text:
  * that keeps the guard below (and every downstream `grep`-shaped reader) able to decide "active
  * anchor present / absent" with one exact predicate, instead of a family of accepted spellings.
- * `plugins/vendor`-style plain-string and comment carriers are inert for ANY `${` and simply show
- * the expression as text — cosmetic, never a ReferenceError.
+ * Plain-string and comment carriers are inert for ANY `${` and simply show the expression as text —
+ * cosmetic, never a ReferenceError.
  */
 export const JS_ROOT_ANCHOR = '${"$"}{CLAUDE_PLUGIN_ROOT}';
 
@@ -865,8 +865,8 @@ export function scanJsCarrierAnchors(pluginRoot) {
  *
  * Fail-closed on BOTH outcomes, and they are different errors on purpose:
  *   - `scanned === 0` is NOT-EVALUATED, not "clean" — a predicate that reads "found nothing" as
- *     "passed" is the same shape as one that never ran (硬规则 3b). This is the shape that let the
- *     defect ship four times: nothing in the pipeline was looking at `.js` evaluation at all.
+ *     "passed" is the same shape as one that never ran (硬规则 3b). Nothing in the pipeline was
+ *     looking at `.js` evaluation at all, which is why the anchor could be injected there unnoticed.
  *   - any violation is the defect itself: the file loads to a `ReferenceError` in the Workflow
  *     sandbox and no agent starts.
  *
