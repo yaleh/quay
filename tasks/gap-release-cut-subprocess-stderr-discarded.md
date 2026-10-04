@@ -2,7 +2,7 @@
 id: gap-release-cut-subprocess-stderr-discarded
 title: release-cut 失败时丢弃子进程 stderr ⇒ CAUSE 零诊断（step-6 ratchet 已连续两版触发；同类位点在
   promotion-driver 已修，本文件漏修 4 处）
-status: todo
+status: ready
 labels:
   - gap
   - defect
