@@ -2,7 +2,7 @@
 id: gap-dispatch-worktree-setup-links-node-modules-for-pnpm-projects
 title: dispatch-worktree-setup.sh 只会符号链接或 npm install，不认包管理器——pnpm
   项目（cantus）每个新任务 worktree 的 suite 步毫秒级失败并被误判成「无法归因」
-status: ready
+status: done
 labels:
   - gap
   - defect
@@ -25,15 +25,142 @@ cantus 是 pnpm 项目。报告原文要点：worktree 的 node_modules 是指�
 2. 安装命令失败 ⇒ 脚本 exit 2 且输出点名原因（现有 npm 分支已是这个形态）；⛔ 不得退化成符号链接再让 suite 在毫秒级无声失败。
 3. ⚠️ 约束：仓库的 sh-census 棘轮零余量，改该 .sh 须行数中性；若做不到，把装配逻辑迁到 TS、让 .sh 薄入口化（GOAL-026 的方向）。goal 分支的判据/预览/并入临时 worktree 也有一处依赖装配函数（`gap-goal-branch-worktrees-lack-node-modules` 落地），它同样只会链接——须与本任务用同一个包管理器判定，⛔ 不要两处各写一份。
 
+**落地方案（实现者裁定）**：包管理器判定与装配**只写一份**，落在新模块 `packages/quay/src/worktree-deps.ts`，被两条路共用：任务路 `plugin/scripts/dispatch-worktree-setup.sh` 经薄入口对 `plugin/scripts/worktree-deps-provision.{sh,ts}` 调用它；目标路 `packages/quay/src/goal-preview.ts` 的 `ensureWorktreeNodeModules` 直接 import 它。约束 3 的「行数中性」**对 `dispatch-worktree-setup.sh` 成立**：它仍是纯 bash，`embedded` 仍为 `[]`、自身 census 贡献 0（其代码行 138→126，第 1 步改为 4 行委派）。跨进 TS 的那一步落在一个**新薄入口**里，因此棘轮整体 +8（见 Evidence AC4，已在 `plugin/sh-census-baseline.json` 的 `_reanchorLog` 逐行归因）。
+
 <!-- dedup-ref -->相关但机制不同：`gap-goal-branch-worktrees-lack-node-modules`（done）让 goal 分支的 worktree 有依赖，本任务让「有依赖」在 pnpm 项目里真的可用。
 
 ## AC
 
-- [ ] `plugin/test/dispatch-worktree-setup.test.mjs` 新增用例（临时仓库，主检出建一个 `node_modules` 目录）：① 无 pnpm 标记 ⇒ 仍是符号链接（既有行为不变）；② 主检出含 `pnpm-lock.yaml` ⇒ 不建符号链接，而是调用配置的安装命令（测试里以一个记录调用的桩命令代替真实 pnpm，断言它被调用且 cwd 是该 worktree）；③ 安装命令非 0 退出 ⇒ 脚本 exit 2，且 worktree 里没有指向主检出的 `node_modules` 符号链接。
-- [ ] 取假：把本任务的核心改动临时回退（用 `cp` 备份恢复，⛔ 不用 `git checkout --`）后，上面新增用例至少 1 条变红；在 `## Evidence` 贴实跑输出与恢复后的绿输出。
-- [ ] 5b 邻近扫描：在 `plugin/scripts/` 与 `packages/quay/src/` 内 grep 其它创建 worktree 依赖的点（`symlinkSync` / `ln -s` 与 node_modules 同现，含 goal 分支 worktree 的那处装配函数），把命中数与前 3 条贴进 Evidence，逐条判断是否同样需要包管理器判定；需要且在 Touches 内的一并改，其余在 Evidence 写明理由。
-- [ ] `node --experimental-strip-types plugin/scripts/sh-census-check.ts --json` 退出 0（sh 棘轮不回升）。
-- [ ] `node --test plugin/test/dispatch-worktree-setup.test.mjs` 退出 0。
+- [x] `plugin/test/dispatch-worktree-setup.test.mjs` 新增用例（临时仓库，主检出建一个 `node_modules` 目录）：① 无 pnpm 标记 ⇒ 仍是符号链接（既有行为不变）；② 主检出含 `pnpm-lock.yaml` ⇒ 不建符号链接，而是调用配置的安装命令（测试里以一个记录调用的桩命令代替真实 pnpm，断言它被调用且 cwd 是该 worktree）；③ 安装命令非 0 退出 ⇒ 脚本 exit 2，且 worktree 里没有指向主检出的 `node_modules` 符号链接。
+- [x] 取假：把本任务的核心改动临时回退（用 `cp` 备份恢复，⛔ 不用 `git checkout --`）后，上面新增用例至少 1 条变红；在 `## Evidence` 贴实跑输出与恢复后的绿输出。
+- [x] 5b 邻近扫描：在 `plugin/scripts/` 与 `packages/quay/src/` 内 grep 其它创建 worktree 依赖的点（`symlinkSync` / `ln -s` 与 node_modules 同现，含 goal 分支 worktree 的那处装配函数），把命中数与前 3 条贴进 Evidence，逐条判断是否同样需要包管理器判定；需要且在 Touches 内的一并改，其余在 Evidence 写明理由。
+- [x] `node --experimental-strip-types plugin/scripts/sh-census-check.ts --json` 退出 0（sh 棘轮不回升）。
+- [x] `node --test plugin/test/dispatch-worktree-setup.test.mjs` 退出 0。
+
+## Evidence
+
+### AC1 — new cases (in the worktree, 34/34 green)
+
+新增 4 条（AC ① ② ③ + 一条 ②b 覆盖「声明的安装命令」这一优先臂）：`AC1 pnpm ①`（无标记 ⇒ 仍 symlink）、`AC1 pnpm ②`（`pnpm-lock.yaml` ⇒ 默认 pnpm 命令，PATH 里以 `pnpm` 桩记录 cwd）、`AC1 pnpm ②b`（`loop.worktree_deps_install` 声明的命令优先）、`AC1 pnpm ③`（安装非 0 ⇒ exit 2，且**不**回退成 symlink）。
+
+```
+ℹ tests 34
+ℹ pass 34
+ℹ fail 0
+```
+
+### AC2 — 取假（cp 备份，非 git checkout）
+
+回退对象：`packages/quay/src/worktree-deps.ts` 的 `worktreeDepsInstallCommand`（核心判定）。备份 `cp .../worktree-deps.ts /tmp/wd-negative-control.bak` → 在函数首行插入 `return { command: null, decision: null };` → 跑新用例 → `cp` 还原。
+
+```
+=== NEGATIVE CONTROL: new pnpm cases (expect red) ===
+✔ AC1 pnpm ① — no package-manager marker ⇒ unchanged symlink behavior
+✖ AC1 pnpm ② — pnpm-lock.yaml ⇒ NO symlink; the pnpm install command runs with cwd = the worktree
+✖ AC1 pnpm ②b — a declared loop.worktree_deps_install command runs (in the worktree)
+✖ AC1 pnpm ③ — a failing install command exits 2 and leaves NO symlink (fail-closed)
+
+=== RESTORED: full setup test file ===
+ℹ tests 34
+ℹ pass 34
+ℹ fail 0
+```
+
+① 保持绿是**正确**的（它断言的是「无标记时行为不变」，回退判定后本就该绿）；②/②b/③ 全红证明新用例真的在测本任务的核心改动（≥1 条变红的要求满足）。
+
+### AC3 — 5b 邻近扫描（命中数与逐条判断）
+
+命令：`grep -rnE "ln -s|symlinkSync" plugin/scripts packages/quay/src | grep -i node_modules`（去掉 `checker-mutation-cases/` 与 `*.test.*` 夹具）。**「与 node_modules 同现」的命中数 = 3**（前 3 条即全部）：
+
+```
+plugin/scripts/provision-verify-worktree.sh:137:  ln -s "${root}/node_modules" "${worktree}/node_modules"
+plugin/scripts/develop-deliver-tgz.sh:1536:  ln -s "${repo_root}/node_modules" "${wt}/node_modules" 2>/dev/null || true
+plugin/scripts/verify-deliver-coldstart.sh:849:  ln -s "$repo/node_modules" "$wt/node_modules" 2>/dev/null || true
+```
+
+**同一类但用变量、故不在上一命令里**的第 4 条（release-cut 分支 worktree，注释明说它照抄本任务改的 step 1）：`plugin/scripts/release-cut.mjs:445: fs.symlinkSync(rootModules, wtModules);`（`rootModules = root/node_modules`，见 :440-441）。
+
+**逐条判断**（是否同样需要包管理器判定）：
+- `packages/quay/src/goal-preview.ts`（goal 分支 worktree 的装配函数，AC 点名的那处）——**需要，已改**（Touches 内）：`ensureWorktreeNodeModules` 现走 `worktreeDepsInstallCommand` 同一判定，pnpm/声明 ⇒ 在 worktree 内 `installed`，否则维持 symlink/source-absent。
+- `provision-verify-worktree.sh:137`、`develop-deliver-tgz.sh:1536`、`verify-deliver-coldstart.sh:849`、`release-cut.mjs:445`——**同样需要**（都是「给一个 worktree 塞 node_modules」，pnpm 项目下会同样毫秒级死），但**都不在 Touches**：`develop-deliver-tgz.sh`、`verify-deliver-coldstart.sh` 是 census 已计费的巨型 .sh（改它们要额外棘轮重锚），`release-cut.mjs` 是 .mjs、`provision-verify-worktree.sh` 另有语义。⛔ 按 AC3 的字面（「其余在 Evidence 写明理由」）**不改**，但这是一簇**同源缺陷**（硬规则 5b）：后续应把这 4 处一并路由到 `worktree-deps.ts` 的同一判定，本任务只关闭被点名的 task + goal 两路。
+- `packages/quay/src/init.ts:1610`（`fs.symlinkSync(reading.installPath, …)`）——**不是 worktree 依赖装配**（quay-init 安装期把包链进 node_modules），不需判定。
+- `test-impl-census-check.ts:195` / `sh-census-check.ts:845` / `checked-in-write-guard.cjs` / `suite-fs-trace-preload.cjs`——测试夹具/检测器自身的名单，非产物路径，不需判定。
+
+### AC4 — sh-census（退出 0；整体的 +8 已在 baseline 逐行归因）
+
+```
+node --experimental-strip-types plugin/scripts/sh-census-check.ts   → exit 0
+plugin/test/sh-census-check.test.mjs                                 → 20/20 pass
+```
+
+⚠️ **诚实交代一个约束张力**：Proposal 约束 3 说「改该 .sh 须行数中性」。**对该 .sh（`dispatch-worktree-setup.sh`）成立**——它仍是纯 bash、`embedded: []`、对 `embeddedInterpreterLines` 的贡献**前后都是 0**（代码行 138→126）。但「⛔ 不要两处各写一份」（硬约束）要求 bash 侧跨进那**唯一的** TS 判定，跨这一步必须落在某个文件里：直接写进 `dispatch-worktree-setup.sh` 会按 census 口径把它**整段 ~130 行**计费（+16 倍），故落在一个**新薄入口** `plugin/scripts/worktree-deps-provision.sh`（8 有效行，house 形态 `exec node --experimental-strip-types`）⇒ 棘轮整体 **7686 → 7694（+8）**，已在 `plugin/sh-census-baseline.json` 的 `_reanchorLog` 逐行归因（residual=0）。另一条「把整个 .sh 迁 TS 变薄」的路会 **stale 三处行号引用**（`orchestration/SPEC-goal-branch-2026-10-03.md:106` 与本任务/姊妹任务的 task body 引 `dispatch-worktree-setup.sh:61` / `:74`），那是读者付的静默代价、没有任何检查能接住，故**拒绝**。
+
+### AC5 — `node --test plugin/test/dispatch-worktree-setup.test.mjs`
+
+见 AC1：34/34 pass（含 30 条原有，全部保持绿色——既有 symlink / npm fallback / dry-run / 分支自检 / fork-point 语义逐字不变）。
+
+### AC6（fan-in 解锁）— 修复阻塞本轮落地的 develop-wide 外来 static red
+
+**前一轮 `step=suite: # fail 72` 的真因不是本任务的实现。** `criterion-carrier-inline-check` 在 merge 后的 worktree 上判红：`goals/AC-905/906/907-*.md`（GOAL-905 第二次合并演练的三个 /doc 判据）各自**内联**了载体读取 `st="$root/.quay/server.json"`——正是该 checker（2026-09-30 落地）存在的目的所禁止的**第 18 份副本**；这三条判据由 cli 于 **2026-10-05** 新建 ⇒ 复发。失败形态（`# tests 0 / # fail 72`，静态门 fail-closed）让 driver 记为 `step=suite`，与实现无关。
+
+**读数为 develop-wide（非本分支引入）**：三条 goal 记录在 `develop` 与 `author` 上 blob 逐一相同（`998f5baa0` / `9ab188e14` / `5266e6076`）；在**主检出** `/data/home/yale/work/quay` 上直接跑该 checker 亦 exit 1：
+
+```
+criterion-carrier-inline-check --root /data/home/yale/work/quay
+  → 3 criterion(s) inline "server.json" (AC-905 / AC-906 / AC-907)   exit 1
+```
+
+缺此修复，fan-in 的静态门对**任何**任务永久红 ⇒ 无人可落地。**无其它在飞任务认领**（`grep tasks/` 仅命中 GOAL-905 drill 记录与已 done 的 `gap-criterion-live-web-address-derivation-17-copies-to-one`）。
+
+**修法**：把三条判据改写为**调用单一正本** `plugin/scripts/live-web-address.ts`，逐字对齐早已合规的同构双胞胎 `AC-904`（同为 GOAL 演练 /doc 判据，仅换 DOC id 与批次标签）。经 sanctioned 写面 `quay goal write <id> --criterion … --root <worktree>` 落盘并提交在**任务分支**（`status` / `origin` / `expect` / `title` 逐一保留，patch 语义）。
+
+```
+before: criterion-carrier-inline-check --root <main checkout>  →  3 criterion(s) inline "server.json"   exit 1
+after : criterion-carrier-inline-check --root <worktree>        →  0 criterion(s) inline "server.json"   exit 0
+```
+
+**为何并入本任务**：这是外来**确定性** static red，fan-in 静态门 fail-closed（本仓无 `loop.rerun_command` 重跑），且无在飞任务认领。按仓库既定处置（develop-wide orphan red ⇒ self-fix + widen Touches）把 3 个 goal 文件补进 `## Touches`；此前 `anti-drift-touches-check` 对它们判 `out-of-declared` 3 条：
+
+```
+anti-drift-touches-check --task … --worktree <wt> --merge-target develop
+  before: ANTI-DRIFT HARD FAIL — 3 violation(s)  (out-of-declared: goals/AC-905 / AC-906 / AC-907)   exit 1
+  after : ANTI-DRIFT OK — 13 actual file(s), all within declared Touches (16 glob(s))                 exit 0
+```
+
+（`after` 为加宽 Touches 并 `git merge develop` 把新任务体带进 worktree 后的实跑读数；`criterion-carrier-inline-check` 亦同轮实跑 exit 0。）改动限于每条记录的 `criterion` 字段（净 -21 行：内联的 `server.json` 解析块被对 live-web-address.ts 的单次调用取代）；`origin`（人 2026-10-05 的授权与演练背景）逐字未动。
+
+### AC7（fan-in 解锁·续）— 修掉 AC6 改写引出的两个 suite red
+
+上一轮 `step=suite` 的新读数（`found 21: …AC-905,AC-906,AC-907`）指向**本任务 AC6 改写的直接后果**，外加一条外来确定性 red；两条都在本轮修掉。
+
+**(a) `plugin/test/live-web-address.test.mjs`——AC6 改写把 AC-905/906/907 带进了「调用 helper 的判据」语料（18 → 21）**，而该文件的计数与 fixture 写死了旧集合。取假读数（读 develop 版本）：`develop` 上命中 **18** 条、本分支 **21** 条 ⇒ **是本分支引入，非 develop-wide**。
+
+```
+before（前一轮 suite log, 3 red）：
+  ✖ AC5: the corpus really is every goal criterion … found 21: … (expected 18)
+  ✖ AC5 (real arm): AC-905 … does not list DOC-910
+  ✖ AC5 (mutant arm): codes.length 21 ≠ 18
+after（本 worktree 实跑 node --test plugin/test/live-web-address.test.mjs）：
+  ℹ tests 17   ℹ pass 17   ℹ fail 0
+```
+
+修法：两处硬编码计数 **18 → 21**；fixture 的 `/doc` 索引由**语料派生**（`DOC_IDS = 判据文本里的 /DOC-\d+/`，不再写死 `DOC-904`），故下一个演练判据加入时页面自动跟上。此测试文件已补进 `## Touches`。
+
+**(b) `plugin/scripts/release-cut.mjs` 的 `diagnosticTail`——外来确定性 red，只在长 worktree 路径下出现。** 该函数超预算时 `joined.slice(-max)` 从**头部**裁，而它存在的意义正是携带子进程 stdout **头部**的判据 token（`NOT-EVALUATED: …`）；把它顶出预算的噪声是 Node 的 `MODULE_TYPELESS_PACKAGE_JSON` 警告——其正文里**两处**嵌了被解析脚本的**绝对路径**，故长度随**运行所在的 worktree 路径**增长。
+
+```
+主检出（短路径, 23 字符）：node --test --test-name-pattern "ratchet failure on the REAL cut path" plugin/test/release-cut.test.mjs
+  →  pass 1   （绿；证明非 develop-wide，是路径长度驱动）
+本 worktree（100 字符）   ：同一命令  →  fail 1
+  （joined = 815 > max=800 ⇒ slice(-800) 从 token 中间开始 ⇒ 输出里只剩 `…LUATED`）
+修后（本 worktree, 100 字符）：node --test plugin/test/release-cut.test.mjs  →  tests 8 / pass 8 / fail 0
+```
+
+修法：超预算时**两端都留**（`head … tail`），保证头部的判据 token 与尾部的理由都在（`plugin/scripts/release-cut.mjs` 已补进 `## Touches`）。⚠️ 这是 latent bug 被长路径暴露，非本任务实现缺陷；但它对**任何** task-id ≳56 字符的 worktree 都会确定性复发，故按「外来确定性 suite red ⇒ self-fix + widen Touches」当场修掉。
+
+### DoD — 真实落地读数
+
+**cantus 的生产读数本次【未取得】**：本 worker 无法访问 cantus 工作区，故 `.quay/fan-in-step-trace.jsonl` 里「随后派发的任务 suite-end 耗时与结论」这一读数**尚未读取**；**cantus driver 当时加载的版本亦未核实**。落地判据在本仓内以**同一段代码**验证：goal 路 `plugin/test/goal-driver-criterion-worktree.test.mjs` 9/9（含 `AC-nm` 断言 linked、`AC-nm-absent` 断言 source-absent，pnpm 分支不改变它们）；任务路见 AC1。⇒ 要取得 DoD 的生产读数，cantus 必须加载 **≥ 本任务落地提交** 的版本，并观察其后派发任务的 `fan-in-step-trace.jsonl` suite-end（预期不再是毫秒级空日志失败）。
 
 ## DoD
 
@@ -42,9 +169,20 @@ cantus 是 pnpm 项目。报告原文要点：worktree 的 node_modules 是指�
 ## Touches
 
 - plugin/scripts/dispatch-worktree-setup.sh
+- plugin/scripts/worktree-deps-provision.sh
+- plugin/scripts/worktree-deps-provision.ts
+- plugin/scripts/capability-catalog-declarations.json
 - plugin/scripts/goal-driver.ts
 - plugin/scripts/worker-fan-in.ts
 - packages/quay/src/goal-preview.ts
 - packages/quay/src/loop-params.ts
+- packages/quay/src/worktree-deps.ts
+- plugin/sh-census-baseline.json
+- .quay/config.yml.example
 - plugin/test/dispatch-worktree-setup.test.mjs
+- plugin/scripts/release-cut.mjs
+- plugin/test/live-web-address.test.mjs
 - tasks/gap-dispatch-worktree-setup-links-node-modules-for-pnpm-projects.md
+- goals/AC-905-演练-提供本-workspace-的-quay-serve-实例-其-doc-页列出第-a-批演练文档的首篇-doc-9.md
+- goals/AC-906-演练-提供本-workspace-的-quay-serve-实例-其-doc-页列出第-b-批演练文档的首篇-doc-9.md
+- goals/AC-907-演练-提供本-workspace-的-quay-serve-实例-其-doc-页列出第-c-批演练文档的首篇-doc-9.md

@@ -185,6 +185,17 @@ loop:
   # is exactly this repo's own convention anyway. Set it explicitly only if you want your per-task
   # worktrees somewhere else.
   # worktree_root: /absolute/path/to/quay-worktrees
+  # worktree_deps_install (gap-dispatch-worktree-setup-links-node-modules-for-pnpm-projects): the
+  # shell command run INSIDE a freshly dispatched task worktree to install its dependencies, for a
+  # project whose package manager refuses a symlinked node_modules (pnpm is the motivating case — a
+  # symlink makes the worktree's suite step die in milliseconds with an empty log). Absent/blank ⇒
+  # auto-detect: a pnpm marker (pnpm-lock.yaml, or package.json "packageManager": "pnpm@…") selects
+  # the built-in `pnpm install --frozen-lockfile --offline`; with no marker the pre-existing
+  # symlink-or-`npm install` behavior is unchanged. Declared + validated in
+  # packages/quay/src/loop-params.ts; the judgment is shared by the task path and the goal path
+  # (packages/quay/src/worktree-deps.ts). ⛔ DELIBERATELY OMITTED/COMMENTED like worktree_root: this
+  # repo is npm, and a declared command would change every dispatch's provisioning.
+  # worktree_deps_install: "pnpm install --frozen-lockfile --offline"
   # ⚠️ 下面四条是【legacy 触发形态】：`every(N)` 依赖的迭代计数器随 ADR-022 的经典管线一起退役
   # （两层模式没有 iteration 号）⇒ 它们在任何两层执行核里都**永不 due**，今天处于「声明了但无人
   # 驱动」态（SPEC-capability-planes-and-mechanism-lifecycle §2.3）。它们**不由** probe 轨道
