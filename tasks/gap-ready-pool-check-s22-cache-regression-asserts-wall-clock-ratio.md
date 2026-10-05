@@ -2,7 +2,7 @@
 id: gap-ready-pool-check-s22-cache-regression-asserts-wall-clock-ratio
 title: ready-pool-check-s22 的缓存回归测试断言墙钟比值 < 0.75——并行 suite
   下比值落在阈值上方（0.76/0.78/0.76/0.87），反复卡住 goal 并入与任务 fan-in
-status: ready
+status: done
 labels:
   - gap
   - defect
