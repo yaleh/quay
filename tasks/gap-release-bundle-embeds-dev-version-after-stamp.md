@@ -24,6 +24,7 @@ extra:
 
 ## Touches
 - `scripts/version-consistency-check.ts`
+- `scripts/version-consistency-check.mjs`
 - `scripts/version-consistency-check.test.ts`
 - `plugin/scripts/sync-vendor.sh`
 - `plugin/scripts/publish-dist-branch.sh`
