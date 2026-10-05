@@ -193,11 +193,20 @@ reason: "I2: all ACs achieved + sufficiency covered"`，而同一时刻 `git mer
 develop` 为假。
 ⇒ `goalFlipDecision` 的**调用处**多一条 close-block：goal 的 `branch: true` ∧ `goal/<id>` 仍存在 ∧ 又不是
 `develop` 的祖先 ⇒ **不翻**，本轮读数在 `closeBlocks` 记一条 `blocked-unmerged-branch`（点名 goal 与分支 tip）；
-分支不存在（从未创建 / 并入后已删）或已是 `develop` 的祖先 ⇒ 不拦（行为与现状一致）。
+已是 `develop` 的祖先 ⇒ 不拦。分支**不存在**时**再分两种**（2026-10-05 增补；来源：cantus GOAL-002 只读核实）：
+账本里有该 goal 的 **landed** `goal-merge-result`（= 并入后已被 quay 自己删）⇒ 不拦（正常终态）；
+**没有**该事件（= 从未创建 / 被误删）⇒ 同样**不翻**，本轮读数记 `blocked-branch-absent`（由 `goal` 字段
+点名该 goal——分支不在，没有 tip 可带）。⚠️ 缺失分支的**补建**（`backfillMissingGoalBranches`）每轮先跑，
+修好了就没有本前置的对象；本前置是**兜底**（补建 `blocked`/`unreadable`，或分支在本轮补建之后才被删）。
+⛔ 五种取值互不同形（`clear` / `blocked-failing-ac` / `not-evaluated` / `blocked-unmerged-branch` /
+`blocked-branch-absent`），⛔ `blocked-branch-absent` 不折进 `not-evaluated`（那不是「读不懂」，是读到了
+「分支不存在 ∧ 无并入记录」这个可操作事实）。
 ⛔ 不动 I2、⛔ 不动 sufficiency 判据、⛔ 非 branch-mode 的 goal 行为逐字不变；⛔ goal-driver 只读 git 引用，不读本仓落地载体（DIR-131）。
 判据：`plugin/test/goal-driver-criterion-worktree.test.mjs` 的「并入 develop 之前不得被翻 achieved」用例
 （三臂：并入前 `blocked-unmerged-branch` ∧ 仍 active；并入后下一轮才翻 `achieved`；同夹具里非 branch-mode
 的同条件 goal 照常翻——负控制证明拦截只针对 branch-mode 的未并入分支）。
+分支缺失那半边的判据是同文件的 `branch-absent-①/②` 两条用例（① 补建被挡 ⇒ 仍 active ∧
+`blocked-branch-absent` ∧ 非 branch-mode 同条件照常翻；② 有 landed 并入结果 ⇒ 不拦、照常 `achieved`）。
 
 **AC 分类**（新字段，AC 记录上）：`phase: pre-merge | post-merge`，缺省 `pre-merge`。
 **⑮ 之后的分界（10-03 修订）**：pre-merge AC 在**预览实例**（§4.10）上求值——预览实例有在跑的 serve，**live-probe AC 因此回到 pre-merge**。

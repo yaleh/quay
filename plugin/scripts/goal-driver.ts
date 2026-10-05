@@ -907,9 +907,9 @@ function ledgerTailVerdict(ac: Record<string, unknown>): string | null {
   return typeof v === "string" ? v : null;
 }
 
-/** 关闭阻塞四态词表（⛔ 加态即改 AC-242 之外的判据集合）：
+/** 关闭阻塞五态词表（⛔ 加态即改 AC-242 之外的判据集合）：
  *  clear             台账可读且该 GOAL 名下没有「achieved ∧ 尾 fail ∧ 未声明 long-term」的 AC，
- *                    且 branch-mode goal 的分支已并入（或不存在）⇒ 放行关闭；
+ *                    且 branch-mode goal 的分支已并入（或不存在且已并入过）⇒ 放行关闭；
  *  blocked-failing-ac 存在这样的 AC（枚举在 `acs`）⇒ 关闭被拒；
  *  not-evaluated     台账读不到（成因在 `cause`）⇒ 关闭被拒（⛔ 不与 clear 同形，硬规则 3b：
  *                    读不懂输入不得返回与合格同形的值——否则删掉台账就能把任何红 AC 静默冻结）；
@@ -917,8 +917,18 @@ function ledgerTailVerdict(ac: Record<string, unknown>): string | null {
  *                    （分支 tip 枚举在 `branchTip`）⇒ 关闭被拒
  *                    （gap-goal-branch-goal-flips-achieved-before-its-branch-merges：并入之前
  *                    不许把 goal 翻成 achieved——提前 achieved 会让 `quay goal merge` 因
- *                    「只允许 active」拒绝，分支永远并不进去的死结）。 */
-export type GoalCloseBlockVerdict = "clear" | "blocked-failing-ac" | "not-evaluated" | "blocked-unmerged-branch";
+ *                    「只允许 active」拒绝，分支永远并不进去的死结）；
+ *  blocked-branch-absent branch-mode goal 的 `goal/<id>` **不存在**、且账本里没有该 goal 的 landed
+ *                    并入结果（`readGoalMergeResults` 的 outcome==="landed"）⇒ 关闭被拒
+ *                    （gap-goal-branch-absent-branch-does-not-block-goal-achieved：cantus GOAL-002
+ *                    的分支被守卫误删后 goal 照常被翻 achieved，隔离承诺无声落空）。
+ *                    ⚠️ 它与 blocked-unmerged-branch 是【两个方向】：那条管「分支在且没并」，本条管
+ *                    「分支不在且从没并过」。⛔ 不并入 not-evaluated（那不是「读不懂」，而是**读到了**
+ *                    「分支不存在 + 无并入记录」这个可操作的事实）；⛔ 也不并入 blocked-unmerged-branch
+ *                    （那条的读数是分支 tip，本条没有 tip 可点名——折成一个态会让「分支在」与「分支不在」
+ *                    同形，硬规则 3b）。
+ *                    ⛔ 必须与「并入后已被 quay 自己删掉」区分：那时账本里有 landed 的并入结果 ⇒ 放行。 */
+export type GoalCloseBlockVerdict = "clear" | "blocked-failing-ac" | "not-evaluated" | "blocked-unmerged-branch" | "blocked-branch-absent";
 
 /** not-evaluated 的成因（⛔ 两种成因仍都是 not-evaluated，只是【可区分】——硬规则 3b /
  *  cause-carrier-must-be-distinguishable）：
@@ -1001,24 +1011,33 @@ function gitExit(cwd: string, args: string[]): number | null {
  *  I2 与 sufficiency ⇒ 被提前翻成 `achieved`，随后 `quay goal merge` 因 `goal-not-active` 被拒
  *  ⇒ 分支永远并不进去的死结（`goal-merge.ts` 只允许 active）。
  *
- *  三态（硬规则 3b：⛔ 不折成布尔）：
+ *  四态（硬规则 3b：⛔ 不折成布尔）：
  *    unmerged       分支存在且不是 `develop` 的祖先（带分支名与 tip sha）⇒ 关闭前置【拦】；
- *    settled        非 branch-mode / 分支不存在（从未创建或并入后已删）/ 已是 `develop` 的祖先
- *                   ⇒ 不拦（与本次改动前的行为逐字一致）；
- *    not-evaluated  `develop` 引用解析不出（或 git 不可用）⇒ 不拦，但取值与 settled【不同形】——
- *                   不把「读不出」伪装成「查过且已并入」。判定与消费分开：本函数只如实分类，
- *                   消费方（runGoalRound）决定不拦（保留改动前的放行方向，避免在无 develop 的
+ *    absent         branch-mode goal 的 `goal/<id>` **不存在** ⇒ 取值独立（⛔ 不再折进 settled——
+ *                   折进去正是 gap-goal-branch-absent-branch-does-not-block-goal-achieved 的形态：
+ *                   「分支不在」与「查过且已并入」同形，于是一条从未并入的 goal 照常被翻 achieved）。
+ *                   本函数只如实分类【分支在不在】（纯 git 引用读）；「从未创建 / 被误删」与
+ *                   「并入后已被 quay 自己删」的分野要读 goal 侧账本事件，由消费方
+ *                   （runGoalRound 的 `landedMergeGoals`，同 backfillMissingGoalBranches 的读法，
+ *                   ⛔ 不引入第二个「已并入」定义——硬规则 5b）决定拦不拦；
+ *    settled        非 branch-mode / 已是 `develop` 的祖先 ⇒ 不拦；
+ *    not-evaluated  分支存在但 `develop` 引用解析不出（或 git 不可用）⇒ 不拦，但取值与 settled
+ *                   【不同形】——不把「读不出」伪装成「查过且已并入」。判定与消费分开：本函数只如实
+ *                   分类，消费方（runGoalRound）决定不拦（保留改动前的放行方向，避免在无 develop 的
  *                   仓库里凭空造出一个新死结）。
  *  ⛔ 只读 git 引用；⛔ 只对 `goal.branch === true` 的 goal 探分支（非 branch-mode 结构上直接 settled）。 */
 export type GoalBranchMergeState =
   | { state: "unmerged"; branch: string; tip: string }
+  | { state: "absent" }
   | { state: "settled" }
   | { state: "not-evaluated"; reason: string };
 
 export function goalBranchMergeState(root: string, goal: Record<string, unknown>): GoalBranchMergeState {
   if (goal.branch !== true) return { state: "settled" };
   const goalId = String(goal.id ?? "");
-  if (!goalBranchRefExists(root, goalId)) return { state: "settled" };
+  // ⛔ 分支缺失【先于】develop 解析判定：absence 是纯引用存在性读数，不依赖任何基线的可解析性。
+  // （旧实现在这里返回 settled；那就是本任务要修的缺陷——见上面类型注释。）
+  if (!goalBranchRefExists(root, goalId)) return { state: "absent" };
   // `develop` 必须先能解析：`merge-base --is-ancestor <branch> <missing-ref>` 以 exit ≥2 结束，与
   // 「确实不是祖先」的 exit 1 若共用「非零 ⇒ 非祖先」的读法，就会在无 develop 的仓库里凭空拦下
   // 每一个 branch-mode goal（一个新死结）。先探 develop，把「读不出」独立成 not-evaluated。
@@ -1029,9 +1048,11 @@ export function goalBranchMergeState(root: string, goal: Record<string, unknown>
   const code = gitExit(root, ["merge-base", "--is-ancestor", branch, "develop"]);
   if (code === 0) return { state: "settled" }; // exit 0 = 是祖先（已并入）
   if (code !== 1) return { state: "not-evaluated", reason: `merge-base exit ${code === null ? "spawn-error" : code}` };
-  // exit 1 = 不是祖先。分支在两次 git 调用之间消失（并发删除）⇒ 再次确认 tip 可读，读不出视同不存在。
+  // exit 1 = 不是祖先。分支在两次 git 调用之间消失（并发删除）⇒ 再次确认 tip 可读，读不出即【分支已不在】
+  // ——与本函数开头那次存在性探测同一个读数（⛔ 不再折进 settled：那会让「删除发生在两次调用之间」与
+  // 「查过且已并入」同形，正是硬规则 3b 禁止的形态）。
   const tip = goalBranchTip(root, goalId);
-  if (tip === null) return { state: "settled" };
+  if (tip === null) return { state: "absent" };
   return { state: "unmerged", branch, tip };
 }
 
@@ -3379,10 +3400,13 @@ export interface GoalRoundReadings {
    *  ⛔ 分诊不翻其余三态（re-anchor / needs-human / hold 只落痕，AC-219）。 */
   flips: Array<{ id: string; to: string; ok: boolean; reason: string }>;
   /** 关闭前置读数（gap-goal-closure-freezes-failing-ac-outside-reverify-scope；branch 半边
-   *  gap-goal-branch-goal-flips-achieved-before-its-branch-merges）：每条 active GOAL 一条
-   *  `{goal, verdict, acs, cause}`（blocked-unmerged-branch 时多一个 `branchTip`）。verdict ∈ 四态
-   *  clear / blocked-failing-ac / not-evaluated / blocked-unmerged-branch（⛔ 互不同形：blocked-failing-ac
-   *  带被点名 AC 清单、not-evaluated 带台账成因、blocked-unmerged-branch 带分支 tip、clear 三者皆空）。
+   *  gap-goal-branch-goal-flips-achieved-before-its-branch-merges +
+   *  gap-goal-branch-absent-branch-does-not-block-goal-achieved）：每条 active GOAL 一条
+   *  `{goal, verdict, acs, cause}`（blocked-unmerged-branch 时多一个 `branchTip`）。verdict ∈ 五态
+   *  clear / blocked-failing-ac / not-evaluated / blocked-unmerged-branch / blocked-branch-absent
+   *  （⛔ 互不同形：blocked-failing-ac 带被点名 AC 清单、not-evaluated 带台账成因、
+   *  blocked-unmerged-branch 带分支 tip、blocked-branch-absent 由 `goal` 字段点名该 goal（它没有 tip
+   *  可带——分支不在）、clear 三者皆空）。
    *  空数组 = 本轮无 active GOAL——「查过且零条」与「未跑该判定」按字段存在性区分（硬规则 3b）。
    *  ⚠️ `branchTip` 是【可选键】：非 blocked-unmerged-branch 的条目与本次改动前的形状逐字相同
    *  （既有消费方按四键 deepEqual 的判据不受影响）。 */
@@ -3809,6 +3833,11 @@ export async function runGoalRound(root: string, opts: GoalRoundOptions = {}): P
     }
   }
 
+  // 分支【不存在】的 branch-mode goal：分野「从未创建 / 被误删」与「并入后已被 quay 自己删」要靠 goal 侧
+  // 账本里有没有该 goal 的 landed 并入结果（`readGoalMergeResults`——与 backfillMissingGoalBranches 取同
+  // 一个定义，⛔ 不引入第二个「已并入」口径，硬规则 5b）。账本按需只读一次（无候选 ⇒ 零读）。
+  let landedMergeGoals: Set<string> | null = null;
+
   for (const { goal, gid, sufficiency } of pendingCloses) {
     // I2（GOAL 层）：充分性闸——全部在域 AC achieved 且充分性 covered ⇒ 机械 flip GOAL（裁定 5）。
     // insufficient / not-evaluated ⇒ 不 flip（GOAL-010 退出条件②：判不出取「未评估」而非放行）。
@@ -3818,39 +3847,60 @@ export async function runGoalRound(root: string, opts: GoalRoundOptions = {}): P
     // ⛔ 第二条追加前置（gap-goal-branch-goal-flips-achieved-before-its-branch-merges）：branch-mode goal
     // 的分支仍存在且不是 develop 的祖先 ⇒ 同样不得关闭（并入之前 achieved 会让 `quay goal merge` 因
     // 「只允许 active」拒绝 ⇒ 分支永远并不进去的死结）。⛔ 只读 git 引用，⛔ 不动 I2 / sufficiency 判据。
+    // ⛔ 第三条追加前置（gap-goal-branch-absent-branch-does-not-block-goal-achieved）：branch-mode goal 的
+    // 分支**不存在**且账本里从没有过该 goal 的 landed 并入结果 ⇒ 也不得关闭（cantus GOAL-002：分支被守卫
+    // 误删后，一个从未并入的 goal 照常被翻 achieved，隔离承诺无声落空）。⛔ 与第二条是两个方向：那条管
+    // 「分支在且没并」（读数带 tip），本条管「分支不在且从没并过」（没有 tip 可带）。
+    // ⚠️ 补建（backfillMissingGoalBranches）每轮先跑，正常路径下分支缺失会被它补上 ⇒ 本轮到此已是
+    // settled；本前置是**兜底**：补建被 blocked / unreadable，或分支在本轮补建之后才被删时仍不翻。
     const closeBlock = goalCloseBlockFromRecords(records, gid, ledger);
     const branchMerge = goalBranchMergeState(dataRoot, goal);
     const unmerged = branchMerge.state === "unmerged" ? branchMerge : null;
+    let branchAbsent = false;
+    if (branchMerge.state === "absent") {
+      if (landedMergeGoals === null) {
+        landedMergeGoals = new Set(
+          readGoalMergeResults(dataRoot).filter((r) => r.outcome === "landed").map((r) => r.goalId),
+        );
+      }
+      branchAbsent = !landedMergeGoals.has(gid); // 已并入过（分支是并入后被删的）⇒ ⛔ 不拦
+    }
+    // 台账判定优先（既有读数形状与语义逐字保留）：台账非 clear ⇒ 报台账成因；台账 clear 而分支未并入
+    // ⇒ 报 blocked-unmerged-branch；台账 clear、分支不存在且从未并入 ⇒ 报 blocked-branch-absent。
+    // 三者同时成立时台账成因更可操作（点名具体红 AC），且这样退回改动不改变既有判据读到的任何一条取值。
+    const closeVerdict: GoalCloseBlockVerdict =
+      closeBlock.verdict !== "clear"
+        ? closeBlock.verdict
+        : unmerged !== null
+          ? "blocked-unmerged-branch"
+          : branchAbsent
+            ? "blocked-branch-absent"
+            : "clear";
     closeBlocks.push({
       goal: gid,
-      // 台账判定优先（既有读数形状与语义逐字保留）：台账非 clear ⇒ 报台账成因；台账 clear 而分支未并入
-      // ⇒ 报 blocked-unmerged-branch。两者同时成立时台账成因更可操作（点名具体红 AC），且这样退回改动
-      // 不改变既有判据读到的任何一条 closeBlock 取值。
-      verdict: closeBlock.verdict !== "clear" ? closeBlock.verdict : unmerged !== null ? "blocked-unmerged-branch" : "clear",
+      verdict: closeVerdict,
       acs: closeBlock.acs,
       cause: closeBlock.cause,
       ...(unmerged !== null ? { branchTip: unmerged.tip } : {}),
     });
     if (goal.status === "active" && goalFlipDecision(records, gid, { verdict: sufficiency })) {
-      if (closeBlock.verdict !== "clear") {
+      if (closeVerdict !== "clear") {
         // 关闭【被拒】——落痕用独立成因取值（⛔ 不与 insufficient / not-evaluated-充分性 同形）：
-        // blocked-failing-ac 带被点名的 AC 清单；not-evaluated 带台账成因。`ok:false` 是消费方的判据
+        // blocked-failing-ac 带被点名的 AC 清单；not-evaluated 带台账成因；
+        // blocked-branch-absent 点名该 goal（没有分支 tip 可带——分支不在）。`ok:false` 是消费方的判据
         // （既有消费者只读 `ok`/`to`，一条 ok:false 的 to=achieved 不会被误读成「关了」）。
         flips.push({
           id: gid,
           to: "achieved",
           ok: false,
-          reason: closeBlock.verdict === "blocked-failing-ac"
+          reason: closeVerdict === "blocked-failing-ac"
             ? `blocked-failing-ac: ${closeBlock.acs.join(", ")}`
-            : `not-evaluated: close-block ${closeBlock.cause}`,
-        });
-      } else if (unmerged !== null) {
-        // 关闭【被拒，分支未并入】——独立成因取值（⛔ 不与充分性 / 台账成因同形），点名分支与 tip。
-        flips.push({
-          id: gid,
-          to: "achieved",
-          ok: false,
-          reason: `blocked-unmerged-branch: ${unmerged.branch} @ ${unmerged.tip}`,
+            : closeVerdict === "not-evaluated"
+              ? `not-evaluated: close-block ${closeBlock.cause}`
+              : closeVerdict === "blocked-unmerged-branch"
+                // 独立成因取值（⛔ 不与充分性 / 台账成因同形），点名分支与 tip。
+                ? `blocked-unmerged-branch: ${unmerged?.branch} @ ${unmerged?.tip}`
+                : `blocked-branch-absent: goal/${gid}`,
         });
       } else {
         const w = await writeGoalStatus(scriptRoot, gid, "achieved", dataRoot, { actor: "goal-driver", reason: "I2: all ACs achieved + sufficiency covered" });
@@ -4070,6 +4120,11 @@ export async function runGoalRound(root: string, opts: GoalRoundOptions = {}): P
         `achievedButFailing=${achievedFailing ? achievedFailing.achievedButFailing.length : "?"} ` +
         `closeBlocked=${closeBlocks.filter((b) => b.verdict === "blocked-failing-ac").length} ` +
         `closeNotEvaluated=${closeBlocks.filter((b) => b.verdict === "not-evaluated").length} ` +
+        // branch 半边两个取值（⛔ 不折成一个）：`unmerged` = 分支在且没并入、`absent` = 分支不在且从没并入。
+        // ⚠️ 后两个是本次补的：`blocked-unmerged-branch` 加进来时这一行没同步（同一条 5b 遗漏），
+        // 一行读数漏掉两个取值 ⇒ 拦截发生了却在日志里读不出来。
+        `closeUnmergedBranch=${closeBlocks.filter((b) => b.verdict === "blocked-unmerged-branch").length} ` +
+        `closeBranchAbsent=${closeBlocks.filter((b) => b.verdict === "blocked-branch-absent").length} ` +
         // 冻结域轮转（pass 1c）：`-` = 读不到；`0/0` = 本轮无合格对象（未到 minAge，正常）。
         `frozenSweep=${frozenSweep === null ? "-" : `${frozenSweep.ran.length}/${frozenSweep.eligible}`} ` +
         // ⑨ CI run 采集：`ok(a+b+c)` = 追加 a / 补全 b / 归因 c；其余态逐字带出 status（⛔ 不折成一个布尔）。

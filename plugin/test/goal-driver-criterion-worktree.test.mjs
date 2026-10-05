@@ -738,6 +738,124 @@ test("branch-mode goal 在 goal/<id> 并入 develop 之前不得被翻 achieved�
   }
 });
 
+// ── gap-goal-branch-absent-branch-does-not-block-goal-achieved ─────────────────────────────────
+//
+// 回答的问题：**branch-mode goal 的 `goal/<id>` 不存在、且它从未并入过时，goal 会不会被翻成 achieved。**
+// cantus GOAL-002（`branch: true`）的生产读数：statusLog `draft → active → achieved`（后一条 actor=
+// goal-driver、reason「I2: all ACs achieved + sufficiency covered」），而同一时刻 `git branch --list
+// 'goal/*'` 为空、账本里没有该 goal 的 `goal-merge-result` ⇒ 一个**从未并入**的 goal 被判完成，隔离
+// 的承诺无声落空。旧实现里 `goalBranchMergeState` 对缺失分支直接返 `settled`（⇒ closeBlock=clear）⇒
+// 「并入前不得 achieved」的闸结构上不生效。
+//
+// 两道防线（本用例把两道都钉住）：① 每轮先跑的补建（gap-goal-branch-active-branch-mode-goal-without-
+// branch-never-self-heals）把缺分支补出来——修好了就没有本前置的对象；② 本任务新增的关闭前置
+// `blocked-branch-absent` 是**兜底**：补建没修好时仍不翻。用例 ① 用「没有 landing baseline ⇒ 补建
+// unreadable」造出「补建没修好」这一状态，并把补建读数一并断言（⇒ 本前置的对象是被证明存在的，⛔ 不空转）。
+// ⛔ 与 `blocked-unmerged-branch` 是两个方向：那条管「分支在且没并」（读数带 branchTip），本条管
+// 「分支不在且从没并过」（没有 tip 可带，由 `goal` 字段点名该 goal）。
+
+const ABSENT_GOAL = "GOAL-920";
+const ABSENT_GOAL_BRANCH = `goal/${ABSENT_GOAL}`;
+const PLAIN_GOAL_3 = "GOAL-921";
+
+/** 分支缺失夹具：active ∧ branch:true 的 ABSENT_GOAL，两条已 achieved 的 AC（criterion `true` ⇒ 本轮
+ *  求值 pass，账本因此可读），但 `goal/GOAL-920` **不存在**。
+ *  `withDevelop` 建不建 landing baseline —— 不建 ⇒ 本轮补建的 `ensureGoalBranch` 返回 `unreadable`
+ *  （「补建被挡」这一兜底路径的对象）；建 ⇒ 补建正常可修（② 的臂靠 landed 并入结果让它跳过，分支保持缺失）。
+ *  `landedMergeResult:true` 预置一条 landed 的 `goal-merge-result`（= 「并入后已被 quay 自己删」）。
+ *  `withPlainGoal` 加一条非 branch-mode 的同条件 goal（④ 的负控制）。 */
+function mkAbsentBranchFixture({ withDevelop = false, landedMergeResult = false, withPlainGoal = false } = {}) {
+  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "goal-branch-absent-"));
+  const ns = fs.mkdtempSync(path.join(os.tmpdir(), "goal-branch-absent-ns-"));
+  fs.mkdirSync(path.join(tmp, "goals"), { recursive: true });
+  fs.mkdirSync(path.join(tmp, ".quay"), { recursive: true });
+  fs.writeFileSync(path.join(tmp, ".gitignore"), ".quay/\n", "utf8");
+  fs.writeFileSync(path.join(tmp, ".quay", "config.yml"), `loop:\n  worktree_root: ${ns}\n`, "utf8");
+  const git = mkGitFixtureRoot(tmp);
+
+  writeGoalRecord(tmp, { id: ABSENT_GOAL, status: "active", branch: true, body: EXIT_BODY });
+  writeAcRecord(tmp, { id: "AC-920", goal: ABSENT_GOAL, status: "achieved", criterion: "true" });
+  writeAcRecord(tmp, { id: "AC-921", goal: ABSENT_GOAL, status: "achieved", criterion: "true" });
+  if (withPlainGoal) {
+    writeGoalRecord(tmp, { id: PLAIN_GOAL_3, status: "active", branch: false, body: EXIT_BODY });
+    writeAcRecord(tmp, { id: "AC-922", goal: PLAIN_GOAL_3, status: "achieved", criterion: "true" });
+  }
+
+  git(["add", "-A"]);
+  git(["commit", "-m", "base"]);
+  if (withDevelop) git(["branch", "develop"]); // ⛔ 绝不建 goal/<id>：本夹具的全部要点就是它不存在
+  if (landedMergeResult) appendLandedMergeResult(tmp, ABSENT_GOAL);
+  return { tmp, ns, git };
+}
+
+test("branch-absent-①: active ∧ branch:true、全 AC achieved＋sufficiency covered，但 goal/<id> 不存在且账本无 landed 并入结果 ⇒ ⛔ 不翻 achieved；closeBlocks=blocked-branch-absent 并点名该 goal；非 branch-mode 同条件照常翻", async () => {
+  // 补建能修好时没有本前置的对象（见 AC-backfill-①），故这里用「无 landing baseline ⇒ 补建 unreadable」
+  // 造出兜底路径：分支在本轮结束前仍不存在，关闭判定必须自己拦住。
+  const { tmp, ns } = mkAbsentBranchFixture({ withPlainGoal: true });
+  try {
+    assert.equal(refExists(tmp, ABSENT_GOAL_BRANCH), false, "夹具前置：goal/GOAL-920 必须不存在（否则本用例空转）");
+
+    const r1 = await runGoalRound(tmp, COVERED_OPTS);
+
+    // 非空转证明：本轮补建**确实失败了**（读数 action=unreadable），且失败后分支仍不存在。若哪天补建
+    // 变成无条件能修好，这条会先红——本前置不会静默退化成永远取不到对象的死代码。
+    const bf = r1.fact.value.goalBranchBackfills.find((b) => b.goal === ABSENT_GOAL);
+    assert.equal(
+      bf?.action, "unreadable",
+      `夹具前置：本轮补建必须失败，否则本前置无对象、本用例空转（实测=${JSON.stringify(r1.fact.value.goalBranchBackfills)}）`,
+    );
+    assert.equal(refExists(tmp, ABSENT_GOAL_BRANCH), false, "补建失败 ⇒ 一轮之后分支仍不存在（直接量）");
+
+    // 正臂：goal 仍是 active（⛔ 没被翻），读数落 blocked-branch-absent 并点名该 goal。
+    assert.equal(goalStatus(tmp, ABSENT_GOAL), "active", "分支缺失且从未并入 ⇒ ⛔ 不得被翻成 achieved");
+    const b1 = r1.fact.value.closeBlocks.find((b) => b.goal === ABSENT_GOAL);
+    assert.ok(b1, `closeBlocks 必须为 ${ABSENT_GOAL} 落一条（实测=${JSON.stringify(r1.fact.value.closeBlocks)}）`);
+    assert.equal(b1.verdict, "blocked-branch-absent", `实测=${JSON.stringify(b1)}`);
+    assert.equal("branchTip" in b1, false, "分支不存在 ⇒ 没有 tip 可点名（⛔ 取值不与 blocked-unmerged-branch 同形）");
+    const refused = r1.fact.value.flips.find((f) => f.id === ABSENT_GOAL && f.to === "achieved");
+    assert.ok(refused && refused.ok === false, `必须有一条 ok:false 的关闭尝试（实测=${JSON.stringify(r1.fact.value.flips)}）`);
+    assert.equal(
+      refused.reason,
+      `blocked-branch-absent: goal/${ABSENT_GOAL}`,
+      "拒绝理由带独立成因取值 + 点名该 goal（⛔ 不与台账 / 充分性 / 未并入分支三种成因同形）",
+    );
+
+    // ④ 非 branch-mode 的 goal 不受影响（负控制：拦截只针对 branch-mode 的缺失分支）：同条件照常翻
+    // achieved，且它的 closeBlock 是 clear、不带 branchTip 键（形状与改动前逐字相同）。
+    assert.equal(goalStatus(tmp, PLAIN_GOAL_3), "achieved", "非 branch-mode 的同条件 goal 不受影响（照常 achieved）");
+    const plain = r1.fact.value.closeBlocks.find((b) => b.goal === PLAIN_GOAL_3);
+    assert.equal(plain?.verdict, "clear", `非 branch-mode goal 的 closeBlock 应为 clear（实测=${JSON.stringify(plain)}）`);
+    assert.equal("branchTip" in plain, false, "clear 条目不得多出 branchTip 键");
+  } finally {
+    fs.rmSync(tmp, { recursive: true, force: true });
+    fs.rmSync(ns, { recursive: true, force: true });
+  }
+});
+
+test("branch-absent-②: 账本有 landed 的并入结果（分支是并入后已被删）⇒ 不拦，照常翻 achieved、closeBlock=clear；且⛔ 不因此补建分支", async () => {
+  // 「从未创建 / 被误删」与「并入后已被 quay 自己删」必须分开：后者是正常终态，拦它就是个新死结。
+  // 这里建了 develop ⇒ 补建本可修好，但 landed 并入结果让补建**跳过**（AC-backfill-② 的同一条判据）
+  // ⇒ 分支在本轮仍缺失，能真实检验「缺失 + 有 landed ⇒ 放行」这条臂。
+  const { tmp, ns } = mkAbsentBranchFixture({ withDevelop: true, landedMergeResult: true });
+  try {
+    const r1 = await runGoalRound(tmp, COVERED_OPTS);
+    assert.deepEqual(
+      r1.fact.value.goalBranchBackfills, [],
+      `账本有 landed 并入结果 ⇒ ⛔ 不得补建（实测=${JSON.stringify(r1.fact.value.goalBranchBackfills)}）`,
+    );
+    assert.equal(refExists(tmp, ABSENT_GOAL_BRANCH), false, "并入后已删的分支不得被补建出来（直接量）");
+    assert.equal(goalStatus(tmp, ABSENT_GOAL), "achieved", "账本有 landed 并入结果 ⇒ 缺失分支不是阻塞，照常翻 achieved");
+    const b1 = r1.fact.value.closeBlocks.find((b) => b.goal === ABSENT_GOAL);
+    assert.equal(b1?.verdict, "clear", `已并入过的 goal 的 closeBlock 应为 clear（实测=${JSON.stringify(b1)}）`);
+    assert.equal("branchTip" in b1, false, "clear 条目不带 branchTip 键");
+    const flipped = r1.fact.value.flips.find((f) => f.id === ABSENT_GOAL && f.to === "achieved");
+    assert.ok(flipped && flipped.ok === true, `应有一条 ok:true 的 achieved 翻写（实测=${JSON.stringify(r1.fact.value.flips)}）`);
+  } finally {
+    fs.rmSync(tmp, { recursive: true, force: true });
+    fs.rmSync(ns, { recursive: true, force: true });
+  }
+});
+
 // ── gap-goal-branch-active-branch-mode-goal-without-branch-never-self-heals ─────────────────────
 //
 // 回答的问题：**一个 active ∧ `branch: true` 的 goal，若它的 `goal/<id>` 从未建出来（激活由旧 CLI
