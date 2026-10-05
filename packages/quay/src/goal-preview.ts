@@ -45,6 +45,12 @@ import path from "node:path";
 import { spawn } from "node:child_process";
 import { goalCriterionWorktreeDir, realpathOrSelf } from "./goal-store.ts";
 import { readServerState, pidAlive } from "./server-state.ts";
+import {
+  worktreeDepsInstallCommand,
+  readDeclaredWorktreeDepsInstall,
+  runWorktreeDepsInstall,
+  type WorktreeDepsDecision,
+} from "./worktree-deps.ts";
 
 /** The serve-lock file, restated from `serve.ts`'s `SERVE_LOCK_REL` — see the header. Not imported
  *  from `serve.ts` on purpose: this module is a LEAF (it is re-exported through the drivers' Layer 0
@@ -90,15 +96,23 @@ export function previewWorktreeDir(mainRoot: string, goalId: string): string {
 // Semantics are ENUMERATED and never throw (硬规则 3/3b): a "no deps at the source" case must read as
 // itself, never as a silent success; an already-provisioned worktree is a no-op, never an error.
 //   linked        — the main checkout had `node_modules` and the symlink was created
+//   installed     — a package-manager-specific install command ran INSIDE the worktree (a declared
+//                   `loop.worktree_deps_install`, or pnpm auto-detected); ⛔ NO symlink — a pnpm
+//                   project refuses a symlinked node_modules and its suite dies in milliseconds
 //   present       — the worktree already carried a `node_modules` entry (kept untouched, idempotent)
 //   source-absent — the main checkout has no `node_modules`: NO link is created, read honestly
-//   failed        — the symlink could not be created (readable reason, still ⛔ does not throw)
+//   failed        — the symlink could not be created, OR an install command ran and did not yield
+//                   `node_modules` (readable reason, still ⛔ does not throw)
 export interface WorktreeNodeModulesReading {
-  state: "linked" | "present" | "source-absent" | "failed";
-  /** `<worktreeRoot>/node_modules` — where the link lives (or would live). */
+  state: "linked" | "installed" | "present" | "source-absent" | "failed";
+  /** `<worktreeRoot>/node_modules` — where the link (or install) lives (or would live). */
   linkPath: string;
   /** The main checkout's `node_modules` the link points at; null when nothing was linked. */
   target: string | null;
+  /** WHY an install command was chosen (config / pnpm-lockfile / packageManager) — present only on
+   *  the `installed`/`failed` install paths; absent on the link paths (⛔ 硬规则 3b: "no marker
+   *  detected" must not share a shape with "linked"). */
+  decision?: WorktreeDepsDecision;
   reason: string | null;
 }
 
@@ -121,6 +135,24 @@ function entryExists(p: string): boolean {
 export function ensureWorktreeNodeModules(mainRoot: string, worktreeRoot: string): WorktreeNodeModulesReading {
   const linkPath = path.join(worktreeRoot, "node_modules");
   if (entryExists(linkPath)) return { state: "present", linkPath, target: null, reason: null };
+
+  // Package-manager-aware arm — the SHARED judgment with the task path
+  // (packages/quay/src/worktree-deps.ts): a pnpm project (or one declaring loop.worktree_deps_install)
+  // refuses a symlinked node_modules, so install INSIDE the worktree instead of linking. ⛔ ONE
+  // implementation, two callers — never a copy per path.
+  const judged = worktreeDepsInstallCommand({ mainRoot, declaredInstall: readDeclaredWorktreeDepsInstall(mainRoot) });
+  if (judged.command !== null) {
+    const r = runWorktreeDepsInstall(judged.command, worktreeRoot); // captured (not relayed): the driver's stdout stays clean
+    if (r.ok && entryExists(linkPath)) return { state: "installed", linkPath, target: null, decision: judged.decision, reason: null };
+    return {
+      state: "failed",
+      linkPath,
+      target: null,
+      decision: judged.decision,
+      reason: r.ok ? `'${judged.command}' did not produce ${linkPath}` : `'${judged.command}' exited non-zero in ${worktreeRoot}${r.output ? `: ${r.output}` : ""}`,
+    };
+  }
+
   const target = path.join(mainRoot, "node_modules");
   let st: fs.Stats;
   try {

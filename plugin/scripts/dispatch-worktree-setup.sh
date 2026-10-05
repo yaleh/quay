@@ -225,29 +225,23 @@ if [ -n "${branch}" ]; then
   fi
 fi
 
-# ── 1. node_modules (AC1: symlink path AND install path) ─────────────────────────────────────
-if [ -e "${worktree}/node_modules" ] || [ -L "${worktree}/node_modules" ]; then
-  echo "dispatch-worktree-setup: node_modules already present, keeping: ${worktree}/node_modules"
-elif [ -d "${root}/node_modules" ]; then
-  # Symlink path: main has node_modules → zero-copy shared-deps link (the tasklist precedent).
-  if [ "${dry_run}" -eq 1 ]; then
-    echo "dispatch-worktree-setup: [dry-run] would link ${root}/node_modules -> ${worktree}/node_modules"
-  else
-    ln -s "${root}/node_modules" "${worktree}/node_modules"
-    echo "dispatch-worktree-setup: linked ${root}/node_modules -> ${worktree}/node_modules"
-  fi
+# ── 1. node_modules (present / package-manager install / symlink / npm fallback) ──────────────
+# The package-manager-aware judgment AND the provisioning live ONCE in
+# packages/quay/src/worktree-deps.ts, shared with the goal path's ensureWorktreeNodeModules
+# (gap-dispatch-worktree-setup-links-node-modules-for-pnpm-projects): a pnpm project refuses a
+# symlinked node_modules, so its worktrees were dying in the suite step in milliseconds. Reached here
+# through the thin entry worktree-deps-provision.sh, NOT a direct `node …` line: this script is a
+# pure-bash orchestrator and the sh-census ratchet is at zero slack (a `node` word here would charge
+# this whole body to embeddedInterpreterLines). The helper's exit code is AUTHORITATIVE — a non-zero
+# exit is fail-closed (⛔ never degrade to a symlink that lets the suite die in milliseconds).
+if [ "${dry_run}" -eq 1 ]; then
+  bash "${SCRIPT_DIR}/worktree-deps-provision.sh" "${worktree}" --root "${root}" --dry-run
+  rc=$?
 else
-  # Install path: main has NO node_modules (bare clone) → npm install INSIDE the worktree.
-  if [ "${dry_run}" -eq 1 ]; then
-    echo "dispatch-worktree-setup: [dry-run] would npm install in ${worktree} (main has no node_modules)"
-  else
-    echo "dispatch-worktree-setup: main ${root} has no node_modules — npm install in ${worktree}..."
-    (cd "${worktree}" && npm install) || { echo "dispatch-worktree-setup: npm install failed" >&2; exit 2; }
-    [ -d "${worktree}/node_modules" ] \
-      || { echo "dispatch-worktree-setup: npm install did not produce ${worktree}/node_modules" >&2; exit 2; }
-    echo "dispatch-worktree-setup: npm install done — ${worktree}/node_modules"
-  fi
+  bash "${SCRIPT_DIR}/worktree-deps-provision.sh" "${worktree}" --root "${root}"
+  rc=$?
 fi
+[ "${rc}" -eq 0 ] || exit "${rc}"
 
 # ── 2. config.yml (delegated to the EXISTING declarative worktree-include.sh) ─────────────────
 # The failure face is deliberately NOT a bare one-line "failed": a bare message is indistinguishable
