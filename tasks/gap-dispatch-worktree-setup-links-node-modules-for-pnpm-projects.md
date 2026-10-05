@@ -2,7 +2,7 @@
 id: gap-dispatch-worktree-setup-links-node-modules-for-pnpm-projects
 title: dispatch-worktree-setup.sh 只会符号链接或 npm install，不认包管理器——pnpm
   项目（cantus）每个新任务 worktree 的 suite 步毫秒级失败并被误判成「无法归因」
-status: ready
+status: done
 labels:
   - gap
   - defect
@@ -97,7 +97,66 @@ plugin/test/sh-census-check.test.mjs                                 → 20/20 p
 
 ### AC5 — `node --test plugin/test/dispatch-worktree-setup.test.mjs`
 
-见 AC1：34/34 pass（含 30 条原有，全部保持绿——既有 symlink / npm fallback / dry-run / 分支自检 / fork-point 语义逐字不变）。
+见 AC1：34/34 pass（含 30 条原有，全部保持绿色——既有 symlink / npm fallback / dry-run / 分支自检 / fork-point 语义逐字不变）。
+
+### AC6（fan-in 解锁）— 修复阻塞本轮落地的 develop-wide 外来 static red
+
+**前一轮 `step=suite: # fail 72` 的真因不是本任务的实现。** `criterion-carrier-inline-check` 在 merge 后的 worktree 上判红：`goals/AC-905/906/907-*.md`（GOAL-905 第二次合并演练的三个 /doc 判据）各自**内联**了载体读取 `st="$root/.quay/server.json"`——正是该 checker（2026-09-30 落地）存在的目的所禁止的**第 18 份副本**；这三条判据由 cli 于 **2026-10-05** 新建 ⇒ 复发。失败形态（`# tests 0 / # fail 72`，静态门 fail-closed）让 driver 记为 `step=suite`，与实现无关。
+
+**读数为 develop-wide（非本分支引入）**：三条 goal 记录在 `develop` 与 `author` 上 blob 逐一相同（`998f5baa0` / `9ab188e14` / `5266e6076`）；在**主检出** `/data/home/yale/work/quay` 上直接跑该 checker 亦 exit 1：
+
+```
+criterion-carrier-inline-check --root /data/home/yale/work/quay
+  → 3 criterion(s) inline "server.json" (AC-905 / AC-906 / AC-907)   exit 1
+```
+
+缺此修复，fan-in 的静态门对**任何**任务永久红 ⇒ 无人可落地。**无其它在飞任务认领**（`grep tasks/` 仅命中 GOAL-905 drill 记录与已 done 的 `gap-criterion-live-web-address-derivation-17-copies-to-one`）。
+
+**修法**：把三条判据改写为**调用单一正本** `plugin/scripts/live-web-address.ts`，逐字对齐早已合规的同构双胞胎 `AC-904`（同为 GOAL 演练 /doc 判据，仅换 DOC id 与批次标签）。经 sanctioned 写面 `quay goal write <id> --criterion … --root <worktree>` 落盘并提交在**任务分支**（`status` / `origin` / `expect` / `title` 逐一保留，patch 语义）。
+
+```
+before: criterion-carrier-inline-check --root <main checkout>  →  3 criterion(s) inline "server.json"   exit 1
+after : criterion-carrier-inline-check --root <worktree>        →  0 criterion(s) inline "server.json"   exit 0
+```
+
+**为何并入本任务**：这是外来**确定性** static red，fan-in 静态门 fail-closed（本仓无 `loop.rerun_command` 重跑），且无在飞任务认领。按仓库既定处置（develop-wide orphan red ⇒ self-fix + widen Touches）把 3 个 goal 文件补进 `## Touches`；此前 `anti-drift-touches-check` 对它们判 `out-of-declared` 3 条：
+
+```
+anti-drift-touches-check --task … --worktree <wt> --merge-target develop
+  before: ANTI-DRIFT HARD FAIL — 3 violation(s)  (out-of-declared: goals/AC-905 / AC-906 / AC-907)   exit 1
+  after : ANTI-DRIFT OK — 13 actual file(s), all within declared Touches (16 glob(s))                 exit 0
+```
+
+（`after` 为加宽 Touches 并 `git merge develop` 把新任务体带进 worktree 后的实跑读数；`criterion-carrier-inline-check` 亦同轮实跑 exit 0。）改动限于每条记录的 `criterion` 字段（净 -21 行：内联的 `server.json` 解析块被对 live-web-address.ts 的单次调用取代）；`origin`（人 2026-10-05 的授权与演练背景）逐字未动。
+
+### AC7（fan-in 解锁·续）— 修掉 AC6 改写引出的两个 suite red
+
+上一轮 `step=suite` 的新读数（`found 21: …AC-905,AC-906,AC-907`）指向**本任务 AC6 改写的直接后果**，外加一条外来确定性 red；两条都在本轮修掉。
+
+**(a) `plugin/test/live-web-address.test.mjs`——AC6 改写把 AC-905/906/907 带进了「调用 helper 的判据」语料（18 → 21）**，而该文件的计数与 fixture 写死了旧集合。取假读数（读 develop 版本）：`develop` 上命中 **18** 条、本分支 **21** 条 ⇒ **是本分支引入，非 develop-wide**。
+
+```
+before（前一轮 suite log, 3 red）：
+  ✖ AC5: the corpus really is every goal criterion … found 21: … (expected 18)
+  ✖ AC5 (real arm): AC-905 … does not list DOC-910
+  ✖ AC5 (mutant arm): codes.length 21 ≠ 18
+after（本 worktree 实跑 node --test plugin/test/live-web-address.test.mjs）：
+  ℹ tests 17   ℹ pass 17   ℹ fail 0
+```
+
+修法：两处硬编码计数 **18 → 21**；fixture 的 `/doc` 索引由**语料派生**（`DOC_IDS = 判据文本里的 /DOC-\d+/`，不再写死 `DOC-904`），故下一个演练判据加入时页面自动跟上。此测试文件已补进 `## Touches`。
+
+**(b) `plugin/scripts/release-cut.mjs` 的 `diagnosticTail`——外来确定性 red，只在长 worktree 路径下出现。** 该函数超预算时 `joined.slice(-max)` 从**头部**裁，而它存在的意义正是携带子进程 stdout **头部**的判据 token（`NOT-EVALUATED: …`）；把它顶出预算的噪声是 Node 的 `MODULE_TYPELESS_PACKAGE_JSON` 警告——其正文里**两处**嵌了被解析脚本的**绝对路径**，故长度随**运行所在的 worktree 路径**增长。
+
+```
+主检出（短路径, 23 字符）：node --test --test-name-pattern "ratchet failure on the REAL cut path" plugin/test/release-cut.test.mjs
+  →  pass 1   （绿；证明非 develop-wide，是路径长度驱动）
+本 worktree（100 字符）   ：同一命令  →  fail 1
+  （joined = 815 > max=800 ⇒ slice(-800) 从 token 中间开始 ⇒ 输出里只剩 `…LUATED`）
+修后（本 worktree, 100 字符）：node --test plugin/test/release-cut.test.mjs  →  tests 8 / pass 8 / fail 0
+```
+
+修法：超预算时**两端都留**（`head … tail`），保证头部的判据 token 与尾部的理由都在（`plugin/scripts/release-cut.mjs` 已补进 `## Touches`）。⚠️ 这是 latent bug 被长路径暴露，非本任务实现缺陷；但它对**任何** task-id ≳56 字符的 worktree 都会确定性复发，故按「外来确定性 suite red ⇒ self-fix + widen Touches」当场修掉。
 
 ### DoD — 真实落地读数
 
@@ -121,4 +180,9 @@ plugin/test/sh-census-check.test.mjs                                 → 20/20 p
 - plugin/sh-census-baseline.json
 - .quay/config.yml.example
 - plugin/test/dispatch-worktree-setup.test.mjs
+- plugin/scripts/release-cut.mjs
+- plugin/test/live-web-address.test.mjs
 - tasks/gap-dispatch-worktree-setup-links-node-modules-for-pnpm-projects.md
+- goals/AC-905-演练-提供本-workspace-的-quay-serve-实例-其-doc-页列出第-a-批演练文档的首篇-doc-9.md
+- goals/AC-906-演练-提供本-workspace-的-quay-serve-实例-其-doc-页列出第-b-批演练文档的首篇-doc-9.md
+- goals/AC-907-演练-提供本-workspace-的-quay-serve-实例-其-doc-页列出第-c-批演练文档的首篇-doc-9.md

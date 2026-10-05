@@ -425,6 +425,103 @@ t("AC1 install path — install that does NOT produce node_modules fails closed 
   }
 });
 
+// ── AC1 package-manager path (pnpm) ─────────────────────────────────────────────────────────────
+// gap-dispatch-worktree-setup-links-node-modules-for-pnpm-projects: a pnpm project refuses a
+// symlinked node_modules, so the OLD behavior (symlink when the main has node_modules) made every
+// dispatched worktree's suite step die in milliseconds. The fix installs INSIDE the worktree when the
+// project declares a command (`.quay/config.yml` loop.worktree_deps_install) or is detected as pnpm
+// (pnpm-lock.yaml). The judgment is ONE implementation in packages/quay/src/worktree-deps.ts.
+
+/** A stub package-manager binary named `name` that prints its cwd and optionally creates node_modules
+ *  / fails. Used to prove the INSTALL branch ran in the worktree (⛔ not real pnpm). */
+function makePmStub(name, { create = false, fail = false } = {}) {
+  const bin = fs.mkdtempSync(path.join(os.tmpdir(), "dispatch-pmbin-"));
+  const stub = path.join(bin, name);
+  fs.writeFileSync(
+    stub,
+    `#!/usr/bin/env bash\n` +
+      `printf 'stub-${name} invoked in %s\\n' "$PWD" >&2\n` +
+      (create ? `mkdir -p node_modules\n` : "") +
+      (fail ? `exit 2\n` : `exit 0\n`),
+  );
+  fs.chmodSync(stub, 0o755);
+  return { bin, stub };
+}
+
+/** A minimal VALID `.quay/config.yml` whose loop section declares loop.worktree_deps_install. */
+function configWithWorktreeDepsInstall(cmd) {
+  return `loop:\n  board: native\n  gates: [acceptance]\n  worktree_deps_install: ${JSON.stringify(cmd)}\n`;
+}
+
+t("AC1 pnpm ① — no package-manager marker ⇒ unchanged symlink behavior", () => {
+  const main = tmpMainRepo(); // node_modules present, NO pnpm-lock.yaml
+  const wt = tmpWorktree();
+  try {
+    assert.ok(!fs.existsSync(path.join(main, "pnpm-lock.yaml")), "fixture premise: no pnpm marker");
+    const r = bash(SETUP, [wt, "--root", main]);
+    assert.equal(r.status, 0, `script exited ${r.status}: ${r.stdout} ${r.stderr}`);
+    assert.ok(fs.lstatSync(path.join(wt, "node_modules")).isSymbolicLink(), "no marker ⇒ still a symlink (behavior unchanged)");
+    assert.equal(fs.readlinkSync(path.join(wt, "node_modules")), path.join(main, "node_modules"));
+  } finally {
+    rmrf(wt);
+    rmrf(main);
+  }
+});
+
+t("AC1 pnpm ② — pnpm-lock.yaml ⇒ NO symlink; the pnpm install command runs with cwd = the worktree", () => {
+  const main = tmpMainRepo();
+  fs.writeFileSync(path.join(main, "pnpm-lock.yaml"), "lockfileVersion: '9.0'\n");
+  const wt = tmpWorktree();
+  const pnpmStub = makePmStub("pnpm", { create: true }); // records its cwd, creates node_modules
+  const env = { ...process.env, PATH: `${pnpmStub.bin}:${process.env.PATH}` };
+  try {
+    const r = bash(SETUP, [wt, "--root", main], { env });
+    assert.equal(r.status, 0, `script exited ${r.status}: ${r.stdout} ${r.stderr}`);
+    assert.ok(r.stderr.includes(`stub-pnpm invoked in ${wt}`), `the pnpm command must run with cwd = the worktree; stderr=${r.stderr}`);
+    assert.ok(!fs.lstatSync(path.join(wt, "node_modules")).isSymbolicLink(), "⛔ must NOT be a symlink to the main checkout");
+    assert.ok(fs.statSync(path.join(wt, "node_modules")).isDirectory(), "the install produced a REAL node_modules directory");
+  } finally {
+    rmrf(wt);
+    rmrf(main);
+    rmrf(pnpmStub.bin);
+  }
+});
+
+t("AC1 pnpm ②b — a declared loop.worktree_deps_install command runs (in the worktree)", () => {
+  const main = tmpMainRepo();
+  const stub = makePmStub("declared-install", { create: true });
+  fs.writeFileSync(path.join(main, ".quay", "config.yml"), configWithWorktreeDepsInstall(stub.stub));
+  const wt = tmpWorktree();
+  try {
+    const r = bash(SETUP, [wt, "--root", main]);
+    assert.equal(r.status, 0, `script exited ${r.status}: ${r.stdout} ${r.stderr}`);
+    assert.ok(r.stderr.includes(`stub-declared-install invoked in ${wt}`), `the declared command must run with cwd = the worktree; stderr=${r.stderr}`);
+    assert.ok(!fs.lstatSync(path.join(wt, "node_modules")).isSymbolicLink(), "⛔ must NOT be a symlink");
+    assert.ok(fs.statSync(path.join(wt, "node_modules")).isDirectory(), "the declared install produced node_modules");
+  } finally {
+    rmrf(wt);
+    rmrf(main);
+    rmrf(stub.bin);
+  }
+});
+
+t("AC1 pnpm ③ — a failing install command exits 2 and leaves NO symlink (fail-closed)", () => {
+  const main = tmpMainRepo();
+  fs.writeFileSync(path.join(main, "pnpm-lock.yaml"), "lockfileVersion: '9.0'\n");
+  const wt = tmpWorktree();
+  const pnpmStub = makePmStub("pnpm", { create: false, fail: true }); // exits 2, produces nothing
+  const env = { ...process.env, PATH: `${pnpmStub.bin}:${process.env.PATH}` };
+  try {
+    const r = bash(SETUP, [wt, "--root", main], { env });
+    assert.equal(r.status, 2, `a failing install must exit 2, got ${r.status}: ${r.stdout} ${r.stderr}`);
+    assert.ok(!fs.existsSync(path.join(wt, "node_modules")), "⛔ NO symlink fallback — the suite must not silently die in milliseconds");
+  } finally {
+    rmrf(wt);
+    rmrf(main);
+    rmrf(pnpmStub.bin);
+  }
+});
+
 // ── idempotency / dry-run / usage ───────────────────────────────────────────────────────────────
 
 t("idempotent — re-run keeps the symlink, no error", () => {

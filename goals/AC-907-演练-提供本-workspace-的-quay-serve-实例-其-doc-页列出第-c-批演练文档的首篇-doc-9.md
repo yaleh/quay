@@ -8,43 +8,36 @@ goal: GOAL-905
 criterion: >-
   set -u
 
+
   root=$(git rev-parse --show-toplevel 2>/dev/null) || { echo "NOT-EVALUATED:
   not inside a git repository" >&2; exit 3; }
 
+
   cd "$root"
 
-  st="$root/.quay/server.json"
 
-  [ -s "$st" ] || { echo "NOT-EVALUATED: no quay.ts serve instance is registered
-  for $root ($st absent)" >&2; exit 3; }
+  out=$(node --no-warnings --experimental-strip-types
+  "$root/plugin/scripts/live-web-address.ts" "$root" 2>&1)
 
-  reg=$(node -e '(() => { try { const s =
-  JSON.parse(require("fs").readFileSync(process.argv[1], "utf8")); const w =
-  (s.services || []).find((x) => x.name === "web"); console.log([s.pid, w &&
-  w.host, w && w.port].join(" ")); } catch { console.log(""); } })()' "$st")
+  rc=$?
 
-  set -- $reg
+  case "$rc" in
+    0) addr=$out ;;
+    1) echo "CAUSE=carrier-web-down — the registered quay.ts serve marks its web service down" >&2; exit 1 ;;
+    *) echo "NOT-EVALUATED: no live web address for $root ($out)" >&2; exit 3 ;;
+  esac
 
-  pid=${1:-}; host=${2:-}; port=${3:-}
 
-  [ -n "$pid" ] && [ -n "$host" ] && [ -n "$port" ] || { echo "NOT-EVALUATED:
-  the quay.ts serve registration at $st has no web host/port" >&2; exit 3; }
+  body=$(curl -s --max-time 20 "http://$addr/doc") || { echo "NOT-EVALUATED: GET
+  http://$addr/doc failed" >&2; exit 3; }
 
-  kill -0 "$pid" 2>/dev/null || { echo "NOT-EVALUATED: registered quay.ts serve
-  pid $pid is not alive (stale registration)" >&2; exit 3; }
-
-  [ "$(readlink /proc/$pid/cwd 2>/dev/null)" = "$root" ] || { echo
-  "NOT-EVALUATED: registered quay.ts serve pid $pid does not run in $root" >&2;
-  exit 3; }
-
-  body=$(curl -s --max-time 20 "http://$host:$port/doc") || { echo
-  "NOT-EVALUATED: GET http://$host:$port/doc failed" >&2; exit 3; }
 
   printf '%s' "$body" | grep -q 'DOC-930' || { echo "CAUSE=drill-doc-not-served
-  — http://$host:$port/doc does not list DOC-930: the instance serving $root
-  lacks the drill record" >&2; exit 1; }
+  — http://$addr/doc does not list DOC-930: the instance serving $root lacks the
+  drill record" >&2; exit 1; }
 
-  echo "PASS: http://$host:$port/doc lists DOC-930"
+
+  echo "PASS: http://$addr/doc lists DOC-930"
 expect: exit 0 = 本 workspace root 下登记在册且存活的 quay.ts serve 实例，其 /doc 页列出
   DOC-930；exit 1 = 该实例的 /doc 页没有 DOC-930（实例所在树缺这批文档）；exit 3 = 该 root 下没有登记在册且存活的
   serve 实例。

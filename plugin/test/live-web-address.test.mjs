@@ -281,6 +281,10 @@ function convergedCriteria() {
 
 const CRITERIA = convergedCriteria();
 const LABELS = [...new Set(CRITERIA.map((c) => c.label).filter(Boolean))];
+// The drill criteria name the doc record they require the `/doc` page to LIST (`grep -q 'DOC-910'`).
+// Deriving the ids from the corpus — instead of a literal list — keeps the fixture page in step when a
+// new drill criterion joins the set.
+const DOC_IDS = [...new Set(CRITERIA.flatMap((c) => [...c.criterion.matchAll(/DOC-\d+/g)].map((m) => m[0])))];
 
 function enPage() {
   const nav = LABELS.map((l) => `<a href="#">${l}</a>`).join("");
@@ -305,11 +309,12 @@ async function makeHarness(mode) {
     res.setHeader("content-type", "text/html; charset=utf-8");
     if (/lang=zh/.test(url)) res.setHeader("set-cookie", "lang=zh; Path=/");
     let body = wantsZh ? ZH_PAGE : enPage();
-    // AC-904 (the GOAL-904 drill) is satisfied by `GET /doc` LISTING its managed record `DOC-904`, so the
-    // `/doc` response carries a doc-index element. Appended OUTSIDE `<nav>`: the other criteria assert on
-    // the nav region + `<title>` (both unchanged), so this stays one generic page serving every subject —
-    // the arm under test is the DERIVATION, not the page content (硬规则 4 推论三).
-    if (/^\/doc(?:[?#]|$)/.test(url)) body = body.replace("</body>", `<div id="doc-index">DOC-904</div></body>`);
+    // The GOAL drill criteria (AC-904/905/906/907) are each satisfied by `GET /doc` LISTING their own
+    // managed record (`DOC-904` / `DOC-910` / `DOC-920` / `DOC-930`), so the `/doc` response carries a
+    // doc-index element naming every record the corpus asks for. Appended OUTSIDE `<nav>`: the other
+    // criteria assert on the nav region + `<title>` (both unchanged), so this stays one generic page
+    // serving every subject — the arm under test is the DERIVATION, not the page content (硬规则 4 推论三).
+    if (/^\/doc(?:[?#]|$)/.test(url)) body = body.replace("</body>", `<div id="doc-index">${DOC_IDS.join(" ")}</div></body>`);
     res.end(body);
   });
   await new Promise((r) => server.listen(0, "127.0.0.1", r));
@@ -362,11 +367,13 @@ function runCriterionText(root, criterion) {
 }
 
 test("AC5: the corpus really is every goal criterion that calls the helper (guard against a vacuous control)", () => {
-  // 18 = the 17 converged criteria (gap-criterion-live-web-address-derivation-17-copies-to-one) + AC-904,
-  // the GOAL-904 drill criterion added 2026-10-04 (`1aec2bd8b`) that calls the helper directly. The
-  // predicate is deliberately live (the criterion TEXT names the helper), so the count is the guard
-  // against a vacuous (empty/one-element) control and must move whenever a new caller joins the set.
-  assert.equal(CRITERIA.length, 18, `expected every criterion that calls the helper, found ${CRITERIA.length}: ${CRITERIA.map((c) => c.id).join(",")}`);
+  // 21 = the 17 converged criteria (gap-criterion-live-web-address-derivation-17-copies-to-one) + AC-904,
+  // the GOAL-904 drill criterion added 2026-10-04 (`1aec2bd8b`), + AC-905/906/907, the GOAL-905 drill
+  // criteria added 2026-10-05 whose inlined `server.json` reads were replaced by a call to the helper
+  // (gap-dispatch-worktree-setup-links-node-modules-for-pnpm-projects). The predicate is deliberately
+  // live (the criterion TEXT names the helper), so the count is the guard against a vacuous
+  // (empty/one-element) control and must move whenever a new caller joins the set.
+  assert.equal(CRITERIA.length, 21, `expected every criterion that calls the helper, found ${CRITERIA.length}: ${CRITERIA.map((c) => c.id).join(",")}`);
   assert.ok(LABELS.length >= 14, `the English nav must carry every asserted label, found ${LABELS.length}`);
 });
 
@@ -413,7 +420,7 @@ test("AC5 (mutant arm): a helper that always reports NOT-EVALUATED makes EVERY c
     await h.cleanup();
   }
   // Enumerate, don't boolean (硬规则 3): the per-criterion codes are part of the reading.
-  assert.equal(codes.length, 18, codes.join(" "));
+  assert.equal(codes.length, 21, codes.join(" "));
 });
 
 test("AC5 (missing arm): with the helper DELETED every criterion exits NON-ZERO (the call is real)", async () => {
