@@ -31,11 +31,11 @@ depends_on: []
 
 ## AC
 
-- [ ] `plugin/test/ready-pool-check-s22.test.mjs` 里该用例不再对墙钟比值做断言：`grep -n 'tUncached \* 0.75' plugin/test/ready-pool-check-s22.test.mjs` 无输出；比值仍通过 `t.diagnostic` 报告。
-- [ ] 同一用例新增确定性断言：缓存臂对任务文件的读取次数远小于 N（或为 0），旁路臂的读取次数不少于 N；两个数在失败信息里都被打印。
-- [ ] 取假：把缓存旁路临时改成空操作（用 `cp` 备份恢复，⛔ 不用 `git checkout --`，即还原到修复前「kill-switch 无效、两臂都全量读取」的形态）后，上面新增的读取次数断言变红；在 `## Evidence` 贴实跑输出与恢复后的绿输出。
-- [ ] 负载无关性读数：在 `## Evidence` 贴出同时并行跑该文件 4 份、重复 5 轮（共 20 次）的结果，要求 20/20 通过（命令形如 `seq 4 | xargs -P4 -I{} node --test plugin/test/ready-pool-check-s22.test.mjs`，重复 5 轮）。
-- [ ] `node --test plugin/test/ready-pool-check-s22.test.mjs` 退出 0。
+- [x] `plugin/test/ready-pool-check-s22.test.mjs` 里该用例不再对墙钟比值做断言：`grep -n 'tUncached \* 0.75' plugin/test/ready-pool-check-s22.test.mjs` 无输出；比值仍通过 `t.diagnostic` 报告。
+- [x] 同一用例新增确定性断言：缓存臂对任务文件的读取次数远小于 N（或为 0），旁路臂的读取次数不少于 N；两个数在失败信息里都被打印。
+- [x] 取假：把缓存旁路临时改成空操作（用 `cp` 备份恢复，⛔ 不用 `git checkout --`，即还原到修复前「kill-switch 无效、两臂都全量读取」的形态）后，上面新增的读取次数断言变红；在 `## Evidence` 贴实跑输出与恢复后的绿输出。
+- [x] 负载无关性读数：在 `## Evidence` 贴出同时并行跑该文件 4 份、重复 5 轮（共 20 次）的结果，要求 20/20 通过（命令形如 `seq 4 | xargs -P4 -I{} node --test plugin/test/ready-pool-check-s22.test.mjs`，重复 5 轮）。
+- [x] `node --test plugin/test/ready-pool-check-s22.test.mjs` 退出 0。
 
 ## DoD
 
@@ -46,3 +46,78 @@ depends_on: []
 - plugin/test/ready-pool-check-s22.test.mjs
 - plugin/scripts/ready-pool-check.ts
 - tasks/gap-ready-pool-check-s22-cache-regression-asserts-wall-clock-ratio.md
+
+## Evidence
+
+落地：commit `b3accc8f4`，**只改 `plugin/test/ready-pool-check-s22.test.mjs`**（`plugin/scripts/ready-pool-check.ts` 未改——计数桩在模块自己的 git 边界上，未触碰产品逻辑）。
+
+**AC1**（不再断言墙钟比值；比值仍走 `t.diagnostic`）：
+
+```
+$ grep -n 'tUncached \* 0.75' plugin/test/ready-pool-check-s22.test.mjs
+$ echo $?
+1
+```
+
+无输出（该字面量已从用例移除）。比值仍在通过路径上报告 —— 见 AC2 的 diagnostic 行。
+
+**AC2**（确定性读取计数；两个数都打印）：
+
+```
+✔ AC5 regression: on an N=2000 store the cached call BYPASSES the store read and the bypass arm reads the whole store (9861ms)
+ℹ AC5 N=2000: cached=1547ms uncached=2111ms ratio=0.73 · task-blob reads cached=0 uncached=4000
+```
+
+新断言（`assert.ok(cachedReads * 10 < N, …)` 与 `assert.ok(uncachedReads >= N, …)`）——失败信息含两个读数：
+
+```
+task-blob reads on an N=2000 store: cached=${cachedReads} uncached=${uncachedReads} (pre-fix: both arms read N)
+```
+
+计数手段：一个 `git` PATH 垫片记录两臂经 `git cat-file --batch`（内容读取的缝；请求 id 在 stdin 上）请求的任务文件行数。缓存臂 = 0（内容寻址缓存命中），旁路臂 = N。
+
+**AC3**（取假：kill-switch 改成空操作 ⇒ 变红；`cp` 恢复 ⇒ 绿）：
+mutation = `rpcCacheEnabled()` 的 `return process.env.QUAY_READY_POOL_CACHE !== "0";` → `return true;`（`cp` 备份到 `/tmp/rpc-mutation-backup.ts`）。
+红（mutation 在位）：
+
+```
+✖ AC5 regression ... (8680ms)
+ℹ AC5 N=2000: cached=1520ms uncached=1535ms ratio=0.99 · task-blob reads cached=0 uncached=0
+  AssertionError [ERR_ASSERTION]: the bypass arm must read the whole store — task-blob reads on an N=2000 store: cached=0 uncached=0 (pre-fix: both arms read N)
+ℹ pass 0  ℹ fail 1
+```
+
+`cp` 恢复后：`md5sum` 前后同为 `88eb8b8726a74e4a57c525a46867e88e`；`git diff --stat -- plugin/scripts/ready-pool-check.ts` 空 ⇒ 工作树干净、byte-identical。恢复后绿：
+
+```
+✔ AC5 regression ... (9915ms)
+ℹ AC5 N=2000: cached=1544ms uncached=2144ms ratio=0.72 · task-blob reads cached=0 uncached=4000
+ℹ pass 1  ℹ fail 0
+```
+
+**AC4**（负载无关性：并行 4 份 × 5 轮 = 20 次）：
+
+命令 `seq 4 | xargs -P4 -I{} node --test --experimental-strip-types plugin/test/ready-pool-check-s22.test.mjs`（重复 5 轮）：
+
+```
+round 1: runs=4 total_pass=52 total_fail=0
+round 2: runs=4 total_pass=52 total_fail=0
+round 3: runs=4 total_pass=52 total_fail=0
+round 4: runs=4 total_pass=52 total_fail=0
+round 5: runs=4 total_pass=52 total_fail=0
+20 runs -> pass=260 fail=0
+```
+
+20 次并行运行的读取计数**全部**为 `cached=0 uncached=4000`（20/20 各一条 diagnostic）；墙钟比值在 0.72–0.74 间漂移，但已不再被断言。
+
+**AC5**（`node --test plugin/test/ready-pool-check-s22.test.mjs` 退出 0）：
+
+```
+$ node --test --experimental-strip-types plugin/test/ready-pool-check-s22.test.mjs; echo exit=$?
+ℹ tests 13   ℹ pass 13   ℹ fail 0
+exit=0
+```
+
+**DoD 记录**：本 worker 按协议**不跑全量 suite**，故本任务完成的**全量 suite 观察次数 = 0**。旧红是墙钟比值对负载的耦合；现已替换为确定性计数，并在 4 路并行负载下 20/20 通过。生产读数是落地后 fan-in / goal 并入的 suite 日志中不再出现 `cached analyzeTasks must beat the uncached baseline`。
+
+**fan-in 前置**：`git merge --no-edit develop` → Already up to date；scoped 门 `scripts/test.sh --for-task gap-ready-pool-check-s22-cache-regression-asserts-wall-clock-ratio --allow-thin` → exit 0（13/13）。scoped-gate cache 已写（develop sha `01706371c`）。
