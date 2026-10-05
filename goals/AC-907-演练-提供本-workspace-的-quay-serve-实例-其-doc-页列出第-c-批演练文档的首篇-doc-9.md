@@ -2,7 +2,7 @@
 id: AC-907
 title: 演练：提供本 workspace 的 quay serve 实例，其 /doc 页列出第 C 批演练文档的首篇
   DOC-930（并入前由预览实例满足、并入后由生产实例满足）
-status: draft
+status: active
 kind: criterion
 goal: GOAL-905
 criterion: >-
@@ -50,4 +50,15 @@ expect: exit 0 = 本 workspace root 下登记在册且存活的 quay.ts serve �
   serve 实例。
 origin: 人 2026-10-05「补上没覆盖的路径」：对 GOAL-028 做第二次演练（多任务并发落同一 goal 分支、goal 分支落后
   develop、真实大小的并入、修复后的刷新与预览自动装配）；判据能在生产实例上判假（落笔当轮读数见各 AC 的验证）。
+activatedAt: 2026-10-05T14:27:55.320Z
+statusLog:
+  - at: 2026-10-05T14:27:55.320Z
+    from: draft
+    to: active
+    actor: cli
+    reason: 人 2026-10-05 授权第二次合并演练（GOAL-905）；承接任务已立并停放（needs-human），激活本 AC 不会触发乱序自动立案
+fidelity:
+  verdict: faithful
+  reason: "fidelity judge: faithful"
+  at: 2026-10-05T14:27:55.320Z
 ---
