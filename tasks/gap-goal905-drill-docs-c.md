@@ -43,12 +43,12 @@ goal_ac: AC-907
 
 ## Touches
 
-- docs-managed/DOC-930-goal905-c1.md
-- docs-managed/DOC-931-goal905-c2.md
-- docs-managed/DOC-932-goal905-c3.md
-- docs-managed/DOC-933-goal905-c4.md
-- docs-managed/DOC-934-goal905-c5.md
-- docs-managed/DOC-935-goal905-c6.md
-- docs-managed/DOC-936-goal905-c7.md
-- docs-managed/DOC-937-goal905-c8.md
+- docs-managed/DOC-930-goal905-c1.md (new)
+- docs-managed/DOC-931-goal905-c2.md (new)
+- docs-managed/DOC-932-goal905-c3.md (new)
+- docs-managed/DOC-933-goal905-c4.md (new)
+- docs-managed/DOC-934-goal905-c5.md (new)
+- docs-managed/DOC-935-goal905-c6.md (new)
+- docs-managed/DOC-936-goal905-c7.md (new)
+- docs-managed/DOC-937-goal905-c8.md (new)
 - tasks/gap-goal905-drill-docs-c.md
