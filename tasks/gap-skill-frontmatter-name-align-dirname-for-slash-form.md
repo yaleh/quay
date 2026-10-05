@@ -1,7 +1,7 @@
 ---
 id: gap-skill-frontmatter-name-align-dirname-for-slash-form
 title: skill 的 frontmatter name 与目录名不一致，导致补全显示/输入形态不是 /quay:init 这样的统一形式
-status: todo
+status: ready
 labels:
   - gap
 parent: null
