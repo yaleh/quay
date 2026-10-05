@@ -29,9 +29,6 @@ extra:
 - `plugin/scripts/publish-dist-branch.sh`
 - `tasks/gap-release-bundle-embeds-dev-version-after-stamp.md`
 
-## Test-Files
-- `scripts/version-consistency-check.test.ts`
-
 ## AC
 - [x] 新增/扩展的测试(在 `scripts/version-consistency-check.test.ts` 中)构造一棵载体=0.14.0 而 dist/quay.js 内嵌 "0.14.0-dev" 的 fixture 树,校验门对它退出非 0 并点名 dist/quay.js;`node --experimental-strip-types --test scripts/version-consistency-check.test.ts` 退出 0。
 - [x] 取假:同一 fixture 在内嵌版本改为 "0.14.0" 后校验门退出 0;内嵌版本串读不出时输出含 `NOT-EVALUATED` 且退出码与"通过"可区分(附两次实跑输出)。
@@ -96,3 +93,4 @@ bash scripts/test.sh --for-task gap-release-bundle-embeds-dev-version-after-stam
 selector: test-selection-thin 1/5 Touches (0.20) < 0.5;ran 1 test file(plugin/test/…postinstall… 5 tests,pass 5);
 scoped static checks 全绿(incl. sh-census-check 7686 == baseline 7686,未越基线)。
 ```
+⛔ `scripts/version-consistency-check.test.ts` 是 `.ts` 且不在 `test/` 目录下,`select-tests-for-touches` 只认 `test/**/*.test.mjs` ⇒ 该测试文件不进入 scoped/full suite 的自动选择,只由 AC1 的直接调用运行(既有 `scripts/*.test.ts` 同此)。
