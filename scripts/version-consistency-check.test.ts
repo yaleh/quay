@@ -20,7 +20,16 @@ import { resolve, dirname, join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { fileURLToPath } from 'node:url';
 import { execSync } from 'node:child_process';
-import { check, readVersions, suffixPolicyOf, JUDGMENT_LABEL } from './version-consistency-check.ts';
+import {
+  check,
+  readVersions,
+  suffixPolicyOf,
+  JUDGMENT_LABEL,
+  checkBundleTree,
+  stampBundleTree,
+  extractEmbeddedVersion,
+  readEmbeddedVersion,
+} from './version-consistency-check.ts';
 import { readBaseVersion, DEV_SUFFIX } from './resolve-version.ts';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
@@ -585,6 +594,222 @@ test('CLI exits 0 on a consistent fixture', () => {
     });
     assert.ok(out.includes('VERSION-CONSISTENCY: OK'), `expected OK in output, got: ${out.slice(0, 200)}`);
     assert.ok(out.includes(`== ${JUDGMENT_LABEL}`));
+  } finally {
+    rmSync(tmp, { recursive: true, force: true });
+  }
+});
+
+// ── BUILD-TREE BUNDLE AXIS (gap-release-bundle-embeds-dev-version-after-stamp) ─────────────────
+//
+// THE DEFECT: a release build (`release/*`, or HEAD at tag `vX.Y.Z`) stamps the tree's CARRIERS
+// bare (`X.Y.Z`), but the esbuild bundle still embeds `X.Y.Z-dev` — it was inlined at build time
+// from the committed `packages/quay/package.json`, which is ALWAYS `-dev`. So `quay --version`
+// reports the dev form while every carrier says released, and nothing saw it (`quay-init.sh`'s
+// version grep swallows the suffix — hard rule 3b: "could not read" and "fine" looked identical).
+//
+// These cases pin all three values of the new judgment: the release-form fixture (carriers bare,
+// bundle `-dev`) MUST redden AND name `dist/quay.js`; the same fixture with the embedded version
+// matching MUST go green; and an anchor-less bundle MUST be NOT-EVALUATED with an exit code
+// distinct from PASS. Without the RED case the gate could never take the false value (hard rule 4).
+
+/** A minimal but structurally-honest esbuild bundle carrying the inlined `package_default` object. */
+function bundleText(version: string | null): string {
+  if (version === null) return '// a bundle that carries no inlined package version\nconsole.log(1);\n';
+  return (
+    'var package_default;\n' +
+    'var init_package = __esm({\n' +
+    '  "package.json"() {\n' +
+    '    package_default = {\n' +
+    '      name: "quay",\n' +
+    `      version: "${version}",\n` +
+    '      private: true\n' +
+    '    };\n' +
+    '  }\n' +
+    '});\n'
+  );
+}
+
+interface BundleTreeOpts {
+  /** `plugin.json` version; `null` ⇒ write no manifest (unjudgeable). default '0.14.0' */
+  manifest?: string | null;
+  /** core bundle embedded version; `null` ⇒ no anchor. default '0.14.0-dev' */
+  core?: string | null;
+  /** `scripts/dist/<name>.js` → embedded version; `null` ⇒ no anchor. default {} */
+  scripts?: Record<string, string | null>;
+}
+
+/** A build-layout tree (`.claude-plugin/plugin.json` + `vendor/quay/dist/quay.js` + optional scripts). */
+function makeBundleTree(name: string, opts: BundleTreeOpts = {}): string {
+  // Outside the checked-in tree: `checked-in-write-check.ts` judges the RESOLVED target path, so a
+  // fixture must not create/delete entries under a checked-in path (see makeFixture's note above).
+  const tmp = mkdtempSync(join(tmpdir(), `bundle-tree-${name}-`));
+  const manifest = opts.manifest === undefined ? '0.14.0' : opts.manifest;
+  const core = opts.core === undefined ? '0.14.0-dev' : opts.core;
+  mkdirSync(resolve(tmp, 'vendor/quay/dist'), { recursive: true });
+  if (manifest !== null) {
+    mkdirSync(resolve(tmp, '.claude-plugin'), { recursive: true });
+    writeFileSync(resolve(tmp, '.claude-plugin/plugin.json'), JSON.stringify({ name: 'quay', version: manifest }, null, 2));
+  }
+  writeFileSync(resolve(tmp, 'vendor/quay/dist/quay.js'), bundleText(core));
+  const scripts = opts.scripts ?? {};
+  if (Object.keys(scripts).length > 0) {
+    mkdirSync(resolve(tmp, 'scripts/dist'), { recursive: true });
+    for (const [n, v] of Object.entries(scripts)) writeFileSync(resolve(tmp, `scripts/dist/${n}`), bundleText(v));
+  }
+  return tmp;
+}
+
+test('extractEmbeddedVersion reads the inlined package_default.version, not any other version token', () => {
+  // The real bundle carries ~10 unrelated `version: "…"` tokens from vendored libs; an unanchored
+  // match would pick the wrong one. This pins the anchoring.
+  const raw = bundleText('0.14.0-dev') + 'var other = { version: "9.9.9" };\n';
+  assert.equal(extractEmbeddedVersion(raw), '0.14.0-dev');
+  assert.equal(extractEmbeddedVersion('// no anchor\n'), null);
+});
+
+test('[AC1] bundle gate REDDENS a release-form tree whose bundle still embeds -dev, and NAMES dist/quay.js', () => {
+  const tmp = makeBundleTree('drift');
+  try {
+    const r = checkBundleTree(tmp);
+    assert.equal(r.ok, false);
+    assert.equal(r.mode, 'drift');
+    assert.equal(r.expected, '0.14.0');
+    const core = r.entries.find((e) => e.path.endsWith('dist/quay.js'));
+    assert.ok(core, 'the Core bundle must be in the checked set');
+    assert.equal(core?.version, '0.14.0-dev');
+    // ...and the CLI names it (the AC's "点名 dist/quay.js").
+    let status = 0;
+    let out = '';
+    try {
+      execSync(`node --experimental-strip-types ${scriptPath} --bundle-tree ${tmp} 2>&1`, {
+        encoding: 'utf-8',
+        cwd: repoRoot,
+        stdio: 'pipe',
+      });
+    } catch (e: any) {
+      status = e.status;
+      out = String(e.stdout ?? '');
+    }
+    assert.notEqual(status, 0, 'the gate must exit non-zero on a stale embedded version');
+    assert.match(out, /BUNDLE-EMBEDDED: DRIFT DETECTED/);
+    assert.ok(out.includes('dist/quay.js'), `output must name dist/quay.js:\n${out}`);
+    assert.ok(out.includes('0.14.0-dev'), `output must name the stale version:\n${out}`);
+  } finally {
+    rmSync(tmp, { recursive: true, force: true });
+  }
+});
+
+test('[AC2] bundle gate is GREEN once the embedded version matches plugin.json', () => {
+  const tmp = makeBundleTree('consistent', { core: '0.14.0' });
+  try {
+    const r = checkBundleTree(tmp);
+    assert.equal(r.mode, 'consistent');
+    assert.equal(r.ok, true);
+    const out = execSync(`node --experimental-strip-types ${scriptPath} --bundle-tree ${tmp} 2>&1`, {
+      encoding: 'utf-8',
+      cwd: repoRoot,
+      stdio: 'pipe',
+    });
+    assert.ok(out.includes('BUNDLE-EMBEDDED: OK'), out.slice(0, 200));
+  } finally {
+    rmSync(tmp, { recursive: true, force: true });
+  }
+});
+
+test('[AC2] an anchor-less bundle is NOT-EVALUATED with an exit code distinct from PASS', () => {
+  const tmp = makeBundleTree('no-anchor', { core: null });
+  try {
+    const r = checkBundleTree(tmp);
+    assert.equal(r.mode, 'not-evaluated');
+    assert.equal(r.ok, false);
+    const core = r.entries.find((e) => e.path.endsWith('dist/quay.js'));
+    assert.ok(core?.error, 'the anchor-less core bundle must carry an error');
+    // The exit code is what a build script keys on: neither 0 (pass) nor 1 (drift) may be reused.
+    let status = 0;
+    let out = '';
+    try {
+      execSync(`node --experimental-strip-types ${scriptPath} --bundle-tree ${tmp} 2>&1`, {
+        encoding: 'utf-8',
+        cwd: repoRoot,
+        stdio: 'pipe',
+      });
+    } catch (e: any) {
+      status = e.status;
+      out = String(e.stdout ?? '');
+    }
+    assert.equal(status, 3, `an unevaluable bundle must exit 3, got ${status}`);
+    assert.ok(out.includes('NOT-EVALUATED'), out);
+  } finally {
+    rmSync(tmp, { recursive: true, force: true });
+  }
+});
+
+test('a script bundle under scripts/dist that embeds a stale version reddens (anchor-less siblings are skipped)', () => {
+  const tmp = makeBundleTree('scripts', {
+    core: '0.14.0',
+    scripts: { 'send-to-session.js': '0.14.0-dev', 'plain.js': null },
+  });
+  try {
+    const r = checkBundleTree(tmp);
+    assert.equal(r.mode, 'drift');
+    assert.equal(r.scriptsScanned, 2);
+    assert.equal(r.scriptsEmbedded, 1, 'only the bundle that carries a version is embedded');
+    const script = r.entries.find((e) => e.path === 'scripts/dist/send-to-session.js');
+    assert.equal(script?.version, '0.14.0-dev');
+    assert.ok(!r.entries.some((e) => e.path === 'scripts/dist/plain.js'), 'an anchor-less script is not judged');
+  } finally {
+    rmSync(tmp, { recursive: true, force: true });
+  }
+});
+
+test('[AC4-(b)] stampBundleTree re-derives the embedded version(s) and the gate then passes', () => {
+  const tmp = makeBundleTree('restamp', {
+    manifest: '0.15.0',
+    core: '0.14.0-dev',
+    scripts: { 'send-to-session.js': '0.14.0-dev' },
+  });
+  try {
+    assert.equal(checkBundleTree(tmp).mode, 'drift');
+    const stamped = stampBundleTree(tmp);
+    assert.deepEqual(stamped.errors, []);
+    assert.deepEqual([...stamped.written].sort(), ['scripts/dist/send-to-session.js', 'vendor/quay/dist/quay.js']);
+    assert.equal(checkBundleTree(tmp).mode, 'consistent');
+    // The re-derived bundle really carries the tree's version (not just "the gate agrees with itself").
+    assert.equal(readEmbeddedVersion(resolve(tmp, 'vendor/quay/dist/quay.js')).version, '0.15.0');
+  } finally {
+    rmSync(tmp, { recursive: true, force: true });
+  }
+});
+
+test('bundle gate is NOT-EVALUATED when the tree has no readable plugin.json', () => {
+  const tmp = makeBundleTree('no-manifest', { manifest: null, core: '0.14.0' });
+  try {
+    const r = checkBundleTree(tmp);
+    assert.equal(r.mode, 'not-evaluated');
+    assert.ok(r.expectedError, 'a tree with no manifest must name the missing expected version');
+  } finally {
+    rmSync(tmp, { recursive: true, force: true });
+  }
+});
+
+test('the Node-20-safe .mjs runner forwards the same verdict (floor-safe entry, no second implementation)', () => {
+  // `plugin/scripts/{sync-vendor,publish-dist-branch}.sh` reach the checker through this runner, not
+  // the `.ts` source (they run on the declared Node floor, where --experimental-strip-types is absent).
+  // Without this case "the runner forwards `main`" and "the runner silently exits 0" are
+  // indistinguishable — and the latter is precisely the hard-rule-3b shape a build gate must not have.
+  const runnerPath = resolve(__dirname, 'version-consistency-check.mjs');
+  const tmp = makeBundleTree('runner-drift');
+  try {
+    let status = 0;
+    let out = '';
+    try {
+      execSync(`node ${runnerPath} --bundle-tree ${tmp} 2>&1`, { encoding: 'utf-8', cwd: repoRoot, stdio: 'pipe' });
+    } catch (e: any) {
+      status = e.status;
+      out = String(e.stdout ?? '');
+    }
+    assert.equal(status, 1, `the runner must forward the drift exit code, got ${status}:\n${out}`);
+    assert.match(out, /BUNDLE-EMBEDDED: DRIFT DETECTED/);
   } finally {
     rmSync(tmp, { recursive: true, force: true });
   }

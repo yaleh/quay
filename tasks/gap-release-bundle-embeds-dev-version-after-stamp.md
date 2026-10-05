@@ -2,7 +2,7 @@
 id: gap-release-bundle-embeds-dev-version-after-stamp
 title: release 构建后 dist/quay.js 与 scripts/dist/*.js 仍内嵌 X.Y.Z-dev：stamp 不覆盖
   bundle，且没有任何检查能发现
-status: ready
+status: done
 labels:
   - gap
   - defect
@@ -29,6 +29,8 @@ extra:
 - `plugin/scripts/sync-vendor.sh`
 - `plugin/scripts/publish-dist-branch.sh`
 - `tasks/gap-release-bundle-embeds-dev-version-after-stamp.md`
+- `plugin/skills/manager/SKILL.md`
+- `plugin/skills/init/SKILL.md`
 
 ## AC
 - [x] 新增/扩展的测试(在 `scripts/version-consistency-check.test.ts` 中)构造一棵载体=0.14.0 而 dist/quay.js 内嵌 "0.14.0-dev" 的 fixture 树,校验门对它退出非 0 并点名 dist/quay.js;`node --experimental-strip-types --test scripts/version-consistency-check.test.ts` 退出 0。
@@ -95,3 +97,7 @@ selector: test-selection-thin 1/5 Touches (0.20) < 0.5;ran 1 test file(plugin/te
 scoped static checks 全绿(incl. sh-census-check 7686 == baseline 7686,未越基线)。
 ```
 ⛔ `scripts/version-consistency-check.test.ts` 是 `.ts` 且不在 `test/` 目录下,`select-tests-for-touches` 只认 `test/**/*.test.mjs` ⇒ 该测试文件不进入 scoped/full suite 的自动选择,只由 AC1 的直接调用运行(既有 `scripts/*.test.ts` 同此)。
+
+---
+
+**本轮补修(develop 全域静态红,非本任务 delta)**:`orchestration/SPEC-goal-author-branch-2026-10-05.md` 于 2026-10-05 直落 develop(`7a596134b`)时未在 `plugin/skills/manager/SKILL.md` 与 `plugin/skills/init/SKILL.md` 两个声明点补声明 ⇒ `spec-declaration-point-check` 全域红,所有任务的 fan-in suite 在静态层 abort(`# tests 0 · # fail 72`)。本任务 branch 补两处声明后 checker 复绿(48 SPECs / 2 points)。两个 skill 文件已加入本任务 `## Touches`。
