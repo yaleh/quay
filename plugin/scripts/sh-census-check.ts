@@ -58,6 +58,7 @@ import { helpExit, isDirectEntry, flagValue, createSelftest } from "./gate-scrip
 // `lineAt` was this file's own copy of the 1-based newline counter (semantic-dedup-scan
 // `lineof-lineat`); the family lives once in source-text-lib.ts under ONE name.
 import { lineOf } from "./source-text-lib.ts";
+import { baselinePath } from "./ratchet-baseline.ts";
 
 // ── constants ───────────────────────────────────────────────────────────────────────────────────────
 
@@ -753,8 +754,10 @@ export function judge(measured: Baseline, baseline: Baseline, worktree: Baseline
   return { ok: over.length === 0 && shrink.raised.length === 0, over, baselineRaised: shrink.raised, headBaseline: head, bootstrap: shrink.bootstrap };
 }
 
+/** This ratchet's baseline path — the DERIVATION is the shared `baselinePath`; this consumer owns
+ * only its own `BASELINE_FILE_REL` constant (the `baseline-file-quad` finding, 硬规则 5b). */
 export function baselineFile(root: string): string {
-  return path.join(root, ...BASELINE_FILE_REL.split("/"));
+  return baselinePath(root, BASELINE_FILE_REL);
 }
 
 export function readBaselineFile(abs: string): Baseline | null {

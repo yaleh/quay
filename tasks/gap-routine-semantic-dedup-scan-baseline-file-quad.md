@@ -3,7 +3,7 @@ id: gap-routine-semantic-dedup-scan-baseline-file-quad
 title: "semantic-dedup-scan: All four are byte-identical path.join(root,
   ...BASELINE_FILE_REL.split('/')); only each module's own BASELINE_FILE_REL
   constant varies and no shared leaf carri"
-status: ready
+status: done
 labels:
   - gap
   - routine-filed
