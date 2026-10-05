@@ -2,7 +2,7 @@
 id: gap-goal-merge-leaks-empty-mkdtemp-parent-dirs
 title: goal 并入只删临时 worktree 的 wt 子目录、不删 mkdtemp 父目录——/tmp 里留下 584 个空的
   goal-merge-GOAL-* 目录（测试 575、真实 9）
-status: todo
+status: ready
 labels:
   - gap
   - defect
