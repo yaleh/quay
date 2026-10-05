@@ -1,10 +1,10 @@
 ---
-name: quay-manager
+name: manager
 description: "The manager layer — the THIRD layer above outer/inner: cross-project planning, prioritization, and trend-watching. One per network/host, started by the human (or an OS anchor), NEVER by a project's cold start. Crystallizes the daily-review cadence (per orchestration/REVIEW-cadence.md), the three functions (planning / prioritization / trend), and the two verified rules (§1.5 ask-vs-act, §1.6 event triage, extracted from orchestration/manager-loop-tick.md). Installable — ships under plugin/, not quay-local. Use when a network runs more than one quay loop and someone must coordinate between them (the human's job otherwise)."
 allowed-tools: Bash, Read, Monitor
 ---
 
-# quay-manager
+# manager
 
 **The third layer — cross-project coordination.** The two-layer loop (outer → inner) executes one
 project's board fast but never plans, prioritizes, or trend-watches. Those three functions are the
@@ -205,6 +205,7 @@ rules* but does not re-implement each SPEC. Index (under `orchestration/` in the
 - `orchestration/SPEC-methodology-as-a-deliverable.md` — methodology as a deliverable
 - `orchestration/SPEC-no-text-substitution-at-install.md` — install is configuration-driven, not text-substitution
 - `orchestration/SPEC-plugin-lifecycle-single-bundle-2026-09-02.md` — Claude Code plugin 全生命周期：单一 bundle、原生交付、安装只写配置（人 2026-09-02 裁定）
+- `orchestration/SPEC-plugin-surface-area-by-usage-evidence-2026-10-05.md` — 按实际使用读数调整 quay plugin 对外表面积（driver 启动会话的使用读数；更正「Read 即使用」的误判）
 - `orchestration/SPEC-release-and-hotfix-branching-2026-09-15.md` — release 与 hotfix 分支：把 `master` 从「2026-08-03 冻结的化石」改造成「最近一次全绿发布」，develop 保持 nvie 的 develop（ruled·人 2026-09-15 对 5 个开放问题逐条裁定，待立案与实现）
 - `orchestration/SPEC-unified-driver-architecture-2026-08-23.md` — 统一 `*-driver` 架构：机械化执行面与长会话规划面的分野。**两级分层**（Layer 0 runtime / 1a task-processing / 1b routine，人 2026-08-23 裁定，manager-kind 属 1b）· 核心不变式「⛔ 不信执行者自述」单一实现 · Filter 谓词列表 · Claude Code profile 抽层 · 配置与运行时控制态分界 · 事件触发保留兜底轮询（proposal·判据落为 AC151–155，排期在 AC142 系列收口后）
 - `orchestration/SPEC-unified-quay-server-2026-09-13.md` — 统一 quay server：把 web、全部 driver、与运行中 Claude Code 会话的双向通信收进一个进程；一个项目空间 = 一个 quay server 实例 = 一个信任域（proposal·人 2026-09-13 三轮裁定；前置阅读 `SPEC-unified-driver-architecture-2026-08-23.md`）
@@ -251,7 +252,7 @@ description: "The THIRD (manager) layer of the fast-mode loop — a cross-projec
 allowed-tools: Bash, Read, Monitor
 ---
 
-# quay-manager —— 第三层：跨项目协调层
+# manager —— 第三层：跨项目协调层
 
 **这是 fast-mode 循环的第三层。** 实跑三层、交付两层的历史缺口（`gap-productize-the-manager-layer`）
 的产物：manager 层从此是 **plugin 交付物的一部分**（本 SKILL 在 `plugin/skills/manager/`，随 plugin
@@ -345,7 +346,7 @@ allowed-tools: Bash, Read, Monitor
 ## 5. 会话内激活（默认路线）——当前会话变身为 manager
 
 **两条启动路线，默认是会话内激活。** 人在已跑过 init + drivers skill 的 Claude Code 会话里，调用本
-skill（`/quay-manager` / Skill 工具），**当前会话即变身为 manager**——就地初始化 manager 家目录、
+skill（`/quay:manager` / Skill 工具），**当前会话即变身为 manager**——就地初始化 manager 家目录、
 加载方法论文档、武装定时锚点，之后按 `orchestration/manager-loop-tick.md` 以 manager 角色行事。
 **不需要人另外手动敲 tmux/CLI 命令启动「新的 manager 会话」。**
 

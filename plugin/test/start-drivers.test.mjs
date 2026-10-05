@@ -754,7 +754,7 @@ test("the drivers skill references plugin/scripts/start-drivers.ts (the ONE dele
   const skill = fs.readFileSync(SKILL, "utf8");
   assert.match(skill, /plugin\/scripts\/start-drivers\.ts/,
     "SKILL.md must reference the delegate script by path (laydown rule-(a) derivation + skill correctness)");
-  assert.match(skill, /^name: quay-drivers$/m, "the skill is named quay-drivers");
+  assert.match(skill, /^name: drivers$/m, "the skill is named drivers (== its directory name, so the slash form is /quay:drivers)");
   assert.ok(!/4173/.test(skill),
     "⛔ the skill must not document a hardcoded default port — the default is the kernel's ephemeral port");
 });
