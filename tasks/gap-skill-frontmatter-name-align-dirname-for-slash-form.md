@@ -17,13 +17,13 @@ extra:
 
 ## AC
 - [ ] `for d in plugin/skills/*/; do n=$(basename $d); grep -q "^name: $n\$" $d/SKILL.md || echo MISMATCH $n; done` 无任何输出。
-- [ ] 在临时目录用 `claude -p "hi" --plugin-dir <plugin副本> --output-format stream-json --verbose --max-turns 1`，init 消息里 `slash_commands` 与 `skills` 中 quay: 开头的项都不含 `quay:quay-init`/`quay:quay-drivers`/`quay:quay-cold-start`/`quay:quay-loop-driver`/`quay:quay-manager`；贴出清单。
+- [ ] 人 yale 在交互式 Claude Code（重启后）输入 /quay，init、drivers、cold-start、loop-driver、manager 均显示为 /quay:<目录名> 且无 "(quay-<目录名>)" 括号后缀；贴出截图文字（待外部）
 - [ ] `grep -rnE 'quay:quay-(init|drivers|cold-start|loop-driver|manager)|"?quay-(cold-start|loop-driver|manager)"?' plugin packages orchestration docs --include=*.md --include=*.ts --include=*.json --include=*.sh --include=*.mjs`（排除 node_modules、archive、tasks）的每条命中被逐条归类为「已更新」或「非 skill 引用（说明原因）」，贴出命中数与前 3 条（规则 5b）。
 - [ ] `claude plugin validate ./plugin` 含 `Validation passed`。
 - [ ] `scripts/test.sh --for-task gap-skill-frontmatter-name-align-dirname-for-slash-form` 退出码 0。
 
 ## DoD
-真实落地：交互式 Claude Code 中输入 `/quay:` 补全，init、drivers、cold-start、loop-driver、manager 均以 `/quay:init` 这样的形式显示与输入（人 yale 在交互界面截图确认，该项属人工关卡）（待外部）。机械侧以 claude -p init 消息读数为证。
+真实落地：交互式 Claude Code 中输入 `/quay:` 补全，init、drivers、cold-start、loop-driver、manager 均以 `/quay:init` 这样的形式显示与输入（人 yale 在交互界面截图确认，该项属人工关卡）（待外部）。机械侧以 claude -p init 消息读数为证。机械侧读数 = 第一条 AC 的 name:==目录名 逐目录核对；不再以 claude -p 的 slash_commands 作为判据（它不区分 name）。
 
 ## Touches
 - plugin/skills/init/SKILL.md
@@ -34,3 +34,15 @@ extra:
 - plugin/.claude-plugin/plugin.json
 - tasks/gap-skill-frontmatter-name-align-dirname-for-slash-form.md
 （执行者须补上 grep 命中的其它引用文件与对应测试文件。）
+
+## Notes
+2026-10-05 交互式实测（Claude Code v2.1.289，cd /tmp 后 `claude --settings '{"enabledPlugins":{"quay@quay":false,"quay@quay-dev":false}}' --plugin-dir /tmp/quay-plugin-exp/<副本>` 再输入 /quay，人 yale 读数）：
+| 副本 | commands | init 的 name | /quay 里 init 次数 | 显示 |
+| before | 有 | quay-init | 2 | /quay:quay-init (quay-init) |
+| cmdonly | 无 | quay-init | 1 | /quay:quay-init (quay-init) |
+| nameonly | 有 | init | 2 | /quay:init |
+| after | 无 | init | 1 | /quay:init |
+结论：有 commands 数组的两份 init 都出现 2 次，没有的都只出现 1 次，与 name 无关 ⇒ 重名由 commands 数组造成，本任务成立。未解释项：每份截图只有两行，未能确认其它 skill 是否也被 commands 重复，但本任务删除整个数组，不依赖此答案。警示：`claude -p` init 消息里的 slash_commands 只反映 quay:SKILL 是否存在，不反映交互补全里的 init 重名，故以交互读数为准。副本在 /tmp/quay-plugin-exp/，可能已被清理。
+
+<!-- dedup-ref -->
+落地顺序：本任务应在 gap-plugin-json-commands-array-duplicates-skills 之后落地（二者都改 plugin.json）。本实测证明：name 决定显示形式（quay-init ⇒ /quay:quay-init (quay-init)；init ⇒ /quay:init），commands 数组决定重名；二者互不替代。
