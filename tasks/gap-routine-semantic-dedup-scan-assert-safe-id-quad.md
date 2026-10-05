@@ -3,7 +3,7 @@ id: gap-routine-semantic-dedup-scan-assert-safe-id-quad
 title: "semantic-dedup-scan: frontmatter-store-base.ts already abstracts
   makeAssertSafeStatus for the four stores, but assertSafeId was left as four
   near-identical locals (differing only i"
-status: todo
+status: ready
 labels:
   - gap
   - routine-filed
