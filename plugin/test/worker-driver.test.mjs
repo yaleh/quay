@@ -400,6 +400,47 @@ test("D5 — computeLandingState(root, task, landedSha) derives landing from ff 
   runGit(root, ["worktree", "remove", "--force", wtPath]);
 });
 
+// gap-goal-branch-landing-judged-against-develop-not-merge-target：落地判定的基准分支 = 本任务的合并
+// 目标（resolveTaskMergeTarget），⛔ 不是硬编码 develop。落 goal/<id> 的任务其落地提交按设计不在 develop
+// 上，拿 develop 判祖先会把成功落地记成 exited-not-landed（生产 4/4 次真实 goal 落地都读到）。
+test("gap-goal-branch-landing-judged-against-develop-not-merge-target — computeLandingState 基准分支由参数给出，缺省 develop 行为不变", (t) => {
+  const root = makeGitRoot("goal-land");
+  t.after(() => fs.rmSync(root, { recursive: true, force: true }));
+
+  // 建 develop（= 初始提交）与 goal/GOAL-901（带一个只在它上面的落地提交）。
+  runGit(root, ["branch", "develop"]);
+  runGit(root, ["checkout", "-q", "-b", "goal/GOAL-901"]);
+  fs.writeFileSync(path.join(root, "landed.txt"), "landed on goal/GOAL-901\n");
+  runGit(root, ["add", "landed.txt"]);
+  runGit(root, ["commit", "-q", "-m", "land on goal/GOAL-901"]);
+  const landedSha = runGit(root, ["rev-parse", "goal/GOAL-901"]).trim();
+  // 前置：落地提交【不在】develop 上——否则本用例测不到目标分支的差别（能取假）。
+  assert.notEqual(
+    spawnSync("git", ["-C", root, "merge-base", "--is-ancestor", landedSha, "develop"]).status,
+    0,
+    "precondition: the landing commit is NOT on develop",
+  );
+
+  // ① 以 goal/GOAL-901 为目标 ⇒ verified（落地提交是该分支 tip ∧ 无残留 worktree）。
+  const goalTarget = computeLandingState(root, "gap-goal-land", landedSha, "goal/GOAL-901");
+  assert.equal(goalTarget.state, "verified", "goal target: landing commit is goal/GOAL-901 tip ⇒ verified (⛔ not exited-not-landed)");
+  assert.match(goalTarget.verifiedBy, /goal\/GOAL-901/, "verified 文案点名实际目标分支");
+
+  // ② 缺省（develop）判同一提交 ⇒ failed，文案含 develop（既有行为逐字不变）。
+  const devTarget = computeLandingState(root, "gap-goal-land", landedSha);
+  assert.equal(devTarget.state, "failed", "develop target: the same commit is not on develop ⇒ failed");
+  assert.match(devTarget.reason, /not develop tip\/ancestor/, "缺省文案仍点名 develop");
+
+  // ③ 落地提交两条分支上都没有 ⇒ 两种目标下都 failed，文案点名【所用的】分支。
+  const bogus = runGit(root, ["commit-tree", `${landedSha}^{tree}`, "-m", "bogus on neither branch"]).trim();
+  const bogusDev = computeLandingState(root, "gap-goal-land", bogus);
+  assert.equal(bogusDev.state, "failed", "bogus commit ⇒ develop target failed");
+  assert.match(bogusDev.reason, /not develop tip\/ancestor/, "文案点名 develop");
+  const bogusGoal = computeLandingState(root, "gap-goal-land", bogus, "goal/GOAL-901");
+  assert.equal(bogusGoal.state, "failed", "bogus commit ⇒ goal target failed");
+  assert.match(bogusGoal.reason, /not goal\/GOAL-901 tip\/ancestor/, "文案点名所用的目标分支 goal/GOAL-901");
+});
+
 test("D6 — extractFailureSummary strips MODULE_TYPELESS noise + keeps the failing test name (⛔ raw stream dump)", () => {
   const noisy = [
     "refresh-worktree-quay: copied 499 file(s) from /x/.quay",

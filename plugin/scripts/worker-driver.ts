@@ -1341,27 +1341,39 @@ export function isShaAncestorOfBranch(root: string, sha: string, branch: string 
 /** 落地判定（AC1 判据），经 AC153 单一不变式 verifyIndependently 表达成 DriverResult（⛔ 不信
  *  exitCode，读任务侧独立直接量）。两态输入：
  *   - `landedSha`（机械 fan-in 落地后传入）= ff 结果的落地 sha ⇒ 判定从 ff 结果派生
- *     （landedSha 是 develop tip/祖先 ∧ 无残留 worktree），⛔ 不读 readTaskStatus（D5）；
+ *     （landedSha 是 `branch` tip/祖先 ∧ 无残留 worktree），⛔ 不读 readTaskStatus（D5）；
  *   - `landedSha` null（未跑机械 fan-in / red / 旧路径）⇒ 沿用 status-based 判定（status=done ∧ 无残留）。
+ * `branch`（缺省 develop）= 本任务的合并目标分支名（resolveTaskMergeTarget：`develop` 或 `goal/<GOAL>`）——
+ * 落 goal 分支的任务其落地提交按设计不在 develop 上，⛔ 不能拿 develop 当基准判祖先（否则成功落地被记
+ * exited-not-landed，gap-goal-branch-landing-judged-against-develop-not-merge-target）。仅在 `landedSha`
+ * 非空时被读到；缺省 develop ⇒ 既有行为逐字不变。
  * 三态（证伪优先）：
  *   verified      = 落地判据证实（独立判据证实落地）
  *   failed        = 任一独立量证伪（⛔ 不需读全另一量）
  *   not-evaluated = 既未证真也未证伪（读不懂，⛔ 不伪造成 failed）
  * 下游 computeOutcome 把 verified→completed、failed/not-evaluated→exited-not-landed（fail-closed 朝
  * 「未完成」，但保留 reason 区分「证伪」与「未评估」）。 */
-export function computeLandingState(root: string, taskId: string, landedSha: string | null = null): DriverResult<LandingEvidence> {
+export function computeLandingState(
+  root: string,
+  taskId: string,
+  landedSha: string | null = null,
+  branch: string = "develop",
+): DriverResult<LandingEvidence> {
   const worktreePresent = worktreePresentForTask(root, taskId);
 
-  // D5：机械 fan-in 落地后，判定从 ff 结果派生（读 git develop 状态，⛔ 非主检出工作分支的 tasks/*.md）。
+  // D5：机械 fan-in 落地后，判定从 ff 结果派生（读 git <branch> 状态，⛔ 非主检出工作分支的 tasks/*.md）。
+  // gap-goal-branch-landing-judged-against-develop-not-merge-target：`branch` = 本任务的合并目标
+  // （resolveTaskMergeTarget），落 goal/<id> 的任务落地提交按设计不在 develop 上 ⇒ 拿 develop 判祖先
+  // 会把成功落地记成 exited-not-landed。develop 缺省 ⇒ 既有行为逐字不变（AC1②）。
   if (landedSha != null && landedSha !== "") {
-    const ancestor = isShaAncestorOfBranch(root, landedSha);
+    const ancestor = isShaAncestorOfBranch(root, landedSha, branch);
     const failedParts: string[] = [];
-    if (ancestor === false) failedParts.push(`landedSha ${landedSha} is not develop tip/ancestor`);
+    if (ancestor === false) failedParts.push(`landedSha ${landedSha} is not ${branch} tip/ancestor`);
     if (worktreePresent === true) failedParts.push(`leftover worktree task/${taskId} still present`);
     return verifyIndependently(
       {
         value: { status: "done", worktreePresent: false },
-        verifiedBy: "landedSha is develop tip/ancestor ∧ no leftover worktree (ff-result-derived, ⛔ not stale main-checkout status)",
+        verifiedBy: `landedSha is ${branch} tip/ancestor ∧ no leftover worktree (ff-result-derived, ⛔ not stale main-checkout status)`,
         failedReason: failedParts.join(" and "),
         notEvaluatedReason:
           ancestor === null
@@ -1369,10 +1381,10 @@ export function computeLandingState(root: string, taskId: string, landedSha: str
             : "worktree state unreadable (git worktree list failed)",
       },
       () => {
-        // 证伪优先：landedSha 不在 develop 历史 / 残留 worktree，任一证伪 ⇒ failed。
+        // 证伪优先：landedSha 不在 <branch> 历史 / 残留 worktree，任一证伪 ⇒ failed。
         if (ancestor === false) return false;
         if (worktreePresent === true) return false;
-        // 证真：landedSha 是 develop tip/祖先 ∧ 确认无残留。
+        // 证真：landedSha 是 <branch> tip/祖先 ∧ 确认无残留。
         if (ancestor === true && worktreePresent === false) return true;
         // 读不懂（ancestor 或 worktree 读不到，且未证伪）⇒ not-evaluated。
         return null;
@@ -4321,11 +4333,14 @@ function runOneWorker({
       // （D5：主检出停 doc-only 工作分支 ⇒ readTaskStatus 是滞后视图 ⇒ 假 exited-not-landed）；未跑机械
       // fan-in / red 时仍走 status-based 判定。spawn-failed/killed/timed-out/failed 分支在 computeOutcome
       // 里优先于 landed，但统一读一次无害（廉价 fs/git 调用）。
-      const landing = computeLandingState(
-        rootDir,
-        taskId,
-        mechResult?.outcome === "landed" ? mechResult.landedSha : null,
-      );
+      // gap-goal-branch-landing-judged-against-develop-not-merge-target：落地判定的基准分支 = 本任务
+      // 的合并目标（resolveTaskMergeTarget，与 fan-in 接线同一解析函数，⛔ 不另写一份分支解析）。落
+      // goal/<id> 的任务其落地提交按设计不在 develop 上，拿 develop 判祖先 ⇒ 成功落地被记 exited-not-landed
+      // （SPEC-goal-branch §4.3 接线改了 fan-in 落点却没同步改这条判定）。landedSha 为 null（未跑机械
+      // fan-in / red / AC 短路）时基准分支不被读到 ⇒ 逐字沿用 develop 缺省，行为不变。
+      const landedSha = mechResult?.outcome === "landed" ? mechResult.landedSha : null;
+      const mergeTargetBranch = landedSha != null ? resolveTaskMergeTarget(taskId, rootDir) : "develop";
+      const landing = computeLandingState(rootDir, taskId, landedSha, mergeTargetBranch);
       // gap-suite-lock-starvation-long-validation-hold AC2 — read the suite's flock metrics from the
       // verification-round ledger (matched by this worker's runId) so worker-outcome.jsonl can
       // distinguish「长时间持锁」from「worker 慢」. Absent (null) on doc-only / scoped / no-record runs.
