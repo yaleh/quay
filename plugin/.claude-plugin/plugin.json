@@ -9,21 +9,6 @@
   "license": "MIT",
   "homepage": "https://github.com/yaleh/quay",
   "repository": "https://github.com/yaleh/quay",
-  "commands": [
-    "./skills/execute/SKILL.md",
-    "./skills/quay-directive/SKILL.md",
-    "./skills/quay-file-task/SKILL.md",
-    "./skills/loop-driver/SKILL.md",
-    "./skills/init/SKILL.md",
-    "./skills/cold-start/SKILL.md",
-    "./skills/drivers/SKILL.md",
-    "./skills/manager/SKILL.md",
-    "./skills/quay-task-operator/SKILL.md",
-    "./skills/quay-task-to-plan/SKILL.md",
-    "./skills/routines/SKILL.md",
-    "./skills/quay-native-methodology/SKILL.md",
-    "./skills/quay-webui-bootstrap-methodology/SKILL.md"
-  ],
   "agents": [
     "./agents/quay-task.md"
   ]
