@@ -6,6 +6,7 @@
 // (packages/quay-native/bin/quay-native.ts).
 
 import fs from "node:fs";
+import os from "node:os";
 import path from "node:path";
 import { createHash } from "node:crypto";
 import YAML from "yaml";
@@ -1418,6 +1419,199 @@ export function ensureProviderCarrierEnv(o: EnsureCarrierEnvOpts): void {
   }
 }
 
+// ── project-internal plugin link (gap-config-provider-path-frozen-to-versioned-cache-dir) ──────────
+//
+// DEFECT. `/quay:init` wrote the provider binding as `<installPath>/vendor/quay-native`, where
+// `installPath` is the plugin MARKETPLACE cache dir — a path that CONTAINS the installed version
+// (`~/.claude/plugins/cache/quay/quay/0.14.0/`). Upgrading the plugin left the config untouched, so
+// Core kept launching the OLD provider bundle forever. `migrateStaleMcpEntry`'s rules only fire on
+// DANGLING / reserved / retired paths — a versioned path that still EXISTS on disk matched none of
+// them, so the drift was silent (reported by `driver status`, never fixed).
+//
+// RULING (human, 2026-10-05): ⛔ NO global symlink (`~/.local/share/quay/current`) — the registry
+// keeps a DIFFERENT entry per scope/projectPath, so one global link would let one project's upgrade
+// clobber a `local`-scope project pinned to an older version. Instead each project gets an
+// INTERNAL link `<project>/.quay/plugin -> <that project's scope installPath>`, refreshed by that
+// project's own `/quay:init`; the config's `path`/`mcp_entry` point at `<project>/.quay/plugin/...`.
+// The config text then carries NO version segment and is STABLE across upgrades — a re-run of
+// `/quay:init` re-points the LINK, not the config.
+//
+// SELECTION RULE: the `projectPath`-matching entry (local/project scope) wins; else the `user` scope
+// entry; else NOT-EVALUATED and the existing link is LEFT UNCHANGED (硬规则 3b: "cannot decide" must
+// not share an outcome with "decided"). `-dev` versions are excluded (a dev build is not an install).
+// A project-scope entry MISSING `projectPath` is undecidable and is NEVER attributed to a project
+// (measured in the real registry 2026-10-05).
+
+/** `x.y.z[-suffix]` shape test (⛔ never a guess at a non-version segment). */
+function looksLikeVersion(v: string): boolean {
+  return /^\d+\.\d+\.\d+(?:-[0-9A-Za-z.]+)?$/.test(v.trim());
+}
+
+/** A path segment that is a version string (the install-cache dir). ⛔ The stable project link
+ *  `<ws>/.quay/plugin/...` has none, which is exactly what makes it upgrade-proof. */
+function hasVersionSegment(p: string): boolean {
+  return /(?:^|\/)\d+\.\d+\.\d+(?:-[0-9A-Za-z.]+)?(?:\/|$)/.test(p);
+}
+
+/** Rank two version strings. Same kernel semantics as `compareVersions` (driver-runtime):
+ *  `1.0.0` > `1.0.0-dev`; unparseable ⇒ plain lexicographic (never the first-seen, which would make
+ *  "take the highest" depend on registry order — 硬规则 4). */
+function compareVersionStrings(a: string, b: string): number {
+  const rank = (v: string): [number, number, number, string] | null => {
+    const m = /^(\d+)\.(\d+)\.(\d+)(?:-(.*))?$/.exec(v.trim());
+    return m ? [Number(m[1]), Number(m[2]), Number(m[3]), m[4] ?? ""] : null;
+  };
+  const ra = rank(a);
+  const rb = rank(b);
+  if (!ra || !rb) return a < b ? -1 : a > b ? 1 : 0;
+  for (let i = 0; i < 3; i++) if (ra[i] !== rb[i]) return (ra[i] as number) - (rb[i] as number);
+  const sa = ra[3] as string;
+  const sb = rb[3] as string;
+  if (sa === sb) return 0;
+  if (sa === "") return 1;
+  if (sb === "") return -1;
+  return sa < sb ? -1 : 1;
+}
+
+export type ProjectPluginLinkReading =
+  | { state: "linked"; installPath: string; version: string; source: "project" | "user" }
+  | { state: "not-evaluated"; reason: string };
+
+/**
+ * Pick the install path THIS project should be linked to, from the raw `installed_plugins.json`
+ * bytes. Pure (no filesystem) so it is directly unit-testable.
+ *
+ * `registryRaw === null` (file missing/unreadable), invalid JSON, and "no usable entry" are ALL
+ * `not-evaluated` with a distinct reason — the caller leaves the existing link alone.
+ */
+export function selectProjectPluginInstallPath(
+  registryRaw: string | null,
+  projectPath: string,
+): ProjectPluginLinkReading {
+  if (registryRaw === null) {
+    return { state: "not-evaluated", reason: "plugin registry unreadable (installed_plugins.json)" };
+  }
+  let entries: unknown;
+  try {
+    const j = JSON.parse(registryRaw) as { plugins?: Record<string, unknown> };
+    entries = j?.plugins?.["quay@quay"];
+  } catch {
+    return { state: "not-evaluated", reason: "plugin registry is not valid JSON" };
+  }
+  if (!Array.isArray(entries)) {
+    return { state: "not-evaluated", reason: "plugin registry carries no quay@quay entries" };
+  }
+
+  const usable = entries
+    .filter((e): e is Record<string, unknown> => !!e && typeof e === "object" && !Array.isArray(e))
+    .map((o) => ({
+      scope: typeof o.scope === "string" ? o.scope : null,
+      projectPath: typeof o.projectPath === "string" ? o.projectPath : null,
+      installPath: typeof o.installPath === "string" ? o.installPath : null,
+      version: typeof o.version === "string" ? o.version.trim() : null,
+    }))
+    .filter(
+      (e) =>
+        e.installPath !== null &&
+        e.version !== null &&
+        looksLikeVersion(e.version) &&
+        !e.version.includes("-dev"),
+    );
+
+  const proj = path.resolve(projectPath);
+  const inProjectScope = (e: { scope: string | null }): boolean => e.scope === "local" || e.scope === "project";
+  const matchesProject = (e: { projectPath: string | null }): boolean =>
+    e.projectPath !== null && path.resolve(e.projectPath) === proj;
+
+  const tierProject = usable.filter((e) => inProjectScope(e) && matchesProject(e));
+  const tierUser = usable.filter((e) => e.scope === "user");
+
+  const pick = tierProject.length > 0 ? tierProject : tierUser;
+  const source: "project" | "user" = tierProject.length > 0 ? "project" : "user";
+  if (pick.length === 0) {
+    return {
+      state: "not-evaluated",
+      reason:
+        "no projectPath-matching local/project entry and no user-scope entry " +
+        "(a project-scope entry without projectPath is undecidable and is never attributed to a project)",
+    };
+  }
+  let best = pick[0]!;
+  for (const e of pick) if (compareVersionStrings(e.version!, best.version!) > 0) best = e;
+  return { state: "linked", installPath: best.installPath!, version: best.version!, source };
+}
+
+export interface ProjectPluginLinkOpts {
+  wsRoot: string;
+  /** The path matched against the registry's `projectPath` (defaults to `wsRoot`). */
+  projectPath?: string;
+  /** Registry path (defaults to `$HOME/.claude/plugins/installed_plugins.json`). */
+  registryPath?: string;
+  dryRun: boolean;
+}
+
+function defaultRegistryPath(): string {
+  const home = process.env.HOME ?? os.homedir();
+  return path.join(home, ".claude", "plugins", "installed_plugins.json");
+}
+
+/**
+ * Refresh `<ws>/.quay/plugin` so it points at THIS project's scope installPath. Idempotent: an
+ * already-correct link is re-created (cheap) but the RESULT is stable; an undecidable registry leaves
+ * the existing link UNTOUCHED and reports `NOT-EVALUATED` (never folded into "linked").
+ *
+ * A real (non-symlink) file/dir at the link path is REFUSED, never clobbered — the closed set does not
+ * own arbitrary user content at that name.
+ */
+export function refreshProjectPluginLink(o: ProjectPluginLinkOpts): ProjectPluginLinkReading {
+  const registryPath = o.registryPath ?? defaultRegistryPath();
+  const projectPath = o.projectPath ?? o.wsRoot;
+  const linkPath = path.join(o.wsRoot, ".quay", "plugin");
+
+  let raw: string | null;
+  try {
+    raw = fs.readFileSync(registryPath, "utf8");
+  } catch {
+    raw = null;
+  }
+  const reading = selectProjectPluginInstallPath(raw, projectPath);
+
+  let existing: fs.Stats | null = null;
+  try {
+    existing = fs.lstatSync(linkPath);
+  } catch {
+    existing = null;
+  }
+  const currentTarget = existing?.isSymbolicLink() ? (() => { try { return fs.readlinkSync(linkPath); } catch { return null; } })() : null;
+
+  if (reading.state === "not-evaluated") {
+    console.log(`  project-plugin-link: NOT-EVALUATED — ${reading.reason} (existing link left unchanged)`);
+    return reading;
+  }
+
+  if (existing && !existing.isSymbolicLink()) {
+    console.log(`  project-plugin-link: REFUSED — ${linkPath} exists and is not a symlink (left unchanged)`);
+    return { state: "not-evaluated", reason: `${linkPath} exists and is not a symlink` };
+  }
+
+  if (o.dryRun) {
+    console.log(
+      currentTarget === reading.installPath
+        ? `  would-keep: .quay/plugin -> ${reading.installPath} (${reading.source} scope, v${reading.version}; already current)`
+        : `  would-link: .quay/plugin -> ${reading.installPath} (${reading.source} scope, v${reading.version})`,
+    );
+    return reading;
+  }
+
+  fs.mkdirSync(path.dirname(linkPath), { recursive: true });
+  if (existing) {
+    try { fs.rmSync(linkPath, { force: true }); } catch { /* recreate below */ }
+  }
+  fs.symlinkSync(reading.installPath, linkPath);
+  console.log(`  linked: .quay/plugin -> ${reading.installPath} (${reading.source} scope, v${reading.version} — stable project provider entry)`);
+  return reading;
+}
+
 export interface MigrateMcpEntryOpts {
   cfgPath: string;
   installProvider: string;
@@ -1431,9 +1625,12 @@ export interface MigrateMcpEntryOpts {
 /**
  * `migrate_stale_mcp_entry` — the UPGRADE-CHANNEL migration for the RETIRED project-local runtime.
  *
- * Ruling (AC1 of gap-dist-runtime-not-self-contained-reads-external-package-json): the provider
- * binding is migrated to THIS plugin delivery's vendored runtime — an ABSOLUTE path under
- * `$PLUGIN_ROOT`. The now-unreferenced project-local copy is retired to a backup ONLY when it is
+ * Ruling (AC1 of gap-dist-runtime-not-self-contained-reads-external-package-json; UPDATED by
+ * gap-config-provider-path-frozen-to-versioned-cache-dir): the provider binding is migrated to the
+ * project-internal STABLE link `<ws>/.quay/plugin/vendor/quay-native` (an absolute path whose TEXT
+ * carries no version segment) — a rebuild to `$PLUGIN_ROOT` would re-freeze it to the running
+ * version. A versioned install-cache path (which still EXISTS on disk) is now ALSO a migration
+ * trigger. The now-unreferenced project-local copy is retired to a backup ONLY when it is
  * unreferenced, recognizably quay's own install-generated runtime, and STALE; a byte-current copy
  * is left byte-identical (AC3), and a directory we cannot recognize is NEVER touched (硬规则 3b:
  * "could not evaluate" must not share an output with "evaluated, fine").
@@ -1519,17 +1716,33 @@ export function migrateStaleMcpEntry(o: MigrateMcpEntryOpts): void {
   let changed = false;
   const migrated: string[] = [];
 
+  // The stable project-internal link this task introduces: `path`/`mcp_entry` name
+  // `<ws>/.quay/plugin/...` so the binding carries NO version segment (see the section above). All
+  // binding rebuilds below target THESE, never the current plugin root — a rebuild to the plugin root
+  // would simply re-freeze the binding to the running version.
+  const linkProvider = path.join(o.wsRoot, ".quay", "plugin", "vendor", "quay-native");
+  const linkRuntime = path.join(linkProvider, "dist", "quay-native.js");
+
   const p = prov["path"];
   const legacyNative = path.join(o.wsRoot, "vendor", "quay-native", "dist", "quay-native.js");
   const legacyCore = path.join(o.wsRoot, "vendor", "quay", "dist", "quay.js");
-  if (
-    typeof p === "string" &&
-    p !== o.installProvider &&
-    (!fs.existsSync(p) || (underReserved(p) && isQuayRuntimeDir(p)) || (inRetiredRuntime(p) && rtState === "retire"))
-  ) {
-    prov["path"] = o.installProvider;
-    changed = true;
-    migrated.push(`path ${pythonRepr(p)} -> ${o.installProvider}`);
+  if (typeof p === "string" && p !== linkProvider) {
+    // Two INDEPENDENT reasons to migrate the provider dir:
+    //   · versioned — the install-time CACHE path (`…/cache/quay/quay/<x.y.z>/vendor/quay-native`),
+    //     which EXISTS on disk and so matched NONE of the old dangling/reserved rules ⇒ the upgrade
+    //     stayed silent (the defect this task closes).
+    //   · legacy    — the old rules (dangling / reserved-non-versioned / retired project-local
+    //     runtime). Guarded by `p !== o.installProvider` so an already-current non-versioned binding
+    //     (a dev/plugin-dir install) is not gratuitously rewritten.
+    const versionedQuay = hasVersionSegment(p) && (isQuayRuntimeDir(p) || underReserved(p));
+    const legacyFire =
+      p !== o.installProvider &&
+      (!fs.existsSync(p) || (underReserved(p) && isQuayRuntimeDir(p)) || (inRetiredRuntime(p) && rtState === "retire"));
+    if (versionedQuay || legacyFire) {
+      prov["path"] = linkProvider;
+      changed = true;
+      migrated.push(`path ${pythonRepr(p)} -> ${linkProvider}`);
+    }
   }
 
   const me = prov["mcp_entry"];
@@ -1537,10 +1750,16 @@ export function migrateStaleMcpEntry(o: MigrateMcpEntryOpts): void {
     const idx = runtimeRefIndex(me);
     const ref = idx === null ? null : me[idx];
     let reason: string | null = null;
-    if (idx !== null && ref !== o.installRuntime) {
-      if (isBarePathQuay(ref)) {
+    if (idx !== null && ref !== linkRuntime) {
+      if (RUNTIME_BASENAME.test(path.basename(String(ref))) && hasVersionSegment(String(ref))) {
+        reason = `versioned install-cache path ${pythonRepr(ref)} (frozen to the install-time version)`;
+      } else if (isBarePathQuay(ref)) {
         reason = `bare PATH reference ${pythonRepr(ref)} (resolved by whatever $PATH happens to hold)`;
-      } else if (RUNTIME_BASENAME.test(path.basename(String(ref))) && (!fs.existsSync(String(ref)) || underReserved(ref))) {
+      } else if (
+        ref !== o.installRuntime &&
+        RUNTIME_BASENAME.test(path.basename(String(ref))) &&
+        (!fs.existsSync(String(ref)) || underReserved(ref))
+      ) {
         reason = `dangling reference to a quay runtime file ${pythonRepr(ref)}`;
       } else if (RUNTIME_BASENAME.test(path.basename(String(ref))) && (ref === legacyNative || ref === legacyCore)) {
         reason = `legacy vendor/ layout ${pythonRepr(ref)}`;
@@ -1549,12 +1768,12 @@ export function migrateStaleMcpEntry(o: MigrateMcpEntryOpts): void {
       }
     }
     if (reason) {
-      // Rebuild canonically: ["node", <plugin runtime>] + everything the old entry carried after the
-      // runtime/executable token (the "mcp" verb + trailing args).
-      prov["mcp_entry"] = ["node", o.installRuntime, ...me.slice(idx! + 1)];
-      prov["path"] = o.installProvider;
+      // Rebuild canonically: ["node", <stable project link runtime>] + everything the old entry
+      // carried after the runtime/executable token (the "mcp" verb + trailing args).
+      prov["mcp_entry"] = ["node", linkRuntime, ...me.slice(idx! + 1)];
+      prov["path"] = linkProvider;
       changed = true;
-      migrated.push(`mcp_entry ${reason} -> ${o.installRuntime}`);
+      migrated.push(`mcp_entry ${reason} -> ${linkRuntime}`);
     }
   }
 

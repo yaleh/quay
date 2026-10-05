@@ -257,7 +257,14 @@ test('AC1/AC2 — the fresh-install config carries no maintainer commentary, and
     // ── AC2: the written file is real YAML and the four delivered values are byte-identical to what
     // the pre-fix writer emitted (the negative control that relocating the note changed no behaviour).
     const doc = YAML.parse(cfg);
-    assert.equal(doc.providers.native.path, path.join(pluginDir, "vendor", "quay-native"), 'providers.native.path');
+    // The provider binding names the project-INTERNAL stable link, not the (version-carrying) plugin
+    // cache dir — see gap-config-provider-path-frozen-to-versioned-cache-dir. The link is created by
+    // the install itself (`refresh_project_plugin_link`), before `write_config`.
+    assert.equal(
+      doc.providers.native.path,
+      path.join(ws, ".quay", "plugin", "vendor", "quay-native"),
+      'providers.native.path',
+    );
     assert.equal(doc.loop.test_command, "node --test", 'loop.test_command');
     assert.equal(doc.loop.worktree_root, wtRoot, 'loop.worktree_root');
     assert.equal(doc.loop.fork_baseline, "develop", 'loop.fork_baseline');

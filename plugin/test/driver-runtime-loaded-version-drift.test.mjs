@@ -300,6 +300,48 @@ test("AC4c — config provider path matching the installed version ⇒ current",
   assert.equal(st.config_provider_path_version, "0.11.0", `附读到的版本段: ${JSON.stringify(st)}`);
 });
 
+// AC4d —— 项目内**稳定链接**形态（gap-config-provider-path-frozen-to-versioned-cache-dir 引入）：
+// `path: <ws>/.quay/plugin/vendor/quay-native` 的 TEXT 里**没有**版本段，但它是**符号链接** —— 解析后
+// 的真实安装目录（`…/cache/quay/quay/0.10.0/…`）里有。判定必须 `readlink -f` 后再取版本段，⛔ 不得因
+// 「文本无版本段」就报 not-evaluated：那会把「链接指着一个落后的版本」伪装成「没有版本可比」（硬规则 3b）。
+test("AC4d — the project-internal .quay/plugin symlink: version read from the RESOLVED install dir", (t) => {
+  const { home, root } = driftedWorld(t, "ac4d"); // no configText — this test writes its own
+  // A fixture install directory the project link resolves to (0.10.0), while the registry says 0.11.0.
+  const installParent = fs.mkdtempSync(path.join(os.tmpdir(), "lvdrift-link-ac4d-"));
+  t.after(() => fs.rmSync(installParent, { recursive: true, force: true }));
+  const installDir = path.join(installParent, "cache", "quay", "quay", "0.10.0");
+  fs.mkdirSync(path.join(installDir, "vendor", "quay-native"), { recursive: true });
+  fs.symlinkSync(installDir, path.join(root, ".quay", "plugin"));
+  fs.writeFileSync(
+    path.join(root, ".quay", "config.yml"),
+    "providers:\n" +
+      "  native:\n" +
+      "    enabled: true\n" +
+      `    path: "${root}/.quay/plugin/vendor/quay-native"\n`,
+    "utf8",
+  );
+
+  const st = statusJson(root, home);
+  assert.equal(
+    st.config_provider_path,
+    "behind",
+    `链接解析出的安装目录落后于已安装版本 ⇒ behind（⛔ 不得报 not-evaluated）: ${JSON.stringify(st)}`,
+  );
+  assert.equal(st.config_provider_path_version, "0.10.0", `附解析后的版本段: ${JSON.stringify(st)}`);
+});
+
+// AC4e —— 负控制（与 AC4d 同一份代码，只去掉符号链接）：一个**不存在的**、无版本段的相对路径 ⇒
+// not-evaluated。这证明 AC4d 的 behind 来自 readlink，而不是「凡无版本段都报 behind」。
+test("AC4e — an unresolvable no-version path stays not-evaluated (negative control for AC4d)", (t) => {
+  const { home, root } = driftedWorld(t, "ac4e", {
+    configText: "providers:\n  native:\n    enabled: true\n    path: \"./.quay/plugin/vendor/quay-native\"\n",
+  });
+
+  const st = statusJson(root, home);
+  assert.equal(st.config_provider_path, "not-evaluated", `不可解析 ⇒ 未评估: ${JSON.stringify(st)}`);
+  assert.notEqual(st.config_provider_path, "behind", `⛔ 不得凭空报 behind: ${JSON.stringify(st)}`);
+});
+
 // ── AC5 ───────────────────────────────────────────────────────────────────────────────────────────
 // 人类可读面：行首第一项 + `quay driver restart` 的提示；⛔ 输出仍是一整行（既有判据
 // driver-status-carrier-path.test.mjs AC3 钉住「恰好一行正文 + 尾换行」，本任务⛔ 不撞它）。

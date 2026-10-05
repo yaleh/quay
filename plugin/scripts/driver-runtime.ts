@@ -276,9 +276,21 @@ export function sleep(ms: number): Promise<void> {
   return new Promise((r) => setTimeout(r, ms));
 }
 
-/** 本 kernel 文件的绝对路径（supervisor 自重启的 cmdline 载体：`node … driver-runtime.ts __supervise`）。 */
+/** 本 kernel 文件的绝对路径（supervisor 自重启的 cmdline 载体：`node … driver-runtime.ts __supervise`）。
+ *
+ *  `readlink -f`（realpath）后返回（gap-config-provider-path-frozen-to-versioned-cache-dir）：一个项目
+ *  可能通过 `<ws>/.quay/plugin` 这条**项目内符号链接**引用插件（config 的 provider path 正是它），此时
+ *  任何把**符号链接路径**当作 exec 实参的启动都会让 `/proc/<pid>/cmdline` 只留下链接路径 —— 而
+ *  `versionOfKernelScript` 要从那条路径的**版本目录**读出已加载版本（硬规则 4b：cmdline 是外部可核的
+ *  直接量，不能让它变成一条无版本信息的代理量）。realpath 失败（路径消失等）⇒ 原样返回，⛔ 不抛。
+ *  Node 默认已对主模块做 realpath，所以这是一条廉价的不变式（`--preserve-symlinks-main` 之类会推翻它）。 */
 export function kernelSelfPath(): string {
-  return fileURLToPath(import.meta.url);
+  const p = fileURLToPath(import.meta.url);
+  try {
+    return fs.realpathSync(p);
+  } catch {
+    return p;
+  }
 }
 
 /** 本 kernel 的脚本目录（sibling 脚本解析基准：driver / ready-pool-check / send-to-session 都住这里）。
@@ -2616,7 +2628,13 @@ export function installedVersionFromRegistry(homeDir: string): InstalledRegistry
 
 /** `.quay/config.yml` 的 `providers:` 块里每个 `path:` 带出的版本段。⛔ 只扫 `providers:` 块
  *  （顶层键起始、下一个顶层键结束）：`gates:`/`loop:` 里也有 `path:` 形的键，扫全文件会读到无关的值。
- *  没有版本段的 path（`./packages/quay-native` 这种源检出形态）被**跳过**，⛔ 不记成空串。 */
+ *  没有版本段的 path（`./packages/quay-native` 这种源检出形态）被**跳过**，⛔ 不记成空串。
+ *
+ *  ⚠️ 自 gap-config-provider-path-frozen-to-versioned-cache-dir 起，正常装机的 `path` 是
+ *  `<ws>/.quay/plugin/vendor/quay-native` —— 一个**项目内符号链接**，TEXT 里没有版本段。这不代表
+ *  「没有版本可比」：`readlink -f` 该路径即得到**真实安装目录**（`…/cache/quay/quay/<x.y.z>/…`），版本段
+ *  在**解析后的路径**里。⇒ 文本里读不到时对路径做一次 realpath 再取版本段；realpath 失败（路径不存在 /
+ *  非源检出形态）才真的算「无版本段可比」⇒ not-evaluated（硬规则 3b：读不到 ≠ 没漂移）。 */
 export function providerPathVersions(root: string): string[] {
   let text: string;
   try {
@@ -2624,6 +2642,7 @@ export function providerPathVersions(root: string): string[] {
   } catch {
     return [];
   }
+  const VERSION_RE = /(?:^|\/)(\d+\.\d+\.\d+(?:-[0-9A-Za-z.]+)?)(?:\/|$)/;
   const out: string[] = [];
   let inProviders = false;
   for (const line of text.split("\n")) {
@@ -2635,8 +2654,18 @@ export function providerPathVersions(root: string): string[] {
     const m = /^\s+path:\s*(.+?)\s*$/.exec(line);
     if (!m) continue;
     const value = m[1].replace(/\s+#.*$/, "").replace(/^["']|["']$/g, "").trim();
-    const v = /(?:^|\/)(\d+\.\d+\.\d+(?:-[0-9A-Za-z.]+)?)(?:\/|$)/.exec(value);
-    if (v) out.push(v[1]);
+    let v = VERSION_RE.exec(value);
+    if (!v) {
+      // No version segment in the TEXT ⇒ the stable project link (or a dev path). Resolve symlinks and
+      // read the version off the REAL install directory. A path that does not resolve stays absent.
+      const abs = path.isAbsolute(value) ? value : path.resolve(root, value);
+      try {
+        v = VERSION_RE.exec(fs.realpathSync(abs));
+      } catch {
+        v = null;
+      }
+    }
+    if (v) out.push(v[1]!);
   }
   return out;
 }

@@ -77,10 +77,13 @@ const INIT_ARGS = (ws) => [
   "--test-command", "node --test", "--tmux-session", "proj-0:0.0",
 ];
 
-// The seven-item closed set (SPEC §6) — the exact relative paths quay-init may write.
+// The closed set (SPEC §6) — the exact relative paths quay-init may write. `.quay/plugin` is the
+// project-internal stable symlink (gap-config-provider-path-frozen-to-versioned-cache-dir): it is a
+// symlink, not a file, and is ignored by `.quay/*` in .gitignore.
 const CLOSED_SET = [
   ".quay/config.yml",
   ".quay/profiles.yml",
+  ".quay/plugin",
   ".gitignore",
   ".claude/launch.settings.json",
   ".claude/settings.json",
@@ -408,6 +411,32 @@ const DELIVERED_CORE = path.join(pluginDir, "vendor", "quay", "dist", "quay.js")
 
 function sha256(p) { return crypto.createHash("sha256").update(fs.readFileSync(p)).digest("hex"); }
 
+// makeDeliveryHome — a hermetic fixture `$HOME` whose plugin registry pins THIS delivery at a fixture
+// install dir. The migration target is now the project-internal link `<ws>/.quay/plugin` (resolved
+// from the registry — gap-config-provider-path-frozen-to-versioned-cache-dir), so the upgrade tests
+// must supply the registry the link is resolved from; with the real `$HOME` the link would point at
+// whatever quay happens to be installed on the host. The fixture install carries a BYTE-IDENTICAL copy
+// of the plugin's delivered bundle, so the "traceable to this delivery" assertion keeps its power.
+function makeDeliveryHome() {
+  const home = fs.mkdtempSync(path.join(os.tmpdir(), "qinit-home-"));
+  _tmp.push(home);
+  const install = path.join(home, "install", "cache", "quay", "quay", "9.9.9");
+  fs.mkdirSync(path.join(install, "vendor", "quay-native", "dist"), { recursive: true });
+  fs.copyFileSync(DELIVERED_NATIVE, path.join(install, "vendor", "quay-native", "dist", "quay-native.js"));
+  fs.writeFileSync(path.join(install, "VERSION"), "9.9.9\n");
+  fs.mkdirSync(path.join(home, ".claude", "plugins"), { recursive: true });
+  fs.writeFileSync(
+    path.join(home, ".claude", "plugins", "installed_plugins.json"),
+    JSON.stringify({ version: 2, plugins: { "quay@quay": [{ scope: "user", installPath: install, version: "9.9.9" }] } }),
+  );
+  return home;
+}
+
+/** The runtime the project link exposes (the migration's canonical binding target). */
+function linkRuntime(ws) {
+  return path.join(ws, ".quay", "plugin", "vendor", "quay-native", "dist", "quay-native.js");
+}
+
 // treeHashes — { relPath: sha256 } for every file under `root` ({} when root is absent). Used as the
 // AC3 "逐字节不变" instrument: a content-addressed snapshot of the whole subtree, not a file count.
 function treeHashes(root) {
@@ -473,15 +502,15 @@ test("AC1/AC2 — legacy bare-PATH project: upgrade migrates the binding to the 
     // to an empty dir, the test would silently stop exercising the branch — so assert the shape.
     assert.ok(Object.keys(treeHashes(rt)).length > 0, "fixture precondition: the target must be NON-EMPTY (empty-dir fixtures cannot reach the upgrade branch)");
 
-    const r = runInit(ws, INIT_ARGS(ws));
+    const r = runInitEnv(ws, INIT_ARGS(ws), { HOME: makeDeliveryHome() });
     assert.equal(r.status, 0, `the upgrade must exit 0:\n${r.stdout}${r.stderr}`);
 
-    // AC2 — the executed binding is no longer a PATH lookup: it is THIS delivery's absolute bundle,
-    // and it resolves to a real file whose bytes ARE the delivered bundle.
+    // AC2 — the executed binding is no longer a PATH lookup: it names the project-internal stable
+    // link, which resolves to a real file whose bytes ARE the delivered bundle.
     const cfg = fs.readFileSync(path.join(ws, ".quay", "config.yml"), "utf8");
     const entry = resolvedMcpEntry(cfg);
-    assert.deepEqual(entry.slice(0, 2), ["node", DELIVERED_NATIVE],
-      `the bare PATH form must be migrated to the delivered absolute runtime (got ${JSON.stringify(entry)})`);
+    assert.deepEqual(entry.slice(0, 2), ["node", linkRuntime(ws)],
+      `the bare PATH form must be migrated to the stable project link runtime (got ${JSON.stringify(entry)})`);
     assert.ok(fs.existsSync(entry[1]), `the migrated mcp_entry must resolve to an existing executable: ${entry[1]}`);
     assert.equal(sha256(entry[1]), sha256(DELIVERED_NATIVE), "the migrated binding must be byte-identical to this delivery's bundle (traceable, not 'whatever $PATH holds')");
 
@@ -513,13 +542,13 @@ test("AC2 — an ABSOLUTE binding to a STALE project-local runtime is migrated t
     const rt = path.join(ws, ".quay", "runtime");
     assert.ok(fs.existsSync(path.join(rt, "bin", "quay-native.js")), "fixture precondition: NON-EMPTY legacy target");
 
-    const r = runInit(ws, INIT_ARGS(ws));
+    const r = runInitEnv(ws, INIT_ARGS(ws), { HOME: makeDeliveryHome() });
     assert.equal(r.status, 0, `the upgrade must exit 0:\n${r.stdout}${r.stderr}`);
 
     const cfg = fs.readFileSync(path.join(ws, ".quay", "config.yml"), "utf8");
     const entry = resolvedMcpEntry(cfg);
-    assert.deepEqual(entry.slice(0, 2), ["node", DELIVERED_NATIVE],
-      `a STALE project-local binding must be migrated to the delivery (got ${JSON.stringify(entry)})`);
+    assert.deepEqual(entry.slice(0, 2), ["node", linkRuntime(ws)],
+      `a STALE project-local binding must be migrated to the stable project link (got ${JSON.stringify(entry)})`);
     assert.ok(!fs.existsSync(rt), "the superseded project-local runtime must be retired");
     assert.match(migrateLines(r).join("\n"), /stale retired project-local runtime/,
       "the report must name WHY it was migrated (stale vs this delivery)");
