@@ -58,6 +58,17 @@ export interface CarrierSpec {
   expected: string[];
   /** 是否应用 Shape B（速率归零对照）。锁事件类（acquire 后 release 可合法滞后）关掉。 */
   shapeB?: boolean;
+  /** 记录里 `kind` 取此值的行**整体不计入本载体的分析**（既不入分组、不计 totalRecords）。缺省不过滤。
+   *
+   *  为什么需要（gap-goal-merge-execution-writes-no-step-trace）：`fan-in-step-trace.jsonl` 现在同时
+   *  承载 goal→develop 并入的步骤（写手 `worker-fan-in.ts` 的 `GOAL_MERGE_TRACE_KIND = "goal-merge"`），
+   *  而本检测器的 `expected` 词表与 Shape B 都是按【任务 fan-in 步骤链】定的。不跳过的两个方向都坏：
+   *  ① 并入的步若与任务步同名（ff/typecheck/suite…），它会把**任务侧写手已停写**的分组刷成「仍在写」
+   *     ⇒ 真腐烂被掩盖（硬规则 4b：代理量与实际偏离）；② 若另起名，goal 并入低频（可能数周一次），
+   *     Shape B 会把它判成 rate-stopped ⇒ 误报（本文件头注点名的「真正低频但仍在写」误报形态）。
+   *  判据用**精确等于**（⛔ 不是「有 kind 就跳过」）：既有记录都没有 `kind` 字段，任何「有 kind 即跳过」
+   *  的写法都会把全部历史记录一起过滤掉——那是把「读不懂」伪装成「零腐烂」（硬规则 3b）。 */
+  skipKind?: string;
   /** 写手溯源——为什么这些分组【应当】在这个载体里。 */
   note: string;
 }
@@ -75,6 +86,12 @@ export const MANIFEST: CarrierSpec[] = [
       "ac-precheck", "suite-start", "suite-end", "suite-skip",
     ],
     shapeB: true,
+    // goal→develop 并入的步骤写进同一载体（worker-fan-in.ts GOAL_MERGE_TRACE_KIND），但它们不是任务
+    // fan-in 的步骤链：本检测器的 expected 词表与 Shape B 都只对任务那批成立。⚠️ 该字面量与写手侧的
+    // GOAL_MERGE_TRACE_KIND 是**两处**声明（本文件不 import 写手的模块——它是常驻检测器，不背负 fan-in
+    // 子系统的加载面）；改判别键取值必须同时改这里，缺一即静默失效（本文件的词表一贯是人审查过的声明，
+    // 见头注「词表是【人审查过的声明】，不是从代码推导」）。
+    skipKind: "goal-merge",
     note:
       "worker-driver.ts 机械 fan-in 步骤链。前 8 个经 step()/appendFanInStepTrace 写共享载体；" +
       "后 4 个（ac-precheck/suite-*）自 a5a301e03 起被 trace() 改写到 per-run 日志，" +
@@ -168,6 +185,9 @@ export function analyzeCarrier(root: string, spec: CarrierSpec, staleSeconds: nu
   for (const line of text.split("\n")) {
     const rec = parseLine(line);
     if (!rec) continue;
+    // 非本载体「该管的那批写手」的记录整体不计入（见 CarrierSpec.skipKind 的两条理由）。精确等于，
+    // ⛔ 不是「有 kind 就跳过」——历史记录都没有该字段，宽松谓词会把它们一起过滤掉。
+    if (spec.skipKind !== undefined && rec["kind"] === spec.skipKind) continue;
     totalRecords++;
     const key = String(rec[spec.groupBy] ?? "<unset>");
     const ts = extractTsMs(rec);

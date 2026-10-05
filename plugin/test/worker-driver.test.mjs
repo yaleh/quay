@@ -164,6 +164,9 @@ import {
   readGoalMergeResults,
 } from "../scripts/worker-driver.ts";
 import { recordGoalMergeRequest } from "../../packages/quay/src/goal-merge.ts";
+// gap-goal-merge-execution-writes-no-step-trace：判别键从【写手】取（⛔ 不在测试里重打一份字面量——
+// 改了写手的取值而测试仍绿，测的就是一个不存在的形态）。
+import { GOAL_MERGE_TRACE_KIND } from "../scripts/worker-fan-in.ts";
 import { defaultLaneCount } from "../scripts/full-suite-runner.ts";
 import { spawnSuiteAndWait } from "../scripts/suite-driver.ts";
 import { suiteLockBase, suiteLockSlotPaths } from "../scripts/suite-lock-slots.ts";
@@ -3847,6 +3850,19 @@ function gmCleanup(root) {
   try { fs.rmSync(root, { recursive: true, force: true }); } catch { /* best-effort */ }
 }
 
+// ── gap-goal-merge-execution-writes-no-step-trace — 并入的每一步都要在【共享】步骤 trace 载体上留痕 ────
+//
+// 直接量是载体本身（`.quay/fan-in-step-trace.jsonl` 里 kind 命中的那些行），⛔ 不是「函数有没有调
+// appendFanInStepTrace」。只取带判别键的行：载体的既有记录（任务 fan-in 的步骤）没有 `kind` 字段——
+// 那正是判别键存在的意义（以 `task` 为键聚合的读者不会把 GOAL id 当成任务）。
+function goalMergeTrace(repo, goalId) {
+  const file = path.join(repo, ".quay", "fan-in-step-trace.jsonl");
+  if (!fs.existsSync(file)) return [];
+  return fs.readFileSync(file, "utf8").split("\n").map((l) => l.trim()).filter(Boolean)
+    .map((l) => JSON.parse(l))
+    .filter((e) => e.kind === GOAL_MERGE_TRACE_KIND && e.task === goalId);
+}
+
 // ── gap-goal-merge-leaks-empty-mkdtemp-parent-dirs — 并入用过的 mkdtemp 父目录必须被删掉 ────────────
 //
 // 直接量不是「函数有没有调 rmSync」，而是【并入跑完后那个 TMPDIR 里还剩什么】。所以用例给并入一段
@@ -3894,6 +3910,31 @@ test("goal-merge e2e — green suite: develop gets exactly ONE goal/GOAL-901 mer
       assert.equal(pendingGoalMerges(root).length, 0, "a landed merge is no longer pending");
       // 泄漏判据（本任务的核心读数）：并入跑完后 TMPDIR 里一个 goal-merge-* 都不剩。
       assert.deepEqual(goalMergeEntriesIn(tmp), [], "成功并入后独占 TMPDIR 里不得残留任何 goal-merge-* 条目");
+
+      // ── gap-goal-merge-execution-writes-no-step-trace AC1 ────────────────────────────────────────
+      // 「并入慢在哪一步」必须是直接量：每个**实际执行**的步骤在共享载体上恰有一对 begin/end，
+      // `step-end` 自带数值型 `durationMs`，且每条都带判别键 `kind`。
+      const trace = goalMergeTrace(root, GM_GOAL);
+      const executed = [
+        "acquire-goal-lock", "acquire-develop-lock", "read-develop", "worktree-add",
+        "merge", "suite", "ff", "branch-delete",
+      ];
+      for (const s of executed) {
+        const begins = trace.filter((e) => e.step === s && e.event === "step-begin");
+        const ends = trace.filter((e) => e.step === s && e.event === "step-end");
+        assert.equal(begins.length, 1, `${s}: 恰一条 step-begin（实测 ${begins.length}）`);
+        assert.equal(ends.length, 1, `${s}: 恰一条 step-end（实测 ${ends.length}）`);
+        assert.equal(typeof ends[0].durationMs, "number", `${s}: step-end 带数值型 durationMs（实测 ${JSON.stringify(ends[0].durationMs)}）`);
+        assert.equal(ends[0].ok, true, `${s}: 绿并入里该步 ok:true`);
+        assert.equal(begins[0].kind, GOAL_MERGE_TRACE_KIND, `${s}: step-begin 带判别键`);
+        assert.equal(ends[0].task, GM_GOAL, `${s}: task 字段是 GOAL id（⛔ 不是某个 task id）`);
+      }
+      // ⛔ 未接线的可选步（本用例没注入 anti-drift / typecheck 命令）**一条都不写**——「这一步没跑」
+      // 不得伪装成一条读数（硬规则 3b）；同理⛔ 不补 `ok:null` 的 end（目标项目健康探针把 ok 非布尔
+      // 的行判成 trace-unparseable）。
+      assert.deepEqual(trace.filter((e) => e.step === "anti-drift" || e.step === "typecheck"), [],
+        "缺省未接线的 anti-drift / typecheck 在轨迹里没有任何条目");
+      assert.ok(trace.every((e) => e.kind === GOAL_MERGE_TRACE_KIND), "每条并入记录都带判别键（否则按 task 聚合会把它当成任务）");
     });
   } finally { gmCleanup(root); }
 });
@@ -3920,6 +3961,16 @@ test("goal-merge e2e — red suite: all refs unchanged, a goal-merge-result is w
       // 泄漏判据（红的这一臂）：失败的并入同样必须清掉自己的 mkdtemp 父目录——失败路径正是
       // 2026-10-06 那 584 个空目录里 9 个真实条目的来源。
       assert.deepEqual(goalMergeEntriesIn(tmp), [], "suite 红的并入之后独占 TMPDIR 里不得残留任何 goal-merge-* 条目");
+
+      // gap-goal-merge-execution-writes-no-step-trace AC1（红的一臂）：轨迹里【最后一条】 `step-end`
+      // 就是红的那一步（suite）且 `ok:false` —— ⛔ 不必再从 goal-merge-request / goal-merge-result 两个
+      // 事件的时间戳反推「红了、红在哪一步」。⛔ finally 里的收尾不写条目（否则它会成为最后一条）。
+      const redTrace = goalMergeTrace(root, GM_GOAL);
+      const lastEnd = redTrace.filter((e) => e.event === "step-end").pop();
+      assert.ok(lastEnd, "suite 红的并入也在共享载体上留了 step-end（实测零条）");
+      assert.equal(lastEnd.step, "suite", `最后一条 step-end 是 suite（实测 ${lastEnd.step}）`);
+      assert.equal(lastEnd.ok, false, "最后一条 step-end 的 ok:false");
+      assert.equal(typeof lastEnd.durationMs, "number", "失败步的 step-end 也自带数值 durationMs");
 
       // tip 不变 ⇒ 下一轮不重试；tip 前进 ⇒ 重试（裁定⑳：人批准的是业务目标，不是某一棵树）。
       assert.equal(pendingGoalMerges(root).length, 0, "tip unchanged ⇒ not retried");

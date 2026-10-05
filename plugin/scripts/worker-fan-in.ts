@@ -2448,6 +2448,16 @@ export function mirrorMechanicalFanInSuiteState(opts: {
 //   · 红或冲突 ⇒ 不动任何 ref，释放锁，写 `goal-merge-result`；请求仍「待执行」（tip 前进后自动重试，
 //     裁定⑳）——重试由 `pendingGoalMerges`（Core）派生，⛔ 本函数不存状态。
 
+/** goal→develop 并入写进共享步骤 trace 载体时的**判别键**取值（`kind` 字段，随每条 begin/end 落盘）。
+ *
+ *  为什么必须有它（本任务 gap-goal-merge-execution-writes-no-step-trace）：并入与任务 fan-in 共用同一份
+ *  `.quay/fan-in-step-trace.jsonl`，而该载体的既有读者隐含假定「一条记录 = 一次 task fan-in 的一步」。
+ *  `task` 字段放的是 GOAL id（⛔ 不是 task id）——以 `task` 为键聚合的读者若不看 `kind`，会把 goal 当成
+ *  一个任务；`kind:"goal-merge"` 让这种聚合**可判别**（硬规则 3：枚举，不布尔）。
+ *  ⛔ 不写成「goal 条目不进这个载体」——并入的步骤时长正是本任务要读的量，分开写 = 又造一个读者看不见的
+ *  分载体（P5 writer-split 的字面实例）。 */
+export const GOAL_MERGE_TRACE_KIND = "goal-merge";
+
 /** 写一条 `goal-merge-result` GateEvent（§4.7 裁定⑫：worker-driver 把结果写成 goal 侧可读的事件，
  *  由现有 gap-filing 立「有请求 ∧ 最近一次执行红」的 gap——⛔ 事件里不含任何 fan-in 载体路径，
  *  以过 `goal-driver-task-boundary-check.ts`）。与 appendCompleteGateEvent 同款动态 import（shipped
@@ -2493,7 +2503,8 @@ export interface GoalMergeFanInOptions {
   slotLib?: string;
   scriptsDir?: string;
   ffMergeModule?: string;
-  /** 可选的额外验证步（生产接线；缺省跳过并以 not-evaluated 记入 trace）。 */
+  /** 可选的额外验证步（生产接线；缺省**不执行 ⇒ 轨迹里无此步**——⛔ 不补一条 not-evaluated 的 end，
+   *  理由见 runGoalMergeFanIn 内 traceStep 的注释：该载体每条 end 必须带布尔 ok / 数值 durationMs）。 */
   typecheckCommand?: string[] | null;
   antiDriftCommand?: string[] | null;
   now?: () => Date;
@@ -2521,6 +2532,47 @@ export async function runGoalMergeFanIn(opts: GoalMergeFanInOptions): Promise<Go
   const suiteLogFile = opts.suiteLogFile ?? path.join(root, ".quay", `goal-merge-suite-${goalId}-${runId.replace(/[^A-Za-z0-9_.-]/g, "_")}.log`);
   const scriptsDir = opts.scriptsDir ?? resolveKernelScriptsDir();
 
+  // ── 步骤轨迹（本任务 gap-goal-merge-execution-writes-no-step-trace）────────────────────────────────
+  // 并入的每一步都经 appendFanInStepTrace 写一对 begin/end 到共享载体 `.quay/fan-in-step-trace.jsonl`
+  // （与任务 fan-in 的 `step()`，约 :1755 起，同一载体、同一读法）；`step-end` 自带**数值型** `durationMs`，
+  // 于是「这次并入慢在哪一步 / 红在哪一步」是直接量，⛔ 不必再从请求与结果两个事件的时间戳反推整段耗时。
+  // 每条记录带 `kind: GOAL_MERGE_TRACE_KIND` 判别键，`task` 放 GOAL id（见该常量的注释：既有读者按
+  // `task` 聚合时不得把 goal 当成任务）。
+  // ⛔ 只给**实际执行**的步骤写 begin/end：未接线的可选步（anti-drift / typecheck 缺省）**不写任何条目**
+  // ——本载体的每条 `step-end` 必须带布尔 `ok` 与数值 `durationMs`，补一条 `ok:null` 的「未评估」记录会让
+  // 目标项目健康探针（goal-driver.ts 的 HEALTH_PROBE_SCRIPT：`ok` 非布尔 ⇒ 判 `trace-unparseable`）把
+  // 「这一步没跑」读成「这个载体读不懂」（硬规则 3b 的反面：没跑的步 ≠ 坏记录）。
+  // ⛔ `finally` 里的收尾（删临时 worktree + mkdtemp 父目录）**刻意不成一步**：它在 `red()` 之后、promise
+  // settle 之前才跑，若也写 end，则「suite 红的并入」的**最后一条** `step-end` 会是收尾而不是红的那一步
+  // （AC1 的判据正是「最后一条 step-end 是 suite 且 ok:false」）——红在哪一步会被收尾掩盖。收尾耗时并入
+  // 整段墙钟即可，⛔ 不为它牺牲「末条 = 失败步」这条可读性。
+  const traceStep = (step: string, phase: "begin" | "end", extra: Record<string, unknown> = {}): void =>
+    appendFanInStepTrace(root, goalId, runId, step, phase, { kind: GOAL_MERGE_TRACE_KIND, ...extra });
+
+  /** 跑一步 + 计时 + 一对 trace。`okOf` 由调用方给实际成败（⛔ 不从返回值自述推）；`extraOf` 只在
+   *  【跑完才有读数】时用（如 suite 失败摘要）——它与 `ok`/`durationMs` 写在同一条 end 里，⛔ 不事后补
+   *  第二条 end（同一 step 两条 end，在不做 begin/end 配对的读者看来是多跑了一次）。
+   *  `okOf` 缺省 `() => true` 只对「唯一失败形态是抛异常」的步成立（如 acquireFanInLock）——那种步的
+   *  异常由下面的 catch 写成 `ok:false` 的 end 再原样抛出，⛔ 不留「begin 无 end」的假挂起。 */
+  const tracedStep = async <T>(
+    name: string,
+    run: () => Promise<T>,
+    okOf: (v: T) => boolean = () => true,
+    extraOf?: (v: T) => Record<string, unknown>,
+  ): Promise<T> => {
+    const t0 = Date.now();
+    traceStep(name, "begin");
+    let v: T;
+    try {
+      v = await run();
+    } catch (e) {
+      traceStep(name, "end", { ok: false, durationMs: Date.now() - t0, reason: (e as Error)?.message ?? String(e) });
+      throw e;
+    }
+    traceStep(name, "end", { ok: okOf(v), durationMs: Date.now() - t0, ...(extraOf?.(v) ?? {}) });
+    return v;
+  };
+
   const red = async (step: string | null, reason: string): Promise<GoalMergeFanInResult> => {
     await appendGoalMergeResultEvent(root, goalId, {
       outcome: "red", step, reason, tipSha, requestEventId: request.eventId, landedSha: null,
@@ -2537,19 +2589,31 @@ export async function runGoalMergeFanIn(opts: GoalMergeFanInOptions): Promise<Go
   // 空的 `goal-merge-GOAL-NNN-XXXXXX`（2026-10-06 实测 584 个）。⛔ 只记本函数 mkdtemp 出来的那个。
   let tmpWorktreeParent: string | null = null;
   try {
+    // 两个 acquire 各成一步：**等锁**往往是并入耗时的大头（unbounded 排队），单独成步才读得出它占了多久。
     try {
-      goalLock = await acquireFanInLock({ root, task: goalId, runId, lockFile: fanInLockFileForMergeTarget(root, branch) });
+      goalLock = await tracedStep(
+        "acquire-goal-lock",
+        () => acquireFanInLock({ root, task: goalId, runId, lockFile: fanInLockFileForMergeTarget(root, branch) }),
+      );
     } catch (e) {
       return red("acquire-goal-lock", (e as Error)?.message ?? String(e));
     }
     try {
-      developLock = await acquireFanInLock({ root, task: goalId, runId, lockFile: fanInLockFile(root) });
+      developLock = await tracedStep(
+        "acquire-develop-lock",
+        () => acquireFanInLock({ root, task: goalId, runId, lockFile: fanInLockFile(root) }),
+      );
     } catch (e) {
       return red("acquire-develop-lock", (e as Error)?.message ?? String(e));
     }
 
     // develop 在锁内不会动——记下基线，ff 前复核（CAS 的另一半；⛔ 不假设）。
-    const developBase = (await mechSh(["git", "-C", root, "rev-parse", "develop"], 30_000)).stdout.trim();
+    const developRead = await tracedStep(
+      "read-develop",
+      () => mechSh(["git", "-C", root, "rev-parse", "develop"], 30_000),
+      (r) => r.ok,
+    );
+    const developBase = developRead.stdout.trim();
     if (!developBase) return red("read-develop", "develop ref does not resolve");
 
     // 2. 临时 worktree 检出 develop（detached），造 --no-ff 合并提交（裁定⑲）。
@@ -2557,7 +2621,11 @@ export async function runGoalMergeFanIn(opts: GoalMergeFanInOptions): Promise<Go
     //    会让 git 报 "already exists"）。
     tmpWorktreeParent = fs.mkdtempSync(path.join(os.tmpdir(), `goal-merge-${goalId}-`));
     tmpWorktree = path.join(tmpWorktreeParent, "wt");
-    const add = await mechSh(["git", "-C", root, "worktree", "add", "--detach", tmpWorktree, "develop"], 60_000);
+    const add = await tracedStep(
+      "worktree-add",
+      () => mechSh(["git", "-C", root, "worktree", "add", "--detach", tmpWorktree as string, "develop"], 60_000),
+      (r) => r.ok,
+    );
     if (!add.ok) return red("worktree-add", (add.stderr || add.stdout || "git worktree add failed").trim());
     // 依赖装配（与判据/预览 worktree 同一实现）：裸 `git worktree add` 不带 gitignored 的
     // `node_modules`，而 `git merge --no-ff` 会触发 pre-merge-commit 钩子、suite 也会跑构建——
@@ -2565,7 +2633,12 @@ export async function runGoalMergeFanIn(opts: GoalMergeFanInOptions): Promise<Go
     // 主检出没有依赖时不建链（读数由 merge 结果本身如实反映），⛔ 不抛。
     ensureWorktreeNodeModules(root, tmpWorktree);
     const mergeMsg = `merge: ${branch} into develop (request ${request.eventId})`;
-    const merge = await mechSh(["git", "-C", tmpWorktree, "merge", "--no-ff", branch, "-m", mergeMsg], 120_000);
+    const merge = await tracedStep(
+      "merge",
+      () => mechSh(["git", "-C", tmpWorktree as string, "merge", "--no-ff", branch, "-m", mergeMsg], 120_000),
+      (r) => r.ok,
+      (r) => (r.ok ? {} : { reason: (r.stderr || r.stdout || "merge failed").trim() }),
+    );
     if (!merge.ok) {
       // 失败分类（硬规则 3b）：`git merge` 非 0 有两种成因——内容冲突与基础设施失败（钩子崩了、spawn
       // 失败等），⛔ 不得同形。只有【退出码 1 ∧ 索引里确有未合并路径】才是 `merge-conflict`；其余写
@@ -2581,17 +2654,22 @@ export async function runGoalMergeFanIn(opts: GoalMergeFanInOptions): Promise<Go
 
     // 3. 验证（typecheck / scoped 门 / 全量 suite）——全部跑在临时 worktree（受测树 = 合并提交）。
     if (opts.antiDriftCommand) {
-      const a = await mechSh(opts.antiDriftCommand, 120_000);
+      const a = await tracedStep("anti-drift", () => mechSh(opts.antiDriftCommand as string[], 120_000), (r) => r.ok);
       if (!a.ok) return red("anti-drift", (a.stderr || a.stdout || `exit ${a.status}`).trim());
     }
     if (opts.typecheckCommand) {
-      const t = await mechSh(opts.typecheckCommand, 180_000);
+      const t = await tracedStep("typecheck", () => mechSh(opts.typecheckCommand as string[], 180_000), (r) => r.ok);
       if (!t.ok) return red("typecheck", (t.stderr || t.stdout || `exit ${t.status}`).trim());
     }
     const suiteCommand = opts.suiteCommand ?? defaultMechanicalSuiteCommand({
       task: goalId, worktree: tmpWorktree, root, suiteLogFile, runId: perSuiteRunId,
     });
-    const suite = await mechSh(suiteCommand, 30 * 60_000);
+    const suite = await tracedStep(
+      "suite",
+      () => mechSh(suiteCommand, 30 * 60_000),
+      (r) => r.ok,
+      (r) => (r.ok ? {} : { reason: extractFailureSummary(combinedOutput(r.stdout, r.stderr)) || `exit ${r.status}` }),
+    );
     if (!suite.ok) return red("suite", extractFailureSummary(combinedOutput(suite.stdout, suite.stderr)) || `exit ${suite.status}`);
 
     // suite 绿：写证书（suite_head = 合并提交 = 待 ff tip ⇒ delta 空 ⇒ 证书闸放行，同 runMechanicalFanIn）。
@@ -2599,11 +2677,15 @@ export async function runGoalMergeFanIn(opts: GoalMergeFanInOptions): Promise<Go
 
     // 4. 绿 ⇒ ff-only develop 到该合并提交（ff-merge 的【源参数】），删 goal 分支。
     const ffMod = await loadFfMergeModule(opts.ffMergeModule);
-    const ff = await ffMod.ffMerge({
-      task: goalId, root, mergeTarget: "develop", sourceRef: mergeCommitSha,
-      runId, attemptKey: perSuiteRunId, worktree: tmpWorktree, suiteCapture, suiteState: suiteStateFile,
-      lockWaitSecs: 30, token: randomUUID(), scriptsDir,
-    });
+    const ff = await tracedStep(
+      "ff",
+      () => ffMod.ffMerge({
+        task: goalId, root, mergeTarget: "develop", sourceRef: mergeCommitSha,
+        runId, attemptKey: perSuiteRunId, worktree: tmpWorktree as string, suiteCapture, suiteState: suiteStateFile,
+        lockWaitSecs: 30, token: randomUUID(), scriptsDir,
+      }),
+      (r) => r.code === 0,
+    );
     if (ff.code !== 0) return red("ff", (ff.stderr || ff.stdout || `exit ${ff.code}`).trim());
     const landedSha = ff.landedSha ?? (await mechSh(["git", "-C", root, "rev-parse", "develop"], 30_000)).stdout.trim();
 
@@ -2611,7 +2693,7 @@ export async function runGoalMergeFanIn(opts: GoalMergeFanInOptions): Promise<Go
     // 「Develop 上出现合并提交」，分支删除是收尾——残留分支不使已落地的合并消失）。
     const criterionWt = path.join(root, ".quay", `goal-criterion-${goalId}`);
     await mechSh(["git", "-C", root, "worktree", "remove", "--force", criterionWt], 60_000);
-    const del = await mechSh(["git", "-C", root, "branch", "-D", branch], 60_000);
+    const del = await tracedStep("branch-delete", () => mechSh(["git", "-C", root, "branch", "-D", branch], 60_000), (r) => r.ok);
     if (!del.ok) {
       await appendGoalMergeResultEvent(root, goalId, {
         outcome: "landed", step: "branch-delete", reason: (del.stderr || "branch -D failed").trim(),
