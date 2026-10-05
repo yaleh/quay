@@ -1,7 +1,7 @@
 ---
 id: gap-goal-merge-execution-writes-no-step-trace
 title: goal→develop 的并入执行不写 fan-in 步骤轨迹——真实大小的并入慢在哪一步、红在哪一步都读不到，只有请求→结果的整段时间戳
-status: ready
+status: done
 labels:
   - gap
   - defect
