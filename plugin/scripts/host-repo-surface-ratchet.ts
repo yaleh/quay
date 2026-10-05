@@ -42,6 +42,7 @@ import { spawnSync } from "node:child_process";
 // `arg-parsing-helper-family`, routine `semantic-dedup-scan`).
 import { emitPass, emitFail, emitNotEvaluated, helpExit, isDirectEntry, flagValue } from "./gate-script-base.ts";
 import { repoRoot } from "./repo-root.ts";
+import { baselinePath } from "./ratchet-baseline.ts";
 
 // ── surfaces ────────────────────────────────────────────────────────────────────────────────────────
 
@@ -219,8 +220,10 @@ export function checkSubset(current: Surface, baseline: Surface): SubsetVerdict 
 
 // ── baseline file ───────────────────────────────────────────────────────────────────────────────────
 
+/** This ratchet's baseline path — the DERIVATION is the shared `baselinePath`; this consumer owns
+ * only its own `BASELINE_FILE_REL` constant (the `baseline-file-quad` finding, 硬规则 5b). */
 export function baselineFile(root: string): string {
-  return path.join(root, ...BASELINE_FILE_REL.split("/"));
+  return baselinePath(root, BASELINE_FILE_REL);
 }
 
 export function readBaseline(root: string): Surface | null {

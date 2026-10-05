@@ -26,6 +26,7 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import {
   BASELINE_COUNT_RE,
+  baselinePath,
   parseBaselineCount,
   parseRatchetBaselineText,
   readRatchetBaseline,
@@ -107,6 +108,30 @@ test("parseBaselineCount: the ceiling-only half shares the readers' grammar — 
   assert.equal(parseBaselineCount("#baseline-count: 7\n"), 7, "no space after '#' at all");
   // Absent token ⇒ null, NOT 0 — "no ceiling recorded" must not be spelled like "ceiling is zero".
   assert.equal(parseBaselineCount("# a header with no ceiling token\n\ntasks/a.md: V1\n"), null);
+});
+
+test("baselinePath: the FOUR ratchets' shared derivation — a `/`-separated rel joins SEGMENTWISE", () => {
+  // tasks/gap-routine-semantic-dedup-scan-baseline-file-quad (routine `semantic-dedup-scan`,
+  // finding `baseline-file-quad`, kind byte-identical-body, verdict real-duplication):
+  // host-repo-surface-ratchet / import-graph-check / quay-init-closure-ratchet / sh-census-check
+  // each exported a `baselineFile(root)` whose body was byte-identical —
+  // `path.join(root, ...BASELINE_FILE_REL.split("/"))` — differing only in the module-local
+  // `BASELINE_FILE_REL` it closed over. The mechanism is now this one function; the constant stays
+  // at each call site.
+  //
+  // This test pins the mechanism, not the call sites. The FOUR consumers' own tests
+  // (host-repo-surface-ratchet / import-graph-check / quay-init-closure-ratchet / sh-census-check)
+  // are what prove the extraction changed no observable path — same division of labour as the
+  // reader/writer extraction above.
+  assert.equal(
+    baselinePath("/repo", "docs/analysis/x.baseline.json"),
+    path.join("/repo", "docs", "analysis", "x.baseline.json"),
+  );
+  // The SEGMENTWISE arm — the observable difference from a `root + "/" + rel` concat: the rel's
+  // separators are structural, so a `./` prefix and a doubled `/` normalize away instead of
+  // surviving as literal path text. (MUTATION CONTROL: replace the body with `root + "/" + rel`
+  // and this line yields "/repo/./plugin//x.json".)
+  assert.equal(baselinePath("/repo", "./plugin//x.json"), "/repo/plugin/x.json");
 });
 
 test("real repo: every baseline file that carries the token yields a positive ceiling under the shared parser", () => {
