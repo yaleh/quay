@@ -2,7 +2,7 @@
 id: gap-config-provider-path-frozen-to-versioned-cache-dir
 title: .quay/config.yml 的 provider path/mcp_entry
   写死安装当时的版本缓存目录，升级后不跟随——需要不含版本号的项目内稳定入口
-status: todo
+status: ready
 labels:
   - gap
 parent: null
