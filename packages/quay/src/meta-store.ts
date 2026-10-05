@@ -34,6 +34,7 @@ import {
   withFileLock,
   slugify,
   makeAssertSafeStatus,
+  makeAssertSafeId,
 } from "./frontmatter-store-base.ts";
 import { commitStoreWrite, resolveGitRoot, type CommitOutcome } from "./store-commit.ts";
 
@@ -96,12 +97,7 @@ function commitMetaFile(metaDir: string, fileName: string, id: string, action: s
 export function createMetaStore(metaDir: string) {
   fs.mkdirSync(metaDir, { recursive: true });
 
-  function assertSafeId(id: string) {
-    if (typeof id !== "string" || !META_ID_RE.test(id)) {
-      throw new Error(`invalid meta id ${JSON.stringify(id)}: must match META-NNN (>=3 digits)`);
-    }
-    return id;
-  }
+  const assertSafeId = makeAssertSafeId("meta", META_ID_RE, "META-NNN (>=3 digits)");
 
   const assertSafeStatus = makeAssertSafeStatus("meta", VALID_META_STATUSES);
 

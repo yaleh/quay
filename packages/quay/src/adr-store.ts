@@ -29,6 +29,7 @@ import {
   withFileLock,
   slugify,
   makeAssertSafeStatus,
+  makeAssertSafeId,
 } from "./frontmatter-store-base.ts";
 import { commitStoreWrite, resolveGitRoot, type CommitOutcome } from "./store-commit.ts";
 
@@ -79,12 +80,7 @@ interface AdrViewModel {
 export function createAdrStore(adrDir: string) {
   fs.mkdirSync(adrDir, { recursive: true });
 
-  function assertSafeId(id: string) {
-    if (typeof id !== "string" || !ADR_ID_RE.test(id)) {
-      throw new Error(`invalid ADR id ${JSON.stringify(id)}: must match ADR-NNN (>=3 digits)`);
-    }
-    return id;
-  }
+  const assertSafeId = makeAssertSafeId("ADR", ADR_ID_RE, "ADR-NNN (>=3 digits)");
 
   const assertSafeStatus = makeAssertSafeStatus("ADR", VALID_ADR_STATUSES);
 

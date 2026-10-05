@@ -26,6 +26,7 @@ import {
   withFileLock,
   slugify,
   makeAssertSafeStatus,
+  makeAssertSafeId,
 } from "./frontmatter-store-base.ts";
 import { commitStoreWrite, resolveGitRoot, type CommitOutcome } from "./store-commit.ts";
 
@@ -67,12 +68,7 @@ interface DocViewModel {
 export function createDocumentStore(docDir: string) {
   fs.mkdirSync(docDir, { recursive: true });
 
-  function assertSafeId(id: string) {
-    if (typeof id !== "string" || !DOCUMENT_ID_RE.test(id)) {
-      throw new Error(`invalid document id ${JSON.stringify(id)}: must match DOC-NNN (>=3 digits)`);
-    }
-    return id;
-  }
+  const assertSafeId = makeAssertSafeId("document", DOCUMENT_ID_RE, "DOC-NNN (>=3 digits)");
 
   const assertSafeStatus = makeAssertSafeStatus("document", VALID_DOCUMENT_STATUSES);
 

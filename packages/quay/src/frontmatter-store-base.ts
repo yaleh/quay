@@ -63,6 +63,34 @@ export function makeAssertSafeStatus(kind, validStatuses) {
 }
 
 /**
+ * Build the per-kind `assertSafeId(id)` guard shared by every sibling store
+ * (ADR / document / goal / meta). Those four bodies were identical apart from
+ * the kind word, the allowed id shape(s), and the human-readable shape text in
+ * the error — so only those three inputs stay per-kind, exactly mirroring
+ * `makeAssertSafeStatus` above. The SCHEMA (which ids are legal, and the error's
+ * kind word) stays independent per kind; only the MECHANICS are shared.
+ *
+ * `idRe` is one RegExp or an array of them — a kind may accept more than one
+ * shape (the goal store accepts `GOAL-NNN` or `AC-NNN`) — and the id passes when
+ * it is a string matching ANY of them. `expected` is appended after "must match"
+ * verbatim, so each store's existing error text (which its tests match) stays
+ * byte-identical. The id is returned so the guard doubles as a pass-through.
+ * @param {string} kind singular kind word used in the error message (e.g. "ADR")
+ * @param {RegExp | readonly RegExp[]} idRe allowed id shape(s)
+ * @param {string} expected human-readable shape text, e.g. "ADR-NNN (>=3 digits)"
+ * @returns {(id: unknown) => string}
+ */
+export function makeAssertSafeId(kind, idRe, expected) {
+  const allowed = Array.isArray(idRe) ? idRe : [idRe];
+  return function assertSafeId(id) {
+    if (typeof id !== "string" || !allowed.some((re) => re.test(id))) {
+      throw new Error(`invalid ${kind} id ${JSON.stringify(id)}: must match ${expected}`);
+    }
+    return id;
+  };
+}
+
+/**
  * Lowercase, collapse non-alphanumeric runs to '-', trim leading/trailing '-',
  * cap at 60 chars; falls back to `fallback` (default "adr") when the title is
  * empty/undefined so callers never emit a blank slug segment.
