@@ -78,6 +78,7 @@ import { repoRoot } from "./repo-root.ts";
 // `runLaydown()` actually spawns, which used to be two independent spellings of one name (editing the
 // list changed what the guard judged and silently left the spawned path alone — 硬规则 5b).
 import { QUAY_INIT_REL } from "./quay-init-closure-assertion.ts";
+import { baselinePath } from "./ratchet-baseline.ts";
 
 // `.quay/` is EXCLUDED from the measurement (the generated, non-deterministic namespace): config.yml
 // embeds random target absolute paths (mcp_entry / repo_root / worktree_root), quay-init-state.json
@@ -227,8 +228,10 @@ function sha256Hex(content: string | Buffer): string {
   return createHash("sha256").update(content).digest("hex");
 }
 
+/** This ratchet's baseline path — the DERIVATION is the shared `baselinePath`; this consumer owns
+ * only its own `BASELINE_FILE_REL` constant (the `baseline-file-quad` finding, 硬规则 5b). */
 export function baselineFile(root: string): string {
-  return path.join(root, ...BASELINE_FILE_REL.split("/"));
+  return baselinePath(root, BASELINE_FILE_REL);
 }
 
 /**

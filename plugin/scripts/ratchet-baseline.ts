@@ -73,10 +73,27 @@ export function parseRatchetBaselineText(text: string): RatchetBaseline {
   return { baseline, baselineCount: parseBaselineCount(text) };
 }
 
-/** Read `<root>/<rel>`. Absent file ⇒ `{ baseline: empty, baselineCount: null }` — the shrink-only
- * floor, identical for every ratchet (a ratchet that was never created has nothing listed). */
+/** The absolute path of a committed baseline file: `<root>` + the consumer's own
+ * repo-root-relative constant, joined segment-by-segment so the constant's `/` separators never
+ * survive into a platform path.
+ *
+ * Why this is here (tasks/gap-routine-semantic-dedup-scan-baseline-file-quad, the
+ * `semantic-dedup-scan` routine's `baseline-file-quad` finding, kind `byte-identical-body`,
+ * verdict `real-duplication`): FOUR ratchets (host-repo-surface-ratchet, import-graph-check,
+ * quay-init-closure-ratchet, sh-census-check) each exported a `baselineFile(root)` whose body was
+ * byte-identical — `path.join(root, ...BASELINE_FILE_REL.split("/"))` — differing only in which
+ * module-local `BASELINE_FILE_REL` constant it closed over. The mechanism is the path derivation;
+ * the constant is what each consumer genuinely OWNS, so it stays at the call site and is passed in
+ * (硬规则 5b: the fix is the shared source, not a fifth correct-looking copy). */
+export function baselinePath(root: string, rel: string): string {
+  return path.join(root, ...rel.split("/"));
+}
+
+/** Read `<root>/<baseline rel>`. Absent file ⇒ `{ baseline: empty, baselineCount: null }` — the
+ * shrink-only floor, identical for every ratchet (a ratchet that was never created has nothing
+ * listed). */
 export function readRatchetBaseline(root: string, rel: string): RatchetBaseline {
-  const p = path.join(root, rel);
+  const p = baselinePath(root, rel);
   if (!fs.existsSync(p)) return { baseline: new Set(), baselineCount: null };
   return parseRatchetBaselineText(fs.readFileSync(p, "utf8"));
 }
@@ -107,7 +124,7 @@ export function writeRatchetBaseline(
   currentEntries: string[],
   { reset = false, headerLines, entriesLabel, newEntryLabel, overCeilingAdvice }: WriteRatchetOptions,
 ): { ok: boolean; reason: string } {
-  const p = path.join(root, rel);
+  const p = baselinePath(root, rel);
   const { baseline, baselineCount } = readRatchetBaseline(root, rel);
   const ceiling = reset ? currentEntries.length : (baselineCount ?? currentEntries.length);
   if (!reset && currentEntries.length > ceiling) {
