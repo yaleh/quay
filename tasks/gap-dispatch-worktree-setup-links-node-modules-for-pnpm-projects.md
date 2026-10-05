@@ -123,11 +123,11 @@ after : criterion-carrier-inline-check --root <worktree>        →  0 criterion
 
 ```
 anti-drift-touches-check --task … --worktree <wt> --merge-target develop
-  before: ANTI-DRIFT HARD FAIL — 3 violation(s)  (out-of-declared: goals/AC-905 / AC-906 / AC-907)
-  after : widened Touches ⇒ 见本轮 fan-in（本段改写后同轮实跑，预期 0 violation）
+  before: ANTI-DRIFT HARD FAIL — 3 violation(s)  (out-of-declared: goals/AC-905 / AC-906 / AC-907)   exit 1
+  after : ANTI-DRIFT OK — 13 actual file(s), all within declared Touches (16 glob(s))                 exit 0
 ```
 
-改动限于每条记录的 `criterion` 字段（净 -21 行：内联的 `server.json` 解析块被对 live-web-address.ts 的单次调用取代）；`origin`（人 2026-10-05 的授权与演练背景）逐字未动。
+（`after` 为加宽 Touches 并 `git merge develop` 把新任务体带进 worktree 后的实跑读数；`criterion-carrier-inline-check` 亦同轮实跑 exit 0。）改动限于每条记录的 `criterion` 字段（净 -21 行：内联的 `server.json` 解析块被对 live-web-address.ts 的单次调用取代）；`origin`（人 2026-10-05 的授权与演练背景）逐字未动。
 
 ### DoD — 真实落地读数
 
