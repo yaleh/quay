@@ -1,7 +1,7 @@
 ---
 id: gap-goal905-drill-docs-c
 title: GOAL-905 第二次演练 C 批：新增 8 篇托管文档（DOC-930…DOC-937），必须经 goal/GOAL-905 分支落地
-status: todo
+status: ready
 labels:
   - gap
 parent: null
