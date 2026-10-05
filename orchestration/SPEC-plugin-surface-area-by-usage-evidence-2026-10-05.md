@@ -45,7 +45,8 @@
 
 ### 1.4 没有覆盖的路径
 
-- **未查**：driver 构造的 `claude -p` worker 提示文本里有无引用 skill 名。只在脚本与 workflow 里查到两处真实读取（§2.3）；其余命中的 `skills/<名>/SKILL.md` 多为静态检查在校验 skill 文件本身，不是使用方。
+- **已查（原为未查）**：driver 构造的 worker 提示不含 skill / workflow 名；driver 启动会话的实际使用见 §2.8。只在脚本与 workflow 里查到两处真实读取（§2.3）；其余命中的 `skills/<名>/SKILL.md` 多为静态检查在校验 skill 文件本身，不是使用方。
+- **仍未查**：worker 是否加载了 plugin 的 skill 清单（取决于 `launchArgv` 的 `--bare`/`--settings`）；`goal-sufficiency follow-up` 会话；续做提示（continue worker）的归类。
 - **未查**：`lifecycle_retreat` 与 `lifecycle_promote` 的不对称（§2.6）。
 - **说明**：被统计的项目 `claudecodeui`、`quay-fleet`、`archguard`、`meta-cc` 都是**本仓库作者自己的项目**，不是第三方；本文中「外部项目」均指这个意思。**没有第三方用户的使用证据。**
 
@@ -80,7 +81,21 @@
 
 （另有 `backend-module-standards`、`frontend-module-standards` 各 2 次，属 claudecodeui 自己的 skill，不在本 plugin 内。）
 
-**直接读取和 `Skill` 调用合起来，才是 skill 的使用量。** 以 `init` 为例：`Skill` 0 次，但被读 13 次。
+**⚠ 更正（2026-10-05 后续核查，§2.8）：这张表里的多数读取是「维护」，不是「使用」。** 对每条 Read，核查同一会话里是否随后对同一个 SKILL.md 做了 `Edit`/`Write`：
+
+| skill | Read 次数 | 同会话随后编辑同一文件 | 判读 |
+|---|---|---|---|
+| quay-file-task | 88 | 1 | 基本是使用 |
+| init | 14 | 11 | 多为维护 |
+| manager | 7 | 7 | 全为维护 |
+| drivers | 2 | 2 | 全为维护 |
+| cold-start | 1 | 1 | 维护 |
+| loop-driver | 1 | 1 | 维护 |
+| quay-native-methodology | 2 | 0 | 使用 |
+| routines | 1 | 0 | 使用 |
+| execute | 1 | 0 | 使用 |
+
+（`init` 14 次是本次口径，表上方的 13 是之前一次扫描的数，口径差异未对。）**因此「`init` 被读 13 次所以在用」的说法作废：除 `quay-file-task` 之外，直接读取不能作为使用证据。** 仍成立的旁路只有 `run-routines.js` 在代码里把 `routines` SKILL.md 当 agent 提示读取（§2.3）。
 
 ### 2.3 workflow 与脚本对 skill 的真实消费（旁路 2）
 
@@ -128,6 +143,35 @@
 - 6 个 workflow 的 description：`fan-in-execute` 1,268、`execute-suite-fix` 323、`drain-directives` 304、`manager-tick-core` 223、`run-routines` 219、`pool-quality-judge` 15。
 - 这些描述会出现在装了 plugin 的每个项目的每个会话的 skill 清单里。**每个会话实际占多少 token 未测。**
 
+### 2.8 driver 启动的会话（worker 等）在用什么
+
+**driver 如何启动会话**：`plugin/scripts/driver-runtime.ts:1736` `launchArgv(role, prompt, root)` 产出 `[launcher, --settings …, (--model), (--bare), (--mcp-config …), -n <name>, -p <prompt>]`。`worker-driver.ts:1871` `buildWorkerPrompt` 的提示全文只含 worktree 创建、`dispatchSetupSignature`、AC 检查、预合并与 fan-in 说明，**没有任何 skill / workflow 名**（读了该函数全文）。
+
+**怎么识别**：按主会话文件里第一条非元数据用户消息的前 120 字符归类；`subagents/`、`workflows/` 下的文件按所在会话目录归到父会话。读数在 `/tmp/usage/result4.json`，脚本 `scan4.mjs`。类别由 driver 提示的固定句式决定，不靠正则猜：
+
+| 类别（提示开头） | 会话数 | `Skill` | `Workflow` | `Agent quay:quay-task` | 读 SKILL.md | MCP（前几位） | Bash 跑 `plugin/scripts/*` |
+|---|---|---|---|---|---|---|---|
+| resident task selector | 1,353 | 0 | 0 | 0 | 0 | `task_get` 196、`task_list` 31 | 80 |
+| per-task worker | 1,347 | 无 quay skill（仅 claudecodeui 自己的 `*-module-standards` 12 次，`quay:quay-file-task` 1 次） | 0 | 13 | 见 §2.2 更正（均为维护） | `task_check` 1,614、`task_get` 1,362、`task_write` 725、`task_list` 88 | **6,814** |
+| gap-filing agent | 445 | **`quay:quay-file-task` 296、`quay-file-task` 27、`quay-dev:quay-file-task` 1** | 0 | 6 | `quay-file-task` 74 | `task_write` 382、`task_list` 319、`task_get` 215、`task_check` 141、`adr_list` 21 | 894 |
+| sufficiency judge | 398 | `quay:quay-file-task` 7 | 0 | 0 | 1 | `task_write` 14 等 | 38 |
+| architecture-review judge | 291 | 0 | 0 | 0 | 0 | `task_list` 1 | **2,825** |
+| criterion-fidelity judge | 184 | 0 | 0 | 0 | 0 | 0 | 67 |
+| fresh-context agent | 150 | 0 | 0 | 0 | 0 | 0 | **2,240** |
+| pool-quality gate | 60 | 0 | 0 | 0 | 0 | `task_list` 2 | 213 |
+| fix worker（promotion-driver） | 38 | 0 | 0 | 1 | 0 | `task_get` 19、`task_write` 10 | 272 |
+| 其余（人或其它） | 352 | `quay:quay-file-task` 55、`quay:drivers` 10、`quay:manager-tick-core` 6 | 7（`manager-tick-core` 6、`fan-in-execute` 1） | 111 | 见 §2.2 | `task_get` 445、`task_write` 399、`task_list` 395、`task_check` 172、`lifecycle_retreat` 106、`lifecycle_promote` 34 | 1,325 |
+
+**这张表改变了前面的结论**：
+
+1. **`quay-file-task` 的 Skill 调用主要不是人发的。** 全部 `quay-file-task` 的 Skill 调用约 388 次，其中约 **324（83%）来自 driver 启动的 gap-filing agent**，约 55 来自「其余」（人为主），7 来自 sufficiency judge。**「唯一高频 skill」其实是 goal-driver 的 gap-filing agent 在用。**
+2. **driver 启动的会话里没有任何 `Workflow` 调用**（全表 0）；workflow 只出现在「其余」类（`manager-tick-core` 6、`fan-in-execute` 1）。
+3. **driver 会话几乎不用 `Skill`，只有 gap-filing agent 与 sufficiency judge 用 `quay-file-task`。** `routines`、`cold-start`、`loop-driver`、`quay-directive`、`init`、`execute`、`manager` 在 driver 会话里的 `Skill` 调用也是 0；它们不是靠 driver 保活的。
+4. **driver 会话的主界面是 `plugin/scripts/*`（直接走 Bash）与 `task_*` MCP**：worker 6,814 次、architecture-review judge 2,825 次、fresh-context agent 2,240 次。`instrument` 在 driver 会话里同样是 0。
+5. **worker 内几乎不加载 quay skill**，说明 skill 描述对 driver 会话的价值很低；它们是否仍被注入 worker 的上下文，取决于 `launchArgv` 的 `--bare` 与 `--settings`（见下方「未查」）。
+
+**局限与未查**：①类别以首条用户提示判定，`unknown` 类 0 个会话；`goal-sufficiency follow-up agent` 提示出现过 11 次，但在聚合输出里没有对应工具调用，未单独列；②worker 是否实际加载了 plugin 的 skill 清单（`--bare` / `--settings` 的效果）**未查**；③`task-worker-continue`（续做提示）若与 `per-task worker` 开头一致已并入前者，若不一致则没被归类，**未核对**。
+
 ---
 
 ## 3. 已实测的缺陷（有对照，可直接修）
@@ -170,6 +214,8 @@
 2. 「补 quay-native 那份的 `name:`」：**不成立**，它已有 `name: execute`。
 3. 「统一 `name:` 对显示名没有效果」：**部分错误**。该结论来自 `claude -p` 清单，该清单不反映 `name:`；交互界面里有效果（§3.2 表）。
 4. 「`quay-fleet` 等项目调用数为 0」：**错误**，见 §1.3。
+5. 「`init`、`manager`、`drivers` 有直接 `Read`，所以不属于零证据」：**错误**。这些读取在同一会话里随后都编辑了同一个文件，是维护，不是使用（§2.2 更正）。
+6. 「`quay-file-task` 是人最常用的 skill」：**需限定**。约 83% 的调用来自 driver 的 gap-filing agent（§2.8）。
 
 ---
 
@@ -190,10 +236,10 @@
 - **前置读数**（建议先取）：skill 清单实际占的 token 与每会话加载频率，再定压缩目标；**不要先设数值目标**（硬规则 4 推论）。
 
 ### P4　对零证据 skill 降级，不删除
-- **对象**：`quay-task-operator`、`quay-task-to-plan`、`quay-webui-bootstrap-methodology`、`loop-driver`、`cold-start`、`quay-directive`。它们 `Skill` 与 `Read` 全历史均为 0。
+- **对象**：`quay-task-operator`、`quay-task-to-plan`、`quay-webui-bootstrap-methodology`、`loop-driver`、`cold-start`、`quay-directive`——`Skill` 全历史为 0，且没有非维护性的 `Read`；另有 `init`、`manager`、`execute`（`Skill` 为 0，`init`/`manager` 的 `Read` 是维护，`execute` 仅 1 次非维护读取），**降级前须先查** `init` 是否被 CLI 路径消费、`manager` 是否被 manager 会话以文字方式引用（§2.8 未覆盖「其余」类里的此类用法）。
 - **提议**：保留文件，不在默认安装里自动注入描述（按需加载或内部分发）。具体机制（plugin 拆分、`disable-model-invocation`、或移出 `skills/`）**需要先验证 Claude Code 的支持**，本文未验证。
 - **不建议删除的理由**：①`cold-start`、`quay-directive` 在仓库内被脚本/文档引用（引用不等于使用）；②全历史窗口起点未查；③`Skill` 之外还有 §2.3 的两条旁路，旁路读数不完整。
-- **留意**：`routines` 全历史 `Skill` 0 次，但被 `run-routines.js` 当提示读；`init`、`manager`、`drivers` 有直接 `Read`。**这几个不属于零证据，不得并入本类。**
+- **留意（已按 §2.2 / §2.8 更正）**：只有 `routines` 因 `run-routines.js` 在代码里把它当提示读，仍属有消费证据，不得并入本类；`drivers` 有 10 次 `Skill` 调用，有使用证据。`init`、`manager` 的直接 `Read` 是维护读取，**不能**当作使用证据，且二者在 driver 会话里的 `Skill` 也是 0——它们当前**没有任何使用证据**，应与 `cold-start`、`loop-driver` 一并按本类评估；但 `init` 是安装流程的入口，是否用 `Skill` 以外的方式触发（如 `quay init` CLI 直接读文件）**未查**，降级前须先查。
 
 ### P5　`instrument` 的去留
 - **依据**：`instrument` 0 次 vs 直接跑 `plugin/scripts/*` 12,824 次。外部项目也在手写脚本路径（74 个不同脚本）。
@@ -257,6 +303,8 @@ fs.writeFileSync('/tmp/usage/result.json', JSON.stringify({R},null,1));
 ```
 
 第二个脚本（`/tmp/usage/scan2.mjs`）只对外部项目（`claudecodeui|quay-fleet|archguard|meta-cc|cantus`）从 Bash 命令里抽取 `plugin/scripts/<名>` 与 `quay <子命令>` 的分布，产出 §2.6 的 74 个脚本与 CLI 分布。
+
+后续脚本（均为临时文件，可能被清理）：`scan4.mjs` 按首条用户提示把会话归类为 driver 角色，并把 `subagents/`、`workflows/` 归到父会话，产出 §2.8 的表；`scan5.mjs` 对每条 `Read …/skills/<名>/SKILL.md` 核查同会话是否随后 `Edit`/`Write` 同一文件，产出 §2.2 更正表。归类函数按提示固定句式（`resident task selector`、`per-task worker`、`gap-filing agent`、`sufficiency judge`、`architecture-review judge`、`criterion-fidelity judge`、`fresh-conte…`、`pool-quality gate`、`fix worker`、`goal-sufficiency follow-up`）逐个 `includes` 判定。
 
 **已知限制**：①`Skill` 之外的两条旁路只做了脚本与 workflow 的静态检查，未逐个读代码；②`BashQuayCli` 的子命令正则只收录了列出的几个动词，未命中的 CLI 不在表里；③`近期` 窗口只用一个起点（2026-09-21）。
 
