@@ -1,7 +1,7 @@
 ---
 id: gap-plugin-json-commands-array-duplicates-skills
 title: plugin.json 的 commands 数组把 13 个 SKILL.md 重复注册为 command（产生 quay:SKILL 与重名）
-status: ready
+status: done
 labels:
   - gap
 parent: null
