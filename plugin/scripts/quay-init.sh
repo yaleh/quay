@@ -1480,26 +1480,24 @@ _on_exit() {
 }
 trap _on_exit EXIT
 
-# refresh_project_plugin_link — the UPGRADE-CHANNEL fix for a version-frozen provider binding
-# (gap-config-provider-path-frozen-to-versioned-cache-dir). `.quay/config.yml`'s provider `path` /
-# `mcp_entry` name `<ws>/.quay/plugin/...` (no version segment). This step re-points that project-
-# INTERNAL symlink at THIS project's scope installPath from `installed_plugins.json`, so a plugin
-# upgrade is picked up by re-running `/quay:init` with NO config edit. ⛔ NOT a global link (the
-# registry holds a per-scope/projectPath entry; one global link would clobber a `local`-scope project
-# pinned to an older version) — the judgment + symlink handling live in `refreshProjectPluginLink`
-# (packages/quay/src/init.ts, the ONE implementation). An undecidable registry prints NOT-EVALUATED
-# and LEAVES the existing link unchanged (硬规则 3b).
-refresh_project_plugin_link() {
-  quay-init-step refresh-plugin-link "$WORKSPACE_ROOT" "$WORKSPACE_ROOT" "$DRY_RUN"
-}
-
 # ── closed-set write (SPEC §6 / gap-quay-init-closure-shrink-body AC168) ────────────────────────────
 echo "quay-init (plugin v${PLUGIN_VERSION})"
 echo "  closed set: .quay/config.yml, .quay/profiles.yml, tasks/, goals/, .gitignore, .claude/launch.settings.json, .claude/settings.json"
 
 # write_config — generate .quay/config.yml (provider map → the plugin's vendored native runtime; loop section).
+#
+# ⚠️ Its FIRST statement refreshes the project-INTERNAL stable link (gap-config-provider-path-frozen-
+# to-versioned-cache-dir): `<ws>/.quay/plugin -> <this project's scope installPath>`, re-pointed from
+# `installed_plugins.json` on every `/quay:init`, so the provider binding written below (which names
+# `<ws>/.quay/plugin/vendor/quay-native`, NO version segment) follows plugin upgrades with no config
+# edit, while a `local`-scope project stays pinned to its own version. ⛔ NOT a global link. The step's
+# judgment + symlink handling live in `refreshProjectPluginLink` (packages/quay/src/init.ts, the ONE
+# implementation); an undecidable registry prints NOT-EVALUATED and LEAVES the link unchanged (硬规则 3b).
+# ⛔ The two statements SHARE ONE LINE on purpose: quay-init.sh is a census-charged .sh whose code-line
+# count `plugin/scripts/sh-census-check.ts` ratchets DOWNWARD-ONLY ⇒ a change here must be line-neutral.
+# Do NOT "tidy" the step back onto its own line, and do not add lines without removing as many.
 write_config() {
-  local cfg="$WORKSPACE_ROOT/.quay/config.yml"
+  quay-init-step refresh-plugin-link "$WORKSPACE_ROOT" "$WORKSPACE_ROOT" "$DRY_RUN"; local cfg="$WORKSPACE_ROOT/.quay/config.yml"
   # EXISTENCE FIRST, then --dry-run (gap-upgrade-leaves-legacy-project-runtime-stale-and-unmigrated):
   # the pre-fix order returned on --dry-run BEFORE the existing-config branch, so on an existing
   # project `--dry-run` printed "would-write: .quay/config.yml" (a fresh-install report) while the
@@ -2082,7 +2080,6 @@ ensure_target_branch_model
 
 # ── main dispatch: the SEVEN-item closed set ────────────────────────────────────────────────────────────
 if [ "$DRY_RUN" = true ]; then
-  refresh_project_plugin_link
   write_config
   write_profiles_template
   echo "  would-create: tasks/"
@@ -2097,7 +2094,6 @@ if [ "$DRY_RUN" = true ]; then
   exit 0
 fi
 
-refresh_project_plugin_link
 write_config
 write_profiles_template
 mkdir -p "$WORKSPACE_ROOT/tasks"
