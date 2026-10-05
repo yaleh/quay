@@ -2,7 +2,7 @@
 id: gap-goal-branch-active-branch-mode-goal-without-branch-never-self-heals
 title: active ∧ branch:true 的 goal 若 goal/<id> 不存在，没有任何 driver 补建——任务静默落
   develop（cantus GOAL-002 读到）
-status: ready
+status: done
 labels:
   - gap
   - defect
