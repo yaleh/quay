@@ -16,7 +16,7 @@ extra:
 - [x] `node -e 'const j=require("./plugin/.claude-plugin/plugin.json");process.exit("commands" in j?1:0)'` 退出码 0（commands 键已不存在）。→ 实测 exit 0。
 - [x] `claude plugin validate ./plugin` 输出含 `Validation passed`（若 agents 路径等无关错误，说明并贴出原文）。→ 实测输出 `✔ Validation passed`（仅此一行，无其它错误）。
 - [x] 在临时目录 `claude -p "hi" --plugin-dir <plugin副本> --output-format stream-json --verbose --max-turns 1` 的 init 消息中，`slash_commands` 里以 `quay:` 开头的项不含 `quay:SKILL`，且 `skills` 里 quay: 开头的项仍为 13 个；贴出两个计数。→ `quay:SKILL` 已消失（before 有 / after 无）；13 个 SKILL.md skill 全部保留。两计数（isolated `CLAUDE_CONFIG_DIR` + 临时 cwd，claude 2.1.289）：slash_commands `quay:` before=20 / after=19；skills `quay:` after=19。⚠️ after 的 19 = 13 个 SKILL.md skill + 6 个 `plugin/workflows/*.js`（本版 Claude Code 把 plugin workflow 与 skill 同列进 init 的 `skills` 字段）；本任务前后差恰为 1（`quay:SKILL`），workflow 条目各只出现一次、非重名、与本改动无关。逐项读数与证据见 Notes。
-- [x] `grep -rn '"commands"' plugin/scripts plugin/test packages/quay/scripts --include=*.ts --include=*.mjs --include=*.sh` 的命中逐条列出，说明无一把 plugin.json 的 commands 数组当必需字段（或已同步修改）。→ 该 grep **0 命中**（exit 1）。另做语义搜索（不带引号的 `commands`）命中唯一活跃消费者 `plugin/test/plugin-packaging.test.mjs`（第 8/86/103/110/114 行读 `manifest.commands`），已同步修改：改为断言 `commands` 键**缺席**（防回归）+ 磁盘上 13 个 skill 目录存在。其余命中均为历史里程碑审计/提案文档（不可变记录，不改）。
+- [x] `grep -rn '"commands"' plugin/scripts plugin/test packages/quay/scripts --include=*.ts --include=*.mjs --include=*.sh` 的命中逐条列出，说明无一把 plugin.json 的 commands 数组当必需字段（或已同步修改）。→ 该 grep **0 命中**（exit 1）。另做语义搜索（不带引号的 `commands`），实际命中**三个**活跃消费者（原证据只列了 1 个，漏报 2 个 —— 首轮 fan-in 的 suite 红暴露）：① `plugin/test/plugin-packaging.test.mjs`（读 `manifest.commands`）；② `plugin/test/cold-start-skill.test.mjs`（AC5 断言 `manifest.commands.includes('./skills/cold-start/SKILL.md')`）；③ `plugin/test/manager-layer-skill.test.mjs`（AC1 断言 `manifest.commands.includes('./skills/manager/SKILL.md')`）。三者均已同步修改：改为断言 `'commands' in manifest === false`（防回归）+ 磁盘上对应 skill 目录存在。其余命中均为历史里程碑审计/提案文档（不可变记录，不改）。
 - [x] `scripts/test.sh --for-task gap-plugin-json-commands-array-duplicates-skills` 退出码 0。→ 实测（加 `--allow-thin`，selector 选 0 个 test 文件时仍跑静态门）exit 0。
 - [ ] 人 yale 在交互式 Claude Code（重启后）输入 /quay，init 只出现 1 次且无重复的其它 quay: 项；贴出截图文字（待外部）
 
@@ -26,6 +26,8 @@ extra:
 ## Touches
 - plugin/.claude-plugin/plugin.json
 - plugin/test/plugin-packaging.test.mjs
+- plugin/test/cold-start-skill.test.mjs
+- plugin/test/manager-layer-skill.test.mjs
 - docs/analysis/quay-init-closure-ratchet.baseline.json
 - tasks/gap-plugin-json-commands-array-duplicates-skills.md
 
@@ -51,6 +53,7 @@ after : slash_commands quay: = 19 ; has quay:SKILL = false ; skills quay: = 19
 ### 附带改动
 - `plugin.json` 是 quay-init laydown 源，改其内容使 closure-ratchet 指纹过期；`--gate` 判为 **shrink-only**（footprint 未增：3 files / 1022 bytes ≤ 基线），按 pre-commit 守卫指引 `--reanchor` 并把新基线 `docs/analysis/quay-init-closure-ratchet.baseline.json` 纳入提交。
 - `plugin/test/plugin-packaging.test.mjs`：原「13 bundled skills」测试断言 `manifest.commands`；已改为断言 `'commands' in manifest === false`（防回归）+ 磁盘 `plugin/skills/` 恰为 13 个目录。该文件 37 测试在 `test.sh` 的 dist 构建+mirage 环境下全绿。
+- `plugin/test/cold-start-skill.test.mjs`（AC5）+ `plugin/test/manager-layer-skill.test.mjs`（AC1）：两者都断言 `manifest.commands.includes('./skills/<x>/SKILL.md')` —— 正是本任务删除的字段。首轮 fan-in 的 suite 在这两处红（10085 中 fail 2），其 delta-relatedness 被机械判为 UNRELATED（one-hop 直导入不交，但两文件是**从盘上读 plugin.json**，非 import）—— 实为**本任务直接因果**。已改为断言 `'commands' in manifest === false` + skill 目录存在（注册机制改为 skills/ 自动发现）。修后两文件单独跑：manager 10/10、cold-start 13/13 全绿。
 
 2026-10-05 交互式实测（Claude Code v2.1.289，cd /tmp 后 `claude --settings '{"enabledPlugins":{"quay@quay":false,"quay@quay-dev":false}}' --plugin-dir /tmp/quay-plugin-exp/<副本>` 再输入 /quay，人 yale 读数）：
 | 副本 | commands | init 的 name | /quay 里 init 次数 | 显示 |
