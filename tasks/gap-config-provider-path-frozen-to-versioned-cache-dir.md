@@ -28,6 +28,8 @@ extra:
 - `plugin/scripts/quay-init-steps.ts`
 - `packages/quay/src/init.ts`
 - `plugin/scripts/driver-runtime.ts`
+- `plugin/skills/init/SKILL.md`
+- `plugin/skills/manager/SKILL.md`
 - `plugin/test/quay-init-stable-plugin-link.test.mjs`
 - `plugin/test/driver-runtime-loaded-version-drift.test.mjs`
 - `plugin/test/quay-init.test.mjs`
@@ -48,3 +50,6 @@ extra:
 真实落地:一个真实第三方项目(claudecodeui)升级插件版本后,不手改 config,只重跑 `/quay:init` 即可让 provider 拉起新版本 runtime;local scope 固定旧版本的项目不被其它项目的升级影响。仅有 fixture 绿不算完成。
 
 **落地证据**:同形真实第三方工作区副本(由 claudecodeui 的真实 `.quay/config.yml` 原文改写路径而来)上,迁移后的 config provider 绑定不再带版本段、`.quay/plugin` 指向当前版本目录,driver anchor 从真实版本目录启动(见 AC5 读数)。"升级后只重跑 init 即跟随新版本、config 不变"由 `quay-init-stable-plugin-link.test.mjs` AC1③ 钉住(夹具注册表改指新版本 ⇒ 链接改指新版本、config 逐字节不变)。"local scope 固定旧版本不被覆盖"由 AC2① 钉住(projectPath 匹配的 0.10.0 胜过更新的 user 0.14.0),即⛔ 全局单一链接会破坏的那条约束。
+
+## Evidence
+**2026-10-05 续做轮:adopt peer 的 spec-declaration 修复(store-wide 静态红,非本任务 delta)。** 上一轮 `step=suite: # fail 72` 的真实原因是日志尾部的 `STATIC_CHECK_FAILED: spec-declaration-point-check exit=1`(静态闸 fail-closed 中止,`# tests 0` ⇒ 不是 72 个测试失败):develop 上 `7a596134b` 落了 `orchestration/SPEC-goal-author-branch-2026-10-05.md` 但两处声明点(`plugin/skills/init/SKILL.md` 的 `<!-- reference-doc -->` 块、`plugin/skills/manager/SKILL.md` 的 SPEC 索引)都没加,故整店红、每个任务的 fan-in 都在静态层中止。查证 develop 自身:两文件 `grep -c SPEC-goal-author-branch` 均 = 0 ⇒ develop-wide,非本分支 delta。owner 判定:无 `status: ready` 任务认领(无任务文件命中该 SPEC);peer 分支 `task/gap-release-bundle-embeds-dev-version-after-stamp` 已带修复 `644ab27ef`(`fix(spec-declaration): declare SPEC-goal-author-branch-2026-10-05 at both points`)但未落 develop。**处置:byte-exact adopt peer 的已提交字节**(`git checkout task/gap-release-bundle-embeds-dev-version-after-stamp -- <两文件>`,md5 逐文件比对一致:init `96f21899bc4e70b33b22988dc5aab8ac`、manager `f037b9e3d54376860132911865902a19`),本地提交 `f22b5956e`。两文件已加进 `## Touches`(anti-drift 硬门要求)。adopt 的同一字节在两种落序下都良性:谁先落谁修 develop,后落者该两路径 delta 归零。验证:adopt 后 `spec-declaration-point-check --root <worktree>` 退出 0(all 48 SPEC declared at each of 2 points)。
