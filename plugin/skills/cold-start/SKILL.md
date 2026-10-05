@@ -1,12 +1,12 @@
 ---
-name: quay-cold-start
-description: "Cold-start the two-layer loop in a project quay-init has already prepared: re-create the 20-minute outer cron, EXPLICITLY drive the inner session to start fast mode and dispatch the first task, then PROVE the loop is live by reading a real --task-start telemetry record in .workflow-events/. One slash command; the inner start is DRIVEN here, never assumed as a side effect."
+name: cold-start
+description: "Cold-start the two-layer loop in a project `/quay:init` has already prepared: re-create the 20-minute outer cron, EXPLICITLY drive the inner session to start fast mode and dispatch the first task, then PROVE the loop is live by reading a real --task-start telemetry record in .workflow-events/. One slash command; the inner start is DRIVEN here, never assumed as a side effect."
 allowed-tools: Bash, Read, Monitor, CronCreate, CronList
 ---
 
-# quay-cold-start
+# cold-start
 
-**One slash command that turns a quay-init-prepared project into a running two-layer loop.**
+**One slash command that turns a `/quay:init`-prepared project into a running two-layer loop.**
 The user's whole cold start is this command; after it returns, the loop must be provably live.
 
 > **⛔ RETIRED (2026-09-04, `SPEC-tmux-retirement-2026-09-03.md` §1.4/Layer 3b).**

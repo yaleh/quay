@@ -75,7 +75,7 @@ test('neither marketplace entry carries a `version` — the field is read by not
   }
 });
 
-test('plugin.json is valid JSON and declares the 13 bundled skills (M179/DIR-070-F: +quay-native-methodology, +quay-webui-bootstrap-methodology; gap-loop-mechanism-...: +quay-task-operator; cold-start-8: +quay-cold-start; gap-productize-the-manager-layer: +manager; +quay-file-task; gap-skill-start-drivers-webserver: +quay-drivers; gap-retire-unused-quay-author-skill: -author)', () => {
+test('plugin.json is valid JSON and declares the 13 bundled skills (M179/DIR-070-F: +quay-native-methodology, +quay-webui-bootstrap-methodology; gap-loop-mechanism-...: +quay-task-operator; cold-start-8: +cold-start; gap-productize-the-manager-layer: +manager; +quay-file-task; gap-skill-start-drivers-webserver: +drivers; gap-retire-unused-quay-author-skill: -author)', () => {
   const manifest = readJson(path.join(pluginDir, '.claude-plugin', 'plugin.json'));
   assert.equal(manifest.name, 'quay');
   // Cross-check against packages/quay's version rather than a hardcoded literal (which is

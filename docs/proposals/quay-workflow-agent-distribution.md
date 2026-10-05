@@ -465,7 +465,7 @@ The skill body is the detailed implementation.
 {
     "name": "quay",
     "version": "0.4.0",
-    "description": "quay: a provider-agnostic task board. Bundles the quay MCP server, the quay-directive and quay-loop-driver skills, the quay-init bootstrap skill, vendored agent types, and distributable workflows and gate scripts.",
+    "description": "quay: a provider-agnostic task board. Bundles the quay MCP server, the quay-directive and loop-driver skills, the init bootstrap skill, vendored agent types, and distributable workflows and gate scripts.",
     "author": {
         "name": "Yale Huang",
         "url": "https://github.com/yaleh"

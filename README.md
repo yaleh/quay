@@ -485,7 +485,7 @@ already-running session into a role. The retired `outer`/`inner` two-session tmu
 model (`session-liveness.sh` / `quay-topology.sh` / `outer-session-check.sh` /
 `topology-check.sh`) was **deleted, not migrated** — see
 `orchestration/SPEC-tmux-retirement-2026-09-03.md`. The **model** the
-`quay-cold-start` skill described — "create an outer cron, then drive an inner
+`cold-start` skill described — "create an outer cron, then drive an inner
 session" — is retired, and the `drivers` + `manager` skills above are its
 successors. The skill **file itself is still shipped and still invocable**
 (`plugin/skills/cold-start/SKILL.md`, listed in the session skill set as
@@ -511,7 +511,7 @@ different things — only the first is a step you perform:
 
 > An older liveness reading — a `--task-start` **telemetry** record under
 > `.workflow-events/*.jsonl` — belongs to the retired `inner` layer and to the
-> retained `quay-cold-start` skill that asserts it. The live driver pipeline writes
+> retained `cold-start` skill that asserts it. The live driver pipeline writes
 > the readings in the first bullet above, not that directory; prefer them.
 
 What `--loop` lays into the target project (from the plugin bundle — nothing is

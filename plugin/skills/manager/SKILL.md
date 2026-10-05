@@ -1,10 +1,10 @@
 ---
-name: quay-manager
+name: manager
 description: "The manager layer — the THIRD layer above outer/inner: cross-project planning, prioritization, and trend-watching. One per network/host, started by the human (or an OS anchor), NEVER by a project's cold start. Crystallizes the daily-review cadence (per orchestration/REVIEW-cadence.md), the three functions (planning / prioritization / trend), and the two verified rules (§1.5 ask-vs-act, §1.6 event triage, extracted from orchestration/manager-loop-tick.md). Installable — ships under plugin/, not quay-local. Use when a network runs more than one quay loop and someone must coordinate between them (the human's job otherwise)."
 allowed-tools: Bash, Read, Monitor
 ---
 
-# quay-manager
+# manager
 
 **The third layer — cross-project coordination.** The two-layer loop (outer → inner) executes one
 project's board fast but never plans, prioritizes, or trend-watches. Those three functions are the
@@ -251,7 +251,7 @@ description: "The THIRD (manager) layer of the fast-mode loop — a cross-projec
 allowed-tools: Bash, Read, Monitor
 ---
 
-# quay-manager —— 第三层：跨项目协调层
+# manager —— 第三层：跨项目协调层
 
 **这是 fast-mode 循环的第三层。** 实跑三层、交付两层的历史缺口（`gap-productize-the-manager-layer`）
 的产物：manager 层从此是 **plugin 交付物的一部分**（本 SKILL 在 `plugin/skills/manager/`，随 plugin
@@ -345,7 +345,7 @@ allowed-tools: Bash, Read, Monitor
 ## 5. 会话内激活（默认路线）——当前会话变身为 manager
 
 **两条启动路线，默认是会话内激活。** 人在已跑过 init + drivers skill 的 Claude Code 会话里，调用本
-skill（`/quay-manager` / Skill 工具），**当前会话即变身为 manager**——就地初始化 manager 家目录、
+skill（`/quay:manager` / Skill 工具），**当前会话即变身为 manager**——就地初始化 manager 家目录、
 加载方法论文档、武装定时锚点，之后按 `orchestration/manager-loop-tick.md` 以 manager 角色行事。
 **不需要人另外手动敲 tmux/CLI 命令启动「新的 manager 会话」。**
 

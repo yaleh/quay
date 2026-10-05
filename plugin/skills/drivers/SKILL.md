@@ -1,20 +1,20 @@
 ---
-name: quay-drivers
-description: "Start the promotion + worker drivers and the web server in ONE idempotent in-session call — wraps `quay driver start --kind promotion|worker` + `quay serve` via plugin/scripts/start-drivers.ts, relaying (never swallowing) the halted / worktree-root failure paths. Use after `quay-init` to bring a project's drivers and Web UI into the running state without hand-typing three CLI commands."
+name: drivers
+description: "Start the promotion + worker drivers and the web server in ONE idempotent in-session call — wraps `quay driver start --kind promotion|worker` + `quay serve` via plugin/scripts/start-drivers.ts, relaying (never swallowing) the halted / worktree-root failure paths. Use after `/quay:init` to bring a project's drivers and Web UI into the running state without hand-typing three CLI commands."
 allowed-tools: Bash, Read
 ---
 
-# quay-drivers
+# drivers
 
 Bring a quay project's **promotion driver**, **worker driver**, and **web server** into the running
 state with a single in-session call — no hand-typed `quay driver` / `quay serve` CLI commands, no
 tmux. This is step ④ of the quay enablement flow (`SPEC-tmux-retirement-2026-09-03.md`
-§1.4/Layer 3b): ① install → ② start a session → ③ `quay-init` → **④ this skill** → ⑤ manager.
+§1.4/Layer 3b): ① install → ② start a session → ③ `/quay:init` → **④ this skill** → ⑤ `/quay:manager`.
 
 The **start logic lives in ONE executable** — `plugin/scripts/start-drivers.ts`
 (`tasks/gap-skill-start-drivers-webserver`). This skill delegates to it rather than repeating the
 idempotent-start loop inline: a second copy of the start logic is exactly the drift this repo keeps
-removing (the same delegate pattern as `quay-init` → `quay-init.sh`). Run the script; do not
+removing (the same delegate pattern as `/quay:init` → `quay-init.sh`). Run the script; do not
 hand-reimplement its behavior.
 
 ## What it wraps
@@ -47,7 +47,7 @@ The script is **idempotent** — safe to call repeatedly:
 
 The script needs a quay workspace root (a directory whose `.quay/config.yml` exists). By default it
 discovers the root by walking up from the current directory; in a fresh project this is the
-directory you just ran `quay-init` in. If the script is not run from inside the workspace, pass
+directory you just ran `/quay:init` in. If the script is not run from inside the workspace, pass
 `--root <path>` explicitly.
 
 ### 2. Run the script
