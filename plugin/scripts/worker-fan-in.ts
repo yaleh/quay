@@ -2532,6 +2532,10 @@ export async function runGoalMergeFanIn(opts: GoalMergeFanInOptions): Promise<Go
   let goalLock: FanInLockHandle | null = null;
   let developLock: FanInLockHandle | null = null;
   let tmpWorktree: string | null = null;
+  // mkdtemp 建出来的是【父目录】，worktree 只是它的 `wt` 子目录（见下面建它的那行）。父目录要自己
+  // 记着——`tmpWorktree` 指向子目录，清理子目录【不会】删掉父目录，于是每次并入都在 /tmp 留下一个
+  // 空的 `goal-merge-GOAL-NNN-XXXXXX`（2026-10-06 实测 584 个）。⛔ 只记本函数 mkdtemp 出来的那个。
+  let tmpWorktreeParent: string | null = null;
   try {
     try {
       goalLock = await acquireFanInLock({ root, task: goalId, runId, lockFile: fanInLockFileForMergeTarget(root, branch) });
@@ -2551,7 +2555,8 @@ export async function runGoalMergeFanIn(opts: GoalMergeFanInOptions): Promise<Go
     // 2. 临时 worktree 检出 develop（detached），造 --no-ff 合并提交（裁定⑲）。
     //    路径用 mkdtemp 的【子目录】——`git worktree add <dir>` 要求目标不存在（mkdtemp 自身建的空目录
     //    会让 git 报 "already exists"）。
-    tmpWorktree = path.join(fs.mkdtempSync(path.join(os.tmpdir(), `goal-merge-${goalId}-`)), "wt");
+    tmpWorktreeParent = fs.mkdtempSync(path.join(os.tmpdir(), `goal-merge-${goalId}-`));
+    tmpWorktree = path.join(tmpWorktreeParent, "wt");
     const add = await mechSh(["git", "-C", root, "worktree", "add", "--detach", tmpWorktree, "develop"], 60_000);
     if (!add.ok) return red("worktree-add", (add.stderr || add.stdout || "git worktree add failed").trim());
     // 依赖装配（与判据/预览 worktree 同一实现）：裸 `git worktree add` 不带 gitignored 的
@@ -2623,6 +2628,18 @@ export async function runGoalMergeFanIn(opts: GoalMergeFanInOptions): Promise<Go
     if (tmpWorktree) {
       await mechSh(["git", "-C", root, "worktree", "remove", "--force", tmpWorktree], 60_000);
       try { fs.rmSync(tmpWorktree, { recursive: true, force: true }); } catch { /* best-effort */ }
+    }
+    // 上面那步只够得着 `wt` 子目录——再删 mkdtemp 出来的父目录，否则每次并入（成功或失败）都在
+    // /tmp 留一个空目录。删之前确认它【确实是本函数建的那个】：basename 以 `goal-merge-` 开头，
+    // 且它就是 `tmpWorktree` 的 dirname。⛔ 绝不删 `os.tmpdir()` 本身或任何别的路径 —— 这条判据
+    // 取假（用例里的 `keep-me` 安全断言：不属于函数的目录必须原样还在）。
+    if (
+      tmpWorktreeParent !== null &&
+      tmpWorktree !== null &&
+      path.basename(tmpWorktreeParent).startsWith("goal-merge-") &&
+      path.dirname(tmpWorktree) === tmpWorktreeParent
+    ) {
+      try { fs.rmSync(tmpWorktreeParent, { recursive: true, force: true }); } catch { /* best-effort */ }
     }
     if (developLock) await developLock.release();
     if (goalLock) await goalLock.release();
