@@ -71,7 +71,7 @@ const skillPath = path.join(pluginDir, 'skills', 'cold-start', 'SKILL.md');
 const skillSrc = fs.readFileSync(skillPath, 'utf8');
 
 // ── AC5: agent-executed via the Monitor tool, never nohup ───────────────────────────────────────────
-test('AC5 — the cold-start skill exists, is a Monitor-based agent skill, and is registered in plugin.json', () => {
+test('AC5 — the cold-start skill exists, is a Monitor-based agent skill, and ships via skills/ auto-discovery', () => {
   assert.ok(fs.existsSync(skillPath), 'plugin/skills/cold-start/SKILL.md must exist');
   // Frontmatter: name + the tool the agent is allowed to call (Monitor must be present so the
   // agent CAN mount monitors — a skill that cannot call Monitor cannot be the AC5 mechanism).
@@ -80,10 +80,16 @@ test('AC5 — the cold-start skill exists, is a Monitor-based agent skill, and i
   assert.ok(fm, 'skill must declare allowed-tools');
   assert.ok(fm[1].includes('Monitor'), 'allowed-tools must include Monitor (the agent must be able to mount monitors)');
   assert.ok(fm[1].includes('CronCreate'), 'allowed-tools must include CronCreate (the skill re-creates the 20-min cron)');
-  // Registered in plugin.json commands[] (plugin-packaging.test.mjs enforces the exact set).
+  // Registration is now by skills/ auto-discovery, not a plugin.json `commands[]` entry
+  // (gap-plugin-json-commands-array-duplicates-skills 2026-10-05: listing each SKILL.md under
+  // `commands[]` ALSO registered it as a flat command named "SKILL" ⇒ duplicate `quay:SKILL`.
+  // Claude Code auto-scans `skills/` unconditionally, so the directory IS the registration).
+  // plugin-packaging.test.mjs pins the exact 13-directory set and that `commands` is absent.
   const manifest = JSON.parse(fs.readFileSync(path.join(pluginDir, '.claude-plugin', 'plugin.json'), 'utf8'));
-  assert.ok(manifest.commands.includes('./skills/cold-start/SKILL.md'),
-    'plugin.json commands[] must register the cold-start skill');
+  assert.equal('commands' in manifest, false,
+    'plugin.json must NOT declare commands[] — skills/ auto-discovers cold-start; commands[] would re-register it as a duplicate flat command');
+  assert.ok(fs.existsSync(path.join(pluginDir, 'skills', 'cold-start', 'SKILL.md')),
+    'the cold-start skill ships via the auto-scanned skills/ directory');
 });
 
 test('AC5 — the retired observer mount is gone: the skill no longer instructs a Monitor mount', () => {

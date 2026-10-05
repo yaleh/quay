@@ -1,7 +1,7 @@
 // @test-group engine
 // manager-layer-skill.test.mjs — gap-productize-the-manager-layer, AC7.
 // Pins the shipped manager layer (the THIRD layer) + the cold-start AC8c dead-key fix:
-//   AC1 — plugin/skills/manager/SKILL.md exists and is registered in plugin.json commands[]
+//   AC1 — plugin/skills/manager/SKILL.md exists and ships via skills/ auto-discovery
 //         (the manager layer ships under plugin/, not quay-local in orchestration/).
 //   AC2 — installability: a cold start on another machine gets the manager layer — the plugin
 //         manifest lists it AND the quay-init referenced ⊆ landed invariant holds (a manager
@@ -50,10 +50,16 @@ test('AC1 — the manager layer SKILL.md exists (the third layer ships under plu
   assert.ok(fm[1].includes('Bash'), 'manager skill must allow Bash');
 });
 
-test('AC1 — the manager skill is registered in plugin.json commands[] (installed on any plugin install)', () => {
+test('AC1 — the manager skill ships via skills/ auto-discovery (installed on any plugin install)', () => {
+  // Registration is now by skills/ auto-discovery, not a plugin.json `commands[]` entry
+  // (gap-plugin-json-commands-array-duplicates-skills 2026-10-05: listing each SKILL.md under
+  // `commands[]` ALSO registered it as a flat command named "SKILL" ⇒ duplicate `quay:SKILL`.
+  // Claude Code auto-scans `skills/` unconditionally, so the directory IS the registration).
   const manifest = JSON.parse(fs.readFileSync(path.join(pluginDir, '.claude-plugin', 'plugin.json'), 'utf8'));
-  assert.ok(manifest.commands.includes('./skills/manager/SKILL.md'),
-    'plugin.json commands[] must register the manager skill');
+  assert.equal('commands' in manifest, false,
+    'plugin.json must NOT declare commands[] — skills/ auto-discovers manager; commands[] would re-register it as a duplicate flat command');
+  assert.ok(fs.existsSync(managerSkillPath),
+    'the manager skill ships via the auto-scanned skills/ directory');
 });
 
 // ── The three layers exist (AC7 — "三层存在") ─────────────────────────────────────────────────────
