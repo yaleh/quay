@@ -2,7 +2,7 @@
 id: gap-dispatch-worktree-setup-links-node-modules-for-pnpm-projects
 title: dispatch-worktree-setup.sh 只会符号链接或 npm install，不认包管理器——pnpm
   项目（cantus）每个新任务 worktree 的 suite 步毫秒级失败并被误判成「无法归因」
-status: todo
+status: ready
 labels:
   - gap
   - defect
