@@ -2,7 +2,7 @@
 id: gap-goal-branch-landing-judged-against-develop-not-merge-target
 title: 落地判定 computeLandingState 一律拿 develop 当基准——经 goal 分支成功落地的任务被记成
   exited-not-landed 并计入重试（4/4 次真实落地读到）
-status: ready
+status: done
 labels:
   - gap
   - defect
