@@ -3847,57 +3847,98 @@ function gmCleanup(root) {
   try { fs.rmSync(root, { recursive: true, force: true }); } catch { /* best-effort */ }
 }
 
+// ── gap-goal-merge-leaks-empty-mkdtemp-parent-dirs — 并入用过的 mkdtemp 父目录必须被删掉 ────────────
+//
+// 直接量不是「函数有没有调 rmSync」，而是【并入跑完后那个 TMPDIR 里还剩什么】。所以用例给并入一段
+// 独占的 TMPDIR：`os.tmpdir()` 在 POSIX 每次调用都重读 `process.env.TMPDIR`（本机 Node 实测），
+// 于是 `runGoalMergeFanIn` 内部 `mkdtempSync(os.tmpdir(), "goal-merge-…")` 建出的父目录就落在
+// `tmp` 里，`goalMergeEntriesIn(tmp)` 一眼可数。⛔ 夹具仓库根（basename 也是 `goal-merge-e2e-*`）
+// 必须由调用方在【进这个函数之前】建好，否则它自己就命中断言谓词。
+async function withExclusiveTmpdir(fn) {
+  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "gm-exclusive-tmpdir-"));
+  const prev = process.env.TMPDIR;
+  process.env.TMPDIR = tmp;
+  try {
+    return await fn(tmp);
+  } finally {
+    if (prev === undefined) delete process.env.TMPDIR; else process.env.TMPDIR = prev;
+    try { fs.rmSync(tmp, { recursive: true, force: true }); } catch { /* best-effort */ }
+  }
+}
+
+/** 独占 TMPDIR 里所有 `goal-merge-*` 条目——并入泄漏 mkdtemp 父目录的直接读数（应为空）。 */
+function goalMergeEntriesIn(tmp) {
+  return fs.readdirSync(tmp).filter((n) => n.startsWith("goal-merge-"));
+}
+
 test("goal-merge e2e — green suite: develop gets exactly ONE goal/GOAL-901 merge commit on its first-parent chain, develop is ff'd to it, the goal branch is deleted", async () => {
   const root = makeGoalMergeRepo("green");
   try {
-    const pending = pendingGoalMerges(root);
-    assert.equal(pending.length, 1, "the recorded request is pending");
-    const r = await runGoalMergeFanIn({ ...gmOpts(root, ["bash", "-c", "exit 0"]), request: pending[0].request });
-    assert.equal(r.outcome, "landed");
-    const merges = execFileSync("git", ["-C", root, "log", "develop", "--first-parent", "--merges", "--format=%H %s"], { encoding: "utf8" })
-      .trim().split("\n").filter(Boolean);
-    assert.equal(merges.length, 1, "exactly one merge commit on develop's first-parent chain");
-    assert.match(merges[0], /goal\/GOAL-901/, "the merge subject names the goal branch");
-    const devTip = execFileSync("git", ["-C", root, "rev-parse", "develop"], { encoding: "utf8" }).trim();
-    assert.equal(r.landedSha, devTip, "develop was ff'd to the merge commit");
-    assert.equal(merges[0].split(" ")[0], devTip, "the ff'd tip IS the merge commit");
-    assert.throws(
-      () => execFileSync("git", ["-C", root, "rev-parse", "--verify", "goal/GOAL-901"], { stdio: "ignore" }),
-      "the goal branch was deleted",
-    );
-    assert.equal(pendingGoalMerges(root).length, 0, "a landed merge is no longer pending");
+    await withExclusiveTmpdir(async (tmp) => {
+      assert.deepEqual(goalMergeEntriesIn(tmp), [], "独占 TMPDIR 开局是空的（谓词对着已知为真的样本干跑）");
+      const pending = pendingGoalMerges(root);
+      assert.equal(pending.length, 1, "the recorded request is pending");
+      const r = await runGoalMergeFanIn({ ...gmOpts(root, ["bash", "-c", "exit 0"]), request: pending[0].request });
+      assert.equal(r.outcome, "landed");
+      const merges = execFileSync("git", ["-C", root, "log", "develop", "--first-parent", "--merges", "--format=%H %s"], { encoding: "utf8" })
+        .trim().split("\n").filter(Boolean);
+      assert.equal(merges.length, 1, "exactly one merge commit on develop's first-parent chain");
+      assert.match(merges[0], /goal\/GOAL-901/, "the merge subject names the goal branch");
+      const devTip = execFileSync("git", ["-C", root, "rev-parse", "develop"], { encoding: "utf8" }).trim();
+      assert.equal(r.landedSha, devTip, "develop was ff'd to the merge commit");
+      assert.equal(merges[0].split(" ")[0], devTip, "the ff'd tip IS the merge commit");
+      assert.throws(
+        () => execFileSync("git", ["-C", root, "rev-parse", "--verify", "goal/GOAL-901"], { stdio: "ignore" }),
+        "the goal branch was deleted",
+      );
+      assert.equal(pendingGoalMerges(root).length, 0, "a landed merge is no longer pending");
+      // 泄漏判据（本任务的核心读数）：并入跑完后 TMPDIR 里一个 goal-merge-* 都不剩。
+      assert.deepEqual(goalMergeEntriesIn(tmp), [], "成功并入后独占 TMPDIR 里不得残留任何 goal-merge-* 条目");
+    });
   } finally { gmCleanup(root); }
 });
 
 test("goal-merge e2e — red suite: all refs unchanged, a goal-merge-result is written, and it retries only after the tip advances", async () => {
   const root = makeGoalMergeRepo("red");
   try {
-    const devBefore = execFileSync("git", ["-C", root, "rev-parse", "develop"], { encoding: "utf8" }).trim();
-    const tip = execFileSync("git", ["-C", root, "rev-parse", "goal/GOAL-901"], { encoding: "utf8" }).trim();
-    const pending = pendingGoalMerges(root);
-    const r = await runGoalMergeFanIn({ ...gmOpts(root, ["bash", "-c", "echo boom; exit 1"]), request: pending[0].request });
-    assert.equal(r.outcome, "red");
-    assert.equal(r.step, "suite");
-    assert.equal(execFileSync("git", ["-C", root, "rev-parse", "develop"], { encoding: "utf8" }).trim(), devBefore, "develop unchanged on red");
-    assert.equal(execFileSync("git", ["-C", root, "rev-parse", "goal/GOAL-901"], { encoding: "utf8" }).trim(), tip, "goal branch unchanged on red");
-    const results = readGoalMergeResults(root);
-    assert.equal(results.length, 1);
-    assert.equal(results[0].outcome, "red");
-    assert.equal(results[0].tipSha, tip, "the result carries the attempted tip");
+    await withExclusiveTmpdir(async (tmp) => {
+      // 安全断言的前置：TMPDIR 里放一个【不属于并入】的目录。删父目录的那条判据若写成「删 tmpdir
+      // 里的一切」或直接删 os.tmpdir()，它就会被误删——本用例两次并入之后它必须原样还在。
+      fs.mkdirSync(path.join(tmp, "keep-me"));
+      const devBefore = execFileSync("git", ["-C", root, "rev-parse", "develop"], { encoding: "utf8" }).trim();
+      const tip = execFileSync("git", ["-C", root, "rev-parse", "goal/GOAL-901"], { encoding: "utf8" }).trim();
+      const pending = pendingGoalMerges(root);
+      const r = await runGoalMergeFanIn({ ...gmOpts(root, ["bash", "-c", "echo boom; exit 1"]), request: pending[0].request });
+      assert.equal(r.outcome, "red");
+      assert.equal(r.step, "suite");
+      assert.equal(execFileSync("git", ["-C", root, "rev-parse", "develop"], { encoding: "utf8" }).trim(), devBefore, "develop unchanged on red");
+      assert.equal(execFileSync("git", ["-C", root, "rev-parse", "goal/GOAL-901"], { encoding: "utf8" }).trim(), tip, "goal branch unchanged on red");
+      const results = readGoalMergeResults(root);
+      assert.equal(results.length, 1);
+      assert.equal(results[0].outcome, "red");
+      assert.equal(results[0].tipSha, tip, "the result carries the attempted tip");
+      // 泄漏判据（红的这一臂）：失败的并入同样必须清掉自己的 mkdtemp 父目录——失败路径正是
+      // 2026-10-06 那 584 个空目录里 9 个真实条目的来源。
+      assert.deepEqual(goalMergeEntriesIn(tmp), [], "suite 红的并入之后独占 TMPDIR 里不得残留任何 goal-merge-* 条目");
 
-    // tip 不变 ⇒ 下一轮不重试；tip 前进 ⇒ 重试（裁定⑳：人批准的是业务目标，不是某一棵树）。
-    assert.equal(pendingGoalMerges(root).length, 0, "tip unchanged ⇒ not retried");
-    const g = (...a) => execFileSync("git", ["-C", root, ...a], { encoding: "utf8" });
-    g("checkout", "-q", `goal/${GM_GOAL}`);
-    fs.writeFileSync(path.join(root, "fix.txt"), "fix\n");
-    g("add", "-A"); g("commit", "-q", "-m", "fix the suite");
-    g("checkout", "-q", "develop-work");
-    const retry = pendingGoalMerges(root);
-    assert.equal(retry.length, 1, "tip advanced ⇒ retried");
+      // tip 不变 ⇒ 下一轮不重试；tip 前进 ⇒ 重试（裁定⑳：人批准的是业务目标，不是某一棵树）。
+      assert.equal(pendingGoalMerges(root).length, 0, "tip unchanged ⇒ not retried");
+      const g = (...a) => execFileSync("git", ["-C", root, ...a], { encoding: "utf8" });
+      g("checkout", "-q", `goal/${GM_GOAL}`);
+      fs.writeFileSync(path.join(root, "fix.txt"), "fix\n");
+      g("add", "-A"); g("commit", "-q", "-m", "fix the suite");
+      g("checkout", "-q", "develop-work");
+      const retry = pendingGoalMerges(root);
+      assert.equal(retry.length, 1, "tip advanced ⇒ retried");
 
-    const r2 = await runGoalMergeFanIn({ ...gmOpts(root, ["bash", "-c", "exit 0"]), request: retry[0].request });
-    assert.equal(r2.outcome, "landed", "the retry after the fix lands");
-    assert.match(execFileSync("git", ["-C", root, "log", "develop", "--first-parent", "--merges", "--format=%s"], { encoding: "utf8" }), /goal\/GOAL-901/);
+      const r2 = await runGoalMergeFanIn({ ...gmOpts(root, ["bash", "-c", "exit 0"]), request: retry[0].request });
+      assert.equal(r2.outcome, "landed", "the retry after the fix lands");
+      assert.match(execFileSync("git", ["-C", root, "log", "develop", "--first-parent", "--merges", "--format=%s"], { encoding: "utf8" }), /goal\/GOAL-901/);
+
+      // 两次并入（一红一绿）之后：既没有 goal-merge-* 残留，也没有误删不属于它的目录。
+      assert.deepEqual(goalMergeEntriesIn(tmp), [], "两次并入之后独占 TMPDIR 里不得残留任何 goal-merge-* 条目");
+      assert.equal(fs.existsSync(path.join(tmp, "keep-me")), true, "不属于并入的目录（keep-me）必须原样还在");
+    });
   } finally { gmCleanup(root); }
 });
 
