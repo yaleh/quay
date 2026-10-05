@@ -32,8 +32,16 @@ extra:
 - plugin/skills/loop-driver/SKILL.md
 - plugin/skills/manager/SKILL.md
 - plugin/.claude-plugin/plugin.json
+- plugin/.claude-plugin/marketplace.json
+- plugin/test/cold-start-skill.test.mjs
+- plugin/test/manager-layer-skill.test.mjs
+- plugin/test/start-drivers.test.mjs
+- plugin/test/plugin-packaging.test.mjs
+- README.md
+- docs/analysis/quay-init-closure-ratchet.baseline.json
+- docs/analysis/quay-self-cold-start-proof.md
+- docs/proposals/quay-workflow-agent-distribution.md
 - tasks/gap-skill-frontmatter-name-align-dirname-for-slash-form.md
-（执行者须补上 grep 命中的其它引用文件与对应测试文件。）
 
 ## Notes
 2026-10-05 交互式实测（Claude Code v2.1.289，cd /tmp 后 `claude --settings '{"enabledPlugins":{"quay@quay":false,"quay@quay-dev":false}}' --plugin-dir /tmp/quay-plugin-exp/<副本>` 再输入 /quay，人 yale 读数）：
