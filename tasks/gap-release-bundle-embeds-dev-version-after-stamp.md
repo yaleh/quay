@@ -2,7 +2,7 @@
 id: gap-release-bundle-embeds-dev-version-after-stamp
 title: release 构建后 dist/quay.js 与 scripts/dist/*.js 仍内嵌 X.Y.Z-dev：stamp 不覆盖
   bundle，且没有任何检查能发现
-status: todo
+status: ready
 labels:
   - gap
   - defect
