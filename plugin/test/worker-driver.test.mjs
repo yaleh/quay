@@ -4105,6 +4105,11 @@ test("goal-merge e2e — develop 不跟踪 .quay：主检出 .quay 快照铺进�
     for (const f of ["server.json", "server.lock", "server-services.json"]) {
       assert.equal(listing.includes(f), false, `${f} 不得被快照带进临时 worktree（实测 ${JSON.stringify(listing)}）`);
     }
+
+    // AC5：清理路径不因新增的快照目录退化——并入收尾后，临时 worktree 连同它刚铺出来的 `.quay/`
+    // 一并消失（`pwd` 是并入过程中记下的临时 worktree 路径，此刻应已不存在）。
+    assert.equal(fs.existsSync(pwd), false, "并入收尾后临时 worktree 目录已被删");
+    assert.equal(fs.existsSync(path.join(pwd, ".quay")), false, "快照目录 .quay/ 也随临时 worktree 一并被删");
   } finally { gmCleanup(root); }
 });
 
