@@ -49,6 +49,12 @@ import { readProcCmdline } from "../../packages/quay/src/kernel/proc-identity.ts
 // be a local hand-rolled copy; it is not any more (SPEC §3.3: a second implementation is the one
 // unacceptable outcome).
 import { readProcStat } from "../../packages/quay/src/primitives/session-liveness.mjs";
+// The stop-the-pids primitive — ONE implementation shared with worktree-process-reaper.ts (the
+// routine semantic-dedup-scan finding `kill-procs-pair`). Re-exported below so every existing
+// caller (this file's --kill-workspace path + its tests, which import it from here) keeps its
+// import site; see process-kill-lib.ts for the contract.
+import { killProcs } from "./process-kill-lib.ts";
+export { killProcs };
 
 export interface ClaudeSessionProc {
   pid: number;
@@ -211,67 +217,6 @@ export function enumerateClaudeProcesses(): ClaudeSessionProc[] {
     if (proc) out.push(proc);
   }
   return out;
-}
-
-/**
- * Stop a set of pids: SIGTERM each, wait a bounded grace for exit, SIGKILL survivors. Returns counts.
- * Fail-open per pid (a process that already exited mid-enumeration is not an error).
- */
-export function killProcs(pids: number[], graceMs = 3000): { killed: number; sigkilled: number; failed: number } {
-  let killed = 0;
-  let sigkilled = 0;
-  let failed = 0;
-  if (pids.length === 0) return { killed, sigkilled, failed };
-  for (const pid of pids) {
-    try {
-      process.kill(pid, "SIGTERM");
-    } catch {
-      // already gone (ESRCH) or not ours (EPERM) — nothing to signal; the final check below
-      // counts it as killed exactly once (do NOT increment here, or a gone pid double-counts:
-      // +1 in this catch and again in the not-alive branch of the final loop).
-      continue;
-    }
-  }
-  const deadline = Date.now() + graceMs;
-  while (Date.now() < deadline) {
-    const stillAlive = pids.filter((pid) => {
-      try {
-        process.kill(pid, 0); // signal 0 = existence probe, no signal sent
-        return true;
-      } catch {
-        return false;
-      }
-    });
-    if (stillAlive.length === 0) break;
-    // bounded backoff — poll roughly every 200ms
-    const sleepMs = Math.min(200, Math.max(0, deadline - Date.now()));
-    if (sleepMs <= 0) break;
-    const t0 = Date.now();
-    // synchronous sleep via Atomics.wait is available in Node ≥ 12.17 on the main thread
-    Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, sleepMs);
-    void t0;
-  }
-  for (const pid of pids) {
-    let alive = false;
-    try {
-      process.kill(pid, 0);
-      alive = true;
-    } catch {
-      alive = false;
-    }
-    if (!alive) {
-      killed += 1;
-      continue;
-    }
-    try {
-      process.kill(pid, "SIGKILL");
-      sigkilled += 1;
-      killed += 1;
-    } catch {
-      failed += 1;
-    }
-  }
-  return { killed, sigkilled, failed };
 }
 
 function summary(proc: ClaudeSessionProc): string {

@@ -114,6 +114,11 @@ import { resolveWorktreeNamespace } from "../../packages/quay/src/worktree-names
 // break the kernel boundary rule outright.
 import { readProcCmdline, isQuayServe } from "../../packages/quay/src/kernel/proc-identity.ts";
 export { readProcCmdline, isQuayServe };
+// The stop-the-pids primitive — ONE implementation shared with orphan-session-check.ts (the routine
+// semantic-dedup-scan finding `kill-procs-pair`: the two copies were byte-identical in code). Kept
+// re-exported so this file's own call site + its tests keep their import site.
+import { killProcs } from "./process-kill-lib.ts";
+export { killProcs };
 
 export interface ProcInfo {
   pid: number;
@@ -502,58 +507,6 @@ export function classifyOrphanServes(
  *  `.0`/`.1` list could never see it). */
 export function fullSuiteLockFiles(root: string): string[] {
   return suiteLockSlotPaths(suiteLockBase(root));
-}
-
-/** Stop a set of pids: SIGTERM each, wait a bounded grace for exit, SIGKILL survivors. Fail-open
- * per pid (an already-exited process is not an error). Same contract as orphan-session-check.ts. */
-export function killProcs(pids: number[], graceMs = 3000): { killed: number; sigkilled: number; failed: number } {
-  let killed = 0;
-  let sigkilled = 0;
-  let failed = 0;
-  if (pids.length === 0) return { killed, sigkilled, failed };
-  for (const pid of pids) {
-    try {
-      process.kill(pid, "SIGTERM");
-    } catch {
-      continue; // already gone (ESRCH) or not ours (EPERM) — counted once below
-    }
-  }
-  const deadline = Date.now() + graceMs;
-  while (Date.now() < deadline) {
-    const stillAlive = pids.filter((pid) => {
-      try {
-        process.kill(pid, 0);
-        return true;
-      } catch {
-        return false;
-      }
-    });
-    if (stillAlive.length === 0) break;
-    const sleepMs = Math.min(200, Math.max(0, deadline - Date.now()));
-    if (sleepMs <= 0) break;
-    Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, sleepMs);
-  }
-  for (const pid of pids) {
-    let alive = false;
-    try {
-      process.kill(pid, 0);
-      alive = true;
-    } catch {
-      alive = false;
-    }
-    if (!alive) {
-      killed += 1;
-      continue;
-    }
-    try {
-      process.kill(pid, "SIGKILL");
-      sigkilled += 1;
-      killed += 1;
-    } catch {
-      failed += 1;
-    }
-  }
-  return { killed, sigkilled, failed };
 }
 
 function summary(p: ProcInfo): string {
