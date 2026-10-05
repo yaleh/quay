@@ -1,7 +1,7 @@
 ---
 id: GOAL-905
 title: goal 分支第二次演练（drill）——并发落地、分支落后、真实大小并入、刷新与预览自动装配；不是真实开发方向
-status: active
+status: achieved
 kind: goal
 origin: 人 2026-10-05「补上没覆盖的路径」：对 GOAL-028 做第二次演练（多任务并发落同一 goal 分支、goal 分支落后
   develop、真实大小的并入、修复后的刷新与预览自动装配）；判据能在生产实例上判假（落笔当轮读数见各 AC 的验证）。
@@ -13,6 +13,11 @@ statusLog:
     actor: cli
     reason: 人 2026-10-05 授权第二次合并演练：三条 AC 已激活、三个承接任务已立并停放；激活 GOAL 即从 develop tip 懒建
       goal/GOAL-905
+  - at: 2026-10-05T21:11:45.361Z
+    from: active
+    to: achieved
+    actor: goal-driver
+    reason: "I2: all ACs achieved + sufficiency covered"
 branch: true
 ---
 ## 背景
