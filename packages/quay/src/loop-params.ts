@@ -28,6 +28,14 @@
 //   audit:     string   OPTIONAL — "adversarial" (DEFAULT) | "none"
 //                         adversarial: fresh-context subagent audits diff before land; refutation blocks land
 //                         none: gate-output only; no independent audit (explicit opt-out)
+//   worktree_deps_install: string  OPTIONAL — the shell command run INSIDE a freshly dispatched task
+//                         worktree to install its dependencies, when the project refuses a symlinked
+//                         node_modules (pnpm is the motivating case). Absent/blank ⇒ auto-detect: a
+//                         pnpm marker (pnpm-lock.yaml, or package.json `packageManager: pnpm@…`)
+//                         selects the built-in `pnpm install --frozen-lockfile --offline`; with no
+//                         marker the pre-existing symlink-or-`npm install` behavior is unchanged.
+//                         Consumed by plugin/scripts/worktree-deps-provision.ts (the task-worktree
+//                         deps step); the shared judgment lives in packages/quay/src/worktree-deps.ts.
 //
 // Valid `stop` values: "once", "until(.halt)", "until(empty)", or until(K·ΔV<ε) prefix.
 
@@ -46,7 +54,7 @@ export const VALID_AUDIT = new Set(["adversarial", "none"]);
  * Throws Error("FAIL-CLOSED: ...") on any validation failure.
  *
  * @param {string} workspaceRoot
- * @returns {{ board: string, gates: string[], stop: string, policy: string, execution: string, audit: string, concurrency: number, routines: Array<object> }}
+ * @returns {{ board: string, gates: string[], stop: string, policy: string, execution: string, audit: string, concurrency: number, routines: Array<object>, worktreeDepsInstall: string | null }}
  */
 export function readLoopParams(workspaceRoot) {
   const unifiedConfigPath = path.join(workspaceRoot, ".quay", "config.yml");
@@ -218,6 +226,19 @@ export function readLoopParams(workspaceRoot) {
     }
   }
 
+  // 13. Optional: worktree_deps_install — the shell command run inside a freshly dispatched task
+  //     worktree to install dependencies, for projects that refuse a symlinked node_modules (pnpm).
+  //     DEFAULT null (auto-detect: a pnpm marker selects the built-in pnpm command; otherwise the
+  //     pre-existing symlink/npm behavior). Fail-closed on a non-string / blank value — a declared
+  //     command that is blank is a configuration mistake, not silently "no declaration".
+  let worktreeDepsInstall: string | null = null;
+  if (p?.worktree_deps_install !== undefined && p?.worktree_deps_install !== null) {
+    if (typeof p.worktree_deps_install !== "string" || !(p.worktree_deps_install as string).trim()) {
+      throw new Error(`FAIL-CLOSED: ${src} field 'worktree_deps_install' must be a non-empty string when present (a blank install command is a mistake, not 'no declaration')`);
+    }
+    worktreeDepsInstall = (p.worktree_deps_install as string).trim();
+  }
+
   return {
     board: (p.board as string).trim(),
     gates,
@@ -227,5 +248,6 @@ export function readLoopParams(workspaceRoot) {
     audit,
     concurrency,
     routines,
+    worktreeDepsInstall,
   };
 }

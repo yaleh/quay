@@ -473,7 +473,20 @@ export { createMetaStore } from "../../packages/quay/src/meta-store.ts";
 // is where the driver-side symbols are surfaced — ⛔ goal-driver never spells a Core source-tree
 // literal itself (AC-262; same reason the two re-exports above exist).
 export { goalCriterionWorktreeDir, realpathOrSelf } from "../../packages/quay/src/goal-store.ts";
-export { goalBranchName, goalBranchRefExists, goalBranchTip } from "../../packages/quay/src/branch-model.ts";
+// `ensureGoalBranch` is the ONE creation site for `goal/<id>` (Core `branch-model.ts`) — the store
+// calls it on the transition that leaves a branch-mode goal active. goal-driver now also calls it
+// idempotently to BACK-FILL a missing branch on an already-active branch-mode goal
+// (gap-goal-branch-active-branch-mode-goal-without-branch-never-self-heals), so the symbol is
+// surfaced here for the same AC-262 reason as the two lines above: the driver expresses "I need this
+// symbol", ⛔ never the Core layout literal.
+export { goalBranchName, goalBranchRefExists, goalBranchTip, ensureGoalBranch } from "../../packages/quay/src/branch-model.ts";
+export type { GoalBranchAction, GoalBranchReport } from "../../packages/quay/src/branch-model.ts";
+// The ledger's `goal-merge-result` reading — the goal-side record of a LANDED `goal/<id>` merge. The
+// back-fill predicate must tell "never created" from "merged and then deleted" (the latter must NOT
+// be re-created), and this is the single definition of that fact (Core `goal-merge.ts`); ⛔ no second
+// "was merged" predicate is written driver-side.
+export { readGoalMergeResults } from "../../packages/quay/src/goal-merge.ts";
+export type { GoalMergeResult } from "../../packages/quay/src/goal-merge.ts";
 // goal-preview (SPEC-goal-branch-2026-10-03 §4.10, rulings ㉒㉓): the criterion worktree IS the
 // preview instance, so goal-driver (which owns the worktree's lifecycle) must take its `.quay/`
 // SNAPSHOT on create/refresh and STOP the preview serve before it deletes the worktree. Both live

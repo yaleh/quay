@@ -1,7 +1,7 @@
 ---
 id: gap-goal905-drill-docs-a
 title: GOAL-905 第二次演练 A 批：新增 8 篇托管文档（DOC-910…DOC-917），必须经 goal/GOAL-905 分支落地
-status: needs-human
+status: ready
 labels:
   - gap
 parent: null
@@ -43,12 +43,12 @@ goal_ac: AC-905
 
 ## Touches
 
-- docs-managed/DOC-910-goal905-a1.md
-- docs-managed/DOC-911-goal905-a2.md
-- docs-managed/DOC-912-goal905-a3.md
-- docs-managed/DOC-913-goal905-a4.md
-- docs-managed/DOC-914-goal905-a5.md
-- docs-managed/DOC-915-goal905-a6.md
-- docs-managed/DOC-916-goal905-a7.md
-- docs-managed/DOC-917-goal905-a8.md
+- docs-managed/DOC-910-goal905-a1.md (new)
+- docs-managed/DOC-911-goal905-a2.md (new)
+- docs-managed/DOC-912-goal905-a3.md (new)
+- docs-managed/DOC-913-goal905-a4.md (new)
+- docs-managed/DOC-914-goal905-a5.md (new)
+- docs-managed/DOC-915-goal905-a6.md (new)
+- docs-managed/DOC-916-goal905-a7.md (new)
+- docs-managed/DOC-917-goal905-a8.md (new)
 - tasks/gap-goal905-drill-docs-a.md

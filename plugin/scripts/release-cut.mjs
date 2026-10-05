@@ -135,6 +135,13 @@ function run(cmd, args, opts = {}) {
  * just Node's MODULE_TYPELESS warning.
  *
  * `(no output on stdout or stderr)` is its own value, never conflated with a short-but-real tail.
+ *
+ * ⛔ It keeps BOTH ends when it must clip. The reason this matters is measured, not stylistic: the
+ * verdict token (`NOT-EVALUATED: …` / `FAIL: …`) sits at the HEAD of the child's stdout, and the noise
+ * that pushes the text past `max` is Node's own MODULE_TYPELESS warning on stderr — whose length grows
+ * with the RESOLVED SCRIPT PATH. A front-only clip therefore dropped the very verdict it exists to
+ * carry once the child ran from a long worktree path (measured 2026-10-05: a 100-char worktree path put
+ * `joined` at 815 > 800, and `…${slice(-800)}` began mid-token at `…LUATED`). Both ends survive now.
  */
 function diagnosticTail(r, max = 800) {
   const out = typeof r.stdout === "string" ? r.stdout.trim() : "";
@@ -144,7 +151,10 @@ function diagnosticTail(r, max = 800) {
   if (err) parts.push(`stderr: ${err}`);
   if (parts.length === 0) return "the child wrote nothing to stdout or stderr";
   const joined = parts.join(" | ");
-  return joined.length > max ? `…${joined.slice(-max)}` : joined;
+  if (joined.length <= max) return joined;
+  const head = joined.slice(0, Math.ceil(max / 2));
+  const tail = joined.slice(-Math.floor(max / 2));
+  return `${head} … ${tail}`;
 }
 
 const git = (dir, ...args) => run("git", ["-C", dir, ...args]);

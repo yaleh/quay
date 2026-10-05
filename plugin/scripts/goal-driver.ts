@@ -77,7 +77,7 @@ import { parse as parseYaml } from "yaml";
 //
 // ⚠️ 从 driver-runtime（Layer 0）取这两个核心符号，⛔ 不在此处直接写 Core 源码树的 import 字面量：
 // 「Core 的源码树在哪」是布局知识，唯一落点是 Layer 0（driver-runtime 的 Core 导入面）。
-import { inAchievedReverifyScope, readsFrozenPopulation, GOAL_ACCEPTANCE_ACTIVE_ENV, goalCriterionWorktreeDir, goalBranchName, goalBranchRefExists, goalBranchTip, realpathOrSelf, snapshotQuayDirInto, stopPreviewServe, ensureWorktreeNodeModules, type QuaySnapshotReading, type PreviewStopReading, type WorktreeNodeModulesReading } from "./driver-runtime.ts";
+import { inAchievedReverifyScope, readsFrozenPopulation, GOAL_ACCEPTANCE_ACTIVE_ENV, goalCriterionWorktreeDir, goalBranchName, goalBranchRefExists, goalBranchTip, ensureGoalBranch, readGoalMergeResults, realpathOrSelf, snapshotQuayDirInto, stopPreviewServe, ensureWorktreeNodeModules, type GoalBranchAction, type QuaySnapshotReading, type PreviewStopReading, type WorktreeNodeModulesReading } from "./driver-runtime.ts";
 
 // ⑨ CI run 载体的**生产调用点**（tasks/gap-develop-ci-first-decisive-green Requested action 2）。
 // ⛔ 本 driver 是 AC-265 的评估者，而 AC-265 读的是 `.quay/ci-runs.jsonl` 这个**本地载体**——
@@ -3248,6 +3248,76 @@ function ensureGoalCriterionWorktree(root: string, goalId: string): CriterionWor
   return { ...base, state: "failed", reason: `refresh failed (${co.stderr.slice(0, 120)}) and re-add failed (${readd.stderr.slice(0, 120)})`, previewStop };
 }
 
+/** 一条 goal 分支补建读数（gap-goal-branch-active-branch-mode-goal-without-branch-never-self-heals）。 */
+export interface GoalBranchBackfillReading {
+  goal: string;
+  branch: string;
+  /** `ensureGoalBranch` 的分类（created/reused/blocked/unreadable）——⛔ 不折成布尔（硬规则 3）。 */
+  action: GoalBranchAction;
+  ok: boolean;
+  /** created/reused 之外的第三种「没做成但也没失败」的取值（读不出输入，硬规则 3b）。 */
+  notEvaluated: boolean;
+  /** 补建后分支的 tip（created ⇒ 分支落点；reused ⇒ 既有 tip；blocked/unreadable ⇒ null）。 */
+  sha: string | null;
+  base: string | null;
+  detail: string;
+}
+
+/**
+ * 幂等的 goal 分支补建（gap-goal-branch-active-branch-mode-goal-without-branch-never-self-heals）。
+ *
+ * 缺陷（2026-10-05 在 cantus 只读核实）：`goal/<id>` 只在「把 goal 写成 active」或「`branch` 第一次
+ * 置 true」的那一次 store 写入里创建（goal-store 的 `ensureGoalBranch` 调用点，条件
+ * `enteringActive || branchJustSet`）——此后没有任何 driver 事后补建。于是一个 active ∧ `branch:true`
+ * 而没有 `goal/<id>` 的 goal 会一直这样（激活由不带这段代码的旧 CLI 完成 / 分支被手工删 / 创建失败只
+ * 打了一行 stderr）。此时任务按 `goal_ac` 解析合并目标得到 `develop`（reason=branch-absent），
+ * isolation 的全部价值静默失效而没有任何读数提示。
+ *
+ * 本轮处置：对每个 branch-mode GOAL，若 ①`status` 为 active ②`goal/<id>` 不存在 ③账本里没有该 goal 的
+ * **landed** 并入结果 ⇒ 调 Core 的 `ensureGoalBranch`（`goal/<id>` 的【唯一创建落点】）补建，并如实
+ * 落一条读数（含 action 与 tip sha）。
+ *
+ * ③ 的必要性（硬规则 3b：「从未创建」与「并入后已删」是两种形态）：并入成功后 `goal/<id>` 被删、而
+ * goal 仍 active 直到 achieved——只按「分支缺失」补建会凭空再造一条分支。判据取已落账的并入结果事件
+ * （`readGoalMergeResults`，goal 侧可读的账本载体），⛔ 不引入第二个「已并入」定义（硬规则 5b）。
+ *
+ * ⛔ 只读 git 引用与 goal 侧账本事件；⛔ 不写 task、⛔ 不参与任何 flip / 关闭判定。幂等：分支已存在时
+ * 直接跳过（⛔ 不调 `ensureGoalBranch`、⛔ 不移动 tip）。
+ */
+export function backfillMissingGoalBranches(
+  root: string,
+  goals: Array<Record<string, unknown>>,
+): GoalBranchBackfillReading[] {
+  const out: GoalBranchBackfillReading[] = [];
+  // 账本只在真有候选（缺失分支的 active branch-mode goal）时才读一次——无候选 = 零 git/gate 读。
+  let landedGoals: Set<string> | null = null;
+  for (const g of goals) {
+    if (g.branch !== true) continue;
+    const gid = String(g.id ?? "");
+    if (!gid.startsWith("GOAL-")) continue;
+    if (g.status !== "active") continue;
+    if (goalBranchRefExists(root, gid)) continue; // 已存在 ⇒ 幂等跳过（⛔ 不调 ensureGoalBranch）
+    if (landedGoals === null) {
+      landedGoals = new Set(
+        readGoalMergeResults(root).filter((r) => r.outcome === "landed").map((r) => r.goalId),
+      );
+    }
+    if (landedGoals.has(gid)) continue; // 并入后已删 ⇒ ⛔ 不得补建
+    const rep = ensureGoalBranch(root, gid);
+    out.push({
+      goal: gid,
+      branch: rep.name,
+      action: rep.action,
+      ok: rep.ok,
+      notEvaluated: rep.notEvaluated,
+      sha: rep.sha,
+      base: rep.base,
+      detail: rep.detail,
+    });
+  }
+  return out;
+}
+
 /** 本轮处置：branch:true 的每个 GOAL 一条读数（⛔ 只扫 branch:true——普通 goal 结构上没有判据 worktree，
  *  逐条探 200 个 goal 的分支存在性是白花的 git 调用）。 */
 export function syncGoalCriterionWorktrees(
@@ -3291,6 +3361,11 @@ export interface GoalRoundReadings {
    *  ⛔ 空数组 = 本轮没有 branch-mode goal（「查过且零条」），不是「没跑这条」——本 pass 无条件执行。
    *  state ∈ 枚举（created/refreshed/current/removed/no-branch/failed），⛔ 不折成布尔（硬规则 3）。 */
   criterionWorktrees: CriterionWorktreeReading[];
+  /** 本轮的 goal 分支补建读数（gap-goal-branch-active-branch-mode-goal-without-branch-never-self-heals）：
+   *  active ∧ branch:true 而 `goal/<id>` 缺失、且账本无 landed 并入结果的 goal，每条一条；`action` =
+   *  `ensureGoalBranch` 的分类（created/reused/blocked/unreadable，⛔ 不折成布尔）。
+   *  ⛔ 空数组 = 本轮无补建（「查过且零条」），不是「没跑这条」——本 pass 无条件执行（硬规则 3b）。 */
+  goalBranchBackfills: GoalBranchBackfillReading[];
   criteria: Array<{ id: string; goal: string; status: string; verdict: "pass" | "fail" | "not-evaluated"; reason: string }>;
   /** SPEC-goal-branch §4.7 (裁定⑭⑮) — branch-mode goals whose ACs are split by phase.
    *  `excluded`: this round's post-merge ACs NOT evaluated before the merge (their `criteria` entry is
@@ -3532,6 +3607,12 @@ export async function runGoalRound(root: string, opts: GoalRoundOptions = {}): P
   // §5 B1 —— 判据 worktree 的建立 / 刷新 / 删除**先于任何判据求值**（§4.10「刷新与求值串行」）：
   // 下面 pass 1 的每条 criterion 都以 `goal/<id>` 的代码为 cwd（store 侧 resolveCriterionRoot 派生），
   // 树没就位就会跑在主检出上——正是本任务要消灭的那个死锁。⛔ 不计入本轮的失败态：它是处置读数。
+  // §5 B1 的**前置补建**（gap-goal-branch-active-branch-mode-goal-without-branch-never-self-heals）：
+  // active ∧ branch:true 而 `goal/<id>` 缺失（且账本无 landed 并入结果）⇒ 本轮先幂等补建，再走判据
+  // worktree 的建/刷。顺序要紧：补建在 `syncGoalCriterionWorktrees` 【之前】，否则本函数会把该 goal 判成
+  // 「分支已删」⇒ 判据回主检出、任务也静默落 develop（本任务要消灭的正是这一形态）。
+  // ⛔ 只读 git 引用与 goal 侧账本事件；⛔ 不改任何 flip / 关闭判定。
+  const goalBranchBackfills = backfillMissingGoalBranches(dataRoot, records);
   const criterionWorktrees = syncGoalCriterionWorktrees(dataRoot, records);
   // SPEC-goal-branch §4.7 (裁定⑭⑮) — the pre-merge/post-merge split. `preMergePhaseAcIds` are the
   // post-merge ACs of branch-mode goals whose branch still exists ⇒ they are NOT evaluated this round
@@ -3939,6 +4020,7 @@ export async function runGoalRound(root: string, opts: GoalRoundOptions = {}): P
     goalCount: activeGoals.length,
     criterionCount: criteria.length,
     criterionWorktrees,
+    goalBranchBackfills,
     criteria,
     phaseSplit,
     flips,
