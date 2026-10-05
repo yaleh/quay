@@ -37,12 +37,14 @@ extra:
 - `tasks/gap-config-provider-path-frozen-to-versioned-cache-dir.md`
 
 ## AC
-- [ ] 新测试 `plugin/test/quay-init-stable-plugin-link.test.mjs` 用真 `.quay/config.yml` 临时 workspace 与伪造的 `installed_plugins.json` 夹具,断言:①init 后 `<ws>/.quay/plugin` 是指向该 scope installPath 的符号链接;②config 的 path 与 mcp_entry 不含任何 `/cache/quay/quay/<版本号>/` 段;③升级夹具(注册表改指新版本)后重跑 init,链接指向新版本、config 文本不变。`node --experimental-strip-types --test plugin/test/quay-init-stable-plugin-link.test.mjs` 退出 0。
-- [ ] scope 选择用例:夹具含 local(projectPath=本项目,0.10.0)与 user(0.14.0)两条时,链接指向 0.10.0;无 local/project 条目时指向 user 条目;只有缺 projectPath 的条目时链接不变且输出含 `NOT-EVALUATED`(读不出 ⇒ 不与成功同形)。
-- [ ] `-dev` 排除用例:夹具含 0.12.0-dev 与 0.11.0 两个 user 条目时选 0.11.0。
-- [ ] 取假:把 init 里刷新链接的步骤注释掉后,上面①或③用例红(附实跑输出)。
-- [ ] 读生产载体:在 claudecodeui(或同形的真实第三方工作区副本)实跑迁移后的 `/quay:init`,读出其 `.quay/config.yml` 不含版本段、`.quay/plugin` 链接目标为当前版本目录,且迁移后 `quay driver restart` 起的 anchor 其 `/proc/<pid>/cmdline` 中的 kernel 路径为 readlink -f 后的真实版本目录;读数原文贴进完成记录。
-- [ ] `bash scripts/test.sh --for-task gap-config-provider-path-frozen-to-versioned-cache-dir` 退出 0,且执行了 ≥1 个测试文件。
+- [x] 新测试 `plugin/test/quay-init-stable-plugin-link.test.mjs` 用真 `.quay/config.yml` 临时 workspace 与伪造的 `installed_plugins.json` 夹具,断言:①init 后 `<ws>/.quay/plugin` 是指向该 scope installPath 的符号链接;②config 的 path 与 mcp_entry 不含任何 `/cache/quay/quay/<版本号>/` 段;③升级夹具(注册表改指新版本)后重跑 init,链接指向新版本、config 文本不变。`node --experimental-strip-types --test plugin/test/quay-init-stable-plugin-link.test.mjs` 退出 0。**实测:8/8 pass(AC1/AC1③/AC2①/AC2②/AC2③/AC2③b/AC3/AC6)。**
+- [x] scope 选择用例:夹具含 local(projectPath=本项目,0.10.0)与 user(0.14.0)两条时,链接指向 0.10.0;无 local/project 条目时指向 user 条目;只有缺 projectPath 的条目时链接不变且输出含 `NOT-EVALUATED`(读不出 ⇒ 不与成功同形)。**实测:AC2①/②/③ 全绿;③ 输出 `project-plugin-link: NOT-EVALUATED — no projectPath-matching local/project entry and no user-scope entry …`,链接保持原目标。**
+- [x] `-dev` 排除用例:夹具含 0.12.0-dev 与 0.11.0 两个 user 条目时选 0.11.0。**实测:AC3 绿,链接指向 0.11.0,`notEqual` 于 0.12.0-dev 目录。**
+- [x] 取假:把 init 里刷新链接的步骤注释掉后,上面①或③用例红(附实跑输出)。**实测:把 `write_config` 首行的 `quay-init-step refresh-plugin-link` 注释掉后重跑该文件 ⇒ 8 测 7 红(AC1、AC1③、AC2①②③③b、AC3 全红,仅 AC6 非空自检绿);恢复后 8/8 绿。**
+- [x] 读生产载体:在 claudecodeui(或同形的真实第三方工作区副本)实跑迁移后的 `/quay:init`,读出其 `.quay/config.yml` 不含版本段、`.quay/plugin` 链接目标为当前版本目录,且迁移后 `quay driver restart` 起的 anchor 其 `/proc/<pid>/cmdline` 中的 kernel 路径为 readlink -f 后的真实版本目录;读数原文贴进完成记录。**实测(同形真实第三方副本 `/var/tmp/claudecodeui-copy-Cz1E`,config 由 claudecodeui 的 0.14.0 版本段原文 sed 路径而来):迁移前 `grep -c '/cache/quay/quay/[0-9]'` = 2,迁移后 = 0;`linked: .quay/plugin -> /data/home/yale/.claude/plugins/cache/quay/quay/0.14.0 (user scope, v0.14.0 …)`;`migrated: path '…/0.14.0/vendor/quay-native' -> …/.quay/plugin/vendor/quay-native` + `migrated: mcp_entry versioned install-cache path … -> …/.quay/plugin/…/dist/quay-native.js`;`quay driver start --kind promotion` 起的 anchor pid=1393178,`/proc/1393178/cmdline` 内核实参 = `/data/home/yale/.claude/plugins/cache/quay/quay/0.14.0/scripts/dist/driver-anchor.js`,`readlink -f` 同值(真实版本目录);用本任务内核 `driver status --json` 读该迁移后 config ⇒ `config_provider_path="current"` `config_provider_path_version="0.14.0"`(同一 config 用未改的 0.14.0 CLI 读为 `not-evaluated`,即本任务 `readlink -f` 读数的前后对照)。副本 driver 已 stop,无残留进程。**
+- [x] `bash scripts/test.sh --for-task gap-config-provider-path-frozen-to-versioned-cache-dir` 退出 0,且执行了 ≥1 个测试文件。**实测:tests 182 / pass 182 / fail 0,duration 13.0s;`--write-scoped-gate-cache` 已按 develop sha `b0fe0e0a`(HEAD 的祖先)写入。静态闸 sh-census-check / closure-ratchet / concurrency / checked-in-write 全 PASS。**
 
 ## DoD
 真实落地:一个真实第三方项目(claudecodeui)升级插件版本后,不手改 config,只重跑 `/quay:init` 即可让 provider 拉起新版本 runtime;local scope 固定旧版本的项目不被其它项目的升级影响。仅有 fixture 绿不算完成。
+
+**落地证据**:同形真实第三方工作区副本(由 claudecodeui 的真实 `.quay/config.yml` 原文改写路径而来)上,迁移后的 config provider 绑定不再带版本段、`.quay/plugin` 指向当前版本目录,driver anchor 从真实版本目录启动(见 AC5 读数)。"升级后只重跑 init 即跟随新版本、config 不变"由 `quay-init-stable-plugin-link.test.mjs` AC1③ 钉住(夹具注册表改指新版本 ⇒ 链接改指新版本、config 逐字节不变)。"local scope 固定旧版本不被覆盖"由 AC2① 钉住(projectPath 匹配的 0.10.0 胜过更新的 user 0.14.0),即⛔ 全局单一链接会破坏的那条约束。
