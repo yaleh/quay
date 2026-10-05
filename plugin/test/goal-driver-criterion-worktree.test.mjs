@@ -45,6 +45,21 @@ const POST_MERGE_FILE = "post-merge-production-only.txt";
  *  ⛔ 这里**重算**而不是 import，正是因为要独立复核：若被测实现换了推导，本断言必须变红。 */
 const criterionWorktreePath = (ns, goalId = GOAL) => path.join(ns, `goal-${goalId}`);
 
+/** 追加一条 landed 的 `goal-merge-result` 事件（并入的【账本】载体；形状 = `readGoalMergeResults` 读回的，
+ *  同 packages/quay/test/goal-merge.test.mjs 的 appendGoalMergeResult）。
+ *
+ *  并入成功后 `goal/<id>` 被删而 goal 仍 active 直到 achieved ⇒「分支不存在」本身**不是**并入的判据：
+ *  driver 的补建谓词（gap-goal-branch-active-branch-mode-goal-without-branch-never-self-heals）靠这条
+ *  已落账的事件区分「从未创建」（补建）与「并入后已删」（⛔ 不得补建）。夹具要模拟「已并入」，就必须
+ *  带上生产里真实存在的这条账本载体（⛔ 不是只删分支——那只描述了「分支没了」这一半事实）。 */
+function appendLandedMergeResult(root, goalId) {
+  fs.appendFileSync(path.join(root, ".quay", "gate-events.jsonl"), JSON.stringify({
+    id: `res-${goalId}`, item_id: goalId, pipeline_id: goalId, gate: "goal-merge-result",
+    actor: "test", verdict: "pass", timestamp: new Date().toISOString(),
+    payload: { outcome: "landed", step: null, reason: null, tipSha: "deadbeef", requestEventId: `req-${goalId}`, landedSha: "deadbeef" },
+  }) + "\n");
+}
+
 /** 只写 frontmatter，不经过 store 的写面——夹具要直接控制 `branch` / `status`（⛔ 不触发激活闸）。 */
 function writeGoalRecord(root, { id, status, branch, body = "## body\nx" }) {
   const lines = ["---", `id: ${id}`, `title: ${id} fixture`, `status: ${status}`, "kind: goal"];
@@ -389,6 +404,8 @@ test("AC-phase-split: 并入前 post-merge AC 读 not-evaluated/pre-merge-phase 
     assert.deepEqual(r1.fact.value.phaseSplit.maybePostMerge, ["AC-906"], "exit 3 的 pre-merge AC 产生 maybe-post-merge 提示");
 
     // ── 并入后（分支删除，§4.7/§4.2）⇒ 同一 AC 照常求值 ─────────────────────────────────────
+    // ⚠️ 并入的账本载体必须先于删分支落地：只删分支在补建谓词看来 =「从未创建」⇒ 会被补建回来。
+    appendLandedMergeResult(tmp, GOAL);
     git(["branch", "-D", BRANCH]);
     const r2 = await runGoalRound(tmp, ROUND_OPTS);
     const c2 = new Map(r2.fact.value.criteria.map((c) => [c.id, c]));
@@ -718,5 +735,117 @@ test("branch-mode goal 在 goal/<id> 并入 develop 之前不得被翻 achieved�
   } finally {
     fs.rmSync(tmp, { recursive: true, force: true });
     fs.rmSync(ns, { recursive: true, force: true });
+  }
+});
+
+// ── gap-goal-branch-active-branch-mode-goal-without-branch-never-self-heals ─────────────────────
+//
+// 回答的问题：**一个 active ∧ `branch: true` 的 goal，若它的 `goal/<id>` 从未建出来（激活由旧 CLI
+// 完成 / 分支被手工删 / 创建失败只打了一行 stderr），谁来补建。** 旧实现里只有 store 写入转换那一处
+// 创建分支，此后没有任何 driver 事后补建 ⇒ 该 goal 的任务按 `goal_ac` 解析合并目标得到 develop
+// （reason=branch-absent），isolation 静默失效而没有任何读数提示。本 driver 每轮做幂等补建，但必须
+// 区分「从未创建」与「并入后已删」——后者（账本里有 landed 的并入结果）⛔ 不得补建，否则凭空再造一条。
+
+/** 无分支夹具：active ∧ branch:true 的 GOAL-901，但 `goal/GOAL-901` **不存在**（base 提交后只建了
+ *  `develop`）。`landedMergeResult:true` 在账本里预置一条 landed 的并入结果（② 的臂）；`withPlainGoal`
+ *  加一个非 branch-mode goal（③ 的负控制）。 */
+function mkBranchlessFixture({ landedMergeResult = false, withPlainGoal = false } = {}) {
+  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "goal-branchless-"));
+  const ns = fs.mkdtempSync(path.join(os.tmpdir(), "goal-branchless-ns-"));
+  fs.mkdirSync(path.join(tmp, "goals"), { recursive: true });
+  fs.mkdirSync(path.join(tmp, ".quay"), { recursive: true });
+  fs.writeFileSync(path.join(tmp, ".gitignore"), ".quay/\n", "utf8");
+  fs.writeFileSync(path.join(tmp, ".quay", "config.yml"), `loop:\n  worktree_root: ${ns}\n`, "utf8");
+  const git = mkGitFixtureRoot(tmp);
+
+  writeGoalRecord(tmp, { id: GOAL, status: "active", branch: true });
+  writeAcRecord(tmp, { id: "AC-901", goal: GOAL, status: "active", criterion: "true" });
+  if (withPlainGoal) {
+    writeGoalRecord(tmp, { id: PLAIN_GOAL, status: "active", branch: false });
+    writeAcRecord(tmp, { id: "AC-902", goal: PLAIN_GOAL, status: "active", criterion: "true" });
+  }
+
+  git(["add", "-A"]);
+  git(["commit", "-m", "base"]);
+  git(["branch", "develop"]); // develop = base tip；⛔ 不建 goal/<id>
+  const developTip = git(["rev-parse", "develop"]);
+  if (landedMergeResult) appendLandedMergeResult(tmp, GOAL);
+  return { tmp, ns, git, developTip };
+}
+
+/** `git rev-parse --verify --quiet <ref>` 的退出码（0 = 存在；非 0 = 不存在）——⛔ 不经过会对非零抛错的
+ *  `mkGitFixtureRoot` 运行器。 */
+const refExists = (root, ref) =>
+  spawnSync("git", ["-C", root, "rev-parse", "--verify", "--quiet", ref]).status === 0;
+
+test("AC-backfill-①: active ∧ branch:true 而 goal/<id> 不存在、账本无 landed 并入结果 ⇒ 一轮后分支补建到 develop tip，读数记 driver 补建", async () => {
+  const { tmp, ns, git, developTip } = mkBranchlessFixture();
+  try {
+    assert.equal(refExists(tmp, BRANCH), false, "夹具前置：goal/GOAL-901 必须不存在（否则本用例空转）");
+    const r1 = await runGoalRound(tmp, ROUND_OPTS);
+    const bf = r1.fact.value.goalBranchBackfills.find((b) => b.goal === GOAL);
+    assert.ok(bf, `必须有一条补建读数，实测=${JSON.stringify(r1.fact.value.goalBranchBackfills)}`);
+    assert.equal(bf.action, "created", `读数 action 应为 created（实测=${bf.action} detail=${bf.detail}）`);
+    assert.equal(bf.sha, developTip, "补建读数的 sha = 当时的 develop tip");
+    assert.equal(bf.branch, BRANCH, "读数点名分支名");
+    // 直接量（⛔ 不采信读数自述）：分支现在存在且指向 develop tip。
+    assert.equal(git(["rev-parse", BRANCH]), developTip, "goal/GOAL-901 存在且指向当时的 develop tip");
+    // 补建先于 worktree 建 ⇒ 判据 worktree 也照建（⛔ 不是 no-branch）。
+    const wt = r1.fact.value.criterionWorktrees.find((w) => w.goal === GOAL);
+    assert.equal(wt?.state, "created", `补建后判据 worktree 应照建（实测=${JSON.stringify(wt)}）`);
+    assert.equal(wt.headSha, developTip, "worktree HEAD = 补建出的分支 tip");
+  } finally {
+    fs.rmSync(tmp, { recursive: true, force: true });
+    fs.rmSync(ns, { recursive: true, force: true });
+  }
+});
+
+test("AC-backfill-②: 账本有 landed 的并入结果、分支已删 ⇒ 不补建（并入后已删 ≠ 从未创建）", async () => {
+  const { tmp, ns } = mkBranchlessFixture({ landedMergeResult: true });
+  try {
+    const r1 = await runGoalRound(tmp, ROUND_OPTS);
+    assert.deepEqual(r1.fact.value.goalBranchBackfills, [], "有 landed 并入结果 ⇒ ⛔ 不得补建（读数空）");
+    // 直接量：分支仍不存在（⛔ 不凭空再造一条）。
+    assert.equal(refExists(tmp, BRANCH), false, "并入后已删的分支不得被补建出来");
+    const wt = r1.fact.value.criterionWorktrees.find((w) => w.goal === GOAL);
+    assert.equal(wt?.state, "no-branch", `分支不存在 ⇒ worktree 读数 no-branch（实测=${JSON.stringify(wt)}）`);
+  } finally {
+    fs.rmSync(tmp, { recursive: true, force: true });
+    fs.rmSync(ns, { recursive: true, force: true });
+  }
+});
+
+test("AC-backfill-③④: 非 branch-mode goal 不补建；分支已存在 ⇒ 幂等且不移动 tip", async () => {
+  // ③ 非 branch-mode goal 不受影响；同轮 branch-mode goal 照常补建（负控制：读数非恒空）。
+  const f3 = mkBranchlessFixture({ withPlainGoal: true });
+  try {
+    const r3 = await runGoalRound(f3.tmp, ROUND_OPTS);
+    assert.equal(r3.fact.value.goalBranchBackfills.some((b) => b.goal === PLAIN_GOAL), false, "非 branch-mode goal 不得补建");
+    assert.equal(r3.fact.value.goalBranchBackfills.some((b) => b.goal === GOAL), true, "同轮的 branch-mode goal 照常补建（负控制）");
+    assert.equal(refExists(f3.tmp, `goal/${PLAIN_GOAL}`), false, "非 branch-mode goal 结构上不得有 goal 分支");
+  } finally {
+    fs.rmSync(f3.tmp, { recursive: true, force: true });
+    fs.rmSync(f3.ns, { recursive: true, force: true });
+  }
+
+  // ④ 幂等：已存在的分支不被重指。第 1 轮补建 ⇒ 让分支前进一个提交（tip ≠ develop tip）⇒ 次轮不动。
+  const f4 = mkBranchlessFixture();
+  try {
+    const r4a = await runGoalRound(f4.tmp, ROUND_OPTS);
+    assert.equal(r4a.fact.value.goalBranchBackfills.length, 1, "第 1 轮补建一条");
+    f4.git(["checkout", "-q", BRANCH]);
+    fs.writeFileSync(path.join(f4.tmp, GOAL_ONLY_FILE), "advanced\n", "utf8");
+    f4.git(["add", GOAL_ONLY_FILE]);
+    f4.git(["commit", "-m", "advance the goal branch"]);
+    const advancedTip = f4.git(["rev-parse", "HEAD"]);
+    f4.git(["checkout", "-q", "main"]);
+    assert.notEqual(advancedTip, f4.developTip, "夹具前置：分支 tip 已偏离 develop tip（否则「不移动」是空转）");
+
+    const r4b = await runGoalRound(f4.tmp, ROUND_OPTS);
+    assert.deepEqual(r4b.fact.value.goalBranchBackfills, [], "分支已存在 ⇒ 幂等，不补建");
+    assert.equal(f4.git(["rev-parse", BRANCH]), advancedTip, "⛔ 不得把已存在的分支重指回 develop");
+  } finally {
+    fs.rmSync(f4.tmp, { recursive: true, force: true });
+    fs.rmSync(f4.ns, { recursive: true, force: true });
   }
 });
