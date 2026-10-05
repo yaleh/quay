@@ -1,7 +1,7 @@
 ---
 id: gap-path-resolved-quay-version-not-in-driver-status
 title: 版本读数缺"PATH 命中的 quay 是哪一版"——与注册表最新版、anchor 实际加载版并列报告，读不到报未评估
-status: todo
+status: ready
 labels:
   - gap
 parent: null
