@@ -1,6 +1,6 @@
 {
   "name": "quay-backlog",
-  "version": "0.15.0-dev",
+  "version": "0.16.0-dev",
   "private": true,
   "description": "Read-only Backlog.md board Provider for Quay: maps a local Backlog.md board's markdown+frontmatter task files onto the canonical task view-model (DIR-039-B). Third real backend, proves the ABI transfers to a heterogeneous, read-only store.",
   "type": "module",
