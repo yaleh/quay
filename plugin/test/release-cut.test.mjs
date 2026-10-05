@@ -395,7 +395,18 @@ test("a real cut creates a LINKED WORKTREE, lands the branch+tag, writes the led
 
     // ── the stage-specific halves ─────────────────────────────────────────────────────────────
     if (r.status === 0) {
-      assert.deepEqual(worktreeDirs(c.parent), [], "a completed cut must clean up the worktree it created");
+      // "removes the worktree it created" = the LINKED WORKTREE leaf
+      // (`<root>-worktrees/release-v9.9.9`), i.e. step 8's `git worktree remove` — ⛔ NOT the
+      // `<root>-worktrees` PARENT dir. `git worktree remove` never removes a containing dir, and in
+      // production that parent is the SHARED worktree root (`/home/yale/work/quay-worktrees`, which
+      // also holds every task worktree), so removing it would be wrong. This arm mirrors the
+      // else-branch's own leaf check just below. The old `worktreeDirs(c.parent) == []` demanded the
+      // parent be gone, so it could only ever pass via the else-branch (bump-failure) arm — red on
+      // any host fast enough for the bump stage to succeed (measured 2026-10-05: suite green at
+      // 12:22 through the else arm, red at 12:25 on the same develop when the host was idle; a
+      // manual cut on clean develop leaves `repo-worktrees/` empty, not absent).
+      assert.equal(existsSync(join(c.parent, "repo-worktrees", "release-v9.9.9")), false,
+        "a completed cut must clean up the worktree it created");
       // The next-version bump really landed on `develop`: VERSION moved to X.(Y+1).0.
       assert.equal(git(c.root, "show", "develop:VERSION").stdout.trim(), "9.10.0",
         "§12: the bump lands on develop as the NEXT version, with no de-suffixing commit");

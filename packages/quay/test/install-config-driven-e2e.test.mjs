@@ -93,6 +93,13 @@ const CONFIG_CLASS = new Set([
   // cross-session SendMessage misrouting on the old hardcoded `quay-<role>` names), so this file
   // is legitimately per-workspace content, not a byte-identical product artifact.
   ".quay/profiles.yml",
+  // .quay/plugin — gap-config-provider-path-frozen-to-versioned-cache-dir: `/quay:init` now lays a
+  // per-project SYMLINK `<ws>/.quay/plugin -> <this project's scope installPath>`, and the config's
+  // provider `path`/`mcp_entry` point at it (no version segment ⇒ upgrade-proof). It is
+  // install-generated per-project config, not a product artifact — and it is a SYMLINK TO A
+  // DIRECTORY, which `listFiles` reports as a plain entry (Dirent.isDirectory() is false for a
+  // symlink), so `crossWorkspaceDiffs`' readFileSync would otherwise die EISDIR on it.
+  ".quay/plugin",
 ]);
 
 const substantive = (label) =>
