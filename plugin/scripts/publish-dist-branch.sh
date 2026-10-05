@@ -151,7 +151,21 @@ echo "[publish-dist-branch] rewriting staged invokers (docs/.sh/quay-init) to re
 # ⛔ Node-20-safe entry (`stamp-version.mjs`, not the `.ts` source): the artifact must not depend on
 # which Node happened to invoke the publisher. A missing entry makes `node` exit non-zero ⇒ `set -e`
 # aborts before anything is committed or pushed (fail-closed), so no explicit check is needed here.
-node --experimental-strip-types "${REPO_ROOT}/packages/quay/scripts/build-plugin-dist.mjs" --rewrite "${WORK}" && node "${REPO_ROOT}/scripts/stamp-version.mjs" --mode build --root "${WORK}" --git-root "${REPO_ROOT}"
+# ── BUNDLE-EMBEDDED version gate (gap-release-bundle-embeds-dev-version-after-stamp) ────────────
+# The stamp ABOVE writes ${WORK}'s CARRIERS; it does NOT touch vendor/quay/dist/quay.js (rsynced
+# from plugin/ above) or scripts/dist/*.js (built above), whose versions were INLINED at build time
+# from the committed `packages/quay/package.json` (always `X.Y.Z-dev`). On a release build the
+# carriers go bare (`X.Y.Z`) while the bundles still say `X.Y.Z-dev`, so `quay --version` / the MCP
+# "Version: …" report the dev form on the PUBLISHED branch — invisible to every pre-existing reader.
+# `--stamp-bundle-tree` re-derives the inlined tokens from ${WORK}'s OWN plugin.json (the (b) half);
+# `--bundle-tree` then JUDGES them (the (a) half). Both run BEFORE the commit below, so a drift
+# aborts the publish (nothing committed or pushed — same fail-closed shape as the closure gate).
+# ⛔ Node-20-safe `.mjs` runner (same mechanism as `stamp-version.mjs` above), never the `.ts` source.
+# ⛔ Chained onto the existing stamp line, not added as NEW lines: `plugin/scripts/sh-census-check.ts`
+# ratchets the effective-line count of every embedded-interpreter .sh and refuses a worktree baseline
+# above git HEAD's, so a new code line here cannot be recovered by re-anchoring. Comment lines are
+# excluded from that count; code lines are not.
+node --experimental-strip-types "${REPO_ROOT}/packages/quay/scripts/build-plugin-dist.mjs" --rewrite "${WORK}" && node "${REPO_ROOT}/scripts/stamp-version.mjs" --mode build --root "${WORK}" --git-root "${REPO_ROOT}" && node "${REPO_ROOT}/scripts/version-consistency-check.mjs" --stamp-bundle-tree "${WORK}" && node "${REPO_ROOT}/scripts/version-consistency-check.mjs" --bundle-tree "${WORK}"
 
 # ── AC-263: the dist reference-closure gate for THIS channel — and it must ABORT, not warn ────────
 # The npm-tarball channel has had an equivalent assertion since gap-plugin-dist-entry-derivation-

@@ -502,7 +502,26 @@ else
   # ⛔ Reached through `stamp-version.mjs` (the Node-20-safe entry), never the `.ts` source: this
   # script is also the root `postinstall` (`engines: >=20`), where `--experimental-strip-types` does
   # not exist. A missing entry makes `node` itself exit non-zero ⇒ `set -e` fails closed.
-  echo "[sync-vendor] stamping the built plugin tree (build-form, branch-aware)..." && node "${REPO_ROOT}/scripts/stamp-version.mjs" --mode build --root "${PLUGIN_DIR}" --git-root "${REPO_ROOT}"
+  # ── BUNDLE-EMBEDDED version gate (gap-release-bundle-embeds-dev-version-after-stamp) ────────────
+  # The stamp ABOVE writes the tree's CARRIERS; it does NOT touch vendor/quay/dist/quay.js, whose
+  # version was INLINED at build time from the committed `packages/quay/package.json` (always
+  # `X.Y.Z-dev`). On a release build the carriers go bare (`X.Y.Z`) while the bundle still says
+  # `X.Y.Z-dev`, so `quay --version` / the MCP "Version: …" / `_version` all report the dev form —
+  # invisible to every pre-existing reader (`quay-init.sh`'s version grep swallows the suffix, hard
+  # rule 3b: "unreadable" and "fine" took the same shape). `--stamp-bundle-tree` re-derives the
+  # inlined token from the tree's OWN plugin.json (the (b) half); `--bundle-tree` then JUDGES it (the
+  # (a) half), so a re-derivation that missed a bundle cannot hide. On develop/author the restamp is a
+  # no-op (bundle and tree are both `X.Y.Z-dev`); it bites only on a release build.
+  # ⛔ Reached through the Node-20-safe `version-consistency-check.mjs` runner (the same mechanism as
+  # `stamp-version.mjs` ABOVE), never the `.ts` source: this script is the root `postinstall` and is
+  # run by package.sh's Node-20 `dist-verify-node-floor` path, where `--experimental-strip-types` does
+  # not exist. A missing entry makes `node` exit non-zero ⇒ `set -e` fails closed.
+  # ⛔ Both calls are CHAINED onto the stamp's existing line, not added as NEW lines:
+  # `plugin/scripts/sh-census-check.ts` ratchets the effective-line count of every embedded-interpreter
+  # .sh, and its guard refuses a worktree baseline above git HEAD's — so a new code line here cannot be
+  # bought back by re-anchoring. Pure comment lines are excluded from that count (these are); code lines
+  # are not.
+  echo "[sync-vendor] stamping the built plugin tree (build-form, branch-aware)..." && node "${REPO_ROOT}/scripts/stamp-version.mjs" --mode build --root "${PLUGIN_DIR}" --git-root "${REPO_ROOT}" && node "${REPO_ROOT}/scripts/version-consistency-check.mjs" --stamp-bundle-tree "${PLUGIN_DIR}" && node "${REPO_ROOT}/scripts/version-consistency-check.mjs" --bundle-tree "${PLUGIN_DIR}"
   # gap-dist-runtime-not-self-contained-reads-external-package-json (AC3): the
   # completion claim is now ACCURATE — src/version.ts embeds the version at build
   # time (esbuild json loader inlines it into dist/quay.js), so the vendored
