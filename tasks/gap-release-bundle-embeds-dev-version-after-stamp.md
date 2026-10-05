@@ -30,11 +30,67 @@ extra:
 - `tasks/gap-release-bundle-embeds-dev-version-after-stamp.md`
 
 ## AC
-- [ ] 新增/扩展的测试(在 `scripts/version-consistency-check.test.ts` 中)构造一棵载体=0.14.0 而 dist/quay.js 内嵌 "0.14.0-dev" 的 fixture 树,校验门对它退出非 0 并点名 dist/quay.js;`node --experimental-strip-types --test scripts/version-consistency-check.test.ts` 退出 0。
-- [ ] 取假:同一 fixture 在内嵌版本改为 "0.14.0" 后校验门退出 0;内嵌版本串读不出时输出含 `NOT-EVALUATED` 且退出码与"通过"可区分(附两次实跑输出)。
-- [ ] 校验门被接入 `plugin/scripts/sync-vendor.sh` 与 `plugin/scripts/publish-dist-branch.sh` 的 stamp 之后:`grep -n` 能在两个文件中各找到对该门的调用,且调用位于 stamp-version.mjs 调用之后(贴出行号)。
-- [ ] 读生产载体:对一次真实 `--mode build` 在 release/* 形态下产出的装配树(或临时 release 分支构建)实跑校验门,读出 dist/quay.js 内嵌版本与 plugin.json 版本一致;输出原文贴进完成记录。该条 AC 在关闭校验门接入后必须变红(负控制)。
-- [ ] `bash scripts/test.sh --for-task gap-release-bundle-embeds-dev-version-after-stamp` 退出 0,且执行了 ≥1 个测试文件。
+- [x] 新增/扩展的测试(在 `scripts/version-consistency-check.test.ts` 中)构造一棵载体=0.14.0 而 dist/quay.js 内嵌 "0.14.0-dev" 的 fixture 树,校验门对它退出非 0 并点名 dist/quay.js;`node --experimental-strip-types --test scripts/version-consistency-check.test.ts` 退出 0。
+- [x] 取假:同一 fixture 在内嵌版本改为 "0.14.0" 后校验门退出 0;内嵌版本串读不出时输出含 `NOT-EVALUATED` 且退出码与"通过"可区分(附两次实跑输出)。
+- [x] 校验门被接入 `plugin/scripts/sync-vendor.sh` 与 `plugin/scripts/publish-dist-branch.sh` 的 stamp 之后:`grep -n` 能在两个文件中各找到对该门的调用,且调用位于 stamp-version.mjs 调用之后(贴出行号)。
+- [x] 读生产载体:对一次真实 `--mode build` 在 release/* 形态下产出的装配树(或临时 release 分支构建)实跑校验门,读出 dist/quay.js 内嵌版本与 plugin.json 版本一致;输出原文贴进完成记录。该条 AC 在关闭校验门接入后必须变红(负控制)。
+- [x] `bash scripts/test.sh --for-task gap-release-bundle-embeds-dev-version-after-stamp` 退出 0,且执行了 ≥1 个测试文件。
 
 ## DoD
 真实落地:一次真实 release 形态构建产出的已安装式插件树上,`node <plugin>/vendor/quay/dist/quay.js --version` 的输出与该树的 plugin.json 版本一致(不含 -dev),且校验门在把 bundle 改回内嵌 -dev 时能拦住构建。仅有 fixture 测试绿不算完成。
+
+## 完成记录
+
+**实现**(分支 `task/gap-release-bundle-embeds-dev-version-after-stamp`,commit `356ff0398`):
+- `scripts/version-consistency-check.ts` 新增 **BUILD-TREE BUNDLE AXIS**:`checkBundleTree(tree)` 判 `<tree>/vendor/quay/dist/quay.js`(必带内嵌版本)与每个带内嵌版本的 `<tree>/scripts/dist/*.js` 是否 == `<tree>/.claude-plugin/plugin.json` 的版本;读不出锚点 ⇒ `NOT-EVALUATED`(exit 3,与 PASS/DRIFT 均不同)。`stampBundleTree(tree)` 从树的 manifest 重新派生内嵌 token((b) 半)。CLI 重构为导出 `main(argv, env)`。
+- `scripts/version-consistency-check.mjs` 新增(Node-20-safe runner,镜像 `stamp-version.mjs`)——sync-vendor.sh 是 root postinstall 与 package.sh 的 Node-20 路径,`--experimental-strip-types` 在那里不存在;故两个 .sh 都经此 runner 调用。
+- 两个 .sh:stamp → restamp → gate,链在**既有** stamp 行上(sh-census 棘轮按 embedded-interpreter 有效行计数且拒绝高于 HEAD 的工作树基线 ⇒ 不新增代码行;注释行不计)。
+
+**AC1**:fixture `[AC1] bundle gate REDDENS…`(plugin.json=0.14.0,bundle=0.14.0-dev ⇒ DRIFT,点名 `dist/quay.js`)。
+`node --experimental-strip-types --test scripts/version-consistency-check.test.ts` ⇒ `tests 34 · pass 34 · fail 0`,exit 0。
+
+**AC2**(三例实跑,`.mjs` runner):
+```
+CASE A  bundle=0.14.0-dev, plugin.json=0.14.0:
+BUNDLE-EMBEDDED: DRIFT DETECTED
+  expected (from .claude-plugin/plugin.json): 0.14.0
+  vendor/quay/dist/quay.js  0.14.0-dev != 0.14.0
+1 of 1 bundles != the tree's .claude-plugin/plugin.json version:
+  vendor/quay/dist/quay.js (0.14.0-dev)                          EXIT=1
+CASE B  bundle=0.14.0 (匹配):
+BUNDLE-EMBEDDED: OK
+  vendor/quay/dist/quay.js  0.14.0 == 0.14.0                     EXIT=0
+CASE C  bundle 无内嵌 token:
+BUNDLE-EMBEDDED: NOT-EVALUATED
+  vendor/quay/dist/quay.js  ERROR — no inlined package_default.version token (cannot evaluate — not a pass)
+  (the bundle axis could not be judged — NOT a pass; hard rule 3b)  EXIT=3
+```
+
+**AC3**(grep -n;两个调用都在 stamp 之后 —— 与 stamp 同一逻辑行,`&&` 保证执行在其后;链式是为满足 sh-census 棘轮的行数中立,注释见脚本内):
+```
+plugin/scripts/sync-vendor.sh:524  echo "…stamping…" && node …/stamp-version.mjs --mode build … && node …/version-consistency-check.mjs --stamp-bundle-tree "$PLUGIN_DIR" && node …/version-consistency-check.mjs --bundle-tree "$PLUGIN_DIR"
+plugin/scripts/publish-dist-branch.sh:168  … && node …/stamp-version.mjs --mode build --root "$WORK" --git-root "$REPO_ROOT" && node …/version-consistency-check.mjs --stamp-bundle-tree "$WORK" && node …/version-consistency-check.mjs --bundle-tree "$WORK"
+```
+
+**AC4 + DoD**(临时 release 分支 `release/v0.15.0-bundlegap-evidence` 上的真实 `bash plugin/scripts/sync-vendor.sh`;VERSION=0.15.0):
+```
+STAMP-VERSION: mode=build … VERSION = 0.15.0 => every carrier must == 0.15.0
+STAMP-VERSION: wrote 4 file(s) … .claude-plugin/plugin.json / README.md / vendor/quay/package.json / VERSION : 0.15.0-dev -> 0.15.0
+BUNDLE-EMBEDDED-STAMP: OK — re-derived 1 bundle(s) to 0.15.0   (# vendor/quay/dist/quay.js)
+BUNDLE-EMBEDDED: OK
+  expected (from .claude-plugin/plugin.json): 0.15.0
+  vendor/quay/dist/quay.js  0.15.0 == 0.15.0
+SYNC_EXIT=0
+---
+plugin.json version: 0.15.0
+bundle --version:    0.15.0            (DoD: 一致,不含 -dev)
+```
+负控制(把 bundle 内嵌 token 改回 `0.15.0-dev`):`bundle --version` 变 `0.15.0-dev`;gate 转红 `BUNDLE-EMBEDDED: DRIFT DETECTED … vendor/quay/dist/quay.js  0.15.0-dev != 0.15.0` exit 1;且在 `set -euo pipefail` 链下中止构建(`CHAIN_EXIT=1`,`REACHED` 未打印)。恢复后 gate 复绿。
+
+**AC5**:
+```
+bash scripts/test.sh --for-task gap-release-bundle-embeds-dev-version-after-stamp --allow-thin   ⇒ exit 0
+selector: test-selection-thin 1/5 Touches (0.20) < 0.5;ran 1 test file(plugin/test/…postinstall… 5 tests,pass 5);
+scoped static checks 全绿(incl. sh-census-check 7686 == baseline 7686,未越基线)。
+```
+⛔ `scripts/version-consistency-check.test.ts` 是 `.ts` 且不在 `test/` 目录下,`select-tests-for-touches` 只认 `test/**/*.test.mjs` ⇒ 该测试文件不进入 scoped/full suite 的自动选择,只由 AC1 的直接调用运行(既有 `scripts/*.test.ts` 同此)。

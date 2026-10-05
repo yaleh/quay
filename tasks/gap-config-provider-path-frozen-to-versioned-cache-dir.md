@@ -25,9 +25,15 @@ extra:
 
 ## Touches
 - `plugin/scripts/quay-init.sh`
+- `plugin/scripts/quay-init-steps.ts`
+- `packages/quay/src/init.ts`
 - `plugin/scripts/driver-runtime.ts`
 - `plugin/test/quay-init-stable-plugin-link.test.mjs`
 - `plugin/test/driver-runtime-loaded-version-drift.test.mjs`
+- `plugin/test/quay-init.test.mjs`
+- `plugin/test/quay-init-characterization.test.mjs`
+- `plugin/test/quay-init-loop.test.mjs`
+- `docs/analysis/quay-init-closure-ratchet.baseline.json`
 - `tasks/gap-config-provider-path-frozen-to-versioned-cache-dir.md`
 
 ## AC
