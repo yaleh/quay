@@ -14,6 +14,7 @@ import {
   fileNameForId,
   withFileLock,
   slugify,
+  makeAssertSafeId,
 } from "../src/frontmatter-store-base.ts";
 
 // Every tmp dir is removed once at the end of this file (the carrier-array + after() pattern) — a
@@ -113,4 +114,45 @@ test("withFileLock recovers a stale lock (older than the stale threshold)", () =
   fs.utimesSync(lockPath, past, past);
   const result = withFileLock(dir, "X-001", () => 7);
   assert.equal(result, 7);
+});
+
+// gap-routine-semantic-dedup-scan-assert-safe-id-quad: the four sibling stores
+// (adr/document/goal/meta) each carried a near-identical `assertSafeId` local,
+// differing only in kind word + id shape + the "must match …" tail. The check now
+// lives here, mirroring makeAssertSafeStatus; these tests pin the MECHANICS the
+// stores rely on (and the exact message the stores' own tests match on).
+
+test("makeAssertSafeId accepts an id matching a single shape and returns it", () => {
+  const assertSafeId = makeAssertSafeId("ADR", /^ADR-\d{3,}$/, "ADR-NNN (>=3 digits)");
+  assert.equal(assertSafeId("ADR-001"), "ADR-001");
+  assert.equal(assertSafeId("ADR-12345"), "ADR-12345");
+});
+
+test("makeAssertSafeId accepts an id matching ANY of several shapes", () => {
+  const assertSafeId = makeAssertSafeId("goal", [/^GOAL-\d{3,}$/, /^AC-\d{3,}$/], "GOAL-NNN or AC-NNN (>=3 digits)");
+  assert.equal(assertSafeId("GOAL-001"), "GOAL-001");
+  assert.equal(assertSafeId("AC-292"), "AC-292");
+});
+
+test("makeAssertSafeId rejects a wrong shape / wrong kind / too-few digits, enumerating the kind + shape", () => {
+  const assertSafeId = makeAssertSafeId("document", /^DOC-\d{3,}$/, "DOC-NNN (>=3 digits)");
+  // wrong kind, too few digits, and a path-traversal attempt are all rejected —
+  // regex must be anchored (the traversal string must not sneak through).
+  for (const bad of ["ADR-001", "DOC-1", "../../etc/x", ""]) {
+    assert.throws(() => assertSafeId(bad), /invalid document id .*must match DOC-NNN \(>=3 digits\)/);
+  }
+});
+
+test("makeAssertSafeId rejects a non-string id (null/undefined/number/object), not just a bad shape", () => {
+  const assertSafeId = makeAssertSafeId("meta", /^META-\d{3,}$/, "META-NNN (>=3 digits)");
+  for (const bad of [null, undefined, 42, {}, ["META-001"]]) {
+    assert.throws(() => assertSafeId(bad), /invalid meta id .*must match META-NNN \(>=3 digits\)/);
+  }
+});
+
+test("makeAssertSafeId keeps each store's kind word distinct in the message (no shared hardcoded kind)", () => {
+  const adr = makeAssertSafeId("ADR", /^ADR-\d{3,}$/, "ADR-NNN (>=3 digits)");
+  const goal = makeAssertSafeId("goal", [/^GOAL-\d{3,}$/, /^AC-\d{3,}$/], "GOAL-NNN or AC-NNN (>=3 digits)");
+  assert.throws(() => adr("nope"), /^Error: invalid ADR id "nope": must match ADR-NNN \(>=3 digits\)$/);
+  assert.throws(() => goal("nope"), /^Error: invalid goal id "nope": must match GOAL-NNN or AC-NNN \(>=3 digits\)$/);
 });

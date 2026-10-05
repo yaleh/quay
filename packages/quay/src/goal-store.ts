@@ -68,6 +68,7 @@ import {
   withFileLock,
   slugify,
   makeAssertSafeStatus,
+  makeAssertSafeId,
 } from "./frontmatter-store-base.ts";
 import {
   runAcceptance,
@@ -1738,14 +1739,11 @@ export function createGoalStore(
   const staleMs = opts.staleMs ?? DEFAULT_STALE_MS;
   const storeFidelityJudge = opts.fidelityJudge;
 
-  function assertSafeId(id: string) {
-    if (typeof id !== "string" || !(GOAL_ID_RE.test(id) || AC_ID_RE.test(id))) {
-      throw new Error(
-        `invalid goal id ${JSON.stringify(id)}: must match GOAL-NNN or AC-NNN (>=3 digits)`
-      );
-    }
-    return id;
-  }
+  const assertSafeId = makeAssertSafeId(
+    "goal",
+    [GOAL_ID_RE, AC_ID_RE],
+    "GOAL-NNN or AC-NNN (>=3 digits)"
+  );
 
   const assertSafeStatus = makeAssertSafeStatus("goal", VALID_GOAL_STATUSES);
 
