@@ -48,7 +48,7 @@
 - **已查（原为未查）**：driver 构造的 worker 提示不含 skill / workflow 名；driver 启动会话的实际使用见 §2.8。只在脚本与 workflow 里查到两处真实读取（§2.3）；其余命中的 `skills/<名>/SKILL.md` 多为静态检查在校验 skill 文件本身，不是使用方。
 - **仍未查**：worker 是否加载了 plugin 的 skill 清单（取决于 `launchArgv` 的 `--bare`/`--settings`）；`goal-sufficiency follow-up` 会话；续做提示（continue worker）的归类。
 - **未查**：`lifecycle_retreat` 与 `lifecycle_promote` 的不对称（§2.6）。
-- **说明**：被统计的项目 `claudecodeui`、`quay-fleet`、`archguard`、`meta-cc` 都是**本仓库作者自己的项目**，不是第三方；本文中「外部项目」均指这个意思。**没有第三方用户的使用证据。**
+- **说明**：被统计的项目 `claudecodeui`、`quay-fleet`、`archguard`、`meta-cc`、`cantus` 都是作者自己的项目。人 2026-10-05 裁定：**作者就是最大的用户，不讨论第三方用户**；本文「外部项目」仅指 quay 仓库之外的这几个项目。
 
 ---
 
@@ -226,6 +226,8 @@
 
 ⇒ **启动 drivers 走 `/quay:drivers` → `start-drivers.js`；CLI 主要用于查询状态（`driver status`）。** 这些项目运行的 plugin 缓存版本不一致（0.9.0 / 0.11.0 / 0.14.0 都出现在命令里）。
 
+**`/quay:init` 到底是什么调用——是 skill，不是 MCP**（实证，meta-cc 会话 `6c5f671d…`）：用户消息序列为 ① `<command-message>quay:init</command-message><command-name>/quay:init</command-name>`；② 紧接一条 `isMeta` 用户消息，正文以 `Base directory for this skill: …/plugins/cache/quay/quay/0.9.0/skills/init` 开头，后面是 `# quay-init …` 即 SKILL.md 全文；③ 随后模型按其指令执行 `bash …/scripts/quay-init.sh`。即：**斜杠命令是调用 skill 的另一种形态——Claude Code 把 SKILL.md 注入为提示，不经 `Skill` 工具，也不经 MCP。** 因此统计 skill 的使用必须同时看三个位置：`Skill` 工具调用、用户消息里的 `<command-name>`、SKILL.md 的非维护读取。MCP `init`（1 次）是另一个独立入口，几乎不用。
+
 **斜杠命令**：用户消息里出现的 quay 斜杠命令只有 `/quay:init` 23、`/quay:drivers` 15、`/quay:SKILL` 1（archguard——即 §3.2 的错误注册项被人真的输入过）。**`/quay:execute`、`/quay:manager`、`/quay:cold-start`、`/quay:loop-driver`、`/quay:routines`、`/quay:quay-directive`、`/quay:quay-task-operator`、`/quay:quay-task-to-plan` 等从未被输入。**
 
 **ADR**
@@ -310,9 +312,9 @@
 - 落地任务 A（删 `commands` 数组）与任务 B（`name:`==目录名并同步旧名引用）。验收以**交互界面读数**为准：重启后输入 `/quay`，`init` 只出现一次且显示为 `/quay:init`。
 - 重装用户侧：同名多来源（`quay@quay` + `quay@quay-dev`）是本机配置问题，不属仓库缺陷，但发布说明里应提醒「不要同时启用两个 `quay`」。（依据 §3.1。）
 
-### P2　补 MCP 缺口（有使用记录）
+### P2　补 MCP 缺口（有使用记录；人 2026-10-05 裁定：goal 的 MCP 动词要补）
 - **依据**：CLI `quay goal …`（严格执行口径，§2.10）476 次（quay-fleet 270、claudecodeui 201），MCP 只有 `goal_get`（1 次）。
-- **提议**：确认 `goal write / list / check` 是否应有 MCP 动词；若是故意只留 CLI，应在 plugin 文档里写明，避免 agent 在 MCP 与 CLI 间任意选择。
+- **提议（已裁定）**：为 `goal write / list / check / get` 补 MCP 动词；若是故意只留 CLI，应在 plugin 文档里写明，避免 agent 在 MCP 与 CLI 间任意选择。
 - **同类**：`quay task edit` CLI 447 次 vs `task_write` MCP 1,529 次，二者并存；是否需要统一，**未调查**。
 
 ### P3　压缩常驻上下文（有静态读数，无 token 读数）
@@ -320,7 +322,7 @@
 - **提议**：优先压缩 `quay-file-task`（高频但 953 字符）、`quay-task-operator`、`quay-directive`、`quay-webui-bootstrap-methodology`、`fan-in-execute`（已退役却是最长的 workflow 描述 1,268 字符）。保持描述内的触发条件与「何时不用」，把过程性内容留在 SKILL.md 正文。
 - **前置读数**（建议先取）：skill 清单实际占的 token 与每会话加载频率，再定压缩目标；**不要先设数值目标**（硬规则 4 推论）。
 
-### P4　对零证据 skill 降级，不删除
+### P4　对零证据 skill 降级，不删除（⚠ 已被 P7 取代：人裁定为从交付物中去除、仅开发可见）
 - **对象（三种位置——`Skill` 调用、人输入的斜杠命令、非维护读取——均为 0）**：`quay-task-operator`、`quay-task-to-plan`、`quay-webui-bootstrap-methodology`、`loop-driver`、`cold-start`、`quay-directive`、`manager`；`execute` 仅 1 次非维护读取。**`init` 与 `drivers` 不在此列**：它们分别有 23 / 15 次斜杠输入（§2.10），是用户面的真实入口，必须保留且保持稳定的名字（`/quay:init`、`/quay:drivers`）。`manager` 降级前须先查 manager 会话是否以文字方式引用它（§2.8 未覆盖）。
 - **提议**：保留文件，不在默认安装里自动注入描述（按需加载或内部分发）。具体机制（plugin 拆分、`disable-model-invocation`、或移出 `skills/`）**需要先验证 Claude Code 的支持**，本文未验证。
 - **不建议删除的理由**：①`cold-start`、`quay-directive` 在仓库内被脚本/文档引用（引用不等于使用）；②全历史窗口起点未查；③`Skill` 之外还有 §2.3 的两条旁路，旁路读数不完整。
@@ -333,6 +335,42 @@
 ### P6　不属于本次调整，但应单独调查
 - `lifecycle_retreat` 107 次 vs `lifecycle_promote` 34 次（claudecodeui 73 次回退）。这是**任务质量信号**，不是 plugin 设计问题。
 
+### P7　开发用组件从交付物中去除，仅 quay 自己开发时可见（人 2026-10-05 裁定）
+
+**裁定**：原先归为「可保留但不应默认暴露」的项，**从交付物中去除，保留为仅 quay 自己开发用**。同日裁定：**goal 的 MCP 动词要补**（见 P2，不再是「待确认」）。
+
+**去除对象（来自 §2 的零证据与旁路读数）**
+- skill：`manager`、`cold-start`、`loop-driver`、`quay-directive`、`quay-task-operator`、`quay-task-to-plan`、`quay-webui-bootstrap-methodology`、`execute`（`execute` 由 `sync-vendor.sh` 从 quay-native 镜像，去除的只是交付物里的镜像，quay-native 包不动）；`routines` 只被 `run-routines.js` 当提示读，与该 workflow 同去同留。
+- workflow：`fan-in-execute`、`execute-suite-fix`、`pool-quality-judge`、`drain-directives`、`run-routines`。
+- MCP 工具：`action_list`、`action_run`、`adr_get`、`adr_write`、`meta_write`、`task_add_label`、`instrument`（全历史各 0 次，`action_list` 1 次）。
+- **未列入、需人裁定**：`manager-tick-core`（见下方「冲突」）。
+
+**交付物现状（读数）**
+- `plugin/scripts/publish-dist-branch.sh:114`：`rsync -a --exclude='.git' "${PLUGIN_DIR}/" "${WORK}/"` ——**整个 `plugin/` 原样复制**到 `dist-plugin`，只做版本戳与脚本打包。`origin/dist-plugin` 顶层实测含：`test`、`fixtures`、`probes`、`loop`、`gate-scripts`、`import-graph-baseline.json`、`sh-census-*`、`test-isolation-violations.txt`、`.claude`、`.quay` 等开发基础设施，以及全部 13 个 skill 与 6 个 workflow。`plugin/` 体量：`test` 12M、`scripts` 12M、`vendor` 3.7M、`skills` 308K、`loop` 264K、`workflows` 196K。
+- `packages/quay/scripts/package.sh:128` 只 `rm -rf "${PLUGIN_DEST}/test"`，其余同样原样打入 npm 包。
+- 开发用 marketplace `quay-dev`（`plugin/.claude-plugin/marketplace.json`，`source: "."`）原地加载整个 `plugin/` 树；发布时由 `scripts/stamp-marketplace-name.mjs` 改名。
+- `plugin/.mcp.json` 的 `env` 为空；MCP 工具在 `packages/quay/src/mcp-handlers.ts`（`task_add_label` :407、`adr_write` :877、`meta_write` :941、`action_run` :1086）与 `mcp-server.ts`（`instrument` :413）里无条件 `registerTool`。
+
+**必须同时处理的耦合（读数）**
+- **laydown 闭包由 skills/loop/workflows 推导**：`plugin/scripts/quay-init.sh:607-613`、`:799` 的 `--loop` 落地集合是从 `skills/*/SKILL.md`、`loop/*.md`、`workflows/*.js` 里引用的 `plugin/scripts/<x>` 推出来的；`:699-712` 说明 `fan-in-execute.js` 会把 `per-task-suite-record.ts`、`suite-params.ts` 拉进落地集，且 workflow 被投递到目标项目的 `.claude/workflows/`。⇒ **去掉 skill/workflow 会改变落地集合**，每一处缩小都必须是有意的。
+- **保留项对被去除项的引用**：`skills/quay-file-task/SKILL.md` 有 11 处引用 `quay-directive` / `quay-task-operator`；`skills/drivers/SKILL.md:12` 的流程图含 `/quay:manager`；`loop/manager-tick-core.md` 等 4 个 loop 文档含相关名；`quay-init.sh:1317-1321` 仅在 `--manager` 时落 `manager-tick-core.md`。去除前必须改写这些引用，否则交付物里留下指向不存在组件的悬空提示。
+
+**建议机制（单源 + 单步 + 带检查）**
+1. **一份清单**：`plugin/dev-only.json`，列出要从交付物去除的路径（skills/workflows 条目、`test/`、`fixtures/`、`probes/`、基线文件等）与要受开关保护的 MCP 工具名。
+2. **一步剥离**：一个脚本（如 `plugin/scripts/strip-dev-only.mjs`）读该清单，**只对复制出的交付树动手**（同 `stamp-marketplace-name.mjs` 的做法，永不动 `plugin/` 本身），由 `publish-dist-branch.sh` 与 `package.sh` 共用；清单里任何路径不存在 ⇒ 失败（fail-closed）。
+3. **开发不受影响**：`quay-dev` 仍原地加载整个 `plugin/`，所以 quay 自己的会话里 `/quay:manager`、`quay:manager-tick-core` 等名字不变。
+4. **MCP 工具分级**：给 dev-only 工具的 `registerTool` 加一个 surface 开关（例如环境变量），默认不注册；quay 自己的开发会话通过本仓库 `.claude/settings.json` 的 `env` 打开。**该环境变量能否传到插件拉起的 MCP 进程——未验证**，要在 `/tmp` 里实测。
+5. 不推荐「物理拆成第二个 dev 插件」：多个脚本与测试直接引用 `plugin/skills/<名>/SKILL.md` 等路径（`verify-delivery-surface.ts`、`spec-declaration-point-check.ts` 等），移动会连锁。
+
+**检查（硬规则 4c：判据落笔时取一次真实读数）**
+- C1 清单路径逐项存在。
+- C2 **引用闭包**：剥离后的交付树里，保留文件不得点名被去除的 skill/workflow（`grep` 命中数与前 3 条贴出；当前基线见上，非零）。
+- C3 **落地集合差**：剥离前后分别跑 `quay-init.sh --dry-run`（或 `derive_loop_scripts`），贴出差集，每一项缩小都要有意；`laydown-set-check.sh` 与 closure-ratchet 须仍绿。
+- C4 **负控制**：把交付树放到 `/tmp`，`claude plugin validate` 通过；`claude -p --plugin-dir <交付树>` 的 init 消息里 skill 清单恰为「保留集」；在一个新目录跑 `quay-init.sh` 与 `start-drivers.js`（`--dry-run`/空项目）退出码 0。
+- C5 **MCP 清单对照**：默认表面的工具清单 = 预期保留集；开启 dev 开关后 = 全集。
+
+**冲突（需人裁定）**：`quay:manager-tick-core` 在 claudecodeui 里被调用 5 次（另有 1 次 `resumeFromRunId`），而 claudecodeui 当时加载的是发布版（`installed_plugins.json` 里 `quay@quay` 在 claudecodeui 为 project 与 user 作用域）。若把 `manager` / `manager-tick-core` 从交付物去除，从 claudecodeui 会话里跑 manager 就需要先启用 `quay@quay-dev`。该 workflow 自述为 quay-dev-only（`workflows/manager-tick-core.js` 的 description 与传入 `args.workspaceRoot`）。**请裁定：manager 是只在 quay 仓库会话里运行，还是允许从别的项目会话里运行。**
+
 ---
 
 ## 5. 验收（本 SPEC 自身的 AC 候选）
@@ -341,14 +379,17 @@
 - [ ] P2：对每个被归为「应有 MCP 动词」的 CLI 命令，写出判定依据与 MCP 动词，或在文档里写明故意不提供；以仓库内 grep 命中与 MCP 工具列表的差集给出清单。
 - [ ] P3：取得 skill/workflow 描述的 token 读数后，才设压缩目标；压缩后触发行为不变（至少以 `quay-file-task` 的近期调用数不降为对照）。
 - [ ] P4：降级方案先在 `/tmp` 副本上用 `claude plugin validate` 与交互界面各验证一次，再动仓库。
-- [ ] P5：贴出「手写脚本路径 vs `instrument action:list` 清单」的差集。
+- [ ] P5：贴出「手写脚本路径 vs `instrument action:list` 清单」的差集。（P7 已把 `instrument` 列入 dev-only，本条降为参考。）
+- [ ] P2（已裁定）：`quay goal` 的 `write` / `list` / `check` / `get` 各有对应 MCP 动词；以 `quay goal` CLI 子命令清单与 MCP 工具清单的差集为空来验收，并在 MCP 工具描述里写明与 CLI 同源。
+- [ ] P7：C1–C5（见 P7）全部有读数；剥离后的交付树在 `/tmp` 中通过 `claude plugin validate`，其 skill 清单恰为保留集；落地集合差集已逐项确认。
 - [ ] 本 SPEC 的 §2 读数在落地后用同一扫描脚本（附录 A）重跑一次，并与 §2 比较；**重跑的项目目录前缀须归一**。
 
 ---
 
 ## 6. 开放问题（需要人裁定）
 
-1. 对外发布的 plugin 的目标用户是谁？目前只有作者自己的项目有使用证据。若只服务内部 loop，P4 的降级可以更激进；若面向第三方，则应拆分「用户面」与「内部编排面」。
+1. （已裁定，2026-10-05）作者就是最大的用户，不讨论第三方用户；**开发用组件从交付物中去除**（P7）。
+1b. **manager / manager-tick-core 是否只在 quay 仓库会话里运行？**（见 P7「冲突」；claudecodeui 有 5 次调用）
 2. `goal` 在 MCP 的缺口是故意还是遗漏？
 3. 全历史窗口的起点是否需要限定（旧版本的使用模式可能已不适用）？
 
