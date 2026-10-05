@@ -205,6 +205,7 @@ rules* but does not re-implement each SPEC. Index (under `orchestration/` in the
 - `orchestration/SPEC-methodology-as-a-deliverable.md` — methodology as a deliverable
 - `orchestration/SPEC-no-text-substitution-at-install.md` — install is configuration-driven, not text-substitution
 - `orchestration/SPEC-plugin-lifecycle-single-bundle-2026-09-02.md` — Claude Code plugin 全生命周期：单一 bundle、原生交付、安装只写配置（人 2026-09-02 裁定）
+- `orchestration/SPEC-plugin-surface-area-by-usage-evidence-2026-10-05.md` — 按实际使用读数调整 quay plugin 对外表面积（driver 启动会话的使用读数；更正「Read 即使用」的误判）
 - `orchestration/SPEC-release-and-hotfix-branching-2026-09-15.md` — release 与 hotfix 分支：把 `master` 从「2026-08-03 冻结的化石」改造成「最近一次全绿发布」，develop 保持 nvie 的 develop（ruled·人 2026-09-15 对 5 个开放问题逐条裁定，待立案与实现）
 - `orchestration/SPEC-unified-driver-architecture-2026-08-23.md` — 统一 `*-driver` 架构：机械化执行面与长会话规划面的分野。**两级分层**（Layer 0 runtime / 1a task-processing / 1b routine，人 2026-08-23 裁定，manager-kind 属 1b）· 核心不变式「⛔ 不信执行者自述」单一实现 · Filter 谓词列表 · Claude Code profile 抽层 · 配置与运行时控制态分界 · 事件触发保留兜底轮询（proposal·判据落为 AC151–155，排期在 AC142 系列收口后）
 - `orchestration/SPEC-unified-quay-server-2026-09-13.md` — 统一 quay server：把 web、全部 driver、与运行中 Claude Code 会话的双向通信收进一个进程；一个项目空间 = 一个 quay server 实例 = 一个信任域（proposal·人 2026-09-13 三轮裁定；前置阅读 `SPEC-unified-driver-architecture-2026-08-23.md`）
