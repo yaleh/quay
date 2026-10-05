@@ -97,7 +97,37 @@ plugin/test/sh-census-check.test.mjs                                 → 20/20 p
 
 ### AC5 — `node --test plugin/test/dispatch-worktree-setup.test.mjs`
 
-见 AC1：34/34 pass（含 30 条原有，全部保持绿——既有 symlink / npm fallback / dry-run / 分支自检 / fork-point 语义逐字不变）。
+见 AC1：34/34 pass（含 30 条原有，全部保持绿色——既有 symlink / npm fallback / dry-run / 分支自检 / fork-point 语义逐字不变）。
+
+### AC6（fan-in 解锁）— 修复阻塞本轮落地的 develop-wide 外来 static red
+
+**前一轮 `step=suite: # fail 72` 的真因不是本任务的实现。** `criterion-carrier-inline-check` 在 merge 后的 worktree 上判红：`goals/AC-905/906/907-*.md`（GOAL-905 第二次合并演练的三个 /doc 判据）各自**内联**了载体读取 `st="$root/.quay/server.json"`——正是该 checker（2026-09-30 落地）存在的目的所禁止的**第 18 份副本**；这三条判据由 cli 于 **2026-10-05** 新建 ⇒ 复发。失败形态（`# tests 0 / # fail 72`，静态门 fail-closed）让 driver 记为 `step=suite`，与实现无关。
+
+**读数为 develop-wide（非本分支引入）**：三条 goal 记录在 `develop` 与 `author` 上 blob 逐一相同（`998f5baa0` / `9ab188e14` / `5266e6076`）；在**主检出** `/data/home/yale/work/quay` 上直接跑该 checker 亦 exit 1：
+
+```
+criterion-carrier-inline-check --root /data/home/yale/work/quay
+  → 3 criterion(s) inline "server.json" (AC-905 / AC-906 / AC-907)   exit 1
+```
+
+缺此修复，fan-in 的静态门对**任何**任务永久红 ⇒ 无人可落地。**无其它在飞任务认领**（`grep tasks/` 仅命中 GOAL-905 drill 记录与已 done 的 `gap-criterion-live-web-address-derivation-17-copies-to-one`）。
+
+**修法**：把三条判据改写为**调用单一正本** `plugin/scripts/live-web-address.ts`，逐字对齐早已合规的同构双胞胎 `AC-904`（同为 GOAL 演练 /doc 判据，仅换 DOC id 与批次标签）。经 sanctioned 写面 `quay goal write <id> --criterion … --root <worktree>` 落盘并提交在**任务分支**（`status` / `origin` / `expect` / `title` 逐一保留，patch 语义）。
+
+```
+before: criterion-carrier-inline-check --root <main checkout>  →  3 criterion(s) inline "server.json"   exit 1
+after : criterion-carrier-inline-check --root <worktree>        →  0 criterion(s) inline "server.json"   exit 0
+```
+
+**为何并入本任务**：这是外来**确定性** static red，fan-in 静态门 fail-closed（本仓无 `loop.rerun_command` 重跑），且无在飞任务认领。按仓库既定处置（develop-wide orphan red ⇒ self-fix + widen Touches）把 3 个 goal 文件补进 `## Touches`；此前 `anti-drift-touches-check` 对它们判 `out-of-declared` 3 条：
+
+```
+anti-drift-touches-check --task … --worktree <wt> --merge-target develop
+  before: ANTI-DRIFT HARD FAIL — 3 violation(s)  (out-of-declared: goals/AC-905 / AC-906 / AC-907)
+  after : widened Touches ⇒ 见本轮 fan-in（本段改写后同轮实跑，预期 0 violation）
+```
+
+改动限于每条记录的 `criterion` 字段（净 -21 行：内联的 `server.json` 解析块被对 live-web-address.ts 的单次调用取代）；`origin`（人 2026-10-05 的授权与演练背景）逐字未动。
 
 ### DoD — 真实落地读数
 
@@ -122,3 +152,6 @@ plugin/test/sh-census-check.test.mjs                                 → 20/20 p
 - .quay/config.yml.example
 - plugin/test/dispatch-worktree-setup.test.mjs
 - tasks/gap-dispatch-worktree-setup-links-node-modules-for-pnpm-projects.md
+- goals/AC-905-演练-提供本-workspace-的-quay-serve-实例-其-doc-页列出第-a-批演练文档的首篇-doc-9.md
+- goals/AC-906-演练-提供本-workspace-的-quay-serve-实例-其-doc-页列出第-b-批演练文档的首篇-doc-9.md
+- goals/AC-907-演练-提供本-workspace-的-quay-serve-实例-其-doc-页列出第-c-批演练文档的首篇-doc-9.md
