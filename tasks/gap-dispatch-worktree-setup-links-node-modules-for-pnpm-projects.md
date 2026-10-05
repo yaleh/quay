@@ -129,6 +129,35 @@ anti-drift-touches-check --task … --worktree <wt> --merge-target develop
 
 （`after` 为加宽 Touches 并 `git merge develop` 把新任务体带进 worktree 后的实跑读数；`criterion-carrier-inline-check` 亦同轮实跑 exit 0。）改动限于每条记录的 `criterion` 字段（净 -21 行：内联的 `server.json` 解析块被对 live-web-address.ts 的单次调用取代）；`origin`（人 2026-10-05 的授权与演练背景）逐字未动。
 
+### AC7（fan-in 解锁·续）— 修掉 AC6 改写引出的两个 suite red
+
+上一轮 `step=suite` 的新读数（`found 21: …AC-905,AC-906,AC-907`）指向**本任务 AC6 改写的直接后果**，外加一条外来确定性 red；两条都在本轮修掉。
+
+**(a) `plugin/test/live-web-address.test.mjs`——AC6 改写把 AC-905/906/907 带进了「调用 helper 的判据」语料（18 → 21）**，而该文件的计数与 fixture 写死了旧集合。取假读数（读 develop 版本）：`develop` 上命中 **18** 条、本分支 **21** 条 ⇒ **是本分支引入，非 develop-wide**。
+
+```
+before（前一轮 suite log, 3 red）：
+  ✖ AC5: the corpus really is every goal criterion … found 21: … (expected 18)
+  ✖ AC5 (real arm): AC-905 … does not list DOC-910
+  ✖ AC5 (mutant arm): codes.length 21 ≠ 18
+after（本 worktree 实跑 node --test plugin/test/live-web-address.test.mjs）：
+  ℹ tests 17   ℹ pass 17   ℹ fail 0
+```
+
+修法：两处硬编码计数 **18 → 21**；fixture 的 `/doc` 索引由**语料派生**（`DOC_IDS = 判据文本里的 /DOC-\d+/`，不再写死 `DOC-904`），故下一个演练判据加入时页面自动跟上。此测试文件已补进 `## Touches`。
+
+**(b) `plugin/scripts/release-cut.mjs` 的 `diagnosticTail`——外来确定性 red，只在长 worktree 路径下出现。** 该函数超预算时 `joined.slice(-max)` 从**头部**裁，而它存在的意义正是携带子进程 stdout **头部**的判据 token（`NOT-EVALUATED: …`）；把它顶出预算的噪声是 Node 的 `MODULE_TYPELESS_PACKAGE_JSON` 警告——其正文里**两处**嵌了被解析脚本的**绝对路径**，故长度随**运行所在的 worktree 路径**增长。
+
+```
+主检出（短路径, 23 字符）：node --test --test-name-pattern "ratchet failure on the REAL cut path" plugin/test/release-cut.test.mjs
+  →  pass 1   （绿；证明非 develop-wide，是路径长度驱动）
+本 worktree（100 字符）   ：同一命令  →  fail 1
+  （joined = 815 > max=800 ⇒ slice(-800) 从 token 中间开始 ⇒ 输出里只剩 `…LUATED`）
+修后（本 worktree, 100 字符）：node --test plugin/test/release-cut.test.mjs  →  tests 8 / pass 8 / fail 0
+```
+
+修法：超预算时**两端都留**（`head … tail`），保证头部的判据 token 与尾部的理由都在（`plugin/scripts/release-cut.mjs` 已补进 `## Touches`）。⚠️ 这是 latent bug 被长路径暴露，非本任务实现缺陷；但它对**任何** task-id ≳56 字符的 worktree 都会确定性复发，故按「外来确定性 suite red ⇒ self-fix + widen Touches」当场修掉。
+
 ### DoD — 真实落地读数
 
 **cantus 的生产读数本次【未取得】**：本 worker 无法访问 cantus 工作区，故 `.quay/fan-in-step-trace.jsonl` 里「随后派发的任务 suite-end 耗时与结论」这一读数**尚未读取**；**cantus driver 当时加载的版本亦未核实**。落地判据在本仓内以**同一段代码**验证：goal 路 `plugin/test/goal-driver-criterion-worktree.test.mjs` 9/9（含 `AC-nm` 断言 linked、`AC-nm-absent` 断言 source-absent，pnpm 分支不改变它们）；任务路见 AC1。⇒ 要取得 DoD 的生产读数，cantus 必须加载 **≥ 本任务落地提交** 的版本，并观察其后派发任务的 `fan-in-step-trace.jsonl` suite-end（预期不再是毫秒级空日志失败）。
@@ -151,6 +180,8 @@ anti-drift-touches-check --task … --worktree <wt> --merge-target develop
 - plugin/sh-census-baseline.json
 - .quay/config.yml.example
 - plugin/test/dispatch-worktree-setup.test.mjs
+- plugin/scripts/release-cut.mjs
+- plugin/test/live-web-address.test.mjs
 - tasks/gap-dispatch-worktree-setup-links-node-modules-for-pnpm-projects.md
 - goals/AC-905-演练-提供本-workspace-的-quay-serve-实例-其-doc-页列出第-a-批演练文档的首篇-doc-9.md
 - goals/AC-906-演练-提供本-workspace-的-quay-serve-实例-其-doc-页列出第-b-批演练文档的首篇-doc-9.md
