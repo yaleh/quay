@@ -3,7 +3,7 @@ id: gap-routine-semantic-dedup-scan-kill-procs-pair
 title: "semantic-dedup-scan: ~55 identical lines duplicated across two plugin
   scripts; the reaper's own comment says 'Same contract as
   orphan-session-check.ts'."
-status: todo
+status: ready
 labels:
   - gap
   - routine-filed
