@@ -58,6 +58,7 @@ extra:
 - 4 个把旧名钉死的测试已改：`cold-start-skill.test.mjs`（`name:\s*quay-cold-start`）、`manager-layer-skill.test.mjs`（`name:\s*quay-manager`）、`start-drivers.test.mjs`（`name: quay-drivers`）、`plugin-packaging.test.mjs`（测试标题里的 +quay-cold-start/+quay-drivers）。
 - `plugin.json` 是 quay-init laydown 源 ⇒ `quay-init-closure-ratchet --check-stale` 报指纹过期；`--gate` 实测 shrink-only（3 files / 1022 bytes ≤ baseline），已 `--reanchor` 并纳入同一次提交。
 - 反漂移：`anti-drift-touches-check --task … --worktree … --merge-target develop` ⇒ `ANTI-DRIFT OK … 15 actual file(s), all within declared Touches (16 glob(s))`。
+- **越界自修（develop-wide 无主红）**：develop `b0a7868dd`/`4079f8b49` 直接落地的 `orchestration/SPEC-plugin-surface-area-by-usage-evidence-2026-10-05.md` 未在任一 declaration point 声明 ⇒ `spec-declaration-point-check` 在 develop 本身上即 exit 1，使**每个**任务的 scoped 门/fan-in suite 变红（本任务首次 scoped 门即因此红）。经三步证明无主（①无 ready 任务点名该 SPEC ②无 peer 分支带修法 ③在飞 worker 仅本任务自己）后自修：`plugin/skills/init/SKILL.md` 加一行 `<!-- reference-doc: … -->`、`plugin/skills/manager/SKILL.md` SPEC 索引加一条 bullet；两者本就在本任务 Touches 内。修后 `spec-declaration-point-check` → `PASS: all 47 orchestration/SPEC-*.md declared at each of 2 declaration points`。
 - ⛔ 未动：`packages/quay-native/skills/execute`（已一致）、`plugin/skills/execute`（sync-vendor 镜像）、`quay-manager` tmux 会话名、`quay-init.sh` 脚本名/`quay-init --loop` CLI 字面量。
 
 <!-- dedup-ref -->
