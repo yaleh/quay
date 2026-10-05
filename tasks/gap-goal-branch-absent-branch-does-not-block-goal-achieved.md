@@ -2,7 +2,7 @@
 id: gap-goal-branch-absent-branch-does-not-block-goal-achieved
 title: branch-mode goal 的分支不存在时「并入前不得 achieved」的 close-block 不生效——从未并入的 goal
   照常被翻成 achieved（cantus GOAL-002 读到）
-status: ready
+status: done
 labels:
   - gap
   - defect
