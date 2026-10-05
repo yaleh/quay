@@ -110,3 +110,7 @@ exit=0
 
 - `plugin/scripts/goal-driver.ts`：新增 `backfillMissingGoalBranches(root, goals)`（`:3287`，幂等；谓词 = active ∧ `branch:true` ∧ 无 ref（`:3299`）∧ 无 landed 并入结果 ⇒ `ensureGoalBranch`（`:3306`））+ `GoalBranchBackfillReading`（`:3252`）+ `GoalRoundReadings.goalBranchBackfills`（`:3368`）；调用点 `:3615` 在 `syncGoalCriterionWorktrees`（`:3616`）**之前**。
 - `plugin/scripts/driver-runtime.ts`：Layer 0 补 `ensureGoalBranch` / `readGoalMergeResults` 与两个类型的 re-export（⛔ goal-driver 不写 Core 源码树字面量，AC-262 ⇒ 经 Layer 0 取符号）。
+
+### DoD 生产读数（落地时状态，按 DoD 要求写明）
+
+本任务在 **quay 仓库内**完成：补建逻辑落在 goal-driver 的下一轮，判据由真 git 仓库夹具端到端验证。DoD 点名的**生产读数**（GOAL-028 的 AC-321：branch-mode goal 的任务只经其 goal 分支落地）需要在**有这类 goal 的第三方项目**里、且该项目的 driver 已加载含本修复的版本后才取得到——cantus 的 GOAL-002 是现成对象，但它依赖 cantus 部署侧的 quay 版本更新，**本任务完成时该读数尚未取得**。
