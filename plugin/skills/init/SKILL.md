@@ -1,12 +1,12 @@
 ---
-name: quay-init
+name: init
 description: "Initialize a workspace as a quay project — write the six-file config surface (.quay/config.yml, .quay/profiles.yml, tasks/, .gitignore, .claude/launch.settings.json, .claude/settings.json) and print the explicit quay plugin install steps. Idempotent."
 allowed-tools: Bash, Read
 ---
 
-# quay-init
+# init
 
-Initialize the current workspace as a quay project. **quay-init is a project initializer, NOT an
+Initialize the current workspace as a quay project. **init is a project initializer, NOT an
 installer** (SPEC-plugin-lifecycle-single-bundle-2026-09-02 裁定 6): it writes ONLY the six-file
 closed set below — no `.claude/{skills,workflows,agents}` copies, no `plugin/scripts` copies, no
 `orchestration/`/`docs/analysis/` copies, no `.quay/runtime` laydown. The quay extension files and
@@ -406,6 +406,7 @@ The init skill is a SPEC declaration point (`spec-declaration-point-check`): eve
 <!-- reference-doc: orchestration/SPEC-outer-liveness-productization.md -->
 <!-- reference-doc: orchestration/SPEC-per-task-suite-verification-2026-08-13.md -->
 <!-- reference-doc: orchestration/SPEC-plugin-lifecycle-single-bundle-2026-09-02.md -->
+<!-- reference-doc: orchestration/SPEC-plugin-surface-area-by-usage-evidence-2026-10-05.md -->
 <!-- reference-doc: orchestration/SPEC-quay-init-reconcile-and-native-implementation-2026-09-18.md -->
 <!-- reference-doc: orchestration/SPEC-quay-self-hosts-its-own-cold-start.md -->
 <!-- reference-doc: orchestration/SPEC-release-and-hotfix-branching-2026-09-15.md -->

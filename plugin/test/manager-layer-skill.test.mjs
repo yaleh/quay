@@ -44,7 +44,7 @@ const coldStartSkill = fs.readFileSync(coldStartSkillPath, 'utf8');
 // ── AC1 — the third layer exists and ships under plugin/ ─────────────────────────────────────────────
 test('AC1 — the manager layer SKILL.md exists (the third layer ships under plugin/)', () => {
   assert.ok(fs.existsSync(managerSkillPath), 'plugin/skills/manager/SKILL.md must exist (AC1, Contract measure ls plugin/skills/manager/)');
-  assert.match(managerSkill, /^name:\s*quay-manager/m, 'skill name must be quay-manager');
+  assert.match(managerSkill, /^name:\s*manager/m, 'skill name must be manager (== its directory name, so the slash form is /quay:manager)');
   const fm = managerSkill.match(/^allowed-tools:\s*(.+)$/m);
   assert.ok(fm, 'manager skill must declare allowed-tools');
   assert.ok(fm[1].includes('Bash'), 'manager skill must allow Bash');

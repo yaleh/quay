@@ -32,13 +32,13 @@
 
 #### 1. 运行事实：这次跑的是什么
 
-**2026-08-12 03:07Z，outer 会话 `902b4528-…` 由 `manager-adopt` 新建**（无历史上下文的 fresh 会话——对应 `gap-no-formalized-bare-metal-session-bootstrap` 形式化的「可复现建会话」路径；`quay-0` tmux 拓扑 08-11 已存在，skill step 2 对既有拓扑做了验证而非重建），随即被指示「调用 quay-cold-start 技能，把循环拉起来」。这是规格所述「quay 从未在自身上跑过自己的 `quay:cold-start` skill」缺口的一次**真实验证**——不是手工恢复，不是「冷启动盖在已暖会话上」。
+**2026-08-12 03:07Z，outer 会话 `902b4528-…` 由 `manager-adopt` 新建**（无历史上下文的 fresh 会话——对应 `gap-no-formalized-bare-metal-session-bootstrap` 形式化的「可复现建会话」路径；`quay-0` tmux 拓扑 08-11 已存在，skill step 2 对既有拓扑做了验证而非重建），随即被指示「调用 cold-start 技能，把循环拉起来」。这是规格所述「quay 从未在自身上跑过自己的 `quay:cold-start` skill」缺口的一次**真实验证**——不是手工恢复，不是「冷启动盖在已暖会话上」。
 
 关键时间线（全部来自 outer 会话 transcript 的机械记录，`~/.claude/projects/-home-yale-work-quay/902b4528-….jsonl`）：
 
 | 时间（Z） | 事件 |
 |---|---|
-| 03:07:52 | outer 会话被 manager-adopt 建出，收到「调用 quay-cold-start 技能」指令 |
+| 03:07:52 | outer 会话被 manager-adopt 建出，收到「调用 cold-start 技能」指令 |
 | 03:07–03:12 | 跑 skill 前置（step 0 dead-loop-check、step 1b laydown-set 门）、建/验拓扑、挂 Monitor |
 | 03:12:07–03:12:25 | 驱动 inner（step 6）：send-keys-reliable.sh 首投 `exit 1`（fresh transcript 未落盘的 ENOENT fail-loud），对**已落盘** transcript 用**同一 checker**（transcript-delivery-check.ts）重判 → `state: delivered, delivered: true`，matched_line 为真实 user 消息（ts 03:12:08） |
 | 03:12:56 | 首个 `--task-start` 遥测落盘（`.workflow-events/fm-gap-quay-has-never-self-hosted-its-own-cold-start-1786504579122-0jhwr4.jsonl`） |
@@ -87,7 +87,7 @@
 | 维度 | 两次手工 OOM 恢复（two-oom-recoveries-compared.md） | 本次自动化冷启动（2026-08-12 03:07Z） |
 |---|---|---|
 | 会话从哪来 | 手工重建 tmux + 手敲会话 | outer 会话由 manager-adopt 新建（fresh、无历史；既有 quay-0 拓扑由 skill step 2 验证） |
-| 恢复/启动流程 | 100% 手工：先读历史、写 AC、逐项手修 | 一条 skill 命令：`quay-cold-start` 走完整 0–9 步 |
+| 恢复/启动流程 | 100% 手工：先读历史、写 AC、逐项手修 | 一条 skill 命令：`cold-start` 走完整 0–9 步 |
 | 验收判据 | 无统一 checklist，靠简报 + 人追问 | 同一份 AC8c 可证伪清单，七键逐条 `true` + 证据 |
 | 缺陷发现→纠正 | 6 条缺陷里 **3 条靠人观察/追问触发**（外层越权、只跑一个任务等） | 2 条发现（C8 self-touch、ENOENT 误报）都**由机制自己暴露并机械解决**，session 内零人工 user 消息（仅 manager-adopt 引导 + cron tick） |
 | 人介入次数 | 多次（人观察、人追问、人手动开 tmux） | **0 次验证性介入**；03:07–03:25 内该会话只有 manager-adopt 引导与 cron tick 两条非人工 user 消息 |

@@ -75,7 +75,7 @@ test('AC5 — the cold-start skill exists, is a Monitor-based agent skill, and s
   assert.ok(fs.existsSync(skillPath), 'plugin/skills/cold-start/SKILL.md must exist');
   // Frontmatter: name + the tool the agent is allowed to call (Monitor must be present so the
   // agent CAN mount monitors — a skill that cannot call Monitor cannot be the AC5 mechanism).
-  assert.match(skillSrc, /^name:\s*quay-cold-start/m, 'skill name must be quay-cold-start');
+  assert.match(skillSrc, /^name:\s*cold-start/m, 'skill name must be cold-start (== its directory name, so the slash form is /quay:cold-start)');
   const fm = skillSrc.match(/^allowed-tools:\s*(.+)$/m);
   assert.ok(fm, 'skill must declare allowed-tools');
   assert.ok(fm[1].includes('Monitor'), 'allowed-tools must include Monitor (the agent must be able to mount monitors)');

@@ -18,6 +18,7 @@ extra:
 - [x] 在临时目录 `claude -p "hi" --plugin-dir <plugin副本> --output-format stream-json --verbose --max-turns 1` 的 init 消息中，`slash_commands` 里以 `quay:` 开头的项不含 `quay:SKILL`，且 `skills` 里 quay: 开头的项仍为 13 个；贴出两个计数。→ `quay:SKILL` 已消失（before 有 / after 无）；13 个 SKILL.md skill 全部保留。两计数（isolated `CLAUDE_CONFIG_DIR` + 临时 cwd，claude 2.1.289）：slash_commands `quay:` before=20 / after=19；skills `quay:` after=19。⚠️ after 的 19 = 13 个 SKILL.md skill + 6 个 `plugin/workflows/*.js`（本版 Claude Code 把 plugin workflow 与 skill 同列进 init 的 `skills` 字段）；本任务前后差恰为 1（`quay:SKILL`），workflow 条目各只出现一次、非重名、与本改动无关。逐项读数与证据见 Notes。
 - [x] `grep -rn '"commands"' plugin/scripts plugin/test packages/quay/scripts --include=*.ts --include=*.mjs --include=*.sh` 的命中逐条列出，说明无一把 plugin.json 的 commands 数组当必需字段（或已同步修改）。→ 该 grep **0 命中**（exit 1）。另做语义搜索（不带引号的 `commands`）命中唯一活跃消费者 `plugin/test/plugin-packaging.test.mjs`（第 8/86/103/110/114 行读 `manifest.commands`），已同步修改：改为断言 `commands` 键**缺席**（防回归）+ 磁盘上 13 个 skill 目录存在。其余命中均为历史里程碑审计/提案文档（不可变记录，不改）。
 - [x] `scripts/test.sh --for-task gap-plugin-json-commands-array-duplicates-skills` 退出码 0。→ 实测（加 `--allow-thin`，selector 选 0 个 test 文件时仍跑静态门）exit 0。
+- [ ] 人 yale 在交互式 Claude Code（重启后）输入 /quay，init 只出现 1 次且无重复的其它 quay: 项；贴出截图文字（待外部）
 
 ## DoD
 真实落地：`/quay:` 补全中不再出现 `quay:SKILL`，且 13 个 skill 仍可用斜杠调用（以 claude -p init 消息的实读计数为证，不是 fixture）。修复后重新跑一次上述 init 读数，贴在任务 Notes。
@@ -50,3 +51,12 @@ after : slash_commands quay: = 19 ; has quay:SKILL = false ; skills quay: = 19
 ### 附带改动
 - `plugin.json` 是 quay-init laydown 源，改其内容使 closure-ratchet 指纹过期；`--gate` 判为 **shrink-only**（footprint 未增：3 files / 1022 bytes ≤ 基线），按 pre-commit 守卫指引 `--reanchor` 并把新基线 `docs/analysis/quay-init-closure-ratchet.baseline.json` 纳入提交。
 - `plugin/test/plugin-packaging.test.mjs`：原「13 bundled skills」测试断言 `manifest.commands`；已改为断言 `'commands' in manifest === false`（防回归）+ 磁盘 `plugin/skills/` 恰为 13 个目录。该文件 37 测试在 `test.sh` 的 dist 构建+mirage 环境下全绿。
+
+2026-10-05 交互式实测（Claude Code v2.1.289，cd /tmp 后 `claude --settings '{"enabledPlugins":{"quay@quay":false,"quay@quay-dev":false}}' --plugin-dir /tmp/quay-plugin-exp/<副本>` 再输入 /quay，人 yale 读数）：
+| 副本 | commands | init 的 name | /quay 里 init 次数 | 显示 |
+| before | 有 | quay-init | 2 | /quay:quay-init (quay-init) |
+| cmdonly | 无 | quay-init | 1 | /quay:quay-init (quay-init) |
+| nameonly | 有 | init | 2 | /quay:init |
+| after | 无 | init | 1 | /quay:init |
+结论：有 commands 数组的两份 init 都出现 2 次，没有的都只出现 1 次，与 name 无关 ⇒ 重名由 commands 数组造成，本任务成立。未解释项：每份截图只有两行，未能确认其它 skill 是否也被 commands 重复，但本任务删除整个数组，不依赖此答案。警示：`claude -p` init 消息里的 slash_commands 只反映 quay:SKILL 是否存在，不反映交互补全里的 init 重名，故以交互读数为准。副本在 /tmp/quay-plugin-exp/，可能已被清理。
+落地顺序：本任务与 gap-skill-frontmatter-name-align-dirname-for-slash-form 都改 plugin/.claude-plugin/plugin.json，建议本任务先落地。
