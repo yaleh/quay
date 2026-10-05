@@ -18,7 +18,7 @@
 // SPLIT from ready-pool-check.test.mjs by gap-suite-split-15-over-30s-test-files — shard 22/22 (8 tests). Shared fixtures: ./helpers/ready-pool-check-harness.mjs (single source).
 
 import { test } from "node:test";
-import { analyzeTasks, assert, buildGitHistoryIndex, cacheFixtureBody, fs, loadLandingIndex, loadParsedTaskStoreAtRef, makeGitWorkspace, makeWorkspace, normIndex, normStore, path, readTaskStatusAtRef, refTaskIds, rpCachePath, withCacheOff, writeTask } from "./helpers/ready-pool-check-harness.mjs";
+import { analyzeTasks, assert, buildGitHistoryIndex, cacheFixtureBody, execFileSync, fs, loadLandingIndex, loadParsedTaskStoreAtRef, makeGitWorkspace, makeWorkspace, normIndex, normStore, os, path, readTaskStatusAtRef, refTaskIds, rpCachePath, withCacheOff, writeTask } from "./helpers/ready-pool-check-harness.mjs";
 // The new judgment is imported DIRECTLY from the script under test (the shared harness above is out
 // of this task's ## Touches, so it must not be edited to re-export it).
 import { judgeUnsatisfiableUnannotatedAc, UNSATISFIABLE_AC_DECLARATION_PHRASES } from "../scripts/ready-pool-check.ts";
@@ -192,11 +192,56 @@ test("landing history index fail-soft: absent / corrupt cache and a rewritten re
 });
 
 
-test("AC5 regression: on an N=2000 store the cached call must beat the uncached baseline (red pre-fix)", (t) => {
+// ── deterministic read counter: a `git` PATH shim that records how many task blobs each arm reads ──
+// The mechanism under test is "the cached arm BYPASSES the store read" (the store is content-addressed
+// by blob OID — see ready-pool-check.ts's PERSISTENT CONTENT-KEYED CACHES). The honest, load-independent
+// reading of that is the NUMBER OF TASK BLOBS READ, not a wall-clock ratio: the ratio is a derived
+// quantity that drifts with host load (the four observed full-suite readings — 0.76/0.87/0.76/0.78 —
+// all sat just over a 0.75 threshold while the same file passed in isolation every time). A blob-read
+// count is deterministic: the same code path reads the same number of blobs regardless of host load.
+//
+// The instrument interposes at the ONE seam the module itself uses — it shells out to `git`. A
+// temporary `git` placed first on PATH delegates to the real binary, but for the batched content read
+// (`cat-file --batch`, whose requested ids arrive on stdin) it counts the requested lines first. ⛔ No
+// product logic is touched (the same interposition the AC's "counting stub" points at, at the git edge
+// rather than the fs edge — the ref read is a git subprocess, not an fs read).
+const REAL_GIT = execFileSync("sh", ["-c", "command -v git"], { encoding: "utf8" }).trim();
+
+/** Run `fn` with a counting `git` first on PATH; return the number of task blobs the arm requested
+ *  through `git cat-file --batch` (the store-content read). Non-batch git calls pass straight through. */
+function countGitBlobReads(fn) {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "rpc-reads-"));
+  const log = path.join(dir, "reads.log");
+  fs.writeFileSync(log, "");
+  const shim = path.join(dir, "git");
+  fs.writeFileSync(shim, [
+    "#!/bin/sh",
+    'case " $* " in',
+    '  *" cat-file --batch "*)',
+    `    _t=${JSON.stringify(dir)}/stdin.$$`,
+    '    cat > "$_t"',
+    `    wc -l < "$_t" | tr -d ' ' >> ${JSON.stringify(log)}`,
+    `    exec ${JSON.stringify(REAL_GIT)} "$@" < "$_t"`,
+    "    ;;",
+    "esac",
+    `exec ${JSON.stringify(REAL_GIT)} "$@"`,
+    "",
+  ].join("\n"));
+  fs.chmodSync(shim, 0o755);
+  const prevPath = process.env.PATH;
+  process.env.PATH = `${dir}:${prevPath}`;
+  try { fn(); } finally { process.env.PATH = prevPath; }
+  const txt = fs.readFileSync(log, "utf8").trim();
+  fs.rmSync(dir, { recursive: true, force: true });
+  return txt ? txt.split("\n").reduce((s, x) => s + Number(x), 0) : 0;
+}
+
+test("AC5 regression: on an N=2000 store the cached call BYPASSES the store read and the bypass arm reads the whole store", (t) => {
   // N ≥ 2,000 — the AC's floor. Mostly `done` (the production store's shape: 2,141 tasks, ~20 ready),
   // so the measurement is the STORE read, not the todo-candidate scan.
+  const N = 2000;
   const { root } = makeGitWorkspace("scale", {
-    n: 2000,
+    n: N,
     statusFor: (i) => (i % 200 === 0 ? "ready" : i % 50 === 0 ? "todo" : "done"),
   });
   t.after(() => fs.rmSync(root, { recursive: true, force: true }));
@@ -205,33 +250,39 @@ test("AC5 regression: on an N=2000 store the cached call must beat the uncached 
 
   // The first call is COLD and both asserts the fixture and populates the cache — it is deliberately
   // not one of the measured runs (a cold call is the thing the cache exists to avoid paying for).
-  assert.equal(run().r.scanned, 2000, "fixture precondition: 2000 tasks scanned");
+  assert.equal(run().r.scanned, N, `fixture precondition: ${N} tasks scanned`);
 
-  // min-of-2 per arm: a shared host's load spikes are one-sided (they only ever make a run slower),
-  // so the minimum is the robust estimator — and the two arms are INTERLEAVED in ONE process, so
-  // load, JIT state and page cache are the same for both. The comparison is therefore "the same work
-  // with the cache vs without", not "this commit vs that commit".
-  const cachedRuns = [];
-  const uncachedRuns = [];
+  // Two INTERLEAVED arms per iteration, so JIT state and page cache are shared — the comparison is
+  // "the same work with the cache vs without", not "this commit vs that commit". Each arm also reports
+  // its task-blob read count (the deterministic reading the assertion below uses).
+  const cachedMs = [];
+  const uncachedMs = [];
+  let cachedReads = 0;
+  let uncachedReads = 0;
   for (let i = 0; i < 2; i++) {
-    cachedRuns.push(run().ms);
-    uncachedRuns.push(withCacheOff(() => run().ms));
+    let ms = 0;
+    cachedReads += countGitBlobReads(() => { ms = run().ms; });
+    cachedMs.push(ms);
+    ms = 0;
+    uncachedReads += countGitBlobReads(() => withCacheOff(() => { ms = run().ms; }));
+    uncachedMs.push(ms);
   }
-  const tCached = Math.min(...cachedRuns);
-  const tUncached = Math.min(...uncachedRuns);
+  const tCached = Math.min(...cachedMs);
+  const tUncached = Math.min(...uncachedMs);
   const ratio = tCached / tUncached;
 
-  // Report the reading on the PASSING path too — a green run whose numbers nobody can see is the
-  // "structure without a reading" shape this repo keeps re-learning (硬规则 3b).
-  t.diagnostic(`AC5 N=2000: cached=${tCached}ms uncached=${tUncached}ms ratio=${ratio.toFixed(2)} (pre-fix ratio ≈ 1.0)`);
+  // Report BOTH readings on the PASSING path too — a green run whose numbers nobody can see is the
+  // "structure without a reading" shape this repo keeps re-learning (硬规则 3b). The wall-clock ratio
+  // stays a DIAGNOSTIC only: it drifts with host load, which is exactly why it is no longer asserted.
+  t.diagnostic(`AC5 N=${N}: cached=${tCached}ms uncached=${tUncached}ms ratio=${ratio.toFixed(2)} · task-blob reads cached=${cachedReads} uncached=${uncachedReads} (pre-fix: the kill-switch was a no-op so BOTH arms read the whole store)`);
 
-  // Fail loudly with the numbers if the cached arm did not actually bypass the store read. Pre-fix
-  // this test is RED: the kill-switch is a no-op there, so both arms do the identical full-store
-  // read + parse and the ratio sits at ~1.0.
-  assert.ok(
-    tCached < tUncached * 0.75,
-    `cached analyzeTasks must beat the uncached baseline on an N=2000 store: cached=${tCached}ms uncached=${tUncached}ms ratio=${ratio.toFixed(2)} (pre-fix ratio ≈ 1.0)`,
-  );
+  // DETERMINISTIC assertion: the cached arm is served from the content-addressed cache, so it reads
+  // (near-)nothing; the bypass arm (kill-switch on) must read the whole store, one task file per id.
+  // Pre-fix this is RED: the kill-switch was a no-op there, so `cachedReads === uncachedReads === 0`
+  // (both arms hit the warm cache) and the second assertion fails.
+  const msg = `task-blob reads on an N=${N} store: cached=${cachedReads} uncached=${uncachedReads} (pre-fix: both arms read N)`;
+  assert.ok(cachedReads * 10 < N, `cached analyzeTasks must bypass the store read — ${msg}`);
+  assert.ok(uncachedReads >= N, `the bypass arm must read the whole store — ${msg}`);
 });
 
 // ── executor-unsatisfiable AC, unannotated (gap-executor-unsatisfiable-ac-unannotated-burns-rounds) ──
