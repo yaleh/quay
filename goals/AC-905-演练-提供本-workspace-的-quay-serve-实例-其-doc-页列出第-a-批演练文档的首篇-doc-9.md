@@ -2,7 +2,7 @@
 id: AC-905
 title: 演练：提供本 workspace 的 quay serve 实例，其 /doc 页列出第 A 批演练文档的首篇
   DOC-910（并入前由预览实例满足、并入后由生产实例满足）
-status: active
+status: achieved
 kind: criterion
 goal: GOAL-905
 criterion: >-
@@ -50,6 +50,11 @@ statusLog:
     to: active
     actor: cli
     reason: 人 2026-10-05 授权第二次合并演练（GOAL-905）；承接任务已立并停放（needs-human），激活本 AC 不会触发乱序自动立案
+  - at: 2026-10-05T16:17:31.663Z
+    from: active
+    to: achieved
+    actor: goal-driver
+    reason: "I2: criterion pass"
 fidelity:
   verdict: faithful
   reason: "fidelity judge: faithful"
