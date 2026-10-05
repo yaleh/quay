@@ -2458,6 +2458,10 @@ export function supervisorStaleness(
 // （硬规则 3b：读错了对象 ⇒ 读数与「合格」同形）。上游 `caeca6f9c`（2026-09-20 17:14，晚于 0.10.0
 // cache 的构建时刻 10:18）因此在 claudecodeui 整整 3 天未生效，而没有任何读数能显示这一点。
 // 第二个漂移源：`.quay/config.yml` 的 provider `path` 写的是**安装当时**的 cache 版本目录，升级后不变。
+// 第三个漂移源（gap-path-resolved-quay-version-not-in-driver-status）：**执行 `quay` 命令时 PATH 实际
+// 命中的是哪一版**。2026-10-05 生产实测：本机 PATH 里冻结着 `cache/quay/quay/0.11.0/bin`，`which -a quay`
+// 第一项是 0.11.0，而注册表已是 0.14.0——人敲 `quay ...` 跑的是 0.11.0，而前两个量都不回答这一点
+// （`loaded_version` 问的是常驻 anchor 加载了哪版，`config_provider_path` 问的是配置里 provider 指向哪版）。
 //
 // 读法（硬规则 4b：用**外部可核**的直接量，⛔ 不用被测对象自报的心跳/派生计数）：
 //   · 「运行中进程实际加载了哪份内核」—— `/proc/<pid>/cmdline`（进程自己的 exec 实参，外部可核）。
@@ -2466,8 +2470,12 @@ export function supervisorStaleness(
 //     采信由 `loadedKernelSource` 单列，⛔ 不把两者混成同一个读数。
 //   · 「当前已安装版本」—— `~/.claude/plugins/installed_plugins.json` 里 `quay@quay` 的**最高**版本条目
 //     （附安装时刻 `installedAt`/`lastUpdated`）；注册表读不到时退回**本内核自己的 `VERSION` 文件**。
+//   · 「PATH 命中的那一版」—— `command -v quay` 的 realpath 所在**版本目录的 `VERSION` 文件**
+//     （⛔ 不 exec `quay --version`——它受 bundle 内嵌版本影响，见 gap-release-bundle-embeds-dev-version-
+//     after-stamp）；与注册表所选条目比较，给 `path_quay_version`。找不到 quay / 推不出版本 / 注册表读不出
+//     ⇒ 一律 `not-evaluated`（⛔ 不与 `current` 同形）。
 //   · 两个版本都拿到才判；任一读不到 ⇒ `not-evaluated`（⛔ 不与 `current` 同形）。
-//   ⛔ 只报，⛔ **不自动重启**（重启时机由人或 manager 决定）；`behind` 的人可读形态给出 `quay driver
+//   ⛔ 都只报，⛔ **不自动重启**（重启时机由人或 manager 决定）；`behind` 的人可读形态给出 `quay driver
 //     restart` 的提示。
 //
 // 与 `sourceWatch`/`supervisorStaleness` 的分工（⛔ 不是同一条判据的两种写法）：
@@ -2506,6 +2514,22 @@ export interface LoadedVersionReading {
   configProviderPath: LoadedVersionState;
   /** 参与上面那个判定的版本段（无版本段可比 ⇒ null）。 */
   configProviderPathVersion: string | null;
+  /** `not-evaluated` 的原因（⛔ 读不出时必须给，⛔ 不得为空——空读不出与「没问题」同形）。 */
+  reason: string | null;
+}
+
+/** 「执行 `quay` 命令时 PATH 实际命中的是哪一版」的完整读数（见本区第三漂移源的注释）。
+ *  ⛔ 三种「读不到」各自 ⇒ `state:"not-evaluated"` + 非空 `reason`（硬规则 3b：读不到不得伪装成
+ *  `current`）：① PATH 上找不到 quay；② 命中但推不出版本；③ 注册表读不出（比较基准缺失）。
+ *  ⛔ 每一格都有独立取值（`path`/`version` 的 `null` 与 `reason`），⛔ 不与「一致」同形。 */
+export interface PathQuayVersionReading {
+  state: LoadedVersionState;
+  /** PATH 上第一个 `quay` 的 realpath（`readlink -f` 的等价物；找不到 / 解析不出 ⇒ null）。 */
+  path: string | null;
+  /** 从 `path` 推出的版本（⛔ 从该版本目录的 `VERSION` 文件，⛔ 不 exec `quay --version`；读不出 ⇒ null）。 */
+  version: string | null;
+  /** `path` 的版本 vs 注册表已安装版本的方向（`loaded-older` = PATH quay 更旧）。 */
+  relation: VersionRelation;
   /** `not-evaluated` 的原因（⛔ 读不出时必须给，⛔ 不得为空——空读不出与「没问题」同形）。 */
   reason: string | null;
 }
@@ -2778,6 +2802,81 @@ export function loadedVersionReading(
   const state: LoadedVersionState =
     relation === "equal" ? "current" : relation === "loaded-older" ? "behind" : relation === "loaded-newer" ? "ahead" : "behind";
   return { state, loaded, loadedKernel, loadedKernelSource, relation, reason: null, ...base };
+}
+
+/** PATH 上第一个 `quay` 的 realpath（`command -v quay` + `readlink -f` 的等价物；⛔ 不 shell out、
+ *  ⛔ 不 exec quay 自己）。逐个 PATH 目录找**存在的普通文件** `<dir>/quay`，取第一个。
+ *  ⛔ 一个都找不到 ⇒ null；命中了但 realpath 解析失败 ⇒ null（= 读不懂，⛔ 不退回字面路径猜，
+ *  硬规则 3b：读不到不得伪装成「命中且合格」）。 */
+export function pathResolvedQuay(opts: { pathEnv?: string } = {}): string | null {
+  const pathEnv = opts.pathEnv ?? process.env.PATH ?? "";
+  for (const dir of pathEnv.split(path.delimiter)) {
+    if (dir === "") continue;
+    const cand = path.join(dir, "quay");
+    try {
+      // ⛔ 必须是普通文件：一个名为 `quay` 的目录不是 `command -v quay` 会命中的东西。
+      if (!fs.statSync(cand).isFile()) continue;
+    } catch {
+      continue; // 不存在 / stat 失败 ⇒ 这一条不算命中
+    }
+    try {
+      return fs.realpathSync(cand);
+    } catch {
+      return null; // 命中了但解析不出真实路径 ⇒ 读不懂
+    }
+  }
+  return null;
+}
+
+/** 「PATH 命中的 quay 是哪一版」的判定（见本区第三漂移源的注释）。
+ *
+ *  取 PATH 上第一个 `quay` 的 realpath（`pathResolvedQuay`），从**该版本目录的 `VERSION` 文件**读版本
+ *  （⛔ 不 exec `quay --version` —— 它受 bundle 内嵌版本影响，见 gap-release-bundle-embeds-dev-version-
+ *  after-stamp），与**注册表所选条目**比较，给 `current`/`behind`/`ahead`/`not-evaluated`。
+ *  ⛔ 只报，⛔ 不自动修复 PATH（人敲 `quay ...` 跑的是哪一版，由人选 PATH 决定）。
+ *
+ *  `opts.homeDir` / `opts.pathEnv` / `opts.quayPath` 是 hermetic 测试缝（缺省 = 真 HOME / 真 PATH /
+ *  自己解析 PATH quay）——⛔ 生产调用方不传。`quayPath` 显式给 `null` 时表示「PATH 上没有 quay」。 */
+export function pathQuayVersionReading(
+  opts: { homeDir?: string; pathEnv?: string; quayPath?: string | null } = {},
+): PathQuayVersionReading {
+  const homeDir = opts.homeDir ?? process.env.HOME ?? os.homedir();
+  const realpath = opts.quayPath !== undefined ? opts.quayPath : pathResolvedQuay({ pathEnv: opts.pathEnv });
+  if (realpath === null) {
+    return {
+      state: "not-evaluated",
+      path: null,
+      version: null,
+      relation: "not-evaluated",
+      reason: "no `quay` executable found on PATH",
+    };
+  }
+  const version = versionOfKernelScript(realpath);
+  if (version === null) {
+    return {
+      state: "not-evaluated",
+      path: realpath,
+      version: null,
+      relation: "not-evaluated",
+      reason: `cannot derive a version from the PATH-resolved quay (${realpath})`,
+    };
+  }
+  const reg = installedVersionFromRegistry(homeDir);
+  if (reg === null) {
+    return {
+      state: "not-evaluated",
+      path: realpath,
+      version,
+      relation: "not-evaluated",
+      reason: "cannot determine the installed version (installed_plugins.json unreadable) — no baseline to compare the PATH quay against",
+    };
+  }
+  const c = compareVersions(version, reg.version);
+  const relation: VersionRelation =
+    c === null ? (version === reg.version ? "equal" : "not-evaluated") : c === 0 ? "equal" : c < 0 ? "loaded-older" : "loaded-newer";
+  const state: LoadedVersionState =
+    relation === "equal" ? "current" : relation === "loaded-older" ? "behind" : relation === "loaded-newer" ? "ahead" : "not-evaluated";
+  return { state, path: realpath, version, relation, reason: null };
 }
 
 // ── Layer 0 · supervisor（respawn / pid 记账 / stop sentinel，由 promotion-driver-launch.sh 港进）────
@@ -3069,7 +3168,10 @@ export function aliveness(root: string, kind: DriverKind): {
  *  `loaded_version` / `loaded` / `installed` / `config_provider_path`（gap-driver-status-loaded-vs-
  *  installed-version-drift）：回答 `supervisor_stale` **结构上答不了**的那个问题——「跑着的那个进程
  *  加载的是哪一版内核」。`supervisor_stale` 对**装好的产物**恒报 `unwatched`-fresh（盘上没有源可推进），
- *  于是「落后 3 天的 anchor」与「一切正常」同形；本条比的是宿主进程**实际加载的**内核版本 vs 已安装版本。 */
+ *  于是「落后 3 天的 anchor」与「一切正常」同形；本条比的是宿主进程**实际加载的**内核版本 vs 已安装版本。
+ *  `path_quay_version` / `path_quay` / `path_quay_version_resolved`（gap-path-resolved-quay-version-not-in-
+ *  driver-status）：第三个漂移源——**PATH 命中的 quay 是哪一版**（人敲 `quay ...` 实际跑的那一版）；
+ *  前两个量都不回答它。⛔ 读不到一律 `not-evaluated`（硬规则 3b）、⛔ 只报不修 PATH。 */
 export function statusForKind(root: string, kind: DriverKind, json: boolean, out: (s: string) => void): number {
   const spec = DRIVER_KINDS[kind];
   const a = aliveness(root, kind);
@@ -3077,6 +3179,9 @@ export function statusForKind(root: string, kind: DriverKind, json: boolean, out
   // 宿主进程：收敛形态 = anchor；旧多进程形态 = supervisor。⛔ 不用 driverPid——短命的 driver 子进程
   // 不是「加载了哪份内核」这个问题的主体（常驻宿主才是）。
   const lv = loadedVersionReading(root, a.host === "anchor" ? a.anchorPid : a.supervisorPid);
+  // 第三个版本读数：PATH 命中的 quay 是哪一版（见本区「第三个漂移源」注释）。⛔ 与宿主进程无关——
+  // 它读的是**查询者 shell 的 PATH**，回答「人敲 `quay ...` 跑的是哪一版」。⛔ 只报，不修 PATH。
+  const pq = pathQuayVersionReading();
   // AC-255 能力半边：`running` 回答「有没有一个活着的承载进程」，**答不了**「这个 kind 的循环还在转
   // 吗」——收敛形态下六个 kind 共用一个 anchor，anchor 活着时全部报 `running=1`，哪怕其中两个的循环
   // 早已被移出期望态而停摆（2026-09-23 实测：`quality`/`meta` 停摆 264min，六个 kind 的 `running` 全是 1）。
@@ -3127,6 +3232,13 @@ export function statusForKind(root: string, kind: DriverKind, json: boolean, out
       // 第二个漂移源（`.quay/config.yml` provider `path` 的版本段），独立取值。
       config_provider_path: lv.configProviderPath,
       config_provider_path_version: lv.configProviderPathVersion,
+      // 第三个漂移源（PATH 命中的 quay）：`path_quay_version` 四态各自独立——找不到 quay / 推不出版本 /
+      // 注册表读不出 ⇒ `not-evaluated`，⛔ 不与 `current` 同形（硬规则 3b）。`path_quay` 是命中的 realpath。
+      path_quay_version: pq.state,
+      path_quay: pq.path,
+      path_quay_version_resolved: pq.version,
+      path_quay_version_relation: pq.relation,
+      path_quay_version_reason: pq.reason,
       // AC-255 能力半边：本 kind 相对**期望态**的声明状态。四态各自独立（⛔ 不与 `alive`/`running` 同形）：
       // `declared` / `stopped-explicitly`（操作员有意停机）/ `not-declared`（**静默脱离期望态**）/
       // `not-evaluated`（读不懂期望态或停机记录）。缺这个字段时，「六个循环里有两个没在转」与
@@ -3169,7 +3281,13 @@ export function statusForKind(root: string, kind: DriverKind, json: boolean, out
       // 第二个漂移源（provider `path` 的版本段）；已加载版本那三键已在行首（loadedHead）。
       // ⛔ 空值打印 "null"，⛔ 不打印空串（硬规则 3b）。
       `config_provider_path=${lv.configProviderPath}` +
-      `${lv.configProviderPathVersion ? `:${lv.configProviderPathVersion}` : ""}\n`,
+      `${lv.configProviderPathVersion ? `:${lv.configProviderPathVersion}` : ""} · ` +
+      // 第三个漂移源（PATH 命中的 quay）：state + 从路径读出的版本 + 命中的 realpath。⛔ 读不到时显式
+      // 报 `not-evaluated`（⛔ 不印空串、⛔ 不印 current——空串与「没问题」同形，硬规则 3b）。
+      `path_quay_version=${pq.state}` +
+      `${pq.version ? `:${pq.version}` : ""}` +
+      `${pq.path ? `:path=${pq.path}` : ""}` +
+      `${pq.state === "not-evaluated" && pq.reason ? ` (${pq.reason})` : ""}\n`,
     );
   }
   return 0;
