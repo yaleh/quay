@@ -177,10 +177,29 @@ export interface QuaySnapshotReading {
    *  `source-absent`    — the main checkout has no `.quay/` (nothing to snapshot). */
   state: "copied" | "target-is-source" | "source-absent";
   copied: string[];
-  /** Instance-identity files that EXIST at the source and were deliberately not copied (enumerated,
-   *  ⛔ never folded into `copied` — 硬规则 3). */
+  /** Entries that EXIST at the source and were deliberately not copied — instance-identity files
+   *  ALWAYS, plus any entry the caller's `skip` predicate protects (enumerated, ⛔ never folded into
+   *  `copied` — 硬规则 3). Directories are recorded with a trailing `/`. */
   excluded: string[];
   reasons: string[];
+}
+
+/** Options for {@link snapshotQuayDirInto}. */
+export interface QuaySnapshotOptions {
+  /**
+   * Entries the TARGET already carries and the snapshot must NOT write over: return a non-null
+   * reason to skip the entry (for a directory, its whole subtree). Called for every entry with its
+   * path RELATIVE TO `.quay/`; `null`/absent ⇒ nothing is protected.
+   *
+   *  WHY IT EXISTS — the goal→develop merge temp worktree
+   *  (gap-goal-merge-temp-worktree-lacks-quay-snapshot-no-suite-tooling): a project that TRACKS part
+   *  of `.quay/` (quay's own repo tracks 101 files under it) already has those checked out at the
+   *  merge commit. Overwriting them with the main checkout's copy would make the TESTED tree differ
+   *  from the merge commit AND dirty a tracked file. The merge caller therefore passes "the merge
+   *  commit tracks this path" as the predicate; the preview/criterion callers pass nothing (their
+   *  target is a bare detached checkout whose `.quay/` has no tracked files to protect).
+   */
+  skip?: (rel: string) => string | null;
 }
 
 function samePath(a: string, b: string): boolean {
@@ -192,10 +211,11 @@ function samePath(a: string, b: string): boolean {
 
 /**
  * Copy the main checkout's `.quay/` into `previewRoot` as a snapshot, skipping instance-identity
- * files and the heavy/wasteful entries. Idempotent (overwrites stale copies). Returns an ENUMERATED
- * reading — what was copied, what was excluded, and (when nothing was copied) why (硬规则 3/3b).
+ * files, the heavy/wasteful entries, and (when `opts.skip` is given) the caller-protected entries.
+ * Idempotent (overwrites stale copies). Returns an ENUMERATED reading — what was copied, what was
+ * excluded, and (when nothing was copied) why (硬规则 3/3b).
  */
-export function snapshotQuayDirInto(mainRoot: string, previewRoot: string): QuaySnapshotReading {
+export function snapshotQuayDirInto(mainRoot: string, previewRoot: string, opts: QuaySnapshotOptions = {}): QuaySnapshotReading {
   const src = path.join(mainRoot, ".quay");
   const dst = path.join(previewRoot, ".quay");
   if (samePath(src, dst)) {
@@ -219,6 +239,14 @@ export function snapshotQuayDirInto(mainRoot: string, previewRoot: string): Quay
     }
     for (const e of entries) {
       const childRel = rel ? path.join(rel, e.name) : e.name;
+      // Caller-protected entries are skipped FIRST — before the expensive recursion into a directory
+      // and before the instance-identity/log checks, so a protected subtree is never even walked.
+      const skipReason = opts.skip?.(childRel);
+      if (skipReason !== undefined && skipReason !== null) {
+        excluded.push(e.isDirectory() ? `${childRel}/` : childRel);
+        reasons.push(`${childRel}: ${skipReason}`);
+        continue;
+      }
       if (e.isDirectory()) {
         if (rel === "" && PREVIEW_SNAPSHOT_SKIP_DIRS.includes(e.name)) {
           excluded.push(`${childRel}/`);

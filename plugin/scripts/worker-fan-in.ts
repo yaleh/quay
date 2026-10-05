@@ -45,6 +45,7 @@ import {
   resolveKernelShellSibling,
   resolveQuaySrcModule,
   ensureWorktreeNodeModules,
+  snapshotQuayDirInto,
 } from "./driver-runtime.ts";
 import { spawnSuiteAndWait, type SuiteOutcome, type SuiteRunResult } from "./suite-driver.ts";
 import { suiteLockBase } from "./suite-lock-slots.ts";
@@ -1314,13 +1315,25 @@ export function newMechanicalSuiteRunId(task: string): string {
  *  gap-plugin-root-resolution-remaining-callsites-round2：第三方项目无 plugin/scripts/，锚在 worktree
  *  会 Cannot find module ⇒ 挡住任务落地）。
  *  抽成纯函数便于 worker-driver.test.mjs 断言缺省命令是 runner 而非 test.sh harness（AC2）。 */
-export function defaultMechanicalSuiteCommand(opts: {
+/** 机械 fan-in suite 步的解析结果（硬规则 3b）。两种产物都是【一条 argv】，调用方从 argv 本身分不清
+ *  「真会跑 suite」与「本项目没有测试能力（fail-closed exit 2）」——所以这里把成因一并交出来：
+ *  `capabilityMissing` 非 null ⇒ `argv` 是 {@link suiteCapabilityFailClosed} 的产物。goal 并入据此给
+ *  该步一个**独立 step 取值**（`suite-capability`），⛔ 不与「suite 跑了且失败」同形（读事件的人不会
+ *  把一个项目配置问题当成代码问题去查）。 */
+export interface MechanicalSuiteResolution {
+  argv: string[];
+  capabilityMissing: string | null;
+}
+
+/** `defaultMechanicalSuiteCommand` 的三态版（argv + 成因）。⛔ 判据只有一处：本函数是 suite 能力解析的
+ *  单一实现，`defaultMechanicalSuiteCommand` 只是它的 argv 投影（5b：同一个判类不得写两份）。 */
+export function resolveMechanicalSuiteCommand(opts: {
   task: string;
   worktree: string;
   root: string;
   suiteLogFile: string;
   runId: string;
-}): string[] {
+}): MechanicalSuiteResolution {
   // 本仓库（scripts/test.sh 存在）⇒ full-suite-runner（本仓库 bucket 化测试基建，行为与修改前逐字
   // 一致）；第三方项目无该文件 ⇒ 直接委托 loop.test_command（全量）——⛔ 不调用 full-suite-runner
   // （其内部锚点假设本仓库结构，gap-driver-fanin-hardcoded-test-sh-third-party 范围扩展：修 5 处
@@ -1329,35 +1342,49 @@ export function defaultMechanicalSuiteCommand(opts: {
   const sr = contract.suiteRunner;
   if (sr.state === "invalid") {
     // 声明了但读不懂 ⇒ fail-closed，⛔ 不静默当成 delegated（那是把「配置写错」伪装成「跑过了」）。
-    return suiteCapabilityFailClosed(
-      `suite-runner-declaration-unreadable: loop.suite_runner = ${sr.raw}（有效值：quay-buckets | delegated）`,
-    );
+    const cause = `suite-runner-declaration-unreadable: loop.suite_runner = ${sr.raw}（有效值：quay-buckets | delegated）`;
+    return { argv: suiteCapabilityFailClosed(cause), capabilityMissing: cause };
   }
   if (sr.state === "declared" && sr.value === "quay-buckets") {
-    return [
-      "node", "--no-warnings", ...kernelSiblingArgv("full-suite-runner.ts"),
-      "--buckets", opts.task,
-      "--root", opts.worktree,
-      "--state-dir", path.join(opts.root, ".quay"),
-      "--runner", "inner",
-      "--log-file", opts.suiteLogFile,
-      "--run-id", opts.runId,
-    ];
+    return {
+      argv: [
+        "node", "--no-warnings", ...kernelSiblingArgv("full-suite-runner.ts"),
+        "--buckets", opts.task,
+        "--root", opts.worktree,
+        "--state-dir", path.join(opts.root, ".quay"),
+        "--runner", "inner",
+        "--log-file", opts.suiteLogFile,
+        "--run-id", opts.runId,
+      ],
+      capabilityMissing: null,
+    };
   }
   // declared "delegated" 或未声明 ⇒ 用本项目自己声明的全量命令（loop.test_command）。该项目自己的
   // test_command（如 `node --test`）依赖 cwd 定位测试树 ⇒ 显式 cd 进 worktree 再跑
   // （spawnSuiteAndWait spawn 不设 cwd）。
   const testCommand = contract.testCommand;
-  if (testCommand !== null) return ["bash", "-c", `cd ${shq(opts.worktree)} && ${testCommand}`];
+  if (testCommand !== null) {
+    return { argv: ["bash", "-c", `cd ${shq(opts.worktree)} && ${testCommand}`], capabilityMissing: null };
+  }
   // 无全量测试能力（quay-init 对第三方已 fail-closed 缺 test_command，此分支仅防半初始化工作区）。
   // fail-closed 且可区分（⛔ 不与「suite 跑了且失败」同形）。⛔ 不再以「命令不存在」的 exit code 127
   // 形态出现——「能力不存在」须可区分于「命令不存在」（GOAL-012 退出条件②；
   // gap-ac227-third-party-capability-degradation）。
-  return suiteCapabilityFailClosed(
-    sr.state === "declared"
-      ? "no-suite-tooling: loop.suite_runner=delegated 但未声明 loop.test_command（无测试能力）"
-      : "no-suite-tooling: 未声明 loop.suite_runner 且未声明 loop.test_command（无测试能力）",
-  );
+  const cause = sr.state === "declared"
+    ? "no-suite-tooling: loop.suite_runner=delegated 但未声明 loop.test_command（无测试能力）"
+    : "no-suite-tooling: 未声明 loop.suite_runner 且未声明 loop.test_command（无测试能力）";
+  return { argv: suiteCapabilityFailClosed(cause), capabilityMissing: cause };
+}
+
+/** suite 步缺省命令（argv 投影，既有调用方与测试的 import 面逐字不变）。 */
+export function defaultMechanicalSuiteCommand(opts: {
+  task: string;
+  worktree: string;
+  root: string;
+  suiteLogFile: string;
+  runId: string;
+}): string[] {
+  return resolveMechanicalSuiteCommand(opts).argv;
 }
 
 /** 无测试能力的 fail-closed argv（exit 2 + 具名 cause；⛔ 不是 exit 127 的「命令不存在」形态）。 */
@@ -2652,6 +2679,43 @@ export async function runGoalMergeFanIn(opts: GoalMergeFanInOptions): Promise<Go
     const mergeCommitSha = (await mechSh(["git", "-C", tmpWorktree, "rev-parse", "HEAD"], 30_000)).stdout.trim();
     if (!mergeCommitSha) return red("merge-commit", "merge produced no commit sha");
 
+    // 2b. `.quay/` 快照（gap-goal-merge-temp-worktree-lacks-quay-snapshot-no-suite-tooling）——
+    //     裸 `git worktree add` 只带【已跟踪】的树；`.quay/config.yml` 若是 gitignored（quay 自己与
+    //     cantus 都如此），临时 worktree 里就没有它。suite 步随后经
+    //     `readLoopSection(<worktree>/.quay/config.yml)` 判「本项目声明了什么能力」，文件不存在 ⇒ 读成
+    //     【未声明】⇒ `no-suite-tooling` fail-closed（cantus 2026-10-06 第一次 `quay goal merge
+    //     GOAL-003` 就是这样红的，step=suite）。修法复用判据/预览 worktree 的同一实现
+    //     （`snapshotQuayDirInto`），⛔ 不写第三份。
+    //
+    //     ⚠️ 时序（必须先想清楚）：快照必须在【合并提交造好之后】铺。早于 `git merge --no-ff` 会把快照
+    //     写进工作树——已跟踪路径的本地改动会让 merge 因「本地改动会被覆盖」失败（quay 自己的仓库跟踪
+    //     `.quay/` 下 101 个文件）。放在 merge 之后，合并提交是既成事实，天然不受快照影响。
+    //     ⛔ 只铺【未被该合并提交跟踪】的条目：已跟踪条目已由 checkout 铺在 worktree 里，再覆盖一次会让
+    //     受测树 ≠ 合并提交，并把已跟踪文件弄脏。`ls-files` 读的是索引（merge --no-ff 提交后索引 =
+    //     合并提交的树），正是「哪些路径会被写脏」的判据。两种项目形态都覆盖：跟踪部分 `.quay/` 的
+    //     （quay 自己）跳过那些、只补 gitignored 的 config.yml；完全不跟踪的（cantus）全铺。
+    //     ⛔ 快照条目是未跟踪/被忽略的运行时文件，不得进任何提交——合并提交在其之前已造好、快照只写
+    //     工作树，天然满足。`ok` 判据只认 `copied`：`source-absent`（主检出根本没有 `.quay/`）如实标红，
+    //     ⛔ 不伪装成铺过（硬规则 3/3b）。
+    const snapshot = await tracedStep(
+      "quay-snapshot",
+      async () => {
+        const trackedOut = await mechSh(["git", "-C", tmpWorktree as string, "ls-files", "-z", "--", ".quay"], 30_000);
+        const tracked = new Set(trackedOut.stdout.split("\0").filter(Boolean));
+        return snapshotQuayDirInto(root, tmpWorktree as string, {
+          skip: (rel) =>
+            tracked.has(path.join(".quay", rel))
+              ? "tracked by the merge commit — already checked out, not overwritten"
+              : null,
+        });
+      },
+      (r) => r.state === "copied",
+      (r) => ({ state: r.state, copied: r.copied.length, excluded: r.excluded.length, failed: r.reasons.length }),
+    );
+    if (snapshot.state !== "copied") {
+      return red("quay-snapshot", snapshot.reasons.join("; ") || `snapshot state ${snapshot.state}`);
+    }
+
     // 3. 验证（typecheck / scoped 门 / 全量 suite）——全部跑在临时 worktree（受测树 = 合并提交）。
     if (opts.antiDriftCommand) {
       const a = await tracedStep("anti-drift", () => mechSh(opts.antiDriftCommand as string[], 120_000), (r) => r.ok);
@@ -2661,16 +2725,23 @@ export async function runGoalMergeFanIn(opts: GoalMergeFanInOptions): Promise<Go
       const t = await tracedStep("typecheck", () => mechSh(opts.typecheckCommand as string[], 180_000), (r) => r.ok);
       if (!t.ok) return red("typecheck", (t.stderr || t.stdout || `exit ${t.status}`).trim());
     }
-    const suiteCommand = opts.suiteCommand ?? defaultMechanicalSuiteCommand({
-      task: goalId, worktree: tmpWorktree, root, suiteLogFile, runId: perSuiteRunId,
-    });
+    const suiteResolution: MechanicalSuiteResolution = opts.suiteCommand
+      ? { argv: opts.suiteCommand, capabilityMissing: null }
+      : resolveMechanicalSuiteCommand({ task: goalId, worktree: tmpWorktree, root, suiteLogFile, runId: perSuiteRunId });
+    // 「本项目没有测试能力」（未声明 suite_runner/test_command，或声明读不懂）走**独立 step 取值**
+    // `suite-capability`（硬规则 3b）——读 goal-merge-result 的人不会把一个项目配置/环境问题当成
+    // 「suite 跑了且失败」的代码问题去查。注入的 suiteCommand（测试缝）永远是 `suite`。
+    const suiteStep = suiteResolution.capabilityMissing === null ? "suite" : "suite-capability";
     const suite = await tracedStep(
-      "suite",
-      () => mechSh(suiteCommand, 30 * 60_000),
+      suiteStep,
+      () => mechSh(suiteResolution.argv, 30 * 60_000),
       (r) => r.ok,
       (r) => (r.ok ? {} : { reason: extractFailureSummary(combinedOutput(r.stdout, r.stderr)) || `exit ${r.status}` }),
     );
-    if (!suite.ok) return red("suite", extractFailureSummary(combinedOutput(suite.stdout, suite.stderr)) || `exit ${suite.status}`);
+    if (!suite.ok) {
+      const failReason = extractFailureSummary(combinedOutput(suite.stdout, suite.stderr)) || `exit ${suite.status}`;
+      return red(suiteStep, suiteResolution.capabilityMissing ?? failReason);
+    }
 
     // suite 绿：写证书（suite_head = 合并提交 = 待 ff tip ⇒ delta 空 ⇒ 证书闸放行，同 runMechanicalFanIn）。
     writeSuiteCapture(suiteCapture, { full_suite_ran: "true", suite_exit: "0", suite_head: mergeCommitSha });
