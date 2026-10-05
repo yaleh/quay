@@ -2,7 +2,7 @@
 id: gap-goal-merge-temp-worktree-lacks-quay-snapshot-no-suite-tooling
 title: goal 并入的临时 worktree 没有 .quay 快照——不跟踪 .quay/ 的项目（cantus）并入的 suite 步读不到
   loop 声明，必红 no-suite-tooling
-status: ready
+status: done
 labels:
   - gap
   - defect

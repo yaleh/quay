@@ -3791,12 +3791,26 @@ const GM_GOAL = "GOAL-901";
 const GM_AC = "AC-901";
 const GM_TASK = "TT-901";
 
-function makeGoalMergeRepo(tag) {
+/**
+ * @param {string} tag
+ * @param {{ quayConfig?: string, trackQuayConfig?: boolean }} [opts]
+ *   `quayConfig` — when given, `.quay/config.yml` is written into the main checkout BEFORE the base
+ *   commit. `trackQuayConfig` — when true, `.quay/` is NOT gitignored and config.yml is COMMITTED at
+ *   base (quay's own repo shape: part of `.quay/` tracked); default false = the cantus shape
+ *   (`.quay/` gitignored, config.yml present only in the main checkout).
+ */
+function makeGoalMergeRepo(tag, opts = {}) {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), `goal-merge-e2e-${tag}-`));
   const g = (...a) => execFileSync("git", ["-C", root, ...a], { encoding: "utf8" });
   g("init", "-q"); g("config", "user.email", "t@example.com"); g("config", "user.name", "T");
   g("branch", "-M", "develop");
-  fs.writeFileSync(path.join(root, ".gitignore"), ".quay/\n");
+  if (!opts.trackQuayConfig) fs.writeFileSync(path.join(root, ".gitignore"), ".quay/\n");
+  if (opts.quayConfig !== undefined) {
+    fs.mkdirSync(path.join(root, ".quay"), { recursive: true });
+    // function form: the main-checkout path is knowable only inside this builder (marker files).
+    const cfg = typeof opts.quayConfig === "function" ? opts.quayConfig(root) : opts.quayConfig;
+    fs.writeFileSync(path.join(root, ".quay", "config.yml"), cfg);
+  }
   fs.mkdirSync(path.join(root, "goals"), { recursive: true });
   fs.mkdirSync(path.join(root, "tasks"), { recursive: true });
   // activatedAt 回拨 5 分钟：AC-322/325/327 的判据改写（2026-10-03）后 live_goals() 要求 branch-mode
@@ -4035,6 +4049,131 @@ test("goal-merge e2e — 临时验证 worktree 被装配依赖：要求 node_mod
       .trim().split("\n").filter(Boolean);
     assert.equal(merges.length, 1, "develop 首父链上恰有一个合并提交");
     assert.match(merges[0], /^merge: goal\/GOAL-901 into develop \(request /, `合并 subject 形态（实测 ${merges[0]}）`);
+  } finally { gmCleanup(root); }
+});
+
+// ── gap-goal-merge-temp-worktree-lacks-quay-snapshot-no-suite-tooling — 并入临时 worktree 的 .quay 快照 ─
+//
+// cantus 2026-10-06 第一次 `quay goal merge GOAL-003` 红在 step=suite，reason 是 `no-suite-tooling`：
+// 裸 `git worktree add` 只带已跟踪的树，gitignored 的 `.quay/config.yml` 不在临时 worktree 里，suite 步
+// 经 `readLoopSection(<worktree>/.quay/config.yml)` 判「本项目声明了什么能力」，文件不存在 ⇒ 读成【未声明】
+// ⇒ fail-closed。下面两个用例覆盖两种项目形态，直接量是【suite 步真的在临时 worktree 里跑了本项目声明的
+// test_command】——它把 `$PWD` 与 `.quay/` 清单写进主检出的标记文件；suite exit 0 本身证明不了它跑在哪个树。
+
+/** 一个 `loop:` 声明：delegated + 一条把读数写进主检出的 test_command。 */
+function quayLoopConfig(command) {
+  return ["loop:", "  suite_runner: delegated", `  test_command: "${command}"`, ""].join("\n");
+}
+
+/** 不注入 suiteCommand 的并入参数（走真实的 resolveMechanicalSuiteCommand：读临时 worktree 的 .quay 声明）。 */
+const gmOptsDeclaredSuite = (root) => ({
+  root, goalId: GM_GOAL,
+  ffMergeModule: FF_MERGE_MODULE_ABS,
+  scriptsDir: path.join(REPO_ROOT, "plugin", "scripts"),
+});
+
+test("goal-merge e2e — develop 不跟踪 .quay：主检出 .quay 快照铺进临时 worktree，suite 读到本项目声明的 test_command 并真的在那里执行", async () => {
+  const pwdMarker = (root) => path.join(root, "suite-pwd.txt");
+  const listingMarker = (root) => path.join(root, "suite-quay-listing.txt");
+  const root = makeGoalMergeRepo("quay-snapshot-untracked", {
+    quayConfig: (r) =>
+      quayLoopConfig(`pwd > ${pwdMarker(r)}; ls -a .quay > ${listingMarker(r)}`),
+  });
+  try {
+    // 实例身份文件放进主检出 .quay/：快照【不得】把它们带进临时 worktree（复用预览快照的排除集）。
+    for (const f of ["server.json", "server.lock", "server-services.json"]) {
+      fs.writeFileSync(path.join(root, ".quay", f), "{}\n");
+    }
+    const pending = pendingGoalMerges(root);
+    assert.equal(pending.length, 1, "请求挂起");
+    const r = await runGoalMergeFanIn({ ...gmOptsDeclaredSuite(root), request: pending[0].request });
+    // 失败信息里带上 step/reason：本用例的取假臂（临时禁用快照）期望这里出现 no-suite-tooling。
+    assert.equal(r.outcome, "landed", `并入必须落地；step=${r.step} reason=${r.reason}`);
+
+    // 直接量①：test_command 在【临时 worktree】里执行的（$PWD 是 mkdtemp 出来的 …/goal-merge-…/wt，
+    // ⛔ 不是主检出）——suite exit 0 不能证明这一点，标记文件才能。
+    const pwd = fs.readFileSync(pwdMarker(root), "utf8").trim();
+    assert.notEqual(pwd, root, "test_command 不是在主检出里跑的空转");
+    assert.equal(path.basename(pwd), "wt", `test_command 跑在临时 worktree 的 wt 子目录（实测 ${pwd}）`);
+    assert.match(path.basename(path.dirname(pwd)), /^goal-merge-/, "父目录是并入 mkdtemp 出来的 goal-merge-*");
+
+    // 直接量②：临时 worktree 的 `.quay/` 里确实有主检出的 config.yml（快照铺到了）。
+    const listing = fs.readFileSync(listingMarker(root), "utf8").split("\n").map((l) => l.trim());
+    assert.ok(listing.includes("config.yml"), `临时 worktree 的 .quay/ 含 config.yml（实测 ${JSON.stringify(listing)}）`);
+
+    // AC3：实例身份文件【不在】临时 worktree 的 .quay/ 里（复制它们会让临时 worktree 读到生产的实例注册）。
+    for (const f of ["server.json", "server.lock", "server-services.json"]) {
+      assert.equal(listing.includes(f), false, `${f} 不得被快照带进临时 worktree（实测 ${JSON.stringify(listing)}）`);
+    }
+
+    // AC5：清理路径不因新增的快照目录退化——并入收尾后，临时 worktree 连同它刚铺出来的 `.quay/`
+    // 一并消失（`pwd` 是并入过程中记下的临时 worktree 路径，此刻应已不存在）。
+    assert.equal(fs.existsSync(pwd), false, "并入收尾后临时 worktree 目录已被删");
+    assert.equal(fs.existsSync(path.join(pwd, ".quay")), false, "快照目录 .quay/ 也随临时 worktree 一并被删");
+  } finally { gmCleanup(root); }
+});
+
+test("goal-merge e2e — develop 跟踪 .quay/config.yml（quay 自己的形态）：快照不覆盖已跟踪条目，并入提交不含快照条目、merge 不因本地改动失败", async () => {
+  const statusMarker = (root) => path.join(root, "suite-quay-status.txt");
+  const rootConfigRanMarker = (root) => path.join(root, "root-config-ran.txt");
+  // 提交在 develop 上的 config：它的 test_command 才是临时 worktree 该跑的那条。
+  const committedCommand = (r) => `git status --porcelain -- .quay > ${statusMarker(r)}`;
+  const root = makeGoalMergeRepo("quay-snapshot-tracked", {
+    trackQuayConfig: true,
+    quayConfig: (r) => quayLoopConfig(committedCommand(r)),
+  });
+  try {
+    // 主检出的 config.yml 改成【不同内容】：快照若不跳过已跟踪条目，就会把它覆盖进临时 worktree，
+    // 于是 ①工作树的 config.yml 相对合并提交变脏 ②suite 会跑主检出的命令而不是提交里的那条。
+    // 两个形态都能被下面的断言抓住（⛔ 内容相同会让这条测试空转，硬规则 4）。
+    fs.writeFileSync(
+      path.join(root, ".quay", "config.yml"),
+      quayLoopConfig(`echo ROOT-CONFIG-RAN > ${rootConfigRanMarker(root)}`),
+    );
+
+    const pending = pendingGoalMerges(root);
+    assert.equal(pending.length, 1, "请求挂起");
+    const r = await runGoalMergeFanIn({ ...gmOptsDeclaredSuite(root), request: pending[0].request });
+    assert.equal(r.outcome, "landed", `并入必须落地（merge 不得因本地改动失败）；step=${r.step} reason=${r.reason}`);
+
+    // 直接量①：临时 worktree 跑的是【提交里的】config（它的 test_command 写了 statusMarker），
+    // ⛔ 不是主检出那份（改跑主检出那条会写 rootConfigRanMarker）。
+    assert.ok(fs.existsSync(statusMarker(root)), "临时 worktree 的 .quay/config.yml 来自合并提交（提交里的 test_command 跑了）");
+    assert.equal(fs.existsSync(rootConfigRanMarker(root)), false, "主检出的 config.yml 未被带进临时 worktree（否则会是它跑）");
+
+    // 直接量②：受测树里【没有被写脏的已跟踪文件】——porcelain 只应出现 `??`（快照铺下的未跟踪条目）。
+    const status = fs.readFileSync(statusMarker(root), "utf8").split("\n").map((l) => l.trim()).filter(Boolean);
+    assert.ok(
+      status.some((l) => l.endsWith(".quay/gate-events.jsonl") && l.startsWith("??")),
+      `快照确实铺下了未跟踪条目（否则本断言空转）；实测 ${JSON.stringify(status)}`,
+    );
+    for (const line of status) {
+      assert.ok(line.startsWith("??"), `临时 worktree 里不得有已跟踪文件被改动（实测行：${line}）`);
+    }
+
+    // 直接量③：并入提交相对其第一父提交的文件列表不含任何 `.quay/` 快照条目（快照条目是未跟踪/被忽略的
+    // 运行时文件，必须留在合并提交之外）。
+    const mergeSha = r.mergeCommitSha;
+    assert.ok(mergeSha, "landed 结果带回合并提交 sha");
+    const changed = execFileSync("git", ["-C", root, "diff", "--name-only", `${mergeSha}^1`, mergeSha], { encoding: "utf8" })
+      .split("\n").map((l) => l.trim()).filter(Boolean);
+    assert.deepEqual(changed.filter((p) => p.startsWith(".quay/")), [], `并入提交不含任何 .quay/ 快照条目（实测 ${JSON.stringify(changed)}）`);
+  } finally { gmCleanup(root); }
+});
+
+test("goal-merge e2e — 本项目无测试能力（.quay 无 loop 声明）：red 的 step 是 suite-capability，⛔ 不与「suite 跑了且失败」共用 suite", async () => {
+  // ⛔ 不写 `.quay/config.yml`：resolveMechanicalSuiteCommand 读成「无测试能力」⇒ 独立 step 取值
+  // （硬规则 3b：读 goal-merge-result 的人不得把项目配置问题当成代码问题）。本任务第 4 小项。
+  const root = makeGoalMergeRepo("quay-snapshot-nocap");
+  try {
+    const devBefore = execFileSync("git", ["-C", root, "rev-parse", "develop"], { encoding: "utf8" }).trim();
+    const pending = pendingGoalMerges(root);
+    assert.equal(pending.length, 1, "请求挂起");
+    const r = await runGoalMergeFanIn({ ...gmOptsDeclaredSuite(root), request: pending[0].request });
+    assert.equal(r.outcome, "red");
+    assert.equal(r.step, "suite-capability", `无测试能力 ⇒ 独立 step 取值（实测 step=${r.step}）`);
+    assert.match(String(r.reason), /no-suite-tooling/, `reason 保留成因原文（实测 ${r.reason}）`);
+    assert.equal(execFileSync("git", ["-C", root, "rev-parse", "develop"], { encoding: "utf8" }).trim(), devBefore, "红：develop 不动");
   } finally { gmCleanup(root); }
 });
 
