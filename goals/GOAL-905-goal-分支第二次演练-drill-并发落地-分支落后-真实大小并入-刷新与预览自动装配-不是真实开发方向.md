@@ -5,6 +5,7 @@ status: draft
 kind: goal
 origin: 人 2026-10-05「补上没覆盖的路径」：对 GOAL-028 做第二次演练（多任务并发落同一 goal 分支、goal 分支落后
   develop、真实大小的并入、修复后的刷新与预览自动装配）；判据能在生产实例上判假（落笔当轮读数见各 AC 的验证）。
+branch: true
 ---
 ## 背景
 
