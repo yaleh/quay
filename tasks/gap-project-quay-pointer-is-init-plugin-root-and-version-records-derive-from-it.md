@@ -33,13 +33,17 @@ extra:
 
 ## Touches
 - `packages/quay/src/init.ts`
+- `packages/quay/src/config.ts`
 - `packages/quay/src/plugin-root.ts`
 - `packages/quay/src/serve-render.ts`
 - `plugin/scripts/goal-driver.ts`
 - `plugin/scripts/driver-runtime.ts`
 - `plugin/scripts/quay-init.sh`
+- `plugin/scripts/quay-init-steps.ts`
 - `plugin/skills/init/SKILL.md`
 - `plugin/test/quay-init-stable-plugin-link.test.mjs`
+- `plugin/test/quay-init.test.mjs`
+- `plugin/test/quay-init-characterization.test.mjs`
 - `plugin/test/goal-driver-s05.test.mjs`
 - `plugin/test/goal-driver-s04.test.mjs`
 - `plugin/test/helpers/goal-driver-harness.mjs`
@@ -48,19 +52,20 @@ extra:
 - `packages/quay/test/plugin-root.test.mjs`
 - `packages/quay/test/install-config-driven-e2e.test.mjs`
 - `plugin/sh-census-baseline.json`
+- `docs/analysis/quay-init-closure-ratchet.baseline.json`
 - `tasks/gap-project-quay-pointer-is-init-plugin-root-and-version-records-derive-from-it.md`
 
 ## AC
-- [ ] `plugin/test/quay-init-stable-plugin-link.test.mjs` 改为断言:链接目标 == 传入 init 的 `--plugin-root`(或 `CLAUDE_PLUGIN_ROOT`),与夹具注册表里 project/user 条目的版本高低、有无 projectPath 完全无关(夹具含 project 0.14.0 + user 0.15.0,传入 plugin-root=0.15.0 ⇒ 链接指向 0.15.0;传入 0.14.0 ⇒ 指向 0.14.0);插件根缺失或为开发树 ⇒ 输出含 `NOT-EVALUATED` 且已有链接不变。`node --experimental-strip-types --test plugin/test/quay-init-stable-plugin-link.test.mjs` 退出 0;取假:恢复注册表 tier 选择后上述用例红(附实跑输出)。
-- [ ] `grep -rn "selectProjectPluginInstallPath" packages/quay/src plugin/scripts --include=*.ts --include=*.sh` 排除测试与 dist 后命中数为 0(先打印基线读数与前 3 条命中,证明谓词对改前代码能命中)。
-- [ ] Core 不写链接:新增测试断言 `driver start`、`serve`、MCP 启动路径、`driver status` 运行前后 `.quay/plugin` 的 `readlink` 不变;并 `grep -rn "symlinkSync\|\.quay.*plugin" packages/quay/src plugin/scripts --include=*.ts` 中对 `.quay/plugin` 的写调用只出现在 `refreshProjectPluginLink` 一处(列出命中)。
-- [ ] `driver status --json` 含 `pointer` 项:夹具中 Core 插件根版本 0.15.0 / 链接目标 0.14.0 ⇒ `behind`;相同 ⇒ `current`;链接不存在或目标无 `plugin.json` ⇒ `not-evaluated`(与 `current` 取值不同);`node --experimental-strip-types --test plugin/test/driver-runtime-loaded-version-drift.test.mjs` 退出 0。
-- [ ] `plugin-root.ts`:新增用例断言 `.quay/plugin` 存在且指向另一版本时,解析结果仍是模块自身所在插件根;`QUAY_PLUGIN_ROOT` 与自身位置不一致时读数含告警;`node --experimental-strip-types --test packages/quay/test/plugin-root.test.mjs` 退出 0。
-- [ ] native provider 缺省解析:用真 `.quay/config.yml` 临时 workspace(缺 native 的 `path`/`mcp_entry`)启动 Core,断言 provider 从 `<插件根>/vendor/quay-native` 拉起且 `task_list` 可用;带显式自定义 provider `path` 的 config 行为不变。
-- [ ] init 迁移:对含 native `path`/`mcp_entry` 与多行注释的旧 config 跑迁移,断言这两项被逐行删除、其余行(含全部注释)逐字节不变(对迁移前后文件做 `diff`,仅差被删的行)。
-- [ ] `quay-init-state.json` 派生:`goal-driver-s05.test.mjs`/`goal-driver-s04.test.mjs` 与 `serve-render` 相关测试改用链接夹具(`goal-driver-harness.mjs` 的 `mkTargetRoot` 建 `.quay/plugin` 链接而非 state 文件);链接缺失 ⇒ `cause: "plugin-link-missing"` 且 `verdict: "not-evaluated"`,`equal: null`;`grep -rn "quay-init-state" packages/quay/src plugin/scripts --include=*.ts` 排除测试、dist 与注释后命中数为 0。
-- [ ] 读生产载体:在本机 cantus(已有 `.quay/plugin` 链接)与 claudecodeui(尚无链接,需先 `/quay:init`)各实跑 `driver status --json` 与 goal-driver 的 target-health 探针,读出 `pointer` 与 `pluginVersion` 读数,cantus 为 current/equal、claudecodeui 链接缺失时为 `not-evaluated` 而非通过;读数原文贴进完成记录。该 AC 在把读取方改回读 `quay-init-state.json` 后必须变红(负控制)。
-- [ ] `quay-init.sh` 是 sh-census 棘轮收费文件:改动后代码行数不高于改前基线(行数中性或净减),`plugin/sh-census-baseline.json` 同步;`bash scripts/test.sh --for-task gap-project-quay-pointer-is-init-plugin-root-and-version-records-derive-from-it` 退出 0 且执行了 ≥1 个测试文件。
+- [x] `plugin/test/quay-init-stable-plugin-link.test.mjs` 改为断言:链接目标 == 传入 init 的 `--plugin-root`(或 `CLAUDE_PLUGIN_ROOT`),与夹具注册表里 project/user 条目的版本高低、有无 projectPath 完全无关(夹具含 project 0.14.0 + user 0.15.0,传入 plugin-root=0.15.0 ⇒ 链接指向 0.15.0;传入 0.14.0 ⇒ 指向 0.14.0);插件根缺失或为开发树 ⇒ 输出含 `NOT-EVALUATED` 且已有链接不变。`node --experimental-strip-types --test plugin/test/quay-init-stable-plugin-link.test.mjs` 退出 0;取假:恢复注册表 tier 选择后上述用例红(附实跑输出)。
+- [x] `grep -rn "selectProjectPluginInstallPath" packages/quay/src plugin/scripts --include=*.ts --include=*.sh` 排除测试与 dist 后命中数为 0(先打印基线读数与前 3 条命中,证明谓词对改前代码能命中)。
+- [x] Core 不写链接:新增测试断言 `driver start`、`serve`、MCP 启动路径、`driver status` 运行前后 `.quay/plugin` 的 `readlink` 不变;并 `grep -rn "symlinkSync\|\.quay.*plugin" packages/quay/src plugin/scripts --include=*.ts` 中对 `.quay/plugin` 的写调用只出现在 `refreshProjectPluginLink` 一处(列出命中)。
+- [x] `driver status --json` 含 `pointer` 项:夹具中 Core 插件根版本 0.15.0 / 链接目标 0.14.0 ⇒ `behind`;相同 ⇒ `current`;链接不存在或目标无 `plugin.json` ⇒ `not-evaluated`(与 `current` 取值不同);`node --experimental-strip-types --test plugin/test/driver-runtime-loaded-version-drift.test.mjs` 退出 0。
+- [x] `plugin-root.ts`:新增用例断言 `.quay/plugin` 存在且指向另一版本时,解析结果仍是模块自身所在插件根;`QUAY_PLUGIN_ROOT` 与自身位置不一致时读数含告警;`node --experimental-strip-types --test packages/quay/test/plugin-root.test.mjs` 退出 0。
+- [x] native provider 缺省解析:用真 `.quay/config.yml` 临时 workspace(缺 native 的 `path`/`mcp_entry`)启动 Core,断言 provider 从 `<插件根>/vendor/quay-native` 拉起且 `task_list` 可用;带显式自定义 provider `path` 的 config 行为不变。
+- [x] init 迁移:对含 native `path`/`mcp_entry` 与多行注释的旧 config 跑迁移,断言这两项被逐行删除、其余行(含全部注释)逐字节不变(对迁移前后文件做 `diff`,仅差被删的行)。
+- [x] `quay-init-state.json` 派生:`goal-driver-s05.test.mjs`/`goal-driver-s04.test.mjs` 与 `serve-render` 相关测试改用链接夹具(`goal-driver-harness.mjs` 的 `mkTargetRoot` 建 `.quay/plugin` 链接而非 state 文件);链接缺失 ⇒ `cause: "plugin-link-missing"` 且 `verdict: "not-evaluated"`,`equal: null`;`grep -rn "quay-init-state" packages/quay/src plugin/scripts --include=*.ts` 排除测试、dist 与注释后命中数为 0。
+- [x] 读生产载体:在本机 cantus(已有 `.quay/plugin` 链接)与 claudecodeui(尚无链接,需先 `/quay:init`)各实跑 `driver status --json` 与 goal-driver 的 target-health 探针,读出 `pointer` 与 `pluginVersion` 读数,cantus 为 current/equal、claudecodeui 链接缺失时为 `not-evaluated` 而非通过;读数原文贴进完成记录。该 AC 在把读取方改回读 `quay-init-state.json` 后必须变红(负控制)。
+- [x] `quay-init.sh` 是 sh-census 棘轮收费文件:改动后代码行数不高于改前基线(行数中性或净减),`plugin/sh-census-baseline.json` 同步;`bash scripts/test.sh --for-task gap-project-quay-pointer-is-init-plugin-root-and-version-records-derive-from-it` 退出 0 且执行了 ≥1 个测试文件。
 
 ## DoD
 真实落地:一个真实第三方项目升级插件版本后,重跑 `/quay:init` 即让 `.quay/plugin` 指向该会话实际加载的插件、`config.yml` 不含任何版本或链接依赖、`driver status` 与 goal-driver target-health 对该项目给出基于链接的真实 `pointer`/`pluginVersion` 读数;链接落后时读数为 `behind` 而非通过,Core 任何路径都没有改写过该链接。仅 fixture 绿不算完成。
