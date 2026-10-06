@@ -1360,3 +1360,23 @@ test("AC5: verify-provider-runtime-existence is three-state — OK / FAIL(non-ze
 after(() => {
   for (const dir of _wtRoots) fs.rmSync(dir, { recursive: true, force: true });
 });
+
+// ── gap-quay-init-sh-upgrade-leaves-version-level-loop-defaults-unfilled ───────────────────────────
+// The SHELL entry's `reconcile-config` step calls `reconcileConfigContent(raw, { serve: false })`: a
+// fresh `quay-init.sh` install writes no `serve:` section, so filling one on a re-run would make the
+// script non-idempotent over its own output. The loop-level version defaults — the ones the validator
+// REQUIRES — are filled either way.
+test("reconcileConfigContent({ serve:false }) fills loop version-level defaults but NEVER adds a serve: section", async () => {
+  const { reconcileConfigContent } = await import("../src/init.ts");
+  const raw = "# keep me\nloop:\n  repo_root: /x\n";
+  const withServe = reconcileConfigContent(raw);
+  const loopOnly = reconcileConfigContent(raw, { serve: false });
+  assert.ok(withServe.report.addedServe.length > 0, "the default reconcile still fills serve (CLI/MCP behaviour unchanged)");
+  assert.deepEqual(loopOnly.report.addedServe, [], "serve:false must add no serve key");
+  assert.ok(loopOnly.report.added.includes("board") && loopOnly.report.added.includes("gates"),
+    "loop.board and loop.gates (validator-required) must still be filled");
+  assert.ok(!/^serve:/m.test(loopOnly.content), `no serve: section may appear:\n${loopOnly.content}`);
+  assert.ok(loopOnly.content.includes("# keep me"), "comments preserved");
+  // idempotent: reconciling its own output is a no-op
+  assert.equal(reconcileConfigContent(loopOnly.content, { serve: false }).report.unchanged, true);
+});

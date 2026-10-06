@@ -241,7 +241,10 @@ export interface ReconcileReport {
  * @throws when the input is not parseable — callers reach this only after `classifyConfig` returned
  *         "valid", so a throw here means the file changed underneath them; it is never swallowed.
  */
-export function reconcileConfigContent(raw: string): { content: string; report: ReconcileReport } {
+export function reconcileConfigContent(
+  raw: string,
+  opts: { serve?: boolean } = {},
+): { content: string; report: ReconcileReport } {
   const doc = YAML.parseDocument(raw);
   const added: string[] = [];
   const addedServe: string[] = [];
@@ -255,7 +258,11 @@ export function reconcileConfigContent(raw: string): { content: string; report: 
 
   // The serve binding's version-level defaults travel through the SAME comment-preserving
   // reconcile — an absent `serve:` section is filled, a present one is left byte-for-byte alone.
-  for (const [key, value] of Object.entries(SERVE_VERSION_DEFAULTS)) {
+  // `opts.serve === false` (the SHELL entry's `reconcile-config` step) skips this table: a FRESH
+  // `quay-init.sh` install writes no `serve:` section, so filling it on a re-run would make the script
+  // non-idempotent over its own output (the second run would rewrite a config the first run just
+  // wrote). The serve defaults stay delivered by `quay init --reconcile` / the MCP init tool.
+  for (const [key, value] of opts.serve === false ? [] : Object.entries(SERVE_VERSION_DEFAULTS)) {
     if (doc.hasIn(["serve", key])) continue;
     doc.setIn(["serve", key], value);
     addedServe.push(key);
@@ -1349,7 +1356,57 @@ export function ensureLoopConfig(o: EnsureLoopConfigOpts): void {
     return;
   }
   fs.writeFileSync(o.cfgPath, after, "utf8");
-  console.log("  wrote: .quay/config.yml loop: (repo_root/test_command/tmux_session/worktree_root updated, doc_surfaces filled when absent; 其余 loop 键保留 — config 保留 增量升级)");
+  console.log("  wrote: .quay/config.yml loop: (repo_root/test_command/tmux_session/worktree_root updated, doc_surfaces filled when absent; 其余 loop 键保留— config 保留 增量升级)");
+}
+
+export interface ReconcileConfigFileOpts {
+  cfgPath: string;
+  dryRun: boolean;
+}
+
+/**
+ * `reconcile_config` — the VERSION-LEVEL half of an upgrade, delivered by the SHELL entry too
+ * (gap-quay-init-sh-upgrade-leaves-version-level-loop-defaults-unfilled).
+ *
+ * THE DEFECT THIS CLOSES (measured 2026-10-07, release rehearsal on 0.17.0): a project initialized
+ * by 0.16.0 and then re-initialized by `bash quay-init.sh` from 0.17.0 had its `.quay/plugin` link
+ * and provider binding migrated, but `quay config validate` still failed with
+ * `loop.board — Missing required field` / `loop.gates — Missing required field`: those are VERSION-
+ * LEVEL defaults (`LOOP_VERSION_DEFAULTS`), and the only things that delivered them to an existing
+ * config were `quay init --reconcile` and the MCP `init` tool — never the script. `ensureLoopConfig`
+ * above is deliberately the four project-DERIVED values and must stay so (its writer drops comments).
+ * So the documented upgrade ("re-run /quay:init") left the official validator red until the user
+ * discovered a third, hidden command.
+ *
+ * Same function the CLI/MCP reconcile uses (`reconcileConfigContent`) — ONE implementation, no second
+ * copy: comment-preserving, per-key, and a no-op reconcile writes NOTHING (byte-identical config).
+ *
+ * NOT-EVALUATED is a voiced state, not a pass: an absent or unparseable config is REPORTED as such and
+ * left untouched (a corrupt file is `quay init --reconcile`'s salvage-by-rebuild job, which keeps the
+ * broken bytes beside the new file — not something a shell step should decide silently).
+ */
+export function reconcileConfigFile(o: ReconcileConfigFileOpts): void {
+  const cls = classifyConfig(o.cfgPath);
+  if (cls.state !== "valid") {
+    console.log(`  reconcile: NOT-EVALUATED — .quay/config.yml is ${cls.state}${cls.state === "corrupt" ? ` (${cls.reason})` : ""}; left untouched (use \`quay init --reconcile\` to salvage)`);
+    return;
+  }
+  const { content, report } = reconcileConfigContent(cls.raw ?? "", { serve: false });
+  if (report.unchanged) {
+    console.log("  unchanged: .quay/config.yml (already current for this version of quay — version-level defaults present, not rewritten)");
+    return;
+  }
+  const lines = [
+    ...report.added.map((k) => `loop.${k}`),
+    ...report.addedServe.map((k) => `serve.${k}`),
+    ...report.migrated.map((m) => `loop.${m}`),
+  ];
+  if (o.dryRun) {
+    console.log(`  would-reconcile: .quay/config.yml (${lines.join(", ")})`);
+    return;
+  }
+  fs.writeFileSync(o.cfgPath, content, "utf8");
+  console.log(`  reconciled: .quay/config.yml version-level defaults (${lines.join(", ")}); comments and every other key preserved`);
 }
 
 export interface EnsureCarrierEnvOpts {

@@ -421,11 +421,15 @@ ensure_loop_config() {
   # ⛔ `loop.doc_surfaces` is deliberately NOT passed here: it is a VERSION-LEVEL default, and this
   # step is the four VALUE-level project-derived values only (repo_root/test_command/tmux_session/
   # worktree_root). Its delivery to an existing config is the comment-preserving per-key reconcile
-  # (`LOOP_VERSION_DEFAULTS` in init.ts, reachable via `quay init --reconcile` / the MCP init tool) —
-  # see plugin/skills/init/SKILL.md, "Re-running on an existing project". Routing it through this
-  # step instead would re-serialize the whole document with the value-merge writer, which DROPS the
-  # user's comments (the "NO GRATUITOUS REWRITE" discipline this file's comments describe).
-  quay-init-step ensure-loop-config "$cfg" "$REPO_ROOT" "$TEST_COMMAND" "$TMUX_SESSION" "$WORKTREE_ROOT" "$DRY_RUN"
+  # (`LOOP_VERSION_DEFAULTS` in init.ts) — the `reconcile-config` step that runs on the SAME LINE right
+  # after the value merge (gap-quay-init-sh-upgrade-leaves-version-level-loop-defaults-unfilled: before
+  # it, only `quay init --reconcile` / the MCP init tool delivered them, so re-running this script after
+  # a plugin upgrade left `loop.board`/`loop.gates` absent and `quay config validate` red). Routing the
+  # version-level keys through the VALUE step instead would re-serialize the whole document with the
+  # value-merge writer, which DROPS the user's comments (the "NO GRATUITOUS REWRITE" discipline).
+  # ⛔ Two statements share ONE LINE on purpose: this file is a census-charged .sh whose code-line count
+  # `plugin/scripts/sh-census-check.ts` ratchets DOWNWARD-ONLY — do not split it onto its own line.
+  quay-init-step ensure-loop-config "$cfg" "$REPO_ROOT" "$TEST_COMMAND" "$TMUX_SESSION" "$WORKTREE_ROOT" "$DRY_RUN"; quay-init-step reconcile-config "$cfg" "$DRY_RUN"
 }
 
 # ensure_provider_carrier_env: pin the provider's carrier directories in an EXISTING

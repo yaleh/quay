@@ -365,9 +365,11 @@ claude plugin update quay@quay --scope <the scope just printed>
 ```
 
 Then **re-run `/quay:init`** in each project: it re-points that project's
-`.quay/plugin` symlink at the newly installed version's directory (the provider
-binding names `.quay/plugin`, never a version segment, so no config edit is needed).
-Restart the session to apply.
+`.quay/plugin` symlink at the newly installed version's directory, drops the retired native
+`path`/`mcp_entry` lines, and fills any version-level `loop:` default the new version added
+(`board`, `gates`, …) without touching your comments, so `quay config validate` passes right after.
+Restart the session to apply; running drivers keep the old version until
+`quay driver restart` (`quay driver status` shows `loaded-version-behind`).
 
 ⛔ Do **not** `claude plugin uninstall` and then `claude plugin install --scope
 project`: that replaces the record you already have, so a user-scope install is

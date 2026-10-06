@@ -614,6 +614,14 @@ test("AC7 — the migration is LINE-WISE: only the path/mcp_entry lines go, ever
       "  test_command: node --test",
       "  tmux_session: proj-0:0.0",
       `  worktree_root: ${wt}`,
+      // The VERSION-LEVEL defaults are already present, so the script's `reconcile-config` step (which
+      // fills absent ones, gap-quay-init-sh-upgrade-leaves-version-level-loop-defaults-unfilled) is a
+      // no-op here and this test keeps pinning the ONE thing it is about: the line-wise deletion.
+      "  board: native",
+      "  gates:",
+      "    - acceptance",
+      "  fork_baseline: develop",
+      '  doc_surfaces: ["tasks/", "goals/", ".quay/"]',
       "",
     ].join("\n");
     // Line indices removed by the migration: the `path` line (5), the `mcp_entry` key (8) and its
@@ -631,5 +639,104 @@ test("AC7 — the migration is LINE-WISE: only the path/mcp_entry lines go, ever
 
     // The byte-current runtime is untouched (staleness is untouched by this task).
     assert.match(r.stdout, /kept-runtime-copy:/, "the report must state that the current runtime copy was left alone");
+  } finally { cleanup(ws); }
+});
+
+// ── gap-quay-init-sh-upgrade-leaves-version-level-loop-defaults-unfilled ───────────────────────────
+// Measured 2026-10-07 (release rehearsal on 0.17.0): a project initialized by 0.16.0 and then re-run
+// through `bash quay-init.sh` kept `loop.board` / `loop.gates` ABSENT, so the OFFICIAL validator
+// rejected the config the OFFICIAL init had just upgraded. Version-level defaults were delivered only by
+// `quay init --reconcile` / the MCP init tool, never by the script that the docs say to re-run.
+// Two judges of one file (硬规则 3b): the writer (init) and the validator now share one table
+// (`LOOP_VERSION_DEFAULTS`) AND the script now reaches it. The round-trip below is the binding check.
+test("upgrade via quay-init.sh fills absent version-level loop defaults, keeps every comment, and is idempotent", () => {
+  const ws = makeTmp();
+  const wt = diskWorktreeRoot();
+  try {
+    // A 0.16.0-shaped config: project-derived loop values current, version-level keys ABSENT.
+    const before = [
+      "# my own header comment — must survive the upgrade verbatim",
+      "providers:",
+      "  native:",
+      "    enabled: true",
+      '    tasks_dir: "./tasks"  # trailing comment on a kept line',
+      "    env:",
+      '      QUAY_NATIVE_TASKS_DIR: "./tasks"',
+      '      QUAY_NATIVE_ADR_DIR: "./adr"',
+      '      QUAY_NATIVE_GOAL_DIR: "./goals"',
+      '      QUAY_NATIVE_META_DIR: "./meta"',
+      "# comment above loop",
+      "loop:",
+      `  repo_root: "${ws}"`,
+      "  test_command: node --test",
+      "  tmux_session: proj-0:0.0",
+      `  worktree_root: ${wt}`,
+      "",
+    ].join("\n");
+    fs.mkdirSync(path.join(ws, ".quay"), { recursive: true });
+    fs.mkdirSync(path.join(ws, "tasks"), { recursive: true });
+    fs.writeFileSync(path.join(ws, ".quay", "config.yml"), before);
+
+    const r1 = runInit(ws, [...INIT_ARGS(ws), "--worktree-root", wt]);
+    assert.equal(r1.status, 0, `the upgrade must exit 0:\n${r1.stdout}${r1.stderr}`);
+    const after1 = fs.readFileSync(path.join(ws, ".quay", "config.yml"), "utf8");
+
+    // The version-level keys the validator REQUIRES are now present.
+    assert.match(after1, /^ {2}board: native$/m, `loop.board must be filled by the script upgrade:\n${after1}`);
+    assert.match(after1, /^ {2}gates:/m, `loop.gates must be filled by the script upgrade:\n${after1}`);
+    assert.match(r1.stdout, /reconciled: \.quay\/config\.yml version-level defaults \(.*loop\.board.*loop\.gates/s,
+      `the report must NAME the keys it filled:\n${r1.stdout}`);
+
+    // Every ORIGINAL line — comments included — survives (the reconcile is comment-preserving). The
+    // YAML Document API re-emits an inline comment with ONE space before `#`, so compare with runs of
+    // inner whitespace collapsed: the contract is "no comment and no key is lost", not byte-identity
+    // of untouched lines (a no-op reconcile — asserted below — is the byte-identical case).
+    const norm = (l) => l.replace(/(\S)\s{2,}/g, "$1 ");
+    const afterLines = new Set(after1.split("\n").map(norm));
+    for (const line of before.split("\n").filter((l) => l.trim() !== "")) {
+      assert.ok(afterLines.has(norm(line)), `original line lost by the upgrade: ${JSON.stringify(line)}\n${after1}`);
+    }
+
+    // Idempotent: a second run is a no-op reconcile — the file is byte-identical, and says so.
+    const r2 = runInit(ws, [...INIT_ARGS(ws), "--worktree-root", wt]);
+    assert.equal(r2.status, 0, `the second upgrade run must exit 0:\n${r2.stdout}${r2.stderr}`);
+    assert.equal(fs.readFileSync(path.join(ws, ".quay", "config.yml"), "utf8"), after1,
+      "a re-run on a current config must not rewrite it");
+    assert.match(r2.stdout, /unchanged: \.quay\/config\.yml \(already current/,
+      `the no-op must be reported as a no-op:\n${r2.stdout}`);
+  } finally { cleanup(ws); }
+});
+
+test("upgrade via quay-init.sh --dry-run reports the version-level fill but writes nothing", () => {
+  const ws = makeTmp();
+  const wt = diskWorktreeRoot();
+  try {
+    const before = [
+      "providers:", "  native:", "    enabled: true", '    tasks_dir: "./tasks"',
+      "loop:", `  repo_root: "${ws}"`, "  test_command: node --test", "  tmux_session: proj-0:0.0", `  worktree_root: ${wt}`, "",
+    ].join("\n");
+    fs.mkdirSync(path.join(ws, ".quay"), { recursive: true });
+    fs.mkdirSync(path.join(ws, "tasks"), { recursive: true });
+    fs.writeFileSync(path.join(ws, ".quay", "config.yml"), before);
+    const r = runInit(ws, [...INIT_ARGS(ws), "--worktree-root", wt, "--dry-run"]);
+    assert.equal(r.status, 0, `${r.stdout}${r.stderr}`);
+    assert.match(r.stdout, /would-reconcile: \.quay\/config\.yml \(.*loop\.board/s, `dry-run must REPORT the fill:\n${r.stdout}`);
+    assert.equal(fs.readFileSync(path.join(ws, ".quay", "config.yml"), "utf8"), before, "dry-run must not write");
+  } finally { cleanup(ws); }
+});
+
+test("upgrade via quay-init.sh: an UNPARSEABLE config is reported NOT-EVALUATED by the reconcile step, never silently passed", () => {
+  const ws = makeTmp();
+  const wt = diskWorktreeRoot();
+  try {
+    fs.mkdirSync(path.join(ws, ".quay"), { recursive: true });
+    fs.mkdirSync(path.join(ws, "tasks"), { recursive: true });
+    const broken = "providers: [unclosed\n  - : :\n";
+    fs.writeFileSync(path.join(ws, ".quay", "config.yml"), broken);
+    const r = runInit(ws, [...INIT_ARGS(ws), "--worktree-root", wt]);
+    // Whatever the earlier upgrade steps do with a broken file, the reconcile step must not PASS it.
+    const out = r.stdout + r.stderr;
+    assert.ok(!/reconciled: \.quay\/config\.yml/.test(out), `a corrupt config must never be reported as reconciled:\n${out}`);
+    assert.equal(fs.readFileSync(path.join(ws, ".quay", "config.yml"), "utf8"), broken, "the broken bytes must be left untouched");
   } finally { cleanup(ws); }
 });

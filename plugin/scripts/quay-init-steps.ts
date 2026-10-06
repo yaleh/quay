@@ -41,6 +41,7 @@ steps (each mirrors the python3 invocation it replaced in plugin/scripts/quay-in
   has-npm-test        <package.json>
   ensure-loop-config  <cfg> <repo_root> <test_command> <tmux_session> <worktree_root> <dry_run:true|false>
   ensure-carrier-env  <cfg> <ws_root> <dry_run:true|false>
+  reconcile-config    <cfg> <dry_run:true|false>
   refresh-plugin-link <ws_root> <plugin_root> <dry_run:true|false>
   migrate-mcp-entry   <cfg> <install_provider> <install_runtime> <install_core> <ws_root> <dry_run> <backup_ts>
   derive-loop-scripts <out-file> <plugin_root> <never-laydown-names>
@@ -95,6 +96,11 @@ async function main(): Promise<void> {
     case "ensure-carrier-env": {
       need(3);
       core.ensureProviderCarrierEnv({ cfgPath: args[0]!, wsRoot: args[1]!, dryRun: args[2] === "true" });
+      return;
+    }
+    case "reconcile-config": {
+      need(2);
+      core.reconcileConfigFile({ cfgPath: args[0]!, dryRun: args[1] === "true" });
       return;
     }
     case "refresh-plugin-link": {

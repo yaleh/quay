@@ -48,16 +48,20 @@ answer, because it sends you looking for a conflict that does not exist). The MC
 registered BEFORE any config is read, so it is reachable in precisely the workspace where every other
 tool is not (see `packages/quay/src/mcp-server.ts`, the two-phase `startMcpServer`).
 
-⚠️ **The VERSION-LEVEL half is still not wired into the script below.** `bash quay-init.sh` is what
-this skill runs, and its own `loop:` upgrade (`ensureLoopConfig` in `packages/quay/src/init.ts`,
-dispatched by that script) updates only the four project-derived values
-(`repo_root`/`test_command`/`tmux_session`/`worktree_root`); the version-level reconcile above is
-reachable today through the CLI and the MCP tool, not yet from the script. Closing that gap is the
-remaining half of `gap-quay-init-native-reconcile`, and the measured reason it was deferred is
-recorded in that task's DoD evidence section.
-(⛔ Do not read the 2026-09-20 port as having closed it: that port moved twelve embedded `python3`
-steps into `init.ts` unchanged — it relocated CODE, it did not add the reconcile to the script's
-path. `ensureLoopConfig` is the same four-value merge it always was.)
+**The script delivers the VERSION-LEVEL `loop:` defaults too.** `bash quay-init.sh` is what this skill
+runs, and on an EXISTING config its upgrade does two things in order: `ensureLoopConfig` updates the
+four project-derived values (`repo_root`/`test_command`/`tmux_session`/`worktree_root`), then the
+`reconcile-config` step fills every ABSENT version-level `loop:` default from `LOOP_VERSION_DEFAULTS`
+(`board`, `gates`, `fork_baseline`, `doc_surfaces`) through the SAME comment-preserving
+`reconcileConfigContent` the CLI/MCP use. A config that is already current is not rewritten, and the
+report says so (`unchanged: .quay/config.yml (already current …)`); `--dry-run` reports
+`would-reconcile: …` and writes nothing. An unparseable config is reported `NOT-EVALUATED` and left
+untouched (use `quay init --reconcile` to salvage it). Before this step existed, re-running the script
+after a plugin upgrade left `loop.board`/`loop.gates` absent and `quay config validate` red
+(gap-quay-init-sh-upgrade-leaves-version-level-loop-defaults-unfilled, measured 2026-10-07).
+The `serve:` section's version-level defaults are still delivered ONLY by `quay init --reconcile` / the
+MCP `init` tool: a fresh script install writes no `serve:` section, so filling one on a re-run would make
+the script non-idempotent over its own output.
 
 ## Write surface (the six-file closed set)
 
