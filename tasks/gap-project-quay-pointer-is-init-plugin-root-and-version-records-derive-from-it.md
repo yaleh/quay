@@ -44,14 +44,17 @@ extra:
 - `plugin/test/quay-init-stable-plugin-link.test.mjs`
 - `plugin/test/quay-init.test.mjs`
 - `plugin/test/quay-init-characterization.test.mjs`
+- `plugin/test/quay-init-loop.test.mjs`
 - `plugin/test/goal-driver-s05.test.mjs`
 - `plugin/test/goal-driver-s04.test.mjs`
 - `plugin/test/helpers/goal-driver-harness.mjs`
 - `plugin/test/helpers/quay-init-install-fixture.mjs`
 - `plugin/test/driver-runtime-loaded-version-drift.test.mjs`
+- `plugin/test/carrier-registry-completeness.test.mjs`
 - `packages/quay/test/plugin-root.test.mjs`
 - `packages/quay/test/install-config-driven-e2e.test.mjs`
 - `plugin/sh-census-baseline.json`
+- `docs/carrier-registry.json`
 - `docs/analysis/quay-init-closure-ratchet.baseline.json`
 - `tasks/gap-project-quay-pointer-is-init-plugin-root-and-version-records-derive-from-it.md`
 
@@ -69,3 +72,14 @@ extra:
 
 ## DoD
 真实落地:一个真实第三方项目升级插件版本后,重跑 `/quay:init` 即让 `.quay/plugin` 指向该会话实际加载的插件、`config.yml` 不含任何版本或链接依赖、`driver status` 与 goal-driver target-health 对该项目给出基于链接的真实 `pointer`/`pluginVersion` 读数;链接落后时读数为 `behind` 而非通过,Core 任何路径都没有改写过该链接。仅 fixture 绿不算完成。
+
+## Evidence
+**2026-10-06（worker 续做轮）—— 上一轮 suite 红的真因与修法**（真因日志 `.quay/fan-in-suite-gap-project-quay-pointer-is-init-plugin-root-and-version-records-derive-from-it~wk-prod-anchor~1791270906289-f07f4a.log`，`# fail 2`）。
+
+两个红都不是 delta 之外的偶发:它们正是本任务**故意改动的契约**被旧断言/旧登记钉住。逐文件本地复现(两次,确定性)后修:
+
+1. `plugin/test/quay-init-loop.test.mjs:263` —— 该用例断言新装 config 的 `providers.native.path == <ws>/.quay/plugin/vendor/quay-native`,正是修法 (D) 去掉的那一项(Core 改由 `plugin-root.ts` 解析)。断言改为**取值为 `undefined`**(⛔ 不是换成另一个路径——那会让回归把版本路径重新钉回来),并补 `mcp_entry` 缺失断言;同时保留 `providers.native.tasks_dir` 作为**正向锚**(证明 provider 绑定本身仍在写,未退化成「键全缺」的真空断言)。实跑 `node --experimental-strip-types --test plugin/test/quay-init-loop.test.mjs` → **7/7 pass**。
+2. `plugin/test/carrier-registry-completeness.test.mjs:172`（staleness）—— `docs/carrier-registry.json` 仍登记 `quay-init-state.json`,而修法 (E) 已移除全部活的读写(源码里只剩一条注释,被 `maskComments` 抹掉)。该载体确实无写者无读者 ⇒ **逐条删除登记项**(非 repoint)。实跑 → **5/5 pass**。
+   - 佐证:`grep -rn "quay-init-state" packages/quay/src plugin/scripts --include=*.ts` 排除测试/dist 后仅剩 `quay-init-closure-ratchet.ts:84` 的一条 `//` 注释,谓词按位置判定不命中(硬规则 2)。
+
+`Touches` 相应扩入 `plugin/test/quay-init-loop.test.mjs`、`docs/carrier-registry.json`、`plugin/test/carrier-registry-completeness.test.mjs` 三个文件。两红均为**本任务契约变更的下游**,非环境性 flake:失败行正文逐字为 `providers.native.path` / `quay-init-state.json`,与本 delta 一一对应。
