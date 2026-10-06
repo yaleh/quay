@@ -91,3 +91,69 @@ extra:
 **delta-relatedness 提示的处置**:机械判定把该红标为 UNRELATED(失败文件不在 Touches 内)。该判定是对的(它不是本任务 delta 引起的),但仍阻塞落地,故按 "foreign deterministic suite red ⇒ self-fix + widen Touches" 处理,而非当作环境噪声重掷。
 
 **Touches 扩边说明**:`plugin/scripts/adr016-screen-use-check.ts` 与 `plugin/test/adr016-screen-use-check.test.mjs` 不在本任务原 Touches 内,但前两轮 fan-in suite-red 的真因落在此处,故纳入。二者与本任务的 config/init 改动无耦合。
+
+### 补记(2026-10-06 续做第 4 轮)——AC6 / AC9 的原文读数(此前轮次只勾选、未落原文)
+
+**AC6 — 两个同类检查器的实跑结论。** 夹具 `/tmp/ac6-fixture-lOUbBz/.quay/config.yml` 全文仅:
+
+```
+providers:
+  native:
+    enabled: true
+    tasks_dir: "./tasks"
+```
+
+① `plugin/scripts/provider-binding-resolvability-check.ts --root <夹具>` 原文:
+
+```
+provider binding resolvability — /tmp/ac6-fixture-lOUbBz/.quay/config.yml
+  [NOT-EVALUATED ] native: no-mcp-entry  token=null
+NOT-EVALUATED: provider-binding-resolvability-check: no enabled provider with a judgeable runtime binding (1 provider(s), 1 not-evaluated) — nothing was judged
+EXIT=3
+```
+
+结论:**非空转**。"无绑定可判"走独立取值 `NOT-EVALUATED`(exit 3),与 PASS(exit 0)/合格 不同形(硬规则 3b/6)。本任务在 `plugin/test/provider-binding-resolvability-check.test.mjs` 补了一条回归用例(scoped 门实跑可见:`native provider that OMITS path/mcp_entry is NOT-EVALUATED (exit 3), never PASS`)。
+
+② `plugin/scripts/quay-init-closure-ratchet.ts` 原文(夹具读不到基线 ⇒ 独立第三态;真树 ⇒ 正常棘轮):
+
+```
+$ ... quay-init-closure-ratchet.ts --gate --root <夹具>
+NOT-EVALUATED: quay-init-closure-ratchet: NOT-EVALUATED — baseline file missing (docs/analysis/quay-init-closure-ratchet.baseline.json); run --reanchor to create it (a checker that cannot read its baseline is never conflated with "≤ baseline")
+EXIT=3
+$ ... quay-init-closure-ratchet.ts --gate --root <worktree 真树,基线在>
+PASS: quay-init laydown footprint 3 files / 1022 bytes ≤ baseline 3 files / 1022 bytes (shrink-only holds)
+EXIT=0
+```
+
+结论:**非空转,且与本任务的 mcp_entry 面无关**。`grep -n "mcp_entry" plugin/scripts/quay-init-closure-ratchet.ts` 仅 1 条命中(`:84` 注释,讲 state 文件里嵌了随机绝对路径);该棘轮判的是 quay-init laydown 的文件数/字节数,不做 provider 绑定判定,读不到基线时给 `NOT-EVALUATED`(exit 3),从不与"≤ baseline"同形。按 AC6 的二分 ⇒ "非空转 ⇒ 记录证据即可,无需改动"(该文件不在本任务 diff 内)。
+
+**AC9 — 真实生产载体(cantus)实跑。** 载体 `/data/home/yale/work/cantus`(真实第三方项目,已被 0.16.0 init 迁移:`providers.native` 无 `path`/`mcp_entry`,`.quay/plugin -> ~/.claude/plugins/cache/quay/quay/0.16.0`)。用修复后的 worktree 代码跑:
+
+```
+$ node --experimental-strip-types packages/quay/bin/quay.js config validate --root /data/home/yale/work/cantus
+Config valid.
+EXIT=0
+$ node ... quay.js config validate --json --root /data/home/yale/work/cantus
+[]
+EXIT=0
+```
+
+MCP `config_validate` 路径(`mcp-handlers.ts` 是该函数 `validateConfig({workspaceRoot})` 的薄透传,同一真实 config):
+
+```
+validateConfig(workspaceRoot=/data/home/yale/work/cantus)
+{ "ok": true, "issues": [] }   EXIT=0
+```
+
+**负控制(取假)**:用 `cp` 备份 `config-validate.ts`,把 `checkProviders` 临时改回"读原始 YAML 的 `mcp_entry`"后,同一 CLI 跑同一 cantus:
+
+```
+error: providers.native — Enabled provider "native" is missing mcp_entry (must be a non-empty array)
+  suggestion: Add mcp_entry: ["node", "./bin/<provider>.ts", "mcp"] to this provider
+1 error(s) found.
+EXIT=1
+```
+
+还原(cp,md5 与备份一致 `4b803ff1c62e729a30416eb65ab37e3d`)后回 `Config valid.` / EXIT=0 ⇒ AC9 的取假判据成立。
+
+**本轮落地前的门**:预合并 `git merge --no-edit develop` 干净(无冲突);scoped 门 `bash scripts/test.sh --for-task <id> --allow-thin` → `tests 286 / pass 286 / fail 0`,EXIT=0;`plugin/test/adr016-screen-use-check.test.mjs` → `19/19`。
