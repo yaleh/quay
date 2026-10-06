@@ -302,6 +302,39 @@ test("validateConfig flags missing loop.board", async () => {
   assert.ok(boardIssue, "should have loop.board issue");
 });
 
+// gap-fresh-quay-init-config-fails-validate-on-loop-board-and-gates-that-init-never-writes AC3 —
+// the MCP SIDE of the same reading test/config-validate.test.mjs pins: the shape a fresh install
+// writes (no `gates:` section at all — the scaffold's is commented out) must pass, because
+// `acceptance` is a BUILT-IN gate. Both surfaces must agree on one config; a fix that satisfied the
+// CLI and not the MCP tool (or vice versa) is the "two judges" defect this task exists to remove.
+test("validateConfig accepts the fresh-install shape (board: native + gates: [acceptance], no gates: section)", async () => {
+  const { validateConfig } = await import("../src/config-validate.ts");
+  const freshShape = [
+    "providers:",
+    "  native:",
+    "    enabled: true",
+    "",
+    "loop:",
+    "  board: native",
+    "  gates: [acceptance]",
+    "",
+  ].join("\n");
+  const ws = makeWorkspaceBase(freshShape, "fresh-shape");
+  const result = validateConfig({ workspaceRoot: ws });
+  assert.equal(result.ok, true, `the fresh-install shape must validate, got: ${JSON.stringify(result.issues)}`);
+});
+
+test("validateConfig still rejects a blank / ill-typed loop.gates (the fix must not widen the gate)", async () => {
+  const { validateConfig } = await import("../src/config-validate.ts");
+  for (const [label, line] of [["empty string", '  gates: ""'], ["wrong type", "  gates: 3"]]) {
+    const cfg = ["providers:", "  native:", "    enabled: true", "loop:", "  board: native", line, ""].join("\n");
+    const ws = makeWorkspaceBase(cfg, `bad-gates-${label.replace(/\s+/g, "-")}`);
+    const result = validateConfig({ workspaceRoot: ws });
+    assert.equal(result.ok, false, `${label} gates must still fail`);
+    assert.ok(result.issues.some((i) => i.field === "loop.gates"), `${label}: expected a loop.gates issue, got ${JSON.stringify(result.issues)}`);
+  }
+});
+
 // ── Additional: missing provider mcp_entry ──
 
 test("validateConfig flags enabled CUSTOM provider missing mcp_entry (native is exempt by design)", async () => {

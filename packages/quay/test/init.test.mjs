@@ -874,7 +874,14 @@ test("AC2 reconcile: a value this version considers incompatible is migrated thr
 
 test("AC2 reconcile unit: reconcileConfigContent edits in place — only the keys it sets appear", () => {
   const { content, report } = reconcileConfigContent("loop:\n  board: \"native\"\n");
-  assert.deepEqual(report.added.sort(), Object.keys(LOOP_VERSION_DEFAULTS).sort(), "every schema key absent from the input is filled");
+  // `board` is supplied BY THE INPUT, so it is the one table key the fill must NOT report — a
+  // reconcile that "filled" a key the config already carries would be the gratuitous rewrite this
+  // function's contract forbids.
+  assert.deepEqual(
+    report.added.sort(),
+    Object.keys(LOOP_VERSION_DEFAULTS).filter((k) => k !== "board").sort(),
+    "every schema key ABSENT from the input is filled, and only those",
+  );
   assert.equal(report.unchanged, false, "a fill is a change");
   // The schema is the version's REQUIREMENT list, and it is deliberately short: a key this version
   // does not require must not be silently introduced by a reconcile (that is how a dead key comes
@@ -884,7 +891,13 @@ test("AC2 reconcile unit: reconcileConfigContent edits in place — only the key
   // constant (the surfaces quay itself writes; a project extends the list), and it must reach
   // EXISTING configs through this comment-preserving reconcile rather than through
   // `ensureLoopConfig`'s whole-document re-serialisation (which drops the user's comments).
-  assert.deepEqual(Object.keys(LOOP_VERSION_DEFAULTS), ["fork_baseline", "doc_surfaces"], "the version-required loop keys, today");
+  // 2026-10-06 (gap-fresh-quay-init-config-fails-validate-on-loop-board-and-gates-that-init-never-
+  // writes): widened by TWO — `board`/`gates`, the loop driver's required provider + gate. They are
+  // the reason an upgrade had to reach existing configs: the validator demands them and
+  // `readLoopParams` FAIL-CLOSES without them, so a 0.16.0 project could never become valid by
+  // re-running init. The alternative branch (drop the requirement from the validator) was rejected
+  // because BOTH keys have real readers — see the task's AC1 evidence.
+  assert.deepEqual(Object.keys(LOOP_VERSION_DEFAULTS), ["board", "gates", "fork_baseline", "doc_surfaces"], "the version-required loop keys, today");
   const doc = YAML.parse(content);
   assert.equal(doc.loop.board, "native", "the pre-existing key is preserved");
   // deepEqual (not equal): a default may be a STRUCTURE (`doc_surfaces` is a list), and a reference
@@ -1050,7 +1063,7 @@ test("AC1: old config (explicit native binding) → init migration → CLI valid
   }
 });
 
-test("AC1: a FRESH workspace's init output validates on the PROVIDER axis (the mcp_entry contradiction is gone)", () => {
+test("AC1/AC2: a FRESH workspace's init output validates CLEANLY (provideR axis AND loop.board/loop.gates)", () => {
   const ws = initWorkspace("ac1-fresh");
   try {
     const r = runQuayInit(ws);
@@ -1061,23 +1074,19 @@ test("AC1: a FRESH workspace's init output validates on the PROVIDER axis (the m
     const raw = fs.readFileSync(path.join(ws, ".quay", "config.yml"), "utf8");
     assert.doesNotMatch(raw, /^\s*mcp_entry:/m, "the fresh install writes NO native mcp_entry");
 
-    // …and the validator no longer demands one. Assert on the PROVIDER AXIS by name: the remaining
-    // errors are the separately-tracked loop.board/loop.gates default gap (declared out of scope in
-    // this task's Proposal), and this assertion FAILS if any other error appears — including any
-    // providers.* / mcp_entry one.
+    // …and it CARRIES the two loop keys the validator requires. Before
+    // gap-fresh-quay-init-config-fails-validate-on-loop-board-and-gates-that-init-never-writes this
+    // test asserted the OPPOSITE (`fields` === ["loop.board","loop.gates"]) — it pinned the fresh
+    // install's own defect in place, because the previous task's scope stopped at mcp_entry. The
+    // reading is now the strong one: a fresh install produces ZERO errors, so a regression in either
+    // writer (or a validator that grows a new required key) reds here rather than being absorbed.
+    assert.match(raw, /^  board: native$/m, "the fresh install writes loop.board");
+    assert.match(raw, /^  gates: \["acceptance"\]$/m, "the fresh install writes loop.gates with the built-in gate");
+
     const res = spawnSync("node", [quayBin, "config", "validate", "--root", ws], { cwd: ws, encoding: "utf8" });
+    assert.equal(res.status, 0, `fresh init must validate with exit 0, got ${res.status}:\n${res.stdout}\n${res.stderr}`);
     const errorLines = ((res.stdout ?? "") + (res.stderr ?? "")).split("\n").filter((l) => l.startsWith("error:"));
-    assert.equal(
-      errorLines.filter((l) => /providers\.|mcp_entry/.test(l)).length,
-      0,
-      `no provider/mcp_entry error may remain, got:\n${errorLines.join("\n")}`,
-    );
-    const fields = errorLines.map((l) => l.replace(/^error:\s*/, "").split(" —")[0]).sort();
-    assert.deepEqual(
-      fields,
-      ["loop.board", "loop.gates"],
-      `the only remaining errors must be the out-of-scope loop.* defaults, got: ${JSON.stringify(fields)}`,
-    );
+    assert.deepEqual(errorLines, [], `a fresh install must produce NO validator errors, got: ${JSON.stringify(errorLines)}`);
   } finally {
     fs.rmSync(ws, { recursive: true, force: true });
   }
@@ -1089,6 +1098,191 @@ test("AC1: a FRESH `quay init` (CLI) output validates with exit 0", () => {
     runQuay(["init"], ws);
     const out = runQuay(["config", "validate", "--root", ws], ws);
     assert.match(out, /Config valid/);
+  } finally {
+    fs.rmSync(ws, { recursive: true, force: true });
+  }
+});
+
+// ---------------------------------------------------------------------------
+// gap-fresh-quay-init-config-fails-validate-on-loop-board-and-gates-that-init-never-writes
+//
+// THE DEFECT: `loop.board`/`loop.gates` are REQUIRED by the validator AND FAIL-CLOSED in
+// `readLoopParams` (which the loop-driver skill reads as the MCP `task_list` provider and the
+// `gate_run` gate), but the shell fresh-install writer never emitted them and the version-level
+// reconcile table did not carry them — so every fresh `/quay:init` produced a config that failed
+// `quay config validate` on the very first command, and the upgrade path could never repair it.
+// ---------------------------------------------------------------------------
+
+test("AC2① (round-trip): a fresh `quay-init.sh --loop` output passes BOTH `quay config validate` and MCP config_validate", async () => {
+  const { registerConfigHandlers } = await import("../src/mcp-handlers.ts");
+  const ws = initWorkspace("ac2-fresh-roundtrip");
+  try {
+    const r = runQuayInit(ws);
+    assert.equal(r.status, 0, `quay-init.sh must exit 0\n${r.stdout}\n${r.stderr}`);
+
+    const raw = fs.readFileSync(path.join(ws, ".quay", "config.yml"), "utf8");
+    const doc = YAML.parse(raw);
+    assert.equal(doc.loop.board, "native", "the fresh install writes loop.board");
+    assert.deepEqual(doc.loop.gates, ["acceptance"], "the fresh install writes loop.gates");
+
+    // CLI surface.
+    const out = runQuay(["config", "validate", "--root", ws], ws);
+    assert.match(out, /Config valid/);
+
+    // MCP surface — the registered handler, not just the shared module (AC2 names both).
+    let handler = null;
+    const mockServer = {
+      registerTool(name, opts, h) {
+        if (name === "config_validate") handler = h || null;
+        return this;
+      },
+    };
+    registerConfigHandlers(mockServer, { workspaceRoot: ws, configPath: path.join(ws, ".quay", "config.yml") });
+    assert.ok(handler, "config_validate handler must be registered");
+    const mcp = await handler({ checkFiles: undefined });
+    assert.equal(mcp.structuredContent.ok, true, `MCP config_validate must pass, got: ${JSON.stringify(mcp.structuredContent.issues)}`);
+  } finally {
+    fs.rmSync(ws, { recursive: true, force: true });
+  }
+});
+
+test("AC2② (round-trip): an OLD config missing loop.board/loop.gates passes after `quay init --reconcile`, and the write is a pure INSERTION", () => {
+  const ws = initWorkspace("ac2-upgrade-roundtrip");
+  try {
+    fs.mkdirSync(path.join(ws, ".quay"), { recursive: true });
+    // A 0.16.0-shaped config: explicit native `path`/`mcp_entry` (both must survive — this task
+    // does not touch the provider axis), a user comment, and a user-tuned block list. ⛔ Block-style
+    // scalars and STANDALONE comments only: the reconcile re-serializes through YAML's Document API,
+    // which normalizes flow style, so a fixture carrying `["a"]` or a trailing inline comment would
+    // make "the diff is exactly the added lines" unmeasurable for a reason unrelated to this task
+    // (the same normalization the pre-existing AC2 reconcile test works around).
+    const before = [
+      "# a user's own comment that a YAML re-dump would destroy",
+      "providers:",
+      "  native:",
+      "    enabled: true",
+      '    path: "./vendor/quay-native"',
+      "    mcp_entry:",
+      "      - node",
+      "      - ./bin/quay-native.ts",
+      "      - mcp",
+      '    tasks_dir: "./tasks"',
+      "    env:",
+      '      QUAY_NATIVE_TASKS_DIR: "./tasks"',
+      "loop:",
+      "  repo_root: /old",
+      "  # the project's own tuning, which must survive verbatim",
+      "  concurrency_bands:",
+      "    - 1",
+      "    - 3",
+      "",
+    ].join("\n");
+    fs.mkdirSync(path.join(ws, "vendor", "quay-native", "bin"), { recursive: true });
+    const cfgPath = path.join(ws, ".quay", "config.yml");
+    fs.writeFileSync(cfgPath, before);
+
+    const out = runQuay(["init", "--reconcile", "--root", ws], ws);
+    assert.match(out, /filled loop\.board/, `the reconcile must report filling board:\n${out}`);
+    assert.match(out, /filled loop\.gates/, `and gates:\n${out}`);
+
+    const after = fs.readFileSync(cfgPath, "utf8");
+    const doc = YAML.parse(after);
+    assert.equal(doc.loop.board, "native", "board is filled from the version default");
+    assert.deepEqual(doc.loop.gates, ["acceptance"], "gates is filled from the version default");
+    assert.equal(doc.loop.concurrency_bands[0], 1, "the user's own key survives");
+
+    // BYTE-LEVEL: every pre-existing line survives, in order ⇒ the write added lines and rewrote
+    // NOTHING (no comment lost, no value reformatted). Asserted as a subsequence rather than with a
+    // diff tool so the property is stated directly.
+    const afterLines = after.split("\n");
+    let cursor = 0;
+    for (const line of before.split("\n").filter((l) => l !== "")) {
+      const at = afterLines.indexOf(line, cursor);
+      assert.ok(at >= 0, `every pre-existing line must survive byte-for-byte, missing: ${JSON.stringify(line)}\n--- after ---\n${after}`);
+      cursor = at + 1;
+    }
+
+    // …and the migrated config now validates, which is the round-trip's whole point.
+    const v = runQuay(["config", "validate", "--root", ws], ws);
+    assert.match(v, /Config valid/);
+  } finally {
+    fs.rmSync(ws, { recursive: true, force: true });
+  }
+});
+
+test("AC4: the shell heredoc's loop.board/loop.gates ARE the LOOP_VERSION_DEFAULTS values — one judgment, two writers", () => {
+  const src = fs.readFileSync(path.join(PLUGIN_ROOT, "scripts", "quay-init.sh"), "utf8");
+  // Enumerate heredocs the same way plugin/test/quay-init-loop.test.mjs does, then find the
+  // fresh-install CONFIG WRITER by a marker only its body carries — a parser that finds nothing must
+  // not read as a pass (硬规则 3b).
+  const bodies = [];
+  const lines = src.split("\n");
+  for (let i = 0; i < lines.length; i++) {
+    const m = /<<-?(["']?)([A-Za-z_][A-Za-z0-9_]*)\1/.exec(lines[i]);
+    if (!m) continue;
+    const body = [];
+    let j = i + 1;
+    for (; j < lines.length && lines[j].trim() !== m[2]; j++) body.push(lines[j]);
+    bodies.push(body.join("\n"));
+    i = j;
+  }
+  const writer = bodies.find((b) => b.includes("# .quay/config.yml — generated by quay-init"));
+  assert.ok(writer, `the fresh-install config-writer heredoc must be found (found ${bodies.length} heredoc(s)) — parser or marker is broken`);
+
+  // `${REPO_ROOT}` … are shell expansions, not YAML; blank them so the body parses as the YAML it
+  // actually becomes on disk.
+  const parsed = YAML.parse(writer.replace(/\$\{[^}]*\}/g, "PLACEHOLDER"));
+  assert.ok(parsed?.loop && typeof parsed.loop === "object", "the heredoc body must parse as YAML with a loop: section");
+
+  // Both values must be PRESENT first (an `undefined === undefined` comparison would otherwise make
+  // "the writer emits nothing" read exactly like "the writers agree").
+  assert.equal(typeof parsed.loop.board, "string", "the heredoc must emit loop.board");
+  assert.ok(parsed.loop.board.length > 0, "loop.board must be non-empty");
+  assert.ok(Array.isArray(parsed.loop.gates) && parsed.loop.gates.length > 0, "the heredoc must emit a non-empty loop.gates list");
+
+  // …then equal to the table the RECONCILE fills from. Asserting against the table (rather than a
+  // literal repeated here) is what makes a future default change require a mirrored heredoc edit.
+  assert.equal(parsed.loop.board, LOOP_VERSION_DEFAULTS.board, "heredoc loop.board must equal LOOP_VERSION_DEFAULTS.board");
+  assert.deepEqual(parsed.loop.gates, LOOP_VERSION_DEFAULTS.gates, "heredoc loop.gates must equal LOOP_VERSION_DEFAULTS.gates");
+
+  // The THIRD writer — the TS fresh-install template — is measured through its real output, so the
+  // three-way agreement (heredoc / reconcile table / template) is observed, not asserted by hand.
+  const tsLoop = YAML.parse(generateConfigContent({ providerId: "native", providerPath: "./x", isNode: true, isGo: false })).loop;
+  assert.equal(tsLoop.board, LOOP_VERSION_DEFAULTS.board, "the TS template's board must equal the table");
+  assert.deepEqual(tsLoop.gates, LOOP_VERSION_DEFAULTS.gates, "the TS template's gates must equal the table");
+});
+
+test("AC3: the validator accepts the init default gate name and still rejects a blank/ill-typed loop.gates", () => {
+  const ws = tmpDir("ac3-gate-ref");
+  fs.mkdirSync(path.join(ws, ".quay"), { recursive: true });
+  const cfgPath = path.join(ws, ".quay", "config.yml");
+  const withGates = (gatesLine) =>
+    ["providers:", "  native:", "    enabled: true", "loop:", "  board: native", gatesLine, ""].join("\n");
+
+  try {
+    // The value the fresh install writes resolves against the BUILT-IN registry (no `gates:` section
+    // in the workspace at all — the fresh-install state). Assert on exit 0 + zero `error:` lines
+    // rather than on the "Config valid." banner: a config with only WARNINGS exits 0 and prints the
+    // warnings instead of that banner, so matching the banner would red on an unrelated warning.
+    fs.writeFileSync(cfgPath, withGates('  gates: ["acceptance"]'));
+    const okOut = runQuayAllowFail(["config", "validate", "--root", ws], ws);
+    assert.equal(okOut.exitCode, 0, `the init default gate name must resolve, got:\n${okOut.stdout}\n${okOut.stderr}`);
+    assert.equal(
+      ((okOut.stdout ?? "") + (okOut.stderr ?? "")).split("\n").filter((l) => l.startsWith("error:")).length,
+      0,
+      "and produce no errors",
+    );
+
+    // Negative controls: the fix relaxes NOTHING — a declared-but-empty or ill-typed value still reds.
+    // spawnSync (not runQuayAllowFail): the validator writes its issues to STDOUT, and that helper's
+    // error branch returns String(err) rather than the captured stream, so its `.stdout` is empty
+    // exactly in the case under test.
+    for (const [label, line] of [["empty string", '  gates: ""'], ["wrong type", "  gates: 3"]]) {
+      fs.writeFileSync(cfgPath, withGates(line));
+      const bad = spawnSync("node", [quayBin, "config", "validate", "--root", ws], { cwd: ws, encoding: "utf8" });
+      assert.equal(bad.status, 1, `${label} gates must still fail:\n${bad.stdout}\n${bad.stderr}`);
+      assert.match(bad.stdout ?? "", /loop\.gates/, `${label}: the issue must name loop.gates`);
+    }
   } finally {
     fs.rmSync(ws, { recursive: true, force: true });
   }

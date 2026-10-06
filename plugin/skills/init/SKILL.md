@@ -217,6 +217,27 @@ to a script that never agreed to consume them, and every mismatch surfaced as "r
 rather than as an error. Shipping a file no longer changes quay's behaviour; declaring the
 capability does.
 
+### The REQUIRED `loop:` keys — `board` and `gates`
+
+Two `loop:` keys are not optional, and a fresh install writes both:
+
+| key | fresh-install value | meaning |
+|---|---|---|
+| `board` | `native` | The provider the loop driver scans. `readLoopParams()` hands it to the driver as the MCP `task_list`/`task_write` `provider` argument, so it must name a provider the config's own `providers:` map enables. |
+| `gates` | `["acceptance"]` | The gate(s) the driver runs on each task (the MCP `gate_run` `gate` argument). `acceptance` is a **built-in** gate (`gate/registry.ts`), so it resolves on a fresh project whose own `gates:` section is still the commented-out scaffold. |
+
+Both are **required**: `quay config validate` (and the MCP `config_validate` tool — the same
+`validateConfig`) reports an error when either is missing, and `readLoopParams` FAIL-CLOSES, so a
+config without them both fails validation and leaves the driver unable to run. A declared-but-empty
+or ill-typed `gates` is still an error — the requirement is on the key's PRESENCE and TYPE, and this
+is deliberate rather than lax.
+
+These are **version-level defaults**, so they live in one table — `LOOP_VERSION_DEFAULTS` in
+`packages/quay/src/init.ts` — which the fresh-install template emits and the `--reconcile` fill reads.
+The shell writer (`plugin/scripts/quay-init.sh`'s fresh-install heredoc) cannot import TypeScript and
+therefore mirrors the same two values; `packages/quay/test/init.test.mjs` pins the mirror to the table,
+so a future default change that is not made in both places is RED rather than silently divergent.
+
 ### The `loop:` fan-in contract keys
 
 | key | values | meaning |
