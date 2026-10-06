@@ -3,7 +3,7 @@ id: gap-server-host-spawn-discards-stdio-while-start-drivers-logs-to-serve-log
 title: '`quay server start/add/restart` 拉起的 serve 宿主 stdio
   被丢弃（stdio:"ignore"），宿主死时零痕迹；同一宿主经 start-drivers 启动却写 .quay/serve.log——两个 spawn
   点两套行为'
-status: todo
+status: ready
 labels:
   - gap
   - defect
