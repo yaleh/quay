@@ -43,6 +43,8 @@ extra:
 - `plugin/scripts/quay-init.sh`
 - `plugin/test/verify-plugin-channel-assertions.test.mjs`
 - `plugin/test/quay-init-characterization.test.mjs`
+- `plugin/test/capability-catalog.test.mjs`
+- `plugin/test/quay-init-closure-ratchet.test.mjs`
 - `docs/analysis/quay-init-closure-ratchet.baseline.json`
 - `README.md`
 - `tasks/gap-release-gate-verify-plugin-channel-misses-config-validate-version-pointer-scope-and-upgrade-assertions.md`
@@ -115,7 +117,7 @@ $ grep -n "verify-plugin-channel-assertions" .github/workflows/release.yml
 252:          node --experimental-strip-types plugin/scripts/verify-plugin-channel-assertions.ts \
 286:          node --experimental-strip-types plugin/scripts/verify-plugin-channel-assertions.ts \
 ```
-断言由**源检出**运行(⛔ 不是 `$INSTALLED`:发布产物 strip 掉 raw plugin `.ts`,checker 是门禁不是交付物)。serve 步骤由裸 `serve … &` 改为 `quay server start --only web,control`——裸 `serve` 继承 runner shell 的 cgroup,会让 `serve-own-scope` 因门禁自身而起红;`server start` 与 `/quay:drivers` 同一 scope envelope,YAML 注释记录了理由。**user scope 实测可行**(本机隔离 HOME 下 `marketplace add` + `install --scope user` + init + driver + `server start` + 断言全绿,见 DoD/AC5),故按修法(B)**两 scope 各装各跑**:project scope 用既有的项目,user scope 在 `${RUNNER_TEMP}/user-scope-home`(隔离 HOME,注释写明「self-hosted runner 会持久化 user 安装,故用 fresh HOME 保持本 job 的隔离前提」)。stale 注释同步更新;`release-master-advance-needs-check.ts --root .` PASS。
+断言由**源检出**运行(⛔ 不是 `$INSTALLED`:发布产物 strip 掉 raw plugin `.ts`,checker 是门禁不是交付物)。serve 步骤由裸 `serve … &` 改为 `quay server start --only web,control`——裸 `serve` 继承 runner shell 的 cgroup,会让 `serve-own-scope` 因门禁自身而起红;`server start` 与 `/quay:drivers` 同一 scope envelope,YAML 注释记录了理由。**user scope 实测可行**(本机隔离 HOME 下 `marketplace add` + `install --scope user` + init + driver + `server start` + 断言全绿,见 DoD/AC5),故按修法(B)**两 scope 各装各跑**:project scope 用既有的项目,user scope 在 `${RUNNER_TEMP}/user-scope-home`(隔离 HOME,注释写明「self-hosted runner 会持久化 user 安装,故用 fresh HOME 保持本 job 的隔离前提」)。`release-master-advance-needs-check.ts --root .` PASS。
 
 ### AC5 — 本地复演入口(README)+ 一次性 clone 实跑
 README 新增「Pre-release local drill — verify the plugin channel yourself(发布前本地演练)」小节(命令 = 门禁同一份实现)。实跑(一次性 clone,未 push,未真实 `release.yml`,未动真实 `~/.claude`):
@@ -153,7 +155,7 @@ passed=3 failed=0 not-evaluated=0        EXIT=0
 ```
 
 ### AC7 — 登记与棘轮
-`bash plugin/scripts/capability-catalog.sh` ⇒ `369 scripts | 369 declared | 0 unclassified | 364 ship`(六张表:QUESTION/CADENCE/INVALIDATION/LAST_REAFFIRMED/MATCHING/CONSUMER 各加一行;值无 backtick / `$(`)。`sh-census-check.ts` ⇒ `embeddedInterpreterLines=7692 ≤ 7692`(见下「quay-init.sh 的行数中性」)。`import-graph-check.ts` ⇒ `valueSccs=0 ≤ 0, typeSccs=0 ≤ 0, reverseEdges=0 ≤ 0`。`bash scripts/test.sh --for-task gap-release-gate-verify-plugin-channel-misses-config-validate-version-pointer-scope-and-upgrade-assertions --allow-thin` ⇒ **exit 0**,执行 20 个测试(0 fail),静态检查全绿(thin:`--allow-thin` 已由本任务说明,fan-in 用同一命令)。
+`bash plugin/scripts/capability-catalog.sh` ⇒ `369 scripts | 369 declared | 0 unclassified | 364 ship`(六张表:QUESTION/CADENCE/INVALIDATION/LAST_REAFFIRMED/MATCHING/CONSUMER 各加一行;值无 backtick / `$(`)。`sh-census-check.ts` ⇒ `embeddedInterpreterLines=7692 ≤ 7692`(见下「quay-init.sh 的行数中性」)。`import-graph-check.ts` ⇒ `valueSccs=0 ≤ 0, typeSccs=0 ≤ 0, reverseEdges=0 ≤ 0`。`bash scripts/test.sh --for-task gap-release-gate-verify-plugin-channel-misses-config-validate-version-pointer-scope-and-upgrade-assertions`(⛔ 无 `--allow-thin`)⇒ **exit 0**,执行 41 个测试(0 fail)、静态检查全绿。⚠️ 该命令**要求**选择器不 thin:首版 `## Touches` 9 项/4 项解析出测试 = 0.44 < 0.5,选择器 exit 1;把本 delta 的两个覆盖测试(`plugin/test/capability-catalog.test.mjs` — 覆盖改动的 `capability-catalog-declarations.json`;`plugin/test/quay-init-closure-ratchet.test.mjs` — 覆盖改动的 `quay-init.sh` + 重锚的基线)纳入 Touches 后 = 6/11 = 0.55 ≥ 0.5,无旗标即 exit 0。
 
 ### DoD — 真实发布形态树,两 scope 全 PASS
 除 AC5 的 user-scope clone 实跑外,另在 worktree 内用同一 0.17.0 release-form 构建:
@@ -162,7 +164,7 @@ passed=3 failed=0 not-evaluated=0        EXIT=0
 对 0.16.0 跑同一脚本:config validate 真实 FAIL(见 AC3)。门禁调用与本地复演是同一份实现(README 的命令逐字对应 release.yml 的调用)。
 
 ### 实现中的两处必要扩边(如实记录)
-1. **`plugin/scripts/quay-init.sh`**:实跑发现官方 init 写出的 config **本身就被官方 validator 拒绝**——`loop.board` / `loop.gates` 缺(`quay config validate` 报 `Missing required field "board"`,且 `packages/quay/src/loop-params.ts:126` 同样 fail-closed 要求 board)。这与本任务第 1 项「init 后 config validate 失败」同类,是本任务 DoD(真实树全 PASS)的前置 ⇒ 在新装 heredoc 的 `loop:` 块补 `board: "native"` + `gates: []`。sh-census 是 **shrink-only** 棘轮 ⇒ 同文件把两条 `local` 声明并到既有行,保持行数中性(7692 ≤ 7692);`quay-init-closure-ratchet --reanchor` 重锚(内容变、footprint 未增)。⛔ 未改 `packages/quay/src/init.ts`:把 board/gates 加进 `LOOP_VERSION_DEFAULTS` 会让 `generateConfigContent` 重复发键(它在 528-529 已写 board/gates,再在 537 从表发一次)⇒ 反而不合法。**已知残余**:对已存在的 config,`ensure_loop_config` 不会补 board/gates(它只写四个项目派生值且会丢注释),故**升级路径不修 legacy config** —— 这是超出本任务范围的一处 gap,如实记下(不在本任务 DoD 范围内:DoD 的对象是「真实构建的发布形态树 + init」)。
+1. **`plugin/scripts/quay-init.sh`**:实跑发现官方 init 写出的 config **本身就被官方 validator 拒绝**——`loop.board` / `loop.gates` 缺(`quay config validate` 报 `Missing required field "board"`,且 `packages/quay/src/loop-params.ts:126` 同样 fail-closed 要求 board)。这与本任务第 1 项「init 后 config validate 失败」同类,是本任务 DoD(真实树全 PASS)的前置 ⇒ 在新装 heredoc 的 `loop:` 块补 `board: "native"` + `gates: []`。sh-census 是 **shrink-only** 棘轮 ⇒ 同文件把两条 `local` 声明并到既有行,保持行数中性(7692 ≤ 7692);`quay-init-closure-ratchet --reanchor` 重锚(内容变、footprint 未增)。⛔ 未改 `packages/quay/src/init.ts`:把 board/gates 加进 `LOOP_VERSION_DEFAULTS` 会让 `generateConfigContent` 重复发键(它在 528-529 已写 board/gates,再在 537 从表发一次)⇒ 反而不合法。**已知残余**:对已存在的 config,`ensure_loop_config` 不会补 board/gates(它只写四个项目派生值且会丢注释),故**升级路径不修 legacy config** —— 这是超出本任务范围的一处 gap,如实记下(不在本任务 DoD 范围内:DoD 的对象是「真实构建的发布形态树 + init」)。develop 合并时已出现同题任务 `gap-fresh-quay-init-config-fails-validate-on-loop-board-and-gates-that-init-never-writes`(由他人立案)——本 delta 的修法落在**新装 heredoc**,与该任务的边界由 fan-in/评审裁定。
 2. **`plugin/test/quay-init-characterization.test.mjs`**:fresh-install 面的 `.quay/config.yml` 哈希钉住整份 config ⇒ 重锚(其余五项哈希不变,证明只有 loop 块动了)。
 
-`## Touches` 相应扩入 `plugin/scripts/quay-init.sh`、`plugin/test/quay-init-characterization.test.mjs`、`docs/analysis/quay-init-closure-ratchet.baseline.json` 三项(均为上述必要扩边的下游)。
+`## Touches` 相应扩入 `plugin/scripts/quay-init.sh`、`plugin/test/quay-init-characterization.test.mjs`、`docs/analysis/quay-init-closure-ratchet.baseline.json` 三项(必要扩边的下游),以及两个覆盖测试(见 AC7)。
