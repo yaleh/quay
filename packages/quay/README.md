@@ -398,46 +398,16 @@ own `<provider> mcp` separately.
 
 ## Distribution: single-file executables (SEA) — **no longer published**
 
-> **Retired with the npm channel** by the 2026-09-16 ruling. `.github/workflows/release.yml`
-> no longer builds these archives or attaches them to a release — the
-> `sea-release` and `sea-verify-node-free` jobs are gone, and no release page
-> carries a `quay-sea-*.tar.gz` or `.zip`. The build still works locally; that is
-> all this section documents.
-
-[Node.js SEA (Single Executable Application)](https://nodejs.org/api/single-executable-applications.html)
-produces a single-file executable that requires **no separately-installed
-Node.js runtime** on the target machine at all.
-
-Build one yourself from a source checkout:
-
-```sh
-bash packages/quay/scripts/build-sea.sh          # -> packages/quay/dist-sea/quay
-bash packages/quay-native/scripts/build-sea.sh   # -> packages/quay-native/dist-sea/quay-native
-```
-
-An archive you assemble for distribution bundles:
-
-- `quay` (or `quay.exe` on Windows) — the Core CLI/web-UI/MCP binary, built
-  via `packages/quay/scripts/build-sea.sh`.
-- `quay-native` (or `quay-native.exe`) — the native Provider binary, built
-  via `packages/quay-native/scripts/build-sea.sh`. Both binaries are needed
-  because Core spawns the active Provider's `mcp_entry` as a child process;
-  `quay serve` is only genuinely Node-free end-to-end if `mcp_entry` also
-  points at a compiled binary, not `node ...`.
-- A `.quay/config.yml` wiring the two binaries together
-  (`mcp_entry: ["./quay-native", "mcp"]`) and a `tasks/` directory.
-
-```sh
-./quay --help
-./quay serve
-```
-
-No `npm install`, no Node.js on `PATH`, nothing beyond the extracted directory
-is required. `scripts/verify-sea-artifact.sh` verifies an artifact you built (the
-retired CI job used it to install and run the binary in a Node-free
-`debian:stable-slim` container); nothing runs it on a release any more.
+> **Retired with the npm channel** by the 2026-09-16 ruling — no release page carries a
+> `quay-sea-*.tar.gz`/`.zip` any more. The build still works locally
+> (`bash packages/quay/scripts/build-sea.sh` → `packages/quay/dist-sea/quay`); full ruling
+> text, the two-binary rationale, and the verification script are documented once, at the
+> repo root: [`README.md` § Distribution: single-file executables (SEA)](../../README.md#distribution-single-file-executables-sea-no-longer-published).
 
 ## Running the test suite
+
+The repo-wide canonical entry point is `scripts/test.sh` (see the repo root README) — it runs
+this package's tests as part of its full-suite pass. To run only this package's tests directly:
 
 ```sh
 node --test packages/quay/test/*.test.mjs
