@@ -2,7 +2,7 @@
 id: gap-release-gate-verify-plugin-channel-misses-config-validate-version-pointer-scope-and-upgrade-assertions
 title: 发布门禁 verify-plugin-channel 只证明"装得上、driver 活、serve 有 HTTP 响应"，放过了 init 后
   config validate 失败、版本不一致、指引链接、serve 独立 scope 等真实回归——把这些断言做成同一份可本地复演的实现并接进门禁
-status: todo
+status: ready
 labels:
   - gap
   - defect
