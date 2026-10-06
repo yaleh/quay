@@ -135,8 +135,13 @@ test("AC1 — a host spawned by `spawnHost` runs in its OWN `quay-serve-*.scope`
   });
 
   // Drive the REAL spawn path with the REAL CLI entry: `quay server …` → `spawnHost` → `quay serve`.
-  const spawnErr = spawnHost(ws, ["web"], undefined, undefined, { entry: QUAY_CLI });
+  // `warnScope` is captured so the SUCCESS path can be asserted to emit NO report — that is what makes
+  // `serve-scope-unavailable` (asserted in the AC3 case) a DISCRIMINATING reading rather than a token
+  // that appears on both paths.
+  const scopeReports = [];
+  const spawnErr = spawnHost(ws, ["web"], undefined, undefined, { entry: QUAY_CLI, warnScope: (line) => scopeReports.push(line) });
   assert.equal(spawnErr, null, `spawnHost reports no locating error (got ${JSON.stringify(spawnErr)})`);
+  assert.deepEqual(scopeReports, [], "with a working envelope the success path emits NO `serve-scope-unavailable` report");
 
   const carrier = await waitForCarrier(ws);
   assert.ok(carrier && Number.isInteger(carrier.pid), `the spawned host published a carrier naming its pid (got ${JSON.stringify(carrier)})`);
