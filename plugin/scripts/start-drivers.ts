@@ -78,6 +78,13 @@ import { spawn, spawnSync } from "node:child_process";
 // bundle:true) INLINES it into the shipped `dist/start-drivers.js`, so "the installed bundle is
 // self-contained" and "there is one implementation" are not in conflict.
 import { openServeLog, SERVE_LOG_UNAVAILABLE } from "../../packages/quay/src/serve-log.ts";
+// The host's OWN cgroup scope (gap-serve-host-spawned-in-caller-session-cgroup-dies-when-cloudcli-
+// restarts): `detached:true` leaves the session but ⛔ not the cgroup, so a host started here from a
+// CloudCLI session died when that session's scope was stopped. The argv construction + availability
+// probe are SINGLE-SOURCED in Core (`packages/quay/src/systemd-scope.ts`) — the SAME implementation
+// `packages/quay/src/cli/server.ts:spawnHost` uses, and the same one the driver anchor delegates to.
+// ⛔ Neither this file nor server.ts spells a `systemd-run` argv of its own (硬规则 5b).
+import { resolveServeEnvelope, scopeLaunchArgv, serveScopeUnavailableReport } from "../../packages/quay/src/systemd-scope.ts";
 
 /** In-memory ceiling for the serve host this skill starts (2026-09-17 global-OOM remediation).
  *
@@ -599,9 +606,20 @@ export async function startServe(
   const serveArgs = [...inv.args, "serve"];
   if (host !== undefined) serveArgs.push("--host", host);
   if (port !== undefined) serveArgs.push("--port", String(port));
+  // The host gets its OWN cgroup scope so that stopping the launching session's/service's scope no
+  // longer kills it (gap-serve-host-spawned-in-caller-session-cgroup-dies-when-cloudcli-restarts).
+  // `--scope` execs in place ⇒ `child.pid` below is still the HOST's pid, the carrier still names
+  // it, and the log marker's `self=<pid>` still binds. Unavailable ⇒ unenveloped spawn (the pre-fix
+  // behaviour) and an explicit stderr report — ⛔ never a silent loss of protection (硬规则 3b).
+  const scope = resolveServeEnvelope({ root });
+  if (scope.envelope === "none") {
+    const report = serveScopeUnavailableReport(scope);
+    if (report) process.stderr.write(report);
+  }
+  const launchArgv = scopeLaunchArgv([inv.argv0, ...serveArgs], scope);
   const child = spawn(
-    inv.argv0,
-    serveArgs,
+    launchArgv[0],
+    launchArgv.slice(1),
     {
       detached: true,
       stdio: log.stdio,
