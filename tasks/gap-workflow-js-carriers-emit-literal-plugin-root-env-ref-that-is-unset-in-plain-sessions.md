@@ -45,6 +45,7 @@ extra:
 - `packages/quay/test/build-plugin-dist.test.mjs`
 - `plugin/test/fan-in-execute-plugin-root-arg.test.mjs`
 - `plugin/test/fan-in-execute-paths-s01.test.mjs`
+- `packages/quay/test/config-validate.test.mjs`
 - `tasks/gap-workflow-js-carriers-emit-literal-plugin-root-env-ref-that-is-unset-in-plain-sessions.md`
 
 ## AC
@@ -59,3 +60,33 @@ extra:
 
 ## DoD
 真实落地:在一个没有 `CLAUDE_PLUGIN_ROOT` 环境变量的普通 CloudCLI 会话里,用发布版 `quay:fan-in-execute`(以及同类的另外三个 workflow,若受影响)按文档的调用示例派发,发出的 agent 命令里每个 `scripts/dist/…` 路径都是绝对路径且文件存在;缺少或写错 `pluginRoot` 时得到稳定错误码而不是运行期的 `/scripts/dist/…` 失败。仅"加载不报错"不算完成。
+
+## Evidence
+
+### 附带修复:config-validate.test.mjs AC4 的取假控制挂在移动的 `develop` 上(开发面、无主红)
+
+**现象**:fan-in suite 唯一红是 `packages/quay/test/config-validate.test.mjs` AC4 的
+`AssertionError: the predicate must match the pre-change file`。delta-relatedness 判 UNRELATED,
+但它**可复现**(连续两轮 exited-not-landed + 本轮单独重跑),不是 flake。
+
+**根因(实测,非推断)**:该 AC4 的取假半边拿 `git show develop:packages/quay/src/config-validate.ts`
+当"改前文件",断言谓词 `/\.mcp_entry\b|\[\s*["']mcp_entry["']\s*\]/` 至少命中 1 行。而 `6f747e39e`
+(`fix(config): single judge for the native provider's mcp_entry binding`)**同时**删掉了原始 `.mcp_entry`
+访问**并**新增了这条断言,且已落在 develop 上 ⇒ `develop` 本身就是"改后"状态。读数:
+`6f747e39e^` ⇒ 1 命中;`6f747e39e` ⇒ 0;`develop` ⇒ 0 ⇒ 该断言在 develop 上恒假,**每个任务的
+fan-in suite 都红**。这是"before/after 判据不是单态检查":它只在落地窗口内成立。
+
+**无主取证(三项全过 ⇒ 无人会修)**:① `grep -rl config-validate tasks/*.md` ∩ `status: ready` ⇒ 命中的
+ready 任务 `gap-release-gate-verify-plugin-channel-misses-config-validate-version-pointer-scope-and-upgrade-assertions`
+的 `## Touches` **不含**该文件;② 无 peer 任务分支改过 `packages/quay/test/config-validate.test.mjs`
+(`git diff --name-only develop...task/*` 全 0);③ 在飞 worker 只有上面那个 + 本任务。
+⇒ 按 `orphaned-develop-wide-static-red-self-fix` 自行修 + 放宽 Touches。
+
+**修法(最小)**:把"改前修订"从**移动的 ref `develop`** 换成**固定的 `6f747e39e^`**(不可变,父提交),
+其余不动。同款先例:`gap-git-graph-cross-column-edges-drawn-as-fixed-stubs-not-anchored.test.mjs` 的
+`303a94950^:packages/quay/src/serve-git.ts`。固定对象缺失时 `exec` 抛错 ⇒ 测试红,不静默通过(硬规则 3b)。
+
+**读数**:`6f747e39e^` ⇒ 1 命中(控制可命中);`6f747e39e` / `develop` ⇒ 0(控制仍能取假);
+`node --experimental-strip-types --test packages/quay/test/config-validate.test.mjs` ⇒ tests 63 / pass 63 / fail 0。
+anti-drift 在放宽前 `out-of-declared: packages/quay/test/config-validate.test.mjs` hard fail(exit 1);
+放宽 Touches 并 merge develop 进 worktree 后复跑 ⇒ 通过。
