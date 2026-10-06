@@ -208,8 +208,17 @@ test("AC4 — the output carries the explicit install steps and never implies co
     // is caught here instead of in production.
     assert.match(out, /claude plugin marketplace add yaleh\/quay/,
       "must print the FULL github recipe `claude plugin marketplace add yaleh/quay` (one <source> arg)");
-    assert.match(out, /claude plugin install quay@quay --scope project/,
-      "must print the project-scoped install step (or the npm-global register-plugin.mjs path)");
+    assert.match(out, /claude plugin install quay@quay --scope /,
+      "must print an install step that names `--scope` explicitly (the CLI default is `user`)");
+    // ── gap-plugin-install-scope-docs-force-project-scope-and-refresh-recipe-uninstalls-user-install:
+    // the printed step must be scope-NEUTRAL. All three scopes are legal for the published channel
+    // `quay@quay` (human ruling 2026-10-06 / SPEC §4b revision); presenting `project` as the ONLY
+    // correct value is what pushed a user-scope consumer to uninstall their own install. Each choice
+    // is asserted individually so an edit that drops one goes red HERE (not silently in a consumer's
+    // shell). The npm-global `register-plugin.mjs` path is covered by the `--scope` match above.
+    for (const s of ["--scope user", "--scope project", "--scope local"]) {
+      assert.ok(out.includes(s), `the install note must name \`${s}\` as a legal choice`);
+    }
     assert.doesNotMatch(out, /marketplace add quay "/,
       "must NOT print the rejected two-arg form (`marketplace add <name> <source>`)");
     // Known-BAD sample dry-run (硬规则 2, the zero-count half): the old recipe must still satisfy the
@@ -222,6 +231,41 @@ test("AC4 — the output carries the explicit install steps and never implies co
     // The negative control (硬规则 4 / SPEC §6): the forbidden "配置即生效" implication is absent.
     assert.doesNotMatch(out, /配置即生效/, "must not print the forbidden config-just-works phrasing");
     assert.doesNotMatch(out, /自动安装|自动装上/, "must not imply auto-install from config alone");
+  } finally { cleanup(ws); }
+});
+
+// ── AC3 (gap-plugin-install-scope-docs-force-project-scope-and-refresh-recipe-uninstalls-user-install) ─
+// The install note must not walk a consumer through uninstalling an install they already have, must
+// not repeat the false AC-161 claim, and must carry the in-place upgrade path. Human ruling
+// 2026-10-06 / SPEC §4b revision: the published channel `quay@quay` may be enabled at user scope;
+// only the DEV channel (quay@quay-dev, the directory source) is barred from the user level.
+test("AC3 — install note: no uninstall recipe, no false AC-161 claim, carries the update + /quay:init upgrade path", () => {
+  const ws = makeTmp();
+  try {
+    const r = runInit(ws, INIT_ARGS(ws));
+    assert.equal(r.status, 0, `init must exit 0:\n${r.stderr}`);
+    const out = r.stdout;
+    assert.ok(!out.includes("uninstall quay@quay"),
+      "must NOT print `uninstall quay@quay` — that recipe removes a consumer's user-scope install");
+    assert.ok(!out.includes("reddens the STANDING goal AC-161"),
+      "must NOT claim a user-scope enable reddens AC-161 (the criterion bars only the DEV channel)");
+    assert.ok(out.includes("plugin update"),
+      "must carry the in-place upgrade command (`claude plugin update quay@quay --scope <scope>`)");
+    assert.ok(out.includes("/quay:init"),
+      "must say to re-run /quay:init so `.quay/plugin` re-points at the new version's directory");
+    // ── 取假 (硬规则 2, the zero-count half): dry-run the SAME predicates against the PRE-FIX note,
+    // known TRUE for each of them. Without this, a typo in a `!out.includes(...)` predicate would
+    // leave the case green on a note that still carries the very defect it was written to catch.
+    const OLD_NOTE = [
+      "  # 2. install the plugin for THIS project (⛔ always pass --scope: `claude plugin install` defaults",
+      "  #    to `user`, which writes a user-level enabledPlugins key and reddens the STANDING goal AC-161):",
+      "  claude plugin install quay@quay --scope project",
+      "  #      claude plugin uninstall quay@quay --scope <the scope just printed>",
+    ].join("\n");
+    assert.ok(OLD_NOTE.includes("uninstall quay@quay"),
+      "the pre-fix sample must satisfy the forbidden-substring predicate — else that assert cannot take false");
+    assert.ok(OLD_NOTE.includes("reddens the STANDING goal AC-161"),
+      "the pre-fix sample must satisfy the false-claim predicate — else that assert cannot take false");
   } finally { cleanup(ws); }
 });
 

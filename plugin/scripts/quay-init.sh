@@ -1808,27 +1808,36 @@ settings are not read at all — so "config committed => auto-installed" is FALS
   #    the SEPARATE name `quay-dev` → a directory source, declared at user scope there.)
   claude plugin marketplace add yaleh/quay
 
-  # 2. install the plugin for THIS project (⛔ always pass --scope: `claude plugin install` defaults
-  #    to `user`, which writes a user-level enabledPlugins key and reddens the STANDING goal AC-161):
-  claude plugin install quay@quay --scope project
+  # 2. install it, at the scope YOU choose (⛔ `claude plugin install` defaults to `user`, so pass
+  #    --scope explicitly — but the VALUE is yours):
+  #      --scope user     one version for every project on this machine; upgrade once, here
+  #      --scope project  a per-project switch, version pinned in <cwd>/.claude/settings.json
+  #      --scope local    this working copy only, not committed
+  #    All three are legal for the PUBLISHED channel `quay@quay`; the scope rule bites only the DEV
+  #    channel (`quay@quay-dev`, the directory source, quay paths in `env`), which must not reach
+  #    the user level (STANDING goal AC-161 / SPEC §4b) — it would inject this repo's tree into
+  #    every project on this machine. That rule does NOT forbid a user-scope `quay@quay`.
+  claude plugin install quay@quay --scope <user|project|local>
 
   # (or the npm-global path: `npm install -g quay` — its register-plugin.mjs postinstall registers the
-  #  marketplace source only; the enable is deliberately NOT user-scope by default)
+  #  marketplace source only; pass QUAY_PLUGIN_SCOPE=user|project|local to enable it in the same run)
   #
-  # ⚠️ To merely RE-FILL a shared plugin-cache entry (~/.claude/plugins/cache/<mkt>/<plugin>/<ver> is
-  #    keyed by marketplace+plugin+version and SHARED ACROSS SCOPES), do NOT reach for --scope user.
-  #    `plugin update` and a re-`install` both short-circuit on an unchanged version (measured
-  #    2026-09-15 / Claude Code 2.1.271: file count 0→0). The refresh is scope-COMPLETE — and the
-  #    resolve step is NOT optional, because `uninstall --scope project` FAILS outright when the
-  #    record is held at USER scope ("... is installed in user scope, not project. Use --scope user
-  #    to uninstall.") — i.e. the CLI's own error hands you the one command to avoid:
+  # 3. UPGRADE LATER — IN PLACE, at the scope that already holds the record (⛔ never `uninstall`
+  #    then `install --scope ...`: that replaces the record you have, so a user-scope install gets
+  #    swapped for a project-scope one):
   #      claude plugin list --json | jq -r '.[] | select(.id=="quay@quay") | .scope' | sort -u
-  #      claude plugin uninstall quay@quay --scope <the scope just printed>
-  #      claude plugin install   quay@quay --scope project -y
-  #    (a USER-scope uninstall is AC-161-safe: it DELETES the user-level key, it never adds one, and
-  #     it does not remove the shared cache payload. Measured 2026-09-15: 0→1, no user key, exit 0.)
+  #      claude plugin update quay@quay --scope <the scope just printed>
+  #    then re-run /quay:init so `.quay/plugin` re-points at the new version's directory.
+  #    Wrong scope fails closed instead of moving the record (measured 2026-10-06 / Claude Code
+  #    2.1.290: `update --scope user` with the record at project scope exits 1 — "Plugin \"quay\"
+  #    is not installed at scope user"); an unchanged version prints "already at the latest
+  #    version" and leaves installed_plugins.json byte-identical.
+  #
+  # (Re-filling a DAMAGED cache payload is a different problem and `update` does not solve it —
+  #  measured 2026-09-15 / Claude Code 2.1.271, file count 0→0; remove-the-record-then-install
+  #  re-materialized it. Do that at the SAME scope the record already holds.)
 
-  # 3. accept the trust dialog the FIRST time you enter this directory, then restart the session.
+  # 4. accept the trust dialog the FIRST time you enter this directory, then restart the session.
 After that, the enabledPlugins block below takes effect (a restart is required to apply).
 EOF
   echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"

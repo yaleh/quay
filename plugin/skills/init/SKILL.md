@@ -82,9 +82,9 @@ script's output carries the explicit steps, which are:
 
 ```bash
 claude plugin marketplace add yaleh/quay
-claude plugin install quay@quay --scope project
+claude plugin install quay@quay --scope user     # or --scope project / --scope local — see below
 # (or the npm-global path: npm install -g quay — its register-plugin.mjs postinstall registers the
-#  marketplace source only; the enable is deliberately NOT user-scope by default)
+#  marketplace source only; pass QUAY_PLUGIN_SCOPE=user|project|local to enable it in the same run)
 ```
 
 ⚠️ **`marketplace add` takes ONE `<source>`, not `<name> <source>`.** The two-argument form is
@@ -96,40 +96,51 @@ plugin **in place** with no install record — `claude mcp list` looks Connected
 ever installed. The published channel is the github source above; this repo's own dog-food channel
 is the separate name `quay-dev` (directory → `<this repo>/plugin`, declared at user scope, SPEC §4b).
 
-⚠️ **Always pass `--scope`.** `claude plugin install` defaults to `scope=user`, which writes a
-user-level `enabledPlugins` key and reddens the STANDING goal AC-161 (the user level is allowed to
-carry only the marketplace *source*). Same class of mistake, same fix: to merely *re-fill* a shared
-plugin-cache entry (`~/.claude/plugins/cache/<marketplace>/<plugin>/<version>` is keyed by
-marketplace+plugin+version and **shared across scopes** — no scope owns a cache path).
+⚠️ **Choose `--scope` deliberately — but the value is the consumer's.** `claude plugin install`
+defaults to `scope=user`, so it is always worth passing `--scope` explicitly; which value is right
+depends on how you want to run quay (human ruling 2026-10-06, SPEC §4b revision):
 
-**Resolve the scope first** — that step is not optional. `claude plugin uninstall <ref> --scope
-project` FAILS outright when the record is held at **user** scope:
+| `--scope` | what it means | where the enable is written |
+|---|---|---|
+| `user` | ONE version for every project on this machine — upgrade once, here | `~/.claude/settings.json` |
+| `project` | a per-project on/off switch, version pinned for that project | `<cwd>/.claude/settings.json` |
+| `local` | this working copy only, not committed | `<cwd>/.claude/settings.local.json` |
 
-```
-✘ Failed to uninstall plugin "quay@quay": Plugin "quay@quay" is installed in user scope, not
-  project. Use --scope user to uninstall.
-```
+⚠️ **Only the DEV channel is scope-restricted.** The published channel `quay@quay` may be enabled at
+**any** of the three scopes. What the user level must not carry is the **dev** channel — the
+`quay@quay-dev` key, the directory source `<this repo>/plugin`, and quay paths in `env` — because
+that injects this repository's working tree into every project on the machine (STANDING goal AC-161 /
+SPEC §4b). `--scope user` for `quay@quay` is a legal, deliberate choice, **not** an AC-161 violation.
 
-i.e. the CLI's own error message hands you the one command this note forbids. (That is the fifth
-AC-161 regression, 2026-09-15: an agent followed the earlier form of this recipe verbatim and was
-machine-redirected onto `--scope user`.) So, in this order:
+### Upgrading: update IN PLACE, at the scope the record already holds
+
+⛔ Never uninstall-then-reinstall at a different scope: for a consumer who installed at `user` scope
+that recipe *removes their install* and replaces it with a project-scoped one. `claude plugin update`
+upgrades in place, and guessing the wrong scope fails closed instead of moving the record:
 
 ```bash
 # (1) which scope ACTUALLY holds the record? (never assume `project`)
 claude plugin list --json | jq -r '.[] | select(.id=="quay@quay") | .scope' | sort -u
-# (2) uninstall THERE — a USER-scope uninstall is AC-161-safe: it DELETES the user-level key,
-#     it never adds one (and it does not remove the shared cache payload)
-claude plugin uninstall quay@quay --scope <the scope just printed>
-# (3) ALWAYS install at project scope — the only step that writes an enabledPlugins key, and it
-#     writes it to <cwd>/.claude/settings.json, never to ~/.claude/settings.json
-claude plugin install   quay@quay --scope project -y
+# (2) update IN PLACE, at that scope
+claude plugin update quay@quay --scope <the scope just printed>
+# (3) re-run /quay:init in the project: it re-points `.quay/plugin` at the new version's directory
 ```
 
-(Measured 2026-09-15 / Claude Code 2.1.271–2.1.272 against a deliberately damaged cache entry: both
-`claude plugin update --scope project` and a re-`install` short-circuit on the unchanged version and
-re-materialize **nothing** — file count 0 → 0; the short-circuit is keyed on an install **record**,
-not on the cache. Only remove-the-record-then-install re-filled it, 0 → 1, with no user-level key
-appearing.)
+Measured 2026-10-06 / Claude Code 2.1.290 in a throwaway `CLAUDE_CONFIG_DIR`, at both scopes:
+
+- version unchanged ⇒ `✔ quay is already at the latest version (0.15.0).`, exit 0, and
+  `installed_plugins.json` is byte-identical — safe to run speculatively;
+- version changed (0.15.0 → 0.99.0) ⇒ `✔ Plugin "quay" updated from 0.15.0 to 0.99.0 for scope
+  user. Restart to apply changes.`, exit 0; the entry keeps its `scope` and its `installedAt`, and
+  only `installPath` / `version` / `lastUpdated` move. Nothing is written to another scope's
+  settings file;
+- wrong scope ⇒ exit 1, `✘ Failed to update plugin "quay@quay": Plugin "quay" is not installed at
+  scope user` — the record is not moved.
+
+(Re-filling a *damaged* cache payload is a different problem, and `update` does not solve it:
+measured 2026-09-15 / Claude Code 2.1.271 against a cache entry whose payload was empty, `update` and
+a re-`install` both short-circuit on the unchanged version — 0 → 0 files.
+Remove-the-record-then-install re-materialized it, 0 → 1.)
 
 Then accept the trust dialog the first time you enter the directory, and restart the session.
 

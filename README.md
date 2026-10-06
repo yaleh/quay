@@ -243,14 +243,30 @@ and prints what to run once — you can either restart Claude Code and run
 
 ```sh
 claude plugin marketplace add "$(npm root -g)/quay/plugin"
-claude plugin install quay@quay --scope project   # scope user only if you mean it — see below
+claude plugin install quay@quay --scope user     # or --scope project / --scope local
 ```
 
-Registration deliberately does **not** enable the plugin at user scope: the
-user-level `~/.claude/settings.json` carries only the marketplace source, and a
-project opts in through its own `.claude/settings.json`
-(`{"enabledPlugins": {"quay@quay": true}}`). Pass `QUAY_PLUGIN_SCOPE=user` to
-`npm install -g` if you deliberately want a user-scope enable.
+**Pick the scope deliberately** — `claude plugin install` defaults to `user`, so
+pass `--scope` explicitly, but the *value* is yours to choose. All three are legal
+for the published channel `quay@quay`:
+
+- **`user`** — one version for every project on this machine; upgrade in one place.
+- **`project`** — a per-project on/off switch, with the version pinned in that
+  project's `.claude/settings.json`.
+- **`local`** — this working copy only, not committed.
+
+The scope restriction is on the **dev** channel only: `quay@quay-dev`, the directory
+source `<this repo>/plugin`, and quay paths in `env` must not reach the user level
+(STANDING goal AC-161 / SPEC §4b), because that injects this repository's working tree
+into every project on the machine. A user-scope `quay@quay` is a deliberate, legal
+choice — not an AC-161 violation.
+
+Registration deliberately does **not** enable the plugin at user scope (the hook
+registers the marketplace source only): the user-level `~/.claude/settings.json`
+carries only the marketplace source, and a project opts in through its own
+`.claude/settings.json` (`{"enabledPlugins": {"quay@quay": true}}`). Pass
+`QUAY_PLUGIN_SCOPE=user` to `npm install -g` if you deliberately want a user-scope
+enable.
 
 Opt-out (install the CLI without registering the plugin):
 
@@ -272,6 +288,33 @@ source) while a Claude Code session that registered the `quay` MCP server is ope
 The MCP server process is started once when Claude Code launches and does not
 auto-restart when the underlying files change. After a restart, the updated tool
 schemas and any new parameters will be available to the AI agent.
+
+### Upgrading the quay plugin
+
+Update the plugin **in place, at the scope its install record already holds**:
+
+```sh
+# (1) which scope actually holds the record? (never assume `project`)
+claude plugin list --json | jq -r '.[] | select(.id=="quay@quay") | .scope' | sort -u
+# (2) update in place, at that scope
+claude plugin update quay@quay --scope <the scope just printed>
+```
+
+Then **re-run `/quay:init`** in each project: it re-points that project's
+`.quay/plugin` symlink at the newly installed version's directory (the provider
+binding names `.quay/plugin`, never a version segment, so no config edit is needed).
+Restart the session to apply.
+
+⛔ Do **not** `claude plugin uninstall` and then `claude plugin install --scope
+project`: that replaces the record you already have, so a user-scope install is
+silently swapped for a project-scope one. `update` upgrades in place, and if the
+`--scope` you guessed is not the one holding the record it fails closed
+(`✘ Failed to update plugin "quay@quay": Plugin "quay" is not installed at scope
+user`) rather than moving it. Measured 2026-10-06 / Claude Code 2.1.290 in a
+throwaway `CLAUDE_CONFIG_DIR`: on an unchanged version `update` prints `already at
+the latest version` and leaves `installed_plugins.json` byte-identical; on a version
+change it re-materializes the new version while keeping the entry's `scope` and
+`installedAt`.
 
 ## Configuration
 
