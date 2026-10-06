@@ -18,7 +18,7 @@ import path from "node:path";
 import fs from "node:fs";
 import os from "node:os";
 
-import { resolvePluginRoot, resolvePluginRootFrom, resolvePluginScript, resolvePluginScriptExec, isPluginSourceCheckout, mainCheckoutRoot } from "../src/plugin-root.ts";
+import { resolvePluginRoot, resolvePluginRootFrom, resolvePluginRootReading, resolvePluginScript, resolvePluginScriptExec, isPluginSourceCheckout, mainCheckoutRoot } from "../src/plugin-root.ts";
 
 const KERNEL = path.join("scripts", "driver-runtime.ts");
 
@@ -225,6 +225,71 @@ test("resolvePluginScriptExec() falls back to the raw .ts when the shipped layou
     assert.ok(r.path.endsWith(path.join("scripts", "dev-only-tool.ts")), `raw path: ${r.path}`);
   } finally {
     fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+// ── AC5 (gap-project-quay-pointer-is-init-plugin-root-and-version-records-derive-from-it (C)) ────────
+// The resolver is anchored on THIS module's install location. It must NEVER consult the project
+// guidance link `<workspace>/.quay/plugin` — that link is a pointer the resolver's answer is later
+// compared against, so reading it would make the reading its own input (a stale link would silently
+// pin the version it was supposed to merely report).
+
+test("AC5① — `.quay/plugin` pointing at ANOTHER version does NOT move the resolution (no feedback loop)", async () => {
+  const base = fs.mkdtempSync(path.join(os.tmpdir(), "quay-plugroot-link-"));
+  const prev = process.env.QUAY_PLUGIN_ROOT;
+  try {
+    delete process.env.QUAY_PLUGIN_ROOT;
+    // A module tree with its OWN plugin/ copy (the real source of the answer) …
+    const modDir = path.join(base, "packages", "quay", "src");
+    fs.mkdirSync(modDir, { recursive: true });
+    fs.mkdirSync(path.join(base, "plugin", "scripts"), { recursive: true });
+    fs.writeFileSync(path.join(base, "plugin", "scripts", "driver-runtime.ts"), "// own kernel\n");
+    // … and a `.quay/plugin` link pointing somewhere ELSE entirely (a decoy install).
+    const decoy = path.join(base, "decoy-plugin");
+    fs.mkdirSync(path.join(decoy, "scripts"), { recursive: true });
+    fs.writeFileSync(path.join(decoy, "scripts", "driver-runtime.ts"), "// decoy kernel\n");
+    fs.mkdirSync(path.join(base, ".quay"), { recursive: true });
+    fs.symlinkSync(decoy, path.join(base, ".quay", "plugin"));
+    fs.copyFileSync(
+      fileURLToPath(new URL("../src/plugin-root.ts", import.meta.url)),
+      path.join(modDir, "plugin-root.ts"),
+    );
+    const mod = await import(pathToFileURL(path.join(modDir, "plugin-root.ts")).href + `?t=${Date.now()}`);
+
+    assert.equal(mod.resolvePluginRoot(), path.resolve(base, "plugin"),
+      "resolution must be the module's OWN plugin root");
+    assert.notEqual(mod.resolvePluginRoot(), path.resolve(decoy),
+      "⛔ the resolver must NEVER read `.quay/plugin` — that would make the pointer its own input");
+  } finally {
+    if (prev === undefined) delete process.env.QUAY_PLUGIN_ROOT; else process.env.QUAY_PLUGIN_ROOT = prev;
+    fs.rmSync(base, { recursive: true, force: true });
+  }
+});
+
+test("AC5② — a QUAY_PLUGIN_ROOT that differs from this module's own root RAISES a warning (frozen-env pointer)", () => {
+  const synthetic = fs.mkdtempSync(path.join(os.tmpdir(), "quay-plugroot-warn-"));
+  const prev = process.env.QUAY_PLUGIN_ROOT;
+  try {
+    process.env.QUAY_PLUGIN_ROOT = synthetic;
+    const reading = resolvePluginRootReading();
+    assert.equal(reading.root, synthetic, "the env pointer still WINS (it is a legitimate override)");
+    assert.ok(reading.warnings.some((w) => /QUAY_PLUGIN_ROOT/.test(w) && /differs/.test(w)),
+      `an env pointer differing from the module's own root must warn: ${JSON.stringify(reading.warnings)}`);
+
+    // Control: pointing the env at the module's OWN root produces NO warning (so the predicate can be
+    // false). The "own root" is read with the env CLEARED — that is exactly the value the warning
+    // compares against, including the linked-worktree → main-checkout relocation.
+    delete process.env.QUAY_PLUGIN_ROOT;
+    const selfRoot = resolvePluginRoot();
+    if (selfRoot) {
+      process.env.QUAY_PLUGIN_ROOT = selfRoot;
+      const r2 = resolvePluginRootReading();
+      assert.equal(r2.root, selfRoot);
+      assert.deepEqual(r2.warnings, [], `an env pointer at the module's own root must NOT warn: ${JSON.stringify(r2.warnings)}`);
+    }
+  } finally {
+    if (prev === undefined) delete process.env.QUAY_PLUGIN_ROOT; else process.env.QUAY_PLUGIN_ROOT = prev;
+    fs.rmSync(synthetic, { recursive: true, force: true });
   }
 });
 

@@ -170,13 +170,12 @@ const PINNED = {
       // that intentional change — the other five files are byte-identical, which is the cross-check
       // that only the loop: block was touched. Re-based 2026-09-24 after merging develop, which had itself
       // moved this row: the merged config MINUS the 14-line fan-in block hashes to develop's pin (ba6933df…).
-      // RE-ANCHORED 2026-10-05 (gap-config-provider-path-frozen-to-versioned-cache-dir): the fresh
-      // writer's provider `path`/`mcp_entry` moved from `<PLUGIN>/vendor/quay-native` (a versioned
-      // cache dir) to the project-internal stable link `<ws>/.quay/plugin/vendor/quay-native`, and the
-      // user-facing header comment was rewritten to explain the link. Same block, same seven keys —
-      // only the two provider refs + that comment moved; the other five files hash unchanged, which is
-      // the cross-check that nothing outside the provider binding was touched.
-      ".quay/config.yml  3f13258a78fb1b8f21ed23992a56943294da94b144d609f4a5d8260452153d5c",
+      // RE-ANCHORED 2026-10-06 (gap-project-quay-pointer-is-init-plugin-root-and-version-records-
+      // derive-from-it): the fresh writer's native provider NO LONGER emits `path`/`mcp_entry` at all
+      // (Core resolves the native provider from its own plugin root — `plugin-root.ts`), so the two
+      // lines left the block and the header comment was rewritten to explain the removal. The other
+      // five files hash unchanged — the cross-check that only the provider block moved.
+      ".quay/config.yml  a5ac122902892c47ae2892fe88fb7697c0493d7dd0c7954425662de2e2495a59",
       ".quay/profiles.yml  0f781fbcc8140fd1b4732d877f8484f2c6f14856e2419167281976678b748bb0",
       ".gitignore  f9e6655aa4762432b178420cf9c9d773fc88a67822c6e44fcbdf5f51a8e6ec7a",
       ".claude/launch.settings.json  25e4ace2586d593da41a0b0f7380c2d77aed03d404b7a0f3414329f6df30baec",
@@ -215,10 +214,12 @@ test("AC2 — the fresh-install config carries the provider map + the loop param
   assert.equal(runInit(ws, argsFor(base)).status, 0);
   const cfg = configText(ws, base);
   assert.match(cfg, /^providers:\n  native:\n    enabled: true$/m);
-  // The provider binding names the project-internal stable link (no version segment), not the plugin
-  // cache dir — gap-config-provider-path-frozen-to-versioned-cache-dir.
-  assert.match(cfg, /^ {4}path: "<BASE>\/ws\/\.quay\/plugin\/vendor\/quay-native"$/m);
-  assert.match(cfg, /^ {4}mcp_entry: \["node", "<BASE>\/ws\/\.quay\/plugin\/vendor\/quay-native\/dist\/quay-native\.js", "mcp"\]$/m);
+  // The native provider carries NO path/mcp_entry (Core resolves it from its own plugin root), and
+  // names no `.quay/plugin` link — gap-project-quay-pointer-is-init-plugin-root-and-version-records-
+  // derive-from-it (D).
+  assert.doesNotMatch(cfg, /^ {4}path:/m, "the native provider must not carry a path:");
+  assert.doesNotMatch(cfg, /^ {4}mcp_entry:/m, "the native provider must not carry an mcp_entry:");
+  assert.doesNotMatch(cfg, /\.quay\/plugin/, "the config must not name the .quay/plugin link");
   for (const key of ["QUAY_NATIVE_TASKS_DIR", "QUAY_NATIVE_GOAL_DIR", "QUAY_NATIVE_ADR_DIR", "QUAY_NATIVE_META_DIR"]) {
     assert.match(cfg, new RegExp(`^ {6}${key}: "<BASE>\/ws\/(tasks|goals|adr|meta)"$`, "m"), `${key} pin missing`);
   }
@@ -234,38 +235,39 @@ test("AC2 — the fresh-install config carries the provider map + the loop param
   );
 });
 
-test("AC3 — an EXISTING legacy config: the migration rewrite is byte-identical to the pre-port output", () => {
-  // The upgrade path is where the round-trip YAML writer actually fires, and it is the ONLY place
-  // the port can silently change bytes: `safe_dump` REFORMATS the whole document (an inline
-  // `mcp_entry: [...]` becomes a block sequence) and DROPS every comment. That unlovely behaviour
-  // is the pre-port contract, so it is pinned here verbatim.
+test("AC3 — an EXISTING legacy config: the migration DELETES the binding lines and keeps every comment", () => {
+  // ⚠️ RE-ANCHORED 2026-10-06 (gap-project-quay-pointer-is-init-plugin-root-and-version-records-
+  // derive-from-it): this scenario used to characterize the round-trip YAML rewrite (drop comments,
+  // reformat `mcp_entry` into a block sequence). That rewrite is RETIRED — the migration is now
+  // LINE-WISE (⛔ never a re-serialization: `.quay/` is gitignored, so dropped comments are
+  // unrecoverable). The new contract is pinned here: the two binding lines vanish, everything else
+  // (comments included) is byte-identical.
   const base = makeBase();
   const ws = initWorkspace(base);
   assert.equal(runInit(ws, argsFor(base)).status, 0, "baseline install");
   // A legacy BARE-PATH binding + a stale project-local runtime ⇒ both migration rules fire.
-  let cfg = fs.readFileSync(path.join(ws, ".quay", "config.yml"), "utf8");
-  cfg = cfg.replace(/mcp_entry: \[.*\]\n/, 'mcp_entry: ["quay-native", "mcp"]\n');
-  fs.writeFileSync(path.join(ws, ".quay", "config.yml"), cfg);
+  const p = path.join(ws, ".quay", "config.yml");
+  let cfg = fs.readFileSync(p, "utf8");
+  cfg = cfg.replace(
+    /^providers:$/m,
+    "# a comment the migration must preserve verbatim\nproviders:",
+  );
+  cfg = cfg.replace(/^ {2}native:\n/m, '  native:\n    path: "."\n    mcp_entry: ["quay-native", "mcp"]\n');
+  fs.writeFileSync(p, cfg);
   fs.mkdirSync(path.join(ws, ".quay", "runtime", "bin"), { recursive: true });
   fs.writeFileSync(path.join(ws, ".quay", "runtime", "bin", "quay-native.js"), "stale-runtime-bytes\n");
 
   const r = runInit(ws, argsFor(base));
   assert.equal(r.status, 0, `upgrade must exit 0\nstdout:\n${r.stdout}\nstderr:\n${r.stderr}`);
   const after = configText(ws, base);
-  // The comment header is GONE — the round-trip dropped it. Pinning the absence is what makes this
-  // a characterization of the shipped behaviour rather than of an idealized one.
-  assert.ok(!after.includes("# .quay/config.yml — generated by quay-init"), "the round-trip rewrite must drop comments (pre-port behaviour)");
-  // ⚠️ UNQUOTED, unlike the fresh-install heredoc's `path: "…"`: the round-trip re-serialises and
-  // drops the quotes the handwritten template used, because a plain scalar needs none.
-  // Rebuilt target is the project-internal stable link (gap-config-provider-path-frozen-…) — the
-  // bare-PATH rule no longer re-freezes the binding to `<PLUGIN>`.
-  assert.match(after, /^ {4}path: <BASE>\/ws\/\.quay\/plugin\/vendor\/quay-native$/m);
-  assert.match(
-    after,
-    /^ {4}mcp_entry:\n {4}- node\n {4}- <BASE>\/ws\/\.quay\/plugin\/vendor\/quay-native\/dist\/quay-native\.js\n {4}- mcp$/m,
-    "the migrated binding must be rebuilt canonically: block sequence, node + the stable project runtime + the trailing verb",
-  );
-  assert.match(r.stdout, /migrated: mcp_entry bare PATH reference 'quay-native'/);
+  // The comment header SURVIVES (line-wise deletion), and the inserted comment is intact.
+  assert.ok(after.includes("# .quay/config.yml — generated by quay-init"), "the line-wise migration must NOT drop comments");
+  assert.ok(after.includes("# a comment the migration must preserve verbatim"), "an unrelated comment must survive verbatim");
+  // The two binding lines are GONE; nothing replaces them.
+  assert.doesNotMatch(after, /^ {4}path:/m, "the binding `path` line must be deleted");
+  assert.doesNotMatch(after, /^ {4}mcp_entry:/m, "the binding `mcp_entry` line must be deleted");
+  assert.match(r.stdout, /removed: providers\.native\.path/);
+  assert.match(r.stdout, /removed: providers\.native\.mcp_entry/);
   assert.match(r.stdout, /retired-orphan-runtime: .* -> backup .*quay-init-backups\//);
   assert.ok(!fs.existsSync(path.join(ws, ".quay", "runtime")), "the stale unreferenced runtime must be retired (moved to a backup)");
   // The carrier pins and the loop values were already current ⇒ NO further rewrite; both steps

@@ -19,6 +19,10 @@ import { escapeRegExp } from "./kernel/regex-escape.ts";
 // The serve binding's ONE fallback (a leaf module): the seed values of the `serve:` config section
 // are THAT constant, so the delivered key and the code's fallback cannot become two defaults.
 import { SERVE_BINDING_FALLBACK } from "./serve-binding.ts";
+// The ONE plugin-tree resolver (gap-project-quay-pointer-is-init-plugin-root-and-version-records-
+// derive-from-it): the project link's source-checkout guard reuses `isPluginSourceCheckout` so the
+// "is this an install or a working tree" judgment cannot fork into two spellings.
+import { isPluginSourceCheckout } from "./plugin-root.ts";
 
 // ── Three-state classification of an existing `.quay/config.yml` ────────────────────────────────────
 // (SPEC-quay-init-reconcile-and-native-implementation-2026-09-18 §3.3; AC1.)
@@ -1419,162 +1423,73 @@ export function ensureProviderCarrierEnv(o: EnsureCarrierEnvOpts): void {
   }
 }
 
-// ── project-internal plugin link (gap-config-provider-path-frozen-to-versioned-cache-dir) ──────────
+// ── project-internal plugin link (gap-config-provider-path-frozen-to-versioned-cache-dir; the
+//    SELECTION RULE rewritten by gap-project-quay-pointer-is-init-plugin-root-and-version-records-
+//    derive-from-it) ────────────────────────────────────────────────────────────────────────────────
 //
-// DEFECT. `/quay:init` wrote the provider binding as `<installPath>/vendor/quay-native`, where
-// `installPath` is the plugin MARKETPLACE cache dir — a path that CONTAINS the installed version
+// DEFECT (first half). `/quay:init` wrote the provider binding as `<installPath>/vendor/quay-native`,
+// where `installPath` is the plugin MARKETPLACE cache dir — a path that CONTAINS the installed version
 // (`~/.claude/plugins/cache/quay/quay/0.14.0/`). Upgrading the plugin left the config untouched, so
-// Core kept launching the OLD provider bundle forever. `migrateStaleMcpEntry`'s rules only fire on
-// DANGLING / reserved / retired paths — a versioned path that still EXISTS on disk matched none of
-// them, so the drift was silent (reported by `driver status`, never fixed).
+// Core kept launching the OLD provider bundle forever.
 //
-// RULING (human, 2026-10-05): ⛔ NO global symlink (`~/.local/share/quay/current`) — the registry
-// keeps a DIFFERENT entry per scope/projectPath, so one global link would let one project's upgrade
-// clobber a `local`-scope project pinned to an older version. Instead each project gets an
-// INTERNAL link `<project>/.quay/plugin -> <that project's scope installPath>`, refreshed by that
-// project's own `/quay:init`; the config's `path`/`mcp_entry` point at `<project>/.quay/plugin/...`.
-// The config text then carries NO version segment and is STABLE across upgrades — a re-run of
-// `/quay:init` re-points the LINK, not the config.
+// DEFECT (second half, this task). The replacement — an INTERNAL link `<project>/.quay/plugin ->
+// <that project's registry-resolved installPath>` — gave the link a SECOND resolver. The session layer
+// decides which plugin version a session actually loads; the registry tier rule (`projectPath`-matching
+// local/project entry wins, else the `user` entry) is a DIFFERENT rule, so the two necessarily diverge.
+// Measured 2026-10-06: claudecodeui's project record stayed at 0.14.0 while the user entry moved to
+// 0.15.0, and every session started after 07:14:55 loaded 0.15.0 — the link, if re-pointed from the
+// registry, would have named a version no session was running.
 //
-// SELECTION RULE: the `projectPath`-matching entry (local/project scope) wins; else the `user` scope
-// entry; else NOT-EVALUATED and the existing link is LEFT UNCHANGED (硬规则 3b: "cannot decide" must
-// not share an outcome with "decided"). `-dev` versions are excluded (a dev build is not an install).
-// A project-scope entry MISSING `projectPath` is undecidable and is NEVER attributed to a project
-// (measured in the real registry 2026-10-05).
-
-/** `x.y.z[-suffix]` shape test (⛔ never a guess at a non-version segment). */
-function looksLikeVersion(v: string): boolean {
-  return /^\d+\.\d+\.\d+(?:-[0-9A-Za-z.]+)?$/.test(v.trim());
-}
-
-/** A path segment that is a version string (the install-cache dir). ⛔ The stable project link
- *  `<ws>/.quay/plugin/...` has none, which is exactly what makes it upgrade-proof. */
-function hasVersionSegment(p: string): boolean {
-  return /(?:^|\/)\d+\.\d+\.\d+(?:-[0-9A-Za-z.]+)?(?:\/|$)/.test(p);
-}
-
-/** Rank two version strings. Same kernel semantics as `compareVersions` (driver-runtime):
- *  `1.0.0` > `1.0.0-dev`; unparseable ⇒ plain lexicographic (never the first-seen, which would make
- *  "take the highest" depend on registry order — 硬规则 4). */
-function compareVersionStrings(a: string, b: string): number {
-  const rank = (v: string): [number, number, number, string] | null => {
-    const m = /^(\d+)\.(\d+)\.(\d+)(?:-(.*))?$/.exec(v.trim());
-    return m ? [Number(m[1]), Number(m[2]), Number(m[3]), m[4] ?? ""] : null;
-  };
-  const ra = rank(a);
-  const rb = rank(b);
-  if (!ra || !rb) return a < b ? -1 : a > b ? 1 : 0;
-  for (let i = 0; i < 3; i++) if (ra[i] !== rb[i]) return (ra[i] as number) - (rb[i] as number);
-  const sa = ra[3] as string;
-  const sb = rb[3] as string;
-  if (sa === sb) return 0;
-  if (sa === "") return 1;
-  if (sb === "") return -1;
-  return sa < sb ? -1 : 1;
-}
+// RULING (human, 2026-10-06): the link target is the plugin root THIS init run executes from
+// (`${CLAUDE_PLUGIN_ROOT}` / `--plugin-root`) — ⛔ never a registry lookup. There is exactly ONE
+// binding producer (this link), one guidance consumer (a Core-absent consumer such as a CloudCLI
+// server `execFile`, cwd = the project root), and the drift between them is REPORTED by `driver
+// status`'s `pointer` reading — never auto-corrected (several plugin versions can be live in one
+// project at once, so a runtime refresh would clobber whichever wrote last).
+//
+// ⛔ Core NEVER writes this link from any runtime path (driver start / serve / MCP). Only `/quay:init`
+// writes it.
+//
+// NOT-EVALUATED (and the existing link is LEFT UNCHANGED — 硬规则 3b: "cannot decide" must not share
+// an outcome with "decided") when the plugin root is unknown or is a SOURCE CHECKOUT (the dev tree
+// `<repo>/plugin` is a working tree, not an install — pointing a project at it would freeze that
+// project to uncommitted state).
 
 export type ProjectPluginLinkReading =
-  | { state: "linked"; installPath: string; version: string; source: "project" | "user" }
+  | { state: "linked"; pluginRoot: string; version: string | null }
   | { state: "not-evaluated"; reason: string };
 
-/**
- * Pick the install path THIS project should be linked to, from the raw `installed_plugins.json`
- * bytes. Pure (no filesystem) so it is directly unit-testable.
- *
- * `registryRaw === null` (file missing/unreadable), invalid JSON, and "no usable entry" are ALL
- * `not-evaluated` with a distinct reason — the caller leaves the existing link alone.
- */
-export function selectProjectPluginInstallPath(
-  registryRaw: string | null,
-  projectPath: string,
-): ProjectPluginLinkReading {
-  if (registryRaw === null) {
-    return { state: "not-evaluated", reason: "plugin registry unreadable (installed_plugins.json)" };
-  }
-  let entries: unknown;
+/** Version of a plugin ROOT (its `.claude-plugin/plugin.json` `version`). null = unreadable.
+ *  ⛔ NEVER `quay --version` output — the shipped bundle embeds the dev version, so that reading is a
+ *  different quantity (gap-release-bundle-embeds-dev-version-after-stamp). */
+export function readPluginRootVersion(pluginRoot: string | null): string | null {
+  if (!pluginRoot) return null;
   try {
-    const j = JSON.parse(registryRaw) as { plugins?: Record<string, unknown> };
-    entries = j?.plugins?.["quay@quay"];
+    const v = JSON.parse(fs.readFileSync(path.join(pluginRoot, ".claude-plugin", "plugin.json"), "utf8"))?.version;
+    return typeof v === "string" && v.trim() !== "" ? v.trim() : null;
   } catch {
-    return { state: "not-evaluated", reason: "plugin registry is not valid JSON" };
+    return null;
   }
-  if (!Array.isArray(entries)) {
-    return { state: "not-evaluated", reason: "plugin registry carries no quay@quay entries" };
-  }
-
-  const usable = entries
-    .filter((e): e is Record<string, unknown> => !!e && typeof e === "object" && !Array.isArray(e))
-    .map((o) => ({
-      scope: typeof o.scope === "string" ? o.scope : null,
-      projectPath: typeof o.projectPath === "string" ? o.projectPath : null,
-      installPath: typeof o.installPath === "string" ? o.installPath : null,
-      version: typeof o.version === "string" ? o.version.trim() : null,
-    }))
-    .filter(
-      (e) =>
-        e.installPath !== null &&
-        e.version !== null &&
-        looksLikeVersion(e.version) &&
-        !e.version.includes("-dev"),
-    );
-
-  const proj = path.resolve(projectPath);
-  const inProjectScope = (e: { scope: string | null }): boolean => e.scope === "local" || e.scope === "project";
-  const matchesProject = (e: { projectPath: string | null }): boolean =>
-    e.projectPath !== null && path.resolve(e.projectPath) === proj;
-
-  const tierProject = usable.filter((e) => inProjectScope(e) && matchesProject(e));
-  const tierUser = usable.filter((e) => e.scope === "user");
-
-  const pick = tierProject.length > 0 ? tierProject : tierUser;
-  const source: "project" | "user" = tierProject.length > 0 ? "project" : "user";
-  if (pick.length === 0) {
-    return {
-      state: "not-evaluated",
-      reason:
-        "no projectPath-matching local/project entry and no user-scope entry " +
-        "(a project-scope entry without projectPath is undecidable and is never attributed to a project)",
-    };
-  }
-  let best = pick[0]!;
-  for (const e of pick) if (compareVersionStrings(e.version!, best.version!) > 0) best = e;
-  return { state: "linked", installPath: best.installPath!, version: best.version!, source };
 }
 
 export interface ProjectPluginLinkOpts {
   wsRoot: string;
-  /** The path matched against the registry's `projectPath` (defaults to `wsRoot`). */
-  projectPath?: string;
-  /** Registry path (defaults to `$HOME/.claude/plugins/installed_plugins.json`). */
-  registryPath?: string;
+  /** The plugin root THIS init run executes from (`CLAUDE_PLUGIN_ROOT` / `--plugin-root`). */
+  pluginRoot: string | null;
   dryRun: boolean;
 }
 
-function defaultRegistryPath(): string {
-  const home = process.env.HOME ?? os.homedir();
-  return path.join(home, ".claude", "plugins", "installed_plugins.json");
-}
-
 /**
- * Refresh `<ws>/.quay/plugin` so it points at THIS project's scope installPath. Idempotent: an
- * already-correct link is re-created (cheap) but the RESULT is stable; an undecidable registry leaves
- * the existing link UNTOUCHED and reports `NOT-EVALUATED` (never folded into "linked").
+ * Refresh `<ws>/.quay/plugin` so it points at the plugin root THIS init run executes from. Idempotent:
+ * an already-correct link is re-created (cheap) but the RESULT is stable; an unknown / source-checkout
+ * plugin root leaves the existing link UNTOUCHED and reports `NOT-EVALUATED` (never folded into
+ * "linked").
  *
  * A real (non-symlink) file/dir at the link path is REFUSED, never clobbered — the closed set does not
  * own arbitrary user content at that name.
  */
 export function refreshProjectPluginLink(o: ProjectPluginLinkOpts): ProjectPluginLinkReading {
-  const registryPath = o.registryPath ?? defaultRegistryPath();
-  const projectPath = o.projectPath ?? o.wsRoot;
   const linkPath = path.join(o.wsRoot, ".quay", "plugin");
-
-  let raw: string | null;
-  try {
-    raw = fs.readFileSync(registryPath, "utf8");
-  } catch {
-    raw = null;
-  }
-  const reading = selectProjectPluginInstallPath(raw, projectPath);
 
   let existing: fs.Stats | null = null;
   try {
@@ -1582,7 +1497,24 @@ export function refreshProjectPluginLink(o: ProjectPluginLinkOpts): ProjectPlugi
   } catch {
     existing = null;
   }
-  const currentTarget = existing?.isSymbolicLink() ? (() => { try { return fs.readlinkSync(linkPath); } catch { return null; } })() : null;
+  const currentTarget = existing?.isSymbolicLink()
+    ? (() => { try { return fs.readlinkSync(linkPath); } catch { return null; } })()
+    : null;
+
+  const decide = (): ProjectPluginLinkReading => {
+    if (!o.pluginRoot) {
+      return { state: "not-evaluated", reason: "plugin root unknown (CLAUDE_PLUGIN_ROOT / --plugin-root unset)" };
+    }
+    const root = path.resolve(o.pluginRoot);
+    if (!fs.existsSync(path.join(root, ".claude-plugin", "plugin.json"))) {
+      return { state: "not-evaluated", reason: `${root} is not a quay plugin root (no .claude-plugin/plugin.json)` };
+    }
+    if (isPluginSourceCheckout(root)) {
+      return { state: "not-evaluated", reason: `${root} is a source checkout (dev tree), not an installed plugin` };
+    }
+    return { state: "linked", pluginRoot: root, version: readPluginRootVersion(root) };
+  };
+  const reading = decide();
 
   if (reading.state === "not-evaluated") {
     console.log(`  project-plugin-link: NOT-EVALUATED — ${reading.reason} (existing link left unchanged)`);
@@ -1596,9 +1528,9 @@ export function refreshProjectPluginLink(o: ProjectPluginLinkOpts): ProjectPlugi
 
   if (o.dryRun) {
     console.log(
-      currentTarget === reading.installPath
-        ? `  would-keep: .quay/plugin -> ${reading.installPath} (${reading.source} scope, v${reading.version}; already current)`
-        : `  would-link: .quay/plugin -> ${reading.installPath} (${reading.source} scope, v${reading.version})`,
+      currentTarget === reading.pluginRoot
+        ? `  would-keep: .quay/plugin -> ${reading.pluginRoot} (v${reading.version ?? "?"}; already current)`
+        : `  would-link: .quay/plugin -> ${reading.pluginRoot} (v${reading.version ?? "?"})`,
     );
     return reading;
   }
@@ -1607,8 +1539,8 @@ export function refreshProjectPluginLink(o: ProjectPluginLinkOpts): ProjectPlugi
   if (existing) {
     try { fs.rmSync(linkPath, { force: true }); } catch { /* recreate below */ }
   }
-  fs.symlinkSync(reading.installPath, linkPath);
-  console.log(`  linked: .quay/plugin -> ${reading.installPath} (${reading.source} scope, v${reading.version} — stable project provider entry)`);
+  fs.symlinkSync(reading.pluginRoot, linkPath);
+  console.log(`  linked: .quay/plugin -> ${reading.pluginRoot} (v${reading.version ?? "?"} — the plugin root this init ran from)`);
   return reading;
 }
 
@@ -1659,38 +1591,11 @@ export function migrateStaleMcpEntry(o: MigrateMcpEntryOpts): void {
     return abs === base || abs.startsWith(base + path.sep);
   };
 
-  // Reserved directory names that must never hold the quay runtime in a target (Go vendor/, npm
-  // node_modules/, cargo target/, make/build/, bundler dist/). An EXISTING pre-fix install laid the
-  // runtime under `<target>/vendor/quay[-native]/`, which EXISTS on upgrade — so a bare "not a dir"
-  // guard would never migrate it and the target would stay pointed at the Go-reserved directory.
-  const RESERVED = new Set(["vendor", "node_modules", "target", "build", "dist"]);
-  const underReserved = (p: unknown): boolean =>
-    String(p)
-      .split(path.sep)
-      .filter(Boolean)
-      .some((seg) => RESERVED.has(seg));
-  const isQuayRuntimeDir = (p: unknown): boolean => {
-    const base = path.basename(String(p).replace(new RegExp(`${path.sep.replace(/\\/g, "\\\\")}+$`), ""));
-    return base === "quay" || base === "quay-native";
-  };
   const rtDir = path.join(o.wsRoot, ".quay", "runtime");
   const inRetiredRuntime = (p: unknown): boolean => {
     const s = String(p);
     const cands = path.isAbsolute(s) ? [s] : [s, path.join(o.wsRoot, s)];
     return cands.some((c) => under(c, rtDir));
-  };
-  const isBarePathQuay = (ref: unknown): boolean =>
-    !String(ref).includes(path.sep) && (ref === "quay" || ref === "quay-native");
-  const RUNTIME_BASENAME = /^quay(-native)?\.(js|ts)$/;
-
-  // The element that NAMES the runtime is NOT always index 1: the canonical node form is
-  // ["node", <runtime>, "mcp"] (index 1) but the legacy BARE PATH form is ["quay-native", "mcp"]
-  // (index 0). A fixed `me[1]` read "mcp", matched nothing, and left the whole bare form unmigrated.
-  const runtimeRefIndex = (me: unknown): number | null => {
-    if (!Array.isArray(me) || me.length < 2) return null;
-    if (typeof me[0] === "string" && isBarePathQuay(me[0])) return 0;
-    if (typeof me[1] === "string" && RUNTIME_BASENAME.test(path.basename(me[1]))) return 1;
-    return null;
   };
 
   // The single source of truth for the fate of <ws>/.quay/runtime, computed ONCE from the ORIGINAL
@@ -1714,74 +1619,28 @@ export function migrateStaleMcpEntry(o: MigrateMcpEntryOpts): void {
   const rtState = retiredRtState();
 
   let changed = false;
-  const migrated: string[] = [];
+  const removed: string[] = [];
 
-  // The stable project-internal link this task introduces: `path`/`mcp_entry` name
-  // `<ws>/.quay/plugin/...` so the binding carries NO version segment (see the section above). All
-  // binding rebuilds below target THESE, never the current plugin root — a rebuild to the plugin root
-  // would simply re-freeze the binding to the running version.
-  const linkProvider = path.join(o.wsRoot, ".quay", "plugin", "vendor", "quay-native");
-  const linkRuntime = path.join(linkProvider, "dist", "quay-native.js");
-
-  const p = prov["path"];
-  const legacyNative = path.join(o.wsRoot, "vendor", "quay-native", "dist", "quay-native.js");
-  const legacyCore = path.join(o.wsRoot, "vendor", "quay", "dist", "quay.js");
-  if (typeof p === "string" && p !== linkProvider) {
-    // Two INDEPENDENT reasons to migrate the provider dir:
-    //   · versioned — the install-time CACHE path (`…/cache/quay/quay/<x.y.z>/vendor/quay-native`),
-    //     which EXISTS on disk and so matched NONE of the old dangling/reserved rules ⇒ the upgrade
-    //     stayed silent (the defect this task closes).
-    //   · legacy    — the old rules (dangling / reserved-non-versioned / retired project-local
-    //     runtime). Guarded by `p !== o.installProvider` so an already-current non-versioned binding
-    //     (a dev/plugin-dir install) is not gratuitously rewritten.
-    const versionedQuay = hasVersionSegment(p) && (isQuayRuntimeDir(p) || underReserved(p));
-    const legacyFire =
-      p !== o.installProvider &&
-      (!fs.existsSync(p) || (underReserved(p) && isQuayRuntimeDir(p)) || (inRetiredRuntime(p) && rtState === "retire"));
-    if (versionedQuay || legacyFire) {
-      prov["path"] = linkProvider;
-      changed = true;
-      migrated.push(`path ${pythonRepr(p)} -> ${linkProvider}`);
-    }
+  // (gap-project-quay-pointer-is-init-plugin-root-and-version-records-derive-from-it): the provider
+  // binding no longer names a provider DIRECTORY at all — Core resolves the native provider from its
+  // own plugin root (`plugin-root.ts`; the default is `<plugin-root>/vendor/quay-native`). So the two
+  // keys that used to carry a path are DELETED here, LINE-WISE. ⛔ Never a YAML re-serialization: that
+  // drops every comment, and `.quay/` is gitignored so the original bytes are unrecoverable.
+  //
+  // The `.quay/runtime` judgment below is unchanged and reads the ORIGINAL binding (whether it
+  // referenced the retired dir) — ⛔ not the text this step deletes.
+  const stripped = stripNativeProviderBindingLines(fs.readFileSync(o.cfgPath, "utf8"));
+  if (stripped.removed.length > 0) {
+    changed = true;
+    for (const r of stripped.removed) removed.push(`providers.native.${r}`);
   }
 
-  const me = prov["mcp_entry"];
-  if (Array.isArray(me) && me.length >= 2 && typeof me[1] === "string") {
-    const idx = runtimeRefIndex(me);
-    const ref = idx === null ? null : me[idx];
-    let reason: string | null = null;
-    if (idx !== null && ref !== linkRuntime) {
-      if (RUNTIME_BASENAME.test(path.basename(String(ref))) && hasVersionSegment(String(ref))) {
-        reason = `versioned install-cache path ${pythonRepr(ref)} (frozen to the install-time version)`;
-      } else if (isBarePathQuay(ref)) {
-        reason = `bare PATH reference ${pythonRepr(ref)} (resolved by whatever $PATH happens to hold)`;
-      } else if (
-        ref !== o.installRuntime &&
-        RUNTIME_BASENAME.test(path.basename(String(ref))) &&
-        (!fs.existsSync(String(ref)) || underReserved(ref))
-      ) {
-        reason = `dangling reference to a quay runtime file ${pythonRepr(ref)}`;
-      } else if (RUNTIME_BASENAME.test(path.basename(String(ref))) && (ref === legacyNative || ref === legacyCore)) {
-        reason = `legacy vendor/ layout ${pythonRepr(ref)}`;
-      } else if (inRetiredRuntime(ref) && rtState === "retire") {
-        reason = `stale retired project-local runtime ${pythonRepr(ref)}`;
-      }
-    }
-    if (reason) {
-      // Rebuild canonically: ["node", <stable project link runtime>] + everything the old entry
-      // carried after the runtime/executable token (the "mcp" verb + trailing args).
-      prov["mcp_entry"] = ["node", linkRuntime, ...me.slice(idx! + 1)];
-      prov["path"] = linkProvider;
-      changed = true;
-      migrated.push(`mcp_entry ${reason} -> ${linkRuntime}`);
-    }
-  }
-
-  const referencedByBinding = (): boolean => {
-    const refs: unknown[] = typeof prov["path"] === "string" ? [prov["path"]] : [];
-    if (Array.isArray(prov["mcp_entry"])) refs.push(...prov["mcp_entry"].filter((x) => typeof x === "string"));
-    return refs.some((r) => inRetiredRuntime(r));
-  };
+  // Whether ANYTHING in the (post-deletion) config still points at the retired runtime. Read from the
+  // STRIPPED text, ⛔ not from the parsed `prov`: the native binding this step just deleted is exactly
+  // the reference that used to keep the runtime alive, so consulting the pre-deletion parse would
+  // keep a now-orphaned copy forever.
+  const referencedByBinding = (): boolean =>
+    stripped.text.includes(rtDir) || /(^|[\s"'])\.quay\/runtime/.test(stripped.text);
 
   const backupDir = path.join(o.wsRoot, ".quay", "quay-init-backups", o.backupTs);
   if (rtState === "retire" && !referencedByBinding()) {
@@ -1807,20 +1666,72 @@ export function migrateStaleMcpEntry(o: MigrateMcpEntryOpts): void {
   }
 
   if (!changed) return;
+  const note = "the native provider is resolved from the plugin root, so the config carries no path";
   if (o.dryRun) {
-    for (const m of migrated) console.log(`  would-migrate: ${m} (upgrade-channel runtime migration — AC1/AC2)`);
+    for (const m of removed) console.log(`  would-remove: ${m} (${note})`);
     return;
   }
-  fs.writeFileSync(o.cfgPath, pyYamlDump(data), "utf8");
-  for (const m of migrated) console.log(`  migrated: ${m} (upgrade-channel runtime migration — AC1/AC2)`);
+  fs.writeFileSync(o.cfgPath, stripped.text, "utf8");
+  for (const m of removed) console.log(`  removed: ${m} (${note})`);
 }
 
-/** Python's `repr()` for a str — single-quoted, with `'` and `\` backslash-escaped. The migration
- *  lines embed it (`path 'x' -> y`), so the port must keep that spelling byte-for-byte. */
-function pythonRepr(s: unknown): string {
-  const str = String(s);
-  const body = str.includes("'") ? str.replace(/\\/g, "\\\\").replace(/'/g, "\\'") : str;
-  return `'${body}'`;
+/**
+ * Delete `providers.native.path` and `providers.native.mcp_entry` from a config's TEXT, line-wise,
+ * leaving every other line (comments included) byte-for-byte. Returns the new text and the list of
+ * `<key> <value>` descriptions of what went.
+ *
+ * A key with an INLINE value is one line; the block-sequence form (`mcp_entry:` then `- node` …) is
+ * the key line plus its contiguous list items. Both forms are deleted. The scan is scoped to the
+ * `providers:` → `native:` block by indentation, so a `path:` under another provider is untouched.
+ */
+function stripNativeProviderBindingLines(text: string): { text: string; removed: string[] } {
+  const lines = text.split("\n");
+  const out: string[] = [];
+  const removed: string[] = [];
+  let inProviders = false;
+  let nativeIndent: number | null = null;
+  for (let i = 0; i < lines.length; i++) {
+    const line = lines[i]!;
+    const trimmed = line.trim();
+    if (trimmed === "") { out.push(line); continue; }
+    const indent = line.length - line.trimStart().length;
+    if (indent === 0) {
+      inProviders = /^providers:\s*(#.*)?$/.test(line);
+      nativeIndent = null;
+      out.push(line);
+      continue;
+    }
+    if (!inProviders) { out.push(line); continue; }
+    if (nativeIndent === null) {
+      if (/^native:\s*(#.*)?$/.test(trimmed)) nativeIndent = indent;
+      out.push(line);
+      continue;
+    }
+    if (indent <= nativeIndent) { nativeIndent = null; out.push(line); continue; }
+    const m = /^(path|mcp_entry):\s*(.*)$/.exec(trimmed);
+    if (!m) { out.push(line); continue; }
+    const inline = m[2]!.replace(/\s+#.*$/, "").trim();
+    if (inline === "") {
+      // Block-sequence form: consume the key line plus its contiguous `- …` items.
+      let j = i + 1;
+      const items: string[] = [];
+      while (j < lines.length) {
+        const l = lines[j]!;
+        const lt = l.trim();
+        if (lt === "" || lt.startsWith("#")) break;
+        const li = l.length - l.trimStart().length;
+        if (li < indent || !lt.startsWith("- ")) break;
+        items.push(lt.replace(/^- /, ""));
+        j++;
+      }
+      removed.push(`${m[1]}: [${items.join(", ")}]`);
+      i = j - 1;
+      continue;
+    }
+    removed.push(`${m[1]}: ${inline}`);
+    // (the inline line itself is dropped)
+  }
+  return { text: out.join("\n"), removed };
 }
 
 /**

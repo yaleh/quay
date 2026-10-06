@@ -4271,17 +4271,23 @@ if (out.rootPresent) {
     }
   } catch (e) {}
   out.roundRecords.sort(function (a, b) { return b.mtimeMs - a.mtimeMs; });
+  // 项目指引链接 <root>/.quay/plugin —— 版本从链接**目标自己**的 plugin.json 派生，龄从**链接本身**的
+  // lstat mtime 派生（⛔ 不跟随链接：跟随会把目标目录的 mtime 当成「上次 init 的时刻」，那是另一个量）。
+  // 链接缺失 / 目标读不出 ⇒ 读数保持 null 且 present=false（⛔ 不与「相等/合格」同形，硬规则 3b）。
+  const linkPath = path.join(q, 'plugin');
   try {
-    const raw = fs.readFileSync(path.join(q, 'quay-init-state.json'), 'utf8'); // 读配置形状版本 + 它的龄（陈旧度）
-    const st = JSON.parse(raw);
+    const lst = fs.lstatSync(linkPath);
     out.initStatePresent = true;
-    if (st && typeof st.pluginVersion === 'string') out.initStatePluginVersion = st.pluginVersion;
-    if (st && typeof st.laidAt === 'number' && Number.isFinite(st.laidAt)) {
-      out.initStateLaidAt = st.laidAt;
-      out.initStateAgeSec = Math.max(0, Math.round(nowMs / 1000 - st.laidAt));
-    }
+    out.initStateLaidAt = lst.mtimeMs / 1000;
+    out.initStateAgeSec = Math.max(0, Math.round(nowMs / 1000 - lst.mtimeMs / 1000));
   } catch (e) {
-    try { out.initStatePresent = fs.existsSync(path.join(q, 'quay-init-state.json')); } catch (e2) {}
+    out.initStatePresent = false;
+  }
+  if (out.initStatePresent) {
+    try {
+      const pj = JSON.parse(fs.readFileSync(path.join(linkPath, '.claude-plugin', 'plugin.json'), 'utf8'));
+      if (pj && typeof pj.version === 'string' && pj.version.length > 0) out.initStatePluginVersion = pj.version;
+    } catch (e) {}
   }
   const tracePath = path.join(q, 'fan-in-step-trace.jsonl'); // 目标项目自己的载体，⛔ 不是本仓同名文件
   try {
@@ -4342,8 +4348,8 @@ export type TargetHealthVerdict = "healthy" | "unhealthy" | "not-evaluated";
  *  carrier-missing       关键载体缺失（枚举在 causeDetail）——「没跑过」不得与「零信号」同形；
  *  process-list-unreadable 进程表读不到（`ps` 不可用 / 被沙箱挡）⇒ 「有没有 driver 在跑」不可知
  *                        ——⛔ 不可知不得回落成「在跑」（硬规则 3b：读不懂不得与合格同形）；
- *  init-state-missing    目标项目没有 `.quay/quay-init-state.json`（未 quay-init / 被删）⇒ 配置形状
- *                        版本与本 fact 的陈旧度都无从谈起 ⇒ 不能判「形状不落后」；
+ *  plugin-link-missing   目标项目没有 `.quay/plugin` 指引链接（未 quay-init / 被删）⇒ 链接目标版本
+ *                        与本 fact 的陈旧度都无从谈起 ⇒ 不能判「形状不落后」；
  *  trace-unreadable      **目标项目自己的** `fan-in-step-trace.jsonl` 在、但读不出来（权限 / I/O /
  *                        它其实是个目录）——⛔ 与「零失败」不同形；
  *  trace-unparseable     该载体读出来了、但其中有**读不懂的行**（JSON 坏 / 缺 epoch / ok 非布尔）
@@ -4357,7 +4363,7 @@ export type TargetHealthCause =
   | "target-root-absent"
   | "carrier-missing"
   | "process-list-unreadable"
-  | "init-state-missing"
+  | "plugin-link-missing"
   | "trace-unreadable"
   | "trace-unparseable"
   | "trace-truncated";
@@ -4379,8 +4385,8 @@ export interface TargetProbeReading {
   driverProcesses: { count: number; samples: string[] } | null;
   initStatePresent: boolean;
   initStatePluginVersion: string | null;
-  /** quay-init-state.json 的 `laidAt`（epoch 秒）与其龄（秒）——版本读数**必须带陈旧度**：
-   *  不带龄的版本读数分不清「刚装的新形状」与「装了一个月没更新」（同盘上任何快照读数的纪律）。 */
+  /** `.quay/plugin` 链接的 lstat mtime（epoch 秒）与其龄（秒）——版本读数**必须带陈旧度**：
+   *  不带龄的版本读数分不清「刚 init 过」与「装了一个月没更新」（同盘上任何快照读数的纪律）。 */
   initStateLaidAt: number | null;
   initStateAgeSec: number | null;
   carriers: Record<string, boolean | null>;
@@ -4443,7 +4449,7 @@ export interface TargetHealthReading {
      *  `failed:0` 不足以判 healthy（⛔ 与「查过且零失败」同形，硬规则 3b）。 */
     windowFullyCovered: boolean;
   } | null;
-  /** AC4：目标项目配置形状版本（quay-init 写进 `.quay/quay-init-state.json` 的 pluginVersion）与
+  /** AC4：目标项目指引链接版本（`.quay/plugin` 目标的 plugin.json version）与
    *  **交付物** plugin 版本（本仓 `plugin/.claude-plugin/plugin.json`，即 quay-init 写入该字段的同源）
    *  并排出现；`equal === false` 即「目标项目装的 quay 已落后于当前交付物」的机械可检读数。
    *  `targetAgeSec` = 该配置形状的龄（陈旧度）——版本不等时它区分「一分钟前刚补跑过」与「一个月没更新」。
@@ -4526,7 +4532,7 @@ export function buildHealthProbeArgv(
 }
 
 /** 交付物 plugin 版本：本仓 `plugin/.claude-plugin/plugin.json` 的 `version` —— 与 quay-init 写入目标项目
- *  `.quay/quay-init-state.json` 的 `pluginVersion` **同源**（quay-init.sh:238 从同一路径读）；目标侧另带陈旧度
+ *  `.quay/plugin` 链接目标的 plugin.json `version` **同源**（同为「插件根的版本」）；目标侧另带陈旧度
  *  （TargetProbeReading.initStateAgeSec）。任一侧读不到 ⇒ null（⛔ 不与相等同形）。 */
 export function readDeliveredPluginVersion(root: string): string | null {
   try {
@@ -4648,7 +4654,7 @@ export function deriveTargetHealth(
     return { ...base, verdict: "not-evaluated", cause: "process-list-unreadable", causeDetail: ["ps -eo pid=,args="], pluginVersion, liveness, roundRecords, carriers };
   }
   if (!r.initStatePresent || r.initStatePluginVersion === null) {
-    return { ...base, verdict: "not-evaluated", cause: "init-state-missing", causeDetail: [".quay/quay-init-state.json"], pluginVersion, liveness, roundRecords, carriers };
+    return { ...base, verdict: "not-evaluated", cause: "plugin-link-missing", causeDetail: [".quay/plugin"], pluginVersion, liveness, roundRecords, carriers };
   }
   // 「载体在」不等于「读得出来 / 读得懂」——⛔ 下面两条各自把一种「读不懂」挡在 healthy 之外（硬规则 3b）：
   // 否则一个坏文件（权限、它其实是个目录、JSON 坏、字段缺）会**恰好**给出 `failed:0`，与「零失败」同形。
@@ -4716,7 +4722,7 @@ function targetHealthReason(v: TargetHealthReading): string {
     ? ` pluginVersion MISMATCH ${ver.target}≠${ver.delivered}${ageNote}`
     : ver.equal === true
       ? ` pluginVersion ok${ageNote}`
-      : ` pluginVersion 读不到${ver.initStatePresent === false ? "（目标无 quay-init-state）" : ""}`;
+      : ` pluginVersion 读不到${ver.initStatePresent === false ? "（目标无 .quay/plugin 链接）" : ""}`;
   const f = v.fanIn;
   const fanInNote = f === null ? "" : `, fan-in ${f.failed > 0
     ? `${f.failed} failed / ${f.steps} steps [${Object.entries(f.failedByStep).map(([k, n]) => `${k}×${n}`).join(" ")}]`

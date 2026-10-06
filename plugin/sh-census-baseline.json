@@ -296,8 +296,24 @@
         "embeddedInterpreterLines": "+8 = plugin/scripts/worktree-deps-provision.sh effective lines 0 (new file) -> 8 (embedded [node]). It is a THIN ENTRY in the exact shape of cross-machine-verify.sh / capability-catalog.sh (exec node … a sibling .ts), so it STAYS IN the axis — the thin-entry membership is the house pattern, not a membership change. ⚠️ The file the task CONSTRAINS stays OUT of the axis, measured: plugin/scripts/dispatch-worktree-setup.sh reads embedded [] on BOTH sides and its code lines fall 138 -> 126 (step 1 is now a 4-line delegation to the thin entry), so its contribution to this axis is 0 before and after — the line-neutral constraint on THAT .sh is satisfied. Residual = 0 BY CONSTRUCTION: the branch's entire tracked *.sh delta vs develop is exactly TWO paths (git diff --name-status develop HEAD -- '*.sh' -> M plugin/scripts/dispatch-worktree-setup.sh, A plugin/scripts/worktree-deps-provision.sh); the modified one is OUT of the axis (embedded []) and the added one is IN it at exactly 8 lines, so the total moves by exactly 8. plugin/scripts/worktree-deps-provision.ts is a .ts (the axis is tracked *.sh only) and contributes 0. Measured with the checker's OWN reading (sh-census-check.ts --json -> totals.embeddedInterpreterLines 7686 -> 7694 on this tree).",
         "duplicateCopies": "0 — untouched. This task added no experiments/** mirror and converted no byte-identical pair."
       }
+    },
+    {
+      "when": "2026-10-06 (gap-project-quay-pointer-is-init-plugin-root-and-version-records-derive-from-it)",
+      "from": {
+        "embeddedInterpreterLines": 7694,
+        "duplicateCopies": 0
+      },
+      "to": {
+        "embeddedInterpreterLines": 7692,
+        "duplicateCopies": 0
+      },
+      "why": "DOWNWARD re-anchor (-2, the intended direction): this task retired the provider path/mcp_entry lines from the fresh-install heredoc in plugin/scripts/quay-init.sh (the native provider is now resolved from the plugin root by Core, so the config binds nothing), and rewrote the surrounding user-facing comment to the same line count. Measured with the checker's OWN reading on this tree (sh-census-check.ts --json -> totals.embeddedInterpreterLines 7694 -> 7692). Residual = 0 by construction: the only *.sh this task edits is plugin/scripts/quay-init.sh, and its delta is exactly -2 code lines.",
+      "attribution": {
+        "embeddedInterpreterLines": "-2 = plugin/scripts/quay-init.sh: the fresh-install heredoc dropped `path:` and `mcp_entry:` (two lines shipped to every generated config) and the comment above them was rewritten to four lines; net -2 code lines, all in this one charged file.",
+        "duplicateCopies": "0 — untouched. This task added no experiments/** mirror and converted no byte-identical pair."
+      }
     }
   ],
-  "embeddedInterpreterLines": 7694,
+  "embeddedInterpreterLines": 7692,
   "duplicateCopies": 0
 }

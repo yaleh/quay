@@ -363,3 +363,144 @@ test("AC5 — text form leads with loaded-version-behind + the restart hint, sti
 function st_pidOf(root) {
   return Number(fs.readFileSync(path.join(root, ".quay", "anchor.pid"), "utf8").trim());
 }
+
+// ── AC4 (gap-project-quay-pointer-is-init-plugin-root-and-version-records-derive-from-it (B)) ──────
+// `pointer` = Core's OWN plugin root version vs the project guidance link `.quay/plugin`'s target
+// version. Four states, ⛔ `not-evaluated` never shares a shape with `current`. Core ⛔ writes the link
+// from no runtime path (only `/quay:init` does) — the readlink-invariance test below is that half.
+
+/** A minimal plugin root carrying a chosen `.claude-plugin/plugin.json` version. */
+function fixturePluginRoot(t, tag, version) {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), `lvdrift-plroot-${tag}-`));
+  t.after(() => fs.rmSync(dir, { recursive: true, force: true }));
+  fs.mkdirSync(path.join(dir, ".claude-plugin"), { recursive: true });
+  fs.writeFileSync(path.join(dir, ".claude-plugin", "plugin.json"), JSON.stringify({ name: "quay", version }, null, 2));
+  return dir;
+}
+
+/** Point `<root>/.quay/plugin` at a fixture plugin root of the given version; returns the target. */
+function linkPlugin(t, root, tag, version, { withManifest = true } = {}) {
+  const target = withManifest
+    ? fixturePluginRoot(t, tag, version)
+    : (() => { const d = fs.mkdtempSync(path.join(os.tmpdir(), `lvdrift-plroot-${tag}-`)); t.after(() => fs.rmSync(d, { recursive: true, force: true })); return d; })();
+  fs.mkdirSync(path.join(root, ".quay"), { recursive: true });
+  const link = path.join(root, ".quay", "plugin");
+  try { fs.rmSync(link, { force: true }); } catch { /* absent */ }
+  fs.symlinkSync(target, link);
+  return target;
+}
+
+function statusJsonEnv(root, home, extraEnv) {
+  const r = spawnSync(
+    process.execPath,
+    ["--experimental-strip-types", KERNEL, "status", "--kind", "worker", "--root", root, "--json"],
+    { encoding: "utf8", timeout: 30000, env: { ...process.env, HOME: home, ...extraEnv } },
+  );
+  assert.equal(r.status, 0, `status --json failed: ${r.stdout}\n${r.stderr}`);
+  return JSON.parse(r.stdout);
+}
+
+test("AC4-pointer① — Core plugin root 0.15.0 vs link 0.14.0 ⇒ pointer=behind (+ both versions)", (t) => {
+  const core = fixturePluginRoot(t, "core15", "0.15.0");
+  const { home, root } = driftedWorld(t, "ptr1");
+  linkPlugin(t, root, "lk14", "0.14.0");
+
+  const st = statusJsonEnv(root, home, { QUAY_PLUGIN_ROOT: core });
+  assert.equal(st.pointer.state, "behind", `链接落后于 Core ⇒ behind: ${JSON.stringify(st.pointer)}`);
+  assert.equal(st.pointer.core_version, "0.15.0", `Core 侧版本: ${JSON.stringify(st.pointer)}`);
+  assert.equal(st.pointer.link_version, "0.14.0", `链接侧版本: ${JSON.stringify(st.pointer)}`);
+  assert.equal(st.pointer.reason, null, `有结论 ⇒ reason 为空: ${JSON.stringify(st.pointer)}`);
+});
+
+test("AC4-pointer② — SAME fixture, link at the Core version ⇒ pointer=current (behind cannot be a constant)", (t) => {
+  const core = fixturePluginRoot(t, "core15b", "0.15.0");
+  const { home, root } = driftedWorld(t, "ptr2");
+  linkPlugin(t, root, "lk15", "0.15.0");
+
+  const st = statusJsonEnv(root, home, { QUAY_PLUGIN_ROOT: core });
+  assert.equal(st.pointer.state, "current", `同版本 ⇒ current: ${JSON.stringify(st.pointer)}`);
+});
+
+test("AC4-pointer③ — no `.quay/plugin` ⇒ pointer=not-evaluated (⛔ never current)", (t) => {
+  const core = fixturePluginRoot(t, "core15c", "0.15.0");
+  const { home, root } = driftedWorld(t, "ptr3");
+
+  const st = statusJsonEnv(root, home, { QUAY_PLUGIN_ROOT: core });
+  assert.equal(st.pointer.state, "not-evaluated", `链接缺失 ⇒ not-evaluated: ${JSON.stringify(st.pointer)}`);
+  assert.notEqual(st.pointer.state, "current", "⛔ not-evaluated 不得与 current 同形");
+  assert.equal(st.pointer.link_target, null, `无链接 ⇒ link_target 为 null: ${JSON.stringify(st.pointer)}`);
+});
+
+test("AC4-pointer④ — link target WITHOUT a plugin.json ⇒ pointer=not-evaluated", (t) => {
+  const core = fixturePluginRoot(t, "core15d", "0.15.0");
+  const { home, root } = driftedWorld(t, "ptr4");
+  linkPlugin(t, root, "lkbare", null, { withManifest: false });
+
+  const st = statusJsonEnv(root, home, { QUAY_PLUGIN_ROOT: core });
+  assert.equal(st.pointer.state, "not-evaluated", `目标无 plugin.json ⇒ not-evaluated: ${JSON.stringify(st.pointer)}`);
+  assert.equal(st.pointer.link_version, null, `无版本可比: ${JSON.stringify(st.pointer)}`);
+});
+
+// AC3 (this task) — Core must not WRITE the link. `driver status` is the Core path this file can run
+// cheaply; the static half (`grep` that only refreshProjectPluginLink constructs it) lives in the
+// task's AC3 evidence.
+test("AC3 — `driver status` leaves the `.quay/plugin` link byte-identical (Core never writes it)", (t) => {
+  const core = fixturePluginRoot(t, "core15e", "0.15.0");
+  const { home, root } = driftedWorld(t, "ptr5");
+  const target = linkPlugin(t, root, "lk14e", "0.14.0");
+  const link = path.join(root, ".quay", "plugin");
+  const before = fs.readlinkSync(link);
+
+  const st = statusJsonEnv(root, home, { QUAY_PLUGIN_ROOT: core });
+  assert.equal(st.pointer.state, "behind");
+  assert.equal(fs.readlinkSync(link), before, "the link target must be unchanged after `driver status`");
+  assert.equal(fs.readlinkSync(link), target, "and it is still the fixture target");
+});
+
+// ── AC3 (this task, second half) — NO Core path writes `.quay/plugin` ───────────────────────────────
+// `driver status` is exercised above; the MCP-launch path is exercised by `quay task list` (it spawns
+// the provider MCP). `driver start` / `serve` are covered STRUCTURALLY by the static scan below (they
+// share the same code path — none of them constructs `.quay/plugin` at all).
+
+test("AC3b — the MCP-launch path (`quay task list`) leaves the `.quay/plugin` link byte-identical", (t) => {
+  const REPO_ROOT = path.resolve(__dirname, "..", "..");
+  const ws = fs.mkdtempSync(path.join(os.tmpdir(), "lvdrift-link-"));
+  t.after(() => fs.rmSync(ws, { recursive: true, force: true }));
+  fs.mkdirSync(path.join(ws, ".quay"), { recursive: true });
+  fs.mkdirSync(path.join(ws, "tasks"), { recursive: true });
+  fs.writeFileSync(path.join(ws, "tasks", "L-1.md"), "---\nid: L-1\ntitle: link probe\nstatus: todo\n---\n\n## Proposal\n" + "x".repeat(60) + "\n");
+  // The native provider carries NO path/mcp_entry (the shape quay-init now writes).
+  fs.writeFileSync(path.join(ws, ".quay", "config.yml"),
+    `providers:\n  native:\n    enabled: true\n    tasks_dir: "${ws}/tasks"\n    env:\n      QUAY_NATIVE_TASKS_DIR: "${ws}/tasks"\n`);
+  const target = fixturePluginRoot(t, "mcp-path", "0.14.0");
+  const link = path.join(ws, ".quay", "plugin");
+  fs.symlinkSync(target, link);
+  const before = fs.readlinkSync(link);
+
+  const r = spawnSync(
+    process.execPath,
+    ["--experimental-strip-types", path.join(REPO_ROOT, "packages", "quay", "bin", "quay.ts"), "task", "list", "--root", ws, "--json"],
+    { encoding: "utf8", timeout: 90000 },
+  );
+  assert.equal(r.status, 0, `task list must succeed:\n${r.stdout}\n${r.stderr}`);
+  assert.equal(fs.readlinkSync(link), before, "Core must NOT rewrite `.quay/plugin` on the MCP-launch path");
+});
+
+test("AC3c — STATIC: the ONLY source that constructs AND writes `.quay/plugin` is init.ts's refreshProjectPluginLink", () => {
+  const REPO_ROOT = path.resolve(__dirname, "..", "..");
+  const dirs = [path.join(REPO_ROOT, "packages", "quay", "src"), path.join(REPO_ROOT, "plugin", "scripts")];
+  const offenders = [];
+  const walk = (d) => {
+    for (const e of fs.readdirSync(d, { withFileTypes: true })) {
+      if (e.name === "dist" || e.name === "node_modules") continue;
+      const p = path.join(d, e.name);
+      if (e.isDirectory()) { walk(p); continue; }
+      if (!e.name.endsWith(".ts") || e.name.endsWith(".test.ts")) continue;
+      const text = fs.readFileSync(p, "utf8");
+      if (/symlinkSync/.test(text) && /"\.quay", *"plugin"/.test(text)) offenders.push(path.relative(REPO_ROOT, p));
+    }
+  };
+  for (const d of dirs) walk(d);
+  assert.deepEqual(offenders, [path.join("packages", "quay", "src", "init.ts")],
+    `the ONLY writer of .quay/plugin must be init.ts (Core runtime paths must never write it); got ${JSON.stringify(offenders)}`);
+});

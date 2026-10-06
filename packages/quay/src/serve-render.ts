@@ -1094,7 +1094,8 @@ export interface ServeIdentity {
   hostname: string;
   /** The delivered quay plugin's version. null = not resolvable — NOT "equal to the laid one". */
   deliveredPluginVersion: string | null;
-  /** `.quay/quay-init-state.json`'s `pluginVersion`. null = absent — NOT "equal to the delivered one". */
+  /** The project plugin link's version (`<root>/.quay/plugin/.claude-plugin/plugin.json`). null =
+   *  absent — NOT "equal to the delivered one". */
   initPluginVersion: string | null;
   branches: BranchModel;
 }
@@ -1203,14 +1204,16 @@ export function readDeliveredPluginVersion(): string | null {
   }
 }
 
-/** The version quay-init LAID DOWN in this workspace (`.quay/quay-init-state.json`). null when
- *  the file / key is absent — an un-initialised workspace, which is a real and common state and
- *  must not be reported as a version match. */
-export function readInitStatePluginVersion(workspaceRoot: string): string | null {
+/** The version the project's plugin LINK names (`<root>/.quay/plugin/.claude-plugin/plugin.json`) —
+ *  the plugin root the last `/quay:init` ran from. Derived from the link itself; there is no separate
+ *  state record anymore (gap-project-quay-pointer-is-init-plugin-root-and-version-records-derive-from-it
+ *  (E)). null when the link is absent / its target unreadable — an un-initialised workspace (or one
+ *  whose plugin tree moved), which must NOT be reported as a version match. */
+export function readPluginLinkVersion(workspaceRoot: string): string | null {
   try {
-    const p = path.join(workspaceRoot, ".quay", "quay-init-state.json");
+    const p = path.join(workspaceRoot, ".quay", "plugin", ".claude-plugin", "plugin.json");
     if (!existsSync(p)) return null;
-    const v = JSON.parse(readFileSync(p, "utf8"))?.pluginVersion;
+    const v = JSON.parse(readFileSync(p, "utf8"))?.version;
     return typeof v === "string" && v.length > 0 ? v : null;
   } catch {
     return null;
@@ -1260,7 +1263,7 @@ export function serveIdentity(input: ServeIdentityInput): ServeIdentity {
       : readDeliveredPluginVersion(),
     initPluginVersion: input.initPluginVersion !== undefined
       ? input.initPluginVersion
-      : readInitStatePluginVersion(root),
+      : readPluginLinkVersion(root),
     branches: {
       default: input.branchModel?.default ?? null,
       doc: input.branchModel?.doc ?? null,

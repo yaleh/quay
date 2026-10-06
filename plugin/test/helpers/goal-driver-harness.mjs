@@ -171,7 +171,7 @@ const PRE_CHANGE_ENTRY = {
 };
 
 function mkTargetRoot({
-  missingCarriers = [], pluginVersion, initStateAbsent = false, roundRecords = [],
+  missingCarriers = [], pluginVersion, initStateAbsent = false, linkAbsent, roundRecords = [],
 } = {}) {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'goal-target-'));
   const q = path.join(dir, '.quay');
@@ -181,8 +181,16 @@ function mkTargetRoot({
     fs.writeFileSync(path.join(q, name), '{}\n', 'utf8');
   }
   for (const name of roundRecords) fs.writeFileSync(path.join(q, name), '{}\n', 'utf8');
-  if (!initStateAbsent && pluginVersion !== undefined) {
-    fs.writeFileSync(path.join(q, 'quay-init-state.json'), JSON.stringify({ pluginVersion }), 'utf8');
+  // The probe reads the project GUIDANCE LINK `<root>/.quay/plugin` (NOT a state file —
+  // gap-project-quay-pointer-is-init-plugin-root-and-version-records-derive-from-it (E)): its version
+  // comes from the link TARGET's `.claude-plugin/plugin.json`, its age from the link's own lstat
+  // mtime. `initStateAbsent` is kept as an alias for `linkAbsent` so older call sites keep meaning.
+  const absent = linkAbsent ?? initStateAbsent;
+  if (!absent && pluginVersion !== undefined) {
+    const target = fs.mkdtempSync(path.join(os.tmpdir(), 'goal-target-plugin-'));
+    fs.mkdirSync(path.join(target, '.claude-plugin'), { recursive: true });
+    fs.writeFileSync(path.join(target, '.claude-plugin', 'plugin.json'), JSON.stringify({ name: 'quay', version: pluginVersion }), 'utf8');
+    fs.symlinkSync(target, path.join(q, 'plugin'));
   }
   return dir;
 }

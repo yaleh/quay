@@ -123,7 +123,7 @@ upgrades in place, and guessing the wrong scope fails closed instead of moving t
 claude plugin list --json | jq -r '.[] | select(.id=="quay@quay") | .scope' | sort -u
 # (2) update IN PLACE, at that scope
 claude plugin update quay@quay --scope <the scope just printed>
-# (3) re-run /quay:init in the project: it re-points `.quay/plugin` at the new version's directory
+# (3) re-run /quay:init in the project: it re-points `.quay/plugin` at the plugin root THIS init ran from
 ```
 
 Measured 2026-10-06 / Claude Code 2.1.290 in a throwaway `CLAUDE_CONFIG_DIR`, at both scopes:
@@ -143,6 +143,26 @@ a re-`install` both short-circuit on the unchanged version — 0 → 0 files.
 Remove-the-record-then-install re-materialized it, 0 → 1.)
 
 Then accept the trust dialog the first time you enter the directory, and restart the session.
+
+### The project link `.quay/plugin` — a GUIDANCE path, never a binding
+
+`/quay:init` maintains the project-internal symlink `<project>/.quay/plugin`, pointing at **the plugin
+root that init ran from** (`${CLAUDE_PLUGIN_ROOT}` / `--plugin-root`). It exists for consumers that run
+**without Core in the loop** — e.g. a CloudCLI server that `execFile`s quay with `cwd` = the project
+root, so nothing else tells it which plugin belongs to this project. Point Core at it as
+`<project>/.quay/plugin/scripts/…` (or `<project>/.quay/plugin/vendor/…`).
+
+⛔ It is a GUIDANCE pointer, **not** a configuration binding:
+
+- Core never reads it to locate itself (`plugin-root.ts` resolves from its own install location), and
+  **no Core runtime path writes it** — only `/quay:init` does. Several plugin versions can be live in one
+  project at once, so a runtime auto-refresh would clobber whichever one wrote last.
+- `.quay/config.yml` does not name it. The native provider carries **no** `path`/`mcp_entry` — Core
+  resolves `<plugin-root>/vendor/quay-native` from its own install location, so the config binds no
+  version and no path.
+- It names "the plugin as of the last init" and can lag after an upgrade until the next init. That drift
+  is **reported** by `quay driver status`'s `pointer` reading (`current` / `behind` / `ahead` /
+  `not-evaluated`), never auto-corrected.
 
 ## Arguments
 

@@ -2892,6 +2892,63 @@ export function pathQuayVersionReading(
   return { state, path: realpath, version, relation, reason: null };
 }
 
+/** 一个插件根目录的版本：`.claude-plugin/plugin.json` 的 `version`，读不到时退回 `VERSION` 文件。
+ *  ⛔ 不用 `quay --version` 输出 —— bundle 内嵌的是 dev 版本（gap-release-bundle-embeds-dev-version-
+ *  after-stamp），那是另一个量。 */
+export function pluginRootVersion(dir: string | null): string | null {
+  if (!dir) return null;
+  try {
+    const v = JSON.parse(fs.readFileSync(path.join(dir, ".claude-plugin", "plugin.json"), "utf8"))?.version;
+    if (typeof v === "string" && v.trim() !== "") return v.trim();
+  } catch {
+    /* fall through to the VERSION file */
+  }
+  return readVersionFile(dir);
+}
+
+/** `driver status` 的 `pointer` 读数：Core 自身所在插件根 vs 项目指引链接 `.quay/plugin` 的版本关系
+ *  （gap-project-quay-pointer-is-init-plugin-root-and-version-records-derive-from-it (B)）。
+ *
+ *  语义（⛔ 四态，`not-evaluated` 与 `current` 不同形）：`current` 链接与 Core 同版本；`behind` 链接
+ *  落后于 Core（`/quay:init` 之后插件升过级）；`ahead` 链接比 Core 新（Core 是旧 checkout）；
+ *  `not-evaluated` 链接缺失 / 目标无 plugin.json / Core 版本读不到。
+ *  Core ⛔ 任何路径都不写这个链接（多版本会话并存时运行期刷新会互相覆盖），只报漂移。 */
+export interface PointerReading {
+  state: LoadedVersionState;
+  coreVersion: string | null;
+  coreRoot: string | null;
+  linkTarget: string | null;
+  linkVersion: string | null;
+  reason: string | null;
+}
+
+export function pointerReading(root: string, opts: { coreRoot?: string | null } = {}): PointerReading {
+  const coreRoot = opts.coreRoot !== undefined ? opts.coreRoot : resolveKernelPluginRoot();
+  const coreVersion = pluginRootVersion(coreRoot);
+  const linkPath = path.join(root, ".quay", "plugin");
+  let linkTarget: string | null = null;
+  try {
+    if (fs.lstatSync(linkPath).isSymbolicLink()) linkTarget = fs.readlinkSync(linkPath);
+  } catch {
+    linkTarget = null;
+  }
+  const linkVersion = linkTarget === null ? null : pluginRootVersion(linkTarget);
+  const base = { coreVersion, coreRoot, linkTarget, linkVersion };
+  if (linkTarget === null) {
+    return { state: "not-evaluated", ...base, reason: `no .quay/plugin symlink in ${root}` };
+  }
+  if (linkVersion === null) {
+    return { state: "not-evaluated", ...base, reason: `the .quay/plugin target (${linkTarget}) carries no plugin.json version` };
+  }
+  if (coreVersion === null) {
+    return { state: "not-evaluated", ...base, reason: "cannot read this Core plugin root's version" };
+  }
+  const c = compareVersions(coreVersion, linkVersion);
+  const state: LoadedVersionState =
+    c === null ? (coreVersion === linkVersion ? "current" : "not-evaluated") : c === 0 ? "current" : c > 0 ? "behind" : "ahead";
+  return { state, ...base, reason: null };
+}
+
 // ── Layer 0 · supervisor（respawn / pid 记账 / stop sentinel，由 promotion-driver-launch.sh 港进）────
 // 仓库里只此一份 respawn 循环；kind 差异由 DRIVER_KINDS 数据表驱动（⛔ 非两份代码分支）。
 
@@ -3195,6 +3252,9 @@ export function statusForKind(root: string, kind: DriverKind, json: boolean, out
   // 第三个版本读数：PATH 命中的 quay 是哪一版（见本区「第三个漂移源」注释）。⛔ 与宿主进程无关——
   // 它读的是**查询者 shell 的 PATH**，回答「人敲 `quay ...` 跑的是哪一版」。⛔ 只报，不修 PATH。
   const pq = pathQuayVersionReading();
+  // 第四个漂移源（项目指引链接 `.quay/plugin` vs Core 自身）：Core ⛔ 不写链接，只报漂移。见
+  // pointerReading 的头注释。`not-evaluated`（链接缺失）⛔ 不与 `current` 同形（硬规则 3b）。
+  const ptr = pointerReading(root);
   // AC-255 能力半边：`running` 回答「有没有一个活着的承载进程」，**答不了**「这个 kind 的循环还在转
   // 吗」——收敛形态下六个 kind 共用一个 anchor，anchor 活着时全部报 `running=1`，哪怕其中两个的循环
   // 早已被移出期望态而停摆（2026-09-23 实测：`quality`/`meta` 停摆 264min，六个 kind 的 `running` 全是 1）。
@@ -3252,6 +3312,16 @@ export function statusForKind(root: string, kind: DriverKind, json: boolean, out
       path_quay_version_resolved: pq.version,
       path_quay_version_relation: pq.relation,
       path_quay_version_reason: pq.reason,
+      // 第四个漂移源（项目指引链接 `.quay/plugin` vs Core 自身插件根）。四态各自独立；链接缺失 /
+      // 目标无 plugin.json ⇒ `not-evaluated`，⛔ 不与 `current` 同形（硬规则 3b）。
+      pointer: {
+        state: ptr.state,
+        core_version: ptr.coreVersion,
+        core_root: ptr.coreRoot,
+        link_target: ptr.linkTarget,
+        link_version: ptr.linkVersion,
+        reason: ptr.reason,
+      },
       // AC-255 能力半边：本 kind 相对**期望态**的声明状态。四态各自独立（⛔ 不与 `alive`/`running` 同形）：
       // `declared` / `stopped-explicitly`（操作员有意停机）/ `not-declared`（**静默脱离期望态**）/
       // `not-evaluated`（读不懂期望态或停机记录）。缺这个字段时，「六个循环里有两个没在转」与
@@ -3300,7 +3370,13 @@ export function statusForKind(root: string, kind: DriverKind, json: boolean, out
       `path_quay_version=${pq.state}` +
       `${pq.version ? `:${pq.version}` : ""}` +
       `${pq.path ? `:path=${pq.path}` : ""}` +
-      `${pq.state === "not-evaluated" && pq.reason ? ` (${pq.reason})` : ""}\n`,
+      `${pq.state === "not-evaluated" && pq.reason ? ` (${pq.reason})` : ""} · ` +
+      // 第四个漂移源（项目指引链接 `.quay/plugin` vs Core）：state 四态 + 两侧版本 + 链接目标。
+      // ⛔ 读不到时报 `not-evaluated`（⛔ 不印空串、⛔ 不印 current——空串与「没问题」同形，硬规则 3b）。
+      `pointer=${ptr.state}` +
+      `${ptr.linkVersion ? `:link=${ptr.linkVersion}` : ""}` +
+      `${ptr.coreVersion ? `:core=${ptr.coreVersion}` : ""}` +
+      `${ptr.state === "not-evaluated" && ptr.reason ? ` (${ptr.reason})` : ""}\n`,
     );
   }
   return 0;

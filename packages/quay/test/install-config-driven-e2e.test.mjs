@@ -69,6 +69,9 @@ import { fileURLToPath } from "node:url";
 import { createHash } from "node:crypto";
 import { spawnSync } from "node:child_process";
 import { createStore } from "../../quay-native/src/store.ts";
+import { activeProvider } from "../src/config.ts";
+import { resolvePluginRoot } from "../src/plugin-root.ts";
+import { readPluginLinkVersion, pluginVersionState } from "../src/serve-render.ts";
 import { laydownWorkspace } from "../../../plugin/test/helpers/quay-init-install-fixture.mjs";
 import { spawnAsync, spawnTimings, assertParallelLaunches } from "../../../plugin/test/helpers/async-spawn.mjs";
 
@@ -305,6 +308,87 @@ function snapshotProductFiles(ws) {
   }
   return snap;
 }
+
+// ═══════════════════════════════════════════════════════════════════════════════════════════════════
+// AC6 — the native provider resolves from the plugin root when the config omits path/mcp_entry
+// (gap-project-quay-pointer-is-init-plugin-root-and-version-records-derive-from-it (D))
+// ═══════════════════════════════════════════════════════════════════════════════════════════════════
+test("AC6① — activeProvider() fills the native provider from the plugin root when the config omits path/mcp_entry", () => {
+  const pluginRoot = resolvePluginRoot();
+  assert.ok(pluginRoot, "the test must be able to resolve a plugin root");
+  const cfg = { config: { providers: { native: { enabled: true, tasks_dir: "/x/tasks" } } } };
+  const p = activeProvider(cfg, undefined);
+  assert.equal(p.id, "native");
+  assert.equal(p.path, path.join(pluginRoot, "vendor", "quay-native"), "path must default to <plugin-root>/vendor/quay-native");
+  assert.deepEqual(
+    p.mcp_entry,
+    ["node", path.join(pluginRoot, "vendor", "quay-native", "dist", "quay-native.js"), "mcp"],
+    "mcp_entry must default to the plugin's vendored native bundle",
+  );
+  assert.ok(fs.existsSync(p.mcp_entry[1]), `the resolved runtime must exist on disk: ${p.mcp_entry[1]}`);
+});
+
+test("AC6② — an explicit provider entry is left EXACTLY as written (only `native` gets defaults)", () => {
+  const custom = { enabled: true, path: "/custom/dir", mcp_entry: ["node", "/custom/dir/server.js", "mcp"] };
+  const p = activeProvider({ config: { providers: { github: custom } } }, "github");
+  assert.equal(p.path, "/custom/dir", "a non-native provider's explicit path must be untouched");
+  assert.deepEqual(p.mcp_entry, custom.mcp_entry, "a non-native provider's explicit mcp_entry must be untouched");
+  // A `native` entry that DOES carry an explicit binding is also left alone (the default only fills gaps).
+  const explicitNative = { enabled: true, path: "/explicit/native", mcp_entry: ["node", "/explicit/native/x.js", "mcp"] };
+  const n = activeProvider({ config: { providers: { native: explicitNative } } }, "native");
+  assert.equal(n.path, "/explicit/native");
+  assert.deepEqual(n.mcp_entry, explicitNative.mcp_entry);
+});
+
+test("AC6③ — a REAL workspace whose config omits path/mcp_entry launches the native provider and answers task_list", () => {
+  const ws = makeWorkspace();
+  fs.mkdirSync(path.join(ws, ".quay"), { recursive: true });
+  fs.mkdirSync(path.join(ws, "tasks"), { recursive: true });
+  fs.writeFileSync(
+    path.join(ws, "tasks", "AC6-1.md"),
+    "---\nid: AC6-1\ntitle: ac6 probe\nstatus: todo\n---\n\n## Proposal\n" + substantive("Proposal") + "\n",
+  );
+  // ⛔ NO path / mcp_entry — exactly the shape quay-init now writes.
+  fs.writeFileSync(
+    path.join(ws, ".quay", "config.yml"),
+    `providers:\n  native:\n    enabled: true\n    tasks_dir: "${ws}/tasks"\n    env:\n      QUAY_NATIVE_TASKS_DIR: "${ws}/tasks"\n`,
+  );
+  const r = spawnSync(
+    process.execPath,
+    ["--experimental-strip-types", path.join(REPO_ROOT, "packages", "quay", "bin", "quay.ts"), "task", "list", "--root", ws, "--json"],
+    { encoding: "utf8", timeout: 90000 },
+  );
+  assert.equal(r.status, 0, `task list must succeed via the plugin-root default:\nstdout:${r.stdout}\nstderr:${r.stderr}`);
+  const parsed = JSON.parse(r.stdout);
+  const tasks = Array.isArray(parsed) ? parsed : parsed.tasks;
+  assert.ok(Array.isArray(tasks), `task list must return a task array: ${r.stdout}`);
+  assert.ok(tasks.some((t) => t.id === "AC6-1"), `the task must be visible — the provider really launched: ${r.stdout}`);
+});
+
+// ═══════════════════════════════════════════════════════════════════════════════════════════════════
+// AC9 (serve half) — the dashboard's "laid" version is DERIVED FROM THE LINK, not a state file
+// (gap-project-quay-pointer-is-init-plugin-root-and-version-records-derive-from-it (E))
+// ═══════════════════════════════════════════════════════════════════════════════════════════════════
+test("AC9 — readPluginLinkVersion() reads the link target's plugin.json; a missing link is null (not a match)", () => {
+  const ws = makeWorkspace();
+  fs.mkdirSync(path.join(ws, ".quay"), { recursive: true });
+
+  // No link ⇒ null, and the dashboard comparator must report the DISTINCT `unknown` state (硬规则 3b).
+  assert.equal(readPluginLinkVersion(ws), null, "no link ⇒ null");
+  assert.equal(pluginVersionState("0.15.0", null), "unknown", "a missing reading must NOT read as `match`");
+  assert.notEqual(pluginVersionState("0.15.0", null), "match");
+
+  // A link to a plugin root with version 0.14.0 ⇒ that version is the "laid" reading.
+  const target = fs.mkdtempSync(path.join(os.tmpdir(), "ac9-plugin-root-"));
+  _tmp.push(target);
+  fs.mkdirSync(path.join(target, ".claude-plugin"), { recursive: true });
+  fs.writeFileSync(path.join(target, ".claude-plugin", "plugin.json"), JSON.stringify({ name: "quay", version: "0.14.0" }));
+  fs.symlinkSync(target, path.join(ws, ".quay", "plugin"));
+
+  assert.equal(readPluginLinkVersion(ws), "0.14.0", "the version must come from the link target's plugin.json");
+  assert.equal(pluginVersionState("0.15.0", "0.14.0"), "mismatch", "delivered != link ⇒ mismatch");
+  assert.equal(pluginVersionState("0.14.0", "0.14.0"), "match");
+});
 
 // ═══════════════════════════════════════════════════════════════════════════════════════════════════
 // A1 — cross-workspace byte-identity

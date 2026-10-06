@@ -6,6 +6,7 @@
 import fs from "node:fs";
 import path from "node:path";
 import YAML from "yaml";
+import { resolvePluginRoot } from "./plugin-root.ts";
 
 export function findConfig(startDir = process.cwd()) {
   let dir = startDir;
@@ -69,9 +70,37 @@ export function activeProvider(cfg, id) {
   const providers = cfg.config.providers ?? {};
   if (id) {
     if (!providers[id]) throw new Error(`no such provider "${id}" in .quay/config.yml`);
-    return { id, ...providers[id] };
+    return withNativeDefaults(id, { id, ...providers[id] });
   }
   const enabledId = Object.keys(providers).find((pid) => providers[pid].enabled);
   if (!enabledId) throw new Error("no enabled provider in .quay/config.yml");
-  return { id: enabledId, ...providers[enabledId] };
+  return withNativeDefaults(enabledId, { id: enabledId, ...providers[enabledId] });
+}
+
+/**
+ * Fill the native provider's launch info from the plugin tree when the config omits `path`/
+ * `mcp_entry` (gap-project-quay-pointer-is-init-plugin-root-and-version-records-derive-from-it (D)).
+ *
+ * WHY the config no longer carries them: a `path` in the config is a BINDING (it decides behavior),
+ * and binding it to a link or a versioned directory froze the provider to whatever quay-init resolved
+ * at install time. Core can resolve the native provider from its OWN install location — that is what
+ * `plugin-root.ts` exists for — so the binding is removed and the resolution is relocated to where it
+ * cannot go stale.
+ *
+ * ⛔ Only `native` gets a default: a custom provider (`github`, a dev checkout, anything with its own
+ * tree) MUST name its own `path`/`mcp_entry`, and its config is left exactly as written. An
+ * unresolvable plugin root also leaves the entry as-is — the caller's existing "no mcp_entry" error
+ * path is the honest reading (硬规则 3b: never invent a path that was not asked for).
+ */
+export function withNativeDefaults(providerId, entry) {
+  if (providerId !== "native") return entry;
+  const root = resolvePluginRoot();
+  if (!root) return entry;
+  const dir = path.join(root, "vendor", "quay-native");
+  const out = { ...entry };
+  if (typeof out.path !== "string" || out.path === "") out.path = dir;
+  if (!Array.isArray(out.mcp_entry) || out.mcp_entry.length === 0) {
+    out.mcp_entry = ["node", path.join(dir, "dist", "quay-native.js"), "mcp"];
+  }
+  return out;
 }

@@ -41,7 +41,7 @@ steps (each mirrors the python3 invocation it replaced in plugin/scripts/quay-in
   has-npm-test        <package.json>
   ensure-loop-config  <cfg> <repo_root> <test_command> <tmux_session> <worktree_root> <dry_run:true|false>
   ensure-carrier-env  <cfg> <ws_root> <dry_run:true|false>
-  refresh-plugin-link <ws_root> <project_path> <dry_run:true|false>
+  refresh-plugin-link <ws_root> <plugin_root> <dry_run:true|false>
   migrate-mcp-entry   <cfg> <install_provider> <install_runtime> <install_core> <ws_root> <dry_run> <backup_ts>
   derive-loop-scripts <out-file> <plugin_root> <never-laydown-names>
   provider-entry-file <cfg>
@@ -99,7 +99,7 @@ async function main(): Promise<void> {
     }
     case "refresh-plugin-link": {
       need(3);
-      core.refreshProjectPluginLink({ wsRoot: args[0]!, projectPath: args[1]!, dryRun: args[2] === "true" });
+      core.refreshProjectPluginLink({ wsRoot: args[0]!, pluginRoot: args[1] || null, dryRun: args[2] === "true" });
       return;
     }
     case "migrate-mcp-entry": {

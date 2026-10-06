@@ -104,8 +104,43 @@ export function mainCheckoutRoot(dir: string): string | null {
 }
 
 /**
- * Resolve the plugin ROOT — the directory that directly contains `scripts/driver-runtime.ts`.
- * Returns null when no plugin can be located (the caller decides whether to fail closed).
+ * This module's OWN install location's plugin root — the walk-up relocation of constraints ①②③,
+ * ⛔ never `process.env.QUAY_PLUGIN_ROOT` and ⛔ never `<workspace>/.quay/plugin`.
+ *
+ * ⛔ `.quay/plugin` (the project link quay-init maintains) is NEVER an input here: it is a GUIDANCE
+ * pointer that may lag, and consulting it would make the pointer its own resolver's input — a cycle
+ * in which a stale link silently pins the version it was supposed to merely report
+ * (gap-project-quay-pointer-is-init-plugin-root-and-version-records-derive-from-it (C)).
+ */
+function selfPluginRoot(): string | null {
+  const dir = moduleDir();
+  const main = mainCheckoutRoot(dir);
+  if (main) {
+    const cand = path.join(main, "plugin");
+    return kernelAnchorExists(cand) ? cand : null;
+  }
+  return resolvePluginRootFrom(dir);
+}
+
+function realpathOrNull(p: string | null): string | null {
+  if (!p) return null;
+  try {
+    return fs.realpathSync(p);
+  } catch {
+    return null;
+  }
+}
+
+/** The plugin-root reading with its WARNINGS. `root` is what `resolvePluginRoot()` returns; the
+ *  warnings explain when an explicit env pointer overrode the module's own location. */
+export interface PluginRootReading {
+  root: string | null;
+  warnings: string[];
+}
+
+/**
+ * Resolve the plugin ROOT — the directory that directly contains `scripts/driver-runtime.ts` — and
+ * report any conflict between an explicit `QUAY_PLUGIN_ROOT` and this module's own location.
  *
  * Resolution order:
  *   1. `QUAY_PLUGIN_ROOT` env — explicit pointer (hermetic tests / operator override).
@@ -113,18 +148,34 @@ export function mainCheckoutRoot(dir: string): string | null {
  *      (constraint ①). Fail-closed (null) rather than ever falling back to the worktree copy.
  *   3. Walk up from this module's own location (constraints ②③): probe `plugin/scripts/…`
  *      then `scripts/…` at each level.
+ *
+ * ⚠️ An env pointer that DIFFERS from the module's own location RAISES A WARNING, never an error: it
+ * is a legitimate operator override, but if it is baked into a service unit it freezes the version
+ * exactly as a stale PATH entry does (硬规则 4 推论二: a literal that means "whatever the host has"
+ * silently becomes a real pin on another host).
  */
-export function resolvePluginRoot(): string | null {
-  if (process.env.QUAY_PLUGIN_ROOT) return process.env.QUAY_PLUGIN_ROOT;
-
-  const dir = moduleDir();
-  const main = mainCheckoutRoot(dir);
-  if (main) {
-    const cand = path.join(main, "plugin");
-    return kernelAnchorExists(cand) ? cand : null;
+export function resolvePluginRootReading(): PluginRootReading {
+  const env = process.env.QUAY_PLUGIN_ROOT;
+  if (env) {
+    const warnings: string[] = [];
+    const self = selfPluginRoot();
+    const selfReal = realpathOrNull(self);
+    const envReal = realpathOrNull(env);
+    if (selfReal !== null && envReal !== null && selfReal !== envReal) {
+      warnings.push(
+        `QUAY_PLUGIN_ROOT (${env}) differs from this module's own plugin root (${self}) — ` +
+          `a pinned env pointer freezes the plugin version like a frozen PATH entry`,
+      );
+    }
+    return { root: env, warnings };
   }
+  return { root: selfPluginRoot(), warnings: [] };
+}
 
-  return resolvePluginRootFrom(dir);
+/** The plugin root alone (the historical signature). Callers that also want the env-conflict warning
+ *  use `resolvePluginRootReading()`. */
+export function resolvePluginRoot(): string | null {
+  return resolvePluginRootReading().root;
 }
 
 /**

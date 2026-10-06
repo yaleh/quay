@@ -81,7 +81,7 @@ test('AC3: 六种未评估成因各出独立取值，且 signals 恒 null（⛔ 
     const absent = targetHealthFact(repoRoot, { targetRoot: path.join(emptyRoot, 'no-such-project') });
     const noTarget = targetHealthFact(emptyRoot, {});
     const noCarrier = targetHealthFact(repoRoot, { targetRoot: mk({ pluginVersion: DELIVERED_VERSION, missingCarriers: [HEALTH_REQUIRED_CARRIERS[0]] }) });
-    const noInitState = targetHealthFact(repoRoot, { targetRoot: mk({ initStateAbsent: true }) });
+    const noInitState = targetHealthFact(repoRoot, { targetRoot: mk({ linkAbsent: true }) });
     const noPs = targetHealthFact(repoRoot, {
       targetRoot: ok,
       healthProbePrefix: cannedProbePrefix(emptyRoot, {
@@ -98,7 +98,7 @@ test('AC3: 六种未评估成因各出独立取值，且 signals 恒 null（⛔ 
       ['probe-unparseable', garbled, []],
       ['target-root-absent', absent, []],
       ['carrier-missing', noCarrier, [HEALTH_REQUIRED_CARRIERS[0]]],
-      ['init-state-missing', noInitState, ['.quay/quay-init-state.json']],
+      ['plugin-link-missing', noInitState, ['.quay/plugin']],
       ['process-list-unreadable', noPs, ['ps -eo pid=,args=']],
     ];
     for (const [cause, fact, detail] of cases) {
@@ -163,23 +163,26 @@ test('AC4: pluginVersion 与交付物 plugin 版本并排出现，不等可机�
   assert.ok(typeof DELIVERED_VERSION === 'string' && DELIVERED_VERSION !== '', '交付物版本可读（本仓 plugin/.claude-plugin/plugin.json）');
   const same = mkTargetRoot({ pluginVersion: DELIVERED_VERSION });
   const stale = mkTargetRoot({ pluginVersion: '0.0.1-stale' });
-  const absent = mkTargetRoot({ initStateAbsent: true });
+  const absent = mkTargetRoot({ linkAbsent: true });
   try {
     const a = targetHealthFact(repoRoot, { targetRoot: same });
     const b = targetHealthFact(repoRoot, { targetRoot: stale });
     const c = targetHealthFact(repoRoot, { targetRoot: absent });
-    assert.equal(a.value.pluginVersion.target, DELIVERED_VERSION, '目标侧 pluginVersion 读出（quay-init-state.json）');
+    assert.equal(a.value.pluginVersion.target, DELIVERED_VERSION, '目标侧 pluginVersion 读出（.quay/plugin 目标的 plugin.json）');
     assert.equal(a.value.pluginVersion.delivered, DELIVERED_VERSION, '交付侧并排出现');
     assert.equal(a.value.pluginVersion.equal, true, '相等态');
     assert.equal(b.value.pluginVersion.equal, false, '不等态可机械检出（AC4 的核心）');
     assert.equal(c.value.pluginVersion.equal, null, '一侧读不到 ⇒ null（⛔ 不与 true 同形，硬规则 3b）');
-    assert.equal(c.value.pluginVersion.initStatePresent, false, '连 state 文件在不在都要能区分');
-    // 版本读数**带陈旧度**：mismatch 时它区分「刚补跑过」与「一个月没更新」。
-    fs.writeFileSync(path.join(stale, '.quay', 'quay-init-state.json'), JSON.stringify({ pluginVersion: '0.0.1-stale', laidAt: Math.floor(Date.now() / 1000) - 3600 }), 'utf8');
+    assert.equal(c.value.pluginVersion.initStatePresent, false, '连链接在不在都要能区分');
+    assert.equal(c.value.cause, 'plugin-link-missing', '链接缺失的成因是 plugin-link-missing（⛔ 不是过了');
+    // 版本读数**带陈旧度**：mismatch 时它区分「刚补跑过」与「一个月没更新」。龄取**链接本身**的
+    // lstat mtime（⛔ 不跟随链接 ⇒ 用 lutimesSync 设链接自己的时间）。
+    const oldSec = Math.floor(Date.now() / 1000) - 3600;
+    fs.lutimesSync(path.join(stale, '.quay', 'plugin'), oldSec, oldSec);
     const bAged = targetHealthFact(repoRoot, { targetRoot: stale });
-    // 龄 = 探针的 now - laidAt，探针在写盘之后跑 ⇒ 允许几秒漂移（⛔ 不钉死等值：那会把时钟漂移当缺陷）。
-    assert.ok(Math.abs(bAged.value.pluginVersion.targetAgeSec - 3600) <= 5, `目标配置形状的龄被读出（陈旧度），实为 ${bAged.value.pluginVersion.targetAgeSec}`);
-    assert.equal(c.value.pluginVersion.targetAgeSec, null, '无 state 文件 ⇒ 龄未知（⛔ 不是 0）');
+    // 龄 = 探针的 now - 链接 mtime，探针在设定之后跑 ⇒ 允许几秒漂移（⛔ 不钉死等值：那会把时钟漂移当缺陷）。
+    assert.ok(Math.abs(bAged.value.pluginVersion.targetAgeSec - 3600) <= 5, `目标链接的龄被读出（陈旧度），实为 ${bAged.value.pluginVersion.targetAgeSec}`);
+    assert.equal(c.value.pluginVersion.targetAgeSec, null, '无链接 ⇒ 龄未知（⛔ 不是 0）');
     console.log(`AC4[equal]   target=${a.value.pluginVersion.target} delivered=${a.value.pluginVersion.delivered} equal=${a.value.pluginVersion.equal}`);
     console.log(`AC4[unequal] target=${b.value.pluginVersion.target} delivered=${b.value.pluginVersion.delivered} equal=${b.value.pluginVersion.equal}`);
   } finally {
