@@ -10,6 +10,8 @@ parent: null
 children: []
 extra:
   schema: execution
+depends_on:
+  - gap-workflow-js-carriers-emit-literal-plugin-root-env-ref-that-is-unset-in-plain-sessions
 ---
 ## Proposal
 **背景(人 2026-10-06 同意)**:`CLAUDE_PLUGIN_ROOT` 在普通会话里不存在、却被写进 workflow 发给 agent 的命令(见任务 gap-workflow-js-carriers-emit-literal-plugin-root-env-ref-that-is-unset-in-plain-sessions,在飞)。人问"其它环境变量是否有类似问题",并同意把它做成**机械检查**而不是靠人再读一遍。
@@ -27,7 +29,7 @@ extra:
 
 **不在范围**:修复 `CLAUDE_PLUGIN_ROOT`(另一个任务在飞,本任务不改 workflow 源码也不改构建);修复 (C) 中发现的任何缺陷(发现即另立任务,附证据);`.sh` 脚本里的环境变量读取(本任务只扫发给 agent 的文本)。
 
-<!-- dedup-ref -->相关(追溯,非前置):gap-workflow-js-carriers-emit-literal-plugin-root-env-ref-that-is-unset-in-plain-sessions(在飞,修 CLAUDE_PLUGIN_ROOT;本任务与它的 Touches 无重叠,不共享测试文件);gap-dist-rewrite-injects-live-interpolation-into-workflow-js(done,只修加载期)。
+<!-- dedup-ref -->相关(追溯,非前置):gap-workflow-js-carriers-emit-literal-plugin-root-env-ref-that-is-unset-in-plain-sessions(在飞,修 CLAUDE_PLUGIN_ROOT;本任务与它的 Touches 无重叠,不共享测试文件);gap-dist-rewrite-injects-live-interpolation-into-workflow-js(done,只修加载期)。 本任务 frontmatter 声明了对前一个任务的 depends_on(它落地后本任务才可派发);该段仍只作追溯说明。
 
 ## Touches
 - `plugin/test/shipped-agent-text-unbound-vars.test.mjs`
@@ -36,10 +38,10 @@ extra:
 ## AC
 - [ ] 新增 `plugin/test/shipped-agent-text-unbound-vars.test.mjs`,对四个 workflow(fan-in-execute、execute-suite-fix、pool-quality-judge、manager-tick-core)用真实调用 harness 捕获发出的 prompt,提取 bash 中未赋值的大写变量并与白名单比对;`node --experimental-strip-types --test plugin/test/shipped-agent-text-unbound-vars.test.mjs` 退出 0。测试输出必须打印本次提取到的未赋值变量总数与前 3 条,证明谓词对真样本命中(硬规则 2);零命中必须同时打印"谓词对已知真样本的干跑结果"。
 - [ ] 取假:向被扫文本注入一个故意未赋值的变量(如在夹具 prompt 里加 `echo $UNBOUND_PROBE_VAR`)后测试红并指名该变量;去掉注入后恢复绿(附两次实跑输出)。另做第二个取假:把一个白名单项从白名单删除后,依赖它的文本使测试红。
-- [ ] 白名单实证:每个白名单变量在完成记录里附"在普通会话 subagent 的 Bash 里 `env | grep ^NAME=` 的原始读数";白名单里不得出现 `CLAUDE_PLUGIN_ROOT`(它应由另一任务消除,在其落地前本测试允许对它单独标记为已知缺陷并列出,而不是静默放过)。
+- [ ] 白名单实证:每个白名单变量在完成记录里附"在普通会话 subagent 的 Bash 里 `env | grep ^NAME=` 的原始读数";白名单里不得出现 `CLAUDE_PLUGIN_ROOT`:本任务在 gap-workflow-js-carriers-emit-literal-plugin-root-env-ref-that-is-unset-in-plain-sessions 落地之后才可派发(见 frontmatter 的 depends_on),所以**不设"已知缺陷"例外**,`CLAUDE_PLUGIN_ROOT` 与其它未赋值变量同等判红。
 - [ ] skill/loop 部分:只扫围栏 bash 代码块;对无法解析的文件输出 `NOT-EVALUATED` 与原因;散文占位符计数作为信息读数打印(不判红)。
 - [ ] 完成记录里对 `FORK_BASELINE`、`MERGE_TARGET`、`REPO_ROOT`、`WORKTREE_ROOT`、`TMUX_SESSION`、`TEST_COMMAND`、`QUAY_GLOBAL_DIR`、`QUAY_CLAIM_REMOTE` 八个变量各给出一行结论(占位符,附上下文;或在 bash 中被使用,附命令);凡属后者,另立任务并附证据,本任务不修。
 - [ ] `bash scripts/test.sh --for-task gap-shipped-agent-text-references-shell-variables-that-nothing-assigns-and-no-check-scans-for-them` 退出 0 且执行了 ≥1 个测试文件。
 
 ## DoD
-真实落地:对已安装/待发布的真实 workflow 与 skill 文本运行该检查,得到一份"无人赋值变量"的真实清单(含对八个嫌疑变量的逐个结论),且检查能对注入的未赋值变量变红;零命中读数同时附有对真样本的干跑证明。仅 fixture 绿不算完成。
+真实落地:对已安装/待发布的真实 workflow 与 skill 文本运行该检查,得到一份"无人赋值变量"的真实清单(含对八个嫌疑变量的逐个结论),且检查能对注入的未赋值变量变红;零命中读数同时附有对真样本的干跑证明。`CLAUDE_PLUGIN_ROOT` 在该检查的读数中零命中(这同时证明其修复已落地)。仅 fixture 绿不算完成。
