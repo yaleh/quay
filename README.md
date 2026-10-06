@@ -1,30 +1,94 @@
 # quay
 
-`quay` is itself a **software engineering agent** — the same category of system as
-Claude Code or Codex, not a task-board framework, a wire protocol, or an editor
-plug-in. Given a goal, it decomposes the goal into tasks, dispatches workers to
-implement them, judges each result against runnable acceptance criteria, and lands
-the ones that pass.
+**`quay` is a software engineering agent whose distinguishing trait is high-throughput
+development: it decomposes a goal into tasks, dispatches workers to implement them in
+parallel, judges each result against runnable acceptance criteria, and lands the ones
+that pass — continuously, unattended.**
 
-What `quay` runs *on* is **Claude Code**, and that relation is intrinsic rather than
-optional: Claude Code is the **infrastructure** underneath `quay` in the same sense
-that an operating system is the infrastructure underneath the programs running on
-it. `quay` consumes the LLM inference, tool invocation, and subagent dispatch that
-Claude Code provides, and builds the task model, the lifecycle gates, and the driver
-loop on top of them. The direction is one-way: Claude Code is the ground `quay`
-stands on, not an artifact `quay` produces.
+![quay's own dashboard, mid-run: six driver roles live, loop pulse timeline, system resources](docs/screenshots/dashboard.png)
 
-Concretely, the surface `quay` exposes is a provider-agnostic task board: a small
-**Core** CLI/MCP client plus a pluggable **Provider ABI** for where tasks
-actually live. A task can be stored as local markdown+frontmatter files, mirrored
-to GitHub Issues, or (in principle) backed by any other tracker that implements
-the same ABI — `quay` Core doesn't know or care which.
+*A real capture of `quay serve`, taken while this repository's own backlog was being driven
+by the loop described below — not a mockup.*
 
-This repository is also the live workspace for a BAIME (Bootstrapped AI
-Methodology Engineering) research experiment in which `quay-native`'s own
-development backlog is driven, progressively, by `quay-native` itself. See
-[**docs/proposals/**](docs/proposals/) below if you want that deeper story —
-it is not required reading to install or use `quay`.
+`quay` is the same category of system as Claude Code or Codex, not a task-board framework,
+a wire protocol, or an editor plug-in. What it runs *on* is **Claude Code**: Claude Code is
+the infrastructure underneath `quay` in the same sense an operating system is infrastructure
+underneath the programs running on it — `quay` consumes the LLM inference, tool invocation,
+and subagent dispatch Claude Code provides, and builds the task model, lifecycle gates, and
+driver loop on top. The direction is one-way: Claude Code is the ground `quay` stands on, not
+an artifact `quay` produces.
+
+Concretely, the surface `quay` exposes is a provider-agnostic task board: a small **Core**
+CLI/MCP client plus a pluggable **Provider ABI** for where tasks actually live. A task can be
+stored as local markdown+frontmatter files, mirrored to GitHub Issues, or (in principle)
+backed by any other tracker that implements the same ABI — `quay` Core doesn't know or care
+which.
+
+This repository is also the live workspace for a BAIME (Bootstrapped AI Methodology
+Engineering) research experiment in which `quay-native`'s own development backlog is driven,
+progressively, by `quay-native` itself — see [**"Quay in practice"**](#quay-in-practice)
+below for what that has actually produced, and [**docs/proposals/**](docs/proposals/) for the
+deeper research story. Neither is required reading to install or use `quay`.
+
+## What you can do with quay
+
+- **Point it at a messy backlog and get a gated, prioritized task board.** Every task carries
+  a `## Proposal` / `## Plan` / `## Acceptance Criteria` / `## Definition of Done` body; a task
+  can't advance `todo → ready → done` without the gate for that transition actually passing.
+- **Let it run unattended against your repo's own `tasks/*.md`.** `quay driver start --kind
+  promotion` and `--kind worker` are resident processes: promotion advances `todo → ready`,
+  worker isolates each `ready` task in its own git worktree, implements it, and lands it —
+  while you do something else.
+- **Swap the backend without touching your workflow.** The same task view-model (id, status,
+  role, labels, Proposal/Plan/AC/DoD body) is implemented today by a local markdown+frontmatter
+  store (`quay-native`) and by GitHub Issues (`quay-github`) — proving the Provider ABI
+  transfers to a second, real backend rather than being a one-off local format.
+- **Watch it work from a real web UI**, not just a CLI — the dashboard, task board, git-landing
+  timeline, and architecture map below are the same four screenshots away.
+
+## See it in action
+
+A clean install starts from the small bundled sample workspace (5 illustrative tasks, no
+experiment history) — not this repository's own ~2,200-task backlog:
+
+![Task board over the bundled sample workspace: one epic with two children, two standalone tasks](docs/screenshots/sample-tasks.png)
+
+![A task's detail page — Proposal / Plan / Acceptance Criteria / Definition of Done, with AC checkboxes reflecting a real gate check](docs/screenshots/sample-task-detail.png)
+
+The architecture view renders the Provider ABI directly from this repo's own `packages/*` and
+git history — not a hand-drawn diagram:
+
+![quay's own /architecture page: Core, web-ui, and provider-abi fanning out to the native and GitHub providers, colored by recent git activity](docs/screenshots/architecture.png)
+
+## Quay in practice
+
+**Built at high throughput.**
+
+Every number below is a direct `git log` measurement against a real repository on the date
+shown, not an estimate. Two case studies:
+
+| | **quay itself** (dogfooding) | **CloudCLI** (`@yalehwang/cloudcli`, aka "Claude Code UI") |
+|---|---|---|
+| What it is | This repository's own backlog, driven by its own loop | A real, independent product — a web UI for Claude Code/Cursor CLI/Codex — [forked](https://github.com/yaleh/claudecodeui) and quay-driven since 2026-09-19 |
+| Window measured | 2026-07-15 → 2026-10-07 (84 days) | 2026-09-19 → 2026-10-07 (18 days since the fork point, commit `fd424f3f`) |
+| Commits | 27,008 total (~322/day average; peak day 2,833) | 5,548 since the fork (4,136 non-merge); ~308/day average |
+| Scope landed | +182k / −36k lines across 600 files in `packages/` alone | 1,892 files changed, +411k / −7.5k lines |
+| Task-branch landings | 5,110 isolated-worktree task branches merged via mechanical fan-in | 455 tasks tracked under `tasks/`; 1,551 `task_write` commits, 450 mechanical fan-in merges |
+| Release cadence | 32 tags, v0.2.0 → v0.16.0, over 84 days | Its own tag series (`v1.37.3` → `v1.38.2`) continuing post-fork |
+
+CloudCLI is a second, independently-verifiable data point, not an anecdote: it's a real fork of
+[`siteboon/claudecodeui`](https://github.com/siteboon/claudecodeui), published to npm, with its
+own git history anyone can inspect. Its own README additionally self-reports (not independently
+re-measured here) a representative set of complex features landed in this window — a resident
+long-lived-session architecture with a host/lease layer and systemd-scoped memory caps, a
+pluggable voice-input recognizer registry, and a responsive composer/chat redesign.
+
+![quay's own git-history view: a dense, continuous stream of isolated task branches forking from and fan-in-merging back into develop](docs/screenshots/git-history.png)
+
+quay's own live commit-count-over-time statistics (tasks done, scripts shipped, goals tracked)
+are kept current automatically — see [**Development process
+statistics**](#development-process-statistics) below, regenerated from this repo's own tracked
+history rather than hand-maintained.
 
 ## The three packages
 
@@ -722,21 +786,20 @@ a single MCP endpoint for an agent (e.g. Claude Code) to register once.
 
 ### Web UI
 
-`quay serve` renders the board as server-rendered HTML (no client framework
-and no build step). The four screenshots below are real captures of a live
-dev-tree `quay serve` at 1440×900 — dashboard, goals, task detail, and the
-commit timeline:
+`quay serve` renders the board as server-rendered HTML (no client framework and no build
+step). The dashboard, sample task board/detail, git-history, and architecture screenshots
+near the top of this README are all real captures of a live dev-tree `quay serve` at
+1440×900 — see ["See it in action"](#see-it-in-action) and ["Quay in practice"](#quay-in-practice)
+above. Two more views, captured against this repository's own live backlog (primarily
+Chinese-language task/goal titles, since that's this project's own working language —
+shown here deliberately rather than cropped out):
 
-![quay web UI — the dashboard: loop pulse, task ledger, system resources and three-layer status](docs/screenshots/dashboard.png)
+![quay web UI — goals and their acceptance criteria, this repo's own live board](docs/screenshots/goals.png)
 
-![quay web UI — goals and their acceptance criteria](docs/screenshots/goals.png)
+![quay web UI — a single task's detail page, this repo's own live board](docs/screenshots/task-detail.png)
 
-![quay web UI — a single task's detail page](docs/screenshots/task-detail.png)
-
-![quay web UI — git history: the commit-landing timeline](docs/screenshots/git-history.png)
-
-Reproduce them against a running server with `docs/capture-webui-screenshots.sh`,
-and pixel-verify any capture with `docs/verify-webui-screenshot.mjs`.
+Reproduce any of these against a running server with `docs/capture-webui-screenshots.sh`,
+and pixel-verify a capture with `docs/verify-webui-screenshot.mjs`.
 
 ### Driver processes (`quay driver`)
 
