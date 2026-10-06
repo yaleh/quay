@@ -43,4 +43,10 @@ long-term: true
 
 **取假**：当前状态即红（实测 PATH 含该路径两次）。
 
+**适用范围（人 2026-10-06 裁定，SPEC §4b 同日修订）**：本判据约束的是 quay 自己的 **dev 渠道**
+（`quay@quay-dev` 等目录源启用键、`env` 中的 quay 路径）不得出现在用户级设置里；**发布渠道
+`quay@quay` 的用户级启用是允许的**（判据代码 `RELEASE={'quay@quay'}` 早已如此），其安装 scope 由使用者选择。
+上文「启用迁项目级」「用户级只留 marketplace 源」按此范围读，只针对 dev 渠道；本修订**未改动**
+`criterion`/`expect` 字段，只澄清适用范围，判据行为不变。
+
 

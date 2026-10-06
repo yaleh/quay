@@ -96,6 +96,18 @@ plugin/                     唯一扩展载体（git 跟踪，一棵树）
 
 ## 4b. 作用域：开发环境不得污染本机其它项目（裁定 5）
 
+> **2026-10-06 修订（人裁定，适用范围收窄）**：本节与 AC-161 / AC5 / AC6 约束的是 **quay 自己的 dev 渠道**
+> （`quay-dev` 名槽、目录源 `<本仓库>/plugin`、`<quay>/plugin/bin` 进 PATH）**不得外溢到本机其它项目**。
+> **发布渠道 `quay@quay`（github 源）的安装 scope 由使用者选择**（user / project / local 均可），
+> 文档与 `/quay:init` 不得把 project scope 写成唯一正路，也不得引导使用者卸载其 user scope 安装。
+> 人 2026-10-06 逐字：「对于其它应用 quay 驱动开发的项目，不应强调 project scope 安装。例如我现在在本机就是
+> 做 user scope 安装。」
+> **依据**：AC-161 判据代码本就只拦 dev 渠道键与 `env` 里的 quay 路径，**明确允许**用户级
+> `enabledPlugins["quay@quay"]`（`goals/AC-161-user-level-marketplace-only.md` 的 `RELEASE={'quay@quay'}`）；
+> 下文凡写「用户级 enabledPlugins 不含任何 quay 键」「其它项目 `install --scope project`」处，
+> 均按本修订读作「不含 dev 渠道键」「scope 由使用者选择」。文档侧的落地见任务
+> `gap-plugin-install-scope-docs-force-project-scope-and-refresh-recipe-uninstalls-user-install`。
+
 **实测的污染（2026-09-02，非推断）**：在 `/home/yale`（**不是** quay 项目）起一个会话，
 其 `PATH` 中含 **`/home/yale/work/quay/plugin/bin`，且出现两次**。
 ⇒ **本仓库的插件面正被注入到本机每一个项目的每一个会话**：`bin/` 进 PATH、14 个 skill 常驻
@@ -115,7 +127,7 @@ plugin/                     唯一扩展载体（git 跟踪，一棵树）
 
 | 槽名 | 源 | 声明在哪 | 谁启用 | 从哪加载 |
 |---|---|---|---|---|
-| `quay` | **github** `yaleh/quay` | User Scope（`~/.claude/settings.json` `extraKnownMarketplaces.quay`） | **其它项目**（各项目级 `enabledPlugins["quay@quay"]` + `install --scope project`） | 缓存副本 `~/.claude/plugins/cache/quay/quay/<ver>/…` |
+| `quay` | **github** `yaleh/quay` | User Scope（`~/.claude/settings.json` `extraKnownMarketplaces.quay`） | **其它项目**（`quay@quay` 的安装 scope 由使用者选择：user / project / local；2026-10-06 修订） | 缓存副本 `~/.claude/plugins/cache/quay/quay/<ver>/…` |
 | `quay-dev` | **directory → `<本仓库>/plugin`** | 同上，`extraKnownMarketplaces.quay-dev`（机器特定路径，**不入库**） | **只有本仓库**（`<quay repo>/.claude/settings.json` `enabledPlugins["quay@quay-dev"]`） | **原地**从 `<本仓库>/plugin/vendor/quay/dist/quay.js` |
 
 **为什么必须换名（不是清理走样，是修一个已经发生的污染）**：marketplace 名**全机唯一**，且
@@ -132,11 +144,12 @@ plugin/                     唯一扩展载体（git 跟踪，一棵树）
 ```
 ~/.claude/settings.json          extraKnownMarketplaces.quay     = github yaleh/quay           ✅ 发布渠道（用户级只留"源"）
                                  extraKnownMarketplaces.quay-dev = directory → <本仓库>/plugin ✅ dog food（机器特定路径，不入库）
-                                 enabledPlugins 不含任何 quay 键                              ⛔ 禁止（AC-161 判据即读此 key 集）
+                                 enabledPlugins 不含 dev 渠道键（quay@quay-dev 等）          ⛔ 禁止（AC-161 判据即读此 dev key 集）
+                                 enabledPlugins["quay@quay"]（发布渠道）                      ✅ 允许（user scope 安装的结果，使用者自选）
 <quay repo>/.claude/settings.json  enabledPlugins["quay@quay-dev"] = true                    ✅ 本仓 dog food（从开发树原地加载）
-<本机其它项目>/.claude/settings.json  enabledPlugins["quay@quay"] = true                      ✅ github 渠道
-                                   （以 `install --scope project` 写入；⛔ 不 `marketplace add --scope project`——
-                                     那会把机器特定的源写进消费方的提交文件）                 ⛔ 不启用 ⇒ 不注入 / 不进 PATH / 不起 MCP
+<本机其它项目>/.claude/settings.json  enabledPlugins["quay@quay"] = true                      ✅ github 渠道（可选：项目级开关/固定版本；
+                                   user scope 安装时可省略；⛔ 不 `marketplace add --scope project`——
+                                     那会把机器特定的源写进消费方的提交文件）                 ⛔ 不启用 dev 渠道 ⇒ 不注入 dev 树 / 不进 PATH / 不起 dev MCP
 ```
 
 **⊢ 这恰好是裁定 3「配置文件」边界在本问题上的具体落法**：机器特定的东西（源路径）留在用户级、
@@ -319,7 +332,7 @@ mcp-server / os-anchor / precommit-guard / scripts/test.sh）的迁移是收缩�
 | 6 | `workflows-dual-copy-drift-check.ts` | 双副本消失 ⇒ 检查器失去对象 |
 | 7 | `plugin/skills/{quay-native,quay-webui-bootstrap}-methodology` 的「精简版」身份 | 裁定 2；与 `.claude/` 版合并为唯一一份 |
 | 8 | `manager-tick-core.js` 迁入 `plugin/workflows/` | **裁定 4：manager 是产品一部分** ⇒ 交付了 manager skill 却不交付它依赖的 workflow，正是裁定 2 禁的病 |
-| 9 | `~/.claude/settings.json` 的 `enabledPlugins["quay@quay"]=true` → 迁到项目级 | **裁定 5**：实测该条目把 quay 扩展面注入本机每个项目（`/home/yale` 会话 PATH 含 `<quay>/plugin/bin` ×2）。**迁移须按 §4b 的顺序**（先确认已装 → 项目级置 true → 最后撤用户级），反序会把自己锁在门外 |
+| 9 | `~/.claude/settings.json` 的 `enabledPlugins["quay@quay"]=true` → 迁到项目级 | **裁定 5**：实测该条目把 quay 扩展面注入本机每个项目（`/home/yale` 会话 PATH 含 `<quay>/plugin/bin` ×2）。**迁移须按 §4b 的顺序**（先确认已装 → 项目级置 true → 最后撤用户级），反序会把自己锁在门外。**（2026-10-06 修订：此行只适用于 dev 渠道键；发布渠道 `quay@quay` 的用户级启用不在迁移之列，见 §4b 修订。）** |
 | 10 | `register-plugin.mjs` 写**用户级启用**的行为 | 同上：它是污染的产生点。**安装可以全局，启用不该全局**——改为只注册 marketplace 源 + 安装，启用交给目标项目 |
 
 **⚠️ 本表所有「退役」一律指 §12 的 archive（`git mv` + INDEX 行），不是 `rm`。**
@@ -345,7 +358,8 @@ mcp-server / os-anchor / precommit-guard / scripts/test.sh）的迁移是收缩�
   *能取假*：**当前状态即红**（实测 `/home/yale` 会话 PATH 含该路径两次）——先红后绿。
 - **AC6 用户级只承载源**：`~/.claude/settings.json` 中与 quay 相关的键**只有** marketplace **源**
   （`extraKnownMarketplaces.quay` → github `yaleh/quay`；`extraKnownMarketplaces.quay-dev` → directory
-  `<本仓库>/plugin`），**没有**任何 `enabledPlugins["quay@…"]` 键。*能取假*：写回任一 quay 启用键即红。
+  `<本仓库>/plugin`），**没有**任何 dev 渠道 `enabledPlugins` 键（如 `quay@quay-dev`；发布渠道 `quay@quay`
+  按 2026-10-06 修订允许）。*能取假*：写回任一 dev 渠道启用键即红。
   （判据正本 = `goals/AC-161-user-level-marketplace-only.md` 的 criterion：读 `enabledPlugins` 的键集与 `env`。）
 - **AC4（反例判据）**：三条 AC 都不得只靠 fixture 满足——AC1/AC2 读仓库真实文件，
   AC3 读一次真实 laydown 的产物清单（硬规则 4 推论三：读生产载体，不读注入数据）。
