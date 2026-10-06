@@ -514,10 +514,12 @@ node plugin/scripts/inner-forensics.mjs timecost --since <外层 loop 起点或�
 机械核实探针没死**——DUE 判定走与内层同一个 `routine-scheduler.ts` 与 `.quay/routine-last-run.json`：
 
 ```bash
+# --plugin-root 用 $(pwd)/plugin 现取（与本行脚本的相对路径 plugin/scripts/ 同源——本 tick 先 cd "$REPO_ROOT"，
+# 故 $(pwd) = REPO_ROOT；⛔ 不用宿主环境变量承载插件根：它在普通会话 Bash 里没有值，展开成空串后与「文件不存在」同形）
 node --experimental-strip-types plugin/scripts/routine-scheduler.ts \
   --now "$(($(date +%s) * 1000))" \
   --last-run "$REPO_ROOT/.quay/routine-last-run.json" \
-  --plugin-root "$CLAUDE_PLUGIN_ROOT" \
+  --plugin-root "$(pwd)/plugin" \
   /tmp/routines-outer-<tick>.json
 # exit 0 + DUE: 行 ⇒ 有 due；exit 3 = 无 due
 ```

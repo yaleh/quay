@@ -747,7 +747,8 @@ node --experimental-strip-types plugin/scripts/ready-pool-check.ts --root "$(pwd
 1. **读例常配置**：`.quay/config.yml` `loop.routines:`（`readLoopParams` 校验；`config-wiring-check.ts`
    钉「有配置必有人读」）。默认 `[]` = 无例行 → 本步空转。
 2. **调度**：把 routines 写成临时 JSON，跑
-   `node --no-warnings --experimental-strip-types routine-scheduler.ts --iteration <tick 计数> --event checkpoint --plugin-root "$CLAUDE_PLUGIN_ROOT" /tmp/routines-<tick>.json`
+   `node --no-warnings --experimental-strip-types routine-scheduler.ts --iteration <tick 计数> --event checkpoint --plugin-root "$(pwd)/plugin" /tmp/routines-<tick>.json`
+   插件根用 `$(pwd)/plugin` **在命令里现取**，与同一条命令里 `routine-scheduler.ts` 的相对路径**同源**（本 tick 的工作目录就是仓库根，`plugin/` 即插件根，`quay-init --loop` 把脚本铺到那里）。⛔ 不用任何宿主环境变量承载插件根：它在普通会话（及其 subagent）的 Bash 里没有值，展开成空串后路径退化成 `/scripts/…`，失败形态与「文件不存在」同形（硬规则 3b）。
    ——exit 0 = 有 DUE；exit 3 = 无 DUE（`every(N)` 的 N 以 tick 计数计，不再用退休管线的「迭代号」）。
 3. **派发**：对每条 DUE routine，用 `read-probe-spec.ts` 读 `<plugin-root>/probes/<name>.md` 的 spec
    （instrument / fallback / objective）；instrument 可用才派后台 subagent，不可用且 `fallback: none` 则跳过。
@@ -759,7 +760,7 @@ node --experimental-strip-types plugin/scripts/ready-pool-check.ts --root "$(pwd
 （**外部自食**——用 quay 对真实外部工作区（archguard）做 pre-friction 发现，`every(8)` 或
 `on(checkpoint)`，DIR-043/ADR-016）。`external-dogfooding` 的例行契约（cadence / 外部目标可驱动 /
 tmux remote-drive 表面 / 发现形状）由 `external-dogfooding-check.ts` 机械校验（capability-catalog
-AC1c，fail-closed）——派发前先 `--selftest` + `--surface --plugin-root "$CLAUDE_PLUGIN_ROOT"` +
+AC1c，fail-closed）——派发前先 `--selftest` + `--surface --plugin-root "$(pwd)/plugin"` +
 `--target <外部工作区> --registry <drivable-workspaces.yml>`，契约不满足即视为发现（先建档再派发）。
 
 `quay:run-routines` skill（`plugin/skills/routines/SKILL.md`）是这条 track 的操作化承载——本步调度它
@@ -1056,10 +1057,11 @@ A-D: {"disjoint":true,"overlaps":[],"reason":"disjoint file-sets"}   # 合规：
 # 1. 读 .quay/config.yml loop.routines:（DIR-050 统一格式；缺省 [] = 无 routine）
 # 2. 写 routines 临时 JSON（/tmp/routines-<tick>.json）
 # 3. 判定 due（--now = 当前墙钟 epoch-ms；--last-run = 每 routine 上次运行时刻映射，缺省 = 从未跑 ⇒ due）：
+#    --plugin-root 用 $(pwd)/plugin 现取（与本行脚本的相对路径 plugin/scripts/ 同源；⛔ 不用宿主环境变量）：
 node --experimental-strip-types plugin/scripts/routine-scheduler.ts \
   --now "$(($(date +%s) * 1000))" \
   --last-run .quay/routine-last-run.json \
-  --plugin-root "$CLAUDE_PLUGIN_ROOT" \
+  --plugin-root "$(pwd)/plugin" \
   /tmp/routines-<tick>.json
 # exit 0 + DUE: 行 ⇒ 有 due；exit 3 = 无 due
 ```
