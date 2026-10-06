@@ -46,9 +46,12 @@ MCP `config_validate` 返回同样两条(`{"ok": false, "issues":[loop.board, lo
 - `packages/quay/test/mcp-config-validate.test.mjs`
 - `plugin/test/quay-init-characterization.test.mjs`
 - `docs/analysis/quay-init-closure-ratchet.baseline.json`
+- `plugin/sh-census-baseline.json`
 - `tasks/gap-fresh-quay-init-config-fails-validate-on-loop-board-and-gates-that-init-never-writes.md`
 
-未改动但原在 Touches 里的(附理由,非静默):`packages/quay/src/config-validate.ts`(走"init 写默认"一支 ⇒ 校验器不动)、`.quay/config.yml.example`(已含 `board: native`/`gates: [acceptance]`,无需改)、`plugin/test/quay-init.test.mjs`(两写者断言落在 init.test.mjs)、`plugin/sh-census-baseline.json`(棘轮往下走,无需重锚)。
+未改动但原在 Touches 里的(附理由,非静默):`packages/quay/src/config-validate.ts`(走"init 写默认"一支 ⇒ 校验器不动)、`.quay/config.yml.example`(已含 `board: native`/`gates: [acceptance]`,无需改)、`plugin/test/quay-init.test.mjs`(两写者断言落在 init.test.mjs)。
+
+⚠️ `plugin/sh-census-baseline.json` 上一轮被列在上面这句里(理由「棘轮往下走,无需重锚」)——**那个理由已被证伪**,它现在在 Touches 里(见 §D 的修正说明)。
 
 ## AC
 - [x] 完成记录里贴出(A)的取证:对 `loop.board`/`loop.gates` 的全部读取点清单(文件:行与上下文),并先打印"谓词对已知真样本(例如 `config-validate.ts` 自身对 `lp.board` 的读取)的干跑结果",再给出零消费者或有消费者的结论;结论决定走(B)的哪一支。→ 见 Evidence §A:**有消费者**,走 (B) 的"init 写默认"一支。
@@ -117,7 +120,11 @@ AC2① 的失败原文:
 
 `init.test.mjs` 的 `AC4` 用例:按 `plugin/test/quay-init-loop.test.mjs` 同样的手法枚举 `quay-init.sh` 的 heredoc,用只有配置写者正文才有的 marker 定位到它(找不到 ⇒ 红,不做空转假绿);把 `${...}` 抹成占位符后当 YAML 解析,断言 `board`/`gates` **先存在**(`typeof === "string"` / 非空数组,否则 `undefined === undefined` 会把"啥也没写"读成"两写者一致"),**再**等于 `LOOP_VERSION_DEFAULTS` 的同名值;第三写者(TS 模板 `generateConfigContent`)用**真实输出**解析后同样比对 ⇒ 三方一致是被**测量**的,不是手写断言的。
 
-`quay-init.sh` 的 sh-census `codeLines`:**改前 1009 → 改后 1009**(净零),合并 develop 后 **1009 → 1007**(净负)。为付这两行的账,`mkdir -p …`/`echo "  created: …"` 两对语句按本文件自己 `write_config` 头注释记录的同一手法合成一行(该注释明写"必须净零或净负")。`embeddedInterpreterLines` 7692 → 7690 ≤ 基线 7692 ⇒ **`plugin/sh-census-baseline.json` 无需改动**(棘轮只降不升,降无需重锚)。
+`quay-init.sh` 的 sh-census `codeLines`:**改前 1009 → 改后 1009**(净零),合并 develop 后 **1009 → 1007**(净负)。为付这两行的账,`mkdir -p …`/`echo "  created: …"` 两对语句按本文件自己 `write_config` 头注释记录的同一手法合成一行(该注释明写"必须净零或净负")。`embeddedInterpreterLines` 实测 **7692 → 7690**。
+
+⛔ **上一轮在此处写的是「7690 ≤ 基线 7692 ⇒ `plugin/sh-census-baseline.json` 无需改动(棘轮只降不升,降无需重锚)」——这条是错的**,且正是它让 fan-in 的 suite 变红。`plugin/test/sh-census-check.test.mjs` 的 AC6 要求 committed baseline **等于**实测读数,不是「不高于」:基线偏高会让未来的 +2 回归静默变绿(该文件 `_reanchorLog` 里每一处下降重锚都写着这句)。故一次**真实的下降也必须重锚**——已按既有惯例追加第 20 条 `_reanchorLog`(7692 → 7690)并把文件末的两个数改为 7690,并把该文件加入 `## Touches`(anti-drift-touches-check 要求 delta 覆盖在声明内)。
+
+判据(可复跑):`node --experimental-strip-types plugin/scripts/sh-census-check.ts --json` ⇒ `totals.embeddedInterpreterLines = baseline = 7690`,`verdict.ok = true`( `over = []`、`baselineRaised = []` );`node --experimental-strip-types --test plugin/test/sh-census-check.test.mjs` ⇒ **20/20 pass**(含 AC6)。
 
 ### §E (AC5) 文档同步
 
