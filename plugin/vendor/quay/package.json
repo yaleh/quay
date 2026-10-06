@@ -1,6 +1,6 @@
 {
   "name": "quay-plugin-vendor",
-  "version": "0.16.0-dev",
+  "version": "0.17.0-dev",
   "private": true,
   "type": "module"
 }
