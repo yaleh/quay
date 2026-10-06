@@ -28,6 +28,7 @@ extra:
 <!-- dedup-ref -->相关(追溯,非前置):gap-serve-same-root-admission-lock(准入锁,读 serve.log 判定);gap-serve-binding-defaults-three-copies-to-one-definition-point(绑定正本)。
 
 ## Touches
+- `packages/quay/src/serve-log.ts`
 - `packages/quay/src/cli/server.ts`
 - `plugin/scripts/start-drivers.ts`
 - `packages/quay/test/server-restart.test.mjs`
