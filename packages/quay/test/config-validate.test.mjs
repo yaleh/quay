@@ -266,6 +266,45 @@ loop:
   }
 });
 
+// gap-fresh-quay-init-config-fails-validate-on-loop-board-and-gates-that-init-never-writes AC3.
+// The branch this task took is "init writes the defaults" (both keys HAVE runtime consumers —
+// `readLoopParams` fail-closes on them and plugin/skills/loop-driver/SKILL.md reads them), so the
+// validator's required-ness is CORRECT and the reading that must be pinned is the other direction:
+// the exact shape a fresh install writes is accepted, and the relaxed reading is NOT (a blank or
+// ill-typed value still reds — the fix must not widen the gate).
+test("AC3: the fresh-install shape (board: native + gates: [acceptance]) validates; blank/ill-typed gates still red", () => {
+  const freshShape = `
+providers:
+  native:
+    enabled: true
+loop:
+  board: native
+  gates: [acceptance]
+`.trim();
+
+  const ok = tmpWorkspace({ ".quay/config.yml": freshShape });
+  try {
+    const result = validateConfig({ workspaceRoot: ok.root });
+    assert.equal(result.ok, true, `the fresh-install shape must validate, got: ${JSON.stringify(result.issues)}`);
+    // The gate name resolves against the BUILT-IN registry — there is no `gates:` section here at
+    // all, which is exactly the fresh-install state (the scaffold's gates are commented out).
+    assert.equal(result.issues.filter((i) => i.field === "loop.gates").length, 0);
+  } finally {
+    ok.cleanup();
+  }
+
+  for (const [label, line] of [["empty string", '  gates: ""'], ["wrong type", "  gates: 3"]]) {
+    const bad = tmpWorkspace({ ".quay/config.yml": `providers:\n  native:\n    enabled: true\nloop:\n  board: native\n${line}\n` });
+    try {
+      const result = validateConfig({ workspaceRoot: bad.root });
+      assert.equal(result.ok, false, `${label} gates must still fail`);
+      assert.ok(result.issues.some((i) => i.field === "loop.gates"), `${label}: expected a loop.gates issue, got ${JSON.stringify(result.issues)}`);
+    } finally {
+      bad.cleanup();
+    }
+  }
+});
+
 test("AC: enabled CUSTOM provider missing mcp_entry exits with error (M1)", () => {
   const { root, cleanup } = tmpWorkspace({
     ".quay/config.yml": `

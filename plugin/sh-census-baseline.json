@@ -312,8 +312,24 @@
         "embeddedInterpreterLines": "-2 = plugin/scripts/quay-init.sh: the fresh-install heredoc dropped `path:` and `mcp_entry:` (two lines shipped to every generated config) and the comment above them was rewritten to four lines; net -2 code lines, all in this one charged file.",
         "duplicateCopies": "0 — untouched. This task added no experiments/** mirror and converted no byte-identical pair."
       }
+    },
+    {
+      "when": "2026-10-07 (gap-fresh-quay-init-config-fails-validate-on-loop-board-and-gates-that-init-never-writes)",
+      "from": {
+        "embeddedInterpreterLines": 7692,
+        "duplicateCopies": 0
+      },
+      "to": {
+        "embeddedInterpreterLines": 7690,
+        "duplicateCopies": 0
+      },
+      "why": "DOWNWARD re-anchor (-2, the intended direction). ⛔ This task's own §D asserted the shrink needed NO re-anchor (「棘轮只降不升,降无需重锚」) and kept this file OUT of ## Touches — that reading is WRONG, and it is what reddened the fan-in suite: AC6 of plugin/test/sh-census-check.test.mjs requires the committed baseline to EQUAL the live reading, not merely bound it (a stale-higher baseline lets a future +2 regression stay green — the gain-not-recaptured failure the entries above name). The task's edits to plugin/scripts/quay-init.sh moved this axis down by 2, measured on the MERGED tree with the checker's OWN reading (sh-census-check.ts --json -> totals.embeddedInterpreterLines 7692 -> 7690). This committed entry IS the re-anchor AC6 exists to force.",
+      "attribution": {
+        "embeddedInterpreterLines": "-2 = plugin/scripts/quay-init.sh effective code lines 1009 -> 1007. The fresh-install heredoc's `board: \"native\"` + `gates: []` (2 code lines) became `board: native` + `gates: [\"acceptance\"]` (2 code lines, net 0 — the surrounding rewrite is COMMENT lines, which countCodeLines drops, so the prose was free); the two `mkdir -p …` / `echo \"  created: …\"` pairs were then folded onto shared lines (4 code lines -> 2, net -2). The file still execs `node` at a command position (embedded: [node]) and is not on the exception list, so it STAYS IN the axis — the line count moved, not its membership. Residual = 0: the branch's entire tracked *.sh delta vs develop is exactly this one path (git diff --name-status develop HEAD -- '*.sh').",
+        "duplicateCopies": "0 — untouched. This task added no experiments/** mirror and converted no byte-identical pair."
+      }
     }
   ],
-  "embeddedInterpreterLines": 7692,
+  "embeddedInterpreterLines": 7690,
   "duplicateCopies": 0
 }

@@ -115,6 +115,38 @@ export function classifyConfig(configPath: string): ConfigClassification {
 // defaulted, and inventing a constant for it would write a confidently wrong value into a user's
 // config — strictly worse than leaving it out.
 export const LOOP_VERSION_DEFAULTS: Readonly<Record<string, unknown>> = {
+  /**
+   * The provider the loop driver scans (`readLoopParams().board` → the MCP `task_list`/`task_write`
+   * `provider` argument in `plugin/skills/loop-driver/SKILL.md`). A REQUIRED key of the `loop:`
+   * schema (`loop-params.ts` FAIL-CLOSES without it, and `config-validate.ts` rejects a config that
+   * omits it) — so a fresh install that does not write it produces a config that fails
+   * `quay config validate` and a loop-driver that refuses to run.
+   *
+   * A VERSION-LEVEL constant because a fresh workspace enables exactly ONE provider and it is the
+   * reference one: `detectProvider()` is native-only and no CLI/MCP surface exposes a provider
+   * choice at init time. A config that enables a DIFFERENT provider gets `board` bound to that
+   * provider by `generateConfigContent` (which overrides this default with its own `providerId`),
+   * never by a constant written over a disagreement.
+   *
+   * ⛔ Mirror: `plugin/scripts/quay-init.sh`'s fresh-install heredoc writes the same value from its
+   * own literal (shell cannot import this table); `plugin/test/quay-init.test.mjs` pins the two to
+   * each other, so a change here that is not mirrored there is RED.
+   */
+  board: "native",
+  /**
+   * The gate(s) the loop driver runs on each task (`readLoopParams().gates` → the `gate_run`
+   * `gate` argument in `plugin/skills/loop-driver/SKILL.md`). REQUIRED for the same reason as
+   * `board` above.
+   *
+   * `acceptance` is a BUILT-IN gate (`gate/registry.ts`), so it resolves on a workspace whose own
+   * `gates:` section is still the commented-out scaffold — which is exactly the fresh-install state.
+   * That matters twice over: `config-validate.ts` check 6 rejects an unresolved name, and an empty
+   * list would leave the driver with no gate to run (`params.gates[0]` undefined). A project with a
+   * real gate registry overrides this in its own config; the key is only a default, never a policy.
+   *
+   * ⛔ Mirror: same heredoc pin as `board` above.
+   */
+  gates: ["acceptance"],
   /** The branch a task worktree forks from (SPEC-branching-model current ruling: `develop`). */
   fork_baseline: "develop",
   /**
@@ -360,6 +392,22 @@ const GH_TOKEN_REF = "$GITHUB_TOKEN";
 const GH_TOKEN_SHELL_REF = "${GITHUB_TOKEN}";
 
 /**
+ * `LOOP_VERSION_DEFAULTS` as the fresh-install template must emit it — the table verbatim, except
+ * that `board` is bound to THIS config's provider.
+ *
+ * WHY `board` IS THE ONE OVERRIDE: every other entry is a version constant, but `board` must name a
+ * provider the config's own `providers:` map declares — `readLoopParams()` hands it to the loop
+ * driver as the MCP `provider` argument, so a value disagreeing with `providers:` would point the
+ * driver at a provider that does not exist. `providerId` IS that name for this call (`detectProvider()`
+ * is native-only, and no CLI/MCP surface exposes a provider choice at init). ⛔ It is an OVERRIDE,
+ * never a second copy: the table's own `board` stays the value the reconcile fills into a config
+ * written before the key existed, and the two agree for every reachable caller today.
+ */
+function loopDefaultsFor(providerId: string): Array<[string, unknown]> {
+  return Object.entries(LOOP_VERSION_DEFAULTS).map(([k, v]) => [k, k === "board" ? providerId : v]);
+}
+
+/**
  * Pick the provider MCP server launch entry based on the RESOLVED provider
  * path form (gap-init-scaffolds-mcp-entry-to-raw-ts-fails-on-installed-copy).
  *
@@ -525,8 +573,12 @@ export function generateConfigContent(opts: { providerId: string; providerPath: 
     "#       probe: <name>           (DIR-056) probe-spec name",
     "#",
     "loop:",
-    "  board: \"" + providerId + "\"",
-    "  gates: []",
+    // EVERY default in this section — `board` and `gates` included — is EMITTED FROM THE SAME TABLE
+    // the reconcile fills from (`LOOP_VERSION_DEFAULTS`) rather than re-typed here. Two hand-kept
+    // copies of one list is the defect this whole change exists to remove: a fresh workspace must not
+    // be born one reconcile behind, which is exactly what a template that forgets a key the reconcile
+    // knows about produces. It is also what a template that writes a key the RECONCILE then
+    // DUPLICATES produces — so neither key is spelled out literally below.
     // The version-level defaults, EMITTED FROM THE SAME TABLE the reconcile fills from
     // (`LOOP_VERSION_DEFAULTS`) rather than re-typed here. Two hand-kept copies of one list is the
     // defect this whole change exists to remove: a fresh workspace must not be born one reconcile
@@ -534,7 +586,7 @@ export function generateConfigContent(opts: { providerId: string; providerPath: 
     // `loopDefaultLine` (not `String(v)`) so a LIST value emits a real YAML flow sequence —
     // `String(["a"])` is `"a"`, which parses back as the scalar `a` and silently turns a list into a
     // string (the same class as the "a value that looks like a declaration but is not one" defect).
-    ...Object.entries(LOOP_VERSION_DEFAULTS).map(([k, v]) => `  ${k}: ${versionDefaultLine(v)}`),
+    ...loopDefaultsFor(providerId).map(([k, v]) => `  ${k}: ${versionDefaultLine(v)}`),
     "  # stop: \"once\"                # uncomment and set your preferred stop policy",
     "  # policy: \"ready-first\"        # uncomment to customize task selection",
     "  # execution: \"dispatched\"      # uncomment to use inline builds",

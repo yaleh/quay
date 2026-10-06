@@ -1559,11 +1559,6 @@ providers:
       QUAY_NATIVE_META_DIR: "${WORKSPACE_ROOT}/meta"
 loop:
   repo_root: ${REPO_ROOT}
-  # The board (which provider to scan) and gates the loop driver reads. Both are REQUIRED by the
-  # official config validator and by loop-params.ts: a fresh install that omitted them was rejected
-  # the moment the user ran the documented verify command (the assertion this release gate runs).
-  board: "native"
-  gates: []
   # quay's mechanical fan-in runs this project's test entrypoint with its own value-taking flags
   # (--buckets / --root / --state-dir / --runner / --log-file / --run-id, plus --test-concurrency=N).
   # If you ship scripts/test.sh, it MUST consume such a flag together with its VALUE (shift 2) and
@@ -1574,6 +1569,17 @@ loop:
   test_command: ${TEST_COMMAND}
   tmux_session: ${TMUX_SESSION:-null}
   worktree_root: ${WORKTREE_ROOT}
+  # The provider the loop driver scans, and the gate(s) it runs on each task: the loop-driver skill
+  # reads them as the MCP task_list "provider" and the gate_run "gate". BOTH ARE REQUIRED — the
+  # config validate command rejects a "loop:" section without them, and readLoopParams
+  # (packages/quay/src/loop-params.ts) FAIL-CLOSES, so a config that omits them validates red and
+  # leaves the driver unable to run. "acceptance" is a BUILT-IN gate (gate/registry.ts), so it
+  # resolves on a workspace whose own "gates:" section is still the commented-out scaffold — the
+  # fresh-install state. Version-level defaults: the shipped reconcile (quay init --reconcile)
+  # fills the SAME two values (packages/quay/src/init.ts LOOP_VERSION_DEFAULTS), and
+  # plugin/test/quay-init.test.mjs pins this mirror to that table.
+  board: native
+  gates: ["acceptance"]
   # The doc/code split the mechanical fan-in uses to decide whether a task's delta may skip the full
   # suite: listed path prefixes are DOC, everything else is CODE (fail-closed). This default names only
   # the surfaces quay itself writes, so ADD your own docs / telemetry directories here. It decides only
@@ -2113,10 +2119,12 @@ fi
 
 write_config
 write_profiles_template
-mkdir -p "$WORKSPACE_ROOT/tasks"
-echo "  created: tasks/"
-mkdir -p "$WORKSPACE_ROOT/goals"
-echo "  created: goals/"
+# ⛔ Each mkdir SHARES ITS LINE with the report echo on purpose — the same census-charged-file
+# discipline `write_config`'s own header records: quay-init.sh's code-line count ratchets
+# DOWNWARD-ONLY, and the `loop.board`/`loop.gates` defaults the fresh-install heredoc must now carry
+# were paid for here rather than by raising the baseline. Do NOT split them back onto their own lines.
+mkdir -p "$WORKSPACE_ROOT/tasks"; echo "  created: tasks/"
+mkdir -p "$WORKSPACE_ROOT/goals"; echo "  created: goals/"
 ensure_gitignore
 ensure_runtime_artifacts_gitignore
 write_template "$PLUGIN_ROOT/.claude/launch.settings.json" "$WORKSPACE_ROOT/.claude/launch.settings.json" "launch template"
