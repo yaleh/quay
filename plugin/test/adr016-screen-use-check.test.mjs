@@ -12,8 +12,9 @@
 //
 // path→content (gap-b5-input-shape-path-to-content): the JUDGMENT logic is tested as PURE functions
 // over string content (detectFileViolations / detectTickDocViolations / stripShellComments /
-// judgeBand) — ZERO spawn, ZERO mkdtemp. The only fs reads are of COMMITTED files (the real ADR
-// doc + the real repo scan for the band), never a temp dir and never a subprocess. 负控制 (AC2):
+// judgeBand) — ZERO spawn, ZERO bare mkdtemp. The fs reads are of COMMITTED files (the real ADR doc
+// + the real repo scan for the band) plus ONE synthetic scan-surface tree built through the shared
+// makeTmpDir helper, which registers its own per-file after() cleanup — never a subprocess. 负控制 (AC2):
 // commenting out any judgment branch below (e.g. the `if (CAPTURE_PANE_RE.test(line))` same-command
 // branch, or the taint seeding loop) makes the corresponding RED test fail — the tests pin the
 // judgment, not the shell.
@@ -36,6 +37,7 @@ import {
   judgeScreenHashScan,
 } from "../scripts/adr016-screen-use-check.ts";
 import { driverResultToExit } from "../scripts/checker-io.ts";
+import { makeTmpDir } from "./helpers/tmp-workspace.mjs";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const repoRoot = path.resolve(__dirname, "../..");
@@ -126,6 +128,28 @@ test("AC3: the gitignored npm-pack staging mirror packages/quay/plugin/ is NOT p
   assert.equal(isGeneratedMirrorPath("plugin/scripts/drivable-workspace-check.sh"), false);
   assert.equal(isGeneratedMirrorPath("packages/quay/plugin-snapshot/x.sh"), false);
   assert.equal(isGeneratedMirrorPath("packages/quay/plugin"), false);
+});
+
+test("scan surface: gitignored repo-root tmp/ runtime scratch is NOT scanned — the sibling selftests' fixture COPIES of real plugin/scripts/*.sh live there and race their own cleanup", () => {
+  // Reproduces the shape that reddened fan-in twice: run-identity.ts / stage-receipt.ts /
+  // workflow-journal.ts each mkdtemp a fixture under <cwd>/tmp/ and copy the real
+  // plugin/scripts/gate-script-lib.sh into it. A whole-repo walk that descends into tmp/ lists
+  // `tmp/<selftest-XXXX>/plugin/scripts/gate-script-lib.sh` — not repo source — and when that
+  // fixture's rm lands between the walk and the read it becomes a SECOND `unreadable` ENOENT,
+  // failing the "the vanished file must be RETURNED" test for a reason that is not the property
+  // under test. Synthetic root: the real plugin/scripts entry must survive, the tmp/ copy must not.
+  const root = makeTmpDir("adr016-surface-");
+  fs.mkdirSync(path.join(root, "plugin", "scripts"), { recursive: true });
+  fs.writeFileSync(path.join(root, "plugin", "scripts", "real.sh"), "echo real\n");
+  fs.mkdirSync(path.join(root, "tmp", "workflow-journal-selftest-abc", "plugin", "scripts"), { recursive: true });
+  fs.writeFileSync(path.join(root, "tmp", "workflow-journal-selftest-abc", "plugin", "scripts", "gate-script-lib.sh"), "echo fixture\n");
+  const scan = scanForScreenHashViolations(root);
+  assert.deepEqual(
+    scan.files,
+    ["plugin/scripts/real.sh"],
+    "tmp/ is runtime residue, not the repo — scanning it double-counts a fixture copy of a real script",
+  );
+  assert.equal(scan.unreadable.length, 0);
 });
 
 test("walk→read race: a listed .sh that vanishes before its read is SKIPPED and REPORTED, never a crash (npm-pack staging rm -rf's packages/quay/plugin/ mid-suite)", (t) => {

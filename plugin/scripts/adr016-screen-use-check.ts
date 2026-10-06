@@ -83,7 +83,16 @@ const CAPTURE_PANE_RE = /capture-pane/;
  * self-match. milestones/ holds classic-loop worktree archives, not live code. dist/ and dist-sea/
  * are gitignored build outputs (esbuild bundle / SEA sidecar snapshot) whose .sh files are
  * generated copies of plugin/, never live code — scanning them would double-count every pattern
- * the real plugin/ scripts carry (gap-release-sea-bundle-excludes-plugin-tree). */
+ * the real plugin/ scripts carry (gap-release-sea-bundle-excludes-plugin-tree). tmp/ is that same
+ * shape one step earlier: it is the gitignored repo-root RUNTIME scratch (.gitignore: "repo-root
+ * tmp/ is RUNTIME residue, not source"), and three sibling selftests — run-identity.ts,
+ * stage-receipt.ts, workflow-journal.ts — mkdtemp a fixture under it and seed that fixture with a
+ * COPY of the real plugin/scripts/gate-script-lib.sh. A whole-repo walk that descends into tmp/
+ * therefore lists a fixture copy as `tmp/<selftest-XXXX>/plugin/scripts/gate-script-lib.sh`, which
+ * is (a) not repo source and (b) racing that fixture's own rm: the file vanishes between the walk
+ * and the read and surfaces as a SECOND `unreadable` ENOENT, reddening a scan whose own subject is
+ * clean. buildFileIndex (fs-walk.ts) prunes tmp/ for the same reason — this is the un-pruned
+ * sibling (硬规则 5b). The prune drops nothing real: no tracked file lives under any `tmp/` dir. */
 const SKIP_DIRS = new Set([
   ".git",
   "node_modules",
@@ -92,6 +101,7 @@ const SKIP_DIRS = new Set([
   "checker-mutation-cases",
   "milestones",
   "worktrees",
+  "tmp",
 ]);
 
 /** Gitignored trees that MIRROR a tree this scan already walks. These cannot be pruned via
