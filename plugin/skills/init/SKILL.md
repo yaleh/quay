@@ -234,7 +234,7 @@ is deliberate rather than lax.
 
 These are **version-level defaults**, so they live in one table — `LOOP_VERSION_DEFAULTS` in
 `packages/quay/src/init.ts` — which the fresh-install template emits and the `--reconcile` fill reads.
-The shell writer (`plugin/scripts/quay-init.sh`'s fresh-install heredoc) cannot import TypeScript and
+The shell writer (`quay-init.sh`'s fresh-install heredoc) cannot import TypeScript and
 therefore mirrors the same two values; `packages/quay/test/init.test.mjs` pins the mirror to the table,
 so a future default change that is not made in both places is RED rather than silently divergent.
 
