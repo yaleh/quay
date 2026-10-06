@@ -2,7 +2,7 @@
 id: gap-config-validate-requires-mcp-entry-contradicts-native-default-resolver
 title: 0.16.0 init 不再写 native 的 path/mcp_entry，但 config validate 与 MCP
   config_validate 仍把 mcp_entry 当必填——官方 init 后立即 validate 失败（两套裁判分叉）
-status: todo
+status: ready
 labels:
   - gap
   - defect
