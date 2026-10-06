@@ -402,7 +402,7 @@ own `<provider> mcp` separately.
 > `quay-sea-*.tar.gz`/`.zip` any more. The build still works locally
 > (`bash packages/quay/scripts/build-sea.sh` → `packages/quay/dist-sea/quay`); full ruling
 > text, the two-binary rationale, and the verification script are documented once, at the
-> repo root: [`README.md` § Distribution: single-file executables (SEA)](../../README.md#distribution-single-file-executables-sea-no-longer-published).
+> repo root: [`README.md` § Distribution: single-file executables (SEA)](../../README.md#distribution-single-file-executables-sea).
 
 ## Running the test suite
 
