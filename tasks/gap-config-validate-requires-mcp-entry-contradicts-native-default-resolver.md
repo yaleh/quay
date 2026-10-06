@@ -157,3 +157,13 @@ EXIT=1
 还原(cp,md5 与备份一致 `4b803ff1c62e729a30416eb65ab37e3d`)后回 `Config valid.` / EXIT=0 ⇒ AC9 的取假判据成立。
 
 **本轮落地前的门**:预合并 `git merge --no-edit develop` 干净(无冲突);scoped 门 `bash scripts/test.sh --for-task <id> --allow-thin` → `tests 286 / pass 286 / fail 0`,EXIT=0;`plugin/test/adr016-screen-use-check.test.mjs` → `19/19`。
+2026-10-06 人工复核：全部 AC 已勾选且 scoped 门 286/286 绿；上两轮 suite-red 真因（adr016-screen-use-check 扫入 tmp/ 夹具）已在 worktree 提交 6649b9b9a 修复，修复后从未再跑过 fan-in suite（orphan worker 退出，非实现缺陷）。退回 ready 让 driver 重新 fan-in。
+## Needs-Human
+
+**执行 2026-10-06T13:35:26.985Z — 停派终止（失败无法归因，⛔ 不再重派）**
+
+- 阻碍原因：exited-not-landed 失败无法归因（基建/契约疑似，非实现缺陷）——停止重派，⛔ 不再拿新会话撞同一堵墙：the exited-not-landed failure could not be attributed in 2 consecutive rounds (bounded to at most one retry; no mechanical fan-in result on the outcome ⇒ no suite ran) — infra/contract suspected, not an implementable defect (parser attributed no failing file (failure-line count unavailable on this judgment)); stopping instead of spending another worker session
+
+- 失败步/判词：adopted orphan worker exited (exit code unobservable) — task status=ready (not done) and leftover worktree task/gap-config-validate-requires-mcp-entry-contradicts-native-default-resolver still present
+
+- run_id：wk-prod-anchor
