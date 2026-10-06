@@ -54,6 +54,12 @@ import { parseServiceList, readServiceState, writeServiceState } from "../serve.
 // consumers. ⛔ Never re-declare them here.
 import { ALL_SERVICE_NAMES, DRIVER_SERVICE_KINDS, HOSTED_SERVICE_NAMES } from "./driver-vocab.ts";
 import { runDriver } from "./driver.ts";
+// The host's log routing is SINGLE-SOURCED (gap-server-host-spawn-discards-stdio-while-start-drivers-
+// logs-to-serve-log): this file and plugin/scripts/start-drivers.ts are the two spawn sites of the
+// SAME host, and they used to disagree — `startServe` appended to `.quay/serve.log`, `spawnHost`
+// used `stdio: "ignore"`, so a host started via `quay server start/add/restart` left no cause
+// anywhere. ⛔ One implementation, not two copies (硬规则 5b).
+import { openServeLog, SERVE_LOG_UNAVAILABLE } from "../serve-log.ts";
 import type { CliCtx } from "./context.ts";
 
 /** In-memory ceiling for the spawned serve host (2026-09-17 global-OOM remediation).
@@ -484,13 +490,39 @@ async function probeHosted(workspaceRoot: string, name: string): Promise<Service
   return name === "control" ? await probeControlService(entry.host, entry.port) : await probeWebService(entry.host, entry.port);
 }
 
-/** Spawn a detached unified host seeded with `initial` as its launch-time service set. */
-function spawnHost(workspaceRoot: string, initial: string[], port: string | undefined, hostFlag: string | undefined): string | null {
+/** Test seams for `spawnHost`. ⛔ Both default to the production behaviour; neither is consulted by
+ *  the `quay server …` verbs. They exist because the spawn path's OWN contract (the host's output
+ *  reaches `.quay/serve.log`) can only be asserted by actually spawning something — a fixture entry
+ *  stands in for `quay serve`, and a warn sink lets the log-unavailable reading be captured instead
+ *  of scrolling past on a real stderr. */
+export interface SpawnHostOverrides {
+  /** CLI entry to spawn, instead of `process.argv[1]`. */
+  entry?: string;
+  /** Sink for the non-fatal "serve log unavailable" warning. Defaults to `process.stderr`. */
+  warn?: (line: string) => void;
+}
+
+/** Spawn a detached unified host seeded with `initial` as its launch-time service set.
+ *
+ *  ⚠️ The host's stdout/stderr go to `.quay/serve.log` — the SAME routing the drivers skill's
+ *  `startServe` uses (`openServeLog`, ONE implementation). Before
+ *  gap-server-host-spawn-discards-stdio-while-start-drivers-logs-to-serve-log this passed
+ *  `stdio: "ignore"`, so a host started here that died left no cause anywhere: a stale
+ *  `.quay/server.json` carrier and nothing else. The log is best-effort BY DESIGN (a host that
+ *  cannot log is still better than no host) but ⛔ never SILENT: an unopenable log is reported on
+ *  `warn`/stderr with the stable `serve-log-unavailable` token (硬规则 3b). */
+export function spawnHost(
+  workspaceRoot: string,
+  initial: string[],
+  port: string | undefined,
+  hostFlag: string | undefined,
+  overrides: SpawnHostOverrides = {},
+): string | null {
   // ⚠️ Resolve to an ABSOLUTE path before spawning: the child runs with cwd=workspaceRoot, so a
   // relative argv[1] (the normal `node packages/quay/bin/quay.ts server start` invocation) would
   // resolve against the WRONG directory and the child would die instantly — which would then read
   // as "the host never came up", i.e. a locating bug masquerading as a server failure.
-  const raw = process.argv[1];
+  const raw = overrides.entry ?? process.argv[1];
   const entry = raw ? path.resolve(raw) : "";
   if (!entry || !fs.existsSync(entry)) return `cannot locate the CLI entry to spawn (process.argv[1]=${JSON.stringify(raw)})`;
   // The dev tree entry is a `.ts` file (needs the strip-types flag); the shipped bundle is `.js`
@@ -506,16 +538,27 @@ function spawnHost(workspaceRoot: string, initial: string[], port: string | unde
   const args = ["--no-warnings", ...stripTypes, entry, "serve",
     ...(hostFlag !== undefined && hostFlag !== "" ? ["--host", hostFlag] : []),
     ...(port !== undefined && port !== "" ? ["--port", port] : [])];
+  const log = openServeLog(workspaceRoot);
+  if (log.unavailable) {
+    const warn = overrides.warn ?? ((line: string) => process.stderr.write(line));
+    warn(
+      `${SERVE_LOG_UNAVAILABLE}: cannot open ${log.path} (${log.reason}) — the host's stdout/stderr ` +
+        `will be discarded, so a later death of this host will have no readable cause\n`,
+    );
+  }
   const child = spawn(process.execPath, args, {
     cwd: workspaceRoot,
     detached: true,
-    stdio: "ignore",
+    stdio: log.stdio,
     env: {
       ...process.env,
       QUAY_SERVER_SERVICES: initial.join(","),
       NODE_OPTIONS: withServeHeapCap(process.env.NODE_OPTIONS),
     },
   });
+  // The child holds its own dup of the fd; release the parent's copy now (⛔ after spawn, never
+  // before — see openServeLog's `close()` contract).
+  log.close();
   child.unref();
   return null;
 }

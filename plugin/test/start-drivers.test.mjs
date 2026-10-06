@@ -492,6 +492,31 @@ test("full flow — run#1 starts drivers + serve; run#2 SPAWNS AGAIN and is refu
   }
 });
 
+// gap-server-host-spawn-discards-stdio-while-start-drivers-logs-to-serve-log — the SIBLING half of
+// the same contract. This script always logged; what it did NOT do was report when it could not.
+test("serve-log-unavailable — an unopenable `.quay/serve.log` is REPORTED, and the host still starts", async () => {
+  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "sdr-nolog-"));
+  try {
+    const root = makeWorkspaceRoot(tmp);
+    // A DIRECTORY where the log file belongs: `open(path, "a")` fails with EISDIR, so the shared
+    // helper must fall back to /dev/null — and SAY SO.
+    fs.mkdirSync(path.join(root, ".quay", "serve.log"), { recursive: true });
+    const fake = writeFakeQuay(tmp);
+    const log = path.join(tmp, "log.jsonl");
+    const stateFile = path.join(tmp, "state.json");
+    const r = runScript(["--cli", fake, "--root", root, "--host", "127.0.0.1", "--serve-timeout", "15000", "--json"], {
+      env: { FAKE_QUAY_LOG: log, FAKE_QUAY_STATE: stateFile, FAKE_QUAY_ROOT: root },
+    });
+    assert.match(r.stderr, /serve-log-unavailable/, "the degradation is NAMED — ⛔ before this it fell back to /dev/null in silence (硬規則 3b)");
+    assert.match(r.stderr, /serve\.log/, "…and names the file an operator must fix");
+    assert.equal(r.status, 0, `the host still started despite the unloggable file:\n${r.stdout}\n${r.stderr}`);
+    assert.equal(jsonReport(r.stdout).serve.state, "started", "⛔ 「cannot write the log」 is not 「cannot start the host」");
+  } finally {
+    reapFakeHost(path.join(tmp, "ws"));
+    fs.rmSync(tmp, { recursive: true, force: true });
+  }
+});
+
 // AC3 (gap-serve-stale-signal-has-no-consumer) — the END-TO-END half: a live-but-STALE host must
 // actually be REPLACED. Before that task the script saw "reachable" and skipped, leaving the pre-fix
 // process serving forever (2026-08-23: 8.5h; 2026-09-14: 3h+, AC-179 oscillating 6/20) — every

@@ -29,6 +29,12 @@ import path from "node:path";
 import fs from "node:fs";
 import os from "node:os";
 import { QUAY_CLI, QUAY_NATIVE_CLI } from "./helpers/cli-entry.mjs";
+// The host-spawn seam itself. `spawnHost` is the ONE place `quay server start/add/restart` starts a
+// host, and its log contract (`gap-server-host-spawn-discards-stdio-while-start-drivers-logs-to-
+// serve-log`) can only be asserted by REALLY spawning something — the `entry` override lets a
+// fixture stand in for `quay serve` without faking the spawn (硬规则 4 推论三: a fixture-only
+// assertion proves "can produce", not "produced").
+import { spawnHost } from "../src/cli/server.ts";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const nativeProviderDir = path.join(__dirname, "..", "..", "quay-native", "bin");
@@ -240,4 +246,87 @@ test("AC-256 — `restart` is advertised in the verb list and the help surface (
   assert.equal(r.code, 0, `\`quay server --help\` exits 0 (stderr: ${r.stderr})`);
   assert.match(r.stdout, /quay server restart --only/, "the usage line advertises `restart --only`");
   assert.match(r.stdout, /started \| already-running \| restarted \| stopped/, "and the --json outcome vocabulary documents `restarted` alongside the other five");
+});
+
+// ── the host's LOG ROUTING (gap-server-host-spawn-discards-stdio-while-start-drivers-logs-to-… ) ──
+//
+// WHY THIS PAIR EXISTS: `quay server start/add/restart` spawns a host through `spawnHost`, while the
+// drivers skill spawns the SAME host through `start-drivers.ts:startServe`. They disagreed about
+// where that host's stdout/stderr goes — `startServe` appended to `.quay/serve.log`, `spawnHost`
+// passed `stdio: "ignore"` — so a host that died on the `server` path left the reason NOWHERE (a
+// stale `.quay/server.json` carrier and no log line anywhere). These two tests pin the contract from
+// both sides: the bytes really land (test 1), and the failure to open the log is REPORTED rather
+// than silently degraded (test 2, 硬规则 3b).
+
+/** A stand-in for the real serve host: it records that it RAN, writes one line to each of stderr and
+ *  stdout, then exits. That is the whole contract these tests need — the real host's own banner
+ *  (`quay serve: listening on …`) is what the production-carrier criterion reads. */
+function writeHostFixture(dir) {
+  const marker = path.join(dir, "host-fixture-ran.txt");
+  const fixture = path.join(dir, "host-fixture.mjs");
+  fs.writeFileSync(
+    fixture,
+    [
+      'import fs from "node:fs";',
+      `fs.writeFileSync(${JSON.stringify(marker)}, "ran\\n");`,
+      'process.stderr.write("host-fixture: stderr line\\n");',
+      'process.stdout.write("host-fixture: stdout line\\n");',
+      "setTimeout(() => process.exit(0), 30);",
+      "",
+    ].join("\n"),
+  );
+  return { fixture, marker };
+}
+
+async function waitForFileText(file, needle, timeoutMs = 15000) {
+  const deadline = Date.now() + timeoutMs;
+  for (;;) {
+    try {
+      const text = fs.readFileSync(file, "utf8");
+      if (text.includes(needle)) return text;
+    } catch {
+      /* not there yet (or not readable yet) — retry */
+    }
+    if (Date.now() > deadline) return null;
+    await new Promise((r) => setTimeout(r, 50));
+  }
+}
+
+test("spawnHost — the host's stdout/stderr reach `.quay/serve.log` through a REAL spawn (⛔ not `stdio: \"ignore\"`)", async (t) => {
+  const ws = makeWorkspace("serve-log-routing");
+  t.after(() => fs.rmSync(ws, { recursive: true, force: true }));
+  const { fixture, marker } = writeHostFixture(ws);
+
+  const spawnErr = spawnHost(ws, ["web"], undefined, undefined, { entry: fixture });
+  assert.equal(spawnErr, null, `spawnHost reports no locating error (got ${JSON.stringify(spawnErr)})`);
+
+  const text = await waitForFileText(path.join(ws, ".quay", "serve.log"), "host-fixture: stderr line");
+  assert.ok(
+    text,
+    "the fixture host's STDERR reached .quay/serve.log — before this fix `spawnHost` passed stdio:\"ignore\" and the bytes went nowhere",
+  );
+  assert.match(text, /host-fixture: stdout line/, "STDOUT lands in the same file — the routing is one stdio pair, not a stderr-only special case");
+  assert.ok(fs.existsSync(marker), "the fixture really executed (the log reading above is a reading of a spawn that happened)");
+});
+
+test("spawnHost — an unopenable `.quay/serve.log` is REPORTED (`serve-log-unavailable`) and the host still spawns", async (t) => {
+  const ws = makeWorkspace("serve-log-unavailable");
+  t.after(() => fs.rmSync(ws, { recursive: true, force: true }));
+  // A DIRECTORY where the log file belongs: `open(path, "a")` fails with EISDIR. (Hard rule 4 推论三
+  // in reverse: this is a REAL degraded filesystem state, not an injected flag.)
+  fs.mkdirSync(path.join(ws, ".quay", "serve.log"), { recursive: true });
+  const { fixture, marker } = writeHostFixture(ws);
+
+  const warnings = [];
+  const spawnErr = spawnHost(ws, ["web"], undefined, undefined, { entry: fixture, warn: (line) => warnings.push(line) });
+  assert.equal(spawnErr, null, "the spawn is NOT refused — a host that cannot log is still better than no host");
+  assert.equal(warnings.length, 1, "the degradation is reported exactly once (neither swallowed nor repeated per byte)");
+  assert.match(warnings[0], /serve-log-unavailable/, "…with the stable token — ⛔ silent fallback to /dev/null is the defect, not the fix (硬规则 3b)");
+  assert.match(warnings[0], /serve\.log/, "…naming the file an operator has to fix");
+
+  // 🔴 The load-bearing half: "reported" must not have replaced "spawned". Without this the test
+  // would pass for an implementation that warned and then did nothing.
+  const deadline = Date.now() + 15000;
+  while (!fs.existsSync(marker) && Date.now() < deadline) await new Promise((r) => setTimeout(r, 50));
+  assert.ok(fs.existsSync(marker), "the host was REALLY spawned despite the unopenable log");
 });
