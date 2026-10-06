@@ -3,7 +3,7 @@ id: gap-loop-tick-docs-pass-claude-plugin-root-to-plugin-scripts-but-it-is-unset
 title: plugin/loop 的 tick 文档让 agent 跑 `--plugin-root
   "$CLAUDE_PLUGIN_ROOT"`，而该变量在普通会话的 Bash 里 UNSET（sibling 任务只修到了
   plugin/workflows/*.js）
-status: todo
+status: ready
 labels:
   - gap
   - priority:p2
