@@ -465,14 +465,21 @@ test("AC4: config-validate.ts no longer reads the raw YAML mcp_entry (predicate 
   // The predicate is a PROPERTY ACCESS of the raw YAML field — message/suggestion text (a quoted
   // "mcp_entry") is not one, so it must not be flagged (硬规则 2: by position, not by keyword).
   const RAW_ACCESS = /\.mcp_entry\b|\[\s*["']mcp_entry["']\s*\]/;
-  // ── half 1: prove the predicate CAN match — run it against the PRE-change file (develop's copy).
-  const before = exec("git", ["-C", repoRoot, "show", "develop:packages/quay/src/config-validate.ts"], {
+  // ── half 1: prove the predicate CAN match — run it against the PRE-change file.
+  // ⛔ The revision is PINNED, not `develop`: `develop` is a MOVING ref, and the very change this
+  // test verifies landed on it (6f747e39e) — so `develop` now IS the post-change state, and the
+  // control below could never match again. That made the assertion a develop-wide, ownerless red
+  // (every task's fan-in suite runs this file). A pinned revision is immutable, so the control
+  // stays falsifiable. Same idiom as gap-git-graph-cross-column-edges-drawn-as-fixed-stubs-not-
+  // anchored.test.mjs's `303a94950^:packages/quay/src/serve-git.ts`.
+  const PRE_CHANGE_REV = "6f747e39e^"; // parent of the commit that removed the raw access
+  const before = exec("git", ["-C", repoRoot, "show", `${PRE_CHANGE_REV}:packages/quay/src/config-validate.ts`], {
     encoding: "utf8",
   });
   const beforeHits = before.split("\n").filter((l) => RAW_ACCESS.test(l));
   assert.ok(
     beforeHits.length > 0,
-    "the predicate must match the pre-change file (otherwise the zero-count below proves nothing)",
+    `the predicate must match the pre-change file ${PRE_CHANGE_REV} (otherwise the zero-count below proves nothing)`,
   );
   // ── half 2: it matches NOTHING in the working copy.
   const after = fs.readFileSync(path.join(__dirname, "..", "src", "config-validate.ts"), "utf8");
