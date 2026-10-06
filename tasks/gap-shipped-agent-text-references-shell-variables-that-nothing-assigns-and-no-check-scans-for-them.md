@@ -2,7 +2,7 @@
 id: gap-shipped-agent-text-references-shell-variables-that-nothing-assigns-and-no-check-scans-for-them
 title: 发布版 workflow 与 skill 里发给 agent 的命令引用了无人赋值的大写 shell
   变量，且没有任何机械检查会发现这一类（CLAUDE_PLUGIN_ROOT 只是其中一个）
-status: todo
+status: ready
 labels:
   - gap
   - priority:p2
