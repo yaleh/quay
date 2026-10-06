@@ -1,7 +1,7 @@
 ---
 id: gap-plugin-install-scope-docs-force-project-scope-and-refresh-recipe-uninstalls-user-install
 title: 面向其它项目的安装文档把 project scope 当唯一正路，刷新配方会卸载使用者的 user scope 安装；升级流程无文档
-status: todo
+status: ready
 labels:
   - gap
 parent: null
