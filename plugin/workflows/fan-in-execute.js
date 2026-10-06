@@ -1,7 +1,7 @@
 export const meta = {
   name: 'fan-in-execute',
   description: 'AC78 fan-in 执行 workflow — 无锁段（merge develop → delta 断言面判定 → ts-typecheck → scoped 门+全量+doc）与持锁段（flip done → fan-in-ff-merge.sh）由本脚本生成的 subagent prompt 全权执行；全量 suite 的【等待】由阶段 2 agent 在本回合内多次 <600s Bash 循环承担（gap-subagent-turn-budget-13min-falsified：已证伪「subagent 回合预算硬超时」，真实限制仅 Bash 单次 600s 硬顶 + suite 实测 19+ min）；subagent 在 ff 成功后才返回。A6 只检查「是否走了本 workflow」（判据2 (a)(b)(c)）。gap-adr034-fan-in-lock-holder-supervised：fan-in 锁已收进 driver（worker-driver.ts acquireFanInLock 非分离 holder，随 driver 死自动释放）；本 workflow 不再持该锁（分离 holder + flag 释放协议已废除），ff-race 防护在机械 fan-in（driver）路径由 driver 持锁提供。gap-fan-in-driver-mechanical-orchestration：本 workflow 退役为【机械 fan-in 失败时的语义兜底】（happy-path primary = worker-driver.ts runMechanicalFanIn 机械驱动锁/merge/delta/typecheck/scoped门/suite/ff；机械失败 ⇒ 任务 exited-not-landed、worktree 保留，续做 prompt 以 scriptPath 调本 workflow 兜底）。',
-  whenToUse: 'inner 对某任务执行 fan-in 时（A6）：以 scriptPath 调用本 workflow，args={task, worktree, root, runId, mergeTarget}。禁止 name:（M176 陷阱：同会话第二次 name: 派发可能取旧脚本体）。',
+  whenToUse: 'inner 对某任务执行 fan-in 时（A6）：以 scriptPath 调用本 workflow，args={task, worktree, root, runId, mergeTarget, pluginRoot}。pluginRoot = 插件根绝对路径（= scriptPath 的上两级目录，如 `<plugin>/workflows/fan-in-execute.js` ⇒ `<plugin>`）；发布版缺失/非绝对 ⇒ 稳定错误码 plugin-root-not-provided / plugin-root-invalid（普通会话里插件根环境变量没有值，命令里不能再有该环境变量字面量）。禁止 name:（M176 陷阱：同会话第二次 name: 派发可能取旧脚本体）。',
   phases: [{ title: 'FanIn', detail: '阶段1（预备+启动 detached suite，立即返回）→ 阶段2 agent 回合内循环 <600s Bash 等 suite →（红则 Fix agent 重启动）→ 入账+flip+ff+bracket，ff 成功后才返回' }],
 }
 
@@ -145,6 +145,42 @@ if (!task || !worktree || !root) {
   return { outcome: 'bad-args', message: 'task / worktree / root are required', args }
 }
 
+// ── 插件根 PLUGIN_ROOT（gap-workflow-js-carriers-emit-literal-plugin-root-env-ref-that-is-unset-in-plain-sessions）──
+// 本 workflow 发给 agent 的每条命令里的插件脚本路径都走 ${PLUGIN_ROOT}【真正的 JS 绑定】，解析出的必须是
+// 【绝对路径】。为什么不再用插件根环境变量字面量：Workflow 沙箱没有这个绑定（0.14.0 因此加载即
+// ReferenceError）；0.15.0+ 把它折成惰性文本后加载通过，但发给 agent 的命令里仍是那个字面量 —— 而该变量
+// 只在 SKILL 文本替换 / hooks / MCP 配置里有值，普通会话的 Bash（及其 subagent）里是空的（2026-10-06 实测
+// echo "${…:-UNSET}" ⇒ UNSET）⇒ 命令里的路径展开成空串、退化成 /scripts/dist/…，到运行期才失败且与
+// 「文件不存在」同形（硬规则 3b）。⇒ 由调用方经 args.pluginRoot 传【绝对插件根】（= scriptPath 的上两级
+// 目录），脚本里定义为真 JS 绑定。缺失 ⇒ 稳定错误码 plugin-root-not-provided（⛔ 绝不悄悄展开成空串）；
+// 非绝对路径 ⇒ plugin-root-invalid。目录里没有 scripts/dist / scripts/*.ts 的「目录不对」由阶段 1 的
+// entry preflight 机械判定（脚本层零 I/O，见本文件 :84-86）。
+// 开发树形态（workflow 直接在仓库 plugin/workflows/ 下运行）的缺省值 = <worktree>/plugin —— 下面那行的
+// 【常量名】就是 plugin-dist 构建的锚点（DEV_PLUGIN_ROOT_DEFAULT_RE），发布版把它清空：消费项目没有
+// worktree 相对的 plugin 树，缺 pluginRoot 必须硬失败而不是解析出一个错路径。
+const DEV_PLUGIN_ROOT_DEFAULT = `${worktree}/plugin`
+const PLUGIN_ROOT = (() => {
+  const provided = typeof A.pluginRoot === 'string' ? A.pluginRoot.trim() : ''
+  return provided || DEV_PLUGIN_ROOT_DEFAULT
+})()
+if (!PLUGIN_ROOT) {
+  return {
+    outcome: 'plugin-root-not-provided',
+    message:
+      'args.pluginRoot 缺失：普通会话里插件根环境变量没有值，插件根必须由调用方传入。' +
+      '调用形如 Workflow({scriptPath: "<…>/workflows/fan-in-execute.js", args: {…, pluginRoot: "<scriptPath 的上两级目录>"}})。' +
+      '⛔ 绝不静默展开成空串。',
+    task,
+  }
+}
+if (!PLUGIN_ROOT.startsWith('/')) {
+  return {
+    outcome: 'plugin-root-invalid',
+    message: `args.pluginRoot 必须是绝对路径（收到 ${JSON.stringify(A.pluginRoot)}）：相对路径无法命名插件根，其 scripts/dist 引用会退化成不可解析路径。`,
+    task,
+  }
+}
+
 // ── 跨 relaunch 锁持有者卡死/失联检测（gap-suite-lock-holder-stuck-detection AC1/AC2）──────────────
 // relaunch 前读上一轮 pidfile（`pid started_ms`，SUITE_LAUNCH/ISOLATE_LAUNCH 的 wrapper 自写）。
 // relaunch 只在上一轮 suite 已 red / 静默死亡 / ff-retry 后发生 ⇒ 上一轮【应已死亡】；若 pid 仍
@@ -208,7 +244,7 @@ printf 'full_suite_ran=true\\nskip_reason=\\nstart_iso=%s\\nstart_ms=%s\\nsuite_
 # refresh-worktree-quay.sh 从 main checkout 拷入的陈旧/缺失 .quay/tmux-leak-scan.snapshot（陈旧/缺失快照
 # ⇒ suite 收尾 --check fail-closed「no before-run snapshot」RED 的成因）。fail-open（--check 本身
 # fail-closed 兜底）。
-bash ${worktree}/plugin/scripts/tmux-leak-scan.sh --snapshot ${worktree} >/dev/null 2>&1 || true
+bash ${PLUGIN_ROOT}/scripts/tmux-leak-scan.sh --snapshot ${worktree} >/dev/null 2>&1 || true
 # GNU time 捕获 CPU（判据3 的 cpu_time_s）；GNU time 不可用 ⇒ 保持 null + not-wired（AC6，绝不写 0）。
 # gap-suite-wait-bash-stale-pid-poll 修正（生产实测 2026-08-21，负控制 3 行确认）：$! 是 setsid 父进程 PID——
 # setsid 检测到调用方是进程组组长即 fork，父进程立即退出（负控制实测 $! 恒 DEAD、wrapper $$ 恒 ALIVE）
@@ -243,7 +279,7 @@ rm -f "$suite_pid_file"
 # the non-atomic shape: 1/56 fan-in suite logs overall, 3/18 in the 09-12 window. A leftover "$N.tmp" is
 # harmless and needs no cleanup: nothing ever opens a .tmp path, and '> "$N.tmp"' truncates before
 # every rename. Reverting this to the single-redirect shape re-reds fan-in-execute-paths-s12's AC3 test.
-setsid bash -c 'printf "%s %s\\n" "$$" "$(date +%s%3N)" > "$5.tmp" && mv -f "$5.tmp" "$5"; cd "$1" && { if command -v /usr/bin/time >/dev/null 2>&1; then /usr/bin/time -o "$2" -f "%U %S" node --no-warnings --experimental-strip-types plugin/scripts/full-suite-runner.ts --buckets ${task} --root "$1" --state-dir "${root}/.quay" --runner inner --log-file "$3"; else node --no-warnings --experimental-strip-types plugin/scripts/full-suite-runner.ts --buckets ${task} --root "$1" --state-dir "${root}/.quay" --runner inner --log-file "$3"; fi; } >> "$3" 2>&1; rc=$?; printf "exit=%s\\nend_ms=%s\\nend_iso=%s\\n" "$rc" "$(date +%s%3N)" "$(date -u +%Y-%m-%dT%H:%M:%S.%3NZ)" > "$4.tmp" && mv -f "$4.tmp" "$4"' _ "${worktree}" "$suite_time_file" "$suite_log_file" "$suite_exit_marker" "$suite_pid_file" & disown
+setsid bash -c 'printf "%s %s\\n" "$$" "$(date +%s%3N)" > "$5.tmp" && mv -f "$5.tmp" "$5"; cd "$1" && { if command -v /usr/bin/time >/dev/null 2>&1; then /usr/bin/time -o "$2" -f "%U %S" node --no-warnings --experimental-strip-types ${PLUGIN_ROOT}/scripts/full-suite-runner.ts --buckets ${task} --root "$1" --state-dir "${root}/.quay" --runner inner --log-file "$3"; else node --no-warnings --experimental-strip-types ${PLUGIN_ROOT}/scripts/full-suite-runner.ts --buckets ${task} --root "$1" --state-dir "${root}/.quay" --runner inner --log-file "$3"; fi; } >> "$3" 2>&1; rc=$?; printf "exit=%s\\nend_ms=%s\\nend_iso=%s\\n" "$rc" "$(date +%s%3N)" "$(date -u +%Y-%m-%dT%H:%M:%S.%3NZ)" > "$4.tmp" && mv -f "$4.tmp" "$4"' _ "${worktree}" "$suite_time_file" "$suite_log_file" "$suite_exit_marker" "$suite_pid_file" & disown
 suite_pid=""
 for _ in 1 2 3 4 5 6 7 8 9 10 11 12 13 14 15; do
   if [ -s "$suite_pid_file" ]; then suite_pid=$(cut -d' ' -f1 "$suite_pid_file" 2>/dev/null); break; fi
@@ -328,10 +364,10 @@ fix_scope_isolate="/tmp/fan-in-scope-isolate-${task}.files"
 fix_scope_defer="/tmp/fan-in-scope-defer-${task}.json"
 rm -f "$fix_scope_isolate"
 fix_scope_out=$(node --no-warnings --experimental-strip-types --input-type=module -e 'import fs from "node:fs";
-import { parseTouches, matchGlob, normalizePath } from "${worktree}/plugin/scripts/touches-orthogonality-check.ts";
-import { scanFamily, kindForFile } from "${worktree}/plugin/scripts/known-load-sensitive.ts";
-import { TMUX_LEAK_FAIL_RE } from "${worktree}/plugin/scripts/tmux-leak-fail-re.ts";
-import { readCarrierPerFile, groupByFile, baselineOf, classifyFailure } from "${worktree}/plugin/scripts/perfile-failure-rate.ts";
+import { parseTouches, matchGlob, normalizePath } from "${PLUGIN_ROOT}/scripts/touches-orthogonality-check.ts";
+import { scanFamily, kindForFile } from "${PLUGIN_ROOT}/scripts/known-load-sensitive.ts";
+import { TMUX_LEAK_FAIL_RE } from "${PLUGIN_ROOT}/scripts/tmux-leak-fail-re.ts";
+import { readCarrierPerFile, groupByFile, baselineOf, classifyFailure } from "${PLUGIN_ROOT}/scripts/perfile-failure-rate.ts";
 const taskFile = process.argv[1]; const wt = process.argv[2]; const logFile = process.argv[3]; const releaseLedger = process.argv[4]; const isolateFile = process.argv[5];
 const livelockRounds = Number(process.argv[6] || 3);
 const deferLedger = process.argv[7]; const deferLivelockRounds = Number(process.argv[8] || 3);
@@ -506,7 +542,7 @@ printf 'cpu_s=%s\\ncpu_source=%s\\ncpu_user_s=%s\\ncpu_sys_s=%s\\nend_iso=%s\\ne
 # failed round (previously only the green path wrote). Best-effort: a write failure is WARNed, never blocks
 # the suite-red verdict (the Fix agent still gets dispatched by the主循环).
 if [ "$full_suite_ran" = "true" ] && [ "$suite_exit" != "0" ]; then
-  if ! node --experimental-strip-types ${worktree}/plugin/scripts/pre-verified-round-record.ts \
+  if ! node --experimental-strip-types ${PLUGIN_ROOT}/scripts/pre-verified-round-record.ts \
     --task-id ${task} --run-id ${runId} --started-at "$start_iso" --duration-ms "$wall_ms" \
     --lane-count "$lane_count" --load "$load" --commit "$suite_head" --preverified 0 --state red \
     --root ${worktree} \
@@ -539,6 +575,21 @@ while (finalResult == null) {
 - 主检出（develop / merge target 所在的 checkout，fan-in-ff-merge.sh 的 --root）：${root}
 - merge target（ff 目标分支）：${mergeTarget}
 - runId：${runId ? runId : '（无，ff 时省略 --run-id）'}
+- 插件根（本 workflow 脚本层零 I/O，插件脚本一律从这里解析）：${PLUGIN_ROOT}
+
+【entry preflight — 插件根可解析性（gap-workflow-js-carriers-emit-literal-plugin-root-env-ref-that-is-unset-in-plain-sessions）】
+# PLUGIN_ROOT 由调用方经 args.pluginRoot 传入，脚本层已校验「存在且为绝对路径」。脚本层零 I/O（见本文件
+# 顶部「脚本层能力边界」）——「这个目录到底是不是一个 quay 插件根」只能由本步（有 Bash）机械判定：发布版
+# 有 <PLUGIN_ROOT>/scripts/dist，开发树有 <PLUGIN_ROOT>/scripts/*.ts，二者至少一种必须存在。
+# ⛔ 读不懂/不适用必须与「合格」可区分（硬规则 3b）：两者都缺 ⇒ 立即返回 { outcome: 'plugin-root-invalid' }，
+#    不执行下面任何步骤（否则命令会退化成不可解析路径，且与「文件不存在」同形）。
+# entry-preflight-block-start
+if [ ! -d "${PLUGIN_ROOT}/scripts/dist" ] && ! ls "${PLUGIN_ROOT}"/scripts/*.ts >/dev/null 2>&1; then
+  echo "PLUGIN_ROOT_INVALID: ${PLUGIN_ROOT} 下既无 scripts/dist 也无 scripts/*.ts —— 不是 quay 插件根" >&2
+  exit 9
+fi
+echo "PLUGIN_ROOT_OK=${PLUGIN_ROOT}"
+# entry-preflight-block-end
 
 步骤（严格按序；每步都先 cd ${worktree} 或显式用 -C）：
 
@@ -561,7 +612,7 @@ bootstrap_fork=$(git -C ${worktree} merge-base ${mergeTarget} HEAD 2>/dev/null |
 bootstrap_delta=$(git -C ${worktree} diff --name-only "$bootstrap_fork" HEAD 2>/dev/null || true)
 bootstrap_hit=""
 if [ -n "$bootstrap_delta" ]; then
-  bootstrap_hit=$(node --experimental-strip-types ${worktree}/plugin/scripts/select-static-checks-for-touches.ts --bootstrap-orchestration --root ${worktree} $bootstrap_delta 2>/dev/null || echo "__BOOTSTRAP_CLASSIFY_FAILED__")
+  bootstrap_hit=$(node --experimental-strip-types ${PLUGIN_ROOT}/scripts/select-static-checks-for-touches.ts --bootstrap-orchestration --root ${worktree} $bootstrap_delta 2>/dev/null || echo "__BOOTSTRAP_CLASSIFY_FAILED__")
 fi
 if [ -n "$bootstrap_hit" ]; then
   echo "FAN-IN-BOOTSTRAP=hit（本分支修改 fan-in 编排文件：）"
@@ -574,7 +625,7 @@ if [ -n "$bootstrap_hit" ]; then
   # 冲突 ⇒ 脚本 abort 并留干净工作树（step 1 的 merge 会再撞并慢慢解）；脏树/ref 缺失 ⇒ skip（step 1
   # 处理）。幂等：派发侧已合 ⇒ "Already up to date"。脚本从 worktree 解析（本分支自带此模式，先于 land），
   # root 兜底（fork 早于本模式 land 的 worktree 自身跑不了它）。
-  sync_helper="${worktree}/plugin/scripts/select-static-checks-for-touches.ts"
+  sync_helper="${PLUGIN_ROOT}/scripts/select-static-checks-for-touches.ts"
   [ -f "$sync_helper" ] || sync_helper="${root}/plugin/scripts/select-static-checks-for-touches.ts"
   node --experimental-strip-types "$sync_helper" --bootstrap-sync --worktree ${worktree} --merge-target ${mergeTarget} --root ${root} 2>&1 || echo "FAN-IN-BOOTSTRAP-SYNC-FAILED rc=$?"
   # 自举警示（取假一能取假）：同步后若 worktree 与主检出的 fan-in-execute.js 仍不一致 ⇒ 本分支修改了它
@@ -597,7 +648,7 @@ cd ${worktree} && git merge ${mergeTarget}
 # （git diff --name-only ${mergeTarget}...HEAD = fan-in 将要 land 的文件）对照声明 Touches 做事后核对。
 # 越界触碰 / 声明过宽 ⇒ HARD FAIL（非建议）；判定逻辑在 anti-drift-touches-check.ts（本步即其 driver
 # 输入面：--task --worktree --merge-target），不改判定逻辑，只喂实际 diff + 声明 Touches。
-if ! node --experimental-strip-types ${worktree}/plugin/scripts/anti-drift-touches-check.ts --task ${task} --worktree ${worktree} --merge-target ${mergeTarget}; then
+if ! node --experimental-strip-types ${PLUGIN_ROOT}/scripts/anti-drift-touches-check.ts --task ${task} --worktree ${worktree} --merge-target ${mergeTarget}; then
   echo "FATAL: anti-drift-touches HARD FAIL——实际触碰超出声明 Touches（或声明过宽）⇒ 不翻 done、不 ff；不得改 Touches 绕过守卫" >&2
   exit 2
 fi
@@ -619,7 +670,7 @@ delta=$(git -C ${worktree} diff --name-only "$fork" HEAD 2>/dev/null || true)
 # 自举（gap-fan-in-orchestration-bootstrap-self-fix）：classify 脚本与 registry（--root）都从 worktree
 # 解析（非 cwd、非 ${root}）——本任务若修改了 select-static-checks-for-touches.ts / scripts/test.sh 的
 # @static-object 注解，其 fan-in 必须用自己的版本判定（取假二：旧正则判 doc、worktree 版判 code）。
-code_delta=$(node --experimental-strip-types ${worktree}/plugin/scripts/select-static-checks-for-touches.ts --classify-delta --root ${worktree} $delta) || code_delta="__CLASSIFY_FAILED__"
+code_delta=$(node --experimental-strip-types ${PLUGIN_ROOT}/scripts/select-static-checks-for-touches.ts --classify-delta --root ${worktree} $delta) || code_delta="__CLASSIFY_FAILED__"
 # suite 等待（gap-fan-in-turn-budget-suite-timeout / gap-subagent-turn-budget-13min-falsified）：把
 # code_delta 落盘，step 4 的 suite 启动块据此判定（bash 变量不跨 Bash 调用持久）。
 printf '%s' "$code_delta" > /tmp/fan-in-code-delta-${task}.txt
@@ -630,7 +681,7 @@ printf '%s' "$code_delta" > /tmp/fan-in-code-delta-${task}.txt
 把 code_delta 记下来（返回时上报）。
 
 【无锁段 step 3 — ts-typecheck 闸】
-cd ${worktree} && node --experimental-strip-types ${worktree}/plugin/scripts/fan-in-ts-typecheck-gate.ts --task ${task} --worktree ${worktree} --merge-target ${mergeTarget}
+cd ${worktree} && node --experimental-strip-types ${PLUGIN_ROOT}/scripts/fan-in-ts-typecheck-gate.ts --task ${task} --worktree ${worktree} --merge-target ${mergeTarget}
   —— 闸自己判定 Touches 是否含新增/移动 .ts（无则直接 exit 0）。exit 非 0 ⇒ 丢弃 worktree 内未合状态、
      标 needs-human、停止本 tick 合并与派发——不要继续启动 suite、不要 ff。
 
@@ -681,7 +732,8 @@ fi
 —— scoped 门 / doc / suite 启动任一失败 ⇒ 修复并重跑对应项（suite 启动失败指 detached 进程未起）；
    全绿（或已 detached 启动）才返回阶段 1。
 
-返回 { outcome: 'suite-started' | 'suite-skipped' | 'suite-preverified' | 'needs-human' | 'red', suitePid, codeDelta, worktreeHead, note }。
+返回 { outcome: 'suite-started' | 'suite-skipped' | 'suite-preverified' | 'plugin-root-invalid' | 'needs-human' | 'red', suitePid, codeDelta, worktreeHead, note }。
+outcome=plugin-root-invalid 仅当上面的 entry preflight 判定 ${PLUGIN_ROOT} 既无 scripts/dist 也无 scripts/*.ts（不是 quay 插件根）——立即返回，不执行任何步骤。
 outcome=needs-human 仅当冲突解不了 / ts-typecheck 阻断 / scoped 门或 doc 修不到绿（返回前已尽力）。outcome=red = 其它失败。
 suite-started ⇒ 全量 suite 已 detached 启动（脚本控制流将轮询等它，你已返回，不等）。
 suite-skipped ⇒ code_delta 空（doc-only），capture 已写 skip_reason=doc-only-delta。
@@ -703,6 +755,12 @@ codeDelta = step 2 记下的 code_delta。worktreeHead = 当前 worktree HEAD（
   )
   log(`FanIn prep: outcome=${prep.outcome} suitePid=${prep.suitePid ?? '?'} codeDelta=${(prep.codeDelta ?? '').slice(0, 40) || '(empty)'} note=${prep.note ?? ''}`)
 
+  if (prep.outcome === 'plugin-root-invalid') {
+    // The phase-1 entry preflight proved <PLUGIN_ROOT>/scripts/{dist,*.ts} is absent: the caller's
+    // args.pluginRoot is not a quay plugin root. Surface the STABLE code (never a run-time
+    // /scripts/dist/… failure that reads as "file not found" — 硬规则 3b).
+    return { outcome: 'plugin-root-invalid', ffOk: false, task, pluginRoot: PLUGIN_ROOT, message: `args.pluginRoot 不是可解析的 quay 插件根（无 scripts/dist 也无 scripts/*.ts）：${PLUGIN_ROOT}` }
+  }
   if (prep.outcome === 'needs-human' || prep.outcome === 'red') {
     return { outcome: prep.outcome, ffOk: false, task, message: `fan-in prep failed for ${task}: ${prep.note ?? prep.outcome}` }
   }
@@ -762,7 +820,7 @@ if [ -n "${runId}" ]; then
   # ⚠️ 异常路径——事件在 suite-green 时刻写入，字段语义退化为「suite 完成」；派发 brief 已要求 Build
   # 完成时调用 --impl-complete，此路径应只出现在 Build 未遵循派发词约定的异常）。|| true：回退是
   # best-effort，不因漏写拦 fan-in。
-  ic_out=$(node --experimental-strip-types ${worktree}/plugin/scripts/fast-mode-telemetry.ts --impl-complete --taskId ${task} --runId ${runId} --root ${root} 2>&1) || ic_out="\${ic_out:-IMPL-COMPLETE-BACKSTOP-FAILED}"
+  ic_out=$(node --experimental-strip-types ${PLUGIN_ROOT}/scripts/fast-mode-telemetry.ts --impl-complete --taskId ${task} --runId ${runId} --root ${root} 2>&1) || ic_out="\${ic_out:-IMPL-COMPLETE-BACKSTOP-FAILED}"
   case "$ic_out" in
     *"already marked impl-complete"*) echo "IMPL-COMPLETE=build-wrote（幂等跳过——Build 完成时已写）";;
     *"impl-complete event written"*) echo "IMPL-COMPLETE=backstop-wrote（⚠️ Build 未写，异常路径：事件在 suite-green 时刻写入）";;
@@ -784,7 +842,7 @@ if [ ! -f "$suite_capture" ]; then
 fi
 . "$suite_capture"
 if [ -n "$skip_reason" ]; then
-  if ! node --experimental-strip-types ${worktree}/plugin/scripts/per-task-suite-record.ts \
+  if ! node --experimental-strip-types ${PLUGIN_ROOT}/scripts/per-task-suite-record.ts \
     --task-id ${task} --run-id ${runId} --state green --lane-count "$lane_count" \
     --duration-ms "$wall_ms" --started-at "$start_iso" --finished-at "$end_iso" \
     --doc-checked true --doc-check-exit 0 \
@@ -795,7 +853,7 @@ if [ -n "$skip_reason" ]; then
     exit 2
   fi
 else
-  if ! node --experimental-strip-types ${worktree}/plugin/scripts/per-task-suite-record.ts \
+  if ! node --experimental-strip-types ${PLUGIN_ROOT}/scripts/per-task-suite-record.ts \
     --task-id ${task} --run-id ${runId} --state green --lane-count "$lane_count" \
     --duration-ms "$wall_ms" --started-at "$start_iso" --finished-at "$end_iso" \
     --doc-checked true --doc-check-exit 0 \
@@ -828,7 +886,7 @@ cd ${worktree}
 # done 之前、ff 之前）重跑同一驱动——git diff --name-only ${mergeTarget}...HEAD 此刻已含 fix commits，
 # 覆盖分支整体 delta（merge + fix）。判定逻辑与 step 1 同一驱动（anti-drift-touches-check.ts），只增
 # 调用点不改判定（AC3）；正常 fan-in（无 fix commit 或 fix 全在 Touches 内）重跑幂等（AC2）。
-if ! node --experimental-strip-types ${worktree}/plugin/scripts/anti-drift-touches-check.ts --task ${task} --worktree ${worktree} --merge-target ${mergeTarget}; then
+if ! node --experimental-strip-types ${PLUGIN_ROOT}/scripts/anti-drift-touches-check.ts --task ${task} --worktree ${worktree} --merge-target ${mergeTarget}; then
   echo "FATAL: anti-drift land 前重跑 HARD FAIL——实际触碰超出声明 Touches（含 fix-agent 提交引入的文件）⇒ 不翻 done、不 ff；不得改 Touches 绕过守卫" >&2
   exit 2
 fi
@@ -855,7 +913,7 @@ fi
 # AC 完成闸（gap-fan-in-flip-no-ac-completion-check）：翻转前跑 AC47 谓词（countCompletionCheckboxes /
 # isLandedCodeComplete，同源不新造）——AC 未全勾（剩余含非待外部项）或 AC/DoD 段缺失（NOT-EVALUATED，
 # 硬规则 3b：无法评估 ≠ 合格）⇒ 不翻 done。与承重点③ 行形检查并列，两检查都过才翻。
-if ! node --experimental-strip-types ${worktree}/plugin/scripts/fan-in-ac-completion-gate.ts --task ${task} --worktree ${worktree}; then
+if ! node --experimental-strip-types ${PLUGIN_ROOT}/scripts/fan-in-ac-completion-gate.ts --task ${task} --worktree ${worktree}; then
   echo "FATAL: flip 拒绝——tasks/${task}.md AC 完成闸未通过（AC 未全勾或段缺失）⇒ 未翻 done" >&2
   exit 2
 fi
@@ -909,7 +967,7 @@ rm -f "$suite_capture" 2>/dev/null || true
 # 只关【本任务】的 bracket（--taskId ${task} 在 telemetry report 的 inProgress[] 按 taskId 定位 runId）——
 # 绝不 --reconcile 全局扫（判据2 能取假：在飞任务/未 land 任务的 bracket 必须保留）。
 # 幂等：无 open bracket（已闭合/从未 --task-start）⇒ --close-task exit 0，无写入。
-if ! bash ${worktree}/plugin/scripts/closure-lag-check.sh --close-task --taskId ${task} --outcome done --root ${root}; then
+if ! bash ${PLUGIN_ROOT}/scripts/closure-lag-check.sh --close-task --taskId ${task} --outcome done --root ${root}; then
   echo "FATAL: telemetry bracket 闭合失败（${task} ff 已成功但 --close-task 非 0）——landing 完成但 bracket 未闭合（stale bracket 将留到下一轮 reconcile）" >&2
   exit 1
 fi
@@ -932,7 +990,7 @@ fi
 # （硬规则 12：要求一个新前置之前先给出它的发生率——给不出就不作阻塞），且两条路径对同一个失败
 # 给出相反后果。漏记不靠这一步静默：日覆盖率判据 gate-event-coverage-check 会在次日把它报出来
 # （这正是它存在的理由），所以告警 + 可检测 = 该失败不可能与「一切正常」同形。
-if ! node --no-warnings --experimental-strip-types ${worktree}/plugin/scripts/worker-driver.ts --append-complete-gate-event --task ${task} --root ${root} --actor quay-fan-in-workflow; then
+if ! node --no-warnings --experimental-strip-types ${PLUGIN_ROOT}/scripts/worker-driver.ts --append-complete-gate-event --task ${task} --root ${root} --actor quay-fan-in-workflow; then
   echo "WARN: complete GateEvent 补写失败（${task} ff 已成功但事件未落盘）——landing 照常完成；该漏记会由 gate-event-coverage-check 在次日覆盖率判据上报出（⛔ 不在此阻塞 landing，与机械 fan-in 的 best-effort 契约一致）" >&2
 fi
 # complete-gate-event-block-end
@@ -944,7 +1002,7 @@ fi
 
 ff 成功后清理（gap-worktree-remove-orphans-probes：拆除前先扫 worktree 路径下的活 claude-probe 探针 / 挂死 runner 并清理，防止 worktree 先删而子进程孤儿化）：
 cd ${root}
-reaper="${worktree}/plugin/scripts/worktree-process-reaper.ts"
+reaper="${PLUGIN_ROOT}/scripts/worktree-process-reaper.ts"
 [ -f "$reaper" ] || reaper="${root}/plugin/scripts/worktree-process-reaper.ts"
 node --no-warnings --experimental-strip-types "$reaper" --worktree ${worktree} --root ${root} --json >/dev/null 2>&1 || true
 git worktree remove ${worktree} --force && git branch -d task/${task}

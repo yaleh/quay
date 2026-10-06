@@ -84,6 +84,34 @@ if (!WORKSPACE_ROOT) {
   }
 }
 const ROOT = WORKSPACE_ROOT
+
+// ── 插件根 PLUGIN_ROOT（gap-workflow-js-carriers-emit-literal-plugin-root-env-ref-that-is-unset-in-plain-sessions）──
+// 交还给主循环的命令块里的插件脚本路径一律走 ${PLUGIN_ROOT} 这个【真 JS 绑定】（绝对路径），不再用插件根
+// 环境变量字面量：它只在 SKILL 文本替换 / hooks / MCP 配置里有值，普通会话的 Bash 里是空的（2026-10-06
+// 实测），命令里的路径会展开成空串、退化成 /scripts/dist/…（运行期才失败，与「文件不存在」同形，硬规则 3b）。
+// 调用方经 args.pluginRoot 传绝对插件根；缺失/非绝对 ⇒ 与 workspaceRoot 同形的独立取值 { evaluated:false,
+// reason } —— ⛔ 绝不落回硬编码默认值，也绝不 spawn agent（否则读数会对着未知根产出伪读数）。
+// 开发树缺省 = <ROOT>/plugin（本 workflow 是 quay-dev-only）；发布版该常量被 plugin-dist 构建清空。
+const DEV_PLUGIN_ROOT_DEFAULT = `${ROOT}/plugin`
+const PLUGIN_ROOT = (() => {
+  const provided = typeof A.pluginRoot === 'string' ? A.pluginRoot.trim() : ''
+  return provided || DEV_PLUGIN_ROOT_DEFAULT
+})()
+if (!PLUGIN_ROOT) {
+  return {
+    evaluated: false,
+    reason:
+      'plugin-root-not-provided: args.pluginRoot 缺失 —— 普通会话里插件根环境变量没有值，插件根必须由调用方经 args.pluginRoot 传入（= scriptPath 的上两级目录）。⛔ 绝不静默展开成空串。',
+    requested: typeof A.pluginRoot === 'string' ? A.pluginRoot : null,
+  }
+}
+if (!PLUGIN_ROOT.startsWith('/')) {
+  return {
+    evaluated: false,
+    reason: `plugin-root-invalid: args.pluginRoot 必须是绝对路径（收到 ${JSON.stringify(A.pluginRoot)}）：相对路径无法命名插件根，其 scripts/dist 引用会退化成不可解析路径。`,
+    requested: A.pluginRoot,
+  }
+}
 // ⚠️ 2026-08-14 14:3xZ：这里【曾经写死】一个 session id `b8dc91a6-…`，而它在 transcript 存储里
 //    【根本不存在】（find ~/.claude/projects -iname '*b8dc91a6*' ⇒ 0 命中）。审计 agent 每轮拿到坏 id，
 //    靠自己比对 SendMessage 前缀与 git 时间戳才找回真会话——**它足够聪明，所以我们一直没发现**。
@@ -119,7 +147,7 @@ const READ_CMD = String.raw`cd ${ROOT}
 # （落点映射逐条，非抽查——硬规则 5）。要「为什么」去那里读，不要在此复制。
 #
 # 【读数正本，不在此复制】：
-#   A0  node --experimental-strip-types plugin/scripts/quay-session.ts manager-tick-readings
+#   A0  node --experimental-strip-types ${PLUGIN_ROOT}/scripts/quay-session.ts manager-tick-readings
 #       → 三项目 status / resource.*（cpu_some_avg10, load1, node_count, node_dual_read,
 #         mem_available_mb）/ outer.liveness / outer.ticklog / monitor.*
 #   A1  python3 orchestration/manager-anchor-check.py
@@ -270,7 +298,7 @@ const [readings, audit] = await parallel([
 ${READ_CMD}
 
 **第二批：A0 与 A1（正本命令，逐字照跑）**
-- A0：node --experimental-strip-types plugin/scripts/quay-session.ts manager-tick-readings
+- A0：node --experimental-strip-types ${PLUGIN_ROOT}/scripts/quay-session.ts manager-tick-readings
       → 取 三项目 status / resource.（cpu_some_avg10, load1, node_count, node_dual_read, mem_available_mb）
         / outer.liveness / outer.ticklog / monitor.
 - A1：python3 orchestration/manager-anchor-check.py
