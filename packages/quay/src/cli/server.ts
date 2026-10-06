@@ -60,6 +60,11 @@ import { runDriver } from "./driver.ts";
 // used `stdio: "ignore"`, so a host started via `quay server start/add/restart` left no cause
 // anywhere. ⛔ One implementation, not two copies (硬规则 5b).
 import { openServeLog, SERVE_LOG_UNAVAILABLE } from "../serve-log.ts";
+// 宿主**加载版本**读数 —— 与 anchor 的 `driver status --json` 共用**同一份**实现（Core
+// `loaded-version.ts`，`plugin/scripts/driver-runtime.ts` 从同一处 import）。⛔ 这里不再手搓一份
+// 「读 /proc/<pid>/cmdline 取版本」的判据（两份 = 漂移，且内核那份在 linked worktree 里会被重定位到
+// 主检出，读数会反映主检出的代码而不是被测代码）。
+import { serveHostLoadedVersionReading } from "../loaded-version.ts";
 import type { CliCtx } from "./context.ts";
 
 /** In-memory ceiling for the spawned serve host (2026-09-17 global-OOM remediation).
@@ -350,6 +355,13 @@ async function statusCommand({ flags, wantsJson }: CliCtx) {
   // ⛔ 不在 `status`/`not-running` 分支里跳过——那正是最需要看「哪个 kind 不转了」的时刻。
   const drivers = DRIVER_SERVICE_KINDS.map((kind) => driverServiceReport(workspaceRoot, kind));
 
+  // 宿主**加载的**版本 vs **已安装**版本（gap-serve-host-has-no-loaded-version-reading-driver-status-
+  // covers-anchor-only）。对象是 carrier 里那个**宿主 pid**——`quay serve` 宿主才是「正在跑的那个
+  // serve」，⛔ 不是执行本命令的进程（后者是查询者，与「跑着的是哪一版」无关）。
+  // ⛔ 只报，⛔ 不自动重启：`behind` 只给人可读形态加一句 `quay server restart` 的提示，⛔ 不改 exit code
+  // （AC-251 的 exit 契约是 pid 同一性；把版本漂移折进去会让「起来了但版本旧」与「server 不在」同形）。
+  const loadedVersion = serveHostLoadedVersionReading(workspaceRoot, hostPid);
+
   if (wantsJson) {
     process.stdout.write(
       JSON.stringify(
@@ -364,6 +376,21 @@ async function statusCommand({ flags, wantsJson }: CliCtx) {
           startedAt,
           services,
           drivers,
+          // 宿主加载版本读数：四态各自独立——`not-evaluated`（宿主已死 / cmdline 认不出 serve 脚本 /
+          // 推不出版本）⛔ 不与 `current` 同形（硬规则 3b）；`behind` 与 `ahead` 也不同形（源树检出里
+          // serve 跑的是比注册表更旧/更新的一版，并进 `behind` 会报一个方向错的读数）。
+          // ⛔ 不复用 driver status 的 `loaded_kernel` 命名：那里的对象是内核脚本，这里的对象是 serve
+          // 宿主加载的产物脚本；本命令自己的词表用 AC 点名的四个键 + 三个补充分量（一个是路径、一个是
+          // 方向、一个是读不到时的原因）。⛔ 读不到时印 `null`，⛔ 不印空串（空串与「没问题」同形）。
+          loaded_version: loadedVersion.state,
+          loaded: loadedVersion.loaded,
+          installed: loadedVersion.installed,
+          installed_at: loadedVersion.installedAt,
+          installed_source: loadedVersion.installedSource,
+          loaded_script: loadedVersion.loadedKernel,
+          source: loadedVersion.loadedKernelSource,
+          loaded_version_relation: loadedVersion.relation,
+          loaded_version_reason: loadedVersion.reason,
         },
         null,
         2,
@@ -372,6 +399,23 @@ async function statusCommand({ flags, wantsJson }: CliCtx) {
   } else {
     process.stdout.write(`quay server: ${status.toUpperCase()} — ${reason}\n`);
     process.stdout.write(`  workspace ${workspaceRoot}\n`);
+    // 宿主加载版本读数**紧跟头部行**：一个跑着旧版本的宿主必须在读者看到逐服务 alive 之前就先看到它
+    // （`supervisor_stale`/`/health` 的 latestCodeCommitAt 对**装好的产物**恒报 fresh/null——那正是本
+    // 读数存在的原因，见 `serve.ts` 的 `/health` 注释）。整行一个字段串，⛔ 不另起多行。
+    process.stdout.write(
+      `  loaded-version-${loadedVersion.state}: loaded=${loadedVersion.loaded ?? "null"} installed=${loadedVersion.installed ?? "null"}` +
+        `${loadedVersion.installedAt ? ` (installed_at ${loadedVersion.installedAt})` : ""}` +
+        `${loadedVersion.loadedKernel ? ` script=${loadedVersion.loadedKernel}` : ""}` +
+        `${loadedVersion.loadedKernelSource ? ` source=${loadedVersion.loadedKernelSource}` : ""}` +
+        (loadedVersion.state === "behind"
+          ? " — the running server loaded an OLDER build than the installed one: run `quay server restart` to load it"
+          : loadedVersion.state === "ahead"
+            ? " — the running server loaded a NEWER build than the installed one (a source checkout in front of the registry)"
+            : loadedVersion.state === "not-evaluated"
+              ? ` — ${loadedVersion.reason ?? "no reason given"}`
+              : "") +
+        "\n",
+    );
     if (services.length === 0) {
       process.stdout.write(`  (no service rows: the carrier records none)\n`);
     }
