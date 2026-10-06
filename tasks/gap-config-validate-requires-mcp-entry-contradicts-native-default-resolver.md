@@ -2,7 +2,7 @@
 id: gap-config-validate-requires-mcp-entry-contradicts-native-default-resolver
 title: 0.16.0 init 不再写 native 的 path/mcp_entry，但 config validate 与 MCP
   config_validate 仍把 mcp_entry 当必填——官方 init 后立即 validate 失败（两套裁判分叉）
-status: ready
+status: needs-human
 labels:
   - gap
   - defect
@@ -157,3 +157,10 @@ EXIT=1
 还原(cp,md5 与备份一致 `4b803ff1c62e729a30416eb65ab37e3d`)后回 `Config valid.` / EXIT=0 ⇒ AC9 的取假判据成立。
 
 **本轮落地前的门**:预合并 `git merge --no-edit develop` 干净(无冲突);scoped 门 `bash scripts/test.sh --for-task <id> --allow-thin` → `tests 286 / pass 286 / fail 0`,EXIT=0;`plugin/test/adr016-screen-use-check.test.mjs` → `19/19`。
+## Needs-Human
+
+**执行 2026-10-06T13:35:26.985Z — 停派终止（失败无法归因，⛔ 不再重派）**
+
+- 阻碍原因：exited-not-landed 失败无法归因（基建/契约疑似，非实现缺陷）——停止重派，⛔ 不再拿新会话撞同一堵墙：the exited-not-landed failure could not be attributed in 2 consecutive rounds (bounded to at most one retry; no mechanical fan-in result on the outcome ⇒ no suite ran) — infra/contract suspected, not an implementable defect (parser attributed no failing file (failure-line count unavailable on this judgment)); stopping instead of spending another worker session
+- 失败步/判词：adopted orphan worker exited (exit code unobservable) — task status=ready (not done) and leftover worktree task/gap-config-validate-requires-mcp-entry-contradicts-native-default-resolver still present
+- run_id：wk-prod-anchor
