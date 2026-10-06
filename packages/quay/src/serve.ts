@@ -13,7 +13,7 @@ import http, { type Server, type ServerResponse } from "node:http";
 import path from "node:path";
 import fs from "node:fs";
 import { execFileSync } from "node:child_process";
-import { loadConfig, activeProvider } from "./config.ts";
+import { loadConfig, activeProvider, providerMcpEntry } from "./config.ts";
 import { connectProvider, type ProviderClient } from "./provider-client.ts";
 import { resolveProviderEnv } from "./provider-env.ts";
 import { handleAllRoutes, serveIdentity, type ServePageCfg } from "./serve-handlers.ts";
@@ -616,7 +616,7 @@ async function startServerUnderLock(cfg: ReturnType<typeof loadConfig>, { port, 
   fs.mkdirSync(path.dirname(resolvedAccessLogPath), { recursive: true });
   const provider = activeProvider(cfg, undefined);
   const providerDir = path.resolve(cfg.workspaceRoot, provider.path ?? ".");
-  const [command, ...args] = provider.mcp_entry;
+  const [command, ...args] = providerMcpEntry(provider);
 
   const client = await connectProvider({
     command,

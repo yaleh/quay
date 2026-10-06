@@ -44,7 +44,7 @@ steps (each mirrors the python3 invocation it replaced in plugin/scripts/quay-in
   refresh-plugin-link <ws_root> <plugin_root> <dry_run:true|false>
   migrate-mcp-entry   <cfg> <install_provider> <install_runtime> <install_core> <ws_root> <dry_run> <backup_ts>
   derive-loop-scripts <out-file> <plugin_root> <never-laydown-names>
-  provider-entry-file <cfg>
+  provider-entry-file <cfg> [plugin-root]
   write-claude-settings <dst> <plugin_name>
 `;
 
@@ -122,7 +122,10 @@ async function main(): Promise<void> {
     }
     case "provider-entry-file": {
       need(1);
-      process.stdout.write(core.providerEntryFile(args[0]!) + "\n");
+      // arg 2 (optional) is the caller's already-resolved plugin root. Passing it through verbatim
+      // keeps the three states distinct: absent ⇒ the reader resolves the root itself; "" ⇒ "no
+      // plugin root" (NOT-EVALUATED); a path ⇒ that root.
+      process.stdout.write(core.providerEntryFile(args[0]!, args[1]) + "\n");
       return;
     }
     case "write-claude-settings": {

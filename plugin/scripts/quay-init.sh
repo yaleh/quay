@@ -1244,6 +1244,12 @@ ensure_vendor_runtime() {
 # depth — AC1 (fail-closed) prevents writing a broken config in the first place; this second check
 # catches a config that already exists (or a lay-down regression) whose mcp_entry points at a missing
 # runtime. FAIL CLOSED (return 1) when the referenced file does not exist.
+#
+# ⛔ The native provider OMITS path/mcp_entry by design, so "no mcp_entry in the config" is NOT
+# "nothing to verify" any more: the reader (`providerEntryFile`) resolves the omitted binding through
+# the plugin root and this check verifies `<root>/vendor/quay-native/dist/quay-native.js` exists.
+# "Could not evaluate" is its own printed state (NOT-EVALUATED) and is never printed as OK
+# (gap-config-validate-requires-mcp-entry-contradicts-native-default-resolver; 硬规则 3b).
 verify_provider_runtime_existence() {
   local ws="$1" plugin_root="${2:-}"
   local cfg="$ws/.quay/config.yml"
@@ -1256,11 +1262,11 @@ verify_provider_runtime_existence() {
     return 1
   fi
   local entry_file
-  entry_file="$(quay-init-step provider-entry-file "$cfg" 2>/dev/null || true)"
-  if [ -z "$entry_file" ]; then
-    echo "  verify-provider-runtime-existence: OK (no mcp_entry path found in the provider config — nothing to verify)"
-    return 0
-  fi
+  entry_file="$(quay-init-step provider-entry-file "$cfg" "$plugin_root" 2>/dev/null || true)"
+  case "$entry_file" in
+    NOT-EVALUATED:*) echo "  verify-provider-runtime-existence: NOT-EVALUATED — ${entry_file#NOT-EVALUATED:}"; return 0 ;;
+    *) [ -n "$entry_file" ] || { echo "  verify-provider-runtime-existence: FAIL — no runtime file could be determined (provider-entry-file returned nothing)" >&2; return 1; } ;;
+  esac
   if [ -f "$entry_file" ]; then
     echo "  verify-provider-runtime-existence: OK ($entry_file exists)"
     # AC2 (gap-upgrade-channel-cant-sync-build-artifacts-dist-stale): the verify now checks
@@ -2111,10 +2117,12 @@ ensure_runtime_artifacts_gitignore
 write_template "$PLUGIN_ROOT/.claude/launch.settings.json" "$WORKSPACE_ROOT/.claude/launch.settings.json" "launch template"
 write_claude_settings
 
-# L1 delivery-surface check (post-init, beside verify_referenced_landed): the six-category delivery
-# surface of the SHIPPED quay checkout is complete. Read-only over the plugin's own root — never
-# writes to the target, so the seven-item closed set is unaffected.
-verify_delivery_surface_l1 || exit 2
+# L1 delivery-surface + provider-runtime post-init checks (beside verify_referenced_landed): the
+# six-category delivery surface of the SHIPPED quay checkout is complete, AND the native provider's
+# runtime file — resolved through the plugin root when the config omits path/mcp_entry — actually
+# exists. Both are read-only over the plugin's own root — never writes to the target, so the
+# seven-item closed set is unaffected.
+verify_delivery_surface_l1 && verify_provider_runtime_existence "$WORKSPACE_ROOT" "$PLUGIN_ROOT" || exit 2
 
 auto_commit_laid_down
 print_install_steps

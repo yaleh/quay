@@ -12,7 +12,7 @@
 import fs from "node:fs";
 import path from "node:path";
 import YAML from "yaml";
-import { loadConfig } from "./config.ts";
+import { loadConfig, resolveProviderEntry, NATIVE_PROVIDER_UNRESOLVABLE } from "./config.ts";
 import { listGates } from "./gate/registry.ts";
 import { VALID_EXECUTION, VALID_AUDIT, VALID_STOP_RE } from "./loop-params.ts";
 
@@ -25,11 +25,18 @@ export interface ConfigIssue {
   field: string;
   message: string;
   suggestion?: string;
+  /** A stable machine-readable code for issues that a caller/gate must be able to match on (e.g.
+   *  `native-provider-unresolvable`) — message text alone is display, not a contract. */
+  code?: string;
 }
 
 export interface ValidateConfigArgs {
   workspaceRoot: string;
   checkFiles?: boolean;
+  /** Test/fixture seam: the plugin root to resolve the native provider's default binding from.
+   *  Omitted (undefined) ⇒ the real `resolvePluginRoot()`; `null` ⇒ "no plugin root could be
+   *  resolved" (the state a fixture injects to exercise `native-provider-unresolvable`). */
+  pluginRoot?: string | null;
 }
 
 export interface ValidateConfigResult {
@@ -216,10 +223,25 @@ function discoverAndParse(workspaceRoot: string): {
   return { issues, unifiedParsed: null, gatesParsed, loopParsed };
 }
 
+/** A provider path frozen to a VERSIONED plugin install-cache dir (`…/cache/quay/quay/<version>/…`):
+ *  the version segment pins the runtime, so a later plugin upgrade leaves the project reading the
+ *  old one. Explicit paths only — an omitted path is resolved from the plugin root and cannot freeze. */
+const FROZEN_CACHE_PATH_RE = /(^|[\\/])cache[\\/]quay[\\/]quay[\\/][^\\/]+([\\/]|$)/;
+
 /**
- * 3. Provider check: enabled providers must have non-empty mcp_entry array.
+ * 3. Provider check: every enabled provider must resolve to a launchable `mcp_entry`.
+ *
+ * ⛔ SINGLE JUDGE (gap-config-validate-requires-mcp-entry-contradicts-native-default-resolver): the
+ * question "does this provider have an mcp_entry?" is answered by `resolveProviderEntry` — the SAME
+ * function the runtime uses (`activeProvider` → `withNativeDefaults`). This module must NOT re-derive
+ * it from the raw YAML: that second copy is exactly how the validator came to demand an `mcp_entry`
+ * the runtime does not need (native omits it and Core derives it from the plugin root).
  */
-function checkProviders(unifiedParsed: unknown | null): ConfigIssue[] {
+function checkProviders(
+  unifiedParsed: unknown | null,
+  workspaceRoot: string,
+  pluginRoot: string | null | undefined,
+): ConfigIssue[] {
   const issues: ConfigIssue[] = [];
   if (!unifiedParsed || typeof unifiedParsed !== "object") return issues;
 
@@ -231,10 +253,51 @@ function checkProviders(unifiedParsed: unknown | null): ConfigIssue[] {
     const p = pdata as Record<string, unknown>;
     if (p.enabled !== true) continue;
 
-    if (!Array.isArray(p.mcp_entry) || p.mcp_entry.length === 0) {
+    // Explicit native `path` diagnostics. Only for a path the config ACTUALLY declares — an omitted
+    // path is the supported form (resolved from the plugin root) and is never warned about.
+    if (pid === "native" && typeof p.path === "string" && p.path !== "") {
+      const resolved = path.isAbsolute(p.path) ? p.path : path.resolve(workspaceRoot, p.path);
+      if (FROZEN_CACHE_PATH_RE.test(p.path)) {
+        issues.push({
+          severity: "warn",
+          field: `providers.${pid}.path`,
+          message:
+            `Native provider path "${p.path}" is frozen to a versioned plugin install-cache directory — ` +
+            `the version segment pins the runtime and will not follow a plugin upgrade`,
+          suggestion: `Remove providers.native.path and mcp_entry to let Core resolve them from the plugin root`,
+        });
+      } else if (!fs.existsSync(resolved)) {
+        issues.push({
+          severity: "error",
+          field: `providers.${pid}.path`,
+          message: `Native provider path does not exist: "${p.path}" (resolved to ${resolved})`,
+          suggestion:
+            `Remove providers.native.path and mcp_entry to let Core resolve them from the plugin root, ` +
+            `or point path at an existing directory`,
+        });
+      }
+    }
+
+    const resolvedEntry = resolveProviderEntry(pid, p, pluginRoot);
+    if (resolvedEntry.mcpEntry) continue;
+
+    if (resolvedEntry.unresolvable) {
       issues.push({
         severity: "error",
         field: `providers.${pid}`,
+        code: NATIVE_PROVIDER_UNRESOLVABLE,
+        message:
+          `${NATIVE_PROVIDER_UNRESOLVABLE}: enabled provider "native" omits path/mcp_entry ` +
+          `(Core resolves them from the plugin root) but no plugin root could be resolved`,
+        suggestion:
+          `Re-run /quay:init from an installed plugin, set QUAY_PLUGIN_ROOT, or declare ` +
+          `mcp_entry: ["node", "<provider-runtime>", "mcp"] explicitly`,
+      });
+    } else {
+      issues.push({
+        severity: "error",
+        field: `providers.${pid}`,
+        code: "provider-missing-mcp-entry",
         message: `Enabled provider "${pid}" is missing mcp_entry (must be a non-empty array)`,
         suggestion: 'Add mcp_entry: ["node", "./bin/<provider>.ts", "mcp"] to this provider',
       });
@@ -798,7 +861,7 @@ function checkFileExistence(
 // Main export
 // ---------------------------------------------------------------------------
 
-export function validateConfig({ workspaceRoot, checkFiles = false }: ValidateConfigArgs): ValidateConfigResult {
+export function validateConfig({ workspaceRoot, checkFiles = false, pluginRoot }: ValidateConfigArgs): ValidateConfigResult {
   const allIssues: ConfigIssue[] = [];
 
   // 1+2. Config file discovery + YAML syntax check
@@ -824,7 +887,7 @@ export function validateConfig({ workspaceRoot, checkFiles = false }: ValidateCo
 
   // 3. Provider check
   if (unifiedParsed) {
-    allIssues.push(...checkProviders(unifiedParsed));
+    allIssues.push(...checkProviders(unifiedParsed, workspaceRoot, pluginRoot));
   }
 
   // 4. Gate nesting check

@@ -252,3 +252,29 @@ test("this repository's own .quay/config.yml is PASS (real input, not a fixture)
   assert.equal(r.status, 0, `the repo's own binding must be path-resolved, got ${r.status}: ${r.stdout}${r.stderr}`);
   assert.match(r.stdout, /path-resolved/);
 });
+
+// ── AC6 of gap-config-validate-requires-mcp-entry-contradicts-native-default-resolver ─────────────
+// The canonical NEW-INSTALL form (`quay-init` writes a native provider with NO path/mcp_entry — Core
+// resolves it from the plugin root) must NOT be read as a PASS by this checker: it has no binding in
+// the config to judge, so its honest answer is NOT-EVALUATED (exit 3), never "合格".
+//
+// This is the 空转-vs-honest characterization: the checker does not silently go green on the omitted
+// form. Pinning it means a future "make the checker resolve native defaults" change must be a
+// deliberate edit here, not an accident (硬规则 3b).
+test("native provider that OMITS path/mcp_entry is NOT-EVALUATED (exit 3), never PASS", () => {
+  const dir = makeTmp("native-omitted");
+  try {
+    makeProject(dir, "  native:\n    enabled: true\n");
+    const r = runChecker(dir, ["--json"]);
+    assert.equal(r.status, 3, `omitted native binding must be NOT-EVALUATED, got ${r.status}: ${r.stdout}${r.stderr}`);
+    // A NOT-EVALUATED verdict is emitted on STDERR deliberately (never on the pass/fail report
+    // stream) — so the machine-readable half lives there.
+    const parsed = JSON.parse(r.stdout || r.stderr);
+    assert.equal(parsed.status, "not-evaluated");
+    assert.equal(parsed.providers[0].state, "no-mcp-entry");
+    assert.equal(parsed.judged, 0, "nothing was judged");
+    assert.equal(parsed.failed, 0, "and nothing was failed — NOT-EVALUATED is its own outcome");
+  } finally {
+    cleanup(dir);
+  }
+});

@@ -86,9 +86,14 @@ providers:
 
 - `enabled` — whether this provider is available at all (`quay mcp` only
   aggregates `enabled: true` providers).
-- `path` — where the Provider's own code + `provider.yml` live.
+- `path` — where the Provider's own code + `provider.yml` live. **Optional for the native
+  provider**: when omitted, Core resolves it from its own plugin root
+  (`<plugin-root>/vendor/quay-native`), which is what `quay-init` writes for a fresh install.
+  Required for every other provider.
 - `tasks_dir` — (native only) storage path for this workspace's tasks.
-- `mcp_entry` — the command Core spawns to launch this Provider's MCP server.
+- `mcp_entry` — the command Core spawns to launch this Provider's MCP server. **Optional for the
+  native provider** (derived from the plugin root alongside `path`); required for every other
+  provider. `quay config validate` accepts both the omitted and the explicit native form.
 - `env` — environment variables passed to the spawned `mcp_entry` process.
 
 The first `enabled: true` provider is the default. Use `--provider <id>` on

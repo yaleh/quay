@@ -10,7 +10,7 @@
 // equivalence is verified per migrated command in packages/quay/test/cli.test.mjs).
 
 import path from "node:path";
-import { loadConfig, activeProvider } from "../config.ts";
+import { loadConfig, activeProvider, providerMcpEntry } from "../config.ts";
 // gap-task-list-root-does-not-scope-config-lookup: the fail-closed `--root`
 // workspace-root resolver — the same findConfig mechanism loadConfig uses
 // everywhere (config-validate, serve, mcp-server), so `--root <path>` on any
@@ -173,7 +173,7 @@ export async function withProvider(fn, { providerId, root }: { providerId?: stri
   }
   const provider = activeProvider(cfg, providerId);
   const providerDir = path.resolve(cfg.workspaceRoot, provider.path ?? ".");
-  const [command, ...args] = provider.mcp_entry;
+  const [command, ...args] = providerMcpEntry(provider);
   const client = await connectProvider({
     command,
     args,
@@ -195,7 +195,7 @@ export async function withProvider(fn, { providerId, root }: { providerId?: stri
 export async function connectNamedProvider(cfg, providerId) {
   const provider = activeProvider(cfg, providerId);
   const providerDir = path.resolve(cfg.workspaceRoot, provider.path ?? ".");
-  const [command, ...args] = provider.mcp_entry;
+  const [command, ...args] = providerMcpEntry(provider);
   const client = await connectProvider({
     command,
     args,

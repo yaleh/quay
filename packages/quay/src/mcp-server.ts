@@ -48,7 +48,7 @@ import { z } from "zod";
 import fs from "node:fs";
 import path from "node:path";
 import { spawn } from "node:child_process";
-import { loadConfig, activeProvider, findConfig } from "./config.ts";
+import { loadConfig, activeProvider, findConfig, providerMcpEntry } from "./config.ts";
 import { connectProvider } from "./provider-client.ts";
 import { resolveProviderEnv } from "./provider-env.ts";
 import { type ConnectedProvider, registerAllHandlers, registerConfigHandlers } from "./mcp-handlers.ts";
@@ -72,7 +72,7 @@ import { readFanInAttempts } from "./observation.ts";
 async function connectToProvider(cfg: ReturnType<typeof loadConfig>, providerId: string | undefined): Promise<ConnectedProvider> {
   const provider = activeProvider(cfg, providerId);
   const providerDir = path.resolve(cfg.workspaceRoot, provider.path ?? ".");
-  const [command, ...args] = provider.mcp_entry;
+  const [command, ...args] = providerMcpEntry(provider);
   const client = await connectProvider({
     command,
     args,

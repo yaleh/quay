@@ -4,9 +4,9 @@
 // Tests cover AC1-AC6 from the task's Acceptance Criteria.
 // Run: node --test --experimental-test-coverage packages/quay/test/init.test.mjs
 
-import { test } from "node:test";
+import { test, after } from "node:test";
 import assert from "node:assert/strict";
-import { execFileSync } from "node:child_process";
+import { execFileSync, spawnSync } from "node:child_process";
 import { makeTmpDir } from "../../../plugin/test/helpers/tmp-workspace.mjs";
 import { fileURLToPath } from "node:url";
 import path from "node:path";
@@ -22,6 +22,8 @@ import {
   reconcileConfigContent,
   LOOP_VERSION_DEFAULTS,
   SERVE_VERSION_DEFAULTS,
+  migrateStaleMcpEntry,
+  providerEntryFile,
 } from "../src/init.ts";
 import { SERVE_BINDING_FALLBACK } from "../src/serve-binding.ts";
 
@@ -893,4 +895,270 @@ test("AC2 reconcile unit: reconcileConfigContent edits in place — only the key
   const again = reconcileConfigContent(content);
   assert.equal(again.report.unchanged, true, "reconciling an already-current document reports unchanged");
   assert.equal(again.content, content, "and produces the identical bytes");
+});
+
+// ---------------------------------------------------------------------------
+// gap-config-validate-requires-mcp-entry-contradicts-native-default-resolver
+// AC1 — the round trip: an old config is migrated, and validate passes; a fresh
+//       `quay init` output validates.
+// AC5 — verify-provider-runtime-existence is no longer vacuous for the omitted
+//       native binding (it verifies the plugin-root runtime, and fails when the
+//       file is gone; an unresolvable plugin root is its own NOT-EVALUATED state).
+// ---------------------------------------------------------------------------
+
+const PLUGIN_ROOT = path.join(__dirname, "..", "..", "..", "plugin");
+
+/** A git-initialised temp workspace (quay-init.sh's branch-model path needs a repo). */
+function initWorkspace(tag) {
+  const ws = tmpDir(tag);
+  execFileSync("git", ["init", "-q"], { cwd: ws });
+  execFileSync(
+    "git",
+    ["-c", "user.email=t@t", "-c", "user.name=t", "commit", "-q", "--allow-empty", "-m", "init"],
+    { cwd: ws },
+  );
+  return ws;
+}
+
+/** A DISK-backed worktree root (quay-init.sh's validate_worktree_root rejects tmpfs). Tracked for cleanup. */
+const _wtRoots = [];
+function diskWorktreeRoot(tag) {
+  const base = fs.existsSync("/var/tmp") ? "/var/tmp" : os.tmpdir();
+  const dir = fs.mkdtempSync(path.join(base, `qiwt-${tag}-`));
+  _wtRoots.push(dir);
+  return dir;
+}
+
+/** The real `quay-init.sh --loop` invocation, with this worktree's plugin as the plugin root. */
+function runQuayInit(ws, { pluginRoot = PLUGIN_ROOT } = {}) {
+  return spawnSync(
+    "bash",
+    [
+      path.join(pluginRoot, "scripts", "quay-init.sh"),
+      "--loop",
+      "--root", ws,
+      "--project", "proj",
+      "--tmux-session", `p-${path.basename(ws).slice(-10)}-0:0.0`,
+      "--repo-root", ws,
+      "--worktree-root", diskWorktreeRoot("init"),
+      "--test-command", "npm test",
+    ],
+    { cwd: ws, encoding: "utf8", env: { ...process.env, CLAUDE_PLUGIN_ROOT: pluginRoot } },
+  );
+}
+
+test("AC1: the migration deletes the native path/mcp_entry LINES and keeps every other byte (comments included)", () => {
+  const ws = initWorkspace("ac1-migrate-unit");
+  try {
+    const pluginVendor = path.join(PLUGIN_ROOT, "vendor", "quay-native");
+    const oldConfig =
+      "# my project's config — this comment must survive the migration\n" +
+      "providers:\n" +
+      "  native:\n" +
+      "    enabled: true\n" +
+      `    path: "${pluginVendor}"\n` +
+      "    mcp_entry:\n" +
+      "    - node\n" +
+      `    - ${path.join(pluginVendor, "dist", "quay-native.js")}\n` +
+      "    - mcp\n" +
+      "    env:\n" +
+      '      QUAY_NATIVE_TASKS_DIR: "./tasks"\n' +
+      "  # a comment inside the providers block must also survive\n" +
+      "loop:\n" +
+      "  board: native\n" +
+      "  gates: [acceptance]\n";
+    fs.mkdirSync(path.join(ws, ".quay"), { recursive: true });
+    const cfg = path.join(ws, ".quay", "config.yml");
+    fs.writeFileSync(cfg, oldConfig);
+
+    migrateStaleMcpEntry({
+      cfgPath: cfg,
+      installProvider: pluginVendor,
+      installRuntime: path.join(pluginVendor, "dist", "quay-native.js"),
+      installCore: path.join(PLUGIN_ROOT, "vendor", "quay", "dist", "quay.js"),
+      wsRoot: ws,
+      dryRun: false,
+      backupTs: "test",
+    });
+
+    const after = fs.readFileSync(cfg, "utf8");
+    assert.doesNotMatch(after, /^\s*path:/m, "the native path line is gone");
+    assert.doesNotMatch(after, /^\s*mcp_entry:/m, "the native mcp_entry line is gone");
+    assert.doesNotMatch(after, /^\s*- node$/m, "the block-sequence items are gone");
+    assert.match(after, /^# my project's config — this comment must survive the migration$/m);
+    assert.match(after, /^  # a comment inside the providers block must also survive$/m);
+    assert.match(after, /^\s+QUAY_NATIVE_TASKS_DIR: "\.\/tasks"$/m, "unrelated lines are byte-untouched");
+  } finally {
+    fs.rmSync(ws, { recursive: true, force: true });
+  }
+});
+
+test("AC1: old config (explicit native binding) → init migration → CLI validate AND MCP config_validate both pass", async () => {
+  const { registerConfigHandlers } = await import("../src/mcp-handlers.ts");
+  const ws = initWorkspace("ac1-roundtrip");
+  try {
+    const pluginVendor = path.join(PLUGIN_ROOT, "vendor", "quay-native");
+    fs.mkdirSync(path.join(ws, ".quay"), { recursive: true });
+    fs.writeFileSync(
+      path.join(ws, ".quay", "config.yml"),
+      "# .quay/config.yml — MY project (hand-edited, keep these comments)\n" +
+        "providers:\n" +
+        "  native:\n" +
+        "    enabled: true\n" +
+        `    path: "${pluginVendor}"\n` +
+        "    tasks_dir: \"./tasks\"\n" +
+        "    mcp_entry:\n" +
+        "    - node\n" +
+        `    - ${path.join(pluginVendor, "dist", "quay-native.js")}\n` +
+        "    - mcp\n" +
+        "    env:\n" +
+        '      QUAY_NATIVE_TASKS_DIR: "./tasks"\n' +
+        "loop:\n" +
+        "  board: native\n" +
+        "  gates: [acceptance]\n",
+    );
+
+    const r = runQuayInit(ws);
+    assert.equal(r.status, 0, `quay-init.sh must exit 0\n${r.stdout}\n${r.stderr}`);
+    assert.match(r.stdout, /removed: providers\.native\.path/);
+    assert.match(r.stdout, /removed: providers\.native\.mcp_entry/);
+    assert.match(r.stdout, /verify-provider-runtime-existence: OK \(/, "the runtime existence check is LIVE and OK");
+    assert.doesNotMatch(r.stdout, /nothing to verify/);
+
+    // CLI surface.
+    const out = runQuay(["config", "validate", "--root", ws], ws);
+    assert.match(out, /Config valid/);
+
+    // MCP surface (the registered handler, not just the shared module).
+    let handler = null;
+    const mockServer = {
+      registerTool(name, opts, h) {
+        if (name === "config_validate") handler = h || null;
+        return this;
+      },
+    };
+    registerConfigHandlers(mockServer, { workspaceRoot: ws, configPath: path.join(ws, ".quay", "config.yml") });
+    assert.ok(handler, "config_validate handler must be registered");
+    const mcp = await handler({ checkFiles: undefined });
+    assert.equal(mcp.structuredContent.ok, true, `MCP config_validate must pass, got: ${JSON.stringify(mcp.structuredContent.issues)}`);
+  } finally {
+    fs.rmSync(ws, { recursive: true, force: true });
+  }
+});
+
+test("AC1: a FRESH workspace's init output validates on the PROVIDER axis (the mcp_entry contradiction is gone)", () => {
+  const ws = initWorkspace("ac1-fresh");
+  try {
+    const r = runQuayInit(ws);
+    assert.equal(r.status, 0, `quay-init.sh must exit 0\n${r.stdout}\n${r.stderr}`);
+    assert.match(r.stdout, /verify-provider-runtime-existence: OK \(/);
+
+    // The freshly-written config omits path/mcp_entry…
+    const raw = fs.readFileSync(path.join(ws, ".quay", "config.yml"), "utf8");
+    assert.doesNotMatch(raw, /^\s*mcp_entry:/m, "the fresh install writes NO native mcp_entry");
+
+    // …and the validator no longer demands one. Assert on the PROVIDER AXIS by name: the remaining
+    // errors are the separately-tracked loop.board/loop.gates default gap (declared out of scope in
+    // this task's Proposal), and this assertion FAILS if any other error appears — including any
+    // providers.* / mcp_entry one.
+    const res = spawnSync("node", [quayBin, "config", "validate", "--root", ws], { cwd: ws, encoding: "utf8" });
+    const errorLines = ((res.stdout ?? "") + (res.stderr ?? "")).split("\n").filter((l) => l.startsWith("error:"));
+    assert.equal(
+      errorLines.filter((l) => /providers\.|mcp_entry/.test(l)).length,
+      0,
+      `no provider/mcp_entry error may remain, got:\n${errorLines.join("\n")}`,
+    );
+    const fields = errorLines.map((l) => l.replace(/^error:\s*/, "").split(" —")[0]).sort();
+    assert.deepEqual(
+      fields,
+      ["loop.board", "loop.gates"],
+      `the only remaining errors must be the out-of-scope loop.* defaults, got: ${JSON.stringify(fields)}`,
+    );
+  } finally {
+    fs.rmSync(ws, { recursive: true, force: true });
+  }
+});
+
+test("AC1: a FRESH `quay init` (CLI) output validates with exit 0", () => {
+  const ws = initWorkspace("ac1-cliinit");
+  try {
+    runQuay(["init"], ws);
+    const out = runQuay(["config", "validate", "--root", ws], ws);
+    assert.match(out, /Config valid/);
+  } finally {
+    fs.rmSync(ws, { recursive: true, force: true });
+  }
+});
+
+test("AC5: providerEntryFile resolves the OMITTED native binding through the plugin root (never 'nothing to verify')", () => {
+  const ws = initWorkspace("ac5-reader");
+  try {
+    fs.mkdirSync(path.join(ws, ".quay"), { recursive: true });
+    const cfg = path.join(ws, ".quay", "config.yml");
+    fs.writeFileSync(cfg, "providers:\n  native:\n    enabled: true\n");
+    const file = providerEntryFile(cfg, "/some/plugin/root");
+    assert.equal(file, path.join("/some/plugin/root", "vendor", "quay-native", "dist", "quay-native.js"));
+    // An explicit mcp_entry still wins (the old form keeps its meaning).
+    fs.writeFileSync(
+      cfg,
+      'providers:\n  native:\n    enabled: true\n    mcp_entry: ["node", "./bin/quay-native.ts", "mcp"]\n',
+    );
+    assert.equal(providerEntryFile(cfg, "/some/plugin/root"), "./bin/quay-native.ts");
+    // No plugin root ⇒ NOT-EVALUATED, distinguishable from a path (硬规则 3b).
+    fs.writeFileSync(cfg, "providers:\n  native:\n    enabled: true\n");
+    assert.match(providerEntryFile(cfg, null), /^NOT-EVALUATED:native-provider-unresolvable/);
+  } finally {
+    fs.rmSync(ws, { recursive: true, force: true });
+  }
+});
+
+test("AC5: verify-provider-runtime-existence is three-state — OK / FAIL(non-zero) / NOT-EVALUATED", () => {
+  const ws = initWorkspace("ac5-verify");
+  const pluginRoot = fs.mkdtempSync(path.join(os.tmpdir(), "ac5-pluginroot-"));
+  try {
+    fs.mkdirSync(path.join(ws, ".quay"), { recursive: true });
+    fs.writeFileSync(path.join(ws, ".quay", "config.yml"), "providers:\n  native:\n    enabled: true\n");
+    const runtime = path.join(pluginRoot, "vendor", "quay-native", "dist", "quay-native.js");
+    fs.mkdirSync(path.dirname(runtime), { recursive: true });
+    fs.writeFileSync(runtime, "// fixture runtime\n");
+
+    // Source quay-init.sh in LIBRARY MODE (it returns before the install flow when sourced) and call
+    // the verify directly — the same function the install tail invokes, with the same arguments.
+    // ⛔ The paths are INLINED, never passed as positional args: quay-init.sh's own arg parser runs
+    // before its library-mode guard and would reject a positional argument.
+    const sq = (s) => `'${String(s).replaceAll("'", `'\\''`)}'`;
+    const initScript = path.join(PLUGIN_ROOT, "scripts", "quay-init.sh");
+    const call = (root) =>
+      spawnSync(
+        "bash",
+        [
+          "-c",
+          `source ${sq(initScript)}\nset +e\nDRY_RUN=false\nverify_provider_runtime_existence ${sq(ws)} ${sq(root)}\necho "RC=$?"`,
+        ],
+        { encoding: "utf8", env: { ...process.env, CLAUDE_PLUGIN_ROOT: PLUGIN_ROOT } },
+      );
+
+    const ok = call(pluginRoot);
+    assert.match(ok.stdout, /verify-provider-runtime-existence: OK \(/);
+    assert.match(ok.stdout, /RC=0/);
+
+    fs.rmSync(runtime);
+    const missing = call(pluginRoot);
+    // The FAIL line is written to stderr (deliberately — a failure must not be mistakable for report
+    // output on stdout); the exit code is the machine-readable half.
+    assert.match(missing.stdout + missing.stderr, /FAIL \(referenced-runtime-missing\)/);
+    assert.match(missing.stdout, /RC=1/);
+
+    const noRoot = call("");
+    assert.match(noRoot.stdout, /NOT-EVALUATED — native-provider-unresolvable/);
+    assert.doesNotMatch(noRoot.stdout, /verify-provider-runtime-existence: OK/);
+    assert.match(noRoot.stdout, /RC=0/);
+  } finally {
+    fs.rmSync(ws, { recursive: true, force: true });
+    fs.rmSync(pluginRoot, { recursive: true, force: true });
+  }
+});
+
+after(() => {
+  for (const dir of _wtRoots) fs.rmSync(dir, { recursive: true, force: true });
 });

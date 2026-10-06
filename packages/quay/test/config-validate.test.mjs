@@ -266,11 +266,11 @@ loop:
   }
 });
 
-test("AC: missing provider mcp_entry exits with error (M1)", () => {
+test("AC: enabled CUSTOM provider missing mcp_entry exits with error (M1)", () => {
   const { root, cleanup } = tmpWorkspace({
     ".quay/config.yml": `
 providers:
-  native:
+  github:
     enabled: true
 gates:
   testPass:
@@ -284,9 +284,215 @@ loop:
   try {
     const result = validateConfig({ workspaceRoot: root });
     assert.equal(result.ok, false);
-    const provIssue = result.issues.find((i) => i.field === "providers.native");
+    const provIssue = result.issues.find((i) => i.field === "providers.github");
     assert.ok(provIssue, `expected mcp_entry issue, got: ${JSON.stringify(result.issues)}`);
     assert.match(provIssue.message, /mcp_entry/);
+    assert.equal(provIssue.code, "provider-missing-mcp-entry");
+  } finally {
+    cleanup();
+  }
+});
+
+// ---------------------------------------------------------------------------
+// gap-config-validate-requires-mcp-entry-contradicts-native-default-resolver
+// AC1/AC2/AC3/AC4 — the validator is the SAME judge as the runtime.
+// ---------------------------------------------------------------------------
+
+const PROVIDER_AXIS_CONFIG = (providersYaml) => `
+providers:
+${providersYaml}
+gates:
+  testPass:
+    - name: my-gate
+      command: "echo ok"
+loop:
+  board: native
+  gates: [acceptance]
+`.trim();
+
+const providerErrors = (result) =>
+  result.issues.filter((i) => i.field.startsWith("providers.") && i.severity === "error");
+
+test("AC2: native provider that OMITS path/mcp_entry validates (Core resolves it from the plugin root)", () => {
+  const { root, cleanup } = tmpWorkspace({
+    ".quay/config.yml": PROVIDER_AXIS_CONFIG("  native:\n    enabled: true"),
+  });
+  try {
+    const result = validateConfig({ workspaceRoot: root });
+    assert.equal(result.ok, true, `expected ok, got: ${JSON.stringify(result.issues)}`);
+    assert.equal(providerErrors(result).length, 0, "no provider-axis error for the omitted native binding");
+  } finally {
+    cleanup();
+  }
+});
+
+test("AC2: native provider with an EXPLICIT path/mcp_entry still validates", () => {
+  const { root, cleanup } = tmpWorkspace({
+    ".quay/config.yml": PROVIDER_AXIS_CONFIG(
+      `  native:\n    enabled: true\n    path: "${os.tmpdir()}"\n    mcp_entry: ["node", "./bin/quay-native.ts", "mcp"]`,
+    ),
+  });
+  try {
+    const result = validateConfig({ workspaceRoot: root });
+    assert.equal(result.ok, true, `expected ok, got: ${JSON.stringify(result.issues)}`);
+  } finally {
+    cleanup();
+  }
+});
+
+test("AC2: native explicit path frozen to a versioned plugin cache dir is a WARNING, not an error", () => {
+  const { root, cleanup } = tmpWorkspace({
+    ".quay/config.yml": PROVIDER_AXIS_CONFIG(
+      `  native:\n    enabled: true\n    path: "/home/someone/.claude/plugins/cache/quay/quay/0.16.0/vendor/quay-native"`,
+    ),
+  });
+  try {
+    const result = validateConfig({ workspaceRoot: root });
+    assert.equal(result.ok, true, `expected ok (warning only), got: ${JSON.stringify(result.issues)}`);
+    const warn = result.issues.find((i) => i.field === "providers.native.path");
+    assert.ok(warn, `expected a providers.native.path warning, got: ${JSON.stringify(result.issues)}`);
+    assert.equal(warn.severity, "warn");
+    assert.match(warn.message, /frozen to a versioned plugin install-cache/);
+  } finally {
+    cleanup();
+  }
+});
+
+test("AC2: native explicit path that does not exist is an ERROR", () => {
+  const { root, cleanup } = tmpWorkspace({
+    ".quay/config.yml": PROVIDER_AXIS_CONFIG(
+      `  native:\n    enabled: true\n    path: "./definitely-not-here/quay-native"`,
+    ),
+  });
+  try {
+    const result = validateConfig({ workspaceRoot: root });
+    assert.equal(result.ok, false, `expected failure, got: ${JSON.stringify(result.issues)}`);
+    const issue = result.issues.find((i) => i.field === "providers.native.path");
+    assert.ok(issue, `expected a providers.native.path error, got: ${JSON.stringify(result.issues)}`);
+    assert.equal(issue.severity, "error");
+    assert.match(issue.message, /does not exist/);
+  } finally {
+    cleanup();
+  }
+});
+
+test("AC2/MCP parity: custom provider missing mcp_entry names providers.<id>", () => {
+  const { root, cleanup } = tmpWorkspace({
+    ".quay/config.yml": PROVIDER_AXIS_CONFIG("  github:\n    enabled: true"),
+  });
+  try {
+    const result = validateConfig({ workspaceRoot: root });
+    assert.equal(result.ok, false);
+    assert.ok(
+      providerErrors(result).some((i) => i.field === "providers.github" && /mcp_entry/.test(i.message)),
+      `expected providers.github mcp_entry error, got: ${JSON.stringify(result.issues)}`,
+    );
+  } finally {
+    cleanup();
+  }
+});
+
+test("AC3: native omitting path/mcp_entry + an UNRESOLVABLE plugin root yields the stable code", () => {
+  const { root, cleanup } = tmpWorkspace({
+    ".quay/config.yml": PROVIDER_AXIS_CONFIG("  native:\n    enabled: true"),
+  });
+  try {
+    const result = validateConfig({ workspaceRoot: root, pluginRoot: null });
+    assert.equal(result.ok, false, "an unresolvable plugin root must fail closed");
+    const issue = result.issues.find((i) => i.code === "native-provider-unresolvable");
+    assert.ok(issue, `expected native-provider-unresolvable, got: ${JSON.stringify(result.issues)}`);
+    assert.match(issue.message, /native-provider-unresolvable/);
+    assert.match(issue.message, /no plugin root could be resolved/);
+  } finally {
+    cleanup();
+  }
+});
+
+test("AC3: the unresolvable-native message never leaks a TypeError (the launch paths throw the code)", async () => {
+  const { providerMcpEntry, resolveProviderEntry, NATIVE_PROVIDER_UNRESOLVABLE } = await import("../src/config.ts");
+  const resolved = resolveProviderEntry("native", { enabled: true }, null);
+  assert.equal(resolved.mcpEntry, null);
+  assert.equal(resolved.unresolvable, true);
+  let thrown = null;
+  try {
+    providerMcpEntry({ id: "native", ...resolved.entry });
+  } catch (e) {
+    thrown = e;
+  }
+  assert.ok(thrown, "providerMcpEntry must throw, never return undefined for the caller to destructure");
+  assert.equal(thrown.code, NATIVE_PROVIDER_UNRESOLVABLE);
+  assert.match(thrown.message, /native-provider-unresolvable/);
+  assert.doesNotMatch(String(thrown.message), /TypeError|is not iterable/);
+});
+
+test("AC4: property — no provider error ⇔ activeProvider() yields a non-empty mcp_entry", async () => {
+  const { activeProvider } = await import("../src/config.ts");
+  const corpus = [
+    { id: "native", entry: { enabled: true }, expected: true, label: "native omitted" },
+    {
+      id: "native",
+      entry: { enabled: true, mcp_entry: ["node", "./bin/quay-native.ts", "mcp"] },
+      expected: true,
+      label: "native explicit",
+    },
+    { id: "github", entry: { enabled: true }, expected: false, label: "custom missing" },
+    { id: "github", entry: { enabled: true, mcp_entry: ["node", "./bin/github.ts", "mcp"] }, expected: true, label: "custom present" },
+  ];
+  for (const c of corpus) {
+    const yamlProviders = c.id === "native"
+      ? `  native:\n    enabled: true${c.entry.path ? `\n    path: "${c.entry.path}"` : ""}${c.entry.mcp_entry ? `\n    mcp_entry: ${JSON.stringify(c.entry.mcp_entry)}` : ""}`
+      : `  github:\n    enabled: true${c.entry.mcp_entry ? `\n    mcp_entry: ${JSON.stringify(c.entry.mcp_entry)}` : ""}`;
+    const { root, cleanup } = tmpWorkspace({ ".quay/config.yml": PROVIDER_AXIS_CONFIG(yamlProviders) });
+    try {
+      const result = validateConfig({ workspaceRoot: root });
+      const runtimeEntry = activeProvider({ config: { providers: { [c.id]: c.entry } } }, c.id);
+      const runtimeHasEntry = Array.isArray(runtimeEntry.mcp_entry) && runtimeEntry.mcp_entry.length > 0;
+      assert.equal(runtimeHasEntry, c.expected, `${c.label}: runtime resolution`);
+      assert.equal(
+        providerErrors(result).length === 0,
+        runtimeHasEntry,
+        `${c.label}: validator verdict (${JSON.stringify(providerErrors(result))}) must equal the runtime's resolution`,
+      );
+    } finally {
+      cleanup();
+    }
+  }
+});
+
+test("AC4: config-validate.ts no longer reads the raw YAML mcp_entry (predicate proven against the pre-change file)", async () => {
+  const { execFileSync: exec } = await import("node:child_process");
+  const repoRoot = path.join(__dirname, "..", "..", "..");
+  // The predicate is a PROPERTY ACCESS of the raw YAML field — message/suggestion text (a quoted
+  // "mcp_entry") is not one, so it must not be flagged (硬规则 2: by position, not by keyword).
+  const RAW_ACCESS = /\.mcp_entry\b|\[\s*["']mcp_entry["']\s*\]/;
+  // ── half 1: prove the predicate CAN match — run it against the PRE-change file (develop's copy).
+  const before = exec("git", ["-C", repoRoot, "show", "develop:packages/quay/src/config-validate.ts"], {
+    encoding: "utf8",
+  });
+  const beforeHits = before.split("\n").filter((l) => RAW_ACCESS.test(l));
+  assert.ok(
+    beforeHits.length > 0,
+    "the predicate must match the pre-change file (otherwise the zero-count below proves nothing)",
+  );
+  // ── half 2: it matches NOTHING in the working copy.
+  const after = fs.readFileSync(path.join(__dirname, "..", "src", "config-validate.ts"), "utf8");
+  const afterHits = after.split("\n").filter((l) => RAW_ACCESS.test(l));
+  assert.deepEqual(
+    afterHits,
+    [],
+    `config-validate.ts must delegate the mcp_entry judgment to resolveProviderEntry; raw reads found: ${JSON.stringify(afterHits)}`,
+  );
+});
+
+test("AC3: the injected plugin root is the same seam the validator uses (resolvable vs null)", () => {
+  const { root, cleanup } = tmpWorkspace({
+    ".quay/config.yml": PROVIDER_AXIS_CONFIG("  native:\n    enabled: true"),
+  });
+  try {
+    const resolvable = validateConfig({ workspaceRoot: root, pluginRoot: "/some/plugin/root" });
+    assert.equal(resolvable.ok, true, `an injected resolvable root ⇒ ok, got ${JSON.stringify(resolvable.issues)}`);
+    const unresolvable = validateConfig({ workspaceRoot: root, pluginRoot: null });
+    assert.equal(unresolvable.ok, false);
   } finally {
     cleanup();
   }
@@ -1334,6 +1540,44 @@ loop:
     assert.match(stdout, /Config valid/);
   } finally {
     cleanup();
+  }
+});
+
+test("AC1/AC2 CLI: a config whose native provider omits path/mcp_entry validates (exit 0)", () => {
+  const { root, cleanup } = tmpWorkspace({
+    ".quay/config.yml": `
+providers:
+  native:
+    enabled: true
+    tasks_dir: "./tasks"
+    env:
+      QUAY_NATIVE_TASKS_DIR: "./tasks"
+gates:
+  testPass:
+    - name: my-gate
+      command: "echo ok"
+loop:
+  board: native
+  gates: [acceptance]
+`.trim(),
+  });
+  try {
+    const stdout = cliValidate(root);
+    assert.match(stdout, /Config valid/);
+  } finally {
+    cleanup();
+  }
+});
+
+test("AC3 (structural): every provider-launch path routes mcp_entry through providerMcpEntry", () => {
+  // By POSITION (硬规则 2): the three launch paths must read the argv through the shared helper —
+  // a direct `… = provider.mcp_entry` destructure is the bare-TypeError path this AC closes.
+  const srcDir = path.join(__dirname, "..", "src");
+  const targets = ["mcp-server.ts", "serve.ts", path.join("cli", "shared.ts")];
+  for (const rel of targets) {
+    const src = fs.readFileSync(path.join(srcDir, rel), "utf8");
+    assert.match(src, /providerMcpEntry\(provider\)/, `${rel} must resolve argv via providerMcpEntry(provider)`);
+    assert.doesNotMatch(src, /=\s*provider\.mcp_entry\b/, `${rel} must not destructure provider.mcp_entry directly`);
   }
 });
 

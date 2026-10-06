@@ -35,6 +35,12 @@
 # packages/quay/src/loop-params.ts's own doc comments.
 
 providers:
+  # NOTE (gap-config-validate-requires-mcp-entry-contradicts-native-default-resolver): a native
+  # provider may OMIT `path`/`mcp_entry` entirely — Core then resolves them from its own plugin root
+  # (`<plugin-root>/vendor/quay-native`), which is what `quay-init` writes for a fresh install, and
+  # `quay config validate` accepts both forms. This repo's own dev config keeps them EXPLICIT on
+  # purpose: it runs the provider straight out of the source tree (`./packages/quay-native`), which
+  # is not what the plugin root would point at. Every NON-native provider MUST declare them.
   native:
     enabled: true
     path: "./packages/quay-native"       # where the Provider's provider.yml + code live

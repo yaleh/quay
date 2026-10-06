@@ -23,6 +23,11 @@ import { SERVE_BINDING_FALLBACK } from "./serve-binding.ts";
 // derive-from-it): the project link's source-checkout guard reuses `isPluginSourceCheckout` so the
 // "is this an install or a working tree" judgment cannot fork into two spellings.
 import { isPluginSourceCheckout } from "./plugin-root.ts";
+// The ONE binding judge (gap-config-validate-requires-mcp-entry-contradicts-native-default-resolver):
+// `verify_provider_runtime_existence`'s reader resolves the native provider's runtime file through
+// the SAME function the runtime and the validator use, so an omitted binding is verified (from the
+// plugin root) instead of silently skipped.
+import { resolveProviderEntry, NATIVE_PROVIDER_UNRESOLVABLE } from "./config.ts";
 
 // ── Three-state classification of an existing `.quay/config.yml` ────────────────────────────────────
 // (SPEC-quay-init-reconcile-and-native-implementation-2026-09-18 §3.3; AC1.)
@@ -403,9 +408,12 @@ export function generateConfigContent(opts: { providerId: string; providerPath: 
     "#",
     "# Each provider entry declares:",
     "#   enabled: true/false     — exactly ONE provider must be enabled",
-    "#   path: <dir>             — provider package root (resolved relative to workspaceRoot)",
+    "#   path: <dir>             — provider package root (relative to workspaceRoot). OPTIONAL for the",
+    "#                             native provider: Core resolves it from the plugin root when omitted.",
     "#   tasks_dir: <dir>        — where task files live (relative to workspaceRoot)",
-    "#   mcp_entry: [cmd, args]  — how to launch the provider's MCP server (resolved relative to provider.path)",
+    "#   mcp_entry: [cmd, args]  — how to launch the provider's MCP server (relative to provider.path).",
+    "#                             OPTIONAL for the native provider (Core derives it from the plugin root);",
+    "#                             REQUIRED for every other provider.",
     "#   env: <map>              — environment variables passed to the MCP server process",
     "#   default_task_status: todo|ready  — status for new tasks when none is specified (default: todo)",
     "#",
@@ -1791,22 +1799,36 @@ export function deriveLoopScriptsClosure(o: { outPath: string; pluginRoot: strin
 }
 
 /**
- * `verify_provider_runtime_existence`'s reader: the provider's `mcp_entry[1]` — the runtime file the
- * binding names (index 1 is the canonical `["node", <runtime>, …]` slot). Empty when there is no
- * config, no `providers.native`, no list-shaped `mcp_entry`, or fewer than two elements.
+ * `verify_provider_runtime_existence`'s reader: the runtime file the native provider's launch argv
+ * names — `mcp_entry[1]` (the canonical `["node", <runtime>, …]` slot), resolved through the SAME
+ * judge the runtime uses (`resolveProviderEntry`) so an OMITTED binding is no longer "nothing to
+ * verify": native omits path/mcp_entry by design, and the file to verify is then
+ * `<plugin-root>/vendor/quay-native/dist/quay-native.js`.
+ *
+ * Three-state return (硬规则 3b — "could not evaluate" must not print as "evaluated, fine"):
+ *   `<path>`             the runtime file to check for existence/freshness.
+ *   `NOT-EVALUATED:<why>` no native provider entry, or the native binding was omitted AND no plugin
+ *                        root could be resolved. The caller reports this as its own state.
+ *
+ * `pluginRoot` is the caller's already-resolved plugin root (the shell passes `$PLUGIN_ROOT`);
+ * omitted/undefined ⇒ the real `resolvePluginRoot()`.
  */
-export function providerEntryFile(cfgPath: string): string {
+export function providerEntryFile(cfgPath: string, pluginRoot?: string | null): string {
   try {
     const doc = (YAML.parse(fs.readFileSync(cfgPath, "utf8")) ?? {}) as Record<string, unknown>;
     const providers = doc["providers"];
     const prov = (typeof providers === "object" && providers !== null ? (providers as Record<string, unknown>)["native"] : undefined) as
       | Record<string, unknown>
       | undefined;
-    const mcp = (prov && typeof prov === "object" ? prov["mcp_entry"] : undefined) ?? [];
+    if (typeof prov !== "object" || prov === null || Array.isArray(prov)) {
+      return "NOT-EVALUATED:no providers.native entry in the config";
+    }
+    const resolved = resolveProviderEntry("native", prov, pluginRoot);
+    const mcp = resolved.mcpEntry;
     if (Array.isArray(mcp) && mcp.length >= 2) return String(mcp[1]);
-    return "";
-  } catch {
-    return "";
+    return `NOT-EVALUATED:${NATIVE_PROVIDER_UNRESOLVABLE} (native omits path/mcp_entry and no plugin root could be resolved)`;
+  } catch (e: unknown) {
+    return `NOT-EVALUATED:unreadable config (${e instanceof Error ? e.message : String(e)})`;
   }
 }
 

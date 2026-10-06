@@ -216,12 +216,68 @@ test("AC5: config_validate handler invokes the imported validateConfig (not dead
 
 test("validateConfig returns ok:true for valid config", async () => {
   const { validateConfig } = await import("../src/config-validate.ts");
-  const ws = makeWorkspaceBase(makeValidConfig("/tmp/test"), "clean");
+  const ws = makeWorkspaceBase(makeValidConfig(os.tmpdir()), "clean");
   const result = validateConfig({ workspaceRoot: ws });
   assert.equal(result.ok, true, `valid config should be ok, got issues: ${JSON.stringify(result.issues)}`);
   // ok:true even with warn-only issues (warn-exit contract)
   const hasErrors = result.issues.some((i) => i.severity === "error");
   assert.equal(hasErrors, false, `valid config should have no errors, got: ${JSON.stringify(result.issues)}`);
+});
+
+// ── gap-config-validate-requires-mcp-entry-contradicts-native-default-resolver ──
+// AC2 (MCP half): the MCP surface must return the SAME verdict as the runtime for the native
+// omitted/explicit and custom-missing cases — driven through the REGISTERED handler, not just the
+// shared module, so a handler-level regression cannot hide.
+
+async function runMcpConfigValidate(workspaceRoot) {
+  const { registerConfigHandlers } = await import("../src/mcp-handlers.ts");
+  let handler = null;
+  const mockServer = {
+    registerTool(name, opts, h) {
+      if (name === "config_validate") handler = h || null;
+      return this;
+    },
+  };
+  registerConfigHandlers(mockServer, { workspaceRoot, configPath: path.join(workspaceRoot, ".quay", "config.yml") });
+  assert.ok(handler, "config_validate handler must be registered");
+  return handler({ checkFiles: undefined });
+}
+
+test("AC2 (MCP): native omitting path/mcp_entry ⇒ ok:true, and custom provider missing it ⇒ ok:false", async () => {
+  const nativeOmitted = [
+    "providers:",
+    "  native:",
+    "    enabled: true",
+    "",
+    "loop:",
+    "  board: native",
+    "  gates: [acceptance]",
+    "",
+  ].join("\n");
+  const wsNative = makeWorkspaceBase(nativeOmitted, "ac2-native-omitted");
+  const nativeResult = await runMcpConfigValidate(wsNative);
+  assert.equal(
+    nativeResult.structuredContent.ok,
+    true,
+    `native omitting path/mcp_entry must pass over MCP, got: ${JSON.stringify(nativeResult.structuredContent.issues)}`,
+  );
+
+  const customMissing = [
+    "providers:",
+    "  github:",
+    "    enabled: true",
+    "",
+    "loop:",
+    "  board: native",
+    "  gates: [acceptance]",
+    "",
+  ].join("\n");
+  const wsCustom = makeWorkspaceBase(customMissing, "ac2-custom-missing");
+  const customResult = await runMcpConfigValidate(wsCustom);
+  assert.equal(customResult.structuredContent.ok, false, "custom provider missing mcp_entry must fail over MCP");
+  const issue = customResult.structuredContent.issues.find((i) => i.field === "providers.github");
+  assert.ok(issue, `expected providers.github issue, got: ${JSON.stringify(customResult.structuredContent.issues)}`);
+  assert.match(issue.message, /mcp_entry/);
 });
 
 // ── Additional: missing required loop fields ──
@@ -248,17 +304,17 @@ test("validateConfig flags missing loop.board", async () => {
 
 // ── Additional: missing provider mcp_entry ──
 
-test("validateConfig flags enabled provider missing mcp_entry", async () => {
+test("validateConfig flags enabled CUSTOM provider missing mcp_entry (native is exempt by design)", async () => {
   const { validateConfig } = await import("../src/config-validate.ts");
   const configMissingMcp = [
     "providers:",
-    "  native:",
+    "  github:",
     "    enabled: true",
     "",
   ].join("\n");
   const ws = makeWorkspaceBase(configMissingMcp, "missing-mcp");
   const result = validateConfig({ workspaceRoot: ws });
-  assert.equal(result.ok, false, "missing mcp_entry should fail");
+  assert.equal(result.ok, false, "a custom provider missing mcp_entry should fail");
   const mcpIssue = result.issues.find((i) => i.field.startsWith("providers."));
   assert.ok(mcpIssue, `should have provider issue, got: ${JSON.stringify(result.issues)}`);
 });
@@ -323,7 +379,7 @@ test("AC4b: validateConfig references in mcp-handlers.ts are import + handler ca
 
 test("validateConfig result shape has ok:boolean and issues:array", async () => {
   const { validateConfig } = await import("../src/config-validate.ts");
-  const ws = makeWorkspaceBase(makeValidConfig("/tmp/test"), "shape");
+  const ws = makeWorkspaceBase(makeValidConfig(os.tmpdir()), "shape");
   const result = validateConfig({ workspaceRoot: ws });
   assert.equal(typeof result.ok, "boolean", "ok should be boolean");
   assert.ok(Array.isArray(result.issues), "issues should be array");
