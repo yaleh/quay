@@ -60,6 +60,12 @@ import { runDriver } from "./driver.ts";
 // used `stdio: "ignore"`, so a host started via `quay server start/add/restart` left no cause
 // anywhere. ⛔ One implementation, not two copies (硬规则 5b).
 import { openServeLog, SERVE_LOG_UNAVAILABLE } from "../serve-log.ts";
+// 宿主**自己的 cgroup scope**（gap-serve-host-spawned-in-caller-session-cgroup-dies-when-cloudcli-
+// restarts）：`detached:true` 只脱离会话、⛔ 不脱离 cgroup ⇒ 必须把 argv 包进 `systemd-run --user
+// --scope`。argv 构造与可用性判据的唯一实现在 Core 叶模块 `systemd-scope.ts`——本文件与
+// `plugin/scripts/start-drivers.ts:startServe`（同一个宿主的另一个 spawn 点）从**同一处**取符号，
+// ⛔ 两边都不自己拼 `systemd-run` argv（硬规则 5b：两份 = 漂移）。
+import { resolveServeEnvelope, scopeLaunchArgv, serveScopeUnavailableReport } from "../systemd-scope.ts";
 // 宿主**加载版本**读数 —— 与 anchor 的 `driver status --json` 共用**同一份**实现（Core
 // `loaded-version.ts`，`plugin/scripts/driver-runtime.ts` 从同一处 import）。⛔ 这里不再手搓一份
 // 「读 /proc/<pid>/cmdline 取版本」的判据（两份 = 漂移，且内核那份在 linked worktree 里会被重定位到
@@ -544,6 +550,10 @@ export interface SpawnHostOverrides {
   entry?: string;
   /** Sink for the non-fatal "serve log unavailable" warning. Defaults to `process.stderr`. */
   warn?: (line: string) => void;
+  /** Sink for the non-fatal "this host is NOT restart-protected" report (envelope unavailable).
+   *  Defaults to `process.stderr`. Deliberately SEPARATE from `warn`: the two degradations are
+   *  independent facts, and folding them onto one sink would make one of them uncountable. */
+  warnScope?: (line: string) => void;
 }
 
 /** Spawn a detached unified host seeded with `initial` as its launch-time service set.
@@ -590,7 +600,24 @@ export function spawnHost(
         `will be discarded, so a later death of this host will have no readable cause\n`,
     );
   }
-  const child = spawn(process.execPath, args, {
+  // ── the host's own cgroup scope (gap-serve-host-spawned-in-caller-session-cgroup-dies-when-
+  //    cloudcli-restarts): `detached: true` leaves the SESSION but ⛔ NOT the cgroup, so a host
+  //    started from a CloudCLI session used to be killed with that session's scope. Wrapping the
+  //    inner argv in `systemd-run --user --scope` puts it in its own transient unit — and `--scope`
+  //    execs in place, so `.quay/server.json`/`.quay/serve.pid`/the admission lock keep their pid
+  //    semantics and `/proc/<pid>/cmdline` still reports `quay serve`.
+  //    ⛔ The argv construction is the ONE shared implementation (Core `systemd-scope.ts`, the same
+  //    one `plugin/scripts/start-drivers.ts:startServe` uses) — this file never spells `systemd-run`.
+  //    Unavailable ⇒ spawn exactly as before AND report it (硬规则 3b: ⛔ not silently unprotected).
+  const innerArgv = [process.execPath, ...args];
+  const scope = resolveServeEnvelope({ root: workspaceRoot });
+  const launchArgv = scopeLaunchArgv(innerArgv, scope);
+  if (scope.envelope === "none") {
+    const warnScope = overrides.warnScope ?? ((line: string) => process.stderr.write(line));
+    const report = serveScopeUnavailableReport(scope);
+    if (report) warnScope(report);
+  }
+  const child = spawn(launchArgv[0], launchArgv.slice(1), {
     cwd: workspaceRoot,
     detached: true,
     stdio: log.stdio,

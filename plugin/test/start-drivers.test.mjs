@@ -51,6 +51,9 @@ import {
   stopServeHost,
   SERVE_ADMISSION_REFUSED_MARKER,
 } from "../scripts/start-drivers.ts";
+// The shared envelope's availability predicate (the SAME one `startServe` consults) — used here only
+// to decide whether the scope membership of the spawned host can be MEASURED on this host.
+import { systemdScopeAvailable } from "../../packages/quay/src/systemd-scope.ts";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const REPO_ROOT = path.resolve(__dirname, "..", "..");
@@ -488,6 +491,80 @@ test("full flow — run#1 starts drivers + serve; run#2 SPAWNS AGAIN and is refu
       "⛔ exactly ONE host ever bound — the refusal is what keeps a second host off this root");
   } finally {
     reapFakeHost(path.join(tmp, "ws"));
+    fs.rmSync(tmp, { recursive: true, force: true });
+  }
+});
+
+// ── gap-serve-host-spawned-in-caller-session-cgroup-dies-when-cloudcli-restarts ──────────────────
+// The SECOND spawn site of the same host. `spawnHost` (Core `cli/server.ts`) is covered by
+// `packages/quay/test/server-host-own-scope.test.mjs`; this is the `startServe` half — the SAME
+// assertion (⛔ not a paraphrase): the spawned host's `/proc/<pid>/cgroup` is a transient
+// `quay-serve-*.scope`, NOT the caller's cgroup, and the pid records on disk (`.quay/serve.pid` —
+// which ONLY this spawn site writes — and the carrier) name that live process, whose cmdline is
+// `serve`.
+function cgroupPathOf(pid) {
+  const m = /(?:^|\n)0::(\/\S*)/.exec(fs.readFileSync(`/proc/${pid}/cgroup`, "utf8"));
+  return m ? m[1] : null;
+}
+
+/** Kill the host by PID (⛔ never `pkill -f`, which matches unrelated `quay.ts serve` peers) and wait
+ *  for both its pid and its `--collect`ed transient scope to reach a terminal state. */
+async function reapHostAndScope(pid, unit) {
+  if (pid) { try { process.kill(pid, "SIGKILL"); } catch { /* gone */ } }
+  const pidDeadline = Date.now() + 10000;
+  while (pid && pidRunning(pid) && Date.now() < pidDeadline) await sleep(150);
+  if (!unit) return;
+  const scopeDeadline = Date.now() + 10000;
+  while (Date.now() < scopeDeadline) {
+    const show = spawnSync("systemctl", ["--user", "show", unit, "-p", "LoadState"], { encoding: "utf8" });
+    if (/LoadState=(not-found|masked|dead|inactive)/.test(show.stdout ?? "")) break;
+    await sleep(200);
+  }
+}
+
+test("startServe — the host runs in its OWN `quay-serve-*.scope`, and its pid records name it", async (t) => {
+  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "sdr-scope-"));
+  // The workspace basename starts with `test-` so the unit is `quay-serve-test-…` and a residue check
+  // can find it by name (AC7).
+  const root = path.join(tmp, "test-ws");
+  fs.mkdirSync(path.join(root, ".quay"), { recursive: true });
+  fs.writeFileSync(path.join(root, ".quay", "config.yml"), "providers: {}\n", "utf8");
+  const fake = writeFakeQuay(tmp);
+  const env = { FAKE_QUAY_LOG: path.join(tmp, "log.jsonl"), FAKE_QUAY_STATE: path.join(tmp, "state.json"), FAKE_QUAY_ROOT: root };
+  let hostPid = null;
+  let unitName = null;
+  try {
+    const r = runScript(["--cli", fake, "--root", root, "--host", "127.0.0.1", "--serve-timeout", "15000", "--json"], { env });
+    assert.equal(r.status, 0, `the run must exit 0:\n${r.stdout}\n${r.stderr}`);
+    const report = jsonReport(r.stdout);
+    assert.equal(report.serve.state, "started", "the host started");
+    hostPid = report.serve.pid;
+    assert.ok(Number.isInteger(hostPid) && hostPid > 0, `the report names the host pid (got ${JSON.stringify(hostPid)})`);
+
+    // pid semantics are UNCHANGED by the envelope: `--scope` execs in place, so the pid written to
+    // `.quay/serve.pid`, the carrier's pid and the report all name the SAME live process.
+    const servePid = Number(fs.readFileSync(path.join(root, ".quay", "serve.pid"), "utf8").trim());
+    const carrier = JSON.parse(fs.readFileSync(path.join(root, ".quay", "server.json"), "utf8"));
+    assert.equal(servePid, hostPid, "`.quay/serve.pid` (written by startServe) names the reported host pid");
+    assert.equal(carrier.pid, hostPid, "the on-disk carrier names the same pid");
+    const cmdline = fs.readFileSync(`/proc/${hostPid}/cmdline`, "utf8").split("\0").filter(Boolean).join(" ");
+    assert.ok(cmdline.includes("serve"), `the host is really \`serve\` (cmdline=${JSON.stringify(cmdline)})`);
+
+    if (!systemdScopeAvailable()) {
+      // 独立取值 (硬规则 3b): the cgroup membership was NOT measured here — ⛔ not read as 「checked and
+      // fine」. The pid/record assertions above DID run in both modes.
+      t.diagnostic("not-evaluated: systemd-run --user --scope unavailable on this host — the spawned host's cgroup membership was not measured");
+      return;
+    }
+    const cg = cgroupPathOf(hostPid);
+    assert.ok(cg, `could not read /proc/${hostPid}/cgroup`);
+    unitName = cg.split("/").filter(Boolean).pop();
+    const tail = cg.slice(cg.indexOf("/app.slice/"));
+    assert.ok(tail.startsWith("/app.slice/quay-serve-"), `the host must live in its own quay-serve-* scope; got cgroup=${cg}`);
+    assert.ok(tail.endsWith(".scope"), `…a transient scope; got cgroup=${cg}`);
+    assert.notEqual(cg, cgroupPathOf(process.pid), "the host must NOT share the caller's cgroup");
+  } finally {
+    await reapHostAndScope(hostPid, unitName);
     fs.rmSync(tmp, { recursive: true, force: true });
   }
 });

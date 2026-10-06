@@ -45,7 +45,7 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import { spawn, spawnSync, execFileSync } from "node:child_process";
+import { spawn, spawnSync } from "node:child_process";
 import { isDirectEntry } from "./gate-script-base.ts";
 // Layer 0 · 主检出推导（order-independent，gap-main-checkout-root-derivation-recurs-three-sites）。
 import { mainCheckoutRoot, repoRoot } from "./repo-root.ts";
@@ -550,6 +550,25 @@ export {
  *  也经它读版本）——保留只为不打断既有消费面。 */
 export { versionOfLoadedScript as versionOfKernelScript };
 export type { LoadedVersionState, VersionRelation, LoadedVersionReading, InstalledRegistryReading };
+
+// 「把子进程包进 `systemd-run --user --scope` 包络」的**唯一一份**实现：单元名派生、可用性探测、
+// MemoryMax 策略、argv 构造。**从 Core 取符号**，本文件不再自带一份（gap-serve-host-spawned-in-
+// caller-session-cgroup-dies-when-cloudcli-restarts）。
+// WHY 落 Core 而不是留在这里：serve 宿主的两个 spawn 点横跨边界（Core `cli/server.ts:spawnHost` +
+// 本层 `start-drivers.ts:startServe`），而 Core **不得静态 import `plugin/**`**（import-graph-check 的
+// reverseEdges 棘轮）⇒ 纯函数提到 `packages/quay/src/systemd-scope.ts`，两侧 import 同一份。本文件
+// 把它历来导出的名字（`anchorLaunchArgv` / `anchorUnitName` / `anchorSystemdRunAvailable` / …）原样
+// 再导出（`plugin/` → `packages/` 是受认可的方向；⛔ 不是复制一份，硬规则 5b）。
+import {
+  scopeUnitName,
+  systemdScopeAvailable,
+  parseMemoryMaxOverride,
+  defaultScopeMemoryMax,
+  resolveScopeEnvelope,
+  scopeLaunchArgv,
+  SCOPE_ENVELOPE_HOST_FRACTION,
+  type ScopeEnvelopeSource,
+} from "../../packages/quay/src/systemd-scope.ts";
 
 // ── Layer 0 · 稳定承载（resolveMainRoot，gap-resident-driver-stable-carrier-liveness AC1）──────────
 // 常驻 supervisor 不得由生命周期短于它的对象（worktree）承载：若 --root 落在 git worktree 内，把 root
@@ -1418,7 +1437,7 @@ export function rebuildKernelBundle(opts: { timeoutMs?: number; scriptPath?: str
 //   ⛔ 三条各自的**消费者不同**（套件 vs anchor 组），合并到共享模块要动第三份文件，收益只是省几十行。
 
 /** 包络里的上限来源：宿主推导 / env 覆盖 / env 明确不设上限 / 读不到（⛔ 四态各自独立，不与「没包络」同形）。 */
-export type AnchorEnvelopeSource = "host-derived" | "env-override" | "env-unlimited" | null;
+export type AnchorEnvelopeSource = ScopeEnvelopeSource;
 
 /** anchor 组的内存包络读数（纯函数判定 + 内核直接量两条路**共用同一形状**）。
  *
@@ -1442,21 +1461,18 @@ export interface AnchorEnvelope {
 /** anchor scope 的单元名前缀。读侧靠它把「我们给的包络」与**环境自带的 scope**（GUI 会话的
  *  `session-N.scope` 等）分开：后者也以 `.scope` 结尾，但**不是**本机制给的包络。 */
 export const ANCHOR_UNIT_PREFIX = "quay-anchor-";
-/** 默认上限 = 宿主总内存 × 本比例。⚠️ **未经测量的起始值**（见上面长注释）——用 MemoryPeak 实测后调。 */
-export const ANCHOR_ENVELOPE_HOST_FRACTION = 0.25;
+/** 默认上限 = 宿主总内存 × 本比例。⚠️ **未经测量的起始值**（见上面长注释）——用 MemoryPeak 实测后调。
+ *  比例的唯一实现落在 Core `systemd-scope.ts`（serve 宿主共用同一个）；此处只是历来的导出名。 */
+export const ANCHOR_ENVELOPE_HOST_FRACTION = SCOPE_ENVELOPE_HOST_FRACTION;
 /** 覆盖上限的环境变量（语法同 full-suite-runner 的 QUAY_TEST_SYSTEMD_RUN_LIMITS；**显式空串 = 不设上限**）。 */
 export const ANCHOR_LIMITS_ENV = "QUAY_DRIVER_SYSTEMD_RUN_LIMITS";
 /** 启动者把「上限由谁决定」传给 anchor 的 seam（内核读不到这件事，只能由启动者声明）。 */
 export const ANCHOR_ENVELOPE_SOURCE_ENV = "QUAY_ANCHOR_ENVELOPE_SOURCE";
-/** 把内存上限对齐到页边界，避免 systemd/cgroup 侧取整后与读数差几 KB（AC3 的一致性比较靠这个）。 */
-const ANCHOR_ENVELOPE_PAGE_BYTES = 4096;
-
 /** 默认上限（宿主推导）：`floor(totalmem × 比例)` 向下对齐页边界，至少一页。
- *  ⛔ 纯函数（入参是字节数，不是 os.totalmem()）⇒ 两个注入宿主必得两个不同的值（AC1）。 */
+ *  ⛔ 纯函数（入参是字节数，不是 os.totalmem()）⇒ 两个注入宿主必得两个不同的值（AC1）。
+ *  实现落在 Core `systemd-scope.ts`（`defaultScopeMemoryMax`）——本函数只是历来的导出名。 */
 export function defaultAnchorMemoryMax(totalmemBytes: number): string {
-  const bytes = Math.floor(Math.max(0, totalmemBytes) * ANCHOR_ENVELOPE_HOST_FRACTION);
-  const aligned = Math.max(ANCHOR_ENVELOPE_PAGE_BYTES, Math.floor(bytes / ANCHOR_ENVELOPE_PAGE_BYTES) * ANCHOR_ENVELOPE_PAGE_BYTES);
-  return String(aligned);
+  return defaultScopeMemoryMax(totalmemBytes, ANCHOR_ENVELOPE_HOST_FRACTION);
 }
 
 /** 从覆盖串里取 MemoryMax 一键。三态（⛔ 各自独立，不与「没给这个键」共用一个取值）：
@@ -1467,50 +1483,28 @@ export function defaultAnchorMemoryMax(totalmemBytes: number): string {
  *   - `"unlimited"` —— 串**显式为空/全空白**（明确「一组属性都不设」）或 `MemoryMax=`（值为空）
  *                      ⇒ 不传 `-p MemoryMax=`（机制上不设该限制，⛔ 不写一个"等价无限制"的字面值）。 */
 export function parseAnchorMemoryMaxOverride(raw: string | undefined): { kind: "absent" | "value" | "unlimited"; value: string | null } {
-  if (raw === undefined) return { kind: "absent", value: null };
-  if (raw.trim() === "") return { kind: "unlimited", value: null };
-  for (const part of raw.trim().split(/\s+/)) {
-    const eq = part.indexOf("=");
-    if (eq === -1) continue;
-    if (part.slice(0, eq) !== "MemoryMax") continue;
-    const value = part.slice(eq + 1);
-    return value === "" ? { kind: "unlimited", value: null } : { kind: "value", value };
-  }
-  return { kind: "absent", value: null };
+  // 三态解析的唯一实现在 Core `systemd-scope.ts`（serve 宿主共用同一套语义）；此处只是历来的导出名。
+  return parseMemoryMaxOverride(raw);
 }
 
 /** anchor 的 scope 单元名（`quay-anchor-<root 基名>-<ts>.scope`）：可读、可按前缀 grep、可按 root 分辨。
- *  sanitize 到 systemd 允许的字符集；⛔ 不依赖它全局唯一（同名已存在的单元 systemd-run 会拒绝起新的）。 */
+ *  sanitize 到 systemd 允许的字符集；⛔ 不依赖它全局唯一（同名已存在的单元 systemd-run 会拒绝起新的）。
+ *  实现落在 Core `systemd-scope.ts`（`scopeUnitName`）——本函数只是历来的导出名 + anchor 的前缀。 */
 export function anchorUnitName(root: string, nowMs: number): string {
-  const base = path.basename(path.resolve(root)).replace(/[^A-Za-z0-9_.-]/g, "-").replace(/^[^A-Za-z0-9]+/, "");
-  const slug = base === "" ? "root" : base;
-  // 单元名总长上限 255；留出 ".scope" 与余量。
-  return `${ANCHOR_UNIT_PREFIX}${slug.slice(0, 180)}-${nowMs}.scope`;
+  return scopeUnitName(ANCHOR_UNIT_PREFIX, root, nowMs);
 }
 
 /** `systemd-run --user --scope` 在本机是否可用（记忆化）。与 full-suite-runner.systemdRunAvailable 的
  *  **同一判据、同一 seam**：起一个真瞬态 scope（`true`）——二进制在不在**不构成**判据，必须有一个活的
- *  user manager（user session / D-Bus）接受 `--scope` + 属性。`QUAY_TEST_SYSTEMD_RUN_AVAILABLE=0|1` 强制。 */
-let _anchorSystemdRunAvailable: boolean | null = null;
+ *  user manager（user session / D-Bus）接受 `--scope` + 属性。`QUAY_TEST_SYSTEMD_RUN_AVAILABLE=0|1` 强制。
+ *  实现落在 Core `systemd-scope.ts`（`systemdScopeAvailable`），serve 宿主共用**同一份探测与同一 memo**。 */
 export function anchorSystemdRunAvailable(): boolean {
-  if (_anchorSystemdRunAvailable !== null) return _anchorSystemdRunAvailable;
-  const forced = process.env.QUAY_TEST_SYSTEMD_RUN_AVAILABLE;
-  if (forced === "0") return (_anchorSystemdRunAvailable = false);
-  if (forced === "1") return (_anchorSystemdRunAvailable = true);
-  try {
-    execFileSync("systemd-run", ["--user", "--scope", "--quiet", "-p", "MemoryAccounting=yes", "true"], {
-      stdio: "ignore",
-      timeout: 10_000,
-    });
-    _anchorSystemdRunAvailable = true;
-  } catch {
-    _anchorSystemdRunAvailable = false;
-  }
-  return _anchorSystemdRunAvailable;
+  return systemdScopeAvailable();
 }
 
 /** 算出 anchor 启动方式：包不包、包住时的上限是多少。**纯函数**（宿主总内存 / env / 探测全可注入）
- *  ⇒ 两个注入宿主必得两个不同的 MemoryMax（AC1），且 systemd 不可用时有独立取值 `"none"`（⛔ 不是缺字段）。 */
+ *  ⇒ 两个注入宿主必得两个不同的 MemoryMax（AC1），且 systemd 不可用时有独立取值 `"none"`（⛔ 不是缺字段）。
+ *  实现落在 Core `systemd-scope.ts`（`resolveScopeEnvelope`）——本函数只是 anchor 的前缀/env 绑定。 */
 export function resolveAnchorEnvelope(opts: {
   root: string;
   /** 测试缝：宿主总内存（字节）。缺省 = `os.totalmem()`。 */
@@ -1522,55 +1516,25 @@ export function resolveAnchorEnvelope(opts: {
   /** 测试缝：单元名里的时间戳。缺省 = `Date.now()`。 */
   nowMs?: number;
 }): { envelope: "scope" | "none"; memoryMax: string | null; source: AnchorEnvelopeSource; unit: string | null; reason: string | null } {
-  const available = opts.systemdRun ?? anchorSystemdRunAvailable();
-  if (!available) {
-    return {
-      envelope: "none",
-      memoryMax: null,
-      source: null,
-      unit: null,
-      reason: "systemd-run --user --scope unavailable on this host (no user manager / no D-Bus / probe failed) — falling back to an unenveloped spawn",
-    };
-  }
-  const raw = opts.limitsRaw !== undefined ? opts.limitsRaw : process.env[ANCHOR_LIMITS_ENV];
-  const override = parseAnchorMemoryMaxOverride(raw);
-  let memoryMax: string | null;
-  let source: AnchorEnvelopeSource;
-  if (override.kind === "value") {
-    memoryMax = override.value;
-    source = "env-override";
-  } else if (override.kind === "unlimited") {
-    memoryMax = null;
-    source = "env-unlimited";
-  } else {
-    memoryMax = defaultAnchorMemoryMax(opts.totalmemBytes ?? os.totalmem());
-    source = "host-derived";
-  }
-  return {
-    envelope: "scope",
-    memoryMax,
-    source,
-    unit: anchorUnitName(opts.root, opts.nowMs ?? Date.now()),
-    reason: null,
-  };
+  return resolveScopeEnvelope({
+    prefix: ANCHOR_UNIT_PREFIX,
+    root: opts.root,
+    limitsEnv: ANCHOR_LIMITS_ENV,
+    systemdRun: opts.systemdRun,
+    totalmemBytes: opts.totalmemBytes,
+    limitsRaw: opts.limitsRaw,
+    nowMs: opts.nowMs,
+  });
 }
 
 /** 把内层 argv 包进 `systemd-run --user --scope`（envelope==="none" ⇒ **原样返回**内层 argv = 回退当前行为）。
  *  `--scope` 下 systemd-run 会**原地 exec** ⇒ 内层 argv 是**尾段**、pid 与 `.quay/anchor.pid` 的语义不变
  *  （AC5 的结构性理由：⛔ 不经 shell、⛔ 不 fork 一个中间进程）。`--collect` = 单元退出后自动回收
  *  （含失败），避免瞬态 scope 在 user manager 里堆积；`OOMPolicy=continue` = 组内某个进程被 OOM 杀
- *  **不**拖垮整个 anchor（正是事故里那个手工 scope 唯一的正确之处）。 */
+ *  **不**拖垮整个 anchor（正是事故里那个手工 scope 唯一的正确之处）。
+ *  argv 构造的唯一实现在 Core `systemd-scope.ts`（`scopeLaunchArgv`），serve 宿主共用同一份。 */
 export function anchorLaunchArgv(innerArgv: string[], res: { envelope: "scope" | "none"; memoryMax: string | null; unit: string | null }): string[] {
-  if (res.envelope === "none" || !res.unit) return innerArgv;
-  const argv = [
-    "systemd-run", "--user", "--scope", "--collect",
-    `--unit=${res.unit}`,
-    "-p", "MemoryAccounting=yes",
-    "-p", "OOMPolicy=continue",
-  ];
-  // ⛔ 上限为空 = **不传**该属性（机制上不设限制）；⛔ 不写一个「等价无限制」的字面值（CLAUDE.md 推论二）。
-  if (res.memoryMax) argv.push("-p", `MemoryMax=${res.memoryMax}`);
-  return [...argv, ...innerArgv];
+  return scopeLaunchArgv(innerArgv, res);
 }
 
 /** anchor 侧读**内核实际生效**的包络（直接量）：`/proc/self/cgroup` 取单元名、该 cgroup 的 `memory.max`
