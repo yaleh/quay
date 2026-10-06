@@ -434,7 +434,7 @@ test("面 B（skill/loop 文本）：只扫 ```bash 围栏；未赋值变量为 
   const s = shipped();
   console.log(`[B/skill+loop] files=${s.files} notEvaluated=${s.notEvaluated.length} bound(assigned=${s.bound.assigned}, hostEnv=${s.bound.hostEnv}, documented=${s.bound.documented})`);
   console.log(`[B/skill+loop] bash 围栏里被赦免的：assigned=${[...s.assignedByName].map(([n, c]) => `${n}×${c}`).join(" ") || "(none)"} hostEnv=${[...s.hostEnvByName].map(([n, c]) => `${n}×${c}`).join(" ") || "(none)"}`);
-  console.log(`[B/skill+loop] bash 围栏里靠「散文说明」赦免的（逐名，供 AC3/AC6 核对）：${[...s.documentedByName].map(([n, c]) => `${n}×${c}`).sort().join(" ") || "(none)"}`);
+  console.log(`[B/skill+loop] bash 围栏里靠「散文说明」赦免的（逐名，供 AC3/AC5 核对）：${[...s.documentedByName].map(([n, c]) => `${n}×${c}`).sort().join(" ") || "(none)"}`);
   console.log(`[B/skill+loop] 散文占位符（信息读数，不判红）：${[...s.prosePlaceholders.entries()].map(([n, c]) => `${n}×${c}`).sort().join(" ") || "(none)"}`);
   report("B/skill+loop", s.findings);
   assert.deepEqual(s.notEvaluated, [], `有文件无法解析（NOT-EVALUATED，不得与零命中同形）：${JSON.stringify(s.notEvaluated)}`);
@@ -455,7 +455,7 @@ test("NOT-EVALUATED：围栏未闭合 ⇒ 报无法评估 + 原因，而不是�
   assert.notEqual(`${p.evaluated}`, `${legit.evaluated}`, "「读不懂」与「零命中」不得共用同一取值");
 });
 
-test("AC6 证据表：八个嫌疑变量在 skill/loop 文本里的落点与来源（机械读数）", () => {
+test("AC5 证据表：八个嫌疑变量在 skill/loop 文本里的落点与来源（机械读数）", () => {
   const SUSPECTS = ["FORK_BASELINE", "MERGE_TARGET", "REPO_ROOT", "WORKTREE_ROOT", "TMUX_SESSION", "TEST_COMMAND", "QUAY_GLOBAL_DIR", "QUAY_CLAIM_REMOTE"];
   const inBash = new Map(); // name -> Set("file:line")
   const inProse = new Map(); // name -> Set(file)
@@ -479,7 +479,7 @@ test("AC6 证据表：八个嫌疑变量在 skill/loop 文本里的落点与来�
   for (const n of SUSPECTS) {
     const bash = [...(inBash.get(n) ?? [])];
     const prose = [...(inProse.get(n) ?? [])];
-    console.log(`[AC6] ${n}: bash-fence=${bash.length ? bash.join(",") : "(none)"} | prose=${prose.length ? prose.length + " file(s): " + prose.join(",") : "(none)"}`);
+    console.log(`[AC5] ${n}: bash-fence=${bash.length ? bash.join(",") : "(none)"} | prose=${prose.length ? prose.length + " file(s): " + prose.join(",") : "(none)"}`);
   }
   // 结论本身（占位符 / 在 bash 中被使用）写在任务完成记录里；此处只保证读数可复现。
   assert.equal(SUSPECTS.length, 8, "八个嫌疑变量一个不能少");
