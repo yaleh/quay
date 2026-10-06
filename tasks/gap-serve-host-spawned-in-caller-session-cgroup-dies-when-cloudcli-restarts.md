@@ -2,7 +2,7 @@
 id: gap-serve-host-spawned-in-caller-session-cgroup-dies-when-cloudcli-restarts
 title: serve 宿主默认落在调用它的会话 scope 里，CloudCLI 重启时随旧会话 scope 被杀——宿主应像 anchor 一样用
   systemd-run --scope 起在独立 scope
-status: todo
+status: ready
 labels:
   - gap
   - defect
