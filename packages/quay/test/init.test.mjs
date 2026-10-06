@@ -920,14 +920,18 @@ function initWorkspace(tag) {
   return ws;
 }
 
-/** A DISK-backed worktree root (quay-init.sh's validate_worktree_root rejects tmpfs). Tracked for cleanup. */
+/** A unique DISK-backed dir (quay-init.sh's validate_worktree_root rejects tmpfs), tracked by the
+ *  after() carrier below. Unique-by-construction (pid + time + random) rather than the shared
+ *  helper's mkdtemp, whose root may be tmpfs. */
 const _wtRoots = [];
-function diskWorktreeRoot(tag) {
+function uniqueDiskDir(tag) {
   const base = fs.existsSync("/var/tmp") ? "/var/tmp" : os.tmpdir();
-  const dir = fs.mkdtempSync(path.join(base, `qiwt-${tag}-`));
+  const dir = path.join(base, `qiwt-${tag}-${process.pid}-${Date.now()}-${Math.random().toString(36).slice(2)}`);
+  fs.mkdirSync(dir, { recursive: true });
   _wtRoots.push(dir);
   return dir;
 }
+const diskWorktreeRoot = (tag) => uniqueDiskDir(`wt-${tag}`);
 
 /** The real `quay-init.sh --loop` invocation, with this worktree's plugin as the plugin root. */
 function runQuayInit(ws, { pluginRoot = PLUGIN_ROOT } = {}) {
@@ -1114,7 +1118,7 @@ test("AC5: providerEntryFile resolves the OMITTED native binding through the plu
 
 test("AC5: verify-provider-runtime-existence is three-state — OK / FAIL(non-zero) / NOT-EVALUATED", () => {
   const ws = initWorkspace("ac5-verify");
-  const pluginRoot = fs.mkdtempSync(path.join(os.tmpdir(), "ac5-pluginroot-"));
+  const pluginRoot = uniqueDiskDir("ac5-pluginroot");
   try {
     fs.mkdirSync(path.join(ws, ".quay"), { recursive: true });
     fs.writeFileSync(path.join(ws, ".quay", "config.yml"), "providers:\n  native:\n    enabled: true\n");
