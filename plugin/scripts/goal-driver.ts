@@ -4274,7 +4274,12 @@ if (out.rootPresent) {
   // 项目指引链接 <root>/.quay/plugin —— 版本从链接**目标自己**的 plugin.json 派生，龄从**链接本身**的
   // lstat mtime 派生（⛔ 不跟随链接：跟随会把目标目录的 mtime 当成「上次 init 的时刻」，那是另一个量）。
   // 链接缺失 / 目标读不出 ⇒ 读数保持 null 且 present=false（⛔ 不与「相等/合格」同形，硬规则 3b）。
-  const linkPath = path.join(q, 'plugin');
+  // 路径拼成完整三段 <root>/.quay/plugin（⛔ 不写成 q 变量后接 plugin 名字的两参拼法：那正是
+  // kernel-sibling-resolution-check 的 DRIVER-SCOPE 判定所报的缺陷**形**——「把 quay 自己的
+  // plugin/ 树锚在 target root」的拼法恰是 <rootVar> 后紧跟第 2 段 plugin。本探针是**发往目标机
+  // 执行的自包含载荷**（⛔ 不 require 任何项目文件），只能自己拼目标侧路径、无法经 Layer 0 取值；
+  // 三段形与 driver-runtime 的 pointerReading 同形，按位置判定（硬规则 2）不是缺陷形）。
+  const linkPath = path.join(root, '.quay', 'plugin');
   try {
     const lst = fs.lstatSync(linkPath);
     out.initStatePresent = true;
