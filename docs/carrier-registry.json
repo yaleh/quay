@@ -332,12 +332,6 @@
       "readers": "unaudited"
     },
     {
-      "name": "quay-init-state.json",
-      "kind": "state-json",
-      "owner": "unowned-yet",
-      "readers": "unaudited"
-    },
-    {
       "name": "quay-session-send-audit.jsonl",
       "kind": "jsonl-log",
       "owner": "unowned-yet",

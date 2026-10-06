@@ -239,12 +239,11 @@ test('AC1/AC2 — the fresh-install config carries no maintainer commentary, and
 
     // ── AC1: whole-file per-line scan, hits listed (a bare boolean could not say WHICH line leaked,
     // or how many). The machine-injected absolute paths are neutralized FIRST, because they are the
-    // test's OWN inputs, not bytes the writer's template emitted — and one of them necessarily
-    // contains a forbidden token here: this task's id is
-    // "gap-quay-init-config-heredoc-leaks-maintainer-comments", so the worktree path the writer
-    // substitutes into providers.native.path ends in "...-heredoc-leaks-maintainer-comments". Red-
-    // lighting on that would be a false positive about the test's own working directory rather than
-    // about shipped prose — and it would red in EVERY worktree of this task, including fan-in's.
+    // test's OWN inputs, not bytes the writer's template emitted — the writer substitutes `ws` into
+    // tasks_dir / env and `wtRoot` into loop.worktree_root, and worktree paths can themselves carry a
+    // forbidden token (the worktree of THIS task's sibling ends in "...-heredoc-leaks-maintainer-
+    // comments"). Red-lighting on the test's own working directory would be a false positive about
+    // shipped prose, in EVERY worktree including fan-in's.
     const scanned = cfg.split(ws).join("<WS>").split(pluginDir).join("<PLUGIN>").split(wtRoot).join("<WT>");
     const hits = [];
     scanned.split("\n").forEach((line, i) => {
@@ -254,17 +253,20 @@ test('AC1/AC2 — the fresh-install config carries no maintainer commentary, and
     });
     assert.deepEqual(hits, [], `maintainer commentary leaked into the installed .quay/config.yml:\n${hits.join("\n")}`);
 
-    // ── AC2: the written file is real YAML and the four delivered values are byte-identical to what
-    // the pre-fix writer emitted (the negative control that relocating the note changed no behaviour).
+    // ── AC2: the written file is real YAML and the delivered values are byte-identical to what the
+    // pre-fix writer emitted (the negative control that relocating the note changed no behaviour).
     const doc = YAML.parse(cfg);
-    // The provider binding names the project-INTERNAL stable link, not the (version-carrying) plugin
-    // cache dir — see gap-config-provider-path-frozen-to-versioned-cache-dir. The link is created by
-    // the install itself (`refresh_project_plugin_link`), before `write_config`.
-    assert.equal(
-      doc.providers.native.path,
-      path.join(ws, ".quay", "plugin", "vendor", "quay-native"),
-      'providers.native.path',
-    );
+    // gap-project-quay-pointer-is-init-plugin-root-and-version-records-derive-from-it (2026-10-06):
+    // the native provider now carries NO path/mcp_entry — Core resolves it from its OWN plugin root
+    // (plugin-root.ts), so the config binds no version and no path. Asserted ABSENT (not merely
+    // "different") so a regression that re-inlines the version-carrying cache path reds here. The
+    // `<ws>/.quay/plugin` symlink is still created (by `refresh_project_plugin_link`, before
+    // `write_config`) as a GUIDANCE path for consumers that run without Core; `driver status`'s
+    // `pointer` reading reports its drift. The provider BINDING itself is still emitted, so the
+    // negative control keeps a positive anchor (tasks_dir) rather than degenerating to "keys absent".
+    assert.equal(doc.providers.native.path, undefined, 'providers.native.path must be absent (Core derives it)');
+    assert.equal(doc.providers.native.mcp_entry, undefined, 'providers.native.mcp_entry must be absent (Core derives it)');
+    assert.equal(doc.providers.native.tasks_dir, path.join(ws, "tasks"), 'providers.native.tasks_dir');
     assert.equal(doc.loop.test_command, "node --test", 'loop.test_command');
     assert.equal(doc.loop.worktree_root, wtRoot, 'loop.worktree_root');
     assert.equal(doc.loop.fork_baseline, "develop", 'loop.fork_baseline');
