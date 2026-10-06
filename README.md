@@ -316,6 +316,53 @@ the latest version` and leaves `installed_plugins.json` byte-identical; on a ver
 change it re-materializes the new version while keeping the entry's `scope` and
 `installedAt`.
 
+### Pre-release local drill — verify the plugin channel yourself (发布前本地演练)
+
+`.github/workflows/release.yml`'s `verify-plugin-channel` job is the only release
+gate, and its channel assertions live in **one** script —
+`plugin/scripts/verify-plugin-channel-assertions.ts` — which you can run locally
+before dispatching a release. It is a **checker**: run it from a **source checkout**
+(the published artifact strips raw plugin `.ts`, so it is deliberately not part of
+the installed tree). It asserts what the gate used to assume: the config
+`/quay:init` wrote passes `quay config validate` **and** the MCP `config_validate`
+tool; the version carriers (`VERSION`, `.claude-plugin/plugin.json`, and the byte
+bundle's own `quay --version`) agree and carry no `-dev`; `.quay/plugin` resolves to
+the verified install and the native provider freezes no `path`/`mcp_entry` into the
+config; the driver and server version readings exist; and the serve host runs in its
+own `quay-serve-*.scope`. Each assertion prints `PASS` / `FAIL` / `NOT-EVALUATED`;
+exit `0` = all passed, `1` = a FAIL, `3` = could not judge (never conflated with a
+pass).
+
+Build the release-form tree, install it into an **isolated HOME**, init a scratch
+project from it, and run the same assertions the gate runs:
+
+```sh
+# 1. build the plugin subtree (no push). Build FROM a `release/*` branch (or a vX.Y.Z tag) so the
+#    build-mode stamp writes X.Y.Z, not X.Y.Z-dev; `git archive` the artifact, never a `cp`
+bash plugin/scripts/publish-dist-branch.sh --branch plugin-channel-verify
+ART=$(mktemp -d); git archive plugin-channel-verify | tar -x -C "$ART"
+
+# 2. install through the marketplace into a throwaway HOME (never your real ~/.claude)
+H=$(mktemp -d); mkdir -p "$H/.claude"
+HOME="$H" CLAUDE_CONFIG_DIR="$H/.claude" claude plugin marketplace add "$ART"
+HOME="$H" CLAUDE_CONFIG_DIR="$H/.claude" claude plugin install quay@quay --scope user -y
+INST=$(HOME="$H" node -e 'const o=require(process.env.HOME+"/.claude/plugins/installed_plugins.json");process.stdout.write(o.plugins["quay@quay"].find(x=>x.scope==="user").installPath)')
+
+# 3. init a scratch project from the INSTALLED copy, then run the assertions
+P=$(mktemp -d); (cd "$P" && git init -q)
+CLAUDE_PLUGIN_ROOT="$INST" bash "$INST/scripts/quay-init.sh" \
+  --all --root "$P" --project scratch --repo-root "$P" --test-command 'node --test' --plugin-root "$INST"
+QUAY_VERIFY_HOME="$H" node --experimental-strip-types \
+  plugin/scripts/verify-plugin-channel-assertions.ts --installed "$INST" --project "$P" --scope user
+```
+
+Run it with `--scope project` too (install `--scope project` from inside `$P`). For
+the **upgrade drill** — the path that historically broke most often — start from a
+project whose `.quay/plugin` points at a previous plugin tree and add
+`--upgrade-from <previous-plugin-tree>`: the script asserts link→old, re-runs
+`/quay:init`, then asserts link→new and a passing validate. Use `--json` for a
+machine-readable report.
+
 ## Configuration
 
 `quay` Core reads `.quay/config.yml` at the repo root to decide which
