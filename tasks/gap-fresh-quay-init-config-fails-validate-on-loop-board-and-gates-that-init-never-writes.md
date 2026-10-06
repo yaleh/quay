@@ -2,7 +2,7 @@
 id: gap-fresh-quay-init-config-fails-validate-on-loop-board-and-gates-that-init-never-writes
 title: 全新项目 /quay:init 之后立即 config validate 与 MCP config_validate 仍失败——validator
   要求 loop.board / loop.gates，init 与 LOOP_VERSION_DEFAULTS 都不写；发布前演练的第一个真实红
-status: ready
+status: done
 labels:
   - gap
   - defect
