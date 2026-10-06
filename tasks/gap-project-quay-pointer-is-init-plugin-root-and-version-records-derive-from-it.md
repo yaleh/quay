@@ -1,7 +1,7 @@
 ---
 id: gap-project-quay-pointer-is-init-plugin-root-and-version-records-derive-from-it
 title: 项目内 quay 版本只留一个指引（.quay/plugin 指向 init 运行时的插件根），Core 不写只报漂移，其余版本记录消除或由它派生
-status: todo
+status: ready
 labels:
   - gap
 parent: null
