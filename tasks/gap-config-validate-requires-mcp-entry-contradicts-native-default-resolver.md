@@ -47,6 +47,7 @@ extra:
 - `plugin/scripts/quay-init-steps.ts`
 - `plugin/scripts/provider-binding-resolvability-check.ts`
 - `plugin/scripts/quay-init-closure-ratchet.ts`
+- `plugin/scripts/adr016-screen-use-check.ts`
 - `.quay/config.yml.example`
 - `docs/analysis/quay-init-closure-ratchet.baseline.json`
 - `packages/quay/test/config-validate.test.mjs`
@@ -54,6 +55,7 @@ extra:
 - `packages/quay/test/init.test.mjs`
 - `plugin/test/provider-binding-resolvability-check.test.mjs`
 - `plugin/test/quay-init-closure-ratchet.test.mjs`
+- `plugin/test/adr016-screen-use-check.test.mjs`
 - `plugin/sh-census-baseline.json`
 - `tasks/gap-config-validate-requires-mcp-entry-contradicts-native-default-resolver.md`
 
@@ -70,3 +72,22 @@ extra:
 
 ## DoD
 真实落地:一个刚被 0.16.0 `/quay:init` 迁移过的真实第三方项目,init 完成后立即运行 `quay config validate` 与 MCP `config_validate` 均通过;自定义 provider 缺 `mcp_entry` 仍被拒;插件根不可解析时得到稳定错误码而非崩溃;provider runtime 存在性检查在 runtime 文件缺失时真实失败。仅 fixture 绿不算完成。
+
+## Evidence
+**本轮(worker 续做,2026-10-06)——第 3 轮:前两轮 suite-red 的真因已定位并修复(落在本任务 delta 之外)**
+
+前两轮 `exited-not-landed` 的 suite-red 是同一条断言:`plugin/test/adr016-screen-use-check.test.mjs:139` 的 `AssertionError: the vanished file must be RETURNED, not swallowed`(真因日志 `.quay/fan-in-suite-gap-config-validate-requires-mcp-entry-contradicts-native-default-resolver~wk-prod-anchor~1791289501665-d89a49.log:14797`),`actual` 比 `expected` 多一条 `{rel:"tmp/workflow-journal-selftest-nzFRwk/plugin/scripts/gate-script-lib.sh",reason:"ENOENT"}`。
+
+**机制**:`adr016-screen-use-check.ts` 的 `SKIP_DIRS` 不含 `tmp`,整树 walk 于是走进被 gitignore 的 repo-root `tmp/`(`.gitignore` 自述:"repo-root tmp/ is RUNTIME residue, not source");而 `run-identity.ts` / `stage-receipt.ts` / `workflow-journal.ts` 三个兄弟 selftest 都在 `<cwd>/tmp/` 下 mkdtemp 夹具,并把真 `plugin/scripts/gate-script-lib.sh` **拷贝**进去。walk 列出该拷贝后,夹具自身的 rm 落在 walk 与 read 之间 ⇒ 冒出**第二个** `unreadable` ENOENT,令"恰好一条"的 deepEqual 变红——失败原因与被测性质(消失文件是否被上报)无关。`fs-walk.ts` 的 `buildFileIndex` 早已为此剪掉 `tmp`,本检查器是漏剪的兄弟(硬规则 5b)。
+
+**修复**:`SKIP_DIRS` 增 `"tmp"`(该集合按 basename 逐层剪枝;`git ls-files | grep -E '(^|/)tmp/'` 计数 = 0 ⇒ 不丢任何 tracked 文件);新增一条扫描面测试。
+
+**实跑读数**:
+- 绿:`node --no-warnings --experimental-strip-types --test plugin/test/adr016-screen-use-check.test.mjs` → `tests 19 / pass 19 / fail 0`。
+- 取假(负控制,用 `cp` 备份还原,⛔ 未用 repo-global 的 `git stash`):从 `SKIP_DIRS` 摘掉 `"tmp"` 后同一命令 → `pass 18 / fail 1`,唯一红项正是新增的扫描面测试,`AssertionError: tmp/ is runtime residue, not the repo — scanning it double-counts a fixture copy of a real script`;还原后回 `19/19`。
+- 生产载体(真树对照,同一 worktree):实放 `tmp/workflow-journal-selftest-nzFRwk/plugin/scripts/gate-script-lib.sh` 后跑 `adr016-screen-use-check.ts --root . --json` → `files_scanned: 156`;删掉该夹具后 → `files_scanned: 156`(**计数不变** ⇒ 该拷贝确未进入扫描面);两次均 `violations: 0`、`unreadable: []`,`--root .` 裸跑 `EXIT=0`。
+- 本任务自带用例仍绿:`node --no-warnings --experimental-strip-types --test packages/quay/test/init.test.mjs packages/quay/test/config-validate.test.mjs packages/quay/test/mcp-config-validate.test.mjs` → `tests 127 / pass 127 / fail 0`。
+
+**delta-relatedness 提示的处置**:机械判定把该红标为 UNRELATED(失败文件不在 Touches 内)。该判定是对的(它不是本任务 delta 引起的),但仍阻塞落地,故按 "foreign deterministic suite red ⇒ self-fix + widen Touches" 处理,而非当作环境噪声重掷。
+
+**Touches 扩边说明**:`plugin/scripts/adr016-screen-use-check.ts` 与 `plugin/test/adr016-screen-use-check.test.mjs` 不在本任务原 Touches 内,但前两轮 fan-in suite-red 的真因落在此处,故纳入。二者与本任务的 config/init 改动无耦合。

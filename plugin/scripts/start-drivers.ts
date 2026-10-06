@@ -69,6 +69,15 @@ import os from "node:os";
 import http from "node:http";
 import { fileURLToPath } from "node:url";
 import { spawn, spawnSync } from "node:child_process";
+// The serve host's log routing (`.quay/serve.log` + the `stdio` that appends to it) is
+// SINGLE-SOURCED in Core — gap-server-host-spawn-discards-stdio-while-start-drivers-logs-to-serve-log:
+// this file's `startServe` and `packages/quay/src/cli/server.ts`'s `spawnHost` are the two spawn
+// sites of the SAME host, and they used to disagree (this one logged; that one `stdio: "ignore"`,
+// so a host started via `quay server …` died leaving no cause anywhere). ⛔ One implementation, not
+// two copies (硬规则 5b). This is a FORWARD plugin→packages edge: esbuild (build-plugin-dist,
+// bundle:true) INLINES it into the shipped `dist/start-drivers.js`, so "the installed bundle is
+// self-contained" and "there is one implementation" are not in conflict.
+import { openServeLog, SERVE_LOG_UNAVAILABLE } from "../../packages/quay/src/serve-log.ts";
 
 /** In-memory ceiling for the serve host this skill starts (2026-09-17 global-OOM remediation).
  *
@@ -81,8 +90,12 @@ import { spawn, spawnSync } from "node:child_process";
  *  Floor 512 MB, cap 4 GB. A host that trips it aborts ITSELF (V8 OOM) rather than dragging the
  *  kernel into an unattributable global OOM.
  *
- *  ⚠️ Deliberately duplicated with `packages/quay/src/cli/server.ts:serveHeapCapMb` — this file is
- *  the kernel side of the kernel↔target boundary (GOAL-012) and must not import Core's source. */
+ *  ⚠️ Deliberately duplicated with `packages/quay/src/cli/server.ts:serveHeapCapMb` — a leaf,
+ *  judgment-free two-line derivation the kernel keeps local (GOAL-012 kernel↔target boundary: the
+ *  kernel does not reach into Core for a constant). ⛔ NOT a template for MECHANISM: where two
+ *  copies would drift — the serve-log routing, above — the single source IS imported from Core. The
+ *  distinction is the point: a constant duplicated twice is a rounding error, a spawn convention
+ *  duplicated twice is how one entry logs and the other discards its host's dying words. */
 function serveHeapCapMb(): number {
   return Math.min(4096, Math.max(512, Math.round(os.totalmem() / (1024 * 1024) / 5)));
 }
@@ -100,7 +113,7 @@ const DRIVER_KINDS = ["promotion", "worker", "outer", "goal"] as const;
 // that was structurally always 0. The serve binding now has ONE definition point —
 // `packages/quay/src/serve-binding.ts` — reached by the spawned `quay serve` itself, so this script
 // only FORWARDS a flag the operator actually named. That is also why it still needs no `.quay/config.yml`
-// read (zero closure deps, see the direct-entry guard at the bottom).
+// read (the binding is resolved by the CHILD, so nothing here has to close over the config reader).
 const DEFAULT_SERVE_TIMEOUT_MS = 30000;
 /** `GET /health` budget. Short: this is a local freshness read, not a build. */
 const HEALTH_PROBE_TIMEOUT_MS = 2000;
@@ -110,9 +123,8 @@ const SERVE_STOP_TIMEOUT_MS = 10000;
 
 /** The marker `quay serve` prints on stdout when its same-root admission lock refused the start.
  *  ⚠️ Deliberately duplicated with `packages/quay/src/serve.ts:SERVE_ADMISSION_REFUSED_MARKER` —
- *  this file is a self-contained plugin entry (rule (a) laydown, zero closure deps: see the
- *  direct-entry guard at the bottom) and must not import Core's source. Both copies must move
- *  together; the `self=<pid>` field is what binds a marker line to the spawn that produced it. */
+ *  the kernel keeps its own copy rather than importing Core for a string literal. Both copies must
+ *  move together; the `self=<pid>` field is what binds a marker line to the spawn that produced it. */
 export const SERVE_ADMISSION_REFUSED_MARKER = "quay-serve-admission-refused";
 
 /** Direct quantity: is this pid a live process? Same semantics as Core `packages/quay/src/
@@ -565,14 +577,19 @@ export async function startServe(
   timeoutMs: number,
 ): Promise<ServeStartResult> {
   fs.mkdirSync(path.join(root, ".quay"), { recursive: true });
-  const logPath = path.join(root, ".quay", "serve.log");
-  let logFd: number;
-  let startOffset = 0;
-  try {
-    logFd = fs.openSync(logPath, "a");
-    startOffset = fs.statSync(logPath).size; // before the spawn: only OUR child's bytes are read
-  } catch {
-    logFd = fs.openSync("/dev/null", "w");
+  // ONE implementation of the log routing, shared with `packages/quay/src/cli/server.ts:spawnHost`
+  // (⛔ this used to be a second copy with its own silent /dev/null fallback). The offset is taken
+  // before the spawn: only OUR child's appended bytes are read back for the admission verdict.
+  const log = openServeLog(root);
+  const logPath = log.path;
+  const startOffset = log.startOffset;
+  if (log.unavailable) {
+    // ⛔ 不静默 (硬规则 3b): without the log, `readAdmissionRefusal` cannot see the child's refusal
+    // marker, so an `already-running` verdict degrades to `exited`. That degradation is REPORTED —
+    // an operator reading a bare "exited" must be able to tell it apart from "the log said so".
+    process.stderr.write(
+      `${SERVE_LOG_UNAVAILABLE}: cannot open ${logPath} (${log.reason}) — the host's stdout/stderr will be discarded and an admission refusal will read as \`exited\`\n`,
+    );
   }
   const spawnedAtMs = Date.now();
   // ⛔ Forward ONLY what the operator named. The host/port defaults are resolved by the spawned
@@ -587,11 +604,15 @@ export async function startServe(
     serveArgs,
     {
       detached: true,
-      stdio: ["ignore", logFd, logFd],
+      stdio: log.stdio,
       cwd: root,
       env: { ...process.env, NODE_OPTIONS: withServeHeapCap(process.env.NODE_OPTIONS) },
     },
   );
+  // The child holds its own dup of the fd; release the parent's copy now (⛔ after spawn, never
+  // before — see openServeLog's `close()` contract). The verdict loop below re-opens the log by
+  // PATH, so closing here costs the reader nothing.
+  log.close();
   let spawnError: (Error & { code?: string }) | null = null;
   child.on("error", (err) => { spawnError = err as Error & { code?: string }; });
   child.unref();
@@ -924,8 +945,10 @@ async function main(argv: string[]): Promise<number> {
   return 0;
 }
 
-// Direct-entry guard (gate-script-base convention, inlined to keep this file self-contained —
-//  no ESM sibling imports, so it lays down via rule (a) with zero closure deps).
+// Direct-entry guard (gate-script-base convention, INLINED rather than imported: that keeps this
+//  file free of ESM SIBLING imports, so it lays down via rule (a). Its one cross-tree import — the
+//  serve-log helper from packages/quay/src — is a plugin→packages forward edge esbuild inlines into
+//  the shipped bundle, which is a different thing from a sibling dependency.)
 const _entryBase = path.basename(process.argv[1] ?? "").replace(/\.(js|ts|mjs)$/, "");
 if (_entryBase === "start-drivers") {
   main(process.argv.slice(2)).then((code) => {
