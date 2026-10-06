@@ -647,35 +647,37 @@ export function verifyDistClosureDir(publishRoot, sourcePluginRoot) {
 const ROOT_ANCHOR = "${CLAUDE_PLUGIN_ROOT}";
 
 /**
- * The `.js`-carrier spelling of the same anchor: a JS expression that EVALUATES to the anchor
- * text instead of INTERPOLATING it.
+ * The `.js`-carrier spelling: a reference to the WORKFLOW'S OWN `PLUGIN_ROOT` binding — a real JS
+ * const the workflow defines (from `args.pluginRoot`, validated at its entry) — never the
+ * `${CLAUDE_PLUGIN_ROOT}` shell text.
  *
- * WHY a second spelling exists (gap-dist-rewrite-injects-live-interpolation-into-workflow-js).
- * The rewrite above is textual, so it lands `${CLAUDE_PLUGIN_ROOT}` into every carrier it touches —
- * and the carriers do not share a semantics for `${}`. In `.md`/`.sh` the sequence is inert text
- * that the shell (or the agent's Bash tool) expands; in a `.js` template literal it is a
- * substitution, and the Workflow sandbox has no `CLAUDE_PLUGIN_ROOT` binding — so the shipped
- * `workflows/*.js` threw `ReferenceError: CLAUDE_PLUGIN_ROOT is not defined` at load and NO agent
- * ever started. The old rule's safety argument ("rewriteMarkdown's rules only touch paths") held
- * for the paths but not for the carrier's evaluation semantics (硬规则 4c).
+ * WHY (gap-workflow-js-carriers-emit-literal-plugin-root-env-ref-that-is-unset-in-plain-sessions).
+ * gap-dist-rewrite-injects-live-interpolation-into-workflow-js fixed the LOAD failure by folding
+ * the anchor into the inert text `${"$"}{CLAUDE_PLUGIN_ROOT}`. That loads, but the string it
+ * evaluates to is still the literal `${CLAUDE_PLUGIN_ROOT}` — and that string is handed to an
+ * agent's SHELL, where the variable has no value: it is expanded only in SKILL.md text, hooks and
+ * MCP config, NOT in a plain session's Bash (measured 2026-10-06: `${CLAUDE_PLUGIN_ROOT:-UNSET}`
+ * ⇒ UNSET in both the session and its subagents). So every emitted command silently degraded to
+ * `/scripts/dist/…` and failed only at run time — the same shape as "file not found" (硬规则 3b).
+ * Also fixed by the same change: 0.14.0's LIVE interpolation loaded to `ReferenceError:
+ * CLAUDE_PLUGIN_ROOT is not defined` and no agent ever started.
  *
- * WHY this spelling and not the obvious `\${CLAUDE_PLUGIN_ROOT}` escape: `\$` is cooked by an
- * UNTAGGED template literal (→ `${…}`) but is returned VERBATIM by a `String.raw` one (→ `\${…}`,
- * a stray backslash inside the command block). `String.raw` is not hypothetical — it is how
- * `plugin/workflows/manager-tick-core.js` builds the tick command block (`READ_CMD`, :85). So the
- * escape fixes the class for every carrier except the one most load-bearing file uses, and does so
- * SILENTLY (the artifact still loads; only the emitted shell text is wrong) — the failure mode this
- * repo treats as the dangerous one (硬规则 3b). This form evaluates to `$` from a substitution and
- * leaves `{CLAUDE_PLUGIN_ROOT}` as raw text, so BOTH tag flavors produce exactly `${CLAUDE_PLUGIN_ROOT}`,
- * byte-identical to what the `.md`/`.sh` carriers emit.
- *
- * The form is chosen so the SUBSTRING `${CLAUDE_PLUGIN_ROOT}` never appears in the emitted text:
- * that keeps the guard below (and every downstream `grep`-shaped reader) able to decide "active
- * anchor present / absent" with one exact predicate, instead of a family of accepted spellings.
- * Plain-string and comment carriers are inert for ANY `${` and simply show the expression as text —
- * cosmetic, never a ReferenceError.
+ * The `.js` carriers therefore no longer carry the anchor at ALL. The build rewrites their
+ * plugin-script references to `${PLUGIN_ROOT}/<kind>/dist/<name>.js` and expects the carrier to
+ * define `PLUGIN_ROOT` (a validated absolute path) itself. `.md`/`.sh` carriers keep the
+ * `${CLAUDE_PLUGIN_ROOT}` anchor — the shell/Skill text expansion there is real.
  */
-export const JS_ROOT_ANCHOR = '${"$"}{CLAUDE_PLUGIN_ROOT}';
+export const JS_PLUGIN_ROOT_BINDING = "${PLUGIN_ROOT}";
+
+/**
+ * The source line every `.js` carrier uses for its dev-tree default (`<worktree>/plugin`, so the
+ * dev tree — where the workflow runs straight out of the repo — resolves without an explicit arg).
+ * The build BLANKS it for the shipped artifact: a consuming project has no `<worktree>/plugin`, so
+ * a missing `args.pluginRoot` must surface as the stable `plugin-root-not-provided` error rather
+ * than a silently-wrong path. Keyed on the constant NAME (not the expression) so the carrier may
+ * change what its dev default is without the build losing the ability to remove it.
+ */
+const DEV_PLUGIN_ROOT_DEFAULT_RE = /(const DEV_PLUGIN_ROOT_DEFAULT = )`[^`]*`/g;
 
 /** An anchor a JS engine would EVALUATE. `\${…}` is deliberately excluded: it is inert, and the
  *  legacy escape stays readable to a `grep`-shaped reader that only knows the escaped form. */
@@ -684,7 +686,10 @@ const ACTIVE_ROOT_ANCHOR_RE = /(?<!\\)\$\{CLAUDE_PLUGIN_ROOT\}/;
 /**
  * Rewrite every plugin-script reference in `text` to the plugin-root-anchored bundled form.
  *
- * Three input shapes, one root cause (the rewriter did not know the anchor existed):
+ * Four input shapes, one root cause (the rewriter did not know the anchor existed):
+ *   ⓪ `${PLUGIN_ROOT}/{scripts,gate-scripts}/X.ts` — the `.js`-carrier BINDING form (see
+ *      JS_PLUGIN_ROOT_BINDING). The child is still the dev-tree `.ts`, so only the extension/child
+ *      changes; the reference stays a live JS interpolation of the carrier's own binding.
  *   ① `plugin/{scripts,gate-scripts}/X.ts` — the dev tree's repo-relative form. Here `plugin/` is
  *      the ANCHOR MARKER, not a path segment to preserve; an optional repo-root expression in front
  *      of it (`${worktree}/plugin/…`, `<root>/plugin/…`) means "that root's plugin subtree", so it
@@ -696,7 +701,7 @@ const ACTIVE_ROOT_ANCHOR_RE = /(?<!\\)\$\{CLAUDE_PLUGIN_ROOT\}/;
  *      SKILL.md, measured 2026-09-15 — invisible to a cwd-relative-prefix predicate alone, 硬规则 5b).
  *   ③ a reference that already carries the bundled extension (authored, or emitted by an earlier
  *      pass) — same prefix problem, no bundling decision to make.
- * ① and ② become `${CLAUDE_PLUGIN_ROOT}/<kind>/dist/<name>.js`.
+ * ⓪–② become `<anchor>/<kind>/dist/<name>.js` where `<anchor>` is the `anchor` argument.
  *
  * A script that is NOT bundled keeps its `.ts` reference. `runner-static-gate.ts` is the
  * static-check REGISTRY — a bash library shipped verbatim, never a bundler entry (see
@@ -709,10 +714,18 @@ const ACTIVE_ROOT_ANCHOR_RE = /(?<!\\)\$\{CLAUDE_PLUGIN_ROOT\}/;
  *   Whether the staged plugin root carries `dist/<name>.js` for that directory. Defaults to
  *   "every script is bundled" — the dev-tree SOURCE assumption the pure callers (unit tests)
  *   hold; the production caller (rewriteInvokers) always passes the real filesystem predicate.
+ * @param {string} [anchor] the root reference to emit. `.md`/`.sh` keep the default
+ *   `${CLAUDE_PLUGIN_ROOT}` (real shell/Skill text expansion); `.js` carriers pass
+ *   JS_PLUGIN_ROOT_BINDING so the emitted reference is the carrier's own JS const.
  */
-export function rewritePluginPaths(text, bundleExists = () => true) {
+export function rewritePluginPaths(text, bundleExists = () => true, anchor = ROOT_ANCHOR) {
   const bundled = (kind, name) =>
-    bundleExists(kind, name) ? `${ROOT_ANCHOR}/${kind}/dist/${name}.js` : null;
+    bundleExists(kind, name) ? `${anchor}/${kind}/dist/${name}.js` : null;
+  // ⓪ the `.js`-carrier binding form — keep the binding, fix the child.
+  text = text.replace(
+    /\$\{PLUGIN_ROOT\}\/(scripts|gate-scripts)\/([A-Za-z0-9_.-]+)\.ts/g,
+    (m, kind, name) => bundled(kind, name) ?? m
+  );
   // ② the anchor is already right — only the child is stale.
   text = text.replace(
     /\$\{CLAUDE_PLUGIN_ROOT\}\/(scripts|gate-scripts)\/([A-Za-z0-9_.-]+)\.ts/g,
@@ -729,21 +742,22 @@ export function rewritePluginPaths(text, bundleExists = () => true) {
   // ③ already-bundled reference carrying the dev-tree prefix.
   text = text.replace(
     /[A-Za-z0-9_${}<>./-]*?plugin\/(scripts|gate-scripts)\/dist\/([A-Za-z0-9_.-]+)\.js/g,
-    `${ROOT_ANCHOR}/$1/dist/$2.js`
+    `${anchor}/$1/dist/$2.js`
   );
   return text;
 }
 
 /** Drop `--experimental-strip-types` where the target is now a bundled `dist/*.js`. Guarded on the
  *  bundled path form on purpose: a script that kept its `.ts` (the raw-shipped registry) still
- *  NEEDS the flag, so a blanket strip would break exactly the reference the guard preserved. */
+ *  NEEDS the flag, so a blanket strip would break exactly the reference the guard preserved.
+ *  Both anchors are accepted: `.md`/`.sh` carry the env-var anchor, `.js` carriers the binding. */
 function stripTypesFlagForBundles(text) {
   text = text.replace(
-    /node --no-warnings --experimental-strip-types (\$\{CLAUDE_PLUGIN_ROOT\}\/(?:scripts|gate-scripts)\/dist\/)/g,
+    /node --no-warnings --experimental-strip-types (\$\{(?:CLAUDE_)?PLUGIN_ROOT\}\/(?:scripts|gate-scripts)\/dist\/)/g,
     "node --no-warnings $1"
   );
   return text.replace(
-    /node --experimental-strip-types (\$\{CLAUDE_PLUGIN_ROOT\}\/(?:scripts|gate-scripts)\/dist\/)/g,
+    /node --experimental-strip-types (\$\{(?:CLAUDE_)?PLUGIN_ROOT\}\/(?:scripts|gate-scripts)\/dist\/)/g,
     "node $1"
   );
 }
@@ -754,21 +768,28 @@ export function rewriteMarkdown(text, bundleExists) {
 }
 
 /**
- * Fold every ACTIVE anchor in a `.js` carrier into the JS-evaluable spelling (see JS_ROOT_ANCHOR).
- * Runs AFTER rewriteMarkdown on purpose: `stripTypesFlagForBundles` keys on the plain
- * `${CLAUDE_PLUGIN_ROOT}/…/dist/` path form, so escaping first would leave the now-bundle-dead
- * `--experimental-strip-types` flag in place.
+ * Fold every anchor a JS engine would EVALUATE (or the legacy `${"$"}{…}` inert spelling) onto the
+ * carrier's own `${PLUGIN_ROOT}` binding. Leaving either in a `.js` carrier re-creates the
+ * `/scripts/dist/…` degradation this change removes.
  *
  * An already-escaped `\${CLAUDE_PLUGIN_ROOT}` is left alone: it is inert in an untagged template,
- * and re-escaping it (`\${"$"}{…}`) would emit `$` twice.
+ * and re-escaping it would be pointless churn.
  */
-export function escapeJsCarrier(text) {
-  return text.replace(/(?<!\\)\$\{CLAUDE_PLUGIN_ROOT\}/g, () => JS_ROOT_ANCHOR);
+export function bindPluginRootInJsCarrier(text) {
+  return text
+    .replace(/(?<!\\)\$\{CLAUDE_PLUGIN_ROOT\}/g, () => JS_PLUGIN_ROOT_BINDING)
+    .replace(/\$\{"\$"\}\{CLAUDE_PLUGIN_ROOT\}/g, () => JS_PLUGIN_ROOT_BINDING);
 }
 
-/** Rewrite a shipped workflow `.js` — same path rules as .md, plus the JS-carrier anchor fold. */
+/**
+ * Rewrite a shipped workflow `.js`: same path rules as `.md`, but the anchor is the carrier's own
+ * `PLUGIN_ROOT` BINDING (JS_PLUGIN_ROOT_BINDING), and the dev-tree default is blanked so a shipped
+ * carrier without `args.pluginRoot` fails closed at its own entry instead of resolving a wrong path.
+ */
 export function rewriteJs(text, bundleExists) {
-  return escapeJsCarrier(rewriteMarkdown(text, bundleExists));
+  const pathRewritten = rewritePluginPaths(text, bundleExists, JS_PLUGIN_ROOT_BINDING);
+  const bound = bindPluginRootInJsCarrier(stripTypesFlagForBundles(pathRewritten));
+  return bound.replace(DEV_PLUGIN_ROOT_DEFAULT_RE, "$1''");
 }
 
 /**
@@ -883,9 +904,10 @@ export function assertJsCarrierAnchorsInert(pluginRoot) {
   if (violations.length) {
     const head = violations.slice(0, 8).map((v) => `  ${path.relative(pluginRoot, v.file)}:${v.line}  ${v.text.slice(0, 120)}`);
     throw new Error(
-      `js-carrier anchor gate FAILED: ${violations.length} active \${CLAUDE_PLUGIN_ROOT} occurrence(s) in ${scanned} scanned .js carrier(s) — ` +
-        `a JS engine evaluates these as template substitutions and the Workflow sandbox has no such binding (ReferenceError at load). ` +
-        `Rewriters must emit the JS_ROOT_ANCHOR form:\n${head.join("\n")}`
+      `js-carrier anchor gate FAILED: ${violations.length} \${CLAUDE_PLUGIN_ROOT} occurrence(s) in ${scanned} scanned .js carrier(s) — ` +
+        `0.14.0 evaluated these as template substitutions and threw ReferenceError at load; 0.15.0+ folded them to inert text that ` +
+        `an agent's shell expands to the EMPTY string (no CLAUDE_PLUGIN_ROOT in a plain session) ⇒ /scripts/dist/… at run time. ` +
+        `Rewriters must emit the JS_PLUGIN_ROOT_BINDING form:\n${head.join("\n")}`
     );
   }
   return scanned;

@@ -3,7 +3,7 @@ export const meta = {
   description:
     'pool 任务质量语义闸 (task gap-pool-quality-semantic-gate, ADR-033): 机械触发 (pool>25 / 最久未复核>48h / 每 10 轮) 后,每 pool 任务一个 schema agent 判 ready/needs-work/should-remove/uncertain,JS 算术聚合,should-remove → 撤出/重定范围。泛化自 nyf-semantic-judge (49c0be86 证明过一次然后丢失——三层执行核只有「检测 workflow 没被调用」的仪器,没有「调用 workflow」的步骤;本 workflow 就是那个被调用的动作)。',
   phases: [
-    { title: 'Plan', detail: 'run plugin/scripts/pool-quality-judge.ts --plan (mechanical triggers + pool enumeration, no LLM judgment) → if not triggered and not forced, return not-triggered' },
+    { title: 'Plan', detail: 'run <pluginRoot>/scripts/pool-quality-judge.ts --plan (mechanical triggers + pool enumeration, no LLM judgment) → if not triggered and not forced, return not-triggered' },
     { title: 'Judge', detail: 'one schema agent per pool task — ready/needs-work/should-remove/uncertain + premiseSound + evidence + recommendation' },
     { title: 'Aggregate', detail: 'JS arithmetic over the agent verdicts (distribution + action routing, should-remove → remove-or-rescope)' },
   ],
@@ -14,6 +14,31 @@ export const meta = {
 const $a = (typeof args === 'string') ? JSON.parse(args) : (args || {})
 const root = $a.root || $a.workspaceRoot || '.'
 
+// ── 插件根 PLUGIN_ROOT（gap-workflow-js-carriers-emit-literal-plugin-root-env-ref-that-is-unset-in-plain-sessions）──
+// 发给 agent 的插件脚本路径一律走 ${PLUGIN_ROOT} 这个【真 JS 绑定】（绝对路径），不再用插件根环境变量
+// 字面量：它只在 SKILL 文本替换 / hooks / MCP 配置里有值，普通会话的 Bash 里是空的（2026-10-06 实测），
+// 命令里的路径会展开成空串、退化成 /scripts/dist/…（运行期才失败，与「文件不存在」同形，硬规则 3b）。
+// 调用方经 args.pluginRoot 传绝对插件根；缺失 ⇒ plugin-root-not-provided；非绝对 ⇒ plugin-root-invalid。
+// 开发树缺省 = <root>/plugin；发布版该常量被 plugin-dist 构建清空（消费工作区没有 <root>/plugin）。
+const DEV_PLUGIN_ROOT_DEFAULT = `${root}/plugin`
+const PLUGIN_ROOT = (() => {
+  const provided = typeof $a.pluginRoot === 'string' ? $a.pluginRoot.trim() : ''
+  return provided || DEV_PLUGIN_ROOT_DEFAULT
+})()
+if (!PLUGIN_ROOT) {
+  return {
+    outcome: 'plugin-root-not-provided',
+    message:
+      'args.pluginRoot 缺失：普通会话里【插件根环境变量】没有值，插件根必须由调用方传入（= scriptPath 的上两级目录）。⛔ 绝不静默展开成空串。',
+  }
+}
+if (!PLUGIN_ROOT.startsWith('/')) {
+  return {
+    outcome: 'plugin-root-invalid',
+    message: `args.pluginRoot 必须是绝对路径（收到 ${JSON.stringify($a.pluginRoot)}）：相对路径无法命名插件根，其 scripts/dist 引用会退化成不可解析路径。`,
+  }
+}
+
 // ── Phase: Plan ──────────────────────────────────────────────────────────────────────────────────
 // MECHANICAL only — run the deterministic script, return its JSON verbatim. No LLM judgment here.
 // (trigger uses mechanical quantities; judgment is the agent's job — ADR-033.)
@@ -22,7 +47,7 @@ phase('Plan')
 const plan = await agent(
   `Run the deterministic mechanical planner (no LLM judgment — it is pure arithmetic):
 
-1. Run: \`node --no-warnings --experimental-strip-types plugin/scripts/pool-quality-judge.ts --root ${root} --plan\`
+1. Run: \`node --no-warnings --experimental-strip-types ${PLUGIN_ROOT}/scripts/pool-quality-judge.ts --root ${root} --plan\`
 2. Parse its JSON output. It contains:
    - \`triggers\`: { poolCount, oldestUnreviewedAgeMs, roundsSinceLastJudge, fired, reasons }
    - \`pool\`: the list of pool task ids (status:ready minus not-yet-flipped/fixture/parked)
@@ -139,7 +164,7 @@ phase('Record')
 const recorded = await agent(
   `Persist the completed judge's lastRound (B15 — the every-10-rounds trigger must reset after a judge).
 
-Run: \`node --no-warnings --experimental-strip-types plugin/scripts/pool-quality-judge.ts --root ${root} --record-last-round\`
+Run: \`node --no-warnings --experimental-strip-types ${PLUGIN_ROOT}/scripts/pool-quality-judge.ts --root ${root} --record-last-round\`
 Return the parsed JSON verbatim: { recorded, lastRound, path }.`,
   {
     phase: 'Record',
@@ -173,7 +198,7 @@ Run this exact command (it writes the verdicts JSON and appends one quality-roun
 cat > /tmp/pqj-verdicts.json <<'EOF'
 ${JSON.stringify(results)}
 EOF
-node --no-warnings --experimental-strip-types plugin/scripts/pool-quality-judge.ts --root ${root} --record-round /tmp/pqj-verdicts.json
+node --no-warnings --experimental-strip-types ${PLUGIN_ROOT}/scripts/pool-quality-judge.ts --root ${root} --record-round /tmp/pqj-verdicts.json
 
 Return the parsed JSON verbatim: { recorded, round, path, state }.`,
       {

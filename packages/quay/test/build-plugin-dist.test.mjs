@@ -35,8 +35,8 @@ import { fileURLToPath } from "node:url";
 import {
   rewriteMarkdown,
   rewriteJs,
-  escapeJsCarrier,
-  JS_ROOT_ANCHOR,
+  bindPluginRootInJsCarrier,
+  JS_PLUGIN_ROOT_BINDING,
   scanJsCarrierAnchors,
   assertJsCarrierAnchorsInert,
   rewriteShell,
@@ -120,7 +120,14 @@ async function loadWorkflowInSandbox(text, argsValue = { workspaceRoot: "/w" }) 
 const WORKFLOW_DIR = path.join(REPO_ROOT, "plugin", "workflows");
 const readWorkflow = (f) => fs.readFileSync(path.join(WORKFLOW_DIR, f), "utf8");
 const countActive = (text) => (text.match(/(?<!\\)\$\{CLAUDE_PLUGIN_ROOT\}/g) || []).length;
-const countFolded = (text) => (text.split(JS_ROOT_ANCHOR).length - 1);
+// The two spellings a `.js` carrier must NOT contain after the rewrite: the live anchor a JS engine
+// evaluates (ReferenceError at load) AND the inert-fold spelling `${"$"}{CLAUDE_PLUGIN_ROOT}` that
+// gap-dist-rewrite-injects-live-interpolation-into-workflow-js emitted (loads, but the string it
+// produces is still the env-var literal, which a plain session's shell expands to the EMPTY string
+// ⇒ /scripts/dist/…). Both must be 0 in the built carriers — the binding form replaces them.
+const FOLDED_ANCHOR_SPELLING = '${"$"}{CLAUDE_PLUGIN_ROOT}';
+const countFolded = (text) => text.split(FOLDED_ANCHOR_SPELLING).length - 1;
+const countBindingRefs = (text) => (text.match(/\$\{PLUGIN_ROOT\}\/(?:scripts|gate-scripts)\/dist\//g) || []).length;
 
 // ── AC1: the closure regex survives rewriteShell multi-segment + prefix-strip ──────────────────────
 test("AC1 — rewriteShell(isQuayInit=true) preserves the two-segment closure regex (dist/X.js tolerant + ${SCRIPT_DIR} prefix-strip)", () => {
@@ -164,7 +171,7 @@ test("AC1 — the packaged closure regex extracts dist/X.js from a ${SCRIPT_DIR}
 });
 
 // ── AC-workflows: rewriteInvokers rewrites the shipped workflow FILES' plugin/scripts/X.ts refs ─────
-test("AC-workflows — rewriteInvokers rewrites plugin/workflows/*.js plugin/scripts/X.ts refs to the plugin-root-anchored dist form", () => {
+test("AC-workflows — rewriteInvokers rewrites plugin/workflows/*.js plugin/scripts/X.ts refs to the PLUGIN_ROOT-binding dist form", () => {
   const dir = tmp();
   try {
     const wfDir = path.join(dir, "workflows");
@@ -186,14 +193,18 @@ test("AC-workflows — rewriteInvokers rewrites plugin/workflows/*.js plugin/scr
     const touched = rewriteInvokers(dir);
     assert.equal(touched, 1, "the workflow .js must be counted as a rewritten invoker");
     const out = fs.readFileSync(path.join(wfDir, "fan-in-execute.js"), "utf8");
-    // A `.js` carrier gets the JS-EVALUABLE anchor form, not the plain text one: `${…}` here is a
-    // template substitution the Workflow sandbox cannot resolve (see JS_ROOT_ANCHOR's docstring).
-    assert.ok(out.includes(`${JS_ROOT_ANCHOR}/scripts/dist/anti-drift-touches-check.js`),
-      "the node --experimental-strip-types invocation must point at the anchored dist bundle");
-    assert.ok(out.includes(`${JS_ROOT_ANCHOR}/scripts/dist/per-task-suite-record.js`),
-      "the comment reference must point at the anchored dist bundle");
-    assert.doesNotMatch(out, /(?<!\\)\$\{CLAUDE_PLUGIN_ROOT\}/,
-      "no ACTIVE anchor may appear in a .js carrier — a JS engine evaluates it");
+    // A `.js` carrier gets a reference to its OWN `${PLUGIN_ROOT}` binding — a real JS const the
+    // carrier defines from args.pluginRoot — NOT the `${CLAUDE_PLUGIN_ROOT}` env-var text, which a
+    // plain session's shell expands to the empty string (⇒ /scripts/dist/…). See
+    // JS_PLUGIN_ROOT_BINDING's docstring.
+    assert.ok(out.includes(`${JS_PLUGIN_ROOT_BINDING}/scripts/dist/anti-drift-touches-check.js`),
+      "the node --experimental-strip-types invocation must point at the binding-prefixed dist bundle");
+    assert.ok(out.includes(`${JS_PLUGIN_ROOT_BINDING}/scripts/dist/per-task-suite-record.js`),
+      "the comment reference must point at the binding-prefixed dist bundle");
+    assert.equal(countActive(out), 0,
+      "no env-var anchor may appear in a .js carrier — a JS engine evaluates it (0.14.0 ReferenceError)");
+    assert.equal(countFolded(out), 0,
+      "no inert-fold anchor may survive either — its evaluated string is still the env-var literal");
     assert.ok(!out.includes("anti-drift-touches-check.ts"),
       "no plugin/scripts/*.ts reference may survive in the shipped workflow");
     assert.ok(!/plugin\/(scripts|gate-scripts)\/dist\//.test(out),
@@ -201,48 +212,61 @@ test("AC-workflows — rewriteInvokers rewrites plugin/workflows/*.js plugin/scr
     assert.ok(out.includes("experiments/quay-perpetual-stream/scripts/drain-scheduler.ts"),
       "a dev-repo experiments/...ts path (not a plugin mechanism) must be left untouched");
     // The flag is dropped only because the target really became a bundle.
-    assert.ok(out.includes(`node ${JS_ROOT_ANCHOR}/scripts/dist/anti-drift-touches-check.js`),
+    assert.ok(out.includes(`node ${JS_PLUGIN_ROOT_BINDING}/scripts/dist/anti-drift-touches-check.js`),
       "the strip-types flag must be gone once the reference names a bundled .js");
   } finally {
     fs.rmSync(dir, { recursive: true, force: true });
   }
 });
 
-// ── AC1/AC4/AC5: the `.js` carrier must not hand a JS engine an interpolated anchor ───────────────
-// gap-dist-rewrite-injects-live-interpolation-into-workflow-js. The finding: the publish rewrite
-// injected `${CLAUDE_PLUGIN_ROOT}` into plugin/workflows/*.js, where a JS engine evaluates it —
-// 4/6 shipped workflows loaded to `ReferenceError: CLAUDE_PLUGIN_ROOT is not defined`.
+// ── AC1/AC4/AC5: the `.js` carrier must not hand a JS engine (or an agent's shell) an anchor ──────
+// Two findings, one surface. gap-dist-rewrite-injects-live-interpolation-into-workflow-js: the
+// publish rewrite injected the env-var anchor into plugin/workflows/*.js, where a JS engine evaluates
+// it — 4/6 loaded to `ReferenceError`. gap-workflow-js-carriers-emit-literal-plugin-root-env-ref-
+// that-is-unset-in-plain-sessions: the fix for THAT emitted the inert fold spelling, which loads but
+// evaluates to the env-var literal — handed to an agent's shell, it expands to the EMPTY string
+// (no such variable in a plain session) ⇒ `/scripts/dist/…`. Both spellings must be 0 in a built
+// `.js` carrier; the reference is the carrier's own `${PLUGIN_ROOT}` binding.
 
 test("AC1 — the PRODUCTION rewrite of the real manager-tick-core.js evaluates end-to-end under the sandbox globals", async () => {
   const out = rewriteJs(readWorkflow("manager-tick-core.js"), () => true);
   const { error } = await loadWorkflowInSandbox(out);
   assert.equal(error, null, `the rewritten workflow must evaluate — got ${error ? `${error.name}: ${error.message}` : "no error"}`);
-  // Non-vacuous: the reference is still THERE, just no longer an interpolation.
-  assert.ok(countFolded(out) >= 1, "the rewritten carrier must still name the tick read command's script");
+  // Non-vacuous: the reference is still THERE (as a binding), just no longer an env-var anchor.
+  assert.ok(countBindingRefs(out) >= 1, "the rewritten carrier must still name the tick read command's script");
+  assert.ok(out.includes("const PLUGIN_ROOT ="), "the carrier must define the binding its references interpolate");
+  assert.ok(out.includes("const DEV_PLUGIN_ROOT_DEFAULT = ''"),
+    "the shipped carrier's dev-tree default must be BLANKED (a consumer has no <worktree>/plugin)");
 });
 
-test("AC2 — both template-literal flavors evaluate to the PLAIN anchor (a `\\${…}` escape would leak a backslash through String.raw)", async () => {
+test("AC2 — both template-literal flavors interpolate the BINDING to an absolute path (no shell-expandable residue, no String.raw backslash leak)", async () => {
   // Both tag flavors appear in the shipped set: manager-tick-core.js builds its tick command block
   // with String.raw (:85) and its returned instruction block with an untagged template (:247). The
-  // evaluated text is what the consumer's shell expands, so it must be identical from both.
+  // evaluated text is what the consumer's shell runs, so it must name an absolute bundle path in
+  // both — and must NOT carry a `${…}` for the shell to expand (that is the defect).
   const src = [
     "export const meta = { name: 'x' }",
-    "const READ_CMD = String.raw`# A0 node plugin/scripts/quay-session.ts manager-tick-readings`",
-    "const TPL = `run: node plugin/scripts/quay-session.ts --root /w`",
+    "const PLUGIN_ROOT = '/plug'",
+    "const READ_CMD = String.raw`# A0 node --experimental-strip-types plugin/scripts/quay-session.ts manager-tick-readings`",
+    "const TPL = `run: node --experimental-strip-types plugin/scripts/quay-session.ts --root /w`",
     "return { READ_CMD, TPL }",
   ].join("\n");
   const out = rewriteJs(src, () => true);
   assert.equal(countActive(out), 0);
+  assert.equal(countFolded(out), 0);
   const r = await new AsyncFunction(out.replace(/^export const meta =/m, "const meta ="))();
-  assert.equal(r.READ_CMD, "# A0 node ${CLAUDE_PLUGIN_ROOT}/scripts/dist/quay-session.js manager-tick-readings");
-  assert.equal(r.TPL, "run: node ${CLAUDE_PLUGIN_ROOT}/scripts/dist/quay-session.js --root /w");
-  assert.doesNotMatch(r.READ_CMD, /\\/, "a backslash here means the escape leaked through String.raw — the shell would not expand it");
-  // Negative control for THIS contract: the escape form (AC2 option ①) compiles and loads, yet its
-  // String.raw output is wrong — which is exactly why the rewriter emits the substitution form.
-  const escaped = out.replace(new RegExp(JS_ROOT_ANCHOR.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"), "g"), "\\${CLAUDE_PLUGIN_ROOT}");
+  assert.equal(r.READ_CMD, "# A0 node /plug/scripts/dist/quay-session.js manager-tick-readings");
+  assert.equal(r.TPL, "run: node /plug/scripts/dist/quay-session.js --root /w");
+  assert.doesNotMatch(r.READ_CMD, /\\/, "a backslash here means an escape leaked through String.raw — the shell would not expand it");
+  assert.doesNotMatch(r.READ_CMD, /\$\{/, "the emitted command must carry NO shell-expandable ${…} — that is the defect (expands to /scripts/dist/…)");
+  assert.doesNotMatch(r.TPL, /\$\{/);
+  // Negative control for THIS contract: if the rewriter emitted an ESCAPED binding (`\${PLUGIN_ROOT}`)
+  // instead of a live interpolation, String.raw would leak the backslash — silent wrongness, not a
+  // load failure. That is why the binding is a real `const`, not text.
+  const escaped = out.replace(/\$\{PLUGIN_ROOT\}/g, "\\${PLUGIN_ROOT}");
   const rEsc = await new AsyncFunction(escaped.replace(/^export const meta =/m, "const meta ="))();
-  assert.equal(rEsc.TPL, "run: node ${CLAUDE_PLUGIN_ROOT}/scripts/dist/quay-session.js --root /w", "untagged: the escape cooks fine");
-  assert.equal(rEsc.READ_CMD, "# A0 node \\${CLAUDE_PLUGIN_ROOT}/scripts/dist/quay-session.js manager-tick-readings",
+  assert.equal(rEsc.TPL, "run: node ${PLUGIN_ROOT}/scripts/dist/quay-session.js --root /w", "untagged: the escape cooks to a shell-expandable ${…}");
+  assert.equal(rEsc.READ_CMD, "# A0 node \\${PLUGIN_ROOT}/scripts/dist/quay-session.js manager-tick-readings",
     "String.raw: the escape LEAKS — silent wrongness, not a load failure");
 });
 
@@ -252,17 +276,20 @@ test("AC4 — negative control: the PRE-FIX rule (rewriteMarkdown on a .js carri
   const { error } = await loadWorkflowInSandbox(preFix);
   assert.ok(isAnchorReferenceError(error),
     `the pre-fix carrier must fail loudly with the recorded error, got ${error ? `${error.name}: ${error.message}` : "NO ERROR"}`);
-  // …and the fix removes exactly that outcome, leaving the reference count unchanged.
+  // …and the fix removes exactly that outcome, leaving one binding reference per pre-fix anchor.
   const fixed = rewriteJs(readWorkflow("manager-tick-core.js"), () => true);
   assert.equal(countActive(fixed), 0);
-  assert.equal(countFolded(fixed), countActive(preFix), "every pre-fix anchor must be folded, none dropped");
+  assert.equal(countFolded(fixed), 0);
+  assert.equal(countBindingRefs(fixed), countActive(preFix), "every pre-fix anchor must become a binding reference, none dropped");
   assert.ok(!isAnchorReferenceError((await loadWorkflowInSandbox(fixed)).error));
 });
 
-test("AC5 — all six shipped workflows fold to ZERO active anchors and evaluate in the sandbox", async () => {
+test("AC5 — all six shipped workflows rewrite to ZERO env-var anchors and evaluate in the sandbox", async () => {
   const expected = {
     "manager-tick-core.js": 2,
-    "pool-quality-judge.js": 4,
+    // 4 in the finding's artifact; 3 in the source after this change moved the meta phase-detail
+    // mention to the literal token `<pluginRoot>/scripts/…` (a description, not a runnable reference).
+    "pool-quality-judge.js": 3,
     // 22 occurrences on 21 lines: the finding counted the published artifact, built with the real
     // bundle predicate (one reference there is not a bundle entry); the unit-level rewrite with
     // bundleExists=()=>true folds that one too.
@@ -273,11 +300,12 @@ test("AC5 — all six shipped workflows fold to ZERO active anchors and evaluate
   };
   for (const [file, n] of Object.entries(expected)) {
     const src = readWorkflow(file);
-    const pre = rewriteMarkdown(src, () => true);
-    const post = rewriteJs(src, () => true);
+    const pre = rewriteMarkdown(src, () => true);   // the OLD .md rule — the pre-fix baseline
+    const post = rewriteJs(src, () => true);        // the .js rule — the binding form
     assert.equal(countActive(pre), n, `${file}: pre-fix anchor count changed — the measurement drifted`);
-    assert.equal(countActive(post), 0, `${file}: no active anchor may survive the rewrite`);
-    assert.equal(countFolded(post), n, `${file}: the ${n} pre-fix anchor(s) must be folded, not deleted`);
+    assert.equal(countActive(post), 0, `${file}: no env-var anchor may survive the rewrite`);
+    assert.equal(countFolded(post), 0, `${file}: no inert-fold anchor may survive either`);
+    assert.equal(countBindingRefs(post), n, `${file}: the ${n} pre-fix anchor(s) must become binding references, not deleted`);
     assert.equal((await loadWorkflowInSandbox(post)).error, null, `${file}: the rewritten carrier must evaluate cleanly`);
   }
   // AC1's baseline, re-measured on the two carriers whose poisoned literals execute eagerly: the
@@ -292,7 +320,46 @@ test("AC5 — all six shipped workflows fold to ZERO active anchors and evaluate
   // something every workflow already satisfies.
   for (const file of Object.keys(expected)) {
     assert.equal(countActive(readWorkflow(file)), 0, `${file}: source form must be anchor-free`);
+    assert.equal(countFolded(readWorkflow(file)), 0, `${file}: source form must carry no folded anchor either`);
   }
+});
+
+test("AC4(task) — the BUILT workflows/*.js carry ZERO ${CLAUDE_PLUGIN_ROOT} in EITHER spelling; .md/.sh carriers keep the anchor", () => {
+  // The predicate (exactly the AC's): count the live anchor and the inert-fold spelling in the
+  // REWRITTEN carrier. Baseline first (the pre-fix rewrite of the real sources), so a zero on the
+  // built side is distinguishable from a predicate that never fires (硬规则 2 / 3b).
+  const CARRIER_RE = /\$(?:\{CLAUDE_PLUGIN_ROOT\}|\{"\$"\}\{CLAUDE_PLUGIN_ROOT\})/g;
+  const countAnchors = (text) => (text.match(CARRIER_RE) || []).length;
+  const preFixCounts = {};
+  const firstHits = [];
+  for (const file of ["manager-tick-core.js", "pool-quality-judge.js", "fan-in-execute.js", "execute-suite-fix.js", "drain-directives.js", "run-routines.js"]) {
+    const pre = rewriteMarkdown(readWorkflow(file), () => true);
+    preFixCounts[file] = countAnchors(pre);
+    for (const line of pre.split("\n")) {
+      if (firstHits.length < 3 && CARRIER_RE.test(line)) firstHits.push(`${file}: ${line.trim().slice(0, 100)}`);
+      CARRIER_RE.lastIndex = 0;
+    }
+  }
+  // Print the baseline (0.16.0's fan-in-execute.js had 20 occurrences in the published artifact; the
+  // unit-level pure rewrite folds 22) and the first 3 hits — "proof the predicate CAN hit the
+  // pre-fix product", not just that it returns 0 now.
+  console.log("[AC4-task] pre-fix anchor counts:", JSON.stringify(preFixCounts));
+  console.log("[AC4-task] first 3 pre-fix hits:\n" + firstHits.map((h) => "  " + h).join("\n"));
+  assert.ok(preFixCounts["fan-in-execute.js"] >= 20, "the pre-fix fan-in-execute.js must carry >=20 anchors (the 0.16.0 baseline)");
+  assert.equal(firstHits.length, 3, "the predicate must hit real pre-fix lines — a zero-hit predicate proves nothing (硬规则 2)");
+
+  for (const file of Object.keys(preFixCounts)) {
+    const built = rewriteJs(readWorkflow(file), () => true);
+    assert.equal(countAnchors(built), 0, `${file}: a built .js carrier must carry ZERO ${"${CLAUDE_PLUGIN_ROOT}"} in either spelling`);
+  }
+  // The `.md`/`.sh` carriers are a DIFFERENT mechanism: their anchor is real Skill/shell text
+  // expansion, so the rule must NOT have been applied to them. Measured on the real shipped docs.
+  const mdSrc = "run `node ${CLAUDE_PLUGIN_ROOT}/scripts/fast-mode-telemetry.ts`";
+  const mdOut = rewriteMarkdown(mdSrc, () => true);
+  assert.ok(mdOut.includes("${CLAUDE_PLUGIN_ROOT}/scripts/dist/fast-mode-telemetry.js"),
+    "the .md carrier keeps the env-var anchor (the shell/Skill expands it there) and only swaps the child");
+  const shSrc = 'exec node --experimental-strip-types "$SCRIPT_DIR/foo.ts"';
+  assert.match(rewriteShell(shSrc), /"\$SCRIPT_DIR\/dist\/foo\.js"/, "the .sh carrier keeps its ${SCRIPT_DIR} anchor");
 });
 
 test("AC3 — the guard takes FALSE on an active anchor, TRUE on the folded form, and refuses NOT-EVALUATED", () => {
@@ -308,11 +375,11 @@ test("AC3 — the guard takes FALSE on an active anchor, TRUE on the folded form
     assert.equal(bad.violations.length, 1, "an ACTIVE anchor is a violation");
     assert.throws(() => assertJsCarrierAnchorsInert(dir), /js-carrier anchor gate FAILED/);
     // (b) the shipped shape — pass
-    fs.writeFileSync(carrier, `const cmd = \`node ${JS_ROOT_ANCHOR}/scripts/dist/y.js\`;\n`, "utf8");
+    fs.writeFileSync(carrier, `const cmd = \`node ${JS_PLUGIN_ROOT_BINDING}/scripts/dist/y.js\`;\n`, "utf8");
     assert.equal(scanJsCarrierAnchors(dir).violations.length, 0);
     assert.equal(assertJsCarrierAnchorsInert(dir), 1);
-    // (c) the legacy escape is inert (a JS engine does not interpolate `\\${…}` in an untagged
-    //     template) — tolerated by the "active" predicate, though the rewriter emits JS_ROOT_ANCHOR
+    // (c) the legacy escape is inert (a JS engine does not interpolate `\${…}` in an untagged
+    //     template) — tolerated by the "active" predicate, though the rewriter emits a real binding
     //     because String.raw defeats the escape.
     fs.writeFileSync(carrier, "const cmd = `node \\${CLAUDE_PLUGIN_ROOT}/scripts/dist/y.js`;\n", "utf8");
     assert.equal(scanJsCarrierAnchors(dir).violations.length, 0);
@@ -333,10 +400,11 @@ test("AC3 — positive control on the REAL plugin root: the guard reads all six 
   assert.equal(assertJsCarrierAnchorsInert(pluginRoot), 6);
 });
 
-test("AC2 — escapeJsCarrier is idempotent and leaves an already-escaped anchor alone", () => {
-  assert.equal(escapeJsCarrier("run ${CLAUDE_PLUGIN_ROOT}/scripts/dist/x.js"), `run ${JS_ROOT_ANCHOR}/scripts/dist/x.js`);
-  assert.equal(escapeJsCarrier(`run ${JS_ROOT_ANCHOR}/scripts/dist/x.js`), `run ${JS_ROOT_ANCHOR}/scripts/dist/x.js`);
-  assert.equal(escapeJsCarrier("run \\${CLAUDE_PLUGIN_ROOT}/scripts/dist/x.js"), "run \\${CLAUDE_PLUGIN_ROOT}/scripts/dist/x.js");
+test("AC2 — bindPluginRootInJsCarrier folds BOTH env-var spellings onto the binding and leaves an escaped anchor alone", () => {
+  assert.equal(bindPluginRootInJsCarrier("run ${CLAUDE_PLUGIN_ROOT}/scripts/dist/x.js"), `run ${JS_PLUGIN_ROOT_BINDING}/scripts/dist/x.js`);
+  assert.equal(bindPluginRootInJsCarrier(`run ${FOLDED_ANCHOR_SPELLING}/scripts/dist/x.js`), `run ${JS_PLUGIN_ROOT_BINDING}/scripts/dist/x.js`);
+  assert.equal(bindPluginRootInJsCarrier(`run ${JS_PLUGIN_ROOT_BINDING}/scripts/dist/x.js`), `run ${JS_PLUGIN_ROOT_BINDING}/scripts/dist/x.js`);
+  assert.equal(bindPluginRootInJsCarrier("run \\${CLAUDE_PLUGIN_ROOT}/scripts/dist/x.js"), "run \\${CLAUDE_PLUGIN_ROOT}/scripts/dist/x.js");
   // A `.md` carrier is untouched by the fold (its `${…}` is expanded by the shell, not a JS engine).
   const md = rewriteMarkdown("`${CLAUDE_PLUGIN_ROOT}/scripts/dist/x.js`");
   assert.equal(md, "`${CLAUDE_PLUGIN_ROOT}/scripts/dist/x.js`");

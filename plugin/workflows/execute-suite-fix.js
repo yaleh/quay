@@ -66,6 +66,10 @@ function isNonVerificationTerminal(s) {
   return !isRealRedRound(s)
 }
 
+// args 到达时可能是【字符串】不是对象（实测 wf_6f8cc053-f52，fan-in-execute.js 同源）：直接解构一个
+// JSON 字符串会得到全 undefined ⇒ 静默 bad-args。统一 parse 一次再解构（本 workflow 的文件仍在交付面上，
+// 不能继续依赖"调用方一定传对象"这个未验证假设 —— 硬规则 4c）。
+const A = (() => { try { return typeof args === 'string' ? JSON.parse(args) : (args ?? {}) } catch { return {} } })()
 const {
   worktree,            // 被测 verify worktree（frozen during round）
   stateDir,            // main checkout 的 .quay（runner 写 state.json 到这里）
@@ -77,10 +81,10 @@ const {
   envSilenceMs = 3_600_000,     // 60 min（默认 15min）
   envRedGraceMs = 180_000,      // 3 min（默认 30s；给红 suite 时间收集完整失败汇总）
   systemdRunLimits = "MemoryMax=4G TasksMax=200", // 人 2026-08-11 06:4x 裁定：取消 CPU 配额 + 保持内存 4G（01:07 OOM 护栏）+ TasksMax 200；gap-systemd-run-cancel-cpuquota-keep-memory-guardrail AC3。⛔ CPUQuota 已于 2026-08-16 移除——400% 是当年 4 核机的「等价不限制」字面值，换 16 核机后静默变成 4/16 核（硬规则④推论二），实测制造 CPU 饥饿假红（e2e/install 族 ~4-5x 慢 + 5 条超时失败，execute-suite-fix 69.6min vs 历史全 None 配额最坏 22.2min）。要表达「不限制」就在机制上不传该参数，不换成另一个字面值。
-} = args ?? {}
+} = A
 
 if (!worktree || !stateDir || !root) {
-  return { outcome: 'bad-args', message: 'worktree/stateDir/root are required', args }
+  return { outcome: 'bad-args', message: 'worktree/stateDir/root are required', args: A }
 }
 // logFile is OPTIONAL (the runner defaults to <state-dir>/full-suite.log) — but the launch
 // template below ALWAYS passes `--log-file ${resolvedLogFile}`, so an unset logFile would emit the literal
@@ -88,6 +92,31 @@ if (!worktree || !stateDir || !root) {
 // the checkout root (bug: 2026-08-12 17:15, a 300KB round log landed in ./undefined). Default it here
 // so the template never emits the undefined literal.
 const resolvedLogFile = logFile ?? `${stateDir}/full-suite.log`
+
+// ── 插件根 PLUGIN_ROOT（gap-workflow-js-carriers-emit-literal-plugin-root-env-ref-that-is-unset-in-plain-sessions）──
+// 发给 agent 的插件脚本路径一律走 ${PLUGIN_ROOT} 这个【真 JS 绑定】（绝对路径），不再用插件根环境变量
+// 字面量：它只在 SKILL 文本替换 / hooks / MCP 配置里有值，普通会话的 Bash 里是空的（2026-10-06 实测），
+// 命令里的路径会展开成空串、退化成 /scripts/dist/…（运行期才失败，与「文件不存在」同形，硬规则 3b）。
+// 调用方经 args.pluginRoot 传绝对插件根；缺失 ⇒ plugin-root-not-provided；非绝对 ⇒ plugin-root-invalid。
+// 开发树缺省 = <worktree>/plugin；发布版该常量被 plugin-dist 构建清空。
+const DEV_PLUGIN_ROOT_DEFAULT = `${worktree}/plugin`
+const PLUGIN_ROOT = (() => {
+  const provided = typeof A.pluginRoot === 'string' ? A.pluginRoot.trim() : ''
+  return provided || DEV_PLUGIN_ROOT_DEFAULT
+})()
+if (!PLUGIN_ROOT) {
+  return {
+    outcome: 'plugin-root-not-provided',
+    message:
+      'args.pluginRoot 缺失：普通会话里插件根环境变量没有值，插件根必须由调用方传入（= scriptPath 的上两级目录）。⛔ 绝不静默展开成空串。',
+  }
+}
+if (!PLUGIN_ROOT.startsWith('/')) {
+  return {
+    outcome: 'plugin-root-invalid',
+    message: `args.pluginRoot 必须是绝对路径（收到 ${JSON.stringify(A.pluginRoot)}）：相对路径无法命名插件根，其 scripts/dist 引用会退化成不可解析路径。`,
+  }
+}
 
 const launchEnv = `QUAY_TEST_SUITE_MAX_RUNTIME_MS=${envMaxRuntimeMs} QUAY_TEST_SUITE_SILENCE_MS=${envSilenceMs} QUAY_TEST_RED_GRACE_MS=${envRedGraceMs} QUAY_TEST_SYSTEMD_RUN_LIMITS='${systemdRunLimits}'`
 
@@ -105,7 +134,7 @@ const launchEnv = `QUAY_TEST_SUITE_MAX_RUNTIME_MS=${envMaxRuntimeMs} QUAY_TEST_S
 // fail-closed「no before-run snapshot」RED 的成因）。--snapshot 失败不阻断 launch（fail-open；
 // --check 本身 fail-closed 兜底）。worktree 恒为真实 worktree（≠ main checkout）⇒ runner 不触发
 // one-shot provisioning ⇒ <worktree>/.quay 快照路径与 test.sh 的 --check 一致。
-const launchCmd = `cd ${root} && bash plugin/scripts/tmux-leak-scan.sh --snapshot ${worktree}; cd ${root} && ${launchEnv} setsid node --no-warnings --experimental-strip-types plugin/scripts/full-suite-runner.ts --root ${worktree} --state-dir ${stateDir} --log-file ${resolvedLogFile} >/dev/null 2>&1 & disown; sleep 2; echo detached-pid=$!`
+const launchCmd = `cd ${root} && bash plugin/scripts/tmux-leak-scan.sh --snapshot ${worktree}; cd ${root} && ${launchEnv} setsid node --no-warnings --experimental-strip-types ${PLUGIN_ROOT}/scripts/full-suite-runner.ts --root ${worktree} --state-dir ${stateDir} --log-file ${resolvedLogFile} >/dev/null 2>&1 & disown; sleep 2; echo detached-pid=$!`
 
 // ── 通用指令片段（发给每个 agent 的执行上下文，固定命令块，不靠探索）─────────────────
 const CONTEXT = `
@@ -137,7 +166,7 @@ const touchesFile = taskId ? `${worktree}/tasks/${taskId}.md` : ''
 const fixScopeGate = `【fix-scope gate —— fix 前必须先跑，得到 FIX_SCOPE_VERDICT 再动手修】
 # fix-scope-gate-block-start
 fix_scope_out=$(node --no-warnings --experimental-strip-types --input-type=module -e 'import fs from "node:fs";
-import { parseTouches, matchGlob, normalizePath } from "${worktree}/plugin/scripts/touches-orthogonality-check.ts";
+import { parseTouches, matchGlob, normalizePath } from "${PLUGIN_ROOT}/scripts/touches-orthogonality-check.ts";
 const taskFile = process.argv[1];
 const stateFile = process.argv[2];
 let globs = null;
