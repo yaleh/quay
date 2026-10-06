@@ -2,7 +2,7 @@
 id: gap-serve-host-has-no-loaded-version-reading-driver-status-covers-anchor-only
 title: serve 宿主没有"加载版本 vs 已安装版本"读数——driver status 的 loaded_version 只覆盖
   anchor，/health 的 latestCodeCommitAt 对已安装产物恒为 null
-status: ready
+status: done
 labels:
   - gap
   - priority:p2
