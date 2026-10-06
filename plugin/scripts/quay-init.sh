@@ -499,10 +499,10 @@ ensure_provider_carrier_env() {
 # already an absolute path is left byte-for-byte untouched — including its runtime dir, which must
 # NOT be retired (a byte-current copy is indistinguishable from a legitimate one).
 migrate_stale_mcp_entry() {
-  local cfg="$WORKSPACE_ROOT/.quay/config.yml"
-  local install_provider="${PLUGIN_ROOT}/vendor/quay-native"
-  local install_runtime="${install_provider}/dist/quay-native.js"
-  local install_core="${PLUGIN_ROOT}/vendor/quay/dist/quay.js"
+  # Two `local`s per line: the sh-census ratchet is shrink-only and quay-init.sh is census-charged, so
+  # the board/gates lines this file's heredoc gained (a fresh install must validate) are paid for here.
+  local cfg="$WORKSPACE_ROOT/.quay/config.yml" install_provider="${PLUGIN_ROOT}/vendor/quay-native"
+  local install_runtime="${install_provider}/dist/quay-native.js" install_core="${PLUGIN_ROOT}/vendor/quay/dist/quay.js"
   if [ ! -f "$cfg" ]; then return; fi
   # The migration rules, the four-way fate of the retired `.quay/runtime` (absent / retire / keep /
   # unknown — never collapsed: "could not evaluate" must not print as "evaluated, fine") and the
@@ -1559,6 +1559,11 @@ providers:
       QUAY_NATIVE_META_DIR: "${WORKSPACE_ROOT}/meta"
 loop:
   repo_root: ${REPO_ROOT}
+  # The board (which provider to scan) and gates the loop driver reads. Both are REQUIRED by the
+  # official config validator and by loop-params.ts: a fresh install that omitted them was rejected
+  # the moment the user ran the documented verify command (the assertion this release gate runs).
+  board: "native"
+  gates: []
   # quay's mechanical fan-in runs this project's test entrypoint with its own value-taking flags
   # (--buckets / --root / --state-dir / --runner / --log-file / --run-id, plus --test-concurrency=N).
   # If you ship scripts/test.sh, it MUST consume such a flag together with its VALUE (shift 2) and
