@@ -158,6 +158,35 @@ EXIT=1
 
 **本轮落地前的门**:预合并 `git merge --no-edit develop` 干净(无冲突);scoped 门 `bash scripts/test.sh --for-task <id> --allow-thin` → `tests 286 / pass 286 / fail 0`,EXIT=0;`plugin/test/adr016-screen-use-check.test.mjs` → `19/19`。
 2026-10-06 人工复核：全部 AC 已勾选且 scoped 门 286/286 绿；上两轮 suite-red 真因（adr016-screen-use-check 扫入 tmp/ 夹具）已在 worktree 提交 6649b9b9a 修复，修复后从未再跑过 fan-in suite（orphan worker 退出，非实现缺陷）。退回 ready 让 driver 重新 fan-in。
+
+### 第 5 轮(2026-10-06 worker 续做)——上轮 suite-red 判为环境性:未复现;无代码改动
+
+上轮(`.quay/fan-in-suite-gap-config-validate-requires-mcp-entry-contradicts-native-default-resolver~wk-prod-anchor~1791294790364-650431.log`)唯一红项 = `packages/quay/test/build-dist-smoke.test.mjs` 的 `(b) serve --port + HTTP GET returns 200`:`AssertionError: GET /tasks on the standalone-bundle server must return 200`(`actual undefined / expected 200`,耗时 15166.8ms = 恰好耗尽 100×150ms 轮询窗;全量 `# tests 8714 / # fail 1`)。
+
+**判为环境性,四条读数:**
+
+1. **本 delta 不经该路径。** 该用例的 workspace 由 `plugin/test/helpers/tmp-workspace.mjs::makeTmpWorkspace` 造,其写入的 `config.yml` 带**显式** `path`/`mcp_entry` ⇒ `providerMcpEntry()` 第一行 `hasMcpEntry(provider)` 即返回,`resolveProviderEntry` / 插件根推导根本不执行。本任务改的是"省略时"的分支(且 `makeTmpWorkspace` 不产生省略形态)。
+2. **隔离实跑 6/6 绿且极稳。** 单跑 1 次 + 5 次并发同跑,`(b)` 全绿,bind 耗时 311.7–314.8ms(5 并发不劣化)⇒ 不是"负载下渐渐变慢"的渐变。
+3. **重跑全量 suite 一次:不复现。** `full-suite-runner.ts --root <worktree> --state-dir /tmp/verify-suite-20261006T215839/quay-state --runner inner --sync`(与 fan-in 同形:`systemd-run --user --scope` + `MemoryMax=16G`,`QUAY_TEST_SUITE_DRIVER_HOLDS_SLOT=1`)⇒ `# tests 10166 / # pass 10166 / # fail 0 / # suite green`;`build-dist-smoke` `passed=true duration_ms=1905`。
+4. **失败窗口正是该轮的 load/PSI 峰值。** 该轮自带采样器 `.quay/suite-load-mfi-…b7b071.jsonl`(相对 `(b)` 起点 −58s..+63s,5s 一条):
+
+```
+ -7.3s load= 49.87 stall= 2.39
+ -2.3s load= 54.04 stall= 4.66
+ +2.7s load= 71.74 stall=15.43   <-- (b) 窗口
+ +7.7s load= 71.44 stall=12.35   <-- (b) 窗口
++12.7s load= 67.40 stall= 8.42   <-- (b) 窗口
++17.7s load= 63.44 stall= 5.17
+```
+
+窗口内 loadavg 由 ~40 基线跳到 71.7、PSI `cpu_stall` 由 ≤4.66% 跳到 **15.43%**(全场最高);`mem_avail` 全程 161–178GB(⇒ 非宿主 OOM)。与 `casebook` 已录的"内存/回收压力 stall 进程 spawn ⇒ 计时断言轮转报红"同族。
+
+**排除"随机端口撞常驻监听"**:`undefined !== 200` 要求 100 次 `httpGet` **全部** ECONNREFUSED ⇒ 该端口全程无监听者;而实测 18000–19499 区间仅 5 个常驻监听(60s 内不 churn),**若**撞上会 CONNECT 成功并拿到非 200 码,报错形态不同。
+
+**归纳**:`build-dist-smoke` 在 72 份 fan-in suite 日志里只红过这一次(72 → 1),且该签名不跨任务复发 ⇒ 即便走 `worker-driver` 的 `judgeRetryExemption`,也只会落 `own-defect-counted`(要求签名跨 ≥2 个不同任务复发),不会豁免。故本轮的价值 = **把"它是环境性"的读数落进载体**,让下一轮不必重查。
+
+**本轮无代码改动**(未碰 `build-dist-smoke.test.mjs`,未扩 Touches);工作树 = 分支既有 11 提交(HEAD `e166cb2a9`,已含 develop `23b831990`),`git merge --no-edit develop` = `Already up to date.`;`task_check` ⇒ `ok:true / acTotal 9 / acChecked 9`。
+
 ## Needs-Human
 
 **执行 2026-10-06T13:35:26.985Z — 停派终止（失败无法归因，⛔ 不再重派）**
