@@ -3,7 +3,7 @@ id: gap-workflow-js-carriers-emit-literal-plugin-root-env-ref-that-is-unset-in-p
 title: 发布版 workflow 把 ${CLAUDE_PLUGIN_ROOT} 写进发给 agent 的命令，但该变量在普通会话里不存在——0.14.0
   加载即 ReferenceError，0.15.0+ 加载通过、运行期路径退化成 /scripts/dist/…；应改为把插件根作为
   args.pluginRoot 传入并写绝对路径
-status: ready
+status: done
 labels:
   - gap
   - defect
