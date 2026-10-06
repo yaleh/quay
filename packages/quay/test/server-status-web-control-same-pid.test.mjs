@@ -72,9 +72,15 @@ function makeWorkspace(prefix) {
  * free to answer the child's probes — a blocking spawnSync would make the server unreachable for the
  * duration and turn a green reading into `degraded`.
  */
-function cli(args, cwd) {
+function cli(args, cwd, extraEnv) {
   return new Promise((resolve, reject) => {
-    const child = spawn(process.execPath, ["--no-warnings", QUAY_CLI, ...args], { cwd, stdio: ["ignore", "pipe", "pipe"] });
+    const child = spawn(process.execPath, ["--no-warnings", QUAY_CLI, ...args], {
+      cwd,
+      stdio: ["ignore", "pipe", "pipe"],
+      // `extraEnv` 存在时**叠在**继承环境之上（缺省 = 完全继承，既有调用点行为不变）。宿主加载版本
+      // 读数要一个 hermetic 的「已安装版本」（fixture HOME），见本文件末尾那一节。
+      ...(extraEnv ? { env: { ...process.env, ...extraEnv } } : {}),
+    });
     let stdout = "";
     let stderr = "";
     child.stdout.on("data", (c) => (stdout += c));
@@ -506,4 +512,254 @@ test("AC4 — the built dist bundle is a working unified server too (the shipped
   // argv (read from /proc) must name the bundle path.
   const cmdline = execFileSync("bash", ["-c", `tr '\\0' ' ' < /proc/${carrier.pid}/cmdline`], { encoding: "utf8" });
   assert.ok(cmdline.includes(QUAY_CLI), `the live process runs the bundle (got: ${JSON.stringify(cmdline)})`);
+});
+
+// ══ 宿主的 loaded_version：serve 宿主**实际加载的产物** vs **已安装**版本 ══════════════════════════
+// gap-serve-host-has-no-loaded-version-reading-driver-status-covers-anchor-only
+//
+// 缺陷（2026-10-06，cantus 实测）：插件 pin 从 0.15.0 升到 0.16.0 后，anchor 侧 `driver status` 正确
+// 报出 `loaded-version-behind: loaded=0.15.0 installed=0.16.0`，而**同一个 workspace 的 `quay serve`
+// 宿主没有任何等价读数**——`/health` 的 `latestCodeCommitAt` 对**装好的产物**恒为 null（workspace 里
+// 没有 quay 源码提交可比），于是「宿主跑的是旧版本」与「一切正常」在该宿主上完全同形。
+//
+// 本节钉住新读数：`loaded_version` / `loaded` / `installed` / `source`（+ `loaded_script` /
+// `loaded_version_relation` / `loaded_version_reason`）。
+// ⛔ 它读的是**运行中进程自己**的 `/proc/<pid>/cmdline`（外部可核的直接量，硬规则 4b）⇒ 夹具必须是
+// 一个**真的在跑**、且 cmdline 里**真的**带着版本目录路径的宿主进程。一个「只看查询者自己目录」或
+// 「总是 current」的实现在这些夹具上取不到假。
+// ⛔ 版本从该版本目录的 `VERSION` 文件读，⛔ 不 exec 该产物自己的 `--version`（bundle 内嵌版本是另一个
+// 量，gap-release-bundle-embeds-dev-version-after-stamp）——AC4 用「`--version` 打印一个与 VERSION
+// 不同的值」的夹具钉死这一点。
+// ⛔ 三种「读不到」一律 `not-evaluated` + 非空 reason，⛔ 不与 `current` 同形（硬规则 3b）。
+
+/** 一个 fixture 版本目录（布局照抄真实 cache）：`…/cache/quay/quay/<ver>/vendor/quay/dist/quay.js`
+ *  + `…/cache/quay/quay/<ver>/VERSION`。脚本 `--version` 时打印 `cliVersion`（缺省 = VERSION）——
+ *  AC4 要它**与 VERSION 不同**。返回脚本绝对路径（= cmdline 里那一段）。 */
+function writeServeVersionDir(cacheRoot, version, cliVersion) {
+  const versionDir = path.join(cacheRoot, "cache", "quay", "quay", version);
+  const dist = path.join(versionDir, "vendor", "quay", "dist");
+  fs.mkdirSync(dist, { recursive: true });
+  fs.writeFileSync(path.join(versionDir, "VERSION"), `${version}\n`, "utf8");
+  const script = path.join(dist, "quay.js");
+  fs.writeFileSync(
+    script,
+    `if (process.argv.includes("--version")) { console.log(${JSON.stringify(cliVersion ?? version)}); process.exit(0); }\n` +
+      "setTimeout(() => {}, 600000);\n",
+    "utf8",
+  );
+  return script;
+}
+
+/** 起一个**真的在跑**的「serve 宿主」（`node <script> serve`，常驻），等它的 cmdline 可读。
+ *  ⛔ 必须真跑：读数取的是那个进程自己的 `/proc/<pid>/cmdline`，写死一个 pid 结构上取不到假。 */
+function spawnFakeServeHost(t, script) {
+  const p = spawn(process.execPath, [script, "serve"], { stdio: "ignore" });
+  t.after(() => {
+    try {
+      p.kill("SIGKILL");
+    } catch {
+      /* already gone */
+    }
+  });
+  const deadline = Date.now() + 3000;
+  while (Date.now() < deadline) {
+    try {
+      if (fs.readFileSync(`/proc/${p.pid}/cmdline`, "utf8").includes(script)) return p.pid;
+    } catch {
+      /* not yet */
+    }
+    spawnSync(process.execPath, ["-e", "setTimeout(()=>{},50)"]);
+  }
+  throw new Error(`fake serve host pid ${p.pid} never became readable via /proc`);
+}
+
+/** fixture HOME（管**已安装**版本）：注册表是「已安装版本」的唯一权威来源；放进 fixture HOME 而不是
+ *  读真 HOME，本节才 hermetic（真 HOME 上的 quay@quay 版本随发布漂移 ⇒ 判据会随环境红绿）。 */
+function writeInstalledRegistry(home, version) {
+  fs.mkdirSync(path.join(home, ".claude", "plugins"), { recursive: true });
+  fs.writeFileSync(
+    path.join(home, ".claude", "plugins", "installed_plugins.json"),
+    JSON.stringify({
+      version: 2,
+      plugins: {
+        "quay@quay": [
+          {
+            scope: "local",
+            installPath: `/nowhere/cache/quay/quay/${version}`,
+            version,
+            installedAt: "2026-09-20T02:20:39.600Z",
+            lastUpdated: "2026-09-23T06:43:08.658Z",
+          },
+        ],
+      },
+    }),
+    "utf8",
+  );
+}
+
+/** 一个**空闲**端口（绑定后立刻释放）——载体里的两个服务都指向它，探针会拿到 ECONNREFUSED。 */
+async function freePort() {
+  return await new Promise((resolve) => {
+    const srv = net.createServer();
+    srv.listen(0, "127.0.0.1", () => {
+      const { port } = srv.address();
+      srv.close(() => resolve(port));
+    });
+  });
+}
+
+/** 写一个指向 `hostPid` 的 `server.json` 载体（形状同 server-state.ts 的 SERVER_STATE_SCHEMA_VERSION 1）。 */
+async function writeCarrier(ws, hostPid) {
+  const port = await freePort();
+  fs.writeFileSync(
+    path.join(ws, SERVER_STATE_REL),
+    JSON.stringify({
+      schemaVersion: 1,
+      pid: hostPid,
+      startedAt: new Date().toISOString(),
+      services: [
+        { name: "web", pid: hostPid, host: "127.0.0.1", port },
+        { name: "control", pid: hostPid, host: "127.0.0.1", port },
+      ],
+    }),
+  );
+}
+
+/** 一个 fixture 世界：一个真在跑的 serve 宿主（加载 `<cacheRoot>/…/<loadedVersion>/vendor/quay/dist/
+ *  quay.js`）+ 一个说「已安装 `<installed>`」的 fixture HOME + 一个指向它的 workspace。 */
+async function serveHostWorld(t, tag, { installed, loadedVersion, cliVersion } = {}) {
+  const home = fs.mkdtempSync(path.join(os.tmpdir(), `srvlv-home-${tag}-`));
+  const cacheRoot = fs.mkdtempSync(path.join(os.tmpdir(), `srvlv-cache-${tag}-`));
+  const ws = makeWorkspace(`srvlv-${tag}`);
+  t.after(() => {
+    fs.rmSync(home, { recursive: true, force: true });
+    fs.rmSync(cacheRoot, { recursive: true, force: true });
+    fs.rmSync(ws, { recursive: true, force: true });
+  });
+  writeInstalledRegistry(home, installed);
+  const script = writeServeVersionDir(cacheRoot, loadedVersion, cliVersion);
+  const pid = spawnFakeServeHost(t, script);
+  await writeCarrier(ws, pid);
+  return { home, cacheRoot, ws, script, pid };
+}
+
+test("loaded_version — the serve host loaded 0.15.0 while 0.16.0 is installed ⇒ behind (+ both versions, source=proc-cmdline)", async (t) => {
+  const { home, ws, script, pid } = await serveHostWorld(t, "behind", { installed: "0.16.0", loadedVersion: "0.15.0" });
+
+  const res = await cli(["server", "status", "--json"], ws, { HOME: home });
+  assert.ok(res.json, `status --json is parseable (stderr: ${res.stderr})`);
+  assert.equal(res.json.loaded_version, "behind", `落后必须报 behind: ${JSON.stringify(res.json.loaded_version)}`);
+  assert.equal(res.json.loaded, "0.15.0", `loaded = 运行中宿主实际加载的那份: ${res.json.loaded}`);
+  assert.equal(res.json.installed, "0.16.0", `installed = 注册表里已安装的版本: ${res.json.installed}`);
+  assert.equal(res.json.source, "proc-cmdline", `来源是外部可核的直接量: ${res.json.source}`);
+  assert.equal(res.json.loaded_version_relation, "loaded-older", `方向单列: ${res.json.loaded_version_relation}`);
+  assert.equal(res.json.loaded_version_reason, null, `有结论 ⇒ reason 为空: ${res.json.loaded_version_reason}`);
+  // 直接量：读的是**那个进程**加载的脚本路径（/proc/<pid>/cmdline 的 exec 实参）。
+  assert.equal(res.json.loaded_script, script, `loaded_script = 宿主进程自己的 cmdline 实参: ${res.json.loaded_script}`);
+  assert.ok(fs.existsSync(res.json.loaded_script), `被点名的脚本真的在盘上: ${res.json.loaded_script}`);
+  assert.equal(res.json.pid, pid, `宿主 = fixture 里真跑着的那个进程: ${res.json.pid}`);
+  assert.notEqual(res.json.loaded_version, "current", "⛔ behind 不得与 current 同形");
+});
+
+test("loaded_version — the SAME fixture with the installed version equal to the loaded one ⇒ current (behind is not a constant)", async (t) => {
+  const { home, ws } = await serveHostWorld(t, "current", { installed: "0.16.0", loadedVersion: "0.16.0" });
+
+  const res = await cli(["server", "status", "--json"], ws, { HOME: home });
+  assert.equal(res.json.loaded_version, "current", `同版本 ⇒ current: ${JSON.stringify(res.json)}`);
+  assert.equal(res.json.loaded, "0.16.0");
+  assert.equal(res.json.installed, "0.16.0");
+  assert.equal(res.json.loaded_version_reason, null);
+});
+
+test("loaded_version — host pid dead / cmdline carries no quay serve script / no version dir ⇒ not-evaluated with a NON-EMPTY reason (⛔ never current)", async (t) => {
+  const home = fs.mkdtempSync(path.join(os.tmpdir(), "srvlv-home-neg-"));
+  const bare = fs.mkdtempSync(path.join(os.tmpdir(), "srvlv-bare-"));
+  const ws = makeWorkspace("srvlv-neg");
+  t.after(() => {
+    fs.rmSync(home, { recursive: true, force: true });
+    fs.rmSync(bare, { recursive: true, force: true });
+    fs.rmSync(ws, { recursive: true, force: true });
+  });
+  writeInstalledRegistry(home, "0.16.0");
+
+  // (a) 宿主 pid 已死（载体还在盘上——SIGKILL 的形态）：没有运行中的进程 ≠ 跑的是最新版。
+  const corpse = spawn(process.execPath, ["-e", "process.exit(0)"], { stdio: "ignore" });
+  const corpsePid = corpse.pid;
+  while (pidAlive(corpsePid)) await new Promise((r) => setTimeout(r, 20));
+  await writeCarrier(ws, corpsePid);
+  const dead = await cli(["server", "status", "--json"], ws, { HOME: home });
+  assert.equal(dead.json.loaded_version, "not-evaluated", `宿主已死 ⇒ not-evaluated: ${JSON.stringify(dead.json.loaded_version)}`);
+  assert.notEqual(dead.json.loaded_version, "current", "⛔ not-evaluated 不得与 current 同形");
+  assert.equal(dead.json.loaded, null, "没有读数就不编一个版本出来");
+  assert.ok(
+    typeof dead.json.loaded_version_reason === "string" && dead.json.loaded_version_reason.length > 0,
+    `读不出必须给原因: ${JSON.stringify(dead.json.loaded_version_reason)}`,
+  );
+
+  // (b) 活着的 pid，但 cmdline 里根本没有 `quay … serve` 实参（pid 复用 / 不是 serve 宿主）。
+  const notServe = spawn(process.execPath, ["-e", "setTimeout(()=>{},600000)"], { stdio: "ignore" });
+  t.after(() => {
+    try {
+      notServe.kill("SIGKILL");
+    } catch {
+      /* already gone */
+    }
+  });
+  await writeCarrier(ws, notServe.pid);
+  const wrongProc = await cli(["server", "status", "--json"], ws, { HOME: home });
+  assert.equal(wrongProc.json.loaded_version, "not-evaluated", `不是 serve 宿主 ⇒ not-evaluated: ${JSON.stringify(wrongProc.json.loaded_version)}`);
+  assert.equal(wrongProc.json.source, null, "没有直接量就没有来源");
+  assert.ok(
+    typeof wrongProc.json.loaded_version_reason === "string" && wrongProc.json.loaded_version_reason.length > 0,
+    `认不出脚本必须给原因: ${JSON.stringify(wrongProc.json.loaded_version_reason)}`,
+  );
+
+  // (c) 活着的 serve 宿主，但它的脚本路径**推不出**版本目录（无版本段的源检出形态 / 被裁掉 VERSION
+  //     的产物）：⛔ 不得退回「随便挑一个数字」，也不得伪装成 current。
+  const noVerDir = path.join(bare, "no-version-segment");
+  fs.mkdirSync(noVerDir, { recursive: true });
+  const bareScript = path.join(noVerDir, "quay.js");
+  fs.writeFileSync(bareScript, "setTimeout(() => {}, 600000);\n", "utf8");
+  const barePid = spawnFakeServeHost(t, bareScript);
+  await writeCarrier(ws, barePid);
+  const noVersion = await cli(["server", "status", "--json"], ws, { HOME: home });
+  assert.equal(noVersion.json.loaded_version, "not-evaluated", `推不出版本 ⇒ not-evaluated: ${JSON.stringify(noVersion.json.loaded_version)}`);
+  assert.equal(noVersion.json.loaded, null);
+  assert.equal(noVersion.json.loaded_script, bareScript, "脚本本身读到了（缺口在「推不出版本」，不在「认不出脚本」）");
+  assert.ok(
+    typeof noVersion.json.loaded_version_reason === "string" && noVersion.json.loaded_version_reason.length > 0,
+    `推不出版本必须给原因: ${JSON.stringify(noVersion.json.loaded_version_reason)}`,
+  );
+});
+
+test("loaded_version — the version comes from the version dir's VERSION file, NOT from `quay.js --version` (its output differs on purpose)", async (t) => {
+  // 夹具的产物在 `--version` 时打印 9.9.9，而它的 VERSION 文件写 0.15.0 ⇒ 若实现 exec 了产物，
+  // loaded 会是 "9.9.9"（且方向变成 ahead：9.9.9 > 0.16.0），两条断言都会红。
+  const { home, ws, script } = await serveHostWorld(t, "noversionexec", {
+    installed: "0.16.0",
+    loadedVersion: "0.15.0",
+    cliVersion: "9.9.9",
+  });
+
+  // 先证明夹具**会**用 9.9.9 回答 `--version`（否则这条判据是空转的）。
+  const v = spawnSync(process.execPath, [script, "--version"], { encoding: "utf8" });
+  assert.equal(v.stdout.trim(), "9.9.9", "the fixture's own --version really does print a DIFFERENT value");
+
+  const res = await cli(["server", "status", "--json"], ws, { HOME: home });
+  assert.equal(res.json.loaded, "0.15.0", `读数取自版本目录的 VERSION 文件: ${res.json.loaded}`);
+  assert.notEqual(res.json.loaded, "9.9.9", "⛔ 不得取 `--version` 的输出（那是 bundle 内嵌版本，另一个量）");
+  assert.equal(res.json.loaded_version, "behind", `方向必须按 VERSION 判（9.9.9 会读成 ahead）: ${res.json.loaded_version}`);
+});
+
+test("loaded_version — the TEXT form leads with loaded-version-<state> and, on behind, names `quay server restart` (⛔ never silent)", async (t) => {
+  const { home, ws } = await serveHostWorld(t, "text", { installed: "0.16.0", loadedVersion: "0.15.0" });
+
+  const behind = await cli(["server", "status"], ws, { HOME: home });
+  assert.match(behind.stdout, /loaded-version-behind: loaded=0\.15\.0 installed=0\.16\.0/, `显式报 behind: ${behind.stdout}`);
+  assert.match(behind.stdout, /quay server restart/, "behind 给出动作提示（⛔ 只提示，不自动重启）");
+
+  const { home: home2, ws: ws2 } = await serveHostWorld(t, "textneg", { installed: "0.16.0", loadedVersion: "0.16.0" });
+  const current = await cli(["server", "status"], ws2, { HOME: home2 });
+  assert.match(current.stdout, /loaded-version-current: /, "同版本走另一个取值（不同形）");
+  assert.doesNotMatch(current.stdout, /quay server restart/, "current 不给重启提示");
 });
