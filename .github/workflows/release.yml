@@ -196,7 +196,7 @@ jobs:
           done
           [ "$fail" = "0" ] || exit 1
 
-      - name: Run quay serve in the scratch project and probe it
+      - name: Run quay's unified server in the scratch project and probe it
         env:
           INSTALLED: ${{ steps.installed.outputs.dir }}
         run: |
@@ -205,14 +205,16 @@ jobs:
           QUAY_BIN="${INSTALLED}/bin/quay"
           PORT=$(( 20000 + RANDOM % 20000 ))
           echo "$PORT" > "${RUNNER_TEMP}/serve-port"
-          # ⛔ No subshell around the backgrounded launch: `( … ) &` makes $! the SUBSHELL's pid, so
-          # the cleanup step would signal a subshell that has already exited and leave the real
-          # server running. cd once, here, so $! IS the server.
-          cd "$SCRATCH"
-          "$QUAY_BIN" serve --host 127.0.0.1 --port "$PORT" > "${RUNNER_TEMP}/serve.log" 2>&1 &
-          echo "$!" > "${RUNNER_TEMP}/serve-pid"
+          # `quay server start` (⛔ NOT a raw `serve … &`): it spawns the host through the SAME
+          # systemd-scope envelope `/quay:drivers` uses, so the host lives in its own
+          # `quay-serve-*.scope`, writes `.quay/serve.log`, and survives its caller's session scope
+          # dying — the mechanism gap-serve-host-spawned-in-caller-session-cgroup-dies-when-cloudcli-
+          # restarts fixed. A raw `serve &` inherits the runner shell's cgroup, so the assertion step
+          # below would fail for a reason that is the gate's own doing. `--only web,control` both
+          # faces, so `quay server status` reads `running` (a web-only host is `degraded`).
+          ( cd "$SCRATCH" && "$QUAY_BIN" server start --only web,control --host 127.0.0.1 --port "$PORT" --root "$SCRATCH" )
           # ANY HTTP response proves the process is up — the status code is not the claim being
-          # made. quay serve blocks its event loop for ~10s on cold start (measured; see the
+          # made. quay's cold start blocks its event loop for ~10s (measured; see the
           # quay-serve-cold-start-blocks-event-loop note), so "no answer yet" is not "failed" and
           # the probe retries for a generous window instead of sampling once.
           for i in $(seq 1 60); do
@@ -223,10 +225,66 @@ jobs:
             fi
             sleep 1
           done
-          echo "ERROR: quay serve did not answer any HTTP response on 127.0.0.1:${PORT} within 60s." >&2
+          echo "ERROR: the quay server did not answer any HTTP response on 127.0.0.1:${PORT} within 60s." >&2
           echo "--- serve log ---" >&2
-          cat "${RUNNER_TEMP}/serve.log" >&2 || true
+          cat "$SCRATCH/.quay/serve.log" >&2 || true
           exit 1
+
+      # ── The CHANNEL assertions (tasks/gap-release-gate-verify-plugin-channel-misses-config-
+      # validate-version-pointer-scope-and-upgrade-assertions) ─────────────────────────────────────
+      # The steps above prove the artifact INSTALLS and RUNS; these prove it is CORRECT — that the
+      # config /quay:init wrote validates (CLI + MCP), the version carriers agree and carry no -dev,
+      # the project pointer/config are not frozen to a cache version, the driver/server version
+      # readings exist, and the serve host runs in its own scope. ONE implementation, called from
+      # here AND from the local pre-release drill (README "发布前本地演练"). ⛔ The assertion logic
+      # is NOT inlined in this YAML: an inline `run:` block can only run in CI, cannot be replayed
+      # before a dispatch, and would have to be written twice across `--scope` values.
+      #
+      # ⛔ Run the checker from THIS SOURCE CHECKOUT, not from `$INSTALLED`: the published artifact
+      # strips raw plugin `.ts` (publish-dist-branch.sh deletes every plugin `.ts`), so the checker
+      # exists there only as a dist bundle. It is a gate, not a deliverable.
+      - name: Verify the channel — project-scope assertions
+        env:
+          INSTALLED: ${{ steps.installed.outputs.dir }}
+        run: |
+          set -euo pipefail
+          SCRATCH="${RUNNER_TEMP}/scratch-project"
+          node --experimental-strip-types plugin/scripts/verify-plugin-channel-assertions.ts \
+            --installed "$INSTALLED" --project "$SCRATCH" --scope project
+
+      # ── user-scope install + the same assertion set (verified locally, 2026-10-06, with exactly
+      # these commands under an isolated HOME — see the task's completion record). WHY A FRESH HOME:
+      # a user-scope install is machine-global (`~/.claude/plugins/installed_plugins.json`), and a
+      # self-hosted runner persists it across runs — a fresh HOME is what keeps this job's
+      # "naturally isolated" premise true. `QUAY_VERIFY_HOME` points the checker's install-record
+      # lookup at that HOME (the CLI subprocesses resolve their own config from it too, because the
+      # step exports HOME). ⛔ The user project is a SECOND scratch project: its `.quay/plugin` must
+      # point at the USER-scope cache dir, which is a different directory than the project-scope one.
+      - name: Verify the channel — user-scope install + assertions
+        env:
+          INSTALLED: ${{ steps.installed.outputs.dir }}
+        run: |
+          set -euo pipefail
+          USER_HOME="${RUNNER_TEMP}/user-scope-home"
+          USER_SCRATCH="${RUNNER_TEMP}/scratch-project-user"
+          rm -rf "$USER_HOME" "$USER_SCRATCH"
+          mkdir -p "$USER_HOME" "$USER_SCRATCH"
+          export HOME="$USER_HOME" CLAUDE_CONFIG_DIR="$USER_HOME/.claude"
+          ( cd "$USER_SCRATCH" && git init -q )
+          claude plugin marketplace add "${RUNNER_TEMP}/plugin-channel-src"
+          ( cd "$USER_SCRATCH" && claude plugin install quay@quay --scope user -y )
+          USER_INSTALLED="$(node -e 'const o=require(process.env.HOME+"/.claude/plugins/installed_plugins.json");const e=(o.plugins["quay@quay"]||[]).find(x=>x.scope==="user");if(!e){console.error("no user-scope install record");process.exit(1)}process.stdout.write(e.installPath)')"
+          echo "$USER_INSTALLED" > "${RUNNER_TEMP}/user-installed"
+          test -f "$USER_INSTALLED/scripts/quay-init.sh"
+          CLAUDE_PLUGIN_ROOT="$USER_INSTALLED" bash "$USER_INSTALLED/scripts/quay-init.sh" \
+            --all --root "$USER_SCRATCH" --project scratch-user --repo-root "$USER_SCRATCH" \
+            --test-command 'node --test' --plugin-root "$USER_INSTALLED"
+          for kind in promotion worker; do
+            ( cd "$USER_SCRATCH" && "$USER_INSTALLED/bin/quay" driver start --kind "$kind" --root "$USER_SCRATCH" ) || true
+          done
+          ( cd "$USER_SCRATCH" && "$USER_INSTALLED/bin/quay" server start --only web,control --host 127.0.0.1 --port 0 --root "$USER_SCRATCH" )
+          node --experimental-strip-types plugin/scripts/verify-plugin-channel-assertions.ts \
+            --installed "$USER_INSTALLED" --project "$USER_SCRATCH" --scope user
 
       - name: Stop the drivers and the server
         if: always()
@@ -238,13 +296,21 @@ jobs:
         run: |
           set -euo pipefail
           SCRATCH="${RUNNER_TEMP}/scratch-project"
-          if [ -s "${RUNNER_TEMP}/serve-pid" ]; then
-            kill "$(cat "${RUNNER_TEMP}/serve-pid")" 2>/dev/null || true
-          fi
           if [ -n "${INSTALLED:-}" ] && [ -x "${INSTALLED}/bin/quay" ]; then
+            ( cd "$SCRATCH" && "${INSTALLED}/bin/quay" server stop --only web,control --root "$SCRATCH" ) || true
             for kind in promotion worker; do
               ( cd "$SCRATCH" && "${INSTALLED}/bin/quay" driver stop --kind "$kind" --root "$SCRATCH" ) || true
             done
+          fi
+          USER_SCRATCH="${RUNNER_TEMP}/scratch-project-user"
+          if [ -s "${RUNNER_TEMP}/user-installed" ]; then
+            USER_INSTALLED="$(cat "${RUNNER_TEMP}/user-installed")"
+            if [ -x "$USER_INSTALLED/bin/quay" ]; then
+              ( cd "$USER_SCRATCH" && "$USER_INSTALLED/bin/quay" server stop --only web,control --root "$USER_SCRATCH" ) || true
+              for kind in promotion worker; do
+                ( cd "$USER_SCRATCH" && "$USER_INSTALLED/bin/quay" driver stop --kind "$kind" --root "$USER_SCRATCH" ) || true
+              done
+            fi
           fi
           exit 0
 

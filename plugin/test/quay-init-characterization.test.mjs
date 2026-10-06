@@ -175,7 +175,12 @@ const PINNED = {
       // (Core resolves the native provider from its own plugin root — `plugin-root.ts`), so the two
       // lines left the block and the header comment was rewritten to explain the removal. The other
       // five files hash unchanged — the cross-check that only the provider block moved.
-      ".quay/config.yml  a5ac122902892c47ae2892fe88fb7697c0493d7dd0c7954425662de2e2495a59",
+      // RE-ANCHORED 2026-10-06 (gap-release-gate-verify-plugin-channel-misses-config-validate-…):
+      // the fresh writer's `loop:` block gained `board: "native"` + `gates: []`, because a config
+      // without them is rejected by `quay config validate` AND by loop-params.ts — a fresh install
+      // was born failing the documented verify command. Only the loop block moved; the other five
+      // files hash unchanged (that cross-check is what makes this a targeted re-anchor).
+      ".quay/config.yml  fc818a6a133224c71d8544b2a46280f7882ea56ac8bf98df77d2d4f79f211d12",
       ".quay/profiles.yml  0f781fbcc8140fd1b4732d877f8484f2c6f14856e2419167281976678b748bb0",
       ".gitignore  f9e6655aa4762432b178420cf9c9d773fc88a67822c6e44fcbdf5f51a8e6ec7a",
       ".claude/launch.settings.json  25e4ace2586d593da41a0b0f7380c2d77aed03d404b7a0f3414329f6df30baec",

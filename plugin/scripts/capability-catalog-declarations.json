@@ -26,6 +26,7 @@
     "NEW_SCRIPT_REGISTRATION_REQUIRED so a new-script task must declare it in Touches."
   ],
   "QUESTION": {
+    "verify-plugin-channel-assertions.ts": "Does a Claude Code plugin-channel install actually WORK — not merely install, start its drivers and answer HTTP? For one install it judges, each as PASS / FAIL / NOT-EVALUATED: the config /quay:init wrote is accepted by BOTH quay config validate and the MCP config_validate tool; the version carriers (VERSION, .claude-plugin/plugin.json, and the byte bundle's own quay --version) agree and carry no -dev; the project .quay/plugin pointer resolves to the verified install and the native provider freezes no path/mcp_entry into config.yml; quay driver status --json exposes loaded_version / path_quay_version / pointer and does not report the pointer behind; the serve host runs in its OWN quay-serve-*.scope (read from /proc/<pid>/cgroup) with a non-empty .quay/serve.log and a server loaded_version that is not behind; and the install record at the requested scope resolves to the verified directory. A local upgrade drill (--upgrade-from) runs the link-to-old, re-init, link-to-new, validate sequence.",
     "release-cut.sh": "How does a RELEASE CUT — the whole SPEC §4/§12 sequence, not just its last three steps — happen as ONE re-runnable command instead of a remembered list? Measured 2026-09-24 (the v0.12.0 cut): ~12 hand-steps, of which two bit — release-branch-finish.sh --cut requires HEAD == base, so it could not be run from the main checkout (HEAD=author) and the cut moved into an INDEPENDENT CLONE, where the finish record landed in that clone's .quay/ (invisible to the main ledger AC-320 reads); and the next-version bump necessarily staled the closure-ratchet baseline, which the prose never mentioned. This command does the sequence in one invocation: preflight (tag free / version-consistent / clean tree / develop not behind the remote) -> a LINKED WORKTREE off develop (never a clone, never a branch switch in the main checkout) -> release-branch-finish.sh --cut --tag (merge back + tag the merge point + delete) -> push -> dispatch release.yml and echo the run URL -> next-version bump on develop + stamp-version + closure-ratchet re-anchor -> remove the worktree, each stage with its own CAUSE= and exit code, plus an --dry-run that prints every step (including the ledger's ABSOLUTE landing path) while writing nothing?",
     "release-cut.mjs": "plugin/scripts/release-cut.mjs —— release-cut.sh 的【执行体】：那条「一条命令切版」是否真的实现了 SPEC §4/§12 的全链（只读 preflight：tag 未存在 / 版本一致 / 树无 tracked 改动 / develop 未落后远端 → 在 develop 上建 LINKED WORKTREE（⛔ 不是独立 clone、⛔ 不在主检出切分支）→ release-branch-finish.sh --cut --tag（合回 + 在合并点打 tag + 删分支）→ push tag 与 develop → dispatch release.yml 并回显 run URL → develop 上 bump 下一版 + stamp-version + closure-ratchet 重锚并提交 → 清理自建 worktree），每一步自带 CAUSE= 与退出码，且 --dry-run 打印全部步骤（含台账落点的绝对路径）而不写？入口形态仍是 bash plugin/scripts/release-cut.sh（薄壳 exec 本文件），本文件是逻辑正本",
     "workflow-runner-self-hosted-check.ts": "Is every job of every .github/workflows/*.{yml,yaml} under the tree on a SELF-HOSTED runner — each job's runs-on label list containing self-hosted, a job carrying NO runs-on at all (a reusable-workflow call, whose runner is decided in another file) or an expression runs-on (decided at run time) counted as NOT statically self-hosted, and the offending jobs NAMED in the output — so that the metered hosted-runner billing/spending-limit gate which silently refused to START 7 of this repo's 8 jobs on 2026-09-24 (runner_name='', steps=0, annotation 'The job was not started because recent account payments have failed') can never stop CI or a release unnoticed again; an absent-or-empty workflow population, an unparseable file, a file with no jobs mapping, and an unavailable YAML implementation each report NOT-EVALUATED under their OWN cause token rather than a pass (tasks/gap-metered-hosted-runner-jobs-to-self-hosted, goal AC-319)?",
@@ -405,6 +406,7 @@
     "verification-marginal-return.ts": "invariant:一个 checker/闸 的拦截数只有三种取值（查过且有 / 查过且零 / 未查），「没有拦截通道」绝不与「拦截数 = 0」同形（硬规则 6 + 3b）—— 并给出判据：谓词 isPureTax 必须对一个【已知有拦截】的行干跑一次返回 false"
   },
   "CADENCE": {
+    "verify-plugin-channel-assertions.ts": "按需",
     "release-cut.sh": "按需",
     "release-cut.mjs": "按需",
     "workflow-runner-self-hosted-check.ts": "每轮",
@@ -775,6 +777,7 @@
     "worktree-deps-provision.sh": "按需"
   },
   "INVALIDATION": {
+    "verify-plugin-channel-assertions.ts": "失效前提：Claude Code plugin 仍是唯一的发布/安装渠道，且 release.yml 的 verify-plugin-channel 仍是发布门禁（门禁若移到别处，断言实现不变但调用点须同步）；断言依赖的直接量仍存在——VERSION、.claude-plugin/plugin.json、bin/quay --version、项目 .quay/plugin 链接、.quay/config.yml 的 providers.native、/proc/<pid>/cgroup、.quay/server.json、.quay/serve.log、installed_plugins.json。任一量改由另一个载体承载（例如版本改从被测对象自报接口取）⇒ 本条口径需同步，否则会把读不懂误判为合格。",
     "release-cut.sh": "失效前提：release 切版仍是「从 develop 切 release/vX → 合回 → 在合并点打 tag → 删分支 → push → dispatch release.yml → develop 上 bump 下一版 + closure-ratchet 重锚」这一串（SPEC §4 + §12），且 develop 仍是合回目标、VERSION 仍是唯一版本来源、release-branch-finish.sh 仍是 --cut 的落地载体；若切版改由 CI 内部完成（本命令的前提「develop 未被任何 worktree 占用 / 主检出干净 / tag 未存在」随之失效）、或下一版号规则不再是 (Y+1).0、或 closure-ratchet 基线不再随版本 bump 变脏（那一步的重锚可去掉），本条口径需同步",
     "release-cut.mjs": "失效前提：① 入口形态仍是 bash plugin/scripts/release-cut.sh（薄壳 exec 本文件）—— 入口若换成别的形态（或逻辑搬回 .sh、或换成 --experimental-strip-types 的 .ts），本条与 sh-census 的读数需同步；② release-branch-finish.sh 仍是 --cut 的落地载体、且 --trace-path 仍能给出台账绝对路径；③ develop 仍是合回目标、VERSION 仍是唯一版本来源、下一版号仍是 (Y+1).0、closure-ratchet 基线仍随版本 bump 变脏。任一改变则本条口径需同步",
     "workflow-runner-self-hosted-check.ts": "失效前提：本仓库的 CI 与发布仍由 .github/workflows/*.yml 承载，且『某个 job 跑在哪台 runner 上』仍由该 job 自身的 runs-on 静态决定（若 workflow 改由另一机制调度、或 runs-on 改为集中声明/矩阵生成而不再逐 job 可读，本条口径需同步，否则会把读不懂误判为合格）；另：若托管 runner 恢复可用且裁定不再要求 self-hosted，本条退休",
@@ -1145,6 +1148,7 @@
     "worktree-deps-provision.sh": "失效前提：dispatch-worktree-setup.sh 改为直接 exec node（不再经本薄入口），或本文件被删除/改名使入口契约失效。"
   },
   "LAST_REAFFIRMED": {
+    "verify-plugin-channel-assertions.ts": "2026-10-06",
     "release-cut.sh": "2026-09-24",
     "release-cut.mjs": "2026-09-24",
     "workflow-runner-self-hosted-check.ts": "2026-09-24",
@@ -1515,6 +1519,7 @@
     "worktree-deps-provision.sh": "2026-10-05"
   },
   "MATCHING": {
+    "verify-plugin-channel-assertions.ts": "position",
     "release-cut.sh": "keyword",
     "release-cut.mjs": "keyword",
     "workflow-runner-self-hosted-check.ts": "position",
@@ -1885,6 +1890,7 @@
     "worktree-deps-provision.sh": "n/a"
   },
   "CONSUMER": {
+    "verify-plugin-channel-assertions.ts": ".github/workflows/release.yml 的 verify-plugin-channel 步骤（CI 门禁调用点）与发布前本地演练（README「发布前本地演练」）。",
     "release-cut.sh": "谁按：切一次 release 的人按（bash plugin/scripts/release-cut.sh <X.Y.Z>；--dry-run 先看计划，--no-push/--no-dispatch 用于本地或测试切版），也由 SPEC §4/§12 的读者按（那两节的手工步骤散文已改为指向本命令的一行指针）；条件=要把整条切版协议作为一次可重复、每步留 CAUSE= 的动作执行、要在真仓库上切出下一个版本而不手工切换分支或另建一个 clone、或要在动手前先看一次切版会创建/推送/提交什么",
     "release-cut.mjs": "谁按：切一次 release 的人经薄壳按（bash plugin/scripts/release-cut.sh <X.Y.Z>），也可直接 node plugin/scripts/release-cut.mjs <X.Y.Z>；本文件不独立对外，唯一入口形态是 release-cut.sh",
     "workflow-runner-self-hosted-check.ts": "谁按：scripts/test.sh 的 run_static_checks 每轮按（登记在 plugin/scripts/runner-static-gate.ts，@static-tier change / @static-object .github/workflows/ 以及本检查自身的三个文件：plugin/scripts/workflow-runner-self-hosted-check.ts、plugin/test/workflow-runner-self-hosted-check.test.mjs、plugin/scripts/checker-mutation-cases/workflow-runner-self-hosted-check.sh）；⚠️ 同一谓词在 goal 层另有一份【独立测量】—— goals/AC-319-*.md 的 python3+pyyaml criterion 刻意不 import 本脚本（goal 层是独立测量），两份实现的一致性由 plugin/test/workflow-runner-self-hosted-check.test.mjs 用同一组 fixture 跑两份、断言三态结论逐一相同来保持（硬规则 5b：改一处须改另一处，落在同一次提交内）。条件=要判『CI 与发布的每个 job 是否真能起跑』—— 这正是 2026-09-24 hosted runner 账单闸那次静默未启动（job 未启动 ≠ 测试红）的取假点（tasks/gap-metered-hosted-runner-jobs-to-self-hosted，goal AC-319）",
