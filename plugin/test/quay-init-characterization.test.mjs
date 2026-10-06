@@ -180,7 +180,14 @@ const PINNED = {
       // without them is rejected by `quay config validate` AND by loop-params.ts — a fresh install
       // was born failing the documented verify command. Only the loop block moved; the other five
       // files hash unchanged (that cross-check is what makes this a targeted re-anchor).
-      ".quay/config.yml  fc818a6a133224c71d8544b2a46280f7882ea56ac8bf98df77d2d4f79f211d12",
+      // RE-ANCHORED AGAIN 2026-10-06 (gap-fresh-quay-init-config-fails-validate-on-loop-board-and-
+      // gates-that-init-never-writes), which was dispatched against the same defect and merged on top:
+      // `board: native` (unquoted — matching LOOP_VERSION_DEFAULTS' own rendering, which the shell
+      // mirror is pinned to) and `gates: ["acceptance"]` rather than `[]`. The empty list satisfied
+      // the validator vacuously but handed the loop driver NO gate (`params.gates[0]` undefined);
+      // `acceptance` is a built-in, always resolvable, and is the value the reconcile now fills into
+      // existing configs too. The other five files hash unchanged again — the same targeted cross-check.
+      ".quay/config.yml  90205083553f5ed9aab88cb671d0f1d6aa57a79ab42d108344edded882eb68b3",
       ".quay/profiles.yml  0f781fbcc8140fd1b4732d877f8484f2c6f14856e2419167281976678b748bb0",
       ".gitignore  f9e6655aa4762432b178420cf9c9d773fc88a67822c6e44fcbdf5f51a8e6ec7a",
       ".claude/launch.settings.json  25e4ace2586d593da41a0b0f7380c2d77aed03d404b7a0f3414329f6df30baec",

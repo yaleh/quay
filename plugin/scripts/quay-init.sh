@@ -1559,11 +1559,6 @@ providers:
       QUAY_NATIVE_META_DIR: "${WORKSPACE_ROOT}/meta"
 loop:
   repo_root: ${REPO_ROOT}
-  # The board (which provider to scan) and gates the loop driver reads. Both are REQUIRED by the
-  # official config validator and by loop-params.ts: a fresh install that omitted them was rejected
-  # the moment the user ran the documented verify command (the assertion this release gate runs).
-  board: "native"
-  gates: []
   # quay's mechanical fan-in runs this project's test entrypoint with its own value-taking flags
   # (--buckets / --root / --state-dir / --runner / --log-file / --run-id, plus --test-concurrency=N).
   # If you ship scripts/test.sh, it MUST consume such a flag together with its VALUE (shift 2) and
