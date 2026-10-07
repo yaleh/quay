@@ -1,7 +1,7 @@
 ---
 id: AC-329
 title: init 是单一引擎：对已有配置的升级与全新安装走同一路径，先算后写、校验不过则非零退出并保留原配置；保留用户注释/未知键/用户固定值，去掉退役键，且幂等
-status: achieved
+status: active
 kind: criterion
 goal: GOAL-029
 criterion: >-
@@ -80,25 +80,80 @@ criterion: >-
   cmp -s "$T/after1.yml" "$T/.quay/config.yml" || { echo "CAUSE=not-idempotent —
   a second init run changed the config" >&2; exit 1; }
 
-  sed -i 's#^  worktree_root: .*#&\n  gates: no-such-gate-zz#'
-  "$T/.quay/config.yml"
+  N=$(mktemp -d /tmp/ac329n.XXXXXX); trap 'rm -rf "$T" "$T-wt" "$N" "$N-wt"'
+  EXIT
 
-  cp "$T/.quay/config.yml" "$T/bad.yml"
+  git init -q -b develop "$N" && git -C "$N" -c user.name=t -c user.email=t@t
+  commit -q --allow-empty -m init || { echo "CAUSE=fixture-git-init-failed —
+  second scratch repo could not be built" >&2; exit 1; }
 
-  $Q init --root "$T" > "$T/out3" 2> "$T/err3"; rc3=$?
+  printf '{"name":"p","version":"1.0.0","scripts":{"test":"node --test"}}\n' >
+  "$N/package.json"
+
+  mkdir -p "$N/.quay" "$N/tasks"
+
+  printf '# keep-me\nproviders:\n  native:\n    enabled: true\n    tasks_dir:
+  ./tasks\nloop:\n  repo_root: %s\n  test_command: node --test\n  worktree_root:
+  %s-wt\n  gates: no-such-gate-zz\n' "$N" "$N" > "$N/.quay/config.yml"
+
+  cp "$N/.quay/config.yml" "$N/bad.yml"
+
+  $Q init --root "$N" > "$N/out" 2> "$N/err"; rc3=$?
 
   [ "$rc3" != 0 ] || { echo "CAUSE=incompatible-user-value-accepted — an
   unresolvable loop.gates value must make init exit non-zero" >&2; exit 1; }
 
-  cmp -s "$T/bad.yml" "$T/.quay/config.yml" || { echo
+  grep -q 'no-such-gate-zz' "$N/err" || { echo
+  "CAUSE=failure-does-not-name-the-value — the refusal must name the
+  incompatible user value" >&2; exit 1; }
+
+  cmp -s "$N/bad.yml" "$N/.quay/config.yml" || { echo
   "CAUSE=config-modified-despite-failure — a failed upgrade must leave the
   original config byte-identical" >&2; exit 1; }
+
+  C=$(mktemp -d /tmp/ac329c.XXXXXX); trap 'rm -rf "$T" "$T-wt" "$N" "$N-wt" "$C"
+  "$C-wt"' EXIT
+
+  git init -q -b develop "$C" && git -C "$C" -c user.name=t -c user.email=t@t
+  commit -q --allow-empty -m init || { echo "CAUSE=fixture-git-init-failed —
+  third scratch repo could not be built" >&2; exit 1; }
+
+  printf '{"name":"p","version":"1.0.0","scripts":{"test":"node --test"}}\n' >
+  "$C/package.json"
+
+  mkdir -p "$C/.quay" "$C/tasks"
+
+  printf 'loop:\n  gates:\n    - acceptance\n  gates:
+  duplicate-key-makes-this-unparseable\nproviders: [unclosed\n' >
+  "$C/.quay/config.yml"
+
+  cp "$C/.quay/config.yml" "$C/corrupt.yml"
+
+  $Q init --root "$C" > "$C/out" 2> "$C/err"; rc4=$?
+
+  [ "$rc4" = 0 ] || { echo "CAUSE=corrupt-config-not-rebuilt-rc$rc4 — an
+  unparseable config must be backed up and rebuilt (exit 0), not refused: $(head
+  -c 160 "$C/err" | tr '\n' ' ')" >&2; exit 1; }
+
+  B=$(ls "$C"/.quay/config.yml.corrupt-* 2>/dev/null | head -1); [ -n "$B" ] ||
+  { echo "CAUSE=corrupt-config-no-backup — the unparseable bytes must be
+  preserved beside the new file as config.yml.corrupt-<ts>" >&2; exit 1; }
+
+  cmp -s "$C/corrupt.yml" "$B" || { echo "CAUSE=corrupt-backup-differs — the
+  backup must be byte-identical to the original unparseable file" >&2; exit 1; }
+
+  $Q config validate --root "$C" > "$C/v" 2>&1 || { echo
+  "CAUSE=rebuilt-config-fails-validate — $(head -c 200 "$C/v" | tr '\n' ' ')"
+  >&2; exit 1; }
 
   exit 0
 expect: 对一份含注释、未知键、用户固定 serve.port、旧版 native path/mcp_entry、缺 loop.board/gates
   的已有配置，plain `quay init --root <dir>`（无任何 --reconcile/--force）退出 0，配置随后通过 `quay
   config validate`，注释/未知键/用户 serve.port 保留，native path/mcp_entry 与等于回退值的
-  serve.host 不出现，二次运行字节不变；对含无法解析的 loop.gates 值的配置，init 非零退出且配置字节不变
+  serve.host 不出现，二次运行字节不变；对独立临时项目里初始含无法解析的 loop.gates 值（no-such-gate-zz）的配置，init
+  非零退出、报错点名该值、配置字节不变；对无法解析（YAML 解析失败）的配置，init 退出 0，备份
+  .quay/config.yml.corrupt-<ts> 与原文字节相同，重建后的配置通过 config validate（2026-10-07
+  修订：原判据最后一步因重复键实际测的是 corrupt 分支而非不可解析的 gate 值，现拆成两个独立负例并显式钉住议定的 corrupt 语义）
 origin: 人 2026-10-07 裁定（与 manager 会话讨论）：init 终局是无 .sh——升级与全新安装统一为单一 TS 引擎，过渡期
   quay-init.sh 缩为调用 bin/quay init 的垫片；不再有 --reconcile；serve
   默认值（等于回退值）不写进配置；升级失败非零退出并保留原配置；未知键保留并警告；并单独收窄发布集合（测试/夹具/突变用例/交付验证工具不应随产物发出）。起因：2026-10-07
@@ -116,8 +171,16 @@ statusLog:
     to: achieved
     actor: goal-driver
     reason: "I2: criterion pass"
+  - at: 2026-10-07T03:03:58.380Z
+    from: achieved
+    to: active
+    actor: manager
+    reason: 人 2026-10-07 指示修正判据并决定 corrupt 语义（备份后重建）：原判据最后一步因重复键实际测的是 corrupt
+      分支；修正后的判据在 corrupt 步骤为红，已有跟进任务
+      gap-init-unparseable-config-backed-up-and-rebuilt-per-the-unified-semantics
+      推进，故重新打开
 fidelity:
-  verdict: not-evaluated
-  reason: no judge configured
-  at: 2026-10-07T02:00:28.722Z
+  verdict: faithful
+  reason: "fidelity judge: faithful"
+  at: 2026-10-07T03:03:58.379Z
 ---
