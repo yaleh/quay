@@ -154,21 +154,14 @@ export async function resolveBody(flags) {
 }
 
 // QX-022 (experiment 4, iteration 5): relative-time helper for CLI timestamp column.
-// Mirror of serve.js's relativeTime() — kept self-contained here to avoid importing
-// serve.js (which starts an HTTP server as a side effect of startServer() being called
-// on import in some scenarios, and imports http/config/connectProvider at module load).
-export function relativeTimeCli(ts) {
-  const elapsed = Date.now() - ts;
-  if (elapsed < 0) return "just now";
-  const seconds = Math.floor(elapsed / 1000);
-  if (seconds < 60) return `${seconds}s ago`;
-  const minutes = Math.floor(seconds / 60);
-  if (minutes < 60) return `${minutes}m ago`;
-  const hours = Math.floor(minutes / 60);
-  if (hours < 24) return `${hours}h ago`;
-  const days = Math.floor(hours / 24);
-  return `${days}d ago`;
-}
+// It was once a self-declared "deliberate mirror" of serve-render.ts's relativeTime,
+// kept inline to avoid importing serve.js (which starts an HTTP server on import).
+// gap-routine-semantic-dedup-scan-relative-time-mirror: that reason does not apply to
+// a pure leaf, so the ONE definition is now ../relative-time.ts — reachable from this
+// LIGHT module without pulling the provider graph (the same constraint the inline copy
+// existed to respect; see flags.test.mjs's spawn-floor guard). Re-exported under this
+// module's original public name so bin/quay.ts and shared.ts keep working unchanged.
+export { relativeTime as relativeTimeCli } from "../relative-time.ts";
 
 // QX-028 (experiment 4, iteration 7) introduced this helper here; QX-041 added
 // the inFence carve-out only to serve.ts, and QX-044 had to chase the same fix

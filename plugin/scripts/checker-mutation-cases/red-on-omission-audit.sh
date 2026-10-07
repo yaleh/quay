@@ -8,7 +8,7 @@
 #   - 删掉变红读数的声明 ⇒ 检查器转红（exit 1）。
 #
 # Fixture: 一个最小 workspace——每条 registry 声明的 redReading 都在对应 tracked 文件里 DECLARED
-#          （tick-core / full-suite-runner.ts / execute-suite-fix.js / judge / test.sh）→ GREEN。
+#          （tick-core / full-suite-runner.ts / integration-batch-merge.ts / judge / test.sh）→ GREEN。
 # Inject 1: 删掉执行核里 A15 ② 的「每 tick 写 `.quay/suite-health-last-run.json`」声明——这正是本
 #          检查器存在的意义（裁定5 做了但执行要求被删 ⇒ ruling5_status + a15_heartbeat_write 变未固化）
 #          → 检查器 MUST 变红。
@@ -23,7 +23,6 @@ checker_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 
 mkdir -p "${workdir}/orchestration"
 mkdir -p "${workdir}/plugin/scripts"
-mkdir -p "${workdir}/plugin/workflows"
 mkdir -p "${workdir}/scripts"
 
 # ── Fixture: 最小 workspace，每条 registry redReading 均 DECLARED（GREEN baseline）───────────────
@@ -67,9 +66,10 @@ export interface SuiteState {
 }
 EOF
 
-cat > "${workdir}/plugin/workflows/execute-suite-fix.js" <<'EOF'
-// fan-in consumer (Merge step): requires a scope=worktree round record with state green
-const gate = state === 'green' && scope === 'worktree';
+cat > "${workdir}/plugin/scripts/integration-batch-merge.ts" <<'EOF'
+// fan-in consumer (WORKTREE-GREEN GATE): rejects the merge unless a round record carries BOTH
+// scope=worktree and state=green — measure has_worktree_green_round.
+if (r["scope"] === "worktree" && r["state"] === "green") has = true;
 EOF
 
 cat > "${workdir}/plugin/scripts/semantic-observer-judge.ts" <<'EOF'

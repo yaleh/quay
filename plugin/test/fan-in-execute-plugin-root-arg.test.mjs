@@ -248,10 +248,11 @@ test("AC3 — the emitted commands are IDENTICAL whatever CLAUDE_PLUGIN_ROOT hol
   assert.ok(runs[0].length > 0 && !ENV_ANCHOR_RE.test(runs[0]), "the captured prompts must be non-empty and anchor-free");
 });
 
-test("AC3 — the sibling carriers (execute-suite-fix / pool-quality-judge / manager-tick-core) use the SAME binding and validate pluginRoot", async () => {
+// gap-delete-dead-execute-suite-fix-workflow (2026-10-07): the standalone suite-fix carrier was
+// DELETED (zero production callers) — the surviving siblings are pool-quality-judge / manager-tick-core.
+test("AC3 — the sibling carriers (pool-quality-judge / manager-tick-core) use the SAME binding and validate pluginRoot", async () => {
   const pluginRoot = makePluginRoot();
   const cases = [
-    { file: "execute-suite-fix.js", args: { worktree: "/tmp/wt", stateDir: "/tmp/sd", root: "/tmp/rt" }, bad: "bad-args" },
     { file: "pool-quality-judge.js", args: { root: "/tmp/rt" } },
     { file: "manager-tick-core.js", args: { workspaceRoot: "/tmp/ws" } },
   ];

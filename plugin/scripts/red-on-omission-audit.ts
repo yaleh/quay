@@ -124,7 +124,11 @@ export const REGISTRY: RedReadingEntry[] = [
       "`.quay/verification-round.jsonl` 无 `scope=worktree`+`state=green` 记录 ⇒ fan-in 拒（门拒）；`scope` 字段缺失 ⇒ 无法判 ⇒ 拒",
     verify: (root) => {
       const runner = readUnder(root, "plugin/scripts/full-suite-runner.ts");
-      const fix = readUnder(root, "plugin/workflows/execute-suite-fix.js");
+      // (2026-10-07): the consumer used to be the standalone A15 ④ suite-fix workflow, now DELETED
+      // (zero production callers). The live consumer of the worktree+green round record is the
+      // batch-merge gate (`checkWorktreeGreenGate`, `has_worktree_green_round`). Repointed here —
+      // same invariant, the surviving enforcement point.
+      const consumer = readUnder(root, "plugin/scripts/integration-batch-merge.ts");
       // gap-arch-import-cycles-zero: the `SuiteState` DECLARATION was moved VERBATIM out of
       // full-suite-runner.ts into the leaf module full-suite-runner-types.ts (to break a type-level
       // import cycle), and full-suite-runner.ts re-exports it — so the runner's declaration surface
@@ -135,12 +139,14 @@ export const REGISTRY: RedReadingEntry[] = [
       const okField =
         has(runner, 'scope?: "main" | "worktree"') || has(runnerTypes, 'scope?: "main" | "worktree"');
       const okConsumer =
-        has(fix, "scope=worktree") && hasRe(fix, /state\s*===\s*'green'|state\s*===["']green["']/);
+        has(consumer, "has_worktree_green_round") &&
+        hasRe(consumer, /\["scope"\]\s*===\s*["']worktree["']/) &&
+        hasRe(consumer, /\["state"\]\s*===\s*["']green["']/);
       const okDoc = hasRe(tickCore(root), /scope=worktree|scope=main/);
       return {
         ok: okField && okConsumer && okDoc,
         detail: okField && okConsumer && okDoc
-          ? "runner 声明 scope 字段 + fan-in 消费者（execute-suite-fix Merge）要求 worktree+green + 执行核声明"
+          ? "runner 声明 scope 字段 + fan-in 消费者（integration-batch-merge WORKTREE-GREEN GATE）要求 worktree+green + 执行核声明"
           : `scope 字段声明=${okField}；fan-in 消费者要求 worktree+green=${okConsumer}；执行核声明=${okDoc}`,
       };
     },

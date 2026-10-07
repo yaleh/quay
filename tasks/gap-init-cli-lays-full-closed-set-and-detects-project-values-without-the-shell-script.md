@@ -383,3 +383,10 @@ ANTI-DRIFT OK: 18 actual file(s), all within declared Touches (19 glob(s))
 **AC3 的迁移用例集合**（§③ 逐条列出）在本轮最终树上一次全绿：
 `plugin/test/{quay-init,quay-init-tmux-detection,quay-init-loop}.test.mjs` 共 29 条（18+4+7）在内，
 连同 `laydown-set-check`（9/9）、`archive-exclusion-wiring`、`l1-delivery-surface-check` 合计 50/50。
+## Needs-Human
+
+**执行 2026-10-07T07:05:02.754Z — 停派终止（失败无法归因，⛔ 不再重派）**
+
+- 阻碍原因：exited-not-landed 失败无法归因（基建/契约疑似，非实现缺陷）——停止重派，⛔ 不再拿新会话撞同一堵墙：the exited-not-landed failure could not be attributed in 2 consecutive rounds (bounded to at most one retry; no mechanical fan-in result on the outcome ⇒ no suite ran) — infra/contract suspected, not an implementable defect (parser attributed no failing file (failure-line count unavailable on this judgment)); stopping instead of spending another worker session
+- 失败步/判词：adopted orphan worker exited (exit code unobservable) — task status=ready (not done) and leftover worktree task/gap-init-cli-lays-full-closed-set-and-detects-project-values-without-the-shell-script still present
+- run_id：wk-prod-anchor

@@ -59,17 +59,36 @@ ready-made body.
 
 2b. **Merge-candidate check (granularity).** Step 2 asks "is this the same mechanism?". This
     step asks a different question: "is an open task already going to run on the same files?"
-    For each source file you expect in Touches — leaving out `tasks/<id>.md`, test files, and
-    generic registries (`capability-catalog-declarations.json`, `sh-census-baseline.json`,
-    `freshness-producers.json`, other baselines) — list the open tasks that name it:
+    Answer it with the shipped instrument, not by hand — it takes the draft Touches and returns
+    the open (`todo`/`ready`) tasks whose **`## Touches`** declare at least one of the same
+    substantive source files, plus, per file, the history of already-landed tasks that touched it:
+
+        node --experimental-strip-types plugin/scripts/task-granularity-advice.ts \
+          --touches <path> [--touches <path> ...] --json
+
+    (`--task <id>` reads an existing task's own `## Touches` instead.) Read `peers[]` — that is the
+    decision input. `mentions[]` is a separate list of open tasks that merely *name* a file in
+    prose without declaring it; they are NOT merge candidates (the scheduler serializes on
+    Touches), but they are shown so the two are never confused. `perFile[]` gives each file's
+    landed-task count, median changed lines and median worker rounds — the history reference for
+    "has this file been a rework magnet?". Non-substantive paths (`tasks/`, test files, and generic
+    registries such as `capability-catalog-declarations.json`, `sh-census-baseline.json`,
+    `freshness-producers.json`, other baselines) are excluded from the overlap test by the tool, so
+    you do not have to remember to skip them. ⛔ From inside a task worktree pass
+    `--root <main checkout>`: the task store, the git landing history and
+    `.quay/worker-outcome.jsonl` all live in the main checkout, not in your worktree.
+
+    **Fallback (only if the script cannot run):** the raw recipe, one source file at a time —
 
         grep -lF -- "<path>" tasks/*.md | xargs grep -lE '^status: (todo|ready)$'
 
-    (`xargs` exits 123 when nothing matches; that means "no peer", not a failure.) Tasks whose
-    Touches overlap are serialized by the scheduler, so merging them costs no parallelism and
-    saves one per-task fixed cost (see "Granularity" below). Decide, and write ONE line in the
-    Proposal/Finding naming the decision — open that paragraph with `<!-- dedup-ref -->` (step 2)
-    if it names the peer's id:
+    (`xargs` exits 123 when nothing matches; that means "no peer", not a failure. The grep also
+    matches prose mentions — the script's `mentions[]` is that same set, split out for you.)
+
+    Tasks whose Touches overlap are serialized by the scheduler, so merging them costs no
+    parallelism and saves one per-task fixed cost (see "Granularity" below). Decide, and write ONE
+    line in the Proposal/Finding naming the decision — open that paragraph with
+    `<!-- dedup-ref -->` (step 2) if it names the peer's id:
       - **merge** — fold this work into the peer (edit the peer via `quay-task-operator`; do not
         file a second task);
       - **separate** — file it, with a reason ("kept separate: independent acceptance / peer is
@@ -190,26 +209,34 @@ Optimize task size for throughput — worker time per unit of landed work. Per-t
 a reason to split: a few minutes per task is negligible. The store imposes no upper bound on task
 size, and nothing in this workflow asks for small tasks.
 
-Why: every landed task pays a cost that barely depends on its size, and failure does not grow
-with size. Fitted on tasks first dispatched on or after 2026-09-16 (869 landed tasks, six
-projects; size = changed lines of code + tests in the landing diff):
-- the landing round costs ~17 min + ~0.35 min per 100 lines;
-- each task also needs ~0.94 failed rounds on average (suite red, ff race, …), each ~19 min, and
-  that count does not rise with size (−0.01 per 10× size, 95% CI [−0.28, 0.22]).
+Why: every landed task pays a cost that barely depends on its size. **The numbers below are a
+dated reading, not a rule — 来源与复跑见 `docs/analysis/task-granularity-and-throughput-2026-10-07.md`**
+(that document holds the 口径/definitions, the full 10-bin table with intervals, and the exact
+`--report` command that regenerates every figure here). Fitted on tasks first
+dispatched on or after 2026-09-16 (≈950 measurable landed tasks, six projects; size = changed
+lines of code + tests in the landing diff). ⚠️ The counts and the low-order digits move every
+time a task lands — read them as magnitudes, and re-run before quoting a figure:
+
+- the landing round costs ~18 min + a small per-100-line term (the slope's interval in the
+  analysis doc is wide — do not quote a point value for it);
+- each task also needs ~0.94 failed rounds on average (suite red, ff race, …), each ~22 min.
+  That count is **U-shaped, not flat**: it is highest for the smallest tasks (fixed cost of a
+  new task) and rises again above ~1500 lines. It is not a reason to split — see below.
 
 So the same work costs far less worker time in larger tasks. Measured worker-hours per 1000
-changed lines, by task size:
+changed lines, by task size (full table with 95% intervals in the analysis doc):
 
-    <100: 13.3   250–400: 1.5   600–1000: 0.77   1000–1500: 0.55   1500–2000: 0.45
-    2000–3000: 0.45 (n=28)   3000–5000: 0.38 (n=10)
+    <100: ≈13   250–400: ≈1.6   600–1000: ≈0.8   1000–1500: ≈0.55
+    1500–2000: ≈0.50   2000–3000: ≈0.4   3000+: ≈0.16
 
 Rules that follow:
 - Make a task as large as one coherent mechanism or deliverable. Below ~300 changed lines,
   prefer merging into a related task (step 2b) over filing separately.
-- No size-based upper limit. The gain flattens past ~1500 lines; above ~3000 lines there is too
-  little data to say anything, so neither split nor merge on size alone there.
-- Larger tasks fail their FIRST landing attempt more often (odds ×1.42 per 10× size), but total
-  failed rounds per task do not rise, so this costs latency, not throughput — not a split reason.
+- No size-based upper limit. The gain flattens past ~1500 lines; even the 3000+ bin is the
+  cheapest per 1000 lines, so neither split nor merge on size alone there.
+- Larger tasks fail their FIRST landing attempt more often and (unlike the earlier reading) their
+  total failed rounds do rise above ~1500 lines — but the cost *per 1000 changed lines* keeps
+  falling, so this costs latency and a little worker time, not throughput. Not a split reason.
 
 Split only for reasons other than size: an AC that can only be satisfied after another part
 lands, or parts that are genuinely separate deliverables (different mechanisms, independent
@@ -217,8 +244,9 @@ acceptance). Splitting so that parts run in parallel adds total worker time and 
 throughput gain.
 
 Caveats: observational, not causal; changed lines are a size proxy, not value; tasks that never
-landed are not in the sample. Re-measure before trusting these numbers later — they are a dated
-reading (2026-10-07), not a rule.
+landed (or landed without a `Merge branch 'develop' into task/<id>` commit) are not in the
+sample. Every figure above is regenerable — run the `--report` command printed at the top of
+`docs/analysis/task-granularity-and-throughput-2026-10-07.md` and update this block from it.
 
 Do not use the number of Touches entries, the number of ACs, or the AC type as a split trigger —
 none of them predicted rework once project and era were controlled for. The Touches entries

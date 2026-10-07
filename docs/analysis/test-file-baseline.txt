@@ -437,8 +437,6 @@ plugin/test/driver-status-carrier-path.test.mjs
 plugin/test/driver-third-party-fixture.test.mjs
 plugin/test/dual-source-check.test.mjs
 plugin/test/enum-surface-parity-check.test.mjs
-plugin/test/execute-suite-fix-relaunch-snapshot.test.mjs
-plugin/test/execute-suite-fix-scope-gate.test.mjs
 plugin/test/execution-policy.test.mjs
 plugin/test/external-dogfooding-check.test.mjs
 plugin/test/fan-in-driver-mechanical-orchestration.test.mjs

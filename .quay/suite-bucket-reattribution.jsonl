@@ -43,8 +43,6 @@
 {"file":"plugin/test/dispatch-worktree-setup.test.mjs","judgment":"S","mechanism":"S+M","signal":["--group"]}
 {"file":"plugin/test/drive-contract-check.test.mjs","judgment":"M","mechanism":"S+M","signal":[]}
 {"file":"plugin/test/drive-target-check.test.mjs","judgment":"M","mechanism":"S+M","signal":[]}
-{"file":"plugin/test/execute-suite-fix-relaunch-snapshot.test.mjs","judgment":"M","mechanism":"S","signal":[]}
-{"file":"plugin/test/execute-suite-fix-scope-gate.test.mjs","judgment":"S","mechanism":"P+S+M","signal":["--for-task"]}
 {"file":"plugin/test/execution-policy.test.mjs","judgment":"M","mechanism":"S+M","signal":[]}
 {"file":"plugin/test/fan-in-ff-protocol-check.test.mjs","judgment":"M","mechanism":"S+M","signal":[]}
 {"file":"plugin/test/fan-in-materialize-check.test.mjs","judgment":"M","mechanism":"S+M","signal":[]}
