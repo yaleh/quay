@@ -1,7 +1,7 @@
 ---
 id: gap-server-status-six-serial-driver-runtime-cold-spawns
 title: quay server status --json 串行冷启动 6 个 driver-runtime 子进程，单条只读命令占了 3.9-5s
-status: todo
+status: ready
 labels:
   - gap
 parent: null
