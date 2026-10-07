@@ -901,6 +901,104 @@ export function registerAdrHandlers(
   );
 }
 
+export function registerGoalHandlers(
+  server: McpServer,
+  getClient: (id: string | undefined) => Promise<ConnectedProvider>
+): void {
+  // ── Goal tools — proxy the Provider's goal_list/goal_get/goal_write/goal_gate (separate object
+  // kind: GOAL-NNN + AC-NNN records; a Provider MAY not support goals, in which case goalList
+  // returns [] and goal_get/goal_write surface isError, per provider-client.ts).
+  //
+  // gap-goal-get-meta-get-mcp-name-collision: these four tools were registered ONLY on the native
+  // provider's own standalone MCP server (quay-native/src/mcp-server.ts:411-554), never re-exposed
+  // by the Core aggregator a normal Claude Code session connects to as `mcp__plugin_quay_quay__*`.
+  // goal-driver's gap-worker dispatch prompts instruct the agent to "Read the AC record (goal_get
+  // MCP)" — a tool that, on the aggregator, did not exist. The observed failure (2026-10-03): an
+  // agent dispatched under that prompt called the nearest-sounding `meta_get` by mistake, got back
+  // `no such META: AC-326`, and fell back to grep over `tasks/`. Re-exposing the goal_* family here
+  // makes the prompts' claim true so that exact fallback cannot recur (the ToolSearch-name-miss
+  // half of the collision; the `meta_*` family itself is left intact — see the task body).
+  server.registerTool(
+    "goal_list",
+    {
+      description: "List goal records (GOAL-NNN + AC-NNN) on an enabled Provider, optionally filtered by status/kind/goal. Goal records are a separate kind from tasks (goal→AC lifecycle: draft|active|achieved|superseded|retired).",
+      inputSchema: {
+        provider: z.string().optional(),
+        status: z.string().optional(),
+        kind: z.string().optional(),
+        goal: z.string().optional(),
+      },
+    },
+    async ({ provider, ...filter }) => {
+      const { client } = await getClient(provider);
+      const goals = await client.goalList(filter);
+      return { content: [{ type: "text" as const, text: JSON.stringify(goals, null, 2) }], structuredContent: { goals } };
+    }
+  );
+
+  server.registerTool(
+    "goal_get",
+    {
+      description: "Get one goal record by id (GOAL-NNN or AC-NNN) from an enabled Provider. Returns isError:true if not found or the Provider does not support goals.",
+      inputSchema: { provider: z.string().optional(), id: z.string() },
+    },
+    async ({ provider, id }) => {
+      const { client } = await getClient(provider);
+      const goal = await client.goalGet(id);
+      if (!goal) return { isError: true, content: [{ type: "text" as const, text: `no such goal: ${id}` }] };
+      return { content: [{ type: "text" as const, text: JSON.stringify(goal, null, 2) }], structuredContent: { goal } };
+    }
+  );
+
+  server.registerTool(
+    "goal_write",
+    {
+      description: "Write/patch one goal record (GOAL-NNN or AC-NNN) on an enabled Provider. status ∈ draft|active|achieved|superseded|retired. A GOAL record requires a non-empty body + origin; an AC record requires criterion + expect + goal: GOAL-NNN + origin. Returns isError:true on validation failure or if the Provider does not support goals.",
+      inputSchema: {
+        provider: z.string().optional(),
+        id: z.string(),
+        title: z.string().optional(),
+        status: z.string().optional(),
+        goal: z.string().optional(),
+        criterion: z.string().optional(),
+        expect: z.string().optional(),
+        origin: z.string().optional(),
+        evidence: z.object({ at: z.string().optional(), verdict: z.string().optional(), reading: z.string().optional() }).optional(),
+        supersedes: z.array(z.string()).optional(),
+        superseded_by: z.array(z.string()).optional(),
+        body: z.string().optional(),
+        disposeOld: z.object({ id: z.string(), to: z.enum(["achieved", "superseded"]) }).optional(),
+      },
+    },
+    async ({ provider, id, ...patch }) => {
+      const { client } = await getClient(provider);
+      try {
+        const goal = await client.goalWrite({ id, ...patch });
+        return { content: [{ type: "text" as const, text: JSON.stringify(goal, null, 2) }], structuredContent: { goal } };
+      } catch (err) {
+        return { isError: true, content: [{ type: "text" as const, text: (err as Error)?.message ?? String(err) }] };
+      }
+    }
+  );
+
+  server.registerTool(
+    "goal_gate",
+    {
+      description: "Run one goal record's `criterion` via the acceptance runner and return the verdict (empty criterion fails closed). Returns isError:true if not found or the Provider does not support goals.",
+      inputSchema: { provider: z.string().optional(), id: z.string() },
+    },
+    async ({ provider, id }) => {
+      const { client } = await getClient(provider);
+      try {
+        const verdict = await client.goalGate(id);
+        return { content: [{ type: "text" as const, text: JSON.stringify(verdict, null, 2) }], structuredContent: verdict as Record<string, unknown> };
+      } catch (err) {
+        return { isError: true, content: [{ type: "text" as const, text: (err as Error)?.message ?? String(err) }] };
+      }
+    }
+  );
+}
+
 export function registerMetaHandlers(
   server: McpServer,
   getClient: (id: string | undefined) => Promise<ConnectedProvider>
@@ -1020,6 +1118,7 @@ export function registerAllHandlers(
   registerGateHandlers(server, getClient, cfg);
   registerLifecycleHandlers(server, getClient, cfg);
   registerAdrHandlers(server, getClient);
+  registerGoalHandlers(server, getClient);
   registerMetaHandlers(server, getClient);
   registerActionHandlers(server, getClient, cfg);
   registerConfigHandlers(server, cfg);
