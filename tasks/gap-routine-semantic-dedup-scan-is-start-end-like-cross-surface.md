@@ -3,7 +3,7 @@ id: gap-routine-semantic-dedup-scan-is-start-end-like-cross-surface
 title: "semantic-dedup-scan: Both predicates are character-for-character
   identical across the plugin/packages boundary (eventKind short-circuit plus
   timing-marker presence); observation.ts"
-status: todo
+status: ready
 labels:
   - gap
   - routine-filed
