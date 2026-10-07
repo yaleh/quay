@@ -2,7 +2,7 @@
 id: gap-delete-dead-execute-suite-fix-workflow
 title: 删除零生产调用的死工作流 execute-suite-fix.js（27111 commit 历史确认零触发；需同步处理
   sync.sh/dual-copy/packaging 的交付引用）
-status: todo
+status: ready
 labels:
   - gap
 parent: null
