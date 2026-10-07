@@ -2,7 +2,7 @@
 id: gap-ready-check-duplicated-algorithm-store-vs-ready-pool-check
 title: todo→ready 四要素判定算法存在两份独立实现：store.ts check() 与 ready-pool-check.ts
   artifactsComplete()
-status: todo
+status: ready
 labels:
   - gap
 parent: null
