@@ -1,7 +1,7 @@
 ---
 id: gap-task-granularity-advice-script-merge-candidates-and-per-file-history
 title: 立案时的粒度建议脚本——列出 Touches 重叠的待办任务（合并候选）与每个文件的落地历史参照，并把分析数字落到可复跑的正本
-status: ready
+status: done
 labels:
   - gap
 parent: null

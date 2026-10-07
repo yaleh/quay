@@ -746,18 +746,12 @@ export function inlineMarkdown(text: string, opts: RenderMarkdownOpts = {}): str
 // QX-018 (experiment 4, iteration 4): relative-time helper for updatedAt display.
 // Given a millisecond timestamp, returns a human-readable "X ago" string.
 // Used on both the list page (updated column) and detail page (last updated meta).
-export function relativeTime(ts: number): string {
-  const elapsed = Date.now() - ts;
-  if (elapsed < 0) return "just now";
-  const seconds = Math.floor(elapsed / 1000);
-  if (seconds < 60) return `${seconds}s ago`;
-  const minutes = Math.floor(seconds / 60);
-  if (minutes < 60) return `${minutes}m ago`;
-  const hours = Math.floor(minutes / 60);
-  if (hours < 24) return `${hours}h ago`;
-  const days = Math.floor(hours / 24);
-  return `${days}d ago`;
-}
+// gap-routine-semantic-dedup-scan-relative-time-mirror: this and cli/flags.ts's
+// relativeTimeCli were byte-identical bodies under two names; the ONE definition is
+// now the shared product-layer leaf ./relative-time.ts (not rendering logic — the CLI
+// needs it too). Re-exported here so serve-task.ts, serve-dashboard.ts, serve-live.ts,
+// serve-goal.ts, serve-needs-human.ts and serve.ts keep their import path unchanged.
+export { relativeTime } from "./relative-time.ts";
 
 // M26-adversarial-eval finding ADV-003: shared open-redirect guard for
 // ?from= redirect targets, replacing the two previously-DIVERGING inline

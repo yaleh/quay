@@ -249,23 +249,17 @@ function shipped() {
 // 扫描面 A：workflow 真实发出的 prompt
 // ══════════════════════════════════════════════════════════════════════════════════════════════════
 // 真实调用 harness（判据「改 workflow 的唯一有效验证=实调」的同一手法，参照 plugin/test/helpers/
-// fan-in-execute-paths-harness.mjs 与 execute-suite-fix-scope-gate.test.mjs，⛔ 不修改那些文件）：
+// fan-in-execute-paths-harness.mjs，⛔ 不修改那个文件）：
 // 把 workflow 文件 vm 执行一遍，让它自己的代码跑出**真实**的 prompt，agent() 只负责捕获。
+// gap-delete-dead-execute-suite-fix-workflow (2026-10-07)：standalone suite-fix 工作流已删除，
+// 故不在此扫描面内。
 
-const WORKFLOWS = ["fan-in-execute.js", "execute-suite-fix.js", "pool-quality-judge.js", "manager-tick-core.js"];
+const WORKFLOWS = ["fan-in-execute.js", "pool-quality-judge.js", "manager-tick-core.js"];
 
 const DEFAULT_AGENT_RESULTS = {
   "fan-in-execute.js": [
     { outcome: "suite-started", suitePid: 4242, codeDelta: "mock-code", worktreeHead: "mockhead", note: "mock-prep" },
     { outcome: "green", ffOk: true, developHead: "dhead", worktreeHead: "whead", agentIdUsed: "mockagent", codeDelta: "mock-code", note: "bracketClose=OK", bracketClosed: true },
-  ],
-  "execute-suite-fix.js": [
-    { launched: true, worktreeHead: "head1", failuresFixed: [], note: "" },
-    { state: "red", reason: "failed", tests: 3000, durationMs: 1000, pid: null, worktreeHead: "head1" },
-    { failureCount: 2, rootCauses: [], relaunched: true, worktreeHead: "head2", note: "" },
-    { state: "green", reason: "passed", tests: 3000, durationMs: 1000, pid: null, worktreeHead: "head2" },
-    { worktreeHeadNow: "head2", verifiedCommit: "head2" },
-    { batchMergeOk: true, developHead: "d", integrationHead: "i", note: "" },
   ],
   "pool-quality-judge.js": [
     { triggers: { fired: true, reasons: ["pool>25"], poolCount: 30, oldestUnreviewedAgeMs: 0, roundsSinceLastJudge: 0 }, pool: ["gap-probe-a", "gap-probe-b"], tasks: [{ id: "gap-probe-a", acChecked: 1, acTotal: 2, acCompleteness: "partial", sections: [] }], poolCount: 30, currentRound: 5 },
@@ -278,7 +272,7 @@ const DEFAULT_AGENT_RESULTS = {
 };
 
 /** vm 执行一个 workflow，捕获它发出的全部 agent prompt。args 形状按各 workflow 的契约给
- *  （fan-in-execute / pool-quality-judge / manager-tick-core 收 JSON 字符串；execute-suite-fix 收对象）。 */
+ *  （fan-in-execute / pool-quality-judge / manager-tick-core 收 JSON 字符串）。 */
 async function captureWorkflowPrompts(name, tmpRoot) {
   const file = path.join(PLUGIN, "workflows", name);
   const src = fs.readFileSync(file, "utf8");
@@ -290,7 +284,6 @@ async function captureWorkflowPrompts(name, tmpRoot) {
   const pluginRoot = path.join(PLUGIN);
   const ARGS = {
     "fan-in-execute.js": JSON.stringify({ task: "gap-probe", worktree: path.join(root, "wt"), root, runId: "probe-1", mergeTarget: "develop", pluginRoot }),
-    "execute-suite-fix.js": { worktree: path.join(root, "wt"), stateDir: path.join(root, ".quay"), root, task: "gap-probe", pluginRoot },
     "pool-quality-judge.js": JSON.stringify({ root, pluginRoot, force: true }),
     "manager-tick-core.js": JSON.stringify({ workspaceRoot: root, pluginRoot, managerSessionId: "probe-session" }),
   }[name];
@@ -391,7 +384,7 @@ test("dry-run: 谓词对已知真样本命中（零命中的配套动作，硬�
   assert.equal(posLate.unbound.map((u) => u.name).join(","), "LATE", "赋值在引用【之后】不算赦免");
 });
 
-test("面 A（workflow prompt）：四个真实 workflow 发出的 prompt 里没有未赋值的大写变量", async () => {
+test("面 A（workflow prompt）：每个真实 workflow 发出的 prompt 里没有未赋值的大写变量", async () => {
   const s = await scanWorkflows();
   console.log(`[A/workflow] prompts=${s.promptCount} refs=${s.refTotal} bound(assigned=${s.bound.assigned}, hostEnv=${s.bound.hostEnv}) notEvaluated=${s.notEvaluated.length}`);
   report("A/workflow", s.findings);
