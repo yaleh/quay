@@ -2,7 +2,7 @@
 id: gap-init-surface-unified-no-reconcile-no-force-json-report-serve-defaults-unwritten
 title: init 对外面统一：CLI 与 MCP 去掉 --reconcile/--force，init --json 给结构化报告，等于回退值的
   serve 默认值不写入配置
-status: ready
+status: done
 labels:
   - gap
   - priority:p2
