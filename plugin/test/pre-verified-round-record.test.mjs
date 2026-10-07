@@ -765,6 +765,42 @@ test("SSOT — hostParallelism has exactly ONE definition point (runner-concurre
   }
 });
 
+// gap-routine-semantic-dedup-scan-preverified-effective-parallelism — the SSOT ratchet for
+// effectiveParallelism. THE DEFECT (.quay/routine-findings.jsonl, routine `semantic-dedup-scan`,
+// runId semantic-dedup-scan-1791353789266, kind byte-identical-body): this module AND
+// full-suite-runner.ts each DECLARED the identical body (cpu_time_s ÷ wall-seconds) ⇒ two homes for
+// one cpu/wall expression, free to drift. The fix lifts the ONE body to suite-accounting.ts (the
+// lightweight NON-hub telemetry module full-suite-runner.ts already re-exports from) and makes both
+// consumers re-export that binding; this test makes "exactly one home" executable. Same shape as the
+// hostParallelism ratchet above. 按位置判定 (硬规则 2): scanExportFunctionDecls matches real
+// `export function <name>(` DECLARATIONS at line start — a mention in a comment/string is not a match.
+test("SSOT — effectiveParallelism has exactly ONE definition point (suite-accounting.ts) and BOTH consumers re-export it", async () => {
+  const scriptDir = path.join(REPO_ROOT, "plugin", "scripts");
+  const decls = scanExportFunctionDecls(scriptDir, "effectiveParallelism");
+  assert.deepEqual(decls.map((d) => d.file), ["suite-accounting.ts"],
+    `effectiveParallelism must be DECLARED in exactly one place — actual declarations: ${JSON.stringify(decls)}`);
+
+  // Both consumers must reach the SAME binding (function object), not a copy — a local
+  // re-declaration is a different object and takes this RED.
+  const acc = await import("../scripts/suite-accounting.ts");
+  assert.strictEqual(effectiveParallelism, acc.effectiveParallelism,
+    "pre-verified-round-record.effectiveParallelism must BE suite-accounting.effectiveParallelism (re-export), never a re-declaration");
+  const runner = await import("../scripts/full-suite-runner.ts");
+  assert.strictEqual(runner.effectiveParallelism, acc.effectiveParallelism,
+    "full-suite-runner.effectiveParallelism must BE suite-accounting.effectiveParallelism (re-export) — its public API must not fork the expression");
+
+  // Negative control for the SCANNER (the "exactly one" arm must be able to take false): a synthetic
+  // second declaration IS detected — otherwise the invariant would be vacuous (硬规则 4 推论三).
+  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "pvr-ssot-scan-effpar-"));
+  try {
+    fs.writeFileSync(path.join(tmp, "fake-copy.ts"), "export function effectiveParallelism() {\n  return 1;\n}\n", "utf8");
+    assert.equal(scanExportFunctionDecls(tmp, "effectiveParallelism").length, 1,
+      "scanner negative control: a real second declaration IS seen");
+  } finally {
+    fs.rmSync(tmp, { recursive: true, force: true });
+  }
+});
+
 test("AC1 — concurrentSuitesRunning=2 when another suite holds a slot [negative control, FULL_SUITE_LOCK_FILE seam]", async () => {
   const lockDir = fs.mkdtempSync(path.join(os.tmpdir(), "pvr-held-"));
   _tmpDirs.push(lockDir);

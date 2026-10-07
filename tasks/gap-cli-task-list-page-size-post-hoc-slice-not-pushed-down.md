@@ -39,8 +39,16 @@ status/label/prefix/search 下推，但没碰 page/pageSize）。
 `pageSize != null` 时不应再无条件把 `includeBody` 撑成 true——只在分页窗口内读 body，而不是全量读了再截断。Provider 不支持
 下推（旧 Provider / schema 拒绝新参数）时保留现有全量+本地 slice 的 fallback 行为，不改变其正确性，只改变有能力下推时的成本。
 
-**消费方风险（claudecodeui 侧，仅记录供其跟进，不在本任务范围内处理）**：claudecodeui 的 `QUAY_COMMAND_TIMEOUT_MS=8000`，
-`task list` 全量读在更大 store 上会逼近这个上限；该读数超时时在 claudecodeui 侧被 `readJsonQuietly` 静默吞掉。
+**消费方风险的更正（2026-10-07，另一会话实测核实，更正此前错误表述）**：此前本段写"claudecodeui 侧不需要改调用方式，继续传
+`--page-size` 即可"——**这个前提是错的**。claudecodeui 的 `server/modules/quay/quay.service.ts:755` 实际发的是裸
+`['task','list','--json']`，从不传 `--page-size`。本任务对 claudecodeui 的 Quay 面板**零直接收益**——它的性能问题不会
+因为这个修复而变化。且**不能**事后建议 claudecodeui 补传 `--page-size`：它的 `summarizeTasks()`
+（`quay.service.ts:359-378`）靠 `value.length` 数全量 `total`/`byStatus`，而分页后的 `--json` 输出是不带 `total` 字段的
+裸数组（已实测 `--page-size 3` → 长度 3 的纯数组）——加 `--page-size` 会把面板计数从「2583 tasks」静默错成「3 tasks」，
+是正确性回归，不是提速。真正能帮到该面板的是另一种能力（全量 frontmatter 投影,不截断、但不读 body，见
+`gap-cli-task-list-json-body-coupled-to-json-flag`——已另立，Touches 与本任务重叠，会被调度器自然序列化在本任务之后）。
+本任务仍然值得做：任何真的传 `--page-size` 的调用方（非 claudecodeui）今天都在付全量读的代价，这是本任务独立的、仍然
+真实的收益面。
 
 该轴仍暗，理由：本任务改动范围限于单个 CLI 命令文件（`cli/task-list.ts`）内把既有 `--page-size` 参数下推给已经存在的
 Provider ABI 分页能力，镶入既有的 `providerFilter` 调用形状，不新增模块、不新增包间依赖、不改变调用图结构，L_D/L_G

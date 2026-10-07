@@ -176,6 +176,12 @@ import { isFailureLine } from "./runner-red-parse.ts";
 // semantic-dedup-scan-1790851304231): the local re-declaration here was byte-identical to
 // runner-concurrency.ts:43 ⇒ two homes for one read-host expression, free to drift on any seam change.
 import { hostParallelism } from "./runner-concurrency.ts";
+// effectiveParallelism's single definition point — suite-accounting.ts is the lightweight NON-hub
+// SSOT home full-suite-runner.ts re-exports from (`.quay/routine-findings.jsonl` finding
+// `preverified-effective-parallelism`, routine `semantic-dedup-scan`, runId
+// semantic-dedup-scan-1791353789266): the local re-declaration here was byte-identical to
+// full-suite-runner.effectiveParallelism ⇒ two homes for one cpu/wall expression, free to drift.
+import { effectiveParallelism } from "./suite-accounting.ts";
 
 const COMMIT_RE = /^[0-9a-f]{40}$/i;
 
@@ -528,17 +534,12 @@ export function parseRedFailures(suiteLog) {
 export { hostParallelism };
 
 /** Effective parallelism = cpu_time_s ÷ wall-seconds — the observability-holes AC4 "did the suite
- *  optimization help" KPI, same 口径 as full-suite-runner.effectiveParallelism (:1300). Returns null
- *  when cpu_time_s is null/≤0 or wall ≤0 — the field is then ABSENT (a fabricated 0 would read
- *  "infinite cores", 硬规则⑥ 缺值=未查≠为假). gap-wiring-B-verification-round-write-path AC1: wired
- *  into THIS real landing writer (the fan-in path) so real verification-round rows carry it, not just
- *  full-suite-runner's dead-on-fan-in path. */
-export function effectiveParallelism(cpuTimeS, durationMs) {
-  if (cpuTimeS == null || !Number.isFinite(cpuTimeS) || cpuTimeS <= 0) return null;
-  const wallS = durationMs / 1000;
-  if (!Number.isFinite(wallS) || wallS <= 0) return null;
-  return Number((cpuTimeS / wallS).toFixed(3));
-}
+ *  optimization help" KPI. gap-wiring-B-verification-round-write-path AC1 wired it into THIS real
+ *  landing writer (the fan-in path) so real verification-round rows carry it. SINGLE DEFINITION POINT:
+ *  re-exported from suite-accounting.ts (the lightweight NON-hub SSOT home full-suite-runner.ts
+ *  re-exports from) — the body is NOT re-declared here (finding `preverified-effective-parallelism`,
+ *  routine `semantic-dedup-scan`; same fix shape as the hostParallelism re-export above). */
+export { effectiveParallelism };
 
 /** The configured concurrent-suite slot count — delegated to the TS canonical suiteLockSlotCount()
  *  (gap-suite-lock-slot-seam-asymmetry: it reads the SAME seam precedence as the bash canonical —
