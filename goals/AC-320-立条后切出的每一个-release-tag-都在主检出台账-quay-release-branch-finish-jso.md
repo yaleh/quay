@@ -2,7 +2,7 @@
 id: AC-320
 title: 立条后切出的每一个 release tag 都在主检出台账 .quay/release-branch-finish.jsonl 有
   form=tagged exit=0 记录——切版走可重复载体且留痕可读回
-status: active
+status: superseded
 kind: criterion
 goal: GOAL-020
 criterion: >-
@@ -99,6 +99,15 @@ statusLog:
     to: active
     actor: human
     reason: 人 2026-09-24 裁定重开 GOAL-020：按裁定激活
+  - at: 2026-10-07T08:20:11.373Z
+    from: active
+    to: superseded
+    actor: human
+    reason: 人 2026-10-07 裁定取消（判据陈旧，非未达成）：判据要求 form=tagged 记录，而 2026-09-19
+      起的规范切版路径（release-cut.sh → release-branch-finish.sh
+      --cut，release-branch-finish.sh:377 cut_form="cut"）落台账的是 form=cut ⇒
+      取值词表对不上，判据结构上不可能绿。台账里 v0.13.0/v0.14.0/v0.15.0/v0.16.0 四条 form=cut exit=0
+      记录都带 tag、都落在主检出，判据要的「切版留痕可读回」本身已满足。goal-driver 本轮把该 AC 判为 world-gated。
 long-term: true
 fidelity:
   verdict: faithful

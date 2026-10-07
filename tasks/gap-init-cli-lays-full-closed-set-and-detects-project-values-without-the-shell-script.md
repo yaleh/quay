@@ -227,3 +227,14 @@ passed=4 failed=4 not-evaluated=4
 - 阻碍原因：exited-not-landed 失败无法归因（基建/契约疑似，非实现缺陷）——停止重派，⛔ 不再拿新会话撞同一堵墙：the exited-not-landed failure could not be attributed in 2 consecutive rounds (bounded to at most one retry; no mechanical fan-in result on the outcome ⇒ no suite ran) — infra/contract suspected, not an implementable defect (parser attributed no failing file (failure-line count unavailable on this judgment)); stopping instead of spending another worker session
 - 失败步/判词：adopted orphan worker exited (exit code unobservable) — task status=ready (not done) and leftover worktree task/gap-init-cli-lays-full-closed-set-and-detects-project-values-without-the-shell-script still present
 - run_id：wk-prod-anchor
+
+## Needs-Human
+
+**执行 2026-10-07T08:21:38.786Z — 停派终止（失败无法归因，⛔ 不再重派）**
+
+- 阻碍原因：exited-not-landed 失败无法归因（基建/契约疑似，非实现缺陷）——停止重派，⛔ 不再拿新会话撞同一堵墙：suite red could not be attributed to any failing test file in 3 consecutive rounds (bounded to at most one retry) — infra/contract suspected, not an implementable defect (parser extracted 0 of 4 failing lines and attributed none to a file; pseudo-stage tokens: __PERFILE__, lint; unrecognized tokens: ...); stopping instead of spending another worker session
+- 失败步/判词：step=suite: __PERFILE__ duration_ms=44672 plugin/test/task-granularity-advice.test.mjs passed=false end_ms=1791361224994 cpu_ms=44154.54 mem_peak_kb=177664
+- run_id：wk-prod-anchor
+- session_id：0d20c4b1-901e-4a6c-9133-df1495414b49
+- suite 日志：/data/home/yale/work/quay/.quay/fan-in-suite-gap-init-cli-lays-full-closed-set-and-detects-project-values-without-the-shell-script~wk-prod-anchor~1791361109424-cfd830.log
+- fan-in 日志：/data/home/yale/work/quay/.quay/fan-in-gap-init-cli-lays-full-closed-set-and-detects-project-values-without-the-shell-script-wk-prod-anchor.log
