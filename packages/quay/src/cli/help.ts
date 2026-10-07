@@ -62,7 +62,7 @@ export function printHelp(sub) {
 Usage:
   quay --version | -V
   quay init [--dry-run] [--json] [--project <name>] [--root <path>]   (scaffold an EMPTY task store; the loop install is the /quay:init skill, NOT this command)
-  quay task list [--status <status>] [--label <label>] [--prefix <prefix>] [--sort id|status|updated] [--search <query>] [--page-size <n>] [--root <path>] [--json|--format json]
+  quay task list [--status <status>] [--label <label>] [--prefix <prefix>] [--sort id|status|updated] [--search <query>] [--page-size <n>] [--root <path>] [--json|--format json] [--no-body]
   quay task view <task-id> [--json]
   quay task create <task-id> --title <title> [--body <text>|--body-file <path>] [--status <status>] [--labels <a,b>] [--parent <id>] [--children <a,b>] [--depends-on <a,b>] [--goal-ac <AC-NNN>] [--extra <json>] [--json]
   quay task edit <task-id> [--title <title>] [--status <status>] [--body <text>|--body-file <path>] [--labels <a,b>] [--extra <json>] [--parent <id>] [--children <a,b>] [--depends-on <a,b>] [--goal-ac <AC-NNN>] [--expect-status <status>] [--acceptance <cmd>] [--append-notes <text>] [--enforce-gate] [--json]
@@ -121,6 +121,12 @@ Options for task list:
                       retreat/run/migrate/config validate) all accept --root.
   --json              Output as JSON
   --format json       Alias for --json (any other --format value is a usage error)
+  --no-body           With --json: emit the complete task array (full count, no
+                      page/slice) using the frontmatter-only projection — each
+                      task keeps id/status/role/title/updatedAt but carries no
+                      body field, so a caller that only counts or summarises
+                      statuses does not pay for reading every body. Ignored
+                      without --json (the table view already reads no bodies).
 
 Options for task create:
   --title <title>      Title for the new task (REQUIRED — hard usage error, no provider call, if missing or empty)

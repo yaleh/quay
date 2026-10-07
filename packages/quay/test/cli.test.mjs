@@ -1068,6 +1068,7 @@ async function main() {
   await block30();
   await block31();
   await block32();
+  await block33();
 
   fs.rmSync(tasksDir, { recursive: true, force: true });
   fs.rmSync(workspaceRoot, { recursive: true, force: true });
@@ -2507,12 +2508,18 @@ server.registerTool("task_list", {
   },
 }, async (args) => {
   fs.appendFileSync(LOG, JSON.stringify(args) + String.fromCharCode(10));
+  // A real Provider honours the frontmatter-only projection: includeBody:false
+  // strips body from every returned task (quay-native mcp-server.ts). Modelling
+  // that here lets block33 assert BOTH the pushed-down filter AND the shape.
+  const outTasks = args.includeBody === false
+    ? ALL.map(({ body, ...rest }) => rest)
+    : ALL;
   if (MODE === "paged") {
     const size = args.pageSize === undefined ? ALL.length : args.pageSize;
     const page = args.page === undefined ? 1 : args.page;
     const start = (page - 1) * size;
     return { content: [{ type: "text", text: "ok" }], structuredContent: {
-      tasks: ALL.slice(start, start + size), malformed: [], total: ALL.length,
+      tasks: outTasks.slice(start, start + size), malformed: [], total: ALL.length,
       page, pageSize: size, totalPages: Math.ceil(ALL.length / size),
       paged: args.pageSize !== undefined, scannedFiles: false,
     } };
@@ -2520,7 +2527,7 @@ server.registerTool("task_list", {
   // MODE "unpaged": a Provider that applied the filters but IGNORED pageSize —
   // it sends no "paged" sentinel, so the caller must slice locally.
   return { content: [{ type: "text", text: "ok" }], structuredContent: {
-    tasks: ALL, malformed: [], total: ALL.length, scannedFiles: true,
+    tasks: outTasks, malformed: [], total: ALL.length, scannedFiles: true,
   } };
 });
 await server.connect(new StdioServerTransport());
@@ -2618,6 +2625,94 @@ async function block32() {
     assert(
       JSON.stringify(ids(d)) === JSON.stringify(["FAKE-1", "FAKE-2", "FAKE-3"]),
       `without --page-size the whole list is returned (got ${JSON.stringify(ids(d))})`
+    );
+  } finally {
+    fs.rmSync(ws, { recursive: true, force: true });
+  }
+}
+
+// 33. gap-cli-task-list-json-body-coupled-to-json-flag: `--json` alone forces
+//     EVERY body to be read + serialised, coupling OUTPUT FORMAT to the READ
+//     PROJECTION. `--no-body` decouples them: with `--json` it asks the Provider
+//     for the frontmatter-only projection (`includeBody:false`) while still
+//     returning the COMPLETE array (full count, no page/slice). The assertion is
+//     on the RECORDED CALL filter (`includeBody:false`), not on output shape — a
+//     store that fits in one page yields the same count either way, so only the
+//     recorded arguments can prove the body READ was actually avoided rather than
+//     stripped after the fact.
+//       (a) `--json --no-body` ⇒ filter carries `includeBody:false`, the output is
+//           a valid JSON array, no task object has a `body` key, the frontmatter
+//           fields survive, and the array length == the FULL task count (3);
+//       (b) `--json` (no flag) ⇒ the filter does NOT request that projection and
+//           every task still carries its body (zero regression).
+async function block33() {
+  const ws = fs.mkdtempSync(path.join(os.tmpdir(), "quay-cli-nobody-"));
+  // Same as block32: the fake Provider is a real MCP server, so node must resolve
+  // @modelcontextprotocol/sdk from the scratch workspace's own node_modules.
+  const repoRoot = path.join(__dirname, "..", "..", "..");
+  fs.symlinkSync(fs.realpathSync(path.join(repoRoot, "node_modules")), path.join(ws, "node_modules"), "dir");
+  const argsLog = path.join(ws, "task-list-args.jsonl");
+  const fakeBin = path.join(ws, "fake-provider.mjs");
+  fs.writeFileSync(fakeBin, FAKE_PROVIDER_SRC);
+
+  fs.mkdirSync(path.join(ws, ".quay"), { recursive: true });
+  fs.writeFileSync(path.join(ws, ".quay", "config.yml"), [
+    "providers:",
+    "  fake:",
+    "    enabled: true",
+    `    path: ${JSON.stringify(ws)}`,
+    `    mcp_entry: ["node", ${JSON.stringify(fakeBin)}, "mcp"]`,
+    "    env:",
+    `      FAKE_PROVIDER_ARGS_LOG: ${JSON.stringify(argsLog)}`,
+    `      FAKE_PROVIDER_MODE: "paged"`,
+    "",
+  ].join("\n"));
+
+  const resetLog = () => fs.rmSync(argsLog, { force: true });
+  const readArgs = () =>
+    fs.existsSync(argsLog)
+      ? fs.readFileSync(argsLog, "utf8").split("\n").filter(Boolean).map((l) => JSON.parse(l))
+      : [];
+  const parse = (r) => { try { return JSON.parse(r.stdout); } catch { return null; } };
+
+  try {
+    // ── (a) --json --no-body: frontmatter-only read, COMPLETE array ──────────
+    resetLog();
+    const a = await runImport(["task", "list", "--json", "--no-body", "--root", ws], {});
+    assert(a.status === 0, `--no-body case (a): task list --json --no-body exits 0 (got ${a.status}; stderr ${a.stderr.slice(0, 200)})`);
+    const aArgs = readArgs();
+    assert(
+      aArgs.length === 1 && aArgs[0].includeBody === false,
+      `--no-body is PUSHED DOWN as includeBody:false to client.taskList (recorded filter: ${JSON.stringify(aArgs[0] ?? null)}), not stripped client-side after a full read`
+    );
+    const aTasks = parse(a);
+    assert(Array.isArray(aTasks), `--no-body case (a): output is a valid JSON array (got ${a.stdout.slice(0, 80)})`);
+    assert(
+      Array.isArray(aTasks) && aTasks.length === 3,
+      `--no-body returns the COMPLETE array, not a page/slice (got ${Array.isArray(aTasks) ? `length ${aTasks.length}` : "non-array"})`
+    );
+    assert(
+      Array.isArray(aTasks) && aTasks.every((t) => !("body" in t)),
+      `--no-body omits the body field from every task (first-task keys: ${JSON.stringify(aTasks && aTasks[0] ? Object.keys(aTasks[0]) : null)})`
+    );
+    assert(
+      Array.isArray(aTasks) && aTasks.every((t) => typeof t.id === "string" && typeof t.status === "string" && typeof t.title === "string"),
+      `--no-body keeps the frontmatter fields a summariser counts on (id/status/title)`
+    );
+
+    // ── (b) --json alone: unchanged, bodies present (zero regression) ────────
+    resetLog();
+    const b = await runImport(["task", "list", "--json", "--root", ws], {});
+    assert(b.status === 0, `--no-body case (b): task list --json exits 0 (got ${b.status}; stderr ${b.stderr.slice(0, 200)})`);
+    const bArgs = readArgs();
+    assert(
+      bArgs.length === 1 && bArgs[0].includeBody !== false,
+      `without --no-body the filter does NOT request the frontmatter-only projection (recorded filter: ${JSON.stringify(bArgs[0] ?? null)}) — zero regression`
+    );
+    const bTasks = parse(b);
+    assert(
+      Array.isArray(bTasks) && bTasks.length === 3 && bTasks.every((t) => "body" in t),
+      `without --no-body every task still carries its body (got ${JSON.stringify((bTasks || []).map((t) => "body" in t))})`
     );
   } finally {
     fs.rmSync(ws, { recursive: true, force: true });

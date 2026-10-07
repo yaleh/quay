@@ -63,7 +63,27 @@ export async function handleTaskList({ flags, positional, wantsJson }: CliCtx) {
     // asks for the frontmatter-only projection (`includeBody:false`, the same one
     // the web board / dashboard / /tasks page use). `--json` DOES print the task
     // objects, body included, so it keeps the full shape.
-    const wantBodiesInOutput = wantsJson === true;
+    //
+    // gap-cli-task-list-json-body-coupled-to-json-flag: `--json` used to imply
+    // "read EVERY body" unconditionally — OUTPUT FORMAT and READ PROJECTION were
+    // one switch. A caller that only needs the full task set to count / summarise
+    // statuses (claudecodeui's `summarizeTasks()` reads id/title/status/updatedAt
+    // and never a body) had no way to ask for JSON *without* paying for every
+    // body's parse + serialisation. The explicit `--no-body` flag DECOUPLES them:
+    // the array stays complete (no page / slice — a full count), every task still
+    // carries its frontmatter fields, but the read uses the frontmatter-only
+    // projection (`includeBody:false`) the table view already uses. Without
+    // `--no-body`, `--json` keeps its pre-existing body-carrying shape (zero
+    // regression). ⛔ Ignored without `--json`: the table view already reads no
+    // bodies, so `--no-body` alone is a no-op there (not a usage error).
+    //
+    // ⚠️ `--no-body` is read off the flag bag directly rather than via
+    // BOOLEAN_FLAGS (cli/flags.ts): `task list` takes no positionals, so a bare
+    // `--no-body` parses to `true` in every real invocation order (`--json
+    // --no-body` / `--no-body --json` / `--no-body --status x` — the next token
+    // always starts with `--` or is absent) — the BOOLEAN_FLAGS mechanism only
+    // matters when a non-flag token could follow, which cannot happen here.
+    const wantBodiesInOutput = wantsJson === true && flags["no-body"] === undefined;
     // ── PUSH THE PAGE DOWN ────────────────────────────────────────────────────
     // gap-cli-task-list-page-size-post-hoc-slice-not-pushed-down: `--page-size`
     // used to be a POST-HOC slice — every matching task was fetched (bodies
