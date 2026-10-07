@@ -13,7 +13,25 @@ import fs from "node:fs";
 import path from "node:path";
 import { spawnSync } from "node:child_process";
 import YAML from "yaml";
-import { makeTmp, cleanup, runInit, pluginDir, diskWorktreeRoot } from "./quay-init-loop-helpers.mjs";
+import { makeTmp, cleanup, pluginDir, diskWorktreeRoot } from "./quay-init-loop-helpers.mjs";
+
+const repoRoot = path.resolve(pluginDir, "..");
+// AC-331 (gap-init-cli-lays-full-closed-set-and-detects-project-values-without-the-shell-script):
+// the auto-commit / closed-set assertions below run THROUGH THE CLI — the single engine. `--loop` is
+// the shell entry's legacy no-op spelling and is not part of the CLI surface, so it is dropped; an
+// explicit disk worktree root is still injected (the CLI validates it exactly as the shell did).
+const QUAY_CLI = path.join(repoRoot, "packages", "quay", "bin", "quay.ts");
+
+function runInit(workspace, args = []) {
+  const loop = args.includes("--loop");
+  const extra = loop && !args.some((a) => a === "--worktree-root") ? ["--worktree-root", diskWorktreeRoot()] : [];
+  const cliArgs = args.filter((a) => a !== "--loop");
+  return spawnSync("node", ["--no-warnings", "--experimental-strip-types", QUAY_CLI, "init", ...extra, ...cliArgs], {
+    cwd: workspace,
+    encoding: "utf8",
+    env: { ...process.env, CLAUDE_PLUGIN_ROOT: pluginDir },
+  });
+}
 
 function git(cwd, args) {
   const r = spawnSync("git", args, { cwd, encoding: "utf8" });
