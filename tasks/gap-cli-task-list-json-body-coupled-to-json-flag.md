@@ -115,3 +115,6 @@ time (.quay/plugin/bin/quay task list --json | wc -c)    # ~3.4s（--json，强�
 改为 pipe，子进程**提前退出会被显式诊断**（不再伪装成一条 HTTP 读数）。另把断言从「状态码 200」加强为「200 **且** 页面上
 有本工作区种子任务 `SMOKE1`」——200 本身可被任一 quay serve 满足，只有内容能证明读的是**我们自己**的 server。实测：
 `node --test packages/quay/test/build-dist-smoke.test.mjs` 4/4 pass（`(b)` 由 630ms 降到 ~250ms）。
+
+
+**本轮（2026-10-07）suite 红的归因**：fan-in suite 红在境外文件 `packages/quay/test/server-status-web-control-same-pid.test.mjs:189` —— `res.json.status` 实测 `degraded`、期望 `running`。判为**非本任务 delta** 的宿主抖动，依据三条：①该文件不在本任务 Touches/diff 内，develop 也没改过它（**非 branch-lag**——`git diff develop...HEAD -- <该文件>` 为空）；②单跑该文件 14/14 pass，且 **6 份并发副本 6/6 pass**（0 red），无负载相关复现；③本任务连续三轮 fan-in suite 各红在**三个不同**的单文件（relation-sync → build-dist-smoke → server-status-web-control），前两个单跑同样全绿，且第二个（build-dist-smoke）已作为真实缺陷修掉。机制旁证：该文件自己的注释写着它**在本进程内**托管 server，故探针（`PROBE_TIMEOUT_MS=4000`）被饿死即读成 `degraded`。cgroup 排除内存因素：`run-u79887.scope` MemoryMax=16G / peak=12.2G / `memory.events max=0` / memory.pressure 三项 psi 皆 0。本轮四文件 delta 单测逐条复验：`cli.test.mjs` pass 1/fail 0、`build-dist-smoke.test.mjs` 4/4，真 store 实测 `--json --no-body` len=2591/anyBody=false vs `--json` len=2591/anyBody=true。
