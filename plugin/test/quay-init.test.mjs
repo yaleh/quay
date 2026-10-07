@@ -32,6 +32,12 @@ import { fileURLToPath } from "node:url";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const pluginDir = path.resolve(__dirname, "..");
+const repoRoot = path.resolve(pluginDir, "..");
+// AC-331 (gap-init-cli-lays-full-closed-set-and-detects-project-values-without-the-shell-script):
+// these assertions run THROUGH THE CLI — the single engine. The shell entry stays the shipped
+// transitional entry point, but every assertion below is about the closed-set contract the CLI now
+// owns alone.
+const QUAY_CLI = path.join(repoRoot, "packages", "quay", "bin", "quay.ts");
 
 const _tmp = [];
 function makeTmp(prefix = "qinit-") {
@@ -49,9 +55,14 @@ function diskWorktreeRoot() {
 }
 
 function runInitEnv(ws, args = [], envExtra = {}) {
-  const extra = args.includes("--loop") && !args.some((a) => a === "--worktree-root")
+  // `--loop` is the shell entry's legacy no-op spelling and is NOT part of the CLI surface (`quay init
+  // --loop` fails closed on purpose) — dropped on the way in. The derived `--worktree-root` injection
+  // stays: the CLI validates the root exactly as the shell did.
+  const loop = args.includes("--loop");
+  const extra = loop && !args.some((a) => a === "--worktree-root")
     ? ["--worktree-root", diskWorktreeRoot()] : [];
-  return spawnSync("bash", [path.join(pluginDir, "scripts", "quay-init.sh"), ...extra, ...args], {
+  const cliArgs = args.filter((a) => a !== "--loop");
+  return spawnSync("node", ["--no-warnings", "--experimental-strip-types", QUAY_CLI, "init", ...extra, ...cliArgs], {
     cwd: ws,
     encoding: "utf8",
     env: { ...process.env, CLAUDE_PLUGIN_ROOT: pluginDir, ...envExtra },
@@ -725,7 +736,7 @@ test("upgrade via quay-init.sh --dry-run reports the version-level fill but writ
   } finally { cleanup(ws); }
 });
 
-test("upgrade via quay-init.sh: an UNPARSEABLE config is reported NOT-EVALUATED by the reconcile step, never silently passed", () => {
+test("an UNPARSEABLE config is NEVER reported as reconciled — the broken bytes are preserved byte-identical beside the rebuilt file", () => {
   const ws = makeTmp();
   const wt = diskWorktreeRoot();
   try {
@@ -734,9 +745,19 @@ test("upgrade via quay-init.sh: an UNPARSEABLE config is reported NOT-EVALUATED 
     const broken = "providers: [unclosed\n  - : :\n";
     fs.writeFileSync(path.join(ws, ".quay", "config.yml"), broken);
     const r = runInit(ws, [...INIT_ARGS(ws), "--worktree-root", wt]);
-    // Whatever the earlier upgrade steps do with a broken file, the reconcile step must not PASS it.
+    // Whatever the run does with a broken file, the reconcile step must not PASS it.
     const out = r.stdout + r.stderr;
     assert.ok(!/reconciled: \.quay\/config\.yml/.test(out), `a corrupt config must never be reported as reconciled:\n${out}`);
-    assert.equal(fs.readFileSync(path.join(ws, ".quay", "config.yml"), "utf8"), broken, "the broken bytes must be left untouched");
+    // AC-330's salvage contract (the CLI is the single engine now): the unreadable bytes are KEPT —
+    // byte-identical — beside the rebuilt config, and the rebuild is reported, never silent. The
+    // pre-fix shell refusal left the project with a broken config and no in-band way to repair it.
+    const backups = fs.readdirSync(path.join(ws, ".quay")).filter((f) => f.startsWith("config.yml.corrupt-"));
+    assert.equal(backups.length, 1, `the unreadable bytes must be preserved beside the new file (got ${JSON.stringify(backups)})\n${out}`);
+    assert.equal(
+      fs.readFileSync(path.join(ws, ".quay", backups[0]), "utf8"),
+      broken,
+      "the backup must be byte-identical to the file that could not be parsed",
+    );
+    assert.match(out, /rebuilt from this version's defaults/, `the salvage must be REPORTED:\n${out}`);
   } finally { cleanup(ws); }
 });

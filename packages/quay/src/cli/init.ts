@@ -463,6 +463,17 @@ Description:
     // exactly which keys this version added/migrated/removed and which unknown keys were kept.
     if (result.outcome === "reconciled" || result.outcome === "unchanged") {
       const r = result.upgrade;
+      // The VERSION-LEVEL reconcile's own line — the same wording the shell entry's `reconcile-config`
+      // step emits (one vocabulary for one judgment), so an operator re-running on either surface
+      // reads the same sentence.
+      const reconcileKeys = [...(r?.added ?? []).map((k) => `loop.${k}`), ...(r?.migrated ?? []).map((m) => `loop.${m}`)];
+      if (result.outcome === "unchanged") {
+        say("  unchanged: .quay/config.yml (already current for this version of quay — version-level defaults present, not rewritten)");
+      } else if (dryRun) {
+        if (reconcileKeys.length > 0) say(`  would-reconcile: .quay/config.yml (${reconcileKeys.join(", ")})`);
+      } else if (reconcileKeys.length > 0) {
+        say(`  reconciled: .quay/config.yml version-level defaults (${reconcileKeys.join(", ")}); comments and every other key preserved`);
+      }
       if (result.outcome === "unchanged") {
         say(`${result.configPath}: already current for this version of quay — not rewritten.`);
       } else {

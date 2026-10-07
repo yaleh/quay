@@ -539,33 +539,34 @@ test("AC1-collision: quay-native init --loop fails closed and points at /quay:in
 // ---------------------------------------------------------------------------
 
 test("gap-installed-form: node_modules provider path -> bundled dist mcp_entry", () => {
+  // AC-331 / gap-project-quay-pointer-… (D): the FRESH template no longer emits a native `mcp_entry`
+  // at all — Core resolves the native binding from its own plugin root, so a declared entry would
+  // freeze the runtime to the version that wrote the config. The CHOOSER still has to discriminate
+  // the two forms (it is what a non-native provider's `mcp_entry` would be built from), so the
+  // assertion is repointed at the chooser itself — same rule, same intent, still falsifiable.
+  const entry = mcpEntryForProvider("./node_modules/quay-native");
+  assert.ok(
+    entry.includes('"./dist/quay-native.js"'),
+    "installed form must launch the bundled dist JS (no type-stripping under node_modules)"
+  );
+  assert.ok(
+    !entry.includes('"./bin/quay-native.ts"'),
+    "installed form must NOT reference the raw .ts entry (it would hit ERR_UNSUPPORTED_NODE_MODULES_TYPE_STRIPPING)"
+  );
+  // And the generated native provider must carry NEITHER binding key.
   const content = generateConfigContent({
     providerId: "native",
     providerPath: "./node_modules/quay-native",
     isNode: false,
     isGo: false,
   });
-  assert.ok(
-    content.includes('mcp_entry: ["node", "./dist/quay-native.js", "mcp"]'),
-    "installed form must launch the bundled dist JS (no type-stripping under node_modules)"
-  );
-  assert.ok(
-    !content.includes('"./bin/quay-native.ts"'),
-    "installed form must NOT reference the raw .ts entry (it would hit ERR_UNSUPPORTED_NODE_MODULES_TYPE_STRIPPING)"
-  );
+  assert.doesNotMatch(content, /^\s*path:/m, "the native provider must not declare a path");
+  assert.doesNotMatch(content, /^\s*mcp_entry:/m, "the native provider must not declare an mcp_entry");
 });
 
 test("gap-dev-form: repo-tree provider path keeps the raw .ts mcp_entry", () => {
-  const content = generateConfigContent({
-    providerId: "native",
-    providerPath: "./packages/quay-native",
-    isNode: false,
-    isGo: false,
-  });
-  assert.ok(
-    content.includes('mcp_entry: ["node", "./bin/quay-native.ts", "mcp"]'),
-    "dev form must keep the raw TypeScript entry"
-  );
+  const entry = mcpEntryForProvider("./packages/quay-native");
+  assert.ok(entry.includes('"./bin/quay-native.ts"'), "dev form must keep the raw TypeScript entry");
 });
 
 test("gap-mcp-entry-for-provider unit: node_modules vs repo-tree discrimination", () => {

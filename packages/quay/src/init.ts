@@ -895,9 +895,18 @@ export function generateConfigContent(opts: {
    * able to lay the whole closed set alone (AC-331).
    */
   values?: ProjectLoopValues;
+  /**
+   * The workspace root — when supplied, the provider's `tasks_dir` and the four `QUAY_NATIVE_*_DIR`
+   * carrier pins are emitted as ABSOLUTE paths inside it, exactly as the shipped shell writer does
+   * (the isolation the pins exist for must be visible in the config the user owns, and an absolute
+   * path cannot silently resolve against somewhere else). Omitted ⇒ the `./`-relative forms the
+   * pure-unit callers use.
+   */
+  root?: string;
 }): string {
   const { providerId, providerPath, isNode, isGo } = opts;
   const values = opts.values;
+  const abs = (rel: string): string => (opts.root ? path.join(opts.root, rel) : `./${rel}`);
 
   // Build gate suggestions based on project type.
   const gateSuggestions = buildGateSuggestions({ isNode, isGo });
@@ -927,11 +936,20 @@ export function generateConfigContent(opts: {
     "providers:",
     "  " + providerId + ":",
     "    enabled: true",
-    "    path: \"" + providerPath + "\"",
-    "    tasks_dir: \"./tasks\"",
-    "    mcp_entry: " + mcpEntryForProvider(providerPath),
+    // ⛔ NO `path:` / NO `mcp_entry:` for the NATIVE provider (gap-project-quay-pointer-is-init-plugin-
+    // root-and-version-records-derive-from-it (D), human ruling 2026-10-06): a declared path freezes
+    // the runtime to the install-cache version that wrote it, so a plugin upgrade never takes effect.
+    // Core resolves the native binding from its OWN plugin root (`plugin-root.ts`) — the single
+    // resolver — and the shipped shell writer emits the same shape. The two fresh-install writers
+    // disagreeing about these two keys is exactly the drift AC-331 removes.
+    // (`mcpEntryForProvider` below remains the ONE chooser for a provider that DOES need a declared
+    // entry — e.g. a custom or github provider — and is unit-tested directly.)
+    "    tasks_dir: " + JSON.stringify(abs("tasks")),
     "    env:",
-    "      QUAY_NATIVE_TASKS_DIR: \"./tasks\"",
+    "      QUAY_NATIVE_TASKS_DIR: " + JSON.stringify(abs("tasks")),
+    "      QUAY_NATIVE_GOAL_DIR: " + JSON.stringify(abs("goals")),
+    "      QUAY_NATIVE_ADR_DIR: " + JSON.stringify(abs("adr")),
+    "      QUAY_NATIVE_META_DIR: " + JSON.stringify(abs("meta")),
     "    # default_task_status: todo   # uncomment to change default status for new tasks",
     "",
     "  # GitHub provider (uncomment to use GitHub Issues as your task store):",
@@ -1619,7 +1637,35 @@ export function runInit(opts: InitOptions): InitResult {
   // non-zero (硬规则 3b — "could not be made valid" is its own outcome, and the operator is told
   // WHICH field failed rather than getting a generic refusal).
   if (existing.state === "valid") {
-    const up = upgradeConfigContent(existing.raw ?? "", {
+    // ── STEP 0: the LEGACY-RUNTIME migration, FIRST ───────────────────────────────────────────────
+    // The shipped shell entry runs this before the reconcile (its `write_config` existing-config arm):
+    // it deletes the retired native `path`/`mcp_entry` LINES and retires a stale project-local
+    // `.quay/runtime/` copy — reversible, and only when unreferenced + recognizably quay's own +
+    // stale. The upgrade engine below then reads the POST-migration text, so one run reaches the
+    // fixpoint (a second run is a no-op) exactly as the shell's does.
+    // Only when the plugin root is known — the judgment needs THIS delivery's vendored bundles to
+    // tell "stale" from "byte-current" (with no root there is nothing to compare against, and
+    // guessing would retire a current copy).
+    let rawForUpgrade = existing.raw ?? "";
+    if (opts.pluginRoot) {
+      const providerRoot = path.join(opts.pluginRoot, "vendor", "quay-native");
+      migrateStaleMcpEntry({
+        cfgPath: configPath,
+        installProvider: providerRoot,
+        installRuntime: path.join(providerRoot, "dist", "quay-native.js"),
+        installCore: path.join(opts.pluginRoot, "vendor", "quay", "dist", "quay.js"),
+        wsRoot: root,
+        dryRun: opts.dryRun === true,
+        backupTs: String(Math.floor(Date.now() / 1000)),
+        log: opts.log,
+      });
+      try {
+        rawForUpgrade = fs.readFileSync(configPath, "utf8");
+      } catch {
+        // the file vanished under us — keep the pre-migration text rather than crashing
+      }
+    }
+    const up = upgradeConfigContent(rawForUpgrade, {
       workspaceRoot: root,
       // ⛔ `undefined`, never `null`: the validator reads `null` as "no plugin root could be resolved"
       // (the state a fixture injects) and `undefined` as "resolve it yourself" — passing `null` here
@@ -1750,7 +1796,7 @@ export function runInit(opts: InitOptions): InitResult {
   // carry) therefore writes NOTHING: the corrupt original and its backup are kept and the failure is
   // named (硬规则 3b — "could not produce a valid config" is its own outcome, never a silent
   // "written").
-  let content = generateConfigContent({ providerId, providerPath, isNode, isGo, values });
+  let content = generateConfigContent({ providerId, providerPath, isNode, isGo, values, root });
   if (isRebuild) {
     const fixpoint = upgradeConfigContent(content, {
       workspaceRoot: root,
@@ -2696,6 +2742,12 @@ export interface MigrateMcpEntryOpts {
   wsRoot: string;
   dryRun: boolean;
   backupTs: string;
+  /**
+   * Where the human-facing report lines go (default `console.log`). ⛔ The CLI's `--json` mode MUST
+   * pass a stderr sink: stdout carries exactly ONE JSON document, and these lines would otherwise
+   * splice themselves into it.
+   */
+  log?: (line: string) => void;
 }
 
 /**
@@ -2715,6 +2767,7 @@ export interface MigrateMcpEntryOpts {
  * vendor-runtime negative control keeps its meaning.
  */
 export function migrateStaleMcpEntry(o: MigrateMcpEntryOpts): void {
+  const say = o.log ?? ((line: string) => console.log(line));
   if (!fs.existsSync(o.cfgPath)) return;
   const data = (YAML.parse(fs.readFileSync(o.cfgPath, "utf8")) ?? {}) as Record<string, unknown>;
   const providers = data["providers"];
@@ -2790,7 +2843,7 @@ export function migrateStaleMcpEntry(o: MigrateMcpEntryOpts): void {
   if (rtState === "retire" && !referencedByBinding()) {
     let dest = path.join(backupDir, "runtime");
     if (o.dryRun) {
-      console.log(`  would-retire-orphan-runtime: ${rtDir} -> ${dest} (retired layout, unreferenced, stale vs this delivery — AC1)`);
+      say(`  would-retire-orphan-runtime: ${rtDir} -> ${dest} (retired layout, unreferenced, stale vs this delivery — AC1)`);
     } else {
       fs.mkdirSync(backupDir, { recursive: true });
       let n = 1;
@@ -2799,24 +2852,24 @@ export function migrateStaleMcpEntry(o: MigrateMcpEntryOpts): void {
         n++;
       }
       fs.renameSync(rtDir, dest);
-      console.log(`  retired-orphan-runtime: ${rtDir} -> backup ${dest} (retired layout, unreferenced, stale vs this delivery — AC1)`);
+      say(`  retired-orphan-runtime: ${rtDir} -> backup ${dest} (retired layout, unreferenced, stale vs this delivery — AC1)`);
     }
   } else if (rtState === "retire") {
-    console.log(`  kept-referenced-runtime: ${rtDir} (still referenced by the provider binding — NOT retired)`);
+    say(`  kept-referenced-runtime: ${rtDir} (still referenced by the provider binding — NOT retired)`);
   } else if (rtState === "keep") {
-    console.log(`  kept-runtime-copy: ${rtDir} (byte-identical to this delivery — untouched, AC3)`);
+    say(`  kept-runtime-copy: ${rtDir} (byte-identical to this delivery — untouched, AC3)`);
   } else if (rtState === "unknown") {
-    console.log(`  kept-unrecognized-runtime-dir: ${rtDir} (not quay's install-generated runtime shape — never touched)`);
+    say(`  kept-unrecognized-runtime-dir: ${rtDir} (not quay's install-generated runtime shape — never touched)`);
   }
 
   if (!changed) return;
   const note = "the native provider is resolved from the plugin root, so the config carries no path";
   if (o.dryRun) {
-    for (const m of removed) console.log(`  would-remove: ${m} (${note})`);
+    for (const m of removed) say(`  would-remove: ${m} (${note})`);
     return;
   }
   fs.writeFileSync(o.cfgPath, stripped.text, "utf8");
-  for (const m of removed) console.log(`  removed: ${m} (${note})`);
+  for (const m of removed) say(`  removed: ${m} (${note})`);
 }
 
 /**
