@@ -823,7 +823,37 @@ test("REBUILD ②: --dry-run over a corrupt config reports the backup+rebuild pl
   assert.equal(fs.readFileSync(cfgPath, "utf8"), BROKEN_YAML, "the corrupt file is untouched");
   const backups = fs.readdirSync(path.join(dir, ".quay")).filter((f) => f.startsWith("config.yml.corrupt-"));
   assert.equal(backups.length, 0, `a dry run must not write a backup (got: [${backups.join(", ")}])`);
+  // "writes NOTHING" is about every file the real run would lay down, not just the config.
+  assert.equal(fs.existsSync(path.join(dir, "tasks")), false, "a dry run must not create tasks/");
+  assert.equal(fs.existsSync(path.join(dir, ".quay", "profiles.yml")), false, "a dry run must not create profiles.yml");
+  assert.equal(fs.existsSync(path.join(dir, ".claude", "launch.settings.json")), false, "a dry run must not create launch.settings.json");
 });
+
+// AC③① — BOTH unparseable shapes the criterion uses (a duplicated map key and an unclosed flow
+// bracket) must take the same salvage path: exit 0, a byte-identical backup, a config that passes the
+// official validator, and a report naming the backup plus the rebuild's cost.
+for (const [kind, corrupt] of [
+  ["unclosed-bracket", "providers: [unclosed\n  bad: : :\n"],
+  ["duplicate-key", 'loop:\n  gates:\n    - acceptance\n  gates: duplicate-makes-this-unparseable\nproviders: [unclosed\n'],
+]) {
+  test(`REBUILD ① (${kind}): exit 0, byte-identical backup, rebuilt config validates, report names the backup + the cost`, () => {
+    const dir = tmpDir(`rebuild-kind-${kind}`);
+    fs.mkdirSync(path.join(dir, ".quay"), { recursive: true });
+    const cfgPath = path.join(dir, ".quay", "config.yml");
+    fs.writeFileSync(cfgPath, corrupt);
+
+    const out = spawnSync("node", [quayBin, "init", "--root", dir], { encoding: "utf8", cwd: dir });
+    assert.equal(out.status, 0, `${kind}: an unparseable config is rebuilt:\n${out.stdout}${out.stderr}`);
+
+    const backups = fs.readdirSync(path.join(dir, ".quay")).filter((f) => f.startsWith("config.yml.corrupt-"));
+    assert.equal(backups.length, 1, `${kind}: exactly one backup (got: [${backups.join(", ")}])`);
+    assert.equal(fs.readFileSync(path.join(dir, ".quay", backups[0]), "utf8"), corrupt, `${kind}: backup is byte-identical`);
+    assert.ok(out.stdout.includes(backups[0]), `${kind}: the report names the backup path`);
+
+    const v = runQuay(["config", "validate", "--root", dir], dir);
+    assert.ok(!v.includes("error:"), `${kind}: the rebuilt config passes the official validator:\n${v}`);
+  });
+}
 
 test("REBUILD ③ (unit): corruptBackupPathFor never hands back a taken name — same-second rebuilds do not overwrite", () => {
   const dir = tmpDir("rebuild-backuppath");
