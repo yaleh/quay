@@ -35,6 +35,14 @@ import {
 // this test assert both gates agree on the CJK proposal-slot body. Precedent:
 // serve.test.mjs imports plugin/scripts/fast-mode-telemetry.ts the same way.
 import { artifactsComplete, SHAPE_SECTIONS } from "../../../plugin/scripts/ready-pool-check.ts";
+// gap-ready-check-duplicated-algorithm-store-vs-ready-pool-check: the ONE kernel judge both sides
+// now call. Imported directly so this test can assert the store and ready-pool-check are not two
+// implementations but two callers of this module.
+import {
+  artifactsComplete as kernelArtifactsComplete,
+  artifactSections as kernelArtifactSections,
+  detectShape as kernelDetectShape,
+} from "../../quay/src/kernel/task-shape-artifacts.ts";
 
 const substantive = (label) =>
   `${label} — this is real, substantive prose describing the ${label.toLowerCase()} in enough detail to exceed the minimum content threshold for this section, well past forty characters.`;
@@ -434,4 +442,72 @@ test("contractKeysPresent reports per-key presence from the ## Contract section"
   const missing = contractKeysPresent(body.replace(/^resume .*$/m, ""));
   assert.equal(missing.resume, false);
   assert.equal(missing.measure, true);
+});
+
+// ── gap-ready-check-duplicated-algorithm-store-vs-ready-pool-check ─────────────────────────────────
+// The todo→ready four-artifact judgment used to be implemented TWICE (store.ts `artifactSections()`
+// and ready-pool-check.ts `artifactsComplete()`), sharing only the heading tables. These two tests
+// pin the structural fix: both judges are now CALLERS of one kernel implementation, and the section
+// boundary they share is depth-aware (which is where the two old copies actually disagreed).
+
+test("ONE judge (gap-ready-check-duplicated-algorithm-store-vs-ready-pool-check): store, ready-pool-check, and the kernel resolve the SAME artifact map on every shape", () => {
+  // The behavioral half: three call sites, one answer — including the finding shape's absent `plan`
+  // key (dispatch is not a waiver) and an unknown shape (both fail closed with an all-false map).
+  const bodies = [
+    contractBody(),
+    // finding shape: NO `## Plan` by construction
+    `## Finding\n${substantive("Finding")}\n` +
+      `## Acceptance Criteria\n- [x] a real, checkable acceptance criterion\n- [x] another one\n` +
+      `## Definition of Done\n${substantive("Definition of Done")}\n`,
+    // plan shape with an EMPTY ## Plan — stays red
+    `## Proposal\n${substantive("Proposal")}\n## Plan\n` +
+      `## Acceptance Criteria\n- [x] a real, checkable acceptance criterion\n- [x] another one\n` +
+      `## Definition of Done\n${substantive("Definition of Done")}\n`,
+    "no registered headings at all", // unknown shape
+  ];
+  const { store, dir } = freshStore();
+  try {
+    for (const body of bodies) {
+      const viaStore = store.artifactSections(body);
+      const viaPc = artifactsComplete(body).artifacts;
+      const viaKernel = kernelArtifactsComplete(body).artifacts;
+      assert.deepEqual(viaStore, viaKernel, `store must resolve the kernel map; body shape=${kernelDetectShape(body)}`);
+      assert.deepEqual(viaPc, viaKernel, `ready-pool-check must resolve the kernel map; body shape=${kernelDetectShape(body)}`);
+    }
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("section boundary is depth-aware (gap-ready-check-duplicated-algorithm-store-vs-ready-pool-check): a shallower H1 ENDS the section — the old store-only `^##\\s` stop swallowed it", () => {
+  // The one real behavioral divergence the corpus diff found between the two old copies: the store's
+  // section stop (`^##\s`) did not terminate on a shallower `# ` heading, so an H1 wedged between two
+  // H2 sections was swallowed into the preceding one and the Contract artifact read present on an
+  // effectively EMPTY Contract section. The shared depth-aware rule (already the methodology judge's)
+  // ends the section at any `# `..`## ` line. This is STRICTER, never looser.
+  const h1Body =
+    `## Proposal\n${substantive("Proposal")}\n` +
+    `## Contract\nmeasure x\n` + // 8 non-whitespace chars — under the 40 floor once the H1 ends it
+    `# a shallower H1 wedge\n` +
+    `${substantive("spillover prose that must NOT count toward the Contract section")}\n` +
+    `## Acceptance Criteria\n- [x] a real, checkable acceptance criterion\n- [x] another one\n` +
+    `## Definition of Done\n${substantive("Definition of Done")}\n`;
+
+  // Kernel/ready-pool-check side.
+  assert.equal(kernelArtifactsComplete(h1Body).artifacts.plan, false, "the H1 must end the Contract section");
+  assert.equal(artifactsComplete(h1Body).artifacts.plan, false, "ready-pool-check agrees");
+  assert.deepEqual(kernelArtifactSections(h1Body), artifactsComplete(h1Body).artifacts);
+
+  // Product gate side: check() must now read plan:false and fail the task closed.
+  const { store, dir } = freshStore();
+  try {
+    store.write("H1-WEDGE", { title: "h1-wedge", status: "todo", body: h1Body });
+    const r = store.check("H1-WEDGE");
+    assert.equal(r.shape, "contract");
+    assert.equal(r.artifacts.plan, false, `the H1 must end the Contract section; got ${JSON.stringify(r.artifacts)}`);
+    assert.equal(r.ok, false);
+    assert.match(r.reason, /plan/);
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
 });

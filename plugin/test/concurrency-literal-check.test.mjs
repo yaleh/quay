@@ -97,7 +97,7 @@ test("RED (P4): the meta-driver per-round cap WITHOUT a marker is a violation (A
 
 test("RED (P5): CPU-quota literal inside a systemd-run-limit override STRING is a violation (the historical 400% leak shape)", () => {
   const src = 'systemdRunLimits = "MemoryMax=4G CPUQuota=400% TasksMax=200",\n';
-  const hits = scanText("plugin/workflows/execute-suite-fix.js", src);
+  const hits = scanText("plugin/workflows/fan-in-execute.js", src);
   assert.equal(hits.length, 1, JSON.stringify(hits));
   assert.equal(hits[0].kind, "violation");
   assert.equal(hits[0].pattern, "P5");
@@ -180,7 +180,7 @@ test("RED: an UNQUOTED executed CLI-flag literal in a shell command reports (the
 
 test("GREEN (P5): a systemd-run override string WITHOUT CPUQuota is not a hit (the current correct form)", () => {
   const src = 'systemdRunLimits = "MemoryMax=4G TasksMax=200",\n';
-  const hits = scanText("plugin/workflows/execute-suite-fix.js", src);
+  const hits = scanText("plugin/workflows/fan-in-execute.js", src);
   assert.equal(hits.length, 0, JSON.stringify(hits));
 });
 
@@ -232,14 +232,16 @@ test("scanSurface covers the executable layer (plugin/scripts + scripts + plugin
   const surface = scanSurface(REPO_ROOT);
   assert.ok(surface.includes("plugin/scripts/concurrency-literal-check.ts"));
   assert.ok(surface.includes("scripts/test.sh"));
-  assert.ok(surface.includes("plugin/workflows/execute-suite-fix.js"));
+  // gap-delete-dead-execute-suite-fix-workflow (2026-10-07): the seam probe used to be the standalone
+  // suite-fix workflow, now deleted; any surviving plugin/workflows/*.js carrier proves the same thing.
+  assert.ok(surface.includes("plugin/workflows/fan-in-execute.js"));
   assert.ok(!surface.some((f) => f.includes("/test/")), "test dirs excluded");
 });
 
 // ── AC1: 扫描面显式枚举 plugin/workflows/ (可 grep 的清单, 非一个 glob 糊过去) ──────────────────────
 test("AC1: the scan surface EXPLICITLY enumerates plugin/workflows/ (single source)", () => {
   const surface = scanSurface(REPO_ROOT);
-  assert.ok(surface.includes("plugin/workflows/execute-suite-fix.js"), "the seam file must be in the surface");
+  assert.ok(surface.includes("plugin/workflows/fan-in-execute.js"), "the seam file must be in the surface");
   const surfaceSrc = fs.readFileSync(CHECKER, "utf8");
   assert.ok(surfaceSrc.includes('"plugin/workflows"'), "SCAN_ROOTS must name the plugin/workflows root explicitly");
 });

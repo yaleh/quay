@@ -467,8 +467,6 @@
   "plugin/test/driver-third-party-fixture.test.mjs": 7490,
   "plugin/test/dual-source-check.test.mjs": 336,
   "plugin/test/enum-surface-parity-check.test.mjs": 4466,
-  "plugin/test/execute-suite-fix-relaunch-snapshot.test.mjs": 538,
-  "plugin/test/execute-suite-fix-scope-gate.test.mjs": 1242,
   "plugin/test/execution-policy.test.mjs": 918,
   "plugin/test/external-dogfooding-check.test.mjs": 2073,
   "plugin/test/fan-in-driver-mechanical-orchestration.test.mjs": 22862,
