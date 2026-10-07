@@ -15,9 +15,9 @@ extra:
 
 ## Acceptance Criteria
 
-- [ ] `plugin/skills/init/SKILL.md` 里「下一步」的文字从 `/quay:cold-start` 改为 `/quay:drivers`
-- [ ] 改动后文字与 `plugin/skills/cold-start/SKILL.md` 自己声明的现役流程（`①install ②session ③/quay:init ④/quay:drivers ⑤/quay:manager`）一致
-- [ ] grep `plugin/skills/init/SKILL.md` 确认不再出现 `/quay:cold-start` 字面引用
+- [x] `plugin/skills/init/SKILL.md` 里「下一步」的文字从 `/quay:cold-start` 改为 `/quay:drivers`
+- [x] 改动后文字与 `plugin/skills/cold-start/SKILL.md` 自己声明的现役流程（`①install ②session ③/quay:init ④/quay:drivers ⑤/quay:manager`）一致
+- [x] grep `plugin/skills/init/SKILL.md` 确认不再出现 `/quay:cold-start` 字面引用
 
 ## Definition of Done
 
