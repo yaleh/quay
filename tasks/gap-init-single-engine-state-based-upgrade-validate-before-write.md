@@ -40,6 +40,7 @@ GOAL-029「init 统一为单一 TS 引擎、终局无 .sh;并收窄发布集合�
 - `packages/quay/test/init.test.mjs`
 - `packages/quay/test/config-validate.test.mjs`
 - `packages/quay/test/mcp-config-validate.test.mjs`
+- `packages/quay/test/branch-model.test.mjs`
 - `plugin/test/quay-init.test.mjs`
 - `plugin/test/quay-init-characterization.test.mjs`
 - `plugin/test/quay-init-config-env-keys.test.mjs`
@@ -74,6 +75,7 @@ GOAL-029「init 统一为单一 TS 引擎、终局无 .sh;并收窄发布集合�
 4. "AC2 reconcile: a config already current is NOT rewritten" → 改为两轮 init 后取字节基线(CLI 全新模板目前仍写退役键;fresh↔升级合流属 AC-331)。
 5. "AC2② …pure INSERTION" → "**…TARGETED edit (no re-dump)**":升级现在还删除退役键,故存活断言排除 path/mcp_entry 行并断言它们消失。
 6. AC10c "quay-native init refuses overwrite" → "**never clobbers**":见"偏差"——native CLI 的 Core 经裸说明符在 worktree 中解析到主检出,故写成两臂都成立(升级则保留用户内容 / 拒绝则零写入)。
+7. `packages/quay/test/branch-model.test.mjs`(**fan-in 全量 suite 报出的遗漏**;该文件原不在 `## Touches`,故 `--for-task` 的 scoped 面没选中它):"CLI: the config-free entry supersedes the config-exists refusal it shares a command with" → "**…supersedes the upgrade refusal…**"。该臂钉的是 plain init 对已有配置报 `already exists` 的**已退役契约**(GOAL-029 反转),故同一 fixture 上 plain init 现在走升级流水线、因用户值不兼容而 `upgrade REFUSED`(exit 1);`--branch-model-only` 不被该 refusal 捕获。原意图保留(仍是"config-free 入口不被 plain init 的守卫捕获"的**定序**回归臂),falsifiable:把 `runInit` 的 `branchModelOnly` 块移/落到升级流水线之后即红(已用 `false &&` mutation 实测变红)。已把该文件加入 `## Touches`。
 
 ### AC6
 `plugin/scripts/quay-init.sh` **未改动**(故免 sh-census 行数中性);`quay-init-closure-ratchet.ts --gate` → `PASS: … 3 files / 1022 bytes ≤ baseline 3 files / 1022 bytes`,`--check-stale` → `PASS … fingerprint fresh` ⇒ 无需 `--reanchor`。
@@ -99,3 +101,4 @@ git worktree add --detach /tmp/quay-v016 v0.16.0   # 临时,用完 remove
 - **CLI help 展示副本**:`quay init --help` 实际由 `packages/quay/src/cli/help.ts` 渲染(不在本任务 Touches),文案仍旧;`cli/init.ts` 内的副本已更新。help/README 对外面更新属 **AC-330**。
 - **native CLI 的 engine 解析**:`packages/quay-native/bin/quay-native.ts` 经裸说明符 `quay/init` 取 Core,在 worktree 中解析到**主检出**(node_modules 是主检出的软链)⇒ 本任务对该文件的 outcome 处理在 worktree 内不生效,合并进 develop 且主检出一致后生效;AC10c 因此写成两臂断言(精确契约由相对路径驱动 Core CLI 的 GOAL-029 测试钉住)。
 - **AC2 措辞与判据实际输入不符**:判据最后一段实际是 corrupt 分支(见"取假 F1"),故 F1 的可观测形态落在 GOAL-029③ 而非判据本身;已按实测如实记录。
+- **scoped 门漏选 `packages/quay/test/branch-model.test.mjs`**:原 `## Touches` 不含该文件 ⇒ `scripts/test.sh --for-task` 的 scoped 测试集不含它,AC6 的 scoped 绿对该文件**不构成证据**;该红是 fan-in 的**全量 suite**(8780 tests / 1 fail)报出的。已把该文件加入 `## Touches`,后续 scoped 门覆盖它。
