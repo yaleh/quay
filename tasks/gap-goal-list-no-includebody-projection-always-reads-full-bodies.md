@@ -39,6 +39,11 @@ quay-native 的 goal store 实现，留给实现时查证——这正是本任�
 是否有逐条额外开销）、还是别的原因，本任务未查证，留给实现时先做 profile 再动手（同一会话之前查 task list 时用了
 `node --cpu-prof`，这里应该先照做一次，不要直接假定"body 更大"就是唯一原因）。
 
+## Touches
+- `packages/quay/src/cli/goal.ts`
+- `packages/quay-native/src/store.ts`
+- `tasks/gap-goal-list-no-includebody-projection-always-reads-full-bodies.md`
+
 ## AC
 - [ ] 用 `node --cpu-prof` 或同等手段对 `goal list --json`（真实 store）做一次性能剖析，贴出耗时最高的几个函数/调用点，确认瓶颈具体在哪一层（Provider 调用本身 / frontmatter 解析 / body 解析 / `goalStalenessMark` 之类的逐条附加计算 / 其它），不要假设。
 - [ ] 核实 quay-native 的 goal store（Provider 实现）是否已有 `includeBody` 或等价的轻量投影能力但未被 `client.goalList` 使用，还是确实从 ABI 到 Provider 都不存在——把结论（存在but未接 / 完全不存在）写进完成记录，附具体文件/行号证据。
