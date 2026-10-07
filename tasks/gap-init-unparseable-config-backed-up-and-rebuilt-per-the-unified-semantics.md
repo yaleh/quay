@@ -115,3 +115,8 @@ $ (MCP stdio) tools/call init {root:<ws2>}      # 第二份损坏配置
 - `packages/quay-native/bin/quay-native.ts` **不在 Touches,未改**:其 `outcome === "corrupt"` 臂在统一语义下成为不可达的防御臂,重建路径落在它的默认臂(打印 `Created …` + `corruptReason`)。native CLI 的收口归 AC-331/AC-332。
 - `plugin/scripts/quay-init.sh` 的 shell 升级路径(`reconcileConfigFile`)语义未改(仍报 NOT-EVALUATED,交给 `quay init` salvage),只把它提示里的 `quay init --reconcile` 改成 `quay init`(`--reconcile` 已 legacy/inert)。`plugin/test/quay-init.test.mjs`(18/18 绿)未改,断言(NOT-EVALUATED、字节不动)继续成立。
 - `--force` / `--reconcile` 两个 flag 仍在(本任务不删;删除归在途的 gap-init-surface-unified…/AC-330)。
+
+
+### 勘误（2026-10-07，本记录自查）
+
+上文 AC4 括号里「(补 `## Test-Files` 后 init.test.mjs 与 plugin/test/quay-init.test.mjs 被选入)」的**因果说法不准确**：实测 `node plugin/scripts/select-tests-for-touches.ts --root <wt> --task <id> --paths-only --allow-thin` 显示这两个文件**在补 `## Test-Files` 之前就已由 `## Touches` 里的具体路径被选入**——两次 scoped 运行的 `tests 183 / pass 183 / fail 0` 完全一致，且**首次运行已包含新增的 `REBUILD …` 用例**。`## Test-Files` 只是按兄弟任务的约定补上的显式声明，不是入选的原因。AC4 的判据（退出 0 且执行 ≥1 个测试文件）两次运行都成立。
