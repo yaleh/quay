@@ -8,7 +8,7 @@ import { parseFlags, resolveJsonFlag } from "./shared.ts";
 // handler's and help.ts's — used to carry byte-identical copies of these sentences, so every edit
 // had to be made twice and the two could drift apart silently.
 import { INIT_BRANCH_MODEL_ONLY_PROSE, INIT_DOC_BRANCH_NO_DEFAULT_PROSE } from "./help.ts";
-import { runInit, printNextSteps, buildInitReport } from "../init.ts";
+import { runInit, printNextSteps, buildInitReport, printInstallSteps } from "../init.ts";
 import {
   ensureDocBranch,
   formatBaselineCheckoutReport,
@@ -37,6 +37,15 @@ const KNOWN_INIT_FLAGS: ReadonlySet<string> = new Set([
   "plugin-root",
   "json",
   "format",
+  // AC-331 — the PROJECT-DERIVED `loop:` values the shipped shell entry used to supply.
+  "repo-root",
+  "test-command",
+  "tmux-session",
+  "worktree-root",
+  // AC-331 — the optional post-write auto-commit of the closed-set paths.
+  "auto-commit-config",
+  "auto-commit-confirm",
+  "auto-commit-skip",
 ]);
 
 // DIR-098: quay init — scaffold a new workspace (.quay/config.yml + tasks/ dir).
@@ -101,6 +110,26 @@ Flags:
                config-exists refusal does not apply). Exits 1 when the landing
                baseline is divergent and no adoption was requested.
   --root <path>  Scaffold at <path> instead of the current working directory.
+  --repo-root <path>
+               The repo root the loop's fan-in operates on (loop.repo_root). Default: the target
+               root, or the target's existing value on an upgrade.
+  --test-command <cmd>
+               The target project's test command (loop.test_command). Default: the target's existing
+               value, else DETECTED from scripts/test.sh → package.json scripts.test → go.mod →
+               Cargo.toml. When nothing can be detected the run FAILS CLOSED (exit 2, nothing
+               written) rather than guessing.
+  --tmux-session <name>
+               Pin loop.tmux_session. Default: the target's existing value, else a BEST-EFFORT
+               detection by project name; zero or several matches leave it null (tmux is optional —
+               a guessed session name would make a monitor report a LIVE loop as gone).
+  --worktree-root <path>
+               Where per-task worktrees are created. Default: a sibling of repo_root. A root on
+               tmpfs FAILS CLOSED (that is RAM, not disk).
+  --auto-commit-config
+               After the write, stage ONLY the closed-set paths and commit them as
+               \"chore(quay-init): ...\". Without it a non-interactive run DECLINES (it never sweeps a
+               working tree it did not create). --auto-commit-confirm / --auto-commit-skip are the
+               shipped shell entry's spellings of the same decision.
 
 Description:
   Creates .quay/config.yml (with all 3 sections: providers, gates, loop) and
@@ -229,8 +258,47 @@ Description:
   // `LEGAL_IDENTITY_VALUES`).
   const docBranchName = typeof initFlags["doc-branch-name"] === "string" ? initFlags["doc-branch-name"] : undefined;
 
+  // ── AC-331: the project-derived `loop:` values + the optional auto-commit ────────────────────────
+  // Explicit flags win; absent ⇒ the target's existing value, else detection / the documented default
+  // (all four resolutions live in init.ts, one implementation).
+  const repoRoot = typeof initFlags["repo-root"] === "string" ? initFlags["repo-root"] : undefined;
+  const testCommand = typeof initFlags["test-command"] === "string" ? initFlags["test-command"] : undefined;
+  const tmuxSession = typeof initFlags["tmux-session"] === "string" ? initFlags["tmux-session"] : undefined;
+  const worktreeRoot = typeof initFlags["worktree-root"] === "string" ? initFlags["worktree-root"] : undefined;
+  // `--auto-commit-config` is the canonical name; the shipped shell entry's `--auto-commit-confirm` /
+  // `--auto-commit-skip` are accepted as the SAME decision, so the two surfaces take the same inputs.
+  const autoCommitConfig: "yes" | "no" | "prompt" =
+    initFlags["auto-commit-config"] === true || initFlags["auto-commit-confirm"] === true
+      ? "yes"
+      : initFlags["auto-commit-skip"] === true
+        ? "no"
+        : "prompt";
+
   try {
-    const result = runInit({ root: targetRoot, dryRun, dropIncompatible, pluginRoot, adoptBranchModel, branchModelOnly, project, log: say });
+    // The closed set this run is responsible for — printed up front so the report's own lines have a
+    // referent (the shipped shell entry's banner).
+    if (!json && !branchModelOnly) {
+      say("  closed set: .quay/config.yml, .quay/profiles.yml, tasks/, goals/, .gitignore, .claude/launch.settings.json, .claude/settings.json");
+    }
+    const result = runInit({
+      root: targetRoot,
+      dryRun,
+      dropIncompatible,
+      pluginRoot,
+      adoptBranchModel,
+      branchModelOnly,
+      project,
+      log: say,
+      repoRoot,
+      testCommand,
+      tmuxSession,
+      worktreeRoot,
+      autoCommitConfig,
+      // AC-331: the CLI must lay the WHOLE closed set alone, and the `.quay/plugin` link is part of it.
+      // The fresh arm (no existing link) may therefore point at a source checkout; an existing link is
+      // still left untouched and reported NOT-EVALUATED (the 2026-10-06 ruling). See runInit.
+      allowSourceCheckoutLink: true,
+    });
 
     // The ONE report (AC-330): `--json` prints exactly this, and the MCP `init` tool returns it
     // verbatim. Emitting it BEFORE the human branches (each of which returns early) is what makes the
@@ -304,6 +372,20 @@ Description:
       // Fail-closed on a real refusal (a name collision) or a failed mutation; a dry run only
       // reports, and an unreadable HEAD is NOT a failure (hard rule 3b).
       if (!docBranch.ok && !dryRun) process.exitCode = 1;
+      return;
+    }
+
+    // ── AC-331: a fail-closed project-value resolution, or a mid-write abort ────────────────────────
+    // Both carry the per-item closed-set state so "initialized half-way" stays distinguishable from
+    // "not initialized" (硬规则 3b, write side). The real cause is printed verbatim.
+    if (result.outcome === "project-values-unresolved" || result.outcome === "write-failed") {
+      if (result.failureReason) console.error(`quay init: ${result.failureReason}`);
+      for (const d of result.failureDetail ?? []) console.error(`  ${d}`);
+      if (result.closedSetState) {
+        console.error("quay-init FAILED — closed-set write state:");
+        for (const e of result.closedSetState) console.error(`  ${e.state}: ${e.item}`);
+      }
+      process.exitCode = result.outcome === "project-values-unresolved" ? 2 : 1;
       return;
     }
 
@@ -426,6 +508,8 @@ Description:
       say(`# Would create: ${result.launchSettingsPath}`);
       say(`# Would create: ${result.profilesPath}`);
       say(`# ${result.branchModelReport}`);
+      say(`  auto-commit: SKIP (--dry-run — nothing was written)`);
+      if (!json) say(printInstallSteps());
       return;
     }
 
@@ -450,6 +534,15 @@ Description:
     say(`Created ${result.launchSettingsPath}`);
     say(`Created ${result.profilesPath}`);
     say(result.branchModelReport);
+    // ── AC-331: the fresh install's own reporting ───────────────────────────────────────────────
+    // The auto-commit reading is enumerated (committed / skipped / declined / not-a-repo) and its
+    // detail line names WHAT happened — a decline goes to stderr (the shipped shell entry's own
+    // channel) so a script reading stdout never mistakes "declined" for "committed".
+    if (result.autoCommit) {
+      const sink = json || result.autoCommit.state === "declined" ? process.stderr : process.stdout;
+      sink.write(`  auto-commit: ${result.autoCommit.detail}\n`);
+    }
+    if (result.installSteps && !json) say(result.installSteps);
     if (!json) printNextSteps("native", result.tasksDir);
   } catch (err) {
     console.error(`quay init: ${err instanceof Error ? err.message : String(err)}`);

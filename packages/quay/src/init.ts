@@ -9,6 +9,7 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { createHash } from "node:crypto";
+import { execFileSync } from "node:child_process";
 import YAML from "yaml";
 import { ensureBranchModel, formatBranchModelReport, type BranchModelReport } from "./branch-model.ts";
 // The ONE regex-literal escaper (kernel leaf). This file used to inline the escape body at the
@@ -19,7 +20,7 @@ import { escapeRegExp } from "./kernel/regex-escape.ts";
 // The ONE plugin-tree resolver (gap-project-quay-pointer-is-init-plugin-root-and-version-records-
 // derive-from-it): the project link's source-checkout guard reuses `isPluginSourceCheckout` so the
 // "is this an install or a working tree" judgment cannot fork into two spellings.
-import { isPluginSourceCheckout } from "./plugin-root.ts";
+import { isPluginSourceCheckout, resolvePluginRoot } from "./plugin-root.ts";
 // The ONE binding judge (gap-config-validate-requires-mcp-entry-contradicts-native-default-resolver):
 // `verify_provider_runtime_existence`'s reader resolves the native provider's runtime file through
 // the SAME function the runtime and the validator use, so an omitted binding is verified (from the
@@ -650,6 +651,34 @@ export interface InitResult {
   validated: boolean | "not-evaluated";
   /** The validator's errors when `validated === false` — never silently dropped. */
   validationIssues?: ConfigIssue[];
+  /**
+   * On a run that FAILED (a pre-write fail-closed gate, or a mid-write abort): the state of every
+   * closed-set item, measured against a snapshot taken BEFORE this run touched anything. This is what
+   * keeps "initialized half-way" distinguishable from both "not initialized" and "already initialized
+   * before this run" (硬规则 3b — the write-side mirror). Absent on a successful run.
+   */
+  closedSetState?: ClosedSetStateEntry[];
+  /** On a fail-closed run: the REAL cause (a missing test command, a tmpfs worktree root, …). */
+  failureReason?: string;
+  /** The remedy lines that accompany `failureReason` — printed verbatim, never re-derived. */
+  failureDetail?: string[];
+  /** What the optional auto-commit step did (AC: `--auto-commit-config`). */
+  autoCommit?: AutoCommitReading;
+  /** The explicit install-steps text a fresh install prints (`printInstallSteps`). */
+  installSteps?: string;
+}
+
+/** One closed-set item's state, measured against the pre-write snapshot. */
+export interface ClosedSetStateEntry {
+  item: string;
+  state: "written" | "pre-existing" | "unwritten" | "unreadable";
+}
+
+/** The auto-commit step's reading — enumerated, never a boolean (硬规则 3b). */
+export interface AutoCommitReading {
+  state: "committed" | "skipped" | "declined" | "not-a-repo";
+  files: string[];
+  detail: string;
 }
 
 /**
@@ -735,6 +764,35 @@ export interface InitOptions {
    * projects).
    */
   branchModelOnly?: boolean;
+  /**
+   * The four PROJECT-DERIVED `loop:` values, explicit (the CLI's `--repo-root` / `--test-command` /
+   * `--tmux-session` / `--worktree-root`). Each is OPTIONAL: absent ⇒ the target's existing config
+   * value wins, else detection / the documented default. Ported from the shipped shell entry so the
+   * CLI can complete a full fresh install alone (AC-331).
+   */
+  repoRoot?: string;
+  testCommand?: string;
+  tmuxSession?: string;
+  worktreeRoot?: string;
+  /**
+   * `--auto-commit-config` / `--auto-commit-confirm` / `--auto-commit-skip`: what the post-write
+   * auto-commit step should do with the closed-set paths.
+   *   "yes"    — stage ONLY those paths and commit (`chore(quay-init): …`);
+   *   "no"     — skip, leave the working tree as it is;
+   *   "prompt" (default) — the shipped shell entry's interactive arm: an interactive stdin may answer,
+   *                        a NON-interactive one DECLINES (never sweeps a user's uncommitted work).
+   */
+  autoCommitConfig?: "yes" | "no" | "prompt";
+  /**
+   * Allow the `.quay/plugin` guidance link to point at a SOURCE CHECKOUT (the dev tree) when the
+   * target has NO link yet. ⛔ Default false: on an EXISTING project a source-checkout root must leave
+   * the link untouched and report NOT-EVALUATED (gap-project-quay-pointer-is-init-plugin-root-and-
+   * version-records-derive-from-it (A)) — a working tree is not an install, and silently re-pointing
+   * a project at one would freeze it to uncommitted state. The FRESH-install arm is the one case where
+   * nothing is being preserved and the closed set would otherwise be incomplete (AC-331 requires the
+   * link), so the caller opts in explicitly.
+   */
+  allowSourceCheckoutLink?: boolean;
 }
 
 // These strings contain characters that confuse Node 26's TypeScript parser
@@ -788,8 +846,21 @@ export function mcpEntryForProvider(providerPath: string): string {
  * Generate the full .quay/config.yml content with all 3 sections and inline
  * documentation for every supported field.
  */
-export function generateConfigContent(opts: { providerId: string; providerPath: string; isNode: boolean; isGo: boolean }): string {
+export function generateConfigContent(opts: {
+  providerId: string;
+  providerPath: string;
+  isNode: boolean;
+  isGo: boolean;
+  /**
+   * The four PROJECT-DERIVED `loop:` values (repo_root / test_command / tmux_session /
+   * worktree_root). Omitted ⇒ only the version-level defaults are emitted (the shape an upgrade
+   * candidate starts from); supplied ⇒ the fresh install writes them, which is what makes the CLI
+   * able to lay the whole closed set alone (AC-331).
+   */
+  values?: ProjectLoopValues;
+}): string {
   const { providerId, providerPath, isNode, isGo } = opts;
+  const values = opts.values;
 
   // Build gate suggestions based on project type.
   const gateSuggestions = buildGateSuggestions({ isNode, isGo });
@@ -924,6 +995,24 @@ export function generateConfigContent(opts: { providerId: string; providerPath: 
     "#       probe: <name>           (DIR-056) probe-spec name",
     "#",
     "loop:",
+    // ── The four PROJECT-DERIVED values, emitted FIRST so `loop.repo_root` is the section's first key
+    //    (the shipped shell writer's shape, and what the fresh-install readers expect to find up top).
+    //    ⛔ Only present when `values` was supplied: an upgrade candidate starts from version defaults
+    //    alone, because the user's own project values are already in their config and must win.
+    ...(values
+      ? [
+        `  repo_root: ${versionDefaultLine(values.repoRoot)}`,
+        "  # quay's mechanical fan-in runs this project's test entrypoint with its own value-taking flags",
+        "  # (--buckets / --root / --state-dir / --runner / --log-file / --run-id, plus --test-concurrency=N).",
+        "  # If you ship scripts/test.sh, it MUST consume such a flag together with its VALUE (shift 2) and",
+        "  # MUST NOT read a flag's value as a positional test-file argument — otherwise every fan-in round",
+        "  # reds with \"Could not find '<value>'\" and burns a whole worker session. Full contract:",
+        "  # plugin/skills/init/SKILL.md, section \"loop.test_command contract\".",
+        `  test_command: ${versionDefaultLine(values.testCommand)}`,
+        `  tmux_session: ${values.tmuxSession === null ? "null" : versionDefaultLine(values.tmuxSession)}`,
+        `  worktree_root: ${versionDefaultLine(values.worktreeRoot)}`,
+      ]
+      : []),
     // EVERY default in this section — `board` and `gates` included — is EMITTED FROM THE SAME TABLE
     // the reconcile fills from (`LOOP_VERSION_DEFAULTS`) rather than re-typed here. Two hand-kept
     // copies of one list is the defect this whole change exists to remove: a fresh workspace must not
@@ -1039,6 +1128,204 @@ export function detectProjectType(root: string): { isNode: boolean; isGo: boolea
  */
 export function detectProvider(): string {
   return "native";
+}
+
+// ════════════════════════════════════════════════════════════════════════════════════════════════════
+// Project-value DETECTION — the four `loop:` values that depend on the TARGET project (never on the
+// quay version). Ported from `plugin/scripts/quay-init.sh`'s `detect_test_command` /
+// `detect_tmux_session` / `validate_worktree_root` so the CLI can complete a fresh install alone
+// (gap-init-cli-lays-full-closed-set-and-detects-project-values-without-the-shell-script / AC-331).
+//
+// ⛔ These are NOT version-level defaults: `LOOP_VERSION_DEFAULTS` holds constants only, and a
+// constant invented for a project-derived value would write a confidently wrong value into a user's
+// config — strictly worse than leaving it out (that table's own header says so).
+// ════════════════════════════════════════════════════════════════════════════════════════════════════
+
+/**
+ * The target project's test command — the CONFIG-PRESERVING ladder the shipped shell entry uses, first
+ * match wins:
+ *   scripts/test.sh             → "bash scripts/test.sh"   (quay's own convention)
+ *   package.json scripts.test   → "npm test"               (non-blank; an unreadable/odd package.json
+ *                                                           is a MISS, never a crash)
+ *   go.mod                      → "go test ./..."
+ *   Cargo.toml                  → "cargo test"
+ * Returns null when nothing is detected. The caller FAILS CLOSED on null — this never guesses.
+ */
+export function detectTestCommand(root: string): string | null {
+  if (fs.existsSync(path.join(root, "scripts", "test.sh"))) return "bash scripts/test.sh";
+  if (fs.existsSync(path.join(root, "package.json")) && hasNpmTestScript(path.join(root, "package.json"))) {
+    return "npm test";
+  }
+  if (fs.existsSync(path.join(root, "go.mod"))) return "go test ./...";
+  if (fs.existsSync(path.join(root, "Cargo.toml"))) return "cargo test";
+  return null;
+}
+
+/**
+ * The detected tmux session for `project`, by NAME PREFIX (`<project>` or `<project>-*`) over
+ * `tmux list-sessions`. Three-state, never a guess folded into a match (硬规则 3b):
+ *   `unique`   — exactly one session matched (`session` is its name);
+ *   `multiple` — several matched (`matches` lists them all) — the caller leaves `loop.tmux_session`
+ *                null rather than picking one;
+ *   `none`     — tmux absent, or nothing matched.
+ * ⛔ A GUESSED session name only works for the project it was written for, and a monitor aimed at a
+ * nonexistent session reports a LIVE inner as GONE — the false-negative this detection exists to kill
+ * (gap-init-guesses-the-tmux-session).
+ */
+export function detectTmuxSession(project: string): { state: "unique" | "none" | "multiple"; session: string | null; matches: string[] } {
+  let out = "";
+  try {
+    out = execFileSync("tmux", ["list-sessions", "-F", "#{session_name}"], {
+      encoding: "utf8",
+      stdio: ["ignore", "pipe", "ignore"],
+    });
+  } catch {
+    return { state: "none", session: null, matches: [] };
+  }
+  const matches = out
+    .split("\n")
+    .map((l) => l.trim())
+    .filter((l) => l !== "" && (l === project || l.startsWith(`${project}-`)));
+  if (matches.length === 1) return { state: "unique", session: matches[0]!, matches };
+  if (matches.length > 1) return { state: "multiple", session: null, matches };
+  return { state: "none", session: null, matches: [] };
+}
+
+/**
+ * FAIL-CLOSED judge of a worktree root: `/tmp` (and any tmpfs) is RAM, not disk, and the 2026-08-04
+ * machine-wide OOM traced straight to in-flight worktrees living in it
+ * (gap-the-shipped-tick-doc-teaches-every-project-to-put-worktrees-in-tmpfs). The root itself may not
+ * exist yet, so the NEAREST EXISTING ANCESTOR is the one stat-ed.
+ *
+ * Returns the probed path and its filesystem type so the caller can name both in the refusal (the
+ * message must say WHY and WHAT TO DO — an unexplained refusal sends the operator guessing).
+ */
+export function validateWorktreeRoot(root: string): { ok: boolean; probe: string; fsType: string } {
+  let probe = root;
+  while (!fs.existsSync(probe) && probe !== path.dirname(probe)) probe = path.dirname(probe);
+  let fsType = "unknown";
+  try {
+    fsType = execFileSync("stat", ["-f", "-c", "%T", probe], { encoding: "utf8", stdio: ["ignore", "pipe", "ignore"] }).trim();
+  } catch {
+    fsType = "unknown";
+  }
+  return { ok: fsType !== "tmpfs", probe, fsType };
+}
+
+/** The four project-derived `loop:` values a fresh install (or an upgrade) writes. */
+export interface ProjectLoopValues {
+  repoRoot: string;
+  testCommand: string;
+  tmuxSession: string | null;
+  worktreeRoot: string;
+}
+
+/**
+ * Why a project-value resolution could not produce a usable set — surfaced verbatim (硬规则 3b: the
+ * CLI must print the REAL cause, not a generic refusal).
+ */
+export interface ProjectValueFailure {
+  reason: string;
+  /** Extra operator-facing lines (the remedy), printed under the reason. */
+  detail: string[];
+}
+
+/**
+ * Resolve the four project-derived `loop:` values with the SHELL ENTRY's precedence — an EXPLICIT
+ * parameter wins, else the target's existing `loop:` value (config-preserving upgrade), else
+ * detection / the documented default. `repo_root` defaults to the workspace root; `worktree_root`
+ * defaults to a sibling of `repo_root` and is validated (tmpfs ⇒ fail closed).
+ *
+ * Returns `{ ok: false }` with the real cause when the test command cannot be resolved — the caller
+ * must fail closed BEFORE writing anything (a workspace whose fan-in command is wrong is worse than
+ * an uninitialized one).
+ */
+export function resolveProjectLoopValues(
+  root: string,
+  configPath: string,
+  explicit: { repoRoot?: string; testCommand?: string; tmuxSession?: string; worktreeRoot?: string },
+  log?: (line: string) => void,
+): { ok: true; values: ProjectLoopValues } | { ok: false; failure: ProjectValueFailure } {
+  const say = log ?? ((l: string) => console.log(l));
+
+  // repo_root: explicit → existing → the workspace root.
+  let repoRoot = explicit.repoRoot && explicit.repoRoot !== "" ? explicit.repoRoot : readExistingLoopValue(configPath, "repo_root");
+  if (repoRoot === "") repoRoot = root;
+
+  // test_command: explicit → existing → detection → FAIL CLOSED.
+  let testCommand = explicit.testCommand && explicit.testCommand !== "" ? explicit.testCommand : readExistingLoopValue(configPath, "test_command");
+  if (testCommand !== "") {
+    say(
+      explicit.testCommand && explicit.testCommand !== ""
+        ? `  using explicit --test-command: ${testCommand}`
+        : `  using existing config loop.test_command: ${testCommand} (config-preserving upgrade — explicit --test-command overrides)`,
+    );
+  }
+  if (testCommand === "") {
+    const detected = detectTestCommand(root);
+    if (detected === null) {
+      return {
+        ok: false,
+        failure: {
+          reason: `quay init needs the target project's test command but none could be detected in ${root}.`,
+          detail: [
+            "Searched: scripts/test.sh → package.json scripts.test → go.mod → Cargo.toml.",
+            "Pass --test-command <cmd> explicitly.",
+          ],
+        },
+      };
+    }
+    testCommand = detected;
+    say(`  detected test command: ${testCommand} (from the target project — confirm this is correct)`);
+  }
+
+  // tmux_session: OPTIONAL since the outer/inner dual-tmux model retired. explicit → existing →
+  // best-effort detection; zero/ambiguous matches leave NULL (never a guess, never a hard failure).
+  let tmuxSession: string | null;
+  if (explicit.tmuxSession && explicit.tmuxSession !== "") {
+    tmuxSession = explicit.tmuxSession;
+    say(`  using explicit --tmux-session: ${tmuxSession}`);
+  } else {
+    const existing = readExistingLoopValue(configPath, "tmux_session");
+    if (existing !== "" && existing !== "null") {
+      tmuxSession = existing;
+      say(`  using existing config loop.tmux_session: ${tmuxSession} (config-preserving upgrade — explicit --tmux-session overrides)`);
+    } else {
+      const project = path.basename(root);
+      const detected = detectTmuxSession(project);
+      if (detected.state === "unique") {
+        tmuxSession = detected.session;
+        say(`  detected tmux session: ${tmuxSession} (matching project '${project}' — confirm this is correct)`);
+      } else {
+        tmuxSession = null;
+        if (detected.state === "multiple") {
+          say(`  note: multiple tmux sessions match project '${project}' — loop.tmux_session left null (tmux is optional; pass --tmux-session to pin one)`);
+        } else {
+          say(`  note: no tmux session detected for project '${project}' — loop.tmux_session left null (tmux is optional; SPEC-tmux-retirement-2026-09-03)`);
+        }
+      }
+    }
+  }
+
+  // worktree_root: explicit → existing → a sibling of repo_root. Validated (tmpfs ⇒ fail closed).
+  let worktreeRoot = explicit.worktreeRoot && explicit.worktreeRoot !== "" ? explicit.worktreeRoot : readExistingLoopValue(configPath, "worktree_root");
+  if (worktreeRoot === "") worktreeRoot = `${repoRoot}/../${path.basename(repoRoot)}-worktrees`;
+  const wt = validateWorktreeRoot(worktreeRoot);
+  if (!wt.ok) {
+    return {
+      ok: false,
+      failure: {
+        reason: `worktree root '${worktreeRoot}' is on tmpfs ('${wt.probe}' is tmpfs) — this is memory, not disk.`,
+        detail: [
+          "Every worktree under it consumes RAM; the 2026-08-04 machine-wide OOM traced straight to it.",
+          `Change it to a real disk path — e.g. '${repoRoot}/../${path.basename(repoRoot)}-worktrees', or pass --worktree-root.`,
+        ],
+      },
+    };
+  }
+  say(`  worktree root: ${worktreeRoot} (filesystem: ${wt.fsType} — not tmpfs, OK)`);
+
+  return { ok: true, values: { repoRoot, testCommand, tmuxSession, worktreeRoot } };
 }
 
 /**
@@ -1226,6 +1513,47 @@ export function runInit(opts: InitOptions): InitResult {
     };
   }
 
+  // ── The PROJECT-DERIVED `loop:` values (AC-331) ──────────────────────────────────────────────
+  // Resolved for EVERY non-branch-model mode — fresh AND upgrade — exactly as the shipped shell entry
+  // does: an explicit parameter wins, else the target's existing value, else detection / the
+  // documented default. A missing TEST COMMAND fails closed BEFORE anything is written: a workspace
+  // whose fan-in command is wrong is worse than an uninitialized one, and the report must name the
+  // real cause (硬规则 3b) rather than quietly proceeding without it.
+  const preWriteSnapshot = snapshotClosedSet(root);
+  const say = opts.log ?? ((l: string) => console.log(l));
+  const projectValues = resolveProjectLoopValues(
+    root,
+    configPath,
+    {
+      repoRoot: opts.repoRoot,
+      testCommand: opts.testCommand,
+      tmuxSession: opts.tmuxSession,
+      worktreeRoot: opts.worktreeRoot,
+    },
+    say,
+  );
+  if (!projectValues.ok) {
+    return {
+      outcome: "project-values-unresolved",
+      configState: existing.state,
+      configPath,
+      tasksDir,
+      content: "",
+      launchSettingsPath,
+      launchSettingsContent: "",
+      profilesPath,
+      profilesContent: "",
+      branchModel: { ok: true, skipped: true, defaultBranch: null, entries: [], remedy: null },
+      branchModelReport: "",
+      pluginLink: { state: "not-run", reason: "init refused before the link step (nothing was written)" },
+      validated: "not-evaluated",
+      failureReason: projectValues.failure.reason,
+      failureDetail: projectValues.failure.detail,
+      closedSetState: closedSetReport(root, preWriteSnapshot),
+    };
+  }
+  const values = projectValues.values;
+
   // ── What does the target already have? (three-state — AC1; not `fs.existsSync`) ────────────────
   const existing = classifyConfig(configPath);
 
@@ -1372,7 +1700,7 @@ export function runInit(opts: InitOptions): InitResult {
   // carry) therefore writes NOTHING: the corrupt original and its backup are kept and the failure is
   // named (硬规则 3b — "could not produce a valid config" is its own outcome, never a silent
   // "written").
-  let content = generateConfigContent({ providerId, providerPath, isNode, isGo });
+  let content = generateConfigContent({ providerId, providerPath, isNode, isGo, values });
   if (isRebuild) {
     const fixpoint = upgradeConfigContent(content, {
       workspaceRoot: root,
@@ -1398,6 +1726,7 @@ export function runInit(opts: InitOptions): InitResult {
         pluginLink: { state: "not-run", reason: "the rebuild was refused before the link step (nothing was written)" },
         validated: false,
         validationIssues: fixpoint.issues,
+        closedSetState: closedSetReport(root, preWriteSnapshot),
       };
     }
     content = fixpoint.content;
@@ -1407,9 +1736,7 @@ export function runInit(opts: InitOptions): InitResult {
   // `validated` field is a real reading rather than a claim. (The upgrade path judges its candidate
   // inside `upgradeConfigContent`; a REBUILD's candidate was judged by the fixpoint above — the same
   // validator over the same text, so this reading agrees by construction, and the `rebuild-invalid`
-  // arm above is where a failure is carried.) A failure on the FRESH path is REPORTED, not written
-  // over: closing the fresh-install write path is AC-331's job, and silently refusing here would be a
-  // second, unseen policy. The issues ride on `validationIssues` either way.
+  // arm above is where a failure is carried.)
   const freshVerdict = validateConfigText({ text: content, workspaceRoot: root, pluginRoot: opts.pluginRoot ?? undefined });
 
   if (opts.dryRun) {
@@ -1432,32 +1759,100 @@ export function runInit(opts: InitOptions): InitResult {
     };
   }
 
-  // Write config. The backup lands FIRST (and only now, past every gate): between the copy and the
-  // rebuild there is no window in which the original is gone.
-  if (isRebuild && corruptBackupPath) fs.copyFileSync(configPath, corruptBackupPath);
-  fs.mkdirSync(quayDir, { recursive: true });
-  writeFileAtomic(configPath, content);
+  // ── The WRITE section ────────────────────────────────────────────────────────────────────────
+  // Everything below MUTATES the target, so it is wrapped: a mid-write abort (a `.claude` FILE where a
+  // directory is needed, a permission error) must be reported with the per-item closed-set state —
+  // "initialized half-way" must stay distinguishable from "not initialized" (硬规则 3b, write side).
+  const goalsDir = path.join(root, "goals");
+  const settingsPath = path.join(root, ".claude", "settings.json");
+  const pluginVersion = readPluginVersion(opts.pluginRoot);
+  const installStepsText = printInstallSteps();
+  let autoCommit: AutoCommitReading | undefined;
+  let pluginLink: PluginLinkOutcome = { state: "not-run", reason: "the run aborted before the link step" };
+  const gitignoreWarnings: string[] = [];
+  try {
+    // The backup lands FIRST (and only now, past every gate): between the copy and the rebuild there
+    // is no window in which the original is gone.
+    if (isRebuild && corruptBackupPath) fs.copyFileSync(configPath, corruptBackupPath);
+    fs.mkdirSync(quayDir, { recursive: true });
+    writeFileAtomic(configPath, content);
 
-  // Create tasks dir if it doesn't exist.
-  if (!fs.existsSync(tasksDir)) {
-    fs.mkdirSync(tasksDir, { recursive: true });
-  }
+    // .quay/profiles.yml (the profile carrier, AC154) — create-if-absent discipline. Written BEFORE
+    // the `.claude/*` files, in the shipped shell entry's order, so a `.claude` that cannot be
+    // created aborts AFTER the config surface is complete (the partial-state report must be truthful
+    // about WHICH items landed).
+    if (!fs.existsSync(profilesPath)) {
+      fs.mkdirSync(path.dirname(profilesPath), { recursive: true });
+      fs.writeFileSync(profilesPath, profilesContent, "utf8");
+    }
 
-  // Lay down .claude/launch.settings.json (with bypassPermissions) so a cold-start
-  // inner does not hit a permission prompt on its own loop scripts.
-  // ⛔ CREATE-IF-ABSENT, never overwrite (AC-330): the old `--force` clause is gone with the flag, so
-  // an existing file is the user's and is left alone. A stale copy is a thing to inspect, not a thing
-  // init silently clobbers — the same "preserve what you do not own" discipline the config follows.
-  if (!fs.existsSync(launchSettingsPath)) {
-    fs.mkdirSync(path.dirname(launchSettingsPath), { recursive: true });
-    fs.writeFileSync(launchSettingsPath, launchSettingsContent, "utf8");
-  }
+    // tasks/ + goals/ — the dual carrier the native provider's goal store needs.
+    if (!fs.existsSync(tasksDir)) fs.mkdirSync(tasksDir, { recursive: true });
+    if (!fs.existsSync(goalsDir)) fs.mkdirSync(goalsDir, { recursive: true });
 
-  // Lay down .quay/profiles.yml (the profile carrier, AC154) so quay-launch.sh can
-  // resolve launcher/model/--bare/-n/unset + flag-only params. Same create-if-absent discipline.
-  if (!fs.existsSync(profilesPath)) {
-    fs.mkdirSync(path.dirname(profilesPath), { recursive: true });
-    fs.writeFileSync(profilesPath, profilesContent, "utf8");
+    // .gitignore — the quay runtime rules (state inside AND outside `.quay/`).
+    const manifest = opts.pluginRoot ? path.join(opts.pluginRoot, "scripts", "quay-runtime-artifacts.txt") : null;
+    gitignoreWarnings.push(...ensureGitignore(root, { runtimeArtifactsManifest: manifest, log: say }).warnings);
+
+    // .claude/launch.settings.json (with bypassPermissions) so a cold-start inner does not hit a
+    // permission prompt on its own loop scripts. ⛔ CREATE-IF-ABSENT, never overwrite (AC-330): an
+    // existing file is the user's and is left alone.
+    if (!fs.existsSync(launchSettingsPath)) {
+      fs.mkdirSync(path.dirname(launchSettingsPath), { recursive: true });
+      fs.writeFileSync(launchSettingsPath, launchSettingsContent, "utf8");
+    }
+
+    // .claude/settings.json — project-level plugin enable + MCP pre-approval. Read-modify-write: an
+    // existing file keeps every unrelated key.
+    fs.mkdirSync(path.dirname(settingsPath), { recursive: true });
+    writeClaudeSettings(settingsPath, readPluginName(opts.pluginRoot));
+
+    // The `.quay/plugin` guidance link (AC-331): the CLI completes the closed set on its own.
+    // `allowSourceCheckout: true` is the FRESH arm only — there is no existing link to preserve, and a
+    // dev-tree run (the goal's own environment) would otherwise leave the closed set incomplete.
+    const resolvedPluginRoot = opts.pluginRoot
+      ?? (process.env.CLAUDE_PLUGIN_ROOT && process.env.CLAUDE_PLUGIN_ROOT !== "" ? process.env.CLAUDE_PLUGIN_ROOT : resolvePluginRoot());
+    // ⛔ The source-checkout opt-in applies ONLY when the target has NO link yet. An EXISTING link is
+    // the state the 2026-10-06 ruling protects (a working tree is not an install — re-pointing a
+    // project at one would freeze it to uncommitted state), so it is left untouched and reported
+    // NOT-EVALUATED no matter what the caller asked for.
+    let linkExists = false;
+    try {
+      linkExists = fs.lstatSync(path.join(quayDir, "plugin")).isSymbolicLink();
+    } catch {
+      linkExists = false;
+    }
+    pluginLink = resolvedPluginRoot
+      ? refreshProjectPluginLink({
+        wsRoot: root,
+        pluginRoot: resolvedPluginRoot,
+        dryRun: false,
+        log: say,
+        allowSourceCheckout: opts.allowSourceCheckoutLink === true && !linkExists,
+      })
+      : { state: "not-run", reason: "no plugin root could be resolved (CLAUDE_PLUGIN_ROOT / --plugin-root / module location)" };
+
+    autoCommit = autoCommitClosedSet(root, opts.autoCommitConfig ?? "prompt", pluginVersion);
+  } catch (err: unknown) {
+    return {
+      outcome: "write-failed",
+      configState: existing.state,
+      ...(isRebuild ? { corruptReason: existing.reason, corruptBackupPath } : {}),
+      configPath,
+      tasksDir,
+      content,
+      launchSettingsPath,
+      launchSettingsContent,
+      profilesPath,
+      profilesContent,
+      branchModel,
+      branchModelReport,
+      pluginLink: { state: "not-run", reason: "the run aborted mid-write" },
+      validated: freshVerdict.ok,
+      ...(freshVerdict.ok ? {} : { validationIssues: freshVerdict.issues }),
+      failureReason: err instanceof Error ? err.message : String(err),
+      closedSetState: closedSetReport(root, preWriteSnapshot),
+    };
   }
 
   return {
@@ -1475,9 +1870,12 @@ export function runInit(opts: InitOptions): InitResult {
     profilesContent,
     branchModel,
     branchModelReport,
-    pluginLink: { state: "not-run", reason: "the fresh-install path does not refresh the .quay/plugin link (the shell step owns it until AC-331)" },
+    pluginLink,
     validated: freshVerdict.ok,
     ...(freshVerdict.ok ? {} : { validationIssues: freshVerdict.issues }),
+    installSteps: installStepsText,
+    ...(autoCommit ? { autoCommit } : {}),
+    ...(gitignoreWarnings.length > 0 ? { failureDetail: gitignoreWarnings } : {}),
   };
 }
 
@@ -2162,6 +2560,13 @@ export interface ProjectPluginLinkOpts {
    * this step's reporting would corrupt the machine-readable output it promises.
    */
   log?: (line: string) => void;
+  /**
+   * Permit a SOURCE-CHECKOUT plugin root as the link target. ⛔ Default false, and that default is the
+   * 2026-10-06 ruling: a working tree is not an install, so an existing project's link is left
+   * untouched and the step reports NOT-EVALUATED. `true` is for the FRESH-install arm only — there is
+   * no link to preserve there, and the closed set would otherwise be incomplete (AC-331).
+   */
+  allowSourceCheckout?: boolean;
 }
 
 /**
@@ -2195,7 +2600,7 @@ export function refreshProjectPluginLink(o: ProjectPluginLinkOpts): ProjectPlugi
     if (!fs.existsSync(path.join(root, ".claude-plugin", "plugin.json"))) {
       return { state: "not-evaluated", reason: `${root} is not a quay plugin root (no .claude-plugin/plugin.json)` };
     }
-    if (isPluginSourceCheckout(root)) {
+    if (isPluginSourceCheckout(root) && o.allowSourceCheckout !== true) {
       return { state: "not-evaluated", reason: `${root} is a source checkout (dev tree), not an installed plugin` };
     }
     return { state: "linked", pluginRoot: root, version: readPluginRootVersion(root) };
@@ -2548,4 +2953,243 @@ export function writeClaudeSettings(dst: string, pluginName: string): void {
   const entry = `mcp__plugin_${pluginName}_${pluginName}__*`;
   if (!(allow as unknown[]).includes(entry)) (allow as unknown[]).push(entry);
   fs.writeFileSync(dst, JSON.stringify(data, null, 2) + "\n", "utf8");
+}
+
+// ════════════════════════════════════════════════════════════════════════════════════════════════════
+// Fresh-install completion (AC-331) — the parts of the shipped shell entry's closed-set write the CLI
+// used to leave to the script: the `goals/` dir, `.gitignore`, `.claude/settings.json`, the optional
+// auto-commit, the install-steps text, and the closed-set failure report.
+// ════════════════════════════════════════════════════════════════════════════════════════════════════
+
+/** The seven-item closed set (SPEC §6) — the exact relative paths a quay-init laydown may write. */
+export const CLOSED_SET_ITEMS: readonly string[] = [
+  ".quay/config.yml",
+  ".quay/profiles.yml",
+  "tasks",
+  "goals",
+  ".gitignore",
+  ".claude/launch.settings.json",
+  ".claude/settings.json",
+];
+
+/**
+ * Fingerprint ONE closed-set item for the failure report: `ABSENT` / `UNREADABLE` / a content hash.
+ * A DIRECTORY is hashed by its sorted entry listing (the exact granularity quay-init's only directory
+ * write — `mkdir -p` — can change); a FILE by its bytes. `UNREADABLE` is kept DISTINCT from `ABSENT`
+ * (硬规则 3b: "could not look" must not be reported with the shape of "not there").
+ */
+export function closedSetFingerprint(absPath: string): string {
+  try {
+    const st = fs.statSync(absPath);
+    if (st.isDirectory()) {
+      const entries = fs.readdirSync(absPath).slice().sort();
+      return createHash("sha256").update(entries.join("\n")).digest("hex");
+    }
+    return createHash("sha256").update(fs.readFileSync(absPath)).digest("hex");
+  } catch {
+    return fs.existsSync(absPath) ? "UNREADABLE" : "ABSENT";
+  }
+}
+
+/** Take the pre-write snapshot the failure report compares against. */
+export function snapshotClosedSet(root: string): Record<string, string> {
+  const snap: Record<string, string> = {};
+  for (const item of CLOSED_SET_ITEMS) snap[item] = closedSetFingerprint(path.join(root, item));
+  return snap;
+}
+
+/** Classify each closed-set item against the pre-write snapshot (the four-state vocabulary). */
+export function closedSetReport(root: string, before: Record<string, string>): ClosedSetStateEntry[] {
+  return CLOSED_SET_ITEMS.map((item) => {
+    const now = closedSetFingerprint(path.join(root, item));
+    let state: ClosedSetStateEntry["state"];
+    if (now === "UNREADABLE") state = "unreadable";
+    else if (now === "ABSENT") state = "unwritten";
+    else if (before[item] === now) state = "pre-existing";
+    else state = "written";
+    return { item, state };
+  });
+}
+
+/** Read the plugin's `name` from its manifest (the `.claude/settings.json` enable key's first half). */
+export function readPluginName(pluginRoot: string | null | undefined): string {
+  if (!pluginRoot) return "quay";
+  const name = readJsonField(path.join(pluginRoot, ".claude-plugin", "plugin.json"), "name", "quay");
+  return name === "" ? "quay" : name;
+}
+
+/** Read the plugin's `version` from its manifest (`unknown` when unreadable — never a guess). */
+export function readPluginVersion(pluginRoot: string | null | undefined): string {
+  if (!pluginRoot) return "unknown";
+  const v = readJsonField(path.join(pluginRoot, ".claude-plugin", "plugin.json"), "version", "unknown");
+  return v === "" ? "unknown" : v;
+}
+
+/** Lines of a manifest file, comments and blanks dropped. */
+function readManifestLines(p: string): string[] {
+  try {
+    return fs
+      .readFileSync(p, "utf8")
+      .split("\n")
+      .map((l) => l.trim())
+      .filter((l) => l !== "" && !l.startsWith("#"));
+  } catch {
+    return [];
+  }
+}
+
+/**
+ * Append the quay runtime ignore rules to `<root>/.gitignore` — idempotent, append-only, never
+ * rewriting or reordering the consumer's own content:
+ *   1. the `.quay/*` block (with the `config.yml`/`profiles.yml` negations, which stay tracked);
+ *   2. the runtime-artifact block, whose PATTERNS are READ from the single-source manifest
+ *      `plugin/scripts/quay-runtime-artifacts.txt` — the same file the fan-in's clean-tree judgment
+ *      and `gitignore-runtime-coverage-check.ts` bind to. Re-listing them here would re-create the
+ *      copy-that-drifted defect (硬规则 5b).
+ *
+ * Without (2) a consumer goes dirty on ANY task-store read (the parse cache, telemetry, event logs
+ * all live OUTSIDE `.quay/`), and the mechanical fan-in's `ff` then refuses for every task forever.
+ * A missing manifest is REPORTED, never silent.
+ */
+export function ensureGitignore(root: string, opts: { runtimeArtifactsManifest?: string | null; log?: (l: string) => void } = {}): { wrote: boolean; warnings: string[] } {
+  const say = opts.log ?? ((l: string) => console.log(l));
+  const gi = path.join(root, ".gitignore");
+  const warnings: string[] = [];
+  let wrote = false;
+
+  const existing = (): string => (fs.existsSync(gi) ? fs.readFileSync(gi, "utf8") : "");
+  const blockPresent = (header: string): boolean => existing().split("\n").some((l) => l.trim() === header);
+
+  const entries = [
+    "# quay runtime state (generated by the loop — .quay/config.yml + .quay/profiles.yml stay tracked)",
+    ".quay/*",
+    "!.quay/config.yml",
+    "!.quay/profiles.yml",
+  ];
+  if (!blockPresent(entries[0]!)) {
+    fs.appendFileSync(gi, entries.join("\n") + "\n", "utf8");
+    wrote = true;
+    say("  appended: .quay/* (+ negation for config.yml/profiles.yml) to .gitignore");
+  } else {
+    say("  skipped: .gitignore already carries .quay/*");
+  }
+
+  const RUNTIME_HEADER =
+    "# quay runtime artifacts outside .quay/ (written by quay itself; list = plugin/scripts/quay-runtime-artifacts.txt — do NOT hand-edit, add to that manifest)";
+  if (!opts.runtimeArtifactsManifest) {
+    warnings.push("runtime-artifact manifest path unknown — no quay runtime ignore rules written (a consumer project will go dirty on any task-store read)");
+    say(`  WARNING: ${warnings[warnings.length - 1]}`);
+    return { wrote, warnings };
+  }
+  const patterns = readManifestLines(opts.runtimeArtifactsManifest);
+  if (patterns.length === 0) {
+    warnings.push(`runtime-artifact manifest not found or empty at ${opts.runtimeArtifactsManifest} — no quay runtime ignore rules written`);
+    say(`  WARNING: ${warnings[warnings.length - 1]}`);
+    return { wrote, warnings };
+  }
+  if (blockPresent(RUNTIME_HEADER)) {
+    say("  skipped: .gitignore already carries the quay runtime-artifact block");
+    return { wrote, warnings };
+  }
+  const present = new Set(existing().split("\n").map((l) => l.trim()));
+  const lines = [RUNTIME_HEADER];
+  for (const p of patterns) if (!present.has(p)) lines.push(p);
+  fs.appendFileSync(gi, lines.join("\n") + "\n", "utf8");
+  wrote = true;
+  say(`  appended: quay runtime-artifact block (${patterns.length} pattern(s))`);
+  return { wrote, warnings };
+}
+
+/**
+ * The explicit install steps. `enabledPlugins` only toggles an ALREADY-INSTALLED plugin and an
+ * untrusted directory's project settings are not read at all, so "config committed ⇒ auto-installed"
+ * is FALSE (SPEC §6 T3). The text must say so, must carry the FULL single-`<source>` recipe (the
+ * two-arg form is rejected outright by the CLI), and must present `--scope` as the caller's choice
+ * rather than pushing `project` as the only correct value.
+ */
+export function printInstallSteps(): string {
+  return [
+    "",
+    "━━━ quay plugin install steps (explicit — config does NOT auto-install) ━━━",
+    "The files just written ENABLE the quay plugin for this project, but they DO NOT install it.",
+    "`enabledPlugins` only toggles an ALREADY-INSTALLED plugin, and an untrusted directory's project",
+    "settings are not read at all — so \"config committed => auto-installed\" is FALSE. Install it first:",
+    "",
+    "  # 1. register the PUBLISHED marketplace source — the github channel. The CLI takes exactly ONE",
+    "  #    <source> argument: `marketplace add <name> <source>` is rejected outright.",
+    "  claude plugin marketplace add yaleh/quay",
+    "",
+    "  # 2. install it, at the scope YOU choose (⛔ `claude plugin install` defaults to `user`, so pass",
+    "  #    --scope explicitly — but the VALUE is yours):",
+    "  #      --scope user     one version for every project on this machine; upgrade once, here",
+    "  #      --scope project  a per-project switch, version pinned in <cwd>/.claude/settings.json",
+    "  #      --scope local    this working copy only, not committed",
+    "  claude plugin install quay@quay --scope <user|project|local>",
+    "",
+    "  # (or the npm-global path: `npm install -g quay` — its register-plugin.mjs postinstall registers",
+    "  #  the marketplace source only; pass QUAY_PLUGIN_SCOPE=user|project|local to enable it in the same run)",
+    "  #",
+    "  # 3. UPGRADE LATER — IN PLACE, at the scope that already holds the record (⛔ never `uninstall`",
+    "  #    then `install --scope ...`: that replaces the record you have):",
+    "  #      claude plugin list --json | jq -r '.[] | select(.id==\"quay@quay\") | .scope' | sort -u",
+    "  #      claude plugin update quay@quay --scope <the scope just printed>",
+    "  #    then re-run /quay:init so `.quay/plugin` re-points at the new version's directory.",
+    "",
+    "  # 4. accept the trust dialog the FIRST time you enter this directory, then restart the session.",
+    "After that, the enabledPlugins block below takes effect (a restart is required to apply).",
+    "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━",
+    "",
+  ].join("\n");
+}
+
+/**
+ * `auto_commit_laid_down`: stage ONLY the closed-set paths and commit — so the enable propagates on
+ * clone. NEVER sweeps pre-existing changes: only the six laid-down paths are `git add`-ed, and an
+ * unrelated edit stays uncommitted. Non-interactive without `--auto-commit-config` DECLINES (a tool
+ * must not silently commit a working tree it did not create).
+ */
+export function autoCommitClosedSet(root: string, mode: "yes" | "no" | "prompt", pluginVersion: string): AutoCommitReading {
+  const git = (args: string[]): { ok: boolean; out: string } => {
+    try {
+      const out = execFileSync("git", ["-C", root, ...args], { encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] });
+      return { ok: true, out };
+    } catch (e: unknown) {
+      const err = e as { stdout?: string; stderr?: string };
+      return { ok: false, out: `${err.stdout ?? ""}${err.stderr ?? ""}` };
+    }
+  };
+  if (!git(["rev-parse", "--is-inside-work-tree"]).ok) {
+    return { state: "not-a-repo", files: [], detail: "SKIP (not a git repository — the laid-down files are not committed; init a repo or commit manually)" };
+  }
+  const status = git(["status", "--porcelain"]).out;
+  if (status.trim() === "") {
+    return { state: "skipped", files: [], detail: "nothing to commit (working tree clean)" };
+  }
+  if (mode === "no") {
+    return { state: "skipped", files: [], detail: "skipped as chosen — the laid-down files remain uncommitted" };
+  }
+  if (mode !== "yes" && !process.stdin.isTTY) {
+    return {
+      state: "declined",
+      files: [],
+      detail: "DECLINED (non-interactive — pass --auto-commit-config to commit, or --auto-commit-skip to skip)",
+    };
+  }
+  const paths = [".quay/config.yml", ".quay/profiles.yml", "tasks", "goals", ".gitignore", ".claude/launch.settings.json", ".claude/settings.json"];
+  for (const p of paths) {
+    if (fs.existsSync(path.join(root, p))) git(["add", "--", p]);
+  }
+  const staged = git(["diff", "--cached", "--name-only"]).out.split("\n").map((l) => l.trim()).filter(Boolean);
+  if (staged.length === 0) {
+    return { state: "skipped", files: [], detail: "nothing staged (all laid-down files are gitignored or already committed)" };
+  }
+  const commit = git(["commit", "-q", "-m", `chore(quay-init): initialize quay project files (plugin v${pluginVersion})`]);
+  if (!commit.ok) {
+    return {
+      state: "skipped",
+      files: staged,
+      detail: `ERROR: auto-commit failed (git commit returned non-zero). Configure git identity, then re-run init (idempotent) to commit. ${commit.out.trim()}`.trim(),
+    };
+  }
+  return { state: "committed", files: staged, detail: `committed ${staged.length} file(s) as chore(quay-init) (plugin v${pluginVersion})` };
 }
