@@ -290,10 +290,13 @@ test("AC5 — all six shipped workflows rewrite to ZERO env-var anchors and eval
     // 4 in the finding's artifact; 3 in the source after this change moved the meta phase-detail
     // mention to the literal token `<pluginRoot>/scripts/…` (a description, not a runnable reference).
     "pool-quality-judge.js": 3,
-    // 22 occurrences on 21 lines: the finding counted the published artifact, built with the real
-    // bundle predicate (one reference there is not a bundle entry); the unit-level rewrite with
-    // bundleExists=()=>true folds that one too.
-    "fan-in-execute.js": 22,
+    // 25 occurrences on 24 lines (re-measured for gap-fan-in-execute-semantic-fallback-telemetry-
+    // blind, which added two real `plugin/scripts/worker-driver.ts` invocations — the phase=start /
+    // phase=end --record-semantic-fallback writes — plus one AC3 rationale comment naming
+    // plugin/scripts/worker-fan-in.ts). The finding's original 22 counted the published artifact,
+    // built with the real bundle predicate (one reference there is not a bundle entry); the
+    // unit-level rewrite with bundleExists=()=>true folds that one too.
+    "fan-in-execute.js": 25,
     "execute-suite-fix.js": 3,
     "drain-directives.js": 0,
     "run-routines.js": 0,
@@ -341,7 +344,7 @@ test("AC4(task) — the BUILT workflows/*.js carry ZERO ${CLAUDE_PLUGIN_ROOT} in
     }
   }
   // Print the baseline (0.16.0's fan-in-execute.js had 20 occurrences in the published artifact; the
-  // unit-level pure rewrite folds 22) and the first 3 hits — "proof the predicate CAN hit the
+  // unit-level pure rewrite folds 25) and the first 3 hits — "proof the predicate CAN hit the
   // pre-fix product", not just that it returns 0 now.
   console.log("[AC4-task] pre-fix anchor counts:", JSON.stringify(preFixCounts));
   console.log("[AC4-task] first 3 pre-fix hits:\n" + firstHits.map((h) => "  " + h).join("\n"));
