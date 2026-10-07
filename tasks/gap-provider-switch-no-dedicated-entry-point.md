@@ -26,11 +26,11 @@ extra:
 
 ## Acceptance Criteria
 
-- [ ] 新增 `quay provider switch <name>` CLI 命令（或等价 skill 文档+脚本）
-- [ ] 执行前校验目标 provider 在 `.quay/config.yml` 中的必需字段齐全，缺失时给出明确错误而不是静默切换
-- [ ] 执行后 `.quay/config.yml` 的 `enabled` 状态正确翻转（目标 provider true，原 provider false），其余字段不被破坏
-- [ ] 命令输出提示用户下一次 `quay init` 会自动 reconcile 新启用的 provider
-- [ ] 新增测试覆盖：成功切换、目标 provider 配置不完整时拒绝切换、切换后 config.yml 内容正确
+- [x] 新增 `quay provider switch <name>` CLI 命令（或等价 skill 文档+脚本）
+- [x] 执行前校验目标 provider 在 `.quay/config.yml` 中的必需字段齐全，缺失时给出明确错误而不是静默切换
+- [x] 执行后 `.quay/config.yml` 的 `enabled` 状态正确翻转（目标 provider true，原 provider false），其余字段不被破坏
+- [x] 命令输出提示用户下一次 `quay init` 会自动 reconcile 新启用的 provider
+- [x] 新增测试覆盖：成功切换、目标 provider 配置不完整时拒绝切换、切换后 config.yml 内容正确
 
 ## Definition of Done
 
@@ -41,5 +41,6 @@ extra:
 - packages/quay/src/init.ts
 - packages/quay/bin/quay.ts
 - packages/quay/src/cli/provider.ts
+- packages/quay/src/cli/help.ts
 - packages/quay/test/cli.test.mjs
 - tasks/gap-provider-switch-no-dedicated-entry-point.md
