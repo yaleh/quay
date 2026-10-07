@@ -1,7 +1,7 @@
 ---
 id: GOAL-020
 title: CI 与 release 渠道成为可信守门员：develop 首绿 + release 能发出三平台可用产物
-status: active
+status: achieved
 kind: goal
 origin: 人 2026-09-15 裁定：以 GitHub CI 与 release 为目标建 GOAL 并持续驱动；并逐条拍板 (a) 接受 5 条
   AC 的范围、(b) 接受 AC-268 需在本 GOAL 期内真发一次版本（workflow_dispatch）。立案读数见 body：develop
@@ -25,6 +25,14 @@ statusLog:
     reason: 人 2026-09-24 裁定重开：hosted runner 账单闸挡住发布链（run 35966264609 annotation『The
       job was not started because recent account payments have failed…』）；新增长期保证
       AC-319（全 job self-hosted）/ AC-320（切版留痕落主台账）
+  - at: 2026-10-07T08:21:39.688Z
+    from: active
+    to: achieved
+    actor: human
+    reason: 人 2026-10-07 裁定收口：在域 7 条 AC（AC-265/269/270/271/272/274/319）全部
+      achieved；唯一未成的 AC-320 经人裁定取消（判据要求 form=tagged 而规范切版路径落
+      form=cut，取值词表对不上）。退出条件 ①/②/③ 分别由 AC-265/AC-274/AC-269 承载，三条均已 achieved。⛔
+      这是人的直接关闭（goal-store write --status achieved），不走机械关闭路径。
 ---
 ## 背景（2026-09-15 实测，全部为直接量）
 
