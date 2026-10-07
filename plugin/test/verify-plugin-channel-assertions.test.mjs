@@ -31,6 +31,8 @@ import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { spawnSync } from "node:child_process";
+import { judgeShippedSetClean } from "../scripts/verify-plugin-channel-assertions.ts";
+import { parseRules, readShippedSet } from "../scripts/shipped-set-rules.ts";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const REPO_ROOT = path.resolve(__dirname, "..", "..");
@@ -423,4 +425,71 @@ test("--json emits the assertion array + summary counts", () => {
   assert.equal(parsed.failed, 0);
   assert.equal(parsed.notEvaluated, 0);
   assert.ok(Array.isArray(parsed.assertions) && parsed.assertions.length >= 10);
+});
+
+// ── the shipped-set assertion (tasks/gap-shipped-plugin-tree-excludes-dev-only-content-and-has-a-
+//    shrink-only-size-ratchet) ────────────────────────────────────────────────────────────────────
+//
+// The judgement is driven through the SAME `readShippedSet` the release gate uses, on hermetic
+// fixture trees: the point is which STATE the assertion reports, never a re-implemented predicate.
+const SS_RULES = parseRules(
+  ["# fixture rules", "test/", "*.test.mjs", "*-baseline.json", "fixtures/"].join("\n"),
+);
+const ssBaseline = (over = {}) => ({ files: 0, bytes: 0, shLines: 0, ...over });
+
+function ssFixture(tag, files) {
+  const dir = freshDir(tag);
+  for (const [rel, content] of Object.entries(files)) {
+    const abs = path.join(dir, rel);
+    fs.mkdirSync(path.dirname(abs), { recursive: true });
+    fs.writeFileSync(abs, content);
+  }
+  return dir;
+}
+
+test("shipped-set-clean: a clean tree is PASS and the detail carries the real totals", () => {
+  const dir = ssFixture("ss-clean", { "README.md": "hi\n", "scripts/tool.sh": "#!/usr/bin/env bash\necho hi\n" });
+  const r = judgeShippedSetClean(readShippedSet(dir, SS_RULES), ssBaseline(), dir);
+  assert.equal(r.state, "PASS");
+  assert.match(r.detail, /2 files/);
+  assert.match(r.detail, /no rule-excluded content among 4 rule\(s\)/);
+});
+
+test("shipped-set-clean: an excluded file present ⇒ FAIL, naming the path and the rule", () => {
+  const dir = ssFixture("ss-dirty", { "README.md": "hi\n", "foo.test.mjs": "x\n", "deep/g.test.mjs": "x\n" });
+  const r = judgeShippedSetClean(readShippedSet(dir, SS_RULES), ssBaseline(), dir);
+  assert.equal(r.state, "FAIL");
+  assert.match(r.detail, /foo\.test\.mjs \(rule \*\.test\.mjs\)/);
+  assert.match(r.detail, /2 rule-excluded path\(s\) PRESENT/);
+});
+
+test("shipped-set-clean: a `test/` directory and a `*-baseline.json` are both caught", () => {
+  const dir = ssFixture("ss-dir", { "test/a.mjs": "x\n", "sh-census-baseline.json": "{}\n" });
+  const r = judgeShippedSetClean(readShippedSet(dir, SS_RULES), ssBaseline(), dir);
+  assert.equal(r.state, "FAIL");
+  assert.match(r.detail, /test\//);
+  assert.match(r.detail, /sh-census-baseline\.json/);
+});
+
+test("shipped-set-clean: the size ceiling FAILs when the artifact outgrows the recorded clean build", () => {
+  const dir = ssFixture("ss-size", { "a.md": "1\n", "b.md": "2\n", "c.md": "3\n" });
+  const r = judgeShippedSetClean(readShippedSet(dir, SS_RULES), ssBaseline({ shipped: { files: 2, bytes: 1, shLines: 0 } }), dir);
+  assert.equal(r.state, "FAIL");
+  assert.match(r.detail, /larger than the recorded clean build/);
+  assert.match(r.detail, /files 3 > ceiling 2/);
+});
+
+test("shipped-set-clean: an unreadable input is NOT-EVALUATED, never PASS", () => {
+  // ① no rules in force ⇒ the reading itself refuses to be "clean" (硬规则 3b)
+  const dir = ssFixture("ss-norules", { "a.md": "x\n" });
+  assert.equal(judgeShippedSetClean(readShippedSet(dir, []), ssBaseline(), dir).state, "NOT-EVALUATED");
+  // ② an unreadable `.sh` makes the reading partial
+  const dangling = ssFixture("ss-dangling", { "a.md": "x\n" });
+  fs.symlinkSync(path.join(dangling, "nope"), path.join(dangling, "broken.sh"));
+  const partial = judgeShippedSetClean(readShippedSet(dangling, SS_RULES), ssBaseline(), dangling);
+  assert.equal(partial.state, "NOT-EVALUATED");
+  assert.match(partial.detail, /could not be read/);
+  // ③ no readable baseline
+  const clean = ssFixture("ss-nobase", { "a.md": "x\n" });
+  assert.equal(judgeShippedSetClean(readShippedSet(clean, SS_RULES), null, clean).state, "NOT-EVALUATED");
 });

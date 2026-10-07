@@ -31,6 +31,7 @@ import { fileURLToPath } from "node:url";
 
 import { makeTmpDir } from "./helpers/tmp-workspace.mjs";
 import { verifyDistClosureDir, scanPublishTreeReferences } from "../../packages/quay/scripts/build-plugin-dist.mjs";
+import { stripComments } from "../scripts/source-text-lib.ts";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const pluginDir = path.resolve(__dirname, "..");
@@ -190,6 +191,68 @@ function addMarketplaceNameStampInputs(root) {
   );
 }
 
+const REL_IMPORT_RE = /(?:from\s*|import\s*\(\s*)(["'])(\.{1,2}\/[^"']+)\1/g;
+
+/** The transitive RELATIVE-import closure of a repo-relative module, derived from the source rather
+ *  than hand-listed — the same walker shape as precommit-guard.test.mjs's `guardClosure`, for the
+ *  same reason (硬规则 5b: a hand-list is a SECOND copy of a set the imports already define, so it
+ *  drifts invisibly — the ENTRY still resolves and only a deeper dep goes missing, as a module-load
+ *  error inside the thing under test). An unresolvable relative import THROWS rather than being
+ *  skipped (硬规则 3b: a silently-short closure is indistinguishable from a complete one).
+ *
+ *  ⛔ Scanned over `stripComments` output, not raw text (硬规则 2: a mention is not a hit). The
+ *  closure includes `source-text-lib.ts`, whose own JSDoc spells a specifier as prose
+ *  (`from "./x.ts"`) — matching raw text walked straight into that mention, resolved it
+ *  against the real tree, and threw on a file the module never imports. Reusing the repo's ONE
+ *  comment definition (硬规则 5b) beats a line-anchoring heuristic: it also keeps multi-line
+ *  `import { … } from "./x.ts"` reachable, which a `^import` anchor would silently drop. String
+ *  literals are deliberately NOT masked by that helper — a specifier IS one. */
+function repoRelativeImportClosure(entryRel) {
+  const seen = new Set();
+  const queue = [path.normalize(entryRel)];
+  while (queue.length > 0) {
+    const rel = path.normalize(queue.shift());
+    if (seen.has(rel)) continue;
+    seen.add(rel);
+    const src = stripComments(fs.readFileSync(path.join(repoRoot, rel), "utf8")); // a listed dep that is absent is a hard error
+    for (const m of src.matchAll(REL_IMPORT_RE)) {
+      const dep = path.normalize(path.join(path.dirname(rel), m[2]));
+      if (!fs.existsSync(path.join(repoRoot, dep))) {
+        throw new Error(`${rel} imports "${m[2]}" which does not resolve under ${repoRoot}`);
+      }
+      queue.push(dep);
+    }
+  }
+  return [...seen];
+}
+
+/** The shipped-set rule module + its transitive imports + the rule TEXT it parses, copied into the
+ *  stub from the repo (same discipline as the stamp inputs above: a fixture copy would stop testing
+ *  what ships).
+ *
+ *  ⛔ Why the stub needs this at all: `publish-dist-branch.sh` reads its exclusion list by SPAWNING
+ *  `plugin/scripts/shipped-set-rules.ts --print-rsync-excludes --rules plugin/shipped-set-rules.txt`
+ *  (gap-shipped-plugin-tree-excludes-dev-only-content-and-has-a-shrink-only-size-ratchet). That is a
+ *  REAL call into the REAL module, so the stub must carry what the call reads. Measured 2026-10-07 on
+ *  this branch's first fan-in run: without it the BASELINE publish died with `Cannot find module
+ *  '<stub>/plugin/scripts/shipped-set-rules.ts'`, so the green half of AC2 failed and the closure
+ *  gate this test exists for was never reached — the stub, not the script, was incomplete (the same
+ *  shape as the stamp-version note above).
+ *
+ *  BOTH halves are load-bearing, and they fail the same way: the module is spawned by path, and
+ *  `--rules` points at the file it parses — a rule file that read as empty makes the script abort by
+ *  its own design (`--print-rsync-excludes` is fail-closed on zero rules, because an empty exclusion
+ *  list would silently restore the full-tree rsync the rules exist to prevent). */
+function addShippedSetRuleInputs(root) {
+  const files = repoRelativeImportClosure(path.join("plugin", "scripts", "shipped-set-rules.ts"));
+  // A closure of size 1 means the walker itself broke, not that the module lost its deps (硬规则 4
+  // 推论二: a zero/one-count reading is an instrument fault, not a clean result).
+  assert.ok(files.length > 1, `shipped-set-rules closure walker found ${files.length} file(s) — walker is broken`);
+  for (const rel of files) writeFile(path.join(root, rel), fs.readFileSync(path.join(repoRoot, rel)));
+  const rulesRel = path.join("plugin", "shipped-set-rules.txt");
+  writeFile(path.join(root, rulesRel), fs.readFileSync(path.join(repoRoot, rulesRel)));
+}
+
 /** A disposable stub repo holding the REAL publish script + the REAL bundler, with one bundleable
  *  script referenced by one carrier — small enough to assemble in seconds, structurally the same
  *  shape the real repo hands the script (plugin/ + packages/quay/scripts + vendor bundle).
@@ -224,6 +287,7 @@ function makeStubRepo(tag) {
   writeFile(path.join(root, "plugin", "vendor", "quay", "dist", "quay.js"), "// stub vendor bundle\n");
   addVersionStampInputs(root);
   addMarketplaceNameStampInputs(root);
+  addShippedSetRuleInputs(root);
   git(root, "init", "-q", "-b", "master");
   git(root, "add", "-A");
   git(root, "-c", "user.name=ac263", "-c", "user.email=ac263@test.invalid", "commit", "-q", "-m", "stub");
@@ -272,7 +336,13 @@ test("AC2: the real publish script exits non-zero and commits nothing when a ref
   // green baseline: the same script, the same tree, no mutation
   const ok = runPublish(stub, branch, undefined);
   assert.equal(ok.status, 0, `baseline publish must succeed:\n${ok.stdout}\n${ok.stderr}`);
-  assert.match(ok.stdout, /dist-closure gate OK \(directory\): 1 referenced dist bundles/);
+  // TWO, not one: the stub now carries `shipped-set-rules.ts` and its import closure (see
+  // addShippedSetRuleInputs), and `gate-script-base.ts` — one of those deps — is in the bundler's
+  // QUAY_INIT_EXPLICIT table, so it is a derived entry the moment it EXISTS in `plugin/scripts/`.
+  // The count is a property of the STUB's file set, not of the gate (the gate's own predicate is
+  // pinned by the AC1/AC3 fixture above, which still reads 1); what this line pins is that the gate
+  // ran on the green tree and reported the real number rather than an empty required-set.
+  assert.match(ok.stdout, /dist-closure gate OK \(directory\): 2 referenced dist bundles/);
   assert.match(ok.stdout, /orphan commit ready/);
   assert.equal(git(stub, "branch", "--list", branch).length > 0, true, "green run must create the branch");
   // the PUBLISHED tree carries the release channel's marketplace name, not plugin/'s source-form
