@@ -1596,7 +1596,11 @@ export function runInit(opts: InitOptions): InitResult {
     },
     say,
   );
-  if (!projectValues.ok) {
+  // `=== false`, not `!projectValues.ok`: this repo's root tsconfig is `strict: false`, under which
+  // the NEGATIVE branch of an `ok: true | false` union is not narrowed ⇒ `.failure` would be TS2339.
+  // (Same note lives on `ensureGoalBranch` in branch-model.ts; the fan-in ts-typecheck gate runs real
+  // `npx tsc` and reds three `ts-typecheck-gate-*` tests when this is got wrong.)
+  if (projectValues.ok === false) {
     return {
       outcome: "project-values-unresolved",
       configState: existing.state,

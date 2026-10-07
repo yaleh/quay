@@ -1931,6 +1931,16 @@ async function main() {
   // "unparseable bytes" is reported as `corrupt`, the vocabulary every caller reads).
   for (const [shape, expectedState] of [["absent", "absent"], ["unparseable", "corrupt"]]) {
     const brokenRoot = fs.mkdtempSync(path.join(os.tmpdir(), `quay-mcp-${shape}-cfg-`));
+    // AC-331 (gap-init-cli-lays-full-closed-set-and-detects-project-values-without-the-shell-script):
+    // `init` now RESOLVES the target's four project-derived `loop:` values and FAILS CLOSED
+    // (`outcome: "project-values-unresolved"`, nothing written) when it cannot detect a test command —
+    // the shipped shell entry's behaviour, ported into the single TS engine. This fixture's subject is
+    // the CONFIG shape (absent / unparseable), not test-command detection, so give the workspace the
+    // cheapest detectable shape (the detection ladder's first rung, `scripts/test.sh`). Without it the
+    // repair assertion below fails for the WRONG reason: the `readFileSync` ENOENTs because init
+    // legitimately refused, and the test would read as "init is broken" instead of "no test command".
+    fs.mkdirSync(path.join(brokenRoot, "scripts"), { recursive: true });
+    fs.writeFileSync(path.join(brokenRoot, "scripts", "test.sh"), "#!/bin/bash\necho test\n");
     fs.mkdirSync(path.join(brokenRoot, ".quay"), { recursive: true });
     if (shape === "unparseable") {
       // Not a config with a semantic problem (DIR-099-C's scope, deliberately not re-opened) — a
