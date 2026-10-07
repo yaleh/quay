@@ -1,7 +1,7 @@
 ---
 id: gap-init-cli-lays-full-closed-set-and-detects-project-values-without-the-shell-script
 title: CLI 单独完成全新安装的完整闭集写入与项目值检测（把 quay-init.sh 的写入者与检测搬进 TS，遗留检查直接删除而不是搬）
-status: needs-human
+status: ready
 labels:
   - gap
   - priority:p2
