@@ -316,10 +316,12 @@ export function deriveReachability(repoRoot: string, overrides: DeriveOverrides 
     return notEvaluated("the shipped-set rule file parsed to ZERO rules — the candidate set would be undefined");
   }
 
+  // ⛔ An empty candidate set is EVALUATED, not NOT-EVALUATED, and the difference is deliberate: the
+  // plugin root's existence is already asserted above, so "no `.sh` outside the rule-excluded set" is
+  // a true reading of THIS tree (a synthetic/partial tree, or one whose whole shell surface the rules
+  // already exclude). It prunes nothing, which is the honest consequence — not a silent pass over an
+  // unread tree (that case is the `plugin/`-missing and rule-file-unreadable branches above).
   const candidates = new Set(candidateShells(repoRoot, rules));
-  if (candidates.size === 0) {
-    return notEvaluated(`no candidate .sh under ${pluginRoot} — an empty candidate set is not a clean derivation`);
-  }
 
   const reachable = new Map<string, string>();
   let rootFiles = 0;
