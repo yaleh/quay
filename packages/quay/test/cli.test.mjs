@@ -1067,6 +1067,7 @@ async function main() {
   await block29();
   await block30();
   await block31();
+  await block32();
 
   fs.rmSync(tasksDir, { recursive: true, force: true });
   fs.rmSync(workspaceRoot, { recursive: true, force: true });
@@ -2460,4 +2461,165 @@ async function block31() {
   assert(rCommented.note === "no-target", `a commented-out provider block is not switchable (note: ${rCommented.note})`);
 
   fs.rmSync(ws, { recursive: true, force: true });
+}
+
+// 32. gap-cli-task-list-page-size-post-hoc-slice-not-pushed-down: `--page-size`
+//     must be PUSHED DOWN to the Provider (into `client.taskList`'s filter
+//     object) and the Provider's `paged` window trusted — NOT applied post-hoc
+//     with `.slice()` after every matching body was already fetched.
+//
+//     The probe is a FAKE Provider MCP server launched through `mcp_entry` that
+//     records the exact `task_list` arguments it receives. The assertion is on
+//     the CALL, not on output length: on a store that fits in one page a pushed
+//     page and a post-hoc slice produce the SAME output, so only the recorded
+//     arguments can tell the two apart. The block also pins the two honest
+//     fallbacks the push-down must not break:
+//       (b) a SORTED request must NOT push the page down (the top-N of a sorted
+//           view is not the first N in provider order) — asserted on the args;
+//       (c) a Provider that IGNORES `pageSize` (no `paged` sentinel) still gets
+//           a correct client-side slice;
+//       (d) with no `--page-size` the filter carries no paging keys at all.
+const FAKE_PROVIDER_SRC = String.raw`
+import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
+import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
+import { z } from "zod";
+import fs from "node:fs";
+
+const LOG = process.env.FAKE_PROVIDER_ARGS_LOG;
+const MODE = process.env.FAKE_PROVIDER_MODE || "paged";
+const ALL = [
+  { id: "FAKE-1", title: "first",  status: "todo",  role: "primitive", labels: [], body: "one",   updatedAt: 3000 },
+  { id: "FAKE-2", title: "second", status: "ready", role: "primitive", labels: [], body: "two",   updatedAt: 1000 },
+  { id: "FAKE-3", title: "third",  status: "done",  role: "primitive", labels: [], body: "three", updatedAt: 2000 },
+];
+
+const server = new McpServer({ name: "fake-provider", version: "0.0.1" });
+server.registerTool("task_list", {
+  description: "records its arguments and replays a canned task list",
+  inputSchema: {
+    status: z.string().optional(),
+    label: z.union([z.string(), z.array(z.string())]).optional(),
+    includeBody: z.boolean().optional(),
+    search: z.string().optional(),
+    prefix: z.string().optional(),
+    page: z.number().int().optional(),
+    pageSize: z.number().int().optional(),
+  },
+}, async (args) => {
+  fs.appendFileSync(LOG, JSON.stringify(args) + String.fromCharCode(10));
+  if (MODE === "paged") {
+    const size = args.pageSize === undefined ? ALL.length : args.pageSize;
+    const page = args.page === undefined ? 1 : args.page;
+    const start = (page - 1) * size;
+    return { content: [{ type: "text", text: "ok" }], structuredContent: {
+      tasks: ALL.slice(start, start + size), malformed: [], total: ALL.length,
+      page, pageSize: size, totalPages: Math.ceil(ALL.length / size),
+      paged: args.pageSize !== undefined, scannedFiles: false,
+    } };
+  }
+  // MODE "unpaged": a Provider that applied the filters but IGNORED pageSize —
+  // it sends no "paged" sentinel, so the caller must slice locally.
+  return { content: [{ type: "text", text: "ok" }], structuredContent: {
+    tasks: ALL, malformed: [], total: ALL.length, scannedFiles: true,
+  } };
+});
+await server.connect(new StdioServerTransport());
+`;
+
+async function block32() {
+  const ws = fs.mkdtempSync(path.join(os.tmpdir(), "quay-cli-page-pushdown-"));
+  // The fake Provider is a real MCP server: node must resolve
+  // @modelcontextprotocol/sdk from the script's OWN directory, so link the
+  // repo's (hoisted) node_modules into the scratch workspace.
+  const repoRoot = path.join(__dirname, "..", "..", "..");
+  fs.symlinkSync(fs.realpathSync(path.join(repoRoot, "node_modules")), path.join(ws, "node_modules"), "dir");
+  const argsLog = path.join(ws, "task-list-args.jsonl");
+  const fakeBin = path.join(ws, "fake-provider.mjs");
+  fs.writeFileSync(fakeBin, FAKE_PROVIDER_SRC);
+
+  const writeCfg = (mode) => {
+    fs.mkdirSync(path.join(ws, ".quay"), { recursive: true });
+    fs.writeFileSync(path.join(ws, ".quay", "config.yml"), [
+      "providers:",
+      "  fake:",
+      "    enabled: true",
+      `    path: ${JSON.stringify(ws)}`,
+      `    mcp_entry: ["node", ${JSON.stringify(fakeBin)}, "mcp"]`,
+      "    env:",
+      `      FAKE_PROVIDER_ARGS_LOG: ${JSON.stringify(argsLog)}`,
+      `      FAKE_PROVIDER_MODE: ${JSON.stringify(mode)}`,
+      "",
+    ].join("\n"));
+  };
+  const resetLog = () => fs.rmSync(argsLog, { force: true });
+  const readArgs = () =>
+    fs.existsSync(argsLog)
+      ? fs.readFileSync(argsLog, "utf8").split("\n").filter(Boolean).map((l) => JSON.parse(l))
+      : [];
+  const ids = (r) => { try { return JSON.parse(r.stdout).map((t) => t.id); } catch { return null; } };
+
+  try {
+    // ── (a) --page-size IS pushed down; the Provider's window is what prints ──
+    writeCfg("paged");
+    resetLog();
+    const a = await runImport(["task", "list", "--json", "--page-size", "2", "--root", ws], {});
+    assert(a.status === 0, `push-down case (a): task list --json --page-size 2 exits 0 (got ${a.status}; stderr ${a.stderr.slice(0, 200)})`);
+    const aArgs = readArgs();
+    assert(
+      aArgs.length === 1 && aArgs[0].pageSize === 2,
+      `--page-size 2 is PUSHED DOWN to client.taskList (recorded filter: ${JSON.stringify(aArgs[0] ?? null)}), not applied post-hoc with .slice()`
+    );
+    assert(
+      JSON.stringify(ids(a)) === JSON.stringify(["FAKE-1", "FAKE-2"]),
+      `the Provider's page window is what gets printed (got ${JSON.stringify(ids(a))})`
+    );
+
+    // ── (b) a SORTED request must NOT push the page down ─────────────────────
+    //     top-2 by updatedAt is FAKE-1 (3000) then FAKE-3 (2000); the Provider's
+    //     own order would give FAKE-1, FAKE-2 — a pushed page would show the
+    //     wrong task, so the CLI must ask for the whole set and sort locally.
+    resetLog();
+    const b = await runImport(["task", "list", "--json", "--page-size", "2", "--sort", "updated", "--root", ws], {});
+    assert(b.status === 0, `push-down case (b): --sort updated --page-size 2 exits 0 (got ${b.status}; stderr ${b.stderr.slice(0, 200)})`);
+    const bArgs = readArgs();
+    assert(
+      bArgs.length === 1 && !("pageSize" in bArgs[0]) && !("page" in bArgs[0]),
+      `a SORTED request does NOT push the page down (recorded filter: ${JSON.stringify(bArgs[0] ?? null)})`
+    );
+    assert(
+      JSON.stringify(ids(b)) === JSON.stringify(["FAKE-1", "FAKE-3"]),
+      `the sorted top-2 is computed locally over the whole set (got ${JSON.stringify(ids(b))})`
+    );
+
+    // ── (c) a Provider that IGNORES pageSize: pushed but sliced locally ──────
+    writeCfg("unpaged");
+    resetLog();
+    const c = await runImport(["task", "list", "--json", "--page-size", "2", "--root", ws], {});
+    assert(c.status === 0, `push-down case (c): unpaged Provider exits 0 (got ${c.status}; stderr ${c.stderr.slice(0, 200)})`);
+    const cArgs = readArgs();
+    assert(
+      cArgs.length === 1 && cArgs[0].pageSize === 2,
+      `the CLI still ASKS for the page even of a Provider that ignores it (recorded filter: ${JSON.stringify(cArgs[0] ?? null)})`
+    );
+    assert(
+      JSON.stringify(ids(c)) === JSON.stringify(["FAKE-1", "FAKE-2"]),
+      `a Provider with no paged sentinel still yields a correct client-side slice (got ${JSON.stringify(ids(c))})`
+    );
+
+    // ── (d) no --page-size ⇒ no paging keys in the pushed filter ─────────────
+    resetLog();
+    const d = await runImport(["task", "list", "--json", "--root", ws], {});
+    assert(d.status === 0, `push-down case (d): no --page-size exits 0 (got ${d.status}; stderr ${d.stderr.slice(0, 200)})`);
+    const dArgs = readArgs();
+    assert(
+      dArgs.length === 1 && !("pageSize" in dArgs[0]) && !("page" in dArgs[0]),
+      `without --page-size the filter carries no paging keys (recorded filter: ${JSON.stringify(dArgs[0] ?? null)})`
+    );
+    assert(
+      JSON.stringify(ids(d)) === JSON.stringify(["FAKE-1", "FAKE-2", "FAKE-3"]),
+      `without --page-size the whole list is returned (got ${JSON.stringify(ids(d))})`
+    );
+  } finally {
+    fs.rmSync(ws, { recursive: true, force: true });
+  }
 }
