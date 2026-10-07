@@ -30,7 +30,7 @@ GOAL-029「init 统一为单一 TS 引擎、终局无 .sh;并收窄发布集合�
 ## DoD
 真实落地:用发布形态产物(`bash plugin/scripts/publish-dist-branch.sh --branch plugin-channel-verify` 不 push → `git archive` → 临时 HOME 下安装)对一个已有 `serve:` 固定值的真实形态配置运行 `quay init`,serve 值原样保留且没有新增 host/port;`quay init --json` 的输出被一个独立消费者(例如 python json.load)解析成功,原始输出贴进完成记录。仅 fixture 绿不算完成。
 
-## Touches
+
 - `packages/quay/src/cli/init.ts`
 - `packages/quay/src/cli/help.ts`
 - `packages/quay/src/init.ts`
@@ -45,3 +45,9 @@ GOAL-029「init 统一为单一 TS 引擎、终局无 .sh;并收窄发布集合�
 - `packages/quay/test/init.test.mjs`
 - `packages/quay/test/mcp-server.test.mjs`
 - `tasks/gap-init-surface-unified-no-reconcile-no-force-json-report-serve-defaults-unwritten.md`
+
+## Test-Files
+- `packages/quay/test/init.test.mjs`
+- `packages/quay/test/mcp-server.test.mjs`
+- `packages/quay/test/branch-model.test.mjs`
+- `plugin/test/config-key-consumer-check.test.mjs`
