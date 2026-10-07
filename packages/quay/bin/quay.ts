@@ -160,6 +160,9 @@ export async function run(argv, ctx = {}) {
     (cmd === "adr" && ["list", "show", "view", "new", "accept", "deprecate", "reject", "supersede"].includes(sub)) ||
     (cmd === "meta" && ["list", "show", "view", "get", "write", "new", "reply"].includes(sub)) ||
     (cmd === "action" && ["list", "run"].includes(sub)) ||
+    // gap-provider-switch-no-dedicated-entry-point: `provider switch` reports a machine-readable
+    // document (what changed, why a refusal happened), so it takes --json like `config validate`.
+    (cmd === "provider" && sub === "switch") ||
     (cmd === "config" && ["validate", "check"].includes(sub));
   if (jsonFlag === null && jsonCommands) {
     console.error(`Error: unsupported --format value ${JSON.stringify(flags.format)} (only "json" is supported; use --json instead of --format for non-JSON output)`);
@@ -202,6 +205,9 @@ export async function run(argv, ctx = {}) {
   if (cmd === "init") return (await import("../src/cli/init.ts")).handleInit(ctx);
   // DIR-099-A: config validate/check + unknown config subcommand both route here.
   if (cmd === "config") return (await import("../src/cli/config.ts")).handleConfigValidate(ctx);
+  // gap-provider-switch-no-dedicated-entry-point: `quay provider switch <name>` — the dedicated
+  // entry for flipping which provider is `enabled` in .quay/config.yml (previously hand-edit only).
+  if (cmd === "provider") return (await import("../src/cli/provider.ts")).handleProvider(ctx);
   // QENG-1: gate (verb-less: id in `sub`; `--list` detected as sub === "--list").
   if (cmd === "gate") return (await import("../src/cli/gate.ts")).handleGate(ctx);
   if (cmd === "gate-log") return (await import("../src/cli/gate-log.ts")).handleGateLog(ctx);
@@ -220,7 +226,7 @@ export async function run(argv, ctx = {}) {
   if (cmd === "driver") return (await import("../src/cli/driver.ts")).handleDriver(ctx);
 
   // QX-005: updated fallback with --help hint (UQ-001/UQ-002).
-  console.error("usage: quay <adr|goal|meta|init|task list|view|create|edit|check|gate|gate-log|complete|adjudicate|promote|retreat|run|migrate|config validate|config check|action list|action run|serve|server start|server add|server stop|server restart|server status|mcp|manager start|manager arm|driver> ...\nRun `quay --help` for full usage documentation.");
+  console.error("usage: quay <adr|goal|meta|init|task list|view|create|edit|check|gate|gate-log|complete|adjudicate|promote|retreat|run|migrate|provider|config validate|config check|action list|action run|serve|server start|server add|server stop|server restart|server status|mcp|manager start|manager arm|driver> ...\nRun `quay --help` for full usage documentation.");
   process.exitCode = 1;
     }
 }

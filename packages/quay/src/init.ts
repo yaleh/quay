@@ -1981,38 +1981,49 @@ const CARRIER_KINDS: ReadonlyArray<readonly [string, string]> = [
  * text → text. `ensureProviderCarrierEnv` below is the file-writing wrapper over this ONE
  * implementation — there is no second copy of the line-level logic.
  */
+// ── line-address helpers shared by EVERY text-level edit of `.quay/config.yml` ────────────────────
+// These three are the whole addressing model for a comment-preserving edit: a `key:` is located by
+// INDENTATION, never by a YAML round-trip (a round-trip reformats the file and drops the comments
+// that document which providers exist and what each one needs).
+//
+// ⛔ Module scope, not closures inside one caller (硬规则 5b): `ensureProviderCarrierEnvText` and
+// `switchEnabledProviderText` are two edits of the SAME file, and a second private copy of the
+// indentation rules is exactly how the two would come to disagree about where a block ends.
+function indentOf(s: string): number {
+  return s.length - s.trimStart().length;
+}
+
+/** First index >= start+1 in `lines` that is non-blank with indent <= parentInd, else lines.length. */
+function blockEnd(lines: string[], start: number, parentInd: number): number {
+  let j = start + 1;
+  while (j < lines.length) {
+    if (lines[j]!.trim() && indentOf(lines[j]!) <= parentInd) return j;
+    j++;
+  }
+  return lines.length;
+}
+
+/** [index, indent] of the first `key:` line in lines[start, end) at indent >= minIndent. */
+function findChild(lines: string[], start: number, end: number, key: string, minIndent: number): [number, number] | null {
+  const pat = new RegExp("^(\\s*)" + escapeRegExp(key) + "\\s*:");
+  for (let i = start; i < end; i++) {
+    const m = pat.exec(lines[i]!);
+    if (m && m[1]!.length >= minIndent) return [i, m[1]!.length];
+  }
+  return null;
+}
+
 export function ensureProviderCarrierEnvText(text: string, o: EnsureCarrierEnvTextOpts): CarrierEnvTextResult {
   const lines = text.split("\n");
   const noop = (note: CarrierEnvTextResult["note"]): CarrierEnvTextResult => ({ text, pinned: [], note });
 
-  const indentOf = (s: string): number => s.length - s.trimStart().length;
-
-  /** First index >= start+1 that is non-blank with indent <= parentInd, else lines.length. */
-  const blockEnd = (start: number, parentInd: number): number => {
-    let j = start + 1;
-    while (j < lines.length) {
-      if (lines[j]!.trim() && indentOf(lines[j]!) <= parentInd) return j;
-      j++;
-    }
-    return lines.length;
-  };
-  /** [index, indent] of the first `key:` line in [start, end) at indent >= minIndent. */
-  const findChild = (start: number, end: number, key: string, minIndent: number): [number, number] | null => {
-    const pat = new RegExp("^(\\s*)" + escapeRegExp(key) + "\\s*:");
-    for (let i = start; i < end; i++) {
-      const m = pat.exec(lines[i]!);
-      if (m && m[1]!.length >= minIndent) return [i, m[1]!.length];
-    }
-    return null;
-  };
-
   // ── locate providers: → native: → env: by INDENTATION, not by a yaml round-trip ─────────────────
-  const prov = findChild(0, lines.length, "providers", 0);
+  const prov = findChild(lines, 0, lines.length, "providers", 0);
   if (!prov) return noop("no-providers");
-  const native = findChild(prov[0] + 1, blockEnd(prov[0], prov[1]), "native", prov[1] + 1);
+  const native = findChild(lines, prov[0] + 1, blockEnd(lines, prov[0], prov[1]), "native", prov[1] + 1);
   if (!native) return noop("no-native");
-  const nativeEnd = blockEnd(native[0], native[1]);
-  const env = findChild(native[0] + 1, nativeEnd, "env", native[1] + 1);
+  const nativeEnd = blockEnd(lines, native[0], native[1]);
+  const env = findChild(lines, native[0] + 1, nativeEnd, "env", native[1] + 1);
 
   // ── collect the keys the env block already carries ──────────────────────────────────────────────
   const present: Record<string, string> = {};
@@ -2023,7 +2034,7 @@ export function ensureProviderCarrierEnvText(text: string, o: EnsureCarrierEnvTe
       for (const m of rest.matchAll(/(QUAY_NATIVE_\w+)\s*:/g)) present[m[1]!] = "";
     } else {
       const keyRe = /^(\s*)(QUAY_NATIVE_\w+)\s*:\s*(.*)$/;
-      for (let i = env[0] + 1; i < blockEnd(env[0], env[1]); i++) {
+      for (let i = env[0] + 1; i < blockEnd(lines, env[0], env[1]); i++) {
         const m = keyRe.exec(lines[i]!);
         if (m && m[1]!.length > env[1]) present[m[2]!] = m[3]!.trim();
       }
@@ -2049,7 +2060,7 @@ export function ensureProviderCarrierEnvText(text: string, o: EnsureCarrierEnvTe
     added = [" ".repeat(baseInd) + "env:", ...pinned.map((p) => `${" ".repeat(baseInd + 2)}${p.key}: "${p.value}"`)];
   } else {
     let last = env[0];
-    for (let i = env[0] + 1; i < blockEnd(env[0], env[1]); i++) {
+    for (let i = env[0] + 1; i < blockEnd(lines, env[0], env[1]); i++) {
       if (lines[i]!.trim()) last = i;
     }
     insertAt = last + 1;
@@ -2100,6 +2111,111 @@ export function ensureProviderCarrierEnv(o: EnsureCarrierEnvOpts): void {
   for (const p of res.pinned) {
     console.log(`  pinned: .quay/config.yml providers.native.env.${p.key}: "${p.value}" (carrier dir pin — AC4)`);
   }
+}
+
+// ── `quay provider switch <name>` — the TEXT half of the enabled-provider flip ─────────────────────
+// (gap-provider-switch-no-dedicated-entry-point). Before this, the ONLY writer of a provider's
+// `enabled:` was `generateConfigContent` — a FRESH workspace. Switching an existing project from
+// native to github (or back) meant hand-editing `.quay/config.yml` with no validation before or
+// after, which is the缺口 this closes.
+//
+// Same discipline as `ensureProviderCarrierEnvText`: a LINE-LEVEL edit, never a YAML round-trip — a
+// round-trip reformats every other key and drops the comments that tell the operator which providers
+// exist and what each one needs. Only the `enabled:` lines that actually CHANGE are rewritten, so a
+// switch that is a no-op produces a byte-identical string (the caller writes nothing).
+
+/** Why the flip could not be expressed. An INDEPENDENT state, never conflated with "nothing to do". */
+export type SwitchProviderNote = null | "no-providers" | "inline-providers" | "no-target";
+
+export interface SwitchEnabledProviderResult {
+  /** The candidate text (byte-identical to the input when `changed` and `added` are both empty). */
+  text: string;
+  /** The `enabled:` rewrites actually applied, in file order. */
+  changed: Array<{ provider: string; from: string; to: "true" | "false" }>;
+  /** Providers that carried no `enabled:` key and gained one (only ever the target). */
+  added: string[];
+  note: SwitchProviderNote;
+}
+
+/**
+ * Make `target` the enabled provider in a `.quay/config.yml` TEXT: `enabled: true` on the target's
+ * entry, `enabled: false` on every other entry that currently says otherwise.
+ *
+ * A provider entry with NO `enabled:` key is already disabled (the runtime reads `enabled === true`,
+ * `activeProvider` in config.ts) — so it is left alone rather than being spelled out: an absent key
+ * and an explicit `false` mean the same thing, and rewriting the absent one would put a line the
+ * user never wrote into their file.
+ */
+export function switchEnabledProviderText(text: string, target: string): SwitchEnabledProviderResult {
+  const lines = text.split("\n");
+  const noop = (note: SwitchProviderNote): SwitchEnabledProviderResult => ({ text, changed: [], added: [], note });
+
+  const prov = findChild(lines, 0, lines.length, "providers", 0);
+  if (!prov) return noop("no-providers");
+  // `providers: {native: {...}}` (a flow mapping) has no per-provider LINE to rewrite. Refusing is
+  // the honest answer (硬规则 3b) — the alternative is a full re-serialization of the user's file.
+  const provRest = lines[prov[0]]!.slice(lines[prov[0]]!.indexOf(":") + 1).trim();
+  if (provRest !== "" && !provRest.startsWith("#")) return noop("inline-providers");
+
+  // The provider entries are the block's DIRECT children — the smallest indent of a `key:` line
+  // inside it. Deriving it (rather than assuming two spaces) keeps this edit working on a config
+  // indented any other way.
+  const provEnd = blockEnd(lines, prov[0], prov[1]);
+  let childInd: number | null = null;
+  for (let i = prov[0] + 1; i < provEnd; i++) {
+    const line = lines[i]!;
+    if (!line.trim() || line.trimStart().startsWith("#")) continue;
+    const m = /^(\s*)[A-Za-z0-9_-]+\s*:/.exec(line);
+    if (!m) continue;
+    const ind = m[1]!.length;
+    if (ind > prov[1] && (childInd === null || ind < childInd)) childInd = ind;
+  }
+  if (childInd === null) return noop("no-target");
+
+  // Collect the entries FIRST (with their block extents), then apply the edits back-to-front: an
+  // insert shifts every later index, and rewriting in reverse keeps every earlier index valid.
+  const entries: Array<{ pid: string; start: number; end: number }> = [];
+  for (let i = prov[0] + 1; i < provEnd; i++) {
+    const line = lines[i]!;
+    if (!line.trim() || line.trimStart().startsWith("#")) continue;
+    const m = /^(\s*)([A-Za-z0-9_-]+)\s*:/.exec(line);
+    if (!m || m[1]!.length !== childInd) continue;
+    entries.push({ pid: m[2]!, start: i, end: blockEnd(lines, i, childInd) });
+  }
+  if (!entries.some((e) => e.pid === target)) return noop("no-target");
+
+  const out = [...lines];
+  const changed: SwitchEnabledProviderResult["changed"] = [];
+  const added: string[] = [];
+
+  for (let n = entries.length - 1; n >= 0; n--) {
+    const { pid, start, end } = entries[n]!;
+    const want: "true" | "false" = pid === target ? "true" : "false";
+    const at = findChild(out, start + 1, Math.min(end, out.length), "enabled", childInd + 1);
+    if (!at) {
+      if (pid !== target) continue; // no `enabled:` key ⇒ already disabled (see the doc comment above)
+      out.splice(start + 1, 0, `${" ".repeat(childInd + 2)}enabled: ${want}`);
+      added.push(pid);
+      continue;
+    }
+    const [lineIdx, lineInd] = at;
+    const rawValue = out[lineIdx]!.slice(out[lineIdx]!.indexOf(":") + 1);
+    const hash = rawValue.indexOf("#");
+    const valuePart = hash >= 0 ? rawValue.slice(0, hash) : rawValue;
+    const current = valuePart.trim();
+    if (current === want) continue;
+    // The trailing comment AND the whitespace run before it are PRESERVED — on a real config that
+    // comment is the sentence explaining why this provider is (or is not) the default, and the run
+    // is what aligns it with the neighbouring lines. Dropping either would silently rewrite
+    // documentation the edit was never asked to touch (and would make a switch-and-switch-back
+    // non-byte-identical, which is the property the round-trip test pins).
+    const pad = valuePart.slice(valuePart.trimEnd().length);
+    out[lineIdx] = `${" ".repeat(lineInd)}enabled: ${want}${pad}${hash >= 0 ? rawValue.slice(hash) : ""}`;
+    changed.push({ provider: pid, from: current, to: want });
+  }
+
+  changed.reverse(); // the edits were applied back-to-front; report them in FILE order
+  return { text: out.join("\n"), changed, added, note: null };
 }
 
 // ── project-internal plugin link (gap-config-provider-path-frozen-to-versioned-cache-dir; the

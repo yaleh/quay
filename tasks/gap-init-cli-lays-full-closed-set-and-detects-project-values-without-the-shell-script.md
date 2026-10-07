@@ -1,7 +1,7 @@
 ---
 id: gap-init-cli-lays-full-closed-set-and-detects-project-values-without-the-shell-script
 title: CLI 单独完成全新安装的完整闭集写入与项目值检测（把 quay-init.sh 的写入者与检测搬进 TS，遗留检查直接删除而不是搬）
-status: ready
+status: needs-human
 labels:
   - gap
   - priority:p2
@@ -219,3 +219,11 @@ passed=4 failed=4 not-evaluated=4
 3. `plugin/test/quay-init-loop.test.mjs` 的 AC5（heredoc 替换惰性）仍以 shell 的 heredoc 为对象——
    该 heredoc 还在（偏差 1），所以这条仍然是有意义的测量，未改。
 4. `quay-init.test.mjs` 的"不可解析 config"一条按 AC-330 已生效的新契约改写（备份 + 重建，而非 refusal）。
+
+## Needs-Human
+
+**执行 2026-10-07T07:05:02.754Z — 停派终止（失败无法归因，⛔ 不再重派）**
+
+- 阻碍原因：exited-not-landed 失败无法归因（基建/契约疑似，非实现缺陷）——停止重派，⛔ 不再拿新会话撞同一堵墙：the exited-not-landed failure could not be attributed in 2 consecutive rounds (bounded to at most one retry; no mechanical fan-in result on the outcome ⇒ no suite ran) — infra/contract suspected, not an implementable defect (parser attributed no failing file (failure-line count unavailable on this judgment)); stopping instead of spending another worker session
+- 失败步/判词：adopted orphan worker exited (exit code unobservable) — task status=ready (not done) and leftover worktree task/gap-init-cli-lays-full-closed-set-and-detects-project-values-without-the-shell-script still present
+- run_id：wk-prod-anchor

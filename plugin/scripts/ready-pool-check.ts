@@ -175,6 +175,17 @@ import { escapeRegExp } from "./regex-escape.ts";
 // Re-export for backward-compat importers (e.g. gate-shape-dispatch.test.mjs) — SHAPE_SECTIONS is
 // the single source now, not a local hand-copied map.
 export { SHAPE_SECTIONS };
+// gap-ready-check-duplicated-algorithm-store-vs-ready-pool-check: the shape JUDGE that reads those
+// lists — `detectShape` + `artifactsComplete` (+ the per-section content floor `MIN_SECTION_CHARS`) —
+// used to be written a SECOND time here, mirroring quay-native store.check(). Two hand-kept copies
+// could (and did) drift. It now lives ONCE in the kernel
+// (packages/quay/src/kernel/task-shape-artifacts.ts), imported here by the same
+// `../../packages/quay/src/…` route this file's shipped sibling scripts already use
+// (profile-policy.ts, driver-shared.ts, …) and inlined into dist/ready-pool-check.js by the plugin
+// bundler. Re-exported so existing importers (rework-predictors.ts, gate-shape-dispatch.test.mjs, the
+// test harness) keep resolving unchanged.
+import { artifactsComplete, detectShape, MIN_SECTION_CHARS } from "../../packages/quay/src/kernel/task-shape-artifacts.ts";
+export { artifactsComplete, detectShape, MIN_SECTION_CHARS };
 import path from "node:path";
 import { execFileSync } from "node:child_process";
 import { parseTask, extractSection, readDependsOn, readTaskStatusAtRef } from "./task-schema.ts";
@@ -332,9 +343,9 @@ export function computePoolFloor(cap = CONCURRENCY_CAP_DEFAULT, floorMult = POOL
   return effectiveFloorCap * floorMult;
 }
 
-/** Minimum non-whitespace content for a section to count as a real artifact (mirrors
- *  quay-native store.ts MIN_SECTION_CHARS — a heading followed by one word is not an artifact). */
-export const MIN_SECTION_CHARS = 40;
+// `MIN_SECTION_CHARS` (the per-section non-whitespace floor, mirroring quay-native store.ts) now
+// lives with the ONE judge — packages/quay/src/kernel/task-shape-artifacts.ts — and is imported +
+// re-exported at the top of this file (gap-ready-check-duplicated-algorithm-store-vs-ready-pool-check).
 
 /** Task-level PARKED marker: a bold `**PARKED` in the body. Plain-text "PARKED" in AC prose
  *  (e.g. this very task's exclusion-rule description) is NOT a marker — matched only when bolded. */
@@ -678,53 +689,15 @@ export const SUITE_BLOCKING_WEIGHT = 2;
  *  连续 ≥3 轮红同一 Touches 命中 ⇒ blocking true). */
 export const RED_WINDOW_MIN_DEFAULT = 3;
 
-// Shape-aware registered sections — SINGLE SOURCE is plugin/scripts/shape-sections.ts (imported +
-// re-exported at the top of this file). This map USED to be a hand-copied second list that drifted
-// twice: the finding-shape DRAFT-heading variants (`## AC（draft）` / `## DoD（draft）`,
-// gap-todo-shape-mismatch-author-gate) and the AC/DoD SUFFIXED-HEADING variants (`## Acceptance
-// Criteria (runnable)` etc., gap-ac47-completion-predicate-consumer-fail-closed AC3) landed ONLY here,
-// so store.check() and artifactsComplete() disagreed on the SAME body. Both lists now live in
-// shape-sections.ts; adding a heading variant there is seen by both judges at once.
-
-/** Detect a task body's shape by exact heading presence (contract → finding → plan → proposal → unknown). */
-export function detectShape(body) {
-  if (/^##\s+Contract\s*$/im.test(body)) return "contract";
-  if (/^##\s+Finding\s*$/im.test(body)) return "finding";
-  if (/^##\s+Plan\s*$/im.test(body)) return "plan";
-  // proposal shape: a literal `## Proposal` section with no contract/finding/plan
-  // heading. Checked AFTER contract/finding/plan so a task carrying `## Proposal`
-  // alongside its shape's own proposal-slot heading still resolves to its true shape.
-  if (/^##\s+Proposal\s*$/im.test(body)) return "proposal";
-  return "unknown";
-}
-
-// `extractSection` matches its heading LITERALLY (it escapes the heading itself — task
-// gap-extract-section-heading-interpolated-unescaped-into-regexp), so callers here pass the raw
-// registered heading: a heading like `AC (draft)` matches the literal `## AC (draft)` line without
-// this module escaping it first. Callers must NOT pre-escape — doing so would double-escape the
-// backslashes and break the match.
-
-function sectionNonWsLength(body, heading) {
-  const sec = extractSection(body, heading);
-  return sec === null ? 0 : sec.replace(/\s/g, "").length;
-}
-
-/** Shape-aware four-artifacts completeness. Returns { shape, complete, artifacts, missing }. */
-export function artifactsComplete(body) {
-  const shape = detectShape(body);
-  const spec = SHAPE_SECTIONS[shape];
-  if (!spec) {
-    return { shape, complete: false, artifacts: {}, missing: ["unknown-shape"] };
-  }
-  const artifacts = {};
-  const missing = [];
-  for (const [name, headings] of Object.entries(spec)) {
-    const ok = headings.some((h) => sectionNonWsLength(body, h) >= MIN_SECTION_CHARS);
-    artifacts[name] = ok;
-    if (!ok) missing.push(name);
-  }
-  return { shape, complete: Object.values(artifacts).every(Boolean), artifacts, missing };
-}
+// The shape-aware JUDGE — `detectShape`, `artifactsComplete`, and the `sectionNonWsLength` helper it
+// used — now lives ONCE in packages/quay/src/kernel/task-shape-artifacts.ts (imported + re-exported
+// at the top of this file). The second hand-kept copy that used to sit here is gone
+// (gap-ready-check-duplicated-algorithm-store-vs-ready-pool-check). Note the `extractSection` still
+// imported below from ./task-schema.ts is a different concern (this file's own AC/DoD checkbox and
+// shape-heading reading); it matches its heading LITERALLY — the function escapes the heading itself
+// (task gap-extract-section-heading-interpolated-unescaped-into-regexp) — so callers pass the raw
+// registered heading (`## AC (draft)` matches literally) and must NOT pre-escape (that would
+// double-escape the backslashes and break the match).
 
 function readFrontField(frontmatterRaw, key) {
   // `key` is interpolated into a regex, so it is escaped first (same metacharacter-literal rule as
