@@ -240,17 +240,14 @@ export function resolveDefaultStatus(value: string): string {
   return value;
 }
 
-/**
- * gap-serve-search-timeout-all-body-fetch: the heading-stripped search index.
- * The former private `stripHeadingsForSearch` body lived here (byte-for-byte
- * the same semantics as Core's serve-render.stripHeadings); it is now the ONE
- * shared definition in ../../quay/src/search-index.ts (imported above) —
- * gap-stripheadings-quadruple-duplication-cli-task-list-client-filter removed
- * the four independent copies so a future heading/fence fix can no longer
- * reach one search surface and miss another. Heading lines outside fenced code
- * blocks are stripped; `# comment` lines inside ``` fences are preserved (they
- * are code content, still searchable).
- */
+// gap-serve-search-timeout-all-body-fetch: the heading-stripped search index
+// (`stripHeadings`, imported above) used by `matchesListFilter`. The former
+// private `stripHeadingsForSearch` body lived here — byte-for-byte the same
+// semantics as Core's serve-render.stripHeadings — and is now the ONE shared
+// definition in ../../quay/src/search-index.ts; gap-stripheadings-quadruple-
+// duplication-cli-task-list-client-filter removed the four independent copies
+// so a future heading/fence fix can no longer reach one search surface and
+// miss another.
 
 /**
  * QN-015: thrown by `write()` when a caller supplies `expectedStatus` and the
