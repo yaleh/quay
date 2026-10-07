@@ -158,4 +158,4 @@ long-term AC 全部判为通过——它们读的是**已发生的** run，结�
 
 在域 AC 7 条全部 achieved；唯一未成的 AC-320 经人裁定取消（判据取值词表陈旧，理由见 `## 范围` 的退役行）。
 本 GOAL 的退出条件 ① / ② / ③ 分别由 AC-265 / AC-274 / AC-269 承载，三条均已 achieved。
-充足性判官在本轮改前的裁决为 `covered`；改动会换掉 `sufficiencyCacheKey`，由下一轮按新 key 重判。
+充足性判官在本轮改前的裁决为 `covered`；本次 body 改动会换掉 `sufficiencyCacheKey`，其后各轮的重判结果落在 `.quay/goal-round.jsonl`，本行不预判它。

@@ -36,30 +36,26 @@ const r = spawnSync(process.execPath, spawnArgs, { encoding: "utf8" });
 在 3.9-5s 量级，store/环境更重时会逼近 8s 超时，超时后在 claudecodeui 侧被 `readJsonQuietly` 静默吞掉（dashboard 外链
 无声消失，不报错）。
 
-**修法方向（留给实现时判断，两条互不排斥）**：
-1. **最小改动、风险最低**：把 `DRIVER_SERVICE_KINDS.map(...)` 的 6 次同步 `spawnSync` 改成并发（`spawn`/`execFile` +
-   `Promise.all`）——6 个 kind 的 status 读取彼此独立（各自读自己的 carrier 文件，无共享可变状态），并发后墙钟时间趋近
-   单次最慢的那个 kind（~1s 量级），而不是 6 次之和。
-2. **更彻底、收益更大**：6 次 Node 冷启动本身才是大头（每次都要重新加载 `--experimental-strip-types` 转译整个
-   `driver-runtime.ts`），并发只是把等待重叠、不消除这个代价。更彻底的修法是让 `driver-runtime.ts` 自己支持"一次
-   进程、循环全部 6 个 kind、吐一次 JSON（或 6 行 JSON 帧）"的调用形态（例如 `status --kind all`），`server.ts` 侧
-   只 `runDriver` 一次而不是 6 次——这样把 6 次冷启动降到 1 次，而不只是把等待重叠。
-   **已知架构约束（实现前需确认，不在本任务预判范围）**：Core（`packages/quay/src`）不得静态 import `plugin/**`
-   （`loaded-version.ts` 头部注释已记载这条方向性限制），所以"把 driver-runtime.ts 的状态计算函数直接 import 进
-   server.ts 同进程跑"可能违反这条既有边界；而"driver-runtime.ts 自己内部一次进程算完 6 个 kind、仍以子进程形态被
-   server.ts 调用一次"不违反这条边界。实现时按既有边界选方案，不要假定方案 2 等同于"合并进 Core 进程"。
+**修法裁定（已选定，不再留给实现时判断）**：选方案1——把 `DRIVER_SERVICE_KINDS.map(...)` 的 6 次同步 `spawnSync` 改成
+并发（`spawn`/`execFile` + `Promise.all`），理由：6 个 kind 的 status 读取彼此独立（各自读自己的 carrier 文件，无共享
+可变状态），并发后墙钟时间趋近单次最慢的那个 kind（~1s 量级）而不是 6 次之和；相比"让 driver-runtime.ts 一次进程算完
+6 个 kind"的方案2，方案1不改变 `driver-runtime.ts` 既有的单 kind CLI 调用契约（该契约还被 `goal-driver.ts`/
+`observation.ts`/`capability-manifest-check.ts` 等其它消费点使用），风险更低、改动面更小。方案2留作记录，不在本任务
+实施：若未来需要进一步压缩（并发后仍有 ~1s 的单次冷启动+转译成本），再单独立案。
+
+该轴仍暗，理由：本任务改动范围限于把 `cli/server.ts` 里 6 次同步 `spawnSync` 调用改成并发 `Promise.all`，不改变
+`driver-runtime.ts` 的既有 CLI 契约、不新增模块、不改变包间依赖结构，L_D/L_G（依赖结构/重复抽象）轴对此类并发化改动
+不提供信号。
 
 ## Touches
 - `packages/quay/src/cli/server.ts`
-- `packages/quay/src/cli/driver.ts`
-- `plugin/scripts/driver-runtime.ts`
 - `plugin/test/driver-runtime-loaded-version-drift.test.mjs`
 - `tasks/gap-server-status-six-serial-driver-runtime-cold-spawns.md`
 
 ## AC
 - [ ] 复现基线：本仓库 `.quay/plugin/bin/quay server status --json` 实测耗时（当前基线量级 ~4-5s），把真实读数贴进完成记录。
-- [ ] 改动后同一命令的墙钟耗时显著下降，把改动前后两组真实耗时数字都贴进完成记录（不是估算；若走方案1并发，预期量级接近单个最慢 kind 的耗时，不是6个之和；若走方案2合并冷启动，预期量级接近1次 Node 启动）。
-- [ ] 新增/修改用例断言 6 个 kind 的 status 读取在并发或单次调用形态下仍各自返回正确、互不污染的读数（每个 kind 的 pid/carrier/declaration 字段与改动前逐一比对一致），`node --experimental-strip-types --test plugin/test/driver-runtime-loaded-version-drift.test.mjs` 退出 0。
+- [ ] 改动后（6 个 kind 并发 spawn）同一命令的墙钟耗时显著下降，把改动前后两组真实耗时数字都贴进完成记录（不是估算；预期量级接近单个最慢 kind 的耗时，不是6个之和）。
+- [ ] 新增/修改用例断言 6 个 kind 的 status 读取并发形态下仍各自返回正确、互不污染的读数（每个 kind 的 pid/carrier/declaration 字段与改动前逐一比对一致），`node --experimental-strip-types --test plugin/test/driver-runtime-loaded-version-drift.test.mjs` 退出 0。
 - [ ] 任一 kind 的子进程/读取失败时（例如该 kind 从未启动过），`server status --json` 的该 kind 行为与改动前一致（`liveness.evaluated:false`/`unevaluated(...)`，不因为改了调用方式而让一个 kind 的失败拖垮或污染其它 5 个 kind 的读数）——补一个显式失败注入的测试用例。
 - [ ] `bash scripts/test.sh --for-task gap-server-status-six-serial-driver-runtime-cold-spawns` 退出 0，且执行了 ≥1 个测试文件。
 
