@@ -544,10 +544,6 @@ validate_worktree_root() {
 }
 
 
-
-
-
-
 # verify_delivery_surface_l1 — gap-complete-delivery-surface-spec-and-l1-verification (AC5): the
 # SIX-category L1 delivery-completeness check (gap-complete-delivery-surface-spec-and-l1-verification
 # AC5): each category's deliverables present + owning gap task filed (SPEC §6 machine-readable list is
@@ -665,6 +661,21 @@ _on_exit() {
   fi
 }
 trap _on_exit EXIT
+
+# ── library mode (gap-quay-init-reduce-real-install-count) ────────────────────────────────────────────
+# When SOURCED (not executed as $0), stop here — the caller wants to invoke ONE function directly
+# (`verify_provider_runtime_existence`, `_closed_set_fingerprint`) without running a full install.
+#
+# ⛔ THIS IS A SAFETY GUARD, NOT A CONVENIENCE. Everything below MUTATES the target: an unguarded
+# source would lay a workspace down in whatever directory the caller happens to be in (measured
+# 2026-10-07: a test that sourced this file to reach a pure check ran the whole install against the
+# repo root). The functions the sourcing callers reach are all defined ABOVE this line.
+# ⛔ It is NOT the retired derivation family's guard: `derive_loop_scripts` / `verify_referenced_landed`
+# and their helpers were DELETED 2026-10-07 (AC5), and the cold-start gate now calls the TS step CLI
+# instead of sourcing this file at all.
+if [ "${BASH_SOURCE[0]}" != "${0}" ]; then
+  return 0
+fi
 
 # ── closed-set write (SPEC §6 / gap-quay-init-closure-shrink-body AC168) ────────────────────────────
 echo "quay-init (plugin v${PLUGIN_VERSION})"

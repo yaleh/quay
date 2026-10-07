@@ -140,8 +140,8 @@ test("capability-catalog excludes archive/** (negative control: removing the exc
   }
 });
 
-// ── quay-init.sh derive_loop_scripts: archived scripts are dropped from the laydown set ──────
-test("derive_loop_scripts drops an archived doc-referenced script (negative control: absent archive/ keeps it)", () => {
+// ── the laydown derivation: archived scripts are dropped from the set ─────────────────────────
+test("the laydown derivation drops an archived doc-referenced script (negative control: absent archive/ keeps it)", () => {
   const d = tmpdir("derive");
   try {
     fs.mkdirSync(path.join(d, "plugin", "scripts"), { recursive: true });
@@ -155,13 +155,15 @@ test("derive_loop_scripts drops an archived doc-referenced script (negative cont
     fs.writeFileSync(path.join(d, "archive", "2026-09-05", "plugin", "scripts", "archived-check.sh"),
       "#!/usr/bin/env bash\n");
 
-    const derive = (root) => spawnSync("bash", ["-c", `
-      export CLAUDE_PLUGIN_ROOT="${SCRIPTS_DIR}/.."
-      set --
-      . "${path.join(SCRIPTS_DIR, "quay-init.sh")}"
-      PLUGIN_ROOT="${root}/plugin"
-      derive_loop_scripts
-    `], { encoding: "utf8" });
+    // AC-331 (gap-init-cli-lays-full-closed-set-and-detects-project-values-without-the-shell-script):
+    // the derivation moved OUT of quay-init.sh's library mode (that mode's guard is now a safety guard
+    // only, and derive_loop_scripts was deleted) into `deriveLoopScripts`, reached through the sibling
+    // step CLI. Same single source, same archive/** exclusion — only the call changed.
+    const derive = (root) => spawnSync("node", [
+      "--no-warnings", "--experimental-strip-types",
+      path.join(SCRIPTS_DIR, "quay-init-steps.ts"),
+      "laydown-set", path.join(root, "plugin"),
+    ], { encoding: "utf8" });
 
     const withArchive = derive(d);
     assert.equal(withArchive.status, 0, `derive must succeed:\n${withArchive.stderr}`);

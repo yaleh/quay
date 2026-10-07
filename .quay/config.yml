@@ -1,0 +1,127 @@
+providers:
+  native:
+    enabled: true
+    tasks_dir: ./tasks
+    env:
+      QUAY_NATIVE_TASKS_DIR: ./tasks
+      QUAY_NATIVE_ADR_DIR: ./adr
+      QUAY_NATIVE_GOAL_DIR: ./goals
+      QUAY_NATIVE_META_DIR: ./meta
+  github:
+    enabled: false
+    path: ./packages/quay-github
+    mcp_entry:
+      - node
+      - ./bin/quay-github.ts
+      - mcp
+    env:
+      QUAY_GITHUB_REPO: yaleh/quay
+gates:
+  it0:
+    - name: impl-row
+      script: ./plugin/scripts/it0-impl-row-check.sh
+      argsKey: implRowArgs
+    - name: line-budget
+      script: ./experiments/quay-perpetual-stream/scripts/it0-ceiling-line-budget-check.sh
+      argsKey: lineBudgetArgs
+    - name: vmeta-lag
+      script: ./plugin/scripts/vmeta-lag-check.sh
+      argsKey: vmetaLagArgs
+    - name: audit-independence
+      script: ./plugin/scripts/audit-independence-check.sh
+      argsKey: auditIndependenceArgs
+    - name: dogfood-evidence
+      script: ./experiments/quay-perpetual-stream/scripts/it0-dogfood-evidence-gate.sh
+      argsKey: dogfoodEvidenceArgs
+    - name: drivable-workspace
+      script: ./plugin/scripts/drivable-workspace-check.sh
+      argsKey: drivableWorkspaceArgs
+  adr:
+    - ADR-001
+    - ADR-007
+  fixed:
+    - name: delivery-standalone-smoke
+      script: ./packages/quay/test/delivery-standalone-smoke.sh
+    - name: anti-gaming
+      script: ./plugin/scripts/anti-gaming-guard.sh
+    - name: loadbearing-test
+      script: ./plugin/scripts/loadbearing-test-gate.sh
+    - name: tree-hygiene
+      script: ./plugin/scripts/tree-hygiene-check.sh
+    - name: worktree-branch-hygiene
+      script: ./plugin/scripts/worktree-branch-hygiene-check.sh
+    - name: build-evidence
+      script: ./plugin/scripts/build-evidence-gate.ts
+      cwd: .
+  testPass:
+    - name: it0-dod-check-tests
+      command: node --test experiments/quay-perpetual-stream/test/it0-dod-check.test.mjs
+    - name: ts-typecheck
+      command: for d in packages/*/; do npx tsc --noEmit -p "$d" || exit 1; done
+      cwd: .
+      timeoutMs: 120000
+    - name: split-or-commit
+      command: node plugin/scripts/it0-split-or-commit-check.ts .
+    - name: enforcement-with-design
+      command: node plugin/scripts/it0-enforcement-with-design-check.ts .
+loop:
+  board: native
+  gates:
+    - acceptance
+  stop: until(.halt)
+  policy: value-typed-ledger
+  suite_runner: quay-buckets
+  scoped_command:
+    - bash
+    - "{worktree}/scripts/test.sh"
+    - --for-task
+    - "{task}"
+    - --allow-thin
+  doc_check_command:
+    - bash
+    - "{worktree}/scripts/test.sh"
+    - --static-checks-doc
+  fork_baseline: develop
+  merge_target: develop
+  execution: dispatched
+  audit: adversarial
+  concurrency: 4
+  concurrency_bands:
+    go: 5
+    wait: 2
+    extreme_wait: 1
+  worktree_root: /home/yale/work/quay-worktrees
+  routines:
+    - name: self-validation
+      trigger: every(5)
+      probe: self-validation
+    - name: architecture-analysis
+      trigger: every(10)
+      probe: architecture-analysis
+    - name: history-mining
+      trigger: every(10)
+      probe: history-mining
+    - name: browser-explorer
+      trigger: every(10)
+      probe: browser-explorer
+    - name: semantic-dedup-scan
+      trigger: interval:1440m
+      probe: semantic-dedup-scan
+    - name: freshness-refresh
+      trigger: interval:120m
+      probe: freshness-refresh
+  repo_root: /data/home/yale/work/quay-worktrees/gap-init-cli-lays-full-closed-set
+  test_command: bash scripts/test.sh
+  tmux_session: null
+  doc_surfaces:
+    - tasks/
+    - goals/
+    - .quay/
+suite:
+  max_oversubscription: 1
+goals:
+  cap: 5
+  stale: 7d
+serve:
+  host: 172.28.0.1
+  port: 20119
