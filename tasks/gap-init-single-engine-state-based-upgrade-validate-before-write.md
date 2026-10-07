@@ -34,6 +34,8 @@ GOAL-029「init 统一为单一 TS 引擎、终局无 .sh;并收窄发布集合�
 - `packages/quay/src/init.ts`
 - `packages/quay/src/config-validate.ts`
 - `packages/quay/src/cli/init.ts`
+- `packages/quay/src/mcp-server.ts`
+- `packages/quay-native/bin/quay-native.ts`
 - `plugin/scripts/quay-init-steps.ts`
 - `packages/quay/test/init.test.mjs`
 - `packages/quay/test/config-validate.test.mjs`
