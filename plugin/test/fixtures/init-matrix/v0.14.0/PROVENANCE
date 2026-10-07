@@ -1,0 +1,26 @@
+tag: v0.14.0
+tag-sha: c00d2702e
+generated: 2026-10-07
+config-sha256: bddf5c80826b1da6fe59e50594e289be96587947f244624093336c7c23899533
+
+# How config.yml was produced — the tag's OWN init run, never hand-written.
+#
+# 1. one-off checkout of the tag (a linked git worktree is enough; a clone works too)
+#      git -C <repo> worktree add --detach /tmp/quay-init-matrix-gen/src-v0.14.0 v0.14.0
+# 2. build the RELEASE-FORM plugin tree from that checkout (no push — local orphan branch only)
+#      cd /tmp/quay-init-matrix-gen/src-v0.14.0
+#      bash plugin/scripts/publish-dist-branch.sh --branch dist-v0.14.0
+#      git worktree add --detach /tmp/quay-init-matrix-gen/dist-v0.14.0 dist-v0.14.0
+# 3. run THAT tag's init against a fresh git repo, from the built tree
+#      cd /tmp/quay-init-matrix-gen/scratch-rel-v0.14.0   # git init -b main; one commit
+#      bash /tmp/quay-init-matrix-gen/dist-v0.14.0/scripts/quay-init.sh \
+#        --root /tmp/quay-init-matrix-gen/scratch-rel-v0.14.0 \
+#        --plugin-root /tmp/quay-init-matrix-gen/dist-v0.14.0 \
+#        --test-command "npm test" --auto-commit-skip
+# 4. the fixture IS the file that run wrote, copied verbatim
+#      cp /tmp/quay-init-matrix-gen/scratch-rel-v0.14.0/.quay/config.yml <fixture>/config.yml
+#
+# The absolute paths baked into config.yml (repo_root / worktree_root / tasks_dir / the four
+# carrier env dirs, and — for this tag — providers.native.path + mcp_entry) are the scratch
+# layout above; they are recorded, not sanitized, because the fixture must be the REAL output.
+# Deterministic: rerun the steps above with the same scratch layout and the bytes match.
