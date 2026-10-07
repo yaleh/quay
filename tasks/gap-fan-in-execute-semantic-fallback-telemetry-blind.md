@@ -22,9 +22,9 @@ extra:
 
 ## AC
 
-- [ ] `grep -n '"landed" | "red"' plugin/scripts/worker-fan-in.ts` confirms the outcome union currently has no slot for semantic-fallback attribution (negative control confirming the gap as filed) — or, if already fixed, a third/sibling value exists and is exercised by a real recorded outcome.
-- [ ] A query over `.quay/worker-outcome.jsonl` (or whatever ledger exists at implementation time) can answer "has `fan-in-execute.js` ever run, and with what result" — currently this returns "unknowable" per the audit above; after the fix it must return a concrete count (even if zero).
-- [ ] Once the semantic-fallback path is observable, the `plugin/workflows/fan-in-execute.js:689` hardcoded scoped-gate command vs. the shared `resolveScopedGateCommand` divergence is re-assessed with actual firing-frequency data, and a decision (fix it / leave it with documented rationale) is recorded.
+- [x] `grep -n '"landed" | "red"' plugin/scripts/worker-fan-in.ts` confirms the outcome union currently has no slot for semantic-fallback attribution (negative control confirming the gap as filed) — or, if already fixed, a third/sibling value exists and is exercised by a real recorded outcome.
+- [x] A query over `.quay/worker-outcome.jsonl` (or whatever ledger exists at implementation time) can answer "has `fan-in-execute.js` ever run, and with what result" — currently this returns "unknowable" per the audit above; after the fix it must return a concrete count (even if zero).
+- [x] Once the semantic-fallback path is observable, the `plugin/workflows/fan-in-execute.js:689` hardcoded scoped-gate command vs. the shared `resolveScopedGateCommand` divergence is re-assessed with actual firing-frequency data, and a decision (fix it / leave it with documented rationale) is recorded.
 
 ## DoD
 
@@ -32,7 +32,31 @@ The worker-outcome ledger (or its successor) distinguishes a landing reached via
 
 ## Touches
 
-- plugin/scripts/worker-fan-in.ts
+- .gitignore
 - plugin/scripts/worker-driver.ts
+- plugin/scripts/worker-fan-in.ts
 - plugin/workflows/fan-in-execute.js
+- plugin/test/fan-in-semantic-fallback-record.test.mjs
 - tasks/gap-fan-in-execute-semantic-fallback-telemetry-blind.md
+
+## Evidence
+
+**What the audit missed (correcting the ## Finding).** The claim "zero invocation-attributable evidence either way" is **falsified**: `.quay/gate-events.jsonl` already carries a real semantic-fallback *landing* — `{gate:"complete", actor:"quay-fan-in-workflow", item_id:"gap-superseded-dependency-blocks-dispatch-forever", timestamp:"2026-09-24T04:11:49.063Z", id:"5e2299bb-91ad-4153-a867-b0d9366c8c32"}`. The same task's worker-outcome record 1h earlier reads `2026-09-24T03:05:42.619Z exited-not-landed mechanical_fan_in:null` — i.e. the durable fan-in ledger says "not landed" for a task the semantic fallback in fact landed. The gap was therefore not "no evidence exists" but "**no query joins the evidence that exists**", plus "**a run that does not land leaves no trace at all**".
+
+**Deliverable.**
+- Write side — `worker-driver.ts --record-semantic-fallback --task <id> --phase start|end [--fallback-outcome landed|red|aborted] [--run-id <id>] [--reason <s>]` appends to `<root>/.quay/fan-in-semantic-fallback.jsonl` (gitignored, `worker-outcome.jsonl` family). Fail-closed (exit 2) on missing `--task`, out-of-vocabulary `--phase`, `--phase end` without `--fallback-outcome`, and `--phase start` with an outcome.
+- Read side — `worker-driver.ts --semantic-fallback-report [--root <r>]`: read-only join of the new attempt ledger with the pre-existing `gate-events.jsonl` landing signal (`actor=quay-fan-in-workflow ∧ gate=complete`). `evaluated:false` only when **neither** carrier is readable (硬规则 3b: not conflated with a measured zero).
+- Workflow wired: `plugin/workflows/fan-in-execute.js` records `--phase start` in the phase-1 prompt (step 0, after entry-preflight) and the paired `--phase end --outcome landed` at step 5.5c (right after the existing `complete`-GateEvent write). Both are best-effort (WARN, never blocking) — 硬规则 12: no new blocking precondition for observability.
+
+**AC1 evidence (negative control, 位置判定).** `grep -c '"landed" | "red"' plugin/scripts/worker-fan-in.ts` = **2** (`:499` `MechanicalFanInResult`, `:2541` `GoalMergeFanInResult`). Deliberately **not** given a "semantic" value: that type describes the *mechanical* path's result, and the semantic fallback is not a value of it (硬规则 8 — no shared vocabulary). The sibling attribution instead lives in the new ledger's own word list (`SemanticFallbackOutcome = "landed" | "red" | "aborted"`, `SEMANTIC_FALLBACK_GATE_ACTOR = "quay-fan-in-workflow"`), and it **is exercised by a real recorded outcome** (the 2026-09-24 landing above).
+
+**AC2 evidence (concrete count, not "unknowable").** Run against the production carriers (main checkout):
+`node --experimental-strip-types plugin/scripts/worker-driver.ts --semantic-fallback-report --root /data/home/yale/work/quay`
+⇒ `{"evaluated":true,"ledgerPresent":false,"gateEventsPresent":true,"attempts":0,"completions":0,"runs":0,"landings":0,...,"gateEventLandings":[{"task":"gap-superseded-dependency-blocks-dispatch-forever","ts":"2026-09-24T04:11:49.063Z","id":"5e2299bb-..."}]}`
+A concrete answer with a concrete count. `--root`-less reads in a worktree (no gitignored carriers) correctly return `evaluated:false` rather than a fake zero.
+
+**AC3 evidence + decision (firing frequency).** Measured: semantic-fallback landings in the whole production ledger = **1** (2026-09-24) vs mechanical-path `complete` events = **825** (`actor=quay-driver`). The declared `loop.scoped_command` in `.quay/config.yml` is `["bash","{worktree}/scripts/test.sh","--for-task","{task}","--allow-thin"]` — byte-equal to the hardcode's argv ⇒ **no actual divergence today**, only a latent "does not follow the config". **Decision: leave it, documented** (rationale now printed in the workflow directly above the line; the line itself moved from `:689` to `:716` because of the AC3 comment). Grounds: (a) the path fires ~never; (b) it is byte-equivalent today; (c) the workflow is being retired (`fan-in-workflow-retirement-check.ts`, L3 双副本删净) ⇒ changing it now only enlarges the change surface of a path about to disappear. Revisit trigger recorded: if the workflow survives P3, route it through `resolveScopedGateCommand` — the moment `.quay/config.yml` changes, the hardcode silently stops matching.
+
+**Tests.** `plugin/test/fan-in-semantic-fallback-record.test.mjs` — 7 tests, all green, including the negative controls that make the report falsifiable: a `quay-driver` `complete` event is **not** counted as a semantic-fallback landing; a same-actor non-`complete` event is not counted; both carriers absent ⇒ `evaluated:false`; unpaired start ⇒ `unfinished`; malformed/out-of-vocabulary lines never become readings; CLI fail-closed paths. `plugin/test/fan-in-execute-paths-s*.test.mjs` (96 tests) still green after the workflow edits.
+
+**Residual gap (honest).** The attempt ledger is written only from the workflow's own start/landed points; its failure exits (suite-red exhaustion, ff-retry exhausted, plugin-root-invalid) currently surface only as an unmatched `phase=start` (`unfinished`), not as an explicit `--outcome red|aborted`. `--fallback-outcome red|aborted` is implemented and tested but not yet wired into those exits.
