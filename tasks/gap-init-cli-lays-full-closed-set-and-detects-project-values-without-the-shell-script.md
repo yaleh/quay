@@ -348,3 +348,38 @@ packages/quay/test/{init,branch-model}.test.mjs                             test
 `## Touches` 因本次 delta 新增两行（`packages/quay/test/mcp-server.test.mjs`、`plugin/sh-census-baseline.json`）——
 `anti-drift-touches-check` 对 Touches 外的 delta 文件是 HARD FAIL，且 fan-in 的 scoped 门按 Touches 选测，
 不加会让这两条修复**不被选中**、下一轮原样再红。
+
+### ⑩ 本轮收尾读数（2026-10-07，修后·merge develop 后·同一棵最终树）
+
+```
+$ bash /tmp/ac331-crit.sh                                  # AC-331 判据原文，取自 goal show --json .criterion
+exit=0
+
+$ node … quay.ts init --root <裸 mktemp 目录>               # 失败面：真因可读（硬规则 3b），且零写入
+quay init: quay init needs the target project's test command but none could be detected in /tmp/quay-bare-….
+  Searched: scripts/test.sh → package.json scripts.test → go.mod → Cargo.toml.
+  Pass --test-command <cmd> explicitly.
+quay-init FAILED — closed-set write state:  unwritten ×7
+exit=2   /   find <dir> -type f ⇒ (空)
+
+$ bash scripts/test.sh --for-task gap-init-cli-lays-full-closed-set-… --allow-thin      # AC6 = 本任务 scoped 门
+ℹ tests 285 / pass 285 / fail 0 / duration_ms 17960
+SCOPED_EXIT=0
+
+$ node plugin/scripts/anti-drift-touches-check.ts --task gap-init-… --worktree <wt> --merge-target develop
+ANTI-DRIFT OK: 18 actual file(s), all within declared Touches (19 glob(s))
+```
+
+**AC2 两条取假臂在本轮最终树上复现**（改动均用 `cp` 备份 + `md5sum` 校验还原，`git status` 空）：
+```
+臂 1  删 init.ts:1891 `if (!fs.existsSync(goalsDir)) fs.mkdirSync(goalsDir, …)`
+      ⇒ CAUSE=closed-set-dir-missing-goals — the CLI alone must create goals/      exit=1
+臂 2  删 init.ts:1908 `writeClaudeSettings(settingsPath, readPluginName(opts.pluginRoot))`
+      ⇒ CAUSE=closed-set-file-missing-.claude/settings.json — the CLI alone must
+        lay the whole closed set (no shell script needed)                          exit=1
+还原后 md5 与备份一致（d4b7b7bf…），两个臂都取自**本轮改过的** init.ts（`ok === false` 那处已在内）。
+```
+
+**AC3 的迁移用例集合**（§③ 逐条列出）在本轮最终树上一次全绿：
+`plugin/test/{quay-init,quay-init-tmux-detection,quay-init-loop}.test.mjs` 共 29 条（18+4+7）在内，
+连同 `laydown-set-check`（9/9）、`archive-exclusion-wiring`、`l1-delivery-surface-check` 合计 50/50。
