@@ -2,7 +2,7 @@
 id: gap-init-unparseable-config-backed-up-and-rebuilt-per-the-unified-semantics
 title: 统一后的 init 对无法解析的配置应"备份后重建"（议定语义），现实现却拒绝且不留备份——与议定设计偏离，并使"/quay:init
   总能得到匹配新版本的配置"对损坏配置不成立
-status: todo
+status: ready
 labels:
   - gap
   - priority:p1
