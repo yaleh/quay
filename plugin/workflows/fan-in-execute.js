@@ -591,6 +591,20 @@ fi
 echo "PLUGIN_ROOT_OK=${PLUGIN_ROOT}"
 # entry-preflight-block-end
 
+【语义兜底遥测 — 记一条「跑过」（gap-fan-in-execute-semantic-fallback-telemetry-blind）】
+# 本 workflow 是【机械 fan-in 失败时的语义兜底】。此前「它跑过没有、结果如何」在任何载体上都答不出：
+# 落地成功会在 step 5.5b 写一条 complete 事件（actor=quay-fan-in-workflow），但【跑过而没落地】
+# （suite 红 / ff 重试耗尽 / 插件根非法）一处痕都不留。本步在接管时记一条 phase=start 到
+# <root>/.quay/fan-in-semantic-fallback.jsonl；step 5.5c 记配对的 phase=end（--outcome landed）。
+# 读面：worker-driver.ts --semantic-fallback-report（join 本台账 + 既有 gate-events 落地信号）。
+# ⛔ best-effort：写失败只 WARN，绝不阻塞 fan-in（硬规则 12：不为观测新增阻塞前置）。
+# ⚠️ phase 1 在 ff 重试环里会被重跑 ⇒ 同一 runId 会有多条 start（attempts 计条数、runs 计 distinct runId）。
+# smf-attempt-block-start
+if ! node --no-warnings --experimental-strip-types ${PLUGIN_ROOT}/scripts/worker-driver.ts --record-semantic-fallback --task ${task} --root ${root} --phase start ${runId ? "--run-id " + runId : ""}; then
+  echo "WARN: 语义兜底 start 记录写入失败（不影响 fan-in 执行；--semantic-fallback-report 将看不到这次尝试）" >&2
+fi
+# smf-attempt-block-end
+
 步骤（严格按序；每步都先 cd ${worktree} 或显式用 -C）：
 
 【重试遗留翻转处理（gap-fan-in-turn-budget-suite-timeout，在 step 0 自举检查之前）】
@@ -686,6 +700,17 @@ cd ${worktree} && node --experimental-strip-types ${PLUGIN_ROOT}/scripts/fan-in-
      标 needs-human、停止本 tick 合并与派发——不要继续启动 suite、不要 ff。
 
 【无锁段 step 4 — scoped 门 + doc 检查 + 全量 suite 启动（detached，不等待）】
+# ⚠️ 本行是 scoped 门的【硬编码命令】，机械路径用的是共享单一真相源 resolveScopedGateCommand
+#    （plugin/scripts/worker-fan-in.ts，读 .quay/config.yml 的 loop.scoped_command）。
+#    gap-fan-in-execute-semantic-fallback-telemetry-blind AC3 的裁定：**保留该硬编码，附理由**——
+#      (a) 实测触发频率：语义兜底路径在本仓库历史上只落地过 1 次（.quay/gate-events.jsonl
+#          actor=quay-fan-in-workflow，2026-09-24），远不足以让该分歧产生可观测后果；
+#      (b) 本仓库的 loop.scoped_command 逐字解析出来就是本行（["bash","{worktree}/scripts/test.sh",
+#          "--for-task","{task}","--allow-thin"]）⇒ 当前【无实际分歧】，只是「不跟配置走」的潜在缺陷；
+#      (c) 本 workflow 正被退役（fan-in-workflow-retirement-check.ts 的双副本删净 L3）⇒ 现在就改它
+#          等于为一条即将消失的路径新增改动面。
+#    ⇒ 若本 workflow 在 P3 之后仍被保留，再把它改成走 resolveScopedGateCommand（判据：配置一改，
+#      本行不跟随 ⇒ 届时分歧从「潜在」变「实际」）。
 cd ${worktree} && bash scripts/test.sh --for-task ${task} --allow-thin
   —— scoped 门，必须绿；非绿 ⇒ 修到绿再继续。
 cd ${worktree} && bash scripts/test.sh --static-checks-doc
@@ -994,6 +1019,16 @@ if ! node --no-warnings --experimental-strip-types ${PLUGIN_ROOT}/scripts/worker
   echo "WARN: complete GateEvent 补写失败（${task} ff 已成功但事件未落盘）——landing 照常完成；该漏记会由 gate-event-coverage-check 在次日覆盖率判据上报出（⛔ 不在此阻塞 landing，与机械 fan-in 的 best-effort 契约一致）" >&2
 fi
 # complete-gate-event-block-end
+
+【持锁段 step 5.5c — 记配对的语义兜底结果（仅 ff 成功后）】
+# gap-fan-in-execute-semantic-fallback-telemetry-blind：与 step 5.5b 同位（ff 成功=真落地）。
+# 记 phase=end --outcome landed，与 phase 1 的 phase=start 配对；--semantic-fallback-report 据此
+# 算出 landings / unfinished（有 start 无 end = 跑过但结果未记）。⛔ best-effort，同 5.5b 契约。
+# smf-landed-block-start
+if ! node --no-warnings --experimental-strip-types ${PLUGIN_ROOT}/scripts/worker-driver.ts --record-semantic-fallback --task ${task} --root ${root} --phase end --fallback-outcome landed ${runId ? "--run-id " + runId : ""}; then
+  echo "WARN: 语义兜底 landed 记录写入失败（landing 照常完成；该漏记表现为一条无配对 end 的 start）" >&2
+fi
+# smf-landed-block-end
 
 —— step 5.5 结果：exit 0 ⇒ bracket 已闭合（返回 note 标注 bracketClose=OK）。
     exit 1 ⇒ bracket 闭合失败（FATAL 已打印）——ff 已成功、task 已 done、landing 完成；
