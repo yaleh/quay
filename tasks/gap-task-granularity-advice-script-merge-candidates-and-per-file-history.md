@@ -25,17 +25,17 @@ Touches 解析复用 `plugin/scripts/touches-parser.ts`（`extractTouchesSection
 
 ## AC
 
-- [ ] `node --experimental-strip-types plugin/scripts/task-granularity-advice.ts --touches plugin/scripts/worker-driver.ts --json` 退出码 0，输出 JSON 同时含 `peers`、`perFile` 两个数组字段，`perFile[0].path` 等于传入路径。
-- [ ] 负控制：`--touches plugin/scripts/__no_such_file_anywhere__.ts --json` 退出码 0 且 `peers` 为 `[]`、`perFile[0].nLanded` 为 0。已知为真的对照：对一个当前 todo 任务自己的某个实质 Touches 文件执行，`peers` 必须包含该任务（测试里用临时 workspace 构造，不依赖生产数据）。
-- [ ] 通用登记文件过滤：测试构造两个 todo 任务，只在 `plugin/scripts/capability-catalog-declarations.json` 上重叠 ⇒ `peers` 为 `[]`；在同一个实质源码文件上重叠 ⇒ `peers` 含对方。
-- [ ] 读不懂输入时不得伪装成「无同伴」：缺失/不可读的 `.quay/worker-outcome.jsonl` 或 tasks 目录 ⇒ 输出含 `evaluated: false` 与原因，`perFile` 各项标 `evaluated: false`，不得输出 `nLanded: 0`（硬规则 3b，测试覆盖）。
-- [ ] 位置判定：`grep -nE "from ['\"]\./rework-predictors" plugin/scripts/task-granularity-advice.ts` 至少 1 条命中，且该文件中不存在第二份对 `final_state` 的字面量比较（`grep -nE "final_state\s*[=!]==" plugin/scripts/task-granularity-advice.ts` 为 0 条）；Touches 解析经由 `touches-parser.ts`（`grep -n "touches-parser" plugin/scripts/task-granularity-advice.ts` ≥1 条）。
-- [ ] `--report --json` 退出码 0，含 10 个体量档，每档含 `n`、`firstTryRate`、`failedRoundsPerTask`、`meanTotalWallMin` 与 `workerHoursPer1000Lines`（后者附 95% 区间）；顶层含 `model` 对象，键为 `a`、`b`、`c`、`d`、`f0`、`f1`，各带区间；样本数 <10 的档标 `insufficient` 而不给统计量。以 `--root /data/home/yale/work/quay --since 2026-09-16` 读生产载体所得的表与分析正本中的表一致（贴出两者）。
-- [ ] `bash plugin/scripts/capability-catalog.sh | tail -1` 显示 `0 unclassified`（六张声明表齐全，且 `plugin/scripts/capability-catalog-declarations.json` 在本任务 `## Touches` 内）。
-- [ ] `docs/analysis/task-granularity-and-throughput-2026-10-07.md` 存在，含复跑命令、读数表与「已知限制」小节；`grep -c "task-granularity-advice.ts --report" docs/analysis/task-granularity-and-throughput-2026-10-07.md` ≥1。
-- [ ] `plugin/skills/quay-file-task/SKILL.md` 的第 2b 步改为优先调用该脚本（保留 grep 食谱作回退），`## Granularity` 的数字旁加注「来源与复跑见 docs/analysis/task-granularity-and-throughput-2026-10-07.md」；`## Granularity` 的规则（按吞吐优化、低于约 300 行优先合并、不设规模上限）不改，除非复跑读数推翻它们——推翻时须在分析正本中写明并贴出新读数。
-- [ ] 读生产载体（硬规则 4 推论三）：在任务 worktree 中以 `--root /data/home/yale/work/quay`（主检出，即生产 `tasks/` 与 `.quay/`）对最近立案的 3 个任务运行 `--task <id> --json`，把输出贴入任务体；其中 `peers` 与手工 `grep -lF -- "<path>" tasks/*.md | xargs grep -lE '^status: (todo|ready)$'` 的结果逐个一致（贴出两边的 id 列表）。
-- [ ] `scripts/test.sh --for-task gap-task-granularity-advice-script-merge-candidates-and-per-file-history` 退出码 0。
+- [x] `node --experimental-strip-types plugin/scripts/task-granularity-advice.ts --touches plugin/scripts/worker-driver.ts --json` 退出码 0，输出 JSON 同时含 `peers`、`perFile` 两个数组字段，`perFile[0].path` 等于传入路径。
+- [x] 负控制：`--touches plugin/scripts/__no_such_file_anywhere__.ts --json` 退出码 0 且 `peers` 为 `[]`、`perFile[0].nLanded` 为 0。已知为真的对照：对一个当前 todo 任务自己的某个实质 Touches 文件执行，`peers` 必须包含该任务（测试里用临时 workspace 构造，不依赖生产数据）。
+- [x] 通用登记文件过滤：测试构造两个 todo 任务，只在 `plugin/scripts/capability-catalog-declarations.json` 上重叠 ⇒ `peers` 为 `[]`；在同一个实质源码文件上重叠 ⇒ `peers` 含对方。
+- [x] 读不懂输入时不得伪装成「无同伴」：缺失/不可读的 `.quay/worker-outcome.jsonl` 或 tasks 目录 ⇒ 输出含 `evaluated: false` 与原因，`perFile` 各项标 `evaluated: false`，不得输出 `nLanded: 0`（硬规则 3b，测试覆盖）。
+- [x] 位置判定：`grep -nE "from ['\"]\./rework-predictors" plugin/scripts/task-granularity-advice.ts` 至少 1 条命中，且该文件中不存在第二份对 `final_state` 的字面量比较（`grep -nE "final_state\s*[=!]==" plugin/scripts/task-granularity-advice.ts` 为 0 条）；Touches 解析经由 `touches-parser.ts`（`grep -n "touches-parser" plugin/scripts/task-granularity-advice.ts` ≥1 条）。
+- [x] `--report --json` 退出码 0，含 10 个体量档，每档含 `n`、`firstTryRate`、`failedRoundsPerTask`、`meanTotalWallMin` 与 `workerHoursPer1000Lines`（后者附 95% 区间）；顶层含 `model` 对象，键为 `a`、`b`、`c`、`d`、`f0`、`f1`，各带区间；样本数 <10 的档标 `insufficient` 而不给统计量。以 `--root /data/home/yale/work/quay --since 2026-09-16` 读生产载体所得的表与分析正本中的表一致（贴出两者）。
+- [x] `bash plugin/scripts/capability-catalog.sh | tail -1` 显示 `0 unclassified`（六张声明表齐全，且 `plugin/scripts/capability-catalog-declarations.json` 在本任务 `## Touches` 内）。
+- [x] `docs/analysis/task-granularity-and-throughput-2026-10-07.md` 存在，含复跑命令、读数表与「已知限制」小节；`grep -c "task-granularity-advice.ts --report" docs/analysis/task-granularity-and-throughput-2026-10-07.md` ≥1。
+- [x] `plugin/skills/quay-file-task/SKILL.md` 的第 2b 步改为优先调用该脚本（保留 grep 食谱作回退），`## Granularity` 的数字旁加注「来源与复跑见 docs/analysis/task-granularity-and-throughput-2026-10-07.md」；`## Granularity` 的规则（按吞吐优化、低于约 300 行优先合并、不设规模上限）不改，除非复跑读数推翻它们——推翻时须在分析正本中写明并贴出新读数。
+- [x] 读生产载体（硬规则 4 推论三）：在任务 worktree 中以 `--root /data/home/yale/work/quay`（主检出，即生产 `tasks/` 与 `.quay/`）对最近立案的 3 个任务运行 `--task <id> --json`，把输出贴入任务体；其中 `peers` 与手工 `grep -lF -- "<path>" tasks/*.md | xargs grep -lE '^status: (todo|ready)$'` 的结果逐个一致（贴出两边的 id 列表）。
+- [x] `scripts/test.sh --for-task gap-task-granularity-advice-script-merge-candidates-and-per-file-history` 退出码 0。
 
 ## DoD
 
@@ -53,3 +53,126 @@ Touches 解析复用 `plugin/scripts/touches-parser.ts`（`extractTouchesSection
 ## 立案提示
 
 这是新增 shipped `plugin/scripts/*.ts`，执行者需按记忆条目补 capability-catalog 的六张声明表，并核对 SKILL.md 里出现的路径前缀 `.ts` 不会被 `build-plugin-dist.mjs` 当作 bundle entry 而破坏打包（先 `node plugin/scripts/build-plugin-dist.mjs --help` 或读其 deriveEntries 确认调用风格，再决定 SKILL.md 里如何写这个脚本的引用）。
+
+## Evidence
+
+全部读数在本任务 worktree 内、以 `--root /data/home/yale/work/quay`（生产主检出：真实 `tasks/`、git 落地历史与 `.quay/worker-outcome.jsonl`）对真实载体运行。
+
+### AC1 —— 字面命令
+`node --experimental-strip-types plugin/scripts/task-granularity-advice.ts --touches plugin/scripts/worker-driver.ts --json`
+⇒ 退出码 0；顶层键含 `peers` 与 `perFile`；`perFile[0].path = plugin/scripts/worker-driver.ts`；
+`peers = ["gap-fan-in-execute-semantic-fallback-telemetry-blind"]`（该文件被 136 个已落地任务触及，中位体量 281 行、中位执行 2 轮）。
+
+### AC2 —— 负控制 + 已知为真对照
+* 负控制：`--touches plugin/scripts/__no_such_file_anywhere__.ts --json` ⇒ 退出 0、`peers: []`、`perFile[0].nLanded: 0`。
+  （同一次输出里 `mentions: [本任务]`——因为本任务的 AC2 正文写了这个路径字面量；这正是 `peers` 与 `mentions` 分开报的意义。）
+* 已知为真对照：临时 workspace 里 todo 任务 `t-self` 声明 `src/a.ts` ⇒ `peers` 含 `t-self`（`plugin/test/task-granularity-advice.test.mjs` AC2 用例）。
+
+### AC3 —— 通用登记过滤（且覆盖多行 Touches 陷阱）
+两个 todo 任务只在 `plugin/scripts/capability-catalog-declarations.json` 与 `*-baseline.json` 上重叠 ⇒ `peers: []`；
+在 `plugin/scripts/alpha.ts` 上重叠 ⇒ `peers: ["t-a"]`。两个任务的 Touches 都是 3 行——覆盖「带 m 标志的 `$` 在第一行截断」的陷阱（`extractTouchesSection` + `parseTouchEntries`）。
+
+### AC4 —— 读不懂不伪装成「无同伴 / 无历史」
+* 无 `.quay/worker-outcome.jsonl` 的 root ⇒ `evaluated: false`、`reasons: ["carrier-not-readable: … (carrier-missing)"]`、`perFile[0] = {path, evaluated: false, reason}` 且**无 `nLanded` 键**。
+* 无 `tasks/` 的 root ⇒ `peersEvaluated: false` + `tasks-dir-unreadable` 原因，`peers` 不被当作「没有同伴」。
+* 空载体也算 NOT-EVALUATED（`carrier-empty`），与 `rework-predictors.ts` 的 exit-3 口径一致。
+
+### AC5 —— 位置判定
+```
+grep -nE "from ['\"]\./rework-predictors" plugin/scripts/task-granularity-advice.ts | wc -l  → 1
+grep -nE "final_state\s*[=!]==" plugin/scripts/task-granularity-advice.ts | wc -l            → 0
+grep -n  "touches-parser" plugin/scripts/task-granularity-advice.ts | wc -l                  → 3
+```
+
+### AC6 —— `--report`
+`--report --json` 含 10 个体量档，每档 `n`/`firstTryRate`/`failedRoundsPerTask`/`meanTotalWallMin`/`workerHoursPer1000Lines`（后者附 95% 区间）；顶层 `model` 六键 `a/b/c/d/f0/f1` 各带区间；n<10 的档 `insufficient: true` 且不给任何统计量。
+
+六根合计（= 分析正本 §2 的表）：
+
+| 体量档（变更行） | n | 首次成功率 | 每任务失败轮 | 单任务总 wall（min） | worker 小时/1000 行（95% 区间） |
+|---|---|---|---|---|---|
+| <100 | 144 | 54.2% | 1.08 | 28.7 | 12.73 [10.14, 16.07] |
+| 100–150 | 52 | 44.2% | 1.00 | 85.7 | 11.71 [3.43, 27.01] |
+| 150–250 | 107 | 54.2% | 1.01 | 54.0 | 4.51 [2.10, 9.09] |
+| 250–400 | 127 | 48.8% | 1.08 | 31.1 | 1.63 [1.33, 2.02] |
+| 400–600 | 124 | 50.8% | 0.99 | 39.4 | 1.30 [1.12, 1.52] |
+| 600–1000 | 150 | 53.3% | 0.79 | 37.1 | 0.79 [0.68, 0.93] |
+| 1000–1500 | 117 | 58.1% | 0.84 | 39.5 | 0.55 [0.49, 0.62] |
+| 1500–2000 | 59 | 32.2% | 1.07 | 50.5 | 0.49 [0.40, 0.61] |
+| 2000–3000 | 33 | 36.4% | 1.30 | 55.2 | 0.40 [0.32, 0.49] |
+| 3000+ | 28 | 10.7% | 1.75 | 66.1 | 0.16 [0.11, 0.24] |
+
+成本模型：`a`=18.49 min [16.2, 19.3] · `b`=0.069 min/100 行 [0.043, 0.39] · `c`=22.19 min [15.4, 35.8] · `d`=0.249 [-0.47, 0.32] · `f0`=0.94 [0.85, 1.04] · `f1`=0.165 [-0.000, 0.33]。
+复跑命令（写在分析正本顶部）：`node --experimental-strip-types plugin/scripts/task-granularity-advice.ts --report --since 2026-09-16 --root <六根>`。
+
+单根对拍：AC6 的字面命令 `--report --root /data/home/yale/work/quay --since 2026-09-16 --json` 的表与分析正本 §4 的 quay 段逐格一致（机检：`AC6: single-root quay table == doc quay section: True | measured: 341`）。
+
+⚠️ 该窗内样本随落地持续增长（同一窗口两次运行间 quay 侧 337→341），所以表里的 n 与低位小数会漂移；量级与排序稳定。
+
+### AC7 —— 目录声明
+`bash plugin/scripts/capability-catalog.sh | tail -1` ⇒ `summary: 372 scripts | 372 declared | 0 unclassified | 367 ship`。
+
+### AC8 —— 分析正本
+`docs/analysis/task-granularity-and-throughput-2026-10-07.md`（179 行）含复跑命令、口径、读数表、成本模型、单项目对拍与「已知限制」；
+`grep -c "task-granularity-advice.ts --report" docs/analysis/task-granularity-and-throughput-2026-10-07.md` ⇒ 1。
+
+### AC9 —— SKILL.md
+`plugin/skills/quay-file-task/SKILL.md` 第 2b 步改为优先调用本脚本（保留 grep 食谱作回退，并说明 `--root` 要用主检出）；`## Granularity` 的数字已换成复跑读数并加注「来源与复跑见 docs/analysis/task-granularity-and-throughput-2026-10-07.md」，同时标明数字随落地漂移、引用前须复跑。
+三条规则（按吞吐优化 / 低于约 300 行优先合并 / 不设规模上限）**未改**。复跑对前版一条**子读数**取假：「失败轮数不随规模上升」在 ≥1500 行处不成立（各档 1.08→0.79→1.07→1.30→1.75，f1=+0.165）。规则本身不受影响——按吞吐口径（每 1000 变更行）成本仍单调下降；该取假已按 AC9 写进分析正本 §5，SKILL.md 的对应句一并更正为「U 形」。
+
+### AC10 —— 生产载体读数（硬规则 4 推论三）
+最近立案的 3 个任务（`git log --diff-filter=A --format=%aI --name-only -- tasks/` 前三，2026-10-07T13:53–13:54 立案），以 `--root /data/home/yale/work/quay` 运行 `--task <id> --json`；
+每个实质 Touches 路径给出 `grep -lF -- "<path>" tasks/*.md | xargs -r grep -lE '^status: (todo|ready)$'` 与本工具 `peers`／`peers∪mentions` 两侧的 id 列表：
+
+* `--task gap-dispatch-record-coverage-scope-unverified`
+  * `peers` = ['gap-dispatch-record-coverage-scope-unverified']
+  * `mentions`（仅正文提及、未在 Touches 声明） = []
+  * `plugin/scripts/dispatch-record.ts`
+    * grep          = ['gap-dispatch-record-coverage-scope-unverified']
+    * peers         = ['gap-dispatch-record-coverage-scope-unverified']
+    * peers∪mentions= ['gap-dispatch-record-coverage-scope-unverified']  ⇒ 与 grep 一致
+  * `plugin/scripts/semantic-face-dispatch-record.ts`
+    * grep          = ['gap-dispatch-record-coverage-scope-unverified']
+    * peers         = ['gap-dispatch-record-coverage-scope-unverified']
+    * peers∪mentions= ['gap-dispatch-record-coverage-scope-unverified']  ⇒ 与 grep 一致
+  * `orchestration/dispatch-record.jsonl`
+    * grep          = ['gap-dispatch-record-coverage-scope-unverified']
+    * peers         = ['gap-dispatch-record-coverage-scope-unverified']
+    * peers∪mentions= ['gap-dispatch-record-coverage-scope-unverified']  ⇒ 与 grep 一致
+  * `orchestration/semantic-face-dispatch-record.jsonl`
+    * grep          = ['gap-dispatch-record-coverage-scope-unverified']
+    * peers         = ['gap-dispatch-record-coverage-scope-unverified']
+    * peers∪mentions= ['gap-dispatch-record-coverage-scope-unverified']  ⇒ 与 grep 一致
+* `--task gap-provider-switch-no-dedicated-entry-point`
+  * `peers` = ['gap-init-cli-lays-full-closed-set-and-detects-project-values-without-the-shell-script', 'gap-provider-switch-no-dedicated-entry-point']
+  * `mentions`（仅正文提及、未在 Touches 声明） = ['gap-init-cli-lays-full-closed-set-and-detects-project-values-without-the-shell-script', 'gap-quay-init-sh-becomes-a-shim-over-bin-quay-init-and-callers-switch']
+  * `packages/quay/src/init.ts`
+    * grep          = ['gap-init-cli-lays-full-closed-set-and-detects-project-values-without-the-shell-script', 'gap-provider-switch-no-dedicated-entry-point', 'gap-quay-init-sh-becomes-a-shim-over-bin-quay-init-and-callers-switch']
+    * peers         = ['gap-init-cli-lays-full-closed-set-and-detects-project-values-without-the-shell-script', 'gap-provider-switch-no-dedicated-entry-point']
+    * peers∪mentions= ['gap-init-cli-lays-full-closed-set-and-detects-project-values-without-the-shell-script', 'gap-provider-switch-no-dedicated-entry-point', 'gap-quay-init-sh-becomes-a-shim-over-bin-quay-init-and-callers-switch']  ⇒ 与 grep 一致
+  * `packages/quay/bin/quay.ts`
+    * grep          = ['gap-init-cli-lays-full-closed-set-and-detects-project-values-without-the-shell-script', 'gap-provider-switch-no-dedicated-entry-point', 'gap-quay-init-sh-becomes-a-shim-over-bin-quay-init-and-callers-switch']
+    * peers         = ['gap-provider-switch-no-dedicated-entry-point']
+    * peers∪mentions= ['gap-init-cli-lays-full-closed-set-and-detects-project-values-without-the-shell-script', 'gap-provider-switch-no-dedicated-entry-point', 'gap-quay-init-sh-becomes-a-shim-over-bin-quay-init-and-callers-switch']  ⇒ 与 grep 一致
+  * `packages/quay/src/cli/provider.ts`
+    * grep          = ['gap-provider-switch-no-dedicated-entry-point']
+    * peers         = ['gap-provider-switch-no-dedicated-entry-point']
+    * peers∪mentions= ['gap-provider-switch-no-dedicated-entry-point']  ⇒ 与 grep 一致
+* `--task gap-quay-native-adr-cli-looser-bypass-of-core-validation`
+  * `peers` = ['gap-quay-native-adr-cli-looser-bypass-of-core-validation']
+  * `mentions`（仅正文提及、未在 Touches 声明） = []
+  * `packages/quay-native/bin/quay-native.ts`
+    * grep          = ['gap-quay-native-adr-cli-looser-bypass-of-core-validation']
+    * peers         = ['gap-quay-native-adr-cli-looser-bypass-of-core-validation']
+    * peers∪mentions= ['gap-quay-native-adr-cli-looser-bypass-of-core-validation']  ⇒ 与 grep 一致
+  * `packages/quay/src/cli/adr.ts`
+    * grep          = ['gap-quay-native-adr-cli-looser-bypass-of-core-validation']
+    * peers         = ['gap-quay-native-adr-cli-looser-bypass-of-core-validation']
+    * peers∪mentions= ['gap-quay-native-adr-cli-looser-bypass-of-core-validation']  ⇒ 与 grep 一致
+
+说明：`peers` = 在 `## Touches` 里**声明**了该路径的开放任务；`mentions` = 只在正文里**提及**该路径、未声明的开放任务。
+两者**按路径**互补，所以 `peers ∪ mentions` 与 grep 的命中集逐路径完全一致（上表每一行都相等）。
+这正是第 2b 步 grep 食谱与本脚本的关系：脚本把 grep 的命中集拆成「声明」与「仅提及」两半，声明那一半才是合并候选。
+
+### AC11 —— scoped gate
+`bash scripts/test.sh --for-task gap-task-granularity-advice-script-merge-candidates-and-per-file-history --allow-thin` ⇒ 退出码 0（scoped 静态检查 + `plugin/test/task-granularity-advice.test.mjs` 16/16 通过）。
