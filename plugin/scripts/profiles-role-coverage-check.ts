@@ -182,7 +182,17 @@ function evaluate(root: string): Result {
   try {
     const r = spawnSync(
       process.execPath,
-      ["--no-warnings", "--experimental-strip-types", cliEntry, "init", "--root", ws],
+      [
+        "--no-warnings", "--experimental-strip-types", cliEntry,
+        "init", "--root", ws,
+        // This checker's question is the profile CARRIER, not the test-command ladder, so it must
+        // supply the one project-derived input `init` fails CLOSED without. That fail-closed is
+        // `quay-init.sh`'s `detect_test_command` miss contract (the CLI is its port), and an empty
+        // temp dir matches none of its four rungs (scripts/test.sh / package.json scripts.test /
+        // go.mod / Cargo.toml). Omitting it makes THIS checker go NOT-EVALUATED for a reason
+        // orthogonal to what it asserts — the artifact it examines was never produced.
+        "--test-command", "node --test",
+      ],
       { encoding: "utf8", timeout: 120_000 },
     );
     if (r.status !== 0) {
