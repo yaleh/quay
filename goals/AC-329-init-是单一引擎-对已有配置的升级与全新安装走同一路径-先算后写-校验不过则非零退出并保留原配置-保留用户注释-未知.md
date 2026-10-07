@@ -1,7 +1,7 @@
 ---
 id: AC-329
 title: init 是单一引擎：对已有配置的升级与全新安装走同一路径，先算后写、校验不过则非零退出并保留原配置；保留用户注释/未知键/用户固定值，去掉退役键，且幂等
-status: achieved
+status: active
 kind: criterion
 goal: GOAL-029
 criterion: >-
@@ -171,8 +171,16 @@ statusLog:
     to: achieved
     actor: goal-driver
     reason: "I2: criterion pass"
+  - at: 2026-10-07T03:03:58.380Z
+    from: achieved
+    to: active
+    actor: manager
+    reason: 人 2026-10-07 指示修正判据并决定 corrupt 语义（备份后重建）：原判据最后一步因重复键实际测的是 corrupt
+      分支；修正后的判据在 corrupt 步骤为红，已有跟进任务
+      gap-init-unparseable-config-backed-up-and-rebuilt-per-the-unified-semantics
+      推进，故重新打开
 fidelity:
-  verdict: not-evaluated
-  reason: no judge configured
-  at: 2026-10-07T02:00:28.722Z
+  verdict: faithful
+  reason: "fidelity judge: faithful"
+  at: 2026-10-07T03:03:58.379Z
 ---
