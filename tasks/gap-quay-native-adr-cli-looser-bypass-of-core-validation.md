@@ -18,10 +18,10 @@ Proposed action：短期/低成本——在 `quay-native adr --help` 的输出�
 
 ## Acceptance Criteria
 
-- [ ] `quay-native adr --help` 输出新增说明文字，声明该 CLI 是内部/绕开 Core 校验的通道,正常使用建议走 `quay adr`
-- [ ] （长期项，若本任务范围内一并完成）`quay-native adr new`/`edit` 增加 title-required 护栏，行为与 `packages/quay/src/cli/adr.ts` 对齐
-- [ ] （长期项，若本任务范围内一并完成）`quay-native adr` 增加 `accept/deprecate/reject/supersede` 语义动词，或明确说明为何不需要
-- [ ] 既有 `quay-native` ADR CLI 测试全绿，无回归
+- [x] `quay-native adr --help` 输出新增说明文字，声明该 CLI 是内部/绕开 Core 校验的通道,正常使用建议走 `quay adr`
+- [x] （长期项，若本任务范围内一并完成）`quay-native adr new`/`edit` 增加 title-required 护栏，行为与 `packages/quay/src/cli/adr.ts` 对齐
+- [x] （长期项，若本任务范围内一并完成）`quay-native adr` 增加 `accept/deprecate/reject/supersede` 语义动词，或明确说明为何不需要
+- [x] 既有 `quay-native` ADR CLI 测试全绿，无回归
 
 ## Definition of Done
 
