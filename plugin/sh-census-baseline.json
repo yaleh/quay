@@ -354,8 +354,24 @@
       },
       "why": "UPWARD re-anchor (+1) — the same deliberate, one-off cost its sibling above paid, for the same reason: plugin/scripts/publish-dist-branch.sh gained ONE code line that reads the runtime-reachable `.sh` set (plugin/scripts/shipped-shell-reachability.ts --print-excludes) so the artifact stops shipping the 19 non-test `.sh` no runtime surface reaches. The prune that consumes that list is chained onto the pre-existing rewrite line, so it adds no line of its own; comment lines, which carry the WHY, are free under this axis. Re-anchored to the checker's OWN reading on this tree (7695) — never hand-fitted.",
       "attribution": "+1 = plugin/scripts/publish-dist-branch.sh's SHELL_EXCLUDES assignment (embedded `node --experimental-strip-types`). Residual = 0. duplicateCopies untouched at 0 (0 is the assertion, not an omission)."
+    },
+    {
+      "when": "2026-10-07 (gap-init-cli-lays-full-closed-set-and-detects-project-values-without-the-shell-script)",
+      "from": {
+        "embeddedInterpreterLines": 7695,
+        "duplicateCopies": 0
+      },
+      "to": {
+        "embeddedInterpreterLines": 7334,
+        "duplicateCopies": 0
+      },
+      "why": "DOWNWARD re-anchor (-361, the intended direction — by far the largest single step this axis has taken). This task DELETES the shell's legacy check family (derive_loop_scripts / verify_referenced_landed / compute_drift_report / compute_dependency_closure_gaps / ensure_vendor_runtime and the --check-drift / --check-dependency-closure modes that were their only callers) and the project-value detection the TS engine now owns, so the two charged files that carried them shrink hard. ⛔ AC6 of plugin/test/sh-census-check.test.mjs requires the committed baseline to EQUAL the live reading, not merely bound it (a stale-higher baseline lets a future +361 regression stay green). The prior round read the GATE (7331 ≤ 7695 ⇒ PASS) and left this file OUT of ## Touches — that reading is what reddened the fan-in suite; the same mistake cost the sibling entry 21 above. Measured on the MERGED tree with the checker's OWN reading: `node --experimental-strip-types plugin/scripts/sh-census-check.ts --json` → totals.embeddedInterpreterLines 7334, duplicateCopies 0. Never hand-fitted.",
+      "attribution": {
+        "embeddedInterpreterLines": "-361 = plugin/scripts/quay-init.sh 1007 -> 650 code lines (-357) + plugin/scripts/laydown-set-check.sh 183 -> 179 (-4). Residual = 0: with BOTH files checked out from develop on this otherwise-final tree the checker reads exactly 7695, and the branch's entire tracked *.sh delta vs develop is those two paths (`git diff --name-status develop HEAD -- '*.sh'`). Both still exec an interpreter at a command position (quay-init.sh embedded:[node]; laydown-set-check.sh embedded:[node,python3]) and neither is on the exception list, so they STAY IN the axis — the line count moved, not their membership.",
+        "duplicateCopies": "0 — untouched (0 is the assertion, not an omission). This task added no experiments/** mirror and converted no byte-identical pair."
+      }
     }
   ],
-  "embeddedInterpreterLines": 7695,
+  "embeddedInterpreterLines": 7334,
   "duplicateCopies": 0
 }
