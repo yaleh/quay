@@ -1,7 +1,7 @@
 ---
 id: gap-shipped-plugin-tree-excludes-dev-only-content-and-has-a-shrink-only-size-ratchet
 title: 发布产物默认全发 plugin/ 导致 641 个测试文件、93 个突变用例与开发期基线随产物发出——改为结构性排除，并加只减不增的体量棘轮与门禁断言
-status: todo
+status: ready
 labels:
   - gap
   - defect
