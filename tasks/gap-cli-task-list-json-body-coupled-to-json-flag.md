@@ -1,7 +1,7 @@
 ---
 id: gap-cli-task-list-json-body-coupled-to-json-flag
 title: quay task list --json 把「要 JSON 格式」和「要每条 body」耦合死，没有「全量计数 + 不读 body」的投影
-status: ready
+status: done
 labels:
   - gap
 parent: null
