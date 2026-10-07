@@ -2,7 +2,7 @@
 id: gap-goal-list-no-includebody-projection-always-reads-full-bodies
 title: goal list 在 --json 和非 --json 下同样慢（~1.3s/234 条）——goal ABI 从没有 includeBody
   投影，不是 task list 那种耦合 bug
-status: todo
+status: ready
 labels:
   - gap
 parent: null
