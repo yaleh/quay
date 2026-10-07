@@ -17,38 +17,16 @@ export async function handleTaskList({ flags, positional, wantsJson }: CliCtx) {
     return;
   }
   await withProvider(async (client) => {
-    // QX-021/QX-023/QX-028: --search is matched locally below (title + heading-stripped
-    // body), so its value has to be known BEFORE the fetch to decide the fetch's shape.
-    // Hoisted here (it used to be read further down, where its only use was the filter).
+    // QX-021/QX-023/QX-028: --search matches title + heading-stripped body. Its
+    // value is read BEFORE the fetch because it is now PUSHED DOWN to the
+    // Provider as a server-side filter (gap-stripheadings-quadruple-duplication-
+    // cli-task-list-client-filter).
     const searchQuery = typeof flags.search === "string" ? flags.search : null;
-    // gap-abi-task-list-times-out-at-2000-tasks-head-of-line-blocks-mcp: the TABLE view
-    // renders id/status/role/title/updatedAt — never a body — yet this used to ask the
-    // Provider for every task's body anyway. On the live store that is ~14 MB and 37 s
-    // for `quay task list` (measured 2026-09-14), for output that contains none of it.
-    // `includeBody:false` is the ABI's existing frontmatter-only projection (the same one
-    // the web board, dashboard and /tasks page already use).
-    //   ⛔ `--json` DOES print the task objects, body included — its output IS the tasks,
-    //      so it keeps the full shape. And `--search` is matched against the body locally
-    //      (there is no body to match when includeBody is false), so it keeps it too.
-    //   The Provider filter args are deliberately unchanged: this is the same query as
-    //   before, just without bytes the caller never renders.
-    const needsBodies = wantsJson === true || searchQuery !== null;
-    // QX-016 (iteration 4): pass only status to taskList; label filtering handled
-    // client-side below so we can apply AND-logic for multiple --label values.
-    // gap-one-unparseable-task-takes-down-the-whole-board: taskList() returns
-    // partial success { tasks, malformed }. The unparseable files are reported
-    // on stderr — never silently dropped, and never treated as "0 tasks".
-    const { tasks, malformed } = await client.taskList(
-      needsBodies ? { status: flags.status } : { status: flags.status, includeBody: false }
-    );
-    // QX-002 (experiment 4, iteration 1): --prefix filter for experiment scoping.
-    // Closes CB-001: `quay task list --prefix QX` returns only QX-* tasks.
-    // Client-side filter after provider fetch — no provider-side changes needed.
-    //
     // QX-006 (experiment 4, iteration 1): guard against `--prefix` passed with
     // no value. parseFlags() sets flags.prefix = true (boolean) in that case,
-    // which causes prefix.toUpperCase() to throw a TypeError (SH-001 regression
-    // from QX-002). Detect early and exit with a clear usage error.
+    // which would throw a TypeError (SH-001 regression from QX-002). Detect early
+    // and exit with a clear usage error. Read before the fetch because the value
+    // now feeds the Provider filter.
     const prefix = flags.prefix;
     if (prefix !== undefined && typeof prefix !== "string") {
       console.error("Error: --prefix requires a value (e.g., --prefix QX)");
@@ -56,41 +34,92 @@ export async function handleTaskList({ flags, positional, wantsJson }: CliCtx) {
       return;
     }
     // QX-037 (experiment 4, iteration 10): UQ-021 — guard --label with no value.
-    // parseFlags() sets flags.label = true (boolean) when --label is passed with no value.
-    // Inconsistency with --prefix (which exits 1) filed as UQ-021; fix mirrors QX-006.
-    // [].concat(flags.label).filter(Boolean) below would silently drop a boolean true,
-    // producing no label filter — even more confusing than a crash.
+    // parseFlags() sets flags.label = true (boolean) when --label is passed with no
+    // value. Inconsistency with --prefix (which exits 1) filed as UQ-021; fix mirrors
+    // QX-006. [].concat(flags.label).filter(Boolean) below would silently drop a
+    // boolean true, producing no label filter — even more confusing than a crash.
     const rawLabel = flags.label;
     if (rawLabel !== undefined && typeof rawLabel !== "string" && !Array.isArray(rawLabel)) {
       console.error("Error: --label requires a value (e.g., --label experiment-4)");
       process.exitCode = 1;
       return;
     }
-    const filteredByPrefix = prefix
-      ? tasks.filter((t) => t.id.toUpperCase().startsWith(prefix.toUpperCase()))
-      : tasks;
-    // QX-016 (experiment 4, iteration 4): AND-logic multi-label filter.
-    // flags.label may be: undefined (no filter), a string (single --label),
-    // or an array of strings (repeated --label, collected by parseFlags).
-    // [].concat(flags.label).filter(Boolean) normalises all three cases to an array.
+    // QX-016 (experiment 4, iteration 4): flags.label may be undefined (no
+    // filter), a string (single --label), or an array of strings (repeated
+    // --label, collected by parseFlags). [].concat(...).filter(Boolean) normalises
+    // all three cases to an array for the AND-join.
     const labelFilters = [].concat(flags.label).filter(Boolean);
-    const filteredByLabel = labelFilters.length > 0
-      ? filteredByPrefix.filter((t) =>
-          Array.isArray(t.labels) && labelFilters.every((l) => t.labels.includes(l))
-        )
-      : filteredByPrefix;
-    // QX-021 (experiment 4, iteration 5): --search <query> title filter.
-    // Case-insensitive substring match on task title. Closes CB-007.
-    // QX-023 (experiment 4, iteration 6): extend to body content too.
-    // Closes CB-016 (significant: title-only search misses body content).
-    // QX-028 (experiment 4, iteration 7): use stripHeadings() to exclude
-    // structural markdown heading lines from the body search index.
-    // Closes CB-017 (significant: template boilerplate false positives).
-    const filtered = searchQuery
-      ? filteredByLabel.filter((t) =>
-          (t.title + " " + stripHeadings(t.body)).toLowerCase().includes(searchQuery.toLowerCase())
-        )
-      : filteredByLabel;
+    // ── PUSH THE FILTERS DOWN ─────────────────────────────────────────────────
+    // gap-stripheadings-quadruple-duplication-cli-task-list-client-filter: this
+    // command used to fetch EVERY task (bodies included) and then re-apply prefix
+    // / label / search matching in TypeScript — a second, client-side copy of
+    // predicates the Provider's own task_list already applies (the native store's
+    // `matchesListFilter`: status → label → prefix → search, the SAME order and
+    // predicates, including the heading-stripped body search). Now the filters go
+    // to the Provider and only the matching set crosses the ABI.
+    //
+    // gap-abi-task-list-times-out-at-2000-tasks-head-of-line-blocks-mcp (follow-up):
+    // the table view renders id/status/role/title/updatedAt — never a body — so it
+    // asks for the frontmatter-only projection (`includeBody:false`, the same one
+    // the web board / dashboard / /tasks page use). `--json` DOES print the task
+    // objects, body included, so it keeps the full shape.
+    const wantBodiesInOutput = wantsJson === true;
+    const providerFilter: Record<string, unknown> = {};
+    if (flags.status !== undefined) providerFilter.status = flags.status;
+    if (labelFilters.length === 1) providerFilter.label = labelFilters[0];
+    // >1 label: the array form is what the AND-join needs; a Provider whose schema
+    // rejects arrays falls into the catch below rather than failing the read.
+    else if (labelFilters.length > 1) providerFilter.label = labelFilters;
+    if (prefix) providerFilter.prefix = prefix;
+    if (searchQuery) providerFilter.search = searchQuery;
+    if (!wantBodiesInOutput) providerFilter.includeBody = false;
+    // ── did the Provider actually apply them? ─────────────────────────────────
+    // A Provider that implements the pushed-down filter surface reports the
+    // FILTERED `total` and a `scannedFiles` boolean (the native store always
+    // does). One whose task_list schema knows only status/label silently DROPS
+    // the rest and reports neither — the signal that the filters were NOT applied
+    // and must be re-applied here (硬规则 3b: a silently-ignoring Provider must
+    // not be confused with one that filtered). A Provider whose schema REJECTS an
+    // extended arg instead of dropping it throws the whole call: same fallback.
+    // Either way the caller gets a correct answer; only the cost differs.
+    let listRes;
+    let providerFiltered = false;
+    try {
+      const first = await client.taskList(providerFilter);
+      if (typeof first.total === "number" && typeof first.scannedFiles === "boolean") {
+        listRes = first;
+        providerFiltered = true;
+      }
+    } catch { /* fall through to the fallback fetch below */ }
+    if (!providerFiltered) {
+      // Client-side fallback — the pre-existing behaviour, kept for Providers that
+      // do not implement the optional filter args. Bodies are requested only when
+      // the OUTPUT (--json) or a client-side `search` must read them.
+      // gap-one-unparseable-task-takes-down-the-whole-board: taskList() returns
+      // partial success { tasks, malformed }; the unparseable files are reported
+      // on stderr below — never silently dropped, never treated as "0 tasks".
+      const needBodies = wantBodiesInOutput || searchQuery !== null;
+      listRes = await client.taskList(
+        needBodies ? { status: flags.status } : { status: flags.status, includeBody: false }
+      );
+    }
+    const { tasks, malformed } = listRes;
+    // When the Provider applied status → label → prefix → search (the pushed-down
+    // path), a second pass here would merely re-implement the same predicates.
+    // Only the fallback path filters locally (QX-002 prefix / QX-016 AND-label /
+    // QX-028 heading-stripped body search — the same semantics either way).
+    const filtered = providerFiltered
+      ? tasks
+      : tasks
+          .filter((t) => !prefix || t.id.toUpperCase().startsWith(prefix.toUpperCase()))
+          .filter((t) =>
+            labelFilters.length === 0 ||
+            (Array.isArray(t.labels) && labelFilters.every((l) => t.labels.includes(l)))
+          )
+          .filter((t) =>
+            !searchQuery ||
+            (t.title + " " + stripHeadings(t.body)).toLowerCase().includes(searchQuery.toLowerCase())
+          );
     // QX-008 (experiment 4, iteration 2): sort-by-updated support.
     // Closes CB-004 (no sort-by-time on CLI) and CB-012 (--sort updated
     // silently ignored). Tasks include `updatedAt` (file mtime in ms) from
