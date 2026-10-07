@@ -76,6 +76,9 @@ function quayShapedRepo() {
   commit(dir, "verified work on develop");
   git(dir, ["branch", "author"]);
   git(dir, ["checkout", "-q", "main"]);
+  // AC-331: same as thirdPartyShapedRepo — a real project carries a detectable test command.
+  fs.mkdirSync(path.join(dir, "scripts"), { recursive: true });
+  fs.writeFileSync(path.join(dir, "scripts", "test.sh"), "#!/bin/bash\necho test\n");
   return dir;
 }
 
@@ -93,6 +96,11 @@ function thirdPartyShapedRepo() {
   fs.writeFileSync(path.join(dir, "legacy.txt"), "ancient\n");
   commit(dir, "ancient develop work (2025)");
   git(dir, ["checkout", "-q", "main"]);
+  // AC-331: `quay init`'s fresh/upgrade pipeline now RESOLVES the target's test command and FAILS
+  // CLOSED when it cannot (the shipped shell entry's behaviour, ported). A fixture standing in for a
+  // real third-party project must therefore carry one — the ladder's first rung is enough.
+  fs.mkdirSync(path.join(dir, "scripts"), { recursive: true });
+  fs.writeFileSync(path.join(dir, "scripts", "test.sh"), "#!/bin/bash\necho test\n");
   return dir;
 }
 
