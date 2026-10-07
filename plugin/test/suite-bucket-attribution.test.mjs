@@ -82,7 +82,6 @@ const GROUP_B = [
   "checker-mutation-check.test.mjs",
   "codex-stage1-adapter.test.mjs",
   "direct-to-develop-bypass-check.test.mjs",
-  "execute-suite-fix-scope-gate.test.mjs",
   "fan-in-execute-paths-s01.test.mjs",
   "fan-in-execute-paths-s04.test.mjs",
   "fan-in-ts-typecheck-gate.test.mjs",
@@ -134,8 +133,10 @@ test("AC2(a): the 8 packages/quay/test files touching plugin/scripts are cross-b
 
 // ── AC2(b) ───────────────────────────────────────────────────────────────────────────────────────────
 
-test("AC2(b): the 20 plugin/test files touching packages src are cross-bucket (contain P)", () => {
-  assert.equal(GROUP_B.length, 20, "group (b) must be exactly 20 files (3 monoliths → 4 P-carrying shards, 2026-09-17)");
+test("AC2(b): the 19 plugin/test files touching packages src are cross-bucket (contain P)", () => {
+  // 2026-10-07 (gap-delete-dead-execute-suite-fix-workflow): was 20 — the standalone suite-fix
+  // scope-gate test was deleted with its workflow.
+  assert.equal(GROUP_B.length, 19, "group (b) must be exactly 19 files (3 monoliths → 4 P-carrying shards, 2026-09-17; minus the deleted execute-suite-fix shard)");
   for (const f of GROUP_B) {
     const rel = `plugin/test/${f}`;
     const buckets = bucketSetOf(rel, ROOT);

@@ -28,11 +28,13 @@
 //
 // SEAM ENUMERATION (AC3, gap-concurrency-literal-check-workflows-coverage): 源头默认值正确不够——
 // 任何能绕过源头默认值的 seam 必须被覆盖, 否则「源头正确」不构成保证。已枚举并覆盖的 seam:
-//   QUAY_TEST_SYSTEMD_RUN_LIMITS — full-suite-runner.ts 的测试 seam, 经 execute-suite-fix.js
+//   QUAY_TEST_SYSTEMD_RUN_LIMITS — full-suite-runner.ts 的测试 seam, 经 workflow 载体
 //     (`systemdRunLimits = "…"` 默认 + launchEnv 注入) 把 systemd-run 限制塞进 suite 启动。
 //     历史: CPUQuota=400% 经此 seam 活 4 天 (拖慢每轮 + 制造假红), 源头默认值 (不传 -p CPUQuota=)
 //     正确但 seam 把字面量塞回。覆盖 = 扫描面含 plugin/workflows/ (P5 检测
 //     override 字符串内的 CPUQuota=<num>%)。
+//     (2026-10-07: 曾承载该默认值的 standalone suite-fix workflow 已删除 —— 扫描面仍含
+//      plugin/workflows/，seam 由存活 workflow 承载。)
 //
 // EVERY hit is classified:
 //   definition-point   — the value derives from a QUAY_MAX_* definition point (the line, or the
@@ -250,7 +252,7 @@ function isMasked(mask: Uint8Array, i: number, j: number): boolean {
  *  Explicitly enumerated per root (可 grep 的枚举清单, 非一个 glob 糊过去 — AC1):
  *    plugin/scripts/*.{ts,sh}   — 循环执行核 (ready-pool-check / slot-refill / resource-gate …)
  *    scripts/*.{ts,sh}          — 测试入口 (test.sh) + 编排
- *    plugin/workflows/*.js      — workflow 脚本唯一份 (execute-suite-fix.js 等 — QUAY_TEST_SYSTEMD_RUN_LIMITS
+ *    plugin/workflows/*.js      — workflow 脚本唯一份 (fan-in-execute.js 等 — QUAY_TEST_SYSTEMD_RUN_LIMITS
  *                                 seam; .claude/workflows/ 双副本已 archive, 见 gap-ac166-second-copy-retirement)
  *  Docs (orchestration/*.md) are excluded — they quote old commands as historical evidence (masking
  *  non-code does not apply to markdown prose); test dirs are excluded — tests legitimately inject

@@ -284,7 +284,7 @@ test("AC4 — negative control: the PRE-FIX rule (rewriteMarkdown on a .js carri
   assert.ok(!isAnchorReferenceError((await loadWorkflowInSandbox(fixed)).error));
 });
 
-test("AC5 — all six shipped workflows rewrite to ZERO env-var anchors and evaluate in the sandbox", async () => {
+test("AC5 — all five shipped workflows rewrite to ZERO env-var anchors and evaluate in the sandbox", async () => {
   const expected = {
     "manager-tick-core.js": 2,
     // 4 in the finding's artifact; 3 in the source after this change moved the meta phase-detail
@@ -297,7 +297,8 @@ test("AC5 — all six shipped workflows rewrite to ZERO env-var anchors and eval
     // built with the real bundle predicate (one reference there is not a bundle entry); the
     // unit-level rewrite with bundleExists=()=>true folds that one too.
     "fan-in-execute.js": 25,
-    "execute-suite-fix.js": 3,
+    // gap-delete-dead-execute-suite-fix-workflow (2026-10-07): the standalone suite-fix workflow was
+    // DELETED (zero production callers) — it is no longer a shipped carrier.
     "drain-directives.js": 0,
     "run-routines.js": 0,
   };
@@ -335,7 +336,7 @@ test("AC4(task) — the BUILT workflows/*.js carry ZERO ${CLAUDE_PLUGIN_ROOT} in
   const countAnchors = (text) => (text.match(CARRIER_RE) || []).length;
   const preFixCounts = {};
   const firstHits = [];
-  for (const file of ["manager-tick-core.js", "pool-quality-judge.js", "fan-in-execute.js", "execute-suite-fix.js", "drain-directives.js", "run-routines.js"]) {
+  for (const file of ["manager-tick-core.js", "pool-quality-judge.js", "fan-in-execute.js", "drain-directives.js", "run-routines.js"]) {
     const pre = rewriteMarkdown(readWorkflow(file), () => true);
     preFixCounts[file] = countAnchors(pre);
     for (const line of pre.split("\n")) {
@@ -395,12 +396,14 @@ test("AC3 — the guard takes FALSE on an active anchor, TRUE on the folded form
   }
 });
 
-test("AC3 — positive control on the REAL plugin root: the guard reads all six shipped carriers and reports inert", () => {
+test("AC3 — positive control on the REAL plugin root: the guard reads every shipped carrier and reports inert", () => {
   const pluginRoot = path.join(REPO_ROOT, "plugin");
   const { scanned, violations } = scanJsCarrierAnchors(pluginRoot);
-  assert.equal(scanned, 6, "the real surface ships six .js carriers — a different count means the guard is blind or vacuous");
+  // gap-delete-dead-execute-suite-fix-workflow (2026-10-07): was 6 — the standalone suite-fix
+  // workflow was deleted, so the real surface ships one fewer .js carrier.
+  assert.equal(scanned, 5, "the real surface ships five .js carriers — a different count means the guard is blind or vacuous");
   assert.deepEqual(violations, []);
-  assert.equal(assertJsCarrierAnchorsInert(pluginRoot), 6);
+  assert.equal(assertJsCarrierAnchorsInert(pluginRoot), 5);
 });
 
 test("AC2 — bindPluginRootInJsCarrier folds BOTH env-var spellings onto the binding and leaves an escaped anchor alone", () => {

@@ -305,7 +305,16 @@ test("spawnHost — the host's stdout/stderr reach `.quay/serve.log` through a R
     text,
     "the fixture host's STDERR reached .quay/serve.log — before this fix `spawnHost` passed stdio:\"ignore\" and the bytes went nowhere",
   );
-  assert.match(text, /host-fixture: stdout line/, "STDOUT lands in the same file — the routing is one stdio pair, not a stderr-only special case");
+  // ⚠️ STDOUT gets its OWN poll — ⛔ never an assertion against the snapshot above. The fixture
+  // APPENDS to this file while we read it, so a text frozen the instant the STDERR needle appeared
+  // can legitimately be missing a line the writer emits microseconds later: the reader polls every
+  // 50 ms and the writer can be preempted between its two writes for longer than that under suite
+  // load. That snapshot read is a race, not a reading of "stdout never landed" (硬规则 4b — a value
+  // sampled at an arbitrary instant is a proxy, not the event).
+  // The assertion is UNCHANGED in strength: the SAME file must carry stdout within the timeout.
+  // ⛔ This cannot mask a genuine loss — a line that really went nowhere still times out red.
+  const full = await waitForFileText(path.join(ws, ".quay", "serve.log"), "host-fixture: stdout line");
+  assert.match(full ?? "", /host-fixture: stdout line/, "STDOUT lands in the same file — the routing is one stdio pair, not a stderr-only special case");
   assert.ok(fs.existsSync(marker), "the fixture really executed (the log reading above is a reading of a spawn that happened)");
 });
 

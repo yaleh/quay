@@ -591,14 +591,16 @@ test('DIR-070-C: Tier-B plugin copies have zero exp5/experiment-path references'
 test('M143: plugin/workflows/ exists with the surviving JS workflow files', () => {
   // gap-retire-the-prepare-execute-pipeline-cluster (ADR-022): execute-milestone.js and
   // prepare-milestone.js were retired with the classic milestone loop.
-  // AC91 (gap-ac91-delivery-core-refs-undelivered-files): execute-suite-fix.js and
-  // pool-quality-judge.js are ADDITIONAL survivors — the shipped orchestrator-tick-core.md
-  // references `.claude/workflows/execute-suite-fix.js` (:39) and `.claude/workflows/
-  // pool-quality-judge.js` (:70), so the distribution mirror must carry them (a delivered exec
-  // core must not point at an undelivered workflow). fan-in-execute.js is likewise mirrored.
+  // AC91 (gap-ac91-delivery-core-refs-undelivered-files): pool-quality-judge.js is an ADDITIONAL
+  // survivor — the shipped orchestrator-tick-core.md names `.claude/workflows/pool-quality-judge.js`
+  // (:70), so the distribution mirror must carry it (a delivered exec core must not point at an
+  // undelivered workflow). fan-in-execute.js is likewise mirrored.
+  // gap-delete-dead-execute-suite-fix-workflow (2026-10-07): the standalone suite-fix workflow had
+  // ZERO production callers (the shipped tick cores do not name it) and was DELETED — it is no
+  // longer part of the mirror, so it is no longer asserted here.
   const workflowsDir = path.join(pluginDir, 'workflows');
   assert.ok(existsSync(workflowsDir), 'plugin/workflows/ must exist');
-  const wanted = ['drain-directives.js', 'run-routines.js', 'fan-in-execute.js', 'execute-suite-fix.js', 'pool-quality-judge.js'];
+  const wanted = ['drain-directives.js', 'run-routines.js', 'fan-in-execute.js', 'pool-quality-judge.js'];
   for (const f of wanted) {
     const fp = path.join(workflowsDir, f);
     assert.ok(existsSync(fp), `plugin/workflows/${f} must exist`);
@@ -640,13 +642,15 @@ test('M143: init skill has zero research-layer references (VT/value-ledger/check
   );
 });
 
-test('M143: the five workflow files live ONLY in plugin/workflows/ — the .claude/workflows/ second copy is retired', () => {
+test('M143: the surviving workflow files live ONLY in plugin/workflows/ — the .claude/workflows/ second copy is retired', () => {
   // gap-ac166-second-copy-retirement (AC166): the .claude/workflows/ dual-copy was the "second
   // copy" that only produced drift (SPEC-plugin-lifecycle-single-bundle-2026-09-02 §7 #3). Each
   // workflow now has a SINGLE source — plugin/workflows/ — and the .claude/workflows/ copy is
   // archived (not deleted) under archive/. The byte-identity test is superseded by a
   // single-source existence test: the canonical must be GONE and the bundled copy must exist.
-  const singleSourceWorkflows = ['drain-directives.js', 'run-routines.js', 'fan-in-execute.js', 'execute-suite-fix.js', 'pool-quality-judge.js'];
+  // gap-delete-dead-execute-suite-fix-workflow (2026-10-07): the standalone suite-fix workflow was
+  // deleted outright (not just its second copy retired), so it is no longer in this set.
+  const singleSourceWorkflows = ['drain-directives.js', 'run-routines.js', 'fan-in-execute.js', 'pool-quality-judge.js'];
   for (const name of singleSourceWorkflows) {
     const retiredCopy = path.join(repoRoot, '.claude', 'workflows', name);
     const bundled = path.join(pluginDir, 'workflows', name);
