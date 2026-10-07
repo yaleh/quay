@@ -432,10 +432,12 @@ The script prints `claude plugin marketplace add` + `claude plugin install` (or 
 `register-plugin.mjs` path). Run them, accept the trust dialog, restart — then the `.claude/settings.json`
 `enabledPlugins` block takes effect.
 
-### 4. Next step: cold start
+### 4. Next step: start the drivers
 
-After the six-file laydown, the workspace is READY for the cold-start skill (`/quay:cold-start`):
-one command that drives the loop to start and asserts a real `--task-start` telemetry record.
+After the six-file laydown, the workspace is READY for the drivers skill (`/quay:drivers`): one
+idempotent in-session call that starts the promotion + worker drivers and the web server. This is
+step ④ of the current enablement flow — **① install ② start a Claude Code session ③ `/quay:init`
+④ `/quay:drivers` ⑤ `/quay:manager`** (`SPEC-tmux-retirement-2026-09-03.md` §1.4/Layer 3b).
 
 ## Reference docs (SPEC declaration point)
 
