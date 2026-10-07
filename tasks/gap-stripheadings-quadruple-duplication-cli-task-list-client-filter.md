@@ -1,7 +1,7 @@
 ---
 id: gap-stripheadings-quadruple-duplication-cli-task-list-client-filter
 title: 搜索归一化逻辑 stripHeadings 被独立实现 4 次；CLI quay task list 自行重做过滤而非转发服务端参数
-status: todo
+status: ready
 labels:
   - gap
 parent: null
