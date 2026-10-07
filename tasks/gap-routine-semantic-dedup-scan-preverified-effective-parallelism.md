@@ -59,6 +59,7 @@ import full-suite-runner 而本地复写）的两处留原样并记因：`concur
 - `plugin/scripts/full-suite-runner.ts`
 - `plugin/scripts/pre-verified-round-record.ts`
 - `plugin/scripts/suite-accounting.ts`
+- `plugin/test/pre-verified-round-record.test.mjs`
 - `tasks/gap-routine-semantic-dedup-scan-preverified-effective-parallelism.md`
 
 ## Test-Files
