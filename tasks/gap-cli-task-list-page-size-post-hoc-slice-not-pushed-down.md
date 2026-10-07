@@ -1,7 +1,7 @@
 ---
 id: gap-cli-task-list-page-size-post-hoc-slice-not-pushed-down
 title: quay task list CLI 的 --page-size 是取全量 body 后客户端 slice，未接入已有的 ABI 分页省读路径
-status: ready
+status: done
 labels:
   - gap
 parent: null
