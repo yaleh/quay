@@ -1,7 +1,7 @@
 ---
 id: AC-332
 title: quay-init.sh 退化为调用 bin/quay init 的垫片（≤40 行），skill、README、release.yml 不再直接调用脚本
-status: active
+status: achieved
 kind: criterion
 goal: GOAL-029
 criterion: >-
@@ -39,6 +39,11 @@ statusLog:
     to: active
     actor: goal-cli
     reason: ""
+  - at: 2026-10-07T15:43:04.255Z
+    from: active
+    to: achieved
+    actor: goal-driver
+    reason: "I2: criterion pass"
 fidelity:
   verdict: not-evaluated
   reason: no judge configured
