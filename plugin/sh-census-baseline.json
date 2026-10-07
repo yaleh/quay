@@ -370,8 +370,24 @@
         "embeddedInterpreterLines": "-361 = plugin/scripts/quay-init.sh 1007 -> 650 code lines (-357) + plugin/scripts/laydown-set-check.sh 183 -> 179 (-4). Residual = 0: with BOTH files checked out from develop on this otherwise-final tree the checker reads exactly 7695, and the branch's entire tracked *.sh delta vs develop is those two paths (`git diff --name-status develop HEAD -- '*.sh'`). Both still exec an interpreter at a command position (quay-init.sh embedded:[node]; laydown-set-check.sh embedded:[node,python3]) and neither is on the exception list, so they STAY IN the axis — the line count moved, not their membership.",
         "duplicateCopies": "0 — untouched (0 is the assertion, not an omission). This task added no experiments/** mirror and converted no byte-identical pair."
       }
+    },
+    {
+      "when": "2026-10-07 (gap-quay-init-sh-becomes-a-shim-over-bin-quay-init-and-callers-switch)",
+      "from": {
+        "embeddedInterpreterLines": 7334,
+        "duplicateCopies": 0
+      },
+      "to": {
+        "embeddedInterpreterLines": 6683,
+        "duplicateCopies": 0
+      },
+      "why": "DOWNWARD re-anchor (-651, the intended direction). This task turns `plugin/scripts/quay-init.sh` into a ≤40-line shim that `exec`s `plugin/bin/quay init`, so the script no longer runs an embedded interpreter AT A COMMAND POSITION and therefore LEAVES the axis entirely (its 650 counted code lines drop to 0 — the file is still tracked and still absent from the exception list; membership moved, not the file). ⛔ AC6 of plugin/test/sh-census-check.test.mjs requires the committed baseline to EQUAL the live reading, not merely bound it (a stale-higher baseline would let a future +651 regression stay green). Measured with the checker's OWN reading on the MERGED tree: `node --experimental-strip-types plugin/scripts/sh-census-check.ts --json` → totals 6683/0 — never hand-fitted. Non-fitted proof: checking out ONLY the 8 changed `*.sh` paths from develop onto this otherwise-final tree makes the same checker read exactly the previously-committed 7334/0, and restoring this branch's versions returns 6683/0.",
+      "attribution": {
+        "embeddedInterpreterLines": "-651 = plugin/scripts/quay-init.sh 650 -> 0 counted lines (it leaves the axis: the shim only `exec`s a binary, no embedded node/python3/jq at a command position) + test/cold-start-oneliner-e2e.sh 188 -> 187 (still embedded:[node], still non-exception). Residual = 0: the other changed .sh paths contribute 0 either way — real-target-verify.sh 105 -> 105 and release-cut.sh 13 -> 13 on the axis, test/cold-start-e2e.sh off the axis on BOTH sides (embedded=[]), and checker-mutation-cases/*.sh is not censused at all. Only the 8 paths `git diff --name-status develop HEAD -- '*.sh'` names were in play.",
+        "duplicateCopies": "0 — untouched (0 is the assertion, not an omission). This task added no experiments/** mirror and converted no byte-identical pair."
+      }
     }
   ],
-  "embeddedInterpreterLines": 7334,
+  "embeddedInterpreterLines": 6683,
   "duplicateCopies": 0
 }

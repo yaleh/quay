@@ -307,10 +307,16 @@ test("AC3: every entry the no-writer guidance names actually exists", () => {
     const writerSide = fs.readFileSync(path.join(repoRoot, "plugin", "scripts", "worker-driver.ts"), "utf8");
     assert.match(writerSide, /loop\.test_command|\.test_command/, "worker-driver.ts really reads loop.test_command");
 
-    // 2. `plugin/scripts/quay-init.sh` — the script that WRITES that declaration.
-    const initScript = path.join(repoRoot, "plugin", "scripts", "quay-init.sh");
-    assert.ok(fs.existsSync(initScript), `the named init entry exists: ${initScript}`);
-    assert.match(fs.readFileSync(initScript, "utf8"), /test_command/, "quay-init.sh really writes loop.test_command");
+    // 2. `packages/quay/src/init.ts` — the ENGINE that WRITES that declaration.
+    //    gap-quay-init-sh-becomes-a-shim-over-bin-quay-init-and-callers-switch: `plugin/scripts/
+    //    quay-init.sh` is now a ≤40-line shim that execs `bin/quay init`, so naming the SCRIPT as the
+    //    writer would be a lie (its content no longer writes anything). The assertion's intent is
+    //    unchanged — the guidance must name a file that really writes `loop.test_command` — so it now
+    //    points at where the write actually lives.
+    assert.match(reason, /packages\/quay\/src\/init\.ts/, "the guidance names the engine, not the retired shell writer");
+    const initEngine = path.join(repoRoot, "packages", "quay", "src", "init.ts");
+    assert.ok(fs.existsSync(initEngine), `the named init entry exists: ${initEngine}`);
+    assert.match(fs.readFileSync(initEngine, "utf8"), /test_command/, "init.ts really writes loop.test_command");
 
     // 3. `/quay:init --all --loop` — the operator-facing equivalent, a real skill.
     assert.match(reason, /\/quay:init --all --loop/);

@@ -3995,7 +3995,8 @@ function missingRoundsLedger(root: string): { status: TestsStatus; reason: strin
       ".quay/config.yml 的 loop 段也未声明 " +
       ROUND_WRITER_LOOP_KEYS.join(" / ") +
       "）—— 再跑多少轮也不会有记录。接入方式：在本项目 .quay/config.yml 的 loop 段声明 test_command" +
-      "（plugin/scripts/quay-init.sh 写入；等价入口 /quay:init --all --loop），机械 fan-in 即会落账",
+      "（`quay init` 引擎写入 — packages/quay/src/init.ts；等价入口 /quay:init --all --loop），" +
+      "机械 fan-in 即会落账",
   };
 }
 
