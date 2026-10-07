@@ -28,12 +28,12 @@ GOAL-029「init 统一为单一 TS 引擎、终局无 .sh;并收窄发布集合�
 真实落地:矩阵测试在发布形态产物构建(`bash plugin/scripts/publish-dist-branch.sh --branch plugin-channel-verify` 不 push)之后对全部历史夹具通过;并把"新增版本夹具的固定做法"写进 `plugin/test/fixtures/init-matrix/README.md`,下次发布按它加一个夹具。仅 fixture 绿不算完成。
 
 ## Touches
-- `plugin/test/init-upgrade-matrix.test.mjs`
-- `plugin/test/fixtures/init-matrix/README.md`
-- `plugin/test/fixtures/init-matrix/v0.14.0/config.yml`
-- `plugin/test/fixtures/init-matrix/v0.14.0/PROVENANCE`
-- `plugin/test/fixtures/init-matrix/v0.15.0/config.yml`
-- `plugin/test/fixtures/init-matrix/v0.15.0/PROVENANCE`
-- `plugin/test/fixtures/init-matrix/v0.16.0/config.yml`
-- `plugin/test/fixtures/init-matrix/v0.16.0/PROVENANCE`
+- `plugin/test/init-upgrade-matrix.test.mjs` (new)
+- `plugin/test/fixtures/init-matrix/README.md` (new)
+- `plugin/test/fixtures/init-matrix/v0.14.0/config.yml` (new)
+- `plugin/test/fixtures/init-matrix/v0.14.0/PROVENANCE` (new)
+- `plugin/test/fixtures/init-matrix/v0.15.0/config.yml` (new)
+- `plugin/test/fixtures/init-matrix/v0.15.0/PROVENANCE` (new)
+- `plugin/test/fixtures/init-matrix/v0.16.0/config.yml` (new)
+- `plugin/test/fixtures/init-matrix/v0.16.0/PROVENANCE` (new)
 - `tasks/gap-init-upgrade-matrix-historical-real-outputs-must-validate-and-preserve.md`
