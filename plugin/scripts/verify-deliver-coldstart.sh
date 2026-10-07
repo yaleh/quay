@@ -5896,12 +5896,16 @@ case "$cmd" in
   install)
     pkg="$prefix/lib/node_modules/quay"
     # 真 npm -g 的 bin 面：<PREFIX>/bin/<name>（step1_install 断言的就是这一层），包内另有副本。
-    mkdir -p "$prefix/bin" "$pkg/bin" "$pkg/scripts" "$pkg/plugin/scripts" "$pkg/plugin/.claude-plugin"
+    mkdir -p "$prefix/bin" "$pkg/bin" "$pkg/scripts" "$pkg/plugin/scripts" "$pkg/plugin/bin" "$pkg/plugin/.claude-plugin"
     printf '#!/usr/bin/env node\nconsole.log("0.6.1-fake");\n' > "$pkg/bin/quay"; chmod +x "$pkg/bin/quay"
     printf '#!/bin/sh\necho "quay-native 0.6.1-fake"\n' > "$pkg/bin/quay-native"; chmod +x "$pkg/bin/quay-native"
     cp "$pkg/bin/quay" "$prefix/bin/quay"; chmod +x "$prefix/bin/quay"
     cp "$pkg/bin/quay-native" "$prefix/bin/quay-native"; chmod +x "$prefix/bin/quay-native"
     : > "$pkg/plugin/scripts/quay-init.sh"
+    # 段①/② 断言的 shipped 入口是 <pkg>/plugin/bin/quay（quay-init.sh 自本任务起退化为 ≤40 行垫片，
+    # 但插件自己的 CLI 入口仍是 bin/quay —— 夹具必须铺出【产品真会装出来的布局】，否则 selfcheck 里
+    # 的 `[ -f "$qinit" ]` 会在一个假布局上失败（硬规则 5b：改调用点要连同一载体里的兄弟夹具一起改）。
+    printf '#!/usr/bin/env node\nconsole.log("0.6.1-fake");\n' > "$pkg/plugin/bin/quay"; chmod +x "$pkg/plugin/bin/quay"
     printf '%s\n' '{"name":"quay","plugins":[{"name":"quay"}]}' > "$pkg/plugin/.claude-plugin/marketplace.json"
     printf '%s\n' '{"name":"quay"}' > "$pkg/plugin/.claude-plugin/plugin.json"
     cp "${FAKE_NPM_REGISTER_SRC:?}" "$pkg/scripts/register-plugin.mjs"
