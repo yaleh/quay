@@ -3,7 +3,7 @@ id: gap-routine-semantic-dedup-scan-relative-time-mirror
 title: "semantic-dedup-scan: Same algorithm under two names,
   statement-for-statement identical (sub-60s just now, then 60s/60m/24h
   thresholds); flags.ts documents it as a deliberate mirror"
-status: todo
+status: ready
 labels:
   - gap
   - routine-filed
