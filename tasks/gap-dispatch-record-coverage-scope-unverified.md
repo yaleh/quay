@@ -20,7 +20,7 @@ Proposed action：本任务的 AC 应是判定每个记录的设计意图覆盖�
 
 ## Investigation result (2026-10-07)
 
-**结论：窄范围属设计意图。** 两份记录都是【LLM 决策账本】，按其设计只覆盖 LLM 中介的选择动作；机械晋升 / fan-in 从来不在其对象内，且它们**已有各自的结构化载体**（比这两份账本大两个数量级）。dispatch-record.jsonl 的低计数另有第二个已记录的成因：**载体迁移**（inner 退役）。
+**结论：窄范围属设计意图。** 两份记录都是【LLM 决策账本】，按其设计只覆盖 LLM 中介的选择动作；机械晋升 / fan-in 从来不在其对象内，且它们**已有各自的结构化载体**（比这两份账本大两个数量级）。dispatch-record.jsonl 的低计数另有第二个已记录的成因：**载体迁移**（inner 退役后功能由 worker-outcome.jsonl 承接，实测 100% 覆盖）。
 
 ### 1. 设计意图原文（AC1）
 
@@ -66,14 +66,14 @@ Proposed action：本任务的 AC 应是判定每个记录的设计意图覆盖�
 - `plugin/scripts/dispatch-record-fingerprint-reason-check.ts:31`（注释）
 - `plugin/scripts/runner-static-gate.ts:911`（`@static-object` 声明行）
 
-⇒ **没有任何 dispatcher / driver / fan-in 路径 import 或调用这两个模块。** 调用面**纯 CLI**，而调用这两个 CLI 的文档全部是 **LLM tick 提示词**：`orchestration/fast-mode-tick-core.md:37`（A16b）、`plugin/loop/fast-mode-loop-tick.md:956`、`orchestration/manager-tick-core.md:134` + `orchestration/manager-tick-sending.md:63`（C30）。
+⇒ **没有任何 dispatcher / driver / fan-in 路径 import 或调用这两个模块。** 调用面**纯 CLI**，而调用这两个 CLI 的文档全部是 **LLM tick / selector 提示面**：`orchestration/fast-mode-tick-core.md:37`（A16b）、`plugin/loop/fast-mode-loop-tick.md:956`、`orchestration/manager-tick-core.md:134` + `orchestration/manager-tick-sending.md:63`（C30）；另 `orchestration/context-slimming/v-validation.md:55` 把「selector 手搓一行 jsonl vs 调 `dispatch-record.ts`」列为 selector 角色的 S1 验证场景 ⇒ **selector 是该 CLI 的预期调用者**。
 
 ### 3. 机械晋升 / fan-in 中【不】调用这两个函数的调用点（AC3，「潜在未覆盖」清单）
 
 **机械晋升（零 LLM）：**
 | 调用点 | 载体（各自的记录面） | 规模 / 活性 |
 |---|---|---|
-| `plugin/scripts/promotion-driver.ts:628` `appendRoundRecord` | `.quay/promotion-round.jsonl`（`:86` `ROUND_LOG_REL`） | 74,726 行，末次 2026-10-07T07:06Z |
+| `plugin/scripts/promotion-driver.ts:628` `appendRoundRecord` | `.quay/promotion-round.jsonl`（`:86` `ROUND_LOG_REL`） | 74,726 行，末次 2026-10-07T07:08Z |
 | `plugin/scripts/promotion-driver.ts:725` `appendOutcomeRecord` | `.quay/promotion-outcome.jsonl`（`:90` `OUTCOME_LOG_REL`） | 49,846 行，末次 2026-10-07T07:06Z |
 | `plugin/scripts/ready-pool-check.ts:3755` `applyPromotions` → `:3782` `setTaskStatus(…, READY)` | 盘上 `tasks/<id>.md` frontmatter（机械批量 todo→ready 状态写） | 每次 `--apply` |
 | `plugin/scripts/driver-filters.ts:299` `writeDocDevelopSyncEvent` | `.quay/doc-develop-sync.jsonl`（`:292`） | 7,793 行，末次 2026-10-07T07:05Z |
@@ -81,25 +81,32 @@ Proposed action：本任务的 AC 应是判定每个记录的设计意图覆盖�
 **机械 fan-in（零 LLM）：**
 | 调用点 | 载体 | 规模 / 活性 |
 |---|---|---|
-| `plugin/scripts/worker-fan-in.ts:1664` `runMechanicalFanIn`（步链） | `.quay/worker-round.jsonl`（`worker-driver.ts:416`） | 42,862 行，末次 2026-10-07T07:03Z |
+| `plugin/scripts/worker-fan-in.ts:1664` `runMechanicalFanIn`（步链） | `.quay/worker-round.jsonl`（`worker-driver.ts:416`） | 42,862 行，末次 2026-10-07T07:08Z |
 | `packages/quay/src/fan-in/ff-merge.ts:811` `ffMerge`（→ `:935` `git merge --ff-only`） | git 本身（develop 提交历史） | 1,221 条「机械 fan-in」提交 |
 | `plugin/scripts/fan-in-push-lag-check.ts:392` `appendPushLagEvent` | `.quay/fan-in-push-lag.jsonl`（`:51`） | 1,066 行，末次 2026-10-07T04:29Z |
 | `plugin/scripts/worker-driver.ts:416` / `:420` 载体常量 | `.quay/worker-round.jsonl` / `.quay/worker-dispatch.json` | 见上 |
 
-**A16b 的承接载体（LLM selector 路径，迁移后）：** `plugin/scripts/worker-driver.ts:619` `selector_reason` → `.quay/worker-outcome.jsonl`（`driver-filters.ts:763` `WORKER_OUTCOME_REL`）——**2,812 行中 2,808 行 `selector_reason` 非空**，末次 2026-10-07T07:06Z。`worker-driver.ts:29-32` 逐字把它声明为「gitignored 运行时日志，**dispatch-record.jsonl 同族**……字段 = SPEC §4③ {task, **selector 理由**, worker exit code, 墙钟, 终态, 失败原因}」。
+**A16b 的承接载体（LLM selector 路径，迁移后）：** `plugin/scripts/worker-driver.ts:619` `selector_reason` → `.quay/worker-outcome.jsonl`（`driver-filters.ts:763` `WORKER_OUTCOME_REL`）。`worker-driver.ts:29-32` 逐字把它声明为「gitignored 运行时日志，**dispatch-record.jsonl 同族**……字段 = SPEC §4③ {task, **selector 理由**, worker exit code, 墙钟, 终态, 失败原因}」。
 
 ### 4. 结论与判断依据（AC4）
 
-**结论：「窄范围属设计意图」**（且 dispatch-record.jsonl 的低计数另有一个已记录的成因：载体迁移，非静默漏记）。
+**结论：「窄范围属设计意图」**（且 dispatch-record.jsonl 的低计数另有一个已记录的成因：功能已由承接载体 100% 覆盖，见下）。
 
 判断依据四条，各自独立可取假：
 
 1. **两份设计意图原文都点名了自己的对象**，且都是 LLM 决策：A16b = inner 的「先派谁」任务派发（倾向指纹 + 为什么选它）；C30 = manager 的八类语义职责派发（closed enum）。**没有任何一份声称覆盖机械事件。**
 2. **机械晋升在定义上就是「无意志」的**——`ready-pool-check.ts:126` 逐字 "no volition (AC1)"；它**从不读 `dispatch-preference.md`**，故 SPEC §4.3 那个「证明倾向文件被读过」的产物**没有对象**（写它只会是恒真的回声，硬规则 4）。
-3. **机械路径并非「未记录」，而是记录在各自的结构化载体里**，且那些载体**比这两份 LLM 账本大两个数量级**（74,726 / 49,846 / 42,862 / 7,793 / 1,066 vs 301 / 6，全部在本轮数分钟内仍在写入）。「未覆盖」这个说法本身不成立。
+3. **机械路径并非「未记录」，而是记录在各自的结构化载体里**，且那些载体**比这两份 LLM 账本大两个数量级**（74,726 / 49,846 / 42,862 / 7,793 / 1,066 vs 302 / 6，全部在本轮数分钟内仍在写入）。「未覆盖」这个说法本身不成立。
 4. **被比较的是两类不同的事件**：1,221 条「机械 fan-in」与 1,134 条「机械晋升」提交，抽样三条均为**任务状态翻转提交**（`tasks: 翻 <id> done（driver 机械 fan-in）` / `tasks: <id> todo→ready（promotion-driver 机械晋升）`）——那是**落地/晋升事件**，不是**派发决策**。把事件数与决策数并列，是谓词与被问问题不匹配（同 C28 方向 A）。
 
-**载体迁移（第二个成因，独立于范围问题）：** `orchestration/dispatch-record.jsonl` 末次写入 = **2026-09-04T04:22:32.921Z**，正是本项目 inner 层退役之日（2026-09-04）；A16b 的承接去向已逐字记录在 `orchestration/AC148-inner-core-itemized-attribution.md:35`：「A16b（`dispatch-record.ts --add`）→ ① 已由 worker-driver 承接：「为什么选它」= selector 真实理由落 `selector_reason` 进 worker-outcome.jsonl」。该承接载体经实测是活的（2,808/2,812）。⇒ 301 行是 **inner 时代的账本，在迁移日冻结**，不是一个仍在增长却长不大的账本。
+**载体迁移（第二个成因，独立于范围问题，实测）：** `orchestration/dispatch-record.jsonl` **不是冻结的**——它是活的（本轮调查期间 07:07:21Z 又落了一条）。但迁移后流量极低，且 A16b 的功能已被承接载体完整覆盖：
+
+| 载体 | 记录总数 | 2026-09-04（inner 退役日）以来 |
+|---|---|---|
+| `.quay/worker-outcome.jsonl`（承接载体，`AC148:35`） | 2,813 | **1,818 次派发，1,818 条带非空 `selector_reason`（100%）** |
+| `orchestration/dispatch-record.jsonl`（原文件） | 302 | **5 条**（4 条在退役当日、全部属 `gap-retire-session-liveness`；1 条为 2026-10-07T07:07:21Z） |
+
+承接去向已逐字记录在 `orchestration/AC148-inner-core-itemized-attribution.md:35`：「A16b（`dispatch-record.ts --add`）→ ① 已由 worker-driver 承接：「为什么选它」= selector 真实理由落 `selector_reason` 进 worker-outcome.jsonl」。⇒ 迁移后 **1,818 次派发中 A16b 的「为什么选它」100% 有记录**；原文件在 33 天里只收到 1 条，即 **A16b 的功能被完整覆盖，原文件本身近乎休眠（vestigial）**——既不是「冻结」，也不是「仍在增长却长不大」。
 
 ### 5. 后续修复任务（AC5）
 
@@ -107,8 +114,8 @@ Proposed action：本任务的 AC 应是判定每个记录的设计意图覆盖�
 
 ### 观察项（⛔ 非缺陷断言，不计入本任务结论，不阻塞）
 
-- **O1**：`semantic-face-dispatch-record.jsonl` = 6 行（2026-08-30 → 2026-10-03）。低，但与「八类 closed enum + manager tick 稀疏」相符；该载体仍活（末次写入 2026-10-03，本轮前 4 天）。判为**符合设计**，非缺口。
-- **O2**：`capability-catalog-declarations.json` 中 `dispatch-record.ts` 一行的 QUESTION 仍写 "Did **inner** record a dispatch…"、CADENCE「每轮」。对本工作区而言 inner 已退役，该行描述的调用者不再存在；但该机制**仍随 `plugin/loop/` 出货给下游 fast-mode 项目**（`plugin/loop/fast-mode-tick-core.md:51`、`plugin/loop/fast-mode-loop-tick.md:956` 仍在教 inner 调它），故对出货消费者该描述是对的。记为本工作区与出货面的差异观察，**不新开修复任务**（符合 AC5 的设计意图分支）。
+- **O1**：`semantic-face-dispatch-record.jsonl` = 6 行（2026-08-30 → 2026-10-03）。低，但与「八类 closed enum + manager tick 稀疏」相符；该载体仍活（末次写入 2026-10-03）。判为**符合设计**，非缺口。
+- **O2（本调查的副产品，供人决定是否另开任务）**：`CLAUDE.md:158` 至今把 `dispatch-record.ts --add` 写成「**单任务派发记录接口**」，其正本指针指向 `fast-mode-tick-core.md` A16b ——**即已退役的 inner 层**；`capability-catalog-declarations.json` 中该行的 QUESTION 也仍写 "Did **inner** record a dispatch…"、CADENCE「每轮」。这**很可能是迁移后那 5 条 stray 记录（尤其 2026-10-07 那条，理由文本是典型 selector 理由）的成因**：任一读了 CLAUDE.md:158 的 LLM（selector / worker / v-validation S1 场景）都会认为该 CLI 仍是当前派发记录接口。**对本工作区而言这是指针过期；对随 `plugin/loop/` 出货的下游 fast-mode 项目该描述仍正确**（`plugin/loop/fast-mode-tick-core.md:51`、`plugin/loop/fast-mode-loop-tick.md:956` 仍在教 inner 调它）。按 AC5 的设计意图分支，**本任务不新开修复任务**，仅记录为观察项。
 
 ## Acceptance Criteria
 
