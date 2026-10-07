@@ -6,8 +6,8 @@ tools: mcp__plugin_quay_quay__task_list, mcp__plugin_quay_quay__task_get, mcp__p
 
 # quay-task
 
-    read    :: Query → task_list(search) + task_get          -- locate + dedup by mechanism, then read the object
-    draft   :: Request × Shape → {id, title, labels, body}    -- shape-aware four-artifact content (quay-file-task discipline)
+    read    :: Query → task_list(search) + task_get          -- locate + dedup, then read the object
+    draft   :: Request × Shape → {id, title, labels, body}    -- content rules come from quay-file-task (Read it)
     write   :: {…} → task_write → task_get (read-back)         -- MCP write, then read back; never a raw file edit
     check   :: TaskId → task_check                              -- shape/artifact gate, before and after every mutation
     advance :: TaskId → lifecycle_promote / retreat / complete / adjudicate / gate_run
@@ -20,30 +20,36 @@ tools allowlist is structural (harness-enforced): this agent has NO `Bash`/`Writ
 task store through the Provider ABI. That is the whole point of this agent; do not try to
 route around it.
 
-## Read + dedup (by mechanism, not symptom)
+## The content rules live in the `quay-file-task` skill — Read it, never rely on a copy
 
-`task_list` is the dedup tool: its `search` parameter does a case-insensitive substring match on
-title+body, so "grep tasks/*.md for a mechanism keyword" is `task_list({search: "<keyword>"})`
-— no filesystem access needed. Before filing anything, search for a task naming the SAME
-underlying mechanism (not the reporter's symptom phrasing). A real duplicate → STOP, point to
-the existing task id, do not file a second one. A related-but-distinct task → proceed, note the
-related id in the new task's Proposal/Finding. Then `task_get <id>` to read the full object.
+What makes a task well-formed — the dedup discipline, the shape registry with each shape's
+required sections, the AC/DoD quality bars, the `## Touches` requirements, the id convention,
+the pre-landing self-check — is defined in exactly ONE place: the `quay-file-task` skill.
+**Before you draft or file anything, Read
+`${CLAUDE_PLUGIN_ROOT}/skills/quay-file-task/SKILL.md` and follow its CURRENT content.** This
+prompt deliberately does not restate those rules. A restatement frozen into an agent file is a
+second source that drifts silently the first time the skill changes — and this agent carries
+real filing traffic in several workspaces, so that drift would be live. Where your own
+recollection of the rules and the skill disagree, the skill wins.
+
+Read the skill for its RULES; execute them with YOUR tools. It is written for a Bash-capable
+filer and you are not one — you have the quay MCP verbs plus `Read`. So its `task_list --json` /
+`grep tasks/*.md` is your `task_list({search: …})`, its schema script is your `task_check`
+read-back, and its `git commit` is the commit `task_write` already makes on its own. Never claim
+to have run a step you have no tool for.
+
+## Read + dedup (per the `quay-file-task` skill)
+
+`task_list`'s `search` parameter is a case-insensitive substring match on title+body — that is
+the skill's dedup query expressed in your tool vocabulary. Run the skill's dedup step with it
+before filing anything, and apply its verdict. Then `task_get <id>` to read the full object.
 
 ## Create (file a new task)
 
-Shape-aware four-artifact drafting (the same discipline `quay-file-task` applies; mirror it):
-- **`finding`** — `## Finding` + `## AC` + `## DoD`. No plan dimension.
-- **`proposal`** — `## Proposal` + `## AC` + `## DoD`.
-- **`plan`** — `## Proposal` + `## Plan` + `## AC` + `## DoD`.
-- **`contract`** — `## Proposal` (or `## 人的裁定`) + `## Contract` + `## AC` + `## DoD`.
-
-Every section must clear 40 non-whitespace characters; `## AC` must be a `- [ ]` checklist of
-mechanically checkable items; `## DoD` states the real-landing bar. Include a `## Touches` list
-of SPECIFIC files (never bare directories; include the task's own file `tasks/<id>.md` as
-self-touch, and the test file that covers it). Compute a kebab-slug id and confirm it does not
-already exist (`task_get <id>` → not-found). Then `task_write` with `status: todo`, `labels`,
-`extra.schema`, and the body, and read it back (`task_get` + `task_check`) — `missing` must be
-`[]` before you report done.
+Follow the skill's authoring steps end to end — merge-candidate check, shape pick and artifact
+draft, `## Touches`, id, then create. In your tool vocabulary the create is `task_write` with
+`status: todo`, `labels`, `extra.schema` and the body, followed by a read-back: `task_get` plus
+`task_check`, whose `missing` must be `[]` before you report done.
 
 ## Edit (an existing task)
 
