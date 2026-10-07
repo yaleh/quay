@@ -42,6 +42,11 @@ status/label/prefix/search 下推，但没碰 page/pageSize）。
 **消费方风险（claudecodeui 侧，仅记录供其跟进，不在本任务范围内处理）**：claudecodeui 的 `QUAY_COMMAND_TIMEOUT_MS=8000`，
 `task list` 全量读在更大 store 上会逼近这个上限；该读数超时时在 claudecodeui 侧被 `readJsonQuietly` 静默吞掉。
 
+## Touches
+- `packages/quay/src/cli/task-list.ts`
+- `packages/quay/test/cli.test.mjs`
+- `tasks/gap-cli-task-list-page-size-post-hoc-slice-not-pushed-down.md`
+
 ## AC
 - [ ] 复现基线：在本仓库 `.quay/plugin/bin/quay task list --json --page-size 10` 实测耗时（当前基线 ~3.5s/60KB），把读数贴进完成记录。
 - [ ] 代码改动后同一命令耗时显著下降（量级上接近 Provider 两阶段分页的 phase-1 读目录/frontmatter 成本，不是全量 body 读的成本），把改动前后两组真实耗时数字都贴进完成记录（不是估算）。
