@@ -1066,6 +1066,7 @@ async function main() {
   await block28();
   await block29();
   await block30();
+  await block31();
 
   fs.rmSync(tasksDir, { recursive: true, force: true });
   fs.rmSync(workspaceRoot, { recursive: true, force: true });
@@ -1264,9 +1265,13 @@ async function block14(workspaceRoot) {
       "quay --help Usage synopsis includes the 'quay config validate' line"
     );
     // The dispatch command set from packages/quay/bin/quay.ts (every `if (cmd === "…")` route).
+    // (`provider` joined it with gap-provider-switch-no-dedicated-entry-point — a new route with no
+    // synopsis line is exactly the drift this assertion exists to catch, so the list is widened here
+    // in the same change that adds the route.)
     const dispatchVerbs = [
       "adr", "goal", "meta", "task", "action", "serve", "server", "mcp", "init", "config", "gate",
-      "gate-log", "complete", "adjudicate", "promote", "retreat", "run", "migrate", "manager", "driver",
+      "gate-log", "complete", "adjudicate", "promote", "retreat", "run", "migrate", "provider",
+      "manager", "driver",
     ];
     const missing = dispatchVerbs.filter((v) => !synopsisVerbs.includes(v));
     const extra = synopsisVerbs.filter((v) => !dispatchVerbs.includes(v));
@@ -2254,4 +2259,205 @@ async function block30() {
   );
 
   fs.rmSync(wsRoot, { recursive: true, force: true });
+}
+
+// 31. gap-provider-switch-no-dedicated-entry-point — `quay provider switch <name>`.
+//
+//   The gap: `enabled:` had exactly ONE writer in the whole product (`quay init`, on a FRESH
+//   workspace), so switching an existing project native→github meant hand-editing .quay/config.yml
+//   with no validation before or after. `quay migrate --from A --to B` is a different axis (it moves
+//   task DATA); it never changed which provider is enabled.
+//
+//   What this block pins, one assertion per AC:
+//     AC1/AC3 — the command exists and the flip lands: `enabled:` true/false on the right entries.
+//     AC2     — a target that is NOT fully configured is REFUSED, with the reason naming the field,
+//               and the file is byte-for-byte UNCHANGED (the refusal half is only worth anything if
+//               the no-write half is also measured — a refusal that wrote anyway would pass a
+//               stderr-only assertion).
+//     AC3-ii  — "the rest of the file is not damaged": the diff is asserted to be EXACTLY the
+//               `enabled:` lines, not merely "the file still parses". A YAML round-trip would pass
+//               a parse check while reformatting every other key and deleting every comment.
+//     AC4     — the output tells the operator that the next `quay init` reconciles with NO flag.
+//     Idempotence, unknown-name and the pure helper's text-shape notes are their own cases (each is
+//     a state that must not share an output with "switched").
+async function block31() {
+  const assert = makeAssert("provider-switch");
+
+  const ws = fs.mkdtempSync(path.join(os.tmpdir(), "quay-cli-provider-switch-"));
+  const cfgPath = path.join(ws, ".quay", "config.yml");
+  const githubDir = path.join(ws, "github-provider");
+  fs.mkdirSync(path.dirname(cfgPath), { recursive: true });
+  fs.mkdirSync(githubDir, { recursive: true });
+
+  // The fixture deliberately mirrors the REAL repo config's shape: the github entry carries a
+  // trailing comment aligned with spaces, which is what makes "comments survive the edit" a real
+  // assertion rather than a vacuous one.
+  const ORIGINAL = [
+    "providers:",
+    "  native:",
+    "    enabled: true",
+    `    path: "${nativeProviderDir.replaceAll("\\", "\\\\")}"`,
+    "    env:",
+    '      QUAY_NATIVE_TASKS_DIR: "./tasks"',
+    "",
+    "  github:",
+    "    enabled: false                       # not the DEFAULT provider (native is)",
+    `    path: "${githubDir.replaceAll("\\", "\\\\")}"`,
+    '    mcp_entry: ["node", "./bin/quay-github.ts", "mcp"]',
+    "    env:",
+    '      QUAY_GITHUB_REPO: "yaleh/quay"',
+    "",
+    "loop:",
+    "  board: native",
+    "  gates: [acceptance]",
+    "",
+  ].join("\n");
+  fs.writeFileSync(cfgPath, ORIGINAL);
+
+  const readCfg = () => fs.readFileSync(cfgPath, "utf8");
+  const enabledValueOf = (pid, text) => {
+    const lines = text.split("\n");
+    const start = lines.findIndex((l) => l === `  ${pid}:`);
+    if (start < 0) return null;
+    for (let i = start + 1; i < lines.length && lines[i].startsWith("    "); i++) {
+      const m = /^\s*enabled:\s*(\S+)/.exec(lines[i]);
+      if (m) return m[1];
+    }
+    return null;
+  };
+
+  // ── AC1/AC3: the happy path ────────────────────────────────────────────────────────────────────
+  const r1 = await runImport(["provider", "switch", "github", "--json", "--root", ws], {});
+  assert(r1.status === 0, `switch github exits 0 (got ${r1.status}; stderr: ${r1.stderr.slice(0, 300)})`);
+  let j1 = null;
+  try {
+    j1 = JSON.parse(r1.stdout);
+  } catch {
+    /* the assertions below print the raw output */
+  }
+  assert(j1 !== null, `switch --json prints parseable JSON: ${r1.stdout.slice(0, 300)}`);
+  assert(j1?.provider === "github", `report names the target provider: ${JSON.stringify(j1?.provider)}`);
+  assert(
+    JSON.stringify(j1?.previousEnabled) === JSON.stringify(["native"]),
+    `report names the provider that WAS enabled: ${JSON.stringify(j1?.previousEnabled)}`
+  );
+
+  const afterSwitch = readCfg();
+  assert(enabledValueOf("github", afterSwitch) === "true", "providers.github.enabled is true after the switch");
+  assert(enabledValueOf("native", afterSwitch) === "false", "providers.native.enabled is false after the switch");
+
+  // ── AC3-ii: ONLY the enabled lines moved ───────────────────────────────────────────────────────
+  const beforeLines = ORIGINAL.split("\n");
+  const afterLines = afterSwitch.split("\n");
+  assert(beforeLines.length === afterLines.length, "the switch changed no line COUNT (no reformat, no insertion)");
+  const changedIdx = beforeLines.map((l, i) => (l === afterLines[i] ? -1 : i)).filter((i) => i >= 0);
+  assert(
+    changedIdx.length === 2 && changedIdx.every((i) => /^\s*enabled:/.test(beforeLines[i])),
+    `the diff is EXACTLY the two enabled: lines (got indices ${JSON.stringify(changedIdx)}: ` +
+      `${JSON.stringify(changedIdx.map((i) => afterLines[i]))})`
+  );
+  assert(
+    afterSwitch.includes("    enabled: true                       # not the DEFAULT provider (native is)"),
+    "the trailing comment (and its alignment) survived the rewrite verbatim"
+  );
+  assert(
+    afterSwitch.startsWith("providers:\n  native:\n"),
+    "the file's head is untouched — a line-level edit, not a YAML round-trip"
+  );
+
+  // The switch and `quay config validate` are the SAME judgment applied to the same bytes: the
+  // post-switch file must pass it. (If they could disagree, AC2's precondition would be a second,
+  // drifting rule rather than the validator's own verdict.)
+  const v = await runImport(["config", "validate", "--root", ws], {});
+  assert(v.status === 0, `the post-switch config validates (exit ${v.status}): ${v.stdout}${v.stderr}`);
+
+  // ── AC4: the init-reconcile hint ───────────────────────────────────────────────────────────────
+  const r1human = await runImport(["provider", "switch", "native", "--root", ws], {});
+  assert(r1human.status === 0, `switch back to native exits 0 (got ${r1human.status})`);
+  assert(
+    /quay init/.test(r1human.stdout) && /reconcile/i.test(r1human.stdout),
+    `the output tells the operator that the next \`quay init\` reconciles: ${JSON.stringify(r1human.stdout.slice(-260))}`
+  );
+  assert(
+    !/--reconcile|--force/.test(r1human.stdout),
+    "the hint does NOT name a retired flag (GOAL-029 removed the reconcile selector)"
+  );
+  // Round trip: switching back must restore the ORIGINAL BYTES — the strongest available reading of
+  // "the rest of the file was not damaged".
+  assert(readCfg() === ORIGINAL, "switching github→native restores the original file byte-for-byte");
+
+  // ── idempotence: already-enabled is its own state, and writes nothing ──────────────────────────
+  const r2 = await runImport(["provider", "switch", "native", "--json", "--root", ws], {});
+  assert(r2.status === 0, `switching to the already-enabled provider exits 0 (got ${r2.status})`);
+  let j2 = null;
+  try {
+    j2 = JSON.parse(r2.stdout);
+  } catch {
+    /* asserted next */
+  }
+  assert(j2?.alreadyEnabled === true, `the already-enabled case reports alreadyEnabled: ${r2.stdout.slice(0, 200)}`);
+  assert(readCfg() === ORIGINAL, "the already-enabled case writes nothing");
+
+  // ── AC2: an incomplete target is REFUSED and the file is left UNCHANGED ────────────────────────
+  const INCOMPLETE = ORIGINAL.replace('    mcp_entry: ["node", "./bin/quay-github.ts", "mcp"]\n', "").replace(
+    '      QUAY_GITHUB_REPO: "yaleh/quay"',
+    '      QUAY_GITHUB_REPO: "not-a-repo"'
+  );
+  assert(INCOMPLETE !== ORIGINAL, "the incomplete fixture really differs from the complete one");
+  fs.writeFileSync(cfgPath, INCOMPLETE);
+
+  const r3 = await runImport(["provider", "switch", "github", "--root", ws], {});
+  assert(r3.status === 1, `an incompletely-configured target is refused (exit ${r3.status})`);
+  assert(
+    r3.stderr.includes("was NOT modified"),
+    `the refusal says the file was not written: ${JSON.stringify(r3.stderr.slice(0, 260))}`
+  );
+  assert(
+    r3.stderr.includes("providers.github") && r3.stderr.includes("mcp_entry"),
+    `the refusal names the missing field: ${JSON.stringify(r3.stderr.slice(0, 300))}`
+  );
+  assert(readCfg() === INCOMPLETE, "the refused switch left .quay/config.yml byte-for-byte unchanged");
+
+  // ── unknown provider name: refused, and the message names the declared set ─────────────────────
+  fs.writeFileSync(cfgPath, ORIGINAL);
+  const r4 = await runImport(["provider", "switch", "gitlab", "--root", ws], {});
+  assert(r4.status === 1, `an undeclared provider name is refused (exit ${r4.status})`);
+  assert(
+    r4.stderr.includes("gitlab") && r4.stderr.includes("native, github"),
+    `the refusal names the unknown id AND the declared ones: ${JSON.stringify(r4.stderr.slice(0, 240))}`
+  );
+  assert(readCfg() === ORIGINAL, "the undeclared-name refusal writes nothing");
+
+  // ── unknown subcommand / missing name: usage errors, never a silent success ────────────────────
+  const r5 = await runImport(["provider", "frobnicate", "--root", ws], {});
+  assert(r5.status === 1, `an unknown subcommand is a usage error (exit ${r5.status})`);
+  assert(
+    r5.stderr.includes('unknown subcommand "frobnicate"'),
+    `the usage error names what it got: ${r5.stderr.slice(0, 160)}`
+  );
+  const r6 = await runImport(["provider", "switch", "--root", ws], {});
+  assert(r6.status === 1, `a missing <name> is a usage error (exit ${r6.status})`);
+  assert(readCfg() === ORIGINAL, "the usage errors write nothing");
+
+  // ── the pure text helper's refusal states (each distinguishable from "nothing to do") ─────────
+  const { switchEnabledProviderText } = await import("../src/init.ts");
+  const notes = {
+    noProviders: switchEnabledProviderText("gates: {}\n", "github").note,
+    inline: switchEnabledProviderText("providers: {native: {enabled: true}}\n", "github").note,
+    noTarget: switchEnabledProviderText(ORIGINAL, "gitlab").note,
+  };
+  assert(notes.noProviders === "no-providers", `note for a config with no providers: ${notes.noProviders}`);
+  assert(notes.inline === "inline-providers", `note for a flow-mapping providers: ${notes.inline}`);
+  assert(notes.noTarget === "no-target", `note for an unknown target: ${notes.noTarget}`);
+  const noopText = switchEnabledProviderText(ORIGINAL, "native");
+  assert(
+    noopText.note === null && noopText.changed.length === 0 && noopText.added.length === 0 && noopText.text === ORIGINAL,
+    "a switch that changes nothing returns the input string byte-identically (so the caller writes nothing)"
+  );
+  // A commented-out provider block is NOT an entry: it must never be rewritten or counted.
+  const commented = ["providers:", "  native:", "    enabled: true", "  # github:", "  #   enabled: false", ""].join("\n");
+  const rCommented = switchEnabledProviderText(commented, "github");
+  assert(rCommented.note === "no-target", `a commented-out provider block is not switchable (note: ${rCommented.note})`);
+
+  fs.rmSync(ws, { recursive: true, force: true });
 }
