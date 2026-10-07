@@ -2,7 +2,7 @@
 id: gap-quay-init-sh-becomes-a-shim-over-bin-quay-init-and-callers-switch
 title: quay-init.sh 退化为调用 bin/quay init 的垫片（≤40
   行），skill/README/release.yml/验证脚本改调 CLI，退役 laydown 闭包棘轮
-status: todo
+status: ready
 labels:
   - gap
   - priority:p2
