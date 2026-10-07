@@ -267,7 +267,7 @@ exit=0
 `## Touches` 因这次 delta 新增 `plugin/scripts/profiles-role-coverage-check.ts` 而加一行
 （`anti-drift-touches-check` 对 Touches 外的 delta 文件是 HARD FAIL，不加会让 fan-in step 3 再红一次）。
 
-### ⑥ 复跑（merge develop 之后，本轮）
+### ⑧ 复跑（merge develop 之后，本轮）
 - AC-331 判据：`exit=0`。
 - AC2 两条取假臂复现：`CAUSE=closed-set-dir-missing-goals`（exit 1）与
   `CAUSE=closed-set-file-missing-.claude/settings.json`（exit 1）；两条改动均用 `cp` 备份还原，
