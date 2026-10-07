@@ -37,6 +37,10 @@ import { execFileSync, execFile, spawn } from "node:child_process";
 import { pathToFileURL } from "node:url";
 import { promisify } from "node:util";
 import { QUAY_VERSION } from "./version.ts";
+// The ONE definition of fast-mode start/end classification — shared with the plugin's
+// fast-mode-telemetry.ts (the writer/`--report` reader of the same `.workflow-events/*.jsonl`
+// store), NOT a hand-maintained mirror of it. See start-end-like.ts's header.
+import { isStartLike, isEndLike } from "./start-end-like.ts";
 import { readProcCmdlineText } from "./kernel/proc-identity.ts";
 import { parseFrontmatter } from "./frontmatter-store-base.ts";
 import { TASK_STATUS, isTaskStatus, type TaskStatus } from "./abi.ts";
@@ -259,24 +263,16 @@ interface RawEvent {
 }
 
 /**
- * Start/end classification — EXACT mirror of fast-mode-telemetry.ts aggregate()'s semantics
- * (verified against `--report --json` in the AC2 test): start-like = `eventKind === "start"`
- * OR (`timing.startedAtMs != null` AND `timing.endedAtMs == null`); end-like = `eventKind ===
- * "end"` OR `timing.endedAtMs != null`. Classification is by TIMING MARKER PRESENCE, not the
- * `eventKind` extra field alone (DEFECT-4 fix), because `eventKind` is not in A1a
- * REQUIRED_FIELDS.
+ * Start/end classification — was an "EXACT mirror" of fast-mode-telemetry.ts aggregate()'s
+ * semantics, pinned by a source-level doc comment and nothing else. It is now the SAME definition,
+ * not a mirror: both readers of `.workflow-events/*.jsonl` import these two predicates from
+ * `./start-end-like.ts` (gap-routine-semantic-dedup-scan-is-start-end-like-cross-surface). The
+ * declared-mirror form could drift silently — the plugin's copy and this one were byte-identical
+ * in body, so any future edit to one alone would make the web view and `--report` disagree about
+ * which runs are in-flight, with no test naming either predicate. Re-exported so the SSOT ratchet
+ * can assert runtime identity across the plugin/Core boundary.
  */
-function isStartLike(e: RawEvent): boolean {
-  if (!e || !e.timing) return false;
-  if (e.eventKind === "start") return true;
-  return e.timing.startedAtMs != null && e.timing.endedAtMs == null;
-}
-
-function isEndLike(e: RawEvent): boolean {
-  if (!e || !e.timing) return false;
-  if (e.eventKind === "end") return true;
-  return e.timing.endedAtMs != null;
-}
+export { isStartLike, isEndLike };
 
 /**
  * Pair parsed `Fast`-stage events into in-flight tasks — mirrors fast-mode-telemetry.ts
