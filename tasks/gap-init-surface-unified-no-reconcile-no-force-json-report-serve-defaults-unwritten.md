@@ -139,10 +139,20 @@ serve:
 
 **⑤ 本轮实跑抓到的两个真实缺陷(不是推测)**
 - **stdout 泄漏**:升级路径上 `.quay/plugin` 链接步骤被调用两次,旧那次未接日志注入点,`linked: …` 直接打进 stdout —— 恰好插在 `--json` 文档之前,打破「stdout 只有一份 JSON」。已合并为单次调用、置于配置写成功之后(GOAL-029 顺序),并给 `refreshProjectPluginLink` 加 `log` 注入;`pluginLink` 现在在**每条** outcome 都报告(`linked`/`not-evaluated`/`not-run` 三态,硬规则 3b)。
-- **语义决策(记录理由)**:`--force`/`--reconcile` 一去,不可解析配置若仍「拒绝」即死路 —— 没有任何 in-band 方式请求重建,而 MCP `init` 存在的唯一理由正是「配置读不动时仍能修复」。故 corrupt 状态自动走「备份 `.corrupt-<ts>`(原文逐字节)→ 从版本默认重建 → 校验 → 原子写 → 退出 0」,结果带 `configState:"corrupt"` + `corruptReason`(真实解析原因 + 备份路径)。这与同轮并入 develop 的兄弟任务 `gap-init-unparseable-config-backed-up-and-rebuilt-per-the-unified-semantics`(goal_ac AC-329)议定语义一致;该任务尚未做完的细项(`outcome:"rebuilt"` 取值、重建丢项目值的显式提示、同秒不覆盖备份、重建体自身校验失败时非零)仍归它。
+- **语义决策(记录理由)**:`--force`/`--reconcile` 一去,不可解析配置若仍「拒绝」即死路 —— 没有任何 in-band 方式请求重建,而 MCP `init` 存在的唯一理由正是「配置读不动时仍能修复」。故 corrupt 状态自动走「备份 `.corrupt-<ts>`(原文逐字节)→ 从版本默认重建 → 校验 → 原子写 → 退出 0」,结果带 `configState:"corrupt"` + `corruptReason`(真实解析原因 + 备份路径)。这与兄弟任务 `gap-init-unparseable-config-backed-up-and-rebuilt-per-the-unified-semantics`(goal_ac AC-329,已 done)议定语义一致;它随后落地的细项(`outcome:"rebuilt"` 取值、`corruptBackupPath`、重建丢项目值的显式提示、同秒不覆盖备份 `corruptBackupPathFor`、重建体自身校验失败时非零 `rebuild-invalid`)已随本轮并入 develop 一并收进本分支(见 ⑦)。
 
 **⑥ 未触碰 / 已知边界**
 - `plugin/scripts/quay-init.sh` 的 `--force` 与 `quay-native init` 的对外收口属 AC-331/AC-332;本轮只让 **Core CLI + MCP** 不再有这两个模式,并让 `quay-native init` 用同一条淘汰选项守卫(它只调用**已存在**的 `InitOptions` 字段/导出 —— native 经 `quay/init` 裸说明符解析到**主检出**的 `src/init.ts`,任何新字段/新导出都会在整条任务分支生命周期里运行时缺失)。
 - 未改 `observation.ts` / `cli/driver.ts` 里的 `--reconcile` / `--reconcile-interval`(见 ③)。
 - 本地孤儿分支 `plugin-channel-verify` 由 `publish-dist-branch.sh` 留下(每次重跑 force 重建),是本轮 DoD 的产物载体。
 - 本轮为任务体补 `## Test-Files`:scoped 选测器的规则 4 只认该声明,否则 `packages/quay/test/init.test.mjs` 不会被选入。
+
+**⑦ 并入 develop 轮:语义联合 + 上轮 suite 红的 flake 归因**
+上一轮以 `step=suite: AssertionError: must have killed the orphan probe: {…"found":0,"probes":[]}` 退出(not-landed)。
+- **flake 归因(四步)**:① `plugin/test/worktree-process-reaper.test.mjs` 不在本任务 `## Touches`,且 `git diff develop -- <该文件>` 为空(develop-identical);② 失败载荷是文档化的 `:325` 臂签名(`found:0` / `probes:[]` —— 负载下 `bash -c 'exec -a claude-probe …'` 尚未执行 `exec -a`,`argv0` 仍是 `bash` ⇒ `classifyOrphans` 匹配不到);③ 红轮该测试 **697.88ms**,隔离复跑 **3863.65ms**(5.5×,该臂既有比值);④ 隔离复跑该文件 **26/26 pass / 0 fail**。⇒ 重试信号,非本任务缺陷;⛔ 未改该文件(anti-drift)。
+- **并入 develop(两轮;第二轮的唯一增量是一个 `goals/AC-329` 状态行,纯 branch-lag)**:冲突面只有 init 三件套 + 其测试(`cli/init.ts` / `init.ts` / `mcp-server.ts` / `init.test.mjs`)—— 两侧是同一 init 面的两条演化:本分支=对外面统一(去 --reconcile/--force、`--json` 单一报告、不写 serve 默认),develop=兄弟任务落地的 corrupt→rebuild 细项。按语义并集解析:
+  - **取 develop 的 rebuild 实现**:`isRebuild` 常量、`corruptBackupPathFor`(同秒不覆盖)、fixpoint 走 `upgradeConfigContent`、`outcome:"rebuilt"` / `"rebuild-invalid"`、备份在过完全部门后才 copy、dry-run 计划里点名备份路径、丢项目值警告。
+  - **保留本分支的对外面**:`say()` 的「stdout 只有一份 JSON」纪律、`buildInitReport` 单一 builder、`pluginLink` 三态、`validated`/`validationIssues`、fresh 路径的 `validateConfigText`、`--force` 去后改 create-if-absent(不 clobber)、`opts.log` 注入、`opts.project`。
+  - `refused` 列表取两侧并集(`corrupt` / `rebuild-invalid` / `skipped` / `upgrade-invalid` / `branch-model-blocked`);`InitReport` 增收 `corruptBackupPath`(MCP 报告与 CLI `--json` 同形,读数见下);⛔ 删掉 develop 侧仍留的 `--reconcile` 测试(该模式已退役)及其孤儿尾,未手改任何生效的 `--force`/`--reconcile` 面。
+- **合并后复跑读数**:`packages/quay/test/init.test.mjs` **73 pass / 0 fail**(develop 的 8 个 REBUILD 用例与本分支的 3 个 `--json` 用例并存);`mcp-server.test.mjs` PASS(MCP 报告实读 `outcome:"rebuilt"`、`configState:"corrupt"`、`corruptReason`+`corruptBackupPath` 均在);`branch-model.test.mjs` + `config-key-consumer-check.test.mjs` **64 pass / 0 fail**;`ts-typecheck`(`for d in packages/*/; do npx tsc --noEmit -p "$d" || exit 1; done`,`.quay/config.yml` 的 ts-typecheck 门命令)**四个包全绿**;
+- **AC-330 判据复跑** ⇒ `AC330_EXIT=0`;**scoped 门** `bash scripts/test.sh --for-task <id> --allow-thin` ⇒ **EXIT=0**(16 个 init 相关用例被执行);scoped-gate cache 已写(`develop-sha=077fab6689e9236cdf88bb026ff26e41cf146eca`,是 HEAD 的祖先)。
