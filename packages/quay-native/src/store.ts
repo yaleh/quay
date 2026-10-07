@@ -32,6 +32,13 @@ import { commitStoreWrite } from "../../quay/src/store-commit.ts";
 // writer's own path is here, so the rule is enforced here (硬规则 4 推论三: a judgment only the hand
 // path can reach proves nothing about the writer path).
 import { GOAL_CARRIER_DIR_NAME, writeFaceRejectionOnCreate } from "../../quay/src/goal-ac-write-face.ts";
+// The ONE heading-stripped search index (the native store's former private
+// `stripHeadingsForSearch`). gap-stripheadings-quadruple-duplication-cli-task-
+// list-client-filter collapsed the four independent copies into the product-
+// layer leaf next to abi.ts/task-parsing.ts, imported here the same way — the
+// store is the authoritative SEARCH BACKEND but not the definition home (Core
+// cannot depend on quay-native; quay-native already depends on Core).
+import { stripHeadings } from "../../quay/src/search-index.ts";
 // The single regex-literal escaper, a kernel leaf — the SAME function plugin/scripts/ready-pool-check.ts
 // imports (via the plugin-side entry `plugin/scripts/regex-escape.ts`). The two judges previously each
 // carried their own byte-identical copy and documented the agreement only by comment ("Mirrors
@@ -234,25 +241,16 @@ export function resolveDefaultStatus(value: string): string {
 }
 
 /**
- * gap-serve-search-timeout-all-body-fetch: strip structural heading lines from
- * a task body before using it as a search index, so template boilerplate
- * (`## Proposal`, `## Plan`, `## AC`, `## DoD`) does not produce false positives
- * when a search term matches a standard section name. This is the native-store
- * mirror of Core's serve-render.stripHeadings (the exact function the web UI's
- * own client-side search filter used) — byte-for-byte the same semantics, so a
- * server-side `search` filter returns exactly the tasks the web UI's
- * (now-removed-for-native) client-side filter would have. Heading lines outside
- * fenced code blocks are stripped; `# comment` lines inside ``` fences are
- * preserved (they are code content, still searchable).
+ * gap-serve-search-timeout-all-body-fetch: the heading-stripped search index.
+ * The former private `stripHeadingsForSearch` body lived here (byte-for-byte
+ * the same semantics as Core's serve-render.stripHeadings); it is now the ONE
+ * shared definition in ../../quay/src/search-index.ts (imported above) —
+ * gap-stripheadings-quadruple-duplication-cli-task-list-client-filter removed
+ * the four independent copies so a future heading/fence fix can no longer
+ * reach one search surface and miss another. Heading lines outside fenced code
+ * blocks are stripped; `# comment` lines inside ``` fences are preserved (they
+ * are code content, still searchable).
  */
-function stripHeadingsForSearch(text: string | undefined | null): string {
-  let inFence = false;
-  return (text || "").split("\n").filter((line) => {
-    if (/^```/.test(line)) { inFence = !inFence; return true; }
-    if (inFence) return true; // preserve code content (including # comment lines)
-    return !/^#+\s/.test(line); // strip structural headings outside fences
-  }).join(" ");
-}
 
 /**
  * QN-015: thrown by `write()` when a caller supplies `expectedStatus` and the
@@ -981,7 +979,7 @@ export function createStore(tasksDir: string, opts?: { defaultStatus?: string })
       if (wanted.length > 0 && !wanted.every((l) => have.includes(l))) return false;
     }
     if (filter.prefix && !t.id.toUpperCase().startsWith(filter.prefix.toUpperCase())) return false;
-    if (sq && !((t.title + " " + stripHeadingsForSearch(t.body)).toLowerCase().includes(sq))) return false;
+    if (sq && !((t.title + " " + stripHeadings(t.body)).toLowerCase().includes(sq))) return false;
     return true;
   }
 
