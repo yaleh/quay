@@ -221,18 +221,20 @@ async function main() {
       console.log(`quay-native init — scaffold a new quay workspace
 
 Usage:
-  quay-native init [--force] [--reconcile] [--dry-run] [--root <path>]
+  quay-native init [--force] [--reconcile] [--drop-incompatible] [--dry-run] [--root <path>]
 
 Flags:
-  --force      Overwrite existing .quay/config.yml if present.
-  --reconcile  Bring an EXISTING .quay/config.yml up to this version's defaults
-               instead of refusing it: keys this version added are filled from the
-               defaults, values this version considers incompatible are migrated,
-               everything else (including comments) is left alone. Handles all three
-               states — absent (fresh write), unparseable (rebuilt, broken file kept
-               beside it), valid (per-key diff). Shares one implementation with the
-               Core CLI's "quay init --reconcile".
-  --dry-run    Print the generated config to stdout without writing to disk.
+  --force      Overwrite an existing .quay/config.yml wholesale. Without it, an EXISTING
+               config is UPGRADED in place (merged, comment-preserving, validated before
+               writing — plain init and --reconcile are the same single engine, GOAL-029).
+  --drop-incompatible
+               When the upgraded config does not validate, delete the user values the
+               validator rejects and retry; without it such a value fails the upgrade and
+               your config is left byte-identical.
+  --reconcile  LEGACY, now inert: plain init already upgrades an existing config. Kept for
+               one release for existing callers. Shares one implementation with the Core
+               CLI's "quay init".
+  --dry-run    Report what would happen without writing to disk.
   --root <path>  Scaffold at <path> instead of the current working directory.
 
 Description:
@@ -240,7 +242,8 @@ Description:
   a tasks/ directory at the project root. Auto-detects project type (Node.js /
   Go) to suggest appropriate gate defaults.
 
-  If .quay/config.yml already exists, refuses to overwrite unless --force.
+  If .quay/config.yml already exists, it is UPGRADED in place; --force replaces it
+  wholesale instead.
 
   This command only scaffolds a brand-new EMPTY task store. It does NOT lay
   down the loop mechanism — the canonical path for onboarding an existing
@@ -272,9 +275,10 @@ Description:
     const force = initFlags.force === true;
     const reconcile = initFlags.reconcile === true;
     const dryRun = initFlags["dry-run"] === true;
+    const dropIncompatible = initFlags["drop-incompatible"] === true;
 
     try {
-      const result = runInit({ root: targetRoot, force, reconcile, dryRun });
+      const result = runInit({ root: targetRoot, force, reconcile, dryRun, dropIncompatible });
 
       // ⛔ Its own arm, before "already exists": an unparseable config is not a name conflict, and
       // reporting it as one hides the parse error (硬规则 3b). Same three-state vocabulary as Core.
@@ -290,23 +294,45 @@ Description:
       }
 
       if (result.outcome === "skipped") {
+        // LEGACY outcome — the single upgrade engine (GOAL-029) upgrades an existing config
+        // instead of refusing it. Defensive arm only.
         console.error(
-          `.quay/config.yml already exists at ${result.configPath}. ` +
-          "Use --force to overwrite, --reconcile to bring it up to this version's defaults, " +
-          "or --dry-run to preview."
+          `.quay/config.yml already exists at ${result.configPath} and was not upgraded. ` +
+          "Re-run, or use --force to overwrite."
         );
         process.exitCode = 1;
         return;
       }
 
+      // The upgraded candidate failed validation ⇒ nothing was written (validate-before-write).
+      if (result.outcome === "upgrade-invalid") {
+        console.error(
+          `${result.configPath}: upgrade REFUSED — the upgraded config did not validate, ` +
+            "so nothing was written (your config is byte-identical)."
+        );
+        for (const i of result.upgradeIssues ?? []) {
+          console.error(`  ${i.severity}: ${i.field} — ${i.message}`);
+          if (i.suggestion) console.error(`    suggestion: ${i.suggestion}`);
+        }
+        console.error("  (pass --drop-incompatible to delete the offending values, or edit them by hand)");
+        process.exitCode = 1;
+        return;
+      }
+
       if (result.outcome === "reconciled" || result.outcome === "unchanged") {
+        const r = result.upgrade;
         if (result.outcome === "unchanged") {
           console.log(`${result.configPath}: already current for this version of quay — not rewritten.`);
         } else {
-          console.log(`${result.configPath}: reconciled to this version's defaults.`);
-          for (const k of result.reconcile?.added ?? []) console.log(`  filled loop.${k} (was absent)`);
-          for (const m of result.reconcile?.migrated ?? []) console.log(`  migrated loop.${m}`);
+          console.log(`${result.configPath}: upgraded to this version's defaults.`);
+          for (const k of r?.added ?? []) console.log(`  filled loop.${k} (was absent)`);
+          for (const k of r?.addedServe ?? []) console.log(`  filled serve.${k} (was absent)`);
+          for (const m of r?.migrated ?? []) console.log(`  migrated loop.${m}`);
+          for (const k of r?.removed ?? []) console.log(`  removed ${k} (retired key)`);
+          for (const k of r?.pinned ?? []) console.log(`  pinned providers.native.env.${k} (carrier dir pin)`);
+          for (const k of r?.dropped ?? []) console.log(`  dropped ${k} (--drop-incompatible: it did not validate)`);
         }
+        for (const k of r?.unknownKeys ?? []) console.error(`  warning: unrecognized top-level config key "${k}" — kept as-is`);
         return;
       }
 

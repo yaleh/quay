@@ -451,18 +451,21 @@ test("CLI: `--branch-model-only --dry-run` reports the block but does not fail (
   assert.equal(git(dir, ["rev-parse", "develop"]), beforeDevelop, "--dry-run mutates nothing");
 });
 
-test("CLI: the config-free entry supersedes the config-exists refusal it shares a command with", () => {
-  // Regression arm for the ordering: `quay init` alone on an initialized project exits 1 with
-  // "already exists"; the branch-model entry must NOT be caught by that guard — an existing config
-  // is its normal input. Falsifiable: move the `branchModelOnly` block after the `configExists`
-  // check in runInit and this test goes red.
+test("CLI: the config-free entry supersedes the upgrade refusal it shares a command with", () => {
+  // Regression arm for the ordering (GOAL-029 retired the old contract): `quay init` alone on an
+  // initialized project no longer exits 1 with "already exists" — it UPGRADES the existing config.
+  // This fixture's own values do not validate under this version (`gates.custom-user-gate` is not a
+  // recognized gate type key; `loop.routines` carries a bare string), so that upgrade REFUSES —
+  // and the branch-model entry must NOT be caught by that refusal: an existing config is its normal
+  // input. Falsifiable: move the `branchModelOnly` block after the upgrade pipeline in runInit and
+  // this test goes red.
   const dir = initializedRepo("bmo-supersede");
   const plain = runQuayInit(["init", "--root", dir], dir);
   assert.equal(plain.exitCode, 1);
-  assert.match(plain.stderr, /already exists/);
+  assert.match(plain.stderr, /upgrade REFUSED/);
   const bmo = runQuayInit(["init", "--branch-model-only", "--root", dir], dir);
   assert.match(bmo.stdout, /landing-baseline/, "the entry must still have run its judgment");
-  assert.doesNotMatch(bmo.stderr, /already exists/);
+  assert.doesNotMatch(bmo.stderr, /upgrade REFUSED/);
 });
 
 // ── the SHIPPED entry: plugin/scripts/quay-init.sh must JUDGE the baseline, never assume it ──────

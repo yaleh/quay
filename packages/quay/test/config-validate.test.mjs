@@ -1823,3 +1823,33 @@ test("M5: validator reuses VALID_EXECUTION, VALID_AUDIT, VALID_STOP_RE from loop
   assert.ok(loopParams.VALID_STOP_RE.test("once"));
   assert.ok(loopParams.VALID_STOP_RE.test("until(.halt)"));
 });
+
+// ── AC3 (gap-init-single-engine-state-based-upgrade-validate-before-write) ─────────────────────────
+// The init upgrade validates its CANDIDATE TEXT through the SAME check pipeline `quay config validate`
+// runs on the FILE. The equivalence is asserted directly: the same bytes, judged both ways, must
+// yield the same verdict AND the same issue set (not merely the same ok flag). This is what makes
+// "init's validation ⇔ config validate" a measurement rather than a claim.
+test("AC3 parity: validateConfigText (init's candidate judge) ⇔ validateConfig (the file judge)", async () => {
+  const { validateConfigText } = await import("../src/config-validate.ts");
+  const cases = [
+    // missing the required loop keys
+    "providers:\n  native:\n    enabled: true\n    tasks_dir: ./tasks\n",
+    // an unresolvable gate reference
+    "providers:\n  native:\n    enabled: true\n    tasks_dir: ./tasks\nloop:\n  board: native\n  gates: [no-such-gate-zz]\n",
+    // a clean, current config
+    "providers:\n  native:\n    enabled: true\n    tasks_dir: ./tasks\nloop:\n  board: native\n  gates: [acceptance]\n",
+    // an unknown gate-type key
+    "providers:\n  native:\n    enabled: true\n    tasks_dir: ./tasks\ngates:\n  bogus: []\nloop:\n  board: native\n  gates: [acceptance]\n",
+  ];
+  for (const text of cases) {
+    const { root, cleanup } = tmpWorkspace({ ".quay/config.yml": text });
+    try {
+      const fileVerdict = validateConfig({ workspaceRoot: root });
+      const textVerdict = validateConfigText({ text, workspaceRoot: root });
+      assert.equal(textVerdict.ok, fileVerdict.ok, `verdict parity for:\n${text}`);
+      assert.deepEqual(textVerdict.issues, fileVerdict.issues, `issue parity for:\n${text}`);
+    } finally {
+      cleanup();
+    }
+  }
+});

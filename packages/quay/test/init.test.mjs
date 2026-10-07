@@ -132,20 +132,26 @@ test("AC2: quay init at Go project root suggests go-test gate", () => {
   assert.ok(configContent.includes("go test ./..."), "Go project should suggest go test ./...");
 });
 
-// AC3: quay init refuses to overwrite existing config (exit 1)
-test("AC3: quay init refuses to overwrite existing config", () => {
+// AC3: plain `quay init` UPGRADES an existing config (GOAL-029 single engine) — it neither refuses
+// nor clobbers. (Was: "quay init refuses to overwrite existing config". The refusal contract was
+// replaced by the human ruling of 2026-10-07: an existing config is the normal input, and the
+// upgrade must be reachable WITHOUT a flag, because the shipped entry is a plain re-run.)
+test("AC3: plain quay init UPGRADES an existing config (no refusal, no clobber)", () => {
   const dir = tmpDir("ac3");
-  // First init succeeds
+  // First init succeeds.
   runQuay(["init"], dir);
-  assert.ok(fs.existsSync(path.join(dir, ".quay", "config.yml")), "config should exist after first init");
+  const cfgPath = path.join(dir, ".quay", "config.yml");
+  assert.ok(fs.existsSync(cfgPath), "config should exist after first init");
 
-  // Second init fails
+  // A user's own comment must survive the second run (comment-preserving upgrade).
+  const before = fs.readFileSync(cfgPath, "utf8").replace(/^providers:/m, "# a user comment\nproviders:");
+  fs.writeFileSync(cfgPath, before);
+
   const out = runQuayAllowFail(["init"], dir);
-  assert.equal(out.exitCode, 1, "second init should exit 1");
-  assert.ok(
-    out.stderr.includes("already exists") || out.stderr.includes("--force"),
-    "error message should mention existing config and --force"
-  );
+  assert.equal(out.exitCode, 0, `a second init must upgrade, not refuse:\n${out.stderr}`);
+  const after = fs.readFileSync(cfgPath, "utf8");
+  assert.ok(after.includes("# a user comment"), "the user's own comment must survive the upgrade");
+  assert.ok(after.includes("providers:"), "the upgraded config still carries its sections");
 });
 
 // AC3b: quay init --force overwrites existing config
@@ -275,13 +281,36 @@ test("AC10b: quay-native init --dry-run prints to stdout", () => {
   assert.ok(!fs.existsSync(path.join(dir, ".quay")), "native dry-run must NOT write .quay/ dir");
 });
 
-// AC10c: quay-native init refuses to overwrite existing config
-test("AC10c: quay-native init refuses overwrite", () => {
+// AC10c: a second `quay-native init` must never CLOBBER an existing config.
+//
+// ⛔ WHY THIS IS NOT A BARE "exitCode === 1": the native CLI acquires the Core ENGINE through the
+// `quay/init` bare specifier, which — inside a git worktree, where `node_modules` is a link to the
+// main checkout — resolves to the MAIN checkout's Core, not this worktree's. So this assertion must
+// hold under BOTH the retired "refuse with exit 1" contract and the new single-engine "upgrade in
+// place" contract (GOAL-029): whichever arm fires, the user's own content is never replaced
+// wholesale. The PRECISE upgrade contract is pinned by the GOAL-029 tests below, which drive the
+// Core CLI by relative path and therefore observe THIS worktree's engine.
+test("AC10c: quay-native init never clobbers an existing config", () => {
   const dir = tmpDir("ac10c");
   runNative(["init"], dir);
+  const cfgPath = path.join(dir, ".quay", "config.yml");
+  const withUserNote = fs.readFileSync(cfgPath, "utf8").replace(/^providers:/m, "# keep-my-note\nproviders:");
+  fs.writeFileSync(cfgPath, withUserNote);
+
   const out = runNativeAllowFail(["init"], dir);
-  assert.equal(out.exitCode, 1, "second native init should exit 1");
-  assert.ok(out.stderr.includes("already exists") || out.stderr.includes("--force"), "should mention --force");
+  assert.ok(out.exitCode === 0 || out.exitCode === 1, `a second native init must be handled, got exit ${out.exitCode}`);
+  const after = fs.readFileSync(cfgPath, "utf8");
+  if (out.exitCode === 0) {
+    // The single-engine contract: it UPGRADED in place, so the user's own content survives.
+    assert.ok(after.includes("# keep-my-note"), "an upgrade preserves the user's own content (not a clobber)");
+  } else {
+    // The retired refusal contract: nothing was written.
+    assert.equal(after, withUserNote, "a refusal writes nothing");
+    assert.ok(
+      out.stderr.includes("already exists") || out.stderr.includes("--force"),
+      "and the refusal explains itself (--force / already exists)"
+    );
+  }
 });
 
 // AC10d: quay-native init --force overwrites
@@ -800,7 +829,7 @@ test("AC2 reconcile: a legacy config missing the version defaults gets them — 
   fs.writeFileSync(cfgPath, LEGACY_CONFIG);
 
   const out = runQuay(["init", "--reconcile", "--root", dir], dir);
-  assert.match(out, /reconciled to this version's defaults/, `the run reports a reconcile:\n${out}`);
+  assert.match(out, /upgraded to this version's defaults/, `the run reports an upgrade:\n${out}`);
   assert.match(out, /filled loop\.fork_baseline/, "the report names the key it filled");
 
   const after = fs.readFileSync(cfgPath, "utf8");
@@ -820,15 +849,16 @@ test("AC2 reconcile: a legacy config missing the version defaults gets them — 
   assert.match(after, /^# a user's own comment that a YAML re-dump would destroy$/m, "comments survive (a YAML round-trip would drop them)");
   assert.match(after, /^  # the project's own tuning, which must survive verbatim$/m, "inline comments inside the edited block survive too");
 
-  // gap-serve-binding-defaults-three-copies-to-one-definition-point P3.2 — the SAME defect shape as
-  // the loop fill above, one section over: a `serve:` key added to the fresh-install template but not
-  // to the reconcile would be unreachable for every project initialized before it, forever. This
-  // fixture's config predates the key, so the fill is the reading that proves the key IS reachable.
-  assert.match(out, /filled serve\.host/, `the report names the serve key it filled:\n${out}`);
-  assert.match(out, /filled serve\.port/, `and its sibling:\n${out}`);
-  assert.deepEqual(doc.serve, SERVE_VERSION_DEFAULTS, "serve: is filled from SERVE_VERSION_DEFAULTS (whose values ARE the resolver's fallback)");
-  assert.equal(doc.serve.host, SERVE_BINDING_FALLBACK.host, "the delivered host default is the ONE fallback constant, not a re-typed literal");
-  assert.equal(doc.serve.port, SERVE_BINDING_FALLBACK.port, "…and so is the port default");
+  // GOAL-029 (人 2026-10-07) INVERTS the serve reading this block used to pin. The old contract was
+  // "reconcile fills serve.host/port from SERVE_VERSION_DEFAULTS"; the ruling is 「serve 默认值（等于
+  // 回退值）不写进配置」 — a version-level default whose value EQUALS the code fallback says nothing,
+  // so the upgrade must NOT write it. The fixture predates the key: the strong reading is now that
+  // `serve:` stays ABSENT (nothing to say) and no `host:`/`port:` line appears.
+  assert.doesNotMatch(out, /filled serve\./, `the upgrade must NOT write a fallback-equal serve default:\n${out}`);
+  assert.equal(doc.serve, undefined, "serve: is not created when every default equals the code fallback");
+  assert.doesNotMatch(after, /^\s*(host|port):/m, "no serve.host/serve.port line is written");
+  // …and the fallback constant is still the ONE definition of what an absent serve means.
+  assert.equal(typeof SERVE_BINDING_FALLBACK.host, "string", "the resolver's fallback stays the single definition");
 });
 
 test("AC2 reconcile: a config already current is NOT rewritten (no gratuitous rewrite)", () => {
@@ -836,27 +866,42 @@ test("AC2 reconcile: a config already current is NOT rewritten (no gratuitous re
   fs.mkdirSync(path.join(dir, ".quay"), { recursive: true });
   const cfgPath = path.join(dir, ".quay", "config.yml");
 
-  runQuay(["init", "--reconcile", "--root", dir], dir); // first: fresh write
+  // ⛔ TWO runs before the byte pin (GOAL-029 single engine): run 1 is the fresh write, which the
+  // CLI template still births with the retired native `path`/`mcp_entry` (a follow-up task folds the
+  // fresh install onto the same pipeline), so the FIRST upgrade is what reaches the fixpoint. The
+  // "already current" contract is about the second upgrade onward.
+  runQuay(["init", "--root", dir], dir); // fresh write
+  runQuay(["init", "--root", dir], dir); // upgrade → the current config
   const first = fs.readFileSync(cfgPath, "utf8");
   const firstMtime = fs.statSync(cfgPath).mtimeMs;
 
   const start = Date.now();
   while (Date.now() - start < 50) { /* let mtime be able to differ */ }
 
-  const out = runQuay(["init", "--reconcile", "--root", dir], dir);
-  assert.match(out, /already current/, `the second run reports a no-op:\n${out}`);
+  const out = runQuay(["init", "--root", dir], dir);
+  assert.match(out, /already current/, `the second UPGRADE run reports a no-op:\n${out}`);
   assert.equal(fs.readFileSync(cfgPath, "utf8"), first, "content is byte-identical");
   assert.equal(fs.statSync(cfgPath).mtimeMs, firstMtime, "and the file was not written at all (mtime unchanged)");
 });
 
-test("AC2 reconcile negative control: WITHOUT --reconcile an existing config is still refused", () => {
+// ⛔ The OLD contract this pinned ("a bare init still refuses an existing config — reconcile is
+// opt-in") is REPLACED by GOAL-029: a bare `quay init` IS the upgrade path. The negative control is
+// now its mirror — the bare form must reach the SAME engine as `--reconcile`, i.e. it must FILL the
+// absent version-level defaults and rewrite the file. (The value preserved is that a bare init is
+// not a silent no-op, not that it refuses.)
+test("AC2 negative control: WITHOUT --reconcile a bare init STILL upgrades an existing config", () => {
   const dir = tmpDir("ac2-nocontrol");
   fs.mkdirSync(path.join(dir, ".quay"), { recursive: true });
-  fs.writeFileSync(path.join(dir, ".quay", "config.yml"), LEGACY_CONFIG);
+  const cfgPath = path.join(dir, ".quay", "config.yml");
+  fs.writeFileSync(cfgPath, LEGACY_CONFIG);
 
   const out = runQuayAllowFail(["init", "--root", dir], dir);
-  assert.equal(out.exitCode, 1, "a bare init still refuses an existing config (reconcile is opt-in, not accidental)");
-  assert.equal(fs.readFileSync(path.join(dir, ".quay", "config.yml"), "utf8"), LEGACY_CONFIG, "and writes nothing");
+  assert.equal(out.exitCode, 0, `a bare init must upgrade an existing config:\n${out.stderr}`);
+  const after = fs.readFileSync(cfgPath, "utf8");
+  assert.notEqual(after, LEGACY_CONFIG, "and it must actually write the upgrade");
+  const doc = YAML.parse(after);
+  assert.equal(doc.loop.fork_baseline, "develop", "the bare form fills the same version defaults as --reconcile");
+  assert.equal(doc.loop.my_project_key, "keep-me", "and preserves the user's own keys");
 });
 
 test("AC2 reconcile: a value this version considers incompatible is migrated through the declared table", () => {
@@ -1146,16 +1191,16 @@ test("AC2① (round-trip): a fresh `quay-init.sh --loop` output passes BOTH `qua
   }
 });
 
-test("AC2② (round-trip): an OLD config missing loop.board/loop.gates passes after `quay init --reconcile`, and the write is a pure INSERTION", () => {
+test("AC2② (round-trip): an OLD config missing loop.board/loop.gates passes after `quay init`, and the write is a TARGETED edit (no re-dump)", () => {
   const ws = initWorkspace("ac2-upgrade-roundtrip");
   try {
     fs.mkdirSync(path.join(ws, ".quay"), { recursive: true });
-    // A 0.16.0-shaped config: explicit native `path`/`mcp_entry` (both must survive — this task
-    // does not touch the provider axis), a user comment, and a user-tuned block list. ⛔ Block-style
-    // scalars and STANDALONE comments only: the reconcile re-serializes through YAML's Document API,
-    // which normalizes flow style, so a fixture carrying `["a"]` or a trailing inline comment would
-    // make "the diff is exactly the added lines" unmeasurable for a reason unrelated to this task
-    // (the same normalization the pre-existing AC2 reconcile test works around).
+    // A 0.16.0-shaped config: an explicit native `path`/`mcp_entry` (both RETIRED — GOAL-029 deletes
+    // them: the native binding is resolved from the plugin root), a user comment, and a user-tuned
+    // block list. ⛔ Block-style scalars and STANDALONE comments only: the upgrade re-serializes
+    // through YAML's Document API, which normalizes flow style, so a fixture carrying `["a"]` or a
+    // trailing inline comment would make "the diff is exactly the added/removed lines" unmeasurable
+    // for a reason unrelated to this task.
     const before = [
       "# a user's own comment that a YAML re-dump would destroy",
       "providers:",
@@ -1182,23 +1227,29 @@ test("AC2② (round-trip): an OLD config missing loop.board/loop.gates passes af
     fs.writeFileSync(cfgPath, before);
 
     const out = runQuay(["init", "--reconcile", "--root", ws], ws);
-    assert.match(out, /filled loop\.board/, `the reconcile must report filling board:\n${out}`);
+    assert.match(out, /filled loop\.board/, `the upgrade must report filling board:\n${out}`);
     assert.match(out, /filled loop\.gates/, `and gates:\n${out}`);
+    assert.match(out, /removed providers\.native\.path/, `and the retired binding:\n${out}`);
+    assert.match(out, /removed providers\.native\.mcp_entry/, `both retired keys:\n${out}`);
 
     const after = fs.readFileSync(cfgPath, "utf8");
     const doc = YAML.parse(after);
     assert.equal(doc.loop.board, "native", "board is filled from the version default");
     assert.deepEqual(doc.loop.gates, ["acceptance"], "gates is filled from the version default");
     assert.equal(doc.loop.concurrency_bands[0], 1, "the user's own key survives");
+    // The retired binding is GONE (GOAL-029) …
+    assert.doesNotMatch(after, /^\s*path:/m, "the retired providers.native.path is deleted");
+    assert.doesNotMatch(after, /^\s*mcp_entry:/m, "the retired providers.native.mcp_entry is deleted");
 
-    // BYTE-LEVEL: every pre-existing line survives, in order ⇒ the write added lines and rewrote
-    // NOTHING (no comment lost, no value reformatted). Asserted as a subsequence rather than with a
-    // diff tool so the property is stated directly.
+    // BYTE-LEVEL: every pre-existing NON-RETIRED line survives, in order ⇒ the edit removed the
+    // retired lines and added the fills; no comment was lost and no unrelated value was reformatted.
+    // (The retired lines are excluded by construction — deleting them is the point of the upgrade.)
+    const retired = new Set(['    path: "./vendor/quay-native"', "    mcp_entry:", "      - node", "      - ./bin/quay-native.ts", "      - mcp"]);
     const afterLines = after.split("\n");
     let cursor = 0;
-    for (const line of before.split("\n").filter((l) => l !== "")) {
+    for (const line of before.split("\n").filter((l) => l !== "" && !retired.has(l))) {
       const at = afterLines.indexOf(line, cursor);
-      assert.ok(at >= 0, `every pre-existing line must survive byte-for-byte, missing: ${JSON.stringify(line)}\n--- after ---\n${after}`);
+      assert.ok(at >= 0, `every non-retired pre-existing line must survive byte-for-byte, missing: ${JSON.stringify(line)}\n--- after ---\n${after}`);
       cursor = at + 1;
     }
 
@@ -1379,4 +1430,119 @@ test("reconcileConfigContent({ serve:false }) fills loop version-level defaults 
   assert.ok(loopOnly.content.includes("# keep me"), "comments preserved");
   // idempotent: reconciling its own output is a no-op
   assert.equal(reconcileConfigContent(loopOnly.content, { serve: false }).report.unchanged, true);
+});
+
+// ── GOAL-029 single-engine upgrade (gap-init-single-engine-state-based-upgrade-validate-before-write) ─
+// Plain `quay init` on an EXISTING config runs the ONE upgrade engine: merge in place (comment-
+// preserving), retag retired keys as deleted, fill version-level defaults, then VALIDATE the
+// candidate — and write only if it validates. A candidate that does not validate leaves the file
+// BYTE-IDENTICAL and exits non-zero, naming the offending field.
+
+/** A 0.16.0-shaped config: multi-line comments, an unknown key, a user-pinned serve.port, the
+ *  retired native binding, and loop: missing board/gates. */
+function goal029OldConfig(root) {
+  return [
+    "# top comment a YAML re-dump would destroy",
+    "# second comment line — a multi-line comment block must survive intact",
+    "x_user_extra: 1",
+    "providers:",
+    "  native:",
+    "    enabled: true",
+    '    path: "/nonexistent/cache/quay/quay/0.10.0/vendor/quay-native"',
+    '    tasks_dir: "./tasks"',
+    '    mcp_entry: ["node", "/nonexistent/x.js", "mcp"]',
+    "loop:",
+    `  repo_root: ${root}`,
+    "  test_command: node --test",
+    `  worktree_root: ${root}-wt`,
+    "serve:",
+    "  port: 4000",
+    "",
+  ].join("\n");
+}
+
+test("GOAL-029①: plain init upgrades an old config — comments/unknown keys/user values kept, retired keys gone, version defaults filled", () => {
+  const dir = tmpDir("g029-upgrade");
+  fs.mkdirSync(path.join(dir, ".quay"), { recursive: true });
+  const cfgPath = path.join(dir, ".quay", "config.yml");
+  fs.writeFileSync(cfgPath, goal029OldConfig(dir));
+
+  // spawnSync (not runQuayAllowFail) so BOTH streams are captured — the unknown-key warning is
+  // written to stderr, and runQuayAllowFail only carries stderr on a NON-zero exit.
+  const out = spawnSync("node", [quayBin, "init", "--root", dir], { cwd: dir, encoding: "utf8" });
+  assert.equal(out.status, 0, `plain init must upgrade, not refuse:\n${out.stdout}${out.stderr}`);
+  const after = fs.readFileSync(cfgPath, "utf8");
+  const doc = YAML.parse(after);
+
+  assert.match(after, /^# top comment a YAML re-dump would destroy$/m, "the user's comment survives");
+  assert.match(after, /^# second comment line.*$/m, "every line of a multi-line comment block survives");
+  assert.equal(doc.x_user_extra, 1, "an unknown top-level key is PRESERVED");
+  assert.match(out.stderr, /unrecognized top-level config key "x_user_extra"/, "and the operator is warned about it");
+  assert.equal(doc.serve.port, 4000, "a user-pinned serve value survives verbatim");
+  assert.doesNotMatch(after, /^\s*path:/m, "the retired providers.native.path is deleted");
+  assert.doesNotMatch(after, /^\s*mcp_entry:/m, "the retired providers.native.mcp_entry is deleted");
+  assert.equal(doc.loop.board, "native", "loop.board filled from the version defaults");
+  assert.deepEqual(doc.loop.gates, ["acceptance"], "loop.gates filled from the version defaults");
+  assert.equal(doc.loop.repo_root, dir, "the user's own project value is kept (not overwritten by detection)");
+
+  const v = runQuay(["config", "validate", "--root", dir], dir);
+  assert.ok(!v.includes("error:"), `the upgraded config passes the official validator (no errors):\n${v}`);
+});
+
+// ⛔ The fixture for ③/④ carries BOTH a change the engine would make (retired keys, missing
+// board/fork_baseline/doc_surfaces) AND a user value the validator rejects. That combination is
+// deliberate: it is the shape that makes "validate BEFORE write" observable — a config with nothing
+// to change writes nothing for a reason unrelated to validation, so it cannot falsify the ordering.
+// (Measured: with a fixture whose only defect was the bad gate, a write-before-validate mutation
+// stayed GREEN, because `untouched` was true and no write occurred either way.)
+function goal029BadGateConfig(root) {
+  return goal029OldConfig(root).replace(
+    `  worktree_root: ${root}-wt\n`,
+    `  worktree_root: ${root}-wt\n  gates: no-such-gate-zz\n`,
+  );
+}
+
+test("GOAL-029③: an unresolvable loop.gates value fails the upgrade — non-zero, config byte-identical, field named", () => {
+  const dir = tmpDir("g029-incompatible");
+  fs.mkdirSync(path.join(dir, ".quay"), { recursive: true });
+  const cfgPath = path.join(dir, ".quay", "config.yml");
+  const bad = goal029BadGateConfig(dir);
+  assert.match(bad, /gates: no-such-gate-zz/, "fixture: the bad gate reference is in place (no duplicate key)");
+  assert.match(bad, /path: "/, "fixture: and there IS work the engine would do (a retired key to delete)");
+  fs.writeFileSync(cfgPath, bad);
+
+  const out = runQuayAllowFail(["init", "--root", dir], dir);
+  assert.equal(out.exitCode, 1, `an unresolvable loop.gates must fail the upgrade:\n${out.stdout}${out.stderr}`);
+  assert.match(out.stderr, /loop\.gates/, "the report names the offending field");
+  assert.equal(fs.readFileSync(cfgPath, "utf8"), bad, "a failed upgrade leaves the config byte-identical (validate BEFORE write)");
+});
+
+test("GOAL-029④: --drop-incompatible deletes the offending value and the upgrade succeeds", () => {
+  const dir = tmpDir("g029-drop");
+  fs.mkdirSync(path.join(dir, ".quay"), { recursive: true });
+  const cfgPath = path.join(dir, ".quay", "config.yml");
+  fs.writeFileSync(cfgPath, goal029BadGateConfig(dir));
+
+  const out = runQuayAllowFail(["init", "--root", dir, "--drop-incompatible"], dir);
+  assert.equal(out.exitCode, 0, `--drop-incompatible must let the upgrade through:\n${out.stderr}`);
+  assert.match(out.stdout, /dropped loop\.gates/, "the report names what it dropped");
+  const doc = YAML.parse(fs.readFileSync(cfgPath, "utf8"));
+  assert.deepEqual(doc.loop.gates, ["acceptance"], "the rejected value is dropped and the required default re-filled");
+  const v = runQuay(["config", "validate", "--root", dir], dir);
+  assert.ok(!v.includes("error:"), `the dropped-and-refilled config validates (no errors):\n${v}`);
+});
+
+test("GOAL-029⑥: init --dry-run on an existing config reports the plan and writes nothing", () => {
+  const dir = tmpDir("g029-dryrun");
+  fs.mkdirSync(path.join(dir, ".quay"), { recursive: true });
+  const cfgPath = path.join(dir, ".quay", "config.yml");
+  const before = goal029OldConfig(dir);
+  fs.writeFileSync(cfgPath, before);
+
+  const out = runQuay(["init", "--root", dir, "--dry-run"], dir);
+  assert.match(out, /would be upgraded to this version's defaults/, `dry-run reports the plan:\n${out}`);
+  assert.match(out, /would-fill loop\.board/, "…including the keys it would fill");
+  assert.match(out, /would-remove providers\.native\.path/, "…and the retired keys it would delete");
+  assert.match(out, /Dry run — nothing written/, "and it says so");
+  assert.equal(fs.readFileSync(cfgPath, "utf8"), before, "dry-run must not write the config");
 });
