@@ -1,7 +1,7 @@
 ---
 id: GOAL-022
 title: self-hosted CI test job 墙钟压到 30 秒内——128核机器实测93.9%空闲，瓶颈是文件粒度太粗+重复装包
-status: active
+status: achieved
 kind: goal
 origin: manager 2026-09-17 采纳 goal-sufficiency-followup 提案
   gap-goal022-scope-item3-prereq-reinstall-uncovered option (a)：新增
@@ -13,6 +13,14 @@ statusLog:
     to: active
     actor: manager
     reason: AC-279/280/281 三条已就位，退出条件（三条 AC 均 achieved）已可判定；进入执行阶段
+  - at: 2026-10-07T08:21:40.750Z
+    from: active
+    to: achieved
+    actor: human
+    reason: 人 2026-10-07 裁定收口：在域 AC = AC-279，已 achieved；AC-280/AC-281/AC-282
+      三条经人裁定取消（判据分别被 GOAL-026 §5.2 的 TS 迁移、30s 口径的规模变化、以及「读最新一次
+      run」的闪烁窗口甩下，逐条理由见各自 statusLog）。⛔ 这是人的直接关闭（goal-store write --status
+      achieved），不走机械关闭路径。
 ---
 ## 背景（2026-09-16/17 实测，全部为直接量）
 
