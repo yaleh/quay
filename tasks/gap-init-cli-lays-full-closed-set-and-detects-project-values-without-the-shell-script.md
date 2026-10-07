@@ -47,7 +47,9 @@ GOAL-029「init 统一为单一 TS 引擎、终局无 .sh;并收窄发布集合�
 - `plugin/test/l1-delivery-surface-check.test.mjs`
 - `packages/quay/test/init.test.mjs`
 - `packages/quay/test/branch-model.test.mjs`
+- `packages/quay/test/mcp-server.test.mjs`
 - `docs/analysis/quay-init-closure-ratchet.baseline.json`
+- `plugin/sh-census-baseline.json`
 - `tasks/gap-init-cli-lays-full-closed-set-and-detects-project-values-without-the-shell-script.md`
 
 ## Evidence
@@ -278,3 +280,71 @@ exit=0
   `compute_dependency_closure_gaps` / `ensure_vendor_runtime` 在可执行层（`packages/*/src`、
   `plugin/scripts`、`plugin/test`、`packages/*/test`）的命中**全部是注释/文档**，非注释命中 = 0。
 - AC6：scoped 门 `tests 278 / pass 278 / fail 0`，exit 0（本轮读数，含 merge develop 后的树）。
+
+### ⑨ 本轮修复（2026-10-07，fan-in suite-red 真因：5 条，全部是本任务 delta）
+
+上一轮 suite 读数为 `# tests 8841 / # pass 8836 / # fail 5`。5 条逐一定位后**全部**是本任务的
+delta（⛔ 不能按 `delta-relatedness = UNRELATED` 的机械提示放过——那 5 个**测试文件**确实不在
+Touches 里，但红的是它们**读的**东西）。
+
+**(a) 3 条 ts-typecheck：`init.ts` 的 ok-union 用了 `!` 而非 `=== false`。**
+`M63 D1`（`ts-typecheck-gate-config-wiring`）、`M63 C1`（`…-cli-event`）、`M63 A2`（`…-pass`）三条
+都报同一句：`packages/quay/src/init.ts(1614,36)/(1615,36): error TS2339: Property 'failure' does not
+exist on type '{ ok: true; values: ProjectLoopValues; } | { ok: false; failure: ProjectValueFailure; }'`。
+根因：`:1599` 写作 `if (!projectValues.ok)`，随后读 `.failure`；**本仓根 tsconfig 是 `strict: false`**，
+在其下 `ok: true | false` 的**否定分支不做窄化**（`branch-model.ts:1147` 早已就地记过这条）。
+改成 `if (projectValues.ok === false)`，并把原因就地写成注释。这三条测试是「对本仓真跑
+`npx tsc`」，所以任何 .ts 的类型错都会红它们——它们看起来无关，其实是本任务的直接后果。
+
+**(b) 1 条 `packages/quay/test/mcp-server.test.mjs`（AC4 修复面）。**
+该用例造一个**裸临时目录**（只有 `.quay/` 或一个坏 `config.yml`），期望 `init` 修好它；本任务把
+CLI/MCP 的新装 `init` 做成与 `quay-init.sh` 的 `detect_test_command` miss **契约等价**（fail-closed），
+裸目录四个 rung 全不命中 ⇒ `outcome: "project-values-unresolved"`、**什么都不写** ⇒ 用例随后的
+`fs.readFileSync(<root>/.quay/config.yml)` ENOENT。修法同 AC3 已迁的那两个夹具
+（`init.test.mjs` / `branch-model.test.mjs` 的既有先例）：给该夹具种一个**可检测**形状
+（阶梯第一级 `scripts/test.sh`）。该用例问的是 **config 形状**（absent / unparseable），不是
+test-command 检测；不种它，断言会因为**另一个**原因红。
+按硬规则 5b 全仓检索同类点：`grep -rn '\["init"\|("init"\|'"'"'init'"'"',' --include=*.mjs packages/*/test plugin/test`
+的非 `git init` 命中只有本文件、`init.test.mjs`、`branch-model.test.mjs`（后两者已种）、
+`plugin/test/init-upgrade-matrix.test.mjs`（其夹具的 config 里**已钉** `loop.test_command: make verify`，
+走「既有值优先」档，不经检测 ⇒ 无需种）。
+
+**(c) 1 条 `plugin/test/sh-census-check.test.mjs` AC6（棘轮基线等式）。**
+AC6 要求**committed baseline 等于 live 读数**（不是「≥」）。本任务把 `quay-init.sh` 的遗留检查族
+（`derive_loop_scripts` / `verify_referenced_landed` / `compute_drift_report` /
+`compute_dependency_closure_gaps` / `ensure_vendor_runtime` 及其 `--check-drift` /
+`--check-dependency-closure` 模式）与项目值检测整体搬进 TS，两个被普查的 `.sh` 大幅缩短 ⇒
+轴从 7695 掉到 **7334**（-361）。上一轮只读了**门**（7331 ≤ 7695 ⇒ PASS），把该文件留在 Touches 外
+——门只要求「≤」，AC6 要求「=」，这是**同一条**已经吃掉过邻居的坑（见 baseline 里 entry 21 的
+为什么）。已按房规追加 `_reanchorLog` entry 23（from 7695 → to 7334，带逐文件 attribution）。
+
+```
+$ node --experimental-strip-types plugin/scripts/sh-census-check.ts --json | jq .totals.embeddedInterpreterLines
+7334        # duplicateCopies 0
+# residual = 0 的证明：把两个 .sh 都从 develop 取回、其余保持本分支最终树 ⇒ 读数恰为 7695（= develop 基线）
+$ git diff --name-status develop HEAD -- '*.sh'
+M  plugin/scripts/laydown-set-check.sh     # 183 -> 179 code lines  (-4)
+M  plugin/scripts/quay-init.sh             # 1007 -> 650 code lines (-357)
+# 两支都仍在轴内（command position 上 exec 解释器：quay-init.sh embedded:[node]；
+# laydown-set-check.sh embedded:[node,python3]；都不在例外清单）——动的是行数，不是成员资格
+```
+
+**修后复跑（worktree 内，merge develop 之后）**：
+```
+packages/quay/test/ts-typecheck-gate-{config-wiring,cli-event,pass}.test.mjs   tests 3 / pass 3 / fail 0
+packages/quay/test/mcp-server.test.mjs                                         tests 1 / pass 1 / fail 0   (All QN-036 Core MCP server (DIR-007) tests passed.)
+plugin/test/sh-census-check.test.mjs                                           tests 20 / pass 20 / fail 0
+for d in packages/*/; do npx tsc --noEmit -p "$d"; done                        四处全静默（0 error）
+```
+硬规则 5b 掃描（Touches 邻域，全部绿）：
+```
+plugin/test/{quay-init,quay-init-tmux-detection,quay-init-loop,laydown-set-check,
+             archive-exclusion-wiring,l1-delivery-surface-check}.test.mjs   tests 50 / pass 50 / fail 0
+plugin/test/{quay-init-closure-ratchet,quay-init-laydown-closure,
+             init-upgrade-matrix,ratchet-baseline}.test.mjs                 tests 42 / pass 42 / fail 0
+packages/quay/test/{init,branch-model}.test.mjs                             tests 127 / pass 127 / fail 0
+```
+
+`## Touches` 因本次 delta 新增两行（`packages/quay/test/mcp-server.test.mjs`、`plugin/sh-census-baseline.json`）——
+`anti-drift-touches-check` 对 Touches 外的 delta 文件是 HARD FAIL，且 fan-in 的 scoped 门按 Touches 选测，
+不加会让这两条修复**不被选中**、下一轮原样再红。
