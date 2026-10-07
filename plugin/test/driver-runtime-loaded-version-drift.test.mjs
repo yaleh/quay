@@ -504,3 +504,325 @@ test("AC3c — STATIC: the ONLY source that constructs AND writes `.quay/plugin`
   assert.deepEqual(offenders, [path.join("packages", "quay", "src", "init.ts")],
     `the ONLY writer of .quay/plugin must be init.ts (Core runtime paths must never write it); got ${JSON.stringify(offenders)}`);
 });
+
+// ══ gap-server-status-six-serial-driver-runtime-cold-spawns ═══════════════════════════════════════
+// `quay server status --json`（`packages/quay/src/cli/server.ts`）reads ALL SIX driver kinds, and each
+// read is a FULL `driver-runtime.ts` cold start + TS transpile (measured 0.23–1.02s per kind on this
+// repo). The old call site was `DRIVER_SERVICE_KINDS.map(kind => driverServiceReport(...))` over a
+// **synchronous** `spawnSync` ⇒ six cold starts strictly serialised: 3.92–4.07s wall for a ~3.2KB
+// response body. The fix runs the six reads CONCURRENTLY (`Promise.all` over an async spawn).
+//
+// Concurrency is the kind of change that can silently corrupt a reading (two kinds' outputs swapped,
+// one kind's failure cancelling the batch, rows reordered). The tests below pin exactly those three:
+//
+//   · AC3a — each row is its OWN reading: field-for-field equal to a DIRECT single-kind kernel read,
+//            with per-kind-distinct carriers AND declarations so a swap cannot survive.
+//   · AC3b — one kind's read failing (no carrier at all) leaves the other five untouched.
+//   · AC4  — the six kernel invocations really OVERLAP in time (the property the serial version
+//            lacked — this assertion fails on it), and a kind whose SUBPROCESS exits non-zero is
+//            reported as an unusable reading without taking the other five down with it.
+//
+// ⛔ These read REAL fixture state (a really-running anchor process, real carrier files), never an
+// injected "the flag was set" seam: 「六个 kind 各自返回自己的读数」 is only a measurement if the six
+// readings are actually distinguishable from one another.
+
+const SERVER_CLI = path.resolve(__dirname, "..", "..", "packages", "quay", "bin", "quay.ts");
+const PLUGIN_ROOT = path.resolve(__dirname, "..");
+const SERVER_KINDS = ["promotion", "worker", "outer", "quality", "meta", "goal"];
+
+/** Each kind's **round** heartbeat carrier — the file that actually supplies `last_record_ts`. */
+const ROUND_CARRIER = {
+  promotion: "promotion-round.jsonl",
+  worker: "worker-round.jsonl",
+  outer: "outer-round.jsonl",
+  quality: "quality-round.jsonl",
+  meta: "meta-driver-round.jsonl",
+  goal: "goal-round.jsonl",
+};
+/** The registry-FIRST carrier of the two kinds that carry two. Written with an OLDER ts on purpose:
+ *  it is what makes `carrier_path` ("who is on disk") and `last_record_carrier` ("where the ts came
+ *  from") DIFFERENT files — the real-workspace shape of gap-driver-status-carrier-path-source-label-
+ *  mismatch. A row whose `liveness.source` named one of these would be attributing the ts to a载体
+ *  that did not supply it. */
+const OUTCOME_CARRIER = { promotion: "promotion-outcome.jsonl", worker: "worker-outcome.jsonl" };
+
+/** Desired state is deliberately NOT "all six": the three declaration values are spread across the
+ *  rows (`declared` / `not-declared` / `stopped-explicitly`) so that a swapped pair of rows is visible
+ *  in `declaration` alone — a plan where every kind read the same value would make that field blind. */
+const DESIRED_KINDS = ["promotion", "quality"];
+const STOP_KINDS = ["outer", "goal"];
+const EXPECTED_DECLARATION = {
+  promotion: "declared",
+  worker: "not-declared",
+  outer: "stopped-explicitly",
+  quality: "declared",
+  meta: "not-declared",
+  goal: "stopped-explicitly",
+};
+
+const jsonl = (obj) => JSON.stringify(obj) + "\n";
+const iso = (epochMs) => new Date(epochMs).toISOString().slice(0, 19) + "Z";
+
+/**
+ * A workspace where one REAL live process carries all six kinds, each kind has its own carrier file
+ * with its own timestamp, and the desired-state file yields a different declaration per kind.
+ *
+ * @param omitCarriers kinds whose carriers are NOT written — the "this kind never produced a
+ *        heartbeat" case (AC3b's failure injection).
+ */
+function makeDriverWorkspace(t, tag, omitCarriers = []) {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), `srvstatus-${tag}-`));
+  t.after(() => fs.rmSync(root, { recursive: true, force: true }));
+  const q = path.join(root, ".quay");
+  fs.mkdirSync(q, { recursive: true });
+  fs.writeFileSync(
+    path.join(q, "config.yml"),
+    "providers:\n  native:\n    enabled: true\n    tasks_dir: \"./tasks\"\n",
+    "utf8",
+  );
+
+  // The reading's direct quantity for "this kind is carried" is /proc liveness of the HOST process,
+  // so a pid written into the fixture could not satisfy it — the anchor has to really run.
+  const anchor = spawn(process.execPath, ["-e", "setTimeout(() => {}, 600000);"], { stdio: "ignore" });
+  t.after(() => { try { anchor.kill("SIGKILL"); } catch { /* already gone */ } });
+  fs.writeFileSync(path.join(q, "anchor.pid"), `${anchor.pid}\n`, "utf8");
+  fs.writeFileSync(
+    path.join(q, "anchor.json"),
+    JSON.stringify({ pid: anchor.pid, startedAt: "2026-10-01T00:00:00.000Z", kinds: SERVER_KINDS, host: "anchor" }),
+    "utf8",
+  );
+
+  const now = Date.now();
+  // Distinct offsets per kind: the six round carriers differ by name AND by the ts they carry.
+  const offsets = { promotion: 3, worker: 5, outer: 7, quality: 9, meta: 11, goal: 13 };
+  for (const k of SERVER_KINDS) {
+    if (omitCarriers.includes(k)) continue;
+    const tsKey = k === "quality" ? "judgedAt" : "ts";
+    fs.writeFileSync(
+      path.join(q, ROUND_CARRIER[k]),
+      jsonl({ [tsKey]: iso(now - offsets[k] * 1000), kind: k, marker: `round-${k}` }),
+      "utf8",
+    );
+  }
+  for (const [k, file] of Object.entries(OUTCOME_CARRIER)) {
+    if (omitCarriers.includes(k)) continue;
+    fs.writeFileSync(path.join(q, file), jsonl({ ts: iso(now - 90 * 60 * 1000), kind: k, marker: `outcome-${k}` }), "utf8");
+  }
+  fs.writeFileSync(
+    path.join(q, "anchor-desired.json"),
+    JSON.stringify({ kinds: DESIRED_KINDS, opts: {}, updatedBy: "fixture", updatedAt: "2026-10-01T00:00:00Z" }),
+    "utf8",
+  );
+  fs.writeFileSync(
+    path.join(q, "anchor-kind-stops.json"),
+    JSON.stringify(Object.fromEntries(STOP_KINDS.map((k) => [k, { at: "2026-10-01T00:00:00Z", by: "fixture" }]))),
+    "utf8",
+  );
+  return { root, anchorPid: anchor.pid };
+}
+
+/** One `quay server status --json`. The fixture carries no `.quay/server-state.json` ⇒ the documented
+ *  NOT-RUNNING outcome (exit 1), which is ASSERTED rather than tolerated: the six driver rows are
+ *  computed on that branch too (a dead host is exactly when you want to see which kind stopped
+ *  turning), so a change that accidentally skipped them there must not read as a pass. */
+function serverStatusJson(root, env = {}) {
+  const r = spawnSync(
+    process.execPath,
+    ["--experimental-strip-types", SERVER_CLI, "server", "status", "--json", "--root", root],
+    // QUAY_PLUGIN_ROOT pins the kernel to THIS checkout — otherwise the resolver would (correctly)
+    // relocate a worktree-loaded Core to the main checkout's `plugin/`, and the test would be reading
+    // a different tree than the one under test.
+    { encoding: "utf8", timeout: 180000, env: { ...process.env, QUAY_PLUGIN_ROOT: PLUGIN_ROOT, ...env } },
+  );
+  assert.equal(r.status, 1, `no server-state carrier ⇒ NOT-RUNNING (exit 1); got ${r.status}\n${r.stdout}\n${r.stderr}`);
+  try {
+    return JSON.parse(r.stdout);
+  } catch {
+    assert.fail(`--json must emit a parseable document for EVERY outcome: ${r.stdout}\n${r.stderr}`);
+  }
+}
+
+/** The reference reading: ONE kind, requested DIRECTLY from the kernel, with no aggregation in
+ *  between. "Concurrent aggregation agrees with the direct read" is the falsifiable form of 「并发的
+ *  六个读数各自正确、互不污染」 — a swap or a dropped field makes the two disagree. */
+function directKindStatus(root, kind) {
+  const r = spawnSync(
+    process.execPath,
+    ["--experimental-strip-types", KERNEL, "status", "--kind", kind, "--json", "--root", root],
+    { encoding: "utf8", timeout: 60000 },
+  );
+  assert.equal(r.status, 0, `direct kernel status --kind ${kind} failed: ${r.stdout}\n${r.stderr}`);
+  return JSON.parse(r.stdout);
+}
+
+test("AC3a — all six kinds are read concurrently and each row is that kind's OWN reading", (t) => {
+  const { root, anchorPid } = makeDriverWorkspace(t, "six");
+  const st = serverStatusJson(root);
+
+  // Order is part of the reading (six rows, one per service, in the vocabulary's own order) — a
+  // `Promise.all` must not be allowed to reorder them.
+  assert.deepEqual(st.drivers.map((d) => d.kind), SERVER_KINDS, `row order must be unchanged: ${JSON.stringify(st.drivers)}`);
+
+  for (const kind of SERVER_KINDS) {
+    const row = st.drivers.find((d) => d.kind === kind);
+    const direct = directKindStatus(root, kind);
+    const label = `driver:${kind}`;
+
+    assert.ok(row, `row for ${label} present: ${JSON.stringify(st.drivers)}`);
+    assert.equal(row.name, label);
+    assert.equal(row.pid, anchorPid, `${label}: carried by the live anchor: ${JSON.stringify(row)}`);
+    // Field-for-field against the direct single-kind read — the 「逐一比对一致」 half of the AC.
+    assert.equal(row.pid, direct.driver_pid, `${label}: pid vs direct: ${JSON.stringify([row.pid, direct.driver_pid])}`);
+    assert.equal(row.declaration, direct.declaration, `${label}: declaration vs direct`);
+    // The named SOURCE must be the file that actually supplied the ts — for promotion/worker that is
+    // the ROUND carrier, NOT the registry-first outcome carrier that `carrier_path` reports.
+    assert.equal(
+      row.liveness.source,
+      `carrier:${direct.last_record_carrier} last ts`,
+      `${label}: source names the ts's own carrier: ${JSON.stringify(row.liveness)}`,
+    );
+    assert.equal(
+      path.basename(row.liveness.source),
+      `${ROUND_CARRIER[kind]} last ts`,
+      `${label}: the round carrier, not the outcome carrier: ${row.liveness.source}`,
+    );
+    assert.equal(row.liveness.evaluated, true, `${label}: a real heartbeat ⇒ evaluated`);
+    assert.equal(row.liveness.alive, true, `${label}: fresh heartbeat ⇒ alive: ${JSON.stringify(row.liveness)}`);
+    assert.match(row.liveness.detail, /^last round heartbeat \d+s ago$/, `${label}: ${row.liveness.detail}`);
+  }
+
+  // Per-kind distinctness — the six rows cannot be six copies of one reading. `source` and
+  // `declaration` are the two fields that must differ; if they did not, the loop above would be
+  // comparing like with like and a swap would be invisible.
+  assert.equal(new Set(st.drivers.map((d) => d.liveness.source)).size, 6, "six distinct carriers");
+  assert.deepEqual(
+    Object.fromEntries(st.drivers.map((d) => [d.kind, d.declaration])),
+    EXPECTED_DECLARATION,
+    "each row carries ITS OWN declaration (declared / not-declared / stopped-explicitly spread across the rows)",
+  );
+});
+
+test("AC3b — one kind producing no heartbeat reads not-evaluated and does NOT touch the other five", (t) => {
+  const { root, anchorPid } = makeDriverWorkspace(t, "oneblind", ["goal"]);
+  const st = serverStatusJson(root);
+
+  const goal = st.drivers.find((d) => d.kind === "goal");
+  assert.equal(goal.liveness.evaluated, false, `no carrier ⇒ not-evaluated, NOT a dead loop: ${JSON.stringify(goal)}`);
+  assert.equal(goal.liveness.alive, null, `not-evaluated must not carry an alive verdict: ${JSON.stringify(goal)}`);
+  assert.match(goal.liveness.detail, /no round heartbeat carrier record yet/, `原因而非沉默: ${JSON.stringify(goal)}`);
+  // The host process IS alive and it IS carrying `goal` — this is 「读不到载体」, which must stay
+  // distinguishable from 「这个 kind 停摆了」 (hard rule 3b).
+  assert.equal(goal.pid, anchorPid);
+  assert.equal(goal.declaration, "stopped-explicitly", `declaration is independent of the carrier read: ${JSON.stringify(goal)}`);
+
+  for (const kind of SERVER_KINDS.filter((k) => k !== "goal")) {
+    const row = st.drivers.find((d) => d.kind === kind);
+    const direct = directKindStatus(root, kind);
+    assert.equal(row.liveness.evaluated, true, `${kind}: unaffected by goal's missing carrier: ${JSON.stringify(row)}`);
+    assert.equal(row.liveness.alive, true, `${kind}: still alive: ${JSON.stringify(row)}`);
+    assert.equal(row.liveness.source, `carrier:${direct.last_record_carrier} last ts`, `${kind}: own carrier`);
+    assert.equal(row.declaration, direct.declaration, `${kind}: own declaration`);
+  }
+});
+
+// ── AC4: the concurrency itself, and a kind whose SUBPROCESS fails ───────────────────────────────
+//
+// AC3a/AC3b prove the readings are correct; neither could tell a concurrent implementation from a
+// serial one (the serial one produced the same six rows). This test measures the concurrency
+// directly, and it is the one that FAILS on the pre-change `spawnSync` chain.
+//
+// The seam is a fixture kernel rather than the real one, for one reason: only then are the six
+// invocations observable from outside. Each stub records its own [t0,t1] window and — the point —
+// BLOCKS for a known duration, so the six windows are either disjoint (serial: Σ ≈ 6×D) or share a
+// common instant (concurrent: ≈ D). The stub answers with per-kind-distinct values so the six rows
+// are still distinguishable from one another, and one kind's stub EXITS NON-ZERO with no JSON — the
+// 「子进程失败」 case, which under `Promise.all` is exactly the shape that could reject the whole
+// batch and blank all six rows.
+const STUB_SLEEP_MS = 2000;
+
+const STUB_KERNEL_SRC = `
+import fs from "node:fs";
+const argv = process.argv.slice(2);
+const kind = argv[argv.indexOf("--kind") + 1];
+const t0 = Date.now();
+// A real BLOCKING wait (no CPU burn, no async): the window is what the concurrency assertion reads.
+Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, Number(process.env.QUAY_STUB_SLEEP_MS));
+const t1 = Date.now();
+const fail = process.env.QUAY_STUB_FAIL_KIND === kind;
+fs.appendFileSync(process.env.QUAY_STUB_PROBE, JSON.stringify({ kind, t0, t1, ok: !fail }) + "\\n");
+if (fail) process.exit(3); // dies with no JSON frame — the "subprocess failed" arm
+process.stdout.write(JSON.stringify({
+  driver_pid: 5150,
+  driver_alive: 1,
+  carrier_path: "/stub/" + kind + "-first",
+  last_record_carrier: "/stub/" + kind + "-round.jsonl",
+  last_record_ts: new Date(t1 - 4000).toISOString().slice(0, 19) + "Z",
+  declaration: "stub-" + kind,
+}) + "\\n");
+`;
+
+function makeStubKernelRoot(t) {
+  const stubRoot = fs.mkdtempSync(path.join(os.tmpdir(), "srvstatus-kernel-"));
+  t.after(() => fs.rmSync(stubRoot, { recursive: true, force: true }));
+  fs.mkdirSync(path.join(stubRoot, "scripts", "dist"), { recursive: true });
+  // `type: module` so the bundled-form `.js` is ESM regardless of what lies above os.tmpdir().
+  fs.writeFileSync(path.join(stubRoot, "package.json"), JSON.stringify({ type: "module" }), "utf8");
+  fs.writeFileSync(path.join(stubRoot, "scripts", "dist", "driver-runtime.js"), STUB_KERNEL_SRC, "utf8");
+  return stubRoot;
+}
+
+test("AC4 — the six kernel invocations overlap in time (fails on the serial implementation)", (t) => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "srvstatus-stub-"));
+  t.after(() => fs.rmSync(root, { recursive: true, force: true }));
+  fs.mkdirSync(path.join(root, ".quay"), { recursive: true });
+  fs.writeFileSync(path.join(root, ".quay", "config.yml"), "providers:\n  native:\n    enabled: true\n", "utf8");
+  const stubRoot = makeStubKernelRoot(t);
+  const probe = path.join(stubRoot, "invocations.jsonl");
+
+  const t0 = Date.now();
+  const st = serverStatusJson(root, {
+    QUAY_PLUGIN_ROOT: stubRoot,
+    QUAY_STUB_PROBE: probe,
+    QUAY_STUB_SLEEP_MS: String(STUB_SLEEP_MS),
+    QUAY_STUB_FAIL_KIND: "meta",
+  });
+  const wallMs = Date.now() - t0;
+
+  const windows = fs.readFileSync(probe, "utf8").trim().split("\n").map((l) => JSON.parse(l));
+  assert.equal(windows.length, 6, `all six kinds must reach the kernel: ${JSON.stringify(windows)}`);
+  assert.deepEqual(windows.map((w) => w.kind).sort(), [...SERVER_KINDS].sort());
+
+  // ⟵ THE FALSIFIER. Six disjoint windows ⟺ a common instant exists ⟺ every invocation was in
+  // flight at the same moment. Under the old `DRIVER_SERVICE_KINDS.map(spawnSync)` chain these
+  // windows cannot overlap by construction: each one begins only after the previous has exited.
+  const latestStart = Math.max(...windows.map((w) => w.t0));
+  const earliestEnd = Math.min(...windows.map((w) => w.t1));
+  assert.ok(
+    earliestEnd > latestStart,
+    `all six windows must share a common instant (⟺ they ran concurrently); ` +
+      `latest start ${latestStart} vs earliest end ${earliestEnd} — windows=${JSON.stringify(windows)}`,
+  );
+  // Second, independent signal (generous bound: serial is ≥ 6×${STUB_SLEEP_MS}ms by construction).
+  assert.ok(wallMs < STUB_SLEEP_MS * 3, `six ${STUB_SLEEP_MS}ms reads must not cost 6× that: ${wallMs}ms`);
+
+  for (const kind of SERVER_KINDS) {
+    const row = st.drivers.find((d) => d.kind === kind);
+    assert.ok(row, `row for driver:${kind}: ${JSON.stringify(st.drivers)}`);
+    if (kind === "meta") {
+      // The subprocess exited 3 with no JSON frame ⇒ an unusable reading, NOT a death and NOT a
+      // blank row — and, crucially, NOT a rejected `Promise.all` that would have taken the rest out.
+      // ⛔ Nothing is invented for it: the row carries no pid, no declaration and no alive verdict.
+      assert.equal(row.liveness.evaluated, false, `meta: a failed subprocess is a reading: ${JSON.stringify(row)}`);
+      assert.equal(row.liveness.alive, null, `meta: no alive verdict may be invented: ${JSON.stringify(row)}`);
+      assert.match(row.liveness.detail, /no JSON frame \(exit 3\)/, `meta: the cause is named: ${JSON.stringify(row)}`);
+      assert.equal(row.pid, null, `meta: no pid may be invented either: ${JSON.stringify(row)}`);
+      assert.equal(row.declaration, null, `meta: no declaration may be invented either: ${JSON.stringify(row)}`);
+    } else {
+      assert.equal(row.liveness.evaluated, true, `${kind}: survived meta's failure: ${JSON.stringify(row)}`);
+      assert.equal(row.liveness.alive, true, `${kind}: still alive: ${JSON.stringify(row)}`);
+      assert.equal(row.pid, 5150, `${kind}: pid from its OWN invocation`);
+      assert.equal(row.declaration, `stub-${kind}`, `${kind}: declaration from its OWN invocation`);
+      assert.equal(row.liveness.source, `carrier:/stub/${kind}-round.jsonl last ts`, `${kind}: own carrier`);
+    }
+  }
+});
