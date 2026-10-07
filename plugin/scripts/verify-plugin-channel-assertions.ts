@@ -54,6 +54,21 @@ import path from "node:path";
 import { spawn, spawnSync } from "node:child_process";
 import { parse as parseYaml } from "yaml";
 import { flagValue, isDirectEntry } from "./gate-script-base.ts";
+import {
+  baselineFileAbs,
+  judge as judgeRatchet,
+  judgeShippedSize,
+  measuredOf,
+  overBaselineMessage,
+  overSizeMessage,
+  readBaselineFile,
+  readRulesFromFile,
+  readShippedSet,
+  rulesFileAbs,
+  shippedOf,
+  type ShippedSetBaseline,
+  type ShippedSetReading,
+} from "./shipped-set-rules.ts";
 
 export type AssertionState = "PASS" | "FAIL" | "NOT-EVALUATED";
 
@@ -390,6 +405,91 @@ export function judgeScopeInstall(record: unknown, installedReal: string | null)
   return { id, state: "PASS", detail: `install record at scope ${String(r.scope)} resolves to the verified install (${installedReal})` };
 }
 
+// ── the shipped set (tasks/gap-shipped-plugin-tree-excludes-dev-only-content-and-has-a-shrink-only-
+//    size-ratchet, GOAL-029) ───────────────────────────────────────────────────────────────────────
+//
+// The release gate proved the artifact INSTALLS and RUNS. It never read WHICH FILES the artifact
+// carries — and the assembly step (`publish-dist-branch.sh`'s bare `rsync -a --exclude='.git'`) was
+// shipping the whole dev tree: 641 test/fixture files, 93 checker-mutation cases, and every
+// dev-period baseline/exception/violation manifest (measured on 0.17.0: 1062 files / 66 MB). This
+// assertion is the DIRECT reading of that quantity on the INSTALLED tree — the same rule set the
+// assembly step used (`plugin/shipped-set-rules.txt`, one parser), plus the shrink-only size ratchet.
+//
+// ⛔ Not a self-report: the reading is a walk of `--installed` itself, never a number the artifact
+// publishes about itself (硬规则 4b). The rules/baseline files are read from the SOURCE checkout this
+// checker runs from (the artifact deliberately does not carry them — see the rules file's header).
+export function judgeShippedSetClean(
+  reading: ShippedSetReading,
+  baseline: ShippedSetBaseline | null,
+  artifactRoot: string,
+): AssertionResult {
+  const id = "shipped-set-clean";
+  if (!reading.evaluated) {
+    return { id, state: "NOT-EVALUATED", detail: reading.reason ?? "the installed tree could not be read against the shipped-set rules" };
+  }
+  if (reading.violations.length > 0) {
+    const named = reading.violations.slice(0, 5).map((v) => `${v.path}${v.isDir ? "/" : ""} (rule ${v.rule})`).join(", ");
+    return {
+      id,
+      state: "FAIL",
+      detail: `${reading.violations.length} rule-excluded path(s) PRESENT in the installed artifact: ${named}${reading.violations.length > 5 ? ", …" : ""} — the assembly step shipped dev-only content (plugin/scripts/publish-dist-branch.sh + plugin/shipped-set-rules.txt)`,
+    };
+  }
+  if (baseline === null) {
+    return { id, state: "NOT-EVALUATED", detail: "no shipped-set baseline at plugin/shipped-set-baseline.json — the ratchet cannot be judged" };
+  }
+  const measured = measuredOf(reading); // the ratchet's axes: rule-excluded content present
+  const verdict = judgeRatchet(measured, baseline, baseline, null);
+  if (verdict.over.length > 0) {
+    return { id, state: "FAIL", detail: `the installed artifact carries more dev-only content than the baseline allows — ${overBaselineMessage(measured, baseline, artifactRoot)}` };
+  }
+  // ② the SIZE ceiling: the artifact's own totals against the recorded clean reading. ⛔ This half
+  // belongs HERE (release cadence, a human in the loop) and NOT in the per-run ratchet: those totals
+  // move with every regenerated bundle, and measured churn on develop is ~1 build-input commit/hour,
+  // so gating them per commit would be re-anchored blindly until it meant nothing (硬规则 4).
+  if (baseline.shipped) {
+    const size = judgeShippedSize(shippedOf(reading), baseline.shipped);
+    if (!size.ok) {
+      return { id, state: "FAIL", detail: `the installed artifact is larger than the recorded clean build — ${overSizeMessage(size, artifactRoot)}` };
+    }
+  }
+  if (reading.unreadable.length > 0) {
+    return {
+      id,
+      state: "NOT-EVALUATED",
+      detail: `${reading.unreadable.length} path(s) of the installed tree could not be read (${reading.unreadable.slice(0, 3).join("; ")}) — the reading is partial`,
+    };
+  }
+  const shipped = shippedOf(reading);
+  return {
+    id,
+    state: "PASS",
+    detail:
+      `no rule-excluded content among ${reading.rulesInForce} rule(s); artifact ${shipped.files} files / ${shipped.bytes} bytes / ${shipped.shLines} .sh lines` +
+      (baseline.shipped ? ` ≤ recorded ${baseline.shipped.files} / ${baseline.shipped.bytes} / ${baseline.shipped.shLines}` : " (no recorded size ceiling)"),
+  };
+}
+
+/** The effect the judge above needs: walk the INSTALLED tree against the source checkout's rules. */
+export function readInstalledShippedSet(installedDir: string): { reading: ShippedSetReading; baseline: ShippedSetBaseline | null } {
+  const loaded = readRulesFromFile(rulesFileAbs());
+  if (loaded === null) {
+    return {
+      reading: {
+        evaluated: false,
+        reason: `the shipped-set rule file is unreadable (${rulesFileAbs()})`,
+        totals: { files: 0, bytes: 0, shLines: 0 },
+        forbidden: { files: 0, bytes: 0, shLines: 0 },
+        violations: [],
+        unreadable: [],
+        rulesInForce: 0,
+      },
+      baseline: null,
+    };
+  }
+  return { reading: readShippedSet(installedDir, loaded.rules), baseline: readBaselineFile(baselineFileAbs()) };
+}
+
 // ── the install-record reader (the one effect judgeScopeInstall needs) ───────────────────────────
 
 /** Read `~/.claude/plugins/installed_plugins.json` and pick the entry matching `scope` (and, for
@@ -647,25 +747,29 @@ export async function runAssertions(opts: RunnerOptions): Promise<AssertionResul
   // 3. version carriers agree, no -dev.
   push(judgeVersionConsistency(readInstalledVersions(opts.installedDir)));
 
-  // 4. `.quay/plugin` → the verified install.
+  // 4. the shipped set: no dev-only content, and within the shrink-only size ratchet.
+  const shipped = readInstalledShippedSet(opts.installedDir);
+  push(judgeShippedSetClean(shipped.reading, shipped.baseline, opts.installedDir));
+
+  // 5. `.quay/plugin` → the verified install.
   push(judgePointer(realpathOrNull(path.join(projectDir, ".quay", "plugin")), installedReal));
 
-  // 5. native provider not frozen in the project config.
+  // 6. native provider not frozen in the project config.
   push(readAndJudgeNativeConfig(projectDir));
 
-  // 6. driver status readings.
+  // 7. driver status readings.
   const ds = runInstalledCli(opts.installedDir, ["driver", "status", "--kind", "promotion", "--json", "--root", projectDir], projectDir);
   push(judgeDriverStatusReadings(parseJsonOrNull(ds.error ? "" : ds.stdout)));
 
-  // 7-8. serve host: own scope + non-empty log.
+  // 8-9. serve host: own scope + non-empty log.
   push(judgeServeCgroup(readServeCgroup(projectDir, procRoot)));
   push(judgeServeLog(readSizeOrNull(path.join(projectDir, ".quay", "serve.log"))));
 
-  // 9. server status loaded version.
+  // 10. server status loaded version.
   const ss = runInstalledCli(opts.installedDir, ["server", "status", "--json", "--root", projectDir], projectDir);
   push(judgeServerStatus(parseJsonOrNull(ss.error ? "" : ss.stdout)));
 
-  // 10. install record at the requested scope.
+  // 11. install record at the requested scope.
   push(judgeScopeInstall(readScopeInstallRecord(homeDir, opts.scope, projectDir), installedReal));
 
   return results;
@@ -743,7 +847,8 @@ function usage(): string {
     "       verify-plugin-channel-assertions.ts --installed <dir> --project <dir> --upgrade-from <previous-plugin-tree> [--json]",
     "",
     "Asserts a Claude Code plugin-channel install is CORRECT — not merely installable: the config the",
-    "init wrote validates (CLI + MCP), the version carriers agree and carry no -dev, the project",
+    "init wrote validates (CLI + MCP), the version carriers agree and carry no -dev, the shipped set",
+    "carries no dev-only content and is within its shrink-only size ratchet, the project",
     "pointer/config are not frozen to a cache version, the driver/server version readings exist, and",
     "the serve host runs in its own systemd scope.",
     "",

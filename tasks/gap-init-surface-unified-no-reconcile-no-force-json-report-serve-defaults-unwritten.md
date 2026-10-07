@@ -35,8 +35,12 @@ GOAL-029「init 统一为单一 TS 引擎、终局无 .sh;并收窄发布集合�
 - `packages/quay/src/cli/help.ts`
 - `packages/quay/src/init.ts`
 - `packages/quay/src/mcp-server.ts`
+- `packages/quay/src/branch-model.ts`
 - `packages/quay/src/mcp-handlers.ts`
+- `packages/quay-native/bin/quay-native.ts`
 - `plugin/skills/init/SKILL.md`
+- `plugin/scripts/config-key-consumer-check.ts`
+- `plugin/test/config-key-consumer-check.test.mjs`
 - `README.md`
 - `packages/quay/test/init.test.mjs`
 - `packages/quay/test/mcp-server.test.mjs`
