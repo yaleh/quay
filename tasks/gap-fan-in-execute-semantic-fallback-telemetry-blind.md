@@ -1,7 +1,7 @@
 ---
 id: gap-fan-in-execute-semantic-fallback-telemetry-blind
 title: fan-in 语义兜底路径（fan-in-execute.js）的实际触发/落地情况在现有账本中完全不可观测
-status: todo
+status: ready
 labels:
   - gap
   - defect
