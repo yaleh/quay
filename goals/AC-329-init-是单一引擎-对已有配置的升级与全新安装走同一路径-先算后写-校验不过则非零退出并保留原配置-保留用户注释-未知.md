@@ -1,7 +1,7 @@
 ---
 id: AC-329
 title: init 是单一引擎：对已有配置的升级与全新安装走同一路径，先算后写、校验不过则非零退出并保留原配置；保留用户注释/未知键/用户固定值，去掉退役键，且幂等
-status: draft
+status: active
 kind: criterion
 goal: GOAL-029
 criterion: >-
@@ -104,4 +104,15 @@ origin: 人 2026-10-07 裁定（与 manager 会话讨论）：init 终局是无 
   默认值（等于回退值）不写进配置；升级失败非零退出并保留原配置；未知键保留并警告；并单独收窄发布集合（测试/夹具/突变用例/交付验证工具不应随产物发出）。起因：2026-10-07
   发布前演练发现已有项目升级后 config validate 仍红（init 脚本升级不补 loop.board/gates），且产物里 shell
   36910 行、641 个测试文件被当作产品发出。
+activatedAt: 2026-10-07T02:00:28.722Z
+statusLog:
+  - at: 2026-10-07T02:00:28.722Z
+    from: draft
+    to: active
+    actor: goal-cli
+    reason: ""
+fidelity:
+  verdict: not-evaluated
+  reason: no judge configured
+  at: 2026-10-07T02:00:28.722Z
 ---
