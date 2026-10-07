@@ -1,7 +1,7 @@
 ---
 id: AC-329
 title: init 是单一引擎：对已有配置的升级与全新安装走同一路径，先算后写、校验不过则非零退出并保留原配置；保留用户注释/未知键/用户固定值，去掉退役键，且幂等
-status: active
+status: achieved
 kind: criterion
 goal: GOAL-029
 criterion: >-
@@ -111,6 +111,11 @@ statusLog:
     to: active
     actor: goal-cli
     reason: ""
+  - at: 2026-10-07T02:56:18.681Z
+    from: active
+    to: achieved
+    actor: goal-driver
+    reason: "I2: criterion pass"
 fidelity:
   verdict: not-evaluated
   reason: no judge configured
