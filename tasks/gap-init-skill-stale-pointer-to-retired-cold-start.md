@@ -1,7 +1,7 @@
 ---
 id: gap-init-skill-stale-pointer-to-retired-cold-start
 title: quay:init skill 结尾的"下一步"指引仍指向已退役的 /quay:cold-start，而非现役的 /quay:drivers
-status: ready
+status: done
 labels:
   - gap
 parent: null

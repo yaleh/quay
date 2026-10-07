@@ -19,6 +19,9 @@
 
 import { test } from "node:test";
 import { CONCURRENCY_CAP_DEFAULT, POOL_FLOOR, POOL_FLOOR_MULT_DEFAULT, analyzeTasks, artifactsComplete, assert, computePoolFloor, fourArtifactBody, fs, makeWorkspace, maxMutuallyDisjointSubset, notYetFlipped, path, writeTask } from "./helpers/ready-pool-check-harness.mjs";
+// The ONE kernel judge (gap-ready-check-duplicated-algorithm-store-vs-ready-pool-check) — imported
+// directly so this shard can assert ready-pool-check re-exports it rather than carrying a copy.
+import { artifactsComplete as kernelArtifactsComplete } from "../../packages/quay/src/kernel/task-shape-artifacts.ts";
 
 test("all remaining unchecked boxes annotated （待外部） ⇒ awaiting-verification (excluded, not dispatchable)", (t) => {
   const root = makeWorkspace("remaining-ext");
@@ -83,6 +86,35 @@ test("artifactsComplete is shape-aware and content-gated", () => {
 
   // Unknown shape fails closed.
   assert.equal(artifactsComplete("## Some unknown heading\ncontent").complete, false);
+});
+
+
+test("artifactsComplete IS the shared kernel judge, not a private copy (gap-ready-check-duplicated-algorithm-store-vs-ready-pool-check)", () => {
+  // Same function reference — ready-pool-check re-exports the kernel judge instead of wrapping or
+  // re-implementing it, and the product judge (quay-native store.check()) calls the same one.
+  assert.equal(
+    artifactsComplete,
+    kernelArtifactsComplete,
+    "ready-pool-check must re-export the kernel artifactsComplete, never a second implementation"
+  );
+  // The depth-aware section boundary the two old copies disagreed on: a shallower `# ` heading ENDS
+  // a `## ` section. Under the old store-only `^##\s` stop, the H1 and the spillover below it were
+  // swallowed into the Contract section and `plan` read present on an effectively empty section.
+  const h1Body = [
+    "## Proposal",
+    "A real proposal paragraph that is definitely more than forty non-whitespace characters long.",
+    "## Contract",
+    "measure x",
+    "# a shallower H1 wedge",
+    "spillover prose that must NOT count toward the contract section, comfortably over forty chars.",
+    "## Acceptance Criteria",
+    "- [x] a real, checkable acceptance criterion long enough to clear the bar",
+    "## Definition of Done",
+    "A real definition of done paragraph more than forty non-whitespace characters long.",
+  ].join("\n");
+  const r = artifactsComplete(h1Body);
+  assert.deepEqual(r, kernelArtifactsComplete(h1Body));
+  assert.equal(r.artifacts.plan, false, "the shallower H1 must END the Contract section");
 });
 
 

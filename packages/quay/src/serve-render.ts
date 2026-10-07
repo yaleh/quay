@@ -64,24 +64,13 @@ export function tableWrap(inner: string): string {
   return `<div class="table-wrap">${inner}</div>`;
 }
 
-// QX-028 (experiment 4, iteration 7): strip structural heading lines from
-// body content before using it as a search index. Lines matching /^#+\s/
-// (one or more # followed by a space) are structural headers ("## Proposal",
-// "## Plan", "## AC", "## DoD", etc.) — excluding them prevents template
-// boilerplate section names from causing false positives in body search.
-// Closes CB-017 (significant: searching "Proposal" matched 117/118 tasks).
-// QX-041 (experiment 4, iteration 11): fix SH-003 — track fenced code blocks
-// so that `# comment` lines inside ``` fences are NOT stripped. Only lines
-// outside a fence that match /^#+\s/ are heading boilerplate; lines inside
-// fences are code content that should remain searchable.
-export function stripHeadings(text: string | undefined | null): string {
-  let inFence = false;
-  return (text || "").split("\n").filter((line) => {
-    if (/^```/.test(line)) { inFence = !inFence; return true; }
-    if (inFence) return true; // preserve code content (including # comment lines)
-    return !/^#+\s/.test(line); // strip structural headings outside fences
-  }).join(" ");
-}
+// QX-028 (experiment 4, iteration 7) first defined the heading-stripped search
+// index here; QX-041 (SH-003) added the inFence carve-out to THIS copy only —
+// the drift sh-005 chased afterwards. The ONE definition is now the shared
+// product-layer leaf ./search-index.ts (Core, not this renderer): the helper is
+// not rendering logic and three other surfaces need it. Re-exported here so
+// serve-task.ts and serve-handlers.ts's `export *` keep their import path.
+export { stripHeadings } from "./search-index.ts";
 
 // QW-001: minimal, consistent CSS system — applied via <link> in every page's
 // <head>. No external file: inlined as a <style> block so the single-file

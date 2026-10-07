@@ -1,7 +1,7 @@
 ---
 id: gap-fan-in-execute-semantic-fallback-telemetry-blind
 title: fan-in 语义兜底路径（fan-in-execute.js）的实际触发/落地情况在现有账本中完全不可观测
-status: ready
+status: done
 labels:
   - gap
   - defect
@@ -33,6 +33,7 @@ The worker-outcome ledger (or its successor) distinguishes a landing reached via
 ## Touches
 
 - .gitignore
+- packages/quay/test/build-plugin-dist.test.mjs
 - plugin/scripts/worker-driver.ts
 - plugin/scripts/worker-fan-in.ts
 - plugin/workflows/fan-in-execute.js
@@ -58,5 +59,7 @@ A concrete answer with a concrete count. `--root`-less reads in a worktree (no g
 **AC3 evidence + decision (firing frequency).** Measured: semantic-fallback landings in the whole production ledger = **1** (2026-09-24) vs mechanical-path `complete` events = **825** (`actor=quay-driver`). The declared `loop.scoped_command` in `.quay/config.yml` is `["bash","{worktree}/scripts/test.sh","--for-task","{task}","--allow-thin"]` — byte-equal to the hardcode's argv ⇒ **no actual divergence today**, only a latent "does not follow the config". **Decision: leave it, documented** (rationale now printed in the workflow directly above the line; the line itself moved from `:689` to `:716` because of the AC3 comment). Grounds: (a) the path fires ~never; (b) it is byte-equivalent today; (c) the workflow is being retired (`fan-in-workflow-retirement-check.ts`, L3 双副本删净) ⇒ changing it now only enlarges the change surface of a path about to disappear. Revisit trigger recorded: if the workflow survives P3, route it through `resolveScopedGateCommand` — the moment `.quay/config.yml` changes, the hardcode silently stops matching.
 
 **Tests.** `plugin/test/fan-in-semantic-fallback-record.test.mjs` — 7 tests, all green, including the negative controls that make the report falsifiable: a `quay-driver` `complete` event is **not** counted as a semantic-fallback landing; a same-actor non-`complete` event is not counted; both carriers absent ⇒ `evaluated:false`; unpaired start ⇒ `unfinished`; malformed/out-of-vocabulary lines never become readings; CLI fail-closed paths. `plugin/test/fan-in-execute-paths-s*.test.mjs` (96 tests) still green after the workflow edits.
+
+**修复（本轮 exited-not-landed 轮）：pre-fix anchor 基线漂移。** 本任务给 `plugin/workflows/fan-in-execute.js` 新增了 2 处真实的 `plugin/scripts/worker-driver.ts` 调用（step 0 的 `--phase start` / step 5.5c 的 `--phase end`）+ 1 条点名 `plugin/scripts/worker-fan-in.ts` 的 AC3 理由注释；三者各被 `rewriteMarkdown` 折成一个 `${CLAUDE_PLUGIN_ROOT}` anchor ⇒ `packages/quay/test/build-plugin-dist.test.mjs` 的 AC5 所钉的「改写前 anchor 数」从 **22** 变为 **25**，suite 红（`fan-in-execute.js: pre-fix anchor count changed — the measurement drifted`）。该测试【直接读 `fan-in-execute.js` 文本】，故 one-hop import 判它与本 delta UNRELATED，而因果为真（data-file 读形态）。修法：重测并把基线钉值 22→25，注释同步；下界断言 `preFixCounts["fan-in-execute.js"] >= 20`（0.16.0 基线）未动。复现/修复读数：`node --test packages/quay/test/build-plugin-dist.test.mjs` 修前 AC5 red（pre=25, pinned=22），修后 exit 0、44 tests pass，`[AC4-task]` 打印 `fan-in-execute.js=25`。已把该测试文件加入 `## Touches`——否则 fan-in step 3 的 anti-drift（读 worktree 内本任务文件的 Touches vs `git diff <mergeTarget>...HEAD`）会把它判成 out-of-declared 硬红。
 
 **Residual gap (honest).** The attempt ledger is written only from the workflow's own start/landed points; its failure exits (suite-red exhaustion, ff-retry exhausted, plugin-root-invalid) currently surface only as an unmatched `phase=start` (`unfinished`), not as an explicit `--outcome red|aborted`. `--fallback-outcome red|aborted` is implemented and tested but not yet wired into those exits.
