@@ -213,8 +213,9 @@ Why: every landed task pays a cost that barely depends on its size. **The number
 dated reading, not a rule — 来源与复跑见 `docs/analysis/task-granularity-and-throughput-2026-10-07.md`**
 (that document holds the 口径/definitions, the full 10-bin table with intervals, and the exact
 `--report` command that regenerates every figure here). Fitted on tasks first
-dispatched on or after 2026-09-16 (934 measurable landed tasks, six projects; size = changed
-lines of code + tests in the landing diff):
+dispatched on or after 2026-09-16 (≈940 measurable landed tasks, six projects; size = changed
+lines of code + tests in the landing diff). ⚠️ The counts and the low-order digits move every
+time a task lands — read them as magnitudes, and re-run before quoting a figure:
 
 - the landing round costs ~18 min + a small per-100-line term (the slope's interval in the
   analysis doc is wide — do not quote a point value for it);
@@ -225,8 +226,8 @@ lines of code + tests in the landing diff):
 So the same work costs far less worker time in larger tasks. Measured worker-hours per 1000
 changed lines, by task size (full table with 95% intervals in the analysis doc):
 
-    <100: 12.7   250–400: 1.6   600–1000: 0.79   1000–1500: 0.55   1500–2000: 0.49
-    2000–3000: 0.39 (n=32)   3000+: 0.16 (n=28)
+    <100: ≈13   250–400: ≈1.6   600–1000: ≈0.8   1000–1500: ≈0.55
+    1500–2000: ≈0.49   2000–3000: ≈0.4   3000+: ≈0.16
 
 Rules that follow:
 - Make a task as large as one coherent mechanism or deliverable. Below ~300 changed lines,

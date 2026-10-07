@@ -363,22 +363,22 @@ export function computePeers(inputPaths: string[], openTasks: PeerTask[]): Peer[
 }
 
 /**
- * Open tasks whose TEXT contains ≥1 substantive input path but whose `## Touches` do NOT declare it
- * — i.e. exactly the prose-only hits of step 2b's `grep -lF` recipe.
+ * Open tasks whose TEXT contains ≥1 substantive input path WITHOUT declaring it in `## Touches` —
+ * i.e. exactly the prose-only hits of step 2b's `grep -lF` recipe.
  *
  * Reported so the reader can see the difference between "declares this file" and "talks about this
- * file", and so the grep oracle stays checkable: for any path,
- * `{ids in peers} ∪ {ids in mentions} = grep -lF <path> tasks/*.md ∩ open statuses` — the two
- * halves partition the grep by whether the hit is a declaration (硬规则 2: 按位置判定).
+ * file", and so the grep oracle stays checkable. The partition is PER PATH: for any single path,
+ * `{ids in peers} ∪ {ids in mentions} = grep -lF <path> tasks/*.md ∩ open statuses`, since a task
+ * either declares the path or merely mentions it (硬规则 2: 按位置判定). A task can therefore appear
+ * in `peers` for one file and in `mentions` for another — excluding whole tasks (rather than
+ * path-by-path) would silently drop a row and break that equality.
  */
-export function computeMentions(inputPaths: string[], openTasks: PeerTask[], peers: Peer[]): Mention[] {
+export function computeMentions(inputPaths: string[], openTasks: PeerTask[]): Mention[] {
   const substantive = inputPaths.filter(isSubstantiveTouchesPath);
   if (substantive.length === 0) return [];
-  const peerIds = new Set(peers.map((p) => p.id));
   const out: Mention[] = [];
   for (const t of openTasks) {
-    if (peerIds.has(t.id)) continue;
-    const hits = substantive.filter((p) => t.text.includes(p));
+    const hits = substantive.filter((p) => t.text.includes(p) && !t.touches.includes(p));
     if (hits.length === 0) continue;
     out.push({ id: t.id, status: t.status, root: t.root, mentionedFiles: hits });
   }
@@ -986,7 +986,7 @@ export function main(argv: string[]): number {
   // peers
   const open = readOpenTasks(rootList);
   const peers = open.evaluated ? computePeers(inputs, open.tasks) : [];
-  const mentions = open.evaluated ? computeMentions(inputs, open.tasks, peers) : [];
+  const mentions = open.evaluated ? computeMentions(inputs, open.tasks) : [];
   // per-file history
   const landing = new Map<string, LandingIndex>();
   const outcomes = new Map<string, Map<string, OutcomeRecord[]>>();

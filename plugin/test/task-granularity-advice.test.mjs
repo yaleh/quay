@@ -205,7 +205,7 @@ test("AC3: prose mentions are reported separately from declarations (never confu
   });
   const open = readOpenTasks([dir]);
   const peers = computePeers(["src/a.ts"], open.tasks);
-  const mentions = computeMentions(["src/a.ts"], open.tasks, peers);
+  const mentions = computeMentions(["src/a.ts"], open.tasks);
   assert.deepEqual(peers.map((p) => p.id), ["t-declares"], "only the DECLARATION is a peer");
   assert.deepEqual(mentions.map((m) => m.id), ["t-mentions"], "the prose hit is surfaced separately");
   // …and the two halves partition the grep-shaped hit set.
@@ -423,10 +423,18 @@ test("production: for real declared paths, peers ∪ mentions equals the step-2b
   }
   const open = readOpenTasks([MAIN]);
   assert.equal(open.evaluated, true);
-  const samplePaths = ["plugin/scripts/worker-driver.ts", "plugin/scripts/rework-predictors.ts"];
+  const samplePaths = [
+    "plugin/scripts/worker-driver.ts",
+    "plugin/scripts/rework-predictors.ts",
+    "packages/quay/bin/quay.ts",
+    "packages/quay/src/init.ts",
+  ];
   for (const p of samplePaths) {
+    // The partition is PER PATH: a task declaring `p` is a peer, one merely naming it is a mention.
     const peers = computePeers([p], open.tasks);
-    const mentions = computeMentions([p], open.tasks, peers);
+    const mentions = computeMentions([p], open.tasks);
+    const both = peers.map((x) => x.id).filter((id) => mentions.some((m) => m.id === id));
+    assert.deepEqual(both, [], "no task may be both a declarer and a pure-prose mention for the SAME path");
     const union = [...new Set([...peers.map((x) => x.id), ...mentions.map((x) => x.id)])].sort();
     // The oracle: the literal grep of step 2b, restricted to open statuses.
     const grepOut = execFileSync(
