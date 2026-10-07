@@ -48,6 +48,7 @@ time (.quay/plugin/bin/quay task list --json | wc -c)    # ~3.4s（--json，强�
 - `packages/quay/src/cli/task-list.ts`
 - `packages/quay/src/cli/help.ts`
 - `packages/quay/test/cli.test.mjs`
+- `packages/quay/test/build-dist-smoke.test.mjs`
 - `tasks/gap-cli-task-list-json-body-coupled-to-json-flag.md`
 
 ## AC
@@ -92,6 +93,25 @@ time (.quay/plugin/bin/quay task list --json | wc -c)    # ~3.4s（--json，强�
   按 `includeBody` 决定是否剥 body，使「调用参数」与「输出形状」两条断言互相印证。
 - **AC6 scoped 门**：按本仓库 `.quay/config.yml` 的 `loop.scoped_command`（即驱动 fan-in 实际执行的形态）
   `bash scripts/test.sh --for-task gap-cli-task-list-json-body-coupled-to-json-flag --allow-thin` 退出 0，`cli.test.mjs`
-  在内实际执行（≥1 个测试文件）；已写 scoped-gate 缓存。⚠️ 不带 `--allow-thin` 的裸形态退出 1，原因是本任务 Touches 的
-  4 条中只有 `cli.test.mjs` 能按 basename 配对到测试（其余为源码路径），选择器判定 thin（1/4 < 0.5）——这是 Touches 形状的
-  属性，不是测试失败（测试本身照跑照过），也正是驱动侧 `scoped_command` 带 `--allow-thin` 的原因。
+  在内实际执行（≥1 个测试文件）；已写 scoped-gate 缓存。⚠️ 不带 `--allow-thin` 的裸形态退出 1，原因是本任务 Touches 中只有
+  能按 basename 配对到测试的条数不足一半（选择器判定 thin）——这是 Touches 形状的属性，不是测试失败（测试本身照跑照过），
+  也正是驱动侧 `scoped_command` 带 `--allow-thin` 的原因。
+
+**落地阻断的修复（境外 suite 红，2026-10-07）**：fan-in 的 suite 步红在
+`packages/quay/test/build-dist-smoke.test.mjs:122`（`(b) serve --port + HTTP GET returns 200`：`GET /tasks` 实测 404）。
+根因**不在本任务 delta**（本任务只改 `cli/*.ts` + `cli.test.mjs`），而是该用例自身的端口选择缺陷在共享宿主上撞车：
+
+- 该用例用 `18000 + Math.floor(Math.random() * 1500)` 选一个**固定随机端口** P，再 `spawn(bundle, serve --port P)`
+  （host 默认 `0.0.0.0`，`stdio:"ignore"`）。宿主的 18000–19500 区间里**确有其它的监听者**（实测 `ss -ltn` 命中
+  18772/18774/18968/19167 等非本仓进程）。撞上时本方子进程绑定 `0.0.0.0:P` 抛 `EADDRINUSE` 静默退出（stdio 被 ignore，
+  无任何诊断），而 `httpGet(127.0.0.1:P, "/tasks")` 连到的是**别人的监听者**，它返回 404 —— 一条伪装成「serve 坏了」的假读数。
+- **判据（404 只可能来自外来监听者）**：`serve-handlers.ts` 里 `/tasks` 由 `handleTaskList` 处理，该 handler **没有任何
+  404 出口**；全文件唯一的 `404` 是路径匹配链末尾的 fall-through。所以本方 server 对 `/tasks` 不可能回 404。
+- **对照（若根因判断为假则结果会不同）**：独立复现——先起一个占用 127.0.0.1:P 的外来 server（`/tasks` 回 404），再以
+  `0.0.0.0:P` 绑定本方 server，实测 `EADDRINUSE`，随后 `GET 127.0.0.1:P/tasks -> 404`，与观测到的失败逐字一致。
+
+**修法**：改用内核分配端口 `--port 0`（与 prod/launcher 同一条契约），端口从子进程自己打印的
+`quay serve: listening on http://<host>:<port>` 行解析——内核不会把一个**在用**的端口发出来，撞车在结构上不可能；`stdio`
+改为 pipe，子进程**提前退出会被显式诊断**（不再伪装成一条 HTTP 读数）。另把断言从「状态码 200」加强为「200 **且** 页面上
+有本工作区种子任务 `SMOKE1`」——200 本身可被任一 quay serve 满足，只有内容能证明读的是**我们自己**的 server。实测：
+`node --test packages/quay/test/build-dist-smoke.test.mjs` 4/4 pass（`(b)` 由 630ms 降到 ~250ms）。
