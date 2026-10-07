@@ -1,7 +1,7 @@
 ---
 id: gap-init-single-engine-state-based-upgrade-validate-before-write
 title: init 单一引擎：升级与全新安装同一路径，先在内存算出新配置并校验、通过才原子写入；失败非零退出并保留原配置；保留用户注释/未知键/固定值、去掉退役键、幂等
-status: ready
+status: done
 labels:
   - gap
   - defect
