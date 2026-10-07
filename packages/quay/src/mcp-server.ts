@@ -101,6 +101,21 @@ function enabledProviderIds(cfg: ReturnType<typeof loadConfig>): string[] {
 // answers does not get in) is applied in that same derivation. The Core stays decoupled from the
 // plugin layer: this file only SPAWNS the inventory tool's CLI and parses its JSON (the JSON shape
 // below mirrors the inventory tool's --instruments-json output).
+//
+// ⛔ NOT A READ-ONLY SURFACE (gap-instrument-tool-mutating-scripts-mislabeled-readonly). AC4's
+// admission filter is a DECLARATION filter: it asks whether a script can say WHAT QUESTION it
+// answers (`@instrument "..."`, or the header's own `<basename> — <description>` line) and NEVER
+// whether running it is safe. The admitted set therefore contains scripts with real side effects —
+// `worktree-process-reaper.ts` terminates live processes (including stale `full-suite.lock`
+// holders) and `quay-deliver.ts` dispatches/preempts delivery work to other sessions, among many
+// others (measured 2026-10-07: 368 admitted, the large majority of which spawn processes, write
+// files/locks, or drive other sessions). There is NO per-instrument read-only/mutating
+// classification to expose, and inventing one from names or declared questions would be a
+// heuristic that mislabels exactly the scripts this task is about (the reaper's own declared
+// question reads as a diagnostic). So the truth is stated where it IS knowable — the tool
+// description — and `action: "run"` is gated behind an explicit `confirm: true` acknowledgment.
+// Fail-closed default: an unclassified instrument is treated as potentially mutating, never as
+// read-only.
 
 interface InstrumentEntry {
   name: string;
@@ -172,11 +187,42 @@ export async function fetchInstrumentsManifest(workspaceRoot: string): Promise<I
   return JSON.parse(r.stdout) as InstrumentsManifest;
 }
 
-/** Resolve an instrument by name from the derived directory, then run it under its interpreter. */
+/**
+ * WHY `action: "run"` IS GATED — the ONE string shared by the tool description and the refusal, so
+ * the warning a caller reads before running and the warning it gets when refused cannot drift apart.
+ */
+const INSTRUMENT_MUTATION_WARNING =
+  "the instrument directory is filtered by DECLARATION, not by safety: a script is admitted for " +
+  "saying WHAT QUESTION it answers (`@instrument \"...\"` or its header's `<name> — <description>` " +
+  "line) and is never checked for whether running it is read-only. An admitted instrument is an " +
+  "arbitrary workspace script and may have real side effects — terminating live processes (and the " +
+  "lock holders they anchor), dispatching or preempting work to other sessions, and writing " +
+  "files/locks. There is no read-only/mutating classification to consult.";
+
+/** The refusal text for an unacknowledged run. Names the instrument, and says nothing executed. */
+function instrumentRunRefusal(name: string): string {
+  return (
+    `instrument run refused — "${name}" was NOT executed. ${INSTRUMENT_MUTATION_WARNING} ` +
+    "`action: \"run\"` therefore requires an explicit `confirm: true` acknowledging that the named " +
+    "instrument may mutate state. Re-invoke with confirm: true to run it."
+  );
+}
+
+/**
+ * Resolve an instrument by name from the derived directory, then run it under its interpreter.
+ *
+ * ⛔ `confirm` is REQUIRED and must be exactly `true`: the admission filter above it is a
+ * declaration filter, not a safety filter (see INSTRUMENT_MUTATION_WARNING), so every run is
+ * treated as potentially mutating until the caller says otherwise. The gate sits HERE, on the
+ * runner, not only in the MCP handler — there is no execution path that skips it. It is checked
+ * AFTER the name resolves to an admitted instrument, so the refusal is never a cheap way to make an
+ * unknown name look like a hazard refusal.
+ */
 export async function runInstrument(
   workspaceRoot: string,
   name: string,
-  args: string[]
+  args: string[],
+  confirm: boolean
 ): Promise<{ exitCode: number; stdout: string; stderr: string }> {
   const manifest = await fetchInstrumentsManifest(workspaceRoot);
   const entry = manifest.instruments.find((i) => i.name === name);
@@ -185,6 +231,7 @@ export async function runInstrument(
       `no such instrument: "${name}" (the admitted directory has ${manifest.admitted}; call instrument action:list to see them)`
     );
   }
+  if (confirm !== true) throw new Error(instrumentRunRefusal(name));
   const resolved = resolveWorkspaceInstrument(workspaceRoot, entry.path);
   const command = entry.kind === "bash" ? "bash" : process.execPath;
   const argv = entry.kind === "bash" ? [resolved.path, ...args] : resolved.stripTypes ? ["--experimental-strip-types", resolved.path, ...args] : [resolved.path, ...args];
@@ -405,25 +452,41 @@ export async function startMcpServer(): Promise<void> {
   // (like config_validate), not Provider-routed: there is no `provider` argument. Registered here in
   // mcp-server.ts rather than mcp-handlers.ts because this task's Touches are limited to this file +
   // the inventory tool + its doc; the handler body is the two exported helpers above.
+  //
+  // ⛔ The description below is the FIX for gap-instrument-tool-mutating-scripts-mislabeled-readonly:
+  // this tool was positioned as a diagnostic/read-only surface, but acceptance is by DECLARATION
+  // (see the header comment above), so the admitted set includes process-killing and
+  // delivery-dispatching scripts. The declaration of that truth lives HERE (the surface an agent
+  // reads) and the enforcement lives on the runner (`runInstrument`'s required `confirm`).
   server.registerTool(
     "instrument",
     {
       description:
         "Discover and run the workspace's plugin/scripts instruments (previously reachable only by remembering " +
         "a path and writing `node --experimental-strip-types plugin/scripts/<name>.ts`). ONE tool, two actions. " +
+        "⚠️ NOT a read-only or diagnostic surface — " + INSTRUMENT_MUTATION_WARNING + " " +
         "`action: \"list\"` returns the DERIVED instrument directory: every instrument that declares what question " +
         "it answers (via `@instrument \"...\"` in its header comment, or the header's own `<basename> — <description>` " +
         "line), with name/path/description/kind, plus `total` (the derived count — never hardcoded) and `notAdmitted` " +
-        "(instruments that could not say what they answer — kept OUT by the admission filter). " +
-        "`action: \"run\"` with `name` (+ optional `args`) invokes one instrument: node scripts run under " +
-        "`node --experimental-strip-types`, `.sh` scripts under bash; stdout is returned and a non-zero exit is isError.",
+        "(instruments that could not say what they answer — kept OUT by the admission filter). The listing carries NO " +
+        "read-only/mutating flag: effects are not classified, for the list and for any single entry. " +
+        "`action: \"run\"` with `name` (+ optional `args`) invokes one instrument and REQUIRES `confirm: true` — an " +
+        "explicit acknowledgment of the side-effect risk above; without it the call is refused (isError) and NOTHING is " +
+        "executed. node scripts run under `node --experimental-strip-types`, `.sh` scripts under bash; stdout is " +
+        "returned and a non-zero exit is isError.",
       inputSchema: {
         action: z.enum(["list", "run"]),
         name: z.string().optional().describe("instrument name (basename without extension) — required for action: \"run\""),
         args: z.array(z.string()).optional().describe("CLI args forwarded to the instrument (action: \"run\")"),
+        confirm: z.boolean().optional().describe(
+          "required (`true`) for action: \"run\": acknowledges that the named instrument is an arbitrary workspace " +
+          "script which may mutate state (process termination, delivery dispatch, file/lock writes) — the admission " +
+          "filter checks only that it declares its question, never that it is read-only. Absent or false ⇒ the run is " +
+          "refused and nothing executes."
+        ),
       },
     },
-    async ({ action, name, args }) => {
+    async ({ action, name, args, confirm }) => {
       try {
         if (action === "list") {
           const manifest = await fetchInstrumentsManifest(loaded.workspaceRoot);
@@ -438,7 +501,7 @@ export async function startMcpServer(): Promise<void> {
             content: [{ type: "text" as const, text: "instrument run requires a `name` (the instrument's basename without extension)" }],
           };
         }
-        const r = await runInstrument(loaded.workspaceRoot, name, args ?? []);
+        const r = await runInstrument(loaded.workspaceRoot, name, args ?? [], confirm === true);
         return {
           isError: r.exitCode !== 0,
           content: [{ type: "text" as const, text: r.exitCode === 0 ? r.stdout : (r.stderr || r.stdout || `exit ${r.exitCode}`) }],

@@ -221,6 +221,29 @@ async function main() {
     "#!/usr/bin/env bash\necho 'no declaration'\n"
   );
 
+  // gap-instrument-tool-mutating-scripts-mislabeled-readonly fixtures (block 7b below). The
+  // admission filter checks DECLARATION, not safety, so side-effecting scripts get in — two
+  // fixtures pin that premise and the fix:
+  //   (a) the REAL `worktree-process-reaper.ts` (the process-terminating script this task names) is
+  //       copied in, so a `run` against that exact name exercises the gate instead of a stand-in;
+  //   (b) `fixture-mutating.sh`'s side effect is observable on disk (it writes a marker), which
+  //       makes "was it executed?" a CAUSAL assertion rather than a textual one. The marker path is
+  //       baked into the script so the assertion never depends on the spawn cwd.
+  fs.copyFileSync(
+    path.join(__dirname, "..", "..", "..", "plugin", "scripts", "worktree-process-reaper.ts"),
+    path.join(workspaceRoot, "plugin", "scripts", "worktree-process-reaper.ts")
+  );
+  const mutatingMarker = path.join(workspaceRoot, "fixture-mutating-ran.marker");
+  fs.writeFileSync(
+    path.join(workspaceRoot, "plugin", "scripts", "fixture-mutating.sh"),
+    "#!/usr/bin/env bash\n" +
+      "# fixture-mutating.sh — a fixture instrument that really mutates (it writes a marker), standing in\n" +
+      "# for the side-effecting scripts the admission filter admits (worktree-process-reaper.ts, quay-deliver.ts).\n" +
+      '# @instrument "did the fixture mutating instrument actually run (its side effect is observable on disk)?"\n' +
+      `touch '${mutatingMarker}'\n` +
+      "echo 'mutating-fixture-ran'\n"
+  );
+
   // AC4 (connection consolidation): blocks 17 (QN-035 _version) and 19
   // (QN-044 fence-search) are READ-ONLY and id/search-scoped (no store-wide
   // count assertions, no writes), so they share the primary `core` connection
@@ -514,13 +537,21 @@ async function main() {
   // admission filter is visible (fixture-undeclared.sh stays out); `action:
   // "run"` spawns an admitted instrument and returns its real stdout (the
   // AC9 contract assertion — spawn, argv, exit code and stdout are all real).
+  //
+  // gap-instrument-tool-mutating-scripts-mislabeled-readonly (AC1/AC2/AC3): the SAME block now
+  // pins the defect and its fix. AC1: the filter admits `worktree-process-reaper` (a script that
+  // terminates live processes) while its declared question reads like a diagnostic — admission is
+  // by DECLARATION, never by safety. AC2/AC3: the tool's description must DECLARE the side-effect
+  // risk (asserted from `listTools()`, the text an agent actually receives), and `action: "run"`
+  // must REFUSE without `confirm: true` — asserted causally: the refused fixture's marker file is
+  // absent, so "nothing executed" is measured, not merely claimed.
   {
     const list = await core.callTool({ name: "instrument", arguments: { action: "list" } });
     assert(list.isError !== true, "instrument action:list succeeds through quay mcp");
     const dir = list.structuredContent;
-    // runtime-usage-inventory.ts + 3 fixture instruments = 4; >=4 keeps it a derived bound.
-    assert(dir.total >= 4, `instrument directory total is DERIVED from the fixture (>=4), got ${dir.total}`);
-    assert(dir.admitted >= 3, `fixture instruments admitted (>=3), got ${dir.admitted}`);
+    // runtime-usage-inventory.ts + the 5 fixture instruments = 6; >=6 keeps it a derived bound.
+    assert(dir.total >= 6, `instrument directory total is DERIVED from the fixture (>=6), got ${dir.total}`);
+    assert(dir.admitted >= 5, `fixture instruments admitted (>=5), got ${dir.admitted}`);
     const sayHello = dir.instruments.find((i) => i.name === "fixture-say-hello");
     assert(
       sayHello && sayHello.description === "answers the fixture greeting question",
@@ -529,8 +560,38 @@ async function main() {
     const undeclared = dir.notAdmitted.includes("plugin/scripts/fixture-undeclared.sh");
     assert(undeclared, "the undeclared fixture is kept OUT (notAdmitted) — the admission filter is visible, not silent");
 
-    const run = await core.callTool({ name: "instrument", arguments: { action: "run", name: "fixture-echo", args: [] } });
-    assert(run.isError !== true, "instrument action:run on an admitted .sh instrument succeeds");
+    // AC1 — the defect's premise, pinned in-fixture: the process-TERMINATING script is admitted,
+    // and the manifest carries no read-only/mutating flag that would have flagged it.
+    const reaper = dir.instruments.find((i) => i.name === "worktree-process-reaper");
+    assert(
+      reaper,
+      "AC1: worktree-process-reaper (terminates live processes / stale full-suite.lock holders) IS admitted — the filter checks declaration, not safety"
+    );
+    assert(
+      !("mutating" in reaper) && !("readonly" in reaper) && !("effects" in reaper),
+      "AC1: the admitted entry carries no effect classification — nothing in the directory distinguishes read-only from side-effecting"
+    );
+
+    // AC2 — the declaration of the risk must reach the agent, in the tool description itself.
+    const { tools } = await core.listTools();
+    const instrTool = tools.find((t) => t.name === "instrument");
+    assert(instrTool, "instrument tool is present in tools/list");
+    const desc = String(instrTool?.description ?? "");
+    assert(
+      /NOT a read-only|not a read-only/i.test(desc),
+      "AC2: the tool description explicitly denies the read-only/diagnostic positioning it used to carry"
+    );
+    assert(
+      /side effects/i.test(desc),
+      "AC2: the tool description explicitly warns about side effects (process termination / delivery dispatch / file+lock writes)"
+    );
+    assert(
+      !!instrTool?.inputSchema?.properties?.confirm,
+      "AC2: the input schema exposes the explicit `confirm` acknowledgment parameter"
+    );
+
+    const run = await core.callTool({ name: "instrument", arguments: { action: "run", name: "fixture-echo", args: [], confirm: true } });
+    assert(run.isError !== true, "instrument action:run on an admitted .sh instrument succeeds once confirmed");
     assert(run.structuredContent?.exitCode === 0, `fixture-echo exits 0 (got ${run.structuredContent?.exitCode})`);
     assert(
       String(run.structuredContent?.stdout ?? "").includes("instrument-ran-ok"),
@@ -542,6 +603,27 @@ async function main() {
 
     const noName = await core.callTool({ name: "instrument", arguments: { action: "run" } });
     assert(noName.isError === true, "instrument run without a name is isError:true, not a crash");
+
+    // AC2/AC3 — the gate, asserted on the script this task names AND causally on a real side effect.
+    const reaperUnconfirmed = await core.callTool({ name: "instrument", arguments: { action: "run", name: "worktree-process-reaper" } });
+    assert(reaperUnconfirmed.isError === true, "AC3: running the process-reaper instrument WITHOUT confirm is refused (isError:true)");
+    const refusalText = String(reaperUnconfirmed.content?.[0]?.text ?? "");
+    assert(refusalText.includes("confirm: true"), "AC3: the refusal names the remedy (`confirm: true`)");
+    assert(
+      /side effect/i.test(refusalText),
+      "AC3: the refusal carries the side-effect warning itself (the description text and the refusal share one string)"
+    );
+
+    assert(
+      !fs.existsSync(mutatingMarker),
+      "AC3 (causal): the refused run did NOT execute the script — the fixture's marker file is absent, so 'nothing ran' is measured"
+    );
+    const confirmed = await core.callTool({ name: "instrument", arguments: { action: "run", name: "fixture-mutating", confirm: true } });
+    assert(confirmed.isError !== true, "AC2: the same instrument runs once `confirm: true` acknowledges the risk");
+    assert(
+      fs.existsSync(mutatingMarker),
+      "AC3 (causal control): the confirmed run DID execute the script — its marker file now exists, so the gate (not the runner) was what blocked it"
+    );
   }
 
   // ---- 7c. (gap-needs-human-raw-fan-in-reason-observation-surface) driver_log ----

@@ -101,6 +101,32 @@ function parseFlags(argv) {
   return { flags, positional };
 }
 
+// gap-quay-native-adr-cli-looser-bypass-of-core-validation: `quay-native adr` calls
+// createAdrStore() IN-PROCESS (line ~118), so it never passes through Core's `quay adr`
+// command nor the MCP adr_write validation layer (packages/quay/src/cli/adr.ts). The
+// finding named this a second, looser, UN-DECLARED entrance to the same ADR store. This text
+// is the short-term action: DECLARE the bypass (and steer normal use to `quay adr`) rather
+// than leaving it a silent back door. `new`/`edit` gain the title guard and the lifecycle
+// verbs are mirrored so the two surfaces agree (the finding's long-term action).
+const ADR_HELP = `quay-native adr — Provider-internal ADR access.
+⚠ BYPASS CHANNEL: this CLI calls createAdrStore() in-process and does NOT go through Core's
+validation layer (the MCP adr_write path that \`quay adr\` uses). Treat it as internal /
+escape-hatch only. For normal use prefer Core:
+    quay adr list|show|new|accept|deprecate|reject|supersede
+
+Subcommands (raw store surface):
+    list    [--status <s>] [--tag <t>] [--applies-to <path>] [--json]
+    get     <id> [--json]
+    write   <id> [--title T] [--status S] [--date D] [--supersedes a,b] [--superseded-by a,b]
+                 [--tags a,b] [--body B | --body-file F] [--json]
+            raw read-modify-write primitive — no title guard (store-level access)
+    new     <id> --title T [same fields as write]   --title is REQUIRED, like \`quay adr new\`
+    edit    <id> [same fields as write]             result must carry a non-empty title
+    accept | deprecate | reject  <id>               → status accepted | deprecated | rejected
+    supersede  <id> --by <newId>                    link both records (id → superseded)
+
+Files live in $QUAY_NATIVE_ADR_DIR (default: <repo>/.quay/adr).`;
+
 async function main() {
   const [, , cmd, sub, ...rest] = process.argv;
 
@@ -117,6 +143,13 @@ async function main() {
   if (cmd === "adr") {
     const adrStore = createAdrStore(resolveAdrDir());
     const { flags, positional } = parseFlags(rest);
+
+    // gap-…-looser-bypass-of-core-validation AC1: `--help` / `-h` (and bare `adr`) print the
+    // declaration that this surface bypasses Core's validation, then exit 0.
+    if (sub === undefined || sub === "--help" || sub === "-h") {
+      console.log(ADR_HELP);
+      return;
+    }
 
     if (sub === "list") {
       // E3: `--applies-to <path>` is the consult surface — filter to ADRs
@@ -136,6 +169,22 @@ async function main() {
     }
     if (sub === "write" || sub === "new" || sub === "edit") {
       const id = positional[0];
+      if (!id) { console.error(`quay-native adr ${sub}: missing required <id>`); process.exitCode = 1; return; }
+      // AC2: `new`/`edit` carry the same title-required guard Core's cli/adr.ts enforces on
+      // `new`. `new` must be given a non-empty --title; `edit` must RESULT in a non-empty title
+      // (either the flag or the title already on the record) — closing the create-through-edit
+      // path that would otherwise write a titleless ADR. `write` stays the raw store-level
+      // primitive (declared as such in `adr --help`), so it keeps its ungated behavior.
+      if (sub === "new" || sub === "edit") {
+        const effective = flags.title !== undefined
+          ? (typeof flags.title === "string" ? flags.title.trim() : "")
+          : (sub === "edit" ? adrStore.get(id)?.title : undefined);
+        if (typeof effective !== "string" || effective.trim() === "") {
+          console.error(`quay-native adr ${sub}: --title <title> is required`);
+          process.exitCode = 1;
+          return;
+        }
+      }
       const patch = {};
       if (flags.title !== undefined) patch.title = flags.title;
       if (flags.status !== undefined) patch.status = flags.status;
@@ -150,7 +199,31 @@ async function main() {
       else console.log(`wrote ${id}`);
       return;
     }
-    console.error(`unknown adr subcommand: ${sub}`);
+    // AC3: the decision-lifecycle verbs Core's cli/adr.ts owns, mirrored here so the two
+    // surfaces agree (the finding's long-term action). Status values are the store's own
+    // VALID_ADR_STATUSES; `supersede` links BOTH records, exactly as Core does.
+    if (sub === "accept" || sub === "deprecate" || sub === "reject") {
+      const statusMap = { accept: "accepted", deprecate: "deprecated", reject: "rejected" };
+      const id = positional[0];
+      if (!id) { console.error(`quay-native adr ${sub}: missing required <id>`); process.exitCode = 1; return; }
+      const a = adrStore.write(id, { status: statusMap[sub] });
+      if (flags.json) printJson(a);
+      else console.log(`${id} → ${statusMap[sub]}`);
+      return;
+    }
+    if (sub === "supersede") {
+      const id = positional[0];
+      const by = flags.by;
+      if (!id || typeof by !== "string") { console.error("quay-native adr supersede <id> --by <newId>"); process.exitCode = 1; return; }
+      adrStore.write(id, { status: "superseded", supersededBy: [by] });
+      const target = adrStore.get(by);
+      const supersedes = [...new Set([...(target?.supersedes ?? []), id])];
+      adrStore.write(by, { supersedes });
+      if (flags.json) printJson({ id, status: "superseded", supersededBy: [by] });
+      else console.log(`${id} superseded by ${by}`);
+      return;
+    }
+    console.error(`unknown adr subcommand: ${sub} (try: list, get, new, edit, write, accept, deprecate, reject, supersede)`);
     process.exitCode = 1;
     return;
   }

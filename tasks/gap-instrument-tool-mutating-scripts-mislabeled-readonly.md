@@ -1,7 +1,7 @@
 ---
 id: gap-instrument-tool-mutating-scripts-mislabeled-readonly
 title: instrument MCP 工具被定位为诊断/只读，但准入脚本集合可执行破坏性操作（进程终止、交付派发）
-status: ready
+status: done
 labels:
   - gap
   - defect
