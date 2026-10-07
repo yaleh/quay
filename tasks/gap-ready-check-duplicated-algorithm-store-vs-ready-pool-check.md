@@ -20,11 +20,29 @@ Proposed action：让 `store.ts` 的 `check()` 直接调用 `ready-pool-check.ts
 
 ## Acceptance Criteria
 
-- [ ] 对全量 `tasks/*.md`（当前语料）跑 `store.ts check()` 与 `ready-pool-check.ts artifactsComplete()` 两个函数并逐任务 diff 结果，贴出差异清单（若有）
-- [ ] `store.ts` 的 `check()` 改为调用（import）`ready-pool-check.ts` 的 `artifactsComplete()`，不再维护独立的判定谓词实现
-- [ ] 跨包依赖方向符合 Provider ABI 纪律（`packages/quay-native` 若需要依赖 `plugin/scripts` 下的逻辑，需确认不违反现有的 import 边界约束；若直接 import 不可行，先把共享算法下沉到两边都能合法 import 的位置，再双边切换到它）
-- [ ] 切换后，全量语料的两个判定结果一致（除本任务修复的差异外，无新的不一致）
-- [ ] 既有门测试（`gate-shape-dispatch.test.mjs`、`ready-pool-check.test.mjs` 等）全绿，无回归
+- [x] 对全量 `tasks/*.md`（当前语料）跑 `store.ts check()` 与 `ready-pool-check.ts artifactsComplete()` 两个函数并逐任务 diff 结果，贴出差异清单（若有）
+- [x] `store.ts` 的 `check()` 改为调用（import）`ready-pool-check.ts` 的 `artifactsComplete()`，不再维护独立的判定谓词实现
+- [x] 跨包依赖方向符合 Provider ABI 纪律（`packages/quay-native` 若需要依赖 `plugin/scripts` 下的逻辑，需确认不违反现有的 import 边界约束；若直接 import 不可行，先把共享算法下沉到两边都能合法 import 的位置，再双边切换到它）
+- [x] 切换后，全量语料的两个判定结果一致（除本任务修复的差异外，无新的不一致）
+- [x] 既有门测试（`gate-shape-dispatch.test.mjs`、`ready-pool-check.test.mjs` 等）全绿，无回归
+
+## Evidence
+
+**AC1/AC4 — 全量语料 diff（2587 个 `tasks/*.md`；`store.artifactSections()`/`detectShape()` vs `ready-pool-check.artifactsComplete()`/`detectShape()`，逐任务比对 shape + artifacts 映射 + complete）**
+
+切换前：**66 处差异**
+- 63 处 = 仅 unknown-shape 的 artifacts 映射**表示差异**（store `{proposal:false,plan:false,ac:false,dod:false}` vs pc `{}`）；两侧 `complete` 本就都是 `false`，非判定差异。
+- 3 处 = **真实判定差异**（均 contract shape，`plan`：store `true` / pc `false`）：`gap-no-explicit-blocked-signal-from-inner-layer`、`gap-suite-concurrency-4-vs-8-measurement`、`gap-sync-vendor-drift-mislabelled-as-task-schema`。根因：store 的 `sectionAfterHeading` 以 `^##\s` 收尾，遇到更浅的 `# ` 标题不收束，把夹在两个 `## ` 之间的 H1 及其内容吞进前面的 `## Contract`，使一个实际为空的 Contract 段读到 `plan:true`。三个任务状态均为 `done`（且 `check()` 对 done 直接返回 terminal，故对生产无影响）。
+
+切换后：**0 处差异**（两侧同调 kernel 单一实现）。
+
+另：`ready-pool-check.artifactsComplete()` 自身在语料上的 `complete`/`missing`/`shape` 读数**逐任务字节一致**（旧实现 vs 新实现单独复核），仅 unknown-shape 的 `artifacts` 映射由 `{}` 变为 all-false——与 store 既有输出对齐，无判定影响。
+
+**AC2 — 单一判定谓词**：新增 `packages/quay/src/kernel/task-shape-artifacts.ts`（`detectShape` / `findShapeSection` / `artifactsComplete` / `artifactSections` / `MIN_SECTION_CHARS` / `TaskShape`）。`store.ts` 删除私有 `artifactSections`/`hasExactHeading`/`detectShape`/`sectionAfterHeading`/`MIN_SECTION_CHARS`，改 import + re-export kernel；`ready-pool-check.ts` 删除私有 `detectShape`/`sectionNonWsLength`/`artifactsComplete`/`MIN_SECTION_CHARS`，同样改 import + re-export。AC2 字面的「import `ready-pool-check.ts`」在 AC3 下**不可行**（那是 `packages/**`→`plugin/**` 反向边），故按 AC3 明列的替代路径执行：先下沉共享算法到 kernel，再双边切换。
+
+**AC3 — 依赖方向**：共享算法落在 kernel（`packages/quay/src/kernel/`）——产品判据（quay-native，禁反 import plugin）与方法论判据（plugin/scripts，可 import Core 源）都能合法 import 的唯一位置；kernel 模块只 import 两个 kernel 叶子。`plugin/scripts/import-graph-check.ts` 通过：`valueSccs=0 typeSccs=0 reverseEdges=0 kernelChecked=true (violations=0)`。
+
+**AC5 — 测试**：`packages/quay-native/test/*`（122）全绿；`plugin/test/ready-pool-check-*.test.mjs` + `rework-predictors`（213）全绿；`--for-task` scoped 门 EXIT=0（含 gate-shape-dispatch 全 16 例）；`npx tsc --noEmit` EXIT=0。新增门锁：`gate-shape-dispatch` 的「ONE judge」+「depth-aware boundary」两例，`ready-pool-check-s04` 的「IS the shared kernel judge」一例。
 
 ## Definition of Done
 
@@ -34,6 +52,7 @@ Proposed action：让 `store.ts` 的 `check()` 直接调用 `ready-pool-check.ts
 
 - packages/quay-native/src/store.ts
 - plugin/scripts/ready-pool-check.ts
+- packages/quay/src/kernel/task-shape-artifacts.ts
 - packages/quay-native/test/gate-shape-dispatch.test.mjs
-- plugin/test/ready-pool-check.test.mjs
+- plugin/test/ready-pool-check-s04.test.mjs
 - tasks/gap-ready-check-duplicated-algorithm-store-vs-ready-pool-check.md
