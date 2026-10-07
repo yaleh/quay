@@ -39,13 +39,11 @@ import { GOAL_CARRIER_DIR_NAME, writeFaceRejectionOnCreate } from "../../quay/sr
 // store is the authoritative SEARCH BACKEND but not the definition home (Core
 // cannot depend on quay-native; quay-native already depends on Core).
 import { stripHeadings } from "../../quay/src/search-index.ts";
-// The single regex-literal escaper, a kernel leaf — the SAME function plugin/scripts/ready-pool-check.ts
-// imports (via the plugin-side entry `plugin/scripts/regex-escape.ts`). The two judges previously each
-// carried their own byte-identical copy and documented the agreement only by comment ("Mirrors
-// ready-pool-check.ts's own escapeRegExp (same byte semantics — the single-judge contract)"); the
-// agreement is now structural. Own copy was one of the twelve byte-identical bodies extracted by
-// gap-routine-semantic-dedup-scan-escapere-escaperegex-escaperegexp-fndefre-stemre.
-import { escapeRegExp } from "../../quay/src/kernel/regex-escape.ts";
+// The single regex-literal escaper (a kernel leaf) and the single four-artifact JUDGE now both live
+// in the kernel: `escapeRegExp` moved into packages/quay/src/kernel/task-shape-artifacts.ts along
+// with the heading/section matching that needs it, so this store no longer imports the escaper
+// directly. plugin/scripts/ready-pool-check.ts reaches the same kernel leaf through
+// `plugin/scripts/regex-escape.ts`; the agreement is structural, not a byte-identical copy.
 // gap-shape-section-tables-dual-copy-no-single-source: the shape section-heading lists (which
 // headings count as proposal/plan/ac/dod per shape) live in ONE place — packages/quay/src/kernel/
 // shape-sections.ts — imported by BOTH this store (product judge) and ready-pool-check.ts
@@ -61,6 +59,20 @@ import { escapeRegExp } from "../../quay/src/kernel/regex-escape.ts";
 // `dist/ready-pool-check.js`. A consumer therefore still needs no packages/ tree for the tools it
 // runs, and this store no longer reverse-imports the mechanism layer.
 import { SHAPE_SECTIONS } from "../../quay/src/kernel/shape-sections.ts";
+// gap-ready-check-duplicated-algorithm-store-vs-ready-pool-check: the four-artifact JUDGMENT (scan
+// each shape's registered headings, floor each section at MIN_SECTION_CHARS) used to be written
+// twice — here (`artifactSections`) and in plugin/scripts/ready-pool-check.ts (`artifactsComplete`).
+// They now call ONE kernel implementation, which BOTH layers may import (this store is the product
+// judge and may not import the mechanism layer; the kernel is the shared legal home — see that
+// file's header for the full reachability argument). `detectShape`/`sectionAfterHeading` are also
+// re-exported below so existing store consumers keep the same import surface.
+import {
+  artifactsComplete,
+  artifactSections,
+  detectShape,
+  sectionAfterHeading,
+  type TaskShape,
+} from "../../quay/src/kernel/task-shape-artifacts.ts";
 
 export const VALID_STATUSES: readonly string[] = TASK_STATUSES;
 
@@ -120,91 +132,16 @@ export const SHAPE_REGISTRY = {
   },
 } as const;
 
-export type TaskShape = keyof typeof SHAPE_REGISTRY | "unknown";
-
-// `escapeRegExp` (imported above, the kernel leaf) escapes regex-special characters so a heading is
-// matched LITERALLY. Without it, a registered heading like `AC (draft)` or
-// `Acceptance Criteria (runnable)` would be built into a `^##\s+<h>\s*$` regex where the parentheses
-// become capture groups and NEVER match the literal `## AC (draft)` line. All the pre-variant headings
-// are plain section names (no special chars), so escaping is a no-op for them — it only matters for the
-// parenthesized suffix/draft variants now registered in SHAPE_REGISTRY. It is the same function
-// ready-pool-check.ts uses, so the single-judge contract is structural, not a mirrored copy.
-
-/** Does `body` contain a `## <heading>` line that is EXACTLY that heading
- *  (trailing whitespace allowed)? Exact match prevents false positives from
- *  subheadings like `## Finding (measured ...)` or `## Plan execution record`.
- *  Detection uses exact match; section content extraction uses the looser
- *  `\b` match (existing behavior) once the shape is known. */
-function hasExactHeading(body: string, heading: string): boolean {
-  return new RegExp(`^##\\s+${heading}\\s*$`, "im").test(body);
-}
-
-/**
- * Detect a task's shape from its body, per the registered registry.
- * Precedence: contract → finding → plan. `## Finding` is checked BEFORE
- * `## Plan` because meta-cc's DIR template carries BOTH headings (Finding
- * replaces Proposal, Plan stays); classifying it as `plan` would demand a
- * `## Proposal` section the template does not have.
- *
- * A body matching none of the registered shapes is "unknown" — the gate must
- * FAIL CLOSED on it (AC5), never fall into a lenient branch.
- */
-export function detectShape(body: string): TaskShape {
-  if (hasExactHeading(body, "Contract")) return "contract";
-  if (hasExactHeading(body, "Finding")) return "finding";
-  if (hasExactHeading(body, "Plan")) return "plan";
-  // proposal shape: a literal `## Proposal` section with no contract/finding/plan
-  // heading. Checked AFTER contract/finding/plan so a task that carries `## Proposal`
-  // alongside its shape's own proposal-slot heading still resolves to its true shape
-  // (e.g. a contractBody test carries both `## Proposal` and `## Contract`).
-  // A subheading like `## Finding (measured ...)` does NOT match the proposal
-  // detection — exact-heading match only, so the existing unknown-shape negative
-  // control (Proposal + `## Finding (measured ...)` subheading) still fails closed.
-  if (hasExactHeading(body, "Proposal")) return "proposal";
-  return "unknown";
-}
-
-/**
- * Extract a body section: the content after the first `## <heading>` (first
- * alias that matches) up to the next `## ` heading or the end of the body.
- * Moved to module scope (was `extractSection` inside createStore) so the
- * shape helpers below can share one implementation (single source of truth).
- */
-export function sectionAfterHeading(body: string, headings: string[]): string {
-  for (const h of headings) {
-    // Whole-line EXACT heading match — deliberately NOT `\b`. A `\b` is only a
-    // boundary between a `\w` char and a non-`\w` char; both the last char of a
-    // CJK heading (e.g. 定 in `## 人的裁定`) and the following newline are
-    // non-`\w`, so `\b` is a no-op there and a CJK alias NEVER matches — the
-    // registered `人的裁定` proposal-slot was dead code, diverging from
-    // ready-pool-check.ts (which uses task-schema.ts extractSection's
-    // `^(##+)\s*<heading>\s*$` whole-line match and recognizes the same alias).
-    // `^##\s+<h>\s*$` matches ASCII headings byte-for-byte as before and CJK
-    // headings the same way — one consistent `\b`-free semantics as the single
-    // judge.
-    //
-    // QN-005 fix (iteration 2): `\Z` is NOT a valid JavaScript regex
-    // end-of-string anchor (JS has no \Z metacharacter) — the engine took
-    // it as a literal capital "Z", and with the `i` (case-insensitive)
-    // flag this also matched a bare lowercase "z" anywhere in the
-    // section's prose, truncating capture early (found and root-caused
-    // by the iteration-1 G3 audit against QN-005's own AC text, which
-    // contains the word "zero"). Correct JS end-of-string lookahead is
-    // `(?![\s\S])` (no characters remain).
-    const headingRe = new RegExp(`^##\\s+${escapeRegExp(h)}\\s*$`, "im");
-    const m = headingRe.exec(body);
-    if (!m) continue;
-    // Content = everything after the heading line up to the next `## ` heading
-    // (or end of body). `^##\s` (a line starting with exactly two hashes +
-    // whitespace) is the next-heading boundary — nested `### ` subheadings do
-    // NOT terminate the section (unchanged from the previous `(?=^##\s|…)`).
-    const rest = body.slice(m.index + m[0].length);
-    const nextRe = /^##\s/m;
-    const next = rest.match(nextRe);
-    return next ? rest.slice(0, next.index) : rest;
-  }
-  return "";
-}
+// TaskShape / detectShape / sectionAfterHeading now live in the ONE kernel judge
+// (packages/quay/src/kernel/task-shape-artifacts.ts, imported at the top of this file) and are
+// re-exported here so existing store consumers keep the same import surface. `escapeRegExp` (the
+// kernel leaf) is still what escapes a heading before it is interpolated into a regex, so a
+// registered heading like `AC (draft)` is matched LITERALLY rather than read as a capture group —
+// the same function ready-pool-check.ts uses, so the single-judge contract is structural, not a
+// mirrored copy. The whole-line EXACT (`\b`-free) heading rule and the QN-005 depth-aware section
+// boundary both moved into that module with the judge they belong to.
+export type { TaskShape };
+export { detectShape, sectionAfterHeading };
 
 /**
  * Contract shape (AC4): verify the `## Contract` section carries ALL six
@@ -1861,65 +1798,16 @@ export function createStore(tasksDir: string, opts?: { defaultStatus?: string })
   }
 
   /**
-   * The four mandatory artifacts (design §2, §3): Proposal, Plan, AC, DoD.
-   * QN-005 (iteration 2): presence-based-only was too thin (a heading
-   * followed by one word passed). Now requires each section's heading to
-   * exist AND its content (up to the next `##` heading) to exceed
-   * MIN_SECTION_CHARS non-whitespace characters — catches the
-   * heading-with-no-real-content failure mode without attempting semantic
-   * quality scoring (out of scope for a mechanical gate; that is what
-   * independent review/audit is for, per design §3/G3).
-   *
-   * QN-030 (iteration 20): the same boundary applies to `check()`'s AC
-   * checkbox counting below — presence/checked-state is verified, never
-   * claim truth. This was asserted in prose for 9+ iterations before being
-   * demonstrated live in test/gate-gameability.test.mjs (a checked-but-
-   * false AC claim passes both the author->ready and execute->done gates).
-   * This is expected, structural, and permanent — see that test file's own
-   * header before treating a future change here as a "fix" for it.
+   * The four mandatory artifacts (design §2, §3) and the shape-aware judged predicate now live in
+   * the ONE kernel judge — packages/quay/src/kernel/task-shape-artifacts.ts. The store no longer
+   * carries a private copy of `artifactSections()` / `MIN_SECTION_CHARS`
+   * (gap-ready-check-duplicated-algorithm-store-vs-ready-pool-check: it was written twice, here and
+   * in plugin/scripts/ready-pool-check.ts, so a heading variant or content-floor change could land
+   * on one judge only and the two would disagree on the SAME body). The QN-005 content floor and the
+   * QN-030 boundary (this is a syntax/presence counter, never a claim verifier — see
+   * test/gate-gameability.test.mjs before treating a future change here as a "fix") moved with it,
+   * and `artifactsComplete()` is imported at the top of this file.
    */
-  const MIN_SECTION_CHARS = 40;
-
-  /**
-   * Presence of the registered gate artifacts for a given shape, per
-   * SHAPE_REGISTRY. `shape` is the detected shape (see detectShape); the
-   * sections each shape requires come from the registry, so the aliases each
-   * project actually uses (quay: `## Contract` for Plan; meta-cc: `## Finding`
-   * for Proposal) are honored WITHOUT loosening any shape's own contract. An
-   * unknown shape yields all-false (the check() caller fails it closed).
-   *
-   * The artifact map is built from THE SHAPE'S OWN registered sections only —
-   * dispatch is not a waiver (each shape has a complete contract on its own
-   * dimension). The `finding` shape deliberately has no `plan` section
-   * (ADR-001: a Finding task has no `## Plan`), so `plan` is ABSENT from its
-   * map rather than present-and-false. The plan shape still carries a real
-   * `plan` artifact, so a Plan-shape task missing `## Plan` stays red.
-   */
-  function artifactSections(body, shape = detectShape(body)) {
-    const spec = SHAPE_REGISTRY[shape];
-    if (!spec) {
-      return { proposal: false, plan: false, ac: false, dod: false };
-    }
-    const has = (headings) => {
-      for (const h of headings) {
-        // Whole-line exact presence check (same CJK-safe, `\b`-free semantics
-        // as sectionAfterHeading): `\b` is a no-op between two non-word chars,
-        // so `## 人的裁定` (last char 定 is CJK, next char is the newline)
-        // never matched the old `^##\s+人的裁定\b` — the registered alias was
-        // dead code and the proposal artifact read false for a present section.
-        if (!new RegExp(`^##\\s+${escapeRegExp(h)}\\s*$`, "im").test(body)) continue;
-        const content = sectionAfterHeading(body, [h]);
-        const nonWhitespaceLen = content.replace(/\s/g, "").length;
-        if (nonWhitespaceLen >= MIN_SECTION_CHARS) return true;
-      }
-      return false;
-    };
-    const artifacts = {};
-    for (const [artifact, headings] of Object.entries(spec.sections)) {
-      artifacts[artifact] = has(headings);
-    }
-    return artifacts;
-  }
 
   /**
    * `task check <id>` — asserts the author->ready and execute->done gates
@@ -1952,8 +1840,11 @@ export function createStore(tasksDir: string, opts?: { defaultStatus?: string })
       // (meta-cc DIR, `## Finding` for Proposal) each have their own COMPLETE
       // contract — dispatch is not a waiver.
       const shape = detectShape(t.body);
-      const artifacts = artifactSections(t.body, shape);
-      const allArtifactsPresent = Object.values(artifacts).every(Boolean);
+      // The ONE shared judgment (kernel task-shape-artifacts.ts) — the same call
+      // plugin/scripts/ready-pool-check.ts makes, so the two judges can never disagree.
+      const judged = artifactsComplete(t.body, shape);
+      const artifacts = judged.artifacts;
+      const allArtifactsPresent = judged.complete;
 
       // AC5 (fail-closed): an unknown shape must never fall into a lenient
       // branch — otherwise "pick a template" becomes a new way to bypass the
