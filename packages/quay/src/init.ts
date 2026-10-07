@@ -2988,6 +2988,165 @@ export function deriveLoopScriptsClosure(o: { outPath: string; pluginRoot: strin
 }
 
 /**
+ * The COMPLETE laydown-set derivation — the TS home of `quay-init.sh`'s `_derive_loop_scripts_once`
+ * (+ its stability-checked `derive_loop_scripts` wrapper). Ported verbatim so the shell's derivation
+ * helpers (and the library-mode `source` contract they served) can be DELETED
+ * (gap-init-cli-lays-full-closed-set-and-detects-project-values-without-the-shell-script AC4/AC5):
+ * `plugin/scripts/laydown-set-check.sh` — the sole remaining consumer — now calls this through the
+ * step CLI instead of sourcing the installer.
+ *
+ * The set is the union of FOUR sources, so there is no second hand-maintained copy to drift:
+ *   (a) prefix-derived — every `plugin/scripts/<name>` reference in ALL shipped skills + loop docs +
+ *       delivered workflows (a delivered workflow calling a script makes it a required landing);
+ *   (b) bare-resolved  — every BARE `<name>.<ext>` token in the MECHANISM corpus (the cold-start skill
+ *       + the loop tick docs) that exists under `<pluginRoot>/scripts/`;
+ *   (c) explicit       — the mechanism files the docs name with NO path at all, plus the checkers'
+ *       ESM-`./` transitive deps (invisible to the `${SCRIPT_DIR}/` closure), plus the self-describing
+ *       capability catalog and the L1/L2 delivery-surface checkers;
+ *   (c2/c3) consolidated grouped-entry members and the three exec-core tick docs;
+ *   (d) closure        — every `${SCRIPT_DIR}/<sibling>` reference, repeated to a fixpoint.
+ * `archive/**` is excluded: a doc-referenced script moved to `archive/<date>/…` is no longer part of
+ * the live set (restore re-registers it).
+ *
+ * STABILITY CHECK (gap-quay-init-torn-read-derive-loop-scripts): the derivation greps the shipped
+ * corpus, and under heavy load a killed grep/sort returns a PARTIAL (torn) set — which then lays
+ * fewer scripts than the docs reference. Two independent passes must agree, retried up to three
+ * times; the last snapshot is returned when they never do (a torn set is caught downstream by the
+ * referenced-not-landed gate).
+ */
+export function deriveLoopScripts(o: { pluginRoot: string; neverLaydown: string }): { names: string[]; stable: boolean } {
+  const never = new Set(o.neverLaydown.split(/\s+/).filter(Boolean));
+  return stableDerivation(() => deriveLoopScriptsOnce(o.pluginRoot, never));
+}
+
+/**
+ * The installer itself is never a laydown member: it is the script DOING the laying down, and a
+ * target that received a copy of it would be carrying a second installer. The default lives here so
+ * the gate does not have to name it — a consumer that must spell the installer's path is a consumer
+ * that still reads as depending on it.
+ */
+export const DEFAULT_NEVER_LAYDOWN = "quay-init.sh";
+
+/** Retry the derivation until two independent passes agree (see `deriveLoopScripts`). */
+function stableDerivation(once: () => string[]): { names: string[]; stable: boolean } {
+  let last: string[] = [];
+  for (let attempt = 0; attempt < 3; attempt++) {
+    const a = once();
+    const b = once();
+    if (a.length > 0 && a.join("\n") === b.join("\n")) return { names: a, stable: true };
+    last = a;
+  }
+  return { names: last, stable: false };
+}
+
+function listFilesSafe(patternDir: string, filter: (name: string) => boolean): string[] {
+  try {
+    return fs.readdirSync(patternDir).filter(filter).map((n) => path.join(patternDir, n));
+  } catch {
+    return [];
+  }
+}
+
+/** One derivation pass — steps (a)+(b)+(c)+(c2)+(c3) + the archive filter + the (d) closure. */
+function deriveLoopScriptsOnce(pluginRoot: string, never: Set<string>): string[] {
+  const read = (p: string): string => {
+    try {
+      return fs.readFileSync(p, "utf8");
+    } catch {
+      return "";
+    }
+  };
+  const names = new Set<string>();
+
+  // (a) prefix-derived over the FULL corpus — shipped skills, loop docs, AND delivered workflows.
+  const aFiles = [
+    ...listFilesSafe(path.join(pluginRoot, "skills"), () => true).flatMap((d) => listFilesSafe(d, (n) => n === "SKILL.md")),
+    ...listFilesSafe(path.join(pluginRoot, "loop"), (n) => n.endsWith(".md")),
+    ...listFilesSafe(path.join(pluginRoot, "workflows"), (n) => n.endsWith(".js")),
+  ];
+  for (const f of aFiles) {
+    for (const m of read(f).matchAll(/plugin\/scripts\/([a-zA-Z0-9._-]+)/g)) names.add(m[1]!);
+  }
+
+  // (b) bare-resolved over the MECHANISM corpus (cold-start skill + the loop tick docs).
+  const mechFiles = [
+    path.join(pluginRoot, "skills", "cold-start", "SKILL.md"),
+    ...listFilesSafe(path.join(pluginRoot, "loop"), (n) => n.endsWith(".md")),
+  ].filter((f) => fs.existsSync(f));
+  for (const f of mechFiles) {
+    for (const m of read(f).matchAll(/(^|[^/a-zA-Z0-9._-])([a-zA-Z0-9._-]+\.[a-zA-Z0-9]+)/g)) {
+      const tok = m[2]!;
+      if (never.has(tok)) continue;
+      if (!fs.existsSync(path.join(pluginRoot, "scripts", tok))) continue;
+      names.add(tok);
+    }
+  }
+
+  // (c) explicit additions — bare-name mechanism files the docs never spell with a path, the
+  //     checkers' ESM-`./` transitive deps (invisible to the `${SCRIPT_DIR}/` closure below), the
+  //     capability catalog, and the L1/L2 delivery-surface checkers. Each entry's REASON lives in the
+  //     shell file's own header before the retirement; the list itself is data, not prose.
+  for (const explicit of [
+    "inner-idle-log.ts", "it0-split-or-commit-check.ts", "pipe-exit-code-check.sh",
+    "gate-script-base.ts", "workflow-event-schema.mjs", "task-schema.ts", "task-ops.ts",
+    "shape-sections.ts", "regex-escape.ts", "touches-parser.ts", "task-status.ts",
+    "wiring-coverage-check.ts", "capability-catalog.sh", "l1-delivery-surface-check.ts",
+    "dead-loop-check.sh", "inner-blocked-signal.ts", "inner-forensics.mjs",
+    "task-contract-check.ts", "task-status-drift-check.ts", "touches-orthogonality-check.ts",
+    "verify-delivery-surface.ts", "precommit-guard.ts", "touches-one-entry-one-path-check.ts",
+    "quay-session.ts", "repo-root.sh", "repo-root.ts", "checker-io.ts", "driver-result.ts",
+    "canonical-test-files.ts", "suite-params.ts", "over90-task-gate.ts", "semantic-trigger.ts",
+    "main-thread-edit-check.ts", "per-file-cpu-report.mjs",
+  ]) names.add(explicit);
+
+  // (c2) consolidated grouped-entry members: `name: "X", file: "Y"` declarations in `quay-*.ts`.
+  for (const f of listFilesSafe(path.join(pluginRoot, "scripts"), (n) => n.startsWith("quay-") && n.endsWith(".ts"))) {
+    for (const m of read(f).matchAll(/name: "[a-zA-Z0-9._-]+", file: "([a-zA-Z0-9._-]+)"/g)) {
+      const member = m[1]!;
+      if (never.has(member)) continue;
+      if (!fs.existsSync(path.join(pluginRoot, "scripts", member))) continue;
+      names.add(member);
+    }
+  }
+
+  // (c3) the exec-core tick docs (shipped from plugin/loop/, laid into orchestration/).
+  for (const tick of ["orchestrator-tick-core.md", "fast-mode-tick-core.md", "manager-tick-core.md"]) names.add(tick);
+
+  // archive/** exclusion: a doc-referenced script that has been archived is no longer part of the set.
+  const archiveDir = path.join(pluginRoot, "..", "archive");
+  if (fs.existsSync(archiveDir)) {
+    const archived = new Set<string>();
+    const walk = (d: string): void => {
+      for (const e of fs.readdirSync(d, { withFileTypes: true })) {
+        const p = path.join(d, e.name);
+        if (e.isDirectory()) walk(p);
+        else archived.add(e.name);
+      }
+    };
+    try {
+      walk(archiveDir);
+    } catch {
+      /* unreadable archive ⇒ no exclusion, the safe direction (lays MORE, never fewer) */
+    }
+    for (const name of [...names]) if (archived.has(name)) names.delete(name);
+  }
+
+  // (d) dependency closure to a fixpoint — the same single implementation the shell step uses.
+  const tmp = path.join(os.tmpdir(), `quay-laydown-derive-${process.pid}-${Math.random().toString(36).slice(2)}.txt`);
+  fs.writeFileSync(tmp, [...names].sort().map((x) => x + "\n").join(""), "utf8");
+  try {
+    deriveLoopScriptsClosure({ outPath: tmp, pluginRoot, neverLaydown: [...never].join(" ") });
+    return fs.readFileSync(tmp, "utf8").split("\n").map((l) => l.trim()).filter(Boolean);
+  } finally {
+    try {
+      fs.unlinkSync(tmp);
+    } catch {
+      /* best-effort */
+    }
+  }
+}
+
+/**
  * `verify_provider_runtime_existence`'s reader: the runtime file the native provider's launch argv
  * names — `mcp_entry[1]` (the canonical `["node", <runtime>, …]` slot), resolved through the SAME
  * judge the runtime uses (`resolveProviderEntry`) so an OMITTED binding is no longer "nothing to

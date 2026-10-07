@@ -9,12 +9,13 @@
 # session-liveness-mount.sh are both derived members, so cold-start would have shipped the M3 bug
 # into the target project) MUST block.
 #
-# The set is MECHANICALLY derived, no new mechanism (AC2): it CALLS quay-init.sh's
-# derive_loop_scripts() — the SAME single source the --loop laydown uses — so "what this gate
-# verifies" and "what quay-init lays down" cannot drift (gap-quay-init-laydown-derivation-count-
-# mismatch-two-sources: the old path here was a second, narrower grep that derived a SUBSET of the
-# real laydown set). This script is itself a derived member once the cold-start SKILL.md references
-# it, so its own test runs in the set.
+# The set is MECHANICALLY derived, no new mechanism (AC2): it CALLS the installer's ONE derivation
+# (`deriveLoopScripts`, packages/quay/src/init.ts — the TS home of the old library-mode
+# derive_loop_scripts; reached through the sibling step CLI) — the SAME single source the --loop
+# laydown uses — so "what this gate verifies" and "what quay-init lays down" cannot drift
+# (gap-quay-init-laydown-derivation-count-mismatch-two-sources: the old path here was a second,
+# narrower grep that derived a SUBSET of the real laydown set). This script is itself a derived member
+# once the cold-start SKILL.md references it, so its own test runs in the set.
 #
 # "Green" for a member = the script exists AND parses (bash -n for .sh; node --check with
 # --experimental-strip-types for .ts/.mjs). The member's OWN tests (`*/test/<basename>.test.mjs`,
@@ -79,20 +80,20 @@ if [ ! -d "$ROOT/plugin" ]; then
   exit 2
 fi
 
-# ── 1. Derive the laydown set — the SINGLE source of truth is quay-init.sh's derive_loop_scripts()
-# (gap-quay-init-laydown-derivation-count-mismatch-two-sources); no independent grep here. quay-init.sh
-# is sourceable (library mode — its guard stops before the install flow), so source it in a subshell
-# and call derive_loop_scripts() with PLUGIN_ROOT re-pointed at --root's plugin tree. The subshell
-# isolates quay-init.sh's `set -euo pipefail` + variable assignments from this script. Source it from
-# SELF_DIR (this checkout's plugin/scripts) under a VALID plugin root (passes the source-time plugin.json
-# check), then re-point PLUGIN_ROOT at the tree to DERIVE from (--root/plugin — a fixture root derives
-# its own fake skills/loop; the repo root derives the full shipped corpus).
+# ── 1. Derive the laydown set — the SINGLE implementation is `deriveLoopScripts`
+# (packages/quay/src/init.ts), reached through the sibling step CLI
+# (`quay-init-steps.ts laydown-set <plugin_root> <never-laydown>`).
+#
+# ⛔ NOT by SOURCING quay-init.sh any more (AC4 of
+# gap-init-cli-lays-full-closed-set-and-detects-project-values-without-the-shell-script): the
+# installer's library-mode derivation helpers (`derive_loop_scripts` + `mechanism_corpus` /
+# `bare_resolved_scripts` / `consolidated_member_files` / the `--check-drift` /
+# `--check-dependency-closure` modes) were DELETED with the rest of its retired check surface, and a
+# gate that sources the very installer it verifies cannot be run against a tree whose installer fails
+# to load. The derivation is the SAME single source (the closed-set/skill-docs corpus), moved into TS
+# so it no longer needs the shell's library-mode guard.
 mapfile -t SET < <(
-  export CLAUDE_PLUGIN_ROOT="$SELF_DIR/.."
-  set --
-  . "$SELF_DIR/quay-init.sh"
-  PLUGIN_ROOT="$ROOT/plugin"
-  derive_loop_scripts
+  node --no-warnings --experimental-strip-types "${SELF_DIR}/quay-init-steps.ts" laydown-set "${ROOT}/plugin"
 )
 
 if [ "${#SET[@]}" -eq 0 ]; then

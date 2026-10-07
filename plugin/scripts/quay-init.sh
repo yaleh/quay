@@ -20,22 +20,35 @@
 # add` + `claude plugin install`（或 npm 全局 register-plugin.mjs），不暗示"配置即生效"。
 #
 # 已退役（copy 机器，AC1 archive）：copy_one/copy_dir/write_state_file/write_session_env + managed/
-# conflict/stale 三态判定 + .quay/runtime 铺设 + ensure_vendor_runtime + verify_provider_runtime_existence
-# + --check-drift/--check-dependency-closure 的铺设面消费。
+# conflict/stale 三态判定 + .quay/runtime 铺设 + verify_provider_runtime_existence 的铺设面消费。
 # ⚠️ 2026-09-18（gap-quay-init-native-reconcile）：上述退役体的【死代码】已从本文件物理删除——它们
 # 当时即已无任何调用者（保留的只是定义）。同批删除的还有：write_provider_config（被 write_config
 # 的新装分支取代的重复 writer）、backup_config / rollback_config_on_exit（同一批无人调用的回滚件）、
 # drift_report（--check-drift 的打印器）、ensure_runtime_gitignore（被 ensure_runtime_artifacts_gitignore
 # 取代）、以及 _precompute_states/_CMP_STATE/_DST_HASH 批量化（其生产者即 copy 机器，删后 _is_identical
 # 的"批量查表"分支从未被执行过 ⇒ 一并退化为直接 `cmp -s`）。2959 → 2426 行；判定方式见该任务的 DoD
-# 证据小节（reachability + `derive_loop_scripts` 输出逐字不变 + 真实铺设产物逐字不变）。
+# 证据小节（reachability + 真实铺设产物逐字不变）。
 # ⚠️ 铺设退役【不等于】既有项目的
 # `.quay/runtime/` 无人管：其继任者是 migrate_stale_mcp_entry（升级通道）——把 provider 绑定迁到
 # 插件交付的 runtime 绝对路径，并把无引用且陈旧的本地副本退役（gap-upgrade-leaves-legacy-project-
-# runtime-stale-and-unmigrated AC1/AC2，裁定见该函数头）。⚠️ 保留为【库函数】（供 laydown-set-check.sh /
-# build-plugin-dist.mjs 等 SOURCE 后调用，本脚本的 library-mode guard 使 source 不执行安装流）：
-# derive_loop_scripts / verify_referenced_landed / _read_declarations 及其 helper——它们不再是 quay-init
-# 的写路径，只是仍然被下游机件按库方式消费；它们的整体退役属 AC158/AC159 波次。
+# runtime-stale-and-unmigrated AC1/AC2，裁定见该函数头）。
+#
+# ⚠️ 2026-10-07（gap-init-cli-lays-full-closed-set-and-detects-project-values-without-the-shell-script
+#    AC4/AC5）：本脚本的【遗留检查族】已物理删除——它们的唯一活消费者是被重新接线的 cold-start 门：
+#   · 派生族：derive_loop_scripts / _derive_loop_scripts_once / mechanism_corpus /
+#     bare_resolved_scripts / consolidated_member_files / resolve_tick_core_src / NEVER_LAYDOWN
+#     —— 唯一消费者 laydown-set-check.sh 改为调用 TS 步骤（deriveLoopScripts，见 quay-init-steps.ts
+#     的 `laydown-set`），派生集逐字不变（120 名，实测两实现 set-diff 为空）。
+#   · 只读诊断模式：--check-drift / --check-dependency-closure + compute_drift_report /
+#     compute_dependency_closure_gaps（SKILL.md 早已标注 retired；无活消费者）。
+#   · 引用完整性检查：verify_referenced_landed / _reference_set_once / _read_references /
+#     _read_declarations（无活消费者）。
+#   · vendor 运行时的自动构建：ensure_vendor_runtime / dist_stale /
+#     vendor_runtime_user_scope_stale_check（唯一调用点在 ensure_target_branch_model；交付物本就带
+#     vendored dist，缺失时改为 fail-closed 并在错误里给出 sync-vendor 的修法）。
+#   · library-mode guard（source 即 return）——它服务的正是上面这族，删族即删 guard。
+#   ⛔ 保留：report_closed_set_state + 闭集指纹 + EXIT trap（活消费者：
+#   plugin/scripts/quay-init-closure-assertion.ts 的 runFailureStateReport → 两个 test 文件）。
 #
 # Flags: 见 plugin/skills/init/SKILL.md（--root/--project/--repo-root/--test-command/--tmux-session/
 # --worktree-root/--plugin-root/--force/--dry-run/--auto-commit-confirm/--auto-commit-skip/
@@ -58,9 +71,9 @@ fi
 set -euo pipefail
 
 # ── this script's own directory (for the sibling step CLI) ─────────────────────────────────────────
-# ⛔ NOT `$0`: this file is also SOURCED in library mode (laydown-set-check.sh and
-# plugin/test/laydown-set-check.test.mjs source it and call `derive_loop_scripts`), where `$0` is the
-# caller's name. `${BASH_SOURCE[0]}` is this file in both modes.
+# ⛔ NOT `$0` (⛔ and the script is NO LONGER SOURCEABLE — its library-mode guard went with the
+# retired derivation family, see the header): `${BASH_SOURCE[0]}` names THIS file when it is executed,
+# which is the only mode left.
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd -P)"
 
 # ── quay-init-step <step> [args…] — the ONE way this script reaches its step logic ──────────────────
@@ -132,8 +145,6 @@ DO_WORKFLOWS=false
 DO_AGENTS=false
 DO_LOOP=false
 DO_MANAGER=false
-DO_CHECK_DRIFT=false
-DO_CHECK_DEPENDENCY_CLOSURE=false
 ANY_CATEGORY=false
 # gap-quay-init-never-commits-broken-committed-state AC3: how the auto-commit prompt resolves when
 # the consumer repo already carries uncommitted changes. "prompt" (default) = interactive read when
@@ -148,8 +159,6 @@ while [ $# -gt 0 ]; do
     --agents) DO_AGENTS=true; ANY_CATEGORY=true; shift ;;
     --loop) DO_LOOP=true; DO_WORKFLOWS=true; ANY_CATEGORY=true; shift ;;
     --manager) DO_MANAGER=true; shift ;;
-    --check-drift) DO_CHECK_DRIFT=true; shift ;;
-    --check-dependency-closure) DO_CHECK_DEPENDENCY_CLOSURE=true; shift ;;
     --all) DO_WORKFLOWS=true; DO_AGENTS=true; ANY_CATEGORY=true; shift ;;
     --force) FORCE=true; shift ;;
     --dry-run) DRY_RUN=true; shift ;;
@@ -157,7 +166,6 @@ while [ $# -gt 0 ]; do
     --doc-branch-name) DOC_BRANCH_NAME="$2"; shift 2 ;;
     --auto-commit-confirm) AUTO_COMMIT_CONFIRM=yes; shift ;;
     --auto-commit-skip) AUTO_COMMIT_CONFIRM=no; shift ;;
-    --check-drift) DO_CHECK_DRIFT=true; shift ;;
     --root) WORKSPACE_ROOT="$2"; shift 2 ;;
     --project) PROJECT_NAME="$2"; shift 2 ;;
     --repo-root) REPO_ROOT="$2"; shift 2 ;;
@@ -310,7 +318,7 @@ BACKUP_TS="$(date +%s)"
 # That producer belonged to the copy machinery AC168 retired and had been unreachable ever since, so
 # the fallback arm was the ONLY arm ever taken and the batching
 # (gap-suite-serial-install-copy-one-subprocess-batching) had been buying nothing. The arrays and the
-# lookup are gone; the remaining live caller (`compute_drift_report`) gets the same answer.
+# lookup are gone; every comparison is a direct `cmp -s`.
 _is_identical() {
   cmp -s "$1" "$2"
 }
@@ -535,551 +543,19 @@ validate_worktree_root() {
   return 0
 }
 
-# ── loop-script set derivation (gap-laydown-derivation-is-sensitive-to-reference-spelling-...):
-# The --loop laydown set is DERIVED from the shipped mechanism docs' OWN references, so there is
-# no second hand-maintained copy to drift. It is the union of FOUR sources:
-#   (a) prefix-derived — every `plugin/scripts/<name>` reference in ALL shipped skills + tick docs
-#       (the doc spells the full target-local path — unambiguous → the full corpus).
-#   (b) bare-resolved  — every BARE `<name>.<ext>` filename token in the MECHANISM corpus (the
-#       cold-start skill + the loop tick docs — the docs that describe how the LAID-DOWN mechanism
-#       operates) that exists under plugin/scripts/. A bare filename there is a target-local
-#       mechanism reference (reference-spelling independence: 文档写裸文件名不再静默漏铺). Scoped to
-#       the mechanism corpus because the pipeline/routine/init skills bare-MENTION plugin-local
-#       tools (proposal-convergence.ts, routine-*, quay-init.sh) whose
-#       transitive deps are NOT loop mechanisms — auto-laying those would ship broken files.
-#   (c) explicit       — documented additions below (bare-name mechanism files the docs call with
-#       no path at all, the checkers' transitive deps, the self-describing capability catalog).
-#   (d) closure        — every script in the set that calls a SIBLING in the same dir
-#       (`${SCRIPT_DIR}/<name>` / `$SCRIPT_DIR/<name>`) pulls that sibling in, repeated to fixpoint.
-#       This is the dependency-closure invariant (铺了消费者必然铺依赖): send-keys-reliable.sh:41
-#       `CHECKER="${SCRIPT_DIR}/transcript-delivery-check.ts"` is the
-#       regression control — before this, the laid-down delivery-verification was broken from first use.
-# Scripts that must NEVER auto-lay-down (the installer itself — it is the script doing the
-# laying down; send-keys-verified.sh was DELETED by gap-retired-script-still-callable, so it is
-# no longer an entry here — a superseded implementation must not exist, not merely not be laid):
-NEVER_LAYDOWN="quay-init.sh"
 
-# Cross-machine VERIFICATION mechanism (gap-no-post-merge-cross-machine-verification-detection-latency-is-luck):
-# `cross-machine-verify.sh` ships with the loop because the loop tick docs reference it by full path
-# (fast-mode 4b / orchestrator 3b+3d — the SAME derivation that puts sync-lag-check.sh in the set). It
-# needs NO explicit entry here: the derived (a) source over plugin/loop/*.md pulls it in, and its
-# sibling dependency `laydown-set-check.sh` (the default fast gate) is already in the set, so the
-# dependency-closure invariant (d) is satisfied. The mechanism's shared state rides git notes
-# (refs/notes/quay-cmv-*) — a notes ref, not a file, so nothing extra to lay down.
 
-# mechanism_corpus — the docs that describe how the LAID-DOWN mechanism operates (bare-filename
-# resolution scope for (b) above).
-mechanism_corpus() {
-  printf '%s\n' "$PLUGIN_ROOT/skills/cold-start/SKILL.md"
-  for f in "$PLUGIN_ROOT"/loop/*.md; do
-    [ -f "$f" ] && printf '%s\n' "$f"
-  done
-}
 
-# bare_resolved_scripts <doc>... — for each BARE `<name>.<ext>` token in the given docs that
-# resolves (by existence) under plugin/scripts/ and is not NEVER_LAYDOWN, print `plugin/scripts/<tok>`.
-bare_resolved_scripts() {
-  [ $# -gt 0 ] || return 0   # no corpus docs → nothing to resolve (never read stdin)
-  grep -ohE '(^|[^/a-zA-Z0-9._-])[a-zA-Z0-9._-]+\.[a-zA-Z0-9]+' "$@" 2>/dev/null \
-    | sed -E 's/^[^a-zA-Z0-9._-]//' | sort -u \
-    | while read -r tok; do
-        [ -f "$PLUGIN_ROOT/scripts/$tok" ] || continue
-        case " $NEVER_LAYDOWN " in *" $tok "*) continue ;; esac
-        printf 'plugin/scripts/%s\n' "$tok"
-      done || true
-}
 
-# consolidated_member_files — the 40→6 grouped entry points' member implementation files
-# (SPEC-instruments-behind-one-entry.md AC8/AC12). The docs/skills invoke members via the ENTRY
-# POINT (`quay-<group>.ts <member>` — a subcommand name, never a plugin/scripts/ path), so the
-# member files are INVISIBLE to (a)/(b) bare/path derivation but MUST ship for the entry point to
-# be able to dispatch to them (a cold-started project running `quay-session.ts monitor-mount-check`
-# would otherwise fail on a missing implementation). Derived from the MEMBERS declarations in each
-# quay-<group>.ts — never a hand-maintained list. Prints one member basename per line.
-consolidated_member_files() {
-  grep -hoE 'name: "[a-zA-Z0-9._-]+", file: "[a-zA-Z0-9._-]+"' "$PLUGIN_ROOT"/scripts/quay-*.ts 2>/dev/null \
-    | sed -E 's/.*file: "([^"]+)"/\1/' | sort -u
-}
-
-# _derive_loop_scripts_once — one derivation pass of the COMPLETE --loop script laydown set
-# (one basename per line), derived as (a)+(b)+(c)+(d) above.
-_derive_loop_scripts_once() {
-  local out changed round s dep f
-  local -a mech_files=()
-  out="$(mktemp)"
-  while IFS= read -r f; do mech_files+=("$f"); done < <(mechanism_corpus)
-  # (a) prefix-derived over the FULL corpus — INCLUDING the shipped workflows (AC91
-  # gap-ac91-delivery-core-refs-undelivered-files): a delivered workflow (plugin/workflows/*.js →
-  # .claude/workflows/ on the target) that calls plugin/scripts/<x> makes <x> a required landing —
-  # a workflow referencing a script the loop does not lay down is the same referenced-not-landed
-  # defect the loop docs' refs already guard. fan-in-execute.js pulls in per-task-suite-record.ts /
-  # fan-in-ac-completion-gate.ts / anti-drift-touches-check.ts this way.
-  grep -ohE 'plugin/scripts/[a-zA-Z0-9._-]+' "$PLUGIN_ROOT/skills"/*/SKILL.md "$PLUGIN_ROOT"/loop/*.md "$PLUGIN_ROOT"/workflows/*.js 2>/dev/null \
-    | sed 's#^plugin/scripts/##' | sort -u >> "$out" || true
-  # (b) bare-resolved over the MECHANISM corpus
-  bare_resolved_scripts "${mech_files[@]}" | sed 's#^plugin/scripts/##' >> "$out" || true
-  # (c) explicit additions:
-  #   tick-doc BARE-NAME mechanism files (no plugin/scripts/ prefix in the docs → not derivable):
-  #   inner-idle-log.ts, it0-split-or-commit-check.ts, pipe-exit-code-check.sh;
-  #   transitive deps of the checkers (imported by them, not doc-referenced): gate-script-base.ts,
-  #   workflow-event-schema.mjs, task-schema.ts, touches-parser.ts, task-status.ts, wiring-coverage-check.ts;
-  #   capability catalog (gap-eighty-two-shipped-checks-and-none-says-what-it-answers): ships with
-  #   the loop so an installed project can see what each laid-down check answers. Deliberate
-  #   explicit addition (no doc references it by path — the catalog is self-describing).
-  #   l1-delivery-surface-check.ts (gap-complete-delivery-surface-spec-and-l1-verification): the
-  #   SIX-category L1 delivery-completeness check ships with the loop so an installed project can
-  #   re-run it (装后能跑). Deliberate explicit addition — no shipped doc references it by path
-  #   (the SPEC §6 machine-readable list is its single source, resolved via --spec).
-  #   verify-delivery-surface.ts (gap-verify-delivery-surface-checks-source-layout-not-consumer-laid,
-  #   追加两半 #2): the embedded-manifest L1 check ships with the loop so an installed project can
-  #   SELF-CHECK its six-category delivery surface in the LAID layout (--layout laid auto-detects a
-  #   consumer root). Archguard's 0/6 had two halves — wrong layout AND the check not being delivered;
-  #   this explicit addition closes the "检查本身没交付" half. Same class as l1-delivery-surface-check.ts.
-  #   dead-loop-check.sh (gap-l2-continuous-health-dead-loop-criterion-loop-running-not-installed):
-  #   the L2 continuous-health DEAD-LOOP criterion (transcript user messages + git commit window)
-  #   ships with the loop so an installed project's manager can ask "is the loop actually running".
-  #   Deliberate explicit addition — the SPEC §5 annotation is the cross-reference (not a shippable
-  #   SKILL.md/loop-doc path reference, so (a)/(b) derivation would miss it).
-  #   inner-blocked-signal.ts + inner-forensics.mjs (the shared-events mechanism retired,
-  #   found by the quay-init-loop AC3 green requirement): the docs invoke them via the quay-deliver.ts
-  #   subcommand registry (`plugin/scripts/quay-deliver.ts inner-blocked-signal` / `... inner-forensics`),
-  #   so (a) derives quay-deliver.ts but not the implementation files — a cold-started project would run
-  #   the subcommand and fail on a missing implementation. Deliberate explicit additions so the registered
-  #   subcommands' implementations ship with the loop.
-  #   task-contract-check.ts + task-status-drift-check.ts + touches-orthogonality-check.ts (same finding):
-  #   the fast-mode gate checkers (## Contract / task-status drift / touch orthogonality) are invoked by
-  #   the tick docs WITHOUT a `plugin/scripts/` path and are not bare-resolved by the mechanism corpus, so
-  #   (a)/(b) derivation misses them — a cold-started project would run the gates and fail on missing
-  #   checkers. Deliberate explicit additions (same class as the other checker transitive deps above).
-  #   quay-session.ts (gap-quay-init-real-install-regression-fix ②): the manager tick core's A0 readings
-  #   script (`node --experimental-strip-types plugin/scripts/quay-session.ts manager-tick-readings`).
-  #   The shipped plugin/loop/manager-tick-core.md is a one-line POINTER to the orchestration/ 正本
-  #   (gap-plugin-loop-manager-drifted-copies-pointerize), so the (a) scan of the SHIPPED docs no longer
-  #   sees `plugin/scripts/quay-session.ts` and it stopped shipping — but the REAL core laid down to
-  #   orchestration/ still references it (gate-validated dep). Deliberate explicit addition so a
-  #   cold-started --manager project's core runs its A0 readings instead of failing on a missing script.
-  #   precommit-guard.ts (gap-precommit-guard-wire-into-quay-init-and-cold-start): the SHARED pre-commit
-  #   guard ships with the loop so a provisioned project has the guard script laid down for its
-  #   `--install-hook` step (quay-init --loop installs the hook post-laydown; cold-start re-verifies it).
-  #   The guard is a CROSS-CUTTING mechanism (covers ALL writers — outer/manager/inner), not a
-  #   tick-doc-invoked script, so (a)/(b) derivation from the docs would miss it; the cold-start skill
-  #   ALSO references it by path (rule (a)), but the explicit entry keeps the guard shipping even if a
-  #   future doc edit drops that reference. The guard's data dependency judged-object-registry.json is
-  #   NOT shipped — it is A0b③ GENERATED per project (empty patterns ⇒ the guard takes its narrowed
-  #   fallback tasks/** + plugin/loop/** + scripts/test.sh @static-object aggregate, which is the
-  #   intended target behavior).
-  #   touches-one-entry-one-path-check.ts (gap-quay-init-laydown-missing-touches-checker): precommit-
-  #   guard.ts imports it via ESM `./touches-one-entry-one-path-check.ts` (the Touches「一条目一路径」
-  #   check the guard runs on every commit). The dependency-closure step (d) below only scans
-  #   `${SCRIPT_DIR}/<name>` sibling references in shell scripts — an ESM relative `./` import is
-  #   INVISIBLE to it — so without an explicit entry a cold-started consumer workspace lays down
-  #   precommit-guard.ts without its imported checker and the guard's `--install-hook` step dies with
-  #   ERR_MODULE_NOT_FOUND (the delta-scope unverified-landing the touches fan-in's skipped full suite
-  #   let through). Same class as the other checker transitive deps listed above.
-  #   repo-root.sh + repo-root.ts (gap-b2-repo-root-unification): capability-catalog.sh sources
-  #   repo-root.sh via `${SELF_DIR}/repo-root.sh` (NOT `${SCRIPT_DIR}/` — the closure step (d)
-  #   below only scans `${SCRIPT_DIR}/` shell sibling refs, so the SELF_DIR form is INVISIBLE to
-  #   it), and the migrated scripts import repo-root.ts via ESM `./repo-root.ts` (also invisible to
-  #   (d)). Without an explicit entry a laid-down catalog/precommit-guard sources/imports a missing
-  #   repo-root and dies with "No such file or directory" / ERR_MODULE_NOT_FOUND. Same class as
-  #   touches-one-entry-one-path-check.ts above — the single repo-root resolver must land with
-  #   every consumer.
-  #   checker-io.ts + driver-result.ts (gap-b4-checker-reuse-driver-result): the laid-down checkers
-  #   outer-anchor-check.ts (derived via (a)) and adr016-screen-use-check.ts (via (b)) import
-  #   checker-io.ts via ESM `./checker-io.ts`, which re-exports driver-result.ts at runtime — an ESM
-  #   `./` import is INVISIBLE to closure step (d) (same class as touches-one-entry-one-path-check.ts
-  #   above), so without an explicit entry a cold-started project lays the checkers without their
-  #   DriverResult<T> bridge and dies with ERR_MODULE_NOT_FOUND. driver-result.ts is itself the ESM dep
-  #   of the laid-down driver-runtime.ts / promotion-driver.ts / worker-driver.ts (AC153), so it ships
-  #   here too (checker-io.ts re-exports it at runtime — both must land or neither works).
-  #   canonical-test-files.ts (gap-canonical-test-files-glob-vs-realpath-divergence): test-framework-
-  #   policy-check.ts is laid down via a bare-name mention in plugin/loop/orchestrator-tick-core.md,
-  #   and imports this lib via ESM `./canonical-test-files.ts` — an ESM relative `./` import is
-  #   INVISIBLE to the dependency-closure step (d) below (it only scans `${SCRIPT_DIR}/<name>`
-  #   sibling references in shell scripts), so without this explicit entry a cold-started consumer
-  #   lays down test-framework-policy-check.ts without its imported lib and the check dies with
-  #   ERR_MODULE_NOT_FOUND. Same class as touches-one-entry-one-path-check.ts above.
-  #   suite-params.ts (gap-suite-knobs-config-file-priority): full-suite-runner.ts is laid down via
-  #   plugin/workflows/fan-in-execute.js (rule (a)) and imports suite-params.ts via ESM `./suite-params.ts`
-  #   — an ESM relative `./` import is INVISIBLE to closure step (d) (same class as canonical-test-files.ts
-  #   above), so without this explicit entry a cold-started consumer lays down full-suite-runner.ts
-  #   without its suite-knob config reader and the runner dies with ERR_MODULE_NOT_FOUND.
-  #   over90-task-gate.ts + semantic-trigger.ts + main-thread-edit-check.ts (gap-retire-inner-hygiene-
-  #   migrate-helper): the three ①类 live helpers migrated OUT of inner-blocked-signal.ts /
-  #   inner-wakeup-heartbeat-check.ts / inner-exec-mode-report.ts into non-inner names. Their consumers
-  #   (inner-blocked-signal.ts — already in the (c) list — supervisor-preempt-candidates.ts, semantic-
-  #   observer-judge.ts, inner-exec-mode-report.ts shim) import them via ESM `./x.ts`, which is INVISIBLE
-  #   to closure step (d) (same class as repo-root.ts / checker-io.ts / canonical-test-files.ts above) —
-  #   without explicit entries a laid-down inner-blocked-signal.ts / judge / shim dies with
-  #   ERR_MODULE_NOT_FOUND.
-  #   per-file-cpu-report.mjs (gap-perfile-cpu-cost-collection): full-suite-runner.ts (laid down via
-  #   fan-in-execute.js rule (a)) loads this preload seam at RUNTIME via `NODE_OPTIONS=--require=<abs>`
-  #   built from a path.join STRING constant (PER_FILE_CPU_PRELOAD) — NOT an ESM `./` import, NOT a
-  #   `${SCRIPT_DIR}/` shell sibling ref, NOT a doc `plugin/scripts/` path, so (a)/(b)/(d) all miss it.
-  #   Without this explicit entry a cold-started consumer lays down full-suite-runner.ts and dies at
-  #   suite launch with ERR_MODULE_NOT_FOUND (the --require target is absent). Same class as
-  #   suite-params.ts / repo-root.ts above.
-  #   task-ops.ts (gap-task-ops-consolidate-driver-frontmatter-writers): the single library owning
-  #   "parse task frontmatter, mutate a field, commit it". driver-filters.ts / worker-driver.ts /
-  #   ready-pool-check.ts (all laid down via (a)/(b)) import it via ESM `./task-ops.ts`, which is
-  #   INVISIBLE to closure step (d) (same class as task-schema.ts above) — without this explicit entry a
-  #   cold-started consumer lays the drivers without their shared parse/patch/commit library and dies
-  #   with ERR_MODULE_NOT_FOUND.
-  #   shape-sections.ts (gap-shape-section-tables-dual-copy-no-single-source): the PURE-DATA single
-  #   source of the shape section-heading lists. ready-pool-check.ts (laid down) imports it via ESM
-  #   `./shape-sections.ts` (INVISIBLE to closure step (d), same class as task-schema.ts / task-ops.ts
-  #   above), AND packages/quay-native/src/store.ts imports it via a relative path that esbuild inlines
-  #   into the dist bundle. Without this explicit entry a cold-started consumer lays ready-pool-check.ts
-  #   with no sibling shape-sections.ts and dies with ERR_MODULE_NOT_FOUND (this is exactly the defect
-  #   this task closed: the section list lived in store.ts which is NOT laid down).
-  #   regex-escape.ts (gap-routine-semantic-dedup-scan-escapere-escaperegex-escaperegexp-fndefre-stemre):
-  #   the SAME class as shape-sections.ts one entry up — a kernel leaf reached through a plugin-side
-  #   re-export. ELEVEN laid-down instruments now import it via ESM `./regex-escape.ts` (ready-pool-check.ts,
-  #   worker-driver.ts, task-ops.ts, rhythm-consumer-check.ts, deletion-closure-check.ts,
-  #   identity-replication-check.ts, enum-surface-parity-check.ts, prod-data-audit.ts,
-  #   agent-panel-classify.ts, repo-root-derivation-check.ts, manager-observation-runtime-check.ts) —
-  #   an ESM `./` import is INVISIBLE to closure step (d), and the kernel path itself is unreachable
-  #   from a flat laydown tree. Without this explicit entry a cold-started consumer lays those eleven
-  #   without their sibling and dies with ERR_MODULE_NOT_FOUND.
-  printf '%s\n' inner-idle-log.ts it0-split-or-commit-check.ts pipe-exit-code-check.sh \
-    gate-script-base.ts workflow-event-schema.mjs task-schema.ts task-ops.ts shape-sections.ts regex-escape.ts touches-parser.ts task-status.ts wiring-coverage-check.ts \
-    capability-catalog.sh l1-delivery-surface-check.ts dead-loop-check.sh inner-blocked-signal.ts \
-    inner-forensics.mjs task-contract-check.ts task-status-drift-check.ts touches-orthogonality-check.ts \
-    verify-delivery-surface.ts precommit-guard.ts touches-one-entry-one-path-check.ts quay-session.ts \
-    repo-root.sh repo-root.ts checker-io.ts driver-result.ts canonical-test-files.ts suite-params.ts \
-    over90-task-gate.ts semantic-trigger.ts main-thread-edit-check.ts per-file-cpu-report.mjs >> "$out"
-  # (c3) exec-core tick docs (gap-ac37-exec-core-ships-with-package): the three ≤80-line execution
-  #   cores ship with the loop so an installed project can read "每轮该做什么" — the shipped tick
-  #   templates (orchestrator-loop-tick.md / fast-mode-loop-tick.md) reference them by the
-  #   `orchestration/<name>` path, and the referenced⊆landed gate (:1081) must see them LAND (this
-  #   entry makes them part of the derived set ⇒ no new check needed). They live under plugin/loop/
-  #   (source: orchestration/<name>), NOT plugin/scripts/, so the laydown loop + drift report treat
-  #   them as loop docs (orchestration/ landing), distinct from scripts. manager-tick-core.md is
-  #   OPT-IN: laid only with --manager (human ruling 2026-08-10: the typical path is two-layer), but
-  #   still derived so ITS OWN references are gate-validated in every --loop run.
-  printf '%s\n' orchestrator-tick-core.md fast-mode-tick-core.md manager-tick-core.md >> "$out"
-  # (c2) consolidated grouped-entry members (SPEC-instruments-behind-one-entry.md AC8/AC12): the
-  #   docs invoke them via `quay-<group>.ts <member>` (a subcommand, never a plugin/scripts/ path),
-  #   so (a)/(b) cannot see them — but the entry point must dispatch to them, so they ship. Only
-  #   EXISTING members land here (a missing member is a plugin defect, surfaced by
-  #   verify_referenced_landed's unconditional member reference, not silently dropped from the set).
-  for f in $(consolidated_member_files); do
-    [ -f "$PLUGIN_ROOT/scripts/$f" ] || continue
-    case " $NEVER_LAYDOWN " in *" $f "*) continue ;; esac
-    printf '%s\n' "$f" >> "$out"
-  done
-  sort -u "$out" -o "$out"
-  # archive/** exclusion (§12c, SPEC-plugin-lifecycle-single-bundle-2026-09-02): a doc-referenced
-  # script that has been archived (moved to archive/<date>/plugin/scripts/<name>) is no longer part of
-  # the laydown set — restore re-registers it (SPEC §12b-3). Only consult archive/ when it exists.
-  if [ -d "${PLUGIN_ROOT}/../archive" ]; then
-    _archived_names="$(find "${PLUGIN_ROOT}/../archive" -type f 2>/dev/null | sed 's#.*/##' | sort -u | tr '\n' ' ')"
-    if [ -n "${_archived_names}" ]; then
-      awk -v names="${_archived_names}" 'BEGIN{split(names,a," "); for(i in a) skip[a[i]]=1} !($0 in skip)' "$out" > "$out.archfilt"
-      mv "$out.archfilt" "$out"
-    fi
-  fi
-  # (d) dependency closure — repeat until fixpoint. ONE pass (now `deriveLoopScriptsClosure` in
-  # packages/quay/src/init.ts) replaces the retired per-script
-  # `grep -oE … | sed … | sort -u` triple + per-dep `grep -qxF` (the per-script subprocess spawns were
-  # the dominant wall-clock cost of derive_loop_scripts; gap-quay-init-install-wall-clock-slow AC1/AC3
-  # batched ~1000 fork/execve per pass into ONE). The closure regex keeps the PACKAGED two-segment
-  # form `${SCRIPT_DIR}/dist/X.js` (gap-delivery-laydown-dist-closure-gap: package.sh rewrites .ts refs
-  # to dist/X.js; a single-segment `[a-zA-Z0-9._-]*` truncated it to `dist` and the sed basename-strip
-  # then dropped the dist/ prefix — the bundle never entered the laydown set). Allow `/` in the matched
-  # path and strip ONLY the ${SCRIPT_DIR}/ or $SCRIPT_DIR/ prefix (NOT a basename-strip) so the
-  # scripts/-relative path `dist/X.js` resolves under scripts/. The python pass mirrors the retired
-  # loop EXACTLY: iterate the round-start snapshot (`for s in $(cat "$out")`), append new deps (picked
-  # up next round), membership = the LIVE set (`grep -qxF "$dep" "$out"`), same filters (non-empty →
-  # not NEVER_LAYDOWN → exists under scripts/), same round<20 bound, same sorted-unique output.
-  # The fixpoint lives in `deriveLoopScriptsClosure` (packages/quay/src/init.ts).
-  quay-init-step derive-loop-scripts "$out" "$PLUGIN_ROOT" "$NEVER_LAYDOWN"
-  sort -u "$out"
-  rm -f "$out"
-}
-
-# derive_loop_scripts — stability-checked wrapper over _derive_loop_scripts_once
-# (gap-quay-init-torn-read-derive-loop-scripts). The laydown set is derived by grep over the shipped
-# corpus (skills/*/SKILL.md + loop/*.md + workflows/*.js); under heavy concurrent load a grep/sort in
-# a command substitution can be killed mid-stream (the `|| true` masks it), returning a PARTIAL (torn)
-# set — which then lays down FEWER scripts than the docs reference, and verify_referenced_landed
-# (which re-derives the reference set independently) false-positives every missing script as
-# referenced-not-landed (observed at cc8: 104 scripts ≈ the ENTIRE reference set in one run). Same
-# torn-read class as _read_declarations (a4f1e41d) — same fix: two independent passes must produce
-# IDENTICAL output (a torn pass truncates at a nondeterministic point, so it differs from a full pass
-# ⇒ retry); only two agreeing non-empty passes are accepted. A stable corpus derives deterministically,
-# so real drift is never masked: a genuinely-absent script is absent from EVERY pass, and the
-# downstream verify_referenced_landed still fail-closes on it.
-derive_loop_scripts() {
-  local a b attempt
-  for attempt in 1 2 3; do
-    a="$(_derive_loop_scripts_once)"
-    b="$(_derive_loop_scripts_once)"
-    if [ -n "$a" ] && [ "$a" = "$b" ]; then
-      printf '%s\n' "$a"
-      return 0
-    fi
-    [ "$attempt" -lt 3 ] && sleep 0.2
-  done
-  # All passes torn or mutually inconsistent — output the LAST snapshot. A torn laydown lays fewer
-  # scripts, so the downstream verify_referenced_landed fail-closes on a genuinely-missing file (the
-  # install fails, never a false pass). The normal case (stable corpus) never reaches this branch.
-  printf '%s\n' "$a"
-  return 0
-}
-
-# ── exec-core pointer resolution (gap-quay-init-real-install-regression-fix ②) ─────────────────────
-# resolve_tick_core_src <basename> — the --loop laydown copies the exec-core tick docs from
-# plugin/loop/<name> to the target's orchestration/<name>. Since gap-plugin-loop-manager-drifted-
-# copies-pointerize, the SHIPPED plugin/loop/manager-tick-core.md is a one-line POINTER
-# (`> 正本: orchestration/<name> — ...`) to the orchestration/ 正本 — laying the pointer line into a
-# cold-started target would deliver a self-referential stub instead of the real core, and the real
-# core's deps (e.g. plugin/scripts/quay-session.ts) would stop shipping (the derive_loop_scripts (a)
-# scan only sees refs in the SHIPPED docs). Resolve the pointer: return the ABSOLUTE path of the
-# 正本 (${PLUGIN_ROOT}/../<pointed-path>) when the shipped file is a pointer, else the shipped path
-# itself (unchanged verbatim laydown). The 正本 lives beside the plugin (the quay repo layout: plugin/
-# and orchestration/ are siblings), so a --loop install lays the REAL core, byte-identical to 正本.
-resolve_tick_core_src() {
-  local name="$1" shipped resolved cand
-  shipped="$PLUGIN_ROOT/loop/$name"
-  if [ -f "$shipped" ]; then
-    resolved="$(sed -n '1s/^> 正本: \([a-zA-Z0-9._\/-]*\).*$/\1/p' "$shipped" 2>/dev/null | head -1)"
-    if [ -n "$resolved" ]; then
-      cand="$PLUGIN_ROOT/../$resolved"
-      if [ -f "$cand" ]; then
-        printf '%s\n' "$cand"
-        return 0
-      fi
-    fi
-  fi
-  printf '%s\n' "$shipped"
-}
-
-# verify_referenced_landed <workspace-root> — gap-init-ships-a-skill-that-calls-files-it-does-not-
-# lay-down. The mechanical constraint "referenced set ⊆ landed set": every file the shipped skills
-# and tick docs reference — by path (plugin/scripts/*, orchestration/*, docs/analysis/*) OR by BARE
-# filename in the mechanism corpus (resolved under plugin/scripts/, the SAME derivation the laydown
-# uses — AC3: checker and checked can no longer share a blind spot) — must exist in the target
-# workspace after the --loop lay-down, AND every laid-down script's same-dir sibling dependency
-# (${SCRIPT_DIR}/<name>) must be laid down too (dependency closure, AC1), UNLESS explicitly
-# declared in plugin/skills/init/SKILL.md as self-create (local state the first run creates — AC8)
-# or reference-doc (quay-specific template prose that is not a loop-mechanism deliverable). The two
-# hand-maintained lists (call sites vs landing set) with no mechanical bond must drift; this is
-# the bond. A referenced file that is neither landed nor declared = drift → FAIL CLOSED.
-# AC2 (gap-quay-init-loop-tick-doc-paths-reference-unlanded-plugin-loop): the reference set ALSO
-# includes the CONSUMER-LAID docs at <ws>/docs/analysis/ — the byte-identical copies a target
-# project actually reads. The source scan alone could not see the AC37 blind spot (a laid tick doc
-# referencing plugin/loop/* paths that never land); scanning the laid docs closes it.
-
-# _reference_set_once <ws> — ONE derivation pass of the complete verify_referenced_landed reference
-# set (one path per line, sorted unique): (1) path-prefixed refs in the shipped corpus (skills +
-# loop docs + workflows) — incl. the `.claude/workflows|.claude/agents` delivery class (AC91); (2)
-# path-prefixed refs in the CONSUMER-LAID docs at <ws>/docs/analysis/ (AC2 — the byte-identical
-# copy a target project actually reads; `plugin/loop` is in the alternation so a shipped doc
-# referencing the non-landed bundle-source path fails closed); (3) BARE filename refs in the
-# mechanism corpus resolved under plugin/scripts/ (bare_resolved_scripts — the SAME derivation the
-# laydown uses, AC3: checker and checked share no blind spot); (4) consolidated grouped-entry
-# members (SPEC-instruments-behind-one-entry.md — EVERY member of a shipped quay-<group>.ts must
-# land; a member absent from the plugin source is exactly the referenced-not-landed defect, so it is
-# unconditional). Read-only over the plugin source + <ws>.
-_reference_set_once() {
-  local ws="$1"
-  local mech_bare consolidated_refs member
-  local -a mech_files=()
-  while IFS= read -r f; do mech_files+=("$f"); done < <(mechanism_corpus)
-  mech_bare="$(bare_resolved_scripts "${mech_files[@]}")"
-  consolidated_refs=""
-  for member in $(consolidated_member_files); do
-    case " $NEVER_LAYDOWN " in *" $member "*) continue ;; esac
-    consolidated_refs+="plugin/scripts/$member"$'\n'
-  done
-  ( grep -ohE '(plugin/scripts|plugin/loop|orchestration|docs/analysis|\.claude/workflows|\.claude/agents)/[a-zA-Z0-9._-]+' "$PLUGIN_ROOT/skills"/*/SKILL.md "$PLUGIN_ROOT"/loop/*.md "$PLUGIN_ROOT"/workflows/*.js 2>/dev/null
-    grep -ohE '(plugin/scripts|plugin/loop|orchestration|docs/analysis)/[a-zA-Z0-9._-]+' "$ws"/docs/analysis/*.md 2>/dev/null
-    printf '%s\n' "$mech_bare"
-    printf '%s' "$consolidated_refs"
-  ) | sort -u || true
-}
-
-# _read_references <ws> — stability-checked wrapper over _reference_set_once
-# (gap-verify-referenced-landed-concurrency-hardening-insufficient). The reference set is derived by
-# grep over the shipped corpus + the consumer-laid docs; under heavy concurrent load a grep/sort in a
-# command substitution can be killed mid-stream (the pipeline's `|| true` masks the death), returning
-# a PARTIAL (torn) set. Same torn-read class as _read_declarations (a4f1e41d) and derive_loop_scripts
-# (089365b5) — same fix: two independent passes must produce IDENTICAL output (a torn pass truncates
-# at a nondeterministic point ⇒ differs from a full pass ⇒ retry); only two agreeing non-empty passes
-# are accepted. A single torn pass would silently MISS a genuinely-referenced-but-not-landed file (a
-# false negative that violates fail-closed), so the check never accepts one. A genuinely-missing ref
-# is absent from EVERY pass, so real drift is never masked.
-_read_references() {
-  local ws="$1" a b attempt
-  for attempt in 1 2 3; do
-    a="$(_reference_set_once "$ws")"
-    b="$(_reference_set_once "$ws")"
-    if [ -n "$a" ] && [ "$a" = "$b" ]; then
-      printf '%s\n' "$a"
-      return 0
-    fi
-    [ "$attempt" -lt 3 ] && sleep 0.2
-  done
-  # All passes torn or mutually inconsistent — output the LAST snapshot (never a silent empty set;
-  # the downstream landed-scan + declaration/landed fresh re-read still fail-closes on a genuine miss).
-  printf '%s\n' "$a"
-  return 0
-}
-
-# _read_declarations — stability-checked declaration reads (self-create + reference-doc), EXTRACTED
-# from verify_referenced_landed (gap-quay-init-reduce-real-install-count) so a torn-read test can
-# SOURCE quay-init.sh and call it directly (免完整安装) instead of running a full --loop install.
-# Reads the machine-readable `<!-- self-create: … -->` / `<!-- reference-doc: … -->` declarations in
-# plugin/skills/init/SKILL.md with the SAME multi-attempt stability check the gate has always used:
-# two independent reads must agree AND the always-present sentinel lines must be in the agreed
-# snapshot. On success it sets the globals QUAY_INIT_SELFCREATE / QUAY_INIT_REFDOC (newline-separated
-# sets) and returns 0; on exhaustion (all attempts torn/inconsistent) it sets them to the LAST
-# snapshot and returns 1. verify_referenced_landed consumes the globals; a direct caller uses the
-# return code.
-_read_declarations() {
-  local attempt=1 s r s2 r2
-  for attempt in 1 2 3; do
-    s="$(grep -oE '<!-- self-create: [a-zA-Z0-9._/-]+ -->' "$PLUGIN_ROOT/skills/init/SKILL.md" 2>/dev/null | sed -E 's/<!-- self-create: //; s/ -->//' | sort -u || true)"
-    r="$(grep -oE '<!-- reference-doc: [a-zA-Z0-9._/-]+ -->' "$PLUGIN_ROOT/skills/init/SKILL.md" 2>/dev/null | sed -E 's/<!-- reference-doc: //; s/ -->//' | sort -u || true)"
-    # Stability check: a SECOND, independent read must return the SAME sets. A transiently
-    # incomplete read (that kept the old 2-line sentinel but dropped a later declaration) will
-    # differ from a full read here, so this is strictly stronger than the retired sentinel.
-    s2="$(grep -oE '<!-- self-create: [a-zA-Z0-9._/-]+ -->' "$PLUGIN_ROOT/skills/init/SKILL.md" 2>/dev/null | sed -E 's/<!-- self-create: //; s/ -->//' | sort -u || true)"
-    r2="$(grep -oE '<!-- reference-doc: [a-zA-Z0-9._/-]+ -->' "$PLUGIN_ROOT/skills/init/SKILL.md" 2>/dev/null | sed -E 's/<!-- reference-doc: //; s/ -->//' | sort -u || true)"
-    # The original 2-line sentinel is kept as a cheap additional guard on top of stability:
-    # the always-present sentinel lines must be in the agreed snapshot too (a read torn before
-    # them is caught even if both reads agree on the torn set). A genuinely-missing declaration
-    # file never passes either guard.
-    if [ "$s" = "$s2" ] && [ "$r" = "$r2" ] \
-      && printf '%s\n' "$s" | grep -qxF 'orchestration/tick-log.md' \
-      && printf '%s\n' "$r" | grep -qxF 'orchestration/manager-tick-log.md'; then
-      QUAY_INIT_SELFCREATE="$s"; QUAY_INIT_REFDOC="$r"; return 0
-    fi
-    [ "$attempt" -lt 3 ] && sleep 0.2
-  done
-  # All 3 reads incomplete or mutually inconsistent — keep the LAST snapshot; the per-reference
-  # loop in verify_referenced_landed will fail on a genuine miss (real drift is never masked).
-  QUAY_INIT_SELFCREATE="$s"; QUAY_INIT_REFDOC="$r"; return 1
-}
-
-verify_referenced_landed() {
-  local ws="$1" missing=0 closure_missing=0 r sd script
-  local refs selfcreate refdoc
-  # Machine-readable declarations live in the shipped init skill (single source of truth — the
-  # same doc the human reads). Marker lines:
-  #   <!-- self-create: <path> -->       local state, first run creates it (AC8)
-  #   <!-- reference-doc: <path> -->     quay-specific reference doc, not a loop deliverable
-  # gap-verify-referenced-landed-concurrency-hardening AC1: read the declaration sets ONCE, with
-  # multi-level retry. gap-lowconc AC3's single re-read proved insufficient under cc3 load — the
-  # concurrent --loop installs' reads of init/SKILL.md transiently return INCOMPLETE output, so a
-  # DECLARED reference-doc is false-positived as not-declared (4 files in one run). Retry up to 3
-  # times with the SAME stable snapshot until the read is complete; a genuinely-undeclared ref
-  # never satisfies any read, so real drift still fails (negative control unchanged).
-  #
-  # 2026-08-18 STRENGTHENING (suite-fix, worktree-root-fs-check AC4 false positive at cc8): the
-  # original completeness sentinel pinned only TWO always-present lines (tick-log.md self-create +
-  # manager-tick-log.md reference-doc). A transiently-partial read can keep BOTH sentinel lines yet
-  # drop a LATER declaration (observed: SPEC-methodology-as-a-deliverable.md at line 173) — the
-  # sentinel passes, the incomplete snapshot is accepted, and a declared ref is false-positived as
-  # not-declared. The sentinel is therefore replaced by a STABILITY check: two independent reads
-  # of init/SKILL.md must produce IDENTICAL declaration sets. A torn read (which truncates at a
-  # nondeterministic point) differs from a full read, so it retries; only two agreeing reads are
-  # accepted as complete. A genuinely-undeclared ref is absent from every read, so real drift
-  # still fails (negative control unchanged).
-  # Read the declaration sets once with the multi-level stability retry. The verdict is captured via
-  # `if` (NOT a bare call — a bare `_read_declarations` returning 1 under `set -e` would abort the
-  # whole check with no verdict). A torn up-front read is re-stabilized per-reference below, never
-  # trusted blindly: a declared self-create (e.g. orchestration/escalations.md) read as absent is
-  # exactly the false positive this gate must not emit.
-  if _read_declarations; then :; fi
-  selfcreate="$QUAY_INIT_SELFCREATE"
-  refdoc="$QUAY_INIT_REFDOC"
-  # The reference set is derived once, STABILITY-CHECKED (two agreeing passes — _read_references),
-  # so the landed-scan below runs against a deterministic snapshot (gap-verify-referenced-landed-
-  # concurrency-hardening-insufficient: the reference-scan grep was the last single-pass "裸 grep"
-  # face, torn under concurrent --loop load).
-  refs="$(_read_references "$ws")"
-  for r in $refs; do
-    # exact-line membership in the declared sets (newline-separated — a `case` pattern would
-    # need spaces the multi-line variable does not have)
-    if printf '%s\n' "$selfcreate" "$refdoc" | grep -qxF "$r"; then
-      continue   # declared self-create or reference-doc — not a defect
-    fi
-    if [ ! -e "$ws/$r" ]; then
-      # last line of defense: re-read the declarations with the SAME stability check the up-front read
-      # uses (two agreeing passes + sentinel), NOT a single-pass grep. The retired single-pass
-      # fresh-read could itself be torn under concurrent --loop load and false-positive a DECLARED
-      # self-create/reference-doc (observed: orchestration/escalations.md — declared at
-      # init/SKILL.md:143 but read as absent). A stability-checked re-read retries a torn pass; a
-      # genuinely-undeclared ref is absent from every stable pass, so fail-closed is unchanged.
-      local fresh_stable=0
-      if _read_declarations; then fresh_stable=0; else fresh_stable=1; fi
-      if printf '%s\n' "$QUAY_INIT_SELFCREATE" "$QUAY_INIT_REFDOC" | grep -qxF "$r"; then
-        continue   # stability-checked re-read confirms the declaration — the up-front snapshot was torn
-      fi
-      if [ "$fresh_stable" != 0 ]; then
-        # The declaration file could not be stabilized across retries (torn under load). Do NOT emit
-        # "referenced-not-landed" from an unreliable read — that would false-positive a declared file
-        # (硬规则 3b mirror: an unreadable input must not masquerade as a definitive miss). Report a
-        # DISTINGUISHABLE failure instead and fail closed.
-        echo "  FAIL (declaration-read-unstable): $r — init/SKILL.md declarations could not be read reliably (torn under load); re-run quay-init" >&2
-        missing=1
-        continue
-      fi
-      # last line of defense for the LANDED set (same torn-read class, opposite face): a concurrent
-      # --loop install's write can transiently make a just-laid file invisible to the `-e` scan (the
-      # "landed 集扫描" torn snapshot). Re-scan existence once more before failing; a genuinely-
-      # missing file is absent from BOTH scans, so real drift still fails (fail-closed unchanged).
-      if [ -e "$ws/$r" ]; then
-        continue   # fresh existence scan finds it landed — the first scan was a transiently-torn snapshot
-      fi
-      echo "  FAIL (referenced-not-landed): $r — referenced by a shipped skill/tick doc but not laid down and not declared in init/SKILL.md" >&2
-      echo "       Fix: add \"<!-- reference-doc: $r -->\" (or \"<!-- self-create: $r -->\" if the loop lays it down) to plugin/skills/init/SKILL.md, or fix the doc's path to a file the loop actually lays down" >&2
-      missing=1
-    fi
-  done
-  # dependency-closure check (AC1/AC3): every LAID-DOWN script's same-dir sibling reference must be
-  # laid down too — a script calling `${SCRIPT_DIR}/<sibling>` with the sibling absent is a broken
-  # mechanism (send-keys-reliable.sh:41 → transcript-delivery-check.ts).
-  if [ -d "$ws/plugin/scripts" ]; then
-    for script in "$ws"/plugin/scripts/*.sh; do
-      [ -f "$script" ] || continue
-      # gap-delivery-laydown-dist-closure-gap: same two-segment tolerance as the derive closure —
-      # a laid-down script's `${SCRIPT_DIR}/dist/X.js` reference must be checked as
-      # $ws/plugin/scripts/dist/X.js, NOT truncated to the dist/ directory (which exists once any
-      # other bundle lands ⇒ the old check passed while the specific .js was missing). Strip only
-      # the ${SCRIPT_DIR}/ or $SCRIPT_DIR/ prefix so the scripts/-relative path is preserved.
-      for sd in $(grep -oE '\$\{SCRIPT_DIR\}/[a-zA-Z0-9][a-zA-Z0-9._/-]*|\$SCRIPT_DIR/[a-zA-Z0-9][a-zA-Z0-9._/-]*' "$script" 2>/dev/null | sed -E 's#^\$\{SCRIPT_DIR\}/##; s#^\$SCRIPT_DIR/##' | sort -u || true); do
-        [ -n "$sd" ] || continue
-        case " $NEVER_LAYDOWN " in *" $sd "*) continue ;; esac
-        if [ ! -e "$ws/plugin/scripts/$sd" ]; then
-          echo "  FAIL (dependency-not-landed): $script references plugin/scripts/$sd but it is not laid down" >&2
-          closure_missing=1
-        fi
-      done
-    done
-  fi
-  if [ "$missing" = 1 ] || [ "$closure_missing" = 1 ]; then
-    echo "ERROR: quay-init --loop would ship skills/tick docs (source OR consumer-laid docs/analysis/) that reference files it does not lay down (referenced ⊆ landed violated)." >&2
-    echo "       Add the script to the landing set, declare the file self-create/reference-doc in plugin/skills/init/SKILL.md, or fix the doc's path to the real landing." >&2
-    return 1
-  fi
-  echo "  verify-referenced-landed: OK (every referenced file is landed or declared self-create/reference-doc; every laid-down script's same-dir dependency is landed)"
-  return 0
-}
 
 # verify_delivery_surface_l1 — gap-complete-delivery-surface-spec-and-l1-verification (AC5): the
-# SIX-category L1 delivery-completeness check. verify_referenced_landed (above) covers category 1
-# (mechanisms/runtime: referenced ⊆ landed); this extends the L1 surface to ALL SIX categories —
-# each category's deliverables present + owning gap task filed (SPEC §6 machine-readable list is
+# SIX-category L1 delivery-completeness check (gap-complete-delivery-surface-spec-and-l1-verification
+# AC5): each category's deliverables present + owning gap task filed (SPEC §6 machine-readable list is
 # the single source). Runs against the SHIPPED delivery surface (the quay checkout root — the SPEC
 # lives at <repo>/orchestration/, outside the plugin bundle), fail-closed on any uncovered category.
-# In a BARE plugin copy (hermetic tests) the repo-level SPEC is absent → SKIP (referenced⊆landed
-# still guards the mechanism axis). This wiring was re-added after being removed by the AC168
-# closed-set shrink (commit 6358b2cd6) — the L1 check ships in the derived laydown set (explicit
-# addition `l1-delivery-surface-check.ts` in derive_loop_scripts) and must still be invoked post-init
-# beside verify_referenced_landed (the AC5 wiring contract, gap-suite-baseline-red-l1-wiring-...).
+# In a BARE plugin copy (hermetic tests) the repo-level SPEC is absent → SKIP.
+# ⚠️ Its one-time companion `verify_referenced_landed` (referenced ⊆ landed) was DELETED 2026-10-07
+# with the retired derivation family — it had no live caller after quay-init shrank to the closed set.
 verify_delivery_surface_l1() {
   local delivery_root spec_file
   l1_script="$PLUGIN_ROOT/scripts/l1-delivery-surface-check.ts"
@@ -1098,162 +574,6 @@ verify_delivery_surface_l1() {
   return 0
 }
 
-# dist_stale <bundle> <src_dir> — AC1 stale detection for the vendored runtime bundle
-# (gap-upgrade-channel-cant-sync-build-artifacts-dist-stale). A git pull syncs SOURCE (tracked)
-# but not the gitignored dist/, so the bundle can be older than the source that produced it — the
-# exact B-machine mixed state (dist built 13:34, fix merged 15:10, ENOENT persists because verify
-# checked existence, not freshness). Returns:
-#   0 (STALE) when any source file under <src_dir> is newer than <bundle>
-#   1 (fresh) when <bundle> is newer than every source file (or the src dir is empty)
-#   2 (no-source-tree) when <src_dir> does not exist — an installed plugin cache (user-scope) has
-#     no packages/ tree, so this check cannot fire there (AC4's version-based check owns that path).
-dist_stale() {
-  local bundle="$1" src_dir="$2" newest=0 m bm
-  [ -d "$src_dir" ] || return 2
-  while IFS= read -r -d '' f; do
-    m="$(stat -c %Y "$f" 2>/dev/null || echo 0)"
-    [ "$m" -gt "$newest" ] && newest="$m"
-  done < <(find "$src_dir" -type f -print0 2>/dev/null || true)
-  bm=0
-  if [ -f "$bundle" ]; then
-    bm="$(stat -c %Y "$bundle" 2>/dev/null || echo 0)"
-  fi
-  [ "$newest" -gt "$bm" ] && return 0
-  return 1
-}
-
-# vendor_runtime_user_scope_stale_check — AC4 stale detection for the USER-SCOPE install cache
-# (~/.local/share/quay-plugin/ or the Claude Code plugin cache). The cache carries the vendored
-# dist bundle but NO packages/ source tree, so the AC1 mtime check cannot fire. Its freshness
-# criterion is VERSION CONSISTENCY: the version embedded in the built bundle
-# (`node dist/quay.js --version`) must match the plugin's vendored package.json version — both are
-# written by sync-vendor.sh from the SAME source at build time (plugin/vendor/quay/package.json is
-# tracked in git; the dist is the gitignored generated mirror of the same version). A mismatch
-# means one is stale relative to the other (a mixed snapshot); the negative control is that BEFORE
-# this check the 06:01 stale dist was treated as fresh. Prints a visible STALE warning + the fix;
-# NEVER fail-closed (there is no source tree to rebuild from in the cache — the action is a prompt
-# to update/reinstall the plugin). Returns 0 when consistent or unverifiable, 1 when a mismatch was
-# reported (callers decide whether a warning is fatal).
-vendor_runtime_user_scope_stale_check() {
-  local dist="$PLUGIN_ROOT/vendor/quay/dist/quay.js" pkg="$PLUGIN_ROOT/vendor/quay/package.json"
-  [ -f "$dist" ] && [ -f "$pkg" ] || return 0
-  local embedded declared
-  embedded="$(node "$dist" --version 2>/dev/null | grep -oE '[0-9]+\.[0-9]+\.[0-9]+' | head -n1 || true)"
-  declared="$(quay-init-step json-field "$pkg" version "" 2>/dev/null || true)"
-  [ -n "$embedded" ] && [ -n "$declared" ] || return 0
-  if [ "$embedded" != "$declared" ]; then
-    echo "  STALE (user-scope vendor runtime): the built bundle embeds version ${embedded} but plugin/vendor/quay/package.json declares ${declared}." >&2
-    echo "         The 06:01 stale dist was previously treated as fresh (AC4 negative control). Update/reinstall the plugin so the runtime matches the plugin version." >&2
-    return 1
-  fi
-  return 0
-}
-
-# ensure_vendor_runtime — gap-vendor-runtime-not-in-git-clone-broken-mcp-entry (AC1/AC2) +
-# gap-upgrade-channel-cant-sync-build-artifacts-dist-stale (AC1/AC4).
-# The vendored runtime bundles (plugin/vendor/quay/dist/quay.js + plugin/vendor/quay-native/dist/
-# quay-native.js) are GENERATED artifacts — gitignored by the bare `dist/` rule (M172), so a fresh
-# plugin clone has NONE of them. Writing a provider config whose mcp_entry references a missing
-# runtime is the exact broken-MCP-entry defect: it blocks the whole Provider ABI / MCP (AC12b hard
-# blocker #2) and the pre-fix behavior WARNED and reported complete anyway ("判据存在但绕过了真正
-# 重要的东西"). Resolution (the manager-verified path 2): if the bundles are missing, AUTO-BUILD them
-# via the plugin's own sync-vendor.sh; only when the build cannot produce them, FAIL CLOSED (exit
-# non-zero, no `quay-init complete`) naming the missing bundles + the fix.
-# Returns 0 only when BOTH bundles are present (present to begin with, or auto-built); exits 2
-# otherwise. In --dry-run it prints what would happen and returns 0 so the dry-run listing continues.
-ensure_vendor_runtime() {
-  local missing=0 stale=0
-  [ -f "$PLUGIN_ROOT/vendor/quay/dist/quay.js" ] || missing=1
-  [ -f "$PLUGIN_ROOT/vendor/quay-native/dist/quay-native.js" ] || missing=1
-
-  # AC1 (gap-upgrade-channel-cant-sync-build-artifacts-dist-stale): STALE detection — the bundles
-  # exist but the SOURCE is newer. The pre-fix code only rebuilt on MISSING; a git pull that synced
-  # source without rebuilding the gitignored dist left a STALE bundle that was silently accepted
-  # (B machine: dist built 13:34, fix merged 15:10, ENOENT persists — verify checked existence, not
-  # freshness). When the source tree is absent (user-scope install cache) the mtime check cannot
-  # fire — AC4's version-consistency check below owns that path.
-  if [ "$missing" = 0 ]; then
-    local core_src="$PLUGIN_ROOT/../packages/quay/src"
-    local native_src="$PLUGIN_ROOT/../packages/quay-native/src"
-    local rc=0 core_stale=0 native_stale=0 core_nosrc=0 native_nosrc=0
-    rc=0; dist_stale "$PLUGIN_ROOT/vendor/quay/dist/quay.js" "$core_src" || rc=$?
-    [ "$rc" = 0 ] && core_stale=1
-    [ "$rc" = 2 ] && core_nosrc=1
-    rc=0; dist_stale "$PLUGIN_ROOT/vendor/quay-native/dist/quay-native.js" "$native_src" || rc=$?
-    [ "$rc" = 0 ] && native_stale=1
-    [ "$rc" = 2 ] && native_nosrc=1
-    [ "$core_stale" = 1 ] && stale=1
-    [ "$native_stale" = 1 ] && stale=1
-    # AC4 (user-scope): no packages/ source tree → the mtime check cannot fire. The user-scope
-    # install cache's freshness criterion is VERSION CONSISTENCY (embedded dist version vs the
-    # vendored package.json version). WARN + prompt only — there is no source to rebuild from in
-    # the cache, so this never fail-closes (the negative control was NO check at all: the 06:01
-    # stale dist was treated as fresh).
-    if [ "$core_nosrc" = 1 ] && [ "$native_nosrc" = 1 ] && [ "$DRY_RUN" != true ]; then
-      vendor_runtime_user_scope_stale_check || true
-    fi
-  fi
-
-  [ "$missing" = 0 ] && [ "$stale" = 0 ] && return 0
-
-  if [ "$DRY_RUN" = true ]; then
-    if [ "$missing" = 1 ]; then
-      echo "  would-ensure-vendor-runtime: plugin source lacks the built vendor runtime (gitignored dist/) — quay-init would auto-build via sync-vendor.sh or fail closed (AC1/AC2)" >&2
-    else
-      echo "  would-ensure-vendor-runtime: the vendored dist is STALE (source newer than the bundle — a git pull synced source without rebuilding the gitignored dist) — quay-init would auto-rebuild via sync-vendor.sh or fail closed (AC1)" >&2
-    fi
-    return 0
-  fi
-
-  if [ "$missing" = 1 ]; then
-    echo "  vendor runtime missing from plugin source (gitignored dist/ — a fresh clone has no built bundles). Attempting auto-build via sync-vendor.sh (AC2, path 2) ..." >&2
-  else
-    echo "  vendor runtime STALE (source mtime newer than dist mtime — a git pull synced source without rebuilding the gitignored bundle). Attempting auto-rebuild via sync-vendor.sh (AC1) ..." >&2
-  fi
-  local vlog
-  vlog="$(mktemp)"
-  if [ -f "$PLUGIN_ROOT/scripts/sync-vendor.sh" ] && bash "$PLUGIN_ROOT/scripts/sync-vendor.sh" >"$vlog" 2>&1; then
-    if [ -f "$PLUGIN_ROOT/vendor/quay/dist/quay.js" ] && [ -f "$PLUGIN_ROOT/vendor/quay-native/dist/quay-native.js" ]; then
-      rm -f "$vlog"
-      if [ "$stale" = 1 ]; then
-        echo "  auto-rebuilt STALE vendor runtime via sync-vendor.sh (AC1)" >&2
-      else
-        echo "  auto-built vendor runtime via sync-vendor.sh (AC2)" >&2
-      fi
-      return 0
-    fi
-  fi
-  echo "ERROR: plugin source has no built vendor runtime and the auto-build did not produce one (gap-vendor-runtime-not-in-git-clone-broken-mcp-entry AC1)." >&2
-  echo "       The provider mcp_entry would reference a nonexistent runtime — the install FAILS CLOSED instead of shipping a broken MCP entry." >&2
-  echo "       Missing bundles:" >&2
-  echo "         - plugin/vendor/quay/dist/quay.js" >&2
-  echo "         - plugin/vendor/quay-native/dist/quay-native.js" >&2
-  echo "       Fix one of:" >&2
-  echo "         - run 'npm install' at the repo root (the postinstall runs sync-vendor.sh to build them), then re-run quay-init" >&2
-  echo "         - run 'bash plugin/scripts/sync-vendor.sh' manually to build + mirror the bundles" >&2
-  echo "         - install the plugin from the dist-plugin orphan branch, which TRACKS the built bundles" >&2
-  if [ -s "$vlog" ]; then
-    echo "       sync-vendor.sh output (last 15 lines):" >&2
-    tail -n 15 "$vlog" >&2
-  fi
-  rm -f "$vlog"
-  exit 2
-}
-
-# verify_provider_runtime_existence <workspace-root> — gap-vendor-runtime-not-in-git-clone-broken-
-# mcp-entry (AC3). verify_referenced_landed above checks the LANDING SET (every skill/tick-doc
-# referenced file is laid down), but NOT that the provider config's mcp_entry references a file that
-# ACTUALLY EXISTS in the target. This is the referenced-not-landed complement: it reads the generated
-# .quay/config.yml provider mcp_entry and asserts the referenced runtime file is present. Defense in
-# depth — AC1 (fail-closed) prevents writing a broken config in the first place; this second check
-# catches a config that already exists (or a lay-down regression) whose mcp_entry points at a missing
-# runtime. FAIL CLOSED (return 1) when the referenced file does not exist.
-#
-# ⛔ The native provider OMITS path/mcp_entry by design, so "no mcp_entry in the config" is NOT
-# "nothing to verify" any more: the reader (`providerEntryFile`) resolves the omitted binding through
-# the plugin root and this check verifies `<root>/vendor/quay-native/dist/quay-native.js` exists.
-# "Could not evaluate" is its own printed state (NOT-EVALUATED) and is never printed as OK
-# (gap-config-validate-requires-mcp-entry-contradicts-native-default-resolver; 硬规则 3b).
 verify_provider_runtime_existence() {
   local ws="$1" plugin_root="${2:-}"
   local cfg="$ws/.quay/config.yml"
@@ -1301,151 +621,7 @@ verify_provider_runtime_existence() {
   return 1
 }
 
-# ── derived laydown set + drift report (gap-delivery-surface-grows-but-target-freezes-no-upgrade) ────
-# The delivery surface grows (new derived scripts ship) while an installed target freezes at install
-# time — there was no upgrade/refresh channel and no drift report. These two functions are the
-# mechanism: the drift report (漂移/缺失/一致 on the DERIVED-SET axis, not the raw plugin/scripts file
-# count — L_D) + the upgrade-path integration in the --loop block. Contract measure/invoke:
-#   `bash plugin/scripts/quay-init.sh --check-drift` stdout's 漂移/缺失/一致 number fields.
 
-
-# compute_drift_report <workspace-root> — the derived-set-axis drift report (AC2). For every script
-# in the derived laydown set, classify the target's copy:
-#   一致 (consistent) = present + byte-identical to the plugin's current delivery
-#   缺失 (missing)    = absent — the target froze at install time and never received this mechanism
-#   漂移 (drift)      = present but differs from the current delivery — stale install content OR a
-#                       local edit (never silent: the --loop upgrade backs it up + reports, and this
-#                       report lists it for confirmation)
-# Emits the parseable summary `漂移 N / 缺失 N / 一致 N` plus a per-file listing of drift/missing.
-# READ-ONLY: never writes (no state, no backups, no copies). Returns 0 — the report is the
-# deliverable, not a pass/fail gate (Contract band: parseable; missing/drift upgradeable to 0 via
-# --loop or listed).
-compute_drift_report() {
-  local ws="$1" drift=0 missing=0 consistent=0 n=0 s tgt rel src i
-  local -a drift_list=() missing_list=() drift_src=() drift_tgt=()
-  for s in "${LOOP_SCRIPTS[@]}"; do
-    # opt-in exec core (gap-ac37-exec-core-ships-with-package): manager-tick-core lands only with
-    # --manager; when not requested AND not already present in the target it is not a defect — skip
-    # it so the drift denominator is the DEFAULT landing + whatever was opted into (a target that
-    # DID opt in earlier still has its manager core drift-checked, because it exists there).
-    if [ "$s" = "manager-tick-core.md" ] && [ "$DO_MANAGER" != true ] && [ ! -f "$ws/orchestration/$s" ]; then
-      continue
-    fi
-    if [ -f "$PLUGIN_ROOT/scripts/$s" ]; then
-      src="$PLUGIN_ROOT/scripts/$s"; tgt="$ws/plugin/scripts/$s"; rel="plugin/scripts/$s"
-    elif [ -f "$PLUGIN_ROOT/loop/$s" ]; then
-      # exec-core tick doc (gap-ac37-exec-core-ships-with-package): lands at orchestration/ (the
-      # path the shipped tick templates reference), distinct from the scripts landing. The source
-      # RESOLVES a pointerized shipped copy to its orchestration/ 正本 (gap-quay-init-real-install-
-      # regression-fix ②) so the drift axis compares the REAL core, not the pointer line.
-      src="$(resolve_tick_core_src "$s")"; tgt="$ws/orchestration/$s"; rel="orchestration/$s"
-    else
-      echo "  WARN: loop mechanism file missing from plugin: plugin/scripts/$s (or plugin/loop/$s)" >&2
-      continue
-    fi
-    n=$((n + 1))
-    if [ ! -f "$tgt" ]; then
-      missing=$((missing + 1)); missing_list+=("$rel")
-    elif _is_identical "$src" "$tgt"; then
-      consistent=$((consistent + 1))
-    else
-      drift=$((drift + 1)); drift_list+=("$rel"); drift_src+=("$src"); drift_tgt+=("$tgt")
-    fi
-  done
-  echo "drift-report: 漂移 ${drift} / 缺失 ${missing} / 一致 ${consistent} (derived-set ${n})"
-  # AC2 (gap-tick-core-drift-check-not-in-suite): a drift entry prints BOTH sides' line counts + a
-  # diff summary (not a "drift/consistent" boolean) so a reader sees the magnitude/character of the
-  # drift. The `drift:` line itself is unchanged (tests parse it); the 行数/diff lines are additive.
-  for i in "${!drift_list[@]}"; do
-    rel="${drift_list[$i]}"; src="${drift_src[$i]}"; tgt="${drift_tgt[$i]}"
-    echo "  drift: $rel — target differs from the plugin's current delivery (stale install or local edit); --loop upgrade backs it up + reports, never silent"
-    echo "    行数: $(wc -l < "$src") (plugin: ${src#"$PLUGIN_ROOT/"}) vs $(wc -l < "$tgt") (target: ${tgt#"$ws/"})"
-    local _dstat
-    _dstat="$(diff -U0 "$src" "$tgt" 2>/dev/null | grep -c '^[+-][^+-]' || true)"
-    echo "    diff: ${_dstat} changed lines (unified diff, 0-context)"
-  done
-  for rel in "${missing_list[@]}"; do
-    echo "  missing: $rel — not installed (target froze at install time); --loop upgrade auto-adds it"
-  done
-  return 0
-}
-
-# ── --check-drift mode (Contract invoke) ──────────────────────────────────────────────────────────────
-# READ-ONLY drift report over the derived laydown set for the target workspace (--root, default cwd).
-# No category dispatch, no --loop params (test-command/tmux-session are NOT needed to report drift).
-# Exits 0 — the report is the deliverable.
-if [ "$DO_CHECK_DRIFT" = true ]; then
-  echo "quay-init drift report (plugin v${PLUGIN_VERSION})"
-  echo "  derived-set axis: the delivery surface's DERIVED scripts (L_D — the functional surface is the"
-  echo "  derived laydown set, NOT the raw plugin/scripts file count)."
-  LOOP_SCRIPTS=()
-  while IFS= read -r s; do LOOP_SCRIPTS+=("$s"); done < <(derive_loop_scripts)
-  compute_drift_report "$WORKSPACE_ROOT"
-  exit 0
-fi
-
-# compute_dependency_closure_gaps — the gap-laydown-derivation-is-sensitive-to-reference-spelling-
-# dependency-closure Contract measure: how many LAID-DOWN scripts reference a same-dir sibling that
-# is NOT in the FINAL (post-closure) laydown set — "已铺但依赖未铺的脚本数". derive_loop_scripts
-# runs the closure to a fixpoint, so on the fixed repo every sibling that EXISTS in plugin/scripts/
-# is already in the set ⇒ gaps = 0 (the band; 铺了消费者必然铺依赖). A gap survives the closure
-# only when the referenced sibling DOES NOT EXIST in plugin/scripts/ (the dependency cannot ship —
-# fail loud, the AC4 spirit) or when the closure pass itself is broken (a regression guard: if the
-# closure silently stopped, send-keys-reliable.sh's sibling would re-appear as a gap here). The
-# validator is SCRIPT CONTENT (${SCRIPT_DIR}/<sibling>), never doc wording (invariant
-# closure_not_documentation = 1). Exits 0 on 0 gaps, 1 when gaps > 0.
-compute_dependency_closure_gaps() {
-  local gaps=0 s name v
-  for s in "${LOOP_SCRIPTS[@]}"; do
-    [ -f "$PLUGIN_ROOT/scripts/$s" ] || continue
-    local vars
-    vars="$(script_dir_vars "$PLUGIN_ROOT/scripts/$s")"
-    [ -n "$vars" ] || continue
-    # distinct same-dir sibling references, UNFILTERED by existence — a reference to a sibling that
-    # does not exist in plugin/scripts/ is exactly the "已铺但依赖未铺" gap this check must surface.
-    local refs
-    refs="$(closure_ref_names "$PLUGIN_ROOT/scripts/$s" $vars | sort -u)"
-    [ -n "$refs" ] || continue
-    for name in $refs; do
-      [ -n "$name" ] || continue
-      local in_set=0 tt
-      for tt in "${LOOP_SCRIPTS[@]}"; do
-        [ "$tt" = "$name" ] && { in_set=1; break; }
-      done
-      if [ "$in_set" = 0 ]; then
-        echo "  gap: plugin/scripts/$s references same-dir sibling plugin/scripts/$name which is NOT in the laydown set — the dependency cannot ship (missing from plugin, or the closure pass is broken)" >&2
-        gaps=$((gaps + 1))
-      fi
-    done
-  done
-  echo "dependency_closure_gaps: $gaps"
-  [ "$gaps" -eq 0 ]
-}
-
-# ── --check-dependency-closure mode (Contract measure/invoke) ────────────────────────────────────────
-# READ-ONLY dependency-closure report over the derived laydown set. No category dispatch, no --loop
-# params. Emits the parseable `dependency_closure_gaps: N` field (Contract band N = 0). Exits 0 when
-# the set is closure-complete, 1 when gaps exist (a regression that would ship a consumer without its
-# dependency). Contract invoke: `grep -n 'transcript-delivery-check' plugin/scripts/send-keys-reliable.sh
-# plugin/scripts/quay-init.sh` must show the consumer → checker reference on both sides.
-if [ "$DO_CHECK_DEPENDENCY_CLOSURE" = true ]; then
-  echo "quay-init dependency-closure report (plugin v${PLUGIN_VERSION})"
-  derive_loop_scripts
-  compute_dependency_closure_gaps
-  exit $?
-fi
-
-# ── library mode (gap-quay-init-reduce-real-install-count) ────────────────────────────────────────────
-# When SOURCED (not executed as $0), stop here — the caller wants to invoke a derivation/stability
-# function directly (derive_loop_scripts / _read_declarations / _read_references /
-# verify_referenced_landed) without running a full install. Every function + its deps
-# (mechanism_corpus / bare_resolved_scripts / consolidated_member_files) and the PLUGIN_ROOT /
-# NEVER_LAYDOWN environment are defined ABOVE this guard; the install flow below must not run.
-# The torn-read family (quay-init.test.mjs + quay-init-loop-consumer-doc-refs.test.mjs) sources this
-# script and calls the function it exercises, so a stability-check test no longer pays a ~33s install.
-if [ "${BASH_SOURCE[0]}" != "${0}" ]; then
-  return 0
-fi
 
 # report_closed_set_state — the AC3 failure-path report: mechanically list each of the seven closed-set
 # items in ONE of four states, by comparing the current fingerprint against the pre-write snapshot:
@@ -1990,19 +1166,16 @@ validate_worktree_root "$WORKTREE_ROOT" || exit 2
 ensure_target_branch_model() {
   local qrl="$PLUGIN_ROOT/vendor/quay/dist/quay.js"
   if [ ! -f "$qrl" ]; then
-    # Reuse the existing fail-closed runtime provisioning mechanism rather than hand-rolling a
-    # second remedy: a fresh plugin clone has NO built bundles (the vendored dist is a gitignored
-    # generated artifact), and `ensure_vendor_runtime` auto-builds them via sync-vendor.sh or exits 2
-    # naming the fix.
-    ensure_vendor_runtime
-  fi
-  if [ ! -f "$qrl" ]; then
     # CANNOT-EVALUATE, kept DISTINCT from both "divergent" and "compatible" (hard rule 3b: a judge
     # that cannot read its input must not return the value a judge that read it would return). The
     # upgrade refuses — silently proceeding would report success for a project whose landing baseline
     # was never judged, which is precisely the defect this step exists to end.
+    # ⛔ The retired `ensure_vendor_runtime` auto-build has been DELETED with the rest of this script's
+    # legacy check surface (AC5): the vendored dist is a generated artifact the DELIVERY ships (the
+    # plugin bundle / a synced worktree), not something an installer should build in a consumer's tree.
     echo "ERROR: cannot judge this project's branch model — the delivered CLI is absent: $qrl" >&2
     echo "       Refusing to continue: an unjudged landing baseline is not a passing one." >&2
+    echo "       Build/sync the vendor bundles ('bash plugin/scripts/sync-vendor.sh --sync-dist') and re-run." >&2
     return 3
   fi
 
@@ -2134,7 +1307,7 @@ ensure_runtime_artifacts_gitignore
 write_template "$PLUGIN_ROOT/.claude/launch.settings.json" "$WORKSPACE_ROOT/.claude/launch.settings.json" "launch template"
 write_claude_settings
 
-# L1 delivery-surface + provider-runtime post-init checks (beside verify_referenced_landed): the
+# L1 delivery-surface + provider-runtime post-init checks: the
 # six-category delivery surface of the SHIPPED quay checkout is complete, AND the native provider's
 # runtime file — resolved through the plugin root when the config omits path/mcp_entry — actually
 # exists. Both are read-only over the plugin's own root — never writes to the target, so the

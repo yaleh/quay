@@ -45,6 +45,7 @@ steps (each mirrors the python3 invocation it replaced in plugin/scripts/quay-in
   refresh-plugin-link <ws_root> <plugin_root> <dry_run:true|false>
   migrate-mcp-entry   <cfg> <install_provider> <install_runtime> <install_core> <ws_root> <dry_run> <backup_ts>
   derive-loop-scripts <out-file> <plugin_root> <never-laydown-names>
+  laydown-set         <plugin_root> [never-laydown-names]
   provider-entry-file <cfg> [plugin-root]
   write-claude-settings <dst> <plugin_name>
 `;
@@ -124,6 +125,18 @@ async function main(): Promise<void> {
     case "derive-loop-scripts": {
       need(3);
       core.deriveLoopScriptsClosure({ outPath: args[0]!, pluginRoot: args[1]!, neverLaydown: args[2]! });
+      return;
+    }
+    case "laydown-set": {
+      // The COMPLETE derivation (a)+(b)+(c)+(c2)+(c3)+archive+(d) — the TS home of the shell's
+      // `derive_loop_scripts`. `laydown-set-check.sh` (the cold-start gate) calls THIS instead of
+      // sourcing the installer (AC4), so the shell's derivation helpers could be deleted (AC5).
+      // The never-laydown name defaults to the installer itself (see `DEFAULT_NEVER_LAYDOWN`) — the
+      // gate must not have to spell it, and a script that names the installer is a script that can
+      // still be read as depending on it.
+      need(1);
+      const { names } = core.deriveLoopScripts({ pluginRoot: args[0]!, neverLaydown: args[1] ?? core.DEFAULT_NEVER_LAYDOWN });
+      process.stdout.write(names.map((n) => n + "\n").join(""));
       return;
     }
     case "provider-entry-file": {
