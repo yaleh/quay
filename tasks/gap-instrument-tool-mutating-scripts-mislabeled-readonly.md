@@ -1,7 +1,7 @@
 ---
 id: gap-instrument-tool-mutating-scripts-mislabeled-readonly
 title: instrument MCP 工具被定位为诊断/只读，但准入脚本集合可执行破坏性操作（进程终止、交付派发）
-status: ready
+status: done
 labels:
   - gap
   - defect
@@ -20,10 +20,10 @@ Proposed action（具体设计留给实现者）：方案 (a) 拆分成一个严
 
 ## Acceptance Criteria
 
-- [ ] 复现：列出 `plugin/scripts/*` 中携带 `@instrument` 标签但具有真实副作用的脚本清单（至少含 `worktree-process-reaper.ts`、`quay-deliver.ts`），确认其准入机制未区分只读/有副作用
-- [ ] 选定并实现方案 (a) 或 (b)：若 (a)，新工具/旧工具的准入集合清晰分离，只读工具的准入校验拒绝有副作用的脚本；若 (b)，`instrument` 工具的 description 文本显式警示副作用风险，且/或新增 mutating 脚本运行前的显式确认参数
-- [ ] 新增/更新测试覆盖：对已知有副作用的脚本（如 `worktree-process-reaper.ts`）调用 `instrument` 工具时，按选定方案的行为（拒绝/警示文案出现/需要确认参数）有断言覆盖
-- [ ] `node --test packages/quay/test/mcp-server*.test.mjs` 全绿，无回归
+- [x] 复现：列出 `plugin/scripts/*` 中携带 `@instrument` 标签但具有真实副作用的脚本清单（至少含 `worktree-process-reaper.ts`、`quay-deliver.ts`），确认其准入机制未区分只读/有副作用
+- [x] 选定并实现方案 (a) 或 (b)：若 (a)，新工具/旧工具的准入集合清晰分离，只读工具的准入校验拒绝有副作用的脚本；若 (b)，`instrument` 工具的 description 文本显式警示副作用风险，且/或新增 mutating 脚本运行前的显式确认参数
+- [x] 新增/更新测试覆盖：对已知有副作用的脚本（如 `worktree-process-reaper.ts`）调用 `instrument` 工具时，按选定方案的行为（拒绝/警示文案出现/需要确认参数）有断言覆盖
+- [x] `node --test packages/quay/test/mcp-server*.test.mjs` 全绿，无回归
 
 ## Definition of Done
 

@@ -2610,7 +2610,13 @@ export function buildGapWorkerPrompt(gap: GoalGap, goalTitle: string, acTitle: s
     `goal_id=${gap.goal} goal_title=${goalTitle}`,
     `ac_id=${gap.ac} ac_title=${acTitle}`,
     `ac_expect=${acExpect}`,
-    "Read the AC record (goal_get MCP) to understand the work it demands, then file ONE child task that closes this gap via the `quay-file-task` skill (Skill tool).",
+    // ⛔ Name the tool EXACTLY (namespace included). The former wording "(goal_get MCP)" was
+    // accurate only as a description; on the aggregator `goal_get` did not exist at all
+    // (gap-goal-get-meta-get-mcp-name-collision), and an agent reading it called the
+    // nearest-sounding `meta_get` instead, got `no such META: AC-326`, and fell back to grep.
+    // The tool now exists (registerGoalHandlers in Core's aggregator) AND the name is pinned so
+    // no nearest-name substitution is possible.
+    "Read the AC record via the `goal_get` MCP tool (`mcp__plugin_quay_quay__goal_get`) to understand the work it demands, then file ONE child task that closes this gap via the `quay-file-task` skill (Skill tool).",
     ...(regressed
       ? [
           "The quay-file-task skill performs MECHANISM-BASED dedup: if a task claiming this AC via a top-level `goal_ac:` field is still IN FLIGHT (todo/ready/needs-human), do NOT file a duplicate — report the existing task id instead.",
@@ -2680,7 +2686,7 @@ export function buildSufficiencyFollowupPrompt(
       ? "  (EMPTY — this goal has zero in-scope ACs. That emptiness is ITSELF why the mechanical layer judged `insufficient`.)"
       : acs.join("\n"),
     "## Your job",
-    "Read the goal record (`goal_get` MCP) and whatever repo sources you need. Then PROPOSE — you do NOT apply — exactly one of:",
+    "Read the goal record via the `goal_get` MCP tool (`mcp__plugin_quay_quay__goal_get`) and whatever repo sources you need. Then PROPOSE — you do NOT apply — exactly one of:",
     "  (a) a candidate NEW AC, with a runnable criterion, that closes a gap between the exit conditions and the current AC set; or",
     "  (b) a REVISION of the exit-conditions / scope text, if the exit conditions as written demand more than this goal should.",
     "In the task body: quote VERBATIM the exit condition (or the part of the goal title) that is currently uncovered, say why the existing AC set does not cover it, and say why your proposal does. A proposal that does not name the uncovered part is not reviewable and will be rejected.",
