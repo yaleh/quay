@@ -197,6 +197,15 @@ test("AC2: every .sh in the artifact is runtime-reachable, and the cancelled-cha
     assert.ok(!present.includes(absent), `${absent} must NOT be in the artifact`);
     assert.equal(reading.unreachableReasons[absent], "no executing reference from any root (无引用)");
   }
+  // ⛔ The two exclusion classes are REPORTED APART (硬规则 3): `develop-deliver-tgz.sh` IS reached —
+  // plugin/scripts/integration-batch-merge.ts launches it for its opt-in `--deliver` flag — and is out
+  // only because the channel it delivers over was cancelled. Reporting it in the "no reference" class
+  // would claim nothing calls it, which is false.
+  for (const t of ["scripts/verify-deliver-coldstart.sh", "scripts/develop-deliver-tgz.sh", "scripts/deliver-verify-usage.sh"]) {
+    assert.ok(reading.unshippedByDecision.includes(t), `${t} must be reported as reached-but-decided-out`);
+    assert.match(reading.unreachableReasons[t], /^REACHED by a root, but unshipped by decision:/);
+  }
+  assert.ok(!reading.unshippedByDecision.includes("sync.sh"), "the retired gates/sync.sh are UNREACHABLE, not decided out");
   // Printed so the file's own log carries the real numbers (a green run is evidence, not a claim).
   console.log(
     `shipped-shell-reachability: artifact ${present.length} .sh (all reachable) · reachable ${reading.reachable.length} · unreachable ${reading.unreachable.length} · ${reading.rootFiles} root file(s) read`,

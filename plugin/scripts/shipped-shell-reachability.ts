@@ -147,6 +147,10 @@ export interface ReachabilityReading {
   unreachable: string[];
   /** one line of WHY per unreachable path (a declared decision, or "no executing reference"). */
   unreachableReasons: Record<string, string>;
+  /** The subset of `unreachable` that a root DID reach but `UNSHIPPED_BY_DECISION` drops — i.e. the
+   *  cost of the decision, named. ⛔ Kept apart from the "no execution reference" class on purpose:
+   *  folding them together would report a tool that HAS a consumer as if nothing called it (硬规则 3). */
+  unshippedByDecision: string[];
   /** one line of WHY per reachable path (which root/edge selected it) — the closure's own trace. */
   reachableReasons: Record<string, string>;
   /** how many root files were read (0 ⇒ the derivation saw nothing; never read as "clean"). */
@@ -162,6 +166,7 @@ function notEvaluated(reason: string): ReachabilityReading {
     reachable: [],
     unreachable: [],
     unreachableReasons: {},
+    unshippedByDecision: [],
     reachableReasons: {},
     rootFiles: 0,
     rulesInForce: 0,
@@ -327,9 +332,13 @@ export function deriveReachability(repoRoot: string, overrides: DeriveOverrides 
   let rootFiles = 0;
 
   const unshipped = overrides.unshippedByDecision ?? UNSHIPPED_BY_DECISION;
+  const droppedByDecision = new Set<string>();
   const add = (rel: string | null, why: string): boolean => {
     if (rel === null) return false;
-    if (unshipped[rel]) return false;
+    if (unshipped[rel]) {
+      droppedByDecision.add(rel);
+      return false;
+    }
     if (reachable.has(rel)) return false;
     reachable.set(rel, why);
     return true;
@@ -445,7 +454,9 @@ export function deriveReachability(repoRoot: string, overrides: DeriveOverrides 
   const unreachable = [...candidates].filter((c) => !reachable.has(c)).sort();
   const unreachableReasons: Record<string, string> = {};
   for (const rel of unreachable) {
-    unreachableReasons[rel] = unshipped[rel] ?? "no executing reference from any root (无引用)";
+    unreachableReasons[rel] = unshipped[rel]
+      ? `REACHED by a root, but unshipped by decision: ${unshipped[rel]}`
+      : "no executing reference from any root (无引用)";
   }
   return {
     evaluated: true,
@@ -453,6 +464,7 @@ export function deriveReachability(repoRoot: string, overrides: DeriveOverrides 
     reachable: reachableList,
     unreachable,
     unreachableReasons,
+    unshippedByDecision: [...droppedByDecision].sort(),
     reachableReasons: Object.fromEntries([...reachable.entries()].sort()),
     rootFiles,
     rulesInForce: rules.length,
