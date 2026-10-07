@@ -1,12 +1,19 @@
 ---
 id: GOAL-029
 title: init 统一为单一 TS 引擎、终局无 .sh；发布集合收窄到运行时必需
-status: draft
+status: active
 kind: goal
 origin: 人 2026-10-07 裁定（与 manager 会话讨论）：init 终局无 .sh——升级与全新安装统一为单一 TS 引擎，过渡期
   quay-init.sh 缩为调用 bin/quay init 的垫片；不再有 --reconcile；serve
   默认值（等于回退值）不写进配置；升级失败非零退出并保留原配置；未知键保留并警告；并单独收窄发布集合。起因：2026-10-07 发布前演练发现已有项目升级后
   config validate 仍红，且产物里 shell 36910 行、641 个测试文件被当作产品发出。
+activatedAt: 2026-10-07T02:00:26.223Z
+statusLog:
+  - at: 2026-10-07T02:00:26.223Z
+    from: draft
+    to: active
+    actor: manager
+    reason: 人 2026-10-07 指示：创建 GOAL、AC 与任务后激活；7 个任务已就位（AC-329..335 各有任务），退出条件可判定
 ---
 ## 背景
 
