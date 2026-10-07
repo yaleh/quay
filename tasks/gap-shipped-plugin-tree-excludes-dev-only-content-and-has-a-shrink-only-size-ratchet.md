@@ -1,7 +1,7 @@
 ---
 id: gap-shipped-plugin-tree-excludes-dev-only-content-and-has-a-shrink-only-size-ratchet
 title: 发布产物默认全发 plugin/ 导致 641 个测试文件、93 个突变用例与开发期基线随产物发出——改为结构性排除，并加只减不增的体量棘轮与门禁断言
-status: ready
+status: done
 labels:
   - gap
   - defect
@@ -55,6 +55,12 @@ GOAL-029「init 统一为单一 TS 引擎、终局无 .sh;并收窄发布集合�
 ### 一处必须记下的坑
 `plugin/scripts/shipped-set-rules.ts` 一度被 `build-plugin-dist.mjs` 的条目推导当成 bundle 入口产出(283 → 284 个文件):成因是**本任务自己写进 `capability-catalog-declarations.json` 的那行 CONSUMER 文案里出现了 `node --experimental-strip-types plugin/scripts/shipped-set-rules.ts`** —— 该推导从被扫描面读这个形状。该 bundle 只会回答 NOT-EVALUATED(它的两个输入——规则与基线——都被规则自身排除),故已把文案改成不带该调用形状的写法,并在文案里写明「本模块不进产物」。
 
+### 首次 fan-in 的 suite 红:新加的门内读取未进 stub 夹具(本轮修复)
+- 现象:首次 fan-in 的 suite 在 `plugin/test/publish-dist-branch-closure-gate.test.mjs` 红 —— `AssertionError: baseline publish must succeed`,原文 `Cannot find module '<stub>/plugin/scripts/shipped-set-rules.ts'`。该测试在一次性 stub 仓里跑**真实**发布脚本;本任务给 `publish-dist-branch.sh` 新增了 `shipped-set-rules.ts --print-rsync-excludes` 这一步,而 stub 不带该模块 ⇒ 基线发布自己失败,closure 门根本没跑到。**是本任务的真实回归,不是环境抖动**(delta-relatedness 判 RELATED,单跑复现,改后 3/3 绿)。
+- 修法(与文件内 stamp-version 先例同形):`makeStubRepo` 新增 `addShippedSetRuleInputs` —— 把真实模块 + 其**相对导入传递闭包**(从源码推导而非手列,且经 `stripComments` 扫描:模块闭包里的 `source-text-lib.ts` 自己的 JSDoc 就写着 `from "./x.ts"` 这句散文,直接扫原文会把提及当 import)+ 真实 `shipped-set-rules.txt` 拷进 stub。两者都承重:模块按路径被 spawn,`--rules` 指向它解析的规则文本,规则读空会让脚本按自身设计拒绝(空排除表会静默退回全树 rsync)。
+- 连带读数:闭包带上 `gate-script-base.ts`,它在 bundler 的 `QUAY_INIT_EXPLICIT` 表里 ⇒ stub 的派生 bundle 由 **1 变 2**;该行断言随之更新为 2,并在注释里写明"计数是 stub 文件集的性质,门的谓词仍由 AC1/AC3 夹具的 1 钉住"。
+- 实跑:`node --test plugin/test/publish-dist-branch-closure-gate.test.mjs` ⇒ 3/3 通过。
+
 ## Touches
 - `plugin/scripts/publish-dist-branch.sh`
 - `plugin/scripts/verify-plugin-channel-assertions.ts`
@@ -66,5 +72,6 @@ GOAL-029「init 统一为单一 TS 引擎、终局无 .sh;并收窄发布集合�
 - `.github/workflows/release.yml`
 - `plugin/test/shipped-set.test.mjs`
 - `plugin/test/verify-plugin-channel-assertions.test.mjs`
+- `plugin/test/publish-dist-branch-closure-gate.test.mjs`
 - `plugin/sh-census-baseline.json`
 - `tasks/gap-shipped-plugin-tree-excludes-dev-only-content-and-has-a-shrink-only-size-ratchet.md`

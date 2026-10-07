@@ -111,7 +111,27 @@ find "$WORK" -mindepth 1 -maxdepth 1 ! -name '.git' -exec rm -rf {} +
 # slot); the published tree carries the release channel's name. The stamp is chained onto the copy
 # so it cannot be separated from it, and acts on the COPY, never plugin/ itself — see
 # scripts/stamp-marketplace-name.mjs. Fail-closed under `set -e`.
-rsync -a --exclude='.git' "${PLUGIN_DIR}/" "${WORK}/" && node "${REPO_ROOT}/scripts/stamp-marketplace-name.mjs" --root "${WORK}" --repo-root "${REPO_ROOT}"
+#
+# ── THE SHIPPED SET (tasks/gap-shipped-plugin-tree-excludes-dev-only-content-and-has-a-shrink-only-
+# size-ratchet, GOAL-029) ─────────────────────────────────────────────────────────────────────────
+# This rsync used to be the WHOLE plugin/ tree minus .git: measured on the 0.17.0 artifact, that
+# shipped 1062 files / 66 MB, of which 641 were test/fixture files (11.7 MB), 93 were the
+# checker-mutation cases, and the rest carried every dev-period baseline/exception/violation
+# manifest. Verification and delivery tooling was being published as product.
+# The exclusion list is NOT spelled here: it lives in `plugin/shipped-set-rules.txt` and is read
+# through its ONE parser (`plugin/scripts/shipped-set-rules.ts --print-rsync-excludes`), so the
+# assembly step, the release-gate assertion (`shipped-set-clean`), and
+# plugin/test/shipped-set.test.mjs all judge the SAME rules — a rule added to one side only is the
+# drift this indirection exists to prevent (硬规则 5b).
+# ⛔ The read is a `$( )` assignment on purpose: a command substitution propagates its exit status,
+# so an unreadable/empty rule file aborts this script under `set -e` BEFORE anything is copied.
+# A silently-empty exclusion list would restore the full-tree rsync above with no signal at all
+# (硬规则 3b — "no rules read" must never be indistinguishable from "nothing to exclude").
+SHIPPED_EXCLUDES="$(node --no-warnings --experimental-strip-types "${PLUGIN_DIR}/scripts/shipped-set-rules.ts" --print-rsync-excludes --rules "${PLUGIN_DIR}/shipped-set-rules.txt")"
+RSYNC_EXCLUDES=()
+while IFS= read -r _ex; do if [ -n "$_ex" ]; then RSYNC_EXCLUDES+=(--exclude "$_ex"); fi; done <<< "$SHIPPED_EXCLUDES"
+if [ "${#RSYNC_EXCLUDES[@]}" -eq 0 ]; then echo "ERROR: shipped-set exclusion list is empty — refusing to publish the whole plugin tree." >&2; exit 1; fi
+rsync -a --exclude='.git' "${RSYNC_EXCLUDES[@]}" "${PLUGIN_DIR}/" "${WORK}/" && node "${REPO_ROOT}/scripts/stamp-marketplace-name.mjs" --root "${WORK}" --repo-root "${REPO_ROOT}"
 
 # gap-dist-plugin-missing-node-modules-task-schema-yaml: this branch used to ship the copied
 # plugin/scripts (and gate-scripts) as RAW .ts alongside whatever dist/*.js happened to already

@@ -1,0 +1,44 @@
+{
+  "_reanchorLog": [
+    {
+      "when": "2026-10-07T02:15:50.527Z",
+      "from": null,
+      "to": {
+        "files": 0,
+        "bytes": 0,
+        "shLines": 0
+      },
+      "shipped": {
+        "files": 283,
+        "bytes": 54476516,
+        "shLines": 17545
+      },
+      "why": "bootstrap anchor: artifact built from this branch's plugin/ tree by the real publish-dist-branch.sh in a throwaway stub repo (112 bundles, 283 files)",
+      "preExclusion": {
+        "note": "the SAME tree published by the pre-change script (bare `rsync -a --exclude='.git'`), measured 2026-10-07 — the subtraction this task delivers",
+        "files": 1062,
+        "bytes": 65511262,
+        "shLines": 22859,
+        "shFileCount": 184,
+        "testFiles": 564,
+        "checkerMutationCases": 93,
+        "devManifests": 7
+      }
+    }
+  ],
+  "_axes": {
+    "files": "RATCHET — files of rule-excluded content PRESENT in the artifact (exactly 0 on a correct publish)",
+    "bytes": "RATCHET — their bytes",
+    "shLines": "RATCHET — their blank/comment-free *.sh lines (sh-census-check.ts countCodeLines)",
+    "shipped": "the artifact's OWN totals as last read from a clean build; compared by the release gate's shipped-set-clean"
+  },
+  "_note": "Shrink-only ratchet over the published plugin artifact's DEV-ONLY content. The three axes are the files/bytes/.sh-lines of rule-excluded content that is PRESENT in the artifact — 0 on a correct publish — so a reading above the baseline is RED and a working-tree baseline raised above git HEAD's is also RED (raising it for real takes a commit). `shipped` records the artifact's own totals for the release gate's size ceiling; it is NOT the per-run ratchet (see the churn note in plugin/scripts/shipped-set-rules.ts). Reanchored only from an artifact's own reading — see _reanchorLog.",
+  "files": 0,
+  "bytes": 0,
+  "shLines": 0,
+  "shipped": {
+    "files": 283,
+    "bytes": 54476516,
+    "shLines": 17545
+  }
+}

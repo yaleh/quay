@@ -394,7 +394,8 @@
     "cross-machine-verify.ts": "plugin/scripts/cross-machine-verify.sh 里那 5 处内嵌 python3（3 个 -c 单行 + 2 段 heredoc：拼接 JSON 对象的扫描器、ISO→epoch、hours-between、快速门的失败文件提取、报告的 JSON 发射）现在由本文件的哪些具名函数实现、输入/输出契约是什么，以及去掉它们之后这条入口在【没有 python3 的机器】上是否仍判出同一组取值？（可复核读数：sh-census-check 里 cross-machine-verify.sh 的 embedded 集合不含 python3 且 codeLines ≤ 25 的薄入口；plugin/test/cross-machine-verify-characterization.test.mjs 把 21 个 CLI 契约的 stdout/退出码按迁移前实测钉住）",
     "repo-root-derivation-check.ts": "Does any plugin/scripts file still re-derive the repo root by counting two levels up from its own directory constant, instead of calling the ONE shared resolver repo-root.ts's repoRoot() — the copy-instead-of-call half of the root-resolution defect class (tasks/gap-repo-root-derivation-bypasses-shared-accessor)?",
     "worktree-deps-provision.ts": "Does a freshly dispatched TASK worktree's node_modules step install dependencies the way its package manager requires — a declared .quay/config.yml loop.worktree_deps_install command, or pnpm auto-detected from pnpm-lock.yaml / package.json packageManager — instead of the symlink a pnpm project refuses (which made the worktree's suite step die in milliseconds with an empty log and get misfiled needs-human as cannot-attribute)?",
-    "worktree-deps-provision.sh": "Is the task-worktree dependency step reachable from the pure-bash dispatch-worktree-setup.sh WITHOUT that script gaining an embedded interpreter — a thin entry that execs worktree-deps-provision.ts, so the sh-census embeddedInterpreterLines reading of dispatch-worktree-setup.sh stays at zero?"
+    "worktree-deps-provision.sh": "Is the task-worktree dependency step reachable from the pure-bash dispatch-worktree-setup.sh WITHOUT that script gaining an embedded interpreter — a thin entry that execs worktree-deps-provision.ts, so the sh-census embeddedInterpreterLines reading of dispatch-worktree-setup.sh stays at zero?",
+    "shipped-set-rules.ts": "发布产物(plugin artifact)里【不该出现的东西】还有没有剩下,以及产物自己有多大 —— 规则声明在 plugin/shipped-set-rules.txt(目录/模式,不是文件名清单:test/、tests/、fixtures/、checker-mutation-cases/、*.test.*/*.spec.*、*-baseline.json/*-exceptions.txt/*-exemptions.*/*-violations.txt/*-violators.txt 及本规则/基线文件自身),本模块是它【唯一】的解析器与匹配器。它对一份已装配的产物给出两类读数:①规则排除、却仍然存在的路径(逐条列举 + 命中的那条规则)及其 files/bytes/.sh 有效行三个量 —— 这就是只降不升棘轮的三个轴,正确发布时应恒为 0;②产物自身的三项总量。同一份规则同时驱动【发布装配】(publish-dist-branch.sh 的 rsync --exclude,经 --print-rsync-excludes)与【发布门禁断言】(verify-plugin-channel-assertions.ts 的 shipped-set-clean),所以「排除什么」与「断言什么」结构上不可能各说各话(tasks/gap-shipped-plugin-tree-excludes-dev-only-content-and-has-a-shrink-only-size-ratchet;GOAL-029「收窄发布集合」,人 2026-10-07 裁定)?"
   },
   "GUARD_OBJECT": {
     "manager-tick-log-check.sh": "file:orchestration/manager-tick-log.md",
@@ -774,7 +775,8 @@
     "cross-machine-verify.ts": "每轮",
     "repo-root-derivation-check.ts": "按需",
     "worktree-deps-provision.ts": "按需",
-    "worktree-deps-provision.sh": "按需"
+    "worktree-deps-provision.sh": "按需",
+    "shipped-set-rules.ts": "每轮"
   },
   "INVALIDATION": {
     "verify-plugin-channel-assertions.ts": "失效前提：Claude Code plugin 仍是唯一的发布/安装渠道，且 release.yml 的 verify-plugin-channel 仍是发布门禁（门禁若移到别处，断言实现不变但调用点须同步）；断言依赖的直接量仍存在——VERSION、.claude-plugin/plugin.json、bin/quay --version、项目 .quay/plugin 链接、.quay/config.yml 的 providers.native、/proc/<pid>/cgroup、.quay/server.json、.quay/serve.log、installed_plugins.json。任一量改由另一个载体承载（例如版本改从被测对象自报接口取）⇒ 本条口径需同步，否则会把读不懂误判为合格。",
@@ -1145,7 +1147,8 @@
     "cross-machine-verify.ts": "失效前提：① plugin/scripts/cross-machine-verify.sh 仍以 exec node --no-warnings --experimental-strip-types \"$SCRIPT_DIR/cross-machine-verify.ts\" \"$@\" 这一形态调用（薄入口锁死的是那一行；换成别的运行时或直调别的文件，本行读数不再成立）；② 本文件仍是【逐行等价移植】而不是重写（判据是同一份输入下 stdout/退出码一致，见 plugin/test/cross-machine-verify-characterization.test.mjs）；③ 那 5 处 python3 的语义仍各自由一个具名导出覆盖（parseNotes / epoch / hoursBetween 与 pyRound2 / execGate 的失败文件提取 / pyJsonCompact 与 pyJsonIndent）。三点任一改变，本条读数不再成立",
     "repo-root-derivation-check.ts": "失效前提：① repoRoot() 仍是 repo-root.ts 导出的唯一根解析器（bundle→consumer→plain-git 标记向上走查 + git rev-parse --show-toplevel + cwd 兜底），且 ② 判定形态仍是「本文件的脚本目录常量 + 紧邻的两级上溯」。任一改变即失效：例如根解析改为显式参数/环境变量传入、脚本目录常量不再由 path.dirname(fileURLToPath(import.meta.url)) 派生、或 plugin/scripts 不再是扫描面。",
     "worktree-deps-provision.ts": "失效前提：dispatch-worktree-setup.sh 与 packages/quay/src/goal-preview.ts 的 ensureWorktreeNodeModules 不再经 packages/quay/src/worktree-deps.ts 的同一包管理器判定，或该模块不再是唯一的判定实现。",
-    "worktree-deps-provision.sh": "失效前提：dispatch-worktree-setup.sh 改为直接 exec node（不再经本薄入口），或本文件被删除/改名使入口契约失效。"
+    "worktree-deps-provision.sh": "失效前提：dispatch-worktree-setup.sh 改为直接 exec node（不再经本薄入口），或本文件被删除/改名使入口契约失效。",
+    "shipped-set-rules.ts": "失效前提:①发布装配仍是 plugin/scripts/publish-dist-branch.sh 的 rsync 那一步 —— 渠道换成别的机制、或排除改由构建器而非 rsync 表达时,--print-rsync-excludes 这半边退休(断言半边仍有效,但规则与装配须重新对齐);②发布门禁仍是 plugin/scripts/verify-plugin-channel-assertions.ts(断言若移到别处,调用点须同步);③esbuild 仍把内联模块的路径以【相对】形式写进产物 —— 若改为绝对路径或不写路径,bytes 轴可以重新设门,SIZE_GATED_AXES 只门 files/shLines 的取舍须重估(实测:同一份源码在不同构建树位置下相差 225,828 字节,同一构建重复跑相差 ±3 字节);④产物仍由「源码树 rsync + 删原始 .ts + 打 dist bundle」三步装配 —— 装配形变会改变三个总量的含义。"
   },
   "LAST_REAFFIRMED": {
     "verify-plugin-channel-assertions.ts": "2026-10-06",
@@ -1516,7 +1519,8 @@
     "cross-machine-verify.ts": "2026-09-20",
     "repo-root-derivation-check.ts": "2026-09-21",
     "worktree-deps-provision.ts": "2026-10-05",
-    "worktree-deps-provision.sh": "2026-10-05"
+    "worktree-deps-provision.sh": "2026-10-05",
+    "shipped-set-rules.ts": "2026-10-07"
   },
   "MATCHING": {
     "verify-plugin-channel-assertions.ts": "position",
@@ -1887,7 +1891,8 @@
     "cross-machine-verify.ts": "keyword",
     "repo-root-derivation-check.ts": "position",
     "worktree-deps-provision.ts": "n/a",
-    "worktree-deps-provision.sh": "n/a"
+    "worktree-deps-provision.sh": "n/a",
+    "shipped-set-rules.ts": "position"
   },
   "CONSUMER": {
     "verify-plugin-channel-assertions.ts": ".github/workflows/release.yml 的 verify-plugin-channel 步骤（CI 门禁调用点）与发布前本地演练（README「发布前本地演练」）。",
@@ -2061,7 +2066,8 @@
     "checker-mutation-check.ts": "谁按：plugin/scripts/checker-mutation-check.sh 的薄入口 —— 唯一直接调用者，每次调用都 exec 到本文件。入口自身的调用方：plugin/scripts/runner-static-gate.ts 的两处 run_checker（全量 @static-tier full 的 --check 与 change-tier 的 --check-changed --repo-root）、元自检用例 plugin/scripts/checker-mutation-cases/checker-mutation-check.sh（--selftest）。机械消费者：plugin/test/checker-mutation-check.test.mjs 与 plugin/test/checker-mutation-check-characterization.test.mjs（后者可用 CMC_UNDER_TEST/CMC_RUNNER 直接指向本文件）。",
     "repo-root-derivation-check.ts": "谁按：plugin/scripts/runner-static-gate.ts 的 run_static_checks（@static-tier change，@static-object plugin/scripts/）——每次全量 suite 各一次，且任何 delta 落在 plugin/scripts/ 下的 scoped 门同样选中它；条件=要判「plugin/scripts 里还有没有手搓『脚本目录常量向上两级』的仓根推导」。命令行：node --no-warnings --experimental-strip-types plugin/scripts/repo-root-derivation-check.ts --root <dir> [--json] [--scan <file-or-dir>]…（--scan 可把判定收窄到一个文件，夹具与单文件干跑用）",
     "worktree-deps-provision.ts": "谁按：plugin/scripts/dispatch-worktree-setup.sh（经 plugin/scripts/worktree-deps-provision.sh 薄入口）；packages/quay/src/goal-preview.ts 的 ensureWorktreeNodeModules；plugin/test/dispatch-worktree-setup.test.mjs。",
-    "worktree-deps-provision.sh": "谁按：plugin/scripts/dispatch-worktree-setup.sh 第 1 步；其 --help 由本薄入口转发。"
+    "worktree-deps-provision.sh": "谁按：plugin/scripts/dispatch-worktree-setup.sh 第 1 步；其 --help 由本薄入口转发。",
+    "shipped-set-rules.ts": "谁按:①scripts/test.sh 的 plugin/test/shipped-set.test.mjs(双控:真产物必须 0 违规且三轴不超基线、把排除列表从 rsync 行拿掉必须红、往干净产物塞 foo.test.mjs 必须红、棘轮 over/raised/reanchor 三向、零规则必须 NOT-EVALUATED);②.github/workflows/release.yml 的 verify-plugin-channel 两个 scope 步骤经 verify-plugin-channel-assertions.ts 的 shipped-set-clean 断言按(先判规则排除内容为 0,再判 files/shLines 不超记录值);③人按:本文件的 CLI —— --check <artifactDir>(读一份已装配的产物;退出 0/1/2)、--reanchor(从产物【自己的读数】重锚,有规则排除内容在时拒绝)、--print-rsync-excludes(publish-dist-branch.sh 用它生成 rsync --exclude)。⛔ 本模块【不进产物】(与 verify-plugin-channel-assertions.ts 同一条纪律):它的两个输入 —— 规则 plugin/shipped-set-rules.txt 与基线 plugin/shipped-set-baseline.json —— 都被排除规则本身排除了,所以一份打好的 bundle 只可能回答 NOT-EVALUATED;它永远从源码检出运行。数据文件:规则 plugin/shipped-set-rules.txt、基线 plugin/shipped-set-baseline.json(三轴只降不升,且相对 git HEAD 的值也只许降);条件=要判『发布集合是否在重新长回开发期内容、体积是否在回升』—— 这正是 GOAL-029 的取假点"
   },
   "SUPERSEDED": {
     "send-keys-verified.sh": "REMOVED 2026-08-10 (gap-retired-script-still-callable, human ruling) — superseded by send-keys-reliable.sh under outer ruling F (2026-08-04); its md5 pane-hash criterion is ADR-016-forbidden. Deleted with its test (send-keys-verified.test.mjs) and leak doc (send-keys-verified-test-leaks-tmux-servers.md). Crystallization residue poisons context — the implementation must NOT exist.",

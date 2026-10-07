@@ -1,7 +1,7 @@
 ---
 id: gap-shipped-shell-limited-to-runtime-reachable-set-and-delivery-verify-tools-leave-the-artifact
 title: 发布产物里的 .sh 只保留运行时可达的集合——按"实际被执行"的引用闭包派生，交付/验证工具（已取消的 tgz 渠道）出局
-status: todo
+status: ready
 labels:
   - gap
   - priority:p2

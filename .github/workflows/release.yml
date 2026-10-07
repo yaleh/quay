@@ -243,6 +243,13 @@ jobs:
       # ⛔ Run the checker from THIS SOURCE CHECKOUT, not from `$INSTALLED`: the published artifact
       # strips raw plugin `.ts` (publish-dist-branch.sh deletes every plugin `.ts`), so the checker
       # exists there only as a dist bundle. It is a gate, not a deliverable.
+      # ⛔ That is also what makes the `shipped-set-clean` assertion possible: it reads the rule set
+      # (plugin/shipped-set-rules.txt) and the ratchet baseline (plugin/shipped-set-baseline.json)
+      # from THIS checkout and walks `--installed` against them — the artifact deliberately carries
+      # neither file. The assertion is one of the two halves of
+      # tasks/gap-shipped-plugin-tree-excludes-dev-only-content-and-has-a-shrink-only-size-ratchet:
+      # the assembly step (publish-dist-branch.sh, run by the step above) applies the SAME rule set as
+      # rsync --exclude args, so "what is excluded" and "what is asserted" cannot drift.
       - name: Verify the channel — project-scope assertions
         env:
           INSTALLED: ${{ steps.installed.outputs.dir }}
