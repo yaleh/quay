@@ -1,7 +1,7 @@
 ---
 id: AC-333
 title: 升级矩阵：最近发布版本的真实 init 输出经当前 init 后校验通过、兼容值与注释保留、幂等
-status: active
+status: achieved
 kind: criterion
 goal: GOAL-029
 criterion: >-
@@ -47,6 +47,11 @@ statusLog:
     to: active
     actor: goal-cli
     reason: ""
+  - at: 2026-10-07T03:22:18.124Z
+    from: active
+    to: achieved
+    actor: goal-driver
+    reason: "I2: criterion pass"
 fidelity:
   verdict: not-evaluated
   reason: no judge configured
