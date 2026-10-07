@@ -41,14 +41,26 @@ function writeFailingTest(dir) {
   return p;
 }
 
-/** A fixture workspace for the config-key dimension: quay-init.sh writer face + one consumer.ts. */
+/**
+ * A fixture workspace for the config-key dimension: the WRITER face + one consumer.ts.
+ *
+ * ⛔ The writer face moved from `plugin/scripts/quay-init.sh` to the engine when that entry became a
+ * ≤40-line shim over the CLI (gap-quay-init-sh-becomes-a-shim-over-bin-quay-init-and-callers-switch);
+ * the checker derives the delivered keys from `packages/quay/src/init.ts` now — the
+ * `LOOP_VERSION_DEFAULTS` table plus the fresh-install template's interpolated `loop:` entries.
+ */
 function writeConfigFixture(dir, { orphan = false } = {}) {
   fs.mkdirSync(path.join(dir, 'plugin', 'scripts'), { recursive: true });
   fs.mkdirSync(path.join(dir, 'packages', 'quay', 'src'), { recursive: true });
-  const lines = ['loop:', '  consumer_key: present'];
-  if (orphan) lines.push('  orphan_key: orphan');
-  lines.push('EOF');
-  fs.writeFileSync(path.join(dir, 'plugin', 'scripts', 'quay-init.sh'), lines.join('\n') + '\n', 'utf8');
+  const lines = [
+    'export const LOOP_VERSION_DEFAULTS = { consumer_key: "present" };',
+    'export function generateConfigContent() {',
+    '  return [',
+    '    `  consumer_key: ${1}`,',
+  ];
+  if (orphan) lines.push('    `  orphan_key: ${2}`,');
+  lines.push('  ].join(' + JSON.stringify('\\n') + ');', '}');
+  fs.writeFileSync(path.join(dir, 'packages', 'quay', 'src', 'init.ts'), lines.join('\n') + '\n', 'utf8');
   fs.writeFileSync(path.join(dir, 'plugin', 'scripts', 'consumer.ts'), 'export const v = "consumer_key";\n', 'utf8');
 }
 

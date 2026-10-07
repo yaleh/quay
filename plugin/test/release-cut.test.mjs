@@ -35,7 +35,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
-import { mkdtempSync, rmSync, existsSync, appendFileSync, writeFileSync, readFileSync, symlinkSync, statSync, linkSync, unlinkSync } from "node:fs";
+import { mkdirSync, mkdtempSync, rmSync, existsSync, appendFileSync, writeFileSync, readFileSync, symlinkSync, statSync, linkSync, unlinkSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -165,23 +165,25 @@ function makeCloneIn(parent, prefix) {
 }
 
 /**
- * Make the fixture's `develop` a tree where the closure ratchet CANNOT measure: drop
- * `plugin/scripts/quay-init.sh` (the laydown `quay-init-closure-ratchet.ts --reanchor` runs) and
- * COMMIT the removal, so the fixture stays clean and the release worktree — cut off `develop` —
- * inherits the hole. The ratchet then reports NOT-EVALUATED (exit 3) instead of a footprint, which
- * is the failure `release-cut` folds into `CAUSE=release-cut-bump-ratchet-failed`.
+ * Make the fixture's `develop` carry a `scripts/stamp-version.ts` that FAILS with a distinctive,
+ * greppable reason and a non-zero exit, COMMITTED so the fixture stays clean and the release worktree
+ * — cut off `develop` — inherits it. The bump stage then dies in `CAUSE=release-cut-bump-stamp-failed`,
+ * which is where `diagnosticTail` has to carry the CHILD's own words into the CAUSE line.
  *
- * This is the REAL invocation path, not a unit call: the reason must travel from the ratchet's own
- * process, through the `stdio` capture in `release-cut.mjs`, into the CAUSE line the cutter sees.
+ * ⛔ The vehicle changed (gap-quay-init-sh-becomes-a-shim-over-bin-quay-init-and-callers-switch): it
+ * used to be the closure ratchet, which is retired. The INVARIANT under test is unchanged — a
+ * fixed-CAUSE failure must carry the child process's own reason, never just fixed prose — and the
+ * stamper is the other child on that same path.
  */
-function breakRatchetOnDevelop(root) {
+function breakStamperOnDevelop(root) {
   assert.equal(git(root, "rev-parse", "--verify", "-q", "refs/heads/develop").status, 0,
     "the fixture must already carry a local `develop`");
-  assert.equal(git(root, "checkout", "-q", "develop").status, 0, "checkout develop to commit the removal");
-  assert.equal(git(root, "rm", "-q", "plugin/scripts/quay-init.sh").status, 0,
-    "the fixture must really remove the ratchet's laydown entry point");
-  assert.equal(git(root, "commit", "-q", "-m", "fixture: drop quay-init.sh so the ratchet cannot measure").status, 0,
-    "the removal must be COMMITTED — an uncommitted edit would trip the dirty-tree preflight instead");
+  assert.equal(git(root, "checkout", "-q", "develop").status, 0, "checkout develop to commit the edit");
+  writeFileSync(join(root, "scripts", "stamp-version.ts"),
+    'process.stderr.write("STAMPER-BLEW-UP: the fixture wants this exact sentence carried through\\n");\nprocess.exit(3);\n');
+  assert.equal(git(root, "add", "scripts/stamp-version.ts").status, 0, "stage the broken stamper");
+  assert.equal(git(root, "commit", "-q", "-m", "fixture: make stamp-version.ts fail with its own reason").status, 0,
+    "the edit must be COMMITTED — an uncommitted edit would trip the dirty-tree preflight instead");
   assert.equal(git(root, "checkout", "-q", "author").status, 0, "return HEAD to `author` (production's shape)");
   assert.equal(git(root, "status", "--porcelain", "--untracked-files=no").stdout.trim(), "",
     "the fixture must be clean, or the cut would refuse on CAUSE=release-cut-dirty-tree for the wrong reason");
@@ -227,7 +229,7 @@ test("the fixture reports its clone locality as an ENUMERATED value that agrees 
 // AC1 — the dry run: exit 0, every step listed, nothing written
 // ══════════════════════════════════════════════════════════════════════════════════════════════
 
-test("--dry-run exits 0, lists every step in order (worktree path, --root, ledger path, bump, ratchet), and writes nothing", () => {
+test("--dry-run exits 0, lists every step in order (worktree path, --root, ledger path, bump), and writes nothing", () => {
   const c = makeClone("dryrun");
   try {
     const before = git(c.root, "status", "--porcelain").stdout;
@@ -249,10 +251,9 @@ test("--dry-run exits 0, lists every step in order (worktree path, --root, ledge
     const iPush = idx(/git -C \S+ push origin develop refs\/tags\/v9\.9\.9/);
     const iDispatch = idx(/gh workflow run release\.yml -f tag=v9\.9\.9/);
     const iBump = idx(/bump VERSION 9\.9\.9 -> 9\.10\.0/);
-    const iRatchet = idx(/re-anchor docs\/analysis\/quay-init-closure-ratchet\.baseline\.json/);
     const iRemove = idx(/worktree remove \S*release-v9\.9\.9/);
     assert.ok(iWorktree < iBranch && iBranch < iFinish && iFinish < iPush && iPush < iDispatch
-      && iDispatch < iBump && iBump < iRatchet && iRatchet < iRemove,
+      && iDispatch < iBump && iBump < iRemove,
       `the steps must be listed in the order they would run: ${r.stdout}`);
 
     // The three landing facts the AC names explicitly.
@@ -425,37 +426,43 @@ test("a real cut creates a LINKED WORKTREE, lands the branch+tag, writes the led
 // gap-release-cut-subprocess-stderr-discarded — a fixed-CAUSE failure must carry the CHILD's reason
 // ══════════════════════════════════════════════════════════════════════════════════════════════
 
-test("a ratchet failure on the REAL cut path carries the ratchet's OWN reason into CAUSE= (not just fixed prose)", () => {
-  const c = makeClone("ratchetfail");
+test("a failing child on the REAL cut path carries its OWN reason into CAUSE= (not just fixed prose)", () => {
+  // WHAT THIS PINS (unchanged): a fixed-CAUSE failure must carry the CHILD process's own words, never
+  // just fixed prose. Before this existed, a cut died with "…the bump is NOT committed" and said
+  // nothing about WHY (measured 2026-10-01 / 2026-10-04: two real cuts had to be hand-archaeologied
+  // by re-running the swallowed command). The INVARIANT lives in `diagnosticTail`, which every such
+  // CAUSE line funnels through.
+  //
+  // ⚠️ THE VEHICLE CHANGED (gap-quay-init-sh-becomes-a-shim-over-bin-quay-init-and-callers-switch):
+  // it used to be the closure ratchet, made to fail by breaking the FIXTURE's `develop` (the ratchet
+  // ran `<worktree>/plugin/scripts/quay-init.sh`). The ratchet is RETIRED, and the remaining children
+  // on the cut path run from the CUTTER's own tree, which a fixture cannot break without also
+  // tripping the clean-tree preflight. `gh` is the one child reached purely through PATH — so the
+  // test puts a FAILING `gh` there and drives the real dispatch step.
+  const c = makeClone("childreason");
+  const fakeBin = join(c.parent, "fakebin");
   try {
-    breakRatchetOnDevelop(c.root);
+    mkdirSync(fakeBin, { recursive: true });
+    const gh = join(fakeBin, "gh");
+    writeFileSync(gh, '#!/usr/bin/env bash\necho "GH-BLEW-UP: the fixture wants this exact sentence carried through" >&2\nexit 5\n', { mode: 0o755 });
 
-    const r = run(["9.9.7", "--root", c.root, "--no-push", "--no-dispatch"]);
+    const r = run(["9.9.7", "--root", c.root, "--no-push"], {
+      env: { ...process.env, PATH: `${fakeBin}:${process.env.PATH}` },
+    });
 
-    // The cut got past the preflight and landed the tag; it then died in the bump stage's ratchet
-    // step. Exit 1 (post-preflight failure), not 2 (refused preflight) — anything else means this
-    // test drove a different arm and the assertions below would be vacuous.
+    // The cut got past the preflight and landed the tag; it then died in the dispatch step. Exit 1
+    // (post-preflight failure), not 2 (refused preflight) — anything else means this test drove a
+    // different arm and the assertions below would be vacuous.
     assert.equal(r.status, 1,
-      `the cut must reach and fail in the ratchet stage: status=${r.status} ${r.stdout}${r.stderr}`);
+      `the cut must reach and fail in the dispatch stage: status=${r.status} ${r.stdout}${r.stderr}`);
     assert.equal(git(c.root, "rev-parse", "--verify", "--quiet", "refs/tags/v9.9.7").status, 0,
-      `the cut landed the tag before the bump stage: ${r.stderr}`);
+      `the cut landed the tag before the failing step: ${r.stderr}`);
 
-    // THE POINT: the reason appears in the SAME output, AFTER the CAUSE token. Before the fix the
-    // line ended at "…the bump is NOT committed" and said nothing about WHY (measured 2026-10-01 /
-    // 2026-10-04: two real cuts had to be hand-archaeologied by re-running the swallowed command).
-    assert.match(r.stderr, /CAUSE=release-cut-bump-ratchet-failed/,
-      `the ratchet stage's OWN CAUSE must be named: ${r.stderr}`);
-    assert.match(r.stderr, /CAUSE=release-cut-bump-ratchet-failed[^\n]*plugin\/scripts\/quay-init\.sh not found/,
-      `the ratchet's own verdict must follow the CAUSE on the same line, not be discarded: ${r.stderr}`);
-    assert.match(r.stderr, /NOT-EVALUATED/,
-      `the ratchet's enumerated NOT-EVALUATED verdict must survive into the cutter's output: ${r.stderr}`);
-
-    // MUTATION CONTROL (AC5): reverting the ratchet call's stdio to `["ignore","ignore","ignore"]`
-    // makes `diagnosticTail` see nothing, so the two assertions above go red — this test measures the
-    // capture rather than restating the fixed prose. (Verified by running that mutation; see the
-    // task's evidence section.)
-    assert.equal(existsSync(join(c.parent, "repo-worktrees", "release-v9.9.7")), true,
-      "a half-done cut must LEAVE its worktree in place (it does not silently clean up evidence)");
+    // THE POINT: the child's own sentence appears in the SAME output, AFTER the CAUSE token.
+    assert.match(r.stderr, /CAUSE=release-cut-dispatch-failed/,
+      `the dispatch stage's OWN CAUSE must be named: ${r.stderr}`);
+    assert.match(r.stderr, /CAUSE=release-cut-dispatch-failed[^\n]*GH-BLEW-UP/,
+      `the child's own reason must follow the CAUSE on the same line, not be discarded: ${r.stderr}`);
   } finally {
     cleanup(c.parent);
   }

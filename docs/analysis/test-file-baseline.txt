@@ -626,7 +626,6 @@ plugin/test/psi-window-join.test.mjs
 plugin/test/publish-dist-branch-closure-gate.test.mjs
 plugin/test/quality-gate-driver-loop-watchdog.test.mjs
 plugin/test/quality-gate-driver.test.mjs
-plugin/test/quay-init-closure-ratchet.test.mjs
 plugin/test/quay-init-config-env-keys.test.mjs
 plugin/test/quay-init-install-fixture-wipe.test.mjs
 plugin/test/quay-init-laydown-closure.test.mjs

@@ -174,7 +174,10 @@ describe("AC3 — fresh install pins every carrier dir", () => {
         `${k} must resolve inside the project, not the plugin tree; got ${env[k]}`,
       );
     }
-    assert.match(stdout + stderr, /wrote: \.quay\/config\.yml/);
+    // The report line is the engine's own (`Created <path>`); the retired shell entry said
+    // `wrote: .quay/config.yml`. Either way the run must SAY it wrote the config — the assertion is
+    // about the report being present, not about which surface phrased it.
+    assert.match(stdout + stderr, /Created \S*\.quay\/config\.yml/);
   });
 
   test("the pinned sibling dirs are the project's own (each resolves under the workspace)", () => {
@@ -275,9 +278,13 @@ describe("AC4 — existing configs are backfilled idempotently", () => {
 
     const second = runInit(ws);
     assert.equal(second.status, 0, "second install");
+    // The no-op must be REPORTED as one. The retired shell entry had a carrier-pins-specific
+    // `unchanged: .quay/config.yml providers.native.env: (four carrier dirs already pinned)` line;
+    // the single upgrade engine reports the same fact in its own vocabulary (one line for the whole
+    // config, "already current"), which is strictly the same reading.
     assert.match(
       second.stdout,
-      /unchanged: \.quay\/config\.yml providers\.native\.env: \(four carrier dirs already pinned/,
+      /unchanged: \.quay\/config\.yml/,
       `the no-op must be REPORTED as a no-op; stdout was:\n${second.stdout}`,
     );
     assert.equal(

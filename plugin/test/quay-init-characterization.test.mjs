@@ -1,35 +1,41 @@
-// quay-init-characterization.test.mjs — pin the CLOSED-SET FILE SURFACE and exit code of
-// `plugin/scripts/quay-init.sh`.
+// quay-init-characterization.test.mjs — pin the CLOSED-SET FILE SURFACE and exit code of the shipped
+// init entry (`plugin/scripts/quay-init.sh`).
 //
-// (gap-arch-quay-init-sh-python-heredocs-to-native, AC2/AC3.) The port that moved this script's
+// (gap-arch-quay-init-sh-python-heredocs-to-native, AC2/AC3.) The port that moved the shell script's
 // TWELVE embedded `python3` invocations into `packages/quay/src/init.ts` promised EQUIVALENCE, not
 // improvement: same six-file surface, same exit code, same report lines. An equivalence claim with
-// nothing pinning it is an assertion (硬规则 4): the port rewrites two whole YAML documents through
-// `yaml.safe_dump(...)`-compatible serialisation and edits another in place by INDENTATION, and any
-// of those three can drift a byte at a time without any test noticing.
+// nothing pinning it is an assertion (硬规则 4), so the surface was pinned by hash.
 //
-// WHAT IS PINNED. For each scenario the test runs the REAL script on a throwaway workspace and
-// pins, by SHA-256 of the path-normalised bytes:
-//   · every closed-set file's content (config.yml, profiles.yml, .gitignore, launch.settings.json,
-//     settings.json) and the tasks/ + goals/ directory listings;
-//   · the script's EXIT CODE.
+// ⚠️ RE-SCOPED 2026-10-07 (gap-quay-init-sh-becomes-a-shim-over-bin-quay-init-and-callers-switch).
+// The entry is now a ≤40-line SHIM that execs `bin/quay init`, so this file no longer characterizes
+// a second implementation — it characterizes THE implementation (the TS engine), reached through the
+// same path a user's script would take. Three shell-era scenarios retired with their carriers:
+//   · "loop VALUE change … PyYAML folds at 80" — the shell's `ensure_loop_config` re-serialiser.
+//     The engine's upgrade path is the SAME comment-preserving, per-key pipeline; its byte-level
+//     behaviour is pinned by `packages/quay/test/init.test.mjs` (GOAL-029①/③/④).
+//   · "a CORRUPT config fails closed with rc=1" — GOAL-029 / AC-330 CHANGED this contract on
+//     purpose: an unparseable config is now REBUILT with the broken bytes preserved beside it
+//     (exit 0), not refused. The successor pin is `quay-init.test.mjs`'s "an UNPARSEABLE config is
+//     NEVER reported as reconciled" + `packages/quay/test/init.test.mjs`.
+//   · "an EXISTING legacy config: the migration DELETES the binding lines" — successor pin is
+//     `quay-init.test.mjs` AC7 ("the migration is LINE-WISE: only the path/mcp_entry lines go,
+//     every other line (comments included) is byte-identical").
+//
+// WHAT IS PINNED HERE. The FRESH install's closed-set surface, by SHA-256 of the path-normalised
+// bytes, plus the run's exit code; and two behavioural arms (dry-run writes nothing; an upgrade
+// preserves a user's own key and comment) that the hash alone cannot express.
 // Normalisation replaces the two machine-specific roots (the temp workspace and this checkout's
 // plugin dir) with placeholders; nothing else is normalised, so a one-byte change anywhere in the
 // surface is a RED.
 //
-// WHY A HASH AND NOT A DIFF-AGAINST-EXPECTED-TEXT. The interesting half of this surface is a YAML
-// document produced by a round-trip that DELIBERATELY drops comments and reformats (that is what
-// shipped). Spelling 60 lines of generated YAML here would be a second copy that drifts from the
-// writer — the exact failure mode the repo's single-source-of-truth principle forbids. A hash is
-// not a copy of the content; it is a claim that the content did not move. Re-anchoring after an
-// INTENTIONAL change is a one-line, reviewable edit to the table below.
+// WHY A HASH AND NOT A DIFF-AGAINST-EXPECTED-TEXT. Spelling the generated YAML here would be a
+// second copy that drifts from the writer — the failure mode the repo's single-source-of-truth
+// principle forbids. A hash is not a copy of the content; it is a claim that the content did not
+// move. Re-anchoring after an INTENTIONAL change is a one-line, reviewable edit to the table below.
 //
-// FALSIFIABILITY. The table was taken from the UNCHANGED script before the port (see the task's
-// notes: `git show HEAD:plugin/scripts/quay-init.sh` run side by side with the ported one on the
-// same fixtures — identical rc + identical normalised bytes on all scenarios), and the port was
-// demonstrated to red it: perturbing `ensureLoopConfig`'s output makes the `loop-values-changed`
-// scenario fail, and reverting makes it pass. A characterization that cannot go red is a
-// tautology.
+// FALSIFIABILITY. The table was taken from the unchanged script before the port and demonstrated to
+// go red (perturbing the writer's output made a scenario fail; reverting made it pass). A
+// characterization that cannot go red is a tautology.
 
 import { test, before, after } from "node:test";
 import assert from "node:assert/strict";
@@ -187,7 +193,16 @@ const PINNED = {
       // the validator vacuously but handed the loop driver NO gate (`params.gates[0]` undefined);
       // `acceptance` is a built-in, always resolvable, and is the value the reconcile now fills into
       // existing configs too. The other five files hash unchanged again — the same targeted cross-check.
-      ".quay/config.yml  90205083553f5ed9aab88cb671d0f1d6aa57a79ab42d108344edded882eb68b3",
+      // RE-ANCHORED 2026-10-07 (gap-quay-init-sh-becomes-a-shim-over-bin-quay-init-and-callers-switch):
+      // the shipped entry is a shim over `bin/quay init`, so this row now pins the TS engine's fresh
+      // config instead of the shell heredoc's. The other FOUR files hash UNCHANGED — including
+      // `.claude/launch.settings.json`, which is the cross-check that matters here: the engine's
+      // inline launch template had DRIFTED from the shipped `plugin/.claude/launch.settings.json`
+      // (missing the two `CLAUDE_CODE_DISABLE_*` keys the shipped file gained 2026-08-11), so making
+      // the engine the sole writer surfaced the drift and it was fixed in the same change —
+      // `packages/quay/test/init.test.mjs` now binds the two byte-for-byte. If this row moves again,
+      // check whether it is the launch carrier that moved; that invariant is the reason it did not.
+      ".quay/config.yml  3eaaf7aa1fc453cb7b5df0ae6f525384e225ff542d9603d567a95d2c48aa67ff",
       ".quay/profiles.yml  0f781fbcc8140fd1b4732d877f8484f2c6f14856e2419167281976678b748bb0",
       ".gitignore  f9e6655aa4762432b178420cf9c9d773fc88a67822c6e44fcbdf5f51a8e6ec7a",
       ".claude/launch.settings.json  25e4ace2586d593da41a0b0f7380c2d77aed03d404b7a0f3414329f6df30baec",
@@ -247,113 +262,37 @@ test("AC2 — the fresh-install config carries the provider map + the loop param
   );
 });
 
-test("AC3 — an EXISTING legacy config: the migration DELETES the binding lines and keeps every comment", () => {
-  // ⚠️ RE-ANCHORED 2026-10-06 (gap-project-quay-pointer-is-init-plugin-root-and-version-records-
-  // derive-from-it): this scenario used to characterize the round-trip YAML rewrite (drop comments,
-  // reformat `mcp_entry` into a block sequence). That rewrite is RETIRED — the migration is now
-  // LINE-WISE (⛔ never a re-serialization: `.quay/` is gitignored, so dropped comments are
-  // unrecoverable). The new contract is pinned here: the two binding lines vanish, everything else
-  // (comments included) is byte-identical.
-  const base = makeBase();
-  const ws = initWorkspace(base);
-  assert.equal(runInit(ws, argsFor(base)).status, 0, "baseline install");
-  // A legacy BARE-PATH binding + a stale project-local runtime ⇒ both migration rules fire.
-  const p = path.join(ws, ".quay", "config.yml");
-  let cfg = fs.readFileSync(p, "utf8");
-  cfg = cfg.replace(
-    /^providers:$/m,
-    "# a comment the migration must preserve verbatim\nproviders:",
-  );
-  cfg = cfg.replace(/^ {2}native:\n/m, '  native:\n    path: "."\n    mcp_entry: ["quay-native", "mcp"]\n');
-  fs.writeFileSync(p, cfg);
-  fs.mkdirSync(path.join(ws, ".quay", "runtime", "bin"), { recursive: true });
-  fs.writeFileSync(path.join(ws, ".quay", "runtime", "bin", "quay-native.js"), "stale-runtime-bytes\n");
-
-  const r = runInit(ws, argsFor(base));
-  assert.equal(r.status, 0, `upgrade must exit 0\nstdout:\n${r.stdout}\nstderr:\n${r.stderr}`);
-  const after = configText(ws, base);
-  // The comment header SURVIVES (line-wise deletion), and the inserted comment is intact.
-  assert.ok(after.includes("# .quay/config.yml — generated by quay-init"), "the line-wise migration must NOT drop comments");
-  assert.ok(after.includes("# a comment the migration must preserve verbatim"), "an unrelated comment must survive verbatim");
-  // The two binding lines are GONE; nothing replaces them.
-  assert.doesNotMatch(after, /^ {4}path:/m, "the binding `path` line must be deleted");
-  assert.doesNotMatch(after, /^ {4}mcp_entry:/m, "the binding `mcp_entry` line must be deleted");
-  assert.match(r.stdout, /removed: providers\.native\.path/);
-  assert.match(r.stdout, /removed: providers\.native\.mcp_entry/);
-  assert.match(r.stdout, /retired-orphan-runtime: .* -> backup .*quay-init-backups\//);
-  assert.ok(!fs.existsSync(path.join(ws, ".quay", "runtime")), "the stale unreferenced runtime must be retired (moved to a backup)");
-  // The carrier pins and the loop values were already current ⇒ NO further rewrite; both steps
-  // report their unchanged state (the negative control for "no gratuitous rewrite").
-  assert.match(r.stdout, /unchanged: \.quay\/config\.yml providers\.native\.env:/);
-  assert.match(r.stdout, /unchanged: \.quay\/config\.yml loop:/);
-});
-
-test("AC3 — a loop VALUE change rewrites the document, folding long plain scalars at 80 columns", () => {
-  // The one path where `ensureLoopConfig` WRITES. It re-serialises with
-  // `yaml.safe_dump(allow_unicode=True, sort_keys=False, default_flow_style=False)` semantics —
-  // including PyYAML's plain-scalar folding at `best_width`(80), which the `yaml` package does NOT
-  // reproduce on its own. A long spaced value is therefore a real falsifier for the folding shim.
+test("AC3 — an EXISTING config carrying a user's own key and comment is UPGRADED, and both survive", () => {
+  // The engine's upgrade path is comment-preserving and per-key. This pins the two properties a hash
+  // over the fresh surface cannot express: a user's own top-level key and their own comment are still
+  // there after a re-run, and the run EXITS 0 rather than refusing — "already exists" is gone
+  // (GOAL-029: the state of the target decides, and a parseable config is upgraded in place).
   const base = makeBase();
   const ws = initWorkspace(base);
   assert.equal(runInit(ws, argsFor(base)).status, 0, "baseline install");
   const p = path.join(ws, ".quay", "config.yml");
-  let cfg = fs.readFileSync(p, "utf8");
-  cfg = cfg.replace(/^  repo_root: .*$/m, "  repo_root: /somewhere/else");
-  // Only `repo_root` DIFFERS from what the run will use (the CLI flag) — that single difference is
-  // what makes the writer fire. `test_command` is left long and is NOT passed as a flag, so the
-  // config's own value is read back and re-serialised: it is the folding probe.
-  cfg = cfg.replace(
-    /^  test_command: .*$/m,
-    "  test_command: bash scripts/test.sh --alpha --beta --gamma --delta --epsilon --zeta --eta --theta --iota",
-  );
-  cfg = cfg.replace(
-    /^loop:$/m,
-    "gates:\n  dod: a fairly long plain scalar value with many single spaces in it that goes past eighty columns\nloop:",
-  );
-  fs.writeFileSync(p, cfg);
+  const cfg = fs.readFileSync(p, "utf8");
+  fs.writeFileSync(p, "# a user comment the upgrade must preserve verbatim\n" + cfg + "\nmy_own_key: 7\n");
 
-  // ⛔ NO `--test-command`: the flag would WIN over the config's value and be written back, so the
-  // long value would never reach the serializer. Without it the config-preserving reader supplies
-  // `test_command` (the config already carries it from the baseline install), which is exactly the
-  // value whose folding this scenario exists to pin.
-  const r = runInit(ws, argsFor(base).filter((a, i, all) => a !== "--test-command" && all[i - 1] !== "--test-command"));
-  assert.equal(r.status, 0, `rewrite must exit 0\nstdout:\n${r.stdout}\nstderr:\n${r.stderr}`);
-  assert.match(r.stdout, /wrote: \.quay\/config\.yml loop:/);
-  const after = configText(ws, base);
-  assert.match(after, /^ {2}repo_root: <BASE>\/ws$/m, "the CLI flag wins and is written back");
-  // PyYAML's fold: break at a single space whose column exceeds 80, continue at lineIndent + 2.
-  assert.match(
-    after,
-    /^ {2}dod: a fairly long plain scalar value with many single spaces in it that goes past\n {4}eighty columns$/m,
-    "a plain scalar past column 80 must fold exactly where PyYAML folds it",
-  );
-  // ⛔ The break POSITION is part of the pin, and it is not "wherever it looks long enough":
-  // PyYAML breaks at the first single space whose column exceeds 80 — verified by running this exact
-  // document through `python3 -c 'import yaml; print(yaml.safe_dump(...))'` (PyYAML 6.0.1) and
-  // comparing byte-for-byte with the ported writer's output.
-  assert.match(after, /^ {2}test_command: bash scripts\/test\.sh --alpha --beta --gamma --delta --epsilon --zeta\n {4}--eta --theta --iota$/m);
-});
-
-test("AC3 — a CORRUPT config fails closed with the SAME exit code as the pre-port script (rc=1)", () => {
-  // The migration step reads the config with an UNGUARDED parse (no try/except in the pre-port
-  // python): an unparseable file aborts the run rather than being silently treated as "no binding
-  // to migrate". That is the shipped contract — a corrupt config must not be quietly skipped past —
-  // and the port must keep it, including the exit code.
-  const base = makeBase();
-  const ws = initWorkspace(base);
-  fs.mkdirSync(path.join(ws, ".quay"), { recursive: true });
-  fs.writeFileSync(path.join(ws, ".quay", "config.yml"), "providers:\n  native:\n   bad: [unclosed\n");
   const r = runInit(ws, argsFor(base));
-  assert.equal(r.status, 1, `a corrupt config must abort the upgrade (exit 1)\nstdout:\n${r.stdout}\nstderr:\n${r.stderr}`);
+  assert.equal(
+    r.status, 0,
+    `re-running over a user's own config must UPGRADE, not refuse\nstdout:\n${r.stdout}\nstderr:\n${r.stderr}`,
+  );
+  const after = configText(ws, base);
+  assert.ok(after.includes("# a user comment the upgrade must preserve verbatim"), "a user comment must survive");
+  assert.match(after, /^my_own_key: 7$/m, "an unrecognized top-level key is KEPT, never deleted");
+  // …and the run SAYS it kept it rather than keeping it silently (硬规则 3b, the "kept" direction).
+  assert.match(r.stdout + r.stderr, /unrecognized top-level config key "my_own_key"/);
 });
 
-test("AC3 — --dry-run writes nothing and still reports the closed set", () => {
+test("AC3 — --dry-run plans and writes NOTHING", () => {
   const base = makeBase();
   const ws = initWorkspace(base);
   const r = runInit(ws, [...argsFor(base), "--dry-run"]);
-  assert.equal(r.status, 0);
-  assert.match(r.stdout, /quay-init complete \(dry-run\)\./);
+  assert.equal(r.status, 0, `a dry run must exit 0\nstdout:\n${r.stdout}\nstderr:\n${r.stderr}`);
   const actual = surface(ws, base);
-  assert.match(actual, /^\.quay\/config\.yml {2}ABSENT$/m);
-  assert.match(actual, /^\.claude\/settings\.json {2}ABSENT$/m);
+  assert.match(actual, /^\.quay\/config\.yml {2}ABSENT$/m, "a dry run must not write the config");
+  assert.match(actual, /^\.claude\/settings\.json {2}ABSENT$/m, "…nor any other closed-set file");
+  assert.match(r.stdout, /# Dry run — nothing written to disk\./, "…and must SAY it wrote nothing");
 });

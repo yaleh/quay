@@ -477,7 +477,10 @@ test("AC-258 preflight — the probe call site precedes the delete-key step and 
   };
   const lPre = bodyLine('preflight_out="$(ac258_worker_preflight 2>&1)"');
   const lDel = bodyLine('del_json="$(ac258_delete_registrations "$home"');
-  const lInit = bodyLine('bash "$plugin_root/scripts/quay-init.sh" --root "$root" --plugin-root "$plugin_root" --force --auto-commit-confirm)');
+  // ⛔ RE-POINTED (gap-quay-init-sh-becomes-a-shim-over-bin-quay-init-and-callers-switch): the
+  // invocation is `bin/quay init` now — the shell entry is a ≤40-line shim, and `--force` was
+  // removed with GOAL-029. The ORDER the assertion is about is unchanged.
+  const lInit = bodyLine('"$plugin_root/bin/quay" init --root "$root" --plugin-root "$plugin_root" --auto-commit-confirm)');
   assert.ok(lPre < lDel,
     `the worker preflight must run BEFORE the three-place delete-key step (preflight line ${lPre}, delete line ${lDel})`);
   assert.ok(lPre < lInit,
@@ -487,7 +490,7 @@ test("AC-258 preflight — the probe call site precedes the delete-key step and 
   const b257s = src.indexOf("step_ac257_project_scope() {");
   const b257 = src.slice(b257s, src.indexOf("\n}", b257s));
   const i257pre = b257.indexOf("ac258_worker_preflight 2>&1");
-  const i257init = b257.indexOf('bash "$plugin_root/scripts/quay-init.sh"');
+  const i257init = b257.indexOf('"$plugin_root/bin/quay" init');
   assert.ok(i257pre >= 0, "step_ac257_project_scope must also carry the worker preflight (DoD: 同族的 --verify-ac257，若共用同一段步骤序)");
   assert.ok(i257pre < i257init,
     "the AC-257 preflight must run BEFORE its quay-init rerun (the sibling instance of the same defect)");

@@ -416,8 +416,8 @@ INST=$(HOME="$H" node -e 'const o=require(process.env.HOME+"/.claude/plugins/ins
 
 # 3. init a scratch project from the INSTALLED copy, then run the assertions
 P=$(mktemp -d); (cd "$P" && git init -q)
-CLAUDE_PLUGIN_ROOT="$INST" bash "$INST/scripts/quay-init.sh" \
-  --all --root "$P" --project scratch --repo-root "$P" --test-command 'node --test' --plugin-root "$INST"
+CLAUDE_PLUGIN_ROOT="$INST" "$INST/bin/quay" init \
+  --root "$P" --project scratch --repo-root "$P" --test-command 'node --test' --plugin-root "$INST"
 QUAY_VERIFY_HOME="$H" node --experimental-strip-types \
   plugin/scripts/verify-plugin-channel-assertions.ts --installed "$INST" --project "$P" --scope user
 ```

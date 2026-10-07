@@ -13,13 +13,13 @@ closed set below — no `.claude/{skills,workflows,agents}` copies, no `plugin/s
 scripts are delivered by the **quay Claude Code plugin**, which this skill's output tells you how to
 install explicitly.
 
-**The entry point is ONE executable** — `bash ${CLAUDE_PLUGIN_ROOT}/scripts/quay-init.sh`. This skill
-delegates to it rather than repeating the write logic inline. Since
-`gap-arch-quay-init-sh-python-heredocs-to-native` (2026-09-20) that script is the **orchestration**
-(which step runs when, in what order, with which report lines) and the **step logic lives in
-`packages/quay/src/init.ts`**, reached through the sibling `plugin/scripts/quay-init-steps.ts`. It
-used to embed twelve `python3` invocations; it now embeds none, so a quay project can be initialized
-with no Python on the machine at all.
+**The entry point is ONE executable** — `${CLAUDE_PLUGIN_ROOT}/bin/quay init`. This skill delegates
+to it rather than repeating the write logic inline; the whole engine is `packages/quay/src/init.ts`,
+reachable IDENTICALLY as the Core CLI (`quay init`), the MCP `init` tool, and the npm/plugin
+`bin/quay` entry. ⛔ A legacy shell entry still exists beside this skill for ONE release, as a
+≤40-line shim that does nothing but exec `bin/quay init` (GOAL-029 / AC-332): it carries no write
+logic and no `python3` invocation, so a quay project can be initialized with no Python on the
+machine at all.
 
 ## Re-running on an existing project: RECONCILE, not "already exists"
 
@@ -51,7 +51,7 @@ as `.quay/config.yml.corrupt-<timestamp>`. The real cause is always reported —
 BEFORE any config is read, so it is reachable in precisely the workspace where every other tool is
 not (see `packages/quay/src/mcp-server.ts`, the two-phase `startMcpServer`).
 
-**The script delivers the VERSION-LEVEL `loop:` defaults too.** `bash quay-init.sh` is what this skill
+**The engine delivers the VERSION-LEVEL `loop:` defaults too.** `quay init` is what this skill
 runs, and on an EXISTING config its upgrade does two things in order: `ensureLoopConfig` updates the
 four project-derived values (`repo_root`/`test_command`/`tmux_session`/`worktree_root`), then the
 `reconcile-config` step fills every ABSENT version-level `loop:` default from `LOOP_VERSION_DEFAULTS`
@@ -246,9 +246,8 @@ is deliberate rather than lax.
 
 These are **version-level defaults**, so they live in one table — `LOOP_VERSION_DEFAULTS` in
 `packages/quay/src/init.ts` — which the fresh-install template emits and the upgrade fill reads.
-The shell writer (`quay-init.sh`'s fresh-install heredoc) cannot import TypeScript and
-therefore mirrors the same two values; `packages/quay/test/init.test.mjs` pins the mirror to the table,
-so a future default change that is not made in both places is RED rather than silently divergent.
+There is now ONE writer (the TS engine) reading that table directly, so a default can no longer be
+added to the fresh install and forgotten by the upgrade path: the two arms share the table.
 
 ### The `loop:` fan-in contract keys
 
@@ -258,12 +257,17 @@ so a future default change that is not made in both places is RED rather than si
 | `scoped_command` | argv list; `{worktree}` and `{task}` are placeholders | The scoped gate's argv, e.g. `["bash", "{worktree}/scripts/test.sh", "--for-task", "{task}", "--allow-thin"]`. **Absent (or `null`) ⇒ this project has no scoped capability**: fan-in skips that step with its own distinguishable value, `no-scoped-command-declared`. A declared-but-malformed value (a bare string, an empty list) **fails closed** — it is never silently treated as "not provided". |
 | `doc_check_command` | argv list; `{worktree}` is a placeholder | The doc-check argv, e.g. `["bash", "{worktree}/scripts/test.sh", "--static-checks-doc"]`. Same three-state rule as `scoped_command`; the absent state reads `no-doc-check-command-declared`. |
 
-`quay-init` writes `suite_runner: delegated`, `scoped_command: null` and `doc_check_command: null`
-into a fresh project's config, with these semantics spelled out in comments next to the keys. A
-project that genuinely has a scoped gate or a doc check replaces the `null` with its own argv
-list. An EXISTING config is never given these keys by an upgrade (the config-preserving merge only
-updates the values it owns), so a project installed earlier simply has them absent — which is the
-honest reading: it never declared those capabilities.
+⛔ **These three are NOT written by init** — neither on a fresh install nor on an upgrade: the
+engine's version-level table carries only the keys the validator REQUIRES (`board`, `gates`) plus
+the doc/code declaration (`doc_surfaces`) and the fork baseline, and the config-preserving merge
+only touches the values it owns. A project that has a scoped gate or a doc check writes its own
+argv list; one that does not simply leaves the key absent, and the absent state is the honest
+reading — it never declared that capability (fan-in then reports its own
+`no-scoped-command-declared` / `no-doc-check-command-declared`, and `suite_runner` falls back to
+`delegated` iff `loop.test_command` is declared). ⚠️ This changed with
+`gap-quay-init-sh-becomes-a-shim-over-bin-quay-init-and-callers-switch`: the retired shell entry's
+fresh-install heredoc used to emit all three, so a project initialised by it carries them and one
+initialised by the engine does not. Both are valid configs — the keys are optional by design.
 
 **Your tolerance obligations** (a violation is not harmless — it burns whole worker sessions):
 
@@ -412,15 +416,15 @@ well-formed input — no registry required.
 
 ### 1. Resolve the plugin root
 
-`quay-init.sh` resolves the plugin root in this order: `--plugin-root <dir>` (highest precedence),
-then `${CLAUDE_PLUGIN_ROOT}`, then self-resolution from the script's own path
-(`<plugin-root>/scripts/quay-init.sh`). It verifies `<plugin-root>/.claude-plugin/plugin.json`
-exists and fails closed otherwise.
+`quay init` resolves the plugin root in this order: `--plugin-root <dir>` (highest precedence),
+then `${CLAUDE_PLUGIN_ROOT}`, then self-resolution from the entry point's own path
+(`<plugin-root>/bin/quay`). It verifies `<plugin-root>/.claude-plugin/plugin.json` exists and fails
+closed otherwise.
 
-### 2. Run the script
+### 2. Run the initializer
 
 ```bash
-bash "${CLAUDE_PLUGIN_ROOT}/scripts/quay-init.sh" \
+"${CLAUDE_PLUGIN_ROOT}/bin/quay" init \
   --root "$(pwd)" \
   --plugin-root "${CLAUDE_PLUGIN_ROOT}" \
   [--test-command <cmd> --project <name> --repo-root <path> --tmux-session <sess>]

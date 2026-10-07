@@ -175,10 +175,18 @@ test("AC5 — quay-init wiring: the L1 check ships in the derived set and is inv
   // slice, which is exactly what the pre-fix form degenerated into after the move).
   const initTs = fs.readFileSync(path.join(REPO_ROOT, "packages", "quay", "src", "init.ts"), "utf8");
   assert.match(initTs, /"l1-delivery-surface-check\.ts"/, "the derived laydown set must ship the L1 check (explicit additions in deriveLoopScripts)");
-  const qinit = fs.readFileSync(path.join(SCRIPTS_DIR, "quay-init.sh"), "utf8");
-  // The post-laydown verification must invoke it in --surface mode via its resolved script path.
-  assert.match(qinit, /l1_script/, "quay-init must invoke the L1 check (via its resolved script path)");
-  assert.match(qinit, /--surface/, "quay-init must invoke the L1 check in --surface mode");
+  // ⛔ RE-POINTED (gap-quay-init-sh-becomes-a-shim-over-bin-quay-init-and-callers-switch): the
+  // post-laydown invocation moved out of the shell, which is a ≤40-line shim over the CLI now and
+  // carries no checks at all. The claim is unchanged — the initializer RUNS the L1 check in
+  // `--surface` mode through the check's own resolved path — only its home moved, together with the
+  // `l1_script` variable the old assertion named.
+  const shell = fs.readFileSync(path.join(SCRIPTS_DIR, "quay-init.sh"), "utf8");
+  assert.ok(shell.length > 0, "the shipped entry must still exist (it is a shim, not a deletion)");
+  const engine = fs.readFileSync(path.join(REPO_ROOT, "packages", "quay", "src", "init.ts"), "utf8");
+  const cli = fs.readFileSync(path.join(REPO_ROOT, "packages", "quay", "src", "cli", "init.ts"), "utf8");
+  assert.match(engine, /l1Script = path\.join\(pluginRoot, "scripts", "l1-delivery-surface-check\.ts"\)/, "the engine must resolve the L1 check's own path");
+  assert.match(engine, /"--surface", "--root", deliveryRoot, "--spec", specFile/, "…and invoke it in --surface mode with the delivery root + SPEC");
+  assert.match(cli, /deliverySurfaceL1Report\(pluginRoot\)/, "…and the CLI must CALL it on the post-write path");
 });
 
 // ── AC3 — the three L2 continuous-health categories are carried by the trend-criteria task ────────

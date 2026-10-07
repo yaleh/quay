@@ -10,7 +10,7 @@
 //      /data/scratch/yale/quay-release-cut-v0120;
 //   2. the finish record then landed in THAT clone's `.quay/` — the main checkout's ledger last line
 //      stayed at 2026-09-20 (AC-320 exists precisely because of this);
-//   3. the next-version bump necessarily edits `docs/analysis/quay-init-closure-ratchet.baseline.json`
+//   3. the next-version bump necessarily edited `docs/analysis/quay-init-closure-ratchet.baseline.json` (retired since — gap-quay-init-sh-becomes-a-shim-over-bin-quay-init-and-callers-switch)
 //      (the bump changes `plugin/.claude-plugin/plugin.json`, a laydown source), which the prose
 //      never mentioned — the cutter discovered it on the spot.
 //
@@ -130,9 +130,9 @@ function run(cmd, args, opts = {}) {
  * depend on which stream the child happened to pick — and a child that is silent on the half you
  * captured reads exactly like a child that said nothing at all (硬规则 5: a search is only
  * conclusive over a COMPLETE source; 硬规则 3b: "could not read the reason" must not share an output
- * shape with "there was no reason"). Measured 2026-10-04: `quay-init-closure-ratchet.ts --reanchor`
- * puts the ONLY copy of its reason on stdout and exits 3 — capturing stderr alone would have shown
- * just Node's MODULE_TYPELESS warning.
+ * shape with "there was no reason"). Measured 2026-10-04 on a tool that put the ONLY copy of its
+ * reason on stdout and exited 3 — capturing stderr alone would have shown just Node's
+ * MODULE_TYPELESS warning.
  *
  * `(no output on stdout or stderr)` is its own value, never conflated with a short-but-real tail.
  *
@@ -143,7 +143,7 @@ function run(cmd, args, opts = {}) {
  * carry once the child ran from a long worktree path (measured 2026-10-05: a 100-char worktree path put
  * `joined` at 815 > 800, and `…${slice(-800)}` began mid-token at `…LUATED`). Both ends survive now.
  */
-function diagnosticTail(r, max = 800) {
+export function diagnosticTail(r, max = 800) {
   const out = typeof r.stdout === "string" ? r.stdout.trim() : "";
   const err = typeof r.stderr === "string" ? r.stderr.trim() : "";
   const parts = [];
@@ -403,7 +403,6 @@ if (dryRun) {
     `  4. ${step4}`,
     `  5. ${step5}`,
     `  6. bump VERSION ${version} -> ${nextVersion} on '${base}' in ${worktree} + stamp-version.ts`,
-    `     + re-anchor docs/analysis/quay-init-closure-ratchet.baseline.json (the bump changes plugin/.claude-plugin/plugin.json, a laydown source)`,
     `  7. ${step7}`,
     `  8. git -C ${root} worktree remove ${worktree}`,
   ];
@@ -515,22 +514,19 @@ if (doDispatch) {
   );
 }
 
-// ── step 5: bump VERSION on develop to the NEXT version (+ stamp + ratchet re-anchor) ─────────
+// ── step 5: bump VERSION on develop to the NEXT version (+ stamp) ───────────────────────────────
 // The bump is a commit ON `develop` with the next version, so the rolling channels advertise a
-// version that does not exist yet rather than one that does (§4.3 选项 ii / §12). The ratchet
-// re-anchor is NOT optional: the bump changes plugin/.claude-plugin/plugin.json, which is a
-// closure-ratchet laydown source ⇒ the committed baseline goes stale and the pre-commit guard
-// rejects every later commit (measured: the v0.12.0 bump commit touched 12 files).
-// The two tooling paths are anchored differently, on purpose: `quay-init-closure-ratchet.ts` is a
-// kernel sibling (same `SCRIPT_DIR` rule as `finishCarrier` above), while `stamp-version.ts` lives in
-// the REPO TREE's `scripts/` — outside `plugin/`, never shipped, and run as raw `.ts`. That pair is
-// why a release cut is a DEV-TREE-ONLY operation by construction (⛔ not a missing fallback).
+// version that does not exist yet rather than one that does (§4.3 选项 ii / §12).
+// ⛔ The closure-ratchet re-anchor this step used to perform is GONE with the ratchet itself
+// (gap-quay-init-sh-becomes-a-shim-over-bin-quay-init-and-callers-switch) — there is no committed
+// baseline left to go stale when the bump changes plugin/.claude-plugin/plugin.json.
+// `stamp-version.ts` lives in the REPO TREE's `scripts/` — outside `plugin/`, never shipped, and run
+// as raw `.ts` — which is why a release cut is a DEV-TREE-ONLY operation by construction.
 const stamper = path.join(SCRIPT_ROOT, "scripts", "stamp-version.ts");
-const ratchet = path.join(SCRIPT_DIR, "quay-init-closure-ratchet.ts");
-if (!fs.existsSync(stamper) || !fs.existsSync(ratchet)) {
+if (!fs.existsSync(stamper)) {
   fail(
     "release-cut-bump-tooling-missing",
-    `'${stamper}' and/or '${ratchet}' is missing from ${root}, so the next-version bump cannot be performed; the cut itself is complete (tag ${tag}). Bump by hand: write VERSION=${nextVersion}, run scripts/stamp-version.ts, then re-anchor the closure ratchet, and commit on ${base}`,
+    `'${stamper}' is missing from ${root}, so the next-version bump cannot be performed; the cut itself is complete (tag ${tag}). Bump by hand: write VERSION=${nextVersion}, run scripts/stamp-version.ts, and commit on ${base}`,
     1,
   );
 }
@@ -547,17 +543,9 @@ if (stamped.status !== 0) {
     1,
   );
 }
-const reanchored = run("node", ["--experimental-strip-types", ratchet, "--reanchor", "--root", worktree], { stdio: ["ignore", "pipe", "pipe"] });
-if (reanchored.status !== 0) {
-  fail(
-    "release-cut-bump-ratchet-failed",
-    `the closure-ratchet baseline could not be re-anchored in '${worktree}' (ratchet exited ${reanchored.status}); committing now would leave the pre-commit guard rejecting later commits, so the bump is NOT committed. The ratchet's own verdict — ${diagnosticTail(reanchored)}`,
-    1,
-  );
-}
 const added = git(worktree, "add", "-A");
 const committed = added.status === 0
-  ? git(worktree, "commit", "-q", "-m", `release: bump version to ${nextVersion} after ${tag} (SPEC §12: VERSION + stamp + closure-ratchet re-anchor)`)
+  ? git(worktree, "commit", "-q", "-m", `release: bump version to ${nextVersion} after ${tag} (SPEC §12: VERSION + stamp)`)
   : { status: 1 };
 if (committed.status !== 0) {
   fail(

@@ -170,10 +170,10 @@ fi
 # Runs AFTER the sabotage hook so a --sabotage run fails HERE naming the missing file, and a
 # normal run proves the install source is complete before the install.
 echo "== AC3 / LEG 1: install source completeness (the mechanism lives in the PLUGIN) =="
-for f in scripts/quay-init.sh loop/orchestrator-loop-tick.md; do
+for f in bin/quay loop/orchestrator-loop-tick.md; do
   assert_file "$QUAY_DEV/plugin/$f"
 done
-echo "  install source has quay-init.sh + orchestrator-loop-tick.md (inner-state.sh is retired, not required)"
+echo "  install source has bin/quay + orchestrator-loop-tick.md (inner-state.sh is retired, not required)"
 # The install source must carry the whole loop surface the cold start needs: BOTH tick docs the
 # two layers read, and the vendored provider runtime the generated config will bind to (LEG 3).
 for f in loop/fast-mode-loop-tick.md vendor/quay-native/dist/quay-native.js vendor/quay/dist/quay.js; do
@@ -187,8 +187,7 @@ mkdir -p "$PROJECT"
 echo "empty target project: $PROJECT"
 
 # ── 3. install: quay-init --all --loop from the source, with the target's values ────────────────────
-INIT_OUT="$(CLAUDE_PLUGIN_ROOT="$QUAY_DEV/plugin" bash "$QUAY_DEV/plugin/scripts/quay-init.sh" \
-  --all --loop \
+INIT_OUT="$(CLAUDE_PLUGIN_ROOT="$QUAY_DEV/plugin" "$QUAY_DEV/plugin/bin/quay" init \
   --root "$PROJECT" \
   --project empty-project \
   --repo-root "$PROJECT" \
@@ -198,14 +197,16 @@ printf '%s\n' "$INIT_OUT"
 echo ""
 
 # ── 4. LEG 2a: the closed set is written ────────────────────────────────────────────────────────────
-# The expected set is READ FROM THE INSTALL SOURCE (the mechanism's own CLOSED_SET_ITEMS in
-# quay-init.sh), never a second hand-written list in this file — a copy here would be exactly the
-# "content living in two places" drift this repo forbids.
-echo "== LEG 2a: the closed set is written (expected set read from the install source) =="
-CLOSED_SET_RAW="$(sed -n 's/^CLOSED_SET_ITEMS="\(.*\)"$/\1/p' "$QUAY_DEV/plugin/scripts/quay-init.sh")"
+# The expected set is READ FROM THE MECHANISM'S OWN OUTPUT — the `  closed set: …` banner the engine
+# prints before it writes — never a second hand-written list in this file. (It used to be read from
+# the shell entry's `CLOSED_SET_ITEMS` variable; that entry is a ≤40-line shim now
+# — gap-quay-init-sh-becomes-a-shim-over-bin-quay-init-and-callers-switch — so the banner is where
+# the engine states the same fact.)
+echo "== LEG 2a: the closed set is written (expected set read from the engine's own banner) =="
+CLOSED_SET_RAW="$(printf '%s\n' "$INIT_OUT" | sed -n 's/^ *closed set: *//p' | head -1 | tr ',' ' ')"
 if [ -z "$CLOSED_SET_RAW" ]; then
   # hard rule 3b: a checker that could NOT read its input must never look like 合格.
-  fail "could not read CLOSED_SET_ITEMS from the install source's quay-init.sh — the closed-set assertion has NO input (NOT-EVALUATED, not a pass)"
+  fail "could not read the closed set from the install source's own init banner — the closed-set assertion has NO input (NOT-EVALUATED, not a pass)"
 fi
 for item in $CLOSED_SET_RAW; do
   case "${item##*/}" in
@@ -328,8 +329,7 @@ echo "  the project's own loop values are the ones this install was given"
 # branch; a second run must not append, duplicate or drop anything).
 echo "== LEG 2d: re-running quay-init is idempotent =="
 BEFORE_FILES="$(cd "$PROJECT" && find . -type f -not -path './.git/*' | sort)"
-CLAUDE_PLUGIN_ROOT="$QUAY_DEV/plugin" bash "$QUAY_DEV/plugin/scripts/quay-init.sh" \
-  --all --loop \
+CLAUDE_PLUGIN_ROOT="$QUAY_DEV/plugin" "$QUAY_DEV/plugin/bin/quay" init \
   --root "$PROJECT" \
   --project empty-project \
   --repo-root "$PROJECT" \

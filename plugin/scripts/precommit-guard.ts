@@ -33,7 +33,6 @@
 //   ① 文档类检查：失败 ⇒ 拒提交（reason=doc-check-failed），输出含失败检查器的文件+行号
 //      （= 补救位置，SPEC §13.4）——见 runDocChecks()。
 //   ③ goal_ac 写入面：见下方「③ `delivery-critical` 新立案任务必须声明 goal_ac」段。
-//   ④ quay-init closure-ratchet 新鲜度：见下方「④ quay-init closure-ratchet freshness」段——只在本
 //      次提交 staged 了 laydown 源文件时才跑，普通提交零额外开销。
 //   state 文件 / 断言面 / --allow-dirty-round 覆盖全部随 ② 退役——见 archive#R27。
 //
@@ -49,8 +48,7 @@
 //                      commit 完全一致，仅输出标注 merge 上下文）
 //
 // 退出码：0 = 放行；1 = 拒（doc-check-failed / touches-multi-path-bullet /
-//         delivery-critical-without-goal-ac / closure-ratchet-stale / closure-ratchet-grown /
-//         closure-ratchet-not-evaluated）；2 = 用法/环境错。
+//         delivery-critical-without-goal-ac）；2 = 用法/环境错。
 //
 // Touches「一条目一路径」detector (gap-touches-one-entry-detector-not-enforcer, 2026-08-16):
 //   一个 staged tasks/*.md 的 ## Touches 若含多路径 bullet（AC93/ac86/AC91/AC99 形状——" / " / " + "
@@ -106,19 +104,6 @@ import {
   judgeStagedDeliveryCritical,
   type StagedTaskCandidate,
 } from "./long-term-guarantee-goal-backed-check.ts";
-// ④ closure-ratchet freshness — the SAME judgment the suite's @static-tier change layer runs
-// (`--check-stale` / `--gate`), reused IN-PROCESS at the commit moment. `LAYDOWN_SOURCES` is imported,
-// never re-typed: the trigger set is the checker's own exported constant (硬规则 1 用机件不手搓 /
-// 硬规则 5b 单源).
-import {
-  LAYDOWN_SOURCES,
-  baselineFile,
-  checkClosureRatchet,
-  collectSourceEntries,
-  fingerprintOf,
-  readBaseline,
-  runLaydown,
-} from "./quay-init-closure-ratchet.ts";
 // The registry's location has ONE owner (select-static-checks-for-touches.ts's REGISTRY_REL_CANDIDATES,
 // derived from REGISTRY_BASENAME). Read it, ⛔ never re-spell the literal here (hard rule 5b).
 import { REGISTRY_REL_CANDIDATES } from "./select-static-checks-for-touches.ts";
@@ -148,8 +133,6 @@ export interface Verdict {
   touchesCheckOutput: string | null;
   /** gap-ac190-goal-ac-rule-not-enforced-at-filing: goal_ac write-surface output (present when reason === "delivery-critical-without-goal-ac"). */
   goalAcCheckOutput: string | null;
-  /** gap-closure-ratchet-stale-wire-into-precommit-guard: closure-ratchet freshness output (present when reason === "closure-ratchet-stale" / "closure-ratchet-grown" / "closure-ratchet-not-evaluated"). */
-  closureRatchetCheckOutput: string | null;
   /** pre-merge-commit 上下文（钩子传 --merge；文档检查行为与 commit 一致，仅标注）。 */
   merge: boolean;
 }
@@ -346,7 +329,7 @@ export interface TouchesCheckResult {
 
 /**
  * Every staged path in the current commit (`git diff --cached --name-only`) — the SINGLE source of
- * this git invocation: the Touches scope, the goal_ac scope and the closure-ratchet trigger set all
+ * this git invocation: the Touches scope and the goal_ac scope both
  * derive from it (硬规则 1 — no second `git diff --cached` call, no second parser).
  */
 export function stagedFilePaths(root: string): string[] {
@@ -463,147 +446,6 @@ export function runGoalAcChecks(root: string): GoalAcCheckResult {
   return { ok: false, output: offenders.join("\n") };
 }
 
-// ── ④ quay-init closure-ratchet freshness（gap-closure-ratchet-stale-wire-into-precommit-guard）─────
-// THE DEFECT THIS CLOSES (2026-09-16, real v0.8.0 release cut): the closure ratchet's freshness
-// judgment (`--check-stale`, gap-quay-init-closure-ratchet-manual-reanchor-recurs) lived ONLY in the
-// suite's @static-tier change layer — i.e. it was evaluated only when a FULL test suite ran (local
-// `scripts/test.sh` or the remote CI `test` job). Both release-cut commits changed
-// `plugin/.claude-plugin/plugin.json` (a laydown source) without re-anchoring the committed baseline,
-// passed the local pre-commit hook (which judged ①②③ only) and were pushed; two CI runs (35100733320 /
-// 35100607207) then failed in ~1-2 min with `STATIC_CHECK_FAILED: quay-init-closure-ratchet-stale`,
-// and the human had to re-anchor by hand. Same shape as ③: the judgment already existed and was
-// already correct — only its WRITE-FACE half was missing (硬规则 9: 可见性 ≠ 执行).
-//
-// WHAT IT DOES: if the commit stages a path in the checker's own `LAYDOWN_SOURCES` (imported, never
-// re-listed), run the checker's own judgment in-process. The COMMON case (a commit that touches no
-// laydown source) returns before any fingerprint/laydown work — see runClosureRatchetChecks' first
-// branch, which is what AC3's "普通提交的耗时不受影响" pins (and what makes it a real reading rather
-// than a claim: the laydown path is observable — the real `runLaydown` runs `bash quay-init.sh`).
-//
-// VERDICT POLARITY — ⛔ REJECT-ALWAYS, NEVER AUTO-REPAIR. The task's Plan offered two implementations:
-// auto-run the `--reanchor` write + `git add` the baseline into the same commit, or reject with the
-// remedy named. This file takes the SECOND (the Plan's degenerate option) because the first one is
-// unsound here, not merely riskier:
-//   • the index is CROSS-LAYER SHARED MUTABLE STATE in this repo (CLAUDE.md 硬规则 11: three layers
-//     share one checkout) — a hook that `git add`s during another layer's commit changes what that
-//     commit contains, invisibly to the layer that made it;
-//   • `--reanchor` measures the WORKING TREE (`runLaydown` runs `<root>/plugin/scripts/quay-init.sh`;
-//     `collectSourceEntries` reads files from disk), while the commit carries the INDEX. When the two
-//     diverge, an auto-written baseline would record a fingerprint matching neither, and a fresh
-//     checkout would then red — a defect shipped BY the guard that was supposed to prevent one.
-// Rejecting keeps the guard read-only on the index and, like ②/③, does not do the author's repair for
-// them. The DoD explicitly accepts 挡住 ("在 commit 那一刻就被挡住或自动补全").
-//
-// THREE-STATE OUTPUT (硬规则 3b): `not-evaluated` (baseline missing/unreadable, or a laydown source
-// unreadable) is a DISTINCT status from `stale` and from `fresh` — a judgment that cannot read its
-// input never shares an output word with one that passed. It is fail-CLOSED here (fires only when the
-// commit already carries a laydown source, so it cannot block ordinary work) — see the AC5 test.
-
-export type ClosureRatchetStatus =
-  /** The commit stages no laydown source (or none exists here) — nothing to judge; zero extra work. */
-  | "not-applicable"
-  /** Fingerprint matches the committed baseline — in sync, allow. */
-  | "fresh"
-  /** A laydown source changed without a re-anchor AND the real laydown did not grow past the baseline. */
-  | "stale"
-  /** A laydown source changed AND the real laydown exceeds the baseline (true growth) — must be refused. */
-  | "stale-and-grown"
-  /** The freshness judgment could not be read (baseline/sources) or the gate could not classify. */
-  | "not-evaluated";
-
-export interface ClosureRatchetCheckResult {
-  status: ClosureRatchetStatus;
-  ok: boolean;
-  /** Human-readable detail; null on the allow path (hard rule 3b — nothing to report is not a report). */
-  output: string | null;
-}
-
-/** Staged paths that ARE laydown sources — the trigger set. Derived from the checker's exported
- *  `LAYDOWN_SOURCES` (硬规则 5b: never a second hand-copied list). */
-export function stagedLaydownSources(root: string): string[] {
-  return stagedFilePaths(root).filter((rel) => LAYDOWN_SOURCES.includes(rel));
-}
-
-/**
- * Run the closure-ratchet freshness judgment against the STAGED commit. Returns `not-applicable` (ok)
- * without touching the fingerprint machinery when the commit stages no laydown source — the ordinary
- * commit path pays one `git diff --cached` that ②/③ already paid.
- */
-export function runClosureRatchetChecks(root: string): ClosureRatchetCheckResult {
-  const touched = stagedLaydownSources(root);
-  if (touched.length === 0) return { status: "not-applicable", ok: true, output: null };
-
-  const baselinePath = baselineRelPath(root);
-  const head = `  staged laydown source(s): ${touched.join(", ")}`;
-
-  if (!fs.existsSync(baselineFile(root))) {
-    return {
-      status: "not-evaluated",
-      ok: false,
-      output:
-        `${head}\n` +
-        `  committed baseline MISSING: ${baselinePath} — freshness cannot be judged either way.\n` +
-        "  (a checker that cannot read its baseline is never conflated with \"in sync\" — 硬规则 3b)",
-    };
-  }
-  const baseline = readBaseline(root);
-  if (baseline === null) {
-    return {
-      status: "not-evaluated",
-      ok: false,
-      output: `${head}\n  committed baseline UNREADABLE (${baselinePath}: not JSON / missing fields).`,
-    };
-  }
-  const entries = collectSourceEntries(root);
-  if (entries === null) {
-    return {
-      status: "not-evaluated",
-      ok: false,
-      output: `${head}\n  a laydown source under the checker's LAYDOWN_SOURCES could not be read (fingerprint unavailable).`,
-    };
-  }
-
-  const currentFp = fingerprintOf(entries);
-  if (currentFp === baseline.fingerprint) return { status: "fresh", ok: true, output: null };
-
-  // STALE. Classify with the REAL laydown (the `--gate` measurement) so the message can say WHICH
-  // failure this is — shrink-only (content changed, footprint did not) or true growth. Paid only on
-  // commits that change a laydown source AND are stale, i.e. exactly the release-cut-shaped commit.
-  const measured = runLaydown(root);
-  if (!measured.evaluated) {
-    return {
-      status: "stale",
-      ok: false,
-      output:
-        `${head}\n` +
-        `  fingerprint ${currentFp.slice(0, 16)}… ≠ baseline ${baseline.fingerprint.slice(0, 16)}… (stale)\n` +
-        `  gate classification NOT-EVALUATED — the real laydown could not run: ${measured.error ?? "unknown"}`,
-    };
-  }
-  const verdict = checkClosureRatchet(measured, baseline);
-  if (!verdict.ok) {
-    return {
-      status: "stale-and-grown",
-      ok: false,
-      output:
-        `${head}\n` +
-        `  the real laydown GREW past the shrink-only baseline: ${measured.files} files (baseline ${baseline.files})` +
-        ` / ${measured.bytes} bytes (baseline ${baseline.bytes})` +
-        `${verdict.overFiles ? " [over files]" : ""}${verdict.overBytes ? " [over bytes]" : ""}\n` +
-        `  fingerprint ${currentFp.slice(0, 16)}… ≠ baseline ${baseline.fingerprint.slice(0, 16)}… (stale)`,
-    };
-  }
-  return {
-    status: "stale",
-    ok: false,
-    output:
-      `${head}\n` +
-      `  fingerprint ${currentFp.slice(0, 16)}… ≠ baseline ${baseline.fingerprint.slice(0, 16)}… (stale)\n` +
-      `  real laydown ${measured.files} files / ${measured.bytes} bytes ≤ baseline ${baseline.files} files / ` +
-      `${baseline.bytes} bytes ⇒ shrink-only (footprint did not grow; the source content changed)`,
-  };
-}
-
 // ── 断言面集合（full-suite-runner 复用；守卫本身不再读它——② 退役）─────────────────────────────────
 
 export interface RegistryShape {
@@ -669,7 +511,6 @@ export function judge(
       docCheckOutput: docResult.output,
       touchesCheckOutput: null,
       goalAcCheckOutput: null,
-      closureRatchetCheckOutput: null,
       merge: opts.merge === true,
     };
   }
@@ -693,7 +534,6 @@ export function judge(
       docCheckOutput: null,
       touchesCheckOutput: touchesResult.output,
       goalAcCheckOutput: null,
-      closureRatchetCheckOutput: null,
       merge: opts.merge === true,
     };
   }
@@ -717,52 +557,6 @@ export function judge(
       docCheckOutput: null,
       touchesCheckOutput: null,
       goalAcCheckOutput: goalAcResult.output,
-      closureRatchetCheckOutput: null,
-      merge: opts.merge === true,
-    };
-  }
-
-  // ④ quay-init closure-ratchet freshness（gap-closure-ratchet-stale-wire-into-precommit-guard）：
-  //    本次提交 staged 了 laydown 源文件（checker 自己的 LAYDOWN_SOURCES，import 单源）而 committed
-  //    baseline 陈旧 ⇒ 提交这一刻即拒。先前这条判据只活在套件的 @static-tier change 层——改动能干净
-  //    commit + push，直到远端 CI 跑完整套件才报 STATIC_CHECK_FAILED（2026-09-16 v0.8.0 release cut
-  //    实证：两次 CI run 白跑）。⛔ 不自动重锚：见上方 ④ 段落的理由（索引是跨层共享可变状态；--reanchor
-  //    量的是工作树而提交带的是索引）。本条与 ②③ 同形：判定已存在且正确，缺的是写入面这一半。
-  const ratchetResult = runClosureRatchetChecks(root);
-  if (!ratchetResult.ok) {
-    const grown = ratchetResult.status === "stale-and-grown";
-    const reason =
-      ratchetResult.status === "not-evaluated"
-        ? "closure-ratchet-not-evaluated"
-        : grown
-          ? "closure-ratchet-grown"
-          : "closure-ratchet-stale";
-    const why = grown
-      ? "committed baseline 陈旧，且真实 laydown 已【膨胀】越过 shrink-only 基线——棘轮只许降不许升，必须改小 laydown，不得重锚放行。"
-      : ratchetResult.status === "not-evaluated"
-        ? "本次提交改了 laydown 源文件，但棘轮的 committed baseline 读不到（缺 / 不可解析 / 源文件不可读）——无法判定新鲜与否，按 fail-closed 拒绝。"
-        : "committed baseline 的 source fingerprint 已陈旧（改了 laydown 源文件却没有同步重锚）——实测未膨胀，只是内容变化导致指纹过期。";
-    return {
-      verdict: "reject",
-      reason,
-      message:
-        `pre-commit 守卫：${why}\n` +
-        "（判据正本 = plugin/scripts/quay-init-closure-ratchet.ts；本条把套件 @static-tier change 层的\n" +
-        " `--check-stale` 提前到提交这一刻——不再等到跑一次完整套件/远端 CI 才发现。）\n" +
-        "修复（先分类，再决定）：\n" +
-        "  ① 先看是哪一种（--gate 会真跑一次 laydown 去量 footprint）：\n" +
-        "     node --experimental-strip-types plugin/scripts/quay-init-closure-ratchet.ts --check-stale\n" +
-        "     node --experimental-strip-types plugin/scripts/quay-init-closure-ratchet.ts --gate\n" +
-        "  ② --gate 绿（shrink-only：只是内容变了）⇒ 机械重锚，并把新基线纳入本次提交：\n" +
-        "     node --experimental-strip-types plugin/scripts/quay-init-closure-ratchet.ts --reanchor\n" +
-        `     git add ${baselineRelPath(root)}\n` +
-        "  ③ --gate 红（footprint 真实膨胀）⇒ 改小 laydown 本身；⛔ 重锚不是修复方式（会把棘轮放宽成恒真）。\n" +
-        "─── closure-ratchet 检查输出 ───\n" +
-        ratchetResult.output,
-      docCheckOutput: null,
-      touchesCheckOutput: null,
-      goalAcCheckOutput: null,
-      closureRatchetCheckOutput: ratchetResult.output,
       merge: opts.merge === true,
     };
   }
@@ -771,19 +565,12 @@ export function judge(
     verdict: "allow",
     reason: "doc-checks-pass",
     message:
-      "pre-commit 守卫：文档类检查通过（①）+ Touches 单路径（②）+ goal_ac 写入面（③）+ " +
-      "quay-init closure-ratchet 新鲜度（④：本次提交未触及 laydown 源文件，或指纹与 committed baseline 一致），放行。",
+      "pre-commit 守卫：文档类检查通过（①）+ Touches 单路径（②）+ goal_ac 写入面（③），放行。",
     docCheckOutput: null,
     touchesCheckOutput: null,
     goalAcCheckOutput: null,
-    closureRatchetCheckOutput: null,
     merge: opts.merge === true,
   };
-}
-
-/** Repo-relative path of the committed baseline file (for the messages above). */
-function baselineRelPath(root: string): string {
-  return path.relative(root, baselineFile(root)).split(path.sep).join("/");
 }
 
 // ── 钩子安装/卸载 ────────────────────────────────────────────────────────────────────────────────────
@@ -822,8 +609,6 @@ function hookShim(root: string): string {
     "# ③ runs the goal_ac write-surface judgment on staged tasks/*.md (gap-ac190-goal-ac-rule-not-",
     "#    enforced-at-filing — a delivery-critical task filed after the activation line WITHOUT",
     "#    goal_ac is rejected HERE, where it is written, instead of only in the goal-layer report).",
-    "# ④ runs the quay-init closure-ratchet freshness judgment when the commit stages a laydown",
-    "#    source (gap-closure-ratchet-stale-wire-into-precommit-guard — a changed laydown source",
     "#    with a stale baseline is rejected HERE, instead of only at the suite's @static-tier change",
     "#    layer / the remote CI, which is ~1-2 min and a whole CI run later).",
     "# (rejecting running-round assertion-surface commits was RETIRED under AC64 — see",
@@ -850,8 +635,6 @@ export function preMergeCommitShim(root: string): string {
     "# ② runs the Touches「一条目一路径」detector on the merged-in tasks/*.md at the merge moment;",
     "# ③ runs the goal_ac write-surface judgment on the merged-in tasks/*.md (a delivery-critical",
     "#    task filed after the activation line without goal_ac is rejected at the merge moment too).",
-    "# ④ runs the quay-init closure-ratchet freshness judgment on the merged-in laydown sources",
-    "#    (a merge that carries a changed laydown source past a stale baseline is rejected here too).",
     "# (rejecting running-round merges was RETIRED under AC64 — see",
     "# orchestration/archive/AC58-retired-clauses.md#R27.)",
     'ROOT="$(git rev-parse --show-toplevel)"',
@@ -912,9 +695,7 @@ const USAGE = `precommit-guard.ts — 写入那一刻的守卫：① 文档类�
 的 ## Touches 多路径 bullet 在提交这一刻红掉，不必等套件静态层）；
 ③ delivery-critical 新立案任务必须声明 goal_ac（gap-ac190-goal-ac-rule-not-enforced-at-filing——
 AC-190 判据的写入面：带 delivery-critical 标签、生效线之后立案、goal_ac 空 ⇒ 拒提交）；
-④ 本次提交 staged 了 quay-init laydown 源文件（checker 自己的 LAYDOWN_SOURCES，import 单源）而
-committed baseline 陈旧 ⇒ 拒提交（gap-closure-ratchet-stale-wire-into-precommit-guard——把套件
-@static-tier change 层的 --check-stale 提前到提交这一刻；⛔ 不自动重锚，理由见 ④ 段落）；
+（④ quay-init closure-ratchet 新鲜度已退役——gap-quay-init-sh-becomes-a-shim-over-bin-quay-init-and-callers-switch；
 （拒绝「轮 running 且触及断言面」的写入已退役——AC64）→ orchestration/archive/AC58-retired-clauses.md#R27。
 
 用法:
@@ -929,12 +710,11 @@ committed baseline 陈旧 ⇒ 拒提交（gap-closure-ratchet-stale-wire-into-pr
   --merge             本轮判定在 merge 上下文（pre-merge-commit 钩子传此 flag；文档检查行为与
                       commit 一致，仅输出标注）
   --json              机器可读输出（{verdict, reason, message, docCheckOutput, touchesCheckOutput,
-                      goalAcCheckOutput, closureRatchetCheckOutput, merge}）
+                      goalAcCheckOutput, merge}）
   --help              本帮助
 
 退出码: 0=放行 1=拒（doc-check-failed / touches-multi-path-bullet /
-        delivery-critical-without-goal-ac / closure-ratchet-stale / closure-ratchet-grown /
-        closure-ratchet-not-evaluated） 2=用法/环境错`;
+        delivery-critical-without-goal-ac） 2=用法/环境错`;
 
 function main(): number {
   const args = process.argv.slice(2);
@@ -1007,7 +787,6 @@ function main(): number {
           docCheckOutput: verdict.docCheckOutput,
           touchesCheckOutput: verdict.touchesCheckOutput,
           goalAcCheckOutput: verdict.goalAcCheckOutput,
-          closureRatchetCheckOutput: verdict.closureRatchetCheckOutput,
           merge: verdict.merge,
         },
         null,

@@ -136,11 +136,15 @@ if ! grep -q '^loop:' "$CONFIG"; then
 fi
 
 # ── read-only upgrade check (the same surface a real downstream runs) ─────────────────────────────────
-# `quay-init.sh --loop --dry-run` is the READ-ONLY upgrade check: it runs the full --loop upgrade
-# path (config-preserving read of existing loop values, drift report, mechanism lay-down, tick docs,
-# runtime) but writes NOTHING (every write is `would-*`, config backup is skipped, auto-commit is
-# skipped). Exit 0 = the upgrade check ran; the conclusion below reads the report.
-OUT="$(cd "$TARGET" && bash "$PLUGIN_ROOT/scripts/quay-init.sh" --loop --dry-run \
+# `quay init --dry-run` is the READ-ONLY upgrade check: it runs the upgrade path (config-preserving
+# read of existing loop values, branch-model + doc-branch judgment, version-level reconcile) but
+# writes NOTHING (every write is `would-*`, config backup is skipped, auto-commit is skipped).
+# Exit 0 = the upgrade check ran; the conclusion below reads the report.
+#
+# ⛔ It drives `bin/quay init`, not `scripts/quay-init.sh`: the shell entry is a ≤40-line shim over
+# the CLI now (gap-quay-init-sh-becomes-a-shim-over-bin-quay-init-and-callers-switch), and a
+# read-only check must exercise the engine rather than a front for it.
+OUT="$(cd "$TARGET" && "$PLUGIN_ROOT/bin/quay" init --dry-run \
   --root "$TARGET" --project "$(basename "$TARGET")" --plugin-root "$PLUGIN_ROOT" 2>&1)"
 RC=$?
 

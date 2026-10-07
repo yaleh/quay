@@ -43,8 +43,18 @@ import { emitVerdict, helpExit, isDirectEntry, readFileSafe } from "./gate-scrip
 
 // ── faces ───────────────────────────────────────────────────────────────────────────────────────────
 
-/** The writer face: quay-init.sh writes delivery config keys into downstream `.quay/config.yml`. */
-export const WRITER_REL = "plugin/scripts/quay-init.sh";
+/**
+ * The writer face: the module that writes delivery config keys into a downstream `.quay/config.yml`.
+ *
+ * ⛔ RE-POINTED 2026-10-07 (gap-quay-init-sh-becomes-a-shim-over-bin-quay-init-and-callers-switch).
+ * It used to be `plugin/scripts/quay-init.sh`, whose fresh-install heredoc WAS the writer. That entry
+ * is now a ≤40-line shim over `bin/quay init`, so a source scan of it finds ZERO keys — and "zero
+ * keys, zero without a consumer" is a PASS, i.e. the 硬规则 3b failure shape where "could not read
+ * the input" wears the same face as "everything is wired". This is also where the keys are DERIVED
+ * from now: not by scanning the source, but by generating the config the engine actually emits (see
+ * `audit`), so a key the template grows is enumerated the moment it is written.
+ */
+export const WRITER_REL = "packages/quay/src/init.ts";
 
 /** The SECOND writer face (gap-serve-binding-defaults-three-copies-to-one-definition-point P3.3):
  *  the `serve:` section is written by `packages/quay/src/init.ts` — both the fresh-install template
@@ -180,6 +190,12 @@ export function listConsumerFiles(root: string): Map<string, string> {
       if (!name.endsWith(".ts")) continue;
       if (/\.test\./.test(name)) continue;
       if (name === SELF_BASENAME) continue;
+      // ⛔ The WRITER FACE is not a consumer of the keys it writes. It did not need saying while the
+      // writer was a `.sh` (the consumer face is `.ts`-only); now that the engine IS a `.ts` inside
+      // `CONSUMER_DIRS`, counting it would give every delivered key a "consumer" — the writer itself
+      // — and the whole enumeration would be vacuously green (硬规则 4: a quantity that cannot come
+      // out false is not a measurement).
+      if (path.join(dir, name) === path.join(WRITER_REL)) continue;
       const p = path.join(abs, name);
       let st: fs.Stats;
       try {
@@ -216,7 +232,68 @@ export function classifyKey(
   return { key, state: "no-consumer-to-wire", consumers: 0 };
 }
 
-/** Full enumeration: extract the writer face, grep the consumer face, classify every key. */
+/**
+ * The `loop:` keys the ENGINE delivers, derived from the config it actually EMITS — not from a scan
+ * of its source. `generateConfigContent` is the one fresh-install writer (the shell's second one is
+ * gone), so its output IS the delivered key set, and running the SAME `extractWriterKeys` over that
+ * output reuses the block scanner the shell face was read with.
+ *
+ * Both project-derived values and version-level defaults are supplied, because the FRESH install
+ * writes both — a key delivered only on the upgrade path (the version defaults) must be enumerated
+ * too, or it could be delivered and never consumer-checked.
+ */
+/**
+ * The `loop:` keys the ENGINE delivers, read off `packages/quay/src/init.ts` (the writer face, from
+ * `--root`) — the SAME kind of mechanical derivation the shell face got, so a fixture can still
+ * drive the negative control.
+ *
+ * ⛔ NOT by importing the module and generating the config: that would bind the answer to THIS
+ * checkout's source (a fixture could not move it), and the checker's own mutation case — "a
+ * delivered key with no consumer must go RED" — needs a writer face it can edit. Two mechanical
+ * sources, both textual:
+ *   (a) the `LOOP_VERSION_DEFAULTS` table, brace-balanced (the same scan the serve table used);
+ *   (b) the fresh-install template's INTERPOLATED `loop:` entries — a backtick line whose payload is
+ *       two spaces + a key + `: ${…}` — which is exactly how the four project-derived values are
+ *       emitted (the non-interpolated defaults come from (a), and a literal key line would be the
+ *       hand-kept second copy the template's own comment forbids).
+ */
+export function extractTsWriterKeys(src: string): string[] {
+  const keys = new Set<string>();
+  const at = src.indexOf("export const LOOP_VERSION_DEFAULTS");
+  if (at !== -1) {
+    const open = src.indexOf("{", at);
+    if (open !== -1) {
+      let depth = 0;
+      let end = open;
+      for (; end < src.length; end++) {
+        if (src[end] === "{") depth += 1;
+        else if (src[end] === "}") {
+          depth -= 1;
+          if (depth === 0) break;
+        }
+      }
+      for (const line of src.slice(open + 1, end).split("\n")) {
+        const m = /^\s*([a-z_][a-z0-9_]*)\s*:/.exec(line);
+        if (m) keys.add(m[1]);
+      }
+    }
+  }
+  // Scoped to the FRESH-INSTALL template's own body: other functions in the file render reports
+  // with the same `` `  <key>: …` `` indent (an upgrade's `  removed: …` line, say), and counting a
+  // REPORT label as a delivered config key would enumerate something init never writes.
+  const fnAt = src.indexOf("export function generateConfigContent");
+  if (fnAt !== -1) {
+    const bodyEnd = src.indexOf("\n}\n", fnAt);
+    const body = src.slice(fnAt, bodyEnd === -1 ? src.length : bodyEnd);
+    for (const line of body.split("\n")) {
+      const m = /`\s{2}([a-z_][a-z0-9_]*): \$\{/.exec(line);
+      if (m) keys.add(m[1]);
+    }
+  }
+  return [...keys].sort();
+}
+
+/** Full enumeration: derive the writer face, grep the consumer face, classify every key. */
 export function audit(root: string): AuditReport {
   const writerSrc = readFileSafe(path.join(root, WRITER_REL));
   const initSrc = readFileSafe(path.join(root, INIT_REL));
@@ -224,7 +301,7 @@ export function audit(root: string): AuditReport {
   // this section", not the bare word `host` that appears in every file. The loop keys keep their
   // historical bare form (changing them would silently rewrite what this checker has always meant).
   const keys = [
-    ...extractWriterKeys(writerSrc),
+    ...extractTsWriterKeys(writerSrc),
     ...extractServeVersionKeys(initSrc).map((k) => `serve.${k}`),
   ].sort();
   const consumerFiles = listConsumerFiles(root);
@@ -300,6 +377,16 @@ export function main(argv: string[]): number {
   if (!fs.existsSync(writerPath)) {
     console.error(
       `ERROR: writer face not found: ${WRITER_REL} (cannot enumerate delivered config keys)`,
+    );
+    return 2;
+  }
+  // ⛔ A ZERO-KEY enumeration is a BROKEN READ, not a clean bill of health (硬规则 3b): every exit is
+  // "no key without a consumer", and the vacuous form of it is indistinguishable from a full PASS
+  // under a boolean verdict. This is not hypothetical — re-pointing the writer face at the shipped
+  // entry after it became a shim produced exactly that (0 keys, PASS) before this guard existed.
+  if (extractTsWriterKeys(readFileSafe(path.join(root, WRITER_REL))).length === 0) {
+    console.error(
+      "ERROR: the engine's emitted config yielded ZERO loop keys — the extraction is broken, not the config. Refusing to report a PASS over an empty enumeration.",
     );
     return 2;
   }

@@ -80,7 +80,7 @@ echo "mode: $MODE | plugin source: $PLUGIN_SRC | from-build: $FROM_BUILD"
 #    a FULL-mode e2e run concurrent with that test would still race. Filed separately.
 HUMAN_INPUTS=(
   "bash plugin/scripts/publish-dist-branch.sh --branch cold8-dist   # install: build the plugin artifact"
-  "bash <dist>/plugin/scripts/quay-init.sh --all --loop --root <proj> --project <proj>   # init: lay down the mechanism (test command auto-detected)"
+  "<dist>/plugin/bin/quay init --root <proj> --project <proj>   # init: lay down the closed set (test command auto-detected)"
   "/quay:cold-start   # cold-start skill: mounts both monitors (Monitor tool), cron, drives inner, asserts telemetry"
 )
 INPUT_COUNT="${#HUMAN_INPUTS[@]}"
@@ -127,8 +127,7 @@ echo "empty target project: $PROJECT"
 # No --test-command is passed: the detection ladder must find one. An empty dir has none → this should
 # FAIL CLOSED (AC3). To exercise the happy path the e2e puts a detection source in place first.
 echo '{"name":"empty-project","scripts":{"test":"node --test"}}' > "$PROJECT/package.json"
-CLAUDE_PLUGIN_ROOT="$QUAY_DEV/plugin" bash "$QUAY_DEV/plugin/scripts/quay-init.sh" \
-  --all --loop \
+CLAUDE_PLUGIN_ROOT="$QUAY_DEV/plugin" "$QUAY_DEV/plugin/bin/quay" init \
   --root "$PROJECT" \
   --project empty-project \
   --repo-root "$PROJECT" \

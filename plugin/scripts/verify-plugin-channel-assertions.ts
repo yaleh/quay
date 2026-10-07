@@ -849,8 +849,13 @@ export function readAndJudgeNativeConfig(projectDir: string): AssertionResult {
  *  The command is overridable via `QUAY_VERIFY_INIT_CMD` so fixture tests can drive the sequence
  *  without a full real init; the real default is what the local replay and CI use. */
 export function runUpgradeInit(installedDir: string, projectDir: string): { error: string | null } {
-  const initScript = path.join(installedDir, "scripts", "quay-init.sh");
-  if (!fs.existsSync(initScript)) return { error: `no scripts/quay-init.sh in ${installedDir}` };
+  // ⛔ RE-POINTED (gap-quay-init-sh-becomes-a-shim-over-bin-quay-init-and-callers-switch): this drill
+  // drives the shipped UPGRADE ENTRY, and that is the CLI entry point now — `scripts/quay-init.sh` is
+  // a ≤40-line shim over it. Running the CLI directly is what makes the drill exercise the engine
+  // rather than a front for it; a shim that silently stopped forwarding would otherwise let this
+  // gate pass while the real path was broken.
+  const initEntry = path.join(installedDir, "bin", "quay");
+  if (!fs.existsSync(initEntry)) return { error: `no bin/quay in ${installedDir}` };
   const override = process.env.QUAY_VERIFY_INIT_CMD;
   const env = {
     ...process.env,
@@ -861,12 +866,12 @@ export function runUpgradeInit(installedDir: string, projectDir: string): { erro
   const r = override
     ? spawnSync("sh", ["-c", override], { cwd: projectDir, env, encoding: "utf8", timeout: 300_000 })
     : spawnSync(
-        "bash",
-        [initScript, "--root", projectDir, "--project", path.basename(projectDir), "--plugin-root", installedDir],
+        initEntry,
+        ["init", "--root", projectDir, "--project", path.basename(projectDir), "--plugin-root", installedDir],
         { cwd: projectDir, env, encoding: "utf8", timeout: 300_000 },
       );
   if (r.error) return { error: String((r.error as Error).message ?? r.error) };
-  if (r.status !== 0) return { error: `quay-init.sh exited ${r.status}: ${firstLine(r.stderr ?? "") || firstLine(r.stdout ?? "")}` };
+  if (r.status !== 0) return { error: `quay init exited ${r.status}: ${firstLine(r.stderr ?? "") || firstLine(r.stdout ?? "")}` };
   return { error: null };
 }
 

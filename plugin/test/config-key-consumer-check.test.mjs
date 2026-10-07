@@ -175,8 +175,13 @@ test("serve: the reader stays wired, and the audit no longer enumerates serve.* 
   const keys = out.entries.map((e) => e.key);
   assert.ok(!keys.includes("serve.host"), `serve.host is no longer DELIVERED by any writer, got ${keys.join(", ")}`);
   assert.ok(!keys.includes("serve.port"), "…and neither is serve.port");
-  assert.ok(!/init\.ts/.test(out.writer), `the report must not name a writer face that writes nothing (got: ${out.writer})`);
-  assert.match(out.writer, /quay-init\.sh/, "the shell writer face is still named");
+  // RE-ANCHORED (gap-quay-init-sh-becomes-a-shim-over-bin-quay-init-and-callers-switch): the shell
+  // entry stopped writing ANY key when it became a shim, and the audit's writer face moved to the
+  // module that actually emits the config. The direction of this assertion is unchanged — the report
+  // must name the face that WRITES — only the name it must carry has moved.
+  assert.match(out.writer, /packages\/quay\/src\/init\.ts/, "the report must name the face that writes");
+  assert.ok(out.keys_total > 0, `a zero-key enumeration is a broken read, not a PASS (got ${out.keys_total})`);
+  assert.ok(!/quay-init\.sh/.test(out.writer), `the shim writes nothing and must not be named as the writer (got: ${out.writer})`);
 
   // The READER half is untouched: a user who pinned serve.host/port still gets it honored. Asserted
   // against the reader's own source, so this half cannot be dropped silently by the same edit that

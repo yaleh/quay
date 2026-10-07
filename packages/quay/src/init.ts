@@ -9,9 +9,19 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { createHash } from "node:crypto";
-import { execFileSync } from "node:child_process";
+import { execFileSync, spawnSync } from "node:child_process";
 import YAML from "yaml";
-import { ensureBranchModel, formatBranchModelReport, type BranchModelReport } from "./branch-model.ts";
+import {
+  ensureBranchModel,
+  formatBranchModelReport,
+  ensureDocBranch,
+  formatDocBranchReport,
+  moveCheckoutOntoLandingBaseline,
+  landingBaselineEstablishedNow,
+  formatBaselineCheckoutReport,
+  type BranchModelReport,
+  type DocBranchReport,
+} from "./branch-model.ts";
 // The ONE regex-literal escaper (kernel leaf). This file used to inline the escape body at the
 // `key`-literal site — one of the spelling variants invisible to the previous sweep's byte needle
 // (finding `escaperegexp-sweep-missed-two`, routine `semantic-dedup-scan`; see
@@ -670,6 +680,19 @@ export interface InitResult {
   /** `formatBranchModelReport(branchModel)` — the operator-facing rendering. */
   branchModelReport: string;
   /**
+   * The doc-branch bootstrap's verdict for THIS run (`ensureDocBranch`), populated on every outcome
+   * that got past the branch model — see `InitOptions.docBranchName`. Absent when the run stopped
+   * before the bootstrap.
+   */
+  docBranch?: DocBranchReport;
+  /** `formatDocBranchReport(docBranch)` — the operator-facing rendering of the verdict above. */
+  docBranchReport?: string;
+  /**
+   * The baseline→checkout handoff's report, present only when THIS run established `develop` at the
+   * very commit the checkout was on and therefore moved the checkout onto it.
+   */
+  baselineCheckoutReport?: string;
+  /**
    * The `.quay/plugin` link step's outcome for THIS run. Three states, never folded into a boolean
    * (硬规则 3b): `linked` (the link was refreshed), `not-evaluated` (the step RAN and could not
    * decide — an unknown or source-checkout plugin root) and `not-run` (this outcome path never
@@ -780,6 +803,22 @@ export interface InitOptions {
    * Nothing is destroyed either way; the flag only decides whether init proceeds or stops.
    */
   adoptBranchModel?: boolean;
+  /**
+   * The DOC-branch NAME for the full init's doc-branch bootstrap (`--doc-branch-name <name>`).
+   *
+   * The retired shell entry ran `quay init --branch-model-only --doc-branch-name <name>` before its
+   * closed-set write, resolving the name in its own CLI-parameter layer: flag > the target's
+   * `loop.doc_branch` > `author`. That entry is now a ≤40-line shim over this engine
+   * (gap-quay-init-sh-becomes-a-shim-over-bin-quay-init-and-callers-switch), so the bootstrap moved
+   * HERE — otherwise `/quay:init` would silently stop creating the doc branch, which is a behavior
+   * change rather than a refactor.
+   *
+   * The precedence is unchanged and is resolved by the caller + this function together: an explicit
+   * `docBranchName` wins, else the target config's `loop.doc_branch`, else the `author` convention
+   * (supplied in an override-channel expression, never as a bare identity literal — see
+   * `target-identity-literal-check.ts`).
+   */
+  docBranchName?: string;
   /**
    * The CONFIG-FREE branch-model entry (`quay init --branch-model-only`) — establish the quay branch
    * model in an ALREADY-initialized project and touch nothing else.
@@ -1410,7 +1449,20 @@ export function generateLaunchSettingsContent(): string {
       {
         $schema: "https://json.schemastore.org/claude-code-settings.json",
         permissions: { defaultMode: "bypassPermissions" },
-        env: { CLAUDE_CODE_ENABLE_PROMPT_SUGGESTION: "false" },
+        // ⛔ These three are the SHIPPED template's env block (plugin/.claude/launch.settings.json),
+        // and the list is load-bearing, not decorative: `CLAUDE_CODE_DISABLE_ALTERNATE_SCREEN` and
+        // `CLAUDE_CODE_DISABLE_MOUSE` were added to the shipped file 2026-08-11 (cold-start
+        // usability) and this inline copy was NOT updated — so every project initialised through the
+        // TS engine got a launch settings file MISSING them, while one initialised by the shell entry
+        // (which copied the shipped file verbatim) got them. Two writers, two answers (硬规则 5b).
+        // The shell entry is a shim now, so this is the only writer — and `packages/quay/test/
+        // init.test.mjs` pins this table to the shipped file byte-for-byte, the same executable
+        // invariant its `.quay/profiles.yml` sibling has. Edit both or neither.
+        env: {
+          CLAUDE_CODE_DISABLE_ALTERNATE_SCREEN: "1",
+          CLAUDE_CODE_DISABLE_MOUSE: "1",
+          CLAUDE_CODE_ENABLE_PROMPT_SUGGESTION: "false",
+        },
       },
       null,
       2,
@@ -1576,6 +1628,118 @@ export function runInit(opts: InitOptions): InitResult {
   // Computed BEFORE the project-value resolution because a fail-closed result carries this state.
   const existing = classifyConfig(configPath);
 
+  // ── Branch model (gap-fan-in-merge-target-hardcoded-develop-blocks-third-party-landing) ──────
+  // Run BEFORE writing anything — on the UPGRADE path as much as the fresh one: if the project's
+  // `develop` is a foreign line, init must stop with the tree untouched (a half-initialized project
+  // is worse than an uninitialized one), and an upgrade that rewrote the config first would have
+  // already broken that promise. The landing baseline the fan-in / anti-drift path reads (`develop`)
+  // is ESTABLISHED here — that is what turns the shipped `?? "develop"` default from an assumption
+  // into a fact.
+  //
+  // ⛔ WHY IT SITS THIS EARLY (gap-quay-init-sh-becomes-a-shim-over-bin-quay-init-and-callers-switch):
+  // the retired shell entry ran the CONFIG-FREE branch-model entry — `quay init --branch-model-only
+  // --doc-branch-name <name>` — as its FIRST step, before its closed-set write, so EVERY shipped
+  // init judged the baseline and established the doc branch. The entry is a shim over this engine
+  // now, so that first step has to live here; leaving it inside the fresh-install arm would make an
+  // upgrade stop judging its baseline (silently writing `fork_baseline: develop` for a `develop` it
+  // never validated) and `/quay:init` stop creating the doc branch.
+  const branchModel = ensureBranchModel(root, {
+    adopt: opts.adoptBranchModel === true,
+    dryRun: opts.dryRun === true,
+  });
+  const branchModelReport = formatBranchModelReport(branchModel);
+  if (!branchModel.ok && !opts.dryRun) {
+    return {
+      outcome: "branch-model-blocked",
+      configState: existing.state,
+      configPath,
+      tasksDir,
+      content: "",
+      launchSettingsPath,
+      launchSettingsContent: "",
+      profilesPath,
+      profilesContent: "",
+      branchModel,
+      branchModelReport,
+      pluginLink: { state: "not-run", reason: "init refused before the link step (nothing was written)" },
+      validated: "not-evaluated",
+    };
+  }
+
+  // ── The DOC-branch bootstrap (gap-quay-init-sh-becomes-a-shim-over-bin-quay-init-and-callers-switch)
+  // ──
+  // The same first step's second half: the branch-model entry ALSO created/switched the doc-only work
+  // branch. Runs BEFORE any write, exactly as the shell's `set -e` abort did: a REFUSED doc branch (a
+  // name collision) leaves the tree untouched rather than half-initialized.
+  const existingLoop = (existing.config?.["loop"] ?? {}) as Record<string, unknown>;
+  const configuredDocBranch =
+    typeof existingLoop["doc_branch"] === "string" ? (existingLoop["doc_branch"] as string) : undefined;
+  // Precedence, unchanged: explicit `--doc-branch-name` > the target's `loop.doc_branch` > the
+  // `author` convention. ⛔ `author` rides an override-channel expression on purpose — a BARE
+  // identity literal is what `target-identity-literal-check.ts` fails RED on, and a default with no
+  // override would be one. `ensureDocBranch` invents no name of its own (see its header).
+  const docBranchName = opts.docBranchName ?? configuredDocBranch ?? "author";
+  // The baseline→checkout handoff the branch-model-only entry performs (and ONLY when the baseline
+  // was established by THIS run and points at the very commit the checkout is on): metadata-only,
+  // never under --dry-run. It must precede the doc-branch judgment — `ensureDocBranch` reads the
+  // CHECKED-OUT branch, and the unmoved checkout is the state that makes it land on its no-op arm.
+  let baselineCheckoutReport: string | null = null;
+  if (opts.dryRun !== true && landingBaselineEstablishedNow(branchModel)) {
+    const checkout = moveCheckoutOntoLandingBaseline(root);
+    baselineCheckoutReport = formatBaselineCheckoutReport(checkout);
+    if (!checkout.ok) {
+      return {
+        outcome: "doc-branch-blocked",
+        configState: existing.state,
+        configPath,
+        tasksDir,
+        content: "",
+        launchSettingsPath,
+        launchSettingsContent: "",
+        profilesPath,
+        profilesContent: "",
+        branchModel,
+        branchModelReport,
+        pluginLink: { state: "not-run", reason: "init refused before the link step (nothing was written)" },
+        validated: "not-evaluated",
+        failureReason:
+          "could not move the main checkout onto the landing baseline it just established — refusing " +
+          "to continue, because the doc-branch bootstrap would then read the unmoved checkout.",
+      };
+    }
+  }
+  const docBranch = ensureDocBranch(root, {
+    name: docBranchName,
+    dryRun: opts.dryRun === true,
+    adopt: opts.adoptBranchModel === true,
+  });
+  const docBranchReport = formatDocBranchReport(docBranch);
+  if (!docBranch.ok && opts.dryRun !== true) {
+    return {
+      outcome: "doc-branch-blocked",
+      configState: existing.state,
+      configPath,
+      tasksDir,
+      content: "",
+      launchSettingsPath,
+      launchSettingsContent: "",
+      profilesPath,
+      profilesContent: "",
+      branchModel,
+      branchModelReport,
+      docBranch,
+      docBranchReport,
+      pluginLink: { state: "not-run", reason: "init refused before the link step (nothing was written)" },
+      validated: "not-evaluated",
+      failureReason: docBranch.detail,
+    };
+  }
+  const docBranchFields = {
+    docBranch,
+    docBranchReport,
+    ...(baselineCheckoutReport !== null ? { baselineCheckoutReport } : {}),
+  };
+
   // ── The PROJECT-DERIVED `loop:` values (AC-331) ──────────────────────────────────────────────
   // Resolved for EVERY non-branch-model mode — fresh AND upgrade — exactly as the shipped shell entry
   // does: an explicit parameter wins, else the target's existing value, else detection / the
@@ -1611,8 +1775,9 @@ export function runInit(opts: InitOptions): InitResult {
       launchSettingsContent: "",
       profilesPath,
       profilesContent: "",
-      branchModel: { ok: true, skipped: true, defaultBranch: null, entries: [], remedy: null },
-      branchModelReport: "",
+      branchModel,
+      branchModelReport,
+      ...docBranchFields,
       pluginLink: { state: "not-run", reason: "init refused before the link step (nothing was written)" },
       validated: "not-evaluated",
       failureReason: projectValues.failure.reason,
@@ -1688,8 +1853,9 @@ export function runInit(opts: InitOptions): InitResult {
       launchSettingsContent: "",
       profilesPath,
       profilesContent: "",
-      branchModel: { ok: true, skipped: true, defaultBranch: null, entries: [], remedy: null },
-      branchModelReport: "",
+      branchModel,
+      branchModelReport,
+      ...docBranchFields,
       upgrade: up.report,
       validated: up.ok,
       ...(up.ok ? {} : { validationIssues: up.issues }),
@@ -1754,34 +1920,6 @@ export function runInit(opts: InitOptions): InitResult {
     corruptBackupPath = corruptBackupPathFor(configPath, Math.floor(Date.now() / 1000));
   }
 
-  // ── Branch model (gap-fan-in-merge-target-hardcoded-develop-blocks-third-party-landing) ──────
-  // Run BEFORE writing anything: if the project's `develop` is a foreign line, init must stop with
-  // the tree untouched (a half-initialized project is worse than an uninitialized one). The
-  // landing baseline the fan-in / anti-drift path reads (`develop`) is ESTABLISHED here — that is
-  // what turns the shipped `?? "develop"` default from an assumption into a fact.
-  const branchModel = ensureBranchModel(root, {
-    adopt: opts.adoptBranchModel === true,
-    dryRun: opts.dryRun === true,
-  });
-  const branchModelReport = formatBranchModelReport(branchModel);
-  if (!branchModel.ok && !opts.dryRun) {
-    return {
-      outcome: "branch-model-blocked",
-      configState: existing.state,
-      configPath,
-      tasksDir,
-      content: "",
-      launchSettingsPath,
-      launchSettingsContent: "",
-      profilesPath,
-      profilesContent: "",
-      branchModel,
-      branchModelReport,
-      pluginLink: { state: "not-run", reason: "init refused before the link step (nothing was written)" },
-      validated: "not-evaluated",
-    };
-  }
-
   // Detect project type.
   const { isNode, isGo } = detectProjectType(root);
 
@@ -1823,6 +1961,7 @@ export function runInit(opts: InitOptions): InitResult {
         profilesContent: "",
         branchModel,
         branchModelReport,
+        ...docBranchFields,
         pluginLink: { state: "not-run", reason: "the rebuild was refused before the link step (nothing was written)" },
         validated: false,
         validationIssues: fixpoint.issues,
@@ -1853,6 +1992,7 @@ export function runInit(opts: InitOptions): InitResult {
       profilesContent,
       branchModel,
       branchModelReport,
+      ...docBranchFields,
       pluginLink: { state: "not-run", reason: "a dry run writes nothing, so the link step is not run" },
       validated: freshVerdict.ok,
       ...(freshVerdict.ok ? {} : { validationIssues: freshVerdict.issues }),
@@ -1947,6 +2087,7 @@ export function runInit(opts: InitOptions): InitResult {
       profilesContent,
       branchModel,
       branchModelReport,
+      ...docBranchFields,
       pluginLink: { state: "not-run", reason: "the run aborted mid-write" },
       validated: freshVerdict.ok,
       ...(freshVerdict.ok ? {} : { validationIssues: freshVerdict.issues }),
@@ -1970,6 +2111,7 @@ export function runInit(opts: InitOptions): InitResult {
     profilesContent,
     branchModel,
     branchModelReport,
+    ...docBranchFields,
     pluginLink,
     validated: freshVerdict.ok,
     ...(freshVerdict.ok ? {} : { validationIssues: freshVerdict.issues }),
@@ -3298,6 +3440,123 @@ export function providerEntryFile(cfgPath: string, pluginRoot?: string | null): 
   } catch (e: unknown) {
     return `NOT-EVALUATED:unreadable config (${e instanceof Error ? e.message : String(e)})`;
   }
+}
+
+/**
+ * `verify_delivery_surface_l1` — the post-init six-category L1 delivery-completeness check.
+ *
+ * Ported from the retired shell entry by
+ * `gap-quay-init-sh-becomes-a-shim-over-bin-quay-init-and-callers-switch` for the same reason the
+ * runtime-existence check below was: the entry is a shim over this engine now, and a check left
+ * behind is a check dropped from every `quay init`. It runs against the SHIPPED delivery surface
+ * (the checkout root — the SPEC lives at `<root>/orchestration/`, outside the plugin bundle), and in
+ * a BARE plugin copy the repo-level SPEC is absent, so it reports SKIP and returns ok — never a
+ * silent pass (硬规则 3b: "nothing to check here" is its own line, not the absence of one).
+ */
+export function deliverySurfaceL1Report(pluginRoot?: string | null): { ok: boolean; lines: string[]; errors: string[] } {
+  if (!pluginRoot) return { ok: true, lines: [], errors: [] };
+  const l1Script = path.join(pluginRoot, "scripts", "l1-delivery-surface-check.ts");
+  if (!fs.existsSync(l1Script)) return { ok: true, lines: [], errors: [] };
+  const deliveryRoot = path.dirname(pluginRoot);
+  const specFile = path.join(deliveryRoot, "orchestration", "SPEC-complete-delivery-surface-2026-08-05.md");
+  if (!fs.existsSync(specFile)) {
+    return {
+      ok: true,
+      lines: [`  delivery-surface-l1: SKIP (repo-level SPEC not found at ${specFile} — bare plugin copy; referenced⊆landed still guards the mechanism axis)`],
+      errors: [],
+    };
+  }
+  const r = spawnSync(
+    process.execPath,
+    ["--no-warnings", "--experimental-strip-types", l1Script, "--surface", "--root", deliveryRoot, "--spec", specFile],
+    { encoding: "utf8", timeout: 120_000 },
+  );
+  if (r.status !== 0) {
+    return {
+      ok: false,
+      lines: [],
+      errors: ["ERROR: delivery-surface L1 check failed — the six-category delivery surface is incomplete."],
+    };
+  }
+  return { ok: true, lines: (r.stdout ?? "").trimEnd().split("\n").filter((l) => l !== ""), errors: [] };
+}
+
+/**
+ * `verify_provider_runtime_existence` — the post-init check that the runtime file the config binds
+ * actually EXISTS, and (for quay's own bundles) is not a stale copy left by an older install.
+ *
+ * Ported from the retired shell entry by
+ * `gap-quay-init-sh-becomes-a-shim-over-bin-quay-init-and-callers-switch`: that entry is now a shim
+ * over this engine, so the check belongs here — leaving it behind would have silently dropped it
+ * from every `quay init` (a real regression, not a wording change). The output lines are the shell
+ * function's, verbatim, so an operator's muscle memory and the callers' assertions still hold.
+ *
+ * THREE STATES, and "could not judge" is its own (硬规则 3b): an unresolvable plugin root is
+ * `NOT-EVALUATED — …`, never a silent pass; a missing runtime is `FAIL (referenced-runtime-missing)`.
+ * `ok:false` is the caller's cue to exit non-zero (the shell's `|| exit 2`).
+ */
+export function providerRuntimeExistenceReport(
+  cfgPath: string,
+  pluginRoot?: string | null,
+  o: { dryRun?: boolean } = {},
+): { ok: boolean; lines: string[]; errors: string[] } {
+  if (o.dryRun) {
+    return { ok: true, lines: ["  verify-provider-runtime-existence: (dry-run, skipped)"], errors: [] };
+  }
+  if (!fs.existsSync(cfgPath)) {
+    return { ok: false, lines: [], errors: ["  verify-provider-runtime-existence: FAIL — no .quay/config.yml to verify"] };
+  }
+  const entryFile = providerEntryFile(cfgPath, pluginRoot);
+  if (entryFile.startsWith("NOT-EVALUATED:")) {
+    return {
+      ok: true,
+      lines: [`  verify-provider-runtime-existence: NOT-EVALUATED — ${entryFile.slice("NOT-EVALUATED:".length)}`],
+      errors: [],
+    };
+  }
+  if (entryFile === "") {
+    return {
+      ok: false,
+      lines: [],
+      errors: ["  verify-provider-runtime-existence: FAIL — no runtime file could be determined (provider-entry-file returned nothing)"],
+    };
+  }
+  if (!fs.existsSync(entryFile)) {
+    return {
+      ok: false,
+      lines: [],
+      errors: [`  FAIL (referenced-runtime-missing): the provider mcp_entry references ${entryFile} but it does not exist in the target`],
+    };
+  }
+  const lines = [`  verify-provider-runtime-existence: OK (${entryFile} exists)`];
+  // Freshness (gap-upgrade-channel-cant-sync-build-artifacts-dist-stale): the referenced runtime must
+  // be byte-identical to the plugin's CURRENT vendored bundle. A copy that differs is a stale dist
+  // from an older install (git pull synced source; the gitignored target dist did not follow) and
+  // FAILS CLOSED. Scoped to quay's known runtime basenames; an arbitrary runtime is existence-only.
+  const base = path.basename(entryFile);
+  const srcBundle =
+    base === "quay.js"
+      ? pluginRoot
+        ? path.join(pluginRoot, "vendor", "quay", "dist", "quay.js")
+        : ""
+      : base === "quay-native.js"
+        ? pluginRoot
+          ? path.join(pluginRoot, "vendor", "quay-native", "dist", "quay-native.js")
+          : ""
+        : "";
+  if (srcBundle !== "" && fs.existsSync(srcBundle)) {
+    if (!fs.readFileSync(entryFile).equals(fs.readFileSync(srcBundle))) {
+      return {
+        ok: false,
+        lines: [],
+        errors: [
+          `  FAIL (stale-runtime): ${entryFile} differs from the plugin's current vendored bundle (${srcBundle}) — a stale dist from an older install`,
+        ],
+      };
+    }
+    lines.push(`  verify-provider-runtime-freshness: OK (${entryFile} matches the plugin's current vendored bundle)`);
+  }
+  return { ok: true, lines, errors: [] };
 }
 
 /**

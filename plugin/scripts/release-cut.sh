@@ -10,7 +10,7 @@
 #      /data/scratch/yale/quay-release-cut-v0120;
 #   2. the finish record then landed in THAT clone's `.quay/` — the main checkout's ledger last line
 #      stayed at 2026-09-20 (AC-320 exists precisely because of this);
-#   3. the next-version bump necessarily edits `docs/analysis/quay-init-closure-ratchet.baseline.json`
+#   3. the next-version bump necessarily edited `docs/analysis/quay-init-closure-ratchet.baseline.json` (retired since — gap-quay-init-sh-becomes-a-shim-over-bin-quay-init-and-callers-switch)
 #      (the bump changes `plugin/.claude-plugin/plugin.json`, a laydown source), which the prose
 #      never mentioned — the cutter discovered it on the spot.
 #

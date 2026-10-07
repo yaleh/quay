@@ -37,8 +37,11 @@ import { audit, type AuditReport } from "./config-key-consumer-check.ts";
 
 // ── faces ───────────────────────────────────────────────────────────────────────────────────────────
 
-/** config-key writer face (the AC-235 product's own single source — derived from quay-init.sh). */
-export const WRITER_REL = "plugin/scripts/quay-init.sh";
+/** config-key writer face — the SAME file config-key-consumer-check.ts derives its keys from
+ *  (`packages/quay/src/init.ts`; it moved there when the shell entry became a ≤40-line shim over the
+ *  CLI — gap-quay-init-sh-becomes-a-shim-over-bin-quay-init-and-callers-switch). Two constants for
+ *  one face would drift, so this one only answers "is the face readable here?". */
+export const WRITER_REL = "packages/quay/src/init.ts";
 
 /** shipped-entry dimension: the AC-233 product (its authoritative enumeration lives in this test). */
 export const SHIPPED_ENTRY_TEST_REL = "plugin/test/shipped-entry-runnable.test.mjs";

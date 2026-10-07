@@ -16,7 +16,6 @@
 // 里那份同名内联文本），修前它只列 2 个 kind 而真源有 6 个 ⇒ outer/quality/meta/goal 四个已实现的
 // kind 在产品表层等于不存在。
 
-import path from "node:path";
 import { ALL_SERVICE_NAMES, KINDS, VERBS } from "./driver-vocab.ts";
 // The web binding's ONE fallback (a leaf module, zero closure deps). Interpolated rather than
 // re-typed: the help text is a DERIVED surface, so the default it prints is the same value the
@@ -32,20 +31,18 @@ import { SERVE_BINDING_FALLBACK } from "../serve-binding.ts";
 // duplicated sentences agreed only because nobody had edited one of them yet — the "one entity, N
 // naming points" shape (硬规则 5b): a name spelled twice drifts, and the stale half keeps being
 // shown/used. Now the name is written ONCE (below) and every prose surface derives it.
-export const QUAY_INIT_REL = "plugin/scripts/quay-init.sh";
-
-/** The display basename of `QUAY_INIT_REL` — DERIVED, ⛔ never re-spelled.
- *  `node:path`'s basename rather than observation.ts's `scriptBasename()` wrapper on purpose:
- *  bin/quay.ts imports this module statically on EVERY CLI invocation, so pulling a heavy module in
- *  for a one-line wrapper would tax `quay --help`. It is the same primitive that wrapper wraps — not
- *  a second derivation. */
-export const QUAY_INIT_BASENAME = path.basename(QUAY_INIT_REL);
+// ⛔ RE-POINTED (gap-quay-init-sh-becomes-a-shim-over-bin-quay-init-and-callers-switch): this names
+// the SHIPPED upgrade entry — the thing a real user runs and that `/quay:init` drives — and that is
+// now the CLI entry point. `plugin/scripts/quay-init.sh` still exists for one release, but it is a
+// ≤40-line shim over THIS entry, so naming the shim here would advertise a front for a mechanism
+// whose real home the help text is supposed to point at.
+export const QUAY_INIT_REL = "plugin/bin/quay";
 
 /** `quay init --help`, the `--doc-branch-name` flag's "no default" clause. Shared VERBATIM by this
  *  file and `cli/init.ts` (both render it; the two copies used to be byte-identical duplicates). */
 export const INIT_DOC_BRANCH_NO_DEFAULT_PROSE =
-  `default for <name>: it is supplied by the caller (the shipped ${QUAY_INIT_BASENAME}\n` +
-  `               resolves --doc-branch-name, then loop.doc_branch, then its own default).`;
+  `default for <name>: it is supplied by the caller (the shipped ${QUAY_INIT_REL}\n` +
+  `               entry resolves --doc-branch-name, then loop.doc_branch, then its own default).`;
 
 /** `quay init --help`, the `--branch-model-only` description. Shared VERBATIM by this file and
  *  `cli/init.ts` (same duplication as the constant above). */

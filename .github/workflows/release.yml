@@ -115,7 +115,8 @@ jobs:
           mkdir -p "${RUNNER_TEMP}/plugin-channel-src"
           git archive plugin-channel-verify | tar -x -C "${RUNNER_TEMP}/plugin-channel-src"
           test -f "${RUNNER_TEMP}/plugin-channel-src/.claude-plugin/marketplace.json"
-          test -f "${RUNNER_TEMP}/plugin-channel-src/scripts/quay-init.sh"
+          test -f "${RUNNER_TEMP}/plugin-channel-src/bin/quay"
+          test -f "${RUNNER_TEMP}/plugin-channel-src/vendor/quay/dist/quay.js"
 
       - name: Install the Claude Code CLI (the plugin channel's own installer)
         run: npm install -g @anthropic-ai/claude-code
@@ -139,37 +140,37 @@ jobs:
       - name: Resolve the installed plugin cache directory
         id: installed
         # The install above lands the plugin in Claude Code's cache; every later step runs the
-        # INSTALLED copy (quay-init.sh from the cache), not the build directory — the same path the
-        # 2026-09-16 manual verification used. Fail closed if no cache entry carries quay-init.sh:
-        # "could not resolve" must not read as "nothing to check".
+        # INSTALLED copy (the CLI entry + its bundle, from the cache), not the build directory — the
+        # same path the 2026-09-16 manual verification used. Fail closed if no cache entry carries
+        # the CLI entry point: "could not resolve" must not read as "nothing to check".
         run: |
           set -euo pipefail
           CACHE_ROOT="${HOME}/.claude/plugins/cache/quay/quay"
           test -d "$CACHE_ROOT" || { echo "ERROR: no plugin cache at ${CACHE_ROOT} — the install did not materialise." >&2; exit 1; }
           INSTALLED=""
           for d in "$CACHE_ROOT"/*/; do
-            [ -f "${d}scripts/quay-init.sh" ] || continue
+            [ -f "${d}bin/quay" ] || continue
             INSTALLED="${d%/}"
           done
-          test -n "$INSTALLED" || { echo "ERROR: no cache entry under ${CACHE_ROOT} carries scripts/quay-init.sh." >&2; ls -la "$CACHE_ROOT" >&2 || true; exit 1; }
+          test -n "$INSTALLED" || { echo "ERROR: no cache entry under ${CACHE_ROOT} carries bin/quay." >&2; ls -la "$CACHE_ROOT" >&2 || true; exit 1; }
           echo "installed plugin: $INSTALLED"
           echo "version: $(node -p "require('${INSTALLED}/.claude-plugin/plugin.json').version" 2>/dev/null || echo unknown)"
           echo "dir=${INSTALLED}" >> "$GITHUB_OUTPUT"
 
-      - name: quay-init the scratch project from the installed plugin
+      - name: init the scratch project from the installed plugin
         env:
           INSTALLED: ${{ steps.installed.outputs.dir }}
         run: |
           set -euo pipefail
           SCRATCH="${RUNNER_TEMP}/scratch-project"
           test -d "$SCRATCH/.git" || git -C "$SCRATCH" init -q
-          CLAUDE_PLUGIN_ROOT="$INSTALLED" bash "$INSTALLED/scripts/quay-init.sh" \
-            --all --loop \
+          CLAUDE_PLUGIN_ROOT="$INSTALLED" "$INSTALLED/bin/quay" init \
             --root "$SCRATCH" \
             --project scratch-project \
             --repo-root "$SCRATCH" \
             --test-command 'node --test' \
-            --tmux-session 'scratch-project-0:0.0'
+            --tmux-session 'scratch-project-0:0.0' \
+            --plugin-root "$INSTALLED"
           test -f "$SCRATCH/.quay/config.yml"
 
       - name: Start the promotion + worker drivers and assert both are alive
@@ -282,9 +283,9 @@ jobs:
           ( cd "$USER_SCRATCH" && claude plugin install quay@quay --scope user -y )
           USER_INSTALLED="$(node -e 'const o=require(process.env.HOME+"/.claude/plugins/installed_plugins.json");const e=(o.plugins["quay@quay"]||[]).find(x=>x.scope==="user");if(!e){console.error("no user-scope install record");process.exit(1)}process.stdout.write(e.installPath)')"
           echo "$USER_INSTALLED" > "${RUNNER_TEMP}/user-installed"
-          test -f "$USER_INSTALLED/scripts/quay-init.sh"
-          CLAUDE_PLUGIN_ROOT="$USER_INSTALLED" bash "$USER_INSTALLED/scripts/quay-init.sh" \
-            --all --root "$USER_SCRATCH" --project scratch-user --repo-root "$USER_SCRATCH" \
+          test -f "$USER_INSTALLED/bin/quay"
+          CLAUDE_PLUGIN_ROOT="$USER_INSTALLED" "$USER_INSTALLED/bin/quay" init \
+            --root "$USER_SCRATCH" --project scratch-user --repo-root "$USER_SCRATCH" \
             --test-command 'node --test' --plugin-root "$USER_INSTALLED"
           for kind in promotion worker; do
             ( cd "$USER_SCRATCH" && "$USER_INSTALLED/bin/quay" driver start --kind "$kind" --root "$USER_SCRATCH" ) || true

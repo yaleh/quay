@@ -732,34 +732,6 @@ run_static_checks() {
   # @static-tier change
   # @static-object plugin/test/ packages/*/test/ experiments/*/test/ scripts/test.sh plugin/scripts/test-file-snapshot.sh
   run_checker "test-file-snapshot-check" bash "${repo_root}/plugin/scripts/test-file-snapshot.sh" --repo-relative check "${repo_root}/docs/analysis/test-file-baseline.txt"
-  echo "== quay-init laydown footprint ratchet (gap-quay-init-closure-assertion-first, SPEC AC168 判据先行) =="
-  # AC168 判据先行 (SPEC §8 AC3/AC4 — 安装写入闭集): the shrink-only ratchet over the REAL
-  # `quay-init --all --loop --manager` laydown footprint (files + bytes). Baseline = the measured
-  # current footprint (recorded in the task body; §2.9 measured 142 files / 7.1 MB — the current value
-  # is lower after mechanism-layer script retirements). 只许降不许升 — any change that makes quay-init
-  # lay ONE MORE file/byte goes RED immediately; the closure shrink (AC168 body) later walks the
-  # baseline down to the §6 闭集. The measurement is the PRODUCTION CARRIER: the checker RUNS a real
-  # laydown into a fresh temp target (never reads derive_loop_scripts' static derivation, never a
-  # fixture — SPEC AC4 反例判据). NOT-EVALUATED (exit 3) when the laydown cannot run (硬规则 3b:
-  # 读不懂输入 ≠ 合格). Negative controls (baseline-1 ⇒ RED / baseline+1 ⇒ GREEN) pinned by
-  # plugin/test/quay-init-closure-ratchet.test.mjs + checker-mutation-cases/quay-init-closure-ratchet.sh.
-  # @static-tier full  (whole-store ratchet — deferred to the full-suite gate in scoped mode)
-  run_checker "quay-init-closure-ratchet" node --no-warnings --experimental-strip-types "${repo_root}/plugin/scripts/quay-init-closure-ratchet.ts" --gate --root "${repo_root}"
-  echo "== quay-init laydown footprint re-anchor freshness (gap-quay-init-closure-ratchet-manual-reanchor-recurs) =="
-  # A change-tier companion to the full-tier byte ratchet above: CHEAP (hashes the laydown SOURCE
-  # tree — no real laydown) and detects "a laydown source file changed but the committed baseline
-  # was not re-anchored" at the CHANGER's own scoped gate, instead of at an unrelated task's
-  # full-suite fan-in (the 8th-recurrence defect this task closes). Exit 1 when the current source
-  # fingerprint differs from docs/analysis/quay-init-closure-ratchet.baseline.json (stale — run
-  # `node --experimental-strip-types plugin/scripts/quay-init-closure-ratchet.ts --reanchor`); exit 3
-  # (NOT-EVALUATED) when the baseline/set cannot be read. The full-tier ratchet (above) still measures
-  # the REAL laydown and still reds on true bloat (negative control — never relaxed into constant-true).
-  # Pinned by plugin/test/quay-init-closure-ratchet.test.mjs (stale on a changed source; fresh after
-  # re-anchor). Object = the precise laydown source dirs (NOT all of plugin/scripts — ~200 harness
-  # scripts there are not laid down; the derived set + wholesale dirs are the fingerprint scope).
-  # @static-tier change
-  # @static-object plugin/scripts/ plugin/workflows/ plugin/agents/ plugin/probes/ plugin/loop/ plugin/.claude/ orchestration/
-  run_checker "quay-init-closure-ratchet-stale" node --no-warnings --experimental-strip-types "${repo_root}/plugin/scripts/quay-init-closure-ratchet.ts" --check-stale --root "${repo_root}"
   echo "== profiles role coverage check (gap-quay-init-profiles-template-omits-every-role-the-drivers-request) =="
   # Every profile role a driver asks for must exist in the carrier a REAL init produces. The
   # assertion object is init's OUTPUT (a temp workspace initialized by the Core CLI), never a

@@ -8,7 +8,14 @@ import { parseFlags, resolveJsonFlag } from "./shared.ts";
 // handler's and help.ts's — used to carry byte-identical copies of these sentences, so every edit
 // had to be made twice and the two could drift apart silently.
 import { INIT_BRANCH_MODEL_ONLY_PROSE, INIT_DOC_BRANCH_NO_DEFAULT_PROSE } from "./help.ts";
-import { runInit, printNextSteps, buildInitReport, printInstallSteps } from "../init.ts";
+import {
+  runInit,
+  printNextSteps,
+  buildInitReport,
+  printInstallSteps,
+  providerRuntimeExistenceReport,
+  deliverySurfaceL1Report,
+} from "../init.ts";
 import {
   ensureDocBranch,
   formatBaselineCheckoutReport,
@@ -274,6 +281,23 @@ Description:
         ? "no"
         : "prompt";
 
+  // The post-init runtime-existence check (ported from the retired shell entry — see
+  // `providerRuntimeExistenceReport`). Emitted on EVERY successful arm so the reading is never
+  // "absent because this branch forgot it"; a failure exits 2 (the shell entry's `|| exit 2`), so a
+  // config that binds a runtime that is not there is not reported as a clean init.
+  const verifyRuntime = (configPath: string): void => {
+    // The retired shell entry ran the L1 delivery-surface check FIRST, then the runtime-existence
+    // check, and exited 2 if either failed. Both are ported (see `deliverySurfaceL1Report` /
+    // `providerRuntimeExistenceReport`), and the order and the exit code are unchanged.
+    const l1 = deliverySurfaceL1Report(pluginRoot);
+    for (const line of l1.lines) say(line);
+    for (const err of l1.errors) console.error(err);
+    const v = providerRuntimeExistenceReport(configPath, pluginRoot, { dryRun });
+    for (const line of v.lines) say(line);
+    for (const err of v.errors) console.error(err);
+    if (!l1.ok || !v.ok) process.exitCode = 2;
+  };
+
   try {
     // The closed set this run is responsible for — printed up front so the report's own lines have a
     // referent (the shipped shell entry's banner).
@@ -294,6 +318,9 @@ Description:
       tmuxSession,
       worktreeRoot,
       autoCommitConfig,
+      // The doc-branch NAME, when the caller gave one. Absent ⇒ `runInit` resolves the target's
+      // `loop.doc_branch`, else the `author` convention (the retired shell entry's own precedence).
+      docBranchName,
       // AC-331: the CLI must lay the WHOLE closed set alone, and the `.quay/plugin` link is part of it.
       // The fresh arm (no existing link) may therefore point at a source checkout; an existing link is
       // still left untouched and reported NOT-EVALUATED (the 2026-10-06 ruling). See runInit.
@@ -305,6 +332,25 @@ Description:
     // two surfaces the same document rather than two renderings that must be kept in step by hand.
     if (json) {
       process.stdout.write(JSON.stringify(buildInitReport(result, { dryRun }), null, 2) + "\n");
+    }
+
+    // The BRANCH MODEL and the DOC-branch bootstrap are the FIRST step of every shipped init — the
+    // retired shell entry ran them (as `quay init --branch-model-only …`) before its closed-set
+    // write — so their verdicts are reported ONCE here, ahead of whatever the config arm does. Doing
+    // it in one place is also what makes the reading present on arms that return early (a refused
+    // upgrade still has to answer "was my baseline judged?").
+    //
+    // ⛔ The blocked arms report their own: they must ALSO name the consequence and set the exit
+    // code, and `branch-model-blocked` prints its verdict on stdout where this would double it.
+    if (
+      result.outcome !== "branch-model-only" &&
+      result.outcome !== "branch-model-blocked" &&
+      result.outcome !== "doc-branch-blocked" &&
+      result.branchModelReport
+    ) {
+      say(result.branchModelReport);
+      if (result.baselineCheckoutReport) say(result.baselineCheckoutReport);
+      if (result.docBranchReport) say(result.docBranchReport);
     }
 
     // The config-free branch-model entry (gap-upgrade-entry-never-establishes-branch-model). It
@@ -489,6 +535,7 @@ Description:
         console.error(`  warning: unrecognized top-level config key "${k}" — kept as-is (not deleted)`);
       }
       if (dryRun && result.outcome === "reconciled") say("# Dry run — nothing written to disk.");
+      verifyRuntime(result.configPath);
       if (result.autoCommit) {
         const sink = json || result.autoCommit.state === "declined" ? process.stderr : process.stdout;
         sink.write(`  auto-commit: ${result.autoCommit.detail}\n`);
@@ -496,14 +543,35 @@ Description:
       return;
     }
 
+    if (result.outcome === "doc-branch-blocked") {
+      // The doc-branch bootstrap refused (a name collision with a branch unrelated to the landing
+      // baseline, or a checkout that could not be moved onto it). Its own report carries the detail;
+      // this arm names the consequence. NOTHING was written — the bootstrap runs before any write.
+      console.error(result.docBranchReport ?? "");
+      console.error("");
+      console.error("ERROR: quay init REFUSES to establish the doc-only work branch — the requested name");
+      console.error("       is already taken by a branch unrelated to the landing baseline 'develop'.");
+      console.error("       NOTHING WAS MOVED (no branch created, HEAD not switched, config untouched).");
+      console.error("       Re-run with a different name: --doc-branch-name <other-name>.");
+      if (result.failureReason) console.error(`       detail: ${result.failureReason}`);
+      process.exitCode = 1;
+      return;
+    }
+
     if (result.outcome === "branch-model-blocked") {
       // Fail-closed, tree untouched: the project's landing baseline is a foreign line and silently
-      // reusing it would make every task's anti-drift diff meaningless. Nothing was written.
-      console.error(result.branchModelReport);
-      console.error(
-        "quay init: refusing to initialize — the project's landing baseline is not a continuation " +
-        "of its default branch. Nothing was written."
-      );
+      // reusing it would make every task's anti-drift diff meaningless. Nothing was written. The
+      // verdict goes to STDOUT and the consequence to stderr — the retired shell entry's split, kept
+      // so a caller reading either stream sees the same thing it always did.
+      say(result.branchModelReport);
+      console.error("");
+      console.error("ERROR: quay init REFUSES to upgrade this project — its landing baseline is not a continuation");
+      console.error("       of the project's default branch ('develop' is a foreign line), so every task would be");
+      console.error("       structurally un-landable (anti-drift would diff against the whole divergent history).");
+      console.error("       NOTHING WAS WRITTEN — .quay/config.yml is byte-for-byte unchanged.");
+      console.error("       Re-run with the adoption decision to proceed; the existing tip is preserved under");
+      console.error("       '<branch>-pre-quay-init-<sha>' and NOTHING is destroyed:");
+      console.error("           quay init --root <root> --adopt-branch-model <same flags as before>");
       process.exitCode = 1;
       return;
     }
@@ -523,7 +591,7 @@ Description:
       say(`# Would create: ${result.tasksDir}/`);
       say(`# Would create: ${result.launchSettingsPath}`);
       say(`# Would create: ${result.profilesPath}`);
-      say(`# ${result.branchModelReport}`);
+      verifyRuntime(result.configPath);
       say(`  auto-commit: SKIP (--dry-run — nothing was written)`);
       if (!json) say(printInstallSteps());
       return;
@@ -549,7 +617,7 @@ Description:
     say(`Created ${result.tasksDir}/ (or already existed)`);
     say(`Created ${result.launchSettingsPath}`);
     say(`Created ${result.profilesPath}`);
-    say(result.branchModelReport);
+    verifyRuntime(result.configPath);
     // ── AC-331: the fresh install's own reporting ───────────────────────────────────────────────
     // The auto-commit reading is enumerated (committed / skipped / declined / not-a-repo) and its
     // detail line names WHAT happened — a decline goes to stderr (the shipped shell entry's own

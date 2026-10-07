@@ -468,6 +468,12 @@ test("CLI: the config-free entry supersedes the upgrade refusal it shares a comm
   // input. Falsifiable: move the `branchModelOnly` block after the upgrade pipeline in runInit and
   // this test goes red.
   const dir = initializedRepo("bmo-supersede");
+  // A COMPATIBLE baseline, deliberately: `initializedRepo` inherits `thirdPartyShapedRepo`'s
+  // DIVERGENT `develop`, and since gap-quay-init-sh-becomes-a-shim-… the branch model runs on the
+  // UPGRADE path too (the shipped entry always ran it first) — so a divergent fixture would refuse
+  // at the branch model and this arm would never reach the refusal it is about. Re-pointing
+  // `develop` at `main`'s tip isolates the config-upgrade refusal the test exists to pin.
+  git(dir, ["branch", "-f", "develop", "main"]);
   const plain = runQuayInit(["init", "--root", dir], dir);
   assert.equal(plain.exitCode, 1);
   assert.match(plain.stderr, /upgrade REFUSED/);
@@ -1024,10 +1030,18 @@ test("the handoff withholds its verdict on a detached HEAD (never 'already there
   assert.equal(git(dir, ["rev-parse", "--abbrev-ref", "HEAD"]), "HEAD");
 });
 
-test("the shipped entry relays the SAME marker the report prints (a rename must not desync them)", () => {
-  // ⛔ The shell matches a literal, so the two spellings are one contract in two files. If this fails
-  // the failure falls through to the entry's "cannot judge the branch model" arm — exit 3 with a
-  // message naming the wrong cause, which is worse than no arm at all.
+test("the [FAILED] baseline-checkout marker no longer has a SECOND parser (the cross-file contract is retired)", () => {
+  // WHAT THIS USED TO PIN: the shipped shell entry matched the marker LITERALLY (`case "$bm_out" in
+  // *"[FAILED] baseline-checkout"*)`), so the two spellings were one contract across two files, and a
+  // rename on either side would silently fall through to the entry's "cannot judge the branch model"
+  // arm (exit 3 naming the wrong cause).
+  //
+  // gap-quay-init-sh-becomes-a-shim-over-bin-quay-init-and-callers-switch retired that arm: the entry
+  // is a ≤40-line shim, the handoff runs INSIDE `runInit`, and its verdict is a typed value
+  // (`doc-branch-blocked` + `failureReason`) rather than a token the shell greps for. The marker is
+  // still emitted (operators read it), but nothing parses it — so a rename can no longer desync a
+  // consumer. The falsifiable half: if a `case` arm on that token comes back to the shipped entry,
+  // this goes red.
   const failed = formatBaselineCheckoutReport({
     action: "failed",
     ok: false,
@@ -1036,10 +1050,10 @@ test("the shipped entry relays the SAME marker the report prints (a rename must 
     to: "develop",
     detail: "boom",
   });
-  assert.match(failed, /\[FAILED\] baseline-checkout/);
+  assert.match(failed, /\[FAILED\] baseline-checkout/, "the marker itself is unchanged");
   const sh = fs.readFileSync(SHIPPED_INIT, "utf8");
-  assert.match(sh, /\*"\[FAILED\] baseline-checkout"\*\)/, "quay-init.sh must relay this exact token");
-  assert.doesNotMatch(sh, /\*"\[NOOP\] baseline-checkout"\*\)/, "the success/no-op markers are not refusals");
+  assert.doesNotMatch(sh, /\[FAILED\] baseline-checkout/, "the shim must not parse the marker — the verdict is a typed value now");
+  assert.doesNotMatch(sh, /\[BLOCKED\] landing-baseline/, "same for the baseline verdict");
 });
 
 // ── GOAL BRANCH role (SPEC-goal-branch-2026-10-03.md §4.1/§4.2) ───────────────────────────────────

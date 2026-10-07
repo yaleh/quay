@@ -91,8 +91,6 @@
     "packaging-hygiene-check.ts": "Does the delivered packaging surface stay structurally runnable — every config key quay-init writes into a downstream .quay/config.yml loop: section has a CODE consumer (wrapping config-key-consumer-check.ts audit; drift = no-consumer-to-wire) AND every npm-pack'd entry-like file is a declared bin runnable from an install location (wrapping the shipped-entry-runnable test's npm pack --dry-run + install-layout enumeration; drift = test red) — a standing two-dimension check whose non-empty drift the quality-gate-driver's packaging-hygiene routine turns into a filed gap task (gap-packaging-hygiene-standing-check / GOAL-015 退出条件③④)?",
     "quay-deliver.ts": "Which delivery/preempt instrument does the consolidated deliver entry point dispatch to (grouped entry, byte-for-byte CLI preservation)?",
     "quay-entry-base.ts": "What is the shared dispatcher framework that the six grouped instrument entry points use to preserve each member's CLI byte-for-byte?",
-    "quay-init-closure-ratchet.ts": "Is the REAL quay-init --all --loop --manager laydown footprint (files + bytes, counted by running a fresh laydown into a temp target — the production carrier, never derive_loop_scripts' static derivation nor a fixture) still ≤ the shrink-only baseline (只许降不许升), so any change that makes quay-init lay ONE MORE file/byte goes RED (SPEC AC168 判据先行, tasks/gap-quay-init-closure-assertion-first)?",
-    "quay-init-closure-assertion.ts": "Is every relative path of a REAL quay-init laydown a member of the SPEC §6 six-item closed set (∪ tasks/ descendants) with ZERO .claude/{skills,workflows,agents} / plugin/scripts copies (closed-set MEMBERSHIP — distinct from the ratchet's count-only judgment; NOT-EVALUATED when the laydown cannot run) (SPEC AC168 收缩本体, tasks/gap-quay-init-closure-shrink-body)?",
     "quay-session.ts": "Which session/topology instrument does the consolidated session entry point dispatch to (grouped entry, byte-for-byte CLI preservation)?",
     "suite-accounting.ts": "What are the per-phase cgroup v2 cpu/psi differential counters and the systemd Consumed load fields of a full-suite round — resolveCgroupV2Dir / parseCpuStatUsageUsec / parsePressureSomeTotal / readPhaseCounters + PhaseDifferentialAccounting (per-phase differential accumulator) + parseSystemdTimespanToSeconds / parseSystemdBytesToMb / parseSystemdConsumedLine / parseConsumedFromJournalOutput / readScopeConsumedLoad — PURE TELEMETRY (changing it never flips pass/fail), extracted from full-suite-runner.ts so accounting-only changes take the bucket path, not the full suite (gap-suite-hub-file-responsibility-strip)?",
     "suite-bucket-attribution.ts": "Which suite bucket does a test file belong to — P (product: packages/*/(src|bin|dist) or packages/*/test/ home), S (suite infra: scripts/test.sh), M (mechanism: plugin/scripts), a cross-bucket combination, or UNRESOLVED (subject not statically locatable) — by STATIC REFERENCE CLOSURE (normalized relative imports + path literals, never basename pairing, never directory-ownership as the sole signal)?",
@@ -397,7 +395,8 @@
     "worktree-deps-provision.sh": "Is the task-worktree dependency step reachable from the pure-bash dispatch-worktree-setup.sh WITHOUT that script gaining an embedded interpreter — a thin entry that execs worktree-deps-provision.ts, so the sh-census embeddedInterpreterLines reading of dispatch-worktree-setup.sh stays at zero?",
     "shipped-shell-reachability.ts": "发布产物里哪些 .sh 该留、哪些不该留 —— 由「运行时实际会执行」的引用闭包派生,而不是维护文件名清单、也不按散文提及? 根 = plugin/bin/quay + plugin/.mcp.json + plugin/skills 与 plugin/loop 围栏代码块里的命令 + plugin/workflows 发出的命令 + packages/*/src 里 resolvePluginScript* / resolveKernelShellSibling 的字面量 + 已构建的 scripts/dist 与 gate-scripts/dist 入口 + capability-catalog-declarations.json 声明的 instrument(quay instrument 那批检查器是产品功能,不因名字以 -check.sh 结尾就删)。闭包只沿【命令位置】的引用走(注释行、正文提及、示例字符串都不算命中),所以它不重演「文本闭包」的高估(实测 2026-10-07:提及闭包留 85/90,执行闭包留 71/90)。出局的两类:无人引用的(退役的经典管线门 gate-scripts/*.sh、开发期资产同步 sync.sh)与按决定出局的(UNSHIPPED_BY_DECISION:已取消的 npm/tgz 渠道的交付验证工具,逐条带理由)。读数三值:evaluated:false 当某个根面或候选集读不出来(硬规则 3b)。(tasks/gap-shipped-shell-limited-to-runtime-reachable-set-and-delivery-verify-tools-leave-the-artifact;GOAL-029,人 2026-10-07 裁定)?",
     "shipped-set-rules.ts": "发布产物(plugin artifact)里【不该出现的东西】还有没有剩下,以及产物自己有多大 —— 规则声明在 plugin/shipped-set-rules.txt(目录/模式,不是文件名清单:test/、tests/、fixtures/、checker-mutation-cases/、*.test.*/*.spec.*、*-baseline.json/*-exceptions.txt/*-exemptions.*/*-violations.txt/*-violators.txt 及本规则/基线文件自身),本模块是它【唯一】的解析器与匹配器。它对一份已装配的产物给出两类读数:①规则排除、却仍然存在的路径(逐条列举 + 命中的那条规则)及其 files/bytes/.sh 有效行三个量 —— 这就是只降不升棘轮的三个轴,正确发布时应恒为 0;②产物自身的三项总量。同一份规则同时驱动【发布装配】(publish-dist-branch.sh 的 rsync --exclude,经 --print-rsync-excludes)与【发布门禁断言】(verify-plugin-channel-assertions.ts 的 shipped-set-clean),所以「排除什么」与「断言什么」结构上不可能各说各话(tasks/gap-shipped-plugin-tree-excludes-dev-only-content-and-has-a-shrink-only-size-ratchet;GOAL-029「收窄发布集合」,人 2026-10-07 裁定)?",
-    "task-granularity-advice.ts": "At filing time, which OPEN tasks already declare the files this draft will touch (merge candidates), and how has each of those files behaved historically (landed tasks / changed lines / worker rounds)? And — across task sizes — what is the real worker cost per unit of landed work (worker-hours per 1000 changed lines), with a re-runnable cost model?"
+    "task-granularity-advice.ts": "At filing time, which OPEN tasks already declare the files this draft will touch (merge candidates), and how has each of those files behaved historically (landed tasks / changed lines / worker rounds)? And — across task sizes — what is the real worker cost per unit of landed work (worker-hours per 1000 changed lines), with a re-runnable cost model?",
+    "quay-init-closure-assertion.ts": "Is every relative path of a REAL quay-init laydown a member of the SPEC §6 six-item closed set (∪ tasks/ descendants) with ZERO .claude/{skills,workflows,agents} / plugin/scripts copies (closed-set MEMBERSHIP — distinct from the ratchet's count-only judgment; NOT-EVALUATED when the laydown cannot run) (SPEC AC168 收缩本体, tasks/gap-quay-init-closure-shrink-body)?"
   },
   "GUARD_OBJECT": {
     "manager-tick-log-check.sh": "file:orchestration/manager-tick-log.md",
@@ -621,8 +620,6 @@
     "publish-dist-branch.sh": "冷启动",
     "quay-deliver.ts": "按需",
     "quay-entry-base.ts": "按需",
-    "quay-init-closure-ratchet.ts": "每轮",
-    "quay-init-closure-assertion.ts": "按需",
     "quay-init.sh": "冷启动",
     "quay-launch.sh": "冷启动",
     "quay-session.ts": "按需",
@@ -780,7 +777,8 @@
     "worktree-deps-provision.sh": "按需",
     "shipped-shell-reachability.ts": "按需",
     "shipped-set-rules.ts": "每轮",
-    "task-granularity-advice.ts": "按需"
+    "task-granularity-advice.ts": "按需",
+    "quay-init-closure-assertion.ts": "按需"
   },
   "INVALIDATION": {
     "verify-plugin-channel-assertions.ts": "失效前提：Claude Code plugin 仍是唯一的发布/安装渠道，且 release.yml 的 verify-plugin-channel 仍是发布门禁（门禁若移到别处，断言实现不变但调用点须同步）；断言依赖的直接量仍存在——VERSION、.claude-plugin/plugin.json、bin/quay --version、项目 .quay/plugin 链接、.quay/config.yml 的 providers.native、/proc/<pid>/cgroup、.quay/server.json、.quay/serve.log、installed_plugins.json。任一量改由另一个载体承载（例如版本改从被测对象自报接口取）⇒ 本条口径需同步，否则会把读不懂误判为合格。",
@@ -995,8 +993,6 @@
     "publish-dist-branch.sh": "无可测前提，靠周期复核",
     "quay-deliver.ts": "无可测前提，靠周期复核",
     "quay-entry-base.ts": "无可测前提，靠周期复核",
-    "quay-init-closure-ratchet.ts": "失效前提：quay-init.sh 仍在按 §6 闭集之外的体积把机制层（plugin/scripts 副本、tick 文档、workflows、agents、probes、runtime）逐字节铺进目标项目；若 AC168 收缩本体落地、闭集收缩到只剩配置面，本棘轮基线随之一路降到 §6 闭集（仍有对象，不退休）",
-    "quay-init-closure-assertion.ts": "失效前提：quay-init.sh 会写入 §6 闭集之外的任何路径（.claude/{skills,workflows,agents}、plugin/scripts、orchestration、docs/analysis、.quay/runtime 副本）；若 AC168 收缩本体落地、写入面收敛到六项闭集，本检查器判定闭集成员（仍有对象，不退休）",
     "quay-init.sh": "无可测前提，靠周期复核",
     "quay-launch.sh": "无可测前提，靠周期复核",
     "quay-session.ts": "无可测前提，靠周期复核",
@@ -1154,7 +1150,8 @@
     "worktree-deps-provision.sh": "失效前提：dispatch-worktree-setup.sh 改为直接 exec node（不再经本薄入口），或本文件被删除/改名使入口契约失效。",
     "shipped-shell-reachability.ts": "失效前提:①发布装配仍由 plugin/scripts/publish-dist-branch.sh 用 --print-excludes 的输出生成 rsync --exclude —— 排除改由构建器表达时,装配半边须重新对齐;②根面仍如上 —— 新增一类运行时可启动的面(新的入口目录/新的声明表)时须加进根,否则该面的 .sh 会被误判出局;③gate-scripts/ 仍是「文件留树、不铺、不 sync」的退役态;④UNSHIPPED_BY_DECISION 每条仍是「可达但渠道已取消」—— 渠道恢复则移除该条。",
     "shipped-set-rules.ts": "失效前提:①发布装配仍是 plugin/scripts/publish-dist-branch.sh 的 rsync 那一步 —— 渠道换成别的机制、或排除改由构建器而非 rsync 表达时,--print-rsync-excludes 这半边退休(断言半边仍有效,但规则与装配须重新对齐);②发布门禁仍是 plugin/scripts/verify-plugin-channel-assertions.ts(断言若移到别处,调用点须同步);③esbuild 仍把内联模块的路径以【相对】形式写进产物 —— 若改为绝对路径或不写路径,bytes 轴可以重新设门,SIZE_GATED_AXES 只门 files/shLines 的取舍须重估(实测:同一份源码在不同构建树位置下相差 225,828 字节,同一构建重复跑相差 ±3 字节);④产物仍由「源码树 rsync + 删原始 .ts + 打 dist bundle」三步装配 —— 装配形变会改变三个总量的含义。",
-    "task-granularity-advice.ts": "失效前提：生产载体 .quay/worker-outcome.jsonl 仍由 worker-driver 按次写记录、任务落地仍以 Merge branch 'develop' into task/<id> 提交为可观测落点（体量取自其 develop 一侧父提交的 numstat）、且 ## Touches 仍是任务的声明面（peers 按解析后的 Touches 判重叠）；若落地不再产生该 merge 提交或改由别的落地路径、或 outcome 记录粒度改为按轮而非按次、或任务粒度不再由 Touches/体量判断，本条无对象，退休"
+    "task-granularity-advice.ts": "失效前提：生产载体 .quay/worker-outcome.jsonl 仍由 worker-driver 按次写记录、任务落地仍以 Merge branch 'develop' into task/<id> 提交为可观测落点（体量取自其 develop 一侧父提交的 numstat）、且 ## Touches 仍是任务的声明面（peers 按解析后的 Touches 判重叠）；若落地不再产生该 merge 提交或改由别的落地路径、或 outcome 记录粒度改为按轮而非按次、或任务粒度不再由 Touches/体量判断，本条无对象，退休",
+    "quay-init-closure-assertion.ts": "失效前提：quay-init.sh 会写入 §6 闭集之外的任何路径（.claude/{skills,workflows,agents}、plugin/scripts、orchestration、docs/analysis、.quay/runtime 副本）；若 AC168 收缩本体落地、写入面收敛到六项闭集，本检查器判定闭集成员（仍有对象，不退休）"
   },
   "LAST_REAFFIRMED": {
     "verify-plugin-channel-assertions.ts": "2026-10-06",
@@ -1369,8 +1366,6 @@
     "publish-dist-branch.sh": "2026-08-10",
     "quay-deliver.ts": "2026-08-10",
     "quay-entry-base.ts": "2026-08-10",
-    "quay-init-closure-ratchet.ts": "2026-09-05",
-    "quay-init-closure-assertion.ts": "2026-09-08",
     "quay-init.sh": "2026-08-10",
     "quay-launch.sh": "2026-08-10",
     "quay-session.ts": "2026-08-10",
@@ -1528,7 +1523,8 @@
     "worktree-deps-provision.sh": "2026-10-05",
     "shipped-shell-reachability.ts": "2026-10-07",
     "shipped-set-rules.ts": "2026-10-07",
-    "task-granularity-advice.ts": "2026-10-07"
+    "task-granularity-advice.ts": "2026-10-07",
+    "quay-init-closure-assertion.ts": "2026-09-08"
   },
   "MATCHING": {
     "verify-plugin-channel-assertions.ts": "position",
@@ -1743,8 +1739,6 @@
     "publish-dist-branch.sh": "keyword",
     "quay-deliver.ts": "keyword",
     "quay-entry-base.ts": "keyword",
-    "quay-init-closure-ratchet.ts": "enumerative",
-    "quay-init-closure-assertion.ts": "enumerative",
     "quay-init.sh": "keyword",
     "quay-launch.sh": "keyword",
     "quay-session.ts": "keyword",
@@ -1902,7 +1896,8 @@
     "worktree-deps-provision.sh": "n/a",
     "shipped-shell-reachability.ts": "position",
     "shipped-set-rules.ts": "position",
-    "task-granularity-advice.ts": "position"
+    "task-granularity-advice.ts": "position",
+    "quay-init-closure-assertion.ts": "enumerative"
   },
   "CONSUMER": {
     "verify-plugin-channel-assertions.ts": ".github/workflows/release.yml 的 verify-plugin-channel 步骤（CI 门禁调用点）与发布前本地演练（README「发布前本地演练」）。",
@@ -2016,8 +2011,6 @@
     "prod-data-audit.ts": "谁按：outer/人在 gap-prod-data-accounting-audit 复核时按；条件=要判生产数据入账三态（①/②/③）——按载体聚合，只计数不修复",
     "quay-deliver.ts": "谁按：quay CLI deliver/preempt 命令按；条件=要交付",
     "quay-entry-base.ts": "谁按：quay 六个组合入口 import；条件=共享 dispatcher 框架",
-    "quay-init-closure-ratchet.ts": "谁按：run_static_checks 每轮自动按（runner-static-gate.ts @static-tier full，全量套件 code-class gate --gate 模式）——读一次真实 quay-init --all --loop --manager laydown 的产物清单，与棘轮基线比对；条件=判定 quay-init 落地量（文件数/字节数）是否超出基线（只许降不许升，SPEC AC168 判据先行）",
-    "quay-init-closure-assertion.ts": "谁按：其自有测试 + 周期复核（当前未接进 run_static_checks @static-tier——AC2 只要求可运行+NOT-EVALUATED 可区分）；条件=枚举一次真实 quay-init laydown 的相对路径、断言均 ∈ 六项闭集 ∪ tasks/ 后代且零扩展/脚本副本",
     "quay-session.ts": "谁按：quay CLI session/topology 命令按；条件=要会话/拓扑操作",
     "release-branch-finish.sh": "谁按：结束一次 release 的人按（合并点打好 tag 后 bash plugin/scripts/release-branch-finish.sh <branch>；或整段切版尾声一条命令 bash plugin/scripts/release-branch-finish.sh <branch> --cut --tag <vX.Y.Z>），也由 AC-271 的清理轮与 SPEC §9 第 2 步的迁移动作按；条件=要判定某条 release 分支是否已无丢失地终止（已合回，或其 tip 被某个 tag 持有）因而该被删除、要一次走完切版的合回+打 tag+删除三步、要在生产仓库上真删掉它、或要用 --log 回到本地记录里查某次结束步是否发生过",
     "release-reading-sandbox.ts": "谁按：任何要取一次真实 build 模式读数的任务按（node --experimental-strip-types plugin/scripts/release-reading-sandbox.ts --root <repo> --branch <名字>；成对负控制换一个非 release 名字再跑一次原文命令），以及 SPEC-release-and-hotfix-branching-2026-09-15 §4.1.2 引用它作为「在真实 release 分支上取读数」的唯一载体；条件=要在一个不会把 AC-271 翻红的隔离位置上真的跑出一次 build 读数、要证明该读数按分支名取假（release 名字给无后缀、别的名字给 -dev）、或要用 --log 查某次 release 形态读数是否发生过",
@@ -2079,7 +2072,8 @@
     "worktree-deps-provision.sh": "谁按：plugin/scripts/dispatch-worktree-setup.sh 第 1 步；其 --help 由本薄入口转发。",
     "shipped-shell-reachability.ts": "谁按:①scripts/test.sh 的 plugin/test/shipped-shell-reachability.test.mjs(真产物:每个 .sh 都可达,且 verify-deliver-coldstart.sh 与 develop-deliver-tgz.sh 不在产物中;三向取假:往产物塞无人引用的 orphan-tool.sh 必红、把某 instrument 的 .sh 从 catalog 声明里拿掉必红、把 verify-deliver-coldstart.sh 塞回产物必红);②发布装配 plugin/scripts/publish-dist-branch.sh(经 --print-excludes 生成 rsync --exclude);③发布门禁 plugin/scripts/verify-plugin-channel-assertions.ts 的 shipped-shell-reachable 断言(对已安装树直接走盘,与源码检出的可达集比对)。⛔ 本模块是【源码检出的门】:它的输入(packages/quay/src、plugin/skills、catalog 声明、规则文件)都不随产物发出,所以 publish-dist-branch.sh 里用带引号的路径调用它,使 build-plugin-dist 的 INVOCATION_RE 不把它并进 bundle 入口 —— 它本身不进产物。决定清单 = 本模块的 UNSHIPPED_BY_DECISION;条件=要判『产物里的 .sh 是否只剩运行时可达的集合』—— 这正是 GOAL-029 的取假点",
     "shipped-set-rules.ts": "谁按:①scripts/test.sh 的 plugin/test/shipped-set.test.mjs(双控:真产物必须 0 违规且三轴不超基线、把排除列表从 rsync 行拿掉必须红、往干净产物塞 foo.test.mjs 必须红、棘轮 over/raised/reanchor 三向、零规则必须 NOT-EVALUATED);②.github/workflows/release.yml 的 verify-plugin-channel 两个 scope 步骤经 verify-plugin-channel-assertions.ts 的 shipped-set-clean 断言按(先判规则排除内容为 0,再判 files/shLines 不超记录值);③人按:本文件的 CLI —— --check <artifactDir>(读一份已装配的产物;退出 0/1/2)、--reanchor(从产物【自己的读数】重锚,有规则排除内容在时拒绝)、--print-rsync-excludes(publish-dist-branch.sh 用它生成 rsync --exclude)。⛔ 本模块【不进产物】(与 verify-plugin-channel-assertions.ts 同一条纪律):它的两个输入 —— 规则 plugin/shipped-set-rules.txt 与基线 plugin/shipped-set-baseline.json —— 都被排除规则本身排除了,所以一份打好的 bundle 只可能回答 NOT-EVALUATED;它永远从源码检出运行。数据文件:规则 plugin/shipped-set-rules.txt、基线 plugin/shipped-set-baseline.json(三轴只降不升,且相对 git HEAD 的值也只许降);条件=要判『发布集合是否在重新长回开发期内容、体积是否在回升』—— 这正是 GOAL-029 的取假点",
-    "task-granularity-advice.ts": "谁按：立案者 / quay-file-task 第 2b 步（plugin/skills/quay-file-task/SKILL.md）在立案前查合并候选与每文件历史时按（node --experimental-strip-types plugin/scripts/task-granularity-advice.ts --touches <草稿 Touches> --json）；条件=要判「这条草稿是否与已有开放任务在实质源码文件上重叠」，或要复核 docs/analysis/task-granularity-and-throughput-2026-10-07.md 的体量读数时跑 --report"
+    "task-granularity-advice.ts": "谁按：立案者 / quay-file-task 第 2b 步（plugin/skills/quay-file-task/SKILL.md）在立案前查合并候选与每文件历史时按（node --experimental-strip-types plugin/scripts/task-granularity-advice.ts --touches <草稿 Touches> --json）；条件=要判「这条草稿是否与已有开放任务在实质源码文件上重叠」，或要复核 docs/analysis/task-granularity-and-throughput-2026-10-07.md 的体量读数时跑 --report",
+    "quay-init-closure-assertion.ts": "谁按：其自有测试 + 周期复核（当前未接进 run_static_checks @static-tier——AC2 只要求可运行+NOT-EVALUATED 可区分）；条件=枚举一次真实 quay-init laydown 的相对路径、断言均 ∈ 六项闭集 ∪ tasks/ 后代且零扩展/脚本副本"
   },
   "SUPERSEDED": {
     "send-keys-verified.sh": "REMOVED 2026-08-10 (gap-retired-script-still-callable, human ruling) — superseded by send-keys-reliable.sh under outer ruling F (2026-08-04); its md5 pane-hash criterion is ADR-016-forbidden. Deleted with its test (send-keys-verified.test.mjs) and leak doc (send-keys-verified-test-leaks-tmux-servers.md). Crystallization residue poisons context — the implementation must NOT exist.",

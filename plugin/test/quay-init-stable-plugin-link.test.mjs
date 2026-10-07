@@ -168,8 +168,13 @@ test("AC1③ — a re-run from a NEW plugin root re-points the LINK; the config 
   assert.ok(!/^\s*(path|mcp_entry):/m.test(nativeBlock), `the native provider must carry no path/mcp_entry:\n${cfgAfter}`);
   assert.ok(!/\.quay\/plugin/.test(cfgAfter), `the config must not name .quay/plugin:\n${cfgAfter}`);
   // Assert the file did not gain a version segment anywhere, on either run.
-  assert.ok(!/\d+\.\d+\.\d+/.test(cfgBefore), `the config must carry no version segment:\n${cfgBefore}`);
-  assert.ok(!/\d+\.\d+\.\d+/.test(cfgAfter), `the config must carry no version segment:\n${cfgAfter}`);
+  // ⛔ Comments are stripped first: the generated template documents the serve fallback with
+  // `#   host: "0.0.0.0"`, which is an ADDRESS, not a plugin version — matching it would make this
+  // assertion red for a reason it does not test. What it is about is a version BAKED INTO A VALUE
+  // (the pre-AC-XXX `path: "./vendor/quay-0.15.0"` shape), so the scan is over non-comment lines.
+  const withoutComments = (s) => s.split("\n").filter((l) => !/^\s*#/.test(l)).join("\n");
+  assert.ok(!/\d+\.\d+\.\d+/.test(withoutComments(cfgBefore)), `the config must carry no version segment:\n${cfgBefore}`);
+  assert.ok(!/\d+\.\d+\.\d+/.test(withoutComments(cfgAfter)), `the config must carry no version segment:\n${cfgAfter}`);
 });
 
 // ── AC1④ — undecidable plugin root ⇒ NOT-EVALUATED, existing link untouched ─────────────────────────

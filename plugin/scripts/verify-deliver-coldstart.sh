@@ -1383,7 +1383,7 @@ step_upgrade_existing() {
     fi
   fi
   npmroot="$(npm root -g --prefix "$PREFIX")"
-  qinit="${npmroot}/quay/plugin/scripts/quay-init.sh"
+  qinit="${npmroot}/quay/plugin/bin/quay"
   fresh_quay="${npmroot}/quay/dist/quay.js"
   fresh_qn="${npmroot}/quay-native/dist/quay-native.js"
   for f in "$qinit" "$fresh_quay" "$fresh_qn"; do
@@ -3603,10 +3603,10 @@ step1_install() {
   fi
   qbin="${PREFIX}/bin/quay"
   qnbin="${PREFIX}/bin/quay-native"
-  qinit="$(npm root -g --prefix "$PREFIX")/quay/plugin/scripts/quay-init.sh"
+  qinit="$(npm root -g --prefix "$PREFIX")/quay/plugin/bin/quay"
   [ -x "$qbin" ] || { echo "  FAIL: $qbin not installed" >&2; return 1; }
   [ -x "$qnbin" ] || { echo "  FAIL: $qnbin not installed" >&2; return 1; }
-  [ -f "$qinit" ] || { echo "  FAIL: shipped quay-init.sh not installed at $qinit" >&2; return 1; }
+  [ -f "$qinit" ] || { echo "  FAIL: shipped bin/quay not installed at $qinit" >&2; return 1; }
   # 产物可运行：经 realpath 用 node 执行 dist（loop 也走 realpath 的 .quay/runtime/bin/quay.js）。
   qrl="$(readlink -f "$qbin")"
   qv="$(node "$qrl" --version 2>/dev/null || echo "")"
@@ -3619,7 +3619,7 @@ step1_install() {
   STEP1_OK=1
   echo "  quay dist --version (realpath): $qv"
   echo "  quay-native (first line): $qnv"
-  echo "  shipped quay-init.sh: $qinit"
+  echo "  shipped bin/quay: $qinit"
   echo "  NPM_BIN_DISPATCH=$NPM_BIN_DISPATCH (0 = npm bin symlink does not dispatch — product bug, surfaced)"
   if [ "$NPM_BIN_DISPATCH" = 0 ]; then
     echo "  NOTE: npm-installed quay bin symlink does not dispatch (ESM main-module guard vs symlink)."
@@ -3779,7 +3779,7 @@ step_ac257_project_scope() {
   # 【提交掉】，它自己就会把被取证项目推入「任何任务都落不了地」的状态——那是本 AC 的产出破坏本 AC
   # 的产出。quay-init 的 auto-commit 只暂存它自己的闭集（`CLOSED_SET_ITEMS`），⛔ 不碰别的改动。
   set +e
-  (cd "$root" && bash "$plugin_root/scripts/quay-init.sh" --root "$root" --plugin-root "$plugin_root" --force --auto-commit-confirm) >/dev/null 2>&1
+  (cd "$root" && "$plugin_root/bin/quay" init --root "$root" --plugin-root "$plugin_root" --auto-commit-confirm) >/dev/null 2>&1
   rc_rerun=$?
   set -e
   # 铺设后主检出必须重新是干净的（这是「不把被取证项目弄脏」的当场读数，⛔ 不靠事后发现）。
@@ -4276,13 +4276,13 @@ step_ac258_user_scope() {
   cfg_before="$(md5sum "$root/.quay/config.yml" 2>/dev/null | cut -d' ' -f1 || echo '<absent>')"
   settings_md5_before="$(md5sum "$root/.claude/settings.json" 2>/dev/null | cut -d' ' -f1 || echo '<absent>')"
   set +e
-  (cd "$root" && bash "$plugin_root/scripts/quay-init.sh" --root "$root" --plugin-root "$plugin_root" --force --auto-commit-confirm) >"$init_log" 2>&1
+  (cd "$root" && "$plugin_root/bin/quay" init --root "$root" --plugin-root "$plugin_root" --auto-commit-confirm) >"$init_log" 2>&1
   rc_rerun=$?
   set -e
   if [ "$rc_rerun" != "0" ] && grep -q 'REFUSES to upgrade this project' "$init_log" 2>/dev/null; then
     echo "  [⑩g1] quay-init refused on the branch model (rc=$rc_rerun) — quay-init's OWN message names --adopt-branch-model ⇒ re-running as it instructs"
     set +e
-    (cd "$root" && bash "$plugin_root/scripts/quay-init.sh" --root "$root" --plugin-root "$plugin_root" --force --auto-commit-confirm --adopt-branch-model) >"$adopt_log" 2>&1
+    (cd "$root" && "$plugin_root/bin/quay" init --root "$root" --plugin-root "$plugin_root" --auto-commit-confirm --adopt-branch-model) >"$adopt_log" 2>&1
     rc_rerun=$?
     set -e
     adopt_used=1
@@ -4570,7 +4570,7 @@ STEP2_OK=0
 STEP2_PROJECT=""
 step2_init() {
   local qinit plugin_root
-  qinit="$(npm root -g --prefix "$STEP1_PREFIX")/quay/plugin/scripts/quay-init.sh"
+  qinit="$(npm root -g --prefix "$STEP1_PREFIX")/quay/plugin/bin/quay"
   plugin_root="$(dirname "$(dirname "$qinit")")"   # <prefix>/lib/node_modules/quay/plugin
   echo "== ② quay-init --loop in clean project $ROOT =="
   rm -rf "$ROOT"
