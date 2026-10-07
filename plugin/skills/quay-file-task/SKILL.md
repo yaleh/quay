@@ -1,6 +1,6 @@
 ---
 name: quay-file-task
-description: "Record a NEW quay task (any shape: contract/finding/plan/proposal — not just directives) in THIS workspace's task store via task_write, from content already discussed/decided in the active conversation or handed over as an already-drafted spec (a director/manager instruction relayed verbatim, a bug report with a proposed fix). This is the step BEFORE `author`: creating the todo-status task object itself, not advancing an existing one. Validates shape-aware four-artifact completeness (MIN_SECTION_CHARS=40, ready-pool-check.ts SHAPE_REGISTRY), Touches discipline (specific files not bare directories, self-touch, test files), and dedup-by-mechanism (not by symptom keyword) before writing. Prefer already-drafted content verbatim over re-authoring it. Not for label:directive tasks (use quay-directive) or for editing an existing task (use author / quay-task-operator). Invoke with a short title hint; Claude Code: /quay-file-task."
+description: "Record a NEW quay task (any shape: contract/finding/plan/proposal — not just directives) in THIS workspace's task store via task_write, from content already discussed/decided in the active conversation or handed over as an already-drafted spec (a director/manager instruction relayed verbatim, a bug report with a proposed fix). This is the step BEFORE `author`: creating the todo-status task object itself, not advancing an existing one. Validates shape-aware four-artifact completeness (MIN_SECTION_CHARS=40, ready-pool-check.ts SHAPE_REGISTRY), Touches discipline (specific files not bare directories, self-touch, test files), and dedup-by-mechanism (not by symptom keyword) before writing. Prefer already-drafted content verbatim over re-authoring it. Not for label:directive tasks (use quay-directive) or for editing an existing task (use author / quay-task-operator). Also checks for open tasks sharing Touches files (merge candidates) and carries granularity guidance. Invoke with a short title hint; Claude Code: /quay-file-task."
 allowed-tools: Bash, Read, Write, Edit
 ---
 
@@ -56,6 +56,27 @@ ready-made body.
    plugin/scripts/ready-pool-check.ts --json` must show your id with an empty `prosePrereqGap`
    (or absent from `candidates[]`) — if it shows refs you did not mean as prerequisites, either
    add the marker or rewrite the sentence as a denial.
+
+2b. **Merge-candidate check (granularity).** Step 2 asks "is this the same mechanism?". This
+    step asks a different question: "is an open task already going to run on the same files?"
+    For each source file you expect in Touches — leaving out `tasks/<id>.md`, test files, and
+    generic registries (`capability-catalog-declarations.json`, `sh-census-baseline.json`,
+    `freshness-producers.json`, other baselines) — list the open tasks that name it:
+
+        grep -lF -- "<path>" tasks/*.md | xargs grep -lE '^status: (todo|ready)$'
+
+    (`xargs` exits 123 when nothing matches; that means "no peer", not a failure.) Tasks whose
+    Touches overlap are serialized by the scheduler, so merging them costs no parallelism and
+    saves one per-task fixed cost (see "Granularity" below). Decide, and write ONE line in the
+    Proposal/Finding naming the decision — open that paragraph with `<!-- dedup-ref -->` (step 2)
+    if it names the peer's id:
+      - **merge** — fold this work into the peer (edit the peer via `quay-task-operator`; do not
+        file a second task);
+      - **separate** — file it, with a reason ("kept separate: independent acceptance / peer is
+        already `ready` and about to dispatch / …");
+      - **none found**.
+    If the content was handed to you already fully drafted, do not rewrite it to merge — report
+    the peer to the requester and let them decide.
 
 3. **Pick the shape and draft/accept content accordingly.** This workspace's todo→ready gate is
    shape-aware (`plugin/scripts/ready-pool-check.ts`'s `SHAPE_REGISTRY`, mirroring quay-native's
@@ -162,6 +183,30 @@ ready-made body.
    test before trusting either claim: write a task, then check with `ls`/`git status` in BOTH the
    shared checkout and any worktree you happen to be in — whichever one actually has the file
    tells you the real answer for that host, not this paragraph.
+
+## Granularity
+
+The store imposes no upper bound on task size, and nothing in this workflow asks for small
+tasks. Do not split a task to make it small.
+
+Why: each task pays a cost that barely depends on its size — roughly 3 min of exploration, 2–4
+min of fan-in, and about a 50% chance per landing attempt that fan-in fails (suite red, ff race)
+and the whole worker round is redone. Implementation time grows slowly with size (~0.4 min per
+100 changed lines). So work on the same mechanism is cheaper as one task than as several.
+
+Where to stop (observational, not causal; 2026-10-07 snapshot, 1625 landed tasks across six
+projects): relative to tasks under ~150 changed lines (code + tests), tasks of ~400+ lines
+landed first time ~11 points less often and cost ~15 min more; tasks of ~1000+ lines ~14 points
+less often and ~39 min more. So aim for one task up to about 600–1000 changed lines; past that,
+split along a seam where each part has its own AC/DoD and lands independently. Re-measure before
+trusting these numbers later — they are a dated reading, not a rule.
+
+Split for these reasons, not for size: parts that can run in parallel because their Touches do
+not overlap; an AC that can only be satisfied after another part lands; independent acceptance.
+
+Do not use the number of Touches entries, the number of ACs, or the AC type as a split trigger —
+none of them predicted rework once project and era were controlled for. The Touches entries
+this skill requires (self-touch, tests, registrations) are not a sign that the task is too big.
 
 ## Notes
 
