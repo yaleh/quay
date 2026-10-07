@@ -2,7 +2,7 @@
 id: gap-quay-task-agent-should-read-not-mirror-quay-file-task-dedup
 title: quay-task agent 的 prompt 正文静态复述 quay-file-task skill 的去重/形态规则，应改为运行时 Read
   该 skill
-status: todo
+status: ready
 labels:
   - gap
 parent: null

@@ -3,7 +3,7 @@ id: gap-routine-semantic-dedup-scan-preverified-effective-parallelism
 title: "semantic-dedup-scan: Bodies are identical (null-guard on non-finite
   cpu/wall, else Number((cpu/wall).toFixed(3))) and the copy's own comment
   states it uses the same formula as full"
-status: todo
+status: ready
 labels:
   - gap
   - routine-filed
