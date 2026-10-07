@@ -1,7 +1,7 @@
 ---
 id: gap-init-upgrade-matrix-historical-real-outputs-must-validate-and-preserve
 title: 升级矩阵：最近发布版本的真实 init 输出经当前 init 后校验通过、用户自定义值与注释保留、幂等
-status: ready
+status: done
 labels:
   - gap
   - priority:p2
