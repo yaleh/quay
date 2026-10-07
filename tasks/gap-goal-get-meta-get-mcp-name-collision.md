@@ -1,7 +1,7 @@
 ---
 id: gap-goal-get-meta-get-mcp-name-collision
 title: goal_* MCP 工具未经 Core 聚合层暴露，与同前缀 meta_* 工具发生真实命名碰撞（已有实际报错复现）
-status: todo
+status: ready
 labels:
   - gap
   - defect
