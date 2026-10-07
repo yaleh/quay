@@ -28,6 +28,10 @@ import { isPluginSourceCheckout } from "./plugin-root.ts";
 // the SAME function the runtime and the validator use, so an omitted binding is verified (from the
 // plugin root) instead of silently skipped.
 import { resolveProviderEntry, NATIVE_PROVIDER_UNRESOLVABLE } from "./config.ts";
+// The ONE config judge (gap-init-single-engine-state-based-upgrade-validate-before-write AC3): the
+// upgrade engine validates its candidate TEXT through the SAME `runChecks` pipeline
+// `quay config validate` and MCP `config_validate` use — never a second copy of the checks.
+import { validateConfigText, type ConfigIssue } from "./config-validate.ts";
 
 // ── Three-state classification of an existing `.quay/config.yml` ────────────────────────────────────
 // (SPEC-quay-init-reconcile-and-native-implementation-2026-09-18 §3.3; AC1.)
@@ -285,15 +289,287 @@ export function reconcileConfigContent(
   return { content: unchanged ? raw : doc.toString(), report: { added, addedServe, migrated, unchanged } };
 }
 
+// ── The retired-key registry — the ONE place a config key is declared dead ─────────────────────────
+//
+// GOAL-029 (人 2026-10-07): the upgrade must delete keys THIS version has retired, and the list of
+// dead keys must be a REGISTRY rather than a scattering of ad-hoc deletions — adding an entry here
+// is the whole change for a future retirement.
+//
+// ⛔ APPEND-ONLY (只增不减): removing an entry would make an old config's dead key invisible to a
+// later upgrade — the key would silently survive, exactly the failure this table exists to prevent.
+// A key that is retired and later REINSTATED gets a new entry (or none), never a deletion here.
+//
+// The `path` is a dotted Document-API path (the same shape `doc.deleteIn` takes); `why` is the
+// reason, kept next to the key so the registry is self-explanatory in review.
+export interface RetiredConfigKey {
+  path: readonly string[];
+  /** Human-readable dotted path, as it appears in a config file and in the report. */
+  label: string;
+  why: string;
+}
+export const RETIRED_CONFIG_KEYS: readonly RetiredConfigKey[] = [
+  {
+    path: ["providers", "native", "path"],
+    label: "providers.native.path",
+    why:
+      "The native provider is resolved from the plugin root (plugin-root.ts); a config-declared path " +
+      "freezes the runtime to the install-cache version that wrote it, so a plugin upgrade never takes " +
+      "effect (gap-config-provider-path-frozen-to-versioned-cache-dir).",
+  },
+  {
+    path: ["providers", "native", "mcp_entry"],
+    label: "providers.native.mcp_entry",
+    why:
+      "Same as providers.native.path — Core derives the native launcher from the plugin root; a declared " +
+      "mcp_entry pins the runtime to the version that wrote the config.",
+  },
+];
+
+// ── The known-top-level-keys registry (for the unknown-key WARNING) ────────────────────────────────
+//
+// GOAL-029: an unrecognized key is PRESERVED (never silently dropped) but the operator is WARNED.
+// This list is what "recognized" means for TOP-LEVEL keys of `.quay/config.yml`. It is deliberately
+// permissive: a false warning is noise, while a false silence hides a typo'd section. Nested
+// sections are NOT enumerated here — `gates:`/`loop:` already have their own validators, and a
+// provider map is open by design.
+export const KNOWN_TOP_LEVEL_CONFIG_KEYS: ReadonlySet<string> = new Set([
+  "providers",
+  "gates",
+  "loop",
+  "serve",
+  "suite",
+  "goals",
+]);
+
+export interface UpgradeOptions {
+  workspaceRoot: string;
+  /** The plugin root this run executes from — threaded to the validator's native-binding resolution. */
+  pluginRoot?: string | null;
+  /** `--drop-incompatible`: delete the user values the candidate validator rejects, instead of failing. */
+  dropIncompatible?: boolean;
+}
+
+export interface UpgradeReport {
+  /** `loop:` keys absent from the config and filled from LOOP_VERSION_DEFAULTS. */
+  added: string[];
+  /** `serve:` keys filled from SERVE_VERSION_DEFAULTS — always empty today (see the skip rule). */
+  addedServe: string[];
+  /** `key: old -> new` rewrites from LOOP_VALUE_MIGRATIONS. */
+  migrated: string[];
+  /** Retired keys deleted per RETIRED_CONFIG_KEYS. */
+  removed: string[];
+  /** `providers.native.env.*` carrier-dir pins backfilled. */
+  pinned: string[];
+  /** Unrecognized top-level keys — PRESERVED, and reported so the operator can look. */
+  unknownKeys: string[];
+  /** Keys deleted by `--drop-incompatible` after the candidate failed validation. */
+  dropped: string[];
+  /** True when nothing at all needed doing ⇒ the caller must not rewrite the file. */
+  untouched: boolean;
+}
+
+export interface UpgradeResult {
+  /** False when the candidate does not validate (and `--drop-incompatible` did not fix it). */
+  ok: boolean;
+  /** The candidate config text. Written only when `ok` and not `report.untouched`. */
+  content: string;
+  report: UpgradeReport;
+  /** The validator's verdict on the candidate — the errors that made `ok` false, when it is. */
+  issues: ConfigIssue[];
+}
+
+/** Parse a validator `field` path (`loop.gates`, `gates.testPass[0].command`) into a Document path. */
+function fieldToPath(field: string): Array<string | number> | null {
+  const segments: Array<string | number> = [];
+  for (const part of field.split(".")) {
+    const m = /^([^[\]]*)((?:\[\d+\])*)$/.exec(part);
+    if (!m) return null;
+    if (m[1]) segments.push(m[1]);
+    for (const idx of m[2]!.matchAll(/\[(\d+)\]/g)) segments.push(Number(idx[1]));
+  }
+  return segments.length > 0 ? segments : null;
+}
+
+/**
+ * The path to DELETE for an incompatibility at `field`: the deepest container, so deleting an
+ * element of a bad array removes the element rather than one field of it (`gates.testPass[0].command`
+ * ⇒ `gates.testPass[0]`, `loop.gates` ⇒ `loop.gates`).
+ */
+function deletionPath(field: string): Array<string | number> | null {
+  const path = fieldToPath(field);
+  if (!path) return null;
+  const idx = path.findIndex((s) => typeof s === "number");
+  return idx >= 0 ? path.slice(0, idx + 1) : path;
+}
+
+/** Serialize a Document only when a change actually happened — a no-op pass must not reformat. */
+function documentToString(doc: YAML.Document.Parsed, raw: string, changed: boolean): string {
+  return changed ? doc.toString() : raw;
+}
+
+/**
+ * The single upgrade engine (GOAL-029): take an EXISTING, parseable `.quay/config.yml`'s bytes and
+ * compute the CURRENT version's config — in memory, comment-preserving, without writing.
+ *
+ * The pipeline, in order:
+ *   1. delete retired keys (RETIRED_CONFIG_KEYS) through the Document API;
+ *   2. fill absent `loop:` version-level defaults (LOOP_VERSION_DEFAULTS);
+ *   3. fill `serve:` version-level defaults — EXCEPT a default whose value EQUALS the code fallback,
+ *      which is not a value the config should carry at all (GOAL-029: 「serve 默认值（等于回退值）
+ *      不写进配置」). Today every SERVE_VERSION_DEFAULTS entry equals its fallback ⇒ nothing is written;
+ *      a user-pinned value is therefore the only thing that can appear under `serve:`;
+ *   4. apply LOOP_VALUE_MIGRATIONS;
+ *   5. backfill the provider carrier-dir env pins;
+ *   6. VALIDATE THE CANDIDATE TEXT (validateConfigText — the same judge `quay config validate` runs).
+ *      If it fails and `--drop-incompatible` was given, delete the offending values, re-fill required
+ *      defaults, and re-validate; otherwise the caller must NOT write.
+ *
+ * The caller distinguishes "unchanged" via `report.untouched`; writing then would be the gratuitous
+ * rewrite the reconcile discipline forbids.
+ */
+export function upgradeConfigContent(raw: string, opts: UpgradeOptions): UpgradeResult {
+  const report: UpgradeReport = {
+    added: [], addedServe: [], migrated: [], removed: [], pinned: [], unknownKeys: [], dropped: [], untouched: false,
+  };
+
+  const doc = YAML.parseDocument(raw);
+  if (doc.errors.length > 0) {
+    // classifyConfig already answered "corrupt" for a file with parse errors; reaching here means the
+    // bytes changed underneath the caller. Report honestly rather than pretending to upgrade.
+    return {
+      ok: false,
+      content: raw,
+      report,
+      issues: [{ severity: "error", field: "config.yml", message: `YAML parse failed: ${doc.errors[0]!.message}` }],
+    };
+  }
+
+  let changed = false;
+
+  // 1. Retired keys — registry-driven, Document-API deletion (comments around them survive).
+  for (const retired of RETIRED_CONFIG_KEYS) {
+    if (!doc.hasIn(retired.path as string[])) continue;
+    doc.deleteIn(retired.path as string[]);
+    report.removed.push(retired.label);
+    changed = true;
+  }
+
+  // 2. Version-level `loop:` defaults — an absent key is filled; a present one is the user's.
+  for (const [key, value] of Object.entries(LOOP_VERSION_DEFAULTS)) {
+    if (doc.hasIn(["loop", key])) continue;
+    doc.setIn(["loop", key], value);
+    report.added.push(key);
+    changed = true;
+  }
+
+  // 3. `serve:` defaults — skipped when the value IS the code fallback (the "don't write a value that
+  //    says nothing" rule). A user's own serve value is never touched (it is already present).
+  for (const [key, value] of Object.entries(SERVE_VERSION_DEFAULTS)) {
+    if (value === (SERVE_BINDING_FALLBACK as unknown as Record<string, unknown>)[key]) continue;
+    if (doc.hasIn(["serve", key])) continue;
+    doc.setIn(["serve", key], value);
+    report.addedServe.push(key);
+    changed = true;
+  }
+
+  // 4. Declared value migrations.
+  for (const [key, rule] of Object.entries(LOOP_VALUE_MIGRATIONS)) {
+    const current = doc.getIn(["loop", key]);
+    if (typeof current !== "string" || !rule.from.includes(current)) continue;
+    doc.setIn(["loop", key], rule.to);
+    report.migrated.push(`${key}: ${current} -> ${String(rule.to)}`);
+    changed = true;
+  }
+
+  // 5. Unknown top-level keys — PRESERVED (nothing is deleted), reported for the operator.
+  const contents = doc.contents;
+  if (YAML.isMap(contents)) {
+    for (const item of contents.items) {
+      const keyNode = item.key as unknown;
+      const key = typeof keyNode === "object" && keyNode !== null && "value" in (keyNode as object)
+        ? String((keyNode as { value: unknown }).value)
+        : String(keyNode);
+      if (!KNOWN_TOP_LEVEL_CONFIG_KEYS.has(key)) report.unknownKeys.push(key);
+    }
+  }
+
+  let content = documentToString(doc, raw, changed);
+
+  // 5b. Carrier-dir env pins — a LINE-LEVEL insert, so it must run on the serialized TEXT (it is the
+  //     same single implementation the shell step uses).
+  const carrier = ensureProviderCarrierEnvText(content, { wsRoot: opts.workspaceRoot });
+  if (carrier.pinned.length > 0) {
+    report.pinned = carrier.pinned.map((p) => p.key);
+    content = carrier.text;
+  }
+
+  report.untouched =
+    report.removed.length === 0 &&
+    report.added.length === 0 &&
+    report.addedServe.length === 0 &&
+    report.migrated.length === 0 &&
+    report.pinned.length === 0;
+
+  // 6. Judge the candidate BEFORE anyone writes it.
+  let verdictResult = validateConfigText({ text: content, workspaceRoot: opts.workspaceRoot, pluginRoot: opts.pluginRoot });
+
+  // 6b. `--drop-incompatible`: remove the user values the judge rejects, then judge again.
+  if (!verdictResult.ok && opts.dropIncompatible === true) {
+    const seen = new Set<string>();
+    for (const issue of verdictResult.issues) {
+      if (issue.severity !== "error") continue;
+      const path = deletionPath(issue.field);
+      if (!path || seen.has(path.join("."))) continue;
+      seen.add(path.join("."));
+      if (!doc.hasIn(path as string[])) continue;
+      doc.deleteIn(path as string[]);
+      report.dropped.push(issue.field);
+      changed = true;
+    }
+    if (report.dropped.length > 0) {
+      // The deletion may have removed a REQUIRED key (loop.gates) — re-fill the version defaults.
+      for (const [key, value] of Object.entries(LOOP_VERSION_DEFAULTS)) {
+        if (doc.hasIn(["loop", key])) continue;
+        doc.setIn(["loop", key], value);
+        report.added.push(key);
+      }
+      content = doc.toString();
+      const carrier2 = ensureProviderCarrierEnvText(content, { wsRoot: opts.workspaceRoot });
+      if (carrier2.pinned.length > 0) {
+        report.pinned = carrier2.pinned.map((p) => p.key);
+        content = carrier2.text;
+      }
+      report.untouched =
+        report.removed.length === 0 && report.added.length === 0 && report.addedServe.length === 0 &&
+        report.migrated.length === 0 && report.pinned.length === 0 && report.dropped.length === 0;
+      verdictResult = validateConfigText({ text: content, workspaceRoot: opts.workspaceRoot, pluginRoot: opts.pluginRoot });
+    }
+  }
+
+  return { ok: verdictResult.ok, content, report, issues: verdictResult.issues };
+}
+
+/** Write `content` to `filePath` atomically: a sibling temp file then a rename, so a reader never
+ *  observes a half-written config (GOAL-029: 通过才原子写). */
+function writeFileAtomic(filePath: string, content: string): void {
+  fs.mkdirSync(path.dirname(filePath), { recursive: true });
+  const tmp = `${filePath}.tmp-${process.pid}-${Date.now()}`;
+  fs.writeFileSync(tmp, content, "utf8");
+  fs.renameSync(tmp, filePath);
+}
+
 /**
  * Result of an init operation.
  */
 export interface InitResult {
   /**
-   * "written" | "dry-run" | "skipped" (existing + valid, no --force/--reconcile) |
+   * "written" | "dry-run" | "skipped" (legacy; no longer produced — an existing valid config is
+   * UPGRADED, see "reconciled") |
    * "corrupt" (existing + unparseable, no --force/--reconcile) |
-   * "reconciled" (existing + valid + --reconcile, and the config had to change) |
-   * "unchanged" (existing + valid + --reconcile, and the config was already current) |
+   * "reconciled" (existing + valid, and the config had to change) |
+   * "unchanged" (existing + valid, and the config was already current) |
+   * "upgrade-invalid" (existing + valid, but the upgraded CANDIDATE fails validation ⇒ nothing was
+   *                    written; see `upgradeIssues`) |
    * "branch-model-blocked" (divergent landing baseline without adoption) |
    * "branch-model-only" (the config-free branch-model entry — see `branchModelOnly`).
    */
@@ -308,6 +584,17 @@ export interface InitResult {
   corruptReason?: string;
   /** What the reconcile changed — present only when `outcome === "reconciled" | "unchanged"`. */
   reconcile?: ReconcileReport;
+  /**
+   * The full upgrade report for an existing valid config (GOAL-029 single engine): what was filled,
+   * migrated, deleted, pinned, which unknown keys were kept, and which values `--drop-incompatible`
+   * removed. Present for `"reconciled" | "unchanged" | "upgrade-invalid"`.
+   */
+  upgrade?: UpgradeReport;
+  /**
+   * The validator's verdict on the upgraded candidate — populated (with the errors) only when
+   * `outcome === "upgrade-invalid"`, i.e. the candidate was NOT written because it did not validate.
+   */
+  upgradeIssues?: ConfigIssue[];
   /** Absolute path to the config file that was (or would be) written. */
   configPath: string;
   /** Absolute path to the tasks dir that was (or would be) created. */
@@ -344,21 +631,29 @@ export interface InitOptions {
   /** Print to stdout instead of writing to disk. */
   dryRun: boolean;
   /**
-   * Reconcile an EXISTING config to this version's schema instead of refusing it (SPEC §3.2).
+   * Bring an EXISTING config up to this version's schema. LEGACY SELECTOR, now inert: GOAL-029
+   * (人 2026-10-07) makes plain `quay init` upgrade an existing valid config, so `reconcile: true`
+   * and `reconcile: false` reach the SAME single engine. The flag is kept for one release so
+   * existing callers keep working; a later task removes it from the CLI/MCP surface (AC-330).
    *
-   * This is the mode `/quay:init` needs: the shipped upgrade path must be able to re-run on an
-   * already-initialized project and bring its config up to what THIS version of quay requires —
-   * filling keys the version added since the project was initialized (`LOOP_VERSION_DEFAULTS`) and
-   * rewriting values this version considers incompatible (`LOOP_VALUE_MIGRATIONS`) — while leaving
-   * every other key and comment byte-for-byte alone.
-   *
-   * Robustness is the point, so the flag is total over the three states (AC1): absent ⇒ a normal
-   * fresh write; corrupt ⇒ salvage-by-rebuild (the unparseable file is preserved beside the new one);
-   * valid ⇒ the per-key diff. With it, re-running init is always a legal, idempotent operation.
-   *
-   * `force` still wins where both are given: an explicit overwrite is not a diff.
+   * `force` still wins where both are given: an explicit overwrite is not an upgrade.
    */
   reconcile?: boolean;
+  /**
+   * `--drop-incompatible` (GOAL-029): when the upgraded candidate FAILS validation, delete the user
+   * values the validator rejects and retry, instead of refusing. Without it, a user's own
+   * incompatible value (e.g. a `loop.gates` naming an unregistered gate) fails the upgrade — the
+   * value is not silently overwritten, and the report names the offending field.
+   */
+  dropIncompatible?: boolean;
+  /**
+   * The plugin root THIS run executes from (`CLAUDE_PLUGIN_ROOT` / `--plugin-root`). Threaded to the
+   * candidate validator's native-binding resolution, and used to refresh `<root>/.quay/plugin` AFTER
+   * the config write succeeds (GOAL-029 ordering: a link pointing at a version whose config upgrade
+   * failed would name a runtime the project is not configured for). Absent ⇒ the link step is
+   * skipped (the shell's own `refresh-plugin-link` step still owns it until AC-331).
+   */
+  pluginRoot?: string | null;
   /** Provider id override (default: auto-detect). */
   provider?: string;
   /**
@@ -904,47 +1199,52 @@ export function runInit(opts: InitOptions): InitResult {
     };
   }
 
-  // EXISTING + USABLE, no overwrite, no reconcile: refuse, exactly as before (AC3).
-  if (existing.state === "valid" && !reconcileMode && !opts.force && !opts.dryRun) {
-    const result: InitResult = {
-      outcome: "skipped",
-      configState: "valid",
+  // ── EXISTING + USABLE ⇒ the SINGLE UPGRADE ENGINE (GOAL-029 single engine) ─────────────────────
+  // Plain `quay init`, `--reconcile` and `--drop-incompatible` all land here — there is no second
+  // upgrade path. The candidate is computed IN MEMORY, judged by the SAME validator `quay config
+  // validate` runs, and written only when it validates: a failed upgrade leaves the original bytes
+  // untouched and exits non-zero (硬规则 3b — "could not be made valid" is its own outcome, and the
+  // operator is told WHICH field failed rather than getting a generic refusal).
+  //
+  // `--force` is NOT an upgrade: it is excluded here and falls through to the wholesale rewrite.
+  if (existing.state === "valid" && !opts.force) {
+    const up = upgradeConfigContent(existing.raw ?? "", {
+      workspaceRoot: root,
+      // ⛔ `undefined`, never `null`: the validator reads `null` as "no plugin root could be resolved"
+      // (the state a fixture injects) and `undefined` as "resolve it yourself" — passing `null` here
+      // would make every upgrade fail with `native-provider-unresolvable`.
+      pluginRoot: opts.pluginRoot ?? undefined,
+      dropIncompatible: opts.dropIncompatible === true,
+    });
+    const base = {
+      configState: "valid" as const,
       configPath,
       tasksDir,
-      content: "",
       launchSettingsPath,
       launchSettingsContent: "",
       profilesPath,
       profilesContent: "",
       branchModel: { ok: true, skipped: true, defaultBranch: null, entries: [], remedy: null },
       branchModelReport: "",
+      upgrade: up.report,
     };
-    return result;
-  }
-
-  // ── The reconcile diff (SPEC §3.2; AC2) ────────────────────────────────────────────────────────
-  // Reached only for a VALID config under `--reconcile`. The content is edited in place, so the
-  // report below describes exactly the keys added/migrated and nothing else. A no-op reconcile writes
-  // NOTHING: re-running `/quay:init` on a current project must leave the config byte-identical.
-  if (existing.state === "valid" && reconcileMode) {
-    const { content, report } = reconcileConfigContent(existing.raw ?? "");
-    if (!opts.dryRun && !report.unchanged) {
-      fs.writeFileSync(configPath, content, "utf8");
+    if (!up.ok) {
+      return { outcome: "upgrade-invalid", content: up.content, upgradeIssues: up.issues, ...base };
     }
-    return {
-      outcome: report.unchanged ? "unchanged" : "reconciled",
-      configState: "valid",
-      configPath,
-      tasksDir,
-      content,
-      launchSettingsPath,
-      launchSettingsContent: "",
-      profilesPath,
-      profilesContent: "",
-      reconcile: report,
-      branchModel: { ok: true, skipped: true, defaultBranch: null, entries: [], remedy: null },
-      branchModelReport: "",
-    };
+    // A no-op upgrade writes NOTHING: re-running init on a current project must leave the config
+    // byte-identical (the reconcile discipline this replaces already enforced this).
+    if (!opts.dryRun && !up.report.untouched) {
+      writeFileAtomic(configPath, up.content);
+    }
+    // The `.quay/plugin` link refresh runs AFTER the config write succeeded (GOAL-029 ordering): a
+    // link pointing at a version whose config upgrade failed would name a runtime the project is not
+    // configured for. Only when the plugin root is known — the shell's own step still owns the link
+    // until AC-331; an unknown root is SKIPPED here, not reported (硬规则 3b's own state is the
+    // shell step's job, not this CLI's).
+    if (!opts.dryRun && opts.pluginRoot) {
+      refreshProjectPluginLink({ wsRoot: root, pluginRoot: opts.pluginRoot, dryRun: false });
+    }
+    return { outcome: up.report.untouched ? "unchanged" : "reconciled", content: up.content, ...base };
   }
 
   // EXISTING + UNPARSEABLE, with an explicit overwrite/reconcile decision: salvage by rebuild. The
@@ -1415,6 +1715,19 @@ export interface EnsureCarrierEnvOpts {
   dryRun: boolean;
 }
 
+export interface EnsureCarrierEnvTextOpts {
+  wsRoot: string;
+}
+
+export interface CarrierEnvTextResult {
+  /** The possibly-updated config text (byte-identical to the input when `pinned` is empty). */
+  text: string;
+  /** The keys appended, in the order they were appended. */
+  pinned: Array<{ key: string; value: string }>;
+  /** Why nothing was pinned — never silently absent (硬规则 3b: an unreadable shape is its own state). */
+  note: null | "no-providers" | "no-native" | "inline-env";
+}
+
 /** The carrier-directory pins `ensure_provider_carrier_env` backfills, with the directory each names. */
 const CARRIER_KINDS: ReadonlyArray<readonly [string, string]> = [
   ["QUAY_NATIVE_ADR_DIR", "adr"],
@@ -1436,10 +1749,15 @@ const CARRIER_KINDS: ReadonlyArray<readonly [string, string]> = [
  *
  * The inserted values MIRROR the form of the existing tasks-dir pin (`./tasks` → `./adr`, an
  * absolute `/ws/tasks` → `/ws/adr`), so the env block does not mix absolute and relative forms.
+ *
+ * ⛔ This is the TEXT-ONLY half (gap-init-single-engine-state-based-upgrade-validate-before-write):
+ * the upgrade engine edits an IN-MEMORY candidate, so the insert must be expressible as
+ * text → text. `ensureProviderCarrierEnv` below is the file-writing wrapper over this ONE
+ * implementation — there is no second copy of the line-level logic.
  */
-export function ensureProviderCarrierEnv(o: EnsureCarrierEnvOpts): void {
-  if (!fs.existsSync(o.cfgPath)) return;
-  const lines = fs.readFileSync(o.cfgPath, "utf8").split("\n");
+export function ensureProviderCarrierEnvText(text: string, o: EnsureCarrierEnvTextOpts): CarrierEnvTextResult {
+  const lines = text.split("\n");
+  const noop = (note: CarrierEnvTextResult["note"]): CarrierEnvTextResult => ({ text, pinned: [], note });
 
   const indentOf = (s: string): number => s.length - s.trimStart().length;
 
@@ -1464,15 +1782,9 @@ export function ensureProviderCarrierEnv(o: EnsureCarrierEnvOpts): void {
 
   // ── locate providers: → native: → env: by INDENTATION, not by a yaml round-trip ─────────────────
   const prov = findChild(0, lines.length, "providers", 0);
-  if (!prov) {
-    console.log("  note: .quay/config.yml has no providers: section — carrier env pins not applicable (nothing written)");
-    return;
-  }
+  if (!prov) return noop("no-providers");
   const native = findChild(prov[0] + 1, blockEnd(prov[0], prov[1]), "native", prov[1] + 1);
-  if (!native) {
-    console.log("  note: providers: has no native: entry — carrier env pins not applicable (nothing written)");
-    return;
-  }
+  if (!native) return noop("no-native");
   const nativeEnd = blockEnd(native[0], native[1]);
   const env = findChild(native[0] + 1, nativeEnd, "env", native[1] + 1);
 
@@ -1480,13 +1792,7 @@ export function ensureProviderCarrierEnv(o: EnsureCarrierEnvOpts): void {
   const present: Record<string, string> = {};
   if (env) {
     const rest = lines[env[0]]!.slice(lines[env[0]]!.indexOf(":") + 1).trim();
-    if (rest && !rest.startsWith("{")) {
-      console.error(
-        "  note: providers.native.env has an unrecognized inline form — carrier env pins NOT applied " +
-          "(add QUAY_NATIVE_ADR_DIR/QUAY_NATIVE_GOAL_DIR/QUAY_NATIVE_META_DIR by hand)",
-      );
-      return;
-    }
+    if (rest && !rest.startsWith("{")) return noop("inline-env");
     if (rest.startsWith("{")) {
       for (const m of rest.matchAll(/(QUAY_NATIVE_\w+)\s*:/g)) present[m[1]!] = "";
     } else {
@@ -1499,21 +1805,12 @@ export function ensureProviderCarrierEnv(o: EnsureCarrierEnvOpts): void {
   }
 
   const missing = CARRIER_KINDS.filter(([k]) => !(k in present));
-  if (missing.length === 0) {
-    console.log("  unchanged: .quay/config.yml providers.native.env: (four carrier dirs already pinned — no rewrite, AC4)");
-    return;
-  }
+  if (missing.length === 0) return noop(null);
 
   const rawTasks = (present["QUAY_NATIVE_TASKS_DIR"] ?? "./tasks").trim().replace(/^["']|["']$/g, "");
   const absolute = rawTasks.startsWith("/") || rawTasks.startsWith("~");
   const valueFor = (kind: string): string => (absolute ? `${o.wsRoot}/${kind}` : `./${kind}`);
-
-  if (o.dryRun) {
-    for (const [k, kind] of missing) {
-      console.log(`  would-pin: providers.native.env.${k}: "${valueFor(kind)}" (carrier dir pin — AC4)`);
-    }
-    return;
-  }
+  const pinned = missing.map(([k, kind]) => ({ key: k, value: valueFor(kind) }));
 
   // ── append the missing keys to the END of the env block (or create the block, if absent) ────────
   const newLines = [...lines];
@@ -1523,7 +1820,7 @@ export function ensureProviderCarrierEnv(o: EnsureCarrierEnvOpts): void {
   if (!env) {
     insertAt = nativeEnd;
     baseInd = native[1] + 2;
-    added = [" ".repeat(baseInd) + "env:", ...missing.map(([k, kind]) => `${" ".repeat(baseInd + 2)}${k}: "${valueFor(kind)}"`)];
+    added = [" ".repeat(baseInd) + "env:", ...pinned.map((p) => `${" ".repeat(baseInd + 2)}${p.key}: "${p.value}"`)];
   } else {
     let last = env[0];
     for (let i = env[0] + 1; i < blockEnd(env[0], env[1]); i++) {
@@ -1531,12 +1828,51 @@ export function ensureProviderCarrierEnv(o: EnsureCarrierEnvOpts): void {
     }
     insertAt = last + 1;
     baseInd = env[1] + 2;
-    added = missing.map(([k, kind]) => `${" ".repeat(baseInd)}${k}: "${valueFor(kind)}"`);
+    added = pinned.map((p) => `${" ".repeat(baseInd)}${p.key}: "${p.value}"`);
   }
   newLines.splice(insertAt, 0, ...added);
-  fs.writeFileSync(o.cfgPath, newLines.join("\n"), "utf8");
-  for (const [k, kind] of missing) {
-    console.log(`  pinned: .quay/config.yml providers.native.env.${k}: "${valueFor(kind)}" (carrier dir pin — AC4)`);
+  return { text: newLines.join("\n"), pinned, note: null };
+}
+
+/**
+ * The FILE-writing wrapper over `ensureProviderCarrierEnvText` — the shell step's entry. Prints the
+ * step's report lines (byte-identical to the pre-refactor output) and writes only when something
+ * was actually pinned.
+ */
+export function ensureProviderCarrierEnv(o: EnsureCarrierEnvOpts): void {
+  if (!fs.existsSync(o.cfgPath)) return;
+  const res = ensureProviderCarrierEnvText(fs.readFileSync(o.cfgPath, "utf8"), { wsRoot: o.wsRoot });
+
+  if (res.note === "no-providers") {
+    console.log("  note: .quay/config.yml has no providers: section — carrier env pins not applicable (nothing written)");
+    return;
+  }
+  if (res.note === "no-native") {
+    console.log("  note: providers: has no native: entry — carrier env pins not applicable (nothing written)");
+    return;
+  }
+  if (res.note === "inline-env") {
+    console.error(
+      "  note: providers.native.env has an unrecognized inline form — carrier env pins NOT applied " +
+        "(add QUAY_NATIVE_ADR_DIR/QUAY_NATIVE_GOAL_DIR/QUAY_NATIVE_META_DIR by hand)",
+    );
+    return;
+  }
+  if (res.pinned.length === 0) {
+    console.log("  unchanged: .quay/config.yml providers.native.env: (four carrier dirs already pinned — no rewrite, AC4)");
+    return;
+  }
+
+  if (o.dryRun) {
+    for (const p of res.pinned) {
+      console.log(`  would-pin: providers.native.env.${p.key}: "${p.value}" (carrier dir pin — AC4)`);
+    }
+    return;
+  }
+
+  fs.writeFileSync(o.cfgPath, res.text, "utf8");
+  for (const p of res.pinned) {
+    console.log(`  pinned: .quay/config.yml providers.native.env.${p.key}: "${p.value}" (carrier dir pin — AC4)`);
   }
 }
 

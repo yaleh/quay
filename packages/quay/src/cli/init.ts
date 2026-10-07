@@ -31,22 +31,27 @@ export async function handleInit({ sub, rest }: CliCtx) {
     process.stdout.write(`quay init — scaffold a new quay workspace
 
 Usage:
-  quay init [--force] [--reconcile] [--dry-run] [--adopt-branch-model] [--root <path>]
+  quay init [--force] [--reconcile] [--drop-incompatible] [--dry-run] [--adopt-branch-model] [--root <path>]
   quay init --branch-model-only [--adopt-branch-model] [--dry-run] [--root <path>]
   quay init --branch-model-only --doc-branch-name <name> [--dry-run] [--root <path>]
 
 Flags:
-  --force      Overwrite existing .quay/config.yml if present.
-  --reconcile  Bring an EXISTING .quay/config.yml up to what THIS version of quay
-               requires, instead of refusing it — the mode /quay:init re-runs use.
-               Per-key diff over the current-version schema: keys the version added
-               since your project was initialized are FILLED from the defaults,
-               values this version considers incompatible are rewritten through an
-               explicit migration table, and every other key (and every comment) is
-               left byte-for-byte alone. A config that is already current is not
-               rewritten at all. Total over the three states, so re-running init is
-               always legal: absent => a normal fresh write; unparseable => rebuilt
-               from defaults with the broken file preserved beside it.
+  --force      Overwrite an existing .quay/config.yml wholesale (a fresh install at the
+               same path). Without it, an EXISTING config is UPGRADED in place.
+  --drop-incompatible
+               When the upgraded config does not validate, delete the user values the
+               validator rejects (e.g. a loop.gates naming an unregistered gate) and
+               retry. Without it, such a value makes the upgrade FAIL: non-zero exit,
+               the report names the offending field, and your config is left
+               byte-identical. Nothing is deleted silently.
+  --reconcile  LEGACY, now inert: plain 'quay init' upgrades an existing config, so this
+               selects the same single engine. Kept for one release for existing callers.
+               Per-key diff: keys this version added since your project was initialized
+               are FILLED from the defaults, retired keys are DELETED, values this version
+               considers incompatible are migrated through an explicit table, and every
+               other key (and every comment) is left byte-for-byte alone. The result is
+               VALIDATED before it is written — an upgrade that does not validate writes
+               nothing (use --drop-incompatible to delete the offending values).
                Scope: when the config already EXISTS, this mode touches
                .quay/config.yml ONLY — it never lays down tasks/, profiles.yml or
                the launch settings. An ABSENT config gets the full fresh scaffold.
@@ -59,7 +64,7 @@ Flags:
                taken by a branch unrelated to 'develop' => REFUSED (exit 1, nothing moved).
                Head detached => NOT-EVALUATED (no verdict, nothing moved). This CLI has NO
                ${INIT_DOC_BRANCH_NO_DEFAULT_PROSE}
-  --dry-run    Print the generated config to stdout without writing to disk.
+  --dry-run    Report what would happen without writing to disk.
   --adopt-branch-model
                When the project already has a 'develop' (or 'author') that is NOT
                a continuation of its default branch, preserve the existing tip
@@ -89,7 +94,9 @@ Description:
   un-landable (anti-drift reports thousands of violations that are not the
   task's work).
 
-  If .quay/config.yml already exists, refuses to overwrite unless --force.
+  If .quay/config.yml already exists, it is UPGRADED in place (single engine, GOAL-029):
+  merged, comment-preserving, and validated BEFORE anything is written. --force replaces
+  it wholesale instead.
 
   ${INIT_BRANCH_MODEL_ONLY_PROSE}
 
@@ -139,8 +146,16 @@ Description:
   const force = initFlags.force === true;
   const reconcile = initFlags.reconcile === true;
   const dryRun = initFlags["dry-run"] === true;
+  const dropIncompatible = initFlags["drop-incompatible"] === true;
   const adoptBranchModel = initFlags["adopt-branch-model"] === true;
   const branchModelOnly = initFlags["branch-model-only"] === true;
+  // The plugin root THIS run executes from — threaded so the upgrade can resolve the native binding
+  // and refresh `<root>/.quay/plugin` AFTER the config write. ⛔ Never a registry lookup (the link
+  // names the plugin root that is actually running — see init.ts's own ruling). Unset ⇒ the link
+  // step is skipped here; the shell's own step still owns it until AC-331.
+  const pluginRoot = typeof process.env.CLAUDE_PLUGIN_ROOT === "string" && process.env.CLAUDE_PLUGIN_ROOT !== ""
+    ? process.env.CLAUDE_PLUGIN_ROOT
+    : null;
   // The doc-branch NAME (gap-quay-init-no-doc-branch-bootstrap-…). ⛔ This CLI carries NO default
   // literal for it: the caller supplies it (`--doc-branch-name <name>`, or the shipped upgrade
   // entry — cli/help.ts's `QUAY_INIT_REL` — which resolves flag → `loop.doc_branch` → its own
@@ -151,7 +166,7 @@ Description:
   const docBranchName = typeof initFlags["doc-branch-name"] === "string" ? initFlags["doc-branch-name"] : undefined;
 
   try {
-    const result = runInit({ root: targetRoot, force, reconcile, dryRun, adoptBranchModel, branchModelOnly });
+    const result = runInit({ root: targetRoot, force, reconcile, dryRun, dropIncompatible, pluginRoot, adoptBranchModel, branchModelOnly });
 
     // The config-free branch-model entry (gap-upgrade-entry-never-establishes-branch-model). It
     // reports the model and decides, nothing else — so the only outcomes it can reach are this one
@@ -241,29 +256,54 @@ Description:
     }
 
     if (result.outcome === "skipped") {
+      // LEGACY outcome — no longer produced by the single upgrade engine (GOAL-029): an existing
+      // valid config is UPGRADED, not refused. Kept as a defensive arm so a future regression that
+      // resurrects it is still reported as a refusal rather than silently falling through.
       console.error(
-        `.quay/config.yml already exists at ${result.configPath}. ` +
-        "Use --force to overwrite, --reconcile to bring it up to this version's defaults, " +
-        "or --dry-run to preview."
+        `.quay/config.yml already exists at ${result.configPath} and was not upgraded. ` +
+        "Re-run, or use --force to overwrite."
       );
       process.exitCode = 1;
       return;
     }
 
-    // The reconcile diff (SPEC §3.2). Reporting the DIFF — not just "ok" — is what makes the upgrade
-    // auditable: an operator re-running /quay:init after a plugin upgrade can see exactly which keys
-    // this version added and whether anything else moved (nothing else can: the document is edited in
-    // place, so a key that is not listed here was not touched).
+    // The upgraded CANDIDATE failed validation ⇒ NOTHING was written (validate-before-write). The
+    // report names the offending field(s); `--drop-incompatible` is the escape hatch for a
+    // user-pinned value this version cannot accept.
+    if (result.outcome === "upgrade-invalid") {
+      console.error(
+        `${result.configPath}: upgrade REFUSED — the upgraded config did not validate, ` +
+          "so nothing was written (your config is byte-identical)."
+      );
+      for (const i of result.upgradeIssues ?? []) {
+        console.error(`  ${i.severity}: ${i.field} — ${i.message}`);
+        if (i.suggestion) console.error(`    suggestion: ${i.suggestion}`);
+      }
+      console.error("  (pass --drop-incompatible to delete the offending values, or edit them by hand)");
+      process.exitCode = 1;
+      return;
+    }
+
+    // The upgrade diff (GOAL-029 single engine). Reporting the DIFF — not just "ok" — is what makes
+    // the upgrade auditable: an operator re-running `quay init` after a plugin upgrade can see
+    // exactly which keys this version added/migrated/removed and which unknown keys were kept.
     if (result.outcome === "reconciled" || result.outcome === "unchanged") {
-      const r = result.reconcile;
+      const r = result.upgrade;
       if (result.outcome === "unchanged") {
         console.log(`${result.configPath}: already current for this version of quay — not rewritten.`);
       } else {
-        console.log(`${result.configPath}: reconciled to this version's defaults.`);
-        for (const k of r?.added ?? []) console.log(`  filled loop.${k} (was absent)`);
-        for (const k of r?.addedServe ?? []) console.log(`  filled serve.${k} (was absent)`);
-        for (const m of r?.migrated ?? []) console.log(`  migrated loop.${m}`);
+        console.log(`${result.configPath}: ${dryRun ? "would be upgraded to" : "upgraded to"} this version's defaults.`);
+        for (const k of r?.added ?? []) console.log(`  ${dryRun ? "would-fill" : "filled"} loop.${k} (was absent)`);
+        for (const k of r?.addedServe ?? []) console.log(`  ${dryRun ? "would-fill" : "filled"} serve.${k} (was absent)`);
+        for (const m of r?.migrated ?? []) console.log(`  ${dryRun ? "would-migrate" : "migrated"} loop.${m}`);
+        for (const k of r?.removed ?? []) console.log(`  ${dryRun ? "would-remove" : "removed"} ${k} (retired key)`);
+        for (const k of r?.pinned ?? []) console.log(`  ${dryRun ? "would-pin" : "pinned"} providers.native.env.${k} (carrier dir pin)`);
+        for (const k of r?.dropped ?? []) console.log(`  dropped ${k} (--drop-incompatible: it did not validate)`);
       }
+      for (const k of r?.unknownKeys ?? []) {
+        console.error(`  warning: unrecognized top-level config key "${k}" — kept as-is (not deleted)`);
+      }
+      if (dryRun && result.outcome === "reconciled") console.log("# Dry run — nothing written to disk.");
       return;
     }
 

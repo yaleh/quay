@@ -858,80 +858,124 @@ function checkFileExistence(
 }
 
 // ---------------------------------------------------------------------------
-// Main export
+// The ONE check pipeline + its two entry points (file-backed, text-backed)
 // ---------------------------------------------------------------------------
 
-export function validateConfig({ workspaceRoot, checkFiles = false, pluginRoot }: ValidateConfigArgs): ValidateConfigResult {
+interface CheckInputs {
+  unifiedParsed: unknown | null;
+  gatesParsed: unknown | null;
+  loopParsed: unknown | null;
+  workspaceRoot: string;
+  pluginRoot: string | null | undefined;
+  checkFiles: boolean;
+}
+
+/**
+ * Checks 3–11 over an ALREADY-PARSED config. THE single check pipeline: both `validateConfig`
+ * (file-backed) and `validateConfigText` (text-backed) below call this and nothing else, so the
+ * checks cannot fork into two implementations (gap-init-single-engine-state-based-upgrade-
+ * validate-before-write AC3). The individual `check*` functions above stay the one implementation
+ * of each check; this function is only their fixed ORDER, which was previously inlined in
+ * `validateConfig` and would otherwise have had to be copied into the text entry point.
+ */
+function runChecks({ unifiedParsed, gatesParsed, loopParsed, workspaceRoot, pluginRoot, checkFiles }: CheckInputs): ConfigIssue[] {
   const allIssues: ConfigIssue[] = [];
 
-  // 1+2. Config file discovery + YAML syntax check
-  const { issues: parseIssues, unifiedParsed, gatesParsed, loopParsed } = discoverAndParse(workspaceRoot);
-  allIssues.push(...parseIssues);
-
-  // If YAML parsing failed catastrophically, stop
-  const hasYamlError = allIssues.some(
-    (i) => i.field === "config.yml" && i.message.startsWith("YAML syntax error")
-  );
-  if (hasYamlError) {
-    return { ok: false, issues: allIssues };
-  }
-
-  // If no config at all was found, stop
-  if (allIssues.some((i) => i.field === "config" && i.message.startsWith("No config file found"))) {
-    return { ok: false, issues: allIssues };
-  }
-
-  // Determine effective gate/loop sources
-  const effectiveGatesParsed = unifiedParsed ? gatesParsed : gatesParsed;
-  const effectiveLoopParsed = unifiedParsed ? loopParsed : loopParsed;
-
   // 3. Provider check
-  if (unifiedParsed) {
-    allIssues.push(...checkProviders(unifiedParsed, workspaceRoot, pluginRoot));
-  }
-
+  if (unifiedParsed) allIssues.push(...checkProviders(unifiedParsed, workspaceRoot, pluginRoot));
   // 4. Gate nesting check
-  if (effectiveGatesParsed) {
-    allIssues.push(...checkGateNesting(effectiveGatesParsed));
-  }
-
+  if (gatesParsed) allIssues.push(...checkGateNesting(gatesParsed));
   // 5. Gate shape check
-  if (effectiveGatesParsed) {
-    allIssues.push(...checkGateShapes(effectiveGatesParsed));
-  }
-
+  if (gatesParsed) allIssues.push(...checkGateShapes(gatesParsed));
   // 6. Gate reference resolution
-  if (effectiveLoopParsed) {
-    allIssues.push(...checkGateReferences(effectiveLoopParsed, effectiveGatesParsed, workspaceRoot));
-  }
-
+  if (loopParsed) allIssues.push(...checkGateReferences(loopParsed, gatesParsed, workspaceRoot));
   // 7. Loop required fields
-  if (effectiveLoopParsed) {
-    allIssues.push(...checkLoopRequiredFields(effectiveLoopParsed));
-  }
-
+  if (loopParsed) allIssues.push(...checkLoopRequiredFields(loopParsed));
   // 8. Loop field values
-  if (effectiveLoopParsed) {
-    allIssues.push(...checkLoopFieldValues(effectiveLoopParsed));
-  }
-
+  if (loopParsed) allIssues.push(...checkLoopFieldValues(loopParsed));
   // 9. Routine shape
-  if (effectiveLoopParsed) {
-    allIssues.push(...checkRoutines(effectiveLoopParsed));
-  }
-
+  if (loopParsed) allIssues.push(...checkRoutines(loopParsed));
   // 10. Provider env check
-  if (unifiedParsed) {
-    allIssues.push(...validateProviderEnv(unifiedParsed));
-  }
-
+  if (unifiedParsed) allIssues.push(...validateProviderEnv(unifiedParsed));
   // 11. File-existence check
-  if (checkFiles && effectiveGatesParsed) {
-    allIssues.push(...checkFileExistence(effectiveGatesParsed, workspaceRoot));
+  if (checkFiles && gatesParsed) allIssues.push(...checkFileExistence(gatesParsed, workspaceRoot));
+
+  return allIssues;
+}
+
+/** The warn-exit contract: `ok` iff no issue is severity "error". */
+function verdict(issues: ConfigIssue[]): ValidateConfigResult {
+  return { ok: !issues.some((i) => i.severity === "error"), issues };
+}
+
+export interface ValidateConfigTextArgs {
+  /** The candidate config bytes to judge — a STRING, not a path. */
+  text: string;
+  workspaceRoot: string;
+  checkFiles?: boolean;
+  pluginRoot?: string | null;
+}
+
+/**
+ * Validate a candidate `.quay/config.yml` TEXT — the SAME checks `validateConfig` runs on the
+ * file, applied to bytes that are not (yet) on disk.
+ *
+ * WHY THIS EXISTS (gap-init-single-engine-state-based-upgrade-validate-before-write): `init` must
+ * be able to compute a new config in memory and REFUSE TO WRITE IT if it does not validate — a
+ * check that can only read the file cannot judge a candidate that has not been written. The write
+ * ordering is the whole point: validate-then-write, never write-then-validate. Sharing `runChecks`
+ * (not a second copy of the checks) is what makes "init's verdict ⇔ `config validate`'s verdict on
+ * the same bytes" true by construction rather than by a test that could drift.
+ */
+export function validateConfigText({ text, workspaceRoot, checkFiles = false, pluginRoot }: ValidateConfigTextArgs): ValidateConfigResult {
+  let unified: unknown;
+  try {
+    unified = YAML.parse(text);
+  } catch (e: unknown) {
+    return {
+      ok: false,
+      issues: [{ severity: "error", field: "config.yml", message: `YAML syntax error in .quay/config.yml: ${(e as Error).message}` }],
+    };
+  }
+  const u = unified && typeof unified === "object" ? (unified as Record<string, unknown>) : null;
+  const issues = runChecks({
+    unifiedParsed: unified,
+    gatesParsed: u?.gates ?? null,
+    loopParsed: u?.loop ?? null,
+    workspaceRoot,
+    pluginRoot,
+    checkFiles,
+  });
+  return verdict(issues);
+}
+
+export function validateConfig({ workspaceRoot, checkFiles = false, pluginRoot }: ValidateConfigArgs): ValidateConfigResult {
+  const unifiedConfigPath = path.join(workspaceRoot, ".quay", "config.yml");
+
+  // Branch A: a unified config.yml exists ⇒ judge its bytes through the text entry point, so the
+  // file-backed and text-backed verdicts are the SAME code path.
+  if (fs.existsSync(unifiedConfigPath)) {
+    let raw: string;
+    try {
+      raw = fs.readFileSync(unifiedConfigPath, "utf8");
+    } catch (e: unknown) {
+      return { ok: false, issues: [{ severity: "error", field: "config.yml", message: `Cannot read .quay/config.yml: ${(e as Error).message}` }] };
+    }
+    return validateConfigText({ text: raw, workspaceRoot, checkFiles, pluginRoot });
   }
 
-  // 10. Warn-exit contract
-  const ok = !allIssues.some((i) => i.severity === "error");
+  // Branch B: legacy .quay/gates.yml + .quay/loop.yml
+  const { issues: parseIssues, unifiedParsed, gatesParsed, loopParsed } = discoverAndParse(workspaceRoot);
 
-  return { ok, issues: allIssues };
+  // If no config at all was found, stop (nothing for the checks to judge).
+  if (parseIssues.some((i) => i.field === "config" && i.message.startsWith("No config file found"))) {
+    return { ok: false, issues: parseIssues };
+  }
+
+  const allIssues = [
+    ...parseIssues,
+    ...runChecks({ unifiedParsed, gatesParsed, loopParsed, workspaceRoot, pluginRoot, checkFiles }),
+  ];
+
+  return verdict(allIssues);
 }

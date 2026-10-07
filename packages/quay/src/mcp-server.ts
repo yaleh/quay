@@ -267,15 +267,26 @@ function registerBootstrapHandlers(server: McpServer): void {
           corruptReason: result.corruptReason ?? null,
           configPath: result.configPath,
           tasksDir: result.tasksDir,
-          added: result.reconcile?.added ?? [],
-          addedServe: result.reconcile?.addedServe ?? [],
-          migrated: result.reconcile?.migrated ?? [],
+          added: result.upgrade?.added ?? [],
+          addedServe: result.upgrade?.addedServe ?? [],
+          migrated: result.upgrade?.migrated ?? [],
+          removed: result.upgrade?.removed ?? [],
+          pinned: result.upgrade?.pinned ?? [],
+          unknownKeys: result.upgrade?.unknownKeys ?? [],
+          dropped: result.upgrade?.dropped ?? [],
+          // The validator's verdict on the UPGRADED candidate — non-empty only when the upgrade was
+          // refused because the candidate did not validate (nothing was written; GOAL-029).
+          upgradeIssues: result.upgradeIssues ?? [],
           content: dryRun === true ? result.content : undefined,
         };
         // A refusal is a NORMAL result of a well-formed judgment (`isError: false` would claim quay
-        // did what was asked); only the two outcomes that leave the caller with nothing to act on
+        // did what was asked); only the outcomes that leave the caller with nothing to act on
         // report as errors.
-        const refused = result.outcome === "corrupt" || result.outcome === "skipped" || result.outcome === "branch-model-blocked";
+        const refused =
+          result.outcome === "corrupt" ||
+          result.outcome === "skipped" ||
+          result.outcome === "upgrade-invalid" ||
+          result.outcome === "branch-model-blocked";
         return {
           ...(refused ? { isError: true } : {}),
           content: [{ type: "text" as const, text: JSON.stringify(payload, null, 2) }],
