@@ -1,7 +1,7 @@
 ---
 id: GOAL-020
 title: CI 与 release 渠道成为可信守门员：develop 首绿 + release 能发出三平台可用产物
-status: active
+status: achieved
 kind: goal
 origin: 人 2026-09-15 裁定：以 GitHub CI 与 release 为目标建 GOAL 并持续驱动；并逐条拍板 (a) 接受 5 条
   AC 的范围、(b) 接受 AC-268 需在本 GOAL 期内真发一次版本（workflow_dispatch）。立案读数见 body：develop
@@ -25,6 +25,14 @@ statusLog:
     reason: 人 2026-09-24 裁定重开：hosted runner 账单闸挡住发布链（run 35966264609 annotation『The
       job was not started because recent account payments have failed…』）；新增长期保证
       AC-319（全 job self-hosted）/ AC-320（切版留痕落主台账）
+  - at: 2026-10-07T08:21:39.688Z
+    from: active
+    to: achieved
+    actor: human
+    reason: 人 2026-10-07 裁定收口：在域 7 条 AC（AC-265/269/270/271/272/274/319）全部
+      achieved；唯一未成的 AC-320 经人裁定取消（判据要求 form=tagged 而规范切版路径落
+      form=cut，取值词表对不上）。退出条件 ①/②/③ 分别由 AC-265/AC-274/AC-269 承载，三条均已 achieved。⛔
+      这是人的直接关闭（goal-store write --status achieved），不走机械关闭路径。
 ---
 ## 背景（2026-09-15 实测，全部为直接量）
 
@@ -90,19 +98,17 @@ CI 日志自带 `__GROUP__ concurrency=8 files=631` 读数。按 `test-file-base
 （只比相邻一次 ⇒ 不引入窗口大小魔数，且恰好抓住「为了绿而删/跳测试」这个动作发生的区间）。
 ⛔ 永不写 `== 631` 这类快照形态。
 
-## 范围（在域 AC = AC-265、AC-269、AC-270、AC-271、AC-272、AC-273、AC-274、AC-319、AC-320，共 9 条）
+## 范围（在域 AC = AC-265、AC-269、AC-270、AC-271、AC-272、AC-274、AC-319，共 7 条）
 
 - **AC-265** develop 首绿，且绿不是靠少跑测试换来的（long-term）
 - **AC-269** CI 红有机械归因：真缺陷 / 基础设施 / 已知 flake（long-term）
 - **AC-270** master 的值域不变式：化石值，或一个 Release 全绿的 tag（long-term）
 - **AC-271** release 分支 tip 逐字停在同名 tag 上（long-term）
 - **AC-272** 滚动渠道自证版本：`-dev` 后缀，或等于同名 tag 的构建（long-term）
-- **AC-273** origin/HEAD 指向 origin/develop（long-term）
 - **AC-274** 首次真实全绿发布 + master 已 ff 到它（一次性，时间窗限定立案之后）
 - **AC-319** 全部 workflow 的全部 job 都在 self-hosted runner 上——计量式 hosted runner 的账单闸不再能挡住 CI/发布（long-term，2026-09-24 重开时新增）
-- **AC-320** 立条后每一个 release tag 在**主检出**台账 `.quay/release-branch-finish.jsonl` 有 `form=tagged exit=0` 记录——切版走可重复载体且留痕可读回（long-term，2026-09-24 重开时新增）
 
-⛔ 已退役、不再计入范围：**AC-266 / AC-267 / AC-268**——主体（SEA/npm 产物线）经人 2026-09-16 裁定取消，已 `superseded`（SPEC §11.4）。
+⛔ 已退役、不再计入范围（均 `superseded`）：**AC-266 / AC-267 / AC-268**——主体（SEA/npm 产物线）经人 2026-09-16 裁定取消（SPEC §11.4）；**AC-273**——由 AC-284 / AC-285 取代（默认分支改回 master 后「origin/HEAD 指向 develop」不再成立）；**AC-320**——人 2026-10-07 裁定取消：判据要求 `form=tagged` 记录，而规范切版路径（`release-cut.sh` → `release-branch-finish.sh --cut`）落台账的是 `form=cut`，取值词表对不上 ⇒ 判据结构上不可能绿；台账里 v0.13.0 / v0.14.0 / v0.15.0 / v0.16.0 四条 `form=cut exit=0` 记录都带 tag、都落在主检出，「切版留痕可读回」这件事本身已满足。
 
 ## 非目标 / 与 GOAL-019 的边界
 
@@ -147,3 +153,9 @@ long-term AC 全部判为通过——它们读的是**已发生的** run，结�
 **执行任务**：runner 迁移 + 防回漂静态闸（`goal_ac: AC-319`）；切版载体 + 主台账落点（`goal_ac: AC-320`）；
 采集器「未启动」独立取值（正文关联 AC-269 的归因正确性）；CI 并发下红的 `serve-sessions-body-i18n.test.mjs`
 （正文关联 AC-265）。
+
+## 收口（2026-10-07，人裁定）
+
+在域 AC 7 条全部 achieved；唯一未成的 AC-320 经人裁定取消（判据取值词表陈旧，理由见 `## 范围` 的退役行）。
+本 GOAL 的退出条件 ① / ② / ③ 分别由 AC-265 / AC-274 / AC-269 承载，三条均已 achieved。
+充足性判官在本条关闭前的最后一次裁决为 `covered`。⛔ 关闭后它不会再被重判：充分性判官只遍历 active GOAL，本 GOAL 关闭后即离开该集合（实测 round 12，2026-10-07T08:43:06Z：`goal-sufficiency` fact 只剩 GOAL-029）。

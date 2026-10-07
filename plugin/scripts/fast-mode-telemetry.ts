@@ -130,6 +130,18 @@ import { isDirectEntry, flagValue } from "./gate-script-base.ts";
 // `s.replace(` byte needle could not see it (finding `escaperegexp-sweep-missed-two`, routine
 // `semantic-dedup-scan`; see packages/quay/test/kernel-regex-escape.test.mjs ④).
 import { escapeRegExp } from "./regex-escape.ts";
+// Start/end classification — the ONE definition, in Core, shared with the web read path
+// (packages/quay/src/observation.ts). This file used to carry a byte-identical local copy and
+// observation.ts carried the other one, each documented as a deliberate mirror of the other and
+// neither pinned by a test naming it (gap-routine-semantic-dedup-scan-is-start-end-like-cross-surface,
+// routine `semantic-dedup-scan`). ⛔ Acquired via acquireCoreSrc, NOT a bare `../../packages/...`
+// literal: this module is in `quay driver`'s kernel import graph (driver-runtime.ts →
+// driver-filters.ts → concurrent-batch-scheduler.ts → here), and the literal dies in the staged
+// `packages/quay/plugin/` copy that `build-plugin-dist.mjs` compiles from.
+const { isStartLike, isEndLike } = await acquireCoreSrc(
+  () => import("../../packages/quay/src/start-end-like.ts"),
+  "start-end-like.ts",
+);
 import {
   SCHEMA_VERSION,
   VALID_STAGES,
@@ -1361,22 +1373,14 @@ function median(values) {
   return (sorted[mid - 1] + sorted[mid]) / 2;
 }
 
-/**
- * Start/end classification is by TIMING MARKER PRESENCE, not the `eventKind` extra field alone
- * (DEFECT-4 fix): `eventKind` is not in A1a REQUIRED_FIELDS and validateEvent allows unknown
- * extra fields, so a hand-edited Fast event may lack it. A start-like event carries startedAtMs
- * and no endedAtMs; an end-like event carries endedAtMs.
- */
-function isStartLike(e) {
-  if (!e || !e.timing) return false;
-  if (e.eventKind === "start") return true;
-  return e.timing.startedAtMs != null && e.timing.endedAtMs == null;
-}
-function isEndLike(e) {
-  if (!e || !e.timing) return false;
-  if (e.eventKind === "end") return true;
-  return e.timing.endedAtMs != null;
-}
+/** Start/end classification is IMPORTED, not defined here — the ONE definition lives in
+ *  `packages/quay/src/start-end-like.ts` and is shared with the web read path
+ *  (packages/quay/src/observation.ts). These two names used to be a local byte-identical copy of
+ *  that file's predicates, each documented as a mirror of the other and neither pinned by a test
+ *  (gap-routine-semantic-dedup-scan-is-start-end-like-cross-surface). Re-exported so the SSOT
+ *  ratchet (plugin/test/start-end-like-ssot.test.mjs) can assert runtime identity across the
+ *  plugin/Core boundary instead of comparing prose. */
+export { isStartLike, isEndLike };
 /** Impl-complete boundary event (gap-inflight-states-missing-impl-complete-event): the third
  *  task-lifecycle kind. Its timing is all-null so it is NEVER start-like nor end-like — it is a
  *  mid-span marker that splits start→end into start→impl-complete and impl-complete→end. */

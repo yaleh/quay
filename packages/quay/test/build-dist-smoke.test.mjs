@@ -88,8 +88,11 @@ function runNative(args, tasksDir) {
 function httpGet(port, urlPath) {
   return new Promise((resolve, reject) => {
     const req = http.get({ host: "127.0.0.1", port, path: urlPath }, (res) => {
+      let body = "";
+      res.setEncoding("utf8");
+      res.on("data", (c) => { body += c; });
+      res.on("end", () => resolve({ status: res.statusCode, body }));
       res.resume();
-      resolve(res.statusCode);
     });
     req.on("error", reject);
   });
@@ -120,25 +123,53 @@ test("(a) different-cwd: task list / task view --json / gate --list run against 
 });
 
 test("(b) serve --port + HTTP GET returns 200", async () => {
-  const port = 18000 + Math.floor(Math.random() * 1500);
-  const child = spawn("node", [bundle, "serve", "--port", String(port)], {
+  // Port-collision fix (2026-10-07): a RANDOM FIXED port drawn from a hand-picked band
+  // (`18000 + rand(1500)`) collides with another tenant's listener on a shared host. When it
+  // does, OUR child silently fails to bind (EADDRINUSE with stdio "ignore" ⇒ no diagnostic)
+  // while the GET reaches the FOREIGN listener, which answers 404 — a false "serve is broken"
+  // reading that burned a fan-in run. `--port 0` asks the kernel for a free ephemeral port
+  // instead (the same contract prod/launcher use); the only place that port is knowable is the
+  // child's own startup line, so stdout is piped and parsed. A collision now cannot happen: the
+  // kernel never hands out a port that is in use, and the port we GET is the one WE bound.
+  const child = spawn("node", [bundle, "serve", "--port", "0"], {
     cwd: ws.workspaceRoot,
     env: { ...process.env },
-    stdio: "ignore",
+    stdio: ["ignore", "pipe", "ignore"],
   });
   try {
-    let code;
-    // Poll for up to ~15s (100 × 150ms) — matching test (c)'s 15s envelope. The previous 40 ×
-    // 150ms (6s) window sat exactly at the bundle's cold-start-under-load time: under full-suite
-    // `--test-concurrency=8` load the spawned server genuinely needs ~6s to bind (measured:
-    // 6.08s pass / 6.68s fail on the same machine, same load — a coin-flip at the boundary), so
-    // ANY test-suite growth tipped this into deterministic failure without any product change.
-    // A genuinely broken serve still fails here, just after a load-tolerant wait.
+    const port = await new Promise((resolve, reject) => {
+      let buf = "";
+      const timer = setTimeout(
+        () => reject(new Error("serve never reported a bound port within 20s")),
+        20000
+      );
+      // The 'data' listener stays attached after resolve, so the child's stdout keeps draining
+      // (a paused pipe would eventually block the server).
+      child.stdout.on("data", (chunk) => {
+        buf += chunk.toString();
+        // serve.ts: `console.log(\`quay serve: listening on http://${host}:${actualPort}\`)`.
+        const m = /quay serve: listening on http:\/\/[^:]+:(\d+)/.exec(buf);
+        if (m) { clearTimeout(timer); resolve(Number(m[1])); }
+      });
+      // An early exit is now DIAGNOSED (previously invisible behind stdio "ignore") instead of
+      // surfacing as a misleading HTTP reading.
+      child.on("exit", (code) => {
+        clearTimeout(timer);
+        reject(new Error(`serve exited before binding (code ${code})`));
+      });
+      child.on("error", reject);
+    });
+    let res;
+    // The port is known only AFTER the 'listening' line, so the handler is already routing;
+    // this loop is a small safety margin, not a bind wait.
     for (let i = 0; i < 100; i++) {
-      await sleep(150);
-      try { code = await httpGet(port, "/tasks"); break; } catch { /* not up yet */ }
+      try { res = await httpGet(port, "/tasks"); break; } catch { await sleep(150); }
     }
-    assert.equal(code, 200, "GET /tasks on the standalone-bundle server must return 200");
+    assert.equal(res?.status, 200, "GET /tasks on the standalone-bundle server must return 200");
+    // THE ANTI-FOREIGN-LISTENER CONTROL: a 200 alone would be satisfied by ANY quay serve on that
+    // port. Asserting OUR seeded task is on the page proves the bytes came from the server WE
+    // spawned against OUR workspace — the reading the collision used to falsify.
+    assert.match(res.body, /SMOKE1/, "the page must be OUR server's task list (the seeded task)");
   } finally {
     child.kill("SIGKILL");
   }

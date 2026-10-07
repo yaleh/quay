@@ -63,7 +63,46 @@ export async function handleTaskList({ flags, positional, wantsJson }: CliCtx) {
     // asks for the frontmatter-only projection (`includeBody:false`, the same one
     // the web board / dashboard / /tasks page use). `--json` DOES print the task
     // objects, body included, so it keeps the full shape.
-    const wantBodiesInOutput = wantsJson === true;
+    //
+    // gap-cli-task-list-json-body-coupled-to-json-flag: `--json` used to imply
+    // "read EVERY body" unconditionally — OUTPUT FORMAT and READ PROJECTION were
+    // one switch. A caller that only needs the full task set to count / summarise
+    // statuses (claudecodeui's `summarizeTasks()` reads id/title/status/updatedAt
+    // and never a body) had no way to ask for JSON *without* paying for every
+    // body's parse + serialisation. The explicit `--no-body` flag DECOUPLES them:
+    // the array stays complete (no page / slice — a full count), every task still
+    // carries its frontmatter fields, but the read uses the frontmatter-only
+    // projection (`includeBody:false`) the table view already uses. Without
+    // `--no-body`, `--json` keeps its pre-existing body-carrying shape (zero
+    // regression). ⛔ Ignored without `--json`: the table view already reads no
+    // bodies, so `--no-body` alone is a no-op there (not a usage error).
+    //
+    // ⚠️ `--no-body` is read off the flag bag directly rather than via
+    // BOOLEAN_FLAGS (cli/flags.ts): `task list` takes no positionals, so a bare
+    // `--no-body` parses to `true` in every real invocation order (`--json
+    // --no-body` / `--no-body --json` / `--no-body --status x` — the next token
+    // always starts with `--` or is absent) — the BOOLEAN_FLAGS mechanism only
+    // matters when a non-flag token could follow, which cannot happen here.
+    const wantBodiesInOutput = wantsJson === true && flags["no-body"] === undefined;
+    // ── PUSH THE PAGE DOWN ────────────────────────────────────────────────────
+    // gap-cli-task-list-page-size-post-hoc-slice-not-pushed-down: `--page-size`
+    // used to be a POST-HOC slice — every matching task was fetched (bodies
+    // included, per `wantBodiesInOutput`) and then `.slice(0, N)` threw almost
+    // all of it away. The Provider ABI already has a two-phase paged read
+    // (native store `queryPage`: phase 1 resolves the matching id set WITHOUT
+    // bodies, phase 2 reads bodies for the page WINDOW only), and Core's MCP
+    // `task_list` handler already pushes `page`/`pageSize` down and trusts
+    // `paged:true` (mcp-handlers.ts). This command never did — the same fix,
+    // applied to the last consumer still full-fetch-then-slicing.
+    //
+    // ⛔ NOT pushed down when `--sort` is requested: a page of the Provider's
+    // own order is NOT the top-N of a SORTED view (top-N by `updatedAt` needs
+    // the WHOLE filtered set to sort first). Pushing the page there would
+    // silently change WHICH tasks are shown, so a sorted request keeps the
+    // pre-existing full fetch + local sort + local slice. Correctness over cost,
+    // and only for the narrower already-slow sorted case.
+    const sortKey = flags.sort;
+    const canPushPage = pageSize != null && sortKey === undefined;
     const providerFilter: Record<string, unknown> = {};
     if (flags.status !== undefined) providerFilter.status = flags.status;
     if (labelFilters.length === 1) providerFilter.label = labelFilters[0];
@@ -73,6 +112,10 @@ export async function handleTaskList({ flags, positional, wantsJson }: CliCtx) {
     if (prefix) providerFilter.prefix = prefix;
     if (searchQuery) providerFilter.search = searchQuery;
     if (!wantBodiesInOutput) providerFilter.includeBody = false;
+    // `page` stays 1 — the CLI has no --page flag. The window is the ONLY thing
+    // the Provider must read bodies for, so `--json --page-size N` costs N body
+    // reads, not the store's (store.ts `queryPage` phase 2).
+    if (canPushPage) providerFilter.pageSize = pageSize;
     // ── did the Provider actually apply them? ─────────────────────────────────
     // A Provider that implements the pushed-down filter surface reports the
     // FILTERED `total` and a `scannedFiles` boolean (the native store always
@@ -82,11 +125,27 @@ export async function handleTaskList({ flags, positional, wantsJson }: CliCtx) {
     // not be confused with one that filtered). A Provider whose schema REJECTS an
     // extended arg instead of dropping it throws the whole call: same fallback.
     // Either way the caller gets a correct answer; only the cost differs.
+    //
+    // The page has its OWN sentinel: `paged:true` (native store: `pageSize` was
+    // sent and applied). A Provider that applied the filters but IGNORED
+    // `pageSize` (or an older build whose schema dropped it) sets no `paged` —
+    // that is the honest "not paged" signal, and the local slice below still
+    // produces the right answer (硬规则 3b: "did not page" must not read as
+    // "paged with everything").
     let listRes;
     let providerFiltered = false;
+    // `providerPaged` is the Provider's own signal that `listRes.tasks` is
+    // already the requested WINDOW of the filtered set — so it must NOT be
+    // sliced again below, and `total` (not `tasks.length`) is the filtered
+    // count the header reports. Mirrors mcp-handlers.ts's trust-`paged` shape.
+    let providerPaged = false;
     try {
       const first = await client.taskList(providerFilter);
-      if (typeof first.total === "number" && typeof first.scannedFiles === "boolean") {
+      if (canPushPage && first.paged === true) {
+        listRes = first;
+        providerFiltered = true;
+        providerPaged = true;
+      } else if (typeof first.total === "number" && typeof first.scannedFiles === "boolean") {
         listRes = first;
         providerFiltered = true;
       }
@@ -126,7 +185,8 @@ export async function handleTaskList({ flags, positional, wantsJson }: CliCtx) {
     // the provider (quay-native's store.js list() path). Sort descending
     // (most-recently-modified first). Tasks without updatedAt (e.g. from a
     // provider that doesn't expose it) sort after those that have it.
-    const sortKey = flags.sort;
+    // `sortKey` was read up top, where it also decided whether the page could
+    // be pushed down (a SORTED view cannot push a page — see the note there).
     let sorted;
     if (sortKey === "updated") {
       sorted = filtered.slice().sort((a, b) => {
@@ -149,8 +209,15 @@ export async function handleTaskList({ flags, positional, wantsJson }: CliCtx) {
     // BOTH output modes below — this is the printJson(sorted) bug fix
     // (previously the full array was always printed in JSON mode
     // regardless of --page-size).
-    const totalCount = sorted.length;
-    const paged = pageSize != null ? sorted.slice(0, pageSize) : sorted;
+    //
+    // ⛔ When the Provider already applied the page (`providerPaged`) `sorted`
+    // IS the window: slicing it again is a no-op, and `total` — not the window
+    // length — is the filtered count (so the "# showing N of M" header stays
+    // truthful). The local slice is the FALLBACK path for a Provider that
+    // ignored the pushed-down `pageSize` (or whose schema rejected it).
+    const totalCount =
+      providerPaged && typeof listRes.total === "number" ? listRes.total : sorted.length;
+    const paged = pageSize != null && !providerPaged ? sorted.slice(0, pageSize) : sorted;
     // gap-one-unparseable-task-takes-down-the-whole-board: report unparseable
     // task files on stderr (so --json stays parseable) instead of silently
     // dropping them or letting them 500 the whole list.

@@ -53,7 +53,7 @@ import { parseServiceList, readServiceState, writeServiceState } from "../serve.
 // The service NAMES come from the zero-import leaf (same reason as help.ts): one list, three
 // consumers. ⛔ Never re-declare them here.
 import { ALL_SERVICE_NAMES, DRIVER_SERVICE_KINDS, HOSTED_SERVICE_NAMES } from "./driver-vocab.ts";
-import { runDriver } from "./driver.ts";
+import { runDriver, runDriverAsync } from "./driver.ts";
 // The host's log routing is SINGLE-SOURCED (gap-server-host-spawn-discards-stdio-while-start-drivers-
 // logs-to-serve-log): this file and plugin/scripts/start-drivers.ts are the two spawn sites of the
 // SAME host, and they used to disagree — `startServe` appended to `.quay/serve.log`, `spawnHost`
@@ -191,10 +191,18 @@ export async function handleServer(ctx: CliCtx) {
 
 /** 一个 driver kind 的健康读数：**直接量** = 它自己 round 心跳载体的最后一条记录的 `ts`。
  *  三态（硬规则 3b）：fresh(`alive:true`) / stale(`alive:false`) / not-evaluated（读不到载体或 ts
- *  不可解析 ⇒ `evaluated:false`，⛔ 与「停摆」不同形——「读不懂」不得伪装成「不合格」。 */
-function driverServiceReport(workspaceRoot: string, kind: string): DriverServiceReport {
+ *  不可解析 ⇒ `evaluated:false`，⛔ 与「停摆」不同形——「读不懂」不得伪装成「不合格」）。
+ *
+ *  ⚠️ 它是 **async** 且用 `runDriverAsync`（gap-server-status-six-serial-driver-runtime-cold-spawns）：
+ *  每个 kind 的读数都是一次完整的 `driver-runtime.ts` **冷启动 + TS 转译**（本仓库实测每 kind
+ *  0.23–1.02s），旧实现是 6 次**同步串行** `spawnSync` ⇒ 墙钟 = 6 次之和（实测 3.92–4.07s，而响应体
+ *  只有 ~3.2KB——慢在"算出这几 KB 之前串行起了 6 个子进程"，⛔ 不是网络/磁盘/序列化）。六个 kind 的
+ *  读取**互不共享可变状态**（各自只开自己 kind 的载体）⇒ 由调用点 `Promise.all` 并发，墙钟趋近**最慢的
+ *  那一个**。⛔ 这里只是把「如何 spawn」换成异步；逐 kind 的解析/三态判定一个字没动，故并发前后的读数
+ *  逐字段一致。 */
+async function driverServiceReport(workspaceRoot: string, kind: string): Promise<DriverServiceReport> {
   const name = `driver:${kind}`;
-  const r = runDriver("status", kind, ["--kind", kind, "--json"], workspaceRoot);
+  const r = await runDriverAsync("status", kind, ["--kind", kind, "--json"], workspaceRoot);
   const base: DriverServiceReport = { name, kind, pid: null, host: "local", liveness: unevaluated("driver status unavailable"), declaration: null };
   if (!r.ok) return { ...base, liveness: unevaluated(r.reason ?? "driver status unavailable") };
   const line = r.stdout.split("\n").find((l) => l.trim().startsWith("{"));
@@ -359,7 +367,13 @@ async function statusCommand({ flags, wantsJson }: CliCtx) {
 
   // SPEC §6.10 的另一半（GOAL-017/AC-255）：六个 driver kind 各一行，活性取**该服务自己的 round 心跳**。
   // ⛔ 不在 `status`/`not-running` 分支里跳过——那正是最需要看「哪个 kind 不转了」的时刻。
-  const drivers = DRIVER_SERVICE_KINDS.map((kind) => driverServiceReport(workspaceRoot, kind));
+  //
+  // ⚠️ 并发执行（gap-server-status-six-serial-driver-runtime-cold-spawns）：`Promise.all` + 每 kind 一次
+  // 异步 spawn ⇒ 墙钟 ≈ 最慢的单个 kind，而不是 6 次冷启动之和。⛔ `.map` 的元素顺序被 `Promise.all`
+  // 原样保留 ⇒ `drivers[]` 的次序与逐 kind 的读数**都不因并发而变**；⛔ 单个 kind 失败只在它自己那一行
+  // 变成 `liveness.evaluated:false`，不会 reject 整个 `Promise.all`（`runDriverAsync` 把 spawn 失败也收敛
+  // 成 `ok:true` + 空 stdout，见其注释）。
+  const drivers = await Promise.all(DRIVER_SERVICE_KINDS.map((kind) => driverServiceReport(workspaceRoot, kind)));
 
   // 宿主**加载的**版本 vs **已安装**版本（gap-serve-host-has-no-loaded-version-reading-driver-status-
   // covers-anchor-only）。对象是 carrier 里那个**宿主 pid**——`quay serve` 宿主才是「正在跑的那个

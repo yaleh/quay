@@ -1,7 +1,7 @@
 ---
 id: AC-280
 title: checker-mutation-check.sh 的80用例循环真正并行化，不再是单线程bash顺序for循环
-status: achieved
+status: superseded
 kind: criterion
 goal: GOAL-022
 criterion: >-
@@ -33,7 +33,8 @@ criterion: >-
   # reap it with a `wait` afterward in the same function — not just mention
   "parallel" in a comment.
 
-  CALL_LINE="$(grep -n 'run_one_case "\$name" "\$workdir"' "$SRC" | head -1 || true)"
+  CALL_LINE="$(grep -n 'run_one_case "\$name" "\$workdir"' "$SRC" | head -1 ||
+  true)"
 
   if [ -z "$CALL_LINE" ]; then
     echo "CAUSE=call-site-not-found — no line in $SRC calls run_one_case \"\$name\" \"\$workdir\" verbatim; the refactor may have renamed the call — this criterion needs updating, not silently passed" >&2; exit 1
@@ -82,6 +83,17 @@ statusLog:
     to: achieved
     actor: goal-driver
     reason: "I2: criterion pass"
+  - at: 2026-10-07T08:20:14.717Z
+    from: achieved
+    to: superseded
+    actor: human
+    reason: 人 2026-10-07 裁定取消（判据陈旧，非未达成）：判据 grep
+      plugin/scripts/checker-mutation-check.sh 里字面量 run_one_case "$name"
+      "$workdir"；该 bash 循环已被 GOAL-026
+      §5.2（gap-arch-tsify-checker-mutation-check-sh）迁进
+      plugin/scripts/checker-mutation-check.ts，入口成薄垫片 ⇒
+      谓词要找的调用点结构上不存在，判据恒红（CAUSE=call-site-not-found）。保证本身仍在 .ts 的
+      bounded-parallel 用例池（poolMax / Promise.race / Promise.all）。
 fidelity:
   verdict: faithful
   reason: "fidelity judge: faithful"

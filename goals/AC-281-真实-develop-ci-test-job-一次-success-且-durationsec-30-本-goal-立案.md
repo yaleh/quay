@@ -1,7 +1,7 @@
 ---
 id: AC-281
 title: 真实 develop CI test job 一次 success 且 durationSec <= 30（本 GOAL 立案之后的读数）
-status: active
+status: superseded
 kind: criterion
 goal: GOAL-022
 criterion: >-
@@ -98,6 +98,14 @@ statusLog:
     to: active
     actor: manager
     reason: GOAL-022 激活，三条 AC 同步激活为可判定态
+  - at: 2026-10-07T08:20:13.008Z
+    from: active
+    to: superseded
+    actor: human
+    reason: 人 2026-10-07 裁定取消（口径陈旧，非未达成）：30s 这个数是在 649 测试文件 / job 208s
+      的成本结构下立的；套件已涨到 852 文件、scheduler 实测 51–72s。且判据读「最新一次 post-filing run」⇒
+      它永远指向最后一个 run，CI 因任何与本目标无关的原因红都让它红（当前
+      CAUSE=latest-run-not-green）。结构上不再由工作决定，goal-driver 判为 world-gated。
 fidelity:
   verdict: faithful
   reason: "fidelity judge: faithful"
