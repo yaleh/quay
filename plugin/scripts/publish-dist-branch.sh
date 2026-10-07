@@ -131,6 +131,27 @@ SHIPPED_EXCLUDES="$(node --no-warnings --experimental-strip-types "${PLUGIN_DIR}
 RSYNC_EXCLUDES=()
 while IFS= read -r _ex; do if [ -n "$_ex" ]; then RSYNC_EXCLUDES+=(--exclude "$_ex"); fi; done <<< "$SHIPPED_EXCLUDES"
 if [ "${#RSYNC_EXCLUDES[@]}" -eq 0 ]; then echo "ERROR: shipped-set exclusion list is empty — refusing to publish the whole plugin tree." >&2; exit 1; fi
+
+# ── THE REACHABLE SHELL SET (tasks/gap-shipped-shell-limited-to-runtime-reachable-set-and-delivery-
+# verify-tools-leave-the-artifact, GOAL-029) ───────────────────────────────────────────────────────
+# The rule list above excludes dev-only content by PATTERN, which cannot express "dev-only by
+# REACHABILITY": the 0.17.0 artifact still carried release/delivery tooling for a cancelled channel
+# and retired classic-pipeline gates nothing calls (90 non-test `.sh` / 28,642 lines). The set of
+# `.sh` that ship is DERIVED — from the surfaces the runtime can start from — by
+# `plugin/scripts/shipped-shell-reachability.ts`. Everything it does not reach is PRUNED from the
+# assembled tree further down, after the dist build.
+# ⛔ WHY A POST-BUILD PRUNE AND NOT AN rsync --exclude (measured 2026-10-07): `build-plugin-dist.mjs`
+# derives its ENTRYPOINT set partly FROM CARRIERS — a `.sh` that names a `.ts` puts that `.ts` in the
+# bundle set. Excluding the `.sh` at rsync time therefore silently SHRANK the built bundle set, and
+# the dist reference-closure gate below (whose required-set is derived against ${PLUGIN_DIR}, where
+# those carriers still exist) refused the publish: 8 referenced bundles absent. The prune keeps the
+# BUILD INPUT byte-identical to the unfiltered tree, so the entry set — and every bundle in it — is
+# unchanged; only the assembled OUTPUT loses the `.sh` no runtime surface reaches.
+# ⛔ Fail-closed both ways: the `$( )` propagates its exit status (the module exits 2 NOT-EVALUATED
+# rather than printing an empty list when a root surface is unreadable), and the prune below refuses
+# if a listed path is absent from ${WORK} — a list and a tree that disagree is a drift signal, never
+# "nothing to prune" (硬规则 3b).
+SHELL_EXCLUDES="$(node --no-warnings --experimental-strip-types "${PLUGIN_DIR}/scripts/shipped-shell-reachability.ts" --print-excludes)"
 rsync -a --exclude='.git' "${RSYNC_EXCLUDES[@]}" "${PLUGIN_DIR}/" "${WORK}/" && node "${REPO_ROOT}/scripts/stamp-marketplace-name.mjs" --root "${WORK}" --repo-root "${REPO_ROOT}"
 
 # gap-dist-plugin-missing-node-modules-task-schema-yaml: this branch used to ship the copied
@@ -185,7 +206,7 @@ echo "[publish-dist-branch] rewriting staged invokers (docs/.sh/quay-init) to re
 # ratchets the effective-line count of every embedded-interpreter .sh and refuses a worktree baseline
 # above git HEAD's, so a new code line here cannot be recovered by re-anchoring. Comment lines are
 # excluded from that count; code lines are not.
-node --experimental-strip-types "${REPO_ROOT}/packages/quay/scripts/build-plugin-dist.mjs" --rewrite "${WORK}" && node "${REPO_ROOT}/scripts/stamp-version.mjs" --mode build --root "${WORK}" --git-root "${REPO_ROOT}" && node "${REPO_ROOT}/scripts/version-consistency-check.mjs" --stamp-bundle-tree "${WORK}" && node "${REPO_ROOT}/scripts/version-consistency-check.mjs" --bundle-tree "${WORK}"
+node --experimental-strip-types "${REPO_ROOT}/packages/quay/scripts/build-plugin-dist.mjs" --rewrite "${WORK}" && node "${REPO_ROOT}/scripts/stamp-version.mjs" --mode build --root "${WORK}" --git-root "${REPO_ROOT}" && node "${REPO_ROOT}/scripts/version-consistency-check.mjs" --stamp-bundle-tree "${WORK}" && node "${REPO_ROOT}/scripts/version-consistency-check.mjs" --bundle-tree "${WORK}" && { _pruned=0; while IFS= read -r _ex; do [ -n "$_ex" ] || continue; if [ ! -e "${WORK}/${_ex}" ]; then echo "ERROR: shipped-shell list names ${_ex}, which is absent from the assembled tree — the derived list and the tree disagree." >&2; exit 1; fi; rm -f "${WORK}/${_ex}"; _pruned=$((_pruned + 1)); done <<< "$SHELL_EXCLUDES"; echo "[publish-dist-branch] pruned ${_pruned} .sh file(s) no runtime surface reaches"; }
 
 # ── AC-263: the dist reference-closure gate for THIS channel — and it must ABORT, not warn ────────
 # The npm-tarball channel has had an equivalent assertion since gap-plugin-dist-entry-derivation-

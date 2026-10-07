@@ -341,8 +341,21 @@
       },
       "why": "UPWARD re-anchor (+4) — a deliberate, one-off cost the task's own mechanism pays: plugin/scripts/publish-dist-branch.sh gained 4 code lines (the shipped-set exclusion list read, its --exclude array, the loop that fills it, and the empty-list fail-closed guard) so the artifact stops shipping the whole dev tree. Comment lines, which carry the WHY, are free under this axis. The 4 lines are the entire executable footprint of the narrowing at this site; the checker itself (plugin/scripts/shipped-set-rules.ts) is a .ts and is not censused. Re-anchored to the checker's OWN reading on the merged tree (7694) — never hand-fitted.",
       "attribution": "4 lines, plugin/scripts/publish-dist-branch.sh — the rsync exclusion wiring; no other .sh changed in this task."
+    },
+    {
+      "when": "2026-10-07 (gap-shipped-shell-limited-to-runtime-reachable-set-and-delivery-verify-tools-leave-the-artifact)",
+      "from": {
+        "embeddedInterpreterLines": 7694,
+        "duplicateCopies": 0
+      },
+      "to": {
+        "embeddedInterpreterLines": 7695,
+        "duplicateCopies": 0
+      },
+      "why": "UPWARD re-anchor (+1) — the same deliberate, one-off cost its sibling above paid, for the same reason: plugin/scripts/publish-dist-branch.sh gained ONE code line that reads the runtime-reachable `.sh` set (plugin/scripts/shipped-shell-reachability.ts --print-excludes) so the artifact stops shipping the 19 non-test `.sh` no runtime surface reaches. The prune that consumes that list is chained onto the pre-existing rewrite line, so it adds no line of its own; comment lines, which carry the WHY, are free under this axis. Re-anchored to the checker's OWN reading on this tree (7695) — never hand-fitted.",
+      "attribution": "+1 = plugin/scripts/publish-dist-branch.sh's SHELL_EXCLUDES assignment (embedded `node --experimental-strip-types`). Residual = 0. duplicateCopies untouched at 0 (0 is the assertion, not an omission)."
     }
   ],
-  "embeddedInterpreterLines": 7694,
+  "embeddedInterpreterLines": 7695,
   "duplicateCopies": 0
 }

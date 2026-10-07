@@ -24,6 +24,30 @@
         "checkerMutationCases": 93,
         "devManifests": 7
       }
+    },
+    {
+      "when": "2026-10-07T03:25:41.618Z",
+      "from": {
+        "files": 0,
+        "bytes": 0,
+        "shLines": 0,
+        "shipped": {
+          "files": 283,
+          "bytes": 54476516,
+          "shLines": 17545
+        }
+      },
+      "to": {
+        "files": 0,
+        "bytes": 0,
+        "shLines": 0
+      },
+      "shipped": {
+        "files": 264,
+        "bytes": 53926575,
+        "shLines": 8286
+      },
+      "why": "DOWNWARD re-anchor — the intended direction of this task, not a regression. tasks/gap-shipped-shell-limited-to-runtime-reachable-set-and-delivery-verify-tools-leave-the-artifact pruned the 19 .sh no runtime surface reaches (12 retired classic-pipeline gates under gate-scripts/, the dev asset-sync sync.sh, and 3 delivery/verification tools of the npm/tgz channel cancelled by human ruling 2026-09-16). Artifact built by the real publish-dist-branch.sh in a throwaway stub repo: 283 -> 264 files, 17545 -> 8286 .sh code lines. The ratchet's three forbidden axes stay 0."
     }
   ],
   "_axes": {
@@ -37,8 +61,8 @@
   "bytes": 0,
   "shLines": 0,
   "shipped": {
-    "files": 283,
-    "bytes": 54476516,
-    "shLines": 17545
+    "files": 264,
+    "bytes": 53926575,
+    "shLines": 8286
   }
 }

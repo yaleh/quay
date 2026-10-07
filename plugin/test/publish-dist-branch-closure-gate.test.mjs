@@ -253,6 +253,27 @@ function addShippedSetRuleInputs(root) {
   writeFile(path.join(root, rulesRel), fs.readFileSync(path.join(repoRoot, rulesRel)));
 }
 
+/** The runtime-reachable shell module + its transitive imports, copied into the stub from the repo —
+ *  the exact sibling of `addShippedSetRuleInputs` above, added when `publish-dist-branch.sh` began
+ *  SPAWNING `plugin/scripts/shipped-shell-reachability.ts --print-excludes` to prune the `.sh` no
+ *  runtime surface reaches (tasks/gap-shipped-shell-limited-to-runtime-reachable-set-and-delivery-
+ *  verify-tools-leave-the-artifact). It is a REAL call into the REAL module, so the stub must carry
+ *  it: without this the baseline publish died with `Cannot find module '<stub>/plugin/scripts/
+ *  shipped-shell-reachability.ts'` (measured 2026-10-07 on this branch's first fan-in run) and the
+ *  closure gate this test exists for was never reached — the stub, not the script, was incomplete.
+ *
+ *  The module's rule file is already carried by `addShippedSetRuleInputs` (it reads the SAME
+ *  `plugin/shipped-set-rules.txt`), and the catalog is copied BOTH as the module's own root input and
+ *  because the module is fail-closed on it: an unreadable catalog means the instrument root would be
+ *  silently empty, which it reports as NOT-EVALUATED (exit 2) rather than pruning nothing. */
+function addShippedShellReachabilityInputs(root) {
+  const files = repoRelativeImportClosure(path.join("plugin", "scripts", "shipped-shell-reachability.ts"));
+  assert.ok(files.length > 1, `shipped-shell-reachability closure walker found ${files.length} file(s) — walker is broken`);
+  for (const rel of files) writeFile(path.join(root, rel), fs.readFileSync(path.join(repoRoot, rel)));
+  const catalogRel = path.join("plugin", "scripts", "capability-catalog-declarations.json");
+  writeFile(path.join(root, catalogRel), fs.readFileSync(path.join(repoRoot, catalogRel)));
+}
+
 /** A disposable stub repo holding the REAL publish script + the REAL bundler, with one bundleable
  *  script referenced by one carrier — small enough to assemble in seconds, structurally the same
  *  shape the real repo hands the script (plugin/ + packages/quay/scripts + vendor bundle).
@@ -288,6 +309,7 @@ function makeStubRepo(tag) {
   addVersionStampInputs(root);
   addMarketplaceNameStampInputs(root);
   addShippedSetRuleInputs(root);
+  addShippedShellReachabilityInputs(root);
   git(root, "init", "-q", "-b", "master");
   git(root, "add", "-A");
   git(root, "-c", "user.name=ac263", "-c", "user.email=ac263@test.invalid", "commit", "-q", "-m", "stub");
