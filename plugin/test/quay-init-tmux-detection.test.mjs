@@ -53,6 +53,9 @@ import { tmux as isolatedTmux } from '../scripts/tmux-session.ts';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const pluginDir = path.resolve(__dirname, '..');
+const repoRoot = path.resolve(pluginDir, '..');
+// The CLI that owns detection (AC-331) — the assertions below run through it, not the shell entry.
+const QUAY_CLI = path.join(repoRoot, 'packages', 'quay', 'bin', 'quay.ts');
 
 const tmuxAvailable = (() => {
   try { return spawnSync('tmux', ['-V'], { encoding: 'utf8' }).status === 0; } catch { return false; }
@@ -115,12 +118,15 @@ function diskWorktreeRoot() {
 }
 
 function runInit(workspace, args = [], env = process.env) {
-  // --loop tests need an explicit disk worktree root (the sibling default of a /tmp workspace is
-  // tmpfs and is correctly rejected). Inject BEFORE the caller's args so an explicit one wins.
-  const loop = args.includes('--loop');
-  const extra = loop && !args.some((a) => a === '--worktree-root') ? ['--worktree-root', diskWorktreeRoot()] : [];
-  return spawnSync('bash', [path.join(pluginDir, 'scripts', 'quay-init.sh'), ...extra, ...args],
-    { cwd: workspace, encoding: 'utf8', env: { ...env, CLAUDE_PLUGIN_ROOT: pluginDir } });
+  // AC-331 (gap-init-cli-lays-full-closed-set-and-detects-project-values-without-the-shell-script):
+  // these assertions now run THROUGH THE CLI — the single engine that owns detection. The shell
+  // entry's legacy `--loop` spelling is not part of the CLI surface, so it is dropped; the derived
+  // `--worktree-root` injection stays, because the CLI validates the root exactly as the shell did.
+  const loop = args.includes("--loop");
+  const extra = loop && !args.some((a) => a === "--worktree-root") ? ["--worktree-root", diskWorktreeRoot()] : [];
+  const cliArgs = args.filter((a) => a !== "--loop");
+  return spawnSync("node", ["--no-warnings", "--experimental-strip-types", QUAY_CLI, "init", ...extra, ...cliArgs],
+    { cwd: workspace, encoding: "utf8", env: { ...env, CLAUDE_PLUGIN_ROOT: pluginDir } });
 }
 
 // paneHasClaudeChild — the first child of the pane

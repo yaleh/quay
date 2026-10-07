@@ -473,10 +473,15 @@ Description:
         for (const k of r?.pinned ?? []) say(`  ${dryRun ? "would-pin" : "pinned"} providers.native.env.${k} (carrier dir pin)`);
         for (const k of r?.dropped ?? []) say(`  dropped ${k} (--drop-incompatible: it did not validate)`);
       }
+      for (const k of r?.projectValues ?? []) say(`  ${dryRun ? "would-update" : "updated"} loop.${k} (project-derived value)`);
       for (const k of r?.unknownKeys ?? []) {
         console.error(`  warning: unrecognized top-level config key "${k}" — kept as-is (not deleted)`);
       }
       if (dryRun && result.outcome === "reconciled") say("# Dry run — nothing written to disk.");
+      if (result.autoCommit) {
+        const sink = json || result.autoCommit.state === "declined" ? process.stderr : process.stdout;
+        sink.write(`  auto-commit: ${result.autoCommit.detail}\n`);
+      }
       return;
     }
 

@@ -331,6 +331,15 @@ export interface UpgradeOptions {
   pluginRoot?: string | null;
   /** `--drop-incompatible`: delete the user values the candidate validator rejects, instead of failing. */
   dropIncompatible?: boolean;
+  /**
+   * The four PROJECT-DERIVED `loop:` values to merge into an existing config — COMMENT-PRESERVING
+   * and PER-KEY, through the same Document API the rest of the upgrade uses (the shipped shell
+   * entry's `ensure_loop_config` re-serializes the whole document and drops comments; the CLI must
+   * not). A key whose document value already equals the resolved value is left byte-untouched, so a
+   * current config stays a no-op. Absent ⇒ no project-value merge (the shape the pure-engine
+   * callers and their unit tests use).
+   */
+  projectValues?: ProjectLoopValues;
 }
 
 export interface UpgradeReport {
@@ -346,6 +355,8 @@ export interface UpgradeReport {
   unknownKeys: string[];
   /** Keys deleted by `--drop-incompatible` after the candidate failed validation. */
   dropped: string[];
+  /** The four PROJECT-DERIVED `loop:` keys updated to this run's resolved values. */
+  projectValues: string[];
   /** True when nothing at all needed doing ⇒ the caller must not rewrite the file. */
   untouched: boolean;
 }
@@ -411,7 +422,7 @@ function documentToString(doc: YAML.Document.Parsed, raw: string, changed: boole
  */
 export function upgradeConfigContent(raw: string, opts: UpgradeOptions): UpgradeResult {
   const report: UpgradeReport = {
-    added: [], migrated: [], removed: [], pinned: [], unknownKeys: [], dropped: [], untouched: false,
+    added: [], migrated: [], removed: [], pinned: [], unknownKeys: [], dropped: [], projectValues: [], untouched: false,
   };
 
   const doc = YAML.parseDocument(raw);
@@ -458,6 +469,30 @@ export function upgradeConfigContent(raw: string, opts: UpgradeOptions): Upgrade
     changed = true;
   }
 
+  // 4b. The PROJECT-DERIVED `loop:` values (AC-331). Merged PER KEY through the Document API — the
+  //     same comment-preserving discipline as everything above — and only when the resolved value
+  //     actually differs, so a current config is still byte-identical (no gratuitous rewrite). This is
+  //     the CLI's equivalent of the shell entry's `ensure_loop_config` step, minus its whole-document
+  //     re-serialization (which drops the user's comments).
+  if (opts.projectValues) {
+    const pv = opts.projectValues;
+    const merged: Array<[string, unknown]> = [
+      ["repo_root", pv.repoRoot],
+      ["test_command", pv.testCommand],
+      ["tmux_session", pv.tmuxSession],
+      ["worktree_root", pv.worktreeRoot],
+    ];
+    for (const [key, value] of merged) {
+      const current = doc.getIn(["loop", key]);
+      // `null` and "absent" are the SAME reading for `tmux_session` (an undetected session must not
+      // write `tmux_session: null` over an absent key and turn a no-op into a write).
+      if (current === value || (current === undefined && value === null)) continue;
+      doc.setIn(["loop", key], value);
+      report.projectValues.push(key);
+      changed = true;
+    }
+  }
+
   // 5. Unknown top-level keys — PRESERVED (nothing is deleted), reported for the operator.
   const contents = doc.contents;
   if (YAML.isMap(contents)) {
@@ -484,7 +519,8 @@ export function upgradeConfigContent(raw: string, opts: UpgradeOptions): Upgrade
     report.removed.length === 0 &&
     report.added.length === 0 &&
     report.migrated.length === 0 &&
-    report.pinned.length === 0;
+    report.pinned.length === 0 &&
+    report.projectValues.length === 0;
 
   // 7. Judge the candidate BEFORE anyone writes it.
   let verdictResult = validateConfigText({ text: content, workspaceRoot: opts.workspaceRoot, pluginRoot: opts.pluginRoot });
@@ -517,7 +553,8 @@ export function upgradeConfigContent(raw: string, opts: UpgradeOptions): Upgrade
       }
       report.untouched =
         report.removed.length === 0 && report.added.length === 0 &&
-        report.migrated.length === 0 && report.pinned.length === 0 && report.dropped.length === 0;
+        report.migrated.length === 0 && report.pinned.length === 0 && report.dropped.length === 0 &&
+        report.projectValues.length === 0;
       verdictResult = validateConfigText({ text: content, workspaceRoot: opts.workspaceRoot, pluginRoot: opts.pluginRoot });
     }
   }
@@ -1243,10 +1280,14 @@ export interface ProjectValueFailure {
 export function resolveProjectLoopValues(
   root: string,
   configPath: string,
-  explicit: { repoRoot?: string; testCommand?: string; tmuxSession?: string; worktreeRoot?: string },
+  explicit: { repoRoot?: string; testCommand?: string; tmuxSession?: string; worktreeRoot?: string; projectName?: string },
   log?: (line: string) => void,
 ): { ok: true; values: ProjectLoopValues } | { ok: false; failure: ProjectValueFailure } {
   const say = log ?? ((l: string) => console.log(l));
+  // The name tmux detection matches against: the EXPLICIT `--project` when given (the caller may know
+  // the project's name better than its directory's), else the directory basename — the same rule the
+  // role-session prefixes use.
+  const projectName = explicit.projectName && explicit.projectName !== "" ? explicit.projectName : path.basename(root);
 
   // repo_root: explicit → existing → the workspace root.
   let repoRoot = explicit.repoRoot && explicit.repoRoot !== "" ? explicit.repoRoot : readExistingLoopValue(configPath, "repo_root");
@@ -1291,7 +1332,7 @@ export function resolveProjectLoopValues(
       tmuxSession = existing;
       say(`  using existing config loop.tmux_session: ${tmuxSession} (config-preserving upgrade — explicit --tmux-session overrides)`);
     } else {
-      const project = path.basename(root);
+      const project = projectName;
       const detected = detectTmuxSession(project);
       if (detected.state === "unique") {
         tmuxSession = detected.session;
@@ -1533,6 +1574,7 @@ export function runInit(opts: InitOptions): InitResult {
       testCommand: opts.testCommand,
       tmuxSession: opts.tmuxSession,
       worktreeRoot: opts.worktreeRoot,
+      projectName: opts.project,
     },
     say,
   );
@@ -1584,6 +1626,9 @@ export function runInit(opts: InitOptions): InitResult {
       // would make every upgrade fail with `native-provider-unresolvable`.
       pluginRoot: opts.pluginRoot ?? undefined,
       dropIncompatible: opts.dropIncompatible === true,
+      // AC-331: the four project-derived values follow the same comment-preserving, per-key pipeline
+      // as the version defaults — the CLI's equivalent of the shell entry's `ensure_loop_config`.
+      projectValues: values,
     });
     const base = {
       configState: "valid" as const,
@@ -1628,10 +1673,14 @@ export function runInit(opts: InitOptions): InitResult {
           : "no plugin root was given for this run (CLAUDE_PLUGIN_ROOT / --plugin-root unset)",
       }
       : refreshProjectPluginLink({ wsRoot: root, pluginRoot: opts.pluginRoot, dryRun: false, log: opts.log });
+    // The closed set is committed outside `--dry-run` (nothing to commit) — the shipped shell entry
+    // runs this step on EVERY mode, so a re-run can commit scaffolds an earlier run left behind.
+    const upgradeAutoCommit = opts.dryRun ? undefined : autoCommitClosedSet(root, opts.autoCommitConfig ?? "prompt", readPluginVersion(opts.pluginRoot));
     return {
       outcome: up.report.untouched ? "unchanged" : "reconciled",
       content: up.content,
       pluginLink,
+      ...(upgradeAutoCommit ? { autoCommit: upgradeAutoCommit } : {}),
       ...base,
     };
   }
@@ -1923,6 +1972,8 @@ export interface InitReport {
   pinned: string[];
   /** Keys deleted by `--drop-incompatible`. */
   dropped: string[];
+  /** The four PROJECT-DERIVED `loop:` keys updated to this run's resolved values (AC-331). */
+  projectValues: string[];
   /** Unrecognized top-level keys, PRESERVED and reported. */
   unknownKeys: string[];
   /** The `.quay/plugin` link step's outcome (three states, see `PluginLinkOutcome`). */
@@ -1961,6 +2012,7 @@ export function buildInitReport(result: InitResult, o: { dryRun: boolean }): Ini
     removed: result.upgrade?.removed ?? [],
     pinned: result.upgrade?.pinned ?? [],
     dropped: result.upgrade?.dropped ?? [],
+    projectValues: result.upgrade?.projectValues ?? [],
     unknownKeys,
     pluginLink: result.pluginLink,
     ...(o.dryRun ? { content: result.content } : {}),
