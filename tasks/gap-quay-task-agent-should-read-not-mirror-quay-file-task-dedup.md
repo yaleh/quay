@@ -30,14 +30,20 @@ extra:
 
 ## AC
 
-- [ ] `plugin/agents/quay-task.md` 正文不再包含与 `plugin/skills/quay-file-task/SKILL.md` 重复的四形状模板清单/40-非空白字符门槛/Touches 纪律的逐条复述，而是包含一条显式指令要求运行时 `Read plugin/skills/quay-file-task/SKILL.md` 并据其当前内容执行去重与形状判断
-- [ ] `plugin/agents/quay-task.md` 的 `tools:` frontmatter 与改写前逐字相同（仍为 9 个 MCP 任务/生命周期动词 + `Read`，不含 `Bash`/`Write`/`Edit`/`Grep`/`Glob`）
-- [ ] 针对一个已知的历史重复检测场景重跑改写后的 agent，确认其仍能正确识别重复任务（给出具体场景与结果作为证据，不是断言）
-- [ ] `plugin/skills/quay-file-task/SKILL.md` 本身未被本任务修改（本任务只改 agent 侧的复述，不改正本）
+- [x] `plugin/agents/quay-task.md` 正文不再包含与 `plugin/skills/quay-file-task/SKILL.md` 重复的四形状模板清单/40-非空白字符门槛/Touches 纪律的逐条复述，而是包含一条显式指令要求运行时 `Read plugin/skills/quay-file-task/SKILL.md` 并据其当前内容执行去重与形状判断
+- [x] `plugin/agents/quay-task.md` 的 `tools:` frontmatter 与改写前逐字相同（仍为 9 个 MCP 任务/生命周期动词 + `Read`，不含 `Bash`/`Write`/`Edit`/`Grep`/`Glob`）
+- [x] 针对一个已知的历史重复检测场景重跑改写后的 agent，确认其仍能正确识别重复任务（给出具体场景与结果作为证据，不是断言）
+- [x] `plugin/skills/quay-file-task/SKILL.md` 本身未被本任务修改（本任务只改 agent 侧的复述，不改正本）
 
 ## DoD
 
 `plugin/agents/quay-task.md` 的 prompt 正文里，去重机制、四形状模板、40 字符门槛、Touches 纪律这四类规则不再以静态复述形式存在，而是通过运行时 `Read` `plugin/skills/quay-file-task/SKILL.md` 获取——即该 skill 更新规则后，agent 下一次派发就能读到新规则，不需要再有人手动同步两处文本。`tools:` allowlist 不变。改写后用一个具体的历史重复检测场景验证过行为未退化。⛔ 只是在 prompt 里加一句「参考 quay-file-task」而未删除原有的硬编码清单，不算完成——必须是真正替换（移除重复内容），否则仍是两份副本共存、漂移风险未消除。
+
+## Notes（AC 证据，2026-10-07 实施轮）
+
+- **AC1 / AC2 / AC4**：改写后正文中下列被删复述的措辞命中数全为 0 —— `40 non-whitespace`、四形状模板行（`## Finding` + `## AC` + `## DoD` 等）、`never bare directories`、`by mechanism, not symptom`、`mirror it`、`self-touch`；`name`/`description`/`tools` 三行 frontmatter 与改写前逐字节相同（`git show <impl>^:plugin/agents/quay-task.md` 前 5 行 diff 为空），`tools:` 仍为 9 个 MCP 动词 + `Read`。新正文含显式指令 `Read ${CLAUDE_PLUGIN_ROOT}/skills/quay-file-task/SKILL.md`（`${CLAUDE_PLUGIN_ROOT}` 由 Claude Code 在加载 agent Markdown 正文时替换为插件根绝对路径，见 plugins-reference 的「Skill, command, and agent content — Anywhere in the Markdown body」）。相对 develop 本分支只改 1 个文件（`plugin/agents/quay-task.md`，+28/−22），`plugin/skills/quay-file-task/SKILL.md` 未动。
+- **AC3**：以 `claude -p --agent quay:quay-task --plugin-dir <本 worktree>/plugin` 隔离加载本 worktree 中**改写后**的 agent 文件，跑一个已知重复场景（请求大意：「立案：quay-task 的 prompt 抄了一份 quay-file-task 的写作规范，两份文本会各自演化」）。观察到的 tool_use 序列：① `Read /…worktree…/plugin/skills/quay-file-task/SKILL.md`（首个动作，证明改写后正文在场、并且其 `Read` 路径可解析）；② 5 次 `task_list({search: …})` 机制检索；③ 1 次 `task_get`；**全程无 `task_write`、无生命周期调用**。裁决原文：「**不立案——这是真重复（按机制判定）**」，指向已存在的同一任务并说明本轮为只读裁决。即改写后仍能正确识别重复，且其所引规则来自它读到的 skill（裁决里逐字引用「`quay-file-task` skill 第 2 步（按机制去重，不按症状关键词）」）。
+- 附带：`node --test plugin/test/plugin-packaging.test.mjs` 37/37 绿（含 4 条钉住该 agent 的 `tools:`/description/正文 section 的既有断言）；本任务 worktree 的 `scripts/test.sh --for-task … --allow-thin` 绿。
 
 ## Touches
 
