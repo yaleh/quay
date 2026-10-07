@@ -39,10 +39,13 @@ subagent 已完成 ready-pool-check.test.mjs（拆9个文件）和 slot-refill.t
 
 ## 范围与非目标
 
-范围：main/serial/lowconc 三阶段的单文件地板全部压到30秒以下（15个已点名文件）+ 静态检查80用例
-mutation-check 并行化 + 自定义 runner 镜像消除重复装包。
-非目标：不追求"绝对30秒"是数学精确值——AC-281 用真实 CI 一次 ≤30s 的绿跑作收口证据，不设更严的
-连续N次要求（后续 goal-driver 自己的 I5 achieved-but-failing 复检机制会持续盯着有没有退化）。
+范围：main/serial/lowconc 三阶段的单文件地板全部压到30秒以下（15个已点名文件）——由 **AC-279** 承载，已 achieved。
+
+原范围另两项与收口口径经人 2026-10-07 裁定取消（判据已陈旧，逐条理由见 `## 退出条件`）：②静态检查80用例
+mutation-check 并行化（原 AC-280）、③自定义 runner 镜像消除重复装包（原 AC-282），以及 30 秒这个数本身
+（原 AC-281）。
+
+非目标：不设数值稳定性阈值（绿率 / 连续 N 次）——先拿读数再谈阈值（硬规则 4 推论一）。
 
 ## 执行主机（人 2026-09-17 裁定）
 
@@ -61,7 +64,17 @@ tokyo-alpha 开发，tokyo-alpha 上也没有这个仓库的任务/worktree 基�
 
 ## 退出条件
 
-四条 AC 全部 achieved：AC-279（15个原地大文件全部被拆分/移走）、AC-280（checker-mutation-check.sh
-的用例循环真正并行化）、AC-282（"Install suite runtime prerequisites" 不再每次 job 重复装包——
-post-filing 最新一次 develop CI test job 的日志派生出三个前置全部 already-present）、AC-281
-（.quay/ci-runs.jsonl 里本 GOAL 立案之后的最新一次 develop CI test job 是 success 且 durationSec ≤30）。
+**在域 AC = AC-279**（15个原地大文件全部被拆分/移走），已 achieved ⇒ 本 GOAL 达成。
+
+⛔ 已退役、不再计入范围（人 2026-10-07 裁定取消，均置 `superseded`）：
+
+· **AC-280**｜判据 grep `plugin/scripts/checker-mutation-check.sh` 里字面量 `run_one_case "$name" "$workdir"`。
+  该 bash 循环已被 GOAL-026 §5.2（`gap-arch-tsify-checker-mutation-check-sh`）迁进
+  `plugin/scripts/checker-mutation-check.ts`，入口变成薄垫片 ⇒ 谓词要找的调用点结构上不存在，判据恒红。
+  **保证本身仍在**（`.ts` 里有真的 bounded-parallel 用例池：`poolMax` / `Promise.race` / `Promise.all`）。
+· **AC-281**｜30 秒这个口径是在 **649 个测试文件 / job 208s** 的成本结构下立的；套件已涨到 852 文件、
+  scheduler 实测 51–72s，且判据读「最新一次 post-filing run」⇒ 它永远指向最后一个 run，CI 因任何与本
+  目标无关的原因红都让它红 —— 结构上不再由工作决定。
+· **AC-282**｜判据读最新一次 run 的派生字段 `prereqProvision`；新 run 一到、日志还没派生完就翻成
+  `underivable`（NOT-EVALUATED），是个会闪的窗口。collector 的派生（`ci-runs-collect.ts`）与
+  `.github/workflows/ci.yml` 的 `__PREREQ__` 标记都仍在。
