@@ -50,6 +50,13 @@ move the pair into Core as the single definition and import it from the plugin, 
    import graph 里（driver-runtime → driver-filters → concurrent-batch-scheduler → 本文件），
    裸字面量在 staged `packages/quay/plugin/` 副本里解析到不存在的路径 —— 这正是
    `plugin/scripts/core-src-import.ts` 头注释记录的 2026-09-14 事故形态。
+4. 新增 `plugin/test/start-end-like-ssot.test.mjs` —— 守上述单一定义的棘轮。
+
+⚠️ **`plugin/test/start-end-like-ssot.test.mjs` 必须同时进 `## Touches`（不只是 `## Test-Files`）**：
+`## Test-Files` 只喂 `select-tests-for-touches.ts` 的选测（rule 4），
+而 fan-in step 3 的 `anti-drift-touches-check.ts` 只看 `## Touches`，它的 arm (a) 对任何
+「写了但未声明」的文件**硬失败**。实测：只挂 `## Test-Files` 时该检查
+`ANTI-DRIFT HARD FAIL: out-of-declared: task wrote plugin/test/start-end-like-ssot.test.mjs`（exit 1）。
 
 **顺带修正一个被这次复核暴露出来的文档缺陷**：两边原来的 doc comment 都把契约写成
 「start-like = `eventKind === "start"` OR (timing 标记…)」，**漏掉了前置条件** ——
@@ -133,14 +140,30 @@ behaves: true
 报同一个 `…/packages/quay/packages/quay/src/kernel/regex-escape.ts` ERR_MODULE_NOT_FOUND。
 shipped 形态不受影响（package.sh 构建 bundle 后删除原始 `.ts`，见 ⑤ 的内联读数）。
 
-**⑥ 其它**
+**⑥ scoped 门（与 fan-in 同一条命令）+ 其它**
 ```
+$ bash scripts/test.sh --for-task gap-routine-semantic-dedup-scan-is-start-end-like-cross-surface --allow-thin
+== scoped static checks (change-relevant tier…) ==   （20+ 个 checker 实跑，非跳过）
+  mirror-pair-drift-check: PASS — every mirror pair matches or is allow-listed…
+  import-graph-check: files=450 edges=1239 (value 1124 / type 115)
+    PASS — valueSccs=0 ≤ 0, typeSccs=0 ≤ 0, reverseEdges=0 ≤ 0
+  NOT-EVALUATED: it0-split-or-commit-check --changed — no task file in this delta（⛔ 明示不与 PASS 混同）
+⇒ 256 tests / 256 pass / 0 fail，exit 0
 $ npx tsc --noEmit                                        ⇒ exit 0
 $ node --test plugin/test/start-end-like-ssot.test.mjs    ⇒ 8 tests / 8 pass / 0 fail
-$ node --test …fast-mode-telemetry{,-halt}.test.mjs observation{,-worktree-namespace}.test.mjs
-                                                          ⇒ 176 tests / 176 pass / 0 fail
-$ node --test …serve.test.mjs observation*.test.mjs start-end-like-ssot.test.mjs
-                                                          ⇒ 75 tests / 75 pass / 0 fail
+```
+选测（`select-tests-for-touches.ts --json`）除本任务测试外，还按 basename 配对选入
+`plugin/test/fast-mode-telemetry.test.mjs` 与 `packages/quay/test/observation.test.mjs`，
+并按 cross-cut 规则选入 `plugin/test/plugin-packaging.test.mjs` / `build-dist` / `npm-pack-e2e` / `adr-*`
+—— 因为改动触及 `packages/quay/src`。
+
+**⑦ fan-in 前置自检（实跑，提前暴露而非等 fan-in 烧掉整轮）**
+```
+$ node --experimental-strip-types plugin/scripts/anti-drift-touches-check.ts \
+    --task gap-routine-semantic-dedup-scan-is-start-end-like-cross-surface --worktree "$PWD" --merge-target develop
+（首次仅挂 ## Test-Files 时）ANTI-DRIFT HARD FAIL: out-of-declared: task wrote
+  plugin/test/start-end-like-ssot.test.mjs (matches no declared Touches glob)   ← exit 1
+（把该测试文件补进 ## Touches 并 merge develop 后）ANTI-DRIFT OK            ← exit 0
 ```
 
 ## AC
@@ -148,7 +171,7 @@ $ node --test …serve.test.mjs observation*.test.mjs start-end-like-ssot.test.m
 - [x] 处置结论可核：要么修掉，要么写明「已有机制在管、失败在哪一步」，⛔ 不以「已注意到」结案 —— **已修掉**，且留下**能取假**的棘轮：`^function isStartLike` / `^function isEndLike` 在 `plugin/scripts` + `packages/quay/src` 下各恰好 1 处（`start-end-like.ts:50/61`）+ 跨边界运行时同一性 + 行为 oracle（17 条）；变异实跑（把本地副本粘回 plugin 消费者）⇒ 7/8 转红并报出第二个声明点，`cp` 复原后 8/8 绿（见 Evidence ④）
 
 ## DoD
-- [x] 上面的判据实跑通过 —— `node --test plugin/test/start-end-like-ssot.test.mjs` ⇒ 8/8；相关既有测试 176/176 与 75/75 全绿；`npx tsc --noEmit` exit 0；staged 布局 dist 内联与 `acquireCoreSrc` 兜底各取一次实读数（Evidence ⑤⑥）
+- [x] 上面的判据实跑通过 —— `bash scripts/test.sh --for-task … --allow-thin` ⇒ 256/256、exit 0（含 scoped 静态检查实跑）；`node --test plugin/test/start-end-like-ssot.test.mjs` ⇒ 8/8；`npx tsc --noEmit` exit 0；staged 布局 dist 内联与 `acquireCoreSrc` 兜底、anti-drift 前置自检各取一次实读数（Evidence ⑤⑦）
 - [x] ⛔ 探针只立案不执行：本任务若需要跑产出者/修复，由派发链执行，⛔ 不由例程代跑 —— 例程只读 `plugin/scripts` + `packages/quay/src` 立案，未代跑任何产出者；修复与上面全部实跑读数由本任务的派发链（worker）执行
 
 ## Test-Files
@@ -159,4 +182,5 @@ $ node --test …serve.test.mjs observation*.test.mjs start-end-like-ssot.test.m
 - `plugin/scripts/fast-mode-telemetry.ts`
 - `packages/quay/src/observation.ts`
 - `packages/quay/src/start-end-like.ts`
+- `plugin/test/start-end-like-ssot.test.mjs`
 - `tasks/gap-routine-semantic-dedup-scan-is-start-end-like-cross-surface.md`
