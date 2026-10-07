@@ -26,30 +26,14 @@ export interface ConnectedProvider {
   client: ProviderClient;
 }
 
-// stripHeadings: remove lines matching /^#+\s/ from body text before
-// search indexing, so that structural markdown headings (## Proposal,
-// ## Plan, ## AC, ## DoD) do not produce false positives when a search
-// term matches a standard section name (e.g. "Proposal" matching every
-// task that uses the Proposal/Plan/AC/DoD template).
-//
-// QX-028 added this helper to bin/quay.js and serve.ts. Inlined here
-// rather than imported because mcp-server.ts is a separate entry point —
-// importing from serve.ts or bin/quay.js would create cross-entry-point
-// dependencies that don't exist anywhere else in this package. The
-// implementation is identical in all three locations by design.
-//
-// QX-041 (experiment 4, iteration 11) added inFence tracking to serve.ts
-// to preserve `# comment` lines inside fenced code blocks from being
-// stripped. QX-044 (experiment 4, iteration 12) syncs that fix here
-// (SH-005: the mcp-server.ts inline copy was not updated by QX-041).
-export function stripHeadings(text: string): string {
-  let inFence = false;
-  return (text || "").split("\n").filter((line) => {
-    if (/^```/.test(line)) { inFence = !inFence; return true; }
-    if (inFence) return true; // preserve code content (including # comment lines)
-    return !/^#+\s/.test(line); // strip structural headings outside fences
-  }).join(" ");
-}
+// stripHeadings (the heading-stripped search index) is the ONE shared
+// product-layer leaf — see ./search-index.ts for the semantics and the drift
+// history (QX-041/QX-044 chased the same inFence fix into two separate inline
+// copies). Inlined here originally "by design"; it is imported now so a future
+// fix cannot reach one search surface and miss another. Re-exported so any
+// importer of this module keeps working.
+import { stripHeadings } from "./search-index.ts";
+export { stripHeadings };
 
 // gap-abi-task-list-times-out-at-2000-tasks-head-of-line-blocks-mcp: an MCP tool result that
 // carries `structuredContent` AND a `content[0].text` holding the SAME JSON ships those bytes

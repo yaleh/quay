@@ -170,11 +170,12 @@ export function relativeTimeCli(ts) {
   return `${days}d ago`;
 }
 
-// QX-028 (experiment 4, iteration 7): strip structural heading lines from
-// body content before using it as a search index. Heading lines (matching
-// /^#+\s/) are template boilerplate ("## Proposal", "## Plan", "## AC",
-// "## DoD") that appear in every task body and cause false positives when
-// users search for those terms. Closes CB-017 (significant).
-export function stripHeadings(text) {
-  return (text || "").split("\n").filter((line) => !/^#+\s/.test(line)).join(" ");
-}
+// QX-028 (experiment 4, iteration 7) introduced this helper here; QX-041 added
+// the inFence carve-out only to serve.ts, and QX-044 had to chase the same fix
+// into another copy (SH-005) — the drift this re-export removes. The ONE
+// definition is now the product-layer leaf ../search-index.ts, imported by
+// every search surface (this module, mcp-handlers.ts, serve-render.ts and the
+// native store). Re-exported here (the LIGHT module) so bin/quay.ts's and
+// shared.ts's existing importers keep working unchanged, without pulling the
+// provider graph — search-index.ts is a pure, builtin-free leaf.
+export { stripHeadings } from "../search-index.ts";
