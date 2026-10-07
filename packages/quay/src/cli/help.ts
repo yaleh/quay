@@ -94,6 +94,7 @@ Usage:
   quay retreat <task-id> --reason <reason> [--file <log-path>]
   quay run [--once] [--file <log-path>] [--cwd <dir>] [--timeout <ms>]
   quay migrate --from <providerId> --to <providerId> [--json]
+  quay provider switch <name> [--json] [--root <path>]
   quay config validate [--json|--format json] [--check-files] [--root <path>]
   quay serve [--port <port>] [--host <host>]        (--host default ${SERVE_BINDING_FALLBACK.host}; --port default ${SERVE_BINDING_FALLBACK.port} = kernel-assigned; .quay/config.yml \`serve:\` overrides)
   quay server start [--only <svc,...>] [--without <svc,...>] [--port <port>] [--host <host>] [--json] [--root <path>]
@@ -335,6 +336,35 @@ Description:
   canonical path for onboarding an existing project onto quay-driven
   development is the /quay:init skill inside a Claude Code session:
   /quay:init --all --loop. CLI init has no --loop flag; passing it is an error.
+`);
+  } else if (sub === "provider") {
+    process.stdout.write(`quay provider — which provider a workspace's tasks live in
+
+Usage:
+  quay provider switch <name> [--json] [--root <path>]
+
+  switch <name>   Make <name> the ENABLED provider in .quay/config.yml: that provider's
+                  \`enabled:\` becomes true and every OTHER provider entry that says \`enabled: true\`
+                  becomes false. The rest of the file is untouched — a line-level edit, so every
+                  comment and every other key survives verbatim.
+
+                  Validated BEFORE the write, by the same pipeline \`quay config validate\` runs: the
+                  candidate config (with <name> enabled) must have no error-severity issue, so a
+                  provider that is missing its \`mcp_entry\` — or a github entry whose
+                  QUAY_GITHUB_REPO is not \`owner/repo\` — is REFUSED with the reason printed, and
+                  .quay/config.yml is left byte-for-byte unchanged. A name the config does not
+                  declare is refused too; declaring the entry is the user's call, not this command's.
+
+                  Idempotent: switching to the provider that is ALREADY enabled writes nothing.
+
+                  \`quay migrate --from A --to B\` is a different axis — it MOVES task data between two
+                  providers and never changes which one is enabled.
+
+  --json   Machine-readable report (provider, previousEnabled, changed, added, warnings).
+  --root   Workspace root (default: discovered via .quay/config.yml from cwd).
+
+  Re-running \`quay init\` (or the /quay:init skill) afterwards is automatic and NEEDS NO FLAG: it
+  upgrades .quay/config.yml in place and re-validates the newly enabled provider's binding.
 `);
   } else if (sub === "config") {
     process.stdout.write(`quay config — validate workspace configuration
