@@ -42,6 +42,10 @@ status/label/prefix/search 下推，但没碰 page/pageSize）。
 **消费方风险（claudecodeui 侧，仅记录供其跟进，不在本任务范围内处理）**：claudecodeui 的 `QUAY_COMMAND_TIMEOUT_MS=8000`，
 `task list` 全量读在更大 store 上会逼近这个上限；该读数超时时在 claudecodeui 侧被 `readJsonQuietly` 静默吞掉。
 
+该轴仍暗，理由：本任务改动范围限于单个 CLI 命令文件（`cli/task-list.ts`）内把既有 `--page-size` 参数下推给已经存在的
+Provider ABI 分页能力，镶入既有的 `providerFilter` 调用形状，不新增模块、不新增包间依赖、不改变调用图结构，L_D/L_G
+（依赖结构/重复抽象）轴对此类单文件参数下推改动不提供信号。
+
 ## Touches
 - `packages/quay/src/cli/task-list.ts`
 - `packages/quay/test/cli.test.mjs`
