@@ -75,6 +75,9 @@ GOAL-029「init 统一为单一 TS 引擎、终局无 .sh;并收窄发布集合�
 - `plugin/test/quay-init-loop.test.mjs`
 - `plugin/test/quay-init-stable-plugin-link.test.mjs`
 - `plugin/test/release-cut.test.mjs`
+- `packages/quay/src/observation.ts`
+- `packages/quay/test/serve-tests-empty-state.test.mjs`
+- `packages/quay/test/fixtures/characterization/serve-routes.snapshot.json`
 ## Evidence
 （2026-10-07，worker 轮。worktree `/home/yale/work/quay-worktrees/gap-quay-init-sh-becomes-a-shim-over-bin-quay-init-and-callers-switch`，分支 `task/gap-quay-init-sh-becomes-a-shim-over-bin-quay-init-and-callers-switch`。实现提交 `e0279c77a`，merge develop 后 `8bba0d197`（无冲突）。垫片 38 行。）
 
@@ -193,3 +196,13 @@ passed=3 failed=0 not-evaluated=0     exit=0
 2. **`plugin/scripts/runner-static-gate.ts` 的 `# @checker-count` 70→68**：本任务从 `run_static_checks` 里删掉两条 closure-ratchet `run_checker`，该注释没跟着改。Touches 加宽后 scoped 门才选中 `checker-count-drift-check`（它按 Touches 里的 `runner-static-gate.ts` 触发）⇒ 红。修复前 `declared 70, measured 68`；修复后 `declared 68, measured 68`（`3/3 evaluated`，exit 0）。
 3. **`plugin/scripts/verify-deliver-coldstart.sh` 的 fake-npm 夹具补出 `plugin/bin/quay`**：调用点从 `plugin/scripts/quay-init.sh` 改到 `plugin/bin/quay` 后，selfcheck 自己铺的合成 npm 布局仍只建旧路径 ⇒ `step1_install` 的 `[ -f "$qinit" ]` 在 `step1_guard_end` 之前 `return 1`，`STEP1_REAL_SETTINGS_UNCHANGED` 停在 0（`STEP1_REAL_SETTINGS_EVALUATED` 从未置位）⇒ `--selfcheck` 非 0，连带 14 个用例红（该文件单跑 17/31）。夹具补齐后 `--selfcheck` exit 0 且 `selfcheck: PASS`，该文件 31/31。**硬规则 5b**：改调用点时同载体里的兄弟夹具就在同一文件第 5904 行，必须一起改。
 最终读数（merge develop `4f1a6347a` 之后复跑）：anti-drift `ANTI-DRIFT OK — 39 actual file(s), all within declared Touches (43 glob(s))`；scoped 门 `exit 0，ℹ tests 398 / pass 398 / fail 0`。
+
+### 追加（2026-10-07，worker 续做轮 2）：上一轮的 suite 红 = 本任务自己的 delta（delta 判为 UNRELATED 的假阴性）
+上一轮 fan-in 在 suite 步红两处，**两处都是本任务改动的直接后果**，不是环境噪声（`delta-relatedness` 的 one-hop import 判定对「运行时 `fs.readFileSync` 读一个被本任务改写的文件」是盲的）：
+
+1. **`plugin/test/sh-census-check.test.mjs` AC6** —— `committed baseline == live reading`（精确相等，不只上界）。本任务把 `plugin/scripts/quay-init.sh` 从 650 计行缩成 23 行垫片后，它**不再在命令位置执行解释器 ⇒ 整体离开该轴**，`embeddedInterpreterLines` 7334 → **6683**。基线是本任务 `## Touches` 里的文件，上一轮读的是「门（7331 ≤ 7695）过了」而不是 AC6 要的相等 ⇒ 红。已降至 6683 并附 `_reanchorLog` 条目（**非手拟**：把 `git diff --name-status develop HEAD -- '*.sh'` 的 8 条路径从 develop 取回后，同一检查器读出恰好 7334/0；恢复本分支版本后回到 6683/0。归因 -651 = quay-init.sh 650→0 + `test/cold-start-oneliner-e2e.sh` 188→187，残差 0）。
+2. **`packages/quay/test/serve-tests-empty-state.test.mjs` AC3** —— 该用例断言「no-writer 指引点名的每个入口都真的存在、且真的写 `loop.test_command`」，其中一条读 `plugin/scripts/quay-init.sh` 的正文并要求命中 `/test_command/`。垫片化后该断言的前提为假（脚本不再写任何键）。**修的是 SOURCE（硬规则：改源头，不改症状）**：`packages/quay/src/observation.ts` 的指引从「plugin/scripts/quay-init.sh 写入」改为「`quay init` 引擎写入 — packages/quay/src/init.ts」，测试随之指向**真正的写者**（`init.ts` 含 `test_command`），断言意图不变（⛔ 不是把 `/test_command/` 塞进垫片的注释里骗过它——那正是硬规则 2 禁止的位置判定）。指引文本同时被 `packages/quay/test/fixtures/characterization/serve-routes.snapshot.json` 固化在 4 条路由里，故按该文件的既有再生成入口 `UPDATE_SNAPSHOT=1 node --test …` 重录（语义 diff 仅这 4 处指引文本，逐条核对无其它漂移）。
+
+`## Touches` 因此再加宽 3 条（上述三个文件）——anti-drift 读的是 **worktree 里的任务文件**，宽化必须落在分支上。
+
+复跑读数（worktree 内，merge develop `4f1a6347a` 之后）：`node --test plugin/test/sh-census-check.test.mjs` → `tests 20 / pass 20 / fail 0`；`node --test packages/quay/test/serve-tests-empty-state.test.mjs` → `tests 13 / pass 13 / fail 0`；`node --test packages/quay/test/characterization-serve-routes.test.mjs` → `tests 3 / pass 3 / fail 0`。
