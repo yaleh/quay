@@ -2,7 +2,7 @@
 id: AC-330
 title: init 的对外面统一：CLI 与 MCP 都不再有 --reconcile/--force，`quay init --json`
   给出可解析的结构化报告，serve 默认值（等于回退值）不写入全新安装的配置
-status: active
+status: achieved
 kind: criterion
 goal: GOAL-029
 criterion: |-
@@ -35,6 +35,11 @@ statusLog:
     to: active
     actor: goal-cli
     reason: ""
+  - at: 2026-10-07T04:33:13.892Z
+    from: active
+    to: achieved
+    actor: goal-driver
+    reason: "I2: criterion pass"
 fidelity:
   verdict: not-evaluated
   reason: no judge configured

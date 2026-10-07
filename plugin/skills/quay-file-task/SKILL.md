@@ -186,23 +186,39 @@ ready-made body.
 
 ## Granularity
 
-The store imposes no upper bound on task size, and nothing in this workflow asks for small
-tasks. Do not split a task to make it small.
+Optimize task size for throughput — worker time per unit of landed work. Per-task latency is not
+a reason to split: a few minutes per task is negligible. The store imposes no upper bound on task
+size, and nothing in this workflow asks for small tasks.
 
-Why: each task pays a cost that barely depends on its size — roughly 3 min of exploration, 2–4
-min of fan-in, and about a 50% chance per landing attempt that fan-in fails (suite red, ff race)
-and the whole worker round is redone. Implementation time grows slowly with size (~0.4 min per
-100 changed lines). So work on the same mechanism is cheaper as one task than as several.
+Why: every landed task pays a cost that barely depends on its size, and failure does not grow
+with size. Fitted on tasks first dispatched on or after 2026-09-16 (869 landed tasks, six
+projects; size = changed lines of code + tests in the landing diff):
+- the landing round costs ~17 min + ~0.35 min per 100 lines;
+- each task also needs ~0.94 failed rounds on average (suite red, ff race, …), each ~19 min, and
+  that count does not rise with size (−0.01 per 10× size, 95% CI [−0.28, 0.22]).
 
-Where to stop (observational, not causal; 2026-10-07 snapshot, 1625 landed tasks across six
-projects): relative to tasks under ~150 changed lines (code + tests), tasks of ~400+ lines
-landed first time ~11 points less often and cost ~15 min more; tasks of ~1000+ lines ~14 points
-less often and ~39 min more. So aim for one task up to about 600–1000 changed lines; past that,
-split along a seam where each part has its own AC/DoD and lands independently. Re-measure before
-trusting these numbers later — they are a dated reading, not a rule.
+So the same work costs far less worker time in larger tasks. Measured worker-hours per 1000
+changed lines, by task size:
 
-Split for these reasons, not for size: parts that can run in parallel because their Touches do
-not overlap; an AC that can only be satisfied after another part lands; independent acceptance.
+    <100: 13.3   250–400: 1.5   600–1000: 0.77   1000–1500: 0.55   1500–2000: 0.45
+    2000–3000: 0.45 (n=28)   3000–5000: 0.38 (n=10)
+
+Rules that follow:
+- Make a task as large as one coherent mechanism or deliverable. Below ~300 changed lines,
+  prefer merging into a related task (step 2b) over filing separately.
+- No size-based upper limit. The gain flattens past ~1500 lines; above ~3000 lines there is too
+  little data to say anything, so neither split nor merge on size alone there.
+- Larger tasks fail their FIRST landing attempt more often (odds ×1.42 per 10× size), but total
+  failed rounds per task do not rise, so this costs latency, not throughput — not a split reason.
+
+Split only for reasons other than size: an AC that can only be satisfied after another part
+lands, or parts that are genuinely separate deliverables (different mechanisms, independent
+acceptance). Splitting so that parts run in parallel adds total worker time and is not a
+throughput gain.
+
+Caveats: observational, not causal; changed lines are a size proxy, not value; tasks that never
+landed are not in the sample. Re-measure before trusting these numbers later — they are a dated
+reading (2026-10-07), not a rule.
 
 Do not use the number of Touches entries, the number of ACs, or the AC type as a split trigger —
 none of them predicted rework once project and era were controlled for. The Touches entries
