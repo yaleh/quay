@@ -51,7 +51,30 @@ GOAL-029「init 统一为单一 TS 引擎、终局无 .sh;并收窄发布集合�
 - `plugin/test/verify-plugin-channel-assertions.test.mjs`
 - `plugin/test/quay-init-closure-ratchet.test.mjs`
 - `tasks/gap-quay-init-sh-becomes-a-shim-over-bin-quay-init-and-callers-switch.md`
-
+- `docs/analysis/suite-perfile-duration-baseline.json`
+- `docs/analysis/test-file-baseline.txt`
+- `packages/quay/src/cli/init.ts`
+- `packages/quay/src/init.ts`
+- `packages/quay/test/branch-model.test.mjs`
+- `packages/quay/test/init.test.mjs`
+- `plugin/scripts/checker-mutation-cases/config-key-consumer-check.sh`
+- `plugin/scripts/checker-mutation-cases/quay-init-closure-ratchet.sh`
+- `plugin/scripts/packaging-hygiene-check.ts`
+- `plugin/scripts/precommit-guard.ts`
+- `plugin/scripts/release-cut.mjs`
+- `plugin/scripts/release-cut.sh`
+- `plugin/scripts/runner-static-gate.ts`
+- `plugin/scripts/verify-deliver-coldstart.sh`
+- `plugin/test/config-key-consumer-check.test.mjs`
+- `plugin/test/develop-deliver-tgz-evidence-transport.test.mjs`
+- `plugin/test/l1-delivery-surface-check.test.mjs`
+- `plugin/test/packaging-hygiene-check.test.mjs`
+- `plugin/test/precommit-guard.test.mjs`
+- `plugin/test/quay-init-characterization.test.mjs`
+- `plugin/test/quay-init-config-env-keys.test.mjs`
+- `plugin/test/quay-init-loop.test.mjs`
+- `plugin/test/quay-init-stable-plugin-link.test.mjs`
+- `plugin/test/release-cut.test.mjs`
 ## Evidence
 （2026-10-07，worker 轮。worktree `/home/yale/work/quay-worktrees/gap-quay-init-sh-becomes-a-shim-over-bin-quay-init-and-callers-switch`，分支 `task/gap-quay-init-sh-becomes-a-shim-over-bin-quay-init-and-callers-switch`。实现提交 `e0279c77a`，merge develop 后 `8bba0d197`（无冲突）。垫片 38 行。）
 
@@ -160,3 +183,6 @@ passed=3 failed=0 not-evaluated=0     exit=0
 - **垫片尚未删除**：Proposal 明写"垫片保留一个发布周期后再删（删除不在本任务内）"。
 - **升级演练的起始状态是构造的**：`v0.16.0` 的 init 不写 `.quay/plugin` 链接 ⇒ 用当前引擎 init 后把链接改指旧树，模拟"上一版装的项目"（演练器的 `--upgrade-from` 契约正是这个状态）；旧树本身是真的从 tag 重建的发布形态产物。
 - **`verify-deliver-coldstart.sh` 与两个 `test/cold-start*.sh` 未实际执行**（dev-only 手工脚本，需要 npm 全局安装 / 真实冷启动流程）；它们的**调用点**已按新参数面改写并静态核对，其承载的"安装源完整性"等断言属另一个脚本的职责范围。
+
+### 追加（2026-10-07，anti-drift 修正）：`## Touches` 补全为实际改动面
+首轮 fan-in 在 anti-drift 步红：`ANTI-DRIFT HARD FAIL — 24 violation(s)`，全部是 `out-of-declared`——本任务的实现面（init 引擎 `packages/quay/src/init.ts`、其 CLI 面与测试、棘轮退役牵动的 `precommit-guard.ts`/`runner-static-gate.ts`/`release-cut.*`/`packaging-hygiene-check.ts`、两份生成基线 `docs/analysis/*`）在立任务时未逐条登记。**宽化 `## Touches` 是正确的修法**（检查器自己的头注释把这一臂称为「declaration was too narrow」），不是回退这些文件：24 个文件全部可追溯到本任务的 Proposal/AC/Evidence（逐条见上），`git log --oneline develop..HEAD -- <file>` 均指向本任务的实现提交 `e0279c77a`。新清单 = 原声明 ∪ `git diff --name-only develop...HEAD` 的 38 个文件。
