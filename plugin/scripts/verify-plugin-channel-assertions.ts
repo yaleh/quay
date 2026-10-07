@@ -69,6 +69,12 @@ import {
   type ShippedSetBaseline,
   type ShippedSetReading,
 } from "./shipped-set-rules.ts";
+import {
+  defaultRepoRoot,
+  deriveReachability,
+  judgeShellReachability,
+  type ReachabilityReading,
+} from "./shipped-shell-reachability.ts";
 
 export type AssertionState = "PASS" | "FAIL" | "NOT-EVALUATED";
 
@@ -470,6 +476,28 @@ export function judgeShippedSetClean(
   };
 }
 
+// ── the reachable shell set (tasks/gap-shipped-shell-limited-to-runtime-reachable-set-and-delivery-
+//    verify-tools-leave-the-artifact, GOAL-029) ────────────────────────────────────────────────────
+//
+// `shipped-set-clean` above judges what the artifact must NOT carry by KIND. It cannot see the other
+// half of the narrowing: a `.sh` that is neither test nor fixture nor baseline, yet that no runtime
+// surface reaches — a delivery tool for a cancelled channel, or a retired classic-pipeline gate. The
+// 0.17.0 artifact carried 90 such non-test `.sh` (28,642 lines). This assertion is the DIRECT reading
+// of that quantity on the INSTALLED tree, judged against the set `shipped-shell-reachability.ts`
+// derives from the SOURCE checkout's roots.
+//
+// ⛔ Not a self-report (硬规则 4b): the artifact side is a walk of `installedDir` itself. The SOURCE
+// side is derived here, from the checkout this checker runs from — never read out of the artifact.
+export function judgeShippedShellReachable(installedDir: string, reading: ReachabilityReading): AssertionResult {
+  const v = judgeShellReachability(installedDir, reading);
+  return { id: v.id, state: v.state, detail: v.detail };
+}
+
+/** The effect the judge above needs: derive the source checkout's reachable `.sh` set. */
+export function readSourceShellReachability(): ReachabilityReading {
+  return deriveReachability(defaultRepoRoot());
+}
+
 /** The effect the judge above needs: walk the INSTALLED tree against the source checkout's rules. */
 export function readInstalledShippedSet(installedDir: string): { reading: ShippedSetReading; baseline: ShippedSetBaseline | null } {
   const loaded = readRulesFromFile(rulesFileAbs());
@@ -750,6 +778,9 @@ export async function runAssertions(opts: RunnerOptions): Promise<AssertionResul
   // 4. the shipped set: no dev-only content, and within the shrink-only size ratchet.
   const shipped = readInstalledShippedSet(opts.installedDir);
   push(judgeShippedSetClean(shipped.reading, shipped.baseline, opts.installedDir));
+
+  // 4b. the reachable shell set: every `.sh` the artifact carries is one the runtime can reach.
+  push(judgeShippedShellReachable(opts.installedDir, readSourceShellReachability()));
 
   // 5. `.quay/plugin` → the verified install.
   push(judgePointer(realpathOrNull(path.join(projectDir, ".quay", "plugin")), installedReal));
