@@ -1,0 +1,77 @@
+# shipped-set-rules.txt — the ONE declaration of what does NOT ship in the plugin artifact.
+#
+# (tasks/gap-shipped-plugin-tree-excludes-dev-only-content-and-has-a-shrink-only-size-ratchet;
+#  GOAL-029 「init 统一为单一 TS 引擎、终局无 .sh;并收窄发布集合」.)
+#
+# THE DEFECT THIS EXISTS FOR: plugin/scripts/publish-dist-branch.sh's assembly step was a bare
+# `rsync -a --exclude='.git'` — the whole plugin/ tree, dev tree and all. The published artifact
+# therefore carried 641 test/fixture files (11.7 MB), 93 checker-mutation cases (~8k lines of
+# deliberately-broken shell), and every dev-period baseline/exception/violation manifest. This
+# file is the exclusion list, and it is read by BOTH sides of the publish from ONE parser
+# (plugin/scripts/shipped-set-rules.ts):
+#   · plugin/scripts/publish-dist-branch.sh — `--print-rsync-excludes`, whose output becomes the
+#     rsync `--exclude` arguments of the assembled tree;
+#   · plugin/scripts/verify-plugin-channel-assertions.ts (`shipped-set-clean`) and
+#     plugin/test/shipped-set.test.mjs — the matcher, which asserts the BUILT artifact carries
+#     none of it.
+# ⛔ A rule added here takes effect on both sides in one edit. A rule added to one side only is
+#    exactly the drift this file exists to prevent (硬规则 5b: fix the class, not the instance).
+#
+# ── GRAMMAR (rsync's own, so the .sh side needs no translation) ─────────────────────────────────
+#   · one pattern per line; blank lines and lines whose first non-blank char is `#` are ignored
+#   · a trailing `/` matches DIRECTORIES only
+#   · a pattern with NO internal `/` matches the FINAL path component (at any depth)
+#   · a pattern WITH an internal `/` is anchored at the artifact root
+#   · `*` matches any run of characters except `/`; `?` matches one character except `/`
+#     (no `**` is used: rsync's `**` crosses `/` but ours doesn't, and one grammar is the point)
+#
+# ── WHY PATTERNS AND NEVER A FILENAME LIST ──────────────────────────────────────────────────────
+# The dev-only set grows with every task (641 test files at this task's立案 reading). A list is
+# stale the moment it lands — that is 硬规则 5 (来源完备性): a list answers "did I remember every
+# file?", a pattern answers "is this file dev-only?".
+#
+# ── WHAT IS DELIBERATELY *NOT* HERE (AC4 — no live consumer may be excluded) ────────────────────
+# `freshness-producers.json` is a dev-LOOKING root data file that the task's own立案 text listed
+# among the dev-period data, and it is NOT excluded, because it has a LIVE RUNTIME CONSUMER in
+# every consuming project: plugin/scripts/probe-routine.ts `resolveMappingPath(root, pluginRoot,
+# "plugin/freshness-producers.json")` reads `<installedPlugin>/freshness-producers.json` for the
+# routine track (the `loop:` producers/execution_probe registry). Excluding it would make that
+# track fail-closed in every install — the exact class this task's AC4 requires be checked before
+# narrowing (measured 2026-10-07: `probe-routine.js` and `routine-file-gate.js` are both in the
+# artifact's 112 shipped bundles; both read it). It is a producer REGISTRY with a shipped reader,
+# not a baseline/exception/violation manifest.
+
+# ── test + fixture trees (the artifact has no test runner — 641 files / 11.7 MB at立案) ─────────
+test/
+tests/
+fixtures/
+
+# ── the checker-mutation fixtures: deliberately-broken checkers, shipped as data would be a
+#    hazard of its own (93 files / ~8k shell lines at立案) ──────────────────────────────────────
+checker-mutation-cases/
+
+# ── test files by name: a stray outside `test/` must still not ship ────────────────────────────
+*.test.mjs
+*.test.js
+*.test.cjs
+*.test.mts
+*.test.cts
+*.test.ts
+*.spec.mjs
+*.spec.js
+*.spec.ts
+
+# ── dev-period baseline / exception / violation manifests: each is read by a checker that runs
+#    in the SOURCE repo against the SOURCE repo (grep-verified 2026-10-07; the one exception with
+#    a shipped-at-runtime reader is called out above and left in the artifact) ──────────────────
+*-baseline.json
+*-exceptions.txt
+*-exemptions.txt
+*-exemptions.json
+*-violations.txt
+*-violators.txt
+
+# ── this file and its ratchet baseline are themselves dev-only: the artifact neither reads nor
+#    carries them (the assertion and the test run from the source checkout, by design) ─────────
+shipped-set-rules.txt
+shipped-set-baseline.json

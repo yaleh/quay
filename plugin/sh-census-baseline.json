@@ -328,8 +328,21 @@
         "embeddedInterpreterLines": "-2 = plugin/scripts/quay-init.sh effective code lines 1009 -> 1007. The fresh-install heredoc's `board: \"native\"` + `gates: []` (2 code lines) became `board: native` + `gates: [\"acceptance\"]` (2 code lines, net 0 — the surrounding rewrite is COMMENT lines, which countCodeLines drops, so the prose was free); the two `mkdir -p …` / `echo \"  created: …\"` pairs were then folded onto shared lines (4 code lines -> 2, net -2). The file still execs `node` at a command position (embedded: [node]) and is not on the exception list, so it STAYS IN the axis — the line count moved, not its membership. Residual = 0: the branch's entire tracked *.sh delta vs develop is exactly this one path (git diff --name-status develop HEAD -- '*.sh').",
         "duplicateCopies": "0 — untouched. This task added no experiments/** mirror and converted no byte-identical pair."
       }
+    },
+    {
+      "when": "2026-10-07 (gap-shipped-plugin-tree-excludes-dev-only-content-and-has-a-shrink-only-size-ratchet)",
+      "from": {
+        "embeddedInterpreterLines": 7690,
+        "duplicateCopies": 0
+      },
+      "to": {
+        "embeddedInterpreterLines": 7694,
+        "duplicateCopies": 0
+      },
+      "why": "UPWARD re-anchor (+4) — a deliberate, one-off cost the task's own mechanism pays: plugin/scripts/publish-dist-branch.sh gained 4 code lines (the shipped-set exclusion list read, its --exclude array, the loop that fills it, and the empty-list fail-closed guard) so the artifact stops shipping the whole dev tree. Comment lines, which carry the WHY, are free under this axis. The 4 lines are the entire executable footprint of the narrowing at this site; the checker itself (plugin/scripts/shipped-set-rules.ts) is a .ts and is not censused. Re-anchored to the checker's OWN reading on the merged tree (7694) — never hand-fitted.",
+      "attribution": "4 lines, plugin/scripts/publish-dist-branch.sh — the rsync exclusion wiring; no other .sh changed in this task."
     }
   ],
-  "embeddedInterpreterLines": 7690,
+  "embeddedInterpreterLines": 7694,
   "duplicateCopies": 0
 }
