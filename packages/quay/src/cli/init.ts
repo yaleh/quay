@@ -98,6 +98,11 @@ Description:
   merged, comment-preserving, and validated BEFORE anything is written. --force replaces
   it wholesale instead.
 
+  If an existing .quay/config.yml cannot be PARSED, it is not refused: its bytes are
+  preserved as .quay/config.yml.corrupt-<timestamp> and the config is REBUILT from this
+  version's defaults (validated before the write, exit 0). The rebuild does NOT carry the
+  old file's project values — compare with the backup and re-apply them.
+
   ${INIT_BRANCH_MODEL_ONLY_PROSE}
 
   Adding --doc-branch-name to that entry also ESTABLISHES the doc-only work
@@ -236,20 +241,42 @@ Description:
       return;
     }
 
-    // ⛔ BEFORE the "already exists" arm, and on a branch of its own: an unparseable config is not a
+    // ⛔ On a branch of its own, and never the "already exists" arm: an unparseable config is not a
     // config-conflict, and answering it with "already exists, use --force" sends the operator looking
     // for a conflict that does not exist while the real cause (the parse error) is never printed
     // (硬规则 3b — "could not read the input" must not be shaped like a verdict about the input).
+    //
+    // GOAL-029 / 人 2026-10-07: an unparseable config is REBUILT (backed up, then regenerated from
+    // this version's defaults, validated, written — exit 0), not refused. The operator is told the
+    // real cause AND the rebuild's real cost: the new file does NOT carry the old one's project
+    // values. That cost must never be silent.
+    if (result.outcome === "rebuild-invalid") {
+      // The rebuilt body itself failed validation ⇒ nothing was written; the corrupt original and
+      // its backup are both kept, and the offending field is named.
+      console.error(
+        `${result.configPath}: the existing config could not be read, and the config rebuilt from ` +
+        "this version's defaults did not validate either — so nothing was written."
+      );
+      if (result.corruptBackupPath) {
+        console.error(`  the unreadable bytes are preserved at ${result.corruptBackupPath}`);
+      }
+      for (const i of result.rebuildIssues ?? []) {
+        console.error(`  ${i.severity}: ${i.field} — ${i.message}`);
+        if (i.suggestion) console.error(`    suggestion: ${i.suggestion}`);
+      }
+      process.exitCode = 1;
+      return;
+    }
+
     if (result.outcome === "corrupt") {
+      // LEGACY outcome — no longer produced (an unparseable config is rebuilt above). Kept as a
+      // defensive arm so a future regression that resurrects the refusal is reported as a refusal
+      // rather than silently falling through to the "Created" arm.
       console.error(
         `.quay/config.yml exists at ${result.configPath} but could not be read as a config:\n` +
         `  ${result.corruptReason}\n` +
-        "\n" +
-        "This is NOT a name conflict — re-running with --force would not have told you that.\n" +
-        "Two legal moves, both non-destructive:\n" +
-        "  --reconcile  rebuild it from this version's defaults (the unparseable file is kept\n" +
-        "               beside the new one as .quay/config.yml.corrupt-<timestamp>)\n" +
-        "  --dry-run    print what a rebuild would write, without touching anything"
+        "Re-run to rebuild it from this version's defaults (the unreadable file is kept beside the " +
+        "new one as .quay/config.yml.corrupt-<timestamp>)."
       );
       process.exitCode = 1;
       return;
@@ -322,6 +349,14 @@ Description:
     if (result.outcome === "dry-run") {
       console.log(result.content);
       console.log(`\n# Dry run — nothing written to disk.`);
+      // The corrupt plan is not the same as the fresh plan: a real run would PRESERVE the bytes that
+      // could not be parsed, so the plan says where. A dry run that omitted this would understate
+      // what the real run does (and a rebuild that dropped the file silently is exactly the failure
+      // the backup exists to prevent).
+      if (result.corruptBackupPath) {
+        console.log(`# Would back up the unreadable .quay/config.yml to: ${result.corruptBackupPath}`);
+        console.log(`# Would rebuild it from this version's defaults (the old file's project values are NOT carried over).`);
+      }
       console.log(`# Would create: ${result.configPath}`);
       console.log(`# Would create: ${result.tasksDir}/`);
       console.log(`# Would create: ${result.launchSettingsPath}`);
@@ -330,10 +365,23 @@ Description:
       return;
     }
 
-    console.log(`Created ${result.configPath}`);
-    // A rebuild-over-corrupt reports where the unreadable bytes went; silence here would make the
-    // salvage step invisible (the operator would have to notice the extra file themselves).
-    if (result.corruptReason) console.log(`  ${result.corruptReason}`);
+    if (result.outcome === "rebuilt") {
+      // A corrupt config was salvaged: the bytes are preserved and the config regenerated. Reporting
+      // the cause, the backup location and the LOST project values makes the salvage auditable — a
+      // silent rebuild would destroy the user's own settings with no trace of what they were.
+      console.log(`${result.configPath}: rebuilt from this version's defaults.`);
+      console.log(`  the previous file could not be read as a config: ${result.corruptReason}`);
+      if (result.corruptBackupPath) {
+        console.log(`  its bytes were preserved at ${result.corruptBackupPath} (byte-identical)`);
+      }
+      console.error(
+        "warning: the rebuilt config carries THIS VERSION's defaults, not the old file's project " +
+        "values (e.g. a pinned serve binding, loop.test_command, loop.gates). Compare it with the " +
+        `backup${result.corruptBackupPath ? ` at ${result.corruptBackupPath}` : ""} and re-apply what you need.`
+      );
+    } else {
+      console.log(`Created ${result.configPath}`);
+    }
     console.log(`Created ${result.tasksDir}/ (or already existed)`);
     console.log(`Created ${result.launchSettingsPath}`);
     console.log(`Created ${result.profilesPath}`);

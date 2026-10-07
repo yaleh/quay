@@ -235,19 +235,21 @@ function registerBootstrapHandlers(server: McpServer): void {
         "Initialize or reconcile a quay workspace's config surface at an explicit `root` — the ONE entry " +
         "point that works even when `.quay/config.yml` is absent or unparseable (which is why it is " +
         "registered before any config is read, and why `root` is required rather than taken from the " +
-        "loaded config). Mirrors the `quay init` CLI. With `reconcile` (default true) an EXISTING config " +
-        "is brought up to this version's requirements instead of being refused: keys this version added " +
-        "are filled from the defaults, values this version considers incompatible are migrated, and every " +
-        "other key and comment is left untouched (a config already current is not rewritten at all). An " +
-        "unparseable config is rebuilt from defaults with the broken file preserved beside it as " +
-        "`config.yml.corrupt-<timestamp>`. Pass `reconcile: false` to get the strict refusal instead, or " +
-        "`dryRun: true` to see what would be written without writing anything.",
+        "loaded config). Mirrors the `quay init` CLI. An EXISTING config is brought up to this version's " +
+        "requirements instead of being refused: keys this version added are filled from the defaults, " +
+        "values this version considers incompatible are migrated, and every other key and comment is left " +
+        "untouched (a config already current is not rewritten at all). An unparseable config is REBUILT " +
+        "from this version's defaults, with the broken file preserved byte-identical beside it as " +
+        "`config.yml.corrupt-<timestamp>` — the result's `outcome` is `rebuilt` and it names the backup " +
+        "in `corruptBackupPath` plus the parse failure in `corruptReason` (the rebuilt config does NOT " +
+        "carry the old file's project values). Pass `dryRun: true` to see what would be written without " +
+        "writing anything.",
       inputSchema: {
         root: z.string().describe(
           "Absolute path of the workspace to initialize/reconcile. Required — on the degraded-startup path this tool exists for, there is no loaded config to derive it from."
         ),
         reconcile: z.boolean().optional().describe(
-          "Bring an existing config up to this version's defaults (default: true). false = refuse an existing config the way a bare `quay init` does."
+          "LEGACY, inert since GOAL-029: an existing config is always upgraded and an unparseable one is always rebuilt, so this option no longer selects a different behavior. Kept for one release so existing callers keep working."
         ),
         force: z.boolean().optional().describe("Overwrite an existing config wholesale (default: false). Wins over `reconcile` when both are given."),
         dryRun: z.boolean().optional().describe("Report what would be written without touching the disk (default: false)."),
@@ -265,6 +267,10 @@ function registerBootstrapHandlers(server: McpServer): void {
           outcome: result.outcome,
           configState: result.configState,
           corruptReason: result.corruptReason ?? null,
+          // Where an unparseable config's bytes were preserved (present only for a rebuild/dry-run
+          // over a corrupt file) — the caller must be able to name the backup, not just know one was
+          // made. `null` here is a real reading ("no backup"), never a stand-in for "not reported".
+          corruptBackupPath: result.corruptBackupPath ?? null,
           configPath: result.configPath,
           tasksDir: result.tasksDir,
           added: result.upgrade?.added ?? [],
@@ -277,13 +283,18 @@ function registerBootstrapHandlers(server: McpServer): void {
           // The validator's verdict on the UPGRADED candidate — non-empty only when the upgrade was
           // refused because the candidate did not validate (nothing was written; GOAL-029).
           upgradeIssues: result.upgradeIssues ?? [],
+          // …and on the REBUILT candidate: non-empty only when a corrupt config could not be rebuilt
+          // into a valid one, so nothing was written and the corrupt original + backup were kept.
+          rebuildIssues: result.rebuildIssues ?? [],
           content: dryRun === true ? result.content : undefined,
         };
         // A refusal is a NORMAL result of a well-formed judgment (`isError: false` would claim quay
         // did what was asked); only the outcomes that leave the caller with nothing to act on
-        // report as errors.
+        // report as errors. `rebuilt` is a SUCCESS (the config was regenerated and written) and is
+        // deliberately absent from this list.
         const refused =
           result.outcome === "corrupt" ||
+          result.outcome === "rebuild-invalid" ||
           result.outcome === "skipped" ||
           result.outcome === "upgrade-invalid" ||
           result.outcome === "branch-model-blocked";

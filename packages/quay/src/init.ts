@@ -549,6 +549,24 @@ export function upgradeConfigContent(raw: string, opts: UpgradeOptions): Upgrade
   return { ok: verdictResult.ok, content, report, issues: verdictResult.issues };
 }
 
+/**
+ * The path an unreadable config's bytes are preserved at: `<configPath>.corrupt-<stamp>`, with a `-N`
+ * suffix when that exact name is already taken. Two rebuilds in the same second must not overwrite
+ * the earlier backup — overwriting it would destroy the only copy of the user's original file, which
+ * is the whole reason the backup exists (硬规则 3b: the salvage step must not become the loss).
+ *
+ * Extracted so the no-overwrite property is directly testable with a FIXED stamp: an integration test
+ * cannot reliably make two runs land in the same instant, so the collision arm would otherwise be
+ * unreachable by construction.
+ */
+export function corruptBackupPathFor(configPath: string, stamp: number): string {
+  const base = `${configPath}.corrupt-${stamp}`;
+  if (!fs.existsSync(base)) return base;
+  let n = 1;
+  while (fs.existsSync(`${base}-${n}`)) n += 1;
+  return `${base}-${n}`;
+}
+
 /** Write `content` to `filePath` atomically: a sibling temp file then a rename, so a reader never
  *  observes a half-written config (GOAL-029: 通过才原子写). */
 function writeFileAtomic(filePath: string, content: string): void {
@@ -564,8 +582,12 @@ function writeFileAtomic(filePath: string, content: string): void {
 export interface InitResult {
   /**
    * "written" | "dry-run" | "skipped" (legacy; no longer produced — an existing valid config is
-   * UPGRADED, see "reconciled") |
-   * "corrupt" (existing + unparseable, no --force/--reconcile) |
+   * UPGRADED, see "reconciled"; "corrupt" is likewise no longer produced — an unparseable config is
+   * REBUILT, see "rebuilt") |
+   * "rebuilt" (existing + unparseable: the bytes were preserved as `config.yml.corrupt-<ts>` and
+   *            the config was rebuilt from this version's defaults; exit 0) |
+   * "rebuild-invalid" (the REBUILT candidate itself fails validation ⇒ nothing was written and the
+   *                    corrupt original + its backup are kept; see `rebuildIssues`) |
    * "reconciled" (existing + valid, and the config had to change) |
    * "unchanged" (existing + valid, and the config was already current) |
    * "upgrade-invalid" (existing + valid, but the upgraded CANDIDATE fails validation ⇒ nothing was
@@ -580,8 +602,24 @@ export interface InitResult {
    * distinction the boolean `configExists` this replaces could not express (硬规则 3b).
    */
   configState: ConfigState;
-  /** Why the config was unreadable — present only when `outcome === "corrupt"`. */
+  /**
+   * Why the config could not be read — present whenever `configState === "corrupt"`. The parser's own
+   * reason, surfaced verbatim: the operator must be told what actually happened, not "already exists".
+   */
   corruptReason?: string;
+  /**
+   * Where the unreadable bytes were preserved — `<configPath>.corrupt-<ts>`, byte-identical to the
+   * file that could not be parsed. Populated when a rebuild happened (`outcome === "rebuilt"`), and
+   * under `--dry-run` it names the path a real run WOULD back up to. Absent when the config was not
+   * corrupt. `unparseable` is not `worthless` — the rebuild over a corrupt config never discards it.
+   */
+  corruptBackupPath?: string;
+  /**
+   * The validator's verdict on the REBUILT candidate — populated only when `outcome ===
+   * "rebuild-invalid"`: the rebuilt-from-defaults config did not validate, so nothing was written
+   * and the corrupt original (and its backup) were left in place.
+   */
+  rebuildIssues?: ConfigIssue[];
   /** What the reconcile changed — present only when `outcome === "reconciled" | "unchanged"`. */
   reconcile?: ReconcileReport;
   /**
@@ -1175,29 +1213,20 @@ export function runInit(opts: InitOptions): InitResult {
 
   // ── What does the target already have? (three-state — AC1; not `fs.existsSync`) ────────────────
   const existing = classifyConfig(configPath);
-  const reconcileMode = opts.reconcile === true && !opts.force;
 
-  // EXISTING + UNPARSEABLE, and the caller asked for neither an overwrite nor a reconcile: stop, and
-  // say WHY. This branch is the whole reason the classification is three-valued — the pre-fix code
-  // answered `existsSync` here and printed "already exists, use --force", which is a true statement
-  // about a DIFFERENT problem (a name conflict) and sent the operator looking for a conflict that
-  // does not exist (硬规则 3b).
-  if (existing.state === "corrupt" && !reconcileMode && !opts.force && !opts.dryRun) {
-    return {
-      outcome: "corrupt",
-      configState: "corrupt",
-      corruptReason: existing.reason,
-      configPath,
-      tasksDir,
-      content: "",
-      launchSettingsPath,
-      launchSettingsContent: "",
-      profilesPath,
-      profilesContent: "",
-      branchModel: { ok: true, skipped: true, defaultBranch: null, entries: [], remedy: null },
-      branchModelReport: "",
-    };
-  }
+  // ── EXISTING + UNPARSEABLE ⇒ SALVAGE-BY-REBUILD (no flag: the file's STATE decides) ────────────
+  // GOAL-029 / 人 2026-10-07: the three states map to three actions and nothing else — absent ⇒ fresh
+  // install, valid ⇒ upgrade (validate-before-write), corrupt ⇒ back the unreadable bytes up and
+  // rebuild from this version's defaults. Corrupt is NOT a refusal: the state is a fact about the
+  // file, not a question for the operator, and the pre-fix refusal left a project with a broken
+  // config NO in-band way to repair it (while 硬规则 3b still requires the real cause — a parse
+  // error, not "already exists" — to be printed). The rebuild is the SAME fresh-install path below,
+  // so there is one template and one writer; only the outcome token and the backup differ.
+  //
+  // `--force` on a corrupt config reaches the same rebuild: an explicit overwrite is not a reason to
+  // DISCARD the unreadable bytes without a backup (the backup is what makes the overwrite
+  // non-destructive). The rebuild's backup therefore happens for every corrupt state, and the
+  // salvage is reported by the caller (`corruptBackupPath`).
 
   // ── EXISTING + USABLE ⇒ the SINGLE UPGRADE ENGINE (GOAL-029 single engine) ─────────────────────
   // Plain `quay init`, `--reconcile` and `--drop-incompatible` all land here — there is no second
@@ -1247,15 +1276,17 @@ export function runInit(opts: InitOptions): InitResult {
     return { outcome: up.report.untouched ? "unchanged" : "reconciled", content: up.content, ...base };
   }
 
-  // EXISTING + UNPARSEABLE, with an explicit overwrite/reconcile decision: salvage by rebuild. The
-  // unreadable bytes are preserved beside the new file rather than discarded — "the parser could not
-  // read it" is not evidence that the content is worthless (the SPEC's §3.3 asks for exactly this
-  // salvage step; the backup is what makes it non-destructive).
+  // EXISTING + UNPARSEABLE ⇒ salvage by rebuild. The unreadable bytes are preserved beside the new
+  // file rather than discarded — "the parser could not read it" is not evidence that the content is
+  // worthless. The backup is what makes the overwrite non-destructive, and it is computed HERE (a
+  // candidate path even under `--dry-run`, so the plan can name it) but only COPIED once we are past
+  // the dry-run and branch-model gates — a blocked run must not leave a stray backup behind.
+  const isRebuild = existing.state === "corrupt";
   let corruptBackupPath: string | undefined;
-  if (existing.state === "corrupt" && !opts.dryRun) {
-    corruptBackupPath = `${configPath}.corrupt-${Date.now()}`;
-    fs.copyFileSync(configPath, corruptBackupPath);
-    // fall through to the fresh-write path below
+  if (isRebuild) {
+    // Second-granularity stamp (see `corruptBackupPathFor`): the `-N` suffix is what makes two
+    // rebuilds inside one second NOT collide, so the earlier backup survives.
+    corruptBackupPath = corruptBackupPathFor(configPath, Math.floor(Date.now() / 1000));
   }
 
   // ── Branch model (gap-fan-in-merge-target-hardcoded-develop-blocks-third-party-landing) ──────
@@ -1293,16 +1324,52 @@ export function runInit(opts: InitOptions): InitResult {
   // Compute relative provider path from workspace root to quay-native package.
   const providerPath = resolveProviderPath(root);
 
-  // Generate config content.
-  const content = generateConfigContent({ providerId, providerPath, isNode, isGo });
-
-  if (opts.dryRun) {
-    return { outcome: "dry-run", configState: existing.state, configPath, tasksDir, content, launchSettingsPath, launchSettingsContent, profilesPath, profilesContent, branchModel, branchModelReport };
+  // Generate config content. A REBUILD then runs the SAME upgrade engine over that template, for two
+  // reasons that are one fix: (a) it brings the rebuilt file to the fixpoint an upgrade would produce
+  // (the retired native binding dropped, the carrier env pinned), so a rebuilt workspace is not born
+  // one `quay init` behind and re-running init on it is a byte-level no-op (idempotent); (b) that
+  // engine ALSO judges the candidate — its `ok` IS validate-before-write, so the corrupt path needs
+  // no second validator. A template that cannot be made valid (e.g. a provider id the YAML cannot
+  // carry) therefore writes NOTHING: the corrupt original and its backup are kept and the failure is
+  // named (硬规则 3b — "could not produce a valid config" is its own outcome, never a silent
+  // "written").
+  let content = generateConfigContent({ providerId, providerPath, isNode, isGo });
+  if (isRebuild) {
+    const fixpoint = upgradeConfigContent(content, {
+      workspaceRoot: root,
+      // ⛔ `undefined`, never `null` — same reading as the upgrade path above.
+      pluginRoot: opts.pluginRoot ?? undefined,
+    });
+    if (!fixpoint.ok) {
+      return {
+        outcome: "rebuild-invalid",
+        configState: "corrupt",
+        corruptReason: existing.reason,
+        corruptBackupPath,
+        rebuildIssues: fixpoint.issues,
+        configPath,
+        tasksDir,
+        content: fixpoint.content,
+        launchSettingsPath,
+        launchSettingsContent: "",
+        profilesPath,
+        profilesContent: "",
+        branchModel,
+        branchModelReport,
+      };
+    }
+    content = fixpoint.content;
   }
 
-  // Write config.
+  if (opts.dryRun) {
+    return { outcome: "dry-run", configState: existing.state, ...(corruptBackupPath ? { corruptBackupPath } : {}), configPath, tasksDir, content, launchSettingsPath, launchSettingsContent, profilesPath, profilesContent, branchModel, branchModelReport };
+  }
+
+  // Write config. The backup lands FIRST (and only now, past every gate): between the copy and the
+  // rebuild there is no window in which the original is gone.
+  if (isRebuild && corruptBackupPath) fs.copyFileSync(configPath, corruptBackupPath);
   fs.mkdirSync(quayDir, { recursive: true });
-  fs.writeFileSync(configPath, content, "utf8");
+  writeFileAtomic(configPath, content);
 
   // Create tasks dir if it doesn't exist.
   if (!fs.existsSync(tasksDir)) {
@@ -1327,9 +1394,11 @@ export function runInit(opts: InitOptions): InitResult {
   }
 
   return {
-    outcome: "written",
+    outcome: isRebuild ? "rebuilt" : "written",
     configState: existing.state,
-    ...(corruptBackupPath ? { corruptReason: `unparseable config preserved at ${corruptBackupPath}` } : {}),
+    // The rebuild's own facts: WHY the old file could not be read, and WHERE its bytes were kept.
+    // Both are carried on the result so no caller has to re-derive them from stdout.
+    ...(isRebuild ? { corruptReason: existing.reason, corruptBackupPath } : {}),
     configPath,
     tasksDir,
     content,
@@ -1682,13 +1751,14 @@ export interface ReconcileConfigFileOpts {
  * copy: comment-preserving, per-key, and a no-op reconcile writes NOTHING (byte-identical config).
  *
  * NOT-EVALUATED is a voiced state, not a pass: an absent or unparseable config is REPORTED as such and
- * left untouched (a corrupt file is `quay init --reconcile`'s salvage-by-rebuild job, which keeps the
- * broken bytes beside the new file — not something a shell step should decide silently).
+ * left untouched (a corrupt file is plain `quay init`'s state-driven salvage-by-rebuild job — the
+ * rebuild keeps the broken bytes beside the new file — not something a shell step should decide
+ * silently).
  */
 export function reconcileConfigFile(o: ReconcileConfigFileOpts): void {
   const cls = classifyConfig(o.cfgPath);
   if (cls.state !== "valid") {
-    console.log(`  reconcile: NOT-EVALUATED — .quay/config.yml is ${cls.state}${cls.state === "corrupt" ? ` (${cls.reason})` : ""}; left untouched (use \`quay init --reconcile\` to salvage)`);
+    console.log(`  reconcile: NOT-EVALUATED — .quay/config.yml is ${cls.state}${cls.state === "corrupt" ? ` (${cls.reason})` : ""}; left untouched (run \`quay init\` to salvage an unparseable config)`);
     return;
   }
   const { content, report } = reconcileConfigContent(cls.raw ?? "", { serve: false });

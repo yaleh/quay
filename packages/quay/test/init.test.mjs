@@ -20,6 +20,7 @@ import {
   generateProfilesContent,
   classifyConfig,
   reconcileConfigContent,
+  corruptBackupPathFor,
   LOOP_VERSION_DEFAULTS,
   SERVE_VERSION_DEFAULTS,
   migrateStaleMcpEntry,
@@ -739,22 +740,189 @@ test("AC1 classifyConfig unit: absent / valid / corrupt (malformed YAML) are thr
   assert.equal(classifyConfig(cfgPath).state, "corrupt", "a list-valued document is corrupt, not valid");
 });
 
-test("AC1 corrupt: a malformed .quay/config.yml is NOT reported as an existing config (the real cause is printed)", () => {
+test("AC1 corrupt: an unparseable .quay/config.yml is BACKED UP and REBUILT — exit 0, never a name conflict", () => {
   const dir = tmpDir("ac1-corrupt");
   fs.mkdirSync(path.join(dir, ".quay"), { recursive: true });
-  fs.writeFileSync(path.join(dir, ".quay", "config.yml"), BROKEN_YAML);
+  const cfgPath = path.join(dir, ".quay", "config.yml");
+  fs.writeFileSync(cfgPath, BROKEN_YAML);
+
+  // spawnSync (not runQuayAllowFail) so BOTH streams are captured — the lost-project-values warning
+  // goes to stderr, and execFileSync only carries stderr on a NON-zero exit.
+  const out = spawnSync("node", [quayBin, "init", "--root", dir], { encoding: "utf8", cwd: dir });
+  const both = out.stdout + out.stderr;
+  // GOAL-029 / 人 2026-10-07: the file's STATE decides. Corrupt ⇒ salvage-by-rebuild, not refusal.
+  assert.equal(out.status, 0, `an unparseable config is salvaged, not refused:\n${both}`);
+  assert.ok(
+    !/already exists/.test(both),
+    `must NOT claim a name conflict — that sends the operator after a problem that does not exist:\n${both}`
+  );
+  // …while the REAL cause is still voiced (硬规则 3b): the parser's own message, not "already exists".
+  assert.match(both, /could not be read as a config/, "the message names what actually happened");
+  assert.match(both, /YAML parse failed/, "the parser's own reason is relayed verbatim");
+
+  // The unreadable bytes are preserved byte-identical beside the new file — "unparseable" is not
+  // "worthless" (the backup is what makes the rebuild non-destructive).
+  const backups = fs.readdirSync(path.join(dir, ".quay")).filter((f) => f.startsWith("config.yml.corrupt-"));
+  assert.equal(backups.length, 1, `exactly one backup of the unreadable file (got: [${backups.join(", ")}])`);
+  assert.equal(
+    fs.readFileSync(path.join(dir, ".quay", backups[0]), "utf8"),
+    BROKEN_YAML,
+    "the backup is byte-identical"
+  );
+  assert.ok(out.stdout.includes(backups[0]), `the report names the backup path it wrote:\n${out.stdout}`);
+
+  // The rebuild's REAL COST is voiced, never silent: the new config does not carry the old project's
+  // values, so the operator must be told to re-apply them from the backup.
+  assert.match(out.stderr, /project values/, `the lost-project-values warning must be printed:\n${out.stderr}`);
+
+  // The rebuilt config is a VALID config for this version (same template as a fresh install).
+  const rebuilt = YAML.parse(fs.readFileSync(cfgPath, "utf8"));
+  assert.equal(rebuilt?.loop?.fork_baseline, "develop", "the rebuilt config carries this version's defaults");
+  const v = runQuay(["config", "validate", "--root", dir], dir);
+  assert.ok(!v.includes("error:"), `the rebuilt config passes the official validator:\n${v}`);
+});
+
+// ── The corrupt state's REBUILD contract (GOAL-029; AC-329's corrected corrupt step) ───────────────
+// Plain `quay init` on an unparseable config: back the bytes up, regenerate from this version's
+// defaults, validate the rebuilt body, write atomically, exit 0. The remaining fine points the
+// sibling task (gap-init-surface-unified…) explicitly left here: the `rebuilt` outcome token, the
+// lost-project-values warning, no-overwrite within one second, and non-zero when the rebuilt body
+// itself fails validation.
+
+test("REBUILD ④: re-running init on the rebuilt config is idempotent (byte-identical, no new backup)", () => {
+  const dir = tmpDir("rebuild-idempotent");
+  fs.mkdirSync(path.join(dir, ".quay"), { recursive: true });
+  const cfgPath = path.join(dir, ".quay", "config.yml");
+  fs.writeFileSync(cfgPath, BROKEN_YAML);
+
+  const r1 = runQuayAllowFail(["init", "--root", dir], dir);
+  assert.equal(r1.exitCode, 0, r1.stdout + r1.stderr);
+  const after1 = fs.readFileSync(cfgPath, "utf8");
+
+  const r2 = runQuayAllowFail(["init", "--root", dir], dir);
+  assert.equal(r2.exitCode, 0, r2.stdout + r2.stderr);
+  assert.equal(fs.readFileSync(cfgPath, "utf8"), after1, "a second run must not rewrite the rebuilt config");
+  assert.doesNotMatch(r2.stdout, /rebuilt from this version's defaults/, "…and it is an UPGRADE now, not a rebuild");
+
+  const backups = fs.readdirSync(path.join(dir, ".quay")).filter((f) => f.startsWith("config.yml.corrupt-"));
+  assert.equal(backups.length, 1, "the second run adds no backup (nothing was corrupt this time)");
+});
+
+test("REBUILD ②: --dry-run over a corrupt config reports the backup+rebuild plan and writes NOTHING", () => {
+  const dir = tmpDir("rebuild-dryrun");
+  fs.mkdirSync(path.join(dir, ".quay"), { recursive: true });
+  const cfgPath = path.join(dir, ".quay", "config.yml");
+  fs.writeFileSync(cfgPath, BROKEN_YAML);
+
+  const out = runQuayAllowFail(["init", "--root", dir, "--dry-run"], dir);
+  assert.equal(out.exitCode, 0, out.stdout + out.stderr);
+  assert.match(out.stdout, /Would back up the unreadable \.quay\/config\.yml to: .*config\.yml\.corrupt-/, `a dry run must report the backup it would write:\n${out.stdout}`);
+  assert.match(out.stdout, /Would rebuild it from this version's defaults/, "…and the rebuild, with its cost stated");
+  assert.match(out.stdout, /Dry run — nothing written/, "and it says nothing was written");
+
+  assert.equal(fs.readFileSync(cfgPath, "utf8"), BROKEN_YAML, "the corrupt file is untouched");
+  const backups = fs.readdirSync(path.join(dir, ".quay")).filter((f) => f.startsWith("config.yml.corrupt-"));
+  assert.equal(backups.length, 0, `a dry run must not write a backup (got: [${backups.join(", ")}])`);
+});
+
+test("REBUILD ③ (unit): corruptBackupPathFor never hands back a taken name — same-second rebuilds do not overwrite", () => {
+  const dir = tmpDir("rebuild-backuppath");
+  const cfg = path.join(dir, ".quay", "config.yml");
+  fs.mkdirSync(path.dirname(cfg), { recursive: true });
+  fs.writeFileSync(cfg, "x");
+
+  const stamp = 1_700_000_000; // a FIXED stamp: the collision arm is otherwise unreachable by construction
+  const first = corruptBackupPathFor(cfg, stamp);
+  assert.equal(first, `${cfg}.corrupt-${stamp}`, "the first backup uses the plain stamp");
+  fs.writeFileSync(first, "first");
+
+  const second = corruptBackupPathFor(cfg, stamp);
+  assert.notEqual(second, first, "the second call must not return the name already on disk");
+  fs.writeFileSync(second, "second");
+  const third = corruptBackupPathFor(cfg, stamp);
+  assert.notEqual(third, first);
+  assert.notEqual(third, second);
+
+  assert.equal(fs.readFileSync(first, "utf8"), "first", "the FIRST backup is untouched (the whole point)");
+  assert.equal(fs.readFileSync(second, "utf8"), "second");
+});
+
+test("REBUILD ③ (integration): two rebuilds back-to-back keep BOTH backups", () => {
+  const dir = tmpDir("rebuild-twice");
+  fs.mkdirSync(path.join(dir, ".quay"), { recursive: true });
+  const cfgPath = path.join(dir, ".quay", "config.yml");
+  const corrupt1 = "providers: [unclosed\n  bad: : :\n";
+  const corrupt2 = "loop:\n  gates:\n    - acceptance\n  gates: duplicate-makes-this-unparseable\n";
+
+  fs.writeFileSync(cfgPath, corrupt1);
+  const r1 = runQuayAllowFail(["init", "--root", dir], dir);
+  assert.equal(r1.exitCode, 0, r1.stdout + r1.stderr);
+  fs.writeFileSync(cfgPath, corrupt2);
+  const r2 = runQuayAllowFail(["init", "--root", dir], dir);
+  assert.equal(r2.exitCode, 0, r2.stdout + r2.stderr);
+
+  const backups = fs.readdirSync(path.join(dir, ".quay")).filter((f) => f.startsWith("config.yml.corrupt-")).sort();
+  assert.equal(backups.length, 2, `both rebuilds left their own backup (got: [${backups.join(", ")}])`);
+  const texts = backups.map((b) => fs.readFileSync(path.join(dir, ".quay", b), "utf8"));
+  assert.ok(texts.includes(corrupt1), "the FIRST unreadable file's bytes survive (it was not overwritten)");
+  assert.ok(texts.includes(corrupt2), "and the second one's do too");
+});
+
+test("REBUILD ⑤ (regression): a PARSEABLE config whose loop.gates names an unknown gate still FAILS — non-zero, byte-identical, names the value", () => {
+  const dir = tmpDir("rebuild-badgate");
+  fs.mkdirSync(path.join(dir, ".quay"), { recursive: true });
+  const cfgPath = path.join(dir, ".quay", "config.yml");
+  const bad = [
+    "providers:",
+    "  native:",
+    "    enabled: true",
+    '    path: "/nonexistent/cache/quay/quay/0.10.0/vendor/quay-native"',
+    '    tasks_dir: "./tasks"',
+    '    mcp_entry: ["node", "/nonexistent/x.js", "mcp"]',
+    "loop:",
+    `  repo_root: ${dir}`,
+    "  test_command: node --test",
+    `  worktree_root: ${dir}-wt`,
+    "  gates: no-such-gate-zz",
+    "",
+  ].join("\n");
+  fs.writeFileSync(cfgPath, bad);
 
   const out = runQuayAllowFail(["init", "--root", dir], dir);
-  assert.equal(out.exitCode, 1, "a config that cannot be read is a refusal");
-  assert.ok(
-    !/already exists/.test(out.stderr),
-    `must NOT claim a name conflict — that sends the operator after a problem that does not exist:\n${out.stderr}`
-  );
-  assert.match(out.stderr, /could not be read as a config/, "the message names what actually happened");
-  assert.match(out.stderr, /YAML parse failed/, "the parser's own reason is relayed verbatim");
+  assert.equal(out.exitCode, 1, `an unresolvable loop.gates must fail the upgrade:\n${out.stdout}${out.stderr}`);
+  assert.match(out.stderr, /no-such-gate-zz/, "the refusal must NAME the incompatible user value");
+  assert.equal(fs.readFileSync(cfgPath, "utf8"), bad, "a failed upgrade leaves the config byte-identical");
+  const backups = fs.readdirSync(path.join(dir, ".quay")).filter((f) => f.startsWith("config.yml.corrupt-"));
+  assert.equal(backups.length, 0, "a parseable-but-incompatible config is NOT corrupt — no backup is made");
+});
 
-  // No silent side effects on the refusal path.
-  assert.equal(fs.readFileSync(path.join(dir, ".quay", "config.yml"), "utf8"), BROKEN_YAML, "the broken file is untouched");
+test("REBUILD: a rebuilt body that ITSELF fails validation writes nothing and keeps the corrupt original + backup", async () => {
+  // Reach the `rebuild-invalid` arm through the state it exists for: the rebuilt config omits the
+  // native binding (the upgrade engine drops the retired path/mcp_entry), so if NO plugin root can be
+  // resolved the validator reports NATIVE_PROVIDER_UNRESOLVABLE. `pluginRoot: ""` is the falsy seam
+  // for exactly that state — the CLI maps an unset CLAUDE_PLUGIN_ROOT to `null`, which Core then
+  // self-resolves, so this branch is otherwise only reachable where the plugin root is genuinely
+  // missing (a bare checkout). A direct runInit call is the honest way to pin it.
+  const { runInit } = await import("../src/init.ts");
+  const dir = tmpDir("rebuild-invalid");
+  fs.mkdirSync(path.join(dir, ".quay"), { recursive: true });
+  const cfgPath = path.join(dir, ".quay", "config.yml");
+  fs.writeFileSync(cfgPath, BROKEN_YAML);
+
+  const res = runInit({ root: dir, force: false, dryRun: false, pluginRoot: "" });
+  assert.equal(res.outcome, "rebuild-invalid", "an invalid rebuilt body gets its own outcome, not 'rebuilt'/'written'");
+  assert.ok((res.rebuildIssues ?? []).length > 0, "the failure names the offending field(s)");
+  assert.ok(
+    (res.rebuildIssues ?? []).some((i) => i.field.startsWith("providers")),
+    `the unresolvable native provider is the named cause:\n${JSON.stringify(res.rebuildIssues)}`
+  );
+  assert.equal(fs.readFileSync(cfgPath, "utf8"), BROKEN_YAML, "the corrupt original is left in place");
+  assert.ok(res.corruptBackupPath, "the backup path is still reported");
+  assert.equal(
+    fs.existsSync(res.corruptBackupPath),
+    false,
+    "nothing was written at all — not even the backup (the corrupt file itself is still there)"
+  );
 });
 
 test("AC1 corrupt: --reconcile repairs it and PRESERVES the unparseable bytes beside the new config", () => {
