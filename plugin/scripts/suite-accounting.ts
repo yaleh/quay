@@ -511,3 +511,27 @@ export async function readScopeConsumedLoad(
   }
   return { cpu_time_s: null, mem_peak_mb: null, swap_peak_mb: null, load_read_error: lastError ?? "unknown" };
 }
+
+// ── gap-routine-semantic-dedup-scan-preverified-effective-parallelism ──────────────────────────────
+/**
+ * The round's effective parallelism: cpu_time_s ÷ (durationMs/1000) = consumed CPU time ÷ wall time
+ * = the average cores actually driven. Rounded to 3 decimals (comparable across rounds). null when
+ * either input is missing/non-finite/≤0 (a fabricated 0 quotient would read "infinite cores" —
+ * 硬规则⑥ 缺值=未查≠为假).
+ *
+ * gap-verification-round-observability-holes AC4 introduced this KPI; gap-wiring-B-verification-
+ * round-write-path AC1 wired it into the real fan-in landing writer.
+ *
+ * SINGLE DEFINITION POINT (.quay/routine-findings.jsonl finding `preverified-effective-parallelism`,
+ * routine `semantic-dedup-scan`): the body lived in BOTH full-suite-runner.ts and
+ * pre-verified-round-record.ts, byte-identical ⇒ two homes for one cpu/wall expression, free to
+ * drift on any seam change. Lifted here — the NON-hub telemetry module the accounting family already
+ * lives in — and re-exported from full-suite-runner.ts so its public API surface is unchanged; the
+ * thin writer imports THIS binding (mirrors the hostParallelism re-export from runner-concurrency.ts).
+ */
+export function effectiveParallelism(cpuTimeS: number | null | undefined, durationMs: number): number | null {
+  if (cpuTimeS == null || !Number.isFinite(cpuTimeS) || cpuTimeS <= 0) return null;
+  const wallS = durationMs / 1000;
+  if (!Number.isFinite(wallS) || wallS <= 0) return null;
+  return Number((cpuTimeS / wallS).toFixed(3));
+}

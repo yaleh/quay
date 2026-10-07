@@ -473,7 +473,7 @@ export function readLoadAvg(): number {
 // SuiteRoundRecord; readScopeConsumedLoad + ScopeConsumedLoadRead at the round-end load capture) and
 // re-exported so the runner's public API surface — and every importer (e.g. full-suite-runner.test.mjs)
 // — is byte-for-byte unchanged.
-import { PhaseDifferentialAccounting, readScopeConsumedLoad } from "./suite-accounting.ts";
+import { PhaseDifferentialAccounting, readScopeConsumedLoad, effectiveParallelism } from "./suite-accounting.ts";
 import type { PhaseDiffRecord, ScopeConsumedLoadRead } from "./suite-accounting.ts";
 
 export {
@@ -487,6 +487,7 @@ export {
   parseSystemdConsumedLine,
   parseConsumedFromJournalOutput,
   readScopeConsumedLoad,
+  effectiveParallelism,
 } from "./suite-accounting.ts";
 export type {
   PhaseCounters,
@@ -496,18 +497,11 @@ export type {
   ScopeConsumedLoadRead,
 } from "./suite-accounting.ts";
 
-/**
- * gap-verification-round-observability-holes AC4 — the round's effective parallelism: cpu_time_s ÷
- * (durationMs/1000) = consumed CPU time ÷ wall time = the average cores actually driven. Rounded to 3
- * decimals (comparable across rounds). null when either input is missing/non-finite/≤0 (a fabricated 0
- * quotient would read "infinite cores" — 硬规则⑥ 缺值=未查≠为假).
- */
-export function effectiveParallelism(cpuTimeS: number | null | undefined, durationMs: number): number | null {
-  if (cpuTimeS == null || !Number.isFinite(cpuTimeS) || cpuTimeS <= 0) return null;
-  const wallS = durationMs / 1000;
-  if (!Number.isFinite(wallS) || wallS <= 0) return null;
-  return Number((cpuTimeS / wallS).toFixed(3));
-}
+// effectiveParallelism moved to suite-accounting.ts (.quay/routine-findings.jsonl finding
+// `preverified-effective-parallelism`, routine `semantic-dedup-scan`): its body was byte-identical
+// here and in pre-verified-round-record.ts ⇒ two homes for one cpu/wall expression. Imported above
+// for internal use at the round-end capture and re-exported so this module's public API surface is
+// byte-for-byte unchanged (gap-routine-semantic-dedup-scan-preverified-effective-parallelism).
 
 // ── failure-location capture (gap-red-window-dispatch-stop-should-be-shared-gate-conditional) ──────
 // The SUITE-RED event must carry WHERE the red landed (state.failures) so the inner dispatch rule can

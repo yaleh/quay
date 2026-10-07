@@ -3,7 +3,7 @@ id: gap-routine-semantic-dedup-scan-preverified-effective-parallelism
 title: "semantic-dedup-scan: Bodies are identical (null-guard on non-finite
   cpu/wall, else Number((cpu/wall).toFixed(3))) and the copy's own comment
   states it uses the same formula as full"
-status: ready
+status: done
 labels:
   - gap
   - routine-filed
@@ -59,6 +59,7 @@ import full-suite-runner 而本地复写）的两处留原样并记因：`concur
 - `plugin/scripts/full-suite-runner.ts`
 - `plugin/scripts/pre-verified-round-record.ts`
 - `plugin/scripts/suite-accounting.ts`
+- `plugin/test/pre-verified-round-record.test.mjs`
 - `tasks/gap-routine-semantic-dedup-scan-preverified-effective-parallelism.md`
 
 ## Test-Files
