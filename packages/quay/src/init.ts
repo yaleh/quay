@@ -1206,18 +1206,6 @@ export function runInit(opts: InitOptions): InitResult {
       pluginRoot: opts.pluginRoot ?? undefined,
       dropIncompatible: opts.dropIncompatible === true,
     });
-    // The `.quay/plugin` link refresh runs AFTER the config write succeeded (GOAL-029 ordering): a
-    // link pointing at a version whose config upgrade failed would name a runtime the project is not
-    // configured for. Only when the plugin root is known — the shell's own step still owns the link
-    // until AC-331; an unknown root is SKIPPED here, and the outcome rides on `pluginLink` so the
-    // JSON report can carry it (硬规则 3b: "skipped" is its own state, never folded into "linked").
-    let pluginLink: PluginLinkOutcome = {
-      state: "not-run",
-      reason: "the upgrade did not reach the link step (nothing was written, or this was a dry run)",
-    };
-    if (up.ok && !opts.dryRun && opts.pluginRoot) {
-      pluginLink = refreshProjectPluginLink({ wsRoot: root, pluginRoot: opts.pluginRoot, dryRun: false, log: opts.log });
-    }
     const base = {
       configState: "valid" as const,
       configPath,
@@ -1229,12 +1217,17 @@ export function runInit(opts: InitOptions): InitResult {
       branchModel: { ok: true, skipped: true, defaultBranch: null, entries: [], remedy: null },
       branchModelReport: "",
       upgrade: up.report,
-      pluginLink,
       validated: up.ok,
       ...(up.ok ? {} : { validationIssues: up.issues }),
     };
+    // A candidate that does not validate is NOT written, and nothing downstream of the write runs:
+    // the link step below would otherwise point the project at a runtime whose config upgrade failed.
     if (!up.ok) {
-      return { outcome: "upgrade-invalid", content: up.content, upgradeIssues: up.issues, ...base };
+      return {
+        outcome: "upgrade-invalid", content: up.content, upgradeIssues: up.issues,
+        pluginLink: { state: "not-run", reason: "the upgrade was refused before the link step (nothing was written)" },
+        ...base,
+      };
     }
     // A no-op upgrade writes NOTHING: re-running init on a current project must leave the config
     // byte-identical (the reconcile discipline this replaces already enforced this).
@@ -1244,12 +1237,24 @@ export function runInit(opts: InitOptions): InitResult {
     // The `.quay/plugin` link refresh runs AFTER the config write succeeded (GOAL-029 ordering): a
     // link pointing at a version whose config upgrade failed would name a runtime the project is not
     // configured for. Only when the plugin root is known — the shell's own step still owns the link
-    // until AC-331; an unknown root is SKIPPED here, not reported (硬规则 3b's own state is the
-    // shell step's job, not this CLI's).
-    if (!opts.dryRun && opts.pluginRoot) {
-      refreshProjectPluginLink({ wsRoot: root, pluginRoot: opts.pluginRoot, dryRun: false });
-    }
-    return { outcome: up.report.untouched ? "unchanged" : "reconciled", content: up.content, ...base };
+    // until AC-331; an unknown root is SKIPPED here, and the outcome rides on `pluginLink` so the
+    // JSON report can carry it (硬规则 3b: "skipped" is its own state, never folded into "linked").
+    // ⛔ Its progress lines go through `opts.log`: on `--json` they must land on stderr, or they
+    // corrupt the one JSON document stdout is promised to carry.
+    const pluginLink: PluginLinkOutcome = opts.dryRun || !opts.pluginRoot
+      ? {
+        state: "not-run",
+        reason: opts.dryRun
+          ? "a dry run writes nothing, so the link step is not run"
+          : "no plugin root was given for this run (CLAUDE_PLUGIN_ROOT / --plugin-root unset)",
+      }
+      : refreshProjectPluginLink({ wsRoot: root, pluginRoot: opts.pluginRoot, dryRun: false, log: opts.log });
+    return {
+      outcome: up.report.untouched ? "unchanged" : "reconciled",
+      content: up.content,
+      pluginLink,
+      ...base,
+    };
   }
 
   // ── EXISTING + UNPARSEABLE ⇒ salvage by rebuild, automatically (GOAL-029 状态自动决定) ────────────
