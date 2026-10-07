@@ -1,7 +1,7 @@
 ---
 id: AC-331
 title: CLI 单独就能完成全新安装的完整闭集写入与检测（无需 quay-init.sh）
-status: active
+status: achieved
 kind: criterion
 goal: GOAL-029
 criterion: >-
@@ -71,6 +71,11 @@ statusLog:
     to: active
     actor: goal-cli
     reason: ""
+  - at: 2026-10-07T13:59:32.941Z
+    from: active
+    to: achieved
+    actor: goal-driver
+    reason: "I2: criterion pass"
 fidelity:
   verdict: not-evaluated
   reason: no judge configured
