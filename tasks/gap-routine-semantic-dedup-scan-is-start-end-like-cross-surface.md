@@ -166,6 +166,51 @@ $ node --experimental-strip-types plugin/scripts/anti-drift-touches-check.ts \
 （把该测试文件补进 ## Touches 并 merge develop 后）ANTI-DRIFT OK            ← exit 0
 ```
 
+### 本轮补充 — fan-in suite 的红来自**外部文件**（不在本题 delta 内），按「孤儿 develop 红 ⇒ 自修 + 扩 Touches」处置
+
+**读数**：上一轮 fan-in 的 suite 红是 `plugin/test/task-granularity-advice.test.mjs`
+（`__PERFILE__ … passed=false`），它不在本题 delta 内（本题 delta 只有 4 个文件）。
+
+**真因（逐字对照，⛔ 不是关键词猜测）**：该文件的 production 臂把 step-2b 的**字面 grep oracle** 经
+`execFileSync` 跑：
+
+```
+$ bash -c 'grep -lF -- "plugin/scripts/worker-driver.ts" tasks/*.md | xargs -r grep -lE "^status: (todo|ready)$"'
+exit=123
+```
+
+`tasks/*.md` 里点名 `plugin/scripts/worker-driver.ts` 的 193 个任务**全部**是
+done(185) / needs-human(1) / superseded(8)，点名 `rework-predictors.ts` 的 3 个也全是 done
+⇒ 内层 grep 无匹配 ⇒ `xargs` 退 123 ⇒ `execFileSync` **在断言之前就抛**，
+四个采样路径里的前两个**必然**红。这是**与分支无关的确定性红**：
+
+- 在本机主检出（正是该测试读取的 `MAIN`）直接跑上面那条命令 ⇒ exit 123，读数与任何分支无关；
+- 同一窗口的另一个任务（`gap-routine-semantic-dedup-scan-preverified-effective-parallelism`，
+  `end_ms=1791359571674`，比本题晚约 4 分钟）**独立复现**同一条 per-file 红。
+
+**归属（三条都查过，才判定无主）**：属主任务
+`gap-task-granularity-advice-script-merge-candidates-and-per-file-history` 已 `status: done`；
+全库 `grep -rl` 无任何 ready/todo 任务声明该文件或其脚本；无 peer 分支携带修复；
+无在飞 worker（`ps` 只命中本 worker 自身）⇒ 属「孤儿 develop 红」，按既有先例**自修 + 扩 `## Touches`**
+（⛔ 不扩会让 fan-in 的 anti-drift arm (a) 硬失败）。
+
+**修法（能取假，⛔ 不是「已注意到」）**：`execFileSync` → `spawnSync`，**只**接受 exit 0（内层有匹配）
+与 exit 123（`xargs` 传递内层 grep 的「无匹配」）——**空 oracle 是合法读数**；任何**其它** exit 是真工具
+故障，**不得**被读成「空」（硬规则 3b：『无法评估』不得与判定共用取值），改为响亮断言。下方 `deepEqual`
+仍是判官，空 oracle 下它**仍能取假**。
+
+**负控制（两次变异实跑；`cp` 备份，复原后 md5 与变异前一致 `501faf809c56c09cf1a9f22f8143db8f`）**：
+
+```
+① 空 oracle 路径非空转 —— 对 worker-driver.ts 注入一个虚假 peer：
+   ✖ AssertionError: peers ∪ mentions must equal the grep oracle for plugin/scripts/worker-driver.ts
+   （15 pass / 1 fail）⇒ 证明空 oracle 分支不是恒真
+② 工具故障不被读成空 —— 把 oracle 管道换成 `exit 2`：
+   ✖ AssertionError: step-2b oracle pipeline failed (exit 2):   （15 pass / 1 fail）
+```
+
+**修后读数**：`node --test plugin/test/task-granularity-advice.test.mjs` ⇒ 16 tests / 16 pass / 0 fail。
+
 ## AC
 - [x] `.quay/routine-findings.jsonl` 中 finding `is-start-end-like-cross-surface`（routine `semantic-dedup-scan`，runId `semantic-dedup-scan-1791353789266`）所描述的问题被复核并处置 —— 复核：属实（两侧四个行号逐字节相同，见 Evidence ①）；处置：按 requested action 第一支搬进 Core 单一定义（`packages/quay/src/start-end-like.ts`），两个消费者改为 import/re-export
 - [x] 处置结论可核：要么修掉，要么写明「已有机制在管、失败在哪一步」，⛔ 不以「已注意到」结案 —— **已修掉**，且留下**能取假**的棘轮：`^function isStartLike` / `^function isEndLike` 在 `plugin/scripts` + `packages/quay/src` 下各恰好 1 处（`start-end-like.ts:50/61`）+ 跨边界运行时同一性 + 行为 oracle（17 条）；变异实跑（把本地副本粘回 plugin 消费者）⇒ 7/8 转红并报出第二个声明点，`cp` 复原后 8/8 绿（见 Evidence ④）
@@ -177,6 +222,7 @@ $ node --experimental-strip-types plugin/scripts/anti-drift-touches-check.ts \
 ## Test-Files
 
 - `plugin/test/start-end-like-ssot.test.mjs`
+- `plugin/test/task-granularity-advice.test.mjs`
 
 ## Touches
 - `plugin/scripts/fast-mode-telemetry.ts`
@@ -184,3 +230,4 @@ $ node --experimental-strip-types plugin/scripts/anti-drift-touches-check.ts \
 - `packages/quay/src/start-end-like.ts`
 - `plugin/test/start-end-like-ssot.test.mjs`
 - `tasks/gap-routine-semantic-dedup-scan-is-start-end-like-cross-surface.md`
+- `plugin/test/task-granularity-advice.test.mjs`
