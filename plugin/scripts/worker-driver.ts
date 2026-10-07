@@ -2642,6 +2642,197 @@ export function aggregateRerunFlakes(root: string): {
   return { rows, notEvaluatedRounds, scannedRounds };
 }
 
+// ── 语义兜底路径遥测：尝试台账（写侧）+ 只读报告（读侧）────────────────────────────────────────────
+// gap-fan-in-execute-semantic-fallback-telemetry-blind 的落地。背景（任务体 ## Finding）：机械 fan-in
+// 的结果落在 worker-outcome.jsonl 的 `mechanical_fan_in`；而【语义兜底路径】——机械失败后由
+// `plugin/workflows/fan-in-execute.js` 接手——只在【落地成功】时经其 step 5.5b 往
+// .quay/gate-events.jsonl 写一条 actor=quay-fan-in-workflow 的 `complete` 事件。此前两个缺口：
+//   ① 【没有查询面】把这条既有信号读成「语义兜底跑过几次 / 结果如何」——答案在载体里，但没人问得出
+//      （审计据此报「unknowable」，见任务体 ## Finding）；
+//   ② 【跑了但没落地】的尝试（suite 红 / ff 失败 / 插件根非法）在【任何】载体上都不留痕。
+// 本段补两件事：写侧（workflow 在开始/结束时各记一条到 fan-in-semantic-fallback.jsonl）+ 读侧
+// （把新台账与既有 gate-events 信号 join 成单一读数）。
+//
+// ⛔ 本段【不】给 `MechanicalFanInResult.outcome` 加"语义"取值：那个类型描述的是【机械路径】的结果，
+// 语义兜底不是机械结果的一个取值（硬规则 8：命名不复用；两条路径各有各的载体）。
+//
+// ⚠️ 本段【可执行位置】的字面量刻意不含被退役 workflow 的文件名：退役防回归检查器
+// `fan-in-workflow-retirement-check.ts` 扫的是可执行载体【代码位置】的字面量，双副本删净后任何存活
+// 引用都会 RED。actor 用 "quay-fan-in-workflow"（生产载体里的既有取值，机械路径是 "quay-driver"），
+// 台账名用 fan-in-semantic-fallback——两者都不匹配该检查器的位置正则。
+
+/** 语义兜底尝试台账（repo-relative；gitignored 运行时状态，worker-outcome.jsonl 同族）。 */
+export const SEMANTIC_FALLBACK_LEDGER_REL = ".quay/fan-in-semantic-fallback.jsonl";
+
+/** 语义兜底 workflow 写 `complete` GateEvent 时用的 actor（既有生产取值；机械路径是 "quay-driver"）。 */
+export const SEMANTIC_FALLBACK_GATE_ACTOR = "quay-fan-in-workflow";
+
+/** 一次尝试的两个时刻：start = 接管开始（有此条即「跑过」）；end = 有了结果。 */
+export type SemanticFallbackPhase = "start" | "end";
+
+/** 语义兜底的结局词表。⛔ 与 MechanicalFanInResult 的 `"landed" | "red"` 分开——那是机械路径的词表。 */
+export type SemanticFallbackOutcome = "landed" | "red" | "aborted";
+
+export interface SemanticFallbackRecord {
+  ts: string;
+  task: string;
+  runId: string | null;
+  phase: SemanticFallbackPhase;
+  /** phase=end 时非 null；phase=start 时恒 null（「开始」没有结果可报）。 */
+  outcome: SemanticFallbackOutcome | null;
+  reason: string | null;
+  actor: string;
+}
+
+/** 追加一条语义兜底尝试记录到 <root>/.quay/fan-in-semantic-fallback.jsonl（与 appendOutcomeToFile
+ *  同款：mkdir + appendFileSync，⛔ 不重写整文件、不手搓 JSON 落盘）。 */
+export function appendSemanticFallbackRecord(root: string, rec: SemanticFallbackRecord): string {
+  const file = path.join(root, SEMANTIC_FALLBACK_LEDGER_REL);
+  fs.mkdirSync(path.dirname(file), { recursive: true });
+  fs.appendFileSync(file, JSON.stringify(rec) + "\n", "utf8");
+  return file;
+}
+
+export interface SemanticFallbackLanding {
+  task: string;
+  ts: string;
+  id: string | null;
+}
+
+export interface SemanticFallbackReport {
+  /** false ⇒ 两个载体都读不到 ⇒ 真·unknowable（硬规则 3b：⛔ 不与「查过且为零」同形）。 */
+  evaluated: boolean;
+  ledgerPresent: boolean;
+  gateEventsPresent: boolean;
+  /** phase=start 条数 = 语义兜底接管次数。 */
+  attempts: number;
+  /** phase=end 条数 = 记了结果的次数。 */
+  completions: number;
+  /** distinct runId 数（runId 缺失的行各计一次，⛔ 不把若干缺 id 的行折成同一个）。 */
+  runs: number;
+  landings: number;
+  reds: number;
+  aborted: number;
+  /** start 无配对 end 的条数——「跑过、结果未记」；⛔ 不等价于「未落地」（可能仍在飞）。 */
+  unfinished: number;
+  firstTs: string | null;
+  lastTs: string | null;
+  tasks: string[];
+  /** 既有生产载体（.quay/gate-events.jsonl）里 actor=SEMANTIC_FALLBACK_GATE_ACTOR 的 complete 落地——
+   *  这是**新台账建立之前**就已存在的真实证据面（backfill 的替代：读侧 join，⛔ 不伪造台账条目）。 */
+  gateEventLandings: SemanticFallbackLanding[];
+}
+
+/** 只读：把语义兜底新台账 join 既有 gate-events 信号，回答「语义兜底跑过几次、结果如何」。
+ *  ⛔ 不写任何文件、不参与控制流。 */
+export function aggregateSemanticFallback(root: string): SemanticFallbackReport {
+  const ledgerFile = path.join(root, SEMANTIC_FALLBACK_LEDGER_REL);
+  const gateFile = path.join(root, ".quay", "gate-events.jsonl");
+  const ledgerPresent = fs.existsSync(ledgerFile);
+  const gateEventsPresent = fs.existsSync(gateFile);
+  const report: SemanticFallbackReport = {
+    evaluated: ledgerPresent || gateEventsPresent,
+    ledgerPresent,
+    gateEventsPresent,
+    attempts: 0,
+    completions: 0,
+    runs: 0,
+    landings: 0,
+    reds: 0,
+    aborted: 0,
+    unfinished: 0,
+    firstTs: null,
+    lastTs: null,
+    tasks: [],
+    gateEventLandings: [],
+  };
+
+  if (ledgerPresent) {
+    let text: string | null = null;
+    try {
+      text = fs.readFileSync(ledgerFile, "utf8");
+    } catch {
+      text = null; // 存在但读不动 ⇒ 该载体本轮不可判（⛔ 不折成 0 条）
+    }
+    if (text != null) {
+      const started = new Set<string>();
+      const ended = new Set<string>();
+      let anonStart = 0;
+      let anonEnd = 0;
+      for (const line of text.split("\n")) {
+        const trimmed = line.trim();
+        if (!trimmed) continue;
+        let rec: { ts?: unknown; task?: unknown; runId?: unknown; phase?: unknown; outcome?: unknown };
+        try {
+          rec = JSON.parse(trimmed);
+        } catch {
+          continue; // 坏行 ⇒ 跳过（⛔ 不伪造成一条读数）
+        }
+        if (!rec || typeof rec !== "object") continue;
+        const phase = rec.phase;
+        if (phase !== "start" && phase !== "end") continue; // 读不懂的行不进任何计数
+        const ts = typeof rec.ts === "string" ? rec.ts : null;
+        const task = typeof rec.task === "string" ? rec.task : null;
+        const rid = typeof rec.runId === "string" && rec.runId !== "" ? rec.runId : null;
+        if (ts) {
+          if (report.firstTs === null || ts < report.firstTs) report.firstTs = ts;
+          if (report.lastTs === null || ts > report.lastTs) report.lastTs = ts;
+        }
+        if (task && !report.tasks.includes(task)) report.tasks.push(task);
+        if (phase === "start") {
+          report.attempts += 1;
+          if (rid) started.add(rid);
+          else anonStart += 1;
+        } else {
+          report.completions += 1;
+          if (rid) ended.add(rid);
+          else anonEnd += 1;
+          if (rec.outcome === "landed") report.landings += 1;
+          else if (rec.outcome === "red") report.reds += 1;
+          else if (rec.outcome === "aborted") report.aborted += 1;
+        }
+      }
+      const paired = new Set<string>(started);
+      for (const r of ended) paired.add(r);
+      report.runs = paired.size + Math.max(anonStart, anonEnd);
+      let unpaired = Math.max(0, anonStart - anonEnd);
+      for (const r of started) if (!ended.has(r)) unpaired += 1;
+      report.unfinished = unpaired;
+    }
+  }
+
+  if (gateEventsPresent) {
+    let text: string | null = null;
+    try {
+      text = fs.readFileSync(gateFile, "utf8");
+    } catch {
+      text = null;
+    }
+    if (text != null) {
+      for (const line of text.split("\n")) {
+        const trimmed = line.trim();
+        if (!trimmed) continue;
+        let rec: { gate?: unknown; actor?: unknown; item_id?: unknown; pipeline_id?: unknown; timestamp?: unknown; id?: unknown };
+        try {
+          rec = JSON.parse(trimmed);
+        } catch {
+          continue;
+        }
+        if (!rec || typeof rec !== "object") continue;
+        if (rec.gate !== "complete" || rec.actor !== SEMANTIC_FALLBACK_GATE_ACTOR) continue;
+        const task = typeof rec.item_id === "string" ? rec.item_id : typeof rec.pipeline_id === "string" ? rec.pipeline_id : "";
+        report.gateEventLandings.push({
+          task,
+          ts: typeof rec.timestamp === "string" ? rec.timestamp : "",
+          id: typeof rec.id === "string" ? rec.id : null,
+        });
+      }
+    }
+  }
+
+  return report;
+}
+
 /** 窗口内全部 suite-red exited-not-landed 尝试（跨任务，⛔ 非 per-task）。读 WORKER_OUTCOME_REL 一次，
  *  对每条 final_state=exited-not-landed ∧ mechanical_fan_in.step=suite ∧ ts 落在 [nowMs-windowMs, nowMs]
  *  的记录，投影出 (taskId, ts, suiteLog 绝对路径, 写入时留存的签名)。读失败 / 无记录 ⇒ []（读不懂 ≠
@@ -5282,6 +5473,10 @@ export async function main(argv: string[]): Promise<number> {
   let appendCompleteGateEventFlag = false;
   let appendCompleteActor: string | undefined;
   let fanInFlakeReport = false;
+  let recordSemanticFallbackFlag = false;
+  let semanticFallbackPhase: string | undefined;
+  let semanticFallbackOutcome: string | undefined;
+  let semanticFallbackReportFlag = false;
 
   for (let i = 0; i < args.length; i++) {
     const a = args[i];
@@ -5315,6 +5510,10 @@ export async function main(argv: string[]): Promise<number> {
     else if (a === "--append-complete-gate-event") appendCompleteGateEventFlag = true;
     else if (a === "--actor") appendCompleteActor = args[++i];
     else if (a === "--fan-in-flake-report") fanInFlakeReport = true;
+    else if (a === "--record-semantic-fallback") recordSemanticFallbackFlag = true;
+    else if (a === "--phase") semanticFallbackPhase = args[++i];
+    else if (a === "--fallback-outcome") semanticFallbackOutcome = args[++i];
+    else if (a === "--semantic-fallback-report") semanticFallbackReportFlag = true;
     else if (a === "--help" || a === "-h") {
       console.log(
         "worker-driver — SPEC §5 阶段 2+3+4：spawn 多 worker（并发 N + 超时 SIGTERM + ⛔ 不 stash 主检出 + MCP 控制面 + 常驻选择环）\n" +
@@ -5333,6 +5532,8 @@ export async function main(argv: string[]): Promise<number> {
           "  --write-scoped-gate-cache --task <id> --develop-sha <sha>  写 scoped-gate 缓存（worker 退出前跑绿后调用；stdout 单行 JSON）\n" +
           "  --append-complete-gate-event --task <id> [--actor <a>]  写 `complete` pass GateEvent 到 <root>/.quay/gate-events.jsonl（语义 fan-in workflow 的 flip 落地补写；exit 0=已写 / 2=缺参）\n" +
           "  --fan-in-flake-report [--root <repo>] [--json]  只读：按失败测试文件聚合 .quay/worker-outcome.jsonl 里的 suite 红轮次（redRounds / tasks / 首红→末红 / rerunGreenRounds），stdout 单行 JSON\n" +
+          "  --record-semantic-fallback --task <id> --phase <start|end> [--fallback-outcome <landed|red|aborted>] [--run-id <id>] [--reason <s>]  写一条语义兜底尝试到 <root>/.quay/fan-in-semantic-fallback.jsonl（--phase end 必须带 --fallback-outcome；exit 0=已写 / 2=缺参或词表外取值）\n" +
+          "  --semantic-fallback-report [--root <repo>]  只读：回答「语义兜底跑过几次、结果如何」——join 新台账 + 既有 .quay/gate-events.jsonl 的 actor=quay-fan-in-workflow complete 落地，stdout 单行 JSON\n" +
           "  ⛔ 无 --serve：MCP 控制面（halt / setPreference / forceDispatch）已上收进 Layer 0——由每个 kind 的\n" +
           "     supervisor（driver-runtime.ts runSupervisor）起，逐 kind 写 <prefix>-control-plane.json 回读面",
       );
@@ -5372,6 +5573,55 @@ export async function main(argv: string[]): Promise<number> {
   // 上红转绿过」。stdout 单行 JSON（同本文件其它 --flag 入口的形态）。
   if (fanInFlakeReport) {
     process.stdout.write(`${JSON.stringify(aggregateRerunFlakes(rootDir))}\n`);
+    return 0;
+  }
+
+  // --record-semantic-fallback：语义兜底 workflow 的【写侧】（gap-fan-in-execute-semantic-fallback-
+  // telemetry-blind）。与 --append-complete-gate-event 同款语义：best-effort 落台账，stdout 单行 JSON，
+  // exit 0 = 已写 / 2 = 缺参或词表外取值（fail-closed，⛔ 不静默写一条读不懂的记录）。⛔ 调它的人不因
+  // 写失败而中断 fan-in（硬规则 12：不为观测新增阻塞前置）。
+  if (recordSemanticFallbackFlag) {
+    const task = tasks[0];
+    if (!task) {
+      console.error("worker-driver: --record-semantic-fallback requires --task <id>");
+      return 2;
+    }
+    if (semanticFallbackPhase !== "start" && semanticFallbackPhase !== "end") {
+      console.error("worker-driver: --record-semantic-fallback requires --phase <start|end>");
+      return 2;
+    }
+    if (semanticFallbackPhase === "start" && semanticFallbackOutcome !== undefined) {
+      console.error("worker-driver: --phase start takes no --fallback-outcome (a start has no result)");
+      return 2;
+    }
+    if (
+      semanticFallbackPhase === "end" &&
+      semanticFallbackOutcome !== "landed" &&
+      semanticFallbackOutcome !== "red" &&
+      semanticFallbackOutcome !== "aborted"
+    ) {
+      console.error("worker-driver: --phase end requires --fallback-outcome <landed|red|aborted>");
+      return 2;
+    }
+    const rec: SemanticFallbackRecord = {
+      ts: new Date().toISOString(),
+      task,
+      runId: runId ?? null,
+      phase: semanticFallbackPhase,
+      outcome: semanticFallbackPhase === "end" ? (semanticFallbackOutcome as SemanticFallbackOutcome) : null,
+      reason: reason ?? null,
+      actor: SEMANTIC_FALLBACK_GATE_ACTOR,
+    };
+    const file = appendSemanticFallbackRecord(rootDir, rec);
+    process.stdout.write(`${JSON.stringify({ event: "semantic-fallback-recorded", file, ...rec })}\n`);
+    return 0;
+  }
+
+  // --semantic-fallback-report：只读仪器（AC2 的查询面）。回答「语义兜底跑过几次、结果如何」——
+  // join 新台账（尝试）+ 既有 .quay/gate-events.jsonl 的 actor=quay-fan-in-workflow complete 事件
+  // （新台账建立【之前】的真实落地）。⛔ 不参与控制流、不写文件。stdout 单行 JSON。
+  if (semanticFallbackReportFlag) {
+    process.stdout.write(`${JSON.stringify(aggregateSemanticFallback(rootDir))}\n`);
     return 0;
   }
 
