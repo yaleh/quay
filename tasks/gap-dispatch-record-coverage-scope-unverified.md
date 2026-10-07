@@ -2,7 +2,7 @@
 id: gap-dispatch-record-coverage-scope-unverified
 title: dispatch-record.jsonl / semantic-face-dispatch-record.jsonl
   的记录条数远低于机械派发实际发生次数，需先核实覆盖范围是否符合设计意图（不要直接当缺陷修）
-status: todo
+status: ready
 labels:
   - gap
 parent: null
