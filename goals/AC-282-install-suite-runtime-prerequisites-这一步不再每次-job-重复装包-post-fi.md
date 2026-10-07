@@ -2,7 +2,7 @@
 id: AC-282
 title: Install suite runtime prerequisites 这一步不再每次 job 重复装包——post-filing 最新一次
   develop CI test job 的日志派生出三个前置全部 already-present（零 per-job install）
-status: achieved
+status: superseded
 kind: criterion
 goal: GOAL-022
 criterion: >-
@@ -120,6 +120,14 @@ statusLog:
     to: achieved
     actor: goal-driver
     reason: "I2: criterion pass"
+  - at: 2026-10-07T08:20:16.536Z
+    from: achieved
+    to: superseded
+    actor: human
+    reason: 人 2026-10-07 裁定取消（窗口会闪，非未达成）：判据读最新一次 run 的派生字段 prereqProvision；新 run
+      一到、日志还没派生完就翻成 underivable（NOT-EVALUATED），读数不稳定。collector
+      的派生（ci-runs-collect.ts）与 .github/workflows/ci.yml 的 __PREREQ__
+      标记都仍在，保证由它们承载。
 fidelity:
   verdict: not-evaluated
   reason: no judge configured
