@@ -561,14 +561,30 @@ quay init --dry-run
 # Scaffold at a specific path:
 quay init --root /path/to/project
 
-# Overwrite an existing .quay/config.yml:
-quay init --force
+# Machine-readable report (the same document the MCP `init` tool returns):
+quay init --json
+
+# Name the project (used for the .quay/profiles.yml role session prefixes):
+quay init --project my-project
 ```
 
 The generated config is valid immediately — `quay task list` works right after
 `init` with no manual edits needed. Auto-detected project type (Node.js via
 `package.json`, Go via `go.mod`) tailors the gate suggestions in the commented-
 out examples.
+
+Re-running `quay init` is safe and is the upgrade path: an existing config is
+merged in place (comments, unknown keys and your own values preserved, retired
+keys deleted, the candidate VALIDATED before anything is written), and a config
+that is already current is not rewritten at all. An unreadable config is
+rebuilt from the defaults with the broken bytes preserved beside it as
+`.quay/config.yml.corrupt-<timestamp>`. There is no overwrite flag and no
+reconcile selector — the target's state decides.
+
+⛔ A fresh config carries no `serve:` section. Its values would be exactly the
+fallback `quay serve` already uses (host `0.0.0.0`, port `0` = kernel-assigned),
+so writing them would say nothing; uncomment the example in the generated file
+only to pin your own binding.
 
 `quay-native init` works identically when the native provider is the sole
 installed package:

@@ -2,13 +2,13 @@
 // Migrated verbatim from packages/quay/bin/quay.ts dispatch body by
 // gap-cli-import-command-migration-into-src. No behavior change.
 
-import { parseFlags } from "./shared.ts";
+import { parseFlags, resolveJsonFlag } from "./shared.ts";
 // The init help prose + the shipped entry's name: ONE naming point, in cli/help.ts
 // (gap-quay-init-sh-no-single-naming-point). The two renderings of `quay init --help` — this
 // handler's and help.ts's — used to carry byte-identical copies of these sentences, so every edit
 // had to be made twice and the two could drift apart silently.
 import { INIT_BRANCH_MODEL_ONLY_PROSE, INIT_DOC_BRANCH_NO_DEFAULT_PROSE } from "./help.ts";
-import { runInit, printNextSteps } from "../init.ts";
+import { runInit, printNextSteps, buildInitReport } from "../init.ts";
 import {
   ensureDocBranch,
   formatBaselineCheckoutReport,
@@ -18,11 +18,32 @@ import {
 } from "../branch-model.ts";
 import type { CliCtx } from "./context.ts";
 
+/**
+ * Every option the `quay init` surface DECLARES. ⛔ This is the allowlist the retired-option guard
+ * checks argv against — it is what makes "unrecognized option" a real judgment rather than a list of
+ * known-bad spellings (硬规则 13's shape: enumerate what IS allowed, not what is not). `h`/`help` are
+ * here because the help arm reads them off the same flag bag.
+ */
+const KNOWN_INIT_FLAGS: ReadonlySet<string> = new Set([
+  "help",
+  "h",
+  "root",
+  "dry-run",
+  "drop-incompatible",
+  "adopt-branch-model",
+  "branch-model-only",
+  "doc-branch-name",
+  "project",
+  "plugin-root",
+  "json",
+  "format",
+]);
+
 // DIR-098: quay init — scaffold a new workspace (.quay/config.yml + tasks/ dir).
 // Does NOT require an existing config (loadConfig() throws without one — that
 // is the whole point of `init`). No provider connection needed.
 export async function handleInit({ sub, rest }: CliCtx) {
-  // Re-parse flags from [sub, ...rest] so --force, --dry-run, --root are seen
+  // Re-parse flags from [sub, ...rest] so --dry-run, --json, --project, --root are seen
   // regardless of whether they land in sub or rest.
   const { flags: initFlags } = parseFlags([sub, ...rest].filter((a) => a !== undefined));
 
@@ -31,31 +52,31 @@ export async function handleInit({ sub, rest }: CliCtx) {
     process.stdout.write(`quay init — scaffold a new quay workspace
 
 Usage:
-  quay init [--force] [--reconcile] [--drop-incompatible] [--dry-run] [--adopt-branch-model] [--root <path>]
+  quay init [--drop-incompatible] [--dry-run] [--json] [--project <name>] [--root <path>]
   quay init --branch-model-only [--adopt-branch-model] [--dry-run] [--root <path>]
   quay init --branch-model-only --doc-branch-name <name> [--dry-run] [--root <path>]
 
+⛔ There is no overwrite flag and no reconcile selector. The STATE of the target decides:
+     absent config      ⇒ write a fresh one
+     parseable config   ⇒ upgrade it in place (comment-preserving, validated before write)
+     unreadable config  ⇒ rebuild it from this version's defaults, preserving the broken
+                           bytes beside the new file as config.yml.corrupt-<timestamp>
+   Re-running init on a current project changes nothing (byte-identical, not rewritten).
+
 Flags:
-  --force      Overwrite an existing .quay/config.yml wholesale (a fresh install at the
-               same path). Without it, an EXISTING config is UPGRADED in place.
   --drop-incompatible
                When the upgraded config does not validate, delete the user values the
                validator rejects (e.g. a loop.gates naming an unregistered gate) and
                retry. Without it, such a value makes the upgrade FAIL: non-zero exit,
                the report names the offending field, and your config is left
                byte-identical. Nothing is deleted silently.
-  --reconcile  LEGACY, now inert: plain 'quay init' upgrades an existing config, so this
-               selects the same single engine. Kept for one release for existing callers.
-               Per-key diff: keys this version added since your project was initialized
-               are FILLED from the defaults, retired keys are DELETED, values this version
-               considers incompatible are migrated through an explicit table, and every
-               other key (and every comment) is left byte-for-byte alone. The result is
-               VALIDATED before it is written — an upgrade that does not validate writes
-               nothing (use --drop-incompatible to delete the offending values).
-               Scope: when the config already EXISTS, this mode touches
-               .quay/config.yml ONLY — it never lays down tasks/, profiles.yml or
-               the launch settings. An ABSENT config gets the full fresh scaffold.
-               --force still wins when both are given (an overwrite is not a diff).
+  --json       Print ONE machine-readable JSON report on stdout (the same document the MCP
+               \`init\` tool returns): outcome, the keys filled/migrated/removed, warnings,
+               whether the result validated, and the .quay/plugin link status. Human-facing
+               progress moves to stderr so stdout stays parseable.
+  --project <name>
+               The project's name, used for the .quay/profiles.yml role session prefixes
+               (<name>-task-worker, …). Default: the basename of the target root.
   --doc-branch-name <name>
                (with --branch-model-only) Establish the DOC-ONLY work branch: when the main
                checkout is sitting on the landing baseline 'develop', create <name> at that
@@ -95,8 +116,9 @@ Description:
   task's work).
 
   If .quay/config.yml already exists, it is UPGRADED in place (single engine, GOAL-029):
-  merged, comment-preserving, and validated BEFORE anything is written. --force replaces
-  it wholesale instead.
+  merged, comment-preserving, and validated BEFORE anything is written. An UNREADABLE
+  config is rebuilt from this version's defaults with the broken bytes preserved beside
+  it. There is no overwrite mode — re-running init never destroys what it did not write.
 
   ${INIT_BRANCH_MODEL_ONLY_PROSE}
 
@@ -128,7 +150,7 @@ Description:
     console.error(
       "quay init: unrecognized option --loop.\n" +
       "CLI `quay init` only scaffolds a brand-new EMPTY quay task store\n" +
-      "(.quay/config.yml + tasks/); it accepts only --force / --dry-run / --root.\n" +
+      "(.quay/config.yml + tasks/); run `quay init --help` for its flags.\n" +
       "\n" +
       "To lay the full quay loop mechanism into an existing project, the canonical\n" +
       "path is the /quay:init skill inside a Claude Code session:\n" +
@@ -142,20 +164,57 @@ Description:
     return;
   }
 
+  // ── The RETIRED-OPTION guard (AC-330) ───────────────────────────────────────────────────────────
+  // `quay init` used to offer an overwrite mode and a reconcile selector; GOAL-029 (人 2026-10-07)
+  // removed both, because the target's STATE now decides everything and a second mode is exactly the
+  // drift this change exists to remove. A caller that still passes one must be TOLD, not silently
+  // obeyed with different semantics (硬规则 3b: "I did something else" must not look like success).
+  //
+  // ⛔ The rejected names are read off the parsed argv, never spelled out below: the check is
+  // "every option is one this surface declares", which stays true for the NEXT retirement too.
+  const unknownFlags = Object.keys(initFlags).filter((k) => !KNOWN_INIT_FLAGS.has(k));
+  if (unknownFlags.length > 0) {
+    console.error(
+      `quay init: unrecognized option${unknownFlags.length > 1 ? "s" : ""}: ` +
+      unknownFlags.map((k) => `--${k}`).join(", ") + "\n" +
+      "The state of the target decides what init does — an absent config is written, a parseable\n" +
+      "one is upgraded in place, an unreadable one is rebuilt with the broken bytes preserved\n" +
+      "beside it. There is no overwrite mode and no reconcile selector any more; re-run without\n" +
+      "the option (plain `quay init` already upgrades an existing config).\n" +
+      "Run `quay init --help` for the current surface."
+    );
+    process.exitCode = 1;
+    return;
+  }
+
+  const jsonFlag = resolveJsonFlag(initFlags);
+  if (jsonFlag === null) {
+    console.error(`quay init: --format only accepts "json" (got ${JSON.stringify(initFlags.format)})`);
+    process.exitCode = 1;
+    return;
+  }
+  const json = jsonFlag.json;
+  // ⛔ In `--json` mode stdout carries ONE JSON document and nothing else: every human-facing line
+  // (including the plugin-link step's own reporting, which runInit does for us) goes to stderr.
+  const say = json
+    ? (line: string) => process.stderr.write(line + "\n")
+    : (line: string) => console.log(line);
+
   const targetRoot = typeof initFlags.root === "string" ? initFlags.root : process.cwd();
-  const force = initFlags.force === true;
-  const reconcile = initFlags.reconcile === true;
   const dryRun = initFlags["dry-run"] === true;
   const dropIncompatible = initFlags["drop-incompatible"] === true;
   const adoptBranchModel = initFlags["adopt-branch-model"] === true;
   const branchModelOnly = initFlags["branch-model-only"] === true;
+  const project = typeof initFlags.project === "string" ? initFlags.project : undefined;
   // The plugin root THIS run executes from — threaded so the upgrade can resolve the native binding
   // and refresh `<root>/.quay/plugin` AFTER the config write. ⛔ Never a registry lookup (the link
   // names the plugin root that is actually running — see init.ts's own ruling). Unset ⇒ the link
   // step is skipped here; the shell's own step still owns it until AC-331.
-  const pluginRoot = typeof process.env.CLAUDE_PLUGIN_ROOT === "string" && process.env.CLAUDE_PLUGIN_ROOT !== ""
-    ? process.env.CLAUDE_PLUGIN_ROOT
-    : null;
+  const pluginRoot = typeof initFlags["plugin-root"] === "string"
+    ? initFlags["plugin-root"]
+    : typeof process.env.CLAUDE_PLUGIN_ROOT === "string" && process.env.CLAUDE_PLUGIN_ROOT !== ""
+      ? process.env.CLAUDE_PLUGIN_ROOT
+      : null;
   // The doc-branch NAME (gap-quay-init-no-doc-branch-bootstrap-…). ⛔ This CLI carries NO default
   // literal for it: the caller supplies it (`--doc-branch-name <name>`, or the shipped upgrade
   // entry — cli/help.ts's `QUAY_INIT_REL` — which resolves flag → `loop.doc_branch` → its own
@@ -166,13 +225,20 @@ Description:
   const docBranchName = typeof initFlags["doc-branch-name"] === "string" ? initFlags["doc-branch-name"] : undefined;
 
   try {
-    const result = runInit({ root: targetRoot, force, reconcile, dryRun, dropIncompatible, pluginRoot, adoptBranchModel, branchModelOnly });
+    const result = runInit({ root: targetRoot, dryRun, dropIncompatible, pluginRoot, adoptBranchModel, branchModelOnly, project, log: say });
+
+    // The ONE report (AC-330): `--json` prints exactly this, and the MCP `init` tool returns it
+    // verbatim. Emitting it BEFORE the human branches (each of which returns early) is what makes the
+    // two surfaces the same document rather than two renderings that must be kept in step by hand.
+    if (json) {
+      process.stdout.write(JSON.stringify(buildInitReport(result, { dryRun }), null, 2) + "\n");
+    }
 
     // The config-free branch-model entry (gap-upgrade-entry-never-establishes-branch-model). It
     // reports the model and decides, nothing else — so the only outcomes it can reach are this one
     // and the shared error path below.
     if (result.outcome === "branch-model-only") {
-      console.log(result.branchModelReport);
+      say(result.branchModelReport);
       if (result.branchModel.skipped) {
         // Not a classifiable repo (no git / no commits). Reported as such, and NOT a failure —
         // "could not evaluate" must not be reported with the shape of a verdict (hard rule 3b).
@@ -201,7 +267,7 @@ Description:
       // checkout moved. Not in `--dry-run` — a plan says what WOULD happen.
       if (!dryRun && landingBaselineEstablishedNow(result.branchModel)) {
         const checkout = moveCheckoutOntoLandingBaseline(targetRoot);
-        console.log(formatBaselineCheckoutReport(checkout));
+        say(formatBaselineCheckoutReport(checkout));
         if (!checkout.ok) {
           // Fail-closed: continuing would fall straight back into the silent no-op this step exists
           // to end (the doc-branch judgment would read the unmoved checkout). The detail line above
@@ -229,29 +295,10 @@ Description:
       // doc-branch collision (`--adopt-branch-model`'s own help text names 'author'), so it is
       // threaded straight through rather than inventing a second adoption flag.
       const docBranch = ensureDocBranch(targetRoot, { name: docBranchName ?? "", dryRun, adopt: adoptBranchModel });
-      console.log(formatDocBranchReport(docBranch));
+      say(formatDocBranchReport(docBranch));
       // Fail-closed on a real refusal (a name collision) or a failed mutation; a dry run only
       // reports, and an unreadable HEAD is NOT a failure (hard rule 3b).
       if (!docBranch.ok && !dryRun) process.exitCode = 1;
-      return;
-    }
-
-    // ⛔ BEFORE the "already exists" arm, and on a branch of its own: an unparseable config is not a
-    // config-conflict, and answering it with "already exists, use --force" sends the operator looking
-    // for a conflict that does not exist while the real cause (the parse error) is never printed
-    // (硬规则 3b — "could not read the input" must not be shaped like a verdict about the input).
-    if (result.outcome === "corrupt") {
-      console.error(
-        `.quay/config.yml exists at ${result.configPath} but could not be read as a config:\n` +
-        `  ${result.corruptReason}\n` +
-        "\n" +
-        "This is NOT a name conflict — re-running with --force would not have told you that.\n" +
-        "Two legal moves, both non-destructive:\n" +
-        "  --reconcile  rebuild it from this version's defaults (the unparseable file is kept\n" +
-        "               beside the new one as .quay/config.yml.corrupt-<timestamp>)\n" +
-        "  --dry-run    print what a rebuild would write, without touching anything"
-      );
-      process.exitCode = 1;
       return;
     }
 
@@ -260,8 +307,7 @@ Description:
       // valid config is UPGRADED, not refused. Kept as a defensive arm so a future regression that
       // resurrects it is still reported as a refusal rather than silently falling through.
       console.error(
-        `.quay/config.yml already exists at ${result.configPath} and was not upgraded. ` +
-        "Re-run, or use --force to overwrite."
+        `.quay/config.yml already exists at ${result.configPath} and was not upgraded. Re-run init.`
       );
       process.exitCode = 1;
       return;
@@ -290,20 +336,19 @@ Description:
     if (result.outcome === "reconciled" || result.outcome === "unchanged") {
       const r = result.upgrade;
       if (result.outcome === "unchanged") {
-        console.log(`${result.configPath}: already current for this version of quay — not rewritten.`);
+        say(`${result.configPath}: already current for this version of quay — not rewritten.`);
       } else {
-        console.log(`${result.configPath}: ${dryRun ? "would be upgraded to" : "upgraded to"} this version's defaults.`);
-        for (const k of r?.added ?? []) console.log(`  ${dryRun ? "would-fill" : "filled"} loop.${k} (was absent)`);
-        for (const k of r?.addedServe ?? []) console.log(`  ${dryRun ? "would-fill" : "filled"} serve.${k} (was absent)`);
-        for (const m of r?.migrated ?? []) console.log(`  ${dryRun ? "would-migrate" : "migrated"} loop.${m}`);
-        for (const k of r?.removed ?? []) console.log(`  ${dryRun ? "would-remove" : "removed"} ${k} (retired key)`);
-        for (const k of r?.pinned ?? []) console.log(`  ${dryRun ? "would-pin" : "pinned"} providers.native.env.${k} (carrier dir pin)`);
-        for (const k of r?.dropped ?? []) console.log(`  dropped ${k} (--drop-incompatible: it did not validate)`);
+        say(`${result.configPath}: ${dryRun ? "would be upgraded to" : "upgraded to"} this version's defaults.`);
+        for (const k of r?.added ?? []) say(`  ${dryRun ? "would-fill" : "filled"} loop.${k} (was absent)`);
+        for (const m of r?.migrated ?? []) say(`  ${dryRun ? "would-migrate" : "migrated"} loop.${m}`);
+        for (const k of r?.removed ?? []) say(`  ${dryRun ? "would-remove" : "removed"} ${k} (retired key)`);
+        for (const k of r?.pinned ?? []) say(`  ${dryRun ? "would-pin" : "pinned"} providers.native.env.${k} (carrier dir pin)`);
+        for (const k of r?.dropped ?? []) say(`  dropped ${k} (--drop-incompatible: it did not validate)`);
       }
       for (const k of r?.unknownKeys ?? []) {
         console.error(`  warning: unrecognized top-level config key "${k}" — kept as-is (not deleted)`);
       }
-      if (dryRun && result.outcome === "reconciled") console.log("# Dry run — nothing written to disk.");
+      if (dryRun && result.outcome === "reconciled") say("# Dry run — nothing written to disk.");
       return;
     }
 
@@ -320,25 +365,25 @@ Description:
     }
 
     if (result.outcome === "dry-run") {
-      console.log(result.content);
-      console.log(`\n# Dry run — nothing written to disk.`);
-      console.log(`# Would create: ${result.configPath}`);
-      console.log(`# Would create: ${result.tasksDir}/`);
-      console.log(`# Would create: ${result.launchSettingsPath}`);
-      console.log(`# Would create: ${result.profilesPath}`);
-      console.log(`# ${result.branchModelReport}`);
+      say(result.content);
+      say(`\n# Dry run — nothing written to disk.`);
+      say(`# Would create: ${result.configPath}`);
+      say(`# Would create: ${result.tasksDir}/`);
+      say(`# Would create: ${result.launchSettingsPath}`);
+      say(`# Would create: ${result.profilesPath}`);
+      say(`# ${result.branchModelReport}`);
       return;
     }
 
-    console.log(`Created ${result.configPath}`);
-    // A rebuild-over-corrupt reports where the unreadable bytes went; silence here would make the
+    say(`Created ${result.configPath}`);
+    // A rebuild-over-unreadable reports where the broken bytes went; silence here would make the
     // salvage step invisible (the operator would have to notice the extra file themselves).
-    if (result.corruptReason) console.log(`  ${result.corruptReason}`);
-    console.log(`Created ${result.tasksDir}/ (or already existed)`);
-    console.log(`Created ${result.launchSettingsPath}`);
-    console.log(`Created ${result.profilesPath}`);
-    console.log(result.branchModelReport);
-    printNextSteps("native", result.tasksDir);
+    if (result.corruptReason) say(`  ${result.corruptReason}`);
+    say(`Created ${result.tasksDir}/ (or already existed)`);
+    say(`Created ${result.launchSettingsPath}`);
+    say(`Created ${result.profilesPath}`);
+    say(result.branchModelReport);
+    if (!json) printNextSteps("native", result.tasksDir);
   } catch (err) {
     console.error(`quay init: ${err instanceof Error ? err.message : String(err)}`);
     process.exitCode = 1;

@@ -16,9 +16,6 @@ import { ensureBranchModel, formatBranchModelReport, type BranchModelReport } fr
 // (finding `escaperegexp-sweep-missed-two`, routine `semantic-dedup-scan`; see
 // packages/quay/test/kernel-regex-escape.test.mjs ④).
 import { escapeRegExp } from "./kernel/regex-escape.ts";
-// The serve binding's ONE fallback (a leaf module): the seed values of the `serve:` config section
-// are THAT constant, so the delivered key and the code's fallback cannot become two defaults.
-import { SERVE_BINDING_FALLBACK } from "./serve-binding.ts";
 // The ONE plugin-tree resolver (gap-project-quay-pointer-is-init-plugin-root-and-version-records-
 // derive-from-it): the project link's source-checkout guard reuses `isPluginSourceCheckout` so the
 // "is this an install or a working tree" judgment cannot fork into two spellings.
@@ -201,27 +198,23 @@ export const LOOP_VALUE_MIGRATIONS: Readonly<Record<string, { from: readonly str
   },
 };
 
-/**
- * The current-version `serve:` default schema — the SAME single-source discipline as
- * `LOOP_VERSION_DEFAULTS`, for the web binding (gap-serve-binding-defaults-three-copies-to-one-
- * definition-point). The seed values ARE the fallback (⛔ not a literal port): a fresh workspace is
- * born carrying the same values `resolveServeBinding` falls back to, so the delivered key and the
- * code's fallback cannot drift into two defaults. Keyed `serve:` → key, filled by the same
- * comment-preserving reconcile that fills `loop:` — without that, the key is unreachable for every
- * project initialized before it, forever (the defect `init.ts:90` records verbatim).
- */
-export const SERVE_VERSION_DEFAULTS: Readonly<Record<string, unknown>> = {
-  host: SERVE_BINDING_FALLBACK.host,
-  port: SERVE_BINDING_FALLBACK.port,
-};
+// ── There is NO `serve:` version-default table (GOAL-029 / AC-330, 人 2026-10-07) ──────────────────
+//
+// The `serve:` section used to have its own seed table (`SERVE_VERSION_DEFAULTS`), written by the
+// fresh-install template and filled by the reconcile. It was removed because EVERY entry equalled the
+// resolver's own fallback, i.e. the table could only ever deliver a value that says nothing: a
+// workspace without a `serve:` section and a workspace carrying `serve.host: 0.0.0.0` behave
+// IDENTICALLY (`resolveServeBinding` falls back to the very same constant). Writing it was pure
+// noise — and worse, it made a fresh install and an upgrade disagree about whether the section
+// exists at all.
+//
+// The ONE definition of what an absent `serve:` means stays where it always was: `SERVE_BINDING_FALLBACK`
+// in `serve-binding.ts`. A user who pins their own `host:`/`port:` keeps it — the upgrade never
+// rewrites a key it does not own, and `serve:` is now entirely the user's to write.
 
 export interface ReconcileReport {
   /** `loop:` keys that were absent from the config and were filled from LOOP_VERSION_DEFAULTS. */
   added: string[];
-  /** `serve:` keys that were absent and were filled from SERVE_VERSION_DEFAULTS. Kept SEPARATE from
-   *  `added` so "the version-required loop keys" keeps meaning exactly that (the pinned schema test
-   *  reads `added`), while the fill is still reported to the operator. */
-  addedServe: string[];
   /** `key: old -> new` for values rewritten via LOOP_VALUE_MIGRATIONS. */
   migrated: string[];
   /**
@@ -245,13 +238,9 @@ export interface ReconcileReport {
  * @throws when the input is not parseable — callers reach this only after `classifyConfig` returned
  *         "valid", so a throw here means the file changed underneath them; it is never swallowed.
  */
-export function reconcileConfigContent(
-  raw: string,
-  opts: { serve?: boolean } = {},
-): { content: string; report: ReconcileReport } {
+export function reconcileConfigContent(raw: string): { content: string; report: ReconcileReport } {
   const doc = YAML.parseDocument(raw);
   const added: string[] = [];
-  const addedServe: string[] = [];
   const migrated: string[] = [];
 
   for (const [key, value] of Object.entries(LOOP_VERSION_DEFAULTS)) {
@@ -260,17 +249,11 @@ export function reconcileConfigContent(
     added.push(key);
   }
 
-  // The serve binding's version-level defaults travel through the SAME comment-preserving
-  // reconcile — an absent `serve:` section is filled, a present one is left byte-for-byte alone.
-  // `opts.serve === false` (the SHELL entry's `reconcile-config` step) skips this table: a FRESH
-  // `quay-init.sh` install writes no `serve:` section, so filling it on a re-run would make the script
-  // non-idempotent over its own output (the second run would rewrite a config the first run just
-  // wrote). The serve defaults stay delivered by `quay init --reconcile` / the MCP init tool.
-  for (const [key, value] of opts.serve === false ? [] : Object.entries(SERVE_VERSION_DEFAULTS)) {
-    if (doc.hasIn(["serve", key])) continue;
-    doc.setIn(["serve", key], value);
-    addedServe.push(key);
-  }
+  // ⛔ `serve:` is NOT filled here (AC-330). There is no version-level serve default any more — every
+  // candidate value equalled the resolver's fallback, so filling it delivered nothing and made the
+  // section's presence depend on WHICH entry point wrote the config. An absent section is the
+  // identical reading (`SERVE_BINDING_FALLBACK`), and a user's own `host:`/`port:` is untouched
+  // because nothing below ever writes under `serve:`.
 
   for (const [key, rule] of Object.entries(LOOP_VALUE_MIGRATIONS)) {
     const current = doc.getIn(["loop", key]);
@@ -285,8 +268,8 @@ export function reconcileConfigContent(
   // MEANING of (a trailing blank line, say), so a no-op reconcile of a current config would report
   // "changed" and rewrite the file — the gratuitous rewrite this whole discipline exists to avoid.
   // A reconcile with nothing to add and nothing to migrate has nothing to write, full stop.
-  const unchanged = added.length === 0 && addedServe.length === 0 && migrated.length === 0;
-  return { content: unchanged ? raw : doc.toString(), report: { added, addedServe, migrated, unchanged } };
+  const unchanged = added.length === 0 && migrated.length === 0;
+  return { content: unchanged ? raw : doc.toString(), report: { added, migrated, unchanged } };
 }
 
 // ── The retired-key registry — the ONE place a config key is declared dead ─────────────────────────
@@ -352,8 +335,6 @@ export interface UpgradeOptions {
 export interface UpgradeReport {
   /** `loop:` keys absent from the config and filled from LOOP_VERSION_DEFAULTS. */
   added: string[];
-  /** `serve:` keys filled from SERVE_VERSION_DEFAULTS — always empty today (see the skip rule). */
-  addedServe: string[];
   /** `key: old -> new` rewrites from LOOP_VALUE_MIGRATIONS. */
   migrated: string[];
   /** Retired keys deleted per RETIRED_CONFIG_KEYS. */
@@ -414,22 +395,22 @@ function documentToString(doc: YAML.Document.Parsed, raw: string, changed: boole
  * The pipeline, in order:
  *   1. delete retired keys (RETIRED_CONFIG_KEYS) through the Document API;
  *   2. fill absent `loop:` version-level defaults (LOOP_VERSION_DEFAULTS);
- *   3. fill `serve:` version-level defaults — EXCEPT a default whose value EQUALS the code fallback,
- *      which is not a value the config should carry at all (GOAL-029: 「serve 默认值（等于回退值）
- *      不写进配置」). Today every SERVE_VERSION_DEFAULTS entry equals its fallback ⇒ nothing is written;
- *      a user-pinned value is therefore the only thing that can appear under `serve:`;
- *   4. apply LOOP_VALUE_MIGRATIONS;
- *   5. backfill the provider carrier-dir env pins;
- *   6. VALIDATE THE CANDIDATE TEXT (validateConfigText — the same judge `quay config validate` runs).
+ *   3. apply LOOP_VALUE_MIGRATIONS;
+ *   4. backfill the provider carrier-dir env pins;
+ *   5. VALIDATE THE CANDIDATE TEXT (validateConfigText — the same judge `quay config validate` runs).
  *      If it fails and `--drop-incompatible` was given, delete the offending values, re-fill required
  *      defaults, and re-validate; otherwise the caller must NOT write.
+ *
+ * `serve:` is NOT touched at all (GOAL-029 的「serve 默认值（等于回退值）不写进配置」): there is no
+ * version-level serve default left to deliver, and a user-pinned `host:`/`port:` is preserved for the
+ * trivial reason that this pipeline never writes under that key.
  *
  * The caller distinguishes "unchanged" via `report.untouched`; writing then would be the gratuitous
  * rewrite the reconcile discipline forbids.
  */
 export function upgradeConfigContent(raw: string, opts: UpgradeOptions): UpgradeResult {
   const report: UpgradeReport = {
-    added: [], addedServe: [], migrated: [], removed: [], pinned: [], unknownKeys: [], dropped: [], untouched: false,
+    added: [], migrated: [], removed: [], pinned: [], unknownKeys: [], dropped: [], untouched: false,
   };
 
   const doc = YAML.parseDocument(raw);
@@ -462,15 +443,10 @@ export function upgradeConfigContent(raw: string, opts: UpgradeOptions): Upgrade
     changed = true;
   }
 
-  // 3. `serve:` defaults — skipped when the value IS the code fallback (the "don't write a value that
-  //    says nothing" rule). A user's own serve value is never touched (it is already present).
-  for (const [key, value] of Object.entries(SERVE_VERSION_DEFAULTS)) {
-    if (value === (SERVE_BINDING_FALLBACK as unknown as Record<string, unknown>)[key]) continue;
-    if (doc.hasIn(["serve", key])) continue;
-    doc.setIn(["serve", key], value);
-    report.addedServe.push(key);
-    changed = true;
-  }
+  // 3. `serve:` — deliberately NOTHING. See the header: there is no version-level serve default any
+  //    more, a user's own value is already present, and an absent section is the same reading as the
+  //    resolver's fallback (so writing one would say nothing and would make fresh vs. upgraded
+  //    configs disagree about the section's existence).
 
   // 4. Declared value migrations.
   for (const [key, rule] of Object.entries(LOOP_VALUE_MIGRATIONS)) {
@@ -495,7 +471,7 @@ export function upgradeConfigContent(raw: string, opts: UpgradeOptions): Upgrade
 
   let content = documentToString(doc, raw, changed);
 
-  // 5b. Carrier-dir env pins — a LINE-LEVEL insert, so it must run on the serialized TEXT (it is the
+  // 6. Carrier-dir env pins — a LINE-LEVEL insert, so it must run on the serialized TEXT (it is the
   //     same single implementation the shell step uses).
   const carrier = ensureProviderCarrierEnvText(content, { wsRoot: opts.workspaceRoot });
   if (carrier.pinned.length > 0) {
@@ -506,14 +482,13 @@ export function upgradeConfigContent(raw: string, opts: UpgradeOptions): Upgrade
   report.untouched =
     report.removed.length === 0 &&
     report.added.length === 0 &&
-    report.addedServe.length === 0 &&
     report.migrated.length === 0 &&
     report.pinned.length === 0;
 
-  // 6. Judge the candidate BEFORE anyone writes it.
+  // 7. Judge the candidate BEFORE anyone writes it.
   let verdictResult = validateConfigText({ text: content, workspaceRoot: opts.workspaceRoot, pluginRoot: opts.pluginRoot });
 
-  // 6b. `--drop-incompatible`: remove the user values the judge rejects, then judge again.
+  // 7b. `--drop-incompatible`: remove the user values the judge rejects, then judge again.
   if (!verdictResult.ok && opts.dropIncompatible === true) {
     const seen = new Set<string>();
     for (const issue of verdictResult.issues) {
@@ -540,7 +515,7 @@ export function upgradeConfigContent(raw: string, opts: UpgradeOptions): Upgrade
         content = carrier2.text;
       }
       report.untouched =
-        report.removed.length === 0 && report.added.length === 0 && report.addedServe.length === 0 &&
+        report.removed.length === 0 && report.added.length === 0 &&
         report.migrated.length === 0 && report.pinned.length === 0 && report.dropped.length === 0;
       verdictResult = validateConfigText({ text: content, workspaceRoot: opts.workspaceRoot, pluginRoot: opts.pluginRoot });
     }
@@ -565,7 +540,7 @@ export interface InitResult {
   /**
    * "written" | "dry-run" | "skipped" (legacy; no longer produced — an existing valid config is
    * UPGRADED, see "reconciled") |
-   * "corrupt" (existing + unparseable, no --force/--reconcile) |
+   * "corrupt" (existing + unparseable) |
    * "reconciled" (existing + valid, and the config had to change) |
    * "unchanged" (existing + valid, and the config was already current) |
    * "upgrade-invalid" (existing + valid, but the upgraded CANDIDATE fails validation ⇒ nothing was
@@ -618,7 +593,34 @@ export interface InitResult {
   branchModel: BranchModelReport;
   /** `formatBranchModelReport(branchModel)` — the operator-facing rendering. */
   branchModelReport: string;
+  /**
+   * The `.quay/plugin` link step's outcome for THIS run. Three states, never folded into a boolean
+   * (硬规则 3b): `linked` (the link was refreshed), `not-evaluated` (the step RAN and could not
+   * decide — an unknown or source-checkout plugin root) and `not-run` (this outcome path never
+   * reaches the step, so nobody looked). "not-run" ≠ "not-evaluated": the first means no judgment was
+   * attempted, the second means one was attempted and the input was undecidable.
+   */
+  pluginLink: PluginLinkOutcome;
+  /**
+   * The official validator's verdict (`validateConfigText` — the same judge `quay config validate`
+   * runs) on the config text this run produced or would produce:
+   *   true            — the candidate passed (upgrade engine, or a fresh install's generated text);
+   *   false           — the candidate FAILED; the errors ride in `validationIssues`;
+   *   "not-evaluated" — no candidate text existed (a corrupt refusal, a branch-model-only entry).
+   * ⛔ A boolean alone would make "no candidate to judge" read exactly like "judged and passed".
+   */
+  validated: boolean | "not-evaluated";
+  /** The validator's errors when `validated === false` — never silently dropped. */
+  validationIssues?: ConfigIssue[];
 }
+
+/**
+ * Outcome of the `.quay/plugin` link step (see `InitResult.pluginLink`): the two readings
+ * `refreshProjectPluginLink` can produce, plus `not-run` for the outcome paths that never reach the
+ * step. ⛔ `not-run` is NOT `not-evaluated` — the first means nobody looked, the second means someone
+ * looked and the input was undecidable (硬规则 3b: those must never share a value).
+ */
+export type PluginLinkOutcome = ProjectPluginLinkReading | { state: "not-run"; reason: string };
 
 /**
  * Options for the init command.
@@ -626,19 +628,15 @@ export interface InitResult {
 export interface InitOptions {
   /** Project root path (default: CWD). */
   root: string;
-  /** Overwrite existing config. */
-  force: boolean;
+  /**
+   * ⛔ THERE IS NO `force` AND NO `reconcile` (GOAL-029 / AC-330, 人 2026-10-07). The STATE of the
+   * target decides the path — absent ⇒ write, parseable ⇒ upgrade in place, unparseable ⇒ refuse (or
+   * salvage when the caller explicitly asks) — so neither flag selects anything a caller could not
+   * get by simply running init. Keeping either one would re-introduce a second mode whose semantics
+   * drift from the state-based one, which is the defect this whole change removes.
+   */
   /** Print to stdout instead of writing to disk. */
   dryRun: boolean;
-  /**
-   * Bring an EXISTING config up to this version's schema. LEGACY SELECTOR, now inert: GOAL-029
-   * (人 2026-10-07) makes plain `quay init` upgrade an existing valid config, so `reconcile: true`
-   * and `reconcile: false` reach the SAME single engine. The flag is kept for one release so
-   * existing callers keep working; a later task removes it from the CLI/MCP surface (AC-330).
-   *
-   * `force` still wins where both are given: an explicit overwrite is not an upgrade.
-   */
-  reconcile?: boolean;
   /**
    * `--drop-incompatible` (GOAL-029): when the upgraded candidate FAILS validation, delete the user
    * values the validator rejects and retry, instead of refusing. Without it, a user's own
@@ -654,6 +652,19 @@ export interface InitOptions {
    * skipped (the shell's own `refresh-plugin-link` step still owns it until AC-331).
    */
   pluginRoot?: string | null;
+  /**
+   * The PROJECT's name, used for the `.quay/profiles.yml` role session prefixes
+   * (`<project>-task-worker`, …). Defaults to the basename of `root`; `--project <name>` overrides it
+   * when the caller knows the project's name better than its directory's. ⛔ Never an invented
+   * literal, and never quay's own `quay-` names — a third-party project copying those would collide
+   * with quay's sessions, and cross-session delivery addresses peers BY NAME.
+   */
+  project?: string;
+  /**
+   * Where human-facing progress lines go (default `console.log`). The CLI's `--json` mode passes a
+   * stderr sink so stdout carries exactly ONE JSON document; everything else keeps the default.
+   */
+  log?: (line: string) => void;
   /** Provider id override (default: auto-detect). */
   provider?: string;
   /**
@@ -900,23 +911,23 @@ export function generateConfigContent(opts: { providerId: string; providerPath: 
     "  #     probe: \"health\"",
     "",
     "# " + ruleLine(69),
-    "# Section 4: Serve — the web server's bind binding",
+    "# Section 4: Serve — the web server's bind binding (OPTIONAL, COMMENTED OUT)",
     "# " + ruleLine(69),
-    "# OPTIONAL. The web server's bind host/port. Absent ⇒ the declared fallback below (a host on",
-    "# all interfaces, and port 0 = NO CONSTRAINT — the kernel assigns an ephemeral port that is",
-    "# read back from .quay/server.json). This section is PER-CHECKOUT by construction:",
-    "# `.quay/config.yml` is gitignored, so two workspaces on one machine pick different ports.",
+    "# The web server's bind host/port. ⛔ NOT WRITTEN: the uncommented defaults below are exactly the",
+    "# values `resolveServeBinding` falls back to, so writing them would say nothing — and it made a",
+    "# fresh install and an upgrade disagree about whether the section exists at all (AC-330).",
+    "# Uncomment ONLY to pin your own values; the ones shown ARE the effective defaults.",
     "#",
     "# Exactly ONE reader: `resolveServeBinding` (packages/quay/src/serve-binding.ts). An explicit",
     "# command-line `--host` / `--port` still wins over this section; a malformed value here (a",
     "# non-integer port, a blank host) REFUSES the start rather than silently falling back — so",
     "# 「配错了」 and 「没配」 are never the same reading.",
     "#",
-    "serve:",
-    // Emitted from the SAME table the reconcile fills from (SERVE_VERSION_DEFAULTS), whose values are
-    // the ONE fallback constant — a fresh workspace is born carrying exactly what the code falls back
-    // to, so the delivered key cannot drift into a second default.
-    ...Object.entries(SERVE_VERSION_DEFAULTS).map(([k, v]) => `  ${k}: ${versionDefaultLine(v)}`),
+    "# serve:",
+    "#   host: \"0.0.0.0\"   # the declared fallback: listen on all interfaces",
+    "#   port: 0           # 0 = NO CONSTRAINT — the kernel assigns an ephemeral port, read back",
+    "#                     # from .quay/server.json (the section is PER-CHECKOUT: .quay/config.yml",
+    "#                     # is gitignored, so two workspaces on one machine pick different ports)",
     "",
   ];
 
@@ -927,7 +938,7 @@ function ruleLine(len: number): string {
   return "─".repeat(len);
 }
 
-/** Render ONE version-level default value (`LOOP_VERSION_DEFAULTS` / `SERVE_VERSION_DEFAULTS`) as
+/** Render ONE version-level default value (`LOOP_VERSION_DEFAULTS`) as
  *  YAML for the fresh-install template. A string array becomes a flow sequence of double-quoted
  *  scalars (`["a", "b"]`) — `String(v)` would emit `a,b`, which YAML reads back as the single scalar
  *  `a,b` (a list silently becoming a string is the kind of quiet mis-typing the template must not
@@ -1146,7 +1157,9 @@ export function runInit(opts: InitOptions): InitResult {
   // The role session names are derived from THIS project (AC4): a third-party project must not
   // copy quay's literal `quay-*` names, or its sessions collide with quay's own and name-addressed
   // cross-session delivery misroutes. `quay-init.sh` applies the same rule to the file it copies.
-  const profilesContent = generateProfilesContent(path.basename(root));
+  // `--project <name>` overrides the directory basename (the caller may know the project's name
+  // better than its directory's); an absent flag keeps the basename, never an invented literal.
+  const profilesContent = generateProfilesContent(opts.project ?? path.basename(root));
 
   // ── The CONFIG-FREE branch-model entry (gap-upgrade-entry-never-establishes-branch-model) ──────
   // FIRST, before the config-exists refusal: an existing `.quay/config.yml` is this entry's NORMAL
@@ -1170,44 +1183,21 @@ export function runInit(opts: InitOptions): InitResult {
       profilesContent: "",
       branchModel,
       branchModelReport: formatBranchModelReport(branchModel),
+      pluginLink: { state: "not-run", reason: "the config-free branch-model entry touches no config" },
+      validated: "not-evaluated",
     };
   }
 
   // ── What does the target already have? (three-state — AC1; not `fs.existsSync`) ────────────────
   const existing = classifyConfig(configPath);
-  const reconcileMode = opts.reconcile === true && !opts.force;
-
-  // EXISTING + UNPARSEABLE, and the caller asked for neither an overwrite nor a reconcile: stop, and
-  // say WHY. This branch is the whole reason the classification is three-valued — the pre-fix code
-  // answered `existsSync` here and printed "already exists, use --force", which is a true statement
-  // about a DIFFERENT problem (a name conflict) and sent the operator looking for a conflict that
-  // does not exist (硬规则 3b).
-  if (existing.state === "corrupt" && !reconcileMode && !opts.force && !opts.dryRun) {
-    return {
-      outcome: "corrupt",
-      configState: "corrupt",
-      corruptReason: existing.reason,
-      configPath,
-      tasksDir,
-      content: "",
-      launchSettingsPath,
-      launchSettingsContent: "",
-      profilesPath,
-      profilesContent: "",
-      branchModel: { ok: true, skipped: true, defaultBranch: null, entries: [], remedy: null },
-      branchModelReport: "",
-    };
-  }
 
   // ── EXISTING + USABLE ⇒ the SINGLE UPGRADE ENGINE (GOAL-029 single engine) ─────────────────────
-  // Plain `quay init`, `--reconcile` and `--drop-incompatible` all land here — there is no second
-  // upgrade path. The candidate is computed IN MEMORY, judged by the SAME validator `quay config
-  // validate` runs, and written only when it validates: a failed upgrade leaves the original bytes
-  // untouched and exits non-zero (硬规则 3b — "could not be made valid" is its own outcome, and the
-  // operator is told WHICH field failed rather than getting a generic refusal).
-  //
-  // `--force` is NOT an upgrade: it is excluded here and falls through to the wholesale rewrite.
-  if (existing.state === "valid" && !opts.force) {
+  // Plain `quay init` and `--drop-incompatible` land here — there is no second upgrade path. The
+  // candidate is computed IN MEMORY, judged by the SAME validator `quay config validate` runs, and
+  // written only when it validates: a failed upgrade leaves the original bytes untouched and exits
+  // non-zero (硬规则 3b — "could not be made valid" is its own outcome, and the operator is told
+  // WHICH field failed rather than getting a generic refusal).
+  if (existing.state === "valid") {
     const up = upgradeConfigContent(existing.raw ?? "", {
       workspaceRoot: root,
       // ⛔ `undefined`, never `null`: the validator reads `null` as "no plugin root could be resolved"
@@ -1216,6 +1206,18 @@ export function runInit(opts: InitOptions): InitResult {
       pluginRoot: opts.pluginRoot ?? undefined,
       dropIncompatible: opts.dropIncompatible === true,
     });
+    // The `.quay/plugin` link refresh runs AFTER the config write succeeded (GOAL-029 ordering): a
+    // link pointing at a version whose config upgrade failed would name a runtime the project is not
+    // configured for. Only when the plugin root is known — the shell's own step still owns the link
+    // until AC-331; an unknown root is SKIPPED here, and the outcome rides on `pluginLink` so the
+    // JSON report can carry it (硬规则 3b: "skipped" is its own state, never folded into "linked").
+    let pluginLink: PluginLinkOutcome = {
+      state: "not-run",
+      reason: "the upgrade did not reach the link step (nothing was written, or this was a dry run)",
+    };
+    if (up.ok && !opts.dryRun && opts.pluginRoot) {
+      pluginLink = refreshProjectPluginLink({ wsRoot: root, pluginRoot: opts.pluginRoot, dryRun: false, log: opts.log });
+    }
     const base = {
       configState: "valid" as const,
       configPath,
@@ -1227,6 +1229,9 @@ export function runInit(opts: InitOptions): InitResult {
       branchModel: { ok: true, skipped: true, defaultBranch: null, entries: [], remedy: null },
       branchModelReport: "",
       upgrade: up.report,
+      pluginLink,
+      validated: up.ok,
+      ...(up.ok ? {} : { validationIssues: up.issues }),
     };
     if (!up.ok) {
       return { outcome: "upgrade-invalid", content: up.content, upgradeIssues: up.issues, ...base };
@@ -1247,10 +1252,16 @@ export function runInit(opts: InitOptions): InitResult {
     return { outcome: up.report.untouched ? "unchanged" : "reconciled", content: up.content, ...base };
   }
 
-  // EXISTING + UNPARSEABLE, with an explicit overwrite/reconcile decision: salvage by rebuild. The
-  // unreadable bytes are preserved beside the new file rather than discarded — "the parser could not
-  // read it" is not evidence that the content is worthless (the SPEC's §3.3 asks for exactly this
-  // salvage step; the backup is what makes it non-destructive).
+  // ── EXISTING + UNPARSEABLE ⇒ salvage by rebuild, automatically (GOAL-029 状态自动决定) ────────────
+  // The STATE decides; no flag asks for this. It has to be automatic: an unreadable config is the one
+  // condition the repair entry exists for (the MCP `init` tool is REGISTERED on the degraded path so
+  // it can be reached exactly here), and with the retired selectors gone there is no in-band way to
+  // request a rebuild — leaving a refusal would be a dead end.
+  //
+  // The unreadable bytes are preserved beside the new file rather than discarded — "the parser could
+  // not read it" is not evidence that the content is worthless (the SPEC's §3.3 asks for exactly this
+  // salvage step; the backup is what makes it non-destructive). The reason is relayed VERBATIM on the
+  // result so the operator is told what actually happened, never "already exists" (硬规则 3b).
   let corruptBackupPath: string | undefined;
   if (existing.state === "corrupt" && !opts.dryRun) {
     corruptBackupPath = `${configPath}.corrupt-${Date.now()}`;
@@ -1281,6 +1292,8 @@ export function runInit(opts: InitOptions): InitResult {
       profilesContent: "",
       branchModel,
       branchModelReport,
+      pluginLink: { state: "not-run", reason: "init refused before the link step (nothing was written)" },
+      validated: "not-evaluated",
     };
   }
 
@@ -1296,8 +1309,21 @@ export function runInit(opts: InitOptions): InitResult {
   // Generate config content.
   const content = generateConfigContent({ providerId, providerPath, isNode, isGo });
 
+  // Judge the FRESH text with the SAME validator `quay config validate` runs, so the report's
+  // `validated` field is a real reading rather than a claim. (The upgrade path judges its candidate
+  // inside `upgradeConfigContent`; this path used to judge nothing at all.) A failure is REPORTED,
+  // not written over: closing the fresh-install write path is AC-331's job, and silently refusing
+  // here would be a second, unseen policy. The issues ride on `validationIssues` either way.
+  const freshVerdict = validateConfigText({ text: content, workspaceRoot: root, pluginRoot: opts.pluginRoot ?? undefined });
+
   if (opts.dryRun) {
-    return { outcome: "dry-run", configState: existing.state, configPath, tasksDir, content, launchSettingsPath, launchSettingsContent, profilesPath, profilesContent, branchModel, branchModelReport };
+    return {
+      outcome: "dry-run", configState: existing.state, configPath, tasksDir, content,
+      launchSettingsPath, launchSettingsContent, profilesPath, profilesContent, branchModel, branchModelReport,
+      pluginLink: { state: "not-run", reason: "a dry run writes nothing, so the link step is not run" },
+      validated: freshVerdict.ok,
+      ...(freshVerdict.ok ? {} : { validationIssues: freshVerdict.issues }),
+    };
   }
 
   // Write config.
@@ -1310,18 +1336,18 @@ export function runInit(opts: InitOptions): InitResult {
   }
 
   // Lay down .claude/launch.settings.json (with bypassPermissions) so a cold-start
-  // inner does not hit a permission prompt on its own loop scripts. Create-if-absent
-  // on a fresh init; --force overwrites a stale copy. Never silently overwrite a
-  // user's launch settings on a plain re-init (that path returns "skipped" anyway).
-  if (opts.force || !fs.existsSync(launchSettingsPath)) {
+  // inner does not hit a permission prompt on its own loop scripts.
+  // ⛔ CREATE-IF-ABSENT, never overwrite (AC-330): the old `--force` clause is gone with the flag, so
+  // an existing file is the user's and is left alone. A stale copy is a thing to inspect, not a thing
+  // init silently clobbers — the same "preserve what you do not own" discipline the config follows.
+  if (!fs.existsSync(launchSettingsPath)) {
     fs.mkdirSync(path.dirname(launchSettingsPath), { recursive: true });
     fs.writeFileSync(launchSettingsPath, launchSettingsContent, "utf8");
   }
 
   // Lay down .quay/profiles.yml (the profile carrier, AC154) so quay-launch.sh can
-  // resolve launcher/model/--bare/-n/unset + flag-only params. Same create-if-absent /
-  // --force semantics as launch.settings.json.
-  if (opts.force || !fs.existsSync(profilesPath)) {
+  // resolve launcher/model/--bare/-n/unset + flag-only params. Same create-if-absent discipline.
+  if (!fs.existsSync(profilesPath)) {
     fs.mkdirSync(path.dirname(profilesPath), { recursive: true });
     fs.writeFileSync(profilesPath, profilesContent, "utf8");
   }
@@ -1329,7 +1355,11 @@ export function runInit(opts: InitOptions): InitResult {
   return {
     outcome: "written",
     configState: existing.state,
-    ...(corruptBackupPath ? { corruptReason: `unparseable config preserved at ${corruptBackupPath}` } : {}),
+    // The salvage step must be VISIBLE (the operator would otherwise have to notice the extra file
+    // themselves), and it relays the parser's own reason — never "already exists" (硬规则 3b).
+    ...(corruptBackupPath
+      ? { corruptReason: `unreadable config (${existing.reason ?? "unparseable"}) preserved at ${corruptBackupPath}` }
+      : {}),
     configPath,
     tasksDir,
     content,
@@ -1339,6 +1369,89 @@ export function runInit(opts: InitOptions): InitResult {
     profilesContent,
     branchModel,
     branchModelReport,
+    pluginLink: { state: "not-run", reason: "the fresh-install path does not refresh the .quay/plugin link (the shell step owns it until AC-331)" },
+    validated: freshVerdict.ok,
+    ...(freshVerdict.ok ? {} : { validationIssues: freshVerdict.issues }),
+  };
+}
+
+// ── The ONE init report (AC-330) ────────────────────────────────────────────────────────────────────
+//
+// `quay init --json` and the MCP `init` tool must hand back the SAME document, and that document must
+// answer the questions an operator (or a script) actually has: what happened, which keys were filled /
+// migrated / removed, what was warned about, whether the result validated, and what the `.quay/plugin`
+// link did. Two builders would drift the moment one of them learned a new field — so there is ONE, and
+// both surfaces call it.
+export interface InitReport {
+  /** The outcome token (`written` / `reconciled` / `unchanged` / `upgrade-invalid` / `dry-run` / …). */
+  outcome: string;
+  /** The three-state classification of the config BEFORE this run. */
+  configState: ConfigState;
+  /** Why the config was unreadable, and where the salvage copy went — null when it was readable. */
+  corruptReason: string | null;
+  /** True when nothing was written to disk. */
+  dryRun: boolean;
+  /**
+   * The official validator's verdict on the config text this run produced/would produce.
+   * `"not-evaluated"` when there was no candidate to judge.
+   */
+  validated: boolean | "not-evaluated";
+  /** Validator issues (errors AND warnings) on the candidate — empty when it passed. */
+  issues: ConfigIssue[];
+  /** Operator-facing warnings — unrecognized top-level keys are kept, never silently dropped. */
+  warnings: string[];
+  configPath: string;
+  tasksDir: string;
+  /** `loop:` keys filled from the version defaults (absent before this run). */
+  added: string[];
+  /** `key: old -> new` rewrites from the declared migration table. */
+  migrated: string[];
+  /** Retired keys deleted. */
+  removed: string[];
+  /** `providers.native.env.*` carrier-dir pins backfilled. */
+  pinned: string[];
+  /** Keys deleted by `--drop-incompatible`. */
+  dropped: string[];
+  /** Unrecognized top-level keys, PRESERVED and reported. */
+  unknownKeys: string[];
+  /** The `.quay/plugin` link step's outcome (three states, see `PluginLinkOutcome`). */
+  pluginLink: PluginLinkOutcome;
+  /** The generated config text — present only in a dry run (nothing else has a use for the bytes). */
+  content?: string;
+}
+
+/**
+ * Build the ONE init report from a `runInit` result. `dryRun` is passed in rather than read off the
+ * result because an UPGRADE under `--dry-run` reports `reconciled`/`unchanged` (the same outcome
+ * tokens as a real write), so the outcome alone cannot answer "did anything touch the disk".
+ */
+export function buildInitReport(result: InitResult, o: { dryRun: boolean }): InitReport {
+  const issues = result.validationIssues ?? result.upgradeIssues ?? [];
+  const unknownKeys = result.upgrade?.unknownKeys ?? [];
+  const warnings = [
+    ...unknownKeys.map((k) => `unrecognized top-level config key "${k}" — kept as-is (not deleted)`),
+    ...(result.validated === false
+      ? issues.filter((i) => i.severity === "error").map((i) => `candidate config did not validate: ${i.field} — ${i.message}`)
+      : []),
+  ];
+  return {
+    outcome: result.outcome,
+    configState: result.configState,
+    corruptReason: result.corruptReason ?? null,
+    dryRun: o.dryRun,
+    validated: result.validated,
+    issues,
+    warnings,
+    configPath: result.configPath,
+    tasksDir: result.tasksDir,
+    added: result.upgrade?.added ?? [],
+    migrated: result.upgrade?.migrated ?? [],
+    removed: result.upgrade?.removed ?? [],
+    pinned: result.upgrade?.pinned ?? [],
+    dropped: result.upgrade?.dropped ?? [],
+    unknownKeys,
+    pluginLink: result.pluginLink,
+    ...(o.dryRun ? { content: result.content } : {}),
   };
 }
 
@@ -1417,8 +1530,8 @@ Next steps:
 // "把「程序」收进 TS，把「胶水」留在 bash" (SPEC-architecture-consolidation §2 P4) — and the logic lives
 // here, in Core, so there is ONE implementation of each step.
 //
-// WHY NOT `runInit` ABOVE. `runInit` is the provider-map SCAFFOLDER: fresh install, `--reconcile`,
-// branch model. The functions below are the shell entry's INCREMENTAL-UPGRADE steps — they edit an
+// WHY NOT `runInit` ABOVE. `runInit` is the provider-map SCAFFOLDER: fresh install, in-place
+// upgrade, branch model. The functions below are the shell entry's INCREMENTAL-UPGRADE steps — they edit an
 // EXISTING consumer's `.quay/config.yml` in place (loop values, carrier-dir pins, the retired
 // runtime binding) and read small fields back out of it for shell variables. They are deliberately
 // NOT folded into `runInit`: the shell entry's ORDERING, its report LINES and its dry-run semantics
@@ -1673,32 +1786,32 @@ export interface ReconcileConfigFileOpts {
  * and provider binding migrated, but `quay config validate` still failed with
  * `loop.board — Missing required field` / `loop.gates — Missing required field`: those are VERSION-
  * LEVEL defaults (`LOOP_VERSION_DEFAULTS`), and the only things that delivered them to an existing
- * config were `quay init --reconcile` and the MCP `init` tool — never the script. `ensureLoopConfig`
+ * config were the CLI and the MCP `init` tool — never the script. `ensureLoopConfig`
  * above is deliberately the four project-DERIVED values and must stay so (its writer drops comments).
  * So the documented upgrade ("re-run /quay:init") left the official validator red until the user
  * discovered a third, hidden command.
  *
- * Same function the CLI/MCP reconcile uses (`reconcileConfigContent`) — ONE implementation, no second
+ * Same function the CLI/MCP upgrade uses (`reconcileConfigContent`) — ONE implementation, no second
  * copy: comment-preserving, per-key, and a no-op reconcile writes NOTHING (byte-identical config).
  *
  * NOT-EVALUATED is a voiced state, not a pass: an absent or unparseable config is REPORTED as such and
- * left untouched (a corrupt file is `quay init --reconcile`'s salvage-by-rebuild job, which keeps the
- * broken bytes beside the new file — not something a shell step should decide silently).
+ * left untouched (salvaging a corrupt file is `quay init`'s state-based job — it rebuilds from the
+ * version defaults and keeps the broken bytes beside the new file — not something a shell step should
+ * decide silently).
  */
 export function reconcileConfigFile(o: ReconcileConfigFileOpts): void {
   const cls = classifyConfig(o.cfgPath);
   if (cls.state !== "valid") {
-    console.log(`  reconcile: NOT-EVALUATED — .quay/config.yml is ${cls.state}${cls.state === "corrupt" ? ` (${cls.reason})` : ""}; left untouched (use \`quay init --reconcile\` to salvage)`);
+    console.log(`  reconcile: NOT-EVALUATED — .quay/config.yml is ${cls.state}${cls.state === "corrupt" ? ` (${cls.reason})` : ""}; left untouched (run \`quay init\` in the project to rebuild it from this version's defaults)`);
     return;
   }
-  const { content, report } = reconcileConfigContent(cls.raw ?? "", { serve: false });
+  const { content, report } = reconcileConfigContent(cls.raw ?? "");
   if (report.unchanged) {
     console.log("  unchanged: .quay/config.yml (already current for this version of quay — version-level defaults present, not rewritten)");
     return;
   }
   const lines = [
     ...report.added.map((k) => `loop.${k}`),
-    ...report.addedServe.map((k) => `serve.${k}`),
     ...report.migrated.map((m) => `loop.${m}`),
   ];
   if (o.dryRun) {
@@ -1930,6 +2043,12 @@ export interface ProjectPluginLinkOpts {
   /** The plugin root THIS init run executes from (`CLAUDE_PLUGIN_ROOT` / `--plugin-root`). */
   pluginRoot: string | null;
   dryRun: boolean;
+  /**
+   * Where the human-facing lines go (default `console.log`). ⛔ `quay init --json` must put ONE
+   * parseable JSON document on stdout, so its caller passes a sink that writes to stderr — otherwise
+   * this step's reporting would corrupt the machine-readable output it promises.
+   */
+  log?: (line: string) => void;
 }
 
 /**
@@ -1942,6 +2061,7 @@ export interface ProjectPluginLinkOpts {
  * own arbitrary user content at that name.
  */
 export function refreshProjectPluginLink(o: ProjectPluginLinkOpts): ProjectPluginLinkReading {
+  const log = o.log ?? ((line: string) => console.log(line));
   const linkPath = path.join(o.wsRoot, ".quay", "plugin");
 
   let existing: fs.Stats | null = null;
@@ -1970,17 +2090,17 @@ export function refreshProjectPluginLink(o: ProjectPluginLinkOpts): ProjectPlugi
   const reading = decide();
 
   if (reading.state === "not-evaluated") {
-    console.log(`  project-plugin-link: NOT-EVALUATED — ${reading.reason} (existing link left unchanged)`);
+    log(`  project-plugin-link: NOT-EVALUATED — ${reading.reason} (existing link left unchanged)`);
     return reading;
   }
 
   if (existing && !existing.isSymbolicLink()) {
-    console.log(`  project-plugin-link: REFUSED — ${linkPath} exists and is not a symlink (left unchanged)`);
+    log(`  project-plugin-link: REFUSED — ${linkPath} exists and is not a symlink (left unchanged)`);
     return { state: "not-evaluated", reason: `${linkPath} exists and is not a symlink` };
   }
 
   if (o.dryRun) {
-    console.log(
+    log(
       currentTarget === reading.pluginRoot
         ? `  would-keep: .quay/plugin -> ${reading.pluginRoot} (v${reading.version ?? "?"}; already current)`
         : `  would-link: .quay/plugin -> ${reading.pluginRoot} (v${reading.version ?? "?"})`,
@@ -1993,7 +2113,7 @@ export function refreshProjectPluginLink(o: ProjectPluginLinkOpts): ProjectPlugi
     try { fs.rmSync(linkPath, { force: true }); } catch { /* recreate below */ }
   }
   fs.symlinkSync(reading.pluginRoot, linkPath);
-  console.log(`  linked: .quay/plugin -> ${reading.pluginRoot} (v${reading.version ?? "?"} — the plugin root this init ran from)`);
+  log(`  linked: .quay/plugin -> ${reading.pluginRoot} (v${reading.version ?? "?"} — the plugin root this init ran from)`);
   return reading;
 }
 

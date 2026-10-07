@@ -53,7 +53,7 @@ import { connectProvider } from "./provider-client.ts";
 import { resolveProviderEnv } from "./provider-env.ts";
 import { type ConnectedProvider, registerAllHandlers, registerConfigHandlers } from "./mcp-handlers.ts";
 import { resolvePluginScriptExec } from "./plugin-root.ts";
-import { runInit } from "./init.ts";
+import { runInit, buildInitReport } from "./init.ts";
 import { readFanInAttempts } from "./observation.ts";
 
 // QX-035 (experiment 4, iteration 10): read package version at startup for
@@ -232,65 +232,44 @@ function registerBootstrapHandlers(server: McpServer): void {
     "init",
     {
       description:
-        "Initialize or reconcile a quay workspace's config surface at an explicit `root` — the ONE entry " +
-        "point that works even when `.quay/config.yml` is absent or unparseable (which is why it is " +
+        "Initialize, upgrade or repair a quay workspace's config surface at an explicit `root` — the ONE " +
+        "entry point that works even when `.quay/config.yml` is absent or unparseable (which is why it is " +
         "registered before any config is read, and why `root` is required rather than taken from the " +
-        "loaded config). Mirrors the `quay init` CLI. With `reconcile` (default true) an EXISTING config " +
-        "is brought up to this version's requirements instead of being refused: keys this version added " +
-        "are filled from the defaults, values this version considers incompatible are migrated, and every " +
-        "other key and comment is left untouched (a config already current is not rewritten at all). An " +
-        "unparseable config is rebuilt from defaults with the broken file preserved beside it as " +
-        "`config.yml.corrupt-<timestamp>`. Pass `reconcile: false` to get the strict refusal instead, or " +
-        "`dryRun: true` to see what would be written without writing anything.",
+        "loaded config). Mirrors the `quay init` CLI and returns the SAME JSON report that CLI's `--json` " +
+        "mode prints. The target's STATE decides what happens: an ABSENT config is written fresh; a " +
+        "PARSEABLE one is brought up to this version's requirements (keys this version added are filled " +
+        "from the defaults, retired keys are deleted, values this version considers incompatible are " +
+        "migrated, and every other key and comment is left untouched — a config already current is not " +
+        "rewritten at all); an UNPARSEABLE one is rebuilt from the defaults with the broken file preserved " +
+        "beside it as `config.yml.corrupt-<timestamp>`. There is no overwrite flag and no reconcile " +
+        "selector. `dryRun: true` reports what would be written without touching anything.",
       inputSchema: {
         root: z.string().describe(
-          "Absolute path of the workspace to initialize/reconcile. Required — on the degraded-startup path this tool exists for, there is no loaded config to derive it from."
+          "Absolute path of the workspace to initialize/upgrade. Required — on the degraded-startup path this tool exists for, there is no loaded config to derive it from."
         ),
-        reconcile: z.boolean().optional().describe(
-          "Bring an existing config up to this version's defaults (default: true). false = refuse an existing config the way a bare `quay init` does."
+        project: z.string().optional().describe(
+          "Project name used for the `.quay/profiles.yml` role session prefixes (default: the basename of `root`)."
         ),
-        force: z.boolean().optional().describe("Overwrite an existing config wholesale (default: false). Wins over `reconcile` when both are given."),
         dryRun: z.boolean().optional().describe("Report what would be written without touching the disk (default: false)."),
       },
     },
-    async ({ root, reconcile, force, dryRun }) => {
+    async ({ root, project, dryRun }) => {
       try {
-        const result = runInit({
-          root,
-          force: force === true,
-          reconcile: reconcile !== false,
-          dryRun: dryRun === true,
-        });
-        const payload = {
-          outcome: result.outcome,
-          configState: result.configState,
-          corruptReason: result.corruptReason ?? null,
-          configPath: result.configPath,
-          tasksDir: result.tasksDir,
-          added: result.upgrade?.added ?? [],
-          addedServe: result.upgrade?.addedServe ?? [],
-          migrated: result.upgrade?.migrated ?? [],
-          removed: result.upgrade?.removed ?? [],
-          pinned: result.upgrade?.pinned ?? [],
-          unknownKeys: result.upgrade?.unknownKeys ?? [],
-          dropped: result.upgrade?.dropped ?? [],
-          // The validator's verdict on the UPGRADED candidate — non-empty only when the upgrade was
-          // refused because the candidate did not validate (nothing was written; GOAL-029).
-          upgradeIssues: result.upgradeIssues ?? [],
-          content: dryRun === true ? result.content : undefined,
-        };
+        const result = runInit({ root, dryRun: dryRun === true, project });
+        // ⛔ THE SAME DOCUMENT `quay init --json` prints — one builder (`buildInitReport`), so the two
+        // surfaces cannot drift apart field by field.
+        const report = buildInitReport(result, { dryRun: dryRun === true });
         // A refusal is a NORMAL result of a well-formed judgment (`isError: false` would claim quay
         // did what was asked); only the outcomes that leave the caller with nothing to act on
         // report as errors.
         const refused =
-          result.outcome === "corrupt" ||
           result.outcome === "skipped" ||
           result.outcome === "upgrade-invalid" ||
           result.outcome === "branch-model-blocked";
         return {
           ...(refused ? { isError: true } : {}),
-          content: [{ type: "text" as const, text: JSON.stringify(payload, null, 2) }],
-          structuredContent: payload as unknown as Record<string, unknown>,
+          content: [{ type: "text" as const, text: JSON.stringify(report, null, 2) }],
+          structuredContent: report as unknown as Record<string, unknown>,
         };
       } catch (err) {
         return {

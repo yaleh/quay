@@ -237,7 +237,11 @@ export function audit(root: string): AuditReport {
   for (const e of entries) states[e.state] += 1;
   return {
     mode: "config-key-consumer-audit",
-    writer: `${WRITER_REL} + ${INIT_REL} (serve: section)`,
+    // ⛔ `+ ${INIT_REL} (serve: section)` was TRUE until AC-330 removed that writer face: init no
+    // longer writes ANY serve key (every candidate value equalled the resolver's fallback). The
+    // label now reports only the face that actually writes, so a PASS cannot claim a writer that
+    // does not exist.
+    writer: WRITER_REL,
     consumerDirs: CONSUMER_DIRS,
     keys_total: entries.length,
     no_consumer_to_wire: states["no-consumer-to-wire"],

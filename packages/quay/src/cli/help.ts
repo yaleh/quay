@@ -61,7 +61,7 @@ export function printHelp(sub) {
 
 Usage:
   quay --version | -V
-  quay init [--force] [--dry-run] [--root <path>]   (scaffold an EMPTY task store; the loop install is the /quay:init skill, NOT this command)
+  quay init [--dry-run] [--json] [--project <name>] [--root <path>]   (scaffold an EMPTY task store; the loop install is the /quay:init skill, NOT this command)
   quay task list [--status <status>] [--label <label>] [--prefix <prefix>] [--sort id|status|updated] [--search <query>] [--page-size <n>] [--root <path>] [--json|--format json]
   quay task view <task-id> [--json]
   quay task create <task-id> --title <title> [--body <text>|--body-file <path>] [--status <status>] [--labels <a,b>] [--parent <id>] [--children <a,b>] [--depends-on <a,b>] [--goal-ac <AC-NNN>] [--extra <json>] [--json]
@@ -262,12 +262,24 @@ Examples:
     process.stdout.write(`quay init — scaffold a new quay workspace
 
 Usage:
-  quay init [--force] [--dry-run] [--adopt-branch-model] [--root <path>]
+  quay init [--drop-incompatible] [--dry-run] [--json] [--project <name>] [--adopt-branch-model] [--root <path>]
   quay init --branch-model-only [--adopt-branch-model] [--dry-run] [--root <path>]
   quay init --branch-model-only --doc-branch-name <name> [--dry-run] [--root <path>]
 
+The STATE of the target decides what happens: an absent config is written, a parseable one is
+upgraded in place (comment-preserving, validated before the write), an unreadable one is rebuilt
+from this version's defaults with the broken bytes preserved beside it. There is no overwrite
+flag and no reconcile selector — re-running on a current project changes nothing.
+
 Flags:
-  --force      Overwrite existing .quay/config.yml if present.
+  --drop-incompatible
+               When the upgraded config does not validate, delete the user values the validator
+               rejects and retry instead of failing. Nothing is deleted silently.
+  --json       Print ONE machine-readable JSON report on stdout (the same document the MCP
+               "init" tool returns); human-facing progress goes to stderr.
+  --project <name>
+               Project name for the .quay/profiles.yml role session prefixes (default: the
+               basename of the target root).
   --doc-branch-name <name>
                (with --branch-model-only) Establish the DOC-ONLY work branch: when the main
                checkout is sitting on the landing baseline 'develop', create <name> at that
@@ -305,7 +317,9 @@ Description:
   every task structurally un-landable (anti-drift reports thousands of
   violations that are not the task's work).
 
-  If .quay/config.yml already exists, refuses to overwrite unless --force.
+  If .quay/config.yml already exists it is UPGRADED in place; an unreadable one is rebuilt from
+  this version's defaults with the broken bytes preserved beside it. Nothing is overwritten
+  wholesale, and a config that is already current is not rewritten at all.
 
   ${INIT_BRANCH_MODEL_ONLY_PROSE}
 

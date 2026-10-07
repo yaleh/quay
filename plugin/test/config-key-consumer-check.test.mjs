@@ -21,6 +21,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
+import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -160,16 +161,29 @@ test("serve: writer face — extractServeVersionKeys reads the SERVE_VERSION_DEF
   assert.deepEqual(extractServeVersionKeys("loop:\n  board: native\n"), []);
 });
 
-test("serve: the real-repo audit ENUMERATES serve.host / serve.port and finds them consumed", () => {
+// ⛔ AC-330 INVERTS this test. It used to require the real-repo audit to ENUMERATE `serve.host` /
+// `serve.port` — i.e. to hold that init.ts WRITES those keys (from `SERVE_VERSION_DEFAULTS`). That
+// table is gone: no quay surface writes a `serve:` key any more, because every candidate value
+// equalled the resolver's own fallback (`serve-binding.ts`), so writing one said nothing and made a
+// fresh install and an upgrade disagree about the section's existence. What must hold now is the
+// MIRROR: the reader half stays wired (`resolveServeBinding` still reads a user's pinned values),
+// while the delivered-key audit no longer claims a writer face that does not write.
+test("serve: the reader stays wired, and the audit no longer enumerates serve.* as a delivered key", () => {
   const res = run("--json");
   assert.equal(res.status, 0, `real-repo audit must pass:\n${res.stdout}${res.stderr}`);
   const out = JSON.parse(res.stdout);
-  const byKey = new Map(out.entries.map((e) => [e.key, e]));
-  assert.ok(byKey.has("serve.host"), `serve.host must be enumerated, got ${[...byKey.keys()].join(", ")}`);
-  assert.ok(byKey.has("serve.port"), "serve.port must be enumerated");
-  assert.equal(byKey.get("serve.host").state, "has-consumer", "resolveServeBinding reads it");
-  assert.equal(byKey.get("serve.port").state, "has-consumer");
-  assert.match(out.writer, /packages\/quay\/src\/init\.ts/, "the second writer face is named in the report");
+  const keys = out.entries.map((e) => e.key);
+  assert.ok(!keys.includes("serve.host"), `serve.host is no longer DELIVERED by any writer, got ${keys.join(", ")}`);
+  assert.ok(!keys.includes("serve.port"), "…and neither is serve.port");
+  assert.ok(!/init\.ts/.test(out.writer), `the report must not name a writer face that writes nothing (got: ${out.writer})`);
+  assert.match(out.writer, /quay-init\.sh/, "the shell writer face is still named");
+
+  // The READER half is untouched: a user who pinned serve.host/port still gets it honored. Asserted
+  // against the reader's own source, so this half cannot be dropped silently by the same edit that
+  // removed the writer.
+  const readerSrc = fs.readFileSync(path.join(REPO_ROOT, "packages", "quay", "src", "serve-binding.ts"), "utf8");
+  assert.match(readerSrc, /const serveHost =/, "resolveServeBinding still binds serve.host");
+  assert.match(readerSrc, /const servePort =/, "…and serve.port");
 });
 
 test("AC3 — the three states are distinguishable (has-consumer / no-consumer-to-wire / documented-with-reason)", () => {

@@ -1959,15 +1959,40 @@ async function main() {
         `AC4[${shape}]: the diagnostic 'config_validate' is registered on the degraded path too (got: [${toolNames.join(", ")}])`
       );
 
+      // AC-330: the MCP tool's schema must NOT carry a reconcile property — the state of the target
+      // decides, so there is nothing for the caller to select. (Read off the SCHEMA, not off a call
+      // result: an argument the schema does not declare is simply dropped, so a passing call proves
+      // nothing about whether the mode is still there.)
+      const initTool = (toolsResult.tools ?? []).find((t) => t.name === "init");
+      const initProps = Object.keys(initTool?.inputSchema?.properties ?? {});
+      assert(
+        !initProps.includes("reconcile"),
+        `AC4[${shape}]: the MCP init schema must not declare \`reconcile\` (got: [${initProps.join(", ")}])`
+      );
+      assert(
+        !initProps.includes("force"),
+        `AC4[${shape}]: …nor the retired overwrite selector (got: [${initProps.join(", ")}])`
+      );
+
       const repaired = await brokenCfgClient.callTool({
         name: "init",
-        arguments: { root: brokenRoot, reconcile: true },
+        arguments: { root: brokenRoot },
       });
       assert(repaired.isError !== true, `AC4[${shape}]: init on the broken workspace succeeds (got: ${JSON.stringify(repaired.structuredContent)})`);
       assert(
         repaired.structuredContent?.configState === expectedState,
         `AC4[${shape}]: the repair reports the pre-state honestly (want ${expectedState}, got: ${repaired.structuredContent?.configState})`
       );
+
+      // The SAME report document the CLI's `--json` prints (AC-330): one builder, so the two surfaces
+      // cannot drift apart field by field. The field set is asserted here; init.test.mjs owns the
+      // per-field semantics.
+      for (const field of ["outcome", "configState", "dryRun", "validated", "issues", "warnings", "pluginLink"]) {
+        assert(
+          field in (repaired.structuredContent ?? {}),
+          `AC4[${shape}]: the MCP report must carry \`${field}\` like the CLI's --json does (got: ${Object.keys(repaired.structuredContent ?? {}).join(", ")})`
+        );
+      }
 
       const cfgPath = path.join(brokenRoot, ".quay", "config.yml");
       const reparsed = YAML.parse(fs.readFileSync(cfgPath, "utf8"));

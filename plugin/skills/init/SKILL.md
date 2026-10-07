@@ -33,20 +33,23 @@ This retires the failure mode that made the same fix necessary twice: a default 
 fresh-install template but never to the upgrade path was unreachable for every project initialized
 before it, no matter how many times init re-ran.
 
-Two equivalent surfaces, both calling the same `runInit`:
+Three equivalent surfaces, all calling the same `runInit` and returning the SAME JSON report:
 
 ```
-quay init --reconcile --root <dir>              # CLI
-# MCP: the `init` tool with { "root": "<dir>" }   (reconcile is that tool's DEFAULT)
+quay init --root <dir>                          # CLI
+quay init --root <dir> --json                   # CLI, machine-readable report on stdout
+# MCP: the `init` tool with { "root": "<dir>" }
 ```
 
-⛔ Neither needs a READABLE config — that is the point. An ABSENT config is written fresh; an
-UNPARSEABLE one is rebuilt from the defaults with the broken bytes preserved beside it as
-`.quay/config.yml.corrupt-<timestamp>`; a config that exists but cannot be read is reported as
-exactly that, never as a name conflict ("already exists, use --force" was the old — and wrong —
-answer, because it sends you looking for a conflict that does not exist). The MCP `init` tool is
-registered BEFORE any config is read, so it is reachable in precisely the workspace where every other
-tool is not (see `packages/quay/src/mcp-server.ts`, the two-phase `startMcpServer`).
+⛔ `--reconcile` 与 `--force` 已移除 (GOAL-029 / AC-330, 人 2026-10-07). The target's STATE
+decides everything, so neither flag selects anything a plain run would not already get; passing one is
+now a hard error. Neither surface needs a READABLE config — that is the point. An ABSENT config is
+written fresh; an EXISTING PARSEABLE one is upgraded in place (comment-preserving, validated before
+the write); an UNPARSEABLE one is rebuilt from the defaults with the broken bytes preserved beside it
+as `.quay/config.yml.corrupt-<timestamp>`. The real cause is always reported — never a name conflict
+("already exists, use --force" was the old, and wrong, answer). The MCP `init` tool is registered
+BEFORE any config is read, so it is reachable in precisely the workspace where every other tool is
+not (see `packages/quay/src/mcp-server.ts`, the two-phase `startMcpServer`).
 
 **The script delivers the VERSION-LEVEL `loop:` defaults too.** `bash quay-init.sh` is what this skill
 runs, and on an EXISTING config its upgrade does two things in order: `ensureLoopConfig` updates the
@@ -56,12 +59,17 @@ four project-derived values (`repo_root`/`test_command`/`tmux_session`/`worktree
 `reconcileConfigContent` the CLI/MCP use. A config that is already current is not rewritten, and the
 report says so (`unchanged: .quay/config.yml (already current …)`); `--dry-run` reports
 `would-reconcile: …` and writes nothing. An unparseable config is reported `NOT-EVALUATED` and left
-untouched (use `quay init --reconcile` to salvage it). Before this step existed, re-running the script
-after a plugin upgrade left `loop.board`/`loop.gates` absent and `quay config validate` red
+untouched (run `quay init` in the project to rebuild it from this version's defaults). Before this
+step existed, re-running the script after a plugin upgrade left `loop.board`/`loop.gates` absent and
+`quay config validate` red
 (gap-quay-init-sh-upgrade-leaves-version-level-loop-defaults-unfilled, measured 2026-10-07).
-The `serve:` section's version-level defaults are still delivered ONLY by `quay init --reconcile` / the
-MCP `init` tool: a fresh script install writes no `serve:` section, so filling one on a re-run would make
-the script non-idempotent over its own output.
+
+⛔ **There is no `serve:` version-default table any more** (AC-330). Every candidate value equalled
+the resolver's own fallback (`SERVE_BINDING_FALLBACK` in `serve-binding.ts`), so writing the section
+delivered nothing and made a fresh install and an upgrade disagree about whether it exists — the
+fresh-install template used to emit `serve.host`/`serve.port` while the script's install did not.
+Now neither writes it: an absent section IS the fallback. A user who pins their own `host:`/`port:`
+keeps it verbatim (nothing writes under `serve:` on upgrade).
 
 ## Write surface (the six-file closed set)
 
@@ -237,7 +245,7 @@ or ill-typed `gates` is still an error — the requirement is on the key's PRESE
 is deliberate rather than lax.
 
 These are **version-level defaults**, so they live in one table — `LOOP_VERSION_DEFAULTS` in
-`packages/quay/src/init.ts` — which the fresh-install template emits and the `--reconcile` fill reads.
+`packages/quay/src/init.ts` — which the fresh-install template emits and the upgrade fill reads.
 The shell writer (`quay-init.sh`'s fresh-install heredoc) cannot import TypeScript and
 therefore mirrors the same two values; `packages/quay/test/init.test.mjs` pins the mirror to the table,
 so a future default change that is not made in both places is RED rather than silently divergent.

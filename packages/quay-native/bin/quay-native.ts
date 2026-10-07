@@ -24,6 +24,18 @@ import { readManifest } from "../src/manifest.ts";
 // DIR-098: quay init — workspace scaffolding (shared with Core CLI)
 import { runInit, printNextSteps } from "quay/init";
 
+// Mirrors the Core CLI's own allowlist (packages/quay/src/cli/init.ts): every option THIS surface
+// declares. The retired-option guard checks argv against it, so the rejection is "this option is not
+// one we declare" rather than a hand-kept list of bad spellings. ⛔ Only exports/fields that already
+// existed may be used here — see the note inside the `init` handler.
+const KNOWN_INIT_FLAGS: ReadonlySet<string> = new Set([
+  "help",
+  "h",
+  "root",
+  "dry-run",
+  "drop-incompatible",
+]);
+
 // The five carrier-dir resolvers used to live here as private functions. They moved to
 // src/carrier-dirs.ts (gap-quay-init-omits-adr-goal-meta-dir-env-third-party-leak) so the
 // resolution that decides WHICH workspace's adr/goal/meta store this process reads and writes is
@@ -221,19 +233,19 @@ async function main() {
       console.log(`quay-native init — scaffold a new quay workspace
 
 Usage:
-  quay-native init [--force] [--reconcile] [--drop-incompatible] [--dry-run] [--root <path>]
+  quay-native init [--drop-incompatible] [--dry-run] [--root <path>]
+
+⛔ There is no overwrite flag and no reconcile selector: the target's STATE decides.
+     absent config      ⇒ write a fresh one
+     parseable config   ⇒ upgrade it in place (comment-preserving, validated before write)
+     unreadable config  ⇒ rebuild it from this version's defaults, preserving the broken
+                           bytes beside the new file as config.yml.corrupt-<timestamp>
 
 Flags:
-  --force      Overwrite an existing .quay/config.yml wholesale. Without it, an EXISTING
-               config is UPGRADED in place (merged, comment-preserving, validated before
-               writing — plain init and --reconcile are the same single engine, GOAL-029).
   --drop-incompatible
                When the upgraded config does not validate, delete the user values the
                validator rejects and retry; without it such a value fails the upgrade and
                your config is left byte-identical.
-  --reconcile  LEGACY, now inert: plain init already upgrades an existing config. Kept for
-               one release for existing callers. Shares one implementation with the Core
-               CLI's "quay init".
   --dry-run    Report what would happen without writing to disk.
   --root <path>  Scaffold at <path> instead of the current working directory.
 
@@ -242,8 +254,8 @@ Description:
   a tasks/ directory at the project root. Auto-detects project type (Node.js /
   Go) to suggest appropriate gate defaults.
 
-  If .quay/config.yml already exists, it is UPGRADED in place; --force replaces it
-  wholesale instead.
+  If .quay/config.yml already exists it is UPGRADED in place; an unreadable one is rebuilt
+  from this version's defaults with the broken bytes preserved beside it.
 
   This command only scaffolds a brand-new EMPTY task store. It does NOT lay
   down the loop mechanism — the canonical path for onboarding an existing
@@ -260,7 +272,7 @@ Description:
       console.error(
         "quay-native init: unrecognized option --loop.\n" +
         "This command only scaffolds a brand-new EMPTY quay task store\n" +
-        "(.quay/config.yml + tasks/); it accepts only --force / --dry-run / --root.\n" +
+        "(.quay/config.yml + tasks/); run `quay-native init --help` for its flags.\n" +
         "\n" +
         "To lay the full quay loop mechanism into an existing project, the canonical\n" +
         "path is the /quay:init skill inside a Claude Code session:\n" +
@@ -271,34 +283,42 @@ Description:
       return;
     }
 
+    // The same RETIRED-OPTION guard as the Core CLI (AC-330): a caller still passing the removed
+    // overwrite/reconcile selectors is TOLD, never silently obeyed with different semantics.
+    const unknownFlags = Object.keys(initFlags).filter((k) => !KNOWN_INIT_FLAGS.has(k));
+    if (unknownFlags.length > 0) {
+      console.error(
+        `quay-native init: unrecognized option${unknownFlags.length > 1 ? "s" : ""}: ` +
+        unknownFlags.map((k) => `--${k}`).join(", ") + "\n" +
+        "The state of the target decides what init does — an absent config is written, a parseable\n" +
+        "one is upgraded in place, an unreadable one is rebuilt with the broken bytes preserved\n" +
+        "beside it. There is no overwrite mode and no reconcile selector any more; re-run without\n" +
+        "the option.\n" +
+        "Run `quay-native init --help` for the current surface."
+      );
+      process.exitCode = 1;
+      return;
+    }
+
     const targetRoot = typeof initFlags.root === "string" ? initFlags.root : process.cwd();
-    const force = initFlags.force === true;
-    const reconcile = initFlags.reconcile === true;
     const dryRun = initFlags["dry-run"] === true;
     const dropIncompatible = initFlags["drop-incompatible"] === true;
+    const say = (line: string) => console.log(line);
 
     try {
-      const result = runInit({ root: targetRoot, force, reconcile, dryRun, dropIncompatible });
-
-      // ⛔ Its own arm, before "already exists": an unparseable config is not a name conflict, and
-      // reporting it as one hides the parse error (硬规则 3b). Same three-state vocabulary as Core.
-      if (result.outcome === "corrupt") {
-        console.error(
-          `.quay/config.yml exists at ${result.configPath} but could not be read as a config:\n` +
-          `  ${result.corruptReason}\n` +
-          "Use --reconcile to rebuild it from this version's defaults (the unparseable file is kept\n" +
-          "beside the new one), or --dry-run to preview a rebuild without touching anything."
-        );
-        process.exitCode = 1;
-        return;
-      }
+      // ⛔ ONLY `InitOptions` fields that already existed — no new ones. `quay-native` reaches this
+      // module through the bare specifier `quay/init`, which resolves through the shared
+      // `node_modules` symlink to the MAIN checkout's `src/init.ts`; a field or export that exists
+      // only on a task branch would therefore be missing at runtime for the whole life of that
+      // branch (see the note on the native arm in packages/quay/test/init.test.mjs). The command-line
+      // surface (`--json`, `--project`) is the Core CLI's, not this one's.
+      const result = runInit({ root: targetRoot, dryRun, dropIncompatible });
 
       if (result.outcome === "skipped") {
         // LEGACY outcome — the single upgrade engine (GOAL-029) upgrades an existing config
         // instead of refusing it. Defensive arm only.
         console.error(
-          `.quay/config.yml already exists at ${result.configPath} and was not upgraded. ` +
-          "Re-run, or use --force to overwrite."
+          `.quay/config.yml already exists at ${result.configPath} and was not upgraded. Re-run init.`
         );
         process.exitCode = 1;
         return;
@@ -322,34 +342,33 @@ Description:
       if (result.outcome === "reconciled" || result.outcome === "unchanged") {
         const r = result.upgrade;
         if (result.outcome === "unchanged") {
-          console.log(`${result.configPath}: already current for this version of quay — not rewritten.`);
+          say(`${result.configPath}: already current for this version of quay — not rewritten.`);
         } else {
-          console.log(`${result.configPath}: upgraded to this version's defaults.`);
-          for (const k of r?.added ?? []) console.log(`  filled loop.${k} (was absent)`);
-          for (const k of r?.addedServe ?? []) console.log(`  filled serve.${k} (was absent)`);
-          for (const m of r?.migrated ?? []) console.log(`  migrated loop.${m}`);
-          for (const k of r?.removed ?? []) console.log(`  removed ${k} (retired key)`);
-          for (const k of r?.pinned ?? []) console.log(`  pinned providers.native.env.${k} (carrier dir pin)`);
-          for (const k of r?.dropped ?? []) console.log(`  dropped ${k} (--drop-incompatible: it did not validate)`);
+          say(`${result.configPath}: upgraded to this version's defaults.`);
+          for (const k of r?.added ?? []) say(`  filled loop.${k} (was absent)`);
+          for (const m of r?.migrated ?? []) say(`  migrated loop.${m}`);
+          for (const k of r?.removed ?? []) say(`  removed ${k} (retired key)`);
+          for (const k of r?.pinned ?? []) say(`  pinned providers.native.env.${k} (carrier dir pin)`);
+          for (const k of r?.dropped ?? []) say(`  dropped ${k} (--drop-incompatible: it did not validate)`);
         }
         for (const k of r?.unknownKeys ?? []) console.error(`  warning: unrecognized top-level config key "${k}" — kept as-is`);
         return;
       }
 
       if (result.outcome === "dry-run") {
-        console.log(result.content);
-        console.log(`\n# Dry run — nothing written to disk.`);
-        console.log(`# Would create: ${result.configPath}`);
-        console.log(`# Would create: ${result.tasksDir}/`);
-        console.log(`# Would create: ${result.launchSettingsPath}`);
-        console.log(`# Would create: ${result.profilesPath}`);
+        say(result.content);
+        say(`\n# Dry run — nothing written to disk.`);
+        say(`# Would create: ${result.configPath}`);
+        say(`# Would create: ${result.tasksDir}/`);
+        say(`# Would create: ${result.launchSettingsPath}`);
+        say(`# Would create: ${result.profilesPath}`);
         return;
       }
 
-      console.log(`Created ${result.configPath}`);
-      if (result.corruptReason) console.log(`  ${result.corruptReason}`);
-      console.log(`Created ${result.tasksDir}/ (or already existed)`);
-      console.log(`Created ${result.launchSettingsPath}`);
+      say(`Created ${result.configPath}`);
+      if (result.corruptReason) say(`  ${result.corruptReason}`);
+      say(`Created ${result.tasksDir}/ (or already existed)`);
+      say(`Created ${result.launchSettingsPath}`);
       console.log(`Created ${result.profilesPath}`);
       printNextSteps("native", result.tasksDir);
     } catch (err) {

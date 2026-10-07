@@ -501,7 +501,7 @@ export function ensureBranchModel(root: string, opts: EnsureBranchModelOptions =
       blocked.length === 0
         ? null
         : `Re-run with branch adoption enabled to preserve the existing branch(es) and re-point them at ` +
-          `${defaultBranch ?? "the default branch"}: CLI \`quay init --force --adopt-branch-model\` ` +
+          `${defaultBranch ?? "the default branch"}: CLI \`quay init --adopt-branch-model\` ` +
           `(or the /quay:init skill with branch adoption). The existing tips are kept under ` +
           `<branch>-pre-quay-init-<sha> — nothing is destroyed.`,
   };

@@ -20,8 +20,8 @@ import {
   generateProfilesContent,
   classifyConfig,
   reconcileConfigContent,
+  buildInitReport,
   LOOP_VERSION_DEFAULTS,
-  SERVE_VERSION_DEFAULTS,
   migrateStaleMcpEntry,
   providerEntryFile,
 } from "../src/init.ts";
@@ -154,23 +154,40 @@ test("AC3: plain quay init UPGRADES an existing config (no refusal, no clobber)"
   assert.ok(after.includes("providers:"), "the upgraded config still carries its sections");
 });
 
-// AC3b: quay init --force overwrites existing config
-test("AC3b: quay init --force overwrites existing config", () => {
+// AC3b (AC-330, rewritten): the overwrite mode is GONE, and the retired selector is a hard error.
+// The old shape ("--force rewrites the file, mtime moves") is exactly what the ruling removed: a
+// second mode whose semantics had to be kept in step with the state-based one. What replaces it is
+// the negative control — the flag is REJECTED, and the config on disk is left byte-identical.
+test("AC3b: the retired overwrite selector is refused and does NOT touch the config", () => {
   const dir = tmpDir("ac3b");
-  // First init
+  const cfgPath = path.join(dir, ".quay", "config.yml");
   runQuay(["init"], dir);
-  const firstMtime = fs.statSync(path.join(dir, ".quay", "config.yml")).mtimeMs;
+  const firstMtime = fs.statSync(cfgPath).mtimeMs;
+  const firstBytes = fs.readFileSync(cfgPath, "utf8");
 
-  // Wait a tick so mtime actually differs
   const start = Date.now();
   while (Date.now() - start < 100) { /* busy-wait */ }
 
-  // Second init with --force
-  const out = runQuay(["init", "--force"], dir);
-  assert.ok(out.includes("Created"), "--force should succeed");
+  const out = runQuayAllowFail(["init", "--force"], dir);
+  assert.equal(out.exitCode, 1, "a retired option must fail closed, never run with other semantics");
+  assert.match(out.stderr, /unrecognized option: --force/, "and it names the option it rejected");
+  assert.equal(fs.readFileSync(cfgPath, "utf8"), firstBytes, "nothing on disk moved");
+  assert.equal(fs.statSync(cfgPath).mtimeMs, firstMtime, "the file was not even rewritten identically");
+});
 
-  const secondMtime = fs.statSync(path.join(dir, ".quay", "config.yml")).mtimeMs;
-  assert.ok(secondMtime > firstMtime, "--force should overwrite (mtime changed)");
+// AC-330: the OTHER retired selector (`--reconcile`) is refused the same way. Kept as its own case
+// because the two flags took different code paths before the removal (an overwrite vs. the upgrade
+// engine), so one could survive while the other did not.
+test("AC-330: the retired reconcile selector is refused with its own message", () => {
+  const dir = tmpDir("ac330-reconcile");
+  runQuay(["init"], dir);
+  const cfgPath = path.join(dir, ".quay", "config.yml");
+  const before = fs.readFileSync(cfgPath, "utf8");
+  const out = runQuayAllowFail(["init", "--reconcile", "--root", dir], dir);
+  assert.equal(out.exitCode, 1, "the retired selector is a usage error");
+  assert.match(out.stderr, /unrecognized option: --reconcile/);
+  assert.match(out.stderr, /already upgrades an existing config/, "the message says what to do instead");
+  assert.equal(fs.readFileSync(cfgPath, "utf8"), before, "and changes nothing");
 });
 
 // AC4: quay init --dry-run prints config to stdout, does NOT touch disk
@@ -184,6 +201,72 @@ test("AC4: quay init --dry-run prints to stdout, does not write to disk", () => 
   assert.ok(out.includes("Dry run"), "dry-run should mention it is a dry run");
   assert.ok(!fs.existsSync(path.join(dir, ".quay", "config.yml")), "dry-run must NOT write config");
   assert.ok(!fs.existsSync(path.join(dir, "tasks")), "dry-run must NOT create tasks dir");
+});
+
+// ── AC-330: the `--json` report contract ───────────────────────────────────────────────────────────
+// The report exists so a consumer (a script, the MCP tool) can act on init WITHOUT scraping prose.
+// The contract asserted here is the FIELD SET (an absent field is a silent read error downstream) and
+// the stdout purity (one JSON document — a stray human line makes the whole thing unparseable).
+test("AC-330: init --json prints ONE parseable report on stdout and the human lines move to stderr", () => {
+  const dir = tmpDir("ac330-json-fresh");
+  const r = spawnSync("node", [quayBin, "init", "--json"], { cwd: dir, encoding: "utf8" });
+  assert.equal(r.status, 0, `--json init must succeed:\n${r.stderr}`);
+
+  const report = JSON.parse(r.stdout); // ← the purity assertion: ANY extra stdout line throws here
+  for (const field of [
+    "outcome", "configState", "dryRun", "validated", "issues", "warnings",
+    "configPath", "tasksDir", "added", "migrated", "removed", "pinned", "dropped",
+    "unknownKeys", "pluginLink",
+  ]) {
+    assert.ok(field in report, `the report must carry \`${field}\` (got: ${Object.keys(report).join(", ")})`);
+  }
+  assert.equal(report.outcome, "written", "a fresh install reports `written`");
+  assert.equal(report.configState, "absent", "and the pre-state it judged");
+  assert.equal(report.validated, true, "the generated config was judged by the official validator and passed");
+  assert.equal(report.dryRun, false, "nothing above was a dry run");
+  assert.deepEqual(report.added, [], "a fresh install has nothing to fill");
+  assert.equal(typeof report.pluginLink.state, "string", "the .quay/plugin link status is carried as its own state");
+  // No `serve:` defaults were written, so the report can never claim to have filled one.
+  assert.ok(!Object.keys(report).includes("addedServe"), "the retired serve-fill field is gone from the contract");
+  assert.ok(!/^serve:/m.test(fs.readFileSync(report.configPath, "utf8")), "and no serve: section exists on disk");
+  // The human-facing half really did move: stdout carried only the JSON.
+  assert.equal(r.stdout.trim().split("\n")[0], "{", "stdout starts with the JSON document");
+  assert.match(r.stderr, /Created .*config\.yml/, "the progress line went to stderr instead");
+});
+
+test("AC-330: init --json on an EXISTING config reports the upgrade diff (fill / migrate / warnings)", () => {
+  const dir = tmpDir("ac330-json-upgrade");
+  fs.mkdirSync(path.join(dir, ".quay"), { recursive: true });
+  fs.writeFileSync(
+    path.join(dir, ".quay", "config.yml"),
+    "serve:\n  host: \"10.1.2.3\"\n  port: 4001\nx_user_extra: 1\nloop:\n  board: native\n  merge_target: integration\n",
+  );
+  const r = spawnSync("node", [quayBin, "init", "--json", "--root", dir], { cwd: dir, encoding: "utf8" });
+  assert.equal(r.status, 0, r.stderr);
+  const report = JSON.parse(r.stdout);
+  assert.equal(report.outcome, "reconciled");
+  assert.equal(report.configState, "valid");
+  assert.ok(report.added.includes("gates"), `the fill must be reported (got: ${report.added.join(", ")})`);
+  assert.ok(report.migrated.some((m) => m.startsWith("merge_target: integration -> develop")), `the migration must be reported (got: ${report.migrated.join(", ")})`);
+  assert.ok(report.unknownKeys.includes("x_user_extra"), "an unrecognized key is reported as kept");
+  assert.ok(report.warnings.some((w) => w.includes("x_user_extra")), "…and materialized as an operator-facing warning");
+  assert.equal(report.validated, true, "the upgraded candidate passed the official validator");
+  // The user's own serve binding survives the upgrade — the report is about loop/config keys, and
+  // `serve:` is never touched by it.
+  const after = fs.readFileSync(path.join(dir, ".quay", "config.yml"), "utf8");
+  assert.match(after, /host: "10\.1\.2\.3"/, "the pinned host survives");
+  assert.match(after, /port: 4001/, "the pinned port survives");
+});
+
+test("AC-330: a dry run reports `dryRun: true` and carries the candidate text; nothing is written", () => {
+  const dir = tmpDir("ac330-json-dryrun");
+  const r = spawnSync("node", [quayBin, "init", "--json", "--dry-run"], { cwd: dir, encoding: "utf8" });
+  assert.equal(r.status, 0, r.stderr);
+  const report = JSON.parse(r.stdout);
+  assert.equal(report.dryRun, true);
+  assert.equal(report.outcome, "dry-run");
+  assert.ok(typeof report.content === "string" && report.content.includes("loop:"), "the candidate text rides in `content`");
+  assert.ok(!fs.existsSync(path.join(dir, ".quay")), "and nothing was written");
 });
 
 // AC5: quay init --root scaffolds at specified path
@@ -245,15 +328,26 @@ test("AC7: generated config contains inline comments for all sections", () => {
   assert.ok(configContent.includes("routines:"), "should document routines field");
 });
 
-// AC8: quay init --help prints usage including all flags
-test("AC8: quay init --help prints usage with all flags", () => {
+// AC8 (AC-330, rewritten): the help must document the CURRENT flags and must NOT advertise the two
+// retired modes. `--reconcile` is checked on the SOURCE too (not just the rendered help): a flag kept
+// in the source but hidden from help is the "visible ≠ executed" shape this AC exists to close.
+test("AC8: quay init --help documents the current flags and advertises no retired mode", () => {
   const dir = tmpDir("ac8");
   const out = runQuay(["init", "--help"], dir);
 
-  assert.ok(out.includes("--force"), "help should document --force");
   assert.ok(out.includes("--dry-run"), "help should document --dry-run");
   assert.ok(out.includes("--root"), "help should document --root");
+  assert.ok(out.includes("--json"), "help should document the --json report");
+  assert.ok(out.includes("--project"), "help should document --project");
   assert.ok(out.includes("quay init"), "help should mention quay init");
+  assert.ok(!out.includes("--force"), `help must not advertise an overwrite mode:\n${out}`);
+  assert.ok(!out.includes("--reconcile"), `help must not advertise a reconcile selector:\n${out}`);
+
+  // The source half — `--reconcile` must be gone from the CLI surface entirely.
+  const cliSrc = fs.readFileSync(path.join(__dirname, "..", "src", "cli", "init.ts"), "utf8");
+  assert.ok(!cliSrc.includes("--reconcile"), "the CLI source must not carry a reconcile mode");
+  const helpSrc = fs.readFileSync(path.join(__dirname, "..", "src", "cli", "help.ts"), "utf8");
+  assert.ok(!helpSrc.includes("--reconcile"), "the shared help source must not carry one either");
 });
 
 // AC10: quay-native init works identically
@@ -300,25 +394,22 @@ test("AC10c: quay-native init never clobbers an existing config", () => {
   const out = runNativeAllowFail(["init"], dir);
   assert.ok(out.exitCode === 0 || out.exitCode === 1, `a second native init must be handled, got exit ${out.exitCode}`);
   const after = fs.readFileSync(cfgPath, "utf8");
-  if (out.exitCode === 0) {
-    // The single-engine contract: it UPGRADED in place, so the user's own content survives.
-    assert.ok(after.includes("# keep-my-note"), "an upgrade preserves the user's own content (not a clobber)");
-  } else {
-    // The retired refusal contract: nothing was written.
-    assert.equal(after, withUserNote, "a refusal writes nothing");
-    assert.ok(
-      out.stderr.includes("already exists") || out.stderr.includes("--force"),
-      "and the refusal explains itself (--force / already exists)"
-    );
-  }
+  // The single-engine contract is the ONLY arm left (AC-330 removed the "refuse an existing config"
+  // mode): it UPGRADED in place, so the user's own content survives. The refusal arm that used to
+  // live here asserted a `--force`-shaped message — a mode that no longer exists.
+  assert.equal(out.exitCode, 0, `an existing config is upgraded, never refused:\n${out.stderr}`);
+  assert.ok(after.includes("# keep-my-note"), "an upgrade preserves the user's own content (not a clobber)");
 });
 
-// AC10d: quay-native init --force overwrites
-test("AC10d: quay-native init --force overwrites", () => {
+// AC10d (AC-330, rewritten): the native CLI carries the SAME retired-option guard as Core. The old
+// shape ("native --force overwrites") is gone with the flag; what must hold now is that native
+// REJECTS it — otherwise the two CLIs would disagree about what init accepts.
+test("AC10d: quay-native refuses the retired overwrite selector too", () => {
   const dir = tmpDir("ac10d");
   runNative(["init"], dir);
-  const out = runNative(["init", "--force"], dir);
-  assert.ok(out.includes("Created"), "native --force should succeed");
+  const out = runNativeAllowFail(["init", "--force"], dir);
+  assert.equal(out.exitCode, 1, "native init must fail closed on the retired option");
+  assert.match(out.stderr, /unrecognized option: --force/, "and name it");
 });
 
 // AC10e: quay-native init --root scaffolds at specified path
@@ -393,15 +484,16 @@ test("AC2-collision: top-level quay --help disambiguates init from /quay:init", 
   assert.ok(out.includes("EMPTY task store"), "top-level --help must say init scaffolds an EMPTY task store");
 });
 
-// AC3 negative control: the legit empty-store flags still behave unchanged.
-test("AC3-collision negative control: quay init --force still succeeds", () => {
+// AC3 negative control (AC-330, rewritten): the legit empty-store flags still behave unchanged —
+// plain init exits 0, AND a second plain init on the same workspace still exits 0 (it upgrades).
+// The `--force` arm that used to be the control here is now a REFUSAL, asserted above.
+test("AC3-collision negative control: plain init still succeeds, twice", () => {
   const dir = tmpDir("collision-ac3");
   const first = runQuayAllowFail(["init"], dir);
   assert.equal(first.exitCode, 0, "plain quay init still exits 0");
   assert.ok(fs.existsSync(path.join(dir, ".quay", "config.yml")));
-  const forced = runQuayAllowFail(["init", "--force"], dir);
-  assert.equal(forced.exitCode, 0, "quay init --force still exits 0");
-  assert.ok(forced.stdout.includes("Created"), "--force still prints Created");
+  const second = runQuayAllowFail(["init"], dir);
+  assert.equal(second.exitCode, 0, "a second plain init still exits 0 (it upgrades in place)");
 });
 
 // quay-native shares the same silent-swallow defect — reject --loop there too.
@@ -575,13 +667,20 @@ test("gap-launch-settings: quay init --dry-run does NOT write launch.settings.js
   assert.ok(!fs.existsSync(path.join(dir, ".quay", "profiles.yml")), "dry-run must NOT write profiles.yml");
 });
 
-test("gap-launch-settings: quay init --force overwrites a stale launch.settings.json (consumer fix path)", () => {
+// AC-330 (rewritten): `--force` used to overwrite a stale `.claude/launch.settings.json`. With the
+// overwrite mode gone, the lay-down is CREATE-IF-ABSENT — an existing file is the user's and init
+// leaves it alone, exactly as it leaves every other key it does not own. The negative control is the
+// half that survives: a FRESH init still lays down a correct file.
+test("gap-launch-settings: init lays down a correct launch.settings.json and never clobbers an existing one", () => {
   const dir = tmpDir("launchsettings-force");
   runQuay(["init"], dir);
   const settingsPath = path.join(dir, ".claude", "launch.settings.json");
 
-  // Simulate the consumer's stale/broken copy (F1/F2: no bypassPermissions,
-  // still carrying the pre-AC154 _launchSpec).
+  const fresh = JSON.parse(fs.readFileSync(settingsPath, "utf8"));
+  assert.equal(fresh.permissions?.defaultMode, "bypassPermissions", "a fresh init lays down bypassPermissions");
+  assert.ok(!("_launchSpec" in fresh), "and carries no pre-AC154 _launchSpec");
+
+  // A user's own (even stale-shaped) copy is NOT init's to overwrite.
   const staleRaw = JSON.stringify(
     { $schema: "https://json.schemastore.org/claude-code-settings.json", _launchSpec: { excludeDynamicSystemPromptSections: false } },
     null,
@@ -589,12 +688,8 @@ test("gap-launch-settings: quay init --force overwrites a stale launch.settings.
   );
   fs.writeFileSync(settingsPath, staleRaw, "utf8");
 
-  runQuay(["init", "--force"], dir);
-  const afterRaw = fs.readFileSync(settingsPath, "utf8");
-  const second = JSON.parse(afterRaw);
-  assert.equal(second.permissions?.defaultMode, "bypassPermissions", "--force must restore bypassPermissions");
-  assert.ok(!("_launchSpec" in second), "--force must strip the stale _launchSpec (AC154)");
-  assert.notEqual(afterRaw, staleRaw, "stale file must be overwritten on --force");
+  runQuay(["init"], dir);
+  assert.equal(fs.readFileSync(settingsPath, "utf8"), staleRaw, "an existing launch.settings.json is left byte-identical");
 });
 
 // ---------------------------------------------------------------------------
@@ -739,35 +834,27 @@ test("AC1 classifyConfig unit: absent / valid / corrupt (malformed YAML) are thr
   assert.equal(classifyConfig(cfgPath).state, "corrupt", "a list-valued document is corrupt, not valid");
 });
 
-test("AC1 corrupt: a malformed .quay/config.yml is NOT reported as an existing config (the real cause is printed)", () => {
+// AC-330 (rewritten): a malformed config used to be a flat REFUSAL that named `--reconcile` as the
+// only way out. With the selectors gone that would be a dead end — no flag could ask for the repair —
+// so the STATE now decides: an unreadable config is rebuilt from this version's defaults. What the
+// old test actually protected survives verbatim: the operator is told the parser's REAL reason, never
+// a name conflict, and the broken bytes are preserved rather than discarded.
+test("AC1 corrupt: an unreadable .quay/config.yml is rebuilt, with the real cause printed and the broken bytes preserved", () => {
   const dir = tmpDir("ac1-corrupt");
   fs.mkdirSync(path.join(dir, ".quay"), { recursive: true });
   fs.writeFileSync(path.join(dir, ".quay", "config.yml"), BROKEN_YAML);
 
-  const out = runQuayAllowFail(["init", "--root", dir], dir);
-  assert.equal(out.exitCode, 1, "a config that cannot be read is a refusal");
+  const out = runQuay(["init", "--root", dir], dir);
   assert.ok(
-    !/already exists/.test(out.stderr),
-    `must NOT claim a name conflict — that sends the operator after a problem that does not exist:\n${out.stderr}`
+    !/already exists/.test(out),
+    `must NOT claim a name conflict — that sends the operator after a problem that does not exist:\n${out}`
   );
-  assert.match(out.stderr, /could not be read as a config/, "the message names what actually happened");
-  assert.match(out.stderr, /YAML parse failed/, "the parser's own reason is relayed verbatim");
-
-  // No silent side effects on the refusal path.
-  assert.equal(fs.readFileSync(path.join(dir, ".quay", "config.yml"), "utf8"), BROKEN_YAML, "the broken file is untouched");
-});
-
-test("AC1 corrupt: --reconcile repairs it and PRESERVES the unparseable bytes beside the new config", () => {
-  const dir = tmpDir("ac1-corrupt-repair");
-  fs.mkdirSync(path.join(dir, ".quay"), { recursive: true });
-  fs.writeFileSync(path.join(dir, ".quay", "config.yml"), BROKEN_YAML);
-
-  const out = runQuay(["init", "--reconcile", "--root", dir], dir);
-  assert.ok(out.includes("corrupt"), `the repair reports where the broken bytes went:\n${out}`);
-
+  assert.match(out, /unreadable config/, "the message names what actually happened");
+  assert.match(out, /YAML parse failed/, "the parser's own reason is relayed verbatim");
+  // The rebuilt file is a working config carrying this version's defaults.
   const repaired = YAML.parse(fs.readFileSync(path.join(dir, ".quay", "config.yml"), "utf8"));
   assert.equal(repaired?.loop?.fork_baseline, "develop", "the rebuilt config carries this version's defaults");
-
+  // …and the unreadable bytes are kept, byte-identical, beside it.
   const backups = fs.readdirSync(path.join(dir, ".quay")).filter((f) => f.startsWith("config.yml.corrupt-"));
   assert.equal(backups.length, 1, `exactly one backup of the unreadable file (got: [${backups.join(", ")}])`);
   assert.equal(
@@ -777,23 +864,42 @@ test("AC1 corrupt: --reconcile repairs it and PRESERVES the unparseable bytes be
   );
 });
 
-// ⛔ The quay-native arm of this test CANNOT run in a git worktree, and that is a property of the
-// worktree layout rather than of the change: `packages/quay-native/bin/quay-native.ts` reaches the
-// shared logic through the bare specifier `quay/init`, which resolves through `node_modules/quay` →
-// `../packages/quay`. A task worktree's `node_modules` is a symlink to the MAIN checkout's, so that
-// specifier lands on the main checkout's `src/init.ts` — i.e. on whatever the main checkout has, not
-// on the file under test here (verified: `require.resolve("quay/init")` from this worktree returns
-// `/home/yale/work/quay/packages/quay/src/init.ts`). A test asserting the NEW native behavior would
-// therefore be red for the whole life of any task branch and green only after the change is already
-// on the main checkout — a check that cannot fail when it matters.
+// AC-330: `--dry-run` on an unreadable config must PREVIEW the rebuild without touching anything —
+// no rewrite, and no backup file either (a dry run writes nothing at all).
+test("AC-330: --dry-run on an unreadable config previews the rebuild and writes nothing", () => {
+  const dir = tmpDir("ac330-corrupt-dryrun");
+  fs.mkdirSync(path.join(dir, ".quay"), { recursive: true });
+  fs.writeFileSync(path.join(dir, ".quay", "config.yml"), BROKEN_YAML);
+
+  const out = runQuay(["init", "--dry-run", "--root", dir], dir);
+  assert.match(out, /Dry run — nothing written to disk/, "the preview says so");
+  assert.match(out, /loop:/, "and prints the config it would write");
+  assert.equal(fs.readFileSync(path.join(dir, ".quay", "config.yml"), "utf8"), BROKEN_YAML, "the broken file is untouched");
+  assert.deepEqual(
+    fs.readdirSync(path.join(dir, ".quay")).filter((f) => f.startsWith("config.yml.corrupt-")),
+    [],
+    "a dry run creates no backup either",
+  );
+});
+
+// ⛔ The quay-native arm of this test CANNOT assert the NEW behaviour in a git worktree, and that is
+// a property of the worktree layout rather than of the change: `packages/quay-native/bin/quay-native.ts`
+// reaches the shared logic through the bare specifier `quay/init`, which resolves through
+// `node_modules/quay` → `../packages/quay`. A task worktree's `node_modules` is a symlink to the MAIN
+// checkout's, so that specifier lands on the main checkout's `src/init.ts` — i.e. on whatever the main
+// checkout has, not on the file under test here (verified: `require.resolve("quay/init")` from this
+// worktree returns `/home/yale/work/quay/packages/quay/src/init.ts`). A test asserting the NEW native
+// behavior would therefore be red for the whole life of any task branch and green only after the
+// change is already on the main checkout — a check that cannot fail when it matters.
 // What IS asserted here instead is the half that is a fact on this branch: quay-native's own handler
-// carries the same three-outcome vocabulary (`corrupt` / `reconciled` / `unchanged`) as Core, because
-// both call the SAME `runInit`. The Core arms above are the executable half of that claim.
-test("AC1 corrupt: quay-native's init handler carries the same three-state vocabulary (shared runInit)", () => {
+// carries the same outcome vocabulary as Core, because both call the SAME `runInit` — and, since
+// AC-330, the same retired-option guard, so the two CLIs cannot disagree about what init accepts.
+test("AC1 corrupt: quay-native's init handler shares Core's outcome vocabulary and retired-option guard", () => {
   const src = fs.readFileSync(path.join(__dirname, "..", "..", "quay-native", "bin", "quay-native.ts"), "utf8");
-  assert.match(src, /result\.outcome === "corrupt"/, "the native handler has a corrupt arm of its own");
-  assert.match(src, /could not be read as a config/, "…that reports the real cause rather than a name conflict");
-  assert.match(src, /result\.outcome === "reconciled"/, "…and handles the reconcile outcomes");
+  assert.match(src, /result\.outcome === "reconciled"/, "…handles the upgrade outcomes");
+  assert.match(src, /KNOWN_INIT_FLAGS/, "…and checks argv against the same retired-option allowlist");
+  assert.ok(!src.includes("initFlags.force"), "the overwrite mode is gone from its flag reading");
+  assert.ok(!src.includes("initFlags.reconcile"), "so is the reconcile selector");
 });
 
 // ---------------------------------------------------------------------------
@@ -828,7 +934,7 @@ test("AC2 reconcile: a legacy config missing the version defaults gets them — 
   const cfgPath = path.join(dir, ".quay", "config.yml");
   fs.writeFileSync(cfgPath, LEGACY_CONFIG);
 
-  const out = runQuay(["init", "--reconcile", "--root", dir], dir);
+  const out = runQuay(["init", "--root", dir], dir);
   assert.match(out, /upgraded to this version's defaults/, `the run reports an upgrade:\n${out}`);
   assert.match(out, /filled loop\.fork_baseline/, "the report names the key it filled");
 
@@ -910,7 +1016,7 @@ test("AC2 reconcile: a value this version considers incompatible is migrated thr
   const cfgPath = path.join(dir, ".quay", "config.yml");
   fs.writeFileSync(cfgPath, "loop:\n  board: \"native\"\n  merge_target: integration\n");
 
-  const out = runQuay(["init", "--reconcile", "--root", dir], dir);
+  const out = runQuay(["init", "--root", dir], dir);
   assert.match(out, /migrated loop\.merge_target: integration -> develop/, `the migration is reported:\n${out}`);
   const doc = YAML.parse(fs.readFileSync(cfgPath, "utf8"));
   assert.equal(doc.loop.merge_target, "develop", "the retired-branch value is rewritten");
@@ -1226,7 +1332,7 @@ test("AC2② (round-trip): an OLD config missing loop.board/loop.gates passes af
     const cfgPath = path.join(ws, ".quay", "config.yml");
     fs.writeFileSync(cfgPath, before);
 
-    const out = runQuay(["init", "--reconcile", "--root", ws], ws);
+    const out = runQuay(["init", "--root", ws], ws);
     assert.match(out, /filled loop\.board/, `the upgrade must report filling board:\n${out}`);
     assert.match(out, /filled loop\.gates/, `and gates:\n${out}`);
     assert.match(out, /removed providers\.native\.path/, `and the retired binding:\n${out}`);
@@ -1413,23 +1519,34 @@ after(() => {
 });
 
 // ── gap-quay-init-sh-upgrade-leaves-version-level-loop-defaults-unfilled ───────────────────────────
-// The SHELL entry's `reconcile-config` step calls `reconcileConfigContent(raw, { serve: false })`: a
-// fresh `quay-init.sh` install writes no `serve:` section, so filling one on a re-run would make the
-// script non-idempotent over its own output. The loop-level version defaults — the ones the validator
-// REQUIRES — are filled either way.
-test("reconcileConfigContent({ serve:false }) fills loop version-level defaults but NEVER adds a serve: section", async () => {
+// The SHELL entry's `reconcile-config` step fills the loop-level version defaults — the ones the
+// validator REQUIRES. AC-330 removed the `{ serve: false }` switch this test used to pin: there is no
+// serve fill at all any more (every candidate value equalled the resolver's fallback), so the switch
+// had nothing left to switch off and the section must never appear from ANY caller.
+test("reconcileConfigContent fills loop version-level defaults and NEVER adds a serve: section", async () => {
   const { reconcileConfigContent } = await import("../src/init.ts");
   const raw = "# keep me\nloop:\n  repo_root: /x\n";
-  const withServe = reconcileConfigContent(raw);
-  const loopOnly = reconcileConfigContent(raw, { serve: false });
-  assert.ok(withServe.report.addedServe.length > 0, "the default reconcile still fills serve (CLI/MCP behaviour unchanged)");
-  assert.deepEqual(loopOnly.report.addedServe, [], "serve:false must add no serve key");
-  assert.ok(loopOnly.report.added.includes("board") && loopOnly.report.added.includes("gates"),
+  const { content, report } = reconcileConfigContent(raw);
+  assert.ok(report.added.includes("board") && report.added.includes("gates"),
     "loop.board and loop.gates (validator-required) must still be filled");
-  assert.ok(!/^serve:/m.test(loopOnly.content), `no serve: section may appear:\n${loopOnly.content}`);
-  assert.ok(loopOnly.content.includes("# keep me"), "comments preserved");
+  assert.ok(!/^serve:/m.test(content), `no serve: section may appear:\n${content}`);
+  assert.ok(content.includes("# keep me"), "comments preserved");
   // idempotent: reconciling its own output is a no-op
-  assert.equal(reconcileConfigContent(loopOnly.content, { serve: false }).report.unchanged, true);
+  assert.equal(reconcileConfigContent(content).report.unchanged, true);
+});
+
+test("AC-330: a user-pinned serve: survives an upgrade untouched and no serve default is ever added", async () => {
+  const { reconcileConfigContent, upgradeConfigContent } = await import("../src/init.ts");
+  const pinned = "serve:\n  host: \"10.9.8.7\"\n  port: 4321\nloop:\n  board: native\n";
+  // The shell step's reconciler and the single upgrade engine are two entry points into the same
+  // discipline; BOTH must leave a user's own binding byte-identical.
+  const r1 = reconcileConfigContent(pinned);
+  assert.match(r1.content, /host: "10\.9\.8\.7"/, "the shell reconciler keeps a pinned host");
+  assert.match(r1.content, /port: 4321/, "and a pinned port");
+  assert.ok(!Object.keys(r1.report).includes("addedServe"), "the report has no serve-fill field left");
+  const up = upgradeConfigContent(pinned, { workspaceRoot: "/tmp" });
+  assert.match(up.content, /port: 4321/, "the upgrade engine keeps a pinned port too");
+  assert.doesNotMatch(up.content, /host: 0\.0\.0\.0/, "and never writes the fallback host over it");
 });
 
 // ── GOAL-029 single-engine upgrade (gap-init-single-engine-state-based-upgrade-validate-before-write) ─
