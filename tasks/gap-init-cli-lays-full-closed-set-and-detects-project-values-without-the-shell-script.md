@@ -38,6 +38,7 @@ GOAL-029「init 统一为单一 TS 引擎、终局无 .sh;并收窄发布集合�
 - `plugin/scripts/quay-init-steps.ts`
 - `plugin/scripts/quay-init.sh`
 - `plugin/scripts/laydown-set-check.sh`
+- `plugin/scripts/profiles-role-coverage-check.ts`
 - `plugin/test/quay-init.test.mjs`
 - `plugin/test/quay-init-tmux-detection.test.mjs`
 - `plugin/test/quay-init-loop.test.mjs`
@@ -219,3 +220,61 @@ passed=4 failed=4 not-evaluated=4
 3. `plugin/test/quay-init-loop.test.mjs` 的 AC5（heredoc 替换惰性）仍以 shell 的 heredoc 为对象——
    该 heredoc 还在（偏差 1），所以这条仍然是有意义的测量，未改。
 4. `quay-init.test.mjs` 的"不可解析 config"一条按 AC-330 已生效的新契约改写（备份 + 重建，而非 refusal）。
+
+### ⑦ 本轮修复（2026-10-07，fan-in suite-red 真因）
+上一轮 exit-not-landed 的 `step=suite # fail 72` 不是测试红，是**静态检查**红：
+`checker-mutation-check exit=1` 之后 suite 根本没跑（同段读到 `# tests 0 / # pass 0 / # fail 72`，
+72 是合成读数）。读到该次 suite 日志
+`.quay/fan-in-suite-…~wk-prod-anchor~1791353519224-afcf3f.log` 定位到
+`MUTATION-FAIL [baseline GREEN (requested roles are all defined)]: checker exited 3, expected 0`
+⇒ 来自 `plugin/scripts/checker-mutation-cases/profiles-role-coverage-check.sh` 的 baseline 臂。
+
+**真因**：`plugin/scripts/profiles-role-coverage-check.ts:185` 用**空临时目录** spawn Core CLI 的
+`init --root <ws>`。本任务把 CLI 的新装 `init` 做成与 `quay-init.sh` 的 `detect_test_command` miss
+**契约等价**（fail-closed，绝不猜默认值——这也正是本任务 AC3 里「不可检测测试命令」那一档），而空目录
+四个 rung（`scripts/test.sh` / `package.json scripts.test` / `go.mod` / `Cargo.toml`）全不命中 ⇒
+`init` exit 2 ⇒ checker 拿不到要断言的产物 ⇒ NOT-EVALUATED(exit 3) ⇒ 其 mutation case 的 baseline 臂
+（期望 exit 0）判成 ALWAYS-RED ⇒ 整条 `checker-mutation-check --check` 红 ⇒ fail-closed 红掉全量 suite。
+（同一日志里 `STATIC_CHECK_NOT_EVALUATED: profiles-role-coverage-check` 是同一根因的另一面。）
+
+**修法（不改任何断言，只补一个与本 checker 的问题【正交】的输入）**：给该 spawn 加
+`--test-command`。这条 checker 问的是 profile **承载面**，不是 test-command 阶梯；不补这一项它就会
+为一条与断言无关的原因 NOT-EVALUATED。四条断言（A1/A2/A3/R）逐字未动。
+按硬规则 5b 全仓检索同类点：`grep -rn '"init"' plugin/ packages/ scripts/` 的非 git 命中**仅此一处**
+（其余全是 `git init`）。
+
+**修后读数（worktree 内实测）**：
+```
+$ node --no-warnings --experimental-strip-types plugin/scripts/profiles-role-coverage-check.ts --check --root <wt>
+PASS: init output covers all 5 requested role(s) and matches the shipped carrier; directly-started (no launchArgv call site): manager, outer
+exit=0
+$ bash plugin/scripts/checker-mutation-cases/profiles-role-coverage-check.sh <workdir>
+ok [baseline GREEN (requested roles are all defined)]: exit 0
+ok [RED-1 shipped carrier missing a requested role]: exit 1
+ok [RED-2 driver requests an undeclared role]: exit 1
+ok [RED-3 the two templates disagree]: exit 1
+ok [RED-4 retired role (inner) present]: exit 1
+ok [NOT-EVALUATED when no init artifact is obtainable]: exit 3
+ok [restored baseline GREEN]: exit 0
+exit=0
+$ node --no-warnings --experimental-strip-types plugin/scripts/checker-mutation-check.ts --check
+checkers_total: 88 / checkers_with_mutation: 88 / mutations_that_stayed_green: 0 /
+mutations_that_always_red: 0 / uncovered: 0 / errors: 0 / not_evaluated: 0
+RESULT: PASS — every registered checker went RED under its injected defect and GREEN on restore.
+exit=0
+```
+
+`## Touches` 因这次 delta 新增 `plugin/scripts/profiles-role-coverage-check.ts` 而加一行
+（`anti-drift-touches-check` 对 Touches 外的 delta 文件是 HARD FAIL，不加会让 fan-in step 3 再红一次）。
+
+### ⑥ 复跑（merge develop 之后，本轮）
+- AC-331 判据：`exit=0`。
+- AC2 两条取假臂复现：`CAUSE=closed-set-dir-missing-goals`（exit 1）与
+  `CAUSE=closed-set-file-missing-.claude/settings.json`（exit 1）；两条改动均用 `cp` 备份还原，
+  `git diff` 空（⛔ 不用 `git checkout` 还原，避免误伤同文件其它在飞改动）。
+- AC4：`grep -n "quay-init\.sh" plugin/scripts/laydown-set-check.sh` 排除注释后命中 = 0；
+  `node --experimental-strip-types --test plugin/test/laydown-set-check.test.mjs` ⇒ `tests 9 / pass 9 / fail 0`。
+- AC5：`derive_loop_scripts` / `verify_referenced_landed` / `compute_drift_report` /
+  `compute_dependency_closure_gaps` / `ensure_vendor_runtime` 在可执行层（`packages/*/src`、
+  `plugin/scripts`、`plugin/test`、`packages/*/test`）的命中**全部是注释/文档**，非注释命中 = 0。
+- AC6：scoped 门 `tests 278 / pass 278 / fail 0`，exit 0（本轮读数，含 merge develop 后的树）。
