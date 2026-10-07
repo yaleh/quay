@@ -2,7 +2,7 @@
 id: gap-quay-native-adr-cli-looser-bypass-of-core-validation
 title: quay-native 自带的 ADR CLI 绕开 Core 的校验（无 --title 必填、无
   accept/deprecate/reject/supersede 动词），是未声明的更松入口
-status: todo
+status: ready
 labels:
   - gap
 parent: null
