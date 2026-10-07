@@ -1513,6 +1513,10 @@ export function runInit(opts: InitOptions): InitResult {
     };
   }
 
+  // ── What does the target already have? (three-state — AC1; not `fs.existsSync`) ────────────────
+  // Computed BEFORE the project-value resolution because a fail-closed result carries this state.
+  const existing = classifyConfig(configPath);
+
   // ── The PROJECT-DERIVED `loop:` values (AC-331) ──────────────────────────────────────────────
   // Resolved for EVERY non-branch-model mode — fresh AND upgrade — exactly as the shipped shell entry
   // does: an explicit parameter wins, else the target's existing value, else detection / the
@@ -1553,9 +1557,6 @@ export function runInit(opts: InitOptions): InitResult {
     };
   }
   const values = projectValues.values;
-
-  // ── What does the target already have? (three-state — AC1; not `fs.existsSync`) ────────────────
-  const existing = classifyConfig(configPath);
 
   // ── EXISTING + UNPARSEABLE ⇒ SALVAGE-BY-REBUILD (no flag: the file's STATE decides) ────────────
   // GOAL-029 / 人 2026-10-07: the three states map to three actions and nothing else — absent ⇒ fresh

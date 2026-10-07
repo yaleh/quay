@@ -37,6 +37,24 @@ const nativeBin = QUAY_NATIVE_CLI;
 // ---------------------------------------------------------------------------
 
 function tmpDir(tag) {
+  const d = makeTmpDir(`quay-init-${tag}-`);
+  // AC-331 (gap-init-cli-lays-full-closed-set-and-detects-project-values-without-the-shell-script):
+  // the CLI's fresh install now RESOLVES the target's test command and FAILS CLOSED when it cannot —
+  // the shipped shell entry's behaviour, ported. Seed the cheapest detectable shape (the ladder's
+  // first rung, `scripts/test.sh`) so every fixture below is a real project. Tests that need the
+  // fail-closed arm use `bareTmpDir()`.
+  seedDetectable(d);
+  return d;
+}
+
+/** Give `d` a detectable test command (the ladder's first rung). */
+function seedDetectable(d) {
+  fs.mkdirSync(path.join(d, "scripts"), { recursive: true });
+  fs.writeFileSync(path.join(d, "scripts", "test.sh"), "#!/bin/bash\necho test\n");
+}
+
+/** A tmp dir with NO detectable test command — the fail-closed arm's input. */
+function bareTmpDir(tag) {
   return makeTmpDir(`quay-init-${tag}-`);
 }
 
@@ -275,6 +293,7 @@ test("AC5: quay init --root scaffolds at specified path", () => {
   const dir = tmpDir("ac5");
   const targetDir = path.join(dir, "subdir");
   fs.mkdirSync(targetDir, { recursive: true });
+  seedDetectable(targetDir);
 
   const out = runQuay(["init", "--root", targetDir], dir); // cwd is parent, --root is subdir
   assert.ok(out.includes("Created"), "init --root should succeed");
@@ -418,6 +437,7 @@ test("AC10e: quay-native init --root scaffolds at specified path", () => {
   const dir = tmpDir("ac10e");
   const targetDir = path.join(dir, "subdir");
   fs.mkdirSync(targetDir, { recursive: true });
+  seedDetectable(targetDir);
 
   runNative(["init", "--root", targetDir], dir);
   assert.ok(fs.existsSync(path.join(targetDir, ".quay", "config.yml")), "config at --root path");
@@ -739,7 +759,12 @@ test("AC168-closed-set: CLI quay init laydown ⊆ SPEC §6 closed set", () => {
   const dir = tmpDir("ac168-closedset");
   runQuay(["init", "--root", dir], dir);
 
-  const produced = listFilesRecursive(dir);
+  // ⛔ `scripts/test.sh` is the FIXTURE the test itself seeded (see tmpDir) — the target's own file,
+  // not something init laid down. Exclude it, and assert it is really there so the exclusion cannot
+  // quietly become a no-op (硬规则 2: the predicate must be run against a known-true sample).
+  const FIXTURE = "scripts/test.sh";
+  assert.ok(fs.existsSync(path.join(dir, FIXTURE)), "fixture precondition: the seeded test command must exist");
+  const produced = listFilesRecursive(dir).filter((p) => p !== FIXTURE);
   const allowed = readClosedSet(SPEC_CLOSED_SET_PATH);
 
   assert.ok(allowed.length > 0, "SPEC §6 closed-set block must be non-empty");
