@@ -166,13 +166,17 @@ test("AC4 — removing a category's owning task file drops the covered count and
 });
 
 // ── AC2/AC5 — the check is runnable BEFORE install (repo) AND the quay-init wiring runs it post-laydown ──
-test("AC5 — quay-init wiring: the L1 check ships in the derived set and is invoked beside verify_referenced_landed", () => {
+test("AC5 — quay-init wiring: the L1 check ships in the derived set and is invoked post-laydown", () => {
+  // AC-331 (gap-init-cli-lays-full-closed-set-and-detects-project-values-without-the-shell-script)
+  // moved the DERIVATION out of quay-init.sh into `deriveLoopScripts` (packages/quay/src/init.ts), so
+  // the explicit-addition block this assertion used to slice out of the shell no longer exists there.
+  // The claim is unchanged — "the check ships with the loop (装后能跑)" — read from its NEW home, plus a
+  // positive control that the phrase is really in that file (so the assertion cannot pass on an empty
+  // slice, which is exactly what the pre-fix form degenerated into after the move).
+  const initTs = fs.readFileSync(path.join(REPO_ROOT, "packages", "quay", "src", "init.ts"), "utf8");
+  assert.match(initTs, /"l1-delivery-surface-check\.ts"/, "the derived laydown set must ship the L1 check (explicit additions in deriveLoopScripts)");
   const qinit = fs.readFileSync(path.join(SCRIPTS_DIR, "quay-init.sh"), "utf8");
-  // The (c) explicit additions must ship the check with the loop (装后能跑).
-  const explicitBlock = qinit.slice(qinit.indexOf("derive_loop_scripts"), qinit.indexOf("sort -u \"$out\" -o \"$out\""));
-  assert.match(explicitBlock, /l1-delivery-surface-check\.ts/, "the derived laydown set must ship the L1 check");
-  // The post-laydown verification must invoke it in --surface mode beside verify_referenced_landed.
-  assert.match(qinit, /verify_referenced_landed/, "the wiring sits beside verify_referenced_landed (category 1)");
+  // The post-laydown verification must invoke it in --surface mode via its resolved script path.
   assert.match(qinit, /l1_script/, "quay-init must invoke the L1 check (via its resolved script path)");
   assert.match(qinit, /--surface/, "quay-init must invoke the L1 check in --surface mode");
 });

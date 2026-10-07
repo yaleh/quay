@@ -1,96 +1,190 @@
+# .quay/config.yml — unified per-workspace config (DIR-050). Travels with the
+# user's project; distinct from provider.yml, which travels with the Provider code.
+#
+# Unified format (DIR-050): providers: / gates: / loop: sections in ONE file.
+# DIR-120 Phase 2: once THIS file exists (as it does here), it is TERMINAL —
+# readGatesConfig()/readLoopParams() resolve exclusively from its own
+# `gates:`/`loop:` sections and never fall through to a legacy
+# `.quay/gates.yml`/`.quay/loop.yml` (this workspace's own root copies of
+# those two files have been deleted; the branch-A fallback code path that
+# would have read them is gone too). A workspace with NO `.quay/config.yml`
+# at all (e.g. exp5's own `experiments/quay-perpetual-stream/.quay/`) still
+# reads a bare `.quay/loop.yml`/`.quay/gates.yml` via the readers' unchanged
+# branch-B path — see packages/quay/src/gate/config/loader.ts and
+# packages/quay/src/loop-params.ts's own doc comments.
+
 providers:
   native:
     enabled: true
-    tasks_dir: ./tasks
+    path: "./packages/quay-native"       # where the Provider's provider.yml + code live
+    tasks_dir: "./tasks"                 # storage path for this workspace
+    mcp_entry: ["node", "./bin/quay-native.ts", "mcp"]
     env:
-      QUAY_NATIVE_TASKS_DIR: ./tasks
-      QUAY_NATIVE_ADR_DIR: ./adr
-      QUAY_NATIVE_GOAL_DIR: ./goals
-      QUAY_NATIVE_META_DIR: ./meta
+      QUAY_NATIVE_TASKS_DIR: "./tasks"   # resolved relative to workspaceRoot at launch time
+      QUAY_NATIVE_ADR_DIR: "./adr"        # ADRs are a SEPARATE kind, stored in a sibling dir of tasks/
+
   github:
-    enabled: false
-    path: ./packages/quay-github
-    mcp_entry:
-      - node
-      - ./bin/quay-github.ts
-      - mcp
+    enabled: false                       # not the DEFAULT provider (native is); select explicitly via `quay --provider github ...`
+    path: "./packages/quay-github"       # where the Provider's provider.yml + code live
+    mcp_entry: ["node", "./bin/quay-github.ts", "mcp"]
     env:
-      QUAY_GITHUB_REPO: yaleh/quay
+      QUAY_GITHUB_REPO: "yaleh/quay"     # owner/repo this Provider reads issues from
+
+# DIR-050: gates section (previously .quay/gates.yml). DIR-120 Phase 2: this
+# workspace's own root `.quay/gates.yml` has been physically deleted, and
+# readGatesConfig()'s branch-A fallback code path that would have read it is
+# gone too — this section is now the ONLY source THIS workspace's readers
+# can resolve gates from (not merely "single source of truth" by convention;
+# the legacy fallback no longer exists as code, not just as a file). A
+# legacy `.quay/gates.yml` remains a valid, unrelated concept only for a
+# DIFFERENT workspace that has no `.quay/config.yml` of its own at all.
 gates:
   it0:
     - name: impl-row
-      script: ./plugin/scripts/it0-impl-row-check.sh
+      script: "./plugin/scripts/it0-impl-row-check.sh"
       argsKey: implRowArgs
     - name: line-budget
-      script: ./experiments/quay-perpetual-stream/scripts/it0-ceiling-line-budget-check.sh
+      script: "./experiments/quay-perpetual-stream/scripts/it0-ceiling-line-budget-check.sh"
       argsKey: lineBudgetArgs
     - name: vmeta-lag
-      script: ./plugin/scripts/vmeta-lag-check.sh
+      script: "./plugin/scripts/vmeta-lag-check.sh"
       argsKey: vmetaLagArgs
     - name: audit-independence
-      script: ./plugin/scripts/audit-independence-check.sh
+      script: "./plugin/scripts/audit-independence-check.sh"
       argsKey: auditIndependenceArgs
     - name: dogfood-evidence
-      script: ./experiments/quay-perpetual-stream/scripts/it0-dogfood-evidence-gate.sh
+      script: "./experiments/quay-perpetual-stream/scripts/it0-dogfood-evidence-gate.sh"
       argsKey: dogfoodEvidenceArgs
     - name: drivable-workspace
-      script: ./plugin/scripts/drivable-workspace-check.sh
+      script: "./plugin/scripts/drivable-workspace-check.sh"
       argsKey: drivableWorkspaceArgs
+
   adr:
-    - ADR-001
-    - ADR-007
+    - "ADR-001"
+    - "ADR-007"   # dark-axis instrument regression gate (git-lens-selfcheck); wired 2026-07-20
+
   fixed:
     - name: delivery-standalone-smoke
-      script: ./packages/quay/test/delivery-standalone-smoke.sh
+      script: "./packages/quay/test/delivery-standalone-smoke.sh"   # ADR-013 / DIR-035-D, wired 2026-07-20
     - name: anti-gaming
-      script: ./plugin/scripts/anti-gaming-guard.sh
+      script: "./plugin/scripts/anti-gaming-guard.sh"
     - name: loadbearing-test
-      script: ./plugin/scripts/loadbearing-test-gate.sh
+      script: "./plugin/scripts/loadbearing-test-gate.sh"
     - name: tree-hygiene
-      script: ./plugin/scripts/tree-hygiene-check.sh
+      script: "./plugin/scripts/tree-hygiene-check.sh"
     - name: worktree-branch-hygiene
-      script: ./plugin/scripts/worktree-branch-hygiene-check.sh
+      script: "./plugin/scripts/worktree-branch-hygiene-check.sh"
+    # M238/gap-build-evidence-manifest-missing: BuildEvidenceGate — mechanical pre-Audit
+    # manifest validation. Primary integration via execute-milestone.js direct invocation;
+    # standalone `quay gate --gate build-evidence` requires task.extra.manifest set.
     - name: build-evidence
-      script: ./plugin/scripts/build-evidence-gate.ts
-      cwd: .
+      script: "./plugin/scripts/build-evidence-gate.ts"
+      cwd: "."
+
   testPass:
     - name: it0-dod-check-tests
-      command: node --test experiments/quay-perpetual-stream/test/it0-dod-check.test.mjs
+      command: "node --test experiments/quay-perpetual-stream/test/it0-dod-check.test.mjs"
     - name: ts-typecheck
-      command: for d in packages/*/; do npx tsc --noEmit -p "$d" || exit 1; done
-      cwd: .
+      # DIR-059: per-package loop (not root `npx tsc --noEmit`) — bounds peak RSS per invocation
+      # to one package's own dependency graph instead of all 4 packages' at once (was routinely
+      # peaking at 4-5GB on the host and OOM-killing it; per-package peaks ~2.6GB at worst).
+      # `cwd: "."` (-> workspaceRoot, DIR-046-B) makes the `packages/*/` glob resolve the same way
+      # regardless of the caller's own process.cwd() (in-process gate() calls vs the `quay gate` CLI).
+      command: "for d in packages/*/; do npx tsc --noEmit -p \"$d\" || exit 1; done"
+      cwd: "."
+      # ts-typecheck gate 实测 ~25s（隔离）/ >60s（全量 suite 28 并发负载下）——默认 60000ms 超时在
+      # suite 负载下必超时（acceptance timed out after 60000ms）。抬到 120000ms（= 该 gate 的
+      # ts-typecheck-gate-config-wiring.test.mjs test timeout），给足负载余量。
       timeoutMs: 120000
+    # C1 / exp5-M-CRYST-C1 / DIR-026: split-or-commit gate
     - name: split-or-commit
-      command: node plugin/scripts/it0-split-or-commit-check.ts .
+      command: "node plugin/scripts/it0-split-or-commit-check.ts ."
+    # INV / exp5-M-CRYST-INV / ADR-011: enforcement-with-design gate
     - name: enforcement-with-design
-      command: node plugin/scripts/it0-enforcement-with-design-check.ts .
+      command: "node plugin/scripts/it0-enforcement-with-design-check.ts ."
+
 loop:
   board: native
-  gates:
-    - acceptance
+  # DIR-120 Phase 1 (2026-07-27, evidence-backed human decision): `it0-set`/`vitest` were both
+  # confirmed dangling references for THIS project (neither resolves via
+  # packages/quay/src/gate/registry.ts listGates() nor matches this project's own real fired-gate
+  # history in .quay/gate-events.jsonl, which shows acceptance/complete/dod/promote). `acceptance`
+  # is the one value that matches — verified against the built-in gate registry AND cross-checked
+  # against /home/yale/work/meta-cc's own config.yml + gate-events.jsonl (same real-usage pattern).
+  gates: [acceptance]
   stop: until(.halt)
   policy: value-typed-ledger
+  # ── fan-in 契约（GOAL-027 / AC-316）——**显式声明，⛔ 不再按「worktree 里有没有 scripts/test.sh」
+  # 推断「这是不是本仓库形态」**。第三方项目只要按 loop.test_command 的约定交付了自己的
+  # scripts/test.sh，就会被整体当成 quay 仓库，随后 scoped 门 / doc-check / suite 调度逐项对不上，
+  # 而每一处对不上都表现为「读不出东西」而不是报错（硬规则 3b）。
+  #
+  # 三个键的语义（实现：plugin/scripts/worker-fan-in.ts）：
+  #   suite_runner        quay-buckets | delegated。quay-buckets ⇒ suite 经 full-suite-runner.ts 跑
+  #                       （bucket 协议；它是 verification-round.jsonl 的唯一 writer）；delegated ⇒
+  #                       用 loop.test_command 跑全量，台账由 fan-in 本层补写。键缺席 ⇒ delegated
+  #                       当且仅当 loop.test_command 有声明，否则「无测试能力」fail-closed。
+  #   scoped_command      scoped 门的 argv 模板（YAML 列表；`{worktree}` / `{task}` 占位符）。缺席 ⇒
+  #                       该能力「未提供」（独立取值 no-scoped-command-declared，⛔ 不与「跑了且失败」
+  #                       同形）⇒ fan-in 跳过该步直接进全量 suite。
+  #   doc_check_command   doc-check 的 argv 模板（`{worktree}`）。缺席 ⇒ 同上（no-doc-check-command-declared）。
+  # ⚠️ 本文件是 gitignored 的**工作区**配置：它随 worktree 由 plugin/scripts/dispatch-worktree-setup.sh
+  # 的 worktree-include 机制铺出，**改它不会进任何分支**；新增/修改这里的键之后，已存在的 worktree
+  # 拿到的是旧副本（重跑一次 dispatch-worktree-setup.sh 即刷新）。
   suite_runner: quay-buckets
-  scoped_command:
-    - bash
-    - "{worktree}/scripts/test.sh"
-    - --for-task
-    - "{task}"
-    - --allow-thin
-  doc_check_command:
-    - bash
-    - "{worktree}/scripts/test.sh"
-    - --static-checks-doc
+  scoped_command: ["bash", "{worktree}/scripts/test.sh", "--for-task", "{task}", "--allow-thin"]
+  doc_check_command: ["bash", "{worktree}/scripts/test.sh", "--static-checks-doc"]
+  # branch-cutover (gap-two-layer-loop-tick-docs-hardcode-master, 2026-08-06): quay overrides the
+  # shared tick-docs' default working-branch (master) to develop. The integration branch (two-line
+  # model) was RETIRED 2026-08-13 (AC48 判据2): per-task verification forks from develop, runs the
+  # full suite in a worktree, and merges back to develop — no integration branch. merge_target now
+  # equals fork_baseline (both develop); the old value pointed at the retired branch.
   fork_baseline: develop
   merge_target: develop
+  # DIR-120 Phase 1 (2026-07-27): execution/audit were real, SKILL.md-consumed fields already set
+  # explicitly in both sibling projects (meta-cc, archguard) and in this repo's own root
+  # `.quay/loop.yml` — but missing from THIS canonical file (DIR-050's unification was left
+  # half-done). Migrated here with their real values so the canonical file stops being an
+  # incomplete copy of the legacy file it is meant to eventually replace.
   execution: dispatched
   audit: adversarial
+  # DIR-120 Phase 1 (2026-07-27, explicit human decision): raised from the DIR-049-era default (2)
+  # to 4. HONEST TENSION, not silently resolved: DIR-049 set exp5's concurrency to 2 specifically
+  # because exp5's OWN methodology milestones carry a SELECT<-ABSORB LEARNING dependency (a later
+  # milestone's SELECT may depend on what an earlier one's ABSORB taught) — a DIFFERENT risk class
+  # than plain file-level touches overlap. DIR-113's touches-preflight (touches-orthogonality-check)
+  # only proves file-level disjointness; it does NOT prove the absence of a learning dependency, and
+  # its existence is NOT by itself a safety argument for raising this number. This value change is a
+  # human decision made with that tension explicitly on the table (see tasks/DIR-120.md's Requested
+  # action item 2 for the full evidence chain), not a claim that DIR-049's concern has been resolved.
+  # NOTE (Phase 0 finding, still true after this edit): this field remains INERT for exp5's own
+  # bespoke driver (OUTER-LOOP.md never calls readLoopParams) — verified live via
+  # `config-wiring-check.ts --driver bespoke`. It is real and consumed by the generic
+  # `plugin/skills/loop-driver/SKILL.md` (used by sibling projects), just not by this workspace yet.
   concurrency: 4
+  # Adaptive concurrency bands (gap-adaptive-concurrency-cap-tied-to-resource-gate AC4): the cap is
+  # NOT a fixed number — cap-from-gate.sh reads cpu `some avg300` at the dispatch decision point
+  # (fast-mode-loop-tick.md step 4, no new polling) and picks a band. The BAND NUMBERS are STRATEGY
+  # (per-project, this block); the MECHANISM (avg300 read + hysteresis + config lookup) is shared
+  # quay infrastructure downstream projects adopt via the upgrade channel. Bands: GO when avg300 < 40
+  # (default cap 5), WAIT 40..70 (default cap 2), EXTREME >= 70 (default cap 1). Override here, e.g.
+  # archguard GO=4/WAIT=2/extreme=1 — same mechanism, different numbers.
   concurrency_bands:
     go: 5
     wait: 2
     extreme_wait: 1
+  # worktree_root (gap-the-shipped-tick-doc-teaches-every-project-to-put-worktrees-in-tmpfs AC2):
+  # the DISK root for per-task git worktrees. /tmp is tmpfs — every MB is memory — and the
+  # 2026-08-04 machine-wide OOM traced straight to in-flight worktrees living in it. quay-init
+  # --loop validates this root's filesystem type and fails closed on tmpfs (AC3/AC4). Default:
+  # <repo_root>/../<project>-worktrees.
   worktree_root: /home/yale/work/quay-worktrees
+  # ⚠️ 下面四条是【legacy 触发形态】：`every(N)` 依赖的迭代计数器随 ADR-022 的经典管线一起退役
+  # （两层模式没有 iteration 号）⇒ 它们在任何两层执行核里都**永不 due**，今天处于「声明了但无人
+  # 驱动」态（SPEC-capability-planes-and-mechanism-lifecycle §2.3）。它们**不由** probe 轨道
+  # （quality driver，见下）承接，驱动启动时会把每条的跳过理由打到 stderr（⛔ 不静默）。把它们迁到
+  # `interval:<N>m` 是一件独立的、会改变生产行为的事（那四条探针的产出路由是「立案」，走的是随
+  # inner 退役的 routines skill 通道），本任务刻意不做。
   routines:
     - name: self-validation
       trigger: every(5)
@@ -104,24 +198,60 @@ loop:
     - name: browser-explorer
       trigger: every(10)
       probe: browser-explorer
+    # ── 深度语义判重扫描（gap-productize-deep-semantic-dedup-scan-routine，2026-09-13）────────
+    # 08-25 那次一次性人工动作（拉全量实体清单 → 分片派 7 个 subagent 各自核实 → 聚合，抓到 8+ 真
+    # 重复）的产品化：**周期 routine，⛔ 不是常驻热路径闸**（同族反例
+    # gap-fan-in-remove-archguard-gate：当成每任务必经的布尔闸后 244 次运行零指引价值）。
+    # 触发形态 = 两层模式的时间量 `interval:<N>m`（routine-scheduler.parseTrigger 解析，唯一文法实现）。
+    # 承载者 = quality driver 的例程表（活的生产调用点；SPEC §5.2 选定的落点，⛔ 不新造 driver kind）。
+    # 产出 = 结构化 finding 追加进 `.quay/routine-findings.jsonl`（每条带具体文件路径 + 函数名 +
+    # 判定理由；⛔ 不是一个绿/红布尔）；探针规格见 plugin/probes/semantic-dedup-scan.md。
+    # 1440m（每日一次）：深扫要派 fresh-context agent 且要跑全量清单，成本远高于单次布尔闸。
     - name: semantic-dedup-scan
       trigger: interval:1440m
       probe: semantic-dedup-scan
+    # ── 新鲜度刷新（gap-ac214-upgrade-face-refresh-and-mechanical-freshness-trigger，2026-09-14）──
+    # 承载的缺口：goal AC-214 要求七个「载体型主体」的证据距 develop tip 不超过 K 个交付面提交，
+    # 而**刷新动作没有触发器** —— 每个主体类都会在窗口外老化，靠 goal-driver 的缺口立案一次次补。
+    # 实测发生率 4 次 / 5 天（09-13 ×2、09-14 ×2），每次都由一次性人工重跑关闭、每次都在关闭后重新
+    # 越界。本 routine 把「谁该被刷新」变成机械提问；**⛔ 只 file 不 execute**（跨机产出器由人/派发链
+    # 决定重跑，routine 的 FILE-ONLY 边界）。
+    # 主体↔产出者映射的**单一真相源** = plugin/freshness-producers.json（判定
+    # freshness-producer-coverage-check.ts 与探针都读它，⛔ 不复制第二份）；完备性判定见该文件。
+    # 探针规格 = plugin/probes/freshness-refresh.md。
+    # ── trigger 取值推导（⛔ 不是魔数；K 与实测量的函数，代入见 body）──────────────────────────
+    # 阈值 = (W_p + I) × R / K，其中
+    #   W_p = 产出者墙钟（小时，from freshness-producers.json：冷启动面 0.34h / 升级面 ~2h）
+    #   I   = 本 routine 的观测间隔（小时）= N/60
+    #   R   = 实测交付面前进速率（提交/小时）= 18（2026-09-14 实测：近 7 天 1034 提交，最大 4h 桶
+    #         72 ⇒ 18/h；单小时峰值 25/h 是瞬态，取 4h 桶为平滑最坏值）
+    #   K   = 新鲜度窗口（提交）= 200（判据正文的未测量初始值，⚠️ 重估点 2026-10-09）
+    # I 取 120m 的依据：观测间隔不需要短于最慢产出者的墙钟（更快地发现一个主体，并不会让产出器
+    # 更快跑完）⇒ I ≤ max_p W_p = 2h。代入：
+    #   升级面    (2.0 + 2.0) × 18 / 200 = 0.360  ⇒ margin/K ≤ 0.360 时产出 finding（≈72 提交余量）
+    #   冷启动面  (0.34 + 2.0) × 18 / 200 = 0.211 ⇒ margin/K ≤ 0.211 时产出 finding（≈42 提交余量）
+    # 两个阈值都 ≥ 设计下界 W×R/K（0.18 / 0.03），且覆盖「本间隔内可能前进的量 + 产出者墙钟」。
     - name: freshness-refresh
       trigger: interval:120m
       probe: freshness-refresh
-  repo_root: /data/home/yale/work/quay-worktrees/gap-init-cli-lays-full-closed-set
-  test_command: bash scripts/test.sh
-  tmux_session: null
-  doc_surfaces:
-    - tasks/
-    - goals/
-    - .quay/
+
+# ── suite 级旋钮（config 优先，env/CLI 备用；gap-suite-knobs-config-file-priority）───────
+# 其余 suite 旋钮用默认；serial/lowconc 并发 host-derived 不写字面量（硬规则 4 推论二）。
 suite:
   max_oversubscription: 1
+
 goals:
-  cap: 5
-  stale: 7d
+  cap: 5        # 并发 active GOAL 上限,整数 ≥1,默认 3
+  stale: 7d     # 顺带一提,过期窗口也在同一段,默认 7 天,可写 "7d"/"12h"/"90m" 或裸数字(天)
+
+# ── serve 绑定：期望态（gap-serve-binding-defaults-three-copies-to-one-definition-point 落地）──
+# 优先级：显式 CLI flag > 本段 > 唯一回退字面量（packages/quay/src/serve-binding.ts 的
+# SERVE_BINDING_FALLBACK = host 0.0.0.0 / port 0）。片段缺席 ⇒ 回退；写坏（port 非整数 / host 空）
+# ⇒ resolveServeBinding 返回 not-evaluated 且宿主【拒绝启动】（fail-closed，⛔ 不静默回退）。
+# ⚠️ host/port 是【绑定期】的量 ⇒ 改这里必须【换宿主进程】才生效；`quay server restart --only web`
+# 只关面再开面、复用已绑端口与同一 host，不会重新 bind。本文件 gitignored（.gitignore:483）
+# ⇒ 绑定是 per-checkout 的，换机器/换 checkout 需重写一次（这是设计意图，不是缺陷）。
+# 172.28.0.1 是本机 docker 网桥 br-a1cffd193797 的地址；20119 是本 workspace 一直用的号。
 serve:
   host: 172.28.0.1
   port: 20119
