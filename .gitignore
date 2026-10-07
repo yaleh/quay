@@ -65,6 +65,11 @@ packages/quay/plugin/
 # blocked task's code). Same gitignored runtime-state family as worker-outcome.jsonl / gate-events.jsonl.
 **/.quay/fan-in-lock-events.jsonl
 **/.quay/fan-in-failure-classification.jsonl
+# gap-fan-in-execute-semantic-fallback-telemetry-blind (2026-10-07): the semantic-fallback attempt
+# ledger (.quay/fan-in-semantic-fallback.jsonl) — one line per fan-in-execute workflow start/end
+# (written by `worker-driver.ts --record-semantic-fallback`, read by `--semantic-fallback-report`).
+# Runtime state, never git-tracked; same family as worker-outcome.jsonl / fan-in-lock-events.jsonl.
+**/.quay/fan-in-semantic-fallback.jsonl
 **/.quay/fan-in-lock-token-*.json
 # gap-mech-fan-in-log-webui-visible-clickable (2026-08-28): the mechanical fan-in process log
 # (.quay/fan-in-<task>-<runId>.log) + its per-run suite log (.quay/fan-in-suite-<task>-<runId>.log) —
