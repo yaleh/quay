@@ -43,4 +43,5 @@ extra:
 - packages/quay/src/cli/provider.ts
 - packages/quay/src/cli/help.ts
 - packages/quay/test/cli.test.mjs
+- delivery-manifest.json
 - tasks/gap-provider-switch-no-dedicated-entry-point.md
