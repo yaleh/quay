@@ -241,8 +241,11 @@ function registerBootstrapHandlers(server: McpServer): void {
         "from the defaults, retired keys are deleted, values this version considers incompatible are " +
         "migrated, and every other key and comment is left untouched — a config already current is not " +
         "rewritten at all); an UNPARSEABLE one is rebuilt from the defaults with the broken file preserved " +
-        "beside it as `config.yml.corrupt-<timestamp>`. There is no overwrite flag and no reconcile " +
-        "selector. `dryRun: true` reports what would be written without touching anything.",
+        "byte-identical beside it as `config.yml.corrupt-<timestamp>` — the result's `outcome` is " +
+        "`rebuilt` and it names the backup in `corruptBackupPath` plus the parse failure in " +
+        "`corruptReason` (the rebuilt config does NOT carry the old file's project values). There is no " +
+        "overwrite flag and no reconcile selector. `dryRun: true` reports what would be written without " +
+        "touching anything.",
       inputSchema: {
         root: z.string().describe(
           "Absolute path of the workspace to initialize/upgrade. Required — on the degraded-startup path this tool exists for, there is no loaded config to derive it from."
@@ -261,8 +264,11 @@ function registerBootstrapHandlers(server: McpServer): void {
         const report = buildInitReport(result, { dryRun: dryRun === true });
         // A refusal is a NORMAL result of a well-formed judgment (`isError: false` would claim quay
         // did what was asked); only the outcomes that leave the caller with nothing to act on
-        // report as errors.
+        // report as errors. `rebuilt` is a SUCCESS (the config was regenerated and written) and is
+        // deliberately absent from this list.
         const refused =
+          result.outcome === "corrupt" ||
+          result.outcome === "rebuild-invalid" ||
           result.outcome === "skipped" ||
           result.outcome === "upgrade-invalid" ||
           result.outcome === "branch-model-blocked";

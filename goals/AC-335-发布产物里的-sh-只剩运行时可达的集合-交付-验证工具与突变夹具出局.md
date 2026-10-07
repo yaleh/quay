@@ -1,7 +1,7 @@
 ---
 id: AC-335
 title: 发布产物里的 .sh 只剩运行时可达的集合；交付/验证工具与突变夹具出局
-status: active
+status: achieved
 kind: criterion
 goal: GOAL-029
 criterion: >-
@@ -37,6 +37,11 @@ statusLog:
     to: active
     actor: goal-cli
     reason: ""
+  - at: 2026-10-07T03:55:09.206Z
+    from: active
+    to: achieved
+    actor: goal-driver
+    reason: "I2: criterion pass"
 fidelity:
   verdict: not-evaluated
   reason: no judge configured

@@ -47,6 +47,11 @@ import {
   isExcluded,
 } from "../scripts/shipped-set-rules.ts";
 import { judgeShippedSetClean } from "../scripts/verify-plugin-channel-assertions.ts";
+// The sibling narrowing (tasks/gap-shipped-shell-limited-to-runtime-reachable-set-and-delivery-
+// verify-tools-leave-the-artifact) is what LOWERED this file's baseline: the 19 `.sh` no runtime
+// surface reaches stopped shipping, so `.sh` code lines went 17545 -> 8286. Imported rather than
+// re-implemented so the two tests judge the SAME derived set (硬规则 5b — one definition point).
+import { deriveReachability } from "../scripts/shipped-shell-reachability.ts";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const pluginDir = path.resolve(__dirname, "..");
@@ -189,6 +194,43 @@ test("AC2: the published artifact carries no dev-only content, and its totals ar
   console.log(
     `shipped-set: artifact ${reading.totals.files} files / ${reading.totals.bytes} bytes / ${reading.totals.shLines} .sh lines, ${rules.length} rule(s) in force, 0 forbidden`,
   );
+});
+
+/** Every artifact-relative `.sh` in a materialised artifact. */
+function artifactShells(root) {
+  const out = [];
+  const visit = (dir, rel) => {
+    for (const d of fs.readdirSync(dir, { withFileTypes: true })) {
+      const r = rel === "" ? d.name : `${rel}/${d.name}`;
+      if (d.isDirectory()) visit(path.join(dir, d.name), r);
+      else if (r.endsWith(".sh")) out.push(r);
+    }
+  };
+  visit(root, "");
+  return out.sort();
+}
+
+// ── AC (this task's other half): the artifact carries only the runtime-REACHABLE shell set ───────
+//
+// The baseline this file reads is the one the reachability narrowing LOWERED (`.sh` code lines
+// 17545 -> 8286). Asserting only "within the ratchet" would let a regression that re-ships the
+// tooling land as long as the totals stayed under an over-generous ceiling, so the structural
+// statement is asserted on the real artifact: the artifact's `.sh` set is a SUBSET of the set
+// `shipped-shell-reachability.ts` derives from the runtime roots. (The full two-way control, incl.
+// the three red controls, is plugin/test/shipped-shell-reachability.test.mjs.)
+test("AC: the artifact's .sh set is within the runtime-reachable set the baseline was lowered to", (t) => {
+  if (!requireArtifact(t)) return;
+  const reach = deriveReachability(repoRoot);
+  assert.equal(reach.evaluated, true, `the reachability derivation must be evaluated: ${reach.reason ?? ""}`);
+  const reachable = new Set(reach.reachable);
+  const present = artifactShells(artifact);
+  const stray = present.filter((p) => !reachable.has(p));
+  assert.deepEqual(stray, [], `every artifact .sh must be reachable — stray: ${stray.join(", ")}`);
+  // The cancelled-channel tools are the concrete names this task's AC pins.
+  for (const absent of ["scripts/verify-deliver-coldstart.sh", "scripts/develop-deliver-tgz.sh"]) {
+    assert.ok(!present.includes(absent), `${absent} must not ship`);
+  }
+  console.log(`shipped-set: artifact .sh ${present.length} ⊆ reachable ${reach.reachable.length} (unreachable pruned ${reach.unreachable.length})`);
 });
 
 test("AC2 control: reverting the rsync exclusion list (the exact regression) turns the reading RED", (t) => {
