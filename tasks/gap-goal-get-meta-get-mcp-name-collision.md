@@ -50,10 +50,7 @@ A real Claude Code session connected to the aggregated quay plugin can either su
 - plugin/scripts/goal-driver.ts
 - packages/quay/src/mcp-handlers.ts
 - packages/quay-native/src/mcp-server.ts
-- tasks/gap-goal-get-meta-get-mcp-name-collision.md
-
-## Test-Files
-
 - packages/quay/test/mcp-goal.test.mjs
 - plugin/test/goal-driver-s01.test.mjs
 - plugin/test/goal-sufficiency-followup.test.mjs
+- tasks/gap-goal-get-meta-get-mcp-name-collision.md
