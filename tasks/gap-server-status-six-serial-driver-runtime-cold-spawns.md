@@ -36,8 +36,8 @@ const r = spawnSync(process.execPath, spawnArgs, { encoding: "utf8" });
 在 3.9-5s 量级，store/环境更重时会逼近 8s 超时，超时后在 claudecodeui 侧被 `readJsonQuietly` 静默吞掉（dashboard 外链
 无声消失，不报错）。
 
-**修法裁定（已选定，不再留给实现时判断）**：选方案1——把 `DRIVER_SERVICE_KINDS.map(...)` 的 6 次同步 `spawnSync` 改成
-并发（`spawn`/`execFile` + `Promise.all`），理由：6 个 kind 的 status 读取彼此独立（各自读自己的 carrier 文件，无共享
+**修法裁定（已选定，不再留给实现时判断）**：选方案1——把 `DRIVER_SERVICE_KINDS.map(...)` 的 6 次同步 `spawnSync`
+改成并发（`spawn`/`execFile` + `Promise.all`），理由：6 个 kind 的 status 读取彼此独立（各自读自己的 carrier 文件，无共享
 可变状态），并发后墙钟时间趋近单次最慢的那个 kind（~1s 量级）而不是 6 次之和；相比"让 driver-runtime.ts 一次进程算完
 6 个 kind"的方案2，方案1不改变 `driver-runtime.ts` 既有的单 kind CLI 调用契约（该契约还被 `goal-driver.ts`/
 `observation.ts`/`capability-manifest-check.ts` 等其它消费点使用），风险更低、改动面更小。方案2留作记录，不在本任务
@@ -49,6 +49,8 @@ const r = spawnSync(process.execPath, spawnArgs, { encoding: "utf8" });
 
 ## Touches
 - `packages/quay/src/cli/server.ts`
+- `packages/quay/src/cli/driver.ts`
+- `packages/quay/test/server.test.mjs`
 - `plugin/test/driver-runtime-loaded-version-drift.test.mjs`
 - `tasks/gap-server-status-six-serial-driver-runtime-cold-spawns.md`
 
