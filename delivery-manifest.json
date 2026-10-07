@@ -31,6 +31,7 @@
     { "name": "meta", "kind": "cli-command", "sourceRef": "packages/quay/bin/quay.ts:dispatch", "verifiedBy": "packages/quay/test/cli.test.mjs" },
     { "name": "migrate", "kind": "cli-command", "sourceRef": "packages/quay/bin/quay.ts:dispatch", "verifiedBy": "packages/quay/test/cli.test.mjs" },
     { "name": "promote", "kind": "cli-command", "sourceRef": "packages/quay/bin/quay.ts:dispatch", "verifiedBy": "packages/quay/test/cli.test.mjs" },
+    { "name": "provider", "kind": "cli-command", "sourceRef": "packages/quay/bin/quay.ts:dispatch", "verifiedBy": "packages/quay/test/cli.test.mjs" },
     { "name": "retreat", "kind": "cli-command", "sourceRef": "packages/quay/bin/quay.ts:dispatch", "verifiedBy": "packages/quay/test/cli.test.mjs" },
     { "name": "run", "kind": "cli-command", "sourceRef": "packages/quay/bin/quay.ts:dispatch", "verifiedBy": "packages/quay/test/cli.test.mjs" },
     { "name": "serve", "kind": "cli-command", "sourceRef": "packages/quay/bin/quay.ts:dispatch", "verifiedBy": "packages/quay/test/cli.test.mjs" },

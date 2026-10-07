@@ -1,7 +1,7 @@
 ---
 id: gap-provider-switch-no-dedicated-entry-point
 title: Provider 切换（如 native→github）没有任何专用入口，只能手改 .quay/config.yml
-status: ready
+status: done
 labels:
   - gap
 parent: null
@@ -43,4 +43,5 @@ extra:
 - packages/quay/src/cli/provider.ts
 - packages/quay/src/cli/help.ts
 - packages/quay/test/cli.test.mjs
+- delivery-manifest.json
 - tasks/gap-provider-switch-no-dedicated-entry-point.md
