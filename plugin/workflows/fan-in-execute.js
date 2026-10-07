@@ -59,8 +59,9 @@ export const meta = {
 //       ≥3 轮 ⇒ escalate → needs-human / 交 outer；与 releaseLivelockRounds / maxFfRetries 互补不冲突）。
 //       ff 失败（develop 前进，窗口 = merge 到 ff 之间的整个 suite 时长）⇒ 回阶段 1 重跑
 //       （有界 maxFfRetries，同 SPEC §7 防活锁阈值；阶段 1 首步 revert 上次 ff 失败遗留的 done 翻转）。
-//     ⛔ 禁止 Bash(run_in_background:true)（subagent 退出被 harness 连带杀，execute-suite-fix.js
-//        实证 runId f6b824b5）；⛔ 禁止前台 bash scripts/test.sh（suite 19+ min > Bash 单次 600s 硬顶）。
+//     ⛔ 禁止 Bash(run_in_background:true)（subagent 退出被 harness 连带杀，runId f6b824b5
+//        实证于已删除的 standalone suite-fix workflow）；⛔ 禁止前台 bash scripts/test.sh
+//        （suite 19+ min > Bash 单次 600s 硬顶）。
 //     取假（plugin/test/fan-in-execute-paths.test.mjs）：构造 step2 code_delta 非空 ⇒ 阶段 1 启动
 //     detached suite（setsid+&+disown）且立即返回；阶段 2 agent 的等待块循环 <600s Bash 到 suite 绿 ⇒
 //     机械步骤（flip/ff/bracket）全执行。等待由阶段 2 agent 承担，脚本不派短命轮询 agent。
@@ -119,7 +120,7 @@ export const meta = {
 //     幂等回归 + 真实 bash）。
 //  ⑨ fix-scope gate（gap-fix-scope-gate-wired-to-wrong-path）：suite-fix 内联 subagent（本文件）的
 //     fix 前判定——红是否本任务 Touches 内回归（inScope 修 / load-sensitive 释放 / 别任务 bug defer）。
-//     上一版 gate 落在 execute-suite-fix.js（standalone 死工作流）零效果。实现见下方 FIX_SCOPE_GATE
+//     上一版 gate 落在一个 standalone 死工作流里零效果（该文件已删除）。实现见下方 FIX_SCOPE_GATE
 //     常量（判定复用 touches-orthogonality-check.ts + known-load-sensitive.ts）。改本块必须同步
 //     plugin/test/fan-in-execute-paths.test.mjs 的 fix-scope 组测试（内联 prompt 含 gate + 越界红 defer）。
 
@@ -331,16 +332,16 @@ printf 'suite_pid=%s\\n' "$suite_pid" >> "$suite_capture"
 # isolate-launch-block-end`
 
 // ── fix-scope gate（fix 前判定红是否本任务 Touches 内回归，gap-fix-scope-gate-wired-to-wrong-path）──
-// 上一版 fix-scope gate（gap-suite-fix-workflow-no-load-sensitive-branch）落在 execute-suite-fix.js
-// （standalone 死工作流）零效果——生产 suite-fix 是本文件内联 subagent（:391 prompt），它直接修根因、
-// 不经 execute-suite-fix.js。越界修已复发第 8+ 例（b0aa31c2 修 quay-init.sh / eb77b17e 修
+// 上一版 fix-scope gate（gap-suite-fix-workflow-no-load-sensitive-branch）落在一个 standalone 死工作流
+// 里（该文件已于 2026-10-07 删除）零效果——生产 suite-fix 是本文件内联 subagent（:391 prompt），
+// 它直接修根因、不经任何独立 workflow。越界修已复发第 8+ 例（b0aa31c2 修 quay-init.sh / eb77b17e 修
 // supervisor-observe.test.mjs / 43153e58 修 session-liveness-helpers.mjs——全不在各自任务 Touches）。
 // 本 gate 把判定落到内联 prompt：fix 前把 suite 日志里 __PERFILE__ passed=false 的失败文件机械分诊为
 // inScope（本任务 Touches 内回归，修）vs outOfScope（越界红，defer/release）：load-sensitive
 // （known-load-sensitive.ts 的 in_family）⇒ 释放不修；file ∉ ## Touches ⇒ 别任务 bug defer 不修；
 // 无 file（tmux-leak 环境残留 / 静态检查）⇒ defer 不修。无法评估（task 文件/日志读失败）⇒
 // fail-closed：不修，全部 defer（硬规则 3b）。判定复用 touches-orthogonality-check.ts 的
-// parseTouches/matchGlob/normalizePath（与 execute-suite-fix.js 同源）。改本块必须同步
+// parseTouches/matchGlob/normalizePath（与已删除的那份同源）。改本块必须同步
 // plugin/test/fan-in-execute-paths.test.mjs 的 fix-scope 组测试。
 // release 持久化（gap-fix-scope-gate-release-not-persistent）：load-sensitive release 曾是一次性
 // relaunch——relaunch 后仍红，第二轮 suite-fix 转越界 fix（第 9+ 例 a76959c8）。修法：gate 把每个
@@ -693,7 +694,8 @@ cd ${worktree} && bash scripts/test.sh --static-checks-doc
 # suite-launch-block-start
 # 全量 suite 启动（gap-fan-in-turn-budget-suite-timeout）：把 suite 交给长生命周期载体（detached
 # setsid 进程，subagent 退出不影响它），不在本回合等待。⛔ 禁止 Bash(run_in_background:true)
-# （subagent 退出时被 harness 连带杀掉，execute-suite-fix.js 实证 runId f6b824b5）；⛔ 禁止前台
+# （subagent 退出时被 harness 连带杀掉，runId f6b824b5 实证于已删除的 standalone suite-fix
+# workflow）；⛔ 禁止前台
 # bash scripts/test.sh（suite 19+ min > Bash 单次 600s 硬顶）。等待由阶段 2 agent 在本回合内多次
 # <600s Bash 循环承担（gap-subagent-turn-budget-13min-falsified）。本块判定依据
 # /tmp/fan-in-code-delta-${task}.txt（step 2 落盘）：非空 ⇒ 启动全量 suite；空 ⇒ 跳过（doc-only）；

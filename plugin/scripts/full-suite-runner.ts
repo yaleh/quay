@@ -72,7 +72,7 @@
 //                                    #   runs the suite in it with the state/log in <main>/.quay (config C
 //                                    #   NODE_COMPILE_CACHE reuse), and tears it down after. Pass
 //                                    #   --one-shot-worktree to force the same for a non-main root; a root
-//                                    #   that is ALREADY a worktree (execute-suite-fix --root <wt>) is never
+//                                    #   that is ALREADY a worktree (a caller passing --root <wt>) is never
 //                                    #   re-provisioned.
 //     [--state-dir <path>]           # the .quay STATE/LOG directory (gate write location);
 //                                    #   default: <root>/.quay (backward compatible single-location)
@@ -1199,7 +1199,7 @@ export async function run(argv: string[]): Promise<number> {
   // package-lock/install rewrites hit the ephemeral worktree copy, never the main checkout.
   // Trigger: automatic when the tested checkout IS the main repo (root === REPO_ROOT — the outer
   // verification round and suite-state-trigger's retrigger spawn both resolve to it), or explicit
-  // via --one-shot-worktree. A caller that already targets a worktree (execute-suite-fix's
+  // via --one-shot-worktree. A caller that already targets a worktree (a per-task worker passing
   // --root <wt>) or a hermetic temp root is never re-provisioned (guarded by !isGitWorktree + the
   // root === REPO_ROOT condition).
   let root = path.resolve(flagValue(argv, "--root") ?? REPO_ROOT);

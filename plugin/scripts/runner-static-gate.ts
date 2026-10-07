@@ -1217,7 +1217,7 @@ run_operational_checks() {
   # (gap-ac73-catalog-rhythm-consumer-check). Wired here as a code-class 每轮 gate: it scans
   # <baseline>..<develop> for non-ff fan-in merges, checks the lock-hold intervals never overlap a
   # suite run, and validates ff-retry-record shape. Baseline advanced 2026-08-16 09:2xZ to 19fea6f0
-  # (develop HEAD then) — the A15 ④ execute-suite-fix workflow's sanctioned non-ff fan-in merge
+  # (develop HEAD then) — the A15 ④ suite-fix workflow's sanctioned non-ff fan-in merge
   # 679ac913 + the AC85/90/93 + drift fan-in merges since cd4f49b4 are all legitimate (verified: 127
   # merges in range are fan-in/resolve subjects, no bypasses); a NEW non-ff fan-in merge AFTER
   # 19fea6f0 is RED (AC62 判据2 mechanically checkable). Prior baseline cd4f49b4 was the develop HEAD

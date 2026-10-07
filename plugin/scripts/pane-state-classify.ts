@@ -958,11 +958,14 @@ export function selfcheck(): boolean {
   check("green-full-text-busy", classifyPaneState(busy).state === "busy");
 
   // GREEN (成因 B): the outer's 93-column task-panel rendering REPLACES "esc to interrupt" with
-  // "ctrl+t to hide tasks" (real 2026-08-11 outer capture, 28/28 agents running). No esc string at
-  // all — only the panel chrome. Must read BUSY.
+  // "ctrl+t to hide tasks" (real 2026-08-11 outer capture, 28/28 agents running). The workflow LABEL
+  // on the task line is normalized 2026-10-07 (the captured workflow was since deleted) — the
+  // verbatim capture is kept unedited in plugin/test/fixtures/pane-states/busy-outer-panel-1.txt;
+  // the classifier keys on the panel CHROME, not the name. No esc string at all — only the panel
+  // chrome. Must read BUSY.
   const outerPanel = [
     "⏵⏵ bypass permissions on · 1 monitor · ctrl+t to hide tasks · ← 1 agent · ↓ to manage",
-    "◯ execute-suite-fix  A15 … 28/28 agents done · 1h 0m 59s · ↓ 2.0m tokens · ⚠ Large workflow",
+    "◯ fan-in-execute  A15 … 28/28 agents done · 1h 0m 59s · ↓ 2.0m tokens · ⚠ Large workflow",
   ].join("\n");
   check("green-outer-panel-busy", classifyPaneState(outerPanel).state === "busy");
   // RED relabel: the panel-rendered busy pane must never read waiting-input.
