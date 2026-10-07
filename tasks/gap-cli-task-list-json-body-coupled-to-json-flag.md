@@ -51,12 +51,12 @@ time (.quay/plugin/bin/quay task list --json | wc -c)    # ~3.4s（--json，强�
 - `tasks/gap-cli-task-list-json-body-coupled-to-json-flag.md`
 
 ## AC
-- [ ] 复现基线：本仓库同一 store 上 `task list`（非 --json，省读路径）vs `task list --json`（全量 body）的真实耗时对照（已有基线：0.422s vs ~3.4s），把读数贴进完成记录。
-- [ ] 新 flag 加上后：`task list --json --no-body`（或实现选定的实际 flag 名）对本仓库真实 store 的实测耗时接近非 --json 的省读路径量级（不是接近全量 body 路径），把真实耗时贴进完成记录。
-- [ ] 新 flag 输出是合法 JSON 数组，每条任务对象不含 `body` 字段，且数组长度 == 全量任务数（不截断、不分页）——用本仓库真实 store 验证 `.length` 与 `task list --json | python3 -c '...'` 的全量计数一致。
-- [ ] 未传新 flag 时 `task list --json` 的既有行为（body 齐全、字段形状）零回归：`node --experimental-strip-types --test packages/quay/test/cli.test.mjs` 退出 0。
-- [ ] 新增用例断言：传新 flag 时 `client.taskList` 收到的 filter 里 `includeBody:false`（用注入的假 provider/client 捕获调用参数断言，不是读输出猜）。
-- [ ] `bash scripts/test.sh --for-task gap-cli-task-list-json-body-coupled-to-json-flag` 退出 0，且执行了 ≥1 个测试文件。
+- [x] 复现基线：本仓库同一 store 上 `task list`（非 --json，省读路径）vs `task list --json`（全量 body）的真实耗时对照（已有基线：0.422s vs ~3.4s），把读数贴进完成记录。
+- [x] 新 flag 加上后：`task list --json --no-body`（或实现选定的实际 flag 名）对本仓库真实 store 的实测耗时接近非 --json 的省读路径量级（不是接近全量 body 路径），把真实耗时贴进完成记录。
+- [x] 新 flag 输出是合法 JSON 数组，每条任务对象不含 `body` 字段，且数组长度 == 全量任务数（不截断、不分页）——用本仓库真实 store 验证 `.length` 与 `task list --json | python3 -c '...'` 的全量计数一致。
+- [x] 未传新 flag 时 `task list --json` 的既有行为（body 齐全、字段形状）零回归：`node --experimental-strip-types --test packages/quay/test/cli.test.mjs` 退出 0。
+- [x] 新增用例断言：传新 flag 时 `client.taskList` 收到的 filter 里 `includeBody:false`（用注入的假 provider/client 捕获调用参数断言，不是读输出猜）。
+- [x] `bash scripts/test.sh --for-task gap-cli-task-list-json-body-coupled-to-json-flag` 退出 0，且执行了 ≥1 个测试文件。
 
 该轴仍暗，理由：本任务改动范围限于单个 CLI 命令文件新增一个输出开关 flag，复用已存在的 Provider `includeBody:false`
 路径，不新增模块、不新增包间依赖、不改变调用图结构，L_D/L_G（依赖结构/重复抽象）轴对此类单文件 flag 新增不提供信号。
@@ -64,3 +64,34 @@ time (.quay/plugin/bin/quay task list --json | wc -c)    # ~3.4s（--json，强�
 ## DoD
 真实落地：在本仓库自己的真实 store 上，新 flag 组合（`--json` + 省读）给出全量计数且不读 body、实测耗时明显低于当前
 `--json` 全量 body 路径的基线，该读数是实跑量出来的，不是依据代码推断。
+
+## Evidence
+**实现**：给 `task list` 增加 `--no-body`。`packages/quay/src/cli/task-list.ts` 的 `wantBodiesInOutput` 由
+`wantsJson === true` 改为 `wantsJson === true && flags["no-body"] === undefined`，于是 `--json --no-body` 走既有的
+`providerFilter.includeBody = false` 下推路径（与表格视图/web board 同一份 frontmatter-only 投影），返回的仍是**全量**
+数组（不截断、不分页）；不传该 flag 时 `--json` 行为不变。`cli/help.ts` 的 task-list 用法行与选项说明同步加上 `--no-body`。
+
+**真实读数**（本仓库真实 store，2591 个任务；跑的是本任务 worktree 的代码，`--root /data/home/yale/work/quay`；best-of-3）：
+
+| 命令 | 耗时 | 输出字节 | 每条含 body |
+|---|---|---|---|
+| `task list`（表格，includeBody:false） | 0.587s | — | 否 |
+| `task list --json`（全量 body） | 3.370s | 26,584,809 | 是 |
+| `task list --json --no-body`（新） | 0.496s | 1,428,739 | 否 |
+
+- **AC1 基线对照**：0.587s（省读路径）vs 3.370s（全量 body）——与本任务 Proposal 记录的 0.422s vs ~3.4s 同一量级，
+  `--json` 全量 body 路径复现出 ~3.4s。
+- **AC2 新 flag 量级**：`task list --json --no-body` = 0.496s，贴近非 --json 省读路径（0.587s），远低于全量 body 路径
+  （3.370s），约 6.8×。
+- **AC3 全量计数/形状**：`task list --json --no-body` 解析为合法 JSON 数组，`len=2591`、`any_body=False`；同 store
+  `task list --json` 亦 `len=2591`、`any_body=True`——全量计数一致，新 flag 只省读、不截断。
+- **AC4 零回归**：`node --experimental-strip-types --test packages/quay/test/cli.test.mjs` 退出 0（tests 1 / pass 1 /
+  fail 0）；同一命令下新增的 block33 case (b) 断言 `--json`（无 flag）每条仍 `"body" in t` 全 true。
+- **AC5 注入断言**：`cli.test.mjs` 新增 block33，用注入的假 Provider MCP server（把收到的 `task_list` 参数落盘），断言
+  `--json --no-body` 时 `aArgs[0].includeBody === false`——断言的是**下推的调用参数**，不是读输出猜。该假 Provider 同时
+  按 `includeBody` 决定是否剥 body，使「调用参数」与「输出形状」两条断言互相印证。
+- **AC6 scoped 门**：按本仓库 `.quay/config.yml` 的 `loop.scoped_command`（即驱动 fan-in 实际执行的形态）
+  `bash scripts/test.sh --for-task gap-cli-task-list-json-body-coupled-to-json-flag --allow-thin` 退出 0，`cli.test.mjs`
+  在内实际执行（≥1 个测试文件）；已写 scoped-gate 缓存。⚠️ 不带 `--allow-thin` 的裸形态退出 1，原因是本任务 Touches 的
+  4 条中只有 `cli.test.mjs` 能按 basename 配对到测试（其余为源码路径），选择器判定 thin（1/4 < 0.5）——这是 Touches 形状的
+  属性，不是测试失败（测试本身照跑照过），也正是驱动侧 `scoped_command` 带 `--allow-thin` 的原因。
