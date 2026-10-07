@@ -24,7 +24,7 @@ import assert from "node:assert/strict";
 import fs from "node:fs";
 import path from "node:path";
 import os from "node:os";
-import { execFileSync } from "node:child_process";
+import { execFileSync, spawnSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
 import {
   isSubstantiveTouchesPath,
@@ -437,11 +437,25 @@ test("production: for real declared paths, peers ∪ mentions equals the step-2b
     assert.deepEqual(both, [], "no task may be both a declarer and a pure-prose mention for the SAME path");
     const union = [...new Set([...peers.map((x) => x.id), ...mentions.map((x) => x.id)])].sort();
     // The oracle: the literal grep of step 2b, restricted to open statuses.
-    const grepOut = execFileSync(
+    // An EMPTY oracle is a legitimate reading of the board, not an evaluation failure. Measured
+    // 2026-10-07: all 193 task files naming `plugin/scripts/worker-driver.ts` were already
+    // done/needs-human/superseded, so the inner grep matched nothing, `xargs` exited 123, and the
+    // former `execFileSync` threw BEFORE the assertion could run — reddening every fan-in suite for
+    // a board state that is perfectly valid.
+    // `xargs` exits 0 when its command matched and 123 when that command exited 1-125 (no match).
+    // ⛔ Any OTHER status is a genuine tool failure and must NOT be read as "empty" (硬规则 3b: the
+    // "couldn't evaluate" reading may not share a value with a verdict); it is asserted loudly, and
+    // the `deepEqual` below stays the judge — with an empty oracle it still CAN take false.
+    const grepRes = spawnSync(
       "bash",
       ["-c", `grep -lF -- "${p}" tasks/*.md | xargs -r grep -lE '^status: (todo|ready)$'`],
       { cwd: MAIN, encoding: "utf8" },
     );
+    assert.ok(
+      grepRes.status === 0 || grepRes.status === 123,
+      `step-2b oracle pipeline failed (exit ${grepRes.status}): ${(grepRes.stderr || "").trim()}`,
+    );
+    const grepOut = grepRes.stdout || "";
     const oracle = grepOut.split("\n").map((x) => path.basename(x.trim()).replace(/\.md$/, "")).filter(Boolean).sort();
     assert.deepEqual(union, oracle, `peers ∪ mentions must equal the grep oracle for ${p}`);
   }
