@@ -1,7 +1,7 @@
 ---
 id: GOAL-029
 title: init 统一为单一 TS 引擎、终局无 .sh；发布集合收窄到运行时必需
-status: active
+status: achieved
 kind: goal
 origin: 人 2026-10-07 裁定（与 manager 会话讨论）：init 终局无 .sh——升级与全新安装统一为单一 TS 引擎，过渡期
   quay-init.sh 缩为调用 bin/quay init 的垫片；不再有 --reconcile；serve
@@ -14,6 +14,11 @@ statusLog:
     to: active
     actor: manager
     reason: 人 2026-10-07 指示：创建 GOAL、AC 与任务后激活；7 个任务已就位（AC-329..335 各有任务），退出条件可判定
+  - at: 2026-10-07T15:47:11.370Z
+    from: active
+    to: achieved
+    actor: goal-driver
+    reason: "I2: all ACs achieved + sufficiency covered"
 ---
 ## 背景
 
