@@ -186,3 +186,10 @@ passed=3 failed=0 not-evaluated=0     exit=0
 
 ### 追加（2026-10-07，anti-drift 修正）：`## Touches` 补全为实际改动面
 首轮 fan-in 在 anti-drift 步红：`ANTI-DRIFT HARD FAIL — 24 violation(s)`，全部是 `out-of-declared`——本任务的实现面（init 引擎 `packages/quay/src/init.ts`、其 CLI 面与测试、棘轮退役牵动的 `precommit-guard.ts`/`runner-static-gate.ts`/`release-cut.*`/`packaging-hygiene-check.ts`、两份生成基线 `docs/analysis/*`）在立任务时未逐条登记。**宽化 `## Touches` 是正确的修法**（检查器自己的头注释把这一臂称为「declaration was too narrow」），不是回退这些文件：24 个文件全部可追溯到本任务的 Proposal/AC/Evidence（逐条见上），`git log --oneline develop..HEAD -- <file>` 均指向本任务的实现提交 `e0279c77a`。新清单 = 原声明 ∪ `git diff --name-only develop...HEAD` 的 38 个文件。
+
+### 追加（2026-10-07，worker 续做轮）：anti-drift 修正 + 两处「门变严后」暴露的真缺陷
+本轮⛔ 不改实现语义，只做三件事：
+1. **`## Touches` 补全**（见上节）——首轮 fan-in 的 24 条 `out-of-declared` 全部是本任务实现面的漏登记。
+2. **`plugin/scripts/runner-static-gate.ts` 的 `# @checker-count` 70→68**：本任务从 `run_static_checks` 里删掉两条 closure-ratchet `run_checker`，该注释没跟着改。Touches 加宽后 scoped 门才选中 `checker-count-drift-check`（它按 Touches 里的 `runner-static-gate.ts` 触发）⇒ 红。修复前 `declared 70, measured 68`；修复后 `declared 68, measured 68`（`3/3 evaluated`，exit 0）。
+3. **`plugin/scripts/verify-deliver-coldstart.sh` 的 fake-npm 夹具补出 `plugin/bin/quay`**：调用点从 `plugin/scripts/quay-init.sh` 改到 `plugin/bin/quay` 后，selfcheck 自己铺的合成 npm 布局仍只建旧路径 ⇒ `step1_install` 的 `[ -f "$qinit" ]` 在 `step1_guard_end` 之前 `return 1`，`STEP1_REAL_SETTINGS_UNCHANGED` 停在 0（`STEP1_REAL_SETTINGS_EVALUATED` 从未置位）⇒ `--selfcheck` 非 0，连带 14 个用例红（该文件单跑 17/31）。夹具补齐后 `--selfcheck` exit 0 且 `selfcheck: PASS`，该文件 31/31。**硬规则 5b**：改调用点时同载体里的兄弟夹具就在同一文件第 5904 行，必须一起改。
+最终读数（merge develop `4f1a6347a` 之后复跑）：anti-drift `ANTI-DRIFT OK — 39 actual file(s), all within declared Touches (43 glob(s))`；scoped 门 `exit 0，ℹ tests 398 / pass 398 / fail 0`。
