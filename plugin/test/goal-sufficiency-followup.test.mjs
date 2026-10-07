@@ -366,6 +366,14 @@ test('AC1: prompt 内嵌退出条件与在域 AC 原文，并明写「只提议�
   assert.ok(/EMPTY/.test(pMechanical), '零在域 AC 时 prompt 如实写 EMPTY');
 });
 
+// gap-goal-get-meta-get-mcp-name-collision：同 buildGapWorkerPrompt——prompt 点名的必须是聚合器上
+// 真实存在的完整工具名，而不再是一个「最近名替换」会踩空的占位措辞。
+test('AC2: prompt 点名 goal_get 的完整聚合器工具名，不残留旧占位措辞', () => {
+  const p = buildSufficiencyFollowupPrompt({ id: 'GOAL-005', title: 't', body: EXIT_CONDITIONS }, [], '/tmp/root', 1);
+  assert.ok(p.includes('mcp__plugin_quay_quay__goal_get'), 'prompt 必须点名聚合器上的完整工具名');
+  assert.ok(!p.includes('(`goal_get` MCP)'), '⛔ 旧的「(`goal_get` MCP)」占位措辞不得残留');
+});
+
 test('AC1: argv 末参数是 prompt；seam 覆盖前缀时 prompt 仍追加在最后', () => {
   const goal = { id: 'GOAL-005', title: 't', body: EXIT_CONDITIONS };
   const argv = buildSufficiencyFollowupArgv(goal, [{ id: 'AC-061', title: 'a', expect: 'e' }], '/tmp/root', 0, 'node /tmp/x.mjs');
