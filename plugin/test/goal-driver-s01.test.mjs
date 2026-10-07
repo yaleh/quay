@@ -410,6 +410,17 @@ test('buildGapWorkerPrompt: 含 quay-file-task 去重指令 + 顶层 goal_ac 指
   assert.ok(p.includes('needs-human'), 'prompt 必须说明 needs-human 也不重复立案');
 });
 
+// gap-goal-get-meta-get-mcp-name-collision：gap-worker prompt 曾逐字写「(goal_get MCP)」——一个在
+// Core 聚合器上【根本不存在】的工具。2026-10-03 实测：被此 prompt 派发的 agent 遂去调名称最接近的
+// `meta_get`，拿到 `no such META: AC-326`，再回落 grep。修法两半（⛔ 只有一半时该 bug 仍会复发）：
+// ① 聚合器补上 goal_*（mcp-handlers.ts 的 registerGoalHandlers —— 由 packages/quay/test/mcp-goal.test.mjs
+//    以真实 MCP 调用钉住）；② 本 prompt 点名【含命名空间的完整工具名】，让「最接近的名字替换」不再可能。
+test('buildGapWorkerPrompt: 点名 goal_get 的完整聚合器工具名（AC2；与本任务聚合器半边配对）', () => {
+  const p = buildGapWorkerPrompt({ goal: 'GOAL-001', ac: 'AC-326', state: 'gap', taskCount: 0 }, 'g', 'a', 'e', '/repo');
+  assert.ok(p.includes('mcp__plugin_quay_quay__goal_get'), 'prompt 必须点名聚合器上的完整工具名（否则 agent 会退到最近名 meta_get）');
+  assert.ok(!p.includes('(goal_get MCP)'), '⛔ 旧的「(goal_get MCP)」占位措辞不得残留（它曾诱导 meta_get 误调）');
+});
+
 // ── gap-goal-active-ac-gap-classification-ignores-round-verdict：① active-AC 缺口分类（count===0
 //    分支）必须【先读本轮判据读数】，而不是只按判据文本。
 //
