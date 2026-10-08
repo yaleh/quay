@@ -1,7 +1,7 @@
 ---
 id: gap-manager-start-tmux-session-name-not-path-derived
 title: manager-start.sh 默认 tmux SESSION 硬编码字面量 "quay-manager"，跨同名 clone 存在碰撞/接管风险
-status: ready
+status: done
 labels:
   - gap
   - defect
