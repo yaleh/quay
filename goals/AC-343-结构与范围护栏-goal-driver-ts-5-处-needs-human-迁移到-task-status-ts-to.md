@@ -2,7 +2,7 @@
 id: AC-343
 title: 结构与范围护栏：goal-driver.ts 5 处 needs-human 迁移到 task-status.ts，todo/ready/done
   与被排除的 goal-AC 行不变，不依赖 goal/GOAL-030 未并入产物
-status: active
+status: achieved
 kind: criterion
 goal: GOAL-031
 criterion: >-
@@ -60,6 +60,11 @@ statusLog:
     to: active
     actor: goal-cli
     reason: ""
+  - at: 2026-10-08T14:26:54.476Z
+    from: active
+    to: achieved
+    actor: goal-driver
+    reason: "I2: criterion pass"
 fidelity:
   verdict: not-evaluated
   reason: no judge configured
