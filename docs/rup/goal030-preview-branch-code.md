@@ -183,3 +183,59 @@ http://172.28.0.1:20830/     (pid 1038773, workspace root = /home/yale/work/quay
 ```
 
 停止：`node --no-warnings --experimental-strip-types packages/quay/bin/quay.ts goal preview GOAL-030 stop --root /data/home/yale/work/quay`
+
+---
+
+## 7. 复核（本落地轮，2026-10-08 15:3xZ）——读数在**当前**分支 tip 上仍成立，并附 suite 红归因
+
+分支 tip 已前移（`goal/GOAL-030` 由 `6a00432ca` → `8c8973dfa`，本任务分支又 merge 了 develop），
+goal-driver 已按 §5 的机制**刷新**判据 worktree 并**重起**预览。本节是**当前时刻**的重取读数
+（⛔ 不是 §1–§6 那份历史读数的替换——两者各自标注了各自的 tip）。
+
+```
+$ git -C /home/yale/work/quay-worktrees/goal-GOAL-030 rev-parse HEAD
+8c8973dfa129a205ef8dacd1b148e629111002a3
+$ git rev-parse goal/GOAL-030
+8c8973dfa129a205ef8dacd1b148e629111002a3        # 两侧相同（AC1 在当前 tip 上仍成立）
+
+$ node --no-warnings --experimental-strip-types packages/quay/bin/quay.ts goal preview GOAL-030 status --json --root /data/home/yale/work/quay
+{ "state": "running", "pid": 1126314, "host": "172.28.0.1", "port": 20830,
+  "previewRoot": "/home/yale/work/quay-worktrees/goal-GOAL-030",
+  "detail": "pid 1126314 alive, web on 172.28.0.1:20830" }
+
+$ cd /home/yale/work/quay-worktrees/goal-GOAL-030 && bash <(quay goal show AC-340 --json | jq -r .criterion)
+PASS: serve pid 1126314 under …/goal-GOAL-030 runs this tree's own entry
+      (…/goal-GOAL-030/packages/quay/bin/quay.ts, read from /proc cmdline) and its web service is
+      alive (http://172.28.0.1:20830/health → HTTP 200 ok:true (stale:false))
+EXIT=0
+
+$ node --no-warnings --experimental-strip-types plugin/scripts/live-web-address.ts .   ⇒ 172.28.0.1:20830  (rc=0)
+$ curl -sL -o /dev/null -w '%{http_code}' --max-time 20 http://172.28.0.1:20830/       ⇒ 200
+```
+
+⇒ **AC-340 在当前 tip 上 `exit 0`**，预览入口 realpath 在本树内、`/` 与 `/health` 均 200。
+
+### 7.1 本轮 fan-in suite 红（前一轮遗留）的归因：**环境形，不可复现**（⛔ 未改任何外来测试）
+
+前一轮 fan-in 在 `step=suite` 红，失败文件是**两个与本任务 delta 无关**的 dashboard 渲染测试
+（`gap-webui-dashboard-tests-card-latest-round-no-live-signal.test.mjs` /
+`gap-webui-accent-palette-no-success-color.test.mjs`）。本轮按 worker 提示**复跑一次全量 suite**
+核实（`buckets=full files=950 full=1`），结果：
+
+| 项 | 读数 |
+|---|---|
+| 上述两个 dashboard 测试 | **`passed=true`（都绿）** —— 上次的红**不可复现** |
+| 本次唯一的红 | `plugin/test/driver-anchor-memory-envelope.test.mjs` AC4 —— 其判据是
+`assert.doesNotMatch(readFileSync('/proc/self/cgroup'), /quay-anchor-/)`，而手跑 suite 的进程
+**继承了生产 anchor 的 cgroup**（实测 `quay-anchor-quay-<ts>.scope`）⇒ 是**手跑的环境产物**，fan-in 走
+`systemd-run --user --scope` 时不会出现 |
+| 两棵树的隔离复跑 | 两个 dashboard 测试在**主检出**与**本 worktree** 各自 `node --test` 均绿 |
+| 语料普查 | 这两个文件在本仓库 `.quay/fan-in-suite-*.log`（136 份）中**从未红过**（唯一一次红就是上一轮本任务的日志） |
+
+⇒ 结论：那两个红是**环境形（ambient-load）**，不是本任务 delta 的缺陷。⛔ 因此**没有**去改那两个外来
+测试文件（改外来 flaky 文件需要一并扩 `## Touches`，而此处证据是「不可复现」，不是「确定性红」）。
+同轮旁证：其它在飞 worker 的日志里同样各自红在**互不相同的外来文件**上（`worktree-process-reaper` /
+`shipped-set` 等），一致指向宿主高负载（跑 suite 时 `loadavg≈53`、`node_procs≈295`）的**环境形红**。
+
+本任务本轮的动作 = 机械两步（merge develop → scoped 门绿 → 写 scoped-gate 缓存 → 退出），
+⛔ 没有重做实现、⛔ 没有改判据、⛔ 没有改外来测试。
