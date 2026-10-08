@@ -158,3 +158,13 @@ ARM3 cross-routine: recentCount=3 accept=false reason="rate: 3 routine-filed tas
 - plugin/scripts/routine-file-gate.ts
 - plugin/scripts/probe-routine.ts
 - plugin/test/routine-file-gate.test.mjs
+
+## 落地状态（2026-10-08T23:45Z 核实；⛔ 本节只记录状态，不改任何代码）
+
+**已落地但【未生效】——⛔ 不要读成「已修复」：**
+
+- 修复提交 `30858fef1`（option A：`countRecentFilings` 加 `routine` 维度、`selectFilings` 传 `o.routine`）已进 **develop**（`git merge-base --is-ancestor 30858fef1 develop` 为真），带 100 行新测试；`scripts/test.sh plugin/test/routine-file-gate.test.mjs` 实测 `tests 17 / pass 17 / fail 0`。
+- **生产上尚未生效**：`plugin/scripts/quality-gate-driver.ts:99` 是 `import { probeRoutinesFromConfig } from "./probe-routine.ts"` —— **进程内 import，不是每轮 spawn**。常驻 anchor（pid 1017798，启动于 `2026-10-08T16:58:27Z`）在该提交（`2026-10-08T23:34:51Z`）**之前**就已加载模块，ESM 模块缓存 ⇒ 运行中的限流语义仍是**改动前的全局窗口**。
+- ⇒ 在 anchor 重启之前，`freshness-refresh` 在生产上仍按旧语义被 `rate:` 拒。**激活该改动需要一个驱动生命周期动作**（anchor 重启）；而是否现在做，属「Driver/Routine ownership 统一」应先裁定的问题。⛔ 本任务及其任何 worker **不得**为取绿自行重启 anchor，也**不得**再改 rate gate 语义。
+
+**仍未处理（本任务方案候选里已写明的代价）：** option (A) 一旦生效，全局上限即消失，总量上限变成 K×R；任务体《方案候选》(A) 原文要求「需另加全局天花板」。本次改动**未**加该天花板。
