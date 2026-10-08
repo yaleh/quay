@@ -45,8 +45,8 @@ GOAL-031 的第二块：在 `gap-goal031-needs-human-literal-migration` 落地�
 
 ## Touches
 
-- .quay/goal-031-evidence/selfhost-identity.json
-- .quay/goal-031-evidence/archguard-dispersion.json
-- .quay/goal-031-evidence/arch-layer-review-output.json
-- plugin/scripts/goal-031-selfhost-probe.mjs
+- .quay/goal-031-evidence/selfhost-identity.json (new)
+- .quay/goal-031-evidence/archguard-dispersion.json (new)
+- .quay/goal-031-evidence/arch-layer-review-output.json (new)
+- plugin/scripts/goal-031-selfhost-probe.mjs (new)
 - tasks/gap-goal031-selfhost-evidence-and-arch-layer-review.md
