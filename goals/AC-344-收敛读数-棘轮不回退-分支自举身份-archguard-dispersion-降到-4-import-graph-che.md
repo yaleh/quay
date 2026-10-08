@@ -2,7 +2,7 @@
 id: AC-344
 title: 收敛读数 + 棘轮不回退 + 分支自举身份：ArchGuard dispersion 降到 4、import-graph-check
   四量不回退、身份证据指向 goal worktree
-status: draft
+status: active
 kind: criterion
 goal: GOAL-031
 criterion: |-
@@ -22,4 +22,15 @@ expect: exit 0 =
   三份证据(archguard-dispersion.json/selfhost-identity.json/import-graph-check)全部达标；exit
   1 = CAUSE= 指明哪一项；exit 3 = 证据文件尚未落盘
 origin: GOAL-031 收敛与身份验收，见 goal body「验证步骤」4-6
+activatedAt: 2026-10-08T14:08:31.299Z
+statusLog:
+  - at: 2026-10-08T14:08:31.299Z
+    from: draft
+    to: active
+    actor: goal-cli
+    reason: ""
+fidelity:
+  verdict: not-evaluated
+  reason: no judge configured
+  at: 2026-10-08T14:08:31.299Z
 ---

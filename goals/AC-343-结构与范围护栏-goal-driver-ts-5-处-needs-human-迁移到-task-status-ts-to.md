@@ -2,7 +2,7 @@
 id: AC-343
 title: 结构与范围护栏：goal-driver.ts 5 处 needs-human 迁移到 task-status.ts，todo/ready/done
   与被排除的 goal-AC 行不变，不依赖 goal/GOAL-030 未并入产物
-status: draft
+status: active
 kind: criterion
 goal: GOAL-031
 criterion: >-
@@ -53,4 +53,15 @@ criterion: >-
   unchanged; no GOAL-030 dependency; no new kernel source"
 expect: exit 0 = 5 处迁移完成且无越界；exit 1 = CAUSE= 指明具体哪一条护栏被破坏；exit 3 = 文件缺失
 origin: GOAL-031 范围护栏，见 goal body「范围与非目标」
+activatedAt: 2026-10-08T14:08:29.939Z
+statusLog:
+  - at: 2026-10-08T14:08:29.939Z
+    from: draft
+    to: active
+    actor: goal-cli
+    reason: ""
+fidelity:
+  verdict: not-evaluated
+  reason: no judge configured
+  at: 2026-10-08T14:08:29.939Z
 ---
