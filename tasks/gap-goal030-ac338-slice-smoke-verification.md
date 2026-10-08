@@ -35,11 +35,11 @@ AC-338 是 GOAL-030 的「测试与 smoke」**整片**验收：`scripts/test.sh`
 
 ## AC
 
-- [ ] AC-338 判据在 goal 判据树根 `/home/yale/work/quay-worktrees/goal-GOAL-030` 取 0（`quay goal show AC-338` 的 criterion，用 bash 执行），`exit 0` 且 stdout 含 `PASS:`；完整 stdout/stderr 进 Evidence
-- [ ] 六文件在 goal 树根齐备（六个 `test -f` 全 `exit 0`），且第 6 个文件来自 ② 的 fan-in：`git -C /data/home/yale/work/quay log -1 --format=%H goal/GOAL-030 -- plugin/test/ready-pool-check-transition-writes.test.mjs` 的 sha 可在 `goal/GOAL-030` 上读出（⛔ 本任务未新建该文件）
-- [ ] 整片 smoke 读数已固化：Evidence 与 `docs/rup/goal030-ac338-slice-smoke.md` 同时给出 `scripts/test.sh <六文件>` 的输出摘要（`tests N ≥ 6`、`fail 0`、静态相位结论）与 goal 判据树 tip sha
-- [ ] 判据强度能取假（负对照；⛔ 不用 `git checkout` 还原）：cp 移走 `packages/quay/test/lifecycle-edge-table.test.mjs` 后重跑判据须 `exit 1` 且 stderr 含 `CAUSE=test-file-absent`；cp 还原后须 `exit 0`；两次 exit 码进 Evidence
-- [ ] 红即如实上报：判据红且原因属 GOAL-030 §停止扩大范围的健康度信号时，⛔ 不伪造 PASS、不改判据 / 不放宽断言 / 不用 `--override` 换绿；同处给出直接量根因与临时红集
+- [x] AC-338 判据在 goal 判据树根 `/home/yale/work/quay-worktrees/goal-GOAL-030` 取 0（`quay goal show AC-338` 的 criterion，用 bash 执行），`exit 0` 且 stdout 含 `PASS:`；完整 stdout/stderr 进 Evidence
+- [x] 六文件在 goal 树根齐备（六个 `test -f` 全 `exit 0`），且第 6 个文件来自 ② 的 fan-in：`git -C /data/home/yale/work/quay log -1 --format=%H goal/GOAL-030 -- plugin/test/ready-pool-check-transition-writes.test.mjs` 的 sha 可在 `goal/GOAL-030` 上读出（⛔ 本任务未新建该文件）
+- [x] 整片 smoke 读数已固化：Evidence 与 `docs/rup/goal030-ac338-slice-smoke.md` 同时给出 `scripts/test.sh <六文件>` 的输出摘要（`tests N ≥ 6`、`fail 0`、静态相位结论）与 goal 判据树 tip sha
+- [x] 判据强度能取假（负对照；⛔ 不用 `git checkout` 还原）：cp 移走 `packages/quay/test/lifecycle-edge-table.test.mjs` 后重跑判据须 `exit 1` 且 stderr 含 `CAUSE=test-file-absent`；cp 还原后须 `exit 0`；两次 exit 码进 Evidence
+- [x] 红即如实上报：判据红且原因属 GOAL-030 §停止扩大范围的健康度信号时，⛔ 不伪造 PASS、不改判据 / 不放宽断言 / 不用 `--override` 换绿；同处给出直接量根因与临时红集
 
 ## DoD
 
@@ -60,3 +60,39 @@ AC-338 是 GOAL-030 的「测试与 smoke」**整片**验收：`scripts/test.sh`
 - plugin/test/carrier-registry-completeness.test.mjs
 - packages/quay-native/test/characterization-store-write.test.mjs
 - packages/quay/test/characterization-serve-routes.test.mjs
+
+## Evidence
+
+**取证时刻**：2026-10-08T04:52:10Z（本机 +0800 = 12:52:10）；主机 VM-16-5-ubuntu（nproc=128）。判据树 = `/home/yale/work/quay-worktrees/goal-GOAL-030`，**tip sha `e20ef12140bf3efef3c699b93044d84fcc83cde9`**（= `git rev-parse goal/GOAL-030`，判据树 HEAD 同值）。完整取证稿：`docs/rup/goal030-ac338-slice-smoke.md`。
+
+**AC1（判据在 goal 判据树根取 0）** —— `exit 0`，stdout 含 `PASS:`，stderr 空：
+
+```
+（stdout）
+PASS: scripts/test.sh on 6 files (kernel transition, ready-pool-check wiring, edge table, carrier registry, store-write golden, serve-route snapshot smoke): 26 tests, 0 fail
+
+（stderr）
+（空）
+```
+
+同一判据在本任务 worktree 根（同 tip `e20ef1214`）独立复跑，同得 `exit 0` + 同一 `PASS:` 行（26 tests, 0 fail）——两次读数一致。
+
+**AC2（六文件齐备 + 第 6 个来自 ② fan-in）** —— 六文件在 goal 树根逐个 `test -f` 全 `exit 0`；第 6 个文件 sha 可在 `goal/GOAL-030` 上读出：
+
+```
+$ git -C /data/home/yale/work/quay log -1 --format=%H goal/GOAL-030 -- plugin/test/ready-pool-check-transition-writes.test.mjs
+62f01fe135d0fa78ea757941de4659e20e8820ff
+$ git -C /data/home/yale/work/quay show -s --format='%ci %s' 62f01fe1…
+2026-10-08 11:55:27 +0800 GOAL-030 ②: promotion path writes status via kernel transition decision + event
+$ git merge-base --is-ancestor 62f01fe1… goal/GOAL-030   ⇒ ancestor: YES
+```
+
+⛔ 本任务未新建该文件（工作树 `git status` 对该文件为空）。
+
+**AC3（整片 smoke 读数固化）** —— `scripts/test.sh <六文件>` exit 0 摘要：`tests 26`（≥6）、`fail 0`、`pass 26`、`cancelled 0`、`skipped 0`、`duration_ms 3666.368`。静态相位结论：整跑 `exit 0` ⇒ 无阻断违规；`checker-mutation-check --selftest: ALL PASS`、`checker-count-drift-check … PASS (3/3 evaluated)`、阻断检查 `violations: 0`；一处 `exit=1 FAIL …`（输出第 616 行）为 `repo-root-derivation-check` 的 **mutation 自检 arm 2 RED**（故意植入缺陷），其后紧跟 arm 3 GREEN（unmutated restored，exit 0）与 `case OK … took all three values (0/1/3)`——非本集失败；19 条任务文件语法违规经台账明示**非阻断**。同一读数固化于 `docs/rup/goal030-ac338-slice-smoke.md`（含 goal 判据树 tip sha `e20ef12140bf3efef3c699b93044d84fcc83cde9`）。
+
+**AC4（判据能取假 / 负对照）** —— 本任务 worktree（同 goal tip）上 `cp` 移走 `packages/quay/test/lifecycle-edge-table.test.mjs` 后重跑判据：`exit 1`，stderr `CAUSE=test-file-absent — packages/quay/test/lifecycle-edge-table.test.mjs (the slice's own tests must exist before this AC can pass)`；`cp` 还原后 `exit 0`（`PASS: … 26 tests, 0 fail`）。三次 exit 码：`0 → 1 → 0`。还原完整性：md5 移走前后均 `c9c12c76d726c86e969c28d6b6108211`，`git status --short` 对该文件为空（⛔ 未用 `git checkout`）。
+
+**AC5（红即如实上报）** —— 本次判据 **绿（exit 0）**，未触发 GOAL-030 §停止扩大范围的健康度信号（分支自举身份 / 架构 / 基线漂移 / 生产污染）⇒ 不存在「伪造 PASS、改判据、放宽断言、`--override` 换绿」的情形；本条在前件为假（无红）下满足，直接量 = 判据 exit 码 0 与 `fail 0`。
+
+**DoD** —— 判据在 goal 判据树（goal 分支 tip `e20ef1214`）上被真实执行一次并 `exit 0`，且为六文件整片集（含 `scripts/test.sh` 静态相位），非任何子集重放。`git show develop:docs/rup/goal030-ac338-slice-smoke.md` ⇒ ABSENT（GOAL-030 并入前不落 develop，符合 DoD）。
