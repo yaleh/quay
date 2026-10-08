@@ -1,7 +1,7 @@
 ---
 id: gap-goal031-selfhost-evidence-and-arch-layer-review
 title: GOAL-031 ②：分支自举身份证明 + ArchGuard before/after 证据 + arch-layer-review 三层输出
-status: todo
+status: ready
 labels:
   - gap
 parent: null
