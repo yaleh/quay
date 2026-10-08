@@ -2,7 +2,7 @@
 id: gap-goal030-kernel-task-transition-and-status-event
 title: GOAL-030 ①：kernel 层任务状态转移决策（LIFECYCLE_EDGES 与 patchStatusField 下沉为唯一定义）+
   结构化转移事件
-status: todo
+status: ready
 labels:
   - gap
 parent: null
