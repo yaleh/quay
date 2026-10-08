@@ -2,7 +2,7 @@
 id: gap-goal030-promotion-writes-via-kernel-transition
 title: GOAL-030 ②：ready-pool-check 的 todo→ready / ready→todo 两条写入改走 kernel
   转移决策并写事件（不碰 fan-in / needs-human）
-status: ready
+status: done
 labels:
   - gap
 parent: null
