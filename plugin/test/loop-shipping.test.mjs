@@ -24,6 +24,12 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { execFileSync } from 'node:child_process';
 import { oldPaths, oldPathPatterns, exclusionEntries, worktreeContainerPaths, stagingDirPrefix } from '../scripts/loop-shipping-exclusion-data.mjs';
+// The repo's ONE temp-dir helper (mkdtemp under a resolved writable root + file-level after()
+// cleanup). The controls below build their probe trees in it rather than in the shared checkout —
+// a test must not create or delete entries under a checked-in path
+// (plugin/scripts/checked-in-write-check.ts), and a probe written into the tree is exactly the
+// transient other tests' whole-repo walks race against.
+import { makeTmpDir } from './helpers/tmp-workspace.mjs';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const pluginDir = path.resolve(__dirname, '..');
@@ -48,7 +54,7 @@ const repoRoot = path.resolve(pluginDir, '..');
 // script" problem — the fixture DIRECTORY can vanish between its parent's readdir and its own,
 // which is what the ENOENT guard below absorbs. The sibling checker landed the tmp/ prune first
 // (2026-10-06); this walk is the same defect one file over (硬规则 5b).
-function walkCorpus(dir, { excluded = [], includeWorktrees = false } = {}) {
+function walkCorpus(dir, { excluded = [], includeWorktrees = false, containerRoot = repoRoot } = {}) {
   // gap-loop-shipping-nested-worktree-container-false-exclude: worktreeContainerPaths(repoRoot)
   // includes EVERY worktree `git worktree list` reports, including ones that are ANCESTORS of
   // `dir` (e.g. the main checkout, when this suite runs from a nested `.claude/worktrees/<name>/`
@@ -58,7 +64,12 @@ function walkCorpus(dir, { excluded = [], includeWorktrees = false } = {}) {
   // files ("only 8 files scanned"). A container can only ever be REACHED by walking `dir`'s own
   // subtree, so containers outside that subtree are never relevant — filter to descendants of (or
   // equal to) `dir` before checking.
-  const rawContainers = includeWorktrees ? new Set() : worktreeContainerPaths(repoRoot);
+  // `containerRoot` is where `git worktree list` is asked (default: the real repo — every production
+  // call site walks repoRoot). A control that builds its probe tree in a private temp dir passes its
+  // OWN root here so the derived container set is the one that actually bounds the walk it judges;
+  // passing `repoRoot` while walking a temp tree is also legitimate (see the real-worktree control:
+  // the registration is real, the walked tree is private).
+  const rawContainers = includeWorktrees ? new Set() : worktreeContainerPaths(containerRoot);
   const containers = [...rawContainers].filter((c) => c === dir || c.startsWith(dir + path.sep));
   const isContainer = (p) => containers.some((c) => p === c || p.startsWith(c + path.sep));
   const scanned = [];
@@ -215,23 +226,20 @@ test('AC1b — after the move, no live reference to the 5 old paths remains (com
 
 test('AC1 — readCorpusText tolerates ENOENT (a parallel test deleted the file between walk and read)', () => {
   // The exact AC1b race: the file is enumerated into the corpus, then deleted before readFileSync.
-  // It must be skipped (null), not crash the scan with an ENOENT throw.
-  const probe = path.join(repoRoot, '.loop-shipping-enoent-probe.md');
+  // It must be skipped (null), not crash the scan with an ENOENT throw. The probe lives in a private
+  // temp dir — the race is between a walk and a read, and where the file sits cannot matter to it.
+  const probe = path.join(makeTmpDir('loop-shipping-enoent-'), 'probe.md');
   fs.writeFileSync(probe, 'a file that will vanish before it is read\n');
   fs.rmSync(probe, { force: true });
   assert.equal(readCorpusText(probe), null, 'a file deleted between walk and read must be skipped, not throw ENOENT');
 });
 
 test('AC2 — a real old-path reference is still caught (ENOENT tolerance must not mask live refs)', () => {
-  const probe = path.join(repoRoot, '.loop-shipping-live-probe.md');
-  try {
-    fs.writeFileSync(probe, 'the moved file used to live at orchestration/orchestrator-loop-tick.md\n');
-    const src = readCorpusText(probe);
-    assert.ok(src !== null && oldPathPatterns.some((re) => re.test(src)),
-      'a live old-path reference must still be read and matched (ENOENT tolerance must not leak into live-ref capture)');
-  } finally {
-    fs.rmSync(probe, { force: true });
-  }
+  const probe = path.join(makeTmpDir('loop-shipping-live-'), 'probe.md');
+  fs.writeFileSync(probe, 'the moved file used to live at orchestration/orchestrator-loop-tick.md\n');
+  const src = readCorpusText(probe);
+  assert.ok(src !== null && oldPathPatterns.some((re) => re.test(src)),
+    'a live old-path reference must still be read and matched (ENOENT tolerance must not leak into live-ref capture)');
 });
 
 test('AC1b negative control — bare scripts/resource-gate.sh still matches; the plugin/-prefixed new path does not', () => {
@@ -318,10 +326,12 @@ test('AC2 — fast-mode-telemetry.ts has ONE physical copy; plugin/scripts/ is a
 
 // ── AC2/AC3 worktree-container controls (gap-loop-shipping-scan-does-not-exclude-worktrees) ────────
 test('AC2 — walk() skips a REAL git worktree (`git worktree list` source): stale refs + a telemetry copy inside it are not scanned', () => {
-  const worktreesDir = path.join(repoRoot, '.claude', 'worktrees');
-  const madeParent = !fs.existsSync(worktreesDir);
-  fs.mkdirSync(worktreesDir, { recursive: true });
-  const wt = path.join(worktreesDir, `ls-control-${process.pid}`);
+  // The REGISTRATION is real (`git worktree add`); the walked tree is a private temp dir, so this
+  // control creates no entries under the checked-in tree (checked-in-write-check). `containerRoot`
+  // is the real repo because that is where the registration is visible — the container set is
+  // still DERIVED by the code under test, never hand-built here.
+  const root = makeTmpDir('loop-shipping-realworktree-');
+  const wt = path.join(root, `ls-control-${process.pid}`);
   try {
     execFileSync('git', ['worktree', 'add', '--detach', wt, 'HEAD'], { cwd: repoRoot, stdio: 'pipe' });
     // The fresh container set must report the registered worktree, and never the main repo root.
@@ -331,37 +341,46 @@ test('AC2 — walk() skips a REAL git worktree (`git worktree list` source): sta
     // Stale-path reference + a fast-mode-telemetry.ts copy inside the worktree.
     fs.writeFileSync(path.join(wt, 'stale-probe.md'), 'old tick-doc path orchestration/orchestrator-loop-tick.md and docs/analysis/fast-mode-loop-tick.md\n');
     fs.writeFileSync(path.join(wt, 'fast-mode-telemetry.ts'), 'export const worktreeCopy = true;\n');
-    const scanned = walkCorpus(repoRoot, { excluded: exclusionTargets() });
+    fs.writeFileSync(path.join(root, 'anchor.md'), 'an ordinary sibling of the worktree container\n');
+    const scanned = walkCorpus(root, { excluded: exclusionTargets(), containerRoot: repoRoot });
+    // Non-vacuousness: the walk DID reach the temp root — the skip below is specific, not "nothing scanned".
+    assert.ok(scanned.includes(path.join(root, 'anchor.md')), 'the walk must reach the temp root (the skip below is a skip of the worktree, not of the whole walk)');
     assert.ok(!scanned.some((p) => p.startsWith(wt + path.sep)), 'walk() must not scan inside a real git worktree');
+    // Negative control: with the container skip REMOVED, the same walk collects the worktree copies —
+    // i.e. the skip is load-bearing (and the telemetry copy under it would have been counted).
+    const unfiltered = walkCorpus(root, { excluded: exclusionTargets(), containerRoot: repoRoot, includeWorktrees: true });
+    assert.ok(unfiltered.some((p) => p.startsWith(wt + path.sep)), 'without the container skip the worktree content IS scanned (the skip is load-bearing)');
     const copies = physicalTelemetryCopies(scanned);
-    assert.deepEqual(copies, [path.join(pluginDir, 'scripts', 'fast-mode-telemetry.ts')], 'a git worktree copy of fast-mode-telemetry.ts must not be counted (AC2)');
+    assert.deepEqual(copies, [], 'a git worktree copy of fast-mode-telemetry.ts must not be counted (AC2)');
   } finally {
     try { execFileSync('git', ['worktree', 'remove', '--force', wt], { cwd: repoRoot, stdio: 'pipe' }); } catch { /* already gone */ }
-    fs.rmSync(wt, { recursive: true, force: true });
-    if (madeParent) fs.rmSync(worktreesDir, { recursive: true, force: true });
   }
 });
 
 test('AC2 — walk() skips the .claude/worktrees/ container even for UNREGISTERED residue (the 2026-08-10 agent-* shape)', () => {
-  const worktreesDir = path.join(repoRoot, '.claude', 'worktrees');
-  const madeParent = !fs.existsSync(worktreesDir);
-  fs.mkdirSync(worktreesDir, { recursive: true });
+  // Private temp root: the shape under test is "a `.claude/worktrees/` container inside the walked
+  // tree", which `worktreeContainerPaths(<root>)` supplies for ANY root (it is the one container it
+  // derives without git). Nothing is created under the checked-in tree.
+  const root = makeTmpDir('loop-shipping-residue-');
+  const worktreesDir = path.join(root, '.claude', 'worktrees');
   const residue = path.join(worktreesDir, `residue-${process.pid}`);
-  try {
-    fs.mkdirSync(residue, { recursive: true });
-    // NOT a registered git worktree (no `.git`): a stale leftover `agent-*`-shaped dir whose content
-    // is a full repo copy — exactly the 2026-08-10 false-red source (agent-a8fd.../README.md). Only
-    // the explicit .claude/worktrees/ container skip catches this (git worktree list does not).
-    fs.writeFileSync(path.join(residue, 'README.md'), 'references orchestration/orchestrator-loop-tick.md\n');
-    fs.writeFileSync(path.join(residue, 'fast-mode-telemetry.ts'), 'export const residueCopy = true;\n');
-    const scanned = walkCorpus(repoRoot, { excluded: exclusionTargets() });
-    assert.ok(!scanned.some((p) => p.startsWith(residue + path.sep)), 'walk() must not scan unregistered residue under .claude/worktrees/');
-    const copies = physicalTelemetryCopies(scanned);
-    assert.deepEqual(copies, [path.join(pluginDir, 'scripts', 'fast-mode-telemetry.ts')], 'residue fast-mode-telemetry.ts copy must not be counted (AC2)');
-  } finally {
-    fs.rmSync(residue, { recursive: true, force: true });
-    if (madeParent) fs.rmSync(worktreesDir, { recursive: true, force: true });
-  }
+  fs.mkdirSync(residue, { recursive: true });
+  fs.writeFileSync(path.join(root, 'anchor.md'), 'an ordinary sibling of the container\n');
+  // NOT a registered git worktree (no `.git`): a stale leftover `agent-*`-shaped dir whose content
+  // is a full repo copy — exactly the 2026-08-10 false-red source (agent-a8fd.../README.md). Only
+  // the explicit .claude/worktrees/ container skip catches this (git worktree list does not).
+  fs.writeFileSync(path.join(residue, 'README.md'), 'references orchestration/orchestrator-loop-tick.md\n');
+  fs.writeFileSync(path.join(residue, 'fast-mode-telemetry.ts'), 'export const residueCopy = true;\n');
+  // containerRoot: this tree's OWN root — `.claude/worktrees/` is the one container
+  // worktreeContainerPaths derives for any root, and that is the face being exercised here.
+  const scanned = walkCorpus(root, { excluded: exclusionTargets(), containerRoot: root });
+  assert.ok(scanned.includes(path.join(root, 'anchor.md')), 'the walk must reach the temp root (the skip below is a skip of the container, not of the whole walk)');
+  assert.ok(!scanned.some((p) => p.startsWith(residue + path.sep)), 'walk() must not scan unregistered residue under .claude/worktrees/');
+  // Negative control: drop the container face and the residue IS collected — the skip is load-bearing.
+  const unfiltered = walkCorpus(root, { excluded: exclusionTargets(), includeWorktrees: true });
+  assert.ok(unfiltered.some((p) => p.startsWith(residue + path.sep)), 'without the container skip the residue IS scanned (the skip is load-bearing)');
+  const copies = physicalTelemetryCopies(scanned);
+  assert.deepEqual(copies, [], 'residue fast-mode-telemetry.ts copy must not be counted (AC2)');
 });
 
 // ── plugin-staging-* orphan skip (gap-orphan-staging-dirs-pollute-walkcorpus) ───────────────────────
@@ -369,47 +388,44 @@ test('AC1 — walkCorpus skips a plugin-staging-* orphan dir (its old-path tick-
   // An orphan is a KILLED stagePackagedPlugin() copy left at packages/quay/plugin-staging-<pid>-{0,1}/:
   // it carries the full plugin/ tree (the tick docs' old-path strings) + scripts/*.ts — swept into the
   // corpus it false-reds AC1b/AC2 (2026-08-25: plugin-staging-3477285-{0,1} red, worker hand-deleted).
-  const container = path.join(repoRoot, 'packages', 'quay');
-  const orphan = path.join(container, `${stagingDirPrefix}${process.pid}-0`);
+  // Private temp root reproducing the real layout (`<root>/packages/quay/plugin-staging-<pid>-0`):
+  // the skip is by BASENAME at every depth, so the predicate under test is exercised faithfully
+  // without creating entries under the checked-in tree.
+  const root = makeTmpDir('loop-shipping-orphan-');
+  const orphan = path.join(root, 'packages', 'quay', `${stagingDirPrefix}${process.pid}-0`);
   fs.mkdirSync(orphan, { recursive: true });
-  try {
-    const tick = path.join(orphan, 'loop', 'orchestrator-loop-tick.md');
-    fs.mkdirSync(path.dirname(tick), { recursive: true });
-    fs.writeFileSync(tick, 'deployed copy lives at orchestration/orchestrator-loop-tick.md\n');
-    fs.mkdirSync(path.join(orphan, 'scripts'), { recursive: true });
-    fs.writeFileSync(path.join(orphan, 'scripts', 'fast-mode-telemetry.ts'), 'export const orphanCopy = true;\n');
-    const scanned = walkCorpus(repoRoot, { excluded: exclusionTargets() });
-    assert.ok(!scanned.some((p) => p.startsWith(orphan + path.sep)), 'walkCorpus must not scan inside a plugin-staging-* orphan dir');
-    const copies = physicalTelemetryCopies(scanned);
-    assert.deepEqual(copies, [path.join(pluginDir, 'scripts', 'fast-mode-telemetry.ts')], 'an orphan staging fast-mode-telemetry.ts copy must not be counted (AC2)');
-  } finally {
-    fs.rmSync(orphan, { recursive: true, force: true });
-  }
+  const tick = path.join(orphan, 'loop', 'orchestrator-loop-tick.md');
+  fs.mkdirSync(path.dirname(tick), { recursive: true });
+  fs.writeFileSync(tick, 'deployed copy lives at orchestration/orchestrator-loop-tick.md\n');
+  fs.mkdirSync(path.join(orphan, 'scripts'), { recursive: true });
+  fs.writeFileSync(path.join(orphan, 'scripts', 'fast-mode-telemetry.ts'), 'export const orphanCopy = true;\n');
+  fs.writeFileSync(path.join(root, 'anchor.md'), 'an ordinary sibling of the orphan\n');
+  const scanned = walkCorpus(root, { excluded: exclusionTargets() });
+  assert.ok(scanned.includes(path.join(root, 'anchor.md')), 'the walk must reach the temp root (the skip below is a skip of the orphan, not of the whole walk)');
+  assert.ok(!scanned.some((p) => p.startsWith(orphan + path.sep)), 'walkCorpus must not scan inside a plugin-staging-* orphan dir');
+  const copies = physicalTelemetryCopies(scanned);
+  assert.deepEqual(copies, [], 'an orphan staging fast-mode-telemetry.ts copy must not be counted (AC2)');
 });
 
 test('AC2 — negative control: renaming off the staging prefix makes walkCorpus COLLECT the orphan (the skip is load-bearing)', () => {
   // The negative control proves the skip suppresses a REAL hit, not a vacuous exclusion: the orphan
   // content IS a live old-path reference (it trips an AC1b pattern), and walkCorpus collects it the
   // moment the dir stops matching the staging prefix — the exact red the skip prevents.
-  const container = path.join(repoRoot, 'packages', 'quay');
+  const root = makeTmpDir('loop-shipping-orphan-nc-');
+  const container = path.join(root, 'packages', 'quay');
   const orphan = path.join(container, `${stagingDirPrefix}${process.pid}-nc`);
   const renamed = path.join(container, `orphan-probe-${process.pid}-nc`);
   fs.mkdirSync(orphan, { recursive: true });
-  try {
-    const probe = path.join(orphan, 'stale-probe.md');
-    fs.writeFileSync(probe, 'the moved file used to live at orchestration/orchestrator-loop-tick.md\n');
-    const src = fs.readFileSync(probe, 'utf8');
-    assert.ok(oldPathPatterns.some((re) => re.test(src)), 'the orphan staging content must trip an AC1b pattern (a live reference)');
-    // With the staging skip active, the orphan is not part of the corpus.
-    assert.ok(!walkCorpus(repoRoot, { excluded: exclusionTargets() }).includes(probe), 'with the staging skip, the orphan probe is not in the corpus');
-    // Remove the skip (rename off the prefix): walkCorpus now COLLECTS the probe — would red AC1b.
-    fs.renameSync(orphan, renamed);
-    const renamedProbe = path.join(renamed, 'stale-probe.md');
-    assert.ok(walkCorpus(repoRoot, { excluded: exclusionTargets() }).includes(renamedProbe), 'without the staging skip, the orphan probe IS collected (would red AC1b)');
-  } finally {
-    fs.rmSync(orphan, { recursive: true, force: true });
-    fs.rmSync(renamed, { recursive: true, force: true });
-  }
+  const probe = path.join(orphan, 'stale-probe.md');
+  fs.writeFileSync(probe, 'the moved file used to live at orchestration/orchestrator-loop-tick.md\n');
+  const src = fs.readFileSync(probe, 'utf8');
+  assert.ok(oldPathPatterns.some((re) => re.test(src)), 'the orphan staging content must trip an AC1b pattern (a live reference)');
+  // With the staging skip active, the orphan is not part of the corpus.
+  assert.ok(!walkCorpus(root, { excluded: exclusionTargets() }).includes(probe), 'with the staging skip, the orphan probe is not in the corpus');
+  // Remove the skip (rename off the prefix): walkCorpus now COLLECTS the probe — would red AC1b.
+  fs.renameSync(orphan, renamed);
+  const renamedProbe = path.join(renamed, 'stale-probe.md');
+  assert.ok(walkCorpus(root, { excluded: exclusionTargets() }).includes(renamedProbe), 'without the staging skip, the orphan probe IS collected (would red AC1b)');
 });
 
 // ── repo-root tmp/ skip + mid-walk ENOENT tolerance (gap-goal-merge-suite-concurrent-npm-pack-…) ───
@@ -418,24 +434,19 @@ test('AC1 — walkCorpus skips the gitignored repo-root tmp/ runtime scratch (a 
   // under `<cwd>/tmp/` — i.e. under repoRoot — and seed it with copies of real plugin/ material. That
   // is not repo source, and it is torn down mid-suite. Same rationale, same skip, as
   // adr016-screen-use-check.ts's SKIP_DIRS (`tmp`), which landed first (硬规则 5b).
-  const tmpDir = path.join(repoRoot, 'tmp', `ls-tmp-probe-${process.pid}`);
+  // Private temp root reproducing `<root>/tmp/<fixture>/…`: the skip is by BASENAME at every depth,
+  // so this exercises the predicate the real tree relies on without writing under the checked-in tree.
+  const root = makeTmpDir('loop-shipping-tmpskip-');
+  const tmpDir = path.join(root, 'tmp', `ls-tmp-probe-${process.pid}`);
   fs.mkdirSync(path.join(tmpDir, 'plugin', 'scripts'), { recursive: true });
-  try {
-    const probe = path.join(tmpDir, 'stale-probe.md');
-    fs.writeFileSync(probe, 'the moved file used to live at orchestration/orchestrator-loop-tick.md\n');
-    assert.ok(oldPathPatterns.some((re) => re.test(fs.readFileSync(probe, 'utf8'))), 'the tmp/ probe content must trip an AC1b pattern (a live-looking reference)');
-    assert.ok(!walkCorpus(repoRoot, { excluded: exclusionTargets() }).includes(probe), 'tmp/ is runtime residue — it must not be scanned');
-    // Load-bearing negative control: move it OFF tmp/ and the very same file IS collected.
-    const outside = path.join(repoRoot, `.ls-tmp-outside-probe-${process.pid}.md`);
-    fs.renameSync(probe, outside);
-    try {
-      assert.ok(walkCorpus(repoRoot, { excluded: exclusionTargets() }).includes(outside), 'without the tmp/ skip the same probe IS collected (the skip is load-bearing, not vacuous)');
-    } finally {
-      fs.rmSync(outside, { force: true });
-    }
-  } finally {
-    fs.rmSync(tmpDir, { recursive: true, force: true });
-  }
+  const probe = path.join(tmpDir, 'stale-probe.md');
+  fs.writeFileSync(probe, 'the moved file used to live at orchestration/orchestrator-loop-tick.md\n');
+  assert.ok(oldPathPatterns.some((re) => re.test(fs.readFileSync(probe, 'utf8'))), 'the tmp/ probe content must trip an AC1b pattern (a live-looking reference)');
+  assert.ok(!walkCorpus(root, { excluded: exclusionTargets() }).includes(probe), 'tmp/ is runtime residue — it must not be scanned');
+  // Load-bearing negative control: move it OFF tmp/ and the very same file IS collected.
+  const outside = path.join(root, `ls-tmp-outside-probe-${process.pid}.md`);
+  fs.renameSync(probe, outside);
+  assert.ok(walkCorpus(root, { excluded: exclusionTargets() }).includes(outside), 'without the tmp/ skip the same probe IS collected (the skip is load-bearing, not vacuous)');
 });
 
 test('AC1 — walkCorpus tolerates a directory that vanishes mid-walk (ENOENT), and ONLY ENOENT', (t) => {
@@ -445,7 +456,7 @@ test('AC1 — walkCorpus tolerates a directory that vanishes mid-walk (ENOENT), 
   // throw ENOENT and red whichever test was walking (reproduced 11/40 runs under fixture churn).
   // Deterministic here: the mock makes one synthetic subtree vanish, so the tolerance is pinned
   // without depending on a timing window.
-  const root = fs.mkdtempSync(path.join(repoRoot, 'tmp', 'ls-enoent-probe-'));
+  const root = makeTmpDir('loop-shipping-enoent-');
   fs.mkdirSync(path.join(root, 'gone'), { recursive: true });
   fs.writeFileSync(path.join(root, 'kept.md'), 'x\n');
   fs.writeFileSync(path.join(root, 'gone', 'vanished.md'), 'x\n');
@@ -457,18 +468,13 @@ test('AC1 — walkCorpus tolerates a directory that vanishes mid-walk (ENOENT), 
     }
     return real(p, ...rest);
   });
-  try {
-    // A subtree that vanished between the walk and its read is skipped — never a crash.
-    let scanned;
-    assert.doesNotThrow(() => { scanned = walkCorpus(root); }, 'a vanished directory must be SKIPPED, not thrown');
-    assert.deepEqual(scanned, [path.join(root, 'kept.md')], 'the sibling that did NOT vanish is still collected (the guard skips a subtree, it does not abort the walk)');
-  } finally {
-    fs.rmSync(root, { recursive: true, force: true });
-  }
+  // A subtree that vanished between the walk and its read is skipped — never a crash.
+  const scanned = walkCorpus(root);
+  assert.deepEqual(scanned, [path.join(root, 'kept.md')], 'the sibling that did NOT vanish is still collected (the guard skips a subtree, it does not abort the walk)');
 });
 
 test('AC1 — negative control: only ENOENT is tolerated — a non-ENOENT readdir error still throws', (t) => {
-  const root = fs.mkdtempSync(path.join(repoRoot, 'tmp', 'ls-eacces-probe-'));
+  const root = makeTmpDir('loop-shipping-eacces-');
   fs.mkdirSync(path.join(root, 'denied'), { recursive: true });
   const denied = path.join(root, 'denied');
   const real = fs.readdirSync;
@@ -478,25 +484,24 @@ test('AC1 — negative control: only ENOENT is tolerated — a non-ENOENT readdi
     }
     return real(p, ...rest);
   });
-  try {
-    // 硬规则 3b: a "cannot read" must not masquerade as "read fine, nothing there".
-    assert.throws(() => walkCorpus(root), { code: 'EACCES' });
-  } finally {
-    fs.rmSync(root, { recursive: true, force: true });
-  }
+  // 硬规则 3b: a "cannot read" must not masquerade as "read fine, nothing there".
+  assert.throws(() => walkCorpus(root), { code: 'EACCES' });
 });
 
-test('AC3 — negative control: a REAL old-path reference in the MAIN repo is still caught (normal capture retained)', () => {
-  const probe = path.join(repoRoot, '.loop-shipping-main-repo-probe.md');
-  try {
-    fs.writeFileSync(probe, 'the moved file used to live at orchestration/orchestrator-loop-tick.md\n');
-    const scanned = walkCorpus(repoRoot, { excluded: exclusionTargets() });
-    assert.ok(scanned.includes(probe), 'a probe file in the MAIN repo must be part of the scan corpus (not over-excluded by the worktree skip)');
-    const src = fs.readFileSync(probe, 'utf8');
-    assert.ok(oldPathPatterns.some((re) => re.test(src)), 'the probe old-path reference must trip an AC1b old-path pattern (would be collected as a hit)');
-  } finally {
-    fs.rmSync(probe, { force: true });
-  }
+test('AC3 — negative control: the MAIN repo is not over-excluded (normal capture retained)', () => {
+  // Was: a probe written into the main repo and asserted to be collected. The WRITE was itself the
+  // defect class checked-in-write-check judges (a test creating/deleting entries under a checked-in
+  // path), and the probe's two properties are already carried elsewhere — the AC1b scan above pins
+  // that the main repo IS the corpus (`scanned >= 200` + `sawTestSh`), and the AC1b negative control
+  // below pins that a real old-path reference still trips a pattern. What is unique here — and needs
+  // no write — is that a REAL main-repo file is collected rather than swallowed by the container /
+  // exclusion skips: the main repo root is never a container, and an unexcluded file under it stays.
+  const realMainRepoFile = path.join(repoRoot, 'scripts', 'test.sh');
+  const scanned = walkCorpus(repoRoot, { excluded: exclusionTargets() });
+  assert.ok(
+    scanned.includes(realMainRepoFile),
+    'a real main-repo file must be part of the scan corpus (the main repo is never over-excluded by the worktree/container skips)',
+  );
 });
 
 // ── AC7: the shipped plugin subtree excludes per-project state files ───────────────────────────────
