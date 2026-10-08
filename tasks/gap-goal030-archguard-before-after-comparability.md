@@ -33,11 +33,11 @@ GOAL-030（goal 分支首个真实试点）的第四条 AC：AC-339「ArchGuard 
 
 ## AC
 
-- [ ] 本任务 worktree 根（从 goal/GOAL-030 开出、已含 ② 的 kernel 接线）运行 GOAL-030 的 AC-339 判据（`quay goal show AC-339` 的 criterion，用 bash 执行）`exit 0`，stdout 含 `PASS: comparable before/after (pre-merge)`；完整 stdout/stderr 进 Evidence
-- [ ] 同一构建单根分析：Evidence 贴出 `readlink -f` 后的 archguard CLI 绝对路径，且 before/after 两侧由同一次 criterion 运行分析（一个 `$cli`、两次 `git archive` 单根）
-- [ ] 对照读数已固化：Evidence 与 `docs/rup/goal030-archguard-before-after.md` 同时含 before/after 两 sha、`mode=pre-merge`、两侧文件数、目录环数、`plugin/scripts→kernel` 与 `→非 kernel` 强度、`packages→plugin` 反向边数；读数为 `packages→plugin` = 0、环不增、`→非 kernel` 不升、`→kernel` 升（`14→15` 量级）
-- [ ] 负对照能取假：cp 备份后临时删掉 `applyPromotions` 的 kernel import，重跑 criterion 须 `exit 1` 且 stderr 含 `CAUSE=kernel-edge-not-observed`；备份还原后 `exit 0`；两次 exit 码进 Evidence（⛔ 不用 `git checkout` 还原）
-- [ ] 载体已落盘且可读：`test -f docs/rup/goal030-archguard-before-after.md` exit 0，且该文件含 before/after 两 sha 与 `plugin/scripts→kernel` 强度读数（`grep -cE 'kernel' docs/rup/goal030-archguard-before-after.md` ≥ 1）
+- [x] 本任务 worktree 根（从 goal/GOAL-030 开出、已含 ② 的 kernel 接线）运行 GOAL-030 的 AC-339 判据（`quay goal show AC-339` 的 criterion，用 bash 执行）`exit 0`，stdout 含 `PASS: comparable before/after (pre-merge)`；完整 stdout/stderr 进 Evidence
+- [x] 同一构建单根分析：Evidence 贴出 `readlink -f` 后的 archguard CLI 绝对路径，且 before/after 两侧由同一次 criterion 运行分析（一个 `$cli`、两次 `git archive` 单根）
+- [x] 对照读数已固化：Evidence 与 `docs/rup/goal030-archguard-before-after.md` 同时含 before/after 两 sha、`mode=pre-merge`、两侧文件数、目录环数、`plugin/scripts→kernel` 与 `→非 kernel` 强度、`packages→plugin` 反向边数；读数为 `packages→plugin` = 0、环不增、`→非 kernel` 不升、`→kernel` 升（`14→15` 量级）
+- [x] 负对照能取假：cp 备份后临时删掉 `applyPromotions` 的 kernel import，重跑 criterion 须 `exit 1` 且 stderr 含 `CAUSE=kernel-edge-not-observed`；备份还原后 `exit 0`；两次 exit 码进 Evidence（⛔ 不用 `git checkout` 还原）
+- [x] 载体已落盘且可读：`test -f docs/rup/goal030-archguard-before-after.md` exit 0，且该文件含 before/after 两 sha 与 `plugin/scripts→kernel` 强度读数（`grep -cE 'kernel' docs/rup/goal030-archguard-before-after.md` ≥ 1）
 
 ## DoD
 
@@ -49,3 +49,70 @@ GOAL-030（goal 分支首个真实试点）的第四条 AC：AC-339「ArchGuard 
 
 - tasks/gap-goal030-archguard-before-after-comparability.md
 - docs/rup/goal030-archguard-before-after.md
+
+## Evidence
+
+实施形态：worktree `/data/home/yale/work/quay-worktrees/gap-goal030-archguard-before-after-comparability`（分支 `task/gap-goal030-archguard-before-after-comparability`，从 `goal/GOAL-030` 开出；`dispatch-worktree-setup.sh --base goal/GOAL-030` 已 provision）。本任务**不改任何源码**；唯一产出是读数载体 `docs/rup/goal030-archguard-before-after.md`（本分支提交 `8e75a7f3a`）。
+
+判据来源（Provider ABI 取出，⛔ 非手抄）：
+```
+$ node --experimental-strip-types packages/quay/bin/quay.ts goal show AC-339 --json   → .criterion
+criterion.sh sha256 = 96f3e969413aaa3cf9954ea5f4a22eab0f6d1ebaff55fd2cacaa86b2abebaa3d   （下列四次运行同一份字节）
+```
+
+AC1 —— 判据在 worktree 根 `exit 0`（`bash criterion.sh`；完整 stdout/stderr）：
+```
+$ cd /data/home/yale/work/quay-worktrees/gap-goal030-archguard-before-after-comparability
+$ bash criterion.sh ; echo "exit=$?"
+{"mode":"pre-merge","before":"019995f65f87744d887cf1f79653d73cf8cd49cb","after":"e20ef12140bf3efef3c699b93044d84fcc83cde9","files":{"before":417,"after":418},"cycles":{"before":1,"after":1},"k":{"before":14,"after":16},"nk":{"before":44,"after":44},"rev":0}
+PASS: comparable before/after (pre-merge): files 417->418, cycles 1->1, plugin->kernel 14->16, plugin->non-kernel 44->44, reverse 0
+exit=0
+stderr：（空）
+```
+载体提交后在本任务 HEAD 复跑，读数逐项一致（只有 `after` 这个字符串随 HEAD 变；载体文档 §6 说明为何这不可能影响任何读数）：
+```
+{"mode":"pre-merge","before":"019995f65f87744d887cf1f79653d73cf8cd49cb","after":"8e75a7f3ab57f7556b85f406367cf3848aaafb04","files":{"before":417,"after":418},"cycles":{"before":1,"after":1},"k":{"before":14,"after":16},"nk":{"before":44,"after":44},"rev":0}
+PASS: comparable before/after (pre-merge): files 417->418, cycles 1->1, plugin->kernel 14->16, plugin->non-kernel 44->44, reverse 0
+exit=0
+```
+
+AC2 —— 同一构建单根。archguard CLI 绝对路径（`readlink -f`，即判据自己解析出的那一个 `$cli`）：
+```
+/data/home/yale/.claude/plugins/npm-cache/node_modules/@yalehwang/archguard/dist/cli/index.js
+```
+判据内只有一个 `$cli`；两侧各一次 `git archive <sha> packages plugin/scripts | tar -x`（单根解包，剥 `node_modules`）后由同一个 `node "$cli" analyze -s <tree> -f json` 分析。⛔ 未新建第二套对比实现。
+
+AC3 —— 五条方向约束逐条（worktree 根、`mode=pre-merge`、`before=019995f65f87744d887cf1f79653d73cf8cd49cb`、`after=e20ef12140bf3efef3c699b93044d84fcc83cde9`）：
+
+| 量 | before | after | 约束 | 结果 |
+|---|---|---|---|---|
+| 非测试 `.ts` 文件数 | 417 | 418 | 差额须等于 `git diff` A−D = 1−0 | ✅ 418−417 = 1 |
+| 目录环数 | 1 | 1 | 不增加 | ✅ |
+| `plugin/scripts→kernel` 强度 | 14 | 16 | 上升 | ✅ |
+| `plugin/scripts→非 kernel` 强度 | 44 | 44 | 不上升 | ✅ |
+| `packages→plugin` 反向边数 | — | 0 | 须为 0 | ✅ |
+
+（`git diff --name-status --no-renames <before> <after> -- packages plugin/scripts`：`A …/kernel/task-transition.ts`，删除 0 条非测试 `.ts`。）
+
+AC4 —— 负对照（在**取用后即 `git worktree remove` 的 scratch worktree** 里跑，故本任务分支字节不动；判据读 `git archive HEAD`（git 对象），所以对照改动必须**提交**才可见；备份与还原一律 `cp`，⛔ 未用 `git checkout` 还原）：
+
+| # | 临时改动 | HEAD | `k` | 判据 | stderr |
+|---|---|---|---|---|---|
+| NC-A | 只删 `ready-pool-check.ts:215` 的 kernel import | `32b92696c` | 14→15 | **exit 0** | （空） |
+| NC-B | 再断开 `task-ops.ts:70` 的 kernel re-export | `ec39139ee` | 14→14 | **exit 1** | `CAUSE=kernel-edge-not-observed — plugin/scripts->kernel strength 14 -> 14 (the slice adds a kernel import; archguard did not see it)` |
+| NC-R | `cp` 两份备份还原（字节相同） | `864a78638` | 14→16 | **exit 0** | （空） |
+
+还原后文件哈希与备份逐一相同：`ready-pool-check.ts` = `a0dd3f6b434809f5f5bd27d8f5ad8543dd06c2889126b25ca45ec498250adafd`；`task-ops.ts` = `7127c053825887218cee1e137f862112ce1b619a24ac3e814e6c1320a19302b8`。NC 的三次提交全在已删除的 detached-HEAD scratch worktree 上，本任务分支从未包含它们。
+
+> ⚠️ **如实上报：AC4 括号里点名的机制被实测证伪，其「主张」成立。**
+> 只删 `applyPromotions` 那条 kernel import（NC-A）判据 **`exit 0`**（`k` 14→15，仍 > 14），**不是** AC4 写的 `exit 1`。原因：②(`gap-goal030-promotion-writes-via-kernel-transition`) 实际新增的是**两条** `plugin/scripts→kernel` 边，不是一条——`ready-pool-check.ts:215` 的 `import` ＋ `task-ops.ts:70` 的 `export { patchStatusField } from "…/kernel/task-transition.ts"`（strength 是包级对文件级边的求和，故 `+2` ⇒ 14→16）。
+> AC4 括号里的 `14→15`/「删一条即失败」来自 GOAL-030 设计期的读数（`goals/GOAL-030-…md:46`：在**只加一条 import 的伪造临时分支**上「加 kernel import 时 14→15 判绿、去掉 import 时判 `kernel-edge-not-observed`」），它**从未对真实 ② 落地校验**——只被 fixture 满足的判据不是测量（硬规则 4 推论三）。
+> 把两条边都断开后（NC-B）才取到 AC4 点名的那一次失败：`exit 1` + `CAUSE=kernel-edge-not-observed`（`k` 14→14）；`cp` 还原后 `exit 0`（`k` 14→16）。故 AC4 的**主张**「负对照能取假」成立（判据非空转），仅其括号内的算式有误。该更正同时写进 `docs/rup/goal030-archguard-before-after.md §3/§4`，并在 AC3 表里以实测值 `14→16` 为准。
+
+AC5 —— 载体已落盘且可读：
+```
+$ test -f docs/rup/goal030-archguard-before-after.md ; echo "exit=$?"
+exit=0
+$ grep -cE 'kernel' docs/rup/goal030-archguard-before-after.md
+18
+```

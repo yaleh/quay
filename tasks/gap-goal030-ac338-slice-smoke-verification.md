@@ -1,7 +1,7 @@
 ---
 id: gap-goal030-ac338-slice-smoke-verification
 title: GOAL-030 AC-338 补：六文件整片 smoke——在 goal 判据树上实跑 scripts/test.sh 六文件集、修红、并证判据能取假
-status: ready
+status: done
 labels:
   - gap
 parent: null
