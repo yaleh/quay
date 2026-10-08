@@ -89,10 +89,10 @@ test("⑰ KNOWN GAP (quota-policy-ownership，独立发现) — DEFAULT_RATE/FIL
 
 ## Acceptance Criteria
 
-- [ ] 上述两个测试逐字落地到 `plugin/test/routine-file-gate.test.mjs`，`node --no-warnings --experimental-strip-types --test plugin/test/routine-file-gate.test.mjs` 全绿（含既有 17 条 + 新增 2 条 = 19 条）
-- [ ] `routine-file-gate.ts` 本身零改动：`git diff --stat` 对该文件应为空（本任务只加测试，不改生产代码/不做配置面迁移）
-- [ ] 正反对照齐全：⑯ 用例必须同时含「板排空仍拒」（正面特征化）与「真正空闲则通过」（负对照）两个断言分支，且负对照分支若被误删（故意试验：把负对照那段注释掉重跑）用例集本身仍能跑通但失去负对照覆盖——评审时需核实两分支都在，⛔ 不接受只留正面断言
-- [ ] 消费方不回归：`plugin/test/probe-routine.test.mjs`、`plugin/test/meta-driver.test.mjs`、`plugin/test/quality-gate-driver.test.mjs` 三个消费 `routine-file-gate.ts` 的测试文件全绿（证明零生产代码改动确实零回归）
+- [x] 上述两个测试逐字落地到 `plugin/test/routine-file-gate.test.mjs`，`node --no-warnings --experimental-strip-types --test plugin/test/routine-file-gate.test.mjs` 全绿（含既有 17 条 + 新增 2 条 = 19 条）
+- [x] `routine-file-gate.ts` 本身零改动：`git diff --stat` 对该文件应为空（本任务只加测试，不改生产代码/不做配置面迁移）
+- [x] 正反对照齐全：⑯ 用例必须同时含「板排空仍拒」（正面特征化）与「真正空闲则通过」（负对照）两个断言分支，且负对照分支若被误删（故意试验：把负对照那段注释掉重跑）用例集本身仍能跑通但失去负对照覆盖——评审时需核实两分支都在，⛔ 不接受只留正面断言
+- [x] 消费方不回归：`plugin/test/probe-routine.test.mjs`、`plugin/test/meta-driver.test.mjs`、`plugin/test/quality-gate-driver.test.mjs` 三个消费 `routine-file-gate.ts` 的测试文件全绿（证明零生产代码改动确实零回归）
 
 ## Definition of Done
 
