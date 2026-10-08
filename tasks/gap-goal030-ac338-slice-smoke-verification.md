@@ -43,7 +43,12 @@ AC-338 是 GOAL-030 的「测试与 smoke」**整片**验收：`scripts/test.sh`
 
 ## DoD
 
-真实落地 = AC-338 判据在 goal 判据树（goal 分支 tip）上被**真实执行一次**并 `exit 0`，且该次执行是**六文件整片集**（含 `scripts/test.sh` 的静态相位），不是任何子集的重放；读数同时固化在任务库（`## Evidence`）与 `docs/rup/goal030-ac338-slice-smoke.md`。本任务经 goal/GOAL-030 分支落地，⛔ 不落 develop：GOAL-030 并入前 `git show develop:tasks/gap-goal030-ac338-slice-smoke-verification.md` 与 `git show develop:docs/rup/goal030-ac338-slice-smoke.md` 均不存在。⛔ 不新建 ② 的产物 `plugin/test/ready-pool-check-transition-writes.test.mjs`。
+真实落地 = AC-338 判据在 goal 判据树（goal 分支 tip）上被**真实执行一次**并 `exit 0`，且该次执行是**六文件整片集**（含 `scripts/test.sh` 的静态相位），不是任何子集的重放；读数同时固化在任务库（`## Evidence`）与 `docs/rup/goal030-ac338-slice-smoke.md`。
+
+本任务经 goal/GOAL-030 分支落地（mergeTarget 由 `goal_ac: AC-338` ⇒ GOAL-030 解析），⛔ **本任务产出的 `docs/rup/goal030-ac338-slice-smoke.md` 与任何源码/测试改动不落 develop**：GOAL-030 并入前 `git show develop:docs/rup/goal030-ac338-slice-smoke.md` 不存在。
+如实注记（⛔ 不要拿一条已在落笔当轮为假的判据）：任务记录文件 `tasks/<id>.md` 由 `task_write` 随状态写入、经 doc→develop 同步机制传播——落笔当轮实测它**已在 `develop` 上**，与同批兄弟 GOAL-030 任务（①、②）一致，故 `git show develop:tasks/<id>.md` **不是**本条的判据；判据取 `docs/rup/…` 与源码 delta 的可见性。
+
+⛔ 不新建 ② 的产物 `plugin/test/ready-pool-check-transition-writes.test.mjs`。
 
 ## Touches
 
