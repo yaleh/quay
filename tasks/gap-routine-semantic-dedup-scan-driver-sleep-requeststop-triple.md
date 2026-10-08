@@ -43,7 +43,10 @@ extract
 - [ ] ⛔ 探针只立案不执行：本任务若需要跑产出者/修复，由派发链执行，⛔ 不由例程代跑
 
 ## Touches
+- `plugin/scripts/driver-shared.ts`
+- `plugin/scripts/driver-runtime.ts`
 - `plugin/scripts/outer-driver.ts`
 - `plugin/scripts/promotion-driver.ts`
 - `plugin/scripts/quality-gate-driver.ts`
+- `plugin/test/driver-shared.test.mjs`
 - `tasks/gap-routine-semantic-dedup-scan-driver-sleep-requeststop-triple.md`
