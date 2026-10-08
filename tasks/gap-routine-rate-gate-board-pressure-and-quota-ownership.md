@@ -2,7 +2,7 @@
 id: gap-routine-rate-gate-board-pressure-and-quota-ownership
 title: routine 限流闸：同一 routine 自身板排空仍被旧批次计数挡住（Option B 残留）+
   K/窗口是孤儿字面量未接统一配置面——先落测试切片，不动生产行为
-status: ready
+status: done
 labels:
   - gap
 parent: null
