@@ -105,6 +105,7 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { spawnSync } from "node:child_process";
 import { repoRoot } from "./repo-root.ts";
+import { ancestry } from "./git-runner.ts";
 
 const MERGE_REF = "quay-cmv-merge";
 const VERDICT_REF = "quay-cmv-verdict";
@@ -505,8 +506,14 @@ export function main(argv: string[], defaultRoot: string, out = process.stdout, 
     `{"verdict":"${g.verdict}","gate":"${g.gate}","files":${pyJsonCompact(g.files)}}`;
 
   // ── branch detection / enumeration ────────────────────────────────────────────────────────────────
+  // The merge-base ancestry predicate is git-runner.ts's `ancestry` (semantic-dedup-scan finding
+  // `is-ancestor-pair`: this file and direct-to-develop-bypass-check.ts each carried a copy with
+  // different plumbing). `null` (the git call failed — not a repo / unknown object) is folded to
+  // false HERE, which is exactly what the previous inline `status === 0` read: a commit whose branch
+  // cannot be resolved is treated as on no tracked branch, so its merge note is not enumerated and it
+  // surfaces through the unattributed path rather than being silently assumed verified.
   const isAncestor = (ancestor: string, descendant: string): boolean =>
-    spawnSync("git", ["-C", root, "merge-base", "--is-ancestor", ancestor, descendant], { stdio: "ignore" }).status === 0;
+    ancestry(root, ancestor, descendant) === true;
   const detectBranch = (sha: string): string => {
     for (const b of branchList) if (isAncestor(sha, `refs/heads/${b}`)) return b;
     return branchList[0] ?? "";
