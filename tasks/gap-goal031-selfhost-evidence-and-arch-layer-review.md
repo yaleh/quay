@@ -54,6 +54,7 @@ GOAL-031 的第二块：在 `gap-goal031-needs-human-literal-migration` 落地�
 - **AC-344 判据自检**：在本 worktree 用 `quay goal show AC-344` 取出的 criterion 实跑一次 → `exit 0`（`PASS: ArchGuard dispersion after=4 with goal-driver.ts cleared, self-host identity proven inside the goal worktree, import-graph-check ratchet unregressed`）。最终判定时机由 goal 侧决定，本任务只保证证据可读且判据为真。
 - **探针落点：为什么在仓库根的 `scripts/` 而不在 `plugin/scripts/`（本轮修复，原首发于 `plugin/scripts/`）**：探针是**开发期、goal 专属的一次性证据工具，没有运行时消费者**——AC-344 的判据只读已提交的快照 JSON，不跑这个文件。`plugin/` 是**发布树**（`publish-dist-branch.sh` rsync 它、且只删原始 `.ts`，不删 `.mjs`），所以放在 `plugin/scripts/` 的 `.mjs` 会**随产物发到每个用户的安装里**：实测它把产物的文件数由 264 顶到 265，`plugin/test/shipped-set.test.mjs` 因此红 3 例（`the artifact's totals must be ≤ the recorded clean build: measured {"files":265,...} vs {"files":264,...}`）。这正是 GOAL-029「开发期内容混进产物」那一类，也是 `plugin/shipped-set-baseline.json` 的体积上限本来要抓的东西 ⇒ **它抓对了，正确反应是不发它**，而不是抬上限。**负对照（同一测试、同一棵树，只去掉这个文件）**：`shipped-set: artifact 264 files … 0 forbidden`，10/10 通过。修法 = 移到仓库根 `scripts/goal-031-selfhost-probe.mjs`，与姊妹自举探针同址（`scripts/branch-selfhost-probe.mjs`，任务 `gap-goal030-branch-selfhost-probe`），不进发布树。**技术不受落点影响**：读数由 cwd=被求值树的**子进程**取，本文件自己在哪里不进入读数；移动后重跑探针，`selfhost-identity.json` **逐字节相同**，AC-344 判据仍 `exit 0`。
 - **新脚本登记随之撤销**：落点在 `plugin/scripts/` 时才有的 AC1c 入口闸义务（`capability-catalog-declarations.json` 登记）随文件移出而消失，已把本轮分支对该文件的改动退回 `develop` 版本：`bash plugin/scripts/capability-catalog.sh` ⇒ `371 scripts | 371 declared | 0 unclassified | 366 ship`（exit 0，与 develop 一致）。
+- **Touches 增列两条（反漂移的判集是「本任务自己的提交」，不是净 diff）**：机械 fan-in 的 anti-drift 两行基线取 `git log --name-only HEAD --not goal/GOAL-031 develop`——本任务**自己的提交所触达文件的并集**。本分支有两条中间提交曾把探针首发在 `plugin/scripts/`、并为其登记 CONSUMER；随后 `e185fbc00` 把它移到 `scripts/` 并把登记退回 develop ⇒ 这两个路径的**净变化为零**，但仍落在上述并集里 ⇒ 不声明即 anti-drift HARD FAIL（实测两条 `out-of-declared`：`plugin/scripts/capability-catalog-declarations.json`、`plugin/scripts/goal-031-selfhost-probe.mjs`）。声明它们不是放宽闸门——声明的正是「本任务确实写过的文件」，与判据的判集一致；判据本身未改动。
 
 ## Touches
 
@@ -61,4 +62,6 @@ GOAL-031 的第二块：在 `gap-goal031-needs-human-literal-migration` 落地�
 - .quay/goal-031-evidence/archguard-dispersion.json (new)
 - .quay/goal-031-evidence/arch-layer-review-output.json (new)
 - scripts/goal-031-selfhost-probe.mjs (new)
+- plugin/scripts/goal-031-selfhost-probe.mjs (removed: probe first added here, then relocated to scripts/)
+- plugin/scripts/capability-catalog-declarations.json (reverted: CONSUMER row added then withdrawn with the move)
 - tasks/gap-goal031-selfhost-evidence-and-arch-layer-review.md
