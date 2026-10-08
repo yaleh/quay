@@ -2,7 +2,7 @@
 id: gap-goal030-post-merge-promotion-events-reading
 title: GOAL-030 ⑥：并入后生产读数——在主检出跑 AC-341 判据，确认并入后每一次生产 promotion-driver
   todo→ready 翻转都在 .quay/task-status-events.jsonl 有 promote 事件
-status: ready
+status: done
 labels:
   - gap
 parent: null
