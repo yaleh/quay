@@ -47,18 +47,18 @@ GOAL-031 的第二块：在 `gap-goal031-needs-human-literal-migration` 落地�
 
 实施形态：worktree `/data/home/yale/work/quay-worktrees/gap-goal031-selfhost-evidence-and-arch-layer-review`（分支 `task/gap-goal031-selfhost-evidence-and-arch-layer-review`，从 `goal/GOAL-031` @ `08d7238a8` 开出；`dispatch-worktree-setup.sh --base goal/GOAL-031` 已 provision）。实现提交见本分支。
 
-- **自举身份（AC1）**：`plugin/scripts/goal-031-selfhost-probe.mjs` 以子进程 cwd=被求值树，经 Node 自己的 ESM 解析（`import.meta.resolve`）＋真实 `import()` 读回 `plugin/scripts/goal-driver.ts` 的 realpath；被求值树 = GOAL-031 的 worktree（目录名带 `goal-GOAL-031` 标记，即 AC 标题/§验证步骤 4 点名的「本 goal 的 worktree」）。读数：`loadedFrom = /data/home/yale/work/quay-worktrees/goal-GOAL-031/plugin/scripts/goal-driver.ts`，`worktreeRoot` 同根，`match = true`，`loaded = true`。**负对照**（同一 specifier、cwd=主检出 `/data/home/yale/work/quay`）读出不同路径，故 `match` 是可证伪的读数而非常量；`alsoReadings` 另记本任务 worktree 的同一读法（其 loadedFrom 落在本任务 worktree 内）。
+- **自举身份（AC1）**：`scripts/goal-031-selfhost-probe.mjs` 以子进程 cwd=被求值树，经 Node 自己的 ESM 解析（`import.meta.resolve`）＋真实 `import()` 读回 `plugin/scripts/goal-driver.ts` 的 realpath；被求值树 = GOAL-031 的 worktree（目录名带 `goal-GOAL-031` 标记，即 AC 标题/§验证步骤 4 点名的「本 goal 的 worktree」）。读数：`loadedFrom = /data/home/yale/work/quay-worktrees/goal-GOAL-031/plugin/scripts/goal-driver.ts`，`worktreeRoot` 同根，`match = true`，`loaded = true`。**负对照**（同一 specifier、cwd=主检出 `/data/home/yale/work/quay`）读出不同路径，故 `match` 是可证伪的读数而非常量；`alsoReadings` 另记本任务 worktree 的同一读法（其 loadedFrom 落在本任务 worktree 内）。
 - **ArchGuard before/after（AC2）**：同一 archguard 构建的 `extractDiscriminatorTypes + detectDispersion`（源目录 `packages` + `plugin/scripts`，同 MCP `archguard_detect_shape_smells` 的 `expandSourceEntries`）。before = `git archive develop`（`a821d680e`）→ `dispersion = 5`（files 含 `plugin/scripts/goal-driver.ts`）；after = 本 worktree → `dispersion = 4`（goal-driver.ts 移出）。交叉核对 `grep -c 'status === "needs-human"' plugin/scripts/goal-driver.ts`：before=6，after=1（唯一残量为 `goal-driver.ts:827` 的 GOAL-AC status 行，不同词表，有意保留）。
 - **import-graph 棘轮（AC3）**：`node --experimental-strip-types plugin/scripts/import-graph-check.ts --json` → `verdict.ok = true`（valueSccs / typeSccs / reverseEdges = 0，kernelViolations = 0）。
 - **arch-layer-review（AC4）**：真实 Skill 工具调用（`archguard:arch-layer-review`），三层物理分离。`declaredRules` = `check-layers.mjs` 原样输出的三态结果（`status = pass`，violations=0，drift=0，cycle-1 = cross-layer-declared；注意 quay 树内 `layers.yml` 仍是未提交 draft）。`judgment` 四条结论各带非空 `evidence`。
 - **AC-344 判据自检**：在本 worktree 用 `quay goal show AC-344` 取出的 criterion 实跑一次 → `exit 0`（`PASS: ArchGuard dispersion after=4 with goal-driver.ts cleared, self-host identity proven inside the goal worktree, import-graph-check ratchet unregressed`）。最终判定时机由 goal 侧决定，本任务只保证证据可读且判据为真。
-- **新脚本登记**：`plugin/scripts/goal-031-selfhost-probe.mjs` 是新增 plugin/scripts 文件，按 AC1c 入口闸在 `plugin/scripts/capability-catalog-declarations.json` 登记了 QUESTION/CADENCE/INVALIDATION/LAST_REAFFIRMED/MATCHING（登记后 catalog `exit 0`：372 declared / 0 unclassified）。
+- **探针落点：为什么在仓库根的 `scripts/` 而不在 `plugin/scripts/`（本轮修复，原首发于 `plugin/scripts/`）**：探针是**开发期、goal 专属的一次性证据工具，没有运行时消费者**——AC-344 的判据只读已提交的快照 JSON，不跑这个文件。`plugin/` 是**发布树**（`publish-dist-branch.sh` rsync 它、且只删原始 `.ts`，不删 `.mjs`），所以放在 `plugin/scripts/` 的 `.mjs` 会**随产物发到每个用户的安装里**：实测它把产物的文件数由 264 顶到 265，`plugin/test/shipped-set.test.mjs` 因此红 3 例（`the artifact's totals must be ≤ the recorded clean build: measured {"files":265,...} vs {"files":264,...}`）。这正是 GOAL-029「开发期内容混进产物」那一类，也是 `plugin/shipped-set-baseline.json` 的体积上限本来要抓的东西 ⇒ **它抓对了，正确反应是不发它**，而不是抬上限。**负对照（同一测试、同一棵树，只去掉这个文件）**：`shipped-set: artifact 264 files … 0 forbidden`，10/10 通过。修法 = 移到仓库根 `scripts/goal-031-selfhost-probe.mjs`，与姊妹自举探针同址（`scripts/branch-selfhost-probe.mjs`，任务 `gap-goal030-branch-selfhost-probe`），不进发布树。**技术不受落点影响**：读数由 cwd=被求值树的**子进程**取，本文件自己在哪里不进入读数；移动后重跑探针，`selfhost-identity.json` **逐字节相同**，AC-344 判据仍 `exit 0`。
+- **新脚本登记随之撤销**：落点在 `plugin/scripts/` 时才有的 AC1c 入口闸义务（`capability-catalog-declarations.json` 登记）随文件移出而消失，已把本轮分支对该文件的改动退回 `develop` 版本：`bash plugin/scripts/capability-catalog.sh` ⇒ `371 scripts | 371 declared | 0 unclassified | 366 ship`（exit 0，与 develop 一致）。
 
 ## Touches
 
 - .quay/goal-031-evidence/selfhost-identity.json (new)
 - .quay/goal-031-evidence/archguard-dispersion.json (new)
 - .quay/goal-031-evidence/arch-layer-review-output.json (new)
-- plugin/scripts/goal-031-selfhost-probe.mjs (new)
-- plugin/scripts/capability-catalog-declarations.json
+- scripts/goal-031-selfhost-probe.mjs (new)
 - tasks/gap-goal031-selfhost-evidence-and-arch-layer-review.md
