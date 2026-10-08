@@ -33,10 +33,10 @@ GOAL-030（goal 分支首个真实试点）的第六条 AC：**并入后生产�
 
 ## AC
 
-- [ ] 生产读数已取（共享主检出根）：用 bash 执行 `quay goal show AC-341` 的 criterion（cwd = 共享主检出根 = `git rev-parse --git-common-dir` 的父目录，⛔ 非任务 worktree），exit 码与完整 stdout/stderr 逐字进 `## Evidence`；`exit 3` 时须写明未满足的前提（无 landed `goal-merge-result` / 并入后尚无生产晋升）
-- [ ] 并入时刻与翻转集合已固化：`## Evidence` 与 `docs/rup/goal030-post-merge-reading.md` 同时给出——GOAL-030 的 landed `goal-merge-result` 时刻 t（取自主检出 `.quay/gate-events.jsonl`）；`git log develop --since=t --format='%s'` 中主题匹配 `tasks: <id> todo→ready（promotion-driver 机械晋升）` 的 id 列表与去重条数；`.quay/task-status-events.jsonl` 中对应 `kind=promote ∧ to=ready ∧ ts≥t-60000` 的事件。若判据 `exit 1`，同处给出直接量根因（缺事件的 id 清单与条数、事件载体是否存在、主检出工作树是否含并入的 `packages/quay/src/kernel/task-transition.ts` 与 `plugin/scripts/ready-pool-check.ts` 的 kernel 接线）；若 `exit 0` 则该项记为 `N/A`
-- [ ] 判据强度能取假（负对照；⛔ 不改生产 `.quay/` / `tasks/`，⛔ 不用 `git checkout` 还原）：在一棵一次性 fixture 树（`/tmp` 下的独立 git 仓库，含自制 `develop` 提交主题 + 自制 `.quay/gate-events.jsonl` 与 `.quay/task-status-events.jsonl`）上给出三种取值——(a) 有翻转无事件 ⇒ `exit 1` 且 stderr 含 `CAUSE=flip-without-event`；(b) 有翻转但事件载体缺席 ⇒ `exit 1` 且 stderr 含 `CAUSE=event-carrier-absent`；(c) 翻转与事件一致 ⇒ `exit 0` 且 stdout 含 `PASS:`；三个 exit 码进 `## Evidence`
-- [ ] 载体已落盘可读：`test -f docs/rup/goal030-post-merge-reading.md` exit 0，且该文件含上文第二条要求的 t、id 列表（含去重条数）与判据 exit 码（`grep -cE 'exit|CAUSE|PASS' docs/rup/goal030-post-merge-reading.md` ≥ 1）
+- [x] 生产读数已取（共享主检出根）：用 bash 执行 `quay goal show AC-341` 的 criterion（cwd = 共享主检出根 = `git rev-parse --git-common-dir` 的父目录，⛔ 非任务 worktree），exit 码与完整 stdout/stderr 逐字进 `## Evidence`；`exit 3` 时须写明未满足的前提（无 landed `goal-merge-result` / 并入后尚无生产晋升）
+- [x] 并入时刻与翻转集合已固化：`## Evidence` 与 `docs/rup/goal030-post-merge-reading.md` 同时给出——GOAL-030 的 landed `goal-merge-result` 时刻 t（取自主检出 `.quay/gate-events.jsonl`）；`git log develop --since=t --format='%s'` 中主题匹配 `tasks: <id> todo→ready（promotion-driver 机械晋升）` 的 id 列表与去重条数；`.quay/task-status-events.jsonl` 中对应 `kind=promote ∧ to=ready ∧ ts≥t-60000` 的事件。若判据 `exit 1`，同处给出直接量根因（缺事件的 id 清单与条数、事件载体是否存在、主检出工作树是否含并入的 `packages/quay/src/kernel/task-transition.ts` 与 `plugin/scripts/ready-pool-check.ts` 的 kernel 接线）；若 `exit 0` 则该项记为 `N/A`
+- [x] 判据强度能取假（负对照；⛔ 不改生产 `.quay/` / `tasks/`，⛔ 不用 `git checkout` 还原）：在一棵一次性 fixture 树（`/tmp` 下的独立 git 仓库，含自制 `develop` 提交主题 + 自制 `.quay/gate-events.jsonl` 与 `.quay/task-status-events.jsonl`）上给出三种取值——(a) 有翻转无事件 ⇒ `exit 1` 且 stderr 含 `CAUSE=flip-without-event`；(b) 有翻转但事件载体缺席 ⇒ `exit 1` 且 stderr 含 `CAUSE=event-carrier-absent`；(c) 翻转与事件一致 ⇒ `exit 0` 且 stdout 含 `PASS:`；三个 exit 码进 `## Evidence`
+- [x] 载体已落盘可读：`test -f docs/rup/goal030-post-merge-reading.md` exit 0，且该文件含上文第二条要求的 t、id 列表（含去重条数）与判据 exit 码（`grep -cE 'exit|CAUSE|PASS' docs/rup/goal030-post-merge-reading.md` ≥ 1）
 
 ## DoD
 
@@ -51,6 +51,60 @@ GOAL-030（goal 分支首个真实试点）的第六条 AC：**并入后生产�
 - tasks/gap-goal030-post-merge-promotion-events-reading.md
 - docs/rup/goal030-post-merge-reading.md
 
+## Evidence
+
+实施形态：worktree `/home/yale/work/quay-worktrees/gap-goal030-post-merge-promotion-events-reading`（分支 `task/gap-goal030-post-merge-promotion-events-reading`，从 `develop` 开出；`dispatch-worktree-setup.sh` 已 provision）。本任务 **read-only、不改任何源码**；唯一受版本管理的产出是读数载体 `docs/rup/goal030-post-merge-reading.md`（本分支提交 `5ab338dcb`）。
+
+判据来源（Provider ABI 取出，⛔ 非手抄）：`node --experimental-strip-types packages/quay/bin/quay.ts goal show AC-341` 的 `.criterion`；抽出脚本 sha256 = `74bb00abdf89e305bddb2e6d2252623ab329fa726801b51b5fb516d9d5efca39`（生产读数与下方负对照三次运行同一份字节）。
+
+**AC1 —— 生产读数已取（共享主检出根 `/data/home/yale/work/quay`，⛔ 非任务 worktree）**，完整逐字：
+
+```
+$ cd /data/home/yale/work/quay && bash criterion.sh
+EXIT=0
+STDOUT: PASS: all 2 production promotion-driver todo→ready flips since the merge carry a promote event
+STDERR:（空）
+```
+
+**AC2 —— 并入时刻与翻转集合已固化**（同见 `docs/rup/goal030-post-merge-reading.md` §2）：
+
+| 量 | 值 |
+|---|---|
+| GOAL-030 landed `goal-merge-result` 时刻 t | `2026-10-08T18:35:54.646Z` |
+| landedSha | `d71d2bde4a74d35ce6981157f82a2710a2dab810` |
+| 生产读数时主检出 == develop tip | `cf4c9acef41ce7cdf92e937e8ab837c5f6cdeb03`（分叉 0/0） |
+| `git log develop --since=t` 主题匹配 promotion 翻转的**去重条数** | **2** |
+
+id 列表：
+
+| # | id | commit | commit 时刻 (UTC) |
+|---|---|---|---|
+| 1 | `gap-routine-filing-rate-global-window-starves-freshness-refresh` | `6ef104600c4f39a8dd955cad4b5914dc81c3d81a` | 2026-10-08T23:30:43Z |
+| 2 | `gap-goal030-post-merge-promotion-events-reading` | `56bf2883b42f4b3965155c9dedd6bf90291cc9d3` | 2026-10-08T23:32:44Z |
+
+`.quay/task-status-events.jsonl` 中对应 `kind=promote ∧ to=ready ∧ ts≥t-60000` 的事件（载体共 2 行，与 2 条翻转 1:1 对应）：
+
+```
+{"ts":"2026-10-08T23:30:43.072Z","taskId":"gap-routine-filing-rate-global-window-starves-freshness-refresh","from":"todo","to":"ready","kind":"promote","actor":"ready-pool-check --apply","writerModule":"/data/home/yale/work/quay/packages/quay/src/kernel/task-transition.ts","entry":"/data/home/yale/work/quay/plugin/scripts/ready-pool-check.ts","pid":456478}
+{"ts":"2026-10-08T23:32:44.203Z","taskId":"gap-goal030-post-merge-promotion-events-reading","from":"todo","to":"ready","kind":"promote","actor":"ready-pool-check --apply","writerModule":"/data/home/yale/work/quay/packages/quay/src/kernel/task-transition.ts","entry":"/data/home/yale/work/quay/plugin/scripts/ready-pool-check.ts","pid":603284}
+```
+
+事件 `writerModule` / `entry` 是**主检出**绝对路径 ⇒ 生产 `ready-pool-check --apply` 在主检出上经 kernel 模块写事件，正是 AC-341 要测的性质。判据 `exit 0` ⇒ AC2 的 `exit 1` 直接量根因分支记为 **N/A**（直接量仍给出：载体存在、2 行；主检出自 `2026-10-08T02:36Z` 起即含 `packages/quay/src/kernel/task-transition.ts` = 17165 B，`plugin/scripts/ready-pool-check.ts` 的 kernel 接线 `grep -c 'kernel/task-transition'` = 1）。
+
+解停条件已满足：`git log develop` 上现已出现 2 条并入后（提交时刻 > t）的 promotion-driver 机械晋升记录，故本任务于 2026-10-09 被改回并晋升为 ready 执行（取代 `## 停放说明` 的停放前提）。
+
+**AC3 —— 判据强度能取假（负对照）**：在 `/tmp/ac341-fixtures` 下建三棵一次性独立 git 仓库（各自 `develop` 分支 + 自制 promotion 提交主题 + 自制 `.quay/gate-events.jsonl` / `.quay/task-status-events.jsonl`），对**同一份判据字节**运行；harness 为 `.quay/ac341-negctl/run.sh`（worktree 内，gitignored）。⛔ 未改生产 `.quay/` / `tasks/`，⛔ 未用 `git checkout` 还原。
+
+| 臂 | fixture | 期望 | 实测 |
+|---|---|---|---|
+| (a) 有翻转无事件 | 有晋升提交，载体存在但无匹配事件 | `exit 1` + `CAUSE=flip-without-event` | **exit 1**；stderr `CAUSE=flip-without-event — 1/1 production todo→ready flips since the merge have no promote event: fixture-task-a` |
+| (b) 有翻转但载体缺席 | 有晋升提交，事件载体文件不存在 | `exit 1` + `CAUSE=event-carrier-absent` | **exit 1**；stderr `CAUSE=event-carrier-absent — .quay/task-status-events.jsonl missing while 1 production promotions happened since the merge` |
+| (c) 翻转与事件一致 | 有晋升提交 + 匹配事件 | `exit 0` + `PASS:` | **exit 0**；stdout `PASS: all 1 production promotion-driver todo→ready flips since the merge carry a promote event` |
+
+三个 exit 码：**(a) exit 1 · (b) exit 1 · (c) exit 0**；生产读数 **exit 0**。臂 (c) 是已知为真样本 ⇒ (a)/(b) 的 exit 1 属真负对照，非「谓词只会变红」。
+
+**AC4 —— 载体已落盘可读**（worktree 根）：`test -f docs/rup/goal030-post-merge-reading.md` → exit 0；`grep -cE 'exit|CAUSE|PASS' docs/rup/goal030-post-merge-reading.md` → **10**（≥ 1）。
+
 ## 停放说明
 
 本任务以 needs-human 状态立案，用于停放：在 GOAL-030 尚未并入 develop 之前，⛔ 不得被派发（判据只会 `exit 3`，白跑一轮）。
@@ -63,3 +117,5 @@ GOAL-030（goal 分支首个真实试点）的第六条 AC：**并入后生产�
 - **⚠️ 上游阻塞（已报人）**：AC-341 是 GOAL-030 七条 AC 中唯一未达成者（AC-336/337/338/339/340/342 均 `achieved`）⇒ **GOAL-030 的收口以「ready 池重新出现可晋升 todo」为关键路径**。该工作区当前 `todo=0 / ready=0`（board 已排空），worker-driver 上一轮 `action=stop`（2026-10-08T22:33:48Z，pool=0）⇒ 在重新投喂工作之前，AC-341 结构上不可测。这属于池饥饿，**不是本任务可解**。
 
 **新的解停条件（取代上文「并入 + 追上 develop」——后者已满足，但已被证明不足）**：在 `git log develop` 上出现**至少一次**主题匹配 `tasks: <id> todo→ready（promotion-driver 机械晋升）` 且提交时刻 > `t=2026-10-08T18:35:54.646Z` 的记录之后，由立案会话把本任务改回 `todo`。在那之前派发本任务，判据只会再次 `exit 3`（白跑一轮），正是本停放要避免的形态。
+
+**2026-10-09 收尾**：上述新的解停条件已触发（develop 上出现 2 条符合主题且时刻 > t 的晋升记录，见 `## Evidence` §AC2）；本任务已执行并取得生产读数 `exit 0`（PASS）。
