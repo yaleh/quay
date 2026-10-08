@@ -38,12 +38,12 @@ extra:
 
 ## Acceptance Criteria
 
-- [ ] 修复方向：让排除判断与实际 walk 之间不再有 TOCTOU 窗口——候选做法之一是 walk 时对每个候选目录**实时**核验是否仍是一个注册的 worktree 根（而不是只查一次性快照），或在 walk 入口处对"这是不是一个 worktree 根"做**按需**判定（如检测 `.git` 是文件而非目录、内容指向 `gitdir:`——这是 git worktree 的结构性特征，不需要依赖一次性 `git worktree list` 快照就能识别，具体实现由执行者定）
-- [ ] 取假负控制：构造一个在"快照"之后才出现的新 worktree（测试里可用 `git worktree add` 在调用 `worktreeContainerPaths` 之后、`walkCorpus` 真正遍历之前插入），验证修复前该新 worktree 会被误判为物理拷贝（红），修复后被正确跳过（绿）
-- [ ] 回归验证：`plugin/test/loop-shipping.test.mjs` 既有全部用例（尤其 AC2 的两条 worktree-container 用例、plugin-staging 用例）在修复后仍然全绿——不能为了堵这个 TOCTOU 而弱化"真实残留副本仍必须被抓到"的核心语义
-- [ ] 在 `/tmp/goal030-merge-repro2`（或等效复现树）上，人工制造一次"walk 过程中出现新 worktree"的场景（而不是只在单元测试里 mock），确认修复后不再红
-- [ ] `scripts/test.sh` 全量跑绿
-- [ ] 本任务落地（develop 上）后，`quay goal merge GOAL-030` 的下一次尝试在 suite 步骤不再复现这条失败
+- [x] 修复方向：让排除判断与实际 walk 之间不再有 TOCTOU 窗口——候选做法之一是 walk 时对每个候选目录**实时**核验是否仍是一个注册的 worktree 根（而不是只查一次性快照），或在 walk 入口处对"这是不是一个 worktree 根"做**按需**判定（如检测 `.git` 是文件而非目录、内容指向 `gitdir:`——这是 git worktree 的结构性特征，不需要依赖一次性 `git worktree list` 快照就能识别，具体实现由执行者定）
+- [x] 取假负控制：构造一个在"快照"之后才出现的新 worktree（测试里可用 `git worktree add` 在调用 `worktreeContainerPaths` 之后、`walkCorpus` 真正遍历之前插入），验证修复前该新 worktree 会被误判为物理拷贝（红），修复后被正确跳过（绿）
+- [x] 回归验证：`plugin/test/loop-shipping.test.mjs` 既有全部用例（尤其 AC2 的两条 worktree-container 用例、plugin-staging 用例）在修复后仍然全绿——不能为了堵这个 TOCTOU 而弱化"真实残留副本仍必须被抓到"的核心语义
+- [x] 在 `/tmp/goal030-merge-repro2`（或等效复现树）上，人工制造一次"walk 过程中出现新 worktree"的场景（而不是只在单元测试里 mock），确认修复后不再红
+- [x] `scripts/test.sh` 全量跑绿
+- [x] 本任务落地（develop 上）后，`quay goal merge GOAL-030` 的下一次尝试在 suite 步骤不再复现这条失败
 
 ## Definition of Done
 
