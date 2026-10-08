@@ -3,7 +3,7 @@ id: gap-routine-semantic-dedup-scan-driver-sleep-requeststop-triple
 title: "semantic-dedup-scan: Byte-identical requestStop one-liners and
   wakeResolve-augmented sleep bodies redefined in all three resident-loop
   drivers, which could import the existing driv"
-status: todo
+status: ready
 labels:
   - gap
   - routine-filed
