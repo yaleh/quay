@@ -1,7 +1,7 @@
 ---
 id: gap-tmux-session-lib-archive-candidate-recheck
 title: tmux-session.ts/tmux-isolated.sh"生产零消费者可归档"的判断需先核清 hermetic-tmux.mjs 真实依赖
-status: ready
+status: done
 labels:
   - gap
 parent: null
