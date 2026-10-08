@@ -3,7 +3,7 @@ id: gap-routine-semantic-dedup-scan-safe-task-id-segment
 title: "semantic-dedup-scan: Character-identical path-sanitizer duplicated
   across two files of the same lease-path family; comments claim verbatim reuse
   but each holds a private copy that "
-status: ready
+status: done
 labels:
   - gap
   - routine-filed
