@@ -197,8 +197,22 @@ import { classifyDarkAxisRecord } from "./dark-axis-record-check.ts";
 // gap-task-ops-consolidate-driver-frontmatter-writers：frontmatter parse/patch + commit 单一真相源
 // 上收到 task-ops.ts（setTaskStatus / retreatReadyToTodo / commitTaskStatus 共用，⛔ 不再本文件手搓
 // fence 切分 + status/labels 行正则）。ensureDeliveryCriticalLabel re-export 保持旧 import 面。
-import { splitTaskFile, statusFromFrontmatter, patchStatusField, ensureDeliveryCriticalLabel, commitTaskFile, hasPriorCommit } from "./task-ops.ts";
+import { splitTaskFile, statusFromFrontmatter, ensureDeliveryCriticalLabel, commitTaskFile, hasPriorCommit } from "./task-ops.ts";
 export { ensureDeliveryCriticalLabel } from "./task-ops.ts";
+// GOAL-030 ② (gap-goal030-promotion-writes-via-kernel-transition): this file's two status writes
+// (todo→ready in applyPromotions, ready→todo in applyRevaluations) no longer patch a frontmatter
+// directly. They go through the kernel's transition DECISION first (`decideTransition`, three-state)
+// and, when it allows, through the kernel's patch primitive + the kernel's structured event writer.
+// A `refuse` / `not-evaluated` verdict writes NOTHING and is surfaced in the output's
+// `transition_refusals` (⛔ never a silent skip — 硬规则 3/3b).
+//
+// The `patchStatusField as applyKernelStatusPatch` alias is deliberate, not cosmetic: the ONLY place
+// this file may patch a status line is `kernelDecideAndPatch()` below, and every other status writer
+// in the tree still imports the same symbol under its own name. Keeping the un-aliased spelling out
+// of this file is exactly what GOAL-030's AC-336 criterion measures
+// (`grep -cE 'patchStatusField\(' plugin/scripts/ready-pool-check.ts` must be 0) — a future edit that
+// reintroduces a bare, decision-free write turns that criterion red instead of passing silently.
+import { decideTransition, patchStatusField as applyKernelStatusPatch, appendTaskStatusEvent } from "../../packages/quay/src/kernel/task-transition.ts";
 // AC152：依赖判定的核复用 driver-filters.ts（depsSatisfied 谓词同一份实现，⛔ 不各写一遍
 // 「逐个查 status !== done」的循环）。gap-superseded-dependency-blocks-dispatch-forever：复用点从
 // 布尔投影 allDepsDone 上移到【三值】judgeDeps —— 本文件必须能区分「依赖全 done」与「依赖已退役」，
@@ -3634,16 +3648,72 @@ export function analyzeTasks({ tasksDir, root, cap = CONCURRENCY_CAP_DEFAULT, fl
 // ensureDeliveryCriticalLabel 已迁至 task-ops.ts（gap-task-ops-consolidate-driver-frontmatter-writers），
 // 本文件 re-export 保持旧 import 面（ready-pool-check.test.mjs 直接 import 它）。单一实现，⛔ 无平行副本。
 
+// ── GOAL-030 ② — the kernel transition gate + the structured event, in ONE place ──────────────────
+// The two writers in this file (todo→ready / ready→todo) must not be able to disagree about which
+// edges are legal or about what a landed flip leaves behind. Both call `kernelDecideAndPatch()` for
+// the judgement+patch and `recordStatusEvent()` for the trace, so there is exactly one decision point
+// and exactly one event shape.
+
+/** The `actor` values stamped on each event: the producing ENTRY POINT (not the function), so a
+ *  reading can tell a tick-heartbeat promotion from a manual `--revaluate-apply` run. */
+const PROMOTION_EVENT_ACTOR = "ready-pool-check --apply";
+const REVALUATION_EVENT_ACTOR = "ready-pool-check --revaluate-apply";
+/** Fallback actor for direct (non-CLI) calls of the two exported writers — a test harness or the A22
+ *  manual path. Still names the module that performed the write, so the record never carries a
+ *  fabricated provenance. */
+const DIRECT_EVENT_ACTOR = "ready-pool-check";
+
+/**
+ * Decide `from → to` with the KERNEL (`decideTransition`) and patch the frontmatter only when the
+ * decision allows. Returns, on allow, the patched frontmatter plus the declared edge's `kind` (written
+ * into the event); otherwise a refusal carrying the verdict verbatim.
+ *
+ * ⛔ Nothing is patched on `refuse` / `not-evaluated`, and the two are NOT collapsed: `not-evaluated`
+ * ("this string is not a status, I cannot judge it") is a different answer from `refuse` ("a known
+ * pair, no walkable edge") — merging them is 硬规则 3b's failure mode.
+ *
+ * @returns {{ok: true, from: string, to: string, fm: string, kind: string} |
+ *           {ok: false, from: string, to: string, verdict: string, transitionReason: string}}
+ */
+function kernelDecideAndPatch(frontmatterRaw, from, to) {
+  const decision = decideTransition(from, to);
+  if (decision.verdict !== "allow") {
+    return { ok: false, from, to, verdict: decision.verdict, transitionReason: decision.reason };
+  }
+  const patched = applyKernelStatusPatch(frontmatterRaw, to, from);
+  if (!patched.ok) {
+    // The kernel judged the EDGE walkable but the file has no `status:` line to patch — a malformed
+    // task, not a transition refusal. Surface it as a `refuse` with its own cause, never as a write.
+    return { ok: false, from, to, verdict: "refuse", transitionReason: `patch-failed: ${patched.reason}` };
+  }
+  return { ok: true, from, to, fm: patched.fm, kind: decision.edge.kind };
+}
+
+/**
+ * Append ONE structured transition event for a flip that has ALREADY landed on disk (called after the
+ * write, never before — 硬规则 7). The kernel writer is fail-open-but-visible: it returns
+ * `{ok:false, reason}` rather than throwing. That failure is turned into a returned reason so the
+ * caller can surface it on its own record (⛔ never swallowed — 硬规则 3b: an unwritten event must not
+ * look like a written one). Returns `undefined` on success, so the success record shape is unchanged.
+ */
+function recordStatusEvent(root, id, from, to, kind, actor) {
+  const res = appendTaskStatusEvent(root, { taskId: id, from, to, kind, actor });
+  return res.ok ? undefined : res.reason;
+}
+
 /** Patch ONE task file's frontmatter `status` line. Only rewrites when the current status is `todo`
  *  (a concurrently-flipped task is left alone — no clobbering a `ready`/`done` written by another
  *  writer). Returns { id, ok, from, to, reason, deliveryCritical }.
  *  @param {string} root  repo root (tasks/<id>.md lives here)
  *  @param {string} id    task id
  *  @param {string} newStatus  target status (ready)
- *  @param {object} [opts]  { ensureDeliveryCritical: boolean } — AC1 (gap-delivery-critical-label-at-
- *      promote-not-after-dispatch): when the promote gate has DETERMINED this candidate is
- *      delivery-critical, the label is written into the frontmatter AT PROMOTE TIME (标签与 ready
- *      同现) so the dispatch sort key can act on it in the NEXT selection.
+ *  @param {object} [opts]  { ensureDeliveryCritical: boolean, actor: string } — AC1
+ *      (gap-delivery-critical-label-at-promote-not-after-dispatch): when the promote gate has
+ *      DETERMINED this candidate is delivery-critical, the label is written into the frontmatter AT
+ *      PROMOTE TIME (标签与 ready 同现) so the dispatch sort key can act on it in the NEXT selection.
+ *      GOAL-030 ②: `actor` is stamped on the structured transition event (defaults to
+ *      DIRECT_EVENT_ACTOR for non-CLI callers). A refused/not-evaluated edge returns
+ *      `{ok:false, verdict, transitionReason}` and writes NOTHING.
  */
 export function setTaskStatus(root, id, newStatus, opts = {}) {
   const file = path.join(root, "tasks", `${id}.md`);
@@ -3663,16 +3733,22 @@ export function setTaskStatus(root, id, newStatus, opts = {}) {
     ? developStatus === TASK_STATUS.TODO
     : statusFromFrontmatter(split.frontmatterRaw) === TASK_STATUS.TODO;
   if (!currentIsTodo) return { id, ok: false, reason: "not-todo" };
-  let patched = patchStatusField(split.frontmatterRaw, newStatus, TASK_STATUS.TODO);
-  if (!patched.ok) return { id, ok: false, reason: patched.reason };
+  // GOAL-030 ②: the kernel transition decision is the gate in FRONT of every byte this file writes.
+  // `refuse` / `not-evaluated` ⇒ nothing is patched; the verdict travels back to applyPromotions,
+  // which records it in `transition_refusals` (⛔ not a silent skip).
+  const decided = kernelDecideAndPatch(split.frontmatterRaw, TASK_STATUS.TODO, newStatus);
+  if (decided.ok === false) return { id, ok: false, ...decided };
+  let fm = decided.fm;
   let deliveryCritical = opts.ensureDeliveryCritical === true;
   if (deliveryCritical) {
-    const ensured = ensureDeliveryCriticalLabel(patched.fm);
-    patched = { ...patched, fm: ensured.fm };
+    const ensured = ensureDeliveryCriticalLabel(fm);
+    fm = ensured.fm;
     deliveryCritical = ensured.deliveryCritical;
   }
-  fs.writeFileSync(file, `${split.open}${patched.fm}${split.close}${split.body}`);
-  return { id, ok: true, from: TASK_STATUS.TODO, to: newStatus, deliveryCritical };
+  fs.writeFileSync(file, `${split.open}${fm}${split.close}${split.body}`);
+  // Event AFTER the write (硬规则 7): the file is the product, the event its trace.
+  const eventError = recordStatusEvent(root, id, decided.from, decided.to, decided.kind, opts.actor || DIRECT_EVENT_ACTOR);
+  return { id, ok: true, from: TASK_STATUS.TODO, to: newStatus, deliveryCritical, ...(eventError ? { eventError } : {}) };
 }
 
 /** COMMIT-AFTER-WRITE (gap-apply-promotions-commit-status-writes): a todo→ready status write must be
@@ -3729,6 +3805,9 @@ export function applyPromotions(opts) {
   const result = analyzeTasks(opts);
   const shouldApply = result.promotions.length > 0;
   const applied = [];
+  // GOAL-030 ②: every candidate the kernel REFUSED to flip (or could not judge) is listed here —
+  // `{id, from, to, verdict, reason}`. A refusal is a visible outcome, never an absent one (硬规则 3b).
+  const transitionRefusals = [];
   if (shouldApply) {
     const candidateById = new Map(result.candidates.map((c) => [c.id, c]));
     // MULTI-PATH TOUCHES GUARD (gap-promotion-driver-commit-bypasses-precommit-touches-guard): the
@@ -3752,7 +3831,10 @@ export function applyPromotions(opts) {
         });
         continue;
       }
-      const out = setTaskStatus(opts.root, p.id, TASK_STATUS.READY, { ensureDeliveryCritical: deliveryCritical });
+      const out = setTaskStatus(opts.root, p.id, TASK_STATUS.READY, { ensureDeliveryCritical: deliveryCritical, actor: PROMOTION_EVENT_ACTOR });
+      // GOAL-030 ②: a kernel refusal (or a not-evaluated pair) never wrote a byte — record it
+      // explicitly alongside the applied record, which still carries the ok:false outcome.
+      if (out.verdict) transitionRefusals.push({ id: p.id, from: out.from, to: out.to, verdict: out.verdict, reason: out.transitionReason });
       // COMMIT-AFTER-WRITE (gap-apply-promotions-commit-status-writes): a landed status write is
       // committed immediately so the main checkout stays clean (a dirty tree blocks every fan-in at
       // fan-in-ff-merge.sh BEFORE the bypass check runs). `committed` is surfaced on the applied
@@ -3766,7 +3848,7 @@ export function applyPromotions(opts) {
   // 缺口 2026-08-31 主检出落后 10 提交）。syncDocDevelopBidirectional 内部按分歧门控，无分歧/非 git
   // no-op。
   syncDocDevelopBidirectional(opts.root);
-  return { ...result, should_apply: shouldApply, applied_promotions: applied };
+  return { ...result, should_apply: shouldApply, applied_promotions: applied, transition_refusals: transitionRefusals };
 }
 
 /** REVALUATION WRITE (AC46 判据3 / AC2 — gap-ac46-pool-criteria-in-gate-plus-revaluation-executor):
@@ -3775,8 +3857,10 @@ export function applyPromotions(opts) {
  *  Appends a `## Revaluation` record to the task body — the grep-able 阻碍原因 + 去向 (判据2's
  *  product: `grep -n "## Revaluation" tasks/<id>.md` + the reason line), so the retreat is an audit
  *  surface, never a silent status flip. Returns { id, ok, from, to, reasons, record }. A task already
- *  at/after todo (or missing) fails closed with reason, never overwrites. */
-export function retreatReadyToTodo(root, id, reasons = []) {
+ *  at/after todo (or missing) fails closed with reason, never overwrites.
+ *  @param {object} [opts] { actor: string } — both GOAL-030 ② fields: the `actor` stamped on the
+ *      structured transition event, defaulting to DIRECT_EVENT_ACTOR for non-CLI callers. */
+export function retreatReadyToTodo(root, id, reasons = [], opts = {}) {
   const file = path.join(root, "tasks", `${id}.md`);
   if (!fs.existsSync(file)) return { id, ok: false, reason: "missing" };
   const raw = fs.readFileSync(file, "utf8");
@@ -3785,13 +3869,16 @@ export function retreatReadyToTodo(root, id, reasons = []) {
   const split = splitTaskFile(raw);
   if (!split) return { id, ok: false, reason: "no-frontmatter" };
   if (statusFromFrontmatter(split.frontmatterRaw) !== TASK_STATUS.READY) return { id, ok: false, reason: "not-ready" };
-  const patched = patchStatusField(split.frontmatterRaw, TASK_STATUS.TODO);
-  if (!patched.ok) return { id, ok: false, reason: patched.reason };
+  // GOAL-030 ②: same kernel gate as the promote edge — ready→todo is judged against LIFECYCLE_EDGES,
+  // not assumed. A refusal writes nothing and travels back to applyRevaluations.
+  const decided = kernelDecideAndPatch(split.frontmatterRaw, TASK_STATUS.READY, TASK_STATUS.TODO);
+  if (decided.ok === false) return { id, ok: false, ...decided };
   const record =
     `\n## Revaluation\n\n**执行 ${new Date().toISOString()} — 静态条件变质，ready.back="todo"**\n\n` +
     `- 去向：ready → todo\n- 阻碍原因：${reasons.join(", ")}\n`;
-  fs.writeFileSync(file, `${split.open}${patched.fm}${split.close}${split.body}${record}`);
-  return { id, ok: true, from: TASK_STATUS.READY, to: TASK_STATUS.TODO, reasons, record };
+  fs.writeFileSync(file, `${split.open}${decided.fm}${split.close}${split.body}${record}`);
+  const eventError = recordStatusEvent(root, id, decided.from, decided.to, decided.kind, opts.actor || DIRECT_EVENT_ACTOR);
+  return { id, ok: true, from: TASK_STATUS.READY, to: TASK_STATUS.TODO, reasons, record, ...(eventError ? { eventError } : {}) };
 }
 
 /** REVALUATION EXECUTOR (AC46 判据3 / AC2 — gap-ac46-pool-criteria-in-gate-plus-revaluation-executor):
@@ -3806,12 +3893,16 @@ export function retreatReadyToTodo(root, id, reasons = []) {
 export function applyRevaluations(opts) {
   const result = analyzeTasks(opts);
   const applied = [];
+  // GOAL-030 ②: kernel refusals on the retreat edge, same contract as applyPromotions' array.
+  const transitionRefusals = [];
   if (result.revaluation.length > 0) {
     for (const r of result.revaluation) {
-      applied.push(retreatReadyToTodo(opts.root, r.id, r.reasons));
+      const out = retreatReadyToTodo(opts.root, r.id, r.reasons, { actor: REVALUATION_EVENT_ACTOR });
+      if (out.verdict) transitionRefusals.push({ id: r.id, from: out.from, to: out.to, verdict: out.verdict, reason: out.transitionReason });
+      applied.push(out);
     }
   }
-  return { ...result, should_revaluate: result.revaluation.length > 0, applied_revaluations: applied };
+  return { ...result, should_revaluate: result.revaluation.length > 0, applied_revaluations: applied, transition_refusals: transitionRefusals };
 }
 
 function main(argv) {
