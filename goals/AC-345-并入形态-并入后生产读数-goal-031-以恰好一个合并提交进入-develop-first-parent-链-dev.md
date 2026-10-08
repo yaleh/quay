@@ -2,7 +2,7 @@
 id: AC-345
 title: 并入形态 + 并入后生产读数：GOAL-031 以恰好一个合并提交进入 develop first-parent 链，develop 上
   needs-human 计数降到 1
-status: draft
+status: active
 kind: criterion
 goal: GOAL-031
 criterion: |-
@@ -24,4 +24,15 @@ criterion: |-
   echo "PASS: GOAL-031 landed as exactly one merge commit $landed (second parent = goal tip $tip); develop's goal-driver.ts shows the fixed needs-human count"
 expect: exit 0 = 合并形态正确且生产读数已修复；exit 1 = CAUSE= 指明哪一项；exit 3 = 尚未并入
 origin: GOAL-031 并入验收，见 goal body「验证步骤」7-8，同构 AC-342
+activatedAt: 2026-10-08T14:08:33.329Z
+statusLog:
+  - at: 2026-10-08T14:08:33.329Z
+    from: draft
+    to: active
+    actor: goal-cli
+    reason: ""
+fidelity:
+  verdict: not-evaluated
+  reason: no judge configured
+  at: 2026-10-08T14:08:33.328Z
 ---
