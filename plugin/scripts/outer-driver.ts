@@ -43,8 +43,9 @@ import { isDirectEntry } from "./gate-script-base.ts";
 // RoutineSpec / scheduleIsDue / collectFacts。⛔ 不 import Layer 1a 的 source/select/verify——
 // 本 kind 是例程型（1b），结构上不被迫实现任务处理三段（AC151 取假①）。
 import { splitArgs, ts, appendHeartbeatLine, scheduleIsDue, collectFacts, kernelSiblingArgv, resolveQuayCodeRoot, registerKindStop, type Fact, type RoutineSpec } from "./driver-runtime.ts";
-// Layer 0 · controlPlane（driver-shared.ts）：运行期 halt = 读控制态单一真相源（与 promotion/worker 同族）。
-import { isHalted } from "./driver-shared.ts";
+// Layer 0 · controlPlane（driver-shared.ts）：运行期 halt = 读控制态单一真相源（与 promotion/worker 同族）；
+// residentLoopStop = 停机标志 + 可唤醒 sleep 的单一实现（finding `driver-sleep-requeststop-triple`）。
+import { isHalted, residentLoopStop } from "./driver-shared.ts";
 // AC155：轮询间隔的单一真相源（drivers.yml 经 driver-config 加载，⛔ 不各写一份字面量）。
 import { defaultDriverConfig, loadDriverConfig } from "./driver-config.ts";
 
@@ -405,21 +406,16 @@ export async function runResidentOuterLoop(opts: ResidentOuterLoopOptions): Prom
     try { fs.writeFileSync(pidFile, `${process.pid}\n`, "utf8"); } catch { /* pid-file 只供外部观测 */ }
   }
 
-  let stopRequested = false;
-  let wakeResolve: (() => void) | null = null;
-  const requestStop = () => { stopRequested = true; if (wakeResolve) { const w = wakeResolve; wakeResolve = null; w(); } };
+  // Layer 0（driver-shared）：停机标志 + 可唤醒 sleep 单一实现（finding `driver-sleep-requeststop-triple`，
+  // semantic-dedup-scan —— 此前三常驻循环各写一份逐字相同的四行副本）。
+  const stopCtl = residentLoopStop();
   // AC-255（SPEC §7 阶段 C）：停机登记 —— 进程信号仍停本 kind，同时 anchor 可经 `requestKindStop`
   // 只停【这一个】循环（收敛后六个 kind 同进程，`kill -TERM <pid>` 不再能只停一个）。
-  registerKindStop("outer", requestStop);
-
-  const sleep = (ms: number) => new Promise<void>((resolve) => {
-    wakeResolve = resolve;
-    setTimeout(() => { if (wakeResolve === resolve) wakeResolve = null; resolve(); }, ms);
-  });
+  registerKindStop("outer", stopCtl.requestStop);
 
   let round = 0;
   let selfStopCounter = 0;
-  while (!stopRequested) {
+  while (!stopCtl.isStopRequested()) {
     round += 1;
     // 控制面：起新一轮前读控制态（.quay/outer-control.json 单一真相源）。halted ⇒ 本轮【不做受闸动作】，
     // 但【观测继续、心跳继续、循环继续】——halt 是轮内闸，⛔ 不是进程的终止条件
@@ -460,10 +456,10 @@ export async function runResidentOuterLoop(opts: ResidentOuterLoopOptions): Prom
 
     if (once) break;
     if (maxRounds !== null && round >= maxRounds) break;
-    await sleep(intervalMs);
+    await stopCtl.sleep(intervalMs);
   }
 
-  if (json && stopRequested) {
+  if (json && stopCtl.isStopRequested()) {
     process.stdout.write(`${JSON.stringify({ event: "stop", reason: "signal", round })}\n`);
   }
   return 0;

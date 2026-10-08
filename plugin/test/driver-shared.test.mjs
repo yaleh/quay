@@ -13,8 +13,11 @@ import assert from "node:assert/strict";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
+import { fileURLToPath } from "node:url";
 
-import { resolveResourceGateScript, resourceGateCheck } from "../scripts/driver-shared.ts";
+import { resolveResourceGateScript, resourceGateCheck, residentLoopStop } from "../scripts/driver-shared.ts";
+
+const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
 /** 一个临时 plugin root：其 scripts 子目录下按 opts.withScript 决定放不放 resource-gate.sh。 */
 function makePluginRoot(opts = {}) {
@@ -121,5 +124,53 @@ test("AC2 负控制（改后）— 无 plugin/ 的第三方 root 走缺省解析
     });
   } finally {
     fs.rmSync(thirdParty, { recursive: true, force: true });
+  }
+});
+
+// ── residentLoopStop：三常驻循环共用的停机控制器 ────────────────────────────────────────────────
+// finding `driver-sleep-requeststop-triple`（semantic-dedup-scan，byte-identical-body）。此处覆盖
+// 三个语义点：(1) 到点 resolve 且未停机；(2) requestStop 唤醒**在飞的** sleep（提前 resolve，⛔ 不等
+// 满一个 interval）；(3) requestStop 后 isStopRequested 翻真且可重复调用。
+
+test("residentLoopStop — 未停机时 sleep 到点 resolve，isStopRequested 保持 false", async () => {
+  const ctl = residentLoopStop();
+  assert.equal(ctl.isStopRequested(), false);
+  const t0 = Date.now();
+  await ctl.sleep(20);
+  assert.ok(Date.now() - t0 >= 15, "应实际等到接近 20ms");
+  assert.equal(ctl.isStopRequested(), false, "无人 requestStop ⇒ 仍是 false");
+});
+
+test("residentLoopStop — requestStop 唤醒在飞的 sleep（提前 resolve，⛔ 不等满 interval）", async () => {
+  const ctl = residentLoopStop();
+  const t0 = Date.now();
+  const pending = ctl.sleep(60_000); // 一分钟后才到点
+  ctl.requestStop();
+  await pending; // 若未被唤醒，本 await 会挂约 60s（测试超时 ⇒ 判据能取假）
+  const elapsed = Date.now() - t0;
+  assert.ok(elapsed < 2_000, `requestStop 须立即唤醒：实测 ${elapsed}ms`);
+  assert.equal(ctl.isStopRequested(), true);
+});
+
+test("residentLoopStop — requestStop 幂等；无在飞 sleep 时调用不抛", () => {
+  const ctl = residentLoopStop();
+  ctl.requestStop();
+  assert.equal(ctl.isStopRequested(), true);
+  ctl.requestStop(); // 无 wakeResolve 时再调用：⛔ 不抛
+  assert.equal(ctl.isStopRequested(), true);
+});
+
+test("回归（dedup 守卫）— 三常驻 driver ⛔ 不再各自声明 wakeResolve 副本；均经 residentLoopStop", () => {
+  // 硬规则 5b：缺陷成簇。此判据在【三个文件】上按位置查标识符（⛔ 不是关键词——注释里提到不算），
+  // 防这次抽取被下一次「顺手复制四行」重新引入。
+  const dir = path.resolve(__dirname, "..", "scripts");
+  for (const f of ["outer-driver.ts", "promotion-driver.ts", "quality-gate-driver.ts"]) {
+    const src = fs.readFileSync(path.join(dir, f), "utf8");
+    assert.equal(
+      (src.match(/let wakeResolve/g) ?? []).length,
+      0,
+      `${f} 不得再声明 wakeResolve 副本（应经 driver-shared residentLoopStop）`,
+    );
+    assert.match(src, /residentLoopStop\(\)/, `${f} 须调用 shared residentLoopStop()`);
   }
 });

@@ -48,6 +48,7 @@ import {
   scheduleIsDue,
   isHalted,
   registerKindStop,
+  residentLoopStop,
   resourceGateCheck,
   type DriverKind,
   type Fact,
@@ -1054,20 +1055,15 @@ export async function runResidentQualityGateLoop(opts: QualityGateLoopOptions): 
   if (pidFile) {
     try { fs.writeFileSync(pidFile, `${process.pid}\n`, "utf8"); } catch { /* pid-file 只供外部观测，写失败不致命 */ }
   }
-  let stopRequested = false;
-  let wakeResolve: (() => void) | null = null;
-  const requestStop = () => { stopRequested = true; if (wakeResolve) { const w = wakeResolve; wakeResolve = null; w(); } };
+  // Layer 0（driver-shared）：停机标志 + 可唤醒 sleep 单一实现（finding `driver-sleep-requeststop-triple`）。
+  const stopCtl = residentLoopStop();
   // AC-255（SPEC §7 阶段 C）：停机登记 —— 进程信号仍停本 kind，同时 anchor 可经 `requestKindStop`
   // 只停【这一个】循环（收敛后多个 kind 同进程，`kill -TERM <pid>` 不再能只停一个）。
-  registerKindStop(opts.kind ?? "quality", requestStop);
-  const sleep = (ms: number) => new Promise<void>((resolve) => {
-    wakeResolve = resolve;
-    setTimeout(() => { if (wakeResolve === resolve) wakeResolve = null; resolve(); }, ms);
-  });
+  registerKindStop(opts.kind ?? "quality", stopCtl.requestStop);
 
   const lastRun: Record<string, number> = {};
   let round = 0;
-  while (!stopRequested) {
+  while (!stopCtl.isStopRequested()) {
     round += 1;
     // 控制面（halt）：读 <kind>-control.json 单一真相源。halted ⇒ 本轮【不做受闸动作（spawn）】，但
     // 【观测继续、心跳继续、循环继续】——halt 是轮内的闸，⛔ 不是进程的终止条件
@@ -1096,9 +1092,9 @@ export async function runResidentQualityGateLoop(opts: QualityGateLoopOptions): 
     if (json) process.stdout.write(`${JSON.stringify({ event: "round", ...rec })}\n`);
     if (once) break;
     if (maxRounds !== null && round >= maxRounds) break;
-    await sleep(intervalMs);
+    await stopCtl.sleep(intervalMs);
   }
-  if (json && stopRequested) {
+  if (json && stopCtl.isStopRequested()) {
     process.stdout.write(`${JSON.stringify({ event: "stop", reason: "signal", round })}\n`);
   }
   return 0;

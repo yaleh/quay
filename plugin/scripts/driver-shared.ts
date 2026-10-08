@@ -93,3 +93,47 @@ export function resourceGateCheck(root: string, cmd: string[] | null): { go: boo
   }
   return { go: false, reason: stdout ? stdout.slice(0, 200) : `resource-gate WAIT (exit ${r.status})` };
 }
+
+// ── 常驻循环停机控制器（可唤醒 sleep）：三个 resident-loop driver 共用同一份 ────────────────────────
+//
+// WHY THIS EXISTS（routine finding `driver-sleep-requeststop-triple`，semantic-dedup-scan runId
+// semantic-dedup-scan-1791442852793，verdict real-duplication / kind byte-identical-body）：outer /
+// promotion / quality-gate 三个常驻循环各自逐字重定义了同一组四行——
+//   `let stopRequested` + `let wakeResolve` + `requestStop` 一行闭包 + 可被唤醒的 `sleep`。
+// 三份副本的【语义】必须一致（停机延迟 0 而非一个 interval、wakeResolve 只被清空一次），
+// 分别是本仓库最典型的 drift 面（硬规则 5b：缺陷成簇，改一处漏两处）。
+//
+// 语义（三 kind 一致，逐字继承旧实现）：
+//   · requestStop()：置停机标志 + 【唤醒当前 sleep】⇒ 循环在下一行即退出，⛔ 不等满一个 interval。
+//   · sleep(ms)：正常到点 resolve；被 requestStop 唤醒时提前 resolve。二者对调用方【同形】（都只是
+//     resolve，无值可区分）——这正是要的：循环醒来后靠 isStopRequested() 判该继续还是退出。
+//   · wakeResolve 只在仍等于本次 resolve 时清空：定时器到点后若已被唤醒（wakeResolve 已置 null），
+//     ⛔ 不重复清空。双 resolve 本身幂等无害，此处保持与旧实现逐字相同的时序。
+// ⛔ 不进程退出、⛔ 不杀在飞轮（调用方负责）——本控制器只做「标志 + 唤醒这一觉」。
+
+/** 常驻循环的停机控制器。`while (!ctl.isStopRequested())` + `await ctl.sleep(intervalMs)`。 */
+export interface ResidentLoopStop {
+  /** 停机是否已被请求（常驻 while 的条件用）。 */
+  isStopRequested(): boolean;
+  /** 请求停机：置标志并唤醒当前 sleep。登记给 `registerKindStop` 的就是它。 */
+  requestStop(): void;
+  /** 可被 requestStop 唤醒的 sleep（到点或唤醒，均 resolve）。 */
+  sleep(ms: number): Promise<void>;
+}
+
+/** 建一个常驻循环停机控制器（见上 WHY）。三 driver 各 import 本函数，⛔ 不各写一份四行副本。 */
+export function residentLoopStop(): ResidentLoopStop {
+  let stopRequested = false;
+  let wakeResolve: (() => void) | null = null;
+  return {
+    isStopRequested: () => stopRequested,
+    requestStop: () => {
+      stopRequested = true;
+      if (wakeResolve) { const w = wakeResolve; wakeResolve = null; w(); }
+    },
+    sleep: (ms: number) => new Promise<void>((resolve) => {
+      wakeResolve = resolve;
+      setTimeout(() => { if (wakeResolve === resolve) wakeResolve = null; resolve(); }, ms);
+    }),
+  };
+}

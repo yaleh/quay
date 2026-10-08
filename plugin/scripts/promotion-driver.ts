@@ -70,7 +70,7 @@ export { splitArgs, launchArgv, runLivenessCheck, type LivenessResult } from "./
 // AC150-3：资源门判定 + halt 判定与 worker-driver 共用同一份实现（driver-shared.ts，⛔ 非复制粘贴）。
 // AC150-1 资源门（起 fix worker 前经同一 resourceGateCheck 判定）；AC150-2 控制面（运行期 halt =
 // 读 .quay/promotion-control.json 单一真相源，⛔ 不再「只能 kill」）。
-import { resourceGateCheck, isHalted, PROMOTION_CONTROL_STATE_REL } from "./driver-shared.ts";
+import { resourceGateCheck, isHalted, PROMOTION_CONTROL_STATE_REL, residentLoopStop } from "./driver-shared.ts";
 // AC152：派发前过滤的【可组合谓词列表】单一实现（driver-filters.ts）。promotion 的 fix pass 经
 // applyTaskFilters 消费 retryCapNotExhausted / notNeedsHuman（⛔ 不各写一遍 retryState.needsHuman 判定）。
 import { applyTaskFilters, makeFilterContext, advanceRetryCap, markNeedsHuman, RETRY_CAP_DEFAULT, syncDevelopToDoc, type RetryState } from "./driver-filters.ts";
@@ -790,23 +790,17 @@ export async function runResidentPromotionLoop(opts: ResidentLoopOptions): Promi
     try { fs.writeFileSync(pidFile, `${process.pid}\n`, "utf8"); } catch { /* pid-file 只供外部观测，写失败不致命 */ }
   }
 
-  let stopRequested = false;
-  let wakeResolve: (() => void) | null = null;
-  const requestStop = () => { stopRequested = true; if (wakeResolve) { const w = wakeResolve; wakeResolve = null; w(); } };
-  // AC-255（SPEC §7 阶段 C）：停机登记 —— 进程信号仍停本 kind，同时 anchor 可经 `requestKindStop`
-  // 只停【这一个】循环（收敛后六个 kind 同进程，`kill -TERM <pid>` 不再能只停一个）。
-  registerKindStop("promotion", requestStop);
-
+  // Layer 0（driver-shared）：停机标志 + 可唤醒 sleep 单一实现（finding `driver-sleep-requeststop-triple`）。
   // 可被信号唤醒的 sleep：SIGINT/SIGTERM 立即 resolve，本轮结束即退出（⛔ 不杀在飞——单轮是同步的，
   // 不存在「在飞轮」）。
-  const sleep = (ms: number) => new Promise<void>((resolve) => {
-    wakeResolve = resolve;
-    setTimeout(() => { if (wakeResolve === resolve) wakeResolve = null; resolve(); }, ms);
-  });
+  const stopCtl = residentLoopStop();
+  // AC-255（SPEC §7 阶段 C）：停机登记 —— 进程信号仍停本 kind，同时 anchor 可经 `requestKindStop`
+  // 只停【这一个】循环（收敛后六个 kind 同进程，`kill -TERM <pid>` 不再能只停一个）。
+  registerKindStop("promotion", stopCtl.requestStop);
 
   let round = 0;
   const retryState: RetryState = { counts: new Map(), needsHuman: new Set() };
-  while (!stopRequested) {
+  while (!stopCtl.isStopRequested()) {
     round += 1;
     // AC150-2 控制面：起新一轮前读控制态（.quay/promotion-control.json 单一真相源，与 worker-driver
     // 共用同一 isHalted 实现）。halted ⇒ 停止晋升与 fix spawn（记一条 halted round 后退出，⛔ 不再跑
@@ -902,10 +896,10 @@ export async function runResidentPromotionLoop(opts: ResidentLoopOptions): Promi
     if (json) process.stdout.write(`${JSON.stringify({ event: "round", ...record })}\n`);
     if (once) break;
     if (maxRounds !== null && round >= maxRounds) break;
-    await sleep(intervalMs);
+    await stopCtl.sleep(intervalMs);
   }
 
-  if (json && stopRequested) {
+  if (json && stopCtl.isStopRequested()) {
     process.stdout.write(`${JSON.stringify({ event: "stop", reason: "signal", round })}\n`);
   }
   return 0;

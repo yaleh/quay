@@ -140,6 +140,7 @@ import { fileURLToPath } from "node:url";
 import { isDirectEntry, flagValue, readJsonlLines } from "./gate-script-base.ts";
 import { buildLockHoldIntervals } from "./fan-in-ff-protocol-check.ts";
 import { mainCheckoutRoot } from "./repo-root.ts";
+import { ancestry } from "./git-runner.ts";
 
 // ── releaseBump 的结构分类：版本载体集（单源派生，⛔ 不手抄文件名清单）───────────────────────────────
 // The set of paths a release-cut next-version bump may touch is DERIVED from the single table
@@ -865,15 +866,15 @@ function gitCommitMessage(root, sha) {
   }
 }
 
-/** `a` 是否为 `b` 的祖先（`git merge-base --is-ancestor`；同一 commit 视为是）。git 错误 ⇒ false
- *  （保守：读不出祖先关系时按「非前向」处理 ⇒ 计入 nonForwardRefMoves 可见，⛔ 不洗成前向落地）。 */
+/** `a` 是否为 `b` 的祖先（`git merge-base --is-ancestor`；同一 commit 视为是）。
+ *
+ *  实现已上收到 git-runner.ts 的 `ancestry`（semantic-dedup-scan finding `is-ancestor-pair`：本文件与
+ *  cross-machine-verify.ts 此前各带一份【不同管线】的同一谓词——一份内联 `spawnSync(...).status === 0`、
+ *  一份 throwing `try/catch`）。⛔ 折叠 `null ⇒ false` 留在【此处】而不是下推进 `ancestry`：本载体要的是
+ *  「读不出祖先关系 ⇒ 按非前向处理 ⇒ 计入 nonForwardRefMoves 可见，⛔ 不洗成前向落地」这一保守方向，而
+ *  另一个载体折叠同一个 null 的理由不同——库返回三态、折叠是调用方的语义（硬规则 3b）。 */
 function isAncestor(root, a, b) {
-  try {
-    git(root, ["merge-base", "--is-ancestor", a, b]);
-    return true;
-  } catch {
-    return false;
-  }
+  return ancestry(root, a, b) === true;
 }
 
 /**

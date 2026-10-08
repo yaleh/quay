@@ -25,7 +25,7 @@ import path from "node:path";
 import { isDirectEntry, parseArgs } from "./gate-script-base.ts";
 import { writeJsonAtomic } from "./write-json-atomic.ts";
 import { extractSection, countBoxes } from "./task-schema.ts";
-import { PREFLIGHT_POLICY_VERSION, releaseLease, _readLeaseFileWithRetry } from "./prepare-admission-check.ts";
+import { PREFLIGHT_POLICY_VERSION, releaseLease, safeTaskIdSegment, _readLeaseFileWithRetry } from "./prepare-admission-check.ts";
 // gap-prepare-milestone-cross-generation-review-state-reset: the novelty scan (AC #6) reuses
 // wiring-coverage-check.ts's REAL claim-extraction machinery verbatim — never a second,
 // independently-buggy implementation of "what counts as a mechanism claim" (the same DIR-122
@@ -532,14 +532,17 @@ export function decideResumeGeneration({
 // rationale (DIR-126-B's landed preflightTouchesMismatch check would mechanically flag a Plan that
 // edits it). ═══════════════════════════════════════════════════════════════════════════════════
 
-function _safeTaskIdSegment(taskId) {
-  return String(taskId).replace(/[\\/]/g, "_");
-}
+// gap-routine-semantic-dedup-scan-safe-task-id-segment: this file used to hold a PRIVATE copy of
+// the sanitizer (`_safeTaskIdSegment`), byte-identical to prepare-admission-check.ts's own
+// `safeTaskIdSegment` — each copy's comments claimed verbatim reuse of "the" sanitizer while a
+// change to the traversal guard in one would have silently missed every path built by the other.
+// The ONE definition now lives in prepare-admission-check.ts (imported above); these local helpers
+// just bind it to this file's `.quay/prepare-*` subdirectories.
 function _leasePath(workspace, taskId) {
-  return path.join(workspace, ".quay", "prepare-leases", `${_safeTaskIdSegment(taskId)}.json`);
+  return path.join(workspace, ".quay", "prepare-leases", `${safeTaskIdSegment(taskId)}.json`);
 }
 function _generationPath(workspace, taskId) {
-  return path.join(workspace, ".quay", "prepare-leases", `${_safeTaskIdSegment(taskId)}.generation.json`);
+  return path.join(workspace, ".quay", "prepare-leases", `${safeTaskIdSegment(taskId)}.generation.json`);
 }
 
 // ═══════════════════════════════════════════════════════════════════════════════════════════════
@@ -553,16 +556,17 @@ function _generationPath(workspace, taskId) {
 const TELEMETRY_ROOT_SEGS = ["milestones", "prepare-telemetry"];
 export const TELEMETRY_SCHEMA_VERSION = 2;
 
-// telemetryPath — Claim A.0: reuses _safeTaskIdSegment() VERBATIM (never reimplemented) for
+// telemetryPath — Claim A.0: reuses safeTaskIdSegment() VERBATIM (the single shared sanitizer
+// imported from prepare-admission-check.ts — never reimplemented) for
 // slash-stripping, then layers a post-hoc containment check on top, specific to this new
 // PERMANENTLY GIT-COMMITTED tree (a stricter bar than .generation.json's gitignored/ephemeral
-// sibling): a bare taskId of exactly ".." passes _safeTaskIdSegment completely unchanged (it only
+// sibling): a bare taskId of exactly ".." passes safeTaskIdSegment completely unchanged (it only
 // strips '/'/'\\') and would otherwise resolve ONE LEVEL ABOVE the intended
 // milestones/prepare-telemetry/ tree. Any resolved candidate landing outside that root is
 // redirected to a fixed `_unsafe-taskid` bucket instead. `taskId === null` (the three pre-lease
 // sites' "taskId itself is the missing field" case) routes to a fixed `_missing-taskId` segment.
 export function telemetryPath(workspace, taskId, recordId) {
-  const seg = taskId === null || taskId === undefined ? "_missing-taskId" : _safeTaskIdSegment(taskId);
+  const seg = taskId === null || taskId === undefined ? "_missing-taskId" : safeTaskIdSegment(taskId);
   const root = path.resolve(workspace, ...TELEMETRY_ROOT_SEGS);
   const candidate = path.join(workspace, ...TELEMETRY_ROOT_SEGS, seg, `${recordId}.json`);
   const resolvedCandidate = path.resolve(candidate);
@@ -1179,7 +1183,7 @@ export function splitScopeHash({ declaredTouches }) {
 
 // ── _decisionRecordPath — committed decision record under milestones/prepare-decisions/. ──────
 function _decisionRecordPath(workspace, taskId) {
-  const seg = _safeTaskIdSegment(taskId);
+  const seg = safeTaskIdSegment(taskId);
   return path.join(workspace, "milestones", "prepare-decisions", `${seg}.json`);
 }
 
@@ -1234,7 +1238,7 @@ export function decideSplitAdjudication(record, { charterHash, scopeHash: curren
 const MAX_MECHANISM_HISTORY_ENTRIES = 5;
 
 function _mechanismHistoryPath(workspace, taskId) {
-  const seg = _safeTaskIdSegment(taskId);
+  const seg = safeTaskIdSegment(taskId);
   return path.join(workspace, ".quay", "prepare-leases", `${seg}.mechanism-history.json`);
 }
 
@@ -1377,9 +1381,10 @@ export function _decideSplitCli({ taskId, workspace, charterFile }) {
 // ProposalAuthors/Adjudicate but ProposalReview itself always restarted from an empty ledger and a
 // fresh full review — the real DIR-126-D incident burned nine full ProposalReview generations after
 // small, targeted task edits. This closes that gap: a durable per-task checkpoint
-// (`.quay/prepare-checkpoints/<safeTaskIdSegment>.json`, reusing this file's OWN existing
-// `_safeTaskIdSegment` — never a second sanitizer) carries the typed finding ledger, the
-// last-reviewed Proposal text, and cumulative epoch counters forward across generations. A later
+// (`.quay/prepare-checkpoints/<safeTaskIdSegment>.json`, reusing the ONE shared `safeTaskIdSegment`
+// imported from prepare-admission-check.ts — never a second sanitizer) carries the typed finding
+// ledger, the last-reviewed Proposal text, and cumulative epoch counters forward across
+// generations. A later
 // attempt validates the checkpoint FAIL-CLOSED (identity/charter/scope/review-policy must all
 // match — any mismatch or corruption routes to a typed cold/full-review reason, never silently
 // accepted as a valid delta base), classifies the Proposal diff mechanically (never LLM
@@ -1397,7 +1402,7 @@ export const CHECKPOINT_SCHEMA_VERSION = 1;
 // state), but its OWN subdirectory: a checkpoint is a cross-GENERATION artifact (survives a lease
 // being released/reacquired many times over), not a single-generation lease/telemetry record.
 export function checkpointPath(workspace, taskId) {
-  return path.join(workspace, ".quay", "prepare-checkpoints", `${_safeTaskIdSegment(taskId)}.json`);
+  return path.join(workspace, ".quay", "prepare-checkpoints", `${safeTaskIdSegment(taskId)}.json`);
 }
 
 // buildReviewCheckpoint — every field explicitly materialized (no-fabrication discipline matching
@@ -1746,9 +1751,10 @@ export function _writeCheckpointCli({ taskId, workspace, charterFile, checkpoint
 // GENERATIONS a task can burn — the real DIR-126-D incident accumulated ~5h wall time / ~9.5M
 // aggregate tokens / 11 attempts, each individually within its own local DIR-125 policy. This
 // closes that gap with a durable per-task epoch record
-// (`.quay/prepare-epochs/<safeTaskIdSegment>.json`, reusing this file's OWN `_safeTaskIdSegment`
-// and `_currentReviewPolicyHash`/sha256-charter-hash idioms verbatim — never a second sanitizer or
-// hasher), keyed on (taskId, charterHash, reviewPolicyHash) ONLY — deliberately NOT any
+// (`.quay/prepare-epochs/<safeTaskIdSegment>.json`, reusing the ONE shared `safeTaskIdSegment`
+// imported from prepare-admission-check.ts and `_currentReviewPolicyHash`/sha256-charter-hash
+// idioms verbatim — never a second sanitizer or hasher), keyed on (taskId, charterHash,
+// reviewPolicyHash) ONLY — deliberately NOT any
 // Proposal-content hash, so an ordinary Proposal/Plan/AC/Touches edit can never reset the epoch
 // (Requested-action item 2). A new epoch requires an EXPLICIT `--new-epoch` CLI call with
 // owner+reason; a bounded time extension requires an EXPLICIT `--override-budget` call. Neither is
@@ -1810,7 +1816,7 @@ export const DEFAULT_EPOCH_POLICY = Object.freeze({
 // (taskId, charterHash, reviewPolicyHash) identity, never reset by a single generation's own
 // lease/checkpoint lifecycle.
 export function epochPath(workspace, taskId) {
-  return path.join(workspace, ".quay", "prepare-epochs", `${_safeTaskIdSegment(taskId)}.json`);
+  return path.join(workspace, ".quay", "prepare-epochs", `${safeTaskIdSegment(taskId)}.json`);
 }
 
 // ── Epoch lock — gap-prepare-milestone-epoch-cli-toctou-and-tamper-hardening (item 1): a real
@@ -1824,11 +1830,11 @@ export function epochPath(workspace, taskId) {
 // `prepare-admission-check.ts`'s lease acquisition uses `fs.writeFileSync(path, json, {flag:
 // 'wx'})` (Node's atomic exclusive-create, throws EEXIST on contention) as the single-flight
 // mechanism — the SAME primitive, applied here to a short-lived critical section instead of a
-// multi-hundred-minute generation lease. `epochLockPath` reuses `_safeTaskIdSegment` VERBATIM
-// (never a second sanitizer) for the SAME reason `epochPath`/`checkpointPath`/lease paths already
-// do.
+// multi-hundred-minute generation lease. `epochLockPath` reuses `safeTaskIdSegment` VERBATIM
+// (the single shared sanitizer — never a second sanitizer) for the SAME reason
+// `epochPath`/`checkpointPath`/lease paths already do.
 function epochLockPath(workspace, taskId) {
-  return path.join(workspace, ".quay", "prepare-epochs", `${_safeTaskIdSegment(taskId)}.lock`);
+  return path.join(workspace, ".quay", "prepare-epochs", `${safeTaskIdSegment(taskId)}.lock`);
 }
 
 // This is a short-lived, LOW-CONTENTION lock (a handful of human-invoked CLI calls at most, each

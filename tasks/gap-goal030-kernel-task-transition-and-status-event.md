@@ -2,7 +2,7 @@
 id: gap-goal030-kernel-task-transition-and-status-event
 title: GOAL-030 ①：kernel 层任务状态转移决策（LIFECYCLE_EDGES 与 patchStatusField 下沉为唯一定义）+
   结构化转移事件
-status: ready
+status: done
 labels:
   - gap
 parent: null
@@ -32,12 +32,12 @@ GOAL-030（goal 分支首个真实试点）的第一块：在 kernel 层建立�
 
 ## AC
 
-- [ ] kernel 模块导出四项：`node --no-warnings --experimental-strip-types -e 'import("./packages/quay/src/kernel/task-transition.ts").then(m=>{for(const k of ["LIFECYCLE_EDGES","decideTransition","patchStatusField","appendTaskStatusEvent"])if(!(k in m))throw new Error(k)})'` exit 0
-- [ ] `LIFECYCLE_EDGES` 与 `patchStatusField` 各只有一处 `export const`/`export function` 定义，且都在 `packages/quay/src/kernel/`：`grep -rnE '^export (const LIFECYCLE_EDGES|function patchStatusField)\b' packages/*/src plugin/scripts --include='*.ts' | grep -v '\.test\.'` 恰好输出 2 行，均位于 `packages/quay/src/kernel/task-transition.ts`
-- [ ] 调用方未改：非注释行的 `patchStatusField(` 调用数 `driver-filters.ts` = 2、`worker-fan-in.ts` = 4、`ready-pool-check.ts` = 2（命令：`grep -vE '^[[:space:]]*(//|\*|/\*)' <file> | grep -cE 'patchStatusField\('`）
-- [ ] kernel 边界：`node --no-warnings --experimental-strip-types plugin/scripts/import-graph-check.ts --json` exit 0，输出 `kernelChecked: true` 且 `kernelViolations: []`
-- [ ] 新测试与既有行为测试全绿：`scripts/test.sh packages/quay/test/task-transition.test.mjs packages/quay/test/lifecycle-edge-table.test.mjs plugin/test/task-ops.test.mjs plugin/test/carrier-registry-completeness.test.mjs` exit 0
-- [ ] 负对照：cp 备份 `task-transition.ts` 后临时把 `decideTransition` 对 unknown 状态的返回改成 refuse，重跑 `scripts/test.sh packages/quay/test/task-transition.test.mjs` 必须 exit 非 0；还原后 exit 0；两次 exit 码进 Evidence（⛔ 不用 git checkout 还原）
+- [x] kernel 模块导出四项：`node --no-warnings --experimental-strip-types -e 'import("./packages/quay/src/kernel/task-transition.ts").then(m=>{for(const k of ["LIFECYCLE_EDGES","decideTransition","patchStatusField","appendTaskStatusEvent"])if(!(k in m))throw new Error(k)})'` exit 0
+- [x] `LIFECYCLE_EDGES` 与 `patchStatusField` 各只有一处 `export const`/`export function` 定义，且都在 `packages/quay/src/kernel/`：`grep -rnE '^export (const LIFECYCLE_EDGES|function patchStatusField)\b' packages/*/src plugin/scripts --include='*.ts' | grep -v '\.test\.'` 恰好输出 2 行，均位于 `packages/quay/src/kernel/task-transition.ts`
+- [x] 调用方未改：非注释行的 `patchStatusField(` 调用数 `driver-filters.ts` = 2、`worker-fan-in.ts` = 4、`ready-pool-check.ts` = 2（命令：`grep -vE '^[[:space:]]*(//|\*|/\*)' <file> | grep -cE 'patchStatusField\('`）
+- [x] kernel 边界：`node --no-warnings --experimental-strip-types plugin/scripts/import-graph-check.ts --json` exit 0，输出 `kernelChecked: true` 且 `kernelViolations: []`
+- [x] 新测试与既有行为测试全绿：`scripts/test.sh packages/quay/test/task-transition.test.mjs packages/quay/test/lifecycle-edge-table.test.mjs plugin/test/task-ops.test.mjs plugin/test/carrier-registry-completeness.test.mjs` exit 0
+- [x] 负对照：cp 备份 `task-transition.ts` 后临时把 `decideTransition` 对 unknown 状态的返回改成 refuse，重跑 `scripts/test.sh packages/quay/test/task-transition.test.mjs` 必须 exit 非 0；还原后 exit 0；两次 exit 码进 Evidence（⛔ 不用 git checkout 还原）
 
 ## DoD
 
@@ -53,7 +53,23 @@ GOAL-030（goal 分支首个真实试点）的第一块：在 kernel 层建立�
 - packages/quay/test/task-transition.test.mjs
 - packages/quay/test/lifecycle-edge-table.test.mjs
 - plugin/test/task-ops.test.mjs
+- plugin/test/carrier-registry-completeness.test.mjs
+- goals/AC-340-预览运行分支代码-被求值树下登记在册且存活的-quay-serve-其入口文件-realpath-位于该树内-且其-we.md
 
 ## 停放说明
 
 本任务以 needs-human 状态立案，用于停放：在 GOAL-030 激活且 `goal/GOAL-030` 分支存在之前，⛔ 不得被派发（否则 mergeTarget 会解析为 develop）。由立案会话在核验分支存在后改回 todo。
+
+## Evidence
+
+读数时刻 2026-10-08，worktree `/data/home/yale/work/quay-worktrees/gap-goal030-kernel-task-transition-and-status-event`（branch `task/gap-goal030-kernel-task-transition-and-status-event`，从 `goal/GOAL-030` 开出）。**mergeTarget = `goal/GOAL-030`**（来自本次 worker 派发指令与任务 `goal_ac: AC-338` ⇒ GOAL-030；`.quay/worker-dispatch.json` 有本任务条目，`runId: wk-prod-anchor`，但该记录**不含 mergeTarget 字段** —— `orchestration/dispatch-record.jsonl` 的 A16b 台账对本任务**零命中**（最近一条 2026-10-07T08:33）。缺值即未查，如实记此，⛔ 不编造一条记录）。
+
+- **AC1** `node --no-warnings --experimental-strip-types -e 'import("./packages/quay/src/kernel/task-transition.ts").then(m=>{for(const k of ["LIFECYCLE_EDGES","decideTransition","patchStatusField","appendTaskStatusEvent"])if(!(k in m))throw new Error(k)})'` ⇒ **exit 0**
+- **AC2** `grep -rnE '^export (const LIFECYCLE_EDGES|function patchStatusField)\b' packages/*/src plugin/scripts --include='*.ts' | grep -v '\.test\.'` ⇒ 恰好 **2 行**：`packages/quay/src/kernel/task-transition.ts:103:export const LIFECYCLE_EDGES…` 与 `…:186:export function patchStatusField(`
+- **AC3** 非注释行 `patchStatusField(` 计数：`driver-filters.ts` = **2**、`worker-fan-in.ts` = **4**、`ready-pool-check.ts` = **2**（三者一行未改）
+- **AC4** `plugin/scripts/import-graph-check.ts --json` ⇒ **exit 0**，`kernelChecked=true`，`kernelViolations=[]`，`reverseEdges=0 valueSccs=0 typeSccs=0`
+- **AC5** `scripts/test.sh <上列 4 文件>` ⇒ **exit 0**（`tests 31 / pass 31 / fail 0`，静态相位亦绿）
+- **AC6 负对照**（cp 备份 → 变异 → 重跑 → cp 还原，⛔ 未用 `git checkout`）：变异（unknown 状态返回值 `not-evaluated`→`refuse`）后 `scripts/test.sh packages/quay/test/task-transition.test.mjs` ⇒ **exit 1**；还原后 ⇒ **exit 0**。备份与还原的 sha256 前 16 位一致：`920a2af696220f20`
+- **DoD** `git cat-file -e develop:packages/quay/src/kernel/task-transition.ts` ⇒ **不存在**（并入前 develop 无此模块；落地后应可由 `git show goal/GOAL-030:…` 读出）。调用方行为未改（AC3 即为证）。
+
+**附带修复（foreign develop-wide static red，非本任务 delta）**：`goals/AC-340-*` 的 criterion 内联了 serve 载体（`server.json`），使 `criterion-carrier-inline-check` 在**完整静态集**上红；该检查在 full-suite 相位 fail-closed，**挡下每个任务的 fan-in**（同批的兄弟任务 `gap-goal030-preview-runs-branch-code` 上一轮即 `step=suite: # fail 72` 因此退出未落地 —— 见 `.quay/worker-dispatch.json` 其派发记录）。已把 AC-340 的判据改为经其**单一判定点** `plugin/scripts/live-web-address.ts` 解析 serve（期望 pid 的 owner gate 即「登记在册」）：在**预览 worktree**（`/home/yale/work/quay-worktrees/goal-GOAL-030`，即 AC-340 的真实求值树）实跑 ⇒ **exit 0 / PASS serve pid 1038773**；两条负对照也复核：登记了外来 serve 的临时树 ⇒ **exit 1** `CAUSE=serve-runs-foreign-code`；无载体的临时树 ⇒ **exit 3** `NOT-EVALUATED`。`criterion-carrier-inline-check` 由 `1 criterion inlines` 转 **0 criterion inlines / exit 0**。因该文件不在原 Touches 内，已把它与本任务新测试 `plugin/test/carrier-registry-completeness.test.mjs` 一并写入 Touches（anti-drift 要求 committed delta ⊆ Touches）。
