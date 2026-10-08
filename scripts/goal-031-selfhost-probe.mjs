@@ -1,6 +1,16 @@
 #!/usr/bin/env node
-// plugin/scripts/goal-031-selfhost-probe.mjs — GOAL-031 ② (task
+// scripts/goal-031-selfhost-probe.mjs — GOAL-031 ② (task
 // gap-goal031-selfhost-evidence-and-arch-layer-review), the branch self-hosting identity proof.
+//
+// ⛔ WHY IT LIVES AT THE REPO ROOT AND NOT IN `plugin/scripts/`: it is a dev-period, goal-scoped
+// evidence tool with no runtime consumer — the AC-344 criterion reads the committed snapshot JSON,
+// it does not run this file. `plugin/` is the PUBLISHED tree (publish-dist-branch.sh rsyncs it, then
+// strips only raw `.ts`), so a `.mjs` under `plugin/scripts/` ships into every user's install — which
+// `plugin/shipped-set-baseline.json`'s size ceiling caught as exactly +1 file. That is the GOAL-029
+// class (dev-only content in the artifact), so the file lives where the sibling self-host probe lives
+// (`scripts/branch-selfhost-probe.mjs`, task gap-goal030-branch-selfhost-probe) and never ships.
+// The technique is location-independent: the reading is taken by a child `node` whose cwd is the tree
+// under evaluation, so where THIS file sits changes nothing about `loadedFrom`.
 //
 // WHAT THIS PROVES (GOAL-031 §验证步骤 4): when the GOAL-031 worktree is the *root* a process runs
 // from, the module it loads (`plugin/scripts/goal-driver.ts`) resolves to THAT worktree's own file
@@ -21,7 +31,7 @@
 // module's declarations. (Verified: the same technique GOAL-030 relied on.)
 //
 // Usage:
-//   node plugin/scripts/goal-031-selfhost-probe.mjs --worktree <abs-tree> [--entry <rel>]
+//   node scripts/goal-031-selfhost-probe.mjs --worktree <abs-tree> [--entry <rel>]
 //        [--main <abs-main-checkout>] [--out <json-path>] [--json]
 // Exit:
 //   0 = probe ran AND identity matched (loadedFrom realpath is inside <worktree>)
