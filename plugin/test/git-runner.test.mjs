@@ -17,7 +17,7 @@
 //
 // Run: scripts/test.sh plugin/test/git-runner.test.mjs
 
-import { test } from "node:test";
+import { test, after } from "node:test";
 import assert from "node:assert/strict";
 import fs from "node:fs";
 import os from "node:os";
@@ -31,10 +31,22 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const REPO_ROOT = path.resolve(__dirname, "..", "..");
 const SCRIPTS_DIR = path.join(REPO_ROOT, "plugin", "scripts");
 
+/** Every temp dir this file creates — cleaned by the single `after()` below (the carrier-array
+ *  pattern, so the mkdtemp results are PAIRED and no fixture leaks into /tmp). */
+const _createdDirs = [];
+function mkTemp(prefix) {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), prefix));
+  _createdDirs.push(dir);
+  return dir;
+}
+after(() => {
+  for (const d of _createdDirs) fs.rmSync(d, { recursive: true, force: true });
+});
+
 /** A throwaway git repo with two commits. Identity via `-c` (the runner's own env carries no
  *  user.name/email — the repo-wide convention for tests that must commit). */
 function makeRepo() {
-  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "git-runner-ancestry-"));
+  const dir = mkTemp("git-runner-ancestry-");
   const run = (args) =>
     spawnSync("git", ["-C", dir, "-c", "user.email=t@example.com", "-c", "user.name=t", ...args], {
       encoding: "utf8",
@@ -77,7 +89,7 @@ test("ancestry: an unknown object is null — the invocation could not be answer
 });
 
 test("ancestry: a directory that is not a repository is null", () => {
-  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "git-runner-nonrepo-"));
+  const dir = mkTemp("git-runner-nonrepo-");
   assert.equal(ancestry(dir, "HEAD", "HEAD"), null);
 });
 
