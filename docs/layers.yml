@@ -1,6 +1,8 @@
 # layers.yml — DRAFT (2026-10-02). 层映射的唯一正本：glob → 层，以及允许的依赖方向。
 #
-# 状态：draft。尚无检查脚本消费本文件；没有消费者之前，它只是声明，不是不变量。
+# 状态：draft。仓库内尚无检查脚本消费本文件；archguard 项目的实验性检查器
+# （docs/experiments/layer-map/check-layers.mjs）在 2026-10-08 对它跑过一次，结论见下面的修正记录。
+# 没有仓库内的、进 CI 的消费者之前，它只是声明，不是不变量。
 # 取证来源（均于 2026-10-02 实测，非推断）：
 #   - archguard_analyze（scope 075f2c0c = packages，4747cc54 = plugin/scripts，两个独立 scope）
 #   - archguard 的 packageGraph 能力对两个 scope 均为 false；plugin/scripts 被当成单个 "(root)" 包
@@ -10,27 +12,32 @@
 #
 # 方向约定：edge "A -> B" 表示 A 的代码 import B。allowed 里没列的方向 = 禁止。
 
+# glob 写法（2026-10-08 修正）：每层同时列【裸目录】和【目录/**】。原因：archguard 的 moduleGraph
+# 节点是目录，节点 id 是裸目录名（如 packages/quay/src/kernel），"dir/**" 匹配不到节点本身；文件级 glob
+# （如 src/*.ts）也匹配不到目录节点。初版只写了 dir/**，被 archguard 的 check-layers.mjs 判为
+# NOT-EVALUATED（exit 2）。写法与 archguard 自己的 layers.yml 一致。
 layers:
   # —— 代码依赖层（ArchGuard 能看见） ——
   core-kernel:
-    globs: ["packages/quay/src/kernel/**"]
+    globs: ["packages/quay/src/kernel", "packages/quay/src/kernel/**"]
   core-gate:
-    globs: ["packages/quay/src/gate/**"]          # 含 gate/config、gate/factories
+    globs: ["packages/quay/src/gate", "packages/quay/src/gate/**"]          # 含 gate/config、gate/factories
   core-fan-in:
-    globs: ["packages/quay/src/fan-in/**"]
+    globs: ["packages/quay/src/fan-in", "packages/quay/src/fan-in/**"]
   core-cli:
-    globs: ["packages/quay/src/cli/**", "packages/quay/bin/**"]
+    globs: ["packages/quay/src/cli", "packages/quay/src/cli/**", "packages/quay/bin", "packages/quay/bin/**"]
   core-root:
-    globs: ["packages/quay/src/*.ts"]             # serve / mcp-server / goal-store 等；862 实体里 822 在此，是最大块
+    # 只列 src 这一个目录节点（不带 /**，否则会吞掉上面几层的子目录）；ts-demo 是 src 下唯一不属于上面几层的子目录。
+    globs: ["packages/quay/src", "packages/quay/src/ts-demo", "packages/quay/src/ts-demo/**"]   # serve / mcp-server / goal-store 等，是最大块
   provider-native:
-    globs: ["packages/quay-native/**"]
+    globs: ["packages/quay-native", "packages/quay-native/**"]
   provider-github:
-    globs: ["packages/quay-github/**"]
+    globs: ["packages/quay-github", "packages/quay-github/**"]
   provider-backlog:
-    globs: ["packages/quay-backlog/**"]
+    globs: ["packages/quay-backlog", "packages/quay-backlog/**"]
   # —— 编排脚本层（单个扁平目录，内部分层未推导） ——
   orchestration-scripts:
-    globs: ["plugin/scripts/**"]
+    globs: ["plugin/scripts", "plugin/scripts/**"]
     note: "276 个 .ts 平铺，前缀只能粗分（suite/task/fan/runner/driver/checker…）；内部子层待人审后再拆，不要从文件名前缀自动推。"
 
 allowed:   # 2026-10-02 在 packages 内部实测到的方向（来自 overview/package.json 的目录级边）
@@ -49,6 +56,9 @@ allowed:   # 2026-10-02 在 packages 内部实测到的方向（来自 overview/
   - orchestration-scripts -> core-kernel   # 22 个文件 import packages/quay/src/**（kernel/proc-identity 最多）
   - orchestration-scripts -> core-root
   - orchestration-scripts -> core-gate     # plugin/scripts/dark-axis-record-check.ts 引用 gate/dark-axis-record.ts（初版漏列）
+  # 2026-10-08 补列（archguard 的 check-layers.mjs 在 quay develop 上报出，我已逐条核实源码）：
+  - core-fan-in -> core-root               # fan-in/ff-merge.ts:30-31 import ../plugin-root.ts、../config.ts（值依赖）
+  - orchestration-scripts -> core-fan-in   # worker-driver.ts:293、worker-fan-in.ts:82 import fan-in/ff-merge.ts，均为 import type（仅类型）
 
 # 目标方向（尚未成立，供人裁决）：Core 与 provider 不得依赖 orchestration-scripts；
 # provider 之间互不依赖；provider 只依赖 Core。
@@ -70,6 +80,10 @@ known_violations:   # 已实测存在；检查脚本落地时应以此为棘轮�
     evidence: "overview 中 gate -> gate/config、gate/config -> gate、gate/factories -> gate 同时存在；detect_cycles(package) 仍报 []，说明该检测在这个粒度上看不见它"
   - edge: "core-root <-> core-cli"
     evidence: "quay/src -> quay/src/cli 与 quay/src/cli -> quay/src 同时存在"
+# 关于这两条为什么保留（2026-10-08，与 archguard 侧会话的分歧，取保留）：archguard 的 moduleGraph.cycles 里
+# 仍有 1 个 6 目录环，含这两组互指；而 allowed 里列了 core-root <-> core-cli 两个方向，只说明规则对这一对
+# 过宽。gate <-> gate/config <-> gate/factories 在同一层内，层间方向检查看不见它。
+# 建议另加两类判据之一（待人裁决，尚未写进检查）：「目录环 = 0」，或禁止 core-root -> core-cli 这一个方向。
 
 # 不在 import 图里的"层"：运行时/编排层（manager → worker-driver → worker；author ↔ develop 分支；
 # tasks/*.md 状态机）。它们靠进程、markdown、git 连接，ArchGuard 看不见，也不在上面的方向检查范围内。
