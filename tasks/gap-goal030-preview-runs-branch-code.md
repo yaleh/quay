@@ -1,7 +1,7 @@
 ---
 id: gap-goal030-preview-runs-branch-code
 title: GOAL-030 ⑤：预览实例自举——在 goal 判据树上起 serve 并证明 AC-340（入口 realpath 在本树内 + 首页 200）
-status: ready
+status: needs-human
 labels:
   - gap
 parent: null
@@ -129,3 +129,14 @@ stderr：**空**。（判据原文经 `quay goal show AC-340 --json` 取出后�
 ### ⑥ 留给人和 `quay goal merge` 的预览
 
 `http://172.28.0.1:20830/`（pid 1038773，workspace root = `/home/yale/work/quay-worktrees/goal-GOAL-030`），**取证后保持运行**。时效边界见 DoD 的如实注记：分支 tip 前移会刷新该 worktree 并停掉预览，`quay goal merge` 前按同一条 `goal preview GOAL-030 start` 命令重起即可（一步）。⛔ 全程没有停、没有重启**生产** serve（主检出登记 pid 1769873）。
+
+## Needs-Human
+
+**执行 2026-10-08T03:24:43.005Z — 停派终止（失败无法归因，⛔ 不再重派）**
+
+- 阻碍原因：exited-not-landed 失败无法归因（基建/契约疑似，非实现缺陷）——停止重派，⛔ 不再拿新会话撞同一堵墙：suite red could not be attributed to any failing test file in 2 consecutive rounds (bounded to at most one retry) — infra/contract suspected, not an implementable defect (parser attributed no failing file (failure-line count unavailable on this judgment)); stopping instead of spending another worker session
+- 失败步/判词：step=suite: # fail 72
+- run_id：wk-prod-anchor
+- session_id：e4530c70-fc76-458d-8b17-27462cf827d7
+- suite 日志：/data/home/yale/work/quay/.quay/fan-in-suite-gap-goal030-preview-runs-branch-code~wk-prod-anchor~1791429826952-5fdbdb.log
+- fan-in 日志：/data/home/yale/work/quay/.quay/fan-in-gap-goal030-preview-runs-branch-code-wk-prod-anchor.log
