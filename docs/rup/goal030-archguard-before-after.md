@@ -38,14 +38,18 @@ produced by the same build (this is what makes the two readings comparable at al
 ## 2. Analyzed roots (pre-merge arm)
 
 `git merge-base --is-ancestor HEAD develop` is **false** on this branch, so the criterion takes the
-**pre-merge** arm: it compares the branch's fork point against the branch tip.
+**pre-merge** arm: it compares `before = git merge-base HEAD develop` against `after = HEAD`.
 
-| | sha | what it is |
+`before` is therefore whatever the branch's last common point with `develop` is — the original fork
+point **until** the branch merges `develop` back in, and the **develop tip** afterwards. Both were
+measured; the quantities do not move (only the two sha labels do):
+
+| run | **before** = `merge-base HEAD develop` | **after** = `HEAD` |
 |---|---|---|
-| **before** | `019995f65f87744d887cf1f79653d73cf8cd49cb` | `git merge-base HEAD develop` — the fork point |
-| **after** | `e20ef12140bf3efef3c699b93044d84fcc83cde9` | `git rev-parse HEAD` — `goal/GOAL-030` tip, **contains ②'s kernel wiring** |
+| A — `goal/GOAL-030` tip, before any develop catch-up | `019995f65f87744d887cf1f79653d73cf8cd49cb` — the **fork point** | `e20ef12140bf3efef3c699b93044d84fcc83cde9` — `goal/GOAL-030` tip, **contains ②'s kernel wiring** |
+| B — after `git merge develop` (×2) into the task branch | `ae703329ca14ebdca2d97f6f4e55c62b91d8c49a` — **develop tip** at that moment | `e05addf01b6c4abad2186fddb257d8ba912be55c` — merged task HEAD |
 
-`mode = pre-merge`. Both sides are single-root extractions of the same two paths:
+`mode = pre-merge` in both. Both sides are single-root extractions of the same two paths:
 
 ```
 git archive <sha> packages plugin/scripts | tar -x -C <tmp>/<side>/tree
@@ -61,11 +65,28 @@ working-tree-vs-archive mix.
 (`packages/quay/test/task-transition.test.mjs` is a test and is excluded; `gate/lifecycle.ts`,
 `plugin/scripts/ready-pool-check.ts`, `plugin/scripts/task-ops.ts` are modifications, not A/D).
 
-## 3. Readings (authoritative run, `exit 0`)
+## 3. Readings (authoritative runs, all `exit 0`)
+
+Run A (`before` = fork point `019995f65…`):
 
 ```
 {"mode":"pre-merge","before":"019995f65f87744d887cf1f79653d73cf8cd49cb",
  "after":"e20ef12140bf3efef3c699b93044d84fcc83cde9",
+ "files":{"before":417,"after":418},
+ "cycles":{"before":1,"after":1},
+ "k":{"before":14,"after":16},
+ "nk":{"before":44,"after":44},
+ "rev":0}
+PASS: comparable before/after (pre-merge): files 417->418, cycles 1->1,
+      plugin->kernel 14->16, plugin->non-kernel 44->44, reverse 0
+```
+
+Run B (`before` = develop tip `ae703329c…`, after the task branch merged `develop` twice) — **same
+quantities, `exit 0`**:
+
+```
+{"mode":"pre-merge","before":"ae703329ca14ebdca2d97f6f4e55c62b91d8c49a",
+ "after":"e05addf01b6c4abad2186fddb257d8ba912be55c",
  "files":{"before":417,"after":418},
  "cycles":{"before":1,"after":1},
  "k":{"before":14,"after":16},
@@ -83,8 +104,12 @@ PASS: comparable before/after (pre-merge): files 417->418, cycles 1->1,
 | `plugin/scripts` → `packages/quay/src` (non-kernel) strength | **44** | **44** | must **not** increase | ✅ |
 | `packages/**` → `plugin/**` reverse edges | — | **0** | must be **0** | ✅ |
 
-`mode=pre-merge`, `before=019995f65f87744d887cf1f79653d73cf8cd49cb`,
-`after=e20ef12140bf3efef3c699b93044d84fcc83cde9`.
+`mode=pre-merge` in both runs. Run A: `before=019995f65f87744d887cf1f79653d73cf8cd49cb`,
+`after=e20ef12140bf3efef3c699b93044d84fcc83cde9`. Run B: `before=ae703329ca14ebdca2d97f6f4e55c62b91d8c49a`,
+`after=e05addf01b6c4abad2186fddb257d8ba912be55c`. Across A→B the `before` moved from the fork point to
+the develop tip — `git rev-list --count 019995f65…ae703329c` = **9** commits of unrelated develop work
+— and **not one of the five quantities moved** (none of those 9 commits changed a file under
+`packages` or `plugin/scripts`, which is why the archived `before` tree is byte-equal in count).
 
 ### Why `→ kernel` rises 14 → **16** (not 14 → 15)
 
