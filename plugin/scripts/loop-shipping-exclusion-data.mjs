@@ -133,6 +133,47 @@ function canonical(p) {
 }
 
 /**
+ * Is `dir` the root of a LINKED git checkout — a `git worktree` (or a submodule) — rather than an
+ * ordinary directory of the main checkout?
+ *
+ * A linked checkout carries a `.git` FILE (not a directory) whose first line names its gitdir
+ * (`gitdir: <main>/.git/worktrees/<name>` for a worktree). The main checkout carries a `.git`
+ * DIRECTORY, so it is never matched, and an ordinary subdirectory has no `.git` at all.
+ *
+ * WHY this exists — gap-loop-shipping-worktree-container-snapshot-toctou-race. `walkCorpus` must not
+ * descend into a worktree: it is a COMPLETE repo copy whose `plugin/scripts/fast-mode-telemetry.ts`
+ * is a SECOND physical copy, which reds AC2 ("exactly one physical copy"). `worktreeContainerPaths`
+ * derives its container set from a ONE-TIME `git worktree list` SNAPSHOT, so it is blind to any
+ * worktree that (a) appears AFTER that snapshot (the walk runs ~minutes; the worker-driver creates
+ * task worktrees throughout), or (b) is not registered at all — e.g. an orphaned
+ * `.quay/deliver-worktree-<hash>/` whose registration was pruned but whose directory (with its
+ * `.git` gitdir file) survived. Either way the walk descends and counts the extra copy.
+ *
+ * This predicate is evaluated PER DIRECTORY at walk time from the tree's OWN STRUCTURE, so it
+ * cannot miss a linked checkout the snapshot missed, regardless of WHEN it appeared. It reads only
+ * the `.git` file's CONTENT — it does NOT resolve the gitdir target — so an orphan whose
+ * `<main>/.git/worktrees/<name>` admin dir is already gone is still recognised. 硬规则 4b: this is a
+ * direct reading of the tree, not a proxy derived from a stale registry.
+ *
+ * @param {string} dir absolute directory path
+ * @returns {boolean} true when dir is a linked-checkout (worktree/submodule) root
+ */
+export function isWorktreeRoot(dir) {
+  let st;
+  try {
+    st = fs.lstatSync(path.join(dir, '.git'));
+  } catch (e) {
+    // No `.git` entry (ordinary directory) — and ONLY that. A real read error (EACCES/EIO) must
+    // still throw: "cannot read" must not masquerade as "ordinary directory" (硬规则 3b).
+    if (e.code === 'ENOENT') return false;
+    throw e;
+  }
+  // `.git` as a DIRECTORY = the main checkout (or a standalone nested repo) — not a linked checkout.
+  if (!st.isFile()) return false;
+  return /^gitdir:\s*\S/m.test(fs.readFileSync(path.join(dir, '.git'), 'utf8'));
+}
+
+/**
  * The AC1b exclusion table: files that MAY legitimately mention the old paths (historical record /
  * target-layout / the pattern definitions themselves) and are therefore exempt from the
  * "no live reference" scan. Directory targets exclude their whole subtree.

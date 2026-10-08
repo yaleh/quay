@@ -23,7 +23,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { execFileSync } from 'node:child_process';
-import { oldPaths, oldPathPatterns, exclusionEntries, worktreeContainerPaths, stagingDirPrefix } from '../scripts/loop-shipping-exclusion-data.mjs';
+import { oldPaths, oldPathPatterns, exclusionEntries, worktreeContainerPaths, isWorktreeRoot, stagingDirPrefix } from '../scripts/loop-shipping-exclusion-data.mjs';
 // The repo's ONE temp-dir helper (mkdtemp under a resolved writable root + file-level after()
 // cleanup). The controls below build their probe trees in it rather than in the shared checkout —
 // a test must not create or delete entries under a checked-in path
@@ -45,6 +45,10 @@ const repoRoot = path.resolve(pluginDir, '..');
 // single source in the same module): a KILLED stagePackagedPlugin() run leaves packages/quay/
 // plugin-staging-<pid>-{0,1}/ orphans that carry a full plugin/ copy — their tick-doc old-path strings
 // + scripts/*.ts false-red AC1b/AC2 (gap-orphan-staging-dirs-pollute-walkcorpus).
+// And it skips every directory that is ITSELF a linked-checkout root, detected at walk time by
+// isWorktreeRoot (same module) rather than from the one-time `git worktree list` snapshot — closing
+// gap-loop-shipping-worktree-container-snapshot-toctou-race (a worktree created after the snapshot,
+// or an unregistered `.quay/deliver-worktree-<hash>/` orphan, otherwise slips through).
 //
 // `tmp/` joins that skip set for the same reason adr016-screen-use-check.ts's SKIP_DIRS carries it
 // (gap-goal-merge-suite-concurrent-npm-pack-staging-race-blocks-fan-in): it is the gitignored
@@ -72,6 +76,16 @@ function walkCorpus(dir, { excluded = [], includeWorktrees = false, containerRoo
   const rawContainers = includeWorktrees ? new Set() : worktreeContainerPaths(containerRoot);
   const containers = [...rawContainers].filter((c) => c === dir || c.startsWith(dir + path.sep));
   const isContainer = (p) => containers.some((c) => p === c || p.startsWith(c + path.sep));
+  // gap-loop-shipping-worktree-container-snapshot-toctou-race: `worktreeContainerPaths` is a ONE-TIME
+  // `git worktree list` SNAPSHOT taken at entry; the walk below runs over minutes. A linked checkout
+  // that appears AFTER the snapshot (the worker-driver keeps creating task worktrees) — or that is not
+  // registered at all (an orphaned `.quay/deliver-worktree-<hash>/` whose registration was pruned but
+  // whose directory survived) — is NOT in `containers`, so the snapshot alone lets the walk descend
+  // into it and count its second `fast-mode-telemetry.ts` copy (AC2 red). `isWorktreeRoot` reads the
+  // candidate directory's OWN structure (`.git` is a FILE naming a gitdir) at the moment the walk
+  // reaches it, so the exclusion no longer depends on snapshot-vs-walk atomicity. Gated on
+  // `!includeWorktrees` so the negative controls that deliberately scan worktree content still do.
+  const skipWorktreeRoots = !includeWorktrees;
   const scanned = [];
   const walk = (d) => {
     let entries;
@@ -93,7 +107,7 @@ function walkCorpus(dir, { excluded = [], includeWorktrees = false, containerRoo
       if (e.name === 'node_modules' || e.name === '.git' || e.name === 'dist' || e.name === 'tmp' || e.name.startsWith(stagingDirPrefix)) continue;
       const p = path.join(d, e.name);
       if (e.isDirectory()) {
-        if (isContainer(p) || excluded.some((x) => p === x || p.startsWith(x + path.sep))) continue;
+        if (isContainer(p) || (skipWorktreeRoots && isWorktreeRoot(p)) || excluded.some((x) => p === x || p.startsWith(x + path.sep))) continue;
         walk(p); continue;
       }
       if (!/\.(md|sh|mjs|ts|json|yml|js)$/.test(e.name)) continue;
@@ -381,6 +395,77 @@ test('AC2 — walk() skips the .claude/worktrees/ container even for UNREGISTERE
   assert.ok(unfiltered.some((p) => p.startsWith(residue + path.sep)), 'without the container skip the residue IS scanned (the skip is load-bearing)');
   const copies = physicalTelemetryCopies(scanned);
   assert.deepEqual(copies, [], 'residue fast-mode-telemetry.ts copy must not be counted (AC2)');
+});
+
+// ── TOCTOU controls: walk-time structural worktree-root detection (gap-…-snapshot-toctou-race) ──────
+test('AC2 — an UNREGISTERED linked checkout (the orphan `deliver-worktree` shape) under the walked tree is skipped at walk time, though the container snapshot cannot see it', () => {
+  // gap-loop-shipping-worktree-container-snapshot-toctou-race: the observed AC2 red came from
+  // `.quay/deliver-worktree-<hash>/` — a REAL git worktree whose registration was pruned (so
+  // `git worktree list` does NOT report it) but whose directory + `.git` gitdir file survived. The
+  // one-time container snapshot therefore never contains it, and the walk descended into it and
+  // counted its second `plugin/scripts/fast-mode-telemetry.ts` (reproduced live in the GOAL-030
+  // merge worktree: `.quay/deliver-worktree-2872db5a3e48/plugin/scripts/fast-mode-telemetry.ts`).
+  // Private temp root reproducing `<root>/.quay/deliver-worktree-<id>/`: nothing under the checked-in
+  // tree is touched.
+  const root = makeTmpDir('loop-shipping-orphan-wt-');
+  const orphan = path.join(root, '.quay', `deliver-worktree-${process.pid}`);
+  fs.mkdirSync(path.join(orphan, 'plugin', 'scripts'), { recursive: true });
+  // The linked-checkout STRUCTURAL signature: `.git` is a FILE naming a gitdir (the admin dir need
+  // not even exist — that is exactly what makes an orphan an orphan).
+  fs.writeFileSync(
+    path.join(orphan, '.git'),
+    `gitdir: ${path.join(repoRoot, '.git', 'worktrees', `deliver-worktree-${process.pid}`)}\n`,
+  );
+  fs.writeFileSync(path.join(orphan, 'plugin', 'scripts', 'fast-mode-telemetry.ts'), 'export const orphanWorktreeCopy = true;\n');
+  fs.writeFileSync(path.join(root, 'anchor.md'), 'an ordinary sibling of the orphan worktree\n');
+  // The predicate reads the orphan's OWN structure — it consults no registry.
+  assert.ok(isWorktreeRoot(orphan), 'isWorktreeRoot must recognise a `.git`-file linked checkout even when unregistered');
+  assert.ok(!isWorktreeRoot(root), 'an ordinary directory (no `.git`) is not a worktree root');
+  // The container SNAPSHOT cannot see it — this is the pre-fix blind spot the fix must close.
+  assert.ok(!worktreeContainerPaths(repoRoot).has(orphan), 'the container snapshot does not list an unregistered worktree (the snapshot-only blind spot)');
+  // Post-fix: the walk reaches the temp root but does NOT descend into the orphan.
+  const scanned = walkCorpus(root, { excluded: exclusionTargets(), containerRoot: repoRoot });
+  assert.ok(scanned.includes(path.join(root, 'anchor.md')), 'the walk must reach the temp root (the skip below is a skip of the orphan, not of the whole walk)');
+  assert.ok(!scanned.some((p) => p.startsWith(orphan + path.sep)), 'walkCorpus must not scan into an unregistered linked checkout');
+  assert.deepEqual(physicalTelemetryCopies(scanned), [], 'the orphan worktree telemetry copy must not be counted (AC2)');
+  // Negative control (the pre-fix red): with the walk-time worktree-root skip disabled the orphan IS
+  // collected and its copy IS counted — the skip is load-bearing, not vacuous.
+  const unfiltered = walkCorpus(root, { excluded: exclusionTargets(), containerRoot: repoRoot, includeWorktrees: true });
+  assert.ok(unfiltered.some((p) => p.startsWith(orphan + path.sep)), 'without the walk-time skip the orphan IS scanned (the skip is load-bearing)');
+  assert.equal(physicalTelemetryCopies(unfiltered).length, 1, 'and its fast-mode-telemetry.ts copy IS counted without the skip — the exact AC2 red');
+});
+
+test('AC2 — a worktree created AFTER the container snapshot is still skipped (the check is at walk time, not snapshot time)', (t) => {
+  // The literal TOCTOU: `walkCorpus` takes its `git worktree list` container snapshot at ENTRY (before
+  // any fs read), then walks for ~minutes. A worktree registered in that window is absent from the
+  // snapshot, so pre-fix the walk descends into it. Deterministic here: the mock fires on the FIRST
+  // readdirSync of the temp root — i.e. strictly AFTER the entry snapshot — and only then creates the
+  // worktree, so the two are ordered without depending on real timing.
+  const root = makeTmpDir('loop-shipping-toctou-');
+  const wt = path.join(root, `ls-toctou-${process.pid}`);
+  fs.writeFileSync(path.join(root, 'anchor.md'), 'an ordinary sibling of the late worktree\n');
+  try {
+    const real = fs.readdirSync;
+    let created = false;
+    t.mock.method(fs, 'readdirSync', (p, ...rest) => {
+      if (!created && String(p) === root) {
+        created = true;
+        execFileSync('git', ['worktree', 'add', '--detach', wt, 'HEAD'], { cwd: repoRoot, stdio: 'pipe' });
+        fs.writeFileSync(path.join(wt, 'fast-mode-telemetry.ts'), 'export const lateWorktreeCopy = true;\n');
+      }
+      return real(p, ...rest);
+    });
+    const scanned = walkCorpus(root, { excluded: [], containerRoot: repoRoot });
+    assert.ok(created, 'the fixture worktree must have been created mid-walk (after the entry snapshot)');
+    assert.ok(scanned.includes(path.join(root, 'anchor.md')), 'the walk must reach the temp root (the skip below is a skip of the late worktree, not of the whole walk)');
+    assert.ok(!scanned.some((p) => p.startsWith(wt + path.sep)), 'a worktree that appeared after the snapshot must still be skipped (walk-time structural check)');
+    assert.deepEqual(physicalTelemetryCopies(scanned), [], 'its telemetry copy must not be counted (AC2)');
+    // The window was REAL: a snapshot taken NOW (after the walk) DOES list the worktree — proving the
+    // entry-time snapshot missed it, i.e. the walk-time check (not timing luck) is what kept the copy out.
+    assert.ok(worktreeContainerPaths(repoRoot).has(fs.realpathSync(wt)), 'a post-walk snapshot DOES list the worktree — the entry snapshot missed it (the window is real)');
+  } finally {
+    try { execFileSync('git', ['worktree', 'remove', '--force', wt], { cwd: repoRoot, stdio: 'pipe' }); } catch { /* already gone */ }
+  }
 });
 
 // ── plugin-staging-* orphan skip (gap-orphan-staging-dirs-pollute-walkcorpus) ───────────────────────
