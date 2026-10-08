@@ -1,7 +1,7 @@
 ---
 id: gap-goal030-archguard-before-after-comparability
 title: GOAL-030 ④：ArchGuard 前后可比读数——分支 tip 上实跑 AC-339（分叉点 vs tip 单根对照），守五条方向约束 + 负对照
-status: ready
+status: done
 labels:
   - gap
 parent: null
