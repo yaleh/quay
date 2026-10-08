@@ -2,7 +2,7 @@
 id: AC-341
 title: 并入后生产读数：GOAL-030 并入之后，develop 上每一次 promotion-driver 机械晋升 todo→ready 都在
   .quay/task-status-events.jsonl 有对应的 promote 事件
-status: active
+status: achieved
 kind: criterion
 goal: GOAL-030
 criterion: |
@@ -31,6 +31,11 @@ statusLog:
     actor: cli
     reason: 人 2026-10-08 授权立项并进入 GOAL-030（goal 分支首个真实试点）；承接任务已立并停放（needs-human），激活本
       AC 不会触发乱序自动立案
+  - at: 2026-10-08T23:34:46.714Z
+    from: active
+    to: achieved
+    actor: goal-driver
+    reason: "I2: criterion pass"
 fidelity:
   verdict: faithful
   reason: "fidelity judge: faithful"
