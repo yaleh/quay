@@ -2,7 +2,7 @@
 id: AC-346
 title: 测试与 smoke 全绿 + 迁移不改变运行时语义：goal-driver 分片经 scripts/test.sh 全绿，且
   TASK_STATUS.NEEDS_HUMAN 与原字面量取值恒等
-status: active
+status: achieved
 kind: criterion
 goal: GOAL-031
 criterion: |-
@@ -26,5 +26,11 @@ origin: 人 2026-10-08 采纳
   gap-goal031-ac-coverage-suite-smoke-and-runtime-semantics 提案：补退出条件「suite/smoke
   全绿」「不改变状态机允许边/运行时语义」的对位（同 GOAL-030 AC-338）
 activatedAt: 2026-10-08T14:55:00.248Z
+statusLog:
+  - at: 2026-10-08T15:01:17.198Z
+    from: active
+    to: achieved
+    actor: goal-driver
+    reason: "I2: criterion pass"
 phase: pre-merge
 ---
