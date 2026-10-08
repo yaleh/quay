@@ -14,9 +14,11 @@
 //                 (YAML) + frontmatterStatus. There is NO new frontmatter-parsing regex here — the fence
 //                 split is structural (locates the block), field VALUES are read by the YAML parser only.
 //   (b) patch   — patchStatusField (byte-preserving status-line edit, never a YAML round-trip that would
-//                 reformat the rest of the frontmatter) + ensureLabel (generic "add one label, keep the
-//                 rest" safe-add primitive) + ensureDeliveryCriticalLabel (label add, moved from
-//                 ready-pool-check.ts; the delivery-critical specialization of ensureLabel; now also
+//                 reformat the rest of the frontmatter; ⛔ DEFINED IN THE KERNEL
+//                 `packages/quay/src/kernel/task-transition.ts` since GOAL-030 and re-exported below —
+//                 one definition, shared with the product judge) + ensureLabel (generic "add one label,
+//                 keep the rest" safe-add primitive) + ensureDeliveryCriticalLabel (label add, moved
+//                 from ready-pool-check.ts; the delivery-critical specialization of ensureLabel; now also
 //                 stamps `extra.deliveryCriticalSource` on label-add, preserving an existing source —
 //                 gap-delivery-critical-source-distinction-outer-retired).
 //   (c) commit  — isInsideGitWorkTree / commitTaskFile / hasPriorCommit (moved verbatim from
@@ -56,25 +58,16 @@ export function statusFromFrontmatter(frontmatterRaw: string): string | null {
 
 // ── patch-one-field (byte-preserving text edits — never a YAML round-trip) ────────────────────────
 
-/** Replace the `status:` scalar value in a frontmatter, preserving every other byte. `fromStatus`, when
- *  set, makes the patch apply ONLY when the current status line equals that value (whitespace-tolerant) —
- *  otherwise the frontmatter is returned UNCHANGED with `replaced:false` (a no-op, NOT an error: callers
- *  that already judged "is it <fromStatus>" via the develop ref use this to avoid clobbering a
- *  concurrently-flipped disk, see setTaskStatus). No `status:` line ⇒ fail-closed (ok:false). */
-export function patchStatusField(
-  frontmatterRaw: string,
-  toStatus: string,
-  fromStatus?: string,
-): { ok: true; fm: string; from: string; replaced: boolean; to: string } | { ok: false; reason: string } {
-  const statusLineRe = /^status:[ \t]*[^\r\n]*$/m;
-  const line = frontmatterRaw.match(statusLineRe);
-  if (!line) return { ok: false, reason: "no-status-line" };
-  const from = line[0].replace(/^status:[ \t]*/, "").trim();
-  if (fromStatus !== undefined && from !== fromStatus) {
-    return { ok: true, fm: frontmatterRaw, from, replaced: false, to: toStatus };
-  }
-  return { ok: true, fm: frontmatterRaw.replace(statusLineRe, `status: ${toStatus}`), from, replaced: true, to: toStatus };
-}
+// `patchStatusField` LIVES IN THE KERNEL now, as the SINGLE definition
+// (`packages/quay/src/kernel/task-transition.ts`, GOAL-030). WHY: the promotion path is where this
+// driver layer meets the product judge that declares the lifecycle edges, and the kernel is the only
+// placement both reach without a `packages/**` → `plugin/**` reverse edge — the same argument as the
+// `regex-escape.ts` re-export above. It is re-exported here so the four existing callers
+// (driver-filters.ts / worker-fan-in.ts / ready-pool-check.ts) keep importing `./task-ops.ts` with
+// zero changes. The plugin bundler (build-plugin-dist's `coreSrcAliasPlugin`) re-points the
+// `packages/quay/src/**` specifier and INLINES the implementation, exactly as it does for
+// `regex-escape.ts` — so this path can never diverge from the product bundle.
+export { patchStatusField } from "../../packages/quay/src/kernel/task-transition.ts";
 
 // `escapeRegExp` (imported above) escapes a literal string for use inside a RegExp, so the
 // label→has-label line match treats the label as a literal (never a regex pattern).

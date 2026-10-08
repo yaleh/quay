@@ -221,6 +221,8 @@ test("--apply heartbeat negative control: promotions empty ⇒ zero writes (AC3)
 // AC1 (能取假): a promoted task leaves `git status --porcelain` clean — the commit is the fix; without
 // it the tree would be dirty. Production root is the main checkout (a git repo); unit-test fixtures are
 // repo-less, where the commit is a no-op (committed=false) and the write still lands.
+// GOAL-030 ②: "clean" means no uncommitted TRACKED residue; the untracked `.quay/task-status-events.
+// jsonl` runtime carrier the flip now appends is filtered out below (same shape as s12's check).
 
 
 test("applyPromotions commits the status write — git status clean + committed record (AC1)", (t) => {
@@ -248,7 +250,18 @@ test("applyPromotions commits the status write — git status clean + committed 
   assert.equal(r.applied_promotions[0].committed, true, "a landed promotion in a git repo must commit");
 
   // AC1 (能取假): the main checkout is immediately clean — the commit is what cleared the status write.
-  assert.equal(git("status", "--porcelain"), "", "AC1: after promotion the tree is clean (dirty ⇒ the commit did not land)");
+  //
+  // GOAL-030 ② (gap-goal030-promotion-writes-via-kernel-transition): a landed flip now ALSO appends
+  // one structured event to the workspace's `.quay/task-status-events.jsonl` (runtime state, never
+  // git-tracked — the same family as `.quay/gate-events.jsonl`, which this checkout gitignores). A
+  // bare fixture repo has no `.gitignore`, so that carrier legitimately shows as untracked. The AC1
+  // judgment is about TRACKED residue ("did the commit land?"), so the untracked `.quay/` telemetry is
+  // filtered out — the shape `ready-pool-check-s12.test.mjs` already uses for the same reason.
+  assert.equal(
+    git("status", "--porcelain").split("\n").filter((l) => l.trim() && !l.includes(".quay/")).join("\n"),
+    "",
+    "AC1: after promotion the tree is clean (tracked residue dirty ⇒ the commit did not land)",
+  );
   const subject = git("log", "-1", "--format=%s");
   assert.equal(subject, "tasks: gap-candidate todo→ready（promotion-driver 机械晋升）", "the commit subject names the task and transition");
 });
