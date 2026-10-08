@@ -6,6 +6,7 @@ kind: goal
 origin: 人 2026-10-08「现在开始执行…正式创建一个真实的重构 goal，并启用 goal branch」：goal
   分支机制首个真实试点，范围严格限于晋升路径的 todo→ready / ready→todo 两条写入；先验证“在分支上运行 Quay 并验证
   Quay”的自举路径，健康度达标后才进入更大重构。
+branch: true
 ---
 ## 背景
 
