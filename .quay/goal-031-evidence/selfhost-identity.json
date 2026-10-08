@@ -1,0 +1,25 @@
+{
+  "loadedFrom": "/data/home/yale/work/quay-worktrees/goal-GOAL-031/plugin/scripts/goal-driver.ts",
+  "worktreeRoot": "/data/home/yale/work/quay-worktrees/goal-GOAL-031",
+  "match": true,
+  "entry": "plugin/scripts/goal-driver.ts",
+  "expectedEntry": "/data/home/yale/work/quay-worktrees/goal-GOAL-031/plugin/scripts/goal-driver.ts",
+  "resolvedUrl": "file:///data/home/yale/work/quay-worktrees/goal-GOAL-031/plugin/scripts/goal-driver.ts",
+  "loaded": true,
+  "alsoReadings": [
+    {
+      "root": "/data/home/yale/work/quay-worktrees/gap-goal031-selfhost-evidence-and-arch-layer-review",
+      "loadedFrom": "/data/home/yale/work/quay-worktrees/gap-goal031-selfhost-evidence-and-arch-layer-review/plugin/scripts/goal-driver.ts",
+      "loaded": true,
+      "error": null
+    }
+  ],
+  "method": "child node process with cwd = worktreeRoot; import.meta.resolve(entry) + realpathSync + real import()",
+  "negativeControl": {
+    "root": "/data/home/yale/work/quay",
+    "loadedFrom": "/data/home/yale/work/quay/plugin/scripts/goal-driver.ts",
+    "loaded": true,
+    "error": null,
+    "differsFromWorktree": true
+  }
+}

@@ -1,0 +1,241 @@
+{
+  "facts": {
+    "source": "node <archguard>/dist/cli/index.js analyze -s <tree> -f json --output-dir <out> → extensions.tsAnalysis.moduleGraph（原样调用，不经 detect_cycles MCP 工具）",
+    "note": "机械事实层：以下均为读数，不含任何语义判断词。before/after 用同一 archguard 构建、同一目录形状（packages + plugin/scripts，git archive/拷贝后剥 node_modules）。",
+    "trees": {
+      "before": {
+        "ref": "develop",
+        "sha": "a821d680eb586b460cb49decc74606ba82fbc34c",
+        "scope": "packages + plugin/scripts"
+      },
+      "after": {
+        "ref": "task/gap-goal031-selfhost-evidence-and-arch-layer-review",
+        "base": "goal/GOAL-031 @ 08d7238a81b4d04e388f88650579b6b809d6172f",
+        "worktree": "/data/home/yale/work/quay-worktrees/gap-goal031-selfhost-evidence-and-arch-layer-review",
+        "scope": "packages + plugin/scripts（同 before 形状）"
+      }
+    },
+    "moduleGraph": {
+      "before": {
+        "nodes": 35,
+        "edges": 112,
+        "directoryCycles": 1,
+        "plugin_to_kernel": 14,
+        "plugin_to_nonkernel_packages": 44,
+        "packages_to_plugin": 0
+      },
+      "after": {
+        "nodes": 35,
+        "edges": 112,
+        "directoryCycles": 1,
+        "plugin_to_kernel": 14,
+        "plugin_to_nonkernel_packages": 44,
+        "packages_to_plugin": 0
+      },
+      "cycleMembers": [
+        "packages/quay/src/fan-in",
+        "packages/quay/src/cli",
+        "packages/quay/src/gate/factories",
+        "packages/quay/src/gate/config",
+        "packages/quay/src/gate",
+        "packages/quay/src"
+      ]
+    },
+    "literalDispersion": {
+      "value": "needs-human",
+      "detector": "archguard extractDiscriminatorTypes + detectDispersion（plugin npm-cache dist），源目录 packages + plugin/scripts",
+      "before": {
+        "dispersion": 5,
+        "files": [
+          "packages/quay-github/src/github-client.ts",
+          "packages/quay/src/observation.ts",
+          "plugin/scripts/goal-driver.ts",
+          "plugin/scripts/task-status.ts",
+          "plugin/scripts/workflow-baseline-metrics.ts"
+        ]
+      },
+      "after": {
+        "dispersion": 4,
+        "files": [
+          "packages/quay-github/src/github-client.ts",
+          "packages/quay/src/observation.ts",
+          "plugin/scripts/task-status.ts",
+          "plugin/scripts/workflow-baseline-metrics.ts"
+        ]
+      }
+    },
+    "grep": {
+      "pattern": "status === \"needs-human\"",
+      "file": "plugin/scripts/goal-driver.ts",
+      "before": {
+        "count": 6,
+        "lines": [
+          823,
+          2088,
+          2098,
+          2319,
+          2383,
+          2443
+        ]
+      },
+      "after": {
+        "count": 1,
+        "lines": [
+          827
+        ]
+      }
+    },
+    "scopeGuardGrep": {
+      "pattern": "status === \"(todo|ready|done)\"",
+      "file": "plugin/scripts/goal-driver.ts",
+      "before": 3,
+      "after": 3
+    },
+    "symbolLocations": {
+      "goalDriverTaskStatusComparisons": {
+        "before": "plugin/scripts/goal-driver.ts:2088,2098,2319,2383,2443（5 处 task.status 裸字面量比较）",
+        "after": "0 处（全部改为消费 TASK_STATUS.NEEDS_HUMAN）"
+      },
+      "goalDriverGoalAcStatusLine": {
+        "before": "plugin/scripts/goal-driver.ts:823（GOAL-AC 的 status 字段，不同词表，有意保留）",
+        "after": "plugin/scripts/goal-driver.ts:827（同义，仍在）"
+      },
+      "goalDriverImport": {
+        "before": "无 import task-status.ts（0 处消费）",
+        "after": "plugin/scripts/goal-driver.ts:67  import { TASK_STATUS } from \"./task-status.ts\""
+      },
+      "canonicalVocabulary": {
+        "pluginTree": "plugin/scripts/task-status.ts:9（TASK_STATUS.NEEDS_HUMAN 定义处）",
+        "packagesTree": "packages/quay/src/abi.ts（TaskStatus/TASK_STATUSES）——按设计 self-contained 镜像（plugin 不能静态 import packages 源码）"
+      }
+    }
+  },
+  "declaredRules": {
+    "source": "/data/home/yale/work/archguard/docs/experiments/layer-map/check-layers.mjs（原样调用，不改）",
+    "command": "node check-layers.mjs <after/overview/package.json> <layers.yml> --before <before/overview/package.json> --classify-cycles --json <out>",
+    "layersFile": "/home/yale/work/quay/.claude/worktrees/layers-yml-draft/docs/layers.yml（QUAY 的 layers.yml 仍是未提交的 draft，不在 develop/goal 树内；已按 draft 实跑）",
+    "status": "pass",
+    "exitCode": 0,
+    "violations": [],
+    "newViolations": [],
+    "gaps": {
+      "unmappedDirs": [
+        "packages/quay/scripts"
+      ],
+      "unresolvedEdges": [],
+      "externalEdgesIgnored": 79
+    },
+    "driftReport": [],
+    "cycleClassification": [
+      {
+        "cycleId": "cycle-1",
+        "members": [
+          "packages/quay/src/fan-in",
+          "packages/quay/src/cli",
+          "packages/quay/src/gate/factories",
+          "packages/quay/src/gate/config",
+          "packages/quay/src/gate",
+          "packages/quay/src"
+        ],
+        "layerMembership": [
+          "core-fan-in",
+          "core-cli",
+          "core-gate",
+          "core-root"
+        ],
+        "classification": "cross-layer-declared"
+      }
+    ],
+    "bidirectionalAllowedPairs": [
+      "core-cli <-> core-root",
+      "core-gate <-> core-root"
+    ],
+    "resolvedBaseline": [
+      "core-gate <-> gate/config <-> gate/factories (目录级互指)",
+      "core-root <-> core-cli"
+    ],
+    "authority": "declared architecture rules 层：pass / fail / not-evaluated 三态由 check-layers.mjs 产出，本 skill 只引用，不重算、不覆盖、不改变它。",
+    "caveat": "quay 树内没有提交的 layers.yml（仅 draft worktree 版本），所以对『只看仓库』的消费者本层实为 not-evaluated；此处引用的是 draft 声明的实跑结果，其权威性以 draft 身份为限。"
+  },
+  "judgment": [
+    {
+      "id": "ownership-convergence",
+      "question": "needs-human 状态词表的判定/消费是否只在声明的正本处有一份，而不是每个消费者各留一份裸字面量",
+      "verdict": "converged",
+      "evidence": [
+        "facts.literalDispersion.after.files 不含 plugin/scripts/goal-driver.ts（before 含），dispersion 5→4",
+        "facts.grep plugin/scripts/goal-driver.ts 命中 before=6 after=1，唯一残留 line 827 是 GOAL-AC status（不同词表）",
+        "facts.symbolLocations.goalDriverImport.after = plugin/scripts/goal-driver.ts:67 import { TASK_STATUS } from \"./task-status.ts\"",
+        "declaredRules.status = pass（check-layers.mjs，violations=0，drift 0）"
+      ],
+      "trapChecklist": [
+        {
+          "trap": "第三套实现（新造第二份词表声明）",
+          "hit": false,
+          "reason": "goal-driver.ts 内无新的 TASK_STATUS 声明；改为消费既有 plugin/scripts/task-status.ts（facts.symbolLocations.goalDriverImport.after）"
+        },
+        {
+          "trap": "词表漂移（task.status 仍与裸字面量比较）",
+          "hit": false,
+          "reason": "after grep count=1 且该 1 行是 GOAL-AC status，非 task.status（facts.grep.after.lines=[827]）"
+        }
+      ]
+    },
+    {
+      "id": "responsibility-migration",
+      "question": "『哪个词表值是合法 task 状态』这个职责是否真的从 goal-driver.ts 消失，而不是留一份等价裸字面量",
+      "verdict": "converged",
+      "evidence": [
+        "facts.symbolLocations.goalDriverImport.before = 无 import task-status.ts（0 处消费）",
+        "facts.symbolLocations.goalDriverTaskStatusComparisons.after = 0 处（before 5 处：2088/2098/2319/2383/2443）",
+        "after 树 goal-driver.ts TASK_STATUS.NEEDS_HUMAN 出现 6 次（5 处迁移 + 消费点），无留在本文件的等价裸字面量"
+      ],
+      "trapChecklist": [
+        {
+          "trap": "搬壳不搬心（旧实现仍 load-bearing）",
+          "hit": false,
+          "reason": "before 的 5 处比较点在 after 树全部不再以裸字面量形式存在（grep lines 仅剩 827）"
+        },
+        {
+          "trap": "接口形状未变（消费点仍是未类型化裸字面量）",
+          "hit": false,
+          "reason": "消费点改用 TASK_STATUS.NEEDS_HUMAN 常量（facts.symbolLocations.goalDriverImport.after）"
+        }
+      ]
+    },
+    {
+      "id": "orchestrator-domain-state",
+      "question": "driver/编排层是否仍直接读状态、判合法、写状态",
+      "verdict": "not-evaluated",
+      "reason": "本切片是词表 canonicalization，不移动任何状态所有权：goal-driver.ts 是观察者（读 status 只用于读数/停派，不写 task 状态；状态写入归 promotion/worker driver 的 lifecycle）。该轴上没有 before/after 差异可供判断。",
+      "evidence": [
+        "facts.moduleGraph before/after 逐项相等（nodes 35→35，edges 112→112，plugin/scripts→kernel 14→14，plugin/scripts→非kernel packages 44→44，packages→plugin 0→0）",
+        "facts.scopeGuardGrep before=3 after=3（todo/ready/done 裸字面量未被顺带改动，状态机允许边语义不变）"
+      ],
+      "trapChecklist": [
+        {
+          "trap": "范围蔓延（顺带改 todo/ready/done）",
+          "hit": false,
+          "reason": "facts.scopeGuardGrep before=3 after=3 不变"
+        }
+      ]
+    },
+    {
+      "id": "shell-move-vs-real-move",
+      "question": "是否只是搬文件/搬壳（新模块是旧主体的副本 + 反向 import）",
+      "verdict": "converged",
+      "evidence": [
+        "无新增模块：facts.moduleGraph nodes/edges before==after（35/112），archguard 分析的 .ts 文件数 before==after（417）",
+        "goal-driver.ts 未反向 import 任何写入原语；改动是消费既有 task-status.ts 正本（facts.symbolLocations.goalDriverImport.after）",
+        "before/after 均无 packages→plugin 反向边（facts.moduleGraph.packages_to_plugin 0→0）"
+      ],
+      "trapChecklist": [
+        {
+          "trap": "搬壳（新模块反向 import 旧实现）",
+          "hit": false,
+          "reason": "本切片无新模块（nodes/edges 不变），无反向 import（facts.moduleGraph）"
+        }
+      ]
+    }
+  ]
+}
