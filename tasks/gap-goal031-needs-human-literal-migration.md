@@ -38,13 +38,13 @@ GOAL-031 的第一块：把 `plugin/scripts/goal-driver.ts` 里 5 处真实的 `
 
 ## Acceptance Criteria
 
-- [ ] `grep -c 'status === "needs-human"' plugin/scripts/goal-driver.ts` 精确等于 1（只剩 823 行）：`[ "$(grep -c 'status === \"needs-human\"' plugin/scripts/goal-driver.ts)" = "1" ]`
-- [ ] 823 行逐字节不变：`grep -qF '(r.status === "active" || r.status === "achieved" || r.status === "needs-human"),' plugin/scripts/goal-driver.ts`
-- [ ] 新增正本 import：`grep -qE "from [\"'].*task-status(\.ts)?[\"']" plugin/scripts/goal-driver.ts`
-- [ ] todo/ready/done 字面量计数不变（2/2/0）：`[ "$(grep -c '=== \"todo\"' plugin/scripts/goal-driver.ts)" = "2" ] && [ "$(grep -c '=== \"ready\"' plugin/scripts/goal-driver.ts)" = "2" ] && [ "$(grep -c '=== \"done\"' plugin/scripts/goal-driver.ts)" = "0" ]`
-- [ ] 不依赖 goal/GOAL-030 专属产物：`! grep -qE "kernel/task-transition|branch-selfhost-probe" plugin/scripts/goal-driver.ts`
-- [ ] 相关测试分片绿：`goal-driver-s01/s06/s08/s12.test.mjs` 全绿（覆盖 `isTaskStuck`/`isTractionStatus`/`stalled` 路径）
-- [ ] `plugin/scripts/import-graph-check.ts --json` 的 `verdict.ok === true`（棘轮不回退）
+- [x] `grep -c 'status === "needs-human"' plugin/scripts/goal-driver.ts` 精确等于 1（只剩 823 行）：`[ "$(grep -c 'status === \"needs-human\"' plugin/scripts/goal-driver.ts)" = "1" ]`
+- [x] 823 行逐字节不变：`grep -qF '(r.status === "active" || r.status === "achieved" || r.status === "needs-human"),' plugin/scripts/goal-driver.ts`
+- [x] 新增正本 import：`grep -qE "from [\"'].*task-status(\.ts)?[\"']" plugin/scripts/goal-driver.ts`
+- [x] todo/ready/done 字面量计数不变（2/2/0）：`[ "$(grep -c '=== \"todo\"' plugin/scripts/goal-driver.ts)" = "2" ] && [ "$(grep -c '=== \"ready\"' plugin/scripts/goal-driver.ts)" = "2" ] && [ "$(grep -c '=== \"done\"' plugin/scripts/goal-driver.ts)" = "0" ]`
+- [x] 不依赖 goal/GOAL-030 专属产物：`! grep -qE "kernel/task-transition|branch-selfhost-probe" plugin/scripts/goal-driver.ts`
+- [x] 相关测试分片绿：`goal-driver-s01/s06/s08/s12.test.mjs` 全绿（覆盖 `isTaskStuck`/`isTractionStatus`/`stalled` 路径）
+- [x] `plugin/scripts/import-graph-check.ts --json` 的 `verdict.ok === true`（棘轮不回退）
 
 ## Definition of Done
 
