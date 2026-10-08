@@ -4,22 +4,68 @@ title: 预览运行分支代码：被求值树下登记在册且存活的 quay s
 status: active
 kind: criterion
 goal: GOAL-030
-criterion: |
+criterion: >-
   set -u
-  root=$(git rev-parse --show-toplevel 2>/dev/null) || { echo "NOT-EVALUATED: not inside a git repository" >&2; exit 3; }
+
+  root=$(git rev-parse --show-toplevel 2>/dev/null) || { echo "NOT-EVALUATED:
+  not inside a git repository" >&2; exit 3; }
+
   cd "$root"; rroot=$(readlink -f "$root")
-  pid=$(node -e '(()=>{try{const j=JSON.parse(require("fs").readFileSync(".quay/server.json","utf8"));process.stdout.write(String(j.pid||""))}catch{}})()')
-  [ -n "$pid" ] && [ -r "/proc/$pid/cmdline" ] || { echo "NOT-EVALUATED: no live quay serve registered under $root (.quay/server.json absent or pid dead) — start the preview with: quay goal preview GOAL-030 start --port <n>" >&2; exit 3; }
-  entry=$(tr '\0' '\n' < "/proc/$pid/cmdline" | grep -E 'packages/quay/bin/quay\.(ts|js)$' | head -1)
-  [ -n "$entry" ] || { echo "NOT-EVALUATED: pid $pid cmdline has no packages/quay/bin/quay.ts entry: $(tr '\0' ' ' < /proc/$pid/cmdline | cut -c1-200)" >&2; exit 3; }
-  case "$entry" in /*) ;; *) entry="$(readlink -f /proc/$pid/cwd)/$entry" ;; esac
+
+  # Identify the serve THIS root REGISTERS. The serve carrier is read ONLY by
+  its single definition
+
+  # point, plugin/scripts/live-web-address.ts: given an expected pid it answers
+  carrier-pid-mismatch
+
+  # unless that pid is the one this root's carrier names, so keeping the live
+  serve process the helper
+
+  # ACCEPTS yields exactly the registered, alive serve of this tree — with NO
+  carrier read inlined in
+
+  # this criterion (criterion-carrier-inline-check).
+
+  pid=""; addr=""
+
+  for p in $(pgrep -f 'packages/quay/bin/quay\.(ts|js)' 2>/dev/null); do
+    [ "$p" = "$$" ] && continue
+    out=$(node --no-warnings --experimental-strip-types "$root/plugin/scripts/live-web-address.ts" "$root" "$p" 2>&1); rc=$?
+    case "$rc" in
+      0) pid=$p; addr=$out; break ;;
+      1) echo "CAUSE=carrier-web-down — the registered serve marks its web service down" >&2; exit 1 ;;
+      *) : ;;
+    esac
+  done
+
+  [ -n "$pid" ] || { echo "NOT-EVALUATED: no live quay serve registered under
+  $root — start the preview with: quay goal preview GOAL-030 start --port <n>"
+  >&2; exit 3; }
+
+  entry=$(tr '\0' '\n' < "/proc/$pid/cmdline" | grep -E
+  'packages/quay/bin/quay\.(ts|js)$' | head -1)
+
+  [ -n "$entry" ] || { echo "NOT-EVALUATED: pid $pid cmdline has no
+  packages/quay/bin/quay.ts entry: $(tr '\0' ' ' < /proc/$pid/cmdline | cut
+  -c1-200)" >&2; exit 3; }
+
+  case "$entry" in /*) ;; *) entry="$(readlink -f /proc/$pid/cwd)/$entry" ;;
+  esac
+
   rentry=$(readlink -f "$entry")
-  case "$rentry" in "$rroot"/*) ;; *) echo "CAUSE=serve-runs-foreign-code — the serve registered under $rroot runs $rentry, not this tree's own code" >&2; exit 1 ;; esac
-  out=$(node --no-warnings --experimental-strip-types "$root/plugin/scripts/live-web-address.ts" "$root" 2>&1); rc=$?
-  case "$rc" in 0) addr=$out ;; 1) echo "CAUSE=carrier-web-down — the registered serve marks its web service down" >&2; exit 1 ;; *) echo "NOT-EVALUATED: no live web address for $root ($out)" >&2; exit 3 ;; esac
-  code=$(curl -sL -o /dev/null -w '%{http_code}' --max-time 20 "http://$addr/") || { echo "NOT-EVALUATED: GET http://$addr/ failed" >&2; exit 3; }
-  [ "$code" = "200" ] || { echo "CAUSE=page-not-served — GET http://$addr/ returned $code after following redirects" >&2; exit 1; }
-  echo "PASS: serve pid $pid under $rroot runs this tree's own entry ($rentry) and serves http://$addr/ (200 after redirects)"
+
+  case "$rentry" in "$rroot"/*) ;; *) echo "CAUSE=serve-runs-foreign-code — the
+  serve registered under $rroot runs $rentry, not this tree's own code" >&2;
+  exit 1 ;; esac
+
+  code=$(curl -sL -o /dev/null -w '%{http_code}' --max-time 20 "http://$addr/")
+  || { echo "NOT-EVALUATED: GET http://$addr/ failed" >&2; exit 3; }
+
+  [ "$code" = "200" ] || { echo "CAUSE=page-not-served — GET http://$addr/
+  returned $code after following redirects" >&2; exit 1; }
+
+  echo "PASS: serve pid $pid under $rroot runs this tree's own entry ($rentry)
+  and serves http://$addr/ (200 after redirects)"
 expect: exit 0 = 该树登记的 serve 跑的是本树自己的入口且首页返回 200；exit 1 = serve
   跑的是别处的代码或页面不可用；exit 3 = 没有登记在册且存活的 serve（预览未起）。
 origin: 人 2026-10-08「现在开始执行…正式创建一个真实的重构 goal，并启用 goal branch」：goal
