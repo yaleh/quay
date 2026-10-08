@@ -2,7 +2,7 @@
 id: AC-342
 title: 并入形态：GOAL-030 以恰好一个合并提交进入 develop 的 first-parent 链，第二父提交为 goal 分支
   tip，且分支上的提交不出现在 first-parent 链上
-status: active
+status: achieved
 kind: criterion
 goal: GOAL-030
 criterion: |-
@@ -32,6 +32,11 @@ statusLog:
     actor: cli
     reason: 人 2026-10-08 授权立项并进入 GOAL-030（goal 分支首个真实试点）；承接任务已立并停放（needs-human），激活本
       AC 不会触发乱序自动立案
+  - at: 2026-10-08T18:38:48.025Z
+    from: active
+    to: achieved
+    actor: goal-driver
+    reason: "I2: criterion pass"
 fidelity:
   verdict: faithful
   reason: "fidelity judge: faithful"
