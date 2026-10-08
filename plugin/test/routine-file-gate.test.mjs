@@ -543,3 +543,45 @@ test("⑮ a record whose OWN routine is absent is not counted against a NAMED ro
       "…but it IS in the global reading (the pre-dimension value is preserved, not silently dropped)");
   } finally { fs.rmSync(dir, { recursive: true, force: true }); }
 });
+
+test("⑯ KNOWN GAP (gap-routine-filing-rate-global-window-starves-freshness-refresh 的方案 B 轴，未关闭，⛔ 非重新发现) — 同一 routine 自身板排空仍被它自己已 done 批次的旧计数挡住", () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "gate-rate-boardpressure-"));
+  try {
+    const nowMs = Date.parse("2026-10-09T07:00:00Z");
+    const ts = new Date(nowMs - 60 * 60 * 1000).toISOString();
+    // 生产实测的病理（见本任务 Finding）：freshness-refresh 本窗口已花满 K=3，三条任务此刻全部 done
+    // （板排空）。countRecentFilings 的输入只有 filing-round 记录，没有任何读板/读任务状态的参数，
+    // 因此无法区分「这 3 条还开着」与「这 3 条已经 done、板是空的」。
+    const carrier = writeCarrier(dir, [filingRound(ts, "freshness-refresh", ["a", "b", "c"])]);
+
+    // 正面（缺口本身）：自己的窗口计数仍是 3，即便它产出的 3 个任务现在全是 done。
+    const mine = countRecentFilings(carrier, nowMs, FILING_WINDOW_MS, "freshness-refresh");
+    assert.equal(mine, 3,
+      "KNOWN GAP: 该 routine 过去的立案计数不随它产出的任务是否已 done 而改变");
+    assert.equal(
+      gateFinding(candidateA(), { existingKeys: new Set(), recentCount: mine, K: DEFAULT_RATE }).accept,
+      false,
+      "KNOWN GAP: 板已排空、自身预算却仍判饱和 ⇒ 仍被拒——这是 gap-routine-filing-rate-global-window-" +
+        "starves-freshness-refresh 自己标注的方案 B 残留轴，不是本任务重新发现的问题",
+    );
+
+    // 负对照（证明上面不是空转）：同一 routine，本窗口真的没立过任何东西 ⇒ 预算真正空闲 ⇒ 应该通过。
+    const emptyCarrier = writeCarrier(dir, []);
+    const none = countRecentFilings(emptyCarrier, nowMs, FILING_WINDOW_MS, "freshness-refresh");
+    assert.equal(none, 0);
+    assert.equal(
+      gateFinding(candidateA(), { existingKeys: new Set(), recentCount: none, K: DEFAULT_RATE }).accept,
+      true,
+      "负对照：本窗口确实没有旧立案时,同一 routine 可以正常通过——证明上面的红不是闸恒红，" +
+        "而是精确命中「旧批次计数跟不上任务终态」这一条",
+    );
+  } finally { fs.rmSync(dir, { recursive: true, force: true }); }
+});
+
+test("⑰ KNOWN GAP (quota-policy-ownership，独立发现) — DEFAULT_RATE/FILING_WINDOW_MS 是孤儿字面量，不经 drivers.yml/driver-config.ts 的统一声明式配置面派生", () => {
+  // 固化当前取值（特征化，不是认可）——见 routine-file-gate.ts:18 / :513。
+  assert.equal(DEFAULT_RATE, 3,
+    "固化当前字面量；若未来接入 drivers.yml 式配置面，这条断言需要连带更新，⛔ 不要只删掉它");
+  assert.equal(FILING_WINDOW_MS, 24 * 60 * 60 * 1000,
+    "固化当前字面量；若未来接入 drivers.yml 式配置面，这条断言需要连带更新，⛔ 不要只删掉它");
+});
