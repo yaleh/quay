@@ -3,7 +3,7 @@ id: AC-339
 title: ArchGuard 前后可比：同一 archguard 构建对分叉点与当前 tip（并入后为合并提交的两侧）做单根分析，文件数差额与 git
   diff 一致；目录环不增加；packages→plugin 为 0；plugin/scripts→非 kernel
   不上升；plugin/scripts→kernel 强度上升
-status: draft
+status: active
 kind: criterion
 goal: GOAL-030
 criterion: |
@@ -39,5 +39,17 @@ expect: exit 0 = 前后可比且满足全部方向约束；exit 1 = 不可比或
 origin: 人 2026-10-08「现在开始执行…正式创建一个真实的重构 goal，并启用 goal branch」：goal
   分支机制首个真实试点，范围严格限于晋升路径的 todo→ready / ready→todo 两条写入；先验证“在分支上运行 Quay 并验证
   Quay”的自举路径，健康度达标后才进入更大重构。
+activatedAt: 2026-10-08T02:30:39.348Z
+statusLog:
+  - at: 2026-10-08T02:30:39.348Z
+    from: draft
+    to: active
+    actor: cli
+    reason: 人 2026-10-08 授权立项并进入 GOAL-030（goal 分支首个真实试点）；承接任务已立并停放（needs-human），激活本
+      AC 不会触发乱序自动立案
+fidelity:
+  verdict: faithful
+  reason: "fidelity judge: faithful"
+  at: 2026-10-08T02:30:39.348Z
 phase: pre-merge
 ---
