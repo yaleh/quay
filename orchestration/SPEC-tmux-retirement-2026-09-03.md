@@ -184,8 +184,11 @@ Layer 3（已按此方向重写）。
 - **A/D 类会话生命周期主线**（`quay-topology.sh`/`session-bootstrap.sh`/`manager-start.sh`/
   `session-liveness.sh`）**仍是唯一/默认路径，尚无非 tmux 替代**——这是本 SPEC 真正要处理的核心。
 - `tmux-session.ts`（"crystallized tmux 库"，设计意图是成为唯一 tmux 调用点）在生产代码中
-  **零真实 import**，只被两个测试 helper 引用；`tmux-isolated.sh` 更彻底——**连自己的测试之外
-  零消费者**，是本次盘点里最干净的孤儿，可直接删除。
+  **零真实 import**，只被测试引用；但它**不是可归档的孤儿**——它是 §4 明确保留的测试基础设施
+  `hermetic-tmux.mjs` 的**依赖库**（`hermetic-tmux.mjs:21` 真 import），直接删除会打断 ADR-016
+  隔离性测试家族（真实运行证据见 §2b.3）。`tmux-isolated.sh` 的运行时消费者只有它自己的测试，
+  但它是 `tmux-test-isolation-check.ts` 登记在册的隔离机制之一。**两者的"可直接删除"判定已于
+  2026-10-08 更正为保留**（见 §2b.3 重新核实）。
 
 ### 2.2 核心分组（完整清单见调查 agent 原始报告，此处只列 A/D 类真正的退役对象）
 
@@ -446,17 +449,63 @@ session-liveness-helpers.mjs（测试 helper，非 .test.mjs，仅服务上述�
 ```
 （全部在 `plugin/test/`，删除前逐一确认无其它测试文件 import 这个 helper）
 
-#### 2b.3 待核实（SPEC 早期判定可能已过期，删除前需重新 grep）
+#### 2b.3 已核实（2026-10-08 重新 grep + 真实运行——§2.1/Layer 5 的"可直接归档"判定已更正）
 
 ```
 plugin/scripts/tmux-isolated.sh   + plugin/test/tmux-isolated.test.mjs
 plugin/scripts/tmux-session.ts    + plugin/test/tmux-session.test.mjs
 ```
-本 SPEC §2.1 曾判定这两个"生产零消费者，可直接删除"，但已发现一个已完成任务
-`gap-tmux-isolated-guard-has-zero-consumers-fifth-machine-wipe`（`status: done`，2026-08-06）
-专门处理过"`tmux-isolated.sh` 零消费者"问题并落地了 STAGE 1-3——**删除前必须重新 grep 一次
-确认当前真实消费者清单，不能直接沿用 2026-09-03 那次调查的结论**（即便只隔几天，这类"零消费者"
-判定容易被后续任务悄悄改变，同硬规则⑤"来源完备性"）。
+本 SPEC §2.1 曾判定这两个"生产零消费者，可直接删除"。该判定**未能直接照字面执行**，因为已发现
+一个已完成任务 `gap-tmux-isolated-guard-has-zero-consumers-fifth-machine-wipe`（`status: done`，
+2026-08-06）专门处理过"`tmux-isolated.sh` 零消费者"问题并落地了 STAGE 1-3——**删除前必须重新
+grep 一次确认当前真实消费者清单**（硬规则⑤来源完备性）。
+
+**2026-10-08 已执行重新核实**（任务 `gap-tmux-session-lib-archive-candidate-recheck`；方法 = 按位置
+判定，真实 import/spawn 调用才算消费者，注释/字符串提及不算——硬规则②）：
+
+`tmux-session.ts` 的真实消费者（三类）——
+- **生产代码消费者：零**（`plugin/scripts/*.ts` 非 test、`packages/` 均无真实 import）。
+- **测试文件消费者（真 import，6 个）**：`plugin/test/manager-install-vector.test.mjs:40`、
+  `manager-productization.test.mjs:37`、`manager-start.test.mjs:25`、
+  `quay-init-tmux-detection.test.mjs:52`、`supervisor-observe.test.mjs:36`、
+  `tmux-session.test.mjs:31-35`。
+- **测试基础设施消费者（真 import，1 个——本任务标题点名的关键项）**：
+  `plugin/test/helpers/hermetic-tmux.mjs:21`（`import { tmux } from "../../scripts/tmux-session.ts"`）。
+  经它**传递依赖**的测试文件另有 6 个（均 `import { newHermeticTmux }`）：`drive-target-check`、
+  `send-keys-reliable`、`supervisor-bus`、`supervisor-deliver`、`supervisor-deliver-crosshost`、
+  `tmux-leak-scan`。
+- **非消费者（按位置判定——硬规则②，非真实调用）**：`tmux-test-isolation-check.ts:23/62`（注释 +
+  `MECHANISM_RE` 正则串）、`tmux-test-isolation-check.test.mjs:50`（喂给 `scanFileText()` 的模板串
+  夹具）、`checker-mutation-cases/tmux-test-isolation-check.sh:13/17`（heredoc 写的是一个**虚构**
+  fixture，不是本文件）、`docs/analysis/dead-set-recomputed.json` 与
+  `plugin/scripts/capability-catalog-declarations.json`（数据/分析产物）。
+
+`tmux-isolated.sh` 的真实消费者（三类）——
+- **生产代码消费者：零。**
+- **测试文件消费者（真 spawn，1 个）**：`plugin/test/tmux-isolated.test.mjs:30`（
+  `HELPER = path.join(REPO_ROOT, "plugin", "scripts", "tmux-isolated.sh")`）+ `:46-47`
+  （`spawnSync("bash", [HELPER, ...])`）——**只有它自己的测试**。
+- **测试基础设施消费者：零**——`hermetic-tmux.mjs` 只在第 2 行注释里提到任务号，既不 import 也不
+  spawn 它。
+- **非消费者**：`hermetic-tmux.mjs:2`/`tmux-session.test.mjs:3`/`manager-productization.test.mjs:34`
+  等全是任务号注释；`tmux-test-isolation-check.ts:24/62` 是注释 + 正则串。
+
+**真实运行证据（非猜测）**：在任务 worktree 内把 `plugin/scripts/tmux-session.ts` 移开后重跑——
+- `node --no-warnings --experimental-strip-types --test plugin/test/tmux-session.test.mjs`
+  ⇒ `ERR_MODULE_NOT_FOUND: Cannot find module .../plugin/scripts/tmux-session.ts imported from
+  .../plugin/test/tmux-session.test.mjs`，fail 1 / pass 0。
+- `... --test plugin/test/tmux-leak-scan.test.mjs`（`hermetic-tmux.mjs` 的消费者）⇒ 同样
+  `ERR_MODULE_NOT_FOUND`，**报错点名 `imported from .../plugin/test/helpers/hermetic-tmux.mjs`**，
+  fail 1 / pass 0。
+- 恢复文件后两者均回绿（9/9、12/12）——因果链实证完毕。
+
+**结论（二选一，附证据）**：**`tmux-session.ts` 不应归档**——`hermetic-tmux.mjs` 依赖它，删除会
+`ERR_MODULE_NOT_FOUND` 打断 6 个直连测试 + 6 个经 `hermetic-tmux.mjs` 传递依赖的测试，正是 §4 非目标
+"不动测试基础设施"所保护的家族。`tmux-isolated.sh` 的运行时消费者确实只有它自己的测试，但它与
+`tmux-session.ts`、`hermetic-tmux.mjs` 同属 `tmux-test-isolation-check.ts` 登记在册的**隔离机制家族**
+（`MECHANISM_RE = /tmux-session|tmux-isolated|hermetic-tmux/`），归档它需同步更新机制登记面
+（`tmux-test-isolation-check.ts` + `capability-catalog-declarations.json`），属独立后续任务，本轮
+**两者均保留**。§2.1 与 Layer 5 的"可直接归档"表述已按此同步更正，文档不再自相矛盾。
 
 #### 2b.4 仅移除依赖，文件本身保留（容易被误解为"要删"的部分）
 
@@ -496,8 +545,9 @@ Layer 3 给它新增 `claude --bg` 分支这个改动，落地时需要新写测
 agent 核实（§2.2）：只要测试基础设施（`hermetic-tmux.mjs`，供 ADR-016 相关测试构造隔离的真实
 tmux server）还会起真实 tmux，`tmux-leak-scan.sh` 就是必需的兜底——**这是测试基础设施的需求，
 与"生产路径是否还依赖 tmux"是两件事**，不随 Layer 1-3 完成而自动退役。`tmux-isolated.sh`
-（连自己测试外零消费者）和 `tmux-session.ts`（生产零 import，只被两个测试 helper 用）可以直接
-归档，与 Layer 1-3 进度无关。
+和 `tmux-session.ts` 同属这一测试基础设施家族（前者是 `tmux-test-isolation-check.ts` 登记在册的
+隔离机制，后者是 `hermetic-tmux.mjs` 的依赖库），**§2.1 早期"可直接归档"的判定已于 2026-10-08
+更正为保留**（见 §2b.3），两者与 Layer 1-3 进度无关，**不归档**。
 
 ---
 

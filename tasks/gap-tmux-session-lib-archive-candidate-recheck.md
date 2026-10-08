@@ -1,7 +1,7 @@
 ---
 id: gap-tmux-session-lib-archive-candidate-recheck
 title: tmux-session.ts/tmux-isolated.sh"生产零消费者可归档"的判断需先核清 hermetic-tmux.mjs 真实依赖
-status: ready
+status: done
 labels:
   - gap
 parent: null
@@ -24,10 +24,10 @@ extra:
 
 ## AC
 
-- [ ] 对 `plugin/scripts/tmux-session.ts` 和 `plugin/scripts/tmux-isolated.sh` 各产出一份"真实消费者清单"（按位置判定——真实 import/spawn 调用，不是注释/字符串提及），区分「生产代码消费者」「测试文件消费者」「测试基础设施（hermetic-tmux.mjs 等）消费者」三类，写入落地提交说明
-- [ ] 明确回答并给出证据：若删除/归档 `tmux-session.ts`，`hermetic-tmux.mjs` 及其依赖它的测试（ADR-016 相关隔离性测试）是否会失败——真实运行一次相关测试（而非猜测），记录命令与结果
-- [ ] 基于上一条真实结果给出明确结论：「tmux-session.ts 不应归档，因为 hermetic-tmux.mjs 依赖它」或「可以归档，因为 ___」，二选一并附证据，不得停留在"可能可以"这类未证伪的猜测
-- [ ] 若结论是"可以归档"：实际执行归档（移动/删除+改消费者调用点），`scripts/test.sh` 全量绿；若结论是"不应归档"：在 `orchestration/SPEC-tmux-retirement-2026-09-03.md` 补一条更正说明，消解 §2.1 与 §2b.3 之间的文字张力，不留着自相矛盾的表述
+- [x] 对 `plugin/scripts/tmux-session.ts` 和 `plugin/scripts/tmux-isolated.sh` 各产出一份"真实消费者清单"（按位置判定——真实 import/spawn 调用，不是注释/字符串提及），区分「生产代码消费者」「测试文件消费者」「测试基础设施（hermetic-tmux.mjs 等）消费者」三类，写入落地提交说明
+- [x] 明确回答并给出证据：若删除/归档 `tmux-session.ts`，`hermetic-tmux.mjs` 及其依赖它的测试（ADR-016 相关隔离性测试）是否会失败——真实运行一次相关测试（而非猜测），记录命令与结果
+- [x] 基于上一条真实结果给出明确结论：「tmux-session.ts 不应归档，因为 hermetic-tmux.mjs 依赖它」或「可以归档，因为 ___」，二选一并附证据，不得停留在"可能可以"这类未证伪的猜测
+- [x] 若结论是"可以归档"：实际执行归档（移动/删除+改消费者调用点），`scripts/test.sh` 全量绿；若结论是"不应归档"：在 `orchestration/SPEC-tmux-retirement-2026-09-03.md` 补一条更正说明，消解 §2.1 与 §2b.3 之间的文字张力，不留着自相矛盾的表述
 
 ## DoD
 
