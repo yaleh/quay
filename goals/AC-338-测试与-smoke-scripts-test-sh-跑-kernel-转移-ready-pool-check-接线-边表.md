@@ -2,7 +2,7 @@
 id: AC-338
 title: 测试与 smoke：scripts/test.sh 跑 kernel 转移、ready-pool-check 接线、边表、载体注册表、store
   写入金样、web 路由快照共 6 个文件全绿
-status: active
+status: achieved
 kind: criterion
 goal: GOAL-030
 criterion: >
@@ -52,6 +52,11 @@ statusLog:
     actor: cli
     reason: 人 2026-10-08 授权立项并进入 GOAL-030（goal 分支首个真实试点）；承接任务已立并停放（needs-human），激活本
       AC 不会触发乱序自动立案
+  - at: 2026-10-08T04:48:00.578Z
+    from: active
+    to: achieved
+    actor: goal-driver
+    reason: "I2: criterion pass"
 fidelity:
   verdict: faithful
   reason: "fidelity judge: faithful"

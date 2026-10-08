@@ -2,7 +2,7 @@
 id: gap-goal030-branch-selfhost-probe
 title: GOAL-030 ③：分支自举探针——证明分支上运行的 promotion-driver / ready-pool-check
   加载的是分支代码，并在沙盒触发两类转移
-status: todo
+status: ready
 labels:
   - gap
 parent: null
@@ -50,8 +50,8 @@ GOAL-030 的第三块，也是本试点的核心验收：一个**分支自举探
 ## Touches
 
 - tasks/gap-goal030-branch-selfhost-probe.md
-- scripts/branch-selfhost-probe.mjs
-- plugin/test/branch-selfhost-probe.test.mjs
+- scripts/branch-selfhost-probe.mjs (new)
+- plugin/test/branch-selfhost-probe.test.mjs (new)
 
 ## 停放说明
 
