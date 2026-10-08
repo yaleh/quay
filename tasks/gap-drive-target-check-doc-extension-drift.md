@@ -1,7 +1,7 @@
 ---
 id: gap-drive-target-check-doc-extension-drift
 title: CLAUDE.md 及三份 orchestration 文档把 drive-target-check.sh 误写成 .ts（扩展名漂移，4 处同源）
-status: todo
+status: ready
 labels:
   - gap
 parent: null
