@@ -39,6 +39,15 @@ const repoRoot = path.resolve(pluginDir, '..');
 // single source in the same module): a KILLED stagePackagedPlugin() run leaves packages/quay/
 // plugin-staging-<pid>-{0,1}/ orphans that carry a full plugin/ copy — their tick-doc old-path strings
 // + scripts/*.ts false-red AC1b/AC2 (gap-orphan-staging-dirs-pollute-walkcorpus).
+//
+// `tmp/` joins that skip set for the same reason adr016-screen-use-check.ts's SKIP_DIRS carries it
+// (gap-goal-merge-suite-concurrent-npm-pack-staging-race-blocks-fan-in): it is the gitignored
+// repo-root RUNTIME scratch, and the sibling selftests (run-identity.ts / stage-receipt.ts /
+// workflow-journal.ts) mkdtemp a fixture under `<cwd>/tmp/` and rm -rf it mid-suite. This walk is an
+// fs traversal over the LIVE shared checkout, so it is not just a "fixture copy double-counts a real
+// script" problem — the fixture DIRECTORY can vanish between its parent's readdir and its own,
+// which is what the ENOENT guard below absorbs. The sibling checker landed the tmp/ prune first
+// (2026-10-06); this walk is the same defect one file over (硬规则 5b).
 function walkCorpus(dir, { excluded = [], includeWorktrees = false } = {}) {
   // gap-loop-shipping-nested-worktree-container-false-exclude: worktreeContainerPaths(repoRoot)
   // includes EVERY worktree `git worktree list` reports, including ones that are ANCESTORS of
@@ -54,8 +63,23 @@ function walkCorpus(dir, { excluded = [], includeWorktrees = false } = {}) {
   const isContainer = (p) => containers.some((c) => p === c || p.startsWith(c + path.sep));
   const scanned = [];
   const walk = (d) => {
-    for (const e of fs.readdirSync(d, { withFileTypes: true })) {
-      if (e.name === 'node_modules' || e.name === '.git' || e.name === 'dist' || e.name.startsWith(stagingDirPrefix)) continue;
+    let entries;
+    try {
+      entries = fs.readdirSync(d, { withFileTypes: true });
+    } catch (e) {
+      // gap-goal-merge-suite-concurrent-npm-pack-staging-race-blocks-fan-in: a directory listed by
+      // its parent and then removed before this read (a parallel test's mkdtemp fixture under
+      // `<cwd>/tmp/`, torn down mid-suite) made this raw readdirSync throw ENOENT and red whichever
+      // test happened to be walking — reproduced 11/40 runs under fixture churn, reporting
+      // `ENOENT ... scandir '<root>/tmp/<fixture>/N'`. Same principle as `readCorpusText` below,
+      // one level up: a subtree that vanished mid-walk is a transient artifact, not corpus content.
+      // ⛔ ONLY ENOENT — EACCES/EIO still throw (硬规则 3b: "cannot read" must not masquerade as
+      // "read fine, nothing there").
+      if (e.code === 'ENOENT') return;
+      throw e;
+    }
+    for (const e of entries) {
+      if (e.name === 'node_modules' || e.name === '.git' || e.name === 'dist' || e.name === 'tmp' || e.name.startsWith(stagingDirPrefix)) continue;
       const p = path.join(d, e.name);
       if (e.isDirectory()) {
         if (isContainer(p) || excluded.some((x) => p === x || p.startsWith(x + path.sep))) continue;
@@ -84,6 +108,29 @@ function readCorpusText(p) {
     if (e.code === 'ENOENT') return null;
     throw e;
   }
+}
+
+// The AC2 corpus filter: of the walked paths, which are PHYSICAL `fast-mode-telemetry.ts` copies?
+// lstatSync (not stat) so the experiments/ symlink re-export is not counted as a copy.
+//
+// ENOENT-tolerant for the SAME reason `walkCorpus`/`readCorpusText` are: this is the second half of a
+// two-step (walk → lstat) over the LIVE shared checkout, so a path a parallel test removed in between
+// is a transient artifact, not a finding. ⛔ Only ENOENT — a real permission/IO error still throws
+// (硬规则 3b). The property it feeds ("exactly ONE physical copy") is NOT loosened: the set is still
+// asserted exactly — only the read is.
+const TELEMETRY_BASENAME = 'fast-mode-telemetry.ts';
+function physicalTelemetryCopies(paths) {
+  const copies = [];
+  for (const p of paths) {
+    if (path.basename(p) !== TELEMETRY_BASENAME) continue;
+    try {
+      if (!fs.lstatSync(p).isSymbolicLink()) copies.push(p);
+    } catch (e) {
+      if (e.code === 'ENOENT') continue;
+      throw e;
+    }
+  }
+  return copies;
 }
 
 // The AC1b exclusion targets (files/dirs that MAY legitimately mention the old paths).
@@ -263,10 +310,9 @@ test('AC2 — fast-mode-telemetry.ts has ONE physical copy; plugin/scripts/ is a
   // experiments/) are not counted as physical copies. walkCorpus skips node_modules/.git/dist, the
   // gitignored pack-time snapshot packages/quay/plugin/, AND every git worktree container (a worktree
   // is a complete repo copy — its fast-mode-telemetry.ts is not a second authority).
-  const copies = [];
-  for (const p of walkCorpus(repoRoot, { excluded: [path.join(repoRoot, 'packages', 'quay', 'plugin')] })) {
-    if (path.basename(p) === 'fast-mode-telemetry.ts' && !fs.lstatSync(p).isSymbolicLink()) copies.push(p);
-  }
+  const copies = physicalTelemetryCopies(
+    walkCorpus(repoRoot, { excluded: [path.join(repoRoot, 'packages', 'quay', 'plugin')] })
+  );
   assert.deepEqual(copies, [canonical], `exactly one physical fast-mode-telemetry.ts expected, got ${JSON.stringify(copies)}`);
 });
 
@@ -287,7 +333,7 @@ test('AC2 — walk() skips a REAL git worktree (`git worktree list` source): sta
     fs.writeFileSync(path.join(wt, 'fast-mode-telemetry.ts'), 'export const worktreeCopy = true;\n');
     const scanned = walkCorpus(repoRoot, { excluded: exclusionTargets() });
     assert.ok(!scanned.some((p) => p.startsWith(wt + path.sep)), 'walk() must not scan inside a real git worktree');
-    const copies = scanned.filter((p) => path.basename(p) === 'fast-mode-telemetry.ts' && !fs.lstatSync(p).isSymbolicLink());
+    const copies = physicalTelemetryCopies(scanned);
     assert.deepEqual(copies, [path.join(pluginDir, 'scripts', 'fast-mode-telemetry.ts')], 'a git worktree copy of fast-mode-telemetry.ts must not be counted (AC2)');
   } finally {
     try { execFileSync('git', ['worktree', 'remove', '--force', wt], { cwd: repoRoot, stdio: 'pipe' }); } catch { /* already gone */ }
@@ -310,7 +356,7 @@ test('AC2 — walk() skips the .claude/worktrees/ container even for UNREGISTERE
     fs.writeFileSync(path.join(residue, 'fast-mode-telemetry.ts'), 'export const residueCopy = true;\n');
     const scanned = walkCorpus(repoRoot, { excluded: exclusionTargets() });
     assert.ok(!scanned.some((p) => p.startsWith(residue + path.sep)), 'walk() must not scan unregistered residue under .claude/worktrees/');
-    const copies = scanned.filter((p) => path.basename(p) === 'fast-mode-telemetry.ts' && !fs.lstatSync(p).isSymbolicLink());
+    const copies = physicalTelemetryCopies(scanned);
     assert.deepEqual(copies, [path.join(pluginDir, 'scripts', 'fast-mode-telemetry.ts')], 'residue fast-mode-telemetry.ts copy must not be counted (AC2)');
   } finally {
     fs.rmSync(residue, { recursive: true, force: true });
@@ -334,7 +380,7 @@ test('AC1 — walkCorpus skips a plugin-staging-* orphan dir (its old-path tick-
     fs.writeFileSync(path.join(orphan, 'scripts', 'fast-mode-telemetry.ts'), 'export const orphanCopy = true;\n');
     const scanned = walkCorpus(repoRoot, { excluded: exclusionTargets() });
     assert.ok(!scanned.some((p) => p.startsWith(orphan + path.sep)), 'walkCorpus must not scan inside a plugin-staging-* orphan dir');
-    const copies = scanned.filter((p) => path.basename(p) === 'fast-mode-telemetry.ts' && !fs.lstatSync(p).isSymbolicLink());
+    const copies = physicalTelemetryCopies(scanned);
     assert.deepEqual(copies, [path.join(pluginDir, 'scripts', 'fast-mode-telemetry.ts')], 'an orphan staging fast-mode-telemetry.ts copy must not be counted (AC2)');
   } finally {
     fs.rmSync(orphan, { recursive: true, force: true });
@@ -363,6 +409,80 @@ test('AC2 — negative control: renaming off the staging prefix makes walkCorpus
   } finally {
     fs.rmSync(orphan, { recursive: true, force: true });
     fs.rmSync(renamed, { recursive: true, force: true });
+  }
+});
+
+// ── repo-root tmp/ skip + mid-walk ENOENT tolerance (gap-goal-merge-suite-concurrent-npm-pack-…) ───
+test('AC1 — walkCorpus skips the gitignored repo-root tmp/ runtime scratch (a fixture COPY there is not corpus content)', () => {
+  // The sibling selftests (run-identity.ts / stage-receipt.ts / workflow-journal.ts) mkdtemp a fixture
+  // under `<cwd>/tmp/` — i.e. under repoRoot — and seed it with copies of real plugin/ material. That
+  // is not repo source, and it is torn down mid-suite. Same rationale, same skip, as
+  // adr016-screen-use-check.ts's SKIP_DIRS (`tmp`), which landed first (硬规则 5b).
+  const tmpDir = path.join(repoRoot, 'tmp', `ls-tmp-probe-${process.pid}`);
+  fs.mkdirSync(path.join(tmpDir, 'plugin', 'scripts'), { recursive: true });
+  try {
+    const probe = path.join(tmpDir, 'stale-probe.md');
+    fs.writeFileSync(probe, 'the moved file used to live at orchestration/orchestrator-loop-tick.md\n');
+    assert.ok(oldPathPatterns.some((re) => re.test(fs.readFileSync(probe, 'utf8'))), 'the tmp/ probe content must trip an AC1b pattern (a live-looking reference)');
+    assert.ok(!walkCorpus(repoRoot, { excluded: exclusionTargets() }).includes(probe), 'tmp/ is runtime residue — it must not be scanned');
+    // Load-bearing negative control: move it OFF tmp/ and the very same file IS collected.
+    const outside = path.join(repoRoot, `.ls-tmp-outside-probe-${process.pid}.md`);
+    fs.renameSync(probe, outside);
+    try {
+      assert.ok(walkCorpus(repoRoot, { excluded: exclusionTargets() }).includes(outside), 'without the tmp/ skip the same probe IS collected (the skip is load-bearing, not vacuous)');
+    } finally {
+      fs.rmSync(outside, { force: true });
+    }
+  } finally {
+    fs.rmSync(tmpDir, { recursive: true, force: true });
+  }
+});
+
+test('AC1 — walkCorpus tolerates a directory that vanishes mid-walk (ENOENT), and ONLY ENOENT', (t) => {
+  // gap-goal-merge-suite-concurrent-npm-pack-staging-race-blocks-fan-in: walkCorpus descends the LIVE
+  // shared checkout while parallel test processes mkdtemp + rm -rf their fixtures under repoRoot.
+  // A directory listed by its parent and removed before its own readdir made the raw `fs.readdirSync`
+  // throw ENOENT and red whichever test was walking (reproduced 11/40 runs under fixture churn).
+  // Deterministic here: the mock makes one synthetic subtree vanish, so the tolerance is pinned
+  // without depending on a timing window.
+  const root = fs.mkdtempSync(path.join(repoRoot, 'tmp', 'ls-enoent-probe-'));
+  fs.mkdirSync(path.join(root, 'gone'), { recursive: true });
+  fs.writeFileSync(path.join(root, 'kept.md'), 'x\n');
+  fs.writeFileSync(path.join(root, 'gone', 'vanished.md'), 'x\n');
+  const vanished = path.join(root, 'gone');
+  const real = fs.readdirSync;
+  t.mock.method(fs, 'readdirSync', (p, ...rest) => {
+    if (String(p) === vanished) {
+      throw Object.assign(new Error(`ENOENT: no such file or directory, scandir '${p}'`), { code: 'ENOENT' });
+    }
+    return real(p, ...rest);
+  });
+  try {
+    // A subtree that vanished between the walk and its read is skipped — never a crash.
+    let scanned;
+    assert.doesNotThrow(() => { scanned = walkCorpus(root); }, 'a vanished directory must be SKIPPED, not thrown');
+    assert.deepEqual(scanned, [path.join(root, 'kept.md')], 'the sibling that did NOT vanish is still collected (the guard skips a subtree, it does not abort the walk)');
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test('AC1 — negative control: only ENOENT is tolerated — a non-ENOENT readdir error still throws', (t) => {
+  const root = fs.mkdtempSync(path.join(repoRoot, 'tmp', 'ls-eacces-probe-'));
+  fs.mkdirSync(path.join(root, 'denied'), { recursive: true });
+  const denied = path.join(root, 'denied');
+  const real = fs.readdirSync;
+  t.mock.method(fs, 'readdirSync', (p, ...rest) => {
+    if (String(p) === denied) {
+      throw Object.assign(new Error('EACCES: permission denied, scandir'), { code: 'EACCES' });
+    }
+    return real(p, ...rest);
+  });
+  try {
+    // 硬规则 3b: a "cannot read" must not masquerade as "read fine, nothing there".
+    assert.throws(() => walkCorpus(root), { code: 'EACCES' });
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
   }
 });
 

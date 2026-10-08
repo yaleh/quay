@@ -152,6 +152,28 @@ test("scan surface: gitignored repo-root tmp/ runtime scratch is NOT scanned —
   assert.equal(scan.unreadable.length, 0);
 });
 
+/** The PER-FILE property this suite pins: a file the walk listed that vanished before its read must
+ * be REPORTED (`unreadable`), never swallowed.
+ *
+ * ⛔ Property-scoped on purpose — it deliberately does NOT assert the whole `unreadable` ARRAY.
+ * The scan runs over the LIVE shared checkout (repoRoot) while OTHER test processes stage and
+ * rm -rf directories under it (npm-pack staging materializes a full plugin/ snapshot; the sibling
+ * selftests mkdtemp + rm their `<cwd>/tmp/` fixtures). Any of those can land an EXTRA, unrelated
+ * ENOENT row in `unreadable` — which says nothing about this property, but a strict
+ * `assert.deepEqual(scan.unreadable, [victim])` reads it as a failure. That is exactly how
+ * `quay goal merge` reddened twice on 2026-10-08 (same test, same cause, different run), blocking
+ * every goal branch on a timing artifact rather than on the code (hard rule 4b: an exact whole-array
+ * reading of a tree other processes are mutating is a proxy that drifts from the property).
+ *
+ * Extracted so the negative control below can drive it with a SYNTHETIC scan — the loosening is
+ * proven non-vacuous without depending on the live tree's timing. */
+function assertVanishedFileReported(scan, victim) {
+  assert.ok(
+    scan.unreadable.some((e) => e.rel === victim && e.reason === "ENOENT"),
+    `the vanished file must be RETURNED, not swallowed (got ${JSON.stringify(scan.unreadable)})`,
+  );
+}
+
 test("walk→read race: a listed .sh that vanishes before its read is SKIPPED and REPORTED, never a crash (npm-pack staging rm -rf's packages/quay/plugin/ mid-suite)", (t) => {
   const victim = "plugin/scripts/drivable-workspace-check.sh";
   const real = fs.readFileSync;
@@ -160,11 +182,44 @@ test("walk→read race: a listed .sh that vanishes before its read is SKIPPED an
     return real(p, ...rest);
   });
   const scan = scanForScreenHashViolations(repoRoot);
-  assert.deepEqual(scan.unreadable, [{ rel: victim, reason: "ENOENT" }], "the vanished file must be RETURNED, not swallowed");
+  // Per-file (not whole-array): concurrent staging under repoRoot may contribute OTHER transient
+  // rows — see assertVanishedFileReported. What must hold is that the victim's own row is there.
+  assertVanishedFileReported(scan, victim);
   assert.equal(scan.violations.length, 0);
   const verdict = judgeScreenHashScan(scan);
   assert.equal(verdict.state, "verified", "a vanished file is not a violation");
-  assert.match(verdict.verifiedBy ?? "", /1 个文件/, "the verdict must name the skip — 0 violations over a partly-read input is not a clean full scan");
+  // The verdict must NAME the skip — ⛔ the count is not pinned: "0 violations over a partly-read
+  // input" must not read as a clean full scan, and how MANY files were skipped is the live tree's
+  // business, not this property's.
+  assert.match(
+    verdict.verifiedBy ?? "",
+    /\d+ 个文件在 walk→read 之间消失/,
+    "the verdict must name the skip — 0 violations over a partly-read input is not a clean full scan",
+  );
+});
+
+test("walk→read race negative control: the loosened 'victim must be reported' assertion is NOT vacuous — a scanner that swallowed the ENOENT still goes RED", () => {
+  const victim = "plugin/scripts/drivable-workspace-check.sh";
+  const shape = (unreadable) => ({ violations: [], retired: [], files: [], unreadable });
+  // GOOD: the victim's own row is present ⇒ the (loosened) assertion passes…
+  assertVanishedFileReported(shape([{ rel: victim, reason: "ENOENT" }]), victim);
+  // …and it stays tolerant of an UNRELATED transient row beside it (the loosening, pinned).
+  assertVanishedFileReported(
+    shape([{ rel: "packages/quay/plugin-staging-1/scripts/x.sh", reason: "ENOENT" }, { rel: victim, reason: "ENOENT" }]),
+    victim,
+  );
+  // BAD #1: the ENOENT was swallowed entirely (the crash-free-but-silent shape) ⇒ MUST be red.
+  assert.throws(
+    () => assertVanishedFileReported(shape([]), victim),
+    /must be RETURNED/,
+    "a scanner that swallowed the vanished file must not pass the loosened assertion",
+  );
+  // BAD #2: rows exist, but not the victim's ⇒ MUST be red (a row for *some* other file is not the property).
+  assert.throws(
+    () => assertVanishedFileReported(shape([{ rel: "other.sh", reason: "ENOENT" }]), victim),
+    /must be RETURNED/,
+    "an unrelated vanished file must not satisfy the victim's property",
+  );
 });
 
 test("walk→read race: only ENOENT is tolerated — a genuinely unreadable file (EACCES) still surfaces", (t) => {
