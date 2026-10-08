@@ -2,7 +2,7 @@
 id: AC-345
 title: 并入形态 + 并入后生产读数：GOAL-031 以恰好一个合并提交进入 develop first-parent 链，develop 上
   needs-human 计数降到 1
-status: active
+status: achieved
 kind: criterion
 goal: GOAL-031
 criterion: |-
@@ -31,6 +31,11 @@ statusLog:
     to: active
     actor: goal-cli
     reason: ""
+  - at: 2026-10-08T17:04:21.935Z
+    from: active
+    to: achieved
+    actor: goal-driver
+    reason: "I2: criterion pass"
 fidelity:
   verdict: not-evaluated
   reason: no judge configured
