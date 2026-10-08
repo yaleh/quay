@@ -2,7 +2,7 @@
 id: AC-341
 title: 并入后生产读数：GOAL-030 并入之后，develop 上每一次 promotion-driver 机械晋升 todo→ready 都在
   .quay/task-status-events.jsonl 有对应的 promote 事件
-status: draft
+status: active
 kind: criterion
 goal: GOAL-030
 criterion: |
@@ -23,5 +23,17 @@ expect: exit 0 = 并入后的全部生产晋升翻转（至少 1 次）都带事
 origin: 人 2026-10-08「现在开始执行…正式创建一个真实的重构 goal，并启用 goal branch」：goal
   分支机制首个真实试点，范围严格限于晋升路径的 todo→ready / ready→todo 两条写入；先验证“在分支上运行 Quay 并验证
   Quay”的自举路径，健康度达标后才进入更大重构。
+activatedAt: 2026-10-08T02:31:49.635Z
+statusLog:
+  - at: 2026-10-08T02:31:49.635Z
+    from: draft
+    to: active
+    actor: cli
+    reason: 人 2026-10-08 授权立项并进入 GOAL-030（goal 分支首个真实试点）；承接任务已立并停放（needs-human），激活本
+      AC 不会触发乱序自动立案
+fidelity:
+  verdict: faithful
+  reason: "fidelity judge: faithful"
+  at: 2026-10-08T02:31:49.634Z
 phase: post-merge
 ---
