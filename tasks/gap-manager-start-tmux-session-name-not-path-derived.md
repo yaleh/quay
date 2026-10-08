@@ -40,8 +40,11 @@ extra:
 
 已付的证据：`plugin/test/manager-start.test.mjs` 5/5 绿（旧脚本下 3 条新用例红——负控制）；真实两 root 复现（两个都叫 `quay` 的真检出、共享一个 tmux server）分 A/B 两案跑通，命令与输出记在落地提交说明里。A 案（都不配 profiles 名）⇒ 两个不同派生名各自建成；B 案（都带出厂 profiles.yml，名都是 `quay-manager`）⇒ 第一个建成、第二个 exit 1 拒接管。边界：显式/配置给的名字是**人选的**，无归属记录时沿用历史 in-place 语义（已有归属记录时仍一律拒外来）。
 
+sh-census 棘轮（同批，landing 前置）：本修复把 `plugin/scripts/manager-start.sh` 从 sh-census 轴移除——该文件此前仅因一个内联 `python3 -c 'import yaml…'` profiles.yml 读取而被整份计费（124 代码行），改为调用已计费的兄弟脚本 `quay-launch.sh manager --dry-run`（取其 ` -n <name>` 计划行）后，命令位不再含解释器 ⇒ 文件离开该轴，读数 6683 → 6559。AC6 要求提交的基线**等于**实测（非仅上界），故同批把 `plugin/sh-census-baseline.json` 向下重锚到 6559/0 并追加 `_reanchorLog` 条目（含非拟合证明：仅 checkout develop 的 `manager-start.sh` 会让同一 checker 读回恰好 6683）。
+
 ## Touches
 
 - plugin/scripts/manager-start.sh
 - plugin/test/manager-start.test.mjs
+- plugin/sh-census-baseline.json
 - tasks/gap-manager-start-tmux-session-name-not-path-derived.md
