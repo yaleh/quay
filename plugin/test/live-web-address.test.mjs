@@ -300,6 +300,10 @@ async function makeHarness(mode) {
   execFileSync("git", ["init", "-q"], { cwd: root });
   fs.mkdirSync(path.join(root, ".quay"), { recursive: true });
   fs.mkdirSync(path.join(root, "plugin", "scripts"), { recursive: true });
+  // The fake serve below is spawned with the PRODUCTION entry shape (`packages/quay/bin/quay.ts`), so
+  // the directory must exist: AC-340 `readlink -f`s the entry it greps out of `/proc/<pid>/cmdline`,
+  // and `readlink -f` requires every component but the last to exist.
+  fs.mkdirSync(path.join(root, "packages", "quay", "bin"), { recursive: true });
   if (mode === "real") fs.copyFileSync(SCRIPT, path.join(root, "plugin", "scripts", "live-web-address.ts"));
   if (mode === "mutant") fs.writeFileSync(path.join(root, "plugin", "scripts", "live-web-address.ts"), MUTANT_HELPER);
 
@@ -320,11 +324,16 @@ async function makeHarness(mode) {
   await new Promise((r) => server.listen(0, "127.0.0.1", r));
   const pagePort = server.address().port;
 
-  // A real process whose argv carries `quay.ts serve` and whose /proc/<pid>/cwd IS this root — the
-  // only candidate shape the criteria accept.
+  // A real process whose argv carries the PRODUCTION entry shape `packages/quay/bin/quay.ts serve` and
+  // whose /proc/<pid>/cwd IS this root — the candidate shape the criteria accept. The full production
+  // path (⛔ not the bare `quay.ts`) is deliberate: the 17 converged criteria locate it with the loose
+  // `pgrep -f 'quay.ts serve'` (which the longer string still contains), while AC-340 locates the SAME
+  // process by its real entry path (`packages/quay/bin/quay\.(ts|js)`) and `readlink -f`s it. A fixture
+  // that served only the bare name would make AC-340 unreachable on its own contract, not prove it
+  // wrong — the arm under test is the DERIVATION, so the fixture must carry the shape production does.
   const child = spawn(
     process.execPath,
-    ["-e", "setTimeout(() => {}, 60000)", "quay.ts", "serve", "--host", "127.0.0.1", "--port", "0"],
+    ["-e", "setTimeout(() => {}, 60000)", "packages/quay/bin/quay.ts", "serve", "--host", "127.0.0.1", "--port", "0"],
     { cwd: root, detached: true, stdio: "ignore", argv0: "node" },
   );
   child.unref();
@@ -367,13 +376,15 @@ function runCriterionText(root, criterion) {
 }
 
 test("AC5: the corpus really is every goal criterion that calls the helper (guard against a vacuous control)", () => {
-  // 21 = the 17 converged criteria (gap-criterion-live-web-address-derivation-17-copies-to-one) + AC-904,
+  // 22 = the 17 converged criteria (gap-criterion-live-web-address-derivation-17-copies-to-one) + AC-904,
   // the GOAL-904 drill criterion added 2026-10-04 (`1aec2bd8b`), + AC-905/906/907, the GOAL-905 drill
   // criteria added 2026-10-05 whose inlined `server.json` reads were replaced by a call to the helper
-  // (gap-dispatch-worktree-setup-links-node-modules-for-pnpm-projects). The predicate is deliberately
-  // live (the criterion TEXT names the helper), so the count is the guard against a vacuous
+  // (gap-dispatch-worktree-setup-links-node-modules-for-pnpm-projects), + AC-340, the GOAL-030 preview
+  // criterion added 2026-10-08 (`1bc75c391`) whose inlined `.quay/server.json` read was replaced by the
+  // helper's pid-owner gate (gap-goal030-kernel-task-transition-and-status-event). The predicate is
+  // deliberately live (the criterion TEXT names the helper), so the count is the guard against a vacuous
   // (empty/one-element) control and must move whenever a new caller joins the set.
-  assert.equal(CRITERIA.length, 21, `expected every criterion that calls the helper, found ${CRITERIA.length}: ${CRITERIA.map((c) => c.id).join(",")}`);
+  assert.equal(CRITERIA.length, 22, `expected every criterion that calls the helper, found ${CRITERIA.length}: ${CRITERIA.map((c) => c.id).join(",")}`);
   assert.ok(LABELS.length >= 14, `the English nav must carry every asserted label, found ${LABELS.length}`);
 });
 
@@ -412,7 +423,12 @@ test("AC5 (mutant arm): a helper that always reports NOT-EVALUATED makes EVERY c
       assert.doesNotMatch(r.stdout, /^OK -- /m, `${c.id} printed a PASS while the derivation was not evaluable: ${r.stdout.slice(0, 200)}`);
       assert.match(
         r.stderr,
-        /no-derivable-serve-address|no-derivable-address|no live candidate exposed a derivable address|no live web address for/,
+        // The last alternative is AC-340's: its criterion refuses with "no live quay serve registered
+        // under <root>" rather than naming the ADDRESS. It is still a NAMED refusal (⛔ not a silent
+        // pass — the two assertions above pin that), so the vocabulary admits it: the property under
+        // test is that the mutation is LOAD-BEARING (every caller notices), not that all 22 phrase the
+        // cause identically.
+        /no-derivable-serve-address|no-derivable-address|no live candidate exposed a derivable address|no live web address for|no live quay serve registered/,
         `${c.id} must NAME the underivable-address refusal: ${r.stderr.slice(0, 300)}`,
       );
     }
@@ -420,7 +436,7 @@ test("AC5 (mutant arm): a helper that always reports NOT-EVALUATED makes EVERY c
     await h.cleanup();
   }
   // Enumerate, don't boolean (硬规则 3): the per-criterion codes are part of the reading.
-  assert.equal(codes.length, 21, codes.join(" "));
+  assert.equal(codes.length, 22, codes.join(" "));
 });
 
 test("AC5 (missing arm): with the helper DELETED every criterion exits NON-ZERO (the call is real)", async () => {
