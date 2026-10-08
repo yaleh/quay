@@ -1,11 +1,20 @@
 ---
 id: GOAL-030
 title: 晋升写入经 kernel 转移决策并留痕——goal 分支首个真实试点：证明分支上运行的 Quay 加载的是分支自己的代码
-status: draft
+status: active
 kind: goal
 origin: 人 2026-10-08「现在开始执行…正式创建一个真实的重构 goal，并启用 goal branch」：goal
   分支机制首个真实试点，范围严格限于晋升路径的 todo→ready / ready→todo 两条写入；先验证“在分支上运行 Quay 并验证
   Quay”的自举路径，健康度达标后才进入更大重构。
+activatedAt: 2026-10-08T02:36:17.793Z
+statusLog:
+  - at: 2026-10-08T02:36:17.793Z
+    from: draft
+    to: active
+    actor: cli
+    reason: 人 2026-10-08「现在开始执行…正式立项并进入该小 goal」：7 条 AC（AC-336…342，并入前 5 条、并入后 2
+      条）已激活且判据在 dash 下逐条实测（含负对照）；3 个承接任务已立并停放（needs-human），激活本 GOAL 即从 develop
+      tip 懒建 goal/GOAL-030
 branch: true
 ---
 ## 背景
