@@ -386,8 +386,24 @@
         "embeddedInterpreterLines": "-651 = plugin/scripts/quay-init.sh 650 -> 0 counted lines (it leaves the axis: the shim only `exec`s a binary, no embedded node/python3/jq at a command position) + test/cold-start-oneliner-e2e.sh 188 -> 187 (still embedded:[node], still non-exception). Residual = 0: the other changed .sh paths contribute 0 either way — real-target-verify.sh 105 -> 105 and release-cut.sh 13 -> 13 on the axis, test/cold-start-e2e.sh off the axis on BOTH sides (embedded=[]), and checker-mutation-cases/*.sh is not censused at all. Only the 8 paths `git diff --name-status develop HEAD -- '*.sh'` names were in play.",
         "duplicateCopies": "0 — untouched (0 is the assertion, not an omission). This task added no experiments/** mirror and converted no byte-identical pair."
       }
+    },
+    {
+      "when": "2026-10-08 (gap-manager-start-tmux-session-name-not-path-derived)",
+      "from": {
+        "embeddedInterpreterLines": 6683,
+        "duplicateCopies": 0
+      },
+      "to": {
+        "embeddedInterpreterLines": 6559,
+        "duplicateCopies": 0
+      },
+      "why": "DOWNWARD re-anchor (-124, the intended direction). This task's defect fix (two same-named checkouts must not collide on the literal tmux session name `quay-manager`) needs +45 lines in plugin/scripts/manager-start.sh, which was charged (124 code lines) SOLELY through one inline `python3 -c 'import yaml…'` profiles.yml read at a command position. The fix replaces that read with a call to an already-charged sibling (`quay-launch.sh manager --dry-run`, scraping its ` -n <name>` line — a shape pinned by plugin/test/manager-install-vector.test.mjs), so the file no longer runs an interpreter AT A COMMAND POSITION and therefore LEAVES the axis entirely: its 124 counted code lines drop to 0 (the file stays tracked and absent from the exception list; membership moved, not the file). This also removes a second reader of profiles.yml (single-source). ⛔ AC6 of plugin/test/sh-census-check.test.mjs requires the committed baseline to EQUAL the live reading, not merely bound it (a stale-higher baseline would let a future +124 regression stay green). Measured with the checker's OWN reading on this tree: `node --experimental-strip-types plugin/scripts/sh-census-check.ts --json` → totals 6559/0 — never hand-fitted. Non-fitted proof: checking out ONLY plugin/scripts/manager-start.sh from develop onto this otherwise-final tree makes the same checker read exactly the previously-committed 6683/0 (script count 54→55, embedded:[python3]), and restoring this branch's version returns 6559/0.",
+      "attribution": {
+        "embeddedInterpreterLines": "-124 = plugin/scripts/manager-start.sh 124 -> 0 counted lines (it leaves the axis: the sole charge was embedded:[python3]; the fix leaves no node/python3/jq at a command position). Residual = 0: the branch's entire tracked *.sh delta vs develop is that one path (`git diff --name-status develop HEAD -- '*.sh'` → M plugin/scripts/manager-start.sh), so no other member contributes.",
+        "duplicateCopies": "0 — untouched (0 is the assertion, not an omission). This task added no experiments/** mirror and converted no byte-identical pair."
+      }
     }
   ],
-  "embeddedInterpreterLines": 6683,
+  "embeddedInterpreterLines": 6559,
   "duplicateCopies": 0
 }
