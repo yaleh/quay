@@ -36,13 +36,13 @@ GOAL-030（goal 分支首个真实试点）的第五块：**预览实例**（`or
 
 ## AC
 
-- [ ] 判据/预览 worktree 存在且停在分支 tip：`git -C /home/yale/work/quay-worktrees/goal-GOAL-030 rev-parse HEAD` 与 `git rev-parse goal/GOAL-030` 输出相同；两个 sha 进 Evidence
-- [ ] 预览已起：`node --no-warnings --experimental-strip-types packages/quay/bin/quay.ts goal preview GOAL-030 status --json --root /data/home/yale/work/quay` 输出 `state: "running"` 且 `pid`、`port` 非空；完整输出进 Evidence
-- [ ] AC-340 在预览树上取 0：在该 worktree 根用 bash 执行 `quay goal show AC-340` 的 criterion，`exit 0` 且 stdout 含 `PASS:`；完整 stdout/stderr 进 Evidence
-- [ ] 首页可访问：`curl -sL -o /dev/null -w '%{http_code}' --max-time 20 http://<host>:<port>/` 输出 `200`
-- [ ] 负对照 (a) 能取假：在被求值树之外、登记了「跑主检出入口的 serve」的临时 git 树上跑同一判据，`exit 1` 且 stderr 含 `CAUSE=serve-runs-foreign-code`
-- [ ] 负对照 (b) 能报未评估：在没有 `.quay/server.json` 的临时 git 树上跑同一判据，`exit 3` 且 stderr 含 `NOT-EVALUATED`
-- [ ] 载体已落盘可读：`test -f docs/rup/goal030-preview-branch-code.md` exit 0，且该文件含 pid、入口 realpath、`<host>:<port>`、HTTP 状态码四个读数
+- [x] 判据/预览 worktree 存在且停在分支 tip：`git -C /home/yale/work/quay-worktrees/goal-GOAL-030 rev-parse HEAD` 与 `git rev-parse goal/GOAL-030` 输出相同；两个 sha 进 Evidence
+- [x] 预览已起：`node --no-warnings --experimental-strip-types packages/quay/bin/quay.ts goal preview GOAL-030 status --json --root /data/home/yale/work/quay` 输出 `state: "running"` 且 `pid`、`port` 非空；完整输出进 Evidence
+- [x] AC-340 在预览树上取 0：在该 worktree 根用 bash 执行 `quay goal show AC-340` 的 criterion，`exit 0` 且 stdout 含 `PASS:`；完整 stdout/stderr 进 Evidence
+- [x] 首页可访问：`curl -sL -o /dev/null -w '%{http_code}' --max-time 20 http://<host>:<port>/` 输出 `200`
+- [x] 负对照 (a) 能取假：在被求值树之外、登记了「跑主检出入口的 serve」的临时 git 树上跑同一判据，`exit 1` 且 stderr 含 `CAUSE=serve-runs-foreign-code`
+- [x] 负对照 (b) 能报未评估：在没有 `.quay/server.json` 的临时 git 树上跑同一判据，`exit 3` 且 stderr 含 `NOT-EVALUATED`
+- [x] 载体已落盘可读：`test -f docs/rup/goal030-preview-branch-code.md` exit 0，且该文件含 pid、入口 realpath、`<host>:<port>`、HTTP 状态码四个读数
 
 ## DoD
 
@@ -56,3 +56,76 @@ GOAL-030（goal 分支首个真实试点）的第五块：**预览实例**（`or
 
 - tasks/gap-goal030-preview-runs-branch-code.md
 - docs/rup/goal030-preview-branch-code.md
+
+## Evidence
+
+**取证时刻**：2026-10-08T03:07:36Z（预览启动）– 2026-10-08T03:08:57Z（读数固化）；本机时区 +0800。完整取证稿：`docs/rup/goal030-preview-branch-code.md`。
+
+### ① 判据/预览 worktree 停在分支 tip（AC1）
+
+```
+$ git -C /home/yale/work/quay-worktrees/goal-GOAL-030 rev-parse HEAD
+6a00432cae4f349f336436aa9de963a331887d02
+$ git -C /data/home/yale/work/quay rev-parse goal/GOAL-030
+6a00432cae4f349f336436aa9de963a331887d02      # 两侧相同
+```
+
+依赖装配读数 = **`linked`**：`/home/yale/work/quay-worktrees/goal-GOAL-030/node_modules -> /data/home/yale/work/quay/node_modules`（⛔ 非 `source-absent` / `failed`）。该 worktree 由 goal-driver 的 `ensureGoalCriterionWorktree` 建（⛔ 本任务没有手工 `git worktree add`）。
+
+### ② 预览已起（AC2）
+
+```
+$ node --no-warnings --experimental-strip-types packages/quay/bin/quay.ts goal preview GOAL-030 status --json --root /data/home/yale/work/quay
+{
+  "goal": "GOAL-030",
+  "action": "status",
+  "previewRoot": "/home/yale/work/quay-worktrees/goal-GOAL-030",
+  "state": "running",
+  "pid": 1038773,
+  "host": "172.28.0.1",
+  "port": 20830,
+  "detail": "pid 1038773 alive, web on 172.28.0.1:20830"
+}
+```
+
+启动读数：`state: "started"`, `pid` 1038773, `host` 172.28.0.1, `port` 20830（`goal preview GOAL-030 start --port 20830 --root /data/home/yale/work/quay`；端口未被占用且 ≠ 生产端口 20119）。
+
+### ③ 入口 realpath + 活 web 地址 + 首页 HTTP 码（AC4 / AC7 的两个读数）
+
+```
+$ tr '\0' '\n' < /proc/1038773/cmdline
+/data/home/yale/.nvm/versions/node/v24.21.0/bin/node
+--experimental-strip-types
+/home/yale/work/quay-worktrees/goal-GOAL-030/packages/quay/bin/quay.ts
+serve
+--port
+20830
+```
+
+- **入口文件 realpath** = `/data/home/yale/work/quay-worktrees/goal-GOAL-030/packages/quay/bin/quay.ts`（在被求值树内）
+- **`<host>:<port>`** = `172.28.0.1:20830`（`node --no-warnings --experimental-strip-types <wt>/plugin/scripts/live-web-address.ts <wt>` ⇒ `172.28.0.1:20830`，rc=0）
+- **HTTP 状态码** = `200`（`curl -sL -o /dev/null -w '%{http_code}' --max-time 20 http://172.28.0.1:20830/`）
+
+### ④ AC-340 判据在预览树上取 0（AC3）
+
+```
+$ cd /home/yale/work/quay-worktrees/goal-GOAL-030 && bash /tmp/ac340-crit.sh
+PASS: serve pid 1038773 under /data/home/yale/work/quay-worktrees/goal-GOAL-030 runs this tree's own entry (/data/home/yale/work/quay-worktrees/goal-GOAL-030/packages/quay/bin/quay.ts) and serves http://172.28.0.1:20830/ (200 after redirects)
+$ echo $?
+0
+```
+
+stderr：**空**。（判据原文经 `quay goal show AC-340 --json` 取出后逐字执行，cwd = 该 worktree。）
+
+### ⑤ 负对照：判据能取假，两个方向都验过（AC5 / AC6）
+
+| 场景 | exit | stderr（逐字） |
+|---|---|---|
+| (a) 临时 git 树 + 主检出 `.quay/server.json` 原样拷贝（登记 pid 1769873 = 活着的**生产** serve，入口 = 主检出） | **1** | `CAUSE=serve-runs-foreign-code — the serve registered under /tmp/ac340-neg-a-csnC7A runs /data/home/yale/work/quay/packages/quay/bin/quay.ts, not this tree's own code` |
+| (b) 临时 git 树，无 `.quay/server.json` | **3** | `NOT-EVALUATED: no live quay serve registered under /tmp/ac340-neg-b-Pe6uUH (.quay/server.json absent or pid dead) — start the preview with: quay goal preview GOAL-030 start --port <n>` |
+
+两条都是**在被求值树之外**的树（`mktemp -d` + `git init`）上跑的，用的是**同一份**判据文件。
+
+### ⑥ 留给人和 `quay goal merge` 的预览
+
+`http://172.28.0.1:20830/`（pid 1038773，workspace root = `/home/yale/work/quay-worktrees/goal-GOAL-030`），**取证后保持运行**。时效边界见 DoD 的如实注记：分支 tip 前移会刷新该 worktree 并停掉预览，`quay goal merge` 前按同一条 `goal preview GOAL-030 start` 命令重起即可（一步）。⛔ 全程没有停、没有重启**生产** serve（主检出登记 pid 1769873）。
