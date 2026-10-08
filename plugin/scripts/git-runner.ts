@@ -9,6 +9,14 @@
 // interface it returns, the trim-and-drop line splitter, the `rev-parse --verify --quiet` sha
 // resolver, and the release-ref enumeration. All of those now exist here once.
 //
+// A LATER pass of the same routine (.quay/routine-findings.jsonl, finding `is-ancestor-pair` —
+// symbol `isAncestor`, kind `same-symbol-multi-file`, runId `semantic-dedup-scan-1791442852793`)
+// found the merge-base ancestry predicate carried twice with DIFFERENT plumbing:
+//   cross-machine-verify.ts            inline `spawnSync("git", …).status === 0`
+//   direct-to-develop-bypass-check.ts  a throwing `try { git(…) } catch { return false }`
+// — both folding any git failure into `false`. That predicate now exists here once, as `ancestry`,
+// and it returns THREE states so that fold stays a caller decision (see its doc comment).
+//
 // ⛔ What this module deliberately does NOT do: fold "could not look" into a value. Every helper
 // whose outcome can be NOT-DETERMINABLE returns `null` — never an empty string / empty array
 // standing in for "none there" (hard rule 3b). Callers keep that null distinct from a real value.
@@ -51,6 +59,24 @@ export function revParseSha(root: string, revision: string): string | null {
   if (r.status !== 0) return null;
   const sha = r.stdout.trim();
   return sha.length > 0 ? sha : null;
+}
+
+/** Is `ancestor` an ancestor of (or equal to) `descendant`? — `git merge-base --is-ancestor`, whose
+ *  exit code is the whole answer: 0 = yes, 1 = no, ≥2 = the invocation itself failed.
+ *
+ *  THREE states, not two: `false` means git ANSWERED "no", `null` means git could not be ASKED
+ *  (unknown object / not a repository / the process never ran, which the runner reports as -1). The
+ *  split is this module's standing rule — folding "could not look" into a value prints an instrument
+ *  failure in the same shape as a real answer (hard rule 3b). ⛔ The fold therefore lives at the call
+ *  sites, and it is NOT always the same fold: direct-to-develop-bypass-check.ts reads `null ⇒ false`
+ *  because "not a forward move" is the VISIBLE (conservative) direction there, while
+ *  cross-machine-verify.ts reads `null ⇒ false` for a different reason. Pushing either fold down here
+ *  would make the library pick one caller's failure semantics for both. */
+export function ancestry(root: string, ancestor: string, descendant: string): boolean | null {
+  const r = git(root, ['merge-base', '--is-ancestor', ancestor, descendant]);
+  if (r.status === 0) return true;
+  if (r.status === 1) return false;
+  return null;
 }
 
 /**
