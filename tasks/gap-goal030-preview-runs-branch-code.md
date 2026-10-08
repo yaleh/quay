@@ -1,7 +1,7 @@
 ---
 id: gap-goal030-preview-runs-branch-code
 title: GOAL-030 ⑤：预览实例自举——在 goal 判据树上起 serve 并证明 AC-340（入口 realpath 在本树内 + 首页 200）
-status: needs-human
+status: ready
 labels:
   - gap
 parent: null
