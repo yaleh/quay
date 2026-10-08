@@ -55,6 +55,7 @@ GOAL-030（goal 分支首个真实试点）的第一块：在 kernel 层建立�
 - plugin/test/task-ops.test.mjs
 - plugin/test/carrier-registry-completeness.test.mjs
 - goals/AC-340-预览运行分支代码-被求值树下登记在册且存活的-quay-serve-其入口文件-realpath-位于该树内-且其-we.md
+- plugin/test/live-web-address.test.mjs
 
 ## 停放说明
 
@@ -73,3 +74,5 @@ GOAL-030（goal 分支首个真实试点）的第一块：在 kernel 层建立�
 - **DoD** `git cat-file -e develop:packages/quay/src/kernel/task-transition.ts` ⇒ **不存在**（并入前 develop 无此模块；落地后应可由 `git show goal/GOAL-030:…` 读出）。调用方行为未改（AC3 即为证）。
 
 **附带修复（foreign develop-wide static red，非本任务 delta）**：`goals/AC-340-*` 的 criterion 内联了 serve 载体（`server.json`），使 `criterion-carrier-inline-check` 在**完整静态集**上红；该检查在 full-suite 相位 fail-closed，**挡下每个任务的 fan-in**（同批的兄弟任务 `gap-goal030-preview-runs-branch-code` 上一轮即 `step=suite: # fail 72` 因此退出未落地 —— 见 `.quay/worker-dispatch.json` 其派发记录）。已把 AC-340 的判据改为经其**单一判定点** `plugin/scripts/live-web-address.ts` 解析 serve（期望 pid 的 owner gate 即「登记在册」）：在**预览 worktree**（`/home/yale/work/quay-worktrees/goal-GOAL-030`，即 AC-340 的真实求值树）实跑 ⇒ **exit 0 / PASS serve pid 1038773**；两条负对照也复核：登记了外来 serve 的临时树 ⇒ **exit 1** `CAUSE=serve-runs-foreign-code`；无载体的临时树 ⇒ **exit 3** `NOT-EVALUATED`。`criterion-carrier-inline-check` 由 `1 criterion inlines` 转 **0 criterion inlines / exit 0**。因该文件不在原 Touches 内，已把它与本任务新测试 `plugin/test/carrier-registry-completeness.test.mjs` 一并写入 Touches（anti-drift 要求 committed delta ⊆ Touches）。
+
+- **suite 修复（本轮）**：`scripts/test.sh` 全量在 `plugin/test/live-web-address.test.mjs` 上三个 AC5 面红（`21 !== 22` + AC-340 的 real/mutant 臂），且**是 develop-wide、非本任务 delta**：该测试把「调用 helper 的 goal 判据」钉为 21 条，AC-340 加入后为 22 条 —— 直接读 develop 树实测（`git ls-tree develop goals/` + yaml 解析 `criterion`）⇒ **22**（清单末项即 AC-340），故 develop 自身即红。修法（**只改测试，⛔ 不改任何判据**）：①计数 21→22（+ 注释记 AC-340 出处 `1bc75c391`）；②夹具的伪 serve 以**生产形态** `packages/quay/bin/quay.ts serve` 起进程并建 `packages/quay/bin/` 目录（AC-340 `readlink -f` 其入口，需要中间目录存在；17 条收敛判据的宽松 `pgrep -f 'quay.ts serve'` 仍命中该更长的串）；③mutant 臂的拒绝词表接纳 AC-340 的 `no live quay serve registered`（仍是**具名**拒绝；非零退出 + 无 `OK --` 两条断言未动）。复跑 `node --test --experimental-strip-types plugin/test/live-web-address.test.mjs` ⇒ **tests 17 / pass 17 / fail 0**（修前同为该三面红，即负/正对照）。`anti-drift-touches-check.ts --task <id> --worktree <wt> --merge-target goal/GOAL-030` ⇒ **ANTI-DRIFT OK**（该文件已补入 `## Touches`）。
