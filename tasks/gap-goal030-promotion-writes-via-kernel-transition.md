@@ -49,6 +49,7 @@ GOAL-030 的第二块：把晋升路径上的两条任务状态写入改走 kern
 - tasks/gap-goal030-promotion-writes-via-kernel-transition.md
 - plugin/scripts/ready-pool-check.ts
 - plugin/test/ready-pool-check-transition-writes.test.mjs
+- plugin/test/ready-pool-check-s11.test.mjs
 
 ## 停放说明
 
