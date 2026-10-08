@@ -895,17 +895,29 @@ export function producerGate(f: FileableFinding, registered: Set<string> | null 
 }
 
 /** The rate window's numerator, read from the CARRIER itself (⛔ no hand-kept counter file): the
- *  number of filings this routine recorded in the trailing window. `nowMs` is injected so the window
- *  is testable; a record with an unparseable ts is skipped, never counted (硬规则 3b). */
-export function countRecentFilings(carrierPath: string, nowMs: number, windowMs: number = FILING_WINDOW_MS): number {
+ *  number of filings ONE routine recorded in the trailing window — `routine` is that dimension
+ *  (⛔ `null` = the pre-dimension GLOBAL reading). A record with an unparseable ts is skipped. */
+export function countRecentFilings(carrierPath: string, nowMs: number, windowMs: number = FILING_WINDOW_MS, routine: string | null = null): number {
   let text: string;
   try { text = fs.readFileSync(carrierPath, "utf8"); } catch { return 0; }
+  // ⚠️ THE ROUTINE DIMENSION (gap-routine-filing-rate-global-window-starves-freshness-refresh): the
+  //    window once summed `filed.length` over EVERY routine's `filing-round` records ⇒ it was a
+  //    CROSS-ROUTINE GLOBAL budget. Measured: `semantic-dedup-scan` filed 3 every round, exhausting
+  //    every other routine's share, while `freshness-refresh` was rejected `rate:` for 11 consecutive
+  //    rounds (2026-10-07T23:05 → 2026-10-08T23:03Z) with the board simultaneously EMPTY — a drained
+  //    board its own routine could not refill. `routine` scopes the budget to the routine's own
+  //    trailing window, so one routine's batch no longer starves another's filings.
+  const want = routine === null ? null : String(routine).trim();
   let n = 0;
   for (const line of text.split("\n")) {
     if (!line.trim()) continue;
     let r: Record<string, unknown>;
     try { r = JSON.parse(line); } catch { continue; }
     if (r.kind !== "filing-round") continue;
+    // ⛔ A `filing-round` whose own `routine` is absent or different is NOT this routine's filing; it
+    //    must not be counted against this routine's budget (that leak is the defect above). A `null`
+    //    `routine` argument skips this filter and preserves the pre-dimension GLOBAL reading.
+    if (want !== null && String(r.routine ?? "").trim() !== want) continue;
     const at = Date.parse(String(r.ts ?? ""));
     if (!Number.isFinite(at) || nowMs - at > windowMs || at > nowMs) continue;
     const filed = Array.isArray(r.filed) ? r.filed.length : 0;

@@ -34,7 +34,9 @@ import path from "node:path";
 
 import {
   DEFAULT_RATE,
+  FILING_WINDOW_MS,
   boardKeys,
+  countRecentFilings,
   dedupReading,
   findingKey,
   findingSubjectKey,
@@ -442,4 +444,102 @@ test("isActionable: unchanged — the quality bar reads the prose, and the subje
   assert.equal(isActionable(candidateA()), true, "a real routine candidate still passes the quality gate");
   // a bare symbol list with no evidence is NOT actionable, however well-identified it is:
   assert.equal(isActionable("## Finding\nsymbols: `a`, `b`\n"), false);
+});
+
+// ── ⑮ the RATE WINDOW's routine dimension ────────────────────────────────────────────────────────
+// Task gap-routine-filing-rate-global-window-starves-freshness-refresh.
+//
+// THE DEFECT (measured from `.quay/routine-findings.jsonl`): `countRecentFilings` summed
+// `filed.length` over EVERY routine's `filing-round` records ⇒ a CROSS-ROUTINE GLOBAL budget of
+// `DEFAULT_RATE`. One routine's batch exhausted every other routine's share — `semantic-dedup-scan`
+// filed 3 every round while `freshness-refresh` was rejected `rate:` for 11 consecutive rounds
+// (2026-10-07T23:05 → 2026-10-08T23:03Z) with the board simultaneously EMPTY. A drained board that
+// the routine whose job is to refill it could not refill.
+//
+// THE FIX under test: `countRecentFilings(…, routine)` scopes the window to ONE routine's own
+// trailing `filing-round` records. The case below takes BOTH arms on ONE fixture so 「按 routine 分账」
+// can be told from 「把窗口整个关掉」 (硬规则 3b): the same carrier counts 3 for the routine that
+// filed, and 0 for a routine that filed nothing.
+
+/** One `filing-round` carrier record. `routine = null` ⇒ the field is absent (the shape whose owner
+ *  cannot be shown to be any named routine). */
+const filingRound = (ts, routine, filed) => ({
+  ts, kind: "filing-round",
+  ...(routine === null ? {} : { routine }),
+  probe: routine ?? "unknown", runId: `run-${ts}`,
+  candidates: filed.length, filed,
+});
+const writeCarrier = (dir, records) => {
+  const p = path.join(dir, "routine-findings.jsonl");
+  fs.writeFileSync(p, records.map((r) => `${JSON.stringify(r)}\n`).join(""), "utf8");
+  return p;
+};
+
+test("⑮ WINDOW POSITION — the SAME carrier rejects inside the window and accepts once the ts leaves it (single input, only the window moves)", () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "gate-rate-window-"));
+  try {
+    const nowMs = Date.parse("2026-10-09T07:00:00Z");
+    const inWindow = filingRound(new Date(nowMs - 60 * 60 * 1000).toISOString(), "freshness-refresh",
+      ["a", "b", "c"]);
+    // ── arm ①: the record is INSIDE the trailing window ⇒ the budget is spent ⇒ reject ────────────
+    const carrier = writeCarrier(dir, [inWindow]);
+    const recentIn = countRecentFilings(carrier, nowMs, FILING_WINDOW_MS, "freshness-refresh");
+    assert.equal(recentIn, 3, "the in-window routine filing counts against the window");
+    const gIn = gateFinding(candidateA(), { existingKeys: new Set(), recentCount: recentIn, K: DEFAULT_RATE });
+    assert.equal(gIn.accept, false);
+    assert.match(gIn.reason, /^rate:/, "the rejection must be the rate gate's own reason, ⛔ not dedup/quality");
+
+    // ── arm ②: the SAME record, only its `ts` moved OUT of the window ⇒ the budget is free ⇒ accept ─
+    const outOfWindow = filingRound(new Date(nowMs - FILING_WINDOW_MS - 60 * 1000).toISOString(),
+      "freshness-refresh", ["a", "b", "c"]);
+    const carrier2 = writeCarrier(dir, [outOfWindow]);
+    const recentOut = countRecentFilings(carrier2, nowMs, FILING_WINDOW_MS, "freshness-refresh");
+    assert.equal(recentOut, 0, "⛔ a filing older than the window is not in it");
+    const gOut = gateFinding(candidateA(), { existingKeys: new Set(), recentCount: recentOut, K: DEFAULT_RATE });
+    assert.equal(gOut.accept, true, "⛔ the flip must come ONLY from the window position, nothing else changed");
+    assert.match(gOut.reason, /^accepted:/);
+  } finally { fs.rmSync(dir, { recursive: true, force: true }); }
+});
+
+test("⑮ CROSS-ROUTINE ISOLATION — another routine's batch does NOT spend this routine's budget (and still spends its own)", () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "gate-rate-routine-"));
+  try {
+    const nowMs = Date.parse("2026-10-09T07:00:00Z");
+    const ts = new Date(nowMs - 60 * 60 * 1000).toISOString();
+    // The measured shape: `semantic-dedup-scan` filed its 3 this window; `freshness-refresh` filed 0.
+    const carrier = writeCarrier(dir, [
+      filingRound(ts, "semantic-dedup-scan", ["x", "y", "z"]),
+      filingRound(ts, "freshness-refresh", []),
+    ]);
+
+    // the routine that filed NOTHING reads its OWN budget as empty ⇒ it may refill a drained board
+    const mine = countRecentFilings(carrier, nowMs, FILING_WINDOW_MS, "freshness-refresh");
+    assert.equal(mine, 0, "another routine's filings must not count against this routine (the defect)");
+    assert.equal(gateFinding(candidateA(), { existingKeys: new Set(), recentCount: mine, K: DEFAULT_RATE }).accept,
+      true, "with its own budget free, freshness-refresh can refill the board");
+
+    // ⛔ the SAME carrier still spends the budget of the routine that DID file — so this is 「分账」,
+    //    ⛔ not 「把窗口关掉」 (the reason the two values must come off one carrier, not two fixtures)
+    const theirs = countRecentFilings(carrier, nowMs, FILING_WINDOW_MS, "semantic-dedup-scan");
+    assert.equal(theirs, 3, "the filing routine's own window is still enforced");
+    assert.equal(gateFinding(candidateA(), { existingKeys: new Set(), recentCount: theirs, K: DEFAULT_RATE }).accept,
+      false, "the routine that spent the budget is still throttled");
+
+    // and `null` preserves the pre-dimension GLOBAL reading (sum of both) — the honest fallback
+    assert.equal(countRecentFilings(carrier, nowMs, FILING_WINDOW_MS, null), 3, "global = both routines' filings");
+    assert.equal(countRecentFilings(carrier, nowMs), 3, "the default argument is the global reading, unchanged");
+  } finally { fs.rmSync(dir, { recursive: true, force: true }); }
+});
+
+test("⑮ a record whose OWN routine is absent is not counted against a NAMED routine (⛔ no leak back in)", () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "gate-rate-noroutine-"));
+  try {
+    const nowMs = Date.parse("2026-10-09T07:00:00Z");
+    const ts = new Date(nowMs - 60 * 60 * 1000).toISOString();
+    const carrier = writeCarrier(dir, [filingRound(ts, null, ["a", "b", "c"])]);
+    assert.equal(countRecentFilings(carrier, nowMs, FILING_WINDOW_MS, "freshness-refresh"), 0,
+      "a filing that names no routine cannot be shown to be this routine's ⇒ ⛔ not counted against it");
+    assert.equal(countRecentFilings(carrier, nowMs, FILING_WINDOW_MS, null), 3,
+      "…but it IS in the global reading (the pre-dimension value is preserved, not silently dropped)");
+  } finally { fs.rmSync(dir, { recursive: true, force: true }); }
 });

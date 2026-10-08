@@ -53,6 +53,7 @@ import {
   countRecentFilings,
   escalationKey,
   escalationMarkerByKey,
+  FILING_WINDOW_MS,
   findingKey,
   foldProbeReportedValue,
   gateEscalation,
@@ -428,7 +429,9 @@ export function selectFilings(findings: readonly ProbeFinding[], o: FilingOption
     const g = escalate
       ? gateEscalation(candidate, { existingKeys: keys })
       : (() => {
-        if (recentBase === null) recentBase = countRecentFilings(o.carrierPath, o.nowMs);
+        // ⚠️ 传 `o.routine`：rate 预算按**本例程自己的**尾窗计（gap-routine-filing-rate-global-window-
+        //    starves-freshness-refresh）。⛔ 不传 ⇒ 退回跨 routine 全局窗，正是本任务要关掉的形态。
+        if (recentBase === null) recentBase = countRecentFilings(o.carrierPath, o.nowMs, FILING_WINDOW_MS, o.routine);
         return gateFinding(candidate, { existingKeys: keys, recentCount: recentBase + acceptedThisRound, K: o.k });
       })();
     if (!g.accept) {
