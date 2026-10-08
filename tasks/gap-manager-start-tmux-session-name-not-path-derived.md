@@ -26,13 +26,19 @@ extra:
 
 ## AC
 
-- [ ] 两个不同 `REPO_ROOT`（各自独立的 git 仓库，都不设置 `profiles.yml` 的 manager 会话名）各自触发 `manager-start.sh` 的默认会话名派生逻辑，得到的两个默认会话名不相等
-- [ ] 若派生的会话名在 `tmux has-session` 上命中一个已存在的会话，脚本能区分"这是我自己之前建的（同一 root）"与"这是另一个 root 建的同名会话"，后一种场景下不静默附着/不静默复用，而是 fail-closed 报错并提示显式传 `--session`
-- [ ] `plugin/test/manager-start.test.mjs` 新增/更新用例覆盖上述两条判据，`node --experimental-strip-types --test plugin/test/manager-start.test.mjs` 全绿
+- [x] 两个不同 `REPO_ROOT`（各自独立的 git 仓库，都不设置 `profiles.yml` 的 manager 会话名）各自触发 `manager-start.sh` 的默认会话名派生逻辑，得到的两个默认会话名不相等
+- [x] 若派生的会话名在 `tmux has-session` 上命中一个已存在的会话，脚本能区分"这是我自己之前建的（同一 root）"与"这是另一个 root 建的同名会话"，后一种场景下不静默附着/不静默复用，而是 fail-closed 报错并提示显式传 `--session`
+- [x] `plugin/test/manager-start.test.mjs` 新增/更新用例覆盖上述两条判据，`node --experimental-strip-types --test plugin/test/manager-start.test.mjs` 全绿
 
 ## DoD
 
 `manager-start.sh` 落地后，对同一台宿主上两个不同 root 的仓库（即便都叫 "quay"）分别调用默认裸机冷启动路径，不再产生相同的 tmux 会话名；真实跑一次"两个 root 连续调用"的复现（而非只看单测），确认第二次调用不接管第一次建立的会话（报错或建出不同名字的会话），把这次真实复现的命令与输出记录在落地提交说明里。
+
+## Resolution
+
+默认会话名改为按**仓库根绝对路径**派生 `quay-manager-<8 位摘要>`（路径而非项目名；⛔ 不带时间戳——名字必须能被下一次 `has-session` 稳定寻址）。会话建立时把本 root 写进 tmux 用户选项 `@quay_manager_root`；之后每次调用在**任何写入之前**核验归属，预检与竞态重判共用**同一个谓词**：归属=本 root ⇒ in-place；归属=另一个 root ⇒ fail-closed；无记录 + 派生名 ⇒ fail-closed（「读不懂归属」不与「归属合格」共用输出）；无记录 + `--session`/env/profiles 显式名 ⇒ 沿用既有 in-place 语义。报错给出记录到的归属、本 root、以及 `--session` 与 `kill-session` 两条出路。
+
+已付的证据：`plugin/test/manager-start.test.mjs` 5/5 绿（旧脚本下 3 条新用例红——负控制）；真实两 root 复现（两个都叫 `quay` 的真检出、共享一个 tmux server）分 A/B 两案跑通，命令与输出记在落地提交说明里。A 案（都不配 profiles 名）⇒ 两个不同派生名各自建成；B 案（都带出厂 profiles.yml，名都是 `quay-manager`）⇒ 第一个建成、第二个 exit 1 拒接管。边界：显式/配置给的名字是**人选的**，无归属记录时沿用历史 in-place 语义（已有归属记录时仍一律拒外来）。
 
 ## Touches
 
