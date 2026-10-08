@@ -110,3 +110,5 @@ echo "PASS: scripts/test.sh on 4 goal-driver shards: $tests tests, 0 fail; TASK_
 - plugin/test/goal-driver-s06.test.mjs
 - plugin/test/goal-driver-s08.test.mjs
 - plugin/test/goal-driver-s12.test.mjs
+
+该轴仍暗,理由:本任务只产出一份提案、不触碰任何源码（Touches 声明的 4 个测试文件与 develop 逐字节相同），L_D/L_G 均未被触及。
