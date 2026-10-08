@@ -6,6 +6,7 @@ labels:
 parent: null
 children: []
 extra: {}
+title: 立案限流闸：跨 routine 的 24h 全局窗口被单一 routine 批量吃光，板排空时该机制仍拒绝回填
 ---
 **type:** gap
 
@@ -63,7 +64,7 @@ extra: {}
 - [ ] 根因读数已固化且可复跑：本任务体逐字给出 `countRecentFilings` 的调用点与 `FILING_WINDOW_MS` / `K` 的取值来源（`plugin/scripts/routine-file-gate.ts:900` / `:513` / `:262`），并给出**至少 10 条**连续 `freshness-refresh` `filing-round` 记录的 ts / candidates / filed / rejectGates（`grep '"kind":"filing-round"' .quay/routine-findings.jsonl` 可复现）
 - [ ] 饱和方与到期时刻已固化：给出吃光预算的 routine 名、其最近一次 `filed=3` 的 ts，及其 24h 到期时刻；`grep` 该 `filing-round` 记录可复现
 - [ ] **窗口板盲性**有单态判据（⛔ 不是叙述）：在一次性 fixture 载体上（`/tmp` 下自造 `.quay/routine-findings.jsonl`，含一个窗口内 `filed:3` 的 `filing-round`）跑 `gateFinding`，断言 `accept === false` 且 `reason` 以 `rate:` 开头；同一 fixture 只把那条记录的 `ts` 移到窗口外 ⇒ 断言 `accept === true`。两次取值与 `recentCount` 读数一并进 `## Evidence`
-- [ ] 所选方案落地后有**能取假**的对照：把修复点改回原实现（或读而不消费）⇒ 上一条中「饱和窗口」用例转红，而纯函数用例（`plugin/test/routine-file-gate.test.mjs`）仍全绿；对照命令与两次数值进 `## Evidence`
+- [ ] 判据能取假（负对照，一次性可复跑）：在本任务改动的文件上，把消费点（`selectFilings` 的复现序消费 / `countRecentFilings` 的 routine 维度）暂时改成「读而不消费」，重跑上一条那棵树上的用例 ⇒ 该用例必须转红；随后改回原样。执行命令、改前改后两次用例结果逐字进 `## Evidence`，且 `plugin/test/routine-file-gate.test.mjs` 的纯函数用例在两次取值下均全绿
 - [ ] 无生产伪造：未为取绿手写任何 `filing-round` / `task-status-events` 行，未修改任何生产任务状态换读数；本任务的观测一律来自既有载体
 
 ## DoD
