@@ -24,6 +24,10 @@ import { verdictFromGateCheck } from "./acceptance-runner.ts";
 import { readGatesConfig } from "./registry.ts";
 import { appendGateEvent, type GateEvent } from "./gate-event-store.ts";
 import { TASK_STATUS, TASK_STATUSES, type Task, type TaskStatus } from "../abi.ts";
+// The DECLARED lifecycle edge table and its types now live in the kernel (see the pointer further
+// down, where the table used to sit); imported here for `lifecycleEdge()`'s lookup and re-exported
+// so every existing `from "../gate/lifecycle.ts"` specifier keeps resolving.
+import { LIFECYCLE_EDGES, type LifecycleEdge, type LifecycleEdgeKind, type LifecycleActor } from "../kernel/task-transition.ts";
 
 interface ProviderClient {
   taskGet: (id: string) => Promise<Task | null>;
@@ -72,85 +76,25 @@ export function assertTransition(status: string, dir: "forward" | "back"): void 
   }
 }
 
-// ── The DECLARED lifecycle edge table
-//    (gap-transitions-table-lacks-needs-human-and-superseded-edges) ──────────
+// ── The DECLARED lifecycle edge table LIVES IN THE KERNEL ───────────────────────────────────────
+//    (gap-transitions-table-lacks-needs-human-and-superseded-edges) ──────────────────────────────
 //
-// WHY THIS EXISTS: `TRANSITIONS` above is only the promote/retreat ADJACENCY the two CLI verbs
-// walk — two edges per status. It is not a declaration of the whole lifecycle: production also
-// reaches statuses through writers that never consult it (the promotion driver's todo→ready, the
-// worker fan-in's ready→done and its done→ready "done 未落地" reset, `markNeedsHuman`'s
-// todo|ready→needs-human, the out-of-band needs-human→done completion, and every
-// `task_write`-driven supersede). Replaying 10k+ commits of `tasks/*.md` status flips against
-// `TRANSITIONS` (readings archived in
-// tasks/gap-status-flip-history-and-parser-diff-readings.md) put 17.7% of flips off that table,
-// and EVERY off-table flip at/after 2026-09-20 involves `needs-human` or `superseded` — the table
-// was missing those statuses' edges, not being violated. The table below is that missing
-// declaration: ALL 5×5 status pairs, each one either a declared EDGE or an explicitly declared
-// ILLEGAL pair. There is no third "silently undeclared" state (hard rule 3b) — the coverage test
-// in `lifecycle-edge-table.test.mjs` enumerates TASK_STATUSES×TASK_STATUSES and fails on any pair
-// that is neither, so adding a new status or edge without declaring it reds the suite.
+// `LIFECYCLE_EDGES` and its types (`LifecycleEdge` / `LifecycleEdgeKind` / `LifecycleActor`) are
+// defined ONCE in `../kernel/task-transition.ts` and re-exported here so every existing
+// `from "../gate/lifecycle.ts"` specifier keeps resolving. WHY THE KERNEL: the promotion path is
+// exactly where the product judge (this module) and the driver layer (`plugin/scripts/task-ops.ts`,
+// which owns `patchStatusField`) meet, and `kernel/` is the only placement both reach without a
+// `packages/**` → `plugin/**` reverse edge (`import-graph-check.ts` ratchets that at 0) — the same
+// argument that moved `regex-escape.ts` and `shape-sections.ts` there. The table's own WHY (the 5×5
+// declaration, `current` vs `legacy`, the verified actor vocabulary) moved WITH it.
 //
 // ⛔ DECLARATION ONLY — this table changes NO runtime transition behaviour. `TRANSITIONS` /
 // `legalForward` / `legalBack` / `assertTransition` are deliberately NOT derived from it; the
 // 25-pair golden comparison in `lifecycle-edge-table.test.mjs` pins their outputs to exactly what
 // they returned before this table existed. Wiring the writers (`patchStatusField` et al.) to
 // consult this table is a FOLLOW-UP task, not this one.
-//
-// `status` — the CURRENT-MODEL judgement (documented rule, not a timestamp):
-//   "current"  the edge belongs to the lifecycle model in force today: wired into `TRANSITIONS`,
-//              OR produced by a live DEDICATED writer in-tree (driver promotion / fan-in /
-//              markNeedsHuman / retreat / out-of-band complete), OR observed in production
-//              at/after 2026-09-20 (the reading's recent window).
-//   "legacy"   no live dedicated writer today; observed only historically (the retired todo→done
-//              skip, one-off manual ABI writes, the old status vocabulary).
-//   An edge is `current` iff (wired ∨ live-dedicated-writer ∨ observed ≥ 2026-09-20).
-//
-// `actors` — the VERIFIED writer classes, read out of the tree, never guessed. A dedicated writer
-// is named by role; an edge whose only writer is the generic Provider-ABI write says
-// `["task_write"]`; an edge whose historical writer could not be established says
-// `["unaudited"]` (缺值 = 未查, hard rule 6 — never a guess dressed as an audit).
-export type LifecycleEdgeKind = "promote" | "retreat" | "escalate" | "resolve" | "supersede";
-
-/** The verified writer vocabulary `LifecycleEdge.actors` draws from. */
-export type LifecycleActor =
-  | "driver-promotion" // promotion-driver / setTaskStatus (todo→ready)
-  | "fan-in" // worker-fan-in flip done + its done→ready "done 未落地" reset
-  | "retreat" // lifecycle runRetreat + ready-pool-check retreatReadyToTodo
-  | "needs-human-writer" // driver-filters markNeedsHuman (todo|ready→needs-human)
-  | "out-of-band-complete" // lifecycle runCompleteOutOfBand (any→done, no gate verdict)
-  | "task_write" // the generic Provider-ABI status write (CLI/MCP/agent)
-  | "unaudited"; // historical edge, writer not established from the tree
-
-export interface LifecycleEdge {
-  from: TaskStatus;
-  to: TaskStatus;
-  /** The transition's semantic role — `escalate` is "→needs-human", `resolve` is
-   *  "needs-human→other", `supersede` is "→superseded". */
-  kind: LifecycleEdgeKind;
-  actors: readonly LifecycleActor[];
-  status: "current" | "legacy";
-}
-
-/** Every status pair the lifecycle has ever declared as a REAL edge (17 of the 25). */
-export const LIFECYCLE_EDGES: readonly LifecycleEdge[] = [
-  { from: TASK_STATUS.TODO, to: TASK_STATUS.READY, kind: "promote", actors: ["driver-promotion"], status: "current" },
-  { from: TASK_STATUS.TODO, to: TASK_STATUS.DONE, kind: "promote", actors: ["unaudited"], status: "legacy" },
-  { from: TASK_STATUS.TODO, to: TASK_STATUS.NEEDS_HUMAN, kind: "escalate", actors: ["needs-human-writer"], status: "current" },
-  { from: TASK_STATUS.TODO, to: TASK_STATUS.SUPERSEDED, kind: "supersede", actors: ["task_write"], status: "legacy" },
-  { from: TASK_STATUS.READY, to: TASK_STATUS.TODO, kind: "retreat", actors: ["retreat"], status: "current" },
-  { from: TASK_STATUS.READY, to: TASK_STATUS.DONE, kind: "promote", actors: ["fan-in"], status: "current" },
-  { from: TASK_STATUS.READY, to: TASK_STATUS.NEEDS_HUMAN, kind: "escalate", actors: ["needs-human-writer"], status: "current" },
-  { from: TASK_STATUS.READY, to: TASK_STATUS.SUPERSEDED, kind: "supersede", actors: ["task_write"], status: "current" },
-  { from: TASK_STATUS.DONE, to: TASK_STATUS.TODO, kind: "retreat", actors: ["unaudited"], status: "legacy" },
-  { from: TASK_STATUS.DONE, to: TASK_STATUS.READY, kind: "retreat", actors: ["fan-in", "retreat"], status: "current" },
-  { from: TASK_STATUS.DONE, to: TASK_STATUS.NEEDS_HUMAN, kind: "escalate", actors: ["unaudited"], status: "legacy" },
-  { from: TASK_STATUS.DONE, to: TASK_STATUS.SUPERSEDED, kind: "supersede", actors: ["task_write"], status: "legacy" },
-  { from: TASK_STATUS.NEEDS_HUMAN, to: TASK_STATUS.TODO, kind: "retreat", actors: ["retreat"], status: "current" },
-  { from: TASK_STATUS.NEEDS_HUMAN, to: TASK_STATUS.READY, kind: "resolve", actors: ["task_write"], status: "current" },
-  { from: TASK_STATUS.NEEDS_HUMAN, to: TASK_STATUS.DONE, kind: "resolve", actors: ["out-of-band-complete"], status: "current" },
-  { from: TASK_STATUS.NEEDS_HUMAN, to: TASK_STATUS.SUPERSEDED, kind: "supersede", actors: ["task_write"], status: "legacy" },
-  { from: TASK_STATUS.SUPERSEDED, to: TASK_STATUS.READY, kind: "resolve", actors: ["unaudited"], status: "legacy" },
-];
+export { LIFECYCLE_EDGES };
+export type { LifecycleEdge, LifecycleEdgeKind, LifecycleActor };
 
 /** A status pair the lifecycle explicitly declares ILLEGAL (8 of the 25) — the other half of the
  *  coverage partition. `why` is the adjudication, not a restatement of `from`/`to`. */

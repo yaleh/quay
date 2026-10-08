@@ -12,7 +12,10 @@
 //   (2) the registry carries no STALE entry — a declared name that no longer appears in code also
 //       fails, so the registry cannot rot in either direction;
 //   (3) the carriers declared by DRIVER_KINDS (plugin/scripts/driver-runtime.ts) carry their
-//       kind's driver file as `owner`, so a driver↔registry drift fails too.
+//       kind's driver file as `owner`, so a driver↔registry drift fails too. Dually, an owner
+//       OUTSIDE those drivers must name a real module file in the repo (`ownerIsRealModule`) — the
+//       registry schema permits a declared non-driver writer module (e.g. a kernel primitive), and a
+//       fabricated path is still rejected.
 //
 // POSITION, NOT KEYWORD (硬规则 2): comments are MASKED before extraction (via the shared
 // source-text-lib.ts#maskComments, a lexical state machine that skips string/template literals),
@@ -49,6 +52,23 @@ const FIXED_NAMES = new Set(["anchor.json", "server.json", "full-suite-state.jso
 const KIND_VOCABULARY = new Set(["jsonl-log", "state-json", "control-json", "lock", "other"]);
 const UNOWNED = "unowned-yet";
 const KNOWN_TRUE_SAMPLE = "worker-outcome.jsonl";
+
+/** Is `owner` a real module file (a repo-relative path to a tracked source file)?
+ *
+ *  The registry schema is `owner: <declared writer module repo-relative path> | "unowned-yet"`, so a
+ *  module OUTSIDE the six DRIVER_KINDS drivers is a legitimate owner — e.g. the kernel primitive
+ *  `packages/quay/src/kernel/task-transition.ts` writes `.quay/task-status-events.jsonl`
+ *  (GOAL-030). The original rule (owner MUST be a DRIVER_KINDS driver) predates non-driver owned
+ *  carriers; this keeps its intent — owning a carrier is a DECLARED act, so a fabricated or typo'd
+ *  path is still rejected — without confining ownership to drivers. */
+function ownerIsRealModule(owner) {
+  if (typeof owner !== "string" || !/\.(ts|mts|cts|mjs|cjs|js)$/.test(owner)) return false;
+  try {
+    return fs.statSync(path.join(REPO_ROOT, owner)).isFile();
+  } catch {
+    return false;
+  }
+}
 
 /** Every carrier name carried by a single string/template literal VALUE (path-segment semantics). */
 function carrierNamesInValue(value) {
@@ -222,11 +242,12 @@ test("DRIVER_KINDS: each declared carrier's registry owner is its kind's driver 
     }
   }
   assert.deepEqual(problems, [], problems.join("\n"));
-  // The converse: no entry may claim an owner that DRIVER_KINDS does not declare (owning a carrier
-  // is a DECLARED act — an ad-hoc owner path would be an undeclared claim).
+  // The converse: no entry may claim an owner that is NEITHER a DRIVER_KINDS driver NOR a real
+  // module file in the repo (owning a carrier is a DECLARED act — an ad-hoc / fabricated owner path
+  // would be an undeclared claim). See `ownerIsRealModule` for why a non-driver owner is legitimate.
   for (const e of readRegistry()) {
-    if (e.owner !== UNOWNED && !declaredOwnerPaths.has(e.owner)) {
-      problems.push(`${e.name}: owner "${e.owner}" is not a DRIVER_KINDS driver`);
+    if (e.owner !== UNOWNED && !declaredOwnerPaths.has(e.owner) && !ownerIsRealModule(e.owner)) {
+      problems.push(`${e.name}: owner "${e.owner}" is neither a DRIVER_KINDS driver nor a real module file in the repo`);
     }
   }
   assert.deepEqual(problems, [], problems.join("\n"));
