@@ -3,7 +3,7 @@ id: AC-337
 title: 分支自举：按文件路径启动的分支 promotion-driver（默认子进程解析）在沙盒中触发 todo→ready，分支
   ready-pool-check --revaluate-apply 触发 ready→todo；每条事件的写入模块与入口 realpath
   都在被求值的树内；主检出驱动负对照写 0 条事件；生产数据不变
-status: draft
+status: active
 kind: criterion
 goal: GOAL-030
 criterion: |
@@ -35,5 +35,17 @@ expect: exit 0 = 两类转移都被触发、全部事件由本树代码写出、
 origin: 人 2026-10-08「现在开始执行…正式创建一个真实的重构 goal，并启用 goal branch」：goal
   分支机制首个真实试点，范围严格限于晋升路径的 todo→ready / ready→todo 两条写入；先验证“在分支上运行 Quay 并验证
   Quay”的自举路径，健康度达标后才进入更大重构。
+activatedAt: 2026-10-08T02:29:23.911Z
+statusLog:
+  - at: 2026-10-08T02:29:23.911Z
+    from: draft
+    to: active
+    actor: cli
+    reason: 人 2026-10-08 授权立项并进入 GOAL-030（goal 分支首个真实试点）；承接任务已立并停放（needs-human），激活本
+      AC 不会触发乱序自动立案
+fidelity:
+  verdict: faithful
+  reason: "fidelity judge: faithful"
+  at: 2026-10-08T02:29:23.910Z
 phase: pre-merge
 ---
