@@ -50,6 +50,7 @@ GOAL-030 的第二块：把晋升路径上的两条任务状态写入改走 kern
 - plugin/scripts/ready-pool-check.ts
 - plugin/test/ready-pool-check-transition-writes.test.mjs
 - plugin/test/ready-pool-check-s11.test.mjs
+- plugin/test/live-web-address.test.mjs
 
 ## 停放说明
 
@@ -116,9 +117,10 @@ $ node --test plugin/test/ready-pool-check-s*.test.mjs
 ```
 （唯一红是 `ready-pool-check-s11` 的 `git status --porcelain` 精确空断言被新事件载体弄红，见下。）
 
-Touches 扩宽说明（唯一一处超出原三文件：`plugin/test/ready-pool-check-s11.test.mjs`）——两条都是机制强制的，不是可选的：
+Touches 扩宽说明（超出原三文件的两处：`plugin/test/ready-pool-check-s11.test.mjs`、`plugin/test/live-web-address.test.mjs`）——三处都是机制强制的，不是可选的：
 1. 该测试的精确空断言在【裸 fixture git 仓库】里把新的事件载体 `.quay/task-status-events.jsonl`（运行时状态，本 checkout 未 gitignore；`ready-pool-check-s12.test.mjs:81` 已有同款「过滤未跟踪 `.quay/` 遥测」的形状）读成脏树；断言改为过滤未跟踪 `.quay/` 遥测后仍取假（tracked 残留脏 ⇒ 红）。
 2. `select-tests-for-touches.ts` 按 **basename 配对**解析 Touches（`plugin/scripts/ready-pool-check.ts` → `*/test/ready-pool-check.test.mjs`；该文件已被 `gap-suite-split-15-over-30s-test-files` 拆成 22 个 shard 而删除 ⇒ 结构性不可解析）。原三 Touch 只有 1 个可解析 ⇒ coverage 0.33 < 0.5 ⇒ **AC5 要求的不带 `--allow-thin` 的 scoped 门必然 thin 退出非 0**。把真正改动过的 s11 如实登记后为 2/4 = 0.50（阈值是 `< 0.5`），scoped 门才真实选择两个测试文件并全绿。
+3. `plugin/test/live-web-address.test.mjs`（第二处扩宽，由本任务分支自己的提交 `67e938381` 写入 ⇒ 属 anti-drift 的 two-line-base「本任务自己的提交」判据，非登记不可）：该测试用 `CRITERIA.length` **钉住** `goals/*.md` 里 `criterion.includes("live-web-address.ts")` 的条数。本任务分支追平 develop 后，`goals/AC-340-*.md` 解析为 **develop 的权威新版**（`fb6dd261b`，判据改走 `quay server status --json --root`，不再点名 helper）⇒ 语料实为 21，而 goal 分支侧旧 pin 是 22 ⇒ 套件红 `21 !== 22`。修法 = **逐字取 develop 版**（`67e938381`；⛔ 不是把 AC-340 的 helper 调用“恢复”回去——那是回退 develop 的权威 goal 写入）。文件因此与本任务分支的基点 `goal/GOAL-030` 不同（goal 线是 22 pin）= 真实写出，故如实登记；相对 develop 则字节相同。
 
 DoD 其余：
 - 落盘结果不变：`applied_promotions` / `applied_revaluations` 的形状与条数不变（22 个 shard 全绿）；多出的只有每次落盘的事件行，以及新输出字段 `transition_refusals`（本任务两条合法边上恒为空数组，`refuse`/`not-evaluated` 才非空且此时**不写盘**）。
