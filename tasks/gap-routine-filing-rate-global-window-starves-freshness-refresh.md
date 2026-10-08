@@ -1,6 +1,6 @@
 ---
 id: gap-routine-filing-rate-global-window-starves-freshness-refresh
-status: todo
+status: ready
 labels:
   - gap
 parent: null
