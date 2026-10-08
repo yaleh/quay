@@ -61,6 +61,10 @@ import { defaultDriverConfig, loadDriverConfig, DRIVERS_CONFIG_REL } from "./dri
 // G7（缺口计算）：task→AC 关联字段 goal_ac 的单一读取路径（parseFrontmatterCompletely +
 // frontmatterStatus / frontmatterGoalAc 投影，⛔ 不在本文件另写一份 frontmatter 解析）。
 import { parseFrontmatterCompletely, frontmatterStatus, frontmatterGoalAc } from "./task-schema.ts";
+// GOAL-031 ①：task 状态词表消费插件树正本 task-status.ts（TASK_STATUS.NEEDS_HUMAN），⛔ 不在本文件
+// 另写一份 "needs-human" 生命周期字面量（硬规则 5b）。⚠️ GOAL-AC 的 status 字段是【另一套词表】
+// （active/achieved/needs-human，在域 AC 集合处），与本 import 无关，绝不在此替换。
+import { TASK_STATUS } from "./task-status.ts";
 // AC150 同族（G9 语义环）：资源门 + halt 判定与 worker/promotion 共用同一份实现（driver-shared.ts，
 // ⛔ 非复制粘贴）。
 import { resourceGateCheck, isHalted } from "./driver-shared.ts";
@@ -2085,7 +2089,7 @@ export interface ReadyPoolJudgment {
  *  不能自行前进，⛔ 与 judgment 无关）。其余状态（done/superseded）本就不在「推进中」集合
  *  （computeGoalGaps 只数 todo/ready/needs-human）。 */
 export function isTaskStuck(task: { id: string; status: string | null }, judgment: ReadyPoolJudgment): boolean {
-  if (task.status === "needs-human") return true;
+  if (task.status === TASK_STATUS.NEEDS_HUMAN) return true;
   if (task.status === "todo") return !judgment.eligibleTodoIds.has(task.id);
   if (task.status === "ready") return judgment.excludedReadyIds.has(task.id);
   return false;
@@ -2095,7 +2099,7 @@ export function isTaskStuck(task: { id: string; status: string | null }, judgmen
  *  done/superseded 等其余状态不是牵引（工作已做过/已放弃）——computeGoalGaps 与 triageDraftAc 都调它
  *  （⛔ 两处各写一份字面量即漂移，硬规则 5b——gap-goal-gap-done-task-not-traction-respawns-every-round AC3）。 */
 export function isTractionStatus(status: string | null | undefined): boolean {
-  return status === "todo" || status === "ready" || status === "needs-human";
+  return status === "todo" || status === "ready" || status === TASK_STATUS.NEEDS_HUMAN;
 }
 
 /** 本轮 active GOAL 的 id 集合（⛔ 只从 records 投影，不另读一份 GOAL 列表）。 */
@@ -2316,7 +2320,7 @@ export function computeGoalGaps(
         out.push({ goal, ac: id, state: "not-evaluated", taskCount: null });
       } else if (inFlight.length === 0) {
         out.push({ goal, ac: id, state: "frozen-violated", taskCount: 0 });
-      } else if (inFlight.every((t) => t.status === "needs-human")) {
+      } else if (inFlight.every((t) => t.status === TASK_STATUS.NEEDS_HUMAN)) {
         out.push({ goal, ac: id, state: "stalled", taskCount: inFlight.length });
       } else if (judgment !== null && inFlight.every((t) => isTaskStuck(t, judgment))) {
         out.push({ goal, ac: id, state: "stalled", taskCount: inFlight.length });
@@ -2380,7 +2384,7 @@ export function computeGoalGaps(
       const inFlight = taskFacts.filter((t) => t.goalAc === id && isTractionStatus(t.status));
       if (inFlight.length === 0) {
         out.push({ goal, ac: id, state: "standing-violated", taskCount: 0 });
-      } else if (inFlight.every((t) => t.status === "needs-human")) {
+      } else if (inFlight.every((t) => t.status === TASK_STATUS.NEEDS_HUMAN)) {
         out.push({ goal, ac: id, state: "stalled", taskCount: inFlight.length });
       } else if (judgment !== null && inFlight.every((t) => isTaskStuck(t, judgment))) {
         out.push({ goal, ac: id, state: "stalled", taskCount: inFlight.length });
@@ -2440,7 +2444,7 @@ export function computeGoalGaps(
         state = classifyCriterionKind(r.criterion);
         taskCount = allAssociated.length; // 枚举关联数（⛔ 非布尔化，硬规则 3）
       }
-    } else if (traction.every((t) => t.status === "needs-human")) {
+    } else if (traction.every((t) => t.status === TASK_STATUS.NEEDS_HUMAN)) {
       state = "stalled";
       taskCount = count;
     } else if (judgment !== null && traction.every((t) => isTaskStuck(t, judgment))) {
