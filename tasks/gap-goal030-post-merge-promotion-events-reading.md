@@ -53,4 +53,13 @@ GOAL-030（goal 分支首个真实试点）的第六条 AC：**并入后生产�
 
 ## 停放说明
 
-本任务以 needs-human 状态立案，用于停放：在 GOAL-030 尚未并入 develop 之前，⛔ 不得被派发（判据只会 `exit 3`，白跑一轮）。由立案会话在 `.quay/gate-events.jsonl` 出现 GOAL-030 的 landed `goal-merge-result`、且主检出已追上 develop 之后改回 todo。
+本任务以 needs-human 状态立案，用于停放：在 GOAL-030 尚未并入 develop 之前，⛔ 不得被派发（判据只会 `exit 3`，白跑一轮）。
+
+**2026-10-08T22:32Z 复评（主检出 = author；`author` 与 `develop` 已同为 `d71d2bde4`，分叉 0/0）——解停条件的前半已满足，但判据仍 `exit 3`：**
+
+- 前提一（并入 develop）**已满足**：主检出 `.quay/gate-events.jsonl` 有 GOAL-030 的 landed `goal-merge-result`（`verdict=pass`、`outcome=landed`、`landedSha=d71d2bde4a74d35ce6981157f82a2710a2dab810`、`t=2026-10-08T18:35:54.646Z`）；主检出工作树已含 `packages/quay/src/kernel/task-transition.ts`（17165 B）与 `plugin/scripts/ready-pool-check.ts` 的 kernel 接线（`grep -c 'kernel/task-transition'` = 1）。
+- 前提二（并入后已有生产晋升）**未满足**：AC-341 判据于 2026-10-08T22:32Z 在**共享主检出根**实跑，`exit 3`，stderr 逐字：`NOT-EVALUATED: no production promotion-driver todo→ready commit on develop since the merge (2026-10-08T18:35:54.646Z)`。`git log develop --since=t` 中主题匹配 `tasks: <id> todo→ready（promotion-driver 机械晋升）` 的提交 **0 条**（`t` 之前最后一条为 `571f5f425` @ 2026-10-08T18:16:03Z）。
+- **直接量根因（⛔ 不是 GOAL-030 接线在生产上落空）**：`.quay/promotion-round.jsonl` 显示 `pool` 自 `2026-10-08T18:29:42Z`（round 94）起持续为 0，**早于并入时刻 18:35:54Z**；并入后每一轮（至 round 373 @ 2026-10-08T22:31:59Z）`pool` 均为 0，无一轮 `pool≥1`，`action=none`、`should_apply=false`、`error=null`。promotion-driver 本身存活且正常轮转（`driver pid=1017798 alive=1 running=1`）。⇒ 并入后无晋升，是因为**池中无 todo 可晋升**，而非接线故障。
+- **⚠️ 上游阻塞（已报人）**：AC-341 是 GOAL-030 七条 AC 中唯一未达成者（AC-336/337/338/339/340/342 均 `achieved`）⇒ **GOAL-030 的收口以「ready 池重新出现可晋升 todo」为关键路径**。该工作区当前 `todo=0 / ready=0`（board 已排空），worker-driver 上一轮 `action=stop`（2026-10-08T22:33:48Z，pool=0）⇒ 在重新投喂工作之前，AC-341 结构上不可测。这属于池饥饿，**不是本任务可解**。
+
+**新的解停条件（取代上文「并入 + 追上 develop」——后者已满足，但已被证明不足）**：在 `git log develop` 上出现**至少一次**主题匹配 `tasks: <id> todo→ready（promotion-driver 机械晋升）` 且提交时刻 > `t=2026-10-08T18:35:54.646Z` 的记录之后，由立案会话把本任务改回 `todo`。在那之前派发本任务，判据只会再次 `exit 3`（白跑一轮），正是本停放要避免的形态。
