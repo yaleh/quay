@@ -1,0 +1,60 @@
+{
+  "before": {
+    "ref": "develop",
+    "sha": "a821d680eb586b460cb49decc74606ba82fbc34c",
+    "tree": "git archive develop packages plugin/scripts",
+    "value": "needs-human",
+    "dispersion": 5,
+    "files": [
+      "packages/quay-github/src/github-client.ts",
+      "packages/quay/src/observation.ts",
+      "plugin/scripts/goal-driver.ts",
+      "plugin/scripts/task-status.ts",
+      "plugin/scripts/workflow-baseline-metrics.ts"
+    ],
+    "locationCount": 12
+  },
+  "after": {
+    "ref": "task/gap-goal031-selfhost-evidence-and-arch-layer-review",
+    "base": "goal/GOAL-031 @ 08d7238a81b4d04e388f88650579b6b809d6172f",
+    "worktree": "/data/home/yale/work/quay-worktrees/gap-goal031-selfhost-evidence-and-arch-layer-review",
+    "value": "needs-human",
+    "dispersion": 4,
+    "files": [
+      "packages/quay-github/src/github-client.ts",
+      "packages/quay/src/observation.ts",
+      "plugin/scripts/task-status.ts",
+      "plugin/scripts/workflow-baseline-metrics.ts"
+    ],
+    "locationCount": 8
+  },
+  "grepCrossCheck": {
+    "pattern": "status === \"needs-human\"",
+    "file": "plugin/scripts/goal-driver.ts",
+    "before": 6,
+    "after": 1
+  },
+  "residual": [
+    {
+      "file": "plugin/scripts/task-status.ts",
+      "line": 9,
+      "why": "正本声明本身（TASK_STATUS.NEEDS_HUMAN 的定义处），非缺陷"
+    },
+    {
+      "file": "packages/quay-github/src/github-client.ts",
+      "line": 646,
+      "why": "已被 gap-abi-status-lifecycle-vocab-scattered-no-named-type 的 AC2 显式豁免：独立 provider 包不能静态 import abi.ts，QN-072/073 needle 测试钉死该字面量形状；不可动，不计入待收敛"
+    },
+    {
+      "file": "packages/quay/src/observation.ts",
+      "line": "1443,1451",
+      "why": "比较的是促晋升结果账本的 action 字段，不是 task.status —— 异词表假阳性"
+    },
+    {
+      "file": "plugin/scripts/workflow-baseline-metrics.ts",
+      "line": "643,776",
+      "why": "比较的是 workflow 事件的 outcome 字段，不是 task.status —— 异词表假阳性"
+    }
+  ],
+  "method": "同一检测函数 archguard 的 extractDiscriminatorTypes + detectDispersion（plugin npm-cache dist），源目录 packages + plugin/scripts（同 MCP archguard_detect_shape_smells 的 expandSourceEntries：**/*.{ts,tsx} 排除 node_modules/测试）。before=git archive develop，after=任务 worktree 的 packages+plugin/scripts。grep 用位置判定交叉核对。"
+}
