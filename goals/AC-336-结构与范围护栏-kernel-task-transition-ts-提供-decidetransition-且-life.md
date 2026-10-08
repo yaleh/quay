@@ -3,7 +3,7 @@ id: AC-336
 title: 结构与范围护栏：kernel/task-transition.ts 提供 decideTransition 且 LIFECYCLE_EDGES
   只在 kernel 定义一次；ready-pool-check 不再直接调用 patchStatusField 并 import 该模块；fan-in 与
   needs-human 写入计数不变（4/2）；import-graph-check 绿且无 kernel 越界
-status: active
+status: achieved
 kind: criterion
 goal: GOAL-030
 criterion: |
@@ -36,6 +36,11 @@ statusLog:
     actor: cli
     reason: 人 2026-10-08 授权立项并进入 GOAL-030（goal 分支首个真实试点）；承接任务已立并停放（needs-human），激活本
       AC 不会触发乱序自动立案
+  - at: 2026-10-08T04:47:14.217Z
+    from: active
+    to: achieved
+    actor: goal-driver
+    reason: "I2: criterion pass"
 fidelity:
   verdict: faithful
   reason: "fidelity judge: faithful"
