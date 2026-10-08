@@ -1,7 +1,7 @@
 ---
 id: AC-340
 title: 预览运行分支代码：被求值树下登记在册且存活的 quay serve，其入口文件 realpath 位于该树内，且其 web 首页可访问
-status: active
+status: achieved
 kind: criterion
 goal: GOAL-030
 criterion: >-
@@ -79,6 +79,11 @@ statusLog:
     actor: cli
     reason: 人 2026-10-08 授权立项并进入 GOAL-030（goal 分支首个真实试点）；承接任务已立并停放（needs-human），激活本
       AC 不会触发乱序自动立案
+  - at: 2026-10-08T03:11:33.809Z
+    from: active
+    to: achieved
+    actor: goal-driver
+    reason: "I2: criterion pass"
 fidelity:
   verdict: faithful
   reason: "fidelity judge: faithful"
