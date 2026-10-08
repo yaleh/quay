@@ -61,6 +61,8 @@ GOAL-030 的第二块：把晋升路径上的两条任务状态写入改走 kern
 实施与落地形态（worktree `/data/home/yale/work/quay-worktrees/gap-goal030-promotion-writes-via-kernel-transition`，分支 `task/gap-goal030-promotion-writes-via-kernel-transition`，从 `goal/GOAL-030` 开出）：
 - 实现提交 `62f01fe13`（`plugin/scripts/ready-pool-check.ts` + 新测试 `plugin/test/ready-pool-check-transition-writes.test.mjs` + `plugin/test/ready-pool-check-s11.test.mjs`）；
 - 追平 develop 两次：`6e7ce2827`、`07ee32697`（第二次带来 AC-340 判据文件的 develop 权威版 + 本任务 Touches 扩宽）。
+- anti-drift 轮（退出原因 = `ANTI-DRIFT HARD FAIL: … 1 violation(s)`，`out-of-declared: … plugin/test/live-web-address.test.mjs`）：`67e938381`（套件红修复，取 develop 版）→ `db62419b2`（Touches 扩宽至 5 条，ABI 写入）→ `0874a0ea6`（把 ABI 写入的 develop 权威版并回本分支，anti-drift 转 OK）。
+- ⚠️ 本分支自己的提交 `67e938381` 写入了 `plugin/test/live-web-address.test.mjs` ⇒ 该文件对 anti-drift 的 two-line-base 判据而言是「本任务写出」，故必须登记（见「Touches 扩宽」第 3 条）；相对 develop 它字节相同。
 
 AC1 —— 本文件无直接写入且已接线：
 ```
@@ -89,25 +91,48 @@ $ bash .quay/ac336-criterion.sh
 PASS: kernel decideTransition present; LIFECYCLE_EDGES single definition in kernel; ready-pool-check has 0 direct writes and imports the kernel module; fan-in/needs-human untouched (2/4); import-graph-check green, kernelViolations []
 ```
 
-AC5 —— scoped 门（**未传 `--allow-thin`**）：
+AC5 —— scoped 门（**未传 `--allow-thin`**；Touches 扩宽至 5 条后的当次读数）：
 ```
-$ bash scripts/test.sh --for-task gap-goal030-promotion-writes-via-kernel-transition
-selection: plugin/test/ready-pool-check-s11.test.mjs + plugin/test/ready-pool-check-transition-writes.test.mjs
-           (coverage 0.50 = 2/4 Touches；非空、真跑)
-ℹ tests 11 · pass 11 · fail 0
+$ node --experimental-strip-types plugin/scripts/select-tests-for-touches.ts --task gap-goal030-promotion-writes-via-kernel-transition --root <worktree>
+task gap-goal030-promotion-writes-via-kernel-transition: 3 test file(s)
+  plugin/test/live-web-address.test.mjs
+  plugin/test/ready-pool-check-s11.test.mjs
+  plugin/test/ready-pool-check-transition-writes.test.mjs
+unresolved (2): plugin/scripts/ready-pool-check.ts（无 */test/ready-pool-check.test.mjs）、tasks/<id>.md
+coverage: 0.60 (3/5 Touches resolved)
+$ bash scripts/test.sh --for-task gap-goal030-promotion-writes-via-kernel-transition   # 未传 --allow-thin
+ℹ tests 28 · pass 28 · fail 0
 SCOPED_GATE_EXIT=0
 ```
 ⚠️ 第一次运行（原三文件 Touches）**是** thin 且退出 1：`test-selection-thin: resolved tests for 1/3 Touches entries (0.33) < 0.5; pass --allow-thin to run anyway` ⇒ scoped 门 exit 1。原因见下面「Touches 扩宽」第 2 条。
 
-AC6 —— 负对照（`cp` 备份，⛔ 未用 `git checkout` 还原）：
+AC6 —— 负对照（`cp` 备份，⛔ 未用 `git checkout` 还原；本工作树内**当场重跑**一次，读数如下）：
 ```
-$ cp plugin/scripts/ready-pool-check.ts .quay/ac6-ready-pool-check.ts.bak   # md5 d36fa67447a0b195fedd7f6cda8241eb
-  # 临时把 setTaskStatus（promote 路径）的 recordStatusEvent(...) 调用改为 `const eventError = undefined;`
+$ cp plugin/scripts/ready-pool-check.ts .quay/ac6-ready-pool-check.ts.bak
+$ md5sum plugin/scripts/ready-pool-check.ts .quay/ac6-ready-pool-check.ts.bak
+d36fa67447a0b195fedd7f6cda8241eb  plugin/scripts/ready-pool-check.ts
+d36fa67447a0b195fedd7f6cda8241eb  .quay/ac6-ready-pool-check.ts.bak
+  # 临时把 setTaskStatus（promote 路径，:3750）的 recordStatusEvent(...) 调用改为 `const eventError = undefined;`
 $ node --test plugin/test/ready-pool-check-transition-writes.test.mjs   → exit 1
-  ✖ promote edge: --apply flips todo→ready and appends exactly one promote event … (1 fail / 3)
-$ cp .quay/ac6-ready-pool-check.ts.bak plugin/scripts/ready-pool-check.ts  # md5 仍 d36fa67447a0b195fedd7f6cda8241eb
+  ✖ promote edge: --apply flips todo→ready and appends exactly one promote event … (actual 0 !== expected 1)
+$ cp .quay/ac6-ready-pool-check.ts.bak plugin/scripts/ready-pool-check.ts
+$ md5sum plugin/scripts/ready-pool-check.ts
+d36fa67447a0b195fedd7f6cda8241eb  plugin/scripts/ready-pool-check.ts   # 与备份逐字节相同
 $ node --test plugin/test/ready-pool-check-transition-writes.test.mjs   → exit 0
-  ℹ pass 3 · fail 0
+  ℹ tests 3 · pass 3 · fail 0
+```
+
+anti-drift（fan-in 的前置硬闸；本轮从 HARD FAIL 转为 OK 的正是本任务的判据）：
+```
+$ node --experimental-strip-types plugin/scripts/anti-drift-touches-check.ts \
+    --task gap-goal030-promotion-writes-via-kernel-transition --worktree <worktree> --merge-target goal/GOAL-030
+（修前）ANTI-DRIFT HARD FAIL: … — 1 violation(s)
+         out-of-declared: task wrote plugin/test/live-web-address.test.mjs (matches no declared Touches glob)
+（扩宽 Touches 第 3 条后）
+BASELINE: merge target 'goal/GOAL-030' is a goal line behind the landing baseline 'develop' (9 commit(s) behind,
+          7 landed commit(s) of its own) — a valid catch-up landing; judging … 's own commits (two-line base).
+ANTI-DRIFT OK: task gap-goal030-promotion-writes-via-kernel-transition — 4 actual file(s), all within declared Touches (5 glob(s))
+exit 0
 ```
 
 回归（既有行为不变）：
