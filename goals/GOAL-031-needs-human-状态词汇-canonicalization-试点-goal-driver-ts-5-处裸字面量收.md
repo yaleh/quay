@@ -2,13 +2,19 @@
 id: GOAL-031
 title: needs-human 状态词汇 canonicalization 试点——goal-driver.ts 5 处裸字面量收敛到已有
   task-status.ts 正本（非 kernel 第二套）
-status: active
+status: achieved
 kind: goal
 origin: 人 2026-10-08 指令：按已验证的小而真实 goal branch 方法推进下一轮重构，仅做 needs-human
   裸字面量收敛。执行前核实发现原技术前提有误（canonical source 应为已有的 abi.ts +
   plugin/scripts/task-status.ts，而非 kernel/task-transition.ts——该文件只存在于未合并的
   goal/GOAL-030 分支；原 dispersion≤2 目标因此不可达成，正确底线是 4），已据实修正，范围保持极小不变。详见 body。
 activatedAt: 2026-10-08T14:08:10.301Z
+statusLog:
+  - at: 2026-10-08T17:09:24.141Z
+    from: active
+    to: achieved
+    actor: goal-driver
+    reason: "I2: all ACs achieved + sufficiency covered"
 branch: true
 ---
 ## 背景
