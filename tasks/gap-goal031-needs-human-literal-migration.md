@@ -1,7 +1,7 @@
 ---
 id: gap-goal031-needs-human-literal-migration
 title: GOAL-031 ①：goal-driver.ts 5 处 needs-human 裸字面量迁移到 task-status.ts 正本
-status: todo
+status: ready
 labels:
   - gap
 parent: null
