@@ -1,7 +1,7 @@
 ---
 id: gap-goal-merge-suite-concurrent-npm-pack-staging-race-blocks-fan-in
 title: goal 并入的全量 suite 下两个测试在与真实 npm-pack staging 并发时必红，两次 GOAL-030 并入尝试均复现
-status: todo
+status: ready
 labels:
   - gap
   - defect
