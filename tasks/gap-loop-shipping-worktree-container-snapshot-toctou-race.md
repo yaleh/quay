@@ -2,7 +2,7 @@
 id: gap-loop-shipping-worktree-container-snapshot-toctou-race
 title: loop-shipping.test.mjs 的 worktreeContainerPaths 快照与实际 walk 之间存在 TOCTOU：新建
   worktree 在两者之间出现即误判多份物理拷贝
-status: todo
+status: ready
 labels:
   - gap
   - defect
