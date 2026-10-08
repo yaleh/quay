@@ -1,7 +1,7 @@
 ---
 id: gap-goal031-ac-coverage-suite-smoke-and-runtime-semantics
 title: GOAL-031 充分性跟进：提案新增候选 AC-346（测试与 smoke 全绿 + 迁移不改变运行时语义），覆盖退出条件中未被现有三条 AC 覆盖的两处
-status: todo
+status: needs-human
 labels:
   - gap
 parent: null
