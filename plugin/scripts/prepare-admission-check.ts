@@ -73,7 +73,14 @@ function leaseDir(workspace) {
 // Defensive: a taskId is always a plain id in real production use (e.g. "DIR-126-A"), but a test
 // fixture or a future caller could pass something path-like — never let taskId escape leaseDir via
 // a path separator (no `..`/`/`/`\` traversal out of `.quay/prepare-leases/`).
-function safeTaskIdSegment(taskId) {
+//
+// SINGLE SOURCE (gap-routine-semantic-dedup-scan-safe-task-id-segment): the ONE taskId-to-path-
+// segment sanitizer for the whole `.quay/prepare-*` lease-path family. proposal-convergence.ts
+// imports THIS function rather than holding its own private copy — the two copies were byte-
+// identical (both `String(taskId).replace(/[\\/]/g, "_")`) while their comments each claimed
+// verbatim reuse, so a change to the traversal guard here would have silently missed every lease/
+// checkpoint/epoch/telemetry path over there. Keep exactly one definition; extend this one.
+export function safeTaskIdSegment(taskId) {
   return String(taskId).replace(/[\\/]/g, "_");
 }
 function leasePath(workspace, taskId) {
@@ -869,7 +876,7 @@ export function runPreflightChecks({ mode, taskBody, charterBody, planBody, work
 }
 
 // ── Exposed for tests/fixtures (not part of the CLI contract). ─────────────────────────────────────
-export const _internal = { leaseDir, leasePath, auditPath, leaseKey, stalenessMsFor, _readLease, _readLeaseFileWithRetry };
+export const _internal = { leaseDir, leasePath, auditPath, leaseKey, stalenessMsFor, safeTaskIdSegment, _readLease, _readLeaseFileWithRetry };
 
 // ── CLI ──────────────────────────────────────────────────────────────────────────────────────────
 async function main(argv) {
