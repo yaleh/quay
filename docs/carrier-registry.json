@@ -446,6 +446,12 @@
       "readers": "unaudited"
     },
     {
+      "name": "task-status-events.jsonl",
+      "kind": "jsonl-log",
+      "owner": "packages/quay/src/kernel/task-transition.ts",
+      "readers": "unaudited"
+    },
+    {
       "name": "test.jsonl",
       "kind": "jsonl-log",
       "owner": "unowned-yet",
