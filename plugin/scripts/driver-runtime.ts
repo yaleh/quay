@@ -102,6 +102,9 @@ export {
   CONTROL_STATE_REL,
   PROMOTION_CONTROL_STATE_REL,
 };
+// Layer 0 · 常驻循环停机控制器（residentLoopStop，单一实现于 driver-shared.ts）：outer / promotion /
+// quality-gate 三循环共用——finding `driver-sleep-requeststop-triple`（semantic-dedup-scan）抽出。
+export { residentLoopStop, type ResidentLoopStop } from "./driver-shared.ts";
 // Layer 1a · filters（re-export，两 driver 经本文件消费同一谓词列表）。
 export { TASK_FILTERS, applyTaskFilters, makeFilterContext, allDepsDone, readTaskStatus };
 
