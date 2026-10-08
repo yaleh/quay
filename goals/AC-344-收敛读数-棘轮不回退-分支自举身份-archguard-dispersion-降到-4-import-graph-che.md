@@ -2,7 +2,7 @@
 id: AC-344
 title: 收敛读数 + 棘轮不回退 + 分支自举身份：ArchGuard dispersion 降到 4、import-graph-check
   四量不回退、身份证据指向 goal worktree
-status: active
+status: achieved
 kind: criterion
 goal: GOAL-031
 criterion: |-
@@ -29,6 +29,11 @@ statusLog:
     to: active
     actor: goal-cli
     reason: ""
+  - at: 2026-10-08T15:55:24.791Z
+    from: active
+    to: achieved
+    actor: goal-driver
+    reason: "I2: criterion pass"
 fidelity:
   verdict: not-evaluated
   reason: no judge configured
