@@ -3,7 +3,7 @@ id: gap-routine-semantic-dedup-scan-is-ancestor-pair
 title: "semantic-dedup-scan: The same git merge-base --is-ancestor predicate
   (false on any git error) implemented twice with different plumbing; a shared
   git-util would single-source it."
-status: ready
+status: done
 labels:
   - gap
   - routine-filed
