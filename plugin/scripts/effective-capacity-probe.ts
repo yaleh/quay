@@ -31,9 +31,10 @@
 //
 // ── Fail-open by contract (AC2/DoD) ──────────────────────────────────────────────────────────────
 // cgroup v2 unavailable (no unified hierarchy, no /proc/self/cgroup "0::" line, cpu.max/memory.max
-// absent or unparsable) ⇒ fall back to the existing readings (os.availableParallelism() / os.totalmem())
-// and REPORT that we fell back. It never refuses to run, and it never returns a number without saying
-// where the number came from.
+// absent or unparsable) ⇒ fall back to the existing readings (the repo's own host parallelism reading
+// — `hostParallelism()`, re-exported from runner-concurrency.ts, which is `RESOURCE_GATE_NPROC` →
+// os.availableParallelism() → os.cpus().length — and os.totalmem()) and REPORT that we fell back. It
+// never refuses to run, and it never returns a number without saying where the number came from.
 //
 // ── The third state (AC3, hard rule 3b) ──────────────────────────────────────────────────────────
 // "probe failed / cgroup unavailable" must not be shaped like "cgroup present and unlimited": a
@@ -99,6 +100,11 @@ import fs from "node:fs";
 import path from "node:path";
 import os from "node:os";
 import { isDirectEntry } from "./gate-script-base.ts";
+// ⛔ The host-parallelism reading has exactly ONE definition point (runner-concurrency.ts — the SSOT
+// ratchet in plugin/test/pre-verified-round-record.test.mjs makes "exactly one" executable). This
+// module must REACH that binding, never re-declare the expression: a local copy is a second home,
+// free to drift on any seam change (it would silently miss RESOURCE_GATE_NPROC).
+import { hostParallelism } from "./runner-concurrency.ts";
 
 export const CGROUP_ROOT = "/sys/fs/cgroup";
 export const PROC_SELF_CGROUP = "/proc/self/cgroup";
@@ -242,15 +248,10 @@ function readTextOrNull(file: string): string | null {
   }
 }
 
-/** The repo's existing host parallelism reading (AC2's "os.availableParallelism()/nproc"). */
-export function hostParallelism(): number {
-  try {
-    if (typeof os.availableParallelism === "function") return os.availableParallelism();
-  } catch {
-    /* fall through to the cpus().length reading below */
-  }
-  return os.cpus().length || 1;
-}
+/** The repo's existing host parallelism reading (AC2's "os.availableParallelism()/nproc") —
+ *  re-exported, ⛔ NOT re-declared: runner-concurrency.ts is its single definition point (see the
+ *  import above). Same fix shape as pre-verified-round-record.ts's `export { hostParallelism }`. */
+export { hostParallelism };
 
 /** The repo's existing host memory reading (AC2's "os.totalmem()/free -m"), in MB. */
 export function hostTotalMemMb(): number {
