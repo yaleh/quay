@@ -2,7 +2,7 @@
 id: gap-direct-to-develop-bypass-check-git-fixture-cost
 title: direct-to-develop-bypass-check.test.mjs 真实 git spawn（init/commit/merge）主导
   74.2s 耗时——先分解再决定能不能共享 fixture
-status: ready
+status: needs-human
 labels:
   - gap
 parent: null
@@ -83,3 +83,13 @@ extra:
 
 - plugin/test/direct-to-develop-bypass-check.test.mjs
 - tasks/gap-direct-to-develop-bypass-check-git-fixture-cost.md
+## Needs-Human
+
+**执行 2026-10-09T02:48:07.020Z — 停派终止（失败无法归因，⛔ 不再重派）**
+
+- 阻碍原因：exited-not-landed 失败无法归因（基建/契约疑似，非实现缺陷）——停止重派，⛔ 不再拿新会话撞同一堵墙：suite red could not be attributed to any failing test file in 2 consecutive rounds (bounded to at most one retry) — infra/contract suspected, not an implementable defect (parser extracted 0 of 5 failing lines and attributed none to a file; pseudo-stage tokens: __PERFILE__, lint; unrecognized tokens: ...); stopping instead of spending another worker session
+- 失败步/判词：step=suite: __PERFILE__ duration_ms=3801 /data/home/yale/work/quay-worktrees/gap-direct-to-develop-bypass-check-git-fixture-cost/plugin/test/shipped-entry-runnable.test.mjs passed=false end_ms=1791513967958 cpu_ms=2957.363 mem_peak_kb=54376
+- run_id：wk-prod-anchor
+- session_id：42de3790-9bbf-4fcc-8b58-d49786c9dedb
+- suite 日志：/data/home/yale/work/quay/.quay/fan-in-suite-gap-direct-to-develop-bypass-check-git-fixture-cost~wk-prod-anchor~1791513719476-da22b0.log
+- fan-in 日志：/data/home/yale/work/quay/.quay/fan-in-gap-direct-to-develop-bypass-check-git-fixture-cost-wk-prod-anchor.log
