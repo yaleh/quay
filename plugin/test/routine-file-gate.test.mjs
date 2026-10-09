@@ -49,6 +49,7 @@ import {
   recurrenceOrder,
   renderRoutineTaskBody,
   routineFindingCandidateText,
+  routineQuotaDecision,
 } from "../scripts/routine-file-gate.ts";
 
 // ── the production fixtures (verbatim from the carrier) ──────────────────────────────────────────
@@ -584,4 +585,37 @@ test("⑰ KNOWN GAP (quota-policy-ownership，独立发现) — DEFAULT_RATE/FIL
     "固化当前字面量；若未来接入 drivers.yml 式配置面，这条断言需要连带更新，⛔ 不要只删掉它");
   assert.equal(FILING_WINDOW_MS, 24 * 60 * 60 * 1000,
     "固化当前字面量；若未来接入 drivers.yml 式配置面，这条断言需要连带更新，⛔ 不要只删掉它");
+});
+
+// ── gap-routine-quota-canonical-config-and-policy-gate：独立纯 Policy 函数 ───────────────────────
+// 人裁定②：准入决策由独立纯 Policy/Gate 执行。⛔ 本组【不经 gateFinding，直接调用 routineQuotaDecision】。
+// 纯函数：不读文件 / 不读 env / 不 I/O —— 两个入参都由调用方传。
+test("routineQuotaDecision (AC4) — 三组对照：accept / `rate:` 拒绝 / `global-rate:` 拒绝（⛔ 两种拒绝理由不同形）", () => {
+  const cfg = { k: 3, globalCeiling: 12 };
+
+  // ① 全局未满 / per-routine 未满 ⇒ accept。
+  const a = routineQuotaDecision({ perRoutine: 0, global: 0 }, cfg);
+  assert.equal(a.accept, true, "两者都未满 ⇒ 准入");
+  // 边界：刚好差一（k-1 / ceiling-1）仍应准入（>= 才是拒绝，不是 >）。
+  assert.equal(routineQuotaDecision({ perRoutine: cfg.k - 1, global: cfg.globalCeiling - 1 }, cfg).accept, true,
+    "差一仍准入——拒绝判据是 ≥，不是 >");
+
+  // ② 全局未满 / per-routine 满 ⇒ `rate:` 拒绝。
+  const b = routineQuotaDecision({ perRoutine: 3, global: 5 }, cfg);
+  assert.equal(b.accept, false, "per-routine 满 ⇒ 拒绝");
+  assert.match(b.reason, /^rate:/, "per-routine 拒绝读作 `rate:`");
+  assert.doesNotMatch(b.reason, /^global-rate:/, "per-routine 拒绝 ⛔ 不得与全局拒绝同形");
+
+  // ③ 全局满（即使 per-routine 未满）⇒ `global-rate:` 拒绝 —— 这正是全局天花板存在的意义。
+  const c = routineQuotaDecision({ perRoutine: 0, global: 12 }, cfg);
+  assert.equal(c.accept, false, "全局满、per-routine 未满 ⇒ 仍拒");
+  assert.match(c.reason, /^global-rate:/, "全局拒绝读作 `global-rate:`");
+  assert.doesNotMatch(c.reason, /^rate:/, "全局拒绝 ⛔ 不得与 per-routine 拒绝同形");
+
+  // 两个拒绝理由的前缀【必须可由 regex 区分】（硬规则 3b：两种原因不得同形）。
+  assert.notEqual(b.reason.split(":")[0], c.reason.split(":")[0], "`rate` 与 `global-rate` 前缀不同");
+
+  // 全局满优先于 per-routine 满（全局是更外层的硬顶）：两者都满 ⇒ 读作 global-rate。
+  const d = routineQuotaDecision({ perRoutine: 9, global: 99 }, cfg);
+  assert.match(d.reason, /^global-rate:/, "两者都满 ⇒ 报更外层的 global-rate");
 });

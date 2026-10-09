@@ -61,3 +61,21 @@ kinds:
     # 采集节流（毫秒）：gh 是外部配额资源，goal 轮间隔 30s ⇒ 不节流等于每分钟 2 次 API 调用。
     # 10 分钟 = 覆盖 AC-265 所需的时效（一次 CI run 实测 18–25 分钟）而不打爆配额。
     ci_runs_collect_throttle_ms: 600000
+
+# ── routine 配额（gap-routine-quota-canonical-config-and-policy-gate）─────────────────────────────
+# ⛔ 与 `kinds:` 平级，**不塞进某个 kind**——quota 是【按 routine 名】维度，不是按 driver kind 维度
+# （一个 kind 下可能注册多条 routine）。本段是 routine 限流闸（routine-file-gate.ts）的
+# K / 窗口 / 全局天花板 的【唯一声明式真相源】；消费方经 driver-config.ts 的 loadRoutineQuotaConfig /
+# routineK / routineGlobalCeiling 读取（⛔ 不各写一份字面量）。
+# ⚠️ 消费面迁移尚未完成（gap-routine-quota-consumer-convergence）：probe-routine.ts / meta-driver.ts
+# 的真实调用点仍走旧参数形状，本段当前只被配置面与纯 Policy 函数读取。
+routine_quota:
+  window_ms: 86400000      # = 24h，与 routine-file-gate.ts 既有 FILING_WINDOW_MS 缺省值逐字一致（迁移兼容）
+  default_k: 3             # 单 routine 缺省上限，与既有 DEFAULT_RATE 缺省值逐字一致（迁移兼容）
+  # 新增：全部 routine 合计的硬上限。⚠️ 这是【人直接裁定的结构性要求】，⛔ 不是从事故阈值反推的实测值——
+  # 本仓库迄今没有「K×R 失控」的事故读数（走该通道立案过任务的 routine 只有 2 个）。12 = default_k(3) ×
+  # 迄今真实使用过该通道的 routine 数(2) × 安全余量(2)，是一个保守起始点，不是精调最优值。
+  # 发生率为 0 ≠ 不需要：上限由人裁定直接要求，不走硬规则 12 的「新前置需发生率」路径。
+  global_ceiling: 12
+  per_routine: {}          # 可选：具名 routine 的 K 覆盖（缺省 = default_k）。空 map = 全部用缺省。
+                           # ⛔ 不变式（由 routineK 结构性保证）：任何单 routine 的有效 K 不得大于 global_ceiling。

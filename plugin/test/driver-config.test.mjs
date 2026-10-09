@@ -17,7 +17,18 @@ import {
   defaultDriverConfig,
   loadDriverConfig,
   driverCap,
+  DEFAULT_ROUTINE_QUOTA_K,
+  DEFAULT_ROUTINE_QUOTA_WINDOW_MS,
+  DEFAULT_ROUTINE_QUOTA_GLOBAL_CEILING,
+  defaultRoutineQuotaConfig,
+  loadRoutineQuotaConfig,
+  routineK,
+  routineGlobalCeiling,
 } from "../scripts/driver-config.ts";
+import { DEFAULT_RATE, FILING_WINDOW_MS } from "../scripts/routine-file-gate.ts";
+
+// 真实仓库根（本测试文件在 plugin/test/ ⇒ 上两级）。
+const REPO_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..", "..");
 
 const _createdDirs = [];
 function tmpdir() {
@@ -156,6 +167,92 @@ test("AC2 — the three routine kinds CONSUME drivers.yml <kind>.interval_ms (de
     assert.ok(elapsedMs < 20_000,
       `${c.file} must pace at the DECLARED interval — took ${elapsedMs}ms for 3 rounds at interval_ms=1`);
   }
+});
+
+// ── gap-routine-quota-canonical-config-and-policy-gate：routine 配额收口 ─────────────────────────
+// K / 窗口 / 全局天花板 的声明式真相源（drivers.yml `routine_quota` 段）。⛔ 本组测试只读配置面，
+// 不接真实调用点（那是 gap-routine-quota-consumer-convergence）。
+
+test("routine_quota (AC1) — features drivers.yml 读出的 windowMs/defaultK 与既有 FILING_WINDOW_MS/DEFAULT_RATE 逐字相等（迁移兼容）", () => {
+  const cfg = loadRoutineQuotaConfig(REPO_ROOT);
+  assert.equal(cfg.windowMs, FILING_WINDOW_MS, "window_ms 必须等于既有 FILING_WINDOW_MS（迁移兼容）");
+  assert.equal(cfg.defaultK, DEFAULT_RATE, "default_k 必须等于既有 DEFAULT_RATE（迁移兼容）");
+  assert.equal(cfg.windowMs, 86_400_000);
+  assert.equal(cfg.defaultK, 3);
+  assert.deepEqual(cfg.warnings, [], "真实 drivers.yml 无荒谬字段 ⇒ 无留痕（留痕只标「读到但荒谬」）");
+
+  // 取假点：改 drivers.yml 任一字段，读数必须跟着变（证明读的是文件，不是代码默认）。
+  const dir = tmpdir();
+  writeDriversYml(dir, "version: 1\nroutine_quota:\n  window_ms: 3600000\n  default_k: 7\n  global_ceiling: 20\n");
+  const cfg2 = loadRoutineQuotaConfig(dir);
+  assert.equal(cfg2.windowMs, 3_600_000, "改 window_ms ⇒ 读数跟着变");
+  assert.equal(cfg2.defaultK, 7, "改 default_k ⇒ 读数跟着变");
+  assert.equal(cfg2.globalCeiling, 20);
+});
+
+test("routine_quota (AC2) — 坏 global_ceiling fail-closed 到缺省；同输入只变字段取值 ⇒ 结论翻转", () => {
+  for (const bad of ["-1", "0", "1.5", "'12'", "abc"]) {
+    const dir = tmpdir();
+    writeDriversYml(dir, `version: 1\nroutine_quota:\n  global_ceiling: ${bad}\n`);
+    const cfg = loadRoutineQuotaConfig(dir);
+    assert.equal(
+      cfg.globalCeiling,
+      DEFAULT_ROUTINE_QUOTA_GLOBAL_CEILING,
+      `global_ceiling=${bad} 是「取值的危险方向」 ⇒ 必须回退缺省 ${DEFAULT_ROUTINE_QUOTA_GLOBAL_CEILING}`,
+    );
+    assert.ok(cfg.warnings.length > 0, `global_ceiling=${bad} 必须留痕（读到但荒谬 ≠ 读不到）`);
+  }
+  // 正对照：同一 fixture 只把该字段改成合法正整数 ⇒ 读出该值（单一变化点是字段取值，结论翻转）。
+  const dir = tmpdir();
+  writeDriversYml(dir, "version: 1\nroutine_quota:\n  global_ceiling: 7\n");
+  const ok = loadRoutineQuotaConfig(dir);
+  assert.equal(ok.globalCeiling, 7, "合法正整数 ⇒ 读出该值");
+  assert.deepEqual(ok.warnings, [], "合法值 ⇒ 无留痕");
+});
+
+test("routine_quota (AC3) — per_routine 荒谬项（> global_ceiling）被拒；不变式：任何单 routine 有效 K ≤ globalCeiling", () => {
+  const dir = tmpdir();
+  writeDriversYml(
+    dir,
+    "version: 1\nroutine_quota:\n  global_ceiling: 12\n  per_routine:\n    x: 100\n    y: 5\n",
+  );
+  const cfg = loadRoutineQuotaConfig(dir);
+  assert.equal(cfg.perRoutine.x, undefined, "x:100 > ceiling 12 ⇒ 丢弃（fail-closed 到缺省 default_k）");
+  assert.equal(cfg.perRoutine.y, 5, "y:5 ≤ 12 ⇒ 保留（合法项不被误伤）");
+  assert.ok(
+    cfg.warnings.some((w) => w.includes("per_routine.x")),
+    "荒谬项必须留痕（可审计是哪一项被拒）",
+  );
+  // 不变式：无论配置怎么写，任何单 routine 的有效 K 不得大于 globalCeiling。
+  for (const r of [null, "x", "y", "never-configured"]) {
+    assert.ok(
+      routineK(dir, r) <= routineGlobalCeiling(dir),
+      `routineK(${r}) 必须 ≤ routineGlobalCeiling（不变式，配置无关）`,
+    );
+  }
+  // 更狠的写法：default_k 本身就大于一个被调低的 global_ceiling ⇒ 仍须被钳住（不能只依赖加载期过滤）。
+  const dir2 = tmpdir();
+  writeDriversYml(dir2, "version: 1\nroutine_quota:\n  default_k: 9\n  global_ceiling: 2\n");
+  assert.equal(routineK(dir2, "anything"), 2, "default_k 9 > ceiling 2 ⇒ 有效 K 钳到 2");
+  assert.ok(routineK(dir2, "anything") <= routineGlobalCeiling(dir2), "不变式仍成立");
+});
+
+test("routine_quota — 留痕区分「读不到」与「读到但荒谬」（硬规则 3b：两者都归一到缺省，但不得同形）", () => {
+  const missing = tmpdir(); // 无 drivers.yml
+  const a = loadRoutineQuotaConfig(missing);
+  assert.deepEqual(a.warnings, [], "读不到 ⇒ 无留痕");
+  assert.equal(a.globalCeiling, DEFAULT_ROUTINE_QUOTA_GLOBAL_CEILING);
+
+  const absurd = tmpdir();
+  writeDriversYml(absurd, "version: 1\nroutine_quota:\n  global_ceiling: -1\n");
+  assert.ok(loadRoutineQuotaConfig(absurd).warnings.length > 0, "读到但荒谬 ⇒ 非空留痕");
+
+  // defaultRoutineQuotaConfig 的取值面（也是加载器 base）。
+  const d = defaultRoutineQuotaConfig();
+  assert.equal(d.windowMs, DEFAULT_ROUTINE_QUOTA_WINDOW_MS);
+  assert.equal(d.defaultK, DEFAULT_ROUTINE_QUOTA_K);
+  assert.equal(d.globalCeiling, DEFAULT_ROUTINE_QUOTA_GLOBAL_CEILING);
+  assert.deepEqual(d.perRoutine, {});
 });
 
 after(() => {

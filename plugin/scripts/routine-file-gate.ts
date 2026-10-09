@@ -14,8 +14,12 @@
 import fs from "node:fs";
 import path from "node:path";
 import { isDirectEntry } from "./gate-script-base.ts";
+import { DEFAULT_ROUTINE_QUOTA_K, DEFAULT_ROUTINE_QUOTA_WINDOW_MS } from "./driver-config.ts";
 
-export const DEFAULT_RATE = 3; // ≤ K routine-filed tasks per window (tunable)
+// ⛔ 收口（gap-routine-quota-canonical-config-and-policy-gate）：此前这里的两条是【孤儿字面量】。
+// 现由 driver-config.ts 的缺省常量派生——drivers.yml `routine_quota` 段是 routine 配额的真相源，
+// 本模块的缺省面只是它的一致回退（迁移兼容：取值逐字不变，`routine-file-gate.test.mjs` ⑰ 仍绿）。
+export const DEFAULT_RATE = DEFAULT_ROUTINE_QUOTA_K; // ≤ K routine-filed tasks per window (tunable)
 
 // ── findingKey ───────────────────────────────────────────────────────────────────────────────────
 // The dedup key for a task's `## Finding` section. TWO sources, in priority order:
@@ -248,6 +252,24 @@ export function isActionable(taskText) {
   return !!m && EVIDENCE.test(m[1]);                 // must cite concrete evidence
 }
 
+// ── routineQuotaDecision ─────────────────────────────────────────────────────────────────────────
+// 独立纯 Policy 函数（人裁定②：准入决策由独立纯 Policy/Gate 执行）。给定「本 routine 窗口内计数」与
+// 「全局窗口内计数」与配置，产出【三态可区分】的准入结论——⛔ 两种拒绝原因不得同形：per-routine 拒绝
+// 读作 `rate:`，全局拒绝读作 `global-rate:`（可用 regex 区分，硬规则 3b/枚举不布尔）。
+// 纯函数：不读文件、不读 env、不做任何 I/O——config 由调用方（经 driver-config.ts 解析好）传入。
+export function routineQuotaDecision(
+  counts: { perRoutine: number; global: number },
+  config: { k: number; globalCeiling: number },
+): { accept: boolean; reason: string } {
+  if (counts.global >= config.globalCeiling) {
+    return { accept: false, reason: `global-rate: ${counts.global} total routine-filed tasks this window ≥ global ceiling ${config.globalCeiling}` };
+  }
+  if (counts.perRoutine >= config.k) {
+    return { accept: false, reason: `rate: ${counts.perRoutine} routine-filed tasks this window ≥ cap ${config.k}` };
+  }
+  return { accept: true, reason: "accepted: within per-routine and global rate" };
+}
+
 // ── gateFinding ──────────────────────────────────────────────────────────────────────────────────
 // candidate: the new task text. opts: { existingKeys:Set|[], recentCount:number, K:number }.
 // Returns { accept, reason }.
@@ -259,7 +281,13 @@ export function gateFinding(candidate: string, { existingKeys = [] as string[], 
   // a candidate, so an over-block reads exactly like a correct suppression (硬规则 3: 枚举不布尔).
   const dedup = dedupReading(existingKeys, findingKey(candidate));
   if (dedup.block) return { accept: false, reason: dedup.reason, dedup };
-  if (recentCount >= K) return { accept: false, reason: `rate: ${recentCount} routine-filed tasks this window ≥ cap ${K}`, dedup };
+  // The per-routine rate rejection now flows through the shared PURE policy (routineQuotaDecision).
+  // ⛔ 过渡期把 global 读数也传 recentCount、天花板设 Infinity：`counts.global >= Infinity` 恒 false、
+  // per-routine 分支的 reason 字符串与旧代码逐字相同 ⇒ 现有调用方（probe-routine.ts/meta-driver.ts）
+  // 的外部行为逐字不变（迁移兼容的取假点）。真正把【有限】天花板与全局读数一起喂进来，留给
+  // gap-routine-quota-consumer-convergence。
+  const quota = routineQuotaDecision({ perRoutine: recentCount, global: recentCount }, { k: K, globalCeiling: Infinity });
+  if (!quota.accept) return { accept: false, reason: quota.reason, dedup };
   // ⚠️ A `novel` acceptance keeps the pre-status reason VERBATIM; when the candidate matched keys
   // that are all CLOSED, the reason carries that fact — ⛔ an accepted finding whose subject is
   // 「板上只有 done」 must not read like 「板上什么都没有」 (硬规则 3).
@@ -509,8 +537,9 @@ export function dedupReading(existingKeys: Set<string> | readonly string[], key:
  *  (the rate window and AC6's production reading both key on it, ⛔ never on a hand-kept counter). */
 export const ROUTINE_TASK_PREFIX = "gap-routine-";
 
-/** The rate window (ms). A day, because the finding rate is a per-day property of the corpus. */
-export const FILING_WINDOW_MS = 24 * 60 * 60 * 1000;
+/** The rate window (ms). A day, because the finding rate is a per-day property of the corpus.
+ *  ⛔ 收口同 DEFAULT_RATE：由 driver-config.ts 的缺省常量派生（drivers.yml `routine_quota.window_ms` 是真相源）。 */
+export const FILING_WINDOW_MS = DEFAULT_ROUTINE_QUOTA_WINDOW_MS;
 
 /** A finding the routine has ALREADY decided to emit. Structural only — this module does not know
  *  which probe produced it (that is what makes the filing step generic across routines). */
