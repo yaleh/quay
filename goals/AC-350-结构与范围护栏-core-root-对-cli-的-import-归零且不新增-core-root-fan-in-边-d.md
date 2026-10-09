@@ -3,7 +3,7 @@ id: AC-350
 title: 结构与范围护栏：core-root 对 cli/ 的 import 归零且不新增 core-root→fan-in
   边；driver-control.ts/driver-vocab.ts 单一定义、五个消费者改口；enum-surface/import-graph
   不回退；gate/fan-in/kernel 未动
-status: draft
+status: active
 kind: criterion
 goal: GOAL-033
 criterion: |-
@@ -53,6 +53,16 @@ criterion: |-
 expect: exit 0 = core-root 零 cli/ import、零新增 fan-in import、单一定义、五个消费者改口、两个检查器
   pass、gate/fan-in/kernel 未动；exit 1 = CAUSE= 指明哪一项；exit 3 = driver-control.ts
   尚未落地
-origin: 人 2026-10-09 裁定：调查并推进 core-root<->core-cli 最小依赖环切片；结论清晰 ⇒ 开 branch:true
-  goal，严格复用 GOAL-030/031/032 方法，只做这一对
+origin: 人 2026-10-09 裁定：调查并推进 core-root<->core-cli 最小依赖环切片
+activatedAt: 2026-10-09T05:46:01.326Z
+statusLog:
+  - at: 2026-10-09T05:46:01.326Z
+    from: draft
+    to: active
+    actor: goal-cli
+    reason: ""
+fidelity:
+  verdict: not-evaluated
+  reason: no judge configured
+  at: 2026-10-09T05:46:01.326Z
 ---
