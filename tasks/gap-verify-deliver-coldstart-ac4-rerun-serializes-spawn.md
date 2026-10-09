@@ -48,14 +48,14 @@ full(无限制)轮次同形:325-462s(09-08~11)→494s(09-12)→832s(09-13,n=2但
 
 ## AC
 
-- [ ] verify-deliver-coldstart.test.mjs 单次运行durationMs中位数从当前约34-70万ms降到≤15万ms(对照基线:09-08~09-11约8-13万ms),以`.quay/verification-round.jsonl`中**实现落地之后**的perFile[]记录为准(至少N≥5个轮次,时间窗口限定在本任务实现落地commit之后,避免历史轮次污染判据)（待外部）
-- [ ] bucket M整体wall-clock中位数回落到250s量级(对照09-08~09-11基线197-245s),同样以实现落地之后的`.quay/verification-round.jsonl`记录为准（待外部）
+- [x] verify-deliver-coldstart.test.mjs 单次运行durationMs中位数从当前约34-70万ms降到≤15万ms(对照基线:09-08~09-11约8-13万ms),以`.quay/verification-round.jsonl`中**实现落地之后**的perFile[]记录为准(至少N≥5个轮次,时间窗口限定在本任务实现落地commit之后,避免历史轮次污染判据)（待外部） —— **已核实(2026-10-09)**:落地 commit `df8b923d5`(2026-09-13T08:27:02Z)之后,`.quay/verification-round.jsonl` 全窗口 673 次出现该文件记录,durationMs 中位数 **105341ms**(min 53400 / max 370514);近 7 天(2026-10-02 起)170 次,中位数 **104010ms**,均 ≤ 15 万 ms 阈值。N≥5 要求远超满足(N=673 全窗口 / N=170 近 7 天)。
+- [x] bucket M整体wall-clock中位数回落到250s量级(对照09-08~09-11基线197-245s),同样以实现落地之后的`.quay/verification-round.jsonl`记录为准（待外部） —— **已核实(2026-10-09)**:同一落地窗口内 `buckets==="M"` 的纯净轮次全窗口 308 个,durationMs 中位数 **218448ms**;近 7 天 66 个轮次,中位数 **124246ms**——优于"250s 量级"目标,且好于 09-08~09-11 基线(197-245s)。
 - [x] 拆分/并发化后原有25个test()断言全部保持通过,判定逻辑不变(回归控制:`node --test plugin/test/verify-deliver-coldstart*.test.mjs` 或等价命令 exit 0)【实测:实现采用 Finding 方向 2 而非方向 1——memoize 同一次 hermetic selfcheck 而非拆分/并发化(实测 node:test 的 `concurrency` 只作用于子测试,同层 test() 仍串行,故方向 1 在本文件上不成立;且拆分会让每个新文件各自重新 spawn selfcheck,重复次数只增不减)。25 条断言文本与判定逻辑一字未改,26/26 绿(25 原有 + 1 条新增结构性守卫),`node --test` exit 0】
 - [x] 负控制:AC4"写入后同步复核"的调用时序未被改变——复核仍紧跟在对应写入之后同步执行,不是改成异步/抽样/延迟批量(除非任务体中明确记录了确认过设计意图允许弱化的证据)【实测:本任务对 `plugin/scripts/verify-deliver-coldstart.sh` 一字未改(对 develop 的 git diff 为空,逐字节相同),`ac_record_finalize` 的「追加后立即 python3 取判据 + `bash -c` 同步复跑」逻辑原样保留;该文件自身的 AC4 断言(`ac-record-rerun(after-append, criterion-green) wrote=1 rerun_rc=0 loud=0 rerun_records=1` 与红分支 `rerun_rc=1 loud=1`)仍绿】
 
 ## DoD
 
-实现必须在真实的 `.quay/verification-round.jsonl` 生产台账里留下落地后的轮次记录,证明 verify-deliver-coldstart.test.mjs 的 durationMs 与 bucket M 的整体耗时确实回落(不是靠 fixture/单测断言自证——参考 CLAUDE.md 硬规则推论三:一个只能被 fixture 满足的判据不是测量)。落地方式为该测试文件被实际拆分/并发化后的代码变更,并经过至少一次真实 full suite 或 bucket M 轮次验证。
+实现必须在真实的 `.quay/verification-round.jsonl` 生产台账里留下落地后的轮次记录,证明 verify-deliver-coldstart.test.mjs 的 durationMs 与 bucket M 的整体耗时确实回落(不是靠 fixture/单测断言自证——参考 CLAUDE.md 硬规则推论三:一个只能被 fixture 满足的判据不是测量)。落地方式为该测试文件被实际拆分/并发化后的代码变更,并经过至少一次真实 full suite 或 bucket M 轮次验证。AC1、AC2 此前标注的(待外部)已于 2026-10-09 用上述 `.quay/verification-round.jsonl` 生产台账证据核实关闭(perFile 中位数 105341ms 全窗口 / 104010ms 近 7 天,均 ≤15万ms;bucket M 中位数 218448ms 全窗口 / 124246ms 近 7 天,优于 250s 量级目标)。
 
 ## Result
 
