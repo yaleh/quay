@@ -16,9 +16,18 @@
 //   cpu cpuset      /sys/fs/cgroup<cgroup-of-this-process>/cpuset.cpus.effective
 //   memory          /sys/fs/cgroup<cgroup-of-this-process>/memory.max   (bytes, "max")
 //
-// ⛔ THIS MODULE CHANGES NO EXISTING CONSUMER. resource-gate.sh / process-budget.sh / driver-anchor.ts
+// ⛔ IT STILL CHANGES NO EXISTING CONSUMER. resource-gate.sh / process-budget.sh / driver-anchor.ts
 // are byte-identical on the branch that introduced this file (AC5) — wiring this probe into the
 // worker-shrink / memory-budget / backpressure consumers is a SEPARATE later task.
+//
+// FIRST REAL CONSUMER (gap-full-suite-runner-dedupe-memory-envelope-to-probe, 2026-10-09):
+// full-suite-runner.ts's `readEffectiveTotalMemBytes()` now calls `computeEffectiveCapacity` on
+// `collectReadings(process.env, { memoryLayers: "ancestors", ignoreEnvSeams: true })` instead of
+// carrying its OWN copy of the cgroup-hierarchy traversal (the inline "临时内联实现" that task's
+// comment had promised to replace). The ancestor walk it needs lives here as
+// `effectiveAncestorMemoryLimit`; on the 128-core baseline the derived argv is byte-identical
+// (`MemoryMax=16G`) because `QUAY_OWN_SCOPE_PREFIXES` skips the `quay-anchor-*` scope this process
+// actually runs inside.
 //
 // ── Fail-open by contract (AC2/DoD) ──────────────────────────────────────────────────────────────
 // cgroup v2 unavailable (no unified hierarchy, no /proc/self/cgroup "0::" line, cpu.max/memory.max
@@ -258,9 +267,95 @@ export function cgroupV2Mounted(root: string = CGROUP_ROOT): boolean {
   }
 }
 
-/** Collect the raw readings, applying the five env seams. Never throws — every unreadable input
- *  becomes `null` (a distinguishable "not read"), never a fabricated 0. */
-export function collectReadings(env: NodeJS.ProcessEnv = process.env, opts: { cgroupRoot?: string; procSelfCgroup?: string } = {}): CapacityReadings {
+// ── the ancestor memory walk (the capacity a CONSUMER wants) ─────────────────────────────────────
+
+/** Scope-name prefixes quay itself creates for its own resource envelopes: the driver-anchor group,
+ *  the serve host, and the transient `run-*` scopes systemd assigns to a `systemd-run --scope`
+ *  without `--unit` (the suite's OWN scope is one). These are guardrails WE imposed, ⛔ not external
+ *  capacity: feeding them into a capacity reading would compound the same host fraction
+ *  (0.25 × 0.25) AND make the reading depend on the limit the process is already inside (a feedback
+ *  loop — one nesting level per round). A genuine external limit (container / VM / slice) is set at
+ *  the cgroup-namespace root or a `user.slice`, never under these prefixes — so excluding ours keeps
+ *  the big-host behaviour while still seeing a real container cap.
+ *
+ *  ⚠️ On the 128-core baseline host a process launched by quay lives INSIDE a `quay-anchor-*.scope`
+ *  (~0.25 × host total, measured 66 295 676 928 B of a 246.97 GiB host on 2026-10-09). Excluding it is
+ *  what keeps the suite's derived ceiling at the 16G empirical ceiling (`MemoryMax=16G` unchanged). */
+export const QUAY_OWN_SCOPE_PREFIXES = ["quay-anchor-", "quay-serve-", "run-"] as const;
+
+/** The ancestor memory walk's result. `bytes: null` = NO non-quay-own ancestor layer set a
+ *  `memory.max` — a distinguishable "no external limit", ⛔ never coerced to 0 or to "unlimited". */
+export interface AncestorMemoryLimit {
+  bytes: number | null;
+  /** cgroup-relative dirs skipped because their `.scope` unit name is quay's own. */
+  skippedQuayScopes: string[];
+}
+
+export interface AncestorMemoryLimitOptions {
+  cgroupRoot?: string;
+  /** The `/proc/self/cgroup` TEXT. Omitted ⇒ read it; `null` ⇒ known-unreadable (fail open). */
+  procSelfCgroup?: string | null;
+  /** Scope-name prefixes treated as quay's own (default `QUAY_OWN_SCOPE_PREFIXES`). */
+  excludeScopePrefixes?: readonly string[];
+}
+
+/** The TIGHTEST `memory.max` on the cgroup v2 chain from its mount root down to THIS process, among
+ *  the layers that are NOT quay's own envelope scopes (`QUAY_OWN_SCOPE_PREFIXES`).
+ *
+ *  ⛔ This is an ANCESTOR walk, deliberately different from the own-dir read `collectReadings`
+ *  ("self") does: an external container / VM / slice cap is imposed on one of the ANCESTOR layers,
+ *  so a read of this process's own cgroup dir alone misses it (and, symmetrically, would CONSUME
+ *  quay's own `quay-anchor-*` guardrail as if it were external capacity). This is the reading a
+ *  capacity CONSUMER wants; "self" is the probe's own-limit reading.
+ *
+ *  Fail-open: no unified hierarchy / unreadable /proc line / malformed path ⇒ `{bytes: null, …}`
+ *  (the caller falls back to the host total — ⛔ never refuses to run). A layer whose `memory.max`
+ *  is `max` (or missing/unparsable) sets no ceiling and is skipped, never read as 0. */
+export function effectiveAncestorMemoryLimit(opts: AncestorMemoryLimitOptions = {}): AncestorMemoryLimit {
+  const root = opts.cgroupRoot ?? CGROUP_ROOT;
+  const prefixes = opts.excludeScopePrefixes ?? QUAY_OWN_SCOPE_PREFIXES;
+  const procSelfCgroup = opts.procSelfCgroup === undefined ? readTextOrNull(PROC_SELF_CGROUP) : opts.procSelfCgroup;
+  const relPath = procSelfCgroup === null ? null : selfCgroupRelPath(procSelfCgroup);
+  if (!cgroupV2Mounted(root) || relPath === null) return { bytes: null, skippedQuayScopes: [] };
+
+  const skippedQuayScopes: string[] = [];
+  let bytes: number | null = null;
+  let dir = root;
+  for (const seg of relPath.split("/").filter(Boolean)) {
+    dir = path.join(dir, seg);
+    const rel = path.relative(root, dir);
+    if (rel.startsWith("..") || path.isAbsolute(rel)) return { bytes: null, skippedQuayScopes: [] }; // malformed /proc entry — fail open
+    if (seg.endsWith(".scope") && prefixes.some((p) => seg.startsWith(p))) {
+      skippedQuayScopes.push(rel);
+      continue;
+    }
+    const limit = parseByteLimit(readTextOrNull(path.join(dir, "memory.max")));
+    if (limit !== null) bytes = bytes === null ? limit : Math.min(bytes, limit);
+  }
+  return { bytes, skippedQuayScopes };
+}
+
+export interface CollectReadingsOptions {
+  cgroupRoot?: string;
+  procSelfCgroup?: string;
+  /**
+   * Which cgroup layer supplies the MEMORY reading:
+   *   "self" (default) — this process's OWN cgroup dir (the probe's documented own-limit read);
+   *   "ancestors"      — `effectiveAncestorMemoryLimit` (the tightest non-quay-own `memory.max` on
+   *                      the root→self chain). A consumer deriving a NEW envelope wants this one.
+   */
+  memoryLayers?: "self" | "ancestors";
+  /**
+   * Ignore the `EFFECTIVE_CAPACITY_TEST_*` seams. A PRODUCTION capacity reading must never be
+   * redirected by a test seam — the same rule full-suite-runner.ts's host-capacity read states for
+   * `QUAY_TEST_CGROUP_DIR`. (The seams exist for THIS module's own unit tests.)
+   */
+  ignoreEnvSeams?: boolean;
+}
+
+/** Collect the raw readings, applying the five env seams (unless `ignoreEnvSeams`). Never throws —
+ *  every unreadable input becomes `null` (a distinguishable "not read"), never a fabricated 0. */
+export function collectReadings(env: NodeJS.ProcessEnv = process.env, opts: CollectReadingsOptions = {}): CapacityReadings {
   const root = opts.cgroupRoot ?? CGROUP_ROOT;
   const procSelfCgroup = opts.procSelfCgroup ?? readTextOrNull(PROC_SELF_CGROUP);
 
@@ -270,13 +365,22 @@ export function collectReadings(env: NodeJS.ProcessEnv = process.env, opts: { cg
 
   const fileCpuMax = cgDir === null ? null : readTextOrNull(path.join(cgDir, "cpu.max"));
   const fileCpuset = cgDir === null ? null : readTextOrNull(path.join(cgDir, "cpuset.cpus.effective"));
-  const fileMemoryMax = cgDir === null ? null : readTextOrNull(path.join(cgDir, "memory.max"));
+  const fileMemoryMax =
+    opts.memoryLayers === "ancestors"
+      ? (() => {
+          const walk = effectiveAncestorMemoryLimit({ cgroupRoot: root, procSelfCgroup });
+          return walk.bytes === null ? null : String(walk.bytes);
+        })()
+      : cgDir === null
+        ? null
+        : readTextOrNull(path.join(cgDir, "memory.max"));
 
-  const seamCpuMax = env[TEST_CPU_MAX];
-  const seamCpuset = env[TEST_CPUSET_COUNT];
-  const seamMemoryMax = env[TEST_MEMORY_MAX];
-  const seamNproc = env[TEST_NPROC];
-  const seamMemMb = env[TEST_MEM_AVAIL_MB];
+  const useSeams = opts.ignoreEnvSeams !== true;
+  const seamCpuMax = useSeams ? env[TEST_CPU_MAX] : undefined;
+  const seamCpuset = useSeams ? env[TEST_CPUSET_COUNT] : undefined;
+  const seamMemoryMax = useSeams ? env[TEST_MEMORY_MAX] : undefined;
+  const seamNproc = useSeams ? env[TEST_NPROC] : undefined;
+  const seamMemMb = useSeams ? env[TEST_MEM_AVAIL_MB] : undefined;
 
   // A cgroup seam asserts a cgroup IS present — that is what the seam simulates (see the header).
   const seamImpliesCgroup = seamCpuMax !== undefined || seamCpuset !== undefined || seamMemoryMax !== undefined;

@@ -34,17 +34,22 @@ import {
   TEST_MEM_AVAIL_MB,
   TEST_MEMORY_MAX,
   TEST_NPROC,
+  QUAY_OWN_SCOPE_PREFIXES,
+  collectReadings,
   computeEffectiveCapacity,
   countCpusetCores,
   cgroupV2Mounted,
+  effectiveAncestorMemoryLimit,
   formatJson,
   formatReport,
   hostParallelism,
+  hostTotalMemMb,
   parseByteLimit,
   parseCpuMax,
   probeEffectiveCapacity,
   selfCgroupRelPath,
 } from "../scripts/effective-capacity-probe.ts";
+import { makeTmpDir } from "./helpers/tmp-workspace.mjs";
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const PROBE = path.join(HERE, "..", "scripts", "effective-capacity-probe.ts");
@@ -413,4 +418,121 @@ test("the AC4 raw reader is a real reader (self-check on a live cgroup file)", (
   } else {
     assert.match(parsed.memMax, /^(\d+|max)$/);
   }
+});
+
+// ── the ancestor memory walk (gap-full-suite-runner-dedupe-memory-envelope-to-probe) ──────────────
+//
+// `effectiveAncestorMemoryLimit` is THE one cgroup-hierarchy traversal in the repo (full-suite-runner
+// keeps none of its own). These drive it against a REAL cgroup-v2-SHAPED fixture tree on disk (the
+// same file names a kernel writes: `cgroup.controllers` + per-layer `memory.max`), so the walk's file
+// access, its exclusion rule, and its malformed-path guard are exercised together — ⛔ not a mock of
+// the walk. `layers` = [[cgroup-relative dir, memory.max text | null], …].
+
+/** Build a cgroup-v2-shaped fixture tree; returns its root (stands in for /sys/fs/cgroup). */
+function makeCgroupFixture(layers) {
+  const root = makeTmpDir("effcap-cgroup-");
+  fs.writeFileSync(path.join(root, "cgroup.controllers"), "+memory +cpu\n");
+  for (const [rel, memMax] of layers) {
+    const dir = path.join(root, rel);
+    fs.mkdirSync(dir, { recursive: true });
+    if (memMax !== null) fs.writeFileSync(path.join(dir, "memory.max"), memMax + "\n");
+  }
+  return root;
+}
+
+test("effectiveAncestorMemoryLimit — a quay-anchor-* ANCESTOR layer is SKIPPED while a NON-quay child layer is CONSUMED", () => {
+  // The quay-own layer (1G) is deliberately TIGHTER than the consumed one (4G): if the exclusion
+  // stopped working the walk would return 1G, so this assertion discriminates rather than passing
+  // for the wrong reason.
+  const root = makeCgroupFixture([
+    ["user.slice", null],
+    ["user.slice/quay-anchor-A.scope", "1073741824"],
+    ["user.slice/quay-anchor-A.scope/child", "4294967296"],
+  ]);
+  const got = effectiveAncestorMemoryLimit({ cgroupRoot: root, procSelfCgroup: "0::/user.slice/quay-anchor-A.scope/child\n" });
+  assert.equal(got.bytes, 4294967296, `the non-quay child layer is consumed (got ${got.bytes})`);
+  assert.deepEqual(got.skippedQuayScopes, ["user.slice/quay-anchor-A.scope"], "the quay-own ancestor was skipped and NAMED");
+});
+
+test("effectiveAncestorMemoryLimit — the TIGHTEST non-quay layer wins (an excluded tighter layer changes nothing)", () => {
+  const root = makeCgroupFixture([
+    ["user.slice", "2147483648"], // 2G, an ordinary (non-quay) ancestor cap — must be consumed
+    ["user.slice/quay-anchor-B.scope", "1073741824"], // 1G, quay's own — tighter, must be ignored
+    ["user.slice/quay-anchor-B.scope/child", "4294967296"], // 4G
+  ]);
+  const got = effectiveAncestorMemoryLimit({ cgroupRoot: root, procSelfCgroup: "0::/user.slice/quay-anchor-B.scope/child\n" });
+  assert.equal(got.bytes, 2147483648, `min(2G, 4G) = 2G; ⛔ 1G would mean the quay-own layer was consumed (got ${got.bytes})`);
+  assert.deepEqual(got.skippedQuayScopes, ["user.slice/quay-anchor-B.scope"]);
+});
+
+test("effectiveAncestorMemoryLimit — every quay-own prefix is skipped, incl. the transient run-* scope", () => {
+  assert.deepEqual([...QUAY_OWN_SCOPE_PREFIXES], ["quay-anchor-", "quay-serve-", "run-"]);
+  for (const name of ["quay-anchor-x.scope", "quay-serve-x.scope", "run-1234.scope"]) {
+    const root = makeCgroupFixture([[`user.slice/${name}`, "1073741824"]]);
+    const got = effectiveAncestorMemoryLimit({ cgroupRoot: root, procSelfCgroup: `0::/user.slice/${name}\n` });
+    assert.equal(got.bytes, null, `${name} must set no consumed ceiling (⛔ not 1G, ⛔ not 0)`);
+    assert.deepEqual(got.skippedQuayScopes, [`user.slice/${name}`]);
+  }
+});
+
+test("effectiveAncestorMemoryLimit — fail-open: no unified hierarchy / no 0:: line / malformed path ⇒ null (never a fabricated limit)", () => {
+  // (a) a root with no cgroup.controllers is not a v2 mount
+  const notV2 = makeTmpDir("effcap-nov2-");
+  fs.mkdirSync(path.join(notV2, "user.slice", "x"), { recursive: true });
+  fs.writeFileSync(path.join(notV2, "user.slice", "x", "memory.max"), "1073741824\n");
+  assert.deepEqual(effectiveAncestorMemoryLimit({ cgroupRoot: notV2, procSelfCgroup: "0::/user.slice/x\n" }), {
+    bytes: null,
+    skippedQuayScopes: [],
+  });
+  // (b) /proc/self/cgroup without a unified line (cgroup v1) is NOT-EVALUATED
+  const root = makeCgroupFixture([["user.slice/x", "1073741824"]]);
+  assert.deepEqual(effectiveAncestorMemoryLimit({ cgroupRoot: root, procSelfCgroup: "1:name=systemd:/user.slice/x\n" }), {
+    bytes: null,
+    skippedQuayScopes: [],
+  });
+  // (c) a path that escapes the mount root is a hostile/malformed /proc entry ⇒ fail open, don't walk
+  assert.deepEqual(effectiveAncestorMemoryLimit({ cgroupRoot: root, procSelfCgroup: "0::/../etc\n" }), {
+    bytes: null,
+    skippedQuayScopes: [],
+  });
+});
+
+test("collectReadings(memoryLayers) — 'ancestors' takes the walked tightest non-quay cap; 'self' takes only this process's own dir", () => {
+  // own cgroup = the child (4G); an ordinary ancestor (2G) sits one level up under user.slice. "self"
+  // cannot see the ancestor cap; "ancestors" must.
+  const root = makeCgroupFixture([
+    ["user.slice", "2147483648"],
+    ["user.slice/quay-anchor-C.scope", null],
+    ["user.slice/quay-anchor-C.scope/child", "4294967296"],
+  ]);
+  const proc = "0::/user.slice/quay-anchor-C.scope/child\n";
+  const selfCap = computeEffectiveCapacity(collectReadings({}, { cgroupRoot: root, procSelfCgroup: proc }));
+  assert.equal(selfCap.mem_source, "cgroup-memory-max");
+  assert.equal(selfCap.effective_mem_mb, 4096, "the own-dir read sees only the child's 4G");
+
+  const ancestorCap = computeEffectiveCapacity(
+    collectReadings({}, { cgroupRoot: root, procSelfCgroup: proc, memoryLayers: "ancestors" }),
+  );
+  assert.equal(ancestorCap.mem_source, "cgroup-memory-max");
+  assert.equal(ancestorCap.effective_mem_mb, 2048, `the ancestor walk sees the 2G cap one level up (got ${ancestorCap.effective_mem_mb})`);
+});
+
+test("collectReadings(ignoreEnvSeams) — the production capacity reading is NEVER redirected by the EFFECTIVE_CAPACITY_TEST_* seams", () => {
+  const root = makeCgroupFixture([["user.slice/quay-anchor-D.scope", null], ["user.slice/quay-anchor-D.scope/child", "4294967296"]]);
+  const opts = { cgroupRoot: root, procSelfCgroup: "0::/user.slice/quay-anchor-D.scope/child\n", memoryLayers: "ancestors" };
+  const seams = {
+    [TEST_MEMORY_MAX]: "999",
+    [TEST_NPROC]: "7",
+    [TEST_MEM_AVAIL_MB]: "123",
+  };
+  // The seams DO apply by default (that is what they are for — the module's own tests).
+  const seamed = collectReadings(seams, opts);
+  assert.equal(seamed.memoryMaxRaw, "999", "sanity: without ignoreEnvSeams the seam redirects the reading");
+  assert.equal(seamed.nproc, 7);
+  // …and are ignored when the caller says the reading is a PRODUCTION host-capacity read.
+  const clean = collectReadings(seams, { ...opts, ignoreEnvSeams: true });
+  assert.equal(clean.memoryMaxRaw, "4294967296", "⛔ the seam must not redirect a production reading");
+  assert.equal(clean.nproc, hostParallelism(), "⛔ the nproc seam must not redirect a production reading");
+  assert.equal(clean.memFallbackMb, hostTotalMemMb(), "⛔ the fallback seam must not redirect a production reading");
+  assert.equal(clean.cgroupV2, true, "a real fixture cgroup still reads as present");
 });
