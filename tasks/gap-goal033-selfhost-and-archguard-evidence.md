@@ -1,7 +1,7 @@
 ---
 id: gap-goal033-selfhost-and-archguard-evidence
 title: GOAL-033 ②：ArchGuard before/after（cli 离开 package SCC 6→5）+ 负对照 + CLI 语义现场重算
-status: ready
+status: needs-human
 labels:
   - gap
 parent: null
@@ -151,3 +151,12 @@ CLI 语义现场重算那一半（判据在证据检查之后才跑到，故此�
 
 **未落地原因**：AC-3（after 成员集）与 AC-5（AC-351 exit 0）**不能如实勾选**，故保留 `- [ ]`；status 字段归
 driver 所有，本任务不改。其余 5 条 AC 均已满足（见上）。
+
+## Needs-Human
+
+**执行 2026-10-09T06:58:16.498Z — 连续修满重试上限仍不合格（标 needs-human）**
+
+- 阻碍原因：worker-driver 连续 3 次 exited-not-landed 未落地（重试上限）
+- 失败步/判词：AC 未全勾（checked 5/7，剩余未勾 2）——续做只需验证并勾选 AC
+- run_id：wk-prod-anchor
+- session_id：1c8c4a2d-bd69-4696-9d9a-80cd47b2dcd2
