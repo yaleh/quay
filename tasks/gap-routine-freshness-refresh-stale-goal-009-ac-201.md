@@ -3,7 +3,7 @@ id: gap-routine-freshness-refresh-stale-goal-009-ac-201
 title: "freshness-refresh: evidence_ts 2026-09-25T17:17:02Z is 321.87h old and
   the delivery-face distance d=217 already exceeds the window K=200 (margin -17)
   — the subject is outside the f"
-status: ready
+status: done
 labels:
   - gap
   - routine-filed
