@@ -157,8 +157,69 @@ export async function buildDist(opts = {}) {
   return outfile;
 }
 
+// ── the published subpath bundle ───────────────────────────────────────────────────────────────────
+
+const DEFAULT_KERNEL_ENTRY = path.resolve(pkgDir, "src/dashboard-kernel.ts");
+const DEFAULT_KERNEL_OUTFILE = path.resolve(pkgDir, "dist/dashboard-kernel.js");
+
+/**
+ * Build the ESM dist bundle for the package's published `quay/dashboard-kernel` subpath
+ * (gap-dashboard-kernel-export-for-cross-project-reuse).
+ *
+ * ⛔ WHY A SEPARATE JS OUTPUT EXISTS AT ALL — MEASURED, NOT ASSUMED: Node REFUSES to strip
+ * TypeScript types for any file resolved under `node_modules` and throws
+ * `ERR_UNSUPPORTED_NODE_MODULES_TYPE_STRIPPING`. Every OTHER `exports` subpath in this package
+ * points at `./src/*.ts`, and those resolve only through this monorepo's npm-workspaces SYMLINK
+ * (`node_modules/quay -> packages/quay`, whose realpath is outside node_modules) — a genuinely
+ * external `npm install` COPIES the file into node_modules and the import then fails outright.
+ * quay's first external consumer cannot be handed a `.ts` path; it is handed this plain-JS build,
+ * for exactly the reason `bin` points at `dist/quay.js` rather than `bin/quay.ts`. `exports`
+ * therefore pairs the runtime path (this file) with a `types` condition pointing at the `.ts`
+ * source, so TS consumers still get the real signatures.
+ *
+ * Unlike `buildDist`, no `banner`/`nodePaths` are needed: the kernel is a ZERO-IMPORT leaf (see its
+ * header), so there is no CJS interop shim or out-of-package bare specifier to satisfy.
+ * @returns the absolute path of the written bundle.
+ */
+export async function buildDashboardKernel(opts = {}) {
+  const entry = opts.entry ?? DEFAULT_KERNEL_ENTRY;
+  const outfile = opts.outfile ?? DEFAULT_KERNEL_OUTFILE;
+  const logLevel = opts.logLevel ?? "info";
+
+  let result;
+  try {
+    result = await esbuild.build({
+      entryPoints: [entry],
+      bundle: true,
+      platform: "neutral",
+      format: "esm",
+      target: ["es2022"],
+      outfile,
+      logLevel,
+    });
+  } catch (err) {
+    if (logLevel !== "silent") console.error("esbuild.build() threw:", err);
+    throw err;
+  }
+
+  if (result.errors && result.errors.length > 0) throw new Error(`esbuild reported errors: ${JSON.stringify(result.errors)}`);
+  if (!fs.existsSync(outfile)) throw new Error(`esbuild reported success but outfile is missing: ${outfile}`);
+
+  console.log(`esbuild: quay dashboard-kernel ESM bundle written to ${outfile}.`);
+  return outfile;
+}
+
 // Run as a script (build-dist.sh / CI): build the default target, exit non-zero
 // on any failure. Skipped when imported (e.g. by the test), so coverage of the
 // build logic is measured in-process.
+//
+// BOTH dist artifacts are built here (not just the CLI bundle): package.sh calls
+// build-dist.sh before `npm pack`, and the exported `./dashboard-kernel` subpath resolves only when
+// dist/dashboard-kernel.js exists — a build entry that produced one but not the other would ship a
+// tarball whose own `exports` map points at a missing file.
 const invokedAsScript = process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url);
-if (invokedAsScript) buildDist().catch(() => process.exit(1));
+if (invokedAsScript) {
+  buildDist()
+    .then(() => buildDashboardKernel())
+    .catch(() => process.exit(1));
+}
