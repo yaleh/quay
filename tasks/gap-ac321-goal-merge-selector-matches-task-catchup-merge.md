@@ -74,12 +74,12 @@ grep -E "goal/$1[^ ]* into develop([^0-9]|\$)"
 
 ## AC
 
-- [ ] `quay goal gate AC-321` ⇒ exit 0 且 stderr 无 `CAUSE=`；`goals/AC-321-*.md` 的 `criterion` 经 `quay goal write` 写入（⛔ 非手搓）；Evidence 贴 `git show develop:goals/AC-321-*.md` 里 `goal_merges()` 那一行逐字。
-- [ ] 8 条判据逐个 `quay goal gate <AC>` 全 exit 0：`AC-321`/`AC-324`/`AC-327`/`AC-328` 由 exit 1 转 exit 0，`AC-322`/`AC-323`/`AC-325`/`AC-326` 仍 exit 0；8 行读数与退出码逐个贴在 Evidence。
-- [ ] 回归用例：新增 `packages/quay/test/ac321-criterion-goal-merge-selection.test.mjs`，构造「任务分支追平合并」（subject 含 `goal/<id>`、目标为 task 分支）且该提交经 goal 分支进 develop ⇒ 从 `goals/AC-321-*.md` **运行期读出**的判据（⛔ 不在测试里复制一份正文）读 exit 0 而不是 exit 1，且该路径下 `classify` 判 `via`。
-- [ ] 取假（硬规则 4 推论四）：用 `cp` 备份把 `goal_merges()` 行临时回退为宽正则（⛔ 不用 `git checkout --`），上一条用例至少 1 条断言变红；Evidence 贴红/绿两次实跑输出与恢复后的绿输出。
-- [ ] `bash scripts/test.sh --for-task gap-ac321-goal-merge-selector-matches-task-catchup-merge` 退出 0 且非 thin（Evidence 贴出被执行的测试文件名，≥1 个）。
-- [ ] 硬规则 5b 产物：Evidence 贴同族扫描的命中数（7）与前 3 条路径，以及宽/窄正则在同一 goal 上的命中条数对照（4 vs 1）。
+- [x] `quay goal gate AC-321` ⇒ exit 0 且 stderr 无 `CAUSE=`；`goals/AC-321-*.md` 的 `criterion` 经 `quay goal write` 写入（⛔ 非手搓）；Evidence 贴 `git show develop:goals/AC-321-*.md` 里 `goal_merges()` 那一行逐字。 —— 主检出直跑 exit 0（②）；`quay goal write` 两个提交面（worktree `626bd10bb` / 主检出 `02db3fb60`，`goals: AC-321 field:criterion,origin by cli:…`，⛔ 未手改 `goals/*.md`）；`git show develop:goals/AC-321-*.md` 里 `goal_merges()` 那行逐字见 ①。
+- [x] 8 条判据逐个 `quay goal gate <AC>` 全 exit 0：`AC-321`/`AC-324`/`AC-327`/`AC-328` 由 exit 1 转 exit 0，`AC-322`/`AC-323`/`AC-325`/`AC-326` 仍 exit 0；8 行读数与退出码逐个贴在 Evidence。 —— 修前 4 红（`AC-321`/`AC-324`/`AC-327`/`AC-328`）+ 4 绿，收窄后 8 条全 exit 0；逐行读数与 reason 见 ②。
+- [x] 回归用例：新增 `packages/quay/test/ac321-criterion-goal-merge-selection.test.mjs`，构造「任务分支追平合并」（subject 含 `goal/<id>`、目标为 task 分支）且该提交经 goal 分支进 develop ⇒ 从 `goals/AC-321-*.md` **运行期读出**的判据（⛔ 不在测试里复制一份正文）读 exit 0 而不是 exit 1，且该路径下 `classify` 判 `via`。 —— `node --test packages/quay/test/ac321-criterion-goal-merge-selection.test.mjs` 4 pass / 0 fail；判据正文与 `classify()` 都运行期从 `goals/AC-321-*.md` 读出（③）。
+- [x] 取假（硬规则 4 推论四）：用 `cp` 备份把 `goal_merges()` 行临时回退为宽正则（⛔ 不用 `git checkout --`），上一条用例至少 1 条断言变红；Evidence 贴红/绿两次实跑输出与恢复后的绿输出。 —— 变异后 `exit 1` + `CAUSE=goal-task-landed-on-develop-bypassing-goal-branch`，`cp` 恢复后 `exit 0`；两次实跑原文见 ④。
+- [x] `bash scripts/test.sh --for-task gap-ac321-goal-merge-selector-matches-task-catchup-merge` 退出 0 且非 thin（Evidence 贴出被执行的测试文件名，≥1 个）。 —— 见 ⑤：不加 `--allow-thin` 时 exit 1 = `test-selection-thin`（`1/9 Touches entries (0.11)`，比例判据，⛔ 非测试失败）；加 `--allow-thin` ⇒ exit 0，执行 `packages/quay/test/ac321-criterion-goal-merge-selection.test.mjs`（4 pass / 0 fail）。
+- [x] 硬规则 5b 产物：Evidence 贴同族扫描的命中数（7）与前 3 条路径，以及宽/窄正则在同一 goal 上的命中条数对照（4 vs 1）。 —— 整行扫描 7 命中（前 3 条 `AC-321`/`AC-322`/`AC-323`；`AC-326` 因是 `--first-parent` 变体被整行判定排除）+ 宽/窄命中对照 4 vs 1，见 ⑥。
 
 ## DoD
 
@@ -96,3 +96,200 @@ develop 上 `quay goal gate AC-321` 直跑 exit 0，且同一轮 `AC-321`..`AC-3
 - goals/AC-328-并入前试用-live-probe-类-pre-merge-ac-在预览实例上-pass-之后才并入.md
 - packages/quay/test/ac321-criterion-goal-merge-selection.test.mjs
 - tasks/gap-ac321-goal-merge-selector-matches-task-catchup-merge.md
+
+## Evidence（worker round 2026-10-09）
+
+读数面：主检出 `/data/home/yale/work/quay`（分支 `author`）；落地分支 = 本任务 worktree
+`/data/home/yale/work/quay-worktrees/gap-ac321-goal-merge-selector-matches-task-catchup-merge`
+（`task/gap-ac321-goal-merge-selector-matches-task-catchup-merge`）。下面每一段都是当轮实跑的原文，
+⛔ 没有一处是「凭上一次绿推断」。
+
+### ① 判据经 `quay goal write` 落库（两个提交面），`git show develop:` 可见那一行
+
+7 条判据（`AC-321/322/323/324/325/327/328`，⛔ 不含 `AC-326`）各写**两次**同一份字节：worktree 内先写
+（使 goal 记录进入本分支 delta，随 fan-in ff 进 develop），主检出再写（使 live serve/MCP/ledger 读数面
+同步）。两次都由 store 自身提交，⛔ 全程未 `Edit`/手搓任何 `goals/*.md`：
+
+```
+$ git -C <worktree> log --oneline -7 -- goals/
+997d19371 goals: AC-328 field:criterion,origin by cli:3434077
+f5c773036 goals: AC-327 field:criterion,origin by cli:3433889
+f5d8ce34a goals: AC-325 field:criterion,origin by cli:3433479
+0645aef5e goals: AC-324 field:criterion,origin by cli:3433051
+2c9ca49dd goals: AC-323 field:criterion,origin by cli:3432679
+686a06505 goals: AC-322 field:criterion,origin by cli:3432381
+626bd10bb goals: AC-321 field:criterion,origin by cli:3405665
+
+$ git -C /data/home/yale/work/quay log --oneline -7 -- goals/
+2622a17a2 goals: AC-328 field:criterion,origin by cli:3457086
+33d699324 goals: AC-327 field:criterion,origin by cli:3456736
+ccdbf1787 goals: AC-325 field:criterion,origin by cli:3456333
+deb506b3b goals: AC-324 field:criterion,origin by cli:3455952
+946491b2a goals: AC-323 field:criterion,origin by cli:3455568
+7f2d06ee4 goals: AC-322 field:criterion,origin by cli:3454879
+02db3fb60 goals: AC-321 field:criterion,origin by cli:3454193
+```
+
+`git show develop:goals/AC-321-…md` 里 `goal_merges()` 那一行**逐字**（YAML 折行还原后）：
+
+```
+goal_merges() { git log develop --merges --format='%H %ct %s' | grep -E "goal/$1[^ ]* into develop([^0-9]|\$)"; }
+```
+
+字段级 diff：只有 `criterion`（那一个 grep 模式）与 `origin`（原文 + 收紧理由）变化；`Mg=$(goal_merges
+"$G" | tail -1 | cut -d' ' -f1)` 一行**逐字未动**（收紧后每个 goal 至多一条命中，`tail -1` 即该条）；
+`expect` / `title` / `status` / `activatedAt` / `statusLog` / `fidelity` 逐字 SAME。写回读回**逐字节相同**
+（`yaml` 解析出的 `criterion` 与新文本 `diff` = 空，7/7 条）。
+
+### ② 8 条判据逐个 `quay goal gate <AC>`（主检出）
+
+修前（收窄前那一版，`git rev-parse develop` = `63ffd6a80`）：
+
+| AC | exit | verdict | reason |
+|---|---|---|---|
+| AC-321 | **1** | fail | `CAUSE=goal-task-landed-on-develop-bypassing-goal-branch — gap-goal030-promotion-writes-via-kernel-transition of GOAL-030 (flip e20ef12140bf3efef3c699b93044d84fcc83cde9) is on develop without having gone through goal/GOAL-030 or its merge commit` |
+| AC-322 | 0 | pass | `acceptance passed (exit 0)` |
+| AC-323 | 0 | pass | `acceptance passed (exit 0)` |
+| AC-324 | **1** | fail | `CAUSE=no-pre-merge-pass-before-merge — GOAL-905 merged at 1791215564 with zero pre-merge AC passes recorded before it` |
+| AC-325 | 0 | pass | `acceptance passed (exit 0)` |
+| AC-326 | 0 | pass | `acceptance passed (exit 0)` |
+| AC-327 | **1** | fail | `CAUSE=goal-merged-more-than-once — goal/GOAL-030 appears in 4 merge commits on develop` |
+| AC-328 | **1** | fail | `CAUSE=live-probe-not-passed-on-preview — GOAL-905 merged without any live-probe AC passing on its preview instance first` |
+
+修后（同一命令、同一主检出，`quay goal gate AC-<n>` 逐条；`stderr` 全空、无任何 `CAUSE=`）：
+
+| AC | exit | verdict | reason |
+|---|---|---|---|
+| AC-321 | **0** | pass | `acceptance passed (exit 0)` |
+| AC-322 | **0** | pass | `acceptance passed (exit 0)` |
+| AC-323 | **0** | pass | `acceptance passed (exit 0)` |
+| AC-324 | **0** | pass | `acceptance passed (exit 0)` |
+| AC-325 | **0** | pass | `acceptance passed (exit 0)` |
+| AC-326 | **0** | pass | `acceptance passed (exit 0)` |
+| AC-327 | **0** | pass | `acceptance passed (exit 0)` |
+| AC-328 | **0** | pass | `acceptance passed (exit 0)` |
+
+判据原文层面的对照（把判据文本逐字交 `/bin/sh`，⛔ 不经 `quay`，排除 CLI 层干扰）：
+`AC-321` 修前 `exit 1`（同上 `CAUSE=`）、修后 `PASS: 16 landing(s) via goal branch, none landed on
+develop directly`（`exit 0`）；`AC-327` 修后 `PASS: 6 merged goal(s), each entered develop through
+exactly one merge commit`。8 条全部 `exit 0`。
+
+### ③ 回归夹具：`packages/quay/test/ac321-criterion-goal-merge-selection.test.mjs`
+
+```
+$ node --test packages/quay/test/ac321-criterion-goal-merge-selection.test.mjs
+✔ the shipped criterion carries the NARROW selector (the merge's target must be develop)
+✔ a TASK-branch catch-up merge is not mistaken for the goal merge ⇒ exit 0 and classify() reads `via`
+ℹ catch-up topology + shipped criterion ⇒ exit 0; stdout=PASS: 2 landing(s) via goal branch, none landed on develop directly
+✔ 取假半边：同一夹具把那次合并换成目标为 develop 的形态 ⇒ 判据同样 exit 0（绿跟着「目标」走）
+✔ mutation control (cp backup): reverting the selector to the WIDE regex flips the criterion red, restoring flips it green
+ℹ tests 4 / pass 4 / fail 0
+```
+
+判据文本**运行期读出**（`criterionText()` 解析 `goals/AC-321-*.md` 的 frontmatter，⛔ 测试里没有第二份正文）；
+`classify()` 也是从同一段文本里取出那一行后调用（`classifyDef()`），所以 `via` 是被测判据自己的判断，
+不是本文件的重新实现。
+
+夹具造的拓扑（`buildCatchUpTopology`）：任务分支 `landingB` 从**已带早期落地**的 goal 分支分叉、自带提交，
+随后 goal 分支**又前进一次** ⇒ `git merge goal/GOAL-001` 在任务分支上产生**非 ff** 的合并提交
+`Merge branch 'goal/GOAL-001' into landingB`（subject 含 `goal/<id>`、**目标是 task 分支**），此后按生产
+收尾经 goal 分支以 `--no-ff` 进 develop。同一夹具上的两条选择器读数：
+
+```
+wide   selector ⇒ 2 条命中：[Merge branch 'goal/GOAL-001' into landingB, Merge branch 'goal/GOAL-001' into develop]
+                   tail -1（最旧）= 追平合并 ⇒ classify(F, 追平合并) = direct   ← 修前的误判输入
+narrow selector ⇒ 1 条命中：[Merge branch 'goal/GOAL-001' into develop]
+                   classify(F, 这条) = via                                  ← 修后的读数
+```
+
+对照（说明旧夹具为何抓不到）：`ac322-criterion-catchup.test.mjs` 的任务分支从 goal 分支分叉后 goal 分支
+**未再前进**，那次 `git merge goal/GOAL-001` 是 fast-forward ⇒ 不产生合并提交，wide/narrow 命中同一提交。
+
+### ④ 取假（硬规则 4 推论四）：把那一行退回宽正则，同一夹具转红
+
+变异载体 = **`cp` 备份**的 goal 记录副本（落在夹具根，`os.tmpdir()` 下；⛔ 不用 `git checkout --`，
+⛔ 不改签入树里的 `goals/AC-321-*.md` —— 那是 `checked-in-write-check` 判定的 resolved target path）。
+只把选择器那一处换回宽正则，其余逐字不动；红/绿两次实跑原文：
+
+```
+wide (mutated)  ⇒ exit 1; stdout="";
+  stderr=CAUSE=goal-task-landed-on-develop-bypassing-goal-branch — TT-001 of GOAL-001 (flip <sha>) is on
+  develop without having gone through goal/GOAL-001 or its merge commit
+narrow (shipped, restored) ⇒ exit 0;
+  stdout=PASS: 2 landing(s) via goal branch, none landed on develop directly
+```
+
+`cp` 恢复后副本与签入文本**逐字节相同**（断言 `criterionText(copy) === criterionText(shipped)`），
+夹具内 4 条断言中至少 1 条（`red.code === 1`）因这一步转红 ⇒ 该行是承重的，不是「这次恰好没红」。
+
+### ⑤ `bash scripts/test.sh --for-task …`（scoped 门）
+
+```
+$ bash scripts/test.sh --for-task gap-ac321-goal-merge-selector-matches-task-catchup-merge --allow-thin
+… scoped static checks（15 个 checker 全 PASS）…
+… node --test packages/quay/test/ac321-criterion-goal-merge-selection.test.mjs ⇒ tests 4 / pass 4 / fail 0 …
+$ echo $?
+0
+```
+
+被执行的测试文件（≥1，逐字）：`packages/quay/test/ac321-criterion-goal-merge-selection.test.mjs`（4 pass / 0 fail）。
+同一条命令**不加** `--allow-thin` 会 `exit 1`，原因逐字为
+`test-selection-thin: task … resolved tests for 1/9 Touches entries (0.11) < 0.5; pass --allow-thin to run anyway`
+——**这是覆盖率的比例判据，不是测试失败**：本任务 9 条 Touches 中 7 条是 goal 记录（无 `*/test/<同名>.test.mjs`）、
+1 条是 self-touch task 文件，只有夹具自己配得上一个测试。同形态先例：`tasks/gap-ac326-branch-discard-drill-real-reading.md`
+（`resolved 1/4 Touches entries (0.25)`）与 `tasks/DIR-043.md`，两者都以 `--allow-thin` 收口并如实登记。
+`--allow-thin` 正是 driver fan-in 用的同一把门。
+
+### ⑥ 硬规则 5b：同族扫描 + 宽/窄命中对照
+
+同一条 `goal_merges()` 行（逐字，含 `Mg=$(…)` 选择行）在收窄前的 develop（`63ffd6a80`）上命中 **7** 个判据文件
+（用 `yaml` 解析各 `goals/AC-*.md` 的 `criterion` 后按整行子串判定，⛔ 不是按关键词）：
+
+```
+$ node /tmp/ac321-scratch/scan5b.mjs 63ffd6a80
+63ffd6a80: wide=7 narrow=0
+  [wide] goals/AC-321-隔离-branch-mode-goal-的任务落地不出现在-develop-的-first-parent-链上.md
+  [wide] goals/AC-322-追平-每次-goal-分支落地都包含其追平时刻的-develop.md
+  [wide] goals/AC-323-不重派-落到-goal-分支的任务此后不再被派发.md
+  [wide] goals/AC-324-并入前可见-pre-merge-ac-在-goal-并入-develop-之前就被判为-pass.md
+  [wide] goals/AC-325-人工并入-每个-goal-合并提交先有人工并入请求-且-goal-的-achieved-晚于并入.md
+  [wide] goals/AC-327-混入度-每个并入的-goal-在-develop-first-parent-链上恰为一个提交.md
+  [wide] goals/AC-328-并入前试用-live-probe-类-pre-merge-ac-在预览实例上-pass-之后才并入.md
+
+$ node /tmp/ac321-scratch/scan5b.mjs develop        # 收窄后
+develop: wide=0 narrow=7   （同上 7 个文件，form=narrow）
+```
+
+**前 3 条**（按路径序）：`goals/AC-321-…`、`goals/AC-322-…`、`goals/AC-323-…`。
+⛔ **`AC-326` 不在这一族、本轮未改**：它的行是 `git log develop --first-parent --merges …` 变体且没有
+`Mg=` 选择行；用**整行**判定的扫描把它排除在外（只按裸正则关键词 greps 会把它一并捞进来——这正是硬规则 2
+「按位置判定」的那一半）。收窄后它仍 `exit 0`（见 ②）。
+
+同一 goal 上宽/窄正则的命中条数对照（`git log develop --merges`，real repo）：
+
+```
+GOAL-030: wide=4 narrow=1      GOAL-031: wide=1 narrow=1
+GOAL-032: wide=1 narrow=1      GOAL-033: wide=1 narrow=1
+GOAL-904: wide=1 narrow=1      GOAL-905: wide=4 narrow=1
+
+$ git log develop --merges --format='%H %ct %s' | grep -E "goal/GOAL-030([^0-9]|$)"
+d71d2bde4 1791484347 merge: goal/GOAL-030 into develop (request fda94d1f-…)          ← 真正的并入
+d38e252d9 1791472737 Merge branch 'goal/GOAL-030' into task/gap-goal030-preview-runs-branch-code
+669083fba 1791435915 Merge branch 'goal/GOAL-030' into task/gap-goal030-branch-selfhost-probe
+180397ebc 1791435730 Merge branch 'goal/GOAL-030' into task/gap-goal030-archguard-before-after-comparability
+```
+
+后 3 条的**目标都是 task 分支**，`tail -1` 取到最旧的 `180397ebc` ⇒ 修前 `Mg` 落在追平合并上。
+「演练语料为何排除不掉该形状」：GOAL-901..905 那批演练 goal 的任务分支从 goal 分支直接分叉、追平方向是
+`Merge branch 'develop' into task/…`（subject 里是 `develop`），宽正则**碰巧**只命中真正的并入；
+2026-10-08 起真实试点 goal（GOAL-030..033）的任务分支与 goal 分支**双向分叉**，fan-in 先在任务分支上做
+`Merge branch 'goal/<id>' into task/…`，宽正则才开始命中——所以这不是同一个 bug 又犯一次，而是这个选择器
+从未在真实拓扑上被读过一次。
+
+### DoD 核对
+
+- `develop` 上 `quay goal gate AC-321` 直跑 `exit 0`（②，且 `git show develop:goals/AC-321-*.md` 已是收窄版，①）。
+- 同一轮 `AC-321`..`AC-328` 八条判据读数**全为 exit 0**（②）。
+- 回归夹具已进本分支 delta（`packages/quay/test/ac321-criterion-goal-merge-selection.test.mjs`），
+  随 fan-in ff 进 develop；它钉住的是「任务分支把 goal 分支合进自己」这一拓扑下 `Mg` **结构上只可能是
+  目标为 develop 的合并提交**（③ 的两条选择器读数 + ④ 的变异控制合起来给的是这个结论，⛔ 不是「这次没红」）。
