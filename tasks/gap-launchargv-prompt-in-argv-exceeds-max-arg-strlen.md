@@ -18,33 +18,16 @@ extra:
 
 ## Finding
 
-**本任务是 `gap-meta-driver-snapshot-tracked-changes-reference-error` 的直接后续**：那个 import 修复已经把语义半从 `ReferenceError` 推进到**下一个、独立的**阻塞点，实测转移：
+`gap-meta-driver-snapshot-tracked-changes-reference-error` 的 import 修复把语义半从 `ReferenceError` 推进到**下一个、独立的**阻塞点，实测转移：`09-12 E2BIG` → `09-14 REF` → `10-09T08:52 E2BIG`（即 guard 已修好、生产已跑新代码，现在是另一个更早存在的缺陷）。
 
-```
-2026-09-12T02:37:09Z  E2BIG      ← 迁模块之前（守卫内联，能跑到 spawn）
-2026-09-14T02:51:40Z  REF        ← 迁模块之后（守卫裸用，根本到不了 spawn）
-2026-10-09T08:52:02Z  E2BIG      ← import 修复后（工作树 mtime 触发的 source-refresh 已加载新代码）
-```
+**根因（实测，非推断）**：`plugin/scripts/driver-runtime.ts:1783` `launchArgv` 把**整个 prompt 作为单个 argv 元素**（`-p <prompt>`）。Linux 单参数上限 `MAX_ARG_STRLEN = 131072 字节`（本会话二分实测：131071 成功、131072 即 E2BIG；⛔ 与总预算 `ARG_MAX=2097152` 无关）。meta-driver readings JSON 实测最大 **1,281,521 字节**（≈9.8×）⇒ `spawn` 必死。
 
-即：**guard 已经修好了、生产已在跑新代码**，现在的阻塞是另一个更早存在的缺陷。
+## Plan (as executed)
 
-**根因（实测，非推断）**：
-
-- `plugin/scripts/driver-runtime.ts:1783` `launchArgv` 末行：`argv.push("-n", resolved.name, "-p", prompt);` —— **整个 prompt 作为单个 argv 元素**传给子进程。
-- Linux 的**单参数**上限 `MAX_ARG_STRLEN = 131072 字节（128 KiB）**，本会话用二分实测确认：`spawnSync` 传 131071 字节成功、131072 字节即 `E2BIG`（⛔ 与 `ARG_MAX=2097152` 无关——那是**总**预算，单参数另有一道 128 KiB 的墙）。
-- meta-driver 的 readings JSON **实测最大 1,281,521 字节**（2026-10-09T08:52:02Z 那一轮），≈ 单参数上限的 **9.8 倍**。
-- ⇒ `spawn` 必然 `E2BIG`。readings 随 goal/AC 累积单调增长（这也是它 09-12 才开始失败的原因）。
-
-**为什么它现在是硬阻塞**：meta-driver 语义半 **0 条 verified**（1,749 条非 verified）。任何「与 monolithic meta-driver 并排对比」的评测（例如 ownership shadow proposer 的对照实验）在语义半不可用时**无法进行**。
-
-**明确非目标**：不改 readings 的内容/形状、不缩小证据面（那是拿信息换通过率）、不动 meta-driver 的判定逻辑、不重启生产 driver。
-
-## Plan
-
-1. 让 `-p` 的 prompt 走 **stdin** 而不是 argv：`claude -p` 在**不接 prompt 参数**时从 stdin 读（`--help` 自述 "useful for pipes"；本会话已确认该形态被接受）。目标形态：`launchArgv` 返回的 argv 里**只留 `-p`**，prompt 作为独立返回值/参数交给 spawn 写入子进程 stdin。
-2. `driver-runtime.ts` 的 `runAsync` 现为 `stdio: ["ignore", ...]`——加一条**可选** `stdinData`（缺省 undefined ⇒ 行为逐字不变），写入后 end()。
-3. 保持**向后兼容**：现有调用点若不传 stdinData，argv 形态与今天完全一致（小 prompt 的 worker/promotion/quality 不受影响）。⛔ 不做「全量切换」——一次只改真正超限的那条路径，把 blast radius 限制在 meta probe。
-4. ⛔ **不得**用「prompt 太大就截断」类降级：那会把「没读全」伪装成「读过了」（硬规则 3b）。
+1. `launchArgv` 加**可选** `promptViaStdin`：为真时只 push 裸 `-p`（prompt 由调用方经 stdin 写入）；缺省 false ⇒ 既有调用点 argv **逐字不变**。
+2. `runAsync` 加**可选** `stdinData`：缺省 `undefined` ⇒ `stdio[0]` 仍是 `"ignore"`（逐字不变）；给了才开 pipe 并 `end()`。
+3. 只有 meta probe 那一条路径 `promptViaStdin: true`（`probeArgv` 测试缝存在时不改）——blast radius 收敛到一个调用点。
+4. 新增 `plugin/test/launchargv-stdin-prompt.test.mjs`：181,072 字节载荷经 stdin 传输、子进程回报**恰好**该长度；负对照断言同一载荷走 argv 必 `E2BIG`；另钉「缺省不传 stdinData 时子进程立即读到 EOF 而非挂住」。
 
 ## Touches
 
@@ -55,23 +38,18 @@ extra:
 
 ## AC
 
-- [ ] 新增测试：构造一个 >131072 字节的 prompt，经新路径 spawn 一个能回显 stdin 长度的子进程，断言**成功且长度一致**（⛔ 非 fixture 自证——子进程实际读到的字节数是直接量）：`node --experimental-strip-types --test plugin/test/launchargv-stdin-prompt.test.mjs` 退出 0。
-- [ ] **负对照**：同一超大 prompt 走**旧的** argv 路径必须 `E2BIG`（证明这条测试真的在测那个墙，而不是恒真）。
-- [ ] 既有行为不回退：`node --experimental-strip-types --test plugin/test/driver-runtime-s01.test.mjs` 等既有 driver-runtime 分片全绿。
-- [ ] 未传 stdinData 的调用点 argv 形态逐字不变（既有测试的断言即为判据，⛔ 不允许改断言来迁就实现）。
-- [ ] 无「截断/降级」分支：`grep -nE "slice\(0,\s*[0-9]{4,}\)|truncat" plugin/scripts/driver-runtime.ts` 在本次新增行上零命中。
+- [x] 新测试：>131072 字节 prompt 经新路径传输、子进程回报长度一致。**Verified**: 181072 == 181072，exit 0。
+- [x] **负对照**：同一载荷走旧 argv 路径必 `E2BIG`。**Verified**: `r.error.code === "E2BIG"`。
+- [x] 既有行为不回退。**Verified**: `driver-runtime-s*.test.mjs` 44/44、`meta-driver.test.mjs` 133/133。
+- [x] 未传 `stdinData` 的调用点 argv 逐字不变。**Verified**: 既有测试未改断言即全绿；新增的 EOF 用例显式钉住缺省路径。
+- [x] 无截断/降级分支。**Verified**: 新增行上 `slice(0,N)|truncat` 零命中。
+- [x] **额外直接量核验**：按修复后的 `launchArgv("meta-driver", <1.28 MB prompt>, root, {promptViaStdin:true})` 现场构造 argv——**11 个元素、最大 567 字节**（上限 131072），末元素为裸 `-p`。即该载荷不再可能触发 E2BIG。
 
 ## DoD
 
-真实落地 = 修复随本任务提交进 develop，且**生产语义半恢复**：`.quay/meta-driver-round.jsonl` 在提交时刻**之后**出现至少一条 `state:"verified"` 的语义半记录（⛔ 非 fixture；载体 gitignored，执行者在生产机上现场取读数并把时间戳与提交 sha 记入本任务）。若 readings 仍超限或被判为需要更根本的载荷改造（如改用临时文件），如实记录并升级，⛔ 不伪装成已验证。
+**⚠️ 诚实结果：代码已修并已在 argv 层面直接量验证，但生产尚未加载它——不得记作「生产已验证」。**
 
-## Superseded
-
-**本任务被 `b468560af` 的落地取代——它的 5 条 AC 与该 DoD 的生产读数全部已被满足，派发它等于让 worker 重做已落地的东西。**
-
-- 本任务立案时刻：**2026-10-09T09:15:36Z**（`task_write by cli:825080`）。
-- 取代它的提交：**`b468560af`**，**2026-10-09T09:24:12Z**（立案后 9 分钟），提交信息 `fix(driver-runtime): carry over-limit prompts via stdin — argv element hit MAX_ARG_STRLEN, spawn E2BIG`；作者分支 `task/gap-meta-driver-snapshot-tracked-changes-reference-error`，已在 `develop`。
-- 该提交落的文件**恰好就是本任务的 `## Touches`**：`plugin/scripts/driver-runtime.ts`（+24）、`plugin/scripts/meta-driver.ts`（+9）、`plugin/test/launchargv-stdin-prompt.test.mjs`（+51）。该测试文件头注释逐字写着 `Regression pin for gap-launchargv-prompt-in-argv-exceeds-max-arg-strlen.`
-- **AC 逐条已被覆盖**：AC1（超大 payload 走 stdin，子进程回显**精确**字节数）/ AC2（负对照：同一 payload 走单个 argv 元素必须 `E2BIG`）/ AC4（未传 `stdinData` 时 argv 形态不变，且子进程读到 EOF 不挂）/ AC5（断言「不是截断前缀」）均由该测试的三条 test 覆盖；AC3 的既有分片 `driver-runtime-s01..s10.test.mjs` 存在。
-- **DoD 的生产读数已取得**：`E2BIG` 在 `.quay/` 各台账中出现次数——修复前（< 09:24:12Z）**151** 条，修复后 **1** 条（且该条落在一个**成功**的语义轮记录里）。语义半恢复的直接证据：`.quay/meta-driver-round.jsonl` round 18 @ **2026-10-09T09:43:36Z** 带回**非空** `facts`（`meta-driver` readings：`goalCount`/`criterionCount`/`divergenceCount`/`drivers[…]`），即 DoD 所要求的「提交时刻之后至少一条语义半记录」。
-- ⛔ 不再派发本任务。若要继续这条轴，应针对**残留**问题另立任务，而不是重跑本条。
+- 直接量：正在跑的 `pid 2521870` **启动于 17:18:57（本地）**，而本修复提交于 **17:24:12**——**该进程比修复早 5 分 15 秒**。它此后（09:22、09:43 UTC）仍报 E2BIG，因为它在跑**修复前的代码**，与修复正确性无关。
+- 因此 `.quay/meta-driver-round.jsonl` 尚无 `state:"verified"` 记录，**不是**修复失败的证据，而是**未刷新**的证据。
+- ⛔ 本任务**不重启任何 driver**（DoD 自身的约束）。需要的动作是让常驻进程重载（source-refresh 未触发，或需一次显式 restart）——**留给后续/人裁定**，⛔ 不由本任务自行执行。
+- 复验方式（刷新后照做即可）：`grep -n 'meta-review' .quay/meta-driver-round.jsonl | tail -1` 应出现 `"state":"verified"` 或**新的**失败原因（不再是 E2BIG）。
