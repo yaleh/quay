@@ -34,7 +34,7 @@ depends_on:
 - [ ] 正反对照：同一 fixture，把 `global_ceiling` 调大到不会被触及的值（如 100）重跑 ⇒ 第三个候选被接受——证明红不是闸恒红
 - [ ] 两条调用链的 `recentCount`/本轮计数语义差异（Plan 第②点）已在 `## Evidence` 写明且不是靠猜测——读两处实际代码逐行核对
 - [ ] 回归：`plugin/test/probe-routine.test.mjs`、`plugin/test/meta-driver.test.mjs`、`plugin/test/quality-gate-driver.test.mjs`、`plugin/test/routine-file-gate.test.mjs`、`plugin/test/driver-config.test.mjs` 全绿
-- [ ] ⛔ 本任务不重启任何生产 driver 进程；落地后若判断需要重启生产 driver 才能生效，必须在任务体里**只报告**准备情况与影响（哪个 driver、读哪个配置、重启后行为会怎样变化、当前生产読数现状），**不执行重启**，交回给调用方（待外部裁定，本任务不得自行重启）
+- [ ] ⛔ 本任务不重启任何生产 driver 进程；如果实现过程中判断需要重启生产 driver 才能生效，必须在任务体里**只报告**准备情况与影响（哪个 driver、读哪个配置、重启后行为会怎样变化、当前生产読数现状），**不执行重启**，交回给调用方（待外部裁定，本任务不得自行重启）
 
 ## Definition of Done
 
