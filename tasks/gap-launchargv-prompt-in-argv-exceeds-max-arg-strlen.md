@@ -3,7 +3,7 @@ id: gap-launchargv-prompt-in-argv-exceeds-max-arg-strlen
 title: launchArgv passes the whole prompt as ONE argv element — meta-driver's
   readings grew past the 128 KiB MAX_ARG_STRLEN, so every semantic round now
   dies on spawn E2BIG
-status: todo
+status: superseded
 labels:
   - gap
   - defect
@@ -64,3 +64,14 @@ extra:
 ## DoD
 
 真实落地 = 修复随本任务提交进 develop，且**生产语义半恢复**：`.quay/meta-driver-round.jsonl` 在提交时刻**之后**出现至少一条 `state:"verified"` 的语义半记录（⛔ 非 fixture；载体 gitignored，执行者在生产机上现场取读数并把时间戳与提交 sha 记入本任务）。若 readings 仍超限或被判为需要更根本的载荷改造（如改用临时文件），如实记录并升级，⛔ 不伪装成已验证。
+
+## Superseded
+
+**本任务被 `b468560af` 的落地取代——它的 5 条 AC 与该 DoD 的生产读数全部已被满足，派发它等于让 worker 重做已落地的东西。**
+
+- 本任务立案时刻：**2026-10-09T09:15:36Z**（`task_write by cli:825080`）。
+- 取代它的提交：**`b468560af`**，**2026-10-09T09:24:12Z**（立案后 9 分钟），提交信息 `fix(driver-runtime): carry over-limit prompts via stdin — argv element hit MAX_ARG_STRLEN, spawn E2BIG`；作者分支 `task/gap-meta-driver-snapshot-tracked-changes-reference-error`，已在 `develop`。
+- 该提交落的文件**恰好就是本任务的 `## Touches`**：`plugin/scripts/driver-runtime.ts`（+24）、`plugin/scripts/meta-driver.ts`（+9）、`plugin/test/launchargv-stdin-prompt.test.mjs`（+51）。该测试文件头注释逐字写着 `Regression pin for gap-launchargv-prompt-in-argv-exceeds-max-arg-strlen.`
+- **AC 逐条已被覆盖**：AC1（超大 payload 走 stdin，子进程回显**精确**字节数）/ AC2（负对照：同一 payload 走单个 argv 元素必须 `E2BIG`）/ AC4（未传 `stdinData` 时 argv 形态不变，且子进程读到 EOF 不挂）/ AC5（断言「不是截断前缀」）均由该测试的三条 test 覆盖；AC3 的既有分片 `driver-runtime-s01..s10.test.mjs` 存在。
+- **DoD 的生产读数已取得**：`E2BIG` 在 `.quay/` 各台账中出现次数——修复前（< 09:24:12Z）**151** 条，修复后 **1** 条（且该条落在一个**成功**的语义轮记录里）。语义半恢复的直接证据：`.quay/meta-driver-round.jsonl` round 18 @ **2026-10-09T09:43:36Z** 带回**非空** `facts`（`meta-driver` readings：`goalCount`/`criterionCount`/`divergenceCount`/`drivers[…]`），即 DoD 所要求的「提交时刻之后至少一条语义半记录」。
+- ⛔ 不再派发本任务。若要继续这条轴，应针对**残留**问题另立任务，而不是重跑本条。
