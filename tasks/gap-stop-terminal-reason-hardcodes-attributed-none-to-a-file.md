@@ -38,7 +38,7 @@ extra:
 - [ ] AC3 文件级复发回退（可得假）：签名取不到时，以**失败文件**为复发身份查跨任务复发；构造「同一文件在窗口内被另**一个**任务也点名为失败文件」的台账夹具 ⇒ verdict 为 `unrelated-flaky-exempt`。对照臂：窗口内只有本任务一条 ⇒ ⛔ 不得豁免（fail-closed 不变）。贴两臂 verdict 与 reason。
 - [ ] AC4 不得回归既有三态：`ac-not-checked-shortcircuit` / `own-defect-counted` / `unrelated-flaky-exempt` / `insufficient-data-fallback` 四者在既有测试下全部仍可复现（贴既有测试文件名与 pass 数），且 `decideExitedNotLandedAction` 的 kind 分叉对 `insufficient-data-fallback` 之外的取值仍回 `count-and-retry`。
 - [ ] AC5 scoped 门：`bash scripts/test.sh --for-task gap-stop-terminal-reason-hardcodes-attributed-none-to-a-file --allow-thin` exit 0。
-- [ ] AC6 生产读数（待外部——落地后）：本任务合入 develop **之后**新产生的 stop-terminal 判词中，「含 `attributed none to a file`」∧「同一轮 `retry_exemptions[0].failingTestFiles` 非空」的组合计数 **= 0**；前基线 **= 3**（见 Finding，三例已具名）。只计本任务落地之后的时间窗，且该计数可由 `## Finding` 给出的那条谓词命令复算、贴出实际输出。
+- [ ] AC6 生产读数（待外部——落地后）：本任务合入 develop **之后**新产生的 stop-terminal 判词中，「含 `attributed none to a file`」∧「同一轮 `retry_exemptions[0].failingTestFiles` 非空」的组合计数 **= 0**；前基线 **= 3**（见 Finding，三例已具名）。只计本任务落地之后的时间窗，且该计数可由 `## Finding` 给出的那条谓词命令复算、贴出实际输出（待外部）。
 
 ## DoD
 
