@@ -67,8 +67,10 @@ kinds:
 # （一个 kind 下可能注册多条 routine）。本段是 routine 限流闸（routine-file-gate.ts）的
 # K / 窗口 / 全局天花板 的【唯一声明式真相源】；消费方经 driver-config.ts 的 loadRoutineQuotaConfig /
 # routineK / routineGlobalCeiling 读取（⛔ 不各写一份字面量）。
-# ⚠️ 消费面迁移尚未完成（gap-routine-quota-consumer-convergence）：probe-routine.ts / meta-driver.ts
-# 的真实调用点仍走旧参数形状，本段当前只被配置面与纯 Policy 函数读取。
+# ✅ 消费面已收敛（gap-routine-quota-consumer-convergence 完成）：两个真实生产调用点都在读本段——
+# `probe-routine.ts` 的 `llmProbeRoutine`（routineK + routineGlobalCeiling ⇒ selectFilings ⇒
+# routineQuotaDecision）与 `meta-driver.ts` 的 `driveItems`（routineGlobalCeiling + 载体全局读数 ⇒
+# routineQuotaDecision）。本段是这两个 consumer 的真实生效源，⛔ 不再只是「配置面与纯 Policy 函数读取」。
 routine_quota:
   window_ms: 86400000      # = 24h，与 routine-file-gate.ts 既有 FILING_WINDOW_MS 缺省值逐字一致（迁移兼容）
   default_k: 3             # 单 routine 缺省上限，与既有 DEFAULT_RATE 缺省值逐字一致（迁移兼容）

@@ -68,10 +68,14 @@ import {
   renderRoutineTaskBody,
   resolveTaskCliEntry,
   routineFindingCandidateText,
+  routineQuotaDecision,
   routineTaskId,
-  DEFAULT_RATE,
 } from "./routine-file-gate.ts";
 import type { BoardKeys, DedupReading, ExecutionProbeDecl, RemedyAvailability } from "./routine-file-gate.ts";
+// routine 配额配置面（gap-routine-quota-canonical-config-and-policy-gate 新增）：本例程的真实立案
+// K / 全局天花板从 drivers.yml 的 `routine_quota` 段读出，⛔ 不再用 routine-file-gate 的孤儿字面量
+// DEFAULT_RATE 兜底（gap-routine-quota-consumer-convergence 的 consumer convergence）。
+import { routineK, routineGlobalCeiling } from "./driver-config.ts";
 import type { Fact, RoutineSpec } from "./driver-runtime.ts";
 
 /** 结构化 finding 的载体（追加式 JSONL）。登记在任务 ## Touches 里 ⇒ 是**可查的落地产物**，
@@ -356,8 +360,14 @@ export interface FilingOptions {
    *  ⇒ 判定读作 `unknown`（fail-closed = 修复前逐字节的行为，⛔ 不是「没有重复」）。 */
   boardKeys?: Set<string> | BoardKeys;
   nowMs: number;
-  /** rate 闸的上限（本窗口内允许立案的条数）。 */
+  /** rate 闸的上限（本窗口内允许立案的条数）。生产路径由 `llmProbeRoutine` 以 `routineK(root, 例程名)`
+   *  从 drivers.yml 的 `routine_quota` 段读出（⛔ 不再是孤儿字面量 DEFAULT_RATE）。
+   *  ⚠️ 若把本值取成 ≥ `globalCeiling`，`routineQuotaDecision` 的 min 不变式仍成立（全局先判）。 */
   k: number;
+  /** 全部 routine 合计的全局窗口上限。**缺省 `Infinity` = 未提供 ⇒ 全局分支恒不触发、逐字保留迁移期
+   *  行为**（既有 `selectFilings` 调用方与单测都不传它 ⇒ 行为逐字节不变）。生产路径由 `llmProbeRoutine`
+   *  以 `routineGlobalCeiling(root)` 从 drivers.yml 读出——这是本任务关掉的「K×R 无上限增长」缺口。 */
+  globalCeiling?: number;
   /** 登记在册的产出者集合。**三值**（见 producerGate 注释）：`undefined` = 本例程未声明登记面 ⇒
    *  该闸不适用；`null` = 声明了但读不懂 ⇒ fail-closed；`Set` = 读到了，按成员判定。 */
   registeredProducers: Set<string> | null | undefined;
@@ -389,6 +399,10 @@ export function selectFilings(findings: readonly ProbeFinding[], o: FilingOption
   const byIndex = new Array<FilingDisposition | undefined>(findings.length);
   let acceptedThisRound = 0;
   let recentBase: number | null = null;
+  // ⓪c 全局读数（本任务新增）：**跨 routine** 的窗口合计，从**同一载体**读（⛔ 不另立计数器文件、
+  //     ⛔ 不用本轮的局部计数冒充当全局——那正是「K×R 无上限增长」缺口的形态）。与 `recentBase`
+  //     同为惰性读：本轮的候选都被前几道闸拒光时一次盘都不碰。
+  let globalBase: number | null = null;
   // ⓪b 升级面（remedy availability = blocked 时才读；⛔ 读数不是 blocked 时一次盘都不碰）。
   let escalated: Map<string, string> | null = null;
   for (const rank of order) {
@@ -432,12 +446,25 @@ export function selectFilings(findings: readonly ProbeFinding[], o: FilingOption
         // ⚠️ 传 `o.routine`：rate 预算按**本例程自己的**尾窗计（gap-routine-filing-rate-global-window-
         //    starves-freshness-refresh）。⛔ 不传 ⇒ 退回跨 routine 全局窗，正是本任务要关掉的形态。
         if (recentBase === null) recentBase = countRecentFilings(o.carrierPath, o.nowMs, FILING_WINDOW_MS, o.routine);
-        return gateFinding(candidate, { existingKeys: keys, recentCount: recentBase + acceptedThisRound, K: o.k });
+        // 全局窗口合计（⛔ 不传 routine ⇒ 跨 routine 汇总；同一次惰性读，与 per-routine 读数同源）。
+        if (globalBase === null) globalBase = countRecentFilings(o.carrierPath, o.nowMs, FILING_WINDOW_MS, null);
+        // 准入判据由**独立纯 Policy 函数**执行（人裁定②）：{perRoutine, global} 一并喂进去，天花板用
+        // **配置读出的有限值**（缺省 Infinity ⇒ 旧调用方逐字不变）。本轮已接受的条数同时计入两个窗口
+        // （本轮的 filing-round 记录要等本函数返回后才 append ⇒ 不 +acceptedThisRound 就漏算本轮）。
+        const quota = routineQuotaDecision(
+          { perRoutine: recentBase + acceptedThisRound, global: globalBase + acceptedThisRound },
+          { k: o.k, globalCeiling: o.globalCeiling ?? Infinity },
+        );
+        // ⛔ quality → dedup → rate/global-rate 的顺序由 gateFinding 保持：把配额**结果**交给它，
+        //    ⛔ 不在这里另排一次闸序（否则「重复」与「超额」会互换，见该函数注释）。
+        return gateFinding(candidate, { existingKeys: keys, quota });
       })();
     if (!g.accept) {
       // rate 拒绝把**复现读数**一并落痕：残余饥饿（复现很高却仍被限流）必须可审，⛔ 否则
       // 「限流正确」与「优先级没生效」在载体记录里同形（硬规则 3）。null = 没读到，写明。
-      const reason = g.reason.startsWith("rate:")
+      // ⚠️ `global-rate:`（全局天花板拒绝）同样标注：它也是「复现很高却被限流」的一种，且两种拒绝
+      //    的前缀不同（rate: / global-rate:），读者仍可区分是哪一道闸给的（硬规则 3b）。
+      const reason = g.reason.startsWith("rate:") || g.reason.startsWith("global-rate:")
         ? `${g.reason} (subject recurrence: ${rank.recurrence === null ? "unknown — carrier unreadable" : `${rank.recurrence} round(s)`})`
         : g.reason;
       reject("quality-dedup-rate", reason, g.dedup);
@@ -753,7 +780,8 @@ export interface ProbeRoutineOptions {
   /** **立案开关缝（测试用）**：缺省 true。`false` ⇒ 立案步整段不出产任务，用于「关掉产出面 ⇒ 不产出」
    *  的反向对照（AC6）——⛔ 不是生产开关，生产恒为 true。 */
   filingEnabled?: boolean;
-  /** 立案的 rate 上限（缺省 DEFAULT_RATE）。 */
+  /** 立案的 rate 上限**测试缝**。缺省 undefined ⇒ 生产路径用 `routineK(root, 例程名)`（drivers.yml
+   *  的 `routine_quota` 段，⛔ 不是孤儿字面量）。⛔ 只有测试才传它来把同一个判定对着受控 K 跑。 */
   filingRate?: number;
   /** 任务写入缝（测试用；缺省 spawn workspace 自己的 task store CLI）。第四参 = 要落的 status
    *  （升级形态为 `needs-human`；缺省 null = 由 store 的 default_task_status 决定）。 */
@@ -947,7 +975,12 @@ export function llmProbeRoutine(decl: RoutineDecl, opts: ProbeRoutineOptions): R
         dispositions = selectFilings(parsed.findings, {
           routine: decl.name, probe: decl.probe as string, runId, ts: new Date(started).toISOString(),
           carrierPath: findingsPath, carrierRel: path.relative(opts.root, findingsPath),
-          tasksDir, nowMs: started, k: opts.filingRate ?? DEFAULT_RATE, registeredProducers,
+          tasksDir, nowMs: started,
+          // ⛔ 真实生产调用点：K 与全局天花板都从 drivers.yml 的 `routine_quota` 段读出（⛔ 不是孤儿
+          //    字面量 DEFAULT_RATE）。`filingRate` 只是测试缝 —— 它一旦给出就覆盖配置读出的 K。
+          k: opts.filingRate ?? routineK(opts.root, decl.name),
+          globalCeiling: routineGlobalCeiling(opts.root),
+          registeredProducers,
           remedy, remedyProbe: executionProbe,
         });
         for (const d of dispositions) {

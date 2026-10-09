@@ -51,11 +51,15 @@ import { launchArgv, runAsync, ts, aliveness, carrierStats, KNOWN_KINDS, resolve
 import { resolveCliInvocation } from "./start-drivers.ts";
 import { runResidentQualityGateLoop, computeRoundRecord } from "./quality-gate-driver.ts";
 import { readProbeSpec } from "./read-probe-spec.ts";
-import { gateFinding, findingKey, DEFAULT_RATE } from "./routine-file-gate.ts";
+import { gateFinding, findingKey, DEFAULT_RATE, countRecentFilings, FILING_WINDOW_MS, routineQuotaDecision } from "./routine-file-gate.ts";
+// 载体相对路径的单一真相源（⛔ 不在此处硬写字面量「.quay/routine-findings.jsonl」——那会制造第二份
+// 定义，本文件读的全局窗口合计必须与 probe-routine.ts 写的是同一个文件；硬规则 5b）。
+import { ROUTINE_FINDINGS_REL } from "./probe-routine.ts";
 import { isDirectEntry } from "./gate-script-base.ts";
 // AC155（gap-drivers-yml-interval-not-honored-for-routine-kinds）：轮询间隔的单一真相源——
 // drivers.yml 经 driver-config 加载，⛔ 不在本文件另写一份字面量（goal/quality/outer 同款接法）。
-import { defaultDriverConfig, loadDriverConfig } from "./driver-config.ts";
+// routineGlobalCeiling 同属该配置面：driveItems 的真实全局天花板从这里读（本任务新增）。
+import { defaultDriverConfig, loadDriverConfig, routineGlobalCeiling } from "./driver-config.ts";
 // stripEvidenceTimestamp 的单一真相源在 Core（goal-store）——本文件与 goal-store 的提交决策
 // 必须用同一判据「什么算实质变化」（gap-goal-gate-timestamp-commit-flood），⛔ 不各写一份。
 // meta 记录是第五种 store kind（gap-meta-records-should-be-a-first-class-store-kind-not-a-task-label）：
@@ -1760,6 +1764,13 @@ export async function driveItems(
 ): Promise<AutoDriveResult[]> {
   const out: AutoDriveResult[] = [];
   let filed = 0;
+  // 全局窗口合计（本任务新增）：**与 probe-routine.ts 的 ① 同一次读法**——从同一载体
+  // `.quay/routine-findings.jsonl` 读跨 routine 的尾窗合计（⛔ 不用本轮的局部计数冒充当全局）。
+  // 读不到载体 ⇒ `countRecentFilings` 返回 0（与「窗口内确实 0 条」同值——两者都只让闸更松，不回退）。
+  const carrierPath = path.join(root, ROUTINE_FINDINGS_REL);
+  const nowMs = Date.now();
+  const globalBase = countRecentFilings(carrierPath, nowMs, FILING_WINDOW_MS, null);
+  const globalCeiling = routineGlobalCeiling(root);
   for (const item of items) {
     if (filed >= opts.cap) {
       out.push({ item, id: null, accepted: false, reason: `rate: 本轮已自动驱动 ${filed} 条，上限 ${opts.cap}` });
@@ -1778,7 +1789,17 @@ export async function driveItems(
     }
     // done/superseded 的命中不拦，但要带进任务体——「已 done 却问题依旧」是立案的核心证据。
     const staleOwners = owners.map((o) => `${o.file}[${o.status}]`);
-    const gate = gateFinding(proposalCandidateText({ title: item.title, criterion: item.criterion, origin: item.problem }), { existingKeys: [], recentCount: filed, K: opts.cap });
+    // 准入判据由**独立纯 Policy 函数**执行（与 probe-routine.ts 收敛到同一个 routineQuotaDecision）。
+    // ⚠️ 语义差异（本任务 Plan ②要求写明，⛔ 不假装两条链同构）：这里的 `perRoutine: filed` 是
+    // **本轮函数内局部计数**（不是跨轮读载体），而 probe-routine.ts 的 `perRoutine` 是**跨轮载体尾窗
+    // 读数**——两者都叫 recentCount，量的来源不同。`global` 则与 ① 一致：载体尾窗合计（跨 routine）
+    // + 本轮已驱动数（meta 自身不写该载体 ⇒ 只有本地 +filed 才把本轮计入全局，与 ① 的
+    // +acceptedThisRound 形状一致）。结果交给 gateFinding 以保持 quality → dedup → rate/global-rate 的闸序。
+    const quota = routineQuotaDecision(
+      { perRoutine: filed, global: globalBase + filed },
+      { k: opts.cap, globalCeiling },
+    );
+    const gate = gateFinding(proposalCandidateText({ title: item.title, criterion: item.criterion, origin: item.problem }), { existingKeys: [], quota });
     if (!gate.accept) { out.push({ item, id: null, accepted: false, reason: gate.reason }); continue; }
 
     const baseId = `gap-meta-${item.mechanismKeyword.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "").slice(0, 48)}`;
