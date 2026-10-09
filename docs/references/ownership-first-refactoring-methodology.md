@@ -1,15 +1,17 @@
-# Ownership-First 重构方法论 — 从 GOAL-030 首个真实试点提炼
+# Ownership-First 重构方法论 — 从 GOAL-030、GOAL-031 两次真实试点提炼
 
 **Status:** live reference — 供后续 `branch:true` Goal 重构复用，不是一次性复盘。
-**Worked example:** GOAL-030（`goals/GOAL-030-晋升写入经-kernel-转移决策并留痕-...md`，AC-336..342，分支 `goal/GOAL-030`）。
-**现状口径（2026-10-08）：** GOAL-030 在 `goal/GOAL-030` 分支上已经把 AC-336/337/338/339/340 跑到 `done`；并入 `develop` 的 fan-in 已尝试两次、均在全量 suite 步骤判红（判定为与合并内容无关的既有 flake，非合并冲突），**截至本文撰写尚未落地**，AC-341（post-merge 生产读数）与 AC-342（merge 形态）仍是 `active`/not-evaluated。本文引用的 `packages/quay/src/kernel/task-transition.ts`、`docs/rup/goal030-archguard-before-after.md` 等文件此刻只存在于 `goal/GOAL-030` 分支，尚不在 `develop`/`author` 上——这是方法论生效中的一个真实样本，不是假设。
+**Worked examples：**
+- GOAL-030（`goals/GOAL-030-晋升写入经-kernel-转移决策并留痕-...md`，AC-336..342，分支 `goal/GOAL-030`）——新增 kernel 模块、收敛两套写入路径，重构规模较大。
+- GOAL-031（`goals/GOAL-031-needs-human-状态词汇-canonicalization-试点-...md`，AC-343..345，分支 `goal/GOAL-031`）——同一套方法在一个刻意切得更小的切片上的第二次独立验证：`goal-driver.ts` 里 5 处 `status === "needs-human"` 裸字面量比较收敛到已有正本 `plugin/scripts/task-status.ts`/`packages/quay/src/abi.ts`，不新造第二套声明。
+**现状口径（2026-10-09）：** 两个 Goal 均已 **merge 入 `develop` 并 achieved**。GOAL-030 的 AC-336..342 全部 `achieved`（合并提交 `d71d2bde4`；post-merge 生产读数 AC-341、merge 形态 AC-342 均 `exit 0 PASS`）。GOAL-031 的 AC-343..345 全部 `achieved`（合并提交 `117ee91b8`）。本文引用的 `packages/quay/src/kernel/task-transition.ts`、`plugin/scripts/task-status.ts` 现在都在 `develop`/`author` 上可读，不再是分支限定产物。
 **正本指针（不复制，只引用）：**
 - `branch:true` Goal 机制细节 → `orchestration/SPEC-goal-branch-2026-10-03.md`
 - GIT lens / hard-over-soft 的理论依据 → `adr/ADR-004-...md`、`adr/ADR-005-...md`、`adr/ADR-006-...md`、`adr/ADR-007-...md`
 - 架构评审三层流程本体 → archguard 插件 `arch-layer-review` skill（`SKILL.md` + `references/goal-030-example-output.json`）
 - `L_T/L_C/L_D/L_G/L_S` 词汇表 → `docs/references/` 下的 GIT 框架文档（见 CLAUDE.md「GIT review checklist」）
 
-**Non-goals：** 不是 OO/设计模式教程；不是 GOAL-030 复盘报告（GOAL-030 只作可核验锚点）；不重复 `SPEC-goal-branch` 的机制细节或 archguard skill 的操作步骤——那些有各自的正本。
+**Non-goals：** 不是 OO/设计模式教程；不是 GOAL-030/GOAL-031 复盘报告（两者只作可核验锚点）；不重复 `SPEC-goal-branch` 的机制细节或 archguard skill 的操作步骤——那些有各自的正本。
 
 ---
 
@@ -22,7 +24,7 @@
 - **副作用**（真正落盘/落事件的那一行写操作，归谁？）
 - **编排**（谁在什么时机调用上面三者，这件事可以继续留在原处）
 
-GOAL-030 的起点问题不是"任务转移该是哪个对象"，而是"任务转移决策该归谁拥有"——答案拆成四块都在 `packages/quay/src/kernel/task-transition.ts`（`goal/GOAL-030` 分支）：`LIFECYCLE_EDGES`（状态/规则表，从 `gate/lifecycle.ts` 收敛而来，原处降级为 re-export）、`decideTransition`（决策，三态 `allow/refuse/not-evaluated`，从不把"没判出来"塞进"拒绝"）、`patchStatusField` + `appendTaskStatusEvent`（副作用，从 `plugin/scripts/task-ops.ts` 收敛而来）。**编排**（何时调用、调用顺序）明确留在 `ready-pool-check.ts` 的 `applyPromotions`/`applyRevaluations` 里——不是每一块都要塞进同一个"对象"，四块可以、也应该落在不同模块。
+GOAL-030 的起点问题不是"任务转移该是哪个对象"，而是"任务转移决策该归谁拥有"——答案拆成四块都在 `packages/quay/src/kernel/task-transition.ts`：`LIFECYCLE_EDGES`（状态/规则表，从 `gate/lifecycle.ts` 收敛而来，原处降级为 re-export）、`decideTransition`（决策，三态 `allow/refuse/not-evaluated`，从不把"没判出来"塞进"拒绝"）、`patchStatusField` + `appendTaskStatusEvent`（副作用，从 `plugin/scripts/task-ops.ts` 收敛而来）。**编排**（何时调用、调用顺序）明确留在 `ready-pool-check.ts` 的 `applyPromotions`/`applyRevaluations` 里——不是每一块都要塞进同一个"对象"，四块可以、也应该落在不同模块。
 
 四个问题分别回答完，剩下的才是"这个形状看起来像什么模式"（见第 3 节）——顺序不能反。
 
@@ -35,6 +37,8 @@ GOAL-030 的起点问题不是"任务转移该是哪个对象"，而是"任务�
 3. **新实现不反向依赖旧实现的写原语**（搬壳不搬心）：如果新模块的 body 里还在 `import` 回旧的写函数，说明"心"没搬，只是换了个门面。
 
 自检问法：**改一条调用点，是否还需要同时跑去两个地方改规则表？** 如果是，说明还没真正收敛，只是又多了一层转发。
+
+**GOAL-031 是这条原则更干净的第二个实例，且不需要新造任何权威实现**：权威实现（`plugin/scripts/task-status.ts` 自包含副本 + `packages/quay/src/abi.ts`）早已存在、早已 `done`，缺口只在调用方——`goal-driver.ts` 里还有 5 处 `status === "needs-human"` 裸字面量比较从未迁移。整个 slice 就是纯粹的"调用方改口"：`grep -c 'status === "needs-human"' plugin/scripts/goal-driver.ts` 从 6 精确降到 1（唯一保留的一行是另一词表——GOAL-AC 的 `status`，不是 task 状态，判定靠逐行核实位置，不是关键词计数）。这也说明"canonical source"不必是物理上的单一文件：plugin 树不能静态 import packages 源码（打包边界），所以两份声明并存是合法的"单一正本的两个已声明副本"，不算第三套实现——真正要收敛的只是**调用方**，不是逼着两棵树共享一份物理文件。
 
 ## 3. OOA/OOD 与设计模式：边界已明确才用，不建 pattern zoo
 
@@ -50,9 +54,11 @@ State / Strategy / Command / Specification / Repository / Application Service / 
 
 一次 slice 只解决一个能独立验收的问题；如果验收条件要同时证明两件不相关的事，说明 slice 切得太大，应该拆成两个 Goal 或两个 task。
 
+**指标服从 scope，不为指标扩大重构范围（GOAL-031 的核心教训）**：GOAL-031 立项时的初始目标是把 `needs-human` 的 ArchGuard literal dispersion 从 5 降到 ≤2。执行前核实发现这个数字本身算错了——`packages/quay/src/observation.ts`、`plugin/scripts/workflow-baseline-metrics.ts` 里命中的其实是不同词表的字段（促晋升账本的 `action`、workflow 事件的 `outcome`），和 task 状态无关，是异词表假阳性；`packages/quay-github/src/github-client.ts` 那一处早被另一个已完成任务显式豁免、由 needle 测试钉死形状，不能动；再加上正本声明自身必然带一处字面量——四处里有三处结构上不可能被这次改动影响。正确的底线是 **4**（正本 1 + 豁免 1 + 假阳性 2），不是 2。GOAL-031 选择**把目标数值改成 4、把范围继续钉在 `goal-driver.ts` 的 5 处真实调用点上**，而不是反过来为了凑到 ≤2 去扩大 scope（比如去改 `observation.ts`/`workflow-baseline-metrics.ts`，或者去碰已豁免的 `github-client.ts`）。原则：**当"目标数值"和"已声明的 scope/非目标"冲突时，先检查数值本身有没有算错，不要为了凑数值反过来扩大 scope**——数值服务于已经划定的责任边界，不是反过来定义边界。
+
 ## 5. `branch:true` Goal 的标准流程
 
-机制细节见 `orchestration/SPEC-goal-branch-2026-10-03.md`；这里只记录 GOAL-030 实际走过的闭环顺序，作为后续复用的检查单：
+机制细节见 `orchestration/SPEC-goal-branch-2026-10-03.md`；这里只记录 GOAL-030、GOAL-031 实际走过的闭环顺序，作为后续复用的检查单：
 
 1. **Fork point**：ArchGuard before-基线，在 goal 分支创建前先对 `develop` 尖端拍一次。
 2. **Goal 激活**：`goal/<GOAL-ID>` 从 `develop` 尖端惰性创建；该 Goal 下的任务派发自动把 `mergeTarget` 解到这个分支，worktree 从它 fork。
@@ -62,7 +68,9 @@ State / Strategy / Command / Specification / Repository / Application Service / 
 6. **人工触发 merge**：`quay goal merge <GOAL-ID> --reason ...` 只记录 `goal-merge-request` GateEvent，不直接执行；机械 fan-in 由 worker-driver 按固定顺序（goal 锁 → develop 锁）做 `git merge --no-ff`，跑 anti-drift/typecheck/scoped-gate/全量 suite，绿则 `ff-only` 推进 `develop`，红则记录 gap、分支保留等下一次重试。
 7. **规定 merge shape**：`develop` 的 first-parent 链上恰好一个合并提交，第二父提交是 goal 分支尖端，不允许分支内部的中间提交泄漏到 first-parent 上（AC-342 的判据）。
 8. **Post-merge 验证**：合并落地后，针对生产环境的真实读数做核验（见第 6 节 AC-341 的形态），而不是止步于"合并没冲突"。
-9. **全部 AC achieved 后关闭**：Goal 的收尾条件是其下全部 AC 进入 `achieved`（含 post-merge 类 AC），不是 merge commit 落地那一刻——GOAL-030 当前正卡在这一步：AC-336..340 已 `done`，AC-341/342 要等 merge 真正落地才能评估，这正是"merge 完成 ≠ Goal 完成"的真实例子。
+9. **全部 AC achieved 后关闭**：Goal 的收尾条件是其下全部 AC 进入 `achieved`（含 post-merge 类 AC），不是 merge commit 落地那一刻。GOAL-030 实际经历过这个等待——AC-336..340 先 `done`，AC-341/342 要等 merge 真正落地（合并提交 `d71d2bde4`）才评估完 `achieved`，GOAL-030 随后整体 `achieved`；GOAL-031 走完同一闭环（合并提交 `117ee91b8`，AC-343..345 全部 `achieved`）。两次都证实了"merge 完成 ≠ Goal 完成"：中间那段等待不是流程多余的一步。
+
+**复用技术，不跨分支复用产物**：GOAL-031 立项时 `goal/GOAL-030` 还没并入 `develop`，GOAL-031 显式把"不依赖、不 import 任何只存在于 `goal/GOAL-030` 分支的文件"写进非目标——复用的是 GOAL-030 验证过的**自举校验技术**（校验被加载模块的 realpath 落在本 goal 的 worktree 内），而不是直接 import 对方未并入分支上的脚本，避免制造跨 goal-branch 的隐性耦合（见第 6 节）。
 
 ## 6. Branch self-host 身份证明：driver/serve/entry 的 realpath 必须在 goal 树内
 
@@ -72,6 +80,7 @@ State / Strategy / Command / Specification / Repository / Application Service / 
 - 每条事件（如 `.quay/task-status-events.jsonl` 的 promote/retreat 记录）都带 `writerModule`/`entry` 的 realpath，验收时核对这些 realpath 落在 goal 树的 worktree 路径下，不是主检出路径（AC-337）。
 - **负对照是这条证明的另一半，不是可选项**：同一个 sandbox，换成**主检出**的 driver 去驱动，必须产出 0 条匹配事件（AC-337 的 `mainHasModule` 字段——这个负控制只在"主检出确实还没有这个模块"时才有效，所以要显式记录前提，而不是假定它永远成立）。
 - 同理应用在 preview/serve 上：分支的 preview 实例若注册的是外来代码的 serve，必须报错退出（而不是悄悄通过）；若目标树根本没注册，必须报 `NOT-EVALUATED`，不能伪装成 PASS（见硬规则 3b 同形：没查成的状态要有独立取值）。
+- GOAL-031 没有直接复用 GOAL-030 的 `scripts/branch-selfhost-probe.mjs`（当时只存在于未并入的 `goal/GOAL-030` 分支，且规模也不对等）——而是写了一个规模相应缩小的自包含校验 `scripts/goal-031-selfhost-probe.mjs`，落盘到 `.quay/goal-031-evidence/selfhost-identity.json`，复用的是上面同一条**判据**（realpath 落在本 goal worktree 内），不是跨分支复用那份脚本本身。
 
 ## 7. 架构评审三层：mechanical facts / declared rules / semantic judgment
 
@@ -109,18 +118,18 @@ GOAL-030 的 AC-339 撞到过一个具体案例：最初为"单一 import 的玩
 
 ## 10. 可测指标：这次重构实际读的是哪些数字
 
-| 指标 | 含义 | GOAL-030 的具体读数 |
-|---|---|---|
-| **cycles / SCC** | 目录级强连通分量数量，重构不应新增环 | 1 → 1（不变） |
-| **reverse edges** | 声明的上下游关系被反向调用的边数 | `packages→plugin` 反向边 0（两端都 0） |
-| **layer violations** | `check-layers.mjs` 报的违规数 | 本 slice 范围内 0 |
-| **edge strength** | 两个包/模块之间的调用边权重 | `plugin/scripts→kernel`：14→16（上升）；`plugin/scripts→non-kernel`：44→44（不变，没有"顺手"把别的也挪过去） |
-| **duplicate disappearance** | 原本重复的声明/实现是否真的消失 | `LIFECYCLE_EDGES` 由两处定义收敛为一处 + 一个 re-export |
-| **literal dispersion** | 同一个字面量/常量散落在几个文件里 | 转移决策相关字面量收口到 kernel 单文件 |
-| **canonical definition count** | 某个状态/规则表的 `export` 定义点数量 | `LIFECYCLE_EDGES`/`patchStatusField` 各恰好 1 |
-| **direct-write count** | 旧模块里直写副作用的调用点数量 | `ready-pool-check.ts` 对 `patchStatusField(` 的直接调用：有 → 0 |
-| **import direction** | 新模块是否反向 import 旧模块的写原语 | 否（通过 archguard 语义判断核实，非仅计数） |
-| **post-merge event evidence** | 合并落地后，生产环境的真实事件是否能对上预期的行为 | AC-341：`develop` 上每一次 `promotion-driver` 机械晋升都要能在 `.quay/task-status-events.jsonl` 里找到对应的 `promote` 事件——**这条指标只能在 merge 真正落地后读，之前只能是 not-evaluated，不能用 pre-merge 的读数顶替** |
+| 指标 | 含义 | GOAL-030 的具体读数 | GOAL-031 的具体读数 |
+|---|---|---|---|
+| **cycles / SCC** | 目录级强连通分量数量，重构不应新增环 | 1 → 1（不变） | `import-graph-check.ts` 四个棘轮量不回退 |
+| **reverse edges** | 声明的上下游关系被反向调用的边数 | `packages→plugin` 反向边 0（两端都 0） | 同上，棘轮不回退 |
+| **layer violations** | `check-layers.mjs` 报的违规数 | 本 slice 范围内 0 | 本 slice 范围内 0 |
+| **edge strength** | 两个包/模块之间的调用边权重 | `plugin/scripts→kernel`：14→16（上升）；`plugin/scripts→non-kernel`：44→44（不变，没有"顺手"把别的也挪过去） | — |
+| **duplicate disappearance** | 原本重复的声明/实现是否真的消失 | `LIFECYCLE_EDGES` 由两处定义收敛为一处 + 一个 re-export | 不适用——GOAL-031 不新造任何声明，权威实现早已存在、早已 `done`（见第 2 节） |
+| **literal dispersion** | 同一个字面量/常量散落在几个文件里 | 转移决策相关字面量收口到 kernel 单文件 | `get_literal_dispersion(value:"needs-human")`：5 → 4（不是 ≤2——见第 4 节"指标服从 scope"） |
+| **canonical definition count** | 某个状态/规则表的 `export` 定义点数量 | `LIFECYCLE_EDGES`/`patchStatusField` 各恰好 1 | `task-status.ts` 正本声明处恰好 1（不变——本 slice 不碰正本，只迁调用方） |
+| **direct-write count** | 旧模块里直写副作用的调用点数量 | `ready-pool-check.ts` 对 `patchStatusField(` 的直接调用：有 → 0 | `grep -c 'status === "needs-human"' plugin/scripts/goal-driver.ts`：6 → 1（剩 1 处是另一词表 GOAL-AC `status`，判定靠逐行核实位置，非关键词） |
+| **import direction** | 新模块是否反向 import 旧模块的写原语 | 否（通过 archguard 语义判断核实，非仅计数） | 否——`goal-driver.ts` 新增 `import { TASK_STATUS } from "./task-status.ts"`，方向正确 |
+| **post-merge event evidence** | 合并落地后，生产环境的真实事件是否能对上预期的行为 | AC-341：`develop` 上每一次 `promotion-driver` 机械晋升都要能在 `.quay/task-status-events.jsonl` 里找到对应的 `promote` 事件——`exit 0 PASS`，merge 落地（`d71d2bde4`）后实测达成 | AC-345：`develop` 上重跑 grep 读数、核对以恰好一个合并提交（`117ee91b8`）进入 first-parent 链——`exit 0 PASS` |
 
 这些指标共同回答的问题是"责任真的搬了吗"，而不是"文件数变了吗"——文件数、行数变化只是会计记账（`AC-339`：file-count delta == `git diff` A−D，只是一致性校验，不是判好坏的依据）。
 
@@ -131,6 +140,7 @@ Quay 现阶段的重构应该优先把"状态/决策/副作用/编排四件事�
 - 边界不清楚的时候提前建模式，代价是搬壳（第 2 节的陷阱）——换了名字没换责任，之后还要再收敛一次。
 - 模式名字应该是"已经收敛形状"的标注，不是"打算收敛成什么样"的蓝图（第 3 节）；在只有一个真实实例的时候谈 Strategy/Repository 没有意义。
 - 等多个 slice 把若干个所有权边界理清之后，真正需要的模式会自己浮现出来（有第二个真实实例时才升格），这时候做规模化 OO 化才是收敛后的自然延伸，而不是收敛前的猜测。
+- GOAL-031 进一步验证了这个优先级在小切片上同样成立：范围已经划清之后，连"量化目标数值"都要服从那个范围，不能反过来用数值牵动范围（第 4 节）——规模化 OO 化更容易把"为了让数字好看"包装成"为了架构更好"，ownership convergence 阶段应该先把这条反射练成本能。
 
 ## 12. 一句话压缩版
 
