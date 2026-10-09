@@ -1,7 +1,7 @@
 ---
 id: gap-goal033-merge-and-postmerge-verify
 title: GOAL-033 ③：人工合并请求 + 机械 fan-in + 并入形态与落地树核验（AC-352，post-merge）
-status: ready
+status: done
 labels:
   - gap
 parent: null
