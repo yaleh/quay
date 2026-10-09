@@ -2,7 +2,7 @@
 id: gap-direct-to-develop-bypass-check-git-fixture-cost
 title: direct-to-develop-bypass-check.test.mjs 真实 git spawn（init/commit/merge）主导
   74.2s 耗时——先分解再决定能不能共享 fixture
-status: needs-human
+status: todo
 labels:
   - gap
 parent: null
