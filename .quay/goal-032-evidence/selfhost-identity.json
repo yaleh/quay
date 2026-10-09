@@ -1,0 +1,104 @@
+{
+  "resolved": {
+    "packages/quay/src/kernel/verdict-parse.ts": "/data/home/yale/work/quay-worktrees/goal-GOAL-032/packages/quay/src/kernel/verdict-parse.ts",
+    "packages/quay/src/criterion-fidelity.ts": "/data/home/yale/work/quay-worktrees/goal-GOAL-032/packages/quay/src/criterion-fidelity.ts",
+    "plugin/scripts/goal-driver.ts": "/data/home/yale/work/quay-worktrees/goal-GOAL-032/plugin/scripts/goal-driver.ts"
+  },
+  "worktreeRoot": "/data/home/yale/work/quay-worktrees/goal-GOAL-032",
+  "allMatch": true,
+  "requiredSubstring": "goal-GOAL-032",
+  "entries": [
+    {
+      "entry": "packages/quay/src/kernel/verdict-parse.ts",
+      "resolvedUrl": "file:///data/home/yale/work/quay-worktrees/goal-GOAL-032/packages/quay/src/kernel/verdict-parse.ts",
+      "loadedFrom": "/data/home/yale/work/quay-worktrees/goal-GOAL-032/packages/quay/src/kernel/verdict-parse.ts",
+      "loaded": true,
+      "insideTree": true,
+      "hasRequiredSubstring": true
+    },
+    {
+      "entry": "packages/quay/src/criterion-fidelity.ts",
+      "resolvedUrl": "file:///data/home/yale/work/quay-worktrees/goal-GOAL-032/packages/quay/src/criterion-fidelity.ts",
+      "loadedFrom": "/data/home/yale/work/quay-worktrees/goal-GOAL-032/packages/quay/src/criterion-fidelity.ts",
+      "loaded": true,
+      "insideTree": true,
+      "hasRequiredSubstring": true
+    },
+    {
+      "entry": "plugin/scripts/goal-driver.ts",
+      "resolvedUrl": "file:///data/home/yale/work/quay-worktrees/goal-GOAL-032/plugin/scripts/goal-driver.ts",
+      "loadedFrom": "/data/home/yale/work/quay-worktrees/goal-GOAL-032/plugin/scripts/goal-driver.ts",
+      "loaded": true,
+      "insideTree": true,
+      "hasRequiredSubstring": true
+    }
+  ],
+  "alsoReadings": [
+    {
+      "treeRoot": "/data/home/yale/work/quay-worktrees/gap-goal032-selfhost-and-archguard-evidence",
+      "cwd": "/data/home/yale/work/quay-worktrees/gap-goal032-selfhost-and-archguard-evidence",
+      "entries": [
+        {
+          "entry": "packages/quay/src/kernel/verdict-parse.ts",
+          "resolvedUrl": "file:///data/home/yale/work/quay-worktrees/gap-goal032-selfhost-and-archguard-evidence/packages/quay/src/kernel/verdict-parse.ts",
+          "loadedFrom": "/data/home/yale/work/quay-worktrees/gap-goal032-selfhost-and-archguard-evidence/packages/quay/src/kernel/verdict-parse.ts",
+          "loaded": true,
+          "insideTree": true,
+          "hasRequiredSubstring": false
+        },
+        {
+          "entry": "packages/quay/src/criterion-fidelity.ts",
+          "resolvedUrl": "file:///data/home/yale/work/quay-worktrees/gap-goal032-selfhost-and-archguard-evidence/packages/quay/src/criterion-fidelity.ts",
+          "loadedFrom": "/data/home/yale/work/quay-worktrees/gap-goal032-selfhost-and-archguard-evidence/packages/quay/src/criterion-fidelity.ts",
+          "loaded": true,
+          "insideTree": true,
+          "hasRequiredSubstring": false
+        },
+        {
+          "entry": "plugin/scripts/goal-driver.ts",
+          "resolvedUrl": "file:///data/home/yale/work/quay-worktrees/gap-goal032-selfhost-and-archguard-evidence/plugin/scripts/goal-driver.ts",
+          "loadedFrom": "/data/home/yale/work/quay-worktrees/gap-goal032-selfhost-and-archguard-evidence/plugin/scripts/goal-driver.ts",
+          "loaded": true,
+          "insideTree": true,
+          "hasRequiredSubstring": false
+        }
+      ],
+      "allMatch": false
+    }
+  ],
+  "method": "child node process with cwd = the tree under evaluation; import.meta.resolve(entry) + realpathSync + real import(); entries spelled ./<rel> so they resolve against import.meta.url (cwd/[eval1])",
+  "negativeControl": {
+    "treeRoot": "/data/home/yale/work/quay",
+    "cwd": "/data/home/yale/work/quay",
+    "entries": [
+      {
+        "entry": "packages/quay/src/kernel/verdict-parse.ts",
+        "resolvedUrl": "file:///data/home/yale/work/quay/packages/quay/src/kernel/verdict-parse.ts",
+        "resolveError": "ENOENT: no such file or directory, lstat '/data/home/yale/work/quay/packages/quay/src/kernel/verdict-parse.ts'",
+        "loaded": false,
+        "loadError": "Cannot find module '/data/home/yale/work/quay/packages/quay/src/kernel/verdict-parse.ts' imported from /data/home/yale/work/quay/[eval1]",
+        "insideTree": null,
+        "hasRequiredSubstring": null
+      },
+      {
+        "entry": "packages/quay/src/criterion-fidelity.ts",
+        "resolvedUrl": "file:///data/home/yale/work/quay/packages/quay/src/criterion-fidelity.ts",
+        "loadedFrom": "/data/home/yale/work/quay/packages/quay/src/criterion-fidelity.ts",
+        "loaded": true,
+        "insideTree": true,
+        "hasRequiredSubstring": false
+      },
+      {
+        "entry": "plugin/scripts/goal-driver.ts",
+        "resolvedUrl": "file:///data/home/yale/work/quay/plugin/scripts/goal-driver.ts",
+        "loadedFrom": "/data/home/yale/work/quay/plugin/scripts/goal-driver.ts",
+        "loaded": true,
+        "insideTree": true,
+        "hasRequiredSubstring": false
+      }
+    ],
+    "allMatch": false,
+    "differsFromPrimary": true
+  },
+  "generatedAt": "2026-10-09T02:39:09.018Z"
+}
