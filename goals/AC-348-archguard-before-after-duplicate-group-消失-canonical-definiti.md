@@ -2,7 +2,7 @@
 id: AC-348
 title: ArchGuard before/after：duplicate group 消失、canonical definition count 收敛到
   1、consumer convergence 证据
-status: draft
+status: active
 kind: criterion
 goal: GOAL-032
 criterion: >-
@@ -32,4 +32,15 @@ criterion: >-
   recorded"
 expect: exit 0 = 证据文件齐全且三项读数达标；exit 1 = CAUSE= 指明哪一项；exit 3 = 证据文件尚未落盘
 origin: GOAL-032 机械证据，见 goal body「验证步骤」5
+activatedAt: 2026-10-09T01:55:08.002Z
+statusLog:
+  - at: 2026-10-09T01:55:08.002Z
+    from: draft
+    to: active
+    actor: goal-cli
+    reason: ""
+fidelity:
+  verdict: not-evaluated
+  reason: no judge configured
+  at: 2026-10-09T01:55:08.001Z
 ---
