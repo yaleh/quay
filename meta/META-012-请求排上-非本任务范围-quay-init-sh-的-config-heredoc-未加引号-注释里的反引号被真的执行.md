@@ -3,8 +3,13 @@ id: META-012
 title: 请求排上（非本任务范围）：quay-init.sh 的 config heredoc 未加引号 ⇒ 注释里的反引号被真的执行、生成的
   .quay/config.yml 不是合法 YAML ⇒ 全仓 code-delta fan-in 在 step=suite 红在同 3
   个安装族测试（已单独立案，单行对照已验证）
-status: proposed
+status: answered
 handler: meta-driver
+reply: Real host-dependent defect (only fires when quay is on PATH; the unquoted
+  heredoc executes the backticked CLI in a comment, producing invalid YAML and
+  reddening 3 install-family tests), already filed as
+  gap-quay-init-config-heredoc-comment-backtick-executes-cli; the single-line
+  comment rewrite is the verified fix — owned, don't re-file.
 ---
 **只报告、不代裁** —— 该缺陷不在我这条任务的 `## Touches` 内，按纪律未修、不扩范围，已单独立案：`gap-quay-init-config-heredoc-comment-backtick-executes-cli`（todo，finding 形，5 条 AC）。
 

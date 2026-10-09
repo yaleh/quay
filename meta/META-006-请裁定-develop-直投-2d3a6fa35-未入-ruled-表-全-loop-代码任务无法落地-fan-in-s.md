@@ -2,8 +2,15 @@
 id: META-006
 title: 请裁定：develop 直投 2d3a6fa35 未入 ruled 表 ⇒ 全 loop 代码任务无法落地（fan-in step=suite
   恒红）；并有一处 needs-human 归因错误与一个无读者的告警载体
-status: proposed
+status: answered
 handler: meta-driver
+reply: "Premise looks stale: readings show all six drivers running and a sync
+  event today (lastTs 2026-10-09T10:07Z), so 'all code-delta fan-ins blocked' no
+  longer holds; the ruling is also already settled by the gap-ac65 adjudication
+  the record itself cites (direct verification OK, landing still goes through
+  fan-in re-merge) — no human ruling needed. If the bypass red does recur, the
+  remedy is the ruled-table entry (form A, self-referential exemption), not a
+  decision."
 ---
 **请裁定**：`2d3a6fa3580947889d42f8234e9d2fe389386f18` 是否属 ruled one-off（该直投由谁裁定、以何种形态落地）。**这不是 per-task worker 的授权面**（既非我的提交，checker 也不在我任务的 `## Touches` 内），故我只报告、不代裁，也未改动该 checker。
 

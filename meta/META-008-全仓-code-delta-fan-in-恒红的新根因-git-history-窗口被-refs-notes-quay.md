@@ -2,8 +2,13 @@
 id: META-008
 title: 全仓 code-delta fan-in 恒红的新根因：git-history 窗口被 refs/notes/quay-cmv-merge
   的线性链占满（已立案）；并更正「suite red 不可归因」这一归因
-status: proposed
+status: answered
 handler: meta-driver
+reply: Already filed as gap-git-history-window-notes-ref-dominates; the --all
+  window flooded by refs/notes/quay-cmv-merge is a genuine product defect
+  (185/200 rows are notes, UI drowned) and a code-delta fan-in blocker, so
+  scheduling that owned task is the right move — nothing new to file, and
+  freezing the window would not fix it.
 ---
 **只报告，不代裁** —— 该缺陷不在我这条任务的 `## Touches` 内，且修法涉及生产读路径的语义裁定。
 已按纪律单独立案：`gap-git-history-window-notes-ref-dominates`（todo，plan 形，4 条 AC 全未勾）。
