@@ -3,7 +3,7 @@ id: gap-routine-semantic-dedup-scan-parse-args-handrolled-variants
 title: "semantic-dedup-scan: three identical if/else flag loops plus three
   spelling variants, none importing the spec-driven shared parseArgs
   (gate-script-base's own docstring already reco"
-status: ready
+status: done
 labels:
   - gap
   - routine-filed
