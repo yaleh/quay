@@ -87,6 +87,9 @@ import {
   goalStoreArgv,
 } from '../scripts/meta-driver.ts';
 import { createMetaStore } from '../../packages/quay/src/meta-store.ts';
+// 全局天花板的单一真相源：载体相对路径（probe-routine.ts）与配置读取面（driver-config.ts）。
+import { ROUTINE_FINDINGS_REL } from '../scripts/probe-routine.ts';
+import { routineGlobalCeiling } from '../scripts/driver-config.ts';
 // 读回 supersedes 用 store 自己的投影（⛔ 不 grep 落盘文本：字段名在 YAML 里的排版是序列化细节，
 // 断言它会把「字段没写进去」与「排版变了」混为一谈）。
 import { createGoalStore } from '../../packages/quay/src/goal-store.ts';
@@ -864,6 +867,50 @@ test('driveItems: 全部前置通过 ⇒ 接受并给出 id（dry-run 不落盘�
   const r = await driveItems('/tmp', [goodItem], ecoReadings, { cap: 1, dryRun: true, at: 'now' });
   assert.equal(r[0].accepted, true, r[0].reason);
   assert.match(r[0].id, /^gap-meta-/);
+});
+
+// ── driveItems 收敛到独立 Policy 函数（gap-routine-quota-consumer-convergence AC2）──────────────
+// THE DEFECT: driveItems 的 gateFinding 调用把 `recentCount: filed`（本轮局部计数）同时当 per-routine
+// 与全局读数，且天花板恒 Infinity ⇒ 全局维度结构性不可能触发。本任务让它读到 drivers.yml 的真实
+// 全局天花板、并把全局窗口合计从载体读出（与 probe-routine.ts 的 ① 同一读法）。
+function makeMetaQuotaRoot(globalCeiling) {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'meta-driver-quota-'));
+  fs.mkdirSync(path.join(root, 'tasks'), { recursive: true });
+  fs.mkdirSync(path.join(root, '.quay'), { recursive: true });
+  fs.mkdirSync(path.join(root, 'plugin', 'scripts'), { recursive: true });
+  fs.writeFileSync(path.join(root, 'plugin', 'scripts', 'drivers.yml'),
+    `routine_quota:\n  default_k: 3\n  global_ceiling: ${globalCeiling}\n`, 'utf8');
+  // 载体：两个 routine 各立案 2 条 ⇒ 全局窗口合计 4（⛔ 不含 meta-driver 自身，见 driveItems 注释）。
+  const ts = new Date(Date.now() - 3_600_000).toISOString();
+  const lines = [
+    { routine: 'freshness-refresh', filed: 2 },
+    { routine: 'semantic-dedup-scan', filed: 2 },
+  ].map((s) => JSON.stringify({
+    ts, kind: 'filing-round', routine: s.routine, probe: s.routine, runId: `${s.routine}-seed`, evaluated: true,
+    candidates: s.filed, filed: Array.from({ length: s.filed }, (_, i) => `${s.routine}-seed-${i}`),
+    escalated: [], rejected: [], errors: [],
+  }));
+  fs.writeFileSync(path.join(root, ROUTINE_FINDINGS_REL), lines.join('\n') + '\n', 'utf8');
+  return root;
+}
+
+test('driveItems AC2 (red) — 真实全局天花板生效：全局窗口合计触及 global_ceiling ⇒ 拒 `global-rate:`', async () => {
+  const root = makeMetaQuotaRoot(4);
+  try {
+    assert.equal(routineGlobalCeiling(root), 4, '夹具自检：drivers.yml 的 global_ceiling 真的被读到');
+    const r = await driveItems(root, [goodItem], ecoReadings, { cap: 1, dryRun: true, at: 'now' });
+    assert.equal(r[0].accepted, false, '全局天花板应拦下本条');
+    assert.match(r[0].reason, /global-rate:/, '拒绝理由必须是 global-rate:（独立 Policy 函数产出）');
+  } finally { fs.rmSync(root, { recursive: true, force: true }); }
+});
+
+test('driveItems AC2 (green control) — 同一夹具把 global_ceiling 调大到不会被触及 ⇒ 接受（⛔ 红不是闸恒红）', async () => {
+  const root = makeMetaQuotaRoot(100);
+  try {
+    assert.equal(routineGlobalCeiling(root), 100);
+    const r = await driveItems(root, [goodItem], ecoReadings, { cap: 1, dryRun: true, at: 'now' });
+    assert.equal(r[0].accepted, true, r[0].reason);
+  } finally { fs.rmSync(root, { recursive: true, force: true }); }
 });
 
 test('renderAutoDriveBody: Touches 来自被修机制、且机械补上 self-touch', () => {
