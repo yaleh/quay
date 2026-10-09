@@ -12,6 +12,8 @@ extra:
 ---
 **type:** execution
 
+该轴仍暗，理由：本任务不改动任何 packages/ 或 plugin/scripts/ 生产模块的依赖关系——产物是三个新增、互相独立、零 import 生产代码的分析文件（一个独立 `.mjs` 脚本只读一个 gitignored jsonl 载体、一个 JSON 结果、一份 `.md`），不新增/不改变任何包间依赖边或 god-package 候选，故 L_D 与 L_G 两轴对本任务结构性不适用。
+
 ## Proposal
 
 meta-driver's semantic half (the `meta-review` routine) has been failing on **100% of invocations since 2026-09-14**, continuously through at least 2026-10-09 (`"routine threw: snapshotTrackedChanges is not defined"`), while the mechanical heartbeat loop kept ticking every ~40-60s the whole time, looking healthy. This has never been caught by any existing mechanism — the only trace is an incidental mention in `tasks/gap-ac255-anchor-kind-set-silent-loss.md:46` ("AI 关联发现…本任务不修，须另立"), and no follow-up was ever filed.
@@ -19,8 +21,6 @@ meta-driver's semantic half (the `meta-review` routine) has been failing on **10
 Before proposing or building any production liveness check, this task runs a **read-only, zero-LLM, fully deterministic backtest** against the real historical carrier `.quay/meta-driver-round.jsonl` to measure: how early could a minimal liveness rule have caught this specific outage, and at what false-alarm cost, across a declared grid of parameterizations? The output is an analysis artifact (script + JSON results + a short writeup), not a production change.
 
 **Explicit non-goals**: this task does **not** modify `plugin/scripts/meta-driver.ts` or any production driver code, does **not** itself decide to ship a liveness check, and does **not** bundle with any other meta-driver refactor. If the backtest result is strong, filing the minimal production-check task is a separate, follow-up task gated on this one's result (see DoD).
-
-**该轴仍暗，理由**：本任务不改动任何 `packages/`/`plugin/scripts/` 生产模块的依赖关系——产物是三个新增、互相独立、零 import 生产代码的分析文件（一个独立 `.mjs` 脚本只读一个 gitignored jsonl 载体、一个 JSON 结果、一份 `.md`），不新增/不改变任何包间依赖边或 god-package 候选，故 ArchGuard 的 `L_D`（依赖结构/环）与 `L_G`（god-package）两轴对本任务结构性不适用，无需读数。
 
 ## Plan
 
