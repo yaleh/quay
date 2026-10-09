@@ -16,6 +16,7 @@ import { fileURLToPath } from "node:url";
 import { emptyEnvelope, deterministicGate, normalizeConcernKey } from "../../docs/analysis/ownership-shadow-proposer.mjs";
 import { baselinePropose, buildEvidenceIndex, runReplay } from "../../docs/analysis/ownership-shadow-replay.mjs";
 import { runLiveRound, readLiveEvidence, readCarrierHistory } from "../../docs/analysis/ownership-shadow-live.mjs";
+import { buildSemanticEvidence, buildSemanticPrompt, parseSemanticEnvelope, proposeSemantic, semanticEvidenceRefs } from "../../docs/analysis/ownership-shadow-semantic.mjs";
 import { loadCaseInput, listCaseIds } from "./helpers/meta-driver-replay-harness.mjs";
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
@@ -174,4 +175,61 @@ test("live shadow: the gate polices the SAME evidence namespace the proposer cit
 test("importing the replay module must NOT run its CLI body (side-effect regression pin)", () => {
   const src = fs.readFileSync(path.join(HERE, "..", "..", "docs", "analysis", "ownership-shadow-replay.mjs"), "utf8");
   assert.match(src, /IS_DIRECT_ENTRY/, "the replay CLI body must be guarded by a direct-entry check");
+});
+
+// ── semantic proposer ─────────────────────────────────────────────────────────────────────────
+
+test("semantic: parseSemanticEnvelope is FAIL-CLOSED — unreadable model output yields null, never a partial envelope", () => {
+  assert.equal(parseSemanticEnvelope("no json here at all"), null);
+  assert.equal(parseSemanticEnvelope(""), null);
+  assert.equal(parseSemanticEnvelope(null), null);
+  assert.equal(parseSemanticEnvelope("{ half an object"), null, "truncated JSON must not half-parse");
+  // a fenced block is accepted
+  const ok = parseSemanticEnvelope('prose\n```json\n{"concern":"a duplicated canonical vocabulary has no owner"}\n```\nmore prose');
+  assert.equal(ok.concern, "a duplicated canonical vocabulary has no owner");
+  assert.equal(ok.recommended_next_action, "abstain", "missing fields fall back to the empty envelope, not undefined");
+});
+
+test("semantic: a judge error or non-zero exit is NOT-EVALUATED, never a verified empty envelope", async () => {
+  const ev = buildSemanticEvidence();
+  const errd = await proposeSemantic(ev, { invokeJudge: async () => ({ stdout: "", status: null, error: new Error("spawn E2BIG") }) });
+  assert.equal(errd.state, "not-evaluated");
+  assert.equal(errd.envelope, null);
+  assert.match(errd.reason, /E2BIG/);
+
+  const badExit = await proposeSemantic(ev, { invokeJudge: async () => ({ stdout: "{}", status: 1, error: null }) });
+  assert.equal(badExit.state, "not-evaluated", "a non-zero exit must not be read as a verdict");
+});
+
+test("semantic: the prompt cites ONLY evidence ids the gate will accept (namespace agreement)", () => {
+  // Regression pin for the class of bug the live runner hit: proposer citations must resolve
+  // against the gate's evidence set. Both are derived from the SAME evidence object here.
+  const ev = buildSemanticEvidence();
+  const refs = semanticEvidenceRefs(ev);
+  const prompt = buildSemanticPrompt(ev);
+  for (const r of refs) {
+    assert.ok(prompt.includes(r), `prompt must list the citable id ${r}`);
+  }
+  const cited = [...prompt.matchAll(/^\s*-\s+(\S+)$/gm)].map((m) => m[1]);
+  for (const c of cited) assert.ok(refs.has(c), `prompt offers ${c} which the gate would reject`);
+});
+
+test("semantic: a well-formed judge reply passes the gate, and its citations resolve", async () => {
+  const ev = buildSemanticEvidence();
+  const refs = semanticEvidenceRefs(ev);
+  const env = {
+    concern: "a canonical status-vocabulary definition has duplicate owners, so consumers carry copies",
+    evidence_refs: [...refs][0] ? [refs.values().next().value] : [],
+    candidate_interventions: [{ title: "sink to one canonical owner", rationale: "consumers then delegate" }],
+    recommended_next_action: "investigate",
+    scope: { in_scope: ["converge genuine consumers"], non_goals: ["do not touch unrelated literals"] },
+    expected_mechanical_delta: "dispersion count drops by the number of genuine un-migrated consumers",
+    negative_control: "re-run the dispersion query and justify each remaining hit as a non-defect",
+    abandon_or_reconsider_condition: "abandon if the two implementations turn out intentionally divergent",
+    confidence: { level: "low", basis: "shape-only evidence in this environment" },
+  };
+  const r = await proposeSemantic(ev, { invokeJudge: async () => ({ stdout: JSON.stringify(env), status: 0, error: null }) });
+  assert.equal(r.state, "verified");
+  const gate = deterministicGate(r.envelope, { evidenceRefs: refs });
+  assert.equal(gate.ok, true, `a well-formed semantic envelope must pass the gate, got ${JSON.stringify(gate.reasons)}`);
 });
