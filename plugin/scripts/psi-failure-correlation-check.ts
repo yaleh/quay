@@ -98,7 +98,7 @@ import { canonicalTestFiles } from "./canonical-test-files.ts";
 import { classifyFile } from "./runner-grouping.ts";
 import { windowMeanStall } from "./psi-window-join.ts";
 import { resolveCarrierRoot } from "./perfile-failure-rate.ts";
-import { readJsonLines } from "./gate-script-base.ts";
+import { readJsonLines, parseArgs as baseParseArgs } from "./gate-script-base.ts";
 import { readCpuStall } from "./suite-load-sampler.ts";
 
 type Sample = { t: number; cpu_stall: number };
@@ -185,35 +185,69 @@ const BINS: { lo: number; hi: number }[] = [
   { lo: 41, hi: Number.POSITIVE_INFINITY },
 ];
 
+// ── CLI ─────────────────────────────────────────────────────────────────────────────────────────
+// The flag loop is the SHARED spec-driven parser (gate-script-base.ts) — this wrapper maps the raw
+// flag strings to this command's typed shape and keeps its numeric validation. It replaces one of the
+// three byte-shape-identical private if/else loops named by semantic-dedup-scan finding
+// `parse-args-handrolled-variants` (runId `semantic-dedup-scan-1791536153223`): they could not fold
+// while the shared parser `process.exit()`ed on `--help`, which this command handles itself in `main`.
 function parseArgs(argv: string[]) {
-  const out = {
-    source: "both" as "active" | "passive" | "both",
-    root: "",
-    trials: 1,
-    loadLevels: [] as number[],
-    testTimeoutMs: 180_000,
-    minNPassive: DEFAULT_MIN_N_PASSIVE,
-    includeAllGroups: false,
-    injectWindowMs: DEFAULT_INJECT_WINDOW_MS,
-    json: false,
-    help: false,
+  const { flags, help } = baseParseArgs(argv, {
+    minArgs: 0,
+    usage:
+      "[--source active|passive|both] [--root <repo-root>] [--trials N] [--load-levels 0,N] " +
+      "[--inject-window-ms N] [--include-all-groups] [--json] [--help]",
+    help: "return",
+    flags: {
+      source: { type: "string" },
+      root: { type: "string" },
+      trials: { type: "string" },
+      "load-levels": { type: "string" },
+      "test-timeout-ms": { type: "string" },
+      "min-n-passive": { type: "string" },
+      "include-all-groups": { type: "boolean" },
+      "inject-window-ms": { type: "string" },
+      json: { type: "boolean" },
+    },
+  });
+
+  // A trailing `--flag` with no value (or an explicit `--flag ""`) reads as ABSENT, matching the
+  // previous loop's `a === "--flag" && v` truthy guard — the shared parser yields `""` for both, so
+  // the two fold back to one "not supplied" reading here.
+  const supplied = (v: string | boolean | undefined): string | undefined =>
+    typeof v === "string" && v !== "" ? v : undefined;
+  const numFlag = (
+    v: string | undefined,
+    dflt: number,
+    ok: (n: number) => boolean,
+    xform: (n: number) => number = (n) => n,
+  ): number => {
+    const n = v === undefined ? Number.NaN : Number(v);
+    return Number.isFinite(n) && ok(n) ? xform(n) : dflt;
   };
-  for (let i = 0; i < argv.length; i++) {
-    const a = argv[i];
-    const v = argv[i + 1];
-    if (a === "--help" || a === "-h") out.help = true;
-    else if (a === "--source" && v) { out.source = v === "active" || v === "passive" ? v : "both"; i++; }
-    else if (a === "--root" && v) { out.root = v; i++; }
-    else if (a === "--trials" && v) { const n = Number(v); out.trials = Number.isFinite(n) && n >= 1 ? Math.floor(n) : 1; i++; }
-    else if (a === "--load-levels" && v) { out.loadLevels = v.split(",").map((s) => Number(s.trim())).filter((n) => Number.isFinite(n) && n >= 0); i++; }
-    else if (a === "--test-timeout-ms" && v) { const n = Number(v); out.testTimeoutMs = Number.isFinite(n) && n > 0 ? Math.floor(n) : out.testTimeoutMs; i++; }
-    else if (a === "--min-n-passive" && v) { const n = Number(v); out.minNPassive = Number.isFinite(n) && n >= 1 ? Math.floor(n) : out.minNPassive; i++; }
-    else if (a === "--include-all-groups") out.includeAllGroups = true;
-    else if (a === "--inject-window-ms" && v) { const n = Number(v); out.injectWindowMs = Number.isFinite(n) && n >= 0 ? Math.min(Math.floor(n), MAX_INJECT_WINDOW_MS) : out.injectWindowMs; i++; }
-    else if (a === "--json") out.json = true;
-  }
-  if (out.loadLevels.length === 0) out.loadLevels = [0, 2 * os.availableParallelism()];
-  return out;
+
+  const source = supplied(flags.source);
+  const loadLevelsRaw = supplied(flags["load-levels"]);
+  const loadLevels =
+    loadLevelsRaw === undefined
+      ? []
+      : loadLevelsRaw.split(",").map((s) => Number(s.trim())).filter((n) => Number.isFinite(n) && n >= 0);
+  if (loadLevels.length === 0) loadLevels.push(0, 2 * os.availableParallelism());
+
+  return {
+    source: source === "active" || source === "passive" ? source : ("both" as "active" | "passive" | "both"),
+    root: supplied(flags.root) ?? "",
+    trials: numFlag(supplied(flags.trials), 1, (n) => n >= 1, Math.floor),
+    loadLevels,
+    testTimeoutMs: numFlag(supplied(flags["test-timeout-ms"]), 180_000, (n) => n > 0, Math.floor),
+    minNPassive: numFlag(supplied(flags["min-n-passive"]), DEFAULT_MIN_N_PASSIVE, (n) => n >= 1, Math.floor),
+    includeAllGroups: flags["include-all-groups"] === true,
+    injectWindowMs: numFlag(supplied(flags["inject-window-ms"]), DEFAULT_INJECT_WINDOW_MS, (n) => n >= 0, (n) =>
+      Math.min(Math.floor(n), MAX_INJECT_WINDOW_MS),
+    ),
+    json: flags.json === true,
+    help: help === true,
+  };
 }
 
 // resolveCarrierRoot is IMPORTED (single definition in perfile-failure-rate.ts). This file used to
@@ -796,7 +830,7 @@ function printJson(args: ReturnType<typeof parseArgs>, active: Awaited<ReturnTyp
 }
 
 async function main(): Promise<void> {
-  const args = parseArgs(process.argv.slice(2));
+  const args = parseArgs(process.argv);
   if (args.help) {
     process.stdout.write(
       "psi-failure-correlation-check.ts — Phase 0 回溯分析（PSI 对失败的增量预测力）\n" +

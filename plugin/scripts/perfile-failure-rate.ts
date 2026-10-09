@@ -70,7 +70,7 @@
 import fs from "node:fs";
 import path from "node:path";
 import { repoRoot } from "./repo-root.ts";
-import { isDirectEntry, helpExit } from "./gate-script-base.ts";
+import { isDirectEntry, helpExit, parseArgs as baseParseArgs } from "./gate-script-base.ts";
 
 // ── Constants ──────────────────────────────────────────────────────────────────────────────────────
 
@@ -271,18 +271,33 @@ function summarize(recs: PerFileRec[], minRuns: number): Summary {
   };
 }
 
+// ── CLI ─────────────────────────────────────────────────────────────────────────────────────────
+// The flag loop is the SHARED spec-driven parser (gate-script-base.ts); this wrapper only maps the
+// raw `--flag <value>` strings onto this command's typed shape. It used to be a private if/else loop
+// — one of the three byte-shape-identical copies named by semantic-dedup-scan finding
+// `parse-args-handrolled-variants` (runId `semantic-dedup-scan-1791536153223`). Those could not fold
+// into the shared parser while it `process.exit()`ed on `--help`: this command prints its OWN
+// multi-line usage from `main`, so it needs the non-exiting `help: "return"` mode.
 function parseArgs(argv: string[]) {
-  const out = { root: "", file: "", minRuns: MIN_RUNS, json: false, help: false };
-  for (let i = 0; i < argv.length; i++) {
-    const a = argv[i];
-    const v = argv[i + 1];
-    if (a === "--help" || a === "-h") out.help = true;
-    else if (a === "--root" && v) { out.root = v; i++; }
-    else if (a === "--file" && v) { out.file = v; i++; }
-    else if (a === "--min-runs" && v) { const n = Number(v); out.minRuns = Number.isFinite(n) && n >= 1 ? Math.floor(n) : out.minRuns; i++; }
-    else if (a === "--json") out.json = true;
-  }
-  return out;
+  const { flags, help } = baseParseArgs(argv, {
+    minArgs: 0,
+    usage: "[--root <repo-root>] [--file <rel-file>] [--min-runs <N>] [--json] [--help]",
+    help: "return",
+    flags: {
+      root: { type: "string" },
+      file: { type: "string" },
+      "min-runs": { type: "string" },
+      json: { type: "boolean" },
+    },
+  });
+  const minRuns = typeof flags["min-runs"] === "string" ? Number(flags["min-runs"]) : Number.NaN;
+  return {
+    root: typeof flags.root === "string" ? flags.root : "",
+    file: typeof flags.file === "string" ? flags.file : "",
+    minRuns: Number.isFinite(minRuns) && minRuns >= 1 ? Math.floor(minRuns) : MIN_RUNS,
+    json: flags.json === true,
+    help: help === true,
+  };
 }
 
 function printSummaryText(args: ReturnType<typeof parseArgs>, res: ReturnType<typeof readCarrierPerFile>, s: Summary): void {
@@ -319,7 +334,7 @@ function printOneJson(file: string, b: FileBaseline, cls: Classification): void 
 }
 
 export function main(argv: string[]): number {
-  const args = parseArgs(argv.slice(2));
+  const args = parseArgs(argv);
   const usage = `perfile-failure-rate.ts — per-file failure-rate baseline + step-change classification
 Usage:
   node --experimental-strip-types plugin/scripts/perfile-failure-rate.ts [--root <repo-root>] [--file <rel-file>] [--min-runs <N>] [--json]
