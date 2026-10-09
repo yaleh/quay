@@ -58,13 +58,24 @@ export function buildDefaultPrompt(caseId, corpusRoot = CORPUS_ROOT) {
   ].join("\n");
 }
 
+// Caught by a deliberate negative-control test (a nonsense response like "the weather is nice"
+// was scoring non-zero overlap against real reference text before this filter existed) — common
+// English function words have length > 2 and create spurious overlap on short candidate text.
+const STOPWORDS = new Set([
+  "the", "and", "for", "are", "but", "not", "you", "all", "can", "had", "her", "was",
+  "one", "our", "out", "day", "get", "has", "him", "his", "how", "man", "new", "now",
+  "old", "see", "two", "way", "who", "boy", "did", "its", "let", "put", "say", "she",
+  "too", "use", "this", "that", "with", "from", "they", "have", "will", "would", "about",
+  "which", "when", "there", "their", "been", "were", "what", "into", "than", "then",
+]);
+
 function tokenize(text) {
   return new Set(
     String(text || "")
       .toLowerCase()
       .replace(/[^a-z0-9一-鿿]+/g, " ")
       .split(/\s+/)
-      .filter((t) => t.length > 2)
+      .filter((t) => t.length > 2 && !STOPWORDS.has(t))
   );
 }
 
@@ -112,6 +123,55 @@ export function scoreResponse(caseId, response, corpusRoot = CORPUS_ROOT) {
   const revisionText = String(response?.revision_evidence || "");
   const abstention_uncertainty_reasonableness = revisionText.trim().length >= 20 ? "specific" : "generic_or_missing";
 
+  // --- Decomposition-quality dimensions (added per the "harness spends intelligence only on
+  // residual uncertainty" principle applied to THIS dataset: scoring must test whether a
+  // candidate compressed an open problem into a minimal-sufficient, harness-able slice, not just
+  // whether it happened to name the right final target). All of these are rule-assisted, weak
+  // signals, deliberately NOT folded into a single pretend-precise score — see README.md.
+  const dr = response?.decomposition_rationale || {};
+  const refGr = reference.granularity_rationale || {};
+
+  const drFieldsPresent = ["why_not_broader", "why_not_finer"].filter((k) => String(dr[k] || "").trim().length >= 20).length;
+  const drArraysPresent = ["harnessable_subproblems", "investigation_required_subproblems", "primitives_reused"].filter(
+    (k) => Array.isArray(dr[k]) && dr[k].length > 0
+  ).length;
+  const decomposition_quality = {
+    structured_fields_present: `${drFieldsPresent}/2 prose fields, ${drArraysPresent}/3 array fields non-empty`,
+    why_not_broader_overlap: overlapScore(refGr.why_not_broader, dr.why_not_broader),
+    why_not_finer_overlap: overlapScore(refGr.why_not_finer, dr.why_not_finer),
+  };
+
+  // slice_semantic_coherence: a deliberately weak heuristic — counts how many distinct
+  // "and also" / ";" / enumerated-clause joins appear in the recommended text, as a crude proxy
+  // for "one coherent slice" vs. "a bundle of loosely related changes." Not a semantic check.
+  const joinMarkers = (recommendedText.match(/;|\band also\b|\bas well as\b|\bin addition to\b/gi) || []).length;
+  const slice_semantic_coherence = joinMarkers === 0 ? "single_coherent_slice_heuristic" : `possible_bundling_heuristic(${joinMarkers}_joins)`;
+
+  const granularity = dr.granularity_assessment === refGr.granularity_label ? "agreement" : dr.granularity_assessment ? "disagreement" : "not_stated";
+
+  const harnessability_components = {
+    has_scope_non_goals: Array.isArray(response?.scope?.non_goals) && response.scope.non_goals.length > 0,
+    has_negative_control: falsifiability_negative_control_presence === "present",
+    has_numeric_expected_delta: expected_delta_quality === "has_numeric_claim",
+  };
+  const harnessability = Object.values(harnessability_components).every(Boolean) ? "harness_ready" : "incomplete";
+
+  const candidatePrimitives = Array.isArray(dr.primitives_reused) ? dr.primitives_reused : [];
+  const referencePrimitives = Array.isArray(refGr.primitives_reused) ? refGr.primitives_reused : [];
+  const primitiveOverlaps = candidatePrimitives.map((p) => Math.max(0, ...referencePrimitives.map((rp) => overlapScore(rp, p))));
+  const primitive_reuse = {
+    mentioned_any: candidatePrimitives.length > 0,
+    overlap_with_reference: primitiveOverlaps.length ? Math.max(...primitiveOverlaps) : 0,
+  };
+
+  // unnecessary_decomposition / coordination-cost flag: fires if the candidate proposes a narrow
+  // slice (few in_scope items) but gives no coordination-cost reasoning for why it isn't split
+  // further, OR explicitly over-fragments without justification. Heuristic, not a verdict.
+  const coordinationNoteLen = String(dr.coordination_cost_note || "").trim().length;
+  const whyNotFinerLen = String(dr.why_not_finer || "").trim().length;
+  const unnecessary_decomposition_flag =
+    (response?.scope?.in_scope?.length || 0) <= 1 && coordinationNoteLen < 20 && whyNotFinerLen < 20;
+
   return {
     case_id: caseId,
     concern_recall,
@@ -122,6 +182,13 @@ export function scoreResponse(caseId, response, corpusRoot = CORPUS_ROOT) {
     scope_expansion_violation,
     expected_delta_quality,
     falsifiability_negative_control_presence,
+    decomposition_quality,
+    slice_semantic_coherence,
+    granularity,
+    harnessability,
+    harnessability_components,
+    primitive_reuse,
+    unnecessary_decomposition_flag,
     hindsight_leakage_guard,
     abstention_uncertainty_reasonableness,
     note: "rule-assisted, minimal-viable metrics — not a calibrated aggregate score (see README.md)",
