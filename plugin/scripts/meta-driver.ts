@@ -56,6 +56,9 @@ import { gateFinding, findingKey, DEFAULT_RATE, countRecentFilings, FILING_WINDO
 // 定义，本文件读的全局窗口合计必须与 probe-routine.ts 写的是同一个文件；硬规则 5b）。
 import { ROUTINE_FINDINGS_REL } from "./probe-routine.ts";
 import { isDirectEntry } from "./gate-script-base.ts";
+// ⛔ 必须 import，不能只靠下面的 re-export：`export { x } from "..."` 只绑定导出表、不在本模块作用域
+// 绑定 x，本文件内裸调用会 ReferenceError（gap-meta-driver-snapshot-tracked-changes-reference-error）。
+import { snapshotTrackedChanges, probeWriteViolations } from "./probe-write-guard.ts";
 // AC155（gap-drivers-yml-interval-not-honored-for-routine-kinds）：轮询间隔的单一真相源——
 // drivers.yml 经 driver-config 加载，⛔ 不在本文件另写一份字面量（goal/quality/outer 同款接法）。
 // routineGlobalCeiling 同属该配置面：driveItems 的真实全局天花板从这里读（本任务新增）。
