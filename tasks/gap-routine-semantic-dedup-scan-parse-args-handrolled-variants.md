@@ -51,4 +51,5 @@ merge — give the shared parser a non-exiting help mode
 - `plugin/scripts/self-report-vocab-check.ts`
 - `plugin/scripts/workflow-invariant-ownership.mjs`
 - `plugin/scripts/workflow-metadata-conformance.mjs`
+- `plugin/test/gate-script-base-help-mode.test.mjs`
 - `tasks/gap-routine-semantic-dedup-scan-parse-args-handrolled-variants.md`
