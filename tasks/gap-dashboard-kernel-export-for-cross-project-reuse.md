@@ -57,12 +57,12 @@ extra: {}
 
 ## AC
 
-- [ ] AC1 `packLanes`/`mergeLiveAndHistoryIntervals`/`FIXED_GANTT_LANES`/相关类型从 `dashboard-kernel` 子路径可被一个**真实的外部 import**拿到——判据：在 `packages/quay` 之外（例如一个临时的 `/tmp` 测试项目，或包测试里模拟外部消费场景）`npm install` 该包的本地构建产物后 `import { packLanes } from '<package>/dashboard-kernel'` 成功，而不是只在包内部 import 成功（包内部 import 不能证明发布面真的暴露了）。
-- [ ] AC2 `serve-dashboard.ts` 改为消费新模块后，既有 dashboard 测试（`gap-dashboard-live-swimlane-fixed-lane-gantt-timeline`/`gap-dashboard-gantt-runid-dedup-collapses-driver-round-shared-id` 等任务锁定的既有判据）逐字不回归——跑一遍相关现有测试文件，退出码 0，且输出数量/内容与改动前一致。
-- [ ] AC3 新增的 `dashboard-kernel` 窄测试覆盖：装箱顺序（多个重叠区间按 `startMs` 排序分配车道）、超 5 车道的 `overflow` 计数、`mergeLiveAndHistoryIntervals` 对时间窗口边界的过滤（窗口外的历史记录不出现）。
-- [ ] AC4 跨项目等价性测试向量文件已产出（版本化 JSON，输入区间 + 期望输出），并在任务体/README 里说明文件路径与用途。
-- [ ] AC5 `exports` 子路径的 semver/稳定性承诺已写进包文档，且记录 claudecodeui 为已知消费者。
-- [ ] 本任务其余机械判据（typecheck/lint/既有测试不回归）按本仓库既有惯例执行，具体命令由实现者按 `packages/quay` 当前的脚本配置选定（不要凭记忆照抄其他仓库的命令字面量）。
+- [x] AC1 `packLanes`/`mergeLiveAndHistoryIntervals`/`FIXED_GANTT_LANES`/相关类型从 `dashboard-kernel` 子路径可被一个**真实的外部 import**拿到——判据：在 `packages/quay` 之外（例如一个临时的 `/tmp` 测试项目，或包测试里模拟外部消费场景）`npm install` 该包的本地构建产物后 `import { packLanes } from '<package>/dashboard-kernel'` 成功，而不是只在包内部 import 成功（包内部 import 不能证明发布面真的暴露了）。
+- [x] AC2 `serve-dashboard.ts` 改为消费新模块后，既有 dashboard 测试（`gap-dashboard-live-swimlane-fixed-lane-gantt-timeline`/`gap-dashboard-gantt-runid-dedup-collapses-driver-round-shared-id` 等任务锁定的既有判据）逐字不回归——跑一遍相关现有测试文件，退出码 0，且输出数量/内容与改动前一致。
+- [x] AC3 新增的 `dashboard-kernel` 窄测试覆盖：装箱顺序（多个重叠区间按 `startMs` 排序分配车道）、超 5 车道的 `overflow` 计数、`mergeLiveAndHistoryIntervals` 对时间窗口边界的过滤（窗口外的历史记录不出现）。
+- [x] AC4 跨项目等价性测试向量文件已产出（版本化 JSON，输入区间 + 期望输出），并在任务体/README 里说明文件路径与用途。
+- [x] AC5 `exports` 子路径的 semver/稳定性承诺已写进包文档，且记录 claudecodeui 为已知消费者。
+- [x] 本任务其余机械判据（typecheck/lint/既有测试不回归）按本仓库既有惯例执行，具体命令由实现者按 `packages/quay` 当前的脚本配置选定（不要凭记忆照抄其他仓库的命令字面量）。
 
 ## DoD
 
@@ -73,11 +73,13 @@ extra: {}
 ## Touches
 
 - packages/quay/src/dashboard-kernel.ts (new)
+- packages/quay/src/dashboard-kernel-vectors.json (new)
 - packages/quay/src/serve-dashboard.ts
+- packages/quay/scripts/build-dist.mjs
 - packages/quay/package.json
 - packages/quay/test/dashboard-kernel.test.mjs (new)
-- 一份版本化的测试向量 fixture 文件（路径由实现者定，需在任务体/README 里写清）
-- 包文档（README 或等价位置）新增该子路径的说明
+- packages/quay/test/package-json-bin.test.mjs
+- packages/quay/README.md
 - tasks/gap-dashboard-kernel-export-for-cross-project-reuse.md (self-touch)
 
 ## Notes（给评审/promote 该任务到 ready 的人）
@@ -89,8 +91,17 @@ extra: {}
 
 本任务创建后约 21 秒（`updatedAt` 从创建时的 2026-10-09T05:46:56 变为 05:47:17），status 被从 `todo` 改成了 `ready`——`gate-log` 对本任务为空数组，即这次变更**没有**经过正常的 `lifecycle_promote` 判据流程，像是某个机械的 pool/ready 质量巡检（例如按结构完整性自动判定 ready 的那一类）直接写的状态，而不是任何人/会话对"quay 现在要不要承诺这个外部发布面"做过实质评审。
 
-与此同时，quay 工作区里一个以架构审查为职责的常驻会话（`Quay 架构审查与 ArchGuard 能力评估`）收到本任务的协调消息后回复：明确表示不会在它的会话里做这个 `exports`/API 决定——它的人类把它限定在 GOAL-033（core-root⇄cli）这一个重构切片，"不碰无关的 todo" 是其人类的明确指示，且认为首次公开 `exports` 子路径承诺本就该是人类的产品判断，会把本任务汇报给其人类。
+与此同时，quay 工作区里一个以架构审查为职责的常驻会话（`Quay 架构审查与 ArchGuard 能力评估`）收到本任务的协调消息后回复：明确表示不会在它的会话里做这个 `exports`/API 决定——它的人类把它限定在 GOAL-033（core-root⇄cli）这一个重构切片，"不碰无关的 todo"是其人类的明确指示，且认为首次公开 `exports` 子路径承诺本就该是人类的产品判断，会把本任务汇报给其人类。
 
 两边（我方 + 该架构审查会话）独立得出同一个结论：本任务需要人工评审才能进入可执行状态。机械流程把它拽成 `ready` 并不代表这次评审已经发生——`ready` 在 quay 的机械 worker 循环里意味着"随时可能被派发实现"，这正是我们都想避免的（一个没人真正拍板过的公开 API 面被自动摘取实现）。因此把 status 退回 `todo`，并把这个退回理由和下面的架构笔记一起写进任务体，供真正评审时参考；不删除、不改写上面已有的设计内容。
 
 **架构笔记（来自该架构审查会话，非绑定，供最终实现者参考）**：`packages/quay/src/serve-dashboard.ts` 目前是正在被该会话收缩的同一个包级 SCC（强连通分量）里的根级文件；如果真的要抽出纯函数那一半（`packLanes`/`mergeLiveAndHistoryIntervals`），应该把它做成一个**零 import 的叶子模块**（不 import `serve-render`/`serve-i18n` 等渲染/文案层），参照本仓库已有的 `packages/quay/src/kernel/*.ts` 与 `driver-vocab.ts` 的写法——这样发布出去的面才不会把 web 层的传递依赖图拖进消费方（claudecodeui 不需要也不应该因为引入这个 kernel 子路径就连带拉进 quay dashboard 的渲染/i18n 依赖）。
+
+## Evidence（实现记录，2026-10-09）
+
+- **AC1 的硬发现（实测，非假设）**：把子路径指向 `./src/dashboard-kernel.ts` 在**外部真实安装**下必然失败——Node 拒绝对 `node_modules` 下的文件做类型擦除（`ERR_UNSUPPORTED_NODE_MODULES_TYPE_STRIPPING`）。仓内既有四个子路径能指向 `.ts`，只因为 npm workspaces 把包**符号链接**了（realpath 落在 node_modules 之外）；`npm install` 的产物是 node_modules 里的真实目录。故本子路径 runtime 目标是**构建产物** `dist/dashboard-kernel.js`，`exports` 用 `types` 条件把类型指回 `.ts`。`build-dist.mjs` 新增该输出（`package.sh` 的构建步骤一并产出）。
+- AC1 判据（`packages/quay/test/dashboard-kernel.test.mjs`）：真 `npm pack` 本包 → `npm install` 进 `/tmp` 下的独立 consumer → 裸 `import ... from "quay/dashboard-kernel"` → 断言解析到 `node_modules/quay/dist/dashboard-kernel.js` 且调用结果正确。9/9 绿。
+- AC2 判据：`serve-dashboard.test.mjs` 本任务未改动（`serve-dashboard.ts` 以 re-export 保持旧导入面）；`serve-dashboard.test.mjs + gap-dashboard-*.test.mjs + build-dist.test.mjs + build-dist-smoke.test.mjs + package-json-bin.test.mjs + dashboard-kernel.test.mjs` 共 174 tests / 0 fail；`npm-pack-e2e.test.mjs`（真 `package.sh`）11/11 绿；`npx tsc --noEmit` 退出 0。
+- AC4 向量：`packages/quay/src/dashboard-kernel-vectors.json`（随包发布，亦可经 `quay/dashboard-kernel/vectors` 解析），3 条向量覆盖顺序装箱 / 超载 overflow / 窗口过滤+跨源去重，由 `AC4:` 测试逐条回放。
+- AC5 文档：`packages/quay/README.md` § "Public API: `quay/dashboard-kernel`"（用途、明确非目标、semver 承诺、已知消费者 claudecodeui）。
+- 实现提交：分支 `task/gap-dashboard-kernel-export-for-cross-project-reuse`，见本任务 worktree 的 `feat(quay): publish the gantt packing kernel as quay/dashboard-kernel`。
