@@ -402,8 +402,24 @@
         "embeddedInterpreterLines": "-124 = plugin/scripts/manager-start.sh 124 -> 0 counted lines (it leaves the axis: the sole charge was embedded:[python3]; the fix leaves no node/python3/jq at a command position). Residual = 0: the branch's entire tracked *.sh delta vs develop is that one path (`git diff --name-status develop HEAD -- '*.sh'` → M plugin/scripts/manager-start.sh), so no other member contributes.",
         "duplicateCopies": "0 — untouched (0 is the assertion, not an omission). This task added no experiments/** mirror and converted no byte-identical pair."
       }
+    },
+    {
+      "when": "2026-10-09 (gap-dashboard-kernel-not-packaged-in-plugin-artifact)",
+      "from": {
+        "embeddedInterpreterLines": 6559,
+        "duplicateCopies": 0
+      },
+      "to": {
+        "embeddedInterpreterLines": 6566,
+        "duplicateCopies": 0
+      },
+      "why": "UPWARD re-anchor, and the growth is the task itself, not a regression: plugin/scripts/sync-vendor.sh (an embedded-interpreter .sh — its section 6 runs `node -e`) gained the wiring that mirrors the published dashboard-kernel bundle and its contract vector into the plugin artifact. The alternative — compressing the wiring onto fewer physical lines to stay at 0, as the 2026-09-19 entry did — was rejected here: the added lines are five independent, separately-readable statements (two --check verifications, two mirror cps per mode, one presence guard), and folding them into chained one-liners would trade a readable check for a baseline number. AC6 of plugin/test/sh-census-check.test.mjs requires the committed baseline to EQUAL the live reading, not merely bound it. Measured with the checker's OWN reading on this tree: `node --experimental-strip-types plugin/scripts/sh-census-check.ts --json` → totals.embeddedInterpreterLines 6566 (54 embedded .sh), duplicateCopies 0 — never hand-fitted. Non-fitted proof: `git stash`-free differential — reverting ONLY the sync-vendor.sh edits makes the same checker read 6559/0 again.",
+      "attribution": {
+        "embeddedInterpreterLines": "+7 = plugin/scripts/sync-vendor.sh 325 -> 332 counted code lines. Itemised: +4 = the two 2-line `cmp_or_report` calls added to --check (the kernel bundle and its vector; without them --check reports CLEAN on a mirror with no kernel); +2 = the two `cp`s added to --sync-dist (mirror the built kernel bundle and the vector); +2 = the same two `cp`s in the full-build mode; -1 = the single-bundle presence guard (`if [ ! -f .../quay.js ]`, 4 lines) became a 3-line loop over `quay.js dashboard-kernel.js`, so --sync-dist still exits 2 when EITHER built bundle is missing. Residual = 0: the branch's entire tracked *.sh delta vs develop is that one path (`git diff --name-status develop HEAD -- '*.sh'` → M plugin/scripts/sync-vendor.sh).",
+        "duplicateCopies": "0 — untouched (0 is the assertion, not an omission). This task added no experiments/** mirror and converted no byte-identical pair."
+      }
     }
   ],
-  "embeddedInterpreterLines": 6559,
+  "embeddedInterpreterLines": 6566,
   "duplicateCopies": 0
 }

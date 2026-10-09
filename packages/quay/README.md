@@ -427,6 +427,30 @@ const { lanes, overflow } = packLanes(merged); // ≤ FIXED_GANTT_LANES lanes; `
   as `quay/dashboard-kernel/vectors`). It is the cross-project contract test: replay each vector
   through your copy and assert identical lane assignment and `overflow`. That is how a consumer
   proves it runs the same algorithm rather than a look-alike.
+- **Reaching it from an installed plugin — the form a consuming project actually uses.** A project
+  consumes quay as the **Claude Code plugin** (marketplace → the `dist-plugin` branch → user scope),
+  not as an npm package, and the plugin artifact mirrors this subpath's built bundle and its vector
+  next to each other under the plugin's `vendor/quay/dist/`. A consumer resolves them **by path**:
+
+  ```js
+  // `pluginRoot` = the directory the quay plugin was installed into. Both paths are
+  // artifact-relative, exactly as they appear in the published tree.
+  const kernel = await import(new URL("vendor/quay/dist/dashboard-kernel.js", pluginRoot));
+  const vectors = JSON.parse(
+    await readFile(new URL("vendor/quay/dist/dashboard-kernel-vectors.json", pluginRoot), "utf8")
+  );
+  ```
+
+  This path contract (`<plugin-root>/vendor/quay/dist/dashboard-kernel.js` +
+  `…/dashboard-kernel-vectors.json`) is what the plugin ships today, and it is why the kernel bundle
+  exists as a **standalone plain-JS file**: it has zero imports, so importing it needs no
+  `node_modules` resolution, no package manager and no build step on the consumer side, and the file
+  keeps working when copied out of its original tree. The `exports` map above
+  (`quay/dashboard-kernel`, `quay/dashboard-kernel/vectors`) is the **package-manager** form of the
+  same two files — it applies when the *package* is installed, which is not the channel an installed
+  plugin provides. `plugin/scripts/sync-vendor.sh` mirrors both files into the artifact and its
+  `--check` mode fails loudly if either is missing or differs from the source build, so an absent or
+  stale kernel in a published artifact is a red check rather than a silent gap.
 - **Stability** — this subpath is a semver-governed public contract. Changing the parameter or
   return shape of `packLanes` / `mergeLiveAndHistoryIntervals`, or removing an exported name, is a
   **breaking** change and calls for the package's major-version bump; adding an export or widening
@@ -435,11 +459,13 @@ const { lanes, overflow } = packLanes(merged); // ≤ FIXED_GANTT_LANES lanes; `
   `quay driver live --json` output through this kernel and renders the lanes with its own
   React/Tailwind components.
 
-> **Distribution note.** The npm and SEA release channels are retired (see Install above), so today
-> this subpath reaches an external project by installing a locally built tarball
-> (`bash packages/quay/scripts/package.sh` → `npm install <path-to-quay-*.tgz>`) or via a `file:`
-> dependency on a checkout. The stability promise above is a promise about the exported shape, and
-> it holds however the tarball is delivered.
+> **Distribution note.** The npm and SEA release channels are retired (see Install above). The live
+> channel is the **plugin marketplace** (the CI-published `dist-plugin` orphan branch, installed at
+> user scope), and the kernel reaches a consumer there through the mirrored
+> `vendor/quay/dist/dashboard-kernel.js` path documented above. Installing a locally built tarball
+> (`bash packages/quay/scripts/package.sh` → `npm install <path-to-quay-*.tgz>`) or a `file:`
+> dependency on a checkout also works, via the `exports` map. The stability promise above is a
+> promise about the exported shape, and it holds however the artifact is delivered.
 
 ## Distribution: single-file executables (SEA) — **no longer published**
 
