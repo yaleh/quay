@@ -22,7 +22,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import path from "node:path";
-import { readFileSync, writeFileSync, mkdtempSync, rmSync } from "node:fs";
+import { readFileSync, writeFileSync, mkdtempSync, rmSync, mkdirSync, symlinkSync } from "node:fs";
 import os from "node:os";
 import { fileURLToPath } from "node:url";
 import { spawnSync } from "node:child_process";
@@ -688,4 +688,82 @@ test("AC8 — every shipped-CLI invocation in verify-deliver-coldstart.sh is ver
   assert.ok(neg.length >= verbFirst.length,
     `stripping the subcommand verb from the ${verbFirst.length} call site(s) MUST make the predicate red ` +
     `(got ${neg.length}): a green here means the check cannot red for the defect it pins`);
+});
+
+// ── post-upgrade binding reading follows the plugin-root semantics (76f89ce82) ───────────────────
+// The AC-238 gate reads the project's post-upgrade runtime BINDING in two places:
+//   · config_native_mcp_entry() — the bound bundle path (its sha is compared to the DELIVERED one), and
+//   · binding_state()            — the form word (the gate requires `path-resolved`).
+// Commit 76f89ce82 (gap-project-quay-pointer-is-init-plugin-root-…) removed
+// providers.native.path/mcp_entry — Core resolves <plugin-root>/vendor/quay-native and the project's
+// binding IS its `.quay/plugin` link. A reading written for the OLD config-carried form goes
+// `<unread>`/`unreadable` under the new one ⇒ AC-238 can never be written ⇒ AC-214's ONLY remedy
+// (re-run the producer) is structurally unable to refresh AC-238/239 (硬规则 5b — the sibling this
+// task's call-site fix exposed). This drives the two readers (extracted by POSITION) against fixtures.
+//
+// Three-valued, never boolean (硬规则 3b): a plugin-linked root resolves; a root with NO link stays
+// not-evaluated (fail-closed, not a silent pass); a bare-path mcp_entry stays RED.
+const VDC_SCRIPT = path.join(REPO_ROOT, "plugin", "scripts", "verify-deliver-coldstart.sh");
+
+function extractFn(src, name) {
+  const m = src.match(new RegExp(`^${name}\\(\\) \\{[\\s\\S]*?^\\}$`, "m"));
+  assert.ok(m, `${name}() must be defined at column 0 in verify-deliver-coldstart.sh`);
+  return m[0];
+}
+
+test("post-upgrade binding reading follows the plugin-root semantics (76f89ce82), three-valued", () => {
+  const src = readFileSync(VDC_SCRIPT, "utf8");
+  const harness = extractFn(src, "binding_state") + "\n" + extractFn(src, "config_native_mcp_entry") + "\n";
+  const tmp = mkdtempSync(path.join(os.tmpdir(), "ac214-binding-"));
+  try {
+    const harnessPath = path.join(tmp, "fns.sh");
+    writeFileSync(harnessPath, harness);
+    const mkRoot = (name, { link = false, bareEntry = false } = {}) => {
+      const r = path.join(tmp, name);
+      mkdirSync(path.join(r, ".quay"), { recursive: true });
+      mkdirSync(path.join(r, "tasks"), { recursive: true });
+      let cfg = "version: 1\nproviders:\n  native:\n    enabled: true\n    tasks_dir: tasks\n";
+      if (bareEntry) cfg += "    mcp_entry: [quay-native, mcp]\n";
+      writeFileSync(path.join(r, ".quay", "config.yml"), cfg);
+      if (link) {
+        const plug = path.join(tmp, `${name}-plugin`);
+        mkdirSync(path.join(plug, "vendor", "quay-native", "dist"), { recursive: true });
+        writeFileSync(path.join(plug, "vendor", "quay-native", "dist", "quay-native.js"), "fake\n");
+        symlinkSync(plug, path.join(r, ".quay", "plugin"));
+      }
+      return r;
+    };
+    const scriptsDir = path.join(REPO_ROOT, "plugin", "scripts");
+    const read = (expr) => {
+      const r = spawnSync("bash", ["-c",
+        `SCRIPT_DIR=${JSON.stringify(scriptsDir)}; source ${JSON.stringify(harnessPath)}; printf '%s' "$(${expr})"`],
+        { encoding: "utf8" });
+      assert.equal(r.status, 0, `harness failed for ${expr}:\n${r.stderr}`);
+      return (r.stdout || "").trim();
+    };
+
+    // ① new semantics (no mcp_entry) + a `.quay/plugin` link whose vendored bundle exists
+    //    ⇒ the binding IS resolvable ⇒ path-resolved; the bound entry is the plugin-vendored bundle.
+    const linked = mkRoot("linked", { link: true });
+    assert.equal(read(`binding_state '${linked}'`), "path-resolved",
+      "a project whose .quay/plugin link resolves to a real vendored quay-native bundle IS bound to a project-controlled path (new semantics)");
+    const entry = read(`config_native_mcp_entry '${linked}'`);
+    assert.match(entry, /\/vendor\/quay-native\/dist\/quay-native\.js$/,
+      `the bound entry must resolve through the plugin link, got: ${entry}`);
+
+    // ② SAME config but NO `.quay/plugin` link ⇒ NOT-EVALUATED / empty, never a silent pass.
+    const unlinked = mkRoot("unlinked", { link: false });
+    assert.equal(read(`binding_state '${unlinked}'`), "no-mcp-entry",
+      "without the plugin link the new-semantics binding is NOT established — it must not read as path-resolved");
+    assert.equal(read(`config_native_mcp_entry '${unlinked}'`), "",
+      "without the plugin link there is no bound entry — empty (the caller's sha gate then fails closed)");
+
+    // ③ a pre-migration bare-PATH binding stays RED even when a plugin link exists (the reading must
+    //    not paper over the very defect it exists to detect).
+    const bare = mkRoot("bare", { link: true, bareEntry: true });
+    assert.equal(read(`binding_state '${bare}'`), "bare-path-name",
+      "a bare-path mcp_entry must stay bare-path-name (RED) — the plugin-link fallback must not mask it");
+  } finally {
+    rmSync(tmp, { recursive: true, force: true });
+  }
 });
