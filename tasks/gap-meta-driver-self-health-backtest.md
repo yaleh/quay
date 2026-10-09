@@ -34,22 +34,26 @@ Before proposing or building any production liveness check, this task runs a **r
 8. Reproducibility proof: re-run the script a second time (cold shell, same input) and diff its JSON output byte-for-byte against the committed artifact.
 9. **Decision gate recorded in DoD, not actioned here**: if some (N,T) in the grid achieves detection delay ≤24h AND false-alarm count ≤2 over the full history, the `.md` writeup states explicitly that a follow-up minimal production-liveness-check task is warranted. Filing that follow-up task is a separate action gated on this result — never bundled into this task or into a meta-driver.ts rewrite.
 
+**Execution note (post-run correction)**: the carrier's semantic-attempt fact was renamed mid-history (`meta-driver` 2026-09-06→09-29, `meta-review` introduced 2026-09-14, both under the same anchor `run_id`). A first draft keyed only on `meta-review` and wrongly concluded zero verified rounds ever existed. Fixed to treat both names as the same attempt timeline before trusting any result — see `docs/analysis/meta-driver-self-health-backtest.md` for the corrected numbers.
+
 ## Touches
 
-- docs/analysis/meta-driver-self-health-backtest.mjs (new)
-- docs/analysis/meta-driver-self-health-backtest.results.json (new)
-- docs/analysis/meta-driver-self-health-backtest.md (new)
+- docs/analysis/meta-driver-self-health-backtest.mjs
+- docs/analysis/meta-driver-self-health-backtest.results.json
+- docs/analysis/meta-driver-self-health-backtest.md
 - tasks/gap-meta-driver-self-health-backtest.md
 
 ## AC
 
-- [ ] `node docs/analysis/meta-driver-self-health-backtest.mjs --in .quay/meta-driver-round.jsonl --out docs/analysis/meta-driver-self-health-backtest.results.json` exits 0 and the output file is valid JSON: `node -e 'JSON.parse(require("fs").readFileSync("docs/analysis/meta-driver-self-health-backtest.results.json","utf8"))'` exits 0.
-- [ ] The results JSON's top-level summary shows the real outage is represented (not an empty/degenerate run): `node -e 'const r=JSON.parse(require("fs").readFileSync("docs/analysis/meta-driver-self-health-backtest.results.json","utf8")); process.exit((r.total_attempts>0 && r.total_failed>0) ? 0 : 1)'`.
-- [ ] All 11 declared rule parameterizations (5 count-based N values + 6 time-window T values) are present: `node -e 'const r=JSON.parse(require("fs").readFileSync("docs/analysis/meta-driver-self-health-backtest.results.json","utf8")); process.exit(r.rules.length>=11 ? 0 : 1)'`.
-- [ ] Reproducibility: a second run with the same input produces byte-identical JSON: `node docs/analysis/meta-driver-self-health-backtest.mjs --in .quay/meta-driver-round.jsonl --out /tmp/rerun-meta-sh-$$.json && diff -q docs/analysis/meta-driver-self-health-backtest.results.json /tmp/rerun-meta-sh-$$.json`.
-- [ ] `docs/analysis/meta-driver-self-health-backtest.md` states the headline rule's detection delay in prose: `grep -q "detection delay" docs/analysis/meta-driver-self-health-backtest.md`.
-- [ ] `plugin/scripts/meta-driver.ts` is untouched by this task: `git diff --name-only HEAD -- plugin/scripts/meta-driver.ts` prints nothing（人工/落地流程核验，执行者本地用 `git status --porcelain plugin/scripts/meta-driver.ts` 自核空输出）.
+- [x] `node docs/analysis/meta-driver-self-health-backtest.mjs --in .quay/meta-driver-round.jsonl --out docs/analysis/meta-driver-self-health-backtest.results.json` exits 0 and the output file is valid JSON: `node -e 'JSON.parse(require("fs").readFileSync("docs/analysis/meta-driver-self-health-backtest.results.json","utf8"))'` exits 0. **Verified**: both exit 0.
+- [x] The results JSON's top-level summary shows the real outage is represented (not an empty/degenerate run): `node -e 'const r=JSON.parse(require("fs").readFileSync("docs/analysis/meta-driver-self-health-backtest.results.json","utf8")); process.exit((r.total_attempts>0 && r.total_failed>0) ? 0 : 1)'`. **Verified**: exit 0 (total_attempts=2319, total_failed=1753).
+- [x] All 11 declared rule parameterizations (5 count-based N values + 6 time-window T values) are present: `node -e 'const r=JSON.parse(require("fs").readFileSync("docs/analysis/meta-driver-self-health-backtest.results.json","utf8")); process.exit(r.rules.length>=11 ? 0 : 1)'`. **Verified**: exit 0 (rules.length=11).
+- [x] Reproducibility: a second run with the same input produces byte-identical JSON: `node docs/analysis/meta-driver-self-health-backtest.mjs --in .quay/meta-driver-round.jsonl --out /tmp/rerun-meta-sh-$$.json && diff -q docs/analysis/meta-driver-self-health-backtest.results.json /tmp/rerun-meta-sh-$$.json`. **Verified**: diff reported no differences.
+- [x] `docs/analysis/meta-driver-self-health-backtest.md` states the headline rule's detection delay in prose: `grep -q "detection delay" docs/analysis/meta-driver-self-health-backtest.md`. **Verified**: exit 0.
+- [x] `plugin/scripts/meta-driver.ts` is untouched by this task: `git diff --name-only HEAD -- plugin/scripts/meta-driver.ts` prints nothing（人工/落地流程核验，执行者本地用 `git status --porcelain plugin/scripts/meta-driver.ts` 自核空输出）. **Verified**: empty output.
 
 ## DoD
 
 真实落地 = 上述三个产物文件随本任务提交进 develop，且 `results.json` 的数字是对 `.quay/meta-driver-round.jsonl`（gitignored，不随 commit 搬运）真实历史的直接读数，不是 fixture/构造样本——落地后审阅者在生产机上现场用 `grep` 核对 `outage_start_ts`/`last_verified_ts` 能在该文件里定位到对应行。本任务**不**决定是否上线生产 liveness check；那是一个独立、仅在本任务 DoD 第 9 步条件成立时才触发的后续任务，不在本任务范围内，也不得合并进本任务或任何 meta-driver.ts 重写。
+
+**结果（已核验）**：N=3（计数式）与 T=30m（窗口式）两条规则在全 53k 轮生产历史上**零假警报**，检测延迟均 <1 小时（对比真实未检测长达 27 天）。已越过决策门阈值（≤24h 且 ≤2 次假警报），数值级差距很大。**结论：建议立一个独立的最小生产 liveness check 后续任务**——严格不与本任务或任何 meta-driver.ts 重写合并。
