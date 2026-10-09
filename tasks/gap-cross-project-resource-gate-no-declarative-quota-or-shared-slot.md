@@ -2,7 +2,7 @@
 id: gap-cross-project-resource-gate-no-declarative-quota-or-shared-slot
 title: resource-gate.sh 只是宿主级只读建议门，不是跨项目准入——suiteLockBase 锚在各自
   .git，没有共享槛/声明式配额，两个项目的重活可能同时通过 GO 并同时起跑
-status: ready
+status: done
 labels:
   - gap
 parent: null

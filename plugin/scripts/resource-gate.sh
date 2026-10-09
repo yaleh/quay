@@ -9,6 +9,28 @@
 # structural signals — `/proc/pressure/cpu`, `free -m` available, node pids via cmdline —
 # prints numbers AND verdicts, and exits 0=GO / non-0=WAIT.
 #
+# ── SCOPE — a SOFT, per-invocation host read; NOT a cross-project reservation ────────────────────────
+# (gap-cross-project-resource-gate-no-declarative-quota-or-shared-slot; DIR-132 2026-10-09)
+# WHAT IT IS: a ONE-SHOT, READ-ONLY snapshot of host-level signals (PSI / loadavg / mem). It exits
+# immediately and HOLDS NOTHING. Two callers in two different repos can each invoke it in the same
+# instant, each read "host idle ⇒ GO", and each launch a heavy op (a full suite) — the check covers
+# only the instant before the start line, not the "the other side is about to start too" window.
+# WHAT IT IS NOT: a cross-repo mutex / shared slot / declarative quota. There is NO cross-repository
+# shared lock today — the suite single-flight slots (`suite-lock-slots.ts` `suiteLockBase()`) resolve
+# to EACH repo's OWN `git-common-dir → <root>/.git`, so this repo's "at most S suites at once"
+# (concurrentSuiteSlots) does NOT extend to "this repo + project B at most S". The gate's guarantee
+# is therefore SOFT (weak coordination on shared host metrics), never a hard mutual-exclusion
+# guarantee — do not read its GO as "I have reserved a slot".
+# MEASURED BASELINE (2026-10-09, this repo + an empty third-party root): two `--for full-suite
+# --json` calls launched back-to-back from the two roots BOTH returned GO (exit 0) — no mutual
+# exclusion observed, because none exists. A cross-process file lock (e.g. a fixed
+# `~/.quay-global/resource-gate.lock`, held ONLY over "check + reserve", NOT over the whole run —
+# else it degenerates into a new global single-flight lock that serializes both projects' heavy ops)
+# was DESIGNED and DEFERRED by DIR-132 pending real incidence data (CLAUDE.md hard rule 12: no
+# invented mechanism without a measured occurrence rate). That lock is the mechanism to build IF a
+# real two-project simultaneous-GO collision is ever observed; until then this stays an OBSERVATION
+# ITEM, recorded in the gap task above — ⛔ not implemented here.
+#
 # Why PSI stays the PRIMARY signal (AC2): `/proc/pressure/cpu` `some avg10` measures "the fraction
 # of time some task was stalled waiting for CPU" directly — the structural CPU-contention quantity.
 # But PSI ALONE missed the load-flake driver (gap-resource-gate-psi-does-not-capture-load-flake-driver):
@@ -129,7 +151,11 @@ while [ $# -gt 0 ]; do
       ;;
     --main-repo-priority) PRIORITY=1; shift ;;
     -h|--help)
-      sed -n '2,14p' "$0" | sed 's/^# \{0,1\}//'
+      # same canonical help as the $1 branch above (tool_help prints the header block; the old fixed
+      # `sed -n '2,14p'` range truncated the header once the SCOPE block was added above it). Kept on
+      # ONE line: this file is under the zero-slack sh-census ratchet (sh-census-check.ts), so the
+      # diff must be line-neutral in code lines.
+      _gap_help_lib="$(dirname "${BASH_SOURCE[0]}")/gate-script-lib.sh"; { [ -f "$_gap_help_lib" ] && . "$_gap_help_lib" && tool_help "$0"; } || echo "用法: bash $(basename "$0") [参数…]"
       exit 0
       ;;
     *)
