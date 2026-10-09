@@ -2,7 +2,7 @@
 id: gap-meta-driver-offline-replay-corpus-goal030-033
 title: "meta-driver offline replay corpus v1: 4 historical GOAL-030..033
   decision-replay cases + harness + integrity tests"
-status: ready
+status: done
 labels:
   - gap
 parent: null
