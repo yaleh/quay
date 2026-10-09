@@ -1,7 +1,7 @@
 ---
 id: gap-goal033-selfhost-and-archguard-evidence
 title: GOAL-033 ②：ArchGuard before/after（cli 离开 package SCC 6→5）+ 负对照 + CLI 语义现场重算
-status: todo
+status: ready
 labels:
   - gap
 parent: null
