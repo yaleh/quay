@@ -2845,12 +2845,28 @@ export function aggregateSemanticFallback(root: string): SemanticFallbackReport 
  *  三态可区分（硬规则 3b）：
  *    - `suiteSignaturesRecorded=true`  ∧ 数组（可能是 `[]`）⇒ 读了、这是当时的签名全集
  *    - `suiteSignaturesRecorded=false` ∧ `null` ⇒ 这条记录**没留下**证据（旧记录无该字段 / 写入时日志读不出）
- *    - 两者对复发判定同义（不贡献证据），但记录面可区分「查过没有」与「没查成」。 */
+ *    - 两者对复发判定同义（不贡献证据），但记录面可区分「查过没有」与「没查成」。
+ *
+ *  `suiteFailingFiles` / `suiteFailingFilesRecorded` 是同款的【文件级】证据面（gap-stop-terminal-reason-
+ *  hardcodes-attributed-none-to-a-file）：取 fan-in 在写记录那一刻落下的 `mechanical_fan_in.failedTestFiles`
+ *  （`evaluated===true` 的 `files`）。签名取不到时（整文件死掉的红——日志里没有 `AssertionError` 行）
+ *  复发判定回退到【失败文件】为身份，消费这里；⛔ 同样不事后读日志。 */
+export interface SuiteRedAttempt {
+  taskId: string;
+  ts: string;
+  suiteLog: string | null;
+  suiteSignatures: string[] | null;
+  suiteSignaturesRecorded: boolean;
+  /** 该轮记录的失败测试文件；`null` = 没留下文件清单（旧记录 / 未评估）。 */
+  suiteFailingFiles: string[] | null;
+  suiteFailingFilesRecorded: boolean;
+}
+
 export function suiteRedAttemptsInWindow(
   root: string,
   windowMs: number,
   nowMs: number = Date.now(),
-): Array<{ taskId: string; ts: string; suiteLog: string | null; suiteSignatures: string[] | null; suiteSignaturesRecorded: boolean }> {
+): SuiteRedAttempt[] {
   let text: string;
   try {
     text = fs.readFileSync(path.join(root, WORKER_OUTCOME_REL), "utf8");
@@ -2858,7 +2874,7 @@ export function suiteRedAttemptsInWindow(
     return [];
   }
   const floor = nowMs - windowMs;
-  const out: Array<{ taskId: string; ts: string; suiteLog: string | null; suiteSignatures: string[] | null; suiteSignaturesRecorded: boolean }> = [];
+  const out: SuiteRedAttempt[] = [];
   for (const line of text.split("\n")) {
     const trimmed = line.trim();
     if (!trimmed) continue;
@@ -2883,7 +2899,25 @@ export function suiteRedAttemptsInWindow(
     const suiteSignatures = Array.isArray(rawSigs)
       ? rawSigs.filter((s): s is string => typeof s === "string")
       : null;
-    out.push({ taskId: rec.task, ts: rec.ts, suiteLog, suiteSignatures, suiteSignaturesRecorded: Array.isArray(rawSigs) });
+    // 文件级证据面：只有 `failedTestFiles.evaluated === true` 的 `files` 才贡献证据（`evaluated:false`
+    // 是「读了但没有」——它不贡献复发证据，且与「没留下清单」在【记录面】同义，故都不进 `suiteFailingFiles`）。
+    const rawFtf = (mfi as { failedTestFiles?: unknown }).failedTestFiles;
+    const ftf = (rawFtf && typeof rawFtf === "object")
+      ? (rawFtf as { evaluated?: unknown; files?: unknown })
+      : undefined;
+    const rawFiles = ftf && ftf.evaluated === true ? ftf.files : undefined;
+    const suiteFailingFiles = Array.isArray(rawFiles)
+      ? rawFiles.filter((f): f is string => typeof f === "string" && f !== "")
+      : null;
+    out.push({
+      taskId: rec.task,
+      ts: rec.ts,
+      suiteLog,
+      suiteSignatures,
+      suiteSignaturesRecorded: Array.isArray(rawSigs),
+      suiteFailingFiles,
+      suiteFailingFilesRecorded: Array.isArray(rawFiles),
+    });
   }
   return out;
 }
@@ -2925,6 +2959,49 @@ function recurringSignatureTasks(
   const tasks = new Set<string>();
   for (const sig of signatures) {
     const set = sigTasks.get(sig);
+    if (set) for (const t of set) tasks.add(t);
+  }
+  return { tasks: [...tasks], otherAttempts, evaluated };
+}
+
+/** 文件级复发：窗口内被【其它】不同任务点名为失败文件的同一文件（签名取不到时的回退身份）。
+ *
+ *  WHY 需要这条回退（gap-stop-terminal-reason-hardcodes-attributed-none-to-a-file）：整文件死掉的红
+ *  （spawn 失败 / ENOENT / OOM / 超时）日志里没有 `AssertionError` 行 ⇒ 断言签名恒取不到 ⇒ 签名复发闸
+ *  对这类红**永远查不到证据**（实测：这类红两轮即 stop-terminal，判词还把「读到了文件」写成
+ *  `attributed none to a file`）。但「同一份文件跨不同任务复发」本身就是外来 flake 的粗一级证据，且已在
+ *  耐久载体里（`mechanical_fan_in.failedTestFiles`）——`aggregateRerunFlakes()` 早已在算它，只是它的
+ *  自身注释写明「只读观测面，不参与任何控制流」。这里把它接进判定。
+ *
+ *  与 `recurringSignatureTasks` 同款：⛔ 不读任何日志（只消费记录内留存的文件清单）；计数随结果一并
+ *  返回，供判词如实报出**证据基础**（「查过、确实没复发」与「窗口里根本没有可比的记录」不得同形）。 */
+function recurringFailingFileTasks(
+  root: string,
+  files: string[],
+  currentTaskId: string,
+  windowMs: number,
+  nowMs: number,
+): { tasks: string[]; otherAttempts: number; evaluated: number } {
+  const wanted = new Set(files.map((f) => normalizeRel(String(f))));
+  const fileTasks = new Map<string, Set<string>>();
+  let otherAttempts = 0;
+  let evaluated = 0;
+  for (const a of suiteRedAttemptsInWindow(root, windowMs, nowMs)) {
+    if (a.taskId === currentTaskId) continue;
+    otherAttempts += 1;
+    // 没留下文件清单的记录（旧记录 / 未评估）**不贡献证据**——⛔ 不回头读它的日志补齐。
+    if (!a.suiteFailingFilesRecorded || a.suiteFailingFiles === null) continue;
+    evaluated += 1;
+    for (const f of a.suiteFailingFiles) {
+      const rel = normalizeRel(String(f));
+      if (!wanted.has(rel)) continue;
+      if (!fileTasks.has(rel)) fileTasks.set(rel, new Set());
+      fileTasks.get(rel)!.add(a.taskId);
+    }
+  }
+  const tasks = new Set<string>();
+  for (const f of wanted) {
+    const set = fileTasks.get(f);
     if (set) for (const t of set) tasks.add(t);
   }
   return { tasks: [...tasks], otherAttempts, evaluated };
@@ -3101,10 +3178,12 @@ export function judgeRetryExemption(
     };
   }
   const signatures = assertionSignaturesFromSuiteLog(logText);
-  if (signatures.length === 0) {
-    return { verdict: "insufficient-data-fallback", reason: "no assertion signature extracted from the suite log", failingTestFiles, signatures: [], recurredTasks: [], ...parseNote };
-  }
   // ① 失败测试文件与任务 Touches/diff 交集——任一命中 ⇒ 任务自身缺陷，照常计数（AC2 防滥用负控制）。
+  // ⛔ 相关性闸排在【签名闸之前】（gap-stop-terminal-reason-hardcodes-attributed-none-to-a-file 的「顺序」
+  // 半边）：整文件死掉的红（spawn 失败 / ENOENT / OOM / 超时）日志里没有 `AssertionError` 行 ⇒ 签名恒为空；
+  // 旧实现在 `signatures.length === 0` 处【提前返回】⇒ 这类红的相关性从不被计算，恒落
+  // insufficient-data-fallback（两轮即 stop-terminal），哪怕该文件明显不在本任务 delta 内。
+  // 能算的先算：delta 读得出就读得出，⛔ 不因「取不到签名」而跳过它。
   const delta = computeDeltaPaths(root, taskId);
   if (delta === null) {
     return { verdict: "insufficient-data-fallback", reason: "unable to read this task's Touches/diff (delta unreadable)", failingTestFiles, signatures, recurredTasks: [], ...parseNote };
@@ -3118,19 +3197,54 @@ export function judgeRetryExemption(
       return { verdict: "insufficient-data-fallback", reason: `unable to determine relatedness of failing test ${rel}`, failingTestFiles, signatures, recurredTasks: [], ...parseNote };
     }
   }
-  // ② 全部失败测试文件与本任务无关 ⇒ 查签名跨任务复发（证据 = 记录内留存签名，⛔ 不事后读日志）。
-  const recurrence = recurringSignatureTasks(root, signatures, taskId, windowMs, nowMs);
-  if (recurrence.tasks.length >= 1) {
-    return { verdict: "unrelated-flaky-exempt", reason: `signature(s) ${signatures.join("; ")} recurred across ≥2 distinct tasks in window (other: ${recurrence.tasks.join(", ")})`, failingTestFiles, signatures, recurredTasks: recurrence.tasks };
+  // ② 全部失败测试文件与本任务无关 ⇒ 查复发豁免。身份优先取断言签名（精确到缺陷）；签名取不到（整文件
+  //    死掉的红）⇒ 回退到【失败文件】为复发身份（粗一级，但同一份耐久载体里已有，见 recurringFailingFileTasks）。
+  if (signatures.length > 0) {
+    const recurrence = recurringSignatureTasks(root, signatures, taskId, windowMs, nowMs);
+    if (recurrence.tasks.length >= 1) {
+      return { verdict: "unrelated-flaky-exempt", reason: `signature(s) ${signatures.join("; ")} recurred across ≥2 distinct tasks in window (other: ${recurrence.tasks.join(", ")})`, failingTestFiles, signatures, recurredTasks: recurrence.tasks };
+    }
+    // 判词的证据基础必须可区分两种成因（硬规则 3b）：①查过 N 条带签名的记录、确实没复发；②窗口里
+    // 压根没有带签名的记录可查（旧记录 / 写入时读不出）。两者动作同义（照常计数），但读数不得同形。
+    const evidence = recurrence.otherAttempts === 0
+      ? "no other suite-red attempt in window to compare against"
+      : recurrence.evaluated === 0
+        ? `${recurrence.otherAttempts} other suite-red attempt(s) in window, none carried a recorded signature (legacy/pre-recording) — recurrence unevaluable, not evaluated-and-negative`
+        : `${recurrence.otherAttempts} other suite-red attempt(s) in window, ${recurrence.evaluated} carried recorded signatures and none matched`;
+    return { verdict: "own-defect-counted", reason: `failing tests unrelated to this task's delta, but the assertion signature did not recur across ≥2 distinct tasks in the window (fail-closed count; ${evidence})`, failingTestFiles, signatures, recurredTasks: [] };
   }
-  // 判词的证据基础必须可区分两种成因（硬规则 3b）：①查过 N 条带签名的记录、确实没复发；②窗口里
-  // 压根没有带签名的记录可查（旧记录 / 写入时读不出）。两者动作同义（照常计数），但读数不得同形。
-  const evidence = recurrence.otherAttempts === 0
+  const fileRecurrence = recurringFailingFileTasks(root, failingTestFiles, taskId, windowMs, nowMs);
+  if (fileRecurrence.tasks.length >= 1) {
+    return {
+      verdict: "unrelated-flaky-exempt",
+      reason:
+        `this round's suite log carried no assertion signature, so recurrence used the failing-file identity: ` +
+        `file(s) ${failingTestFiles.join(", ")} were attributed to this round but are outside this task's ` +
+        `Touches/diff, and recurred across ≥2 distinct tasks in window (other: ${fileRecurrence.tasks.join(", ")})`,
+      failingTestFiles,
+      signatures,
+      recurredTasks: fileRecurrence.tasks,
+    };
+  }
+  const fileEvidence = fileRecurrence.otherAttempts === 0
     ? "no other suite-red attempt in window to compare against"
-    : recurrence.evaluated === 0
-      ? `${recurrence.otherAttempts} other suite-red attempt(s) in window, none carried a recorded signature (legacy/pre-recording) — recurrence unevaluable, not evaluated-and-negative`
-      : `${recurrence.otherAttempts} other suite-red attempt(s) in window, ${recurrence.evaluated} carried recorded signatures and none matched`;
-  return { verdict: "own-defect-counted", reason: `failing tests unrelated to this task's delta, but the assertion signature did not recur across ≥2 distinct tasks in the window (fail-closed count; ${evidence})`, failingTestFiles, signatures, recurredTasks: [] };
+    : fileRecurrence.evaluated === 0
+      ? `${fileRecurrence.otherAttempts} other suite-red attempt(s) in window, none carried a recorded failing-file list (legacy/pre-recording) — recurrence unevaluable, not evaluated-and-negative`
+      : `${fileRecurrence.otherAttempts} other suite-red attempt(s) in window, ${fileRecurrence.evaluated} carried recorded failing-file lists and none named a file this round attributed`;
+  // 文件级复发也查不到证据 ⇒ 仍 fail-closed 回 insufficient-data-fallback（动作语义逐字不变：照常计数 +
+  // 有界重试 + 停派）。⛔ 但判词不得沿用旧措辞「no assertion signature extracted from the suite log」——
+  // 那句话把本情形说成「连失败文件都没读到」，与 `failingTestFiles` 非空直接矛盾（正是本任务的缺陷：
+  // 读到了却写成没读到）。判词必须同时报出【已算出的相关性】（文件不在本任务 delta 内）与【哪一步查不到】。
+  return {
+    verdict: "insufficient-data-fallback",
+    reason:
+      `failing file(s) ${failingTestFiles.join(", ")} are outside this task's Touches/diff, but no assertion ` +
+      `signature was extracted from the suite log and the failing-file-identity recurrence fallback found no ` +
+      `cross-task evidence (cannot attribute; fail-closed count; ${fileEvidence})`,
+    failingTestFiles,
+    signatures,
+    recurredTasks: [],
+  };
 }
 
 // ── gap-fan-in-suite-red-with-no-attributable-test-still-redispatches-worker ─────────────────────────
@@ -3238,14 +3352,25 @@ function unattributablePriorAttempts(
   return out;
 }
 
-/** stop-terminal 判词的归因依据。⛔ 只说【解析器读到了什么】，不做「日志里没有 worker 能修的东西」这类
+/** stop-terminal 判词的归因依据。⛔ 只说【判定器读到了什么】，不做「日志里没有 worker 能修的东西」这类
  *  肯定断言——那句话的依据只是「解析器没读懂」（硬规则 3b：读不懂 ⇒ 伪装成判定）。N 是解析器读到的失败
- *  行数：`0 of N`（N>0）说明日志里有失败行却一行也没归因出；`0 of 0` 说明连失败行形态都没有。 */
-function suiteAttributionEvidence(exemption: RetryExemptionJudgment): string {
+ *  行数：`0 of N`（N>0）说明日志里有失败行却一行也没归因出；`0 of 0` 说明连失败行形态都没有。
+ *
+ *  ⛔ 硬编码是 gap-stop-terminal-reason-hardcodes-attributed-none-to-a-file 的缺陷本体：旧实现把
+ *  `attributed none to a file` 写死，从不读 `exemption.failingTestFiles` ⇒ 「判定器【读到了】失败文件」
+ *  与「真的一行也没归因出」共用同一句、方向相反（实测 3 例：判词说「一个也没归因出来」，而同一轮
+ *  `failingTestFiles` 非空）。本函数的输出必须由 `RetryExemptionJudgment` 的字段复算：读到文件 ⇒ 点名
+ *  它们；确实没归因出 ⇒ 才允许说 `attributed none to a file`。 */
+export function suiteAttributionEvidence(exemption: RetryExemptionJudgment): string {
   const n = exemption.suiteFailingLines;
-  const base = typeof n === "number"
-    ? `parser extracted 0 of ${n} failing lines and attributed none to a file`
-    : "parser attributed no failing file (failure-line count unavailable on this judgment)";
+  const files = exemption.failingTestFiles ?? [];
+  const base = files.length > 0
+    ? `parser attributed ${files.length} failing file(s) in this round: ${files.slice(0, 5).join(", ")}` +
+      `${files.length > 5 ? ` (+${files.length - 5} more)` : ""}` +
+      `${typeof n === "number" ? ` (of ${n} failing line(s) parsed)` : ""}`
+    : typeof n === "number"
+      ? `parser extracted 0 of ${n} failing lines and attributed none to a file`
+      : "parser attributed no failing file (failure-line count unavailable on this judgment)";
   return `${base}${suiteTokenDetail(exemption.suitePseudoStages ?? [], exemption.suiteUnclassified ?? [])}`;
 }
 
