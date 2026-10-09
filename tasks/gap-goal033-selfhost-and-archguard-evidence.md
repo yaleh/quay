@@ -38,9 +38,9 @@ GOAL-033 的第二块（分支自举 + ArchGuard before/after）：在实现已�
 
 - [x] `.quay/goal-033-evidence/archguard-before-after.json` 已提交到本任务分支，且 before / after / negativeControl 三段都由同一 `archguardVersion` 取得、每段带显式 `scopeKey`
 - [x] before 段复现调查读数：SCC 成员 6 个含 `cli`、`cliPackageFanIn = 2`
-- [ ] after 段：`cliPackageFanIn = 0`，SCC 成员恰为 `["", "gate", "gate/config", "gate/factories"]`（6→4：cli 与仅经 cli 入环的 fan-in 一同离开）
+- [x] after 段：`cliPackageFanIn = 0`，SCC 成员恰为 `["", "gate", "gate/config", "gate/factories"]`（6→4：cli 与仅经 cli 入环的 fan-in 一同离开）
 - [x] negativeControl 段：注入一条 core→cli 边后 `cliPackageFanIn ≥ 1` 且 SCC 重新包含 `cli`
-- [ ] AC-351 判据在本任务 worktree 内 exit 0，输出原文进 `## Evidence`
+- [x] AC-351 判据在本任务 worktree 内 exit 0，输出原文进 `## Evidence`
 - [x] Evidence 里 facts / declared rules / judgment 三段分开记录
 - [x] 临时 worktree `goal033-fork` 与 scratch 目录 `goal033-negctl` 已清理（`git worktree list` 读数进 Evidence）
 
@@ -108,7 +108,7 @@ AC-351 的证据文件在分支上可读，三段读数出自同一 ArchGuard �
 也是「拆掉 root⇄cli 不会换来 root⇄fan-in」的依据。**未跑**可选的 `archguard:arch-layer-review` skill
 （Plan 第 6 步标记为不作硬性要求），故此处无四态结论可记。
 
-### AC-351 判据原文（本任务 worktree 内跑）——exit 1
+### AC-351 旧判据原文（更正前——after 期望 6→5；本任务 worktree 内跑）——exit 1
 
     $ bash <AC-351 criterion>
     CAUSE=scc-not-exactly-minus-cli — after members=["","gate","gate/config","gate/factories"] expected ["","fan-in","gate","gate/config","gate/factories"] (cli removed, nothing else changed)
@@ -119,6 +119,16 @@ CLI 语义现场重算那一半（判据在证据检查之后才跑到，故此�
 
     worker:    with      （`quay driver status --kind worker --json` 含 `instruments` 键）
     promotion: without   （`quay driver status --kind promotion --json` 不含）
+
+### AC-351 更正后判据原文（goal 作者已把 after 期望改为 6→4；本任务 worktree 内跑）——exit 0
+
+    $ bash <AC-351 criterion（rest 去掉 fan-in；expect 6→4）>
+    PASS: ArchGuard before/after shows cli leaving the package SCC (6 -> 4: cli plus fan-in, the other four unchanged) with a falsifying negative control, and the CLI status surface keeps its exact instrument semantics on this tree
+    EXIT=0
+
+判据两半都实跑到：证据检查段（before/after/negativeControl/archguardVersion）之后，现场重算的 CLI 语义探针
+同段执行并给出 `worker=with` / `promotion=without`。跑判据时的被求值树 = 本 worktree tip `925f9e1b6`
+（当时已并入 develop `0bf53745b`）。上方旧判据 exit 1 的读数保留更正前的历史记录；更正依据见 `## Resolved` 段。
 
 ### 清理读数
 
