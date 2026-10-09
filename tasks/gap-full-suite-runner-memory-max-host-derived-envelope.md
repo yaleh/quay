@@ -2,7 +2,7 @@
 id: gap-full-suite-runner-memory-max-host-derived-envelope
 title: full-suite-runner.ts 的 systemd-run MemoryMax 仍是写死 "16G"（128核大宿主上调的）——套用
   driver-anchor 已验证的宿主推导包络,不改变大宿主现有行为
-status: ready
+status: done
 labels:
   - gap
 parent: null
