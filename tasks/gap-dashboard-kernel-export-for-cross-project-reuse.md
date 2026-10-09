@@ -2,7 +2,7 @@
 id: gap-dashboard-kernel-export-for-cross-project-reuse
 title: 发布 Loop-pulse 甘特图内核（packLanes/区间合并/5 车道语义）为外部项目可复用的 dashboard-kernel
   子路径——claudecodeui 是首个待接入方
-status: ready
+status: todo
 labels:
   - gap
   - design
@@ -83,3 +83,14 @@ extra: {}
 ## Notes（给评审/promote 该任务到 ready 的人）
 
 这是 quay 第一次要对外发布一个"稳定 API"承诺，不是常规内部重构——建议在 promote 到 ready 之前由人工/高优先级会话过一遍"是否真的要在此刻承诺这个发布面、子路径命名是否符合包现有发布惯例"，而不是直接丢给机械 worker 循环自动摘取。消费方（claudecodeui）那边已经把需求和语义讲得很完整（见上文引用的两份设计记录），本任务卡住的只是"quay 这边要不要/怎么发布"这个产品判断。
+
+
+## Update（status 被机械流程拽回 ready，已核实并退回 todo）
+
+本任务创建后约 21 秒（`updatedAt` 从创建时的 2026-10-09T05:46:56 变为 05:47:17），status 被从 `todo` 改成了 `ready`——`gate-log` 对本任务为空数组，即这次变更**没有**经过正常的 `lifecycle_promote` 判据流程，像是某个机械的 pool/ready 质量巡检（例如按结构完整性自动判定 ready 的那一类）直接写的状态，而不是任何人/会话对"quay 现在要不要承诺这个外部发布面"做过实质评审。
+
+与此同时，quay 工作区里一个以架构审查为职责的常驻会话（`Quay 架构审查与 ArchGuard 能力评估`）收到本任务的协调消息后回复：明确表示不会在它的会话里做这个 `exports`/API 决定——它的人类把它限定在 GOAL-033（core-root⇄cli）这一个重构切片，"不碰无关的 todo" 是其人类的明确指示，且认为首次公开 `exports` 子路径承诺本就该是人类的产品判断，会把本任务汇报给其人类。
+
+两边（我方 + 该架构审查会话）独立得出同一个结论：本任务需要人工评审才能进入可执行状态。机械流程把它拽成 `ready` 并不代表这次评审已经发生——`ready` 在 quay 的机械 worker 循环里意味着"随时可能被派发实现"，这正是我们都想避免的（一个没人真正拍板过的公开 API 面被自动摘取实现）。因此把 status 退回 `todo`，并把这个退回理由和下面的架构笔记一起写进任务体，供真正评审时参考；不删除、不改写上面已有的设计内容。
+
+**架构笔记（来自该架构审查会话，非绑定，供最终实现者参考）**：`packages/quay/src/serve-dashboard.ts` 目前是正在被该会话收缩的同一个包级 SCC（强连通分量）里的根级文件；如果真的要抽出纯函数那一半（`packLanes`/`mergeLiveAndHistoryIntervals`），应该把它做成一个**零 import 的叶子模块**（不 import `serve-render`/`serve-i18n` 等渲染/文案层），参照本仓库已有的 `packages/quay/src/kernel/*.ts` 与 `driver-vocab.ts` 的写法——这样发布出去的面才不会把 web 层的传递依赖图拖进消费方（claudecodeui 不需要也不应该因为引入这个 kernel 子路径就连带拉进 quay dashboard 的渲染/i18n 依赖）。
