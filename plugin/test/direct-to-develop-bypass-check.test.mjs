@@ -88,6 +88,13 @@ import {
   RELEASE_BUMP_SUBJECT_RE,
   extractCutParents,
   classifyReleaseBumpCommit,
+  gitCommitFiles,
+  gitCommitEpoch,
+  gitCommitParent,
+  gitCommitSubject,
+  gitCommitMessage,
+  gitCommitFilesBatch,
+  gitCommitMetaBatch,
 } from "../scripts/direct-to-develop-bypass-check.ts";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -2084,6 +2091,144 @@ test("AC5 CLI — 词表外 fetch 后缀（`pruned`）落在**真实 reflog 行*
     assert.equal(out.classification.ratio, 1);
     assert.equal(out.denominator.totalDirectCommits, 0);
   } finally {
+    cleanup(dir);
+  }
+});
+
+// ── 批量取数（gap-direct-to-develop-bypass-check-per-commit-git-subprocess-cost）──────────────────
+// 逐 commit 的 5 个 git 读取面（:813/:823/:833/:854/:863 = gitCommitFiles/Epoch/Parent/Subject/Message）
+// 在一次 `--baseline b11ce720` 扫描里被调用 6913 + 288 次（实测计数），是墙钟 sys≫user 的驱动。改为
+// gitCommitFilesBatch/gitCommitMetaBatch 各一次取数后，输出必须【逐字节不变】——下面三条差分测试钉住它，
+// 第四条（GIT_TRACE）钉住「批量已接线」：回退到逐 commit ⇒ 变红。
+
+/** 含 root commit + 普通提交 + merge commit 的最小 repo。
+ *  merge 是钉子：裸 `git log --name-only` 对 merge 默认不输出改动（diff-merges=off）⇒ 必须
+ *  `-m --first-parent` 才与逐条 `git diff <sha>^ <sha>` 一致。root commit 是另一钉子：无父 ⇒ 逐条/批量都 null。 */
+function makeMergeRepo(prefix) {
+  const dir = makeTmp(prefix);
+  gitCmd(dir, "init", "-q", "-b", "develop");
+  gitCmd(dir, "config", "user.name", "d2d-test");
+  gitCmd(dir, "config", "user.email", "d2d@example.com");
+  fs.mkdirSync(path.join(dir, "tasks"), { recursive: true });
+  fs.writeFileSync(path.join(dir, "tasks", "root.md"), "root\n", "utf8");
+  gitCmd(dir, "add", "-A");
+  gitCommitFixed(dir, FIXED_PAST, "tasks: root"); // root commit（无父）
+  fs.writeFileSync(path.join(dir, "a.txt"), "a\n", "utf8");
+  gitCmd(dir, "add", "-A");
+  gitCommitFixed(dir, FIXED_PAST, "feat: a"); // 普通提交
+  gitCmd(dir, "checkout", "-q", "-b", "side");
+  fs.writeFileSync(path.join(dir, "side.txt"), "side\n", "utf8");
+  gitCmd(dir, "add", "-A");
+  gitCommitFixed(dir, FIXED_PAST, "feat: side");
+  gitCmd(dir, "checkout", "-q", "develop");
+  fs.writeFileSync(path.join(dir, "b.txt"), "b\n", "utf8");
+  gitCmd(dir, "add", "-A");
+  gitCommitFixed(dir, FIXED_PAST, "feat: b");
+  const merge = gitCmd(dir, "merge", "-q", "--no-ff", "-m", "merge side", "side");
+  if (merge.status !== 0) throw new Error(`fixture merge failed: ${merge.stderr}`);
+  const shas = gitCmd(dir, "rev-list", "HEAD").stdout.split("\n").filter(Boolean);
+  return { dir, shas };
+}
+
+test("批量取数 — gitCommitFilesBatch 在 root/普通/merge 三形态上与逐条 gitCommitFiles 逐字节一致", () => {
+  const { dir, shas } = makeMergeRepo("batch-files");
+  try {
+    assert.ok(shas.length >= 4, "夹具至少有 root + a + b + merge");
+    const batch = gitCommitFilesBatch(dir, shas);
+    for (const sha of shas) {
+      const per = gitCommitFiles(dir, sha);
+      const got = batch.has(sha) ? batch.get(sha) : null;
+      assert.deepEqual(got, per, `${sha.slice(0, 8)} 批量 files 必须与逐条一致`);
+    }
+    const rootSha = shas[shas.length - 1];
+    assert.equal(gitCommitFiles(dir, rootSha), null, "root commit 逐条 ⇒ null（无父可 diff）");
+    assert.equal(batch.get(rootSha), null, "root commit 批量 ⇒ null");
+    const mergeSha = shas.find(
+      (s) => gitCmd(dir, "log", "-1", "--format=%P", s).stdout.trim().split(" ").filter(Boolean).length >= 2,
+    );
+    assert.ok(mergeSha, "夹具必须含一个 merge commit");
+    assert.deepEqual(batch.get(mergeSha), gitCommitFiles(dir, mergeSha), "merge 批量必须与逐条一致");
+    assert.ok(
+      (batch.get(mergeSha) ?? []).length > 0,
+      "merge commit 文件集非空——钉住 `-m --first-parent`（去掉它 merge 退化成空集 ⇒ 本断言变红）",
+    );
+  } finally {
+    cleanup(dir);
+  }
+});
+
+test("批量取数 — gitCommitMetaBatch 的 epoch/parent/subject/message 与逐条读取面逐字段一致", () => {
+  const { dir, shas } = makeMergeRepo("batch-meta");
+  try {
+    const batch = gitCommitMetaBatch(dir, shas);
+    for (const sha of shas) {
+      const m = batch.get(sha);
+      assert.ok(m, `${sha.slice(0, 8)} 必须在批量结果里`);
+      assert.equal(m.epoch, gitCommitEpoch(dir, sha), "epoch");
+      assert.equal(m.parent, gitCommitParent(dir, sha), "parent（第一父）");
+      assert.equal(m.subject, gitCommitSubject(dir, sha), "subject");
+      assert.equal(m.message, gitCommitMessage(dir, sha), "message（%B）");
+    }
+  } finally {
+    cleanup(dir);
+  }
+});
+
+test("批量取数 — 边界：空输入 ⇒ 空 Map；非法 sha ⇒ null（fail-closed，⛔ 不伪装成空文件集）；不连坐同块", () => {
+  const { dir, shas } = makeMergeRepo("batch-edge");
+  try {
+    assert.equal(gitCommitFilesBatch(dir, []).size, 0, "空输入 ⇒ 空 Map");
+    assert.equal(gitCommitMetaBatch(dir, []).size, 0, "空输入 ⇒ 空 Map");
+    const bogus = "0".repeat(40);
+    assert.equal(gitCommitFilesBatch(dir, [bogus]).get(bogus) ?? null, null, "非法 sha ⇒ null（⛔ 不是空文件集 []）");
+    assert.equal(
+      (gitCommitMetaBatch(dir, [bogus]).get(bogus) ?? { epoch: null }).epoch,
+      null,
+      "非法 sha ⇒ epoch null（调用方据此跳过）",
+    );
+    // 逐条回退：同块含一条非法 sha，不得连坐丢掉合法 sha（旧逐条读面对合法 sha 仍读得出）。
+    const mixed = gitCommitFilesBatch(dir, [shas[0], bogus]);
+    assert.deepEqual(mixed.get(shas[0]), gitCommitFiles(dir, shas[0]), "同块非法 sha 不得连坐合法 sha");
+  } finally {
+    cleanup(dir);
+  }
+});
+
+test("批量取数接线（mutation nail）— checker 子进程不再逐 commit 起 git：GIT_TRACE 计数钉住回退", () => {
+  const dir = makeTmp("batch-wiring");
+  const savedTrace = process.env.GIT_TRACE;
+  const traceFile = path.join(os.tmpdir(), `d2d-trace-${process.pid}-${Date.now()}.log`);
+  try {
+    initRepo(dir);
+    fs.mkdirSync(path.join(dir, "plugin", "test"), { recursive: true });
+    fs.writeFileSync(path.join(dir, "plugin", "test", "x.test.mjs"), "export const x = 1;\n", "utf8");
+    gitCmd(dir, "add", "-A");
+    gitCmd(dir, "commit", "-q", "-m", "test: direct code commit");
+    // GIT_TRACE 指向**文件**（不是 "1"）：checker 的 git() 用 stdio stderr="ignore" ⇒ 写 stderr 会被那层
+    // 重定向吞掉，只有文件形态能穿过它被本测试读到。
+    process.env.GIT_TRACE = traceFile;
+    const r = runChecker(["--root", dir]);
+    const raw = fs.existsSync(traceFile) ? fs.readFileSync(traceFile, "utf8") : "";
+    const trace = raw.split("\n").filter((l) => l.includes("trace: built-in: git"));
+    assert.ok(trace.length > 0, `GIT_TRACE 必须产出子进程轨迹（否则本测试无法判定）: ${r.stderr}`);
+    assert.equal(
+      trace.filter((l) => l.includes("diff --name-only")).length,
+      0,
+      "逐 commit `git diff --name-only <sha>^ <sha>` 必须已被批量取数取代（回退 ⇒ 变红）",
+    );
+    assert.equal(
+      trace.filter((l) => l.includes("--format=%ct")).length,
+      0,
+      "逐 commit `git log -1 --format=%ct` 必须已被批量取数取代（回退 ⇒ 变红）",
+    );
+    assert.ok(
+      trace.some((l) => l.includes("--no-walk")),
+      "批量取数（git log --no-walk ...）必须真的被调用（否则本测试空转）",
+    );
+  } finally {
+    if (savedTrace === undefined) delete process.env.GIT_TRACE;
+    else process.env.GIT_TRACE = savedTrace;
+    try { fs.rmSync(traceFile, { force: true }); } catch { /* best-effort */ }
     cleanup(dir);
   }
 });
