@@ -2,7 +2,7 @@
 id: AC-347
 title: 结构与范围护栏：kernel/verdict-parse.ts 提供
   parseBinaryVerdict，两个旧函数薄包装、调用方零改动，routine-quota 文件未被触碰
-status: active
+status: achieved
 kind: criterion
 goal: GOAL-032
 criterion: >-
@@ -69,6 +69,11 @@ statusLog:
     to: active
     actor: goal-cli
     reason: ""
+  - at: 2026-10-09T02:19:09.707Z
+    from: active
+    to: achieved
+    actor: goal-driver
+    reason: "I2: criterion pass"
 fidelity:
   verdict: not-evaluated
   reason: no judge configured
