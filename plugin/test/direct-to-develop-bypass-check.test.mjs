@@ -55,7 +55,7 @@
 //   scripts/test.sh plugin/test/direct-to-develop-bypass-check.test.mjs
 //   node --test plugin/test/direct-to-develop-bypass-check.test.mjs
 
-import { test } from "node:test";
+import { test as _nodeTest } from "node:test";
 import assert from "node:assert/strict";
 import fs from "node:fs";
 import os from "node:os";
@@ -94,9 +94,30 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const REPO_ROOT = path.resolve(__dirname, "..", "..");
 const CHECKER = path.join(REPO_ROOT, "plugin", "scripts", "direct-to-develop-bypass-check.ts");
 
+// ── AC1 cost decomposition (gap-direct-to-develop-bypass-check-git-fixture-cost) ──────────────────────
+// env-gated, ZERO assertion change: QUAY_TEST_ASSERT_TIMING=1 makes every test print its wall-clock and
+// the number of real git / checker subprocess spawns it made — the corpus technique (see
+// tasks/gap-slow-test-shared-fixture-and-group-recheck.md AC3 and
+// gap-suite-cost-model-is-wrong-optimizations-buy-nothing AC1b). Inert when the env var is unset:
+// `test` IS node:test's own `test`, and the counters are never incremented.
+const _COST_TIMING = !!process.env.QUAY_TEST_ASSERT_TIMING;
+let _gitSpawns = 0;
+let _checkerSpawns = 0;
+const test = _COST_TIMING
+  ? (name, fn) => _nodeTest(name, async (t) => {
+      const t0 = Date.now();
+      const g0 = _gitSpawns, c0 = _checkerSpawns;
+      try { return await fn(t); }
+      finally {
+        console.error(`[cost] ${Date.now() - t0}ms git=${_gitSpawns - g0} checker=${_checkerSpawns - c0} :: ${name}`);
+      }
+    })
+  : _nodeTest;
+
 // ── helpers ───────────────────────────────────────────────────────────────────────────────────────────
 
 function gitCmd(cwd, ...args) {
+  if (_COST_TIMING) _gitSpawns++;
   return spawnSync("git", ["-C", cwd, ...args], { encoding: "utf8" });
 }
 
@@ -109,6 +130,7 @@ function cleanup(dir) {
 }
 
 function runChecker(args) {
+  if (_COST_TIMING) _checkerSpawns++;
   return spawnSync("node", ["--no-warnings", "--experimental-strip-types", CHECKER, "--json", ...args], { encoding: "utf8" });
 }
 
@@ -966,13 +988,34 @@ const FIXED_PAST = "2026-08-01T00:00:00Z";
 
 /** 以固定 author+committer 时刻提交（`git commit --date` 只设 author date，committer date 需 env）。 */
 function gitCommitFixed(cwd, date, message) {
+  if (_COST_TIMING) _gitSpawns++;
   return spawnSync("git", ["-C", cwd, "commit", "-q", "-m", message], {
     encoding: "utf8",
     env: { ...process.env, GIT_AUTHOR_DATE: date, GIT_COMMITTER_DATE: date },
   });
 }
 
-function initRepo(dir) {
+// AC2 (gap-direct-to-develop-bypass-check-git-fixture-cost): the two small "base repo" builders below
+// are identical on every call and are only a PRECONDITION — each test's subject is what the checker
+// concludes about commits laid on top of the base, never how the base was built. So the base is built
+// ONCE per file run and every test cpSync's a PRIVATE copy (independent .git, no cross-test state, no
+// execution-order property), matching the AC2 "before() builds one base; each test forks a variant"
+// pattern without touching any assertion. Source: measured — a fresh initRepo is ~20ms of subprocess,
+// a cpSync of the 2-commit base ~0.8ms (see the task body's Measured section).
+const _BASES = new Map();
+function sharedBase(kind, build) {
+  let d = _BASES.get(kind);
+  if (!d) {
+    d = makeTmp(kind);
+    build(d);
+    // The shared base lives in os.tmpdir(); reap it at process exit (tests only clean their own copies).
+    process.on("exit", () => cleanup(d));
+    _BASES.set(kind, d);
+  }
+  return d;
+}
+
+function initRepoInto(dir) {
   gitCmd(dir, "init", "-q");
   gitCmd(dir, "config", "user.name", "d2d-test");
   gitCmd(dir, "config", "user.email", "d2d@example.com");
@@ -985,6 +1028,10 @@ function initRepo(dir) {
   fs.writeFileSync(path.join(dir, "tasks", "base.md"), "base\n", "utf8");
   gitCmd(dir, "add", "-A");
   gitCommitFixed(dir, FIXED_PAST, "tasks: base");
+}
+
+function initRepo(dir) {
+  fs.cpSync(sharedBase("d2d-initbase", initRepoInto), dir, { recursive: true });
 }
 
 test("CLI — 直接提交 develop 触及代码面 ⇒ RED(exit 1)；同 repo 直接提交 .gitignore ⇒ 该条不报", () => {
@@ -1481,6 +1528,7 @@ function buildOffSpineLandingFixture(dir) {
   const a2 = gitCmd(dir, "rev-parse", "HEAD~2").stdout.trim();
   // M：first parent = spine 上的 a2、second parent = a4（a4 是 a2 的后代 ⇒ 必须 --no-ff 才产生 merge 提交）。
   gitCmd(dir, "checkout", "-q", "-b", "spine", a2);
+  if (_COST_TIMING) _gitSpawns++;
   const mg = spawnSync("git", ["-C", dir, "merge", "-q", "--no-ff", "-m", "Merge lineA into spine", a4], { encoding: "utf8", env: FIXED_ENV });
   assert.equal(mg.status, 0, `merge --no-ff 应成功: ${mg.stdout}${mg.stderr}`);
   const m = gitCmd(dir, "rev-parse", "HEAD").stdout.trim();
@@ -1725,6 +1773,7 @@ function runRegisteredFlags(name, fnName, dir) {
     .replaceAll("${main_root}", dir)
     .replaceAll("${repo_root}", dir);
   const argv = flags.match(/"[^"]*"|\S+/g).map((s) => s.replace(/^"|"$/g, ""));
+  if (_COST_TIMING) _checkerSpawns++;
   const r = spawnSync("node", ["--no-warnings", "--experimental-strip-types", CHECKER, ...argv], { encoding: "utf8" });
   return r;
 }
@@ -1833,8 +1882,7 @@ test("NEGATIVE CONTROL on the REGISTERED argv: a code-surface direct commit to d
 
 /** 建一个 base 为 design-internal 提交、且 `develop` **未被检出**的 repo（`git branch -f develop <t>`
  *  只在该分支未被检出时可用——这正是生产上 develop 的落地形态：主检出检的是 author，不是 develop）。 */
-function makeForkedDevelopRepo(prefix) {
-  const dir = makeTmp(prefix);
+function makeForkedDevelopRepoInto(dir) {
   gitCmd(dir, "init", "-q", "-b", "main");
   gitCmd(dir, "config", "user.name", "d2d-test");
   gitCmd(dir, "config", "user.email", "d2d@example.com");
@@ -1843,6 +1891,12 @@ function makeForkedDevelopRepo(prefix) {
   gitCmd(dir, "add", "-A");
   gitCommitFixed(dir, FIXED_PAST, "tasks: base");
   gitCmd(dir, "branch", "develop");
+}
+
+function makeForkedDevelopRepo(prefix) {
+  const dir = makeTmp(prefix);
+  // AC2: same shared-base treatment as initRepo — the base is a precondition, copied per test.
+  fs.cpSync(sharedBase("d2d-forkbase", makeForkedDevelopRepoInto), dir, { recursive: true });
   return { dir, base: gitCmd(dir, "rev-parse", "HEAD").stdout.trim() };
 }
 
