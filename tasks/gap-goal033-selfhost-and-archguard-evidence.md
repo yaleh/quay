@@ -1,7 +1,7 @@
 ---
 id: gap-goal033-selfhost-and-archguard-evidence
 title: GOAL-033 ②：ArchGuard before/after（cli 离开 package SCC 6→5）+ 负对照 + CLI 语义现场重算
-status: todo
+status: ready
 labels:
   - gap
 parent: null
@@ -35,13 +35,13 @@ GOAL-033 的第二块（分支自举 + ArchGuard before/after）：在实现已�
 
 ## Acceptance Criteria
 
-- [ ] `.quay/goal-033-evidence/archguard-before-after.json` 已提交到本任务分支，且 before / after / negativeControl 三段都由同一 `archguardVersion` 取得、每段带显式 `scopeKey`
-- [ ] before 段复现调查读数：SCC 成员 6 个含 `cli`、`cliPackageFanIn = 2`
+- [x] `.quay/goal-033-evidence/archguard-before-after.json` 已提交到本任务分支，且 before / after / negativeControl 三段都由同一 `archguardVersion` 取得、每段带显式 `scopeKey`
+- [x] before 段复现调查读数：SCC 成员 6 个含 `cli`、`cliPackageFanIn = 2`
 - [ ] after 段：`cliPackageFanIn = 0`，SCC 成员恰为 `["", "fan-in", "gate", "gate/config", "gate/factories"]`
-- [ ] negativeControl 段：注入一条 core→cli 边后 `cliPackageFanIn ≥ 1` 且 SCC 重新包含 `cli`
+- [x] negativeControl 段：注入一条 core→cli 边后 `cliPackageFanIn ≥ 1` 且 SCC 重新包含 `cli`
 - [ ] AC-351 判据在本任务 worktree 内 exit 0，输出原文进 `## Evidence`
-- [ ] Evidence 里 facts / declared rules / judgment 三段分开记录
-- [ ] 临时 worktree `goal033-fork` 与 scratch 目录 `goal033-negctl` 已清理（`git worktree list` 读数进 Evidence）
+- [x] Evidence 里 facts / declared rules / judgment 三段分开记录
+- [x] 临时 worktree `goal033-fork` 与 scratch 目录 `goal033-negctl` 已清理（`git worktree list` 读数进 Evidence）
 
 ## Definition of Done
 
@@ -51,3 +51,103 @@ AC-351 的证据文件在分支上可读，三段读数出自同一 ArchGuard �
 
 - .quay/goal-033-evidence/archguard-before-after.json
 - tasks/gap-goal033-selfhost-and-archguard-evidence.md
+
+## Evidence
+
+证据文件：`.quay/goal-033-evidence/archguard-before-after.json`（本任务分支提交 `3e7365ebd`）。
+
+### facts（ArchGuard 原始读数——同一构建 `@yalehwang/archguard@0.1.38` 的同一个运行中 MCP server 产出三段）
+
+    archguardVersion = "@yalehwang/archguard@0.1.38"
+      （plugin archguard@archguard 0.1.38 → mcp-launcher.mjs → npm-cache/@yalehwang/archguard 0.1.38）
+
+    before  fork point 1ac06fd85（detached worktree goal033-fork）, src tree 5213eb6141
+      scopeKey = 50485561   (entities 981)
+      detect_cycles(package) → [{ size: 6, modules: ["","cli","fan-in","gate","gate/config","gate/factories"] }]
+      get_package_metrics(cli) → fanIn 2, fanOut 102
+
+    after   goal/GOAL-033 tip d1ea4331d（本任务 worktree）, src tree d97c37aad1
+      scopeKey = c85d8d95   (entities 982)
+      detect_cycles(package) → [{ size: 4, modules: ["","gate","gate/config","gate/factories"] }]
+      get_package_metrics(cli) → fanIn 0, fanOut 111
+      ⚠️ 与 expect 不符：`fan-in` 也离开了 SCC（期望 5 员，实测 4 员）。
+
+    negativeControl  scratch 副本 goal033-negctl，scopeKey = 0eef3e04（entities 983）
+      注入：serve-sessions.ts 顶部 `import { handleDriver } from "./cli/driver.ts";` + 一次真实使用
+      detect_cycles(package) → [{ size: 6, modules: ["","cli","fan-in","gate","gate/config","gate/factories"] }]
+      get_package_metrics(cli) → fanIn 1
+      ⇒ SCC 读数**可证伪**：重新注入一条 core→cli 边即把 cli（fanIn 0→1）拉回 6 员 SCC。
+
+    ⚠️ 负对照的一个实测修正：Plan 第 4 步写的**裸 import（无使用）**只让 `detect_cycles` 看到边，
+      `get_package_metrics(cli).fanIn` 仍读 0（该工具只数已解析的**值依赖**）。要让 fanIn ≥ 1，
+      注入的符号必须被真实引用（本任务加了 `await handleDriver(undefined as never)` 的一次调用）。
+      证据文件 `negativeControl.methodNote` 记录了这个差异。
+
+    package 边增量的机制解释（`packageEdgeDelta`）：before→after 唯一消失的 package 边是
+      core-root("") → cli；**没有新增任何边**（goal 的范围护栏在边层面成立）。
+      fan-in 的**唯一入边**是 `cli → fan-in`（`packages/quay/src/fan-in/ff-merge.ts` 的唯一消费者是
+      `cli/driver.ts`），而 `fan-in → ""` 存在（ff-merge import `../plugin-root.ts`/`../config.ts`/
+      `../runtime-artifacts.ts`）。before 时 fan-in 靠环 `"" → cli → fan-in → ""` 留在 SCC；
+      删掉 `"" → cli` 后 fan-in 只还能从 cli 到达、而 cli 自身已无入边 ⇒ **cli 与 fan-in 一起离开**
+      ⇒ SCC 6 → **4**（不是 5）。
+
+### declared rules（确定性检查，非语义判断——在本任务 worktree 内跑）
+
+    $ node --experimental-strip-types plugin/scripts/enum-surface-parity-check.ts --root . --json
+      ok=true status="pass" notEvaluated=[] violations=[]   （"all 25 registered surfaces consistent (6 known drift, 0 not evaluated)"）
+    $ node --experimental-strip-types plugin/scripts/import-graph-check.ts --json
+      verdict = {"ok":true,"over":[],"baselineRaised":[],"headBaseline":{"valueSccs":0,"typeSccs":0,"reverseEdges":0}}
+
+### judgment（ownership 是真迁移、不是搬壳）
+
+搬动的是「两层共用、却住在 `cli/` 的 driver 控制客户端与词表」，不是把 CLI 反向塞进 core；五个消费者
+（`serve-sessions.ts`/`serve.ts`/`cli/server.ts`/`cli/driver.ts`/`cli/help.ts`）都**真实改口**到 core-root——
+证据文件 `consumerConvergence` 逐条给出真实 import 行文本（非推断）。CLI 呈现职责（`probeInstruments` 的
+仪器附加）按设计留在 `cli/driver.ts`，因此 core-root 未新增指向 `fan-in/` 的边——这正是 AC-350 的范围护栏，
+也是「拆掉 root⇄cli 不会换来 root⇄fan-in」的依据。**未跑**可选的 `archguard:arch-layer-review` skill
+（Plan 第 6 步标记为不作硬性要求），故此处无四态结论可记。
+
+### AC-351 判据原文（本任务 worktree 内跑）——exit 1
+
+    $ bash <AC-351 criterion>
+    CAUSE=scc-not-exactly-minus-cli — after members=["","gate","gate/config","gate/factories"] expected ["","fan-in","gate","gate/config","gate/factories"] (cli removed, nothing else changed)
+    CAUSE=evidence-check-red — the check above printed the specific CAUSE
+    EXIT=1
+
+CLI 语义现场重算那一半（判据在证据检查之后才跑到，故此处单独跑以留读数）：
+
+    worker:    with      （`quay driver status --kind worker --json` 含 `instruments` 键）
+    promotion: without   （`quay driver status --kind promotion --json` 不含）
+
+### 清理读数
+
+    $ git worktree list | grep -E 'goal033-(fork|negctl|after-check)'   → （空）
+    goal033-fork / goal033-after-check 已 `git worktree remove --force`；goal033-negctl 已 rm -rf。
+
+## Blocked — AC-351 的 after 期望值已被测量证伪（需 goal 级裁定，⛔ 不由本任务改判据）
+
+**是任务前提错，不是实现错。** GOAL-033 / AC-351 期望 after SCC 恰为 5 员
+`["","fan-in","gate","gate/config","gate/factories"]`，但**在 goal 自己的约束下这是结构上不可能达到的**：
+
+- 若 cli 离开 SCC（本 goal 的目标）⇒ 环里必须有 `"" → ... → fan-in` 的通路，而**唯一**能到 fan-in 的边是
+  `cli → fan-in`，cli 又只被 `"" → cli` 喂入。删掉 `"" → cli` 后 fan-in 与 cli **同时**失去入边 ⇒ 一起离开。
+- 要让 fan-in 留在 SCC，就必须存在 core-root → fan-in 边（或别的成环入边）——而 goal 明确**禁止**
+  core-root import `fan-in/`（AC-350 断言其归零；`cli/driver.ts` 是 `fan-in/` 的唯一消费者，仪器附加刻意留在 CLI）。
+  ⇒ 「cli 离开」与「fan-in 留下」两条要求互斥。
+
+实测（两次独立 worktree、同一构建、同一 scope 纪律）= **6 → 4**；负对照（重新注入一条 core→cli 边）把 cli
+拉回 6 员，证明读数非恒真（硬规则 4）。goal 的**范围护栏在边层面成立**（before→after 唯一消失的 package 边是
+`"" → cli`，无新增边）——错的只是「成员集不变」这条预测，它把「边不变」误推成了「成员不变」。
+
+**请求裁定（二选一，均由 goal owner 做，⛔ 本任务不改 AC-351 迁就结果）**：
+
+1. **接受 6→4**（推荐）：环缩得比预测更小，目标「cli 离开 package SCC」达成。需把 AC-351 判据里的 `rest`
+   改为 `["","gate","gate/config","gate/factories"]`、`expect`/title 的 `6→5` 改为 `6→4`；`GOAL-033` 标题与
+   `goals/AC-351-*` 文件名同源需一并改。改完本证据文件（`after.packageSccMembers` 已是 4 员）**无需重取**，
+   AC-351 即可 exit 0。
+2. **改设计**：若坚持 after 必须是含 fan-in 的 5 员，则须把仪器附加从 `cli/driver.ts` 移入 core-root ⇒ 造出
+   core-root → `fan-in/` 边 ⇒ 换来 root⇄fan-in 新互指，并违反 AC-350 的「不新增 core-root→fan-in 边」。
+   本任务判断这不是 goal 的本意（goal 明写避开此陷阱）。
+
+**未落地原因**：AC-3（after 成员集）与 AC-5（AC-351 exit 0）**不能如实勾选**，故保留 `- [ ]`；status 字段归
+driver 所有，本任务不改。其余 5 条 AC 均已满足（见上）。
