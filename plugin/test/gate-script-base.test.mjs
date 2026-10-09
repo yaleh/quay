@@ -31,6 +31,7 @@ import {
   createSelftest,
   readJsonLines,
   readJsonlLines,
+  readJsonOrNull,
   git,
 } from "../scripts/gate-script-base.ts";
 
@@ -814,6 +815,90 @@ function fileOf(text) {
   fs.writeFileSync(file, text);
   return file;
 }
+
+// ── readJsonOrNull — the whole-file parse-or-null reader, extracted ─────────────────────────────────
+// semantic-dedup-scan finding `read-current-state-duplicate` (routine `semantic-dedup-scan`, runId
+// `semantic-dedup-scan-1791536153223`, kind `byte-identical-body`, verdict `real-duplication`,
+// requested action `merge into one shared readJsonOrNull`) named TWO byte-identical private readers:
+// mirror-full-suite-state.ts's `readCurrentState` and red-window-triage.ts's `readState`. Both now
+// read through the base. `readCurrentState` stays EXPORTED (worker-fan-in.ts / worker-driver.ts / the
+// mirror test import it by that name) but delegates; `readState` was private and is gone.
+
+/** The two modules that carried a byte-identical private copy of the parse-or-null reader. */
+const PARSE_OR_NULL_CARRIERS = ["mirror-full-suite-state.ts", "red-window-triage.ts"];
+
+test("readJsonOrNull: defined exactly ONCE under plugin/scripts (gate-script-base.ts)", () => {
+  const defs = scriptTsFiles().filter((f) => /\bfunction readJsonOrNull\b/.test(sourceOf(f)));
+  assert.deepEqual(
+    defs,
+    ["gate-script-base.ts"],
+    `readJsonOrNull must have a single definition; found: ${defs.length ? defs.join(", ") : "none"}`,
+  );
+});
+
+test("readJsonOrNull: neither former carrier re-inlines the body, and each IMPORTS the shared one", () => {
+  for (const f of PARSE_OR_NULL_CARRIERS) {
+    const src = sourceOf(f);
+    // The extracted BODY — not the symbol — is what must be gone: a carrier may keep its own name
+    // as a delegating shim (mirror does), but re-typing `JSON.parse(fs.readFileSync(…))` is the drift.
+    assert.doesNotMatch(
+      src,
+      /JSON\.parse\(fs\.readFileSync\(/,
+      `${f} must not keep a private parse-or-null body (import readJsonOrNull instead)`,
+    );
+    assert.match(
+      src,
+      /import \{[^}]*\breadJsonOrNull\b[^}]*\} from "\.\/gate-script-base\.ts"/,
+      `${f} does not import readJsonOrNull from the base`,
+    );
+  }
+  // The public name the two shipped consumers (worker-fan-in.ts / worker-driver.ts) import is kept.
+  assert.match(
+    sourceOf("mirror-full-suite-state.ts"),
+    /export function readCurrentState\b/,
+    "readCurrentState is still the exported name its callers import (a delegating shim, not a rename)",
+  );
+});
+
+test("readJsonOrNull: a directory (EISDIR) is unreadable ⇒ null, not a throw (the contract the two callers branch on)", () => {
+  withTempDir("readjsonornull-unreadable-", (dir) => {
+    assert.equal(readJsonOrNull(dir), null);
+  });
+});
+
+test("readJsonOrNull: parses a JSON document; absent / corrupt / empty ⇒ null", () => {
+  withTempDir("readjsonornull-semantics-", (dir) => {
+    const good = path.join(dir, "state.json");
+    fs.writeFileSync(good, JSON.stringify({ state: "green", finishedAt: 42 }));
+    assert.deepEqual(readJsonOrNull(good), { state: "green", finishedAt: 42 }, "a whole JSON document parses");
+
+    // Absent, corrupt and empty all read as the SAME `null` — that is exactly the callers' contract
+    // ("no usable state on disk ⇒ treat as absent and write fresh"), NOT a three-way distinction.
+    assert.equal(readJsonOrNull(path.join(dir, "absent.json")), null, "absent file ⇒ null");
+    const bad = path.join(dir, "bad.json");
+    fs.writeFileSync(bad, "{not json");
+    assert.equal(readJsonOrNull(bad), null, "corrupt JSON ⇒ null");
+    const empty = path.join(dir, "empty.json");
+    fs.writeFileSync(empty, "");
+    assert.equal(readJsonOrNull(empty), null, "empty file ⇒ null (JSON.parse throws on '')");
+  });
+});
+
+test("readJsonOrNull: deleting the shared export makes a consumer import fail (the mechanism is real)", () => {
+  withTempDir("readjsonornull-negctl-", (dir) => {
+    fs.writeFileSync(path.join(dir, "gate-script-base.ts"), "export const OTHER = 1;\n");
+    fs.writeFileSync(
+      path.join(dir, "consumer.ts"),
+      'import { readJsonOrNull } from "./gate-script-base.ts";\nconsole.log(readJsonOrNull);\n',
+    );
+    const missing = spawnSync("node", ["--experimental-strip-types", "consumer.ts"], { cwd: dir, encoding: "utf8" });
+    assert.notEqual(missing.status, 0, "a consumer importing an absent export must fail to link");
+
+    fs.writeFileSync(path.join(dir, "gate-script-base.ts"), "export function readJsonOrNull() { return null; }\n");
+    const present = spawnSync("node", ["--experimental-strip-types", "consumer.ts"], { cwd: dir, encoding: "utf8" });
+    assert.equal(present.status, 0, "the same consumer links once the export is present");
+  });
+});
 
 // ── git: the fail-closed runner is a single source (finding `git-helper-collector-gate`) ───────────
 //

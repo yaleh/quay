@@ -36,9 +36,11 @@
 //   readCurrentState(file)         → parsed state | null
 //   shouldSkipMirrorWrite(cur)     → true when a non-terminal on-disk state owns the file
 
-import fs from "node:fs";
 import { toIsoTimestamp } from "./per-task-suite-record.ts";
 import { writeJsonAtomic } from "./write-json-atomic.ts";
+// readJsonOrNull — the shared parse-or-null reader (was a byte-identical private copy here and in
+// red-window-triage.ts; semantic-dedup-scan finding `read-current-state-duplicate`).
+import { readJsonOrNull } from "./gate-script-base.ts";
 
 const COMMIT_RE = /^[0-9a-f]{40}$/i;
 const VALID_STATES = new Set(["green", "red"]);
@@ -124,13 +126,11 @@ export function writeMirrorState(file, state) {
 }
 
 /** Read the current on-disk state, or null when absent/unparseable (an unparseable state is treated
- *  as absent — overwriting garbage with a fresh terminal state is harmless). */
+ *  as absent — overwriting garbage with a fresh terminal state is harmless). Kept as the public name
+ *  its callers import (worker-fan-in.ts / worker-driver.ts / the test) — the body now delegates to
+ *  the shared `readJsonOrNull` (semantic-dedup-scan finding `read-current-state-duplicate`). */
 export function readCurrentState(file) {
-  try {
-    return JSON.parse(fs.readFileSync(file, "utf8"));
-  } catch {
-    return null;
-  }
+  return readJsonOrNull(file);
 }
 
 /** gap-full-suite-state-stale-no-writer AC1 — should the mirror-write be SKIPPED to avoid clobbering

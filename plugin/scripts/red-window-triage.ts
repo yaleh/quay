@@ -35,14 +35,15 @@
 // Exit: 0 ok; 1 a --band violation (an in-family failure lacks an isolate_rerun verdict) or a
 // --record-verdict out-of-range index; 2 usage/env error.
 
-import fs from "node:fs";
 import { repoRoot } from "./repo-root.ts";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 // getArgValue now lives in gate-script-base.ts as `flagValue` (it was one of the byte-identical
 // copies of the indexOf+next-arg idiom in plugin/scripts; .quay/routine-findings.jsonl finding
 // `arg-parsing-helper-family`, routine `semantic-dedup-scan`).
-import { isDirectEntry, flagValue } from "./gate-script-base.ts";
+// `readJsonOrNull` — the shared parse-or-null reader; the local private copy it replaces was
+// byte-identical (semantic-dedup-scan finding `read-current-state-duplicate`).
+import { isDirectEntry, flagValue, readJsonOrNull } from "./gate-script-base.ts";
 import { scanFamily, kindForFile, isFamilyMember } from "./known-load-sensitive.ts";
 import { writeJsonAtomic } from "./write-json-atomic.ts";
 
@@ -156,14 +157,6 @@ function defaultStateFile(root) {
   return path.join(root, ".quay", "full-suite-state.json");
 }
 
-function readState(file) {
-  try {
-    return JSON.parse(fs.readFileSync(file, "utf8"));
-  } catch {
-    return null;
-  }
-}
-
 function writeState(file, state) {
   writeJsonAtomic(file, state);
 }
@@ -188,7 +181,7 @@ export function main(argv) {
   const family = scanFamily(root);
 
   if (partitionMode) {
-    const state = readState(stateFile);
+    const state = readJsonOrNull(stateFile);
     if (!state) {
       process.stderr.write(`red-window-triage: cannot read state file ${stateFile}\n`);
       return 2;
@@ -218,7 +211,7 @@ export function main(argv) {
       process.stderr.write(`${usage}\n`);
       return 2;
     }
-    const state = readState(stateFile);
+    const state = readJsonOrNull(stateFile);
     if (!state) {
       process.stderr.write(`red-window-triage: cannot read state file ${stateFile}\n`);
       return 2;
@@ -236,7 +229,7 @@ export function main(argv) {
   }
 
   if (bandMode) {
-    const state = readState(stateFile);
+    const state = readJsonOrNull(stateFile);
     if (!state) {
       process.stderr.write(`red-window-triage --band: cannot read state file ${stateFile}\n`);
       return 2;
