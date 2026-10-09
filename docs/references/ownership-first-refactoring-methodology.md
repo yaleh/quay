@@ -1,17 +1,18 @@
-# Ownership-First 重构方法论 — 从 GOAL-030、GOAL-031 两次真实试点提炼
+# Ownership-First 重构方法论 — 从 GOAL-030、GOAL-031、GOAL-032 三次真实试点提炼
 
 **Status:** live reference — 供后续 `branch:true` Goal 重构复用，不是一次性复盘。
 **Worked examples：**
 - GOAL-030（`goals/GOAL-030-晋升写入经-kernel-转移决策并留痕-...md`，AC-336..342，分支 `goal/GOAL-030`）——新增 kernel 模块、收敛两套写入路径，重构规模较大。
 - GOAL-031（`goals/GOAL-031-needs-human-状态词汇-canonicalization-试点-...md`，AC-343..345，分支 `goal/GOAL-031`）——同一套方法在一个刻意切得更小的切片上的第二次独立验证：`goal-driver.ts` 里 5 处 `status === "needs-human"` 裸字面量比较收敛到已有正本 `plugin/scripts/task-status.ts`/`packages/quay/src/abi.ts`，不新造第二套声明。
-**现状口径（2026-10-09）：** 两个 Goal 均已 **merge 入 `develop` 并 achieved**。GOAL-030 的 AC-336..342 全部 `achieved`（合并提交 `d71d2bde4`；post-merge 生产读数 AC-341、merge 形态 AC-342 均 `exit 0 PASS`）。GOAL-031 的 AC-343..345 全部 `achieved`（合并提交 `117ee91b8`）。本文引用的 `packages/quay/src/kernel/task-transition.ts`、`plugin/scripts/task-status.ts` 现在都在 `develop`/`author` 上可读，不再是分支限定产物。
+- GOAL-032（`goals/GOAL-032-verdict-parser-ownership-收敛试点-...md`，AC-347..349，分支 `goal/GOAL-032`）——第三次独立验证，范围只收敛 ArchGuard `detect_duplicates` 命中的一对函数（`criterion-fidelity.ts::parseFidelityVerdict` / `goal-driver.ts::parseSemanticSufficiencyVerdict`），但先做了一次正式的等价性调查，再收敛为 kernel 单一实现 + 两个薄包装——是"ownership migration 而非删除重复"的例子（见第 2 节）。
+**现状口径（2026-10-09）：** 三个 Goal 均已 **merge 入 `develop` 并 achieved**。GOAL-030 的 AC-336..342 全部 `achieved`（合并提交 `d71d2bde4`；post-merge 生产读数 AC-341、merge 形态 AC-342 均 `exit 0 PASS`）。GOAL-031 的 AC-343..345 全部 `achieved`（合并提交 `117ee91b8`）。GOAL-032 的 AC-347..349 全部 `achieved`（合并提交 `0da918926`）。本文引用的 `packages/quay/src/kernel/task-transition.ts`、`plugin/scripts/task-status.ts`、`packages/quay/src/kernel/verdict-parse.ts` 现在都在 `develop`/`author` 上可读，不再是分支限定产物。
 **正本指针（不复制，只引用）：**
 - `branch:true` Goal 机制细节 → `orchestration/SPEC-goal-branch-2026-10-03.md`
 - GIT lens / hard-over-soft 的理论依据 → `adr/ADR-004-...md`、`adr/ADR-005-...md`、`adr/ADR-006-...md`、`adr/ADR-007-...md`
 - 架构评审三层流程本体 → archguard 插件 `arch-layer-review` skill（`SKILL.md` + `references/goal-030-example-output.json`）
 - `L_T/L_C/L_D/L_G/L_S` 词汇表 → `docs/references/` 下的 GIT 框架文档（见 CLAUDE.md「GIT review checklist」）
 
-**Non-goals：** 不是 OO/设计模式教程；不是 GOAL-030/GOAL-031 复盘报告（两者只作可核验锚点）；不重复 `SPEC-goal-branch` 的机制细节或 archguard skill 的操作步骤——那些有各自的正本。
+**Non-goals：** 不是 OO/设计模式教程；不是 GOAL-030/031/032 复盘报告（三者只作可核验锚点）；不重复 `SPEC-goal-branch` 的机制细节或 archguard skill 的操作步骤——那些有各自的正本。
 
 ---
 
@@ -40,6 +41,10 @@ GOAL-030 的起点问题不是"任务转移该是哪个对象"，而是"任务�
 
 **GOAL-031 是这条原则更干净的第二个实例，且不需要新造任何权威实现**：权威实现（`plugin/scripts/task-status.ts` 自包含副本 + `packages/quay/src/abi.ts`）早已存在、早已 `done`，缺口只在调用方——`goal-driver.ts` 里还有 5 处 `status === "needs-human"` 裸字面量比较从未迁移。整个 slice 就是纯粹的"调用方改口"：`grep -c 'status === "needs-human"' plugin/scripts/goal-driver.ts` 从 6 精确降到 1（唯一保留的一行是另一词表——GOAL-AC 的 `status`，不是 task 状态，判定靠逐行核实位置，不是关键词计数）。这也说明"canonical source"不必是物理上的单一文件：plugin 树不能静态 import packages 源码（打包边界），所以两份声明并存是合法的"单一正本的两个已声明副本"，不算第三套实现——真正要收敛的只是**调用方**，不是逼着两棵树共享一份物理文件。
 
+**先导检查：duplicate ≠ equivalent，ArchGuard 的重复命中只是调查入口，不是合并触发器。** `detect_duplicates` 报出两段代码重复，证明的只是"文本/结构相似"，不证明"该不该合并"——合并前必须逐项核实：①调用语义是否真的相同（同一问题的两种答案，还是看起来像、实际回答不同问题）；②输入/输出形状是否一致；③错误与 `not-evaluated` 行为是否一致（fail-closed 的触发条件、兜底值是否逐字相同）；④调用方实际怎么消费返回值（同步/异步、是否缓存、失败后的编排是否不同）。四项都核实过、结论是 **equivalent**（不是"碰巧长得像"的 intentionally-divergent）才进入收敛；核实本身要留痕（谁比较了哪几行、下的什么结论），不能只凭 ArchGuard 的相似度分数直接动手合并。
+
+**GOAL-032 是这条先导检查 + ownership migration（而非删除重复）的例子。** `criterion-fidelity.ts::parseFidelityVerdict` 与 `goal-driver.ts::parseSemanticSufficiencyVerdict` 先经过上面四项核实：算法逐字相同（`exitCode!==0 ⇒ not-evaluated` → 裸 token 匹配 → 从末行向上扫描 JSON → 其余一律 `not-evaluated`），两处源码注释与测试文件都自述"复刻"对方手法（证明是蓄意复制，不是巧合），结论 equivalent；但两边的**调用方编排故意保持不同**（一个同步无缓存，一个异步、两次采样一致才入缓存）——这部分不碰，留在原处（呼应第 1 节"编排可以继续留在原处"）。收敛动作是：新建 `packages/quay/src/kernel/verdict-parse.ts::parseBinaryVerdict` 作为唯一算法实现；`parseFidelityVerdict`/`parseSemanticSufficiencyVerdict` **保留原函数名/签名/返回类型，改成调用 kernel 函数的薄包装**；两处真实调用方（`criterionFidelityVerdict`/`sampleSemanticSufficiency`）**零改动**，仍然调用原来的函数名，只是那个函数内部已经委托给 canonical 实现。**这和 GOAL-030/031"调用方改口直接调新正本"是不同的收敛形状**：这次是"责任迁移到了正确的层，调用点感觉不到"——目标从来不是"删掉重复的那一份"，是"让两份实现背后只有一个真正的算法"。
+
 ## 3. OOA/OOD 与设计模式：边界已明确才用，不建 pattern zoo
 
 State / Strategy / Command / Specification / Repository / Application Service / Domain Service / Domain Event 这些名字描述的是**责任边界已经清楚之后**长出来的形状，不是动手前要往代码里"安装"的蓝图：
@@ -58,7 +63,7 @@ State / Strategy / Command / Specification / Repository / Application Service / 
 
 ## 5. `branch:true` Goal 的标准流程
 
-机制细节见 `orchestration/SPEC-goal-branch-2026-10-03.md`；这里只记录 GOAL-030、GOAL-031 实际走过的闭环顺序，作为后续复用的检查单：
+机制细节见 `orchestration/SPEC-goal-branch-2026-10-03.md`；这里只记录 GOAL-030、GOAL-031、GOAL-032 实际走过的闭环顺序，作为后续复用的检查单：
 
 1. **Fork point**：ArchGuard before-基线，在 goal 分支创建前先对 `develop` 尖端拍一次。
 2. **Goal 激活**：`goal/<GOAL-ID>` 从 `develop` 尖端惰性创建；该 Goal 下的任务派发自动把 `mergeTarget` 解到这个分支，worktree 从它 fork。
@@ -118,18 +123,19 @@ GOAL-030 的 AC-339 撞到过一个具体案例：最初为"单一 import 的玩
 
 ## 10. 可测指标：这次重构实际读的是哪些数字
 
-| 指标 | 含义 | GOAL-030 的具体读数 | GOAL-031 的具体读数 |
-|---|---|---|---|
-| **cycles / SCC** | 目录级强连通分量数量，重构不应新增环 | 1 → 1（不变） | `import-graph-check.ts` 四个棘轮量不回退 |
-| **reverse edges** | 声明的上下游关系被反向调用的边数 | `packages→plugin` 反向边 0（两端都 0） | 同上，棘轮不回退 |
-| **layer violations** | `check-layers.mjs` 报的违规数 | 本 slice 范围内 0 | 本 slice 范围内 0 |
-| **edge strength** | 两个包/模块之间的调用边权重 | `plugin/scripts→kernel`：14→16（上升）；`plugin/scripts→non-kernel`：44→44（不变，没有"顺手"把别的也挪过去） | — |
-| **duplicate disappearance** | 原本重复的声明/实现是否真的消失 | `LIFECYCLE_EDGES` 由两处定义收敛为一处 + 一个 re-export | 不适用——GOAL-031 不新造任何声明，权威实现早已存在、早已 `done`（见第 2 节） |
-| **literal dispersion** | 同一个字面量/常量散落在几个文件里 | 转移决策相关字面量收口到 kernel 单文件 | `get_literal_dispersion(value:"needs-human")`：5 → 4（不是 ≤2——见第 4 节"指标服从 scope"） |
-| **canonical definition count** | 某个状态/规则表的 `export` 定义点数量 | `LIFECYCLE_EDGES`/`patchStatusField` 各恰好 1 | `task-status.ts` 正本声明处恰好 1（不变——本 slice 不碰正本，只迁调用方） |
-| **direct-write count** | 旧模块里直写副作用的调用点数量 | `ready-pool-check.ts` 对 `patchStatusField(` 的直接调用：有 → 0 | `grep -c 'status === "needs-human"' plugin/scripts/goal-driver.ts`：6 → 1（剩 1 处是另一词表 GOAL-AC `status`，判定靠逐行核实位置，非关键词） |
-| **import direction** | 新模块是否反向 import 旧模块的写原语 | 否（通过 archguard 语义判断核实，非仅计数） | 否——`goal-driver.ts` 新增 `import { TASK_STATUS } from "./task-status.ts"`，方向正确 |
-| **post-merge event evidence** | 合并落地后，生产环境的真实事件是否能对上预期的行为 | AC-341：`develop` 上每一次 `promotion-driver` 机械晋升都要能在 `.quay/task-status-events.jsonl` 里找到对应的 `promote` 事件——`exit 0 PASS`，merge 落地（`d71d2bde4`）后实测达成 | AC-345：`develop` 上重跑 grep 读数、核对以恰好一个合并提交（`117ee91b8`）进入 first-parent 链——`exit 0 PASS` |
+| 指标 | 含义 | GOAL-030 的具体读数 | GOAL-031 的具体读数 | GOAL-032 的具体读数 |
+|---|---|---|---|---|
+| **cycles / SCC** | 目录级强连通分量数量，重构不应新增环 | 1 → 1（不变） | `import-graph-check.ts` 四个棘轮量不回退 | `import-graph-check.ts` 四个棘轮量不回退 |
+| **reverse edges** | 声明的上下游关系被反向调用的边数 | `packages→plugin` 反向边 0（两端都 0） | 同上，棘轮不回退 | 同上，棘轮不回退 |
+| **layer violations** | `check-layers.mjs` 报的违规数 | 本 slice 范围内 0 | 本 slice 范围内 0 | 本 slice 范围内 0（kernel 是 `layers.yml` 已声明允许的落点，无需新加边） |
+| **edge strength** | 两个包/模块之间的调用边权重 | `plugin/scripts→kernel`：14→16（上升）；`plugin/scripts→non-kernel`：44→44（不变，没有"顺手"把别的也挪过去） | — | `plugin/scripts→packages/quay/src/kernel` 新增一条边（方向正确，与 GOAL-030 引入 kernel 同构） |
+| **duplicate disappearance** | 原本重复的声明/实现是否真的消失 | `LIFECYCLE_EDGES` 由两处定义收敛为一处 + 一个 re-export | 不适用——GOAL-031 不新造任何声明，权威实现早已存在、早已 `done`（见第 2 节） | ArchGuard `detect_duplicates` 命中的该组 before 存在、after 消失——算法只有 `verdict-parse.ts::parseBinaryVerdict` 一份 |
+| **literal dispersion** | 同一个字面量/常量散落在几个文件里 | 转移决策相关字面量收口到 kernel 单文件 | `get_literal_dispersion(value:"needs-human")`：5 → 4（不是 ≤2——见第 4 节"指标服从 scope"） | 不适用——本 slice 收敛的是算法重复，不是字面量分散 |
+| **canonical definition count** | 某个状态/规则表的 `export` 定义点数量 | `LIFECYCLE_EDGES`/`patchStatusField` 各恰好 1 | `task-status.ts` 正本声明处恰好 1（不变——本 slice 不碰正本，只迁调用方） | `parseBinaryVerdict` 的算法实现 2 → 1（两处旧函数各自一份完整算法 → kernel 唯一一份） |
+| **direct-write count** | 旧模块里直写副作用的调用点数量 | `ready-pool-check.ts` 对 `patchStatusField(` 的直接调用：有 → 0 | `grep -c 'status === "needs-human"' plugin/scripts/goal-driver.ts`：6 → 1（剩 1 处是另一词表 GOAL-AC `status`，判定靠逐行核实位置，非关键词） | 不适用——GOAL-032 不是"消灭直写"，是"消灭重复算法"（见 consumer convergence 行） |
+| **consumer convergence** | 真实消费方的调用方式是否仍指向正确的入口，而不是绕开封装直连内部实现 | 随 direct-write count 一起验证：`ready-pool-check.ts` 两处调用点确认走 kernel 路径 | 随 direct-write count 一起验证：`goal-driver.ts` 5 处调用点确认走 `task-status.ts` | `criterionFidelityVerdict`/`sampleSemanticSufficiency` 两个真实调用方**零改动**，仍调用 `parseFidelityVerdict`/`parseSemanticSufficiencyVerdict` 原函数名——验证靠读两层源码（调用方仍调旧函数名；旧函数体内已委托 `parseBinaryVerdict`），不是看调用点数字变化（本例调用点数字根本不变） |
+| **import direction** | 新模块是否反向 import 旧模块的写原语 | 否（通过 archguard 语义判断核实，非仅计数） | 否——`goal-driver.ts` 新增 `import { TASK_STATUS } from "./task-status.ts"`，方向正确 | 否——`verdict-parse.ts` 零依赖纯函数，`criterion-fidelity.ts`/`goal-driver.ts` 单向 import 它，不反向 |
+| **post-merge event evidence** | 合并落地后，生产环境的真实事件是否能对上预期的行为 | AC-341：`develop` 上每一次 `promotion-driver` 机械晋升都要能在 `.quay/task-status-events.jsonl` 里找到对应的 `promote` 事件——`exit 0 PASS`，merge 落地（`d71d2bde4`）后实测达成 | AC-345：`develop` 上重跑 grep 读数、核对以恰好一个合并提交（`117ee91b8`）进入 first-parent 链——`exit 0 PASS` | AC-349：`develop` 上 grep 两个旧函数体确认已是薄包装（不是叙述，是读到的事实），两处调用方测试在主检出上仍绿——merge 落地（`0da918926`）后实测达成 |
 
 这些指标共同回答的问题是"责任真的搬了吗"，而不是"文件数变了吗"——文件数、行数变化只是会计记账（`AC-339`：file-count delta == `git diff` A−D，只是一致性校验，不是判好坏的依据）。
 
