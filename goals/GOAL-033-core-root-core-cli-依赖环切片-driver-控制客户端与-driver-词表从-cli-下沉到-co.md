@@ -2,10 +2,16 @@
 id: GOAL-033
 title: core-root⇄core-cli 依赖环切片：driver 控制客户端与 driver 词表从 cli/ 下沉到 core-root（cli
   离开 package SCC，6→5），fan-in 仪器附加留在 CLI 以免造出 root⇄fan-in 新互指
-status: draft
+status: active
 kind: goal
-origin: 人 2026-10-09 裁定：调查并推进 core-root<->core-cli 最小依赖环切片；结论清晰 ⇒ 开 branch:true
-  goal，严格复用 GOAL-030/031/032 方法，只做这一对
+origin: 人 2026-10-09 裁定：调查并推进 core-root<->core-cli 最小依赖环切片
+activatedAt: 2026-10-09T05:46:07.439Z
+statusLog:
+  - at: 2026-10-09T05:46:07.439Z
+    from: draft
+    to: active
+    actor: goal-cli
+    reason: ""
 branch: true
 ---
 ## 背景
