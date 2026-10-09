@@ -105,3 +105,22 @@ extra: {}
 - AC4 向量：`packages/quay/src/dashboard-kernel-vectors.json`（随包发布，亦可经 `quay/dashboard-kernel/vectors` 解析），3 条向量覆盖顺序装箱 / 超载 overflow / 窗口过滤+跨源去重，由 `AC4:` 测试逐条回放。
 - AC5 文档：`packages/quay/README.md` § "Public API: `quay/dashboard-kernel`"（用途、明确非目标、semver 承诺、已知消费者 claudecodeui）。
 - 实现提交：分支 `task/gap-dashboard-kernel-export-for-cross-project-reuse`，见本任务 worktree 的 `feat(quay): publish the gantt packing kernel as quay/dashboard-kernel`。
+
+## 独立复核 + 契约加固（2026-10-09，后续会话）
+
+**复核结论：本任务已在 `develop` 落地且可复现**（不是"done 未落地"中间态）。独立取证：
+
+- 实现提交 `2a894daf4` 同时在 `develop` 与 `author`（`git merge-base --is-ancestor` 双绿）；任务 worktree/branch 已清理。
+- `packages/quay/test/dashboard-kernel.test.mjs` **9/9 绿**——含真 `npm pack` → `npm install` 到 `/tmp` 独立 consumer → 裸 `import ... from "quay/dashboard-kernel"`，断言解析到 `node_modules/quay/dist/dashboard-kernel.js`。
+- 既有面不回归：`serve-dashboard.test.mjs` + `package-json-bin.test.mjs` **17/17 绿**；worktree 内 `npx tsc --noEmit` 退出 0。
+- **差异执行复核（本次新增的最强证据）**：从 `2a894daf4^` 抽出重构前的 `mergeLiveAndHistoryIntervals` / `packLanes`（esbuild 转译），与新模块做差分 fuzz——**410 个用例**（含 9 个对抗边界：NaN 起始 / 未来起始 / 窗口端点 / `end < start` / 跨源去重）+ **2904 条真实 `worker-outcome.jsonl` 记录**，`maxLanes ∈ {默认, 5, 1, 3, 100}`，**0 处不一致**。「serve-dashboard 行为不变」由此实测坐实，而非仅靠既有测试。
+
+**契约加固（3 处面向消费方的缺口，均已修）**——分支 `task/gap-dashboard-kernel-export-for-cross-project-reuse`，提交 `d1e3464ed`（doc/comment only；26/26 绿 + tsc 0）：
+
+1. `packLanes` 把超出 `FIXED_GANTT_LANES` 的区间从 `lanes` 中**剔除**并计入 `overflow`；画 "+N more" 徽章的渲染器属于 Core 且**未发布** ⇒ 只渲染 `lanes` 的消费方会**静默丢数据**。README 已写明该义务（求和不变式本身已由 AC3 测试钉住）。
+2. `quay/dashboard-kernel/vectors` 是 JSON，Node 要求 `with { type: "json" }` 导入属性；缺失即 `ERR_IMPORT_ATTRIBUTE_MISSING`（对真实外部安装实测）。README 已补该写法。
+3. `dashboard-kernel.ts` 原注释称与 `FIXED_DISPATCH_CAP` "never drift apart"——该常量实读 `drivers.yml` 的 `worker.cap`（可覆盖），本字面量无法跟随，且无任何检查断言二者相等。已改为陈述真实关系：默认相等，cap 提高时 5 车道不变、超出部分由 `overflow` 如实呈现。
+
+**未落地**：`d1e3464ed` 目前只在任务分支上（`develop` 由循环持有），是否合入由人工/驱动决定。
+
+**剩余依赖**：claudecodeui 侧集成尚未开始（其 Quay tab 消费本 kernel + 等价性测试向量），需与该会话协调。
