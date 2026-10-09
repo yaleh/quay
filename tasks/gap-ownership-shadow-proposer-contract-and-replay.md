@@ -3,7 +3,7 @@ id: gap-ownership-shadow-proposer-contract-and-replay
 title: "ownership/architecture shadow proposer: project-local contract +
   deterministic gate + offline replay over the GOAL-030..033 corpus (no
   task/goal creation)"
-status: ready
+status: done
 labels:
   - gap
 parent: null
