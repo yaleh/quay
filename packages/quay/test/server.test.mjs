@@ -1,6 +1,6 @@
 // @test-group product
 // server.test.mjs — the `quay server status` aggregation (`src/cli/server.ts`) and the two spawn arms
-// it can delegate through (`src/cli/driver.ts`: `runDriver` sync / `runDriverAsync` concurrent).
+// it can delegate through (`src/driver-control.ts`: `runDriver` sync / `runDriverAsync` concurrent).
 //
 // WHY THIS FILE EXISTS AS ITS OWN PAIR: per `plugin/scripts/select-tests-for-touches.ts` rule 2 (the
 // repo's dominant `<dir>/foo.ts` → `*/test/foo.test.mjs` convention), `packages/quay/src/cli/server.ts`
@@ -30,7 +30,7 @@ import path from "node:path";
 import { spawnSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
 
-import { runDriver, runDriverAsync } from "../src/cli/driver.ts";
+import { runDriver, runDriverAsync } from "../src/driver-control.ts";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const REPO_ROOT = path.resolve(__dirname, "..", "..", "..");

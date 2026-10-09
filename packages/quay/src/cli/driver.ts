@@ -27,50 +27,27 @@
 //   worktree (second layer) — so the kernel never hangs on a short-lived worktree copy.
 
 import path from "node:path";
-import { execFileSync, spawn, spawnSync } from "node:child_process";
 import { parseFlags, resolveJsonFlag } from "./flags.ts";
-import { findConfig } from "../config.ts";
-import { resolvePluginScriptExec } from "../plugin-root.ts";
 import { readFanInAttempts, readLiveWorkers, type FanInAttemptsResult, type InFlightTask } from "../observation.ts";
 // gap-fan-in-instrument-availability-self-check AC3：`quay driver status --kind worker` 也报这两个 fan-in
 // 仪器的当前读数。⛔ 只读（探针不写任何 quay 状态）、⛔ 不改退出码——它是**事实**，不是拦截信号。
+// ⚠️ 它是本文件的**呈现**职责（GOAL-033/AC-350）：核心控制客户端 `../driver-control.ts` ⛔ 不许
+// import `../fan-in/`，否则会新增 core-root → fan-in 边（fan-in → core-root 已存在）。
 import { probeInstruments, type InstrumentProbe, type InstrumentReading } from "../fan-in/ff-merge.ts";
 import type { CliCtx } from "./context.ts";
 
-// VERBS 与 KINDS 定义在 cli/driver-vocab.ts（零依赖叶模块——help.ts 静态 import 它，⛔ 不能把这两个
-// 常量留在本文件：本文件的传递闭包带 config.ts/plugin-root.ts，实测会让 `quay --help` 每次调用贵 0.4s）。
-// 此处 import + 再导出，保持既有 import 位点（goal-driver.test.mjs AC6）不变。
-import { KINDS, VERBS } from "./driver-vocab.ts";
+// VERBS 与 KINDS 定义在 core-root 的 driver-vocab.ts（零依赖叶模块——help.ts 静态 import 它，⛔ 不能
+// 把这两个常量留在本文件：本文件的传递闭包带 config.ts/plugin-root.ts，实测会让 `quay --help` 每次
+// 调用贵 0.4s）。此处 import + 再导出，保持既有 import 位点（goal-driver.test.mjs AC6）不变。
+import { KINDS, VERBS } from "../driver-vocab.ts";
 export { KINDS, VERBS };
 
-/** Resolve the workspace root from `--root` (walk-up) or the process cwd; null when no config. */
-function resolveRoot(rootFlag: string | undefined): string | null {
-  const startDir =
-    typeof rootFlag === "string" && rootFlag.trim() !== "" ? path.resolve(rootFlag) : process.cwd();
-  const configPath = findConfig(startDir);
-  if (!configPath) return null;
-  return path.dirname(path.dirname(configPath));
-}
-
-/** AC139-4: is `root` a git worktree (the literal quay-worktrees/ convention, or a linked worktree)? */
-function isWorktreeRoot(root: string): boolean {
-  // ① literal convention the AC names: a `quay-worktrees/` path.
-  if (/(^|\/)quay-worktrees(\/|$)/.test(root)) return true;
-  // ② git-backed: root is a LINKED worktree (any non-main entry in `git worktree list`).
-  try {
-    const out = execFileSync("git", ["-C", root, "worktree", "list", "--porcelain"], {
-      encoding: "utf8",
-    });
-    const worktrees = out
-      .split("\n")
-      .filter((l) => l.startsWith("worktree "))
-      .map((l) => path.resolve(l.slice("worktree ".length).trim()));
-    const real = path.resolve(root);
-    return worktrees.slice(1).some((w) => w === real);
-  } catch {
-    return false; // git unavailable / not a repo → only the path check applies
-  }
-}
+// driver 控制客户端（校验 verb/kind → 解析 root → 拒绝 worktree → 解析 kernel → spawn → 结构化结果）
+// 住在 core-root 的 ../driver-control.ts，因为 web（serve-sessions）与 CLI 共用它——它留在这里会让
+// core-root import cli/（GOAL-033 拆的那条 package 环）。本文件只剩 CLI facade：argv / 帮助 / stdout /
+// 退出码，以及 `status --kind worker` 的仪器附加（见下）。⛔ 不要再导出 runDriver —— 消费者直接从
+// ../driver-control.ts 取，避免留下一条会把核心实现重新拖回 cli/ 的再导出路径。
+import { runDriver, resolveRoot } from "../driver-control.ts";
 
 export async function handleDriver({ sub, rest, positional }: CliCtx) {
   const { flags } = parseFlags([sub, ...rest].filter((a) => a !== undefined));
@@ -165,7 +142,14 @@ carried from the workspace root (main checkout), not a short-lived worktree.
   }
 
   const r = runDriver(sub, flags.kind, rest, flags.root);
-  if (r.stdout) process.stdout.write(r.stdout);
+  // AC3 (gap-fan-in-instrument-availability-self-check): the fan-in instrument decoration is a CLI
+  // PRESENTATION concern (see ../driver-control.ts's header for why it must not live in core-root).
+  // `r.root`/`r.kernelPath` are the SAME resolution the spawn used — ⛔ never a second one (硬规则 5b).
+  const stdout =
+    r.ok && r.root !== null && r.kernelPath !== null
+      ? withWorkerInstrumentReadings(sub, flags.kind, r.stdout, r.root, r.kernelPath)
+      : r.stdout;
+  if (stdout) process.stdout.write(stdout);
   if (r.stderr) process.stderr.write(r.stderr);
   if (r.reason) console.error(r.reason);
   process.exitCode = r.exitCode;
@@ -320,102 +304,16 @@ export function withInstrumentReadings(stdout: string, root: string, scriptsDir:
   return prefix + line("classifier", probe.classifier) + "\n" + line("reaper", probe.reaper) + "\n";
 }
 
-/** Structured result of `runDriver` — the shared core behind both the CLI and the web surface. */
-export interface DriverRunResult {
-  /** true = the command was delegated to the supervisor kernel (spawn succeeded). */
-  ok: boolean;
-  /** Human-readable failure reason (validation / root / worktree / kernel-missing), null when ok. */
-  reason: string | null;
-  stdout: string;
-  stderr: string;
-  /** Exit code the caller should report. */
-  exitCode: number;
-}
-
-/**
- * gap-webui-session-lifecycle AC1: the web surface exposes headless driver start/stop/restart by
- * REUSING `quay driver` — this pure function is that shared core. It validates verb+kind, resolves
- * the workspace root, rejects a worktree root (AC139-4), resolves the TS kernel path, and
- * spawnSync's the supervisor kernel — returning a structured result (⛔ never writes to process globals,
- * so the web handler can call it in-process without coupling to stdout/exitCode). Both the CLI
- * (handleDriver) and the web handler consume this ONE implementation (⛔ reimplementing the driver
- * lifecycle in the web layer would be fake reuse).
- */
-/** The resolved spawn inputs for one `quay driver` delegation. `failure` non-null ⇒ the invocation
- *  never reached the kernel (verb/kind validation, root resolution, worktree rejection, missing
- *  kernel) and the caller returns that result verbatim. */
-interface DriverInvocation {
-  failure: DriverRunResult | null;
-  spawnArgs: string[];
-  root: string;
-  kernelPath: string;
-}
-
-function refusedInvocation(reason: string, exitCode = 1): DriverInvocation {
-  return { failure: { ok: false, reason, stdout: "", stderr: "", exitCode }, spawnArgs: [], root: "", kernelPath: "" };
-}
-
-/** The SHARED prologue of `runDriver` / `runDriverAsync`: validate the verb+kind, resolve the
- *  workspace root, reject a worktree root (AC139-4), resolve the kernel and build the argv.
- *
- *  ⛔ ONE implementation, deliberately: the sync spawn site and the concurrent one must agree on
- *  every one of these judgments, and a second copy of the root/kernel resolution is exactly how
- *  the two drift apart (硬规则 5b). Only the SPAWN itself differs between them. */
-function resolveDriverInvocation(
-  verb: string,
-  kind: string | undefined,
-  rest: string[],
-  rootFlag: string | undefined,
-): DriverInvocation {
-  if (!VERBS.includes(verb)) {
-    return refusedInvocation(`quay driver: unknown subcommand: ${verb} (try: ${VERBS.join(", ")})`);
-  }
-  if (!KINDS.includes(kind)) {
-    return refusedInvocation(`quay driver: missing/invalid --kind: ${kind ?? "<empty>"} (expected ${KINDS.join("|")})`);
-  }
-
-  // AC139-4: resolve the carrier/entry path from the workspace root (NOT import.meta walk-up).
-  const root = resolveRoot(rootFlag);
-  if (!root) {
-    return refusedInvocation(
-      `quay driver: no .quay/config.yml found (searched from ${rootFlag ?? process.cwd()} upward). ` +
-        `Run from a quay workspace root, or pass --root <workspace-root>.`,
-    );
-  }
-
-  // AC139-4: reject a worktree root (fail closed; never start a supervisor on a worktree).
-  if (isWorktreeRoot(root)) {
-    return refusedInvocation(
-      `quay driver: refusing to run from a git worktree (${root}). ` +
-        `The resident supervisor must be carried from the workspace root (main checkout), ` +
-        `not a short-lived worktree. Run from the main checkout instead.`,
-    );
-  }
-
-  const kernel = resolvePluginScriptExec(path.join("scripts", "driver-runtime.ts"));
-  if (!kernel) {
-    return refusedInvocation(`quay driver: driver runtime kernel not found (no plugin root resolved — no local plugin/ copy and no installed quay plugin)`);
-  }
-
-  // Forward the user's argv verbatim (rest already carries --kind/--root/--json/…), then pin
-  // --root to the resolved workspace root (last-wins in the kernel's parser) so the kernel runs
-  // against the same root this handler resolved — never a stale/missing one. AC151: the supervisor
-  // is TS now — spawn the kernel with `node --experimental-strip-types` (⛔ no more bash .sh).
-  // The dev tree kernel is the raw `driver-runtime.ts` (run WITH --experimental-strip-types); the
-  // shipped artifact carries it ONLY as the bundled `dist/driver-runtime.js` (a plain ESM bundle,
-  // run WITHOUT the flag) — resolvePluginScriptExec applies that dev/dist fallback
-  // (gap-plugin-dist-entry-derivation-blind-to-core-and-table-refs).
-  const args = [verb, ...rest, "--root", root];
-  const spawnArgs = kernel.stripTypes
-    ? ["--experimental-strip-types", kernel.path, ...args]
-    : [kernel.path, ...args];
-  return { failure: null, spawnArgs, root, kernelPath: kernel.path };
-}
-
 /** AC3 (gap-fan-in-instrument-availability-self-check): the two fan-in instruments are a worker-kind
  *  concern (its mechanical fan-in is their only consumer) — attach their readings to `status` for
  *  `worker` only. ⛔ stdout only: the probe never changes the command's success (exitCode untouched).
- *  Shared by both spawn arms so the concurrent path cannot silently drop the readings. */
+ *
+ *  ⛔ CLI-only (GOAL-033/AC-350): this decoration used to be applied inside `runDriver` /
+ *  `runDriverAsync`; those moved to core-root (`../driver-control.ts`), which ⛔ must not import
+ *  `../fan-in/`. `handleDriver` therefore applies it here, on the kernel's RAW stdout, reusing the
+ *  `root`/`kernelPath` that the SAME spawn resolution already returned (⛔ no second resolution).
+ *  ⚠️ `cli/server.ts` and `serve-sessions.ts` read the raw stdout — they parse named fields only and
+ *  never read `instruments`, so dropping the decoration on those two paths is unobservable. */
 function withWorkerInstrumentReadings(
   verb: string,
   kind: string | undefined,
@@ -426,73 +324,4 @@ function withWorkerInstrumentReadings(
   return verb === "status" && kind === "worker"
     ? withInstrumentReadings(stdout, root, path.dirname(kernelPath))
     : stdout;
-}
-
-/** The SYNC delegation: `spawnSync` the kernel and wait. Unchanged behaviour — see `runDriverAsync`
- *  for the concurrent twin. */
-export function runDriver(
-  verb: string,
-  kind: string | undefined,
-  rest: string[],
-  rootFlag: string | undefined,
-): DriverRunResult {
-  const inv = resolveDriverInvocation(verb, kind, rest, rootFlag);
-  if (inv.failure !== null) return inv.failure;
-  const r = spawnSync(process.execPath, inv.spawnArgs, { encoding: "utf8" });
-  const stdout = withWorkerInstrumentReadings(verb, kind, r.stdout ?? "", inv.root, inv.kernelPath);
-  return { ok: true, reason: null, stdout, stderr: r.stderr ?? "", exitCode: r.status ?? 1 };
-}
-
-/** The ASYNC twin of `runDriver`: SAME validation/root/kernel resolution and the SAME argv (both go
- *  through `resolveDriverInvocation`), but spawns with the async `spawn` so N independent
- *  delegations can run CONCURRENTLY under `Promise.all`.
- *
- *  WHY IT EXISTS (gap-server-status-six-serial-driver-runtime-cold-spawns): `quay server status`
- *  reads six driver kinds, and each read is a FULL cold Node start + `--experimental-strip-types`
- *  transpile (measured 0.23–1.02s per kind on this repo). Serialised through `spawnSync` that is the
- *  SUM of six process starts — measured 3.92–4.07s wall for a ~3.2KB response body, i.e. the latency
- *  is process startup, ⛔ not I/O and ⛔ not serialisation. The six reads share no mutable state
- *  (each kernel opens only its own kind's carriers), so concurrency collapses the wall clock to
- *  ≈ the slowest single kind.
- *
- *  ⛔ A failed spawn is reported the SAME way the sync arm reports it: `spawnSync` yields
- *  `status:null` ⇒ `exitCode 1`, empty stdout, `ok:true`; the caller's parser then renders
- *  `unevaluated("driver status produced no JSON frame (exit 1)")`. Mirroring that here keeps
- *  「一个 kind 起不来」 from acquiring a different shape just because the call site went concurrent
- *  (硬规则 3b: the failure must stay a reading, not become an absence). */
-export function runDriverAsync(
-  verb: string,
-  kind: string | undefined,
-  rest: string[],
-  rootFlag: string | undefined,
-): Promise<DriverRunResult> {
-  const inv = resolveDriverInvocation(verb, kind, rest, rootFlag);
-  if (inv.failure !== null) return Promise.resolve(inv.failure);
-  return new Promise<DriverRunResult>((resolve) => {
-    const child = spawn(process.execPath, inv.spawnArgs);
-    const out: Buffer[] = [];
-    const err: Buffer[] = [];
-    let settled = false;
-    const finish = (r: DriverRunResult) => {
-      if (settled) return;
-      settled = true;
-      resolve(r);
-    };
-    child.stdout.on("data", (c: Buffer) => out.push(c));
-    child.stderr.on("data", (c: Buffer) => err.push(c));
-    // Spawn-level failure (ENOENT / EACCES on the interpreter): same reading as the sync arm's
-    // `status:null` — see the doc comment. stderr stays "" so the two arms cannot disagree on what
-    // a failed spawn looks like; the caller renders it through the no-JSON-frame path.
-    child.on("error", () => finish({ ok: true, reason: null, stdout: "", stderr: "", exitCode: 1 }));
-    child.on("close", (code: number | null) => {
-      const stdout = withWorkerInstrumentReadings(
-        verb,
-        kind,
-        Buffer.concat(out).toString("utf8"),
-        inv.root,
-        inv.kernelPath,
-      );
-      finish({ ok: true, reason: null, stdout, stderr: Buffer.concat(err).toString("utf8"), exitCode: code ?? 1 });
-    });
-  });
 }

@@ -44,10 +44,11 @@ import { writeJsonAtomic } from "./kernel/write-json-atomic.ts";
 // single-sourced in the kernel leaf `./kernel/proc-identity.ts` (extracted from the reaper, which
 // re-exports them for its own callers) — ⛔ not reimplemented here (second copy = drift).
 import { readProcCmdline, isQuayServe } from "./kernel/proc-identity.ts";
-// The service inventory is a ZERO-IMPORT leaf module (cli/driver-vocab.ts) because the same names
-// appear in `quay --help`'s statically-imported help text — this file's graph must not be pulled in
-// just to print them. One list, two consumers.
-import { ALL_SERVICE_NAMES, HOSTED_SERVICE_NAMES } from "./cli/driver-vocab.ts";
+// The service inventory is a ZERO-IMPORT leaf module (driver-vocab.ts, core-root) because the same
+// names appear in `quay --help`'s statically-imported help text — this file's graph must not be
+// pulled in just to print them. One list, two consumers. ⛔ It lives in core-root, NOT `cli/`: this
+// host IS core, and importing a cli/ module from here is the core-root → cli edge GOAL-033 removes.
+import { ALL_SERVICE_NAMES } from "./driver-vocab.ts";
 
 // ══ 服务清单 + 期望态载体（GOAL-017 / AC-254, SPEC §6.9 阶段 B）══════════════════════════════════
 //

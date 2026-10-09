@@ -145,10 +145,10 @@ const AUTHORITIES: AuthoritySpec[] = [
   // 白名单副本），而是 kernel 的那张数据表 —— respawn 循环、pid/控制态、carrier、per-kind 动词全部由
   // `DRIVER_KINDS` 驱动，新增一个 kind 的第一处永远是它（driver-runtime.ts 的头注释逐字如此规定）。
   { id: "driver-kind", file: "plugin/scripts/driver-runtime.ts", symbol: "DRIVER_KINDS", extract: "ts-object-keys" },
-  // CLI 的 verb 词表已移入零依赖叶模块 cli/driver-vocab.ts（gap-driver-cli-help-hides-four-of-six-kinds）
+  // CLI 的 verb 词表已移入零依赖叶模块 driver-vocab.ts（gap-driver-cli-help-hides-four-of-six-kinds）
   // —— help.ts 被 bin/quay.ts 静态 import，把词表留在 cli/driver.ts 会让每次 CLI 调用多付 0.4s
   // （该文件的传递闭包带 config.ts/plugin-root.ts）。权威位置随词表移动，⛔ 不是新增一个来源。
-  { id: "driver-verb", file: "packages/quay/src/cli/driver-vocab.ts", symbol: "VERBS", extract: "ts-array" },
+  { id: "driver-verb", file: "packages/quay/src/driver-vocab.ts", symbol: "VERBS", extract: "ts-array" },
   { id: "goal-status", file: "packages/quay/src/abi.ts", symbol: "GOAL_STATUSES", extract: "ts-array" },
   { id: "meta-status", file: "packages/quay/src/abi.ts", symbol: "META_STATUSES", extract: "ts-array" },
   { id: "task-status", file: "packages/quay/src/abi.ts", symbol: "TASK_STATUSES", extract: "ts-array" },
@@ -158,26 +158,26 @@ const AUTHORITIES: AuthoritySpec[] = [
 
 const SURFACES: SurfaceSpec[] = [
   // ── driver kind（6 值）──────────────────────────────────────────────────────────────────────────
-  { id: "cli-driver-kinds", authority: "driver-kind", file: "packages/quay/src/cli/driver-vocab.ts", extract: "ts-array", symbol: "KINDS", policy: "exact" },
+  { id: "cli-driver-kinds", authority: "driver-kind", file: "packages/quay/src/driver-vocab.ts", extract: "ts-array", symbol: "KINDS", policy: "exact" },
   { id: "driver-config-union", authority: "driver-kind", file: "plugin/scripts/driver-config.ts", extract: "ts-string-union", anchor: "kind:\\s*", policy: "exact" },
   { id: "web-driver-kinds", authority: "driver-kind", file: "packages/quay/src/serve-sessions.ts", extract: "ts-array", symbol: "WEB_DRIVER_KINDS", policy: "subset" },
   { id: "start-drivers-kinds", authority: "driver-kind", file: "plugin/scripts/start-drivers.ts", extract: "ts-array", symbol: "DRIVER_KINDS", policy: "exact" },
-  // cli/driver.ts 与 cli/help.ts 的 kind 帮助文本：**运行时派生**自 cli/driver-vocab.ts:KINDS
+  // cli/driver.ts 与 cli/help.ts 的 kind 帮助文本：**运行时派生**自 driver-vocab.ts:KINDS
   // （Core ⛔ 不能静态 import plugin/ 的 kernel —— 见 SurfaceSpec.derivesFrom 的注释）。
   { id: "cli-driver-help-kind", authority: "driver-kind", file: "packages/quay/src/cli/driver.ts", extract: "text", anchor: "--kind <([a-z-]+\\|[a-z|-]+)>", policy: "exact",
-    derivesFrom: { file: "packages/quay/src/cli/driver-vocab.ts", symbol: "KINDS", extract: "ts-array", spelling: "--kind <\\$\\{[^}]*\\bKINDS\\b[^}]*\\}>" } },
+    derivesFrom: { file: "packages/quay/src/driver-vocab.ts", symbol: "KINDS", extract: "ts-array", spelling: "--kind <\\$\\{[^}]*\\bKINDS\\b[^}]*\\}>" } },
   { id: "cli-help-kind", authority: "driver-kind", file: "packages/quay/src/cli/help.ts", extract: "text", anchor: "--kind <([a-z-]+\\|[a-z|-]+)>", policy: "exact",
-    derivesFrom: { file: "packages/quay/src/cli/driver-vocab.ts", symbol: "KINDS", extract: "ts-array", spelling: "--kind <\\$\\{[^}]*\\bKINDS\\b[^}]*\\}>" } },
+    derivesFrom: { file: "packages/quay/src/driver-vocab.ts", symbol: "KINDS", extract: "ts-array", spelling: "--kind <\\$\\{[^}]*\\bKINDS\\b[^}]*\\}>" } },
   { id: "driver-runtime-help-kind", authority: "driver-kind", file: "plugin/scripts/driver-runtime.ts", extract: "text", anchor: "--kind <([a-z-]+\\|[a-z|-]+)>", policy: "exact" },
   { id: "claude-md-driver-kind", authority: "driver-kind", file: "CLAUDE.md", extract: "text", anchor: "--kind <([a-z-]+\\|[a-z|-]+)>", policy: "exact" },
   { id: "drivers-skill-kind", authority: "driver-kind", file: "plugin/skills/drivers/SKILL.md", extract: "text", anchor: "--kind ([a-z-]+\\|[a-z|-]+)", policy: "exact" },
   // ── driver verb（6 值）──────────────────────────────────────────────────────────────────────────
   { id: "web-driver-verbs", authority: "driver-verb", file: "packages/quay/src/serve-sessions.ts", extract: "ts-array", symbol: "WEB_DRIVER_VERBS", policy: "subset" },
-  // 同上：verb 帮助文本运行时派生自 cli/driver-vocab.ts:VERBS。
+  // 同上：verb 帮助文本运行时派生自 driver-vocab.ts:VERBS。
   { id: "cli-help-driver-usage-verbs", authority: "driver-verb", file: "packages/quay/src/cli/help.ts", extract: "text", anchor: "quay driver <([a-z|]+)>", policy: "exact",
-    derivesFrom: { file: "packages/quay/src/cli/driver-vocab.ts", symbol: "VERBS", extract: "ts-array", spelling: "quay driver <\\$\\{[^}]*\\bVERBS\\b[^}]*\\}>" } },
+    derivesFrom: { file: "packages/quay/src/driver-vocab.ts", symbol: "VERBS", extract: "ts-array", spelling: "quay driver <\\$\\{[^}]*\\bVERBS\\b[^}]*\\}>" } },
   { id: "cli-driver-usage-verbs", authority: "driver-verb", file: "packages/quay/src/cli/driver.ts", extract: "text", anchor: "quay driver <([a-z|]+)>", policy: "exact",
-    derivesFrom: { file: "packages/quay/src/cli/driver-vocab.ts", symbol: "VERBS", extract: "ts-array", spelling: "quay driver <\\$\\{[^}]*\\bVERBS\\b[^}]*\\}>" } },
+    derivesFrom: { file: "packages/quay/src/driver-vocab.ts", symbol: "VERBS", extract: "ts-array", spelling: "quay driver <\\$\\{[^}]*\\bVERBS\\b[^}]*\\}>" } },
   // ── goal status ────────────────────────────────────────────────────────────────────────────────
   { id: "goal-store-valid-statuses", authority: "goal-status", file: "packages/quay/src/goal-store.ts", extract: "ts-array", symbol: "VALID_GOAL_STATUSES", policy: "exact" },
   { id: "native-goal-write-desc", authority: "goal-status", file: "packages/quay-native/src/mcp-server.ts", extract: "text", anchor: "one goal record[^\\n]*?status ∈ ([a-z|-]+)", policy: "exact" },

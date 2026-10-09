@@ -11,12 +11,12 @@
 // get at least minimal guidance.
 //
 // gap-driver-cli-help-hides-four-of-six-kinds: the `driver` block below DERIVES its verb/kind
-// spellings from cli/driver-vocab.ts's VERBS/KINDS (`${…join("|")}`) — ⛔ 不再手抄。这是用户与 agent
+// spellings from ../driver-vocab.ts's VERBS/KINDS (`${…join("|")}`) — ⛔ 不再手抄。这是用户与 agent
 // 唯一看得到的那份驱动帮助（`quay driver --help` 由 bin/quay.ts 路由到这里，⛔ 不是 cli/driver.ts
 // 里那份同名内联文本），修前它只列 2 个 kind 而真源有 6 个 ⇒ outer/quality/meta/goal 四个已实现的
 // kind 在产品表层等于不存在。
 
-import { ALL_SERVICE_NAMES, KINDS, VERBS } from "./driver-vocab.ts";
+import { ALL_SERVICE_NAMES, KINDS, VERBS } from "../driver-vocab.ts";
 // The web binding's ONE fallback (a leaf module, zero closure deps). Interpolated rather than
 // re-typed: the help text is a DERIVED surface, so the default it prints is the same value the
 // resolver uses — the two cannot drift (gap-serve-binding-defaults-three-copies-to-one-definition-point AC8).

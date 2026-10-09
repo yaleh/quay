@@ -52,8 +52,8 @@ import {
 import { parseServiceList, readServiceState, writeServiceState } from "../serve.ts";
 // The service NAMES come from the zero-import leaf (same reason as help.ts): one list, three
 // consumers. ⛔ Never re-declare them here.
-import { ALL_SERVICE_NAMES, DRIVER_SERVICE_KINDS, HOSTED_SERVICE_NAMES } from "./driver-vocab.ts";
-import { runDriver, runDriverAsync } from "./driver.ts";
+import { ALL_SERVICE_NAMES, DRIVER_SERVICE_KINDS, HOSTED_SERVICE_NAMES } from "../driver-vocab.ts";
+import { runDriver, runDriverAsync } from "../driver-control.ts";
 // The host's log routing is SINGLE-SOURCED (gap-server-host-spawn-discards-stdio-while-start-drivers-
 // logs-to-serve-log): this file and plugin/scripts/start-drivers.ts are the two spawn sites of the
 // SAME host, and they used to disagree — `startServe` appended to `.quay/serve.log`, `spawnHost`
