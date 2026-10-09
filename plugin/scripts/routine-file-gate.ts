@@ -271,9 +271,10 @@ export function routineQuotaDecision(
 }
 
 // ── gateFinding ──────────────────────────────────────────────────────────────────────────────────
-// candidate: the new task text. opts: { existingKeys:Set|[], recentCount:number, K:number }.
+// candidate: the new task text.
+// opts: { existingKeys:Set|[], recentCount:number, K:number, quota?:{accept,reason}|null }.
 // Returns { accept, reason }.
-export function gateFinding(candidate: string, { existingKeys = [] as string[], recentCount = 0, K = DEFAULT_RATE }: { existingKeys?: Set<string> | readonly string[]; recentCount?: number; K?: number } = {}): { accept: boolean; reason: string; dedup: DedupReading | null } {
+export function gateFinding(candidate: string, { existingKeys = [] as string[], recentCount = 0, K = DEFAULT_RATE, quota = null as { accept: boolean; reason: string } | null }: { existingKeys?: Set<string> | readonly string[]; recentCount?: number; K?: number; quota?: { accept: boolean; reason: string } | null } = {}): { accept: boolean; reason: string; dedup: DedupReading | null } {
   if (!isActionable(candidate)) return { accept: false, reason: "quality: no actionable `## Finding` with reproduction evidence", dedup: null };
   // The dedup judgment is ONE call into ONE implementation (`dedupReading`, which carries the
   // matched key AND the holder's status into the reason): the reason is recorded verbatim in the
@@ -281,13 +282,17 @@ export function gateFinding(candidate: string, { existingKeys = [] as string[], 
   // a candidate, so an over-block reads exactly like a correct suppression (硬规则 3: 枚举不布尔).
   const dedup = dedupReading(existingKeys, findingKey(candidate));
   if (dedup.block) return { accept: false, reason: dedup.reason, dedup };
-  // The per-routine rate rejection now flows through the shared PURE policy (routineQuotaDecision).
-  // ⛔ 过渡期把 global 读数也传 recentCount、天花板设 Infinity：`counts.global >= Infinity` 恒 false、
-  // per-routine 分支的 reason 字符串与旧代码逐字相同 ⇒ 现有调用方（probe-routine.ts/meta-driver.ts）
-  // 的外部行为逐字不变（迁移兼容的取假点）。真正把【有限】天花板与全局读数一起喂进来，留给
-  // gap-routine-quota-consumer-convergence。
-  const quota = routineQuotaDecision({ perRoutine: recentCount, global: recentCount }, { k: K, globalCeiling: Infinity });
-  if (!quota.accept) return { accept: false, reason: quota.reason, dedup };
+  // The rate/global-rate rejection flows through the shared PURE policy (routineQuotaDecision).
+  // `quota` lets a caller that HAS the real global reading (probe-routine.ts / meta-driver.ts, after
+  // gap-routine-quota-consumer-convergence) supply the decision computed with the FINITE global
+  // ceiling; it is checked HERE, AFTER quality and dedup, so the reported rejection order stays
+  // quality → dedup → rate/global-rate (⛔ a duplicate must never be reported as an over-rate).
+  // ⛔ `quota === null` (没给) keeps the migration-time shape VERBATIM: global reading = recentCount,
+  // ceiling = Infinity ⇒ `counts.global >= Infinity` is always false, the per-routine reason string is
+  // byte-identical to the pre-policy code, and every caller that passes only recentCount/K (all
+  // existing tests included) behaves byte-for-byte as before.
+  const q = quota ?? routineQuotaDecision({ perRoutine: recentCount, global: recentCount }, { k: K, globalCeiling: Infinity });
+  if (!q.accept) return { accept: false, reason: q.reason, dedup };
   // ⚠️ A `novel` acceptance keeps the pre-status reason VERBATIM; when the candidate matched keys
   // that are all CLOSED, the reason carries that fact — ⛔ an accepted finding whose subject is
   // 「板上只有 done」 must not read like 「板上什么都没有」 (硬规则 3).
