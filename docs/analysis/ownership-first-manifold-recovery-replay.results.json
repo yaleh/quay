@@ -1,0 +1,174 @@
+{
+  "feature_vectors": {
+    "GOAL-030": {
+      "has_archguard_before_after": true,
+      "has_negative_control": true,
+      "has_branch_selfhost_probe": true,
+      "has_explicit_non_goals": true,
+      "has_stop_signal_list": true,
+      "has_three_state_exit_code": true,
+      "sink_target_is_kernel": true,
+      "human_activated": true,
+      "merge_shape_single_commit": true
+    },
+    "GOAL-031": {
+      "has_archguard_before_after": true,
+      "has_negative_control": false,
+      "has_branch_selfhost_probe": true,
+      "has_explicit_non_goals": true,
+      "has_stop_signal_list": true,
+      "has_three_state_exit_code": true,
+      "sink_target_is_kernel": true,
+      "human_activated": false,
+      "merge_shape_single_commit": true
+    },
+    "GOAL-032": {
+      "has_archguard_before_after": true,
+      "has_negative_control": true,
+      "has_branch_selfhost_probe": true,
+      "has_explicit_non_goals": true,
+      "has_stop_signal_list": true,
+      "has_three_state_exit_code": true,
+      "sink_target_is_kernel": true,
+      "human_activated": true,
+      "merge_shape_single_commit": true
+    }
+  },
+  "checkpoints": [
+    {
+      "checkpoint": 1,
+      "visible_goals": [
+        "GOAL-030"
+      ],
+      "pairwise_agreement_scores": {},
+      "trigger_fired": false
+    },
+    {
+      "checkpoint": 2,
+      "visible_goals": [
+        "GOAL-030",
+        "GOAL-031"
+      ],
+      "pairwise_agreement_scores": {
+        "GOAL-030|GOAL-031": 7
+      },
+      "trigger_fired": true
+    },
+    {
+      "checkpoint": 3,
+      "visible_goals": [
+        "GOAL-030",
+        "GOAL-031",
+        "GOAL-032"
+      ],
+      "pairwise_agreement_scores": {
+        "GOAL-030|GOAL-031": 7,
+        "GOAL-030|GOAL-032": 9,
+        "GOAL-031|GOAL-032": 7
+      },
+      "trigger_fired": true
+    }
+  ],
+  "first_threshold_checkpoint": 2,
+  "source_files": {
+    "GOAL-030": "goals/GOAL-030-晋升写入经-kernel-转移决策并留痕-goal-分支首个真实试点-证明分支上运行的-quay-加载的是分支自己的代码.md",
+    "GOAL-031": "goals/GOAL-031-needs-human-状态词汇-canonicalization-试点-goal-driver-ts-5-处裸字面量收.md",
+    "GOAL-032": "goals/GOAL-032-verdict-parser-ownership-收敛试点-parsefidelityverdict-parsesema.md"
+  },
+  "contracts": {
+    "checkpoint_2": {
+      "owner_concern": "Recurring small-slice refactor pattern: a code-duplication/ownership-misplacement signal is sunk to a canonical layer, proven via before/after structural (ArchGuard-shaped) comparison plus a constructed negative control and a branch-self-host code-identity proof, then merged as exactly one commit under explicit human activation.",
+      "scope": {
+        "owned_reading_classes": [
+          "archguard_dependency_or_duplicate_metrics",
+          "goal_branch_merge_shape"
+        ],
+        "owned_mechanisms_or_paths": [
+          "goal-branch ownership-first refactor slices (destination layer unspecified at this checkpoint)"
+        ]
+      },
+      "inputs": [
+        "before/after structural comparison readings",
+        "goal body non-goals/stop-signal sections",
+        "human activation ruling text"
+      ],
+      "forbidden_actions": [
+        "direct-task-create",
+        "direct-goal-activate",
+        "scope-expansion-beyond-declared-non-goals"
+      ],
+      "success_metrics": [
+        "structural_metric_delta_direction",
+        "merge_shape_single_commit_rate",
+        "negative_control_presence_rate"
+      ],
+      "replay_dataset": {
+        "snapshots": [
+          "GOAL-030",
+          "GOAL-031"
+        ],
+        "ground_truth_cases": [
+          "GOAL-030",
+          "GOAL-031"
+        ]
+      },
+      "stop_retire_criteria": [
+        "no_matching_pattern_in_next_goal_sample",
+        "overlap_detected_with_other_ownership_proposer"
+      ],
+      "derived_from_checkpoint": 2,
+      "pairwise_agreement_at_derivation": 7,
+      "note": "Synthesized from boolean feature vectors ONLY (per task constraint) — negative_control and human_activated differed between GOAL-030/031, so this contract omits any claim both are universal; omitted entirely is WHICH layer things sink to (e.g. \"kernel\") and WHAT domain each slice covers, since the feature vector has no field for that — those would require relaxing the prose-free constraint."
+    },
+    "checkpoint_3": {
+      "owner_concern": "Same concern as checkpoint 2, reconfirmed by a third independent sample (GOAL-032): a code-duplication/ownership-misplacement signal sunk to a canonical layer, proven via before/after structural comparison, a negative control, and branch-self-host identity, merged as exactly one commit under explicit human activation.",
+      "scope": {
+        "owned_reading_classes": [
+          "archguard_dependency_or_duplicate_metrics",
+          "goal_branch_merge_shape"
+        ],
+        "owned_mechanisms_or_paths": [
+          "goal-branch ownership-first refactor slices"
+        ]
+      },
+      "inputs": [
+        "before/after structural comparison readings",
+        "goal body non-goals/stop-signal sections",
+        "human activation ruling text"
+      ],
+      "forbidden_actions": [
+        "direct-task-create",
+        "direct-goal-activate",
+        "scope-expansion-beyond-declared-non-goals"
+      ],
+      "success_metrics": [
+        "structural_metric_delta_direction",
+        "merge_shape_single_commit_rate",
+        "negative_control_presence_rate"
+      ],
+      "replay_dataset": {
+        "snapshots": [
+          "GOAL-030",
+          "GOAL-031",
+          "GOAL-032"
+        ],
+        "ground_truth_cases": [
+          "GOAL-030",
+          "GOAL-031",
+          "GOAL-032"
+        ]
+      },
+      "stop_retire_criteria": [
+        "no_matching_pattern_in_next_goal_sample",
+        "overlap_detected_with_other_ownership_proposer"
+      ],
+      "derived_from_checkpoint": 3,
+      "pairwise_agreement_at_derivation": {
+        "GOAL-030|GOAL-031": 7,
+        "GOAL-030|GOAL-032": 9,
+        "GOAL-031|GOAL-032": 7
+      },
+      "note": "GOAL-030 and GOAL-032 agree on all 9/9 extracted features (perfect match); GOAL-031 still differs on negative_control and human_activated. Confidence strengthens but the contract content itself is materially unchanged from checkpoint 2 — this is an honest limit of a prose-free, feature-vector-only discovery step: it can confirm recurrence but cannot name the specific domain (task-transition vs task-status-vocab vs verdict-parser dedup) or the destination layer, since no feature field captures that."
+    }
+  }
+}
