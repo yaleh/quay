@@ -1,0 +1,66 @@
+{
+  "archguardVersion": "@yalehwang/archguard@0.1.38",
+  "archguardVersionSource": "Claude Code plugin `archguard@archguard` v0.1.38 (installed_plugins.json installPath /data/home/yale/.claude/plugins/cache/archguard/archguard/0.1.38), whose .mcp.json launches ${CLAUDE_PLUGIN_ROOT}/mcp-launcher.mjs; the launcher resolves the runtime entry @yalehwang/archguard/dist/cli/index.js from the plugin npm-cache sibling (/data/home/yale/.claude/plugins/npm-cache/node_modules/@yalehwang/archguard, package.json version 0.1.38). The SAME running MCP server produced all three segments below.",
+  "instrument": {
+    "tool": "archguard MCP — archguard_analyze (lang=typescript, format=json) then archguard_detect_cycles(outputScope=package) + archguard_get_package_metrics(packageName=cli)",
+    "sourcesOption": ["packages/quay/src"],
+    "scopeDiscipline": "each segment records the scope key echoed back by archguard_analyze and passes it explicitly to the query tools (never omitted — omission silently selects a stale unrelated scope)",
+    "sameBuildNote": "before / after / negativeControl all analysed in one session against one running MCP server (0.1.38); no rebuild, no version change between segments"
+  },
+  "before": {
+    "label": "fork point",
+    "ref": "1ac06fd85094a58d4954640811a787873f8ad2a1 (detached worktree /home/yale/work/quay-worktrees/goal033-fork)",
+    "commitSha": "1ac06fd85094a58d4954640811a787873f8ad2a1",
+    "treeSha": "5213eb614130bf9f8ade9e38b46da7e60fb1c536",
+    "treeShaOf": "packages/quay/src subtree at the fork point (git rev-parse 1ac06fd85:packages/quay/src)",
+    "scopeKey": "50485561",
+    "entityCount": 981,
+    "packageSccMembers": ["", "cli", "fan-in", "gate", "gate/config", "gate/factories"],
+    "packageSccSize": 6,
+    "cliPackageFanIn": 2,
+    "cliPackageFanOut": 102,
+    "packageSccContainsCli": true
+  },
+  "after": {
+    "label": "goal branch tip",
+    "ref": "goal/GOAL-033 tip d1ea4331d840777f63aef1d2267a25dd39f6d884 (task worktree /home/yale/work/quay-worktrees/gap-goal033-selfhost-and-archguard-evidence; independently reproduced in a second detached worktree at the same tip)",
+    "commitSha": "d1ea4331d840777f63aef1d2267a25dd39f6d884",
+    "treeSha": "d97c37aad16e852288bbf00529d3d893d22444e8",
+    "treeShaOf": "packages/quay/src subtree at the goal branch tip (git rev-parse goal/GOAL-033:packages/quay/src)",
+    "scopeKey": "c85d8d95",
+    "entityCount": 982,
+    "packageSccMembers": ["", "gate", "gate/config", "gate/factories"],
+    "packageSccSize": 4,
+    "cliPackageFanIn": 0,
+    "cliPackageFanOut": 111,
+    "packageSccContainsCli": false
+  },
+  "negativeControl": {
+    "injected": "import { handleDriver } from \"./cli/driver.ts\"; added at the top of packages/quay/src/serve-sessions.ts in a scratch copy of the moved tree, PLUS a real value use `await handleDriver(undefined as never)` inside an added exported function (a bare/unused import registers in detect_cycles' file-import graph but NOT in get_package_metrics' resolved-dependency graph — see methodNote).",
+    "scratch": "/home/yale/work/quay-worktrees/goal033-negctl (deleted after reading; not part of the repo)",
+    "scopeKey": "0eef3e04",
+    "entityCount": 983,
+    "cliPackageFanIn": 1,
+    "packageSccContainsCli": true,
+    "packageSccMembers": ["", "cli", "fan-in", "gate", "gate/config", "gate/factories"],
+    "packageSccSize": 6,
+    "conclusion": "the reading is FALSIFIABLE: re-injecting exactly one core-root -> cli edge brings cli (fan-in 0 -> 1) back into the size-6 package SCC.",
+    "methodNote": "The task Plan prescribed the bare `import { handleDriver } from \"./cli/driver.ts\";` (no usage). Measured: that injection alone gives packageSccContainsCli=true but cliPackageFanIn=0 — detect_cycles sees the import statement, get_package_metrics counts only resolved value dependencies. A real use of the imported symbol is required for the fanIn half of the negative control to move."
+  },
+  "consumerConvergence": [
+    { "file": "packages/quay/src/serve-sessions.ts", "line": 20, "importLine": "import { runDriver } from \"./driver-control.ts\";" },
+    { "file": "packages/quay/src/serve.ts", "line": 51, "importLine": "import { ALL_SERVICE_NAMES } from \"./driver-vocab.ts\";" },
+    { "file": "packages/quay/src/cli/server.ts", "line": 56, "importLine": "import { runDriver, runDriverAsync } from \"../driver-control.ts\";" },
+    { "file": "packages/quay/src/cli/driver.ts", "line": 42, "importLine": "import { KINDS, VERBS } from \"../driver-vocab.ts\";" },
+    { "file": "packages/quay/src/cli/help.ts", "line": 19, "importLine": "import { ALL_SERVICE_NAMES, KINDS, VERBS } from \"../driver-vocab.ts\";" }
+  ],
+  "packageEdgeDelta": {
+    "method": "package-level dependency edges aggregated from each segment's own .archguard/query/<scopeKey>/arch.json relations (dependency relations, entity -> entity), projected onto the containing directory (package). cross-package edges only.",
+    "beforeOnlyEdges": [" -> cli"],
+    "afterOnlyEdges": [],
+    "invariant": "the ONLY package edge that disappeared between before and after is core-root(\"\") -> cli; no edge was added. The goal touched exactly the two core-root -> cli imports it set out to remove and created no new edge (in particular no core-root -> fan-in edge).",
+    "whyFanInAlsoLeft": "fan-in's ONLY incoming package edge is cli -> fan-in (the sole importer of ../fan-in/ff-merge.ts is cli/driver.ts). fan-in -> \"\" exists (fan-in/ff-merge.ts imports ../plugin-root.ts, ../config.ts, ../runtime-artifacts.ts). Before, fan-in was in the SCC via the cycle \"\" -> cli -> fan-in -> \"\". Removing \"\" -> cli leaves fan-in reachable only from cli, which itself has no incoming edge — so BOTH cli and fan-in leave the SCC (6 -> 4), not 5."
+  },
+  "analysisNote": "MEASURED after-SCC is size 4 ([\"\",\"gate\",\"gate/config\",\"gate/factories\"]), NOT the size 5 with fan-in that GOAL-033 / AC-351 predicted. The prediction is structurally impossible under the goal's own constraint: keeping fan-in in the SCC would require a core-root -> fan-in edge (the goal forbids it and AC-350 asserts its absence). Removing core-root -> cli necessarily also removes fan-in (fan-in's only in-edge is cli -> fan-in). This file records the measured truth; AC-351's `rest` expectation (with fan-in) is falsified.",
+  "generatedAt": "2026-10-09T06:30:00.000Z"
+}
