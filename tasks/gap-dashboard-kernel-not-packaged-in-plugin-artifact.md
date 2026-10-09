@@ -2,7 +2,7 @@
 id: gap-dashboard-kernel-not-packaged-in-plugin-artifact
 title: dashboard-kernel 不在任何发布产物里：sync-vendor 只按文件名镜像 dist/quay.js，vendor
   package.json 又被重写成无 exports——发布 0.18.0 也对消费方不可达
-status: ready
+status: done
 labels:
   - gap
   - defect
