@@ -1,4 +1,13 @@
 // @test-group engine
+// @load-sensitive fixture-vs-sweeper
+// (gap-worktree-process-reaper-probe-fixed-sleep-load-race) The two real-process cases below
+//   (`--worktree` real-kill at ~:300, `--orphans` deleted-cwd at ~:340) spawn `bash -c 'exec -a …'`
+//   fixtures and then run the reaper — a SWEEPER — against a LIVE fixture. That is the
+//   fixture-vs-sweeper root cause (same kind as test-isolation-check / tmux-leak-scan): under
+//   full-suite concurrency the fixture's own `chdir`/`exec -a` may not have run before the sweep,
+//   so the fixture is judged by the wrong argv0/cwd. The windows are now bounded polls to readiness
+//   (not fixed sleeps) — this annotation makes red-window triage classify a future red as
+//   load-sensitive (isolate-rerun) rather than attributing it to an unrelated task.
 // worktree-process-reaper.test.mjs — tasks/gap-worktree-remove-orphans-probes.
 // 测试钉住 plugin/scripts/worktree-process-reaper.ts：
 //   1. `--worktree <path>` 模式 — `git worktree remove` 前扫 worktree 路径下的活子进程（claude-probe
@@ -13,7 +22,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { spawn, spawnSync } from "node:child_process";
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -24,6 +33,8 @@ import {
   isRealClaude,
   isProbe,
   cwdUnder,
+  readProcCwd,
+  readProcArgv0,
   classifyForWorktree,
   classifyOrphans,
   fullSuiteLockFiles,
@@ -55,6 +66,35 @@ function tmp(prefix) {
 
 function cleanup(dir) {
   try { rmSync(dir, { recursive: true, force: true }); } catch (_) { /* best-effort */ }
+}
+
+/** `/proc/<pid>/status` (first few lines) or an explicit unreadable note — the diagnosable payload
+ *  printed when a `waitUntil` times out, so a failure names WHAT was observed rather than degrading
+ *  into a bare "empty value" (硬规则 3b / rule-4c). */
+function procDiag(pid) {
+  try {
+    return readFileSync(`/proc/${pid}/status`, "utf8").trim().split("\n").slice(0, 4).join(" | ");
+  } catch (e) {
+    return `/proc/${pid}/status unreadable: ${e.code ?? e.message}`;
+  }
+}
+
+/**
+ * Bounded poll: resolve (returning the elapsed ms) as soon as `predicate()` is truthy; otherwise
+ * throw with `diag()`. Replaces the `await sleep(N)`-then-assert pattern, whose fixed window loses
+ * to scheduler delay whenever the host is loaded — the fixture's `chdir`/`exec -a` may simply not
+ * have run yet, which is a measurement of the host's load, not of the reaper
+ * (gap-worktree-process-reaper-probe-fixed-sleep-load-race).
+ */
+async function waitUntil(predicate, { timeoutMs = 5000, intervalMs = 25, label = "condition", diag = () => "" } = {}) {
+  const t0 = Date.now();
+  for (;;) {
+    if (predicate()) return Date.now() - t0;
+    if (Date.now() - t0 >= timeoutMs) {
+      throw new Error(`waitUntil(${label}) timed out after ${timeoutMs}ms — observed: ${diag()}`);
+    }
+    await sleep(intervalMs);
+  }
 }
 
 /** Seam record: `<pid>\0<cwd>\0<argv0>\0<state>\0<ppid>\0<fds>` */
@@ -288,16 +328,41 @@ test("CLI --worktree — real reaps a claude-probe fixture under the worktree, k
   // real claude session with cwd under the worktree — must NOT be reaped (AC2)
   const real = spawn("bash", ["-c", 'exec -a claude sleep 10000'], { cwd: wt, stdio: "ignore", detached: false });
   try {
-    await sleep(300);
+    // READINESS, not a fixed 300ms sleep. Both fixtures must have applied their `cwd` under `wt`
+    // AND finished their `exec -a` before the reaper runs: `--worktree` reaps anything under `wt`
+    // that is not argv0=`claude`, so a `real` still exec'ing as `bash` would be mis-killed by the
+    // reaper (a false AC2 failure), and a `probe` still exec'ing as `bash` would be classified by
+    // the wrong argv0. Bounded poll with a /proc diag on timeout
+    // (gap-worktree-process-reaper-probe-fixed-sleep-load-race).
+    const t0 = Date.now();
+    const readyMs = await waitUntil(
+      () => cwdUnder(readProcCwd(probe.pid), wt) && cwdUnder(readProcCwd(real.pid), wt)
+        && isProbe(readProcArgv0(probe.pid)) && isRealClaude(readProcArgv0(real.pid)),
+      {
+        timeoutMs: 5000,
+        label: "probe+real ready (cwd under wt, argv0 exec'd)",
+        diag: () => `probe pid=${probe.pid} cwd=${readProcCwd(probe.pid)} argv0=${JSON.stringify(readProcArgv0(probe.pid))} exit=${probe.exitCode}/${probe.signalCode} [${procDiag(probe.pid)}] | real pid=${real.pid} cwd=${readProcCwd(real.pid)} argv0=${JSON.stringify(readProcArgv0(real.pid))} exit=${real.exitCode}/${real.signalCode} [${procDiag(real.pid)}]`,
+      },
+    );
     assert.equal(probe.exitCode, null, "probe should still be running before the reaper");
     assert.equal(real.exitCode, null, "real claude should still be running before the reaper");
     const r = run(["--worktree", wt, "--json"]);
     assert.equal(r.status, 0, r.stderr);
     const out = JSON.parse(r.stdout);
     assert.ok(out.killed >= 1, `must have killed the probe: ${r.stdout}`);
-    await sleep(200);
+    // The reaper already SIGTERM'd the probe, but Node only sets exitCode/signalCode when it reaps
+    // the SIGCHLD — poll for that instead of a fixed 200ms wait.
+    await waitUntil(
+      () => probe.exitCode !== null || probe.signalCode !== null,
+      {
+        timeoutMs: 5000,
+        label: "probe reaped",
+        diag: () => `probe pid=${probe.pid} cwd=${readProcCwd(probe.pid)} argv0=${JSON.stringify(readProcArgv0(probe.pid))} exit=${probe.exitCode} signal=${probe.signalCode} [${procDiag(probe.pid)}]`,
+      },
+    );
     assert.ok(probe.exitCode !== null || probe.signalCode !== null, "claude-probe fixture must be dead after the reaper");
     assert.equal(real.exitCode, null, "real claude session must survive (AC2)");
+    console.log(`[duration_ms] --worktree real-kill: readiness poll settled in ${readyMs}ms, total ${Date.now() - t0}ms (poll, no fixed 300ms+200ms window)`);
   } finally {
     try { probe.kill("SIGKILL"); } catch (_) { /* best-effort */ }
     try { real.kill("SIGKILL"); } catch (_) { /* best-effort */ }
@@ -314,9 +379,32 @@ test("CLI --orphans — real reaps a probe whose cwd dir was deleted (the orphan
   // probe with cwd = orphanDir, then DELETE the dir → cwd becomes "<orphanDir> (deleted)"
   const probe = spawn("bash", ["-c", 'exec -a claude-probe sleep 10000'], { cwd: orphanDir, stdio: "ignore", detached: false });
   try {
-    await sleep(300);
+    // READINESS before deleting anything — this is the whole defect. Race the fixed 300ms instead
+    // and, under load, the delete lands before the child has run: its `chdir` then fails (dir gone)
+    // and bash exits ⇒ readlink gives nothing (the old `:321` empty-readlink arm), or the `exec -a`
+    // hasn't run ⇒ argv0 is still `bash` and the reaper's isProbe matches nothing (the old `:325`
+    // found:0 arm). Both fixtures are host-load measurements, not reaper measurements
+    // (gap-worktree-process-reaper-probe-fixed-sleep-load-race).
+    const t0 = Date.now();
+    const readyMs = await waitUntil(
+      () => cwdUnder(readProcCwd(probe.pid), orphanDir) && isProbe(readProcArgv0(probe.pid)),
+      {
+        timeoutMs: 5000,
+        label: "probe ready (cwd=orphanDir, argv0=claude-probe)",
+        diag: () => `probe pid=${probe.pid} cwd=${readProcCwd(probe.pid)} argv0=${JSON.stringify(readProcArgv0(probe.pid))} exit=${probe.exitCode}/${probe.signalCode} [${procDiag(probe.pid)}]`,
+      },
+    );
     rmSync(orphanDir, { recursive: true, force: true });
-    await sleep(200);
+    // Poll for the "(deleted)" cwd rather than a fixed 200ms wait; on timeout the diag names what
+    // was actually observed (never a silent empty-value red).
+    await waitUntil(
+      () => (readProcCwd(probe.pid) ?? "").includes("(deleted)"),
+      {
+        timeoutMs: 5000,
+        label: "probe cwd carries the (deleted) suffix",
+        diag: () => `probe pid=${probe.pid} cwd=${readProcCwd(probe.pid)} argv0=${JSON.stringify(readProcArgv0(probe.pid))} exit=${probe.exitCode} signal=${probe.signalCode} [${procDiag(probe.pid)}]`,
+      },
+    );
     // confirm the cwd now carries the deleted suffix
     const cwdCheck = spawnSync("readlink", [`/proc/${probe.pid}/cwd`], { encoding: "utf8" });
     assert.ok((cwdCheck.stdout ?? "").includes("(deleted)"), `probe cwd should be deleted: ${cwdCheck.stdout}`);
@@ -324,8 +412,16 @@ test("CLI --orphans — real reaps a probe whose cwd dir was deleted (the orphan
     assert.equal(r.status, 0, r.stderr);
     const out = JSON.parse(r.stdout);
     assert.ok(out.killed >= 1, `must have killed the orphan probe: ${r.stdout}`);
-    await sleep(200);
+    await waitUntil(
+      () => probe.exitCode !== null || probe.signalCode !== null,
+      {
+        timeoutMs: 5000,
+        label: "orphan probe reaped",
+        diag: () => `probe pid=${probe.pid} cwd=${readProcCwd(probe.pid)} exit=${probe.exitCode} signal=${probe.signalCode} [${procDiag(probe.pid)}]`,
+      },
+    );
     assert.ok(probe.exitCode !== null || probe.signalCode !== null, "orphan probe must be dead after the reaper");
+    console.log(`[duration_ms] --orphans deleted-cwd: readiness poll settled in ${readyMs}ms, total ${Date.now() - t0}ms (poll, no fixed 300ms+200ms window)`);
   } finally {
     try { probe.kill("SIGKILL"); } catch (_) { /* best-effort */ }
     cleanup(dir);
