@@ -41,6 +41,11 @@ packages/quay/plugin/
 **/dist-sea/
 **/dist-sea-release/
 **/.quay/gate-events.jsonl
+# ownership/architecture shadow proposer sandbox carrier (gap-ownership-shadow-proposer-contract-
+# and-replay): the proposer's ONLY persistence target while it is in shadow mode. Runtime state,
+# never git-tracked — same family as gate-events.jsonl. Leaving it untracked-but-visible made it
+# committable, which is exactly the "sandbox" property the shadow design depends on.
+**/.quay/ownership-shadow-proposals.jsonl
 # (.quay/goal-freshness-margin.json) — AC6 runtime carrier: the achieved-AC freshness
 # margin (distance/K) snapshot written by AC-214's criterion, so the margin is readable BEFORE
 # the criterion turns red (the runner surfaces a criterion's output only on failure). Runtime
