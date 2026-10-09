@@ -1,0 +1,34 @@
+{
+  "case_id": "GOAL-032",
+  "selected_concern": "Duplicate != equivalent: an ArchGuard duplicate-detection hit between two call sites' verdict parsers is structurally real, but duplication alone doesn't tell you whether to merge, and merging the wrong pair (one that's intentionally-divergent) would be a mistake. The investigation step must come first and must be explicit about what it did and didn't check.",
+  "selected_slice": "Having confirmed the parsing ALGORITHM (not the caller orchestration) is domain-agnostic — 'parse a judge's raw stdout into a three-state verdict, fail closed if unreadable' doesn't care whether the domain is fidelity or sufficiency, the legal-value strings are DATA not logic — sink exactly that shared algorithm into a new kernel module packages/quay/src/kernel/verdict-parse.ts exporting a generic parseBinaryVerdict(stdout, exitCode, positive, negative). The two original functions (parseFidelityVerdict, parseSemanticSufficiencyVerdict) become thin wrappers that call the kernel function, keeping their own name/signature/return type and zero caller changes — the caller-side orchestration differences (sync/uncached vs async/runAsync/2-sample-agreement/cache) are explicitly NOT touched, because ownership-first's own principle is that orchestration can legitimately stay where it is even when the underlying computation is unified.",
+  "why_now": "Third real goal-branch pilot, smallest scope yet (exactly one duplicate pair), chosen specifically to test whether the ownership-first method generalizes to a 'is this duplication real or just superficially similar' judgment call, not just to mechanical literal-convergence (GOAL-031) or new-layer-introduction (GOAL-030).",
+  "why_not_others": "Explicitly not expanded to any of the other ~27 dispersed-literal files a prior architecture review had already found for other verdict-shaped types (GateVerdictKind/DimensionState/ScopedGateVerdict) — that is a separate, larger, independent gap, deliberately out of scope here. Also explicitly not changing the two call sites' orchestration logic, since conflating 'the parsing is the same' with 'the orchestration should also be the same' would be exactly the kind of over-generalization the investigation was there to prevent.",
+  "risk": "If the equivalence conclusion is wrong (the two really are intentionally-divergent and only superficially similar), merging them would silently couple two things that should vary independently in the future.",
+  "scope_discipline": {
+    "non_goals": [
+      "do not touch any other verdict type (GateVerdictKind/DimensionState/ScopedGateVerdict and the other dispersed literals an earlier architecture review found)",
+      "do not touch the packages/quay/src directory-cycle issue",
+      "do not change criterionFidelityVerdict/sampleSemanticSufficiency's orchestration (sync/async, caching, 2-sample agreement) — only swap what they internally call, not their own signature or call pattern",
+      "do not restart any production driver process to make the new code 'take effect' — that's a separate human decision"
+    ],
+    "stop_signals": [
+      "same structural signals as GOAL-030/031 (code-identity falsified, production contamination, isolation failure)",
+      "interference with the concurrently-running gap-routine-quota-* tasks (different branches/worktrees, zero Touches overlap expected)",
+      "need to add a layers.yml edge",
+      "new directory cycle",
+      "baseline drift",
+      "escalating manual intervention"
+    ]
+  },
+  "acceptance_evidence": "Three ACs (AC-347..349), three-state exit codes. AC-348 requires an ArchGuard before/after pair showing the duplicate group disappears and the canonical-definition count for this parsing logic goes from 2 to 1, PLUS a negative control proving both call chains genuinely changed what they call (not just moved the file).",
+  "stop_abandon_condition": "Same abandon discipline as GOAL-030/031.",
+  "leakage_markers": [
+    "verdict-parse.ts",
+    "parseBinaryVerdict",
+    "薄包装",
+    "thin wrapper",
+    "canonical-definition count for this parsing logic goes from 2 to 1"
+  ],
+  "investigation_or_goal_reference": "goal"
+}
