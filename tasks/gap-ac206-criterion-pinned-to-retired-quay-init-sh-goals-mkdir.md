@@ -37,20 +37,86 @@ check ④（载体）**已通过**：`.quay/productization-verification.jsonl` �
 
 ## AC
 
-- [ ] AC1 check ③ 从「grep 已退役的 `plugin/scripts/quay-init.sh` 字面量」改为**活引擎行为探针**：在一次性 git 工作区跑 init 引擎，断言 `goals/` ∧ `tasks/` 两者均被创建（双载体），并断言产出的 `.quay/config.yml` 把 `QUAY_NATIVE_GOAL_DIR` 绑到该项目自己的 `goals/`。⛔ 不得改为 grep 另一个实现文件（那只是把同一个病推迟到下次重构）——判据必须读**行为**（硬规则 4b/4c）。贴可复现命令与真实读数。
-- [ ] AC2 check ①②④ 逐字不变；改完后在**本仓库 git root**（goal criterion 的固定 cwd）`bash -c "$(criterion)"` **exit 0**、stderr 为空。贴 exit code 与完整输出。
-- [ ] AC3 **能取假，不是恒真空转**（硬规则 4 推论三）：负控制——用一次性副本/fixture 令引擎不建 `goals/`（⛔ 不改生产代码），同一条 check ③ 必须红（exit 1 且 stderr 指名 goals 未建）；恢复后转绿。贴正/负两次读数。
-- [ ] AC4 声明侧与行为侧**成对**：check ①②（SPEC 闭集块、`CLOSED_SET_DIRS`）继续为真且与 check ③ 同时成立——任一单独成立都不够（避免 AC-204 风险 3 的「什么都不做也通过」）。贴 check ①② 的当前读数。
+- [x] AC1 check ③ 从「grep 已退役的 `plugin/scripts/quay-init.sh` 字面量」改为**活引擎行为探针**：在一次性 git 工作区跑 init 引擎，断言 `goals/` ∧ `tasks/` 两者均被创建（双载体），并断言产出的 `.quay/config.yml` 把 `QUAY_NATIVE_GOAL_DIR` 绑到该项目自己的 `goals/`。⛔ 不得改为 grep 另一个实现文件（那只是把同一个病推迟到下次重构）——判据必须读**行为**（硬规则 4b/4c）。贴可复现命令与真实读数。
+- [x] AC2 check ①②④ 逐字不变；改完后在**本仓库 git root**（goal criterion 的固定 cwd）`bash -c "$(criterion)"` **exit 0**、stderr 为空。贴 exit code 与完整输出。
+- [x] AC3 **能取假，不是恒真空转**（硬规则 4 推论三）：负控制——用一次性副本/fixture 令引擎不建 `goals/`（⛔ 不改生产代码），同一条 check ③ 必须红（exit 1 且 stderr 指名 goals 未建）；恢复后转绿。贴正/负两次读数。
+- [x] AC4 声明侧与行为侧**成对**：check ①②（SPEC 闭集块、`CLOSED_SET_DIRS`）继续为真且与 check ③ 同时成立——任一单独成立都不够（避免 AC-204 风险 3 的「什么都不做也通过」）。贴 check ①② 的当前读数。
 
 ## DoD
 
-- [ ] `goals/AC-206-目标项目具备-goals-tasks-双载体-goals-与-tasks-一同由-quay-init-创建.md` 的 `criterion:` 已改（经 `quay goal write <id> --origin ... --criterion ...` 或 `goal_write` MCP，⛔ 不手改 md 绕过 ABI）；`origin`/`expect` 同步更新——`expect` 里那句过期的「（当前：SPEC 闭集缺 goals/）」必须改成当前真实失败原因或删除（⛔ 不得留一句与 criterion 矛盾的散文）。
-- [ ] AC-206 在仓库上复跑 **exit 0**；`quay goal check --achieved-failing` 读数中不再出现 AC-206（贴命令与输出）。
-- [ ] 真落地点不是「文件里出现新字符串」，而是**判据本身在仓库上 exit 0 且负控制下 exit 1**。贴正/负两次 `bash -c "$(criterion)"` 的 exit code 与 stderr。
-- [ ] 相关机制测试仍绿：`plugin/test/quay-init.test.mjs`（`:136`/`:329` 断言 goals/ 双载体）、`plugin/test/quay-init-loop.test.mjs`（`:149`）。贴命令与结果。
-- [ ] 若改判据导致 develop 上的语料 pin / 测试转红（记忆 goal-criterion-rewrite-on-develop-stales-a-corpus-pin），一并修（先查有没有测试逐字 pin 这段 criterion——已查：`grep -rn 'GOAL-009-AC-206\|does not create goals' plugin/test packages experiments docs` 当前零命中，仍须改完复跑确认）。
+- [x] `goals/AC-206-目标项目具备-goals-tasks-双载体-goals-与-tasks-一同由-quay-init-创建.md` 的 `criterion:` 已改（经 `quay goal write <id> --origin ... --criterion ...` 或 `goal_write` MCP，⛔ 不手改 md 绕过 ABI）；`origin`/`expect` 同步更新——`expect` 里那句过期的「（当前：SPEC 闭集缺 goals/）」必须改成当前真实失败原因或删除（⛔ 不得留一句与 criterion 矛盾的散文）。
+- [x] AC-206 在仓库上复跑 **exit 0**；`quay goal check --achieved-failing` 读数中不再出现 AC-206（贴命令与输出）。
+- [x] 真落地点不是「文件里出现新字符串」，而是**判据本身在仓库上 exit 0 且负控制下 exit 1**。贴正/负两次 `bash -c "$(criterion)"` 的 exit code 与 stderr。
+- [x] 相关机制测试仍绿：`plugin/test/quay-init.test.mjs`（`:136`/`:329` 断言 goals/ 双载体）、`plugin/test/quay-init-loop.test.mjs`（`:149`）。贴命令与结果。
+- [x] 若改判据导致 develop 上的语料 pin / 测试转红（记忆 goal-criterion-rewrite-on-develop-stales-a-corpus-pin），一并修（先查有没有测试逐字 pin 这段 criterion——已查：`grep -rn 'GOAL-009-AC-206\|does not create goals' plugin/test packages experiments docs` 当前零命中，仍须改完复跑确认）。
 
 ## Touches
 - goals/AC-206-目标项目具备-goals-tasks-双载体-goals-与-tasks-一同由-quay-init-创建.md
 - tasks/gap-ac206-criterion-pinned-to-retired-quay-init-sh-goals-mkdir.md
 - plugin/test/quay-init.test.mjs
+
+——
+
+## Evidence（worker round 2026-10-09）
+
+### AC1 —— check③ 改为活引擎行为探针（不是把 grep 换个实现文件）
+
+`goals/AC-206-…md` 的 `criterion:` 第 20–49 行即新 check③：建一次性 git 工作区 → 跑**活引擎**
+`node packages/quay/bin/quay.js init --root <probe>` → 断言 `goals/` ∧ `tasks/` **均被创建**，
+且产出的 `.quay/config.yml` 的 `QUAY_NATIVE_GOAL_DIR` realpath == `<probe>/goals`（双载体 + 绑定）。
+引擎探针实测 0.38s（远低于 60s 默认 deadline）。⛔ 全文不再 grep 任何实现文件。
+
+复现（cwd = 本仓库 git root）：
+
+```sh
+node /tmp/ac206-extract.mjs "goals/AC-206-目标项目具备-goals-tasks-双载体-goals-与-tasks-一同由-quay-init-创建.md" > /tmp/ac206-stored.sh
+bash -c "$(cat /tmp/ac206-stored.sh)"; echo "EXIT=$?"   # EXIT=0
+```
+
+### AC2 —— 整条 criterion 在仓库 git root（固定 cwd）exit 0、stderr 空
+
+```
+$ bash -c "$(cat /tmp/ac206-stored.sh)"     # cwd=/data/home/yale/work/quay
+EXIT=0   STDOUT=[]   STDERR=[]
+$ sh  -c "$(cat /tmp/ac206-stored.sh)"      # 验收 runner 用的是 /bin/sh(=dash)
+EXIT=0   STDERR=[]
+$ node packages/quay/bin/quay.js goal gate AC-206
+{"verdict":"pass","reason":"acceptance passed (exit 0)","evaluationRoot":"/data/home/yale/work/quay"}   EXIT=0
+```
+
+check ①②④ 逐字未动（见 AC4）。
+
+### AC3 —— 能取假，不是恒真空转（硬规则 4 推论三）
+
+四组读数。fixture = `git worktree add -q --detach /tmp/ac206-negctl HEAD`（一次性副本）
++ 删掉副本里 `packages/quay/src/init.ts` 的 goals mkdir 一行（⛔ 生产代码未改一行），
+在副本 cwd 跑**同一条（存储版）criterion**：
+
+```
+neg arm1 (引擎不建 goals/):     EXIT=1  stderr=[init engine did not create the dual carrier: goals=False tasks=True]
+neg arm2 (goals/ 建了但 GOAL_DIR 绑到 other-goals): EXIT=1  stderr=[QUAY_NATIVE_GOAL_DIR is not bound to this project's own goals/: /tmp/ac206-init-probe-…/other-goals]
+pos     (仓库 git root，未打补丁): EXIT=0  stderr=[]
+```
+
+⇒ 同一条判据在两处独立维度上都能取假（缺目录 / 绑错目录），恢复后转绿。
+
+### AC4 —— 声明侧与行为侧成对
+
+```
+check ① SPEC QUAY-INIT-CLOSED-SET 块:  "- tasks/" 与 "- goals/" 均在
+check ② plugin/scripts/quay-init-closure-assertion.ts:58  CLOSED_SET_DIRS = ["tasks", "goals"]
+check ③ 行为探针 exit 0（AC2）；check ④ 合格载体记录 29 条（host≠VM-16-5-ubuntu、project_root 在仓库外）
+```
+
+### DoD
+
+- `quay goal write AC-206 …` 执行两次：worktree 内（分支 delta，commit `bbe3dfb8c`）与主检出
+  （活 serve/MCP/ledger 读数，commit `810bce361`）。改后的 criterion 用 `goal show` 读回与预期
+  **byte-identical**（`cmp` = YES）；`expect` 里过期的「（当前：SPEC 闭集缺 goals/）」已删除，改为
+  描述新失败面。
+- `quay goal check --achieved-failing`：`achievedButFailing = ["AC-214","AC-242","AC-315"]`，
+  **AC-206 不在其中**；`inScope`（34 条）含 AC-206 ⇒ 它是被**求值**过才不出现的，不是 not-evaluated 空转。
+- 机制测试：`plugin/test/quay-init.test.mjs` **18 pass / 0 fail**（`:136` / `:329` 的 goals 双载体断言在）；
+  `plugin/test/quay-init-loop.test.mjs` **7 pass / 0 fail**（`:149` goals 断言在）。
+- 语料 pin 复查：`grep -rn 'GOAL-009-AC-206\|does not create goals' plugin/test packages experiments docs`
+  = **0 命中**；`criterion-failure-attribution-check.ts` = **PASS inDomain=197 bareAcs=0**。
