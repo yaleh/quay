@@ -2,7 +2,7 @@
 id: gap-routine-freshness-refresh-stale-goal-009-ac-238-79f43e79
 title: "freshness-refresh: evidence_ts 2026-09-25T16:27:01Z is 322.71h old and
   d=217 > K=200 (margin -17) — out of window"
-status: todo
+status: ready
 labels:
   - gap
   - routine-filed
