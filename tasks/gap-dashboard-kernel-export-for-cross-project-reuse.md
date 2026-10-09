@@ -2,7 +2,7 @@
 id: gap-dashboard-kernel-export-for-cross-project-reuse
 title: 发布 Loop-pulse 甘特图内核（packLanes/区间合并/5 车道语义）为外部项目可复用的 dashboard-kernel
   子路径——claudecodeui 是首个待接入方
-status: done
+status: ready
 labels:
   - gap
   - design
