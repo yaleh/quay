@@ -50,5 +50,47 @@
       "three-state exit-code convention (0 achieved / 1 not-achieved+CAUSE= / 3 not-evaluated)",
       "ArchGuard single-root scope analysis for before/after comparison"
     ]
-  }
+  },
+  "timeline": {
+    "t0": "2026-10-08T02:00:00.000Z",
+    "t1": "2026-10-08T02:31:00.000Z",
+    "activated_at": "2026-10-08T02:36:17.793Z",
+    "note": "GOAL-030 is the first real goal-branch pilot; the human's driving goal was MECHANISM validation, not architectural payoff. That intent is T0-visible (it is in the trigger)."
+  },
+  "stage_a_reference": {
+    "expected_concerns": [
+      "lifecycle status writes scattered across orchestration scripts with no single decision layer / no structured per-transition record",
+      "the goal-branch mechanism is unproven on a real development direction (mechanism-level concern)",
+      "plugin/scripts reaches the kernel on far fewer edges than it does non-kernel modules (boundary under-use)"
+    ],
+    "abstain_acceptable": false
+  },
+  "stage_b_reference": {
+    "investigate_or_goal": "propose-goal",
+    "investigate_or_goal_rationale": "At T1 both write sites are located and the placement constraint is established, so the remaining work is execution, not discovery. Saying 'investigate' at T1 would be under-committing.",
+    "minimum_sufficiency_rationale": "Both directions of the promotion path share one decision point and one event schema; splitting promote/retreat into two goals would double branch-lifecycle overhead for no independent acceptance benefit. Broadening to fan-in's 4 sites would add debugging surface on the first real trial of the mechanism itself — the thing actually being tested.",
+    "reference_slice": "New kernel module packages/quay/src/kernel/task-transition.ts: the sole definition of LIFECYCLE_EDGES, a decideTransition function (three-state: allow/refuse/not-evaluated), and patchStatusField (sunk down from plugin/scripts/task-ops.ts, which becomes a re-export); each transition writes a structured event to .quay/task-status-events.jsonl (recording the writing module's and entry process's realpath, as a direct-quantity code-identity check). ready-pool-check.ts's two existing write sites are switched to call the kernel. A branch self-host probe script (scripts/branch-selfhost-probe.mjs) is added specifically to prove the branch's own promotion-driver and preview serve load the branch's own code, not the main checkout's.",
+    "alternative_valid_slices": [
+      "Sink only the promote edge (todo->ready) first, leaving retreat for a follow-up — defensible if the goal is to minimise blast radius further, but it halves the evidence that the event schema generalises.",
+      "Model the transition decision as a pure data table owned by the kernel and write events from each call site without a shared writer function — defensible, weaker on the 'single decision layer' half of the concern."
+    ],
+    "adjacent_reasonable_slices": [
+      "Cover the needs-human/branch-sync alignment writes in the same pass (rejected: different mechanism, doubles surface)"
+    ],
+    "clearly_too_broad": [
+      "Refactor all six lifecycle write sites (promotion x2, fan-in x4, needs-human x2) at once",
+      "Full OO/domain ownership analysis of the orchestration layer"
+    ],
+    "clearly_too_fragmented": [
+      "Create one goal per single status literal",
+      "Add an event writer without unifying the decision point"
+    ],
+    "expected_delta_predicted_at_t1": "plugin/scripts -> kernel edge strength rises by the number of switched call sites; each transition emits one structured event",
+    "expected_delta_observed": "Not recorded in the case fixture; AC-339's before/after used a single-root archguard analysis with an on/off kernel-import control."
+  },
+  "deprecated_note": "investigation_or_goal_reference is the v1 single-stage gold; use stage_b_reference for the two-stage benchmark.",
+  "t1_belief_gaps": [
+    "The chosen new module path and symbol names.",
+    "Whether the sink layer should be the kernel, and the resulting edge-count delta."
+  ]
 }

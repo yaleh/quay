@@ -1,0 +1,109 @@
+{
+  "case_id": "GOAL-032",
+  "stage": "A",
+  "stage_name": "discovery",
+  "cutoff": "2026-10-09T01:00:00.000Z",
+  "cutoff_label": "T0-concern-discovery",
+  "cutoff_rationale": "The duplicate-detection hit is visible; the equivalence question is entirely open.",
+  "context": {
+    "repo_state_summary": "GOAL-030 and GOAL-031 have landed. ArchGuard detect_duplicates flags one duplicate-implementation group.",
+    "archguard_duplicate_group": {
+      "tool_call": "detect_duplicates",
+      "flagged_pair": [
+        "packages/quay/src/criterion-fidelity.ts (a fidelity-verdict parser)",
+        "plugin/scripts/goal-driver.ts (a sufficiency-verdict parser)"
+      ],
+      "surface_similarity": "Both parsers follow the same shape: non-zero exit => not-evaluated; bare token match; scan upward from the last line for a JSON verdict object; otherwise not-evaluated.",
+      "note": "Structural similarity does NOT establish semantic equivalence. The classification has not been made at this cutoff."
+    },
+    "code_pointers": [
+      "packages/quay/src/criterion-fidelity.ts",
+      "plugin/scripts/goal-driver.ts"
+    ],
+    "prior_goal_precedents": [
+      {
+        "id": "GOAL-030",
+        "one_line": "lifecycle-write ownership; landed."
+      },
+      {
+        "id": "GOAL-031",
+        "one_line": "status-literal convergence with a corrected target; landed."
+      }
+    ],
+    "test_suite_state": "scripts/test.sh green on develop at the cutoff commit."
+  },
+  "citable_evidence_refs": [
+    "archguard:detect_duplicates",
+    "code:criterion_fidelity",
+    "code:goal_driver_parser",
+    "methodology:ownership_first"
+  ],
+  "task": {
+    "instructions": "You are a NARROW ownership/architecture analyst. This is a DISCOVERY stage: identify what, if anything, ownership-shaped is visible in the state below. You are NOT asked to match any historical decision, and you do NOT need to propose a fix. Saying no concern is visible is a valid and sometimes correct answer. Cite only the listed evidence refs; do not invent readings.",
+    "questions": [
+      "a) What ownership / canonicalization / dependency-boundary concerns are visible in this state? (<=3)",
+      "b) For each concern, which evidence refs ground it?",
+      "c) Does it need investigation before any slice can be defined, or is it decision-ready?",
+      "d) How confident are you, and what would raise or lower that confidence?",
+      "e) If nothing ownership-shaped is visible, say so (abstain) — that is a valid answer."
+    ],
+    "response_schema": {
+      "type": "object",
+      "required": [
+        "concerns",
+        "overall_assessment"
+      ],
+      "properties": {
+        "concerns": {
+          "type": "array",
+          "maxItems": 3,
+          "items": {
+            "type": "object",
+            "required": [
+              "concern",
+              "evidence_refs",
+              "needs_investigation",
+              "confidence"
+            ],
+            "properties": {
+              "concern": {
+                "type": "string"
+              },
+              "evidence_refs": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              },
+              "needs_investigation": {
+                "type": "boolean"
+              },
+              "what_to_investigate": {
+                "type": "string"
+              },
+              "confidence": {
+                "enum": [
+                  "low",
+                  "medium",
+                  "high"
+                ]
+              }
+            }
+          }
+        },
+        "overall_assessment": {
+          "enum": [
+            "no_concern_visible",
+            "concerns_found"
+          ]
+        }
+      }
+    },
+    "citable_evidence_refs": [
+      "archguard:detect_duplicates",
+      "code:criterion_fidelity",
+      "code:goal_driver_parser",
+      "methodology:ownership_first"
+    ]
+  }
+}

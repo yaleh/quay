@@ -1,0 +1,108 @@
+{
+  "case_id": "GOAL-033",
+  "stage": "A",
+  "stage_name": "discovery",
+  "cutoff": "2026-10-09T05:00:00.000Z",
+  "cutoff_label": "T0-concern-discovery",
+  "cutoff_rationale": "The single package-level SCC is visible from the cycle reading; which edge is cheapest to cut, and what else leaves with it, is not established.",
+  "context": {
+    "repo_state_summary": "GOAL-030/031/032 have landed. ArchGuard detect_cycles(outputScope: package) reports exactly one package-level cycle.",
+    "archguard_cycle_reading": {
+      "tool_call": "detect_cycles(outputScope: package)",
+      "reading_at_cutoff": "exactly one package-level cycle exists: a 6-member SCC comprising the packages/quay/src root, cli, fan-in, gate, gate/config, gate/factories.",
+      "note": "Which single edge is the cheapest to cut, and what else would leave the SCC with it, has NOT been established."
+    },
+    "draft_layers_rule": "An unlanded draft layers.yml already lists the root<->cli edge as a known violation and recommends tightening it, but does not decide how.",
+    "code_pointers": [
+      "packages/quay/src",
+      "packages/quay/src/cli"
+    ],
+    "prior_goal_precedents": [
+      {
+        "id": "GOAL-030",
+        "one_line": "lifecycle-write ownership; landed."
+      },
+      {
+        "id": "GOAL-031",
+        "one_line": "status-literal convergence; landed."
+      },
+      {
+        "id": "GOAL-032",
+        "one_line": "duplicate-parser equivalence then merge; landed."
+      }
+    ],
+    "test_suite_state": "scripts/test.sh green on develop at the cutoff commit."
+  },
+  "citable_evidence_refs": [
+    "archguard:detect_cycles",
+    "code:core_root_to_cli_edges",
+    "repo:draft_layers_yml"
+  ],
+  "task": {
+    "instructions": "You are a NARROW ownership/architecture analyst. This is a DISCOVERY stage: identify what, if anything, ownership-shaped is visible in the state below. You are NOT asked to match any historical decision, and you do NOT need to propose a fix. Saying no concern is visible is a valid and sometimes correct answer. Cite only the listed evidence refs; do not invent readings.",
+    "questions": [
+      "a) What ownership / canonicalization / dependency-boundary concerns are visible in this state? (<=3)",
+      "b) For each concern, which evidence refs ground it?",
+      "c) Does it need investigation before any slice can be defined, or is it decision-ready?",
+      "d) How confident are you, and what would raise or lower that confidence?",
+      "e) If nothing ownership-shaped is visible, say so (abstain) — that is a valid answer."
+    ],
+    "response_schema": {
+      "type": "object",
+      "required": [
+        "concerns",
+        "overall_assessment"
+      ],
+      "properties": {
+        "concerns": {
+          "type": "array",
+          "maxItems": 3,
+          "items": {
+            "type": "object",
+            "required": [
+              "concern",
+              "evidence_refs",
+              "needs_investigation",
+              "confidence"
+            ],
+            "properties": {
+              "concern": {
+                "type": "string"
+              },
+              "evidence_refs": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              },
+              "needs_investigation": {
+                "type": "boolean"
+              },
+              "what_to_investigate": {
+                "type": "string"
+              },
+              "confidence": {
+                "enum": [
+                  "low",
+                  "medium",
+                  "high"
+                ]
+              }
+            }
+          }
+        },
+        "overall_assessment": {
+          "enum": [
+            "no_concern_visible",
+            "concerns_found"
+          ]
+        }
+      }
+    },
+    "citable_evidence_refs": [
+      "archguard:detect_cycles",
+      "code:core_root_to_cli_edges",
+      "repo:draft_layers_yml"
+    ]
+  }
+}

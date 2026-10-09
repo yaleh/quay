@@ -1,0 +1,105 @@
+{
+  "case_id": "GOAL-030",
+  "stage": "A",
+  "stage_name": "discovery",
+  "cutoff": "2026-10-08T02:00:00.000Z",
+  "cutoff_label": "T0-concern-discovery",
+  "cutoff_rationale": "Before the human had identified which code owns the lifecycle writes. Only the repo-shape signal is visible.",
+  "context": {
+    "repo_state_summary": "The goal-branch mechanism exists but has never carried a real development direction through its full lifecycle (GOAL-901..905 were rehearsals; GOAL-905's merge needed 6 suite retries). Separately, task lifecycle status is written directly inside orchestration-layer scripts; there is no single decision layer and no structured per-transition record.",
+    "archguard_edge_strength": {
+      "source_commit": "develop @97d17da6b",
+      "directory_cycles": 1,
+      "plugin_scripts_to_kernel_edge_strength": 14,
+      "plugin_scripts_to_non_kernel_edge_strength": 44,
+      "packages_to_plugin_edges": 0
+    },
+    "code_pointers": [
+      "plugin/scripts/ready-pool-check.ts (contains the status-write logic for both promote and retreat directions; function names not resolved here)"
+    ],
+    "related_landed_tasks": [
+      "gap-status-flip-history-and-parser-diff-readings (done) — replayed historical status-flip events"
+    ],
+    "prior_goal_precedents": [],
+    "prior_goal_precedents_note": "First real (non-rehearsal) goal-branch pilot; no prior real sample exists.",
+    "known_mechanism_risks": [
+      "Two earlier incidents show worktree-loaded code silently resolving to the main checkout (Core plugin-root relocation; quay-native via a node_modules symlink) — a worktree is not guaranteed to run its own code.",
+      "SPEC-goal-branch 4.10/8: preview instances do not run the driver, and a goal changing driver code gets no pre-merge trial."
+    ],
+    "test_suite_state": "scripts/test.sh green on develop at the cutoff commit."
+  },
+  "citable_evidence_refs": [
+    "archguard:edge_strength",
+    "repo:goal_branch_state",
+    "code:ready_pool_check",
+    "task:status_flip_readings"
+  ],
+  "task": {
+    "instructions": "You are a NARROW ownership/architecture analyst. This is a DISCOVERY stage: identify what, if anything, ownership-shaped is visible in the state below. You are NOT asked to match any historical decision, and you do NOT need to propose a fix. Saying no concern is visible is a valid and sometimes correct answer. Cite only the listed evidence refs; do not invent readings.",
+    "questions": [
+      "a) What ownership / canonicalization / dependency-boundary concerns are visible in this state? (<=3)",
+      "b) For each concern, which evidence refs ground it?",
+      "c) Does it need investigation before any slice can be defined, or is it decision-ready?",
+      "d) How confident are you, and what would raise or lower that confidence?",
+      "e) If nothing ownership-shaped is visible, say so (abstain) — that is a valid answer."
+    ],
+    "response_schema": {
+      "type": "object",
+      "required": [
+        "concerns",
+        "overall_assessment"
+      ],
+      "properties": {
+        "concerns": {
+          "type": "array",
+          "maxItems": 3,
+          "items": {
+            "type": "object",
+            "required": [
+              "concern",
+              "evidence_refs",
+              "needs_investigation",
+              "confidence"
+            ],
+            "properties": {
+              "concern": {
+                "type": "string"
+              },
+              "evidence_refs": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              },
+              "needs_investigation": {
+                "type": "boolean"
+              },
+              "what_to_investigate": {
+                "type": "string"
+              },
+              "confidence": {
+                "enum": [
+                  "low",
+                  "medium",
+                  "high"
+                ]
+              }
+            }
+          }
+        },
+        "overall_assessment": {
+          "enum": [
+            "no_concern_visible",
+            "concerns_found"
+          ]
+        }
+      }
+    },
+    "citable_evidence_refs": [
+      "archguard:edge_strength",
+      "repo:goal_branch_state",
+      "code:ready_pool_check",
+      "task:status_flip_readings"
+    ]
+  }
+}
