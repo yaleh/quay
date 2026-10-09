@@ -2,7 +2,7 @@
 id: gap-full-suite-runner-dedupe-memory-envelope-to-probe
 title: full-suite-runner.ts 的 readEffectiveTotalMemBytes() 是内联重复实现，未真正调用
   effective-capacity-probe.ts——两个已 done 任务都没有完成这条自己留的 TODO
-status: todo
+status: ready
 labels:
   - gap
 parent: null
