@@ -1,0 +1,640 @@
+{
+  "task": "gap-ownership-first-manifold-recovery-replay",
+  "generated_by": "docs/analysis/ownership-first-manifold-recovery-replay.mjs",
+  "mode": "deterministic extraction; the only non-mechanical value is `contracts`, authored by an LLM after extraction and guarded by `synthesized_at_checkpoint`",
+  "source_files": {
+    "GOAL-030": "goals/GOAL-030-晋升写入经-kernel-转移决策并留痕-goal-分支首个真实试点-证明分支上运行的-quay-加载的是分支自己的代码.md",
+    "GOAL-031": "goals/GOAL-031-needs-human-状态词汇-canonicalization-试点-goal-driver-ts-5-处裸字面量收.md",
+    "GOAL-032": "goals/GOAL-032-verdict-parser-ownership-收敛试点-parsefidelityverdict-parsesema.md"
+  },
+  "feature_definitions": {
+    "has_archguard_before_after": "body names an ArchGuard instrument reading taken both before and after the change: an `archguard` mention AND a before-baseline line AND a separate after/post-baseline or explicit before/after-comparison line. All three arms are required so that a goal carrying only a before-baseline cannot satisfy a feature whose name says 'before AND after'",
+    "has_negative_control": "body contains a deliberately-constructed negative control (负对照)",
+    "has_branch_selfhost_probe": "body names the branch self-host technique (自举 / selfhost) — proving the code running on the branch is the branch's own code",
+    "has_explicit_non_goals": "body carries an explicit 非目标 (non-goal) block holding at least one ⛔ bullet — the mechanically-countable fence that bounds the slice",
+    "has_stop_signal_list": "body carries a 停止扩大范围的信号-shaped heading — a pre-declared list of signals that stop the scope from growing",
+    "has_three_state_exit_code": "body declares a three-state exit code — 0 达成 / 1 未达成 (with CAUSE=) / 3 未评估 — so that 'not evaluated' cannot be confused with 'achieved'",
+    "sink_target_is_kernel": "the goal's POSITIVE scope (the 范围 block up to the 非目标 marker) or its 退出条件 names a kernel/<module>.ts artifact as the destination it creates/sinks into. Positional, not keyword: a kernel path named only inside 背景 or inside the ⛔ 非目标 fence does NOT count (GOAL-031 names kernel/task-transition.ts only to exclude it)",
+    "human_activated": "the frontmatter attributes the goal to a human ruling — a `人` attribution carrying a date (人 YYYY-MM-DD) in `origin` or a `statusLog` reason. NOTE: this is the PRINCIPLED, broad reading of the feature name (all three goals were in fact human-activated). A narrower `人.*裁定` reading is reported separately under `sensitivity` because it is lexically stricter than the property the feature name denotes.",
+    "merge_shape_single_commit": "body requires the goal to land as exactly one merge commit (恰好一个合并提交) — the branch's internal commits must not leak onto develop's first-parent chain"
+  },
+  "trigger_rule": {
+    "kind": "pairwise-agreement",
+    "total_features": 9,
+    "min_agreement": 6,
+    "declared": "a recurring-axis candidate is proposable at a checkpoint iff the visible goals' feature vectors pairwise agree on >= 6 of 9 features; a checkpoint with fewer than 2 visible goals is not evaluable",
+    "checkpoints": [
+      {
+        "checkpoint": 1,
+        "visible_goals": [
+          "GOAL-030"
+        ]
+      },
+      {
+        "checkpoint": 2,
+        "visible_goals": [
+          "GOAL-030",
+          "GOAL-031"
+        ]
+      },
+      {
+        "checkpoint": 3,
+        "visible_goals": [
+          "GOAL-030",
+          "GOAL-031",
+          "GOAL-032"
+        ]
+      }
+    ]
+  },
+  "feature_vectors": {
+    "GOAL-030": {
+      "has_archguard_before_after": true,
+      "has_negative_control": true,
+      "has_branch_selfhost_probe": true,
+      "has_explicit_non_goals": true,
+      "has_stop_signal_list": true,
+      "has_three_state_exit_code": true,
+      "sink_target_is_kernel": true,
+      "human_activated": true,
+      "merge_shape_single_commit": true
+    },
+    "GOAL-031": {
+      "has_archguard_before_after": true,
+      "has_negative_control": false,
+      "has_branch_selfhost_probe": true,
+      "has_explicit_non_goals": true,
+      "has_stop_signal_list": true,
+      "has_three_state_exit_code": true,
+      "sink_target_is_kernel": false,
+      "human_activated": true,
+      "merge_shape_single_commit": true
+    },
+    "GOAL-032": {
+      "has_archguard_before_after": true,
+      "has_negative_control": true,
+      "has_branch_selfhost_probe": true,
+      "has_explicit_non_goals": true,
+      "has_stop_signal_list": true,
+      "has_three_state_exit_code": true,
+      "sink_target_is_kernel": true,
+      "human_activated": true,
+      "merge_shape_single_commit": true
+    }
+  },
+  "feature_evidence": {
+    "GOAL-030": {
+      "has_archguard_before_after": [
+        {
+          "line": 31,
+          "text": "重构切片（OO/领域所有权分析的阶段 A 的最小子集）：晋升路径上两条任务状态写入——`plugin/scripts/ready-pool-check.ts` 的 `applyPromotions`（todo→ready，promote 边）与 `applyRevaluations`（ready→todo，retreat 边）——改走 kernel 层的转移决策（基于 `LIFECYCLE_EDGES`），并为每次转移写一条结构化事件。前置读数见已完成任务 gap-statu"
+        },
+        {
+          "line": 31,
+          "text": "重构切片（OO/领域所有权分析的阶段 A 的最小子集）：晋升路径上两条任务状态写入——`plugin/scripts/ready-pool-check.ts` 的 `applyPromotions`（todo→ready，promote 边）与 `applyRevaluations`（ready→todo，retreat 边）——改走 kernel 层的转移决策（基于 `LIFECYCLE_EDGES`），并为每次转移写一条结构化事件。前置读数见已完成任务 gap-statu"
+        },
+        {
+          "line": 61,
+          "text": "6. 后基线：AC-339 在分支 tip 上实跑 archguard 前后对比。"
+        }
+      ],
+      "has_negative_control": [
+        {
+          "line": 51,
+          "text": "- 落笔当轮读数（2026-10-08，主检出 = develop @c8461f5f）：AC-336/338 exit 1（模块与测试尚不存在）；AC-337/339/341/342 exit 3（前提未落地）；AC-340 在主检出 exit 0（生产 serve 跑主检出自身代码）。负对照：AC-340 在一个登记了主检出 serve 的临时 worktree 上判 `serve-runs-foreign-code`；AC-337 对一条写入模块位于主检出的伪造事件判 "
+        },
+        {
+          "line": 60,
+          "text": "5. 沙盒驱动自举（AC-337）：按文件路径启动分支的 promotion-driver（默认子进程解析，清掉 `QUAY_PLUGIN_ROOT`）对 /tmp 沙盒跑一轮触发 todo→ready；分支的 `ready-pool-check --revaluate-apply` 触发 ready→todo；每条事件的写入模块与入口 realpath 必须位于分支树内；同一沙盒用主检出驱动跑负对照须写 0 条事件；生产 `.quay/` 与 `tasks/` 不变。"
+        },
+        {
+          "line": 67,
+          "text": "- **代码身份**：沙盒或预览证明跑的不是分支代码（AC-337 `loaded-main-checkout-code`、AC-340 `serve-runs-foreign-code`），或负对照失效；**自举或模块解析落到主检出 ⇒ 分支不健康。**"
+        }
+      ],
+      "has_branch_selfhost_probe": [
+        {
+          "line": 27,
+          "text": "**这是 goal 分支机制的第一个真实开发方向试点，主要目的不是架构收益，而是验证“在分支上运行 Quay、并验证 Quay”这条自举路径。** 人 2026-10-08 裁定：先用一个相对小、但足以验证机制的重构走完 goal branch 全流程；只有它完整走完且健康度达标，才进入更大规模的重构 goal。"
+        },
+        {
+          "line": 38,
+          "text": "- 分支自举探针 `scripts/branch-selfhost-probe.mjs`。"
+        },
+        {
+          "line": 60,
+          "text": "5. 沙盒驱动自举（AC-337）：按文件路径启动分支的 promotion-driver（默认子进程解析，清掉 `QUAY_PLUGIN_ROOT`）对 /tmp 沙盒跑一轮触发 todo→ready；分支的 `ready-pool-check --revaluate-apply` 触发 ready→todo；每条事件的写入模块与入口 realpath 必须位于分支树内；同一沙盒用主检出驱动跑负对照须写 0 条事件；生产 `.quay/` 与 `tasks/` 不变。"
+        }
+      ],
+      "has_explicit_non_goals": [
+        {
+          "line": 41,
+          "text": "- ⛔ 不碰 fan-in 的 4 处状态写入（`worker-fan-in.ts`）、不碰 needs-human 与分支同步状态对齐的 2 处写入（`driver-filters.ts`）——AC-336 以计数钉死。"
+        },
+        {
+          "line": 42,
+          "text": "- ⛔ 不让 promotion-driver 新增自动撤回行为：生产上目前没有任何调用方传 `--revaluate-apply`，ready→todo 由同一分支的 `ready-pool-check --revaluate-apply` 直接触发验证，⛔ 不新增驱动调用方（那会是新的生产行为）。"
+        },
+        {
+          "line": 43,
+          "text": "- ⛔ 不改 `gate/lifecycle.ts` 的 `runPromote`/`runRetreat` 行为（CLI 路径），只让它们与 kernel 共用同一份边表数据，⛔ 不造第三套实现。"
+        }
+      ],
+      "has_stop_signal_list": [
+        {
+          "line": 65,
+          "text": "## 停止扩大范围的信号（任一出现 ⇒ 不加范围、不进入下一个 goal，先把机制缺口立案修复；无法恢复则按裁定⑨放弃并丢弃分支）"
+        }
+      ],
+      "has_three_state_exit_code": [
+        {
+          "line": 50,
+          "text": "- 退出码三态：0 达成；1 未达成，同行带 `CAUSE=`；3 未评估（前提未落地、预览未起、载体缺席）。"
+        }
+      ],
+      "sink_target_is_kernel": [
+        {
+          "line": 36,
+          "text": "- kernel 新模块 `packages/quay/src/kernel/task-transition.ts`：`LIFECYCLE_EDGES` 的唯一定义（从 `gate/lifecycle.ts` 下沉，后者改为 re-export）、`decideTransition`（三态：allow / refuse / not-evaluated）、`patchStatusField`（从 `plugin/scripts/task-ops.ts` 下沉，后者改为 re-e"
+        }
+      ],
+      "human_activated": [
+        {
+          "line": 6,
+          "text": "origin: 人 2026-10-08「现在开始执行…正式创建一个真实的重构 goal，并启用 goal branch」：goal"
+        },
+        {
+          "line": 15,
+          "text": "reason: 人 2026-10-08「现在开始执行…正式立项并进入该小 goal」：7 条 AC（AC-336…342，并入前 5 条、并入后 2"
+        }
+      ],
+      "merge_shape_single_commit": [
+        {
+          "line": 79,
+          "text": "晋升路径的两条状态写入（todo→ready、ready→todo）经 kernel 转移决策落盘并留下结构化事件，fan-in 与 needs-human 写入原样不动；并且 goal 分支全流程走通：分支上运行的 Quay（沙盒中的 promotion-driver 与 ready-pool-check、预览 serve）被证明加载的是分支自己的代码，测试、smoke、`import-graph-check` 与分层约束通过，ArchGuard 前后读数可比且无新的结构债"
+        }
+      ]
+    },
+    "GOAL-031": {
+      "has_archguard_before_after": [
+        {
+          "line": 30,
+          "text": "用 ArchGuard `get_literal_dispersion(value:\"needs-human\")` 现读（2026-10-08，develop（取值随快照时刻变化；当时读到 a8abf1a6dd0fd70b3e3f6ef8529447797e36b053，仅示例））：dispersion=5，文件 = `task-status.ts`、`github-client.ts`、`observation.ts`、`goal-driver.ts`、`workflow-"
+        },
+        {
+          "line": 65,
+          "text": "1. 激活前：对 `develop` 当前 tip 读 `get_literal_dispersion(value:\"needs-human\")` 作为 before 基线（dispersion=5）+ `grep -c 'status === \"needs-human\"' plugin/scripts/goal-driver.ts` = 6。"
+        },
+        {
+          "line": 69,
+          "text": "5. 后基线：对分支 tip 重跑 `get_literal_dispersion(value:\"needs-human\")` + 同一 grep，核对 dispersion 降到 4、`grep -c` 降到 1，落盘到 `.quay/goal-031-evidence/archguard-dispersion.json`。"
+        }
+      ],
+      "has_negative_control": [],
+      "has_branch_selfhost_probe": [
+        {
+          "line": 22,
+          "text": "**这是继 GOAL-030 之后的第二个真实 goal branch 试点**，目的与 GOAL-030 相同——首先是继续验证\"在分支上运行 Quay、并验证 Quay\"这条自举机制本身，不是追求架构收益；范围比 GOAL-030 更小、更安全，作为机制的第二次独立验证（不同形状的改动：纯文本字面量替换，而不是新增模块+改写两处调用）。"
+        },
+        {
+          "line": 53,
+          "text": "- ⛔ 不新造 kernel 第二套声明；不 import/不依赖任何只存在于 `goal/GOAL-030` 分支的文件（`kernel/task-transition.ts`、`scripts/branch-selfhost-probe.mjs`）；不等待 GOAL-030 合并。"
+        },
+        {
+          "line": 68,
+          "text": "4. 分支自举身份证明：**不复用 GOAL-030 的 `scripts/branch-selfhost-probe.mjs`**（只存在于未合并的 `goal/GOAL-030`，develop 上没有）——复用它验证过的**技术**（校验被加载模块的 realpath 落在本 goal 的 worktree 内，不是主检出），写一个规模相应缩小的、自包含的身份校验，落盘到 `.quay/goal-031-evidence/selfhost-identity.json`。"
+        }
+      ],
+      "has_explicit_non_goals": [
+        {
+          "line": 52,
+          "text": "- ⛔ 不碰 `todo`/`ready`/`done` 任何裸字面量（即使同文件同行）。"
+        },
+        {
+          "line": 53,
+          "text": "- ⛔ 不新造 kernel 第二套声明；不 import/不依赖任何只存在于 `goal/GOAL-030` 分支的文件（`kernel/task-transition.ts`、`scripts/branch-selfhost-probe.mjs`）；不等待 GOAL-030 合并。"
+        },
+        {
+          "line": 54,
+          "text": "- ⛔ 不碰 `packages/quay/src` 的目录环（core-root<->core-cli）。"
+        }
+      ],
+      "has_stop_signal_list": [
+        {
+          "line": 74,
+          "text": "## 停止扩大范围的信号"
+        }
+      ],
+      "has_three_state_exit_code": [
+        {
+          "line": 61,
+          "text": "三态退出码（同 GOAL-030 惯例）：0 达成；1 未达成，同行带 `CAUSE=`；3 未评估（前提未落地，如 worktree/evidence 未产生、尚未并入）。"
+        }
+      ],
+      "sink_target_is_kernel": [],
+      "human_activated": [
+        {
+          "line": 7,
+          "text": "origin: 人 2026-10-08 指令：按已验证的小而真实 goal branch 方法推进下一轮重构，仅做 needs-human"
+        }
+      ],
+      "merge_shape_single_commit": [
+        {
+          "line": 72,
+          "text": "8. 并入后：develop 上重跑 grep 读数、核对 `goal/GOAL-031` 以恰好一个合并提交进入 first-parent 链（AC-345）。"
+        },
+        {
+          "line": 80,
+          "text": "`goal-driver.ts` 的 5 处 `needs-human` 裸字面量比较全部消费 `plugin/scripts/task-status.ts` 的既有正本，不新造第二套；不改变状态机允许边/运行时语义；`grep -c 'status === \"needs-human\"' plugin/scripts/goal-driver.ts` 从 6 精确降到 1；`get_literal_dispersion(value:\"needs-human\")` 从 5 降到 "
+        }
+      ]
+    },
+    "GOAL-032": {
+      "has_archguard_before_after": [
+        {
+          "line": 23,
+          "text": "**这是继 GOAL-030/031 之后第三个真实 goal branch 试点**，范围比前两个更小：只收敛**一对**被 ArchGuard `detect_duplicates` 命中的重复实现，验证\"ownership-first\"方法论对\"文本→verdict 解析\"这类跨层重复的适用性，不追求架构收益，不扩展到任何其它 verdict 类型。"
+        },
+        {
+          "line": 55,
+          "text": "1. 激活前：ArchGuard 对 `develop` 当前 tip 的 before 基线——`detect_duplicates` 命中该组、`archguard_get_dependencies`/`get_package_metrics` 读 `criterion-fidelity.ts`/`goal-driver.ts` 当前各自的 canonical-definition 站点数（各 1，互不调用）。"
+        },
+        {
+          "line": 59,
+          "text": "5. Before/after 对比：同一 ArchGuard 构建对 fork point 与分支 tip（或合并提交两个父提交）各做一次单根分析，比较 §10 式指标（见下方 AC-348）。"
+        }
+      ],
+      "has_negative_control": [
+        {
+          "line": 70,
+          "text": "`parseFidelityVerdict`/`parseSemanticSufficiencyVerdict` 的解析算法收敛为 `packages/quay/src/kernel/verdict-parse.ts` 的唯一实现，两处旧函数变为薄包装（调用方零改动）；ArchGuard before/after 证明 duplicate group 消失、canonical definition count 2→1、`plugin/scripts→packages/quay"
+        }
+      ],
+      "has_branch_selfhost_probe": [
+        {
+          "line": 58,
+          "text": "4. 分支自举身份证明（规模对应本 goal 的实际风险——本次改动是纯函数重构，无新 driver/事件载体，不需要 GOAL-030 那种驱动进程沙盒级证明；取而代之核验**模块解析身份**：分支 worktree 内运行回归测试时，`import.meta.resolve`/`require.resolve` 解析到的 `verdict-parse.ts`/`criterion-fidelity.ts`/`goal-driver.ts` 的 realpath 落在该 w"
+        }
+      ],
+      "has_explicit_non_goals": [
+        {
+          "line": 43,
+          "text": "- ⛔ 不碰其它任何 verdict 类型（`GateVerdictKind`/`DimensionState`/`ScopedGateVerdict` 等 Quay 架构评审已发现的 27 文件分散字面量——那是独立、更大规模的缺口，不在本 goal 范围）。"
+        },
+        {
+          "line": 44,
+          "text": "- ⛔ 不碰 `packages/quay/src` 的目录环（core-root<->core-cli）。"
+        },
+        {
+          "line": 45,
+          "text": "- ⛔ 不碰正在自动运行的 routine quota 两个任务（`gap-routine-quota-canonical-config-and-policy-gate`已 done、`gap-routine-quota-consumer-convergence`已 ready，均不在本 goal 的 Touches 范围内，无文件重叠）。"
+        }
+      ],
+      "has_stop_signal_list": [
+        {
+          "line": 64,
+          "text": "## 停止扩大范围的信号"
+        }
+      ],
+      "has_three_state_exit_code": [
+        {
+          "line": 51,
+          "text": "三态退出码（同 GOAL-030/031 惯例）：0 达成；1 未达成，同行带 `CAUSE=`；3 未评估（前提未落地、尚未并入）。"
+        }
+      ],
+      "sink_target_is_kernel": [
+        {
+          "line": 40,
+          "text": "- 新建 `packages/quay/src/kernel/verdict-parse.ts`（纯函数，零依赖，天然满足 kernel\"只 import kernel + 裸说明符\"的约束）。"
+        },
+        {
+          "line": 70,
+          "text": "`parseFidelityVerdict`/`parseSemanticSufficiencyVerdict` 的解析算法收敛为 `packages/quay/src/kernel/verdict-parse.ts` 的唯一实现，两处旧函数变为薄包装（调用方零改动）；ArchGuard before/after 证明 duplicate group 消失、canonical definition count 2→1、`plugin/scripts→packages/quay"
+        }
+      ],
+      "human_activated": [
+        {
+          "line": 8,
+          "text": "origin: 人 2026-10-09 裁定：对 criterion-fidelity.ts::parseFidelityVerdict 与"
+        }
+      ],
+      "merge_shape_single_commit": [
+        {
+          "line": 61,
+          "text": "7. 规定 merge shape：`develop` 的 first-parent 链上恰好一个合并提交，第二父提交是 `goal/GOAL-032` tip，分支内部提交不泄漏到 first-parent（同 AC-342 判据，本 goal 对应 AC-349）。"
+        },
+        {
+          "line": 70,
+          "text": "`parseFidelityVerdict`/`parseSemanticSufficiencyVerdict` 的解析算法收敛为 `packages/quay/src/kernel/verdict-parse.ts` 的唯一实现，两处旧函数变为薄包装（调用方零改动）；ArchGuard before/after 证明 duplicate group 消失、canonical definition count 2→1、`plugin/scripts→packages/quay"
+        }
+      ]
+    }
+  },
+  "checkpoints": [
+    {
+      "checkpoint": 1,
+      "visible_goals": [
+        "GOAL-030"
+      ],
+      "pairwise_agreement_scores": [],
+      "max_agreement": null,
+      "trigger_evaluated": false,
+      "trigger_fired": false,
+      "reason": "insufficient-samples: 1 visible goal yields 0 comparable pairs, so the pairwise-agreement trigger is not evaluable here (NOT 'not yet fired')"
+    },
+    {
+      "checkpoint": 2,
+      "visible_goals": [
+        "GOAL-030",
+        "GOAL-031"
+      ],
+      "pairwise_agreement_scores": [
+        {
+          "pair": "GOAL-030|GOAL-031",
+          "agree": 7,
+          "of": 9
+        }
+      ],
+      "max_agreement": 7,
+      "trigger_evaluated": true,
+      "trigger_fired": true
+    },
+    {
+      "checkpoint": 3,
+      "visible_goals": [
+        "GOAL-030",
+        "GOAL-031",
+        "GOAL-032"
+      ],
+      "pairwise_agreement_scores": [
+        {
+          "pair": "GOAL-030|GOAL-031",
+          "agree": 7,
+          "of": 9
+        },
+        {
+          "pair": "GOAL-030|GOAL-032",
+          "agree": 9,
+          "of": 9
+        },
+        {
+          "pair": "GOAL-031|GOAL-032",
+          "agree": 7,
+          "of": 9
+        }
+      ],
+      "max_agreement": 9,
+      "trigger_evaluated": true,
+      "trigger_fired": true
+    }
+  ],
+  "first_threshold_checkpoint": 2,
+  "contracts": {
+    "checkpoint_2": {
+      "synthesized_at_checkpoint": 2,
+      "visible_goals": [
+        "GOAL-030",
+        "GOAL-031"
+      ],
+      "synthesized_inputs": "the two extracted 9-feature boolean vectors only",
+      "confidence": "medium — 2 samples, pairwise agreement 7/9; two features (has_negative_control, sink_target_is_kernel) are held by one sample and not the other, so they enter the contract as supported-but-not-uniform rather than as invariants",
+      "feature_support": {
+        "has_archguard_before_after": "2/2",
+        "has_negative_control": "1/2",
+        "has_branch_selfhost_probe": "2/2",
+        "has_explicit_non_goals": "2/2",
+        "has_stop_signal_list": "2/2",
+        "has_three_state_exit_code": "2/2",
+        "sink_target_is_kernel": "1/2",
+        "human_activated": "2/2",
+        "merge_shape_single_commit": "2/2"
+      },
+      "owner_concern": "Recurring ownership defects in the task/goal lifecycle surface that are observable through ArchGuard: one reading or one vocabulary is computed in more than one place (a duplicated decision function, a dispersed string literal, a write whose layer does not own the decision). Each recurrence is retired by moving that single decision to its correct owning layer in a minimally-scoped slice, leaving runtime semantics and every out-of-scope writer byte-identical.",
+      "scope": {
+        "owned_reading_classes": [
+          "ArchGuard before/after instrument readings (detect_duplicates groups, get_literal_dispersion values, package/layer edge strengths)",
+          "three-state criterion exit codes (0 达成 / 1 未达成 with CAUSE= / 3 未评估)",
+          "goal-branch merge-shape readings (exactly one merge commit on develop's first-parent chain; internal commits do not leak)",
+          "branch self-host identity readings (the resolved realpath of a loaded module lies inside the branch worktree, not the main checkout)"
+        ],
+        "owned_mechanisms_or_paths": [
+          "the goal-branch lifecycle (create from develop tip, one worktree per task, catch up develop before landing, land as one merge commit)",
+          "the explicit ⛔ non-goal fence declared per goal and mechanically counted",
+          "the human activation ruling recorded in the goal frontmatter's origin field",
+          "the branch self-host probe technique (realpath identity of the modules actually loaded)",
+          "the owning-layer routing decision — kernel is one instantiation, an already-canonical existing module is another"
+        ]
+      },
+      "inputs": [
+        "an ArchGuard before-baseline reading of the affected signal, taken on the pre-change tree",
+        "the inventory of which module is ALREADY the single source of truth for the affected vocabulary",
+        "the per-file positional enumeration of residual occurrences, each classified as real-defect / canonical-declaration / exempted / cross-vocabulary false-positive",
+        "the human activation ruling text"
+      ],
+      "forbidden_actions": [
+        "⛔ do not widen the slice past the enumerated occurrences",
+        "⛔ do not create a second canonical declaration of a vocabulary that already has one",
+        "⛔ do not change runtime semantics, allowed lifecycle edges, or any out-of-scope writer",
+        "⛔ do not import or depend on artifacts that exist only on an unmerged sibling goal branch",
+        "⛔ do not add edges to layers.yml, clear directory cycles, or split large files",
+        "⛔ do not touch production driver processes or the production .quay/ and tasks/ state"
+      ],
+      "success_metrics": [
+        "the ArchGuard after-reading is comparable to the before-reading and the targeted signal strictly improves, with every residual accounted for by a recorded non-defect reason",
+        "a deliberately-constructed negative control flips the reading the wrong way when the mechanism is removed — proving the metric measures the change and is not a fixture echo",
+        "all pre-existing tests plus any added characterization test are green on the branch tip, and import-graph-check ratchets do not regress",
+        "the goal lands on develop as exactly one merge commit whose second parent is the goal branch tip",
+        "branch self-host identity is demonstrated: the resolved realpath of the loaded modules lies inside the branch worktree"
+      ],
+      "replay_dataset": [
+        "goals/GOAL-030-*.md",
+        "goals/GOAL-031-*.md"
+      ],
+      "stop_retire_criteria": [
+        "code-identity false positive: self-host or module resolution escapes to the main checkout",
+        "production pollution: a sandbox run mutates the production .quay/ or tasks/",
+        "isolation loss: this goal's commits appear on develop's first-parent chain, or a landed task is re-dispatched",
+        "an unmerged sibling goal branch becomes a dependency, or layers.yml must gain an edge",
+        "baseline drift: characterization snapshots or golden samples change without an explanation from the slice",
+        "sustained manual patching outside the task mechanism"
+      ]
+    },
+    "checkpoint_3": {
+      "synthesized_at_checkpoint": 3,
+      "regenerated_for_comparison": true,
+      "visible_goals": [
+        "GOAL-030",
+        "GOAL-031",
+        "GOAL-032"
+      ],
+      "synthesized_inputs": "the three extracted 9-feature boolean vectors only",
+      "confidence": "medium-high — 3 samples; the axis reconfirms and scope does not change. The SAME two features remain non-uniform (has_negative_control 2/3, sink_target_is_kernel 2/3), so the third sample adds confidence without upgrading either into a claimed invariant",
+      "feature_support": {
+        "has_archguard_before_after": "3/3",
+        "has_negative_control": "2/3",
+        "has_branch_selfhost_probe": "3/3",
+        "has_explicit_non_goals": "3/3",
+        "has_stop_signal_list": "3/3",
+        "has_three_state_exit_code": "3/3",
+        "sink_target_is_kernel": "2/3",
+        "human_activated": "3/3",
+        "merge_shape_single_commit": "3/3"
+      },
+      "delta_from_checkpoint_2": "scope unchanged (no reading class, mechanism or forbidden action added or removed); confidence raised medium → medium-high; replay_dataset extended with GOAL-032; and one finding recorded that the ② contract could not have seen — sink_target_is_kernel is 2/3, not 3/3: GOAL-031 sinks its vocabulary into an ALREADY-canonical existing module (plugin/scripts/task-status.ts), not into kernel. The axis is therefore 'route the decision to its correct owning layer', NOT 'sink to kernel'.",
+      "owner_concern": "Recurring ownership defects in the task/goal lifecycle surface that are observable through ArchGuard: one reading or one vocabulary is computed in more than one place (a duplicated decision function, a dispersed string literal, a write whose layer does not own the decision). Each recurrence is retired by moving that single decision to its correct owning layer in a minimally-scoped slice, leaving runtime semantics and every out-of-scope writer byte-identical.",
+      "scope": {
+        "owned_reading_classes": [
+          "ArchGuard before/after instrument readings (detect_duplicates groups, get_literal_dispersion values, package/layer edge strengths)",
+          "three-state criterion exit codes (0 达成 / 1 未达成 with CAUSE= / 3 未评估)",
+          "goal-branch merge-shape readings (exactly one merge commit on develop's first-parent chain; internal commits do not leak)",
+          "branch self-host identity readings (the resolved realpath of a loaded module lies inside the branch worktree, not the main checkout)"
+        ],
+        "owned_mechanisms_or_paths": [
+          "the goal-branch lifecycle (create from develop tip, one worktree per task, catch up develop before landing, land as one merge commit)",
+          "the explicit ⛔ non-goal fence declared per goal and mechanically counted",
+          "the human activation ruling recorded in the goal frontmatter's origin field",
+          "the branch self-host probe technique (realpath identity of the modules actually loaded)",
+          "the owning-layer routing decision — the correct layer may be kernel OR an already-canonical existing module (GOAL-031 uses the latter)"
+        ]
+      },
+      "inputs": [
+        "an ArchGuard before-baseline reading of the affected signal, taken on the pre-change tree",
+        "the inventory of which module is ALREADY the single source of truth for the affected vocabulary",
+        "the per-file positional enumeration of residual occurrences, each classified as real-defect / canonical-declaration / exempted / cross-vocabulary false-positive",
+        "the human activation ruling text",
+        "an equivalence investigation when the defect is a suspected duplicate, recorded BEFORE the goal is created (equivalent vs intentionally-divergent)"
+      ],
+      "forbidden_actions": [
+        "⛔ do not widen the slice past the enumerated occurrences",
+        "⛔ do not create a second canonical declaration of a vocabulary that already has one",
+        "⛔ do not change runtime semantics, allowed lifecycle edges, or any out-of-scope writer",
+        "⛔ do not import or depend on artifacts that exist only on an unmerged sibling goal branch",
+        "⛔ do not add edges to layers.yml, clear directory cycles, or split large files",
+        "⛔ do not touch production driver processes or the production .quay/ and tasks/ state"
+      ],
+      "success_metrics": [
+        "the ArchGuard after-reading is comparable to the before-reading and the targeted signal strictly improves, with every residual accounted for by a recorded non-defect reason",
+        "a deliberately-constructed negative control flips the reading the wrong way when the mechanism is removed — proving the metric measures the change and is not a fixture echo",
+        "all pre-existing tests plus any added characterization test are green on the branch tip, and import-graph-check ratchets do not regress",
+        "the goal lands on develop as exactly one merge commit whose second parent is the goal branch tip",
+        "branch self-host identity is demonstrated: the resolved realpath of the loaded modules lies inside the branch worktree"
+      ],
+      "replay_dataset": [
+        "goals/GOAL-030-*.md",
+        "goals/GOAL-031-*.md",
+        "goals/GOAL-032-*.md"
+      ],
+      "stop_retire_criteria": [
+        "code-identity false positive: self-host or module resolution escapes to the main checkout",
+        "production pollution: a sandbox run mutates the production .quay/ or tasks/",
+        "isolation loss: this goal's commits appear on develop's first-parent chain, or a landed task is re-dispatched",
+        "an unmerged sibling goal branch becomes a dependency, or layers.yml must gain an edge",
+        "baseline drift: characterization snapshots or golden samples change without an explanation from the slice",
+        "sustained manual patching outside the task mechanism"
+      ]
+    }
+  },
+  "sensitivity": {
+    "note": "hides nothing and moves nothing: the primary trigger above uses the principled broad reading of human_activated. This block recomputes the same pipeline with the narrower `人.*裁定` reading named in the task, purely to show the answer is not an artifact of that choice.",
+    "definition": "narrow reading: frontmatter matches `人.*裁定` (the example pattern named in the task). GOAL-030 quotes the human (「现在开始执行…」) and GOAL-031 says 指令 rather than 裁定, so this narrower predicate is expected to be false for both.",
+    "feature_vectors": {
+      "GOAL-030": {
+        "has_archguard_before_after": true,
+        "has_negative_control": true,
+        "has_branch_selfhost_probe": true,
+        "has_explicit_non_goals": true,
+        "has_stop_signal_list": true,
+        "has_three_state_exit_code": true,
+        "sink_target_is_kernel": true,
+        "human_activated": false,
+        "merge_shape_single_commit": true
+      },
+      "GOAL-031": {
+        "has_archguard_before_after": true,
+        "has_negative_control": false,
+        "has_branch_selfhost_probe": true,
+        "has_explicit_non_goals": true,
+        "has_stop_signal_list": true,
+        "has_three_state_exit_code": true,
+        "sink_target_is_kernel": false,
+        "human_activated": false,
+        "merge_shape_single_commit": true
+      },
+      "GOAL-032": {
+        "has_archguard_before_after": true,
+        "has_negative_control": true,
+        "has_branch_selfhost_probe": true,
+        "has_explicit_non_goals": true,
+        "has_stop_signal_list": true,
+        "has_three_state_exit_code": true,
+        "sink_target_is_kernel": true,
+        "human_activated": true,
+        "merge_shape_single_commit": true
+      }
+    },
+    "checkpoints": [
+      {
+        "checkpoint": 1,
+        "visible_goals": [
+          "GOAL-030"
+        ],
+        "pairwise_agreement_scores": [],
+        "max_agreement": null,
+        "trigger_evaluated": false,
+        "trigger_fired": false,
+        "reason": "insufficient-samples: 1 visible goal yields 0 comparable pairs, so the pairwise-agreement trigger is not evaluable here (NOT 'not yet fired')"
+      },
+      {
+        "checkpoint": 2,
+        "visible_goals": [
+          "GOAL-030",
+          "GOAL-031"
+        ],
+        "pairwise_agreement_scores": [
+          {
+            "pair": "GOAL-030|GOAL-031",
+            "agree": 7,
+            "of": 9
+          }
+        ],
+        "max_agreement": 7,
+        "trigger_evaluated": true,
+        "trigger_fired": true
+      },
+      {
+        "checkpoint": 3,
+        "visible_goals": [
+          "GOAL-030",
+          "GOAL-031",
+          "GOAL-032"
+        ],
+        "pairwise_agreement_scores": [
+          {
+            "pair": "GOAL-030|GOAL-031",
+            "agree": 7,
+            "of": 9
+          },
+          {
+            "pair": "GOAL-030|GOAL-032",
+            "agree": 8,
+            "of": 9
+          },
+          {
+            "pair": "GOAL-031|GOAL-032",
+            "agree": 6,
+            "of": 9
+          }
+        ],
+        "max_agreement": 8,
+        "trigger_evaluated": true,
+        "trigger_fired": true
+      }
+    ],
+    "first_threshold_checkpoint": 2
+  },
+  "contract_guard": {
+    "ok": true,
+    "errors": []
+  },
+  "interpretation": "the fixed >=6-of-9 pairwise-agreement rule first fires at checkpoint 2 (visible goals: GOAL-030, GOAL-031)"
+}
