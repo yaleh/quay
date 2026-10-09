@@ -602,3 +602,90 @@ test("AC-257/AC-258 — BOTH legs' remote preamble carries the caller-declared w
       `${mode}: removing the call site MUST make the predicate false — otherwise this check cannot red for the defect it pins`);
   }
 });
+
+// ── verb-first call-site pin (gap-ac214-tenth-crossing-producer-callsite-missing-init-verb) ──────
+// AC-214's REMEDY is "re-run the producer", and the producer (`develop-deliver-tgz.sh
+// --verify-coldstart|--verify-upgrade`) runs `verify-deliver-coldstart.sh` on the remote, whose two
+// init actions invoke the shipped CLI entry `plugin/bin/quay`. e0279c77a migrated quay-init.sh's
+// `qinit=` call sites to `bin/quay` but left TWO call sites VERB-LESS (`bash "$qinit" --root …` and
+// `bash "$qinit" --all --loop …`). `bin/quay` requires the FIRST positional argument to be a
+// subcommand, so `--root` was parsed as an unknown verb ⇒ usage ⇒ rc=1 ⇒ the upgrade action and the
+// cold-start face wrote NO carrier record ⇒ six AC-214 subjects went stale and AC-214 re-crossed for
+// the tenth time. The failure shape — "no record was written" — is the same shape as "everything is
+// fine" (硬规则 3b/4b), so it stayed invisible for two days. This test pins the SHAPE.
+//
+// Judged by POSITION (硬规则 2): a comment mentioning the call, or an unrelated `git log --all`, does
+// not count; the predicate reads logical statements (backslash continuations joined) with comments
+// stripped. The in-process negative control below proves the predicate CAN red for the defect.
+const CALLSITE_SCRIPT = path.join(REPO_ROOT, "plugin", "scripts", "verify-deliver-coldstart.sh");
+
+// Join backslash-continued physical lines into one logical statement, so a call whose verb and its
+// flags sit on different physical lines is judged as a whole.
+// (mirrors the helper in verify-deliver-coldstart.test.mjs)
+function logicalStatements(src) {
+  const out = [];
+  let cur = "";
+  for (const raw of src.split("\n")) {
+    const line = raw.replace(/\s+$/, "");
+    const cont = line.endsWith("\\");
+    const piece = cont ? line.slice(0, -1) : line;
+    cur = cur ? `${cur} ${piece.trim()}` : piece;
+    if (!cont) { out.push(cur); cur = ""; }
+  }
+  if (cur) out.push(cur);
+  return out;
+}
+
+// verbLessCalls(): enumerate the shipped-CLI invocations in `src` that are MISSING the subcommand
+// verb — i.e. the executable token is followed directly by a flag. Two invocation forms:
+//   (a) `bash "$qinit" <token>`  — the shipped shell-entry invocation;
+//   (b) `"…/bin/quay" <token>`   — the plugin CLI entry invoked directly (a full-path command word).
+// Existence checks (`[ -f "$qinit" ]`), assignments (`qinit=…`), readlink probes and fixtures that
+// merely WRITE a fake bin are excluded by POSITION: none of them put a flag right after the token.
+const VERB_LESS_RES = [
+  { re: /bash\s+"?\$\{?qinit\}?"?\s+(-\w|--\w)/, form: 'bash "$qinit"' },
+  { re: /"(?:[^"]*\/)?bin\/quay"\s+(-\w|--\w)/, form: '"…/bin/quay"' },
+];
+function verbLessCalls(src) {
+  const hits = [];
+  for (const s of logicalStatements(src)) {
+    for (const { re, form } of VERB_LESS_RES) {
+      if (re.test(s)) hits.push({ form, stmt: s.trim().slice(0, 160) });
+    }
+  }
+  return hits;
+}
+
+test("AC8 — every shipped-CLI invocation in verify-deliver-coldstart.sh is verb-first (position + negative control)", () => {
+  // comments stripped by POSITION (a `# …` line is not a call site) — per-line `#` strip, the same
+  // crude-but-positional rule the sibling test uses.
+  const src = readFileSync(CALLSITE_SCRIPT, "utf8").split("\n").map((l) => l.replace(/#.*$/, "")).join("\n");
+
+  // positive: the predicate finds NO verb-less call site in the fixed file.
+  assert.deepEqual(verbLessCalls(src), [],
+    "every shipped-CLI invocation must carry its subcommand verb (… bin/quay init --root …): a " +
+    "verb-less call parses --root as an unknown verb ⇒ usage ⇒ rc=1 ⇒ the producer writes no carrier record");
+
+  // 硬规则 3 (absence is not a pass): pin that the two migrated call sites EXIST in verb-first form,
+  // so deleting both call sites cannot satisfy the predicate above by emptiness.
+  const verbFirst = [...src.matchAll(/bash\s+"\$qinit"\s+init\b/g)];
+  assert.equal(verbFirst.length, 2,
+    `the upgrade action AND the cold-start face must EACH invoke \`bash "$qinit" init\` (found ${verbFirst.length})`);
+
+  // the retired no-op flags must not ride a shipped-CLI invocation (they are an error to `quay init`).
+  const retired = logicalStatements(src).filter((s) =>
+    /(bash\s+"?\$\{?qinit\}?"?|"(?:[^"]*\/)?bin\/quay")/.test(s) && /(^|\s)--(all|loop)\b/.test(s));
+  assert.deepEqual(retired, [],
+    `--all/--loop are retired no-ops AND \`quay init\` rejects --loop ⇒ they must not appear on a shipped-CLI invocation: ${retired.join(" | ")}`);
+
+  // ── in-process negative control (硬规则 4: a check that cannot fail is not a measurement) ──────
+  // Re-run the SAME predicate against a copy with `init` stripped from each site. Removing the verb
+  // MUST make it fire — otherwise the positive assertion above is vacuous.
+  const mutated = src
+    .replace(/bash\s+"\$qinit"\s+init\b/g, 'bash "$qinit"')
+    .replace(/"(?:([^"]*\/)?)bin\/quay"\s+init\b/g, '"$1bin/quay"');
+  const neg = verbLessCalls(mutated);
+  assert.ok(neg.length >= verbFirst.length,
+    `stripping the subcommand verb from the ${verbFirst.length} call site(s) MUST make the predicate red ` +
+    `(got ${neg.length}): a green here means the check cannot red for the defect it pins`);
+});

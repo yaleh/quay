@@ -1453,7 +1453,7 @@ step_upgrade_existing() {
   #   0 个 backup ref（该旗标在不需要采纳时是 no-op，故可以无条件传）。
   set +e
   CLAUDE_PLUGIN_ROOT="$(dirname "$(dirname "$qinit")")" \
-    bash "$qinit" --root "$root" --repo-root "$root" \
+    bash "$qinit" init --root "$root" --repo-root "$root" \
       --worktree-root "$(dirname "$root")/$(basename "$root")-worktrees" \
       --adopt-branch-model \
       --auto-commit-skip >"$root/.quay-upgrade-init.log" 2>&1
@@ -4580,8 +4580,7 @@ step2_init() {
   git -C "$ROOT" config user.email "verify@localhost" 2>/dev/null || true
   git -C "$ROOT" config user.name "verify" 2>/dev/null || true
   printf '{"name":"%s","scripts":{"test":"%s"}}\n' "$PROJECT" "$TEST_CMD" > "$ROOT/package.json"
-  if ! CLAUDE_PLUGIN_ROOT="$plugin_root" bash "$qinit" \
-      --all --loop \
+  if ! CLAUDE_PLUGIN_ROOT="$plugin_root" bash "$qinit" init \
       --root "$ROOT" \
       --project "$PROJECT" \
       --repo-root "$ROOT" \
