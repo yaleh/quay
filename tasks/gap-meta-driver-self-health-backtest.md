@@ -36,9 +36,9 @@ Before proposing or building any production liveness check, this task runs a **r
 
 ## Touches
 
-- docs/analysis/meta-driver-self-health-backtest.mjs
-- docs/analysis/meta-driver-self-health-backtest.results.json
-- docs/analysis/meta-driver-self-health-backtest.md
+- docs/analysis/meta-driver-self-health-backtest.mjs (new)
+- docs/analysis/meta-driver-self-health-backtest.results.json (new)
+- docs/analysis/meta-driver-self-health-backtest.md (new)
 - tasks/gap-meta-driver-self-health-backtest.md
 
 ## AC
