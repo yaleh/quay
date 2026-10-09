@@ -1,7 +1,7 @@
 ---
 id: AC-349
 title: 并入形态 + 并入后生产核验：GOAL-032 以恰好一个合并提交进入 develop，两处调用方在 develop 上确已委托给 kernel
-status: draft
+status: active
 kind: criterion
 goal: GOAL-032
 criterion: |-
@@ -23,4 +23,15 @@ criterion: |-
   echo "PASS: GOAL-032 landed as exactly one merge commit (second parent = goal tip); develop's two call sites both delegate to the kernel parser"
 expect: exit 0 = 合并形态正确且生产两处均已委托；exit 1 = CAUSE= 指明哪一项；exit 3 = 尚未并入
 origin: GOAL-032 并入验收，同构 AC-342/AC-345
+activatedAt: 2026-10-09T01:55:10.012Z
+statusLog:
+  - at: 2026-10-09T01:55:10.012Z
+    from: draft
+    to: active
+    actor: goal-cli
+    reason: ""
+fidelity:
+  verdict: not-evaluated
+  reason: no judge configured
+  at: 2026-10-09T01:55:10.011Z
 ---
