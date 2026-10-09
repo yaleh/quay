@@ -1,7 +1,7 @@
 ---
 id: gap-goal033-selfhost-and-archguard-evidence
 title: GOAL-033 ②：ArchGuard before/after（cli 离开 package SCC 6→5）+ 负对照 + CLI 语义现场重算
-status: ready
+status: todo
 labels:
   - gap
 parent: null
@@ -26,7 +26,7 @@ GOAL-033 的第二块（分支自举 + ArchGuard before/after）：在实现已�
 
 1. **记录 ArchGuard 版本**：before 与 after 必须是同一个构建；把版本串写进证据（`archguardVersion`）。若会话中 ArchGuard 版本变化，两次都重取。
 2. **before（fork point）**：`git worktree add --detach /home/yale/work/quay-worktrees/goal033-fork 1ac06fd85`（⛔ 不放 `/tmp`）。对它跑 `archguard_analyze(projectRoot=<该 worktree>, sources:["packages/quay/src"], lang:"typescript", format:"json")`，**显式传回显的 scope key**（⛔ 不省略 scope——省略时会静默选中一个陈旧的无关 scope），再跑 `archguard_detect_cycles(outputScope:"package", scope:<key>)` 与 `archguard_get_package_metrics(packageName:"cli", scope:<key>)`。读完 `git worktree remove` 掉它。
-3. **after（分支 tip）**：在本任务 worktree（已含实现）上做同样三步。期望 `cli.fanIn = 0`，SCC 成员恰为 `["", "fan-in", "gate", "gate/config", "gate/factories"]`——**其余五员不多不少**，证明本 goal 没碰别的边、也没造出新边。
+3. **after（分支 tip）**：在本任务 worktree（已含实现）上做同样三步。期望 `cli.fanIn = 0`，SCC 成员恰为 `["", "gate", "gate/config", "gate/factories"]`——`cli` 离开，`fan-in` 随之离开（`cli/driver.ts:37` 是 `packages/quay/src` 内 `fan-in/` 的唯一 importer，它只经 `cli` 入环），**其余四员不多不少**，证明本 goal 没碰别的边、也没造出新边。（2026-10-09 goal 作者更正：原写 5 员，见下方 Resolved 段。）
 4. **负对照**：把本 worktree 的 `packages/quay/src` 复制到一个 scratch 目录（`/home/yale/work/quay-worktrees/goal033-negctl/`），只在副本的 `serve-sessions.ts` 顶部注入一行 `import { handleDriver } from "./cli/driver.ts";`（选一个搬迁后仍存在的导出），对副本跑同样三步 ⇒ 期望 `cli.fanIn ≥ 1` 且 SCC 重新包含 `cli`。读完删掉 scratch 目录。
 5. **落盘证据** `.quay/goal-033-evidence/archguard-before-after.json`（**要 `git add -f` 提交**，否则 goal 判据 worktree 读不到——GOAL-032 的同名证据就是这样进去的）：
    `{ archguardVersion, before: {treeSha, scopeKey, packageSccMembers, packageSccSize, cliPackageFanIn, packageSccContainsCli}, after: {...同上}, negativeControl: {injected, cliPackageFanIn, packageSccContainsCli, packageSccMembers}, consumerConvergence: [{file, importLine}...] }`。`consumerConvergence` 用 grep 的真实行文本（`serve-sessions.ts`、`serve.ts`、`cli/server.ts`、`cli/driver.ts`、`cli/help.ts` 五个文件各一条），不是推断。
@@ -37,7 +37,7 @@ GOAL-033 的第二块（分支自举 + ArchGuard before/after）：在实现已�
 
 - [x] `.quay/goal-033-evidence/archguard-before-after.json` 已提交到本任务分支，且 before / after / negativeControl 三段都由同一 `archguardVersion` 取得、每段带显式 `scopeKey`
 - [x] before 段复现调查读数：SCC 成员 6 个含 `cli`、`cliPackageFanIn = 2`
-- [ ] after 段：`cliPackageFanIn = 0`，SCC 成员恰为 `["", "fan-in", "gate", "gate/config", "gate/factories"]`
+- [ ] after 段：`cliPackageFanIn = 0`，SCC 成员恰为 `["", "gate", "gate/config", "gate/factories"]`（6→4：cli 与仅经 cli 入环的 fan-in 一同离开）
 - [x] negativeControl 段：注入一条 core→cli 边后 `cliPackageFanIn ≥ 1` 且 SCC 重新包含 `cli`
 - [ ] AC-351 判据在本任务 worktree 内 exit 0，输出原文进 `## Evidence`
 - [x] Evidence 里 facts / declared rules / judgment 三段分开记录
@@ -45,7 +45,7 @@ GOAL-033 的第二块（分支自举 + ArchGuard before/after）：在实现已�
 
 ## Definition of Done
 
-AC-351 的证据文件在分支上可读，三段读数出自同一 ArchGuard 构建且显式 scope；`cli` 离开 package SCC、其余五员不变、负对照把它拉回——读数能取假；AC-351 判据（含现场重算的 CLI 语义探针）在分支树上 exit 0；临时产物已清理。
+AC-351 的证据文件在分支上可读，三段读数出自同一 ArchGuard 构建且显式 scope；`cli`（连同仅经 cli 入环的 `fan-in`）离开 package SCC、其余四员不变、负对照把它拉回——读数能取假；AC-351 判据（含现场重算的 CLI 语义探针）在分支树上 exit 0；临时产物已清理。
 
 ## Touches
 
@@ -124,7 +124,11 @@ CLI 语义现场重算那一半（判据在证据检查之后才跑到，故此�
     $ git worktree list | grep -E 'goal033-(fork|negctl|after-check)'   → （空）
     goal033-fork / goal033-after-check 已 `git worktree remove --force`；goal033-negctl 已 rm -rf。
 
-## Blocked — AC-351 的 after 期望值已被测量证伪（需 goal 级裁定，⛔ 不由本任务改判据）
+## Resolved — AC-351 的 after 期望已由 goal 作者更正为 6→4（2026-10-09，采纳下方选项 1）
+
+**裁定**：采纳选项 1。本任务的分析经 goal 作者独立复核成立——`git grep` 按位置判定 develop 上 `packages/quay/src` 内 `fan-in/` 的 importer **只有** `cli/driver.ts:37`（同一谓词对 `gate/` 命中 10 个文件作正对照）⇒ 删除 `"" → cli` 后 `fan-in` 随 `cli` 一起离开 SCC，6→4 是唯一自洽的期望；错的是 goal 作者当初只核了 `cli` 的入边、没核 `fan-in` 的入环路径。已更正：AC-351 的 criterion（`rest` 去掉 `fan-in`）、expect、title（author 提交 `e2abedc55`），GOAL-033 的 title/body（`adcefec15`）。选项 2（把仪器附加搬进 core-root）**不采纳**——它恰是 GOAL-033 明令避开的 root⇄fan-in 搬壳。更正后的 AC-351 判据已在本任务 worktree 内 dry-run ⇒ exit 0（含现场重算的 CLI 语义探针），旧判据同处 ⇒ `CAUSE=scc-not-exactly-minus-cli`，与本任务的报告一致。**证据文件无需重取**；续做只需在本 worktree 重跑 AC-351 判据、如实勾选剩余两条 AC。⛔ 文件名 `goals/AC-351-…-6-5-…` 是旧 slug，store 不随 title 改名，属外观问题，不影响判定。
+
+以下为本任务原始分析（保留原文）：
 
 **是任务前提错，不是实现错。** GOAL-033 / AC-351 期望 after SCC 恰为 5 员
 `["","fan-in","gate","gate/config","gate/factories"]`，但**在 goal 自己的约束下这是结构上不可能达到的**：
@@ -151,3 +155,12 @@ CLI 语义现场重算那一半（判据在证据检查之后才跑到，故此�
 
 **未落地原因**：AC-3（after 成员集）与 AC-5（AC-351 exit 0）**不能如实勾选**，故保留 `- [ ]`；status 字段归
 driver 所有，本任务不改。其余 5 条 AC 均已满足（见上）。
+
+## Needs-Human
+
+**执行 2026-10-09T06:58:16.498Z — 连续修满重试上限仍不合格（标 needs-human）**
+
+- 阻碍原因：worker-driver 连续 3 次 exited-not-landed 未落地（重试上限）
+- 失败步/判词：AC 未全勾（checked 5/7，剩余未勾 2）——续做只需验证并勾选 AC
+- run_id：wk-prod-anchor
+- session_id：1c8c4a2d-bd69-4696-9d9a-80cd47b2dcd2

@@ -1,0 +1,19 @@
+{
+  "case_id": "GOAL-030",
+  "status": "landed",
+  "merge_commit": "d71d2bde4",
+  "merge_commit_note": "git log --oneline --all --grep=\"GOAL-030\" --merges shows 'd71d2bde4 merge: goal/GOAL-030 into develop'.",
+  "ac_results": {
+    "AC-336": "achieved",
+    "AC-337": "achieved",
+    "AC-338": "achieved",
+    "AC-339": "achieved",
+    "AC-340": "achieved",
+    "AC-341": "achieved",
+    "AC-342": "achieved"
+  },
+  "goal_final_status": "achieved",
+  "goal_status_log_reason": "I2: all ACs achieved + sufficiency covered",
+  "archguard_delta_direction": "AC-339's own verification: adding the kernel import raised plugin/scripts->kernel edge strength from 14 to 15 (matching the before baseline + 1 new edge from the two switched call sites); removing it reverted to 14, confirming the measured delta is attributable to this change and reversible on demand (the negative-control property).",
+  "as_of": "2026-10-09T00:00:00.000Z"
+}
