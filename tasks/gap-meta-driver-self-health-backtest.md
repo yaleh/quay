@@ -2,7 +2,7 @@
 id: gap-meta-driver-self-health-backtest
 title: "meta-driver self-health backtest: offline deterministic liveness-check
   detection-delay/false-alarm analysis over .quay/meta-driver-round.jsonl"
-status: ready
+status: done
 labels:
   - gap
 parent: null
