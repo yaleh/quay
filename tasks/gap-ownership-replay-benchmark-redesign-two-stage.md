@@ -2,7 +2,7 @@
 id: gap-ownership-replay-benchmark-redesign-two-stage
 title: "ownership replay benchmark redesign: T0/T1 two-stage corpus, falsifiable
   granularity, alternative-answer tolerance, Flash-vs-Opus re-run"
-status: todo
+status: ready
 labels:
   - gap
 parent: null
