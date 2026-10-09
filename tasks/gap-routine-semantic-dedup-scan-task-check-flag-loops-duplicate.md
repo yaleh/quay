@@ -3,7 +3,7 @@ id: gap-routine-semantic-dedup-scan-task-check-flag-loops-duplicate
 title: "semantic-dedup-scan: near-identical flag-parsing loops
   (root/json/write-ratchet/allow-growth/reset-baseline/strict-subset/no-block/f\
   iles) in the two task checkers — a separate real"
-status: ready
+status: done
 labels:
   - gap
   - routine-filed
