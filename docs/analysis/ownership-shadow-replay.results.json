@@ -1,264 +1,398 @@
 {
-  "proposer_id": "ownership-shadow-proposer/v1",
-  "corpus_root": "plugin/fixtures/meta-driver-replay",
-  "scoring": "plugin/test/helpers/meta-driver-replay-harness.mjs#scoreResponse",
-  "note": "Offline replay of a DETERMINISTIC stub proposer over a 4-case, single-domain corpus. These numbers read the corpus, not a calibrated judgment — see docs/analysis/ownership-shadow-replay.md.",
+  "proposer_id": "ownership-shadow-baseline",
+  "note": "Deterministic baseline proposer (NO LLM). Its role is to prove the pipeline + gate run end-to-end offline and to set an honest floor a semantic proposer must beat — it is NOT evidence that a semantic proposer works.",
+  "generated_at_note": "no timestamp recorded on purpose: the output must be byte-reproducible",
   "cases": {
     "GOAL-030": {
-      "case_id": "GOAL-030",
-      "concern_recall": 1,
-      "concern_precision": 1,
-      "chosen_slice_agreement": "no_match",
-      "chosen_slice_overlap_score": 0.23529411764705882,
-      "investigation_vs_goal_agreement": true,
-      "scope_expansion_violation": false,
-      "expected_delta_quality": "has_numeric_claim",
-      "falsifiability_negative_control_presence": "present",
-      "decomposition_quality": {
-        "structured_fields_present": "2/2 prose fields, 2/3 array fields non-empty",
-        "why_not_broader_overlap": 0.05555555555555555,
-        "why_not_finer_overlap": 0
-      },
-      "slice_semantic_coherence": "possible_bundling_heuristic(4_joins)",
-      "granularity": "agreement",
-      "harnessability": "harness_ready",
-      "harnessability_components": {
-        "has_scope_non_goals": true,
-        "has_negative_control": true,
-        "has_numeric_expected_delta": true,
-        "has_failure_mode": true
-      },
-      "primitive_reuse": {
-        "mentioned_any": true,
-        "overlap_with_reference": 1,
-        "possible_reinvention": false
-      },
-      "decomposition_breadth": {
-        "concerns_named": 1,
-        "interventions_proposed": 1
-      },
-      "coordination_cost_reasoning_given": true,
-      "unnecessary_decomposition_flag": false,
-      "hindsight_leakage_guard": {
-        "flagged": false,
-        "matched_markers": []
-      },
-      "abstention_uncertainty_reasonableness": "specific",
-      "note": "rule-assisted, minimal-viable metrics — not a calibrated aggregate score (see README.md)",
-      "prompt_sha256": "ada20a150bcd054bdb5676cb71d2ba95e840e227d6ec8a64e65aa7f2ad7b351b",
-      "proposer": {
-        "concern_class": "ownership-placement",
-        "recommended_next_action": "propose-goal",
+      "prompt_chars": 6216,
+      "evidence_refs_available": [
+        "archguard:source_commit",
+        "archguard:directory_cycles",
+        "archguard:plugin_scripts_to_kernel_edge_strength",
+        "archguard:plugin_scripts_to_non_kernel_edge_strength",
+        "archguard:packages_to_plugin_edges",
+        "code:pointer:0",
+        "code:pointer:1",
+        "task:0",
+        "repo:state"
+      ],
+      "envelope": {
+        "proposer_id": "ownership-shadow-baseline",
+        "concern": "a package-level dependency cycle (SCC) indicates ownership inversion: a lower layer imports upward, so the cycle must be cut at its cheapest outermost edge",
         "evidence_refs": [
-          "archguard.package_fanin_out",
-          "corpus.context",
-          "tasks.recent_landed"
+          "archguard:source_commit"
         ],
-        "candidate_intervention_count": 1
+        "candidate_interventions": [
+          {
+            "title": "slice the cheapest root->subdir edge out of the SCC",
+            "rationale": "smallest independently-verifiable ownership move"
+          },
+          {
+            "title": "investigate which member the cut node is the sole in-edge for",
+            "rationale": "a cut can strand reachable-only-through-it members"
+          }
+        ],
+        "recommended_next_action": "propose-goal",
+        "scope": {
+          "in_scope": [
+            "cut the single cheapest root->subdir import edge",
+            "move the shared primitive to the correct ownership layer"
+          ],
+          "non_goals": [
+            "do not clear the whole SCC in one slice",
+            "do not touch unrelated cycle members"
+          ]
+        },
+        "expected_mechanical_delta": "package SCC size decreases by at least one member, with the other members unchanged",
+        "negative_control": "re-inject one edge with a REAL (used) import and confirm the cut member returns to the SCC",
+        "abandon_or_reconsider_condition": "abandon if the fix requires creating a new edge between two other packages, or if another member leaves the SCC unexpectedly",
+        "confidence": {
+          "level": "medium",
+          "basis": "derived deterministically from the case's own archguard readings; no semantic judgement applied"
+        }
       },
       "gate": {
-        "accepted": true,
-        "code": "accepted",
-        "reason": "all deterministic checks passed",
-        "concern_key": "ownership:ownership-placement:quay s goal branch mechanism exists in the codebase spec goal branch but has only ever been exercised in rehearsals goal"
+        "ok": true,
+        "reasons": []
+      },
+      "scores": {
+        "case_id": "GOAL-030",
+        "concern_recall": 0,
+        "concern_precision": 0,
+        "chosen_slice_agreement": "no_match",
+        "chosen_slice_overlap_score": 0.047619047619047616,
+        "investigation_vs_goal_agreement": true,
+        "scope_expansion_violation": false,
+        "expected_delta_quality": "no_numeric_claim",
+        "falsifiability_negative_control_presence": "present",
+        "decomposition_quality": {
+          "structured_fields_present": "2/2 prose fields, 3/3 array fields non-empty",
+          "why_not_broader_overlap": 0,
+          "why_not_finer_overlap": 0.375
+        },
+        "slice_semantic_coherence": "possible_bundling_heuristic(1_joins)",
+        "granularity": "agreement",
+        "harnessability": "incomplete",
+        "harnessability_components": {
+          "has_scope_non_goals": true,
+          "has_negative_control": true,
+          "has_numeric_expected_delta": false,
+          "has_failure_mode": true
+        },
+        "primitive_reuse": {
+          "mentioned_any": true,
+          "overlap_with_reference": 0.5,
+          "possible_reinvention": false
+        },
+        "decomposition_breadth": {
+          "concerns_named": 1,
+          "interventions_proposed": 2
+        },
+        "coordination_cost_reasoning_given": true,
+        "unnecessary_decomposition_flag": false,
+        "hindsight_leakage_guard": {
+          "flagged": false,
+          "matched_markers": []
+        },
+        "abstention_uncertainty_reasonableness": "specific",
+        "note": "rule-assisted, minimal-viable metrics — not a calibrated aggregate score (see README.md)"
       }
     },
     "GOAL-031": {
-      "case_id": "GOAL-031",
-      "concern_recall": 1,
-      "concern_precision": 1,
-      "chosen_slice_agreement": "near_match",
-      "chosen_slice_overlap_score": 0.32608695652173914,
-      "investigation_vs_goal_agreement": true,
-      "scope_expansion_violation": false,
-      "expected_delta_quality": "has_numeric_claim",
-      "falsifiability_negative_control_presence": "present",
-      "decomposition_quality": {
-        "structured_fields_present": "2/2 prose fields, 3/3 array fields non-empty",
-        "why_not_broader_overlap": 0.13636363636363635,
-        "why_not_finer_overlap": 0.09523809523809523
-      },
-      "slice_semantic_coherence": "possible_bundling_heuristic(4_joins)",
-      "granularity": "agreement",
-      "harnessability": "harness_ready",
-      "harnessability_components": {
-        "has_scope_non_goals": true,
-        "has_negative_control": true,
-        "has_numeric_expected_delta": true,
-        "has_failure_mode": true
-      },
-      "primitive_reuse": {
-        "mentioned_any": true,
-        "overlap_with_reference": 1,
-        "possible_reinvention": false
-      },
-      "decomposition_breadth": {
-        "concerns_named": 1,
-        "interventions_proposed": 1
-      },
-      "coordination_cost_reasoning_given": true,
-      "unnecessary_decomposition_flag": false,
-      "hindsight_leakage_guard": {
-        "flagged": false,
-        "matched_markers": []
-      },
-      "abstention_uncertainty_reasonableness": "specific",
-      "note": "rule-assisted, minimal-viable metrics — not a calibrated aggregate score (see README.md)",
-      "prompt_sha256": "86b51f532c96307450a857b6d74bae1e1fd768b829639e05ba5597ab7e3ebd4a",
-      "proposer": {
-        "concern_class": "canonicalization",
-        "recommended_next_action": "propose-goal",
+      "prompt_chars": 5771,
+      "evidence_refs_available": [
+        "archguard:tool_call",
+        "archguard:reading_at_cutoff",
+        "archguard:note",
+        "code:pointer:0",
+        "task:0",
+        "goal:precedent:0",
+        "repo:state"
+      ],
+      "envelope": {
+        "proposer_id": "ownership-shadow-baseline",
+        "concern": "duplicate or dispersed implementations of one concept indicate an ownership problem: the concept has no canonical home, so consumers each carry a copy",
         "evidence_refs": [
-          "archguard.dispersion",
-          "corpus.context",
-          "goals.recent_precedents",
-          "tasks.recent_landed"
+          "archguard:tool_call"
         ],
-        "candidate_intervention_count": 1
+        "candidate_interventions": [
+          {
+            "title": "investigate equivalence before merging",
+            "rationale": "structural similarity is not semantic equivalence"
+          },
+          {
+            "title": "give the shared logic one canonical owner and let the rest delegate to it",
+            "rationale": "keeps callers unchanged"
+          }
+        ],
+        "recommended_next_action": "investigate",
+        "scope": {
+          "in_scope": [
+            "sink the shared implementation to one canonical owner",
+            "migrate the real consumers, not look-alikes"
+          ],
+          "non_goals": [
+            "do not merge merely-similar implementations without checking equivalence first",
+            "do not touch unrelated dispersed definitions"
+          ]
+        },
+        "expected_mechanical_delta": "the duplicate-detection group disappears and the canonical definition count drops to 1",
+        "negative_control": "verify BOTH call chains actually changed what they call, not that the file merely moved",
+        "abandon_or_reconsider_condition": "abandon if the two implementations turn out to be intentionally-divergent rather than equivalent",
+        "confidence": {
+          "level": "medium",
+          "basis": "derived deterministically from the case's own archguard readings; no semantic judgement applied"
+        }
       },
       "gate": {
-        "accepted": true,
-        "code": "accepted",
-        "reason": "all deterministic checks passed",
-        "concern_key": "ownership:canonicalization:goal 030 the first real goal branch pilot lifecycle status writes sunk to a kernel decision layer with structured events"
+        "ok": true,
+        "reasons": []
+      },
+      "scores": {
+        "case_id": "GOAL-031",
+        "concern_recall": 0,
+        "concern_precision": 0,
+        "chosen_slice_agreement": "no_match",
+        "chosen_slice_overlap_score": 0.11764705882352941,
+        "investigation_vs_goal_agreement": false,
+        "scope_expansion_violation": false,
+        "expected_delta_quality": "has_numeric_claim",
+        "falsifiability_negative_control_presence": "present",
+        "decomposition_quality": {
+          "structured_fields_present": "2/2 prose fields, 3/3 array fields non-empty",
+          "why_not_broader_overlap": 0,
+          "why_not_finer_overlap": 0.125
+        },
+        "slice_semantic_coherence": "possible_bundling_heuristic(1_joins)",
+        "granularity": "agreement",
+        "harnessability": "harness_ready",
+        "harnessability_components": {
+          "has_scope_non_goals": true,
+          "has_negative_control": true,
+          "has_numeric_expected_delta": true,
+          "has_failure_mode": true
+        },
+        "primitive_reuse": {
+          "mentioned_any": true,
+          "overlap_with_reference": 0.16666666666666666,
+          "possible_reinvention": false
+        },
+        "decomposition_breadth": {
+          "concerns_named": 1,
+          "interventions_proposed": 2
+        },
+        "coordination_cost_reasoning_given": true,
+        "unnecessary_decomposition_flag": false,
+        "hindsight_leakage_guard": {
+          "flagged": false,
+          "matched_markers": []
+        },
+        "abstention_uncertainty_reasonableness": "specific",
+        "note": "rule-assisted, minimal-viable metrics — not a calibrated aggregate score (see README.md)"
       }
     },
     "GOAL-032": {
-      "case_id": "GOAL-032",
-      "concern_recall": 0,
-      "concern_precision": 0,
-      "chosen_slice_agreement": "no_match",
-      "chosen_slice_overlap_score": 0.1864406779661017,
-      "investigation_vs_goal_agreement": true,
-      "scope_expansion_violation": false,
-      "expected_delta_quality": "has_numeric_claim",
-      "falsifiability_negative_control_presence": "present",
-      "decomposition_quality": {
-        "structured_fields_present": "2/2 prose fields, 3/3 array fields non-empty",
-        "why_not_broader_overlap": 0.05263157894736842,
-        "why_not_finer_overlap": 0.3888888888888889
-      },
-      "slice_semantic_coherence": "possible_bundling_heuristic(8_joins)",
-      "granularity": "agreement",
-      "harnessability": "harness_ready",
-      "harnessability_components": {
-        "has_scope_non_goals": true,
-        "has_negative_control": true,
-        "has_numeric_expected_delta": true,
-        "has_failure_mode": true
-      },
-      "primitive_reuse": {
-        "mentioned_any": true,
-        "overlap_with_reference": 1,
-        "possible_reinvention": false
-      },
-      "decomposition_breadth": {
-        "concerns_named": 1,
-        "interventions_proposed": 1
-      },
-      "coordination_cost_reasoning_given": true,
-      "unnecessary_decomposition_flag": false,
-      "hindsight_leakage_guard": {
-        "flagged": false,
-        "matched_markers": []
-      },
-      "abstention_uncertainty_reasonableness": "specific",
-      "note": "rule-assisted, minimal-viable metrics — not a calibrated aggregate score (see README.md)",
-      "prompt_sha256": "2cc6e7b1c68546a80b6c3d822dafc319b44f65e372fb1d41830d6d10ba6b720d",
-      "proposer": {
-        "concern_class": "duplication",
-        "recommended_next_action": "propose-goal",
+      "prompt_chars": 7392,
+      "evidence_refs_available": [
+        "archguard:tool_call",
+        "archguard:reading_at_cutoff",
+        "archguard:surface_similarity",
+        "archguard:note",
+        "code:pointer:0",
+        "code:pointer:1",
+        "code:pointer:2",
+        "code:pointer:3",
+        "goal:precedent:0",
+        "goal:precedent:1",
+        "repo:state"
+      ],
+      "envelope": {
+        "proposer_id": "ownership-shadow-baseline",
+        "concern": "duplicate or dispersed implementations of one concept indicate an ownership problem: the concept has no canonical home, so consumers each carry a copy",
         "evidence_refs": [
-          "archguard.duplicate",
-          "corpus.context",
-          "goals.recent_precedents"
+          "archguard:tool_call"
         ],
-        "candidate_intervention_count": 1
+        "candidate_interventions": [
+          {
+            "title": "investigate equivalence before merging",
+            "rationale": "structural similarity is not semantic equivalence"
+          },
+          {
+            "title": "give the shared logic one canonical owner and let the rest delegate to it",
+            "rationale": "keeps callers unchanged"
+          }
+        ],
+        "recommended_next_action": "investigate",
+        "scope": {
+          "in_scope": [
+            "sink the shared implementation to one canonical owner",
+            "migrate the real consumers, not look-alikes"
+          ],
+          "non_goals": [
+            "do not merge merely-similar implementations without checking equivalence first",
+            "do not touch unrelated dispersed definitions"
+          ]
+        },
+        "expected_mechanical_delta": "the duplicate-detection group disappears and the canonical definition count drops to 1",
+        "negative_control": "verify BOTH call chains actually changed what they call, not that the file merely moved",
+        "abandon_or_reconsider_condition": "abandon if the two implementations turn out to be intentionally-divergent rather than equivalent",
+        "confidence": {
+          "level": "medium",
+          "basis": "derived deterministically from the case's own archguard readings; no semantic judgement applied"
+        }
       },
       "gate": {
-        "accepted": true,
-        "code": "accepted",
-        "reason": "all deterministic checks passed",
-        "concern_key": "ownership:duplication:goal 030 lifecycle write ownership sunk to kernel and goal 031 needs human vocabulary dispersion corrected scope have bo"
+        "ok": true,
+        "reasons": []
+      },
+      "scores": {
+        "case_id": "GOAL-032",
+        "concern_recall": 0,
+        "concern_precision": 0,
+        "chosen_slice_agreement": "no_match",
+        "chosen_slice_overlap_score": 0.11764705882352941,
+        "investigation_vs_goal_agreement": false,
+        "scope_expansion_violation": false,
+        "expected_delta_quality": "has_numeric_claim",
+        "falsifiability_negative_control_presence": "present",
+        "decomposition_quality": {
+          "structured_fields_present": "2/2 prose fields, 3/3 array fields non-empty",
+          "why_not_broader_overlap": 0.1,
+          "why_not_finer_overlap": 0.25
+        },
+        "slice_semantic_coherence": "possible_bundling_heuristic(1_joins)",
+        "granularity": "agreement",
+        "harnessability": "harness_ready",
+        "harnessability_components": {
+          "has_scope_non_goals": true,
+          "has_negative_control": true,
+          "has_numeric_expected_delta": true,
+          "has_failure_mode": true
+        },
+        "primitive_reuse": {
+          "mentioned_any": true,
+          "overlap_with_reference": 0.16666666666666666,
+          "possible_reinvention": false
+        },
+        "decomposition_breadth": {
+          "concerns_named": 1,
+          "interventions_proposed": 2
+        },
+        "coordination_cost_reasoning_given": true,
+        "unnecessary_decomposition_flag": false,
+        "hindsight_leakage_guard": {
+          "flagged": false,
+          "matched_markers": []
+        },
+        "abstention_uncertainty_reasonableness": "specific",
+        "note": "rule-assisted, minimal-viable metrics — not a calibrated aggregate score (see README.md)"
       }
     },
     "GOAL-033": {
-      "case_id": "GOAL-033",
-      "concern_recall": 1,
-      "concern_precision": 1,
-      "chosen_slice_agreement": "no_match",
-      "chosen_slice_overlap_score": 0.13953488372093023,
-      "investigation_vs_goal_agreement": true,
-      "scope_expansion_violation": false,
-      "expected_delta_quality": "has_numeric_claim",
-      "falsifiability_negative_control_presence": "present",
-      "decomposition_quality": {
-        "structured_fields_present": "2/2 prose fields, 3/3 array fields non-empty",
-        "why_not_broader_overlap": 0,
-        "why_not_finer_overlap": 0.1
-      },
-      "slice_semantic_coherence": "possible_bundling_heuristic(8_joins)",
-      "granularity": "agreement",
-      "harnessability": "harness_ready",
-      "harnessability_components": {
-        "has_scope_non_goals": true,
-        "has_negative_control": true,
-        "has_numeric_expected_delta": true,
-        "has_failure_mode": true
-      },
-      "primitive_reuse": {
-        "mentioned_any": true,
-        "overlap_with_reference": 1,
-        "possible_reinvention": false
-      },
-      "decomposition_breadth": {
-        "concerns_named": 1,
-        "interventions_proposed": 1
-      },
-      "coordination_cost_reasoning_given": true,
-      "unnecessary_decomposition_flag": false,
-      "hindsight_leakage_guard": {
-        "flagged": false,
-        "matched_markers": []
-      },
-      "abstention_uncertainty_reasonableness": "specific",
-      "note": "rule-assisted, minimal-viable metrics — not a calibrated aggregate score (see README.md)",
-      "prompt_sha256": "72778959fc5fb09691194b46f7d3f6ae3ac90fe6299188d752fb579b166ab32e",
-      "proposer": {
-        "concern_class": "dependency-boundary",
-        "recommended_next_action": "propose-goal",
+      "prompt_chars": 6442,
+      "evidence_refs_available": [
+        "archguard:tool_call",
+        "archguard:reading_at_cutoff",
+        "archguard:note",
+        "code:pointer:0",
+        "code:pointer:1",
+        "code:pointer:2",
+        "code:pointer:3",
+        "goal:precedent:0",
+        "goal:precedent:1",
+        "goal:precedent:2",
+        "repo:state"
+      ],
+      "envelope": {
+        "proposer_id": "ownership-shadow-baseline",
+        "concern": "a package-level dependency cycle (SCC) indicates ownership inversion: a lower layer imports upward, so the cycle must be cut at its cheapest outermost edge",
         "evidence_refs": [
-          "archguard.cycle",
-          "corpus.context",
-          "goals.recent_precedents"
+          "archguard:tool_call"
         ],
-        "candidate_intervention_count": 1
+        "candidate_interventions": [
+          {
+            "title": "slice the cheapest root->subdir edge out of the SCC",
+            "rationale": "smallest independently-verifiable ownership move"
+          },
+          {
+            "title": "investigate which member the cut node is the sole in-edge for",
+            "rationale": "a cut can strand reachable-only-through-it members"
+          }
+        ],
+        "recommended_next_action": "propose-goal",
+        "scope": {
+          "in_scope": [
+            "cut the single cheapest root->subdir import edge",
+            "move the shared primitive to the correct ownership layer"
+          ],
+          "non_goals": [
+            "do not clear the whole SCC in one slice",
+            "do not touch unrelated cycle members"
+          ]
+        },
+        "expected_mechanical_delta": "package SCC size decreases by at least one member, with the other members unchanged",
+        "negative_control": "re-inject one edge with a REAL (used) import and confirm the cut member returns to the SCC",
+        "abandon_or_reconsider_condition": "abandon if the fix requires creating a new edge between two other packages, or if another member leaves the SCC unexpectedly",
+        "confidence": {
+          "level": "medium",
+          "basis": "derived deterministically from the case's own archguard readings; no semantic judgement applied"
+        }
       },
       "gate": {
-        "accepted": true,
-        "code": "accepted",
-        "reason": "all deterministic checks passed",
-        "concern_key": "ownership:dependency-boundary:three real goal branch pilots goal 030 goal 031 goal 032 have each landed cleanly each targeting a progressively differe"
+        "ok": true,
+        "reasons": []
+      },
+      "scores": {
+        "case_id": "GOAL-033",
+        "concern_recall": 1,
+        "concern_precision": 1,
+        "chosen_slice_agreement": "no_match",
+        "chosen_slice_overlap_score": 0.09523809523809523,
+        "investigation_vs_goal_agreement": true,
+        "scope_expansion_violation": false,
+        "expected_delta_quality": "no_numeric_claim",
+        "falsifiability_negative_control_presence": "present",
+        "decomposition_quality": {
+          "structured_fields_present": "2/2 prose fields, 3/3 array fields non-empty",
+          "why_not_broader_overlap": 0.2,
+          "why_not_finer_overlap": 0.25
+        },
+        "slice_semantic_coherence": "possible_bundling_heuristic(1_joins)",
+        "granularity": "agreement",
+        "harnessability": "incomplete",
+        "harnessability_components": {
+          "has_scope_non_goals": true,
+          "has_negative_control": true,
+          "has_numeric_expected_delta": false,
+          "has_failure_mode": true
+        },
+        "primitive_reuse": {
+          "mentioned_any": true,
+          "overlap_with_reference": 1,
+          "possible_reinvention": false
+        },
+        "decomposition_breadth": {
+          "concerns_named": 1,
+          "interventions_proposed": 2
+        },
+        "coordination_cost_reasoning_given": true,
+        "unnecessary_decomposition_flag": false,
+        "hindsight_leakage_guard": {
+          "flagged": false,
+          "matched_markers": []
+        },
+        "abstention_uncertainty_reasonableness": "specific",
+        "note": "rule-assisted, minimal-viable metrics — not a calibrated aggregate score (see README.md)"
       }
     }
   },
   "summary": {
-    "cases_total": 4,
-    "cases_accepted": 4,
-    "cases_rejected": 0,
-    "gate_code_counts": {
-      "accepted": 4
-    },
-    "concern_recall_mean": 0.75,
-    "concern_precision_mean": 0.75,
-    "investigation_vs_goal_agreement_count": 4,
-    "chosen_slice_near_match_count": 1,
-    "scope_expansion_violation_count": 0,
-    "harnessability_ready_count": 4,
-    "negative_control_present_count": 4,
-    "expected_delta_numeric_count": 4,
-    "granularity_agreement_count": 4,
-    "abstention_specific_count": 4,
-    "hindsight_leakage_flagged_count": 0
+    "total": 4,
+    "gate_accepted": 4,
+    "gate_rejected": 0,
+    "by_action": {
+      "propose-goal": 2,
+      "investigate": 2
+    }
   }
 }
