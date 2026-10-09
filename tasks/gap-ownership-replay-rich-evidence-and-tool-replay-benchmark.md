@@ -1,7 +1,7 @@
 ---
 id: gap-ownership-replay-rich-evidence-and-tool-replay-benchmark
 title: "Ownership replay benchmark: rich evidence dossier and historical tool replay"
-status: todo
+status: ready
 labels:
   - gap
 parent: null
