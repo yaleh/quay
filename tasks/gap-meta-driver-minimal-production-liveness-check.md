@@ -3,7 +3,7 @@ id: gap-meta-driver-minimal-production-liveness-check
 title: "meta-driver minimal production liveness check: standalone on-demand N=3
   detector, derived from the self-health backtest, scoped to avoid touching
   driver.ts/driver-runtime.ts"
-status: todo
+status: done
 labels:
   - gap
 parent: null
@@ -40,13 +40,13 @@ This task's own bar: ship a correct, tested, standalone tool that a human (or a 
 
 ## AC
 
-- [ ] Self-test passes: `node docs/analysis/meta-driver-liveness-check.mjs --self-test` exits 0.
-- [ ] Negative control holds: a fixture with exactly 2 consecutive non-`verified` attempts (one below the N=3 threshold) reports `healthy`, not `degraded` — checked as one of the `--self-test` cases, and independently confirmed via `node -e` constructing that exact fixture and calling `checkLiveness` directly.
-- [ ] Not-evaluated is a real, distinguishable third state (not folded into healthy or degraded): `node docs/analysis/meta-driver-liveness-check.mjs --root /tmp/nonexistent-root-$$` exits 3.
-- [ ] Landing-time real-carrier proof: `node docs/analysis/meta-driver-liveness-check.mjs --root .` exits 1 (degraded) against the actual live `.quay/meta-driver-round.jsonl` — the real outage must still be reported, not a stale/fixture result.
-- [ ] `docs/analysis/meta-driver-liveness-check.md` explicitly states the "not yet wired into `quay driver status`" scope note: `grep -q "quay driver status" docs/analysis/meta-driver-liveness-check.md`.
-- [ ] No shared production infrastructure touched: `git status --porcelain packages/quay/src/cli/driver.ts plugin/scripts/driver-runtime.ts plugin/scripts/meta-driver.ts` prints nothing.
+- [x] Self-test passes: `node docs/analysis/meta-driver-liveness-check.mjs --self-test` exits 0. **Verified**: 4/4 PASS.
+- [x] Negative control holds: a fixture with exactly 2 consecutive non-`verified` attempts (one below the N=3 threshold) reports `healthy`, not `degraded`. **Verified**: both the embedded self-test case and an independent direct `checkLiveness` call returned `healthy`.
+- [x] Not-evaluated is a real, distinguishable third state: `node docs/analysis/meta-driver-liveness-check.mjs --root /tmp/nonexistent-root-$$` exits 3. **Verified**: exit 3, `NOT-EVALUATED: carrier absent...`.
+- [x] Landing-time real-carrier proof: `node docs/analysis/meta-driver-liveness-check.mjs --root .` exits 1 (degraded) against the actual live carrier. **Verified**: exit 1, `{"state":"degraded","consecutiveNonVerified":1895,"lastVerifiedTs":"2026-09-12T02:21:57.766Z"}` — the real outage is still ongoing.
+- [x] `docs/analysis/meta-driver-liveness-check.md` states the "not yet wired into `quay driver status`" scope note. **Verified**: `grep -q "quay driver status"` exit 0.
+- [x] No shared production infrastructure touched. **Verified**: `git status --porcelain packages/quay/src/cli/driver.ts plugin/scripts/driver-runtime.ts plugin/scripts/meta-driver.ts` empty.
 
 ## DoD
 
-真实落地 = 上述两个产物文件随本任务提交进 develop；落地当刻对真实 `.quay/meta-driver-round.jsonl` 跑该脚本必须报 `degraded`（反映仍在持续的真实 outage，不是构造样本）。本任务**明确不**把这条校验接入 `quay driver status` 的自动输出或任何常驻 driver 循环——那是一个独立、需要跑完整 suite 验证的后续任务，本任务只交付一个正确、可独立运行、可重复的按需检查工具，诚实标注尚未自动化这一事实，不得在文档里暗示已经接入生产自动告警。
+真实落地 = 上述两个产物文件随本任务提交进 develop（已提交 `0de02c223`）；落地当刻对真实 `.quay/meta-driver-round.jsonl` 跑该脚本报 `degraded`（1895 连续非-verified，last_verified=2026-09-12T02:21:57.766Z——反映仍在持续的真实 outage，不是构造样本）。本任务**明确不**把这条校验接入 `quay driver status` 的自动输出或任何常驻 driver 循环——那是一个独立、需要跑完整 suite 验证的后续任务，本任务只交付一个正确、可独立运行、可重复的按需检查工具，诚实标注尚未自动化这一事实，不得在文档里暗示已经接入生产自动告警。
