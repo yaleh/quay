@@ -10,10 +10,12 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import fs from "node:fs";
+import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { emptyEnvelope, deterministicGate, normalizeConcernKey } from "../../docs/analysis/ownership-shadow-proposer.mjs";
 import { baselinePropose, buildEvidenceIndex, runReplay } from "../../docs/analysis/ownership-shadow-replay.mjs";
+import { runLiveRound, readLiveEvidence, readCarrierHistory } from "../../docs/analysis/ownership-shadow-live.mjs";
 import { loadCaseInput, listCaseIds } from "./helpers/meta-driver-replay-harness.mjs";
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
@@ -136,4 +138,40 @@ test("runReplay: all 4 cases accepted, every case carries the full evaluator key
     }
     assert.equal(c.scores.hindsight_leakage_guard.flagged, false, `${id}: the proposer must not emit a hindsight leakage marker`);
   }
+});
+
+test("live shadow: records to the sandbox carrier, never executes, and dedups ACROSS live rounds (not vacuously)", () => {
+  const carrier = path.join(os.tmpdir(), `ownership-shadow-live-test-${process.pid}-${Date.now()}.jsonl`);
+  try {
+    const a = runLiveRound({ carrier });
+    assert.equal(a.executed, false, "live shadow must never execute a proposal");
+    assert.equal(a.is_repeat, false, "the FIRST live round cannot be a repeat (else dedup is vacuously true)");
+    assert.equal(a.gate_ok, true, `first live round should pass the gate, got ${JSON.stringify(a.gate_reasons)}`);
+
+    const b = runLiveRound({ carrier });
+    assert.equal(b.is_repeat, true, "an identical second live round must be mechanically flagged as a repeat");
+    assert.ok(b.gate_reasons.some((r) => r.startsWith("DUPLICATE_CONCERN:")), `got ${JSON.stringify(b.gate_reasons)}`);
+    assert.equal(readCarrierHistory(carrier).length, 2);
+  } finally {
+    fs.rmSync(carrier, { force: true });
+  }
+});
+
+test("live shadow: the gate polices the SAME evidence namespace the proposer cites from", () => {
+  // Regression pin for a real bug the OFFLINE replay never hit: the live runner derived the
+  // gate's evidence set from a DIFFERENT index than the proposer used, so every citation came
+  // back EVIDENCE_UNRESOLVED. Both sides must agree.
+  const carrier = path.join(os.tmpdir(), `ownership-shadow-ns-test-${process.pid}-${Date.now()}.jsonl`);
+  try {
+    const r = runLiveRound({ carrier });
+    const unresolved = (r.gate_reasons || []).filter((x) => x.startsWith("EVIDENCE_UNRESOLVED:"));
+    assert.deepEqual(unresolved, [], `proposer citations must resolve, got ${JSON.stringify(unresolved)}`);
+  } finally {
+    fs.rmSync(carrier, { force: true });
+  }
+});
+
+test("importing the replay module must NOT run its CLI body (side-effect regression pin)", () => {
+  const src = fs.readFileSync(path.join(HERE, "..", "..", "docs", "analysis", "ownership-shadow-replay.mjs"), "utf8");
+  assert.match(src, /IS_DIRECT_ENTRY/, "the replay CLI body must be guarded by a direct-entry check");
 });

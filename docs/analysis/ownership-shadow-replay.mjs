@@ -196,15 +196,21 @@ export function runReplay({ sandboxCarrier } = {}) {
   return result;
 }
 
-const argv = process.argv.slice(2);
-const args = parseArgs(argv);
-const result = runReplay({ sandboxCarrier: args.sandbox === undefined ? SANDBOX_CARRIER : args.sandbox || null });
-const out = args.out || path.join(HERE, "ownership-shadow-replay.results.json");
-fs.writeFileSync(out, JSON.stringify(result, null, 2) + "\n", "utf8");
-if (!args.quiet) {
-  console.error(`cases=${summaryLine(result)} -> ${out}`);
-  for (const [id, c] of Object.entries(result.cases)) {
-    console.error(`  ${id}: gate=${c.gate.ok ? "accept" : "REJECT:" + c.gate.reasons.join("|")} action=${c.envelope.recommended_next_action} slice=${c.scores.chosen_slice_agreement} gran=${c.scores.granularity} harness=${c.scores.harnessability}`);
+// ⛔ CLI body guarded by the direct-entry check: WITHOUT this, merely IMPORTING this module (e.g.
+// from ownership-shadow-live.mjs, which reuses runReplay's proposer) re-ran the whole replay,
+// rewrote results.json, and printed into the importer's stdout — caught when the live runner first
+// imported it. `runReplay` above stays exported and side-effect-free for reuse.
+const IS_DIRECT_ENTRY = import.meta.url === `file://${process.argv[1]}`;
+if (IS_DIRECT_ENTRY) {
+  const args = parseArgs(process.argv.slice(2));
+  const result = runReplay({ sandboxCarrier: args.sandbox === undefined ? SANDBOX_CARRIER : args.sandbox || null });
+  const out = args.out || path.join(HERE, "ownership-shadow-replay.results.json");
+  fs.writeFileSync(out, JSON.stringify(result, null, 2) + "\n", "utf8");
+  if (!args.quiet) {
+    console.error(`cases=${summaryLine(result)} -> ${out}`);
+    for (const [id, c] of Object.entries(result.cases)) {
+      console.error(`  ${id}: gate=${c.gate.ok ? "accept" : "REJECT:" + c.gate.reasons.join("|")} action=${c.envelope.recommended_next_action} slice=${c.scores.chosen_slice_agreement} gran=${c.scores.granularity} harness=${c.scores.harnessability}`);
+    }
   }
 }
 function summaryLine(r) {

@@ -31,6 +31,10 @@ import { fileURLToPath } from "node:url";
 // copy was the twelfth live instance of the same 1-based newline counter. Sibling .mjs modules
 // already import .ts from this directory (workflow-event-schema.mjs, workflow-invariant-ownership.mjs).
 import { lineOf } from "./source-text-lib.ts";
+// The spec-driven shared arg parser (gate-script-base.ts). This module previously carried its own
+// while-loop flag parser — one of the "three spelling variants" named by semantic-dedup-scan finding
+// `parse-args-handrolled-variants` (runId `semantic-dedup-scan-1791536153223`).
+import { parseArgs as baseParseArgs } from "./gate-script-base.ts";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
@@ -696,19 +700,33 @@ export function checkAll(filePaths) {
 
 // ── CLI ───────────────────────────────────────────────────────────────────────────────────────────
 
+// The flag loop is the SHARED spec-driven parser (gate-script-base.ts) — this wrapper maps the raw
+// flag strings onto this module's shape and keeps `<file...>` as POSITIONALS. It could not fold while
+// the shared parser `process.exit()`ed on `--help`; now it uses the non-exiting `help: "return"` mode
+// and `main` prints this module's own usage.
+//
+// `--files` stays a declared BOOLEAN marker (not a value flag), so the paths that follow it are still
+// collected as positionals — byte-for-byte the previous input language (`prog --files a b c` and
+// `prog a b c` remain equivalent). `main` takes the SLICED argv tail, so the two leading slots the
+// shared parser skips are re-attached here.
 export function parseArgs(argv) {
-  const args = { files: [], json: false, workspaceRoot: null, help: false };
-  let i = 0;
-  while (i < argv.length) {
-    const a = argv[i];
-    if (a === "--json") { args.json = true; }
-    else if (a === "--files") { /* marker — following positionals are file paths */ }
-    else if (a === "--workspace-root") { args.workspaceRoot = argv[++i]; }
-    else if (a === "--help" || a === "-h") { args.help = true; }
-    else if (!a.startsWith("--")) { args.files.push(a); }
-    i++;
-  }
-  return args;
+  const { args, flags, help } = baseParseArgs(["node", "workflow-metadata-conformance.mjs", ...argv], {
+    minArgs: 0,
+    usage: "[--json] [--workspace-root <dir>] [<file...>] [--help]",
+    help: "return",
+    flags: {
+      json: { type: "boolean" },
+      files: { type: "boolean" },
+      "workspace-root": { type: "string" },
+    },
+  });
+  return {
+    files: args,
+    json: flags.json === true,
+    workspaceRoot:
+      typeof flags["workspace-root"] === "string" && flags["workspace-root"] !== "" ? flags["workspace-root"] : null,
+    help: help === true,
+  };
 }
 
 function usage() {
