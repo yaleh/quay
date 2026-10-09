@@ -2,7 +2,7 @@
 id: gap-goal033-driver-control-and-vocab-to-core
 title: GOAL-033 ①：driver 控制客户端与 driver 词表从 cli/ 下沉到 core-root（core-root 零 cli/
   import，fan-in 仪器附加留在 CLI）
-status: ready
+status: done
 labels:
   - gap
 parent: null
@@ -54,14 +54,14 @@ Ownership 判断：这两处不是「CLI 渗透 core」，而是**两层共用�
 
 ## Acceptance Criteria
 
-- [ ] AC-350 判据在本任务 worktree 内 exit 0：`bash -c "$(node --experimental-strip-types packages/quay/bin/quay.ts goal show AC-350 --json | node -e 'let s="";process.stdin.on("data",d=>s+=d).on("end",()=>process.stdout.write(JSON.parse(s).criterion))')"`，输出原文进 `## Evidence`
-- [ ] `packages/quay/src/cli/driver-vocab.ts` 不存在，`packages/quay/src/driver-vocab.ts` 零 import 行；`runDriver`/`runDriverAsync`/`resolveDriverInvocation` 在 `packages/quay/src/**` 下各只有 `driver-control.ts` 一处定义
-- [ ] `driver-control.ts` 不 import `./cli/` 也不 import `./fan-in/`；`probeInstruments` 的调用只出现在 `cli/driver.ts`
-- [ ] 回归一字不改全绿：`packages/quay/test/server.test.mjs`、`packages/quay/test/serve-handlers.test.mjs`（POST /sessions/driver 那组）、`packages/quay/test/cli.test.mjs`、`packages/quay/test/cli-live.test.mjs`、`packages/quay/test/serve-sessions-body-i18n.test.mjs`、`packages/quay/test/build-plugin-dist.test.mjs`、`plugin/test/enum-surface-parity-check.test.mjs`、`plugin/test/goal-driver-s01.test.mjs`（经 harness 从 `cli/driver.ts` 取 `KINDS`）——import 路径的必要改动除外，断言不改
-- [ ] 新增 `packages/quay/test/driver-control.test.mjs` 三组用例全绿，其中 CLI 呈现契约用例在 worker / promotion 两个方向各有断言
-- [ ] `node --experimental-strip-types plugin/scripts/enum-surface-parity-check.ts --root . --json` 为 `ok:true, status:"pass", notEvaluated:[]`；`node --experimental-strip-types plugin/scripts/import-graph-check.ts --json` 的 `verdict.ok === true`
-- [ ] 负对照（Plan 第 7 步）两种注入各自得到对应的 `CAUSE=`，恢复后扫描通过——命令与输出进 `## Evidence`
-- [ ] 范围护栏：`git diff --name-only develop...HEAD -- packages/quay/src/gate packages/quay/src/fan-in packages/quay/src/kernel` 为空
+- [x] AC-350 判据在本任务 worktree 内 exit 0：`bash -c "$(node --experimental-strip-types packages/quay/bin/quay.ts goal show AC-350 --json | node -e 'let s="";process.stdin.on("data",d=>s+=d).on("end",()=>process.stdout.write(JSON.parse(s).criterion))')"`，输出原文进 `## Evidence`
+- [x] `packages/quay/src/cli/driver-vocab.ts` 不存在，`packages/quay/src/driver-vocab.ts` 零 import 行；`runDriver`/`runDriverAsync`/`resolveDriverInvocation` 在 `packages/quay/src/**` 下各只有 `driver-control.ts` 一处定义
+- [x] `driver-control.ts` 不 import `./cli/` 也不 import `./fan-in/`；`probeInstruments` 的调用只出现在 `cli/driver.ts`
+- [x] 回归一字不改全绿：`packages/quay/test/server.test.mjs`、`packages/quay/test/serve-handlers.test.mjs`（POST /sessions/driver 那组）、`packages/quay/test/cli.test.mjs`、`packages/quay/test/cli-live.test.mjs`、`packages/quay/test/serve-sessions-body-i18n.test.mjs`、`packages/quay/test/build-plugin-dist.test.mjs`、`plugin/test/enum-surface-parity-check.test.mjs`、`plugin/test/goal-driver-s01.test.mjs`（经 harness 从 `cli/driver.ts` 取 `KINDS`）——import 路径的必要改动除外，断言不改
+- [x] 新增 `packages/quay/test/driver-control.test.mjs` 三组用例全绿，其中 CLI 呈现契约用例在 worker / promotion 两个方向各有断言
+- [x] `node --experimental-strip-types plugin/scripts/enum-surface-parity-check.ts --root . --json` 为 `ok:true, status:"pass", notEvaluated:[]`；`node --experimental-strip-types plugin/scripts/import-graph-check.ts --json` 的 `verdict.ok === true`
+- [x] 负对照（Plan 第 7 步）两种注入各自得到对应的 `CAUSE=`，恢复后扫描通过——命令与输出进 `## Evidence`
+- [x] 范围护栏：`git diff --name-only develop...HEAD -- packages/quay/src/gate packages/quay/src/fan-in packages/quay/src/kernel` 为空
 
 ## Definition of Done
 
@@ -83,3 +83,53 @@ core-root 对 `cli/` 的 import 归零且没有新增 core-root → `fan-in/` �
 - plugin/scripts/enum-surface-parity-check.ts
 - plugin/scripts/runner-static-gate.ts
 - tasks/gap-goal033-driver-control-and-vocab-to-core.md
+
+## Evidence
+
+**AC-350 判据原文**（本任务 worktree 内跑，exit 0）：
+
+    $ bash -c "$(node --experimental-strip-types packages/quay/bin/quay.ts goal show AC-350 --json | node -e 'let s="";process.stdin.on("data",d=>s+=d).on("end",()=>process.stdout.write(JSON.parse(s).criterion))')"
+    PASS: core-root imports nothing from cli/ (and gained no fan-in edge); driver-control.ts / driver-vocab.ts are the single definitions; all five consumers converged; enum-surface + import-graph checks pass; gate/fan-in/kernel untouched
+    EXIT=0
+
+**负对照（Plan 第 7 步，取假）**——两个 detached scratch worktree（`git worktree add --detach <dir> <HEAD>`，HEAD = 本次实现提交）各注入一条违规后跑**同一份** AC-350 判据：
+
+    # 注入 ①：serve-sessions.ts 的 import 从 "./driver-control.ts" 改回 "./cli/driver.ts"（取仍存在的导出 handleDriver）
+    CAUSE=core-root-still-imports-cli — 1 edge(s) in packages/quay/src/serve-sessions.ts
+    CAUSE=structural-scan-red — the scan above printed the specific CAUSE
+    EXIT=1
+
+    # 注入 ②：往 driver-control.ts 顶部加 import { probeInstruments } from "./fan-in/ff-merge.ts"
+    CAUSE=new-root-to-fan-in-edge — 1 core-root import(s) of ./fan-in/ (the instrument decoration must stay in cli)
+    CAUSE=structural-scan-red — the scan above printed the specific CAUSE
+    EXIT=1
+
+    # 两处注入各自 `git checkout -- <file>` 恢复后，同一判据在两个副本上都回到：
+    PASS: core-root imports nothing from cli/ (and gained no fan-in edge); …
+    EXIT=0
+
+**两个机械检查器**：
+
+    $ node --experimental-strip-types plugin/scripts/enum-surface-parity-check.ts --root . --json
+    ok=true status="pass" notEvaluated=[] violations=[]   （25 个注册面全部一致；6 项 known-drift 为既有台账）
+    $ node --experimental-strip-types plugin/scripts/import-graph-check.ts --json
+    verdict = {"ok":true,"over":[],"baselineRaised":[],"headBaseline":{"valueSccs":0,"typeSccs":0,"reverseEdges":0}}
+
+**回归（import 路径的必要改动除外，断言一字未改）**：
+
+    packages/quay/test/server.test.mjs                   10 pass / 0 fail
+    packages/quay/test/serve-handlers.test.mjs           POST /sessions/driver 组 3 pass / 0 fail
+    packages/quay/test/cli.test.mjs                      exit 0（全绿）
+    packages/quay/test/cli-live.test.mjs                 7 pass / 0 fail
+    packages/quay/test/serve-sessions-body-i18n.test.mjs 与 build-plugin-dist.test.mjs 同批：56 + 44 pass / 0 fail
+    plugin/test/enum-surface-parity-check.test.mjs + plugin/test/goal-driver-s01.test.mjs  40 pass / 0 fail
+    packages/quay/test/driver-control.test.mjs（新增）    3 pass / 0 fail
+
+**`cli/server.ts` / `serve-sessions.ts` 的仪器附加消失是不可观测的**（Plan 第 4 步）：迁移前它们经 `runDriver`/`runDriverAsync` 拿到的 worker status stdout 带 `instruments`，迁移后不带——两处都只解析具名字段（`driver_pid`/`driver_alive`/`running`/`carrier_path`…）且从不读 `instruments`；`server.test.mjs`（10/10）与 `serve-handlers.test.mjs` 的 POST /sessions/driver 组（3/3）一字未改全绿即为此作证。
+
+**范围护栏**：
+
+    $ git diff --name-only develop...HEAD -- packages/quay/src/gate packages/quay/src/fan-in packages/quay/src/kernel
+    （空）
+
+**scoped 门**：`bash scripts/test.sh --for-task gap-goal033-driver-control-and-vocab-to-core --allow-thin` ⇒ exit 0（0 fail）。
