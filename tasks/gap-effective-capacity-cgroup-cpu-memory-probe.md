@@ -21,14 +21,40 @@ extra:
 
 **跨项目协同（2026-10-09，已对齐，各自独立实现）**：ClaudeCodeUI 项目的会话独立发现了同一个缺口，提出了他们自己的实现方向（暂定脚本名 `effective-capacity.sh`，读 `/sys/fs/cgroup/cpu.max`（quota/period）算有效核数、`/sys/fs/cgroup/memory.max` 算有效内存上限，非 cgroup v2 环境 fail-open 退回 nproc/free-m），并提议对齐输出字段形状（`key=value` 多行 + `--json`，env override 测试缝风格同 `resource-gate.sh` 的既有约定如 `RESOURCE_GATE_TEST_*`）。双方已确认"各自独立实现、不互相阻塞、不强依赖"——本任务**不能**假设 ClaudeCodeUI 的脚本存在或已完成，必须在 quay 自己仓库内独立可用。
 
+### AC1 实测（2026-10-09，本机 Node v24.21.0，host nproc=128）
+
+**结论：`os.availableParallelism()` 在本机【确实反映】cgroup v2 CPU 带宽配额**，不是 host 总核数。手法按要求：用真实 `systemd-run --user --scope -p CPUQuota=…` 把当前 shell 限制到一个已知有效核数，在 scope 内跑 `node -e "console.log(os.availableParallelism())"`，并与内核自己的 `cpu.max`、`nproc` 对照：
+
+| CPUQuota | 该 scope 内核 cpu.max | scope 内 nproc | scope 内 availableParallelism |
+|---|---|---|---|
+| 50% | `50000 100000` | 128 | 1 |
+| 150% | `150000 100000` | 128 | 1 |
+| 250% | `250000 100000` | 128 | 2 |
+| 400% | `400000 100000` | 128 | 4 |
+| 1000% | `1000000 100000` | 128 | 10 |
+| 无配额 | `max 100000` | 128 | 128 |
+| `taskset -c 0-3`（affinity，无配额） | （无 quota） | 4 | 4 |
+
+即 `availableParallelism()` = `floor(quota/period)`（下限 1），并且也跟随 CPU affinity；`nproc` 在所有配额下都停在 128（对配额盲）。⇒ 结论如实记下：`runner-concurrency.ts` 的并发推导在这个意义上已经是配额感知的；`resource-gate.sh`/`process-budget.sh` 的 `nproc --all` 仍是 host 读数（其注释写明是为「host-wide loadavg 该跟多大核数比」这个不同问题刻意选的），本任务不改变它们。
+
+### 实施记录（2026-10-09）
+
+新增 `plugin/scripts/effective-capacity-probe.ts`（只读、fail-open，无副作用）：读本进程自己 cgroup 下的 `/sys/fs/cgroup<rel>/cpu.max`（`max` 或 `quota<=0` ⇒ 回退；否则 `floor(quota/period)`，下限 1）、`cpuset.cpus.effective`（区间计数）、`memory.max`（`max`/不可读 ⇒ 回退 `os.totalmem()`），按 `min(bandwidth, cpuset, nproc)` 给出 `effective_cpu` 与其来源；report 模式六行 `key=value`、`--json` 同一组六键同值。**第三态**：cgroup 读不到时 `cgroup_v2=false` 且 `*_source=*-fallback`，与「cgroup 可读但该类限额为 max」可区分（后者 `cgroup_v2=true`）。测试缝五个：`EFFECTIVE_CAPACITY_TEST_CPU_MAX` / `_CPUSET_COUNT` / `_MEMORY_MAX` / `_NPROC` / `_MEM_AVAIL_MB`。
+
+未改任何现有调用点：`resource-gate.sh` / `process-budget.sh` / `driver-anchor.ts` 相对 develop 逐字节不变（AC5 实测 `git diff develop -- <三文件>` 为空，0 字节）。
+
+新建 `plugin/scripts/*.ts` 的机械注册点已补：`plugin/scripts/capability-catalog-declarations.json` 加了本脚本的六张声明表（QUESTION / CADENCE / INVALIDATION / LAST_REAFFIRMED / MATCHING / CONSUMER）；`bash plugin/scripts/capability-catalog.sh` ⇒ `372 scripts | 372 declared | 0 unclassified`，exit 0。
+
+单测 `plugin/test/effective-capacity-probe.test.mjs`（@test-group engine）：13 项全绿。AC4 的真 cgroup 控制是在 `systemd-run --user --scope -p CPUQuota=300% -p MemoryMax=512M` 内**同一次运行**里先读内核原始文件、再跑探测模块，断言「计划（300%/512M）== 内核在效值（cpu.max=`300000 100000` / memory.max=`536870912`）== 探测读数（effective_cpu=3 / effective_mem_mb=512）」，并带两个负控制：同探测在 scope 外不报 3 核；把解析改成恒 unlimited 的突变下该测试确实变红（已实测红过一次后还原）。cgroup v2 或 systemd-run 不可用的宿主上该测试 `skip`（独立取值，不算 pass 也不算 fail）。
+
 ## AC
 
-- [ ] 先验证 `os.availableParallelism()` 在本仓库是否已经对 cgroup CPU quota 敏感（不是假设）：构造一个真实的 cgroup v2 测试 scope，用 `systemd-run --user --scope -p CPUQuota=50%`（或等价）把当前 shell 限制到一个已知的有效核数，在该 scope 内跑 `node -e "console.log(os.availableParallelism())"`，核对输出是否反映了 quota 而非 host 总核数。把实测结果（反映了 / 没反映）如实写入任务体，不要预设答案。
-- [ ] 新增一个无副作用（只读、不改变任何现有行为）的探测能力：读 `/sys/fs/cgroup/cpu.max`（格式 `<quota> <period>`，`max` 表示无限制）算出有效核数（`quota<=0 or quota=="max"` ⇒ 回退到现有 host 读数；否则 `effective_cpus = quota/period`，向下取整但至少 1）；读 `/sys/fs/cgroup/memory.max`（`max` 表示无限制 ⇒ 回退到 `os.totalmem()`；否则取该值）。cgroup v2 不可用（文件不存在/不是数字）时 **fail-open** 回退到现有读数（`os.availableParallelism()`/`nproc`、`os.totalmem()`/`free -m`），不得 fail-closed 拒绝运行。
-- [ ] 输出形状与 ClaudeCodeUI 侧对齐并已定稿（协调记录见本任务 Finding，2026-10-09 双方确认）：report 模式 `key=value` 多行输出，字段精确为 `effective_cpu=<int>`（最终取值，`min(bandwidth quota 核数, cpuset 核数, nproc)`）、`cpu_source=cgroup-cpu-max|cpuset|nproc-fallback`、`effective_mem_mb=<int>`、`mem_source=cgroup-memory-max|free-fallback`、`nproc=<int>`（对照读数，非最终值）、`cgroup_v2=true|false`；`--json` 模式同一组字段的 JSON 对象，键名不变。测试缝精确为 `EFFECTIVE_CAPACITY_TEST_CPU_MAX`/`EFFECTIVE_CAPACITY_TEST_CPUSET_COUNT`/`EFFECTIVE_CAPACITY_TEST_MEMORY_MAX`/`EFFECTIVE_CAPACITY_TEST_NPROC`/`EFFECTIVE_CAPACITY_TEST_MEM_AVAIL_MB`（沿用本仓库既有 `RESOURCE_GATE_TEST_*` 命名风格）。探测失败（cgroup v2 不可用）必须是独立的、可区分的第三态（硬规则3b），不能悄悄退化成看起来正常的 fallback 值而不声明来源——`*_source`/`cgroup_v2` 字段就是这个第三态的落点。
-- [ ] 单测：真实构造至少一个 cgroup v2 cpu.max/memory.max 受限的子进程场景（同 `driver-anchor-memory-envelope.test.mjs` AC4 的真 cgroup 负控制手法，不是纯 mock），验证探测函数读出的有效值与实际施加的限制一致；cgroup v2 不可用的宿主上这部分测试判定为 `not-evaluated`/`skip`,不算 pass,也不算 fail。
-- [ ] 本任务只新增探测能力，**不**修改任何现有调用点的行为：`resource-gate.sh` / `process-budget.sh` / `driver-anchor.ts` 在本任务分支上必须**逐字节不变**（`git diff develop -- plugin/scripts/resource-gate.sh plugin/scripts/process-budget.sh plugin/scripts/driver-anchor.ts` 为空），消费该新探测结果是后续任务 `gap-full-suite-runner-memory-max-host-derived-memory-envelope`（另案）的事。
-- [ ] scoped 门：`bash scripts/test.sh --for-task gap-effective-capacity-cgroup-cpu-memory-probe --allow-thin` exit 0。
+- [x] 先验证 `os.availableParallelism()` 在本仓库是否已经对 cgroup CPU quota 敏感（不是假设）：构造一个真实的 cgroup v2 测试 scope，用 `systemd-run --user --scope -p CPUQuota=50%`（或等价）把当前 shell 限制到一个已知的有效核数，在该 scope 内跑 `node -e "console.log(os.availableParallelism())"`，核对输出是否反映了 quota 而非 host 总核数。把实测结果（反映了 / 没反映）如实写入任务体，不要预设答案。
+- [x] 新增一个无副作用（只读、不改变任何现有行为）的探测能力：读 `/sys/fs/cgroup/cpu.max`（格式 `<quota> <period>`，`max` 表示无限制）算出有效核数（`quota<=0 or quota=="max"` ⇒ 回退到现有 host 读数；否则 `effective_cpus = quota/period`，向下取整但至少 1）；读 `/sys/fs/cgroup/memory.max`（`max` 表示无限制 ⇒ 回退到 `os.totalmem()`；否则取该值）。cgroup v2 不可用（文件不存在/不是数字）时 **fail-open** 回退到现有读数（`os.availableParallelism()`/`nproc`、`os.totalmem()`/`free -m`），不得 fail-closed 拒绝运行。
+- [x] 输出形状与 ClaudeCodeUI 侧对齐并已定稿（协调记录见本任务 Finding，2026-10-09 双方确认）：report 模式 `key=value` 多行输出，字段精确为 `effective_cpu=<int>`（最终取值，`min(bandwidth quota 核数, cpuset 核数, nproc)`）、`cpu_source=cgroup-cpu-max|cpuset|nproc-fallback`、`effective_mem_mb=<int>`、`mem_source=cgroup-memory-max|free-fallback`、`nproc=<int>`（对照读数，非最终值）、`cgroup_v2=true|false`；`--json` 模式同一组字段的 JSON 对象，键名不变。测试缝精确为 `EFFECTIVE_CAPACITY_TEST_CPU_MAX`/`EFFECTIVE_CAPACITY_TEST_CPUSET_COUNT`/`EFFECTIVE_CAPACITY_TEST_MEMORY_MAX`/`EFFECTIVE_CAPACITY_TEST_NPROC`/`EFFECTIVE_CAPACITY_TEST_MEM_AVAIL_MB`（沿用本仓库既有 `RESOURCE_GATE_TEST_*` 命名风格）。探测失败（cgroup v2 不可用）必须是独立的、可区分的第三态（硬规则3b），不能悄悄退化成看起来正常的 fallback 值而不声明来源——`*_source`/`cgroup_v2` 字段就是这个第三态的落点。
+- [x] 单测：真实构造至少一个 cgroup v2 cpu.max/memory.max 受限的子进程场景（同 `driver-anchor-memory-envelope.test.mjs` AC4 的真 cgroup 负控制手法，不是纯 mock），验证探测函数读出的有效值与实际施加的限制一致；cgroup v2 不可用的宿主上这部分测试判定为 `not-evaluated`/`skip`,不算 pass,也不算 fail。
+- [x] 本任务只新增探测能力，**不**修改任何现有调用点的行为：`resource-gate.sh` / `process-budget.sh` / `driver-anchor.ts` 在本任务分支上必须**逐字节不变**（`git diff develop -- plugin/scripts/resource-gate.sh plugin/scripts/process-budget.sh plugin/scripts/driver-anchor.ts` 为空），消费该新探测结果是后续任务 `gap-full-suite-runner-memory-max-host-derived-memory-envelope`（另案）的事。
+- [x] scoped 门：`bash scripts/test.sh --for-task gap-effective-capacity-cgroup-cpu-memory-probe --allow-thin` exit 0。
 
 ## DoD
 
@@ -40,3 +66,4 @@ extra:
 - plugin/scripts/effective-capacity-probe.ts（文件名与字段名已与 ClaudeCodeUI 侧对齐，实施时若需调整须同步通知对方）
 - plugin/test/effective-capacity-probe.test.mjs（新文件）
 - tasks/gap-effective-capacity-cgroup-cpu-memory-probe.md
+- plugin/scripts/capability-catalog-declarations.json
