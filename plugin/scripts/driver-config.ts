@@ -120,12 +120,18 @@ export function driverCap(root: string, kind: "promotion" | "worker" | "outer" |
 // 「K×R 可无上限增长」的结构性原因。本段把它收口进来，并补一个全局天花板。
 
 /** 缺省 routine 窗口（ms）——= 24h。与 routine-file-gate.ts 既有 FILING_WINDOW_MS 缺省值逐字一致
- *  （迁移兼容：routine-file-gate.ts 的 FILING_WINDOW_MS 现由本常量派生）。 */
+ *  （迁移兼容：routine-file-gate.ts 的 FILING_WINDOW_MS 现由本常量派生）。
+ *  concurrency-default-fallback: ⛔ 这不是【并发数】——是 routine 立案的【速率】配额缺省，其单一定义点
+ *  就是本模块（drivers.yml `routine_quota` 段是真相源，此处是一致回退）。名字含 `quota` 只因 P1 关键词表
+ *  把 CPU quota（P3）与 routine quota 共用；按 checker『非并发但撞关键词须显式声明以保持诚实』条款在此
+ *  声明（同 RED_BACKLOG_CAP_DEFAULT 先例），⛔ 不是悄悄写死。 */
 export const DEFAULT_ROUTINE_QUOTA_WINDOW_MS = 24 * 60 * 60 * 1000;
-/** 单 routine 缺省上限 K——与既有 DEFAULT_RATE 逐字一致（迁移兼容，同上）。 */
+/** 单 routine 缺省上限 K——与既有 DEFAULT_RATE 逐字一致（迁移兼容，同上）。
+ *  concurrency-default-fallback: 同上——routine 速率配额缺省，非并发数。 */
 export const DEFAULT_ROUTINE_QUOTA_K = 3;
 /** 全部 routine 合计的缺省硬上限。⚠️ 结构性保守选择（详见 drivers.yml routine_quota 段注释），
- *  ⛔ 不是从事故阈值反推的实测值。 */
+ *  ⛔ 不是从事故阈值反推的实测值。
+ *  concurrency-default-fallback: 同上——routine 速率配额缺省，非并发数。 */
 export const DEFAULT_ROUTINE_QUOTA_GLOBAL_CEILING = 12;
 
 /** routine 配额配置。 */
