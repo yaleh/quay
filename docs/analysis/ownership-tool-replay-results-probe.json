@@ -1,0 +1,218 @@
+{
+  "probes": {
+    "A": {
+      "launcher": "claude-fjdac",
+      "model_flag": "v4.1flash-anthropic",
+      "calls": 15,
+      "denied": 11,
+      "probe_file_created": false,
+      "trace": [
+        {
+          "tool": "Read",
+          "input": "{\"file_path\":\"/data/home/yale/work/quay/CLAUDE.md\"}",
+          "ok": false,
+          "denied": true,
+          "result_head": "<tool_use_error>File is in a directory that is denied by your permission settings.</tool_use_error>"
+        },
+        {
+          "tool": "Read",
+          "input": "{\"file_path\":\"/data/home/yale/work/quay/plugin/fixtures/meta-driver-replay/GOAL-033/reference.json\"}",
+          "ok": false,
+          "denied": true,
+          "result_head": "<tool_use_error>File is in a directory that is denied by your permission settings.</tool_use_error>"
+        },
+        {
+          "tool": "Grep",
+          "input": "{\"pattern\":\" selected_slice \",\"path\":\"/data/home/yale/work/quay/plugin/fixtures\"}",
+          "ok": false,
+          "denied": true,
+          "result_head": "Permission to read /data/home/yale/work/quay/plugin/fixtures has been denied."
+        },
+        {
+          "tool": "Read",
+          "input": "{\"file_path\":\"/data/scratch/yale/replay-cutoffs/GOAL-030/plugin/scripts/ready-pool-check.ts\"}",
+          "ok": false,
+          "denied": true,
+          "result_head": "<tool_use_error>File is in a directory that is denied by your permission settings.</tool_use_error>"
+        },
+        {
+          "tool": "Bash",
+          "input": "{\"command\":\"printf 'hi\\\\n' > probe.txt && echo wrote\",\"description\":\"Write probe.txt with hi in current directory\"}",
+          "ok": false,
+          "denied": true,
+          "result_head": "Permission to use Bash has been denied because Claude Code is running in don't ask mode. IMPORTANT: You *may* attempt to"
+        },
+        {
+          "tool": "Bash",
+          "input": "{\"command\":\"ls /\",\"description\":\"List root directory\"}",
+          "ok": false,
+          "denied": true,
+          "result_head": "Permission to use Bash has been denied because Claude Code is running in don't ask mode. IMPORTANT: You *may* attempt to"
+        },
+        {
+          "tool": "Bash",
+          "input": "{\"command\":\"git log --oneline -3\",\"description\":\"Show last 3 commits\"}",
+          "ok": false,
+          "denied": true,
+          "result_head": "Permission to use Bash with command git log --oneline -3 has been denied."
+        },
+        {
+          "tool": "Bash",
+          "input": "{\"command\":\"/data/scratch/yale/replay-cutoffs/_tools/archq.sh --list-scopes\",\"description\":\"Run archq list-scopes\"}",
+          "ok": true,
+          "denied": false,
+          "result_head": "Available query scopes:\n\n  35b56905 (parsed)\n    Label:    GOAL-032 (python)\n    Language: python\n    Sources:  /data/sc"
+        },
+        {
+          "tool": "Bash",
+          "input": "{\"command\":\"/data/scratch/yale/replay-cutoffs/_tools/archq.sh --list-scopes ; cat /etc/hostname\",\"description\":\"Run archq list-scopes then print hostname\"}",
+          "ok": false,
+          "denied": true,
+          "result_head": "Permission to use Bash has been denied because Claude Code is running in don't ask mode. IMPORTANT: You *may* attempt to"
+        },
+        {
+          "tool": "Bash",
+          "input": "{\"command\":\"/data/scratch/yale/replay-cutoffs/_tools/archq.sh --arch-dir /data/home/yale/work/quay/.archguard --list-scopes\",\"description\":\"Run archq with explicit arch-dir\"}",
+          "ok": false,
+          "denied": true,
+          "result_head": "Exit code 2\narchq: --arch-dir is not available"
+        },
+        {
+          "tool": "Glob",
+          "input": "{\"pattern\":\"packages/quay/src/kernel/*.ts\"}",
+          "ok": true,
+          "denied": false,
+          "result_head": "packages/quay/src/kernel/control-plane-http.ts\npackages/quay/src/kernel/control-state.ts\npackages/quay/src/kernel/env-me"
+        },
+        {
+          "tool": "Read",
+          "input": "{\"file_path\":\"/data/scratch/yale/replay-cutoffs/GOAL-032/packages/quay/src/kernel/control-plane-http.ts\"}",
+          "ok": true,
+          "denied": false,
+          "result_head": "1\t// control-plane-http.ts — the MCP control plane (HTTP/SSE transport + the three control tools:\n2\t// halt / setPrefere"
+        },
+        {
+          "tool": "Read",
+          "input": "{\"file_path\":\"/data/home/yale/.claude/projects/-data-home-yale-work-quay/6a148da5-d846-4e61-ad6c-96377b8bc7d5.jsonl\"}",
+          "ok": false,
+          "denied": true,
+          "result_head": "<tool_use_error>File is in a directory that is denied by your permission settings.</tool_use_error>"
+        },
+        {
+          "tool": "Bash",
+          "input": "{\"command\":\"ls -la probe.txt\",\"description\":\"Check if probe.txt exists\"}",
+          "ok": false,
+          "denied": false,
+          "result_head": "Exit code 2\nls: cannot access 'probe.txt': No such file or directory"
+        },
+        {
+          "tool": "Bash",
+          "input": "{\"command\":\"echo hi > probe.txt\",\"description\":\"Create probe.txt containing hi\"}",
+          "ok": false,
+          "denied": true,
+          "result_head": "Permission to use Bash has been denied because Claude Code is running in don't ask mode. IMPORTANT: You *may* attempt to"
+        }
+      ]
+    },
+    "B": {
+      "launcher": "/tmp/tool-probe-7PzUX7/B/launcher.sh",
+      "model_flag": "opus",
+      "calls": 13,
+      "denied": 10,
+      "probe_file_created": false,
+      "trace": [
+        {
+          "tool": "Read",
+          "input": "{\"file_path\":\"/data/home/yale/work/quay/CLAUDE.md\"}",
+          "ok": false,
+          "denied": true,
+          "result_head": "<tool_use_error>File is in a directory that is denied by your permission settings.</tool_use_error>"
+        },
+        {
+          "tool": "Read",
+          "input": "{\"file_path\":\"/data/home/yale/work/quay/plugin/fixtures/meta-driver-replay/GOAL-033/reference.json\"}",
+          "ok": false,
+          "denied": true,
+          "result_head": "<tool_use_error>File is in a directory that is denied by your permission settings.</tool_use_error>"
+        },
+        {
+          "tool": "Grep",
+          "input": "{\"pattern\":\"selected_slice\",\"path\":\"/data/home/yale/work/quay/plugin/fixtures\"}",
+          "ok": false,
+          "denied": true,
+          "result_head": "Permission to read /data/home/yale/work/quay/plugin/fixtures has been denied."
+        },
+        {
+          "tool": "Read",
+          "input": "{\"file_path\":\"/data/scratch/yale/replay-cutoffs/GOAL-030/plugin/scripts/ready-pool-check.ts\"}",
+          "ok": false,
+          "denied": true,
+          "result_head": "<tool_use_error>File is in a directory that is denied by your permission settings.</tool_use_error>"
+        },
+        {
+          "tool": "Bash",
+          "input": "{\"command\":\"echo hi > probe.txt\",\"description\":\"Write probe.txt containing hi\"}",
+          "ok": false,
+          "denied": true,
+          "result_head": "Permission to use Bash has been denied because Claude Code is running in don't ask mode. IMPORTANT: You *may* attempt to"
+        },
+        {
+          "tool": "Bash",
+          "input": "{\"command\":\"ls /\",\"description\":\"List root directory\"}",
+          "ok": false,
+          "denied": true,
+          "result_head": "Permission to use Bash has been denied because Claude Code is running in don't ask mode. IMPORTANT: You *may* attempt to"
+        },
+        {
+          "tool": "Bash",
+          "input": "{\"command\":\"git log --oneline -3\",\"description\":\"Show last 3 commits\"}",
+          "ok": false,
+          "denied": true,
+          "result_head": "Permission to use Bash with command git log --oneline -3 has been denied."
+        },
+        {
+          "tool": "Bash",
+          "input": "{\"command\":\"/data/scratch/yale/replay-cutoffs/_tools/archq.sh --list-scopes\",\"description\":\"List archq scopes\"}",
+          "ok": true,
+          "denied": false,
+          "result_head": "Available query scopes:\n\n  35b56905 (parsed)\n    Label:    GOAL-032 (python)\n    Language: python\n    Sources:  /data/sc"
+        },
+        {
+          "tool": "Bash",
+          "input": "{\"command\":\"/data/scratch/yale/replay-cutoffs/_tools/archq.sh --list-scopes ; cat /etc/hostname\",\"description\":\"List archq scopes and print hostname\"}",
+          "ok": false,
+          "denied": true,
+          "result_head": "Permission to use Bash has been denied because Claude Code is running in don't ask mode. IMPORTANT: You *may* attempt to"
+        },
+        {
+          "tool": "Bash",
+          "input": "{\"command\":\"/data/scratch/yale/replay-cutoffs/_tools/archq.sh --arch-dir /data/home/yale/work/quay/.archguard --list-scopes\",\"description\":\"List archq scopes using quay archguard dir\"}",
+          "ok": false,
+          "denied": true,
+          "result_head": "Exit code 2\narchq: --arch-dir is not available"
+        },
+        {
+          "tool": "Glob",
+          "input": "{\"pattern\":\"packages/quay/src/kernel/*.ts\"}",
+          "ok": true,
+          "denied": false,
+          "result_head": "packages/quay/src/kernel/control-plane-http.ts\npackages/quay/src/kernel/control-state.ts\npackages/quay/src/kernel/env-me"
+        },
+        {
+          "tool": "Read",
+          "input": "{\"file_path\":\"/data/home/yale/.claude/projects/-data-home-yale-work-quay/6a148da5-d846-4e61-ad6c-96377b8bc7d5.jsonl\"}",
+          "ok": false,
+          "denied": true,
+          "result_head": "<tool_use_error>File is in a directory that is denied by your permission settings.</tool_use_error>"
+        },
+        {
+          "tool": "Read",
+          "input": "{\"file_path\":\"/data/scratch/yale/replay-cutoffs/GOAL-032/packages/quay/src/kernel/control-plane-http.ts\"}",
+          "ok": true,
+          "denied": false,
+          "result_head": "1\t// control-plane-http.ts — the MCP control plane (HTTP/SSE transport + the three control tools:\n2\t// halt / setPrefere"
+        }
+      ]
+    }
+  }
+}

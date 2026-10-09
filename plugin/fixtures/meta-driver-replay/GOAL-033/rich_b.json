@@ -1,0 +1,489 @@
+{
+  "case_id": "GOAL-033",
+  "stage": "B",
+  "stage_name": "decomposition",
+  "mode": "rich-bundle",
+  "cutoff": "2026-10-09T05:41:00.000Z",
+  "cutoff_label": "T1-decision-ready",
+  "cutoff_commit": "1025ab9512de3e7b260214d2360a4b035ca80957",
+  "cutoff_commit_time": "2026-10-09T13:35:40+08:00",
+  "confirmed_concern": "One package-level dependency cycle (a 6-member SCC) exists, and the root<->cli edge is the outermost, cheapest candidate to cut; the ownership question is which side should own the shared primitives the edge crosses.",
+  "dossier": {
+    "total_bytes": 72218,
+    "section_count": 17,
+    "sections": [
+      {
+        "id": "arch:scc",
+        "title": "Package-level dependency cycles",
+        "kind": "arch_scc",
+        "provenance": {
+          "kind": "archguard_derived",
+          "tool": "ArchGuard 0.1.38 analyze (TypeScript scope)",
+          "analysis_commit": "1025ab9512de3e7b260214d2360a4b035ca80957",
+          "stage_commit": "1025ab9512de3e7b260214d2360a4b035ca80957",
+          "scanned_code_identical_to_stage_commit": true,
+          "differing_files_in_scanned_dirs": [],
+          "derivation": "package = directory of the entity's source file; edge = one 'dependency' relation in arch.json",
+          "query": "package-level Tarjan SCC over arch.json dependency relations",
+          "sccs": [
+            6
+          ]
+        },
+        "text": "scanned: 487 source files, 5044 entities, 3248 file-level dependency relations\npackage-level strongly-connected components with more than one member: 1\n  SCC#1 size=6: packages/quay/src | packages/quay/src/cli | packages/quay/src/fan-in | packages/quay/src/gate | packages/quay/src/gate/config | packages/quay/src/gate/factories",
+        "bytes": 328,
+        "text_sha256": "e6d2bf1894c2e8b589d420b78ed6ae97ba11e0db1f49e447ffa88d226392b6b8"
+      },
+      {
+        "id": "arch:package-metrics",
+        "title": "Package fan-in / fan-out under packages/quay/src",
+        "kind": "arch_metrics",
+        "provenance": {
+          "kind": "archguard_derived",
+          "tool": "ArchGuard 0.1.38 analyze (TypeScript scope)",
+          "analysis_commit": "1025ab9512de3e7b260214d2360a4b035ca80957",
+          "stage_commit": "1025ab9512de3e7b260214d2360a4b035ca80957",
+          "scanned_code_identical_to_stage_commit": true,
+          "differing_files_in_scanned_dirs": [],
+          "derivation": "package = directory of the entity's source file; edge = one 'dependency' relation in arch.json",
+          "query": "package metrics for packages/quay/src*"
+        },
+        "text": "package fan-in / fan-out (cross-package dependency relations), prefix packages/quay/src:\n(computed here from file-level 'dependency' relations only; ArchGuard's own package-metrics tool also counts composition/inheritance/call relations, so its absolute numbers are larger)\n  fanIn= 171 fanOut=  43  packages/quay/src\n  fanIn=  65 fanOut=  21  packages/quay/src/gate\n  fanIn=  43 fanOut=   0  packages/quay/src/kernel\n  fanIn=  17 fanOut=   4  packages/quay/src/gate/config\n  fanIn=   5 fanOut=  88  packages/quay/src/cli\n  fanIn=   5 fanOut=   8  packages/quay/src/fan-in\n  fanIn=   3 fanOut=  24  packages/quay/src/gate/factories",
+        "bytes": 631,
+        "text_sha256": "bc59fea424b85663efb1ee85925e5d52b5099fa734d66ffb0a095649cc5426e8"
+      },
+      {
+        "id": "code:cli-dir",
+        "title": "packages/quay/src/cli/ directory listing",
+        "kind": "git_ls",
+        "provenance": {
+          "kind": "git_ls",
+          "commit": "1025ab9512de3e7b260214d2360a4b035ca80957",
+          "path": "packages/quay/src/cli",
+          "command": "git ls-tree -l 1025ab9512de packages/quay/src/cli/",
+          "entries": 27
+        },
+        "text": "    2148  packages/quay/src/cli/action.ts\n    4458  packages/quay/src/cli/adr.ts\n    2633  packages/quay/src/cli/config.ts\n    1294  packages/quay/src/cli/context.ts\n    4386  packages/quay/src/cli/driver-vocab.ts\n   29173  packages/quay/src/cli/driver.ts\n    9111  packages/quay/src/cli/flags.ts\n    1512  packages/quay/src/cli/gate-log.ts\n    8977  packages/quay/src/cli/gate.ts\n   20016  packages/quay/src/cli/goal.ts\n   47960  packages/quay/src/cli/help.ts\n   37753  packages/quay/src/cli/init.ts\n    4167  packages/quay/src/cli/lifecycle.ts\n    4693  packages/quay/src/cli/manager.ts\n     743  packages/quay/src/cli/mcp.ts\n    3732  packages/quay/src/cli/meta.ts\n    3005  packages/quay/src/cli/migrate.ts\n    8181  packages/quay/src/cli/provider.ts\n    3458  packages/quay/src/cli/run.ts\n    2092  packages/quay/src/cli/serve.ts\n   61014  packages/quay/src/cli/server.ts\n    9781  packages/quay/src/cli/shared.ts\n    1098  packages/quay/src/cli/task-check.ts\n    4048  packages/quay/src/cli/task-create.ts\n   10524  packages/quay/src/cli/task-edit.ts\n   16261  packages/quay/src/cli/task-list.ts\n     801  packages/quay/src/cli/task-view.ts",
+        "bytes": 1146,
+        "text_sha256": "e19c57c5191abc89948ccd98a724514c1137d5af44ad46bb376b6e69b5dbb741"
+      },
+      {
+        "id": "doc:methodology",
+        "title": "docs/references/ownership-first-refactoring-methodology.md",
+        "kind": "git_cat",
+        "provenance": {
+          "kind": "git_file",
+          "commit": "1025ab9512de3e7b260214d2360a4b035ca80957",
+          "path": "docs/references/ownership-first-refactoring-methodology.md",
+          "ranges": null,
+          "command": "git show 1025ab9512de:docs/references/ownership-first-refactoring-methodology.md",
+          "truncated": false,
+          "total_chars": 14657
+        },
+        "text": "# Ownership-First 重构方法论 — 从 GOAL-030、GOAL-031、GOAL-032 三次真实试点提炼\n\n**Status:** live reference — 供后续 `branch:true` Goal 重构复用，不是一次性复盘。\n**Worked examples：**\n- GOAL-030（`goals/GOAL-030-晋升写入经-kernel-转移决策并留痕-...md`，AC-336..342，分支 `goal/GOAL-030`）——新增 kernel 模块、收敛两套写入路径，重构规模较大。\n- GOAL-031（`goals/GOAL-031-needs-human-状态词汇-canonicalization-试点-...md`，AC-343..345，分支 `goal/GOAL-031`）——同一套方法在一个刻意切得更小的切片上的第二次独立验证：`goal-driver.ts` 里 5 处 `status === \"needs-human\"` 裸字面量比较收敛到已有正本 `plugin/scripts/task-status.ts`/`packages/quay/src/abi.ts`，不新造第二套声明。\n- GOAL-032（`goals/GOAL-032-verdict-parser-ownership-收敛试点-...md`，AC-347..349，分支 `goal/GOAL-032`）——第三次独立验证，范围只收敛 ArchGuard `detect_duplicates` 命中的一对函数（`criterion-fidelity.ts::parseFidelityVerdict` / `goal-driver.ts::parseSemanticSufficiencyVerdict`），但先做了一次正式的等价性调查，再收敛为 kernel 单一实现 + 两个薄包装——是\"ownership migration 而非删除重复\"的例子（见第 2 节）。\n**现状口径（2026-10-09）：** 三个 Goal 均已 **merge 入 `develop` 并 achieved**。GOAL-030 的 AC-336..342 全部 `achieved`（合并提交 `d71d2bde4`；post-merge 生产读数 AC-341、merge 形态 AC-342 均 `exit 0 PASS`）。GOAL-031 的 AC-343..345 全部 `achieved`（合并提交 `117ee91b8`）。GOAL-032 的 AC-347..349 全部 `achieved`（合并提交 `0da918926`）。本文引用的 `packages/quay/src/kernel/task-transition.ts`、`plugin/scripts/task-status.ts`、`packages/quay/src/kernel/verdict-parse.ts` 现在都在 `develop`/`author` 上可读，不再是分支限定产物。\n**正本指针（不复制，只引用）：**\n- `branch:true` Goal 机制细节 → `orchestration/SPEC-goal-branch-2026-10-03.md`\n- GIT lens / hard-over-soft 的理论依据 → `adr/ADR-004-...md`、`adr/ADR-005-...md`、`adr/ADR-006-...md`、`adr/ADR-007-...md`\n- 架构评审三层流程本体 → archguard 插件 `arch-layer-review` skill（`SKILL.md` + `references/goal-030-example-output.json`）\n- `L_T/L_C/L_D/L_G/L_S` 词汇表 → `docs/references/` 下的 GIT 框架文档（见 CLAUDE.md「GIT review checklist」）\n\n**Non-goals：** 不是 OO/设计模式教程；不是 GOAL-030/031/032 复盘报告（三者只作可核验锚点）；不重复 `SPEC-goal-branch` 的机制细节或 archguard skill 的操作步骤——那些有各自的正本。\n\n---\n\n## 1. Ownership-first：先问\"谁该拥有\"，不先找 class\n\n遇到一段行为分散、多处直写的代码，第一步不是\"这段逻辑该放进哪个 class\"，而是把它拆成四个独立的问题分别找拥有者：\n\n- **状态**（这个决策依赖的规则表/边表本身，谁是唯一定义处？）\n- **决策**（给定输入，判定走哪条路，这个判断函数归谁？）\n- **副作用**（真正落盘/落事件的那一行写操作，归谁？）\n- **编排**（谁在什么时机调用上面三者，这件事可以继续留在原处）\n\nGOAL-030 的起点问题不是\"任务转移该是哪个对象\"，而是\"任务转移决策该归谁拥有\"——答案拆成四块都在 `packages/quay/src/kernel/task-transition.ts`：`LIFECYCLE_EDGES`（状态/规则表，从 `gate/lifecycle.ts` 收敛而来，原处降级为 re-export）、`decideTransition`（决策，三态 `allow/refuse/not-evaluated`，从不把\"没判出来\"塞进\"拒绝\"）、`patchStatusField` + `appendTaskStatusEvent`（副作用，从 `plugin/scripts/task-ops.ts` 收敛而来）。**编排**（何时调用、调用顺序）明确留在 `ready-pool-check.ts` 的 `applyPromotions`/`applyRevaluations` 里——不是每一块都要塞进同一个\"对象\"，四块可以、也应该落在不同模块。\n\n四个问题分别回答完，剩下的才是\"这个形状看起来像什么模式\"（见第 3 节）——顺序不能反。\n\n## 2. Canonical source ≠ 调用方真正收敛：避免搬壳\n\n\"建了一个新的权威实现\"和\"调用方真的收敛到那个权威实现\"是两件独立的事，中间的陷阱是**搬壳（shell move）**：新模块存在、名字也对，但旧实现只是被套了个壳，或者调用方表面换了导入路径、骨子里还在走老的写法。真正收敛要同时满足三条（对齐 archguard `arch-layer-review` 的三个陷阱）：\n\n1. **单一定义处**：状态/决策表在全仓库只有一个 `export` 来源，别处最多是 re-export，不能有\"第三套实现\"悄悄并存（GOAL-030 AC-336：`LIFECYCLE_EDGES`/`patchStatusField` 各恰好一个 `export` 站点，且站点在 kernel）。\n2. **调用方真的改口**：把旧的直写路径数清楚、钉成具体数字，验收时确认这个数字归零（AC-336：`ready-pool-check.ts` 对 `patchStatusField(` 的直接调用从有到 0，转为 import kernel）。\n3. **新实现不反向依赖旧实现的写原语**（搬壳不搬心）：如果新模块的 body 里还在 `import` 回旧的写函数，说明\"心\"没搬，只是换了个门面。\n\n自检问法：**改一条调用点，是否还需要同时跑去两个地方改规则表？** 如果是，说明还没真正收敛，只是又多了一层转发。\n\n**GOAL-031 是这条原则更干净的第二个实例，且不需要新造任何权威实现**：权威实现（`plugin/scripts/task-status.ts` 自包含副本 + `packages/quay/src/abi.ts`）早已存在、早已 `done`，缺口只在调用方——`goal-driver.ts` 里还有 5 处 `status === \"needs-human\"` 裸字面量比较从未迁移。整个 slice 就是纯粹的\"调用方改口\"：`grep -c 'status === \"needs-human\"' plugin/scripts/goal-driver.ts` 从 6 精确降到 1（唯一保留的一行是另一词表——GOAL-AC 的 `status`，不是 task 状态，判定靠逐行核实位置，不是关键词计数）。这也说明\"canonical source\"不必是物理上的单一文件：plugin 树不能静态 import packages 源码（打包边界），所以两份声明并存是合法的\"单一正本的两个已声明副本\"，不算第三套实现——真正要收敛的只是**调用方**，不是逼着两棵树共享一份物理文件。\n\n**先导检查：duplicate ≠ equivalent，ArchGuard 的重复命中只是调查入口，不是合并触发器。** `detect_duplicates` 报出两段代码重复，证明的只是\"文本/结构相似\"，不证明\"该不该合并\"——合并前必须逐项核实：①调用语义是否真的相同（同一问题的两种答案，还是看起来像、实际回答不同问题）；②输入/输出形状是否一致；③错误与 `not-evaluated` 行为是否一致（fail-closed 的触发条件、兜底值是否逐字相同）；④调用方实际怎么消费返回值（同步/异步、是否缓存、失败后的编排是否不同）。四项都核实过、结论是 **equivalent**（不是\"碰巧长得像\"的 intentionally-divergent）才进入收敛；核实本身要留痕（谁比较了哪几行、下的什么结论），不能只凭 ArchGuard 的相似度分数直接动手合并。\n\n**GOAL-032 是这条先导检查 + ownership migration（而非删除重复）的例子。** `criterion-fidelity.ts::parseFidelityVerdict` 与 `goal-driver.ts::parseSemanticSufficiencyVerdict` 先经过上面四项核实：算法逐字相同（`exitCode!==0 ⇒ not-evaluated` → 裸 token 匹配 → 从末行向上扫描 JSON → 其余一律 `not-evaluated`），两处源码注释与测试文件都自述\"复刻\"对方手法（证明是蓄意复制，不是巧合），结论 equivalent；但两边的**调用方编排故意保持不同**（一个同步无缓存，一个异步、两次采样一致才入缓存）——这部分不碰，留在原处（呼应第 1 节\"编排可以继续留在原处\"）。收敛动作是：新建 `packages/quay/src/kernel/verdict-parse.ts::parseBinaryVerdict` 作为唯一算法实现；`parseFidelityVerdict`/`parseSemanticSufficiencyVerdict` **保留原函数名/签名/返回类型，改成调用 kernel 函数的薄包装**；两处真实调用方（`criterionFidelityVerdict`/`sampleSemanticSufficiency`）**零改动**，仍然调用原来的函数名，只是那个函数内部已经委托给 canonical 实现。**这和 GOAL-030/031\"调用方改口直接调新正本\"是不同的收敛形状**：这次是\"责任迁移到了正确的层，调用点感觉不到\"——目标从来不是\"删掉重复的那一份\"，是\"让两份实现背后只有一个真正的算法\"。\n\n## 3. OOA/OOD 与设计模式：边界已明确才用，不建 pattern zoo\n\nState / Strategy / Command / Specification / Repository / Application Service / Domain Service / Domain Event 这些名字描述的是**责任边界已经清楚之后**长出来的形状，不是动手前要往代码里\"安装\"的蓝图：\n\n- `LIFECYCLE_EDGES` + `decideTransition` 事后看像一张 State 表 + Strategy 判定——但起点不是\"我们来套用 State 模式\"，是第 1 节四问里\"决策归谁\"先有了答案，形状自然收敛成这样。\n- 只有一个调用点、看不到第二个实现在望的时候，不要先搭 Repository 抽象层、不要先建 Domain Event 总线、不要先引入 Specification 对象——这是 CLAUDE.md 已有原则（\"不要为假设的未来需求设计\"）在重构场景下的具体化：三行相似代码好于一个过早的抽象。\n- 判据：先完成第 1 节的四问拆分，**只有当某个边界已经出现第二个真实实例（第二个 provider、第二条调用链、第二种策略）** 时，才把这个边界正式升格为一个命名模式；否则它只是一个单一职责的函数/模块，不需要模式名字。\n\n## 4. 小而真实的 refactor slice：一次只切一个可独立验收的问题\n\n每个 slice 必须能**用数字钉死范围**，而不是用一句\"顺手也清理一下\"模糊掉边界。GOAL-030 的 AC-336 把范围钉成：fan-in（`worker-fan-in.ts`，4 处调用）、needs-human/branch-sync（`driver-filters.ts`，2 处调用）**明确排除**；\"ABI vs kernel 的归属决策\"\"`gate/lifecycle.ts` CLI 路径行为改变\"\"目录环清理\"\"driver 机制改动\"**明确列为 non-goals**，不是被遗忘，而是被数清楚、点名留给以后的 slice——下一个 slice 不需要重新发现这些边界,直接从这张清单接手。\n\n一次 slice 只解决一个能独立验收的问题；如果验收条件要同时证明两件不相关的事，说明 slice 切得太大，应该拆成两个 Goal 或两个 task。\n\n**指标服从 scope，不为指标扩大重构范围（GOAL-031 的核心教训）**：GOAL-031 立项时的初始目标是把 `needs-human` 的 ArchGuard literal dispersion 从 5 降到 ≤2。执行前核实发现这个数字本身算错了——`packages/quay/src/observation.ts`、`plugin/scripts/workflow-baseline-metrics.ts` 里命中的其实是不同词表的字段（促晋升账本的 `action`、workflow 事件的 `outcome`），和 task 状态无关，是异词表假阳性；`packages/quay-github/src/github-client.ts` 那一处早被另一个已完成任务显式豁免、由 needle 测试钉死形状，不能动；再加上正本声明自身必然带一处字面量——四处里有三处结构上不可能被这次改动影响。正确的底线是 **4**（正本 1 + 豁免 1 + 假阳性 2），不是 2。GOAL-031 选择**把目标数值改成 4、把范围继续钉在 `goal-driver.ts` 的 5 处真实调用点上**，而不是反过来为了凑到 ≤2 去扩大 scope（比如去改 `observation.ts`/`workflow-baseline-metrics.ts`，或者去碰已豁免的 `github-client.ts`）。原则：**当\"目标数值\"和\"已声明的 scope/非目标\"冲突时，先检查数值本身有没有算错，不要为了凑数值反过来扩大 scope**——数值服务于已经划定的责任边界，不是反过来定义边界。\n\n## 5. `branch:true` Goal 的标准流程\n\n机制细节见 `orchestration/SPEC-goal-branch-2026-10-03.md`；这里只记录 GOAL-030、GOAL-031、GOAL-032 实际走过的闭环顺序，作为后续复用的检查单：\n\n1. **Fork point**：ArchGuard before-基线，在 goal 分支创建前先对 `develop` 尖端拍一次。\n2. **Goal 激活**：`goal/<GOAL-ID>` 从 `develop` 尖端惰性创建；该 Goal 下的任务派发自动把 `mergeTarget` 解到这个分支，worktree 从它 fork。\n3. **少量串行 task**：每个 task 对应第 4 节的一个 slice，在 goal 分支上串行落地（彼此 fan-in 到 goal 分支，而非各自散落）。\n4. **Branch 自举（self-host）**：见第 6 节——证明分支尖端跑的是分支自己的代码，不是侥幸读到了主检出。\n5. **Before/after 对比**：同一套 ArchGuard CLI，对 fork point 和分支尖端（或合并提交两个父提交）各做一次单根 `git archive` 提取后分析，比较结构性指标（见第 10 节）。\n6. **人工触发 merge**：`quay goal merge <GOAL-ID> --reason ...` 只记录 `goal-merge-request` GateEvent，不直接执行；机械 fan-in 由 worker-driver 按固定顺序（goal 锁 → develop 锁）做 `git merge --no-ff`，跑 anti-drift/typecheck/scoped-gate/全量 suite，绿则 `ff-only` 推进 `develop`，红则记录 gap、分支保留等下一次重试。\n7. **规定 merge shape**：`develop` 的 first-parent 链上恰好一个合并提交，第二父提交是 goal 分支尖端，不允许分支内部的中间提交泄漏到 first-parent 上（AC-342 的判据）。\n8. **Post-merge 验证**：合并落地后，针对生产环境的真实读数做核验（见第 6 节 AC-341 的形态），而不是止步于\"合并没冲突\"。\n9. **全部 AC achieved 后关闭**：Goal 的收尾条件是其下全部 AC 进入 `achieved`（含 post-merge 类 AC），不是 merge commit 落地那一刻。GOAL-030 实际经历过这个等待——AC-336..340 先 `done`，AC-341/342 要等 merge 真正落地（合并提交 `d71d2bde4`）才评估完 `achieved`，GOAL-030 随后整体 `achieved`；GOAL-031 走完同一闭环（合并提交 `117ee91b8`，AC-343..345 全部 `achieved`）。两次都证实了\"merge 完成 ≠ Goal 完成\"：中间那段等待不是流程多余的一步。\n\n**复用技术，不跨分支复用产物**：GOAL-031 立项时 `goal/GOAL-030` 还没并入 `develop`，GOAL-031 显式把\"不依赖、不 import 任何只存在于 `goal/GOAL-030` 分支的文件\"写进非目标——复用的是 GOAL-030 验证过的**自举校验技术**（校验被加载模块的 realpath 落在本 goal 的 worktree 内），而不是直接 import 对方未并入分支上的脚本，避免制造跨 goal-branch 的隐性耦合（见第 6 节）。\n\n## 6. Branch self-host 身份证明：driver/serve/entry 的 realpath 必须在 goal 树内\n\n\"分支上跑测试通过\"不等于\"分支上跑的代码就是分支自己的代码\"——如果子进程解析模块时意外落回主检出或全局安装的版本，所有绿色都是假的。证明身份用**直接量**，不用自报量：\n\n- 从 `/proc/<pid>/cmdline` 读 entry 脚本的真实路径，而不是信任进程自己汇报的参数（AC-340：\"真实读到的实体 realpath 在被评估的树内\"）。\n- 每条事件（如 `.quay/task-status-events.jsonl` 的 promote/retreat 记录）都带 `writerModule`/`entry` 的 realpath，验收时核对这些 realpath 落在 goal 树的 worktree 路径下，不是主检出路径（AC-337）。\n- **负对照是这条证明的另一半，不是可选项**：同一个 sandbox，换成**主检出**的 driver 去驱动，必须产出 0 条匹配事件（AC-337 的 `mainHasModule` 字段——这个负控制只在\"主检出确实还没有这个模块\"时才有效，所以要显式记录前提，而不是假定它永远成立）。\n- 同理应用在 preview/serve 上：分支的 preview 实例若注册的是外来代码的 serve，必须报错退出（而不是悄悄通过）；若目标树根本没注册，必须报 `NOT-EVALUATED`，不能伪装成 PASS（见硬规则 3b 同形：没查成的状态要有独立取值）。\n- GOAL-031 没有直接复用 GOAL-030 的 `scripts/branch-selfhost-probe.mjs`（当时只存在于未并入的 `goal/GOAL-030` 分支，且规模也不对等）——而是写了一个规模相应缩小的自包含校验 `scripts/goal-031-selfhost-probe.mjs`，落盘到 `.quay/goal-031-evidence/selfhost-identity.json`，复用的是上面同一条**判据**（realpath 落在本 goal worktree 内），不是跨分支复用那份脚本本身。\n\n## 7. 架构评审三层：mechanical facts / declared rules / semantic judgment\n\n这是 archguard `arch-layer-review` skill 的既有分工，三层物理上不合并成一张表：\n\n| 层 | 产出 | 谁判定 | 可复现性 |\n|---|---|---|---|\n| **mechanical facts** | ArchGuard `analyze` 的原始输出（`moduleGraph` 边、环、度量） | ArchGuard，唯一真相来源 | 同输入字节级一致 |\n| **declared rules** | `layers.yml` + `check-layers.mjs` 的 `pass`/`fail`/`not-evaluated` | 人审过的声明 + 确定性检查器 | 同输入字节级一致 |\n| **semantic judgment** | 四态语义判断（`converged`/`cosmetic`/`regressed`/`not-evaluated`），附证据引用 | LLM，**仅建议，从不作为门禁** | 证据可复现，措辞可能变 |\n\n四态判断只回答四个 MVP 问题：①责任真的只留在声明层（不是又长出第三套实现）；②旧层里的实现是否真的消失，不是看起来挪了但旧实现仍是 load-bearing（cosmetic）；③编排层是不是真的停止自己读+判+写，改成只传意图给领域层；④新模块是不是只是改名复制、body 里仍反向 import 旧的写原语（搬壳）。全 DDD 建模、OOD 审查（类职责/继承/组合）、架构风格诊断、全局打分，都明确排除在这个薄语义层之外——若回答判断需要新写一个确定性检查器，那是下一阶段的事，不归这层。\n\n## 8. Mechanical pass ≠ architecture good；deterministic fail 也可能是改进或声明过期\n\n`check-layers.mjs` 报 `pass` 只证明\"声明的规则没被机械图违反\"，不证明责任真的搬过去了——这正是第 7 节的 cosmetic 陷阱：看起来挪了，旧实现仍在干活,机械检查看不出来。\n\n反过来，重构后一次 `fail` 不等于\"改坏了，回滚\"：\n\n- 可能是**实现真的改进了**，出现了一条新的、符合预期的所有权边，只是声明文件（`layers.yml`）还没跟上这个新边，需要更新声明而不是改代码；\n- 可能是**声明本身过期**，描述的是重构前的旧形状；\n- 也可能真的是回归。\n\nGOAL-030 的 AC-339 撞到过一个具体案例：最初为\"单一 import 的玩具分支\"设计的负对照算术，被真实落地的两条边（`ready-pool-check.ts` 直接 import + 经由 `task-ops.ts` 的 re-export）证伪了——只移除其中一条边，`strength` 仍然通过（因为另一条边还在撑着）；移除两条才正确触发 `CAUSE=kernel-edge-not-observed`。任务记录里原样保留了这次证伪过程，没有悄悄改数字掩盖掉。**这是模板：一次红不是告诉你\"撤销\"，是告诉你\"去看\"。**\n\n## 9. Negative control / falsifiability：AC 必须能在负对照下失败\n\n一条 AC 如果在故意破坏它本应守护的东西之后仍然通过，它就不是在测那个东西——这是本方法论对硬规则 4 的直接应用。GOAL-030 里三个具体负对照：\n\n- **身份负对照**（AC-337）：主检出驱动同一个 sandbox 必须产出 0 条事件；\n- **结构负对照**（AC-339）：移除声明边后重新测 `strength` 是否真的下降——且这个负对照本身也要被验证过（见第 8 节的两条边案例，证明\"负对照的算术假设\"同样需要经受真实数据的检验，不能只设计一次就当永久有效）；\n- **身份负对照的镜像**（AC-340）：外来代码注册 → 必须报错退出；未注册目录 → 必须报 `NOT-EVALUATED`，不能和\"通过\"同形。\n\n写一条新 AC 时，先问：\"如果我故意把它该守护的东西破坏掉，这条 AC 会变红吗？\" 答不出来就不是一条可信的验收条件。\n\n## 10. 可测指标：这次重构实际读的是哪些数字\n\n| 指标 | 含义 | GOAL-030 的具体读数 | GOAL-031 的具体读数 | GOAL-032 的具体读数 |\n|---|---|---|---|---|\n| **cycles / SCC** | 目录级强连通分量数量，重构不应新增环 | 1 → 1（不变） | `import-graph-check.ts` 四个棘轮量不回退 | `import-graph-check.ts` 四个棘轮量不回退 |\n| **reverse edges** | 声明的上下游关系被反向调用的边数 | `packages→plugin` 反向边 0（两端都 0） | 同上，棘轮不回退 | 同上，棘轮不回退 |\n| **layer violations** | `check-layers.mjs` 报的违规数 | 本 slice 范围内 0 | 本 slice 范围内 0 | 本 slice 范围内 0（kernel 是 `layers.yml` 已声明允许的落点，无需新加边） |\n| **edge strength** | 两个包/模块之间的调用边权重 | `plugin/scripts→kernel`：14→16（上升）；`plugin/scripts→non-kernel`：44→44（不变，没有\"顺手\"把别的也挪过去） | — | `plugin/scripts→packages/quay/src/kernel` 新增一条边（方向正确，与 GOAL-030 引入 kernel 同构） |\n| **duplicate disappearance** | 原本重复的声明/实现是否真的消失 | `LIFECYCLE_EDGES` 由两处定义收敛为一处 + 一个 re-export | 不适用——GOAL-031 不新造任何声明，权威实现早已存在、早已 `done`（见第 2 节） | ArchGuard `detect_duplicates` 命中的该组 before 存在、after 消失——算法只有 `verdict-parse.ts::parseBinaryVerdict` 一份 |\n| **literal dispersion** | 同一个字面量/常量散落在几个文件里 | 转移决策相关字面量收口到 kernel 单文件 | `get_literal_dispersion(value:\"needs-human\")`：5 → 4（不是 ≤2——见第 4 节\"指标服从 scope\"） | 不适用——本 slice 收敛的是算法重复，不是字面量分散 |\n| **canonical definition count** | 某个状态/规则表的 `export` 定义点数量 | `LIFECYCLE_EDGES`/`patchStatusField` 各恰好 1 | `task-status.ts` 正本声明处恰好 1（不变——本 slice 不碰正本，只迁调用方） | `parseBinaryVerdict` 的算法实现 2 → 1（两处旧函数各自一份完整算法 → kernel 唯一一份） |\n| **direct-write count** | 旧模块里直写副作用的调用点数量 | `ready-pool-check.ts` 对 `patchStatusField(` 的直接调用：有 → 0 | `grep -c 'status === \"needs-human\"' plugin/scripts/goal-driver.ts`：6 → 1（剩 1 处是另一词表 GOAL-AC `status`，判定靠逐行核实位置，非关键词） | 不适用——GOAL-032 不是\"消灭直写\"，是\"消灭重复算法\"（见 consumer convergence 行） |\n| **consumer convergence** | 真实消费方的调用方式是否仍指向正确的入口，而不是绕开封装直连内部实现 | 随 direct-write count 一起验证：`ready-pool-check.ts` 两处调用点确认走 kernel 路径 | 随 direct-write count 一起验证：`goal-driver.ts` 5 处调用点确认走 `task-status.ts` | `criterionFidelityVerdict`/`sampleSemanticSufficiency` 两个真实调用方**零改动**，仍调用 `parseFidelityVerdict`/`parseSemanticSufficiencyVerdict` 原函数名——验证靠读两层源码（调用方仍调旧函数名；旧函数体内已委托 `parseBinaryVerdict`），不是看调用点数字变化（本例调用点数字根本不变） |\n| **import direction** | 新模块是否反向 import 旧模块的写原语 | 否（通过 archguard 语义判断核实，非仅计数） | 否——`goal-driver.ts` 新增 `import { TASK_STATUS } from \"./task-status.ts\"`，方向正确 | 否——`verdict-parse.ts` 零依赖纯函数，`criterion-fidelity.ts`/`goal-driver.ts` 单向 import 它，不反向 |\n| **post-merge event evidence** | 合并落地后，生产环境的真实事件是否能对上预期的行为 | AC-341：`develop` 上每一次 `promotion-driver` 机械晋升都要能在 `.quay/task-status-events.jsonl` 里找到对应的 `promote` 事件——`exit 0 PASS`，merge 落地（`d71d2bde4`）后实测达成 | AC-345：`develop` 上重跑 grep 读数、核对以恰好一个合并提交（`117ee91b8`）进入 first-parent 链——`exit 0 PASS` | AC-349：`develop` 上 grep 两个旧函数体确认已是薄包装（不是叙述，是读到的事实），两处调用方测试在主检出上仍绿——merge 落地（`0da918926`）后实测达成 |\n\n这些指标共同回答的问题是\"责任真的搬了吗\"，而不是\"文件数变了吗\"——文件数、行数变化只是会计记账（`AC-339`：file-count delta == `git diff` A−D，只是一致性校验，不是判好坏的依据）。\n\n## 11. 当前阶段：优先 ownership convergence，再谈规模化 OO 化\n\nQuay 现阶段的重构应该优先把\"状态/决策/副作用/编排四件事分别归谁\"理清、把 canonical source 真正收敛、把调用方真正改口（第 1–4 节），而不是急于铺开大规模的领域对象/模式体系。原因：\n\n- 边界不清楚的时候提前建模式，代价是搬壳（第 2 节的陷阱）——换了名字没换责任，之后还要再收敛一次。\n- 模式名字应该是\"已经收敛形状\"的标注，不是\"打算收敛成什么样\"的蓝图（第 3 节）；在只有一个真实实例的时候谈 Strategy/Repository 没有意义。\n- 等多个 slice 把若干个所有权边界理清之后，真正需要的模式会自己浮现出来（有第二个真实实例时才升格），这时候做规模化 OO 化才是收敛后的自然延伸，而不是收敛前的猜测。\n- GOAL-031 进一步验证了这个优先级在小切片上同样成立：范围已经划清之后，连\"量化目标数值\"都要服从那个范围，不能反过来用数值牵动范围（第 4 节）——规模化 OO 化更容易把\"为了让数字好看\"包装成\"为了架构更好\"，ownership convergence 阶段应该先把这条反射练成本能。\n\n## 12. 一句话压缩版\n\n**先把状态、决策、副作用、编排四件事分别钉给唯一拥有者，用 ArchGuard before/after + 负对照 + 分支自举证明调用方真的收敛到了那个唯一实现（不是搬了个壳），每次只切一个能独立验收的小问题，在 `branch:true` Goal 的 fork → 串行 task → 自举 → before/after → merge → post-merge 闭环里把这套验证跑穿到底，模式名字只用来标注已经收敛出来的形状，不用来提前设计。**\n",
+        "bytes": 26717,
+        "text_sha256": "0f973988688497cd4b0a09447808da59823b19580acfe0d8756319ec4b77af28"
+      },
+      {
+        "id": "doc:spec-layer-architecture",
+        "title": "orchestration/SPEC-methodology-layer-architecture-2026-08-25.md",
+        "kind": "git_cat",
+        "provenance": {
+          "kind": "git_file",
+          "commit": "1025ab9512de3e7b260214d2360a4b035ca80957",
+          "path": "orchestration/SPEC-methodology-layer-architecture-2026-08-25.md",
+          "ranges": null,
+          "command": "git show 1025ab9512de:orchestration/SPEC-methodology-layer-architecture-2026-08-25.md",
+          "truncated": true,
+          "total_chars": 18075
+        },
+        "text": "# SPEC：方法学层架构 —— 契约面的采纳，不是抽象的从头建立\n\n> **立本 SPEC 的由来（人 2026-08-25 逐字）**：「本项目的 OOA/OOD 设计是不足的，大部分任务关注的\n> 仅是实现功能和跑通，并未做更大颗粒的架构设计」；「基于现有实现和典型应用场景明确架构轮廓和演进\n> 方向」「基于现有实现进行持续重构」「用现有的阶段目标+AC 的形式来驱动」「尽早把大的架构做对」\n> 「可测试性和测试的性能也是优化的重点」。\n>\n> **体例照 `SPEC-unified-driver-architecture-2026-08-23.md`**：现状盘点直读代码、目标架构、非目标、\n> 排期与验收方向（**非最终 AC，供立案时参考——AC 正本由 outer 写，本文件是输入**）。\n\n## 0. 一句话\n\n**抽象大多已经存在且已被广泛 import；缺的是【契约面】被消费、【第三态】被 harness 看见、\n【输入形状】从\"路径\"改为\"内容\"。这是三个可验证的窄命题，不是\"重建架构\"。**\n\n---\n\n## 1. 现状盘点（直读代码 + 并发 subagent 核实，非印象）\n\n### 1.1 已经做对的两个子系统 —— 这是样板，不是待修对象\n\n| 子系统 | 证据 | 结论 |\n|---|---|---|\n| **driver 两级分层** | `driver-runtime.ts`(1106L) + `driver-shared`(472L) + `driver-filters`(159L) + `driver-result`(71L)；消费者 worker-driver / promotion-driver / ready-pool-check | Layer 0 共享 7 项能力（supervisor/loop/trigger/stopCondition/heartbeat/controlPlane/notify），Layer 1a task-processing。**`gap-ac151-two-level-driver-layer-landing` 已 done（08aa69a0, 2026-08-25 10:25）** |\n| **gate 工厂** | `gate/registry.ts` 定义 `GateFn`，`config/loader.ts` 按 `gates.yml` 的 `type` 多态派发；8 个工厂中 6 个复用 `acceptance-runner.ts` 的 `runAcceptance()` | **真工厂模式**。昂贵逻辑（spawnSync/超时/env 优先级/成本账本）集中在一处。唯一重复是 `coverage-floor.ts` 的 `spawnSyncCapture`，作者注释已自认 |\n\n⊢ **这两处证明本仓库有能力做对**。本 SPEC 的全部主张 = **把 driver 这次的做法套到其余角色**。\n\n### 1.2 契约面被写下来过，零人采纳 —— 最尖锐的一条\n\n```\ngate-script-base.ts:102-110   export function emitPass/emitFail\n  全仓生产调用者：0（唯一引用在 experiments/.../gate-script-base.test.mjs）\n  而 77 个 *-check.ts 中，21 个自己 console.log 打 PASS/FAIL\n\n同一文件的其它导出，采纳率天差地别：\n  isDirectEntry   39/77   ← 入口样板，被采纳\n  parseArgs        5/77\n  readFrontmatter  4/77（而全仓有 8 处自建 frontmatter 解析）\n  emitPass/emitFail 0/77  ← 契约面，零采纳\n```\n\n⊢ **基座被 100 个文件 import，但被 import 的是入口样板，不是契约。**\n⊢ **这是新契约必须先胜过的先例**：写下来不等于被采纳。任何\"定义一个 `Checker` 接口\"的提案，\n若不解决\"为什么上一个契约无人用\"，会复现同一结果。\n\n### 1.3 NOT-EVALUATED：硬规则 3b 在 harness 层结构上无法兑现\n\n```\nchecker-cost-lib.sh  run_checker  ⇒ 把【任何非零】一律当 fail-closed RED（|| _rc=$? → STATIC_CHECK_FAILED）\n                                    无第三态概念\n\n而 exit 2 当前同时承载三种互不相容的含义：\n  spec-declaration-point-check.ts:33,179        exit 2 = NOT-EVALUATED\n  另外 6 个 checker                              exit 2 = usage/env error\n  fan-in-materialize / per-task-suite /\n  inner-wakeup-heartbeat                        NOT-EVALUATED = exit 0 + 一个 JSON 字段\n```\n\n⊢ **spec-declaration-point 的\"无法评估\"会把套件判红；另三个的\"无法评估\"是绿色 + 一个 harness\n根本看不见的字段。** 全population：17/77 有 marker、16/77 有字段，编码互不相容。\n⊢ **无论单个 checker 多守纪律，硬规则 3b 在 harness 层都兑现不了——这是架构级缺口，不是 checker 缺陷。**\n⊢ 已立案 `gap-not-evaluated-harness-third-state`（ready）。\n\n### 1.3a 同一个病的数据层版本：「验证发生过」这个事实，没有单一权威载体（2026-08-25 补，manager+人实证）\n\n```\n一次真实的动态测试失败（worker-driver.test.mjs AC1，5831.7ms 超时），独立证据：\n  /tmp/fan-in-suite-<task>.log.prev（跨 relaunch 轮转前的旧副本，真实 ✖ 行）\n而它在下列【全部】面向消费者的正本载体里 = 0 条：\n  .quay/verification-round.jsonl      （/tests 页 serve-tests.ts 的唯一数据源）\n  .quay/per-task-suite-records.jsonl  （fan-in AC 闸的判据来源）\n```\n⊢ **`/tests` 页没有隐藏这条红——红压根没被写进它读的那个文件。** 真实发生的事件，唯一留痕的\n载体是 fan-in 机制内部用的 `/tmp` 临时日志，**且该临时日志自己还有已知的\"跨 relaunch 复用不\n轮转\"缺陷**（这次全靠没被覆盖的 `.log.prev` 才捞到证据，`.log` 当前内容已是后续轮次覆盖）。\n\n⊢ **这与 §1.3 是同一个病的两种表现，不是两个不同问题**：§1.3 是\"NOT-EVALUATED 在退出码这一层\n没有统一编码\"；本条是\"验证曾经发生过这件事，在【记录】这一层没有统一编码\"——两者的共同根子是\n**\"验证结果\"从来不是一个被设计过的一等对象**：exit code、`verification-round.jsonl`、\n`per-task-suite-records.jsonl`、`worker-outcome.jsonl`、`/tmp/fan-in-suite-*.log` 各自记录\nverification 生命周期的一个片段，彼此不同步、无人拥有\"这是完整记录吗\"这个问题的答案。\n⊢ **人的原话点破了这条的性质**：「这显然也是在缺乏整体设计的情况下的零散实现造成的分歧」——\n与 §1.2（`gate-script-base` 的 `emitPass`/`emitFail` 零调用）、§1.6（scattered utility 重复）\n同属一类：**没有人在架构层面回答过\"一次验证的结果应该长什么样、该写在哪、谁读它\"**，\n于是每个消费者（`/tests` 页、fan-in 闸、driver）各自实现了自己需要的那一小片。\n⊢ **已投递 outer**（2026-08-25 18:5xZ），建议判断是否与 `gap-verification-round-static-fail-\nno-record`（同族但范围更窄，仅管静态检查 fail）合并处理——真正的修法可能是给\"验证轮\"一个\n统一 schema 与单一 writer，而不是逐个 carrier 打补丁。\n\n### 1.4 输入形状：`path` vs `content` —— 可测试性的真正杠杆\n\n```\n~70% 的 checker 吃【文件系统路径】作为输入\n⇒ 85 个 checker 测试中 70 个要 mkdtemp 建 fixture 目录\n⇒ 只统一【返回类型】不会改变这一点\n```\n\n**已存在的正确样板**（`experiments/quay-perpetual-stream/scripts/audit-independence-check.ts`）：\n\n```ts\n// 导出对【字符串】的纯函数，不是对路径的\ncheckArtifact(fullText, orchestratorId, options)\nevaluateIndependence(...)\nisCorroborated(...)\nmain(argv)   // 只是薄 CLI 壳\n```\n其测试：**39 个断言 0.49s，零 subprocess spawn**。对照 checker 测试中位数 **2.53s**。\n\n⊢ **这才是\"可测试性\"的杠杆**：把纯判定逻辑从 I/O 里剥出来，测试就不需要 fixture 目录。\n⊢ 次优样板：`touches-orthogonality-check.ts`（`parseTouches(text)` 纯字符串）；\n`retired-clause-check.ts` 形状好（`runCheck(root) → {ok, issues}`）**但仍吃 root 路径，\n所以它的测试仍要 mkdtemp** —— 正好演示了\"只改返回类型不够\"。\n\n### 1.5 ⛔ 本 SPEC 起草过程中【被证伪】的两条假设 —— 原样保留以防复活\n\n**① \"checker 没有可 import 的契约\" —— 假。**\n实测：**91/97 个 `.ts` checker 已导出东西；54 个测试文件已 import checker**。\n真实问题是**异构**：45 个导出叫 `main`、11 个 `selftest`、5 个 `runChecks`、3 个 `runCheck`…\n⇒ 命题应为\"缺共享契约\"，**不是\"不可 import\"**。\n\n**② \"无共享抽象 → 每脚本一测试 → 慢套件 → 慢迭代\"这条因果链 —— 第 3 环断裂。**\n实测（`.quay/verification-round.jsonl`，116 轮含 perFile，参考轮 435 文件 / 705s / 并行度 6.76）：\n```\nchecker 测试合计 411.9s = per-file 总时间的 7.0%（中位 2.53s，非 checker 中位 2.12s——几乎一样快）\n现实可折叠量：162 个 spawn 点 × 0.63s = 102s，封顶 73s ⇒ 折成墙钟 73/6.76 ≈ 11s\n             = 705s 轮次的 ~1.5%，【低于轮次间噪声】（套件墙钟 p10 246s / 中位 552s / p90 1162s）\n即使把全部 checker 测试删光：61s = 墙钟 8.6%\n⇒ packages/ 测试才是大头：5470s = per-file 总时间的 93%\n```\n⊢ **所以本 SPEC 不以\"缩短默认轮套件时间\"作为可测试性的论据。** 该论据已被自己的测量否定。\n⊢ **真正成立的成本论据有两条**：\n- **`checker-mutation-check.test.mjs` 单文件 227.6s**，迭代 57 个 mutation case、每 checker ~4.0s\n  spawn 一次证明它能变红 —— **这是唯一随 checker 数量线性增长的成本**（governance 组，不在默认轮）；\n- **32,881 行 checker 测试代码**的撰写与维护成本（85 个文件，86% 的 checker 有专属测试）。\n\n⊢ **记此二条的方法论意义**：①来自我给 subagent 的先验被当作待确认结论放大；②来自我自己没测就写进\n链条。**两条都在动笔前被实测拦下** —— 这正是\"先测再写\"的价值，也是本 SPEC 要求每条 AC 带负控制的理由。\n\n### 1.6 其余角色的重复（已核实，规模适中）\n\n| 簇 | 判定 | 备注 |\n|---|---|---|\n| `findRepoRoot`(14)+`findWorkspaceRoot`(4) | TRUE_DUP | **同一函数体在两个名字下逐字节重复**；5 份 body hash 相同；另有 4 处已跨文件 import 对方版本 |\n| `normalizeRel`(4) | TRUE_DUP | 两份注释**各自声称自己是规范版** |\n| `canonicalTestFiles` 组(3) | TRUE_DUP | ~221 行中 ~146 行纯重复 + **glob-vs-realpath 潜伏分歧**（已立案） |\n| `scanSurface`(2/3) | TRUE_DUP | 逐字节相同（连 `SCAN_ROOTS` 共 25 行连续复制）；第 3 个同名不同义 |\n| `write*State`(6) | 真实重复 + **正确性缺口** | 原子写 2 / 非原子 4，仅 1 处有理由说明（已立案） |\n| `readFileSafe`(4) | TRUE_DUP | 另有 50 处 inline try/catch 散在 37 文件 |\n| `parseFrontmatter` | 4 份独立实现 | 基座已提供 `readFrontmatter` 但只有 4/77 用 |\n| `runOnce`/`RunOnceResult` | PARTIAL_DUP | 2 真实近重复（poll/diff/emit/memo 骨架）+ 1 职责不同 |\n| **`SCAN_ROOTS`** | **⛔ 不是重复** | 10 个数组只有 1 对真重复，其余是各 checker 的**配置**，不该被吸收 |\n| **`scanText`(4)** | **⛔ COINCIDENTAL** | 四份匹配逻辑真不同，只共享\"逐行扫描\"这个不可避免的骨架 |\n\n⊢ 输入侧重复量实测 **~557 行（区间 510–570）**，占 checker 总量 32,825 LOC 的 **~1.7%**。\n⊢ **体积不是主要代价**，两个\"同一概念多种不相容策略\"才是（root 三策略、`scanSurface` 一名两义）。\n\n### 1.7 规模与交付事实\n\n```\npackages/quay/src   （产品核心）      64 文件   15,347 行\nplugin/scripts      （方法学层）     286 文件  112,202 行   ← 7.3x\n  其中 checker                       109 个（77 .ts + 32 .sh）\n所有 *.test.mjs                      411 文件  150,151 行   ← 1.34x 实现\nplugin/scripts 结构                  288 文件平铺，子目录 1 个\n```\n\n**⚠️ 关键事实**：`packages/quay/package.json` 的 `files` 数组含 `plugin`\n⇒ **`plugin/` 随 npm 交付给用户**。\n⊢ **方法学层不是实验脚手架，是已发布产品的\n… [truncated: first 7000 of 18075 chars]",
+        "bytes": 11678,
+        "text_sha256": "e3227d30b9a133333fc2706acde919a474117b44c605ab9f99ee29fa46fb2f32"
+      },
+      {
+        "id": "goal:GOAL-032",
+        "title": "Prior goal GOAL-032 (verdict-parser ownership)",
+        "kind": "git_cat",
+        "provenance": {
+          "kind": "git_file",
+          "commit": "1025ab9512de3e7b260214d2360a4b035ca80957",
+          "path": "goals/GOAL-032-verdict-parser-ownership-收敛试点-parsefidelityverdict-parsesema.md",
+          "ranges": null,
+          "command": "git show 1025ab9512de:goals/GOAL-032-verdict-parser-ownership-收敛试点-parsefidelityverdict-parsesema.md",
+          "truncated": false,
+          "total_chars": 5102
+        },
+        "text": "---\nid: GOAL-032\ntitle: verdict parser ownership\n  收敛试点——parseFidelityVerdict/parseSemanticSufficiencyVerdict 收口进\n  kernel（equivalent 调查结论，非 intentionally-divergent）\nstatus: achieved\nkind: goal\norigin: 人 2026-10-09 裁定：对 criterion-fidelity.ts::parseFidelityVerdict 与\n  goal-driver.ts::parseSemanticSufficiencyVerdict 做正式等价性调查，结论 equivalent 后创建并激活\n  branch:true Goal，严格复用 GOAL-030/031 方法，范围只做这一对 parser 的 ownership 收敛，不碰其它\n  verdict 类型/CLI 环/routine quota。调查过程与结论见 body「背景」。\nactivatedAt: 2026-10-09T01:55:04.388Z\nstatusLog:\n  - at: 2026-10-09T03:17:51.231Z\n    from: active\n    to: achieved\n    actor: goal-driver\n    reason: \"I2: all ACs achieved + sufficiency covered\"\nbranch: true\n---\n## 背景\n\n**这是继 GOAL-030/031 之后第三个真实 goal branch 试点**，范围比前两个更小：只收敛**一对**被 ArchGuard `detect_duplicates` 命中的重复实现，验证\"ownership-first\"方法论对\"文本→verdict 解析\"这类跨层重复的适用性，不追求架构收益，不扩展到任何其它 verdict 类型。\n\n**调查结论（本 goal 创建前已完成，非事后补充）**：\n\n`packages/quay/src/criterion-fidelity.ts::parseFidelityVerdict`（`:71-87`）与 `plugin/scripts/goal-driver.ts::parseSemanticSufficiencyVerdict`（`:1142-1161`）是**结构相同且领域语义等价**（equivalent，非 intentionally-divergent）：\n\n- 两者算法逐字相同：`exitCode!==0 ⇒ not-evaluated` → 裸 token 匹配 → 从末行向上扫描 `{\"verdict\":\"...\"}` JSON → 其余一律 `not-evaluated`。唯一差异是合法值的两个字符串字面量（`faithful`/`vacuous` vs `covered`/`insufficient`）。\n- 非结构相似性推断：`criterion-fidelity.ts:27-28` 源码注释自述\"reuses goal-driver.ts's parseSemanticSufficiencyVerdict fail-closed手法 **verbatim**\"；`criterion-fidelity-historical-case.test.mjs:56` 测试文件自述\"解析器 fail-closed（**复刻** parseSemanticSufficiencyVerdict 手法）\"——两处独立文档均确认是蓄意复制，不是两个作者各自想出相同形状。\n- 调用方编排（orchestration）真实不同且应该保持不同（ownership-first §1\"编排可以继续留在原处\"）：`criterionFidelityVerdict` 是同步、无缓存、经 `invokeJudge` seam 注入；`sampleSemanticSufficiency` 是异步、`runAsync`、2 次采样一致才入缓存、成因拆分（judge-unavailable/judge-unparseable/samples-disagree）。本 goal **不碰**这层编排差异。\n- 解析算法本身是**领域无关**的：\"把判定器原始 stdout 解析成三态 verdict，读不懂就 fail-closed\"不关心验证的是\"fidelity\"还是\"sufficiency\"——合法词表是**数据**，不是**逻辑**。\n\n**目标不是删除重复本身，是把\"文本→verdict 解析\"这条职责迁移到正确所有权层**：新建 `packages/quay/src/kernel/verdict-parse.ts`（kernel——两层都能触达而不产生反向边，GOAL-030 已验证的放置原则），导出一个通用纯函数 `parseBinaryVerdict(stdout, exitCode, positive, negative)`；`parseFidelityVerdict`/`parseSemanticSufficiencyVerdict` 改为**薄包装**（调用 kernel 函数，保留各自原有函数名/签名/返回类型，零调用方改动）。\n\n## 范围与非目标\n\n范围：\n- 仅 `packages/quay/src/criterion-fidelity.ts::parseFidelityVerdict` 与 `plugin/scripts/goal-driver.ts::parseSemanticSufficiencyVerdict` 这一对。\n- 新建 `packages/quay/src/kernel/verdict-parse.ts`（纯函数，零依赖，天然满足 kernel\"只 import kernel + 裸说明符\"的约束）。\n\n非目标（⛔ 有意排除）：\n- ⛔ 不碰其它任何 verdict 类型（`GateVerdictKind`/`DimensionState`/`ScopedGateVerdict` 等 Quay 架构评审已发现的 27 文件分散字面量——那是独立、更大规模的缺口，不在本 goal 范围）。\n- ⛔ 不碰 `packages/quay/src` 的目录环（core-root<->core-cli）。\n- ⛔ 不碰正在自动运行的 routine quota 两个任务（`gap-routine-quota-canonical-config-and-policy-gate`已 done、`gap-routine-quota-consumer-convergence`已 ready，均不在本 goal 的 Touches 范围内，无文件重叠）。\n- ⛔ 不改 `criterionFidelityVerdict`/`sampleSemanticSufficiency` 两个调用方的编排逻辑（同步/异步、缓存、2 次采样一致性）——只换它们内部调的解析函数的**实现**，不换**签名/返回类型/调用方式**。\n- ⛔ 不重启任何生产 driver 进程（goal-driver.ts 是活跃 kind 的实现文件，但本次改动是纯函数重构、有完整回归测试，验证走分支 worktree，不要求重启生产进程才能验证正确性；是否需要重启让新代码在生产\"生效\"，留给人裁定，本 goal 不自行执行）。\n\n## 判据形态\n\n三态退出码（同 GOAL-030/031 惯例）：0 达成；1 未达成，同行带 `CAUSE=`；3 未评估（前提未落地、尚未并入）。\n\n## 验证步骤\n\n1. 激活前：ArchGuard 对 `develop` 当前 tip 的 before 基线——`detect_duplicates` 命中该组、`archguard_get_dependencies`/`get_package_metrics` 读 `criterion-fidelity.ts`/`goal-driver.ts` 当前各自的 canonical-definition 站点数（各 1，互不调用）。\n2. 激活后核验：`goal/GOAL-032` 从 develop tip 懒创建；任务 worktree 从该分支开出；与仍在跑的 `gap-routine-quota-*` 两个任务互不干扰（不同分支/worktree，Touches 零重叠）。\n3. 分支 tip 上：类型检查、既有回归测试（`criterion-fidelity-*.test.mjs` 三个文件 + `goal-sufficiency-semantic-covered.test.mjs` + consumer 测试）、`import-graph-check.ts`（kernel 边界不回退）。\n4. 分支自举身份证明（规模对应本 goal 的实际风险——本次改动是纯函数重构，无新 driver/事件载体，不需要 GOAL-030 那种驱动进程沙盒级证明；取而代之核验**模块解析身份**：分支 worktree 内运行回归测试时，`import.meta.resolve`/`require.resolve` 解析到的 `verdict-parse.ts`/`criterion-fidelity.ts`/`goal-driver.ts` 的 realpath 落在该 worktree 内，不是主检出路径）。\n5. Before/after 对比：同一 ArchGuard 构建对 fork point 与分支 tip（或合并提交两个父提交）各做一次单根分析，比较 §10 式指标（见下方 AC-348）。\n6. 人工触发 merge：`quay goal merge GOAL-032 --reason ...`，worker-driver 机械 fan-in（`--no-ff`，全量 suite）。\n7. 规定 merge shape：`develop` 的 first-parent 链上恰好一个合并提交，第二父提交是 `goal/GOAL-032` tip，分支内部提交不泄漏到 first-parent（同 AC-342 判据，本 goal 对应 AC-349）。\n8. Post-merge 验证：核对两个旧函数在 develop 上确已是薄包装（不是叙述，是 grep 到的事实），两处调用方测试在主检出上仍绿。\n\n## 停止扩大范围的信号\n\n与 GOAL-030/031 同构：代码身份假阳性；生产污染；隔离失效；与仍在跑的 `gap-routine-quota-*` 任务产生任何依赖或干扰；需要往 `layers.yml` 加边（预期不需要——kernel 已是声明允许的落点）；目录环增加；基线漂移；人工干预持续增加。任一出现 ⇒ 不扩大范围，先修机制缺口，无法恢复则放弃分支并丢弃。\n\n## 退出条件\n\n`parseFidelityVerdict`/`parseSemanticSufficiencyVerdict` 的解析算法收敛为 `packages/quay/src/kernel/verdict-parse.ts` 的唯一实现，两处旧函数变为薄包装（调用方零改动）；ArchGuard before/after 证明 duplicate group 消失、canonical definition count 2→1、`plugin/scripts→packages/quay/src/kernel` 边新增（方向正确，与 GOAL-030 的 kernel 引入同构）；负对照证明两条调用链确实都真正改口（不是搬壳）；全部既有测试 + 新增测试绿；goal branch 以恰好一个合并提交进入 develop；并入后生产读数（两个薄包装函数的真实存在性）核验通过。对应 AC-347（结构与范围护栏 + 实现）、AC-348（ArchGuard before/after + 消费方收敛证据）、AC-349（并入形态 + 并入后核验）。",
+        "bytes": 8184,
+        "text_sha256": "12986ac8d7b5e93f5081da77345e9327daae3e83e024f2aa5cf4c9ac2b1185a6"
+      },
+      {
+        "id": "goal:GOAL-031",
+        "title": "Prior goal GOAL-031 (status-vocabulary canonicalization pilot)",
+        "kind": "git_cat",
+        "provenance": {
+          "kind": "git_file",
+          "commit": "1025ab9512de3e7b260214d2360a4b035ca80957",
+          "path": "goals/GOAL-031-needs-human-状态词汇-canonicalization-试点-goal-driver-ts-5-处裸字面量收.md",
+          "ranges": null,
+          "command": "git show 1025ab9512de:goals/GOAL-031-needs-human-状态词汇-canonicalization-试点-goal-driver-ts-5-处裸字面量收.md",
+          "truncated": true,
+          "total_chars": 6124
+        },
+        "text": "---\nid: GOAL-031\ntitle: needs-human 状态词汇 canonicalization 试点——goal-driver.ts 5 处裸字面量收敛到已有\n  task-status.ts 正本（非 kernel 第二套）\nstatus: achieved\nkind: goal\norigin: 人 2026-10-08 指令：按已验证的小而真实 goal branch 方法推进下一轮重构，仅做 needs-human\n  裸字面量收敛。执行前核实发现原技术前提有误（canonical source 应为已有的 abi.ts +\n  plugin/scripts/task-status.ts，而非 kernel/task-transition.ts——该文件只存在于未合并的\n  goal/GOAL-030 分支；原 dispersion≤2 目标因此不可达成，正确底线是 4），已据实修正，范围保持极小不变。详见 body。\nactivatedAt: 2026-10-08T14:08:10.301Z\nstatusLog:\n  - at: 2026-10-08T17:09:24.141Z\n    from: active\n    to: achieved\n    actor: goal-driver\n    reason: \"I2: all ACs achieved + sufficiency covered\"\nbranch: true\n---\n## 背景\n\n**这是继 GOAL-030 之后的第二个真实 goal branch 试点**，目的与 GOAL-030 相同——首先是继续验证\"在分支上运行 Quay、并验证 Quay\"这条自举机制本身，不是追求架构收益；范围比 GOAL-030 更小、更安全，作为机制的第二次独立验证（不同形状的改动：纯文本字面量替换，而不是新增模块+改写两处调用）。\n\n**⚠️ 执行前核实发现的关键前提修正（必须显式记录，否则下面的 AC 会引用不存在的东西）**：\n\n最初设想的 canonical source 是 `packages/quay/src/kernel/task-transition.ts::TASK_STATUSES/TaskStatus`——但该文件**只存在于尚未合并的 `goal/GOAL-030` 分支**（此刻 35 commits ahead of develop，AC-341/342 仍 `active`，未并入），在 `develop` 上不存在。本 goal 从 develop tip 开分支，不能依赖兄弟分支未并入的产物，否则会制造跨 goal-branch 的隐性耦合。\n\n真正已经存在、且早已 `status: done` 的正本是 **`packages/quay/src/abi.ts`**（`TaskStatus`/`TASK_STATUSES`/`TASK_STATUS`/`isTaskStatus`，packages/* 树）与 **`plugin/scripts/task-status.ts`**（同一词表的 plugin 树自包含副本——plugin 独立打包，不能静态 import packages 源码，原因与 `sync-vendor.sh` 相同）。两者由已完成任务 `gap-abi-status-lifecycle-vocab-scattered-no-named-type` 建立，16 个消费者已迁移。\n\n用 ArchGuard `get_literal_dispersion(value:\"needs-human\")` 现读（2026-10-08，develop（取值随快照时刻变化；当时读到 a8abf1a6dd0fd70b3e3f6ef8529447797e36b053，仅示例））：dispersion=5，文件 = `task-status.ts`、`github-client.ts`、`observation.ts`、`goal-driver.ts`、`workflow-baseline-metrics.ts`。逐文件逐行核实（位置判定，非关键词）：\n\n- `plugin/scripts/task-status.ts:9`：正本声明本身，非缺陷。\n- `packages/quay-github/src/github-client.ts:646`：已被 `gap-abi-status-lifecycle-vocab-scattered-no-named-type` 的 AC2 显式豁免（独立 provider 包不能静态 import `abi.ts`，QN-072/073 needle 测试钉死该字面量形状）——不可动，不计入\"待收敛\"。\n- `packages/quay/src/observation.ts:1443,1451`：比较的是促晋升结果账本的 `action` 字段，不是 `task.status`——异词表假阳性。\n- `plugin/scripts/workflow-baseline-metrics.ts:643,776`：比较的是 workflow 事件的 `outcome` 字段，同样不是 `task.status`——异词表假阳性。\n- `plugin/scripts/goal-driver.ts:2088,2098,2319,2383,2443`（grep 位置核实，比 ArchGuard 自己的检测多抓到 2098 一行）：全部是货真价实的 `task.status === \"needs-human\"` 裸字面量比较，该文件目前零 import `task-status.ts`——**这是唯一真实、未迁移的残量**。\n- 额外排除：`goal-driver.ts:823` 是 `r.status === \"active\" || r.status === \"achieved\" || r.status === \"needs-human\"`——GOAL-AC 的 `status` 字段（不同词表），不是 task.status，⛔ 不在本 goal 范围内；`workflow-replay.ts:138` 同理是 workflow outcome，⛔ 不碰。\n\n**因此\"dispersion 从 5 降到 ≤2\"这个原始目标数值不可达成**：正确的、完全修复后的底线是 **4**（正本声明 1 + 豁免 1 + 假阳性 2），不是 2——\"2\"没有把\"正本自身必然带字面量\"和\"两个假阳性文件永远不会被这次改动影响\"算进去。本 goal 把目标数值改为 4，并要求逐一枚举这 4 个为什么不是缺陷（见 AC-344）。\n\n`plugin/scripts/goal-driver.ts:823` 用 `grep -c 'status === \"needs-human\"' plugin/scripts/goal-driver.ts` 现读 = 6（5 条真实目标 + 1 条被排除的 goal-AC 行），修复后必须精确降到 **1**（只剩被排除的那一行，逐字节不变）——这是本 goal 核心的机械判据。\n\n## 范围与非目标\n\n范围：\n\n- 仅 `plugin/scripts/goal-driver.ts` 的 5 处（`grep -n 'status === \"needs-human\"' plugin/scripts/goal-driver.ts | grep -v 823` 当前命中的 5 行），把裸字面量比较改为消费 `plugin/scripts/task-status.ts` 的 `isTaskStatus`/`TASK_STATUS.NEEDS_HUMAN`（新增 import）。\n- 2098 行 `status === \"todo\" || status === \"ready\" || status === \"needs-human\"` 只替换 `needs-human` 那一项；`todo`/`ready` 两项保持裸字面量——用户显式约束（不要顺手扫 todo/ready/done）的直接后果，即使同一行风格不一致也要接受。\n\n非目标（⛔ 有意排除）：\n\n- ⛔ 不碰 `todo`/`ready`/`done` 任何裸字面量（即使同文件同行）。\n- ⛔ 不新造 kernel 第二套声明；不 import/不依赖任何只存在于 `goal/GOAL-030` 分支的文件（`kernel/task-transition.ts`、`scripts/branch-selfhost-probe.mjs`）；不等待 GOAL-030 合并。\n- ⛔ 不碰 `packages/quay/src` 的目录环（core-root<->core-cli）。\n- ⛔ 不引入共享 `Verdict` 原语。\n- ⛔ 不碰 `goal-driver.ts::parseSemanticSufficiencyVerdict` 与 `criterion-fidelity.ts::parseFidelityVerdict` 的重复问题。\n- ⛔ 不碰 `goal-driver.ts:823`（GOAL-AC status，不同词表）、`observation.ts`/`workflow-baseline-metrics.ts`/`workflow-replay.ts`（异词表假阳性，不该变）、`github-client.ts`（已豁免，needle 测试钉住）。\n\n## 判据形态\n\n三态退出码（同 GOAL-030 惯例）：0 达成；1 未达成，同行带 `CAUSE=`；3 未评估（前提未落地，如 worktree/evidence 未产生、尚未并入）。\n\n## 验证步骤\n\n1. 激活前：对 `develop` 当前 tip 读 `get_literal_dispersion(value:\"needs-human\")` 作为 before 基线（dispersion=5）+ `grep -c 'status === \"needs-human\"' plugin/scripts/goal-driver.ts` = 6。\n2. 激活后核验：`goal/GOAL-031` 从 develop tip 懒创建（具体 fork SHA 由懒创建机制在激活那一刻自动钉住，不在此预先写死——develop 持续被后台 driver 推进，写死一个快照点只会在几分钟内变假）；任务 worktree 从该分支开出；与 `goal/GOAL-030` 分支互不干扰（不同分支名、不同 worktree 路径、不 import 对方产物——A\n… [truncated: first 4500 of 6124 chars]",
+        "bytes": 7012,
+        "text_sha256": "421981c43383ec34cf68aab9c8af2a97ff79ea91ebb641e8e47c2cdf9bf0a1d9"
+      },
+      {
+        "id": "arch:cycle-matrix",
+        "title": "Relation counts between the six cycle members",
+        "kind": "arch_matrix",
+        "provenance": {
+          "kind": "archguard_derived",
+          "tool": "ArchGuard 0.1.38 analyze (TypeScript scope)",
+          "analysis_commit": "1025ab9512de3e7b260214d2360a4b035ca80957",
+          "stage_commit": "1025ab9512de3e7b260214d2360a4b035ca80957",
+          "scanned_code_identical_to_stage_commit": true,
+          "differing_files_in_scanned_dirs": [],
+          "derivation": "package = directory of the entity's source file; edge = one 'dependency' relation in arch.json",
+          "query": "member-to-member relation counts",
+          "members": [
+            "packages/quay/src",
+            "packages/quay/src/cli",
+            "packages/quay/src/fan-in",
+            "packages/quay/src/gate",
+            "packages/quay/src/gate/config",
+            "packages/quay/src/gate/factories"
+          ]
+        },
+        "text": "relation counts between the members of the cycle (row -> column), cross-package only:\n  root           -> cli:2  fan-in:0  gate:24  gate/config:2  gate/factories:0\n  cli            -> root:62  fan-in:3  gate:17  gate/config:6  gate/factories:0\n  fan-in         -> root:8  cli:0  gate:0  gate/config:0  gate/factories:0\n  gate           -> root:9  cli:0  fan-in:0  gate/config:8  gate/factories:2\n  gate/config    -> root:1  cli:0  fan-in:0  gate:2  gate/factories:1\n  gate/factories -> root:8  cli:0  fan-in:0  gate:15  gate/config:1",
+        "bytes": 533,
+        "text_sha256": "253c027b2cef6d80250108c9f9dc291e2790956683fa73ea1a3e792bca5d9d54"
+      },
+      {
+        "id": "arch:root-to-cli",
+        "title": "Dependency edges packages/quay/src (root) -> packages/quay/src/cli, with file pairs",
+        "kind": "arch_pkg_edges",
+        "provenance": {
+          "kind": "archguard_derived",
+          "tool": "ArchGuard 0.1.38 analyze (TypeScript scope)",
+          "analysis_commit": "1025ab9512de3e7b260214d2360a4b035ca80957",
+          "stage_commit": "1025ab9512de3e7b260214d2360a4b035ca80957",
+          "scanned_code_identical_to_stage_commit": true,
+          "differing_files_in_scanned_dirs": [],
+          "derivation": "package = directory of the entity's source file; edge = one 'dependency' relation in arch.json",
+          "query": "edges packages/quay/src -> packages/quay/src/cli",
+          "relations": 2
+        },
+        "text": "edges  packages/quay/src  ->  packages/quay/src/cli  :  2 dependency relations\n     2  -> packages/quay/src/cli\nfile pairs (relations per pair):\n    1  packages/quay/src/serve-sessions.ts  ->  packages/quay/src/cli/driver.ts\n    1  packages/quay/src/serve.ts  ->  packages/quay/src/cli/driver-vocab.ts",
+        "bytes": 301,
+        "text_sha256": "973754056fb224806c8a9ce576b6c26598fb9f4a378272edd74ffadde601c723"
+      },
+      {
+        "id": "arch:cli-to-root",
+        "title": "Dependency edges packages/quay/src/cli -> packages/quay/src (root), with file pairs",
+        "kind": "arch_pkg_edges",
+        "provenance": {
+          "kind": "archguard_derived",
+          "tool": "ArchGuard 0.1.38 analyze (TypeScript scope)",
+          "analysis_commit": "1025ab9512de3e7b260214d2360a4b035ca80957",
+          "stage_commit": "1025ab9512de3e7b260214d2360a4b035ca80957",
+          "scanned_code_identical_to_stage_commit": true,
+          "differing_files_in_scanned_dirs": [],
+          "derivation": "package = directory of the entity's source file; edge = one 'dependency' relation in arch.json",
+          "query": "edges packages/quay/src/cli -> packages/quay/src",
+          "relations": 62
+        },
+        "text": "edges  packages/quay/src/cli  ->  packages/quay/src  :  62 dependency relations\n    62  -> packages/quay/src\nfile pairs (relations per pair):\n   12  packages/quay/src/cli/server.ts  ->  packages/quay/src/server-state.ts\n    6  packages/quay/src/cli/init.ts  ->  packages/quay/src/init.ts\n    5  packages/quay/src/cli/driver.ts  ->  packages/quay/src/observation.ts\n    5  packages/quay/src/cli/init.ts  ->  packages/quay/src/branch-model.ts\n    5  packages/quay/src/cli/shared.ts  ->  packages/quay/src/config.ts\n    3  packages/quay/src/cli/server.ts  ->  packages/quay/src/serve.ts\n    3  packages/quay/src/cli/server.ts  ->  packages/quay/src/systemd-scope.ts\n    2  packages/quay/src/cli/action.ts  ->  packages/quay/src/action.ts\n    2  packages/quay/src/cli/server.ts  ->  packages/quay/src/serve-log.ts\n    2  packages/quay/src/cli/shared.ts  ->  packages/quay/src/provider-client.ts\n    2  packages/quay/src/cli/shared.ts  ->  packages/quay/src/provider-env.ts\n    1  packages/quay/src/cli/config.ts  ->  packages/quay/src/config.ts\n    1  packages/quay/src/cli/driver.ts  ->  packages/quay/src/config.ts\n    1  packages/quay/src/cli/driver.ts  ->  packages/quay/src/plugin-root.ts\n    1  packages/quay/src/cli/gate.ts  ->  packages/quay/src/config.ts\n    1  packages/quay/src/cli/goal.ts  ->  packages/quay/src/abi.ts\n    1  packages/quay/src/cli/goal.ts  ->  packages/quay/src/goal-store.ts\n    1  packages/quay/src/cli/help.ts  ->  packages/quay/src/serve-binding.ts\n    1  packages/quay/src/cli/manager.ts  ->  packages/quay/src/plugin-root.ts\n    1  packages/quay/src/cli/migrate.ts  ->  packages/quay/src/config.ts\n    1  packages/quay/src/cli/migrate.ts  ->  packages/quay/src/migrate.ts\n    1  packages/quay/src/cli/provider.ts  ->  packages/quay/src/config-validate.ts\n    1  packages/quay/src/cli/provider.ts  ->  packages/quay/src/config.ts\n    1  packages/quay/src/cli/provider.ts  ->  packages/quay/src/init.ts\n    1  packages/quay/src/cli/server.ts  ->  packages/quay/src/config.ts\n  … 1 more pairs omitted",
+        "bytes": 2030,
+        "text_sha256": "7e6389f0b97de9a1e88fac253c748b48af46f4dce4e5a5f36c067038e569aac6"
+      },
+      {
+        "id": "code:root-imports-cli",
+        "title": "Import lines in root-level source files that reach into ./cli/",
+        "kind": "git_grep",
+        "provenance": {
+          "kind": "git_grep",
+          "commit": "1025ab9512de3e7b260214d2360a4b035ca80957",
+          "command": "git grep -nE 'from [\"']\\./cli/' 1025ab9512de -- :(glob)packages/quay/src/*.ts",
+          "hit_lines": 2,
+          "truncated": false
+        },
+        "text": "packages/quay/src/serve-sessions.ts:20:import { runDriver } from \"./cli/driver.ts\";\npackages/quay/src/serve.ts:50:import { ALL_SERVICE_NAMES, HOSTED_SERVICE_NAMES } from \"./cli/driver-vocab.ts\";",
+        "bytes": 194,
+        "text_sha256": "941d3fd7d9085964ca0a689d4e49b605d3ea1b6044d6912b676dc84c5457af88"
+      },
+      {
+        "id": "code:serve-sessions-use",
+        "title": "serve-sessions.ts: the import and the runDriver call site",
+        "kind": "git_file",
+        "provenance": {
+          "kind": "git_file",
+          "commit": "1025ab9512de3e7b260214d2360a4b035ca80957",
+          "path": "packages/quay/src/serve-sessions.ts",
+          "ranges": [
+            [
+              17,
+              22
+            ],
+            [
+              690,
+              712
+            ]
+          ],
+          "command": "git show 1025ab9512de:packages/quay/src/serve-sessions.ts",
+          "truncated": false,
+          "total_chars": 1913
+        },
+        "text": "   17|   // label.\n   18|   htmlLangTag, pageNameFor, DEFAULT_LANG, type Lang,\n   19| } from \"./serve-render.ts\";\n   20| import { runDriver } from \"./cli/driver.ts\";\n   21| import { renderSendForm } from \"./serve-send.ts\";\n   22| import { resolvePluginScript } from \"./plugin-root.ts\";\n  ...\n  690| \n  691| /**\n  692|  * POST /sessions/driver — headless driver start/stop/restart, REUSING `quay driver` (runDriver).\n  693|  * Body: {verb: start|stop|restart, kind: promotion|worker}. Any other verb/kind (interactive\n  694|  * manager/outer/inner, status, drain) ⇒ 400 (AC3). The valid path delegates to runDriver and echoes\n  695|  * its structured result (ok/reason/stdout/stderr/exitCode) — never a reimplemented lifecycle.\n  696|  */\n  697| export async function handleDriverLifecycle(req: IncomingMessage, res: ServerResponse, cfg: ServePageCfg): Promise<void> {\n  698|   const raw = await readBody(req);\n  699|   const body = parsePostBody(raw, req.headers[\"content-type\"] ?? \"\");\n  700|   const spec = driverActionSpec(body.verb, body.kind);\n  701|   if (spec == null) {\n  702|     writeJson(res, 400, { ok: false, reason: `invalid driver action (verb ∈ ${WEB_DRIVER_VERBS.join(\"|\")}, kind ∈ ${WEB_DRIVER_KINDS.join(\"|\")})`, verb: body.verb ?? null, kind: body.kind ?? null });\n  703|     return;\n  704|   }\n  705|   // Forward --kind into the supervisor argv (runDriver's `rest` carries the user flags verbatim; the\n  706|   // CLI gets --kind from `rest`, the web layer must pass it explicitly). ⛔ omitting it makes the\n  707|   // supervisor default to promotion — a web \"worker\" action would silently hit the promotion driver.\n  708|   const r = runDriver(spec.verb, spec.kind, [\"--kind\", spec.kind], cfg.workspaceRoot);\n  709|   writeJson(res, 200, { ok: r.ok, verb: spec.verb, kind: spec.kind, stdout: r.stdout, stderr: r.stderr, exitCode: r.exitCode, reason: r.reason });\n  710| }\n  711| \n  712| /**",
+        "bytes": 1927,
+        "text_sha256": "f7ef1ee039c28eb345cba2d6a6028c9552a5c2a6ba4889d10badfde556b87a6e"
+      },
+      {
+        "id": "code:serve-use",
+        "title": "serve.ts: the import and every use of the two imported names",
+        "kind": "git_grep",
+        "provenance": {
+          "kind": "git_grep",
+          "commit": "1025ab9512de3e7b260214d2360a4b035ca80957",
+          "command": "git grep -nE 'ALL_SERVICE_NAMES|HOSTED_SERVICE_NAMES' 1025ab9512de -- packages/quay/src/serve.ts",
+          "hit_lines": 3,
+          "truncated": false
+        },
+        "text": "packages/quay/src/serve.ts:50:import { ALL_SERVICE_NAMES, HOSTED_SERVICE_NAMES } from \"./cli/driver-vocab.ts\";\npackages/quay/src/serve.ts:151:  const unknown = names.filter((n) => !ALL_SERVICE_NAMES.includes(n));\npackages/quay/src/serve.ts:153:    return { ok: false, error: `unknown service name(s): ${unknown.join(\", \")} — known: ${ALL_SERVICE_NAMES.join(\", \")}` };",
+        "bytes": 369,
+        "text_sha256": "116a71ae7c34b9352eee305979784e8cdf491a6a4cf50ac59f2f44c13159c8fc"
+      },
+      {
+        "id": "code:cli-driver-vocab",
+        "title": "cli/driver-vocab.ts (whole file)",
+        "kind": "git_cat",
+        "provenance": {
+          "kind": "git_file",
+          "commit": "1025ab9512de3e7b260214d2360a4b035ca80957",
+          "path": "packages/quay/src/cli/driver-vocab.ts",
+          "ranges": null,
+          "command": "git show 1025ab9512de:packages/quay/src/cli/driver-vocab.ts",
+          "truncated": false,
+          "total_chars": 2853
+        },
+        "text": "// cli/driver-vocab.ts — the CLI's driver verb + kind vocabulary (gap-driver-cli-help-hides-four-of-six-kinds).\n//\n// WHY THIS MODULE EXISTS（⛔ 不是\"为了整齐\"）：`quay driver` 的 verb/kind 词表要在三处用户可见的\n// 帮助文本里出现（`quay --help` 顶层用法行、`quay driver --help` 的用法行与 `--kind` 旗标说明），\n// 修前它们各自手抄一份、取值互不一致（2/4/5/6 四种）⇒ 用户唯一看得到的 `<promotion|worker>` 让\n// outer/quality/meta/goal 四个**已实现**的 driver kind 在产品表层等于不存在（硬规则 3b 形态：\n// 能力缺失与能力未暴露同形）。现在帮助文本一律插值本模块的两个常量（见 cli/driver.ts 与\n// cli/help.ts），⛔ 不再有第二份副本；不变式由 plugin/scripts/enum-surface-parity-check.ts 的面\n// `cli-driver-kinds` / `cli-driver-help-kind` / `cli-driver-usage-verbs` 机械守着。\n//\n// ⛔ 为什么独立成叶模块（而不是留在 cli/driver.ts 里让 help.ts import 它）：help.ts 被 bin/quay.ts\n// **静态** import（每次 CLI 调用都会加载），而 cli/driver.ts 的传递闭包含 config.ts / plugin-root.ts\n// 等重依赖——实测把 KINDS 留在 driver.ts 会让 `quay --help` 从 0.25s 涨到 0.67s（每次调用都付）。\n// 本模块零 import ⇒ 加载成本可忽略。⚠️ 与\"能不能少写一个文件\"无关，是 help 路径的实测成本。\n\n/** `quay driver <verb>` 的全部 verb。\n *\n *  ⚠️ `log` / `live` 与其余六个 verb 的**类别不同**：那六个是 supervisor kernel 的**控制面**动词\n *  （start/stop/drain/resume/status/restart 都要落到常驻进程上），`log` 与 `live` 是**只读**的——\n *  它们不 spawn kernel、也不碰任何控制态。`log` 读 driver 的**记录载体**；`live` 读**当前在飞 worker\n *  集合**（`.quay/worker-*.jsonl` + host-global `/proc`，经 observation.readLive，⛔ 不是第二份扫描）。\n *  两者仍在此表里，是因为用户找它们的位置就是 `quay driver`（人 2026-09-20 的裁定把「driver 应当记录的\n *  日志」的可达面点名在 quay cli/mcp/web 上）；cli/driver.ts 在委派 kernel 之前截住它们\n *  （见那里的 `runDriverLog` / `runDriverLive`）。 */\nexport const VERBS = [\"start\", \"stop\", \"drain\", \"resume\", \"status\", \"restart\", \"log\", \"live\"];\n\n// ⛔ 白名单必须与 kernel 的 DRIVER_KINDS 一致（suite 已按人 2026-09-07 裁定退役移除）。导出供\n// goal-driver.test.mjs 断言两者集合相等（gap-goal-driver-mechanical-ring AC6），并作为帮助文本\n// 的 kind 真源。⚠️ 它是 kernel 那张表的【已机械比对过的镜像】，⛔ 不是新的事实来源\n// （enum-surface-parity-check 的 authority `driver-kind` 指向 driver-runtime.ts:DRIVER_KINDS）。\nexport const KINDS = [\"promotion\", \"worker\", \"outer\", \"quality\", \"meta\", \"goal\"];\n\n// ── GOAL-017/AC-254（SPEC §6.9 阶段 B）：服务清单也住在这里，理由与上面完全相同 ────────────────────\n//\n// 服务名要在**三处用户可见的帮助文本**里出现（`quay --help` 的用法行、`quay server --help` 的\n// 用法行与 services 行），而 `cli/serve` 那条路径的传递闭包带 config/provider/serve-handlers ——\n// 把清单留在 serve.ts 会让 `quay --help` 每次调用付那份加载成本（driver-vocab.ts 的头注释记着\n// 同一个实测：0.25s → 0.67s）。本模块零 import ⇒ 成为**单一实现 + 零加载成本**的那个落点。\n//\n// ⛔ 这里是**唯一**的服务清单：`packages/quay/src/serve.ts`（宿主）与 `packages/quay/src/cli/server.ts`\n// （四个动词）都从这里 import，⛔ 不各写一份（SPEC §6.8 单一实现；两份 = 假）。\n//\n// `DRIVER_SERVICE_KINDS` 与上面的 `KINDS` 是同一集合 —— 服务名 `driver:<kind>` 的 kind 段由它构造。\n// `peer` 是 SPEC §6.9 清单里唯一的**尚不存在**的服务（阶段 D），故刻意不在此列：把它写进来会让\n// `--only peer` 通过解析然后在没有任何实现的地方静默假成功。\nexport const HOSTED_SERVICE_NAMES = [\"web\", \"control\"];\nexport const DRIVER_SERVICE_KINDS = KINDS.slice();\nexport const ALL_SERVICE_NAMES = [\n  ...HOSTED_SERVICE_NAMES,\n  ...DRIVER_SERVICE_KINDS.map((k) => `driver:${k}`),\n];\n",
+        "bytes": 4386,
+        "text_sha256": "5c7c77ee7f04e8388afd2322019a7ec6105f3b6ba57b4dac42b5e3d1f467a854"
+      },
+      {
+        "id": "code:driver-vocab-consumers",
+        "title": "Every file that references driver-vocab",
+        "kind": "git_grep",
+        "provenance": {
+          "kind": "git_grep",
+          "commit": "1025ab9512de3e7b260214d2360a4b035ca80957",
+          "command": "git grep -nE 'driver-vocab' 1025ab9512de -- packages plugin/scripts",
+          "hit_lines": 19,
+          "truncated": false
+        },
+        "text": "packages/quay/src/cli/driver-vocab.ts:1:// cli/driver-vocab.ts — the CLI's driver verb + kind vocabulary (gap-driver-cli-help-hides-four-of-six-kinds).\npackages/quay/src/cli/driver-vocab.ts:37:// 把清单留在 serve.ts 会让 `quay --help` 每次调用付那份加载成本（driver-vocab.ts 的头注释记着\npackages/quay/src/cli/driver.ts:40:// VERBS 与 KINDS 定义在 cli/driver-vocab.ts（零依赖叶模块——help.ts 静态 import 它，⛔ 不能把这两个\npackages/quay/src/cli/driver.ts:43:import { KINDS, VERBS } from \"./driver-vocab.ts\";\npackages/quay/src/cli/help.ts:14:// spellings from cli/driver-vocab.ts's VERBS/KINDS (`${…join(\"|\")}`) — ⛔ 不再手抄。这是用户与 agent\npackages/quay/src/cli/help.ts:19:import { ALL_SERVICE_NAMES, KINDS, VERBS } from \"./driver-vocab.ts\";\npackages/quay/src/cli/server.ts:55:import { ALL_SERVICE_NAMES, DRIVER_SERVICE_KINDS, HOSTED_SERVICE_NAMES } from \"./driver-vocab.ts\";\npackages/quay/src/goal-preview.ts:18://   · `quay serve` hosts only `web` + `control` (cli/driver-vocab.ts HOSTED_SERVICE_NAMES) — no\npackages/quay/src/serve.ts:47:// The service inventory is a ZERO-IMPORT leaf module (cli/driver-vocab.ts) because the same names\npackages/quay/src/serve.ts:50:import { ALL_SERVICE_NAMES, HOSTED_SERVICE_NAMES } from \"./cli/driver-vocab.ts\";\nplugin/scripts/enum-surface-parity-check.ts:148:  // CLI 的 verb 词表已移入零依赖叶模块 cli/driver-vocab.ts（gap-driver-cli-help-hides-four-of-six-kinds）\nplugin/scripts/enum-surface-parity-check.ts:151:  { id: \"driver-verb\", file: \"packages/quay/src/cli/driver-vocab.ts\", symbol: \"VERBS\", extract: \"ts-array\" },\nplugin/scripts/enum-surface-parity-check.ts:161:  { id: \"cli-driver-kinds\", authority: \"driver-kind\", file: \"packages/quay/src/cli/driver-vocab.ts\", extract: \"ts-array\", symbol: \"KINDS\", policy: \"exact\" },\nplugin/scripts/enum-surface-parity-check.ts:165:  // cli/driver.ts 与 cli/help.ts 的 kind 帮助文本：**运行时派生**自 cli/driver-vocab.ts:KINDS\nplugin/scripts/enum-surface-parity-check.ts:168:    derivesFrom: { file: \"packages/quay/src/cli/driver-vocab.ts\", symbol: \"KINDS\", extract: \"ts-array\", spelling: \"--kind <\\\\$\\\\{[^}]*\\\\bKINDS\\\\b[^}]*\\\\}>\" } },\nplugin/scripts/enum-surface-parity-check.ts:170:    derivesFrom: { file: \"packages/quay/src/cli/driver-vocab.ts\", symbol: \"KINDS\", extract: \"ts-array\", spelling: \"--kind <\\\\$\\\\{[^}]*\\\\bKINDS\\\\b[^}]*\\\\}>\" } },\nplugin/scripts/enum-surface-parity-check.ts:176:  // 同上：verb 帮助文本运行时派生自 cli/driver-vocab.ts:VERBS。\nplugin/scripts/enum-surface-parity-check.ts:178:    derivesFrom: { file: \"packages/quay/src/cli/driver-vocab.ts\", symbol: \"VERBS\", extract: \"ts-array\", spelling: \"quay driver <\\\\$\\\\{[^}]*\\\\bVERBS\\\\b[^}]*\\\\}>\" } },\nplugin/scripts/enum-surface-parity-check.ts:180:    derivesFrom: { file: \"packages/quay/src/cli/driver-vocab.ts\", symbol: \"VERBS\", extract: \"ts-array\", spelling: \"quay driver <\\\\$\\\\{[^}]*\\\\bVERBS\\\\b[^}]*\\\\}>\" } },",
+        "bytes": 2985,
+        "text_sha256": "cea7bdafd242fadce68b7337de41006b3281e94f66fd477a4c08510c7b82de89"
+      },
+      {
+        "id": "code:runDriver-def",
+        "title": "cli/driver.ts: runDriver and its result type",
+        "kind": "git_file",
+        "provenance": {
+          "kind": "git_file",
+          "commit": "1025ab9512de3e7b260214d2360a4b035ca80957",
+          "path": "packages/quay/src/cli/driver.ts",
+          "ranges": [
+            [
+              323,
+              360
+            ],
+            [
+              433,
+              446
+            ]
+          ],
+          "command": "git show 1025ab9512de:packages/quay/src/cli/driver.ts",
+          "truncated": false,
+          "total_chars": 2894
+        },
+        "text": "  323| /** Structured result of `runDriver` — the shared core behind both the CLI and the web surface. */\n  324| export interface DriverRunResult {\n  325|   /** true = the command was delegated to the supervisor kernel (spawn succeeded). */\n  326|   ok: boolean;\n  327|   /** Human-readable failure reason (validation / root / worktree / kernel-missing), null when ok. */\n  328|   reason: string | null;\n  329|   stdout: string;\n  330|   stderr: string;\n  331|   /** Exit code the caller should report. */\n  332|   exitCode: number;\n  333| }\n  334| \n  335| /**\n  336|  * gap-webui-session-lifecycle AC1: the web surface exposes headless driver start/stop/restart by\n  337|  * REUSING `quay driver` — this pure function is that shared core. It validates verb+kind, resolves\n  338|  * the workspace root, rejects a worktree root (AC139-4), resolves the TS kernel path, and\n  339|  * spawnSync's the supervisor kernel — returning a structured result (⛔ never writes to process globals,\n  340|  * so the web handler can call it in-process without coupling to stdout/exitCode). Both the CLI\n  341|  * (handleDriver) and the web handler consume this ONE implementation (⛔ reimplementing the driver\n  342|  * lifecycle in the web layer would be fake reuse).\n  343|  */\n  344| /** The resolved spawn inputs for one `quay driver` delegation. `failure` non-null ⇒ the invocation\n  345|  *  never reached the kernel (verb/kind validation, root resolution, worktree rejection, missing\n  346|  *  kernel) and the caller returns that result verbatim. */\n  347| interface DriverInvocation {\n  348|   failure: DriverRunResult | null;\n  349|   spawnArgs: string[];\n  350|   root: string;\n  351|   kernelPath: string;\n  352| }\n  353| \n  354| function refusedInvocation(reason: string, exitCode = 1): DriverInvocation {\n  355|   return { failure: { ok: false, reason, stdout: \"\", stderr: \"\", exitCode }, spawnArgs: [], root: \"\", kernelPath: \"\" };\n  356| }\n  357| \n  358| /** The SHARED prologue of `runDriver` / `runDriverAsync`: validate the verb+kind, resolve the\n  359|  *  workspace root, reject a worktree root (AC139-4), resolve the kernel and build the argv.\n  360|  *\n  ...\n  433| export function runDriver(\n  434|   verb: string,\n  435|   kind: string | undefined,\n  436|   rest: string[],\n  437|   rootFlag: string | undefined,\n  438| ): DriverRunResult {\n  439|   const inv = resolveDriverInvocation(verb, kind, rest, rootFlag);\n  440|   if (inv.failure !== null) return inv.failure;\n  441|   const r = spawnSync(process.execPath, inv.spawnArgs, { encoding: \"utf8\" });\n  442|   const stdout = withWorkerInstrumentReadings(verb, kind, r.stdout ?? \"\", inv.root, inv.kernelPath);\n  443|   return { ok: true, reason: null, stdout, stderr: r.stderr ?? \"\", exitCode: r.status ?? 1 };\n  444| }\n  445| \n  446| /** The ASYNC twin of `runDriver`: SAME validation/root/kernel resolution and the SAME argv (both go",
+        "bytes": 2906,
+        "text_sha256": "26cd98d3925bcbb831e6cf19ddaa7f529cbc1aa7ab76bd089199f4e030d1489a"
+      },
+      {
+        "id": "findings:T1",
+        "title": "Investigation findings established by T1",
+        "kind": "authored",
+        "provenance": {
+          "kind": "authored_findings",
+          "source": "docs/analysis/two-stage-corpus-spec.json#GOAL-033.t1_findings",
+          "note": "Investigation results the decision-maker had established by T1 (recorded in the goal/AC bodies at activation). Not a git excerpt.",
+          "text_sha256": "86f921b1e69b8c1b8474d15c9caec2b758de261f0a2592cd5f29a409804ce4a1"
+        },
+        "text": "1. core-root -> cli is exactly 2 value edges, both static paths, confirmed by grep and by the package fan-in reading (fanIn = 2): one imports a driver control client into a session handler; the other imports a service-name vocabulary into the server entry — of which one imported symbol is entirely unused (a dead import).\n2. cli -> core-root is the normal direction with 34 edges and is not itself a problem.\n3. Every other SCC member (gate, gate/config, gate/factories, fan-in, primitives, kernel) contributes ZERO edges into cli.\n4. Therefore removing those 2 edges leaves cli with no inbound edge from inside the cycle, so cli MUST leave the SCC.\n5. The ownership reading: this is not CLI reaching backward into core, nor core wanting a CLI facade — two primitives genuinely shared by both layers were placed under cli/ only because their first historical consumer was CLI help text.",
+        "bytes": 891,
+        "text_sha256": "86f921b1e69b8c1b8474d15c9caec2b758de261f0a2592cd5f29a409804ce4a1"
+      }
+    ]
+  },
+  "citable_evidence_refs": [
+    "arch:scc",
+    "arch:package-metrics",
+    "code:cli-dir",
+    "doc:methodology",
+    "doc:spec-layer-architecture",
+    "goal:GOAL-032",
+    "goal:GOAL-031",
+    "arch:cycle-matrix",
+    "arch:root-to-cli",
+    "arch:cli-to-root",
+    "code:root-imports-cli",
+    "code:serve-sessions-use",
+    "code:serve-use",
+    "code:cli-driver-vocab",
+    "code:driver-vocab-consumers",
+    "code:runDriver-def",
+    "findings:T1"
+  ],
+  "task": {
+    "instructions": "You are a NARROW ownership/architecture proposer. This is a DECOMPOSITION stage: the concern below is already confirmed, and the investigation findings are established facts as of T1. Propose the minimal-sufficient slice. Several decompositions may be defensible — you are scored on whether yours is coherent, minimum-sufficient and harnessable, NOT on matching one historical artifact. Cite only the listed evidence refs; do not invent readings. The EVIDENCE DOSSIER is raw tool output and source excerpts: it contains material unrelated to the concern (other duplicate groups, unrelated call sites, etc.) — judging relevance is part of the task. Section ids ARE the citable evidence refs.",
+    "questions": [
+      "a) What candidate slices follow from this concern? (<=3, ordered)",
+      "b) Which one should be done first, and why is it minimum-sufficient?",
+      "c) investigate, or propose-goal? Justify from the T1 findings.",
+      "d) Scope and explicit non-goals.",
+      "e) What mechanical before/after delta would evidence success?",
+      "f) What negative control distinguishes 'it worked' from 'it looks like it worked'?",
+      "g) What would make you abandon or materially revise this?",
+      "h) Is this harnessable as stated (inputs/outputs/constraints/acceptance/failure mode)?"
+    ],
+    "response_schema": {
+      "type": "object",
+      "required": [
+        "candidate_slices",
+        "recommended_first",
+        "investigate_or_goal",
+        "scope",
+        "expected_mechanical_delta",
+        "negative_control",
+        "abandon_or_reconsider_condition",
+        "harnessability",
+        "minimum_sufficiency_rationale",
+        "evidence_refs"
+      ],
+      "properties": {
+        "candidate_slices": {
+          "type": "array",
+          "maxItems": 3,
+          "items": {
+            "type": "object",
+            "properties": {
+              "title": {
+                "type": "string"
+              },
+              "description": {
+                "type": "string"
+              },
+              "why_plausible": {
+                "type": "string"
+              }
+            }
+          }
+        },
+        "recommended_first": {
+          "type": "string"
+        },
+        "investigate_or_goal": {
+          "enum": [
+            "investigate",
+            "propose-goal"
+          ]
+        },
+        "scope": {
+          "type": "object",
+          "properties": {
+            "in_scope": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            },
+            "non_goals": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            }
+          }
+        },
+        "expected_mechanical_delta": {
+          "type": "string"
+        },
+        "negative_control": {
+          "type": "string"
+        },
+        "abandon_or_reconsider_condition": {
+          "type": "string"
+        },
+        "harnessability": {
+          "type": "object",
+          "required": [
+            "inputs",
+            "outputs",
+            "constraints",
+            "acceptance",
+            "failure_mode"
+          ],
+          "properties": {
+            "inputs": {
+              "type": "string"
+            },
+            "outputs": {
+              "type": "string"
+            },
+            "constraints": {
+              "type": "string"
+            },
+            "acceptance": {
+              "type": "string"
+            },
+            "failure_mode": {
+              "type": "string"
+            }
+          }
+        },
+        "minimum_sufficiency_rationale": {
+          "type": "string"
+        },
+        "evidence_refs": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "description": "dossier section ids that support the recommended slice"
+        }
+      }
+    },
+    "citable_evidence_refs": [
+      "arch:scc",
+      "arch:package-metrics",
+      "code:cli-dir",
+      "doc:methodology",
+      "doc:spec-layer-architecture",
+      "goal:GOAL-032",
+      "goal:GOAL-031",
+      "arch:cycle-matrix",
+      "arch:root-to-cli",
+      "arch:cli-to-root",
+      "code:root-imports-cli",
+      "code:serve-sessions-use",
+      "code:serve-use",
+      "code:cli-driver-vocab",
+      "code:driver-vocab-consumers",
+      "code:runDriver-def",
+      "findings:T1"
+    ]
+  }
+}

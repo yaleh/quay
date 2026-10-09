@@ -1,0 +1,210 @@
+{
+  "case_id": "GOAL-031",
+  "stage": "A",
+  "stage_name": "discovery",
+  "mode": "rich-bundle",
+  "cutoff": "2026-10-08T13:00:00.000Z",
+  "cutoff_label": "T0-concern-discovery",
+  "cutoff_commit": "a8abf1a6dd0fd70b3e3f6ef8529447797e36b053",
+  "cutoff_commit_time": "2026-10-08T20:02:46+08:00",
+  "dossier": {
+    "total_bytes": 19954,
+    "section_count": 7,
+    "sections": [
+      {
+        "id": "arch:literal-dispersion",
+        "title": "ArchGuard literal-dispersion reading (TaskStatus values)",
+        "kind": "evidence_file",
+        "provenance": {
+          "kind": "recorded_tool_output",
+          "tool": "archguard_detect_shape_smells",
+          "file": "docs/analysis/dossier-evidence/GOAL-031-literal-dispersion.txt",
+          "analysis_commit": "a8abf1a6dd0fd70b3e3f6ef8529447797e36b053",
+          "file_sha256": "01be66dddcaede9c3311dedff384756cd4af607d99f80975dd1a5e29791c7b3b",
+          "note": null,
+          "truncated": false,
+          "total_chars": 1911
+        },
+        "text": "archguard_detect_shape_smells  (ArchGuard 0.1.38, MCP tool, layer=literal-dispersion)\nanalyzed tree: commit a8abf1a6d (GOAL-031 decision cutoff)\nrun 1  params: dispersionThreshold=2, sources omitted (tool default)  -> result: totalSmells=0   (NOTE: empty, not 'no dispersion' — the default source scope matched nothing)\nrun 2  params: dispersionThreshold=2, sources=[plugin/scripts, packages]  -> result: totalSmells=248 (all warning)\nshown: all smells whose value == \"needs-human\" (any typeName), plus the other TaskStatus values for scale; dispersion = distinct files\n\n== value \"needs-human\" ==\ntypeName=TaskStatus dispersion=4\n    packages/quay-github/src/github-client.ts\n    packages/quay/src/observation.ts\n    plugin/scripts/task-status.ts\n    plugin/scripts/workflow-baseline-metrics.ts\n  locations: plugin/scripts/task-status.ts:9, plugin/scripts/workflow-baseline-metrics.ts:643, plugin/scripts/workflow-baseline-metrics.ts:643, plugin/scripts/workflow-baseline-metrics.ts:776, plugin/scripts/workflow-baseline-metrics.ts:776, packages/quay-github/src/github-client.ts:646, packages/quay/src/observation.ts:1443, packages/quay/src/observation.ts:1451\ntypeName=TaskStatus dispersion=4\n    packages/quay-github/src/github-client.ts\n    packages/quay/src/kernel/task-transition.ts\n    packages/quay/src/observation.ts\n    plugin/scripts/workflow-baseline-metrics.ts\n  locations: packages/quay/src/kernel/task-transition.ts:72, plugin/scripts/workflow-baseline-metrics.ts:643, plugin/scripts/workflow-baseline-metrics.ts:643, plugin/scripts/workflow-baseline-metrics.ts:776, plugin/scripts/workflow-baseline-metrics.ts:776, packages/quay-github/src/github-client.ts:646, packages/quay/src/observation.ts:1443, packages/quay/src/observation.ts:1451\n\n== other values of typeName TaskStatus (value -> dispersion) ==\n  done  dispersion=14\n  ready  dispersion=7\n  superseded  dispersion=6\n  todo  dispersion=6\n",
+        "bytes": 1913,
+        "text_sha256": "01be66dddcaede9c3311dedff384756cd4af607d99f80975dd1a5e29791c7b3b"
+      },
+      {
+        "id": "code:needs-human-comparisons",
+        "title": "Every comparison against the literal \"needs-human\" in non-test sources",
+        "kind": "git_grep",
+        "provenance": {
+          "kind": "git_grep",
+          "commit": "a8abf1a6dd0fd70b3e3f6ef8529447797e36b053",
+          "command": "git grep -nE '[=!]==? *[\"']needs-human[\"']|[\"']needs-human[\"'] *[=!]==?' a8abf1a6dd0f -- plugin/scripts packages/quay/src packages/quay-github/src packages/quay-native/src",
+          "hit_lines": 13,
+          "truncated": false
+        },
+        "text": "packages/quay-github/src/github-client.ts:646:  if (status === \"needs-human\") {\npackages/quay/src/observation.ts:1443:/** Read the needs-human ledger: promotion-outcome records with action === \"needs-human\", newest\npackages/quay/src/observation.ts:1451:      .filter((r) => r.action === \"needs-human\")\nplugin/scripts/closure-lag-check.sh:251:      if (status === \"needs-human\") outcome = \"needs-human\";\nplugin/scripts/goal-driver.ts:823:      (r.status === \"active\" || r.status === \"achieved\" || r.status === \"needs-human\"),\nplugin/scripts/goal-driver.ts:2088:  if (task.status === \"needs-human\") return true;\nplugin/scripts/goal-driver.ts:2098:  return status === \"todo\" || status === \"ready\" || status === \"needs-human\";\nplugin/scripts/goal-driver.ts:2319:      } else if (inFlight.every((t) => t.status === \"needs-human\")) {\nplugin/scripts/goal-driver.ts:2383:      } else if (inFlight.every((t) => t.status === \"needs-human\")) {\nplugin/scripts/goal-driver.ts:2443:    } else if (traction.every((t) => t.status === \"needs-human\")) {\nplugin/scripts/workflow-baseline-metrics.ts:643:  const needsHuman = events.filter(e => e.outcome === \"needs-human\" && e.eventKind === \"end\");\nplugin/scripts/workflow-baseline-metrics.ts:776:    .filter(e => e.outcome === \"needs-human\" || e.outcome !== \"done\")\nplugin/scripts/workflow-replay.ts:138:    const gf = events.find(e => e.stage === \"Gate\" && e.outcome === \"needs-human\");",
+        "bytes": 1418,
+        "text_sha256": "f3576b8d39947d9bcc27fe51bc92110c17f7b88d4aa6f908bff9a46f4493f518"
+      },
+      {
+        "id": "code:task-status-canonical",
+        "title": "plugin/scripts/task-status.ts (existing status vocabulary module)",
+        "kind": "git_cat",
+        "provenance": {
+          "kind": "git_file",
+          "commit": "a8abf1a6dd0fd70b3e3f6ef8529447797e36b053",
+          "path": "plugin/scripts/task-status.ts",
+          "ranges": null,
+          "command": "git show a8abf1a6dd0f:plugin/scripts/task-status.ts",
+          "truncated": false,
+          "total_chars": 1479
+        },
+        "text": "// task-status.ts — the plugin tree's SELF-CONTAINED copy of the task-status lifecycle\n// vocabulary (gap-abi-status-lifecycle-vocab-scattered-no-named-type). The PRODUCT type's\n// canonical source is packages/quay/src/abi.ts (`Task['status']`); the plugin is a\n// separately-bundled deliverable (build-plugin-dist.mjs stages plugin/ → packages/quay/\n// plugin/), so a static `../../packages/quay/src/abi.ts` import cannot resolve in the\n// shipped artifact (sync-vendor.sh's documented rationale: paths reaching outside plugin/\n// do not survive install scopes). This module is the plugin tree's single source — keep\n// the five words in lockstep with abi.ts's TASK_STATUSES.\nexport type TaskStatus = 'todo' | 'ready' | 'done' | 'needs-human' | 'superseded';\n\n/** All valid task-status values, in canonical order (todo → ready → done → terminal). */\nexport const TASK_STATUSES: readonly TaskStatus[] = ['todo', 'ready', 'done', 'needs-human', 'superseded'];\n\n/** Named status constants so consumers never write a raw lifecycle literal. */\nexport const TASK_STATUS = {\n  TODO: 'todo',\n  READY: 'ready',\n  DONE: 'done',\n  NEEDS_HUMAN: 'needs-human',\n  SUPERSEDED: 'superseded',\n} as const;\n\nconst TASK_STATUS_SET: ReadonlySet<string> = new Set<string>(TASK_STATUSES);\n\n/** Type guard: is `value` one of the five task-status lifecycle words? */\nexport function isTaskStatus(value: unknown): value is TaskStatus {\n  return typeof value === 'string' && TASK_STATUS_SET.has(value);\n}\n",
+        "bytes": 1491,
+        "text_sha256": "2faf92520e69a4baaa14f4f0708b61cea4ec41c0cd1e1c699a82b7095db0e8b1"
+      },
+      {
+        "id": "code:abi-task-status",
+        "title": "packages/quay/src/abi.ts: TASK_STATUS declaration",
+        "kind": "git_grep",
+        "provenance": {
+          "kind": "git_grep",
+          "commit": "a8abf1a6dd0fd70b3e3f6ef8529447797e36b053",
+          "command": "git grep -nE -C14 'export const TASK_STATUS' a8abf1a6dd0f -- packages/quay/src/abi.ts",
+          "hit_lines": 32,
+          "truncated": false
+        },
+        "text": "packages/quay/src/abi.ts-19-  // /goal rollup) can consume the structured relationship through taskList — previously goal_ac\npackages/quay/src/abi.ts-20-  // was WRITE-only through the ABI (task_write accepted it, task_list never returned it).\npackages/quay/src/abi.ts-21-  goal_ac?: string | null;\npackages/quay/src/abi.ts-22-}\npackages/quay/src/abi.ts-23-\npackages/quay/src/abi.ts-24-// ── Task-status lifecycle vocabulary: the SINGLE source (gap-abi-status-lifecycle-\npackages/quay/src/abi.ts-25-//    vocab-scattered-no-named-type). The lifecycle words were scattered as raw string\npackages/quay/src/abi.ts-26-//    literals across ~30 files; consumers now import `TaskStatus` / `TASK_STATUS` /\npackages/quay/src/abi.ts-27-//    `TASK_STATUSES` / `isTaskStatus` here instead of hardcoding `\"done\"` etc., and\npackages/quay/src/abi.ts-28-//    disk-read parse boundaries guard with `isTaskStatus` (fail-closed on illegal\npackages/quay/src/abi.ts-29-//    values — hard rule 3b: an unreadable value must not look like a valid one).\npackages/quay/src/abi.ts-30-export type TaskStatus = Task['status'];\npackages/quay/src/abi.ts-31-\npackages/quay/src/abi.ts-32-/** All valid task-status values, in canonical order (todo → ready → done → terminal). */\npackages/quay/src/abi.ts:33:export const TASK_STATUSES: readonly TaskStatus[] = ['todo', 'ready', 'done', 'needs-human', 'superseded'];\npackages/quay/src/abi.ts-34-\npackages/quay/src/abi.ts-35-/** Named status constants so consumers never write a raw lifecycle literal. */\npackages/quay/src/abi.ts:36:export const TASK_STATUS = {\npackages/quay/src/abi.ts-37-  TODO: 'todo',\npackages/quay/src/abi.ts-38-  READY: 'ready',\npackages/quay/src/abi.ts-39-  DONE: 'done',\npackages/quay/src/abi.ts-40-  NEEDS_HUMAN: 'needs-human',\npackages/quay/src/abi.ts-41-  SUPERSEDED: 'superseded',\npackages/quay/src/abi.ts-42-} as const;\npackages/quay/src/abi.ts-43-\npackages/quay/src/abi.ts-44-const TASK_STATUS_SET: ReadonlySet<string> = new Set<string>(TASK_STATUSES);\npackages/quay/src/abi.ts-45-\npackages/quay/src/abi.ts-46-/** Type guard: is `value` one of the five task-status lifecycle words? */\npackages/quay/src/abi.ts-47-export function isTaskStatus(value: unknown): value is TaskStatus {\npackages/quay/src/abi.ts-48-  return typeof value === 'string' && TASK_STATUS_SET.has(value);\npackages/quay/src/abi.ts-49-}\npackages/quay/src/abi.ts-50-",
+        "bytes": 2395,
+        "text_sha256": "413776567c7c518fa31d0a804ed0c3371215be863f0f61b14b0c6f52a71e71d3"
+      },
+      {
+        "id": "code:task-status-importers",
+        "title": "Modules that import the plugin-side status vocabulary",
+        "kind": "git_grep",
+        "provenance": {
+          "kind": "git_grep",
+          "commit": "a8abf1a6dd0fd70b3e3f6ef8529447797e36b053",
+          "command": "git grep -nE 'from [\"']\\./task-status\\.ts[\"']' a8abf1a6dd0f -- plugin/scripts",
+          "hit_lines": 8,
+          "truncated": false
+        },
+        "text": "plugin/scripts/cap-counts-subagents-check.ts:63:import { TASK_STATUS } from \"./task-status.ts\";\nplugin/scripts/driver-filters.ts:34:import { TASK_STATUS } from \"./task-status.ts\";\nplugin/scripts/prod-data-audit.ts:761:import { TASK_STATUS } from \"./task-status.ts\";\nplugin/scripts/ready-pool-check.ts:248:import { TASK_STATUS, isTaskStatus } from \"./task-status.ts\";\nplugin/scripts/stale-ready-audit.ts:23:import { TASK_STATUS } from \"./task-status.ts\";\nplugin/scripts/task-ac-carryover-check.ts:68:import { TASK_STATUS } from \"./task-status.ts\";\nplugin/scripts/task-contract-check.ts:57:import { TASK_STATUS } from \"./task-status.ts\";\nplugin/scripts/worker-driver.ts:128:import { TASK_STATUS } from \"./task-status.ts\";",
+        "bytes": 719,
+        "text_sha256": "71ea1698c40cb4384bac5dcae5197801a194140b6fc8cc14f535d25b3044f51c"
+      },
+      {
+        "id": "goal:GOAL-030",
+        "title": "Prior goal GOAL-030 (kernel transition decision pilot)",
+        "kind": "git_cat",
+        "provenance": {
+          "kind": "git_file",
+          "commit": "a8abf1a6dd0fd70b3e3f6ef8529447797e36b053",
+          "path": "goals/GOAL-030-晋升写入经-kernel-转移决策并留痕-goal-分支首个真实试点-证明分支上运行的-quay-加载的是分支自己的代码.md",
+          "ranges": null,
+          "command": "git show a8abf1a6dd0f:goals/GOAL-030-晋升写入经-kernel-转移决策并留痕-goal-分支首个真实试点-证明分支上运行的-quay-加载的是分支自己的代码.md",
+          "truncated": false,
+          "total_chars": 4942
+        },
+        "text": "---\nid: GOAL-030\ntitle: 晋升写入经 kernel 转移决策并留痕——goal 分支首个真实试点：证明分支上运行的 Quay 加载的是分支自己的代码\nstatus: active\nkind: goal\norigin: 人 2026-10-08「现在开始执行…正式创建一个真实的重构 goal，并启用 goal branch」：goal\n  分支机制首个真实试点，范围严格限于晋升路径的 todo→ready / ready→todo 两条写入；先验证“在分支上运行 Quay 并验证\n  Quay”的自举路径，健康度达标后才进入更大重构。\nactivatedAt: 2026-10-08T02:36:17.793Z\nstatusLog:\n  - at: 2026-10-08T02:36:17.793Z\n    from: draft\n    to: active\n    actor: cli\n    reason: 人 2026-10-08「现在开始执行…正式立项并进入该小 goal」：7 条 AC（AC-336…342，并入前 5 条、并入后 2\n      条）已激活且判据在 dash 下逐条实测（含负对照）；3 个承接任务已立并停放（needs-human），激活本 GOAL 即从 develop\n      tip 懒建 goal/GOAL-030\nbranch: true\n---\n## 背景\n\n**这是 goal 分支机制的第一个真实开发方向试点，主要目的不是架构收益，而是验证“在分支上运行 Quay、并验证 Quay”这条自举路径。** 人 2026-10-08 裁定：先用一个相对小、但足以验证机制的重构走完 goal branch 全流程；只有它完整走完且健康度达标，才进入更大规模的重构 goal。\n\n迄今开过分支的 goal（GOAL-901…905）全是演练；GOAL-905（真实大小的并入）的 goal→develop 并入跑了 6 次 suite 才通过。SPEC-goal-branch §4.10/§8 写明预览实例不跑 driver、改 driver 的 goal 得不到并入前试用；另有两条实测记录表明 worktree 里的代码可能在运行时加载主检出的代码（Core plugin root 重定位、quay-native 经 node_modules 软链解析）。本 goal 因此把“分支上跑的确实是分支自己的代码”作为显式验收，⛔ 不允许用表面成功替代。\n\n重构切片（OO/领域所有权分析的阶段 A 的最小子集）：晋升路径上两条任务状态写入——`plugin/scripts/ready-pool-check.ts` 的 `applyPromotions`（todo→ready，promote 边）与 `applyRevaluations`（ready→todo，retreat 边）——改走 kernel 层的转移决策（基于 `LIFECYCLE_EDGES`），并为每次转移写一条结构化事件。前置读数见已完成任务 gap-status-flip-history-and-parser-diff-readings（历史翻转回放）与 docs/rup/architecture-views.md §6（ArchGuard 重构前基线，develop @97d17da6b：目录环 1 个、plugin/scripts→kernel 强度 14、→非 kernel 44、packages→plugin 0）。\n\n## 范围与非目标\n\n范围：\n- kernel 新模块 `packages/quay/src/kernel/task-transition.ts`：`LIFECYCLE_EDGES` 的唯一定义（从 `gate/lifecycle.ts` 下沉，后者改为 re-export）、`decideTransition`（三态：allow / refuse / not-evaluated）、`patchStatusField`（从 `plugin/scripts/task-ops.ts` 下沉，后者改为 re-export，四个现有调用方不改）、状态转移事件写入 `.quay/task-status-events.jsonl`（每条事件记录写入模块与入口进程的 realpath，作为代码身份的直接量）。\n- `ready-pool-check.ts` 两处写入改走 kernel。\n- 分支自举探针 `scripts/branch-selfhost-probe.mjs`。\n\n非目标（⛔ 有意排除）：\n- ⛔ 不碰 fan-in 的 4 处状态写入（`worker-fan-in.ts`）、不碰 needs-human 与分支同步状态对齐的 2 处写入（`driver-filters.ts`）——AC-336 以计数钉死。\n- ⛔ 不让 promotion-driver 新增自动撤回行为：生产上目前没有任何调用方传 `--revaluate-apply`，ready→todo 由同一分支的 `ready-pool-check --revaluate-apply` 直接触发验证，⛔ 不新增驱动调用方（那会是新的生产行为）。\n- ⛔ 不改 `gate/lifecycle.ts` 的 `runPromote`/`runRetreat` 行为（CLI 路径），只让它们与 kernel 共用同一份边表数据，⛔ 不造第三套实现。\n- ⛔ 不决定“状态写入走 ABI 还是 kernel”，本试点用 kernel 写函数。\n- ⛔ 不做目录环清理、不拆大文件、不动 goal-driver / worker-driver 机制本身。\n\n## 判据形态\n\n- 并入前 AC（AC-336…340）在判据 worktree / 预览实例上求值；并入后全部 AC 在主检出上照常求值，所以每条并入前判据在两种树上都必须成立（各判据已按两种树写）。\n- 退出码三态：0 达成；1 未达成，同行带 `CAUSE=`；3 未评估（前提未落地、预览未起、载体缺席）。\n- 落笔当轮读数（2026-10-08，主检出 = develop @c8461f5f）：AC-336/338 exit 1（模块与测试尚不存在）；AC-337/339/341/342 exit 3（前提未落地）；AC-340 在主检出 exit 0（生产 serve 跑主检出自身代码）。负对照：AC-340 在一个登记了主检出 serve 的临时 worktree 上判 `serve-runs-foreign-code`；AC-337 对一条写入模块位于主检出的伪造事件判 `loaded-main-checkout-code`；AC-339 在临时分支上实跑 archguard，加 kernel import 时 14→15 判绿、去掉 import 时判 `kernel-edge-not-observed`。\n- AC-338 经 `scripts/test.sh` 跑 6 个文件；4 个现存文件实测 18.6 s，判据默认 60 s 上限，新增文件须控制体量。\n\n## 验证步骤（分支上必须执行，命令与原始读数记入各任务 Evidence 与复盘）\n\n1. 激活前：ArchGuard 前基线（同一 archguard 构建、单根复制、中立 cwd、读 `moduleGraph`）。\n2. 激活后：核验 `goal/GOAL-030` 从 develop tip 懒创建；任务派发记录的 mergeTarget 为该分支；任务 worktree 从该分支开出；落地前追平 develop；develop 的 first-parent 链上不出现这些提交；落地后不再被派发。\n3. 分支 tip 上：类型检查、`import-graph-check`、载体注册表、特征化测试（AC-336/338）。\n4. 预览：`quay goal preview GOAL-030 start --port <n>`，AC-340 证明预览进程跑的是分支自己的入口。\n5. 沙盒驱动自举（AC-337）：按文件路径启动分支的 promotion-driver（默认子进程解析，清掉 `QUAY_PLUGIN_ROOT`）对 /tmp 沙盒跑一轮触发 todo→ready；分支的 `ready-pool-check --revaluate-apply` 触发 ready→todo；每条事件的写入模块与入口 realpath 必须位于分支树内；同一沙盒用主检出驱动跑负对照须写 0 条事件；生产 `.quay/` 与 `tasks/` 不变。\n6. 后基线：AC-339 在分支 tip 上实跑 archguard 前后对比。\n7. 人在预览上试用后 `quay goal merge GOAL-030 --reason …`；记录并入 suite 尝试次数与每次红集。\n8. 并入后：主检出追上 develop；AC-341 取生产读数；AC-342 核对并入形态。\n\n## 停止扩大范围的信号（任一出现 ⇒ 不加范围、不进入下一个 goal，先把机制缺口立案修复；无法恢复则按裁定⑨放弃并丢弃分支）\n\n- **代码身份**：沙盒或预览证明跑的不是分支代码（AC-337 `loaded-main-checkout-code`、AC-340 `serve-runs-foreign-code`），或负对照失效；**自举或模块解析落到主检出 ⇒ 分支不健康。**\n- **生产污染**：沙盒运行改动了生产 `.quay/` 或 `tasks/`；生产派发记录被沙盒驱动接管；生产 serve 被重启或端口改变。\n- **隔离失效**：本 goal 任务提交出现在 develop first-parent 链上；任务落地后被再次派发；goal 在并入前被翻为 achieved。\n- **追平漂移**：追平反复冲突；anti-drift 因基准不对误报；分支落后 develop 持续增大。\n- **并入不稳**：goal→develop 并入 suite 尝试次数超过 GOAL-905 的 6 次，或红集含本 goal 触及的文件；需要 `--override` 才能并入。\n- **预览不可用**：预览 serve 起不来或被孤儿回收器杀掉。\n- **架构**：目录环增加；需要往 layers.yml 的 allowed 加边；出现 packages→plugin 边；前后文件数差额对不上；`import-graph-check` 的 kernel 越界。\n- **基线漂移**：特征化快照或金样出现本切片无法解释的变化。\n- **人工干预**：任务机制之外的手工修补持续增加。\n\n## 退出条件\n\n晋升路径的两条状态写入（todo→ready、ready→todo）经 kernel 转移决策落盘并留下结构化事件，fan-in 与 needs-human 写入原样不动；并且 goal 分支全流程走通：分支上运行的 Quay（沙盒中的 promotion-driver 与 ready-pool-check、预览 serve）被证明加载的是分支自己的代码，测试、smoke、`import-graph-check` 与分层约束通过，ArchGuard 前后读数可比且无新的结构债；goal 以恰好一个合并提交并入 develop，并入后生产上的晋升翻转都带有事件。对应 AC-336（结构与范围护栏）、AC-337（分支自举身份与两类转移）、AC-338（测试与 smoke）、AC-339（ArchGuard 前后可比）、AC-340（预览运行分支代码）、AC-341（并入后生产读数）、AC-342（并入形态）。\n",
+        "bytes": 8899,
+        "text_sha256": "9c049fedb4a4c2725117ca83b1af304ae37b045133200b47b0b290332e5abf16"
+      },
+      {
+        "id": "goal:GOAL-905",
+        "title": "Prior goal GOAL-905 (goal-branch rehearsal)",
+        "kind": "git_cat",
+        "provenance": {
+          "kind": "git_file",
+          "commit": "a8abf1a6dd0fd70b3e3f6ef8529447797e36b053",
+          "path": "goals/GOAL-905-goal-分支第二次演练-drill-并发落地-分支落后-真实大小并入-刷新与预览自动装配-不是真实开发方向.md",
+          "ranges": null,
+          "command": "git show a8abf1a6dd0f:goals/GOAL-905-goal-分支第二次演练-drill-并发落地-分支落后-真实大小并入-刷新与预览自动装配-不是真实开发方向.md",
+          "truncated": false,
+          "total_chars": 1749
+        },
+        "text": "---\nid: GOAL-905\ntitle: goal 分支第二次演练（drill）——并发落地、分支落后、真实大小并入、刷新与预览自动装配；不是真实开发方向\nstatus: achieved\nkind: goal\norigin: 人 2026-10-05「补上没覆盖的路径」：对 GOAL-028 做第二次演练（多任务并发落同一 goal 分支、goal 分支落后\n  develop、真实大小的并入、修复后的刷新与预览自动装配）；判据能在生产实例上判假（落笔当轮读数见各 AC 的验证）。\nactivatedAt: 2026-10-05T14:27:57.193Z\nstatusLog:\n  - at: 2026-10-05T14:27:57.193Z\n    from: draft\n    to: active\n    actor: cli\n    reason: 人 2026-10-05 授权第二次合并演练：三条 AC 已激活、三个承接任务已立并停放；激活 GOAL 即从 develop tip 懒建\n      goal/GOAL-905\n  - at: 2026-10-05T21:11:45.361Z\n    from: active\n    to: achieved\n    actor: goal-driver\n    reason: \"I2: all ACs achieved + sufficiency covered\"\nbranch: true\n---\n## 背景\n\n**这是第二次演练（drill），不是真实开发方向。** 第一次演练（GOAL-904）只覆盖了「单个任务、doc-only、手工补了两处」的路径，并在过程中挖出 5 个缺陷（均已修）。本次演练补第一次没覆盖的路径，且**不做任何手工干预**——需要手工才能继续的地方本身就是发现：\n1. **多个任务并发落到同一个 goal 分支**：三个 Touches 互不相交的任务同时被派发，竞争同一把 `fan-in.goal-GOAL-905.lock`，先落地者推进 goal tip，后落地者的 ff 非快进 ⇒ 走再追平重试。\n2. **goal 分支落后 develop**：goal 分支在激活时从 develop tip 分出，任务在 develop 前进若干提交之后才派发，追平步骤要真的合入 develop 的新提交。\n3. **真实大小的并入**：三个任务各加 8 篇文档（共 24 个文件、约一千行），并入走完整的合并、typecheck、scoped 门、全量 suite、ff。\n4. **修复后的刷新**：每次落地后 goal-driver 把判据 worktree 刷新到新 tip（读数 `refreshed`，此前只读到过 `current`）。\n5. **预览自动装配依赖**：`quay goal preview GOAL-905 start` 在判据 worktree 上直接起来，不手工链接 `node_modules`。\n\n承载内容刻意无害：三批托管文档 `DOC-910…917`、`DOC-920…927`、`DOC-930…937`（`docs-managed/`，kind: drill）。它们只存在于 `goal/GOAL-905` 上——预览实例的 `/doc` 页列得出，生产实例在并入前列不出。\n\n## 范围与非目标\n\n- 范围：三个任务（`gap-goal905-drill-docs-a`、`-b`、`-c`）、三条 live-probe AC（AC-905/906/907，各自检查一批的首篇）。\n- 非目标：不改任何产品代码；不改 GOAL-028 的任何判据；演练文档并入后保留，作为演练记录，清理另立任务。\n\n## 退出条件\n\n提供本 workspace 的 quay serve 实例，其 `/doc` 页同时列出三批演练文档的首篇 DOC-910、DOC-920、DOC-930——并入前由预览实例满足，并入后由生产实例满足（三条 AC 的判据对两种实例同形：读该 workspace root 下登记在册的 serve）。\n",
+        "bytes": 3119,
+        "text_sha256": "c7bc2518f1bdb66240c7ef6011a8b6e82ffafd0439d73ae9a27ff63671f81c3d"
+      }
+    ]
+  },
+  "citable_evidence_refs": [
+    "arch:literal-dispersion",
+    "code:needs-human-comparisons",
+    "code:task-status-canonical",
+    "code:abi-task-status",
+    "code:task-status-importers",
+    "goal:GOAL-030",
+    "goal:GOAL-905"
+  ],
+  "task": {
+    "instructions": "You are a NARROW ownership/architecture analyst. This is a DISCOVERY stage: identify what, if anything, ownership-shaped is visible in the state below. You are NOT asked to match any historical decision, and you do NOT need to propose a fix. Saying no concern is visible is a valid and sometimes correct answer. Cite only the listed evidence refs; do not invent readings. The EVIDENCE DOSSIER is raw tool output and source excerpts: it contains material unrelated to the concern (other duplicate groups, unrelated call sites, etc.) — judging relevance is part of the task. Section ids ARE the citable evidence refs.",
+    "questions": [
+      "a) What ownership / canonicalization / dependency-boundary concerns are visible in this state? (<=3)",
+      "b) For each concern, which evidence refs ground it?",
+      "c) Does it need investigation before any slice can be defined, or is it decision-ready?",
+      "d) How confident are you, and what would raise or lower that confidence?",
+      "e) If nothing ownership-shaped is visible, say so (abstain) — that is a valid answer."
+    ],
+    "response_schema": {
+      "type": "object",
+      "required": [
+        "concerns",
+        "overall_assessment"
+      ],
+      "properties": {
+        "concerns": {
+          "type": "array",
+          "maxItems": 3,
+          "items": {
+            "type": "object",
+            "required": [
+              "concern",
+              "evidence_refs",
+              "needs_investigation",
+              "confidence"
+            ],
+            "properties": {
+              "concern": {
+                "type": "string"
+              },
+              "evidence_refs": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              },
+              "needs_investigation": {
+                "type": "boolean"
+              },
+              "what_to_investigate": {
+                "type": "string"
+              },
+              "confidence": {
+                "enum": [
+                  "low",
+                  "medium",
+                  "high"
+                ]
+              }
+            }
+          }
+        },
+        "overall_assessment": {
+          "enum": [
+            "no_concern_visible",
+            "concerns_found"
+          ]
+        }
+      }
+    },
+    "citable_evidence_refs": [
+      "arch:literal-dispersion",
+      "code:needs-human-comparisons",
+      "code:task-status-canonical",
+      "code:abi-task-status",
+      "code:task-status-importers",
+      "goal:GOAL-030",
+      "goal:GOAL-905"
+    ]
+  }
+}

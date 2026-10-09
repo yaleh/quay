@@ -1,0 +1,2676 @@
+{
+  "experiment": "ownership benchmark — RICH EVIDENCE BUNDLE (dossier) — runtime+model A/B",
+  "mode": "rich-bundle",
+  "groups": {
+    "A": {
+      "launcher": "claude-fjdac",
+      "model": "v4.1flash-anthropic"
+    },
+    "B": {
+      "launcher": "claude",
+      "model": "opus"
+    }
+  },
+  "controls": {
+    "corpus": "plugin/fixtures/meta-driver-replay/GOAL-03x/rich_{a,b}.json",
+    "profiles_carrier": "fixture .quay/profiles.yml under a temp root; repo carrier untouched",
+    "leakage": "model sees rich_{a,b}.json only; reference.json / outcome.json are evaluator-side; integrity: plugin/test/ownership-rich-dossier.test.mjs",
+    "scoring": "no single total; per-dimension. Stage B recorded under two slice bases (union = comparable with the compact run, first = recommended slice only)"
+  },
+  "harness_self_test": {
+    "prompts_identical_across_groups_per_cell": true,
+    "cells": {
+      "GOAL-030:A": {
+        "prompt_shas": [
+          "88798d48bf2d66ac"
+        ],
+        "identical_across_groups": true
+      },
+      "GOAL-030:B": {
+        "prompt_shas": [
+          "d08de0b9725e0a1b"
+        ],
+        "identical_across_groups": true
+      },
+      "GOAL-031:A": {
+        "prompt_shas": [
+          "1e53fa35408548c5"
+        ],
+        "identical_across_groups": true
+      },
+      "GOAL-031:B": {
+        "prompt_shas": [
+          "b519548a63bad929"
+        ],
+        "identical_across_groups": true
+      },
+      "GOAL-032:A": {
+        "prompt_shas": [
+          "6190ca3e6baca83a"
+        ],
+        "identical_across_groups": true
+      },
+      "GOAL-032:B": {
+        "prompt_shas": [
+          "51dae438ae677a15"
+        ],
+        "identical_across_groups": true
+      },
+      "GOAL-033:A": {
+        "prompt_shas": [
+          "60938872c3553458"
+        ],
+        "identical_across_groups": true
+      },
+      "GOAL-033:B": {
+        "prompt_shas": [
+          "335dbcc426a64388"
+        ],
+        "identical_across_groups": true
+      }
+    }
+  },
+  "reps": 1,
+  "stages": [
+    "A",
+    "B"
+  ],
+  "runs": [
+    {
+      "case_id": "GOAL-030",
+      "stage": "A",
+      "group": "A",
+      "provenance": {
+        "role": "ab-a",
+        "profile": "gw",
+        "launcher": "claude-fjdac",
+        "model_from_profile": "v4.1flash-anthropic",
+        "model_flag_in_argv": "v4.1flash-anthropic",
+        "gateway_env_dropped": false,
+        "prompt_sha256_16": "88798d48bf2d66ac",
+        "prompt_chars": 24395,
+        "prompt_bytes": 35475,
+        "started_at": "2026-10-09T14:47:18.284Z",
+        "duration_ms": 38959
+      },
+      "state": "verified",
+      "error": null,
+      "exit_status": 0,
+      "response": {
+        "concerns": [
+          {
+            "concern": "Package-level dependency cycle (SCC#1, size=6) binds packages/quay/src to its own subsystems — src/cli, src/fan-in, src/gate, src/gate/config, src/gate/factories. The top-level core module and the gate/fan-in layers form a mutually-recursive boundary, so the intended layer split (core vs gate vs fan-in) is not one-directional; ownership between the core source root and the gate subsystem is entangled rather than a clean dependency edge.",
+            "evidence_refs": [
+              "arch:scc"
+            ],
+            "needs_investigation": true,
+            "what_to_investigate": "Identify which concrete edges close the SCC (at least one edge from each layer back into packages/quay/src) and whether any can be moved to a lower-level module — noting that a kernel seam (packages/quay/src/kernel) already exists and is imported by plugin/scripts, which is evidence a clean low-level seam is an established pattern here.",
+            "confidence": "high"
+          },
+          {
+            "concern": "No single owner resolves a task's landing baseline. The default landing literal \"develop\" is duplicated (~20 sites / 17 files), and SPEC-goal-branch §4.3 explicitly requires one shared resolver (mergeTarget = goal/<id> when the goal is active + branch:true, else develop) used simultaneously by three call sites: worktree --base, fan-in mergeTarget, and fan-in lock selection — with the spec warning that a mismatch makes fork-point and landing point diverge. Landing-baseline ownership is currently implicit and duplicated rather than canonicalized, and the goal-branch feature (drilled on GOAL-905) depends on fixing exactly this.",
+            "evidence_refs": [
+              "doc:spec-goal-branch",
+              "goal:GOAL-905"
+            ],
+            "needs_investigation": true,
+            "what_to_investigate": "Enumerate the real call sites of the \"develop\" default (the spec's 20/17 count is explicitly an upper bound, not all requiring change) and confirm whether any single resolveTaskMergeTarget exists today or must be introduced; also check whether the plugin layer that spawns fan-in is the right owner given its existing dependency footprint on packages/quay/src.",
+            "confidence": "medium"
+          },
+          {
+            "concern": "Task status-field write ownership is dispersed. A single byte-preserving helper (patchStatusField in task-ops.ts, with an optimistic fromStatus guard against clobbering a concurrently-flipped disk) is the canonical writer, but four non-test modules invoke it (driver-filters.ts x2, ready-pool-check.ts x2, worker-fan-in.ts x4). SPEC-goal-branch additionally changes what `done` means (landed on the task's mergeTarget, with status double-written across goal/develop branches). The intended canonical transition authority is also incomplete — 17.7% of historical status flips fall outside the TRANSITIONS table, and the missing edges are systematically needs-human/superseded in/out edges.",
+            "evidence_refs": [
+              "code:status-writers",
+              "code:patchStatusField",
+              "doc:spec-goal-branch",
+              "task:status-flip-readings"
+            ],
+            "needs_investigation": true,
+            "what_to_investigate": "Confirm whether TRANSITIONS is enforced anywhere in production (the reading indicates it is not — the out-of-table flips are real transitions, not violations) and whether the goal-branch double-write creates two authoritative status owners on two branches (task branch vs mergeTarget), which would require deciding which side is authoritative on conflict.",
+            "confidence": "medium"
+          }
+        ],
+        "overall_assessment": "concerns_found"
+      },
+      "rep": 1,
+      "mode": "rich-bundle",
+      "scores": {
+        "case_id": "GOAL-030",
+        "stage": "A",
+        "concerns_returned": 3,
+        "concern_validity": {
+          "any_matches_expected": false,
+          "per_concern": [
+            {
+              "concern": "Package-level dependency cycle (SCC#1, size=6) binds packages/quay/src to its own subsystems — src/cli, src/fan-in, src/gate, src/gate/config, src/gate/factorie",
+              "matches_expected": false,
+              "matched_reference": null,
+              "overlap": 0.111,
+              "evidence_refs": 1,
+              "unsupported_evidence_refs": [],
+              "grounded": true,
+              "needs_investigation": true,
+              "confidence": "high"
+            },
+            {
+              "concern": "No single owner resolves a task's landing baseline. The default landing literal \"develop\" is duplicated (~20 sites / 17 files), and SPEC-goal-branch §4.3 explic",
+              "matches_expected": false,
+              "matched_reference": null,
+              "overlap": 0.222,
+              "evidence_refs": 2,
+              "unsupported_evidence_refs": [],
+              "grounded": true,
+              "needs_investigation": true,
+              "confidence": "medium"
+            },
+            {
+              "concern": "Task status-field write ownership is dispersed. A single byte-preserving helper (patchStatusField in task-ops.ts, with an optimistic fromStatus guard against cl",
+              "matches_expected": false,
+              "matched_reference": null,
+              "overlap": 0.286,
+              "evidence_refs": 4,
+              "unsupported_evidence_refs": [],
+              "grounded": true,
+              "needs_investigation": true,
+              "confidence": "medium"
+            }
+          ]
+        },
+        "grounding": {
+          "all_cited_refs_resolve": true,
+          "unsupported_claims": []
+        },
+        "ranking": {
+          "valid_concern_ranked_first": false
+        },
+        "abstention": {
+          "abstained": false,
+          "acceptable_here": false,
+          "verdict": "proposed_concerns"
+        },
+        "evidence_breadth": {
+          "distinct_refs_cited": 6,
+          "of_available": 8
+        },
+        "unsupported_mentions": {
+          "distinct_paths_mentioned": 4,
+          "not_in_dossier": 0,
+          "nonexistent_at_cutoff": 0,
+          "examples_not_shown": [],
+          "examples_nonexistent": [],
+          "note": "a proposed NEW file legitimately lands in nonexistent_at_cutoff; review examples, do not treat as a score"
+        },
+        "man": "manual_review_suggested"
+      }
+    },
+    {
+      "case_id": "GOAL-030",
+      "stage": "A",
+      "group": "B",
+      "provenance": {
+        "role": "ab-b",
+        "profile": "native",
+        "launcher": "/tmp/rich-ab-DWzIzI/B/launcher.sh",
+        "model_from_profile": "opus",
+        "model_flag_in_argv": "opus",
+        "gateway_env_dropped": true,
+        "prompt_sha256_16": "88798d48bf2d66ac",
+        "prompt_chars": 24395,
+        "prompt_bytes": 35475,
+        "started_at": "2026-10-09T14:47:57.246Z",
+        "duration_ms": 23499
+      },
+      "state": "verified",
+      "error": null,
+      "exit_status": 0,
+      "response": {
+        "concerns": [
+          {
+            "concern": "Task status writes have no single owner. One raw helper, plugin/scripts/task-ops.ts:patchStatusField, rewrites the `status:` line with no transition check (only an optional fromStatus compare-and-swap). It is called directly from three modules, each holding its own transition rules: driver-filters.ts (2 sites, including needs-human), ready-pool-check.ts (2 sites, todo↔ready) and worker-fan-in.ts (4 sites, done/ready reset). The Core lifecycle table (gate/lifecycle.ts TRANSITIONS) is not on any of these paths. The archived history replay shows 17.7% of real flips fall outside that table, because the table lacks the needs-human and superseded edges. So the 'canonical' transition table and the actual writers have drifted apart. The goal-branch spec adds a second dimension: `done` will mean 'landed on mergeTarget', with status written to two places (B2). That raises the cost of having no single status-transition owner.",
+            "evidence_refs": [
+              "code:status-writers",
+              "code:patchStatusField",
+              "task:status-flip-readings",
+              "doc:spec-goal-branch"
+            ],
+            "needs_investigation": false,
+            "what_to_investigate": "This is decision-ready in shape: first add the missing needs-human/superseded edges (the readings name that as the prerequisite), then send all 8 call sites through one transition-checked writer. One thing to confirm before slicing: whether any of the 3 caller modules already consults TRANSITIONS before calling patchStatusField. The dossier excerpts don't show it either way.",
+            "confidence": "high"
+          },
+          {
+            "concern": "There is a package-level dependency cycle inside Core. One strongly connected component of size 6 spans packages/quay/src, cli, fan-in, gate, gate/config and gate/factories. The root package, the CLI layer and the gate engine/fan-in subsystems all depend on each other, so there is no layering direction among them. This is a dependency-boundary and ownership problem: it is unclear whether gate or fan-in owns its config/factories, or the root does.",
+            "evidence_refs": [
+              "arch:scc"
+            ],
+            "needs_investigation": true,
+            "what_to_investigate": "List the file-level edges that close the cycle, especially any edge from gate/* or fan-in back to the src root or cli. Find the smallest cut set that breaks it. The dossier only shows which packages are in the cycle, not which edges form it.",
+            "confidence": "medium"
+          },
+          {
+            "concern": "The boundary between plugin/scripts and Core is unclear. plugin/scripts has 86 dependency edges into packages/quay (65 to the src root, 17 to src/kernel, 2 each to gate and fan-in). Yet the archived readings justify keeping duplicate Task parsers (task-parsing.ts ↔ task-schema.ts) on the grounds that the plugin 'cannot static import' packages/. Either the plugin can depend on Core, so the duplicate parsers are unnecessary copies, or it can't, so these 86 edges rely on a bundling step that isn't stated in the evidence. The kernel subset (proc-identity, task-shape-artifacts, env-merge) looks like a deliberate shared kernel. The 65 edges to the src root don't.",
+            "evidence_refs": [
+              "arch:plugin-outbound",
+              "arch:plugin-to-kernel",
+              "task:status-flip-readings"
+            ],
+            "needs_investigation": true,
+            "what_to_investigate": "Find out how the plugin build resolves imports from packages/quay/src (inlined by the bundler, or failing at runtime). Classify the 65 src-root edges: are they kernel-shaped utilities, or reaches into Core internals? The answer decides whether the parser duplication is necessary or just leftover drift.",
+            "confidence": "medium"
+          }
+        ],
+        "overall_assessment": "concerns_found"
+      },
+      "rep": 1,
+      "mode": "rich-bundle",
+      "scores": {
+        "case_id": "GOAL-030",
+        "stage": "A",
+        "concerns_returned": 3,
+        "concern_validity": {
+          "any_matches_expected": true,
+          "per_concern": [
+            {
+              "concern": "Task status writes have no single owner. One raw helper, plugin/scripts/task-ops.ts:patchStatusField, rewrites the `status:` line with no transition check (only",
+              "matches_expected": true,
+              "matched_reference": "lifecycle status writes scattered across orchestration scripts with no single decision layer / no structured per-transition record",
+              "overlap": 0.429,
+              "evidence_refs": 4,
+              "unsupported_evidence_refs": [],
+              "grounded": true,
+              "needs_investigation": false,
+              "confidence": "high"
+            },
+            {
+              "concern": "There is a package-level dependency cycle inside Core. One strongly connected component of size 6 spans packages/quay/src, cli, fan-in, gate, gate/config and ga",
+              "matches_expected": false,
+              "matched_reference": null,
+              "overlap": 0.222,
+              "evidence_refs": 1,
+              "unsupported_evidence_refs": [],
+              "grounded": true,
+              "needs_investigation": true,
+              "confidence": "medium"
+            },
+            {
+              "concern": "The boundary between plugin/scripts and Core is unclear. plugin/scripts has 86 dependency edges into packages/quay (65 to the src root, 17 to src/kernel, 2 each",
+              "matches_expected": true,
+              "matched_reference": "plugin/scripts reaches the kernel on far fewer edges than it does non-kernel modules (boundary under-use)",
+              "overlap": 0.417,
+              "evidence_refs": 3,
+              "unsupported_evidence_refs": [],
+              "grounded": true,
+              "needs_investigation": true,
+              "confidence": "medium"
+            }
+          ]
+        },
+        "grounding": {
+          "all_cited_refs_resolve": true,
+          "unsupported_claims": []
+        },
+        "ranking": {
+          "valid_concern_ranked_first": true
+        },
+        "abstention": {
+          "abstained": false,
+          "acceptable_here": false,
+          "verdict": "proposed_concerns"
+        },
+        "evidence_breadth": {
+          "distinct_refs_cited": 7,
+          "of_available": 8
+        },
+        "unsupported_mentions": {
+          "distinct_paths_mentioned": 7,
+          "not_in_dossier": 0,
+          "nonexistent_at_cutoff": 0,
+          "examples_not_shown": [],
+          "examples_nonexistent": [],
+          "note": "a proposed NEW file legitimately lands in nonexistent_at_cutoff; review examples, do not treat as a score"
+        },
+        "man": "manual_review_suggested"
+      }
+    },
+    {
+      "case_id": "GOAL-030",
+      "stage": "B",
+      "group": "A",
+      "provenance": {
+        "role": "ab-a",
+        "profile": "gw",
+        "launcher": "claude-fjdac",
+        "model_from_profile": "v4.1flash-anthropic",
+        "model_flag_in_argv": "v4.1flash-anthropic",
+        "gateway_env_dropped": false,
+        "prompt_sha256_16": "d08de0b9725e0a1b",
+        "prompt_chars": 44138,
+        "prompt_bytes": 55724,
+        "started_at": "2026-10-09T14:48:20.747Z",
+        "duration_ms": 92734
+      },
+      "state": "verified",
+      "error": null,
+      "exit_status": 0,
+      "response": {
+        "candidate_slices": [
+          {
+            "title": "Single lifecycle decision layer (consult LIFECYCLE_EDGES) + structured per-transition record for the promote/retreat edges, delivered as the first real goal-branch direction",
+            "description": "Add ONE decision function in the gate layer (gated on the already-declared LIFECYCLE_EDGES / lifecycleEdge / isDeclaredIllegalPair, which today have zero non-definition callers) that (1) validates the status pair against the declared edge table, (2) delegates the byte-level patch to task-ops.patchStatusField, and (3) appends one structured per-transition record per flip to an EXISTING carrier (reuse the gate-event store / gate-log rather than inventing a parallel jsonl). Route ONLY the two in-scope orchestration writers through it: applyPromotions (todo->ready, promote) and applyRevaluations (ready->todo, retreat) in plugin/scripts/ready-pool-check.ts. Deliver on goal/GOAL-030 with branch:true, and add a live-probe AC that a preview/worktree served from the branch runs branch code while a develop-served one does not.",
+            "why_plausible": "The two transitions the concern names are exactly applyPromotions and applyRevaluations, and findings:T1 boxes scope to those two sites (fan-in's 4 and needs-human/branch-sync's 2 are explicitly excluded). LIFECYCLE_EDGES is declared but consulted by no writer, so the 'single decision layer' is wiring, not a new mechanism. plugin/scripts/ready-pool-check.ts already depends on the gate/kernel packages, so the dependency direction is not new. And because the change is REAL code (not GOAL-904/905's doc-only drills), it is the first real development direction the goal-branch mechanism is proven on — one slice, both clauses."
+          },
+          {
+            "title": "Decision layer only, landed directly on develop (goal-branch proof deferred)",
+            "description": "The same decision-layer + per-transition-record refactor for the two writers, but landed through the ordinary task fan-in to develop, deferring any proof of the goal-branch mechanism to a later, separate slice.",
+            "why_plausible": "Decouples the mechanism risk (a real goal-branch direction, finding #4) from the refactor, so a broken branch mechanism cannot block the deliverable. On its own it leaves the concern's second clause unaddressed, so it is not sufficient for the stated concern."
+          },
+          {
+            "title": "Full-coverage decision layer across all status-write sites (fan-in done flips + needs-human / branch-sync alignment)",
+            "description": "Extend the single decision layer to the remaining 6 sites: worker-fan-in.ts's 4 done-flip sites (ready->done, the done->ready 'done 未落地' reset, doc-face flip) and driver-filters.ts's 2 sites (branch-sync alignment, markNeedsHuman).",
+            "why_plausible": "Hard rule 5b: the same defect class repeats in siblings, so a two-site fix leaves the pattern elsewhere. But fixing the whole class first is larger than the minimum the concern names, and T1 deliberately excludes these sites from the first trial."
+          }
+        ],
+        "recommended_first": "Single lifecycle decision layer (consult LIFECYCLE_EDGES) + structured per-transition record for the promote/retreat edges, delivered as the first real goal-branch direction",
+        "investigate_or_goal": "propose-goal",
+        "scope": {
+          "in_scope": [
+            "One decision function in the gate layer that consults the already-declared LIFECYCLE_EDGES / lifecycleEdge / isDeclaredIllegalPair and returns a distinguishable 'undeclared/illegal' value (hard rule 3b).",
+            "Routing the two orchestration writers applyPromotions (todo->ready) and applyRevaluations (ready->todo) in plugin/scripts/ready-pool-check.ts through that single layer; the byte-level patch stays in task-ops.patchStatusField.",
+            "One structured per-transition record per flip, emitted to an existing carrier (reuse the gate-event store / gate-log, not a new log file).",
+            "Delivery on goal/GOAL-030 with branch:true, plus a live-probe AC that the branch's preview/worktree runs its own branch code and a develop-served instance does not."
+          ],
+          "non_goals": [
+            "worker-fan-in.ts's 4 done-flip sites and driver-filters.ts's 2 needs-human / branch-sync-alignment sites (excluded by findings:T1 #3).",
+            "Filling the needs-human / superseded edges missing from the declared table (task:status-flip-readings) — a real prerequisite the table needs before it can hard-gate, but not this slice; the decision layer must not reject live needs-human flows.",
+            "Rewiring the goal->develop final fan-in or any goal-branch topology change (doc:spec-goal-branch).",
+            "Changing TRANSITIONS or the gate verbs promote/retreat/complete (they stay; this slice adds a shared decision layer, it does not move the verbs)."
+          ]
+        },
+        "expected_mechanical_delta": "Before: `grep -nE 'LIFECYCLE_EDGES|lifecycleEdge\\(|isDeclaredIllegalPair' plugin packages` returns 6 lines, ALL inside gate/lifecycle.ts (definitions + comments) — zero non-definition callers; the two writers call setTaskStatus / retreatReadyToTodo directly; no carrier holds status-transition records. After: the same grep gains >=1 non-test caller of lifecycleEdge/isDeclaredIllegalPair outside lifecycle.ts (the decision layer); both applyPromotions and applyRevaluations route through it; the record carrier holds >=2 kinds of status-transition record (promote, retreat), each with task-id, from, to, actor and reason, with N counting only records produced AFTER the refactor lands (hard rule 4 推论三). Plus: `git branch --list 'goal/GOAL-030'` is non-empty, the refactor's commits are reachable from goal/GOAL-030 before the merge and from develop after it, and a branch-served preview advertises content the develop-served preview does not.",
+        "negative_control": "Three independent controls, each separating 'worked' from 'looks like it worked'. (1) Edge-table falsity: feed the decision layer a genuinely undeclared pair vs a declared-but-illegal pair (`isDeclaredIllegalPair`) and assert TWO DIFFERENT values, not a single 'not-allowed' — otherwise an absent/empty table is indistinguishable from a passing check (hard rule 3b). (2) Record is production, not echo: with an empty promotion/revaluation set assert ZERO records, then run a real promotion and assert exactly one record per flip — a count satisfiable only by injected data is a fixture echo, not a measurement (hard rule 4 推论三). (3) Branch isolation: serve a preview from develop and assert the branch-only content is ABSENT — if it also appears on develop, the 'branch ran its own code' claim is satisfied by content already on develop, i.e. it only looks like it worked (finding #4).",
+        "abandon_or_reconsider_condition": "Revise materially if any of: (a) the goal-branch mechanism fails on a REAL (code-bearing) direction in a way not fixable inside this slice — then decompose: land the decision layer on develop directly (candidate slice 2) and file the mechanism defect as a separate gap; (b) the decision layer cannot be introduced for the two writers without simultaneously rewiring the other 6 sites — then scope is not separable and must grow; (c) a carrier already records these flips (gate-log / gate-events) — then the record half of the concern is already satisfied and the slice reduces to the decision layer alone; (d) the declared table cannot be consulted without first filling the missing needs-human / superseded edges (task:status-flip-readings) because it would reject live flows — then table-fill becomes a prerequisite, not a non-goal.",
+        "harnessability": {
+          "inputs": "The two writer entry points (applyPromotions, applyRevaluations in plugin/scripts/ready-pool-check.ts) driven against a real task store containing >=1 promotion-eligible and >=1 revaluation-triggering task; the declared table (packages/quay/src/gate/lifecycle.ts LIFECYCLE_EDGES); a goal record with branch:true (goal/GOAL-030).",
+          "outputs": "A status write per flip that has passed the single decision layer; >=2 structured status-transition records (promote, retreat) in the carrier; a goal/GOAL-030 branch carrying the refactor and a preview reading that differs from develop's.",
+          "constraints": "Scope limited to the promote/retreat edges; fan-in and needs-human/branch-sync writers untouched; ONE decision function (not two parallel paths) so the record and the patch come from the same call and a bypass is detectable as a record/flip mismatch; the record goes to an existing carrier, not a new log.",
+          "acceptance": "grep: lifecycleEdge/isDeclaredIllegalPair has >=1 non-test caller outside lifecycle.ts; the carrier holds >=2 record kinds with task-id/from/to/actor/reason, N restricted to post-landing records; a develop-served preview lacks the branch-only reading while a branch-served preview has it.",
+          "failure_mode": "(1) A writer bypasses the layer — detectable because flips > records. (2) The record is emitted only from a fixture/injected seam — the production-carrier AC goes red (hard rule 4 推论三). (3) The decision layer collapses 'undeclared' into 'illegal' — the two-value negative control fails (hard rule 3b). (4) The goal-branch preview 'passes' on content already present on develop — the develop negative control must be red."
+        },
+        "minimum_sufficiency_rationale": "The concern names exactly two transitions (todo->ready, ready->todo) and two defects (no single decision layer; no structured per-transition record), plus one unproven mechanism (goal branch on a real direction). The two transitions are exactly the two writers T1 puts in scope; the table the decision layer must consult already exists with zero non-definition callers, so the layer is wiring, not invention; and the record reuses an existing gate-event carrier rather than a new log. The remaining 6 write sites are the same defect class but T1 deliberately excludes them, so covering them first would exceed the minimum. Delivering the refactor on goal/GOAL-030 is what satisfies the 'real development direction' clause, because the deliverable is real code (unlike GOAL-904/905's doc-only drills) — one slice, both clauses, no extra mechanism, and the unknown (does the branch/preview actually run its own code) is measured by an explicit AC rather than treated as a prerequisite investigation (findings:T1 #4).",
+        "evidence_refs": [
+          "code:status-writers",
+          "code:applyPromotions",
+          "code:applyRevaluations",
+          "code:patchStatusField",
+          "code:lifecycle-edge-table",
+          "code:edge-table-consumers",
+          "code:other-write-sites",
+          "findings:T1",
+          "doc:spec-goal-branch",
+          "goal:GOAL-905",
+          "task:status-flip-readings",
+          "arch:plugin-to-kernel",
+          "arch:plugin-outbound",
+          "arch:scc"
+        ]
+      },
+      "rep": 1,
+      "mode": "rich-bundle",
+      "scores": {
+        "case_id": "GOAL-030",
+        "stage": "B",
+        "slice": {
+          "matches_reference": true,
+          "matches_alternative": true,
+          "novel_not_in_reference": false,
+          "reference_overlap": 0.368,
+          "alternative_overlap": 0.429,
+          "note": "auxiliary: the historical slice is one defensible answer among several, not the sole target"
+        },
+        "granularity": {
+          "verdict": "too-broad",
+          "basis": "union",
+          "by_basis": {
+            "union": "too-broad",
+            "first": "too-fragmented"
+          },
+          "too_broad_overlap": 0.7,
+          "too_fragmented_overlap": 0.667
+        },
+        "investigate_or_goal": {
+          "candidate": "propose-goal",
+          "reference": "propose-goal",
+          "agreement": true,
+          "scored_at": "T1-decision-ready"
+        },
+        "scope_discipline": {
+          "non_goals_present": true,
+          "in_scope_count": 4,
+          "violation": false
+        },
+        "harnessability": {
+          "fields_present": "5/5",
+          "complete": true,
+          "missing": []
+        },
+        "expected_delta_quality": "quantified",
+        "falsifiability": "substantive",
+        "abandon_condition": "specific",
+        "evidence_citations_resolve": true,
+        "evidence_breadth": {
+          "distinct_refs_cited": 14,
+          "of_available": 14,
+          "refs_requested": true
+        },
+        "unsupported_mentions": {
+          "distinct_paths_mentioned": 6,
+          "not_in_dossier": 0,
+          "nonexistent_at_cutoff": 0,
+          "examples_not_shown": [],
+          "examples_nonexistent": [],
+          "note": "a proposed NEW file legitimately lands in nonexistent_at_cutoff; review examples, do not treat as a score"
+        },
+        "manual_review": null
+      },
+      "scores_first_basis": {
+        "case_id": "GOAL-030",
+        "stage": "B",
+        "slice": {
+          "matches_reference": false,
+          "matches_alternative": true,
+          "novel_not_in_reference": false,
+          "reference_overlap": 0.324,
+          "alternative_overlap": 0.429,
+          "note": "auxiliary: the historical slice is one defensible answer among several, not the sole target"
+        },
+        "granularity": {
+          "verdict": "too-fragmented",
+          "basis": "first",
+          "by_basis": {
+            "union": "too-broad",
+            "first": "too-fragmented"
+          },
+          "too_broad_overlap": 0.333,
+          "too_fragmented_overlap": 0.667
+        },
+        "investigate_or_goal": {
+          "candidate": "propose-goal",
+          "reference": "propose-goal",
+          "agreement": true,
+          "scored_at": "T1-decision-ready"
+        },
+        "scope_discipline": {
+          "non_goals_present": true,
+          "in_scope_count": 4,
+          "violation": false
+        },
+        "harnessability": {
+          "fields_present": "5/5",
+          "complete": true,
+          "missing": []
+        },
+        "expected_delta_quality": "quantified",
+        "falsifiability": "substantive",
+        "abandon_condition": "specific",
+        "evidence_citations_resolve": true,
+        "evidence_breadth": {
+          "distinct_refs_cited": 14,
+          "of_available": 14,
+          "refs_requested": true
+        },
+        "unsupported_mentions": {
+          "distinct_paths_mentioned": 6,
+          "not_in_dossier": 0,
+          "nonexistent_at_cutoff": 0,
+          "examples_not_shown": [],
+          "examples_nonexistent": [],
+          "note": "a proposed NEW file legitimately lands in nonexistent_at_cutoff; review examples, do not treat as a score"
+        },
+        "manual_review": null
+      }
+    },
+    {
+      "case_id": "GOAL-030",
+      "stage": "B",
+      "group": "B",
+      "provenance": {
+        "role": "ab-b",
+        "profile": "native",
+        "launcher": "/tmp/rich-ab-DWzIzI/B/launcher.sh",
+        "model_from_profile": "opus",
+        "model_flag_in_argv": "opus",
+        "gateway_env_dropped": true,
+        "prompt_sha256_16": "d08de0b9725e0a1b",
+        "prompt_chars": 44138,
+        "prompt_bytes": 55724,
+        "started_at": "2026-10-09T14:49:53.486Z",
+        "duration_ms": 74187
+      },
+      "state": "verified",
+      "error": null,
+      "exit_status": 0,
+      "response": {
+        "candidate_slices": [
+          {
+            "title": "S1: A single decision function for the promote and retreat edges in ready-pool-check, with a per-transition record, shipped as the first real branch-mode goal",
+            "description": "Add one transition-decision function next to the declared edge table in packages/quay/src/gate/lifecycle.ts, for example decideStatusTransition(from, to, actor). It looks up LIFECYCLE_EDGES and returns one of three values: {decision:'allowed', edge}, {decision:'refused', reason} or {decision:'not-evaluated', reason}. The third value covers an undeclared pair or a status that can't be read, so 'couldn't check' never looks the same as 'allowed' (hard rule 3b). Wire only the two writers named in T1 through it: the todo->ready write that applyPromotions reaches through setTaskStatus (ready-pool-check.ts:3666) and the ready->todo write that applyRevaluations reaches through retreatReadyToTodo (ready-pool-check.ts:3788). Each decision appends one structured record {ts, taskId, from, to, actor, decision, edgeKind, commitSha|null} to an append-only carrier under .quay/. patchStatusField stays as the byte-level patch primitive and does not decide anything. Deliver it on a goal with branch:true, so the work is also the first non-drill trip through the goal-branch mechanism.",
+            "why_plausible": "T1 says these two sites are the whole first-trial scope (findings:T1 #1, #3). LIFECYCLE_EDGES already declares both edges as current, with actors driver-promotion and retreat, but no writer reads the table yet (code:lifecycle-edge-table, code:edge-table-consumers: only lifecycle.ts itself). The table's own header calls wiring the writers a follow-up (lifecycle.ts:96-97). Status-flip forensics found no violations among todo/ready/done since 2026-09-20 (task:status-flip-readings), so wiring these two edges should refuse nothing legitimate. That makes it a low-risk real change, which is what a first real goal-branch run needs."
+          },
+          {
+            "title": "S2: Extend the decision layer to the four fan-in writers (ready->done and the done->ready reset)",
+            "description": "Route worker-fan-in.ts:1167/1175/1182/1221 through the same decision function and record carrier. This needs B2 handled first: on a goal branch, done means 'landed on mergeTarget' (doc:spec-goal-branch §1 ⑪, §5 B2).",
+            "why_plausible": "These are the busiest edges (ready->done 2168 in task:status-flip-readings), and they are in code:other-write-sites. But they interact with fan-in locking and mergeTarget semantics, and T1 #3 puts them out of scope for the first trial."
+          },
+          {
+            "title": "S3: Extend to needs-human and branch-sync alignment (driver-filters.ts:567, :909), after the edge table is completed",
+            "description": "Route markNeedsHuman and the doc/develop status-alignment write through the decision layer. First confirm the table's needs-human and superseded edges match production, because the forensics found the table was missing exactly those edges.",
+            "why_plausible": "task:status-flip-readings shows every out-of-table flip since 2026-09-20 involves needs-human or superseded. The alignment path at driver-filters.ts:567 writes any status, so it does not fit a single edge kind. T1 #3 also puts it out of scope."
+          }
+        ],
+        "recommended_first": "S1. It covers both halves of the concern with the smallest real change: (1) the two orchestration-layer status writes T1 names get one decision point and one structured record per transition; (2) the work runs as a branch-mode goal, which is the first real direction through the mechanism. GOAL-905 calls itself a drill and says it is 'not a real development direction' (goal:GOAL-905). The change is small and low-risk: two call sites, two edges the table already marks current, and no recent production flips that the table would refuse. So if the goal-branch run fails, the cause can be pinned on the mechanism and not on the refactor.",
+        "investigate_or_goal": "propose-goal",
+        "scope": {
+          "in_scope": [
+            "decideStatusTransition(from, to, actor) in packages/quay/src/gate/lifecycle.ts, beside LIFECYCLE_EDGES, returning allowed, refused or not-evaluated",
+            "Wire setTaskStatus's todo->ready patch (ready-pool-check.ts:3666, reached from applyPromotions) and retreatReadyToTodo's ready->todo patch (ready-pool-check.ts:3788, reached from applyRevaluations) through it",
+            "Append-only per-transition record carrier (one JSONL line per decision, including refused and not-evaluated ones), written before the status commit so the record cannot be skipped (hard rule 7)",
+            "A refused or not-evaluated result leaves the task file unchanged and shows up on the applied_promotions / applied_revaluations record (no silent drop)",
+            "The goal is opened with branch:true and every task carries goal_ac (SPEC ⑧). Pre-merge acceptance is evaluated on the goal's criterion worktree or preview instance, and a person triggers the merge with quay goal merge (SPEC ⑭, ⑱)",
+            "An explicit acceptance condition that the criterion worktree or preview runs the goal branch's code, not the main checkout's (T1 #4)"
+          ],
+          "non_goals": [
+            "The four fan-in status writers in worker-fan-in.ts (S2), which need B2 first",
+            "driver-filters.ts markNeedsHuman and branch-sync alignment (S3)",
+            "Adding or reclassifying edges in LIFECYCLE_EDGES, or changing legalForward/legalBack/TRANSITIONS (the 25-pair golden test stays byte-identical)",
+            "Moving patchStatusField out of plugin/scripts/task-ops.ts, or any other package relocation",
+            "Generic Provider-ABI task_write and lifecycle runPromote/runRetreat CAS paths",
+            "Fixing goal-branch mechanism defects found along the way as part of this goal. They get filed as separate gap tasks (SPEC ⑫) so this goal's acceptance stays meaningful"
+          ]
+        },
+        "expected_mechanical_delta": "Before (28c72f436f63): `git grep -nE 'LIFECYCLE_EDGES|lifecycleEdge\\(|decideStatusTransition' -- plugin` returns 0 lines (code:edge-table-consumers shows readers only inside lifecycle.ts). No per-transition record carrier exists. Promotion and retreat leave only git commits. After: (a) plugin/scripts/ready-pool-check.ts has exactly 2 call sites of the decision function, both on the code paths of patchStatusField:3666 and :3788. The other 6 patchStatusField call lines (worker-fan-in ×4, driver-filters ×2) are unchanged, because they are out of scope. (b) Measured on the production carrier, counting only after the merge to develop: for every promotion-driver commit 'todo→ready（promotion-driver 机械晋升）' after landing, there is one record with decision:'allowed', edgeKind:'promote', and a matching taskId and commitSha. The record count is ≥ N and equals the commit count in that window. Revaluation commits get the same check if any happen; if none happen in the window, report 'not observed', not 'pass'. (c) Architecture: arch:scc still reports exactly 1 multi-member SCC of size 6, and plugin/scripts does not join it. The plugin->packages/quay/src/gate edge count (2 in arch:plugin-outbound) rises by the new imports only. (d) Goal-branch: on develop, the new symbol is absent before merge (`git show develop:packages/quay/src/gate/lifecycle.ts | grep -c decideStatusTransition` = 0) and present on goal/<GOAL> and in the criterion worktree. After quay goal merge, the goal's landings form exactly one contiguous segment on develop (SPEC §2.1 control quantity).",
+        "negative_control": "Four controls, one per failure that could look like success. (1) Decision-layer mutation: in a fixture workspace, swap the table lookup for the todo->ready edge so it is undeclared. applyPromotions must then write no status, and both the carrier and applied_promotions must show not-evaluated, not allowed. Revert, and it goes back to allowed. An acceptance check that stays green under this mutation is only echoing output. (2) Bypass detector: replace one wired site with a direct patchStatusField call. The production check 'record count == promotion-commit count' must go red on the next promotion. If it stays green, the records are coming from somewhere other than the write path. (3) Production-carrier rule (hard rule 4, corollary 3): with fixture and injection seams turned off, the post-landing record count must still be ≥ N. Fixture-only greens do not count. (4) Branch-code control for the mechanism risk: the pre-merge acceptance check evaluated on the criterion worktree must pass there, and the same check run in the main checkout or on develop must fail before the merge. If both pass, the preview or criterion worktree is resolving to main-checkout code (for example through a bare-specifier or dynamic-import path), and the goal-branch run proved nothing.",
+        "abandon_or_reconsider_condition": "Revise S1 materially if any of these happen. (a) The decision layer refuses or returns not-evaluated for a todo->ready or ready->todo transition that production has always accepted. That would contradict the 'no core-state violations since 2026-09-20' reading in task:status-flip-readings, meaning the table is wrong for these edges and must be fixed (an S3-style table task) before wiring. (b) The criterion worktree or preview cannot be shown to run branch code (negative control 4 cannot fail). Then split the goal-branch proof into its own investigate step, and land S1 directly on develop as an ordinary goal, so a mechanism defect doesn't block the refactor or hide inside it. (c) The goal-branch run needs manual intervention to proceed (as with GOAL-904's defects or the early-achieved deadlock in SPEC §4.7). Record each case as a finding and gap task. If the run cannot finish without hand edits, conclude 'mechanism not yet proven on a real direction' and do not claim it was proven. (d) Importing the decision function from plugin/scripts into packages/quay/src/gate makes plugin/scripts join or enlarge SCC#1 in arch:scc. Then move the function to packages/quay/src/kernel, which plugin already imports 17 times (arch:plugin-to-kernel) and which is outside the SCC.",
+        "harnessability": {
+          "inputs": "The tree at the cutoff commit; LIFECYCLE_EDGES as declared; the two named call sites in ready-pool-check.ts; a goal record with branch:true and tasks carrying goal_ac; the production promotion-driver and its commit stream after landing.",
+          "outputs": "The decideStatusTransition function and tests (allowed/refused/not-evaluated, including a fixture where an undeclared pair gives not-evaluated); the two wired call sites; an append-only per-transition record carrier; goal/<GOAL> branch history, the criterion-worktree acceptance results, and one --no-ff merge commit on develop.",
+          "constraints": "Only the two in-scope sites change, and the other 6 patchStatusField call lines are byte-unchanged. The golden 25-pair lifecycle-edge-table test is unchanged. A record is written before the commit and recorded even when refused. No new multi-member SCC and no SCC growth. Pre-merge acceptance is evaluated on the goal's criterion worktree, and the merge is triggered by a person with no --override. The fan-in path, B2 semantics and the needs-human path are untouched.",
+          "acceptance": "Mechanical checks, each runnable as one command: (1) grep counts exactly 2 decision-function call sites in ready-pool-check.ts; (2) the mutation fixture flips allowed to not-evaluated and writes no status; (3) arch:scc reading is unchanged (one SCC, size 6); (4) before merge, the symbol is present on the goal branch and in the criterion worktree and absent on develop, and the same acceptance command differs between the two; (5) after merge, in the production carrier, the count of promotion records with decision:'allowed' after landing equals the count of promotion-driver commits in the same window and is ≥ N; (6) the goal's landings form exactly 1 contiguous segment on develop.",
+          "failure_mode": "Each failure has its own distinct outcome: a refused or not-evaluated record (table gap, fix the table); a production record count of 0 or below the commit count (bypass, or the carrier not wired in production); criterion and main checkout giving the same result (preview running main code, so the mechanism is unproven); a merge needing --override or hand edits (mechanism defect, filed as a gap task); SCC growth (move the function to the kernel). None of these collapses into 'green'."
+        },
+        "minimum_sufficiency_rationale": "Without a decision point plus a record, the concern isn't addressed. Without a real branch-mode run, the second half of the concern isn't addressed. S1 is the smallest thing that does both. It touches the two write sites T1 names. It uses an edge table that already exists and already classifies both edges as current, so it builds no new table. It adds one function, one carrier and two call-site changes. Anything smaller fails one of the two halves: wiring one edge leaves applyRevaluations as an ungoverned writer, and landing straight on develop leaves the mechanism unproven. Anything larger, such as the fan-in writers or needs-human, brings in B2 and the table-completeness risk, which would make a goal-branch failure impossible to attribute. One discrepancy to resolve during implementation: T1 #2 says patchStatusField has '4 call sites', while code:status-writers shows 8 call lines across 4 files (2 in ready-pool-check). Acceptance (1) counts the two in-scope sites by position, so the slice holds under either reading.",
+        "evidence_refs": [
+          "findings:T1",
+          "code:applyPromotions",
+          "code:applyRevaluations",
+          "code:status-writers",
+          "code:patchStatusField",
+          "code:lifecycle-edge-table",
+          "code:edge-table-consumers",
+          "code:other-write-sites",
+          "task:status-flip-readings",
+          "doc:spec-goal-branch",
+          "goal:GOAL-905",
+          "arch:scc",
+          "arch:plugin-outbound",
+          "arch:plugin-to-kernel"
+        ]
+      },
+      "rep": 1,
+      "mode": "rich-bundle",
+      "scores": {
+        "case_id": "GOAL-030",
+        "stage": "B",
+        "slice": {
+          "matches_reference": false,
+          "matches_alternative": true,
+          "novel_not_in_reference": false,
+          "reference_overlap": 0.279,
+          "alternative_overlap": 0.381,
+          "note": "auxiliary: the historical slice is one defensible answer among several, not the sole target"
+        },
+        "granularity": {
+          "verdict": "too-broad",
+          "basis": "union",
+          "by_basis": {
+            "union": "too-broad",
+            "first": "too-fragmented"
+          },
+          "too_broad_overlap": 0.5,
+          "too_fragmented_overlap": 0.667
+        },
+        "investigate_or_goal": {
+          "candidate": "propose-goal",
+          "reference": "propose-goal",
+          "agreement": true,
+          "scored_at": "T1-decision-ready"
+        },
+        "scope_discipline": {
+          "non_goals_present": true,
+          "in_scope_count": 6,
+          "violation": false
+        },
+        "harnessability": {
+          "fields_present": "5/5",
+          "complete": true,
+          "missing": []
+        },
+        "expected_delta_quality": "quantified",
+        "falsifiability": "substantive",
+        "abandon_condition": "specific",
+        "evidence_citations_resolve": true,
+        "evidence_breadth": {
+          "distinct_refs_cited": 14,
+          "of_available": 14,
+          "refs_requested": true
+        },
+        "unsupported_mentions": {
+          "distinct_paths_mentioned": 7,
+          "not_in_dossier": 0,
+          "nonexistent_at_cutoff": 0,
+          "examples_not_shown": [],
+          "examples_nonexistent": [],
+          "note": "a proposed NEW file legitimately lands in nonexistent_at_cutoff; review examples, do not treat as a score"
+        },
+        "manual_review": null
+      },
+      "scores_first_basis": {
+        "case_id": "GOAL-030",
+        "stage": "B",
+        "slice": {
+          "matches_reference": false,
+          "matches_alternative": true,
+          "novel_not_in_reference": false,
+          "reference_overlap": 0.265,
+          "alternative_overlap": 0.381,
+          "note": "auxiliary: the historical slice is one defensible answer among several, not the sole target"
+        },
+        "granularity": {
+          "verdict": "too-fragmented",
+          "basis": "first",
+          "by_basis": {
+            "union": "too-broad",
+            "first": "too-fragmented"
+          },
+          "too_broad_overlap": 0.2,
+          "too_fragmented_overlap": 0.667
+        },
+        "investigate_or_goal": {
+          "candidate": "propose-goal",
+          "reference": "propose-goal",
+          "agreement": true,
+          "scored_at": "T1-decision-ready"
+        },
+        "scope_discipline": {
+          "non_goals_present": true,
+          "in_scope_count": 6,
+          "violation": false
+        },
+        "harnessability": {
+          "fields_present": "5/5",
+          "complete": true,
+          "missing": []
+        },
+        "expected_delta_quality": "quantified",
+        "falsifiability": "substantive",
+        "abandon_condition": "specific",
+        "evidence_citations_resolve": true,
+        "evidence_breadth": {
+          "distinct_refs_cited": 14,
+          "of_available": 14,
+          "refs_requested": true
+        },
+        "unsupported_mentions": {
+          "distinct_paths_mentioned": 7,
+          "not_in_dossier": 0,
+          "nonexistent_at_cutoff": 0,
+          "examples_not_shown": [],
+          "examples_nonexistent": [],
+          "note": "a proposed NEW file legitimately lands in nonexistent_at_cutoff; review examples, do not treat as a score"
+        },
+        "manual_review": null
+      }
+    },
+    {
+      "case_id": "GOAL-031",
+      "stage": "A",
+      "group": "A",
+      "provenance": {
+        "role": "ab-a",
+        "profile": "gw",
+        "launcher": "claude-fjdac",
+        "model_from_profile": "v4.1flash-anthropic",
+        "model_flag_in_argv": "v4.1flash-anthropic",
+        "gateway_env_dropped": false,
+        "prompt_sha256_16": "1e53fa35408548c5",
+        "prompt_chars": 18497,
+        "prompt_bytes": 24020,
+        "started_at": "2026-10-09T14:57:45.454Z",
+        "duration_ms": 33519
+      },
+      "state": "verified",
+      "error": null,
+      "exit_status": 0,
+      "response": {
+        "concerns": [
+          {
+            "concern": "Task-status lifecycle vocabulary has no single owning module: the product declares it canonically in packages/quay/src/abi.ts (TaskStatus / TASK_STATUSES / TASK_STATUS / isTaskStatus), while the plugin tree keeps a deliberately duplicated, self-contained copy in plugin/scripts/task-status.ts, and the two are kept in sync only by a source comment ('keep the five words in lockstep with abi.ts's TASK_STATUSES'). ArchGuard's dispersion reading shows TWO disjoint typeName=TaskStatus groups — one whose file set includes plugin/scripts/task-status.ts, another whose file set includes packages/quay/src/kernel/task-transition.ts — i.e. the instrument already sees distinct declarations rather than one canonical type. GOAL-030 adds kernel/task-transition.ts as the single definition of the transition edges, which raises the prospect of a third locus for lifecycle data. Ownership of 'the legal status words and edges' is therefore split across product, plugin, and kernel scopes with no named owner.",
+            "evidence_refs": [
+              "code:abi-task-status",
+              "code:task-status-canonical",
+              "arch:literal-dispersion",
+              "goal:GOAL-030"
+            ],
+            "needs_investigation": true,
+            "what_to_investigate": "Determine whether any mechanical check ties abi.ts's TASK_STATUSES to task-status.ts's TASK_STATUSES (i.e. whether drift is detectable at all), and whether the kernel/task-transition.ts type becomes a third copy of the status/edge vocabulary or only consumes the plugin/product one. The plugin-copy comment asserts the duplication is forced by bundle isolation (paths outside plugin/ do not survive install scopes) — verify that boundary still holds before treating the duplication as removable.",
+            "confidence": "medium"
+          },
+          {
+            "concern": "Adoption of the named vocabulary is asymmetric across the product/plugin boundary. Eight plugin modules import ./task-status.ts, but 13 non-test sites still compare the raw 'needs-human' literal, and several of those live in files that do NOT import the vocabulary — goal-driver.ts (four comparisons), workflow-baseline-metrics.ts, workflow-replay.ts, and closure-lag-check.sh — plus product-side providers (packages/quay-github/src/github-client.ts, packages/quay/src/observation.ts). closure-lag-check.sh is a shell script and structurally cannot import a TypeScript constant, so at least one comparison site is outside the reach of the module entirely. The 'single source' is thus aspirational: real ownership of status semantics remains distributed over the plugin scripts, the product providers, and a shell gate.",
+            "evidence_refs": [
+              "code:needs-human-comparisons",
+              "code:task-status-importers",
+              "code:task-status-canonical"
+            ],
+            "needs_investigation": true,
+            "what_to_investigate": "Classify each of the 13 comparison sites as genuinely a TaskStatus comparison vs. a different domain, and confirm the constraints of the non-importing sites (shell script, product provider, kernel) before any slice is scoped — a slice that 'routes status writes through the vocabulary' must know which sites are addressable and which are out of reach by construction.",
+            "confidence": "medium"
+          },
+          {
+            "concern": "The literal 'needs-human' is overloaded across at least two distinct domains, so a bare literal comparison does not identify which vocabulary is being tested. Some sites are task-status comparisons (github-client.ts:646 `status === \"needs-human\"`), others are promotion-record / workflow-event comparisons (observation.ts:1451 `r.action === \"needs-human\"`; workflow-baseline-metrics.ts:643 `e.outcome === \"needs-human\"`; workflow-replay.ts:138 `e.outcome === \"needs-human\"`). ArchGuard's TaskStatus dispersion grouping is keyed on the value string, so it conflates these separate vocabularies under one TokenStatus-style reading. Canonicalization is therefore unclear not only in count but in kind.",
+            "evidence_refs": [
+              "code:needs-human-comparisons",
+              "arch:literal-dispersion"
+            ],
+            "needs_investigation": true,
+            "what_to_investigate": "Establish whether the task-status vocabulary and the workflow/promotion-outcome vocabulary are intentionally separate types (an outcome/action vocabulary is not a TaskStatus). If they are separate, the shared literal is a naming/ownership defect (one token, two owners) rather than a reuse opportunity, which changes what a slice may safely touch.",
+            "confidence": "medium"
+          }
+        ],
+        "overall_assessment": "concerns_found"
+      },
+      "rep": 1,
+      "mode": "rich-bundle",
+      "scores": {
+        "case_id": "GOAL-031",
+        "stage": "A",
+        "concerns_returned": 3,
+        "concern_validity": {
+          "any_matches_expected": true,
+          "per_concern": [
+            {
+              "concern": "Task-status lifecycle vocabulary has no single owning module: the product declares it canonically in packages/quay/src/abi.ts (TaskStatus / TASK_STATUSES / TASK",
+              "matches_expected": true,
+              "matched_reference": "possible duplicated/parallel vocabulary declarations between the packages tree and the plugin tree",
+              "overlap": 0.667,
+              "evidence_refs": 4,
+              "unsupported_evidence_refs": [],
+              "grounded": true,
+              "needs_investigation": true,
+              "confidence": "medium"
+            },
+            {
+              "concern": "Adoption of the named vocabulary is asymmetric across the product/plugin boundary. Eight plugin modules import ./task-status.ts, but 13 non-test sites still com",
+              "matches_expected": true,
+              "matched_reference": "dispersed literal for one status value across modules, canonical home unclear",
+              "overlap": 0.444,
+              "evidence_refs": 3,
+              "unsupported_evidence_refs": [],
+              "grounded": true,
+              "needs_investigation": true,
+              "confidence": "medium"
+            },
+            {
+              "concern": "The literal 'needs-human' is overloaded across at least two distinct domains, so a bare literal comparison does not identify which vocabulary is being tested. S",
+              "matches_expected": true,
+              "matched_reference": "dispersed literal for one status value across modules, canonical home unclear",
+              "overlap": 0.556,
+              "evidence_refs": 2,
+              "unsupported_evidence_refs": [],
+              "grounded": true,
+              "needs_investigation": true,
+              "confidence": "medium"
+            }
+          ]
+        },
+        "grounding": {
+          "all_cited_refs_resolve": true,
+          "unsupported_claims": []
+        },
+        "ranking": {
+          "valid_concern_ranked_first": true
+        },
+        "abstention": {
+          "abstained": false,
+          "acceptable_here": false,
+          "verdict": "proposed_concerns"
+        },
+        "evidence_breadth": {
+          "distinct_refs_cited": 6,
+          "of_available": 7
+        },
+        "unsupported_mentions": {
+          "distinct_paths_mentioned": 13,
+          "not_in_dossier": 0,
+          "nonexistent_at_cutoff": 0,
+          "examples_not_shown": [],
+          "examples_nonexistent": [],
+          "note": "a proposed NEW file legitimately lands in nonexistent_at_cutoff; review examples, do not treat as a score"
+        },
+        "man": null
+      }
+    },
+    {
+      "case_id": "GOAL-031",
+      "stage": "A",
+      "group": "B",
+      "provenance": {
+        "role": "ab-b",
+        "profile": "native",
+        "launcher": "/tmp/rich-ab-Cul4Pe/B/launcher.sh",
+        "model_from_profile": "opus",
+        "model_flag_in_argv": "opus",
+        "gateway_env_dropped": true,
+        "prompt_sha256_16": "1e53fa35408548c5",
+        "prompt_chars": 18497,
+        "prompt_bytes": 24020,
+        "started_at": "2026-10-09T14:58:18.981Z",
+        "duration_ms": 25474
+      },
+      "state": "verified",
+      "error": null,
+      "exit_status": 0,
+      "response": {
+        "concerns": [
+          {
+            "concern": "The task-status vocabulary has two canonical owners: packages/quay/src/abi.ts and plugin/scripts/task-status.ts. The plugin copy says it must be kept 'in lockstep' with abi.ts, but nothing in the evidence enforces that. The only guarantee is a comment, which hard rule 9 says is not enough. A third place has also appeared: the dispersion reading finds 'needs-human' in packages/quay/src/kernel/task-transition.ts:72, the new kernel module from GOAL-030. So kernel, ABI and plugin each hold the word, and none of them is shown to derive from another.",
+            "evidence_refs": [
+              "code:task-status-canonical",
+              "code:abi-task-status",
+              "arch:literal-dispersion",
+              "goal:GOAL-030"
+            ],
+            "needs_investigation": true,
+            "what_to_investigate": "1) Does any executable check compare TASK_STATUSES in task-status.ts with abi.ts? None is shown, but the dossier does not cover this, so not seeing one does not prove it is absent. 2) Does task-transition.ts:72 import TASK_STATUS from abi.ts or hardcode the string? 3) Does the bundle boundary (the plugin is staged separately) really rule out a generated or vendored copy, which would remove the hand-kept duplicate?",
+            "confidence": "medium"
+          },
+          {
+            "concern": "The named constant exists, but 'needs-human' task-status comparisons still use the raw literal in modules that do not import it. goal-driver.ts has 5 task-status comparisons (lines 2088, 2098, 2319, 2383 and 2443) and does not appear in the list of task-status.ts importers. github-client.ts:646 compares against the raw string inside the product package, even though abi.ts says consumers should import TASK_STATUS. This contradicts abi.ts's own claim that the vocabulary was consolidated so consumers never write a raw lifecycle literal.",
+            "evidence_refs": [
+              "code:needs-human-comparisons",
+              "code:task-status-importers",
+              "code:abi-task-status",
+              "code:task-status-canonical"
+            ],
+            "needs_investigation": false,
+            "what_to_investigate": "Before cutting a slice, confirm that each goal-driver site really compares a task status (the variable names suggest so) and that github-client.ts:646 is a mapping into Task['status'], not a GitHub-side label vocabulary.",
+            "confidence": "medium"
+          },
+          {
+            "concern": "'needs-human' is overloaded across at least four vocabularies, and the dispersion instrument merges them all into one TaskStatus count. The evidence shows task status (goal-driver task.status), goal status (goal-driver.ts:823 compares r.status with active/achieved/needs-human), promotion-outcome action (observation.ts:1451 r.action), and workflow-event outcome (workflow-baseline-metrics.ts:643/776, workflow-replay.ts:138, closure-lag-check.sh:251). Because ArchGuard labels every one of these typeName=TaskStatus, the dispersion=4 reading is not an ownership measurement until the vocabularies are separated. There are two more instrument caveats. The default-scope run returned 0, which is an empty reading, not a finding of no dispersion. The comparison grep also misses one dispersion location: task-transition.ts:72 appears in the ArchGuard locations but not in the grep output. Who owns each of these vocabularies, and whether 'needs-human' should be shared between them, is undecided.",
+            "evidence_refs": [
+              "arch:literal-dispersion",
+              "code:needs-human-comparisons"
+            ],
+            "needs_investigation": true,
+            "what_to_investigate": "Classify each of the 13 grep hits and 8 ArchGuard locations by the vocabulary it compares against (task status, goal status, outcome or action), then count only the real TaskStatus uses. Find out whether the outcome and action vocabularies have their own named types, or whether they borrow the task-status word on purpose, for example by recording a transition to needs-human.",
+            "confidence": "medium"
+          }
+        ],
+        "overall_assessment": "concerns_found"
+      },
+      "rep": 1,
+      "mode": "rich-bundle",
+      "scores": {
+        "case_id": "GOAL-031",
+        "stage": "A",
+        "concerns_returned": 3,
+        "concern_validity": {
+          "any_matches_expected": false,
+          "per_concern": [
+            {
+              "concern": "The task-status vocabulary has two canonical owners: packages/quay/src/abi.ts and plugin/scripts/task-status.ts. The plugin copy says it must be kept 'in lockst",
+              "matches_expected": false,
+              "matched_reference": null,
+              "overlap": 0.333,
+              "evidence_refs": 4,
+              "unsupported_evidence_refs": [],
+              "grounded": true,
+              "needs_investigation": true,
+              "confidence": "medium"
+            },
+            {
+              "concern": "The named constant exists, but 'needs-human' task-status comparisons still use the raw literal in modules that do not import it. goal-driver.ts has 5 task-statu",
+              "matches_expected": false,
+              "matched_reference": null,
+              "overlap": 0.333,
+              "evidence_refs": 4,
+              "unsupported_evidence_refs": [],
+              "grounded": true,
+              "needs_investigation": false,
+              "confidence": "medium"
+            },
+            {
+              "concern": "'needs-human' is overloaded across at least four vocabularies, and the dispersion instrument merges them all into one TaskStatus count. The evidence shows task ",
+              "matches_expected": false,
+              "matched_reference": null,
+              "overlap": 0.222,
+              "evidence_refs": 2,
+              "unsupported_evidence_refs": [],
+              "grounded": true,
+              "needs_investigation": true,
+              "confidence": "medium"
+            }
+          ]
+        },
+        "grounding": {
+          "all_cited_refs_resolve": true,
+          "unsupported_claims": []
+        },
+        "ranking": {
+          "valid_concern_ranked_first": false
+        },
+        "abstention": {
+          "abstained": false,
+          "acceptable_here": false,
+          "verdict": "proposed_concerns"
+        },
+        "evidence_breadth": {
+          "distinct_refs_cited": 6,
+          "of_available": 7
+        },
+        "unsupported_mentions": {
+          "distinct_paths_mentioned": 11,
+          "not_in_dossier": 0,
+          "nonexistent_at_cutoff": 0,
+          "examples_not_shown": [],
+          "examples_nonexistent": [],
+          "note": "a proposed NEW file legitimately lands in nonexistent_at_cutoff; review examples, do not treat as a score"
+        },
+        "man": "manual_review_suggested"
+      }
+    },
+    {
+      "case_id": "GOAL-031",
+      "stage": "B",
+      "group": "A",
+      "provenance": {
+        "role": "ab-a",
+        "profile": "gw",
+        "launcher": "claude-fjdac",
+        "model_from_profile": "v4.1flash-anthropic",
+        "model_flag_in_argv": "v4.1flash-anthropic",
+        "gateway_env_dropped": false,
+        "prompt_sha256_16": "b519548a63bad929",
+        "prompt_chars": 40584,
+        "prompt_bytes": 49278,
+        "started_at": "2026-10-09T14:58:44.458Z",
+        "duration_ms": 107756
+      },
+      "state": "verified",
+      "error": null,
+      "exit_status": 0,
+      "response": {
+        "candidate_slices": [
+          {
+            "title": "Migrate goal-driver.ts's genuine task.status `needs-human` literals to TASK_STATUS.NEEDS_HUMAN",
+            "description": "Add `import { TASK_STATUS } from \"./task-status.ts\"` to plugin/scripts/goal-driver.ts and replace the 5 raw comparisons against the `\"needs-human\"` literal that read a real task.status — isTaskStuck (2088), isTractionStatus (2098), and the three `inFlight/traction.every(t => t.status === \"needs-human\")` sites (2319/2383/2443) — with TASK_STATUS.NEEDS_HUMAN. Leave goal-driver.ts:823 (`r.status`, a GOAL-AC status field) untouched. Behavior-preserving: the constant resolves to the same string.",
+            "why_plausible": "findings:T1:3-4 name exactly one genuine un-migrated module (goal-driver.ts) with 5 real task.status comparisons; [code:needs-human-in-goal-driver] and [code:goal-driver-status-fields] localize them to symbols; [code:task-status-importers] shows goal-driver.ts is the one module NOT yet importing the canonical vocabulary while its peers (driver-filters.ts, ready-pool-check.ts, worker-driver.ts) already do."
+          },
+          {
+            "title": "Pin the `needs-human` literal dispersion at its floor with a mechanical ratchet",
+            "description": "Add a checker under plugin/scripts (wired into the scoped gate) that counts distinct non-test modules carrying a task.status `needs-human` literal and fails when a new module appears, with an explicit allowlist: task-status.ts (canonical declaration), github-client.ts (independent provider package, cannot statically import abi.ts — fixed exemption), and observation.ts + workflow-baseline-metrics.ts (different vocabularies).",
+            "why_plausible": "findings:T1:2,3,5 fix the permanent residues and the floor of 4; the repo's stated direction is 'single source of truth + executable invariants over prose' (CLAUDE.md; docs/proposals/exp5-crystallization-strategy.md), and without a guard the one-off fix can silently regress. GOAL-030 (AC-339) is the precedent for a mechanical archguard before/after the change."
+          },
+          {
+            "title": "Migrate the whole task.status vocabulary in goal-driver.ts in one pass",
+            "description": "Convert the sibling `todo`/`ready` literals too (isTaskStuck:2089-2090, isTractionStatus:2098) so no touched predicate mixes a constant with a raw literal and goal-driver.ts becomes a full task-status.ts consumer.",
+            "why_plausible": "Keeps each migrated predicate internally consistent and avoids the awkward `status === \"todo\" || status === \"ready\" || TASK_STATUS.NEEDS_HUMAN`; but `todo` (dispersion 6) and `ready` (7) are different values, outside the confirmed `needs-human` concern, so the extra scope buys coherence at the cost of minimum-sufficiency."
+          }
+        ],
+        "recommended_first": "Slice 1 — migrate goal-driver.ts's 5 genuine task.status `needs-human` comparisons to TASK_STATUS.NEEDS_HUMAN (add the `./task-status.ts` import; leave the GOAL-AC comparison at line 823 and all look-alike files untouched).",
+        "investigate_or_goal": "propose-goal",
+        "scope": {
+          "in_scope": [
+            "plugin/scripts/goal-driver.ts: add `import { TASK_STATUS } from \"./task-status.ts\"`.",
+            "Replace the 5 genuine task.status comparisons against the raw `\"needs-human\"` literal with TASK_STATUS.NEEDS_HUMAN: isTaskStuck (2088), isTractionStatus (2098), and the three `.every(t => t.status === \"needs-human\")` sites (2319/2383/2443). Line numbers are from the a8abf1a6dd0f snapshot; anchor by symbol.",
+            "Preserve behavior exactly (TASK_STATUS.NEEDS_HUMAN === \"needs-human\"); existing isTaskStuck / isTractionStatus unit tests unchanged and green.",
+            "A position-based (not keyword) check evidencing the raw comparison literal is gone from those 5 sites while the GOAL-AC site remains a raw literal."
+          ],
+          "non_goals": [
+            "⛔ Do not touch goal-driver.ts:823 (`r.status === \"needs-human\"`) — reads a GOAL-AC status field, a different vocabulary (findings:T1:4).",
+            "⛔ Do not touch task-status.ts or abi.ts — the canonical declarations themselves (findings:T1:1).",
+            "⛔ Do not touch github-client.ts — fixed exemption: an independent provider package cannot statically import abi.ts, and its literal shape is pinned by its own needle test (findings:T1:2).",
+            "⛔ Do not touch observation.ts or workflow-baseline-metrics.ts — false positives comparing a promotion-outcome 'action' field and a workflow 'outcome' field, not task.status (findings:T1:3).",
+            "⛔ Do not migrate the sibling todo/ready/done task.status literals in goal-driver.ts — different values, outside the confirmed concern (deferred to candidate 3).",
+            "⛔ Do not re-baseline the ArchGuard floor or change the achievable <=4 target (findings:T1:5,6).",
+            "⛔ No runtime behavior change; no new abstraction beyond the existing TASK_STATUS constant.",
+            "⛔ Out of scope pending classification: closure-lag-check.sh:251 and workflow-replay.ts:138 compare `status`/`outcome` but were not classified by T1 — resolve them in the guard's allowlist, do not migrate blind."
+          ]
+        },
+        "expected_mechanical_delta": "Position-based (not keyword), same tree, same tool, before/after: in plugin/scripts/goal-driver.ts the count of comparison-position raw `\"needs-human\"` literals is 6 -> 1 — per [code:needs-human-comparisons] the sites are 823, 2088, 2098, 2319, 2383, 2443 before, and only 823 (the GOAL-AC `r.status` site, byte-identical) after. Concretely: `TASK_STATUS.NEEDS_HUMAN` occurrences in goal-driver.ts 0 -> 5; the `./task-status.ts` import edge 0 -> 1 ([code:task-status-importers] lists 8 importers, goal-driver.ts not among them); and on the ArchGuard literal-dispersion layer (typeName=TaskStatus, value=\"needs-human\") the group loses goal-driver.ts and settles at its floor of 4 residues {task-status.ts, github-client.ts, observation.ts, workflow-baseline-metrics.ts} ([arch:literal-dispersion]; findings:T1:5).",
+        "negative_control": "Because TASK_STATUS.NEEDS_HUMAN has the SAME string value, neither an output/behavior test nor a bare `git grep needs-human` can distinguish 'migrated' from 'not migrated' (the substring survives both inside the constant and at line 823) — so the control must be positional/symbolic, with three arms: (1) injected-literal arm — on a scratch copy revert one site (e.g. 2319) to `t.status === \"needs-human\"`; the check MUST go red, proving it measures position, not presence; (2) import-only arm — add the import but change none of the 5 sites; the check MUST stay red (count stays 6), proving 'import added' != 'migrated'; (3) over-migration arm — also replace line 823; the check MUST flag it, proving the fix is scoped to task.status and does not erase a different vocabulary. Behavioral equivalence is separately confirmed by the unchanged isTaskStuck / isTractionStatus tests still passing.",
+        "abandon_or_reconsider_condition": "Abandon or materially revise the slice if any of: (a) a position-based scan finds a genuine task.status `needs-human` comparison in a module T1 did not classify (e.g. closure-lag-check.sh:251 or a provider) — floor-of-4 (findings:T1:5) is then falsified and scope must re-open; (b) importing ./task-status.ts into goal-driver.ts trips a layering / import-graph rule or introduces a bundle-duplication/drift problem — pick a different canonical carrier; (c) the ArchGuard needs-human dispersion reading does NOT change after the edit (i.e., goal-driver.ts was never counted — note the reading's own scope caveat, run-1 empty) — the metric structurally cannot move, so re-derive the measurement before claiming success (hard rule 4); (d) closer inspection shows the 5 cited sites read mixed vocabularies rather than task.status.",
+        "harnessability": {
+          "inputs": "The static tree at the fixed commit a8abf1a6dd0f (plugin/scripts/goal-driver.ts, plugin/scripts/task-status.ts, packages/quay/src/abi.ts); a position-based comparison scan over non-test sources (the pattern in [code:needs-human-comparisons]); and the ArchGuard literal-dispersion reading — layer=literal-dispersion, typeName=TaskStatus, value=\"needs-human\" — invoked with sources=[plugin/scripts,packages] because the tool's default scope returned empty.",
+          "outputs": "An integer count of comparison-position raw `\"needs-human\"` literals in goal-driver.ts (6 before -> 1 after); a symbol count for TASK_STATUS.NEEDS_HUMAN (0 -> 5); presence/absence of the `./task-status.ts` import edge in goal-driver.ts; and membership of goal-driver.ts in the ArchGuard needs-human dispersion group (present -> absent).",
+          "constraints": "Purely static and deterministic; same-tree, same-tool before/after so the delta is comparable; must exclude comments and string literals and count by position (hard rule 2) — the substring survives inside the constant's value, so a keyword grep is inadmissible; must run under the existing plugin harness (scripts/test.sh scoped gate) with no new heavy dependency; the edit itself must be behavior-preserving (no runtime change).",
+          "acceptance": "goal-driver.ts's comparison-position raw `\"needs-human\"` count == 1, and that 1 is exactly line 823 (the GOAL-AC `r.status` site, byte-identical); the 5 genuine sites read TASK_STATUS.NEEDS_HUMAN; `import { TASK_STATUS } from \"./task-status.ts\"` is present; isTaskStuck / isTractionStatus tests pass unchanged; the check goes red on both the injected-literal and the import-only variants.",
+          "failure_mode": "Hard rule 3b: the check must not return a value indistinguishable from 'clean' when it cannot read goal-driver.ts — if the file moved/renamed or the comparison positions cannot be parsed it must emit NOT-EVALUATED, not pass. The dominant false-pass is a keyword grep: since the constant expands to the same `\"needs-human\"` string, a substring check passes whether or not the migration happened, and passes even for a file that merely re-aliases the string locally — hence the check must require the canonical symbol TASK_STATUS.NEEDS_HUMAN, not merely the absence of the literal."
+        },
+        "minimum_sufficiency_rationale": "One module, one vocabulary value, five sites, one import — reusing the already-existing canonical constant, so no new abstraction is introduced. T1 has already collapsed the genuine-vs-look-alike ambiguity to exactly this residue (findings:T1:1-4), so this is the smallest edit that removes the last genuine consumer of the bare task.status `needs-human` literal and reaches the achievable floor of 4 without re-baselining. Every wider move is deferrable and unnecessary to close the confirmed concern: the sibling todo/ready/done literals (different values — candidate 3), the other modules (exempted or false-positive vocabularies), and a dispersion ratchet (candidate 2). Every narrower move — a subset of the 5 sites — leaves the module half-migrated and the concern open.",
+        "evidence_refs": [
+          "findings:T1",
+          "code:needs-human-comparisons",
+          "code:needs-human-in-goal-driver",
+          "code:goal-driver-status-fields",
+          "code:task-status-canonical",
+          "code:task-status-importers",
+          "code:abi-task-status",
+          "arch:literal-dispersion",
+          "code:needs-human-in-github-client",
+          "code:needs-human-in-observation",
+          "code:needs-human-in-baseline-metrics",
+          "goal:GOAL-030"
+        ]
+      },
+      "rep": 1,
+      "mode": "rich-bundle",
+      "scores": {
+        "case_id": "GOAL-031",
+        "stage": "B",
+        "slice": {
+          "matches_reference": true,
+          "matches_alternative": true,
+          "novel_not_in_reference": false,
+          "reference_overlap": 0.465,
+          "alternative_overlap": 0.526,
+          "note": "auxiliary: the historical slice is one defensible answer among several, not the sole target"
+        },
+        "granularity": {
+          "verdict": "too-broad",
+          "basis": "union",
+          "by_basis": {
+            "union": "too-broad",
+            "first": "too-broad"
+          },
+          "too_broad_overlap": 0.8,
+          "too_fragmented_overlap": 0.333
+        },
+        "investigate_or_goal": {
+          "candidate": "propose-goal",
+          "reference": "propose-goal",
+          "agreement": true,
+          "scored_at": "T1-decision-ready"
+        },
+        "scope_discipline": {
+          "non_goals_present": true,
+          "in_scope_count": 4,
+          "violation": true
+        },
+        "harnessability": {
+          "fields_present": "5/5",
+          "complete": true,
+          "missing": []
+        },
+        "expected_delta_quality": "quantified",
+        "falsifiability": "substantive",
+        "abandon_condition": "specific",
+        "evidence_citations_resolve": true,
+        "evidence_breadth": {
+          "distinct_refs_cited": 12,
+          "of_available": 13,
+          "refs_requested": true
+        },
+        "unsupported_mentions": {
+          "distinct_paths_mentioned": 15,
+          "not_in_dossier": 1,
+          "nonexistent_at_cutoff": 0,
+          "examples_not_shown": [
+            "docs/proposals/exp5-crystallization-strategy.md"
+          ],
+          "examples_nonexistent": [],
+          "note": "a proposed NEW file legitimately lands in nonexistent_at_cutoff; review examples, do not treat as a score"
+        },
+        "manual_review": null
+      },
+      "scores_first_basis": {
+        "case_id": "GOAL-031",
+        "stage": "B",
+        "slice": {
+          "matches_reference": true,
+          "matches_alternative": false,
+          "novel_not_in_reference": false,
+          "reference_overlap": 0.357,
+          "alternative_overlap": 0.263,
+          "note": "auxiliary: the historical slice is one defensible answer among several, not the sole target"
+        },
+        "granularity": {
+          "verdict": "too-broad",
+          "basis": "first",
+          "by_basis": {
+            "union": "too-broad",
+            "first": "too-broad"
+          },
+          "too_broad_overlap": 0.6,
+          "too_fragmented_overlap": 0.333
+        },
+        "investigate_or_goal": {
+          "candidate": "propose-goal",
+          "reference": "propose-goal",
+          "agreement": true,
+          "scored_at": "T1-decision-ready"
+        },
+        "scope_discipline": {
+          "non_goals_present": true,
+          "in_scope_count": 4,
+          "violation": true
+        },
+        "harnessability": {
+          "fields_present": "5/5",
+          "complete": true,
+          "missing": []
+        },
+        "expected_delta_quality": "quantified",
+        "falsifiability": "substantive",
+        "abandon_condition": "specific",
+        "evidence_citations_resolve": true,
+        "evidence_breadth": {
+          "distinct_refs_cited": 12,
+          "of_available": 13,
+          "refs_requested": true
+        },
+        "unsupported_mentions": {
+          "distinct_paths_mentioned": 15,
+          "not_in_dossier": 1,
+          "nonexistent_at_cutoff": 0,
+          "examples_not_shown": [
+            "docs/proposals/exp5-crystallization-strategy.md"
+          ],
+          "examples_nonexistent": [],
+          "note": "a proposed NEW file legitimately lands in nonexistent_at_cutoff; review examples, do not treat as a score"
+        },
+        "manual_review": null
+      }
+    },
+    {
+      "case_id": "GOAL-031",
+      "stage": "B",
+      "group": "B",
+      "provenance": {
+        "role": "ab-b",
+        "profile": "native",
+        "launcher": "/tmp/rich-ab-Cul4Pe/B/launcher.sh",
+        "model_from_profile": "opus",
+        "model_flag_in_argv": "opus",
+        "gateway_env_dropped": true,
+        "prompt_sha256_16": "b519548a63bad929",
+        "prompt_chars": 40584,
+        "prompt_bytes": 49278,
+        "started_at": "2026-10-09T15:00:32.225Z",
+        "duration_ms": 72574
+      },
+      "state": "verified",
+      "error": null,
+      "exit_status": 0,
+      "response": {
+        "candidate_slices": [
+          {
+            "title": "S1: Move goal-driver.ts's 5 task.status needs-human comparisons onto TASK_STATUS.NEEDS_HUMAN",
+            "description": "Import { TASK_STATUS } from \"./task-status.ts\" in plugin/scripts/goal-driver.ts. Then replace the raw \"needs-human\" literal in the five comparisons that read a task's status: :2088 (isTaskStuck), :2098 (isTractionStatus), and :2319, :2383 and :2443 (the inFlight/traction .every(...) checks). Leave :823 (inScopeAcsOf, which reads the status of GOAL/AC records) exactly as it is. Behaviour does not change: the constant has the same string value.",
+            "why_plausible": "Finding 4 of findings:T1 says goal-driver.ts is the only real unmigrated residue. code:goal-driver-status-fields shows that 2088/2319/2383/2443 compare `task.status` or `t.status` on task objects, and 2098 is the traction-status helper for tasks. Line 823 compares `r.status` next to the GOAL/AC words 'active' and 'achieved'. code:task-status-importers shows 8 plugin scripts already import TASK_STATUS from ./task-status.ts, so the pattern is established and works in the plugin bundle. code:task-status-canonical documents the module's purpose as 'so consumers never write a raw lifecycle literal'."
+          },
+          {
+            "title": "S2: Pin the reviewed residue set with a mechanical check",
+            "description": "Add a check, or extend an existing one, so that bare `\"needs-human\"` comparisons are only allowed in a fixed, reviewed list. The list has two parts. Permanent residues: task-status.ts (the declaration), github-client.ts (the exemption), and observation.ts and workflow-baseline-metrics.ts (they compare action and outcome values, not task status). Separate-vocabulary residues: goal-driver.ts:823 (GOAL/AC status). Any new hit outside the list turns the check red.",
+            "why_plausible": "Findings 3 and 5 of findings:T1 say the realistic floor is 4 files and that the false positives are permanent. Without a pinned list, every future ArchGuard run (arch:literal-dispersion) will reopen the same classification question. The ArchGuard reading also does not list goal-driver.ts at all, so it cannot detect this residue coming back."
+          },
+          {
+            "title": "S3: Classify the hits that T1 did not cover",
+            "description": "Three locations hold a needs-human comparison but appear in none of the T1 findings. packages/quay/src/kernel/task-transition.ts:72 is a kernel file listed in the second smell group of arch:literal-dispersion. plugin/scripts/closure-lag-check.sh:251 is JS embedded in a shell script. plugin/scripts/workflow-replay.ts:138 compares an e.outcome field, so it is probably the same false-positive vocabulary as workflow-baseline-metrics.ts. Decide for each whether it is a real task-status comparison.",
+            "why_plausible": "code:needs-human-comparisons and arch:literal-dispersion show these locations exist. findings:T1 does not classify them. task-transition.ts belongs to the active GOAL-030 work, so changing it now would collide with that goal's branch."
+          }
+        ],
+        "recommended_first": "S1. It is the only change that actually reduces the concern: per T1 finding 4, these are the only real unmigrated consumers. It is one file, five replacements of a literal with a constant of identical value, plus one import that 8 sibling scripts already use. No behaviour changes, no new module, no new import edge to anything that would count as a layering change (task-status.ts sits inside plugin/scripts), and no change to the ArchGuard floor. Do S2 next, so the classification behind S1 becomes an executable list instead of prose. S3 should wait until GOAL-030 merges, because task-transition.ts is inside that goal's scope.",
+        "investigate_or_goal": "propose-goal",
+        "scope": {
+          "in_scope": [
+            "plugin/scripts/goal-driver.ts: add `import { TASK_STATUS } from \"./task-status.ts\"`",
+            "plugin/scripts/goal-driver.ts:2088, :2098, :2319, :2383, :2443: replace `\"needs-human\"` with `TASK_STATUS.NEEDS_HUMAN` in the comparisons on task status",
+            "Run the existing goal-driver tests that cover isTaskStuck, isTractionStatus and the stalled/in-flight classification, unchanged, through scripts/test.sh scoped to goal-driver.ts"
+          ],
+          "non_goals": [
+            "Do not touch goal-driver.ts:823 (inScopeAcsOf). It compares GOAL/AC record status, a different vocabulary (T1 finding 4). Rewriting it to TASK_STATUS.NEEDS_HUMAN would wrongly tie the AC lifecycle to the task lifecycle.",
+            "Do not migrate the 'todo'/'ready'/'done' literals in goal-driver.ts (for example :2089, :2090, and the todo/ready on :2098). The concern is about needs-human; widening the change would blur the before/after count.",
+            "Do not edit observation.ts:1443/1451, workflow-baseline-metrics.ts:643/776 or workflow-replay.ts:138. They compare action/outcome fields, not task status (T1 finding 3).",
+            "Do not edit github-client.ts:646. It has an existing exemption: an independent provider package cannot import abi.ts, and a needle test pins the literal (T1 finding 2).",
+            "Do not edit task-status.ts or abi.ts. They are the canonical declarations (T1 finding 1).",
+            "Do not edit packages/quay/src/kernel/task-transition.ts. It is inside GOAL-030's scope while that goal is active (see S3).",
+            "Do not treat the ArchGuard dispersion number as the success measure. Do not chase a target of ≤2: T1 finding 6 says that target was corrected because it cannot be reached.",
+            "Do not open a goal branch (branch:true). The change does not alter behaviour, and GOAL-905/GOAL-030 show a goal branch adds expensive suite runs at merge time. It is not needed for a constant substitution."
+          ]
+        },
+        "expected_mechanical_delta": "All counts use `git grep` on plugin/scripts/goal-driver.ts at the pre-change commit (a8abf1a6dd0f) and at the post-change tip. (1) Lines comparing a task's status to the raw needs-human literal, `grep -nE '(task|t)\\.status === \"needs-human\"|status === \"todo\" \\|\\| status === \"ready\" \\|\\| status === \"needs-human\"'`, go from 5 to 0. (2) Lines comparing the AC record status, `grep -n 'r.status === \"needs-human\"'`, stay at 1 (the :823 line). (3) Lines containing `TASK_STATUS.NEEDS_HUMAN` go from 0 to 5. (4) Files matching the ./task-status.ts import grep (code:task-status-importers) go from 8 to 9. (5) The repo-wide needs-human comparison grep (code:needs-human-comparisons) goes from 13 lines to 8. (6) ArchGuard literal-dispersion for value 'needs-human', run with sources=[plugin/scripts, packages] (run 2 parameters; run 1 returned an empty scope), stays at dispersion 4 and must not go up. This is a guard, not the success measure: goal-driver.ts never appears in that reading.",
+        "negative_control": "Three controls, each one able to come out false. (a) Check the predicate on a known-positive sample: run grep (1) against a8abf1a6dd0f and confirm it returns exactly the five lines 2088, 2098, 2319, 2383 and 2443, printing the first 3 hits. This rules out a zero after the change that only means the predicate was wrong. (b) Check against over-migration: grep (2) must still return :823 with the literal. If :823 also became TASK_STATUS.NEEDS_HUMAN, the change would look like full success (zero literals) while being semantically wrong. (c) Check the constant is actually used, not just imported: in a scratch copy of the worktree, change TASK_STATUS.NEEDS_HUMAN's value in task-status.ts (for example to 'needs-humanX'). The goal-driver tests that check isTaskStuck and isTractionStatus on a needs-human task must then fail. The same mutation on the pre-change commit must leave them passing. If the tests pass after the mutation on the new code, the comparisons are not reading the constant.",
+        "abandon_or_reconsider_condition": "Any one of these sends the slice back for revision. (1) Reading the five lines in context shows that one of them compares something other than a task's status, for example a GOAL/AC record that reaches the function as `t`; that would contradict T1 finding 4, so redo the classification first. (2) Importing ./task-status.ts creates a new cycle or breaks the plugin bundle (an import-graph-check failure, or build-plugin-dist failing). That is unlikely, since 8 siblings already import it. (3) The goal-driver tests change any classification outcome; a substitution of an identical value must not change behaviour. (4) S3 finds that task-transition.ts:72 or closure-lag-check.sh:251 is a real task-status comparison. Then T1's statement that goal-driver.ts holds the only residue is wrong, and the goal's exit condition must be widened (after GOAL-030 merges) rather than marked achieved. (5) GOAL-030's branch turns out to modify goal-driver.ts. Then rebase after it merges instead of racing it.",
+        "harnessability": {
+          "inputs": "plugin/scripts/goal-driver.ts at develop tip; plugin/scripts/task-status.ts (unchanged); reference commit a8abf1a6dd0f for the before reading.",
+          "outputs": "A single commit touching plugin/scripts/goal-driver.ts only: 1 import plus 5 line edits. The task Evidence records the before/after counts (1) through (6) with the first 3 hits of each, and the output of the mutation control.",
+          "constraints": "Edit exactly those 5 comparison lines. Line :823 must keep its literal byte for byte. Do not change any todo/ready/done literal. Touches = goal-driver.ts plus its existing test file(s). No branch:true goal. The work happens in a private task worktree per DIR-027.",
+          "acceptance": "Exit 0 only when all of these hold: grep (1) returns 0 on the tip and 5 on a8abf1a6dd0f; grep (2) returns 1 on both; grep (3) returns 5; the import grep returns 9 files; ts typecheck, import-graph-check and the scoped goal-driver tests pass; the mutation control (c) turns the tests red on the tip. Exit 1 with a same-line CAUSE= naming the failed count otherwise. Exit 3 (not evaluated) when a8abf1a6dd0f or the test file cannot be read.",
+          "failure_mode": "These failures look the same as success, so each needs a control. A predicate that silently matches nothing (caught by control a). Over-migrating :823 (caught by control b). A dead import with literals left in place under a different spelling, such as single quotes (caught by control c, and by grep (1) using both quote styles). Treating 'ArchGuard dispersion unchanged at 4' as proof of progress: the reading is blind to goal-driver.ts, so its flat value proves nothing about this slice."
+        },
+        "minimum_sufficiency_rationale": "The concern asks whether the dispersed literal is real unmigrated consumers or look-alikes. T1 has answered that: three of the four ArchGuard files are by design or false positives (findings 1–3), and the real residue is the 5 task-status comparisons in goal-driver.ts (finding 4). Migrating those 5 fully closes the genuine part of the concern. Anything less leaves real consumers unmigrated. Anything more either changes correct code (the false positives and the exemption), changes a different vocabulary (:823), widens to other status words that are not part of the concern, or enters GOAL-030's active scope (task-transition.ts). The value is identical, so the slice needs no behaviour proof beyond the existing tests plus the mutation control. That is also why it needs no goal branch.",
+        "evidence_refs": [
+          "findings:T1",
+          "code:goal-driver-status-fields",
+          "code:needs-human-in-goal-driver",
+          "code:needs-human-comparisons",
+          "code:task-status-canonical",
+          "code:task-status-importers",
+          "arch:literal-dispersion",
+          "code:needs-human-in-observation",
+          "code:needs-human-in-baseline-metrics",
+          "code:needs-human-in-github-client",
+          "code:abi-task-status",
+          "goal:GOAL-030",
+          "goal:GOAL-905"
+        ]
+      },
+      "rep": 1,
+      "mode": "rich-bundle",
+      "scores": {
+        "case_id": "GOAL-031",
+        "stage": "B",
+        "slice": {
+          "matches_reference": true,
+          "matches_alternative": false,
+          "novel_not_in_reference": false,
+          "reference_overlap": 0.423,
+          "alternative_overlap": 0.308,
+          "note": "auxiliary: the historical slice is one defensible answer among several, not the sole target"
+        },
+        "granularity": {
+          "verdict": "too-broad",
+          "basis": "union",
+          "by_basis": {
+            "union": "too-broad",
+            "first": "too-broad"
+          },
+          "too_broad_overlap": 0.6,
+          "too_fragmented_overlap": 0.667
+        },
+        "investigate_or_goal": {
+          "candidate": "propose-goal",
+          "reference": "propose-goal",
+          "agreement": true,
+          "scored_at": "T1-decision-ready"
+        },
+        "scope_discipline": {
+          "non_goals_present": true,
+          "in_scope_count": 3,
+          "violation": false
+        },
+        "harnessability": {
+          "fields_present": "5/5",
+          "complete": true,
+          "missing": []
+        },
+        "expected_delta_quality": "quantified",
+        "falsifiability": "substantive",
+        "abandon_condition": "specific",
+        "evidence_citations_resolve": true,
+        "evidence_breadth": {
+          "distinct_refs_cited": 13,
+          "of_available": 13,
+          "refs_requested": true
+        },
+        "unsupported_mentions": {
+          "distinct_paths_mentioned": 14,
+          "not_in_dossier": 0,
+          "nonexistent_at_cutoff": 0,
+          "examples_not_shown": [],
+          "examples_nonexistent": [],
+          "note": "a proposed NEW file legitimately lands in nonexistent_at_cutoff; review examples, do not treat as a score"
+        },
+        "manual_review": null
+      },
+      "scores_first_basis": {
+        "case_id": "GOAL-031",
+        "stage": "B",
+        "slice": {
+          "matches_reference": false,
+          "matches_alternative": false,
+          "novel_not_in_reference": true,
+          "reference_overlap": 0.293,
+          "alternative_overlap": 0.211,
+          "note": "auxiliary: the historical slice is one defensible answer among several, not the sole target"
+        },
+        "granularity": {
+          "verdict": "too-broad",
+          "basis": "first",
+          "by_basis": {
+            "union": "too-broad",
+            "first": "too-broad"
+          },
+          "too_broad_overlap": 0.6,
+          "too_fragmented_overlap": 0.333
+        },
+        "investigate_or_goal": {
+          "candidate": "propose-goal",
+          "reference": "propose-goal",
+          "agreement": true,
+          "scored_at": "T1-decision-ready"
+        },
+        "scope_discipline": {
+          "non_goals_present": true,
+          "in_scope_count": 3,
+          "violation": false
+        },
+        "harnessability": {
+          "fields_present": "5/5",
+          "complete": true,
+          "missing": []
+        },
+        "expected_delta_quality": "quantified",
+        "falsifiability": "substantive",
+        "abandon_condition": "specific",
+        "evidence_citations_resolve": true,
+        "evidence_breadth": {
+          "distinct_refs_cited": 13,
+          "of_available": 13,
+          "refs_requested": true
+        },
+        "unsupported_mentions": {
+          "distinct_paths_mentioned": 14,
+          "not_in_dossier": 0,
+          "nonexistent_at_cutoff": 0,
+          "examples_not_shown": [],
+          "examples_nonexistent": [],
+          "note": "a proposed NEW file legitimately lands in nonexistent_at_cutoff; review examples, do not treat as a score"
+        },
+        "manual_review": null
+      }
+    },
+    {
+      "case_id": "GOAL-032",
+      "stage": "A",
+      "group": "A",
+      "provenance": {
+        "role": "ab-a",
+        "profile": "gw",
+        "launcher": "claude-fjdac",
+        "model_from_profile": "v4.1flash-anthropic",
+        "model_flag_in_argv": "v4.1flash-anthropic",
+        "gateway_env_dropped": false,
+        "prompt_sha256_16": "6190ca3e6baca83a",
+        "prompt_chars": 29439,
+        "prompt_bytes": 44202,
+        "started_at": "2026-10-09T15:01:44.806Z",
+        "duration_ms": 70355
+      },
+      "state": "verified",
+      "error": null,
+      "exit_status": 0,
+      "response": {
+        "concerns": [
+          {
+            "concern": "Cross-boundary duplicate verdict-parser with no canonical owner. parseFidelityVerdict (packages/quay/src/criterion-fidelity.ts:71-87) and parseSemanticSufficiencyVerdict (plugin/scripts/goal-driver.ts:1142-1161) are structurally identical: accept a bare token, otherwise scan from the last non-empty line upward for a JSON object, and default to 'not-evaluated' on failure. They differ only in the verdict vocabulary ('faithful'/'vacuous' vs 'covered'/'insufficient') and the return type. So two real instances of the same decision function sit on opposite sides of the packages↔plugin packaging boundary, and no verdict unit exists in packages/quay/src/kernel/ (code:kernel-dir) that could own it. GOAL-031 explicitly carved this exact pair out of scope ('⛔ 不碰 goal-driver.ts::parseSemanticSufficiencyVerdict 与 criterion-fidelity.ts::parseFidelityVerdict 的重复问题'), i.e. it is a recognized, deliberately-deferred duplicate rather than an oversight. Ownership is unassigned.",
+            "evidence_refs": [
+              "arch:duplicates",
+              "code:packages-side-member",
+              "code:plugin-side-member",
+              "code:kernel-dir",
+              "goal:GOAL-031",
+              "doc:methodology"
+            ],
+            "needs_investigation": true,
+            "what_to_investigate": "Enumerate the actual callers of each function and confirm the two are behaviorally identical on every input (the dossier shows structural identity, not semantic equivalence). Then resolve the ownership shape: the methodology's canonical-source test (single definition site + callers switched + no reverse-import of the old primitive) cannot be met by a plain shared import here, because GOAL-031 records that the plugin is packaged independently and cannot statically import packages source, and its precedent for a shared vocabulary is a packages-canonical definition plus a self-contained plugin-tree copy (plugin/scripts/task-status.ts). Decide whether kernel is the right home or whether placing it there recreates the same cross-boundary problem, and identify the canonical home of the two verdict vocabularies themselves.",
+            "confidence": "high"
+          },
+          {
+            "concern": "Identical gate-script copies across the experiments and shipped-plugin trees. arch:duplicates row 4 shows drain-scheduler.ts 'main' duplicated with identical line ranges (85-144) in experiments/quay-perpetual-stream/scripts/ and plugin/gate-scripts/; rows 10 and 14 show drain-dispose-corruption-check.ts 'main' (95-121) and checkBodyIntegrity (67-88) likewise duplicated across the same two trees. Byte-identical ranges point to a copy/generated relationship, but which copy is canonical (or whether one is a vendor/build output of the other) is not determinable from the dossier alone. This may simply be intentional vendoring, which would make it non-actionable.",
+            "evidence_refs": [
+              "arch:duplicates"
+            ],
+            "needs_investigation": true,
+            "what_to_investigate": "Determine whether plugin/gate-scripts/ is generated/vendored from experiments/quay-perpetual-stream/scripts/ (or the reverse) and whether a sync mechanism guards the pair; if they are independently maintained, identify the canonical source and check for drift. Confirm whether this is deliberate vendoring before treating it as an ownership defect.",
+            "confidence": "low"
+          }
+        ],
+        "overall_assessment": "concerns_found"
+      },
+      "rep": 1,
+      "mode": "rich-bundle",
+      "scores": {
+        "case_id": "GOAL-032",
+        "stage": "A",
+        "concerns_returned": 2,
+        "concern_validity": {
+          "any_matches_expected": true,
+          "per_concern": [
+            {
+              "concern": "Cross-boundary duplicate verdict-parser with no canonical owner. parseFidelityVerdict (packages/quay/src/criterion-fidelity.ts:71-87) and parseSemanticSufficien",
+              "matches_expected": true,
+              "matched_reference": "a duplicate implementation of one concept exists across the packages/plugin boundary and has no single owner",
+              "overlap": 0.6,
+              "evidence_refs": 6,
+              "unsupported_evidence_refs": [],
+              "grounded": true,
+              "needs_investigation": true,
+              "confidence": "high"
+            },
+            {
+              "concern": "Identical gate-script copies across the experiments and shipped-plugin trees. arch:duplicates row 4 shows drain-scheduler.ts 'main' duplicated with identical li",
+              "matches_expected": false,
+              "matched_reference": null,
+              "overlap": 0.2,
+              "evidence_refs": 1,
+              "unsupported_evidence_refs": [],
+              "grounded": true,
+              "needs_investigation": true,
+              "confidence": "low"
+            }
+          ]
+        },
+        "grounding": {
+          "all_cited_refs_resolve": true,
+          "unsupported_claims": []
+        },
+        "ranking": {
+          "valid_concern_ranked_first": true
+        },
+        "abstention": {
+          "abstained": false,
+          "acceptable_here": false,
+          "verdict": "proposed_concerns"
+        },
+        "evidence_breadth": {
+          "distinct_refs_cited": 6,
+          "of_available": 7
+        },
+        "unsupported_mentions": {
+          "distinct_paths_mentioned": 7,
+          "not_in_dossier": 0,
+          "nonexistent_at_cutoff": 0,
+          "examples_not_shown": [],
+          "examples_nonexistent": [],
+          "note": "a proposed NEW file legitimately lands in nonexistent_at_cutoff; review examples, do not treat as a score"
+        },
+        "man": "manual_review_suggested"
+      }
+    },
+    {
+      "case_id": "GOAL-032",
+      "stage": "A",
+      "group": "B",
+      "provenance": {
+        "role": "ab-b",
+        "profile": "native",
+        "launcher": "/tmp/rich-ab-Cul4Pe/B/launcher.sh",
+        "model_from_profile": "opus",
+        "model_flag_in_argv": "opus",
+        "gateway_env_dropped": true,
+        "prompt_sha256_16": "6190ca3e6baca83a",
+        "prompt_chars": 29439,
+        "prompt_bytes": 44202,
+        "started_at": "2026-10-09T15:02:55.162Z",
+        "duration_ms": 31227
+      },
+      "state": "verified",
+      "error": null,
+      "exit_status": 0,
+      "response": {
+        "concerns": [
+          {
+            "concern": "The same 'parse an LLM verdict from claude -p stdout' logic has two separate homes, one per package tree. packages/quay/src/criterion-fidelity.ts:71-87 (parseFidelityVerdict) and plugin/scripts/goal-driver.ts:1142-1161 (parseSemanticSufficiencyVerdict) are structurally identical, and ArchGuard puts them in one duplicate group (hash 0cac7de2dd5ee549). Both functions do the same things in the same order: a non-zero exit code returns not-evaluated; a bare token is accepted; otherwise they scan lines from the last one upward for a JSON {verdict} object; if nothing matches they return not-evaluated. Only the two-word vocabulary differs (faithful/vacuous versus covered/insufficient). The shared part is a three-state decision rule ('could not read it' must never become a pass). Today nobody owns that rule. If one copy is fixed or tightened, the other drifts. GOAL-031 named this duplicate as a non-goal and excluded a shared Verdict primitive, so it is a known item that was deferred, not a new finding. Methodology §3 only allows a boundary to become a named abstraction once a second real instance exists. Here two real instances already exist, so that precondition is met.",
+            "evidence_refs": [
+              "arch:duplicates",
+              "code:packages-side-member",
+              "code:plugin-side-member",
+              "goal:GOAL-031",
+              "doc:methodology"
+            ],
+            "needs_investigation": true,
+            "what_to_investigate": "1. Where can the owner live? GOAL-031 says plugin/scripts cannot statically import packages source because the plugin is bundled on its own. GOAL-030, however, records live plugin/scripts→kernel edges (strength 14→16). Find out whether plugin code may import packages/quay/src/kernel/, which already holds small shared primitives such as regex-escape.ts, write-json-atomic.ts and shape-sections.ts, or whether it must follow the vendored-copy pattern used by plugin/scripts/task-status.ts. 2. Is the shared core really parametric in the vocabulary only? Check the callers and tests for both functions. 3. Count the callers of each function, so a slice can pin 'callers converged' to a number and avoid a shell move.",
+            "confidence": "high"
+          },
+          {
+            "concern": "Two scripts exist as byte-identical copies under two roots: experiments/quay-perpetual-stream/scripts/ and plugin/gate-scripts/. They are drain-scheduler.ts (main, lines 85-144 in both) and drain-dispose-corruption-check.ts (main 95-121 and checkBodyIntegrity 67-88 in both). Identical line ranges suggest a copy or promotion with no recorded canonical source. It is unclear which copy is authoritative and whether the experiments copy is still live or left behind after the move to the shipped plugin.",
+            "evidence_refs": [
+              "arch:duplicates"
+            ],
+            "needs_investigation": true,
+            "what_to_investigate": "1. Find which copy has live callers and which is dead. 2. Check whether a sync or vendoring step intentionally keeps them identical, the way sync-vendor.sh does for the status vocabulary. 3. If one copy has no callers, this is cleanup rather than an ownership question.",
+            "confidence": "low"
+          }
+        ],
+        "overall_assessment": "concerns_found"
+      },
+      "rep": 1,
+      "mode": "rich-bundle",
+      "scores": {
+        "case_id": "GOAL-032",
+        "stage": "A",
+        "concerns_returned": 2,
+        "concern_validity": {
+          "any_matches_expected": true,
+          "per_concern": [
+            {
+              "concern": "The same 'parse an LLM verdict from claude -p stdout' logic has two separate homes, one per package tree. packages/quay/src/criterion-fidelity.ts:71-87 (parseFi",
+              "matches_expected": true,
+              "matched_reference": "a duplicate implementation of one concept exists across the packages/plugin boundary and has no single owner",
+              "overlap": 0.5,
+              "evidence_refs": 5,
+              "unsupported_evidence_refs": [],
+              "grounded": true,
+              "needs_investigation": true,
+              "confidence": "high"
+            },
+            {
+              "concern": "Two scripts exist as byte-identical copies under two roots: experiments/quay-perpetual-stream/scripts/ and plugin/gate-scripts/. They are drain-scheduler.ts (ma",
+              "matches_expected": false,
+              "matched_reference": null,
+              "overlap": 0.1,
+              "evidence_refs": 1,
+              "unsupported_evidence_refs": [],
+              "grounded": true,
+              "needs_investigation": true,
+              "confidence": "low"
+            }
+          ]
+        },
+        "grounding": {
+          "all_cited_refs_resolve": true,
+          "unsupported_claims": []
+        },
+        "ranking": {
+          "valid_concern_ranked_first": true
+        },
+        "abstention": {
+          "abstained": false,
+          "acceptable_here": false,
+          "verdict": "proposed_concerns"
+        },
+        "evidence_breadth": {
+          "distinct_refs_cited": 5,
+          "of_available": 7
+        },
+        "unsupported_mentions": {
+          "distinct_paths_mentioned": 8,
+          "not_in_dossier": 0,
+          "nonexistent_at_cutoff": 0,
+          "examples_not_shown": [],
+          "examples_nonexistent": [],
+          "note": "a proposed NEW file legitimately lands in nonexistent_at_cutoff; review examples, do not treat as a score"
+        },
+        "man": null
+      }
+    },
+    {
+      "case_id": "GOAL-032",
+      "stage": "B",
+      "group": "A",
+      "provenance": {
+        "role": "ab-a",
+        "profile": "gw",
+        "launcher": "claude-fjdac",
+        "model_from_profile": "v4.1flash-anthropic",
+        "model_flag_in_argv": "v4.1flash-anthropic",
+        "gateway_env_dropped": false,
+        "prompt_sha256_16": "51dae438ae677a15",
+        "prompt_chars": 51570,
+        "prompt_bytes": 69537,
+        "started_at": "2026-10-09T15:03:26.391Z",
+        "duration_ms": 40394
+      },
+      "state": "verified",
+      "error": null,
+      "exit_status": 0,
+      "response": {
+        "candidate_slices": [
+          {
+            "title": "Extract the domain-agnostic three-state verdict parser into kernel; converge both call sites (verdict word lists stay call-site data)",
+            "description": "Add one kernel module (e.g. packages/quay/src/kernel/verdict-parse.ts — kebab-case matching the existing kernel listing) exporting a single generic, fail-closed parser: (stdout, exitCode, {positive, negative}) -> positive | negative | 'not-evaluated', with the algorithm exactly as it exists today (non-zero exit ⇒ not-evaluated; bare token; else scan lines from the last upward for the first parseable JSON object whose `verdict` is one of the two accepted values; anything else ⇒ not-evaluated, never falling back to the positive value). packages/quay/src/criterion-fidelity.ts:parseFidelityVerdict and plugin/scripts/goal-driver.ts:parseSemanticSufficiencyVerdict each become a one-statement thin wrapper delegating to it with their own token pair (faithful/vacuous vs covered/insufficient). Plugin reaches kernel by relative path, exactly like the 16 existing plugin/scripts kernel imports. Both callers' orchestration is untouched, and both parsers keep their exported names so every existing test stays unedited."
+          },
+          {
+            "title": "Declare the duplication intentional-and-bounded: pin the two parsers to each other with a cross-file equivalence test, extract nothing",
+            "description": "Leave both implementations in place and add a test that runs a shared input corpus (bare token, JSON on last line, explanatory prose, empty output, non-zero exit, unknown verdict value, non-JSON) through both functions and asserts they agree modulo the token pair. Rationale: the algorithm is safety-critical fail-closed logic and duplication is deliberate, so an equivalence pin bounds drift without adding kernel surface."
+          },
+          {
+            "title": "Parser-family sweep: fold every judge-stdout/stdout-scan duplicate in arch:duplicates into shared helpers",
+            "description": "Treat the whole duplicate family as one slice — the two drain-scheduler/drain-dispose-corruption-check `main` copies (identical line ranges 85-144 / 95-121), expandGlob x2, parseFlags x3, pathCandidates x2, plus the criterion-fidelity/goal-driver pair."
+          }
+        ],
+        "recommended_first": "Slice 1 — extract the single generic fail-closed parser into kernel and make both domain parsers thin wrappers over it. T1 findings establish that exactly one thing is duplicated (the domain-agnostic parse algorithm) while the legal-value word list is data belonging to each domain (finding 3), and that kernel placement is reachable from both trees without a reverse edge (finding 5, corroborated by the 16 existing plugin/scripts → kernel imports in code:plugin-imports-packages and by kernel being the only packages subtree plugin already imports). Slice 2 leaves two copies of fail-closed verdict logic free to drift and does not retire the flagged group; Slice 3 mixes ownership classes — the experiments/↔plugin/gate-scripts pairs are byte-identical packaging mirrors (identical line ranges), not ownership drift, so folding them in would make the slice un-verifiable as a single thing.",
+        "investigate_or_goal": "propose-goal",
+        "scope": {
+          "in_scope": [
+            "New kernel module exporting the generic three-state fail-closed parser, parameterized by the accepted positive/negative verdict tokens (algorithm unchanged; tokens are arguments, not logic).",
+            "packages/quay/src/criterion-fidelity.ts: parseFidelityVerdict delegates to it with the fidelity token pair; exported name and signature unchanged so its callers (criterionFidelityVerdict, and the tests) are untouched.",
+            "plugin/scripts/goal-driver.ts: parseSemanticSufficiencyVerdict delegates to it with the sufficiency token pair; exported name and signature unchanged so sampleSemanticSufficiency and the tests are untouched.",
+            "Verification readings: before/after archguard_detect_duplicates on the same parameters, plus a single-definition-site count for the algorithm fragment across packages+plugin, plus import-graph/typecheck/suite.",
+            "If the goal is filed as branch:true by prior precedent, the same branch-self-host identity evidence shape used by the two prior pilots."
+          ],
+          "non_goals": [
+            "Do NOT touch either caller's orchestration: the synchronous, uncached, injected-judge-seam path in criterionFidelityVerdict (with its mechanical pre-filter) stays as-is; the async, two-sample-agreement-before-caching path in sampleSemanticSufficiency, including its judge-unavailable/judge-unparseable/samples-disagree cause split, stays as-is (T1 finding 4).",
+            "Do NOT merge the two verdict vocabularies or the FidelityVerdict / SufficiencyVerdict types; the word lists stay owned by their domains (T1 finding 3).",
+            "Do NOT move the token lists into the kernel as canonical declarations — that would be exactly the 'shell move'/wrong-owner failure the methodology warns about.",
+            "Do NOT touch the other 85 duplicate groups in arch:duplicates: the kernel-sibling resolution-check/fixture triples and pairs, the experiments/↔plugin/gate-scripts byte-identical mirrors (drain-scheduler, drain-dispose-corruption-check), parseFlags x3 across bin/ entry points, expandGlob, pathCandidates, checkBodyIntegrity, and the rest.",
+            "Do NOT create any packages→plugin edge; do NOT introduce a cross-tree vendoring/copy step to make the kernel reachable from plugin.",
+            "Do NOT edit the existing test assertions for either parser; a green unmodified suite is part of the evidence, not an obstacle.",
+            "No directory-cycle cleanup, no file splitting, no changes to goal-driver/worker-driver mechanisms."
+          ]
+        },
+        "expected_mechanical_delta": "Before (commit 273ef15b1ebe): archguard_detect_duplicates with minStatements=3 minTokens=30 includeTests=false returns 86 groups, one of which is the named pair `parseFidelityVerdict / parseSemanticSufficiencyVerdict` (hash 0cac7de2dd5ee549, stmts=12/13, tokens=197/198, savable=20) pointing at packages/quay/src/criterion-fidelity.ts:71-87 and plugin/scripts/goal-driver.ts:1142-1161. After: the same run returns 85 groups and that named group (and its hash) is absent — the two wrappers are single-statement functions, below the minStatements=3 floor, so they cannot reappear as a new group. Corroborating counts, all of which must move: (a) a single-definition-site count of the distinctive candidate-scan fragment (the `filter(Boolean).reverse()` line) across packages+plugin goes 2 → 1, and the remaining site is in the kernel module; (b) the code:kernel-dir listing gains one file; (c) the code:plugin-imports-packages kernel-import census goes 16 → 17 lines (new import in goal-driver.ts) while packages→plugin reverse edges stay at 0 and cycle/kernelViolations ratchets do not regress; (d) typecheck and scripts/test.sh green with BOTH parser test files (criterion-fidelity-historical-case.test.mjs, goal-sufficiency-semantic-covered.test.mjs — the 21 assertions listed in code:parser-call-sites) passing byte-unchanged.",
+        "negative_control": "Sabotage the thing the change is supposed to have achieved, then check both halves separately. (1) Mutation control: change one behaviour in the kernel parser — e.g. make unreadable input return the positive token instead of 'not-evaluated', or drop the last-line-upward JSON scan — and require BOTH test files to go red. If only the fidelity tests go red and the sufficiency tests stay green, the sufficiency path is still served by a surviving local copy and the change is cosmetic (the methodology's 'shell move' trap). (2) Erasure control: remove the kernel export and require both files to fail to resolve/typecheck — if either still passes, an inlined copy remains. (3) The declared negative control on the metric itself: re-run detect_duplicates with the ORIGINAL parameters and confirm the named group's absence is not an artifact of having lowered a threshold — assert groups go 86 → 85, not that a threshold changed. (4) Scope negative control: take a member of an untouched group (e.g. the experiments/↔plugin/gate-scripts drain-scheduler `main` copy) and confirm it is still flagged — proving the sweep did not silently broaden.",
+        "abandon_or_reconsider_condition": "Abandon or materially revise if any of these hold: (a) kernel reachability from plugin/scripts fails or would require a copy/vendoring step or a packages→plugin edge — then T1 finding 5 is falsified and fall back to Slice 2 (a cross-file equivalence pin) rather than forcing the extraction; (b) extraction cannot preserve behaviour without editing an existing test assertion — that means the two implementations differ somewhere beyond the token pair (T1 finding 1 falsified) and the pair must be re-examined before any unification; (c) a caller turns out to depend on something the generic signature cannot carry (e.g. token ordering/normalization, or a third verdict value) — then the word list is not the only data and the slice must be re-cut; (d) after both call sites converge the named group is still reported (e.g. the wrappers are not below the analyzer floor) — per the methodology's 'metric obeys scope' rule, re-check the numeric target and the analyzer parameters, and do not enlarge scope to make the number move; (e) the kernel-module addition turns out to require touching goal-branch/cross-branch artefacts not on develop (the GOAL-031 cross-branch trap) — then defer until the dependency is merged.",
+        "harnessability": {
+          "inputs": "A git tree pinned at a fixed commit (273ef15b1ebe was the cutoff reading), the two named parser files, the kernel directory listing, and the archguard_detect_duplicates run at fixed parameters (minStatements=3, minTokens=30, includeTests=false) over the TypeScript scope.",
+          "outputs": "One new kernel module; two thin wrappers with unchanged exported names/signatures; and the recorded readings — before/after duplicate-group list (86 → 85, named group and hash absent), single-definition-site count of the candidate-scan fragment (2 → 1), kernel-dir listing, plugin→kernel import census (16 → 17) with packages→plugin still 0, typecheck + test-suite result, and the unmodified parser test files' output.",
+          "constraints": "Plugin may reach kernel only by the existing relative-path import style; no packages→plugin edge; both callers' orchestration byte-unchanged; both token lists stay at their call sites; existing tests unedited; tri-state exit-code discipline on every AC (0 achieved / 1 not achieved with same-line CAUSE= / 3 not evaluated when the prerequisite module is not landed); work performed on a goal branch worktree per the established branch:true flow, never racing the loop on master.",
+          "acceptance": "Mechanical and falsifiable: the named duplicate group (0cac7de2dd5ee549) is gone from a same-parameter re-run while an untouched group from arch:duplicates is still present; the algorithm fragment has exactly one definition site across packages+plugin and it lives in kernel; both parser test files pass with zero edits; import-graph ratchets do not regress and no packages→plugin edge appears; the kernel parser's mutation makes both test files red.",
+          "failure_mode": "Exit 3 / not-evaluated when the prerequisite is absent (kernel module not landed on the evaluated tree, worktree not created, analyzer unavailable) — never reported as pass. Exit 1 with a same-line CAUSE= for each of: duplicate group still present (cause=group-still-flagged), a second surviving definition site (cause=second-definition-site:<path>), a packages→plugin edge or a regressed ratchet (cause=import-direction-regressed), any existing parser test requiring modification (cause=behaviour-not-preserved), and mutation failing to red only one side (cause=cosmetic-convergence). The dangerous mode to defeat is a green wrapper-shaped duplicate that no longer shares behaviour — which is exactly what the mutation control is for."
+        },
+        "minimum_sufficiency_rationale": "The confirmed concern is a flagged duplicate group whose equivalence was undetermined; T1 has now settled that question in both directions at once. Findings 1-3 say the duplicated artefact is the domain-agnostic algorithm ('parse judge stdout into a three-state verdict, failing closed when unreadable') and that the only divergence is which two literals count as the positive/negative values — i.e. the word list is DATA, not logic. Finding 4 says the surrounding orchestration genuinely differs and must stay different. So the minimum-sufficient change is exactly the convergence of the algorithm, parameterized by the call-site data — nothing wider. No new mechanism, no new vocabulary, no shared type is required: finding 5 plus the existing 16-line plugin→kernel import census show the destination already exists and is already reachable from both trees in the sanctioned direction (as GOAL-030 established for a much larger move, and as GOAL-031's much smaller caller-only convergence confirmed for the cheap case). This is the smaller of the two: one new kernel definition plus two one-statement wrappers, with the mechanism (branch:true goal, before/after archguard readings, negative control, self-host evidence) already proven twice on this exact repository shape. It is also cleanly verifiable in a way the alternatives are not: the withdrawn analyzer group is a countable, already-recorded before/after, and the existing 21 parser assertions give a behaviour-preservation oracle that must stay green unedited — the strongest available evidence that the extraction moved the logic rather than the text. Slice 2 would leave two live copies of fail-closed verdict parsing (the very thing whose divergence would be silent) and retire no group; Slice 3 would absorb packaging mirrors and unrelated helpers into one slice, making 'it worked' unmeasurable as a single claim.",
+        "evidence_refs": [
+          "arch:duplicates",
+          "code:packages-side-member",
+          "code:plugin-side-member",
+          "code:kernel-dir",
+          "doc:methodology",
+          "goal:GOAL-030",
+          "goal:GOAL-031",
+          "code:parseFidelityVerdict-full",
+          "code:parseSemanticSufficiencyVerdict-full",
+          "code:parser-call-sites",
+          "code:fidelity-caller",
+          "code:sufficiency-caller",
+          "code:imports-both-files",
+          "code:plugin-imports-packages",
+          "findings:T1"
+        ]
+      },
+      "rep": 1,
+      "mode": "rich-bundle",
+      "scores": {
+        "case_id": "GOAL-032",
+        "stage": "B",
+        "slice": {
+          "matches_reference": true,
+          "matches_alternative": true,
+          "novel_not_in_reference": false,
+          "reference_overlap": 0.469,
+          "alternative_overlap": 0.5,
+          "note": "auxiliary: the historical slice is one defensible answer among several, not the sole target"
+        },
+        "granularity": {
+          "verdict": "too-broad",
+          "basis": "union",
+          "by_basis": {
+            "union": "too-broad",
+            "first": "too-broad"
+          },
+          "too_broad_overlap": 0.6,
+          "too_fragmented_overlap": 0.5
+        },
+        "investigate_or_goal": {
+          "candidate": "propose-goal",
+          "reference": "propose-goal",
+          "agreement": true,
+          "scored_at": "T1-decision-ready"
+        },
+        "scope_discipline": {
+          "non_goals_present": true,
+          "in_scope_count": 5,
+          "violation": true
+        },
+        "harnessability": {
+          "fields_present": "5/5",
+          "complete": true,
+          "missing": []
+        },
+        "expected_delta_quality": "quantified",
+        "falsifiability": "substantive",
+        "abandon_condition": "specific",
+        "evidence_citations_resolve": true,
+        "evidence_breadth": {
+          "distinct_refs_cited": 15,
+          "of_available": 15,
+          "refs_requested": true
+        },
+        "unsupported_mentions": {
+          "distinct_paths_mentioned": 6,
+          "not_in_dossier": 1,
+          "nonexistent_at_cutoff": 1,
+          "examples_not_shown": [
+            "packages/quay/src/kernel/verdict-parse.ts"
+          ],
+          "examples_nonexistent": [
+            "packages/quay/src/kernel/verdict-parse.ts"
+          ],
+          "note": "a proposed NEW file legitimately lands in nonexistent_at_cutoff; review examples, do not treat as a score"
+        },
+        "manual_review": null
+      },
+      "scores_first_basis": {
+        "case_id": "GOAL-032",
+        "stage": "B",
+        "slice": {
+          "matches_reference": true,
+          "matches_alternative": true,
+          "novel_not_in_reference": false,
+          "reference_overlap": 0.42,
+          "alternative_overlap": 0.417,
+          "note": "auxiliary: the historical slice is one defensible answer among several, not the sole target"
+        },
+        "granularity": {
+          "verdict": "too-broad",
+          "basis": "first",
+          "by_basis": {
+            "union": "too-broad",
+            "first": "too-broad"
+          },
+          "too_broad_overlap": 0.6,
+          "too_fragmented_overlap": 0.5
+        },
+        "investigate_or_goal": {
+          "candidate": "propose-goal",
+          "reference": "propose-goal",
+          "agreement": true,
+          "scored_at": "T1-decision-ready"
+        },
+        "scope_discipline": {
+          "non_goals_present": true,
+          "in_scope_count": 5,
+          "violation": true
+        },
+        "harnessability": {
+          "fields_present": "5/5",
+          "complete": true,
+          "missing": []
+        },
+        "expected_delta_quality": "quantified",
+        "falsifiability": "substantive",
+        "abandon_condition": "specific",
+        "evidence_citations_resolve": true,
+        "evidence_breadth": {
+          "distinct_refs_cited": 15,
+          "of_available": 15,
+          "refs_requested": true
+        },
+        "unsupported_mentions": {
+          "distinct_paths_mentioned": 6,
+          "not_in_dossier": 1,
+          "nonexistent_at_cutoff": 1,
+          "examples_not_shown": [
+            "packages/quay/src/kernel/verdict-parse.ts"
+          ],
+          "examples_nonexistent": [
+            "packages/quay/src/kernel/verdict-parse.ts"
+          ],
+          "note": "a proposed NEW file legitimately lands in nonexistent_at_cutoff; review examples, do not treat as a score"
+        },
+        "manual_review": null
+      }
+    },
+    {
+      "case_id": "GOAL-032",
+      "stage": "B",
+      "group": "B",
+      "provenance": {
+        "role": "ab-b",
+        "profile": "native",
+        "launcher": "/tmp/rich-ab-Cul4Pe/B/launcher.sh",
+        "model_from_profile": "opus",
+        "model_flag_in_argv": "opus",
+        "gateway_env_dropped": true,
+        "prompt_sha256_16": "51dae438ae677a15",
+        "prompt_chars": 51570,
+        "prompt_bytes": 69537,
+        "started_at": "2026-10-09T15:04:06.799Z",
+        "duration_ms": 54819
+      },
+      "state": "verified",
+      "error": null,
+      "exit_status": 0,
+      "response": {
+        "candidate_slices": [
+          {
+            "title": "S1: Move the domain-agnostic verdict parser into the kernel and have both members delegate to it",
+            "description": "Add one generic, fail-closed parser in a new kernel module, e.g. packages/quay/src/kernel/judge-verdict-parse.ts: parseJudgeVerdict<V extends string>(stdout, exitCode, legal: readonly [V, V]): V | 'not-evaluated'. It holds the one copy of the algorithm: a non-zero exit returns not-evaluated; a bare token is accepted; otherwise it scans for {\"verdict\":…} JSON from the last line upward; anything else returns not-evaluated. criterion-fidelity.ts::parseFidelityVerdict and goal-driver.ts::parseSemanticSufficiencyVerdict stay exported under their current names and signatures, but each body becomes a one-line call with its own legal-value list (['faithful','vacuous'] / ['covered','insufficient']). goal-driver.ts reaches the kernel through the same relative-path import that 16 plugin/scripts lines already use. The two callers' orchestration (criterionFidelityVerdict, sampleSemanticSufficiency) is not changed.",
+            "why_plausible": "T1 findings 1–3 say the algorithm is identical and only the word list (data) differs. Finding 5 and the existing plugin→kernel imports show the kernel is reachable from both trees without a reverse edge. The duplicate group (hash 0cac7de2dd5ee549, savable=20) is the only group in the top 20 that spans packages/ and plugin/."
+          },
+          {
+            "title": "S2 (fallback): Parity characterization test only, no code move",
+            "description": "Leave both copies in place. Add one test that runs the same input corpus through both parsers (the corpus already exists in the two test files), mapping fidelity↔sufficiency labels, and asserts they return the same verdict shape on every row. This turns 'deliberate verbatim copy' into a checked invariant instead of a comment.",
+            "why_plausible": "It is cheaper and touches no production code. It is the right fallback if S1 hits a packaging or bundling obstacle, because it stops silent divergence without moving ownership. It does not remove the duplicate."
+          },
+          {
+            "title": "S3 (rejected for now): Unify the two judge-invocation orchestrations",
+            "description": "Extract a common 'invoke judge → parse → cause' pipeline shared by criterionFidelityVerdict and sampleSemanticSufficiency.",
+            "why_plausible": "It looks like the next duplication. But T1 finding 4 says the orchestration genuinely differs and should stay different: one is sync with an injected seam and no cache; the other is async, takes two agreeing samples before caching, and splits failure causes. Per methodology §3 this would be a premature pattern, so it is listed only to name it as a non-goal."
+          }
+        ],
+        "recommended_first": "S1. The equivalence question in the concern is already settled by T1 findings 1–2 (structurally identical, copied on purpose, and criterion-fidelity.ts's doc comment says it mirrors goal-driver.ts 'verbatim'). Finding 3 says the variation is data, not logic. So the minimal real convergence is one definition of the algorithm, with each existing exported name kept as a thin wrapper that supplies its word list. This removes the duplicate group, keeps both test files' public interface unchanged (they call the wrapper names; see code:parser-call-sites), and leaves both callers alone. It is exactly the slice GOAL-031 named and deferred ('⛔ 不碰 parseSemanticSufficiencyVerdict 与 parseFidelityVerdict 的重复问题'), so it is the next item on that list rather than new scope.",
+        "investigate_or_goal": "propose-goal",
+        "scope": {
+          "in_scope": [
+            "New kernel module packages/quay/src/kernel/<judge-verdict-parse>.ts exporting one generic fail-closed parser whose legal-value pair is a parameter.",
+            "packages/quay/src/criterion-fidelity.ts: parseFidelityVerdict body becomes a delegation. Name, signature, FidelityVerdict type and doc comment are kept, and the comment is updated to point at the kernel instead of 'mirrors goal-driver.ts'.",
+            "plugin/scripts/goal-driver.ts: parseSemanticSufficiencyVerdict body becomes a delegation through one new relative import from ../../packages/quay/src/kernel/, the same form as the 16 existing plugin→kernel imports. Name, signature and SufficiencyVerdict type are kept.",
+            "One kernel unit test for the generic parser: the union of the two existing corpora, plus a row proving that the legal list is honoured (a value that is legal for the other domain must return not-evaluated)."
+          ],
+          "non_goals": [
+            "Do not change criterionFidelityVerdict or sampleSemanticSufficiency orchestration: sync vs async, the injected seam, two-sample agreement, cache, or the judge-unavailable/judge-unparseable split (T1 finding 4).",
+            "Do not introduce a shared Verdict type or union. Each domain keeps its own FidelityVerdict / SufficiencyVerdict (GOAL-031 non-goal 'no shared Verdict primitive' still stands). Only the parse algorithm is shared, and it is generic over V.",
+            "Do not rename or remove the two exported wrapper functions, and do not edit plugin/test/criterion-fidelity-historical-case.test.mjs or plugin/test/goal-sufficiency-semantic-covered.test.mjs.",
+            "Do not touch any other duplicate group in arch:duplicates (kernel-sibling fixtures, drain-scheduler, parseFlags, expandGlob, etc.).",
+            "Do not change fail-closed semantics: no new accepted forms, no fallback to a positive verdict.",
+            "No packages→plugin edge, and no edit to layers.yml allowed edges.",
+            "No Strategy or 'judge framework' abstraction (methodology §3)."
+          ]
+        },
+        "expected_mechanical_delta": "1) archguard_detect_duplicates (same version, params and scope as arch:duplicates): the group with hash 0cac7de2dd5ee549 is absent and the total goes 86 → 85, with no new group containing the kernel module. 2) The canonical definition count of the scan algorithm goes 2 → 1: `git grep -n 'split(/\\\\r?\\\\n/)' -- packages/quay/src/criterion-fidelity.ts plugin/scripts/goal-driver.ts` covering the parser bodies goes from 2 hits to 0, and there is exactly one hit in the kernel module. Per hard rule 2, print the matched lines, not just the count. 3) plugin/scripts→kernel import lines go 16 → 17, and the added line is in goal-driver.ts. 4) import-graph-check.ts ratchets (valueSccs / typeSccs / reverseEdges / kernelViolations) do not regress, and packages→plugin reverse edges stay at 0. 5) Both existing test files pass unchanged: 10 + 11 assertions, byte-identical test files.",
+        "negative_control": "Shell-move control (methodology §2.3 / §7 question ④): mutate only the kernel parser, e.g. make it return legal[0] when nothing parses, which is an unsafe fail-open. Both existing test files must go red: the 'empty output / prose / {\"foo\":\"bar\"} ⇒ not-evaluated' rows in both criterion-fidelity-historical-case and goal-sufficiency-semantic-covered. If only one goes red, that wrapper is still running its own copy, so the convergence is only cosmetic. Restore with a cp backup, not git checkout. Second control: in the kernel unit test, pass the sufficiency word list with input '{\"verdict\":\"faithful\"}'. It must return not-evaluated, which proves the word list really is data and the generic was not hard-coded to one domain. Third control, the zero-count predicate: before the change, dry-run the 'split(/\\r?\\n/)' grep on the current files and confirm it hits 2, so the post-change 0 is a real reading and not a blind predicate.",
+        "abandon_or_reconsider_condition": "Revise or fall back to S2 if any of these happen: (a) adding the kernel import makes import-graph-check regress, adds an SCC, or needs a new allowed edge in layers.yml; (b) the plugin dist or shipped-set build cannot bundle the new kernel file, or a ratchet such as the shipped-set or sh-census baselines would need widening beyond the one new file; (c) on the combined corpus, the two parsers turn out to differ in some way the generic cannot express without a domain flag, which would falsify T1 finding 1 and reopen the 'intentionally divergent' branch of the concern; (d) the generic signature forces a shared Verdict union type or changes either wrapper's exported signature; (e) the negative control shows only one test suite reacting to the kernel mutation.",
+        "harnessability": {
+          "inputs": "Repository at a develop tip (fork point ≥ 273ef15b1ebe); the two member files; the two existing test files as a frozen behavioural corpus; ArchGuard 0.1.38 detect_duplicates with the same params as arch:duplicates; plugin/scripts/import-graph-check.ts.",
+          "outputs": "One new kernel module plus its unit test; two wrapper bodies reduced to delegation; one new import line in goal-driver.ts; a before/after evidence file with the duplicate-group listing, the grep hits (first lines printed), the plugin→kernel import count and the import-graph ratchet readings; a negative-control record.",
+          "constraints": "Run on a branch:true Goal with goal branch, serial tasks (one task is enough), and a self-host identity check: the kernel module realpath loaded by the branch's goal-driver must be inside the goal worktree, not the main checkout, as in methodology §6. Existing test files must not be edited. No packages→plugin edge. Fail-closed semantics unchanged. Do not import artifacts from any other unmerged goal branch.",
+          "acceptance": "Three-state exit codes per GOAL-030/031 convention: 0 pass; 1 fail with CAUSE= on the same line; 3 not evaluated. AC-a: the duplicate group with hash 0cac7de2dd5ee549 is absent and the total is 85. AC-b: the scan loop is defined exactly once and lives in packages/quay/src/kernel/, with 0 copies in the two member files. AC-c: both existing test files pass byte-unchanged, and the kernel unit test passes, including the cross-domain row. AC-d: the kernel-mutation negative control turns both suites red. AC-e: import-graph ratchets do not regress and reverse edges stay 0. AC-f (post-merge): the same readings on develop, entered via exactly one merge commit on the first-parent chain.",
+          "failure_mode": "The main risk is a shell move: a new kernel file exists but a wrapper keeps its own loop. AC-b and AC-d catch this. Second risk: a silent change in fail-closed behaviour, caught by the unchanged test corpus. Third risk: a bundling or import-graph regression, caught by AC-e and abandon condition (b). If ArchGuard cannot be run, AC-a must report exit 3 (not evaluated), never pass."
+        },
+        "minimum_sufficiency_rationale": "It is sufficient because it removes the only defect the concern names: one algorithm with two physical definitions across packages/ and plugin/. After it, there is one owner, the kernel, and changing the parse rule means editing one place (methodology §2 self-check). It is minimal because it only collapses the decision function. The caller orchestration is excluded (T1 finding 4), as are the verdict types (GOAL-031 non-goal) and the public wrapper names, so neither test file needs editing. It adds one module and one import edge of a kind that already exists 16 times. Each step is countable before and after (group present → absent, 2 → 1 definitions, 16 → 17 kernel imports) and has a negative control. The kernel placement is justified because two real instances already exist (methodology §3), not by a hypothetical future third.",
+        "evidence_refs": [
+          "findings:T1",
+          "arch:duplicates",
+          "code:packages-side-member",
+          "code:plugin-side-member",
+          "code:parseFidelityVerdict-full",
+          "code:parseSemanticSufficiencyVerdict-full",
+          "code:parser-call-sites",
+          "code:fidelity-caller",
+          "code:sufficiency-caller",
+          "code:plugin-imports-packages",
+          "code:kernel-dir",
+          "code:imports-both-files",
+          "doc:methodology",
+          "goal:GOAL-030",
+          "goal:GOAL-031"
+        ]
+      },
+      "rep": 1,
+      "mode": "rich-bundle",
+      "scores": {
+        "case_id": "GOAL-032",
+        "stage": "B",
+        "slice": {
+          "matches_reference": true,
+          "matches_alternative": true,
+          "novel_not_in_reference": false,
+          "reference_overlap": 0.358,
+          "alternative_overlap": 0.5,
+          "note": "auxiliary: the historical slice is one defensible answer among several, not the sole target"
+        },
+        "granularity": {
+          "verdict": "too-broad",
+          "basis": "union",
+          "by_basis": {
+            "union": "too-broad",
+            "first": "too-broad"
+          },
+          "too_broad_overlap": 0.6,
+          "too_fragmented_overlap": 0.5
+        },
+        "investigate_or_goal": {
+          "candidate": "propose-goal",
+          "reference": "propose-goal",
+          "agreement": true,
+          "scored_at": "T1-decision-ready"
+        },
+        "scope_discipline": {
+          "non_goals_present": true,
+          "in_scope_count": 4,
+          "violation": true
+        },
+        "harnessability": {
+          "fields_present": "5/5",
+          "complete": true,
+          "missing": []
+        },
+        "expected_delta_quality": "quantified",
+        "falsifiability": "substantive",
+        "abandon_condition": "specific",
+        "evidence_citations_resolve": true,
+        "evidence_breadth": {
+          "distinct_refs_cited": 15,
+          "of_available": 15,
+          "refs_requested": true
+        },
+        "unsupported_mentions": {
+          "distinct_paths_mentioned": 9,
+          "not_in_dossier": 1,
+          "nonexistent_at_cutoff": 1,
+          "examples_not_shown": [
+            "packages/quay/src/kernel/judge-verdict-parse.ts"
+          ],
+          "examples_nonexistent": [
+            "packages/quay/src/kernel/judge-verdict-parse.ts"
+          ],
+          "note": "a proposed NEW file legitimately lands in nonexistent_at_cutoff; review examples, do not treat as a score"
+        },
+        "manual_review": null
+      },
+      "scores_first_basis": {
+        "case_id": "GOAL-032",
+        "stage": "B",
+        "slice": {
+          "matches_reference": false,
+          "matches_alternative": false,
+          "novel_not_in_reference": true,
+          "reference_overlap": 0.321,
+          "alternative_overlap": 0.333,
+          "note": "auxiliary: the historical slice is one defensible answer among several, not the sole target"
+        },
+        "granularity": {
+          "verdict": "too-broad",
+          "basis": "first",
+          "by_basis": {
+            "union": "too-broad",
+            "first": "too-broad"
+          },
+          "too_broad_overlap": 0.6,
+          "too_fragmented_overlap": 0.25
+        },
+        "investigate_or_goal": {
+          "candidate": "propose-goal",
+          "reference": "propose-goal",
+          "agreement": true,
+          "scored_at": "T1-decision-ready"
+        },
+        "scope_discipline": {
+          "non_goals_present": true,
+          "in_scope_count": 4,
+          "violation": true
+        },
+        "harnessability": {
+          "fields_present": "5/5",
+          "complete": true,
+          "missing": []
+        },
+        "expected_delta_quality": "quantified",
+        "falsifiability": "substantive",
+        "abandon_condition": "specific",
+        "evidence_citations_resolve": true,
+        "evidence_breadth": {
+          "distinct_refs_cited": 15,
+          "of_available": 15,
+          "refs_requested": true
+        },
+        "unsupported_mentions": {
+          "distinct_paths_mentioned": 9,
+          "not_in_dossier": 1,
+          "nonexistent_at_cutoff": 1,
+          "examples_not_shown": [
+            "packages/quay/src/kernel/judge-verdict-parse.ts"
+          ],
+          "examples_nonexistent": [
+            "packages/quay/src/kernel/judge-verdict-parse.ts"
+          ],
+          "note": "a proposed NEW file legitimately lands in nonexistent_at_cutoff; review examples, do not treat as a score"
+        },
+        "manual_review": null
+      }
+    },
+    {
+      "case_id": "GOAL-033",
+      "stage": "A",
+      "group": "A",
+      "provenance": {
+        "role": "ab-a",
+        "profile": "gw",
+        "launcher": "claude-fjdac",
+        "model_from_profile": "v4.1flash-anthropic",
+        "model_flag_in_argv": "v4.1flash-anthropic",
+        "gateway_env_dropped": false,
+        "prompt_sha256_16": "60938872c3553458",
+        "prompt_chars": 34625,
+        "prompt_bytes": 54872,
+        "started_at": "2026-10-09T15:05:01.633Z",
+        "duration_ms": 33181
+      },
+      "state": "verified",
+      "error": null,
+      "exit_status": 0,
+      "response": {
+        "concerns": [
+          {
+            "concern": "A package-level dependency cycle persists at the core root — the single 6-member SCC (packages/quay/src root, cli, fan-in, gate, gate/config, gate/factories) is exactly the '目录环 (core-root<->core-cli)' that every prior ownership-convergence goal (GOAL-030/031/032) declared explicitly out of scope and left standing. Notably, the measured SCC extent (6 members, including the whole gate subtree and fan-in) is broader than the two-package 'core-root<->core-cli' description those goals keep citing, so the deferred item's boundary is under-specified relative to the graph.",
+            "evidence_refs": [
+              "arch:scc",
+              "arch:package-metrics",
+              "goal:GOAL-032",
+              "goal:GOAL-031"
+            ],
+            "needs_investigation": true,
+            "what_to_investigate": "Enumerate the file-level edges that actually close the cycle (which core-root imports pull in cli/fan-in/gate/config/factories, and which of those import back into the root), classify each as a genuine ownership/layering inversion vs benign composition-root wiring, and confirm the kernel sub-package (fanOut=0 in the metrics) stays cycle-free so the GOAL-030/031/032 kernel placement remains valid. The dossier gives SCC membership and package fan-in/out but not the constituent edges — an edge list is required before any slice can be defined.",
+            "confidence": "medium"
+          },
+          {
+            "concern": "A canonicalization backlog is named but unmeasured: GOAL-032 defers '其它任何 verdict 类型 (GateVerdictKind/DimensionState/ScopedGateVerdict 等) 的 27 文件分散字面量' to a separate, larger slice. This is the same ownership-convergence shape as GOAL-030/031/032 (scattered literals → single canonical owner), but the dossier carries only the prosaic claim inside GOAL-032's non-goals — no independent dispersion reading for those tokens is present in the state.",
+            "evidence_refs": [
+              "goal:GOAL-032"
+            ],
+            "needs_investigation": true,
+            "what_to_investigate": "Re-measure the dispersion for those verdict-type literals (ArchGuard get_literal_dispersion, or position-verified grep) to confirm the 27-file figure and to separate same-vocabulary hits from cross-vocabulary false positives — GOAL-031's own lesson was that 3 of 5 raw dispersion hits were false positives or structural non-defects, so the raw token count must not be taken at face value before scoping a slice.",
+            "confidence": "low"
+          }
+        ],
+        "overall_assessment": "concerns_found"
+      },
+      "rep": 1,
+      "mode": "rich-bundle",
+      "scores": {
+        "case_id": "GOAL-033",
+        "stage": "A",
+        "concerns_returned": 2,
+        "concern_validity": {
+          "any_matches_expected": true,
+          "per_concern": [
+            {
+              "concern": "A package-level dependency cycle persists at the core root — the single 6-member SCC (packages/quay/src root, cli, fan-in, gate, gate/config, gate/factories) is",
+              "matches_expected": true,
+              "matched_reference": "a package-level dependency cycle indicates an ownership inversion somewhere among its members",
+              "overlap": 0.6,
+              "evidence_refs": 4,
+              "unsupported_evidence_refs": [],
+              "grounded": true,
+              "needs_investigation": true,
+              "confidence": "medium"
+            },
+            {
+              "concern": "A canonicalization backlog is named but unmeasured: GOAL-032 defers '其它任何 verdict 类型 (GateVerdictKind/DimensionState/ScopedGateVerdict 等) 的 27 文件分散字面量' to a sep",
+              "matches_expected": false,
+              "matched_reference": null,
+              "overlap": 0.2,
+              "evidence_refs": 1,
+              "unsupported_evidence_refs": [],
+              "grounded": true,
+              "needs_investigation": true,
+              "confidence": "low"
+            }
+          ]
+        },
+        "grounding": {
+          "all_cited_refs_resolve": true,
+          "unsupported_claims": []
+        },
+        "ranking": {
+          "valid_concern_ranked_first": true
+        },
+        "abstention": {
+          "abstained": false,
+          "acceptable_here": false,
+          "verdict": "proposed_concerns"
+        },
+        "evidence_breadth": {
+          "distinct_refs_cited": 4,
+          "of_available": 7
+        },
+        "unsupported_mentions": {
+          "distinct_paths_mentioned": 0,
+          "not_in_dossier": 0,
+          "nonexistent_at_cutoff": 0,
+          "examples_not_shown": [],
+          "examples_nonexistent": [],
+          "note": "a proposed NEW file legitimately lands in nonexistent_at_cutoff; review examples, do not treat as a score"
+        },
+        "man": "manual_review_suggested"
+      }
+    },
+    {
+      "case_id": "GOAL-033",
+      "stage": "A",
+      "group": "B",
+      "provenance": {
+        "role": "ab-b",
+        "profile": "native",
+        "launcher": "/tmp/rich-ab-Cul4Pe/B/launcher.sh",
+        "model_from_profile": "opus",
+        "model_flag_in_argv": "opus",
+        "gateway_env_dropped": true,
+        "prompt_sha256_16": "60938872c3553458",
+        "prompt_chars": 34625,
+        "prompt_bytes": 54872,
+        "started_at": "2026-10-09T15:05:34.816Z",
+        "duration_ms": 40210
+      },
+      "state": "verified",
+      "error": null,
+      "exit_status": 0,
+      "response": {
+        "concerns": [
+          {
+            "concern": "There is a package-level dependency cycle between the core root (packages/quay/src) and its CLI layer (packages/quay/src/cli), and it also pulls in fan-in, gate, gate/config and gate/factories (SCC#1, size 6). The cli package depends on many things (fanOut=88) while few things depend on it (fanIn=5), so it looks like an entry/orchestration layer. Since it still sits inside the cycle, at least one edge must run back from the root, gate or fan-in into cli: something the core uses (likely a flag/vocabulary/shared helper, a guess from file names only) is owned by the CLI layer. GOAL-031 and GOAL-032 both list this 'core-root<->core-cli' directory cycle as a named non-goal. Under methodology §4 that means it was counted and left for a later slice, not forgotten. It is the most obvious unresolved ownership boundary in this state.",
+            "evidence_refs": [
+              "arch:scc",
+              "arch:package-metrics",
+              "code:cli-dir",
+              "goal:GOAL-031",
+              "goal:GOAL-032",
+              "doc:methodology"
+            ],
+            "needs_investigation": true,
+            "what_to_investigate": "List the specific file-level edges that close the SCC: which files in packages/quay/src, gate, gate/config, gate/factories and fan-in import from packages/quay/src/cli/*, and which symbols they import (for example shared.ts, flags.ts, driver-vocab.ts, context.ts). For each symbol, apply the four questions from methodology §1 (state / decision / side-effect / orchestration) to decide whether it belongs in core/kernel or in cli. Also check whether the gate <-> gate/config <-> gate/factories part of the cycle is an inherent registry/factory loop (which could be acceptable) or a separate inverted edge. Until the closing edges are counted, the slice scope and the AC numbers can't be pinned.",
+            "confidence": "medium"
+          },
+          {
+            "concern": "Verdict and state vocabulary for gates is spread across files with no single owner. GOAL-032 explicitly set aside GateVerdictKind, DimensionState, ScopedGateVerdict and similar literals, which it says are scattered across 27 files, calling them 'a separate, larger gap'. GOAL-032 only merged one pair of binary verdict parsers into kernel/verdict-parse.ts. The layer-architecture SPEC describes the same problem in its own words: 'the verification result was never a designed first-class object'. Exit-code meanings for NOT-EVALUATED are encoded in incompatible ways, and the shared emitPass/emitFail contract has zero adopters. The canonical-vocabulary approach GOAL-031 used for task status has not been applied to the gate/verification vocabulary.",
+            "evidence_refs": [
+              "goal:GOAL-032",
+              "doc:spec-layer-architecture",
+              "doc:methodology",
+              "arch:package-metrics"
+            ],
+            "needs_investigation": true,
+            "what_to_investigate": "Measure the dispersion again at the cutoff commit (literal dispersion for each verdict/state value), and classify each hit by position, not by keyword: canonical declaration, real consumer, or a field from a different vocabulary. GOAL-031 showed the raw count can be wrong. Check whether the 27-file figure and the SPEC readings (dated 2026-08-25) are still current, and find whether any existing canonical declaration is already in place (abi.ts, gate/registry.ts, or the kernel). Choose one vocabulary as the slice; this one fact rather than the whole 'verification result object'.",
+            "confidence": "low"
+          }
+        ],
+        "overall_assessment": "concerns_found"
+      },
+      "rep": 1,
+      "mode": "rich-bundle",
+      "scores": {
+        "case_id": "GOAL-033",
+        "stage": "A",
+        "concerns_returned": 2,
+        "concern_validity": {
+          "any_matches_expected": true,
+          "per_concern": [
+            {
+              "concern": "There is a package-level dependency cycle between the core root (packages/quay/src) and its CLI layer (packages/quay/src/cli), and it also pulls in fan-in, gate",
+              "matches_expected": true,
+              "matched_reference": "a package-level dependency cycle indicates an ownership inversion somewhere among its members",
+              "overlap": 0.5,
+              "evidence_refs": 6,
+              "unsupported_evidence_refs": [],
+              "grounded": true,
+              "needs_investigation": true,
+              "confidence": "medium"
+            },
+            {
+              "concern": "Verdict and state vocabulary for gates is spread across files with no single owner. GOAL-032 explicitly set aside GateVerdictKind, DimensionState, ScopedGateVer",
+              "matches_expected": true,
+              "matched_reference": "two primitives shared by two layers have no unambiguous owner",
+              "overlap": 0.4,
+              "evidence_refs": 4,
+              "unsupported_evidence_refs": [],
+              "grounded": true,
+              "needs_investigation": true,
+              "confidence": "low"
+            }
+          ]
+        },
+        "grounding": {
+          "all_cited_refs_resolve": true,
+          "unsupported_claims": []
+        },
+        "ranking": {
+          "valid_concern_ranked_first": true
+        },
+        "abstention": {
+          "abstained": false,
+          "acceptable_here": false,
+          "verdict": "proposed_concerns"
+        },
+        "evidence_breadth": {
+          "distinct_refs_cited": 7,
+          "of_available": 7
+        },
+        "unsupported_mentions": {
+          "distinct_paths_mentioned": 7,
+          "not_in_dossier": 0,
+          "nonexistent_at_cutoff": 0,
+          "examples_not_shown": [],
+          "examples_nonexistent": [],
+          "note": "a proposed NEW file legitimately lands in nonexistent_at_cutoff; review examples, do not treat as a score"
+        },
+        "man": null
+      }
+    },
+    {
+      "case_id": "GOAL-033",
+      "stage": "B",
+      "group": "A",
+      "provenance": {
+        "role": "ab-a",
+        "profile": "gw",
+        "launcher": "claude-fjdac",
+        "model_from_profile": "v4.1flash-anthropic",
+        "model_flag_in_argv": "v4.1flash-anthropic",
+        "gateway_env_dropped": false,
+        "prompt_sha256_16": "335dbcc426a64388",
+        "prompt_chars": 55891,
+        "prompt_bytes": 79966,
+        "started_at": "2026-10-09T15:06:15.029Z",
+        "duration_ms": 72136
+      },
+      "state": "verified",
+      "error": null,
+      "exit_status": 0,
+      "response": {
+        "candidate_slices": [
+          {
+            "title": "Cut both root→cli value edges: relocate the driver-vocab leaf and the runDriver shared core to neutral root-level modules",
+            "description": "Two serial tasks under one goal, same fix shape (relocate a declared-shared primitive out of cli/ to a neutral home). Task 1: move packages/quay/src/cli/driver-vocab.ts → packages/quay/src/driver-vocab.ts (it is a zero-import leaf by construction, per its own header), update its four code consumers (cli/driver.ts, cli/help.ts, cli/server.ts, serve.ts) and the six path declarations in plugin/scripts/enum-surface-parity-check.ts, and drop serve.ts's dead HOSTED_SERVICE_NAMES import. Task 2: extract runDriver/runDriverAsync + DriverRunResult/DriverInvocation/resolveDriverInvocation from cli/driver.ts into a root-level module (packages/quay/src/driver-run.ts); cli/driver.ts keeps only the CLI-only surface (runDriverLog/runDriverLive, handleDriver) and consumes the core from the new module; serve-sessions.ts imports runDriver from the new module instead of ./cli/driver.ts. Result: root→cli edges 2→0, so cli (and fan-in, whose only in-cycle inbound is cli→fan-in:3) leave the SCC.",
+            "why_plausible": "arch:root-to-cli shows exactly two file pairs (serve-sessions.ts→cli/driver.ts, serve.ts→cli/driver-vocab.ts) and arch:cycle-matrix shows every other SCC member contributes 0 edges into cli — so these two edges are the entire cut surface, and findings:T1 #3/#4 states removing them guarantees cli leaves. Both targets are declared shared primitives, not CLI-private ones: driver-vocab.ts's own header names serve.ts (host) and cli/server.ts as co-consumers (code:cli-driver-vocab), and runDriver is documented as the ONE implementation consumed by both handleDriver and the web handler (code:runDriver-def). cli→root is the healthy 62-relation normal direction (arch:cli-to-root), so making root the owner and cli a downstream consumer re-orients both edges correctly (findings:T1 #5)."
+          },
+          {
+            "title": "Split into two goals: driver-vocab relocation first, driver-core extraction second",
+            "description": "Do the same two moves but as two independently-landed goal branches, each verified by the root→cli edge count (2→1, then 1→0).",
+            "why_plausible": "Matches doc:methodology §4 ('one slice = one independently verifiable problem') and is the safest sequencing: the vocab move is a zero-closure leaf relocation with no transitive-closure risk, whereas the driver-core extraction carries the whole runDriver closure. Both are legitimate under the GOAL-030/031/032 precedent. Rejected as the primary only because neither goal alone turns the concern's own metric — the SCC stays size 6 until the second edge also goes — so the concern is not resolved at the end of goal 1."
+          },
+          {
+            "title": "Cut the two root→cli edges AND normalize the residual SCC (or move the driver core into kernel/)",
+            "description": "Same two edges, plus addressing the remaining {root, gate, gate/config, gate/factories} cycle, or placing the extracted driver core under packages/quay/src/kernel/.",
+            "why_plausible": "Superficially attractive because kernel is the neutral landing point used by GOAL-030/032 and has fanOut=0 (arch:package-metrics). Rejected as over-scoped and infeasible as stated: the residual cycle is a distinct concern (doc:methodology §4 says name it and leave it), and runDriver's closure is root-level (config/plugin-root/observation per code:runDriver-def), so hosting it in kernel would add kernel→root edges and destroy kernel's zero-fanOut leaf property."
+          }
+        ],
+        "recommended_first": "Cut both root→cli value edges: relocate the driver-vocab leaf and the runDriver shared core to neutral root-level modules",
+        "investigate_or_goal": "propose-goal",
+        "scope": {
+          "in_scope": [
+            "Relocate packages/quay/src/cli/driver-vocab.ts → packages/quay/src/driver-vocab.ts; update its consumers cli/driver.ts, cli/help.ts, cli/server.ts, serve.ts and the six enum-surface-parity-check.ts path/symbol declarations (code:driver-vocab-consumers).",
+            "Remove serve.ts's dead HOSTED_SERVICE_NAMES import (imported, zero uses — code:serve-use).",
+            "Extract runDriver/runDriverAsync + DriverRunResult/DriverInvocation/resolveDriverInvocation from cli/driver.ts into a new root-level module; have serve-sessions.ts import the core from the new module (replacing the ./cli/driver.ts import used at :708 — code:serve-sessions-use), and cli/driver.ts consume the core from there (cli/driver.ts keeps only runDriverLog/runDriverLive/handleDriver).",
+            "Repoint any other checker that pins those file paths.",
+            "Prove via same-build ArchGuard before/after that root→cli = 0 and the SCC member set shrinks to exactly {root, gate, gate/config, gate/factories}."
+          ],
+          "non_goals": [
+            "⛔ Do not cut or re-touch any cli→root edge (62 relations; healthy normal direction — arch:cli-to-root).",
+            "⛔ Do not touch the residual SCC members (gate, gate/config, gate/factories, fan-in) or their edges; the residual cycle is a separate future slice.",
+            "⛔ Do not host the extracted driver core in packages/quay/src/kernel/ (its closure is root-level; kernel must stay a zero-fanOut leaf).",
+            "⛔ Do not reimplement the driver lifecycle anywhere — it must remain one implementation (code:runDriver-def).",
+            "⛔ No behavior change: no new driver verbs/kinds, no service-name changes, no serve-route changes.",
+            "⛔ No plugin/scripts logic changes beyond the enum-surface-parity-check path repoint; no packages/quay-github or quay-native edits.",
+            "⛔ Do not fold in the other duplicate clusters listed in doc:spec-layer-architecture §1.6 (findRepoRoot, normalizeRel, canonicalTestFiles, …)."
+          ]
+        },
+        "expected_mechanical_delta": "Same ArchGuard build, single-root analysis of fork point vs goal-branch tip: (1) arch:scc — 1 SCC of size 6 → 1 SCC of size 4 with member set exactly {packages/quay/src, gate, gate/config, gate/factories}; cli and fan-in leave (fan-in by prediction from arch:cycle-matrix: its only in-cycle inbound is cli→fan-in:3, so the AC must assert the member SET, not just the count). (2) arch:root-to-cli / code:root-imports-cli — root→cli value edges 2→0; `git grep -nE 'from \"\\./cli/' packages/quay/src/*.ts` returns 0 lines (was 2). (3) code:serve-use — HOSTED_SERVICE_NAMES occurrences in serve.ts 1→0. (4) code:driver-vocab-consumers — the six cli/driver-vocab.ts path references in enum-surface-parity-check.ts now point at the new path with the authority symbols unchanged, checker still green. (5) import-graph-check.ts ratchets: root→cli drops, cli→root rises, no reverse-edge/cycle ratchet regresses; kernel fanOut stays 0. Zero behavior deltas (same CLI/HTTP outputs).",
+        "negative_control": "Two, both required. (1) Edge-reinstatement falsifiability: in a scratch copy of the tip, re-add ONE cut import (e.g. serve.ts → ./cli/driver-vocab.ts) and re-run the identical analysis — the SCC must return to size 6. If it stays 4, the reading is not being driven by the edge removal and the measurement is broken. (2) Shell-move (搬壳) guard (doc:methodology §2): assert the relocated modules import nothing from cli/ — `git grep -nE 'from \"\\./cli/' packages/quay/src/driver-vocab.ts packages/quay/src/driver-run.ts` = 0 — and re-run the arch:root-to-cli query = 0 relations (a re-export chain would re-materialize the package-level edge even with direct imports removed); also assert serve.ts/serve-sessions.ts name the new paths, not cli/. This distinguishes 'the primitive now lives in a neutral layer' from 'the import was cosmetically redirected while root still reaches cli'.",
+        "abandon_or_reconsider_condition": "Abandon and re-investigate if before/after shows root→cli = 0 but cli or fan-in remains in the SCC — that falsifies findings:T1 #3 (some other member does point into cli) and the cut set is not {2 edges}. Materially revise (shrink to the vocab-only slice and refile the driver-core ownership separately) if extracting runDriver forces its root-level closure to create a new cycle (root→driver-run→…→root) or regresses an import-graph-check.ts ratchet. Reconsider the whole edge-2 framing if the two serve consumers turn out to need semantics divergent from the CLI consumer (the equivalence pre-check fails) — then it is not a shared primitive and edge 2 must be cut by dedup/split, not relocation. Escalate rather than paper over if enum-surface-parity-check.ts cannot express the new path without weakening its authority declaration. Also do not force it if the measured SCC size drops by a different amount than predicted — record the measured number and re-derive the member set from the reachability rule, do not assert the guess.",
+        "harnessability": {
+          "inputs": "The repo tree at the fork point (for the ArchGuard before-baseline); the two enumerated edge file-pairs (arch:root-to-cli); the consumer sets (code:driver-vocab-consumers, code:serve-use, code:serve-sessions-use, code:runDriver-def, code:cli-dir); the enum-surface-parity-check.ts authority table.",
+          "outputs": "Relocated module(s) packages/quay/src/driver-vocab.ts and packages/quay/src/driver-run.ts with updated consumers; updated parity-checker declarations; ArchGuard before/after single-root analyses; edge-count and member-set greps.",
+          "constraints": "root→cli = 0; SCC member set = {root, gate, gate/config, gate/factories}; cli→root may only increase; no new SCC member; import-graph-check.ts ratchets non-regressing; kernel stays fanOut 0; TypeScript typecheck and existing tests green; branch:true goal landed by worker-driver mechanical fan-in; zero behavior change.",
+          "acceptance": "Same-build before/after ArchGuard: SCC 6→4 with exact member set {packages/quay/src, gate, gate/config, gate/factories} and root→cli relations 2→0; `git grep -nE 'from \"\\./cli/' packages/quay/src/*.ts` = 0; every moved consumer imports the new paths; enum-surface-parity-check green; both negative controls fire and clear as specified.",
+          "failure_mode": "Shell move — root still reaches cli transitively through the relocated module, so the package-level root→cli edge re-forms; checker path drift — enum-surface-parity-check red because its pinned path was not repointed; new cycle from the extracted driver core's closure; mis-predicted departure — SCC goes 6→5 not 6→4 because fan-in's only-inbound assumption is wrong; ratchet regression in import-graph-check.ts; behavior change leaking through the moved driver core."
+        },
+        "minimum_sufficiency_rationale": "Exactly two edges must go — no fewer, no more. Fewer: with either edge left in place, cli keeps an in-cycle inbound relation (arch:cycle-matrix shows root→cli is the sole in-cycle inbound to cli) and the SCC stays size 6, so the confirmed concern is untouched — that is why the single-edge candidates are not sufficient on their own. More: no other member contributes an inbound edge to cli (arch:cycle-matrix: fan-in/gate/gate-config/gate-factories →cli all 0), the cli→root direction is the healthy 62-relation normal direction and must not be cut (findings:T1 #2), and once cli leaves, fan-in leaves with it because its only in-cycle inbound is cli→fan-in:3 — so no third move is required to reach 6→4, and touching the residual gate cycle is a different concern. The two moves are one coherent fix (relocate a declared-shared primitive from cli/ to a neutral home), so they belong in one goal with two serial tasks rather than two unrelated slices. This matches the GOAL-030/031/032 precedent of a small, numerically-pinned slice whose before/after delta is read from the same analysis tool for fork point and tip (goal:GOAL-031, goal:GOAL-032, doc:methodology §4/§10).",
+        "evidence_refs": [
+          "arch:scc",
+          "arch:package-metrics",
+          "arch:cycle-matrix",
+          "arch:root-to-cli",
+          "arch:cli-to-root",
+          "code:root-imports-cli",
+          "code:serve-use",
+          "code:serve-sessions-use",
+          "code:cli-driver-vocab",
+          "code:driver-vocab-consumers",
+          "code:runDriver-def",
+          "code:cli-dir",
+          "findings:T1",
+          "doc:methodology",
+          "doc:spec-layer-architecture",
+          "goal:GOAL-032",
+          "goal:GOAL-031"
+        ]
+      },
+      "rep": 1,
+      "mode": "rich-bundle",
+      "scores": {
+        "case_id": "GOAL-033",
+        "stage": "B",
+        "slice": {
+          "matches_reference": true,
+          "matches_alternative": true,
+          "novel_not_in_reference": false,
+          "reference_overlap": 0.395,
+          "alternative_overlap": 0.5,
+          "note": "auxiliary: the historical slice is one defensible answer among several, not the sole target"
+        },
+        "granularity": {
+          "verdict": "too-broad",
+          "basis": "union",
+          "by_basis": {
+            "union": "too-broad",
+            "first": "too-fragmented"
+          },
+          "too_broad_overlap": 0.571,
+          "too_fragmented_overlap": 1
+        },
+        "investigate_or_goal": {
+          "candidate": "propose-goal",
+          "reference": "propose-goal",
+          "agreement": true,
+          "scored_at": "T1-decision-ready"
+        },
+        "scope_discipline": {
+          "non_goals_present": true,
+          "in_scope_count": 5,
+          "violation": true
+        },
+        "harnessability": {
+          "fields_present": "5/5",
+          "complete": true,
+          "missing": []
+        },
+        "expected_delta_quality": "quantified",
+        "falsifiability": "substantive",
+        "abandon_condition": "specific",
+        "evidence_citations_resolve": true,
+        "evidence_breadth": {
+          "distinct_refs_cited": 17,
+          "of_available": 17,
+          "refs_requested": true
+        },
+        "unsupported_mentions": {
+          "distinct_paths_mentioned": 14,
+          "not_in_dossier": 3,
+          "nonexistent_at_cutoff": 3,
+          "examples_not_shown": [
+            "packages/quay/src/driver-vocab.ts",
+            "packages/quay/src/driver-run.ts",
+            "serve.ts/serve-sessions.ts"
+          ],
+          "examples_nonexistent": [
+            "packages/quay/src/driver-vocab.ts",
+            "packages/quay/src/driver-run.ts",
+            "serve.ts/serve-sessions.ts"
+          ],
+          "note": "a proposed NEW file legitimately lands in nonexistent_at_cutoff; review examples, do not treat as a score"
+        },
+        "manual_review": null
+      },
+      "scores_first_basis": {
+        "case_id": "GOAL-033",
+        "stage": "B",
+        "slice": {
+          "matches_reference": true,
+          "matches_alternative": true,
+          "novel_not_in_reference": false,
+          "reference_overlap": 0.395,
+          "alternative_overlap": 0.5,
+          "note": "auxiliary: the historical slice is one defensible answer among several, not the sole target"
+        },
+        "granularity": {
+          "verdict": "too-fragmented",
+          "basis": "first",
+          "by_basis": {
+            "union": "too-broad",
+            "first": "too-fragmented"
+          },
+          "too_broad_overlap": 0.4,
+          "too_fragmented_overlap": 1
+        },
+        "investigate_or_goal": {
+          "candidate": "propose-goal",
+          "reference": "propose-goal",
+          "agreement": true,
+          "scored_at": "T1-decision-ready"
+        },
+        "scope_discipline": {
+          "non_goals_present": true,
+          "in_scope_count": 5,
+          "violation": true
+        },
+        "harnessability": {
+          "fields_present": "5/5",
+          "complete": true,
+          "missing": []
+        },
+        "expected_delta_quality": "quantified",
+        "falsifiability": "substantive",
+        "abandon_condition": "specific",
+        "evidence_citations_resolve": true,
+        "evidence_breadth": {
+          "distinct_refs_cited": 17,
+          "of_available": 17,
+          "refs_requested": true
+        },
+        "unsupported_mentions": {
+          "distinct_paths_mentioned": 14,
+          "not_in_dossier": 3,
+          "nonexistent_at_cutoff": 3,
+          "examples_not_shown": [
+            "packages/quay/src/driver-vocab.ts",
+            "packages/quay/src/driver-run.ts",
+            "serve.ts/serve-sessions.ts"
+          ],
+          "examples_nonexistent": [
+            "packages/quay/src/driver-vocab.ts",
+            "packages/quay/src/driver-run.ts",
+            "serve.ts/serve-sessions.ts"
+          ],
+          "note": "a proposed NEW file legitimately lands in nonexistent_at_cutoff; review examples, do not treat as a score"
+        },
+        "manual_review": null
+      }
+    },
+    {
+      "case_id": "GOAL-033",
+      "stage": "B",
+      "group": "B",
+      "provenance": {
+        "role": "ab-b",
+        "profile": "native",
+        "launcher": "/tmp/rich-ab-Cul4Pe/B/launcher.sh",
+        "model_from_profile": "opus",
+        "model_flag_in_argv": "opus",
+        "gateway_env_dropped": true,
+        "prompt_sha256_16": "335dbcc426a64388",
+        "prompt_chars": 55891,
+        "prompt_bytes": 79966,
+        "started_at": "2026-10-09T15:07:27.189Z",
+        "duration_ms": 89644
+      },
+      "state": "verified",
+      "error": null,
+      "exit_status": 0,
+      "response": {
+        "candidate_slices": [
+          {
+            "title": "S1: Move the two shared primitives from cli/ to the root package, then change root's two imports to the new location (6 to 4 SCC cut)",
+            "description": "(a) Move the zero-import leaf `cli/driver-vocab.ts` (VERBS, KINDS, HOSTED_SERVICE_NAMES, DRIVER_SERVICE_KINDS, ALL_SERVICE_NAMES) to a root-level zero-import module, for example `packages/quay/src/driver-vocab.ts`. (b) Move the driver-invocation core out of `cli/driver.ts` into a root-level module, for example `packages/quay/src/driver-control.ts`. The core is `DriverRunResult`, `DriverInvocation`, `refusedInvocation`, `resolveDriverInvocation`, `runDriver`, `runDriverAsync` and `withWorkerInstrumentReadings`. `cli/driver.ts` keeps its CLI orchestration (`handleDriver`, `runDriverLog`/`runDriverLive`, help text) and imports the core and the vocabulary in the normal cli→root direction. (c) Change `serve-sessions.ts:20` and `serve.ts:50` to import from root. Drop the unused `HOSTED_SERVICE_NAMES` from `serve.ts:50`, because only `ALL_SERVICE_NAMES` is used, at :151 and :153. (d) Update `cli/help.ts:19`, `cli/server.ts:55` and `cli/driver.ts:43` to the new path. Also update the file paths in the five `enum-surface-parity-check.ts` entries (:151, :161, :168, :170, :178, :180) so the parity invariant follows the move.",
+            "why_plausible": "Root→cli is exactly 2 relations, from 2 files, carrying 2 symbols groups. No other SCC member has an edge into cli. After the cut, cli has no inbound edge from the cycle, so it leaves the SCC. fan-in leaves with it: its only inbound edge from inside the cycle is cli→fan-in:3 (root→fan-in = 0, gate*→fan-in = 0). The prediction is therefore 6→4 (root, gate, gate/config, gate/factories), not 6→5. Both moved things are layer-neutral primitives that ended up under cli/ only because CLI help text was their first consumer (findings:T1 #5). The vocabulary file's own header calls the service list the single source that serve.ts, the host, imports."
+          },
+          {
+            "title": "S1-alt: Invert only the runDriver edge by dependency injection; move only the vocabulary",
+            "description": "`cli/server.ts` hands `runDriver` to serve through `ServePageCfg`, so `serve-sessions.ts` calls `cfg.runDriver(...)` and no longer imports it. The vocabulary still moves to root as in S1.",
+            "why_plausible": "The diff is smaller and `cli/driver.ts` stays whole. It is weaker on ownership: the driver control client is a shared capability used by both web and CLI, and injection only hides the edge without answering who owns that client. Keep it only as the fallback if S1's precondition (closure check) fails."
+          },
+          {
+            "title": "S2 (later, separate goal): the remaining 4-member core: root↔gate/gate-config/gate-factories",
+            "description": "After S1, the SCC is root↔gate (24/9), gate↔gate/config (8/2), and gate/factories→gate (15) plus →root (8). This core needs its own ownership investigation.",
+            "why_plausible": "This is the next real cycle, but it is many times larger and has no T1 findings yet. It is listed so the boundary is named and handed on, not attempted now."
+          }
+        ],
+        "recommended_first": "S1. The cut only works if both root→cli edges go: removing either one alone leaves the SCC at 6 (root→cli→fan-in→root survives). So the two moves together are the smallest unit that changes the measurement, and splitting them would give two slices that cannot each be accepted on their own. S1 adds no new abstraction, interface or pattern. It moves two existing pieces into the layer that both consumers can reach in the allowed direction. It is the same ownership-migration shape as GOAL-032: the CLI-side callers see an import-path change, `runDriver`'s signature and return type stay the same, and `handleDriverLifecycle`'s orchestration is untouched.",
+        "investigate_or_goal": "propose-goal",
+        "scope": {
+          "in_scope": [
+            "Move the `cli/driver-vocab.ts` content to a root-level zero-import module. Its header's load-cost rationale (help path 0.25s vs 0.67s) carries over, so it must stay zero-import.",
+            "Move the driver-invocation core (DriverRunResult, resolveDriverInvocation, runDriver, runDriverAsync, withWorkerInstrumentReadings) from `cli/driver.ts` to a root-level module. `cli/driver.ts` imports it back.",
+            "Change the two root import sites: `serve-sessions.ts:20` and `serve.ts:50`. Drop the dead `HOSTED_SERVICE_NAMES` import from `serve.ts`.",
+            "Update the 3 cli importers (driver.ts:43, help.ts:19, server.ts:55) and the file paths in `plugin/scripts/enum-surface-parity-check.ts` that reference driver-vocab.",
+            "Before/after ArchGuard reading, SCC membership, and negative controls as described below"
+          ],
+          "non_goals": [
+            "Do not break the root↔gate / gate/config / gate/factories cycle (S2)",
+            "Do not touch the cli→root direction, which is normal: no reduction of the 62 relations and no CLI facade refactor",
+            "Do not change `runDriver`/`runDriverAsync` behavior, signatures, result shape, or the web handler's verb/kind whitelist and `--kind` forwarding",
+            "Do not change VERBS/KINDS/service-name values. Do not add `peer`.",
+            "Do not add a re-export shim at `cli/driver-vocab.ts` for root to keep importing. The old path may disappear or re-export only for cli-internal callers, and root must never import through cli.",
+            "Do not touch `fan-in/` content. It leaves the SCC as a side effect, not through edits.",
+            "Do not add a kernel placement or `layers.yml` edges. If the move needs any, stop (see abandon conditions).",
+            "Do not restart production drivers or serve"
+          ]
+        },
+        "expected_mechanical_delta": "Same ArchGuard 0.1.38 TypeScript-scope analysis, fork point vs branch tip, package-level Tarjan SCC. (1) Number of SCCs with more than 1 member: 1 → 1. Size 6 → 4. Members after = {packages/quay/src, gate, gate/config, gate/factories}; cli and fan-in both absent. (2) root→cli relations: 2 → 0. `git grep -nE 'from [\"']\\./cli/' -- 'packages/quay/src/*.ts'` goes from 2 lines to 0. (3) Inbound edges into cli from the other SCC members stay at 0 (cycle-matrix column cli all zeros). (4) There is exactly 1 definition site each for `resolveDriverInvocation`/`runDriver` and for `ALL_SERVICE_NAMES`/`KINDS`, both at root. `cli/driver.ts` contains no function body that spawns the supervisor kernel. (5) cli fan-out to root rises by roughly the 2 new import relations, in the allowed direction. Nothing else in the cycle matrix changes, which shows nothing else was moved along the way. (6) `enum-surface-parity-check` passes with the new paths. The scoped test suite and typecheck are green. `quay --help` wall time does not regress against the before reading on the same host (same N).",
+        "negative_control": "(A) Cut falsifiability: on a scratch copy of the branch tip, re-add one root→cli import, for example restore `serve.ts`'s import from a cli module. The SCC must return to 6 with cli AND fan-in back in. If it returns to 5, or fan-in never left, there is an unmapped edge and the 6→4 prediction was wrong. Getting 4 after the cut but not 6 under the control also means the reading is not measuring the edge. (B) Shell-move check: on the scratch copy, remove the moved root module's body, leaving it as an export that re-imports from `cli/driver.ts`. ArchGuard must show root→cli again, and the definition-count check must fail (the definition is not at root). This proves the reading tells \"moved the heart\" apart from \"moved the door\". (C) Parity follow-through: mutate `KINDS` in the new root file (drop `goal`). `enum-surface-parity-check` must turn red, not report NOT-EVALUATED or green because of a stale path. This proves the invariant tracked the move. (D) Web reuse identity: a test that drives `handleDriverLifecycle` must hit the same `runDriver` export that the CLI uses, by comparing module identity or realpath.",
+        "abandon_or_reconsider_condition": "Reconsider, falling back to S1-alt or re-scoping, if the move would drag more than the listed pieces: for example, if `runDriver`'s transitive closure reaches cli-only modules (`cli/shared.ts`, `cli/flags.ts`, `cli/help.ts`) whose relocation would itself be a second ownership decision. That would contradict findings:T1 #5's claim that these are layer-neutral primitives. Abandon or re-investigate if: (1) the before reading does not reproduce SCC=6 with the cycle matrix as stated; (2) the after reading is anything other than 4 with the exact member set above, which means hidden edges (for example the 3 unattributed cli inbound relations in package-metrics turn out to come from in-cycle code); (3) the move needs new `layers.yml` edges or a kernel placement; (4) `quay --help` latency regresses because the vocabulary module picked up imports; (5) the parity check can only be kept green by weakening its entries. Also stop if the slice starts to touch gate/* or fan-in/* source to make the numbers work. Per the methodology, the metric serves the scope.",
+        "harnessability": {
+          "inputs": "Fork-point commit, which is the develop tip at activation (cutoff 1025ab9512de as reference). The ArchGuard 0.1.38 TypeScript scope. The two root import sites and the three cli importers. The parity-check entries.",
+          "outputs": "A goal branch with one or a few serial tasks: the vocabulary move plus the dead-import drop, then the driver-control move. Evidence JSON with the before/after SCC member list and size, root→cli relation count, definition-site counts, the (A)–(D) negative-control readings, and `quay --help` timing.",
+          "constraints": "Branch:true goal, private worktree off develop. `runDriver` signatures, result shape and vocabulary values stay byte-identical. The vocabulary module stays zero-import. Root never imports through cli. No production restarts. Self-host identity: in the worktree, the resolved realpaths of the new root modules must fall inside the goal worktree.",
+          "acceptance": "Three-state exit (0 achieved / 1 with same-line CAUSE= / 3 not evaluated). AC-a: structure is done when `git grep` of root importing `./cli/` = 0, the definition-site counts are 1 at root, and parity, typecheck and scoped tests are green. AC-b: ArchGuard before shows SCC=6 and after shows SCC=4 with the exact member set, and negative controls A–D behave as specified. AC-c: merge shape is exactly 1 first-parent merge commit on develop, and the post-merge ArchGuard reading on develop still gives 4.",
+          "failure_mode": "The bad case is a quiet pass: SCC drops to 5 while a reviewer accepts \"it went down\". Or root keeps a re-export path through cli that ArchGuard misattributes. Or the parity check silently stops covering the vocabulary after the file path changes. Controls A, B and C exist to make each of these red rather than looking like success."
+        },
+        "minimum_sufficiency_rationale": "Sufficient: with both root→cli relations removed, the cycle matrix leaves cli with zero inbound edges from SCC members, so cli must leave. fan-in's only in-cycle inbound edge comes from cli, so it leaves too. That is a guaranteed 2-member reduction from 2 import sites. Minimum: either edge alone leaves the cycle intact, so the pair cannot be split. The cli→root direction (62) is legitimate and stays. The remaining gate/root core is a separate, larger question. No new abstraction is introduced, only relocation to the layer both consumers can reach, following the GOAL-032 thin-move precedent. The dead `HOSTED_SERVICE_NAMES` import is removed only because it is on a line this slice already rewrites. propose-goal over investigate: T1 already established the edge count, the symbols, the consumers, and that no other member feeds cli. The one open premise, `runDriver`'s closure, is a cheap precondition check inside the first task and a defined abandon trigger, not a question that needs its own investigation round.",
+        "evidence_refs": [
+          "arch:scc",
+          "arch:cycle-matrix",
+          "arch:root-to-cli",
+          "arch:cli-to-root",
+          "arch:package-metrics",
+          "code:root-imports-cli",
+          "code:serve-sessions-use",
+          "code:serve-use",
+          "code:cli-driver-vocab",
+          "code:driver-vocab-consumers",
+          "code:runDriver-def",
+          "findings:T1",
+          "doc:methodology",
+          "goal:GOAL-032"
+        ]
+      },
+      "rep": 1,
+      "mode": "rich-bundle",
+      "scores": {
+        "case_id": "GOAL-033",
+        "stage": "B",
+        "slice": {
+          "matches_reference": true,
+          "matches_alternative": true,
+          "novel_not_in_reference": false,
+          "reference_overlap": 0.419,
+          "alternative_overlap": 0.4,
+          "note": "auxiliary: the historical slice is one defensible answer among several, not the sole target"
+        },
+        "granularity": {
+          "verdict": "too-broad",
+          "basis": "union",
+          "by_basis": {
+            "union": "too-broad",
+            "first": "too-fragmented"
+          },
+          "too_broad_overlap": 0.6,
+          "too_fragmented_overlap": 0.667
+        },
+        "investigate_or_goal": {
+          "candidate": "propose-goal",
+          "reference": "propose-goal",
+          "agreement": true,
+          "scored_at": "T1-decision-ready"
+        },
+        "scope_discipline": {
+          "non_goals_present": true,
+          "in_scope_count": 5,
+          "violation": false
+        },
+        "harnessability": {
+          "fields_present": "5/5",
+          "complete": true,
+          "missing": []
+        },
+        "expected_delta_quality": "quantified",
+        "falsifiability": "substantive",
+        "abandon_condition": "specific",
+        "evidence_citations_resolve": true,
+        "evidence_breadth": {
+          "distinct_refs_cited": 14,
+          "of_available": 17,
+          "refs_requested": true
+        },
+        "unsupported_mentions": {
+          "distinct_paths_mentioned": 15,
+          "not_in_dossier": 2,
+          "nonexistent_at_cutoff": 2,
+          "examples_not_shown": [
+            "packages/quay/src/driver-vocab.ts",
+            "packages/quay/src/driver-control.ts"
+          ],
+          "examples_nonexistent": [
+            "packages/quay/src/driver-vocab.ts",
+            "packages/quay/src/driver-control.ts"
+          ],
+          "note": "a proposed NEW file legitimately lands in nonexistent_at_cutoff; review examples, do not treat as a score"
+        },
+        "manual_review": null
+      },
+      "scores_first_basis": {
+        "case_id": "GOAL-033",
+        "stage": "B",
+        "slice": {
+          "matches_reference": true,
+          "matches_alternative": true,
+          "novel_not_in_reference": false,
+          "reference_overlap": 0.419,
+          "alternative_overlap": 0.4,
+          "note": "auxiliary: the historical slice is one defensible answer among several, not the sole target"
+        },
+        "granularity": {
+          "verdict": "too-fragmented",
+          "basis": "first",
+          "by_basis": {
+            "union": "too-broad",
+            "first": "too-fragmented"
+          },
+          "too_broad_overlap": 0.2,
+          "too_fragmented_overlap": 0.667
+        },
+        "investigate_or_goal": {
+          "candidate": "propose-goal",
+          "reference": "propose-goal",
+          "agreement": true,
+          "scored_at": "T1-decision-ready"
+        },
+        "scope_discipline": {
+          "non_goals_present": true,
+          "in_scope_count": 5,
+          "violation": false
+        },
+        "harnessability": {
+          "fields_present": "5/5",
+          "complete": true,
+          "missing": []
+        },
+        "expected_delta_quality": "quantified",
+        "falsifiability": "substantive",
+        "abandon_condition": "specific",
+        "evidence_citations_resolve": true,
+        "evidence_breadth": {
+          "distinct_refs_cited": 14,
+          "of_available": 17,
+          "refs_requested": true
+        },
+        "unsupported_mentions": {
+          "distinct_paths_mentioned": 15,
+          "not_in_dossier": 2,
+          "nonexistent_at_cutoff": 2,
+          "examples_not_shown": [
+            "packages/quay/src/driver-vocab.ts",
+            "packages/quay/src/driver-control.ts"
+          ],
+          "examples_nonexistent": [
+            "packages/quay/src/driver-vocab.ts",
+            "packages/quay/src/driver-control.ts"
+          ],
+          "note": "a proposed NEW file legitimately lands in nonexistent_at_cutoff; review examples, do not treat as a score"
+        },
+        "manual_review": null
+      }
+    }
+  ]
+}

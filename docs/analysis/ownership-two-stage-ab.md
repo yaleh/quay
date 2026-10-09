@@ -78,3 +78,17 @@ re-running. A model switch on the current payload would be optimising the wrong 
 
 Caveats: n=4 per cell per stage, 1 repetition. The granularity direction difference (Flash
 fragmented vs Opus broad) is suggestive but not established at this n; a 2-rep run would test it.
+
+## Erratum (added with the rich-bundle / tool-replay follow-up)
+
+The **granularity** and **scope-violation** rows above, and the conclusion drawn from them ("0/8 reach
+`sufficient`; Flash under-scopes, Opus over-scopes"), rest on a lexical matcher whose token overlap is
+normalised by the *shorter* string. A short counterfactual phrase such as "Move only one of the two edges"
+is therefore 100 % "contained" in any long answer, so longer answers drift toward `too-fragmented` /
+`too-broad` regardless of what they propose. Evidence: re-scoring the same 16 responses on the
+*recommended (first) slice only* gives 1/4 `sufficient` per group instead of 0/4, and reading the richer
+follow-up answers directly shows both models proposing the historically correct fix while being scored
+`too-fragmented` (overlap 1.00 with a one-line counterfactual). Treat those rows as **unreliable**.
+Unaffected: investigate-vs-goal (an enum comparison), harnessability / falsifiability field presence, and the
+T0/T1 gold fix itself. The corrected analysis, with a blinded semantic judge as a second instrument, is in
+`ownership-rich-and-tool-replay.md`. The raw results file is unchanged.

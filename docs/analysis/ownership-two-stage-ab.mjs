@@ -49,7 +49,7 @@ function buildPrompt(doc) {
 }
 
 /** Fail-closed: unreadable output yields null, never a half-formed response. */
-function parseJson(stdout) {
+export function parseJson(stdout) {
   if (typeof stdout !== "string" || !stdout.trim()) return null;
   const cands = [];
   const f = stdout.match(/```(?:json)?\s*([\s\S]*?)```/g);
@@ -63,28 +63,38 @@ function parseJson(stdout) {
   return null;
 }
 
-async function runOne({ caseId, stage, group, roots, prompt }) {
+/** Launch one (case, stage, group) cell and return the record WITHOUT scores. Shared by the compact and the
+ *  rich-bundle runners so the two cannot drift apart on how a runtime/model is invoked. */
+export async function invokeGroup({ caseId, stage, group, roots, prompt, timeoutMs = 600_000, extraArgv = [] }) {
   const t0 = Date.now();
   const argv = launchArgv(group.role, prompt, roots[group.id], { promptViaStdin: true });
-  const r = await runAsync(argv, { timeoutMs: 600_000, collectStderr: true, stdinData: prompt });
+  if (extraArgv.length) argv.splice(argv.length - 1, 0, ...extraArgv);   // flags go BEFORE the trailing `-p`
+  const r = await runAsync(argv, { timeoutMs, collectStderr: true, stdinData: prompt });
   const ms = Date.now() - t0;
   const mi = argv.indexOf("--model");
   const parsed = r.error || (typeof r.status === "number" && r.status !== 0) ? null : parseJson(r.stdout);
-  const rec = {
-    case_id: caseId, stage, group: group.id,
-    provenance: {
-      role: group.role, profile: group.profile, launcher: argv[0],
-      model_from_profile: group.model, model_flag_in_argv: mi >= 0 ? argv[mi + 1] : null,
-      gateway_env_dropped: group.dropsGatewayEnv,
-      prompt_sha256_16: sha(prompt), prompt_chars: prompt.length,
-      started_at: new Date(t0).toISOString(), duration_ms: ms,
+  return {
+    rec: {
+      case_id: caseId, stage, group: group.id,
+      provenance: {
+        role: group.role, profile: group.profile, launcher: argv[0],
+        model_from_profile: group.model, model_flag_in_argv: mi >= 0 ? argv[mi + 1] : null,
+        gateway_env_dropped: group.dropsGatewayEnv,
+        prompt_sha256_16: sha(prompt), prompt_chars: prompt.length, prompt_bytes: Buffer.byteLength(prompt, "utf8"),
+        started_at: new Date(t0).toISOString(), duration_ms: ms,
+      },
+      state: parsed ? "verified" : "not-evaluated",
+      error: r.error ? String(r.error.message) : null,
+      exit_status: r.status,
+      response: parsed,
     },
-    state: parsed ? "verified" : "not-evaluated",
-    error: r.error ? String(r.error.message) : null,
-    exit_status: r.status,
-    response: parsed,
+    raw: r,
   };
-  if (parsed) rec.scores = stage === "A" ? scoreStageA(caseId, parsed) : scoreStageB(caseId, parsed);
+}
+
+async function runOne({ caseId, stage, group, roots, prompt }) {
+  const { rec } = await invokeGroup({ caseId, stage, group, roots, prompt });
+  if (rec.response) rec.scores = stage === "A" ? scoreStageA(caseId, rec.response) : scoreStageB(caseId, rec.response);
   return rec;
 }
 

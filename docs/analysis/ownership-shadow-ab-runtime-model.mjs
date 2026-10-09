@@ -42,43 +42,46 @@ export const GROUPS = {
   B: { id: "B", role: "ab-b", profile: "native", launcher: "claude", model: "opus", dropsGatewayEnv: true },
 };
 
-/** Build the fixture profile roots. Returns {A: rootDir, B: rootDir, wrapperPath}. */
+/** Write ONE group's fixture root (a temp dir with its own .quay/profiles.yml) and return its path. */
+export function makeRootFor(baseDir, g) {
+  const root = path.join(baseDir, g.id);
+  fs.mkdirSync(path.join(root, ".quay"), { recursive: true });
+  let launcher = g.launcher;
+  if (g.dropsGatewayEnv) {
+    // A wrapper is the only way to drop env for one group without touching runAsync (which has
+    // no env option) — argv[0] is spawned directly, so `env -u ...` cannot be spliced in.
+    launcher = path.join(root, "launcher.sh");
+    fs.writeFileSync(
+      launcher,
+      `#!/bin/bash\nunset ${GATEWAY_ENV.join(" ")}\nexec claude "$@"\n`,
+      { mode: 0o755 }
+    );
+  }
+  fs.writeFileSync(
+    path.join(root, ".quay", "profiles.yml"),
+    [
+      "version: 1",
+      "profiles:",
+      `  ${g.profile}:`,
+      `    launcher: ${launcher}`,
+      `    model: ${g.model}`,
+      "    bare: false",
+      `    auth: ${g.dropsGatewayEnv ? "key" : "token"}`,
+      "roles:",
+      `  ${g.role}:`,
+      `    profile: ${g.profile}`,
+      `    name: quay-ab-${g.id.toLowerCase()}`,
+      "",
+    ].join("\n"),
+    "utf8"
+  );
+  return root;
+}
+
+/** Build the fixture profile roots. Returns {A: rootDir, B: rootDir}. */
 export function makeFixtureRoots(baseDir) {
   const roots = {};
-  for (const g of Object.values(GROUPS)) {
-    const root = path.join(baseDir, g.id);
-    fs.mkdirSync(path.join(root, ".quay"), { recursive: true });
-    let launcher = g.launcher;
-    if (g.dropsGatewayEnv) {
-      // A wrapper is the only way to drop env for one group without touching runAsync (which has
-      // no env option) — argv[0] is spawned directly, so `env -u ...` cannot be spliced in.
-      launcher = path.join(root, "launcher.sh");
-      fs.writeFileSync(
-        launcher,
-        `#!/bin/bash\nunset ${GATEWAY_ENV.join(" ")}\nexec claude "$@"\n`,
-        { mode: 0o755 }
-      );
-    }
-    fs.writeFileSync(
-      path.join(root, ".quay", "profiles.yml"),
-      [
-        "version: 1",
-        "profiles:",
-        `  ${g.profile}:`,
-        `    launcher: ${launcher}`,
-        `    model: ${g.model}`,
-        "    bare: false",
-        `    auth: ${g.dropsGatewayEnv ? "key" : "token"}`,
-        "roles:",
-        `  ${g.role}:`,
-        `    profile: ${g.profile}`,
-        `    name: quay-ab-${g.id.toLowerCase()}`,
-        "",
-      ].join("\n"),
-      "utf8"
-    );
-    roots[g.id] = root;
-  }
+  for (const g of Object.values(GROUPS)) roots[g.id] = makeRootFor(baseDir, g);
   return roots;
 }
 
