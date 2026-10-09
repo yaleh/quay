@@ -3,7 +3,7 @@ id: gap-meta-driver-snapshot-tracked-changes-reference-error
 title: "meta-driver semantic half is 100% dead: bare
   snapshotTrackedChanges/probeWriteViolations are re-exported, not imported —
   ReferenceError, live for 27 days"
-status: todo
+status: ready
 labels:
   - gap
   - defect
