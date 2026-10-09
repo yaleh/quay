@@ -3,7 +3,7 @@ id: gap-launchargv-prompt-in-argv-exceeds-max-arg-strlen
 title: launchArgv passes the whole prompt as ONE argv element — meta-driver's
   readings grew past the 128 KiB MAX_ARG_STRLEN, so every semantic round now
   dies on spawn E2BIG
-status: superseded
+status: done
 labels:
   - gap
   - defect
