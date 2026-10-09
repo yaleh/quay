@@ -1,0 +1,111 @@
+{
+  "outage_start_ts": "2026-09-12T02:37:09.240Z",
+  "last_verified_ts": "2026-09-12T02:21:57.766Z",
+  "total_attempts": 2319,
+  "total_failed": 1753,
+  "total_verified": 419,
+  "attempt_gap_before_outage_ms": 911474,
+  "rules": [
+    {
+      "rule_family": "count",
+      "param": 1,
+      "fired_at": "2026-09-12T02:37:09.240Z",
+      "detection_delay_ms": 0,
+      "false_alarm_count": 6,
+      "false_alarm_timestamps": [
+        "2026-09-06T21:48:09.851Z",
+        "2026-09-07T03:52:16.260Z",
+        "2026-09-07T04:37:13.583Z",
+        "2026-09-07T05:55:45.141Z",
+        "2026-09-07T08:13:00.307Z",
+        "2026-09-09T20:47:15.422Z"
+      ]
+    },
+    {
+      "rule_family": "count",
+      "param": 3,
+      "fired_at": "2026-09-12T03:17:22.796Z",
+      "detection_delay_ms": 2413556,
+      "false_alarm_count": 0,
+      "false_alarm_timestamps": []
+    },
+    {
+      "rule_family": "count",
+      "param": 5,
+      "fired_at": "2026-09-12T03:57:36.037Z",
+      "detection_delay_ms": 4826797,
+      "false_alarm_count": 0,
+      "false_alarm_timestamps": []
+    },
+    {
+      "rule_family": "count",
+      "param": 10,
+      "fired_at": "2026-09-12T05:38:06.671Z",
+      "detection_delay_ms": 10857431,
+      "false_alarm_count": 0,
+      "false_alarm_timestamps": []
+    },
+    {
+      "rule_family": "count",
+      "param": 20,
+      "fired_at": "2026-09-12T08:59:15.332Z",
+      "detection_delay_ms": 22926092,
+      "false_alarm_count": 0,
+      "false_alarm_timestamps": []
+    },
+    {
+      "rule_family": "window",
+      "param": "15m",
+      "fired_at": "2026-09-12T02:37:09.240Z",
+      "detection_delay_ms": 0,
+      "false_alarm_count": 5,
+      "false_alarm_timestamps": [
+        "2026-09-06T21:48:09.851Z",
+        "2026-09-07T03:52:16.260Z",
+        "2026-09-07T04:37:13.583Z",
+        "2026-09-07T05:55:45.141Z",
+        "2026-09-07T08:13:00.307Z"
+      ]
+    },
+    {
+      "rule_family": "window",
+      "param": "30m",
+      "fired_at": "2026-09-12T02:57:16.105Z",
+      "detection_delay_ms": 1206865,
+      "false_alarm_count": 0,
+      "false_alarm_timestamps": []
+    },
+    {
+      "rule_family": "window",
+      "param": "1h",
+      "fired_at": "2026-09-12T03:37:29.053Z",
+      "detection_delay_ms": 3619813,
+      "false_alarm_count": 0,
+      "false_alarm_timestamps": []
+    },
+    {
+      "rule_family": "window",
+      "param": "3h",
+      "fired_at": "2026-09-12T05:38:06.671Z",
+      "detection_delay_ms": 10857431,
+      "false_alarm_count": 0,
+      "false_alarm_timestamps": []
+    },
+    {
+      "rule_family": "window",
+      "param": "6h",
+      "fired_at": "2026-09-12T08:39:05.835Z",
+      "detection_delay_ms": 21716595,
+      "false_alarm_count": 0,
+      "false_alarm_timestamps": []
+    },
+    {
+      "rule_family": "window",
+      "param": "24h",
+      "fired_at": "2026-09-13T02:27:25.298Z",
+      "detection_delay_ms": 85816058,
+      "false_alarm_count": 0,
+      "false_alarm_timestamps": []
+    }
+  ]
+}
