@@ -160,6 +160,72 @@ test("residentLoopStop — requestStop 幂等；无在飞 sleep 时调用不抛"
   assert.equal(ctl.isStopRequested(), true);
 });
 
+// ── residentLoopStop：提前唤醒须 clearTimeout 本觉排定的定时器 ────────────────────────────────────
+// finding `driver-shared-sleep-timer-not-cleared-on-early-wake`：wakeResolve 只让 Promise 提前
+// resolve，**⛔ 不取消那个已排定的 setTimeout**；handle 悬空 ⇒ 事件循环/测试进程被拖到原 `ms` 到期
+// （实测把本测试文件从 ~3.8s 拖到 ~62.7s）。下面两条用 sentinel 替身接管全局定时器（不真正排定），
+// 让「handle 到底有没有被 clear」成为一个可直接读的常量。
+
+/** 用替身接管 globalThis.setTimeout/clearTimeout（不真正排定任何定时器），跑同步 fn，必还原。
+ *  替身返回的 handle 是 sentinel 对象 ⇒ 断言可用【引用相等】核对 clear 的是不是同一个 handle。 */
+function withTimerSpies(fn) {
+  const realSetTimeout = globalThis.setTimeout;
+  const realClearTimeout = globalThis.clearTimeout;
+  const scheduled = []; // [{ handle, ms, handler }]
+  const cleared = []; // [handle]
+  let seq = 0;
+  globalThis.setTimeout = (handler, ms) => {
+    const handle = { __fakeTimer: (seq += 1) };
+    scheduled.push({ handle, ms, handler });
+    return handle;
+  };
+  globalThis.clearTimeout = (handle) => { cleared.push(handle); };
+  try {
+    return fn({ scheduled, cleared });
+  } finally {
+    globalThis.setTimeout = realSetTimeout;
+    globalThis.clearTimeout = realClearTimeout;
+  }
+}
+
+test("回归（timer 泄漏）— requestStop 提前唤醒后，本觉排定的定时器被 clearTimeout 恰一次（能取假）", async () => {
+  // ⚠️ 为什么这条能取假：本断言直接读 clearTimeout 被调用的【次数与 handle 引用】。
+  // 若实现里去掉 requestStop 里那句 clearTimeout（正是本任务修的缺陷），cleared.length = 0 ⇒
+  // 本断言变红。而现有那条「requestStop 唤醒在飞的 sleep（提前 resolve）」测试此时【仍然通过】
+  // （问题不在 resolve 时序）——所以这条测的是旧测试结构上测不到的量。
+  const ctl = residentLoopStop();
+  let pending = null;
+  let handle = null;
+  withTimerSpies(({ scheduled, cleared }) => {
+    pending = ctl.sleep(60_000);
+    assert.equal(scheduled.length, 1, "sleep 须排定一个定时器");
+    assert.equal(scheduled[0].ms, 60_000, "排定的就是本次 sleep 的 interval");
+    handle = scheduled[0].handle;
+    ctl.requestStop();
+    assert.equal(cleared.length, 1, "提前唤醒须 clearTimeout 一次（⛔ 否则 handle 悬空到 60s）");
+    assert.equal(cleared[0], handle, "clear 的必须是 sleep 拿到的那同一个 handle");
+  });
+  await pending; // requestStop 已同步 resolve（替身定时器从不触发，也无须触发）
+  assert.equal(ctl.isStopRequested(), true);
+});
+
+test("回归（负控制）— 自然到点 resolve 的 sleep 不 clearTimeout（⛔ 防「一律 clear」的过度修复）", async () => {
+  // 半边对照：证明上一条不是在测「任何路径都 clear」。自然到点走的是定时器回调，本觉已不在飞 ⇒
+  // ⛔ 不 clear；此后 requestStop（wakeResolve 已 null）也 ⛔ 不 clear、不抛。
+  const ctl = residentLoopStop();
+  let pending = null;
+  withTimerSpies(({ scheduled, cleared }) => {
+    pending = ctl.sleep(30);
+    assert.equal(scheduled.length, 1);
+    scheduled[0].handler(); // 模拟定时器到点
+    assert.equal(cleared.length, 0, "自然到点不调用 clearTimeout");
+    ctl.requestStop(); // 已到点 ⇒ 无在飞 sleep
+    assert.equal(cleared.length, 0, "无在飞 sleep 时 requestStop ⛔ 不 clear、不抛");
+  });
+  await pending;
+  assert.equal(ctl.isStopRequested(), true);
+});
+
 test("回归（dedup 守卫）— 三常驻 driver ⛔ 不再各自声明 wakeResolve 副本；均经 residentLoopStop", () => {
   // 硬规则 5b：缺陷成簇。此判据在【三个文件】上按位置查标识符（⛔ 不是关键词——注释里提到不算），
   // 防这次抽取被下一次「顺手复制四行」重新引入。
