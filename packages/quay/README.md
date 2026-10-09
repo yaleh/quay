@@ -396,6 +396,51 @@ from `.quay/config.yml` behind a single MCP endpoint — the binding an agent
 (e.g. Claude Code) registers once instead of registering each Provider's
 own `<provider> mcp` separately.
 
+## Public API: `quay/dashboard-kernel`
+
+This package publishes exactly one subpath meant for an **external** package consumer: the pure
+packing half of the dashboard's "Loop pulse" gantt.
+
+```js
+import { FIXED_GANTT_LANES, mergeLiveAndHistoryIntervals, packLanes } from "quay/dashboard-kernel";
+
+const merged = mergeLiveAndHistoryIntervals(inFlight, historyRecords, windowStartMs, nowMs);
+const { lanes, overflow } = packLanes(merged); // ≤ FIXED_GANTT_LANES lanes; `overflow` is never dropped
+```
+
+- **What it is** — `FIXED_GANTT_LANES` (the fixed 5-lane cap, the dashboard's visual contract),
+  `mergeLiveAndHistoryIntervals` (in-flight runs + `worker-outcome.jsonl` history → one interval
+  list, filtered to the time window and deduped on `(taskId, startMs)`), and `packLanes` (greedy
+  packing onto ≤ 5 lanes plus an explicit `overflow` count), together with the interval type and the
+  published state vocabulary (`LIVE_INTERVAL_PHASES`, `LIVE_INTERVAL_FINAL_STATES`).
+- **What it is NOT** — the SVG renderer, the CSS colour tokens and the label catalogue stay in
+  Core's dashboard. The kernel publishes *which states exist*, never *what colour they are*: map the
+  state values onto your own palette.
+- **Zero dependencies** — the module is a zero-import leaf, so importing it never drags Core's
+  web/render/i18n dependency graph into the consumer's bundle.
+- **Runtime and types** — the `exports` map resolves the runtime to the built
+  `dist/dashboard-kernel.js` and TypeScript to the `.ts` source. The built file (produced by
+  `bash packages/quay/scripts/build-dist.sh`, which `package.sh` runs before `npm pack`) is
+  required rather than the `.ts` source because Node refuses to strip types for anything under
+  `node_modules` — which is exactly where an externally installed copy lives.
+- **Equivalence vector** — `dashboard-kernel-vectors.json` ships with the package (and is resolvable
+  as `quay/dashboard-kernel/vectors`). It is the cross-project contract test: replay each vector
+  through your copy and assert identical lane assignment and `overflow`. That is how a consumer
+  proves it runs the same algorithm rather than a look-alike.
+- **Stability** — this subpath is a semver-governed public contract. Changing the parameter or
+  return shape of `packLanes` / `mergeLiveAndHistoryIntervals`, or removing an exported name, is a
+  **breaking** change and calls for the package's major-version bump; adding an export or widening
+  an input type is not.
+- **Known consumers** — `claudecodeui`'s Quay tab is the first external consumer: it feeds
+  `quay driver live --json` output through this kernel and renders the lanes with its own
+  React/Tailwind components.
+
+> **Distribution note.** The npm and SEA release channels are retired (see Install above), so today
+> this subpath reaches an external project by installing a locally built tarball
+> (`bash packages/quay/scripts/package.sh` → `npm install <path-to-quay-*.tgz>`) or via a `file:`
+> dependency on a checkout. The stability promise above is a promise about the exported shape, and
+> it holds however the tarball is delivered.
+
 ## Distribution: single-file executables (SEA) — **no longer published**
 
 > **Retired with the npm channel** by the 2026-09-16 ruling — no release page carries a
