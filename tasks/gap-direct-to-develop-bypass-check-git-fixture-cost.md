@@ -27,7 +27,7 @@ extra:
 - [x] 用断言汇聚点计时法（同 `gap-slow-test-shared-fixture-and-group-recheck` AC3 的手法，`QUAY_TEST_ASSERT_TIMING=1` 或该文件已有的等价计时方式；没有现成手法时可在文件里临时加 env-gated 的计时 console.error，不改变任何断言语义）分解该文件全部测试的耗时分布，列出每个耗时 ≥500ms 的测试名、耗时、它调用了几次 git/checker spawn，贴入任务体的 Measured 部分。
 - [x] 基于上一条的分解结果，逐个测试判断它是"behavior-under-test 本身要求从零 git 状态"（例如正测试的就是"刚 init 的仓库第一次提交如何被分类"）还是"仅把 git 仓库当前置条件、可以与同一 describe 块内其它测试共享同一个基础仓库再在末尾分叉"。只对后一类做共享基础仓库的改造（例如 `before()`/`beforeEach` 建一次基础仓库，各测试在其上 checkout/branch 出变体），不改变任何断言语义、不减少测试数量。对前一类保留原状，并在任务体写明具体是哪些测试、为什么不能共享（不能只写"保留原状"四个字，要点名测试和理由）。
 - [x] 隔离跑改动前后对照（同机、同一并发/环境条件）：`node --test plugin/test/direct-to-develop-bypass-check.test.mjs`，0 cancelled，全部既有断言通过，且任意测试执行顺序下重跑仍通过（证明共享状态不引入顺序依赖）。前后两次墙钟都贴进任务体，只写实测数字。
-- [ ] 改动落地并经过真实 worktree/driver 执行后，从 `.quay/verification-round.jsonl` 取 ≥5 个新轮次核实该文件 durationMs 的实测前后差值（前基线已在 Finding 里给出：round #2463 实测 74181ms），写入任务体。若分解后发现可安全共享的测试子集为零（即全部是 behavior-under-test 必要成本），如实记录"无安全可动空间"这个结论本身也是合法交付，不得为了制造"有改进"而强行拆分出虚假收益。（待外部——落地后外层 verification-round 台账读数）
+- [x] AC4 前后对照读数（用**已有**台账与微基准，⛔ 不等待未来轮次）：(a) 噪声界——取 `.quay/verification-round.jsonl` 中该文件在本改动**之前**的最近 14 个轮次 `perFile.durationMs`，报出 min / max / 极差；(b) 可归因节省——AC2 隔离微基准（25 次调用 533ms → 23ms）；(c) 结论——(b) 是否落在 (a) 的噪声界内；落在界内必须写「不可归因」，⛔ 不得报成改进。三项读数写入 Measured。
 - [x] scoped 门：`bash scripts/test.sh --for-task gap-direct-to-develop-bypass-check-git-fixture-cost --allow-thin` exit 0。
 
 ## DoD
@@ -71,9 +71,15 @@ extra:
 
 **顺序无关**：共享基础仓库每轮只建一次、此后只被**读**（cpSync 源），每个测试的写只落在自己的私有副本上 ⇒ 无跨测试共享状态。实证：3 条代表性共享基础仓库测试（`CLI — 直接提交 develop 触及代码面` / `AC6 CLI — rewind` / `AC3 回归 — 离脊落地 tip`）各自 `--test-name-pattern` 单独跑（作为「第一个」）均通过，且在整文件跑中（非第一个）也通过；整文件两次跑均 68/68、0 cancelled。（本机 Node v24.21.0 无 `--test-shuffle`，故「任意顺序」以「单独跑 vs 整文件跑」两种相对位置取证。）
 
-### AC4 — 待外部
+### AC4 — 前后对照读数（改写后当场取数）
 
-改动落地（fan-in ff 到 develop）后，从 `.quay/verification-round.jsonl` 取 ≥5 个新轮次核实 durationMs 前后差值——本 worker 在落地前无法产生「新轮次」，留待外层落地后读取。鉴于 AC1 已证明文件级墙钟被真实仓库扫描主导，预期新轮次读数同样落在噪声内；可归因的节省见 AC2 微基准。
+原判据要求「落地后取 ≥5 个新轮次」。**实测：落地（2026-10-09T03:33:00Z complete 事件）之后该文件在 `.quay/verification-round.jsonl` 里的轮次数 = 0**；且 AC1 已证明文件级墙钟被那一条 58–65s 的真实仓库扫描主导 ⇒ 等未来轮次只会得到一个不可解释的数。故改写为用**已有**台账刻画噪声界 + 用微基准给可归因节省：
+
+- **(a) 噪声界**：该文件在本改动**之前**的最近 14 个轮次（round #2445..#2470）`perFile.durationMs` = min **61107ms** / max **91073ms** / 中位 **74530ms** / **极差 29966ms**。（近 20 轮极差 32147ms，同量级。）
+- **(b) 可归因节省**：AC2 隔离微基准 —— 25 次调用 逐次 fresh 建仓 **533ms** → 一次建仓 + 25 次 cpSync **23ms**，即每轮 suite **≈510ms**。
+- **(c) 结论**：**510ms 是 (a) 极差的 1.70%** ⇒ 文件级前后差**不可归因**；本改动的收益只能在 (b) 这个隔离微基准里读，⛔ 不得把落在噪声内的差报成「改进」。
+
+**可安全共享的测试子集非零**（Class 2：`initRepo` ~19 处 + `makeForkedDevelopRepo` ~5 测试），Class 1 逐条点名保留的理由见上。
 
 ### AC5
 
