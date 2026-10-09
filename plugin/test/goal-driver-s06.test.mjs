@@ -207,6 +207,39 @@ test('AC5 负控制（契约另一半）: 解析不出的代码根 ⇒ 一个【
   }
 });
 
+// ── AC3（源文本硬检查；gap-goal032-verdict-parse-direct-import-regresses-ac262）──
+//
+// 上面那条 AC5 pin 钉的是 goalStoreArgv 造出的 **argv 形态**；它对 goal-driver 顶部的一行 **静态
+// import** 结构上取不到假。GOAL-032 正是这样回归的：`import { parseBinaryVerdict } from
+// "../../packages/quay/src/kernel/verdict-parse.ts"` 加进去后 argv 一点没变（那条 pin 仍绿），而
+// goals/AC-262 判据第二支翻假（实测命中 2 处：import 说明符 + JSDoc 散文）。⇒ 按源文本补一条硬检查，
+// 谓词与 AC-262 criterion 第二支**逐字相同**：只剥 `//` 行注释，块注释散文存活（则上面两处都算命中）。
+const CORE_SRC_RE = /"packages"\s*,\s*"quay"\s*,\s*"src"/;
+function coreSrcHitsIn(text) {
+  const hits = [];
+  text.split('\n').forEach((ln, i) => {
+    const code = ln.split('//', 1)[0];
+    if (CORE_SRC_RE.test(code) || code.includes('packages/quay/src')) hits.push(`${i + 1}: ${code.trim().slice(0, 90)}`);
+  });
+  return hits;
+}
+
+test('AC3: goal/meta driver 剥掉 `//` 行注释后不含 packages/quay/src（与 AC-262 判据第二支同谓词）', () => {
+  // 空转防线（硬规则 3b；规则 2 的**零计数半边**）：先证明谓词对【已知为真】的样本命中，否则
+  // 「0 命中」与「文件读成空串」同形。基线样本 = GOAL-032 加的那行直连 import。
+  const knownTrue = 'import { parseBinaryVerdict } from "../../packages/quay/src/kernel/verdict-parse.ts";';
+  assert.equal(coreSrcHitsIn(knownTrue).length, 1, '自检：谓词对已知为真的样本必须命中（否则本判据空转）');
+  const hits = [];
+  for (const rel of ['plugin/scripts/goal-driver.ts', 'plugin/scripts/meta-driver.ts']) {
+    const abs = path.join(repoRoot, rel);
+    assert.equal(fs.existsSync(abs), true, `前置：${rel} 必须存在（文件不在而读成空串也是 0 命中）`);
+    const text = fs.readFileSync(abs, 'utf8');
+    assert.ok(text.length > 0, `前置：${rel} 必须非空`);
+    for (const h of coreSrcHitsIn(text)) hits.push(`${rel} ${h}`);
+  }
+  assert.equal(hits.length, 0, `driver 复写了 Core 源码树布局字面量（前 3 条实际命中）：${hits.slice(0, 3).join(' | ')}`);
+});
+
 
 test('派生判据的识别式：按【位置】（判据里成词出现）判定，⛔ 不按子串/散文提及', () => {
   assert.equal(readsFrozenPopulation('node --no-warnings --experimental-strip-types packages/quay/src/goal-store.ts check --stale-pass'), true);

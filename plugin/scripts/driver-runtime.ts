@@ -504,6 +504,11 @@ export {
   type PreviewStopReading,
   type WorktreeNodeModulesReading,
 } from "../../packages/quay/src/goal-preview.ts";
+// GOAL-032：judge-stdout → 三态 verdict 的解析算法（Core kernel leaf）。goal-driver 的
+// `parseSemanticSufficiencyVerdict` 与产品侧 `criterion-fidelity.ts::parseFidelityVerdict` 此前各有一份
+// 逐字相同的解析循环，现收敛到 Core 的单一实现；driver 只是**取符号**，布局知识仍只在本节出现一次
+// （AC-262 判据按源文本扫 goal-driver / meta-driver，剥掉 `//` 后不得出现 Core 源码树字面量——同上一节）。
+export { parseBinaryVerdict } from "../../packages/quay/src/kernel/verdict-parse.ts";
 
 // `pidAlive`：**本文件曾是它的第四份副本**，且是唯一把 EPERM（exists-but-not-ours）读成 DEAD 的一份
 // ⇒ `rmCarrierUnlessForeignLive`（存在的理由正是「别删掉一个外来的活进程在盘上唯一的记录」）与
