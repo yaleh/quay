@@ -34,5 +34,21 @@
     "branch-selfhost-probe.mjs",
     "task-status-events.jsonl"
   ],
-  "investigation_or_goal_reference": "goal"
+  "investigation_or_goal_reference": "goal",
+  "granularity_rationale": {
+    "granularity_label": "sufficient",
+    "why_not_broader": "Could have included fan-in's 4 status-write sites or the needs-human/branch-sync-alignment 2 sites in the same slice, but that would add surface area to debug on the FIRST real trial of the goal-branch mechanism itself -- the thing actually being tested here is whether the self-host identity proof works at all, not architectural coverage.",
+    "why_not_finer": "Could have split todo->ready and ready->todo into two separate goals, but they share the same kernel module and event-schema design question; splitting would double the branch-lifecycle overhead (activate/preview/merge/post-merge-verify, each with its own suite run) for zero independent-acceptance benefit -- a coordination-cost argument, not a correctness one.",
+    "harnessable_subproblems": [
+      "ArchGuard edge-count before/after comparison (an existing instrument, single-root scope analysis)",
+      "branch merge-shape check (first-parent chain, exactly-one-merge-commit -- an established goal-branch mechanics pattern)"
+    ],
+    "investigation_required_subproblems": [
+      "whether a worktree/preview process can be proven to load its OWN branch's code rather than the main checkout's -- no existing instrument covered this before this goal; had to design and build a new self-host identity probe"
+    ],
+    "primitives_reused": [
+      "three-state exit-code convention (0 achieved / 1 not-achieved+CAUSE= / 3 not-evaluated)",
+      "ArchGuard single-root scope analysis for before/after comparison"
+    ]
+  }
 }

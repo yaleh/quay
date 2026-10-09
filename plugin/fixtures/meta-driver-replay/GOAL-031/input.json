@@ -5,7 +5,10 @@
   "context": {
     "repo_state_summary": "GOAL-030 (the first real goal-branch pilot: lifecycle status writes sunk to a kernel decision layer with structured events) has just landed cleanly. The project's 'ownership-first refactoring' methodology (documented separately) calls for continuing with small, independently-verifiable slices rather than one large refactor.",
     "prior_goal_precedents": [
-      { "id": "GOAL-030", "one_line": "lifecycle-write ownership sunk to kernel + structured events; landed, all 7 ACs achieved, clean single-commit merge." }
+      {
+        "id": "GOAL-030",
+        "one_line": "lifecycle-write ownership sunk to kernel + structured events; landed, all 7 ACs achieved, clean single-commit merge."
+      }
     ],
     "archguard_readings_before": {
       "tool_call": "get_literal_dispersion(value:\"needs-human\")",
@@ -31,27 +34,126 @@
       "e) What is the scope, and what are the explicit non-goals?",
       "f) What mechanical delta (a concrete, measurable before/after) would you expect evidence of, once done?",
       "g) What negative control would distinguish 'this actually worked' from 'this looks like it worked'?",
-      "h) What evidence, if it appeared, would make you abandon or materially revise this recommendation?"
+      "h) What evidence, if it appeared, would make you abandon or materially revise this recommendation?",
+      "i) Decompose the problem: what semantically coherent slices did you consider, and why is your recommended one the minimal-sufficient granularity (not too broad, not too fragmented)? Which sub-problems are already checkable by an existing harness/instrument, and which still need investigation first? What existing stable mechanism(s) are you reusing rather than rebuilding from scratch?"
     ],
     "response_schema": {
       "type": "object",
-      "required": ["concerns", "candidate_interventions", "recommended", "investigation_or_goal", "scope", "expected_mechanical_delta", "negative_control", "revision_evidence"],
+      "required": [
+        "concerns",
+        "candidate_interventions",
+        "recommended",
+        "investigation_or_goal",
+        "scope",
+        "expected_mechanical_delta",
+        "negative_control",
+        "revision_evidence",
+        "decomposition_rationale"
+      ],
       "properties": {
-        "concerns": { "type": "array", "items": { "type": "string" } },
+        "concerns": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
         "candidate_interventions": {
           "type": "array",
           "maxItems": 3,
-          "items": { "type": "object", "properties": { "title": { "type": "string" }, "rationale": { "type": "string" } } }
+          "items": {
+            "type": "object",
+            "properties": {
+              "title": {
+                "type": "string"
+              },
+              "rationale": {
+                "type": "string"
+              }
+            }
+          }
         },
-        "recommended": { "type": "string" },
-        "investigation_or_goal": { "enum": ["investigation", "goal"] },
+        "recommended": {
+          "type": "string"
+        },
+        "investigation_or_goal": {
+          "enum": [
+            "investigation",
+            "goal"
+          ]
+        },
         "scope": {
           "type": "object",
-          "properties": { "in_scope": { "type": "array", "items": { "type": "string" } }, "non_goals": { "type": "array", "items": { "type": "string" } } }
+          "properties": {
+            "in_scope": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            },
+            "non_goals": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            }
+          }
         },
-        "expected_mechanical_delta": { "type": "string" },
-        "negative_control": { "type": "string" },
-        "revision_evidence": { "type": "string" }
+        "expected_mechanical_delta": {
+          "type": "string"
+        },
+        "negative_control": {
+          "type": "string"
+        },
+        "revision_evidence": {
+          "type": "string"
+        },
+        "decomposition_rationale": {
+          "type": "object",
+          "properties": {
+            "granularity_assessment": {
+              "enum": [
+                "too-broad",
+                "sufficient",
+                "too-fragmented"
+              ]
+            },
+            "why_not_broader": {
+              "type": "string"
+            },
+            "why_not_finer": {
+              "type": "string"
+            },
+            "harnessable_subproblems": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            },
+            "investigation_required_subproblems": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            },
+            "primitives_reused": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            },
+            "coordination_cost_note": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "granularity_assessment",
+            "why_not_broader",
+            "why_not_finer",
+            "harnessable_subproblems",
+            "investigation_required_subproblems",
+            "primitives_reused"
+          ]
+        }
       }
     }
   }

@@ -29,5 +29,22 @@
     "probeInstruments",
     "resolveDriverInvocation"
   ],
-  "investigation_or_goal_reference": "goal"
+  "investigation_or_goal_reference": "goal",
+  "granularity_rationale": {
+    "granularity_label": "sufficient",
+    "why_not_broader": "The other 5 members of the 6-node SCC (gate / gate-config / gate-factories / fan-in and their mutual edges) are explicitly not touched -- clearing the WHOLE cycle in one goal would require re-deciding ownership for all of them simultaneously, a much larger and riskier undertaking than cutting the one cheapest, best-understood edge.",
+    "why_not_finer": "The two root->cli edges (a control-vocabulary table and a control client) must move together -- both are consumed in combination by the same 5 downstream call sites; moving just one would leave a partially-converged, harder-to-reason-about intermediate state with no independent acceptance story of its own.",
+    "harnessable_subproblems": [
+      "ArchGuard SCC-membership before/after with a negative control (the SAME before/after+negative-control pattern already used 3 times in GOAL-030/031/032, reused for a 4th time)",
+      "a structural import-grep scan (zero cli-> imports from root) -- mechanical, the pattern is already established"
+    ],
+    "investigation_required_subproblems": [
+      "recognizing a decoration trap: naively moving the control client verbatim would create a NEW root->fan-in edge, trading one cycle-causing edge for a different one -- only visible by reading the function's actual body, not from the dependency graph alone"
+    ],
+    "primitives_reused": [
+      "three-state exit-code convention",
+      "the ArchGuard before/after + negative-control pattern (4th use)",
+      "the branch merge-shape AC pattern (post-merge, same shape used in every prior goal in this series)"
+    ]
+  }
 }

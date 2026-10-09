@@ -19,6 +19,7 @@ import {
   loadCaseReference,
   loadCaseOutcome,
   buildDefaultPrompt,
+  scoreResponse,
 } from "./helpers/meta-driver-replay-harness.mjs";
 
 const INPUT_REQUIRED = ["case_id", "cutoff", "context", "decision_prompt_schema"];
@@ -34,6 +35,15 @@ const REFERENCE_REQUIRED = [
   "stop_abandon_condition",
   "leakage_markers",
   "investigation_or_goal_reference",
+  "granularity_rationale",
+];
+const GRANULARITY_RATIONALE_REQUIRED = [
+  "granularity_label",
+  "why_not_broader",
+  "why_not_finer",
+  "harnessable_subproblems",
+  "investigation_required_subproblems",
+  "primitives_reused",
 ];
 const OUTCOME_REQUIRED = ["case_id", "status"];
 
@@ -54,19 +64,39 @@ test("corpus has exactly the expected 4 cases, unique ids matching directory nam
 });
 
 for (const id of ["GOAL-030", "GOAL-031", "GOAL-032", "GOAL-033"]) {
-  test(`${id}: input.json has all required schema keys`, () => {
+  test(`${id}: input.json has all required schema keys, including the decomposition question (i) and response schema`, () => {
     const input = loadCaseInput(id);
     for (const key of INPUT_REQUIRED) assert.ok(key in input, `input.json missing ${key}`);
-    assert.ok(Array.isArray(input.decision_prompt_schema.questions) && input.decision_prompt_schema.questions.length === 8, "must have exactly 8 questions");
-    assert.ok(typeof input.decision_prompt_schema.response_schema === "object");
+    const { questions, response_schema } = input.decision_prompt_schema;
+    assert.ok(Array.isArray(questions) && questions.length === 9, "must have exactly 9 questions (a-h plus the decomposition question i)");
+    assert.ok(questions.some((q) => q.startsWith("i)") && /decompose/i.test(q)), "question (i) must ask for decomposition reasoning");
+    assert.ok(typeof response_schema === "object");
+    assert.ok(
+      response_schema.required.includes("decomposition_rationale"),
+      "response_schema must require decomposition_rationale — otherwise decomposition quality cannot be scored at all"
+    );
+    const drSchema = response_schema.properties.decomposition_rationale;
+    assert.ok(drSchema, "response_schema.properties.decomposition_rationale missing");
+    for (const key of ["granularity_assessment", "why_not_broader", "why_not_finer", "harnessable_subproblems", "investigation_required_subproblems", "primitives_reused"]) {
+      assert.ok(key in drSchema.properties, `decomposition_rationale schema missing property ${key}`);
+    }
   });
 
-  test(`${id}: reference.json has all required schema keys`, () => {
+  test(`${id}: reference.json has all required schema keys, including granularity_rationale (why this is minimal-sufficient)`, () => {
     const reference = loadCaseReference(id);
     for (const key of REFERENCE_REQUIRED) assert.ok(key in reference, `reference.json missing ${key}`);
     assert.ok(Array.isArray(reference.leakage_markers) && reference.leakage_markers.length > 0, "leakage_markers must be a non-empty array");
     assert.ok(Array.isArray(reference.scope_discipline.non_goals) && reference.scope_discipline.non_goals.length > 0);
     assert.ok(Array.isArray(reference.scope_discipline.stop_signals) && reference.scope_discipline.stop_signals.length > 0);
+
+    const gr = reference.granularity_rationale;
+    for (const key of GRANULARITY_RATIONALE_REQUIRED) assert.ok(key in gr, `granularity_rationale missing ${key} for ${id}`);
+    assert.equal(gr.granularity_label, "sufficient", `all 4 real gold cases are real landed/in-progress decisions, so their own ground truth granularity must be "sufficient" for ${id}`);
+    assert.ok(gr.why_not_broader.trim().length >= 40, `why_not_broader too thin to actually justify minimal-sufficiency for ${id}`);
+    assert.ok(gr.why_not_finer.trim().length >= 40, `why_not_finer too thin to actually justify minimal-sufficiency for ${id}`);
+    assert.ok(Array.isArray(gr.harnessable_subproblems) && gr.harnessable_subproblems.length > 0, `harnessable_subproblems must be non-empty for ${id}`);
+    assert.ok(Array.isArray(gr.investigation_required_subproblems) && gr.investigation_required_subproblems.length > 0, `investigation_required_subproblems must be non-empty for ${id}`);
+    assert.ok(Array.isArray(gr.primitives_reused) && gr.primitives_reused.length > 0, `primitives_reused must be non-empty for ${id}`);
   });
 
   test(`${id}: outcome.json has all required schema keys`, () => {
@@ -110,6 +140,74 @@ for (const id of ["GOAL-030", "GOAL-031", "GOAL-032", "GOAL-033"]) {
     }
   });
 }
+
+test("scoreResponse: known-false sample (generic/irrelevant response) scores near-zero across overlap-based dimensions", () => {
+  // Regression pin for a real bug caught during manual smoke-testing: the tokenizer's
+  // stopword list was missing, so a generic irrelevant response like this one scored
+  // concern_recall=1 purely from common English function words overlapping reference prose.
+  const bad = {
+    concerns: ["the weather is nice"],
+    candidate_interventions: [{ title: "rewrite everything", rationale: "because" }],
+    recommended: "rewrite the entire orchestration layer from scratch",
+    investigation_or_goal: "investigation",
+    scope: { in_scope: ["everything"], non_goals: [] },
+    expected_mechanical_delta: "things will be better",
+    negative_control: "",
+    revision_evidence: "",
+    decomposition_rationale: {
+      granularity_assessment: "too-broad",
+      why_not_broader: "n/a",
+      why_not_finer: "n/a",
+      harnessable_subproblems: [],
+      investigation_required_subproblems: [],
+      primitives_reused: [],
+      coordination_cost_note: "",
+    },
+  };
+  const result = scoreResponse("GOAL-030", bad);
+  assert.equal(result.concern_recall, 0, "a response about 'the weather' must not recall the real concern");
+  assert.equal(result.chosen_slice_agreement, "no_match");
+  assert.equal(result.harnessability, "incomplete");
+  assert.equal(result.primitive_reuse.mentioned_any, false);
+  assert.equal(result.granularity, "disagreement", "candidate said too-broad, reference says sufficient");
+});
+
+test("scoreResponse: known-true sample (a close paraphrase of the real reference decision) scores agreement across overlap-based dimensions", () => {
+  const good = {
+    concerns: ["lifecycle status writes are scattered across orchestration scripts with no structured event record"],
+    candidate_interventions: [{ title: "sink status-write logic into a shared decision module with event logging", rationale: "removes the scatter and adds an audit trail" }],
+    recommended: "sink lifecycle status-write logic into a shared decision layer and write a structured event per transition, as a small real goal-branch pilot",
+    investigation_or_goal: "goal",
+    scope: { in_scope: ["todo->ready and ready->todo writes"], non_goals: ["fan-in writes", "needs-human writes"] },
+    expected_mechanical_delta: "plugin/scripts to kernel edge strength should go from 14 to 15",
+    negative_control: "feed a fabricated event whose writer module lives in the main checkout and confirm it is classified as loaded-main-checkout-code",
+    revision_evidence: "if the branch worktree is ever shown to load main-checkout code, abandon immediately",
+    decomposition_rationale: {
+      granularity_assessment: "sufficient",
+      why_not_broader: "including fan-in or needs-human writes would add debugging surface area on the first real trial of the mechanism itself",
+      why_not_finer: "splitting todo->ready and ready->todo into two goals would double branch-lifecycle overhead for no independent acceptance benefit",
+      harnessable_subproblems: ["ArchGuard edge-count before/after", "branch merge-shape check"],
+      investigation_required_subproblems: ["proving a worktree loads its own branch's code, not the main checkout's"],
+      primitives_reused: ["three-state exit code convention", "ArchGuard single-root scope analysis"],
+      coordination_cost_note: "keeping both writes in one goal avoids paying the branch-lifecycle fixed cost twice",
+    },
+  };
+  const result = scoreResponse("GOAL-030", good);
+  assert.equal(result.concern_recall, 1);
+  assert.equal(result.chosen_slice_agreement, "near_match");
+  assert.equal(result.harnessability, "harness_ready");
+  assert.equal(result.granularity, "agreement");
+  assert.equal(result.primitive_reuse.mentioned_any, true);
+  assert.ok(result.primitive_reuse.overlap_with_reference > 0.5);
+  assert.equal(result.unnecessary_decomposition_flag, false);
+});
+
+test("scoreResponse: hindsight_leakage_guard flags a response that happens to contain a real leakage marker", () => {
+  const leaky = { recommended: "build packages/quay/src/kernel/task-transition.ts as the fix" };
+  const result = scoreResponse("GOAL-030", leaky);
+  assert.equal(result.hindsight_leakage_guard.flagged, true);
+  assert.ok(result.hindsight_leakage_guard.matched_markers.includes("task-transition.ts"));
+});
 
 test("README.md exists and states the first-version/not-a-benchmark caveat", () => {
   const readme = fs.readFileSync(path.join(CORPUS_ROOT, "README.md"), "utf8");
