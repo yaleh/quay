@@ -2,7 +2,7 @@
 id: AC-352
 title: 并入形态 + 并入后核验：GOAL-033 以恰好一个合并提交进入 develop，落地树有 driver-control.ts、无
   cli/driver-vocab.ts、core-root 零 cli/ import
-status: active
+status: achieved
 kind: criterion
 goal: GOAL-033
 criterion: |-
@@ -36,6 +36,11 @@ statusLog:
     to: active
     actor: goal-cli
     reason: ""
+  - at: 2026-10-09T07:36:39.383Z
+    from: active
+    to: achieved
+    actor: goal-driver
+    reason: "I2: criterion pass"
 fidelity:
   verdict: not-evaluated
   reason: no judge configured
