@@ -2,7 +2,7 @@
 id: gap-ac321-goal-merge-selector-matches-task-catchup-merge
 title: AC-321 误读 exit 1（隔离实际成立）：判据的 goal_merges() 把「任务分支追平 goal 分支」的合并也算作 goal
   并入，Mg 又被 tail -1 取到最旧的一条 —— 同因还打红 AC-324/327/328
-status: todo
+status: ready
 labels:
   - gap
   - defect
