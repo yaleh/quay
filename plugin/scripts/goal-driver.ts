@@ -47,15 +47,12 @@ import { spawnSync } from "node:child_process";
 import { isDirectEntry } from "./gate-script-base.ts";
 // Layer 0（driver-runtime 单一实现）：DRIVER_KINDS（controlFile/carriers 单源）、runAsync（非阻塞
 // spawn）、launchArgv（LLM 调用配置单一构造点）、splitArgs（测试缝覆盖命令切分）、Fact / RoutineSpec
-// （Layer 1b 例程契约）。
-import { DRIVER_KINDS, runAsync, launchArgv, splitArgs, kernelSiblingArgv, kernelConfigPath, resolveQuayCodeRoot, type Fact, type RoutineSpec } from "./driver-runtime.ts";
+// （Layer 1b 例程契约）、parseBinaryVerdict（GOAL-032 判定器 stdout → 三态 verdict 的解析算法，
+// kernel leaf；⛔ 本文件只表达「我需要这个符号」，布局知识留 Layer 0 —— 同 regex-escape 的落点论证）。
+import { DRIVER_KINDS, runAsync, launchArgv, splitArgs, kernelSiblingArgv, kernelConfigPath, resolveQuayCodeRoot, parseBinaryVerdict, type Fact, type RoutineSpec } from "./driver-runtime.ts";
 // The ONE regex-literal escaper (kernel leaf via the plugin shim) — replaces an inline escape body at
 // the heading-literal site (finding `escaperegexp-sweep-missed-two`, routine `semantic-dedup-scan`).
 import { escapeRegExp } from "./regex-escape.ts";
-// GOAL-032：判定器 stdout → 三态 verdict 的解析算法单一实现（kernel leaf，plugin → kernel 方向，
-// 同 regex-escape 的落点论证）。parseSemanticSufficiencyVerdict 此前与产品侧
-// criterion-fidelity.ts::parseFidelityVerdict 逐字相同的解析循环已收敛到这一个 kernel 函数。
-import { parseBinaryVerdict } from "../../packages/quay/src/kernel/verdict-parse.ts";
 // Layer 1b 常驻循环（quality-gate-driver 的通用例程型循环 + 统一轮记录信封，同 meta-driver 的接法）。
 import { runResidentQualityGateLoop } from "./quality-gate-driver.ts";
 // goal 动词的 argv 单一构造点 + 「quay CLI 解析得出吗」的判据（同 meta-driver，⛔ 本文件不另拼路径）。
@@ -1144,9 +1141,10 @@ export function goalSufficiencyVerdict(
  *  读不懂、超时、JSON 解析失败）⇒ not-evaluated。⛔ 绝不把「读不懂」回落成 covered——「无条件
  *  return covered」的放水实现会原样重演 AC-212 记录过的三次假 achieved。
  *
- *  GOAL-032：解析算法已收敛到 kernel 单一实现 `packages/quay/src/kernel/verdict-parse.ts::
- *  parseBinaryVerdict`（此前本函数与产品侧 criterion-fidelity.ts::parseFidelityVerdict 逐字相同的
- *  解析循环现已结构化）——本函数只是把本领域的合法值字面量传入的薄包装，签名/返回类型不变。 */
+ *  GOAL-032：解析算法已收敛到 kernel 单一实现（`kernel/verdict-parse.ts::parseBinaryVerdict`，经
+ *  Layer 0 `driver-runtime.ts` 取符号——本文件不写 Core 源码树字面量）——此前本函数与产品侧
+ *  criterion-fidelity.ts::parseFidelityVerdict 逐字相同的解析循环现已结构化；本函数只是把本领域的
+ *  合法值字面量传入的薄包装，签名/返回类型不变。 */
 export function parseSemanticSufficiencyVerdict(stdout: string | null, exitCode: number | null): SufficiencyVerdict {
   return parseBinaryVerdict(stdout, exitCode, "covered", "insufficient");
 }
