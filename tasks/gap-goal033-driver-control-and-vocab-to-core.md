@@ -2,7 +2,7 @@
 id: gap-goal033-driver-control-and-vocab-to-core
 title: GOAL-033 ①：driver 控制客户端与 driver 词表从 cli/ 下沉到 core-root（core-root 零 cli/
   import，fan-in 仪器附加留在 CLI）
-status: todo
+status: ready
 labels:
   - gap
 parent: null
