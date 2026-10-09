@@ -3,7 +3,7 @@ id: gap-meta-driver-minimal-production-liveness-check
 title: "meta-driver minimal production liveness check: standalone on-demand N=3
   detector, derived from the self-health backtest, scoped to avoid touching
   driver.ts/driver-runtime.ts"
-status: ready
+status: done
 labels:
   - gap
 parent: null
