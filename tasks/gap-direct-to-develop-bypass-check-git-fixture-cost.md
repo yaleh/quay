@@ -79,17 +79,17 @@ extra:
 
 `bash scripts/test.sh --for-task gap-direct-to-develop-bypass-check-git-fixture-cost --allow-thin` → **exit 0**，68/68 pass、0 fail、0 cancelled。
 
+### AC4 — 停派理由更正（manager 复核 2026-10-09）
+
+本任务 2026-10-09T02:48:07Z 的 needs-human 停派理由**与判定器自己的读数相反**，manager 复核后撤回。
+
+- 停派判词逐字为「…parser extracted 0 of 5 failing lines and attributed none to a file…」，但**同一轮**的 `retry_exemptions` 记录逐字写着 `failingTestFiles: ["plugin/test/shipped-entry-runnable.test.mjs"]` 与 `reason: "no assertion signature extracted from the suite log"` ⇒ 判定器**读到了**文件名。判词由 `plugin/scripts/worker-driver.ts` 的 `suiteAttributionEvidence()` **硬编码**「attributed none to a file」，⛔ 从不读 `exemption.failingTestFiles` ⇒ 读到的与读不到的共用同一句（硬规则 3b）。
+- **真因（实测）**：`plugin/test/shipped-entry-runnable.test.mjs` 与 `packages/quay/test/delivery-standalone-smoke-gate.test.mjs` 的真实竞态——后者的 `delivery-standalone-smoke.sh` 把插件包 stage 进共享的 `packages/quay/plugin/` 再 `rm -rf`，而前者正在 `npm pack --dry-run --json` 枚举该目录。受害者窗口 `[1791513964157, 1791513967958]` **完全落在**生产者窗口 `[1791513920652, 1791513968892]`（48.2s）之内。失败原文：`ENOENT: no such file or directory, scandir '…/packages/quay/plugin/agents'`。
+- **与本任务 delta 无关**：`git diff develop -- plugin/test/shipped-entry-runnable.test.mjs` 为空；本任务全部 delta = `plugin/test/direct-to-develop-bypass-check.test.mjs`（+58/-4）。
+- **跨任务复发读数**：`.quay/worker-outcome.jsonl` 中该文件被点名为失败文件 **2 轮 / 2 个不同任务**（2026-10-05 .. 2026-10-09）⇒ 外来复发 flake，⛔ 非本任务缺陷。
+- ⇒ 停派不成立，任务退回 todo 后重派。判定器判词本身的缺陷另立任务，不在本任务 Touches 内。
+
 ## Touches
 
 - plugin/test/direct-to-develop-bypass-check.test.mjs
 - tasks/gap-direct-to-develop-bypass-check-git-fixture-cost.md
-## Needs-Human
-
-**执行 2026-10-09T02:48:07.020Z — 停派终止（失败无法归因，⛔ 不再重派）**
-
-- 阻碍原因：exited-not-landed 失败无法归因（基建/契约疑似，非实现缺陷）——停止重派，⛔ 不再拿新会话撞同一堵墙：suite red could not be attributed to any failing test file in 2 consecutive rounds (bounded to at most one retry) — infra/contract suspected, not an implementable defect (parser extracted 0 of 5 failing lines and attributed none to a file; pseudo-stage tokens: __PERFILE__, lint; unrecognized tokens: ...); stopping instead of spending another worker session
-- 失败步/判词：step=suite: __PERFILE__ duration_ms=3801 /data/home/yale/work/quay-worktrees/gap-direct-to-develop-bypass-check-git-fixture-cost/plugin/test/shipped-entry-runnable.test.mjs passed=false end_ms=1791513967958 cpu_ms=2957.363 mem_peak_kb=54376
-- run_id：wk-prod-anchor
-- session_id：42de3790-9bbf-4fcc-8b58-d49786c9dedb
-- suite 日志：/data/home/yale/work/quay/.quay/fan-in-suite-gap-direct-to-develop-bypass-check-git-fixture-cost~wk-prod-anchor~1791513719476-da22b0.log
-- fan-in 日志：/data/home/yale/work/quay/.quay/fan-in-gap-direct-to-develop-bypass-check-git-fixture-cost-wk-prod-anchor.log
