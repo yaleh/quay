@@ -2,7 +2,7 @@
 id: gap-goal032-verdict-parse-direct-import-regresses-ac262
 title: GOAL-032 的 parseBinaryVerdict 直连 import 绕过 Layer-0 导入面，goal-driver.ts 重现
   packages/quay/src 字面量 ⇒ AC-262 判据第二支翻假
-status: todo
+status: ready
 labels:
   - gap
   - defect
