@@ -11,6 +11,7 @@
 - GIT lens / hard-over-soft 的理论依据 → `adr/ADR-004-...md`、`adr/ADR-005-...md`、`adr/ADR-006-...md`、`adr/ADR-007-...md`
 - 架构评审三层流程本体 → archguard 插件 `arch-layer-review` skill（`SKILL.md` + `references/goal-030-example-output.json`）
 - `L_T/L_C/L_D/L_G/L_S` 词汇表 → `docs/references/` 下的 GIT 框架文档（见 CLAUDE.md「GIT review checklist」）
+- 上位框架（本文三次重构是其具体实例，不是平行发明） → `docs/references/harness-semantic-compression-and-meta-driver-builder.md`（把"结晶/硬形变/残差维度"这套既有框架应用到 meta-driver builder 设计，第 4 节直接引用本文作 worked example）
 
 **Non-goals：** 不是 OO/设计模式教程；不是 GOAL-030/031/032 复盘报告（三者只作可核验锚点）；不重复 `SPEC-goal-branch` 的机制细节或 archguard skill 的操作步骤——那些有各自的正本。
 
