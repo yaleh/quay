@@ -2,7 +2,7 @@
 id: AC-352
 title: 并入形态 + 并入后核验：GOAL-033 以恰好一个合并提交进入 develop，落地树有 driver-control.ts、无
   cli/driver-vocab.ts、core-root 零 cli/ import
-status: draft
+status: active
 kind: criterion
 goal: GOAL-033
 criterion: |-
@@ -28,7 +28,17 @@ criterion: |-
   echo "PASS: GOAL-033 landed as exactly one merge commit (second parent = goal tip); the landed tree has driver-control.ts, no cli/driver-vocab.ts, and no core-root import of cli/"
 expect: exit 0 = 恰好一个合并提交、第二父=goal tip、无分支提交泄漏、落地树 core-root 零 cli/ import；exit
   1 = CAUSE=；exit 3 = 尚未并入
-origin: 人 2026-10-09 裁定：调查并推进 core-root<->core-cli 最小依赖环切片；结论清晰 ⇒ 开 branch:true
-  goal，严格复用 GOAL-030/031/032 方法，只做这一对
+origin: 人 2026-10-09 裁定：调查并推进 core-root<->core-cli 最小依赖环切片
+activatedAt: 2026-10-09T05:46:04.942Z
+statusLog:
+  - at: 2026-10-09T05:46:04.942Z
+    from: draft
+    to: active
+    actor: goal-cli
+    reason: ""
+fidelity:
+  verdict: not-evaluated
+  reason: no judge configured
+  at: 2026-10-09T05:46:04.941Z
 phase: post-merge
 ---
