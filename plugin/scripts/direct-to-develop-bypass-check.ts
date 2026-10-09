@@ -827,8 +827,9 @@ export function gitCommitEpoch(root, sha) {
 }
 
 /** 一条 commit 的**第一父** sha（`%P` 的首个 token）；root commit / 读不出 ⇒ null。
- *  releaseBump 谓词②（cut-ledger 直接子提交）的 git 读取面。 */
-function gitCommitParent(root, sha) {
+ *  releaseBump 谓词②（cut-ledger 直接子提交）的 git 读取面。export：作 gitCommitMetaBatch 的
+ *  逐条差分参照（等价性测试 pin 住批量与逐条逐字节一致——本任务的验据面）。 */
+export function gitCommitParent(root, sha) {
   try {
     const first = git(root, ["log", "-1", "--format=%P", sha]).trim().split(" ").filter(Boolean)[0];
     return first ?? null;
@@ -849,7 +850,8 @@ function defaultReleaseLedgerPath(root) {
   return path.join(owner, ".quay", "release-branch-finish.jsonl");
 }
 
-function gitCommitSubject(root, sha) {
+/** 一条 commit 的 subject（`%s`）。export：gitCommitMetaBatch 的逐条差分参照（等价性测试）。 */
+export function gitCommitSubject(root, sha) {
   try {
     return git(root, ["log", "-1", "--format=%s", sha]).trim();
   } catch {
@@ -857,13 +859,125 @@ function gitCommitSubject(root, sha) {
   }
 }
 
-/** 一条 commit 的完整消息（%B，subject + body）——AC65 验证证据（一条命令可验的引用）读取面。 */
-function gitCommitMessage(root, sha) {
+/** 一条 commit 的完整消息（%B，subject + body）——AC65 验证证据（一条命令可验的引用）读取面。
+ *  export：gitCommitMetaBatch 的逐条差分参照（等价性测试）。 */
+export function gitCommitMessage(root, sha) {
   try {
     return git(root, ["log", "-1", "--format=%B", sha]).trim();
   } catch {
     return "";
   }
+}
+
+// ── 批量取数（一次 git 子进程取多条 commit 的字段）──────────────────────────────────────────────
+// gap-direct-to-develop-bypass-check-per-commit-git-subprocess-cost：逐条 gitCommitFiles 在一次
+// `--baseline b11ce720` 扫描里被调用 **6913** 次（实测计数：直接提交 72 次 + refMove 可见性读数 6841 次），
+// git 子进程总数 **15212**（strace -e trace=execve -e status=successful 实测）——这是该扫描 sys（37.45s）
+// ≫ user（12.44s）、单测墙钟 58-65s 的真实驱动。批量取数把同一批 sha 用【一次】子进程取出，
+// 判据输出逐字节不变（`-m --first-parent` 让 merge 也只输出相对第一父的 diff，与逐条 `diff <sha>^ <sha>`
+// 一致——实测 301 条含 63 个 merge + 1 个 root 逐字节相同）。
+//
+// ⛔ 为何 `-m --first-parent` 而非 `--diff-merges=first-parent`：后者要 git ≥2.31，而本脚本经
+// repo-root.ts 对老 git 有回退（不硬性要求 2.31）⇒ 用前者保持版本面不变。
+// ⛔ 每块一条子进程（GIT_BATCH_CHUNK）：sha 数随历史增长（现 6841）时避免撞 ARG_MAX；块读不出 ⇒
+// 该块 sha 全部缺席（调用方按 null），⛔ 不静默当作「空文件集」（硬规则 3b）。
+
+const GIT_BATCH_CHUNK = 1000;
+
+/** 把批量结果的 full-sha（`%H`）记录绑回**输入 sha**（可能是缩写——`--commits` 允许缩写，旧逐条读面
+ *  直接把缩写喂给 git 由 git 解析）。唯一前缀才绑定；歧义前缀不绑定（旧逐条读面会 git 报错 ⇒ null，同形）。
+ *  直接提交 / refMove 循环传的是 rev-list 全长 sha ⇒ `out.has(r)` 即中，此步为空转。 */
+function bindRequestedShas(out, requested) {
+  for (const r of requested) {
+    if (out.has(r)) continue;
+    let match = null;
+    let ambiguous = false;
+    for (const key of out.keys()) {
+      if (!key.startsWith(r)) continue;
+      if (match !== null) { ambiguous = true; break; }
+      match = key;
+    }
+    if (!ambiguous && match !== null) out.set(r, out.get(match));
+  }
+}
+
+/** 批量改动文件——与逐条 `gitCommitFiles` 等价（相对第一父；root commit / 读不出 ⇒ null）。
+ *  返回 `Map<sha, string[] | null>`；输入里读不出的 sha 不出现在 map 中（调用方按 null 处理）。 */
+export function gitCommitFilesBatch(root, shas) {
+  const out = new Map();
+  const list = [...new Set(shas)];
+  for (let i = 0; i < list.length; i += GIT_BATCH_CHUNK) {
+    const chunk = list.slice(i, i + GIT_BATCH_CHUNK);
+    let text;
+    try {
+      text = git(root, [
+        "-c", "core.quotepath=false", "log", "--no-walk", "--name-only", "-m", "--first-parent",
+        "--format=%x00%H%x1f%P", ...chunk,
+      ]);
+    } catch {
+      // 整块读不出（含非法 sha / git 故障 / 超 ARG_MAX）⇒ 逐条回退：⛔ 不因为一条非法 sha 就把整块
+      // 合法 sha 静默丢成「空文件集」——逐条读面里合法 sha 仍读得出，回退保住该语义（硬规则 3b）。
+      for (const sha of chunk) out.set(sha, gitCommitFiles(root, sha));
+      continue;
+    }
+    let cur = null;
+    for (const line of text.split("\n")) {
+      if (line.startsWith("\x00")) {
+        const [h, p] = line.slice(1).split("\x1f");
+        cur = (h ?? "").trim();
+        if (cur) out.set(cur, (p ?? "").trim() ? [] : null);
+      } else if (cur !== null && line.trim()) {
+        const arr = out.get(cur);
+        if (arr) arr.push(line.trim());
+      }
+    }
+  }
+  bindRequestedShas(out, list);
+  return out;
+}
+
+/** 批量元数据——与逐条 `gitCommitEpoch`/`gitCommitParent`/`gitCommitSubject`/`gitCommitMessage` 等价。
+ *  `%B` 可含换行 ⇒ `%x00`（记录首）+ `%x02`（记录尾）定界，字段间 `%x1f`。
+ *  返回 `Map<sha, {epoch, parent, subject, message}>`；读不出的 sha 缺席。 */
+export function gitCommitMetaBatch(root, shas) {
+  const out = new Map();
+  const list = [...new Set(shas)];
+  for (let i = 0; i < list.length; i += GIT_BATCH_CHUNK) {
+    const chunk = list.slice(i, i + GIT_BATCH_CHUNK);
+    let text;
+    try {
+      text = git(root, [
+        "-c", "core.quotepath=false", "log", "--no-walk",
+        "--format=%x00%H%x1f%ct%x1f%P%x1f%s%x1f%B%x02", ...chunk,
+      ]);
+    } catch {
+      // 同 gitCommitFilesBatch：整块失败 ⇒ 逐条回退（非法 sha 不连坐同块合法 sha）。
+      for (const sha of chunk) {
+        out.set(sha, {
+          epoch: gitCommitEpoch(root, sha),
+          parent: gitCommitParent(root, sha),
+          subject: gitCommitSubject(root, sha),
+          message: gitCommitMessage(root, sha),
+        });
+      }
+      continue;
+    }
+    for (const block of text.split("\x00")) {
+      if (!block) continue;
+      const end = block.indexOf("\x02");
+      if (end < 0) continue;
+      const parts = block.slice(0, end).split("\x1f");
+      const sha = (parts[0] ?? "").trim();
+      if (!sha) continue;
+      const epoch = Number((parts[1] ?? "").trim());
+      const parent = (parts[2] ?? "").trim().split(" ").filter(Boolean)[0] ?? null;
+      const subject = (parts[3] ?? "").trim();
+      const message = parts.slice(4).join("\x1f").trim();
+      out.set(sha, { epoch, parent, subject, message });
+    }
+  }
+  bindRequestedShas(out, list);
+  return out;
 }
 
 /** `a` 是否为 `b` 的祖先（`git merge-base --is-ancestor`；同一 commit 视为是）。
@@ -984,6 +1098,9 @@ export function gitDevelopDirectCommits(root, develop, baseline, ledgerShas) {
   const refMoveCovered = new Set();
   const refMoveIntroduced = [];
   const nonForwardRefMoves = [];
+  // 引入 commit 的改动文件改为**循环后一次批量取**（原本逐 commit 一次 gitCommitFiles：实测 6841 次
+  // 子进程 = 该扫描 git 子进程总数 15212 的最大单项）。顺序仍按 brackets 序（push 顺序不变）。
+  const pendingRefMoveIntroduced = []; // { tip, prev, intro }
   if (reflogIndex) {
     for (const { T, P } of brackets) {
       // 准入（见上注——⛔ 不是「T 在当前 first-parent spine 上」）：只排除结构上确证带入不了窗内提交的括注。
@@ -1005,39 +1122,54 @@ export function gitDevelopDirectCommits(root, develop, baseline, ledgerShas) {
           });
           continue;
         }
-        refMoveIntroduced.push({
-          tip: T,
-          prev: P,
-          introduced: intro.map((s) => {
-            const files = gitCommitFiles(root, s);
-            return {
-              sha: s,
-              codeSurface: files !== null && files.some((f) => !isDesignInternalPath(f)),
-              files: files ?? null,
-            };
-          }),
-        });
+        pendingRefMoveIntroduced.push({ tip: T, prev: P, intro });
       } catch {
         // 括注不可读 ⇒ 该括注不覆盖任何 spine commit（其余保持 unclassifiable，fail-closed）
       }
+    }
+    // 一次批量取数取全部引入 commit 的改动文件（逐条 gitCommitFiles ⇒ 一次 gitCommitFilesBatch）。
+    const introShas = [];
+    for (const e of pendingRefMoveIntroduced) for (const s of e.intro) introShas.push(s);
+    const introFiles = introShas.length > 0 ? gitCommitFilesBatch(root, introShas) : new Map();
+    for (const e of pendingRefMoveIntroduced) {
+      refMoveIntroduced.push({
+        tip: e.tip,
+        prev: e.prev,
+        introduced: e.intro.map((s) => {
+          const files = introFiles.has(s) ? introFiles.get(s) : null;
+          return {
+            sha: s,
+            codeSurface: files !== null && files.some((f) => !isDesignInternalPath(f)),
+            files: files ?? null,
+          };
+        }),
+      });
     }
   }
 
   const direct = [];
   const unclassifiable = [];
+  // pass 1（纯分类，无 git）：确定 direct / unclassifiable —— 顺序与旧单循环一致（unclassifiable 保持 reachable 序）。
+  const directShas = [];
   for (const sha of reachable) {
     const mode = classifySpineLandingMode(sha, ledgerShas, reflogIndex?.direct ?? null, refMoveTips, refMoveCovered);
     if (mode === "fan-in") continue;
     if (mode === "unclassifiable") { unclassifiable.push(sha); continue; }
-    // direct：逐条读 files/epoch/message（与 --commits 回放同源）。
-    const files = gitCommitFiles(root, sha);
-    if (files === null) continue; // root commit / unreadable — skip (can't diff)
-    const epoch = gitCommitEpoch(root, sha);
-    if (epoch === null) continue;
-    const subject = gitCommitSubject(root, sha);
-    const message = gitCommitMessage(root, sha); // AC65 验证证据读取面
-    const parent = gitCommitParent(root, sha); // releaseBump 谓词②（cut-ledger 直接子提交）
-    direct.push({ sha, subject, action: "commit", epoch, files, message, parent });
+    directShas.push(sha);
+  }
+  // pass 2（一次批量取数）：direct 的 files/epoch/subject/message/parent 改由 gitCommitFilesBatch +
+  // gitCommitMetaBatch 各一次取出（原本逐 commit 5 次独立子进程——:813/:823/:833/:854/:863）。⛔ 语义逐字节
+  // 不变：files===null（root / 读不出）跳过、epoch===null 跳过、字段全部沿用旧读取面。
+  if (directShas.length > 0) {
+    const fileMap = gitCommitFilesBatch(root, directShas);
+    const metaMap = gitCommitMetaBatch(root, directShas);
+    for (const sha of directShas) {
+      const files = fileMap.has(sha) ? fileMap.get(sha) : null;
+      if (files === null) continue; // root commit / unreadable — skip (can't diff)
+      const meta = metaMap.get(sha);
+      if (!meta || meta.epoch === null) continue;
+      direct.push({ sha, subject: meta.subject, action: "commit", epoch: meta.epoch, files, message: meta.message, parent: meta.parent });
+    }
   }
 
   // 未分类 action 形的点名（AC2「根因在失败那一刻可见」）：unclassifiable 的 spine commit 若**有自己的
@@ -1205,11 +1337,15 @@ export function main(argv) {
   // ── 收集直接提交（rev-list 三态扫描 或 --commits 回放）──────────────────────────────────────
   if (commitsArg !== undefined) {
     const shas = commitsArg.split(",").map((s) => s.trim()).filter(Boolean);
+    // 回放面同源：一次批量取数替换逐条 5 次子进程（:813/:823/:833/:854/:863）。
+    const fileMap = gitCommitFilesBatch(root, shas);
+    const metaMap = gitCommitMetaBatch(root, shas);
     commits = shas.map((sha) => {
-      const files = gitCommitFiles(root, sha);
-      const epoch = gitCommitEpoch(root, sha);
+      const files = fileMap.has(sha) ? fileMap.get(sha) : null;
+      const meta = metaMap.get(sha);
+      const epoch = meta ? meta.epoch : null;
       if (files === null || epoch === null) return null;
-      return { sha, subject: gitCommitSubject(root, sha), action: "commit", epoch, files, message: gitCommitMessage(root, sha), parent: gitCommitParent(root, sha) };
+      return { sha, subject: meta.subject, action: "commit", epoch, files, message: meta.message, parent: meta.parent };
     }).filter(Boolean);
     totalScanned = commits.length;
     if (commits.length === 0) {
