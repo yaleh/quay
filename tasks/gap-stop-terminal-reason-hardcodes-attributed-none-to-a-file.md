@@ -2,7 +2,7 @@
 id: gap-stop-terminal-reason-hardcodes-attributed-none-to-a-file
 title: stop-terminal 停派判词硬编码「attributed none to a
   file」——判定器已读到的失败文件被写成「一个也没归因出来」（实测 3 例）
-status: todo
+status: ready
 labels:
   - gap
   - defect
