@@ -2,7 +2,7 @@
 id: gap-worktree-process-reaper-probe-fixed-sleep-load-race
 title: worktree-process-reaper.test.mjs 两个 claude-probe 真进程用例依赖固定 sleep，宿主时序竞态在
   fan-in suite 下反复误杀无关任务
-status: ready
+status: done
 labels:
   - gap
   - defect
