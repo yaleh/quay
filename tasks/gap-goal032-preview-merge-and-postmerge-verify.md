@@ -1,7 +1,7 @@
 ---
 id: gap-goal032-preview-merge-and-postmerge-verify
 title: GOAL-032 ③：预览试用、quay goal merge、并入后生产读数核验
-status: todo
+status: ready
 labels:
   - gap
 parent: null
