@@ -31,5 +31,22 @@
     "github-client.ts 已豁免",
     "observation.ts/workflow-baseline-metrics.ts 异词表假阳性"
   ],
-  "investigation_or_goal_reference": "goal"
+  "investigation_or_goal_reference": "goal",
+  "granularity_rationale": {
+    "granularity_label": "sufficient",
+    "why_not_broader": "Could have also converged the two false-positive files' underlying vocabulary confusion, or touched the same-line todo/ready/done literals, but neither recurs the needs-human mechanism specifically and would blur what this slice is actually measuring.",
+    "why_not_finer": "All 5 literal occurrences are the identical mechanical substitution in the same file; splitting per-occurrence would multiply branch-lifecycle overhead (same coordination-cost reasoning as GOAL-030's why_not_finer) for a change that is not independently separable -- a reviewer cannot meaningfully accept 1 of 5 identical-shape edits before the others.",
+    "harnessable_subproblems": [
+      "literal grep-count before/after (a pre-existing, mechanical grep convention)",
+      "ArchGuard get_literal_dispersion before/after (an existing instrument)"
+    ],
+    "investigation_required_subproblems": [
+      "classifying each of the 5 raw dispersion hits as genuine / exempted / false-positive -- required reading each file's actual comparison target, not just counting string matches; this is exactly where the original numeric target (<=2) was discovered to be wrong"
+    ],
+    "primitives_reused": [
+      "three-state exit-code convention",
+      "the existing canonical vocabulary module (already landed by a prior task) -- reused, not reinvented",
+      "the branch self-host identity check pattern introduced in GOAL-030, scaled down since this goal's own dependency risk differs"
+    ]
+  }
 }

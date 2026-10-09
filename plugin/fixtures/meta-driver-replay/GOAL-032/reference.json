@@ -30,5 +30,22 @@
     "thin wrapper",
     "canonical-definition count for this parsing logic goes from 2 to 1"
   ],
-  "investigation_or_goal_reference": "goal"
+  "investigation_or_goal_reference": "goal",
+  "granularity_rationale": {
+    "granularity_label": "sufficient",
+    "why_not_broader": "The ~27 other dispersed-literal files for OTHER verdict types (a separate, independently-discovered, larger gap) are explicitly out of scope -- folding them in would turn a one-pair merge into an open-ended vocabulary-unification project with a different risk profile and no shared acceptance evidence.",
+    "why_not_finer": "Converging only ONE of the two call sites would not clear the ArchGuard duplicate-detection finding at all -- the minimal unit that actually resolves the finding is both sides converging on one shared implementation; anything smaller leaves the original signal unresolved, so there is no smaller slice that is still a complete answer.",
+    "harnessable_subproblems": [
+      "ArchGuard detect_duplicates before/after (an existing instrument)",
+      "caller-orchestration left unchanged, verified by each caller's PRE-EXISTING regression tests (no new test design needed)"
+    ],
+    "investigation_required_subproblems": [
+      "whether the two parsers are semantically equivalent or intentionally-divergent -- not decidable by the duplicate-detection tool itself; required reading both function bodies and their own self-documenting comments before any slice could be chosen"
+    ],
+    "primitives_reused": [
+      "three-state exit-code convention",
+      "the kernel-module-as-sink-layer pattern established in GOAL-030",
+      "the thin-wrapper-preserves-callers pattern (zero caller-signature changes)"
+    ]
+  }
 }
