@@ -149,6 +149,8 @@ import {
   reclaimSupersededWorktrees,
   resolveKernelSrcModule,
   judgeRetryExemption,
+  decideExitedNotLandedAction,
+  suiteAttributionEvidence,
   withRecordedSuiteSignatures,
   suiteRedAttemptsInWindow,
   assertionSignaturesFromSuiteLog,
@@ -3548,6 +3550,156 @@ test("withRecordedSuiteSignatures — 三态写入（不适用 / 读不出 / 读
   assert.strictEqual(legacy.suiteSignatures, null);
   assert.strictEqual(recorded.suiteSignaturesRecorded, true, "新记录：签名已留存");
   assert.deepEqual(recorded.suiteSignatures, [AC_UNRELATED_SIG]);
+});
+
+// ── gap-stop-terminal-reason-hardcodes-attributed-none-to-a-file ─────────────────────────────────
+// 缺陷（实测 3 例）：`suiteAttributionEvidence()` **硬编码**「… attributed none to a file」，⛔ 从不读
+// `exemption.failingTestFiles` ⇒ 「判定器【读到了】失败文件」（只是没有 AssertionError 行 ⇒ 取不到签名）
+// 与「真的一行也没归因出」共用同一句，方向相反（硬规则 3b）。同源第二处：`judgeRetryExemption` 把
+// 「断言签名」闸排在「delta 相关性」闸之前 ⇒ 整文件死掉的红（spawn 失败/ENOENT/OOM/超时，日志里没有
+// AssertionError）相关性从不被计算，恒落 insufficient-data-fallback，两轮即 stop-terminal。
+// ⛔ 本修法【不放宽 fail-closed】：动作分叉与重试上限语义逐字不变，只改【读数】与【判定顺序】。
+const SDE_DEAD_FILE = "plugin/test/whole-file-dead.test.mjs";
+const SDE_NOW = Date.parse("2026-10-09T03:00:00.000Z");
+
+/** suite 日志：有 `__PERFILE__ … passed=false` 行、⛔ 无任何 `AssertionError` 行（整文件死掉的红）。
+ *  `duration_ms` 可变——用来造两份【内容不同】的日志（避开「内容逐字节相同」那条停因）。 */
+function sdeWriteDeadLog(root, basename, durationMs = 10) {
+  const p = path.join(root, ".quay", basename);
+  fs.writeFileSync(p, `__PERFILE__ duration_ms=${durationMs} ${SDE_DEAD_FILE} passed=false end_ms=1\n`, "utf8");
+  return p;
+}
+
+/** 一条【其它】任务的 suite-red 记录，带生产形态的失败文件读数（`readFailedTestFiles` 的 `evaluated:true`
+ *  形状）——`aggregateRerunFlakes` / `recurringFailingFileTasks` 消费的正是这个字段。 */
+function sdeAppendFileRecord(root, taskId, tsMs, basename, files) {
+  fs.appendFileSync(path.join(root, ".quay", "worker-outcome.jsonl"),
+    JSON.stringify({
+      ts: new Date(tsMs).toISOString(), task: taskId, final_state: "exited-not-landed", run_id: "r", session_id: "s",
+      mechanical_fan_in: { outcome: "red", step: "suite", suiteLog: basename, failedTestFiles: { evaluated: true, files } },
+    }) + "\n", "utf8");
+}
+
+/** 夹具：失败文件在盘上（一跳 import 读得出 ⇒ 相关性判为 unrelated 而非 unknown），Touches 默认不含它。 */
+function sdeFixture(tag, touches = ["packages/quay/src/serve-dashboard.ts"]) {
+  const root = makeRoot(tag);
+  acWriteTouchesTask(root, "gap-a", touches);
+  fs.mkdirSync(path.join(root, "plugin", "test"), { recursive: true });
+  fs.writeFileSync(path.join(root, SDE_DEAD_FILE), "", "utf8");
+  sdeWriteDeadLog(root, "fan-in-suite-gap-a.log");
+  return root;
+}
+
+test("AC1（判词如实·可得假）— failingTestFiles 非空 ⇒ 判词点名文件、⛔ 不再出现 attributed none to a file；对照臂 files 为空 ⇒ 该句仍在", () => {
+  const withFiles = suiteAttributionEvidence({
+    verdict: "insufficient-data-fallback", reason: "r",
+    failingTestFiles: [SDE_DEAD_FILE, "plugin/test/another-dead.test.mjs"],
+    signatures: [], recurredTasks: [], suiteFailingLines: 3,
+  });
+  const noFiles = suiteAttributionEvidence({
+    verdict: "insufficient-data-fallback", reason: "r",
+    failingTestFiles: [], signatures: [], recurredTasks: [], suiteFailingLines: 3,
+  });
+  // 正向臂：读到了就必须点名（⛔ 不得说反话）。
+  assert.match(withFiles, /plugin\/test\/whole-file-dead\.test\.mjs/, `判词点名第一个失败文件：${withFiles}`);
+  assert.match(withFiles, /plugin\/test\/another-dead\.test\.mjs/, "判词点名第二个失败文件");
+  assert.doesNotMatch(withFiles, /attributed none to a file/, "读到了文件 ⇒ ⛔ 不得断言「一个也没归因出来」");
+  // 对照臂：确实没归因出（files 为空）⇒ 该句**仍须**出现（否则修法只是把这句话删了）。
+  assert.match(noFiles, /attributed none to a file/, `files 为空 ⇒ 如实说「attributed none to a file」：${noFiles}`);
+  assert.doesNotMatch(noFiles, /whole-file-dead/, "对照臂不得凭空点名");
+  // 两臂输出必须不同（否则该读数与字段无关 ⇒ 恒真量，硬规则 4）。
+  assert.notEqual(withFiles, noFiles, "两臂输出必须可区分");
+  // AC1 要求「贴两条实际输出字符串」——入测试输出（证据取自真实运行，⛔ 不是手抄）。
+  console.log(`AC1 arm A (failingTestFiles 非空): ${withFiles}`);
+  console.log(`AC1 arm B (failingTestFiles 为空): ${noFiles}`);
+});
+
+test("AC1（走生产路径）— 判定器读到文件却归因不出时，stop-terminal 判词点名那些文件（⛔ 不是手搓 judgment）", (t) => {
+  const root = makeRoot("sde-ac1-stop");
+  t.after(() => rmSafe(root));
+  // ⛔ 不写 tasks/gap-a.md ⇒ delta 读不懂 ⇒ insufficient-data-fallback，但 failingTestFiles【非空】。
+  fs.mkdirSync(path.join(root, "plugin", "test"), { recursive: true });
+  fs.writeFileSync(path.join(root, SDE_DEAD_FILE), "", "utf8");
+  sdeWriteDeadLog(root, "fan-in-suite-gap-a-1.log");
+  sdeWriteDeadLog(root, "fan-in-suite-gap-a-2.log", 11); // 内容不同 ⇒ 停因是「有界重试用尽」而非内容哈希
+  // 上一轮同为归因不出（不同日志内容 ⇒ 停因是「有界重试用尽」而非内容哈希）。
+  sdeAppendFileRecord(root, "gap-a", SDE_NOW - 3600_000, "fan-in-suite-gap-a-1.log", [SDE_DEAD_FILE]);
+
+  const outcome = { ts: new Date(SDE_NOW).toISOString(), final_state: "exited-not-landed", mechanical_fan_in: { outcome: "red", step: "suite", suiteLog: "fan-in-suite-gap-a-2.log" } };
+  const j = judgeRetryExemption(root, "gap-a", outcome, { nowMs: SDE_NOW });
+  assert.equal(j.verdict, "insufficient-data-fallback", "delta 读不懂 ⇒ 仍 fail-closed 落 insufficient-data-fallback（动作不变）");
+  assert.deepEqual(j.failingTestFiles, [SDE_DEAD_FILE], "判定器【读到了】失败文件（这正是旧判词说反话的那条路径）");
+  const d = decideExitedNotLandedAction(root, "gap-a", outcome, j, { nowMs: SDE_NOW });
+  assert.equal(d.kind, "stop-terminal", "两次归因不出 ⇒ 停（动作语义逐字不变）");
+  assert.match(d.reason, /whole-file-dead\.test\.mjs/, `判词点名判定器读到的失败文件：${d.reason}`);
+  assert.doesNotMatch(d.reason, /attributed none to a file/, "⛔ 判词不得与判定器自己的读数相反");
+});
+
+test("AC2（顺序·可得假）— 无 AssertionError 的整文件红：delta 相关性必须先算；在 delta 外 ⇒ 豁免，在 delta 内 ⇒ own-defect", (t) => {
+  const outside = sdeFixture("sde-ac2-out");
+  t.after(() => rmSafe(outside));
+  sdeAppendFileRecord(outside, "gap-b", SDE_NOW - 3600_000, "fan-in-suite-gap-a.log", [SDE_DEAD_FILE]);
+  const jOut = judgeRetryExemption(outside, "gap-a",
+    { mechanical_fan_in: { outcome: "red", step: "suite", suiteLog: "fan-in-suite-gap-a.log" } }, { nowMs: SDE_NOW });
+  assert.notEqual(jOut.verdict, "insufficient-data-fallback", "顺序修好 ⇒ 取不到签名也必须先算出 delta 相关性（旧实现恒落 insufficient）");
+  assert.match(jOut.reason, /outside this task's Touches\/diff/, "判词如实报出「已算出：不在本任务 delta 内」");
+
+  // 对照臂：同一夹具，只把该文件放进本任务 Touches ⇒ own-defect-counted。
+  const inside = sdeFixture("sde-ac2-in", [SDE_DEAD_FILE, "packages/quay/src/serve-dashboard.ts"]);
+  t.after(() => rmSafe(inside));
+  sdeAppendFileRecord(inside, "gap-b", SDE_NOW - 3600_000, "fan-in-suite-gap-a.log", [SDE_DEAD_FILE]);
+  const jIn = judgeRetryExemption(inside, "gap-a",
+    { mechanical_fan_in: { outcome: "red", step: "suite", suiteLog: "fan-in-suite-gap-a.log" } }, { nowMs: SDE_NOW });
+  assert.equal(jIn.verdict, "own-defect-counted", "文件在本任务 Touches ⇒ 自身缺陷（对照臂）");
+  assert.notEqual(jOut.verdict, jIn.verdict, "两臂 verdict 必须可区分（AC2）");
+  console.log(`AC2 arm A (文件在 delta 外): ${jOut.verdict} — ${jOut.reason}`);
+  console.log(`AC2 arm B (文件在 Touches 内): ${jIn.verdict} — ${jIn.reason}`);
+});
+
+test("AC3（文件级复发回退·可得假）— 签名取不到时以失败文件为复发身份；另有一个任务同点名 ⇒ 豁免，只有本任务 ⇒ ⛔ 不豁免", (t) => {
+  // 臂 A：窗口内【另一个】任务也把该文件点名为失败文件 ⇒ unrelated-flaky-exempt。
+  const rootA = sdeFixture("sde-ac3-exempt");
+  t.after(() => rmSafe(rootA));
+  sdeAppendFileRecord(rootA, "gap-b", SDE_NOW - 3600_000, "fan-in-suite-gap-b.log", [SDE_DEAD_FILE]);
+  const jA = judgeRetryExemption(rootA, "gap-a",
+    { mechanical_fan_in: { outcome: "red", step: "suite", suiteLog: "fan-in-suite-gap-a.log" } }, { nowMs: SDE_NOW });
+  assert.equal(jA.verdict, "unrelated-flaky-exempt", `同一文件跨 ≥2 任务复发 ⇒ 豁免：${jA.reason}`);
+  assert.deepEqual(jA.recurredTasks, ["gap-b"], "复发任务被点名");
+  assert.match(jA.reason, /whole-file-dead\.test\.mjs/, "理由点名复发身份（失败文件）");
+
+  // 臂 B（对照）：窗口内只有本任务一条 ⇒ ⛔ 不得豁免（fail-closed 不变）。
+  const rootB = sdeFixture("sde-ac3-failclosed");
+  t.after(() => rmSafe(rootB));
+  sdeAppendFileRecord(rootB, "gap-a", SDE_NOW - 3600_000, "fan-in-suite-gap-b.log", [SDE_DEAD_FILE]);
+  const jB = judgeRetryExemption(rootB, "gap-a",
+    { mechanical_fan_in: { outcome: "red", step: "suite", suiteLog: "fan-in-suite-gap-a.log" } }, { nowMs: SDE_NOW });
+  assert.notEqual(jB.verdict, "unrelated-flaky-exempt", `只有本任务一条 ⇒ ⛔ 不豁免（fail-closed）：${jB.reason}`);
+  assert.equal(jB.verdict, "insufficient-data-fallback", "无跨任务证据 ⇒ 仍回 insufficient-data-fallback（动作语义不变）");
+  assert.match(jB.reason, /whole-file-dead\.test\.mjs/, "判词仍须点名失败文件（⛔ 不得说「一个也没归因出来」）");
+  assert.doesNotMatch(jB.reason, /no assertion signature extracted from the suite log/, "⛔ 旧措辞（与 failingTestFiles 非空矛盾）已消失");
+  assert.notEqual(jA.verdict, jB.verdict, "两臂 verdict 必须可区分（AC3）");
+
+  // 臂 C（额外负控制）：另有一任务，但它点名的是【别的】文件 ⇒ 不算复发。
+  const rootC = sdeFixture("sde-ac3-otherfile");
+  t.after(() => rmSafe(rootC));
+  sdeAppendFileRecord(rootC, "gap-b", SDE_NOW - 3600_000, "fan-in-suite-gap-b.log", ["plugin/test/unrelated-other.test.mjs"]);
+  const jC = judgeRetryExemption(rootC, "gap-a",
+    { mechanical_fan_in: { outcome: "red", step: "suite", suiteLog: "fan-in-suite-gap-a.log" } }, { nowMs: SDE_NOW });
+  assert.notEqual(jC.verdict, "unrelated-flaky-exempt", "复发的必须是【同一个文件】，⛔ 不是「有别的任务红过」");
+  console.log(`AC3 arm A (另一任务同点名同文件): ${jA.verdict} — ${jA.reason}`);
+  console.log(`AC3 arm B (窗口内只有本任务): ${jB.verdict} — ${jB.reason}`);
+  console.log(`AC3 arm C (另一任务点名别的文件): ${jC.verdict} — ${jC.reason}`);
+});
+
+test("AC4（kind 分叉不回归）— insufficient-data-fallback 之外的取值仍回 count-and-retry", (t) => {
+  const root = makeRoot("sde-ac4-kinds");
+  t.after(() => rmSafe(root));
+  const outcome = { mechanical_fan_in: { step: "suite", suiteLog: null } };
+  for (const verdict of ["ac-not-checked-shortcircuit", "own-defect-counted", "unrelated-flaky-exempt", "static-phase-attributed"]) {
+    const d = decideExitedNotLandedAction(root, "gap-a", outcome,
+      { verdict, reason: "r", failingTestFiles: [], signatures: [], recurredTasks: [] }, { nowMs: SDE_NOW });
+    assert.equal(d.kind, "count-and-retry", `${verdict} ⇒ 既有重试上限路径（⛔ 不进 stop-terminal）`);
+  }
 });
 
 // ── gap-goal-branch-dispatch-wiring-and-task-fan-in ──────────────────────────────────────────────
