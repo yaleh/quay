@@ -3,7 +3,7 @@ id: gap-ac214-tenth-crossing-producer-callsite-missing-init-verb
 title: AC-214 第十次转红（6/7 主体 d=239/200, margin −39）：产出者的动作调用点缺 `init`
   子命令（verify-deliver-coldstart.sh:1456/:4583，e0279c77a 漏迁）⇒「重跑产出者」这一补救自
   2026-10-07 起结构性写不出记录
-status: ready
+status: done
 labels:
   - gap
   - defect

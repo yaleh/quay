@@ -22,7 +22,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import path from "node:path";
-import { readFileSync, writeFileSync, mkdtempSync, rmSync } from "node:fs";
+import { readFileSync, writeFileSync, mkdtempSync, rmSync, mkdirSync, symlinkSync } from "node:fs";
 import os from "node:os";
 import { fileURLToPath } from "node:url";
 import { spawnSync } from "node:child_process";
@@ -600,5 +600,170 @@ test("AC-257/AC-258 — BOTH legs' remote preamble carries the caller-declared w
       `${mode}: the negative control must actually remove the call site`);
     assert.ok(!carriesWorkerEnv(mutated),
       `${mode}: removing the call site MUST make the predicate false — otherwise this check cannot red for the defect it pins`);
+  }
+});
+
+// ── verb-first call-site pin (gap-ac214-tenth-crossing-producer-callsite-missing-init-verb) ──────
+// AC-214's REMEDY is "re-run the producer", and the producer (`develop-deliver-tgz.sh
+// --verify-coldstart|--verify-upgrade`) runs `verify-deliver-coldstart.sh` on the remote, whose two
+// init actions invoke the shipped CLI entry `plugin/bin/quay`. e0279c77a migrated quay-init.sh's
+// `qinit=` call sites to `bin/quay` but left TWO call sites VERB-LESS (`bash "$qinit" --root …` and
+// `bash "$qinit" --all --loop …`). `bin/quay` requires the FIRST positional argument to be a
+// subcommand, so `--root` was parsed as an unknown verb ⇒ usage ⇒ rc=1 ⇒ the upgrade action and the
+// cold-start face wrote NO carrier record ⇒ six AC-214 subjects went stale and AC-214 re-crossed for
+// the tenth time. The failure shape — "no record was written" — is the same shape as "everything is
+// fine" (硬规则 3b/4b), so it stayed invisible for two days. This test pins the SHAPE.
+//
+// Judged by POSITION (硬规则 2): a comment mentioning the call, or an unrelated `git log --all`, does
+// not count; the predicate reads logical statements (backslash continuations joined) with comments
+// stripped. The in-process negative control below proves the predicate CAN red for the defect.
+const CALLSITE_SCRIPT = path.join(REPO_ROOT, "plugin", "scripts", "verify-deliver-coldstart.sh");
+
+// Join backslash-continued physical lines into one logical statement, so a call whose verb and its
+// flags sit on different physical lines is judged as a whole.
+// (mirrors the helper in verify-deliver-coldstart.test.mjs)
+function logicalStatements(src) {
+  const out = [];
+  let cur = "";
+  for (const raw of src.split("\n")) {
+    const line = raw.replace(/\s+$/, "");
+    const cont = line.endsWith("\\");
+    const piece = cont ? line.slice(0, -1) : line;
+    cur = cur ? `${cur} ${piece.trim()}` : piece;
+    if (!cont) { out.push(cur); cur = ""; }
+  }
+  if (cur) out.push(cur);
+  return out;
+}
+
+// verbLessCalls(): enumerate the shipped-CLI invocations in `src` that are MISSING the subcommand
+// verb — i.e. the executable token is followed directly by a flag. Two invocation forms:
+//   (a) `bash "$qinit" <token>`  — the shipped shell-entry invocation;
+//   (b) `"…/bin/quay" <token>`   — the plugin CLI entry invoked directly (a full-path command word).
+// Existence checks (`[ -f "$qinit" ]`), assignments (`qinit=…`), readlink probes and fixtures that
+// merely WRITE a fake bin are excluded by POSITION: none of them put a flag right after the token.
+const VERB_LESS_RES = [
+  { re: /bash\s+"?\$\{?qinit\}?"?\s+(-\w|--\w)/, form: 'bash "$qinit"' },
+  { re: /"(?:[^"]*\/)?bin\/quay"\s+(-\w|--\w)/, form: '"…/bin/quay"' },
+];
+function verbLessCalls(src) {
+  const hits = [];
+  for (const s of logicalStatements(src)) {
+    for (const { re, form } of VERB_LESS_RES) {
+      if (re.test(s)) hits.push({ form, stmt: s.trim().slice(0, 160) });
+    }
+  }
+  return hits;
+}
+
+test("AC8 — every shipped-CLI invocation in verify-deliver-coldstart.sh is verb-first (position + negative control)", () => {
+  // comments stripped by POSITION (a `# …` line is not a call site) — per-line `#` strip, the same
+  // crude-but-positional rule the sibling test uses.
+  const src = readFileSync(CALLSITE_SCRIPT, "utf8").split("\n").map((l) => l.replace(/#.*$/, "")).join("\n");
+
+  // positive: the predicate finds NO verb-less call site in the fixed file.
+  assert.deepEqual(verbLessCalls(src), [],
+    "every shipped-CLI invocation must carry its subcommand verb (… bin/quay init --root …): a " +
+    "verb-less call parses --root as an unknown verb ⇒ usage ⇒ rc=1 ⇒ the producer writes no carrier record");
+
+  // 硬规则 3 (absence is not a pass): pin that the two migrated call sites EXIST in verb-first form,
+  // so deleting both call sites cannot satisfy the predicate above by emptiness.
+  const verbFirst = [...src.matchAll(/bash\s+"\$qinit"\s+init\b/g)];
+  assert.equal(verbFirst.length, 2,
+    `the upgrade action AND the cold-start face must EACH invoke \`bash "$qinit" init\` (found ${verbFirst.length})`);
+
+  // the retired no-op flags must not ride a shipped-CLI invocation (they are an error to `quay init`).
+  const retired = logicalStatements(src).filter((s) =>
+    /(bash\s+"?\$\{?qinit\}?"?|"(?:[^"]*\/)?bin\/quay")/.test(s) && /(^|\s)--(all|loop)\b/.test(s));
+  assert.deepEqual(retired, [],
+    `--all/--loop are retired no-ops AND \`quay init\` rejects --loop ⇒ they must not appear on a shipped-CLI invocation: ${retired.join(" | ")}`);
+
+  // ── in-process negative control (硬规则 4: a check that cannot fail is not a measurement) ──────
+  // Re-run the SAME predicate against a copy with `init` stripped from each site. Removing the verb
+  // MUST make it fire — otherwise the positive assertion above is vacuous.
+  const mutated = src
+    .replace(/bash\s+"\$qinit"\s+init\b/g, 'bash "$qinit"')
+    .replace(/"(?:([^"]*\/)?)bin\/quay"\s+init\b/g, '"$1bin/quay"');
+  const neg = verbLessCalls(mutated);
+  assert.ok(neg.length >= verbFirst.length,
+    `stripping the subcommand verb from the ${verbFirst.length} call site(s) MUST make the predicate red ` +
+    `(got ${neg.length}): a green here means the check cannot red for the defect it pins`);
+});
+
+// ── post-upgrade binding reading follows the plugin-root semantics (76f89ce82) ───────────────────
+// The AC-238 gate reads the project's post-upgrade runtime BINDING in two places:
+//   · config_native_mcp_entry() — the bound bundle path (its sha is compared to the DELIVERED one), and
+//   · binding_state()            — the form word (the gate requires `path-resolved`).
+// Commit 76f89ce82 (gap-project-quay-pointer-is-init-plugin-root-…) removed
+// providers.native.path/mcp_entry — Core resolves <plugin-root>/vendor/quay-native and the project's
+// binding IS its `.quay/plugin` link. A reading written for the OLD config-carried form goes
+// `<unread>`/`unreadable` under the new one ⇒ AC-238 can never be written ⇒ AC-214's ONLY remedy
+// (re-run the producer) is structurally unable to refresh AC-238/239 (硬规则 5b — the sibling this
+// task's call-site fix exposed). This drives the two readers (extracted by POSITION) against fixtures.
+//
+// Three-valued, never boolean (硬规则 3b): a plugin-linked root resolves; a root with NO link stays
+// not-evaluated (fail-closed, not a silent pass); a bare-path mcp_entry stays RED.
+const VDC_SCRIPT = path.join(REPO_ROOT, "plugin", "scripts", "verify-deliver-coldstart.sh");
+
+function extractFn(src, name) {
+  const m = src.match(new RegExp(`^${name}\\(\\) \\{[\\s\\S]*?^\\}$`, "m"));
+  assert.ok(m, `${name}() must be defined at column 0 in verify-deliver-coldstart.sh`);
+  return m[0];
+}
+
+test("post-upgrade binding reading follows the plugin-root semantics (76f89ce82), three-valued", () => {
+  const src = readFileSync(VDC_SCRIPT, "utf8");
+  const harness = extractFn(src, "binding_state") + "\n" + extractFn(src, "config_native_mcp_entry") + "\n";
+  const tmp = mkdtempSync(path.join(os.tmpdir(), "ac214-binding-"));
+  try {
+    const harnessPath = path.join(tmp, "fns.sh");
+    writeFileSync(harnessPath, harness);
+    const mkRoot = (name, { link = false, bareEntry = false } = {}) => {
+      const r = path.join(tmp, name);
+      mkdirSync(path.join(r, ".quay"), { recursive: true });
+      mkdirSync(path.join(r, "tasks"), { recursive: true });
+      let cfg = "version: 1\nproviders:\n  native:\n    enabled: true\n    tasks_dir: tasks\n";
+      if (bareEntry) cfg += "    mcp_entry: [quay-native, mcp]\n";
+      writeFileSync(path.join(r, ".quay", "config.yml"), cfg);
+      if (link) {
+        const plug = path.join(tmp, `${name}-plugin`);
+        mkdirSync(path.join(plug, "vendor", "quay-native", "dist"), { recursive: true });
+        writeFileSync(path.join(plug, "vendor", "quay-native", "dist", "quay-native.js"), "fake\n");
+        symlinkSync(plug, path.join(r, ".quay", "plugin"));
+      }
+      return r;
+    };
+    const scriptsDir = path.join(REPO_ROOT, "plugin", "scripts");
+    const read = (expr) => {
+      const r = spawnSync("bash", ["-c",
+        `SCRIPT_DIR=${JSON.stringify(scriptsDir)}; source ${JSON.stringify(harnessPath)}; printf '%s' "$(${expr})"`],
+        { encoding: "utf8" });
+      assert.equal(r.status, 0, `harness failed for ${expr}:\n${r.stderr}`);
+      return (r.stdout || "").trim();
+    };
+
+    // ① new semantics (no mcp_entry) + a `.quay/plugin` link whose vendored bundle exists
+    //    ⇒ the binding IS resolvable ⇒ path-resolved; the bound entry is the plugin-vendored bundle.
+    const linked = mkRoot("linked", { link: true });
+    assert.equal(read(`binding_state '${linked}'`), "path-resolved",
+      "a project whose .quay/plugin link resolves to a real vendored quay-native bundle IS bound to a project-controlled path (new semantics)");
+    const entry = read(`config_native_mcp_entry '${linked}'`);
+    assert.match(entry, /\/vendor\/quay-native\/dist\/quay-native\.js$/,
+      `the bound entry must resolve through the plugin link, got: ${entry}`);
+
+    // ② SAME config but NO `.quay/plugin` link ⇒ NOT-EVALUATED / empty, never a silent pass.
+    const unlinked = mkRoot("unlinked", { link: false });
+    assert.equal(read(`binding_state '${unlinked}'`), "no-mcp-entry",
+      "without the plugin link the new-semantics binding is NOT established — it must not read as path-resolved");
+    assert.equal(read(`config_native_mcp_entry '${unlinked}'`), "",
+      "without the plugin link there is no bound entry — empty (the caller's sha gate then fails closed)");
+
+    // ③ a pre-migration bare-PATH binding stays RED even when a plugin link exists (the reading must
+    //    not paper over the very defect it exists to detect).
+    const bare = mkRoot("bare", { link: true, bareEntry: true });
+    assert.equal(read(`binding_state '${bare}'`), "bare-path-name",
+      "a bare-path mcp_entry must stay bare-path-name (RED) — the plugin-link fallback must not mask it");
+  } finally {
+    rmSync(tmp, { recursive: true, force: true });
   }
 });

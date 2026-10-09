@@ -1338,10 +1338,16 @@ BODY
 # no-mcp-entry / unrecognized-shape (NOT-EVALUATED) · unreadable (the checker could not run at all —
 # ⛔ a distinct word, never confused with 合格).
 binding_state() {
-  local r="$1" out
+  local r="$1" out state
+  # ⛔ 2>&1 (BOTH streams) is load-bearing: gate-script-base.emitVerdict writes its JSON on the stream
+  #    its caller picks, and provider-binding-resolvability-check writes its NOT-EVALUATED verdicts
+  #    (no-mcp-entry / unrecognized-shape / an audit throw) to **stderr** while PASS/FAIL go to stdout.
+  #    Reading stdout alone collapsed every not-evaluated state into "unreadable" — "readable and
+  #    not-evaluated" and "could not run at all" shared one word (硬规则 3b). `--no-warnings` keeps
+  #    stderr JSON-only so the merge stays parseable; a genuine crash still yields "unreadable".
   out="$(node --no-warnings --experimental-strip-types \
-    "$SCRIPT_DIR/provider-binding-resolvability-check.ts" --root "$r" --json 2>/dev/null)"
-  printf '%s' "$out" | python3 -c '
+    "$SCRIPT_DIR/provider-binding-resolvability-check.ts" --root "$r" --json 2>&1)"
+  state="$(printf '%s' "$out" | python3 -c '
 import json,sys
 try:
     d = json.load(sys.stdin)
@@ -1354,7 +1360,23 @@ for p in rows:
     if p.get("state") in ("bare-path-name", "dangling-absolute", "dangling-relative"):
         print(p["state"]); raise SystemExit
 print(rows[0].get("state", "unrecognized-shape"))
-' 2>/dev/null || echo "unreadable"
+' 2>/dev/null || echo "unreadable")"
+  # ── new-semantics binding (76f89ce82 / gap-project-quay-pointer-is-init-plugin-root-…): the native
+  #    provider no longer CARRIES path/mcp_entry — Core resolves <plugin-root>/vendor/quay-native, and
+  #    the project's binding IS its `.quay/plugin` link. The checker was written for the OLD
+  #    config-carried form, so it reports `no-mcp-entry` ("nothing to judge") for the CURRENT form.
+  #    Judge that form here: a `.quay/plugin` link whose vendored quay-native bundle is a real file IS
+  #    a project-controlled, $PATH-independent binding ⇒ path-resolved. ⛔ Not a blanket relaxation —
+  #    the AC-238 gate still compares the resolved bundle's sha to the DELIVERED one (RUNTIME_REPLACED
+  #    ③), so a stale/absent link fails closed. RED states above are returned before this branch.
+  if [ "$state" = "no-mcp-entry" ]; then
+    local pj=""
+    pj="$(cd "$r/.quay/plugin" 2>/dev/null && pwd -P || true)"
+    if [ -n "$pj" ] && [ -f "$pj/vendor/quay-native/dist/quay-native.js" ]; then
+      printf 'path-resolved'; return 0
+    fi
+  fi
+  printf '%s' "$state"
 }
 
 step_upgrade_existing() {
@@ -1453,7 +1475,7 @@ step_upgrade_existing() {
   #   0 个 backup ref（该旗标在不需要采纳时是 no-op，故可以无条件传）。
   set +e
   CLAUDE_PLUGIN_ROOT="$(dirname "$(dirname "$qinit")")" \
-    bash "$qinit" --root "$root" --repo-root "$root" \
+    bash "$qinit" init --root "$root" --repo-root "$root" \
       --worktree-root "$(dirname "$root")/$(basename "$root")-worktrees" \
       --adopt-branch-model \
       --auto-commit-skip >"$root/.quay-upgrade-init.log" 2>&1
@@ -4580,8 +4602,7 @@ step2_init() {
   git -C "$ROOT" config user.email "verify@localhost" 2>/dev/null || true
   git -C "$ROOT" config user.name "verify" 2>/dev/null || true
   printf '{"name":"%s","scripts":{"test":"%s"}}\n' "$PROJECT" "$TEST_CMD" > "$ROOT/package.json"
-  if ! CLAUDE_PLUGIN_ROOT="$plugin_root" bash "$qinit" \
-      --all --loop \
+  if ! CLAUDE_PLUGIN_ROOT="$plugin_root" bash "$qinit" init \
       --root "$ROOT" \
       --project "$PROJECT" \
       --repo-root "$ROOT" \
@@ -4632,9 +4653,9 @@ profile_worker_default_field() {
 # ⛔ 刻意【不】引入 yaml 依赖：远端不保证有 PyYAML，而这里要解的形态是闭集（`mcp_entry:` 后跟
 # `- item` 列表或 `[a, b]` 内联）。解析结果只参与 fail-closed 门（== 本次交付物），解错即门不开。
 config_native_mcp_entry() {
-  local root="$1"
+  local root="$1" out pj
   [ -f "$root/.quay/config.yml" ] || return 0
-  python3 - "$root/.quay/config.yml" <<'PY'
+  out="$(python3 - "$root/.quay/config.yml" <<'PY'
 import re, sys
 path = sys.argv[1]
 in_block = False
@@ -4660,6 +4681,21 @@ for line in open(path, encoding="utf-8"):
 cand = [i for i in items if i.startswith("/") and i.endswith(".js")]
 sys.stdout.write(cand[0] if cand else "")
 PY
+)"
+  # ── new-semantics fallback (76f89ce82 / gap-project-quay-pointer-is-init-plugin-root-…): after the
+  #    upgrade the native provider carries NO path/mcp_entry — Core resolves <plugin-root>/vendor/
+  #    quay-native, and the project's binding IS its `.quay/plugin` link. A check written for the OLD
+  #    config-carried form reads `<unread>`/fail-closed here even though the binding is fine. Resolve
+  #    the link: the linked bundle IS the runtime the project is bound to. ⛔ Not "any path counts" —
+  #    the caller compares this entry's sha256 to the DELIVERED bundle (AC238_RUNTIME_REPLACED ③), so
+  #    an absent or stale link still fails the gate.
+  if [ -z "$out" ]; then
+    pj="$(cd "$root/.quay/plugin" 2>/dev/null && pwd -P || true)"
+    if [ -n "$pj" ] && [ -f "$pj/vendor/quay-native/dist/quay-native.js" ]; then
+      out="$pj/vendor/quay-native/dist/quay-native.js"
+    fi
+  fi
+  printf '%s' "$out"
 }
 
 # resolve_driving_profiles — 驱动方仓库 profiles 路径推导：--driving-profiles 显式 >
