@@ -153,7 +153,7 @@ import {
 import { QUAY_CLI, QUAY_NATIVE_CLI } from "./helpers/cli-entry.mjs";
 // gap-driver-cli-help-hides-four-of-six-kinds: 帮助文本的 kind/verb 单一真源（零依赖叶模块——⛔ 不要
 // 从 ../src/cli/driver.ts 取，那条路径把 config.ts/plugin-root.ts 拖进来，正是本任务要避免的成本）。
-import { KINDS as DRIVER_KINDS_VOCAB, VERBS as DRIVER_VERBS_VOCAB } from "../src/cli/driver-vocab.ts";
+import { KINDS as DRIVER_KINDS_VOCAB, VERBS as DRIVER_VERBS_VOCAB } from "../src/driver-vocab.ts";
 // gap-ac256: `server <verb>` subs are DERIVED from the single source (cli/server.ts's SERVER_VERBS —
 // the same table the usage line itself is built from), ⛔ not re-listed here. A hand-copied list is
 // exactly what went stale when AC-256 added the `restart` verb: the usage line grew it, this list did

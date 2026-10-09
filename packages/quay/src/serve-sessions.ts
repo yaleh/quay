@@ -17,7 +17,7 @@ import {
   // label.
   htmlLangTag, pageNameFor, DEFAULT_LANG, type Lang,
 } from "./serve-render.ts";
-import { runDriver } from "./cli/driver.ts";
+import { runDriver } from "./driver-control.ts";
 import { renderSendForm } from "./serve-send.ts";
 import { resolvePluginScript } from "./plugin-root.ts";
 import { writeJson } from "./serve-http-json.ts";

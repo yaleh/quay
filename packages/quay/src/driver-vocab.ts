@@ -1,4 +1,8 @@
-// cli/driver-vocab.ts — the CLI's driver verb + kind vocabulary (gap-driver-cli-help-hides-four-of-six-kinds).
+// driver-vocab.ts — the driver verb + kind vocabulary (gap-driver-cli-help-hides-four-of-six-kinds).
+//
+// ⛔ 住在 core-root（GOAL-033/AC-350）：core（`driver-control.ts`、`serve.ts`）与 CLI（`cli/help.ts` /
+// `cli/driver.ts` / `cli/server.ts`）**共同消费**这张控制面词表，放在 `cli/` 会制造 core → cli 边
+// （宿主 serve.ts 是 core，却要 import cli/ 里的服务名清单）。ownership 随真实消费者走，⛔ 不是整理。
 //
 // WHY THIS MODULE EXISTS（⛔ 不是"为了整齐"）：`quay driver` 的 verb/kind 词表要在三处用户可见的
 // 帮助文本里出现（`quay --help` 顶层用法行、`quay driver --help` 的用法行与 `--kind` 旗标说明），
