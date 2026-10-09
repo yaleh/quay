@@ -11,6 +11,8 @@ extra:
 ---
 **type:** execution
 
+**PARKED** — 由主会话交互执行中，勿派发/勿晋升；完成时由主会话移除本行。
+
 该轴仍暗，理由：本任务新增的是只读 corpus/评测器/测试与 docs/analysis 产物，不 import/不改变任何生产包间依赖边，也不碰 god-package 候选，故 L_D 与 L_G 两轴对本任务结构性不适用。
 
 ## Finding
@@ -28,12 +30,24 @@ extra:
 
 ## Touches
 
-- plugin/fixtures/meta-driver-replay/GOAL-030..033/{rich_a,rich_b}.json
-- docs/analysis/{rich-dossier-spec.json,gen-rich-dossier.mjs,ownership-rich-ab.mjs,ownership-tool-replay.mjs}
+- plugin/fixtures/meta-driver-replay/GOAL-030/rich_a.json
+- plugin/fixtures/meta-driver-replay/GOAL-030/rich_b.json
+- plugin/fixtures/meta-driver-replay/GOAL-031/rich_a.json
+- plugin/fixtures/meta-driver-replay/GOAL-031/rich_b.json
+- plugin/fixtures/meta-driver-replay/GOAL-032/rich_a.json
+- plugin/fixtures/meta-driver-replay/GOAL-032/rich_b.json
+- plugin/fixtures/meta-driver-replay/GOAL-033/rich_a.json
+- plugin/fixtures/meta-driver-replay/GOAL-033/rich_b.json
+- docs/analysis/rich-dossier-spec.json
+- docs/analysis/gen-rich-dossier.mjs
+- docs/analysis/ownership-rich-ab.mjs
+- docs/analysis/ownership-tool-replay.mjs
 - docs/analysis/ownership-two-stage-evaluator.mjs
-- docs/analysis/dossier-evidence/
-- docs/analysis/{ownership-rich-ab-results.json,ownership-tool-replay-results.json,ownership-rich-and-tool-replay.md}
+- docs/analysis/ownership-rich-ab-results.json
+- docs/analysis/ownership-tool-replay-results.json
+- docs/analysis/ownership-rich-and-tool-replay.md
 - plugin/test/ownership-rich-dossier.test.mjs
+- docs/analysis/dossier-evidence/GOAL-032-duplicates.txt
 - tasks/gap-ownership-replay-rich-evidence-and-tool-replay-benchmark.md
 
 ## AC
