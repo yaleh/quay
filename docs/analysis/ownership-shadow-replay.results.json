@@ -1,0 +1,264 @@
+{
+  "proposer_id": "ownership-shadow-proposer/v1",
+  "corpus_root": "plugin/fixtures/meta-driver-replay",
+  "scoring": "plugin/test/helpers/meta-driver-replay-harness.mjs#scoreResponse",
+  "note": "Offline replay of a DETERMINISTIC stub proposer over a 4-case, single-domain corpus. These numbers read the corpus, not a calibrated judgment — see docs/analysis/ownership-shadow-replay.md.",
+  "cases": {
+    "GOAL-030": {
+      "case_id": "GOAL-030",
+      "concern_recall": 1,
+      "concern_precision": 1,
+      "chosen_slice_agreement": "no_match",
+      "chosen_slice_overlap_score": 0.23529411764705882,
+      "investigation_vs_goal_agreement": true,
+      "scope_expansion_violation": false,
+      "expected_delta_quality": "has_numeric_claim",
+      "falsifiability_negative_control_presence": "present",
+      "decomposition_quality": {
+        "structured_fields_present": "2/2 prose fields, 2/3 array fields non-empty",
+        "why_not_broader_overlap": 0.05555555555555555,
+        "why_not_finer_overlap": 0
+      },
+      "slice_semantic_coherence": "possible_bundling_heuristic(4_joins)",
+      "granularity": "agreement",
+      "harnessability": "harness_ready",
+      "harnessability_components": {
+        "has_scope_non_goals": true,
+        "has_negative_control": true,
+        "has_numeric_expected_delta": true,
+        "has_failure_mode": true
+      },
+      "primitive_reuse": {
+        "mentioned_any": true,
+        "overlap_with_reference": 1,
+        "possible_reinvention": false
+      },
+      "decomposition_breadth": {
+        "concerns_named": 1,
+        "interventions_proposed": 1
+      },
+      "coordination_cost_reasoning_given": true,
+      "unnecessary_decomposition_flag": false,
+      "hindsight_leakage_guard": {
+        "flagged": false,
+        "matched_markers": []
+      },
+      "abstention_uncertainty_reasonableness": "specific",
+      "note": "rule-assisted, minimal-viable metrics — not a calibrated aggregate score (see README.md)",
+      "prompt_sha256": "ada20a150bcd054bdb5676cb71d2ba95e840e227d6ec8a64e65aa7f2ad7b351b",
+      "proposer": {
+        "concern_class": "ownership-placement",
+        "recommended_next_action": "propose-goal",
+        "evidence_refs": [
+          "archguard.package_fanin_out",
+          "corpus.context",
+          "tasks.recent_landed"
+        ],
+        "candidate_intervention_count": 1
+      },
+      "gate": {
+        "accepted": true,
+        "code": "accepted",
+        "reason": "all deterministic checks passed",
+        "concern_key": "ownership:ownership-placement:quay s goal branch mechanism exists in the codebase spec goal branch but has only ever been exercised in rehearsals goal"
+      }
+    },
+    "GOAL-031": {
+      "case_id": "GOAL-031",
+      "concern_recall": 1,
+      "concern_precision": 1,
+      "chosen_slice_agreement": "near_match",
+      "chosen_slice_overlap_score": 0.32608695652173914,
+      "investigation_vs_goal_agreement": true,
+      "scope_expansion_violation": false,
+      "expected_delta_quality": "has_numeric_claim",
+      "falsifiability_negative_control_presence": "present",
+      "decomposition_quality": {
+        "structured_fields_present": "2/2 prose fields, 3/3 array fields non-empty",
+        "why_not_broader_overlap": 0.13636363636363635,
+        "why_not_finer_overlap": 0.09523809523809523
+      },
+      "slice_semantic_coherence": "possible_bundling_heuristic(4_joins)",
+      "granularity": "agreement",
+      "harnessability": "harness_ready",
+      "harnessability_components": {
+        "has_scope_non_goals": true,
+        "has_negative_control": true,
+        "has_numeric_expected_delta": true,
+        "has_failure_mode": true
+      },
+      "primitive_reuse": {
+        "mentioned_any": true,
+        "overlap_with_reference": 1,
+        "possible_reinvention": false
+      },
+      "decomposition_breadth": {
+        "concerns_named": 1,
+        "interventions_proposed": 1
+      },
+      "coordination_cost_reasoning_given": true,
+      "unnecessary_decomposition_flag": false,
+      "hindsight_leakage_guard": {
+        "flagged": false,
+        "matched_markers": []
+      },
+      "abstention_uncertainty_reasonableness": "specific",
+      "note": "rule-assisted, minimal-viable metrics — not a calibrated aggregate score (see README.md)",
+      "prompt_sha256": "86b51f532c96307450a857b6d74bae1e1fd768b829639e05ba5597ab7e3ebd4a",
+      "proposer": {
+        "concern_class": "canonicalization",
+        "recommended_next_action": "propose-goal",
+        "evidence_refs": [
+          "archguard.dispersion",
+          "corpus.context",
+          "goals.recent_precedents",
+          "tasks.recent_landed"
+        ],
+        "candidate_intervention_count": 1
+      },
+      "gate": {
+        "accepted": true,
+        "code": "accepted",
+        "reason": "all deterministic checks passed",
+        "concern_key": "ownership:canonicalization:goal 030 the first real goal branch pilot lifecycle status writes sunk to a kernel decision layer with structured events"
+      }
+    },
+    "GOAL-032": {
+      "case_id": "GOAL-032",
+      "concern_recall": 0,
+      "concern_precision": 0,
+      "chosen_slice_agreement": "no_match",
+      "chosen_slice_overlap_score": 0.1864406779661017,
+      "investigation_vs_goal_agreement": true,
+      "scope_expansion_violation": false,
+      "expected_delta_quality": "has_numeric_claim",
+      "falsifiability_negative_control_presence": "present",
+      "decomposition_quality": {
+        "structured_fields_present": "2/2 prose fields, 3/3 array fields non-empty",
+        "why_not_broader_overlap": 0.05263157894736842,
+        "why_not_finer_overlap": 0.3888888888888889
+      },
+      "slice_semantic_coherence": "possible_bundling_heuristic(8_joins)",
+      "granularity": "agreement",
+      "harnessability": "harness_ready",
+      "harnessability_components": {
+        "has_scope_non_goals": true,
+        "has_negative_control": true,
+        "has_numeric_expected_delta": true,
+        "has_failure_mode": true
+      },
+      "primitive_reuse": {
+        "mentioned_any": true,
+        "overlap_with_reference": 1,
+        "possible_reinvention": false
+      },
+      "decomposition_breadth": {
+        "concerns_named": 1,
+        "interventions_proposed": 1
+      },
+      "coordination_cost_reasoning_given": true,
+      "unnecessary_decomposition_flag": false,
+      "hindsight_leakage_guard": {
+        "flagged": false,
+        "matched_markers": []
+      },
+      "abstention_uncertainty_reasonableness": "specific",
+      "note": "rule-assisted, minimal-viable metrics — not a calibrated aggregate score (see README.md)",
+      "prompt_sha256": "2cc6e7b1c68546a80b6c3d822dafc319b44f65e372fb1d41830d6d10ba6b720d",
+      "proposer": {
+        "concern_class": "duplication",
+        "recommended_next_action": "propose-goal",
+        "evidence_refs": [
+          "archguard.duplicate",
+          "corpus.context",
+          "goals.recent_precedents"
+        ],
+        "candidate_intervention_count": 1
+      },
+      "gate": {
+        "accepted": true,
+        "code": "accepted",
+        "reason": "all deterministic checks passed",
+        "concern_key": "ownership:duplication:goal 030 lifecycle write ownership sunk to kernel and goal 031 needs human vocabulary dispersion corrected scope have bo"
+      }
+    },
+    "GOAL-033": {
+      "case_id": "GOAL-033",
+      "concern_recall": 1,
+      "concern_precision": 1,
+      "chosen_slice_agreement": "no_match",
+      "chosen_slice_overlap_score": 0.13953488372093023,
+      "investigation_vs_goal_agreement": true,
+      "scope_expansion_violation": false,
+      "expected_delta_quality": "has_numeric_claim",
+      "falsifiability_negative_control_presence": "present",
+      "decomposition_quality": {
+        "structured_fields_present": "2/2 prose fields, 3/3 array fields non-empty",
+        "why_not_broader_overlap": 0,
+        "why_not_finer_overlap": 0.1
+      },
+      "slice_semantic_coherence": "possible_bundling_heuristic(8_joins)",
+      "granularity": "agreement",
+      "harnessability": "harness_ready",
+      "harnessability_components": {
+        "has_scope_non_goals": true,
+        "has_negative_control": true,
+        "has_numeric_expected_delta": true,
+        "has_failure_mode": true
+      },
+      "primitive_reuse": {
+        "mentioned_any": true,
+        "overlap_with_reference": 1,
+        "possible_reinvention": false
+      },
+      "decomposition_breadth": {
+        "concerns_named": 1,
+        "interventions_proposed": 1
+      },
+      "coordination_cost_reasoning_given": true,
+      "unnecessary_decomposition_flag": false,
+      "hindsight_leakage_guard": {
+        "flagged": false,
+        "matched_markers": []
+      },
+      "abstention_uncertainty_reasonableness": "specific",
+      "note": "rule-assisted, minimal-viable metrics — not a calibrated aggregate score (see README.md)",
+      "prompt_sha256": "72778959fc5fb09691194b46f7d3f6ae3ac90fe6299188d752fb579b166ab32e",
+      "proposer": {
+        "concern_class": "dependency-boundary",
+        "recommended_next_action": "propose-goal",
+        "evidence_refs": [
+          "archguard.cycle",
+          "corpus.context",
+          "goals.recent_precedents"
+        ],
+        "candidate_intervention_count": 1
+      },
+      "gate": {
+        "accepted": true,
+        "code": "accepted",
+        "reason": "all deterministic checks passed",
+        "concern_key": "ownership:dependency-boundary:three real goal branch pilots goal 030 goal 031 goal 032 have each landed cleanly each targeting a progressively differe"
+      }
+    }
+  },
+  "summary": {
+    "cases_total": 4,
+    "cases_accepted": 4,
+    "cases_rejected": 0,
+    "gate_code_counts": {
+      "accepted": 4
+    },
+    "concern_recall_mean": 0.75,
+    "concern_precision_mean": 0.75,
+    "investigation_vs_goal_agreement_count": 4,
+    "chosen_slice_near_match_count": 1,
+    "scope_expansion_violation_count": 0,
+    "harnessability_ready_count": 4,
+    "negative_control_present_count": 4,
+    "expected_delta_numeric_count": 4,
+    "granularity_agreement_count": 4,
+    "abstention_specific_count": 4,
+    "hindsight_leakage_flagged_count": 0
+  }
+}
