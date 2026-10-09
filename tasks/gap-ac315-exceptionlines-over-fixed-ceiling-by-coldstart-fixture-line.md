@@ -2,7 +2,7 @@
 id: gap-ac315-exceptionlines-over-fixed-ceiling-by-coldstart-fixture-line
 title: AC-315 回归（exceptionLines 7500→7501）：08e6209f7 给例外文件
   verify-deliver-coldstart.sh 加 1 有效行，顶破固定上限（唯一合法出口 = 把例外文件有效行总数减回 ≤7500）
-status: todo
+status: ready
 labels:
   - gap
   - defect
