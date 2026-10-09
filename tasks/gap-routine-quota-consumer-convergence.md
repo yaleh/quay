@@ -2,7 +2,7 @@
 id: gap-routine-quota-consumer-convergence
 title: routine 限流②：probe-routine.ts / meta-driver.ts 真实调用点收敛到独立 Policy 函数 +
   真实全局天花板生效（依赖①落地）
-status: todo
+status: ready
 labels:
   - gap
 parent: null
