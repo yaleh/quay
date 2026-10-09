@@ -86,6 +86,7 @@ printf '#!/usr/bin/env node\nconsole.log("0.6.1-fake");\n' > "$pkg/plugin/bin/qu
 
 - plugin/scripts/verify-deliver-coldstart.sh
 - plugin/test/verify-deliver-coldstart.test.mjs
+- plugin/test/ac248-adr-check-flip-record.test.mjs
 - tasks/gap-ac315-exceptionlines-over-fixed-ceiling-by-coldstart-fixture-line.md
 
 ## Evidence
@@ -177,3 +178,22 @@ selfcheck: PASS — AC2 direct measures can take false …（145 条断言全部
 改前/改后 `--selfcheck` 输出 diff **只剩随机临时目录名与 sentinel 的 sha256**（后者内含临时路径）——145 条 `selfcheck:` 断言的取值逐字不变，14 个原 selfcheck 测试仍过。
 
 补充（同一负控制的层面）：`node --test plugin/test/verify-deliver-coldstart.test.mjs` ⇒ **31/31 pass**；合并 develop 后的 scoped gate `bash scripts/test.sh --for-task gap-ac315-exceptionlines-over-fixed-ceiling-by-coldstart-fixture-line --allow-thin` ⇒ **exit 0**。
+
+### 续做轮（2026-10-09）：上一轮 fan-in suite 红的真因 = ac248 依赖闭包未同步（非环境）
+
+上一轮 `step=suite` 红：`AssertionError [ERR_ASSERTION]: the positive spec must write exactly one record`（`'REFUSED' !== 'WROTE'` @ `plugin/test/ac248-adr-check-flip-record.test.mjs:407`）。delta-relatedness 机械判为 UNRELATED —— **该判据 one-hop import 盲**：本测试不 `import` 该 .sh，而是用【手工维护的依赖闭包】`fnNames` 把 `write_ac248_record` 及其依赖抽成 hermetic harness，故其失败**由本任务的 `verify-deliver-coldstart.sh` 改动直接造成**。
+
+真因（按位置）：`0f839f56a` 抽出 `ac_files_non_bookkeeping`（AC-207/239/248 三个写入器共用同一「非记账」判定，硬规则 5b 去重复副本）后，`write_ac248_record` 新增了对它的调用；`ac248-adr-check-flip-record.test.mjs` 的 `fnNames` 闭包未列出它 ⇒ 抽出的写入器 `command not found` ⇒ REFUSED for every input ⇒ 正向控制转红（该测试自带正向控制的设计意图正是：闭包过期必须响亮失败，⛔ 不是让 ③b 的负例全部空转绿）。
+
+修复 = 把 `ac_files_non_bookkeeping` 补入 `fnNames`（`plugin/test/ac248-adr-check-flip-record.test.mjs`，本任务 Touches 补录该文件）：
+
+```
+$ node --test plugin/test/ac248-adr-check-flip-record.test.mjs
+ℹ tests 6   ℹ pass 6   ℹ fail 0
+```
+
+同轮复核（worktree，修复后）：
+
+- `sh-census-check --json` ⇒ `evaluated:true`、`verdict.ok:true`、`verdict.over:[]`、`verdict.baselineRaised:[]`、`totals.exceptionLines = 7490`（≤7500）；`verify-deliver-coldstart.sh codeLines = 6283`。
+- AC-315 判据本体逐字（cwd=worktree）⇒ `EXIT=0`。
+- `node --test plugin/test/verify-deliver-coldstart.test.mjs` ⇒ 31/31 pass。
