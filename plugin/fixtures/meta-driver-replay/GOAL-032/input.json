@@ -1,0 +1,63 @@
+{
+  "case_id": "GOAL-032",
+  "cutoff": "2026-10-09T01:00:00.000Z",
+  "cutoff_note": "Strictly before the real activation (goals/GOAL-032-*.md activatedAt=2026-10-09T01:55:04.388Z). GOAL-030 and GOAL-031 have both already landed and are legitimate prior context.",
+  "context": {
+    "repo_state_summary": "GOAL-030 (lifecycle-write ownership sunk to kernel) and GOAL-031 (needs-human vocabulary dispersion, corrected scope) have both landed cleanly as independent, small, real goal-branch pilots.",
+    "prior_goal_precedents": [
+      { "id": "GOAL-030", "one_line": "lifecycle-write ownership sunk to kernel + structured events; landed." },
+      { "id": "GOAL-031", "one_line": "needs-human literal-dispersion convergence, with a mid-flight premise correction; landed." }
+    ],
+    "archguard_readings_before": {
+      "tool_call": "detect_duplicates",
+      "reading_at_cutoff": "one duplicate-implementation group flagged, comprising packages/quay/src/criterion-fidelity.ts::parseFidelityVerdict and plugin/scripts/goal-driver.ts::parseSemanticSufficiencyVerdict",
+      "surface_similarity": "Both functions follow the identical algorithm shape: exitCode!==0 => not-evaluated; else bare-token match; else scan from the last line upward for a {\"verdict\":\"...\"} JSON blob; anything else => not-evaluated. The only textual difference is which two literal strings count as the positive/negative verdict values.",
+      "note": "detect_duplicates flags structural similarity. It does NOT by itself determine whether the two call sites are semantically equivalent (safe to merge) or intentionally-divergent (the duplication is incidental, not the same concern) — that classification has not yet been made at this cutoff."
+    },
+    "code_pointers": [
+      "packages/quay/src/criterion-fidelity.ts — the fidelity-verdict parser flagged by the duplicate-detection reading above",
+      "plugin/scripts/goal-driver.ts — the sufficiency-verdict parser flagged by the same reading",
+      "criterion-fidelity.ts's own header comment states it 'reuses goal-driver.ts's parseSemanticSufficiencyVerdict fail-closed approach verbatim' — a self-documented claim of deliberate copying, not yet independently verified",
+      "criterion-fidelity-historical-case.test.mjs's own comment similarly self-describes the parser as 'fail-closed (mirrors parseSemanticSufficiencyVerdict's approach)'"
+    ],
+    "caller_orchestration_note": "The two call sites that invoke these parsers are known to differ in orchestration: one is synchronous, uncached, invoked through an injected judge seam; the other is async, uses runAsync, requires two samples to agree before caching, and splits failure into several named causes (judge-unavailable / judge-unparseable / samples-disagree). Whether that caller-side difference means the PARSING logic itself must also stay separate, or is orthogonal to it, has not yet been investigated at this cutoff.",
+    "related_landed_tasks": [],
+    "human_trigger_quote": "人 2026-10-09 指令：请对 criterion-fidelity.ts::parseFidelityVerdict 与 goal-driver.ts::parseSemanticSufficiencyVerdict 这一对 ArchGuard 重复检测命中做正式评估，并据评估结果提出下一步。",
+    "equivalence_investigation_status": "A formal equivalence investigation (distinct from this decision point) ran before this cutoff and reached a conclusion: the two functions' PARSING ALGORITHM is equivalent (not intentionally-divergent) — they implement the identical fail-closed token/JSON-scan logic, differing only in which two literal strings count as positive/negative. This investigation did NOT determine what, if anything, should be done about it (that is the decision under test here), and did NOT examine the two call sites' orchestration differences in detail beyond noting they exist (see caller_orchestration_note above).",
+    "test_suite_state": "scripts/test.sh green on develop at the cutoff commit."
+  },
+  "decision_prompt_schema": {
+    "instructions": "You are advising on what Quay should do next, given ONLY the context above (nothing after the cutoff). Answer the 8 questions below as a single JSON object matching response_schema. Be concrete and falsifiable; do not pad with generic advice.",
+    "questions": [
+      "a) What are the most noteworthy architecture concerns right now, given this context?",
+      "b) Propose at most 3 candidate interventions.",
+      "c) Which one would you recommend doing first, and why?",
+      "d) Should this become an investigation or a goal (with an active branch)?",
+      "e) What is the scope, and what are the explicit non-goals?",
+      "f) What mechanical delta (a concrete, measurable before/after) would you expect evidence of, once done?",
+      "g) What negative control would distinguish 'this actually worked' from 'this looks like it worked'?",
+      "h) What evidence, if it appeared, would make you abandon or materially revise this recommendation?"
+    ],
+    "response_schema": {
+      "type": "object",
+      "required": ["concerns", "candidate_interventions", "recommended", "investigation_or_goal", "scope", "expected_mechanical_delta", "negative_control", "revision_evidence"],
+      "properties": {
+        "concerns": { "type": "array", "items": { "type": "string" } },
+        "candidate_interventions": {
+          "type": "array",
+          "maxItems": 3,
+          "items": { "type": "object", "properties": { "title": { "type": "string" }, "rationale": { "type": "string" } } }
+        },
+        "recommended": { "type": "string" },
+        "investigation_or_goal": { "enum": ["investigation", "goal"] },
+        "scope": {
+          "type": "object",
+          "properties": { "in_scope": { "type": "array", "items": { "type": "string" } }, "non_goals": { "type": "array", "items": { "type": "string" } } }
+        },
+        "expected_mechanical_delta": { "type": "string" },
+        "negative_control": { "type": "string" },
+        "revision_evidence": { "type": "string" }
+      }
+    }
+  }
+}

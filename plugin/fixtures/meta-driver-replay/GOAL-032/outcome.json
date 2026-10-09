@@ -1,0 +1,15 @@
+{
+  "case_id": "GOAL-032",
+  "status": "landed",
+  "merge_commit": "0da918926",
+  "merge_commit_note": "git log --oneline --all --grep=\"GOAL-032\" --merges shows '0da918926 merge: goal/GOAL-032 into develop'.",
+  "ac_results": {
+    "AC-347": "achieved",
+    "AC-348": "achieved",
+    "AC-349": "achieved"
+  },
+  "goal_final_status": "achieved",
+  "goal_status_log_reason": "I2: all ACs achieved + sufficiency covered",
+  "archguard_delta_direction": "detect_duplicates group for this pair disappeared after the change; canonical-definition count for the shared parsing algorithm went from 2 (one per call site) to 1 (kernel/verdict-parse.ts), with the two original functions confirmed as thin wrappers and both call chains independently verified to have actually changed what they call (not merely relocated).",
+  "as_of": "2026-10-09T00:00:00.000Z"
+}
