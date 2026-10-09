@@ -1,0 +1,97 @@
+{
+  "before": {
+    "ref": "develop",
+    "sha": "423670d29c133a454c3a6019d63fb99b3752107f",
+    "tree": "git archive develop -- packages plugin/scripts → /tmp/goal032-before-gXQdHf",
+    "sources": [
+      "packages",
+      "plugin/scripts"
+    ],
+    "scannedFiles": 418,
+    "scannedFunctions": 9370,
+    "totalGroups": 21,
+    "duplicateGroupPresent": true,
+    "duplicateGroup": {
+      "hash": "0cac7de2dd5ee549",
+      "tokenCount": 197,
+      "statementCount": 12,
+      "members": [
+        {
+          "file": "packages/quay/src/criterion-fidelity.ts",
+          "startLine": 71,
+          "endLine": 87,
+          "name": "parseFidelityVerdict"
+        },
+        {
+          "file": "plugin/scripts/goal-driver.ts",
+          "startLine": 1142,
+          "endLine": 1161,
+          "name": "parseSemanticSufficiencyVerdict"
+        }
+      ]
+    },
+    "canonicalDefinitionAnchor": {
+      "file": "packages/quay/src/criterion-fidelity.ts",
+      "name": "parseFidelityVerdict",
+      "hash": "0cac7de2dd5ee549",
+      "tokenCount": 197,
+      "statementCount": 12
+    },
+    "canonicalDefinitionCount": 2,
+    "canonicalDefinitionFiles": [
+      "packages/quay/src/criterion-fidelity.ts",
+      "plugin/scripts/goal-driver.ts"
+    ]
+  },
+  "after": {
+    "tree": "/data/home/yale/work/quay-worktrees/gap-goal032-selfhost-and-archguard-evidence",
+    "sha": "73640b18e5658491452700344c412e26350effbd",
+    "sources": [
+      "packages",
+      "plugin/scripts"
+    ],
+    "scannedFiles": 419,
+    "scannedFunctions": 9370,
+    "totalGroups": 20,
+    "duplicateGroupPresent": false,
+    "duplicateGroup": null,
+    "canonicalDefinitionAnchor": {
+      "file": "packages/quay/src/kernel/verdict-parse.ts",
+      "name": "parseBinaryVerdict",
+      "hash": "bdba8a3a676ceef3",
+      "tokenCount": 205,
+      "statementCount": 12
+    },
+    "canonicalDefinitionCount": 1,
+    "canonicalDefinitionFiles": [
+      "packages/quay/src/kernel/verdict-parse.ts"
+    ]
+  },
+  "consumerConvergenceEvidence": [
+    {
+      "file": "packages/quay/src/criterion-fidelity.ts",
+      "line": 77,
+      "text": "return parseBinaryVerdict(stdout, exitCode, \"faithful\", \"vacuous\");"
+    },
+    {
+      "file": "plugin/scripts/goal-driver.ts",
+      "line": 1151,
+      "text": "return parseBinaryVerdict(stdout, exitCode, \"covered\", \"insufficient\");"
+    }
+  ],
+  "canonicalDefinitionCountMethod": "distinct FILES in the scanned set carrying a function whose ARCHGUARD STRUCTURAL FINGERPRINT equals the anchor function's (fingerprintSourceText — the same normalizer detectDuplicates groups by). Anchor located by (file, function name): parseFidelityVerdict before, parseBinaryVerdict after. Not name-based and not hand-counted: the instrument decides which functions match.",
+  "method": {
+    "instrument": "archguard 0.1.38 detectDuplicates + fingerprintSourceText (/data/home/yale/.claude/plugins/npm-cache/node_modules/@yalehwang/archguard)",
+    "sources": [
+      "packages",
+      "plugin/scripts"
+    ],
+    "options": {
+      "minStatements": 6,
+      "minTokens": 50,
+      "includeTests": false
+    },
+    "scopeNote": "same instrument, same directory shape, only the tree differs — before is a git-archive of the ref (no worktree, no checkout, nothing written back), after is the tree under test"
+  },
+  "generatedAt": "2026-10-09T02:39:13.569Z"
+}

@@ -52,6 +52,10 @@ import { DRIVER_KINDS, runAsync, launchArgv, splitArgs, kernelSiblingArgv, kerne
 // The ONE regex-literal escaper (kernel leaf via the plugin shim) — replaces an inline escape body at
 // the heading-literal site (finding `escaperegexp-sweep-missed-two`, routine `semantic-dedup-scan`).
 import { escapeRegExp } from "./regex-escape.ts";
+// GOAL-032：判定器 stdout → 三态 verdict 的解析算法单一实现（kernel leaf，plugin → kernel 方向，
+// 同 regex-escape 的落点论证）。parseSemanticSufficiencyVerdict 此前与产品侧
+// criterion-fidelity.ts::parseFidelityVerdict 逐字相同的解析循环已收敛到这一个 kernel 函数。
+import { parseBinaryVerdict } from "../../packages/quay/src/kernel/verdict-parse.ts";
 // Layer 1b 常驻循环（quality-gate-driver 的通用例程型循环 + 统一轮记录信封，同 meta-driver 的接法）。
 import { runResidentQualityGateLoop } from "./quality-gate-driver.ts";
 // goal 动词的 argv 单一构造点 + 「quay CLI 解析得出吗」的判据（同 meta-driver，⛔ 本文件不另拼路径）。
@@ -1138,26 +1142,13 @@ export function goalSufficiencyVerdict(
 /** 语义判定 stdout → 三态词表（AC-222 负控制 b 的 fail-closed 核心）：
  *  只有【明确、可解析】的 `covered` 才返回 covered；`insufficient` 同理；其余一切（非零退出、空输出、
  *  读不懂、超时、JSON 解析失败）⇒ not-evaluated。⛔ 绝不把「读不懂」回落成 covered——「无条件
- *  return covered」的放水实现会原样重演 AC-212 记录过的三次假 achieved。 */
+ *  return covered」的放水实现会原样重演 AC-212 记录过的三次假 achieved。
+ *
+ *  GOAL-032：解析算法已收敛到 kernel 单一实现 `packages/quay/src/kernel/verdict-parse.ts::
+ *  parseBinaryVerdict`（此前本函数与产品侧 criterion-fidelity.ts::parseFidelityVerdict 逐字相同的
+ *  解析循环现已结构化）——本函数只是把本领域的合法值字面量传入的薄包装，签名/返回类型不变。 */
 export function parseSemanticSufficiencyVerdict(stdout: string | null, exitCode: number | null): SufficiencyVerdict {
-  if (exitCode !== 0) return "not-evaluated";
-  const text = (stdout ?? "").trim();
-  // 纯 token（测试缝 / 极简输出）也认。
-  if (text === "covered" || text === "insufficient") return text;
-  // JSON 形态：{"verdict":"covered"} / {"verdict":"insufficient"}（claude -p 可能带解释性前文，
-  // 从末行向上找第一个可解析的 JSON 对象）。⛔ 找不到 ⇒ not-evaluated，绝不默认 covered。
-  const candidates = [text, ...text.split(/\r?\n/).map((s) => s.trim()).filter(Boolean).reverse()];
-  for (const cand of candidates) {
-    try {
-      const obj = JSON.parse(cand);
-      if (obj && typeof obj === "object" && (obj.verdict === "covered" || obj.verdict === "insufficient")) {
-        return obj.verdict as SufficiencyVerdict;
-      }
-    } catch {
-      /* 非 JSON 行，继续向上找 */
-    }
-  }
-  return "not-evaluated";
+  return parseBinaryVerdict(stdout, exitCode, "covered", "insufficient");
 }
 
 /** 充分性语义判定的 prompt：把 GOAL 的退出条件文本 + `## 范围` 节 + 在域 AC 集合（id/title/expect）
