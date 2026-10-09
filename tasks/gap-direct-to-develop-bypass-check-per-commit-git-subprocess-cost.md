@@ -2,7 +2,7 @@
 id: gap-direct-to-develop-bypass-check-per-commit-git-subprocess-cost
 title: direct-to-develop-bypass-check.ts 对 reachable/unclassifiable 候选逐 commit
   起多个 git 子进程（diff+4×log）——可能是该文件 58-65s/sys46.5s 真实驱动，未被 git-fixture-cost 任务覆盖
-status: todo
+status: ready
 labels:
   - gap
 parent: null
