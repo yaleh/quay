@@ -11,8 +11,6 @@ extra:
 ---
 **type:** execution
 
-**PARKED** — 由主会话交互执行中，勿派发/勿晋升；完成时由主会话移除本行。
-
 该轴仍暗，理由：本任务新增的是只读 corpus/评测器/测试与 docs/analysis 产物，不 import/不改变任何生产包间依赖边，也不碰 god-package 候选，故 L_D 与 L_G 两轴对本任务结构性不适用。
 
 ## Finding
@@ -49,15 +47,23 @@ extra:
 - plugin/test/ownership-rich-dossier.test.mjs
 - docs/analysis/dossier-evidence/GOAL-032-duplicates.txt
 - tasks/gap-ownership-replay-rich-evidence-and-tool-replay-benchmark.md
+- docs/analysis/ownership-blind-judge.mjs
+- docs/analysis/ownership-blind-judge-results.json
+- docs/analysis/summarize-rich-and-tool.mjs
+- docs/analysis/ownership-tool-replay-results-probe.json
+- docs/analysis/ownership-two-stage-ab.mjs
+- docs/analysis/ownership-two-stage-ab.md
+- docs/analysis/ownership-shadow-ab-runtime-model.mjs
+- docs/analysis/dossier-evidence/GOAL-031-literal-dispersion.txt
 
 ## AC
 
-- [ ] 四例各有 `rich_a.json` 与 `rich_b.json`，每段含 commit/路径/行范围或查询来源；每个 dossier 10–50 KB 量级。
-- [ ] integrity tests 全绿：provenance 重放字节一致、commit ≤ cutoff、cutoff 处不存在的 outcome 标识符零命中、reference/outcome shingle 零命中、目标 Goal 正文不入 dossier。
-- [ ] rich-bundle A/B 完成（16 run），结果写入 `docs/analysis/ownership-rich-ab-results.json`，且自检 `prompts_identical_across_groups_per_cell` 为真。
-- [ ] GOAL-032/033 tool replay 在只读 worktree 内完成，写出 tool trace 摘要；已验证 agent 无法读 reference/outcome 且无写权限。
-- [ ] 报告分开呈现 rich-bundle 与 tool replay，含与旧 1–2 KB baseline 的同口径对比与 production meta-driver 的 evidence/tool 访问建议。
+- [x] 四例各有 `rich_a.json` 与 `rich_b.json`，每段含 commit/路径/行范围或查询来源；每个 dossier 10–50 KB 量级。 **Verified**: 8 dossiers, 19.5–70.5 KB, provenance per section
+- [x] integrity tests 全绿：provenance 重放字节一致、commit ≤ cutoff、cutoff 处不存在的 outcome 标识符零命中、reference/outcome shingle 零命中、目标 Goal 正文不入 dossier。 **Verified**: 33/33 integrity tests incl. 4 mutation negative controls
+- [x] rich-bundle A/B 完成（16 run），结果写入 `docs/analysis/ownership-rich-ab-results.json`，且自检 `prompts_identical_across_groups_per_cell` 为真。 **Verified**: 16 runs, prompts identical per cell, ownership-rich-ab-results.json
+- [x] GOAL-032/033 tool replay 在只读 worktree 内完成，写出 tool trace 摘要；已验证 agent 无法读 reference/outcome 且无写权限。 **Verified**: 8 tool-replay cells, sandbox probed for both runtimes (all forbidden actions denied, nothing written), trace summaries recorded
+- [x] 报告分开呈现 rich-bundle 与 tool replay，含与旧 1–2 KB baseline 的同口径对比与 production meta-driver 的 evidence/tool 访问建议。 **Verified**: docs/analysis/ownership-rich-and-tool-replay.md separates the two modes, compares to the 1–2 KB baseline, gives production recommendations
 
 ## DoD
 
-结果与结论写入 `docs/analysis/ownership-rich-and-tool-replay.md`：每 case dossier 大小/内容/provenance，leakage 测试，rich-bundle 与 tool replay 各自的 Flash vs Opus 结果，tool trace 摘要，与旧 baseline 的差异（模型差异是否显现），以及对 production meta-driver 应提供的 evidence/tool 访问建议。⛔ 不改线上自治、不切生产模型配置；结果 JSON 经凭证扫描，仅含 launcher/model/argv 级 provenance。
+结果见 docs/analysis/ownership-rich-and-tool-replay.md（提交 b40779bf1）。要点：① 前一版词法 granularity 判定是人为产物（按较短串归一，长答案饱和），已在旧报告追加勘误；改以盲评语义判官（Sonnet，16/16 对照通过）为准。② 盲评下 Stage B 切片可接受率：紧凑基线 Flash 3/4 / Opus 4/4，rich bundle 两组均 4/4——证据展开带来的是可审计性（每例引用 14–15 个 section），不是准确率。③ tool replay（GOAL-032/033）：GOAL-033 stage B 两组都从零找到 root→cli 恰好 2 条边并给出等价切法；GOAL-032 因 archq/CLI 没有 duplicates 查询（仅 MCP 有）而结构性不可达（Flash 触顶 46 次无答案，Opus 分析了另一组重复）。④ 模型质量差异未建立；过程差异一致：Opus 4/4 个 cell 工具调用更少（均值 24 vs 36）。⑤ 建议：补齐 CLI/MCP 工具面（duplicates、literal-dispersion），Read/Grep/Glob+单一查询命令的 dontAsk 沙箱可复用，外部强制工具调用预算，不以『与人选一致』评 Stage A 发现，不据此切换 Opus。⛔ 未改线上自治、未切生产模型配置；结果 JSON 经凭证扫描 0 命中。
