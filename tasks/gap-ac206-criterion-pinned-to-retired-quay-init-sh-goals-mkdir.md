@@ -1,7 +1,7 @@
 ---
 id: gap-ac206-criterion-pinned-to-retired-quay-init-sh-goals-mkdir
 title: AC-206 判据 check③ 钉在已退役的 quay-init.sh 字面量上 → 改为活引擎行为探针
-status: ready
+status: done
 labels:
   - gap
   - mechanism
