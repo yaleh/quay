@@ -165,7 +165,7 @@ function writeRecordViaProduct(spec) {
   // must write exactly one record") goes red. Listed so the refusals below are the product's verdicts.
   const fnNames = ["ac_record_append", "ac_record_schema_validate_fragment", "ac_record_fragment_ac",
     "ac_record_carrier_root", "ac_record_finalize", "ac248_json_bool_ok", "ac248_flip_is_forward",
-    "ac248_produced_by_driver_ok", "write_ac248_record"];
+    "ac248_produced_by_driver_ok", "ac_files_non_bookkeeping", "write_ac248_record"];
   const src = fs.readFileSync(SCRIPT, "utf8");
   let harness = 'set -uo pipefail\nVC_NODE="${VC_NODE:-node}"\n';
   for (const fn of fnNames) {
