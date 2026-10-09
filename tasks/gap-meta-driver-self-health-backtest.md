@@ -2,7 +2,7 @@
 id: gap-meta-driver-self-health-backtest
 title: "meta-driver self-health backtest: offline deterministic liveness-check
   detection-delay/false-alarm analysis over .quay/meta-driver-round.jsonl"
-status: ready
+status: done
 labels:
   - gap
 parent: null
@@ -11,6 +11,8 @@ extra:
   schema: execution
 ---
 **type:** execution
+
+该轴仍暗，理由：本任务不改动任何 packages/ 或 plugin/scripts/ 生产模块的依赖关系——产物是三个新增、互相独立、零 import 生产代码的分析文件（一个独立 `.mjs` 脚本只读一个 gitignored jsonl 载体、一个 JSON 结果、一份 `.md`），不新增/不改变任何包间依赖边或 god-package 候选，故 L_D 与 L_G 两轴对本任务结构性不适用。
 
 ## Proposal
 
@@ -54,6 +56,6 @@ Before proposing or building any production liveness check, this task runs a **r
 
 ## DoD
 
-真实落地 = 上述三个产物文件随本任务提交进 develop，且 `results.json` 的数字是对 `.quay/meta-driver-round.jsonl`（gitignored，不随 commit 搬运）真实历史的直接读数，不是 fixture/构造样本——落地后审阅者在生产机上现场用 `grep` 核对 `outage_start_ts`/`last_verified_ts` 能在该文件里定位到对应行。本任务**不**决定是否上线生产 liveness check；那是一个独立、仅在本任务 DoD 第 9 步条件成立时才触发的后续任务，不在本任务范围内，也不得合并进本任务或任何 meta-driver.ts 重写。
+真实落地 = 上述三个产物文件随本任务提交进 develop（已提交 `bd916a166`），且 `results.json` 的数字是对 `.quay/meta-driver-round.jsonl`（gitignored，不随 commit 搬运）真实历史的直接读数，不是 fixture/构造样本——落地后审阅者在生产机上现场用 `grep` 核对 `outage_start_ts`/`last_verified_ts` 能在该文件里定位到对应行。本任务**不**决定是否上线生产 liveness check；那是一个独立、仅在本任务 DoD 第 9 步条件成立时才触发的后续任务，不在本任务范围内，也不得合并进本任务或任何 meta-driver.ts 重写。
 
 **结果（已核验）**：N=3（计数式）与 T=30m（窗口式）两条规则在全 53k 轮生产历史上**零假警报**，检测延迟均 <1 小时（对比真实未检测长达 27 天）。已越过决策门阈值（≤24h 且 ≤2 次假警报），数值级差距很大。**结论：建议立一个独立的最小生产 liveness check 后续任务**——严格不与本任务或任何 meta-driver.ts 重写合并。
