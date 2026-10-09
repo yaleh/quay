@@ -46,5 +46,5 @@ export const DEFAULT_SYSTEMD_RUN_LIMITS: SystemdRunLimits = {
 ## Touches
 
 - plugin/scripts/full-suite-runner.ts
-- plugin/test/full-suite-runner.test.mjs
+- plugin/test/full-suite-runner-cgroup.test.mjs
 - tasks/gap-full-suite-runner-memory-max-host-derived-envelope.md
