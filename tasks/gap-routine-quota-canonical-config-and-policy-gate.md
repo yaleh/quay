@@ -95,14 +95,47 @@ export function routineQuotaDecision(
 
 ## Acceptance Criteria
 
-- [ ] `drivers.yml` 新增 `routine_quota` 段，`driver-config.test.mjs` 新增用例核实 `loadRoutineQuotaConfig` 读出的 `windowMs`/`defaultK` 与现有 `FILING_WINDOW_MS`/`DEFAULT_RATE` 的值逐字相等（迁移兼容，取假点：改 `drivers.yml` 任一字段，读数必须跟着变）
-- [ ] 配置错误 fail-closed 有单态判据（正反对照）：构造一个 `global_ceiling: -1`（或 0、非数字、字符串）的 `drivers.yml` fixture，`loadRoutineQuotaConfig` 必须返回缺省的 `globalCeiling`（不得返回 -1/0/NaN）；同一 fixture 把该字段改成合法正整数 ⇒ 读出该值——同一输入、只变字段取值、结论翻转
-- [ ] `per_routine` 某项 > `global_ceiling` 的荒谬配置（如 `per_routine: {x: 100}, global_ceiling: 12`）必须被拒（fail-closed 到缺省 `per_routine`，或至少不允许该 routine 单独突破全局上限——具体取哪种处理方式由实现者定，但必须有一条断言证明"任何单 routine 的有效 K 不会大于 globalCeiling"这个不变式，无论配置怎么写）
-- [ ] `routineQuotaDecision` 是独立纯函数单测（不经 `gateFinding`，直接调用）：三组对照——全局未满/per-routine 未满 ⇒ accept；全局未满/per-routine 满 ⇒ `rate:` 拒绝；全局满（即使 per-routine 未满）⇒ `global-rate:` 拒绝（**两种拒绝理由前缀不同，可用 regex 区分，⛔ 不同形**）
-- [ ] 负对照（取假）：把 `routineQuotaDecision` 里 `global` 分支暂时注掉重跑用例 ⇒ "全局满但 per-routine 未满"那组断言必须转红；改回原样重跑全绿——执行命令与两次结果进 `## Evidence`
-- [ ] 迁移兼容性取假（硬约束）：实现完成后在本任务自己的 worktree 内重跑，`plugin/test/routine-file-gate.test.mjs` 既有全部 19 条用例（含上一任务刚加的 ⑯⑰）**一字不改、全部仍绿**——`gateFinding` 对现有调用方（`probe-routine.ts`/`meta-driver.ts`）的外部行为逐字不变（因为过渡期 `globalCeiling` 传 `Infinity`）
-- [ ] `plugin/test/probe-routine.test.mjs`/`plugin/test/meta-driver.test.mjs`/`plugin/test/quality-gate-driver.test.mjs` 三个消费方测试全绿（本任务不改调用点，理论上必然不回归，但须实跑验证而非假设）
-- [ ] ⛔ 本任务不重启任何生产 driver 进程，不触发任何 `.quay/*-control.json` 写入；`git diff` 范围严格限于 Touches 列出的文件
+- [x] `drivers.yml` 新增 `routine_quota` 段，`driver-config.test.mjs` 新增用例核实 `loadRoutineQuotaConfig` 读出的 `windowMs`/`defaultK` 与现有 `FILING_WINDOW_MS`/`DEFAULT_RATE` 的值逐字相等（迁移兼容，取假点：改 `drivers.yml` 任一字段，读数必须跟着变）
+- [x] 配置错误 fail-closed 有单态判据（正反对照）：构造一个 `global_ceiling: -1`（或 0、非数字、字符串）的 `drivers.yml` fixture，`loadRoutineQuotaConfig` 必须返回缺省的 `globalCeiling`（不得返回 -1/0/NaN）；同一 fixture 把该字段改成合法正整数 ⇒ 读出该值——同一输入、只变字段取值、结论翻转
+- [x] `per_routine` 某项 > `global_ceiling` 的荒谬配置（如 `per_routine: {x: 100}, global_ceiling: 12`）必须被拒（fail-closed 到缺省 `per_routine`，或至少不允许该 routine 单独突破全局上限——具体取哪种处理方式由实现者定，但必须有一条断言证明"任何单 routine 的有效 K 不会大于 globalCeiling"这个不变式，无论配置怎么写）
+- [x] `routineQuotaDecision` 是独立纯函数单测（不经 `gateFinding`，直接调用）：三组对照——全局未满/per-routine 未满 ⇒ accept；全局未满/per-routine 满 ⇒ `rate:` 拒绝；全局满（即使 per-routine 未满）⇒ `global-rate:` 拒绝（**两种拒绝理由前缀不同，可用 regex 区分，⛔ 不同形**）
+- [x] 负对照（取假）：把 `routineQuotaDecision` 里 `global` 分支暂时注掉重跑用例 ⇒ "全局满但 per-routine 未满"那组断言必须转红；改回原样重跑全绿——执行命令与两次结果进 `## Evidence`
+- [x] 迁移兼容性取假（硬约束）：实现完成后在本任务自己的 worktree 内重跑，`plugin/test/routine-file-gate.test.mjs` 既有全部 19 条用例（含上一任务刚加的 ⑯⑰）**一字不改、全部仍绿**——`gateFinding` 对现有调用方（`probe-routine.ts`/`meta-driver.ts`）的外部行为逐字不变（因为过渡期 `globalCeiling` 传 `Infinity`）
+- [x] `plugin/test/probe-routine.test.mjs`/`plugin/test/meta-driver.test.mjs`/`plugin/test/quality-gate-driver.test.mjs` 三个消费方测试全绿（本任务不改调用点，理论上必然不回归，但须实跑验证而非假设）
+- [x] ⛔ 本任务不重启任何生产 driver 进程，不触发任何 `.quay/*-control.json` 写入；`git diff` 范围严格限于 Touches 列出的文件
+
+## Evidence
+
+实现提交（worktree `/data/home/yale/work/quay-worktrees/gap-routine-quota-canonical-config-and-policy-gate`，分支 `task/gap-routine-quota-canonical-config-and-policy-gate`）：`e1ac06dd4`（实现）+ `0d897b76e`（concurrency-literal-check 例外声明）。
+
+**AC1/AC2/AC3 配置面（`plugin/test/driver-config.test.mjs` 新增 4 条）**
+- `node --no-warnings --test --experimental-strip-types plugin/test/driver-config.test.mjs` ⇒ `tests 9 / pass 9 / fail 0`
+  - AC1：真实 `drivers.yml` 读出的 `windowMs===FILING_WINDOW_MS`、`defaultK===DEFAULT_RATE`（收口后 `FILING_WINDOW_MS`/`DEFAULT_RATE` 由 driver-config 缺省常量派生）；改 fixture 字段读数跟着变。
+  - AC2：`global_ceiling` ∈ {-1, 0, 1.5, "12", abc} ⇒ 全部回退缺省 12 且留痕；改成合法 `7` ⇒ 读出 7（同输入、只变字段取值、结论翻转）。
+  - AC3：`per_routine:{x:100}` 且 `global_ceiling:12` ⇒ `x` 被丢弃（fail-closed）+ 留痕；不变式 `routineK(dir,r) ≤ routineGlobalCeiling(dir)` 对 `r ∈ {null,x,y,未配置}` 全部成立；`default_k:9`/`global_ceiling:2` ⇒ 有效 K 钳到 2。
+
+**AC4（`plugin/test/routine-file-gate.test.mjs` 新增 1 条，直接调 `routineQuotaDecision`，不经 `gateFinding`）**
+- `node --no-warnings --test --experimental-strip-types plugin/test/routine-file-gate.test.mjs` ⇒ `tests 20 / pass 20 / fail 0`
+  - 三组对照：`{0,0}` ⇒ accept；`{perRoutine:3,global:5}` ⇒ `rate:` 拒绝；`{perRoutine:0,global:12}` ⇒ `global-rate:` 拒绝；前缀可 regex 区分（`rate` ≠ `global-rate`）；两者都满 ⇒ 报更外层 `global-rate:`。
+
+**AC5 负对照（取假）——`routineQuotaDecision` 的 global 分支注掉 ⇒ 「全局满但 per-routine 未满」断言转红；改回 ⇒ 全绿。**
+- 命令（注掉状态下）：`node --no-warnings --test --experimental-strip-types --test-name-pattern='routineQuotaDecision' plugin/test/routine-file-gate.test.mjs`
+  - 结果：`✖ routineQuotaDecision (AC4) … tests 1 / pass 0 / fail 1`；`AssertionError [ERR_ASSERTION]: 全局满、per-routine 未满 ⇒ 仍拒`（精确命中 global 分支那条断言，不是别的红）。
+- 命令（恢复后）：同上
+  - 结果：`✔ routineQuotaDecision (AC4) … tests 1 / pass 1 / fail 0`。
+
+**AC6 迁移兼容**
+- `node --no-warnings --test --experimental-strip-types plugin/test/routine-file-gate.test.mjs` ⇒ `tests 19 / pass 19 / fail 0`（既有 19 条一字不改全绿）；加 AC4 用例后同一文件 `tests 20 / pass 20 / fail 0`。
+
+**AC7 消费方**
+- `probe-routine.test.mjs` 23/23、`meta-driver.test.mjs` 131/131、`quality-gate-driver.test.mjs` 32/32 全绿。
+
+**静态门 + scoped 门**
+- `bash /data/home/yale/work/quay-worktrees/gap-routine-quota-canonical-config-and-policy-gate/scripts/test.sh --for-task gap-routine-quota-canonical-config-and-policy-gate --allow-thin` ⇒ `exit=0`；含 `PASS — every concurrency literal is at a QUAY_MAX_* definition point or a declared fallback (0 violations)`、`PASS — valueSccs=0 ≤ 0, typeSccs=0 ≤ 0, reverseEdges=0 ≤ 0`。
+- 首轮该门红于 `concurrency-literal-check exit=1`：新增常量名含 `quota` 撞 P1 关键词（非并发数）⇒ 按 checker『非并发但撞关键词须显式声明』条款加 `concurrency-default-fallback` 例外（同 RED_BACKLOG_CAP_DEFAULT 先例），`0d897b76e` 修复后 0 violations。
+
+**AC8 边界**
+- `git diff --stat` 仅 5 个 Touches 文件（`drivers.yml`/`driver-config.ts`/`routine-file-gate.ts`/`driver-config.test.mjs`/`routine-file-gate.test.mjs`）；未重启任何生产 driver 进程，未写任何 `.quay/*-control.json`（唯一 `.quay` 写入是任务要求的 `scoped-gate-cache.json`）。
 
 ## Definition of Done
 
