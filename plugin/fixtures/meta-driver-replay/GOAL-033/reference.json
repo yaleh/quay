@@ -46,5 +46,6 @@
       "the ArchGuard before/after + negative-control pattern (4th use)",
       "the branch merge-shape AC pattern (post-merge, same shape used in every prior goal in this series)"
     ]
-  }
+  },
+  "predicted_mechanical_delta": "SCC size 6 -> 5 (cli leaves; the other 5 members, including fan-in, believed unchanged). This was the real decision-time belief, later corrected by measurement -- see outcome.json observed_mechanical_delta (6 -> 4) and prediction_correction_narrative for what was missed and why."
 }
