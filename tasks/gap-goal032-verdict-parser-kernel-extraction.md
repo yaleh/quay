@@ -2,7 +2,7 @@
 id: gap-goal032-verdict-parser-kernel-extraction
 title: GOAL-032 ①：抽取 parseBinaryVerdict 到
   kernel，parseFidelityVerdict/parseSemanticSufficiencyVerdict 改为薄包装
-status: ready
+status: done
 labels:
   - gap
 parent: null
