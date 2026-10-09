@@ -109,6 +109,12 @@ export function resourceGateCheck(root: string, cmd: string[] | null): { go: boo
 //     resolve，无值可区分）——这正是要的：循环醒来后靠 isStopRequested() 判该继续还是退出。
 //   · wakeResolve 只在仍等于本次 resolve 时清空：定时器到点后若已被唤醒（wakeResolve 已置 null），
 //     ⛔ 不重复清空。双 resolve 本身幂等无害，此处保持与旧实现逐字相同的时序。
+//   · 【提前唤醒必须 clearTimeout 本觉的定时器】（gap-driver-shared-sleep-timer-not-cleared-on-early-
+//     wake）：wakeResolve 只让 Promise 提前 resolve，**⛔ 不取消那个已排定的 setTimeout**。若不清它，
+//     回调虽是无害 no-op（wakeResolve 已 null），但那个 handle 仍挂在事件循环上，要等满 `ms` 才到期
+//     —— 实测后果：driver-shared.test.mjs 里 `sleep(60_000)` + `requestStop()` 使整个测试文件
+//     从 ~3.8s 拖到 ~62.7s（`.quay/verification-round.jsonl` 台账读数），生产上则是停机后进程被一个
+//     悬空 interval 拖着不退。故 requestStop 在唤醒在飞 sleep 时一并 clearTimeout 并置 wakeTimer=null。
 // ⛔ 不进程退出、⛔ 不杀在飞轮（调用方负责）——本控制器只做「标志 + 唤醒这一觉」。
 
 /** 常驻循环的停机控制器。`while (!ctl.isStopRequested())` + `await ctl.sleep(intervalMs)`。 */
@@ -125,15 +131,29 @@ export interface ResidentLoopStop {
 export function residentLoopStop(): ResidentLoopStop {
   let stopRequested = false;
   let wakeResolve: (() => void) | null = null;
+  // 当前在飞 sleep 排定的定时器 handle（见 WHY 第三条）：requestStop 提前唤醒时须 clearTimeout，
+  // 否则悬空 handle 会把事件循环/测试进程拖到原 `ms` 到期。
+  let wakeTimer: ReturnType<typeof setTimeout> | null = null;
   return {
     isStopRequested: () => stopRequested,
     requestStop: () => {
       stopRequested = true;
-      if (wakeResolve) { const w = wakeResolve; wakeResolve = null; w(); }
+      if (wakeResolve) {
+        const w = wakeResolve;
+        wakeResolve = null;
+        // 取消本觉排定的定时器（它已经不该再触发）——先清 handle 再唤醒，二者无时序耦合但保持
+        // “唤醒即不再有本觉的定时器”这一可断言的不变式。
+        if (wakeTimer !== null) { clearTimeout(wakeTimer); wakeTimer = null; }
+        w();
+      }
     },
     sleep: (ms: number) => new Promise<void>((resolve) => {
       wakeResolve = resolve;
-      setTimeout(() => { if (wakeResolve === resolve) wakeResolve = null; resolve(); }, ms);
+      wakeTimer = setTimeout(() => {
+        wakeTimer = null; // 已到点 ⇒ 本觉的定时器不再在飞，提前唤醒路径无须（也不应）再 clear 它
+        if (wakeResolve === resolve) wakeResolve = null;
+        resolve();
+      }, ms);
     }),
   };
 }
