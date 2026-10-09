@@ -149,10 +149,16 @@ export function scoreResponse(caseId, response, corpusRoot = CORPUS_ROOT) {
 
   const granularity = dr.granularity_assessment === refGr.granularity_label ? "agreement" : dr.granularity_assessment ? "disagreement" : "not_stated";
 
+  // harnessability_components deliberately covers only 4 of the 5 dimensions the origin
+  // instruction names (input/output/constraints/acceptance/failure-mode): "input" and "output"
+  // have no dedicated response_schema field and are only indirectly inferable from scope.in_scope
+  // / expected_mechanical_delta — this is a stated, honest limitation (see README.md "Evaluation
+  // is deliberately weak"), not silently claimed as full 5-dimension coverage.
   const harnessability_components = {
-    has_scope_non_goals: Array.isArray(response?.scope?.non_goals) && response.scope.non_goals.length > 0,
-    has_negative_control: falsifiability_negative_control_presence === "present",
-    has_numeric_expected_delta: expected_delta_quality === "has_numeric_claim",
+    has_scope_non_goals: Array.isArray(response?.scope?.non_goals) && response.scope.non_goals.length > 0, // constraints
+    has_negative_control: falsifiability_negative_control_presence === "present", // acceptance (falsifiable)
+    has_numeric_expected_delta: expected_delta_quality === "has_numeric_claim", // output proxy
+    has_failure_mode: abstention_uncertainty_reasonableness === "specific", // failure mode / stop condition
   };
   const harnessability = Object.values(harnessability_components).every(Boolean) ? "harness_ready" : "incomplete";
 
@@ -162,15 +168,28 @@ export function scoreResponse(caseId, response, corpusRoot = CORPUS_ROOT) {
   const primitive_reuse = {
     mentioned_any: candidatePrimitives.length > 0,
     overlap_with_reference: primitiveOverlaps.length ? Math.max(...primitiveOverlaps) : 0,
+    // weak "reinventing the wheel" signal: the reference names real, available primitives but the
+    // candidate named none at all.
+    possible_reinvention: referencePrimitives.length > 0 && candidatePrimitives.length === 0,
   };
 
-  // unnecessary_decomposition / coordination-cost flag: fires if the candidate proposes a narrow
-  // slice (few in_scope items) but gives no coordination-cost reasoning for why it isn't split
-  // further, OR explicitly over-fragments without justification. Heuristic, not a verdict.
+  // A purely structural reading of "how many concerns got compressed into how many proposed
+  // slices" — reported for visibility, NOT a judgment of whether the compression was good (that
+  // would require real semantic understanding this heuristic doesn't have).
+  const decomposition_breadth = {
+    concerns_named: concerns.length,
+    interventions_proposed: (response?.candidate_interventions || []).length,
+  };
+
+  // unnecessary_decomposition / coordination-cost flag — FIXED after audit: the first version of
+  // this check keyed off scope.in_scope's length, which tests narrowness, not fragmentation, and
+  // was never exercised by a test that actually proposes multiple interventions. Redesigned to
+  // test what the name says: does the candidate propose MULTIPLE distinct interventions (actual
+  // decomposition into pieces) without ever justifying why that's necessary (coordination cost)?
   const coordinationNoteLen = String(dr.coordination_cost_note || "").trim().length;
   const whyNotFinerLen = String(dr.why_not_finer || "").trim().length;
-  const unnecessary_decomposition_flag =
-    (response?.scope?.in_scope?.length || 0) <= 1 && coordinationNoteLen < 20 && whyNotFinerLen < 20;
+  const coordination_cost_reasoning_given = coordinationNoteLen >= 20 || whyNotFinerLen >= 20;
+  const unnecessary_decomposition_flag = decomposition_breadth.interventions_proposed >= 2 && !coordination_cost_reasoning_given;
 
   return {
     case_id: caseId,
@@ -188,6 +207,8 @@ export function scoreResponse(caseId, response, corpusRoot = CORPUS_ROOT) {
     harnessability,
     harnessability_components,
     primitive_reuse,
+    decomposition_breadth,
+    coordination_cost_reasoning_given,
     unnecessary_decomposition_flag,
     hindsight_leakage_guard,
     abstention_uncertainty_reasonableness,

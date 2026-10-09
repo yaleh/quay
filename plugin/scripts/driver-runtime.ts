@@ -1756,6 +1756,12 @@ export interface LaunchArgvOpts {
    *  缺省（undefined）⇒ 生产路径（env 缝 / 真实 `~/.claude*`）。⛔ 用 undefined vs null 区分
    *  「没传」与「传了、结论是不可用」——两者动作相同但成因不同，测试要能分别钉住。 */
   mcpRoots?: McpConfigRoots | null;
+  /** 把 prompt 从 argv 移出（`-p` 留空，prompt 由调用方经 runAsync 的 stdinData 写入）。
+   *  为什么存在：prompt 作为**单个 argv 元素**时受 Linux `MAX_ARG_STRLEN`（128 KiB）限制，
+   *  超过即 `spawn E2BIG`——meta-driver 的 readings JSON 已实测到 1.28 MB
+   *  （gap-launchargv-prompt-in-argv-exceeds-max-arg-strlen）。
+   *  缺省 false ⇒ 既有调用点 argv **逐字不变**（只有真正超限的调用点才开）。 */
+  promptViaStdin?: boolean;
 }
 
 /** LLM 调用配置解析单一构造点（role ∈ task-worker | selector | fix-worker）。经 L2 policy 解析
@@ -1780,7 +1786,9 @@ export function launchArgv(role: string, prompt: string, root: string, opts: Lau
     const roots = opts.mcpRoots !== undefined ? opts.mcpRoots : rootsFromEnv([root], process.env, resolveKernelPluginRoot());
     if (roots) argv.push(...mcpConfigArgvSuffix(resolved.mcpBlacklist, roots));
   }
-  argv.push("-n", resolved.name, "-p", prompt);
+  // promptViaStdin ⇒ `-p` 不带值（prompt 由调用方写 stdin）；缺省仍是 `-p <prompt>`，逐字不变。
+  if (opts.promptViaStdin === true) argv.push("-n", resolved.name, "-p");
+  else argv.push("-n", resolved.name, "-p", prompt);
   return argv;
 }
 
@@ -1943,14 +1951,17 @@ export async function runEnvironmentSmoke(
  *  watchdog 兜底，不靠此处 SIGKILL）。永不 throw。 */
 export async function runAsync(
   argv: string[],
-  opts: { timeoutMs: number; collectStderr?: boolean } = { timeoutMs: 120_000 },
+  opts: { timeoutMs: number; collectStderr?: boolean; stdinData?: string } = { timeoutMs: 120_000 },
 ): Promise<{ status: number | null; stdout: string; stderr: string; error: Error | null }> {
-  const { timeoutMs, collectStderr = false } = opts;
+  const { timeoutMs, collectStderr = false, stdinData } = opts;
   return new Promise((resolve) => {
     let child: ReturnType<typeof spawn>;
     try {
       child = spawn(argv[0], argv.slice(1), {
-        stdio: ["ignore", "pipe", collectStderr ? "pipe" : "ignore"],
+        // stdinData 缺省 ⇒ "ignore"，与既有行为逐字一致；给了才开 pipe 并写入后 end。
+        // （gap-launchargv-prompt-in-argv-exceeds-max-arg-strlen：prompt 作为单个 argv 元素会撞
+        // Linux 的 MAX_ARG_STRLEN=128KiB 单参数上限 ⇒ spawn E2BIG。走 stdin 是那条路的上限之外的传输面。）
+        stdio: [stdinData === undefined ? "ignore" : "pipe", "pipe", collectStderr ? "pipe" : "ignore"],
       });
     } catch (e) {
       resolve({ status: null, stdout: "", stderr: "", error: e as Error });
@@ -1973,6 +1984,11 @@ export async function runAsync(
         try { child.kill("SIGKILL"); } catch { /* already gone */ }
         finish(null, new Error(`spawn timeout after ${timeoutMs}ms (SIGKILL): ${argv[0]}`));
       }, timeoutMs);
+    }
+    if (stdinData !== undefined && child.stdin) {
+      // 写失败（子进程已退出/EPIPE）不算致命：child.on("error"/"close") 仍会 settle。
+      child.stdin.on("error", () => { /* ignored — the child's own exit decides the outcome */ });
+      child.stdin.end(stdinData);
     }
     child.stdout?.on("data", (d) => { stdout += d; });
     if (child.stderr) child.stderr.on("data", (d) => { stderr += d; });
