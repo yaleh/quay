@@ -42,7 +42,8 @@ import {
   selectFilings,
   selectProbeRoutines,
 } from "../scripts/probe-routine.ts";
-import { findingKey, recurrenceByKey, renderRoutineTaskBody, routineFindingCandidateText } from "../scripts/routine-file-gate.ts";
+import { findingKey, recurrenceByKey, renderRoutineTaskBody, routineFindingCandidateText, countRecentFilings, FILING_WINDOW_MS } from "../scripts/routine-file-gate.ts";
+import { routineK, routineGlobalCeiling } from "../scripts/driver-config.ts";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const REPO_ROOT = path.resolve(__dirname, "..", "..");
@@ -441,6 +442,42 @@ async function runFilingRoutine(root, finding, extra = {}) {
   return { facts, written };
 }
 
+/** 给工作区装一份 `drivers.yml` 的 `routine_quota` 段（K / 全局天花板的**声明式真相源**）。
+ *  ⛔ 让 `llmProbeRoutine` 的真实生产路径（routineK / routineGlobalCeiling）能读到有限天花板。 */
+function seedRoutineQuota(root, { globalCeiling, defaultK = 3 } = {}) {
+  fs.mkdirSync(path.join(root, "plugin", "scripts"), { recursive: true });
+  fs.writeFileSync(path.join(root, "plugin", "scripts", "drivers.yml"),
+    ["routine_quota:", `  default_k: ${defaultK}`, `  global_ceiling: ${globalCeiling}`, ""].join("\n"), "utf8");
+}
+
+/** 预填载体里的 `filing-round` 记录（rate 窗口的唯一读数来源）。每条 = 一个 routine 本轮立案 N 条；
+ *  ⛔ 形状必须与生产者（probe-routine.ts 的 filing-round）一致，否则这条夹具只测了它自己。 */
+function seedCarrierFilings(root, atIso, spec) {
+  const p = path.join(root, ".quay", path.basename(ROUTINE_FINDINGS_REL));
+  fs.mkdirSync(path.dirname(p), { recursive: true });
+  const lines = spec.map((s) => JSON.stringify({
+    ts: atIso, kind: "filing-round", routine: s.routine, probe: s.routine, runId: `${s.routine}-seed`,
+    evaluated: true, candidates: s.filed,
+    filed: Array.from({ length: s.filed }, (_, i) => `${s.routine}-seed-${i}`),
+    escalated: [], rejected: [], errors: [],
+  }));
+  fs.writeFileSync(p, lines.join("\n") + "\n", "utf8");
+  return p;
+}
+
+/** 本任务（gap-routine-quota-consumer-convergence）的夹具：两个不同 routine 各立案 2 条（合计 4），
+ *  **每个 routine 自己的窗口 = 2 < K = 3**（远未满），但合计触及 `global_ceiling`。 */
+const QUOTA_NOW = Date.parse("2026-10-09T12:00:00Z");
+function makeGlobalCeilingWorkspace(globalCeiling) {
+  const root = makeFilingWorkspace({ registeredProducers: [FRESHNESS_FINDING.producer] });
+  seedRoutineQuota(root, { globalCeiling });
+  seedCarrierFilings(root, new Date(QUOTA_NOW - 3_600_000).toISOString(), [
+    { routine: "freshness-refresh", filed: 2 },   // 本 routine：2（< K=3）
+    { routine: "semantic-dedup-scan", filed: 2 }, // 另一个 routine：2
+  ]);
+  return root;
+}
+
 test("FILING AC5 (red side) — a finding naming an UNREGISTERED producer fails the run and NAMES it", async () => {
   const root = makeFilingWorkspace({ registeredProducers: ["upgrade-face"] });
   const { facts, written } = await runFilingRoutine(root, FRESHNESS_FINDING);
@@ -510,6 +547,49 @@ test("FILING — with NO registry declared the producer gate does not apply (gen
   const { facts, written } = await runFilingRoutine(root, { ...FRESHNESS_FINDING, producer: "who-knows" });
   assert.equal(facts[0].state, "verified", facts[0].reason);
   assert.equal(written.length, 1, "a routine that declares no producer registry is unaffected by the gate");
+});
+
+// ── FILING QUOTA (gap-routine-quota-consumer-convergence) — the REAL global ceiling, on the REAL
+//    call chain (llmProbeRoutine → selectFilings → routineQuotaDecision → gateFinding).
+//
+// THE DEFECT this closes (人裁定③): per-routine K × R routines had NO combined ceiling ⇒ automated
+// filing could grow without bound. The previous task landed the config面 + the pure Policy function,
+// but pinned `globalCeiling: Infinity` so that step changed nothing; THIS task makes the finite
+// ceiling from drivers.yml actually reach the two production call sites.
+//
+// ⛔ These two arms are a POSITIVE/NEGATIVE CONTROL pair on the SAME input: identical workspace,
+// identical carrier, identical finding — only `global_ceiling` moves (4 vs 100). If the reject arm
+// stayed red with the ceiling raised, the red would be a gate stuck red, not a gate working.
+test("FILING QUOTA AC3 — 合计触及 global_ceiling ⇒ 第三个候选被 `global-rate:` 拒绝（即便本 routine 远未满）", async () => {
+  const root = makeGlobalCeilingWorkspace(4);
+  const carrier = path.join(root, ".quay", path.basename(ROUTINE_FINDINGS_REL));
+  // 夹具自检：配置真的读出来了、两个窗口计数真的各就各位（⛔ 不靠猜测，硬规则 4c：落笔当轮取真实读数）。
+  assert.equal(routineGlobalCeiling(root), 4, "drivers.yml 的 global_ceiling:4 必须被读到");
+  assert.equal(routineK(root, "freshness-refresh"), 3, "本 routine 的 K = min(default_k=3, ceiling=4) = 3");
+  assert.equal(countRecentFilings(carrier, QUOTA_NOW, FILING_WINDOW_MS, "freshness-refresh"), 2, "本 routine 窗口 2 < K");
+  assert.equal(countRecentFilings(carrier, QUOTA_NOW, FILING_WINDOW_MS, null), 4, "全局窗口合计 4 ≥ ceiling");
+
+  const { facts, written } = await runFilingRoutine(root, FRESHNESS_FINDING, { now: () => QUOTA_NOW });
+  assert.equal(facts[0].state, "verified", facts[0].reason);
+  assert.equal(written.length, 0, "第三个候选必须被【全局】天花板拒绝（⛔ 不是 per-routine——本例程只用了 2/3）");
+  const round = readCarrier(root).filter((r) => r.kind === "filing-round").at(-1);
+  assert.equal(round.filed.length, 0);
+  assert.equal(round.rejected[0].gate, "quality-dedup-rate");
+  assert.match(round.rejected[0].reason, /global-rate:/,
+    "拒绝理由必须读作 global-rate:，⛔ 不得与 per-routine 的 rate: 同形（硬规则 3：两种拒绝不同形）");
+});
+
+test("FILING QUOTA AC4 — 正反对照：同一夹具把 global_ceiling 调大到不会被触及 ⇒ 第三个候选被接受", async () => {
+  const root = makeGlobalCeilingWorkspace(100); // 唯一变化：天花板 4 → 100
+  const carrier = path.join(root, ".quay", path.basename(ROUTINE_FINDINGS_REL));
+  assert.equal(routineGlobalCeiling(root), 100);
+  assert.equal(countRecentFilings(carrier, QUOTA_NOW, FILING_WINDOW_MS, null), 4, "输入（载体）与 AC3 臂逐字相同");
+
+  const { facts, written } = await runFilingRoutine(root, FRESHNESS_FINDING, { now: () => QUOTA_NOW });
+  assert.equal(facts[0].state, "verified", facts[0].reason);
+  assert.equal(written.length, 1, "天花板放宽后，同一输入必须被接受——证明 AC3 的红不是闸恒红（硬规则 4 取假）");
+  const round = readCarrier(root).filter((r) => r.kind === "filing-round").at(-1);
+  assert.equal(round.filed.length, 1);
 });
 
 // ── FILING PRIORITY — the real round, replayed (gap-routine-semantic-dedup-scan-recurring-cluster-
