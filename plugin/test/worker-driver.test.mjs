@@ -3652,6 +3652,8 @@ test("AC2（顺序·可得假）— 无 AssertionError 的整文件红：delta �
     { mechanical_fan_in: { outcome: "red", step: "suite", suiteLog: "fan-in-suite-gap-a.log" } }, { nowMs: SDE_NOW });
   assert.equal(jIn.verdict, "own-defect-counted", "文件在本任务 Touches ⇒ 自身缺陷（对照臂）");
   assert.notEqual(jOut.verdict, jIn.verdict, "两臂 verdict 必须可区分（AC2）");
+  console.log(`AC2 arm A (文件在 delta 外): ${jOut.verdict} — ${jOut.reason}`);
+  console.log(`AC2 arm B (文件在 Touches 内): ${jIn.verdict} — ${jIn.reason}`);
 });
 
 test("AC3（文件级复发回退·可得假）— 签名取不到时以失败文件为复发身份；另有一个任务同点名 ⇒ 豁免，只有本任务 ⇒ ⛔ 不豁免", (t) => {
@@ -3684,6 +3686,9 @@ test("AC3（文件级复发回退·可得假）— 签名取不到时以失败�
   const jC = judgeRetryExemption(rootC, "gap-a",
     { mechanical_fan_in: { outcome: "red", step: "suite", suiteLog: "fan-in-suite-gap-a.log" } }, { nowMs: SDE_NOW });
   assert.notEqual(jC.verdict, "unrelated-flaky-exempt", "复发的必须是【同一个文件】，⛔ 不是「有别的任务红过」");
+  console.log(`AC3 arm A (另一任务同点名同文件): ${jA.verdict} — ${jA.reason}`);
+  console.log(`AC3 arm B (窗口内只有本任务): ${jB.verdict} — ${jB.reason}`);
+  console.log(`AC3 arm C (另一任务点名别的文件): ${jC.verdict} — ${jC.reason}`);
 });
 
 test("AC4（kind 分叉不回归）— insufficient-data-fallback 之外的取值仍回 count-and-retry", (t) => {
