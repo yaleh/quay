@@ -16,6 +16,11 @@
     "./adr-store": "./src/adr-store.ts",
     "./document-store": "./src/document-store.ts",
     "./contract-validator": "./src/contract-validator.ts",
+    "./dashboard-kernel": {
+      "types": "./src/dashboard-kernel.ts",
+      "default": "./dist/dashboard-kernel.js"
+    },
+    "./dashboard-kernel/vectors": "./src/dashboard-kernel-vectors.json",
     "./init": "./src/init.ts"
   },
   "files": [

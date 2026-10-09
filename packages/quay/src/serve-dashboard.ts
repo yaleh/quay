@@ -5,7 +5,7 @@ import fs from "node:fs";
 import path from "node:path";
 import YAML from "yaml";
 import type { ProviderClient } from "./provider-client.ts";
-import { readLive, readSystem, readManagerLight, readTests, readTestsNonBlocking, readGitHistory, readCurrentSuiteRun, readWorkerOutcomeRecords, yieldToEventLoop, DEFAULT_DRIVER_CAP, type LiveResult, type SystemResult, type ManagerResult, type TestsResult, type GitHistoryResult, type CurrentSuiteRun, type WorkerOutcomeRecord, type DriverKindReading, type InFlightTask } from "./observation.ts";
+import { readLive, readSystem, readManagerLight, readTests, readTestsNonBlocking, readGitHistory, readCurrentSuiteRun, readWorkerOutcomeRecords, yieldToEventLoop, DEFAULT_DRIVER_CAP, type LiveResult, type SystemResult, type ManagerResult, type TestsResult, type GitHistoryResult, type CurrentSuiteRun, type WorkerOutcomeRecord, type DriverKindReading } from "./observation.ts";
 import { TASK_STATUS, type GoalRecord } from "./abi.ts";
 import { DEFAULT_LANG, type Lang, type Manifest, type ServeIdentity, type ServePageCfg } from "./serve-render.ts";
 import { html, escapeHtml, pageStyles, modernistStyles, renderSiteNav, renderMobileChrome, relativeTime, pageTitle, renderIdentityCard, htmlLangTag, pageNameFor } from "./serve-render.ts";
@@ -16,6 +16,12 @@ import { renderFanInCell } from "./serve-task.ts";
 // `dashboardLabelsFor(lang)` is taken ONCE per render (each card takes its own table), never
 // re-read per label.
 import { dashboardLabelsFor, fillLabel } from "./serve-i18n.ts";
+// The pure packing half of the "Loop pulse" gantt (FIXED_GANTT_LANES / mergeLiveAndHistoryIntervals /
+// packLanes + the interval type) is a zero-import LEAF module so it can be published as the package
+// subpath `quay/dashboard-kernel` without dragging this render module's dependency graph into a
+// consumer (gap-dashboard-kernel-export-for-cross-project-reuse). The rendering half — colour tokens,
+// i18n labels, the SVG string — stays here.
+import { FIXED_GANTT_LANES, mergeLiveAndHistoryIntervals, packLanes, type LiveGanttInterval } from "./dashboard-kernel.ts";
 
 // ── /dashboard ─────────────────────────────────────────────────────────────────────────────────────
 
@@ -323,93 +329,17 @@ ${rightLabel}
 // system: colours come from livePhaseColorToken (in-flight) / fanInOutcomeColorToken + final_state
 // (history), the SAME three token functions the rest of the dashboard already uses.
 
-/** The dispatch concurrency cap — also the fixed Y-axis lane count ("this is the concurrency cap").
- *  Matches the driver's FIXED_DISPATCH_CAP so the two can never drift apart. */
-export const FIXED_GANTT_LANES = 5;
-
-/** A merged in-flight-or-historical run interval for the liveCard gantt. `phase` (in-flight) and
- *  `finalState`/`fanInOutcome` (historical) are mutually exclusive: exactly one side is non-null. */
-export interface LiveGanttInterval {
-  taskId: string;
-  runId: string;
-  startMs: number;
-  endMs: number;
-  phase: string | null;
-  finalState: string | null;
-  fanInOutcome: string | null;
-}
-
-/** Merge readLive's in-flight runs (open interval to `now`) with worker-outcome history (closed
- *  interval, filtered to `[windowStartMs, nowMs]`) into ONE interval list. Pure — no I/O.
- *  A run that is both in-flight AND already on the outcome carrier appears once: in-flight wins
- *  (added first). The dedup key is (taskId, startMs) — NOT `run_id`, which is the driver-process
- *  round id shared by EVERY task dispatched in that driver lifetime (⛔ gap-dashboard-gantt-
- *  runid-dedup-collapses-driver-round-shared-id: deduping on run_id collapsed dozens of distinct
- *  historical tasks per driver round into one). (taskId, startMs) is unique per dispatch and, for
- *  the same run, `Date.parse(started_at)` round-trips to the exact `startedAtMs` the in-flight
- *  side carries, so the cross-source dedup still fires for a genuinely-shared run. */
-export function mergeLiveAndHistoryIntervals(
-  inFlight: InFlightTask[],
-  records: WorkerOutcomeRecord[],
-  windowStartMs: number,
-  nowMs: number,
-): LiveGanttInterval[] {
-  const seen = new Set<string>();
-  const out: LiveGanttInterval[] = [];
-  const add = (iv: LiveGanttInterval): void => {
-    // startMs is always finite here (both callers guard it), so the key is always well-defined even
-    // when taskId is "" (an unknown task — the key still distinguishes by start time).
-    const key = `${iv.taskId}|${iv.startMs}`;
-    if (seen.has(key)) return;
-    seen.add(key);
-    out.push(iv);
-  };
-  for (const t of inFlight) {
-    if (!Number.isFinite(t.startedAtMs) || t.startedAtMs > nowMs) continue;
-    add({ taskId: t.taskId, runId: t.runId, startMs: t.startedAtMs, endMs: nowMs, phase: t.phase, finalState: null, fanInOutcome: null });
-  }
-  for (const r of records) {
-    const startMs = r.started_at != null ? Date.parse(r.started_at) : NaN;
-    const endMs = r.ended_at != null ? Date.parse(r.ended_at) : NaN;
-    if (!Number.isFinite(startMs) || !Number.isFinite(endMs) || endMs < startMs) continue;
-    if (endMs < windowStartMs || startMs > nowMs) continue;
-    add({ taskId: r.task ?? "", runId: r.run_id ?? "", startMs, endMs, phase: null, finalState: r.final_state, fanInOutcome: r.mechanical_fan_in?.outcome ?? null });
-  }
-  return out;
-}
-
-/** Greedy "meeting-room" packing of intervals onto ≤ maxLanes lanes (sorted by start, assigned to the
- *  earliest lane whose last interval has ended). Returns the packed lanes PLUS an explicit `overflow`
- *  count: when a moment has > maxLanes overlapping intervals (e.g. a fan-in phase not counted against
- *  the driver's worker cap), the excess is NEVER silently dropped or index-clipped — it surfaces as a
- *  visible "+N 更多" badge, not a swallowed interval. (The bounded-overlap ⇒ ≤5-lane convergence claim
- *  holds only when the window's true concurrency never exceeds the cap; the overflow arm is the honest
- *  degradation when that assumption breaks.) */
-export function packLanes(
-  intervals: LiveGanttInterval[],
-  maxLanes: number = FIXED_GANTT_LANES,
-): { lanes: LiveGanttInterval[][]; overflow: number } {
-  const sorted = [...intervals].sort((a, b) => (a.startMs - b.startMs) || (a.endMs - b.endMs));
-  const lanes: LiveGanttInterval[][] = [];
-  const laneEnds: number[] = [];
-  let overflow = 0;
-  for (const iv of sorted) {
-    let lane = -1;
-    for (let i = 0; i < lanes.length; i++) {
-      if (laneEnds[i] <= iv.startMs) { lane = i; break; }
-    }
-    if (lane >= 0) {
-      lanes[lane].push(iv);
-      laneEnds[lane] = iv.endMs;
-    } else if (lanes.length < maxLanes) {
-      lanes.push([iv]);
-      laneEnds.push(iv.endMs);
-    } else {
-      overflow++;
-    }
-  }
-  return { lanes, overflow };
-}
+// The pure packing half — FIXED_GANTT_LANES / LiveGanttInterval / mergeLiveAndHistoryIntervals /
+// packLanes — MOVED to ./dashboard-kernel.ts verbatim (same bodies, input shapes declared
+// structurally there so the leaf module can stay import-free). Re-exported here so every existing
+// importer of THIS module keeps resolving them unchanged: the extraction is a move, not a
+// behaviour change (gap-dashboard-kernel-export-for-cross-project-reuse).
+export {
+  FIXED_GANTT_LANES,
+  mergeLiveAndHistoryIntervals,
+  packLanes,
+  type LiveGanttInterval,
+} from "./dashboard-kernel.ts";
 
 /** A merged interval → the card's colour token. In-flight by phase (livePhaseColorToken); history by
  *  fan-in outcome first (fanInOutcomeColorToken), then final_state (completed → positive; failed/
