@@ -2,7 +2,7 @@
 id: AC-347
 title: 结构与范围护栏：kernel/verdict-parse.ts 提供
   parseBinaryVerdict，两个旧函数薄包装、调用方零改动，routine-quota 文件未被触碰
-status: draft
+status: active
 kind: criterion
 goal: GOAL-032
 criterion: >-
@@ -62,4 +62,15 @@ criterion: >-
 expect: exit 0 = kernel 正本落地且两处均真正委托、调用方签名/调用点不变、无越界；exit 1 = CAUSE=
   指明具体哪一条；exit 3 = 文件缺失
 origin: GOAL-032 结构护栏，见 goal body「范围与非目标」
+activatedAt: 2026-10-09T01:55:06.628Z
+statusLog:
+  - at: 2026-10-09T01:55:06.628Z
+    from: draft
+    to: active
+    actor: goal-cli
+    reason: ""
+fidelity:
+  verdict: not-evaluated
+  reason: no judge configured
+  at: 2026-10-09T01:55:06.628Z
 ---
