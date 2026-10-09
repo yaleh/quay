@@ -3,7 +3,7 @@ id: gap-ownership-first-manifold-recovery-replay
 title: "ownership-first manifold recovery replay: can a constrained discovery
   procedure recover the GOAL-030/031/032 recurring axis, and at which
   checkpoint"
-status: ready
+status: done
 labels:
   - gap
 parent: null
