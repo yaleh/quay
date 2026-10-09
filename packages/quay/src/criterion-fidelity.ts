@@ -24,8 +24,9 @@
 //
 // ⛔ Pure judgment + pure parsing — NO LLM spawn here. The semantic call is injected via the
 // `invokeJudge` seam (a function parameter), so this module is unit-testable and does NOT add
-// process responsibilities to Core. The parser reuses goal-driver.ts's
-// parseSemanticSufficiencyVerdict fail-closed手法 verbatim: only explicit parseable values are
+// process responsibilities to Core. The parser is the fail-closed kernel primitive
+// `kernel/verdict-parse.ts::parseBinaryVerdict` (GOAL-032 — the algorithm it shares with
+// goal-driver.ts::parseSemanticSufficiencyVerdict now lives ONCE): only explicit parseable values are
 // recognized; everything else (non-zero exit / empty output / unreadable / timeout / JSON parse
 // failure) ⇒ not-evaluated, NEVER silently faithful.
 //
@@ -48,6 +49,7 @@
 
 import fs from "node:fs";
 import path from "node:path";
+import { parseBinaryVerdict } from "./kernel/verdict-parse.ts";
 
 /** The three-state fidelity verdict. */
 export type FidelityVerdict = "faithful" | "vacuous" | "not-evaluated";
@@ -63,27 +65,16 @@ export interface FidelityJudgeResult {
  *  matching runAcceptance's spawnSync shape). */
 export type FidelityInvokeJudge = (prompt: string) => FidelityJudgeResult;
 
-/** Parse the judge's stdout → three-state verdict. ⛔ fail-closed (mirrors goal-driver.ts
- *  parseSemanticSufficiencyVerdict verbatim): only explicit, parseable `faithful`/`vacuous` are
- *  recognized — a bare token, or `{"verdict":"…"}` JSON scanned from the LAST line upward. Everything
- *  else (non-zero exit, empty output, unreadable prose, JSON parse failure, an unknown verdict
- *  value) ⇒ not-evaluated. NEVER falls back to faithful. */
+/** Parse the judge's stdout → three-state verdict. ⛔ fail-closed (硬规则 3b): only explicit,
+ *  parseable `faithful`/`vacuous` are recognized — a bare token, or `{"verdict":"…"}` JSON scanned
+ *  from the LAST line upward. Everything else (non-zero exit, empty output, unreadable prose, JSON
+ *  parse failure, an unknown verdict value) ⇒ not-evaluated. NEVER falls back to faithful.
+ *
+ *  GOAL-032: 解析算法已收敛到 kernel 单一实现 `./kernel/verdict-parse.ts::parseBinaryVerdict`
+ *  （此前本函数与 goal-driver.ts::parseSemanticSufficiencyVerdict 逐字相同的镜像现已结构化）——
+ *  本函数只是把本领域的合法值字面量传入的薄包装，签名/返回类型不变。 */
 export function parseFidelityVerdict(stdout: string | null, exitCode: number | null): FidelityVerdict {
-  if (exitCode !== 0) return "not-evaluated";
-  const text = (stdout ?? "").trim();
-  if (text === "faithful" || text === "vacuous") return text;
-  const candidates = [text, ...text.split(/\r?\n/).map((s) => s.trim()).filter(Boolean).reverse()];
-  for (const cand of candidates) {
-    try {
-      const obj = JSON.parse(cand);
-      if (obj && typeof obj === "object" && (obj.verdict === "faithful" || obj.verdict === "vacuous")) {
-        return obj.verdict as FidelityVerdict;
-      }
-    } catch {
-      /* non-JSON line, keep scanning upward */
-    }
-  }
-  return "not-evaluated";
+  return parseBinaryVerdict(stdout, exitCode, "faithful", "vacuous");
 }
 
 // ── 机械前置筛（方向 B，⛔ 不调 LLM）────────────────────────────────────────────────────────
