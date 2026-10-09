@@ -33,9 +33,9 @@ GOAL-030, GOAL-031, and GOAL-032 are three real, human-driven goal branches that
 
 ## Touches
 
-- docs/analysis/ownership-first-manifold-recovery-replay.mjs
-- docs/analysis/ownership-first-manifold-recovery-replay.results.json
-- docs/analysis/ownership-first-manifold-recovery-replay.md
+- docs/analysis/ownership-first-manifold-recovery-replay.mjs (new)
+- docs/analysis/ownership-first-manifold-recovery-replay.results.json (new)
+- docs/analysis/ownership-first-manifold-recovery-replay.md (new)
 - tasks/gap-ownership-first-manifold-recovery-replay.md
 
 ## AC
