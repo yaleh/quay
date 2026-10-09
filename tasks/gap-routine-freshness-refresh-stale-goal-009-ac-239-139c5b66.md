@@ -3,7 +3,7 @@ id: gap-routine-freshness-refresh-stale-goal-009-ac-239-139c5b66
 title: "freshness-refresh: evidence_ts 2026-09-25T16:27:01Z is 322.71h old and
   d=217 > K=200 (margin -17); note the AC-239 leg has no standalone command —
   its only refresh path is the AC-2"
-status: todo
+status: ready
 labels:
   - gap
   - routine-filed
