@@ -2,7 +2,7 @@
 id: AC-351
 title: ArchGuard before/after：cli 离开 package SCC（6→4：cli 与仅经 cli 入环的 fan-in
   一同离开，其余四员不变）且负对照可证伪；CLI driver status 的仪器读数语义在被求值树上现场重算不变
-status: active
+status: achieved
 kind: criterion
 goal: GOAL-033
 criterion: |-
@@ -41,6 +41,11 @@ statusLog:
     to: active
     actor: goal-cli
     reason: ""
+  - at: 2026-10-09T07:25:10.831Z
+    from: active
+    to: achieved
+    actor: goal-driver
+    reason: "I2: criterion pass"
 fidelity:
   verdict: not-evaluated
   reason: no judge configured
