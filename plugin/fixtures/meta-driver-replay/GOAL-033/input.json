@@ -1,0 +1,173 @@
+{
+  "case_id": "GOAL-033",
+  "cutoff": "2026-10-09T05:00:00.000Z",
+  "cutoff_note": "Strictly before the real activation (goals/GOAL-033-*.md activatedAt=2026-10-09T05:46:07.439Z). GOAL-030/031/032 have all already landed and are legitimate prior context.",
+  "context": {
+    "repo_state_summary": "Three real goal-branch pilots (GOAL-030, GOAL-031, GOAL-032) have each landed cleanly, each targeting a progressively different shape of small ownership-first refactor: a new decision layer, a literal-vocabulary convergence, and a duplicate-implementation merge.",
+    "prior_goal_precedents": [
+      {
+        "id": "GOAL-030",
+        "one_line": "lifecycle-write ownership sunk to kernel + structured events; landed."
+      },
+      {
+        "id": "GOAL-031",
+        "one_line": "needs-human literal-dispersion convergence, with a mid-flight premise correction; landed."
+      },
+      {
+        "id": "GOAL-032",
+        "one_line": "duplicate-parser investigation (equivalent, not divergent) then kernel-level merge; landed."
+      }
+    ],
+    "archguard_readings_before": {
+      "tool_call": "detect_cycles(outputScope: package)",
+      "reading_at_cutoff": "exactly one package-level cycle exists: a 6-member SCC comprising {\"\" (packages/quay/src root), cli, fan-in, gate, gate/config, gate/factories}.",
+      "note": "A draft layers.yml (not yet landed, living only in an unmerged worktree) already lists the root<->cli edge as a known violation and recommends tightening it, but that draft itself does not decide HOW to fix it — just that it's flagged."
+    },
+    "code_pointers": [
+      "packages/quay/src/serve-sessions.ts — contains an import from the cli/ subdirectory (one of exactly two root-to-cli edges found by a prior grep+ArchGuard cross-check)",
+      "packages/quay/src/serve.ts — contains a second, separate import from the cli/ subdirectory",
+      "the cli-to-root direction has 34 edges (the normal, expected direction — CLI depending on core) and is not itself a problem",
+      "no gate/, gate/config/, gate/factories/, fan-in/, primitives/, or kernel/ file imports anything from cli/ (zero edges in that direction) at this cutoff"
+    ],
+    "known_mechanism_risks": [
+      "fan-in/ff-merge.ts already imports from the package root (plugin-root/config/runtime-artifacts) — i.e. a root<->fan-in relationship does not yet exist in the cycle-causing direction, but could be accidentally created by a careless fix to the root<->cli edge.",
+      "At least one of the two root-to-cli imports is known (by code inspection) to also pull in behavior that itself calls into yet a THIRD subdirectory (fan-in/) to decorate its own output — a naive 'just move the whole file' fix could inadvertently create a new edge nobody asked for."
+    ],
+    "related_landed_tasks": [],
+    "human_trigger_quote": "人 2026-10-09 裁定：调查并推进 core-root<->core-cli 最小依赖环切片",
+    "test_suite_state": "scripts/test.sh green on develop at the cutoff commit."
+  },
+  "decision_prompt_schema": {
+    "instructions": "You are advising on what Quay should do next, given ONLY the context above (nothing after the cutoff). Answer the 8 questions below as a single JSON object matching response_schema. Be concrete and falsifiable; do not pad with generic advice.",
+    "questions": [
+      "a) What are the most noteworthy architecture concerns right now, given this context?",
+      "b) Propose at most 3 candidate interventions.",
+      "c) Which one would you recommend doing first, and why?",
+      "d) Should this become an investigation or a goal (with an active branch)?",
+      "e) What is the scope, and what are the explicit non-goals?",
+      "f) What mechanical delta (a concrete, measurable before/after) would you expect evidence of, once done?",
+      "g) What negative control would distinguish 'this actually worked' from 'this looks like it worked'?",
+      "h) What evidence, if it appeared, would make you abandon or materially revise this recommendation?",
+      "i) Decompose the problem: what semantically coherent slices did you consider, and why is your recommended one the minimal-sufficient granularity (not too broad, not too fragmented)? Which sub-problems are already checkable by an existing harness/instrument, and which still need investigation first? What existing stable mechanism(s) are you reusing rather than rebuilding from scratch?"
+    ],
+    "response_schema": {
+      "type": "object",
+      "required": [
+        "concerns",
+        "candidate_interventions",
+        "recommended",
+        "investigation_or_goal",
+        "scope",
+        "expected_mechanical_delta",
+        "negative_control",
+        "revision_evidence",
+        "decomposition_rationale"
+      ],
+      "properties": {
+        "concerns": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "candidate_interventions": {
+          "type": "array",
+          "maxItems": 3,
+          "items": {
+            "type": "object",
+            "properties": {
+              "title": {
+                "type": "string"
+              },
+              "rationale": {
+                "type": "string"
+              }
+            }
+          }
+        },
+        "recommended": {
+          "type": "string"
+        },
+        "investigation_or_goal": {
+          "enum": [
+            "investigation",
+            "goal"
+          ]
+        },
+        "scope": {
+          "type": "object",
+          "properties": {
+            "in_scope": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            },
+            "non_goals": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            }
+          }
+        },
+        "expected_mechanical_delta": {
+          "type": "string"
+        },
+        "negative_control": {
+          "type": "string"
+        },
+        "revision_evidence": {
+          "type": "string"
+        },
+        "decomposition_rationale": {
+          "type": "object",
+          "properties": {
+            "granularity_assessment": {
+              "enum": [
+                "too-broad",
+                "sufficient",
+                "too-fragmented"
+              ]
+            },
+            "why_not_broader": {
+              "type": "string"
+            },
+            "why_not_finer": {
+              "type": "string"
+            },
+            "harnessable_subproblems": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            },
+            "investigation_required_subproblems": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            },
+            "primitives_reused": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            },
+            "coordination_cost_note": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "granularity_assessment",
+            "why_not_broader",
+            "why_not_finer",
+            "harnessable_subproblems",
+            "investigation_required_subproblems",
+            "primitives_reused"
+          ]
+        }
+      }
+    }
+  }
+}

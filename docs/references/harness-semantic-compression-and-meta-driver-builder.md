@@ -14,6 +14,49 @@
 
 ---
 
+## 0. Quay 的母命题：分解带来复杂、harness 带来可靠、固化带来更高层智能
+
+**原始信念（中文陈述）**：复杂能力来自可控分解；可靠能力来自局部 harness；更高层智能来自把已经可靠的局部能力当作新的 primitive。
+
+**更完整的表述**：通过递归分解复杂任务，并把其中稳定下来的小任务固化为受 harness 保障的能力原语，系统逐层扩展自己能够可靠处理的问题层级与领域范围——这不是比喻，是对下文第 2-9 节（概念表、演化闭环、ownership-first 实例、meta-driver builder 设计）共同服务的那一条更上位的命题的显式陈述。
+
+**English compressed version**：
+> Scale intelligence by recursively decomposing open-ended work into semantically coherent slices, and turning each stabilized slice into a harnessed capability that becomes a primitive for the next level.
+
+### 0.1 两条必要条件
+
+这条命题要成立，缺一不可：
+
+1. **子任务必须落入 harness 能覆盖的局部领域**——有相对明确的输入/输出/约束/验收标准/失败模式，而不是一个仍然开放式的问题。本仓库已经在运作的具体操作化：`SHAPE_REGISTRY`（`adr/ADR-023`）要求每个任务按其 shape 携带四件可核验的产物；GOAL-030~033 统一使用的三态退出码（`0` 达成 / `1` 未达成且带 `CAUSE=` / `3` 未评估）就是"验收标准 + 失败模式"必须显式声明这条要求的具体实例，不是额外发明。
+2. **分解本身也必须逐步被 harness 化**——否则真正最难的那部分智能（"这个问题该怎么切"）永远留在人脑里，系统只学会了"执行已经切好的任务"，没有学会"切任务"。这正是第 7 节 meta-driver builder 设计（当前**零实现**，见第 6 节）试图覆盖、但本仓库目前完全没有做到的那一层——builder 的 A 类工作（识别"现状=已知分解模式的实例"）本质上就是尝试把第二条必要条件机械化。
+
+### 0.2 不是无限拆细：最小充分颗粒度
+
+这条命题常见的误读是"分解得越细越好"。实际判据是**最小充分颗粒度**：切片要足够小，小到可以被机械验证（独立的验收标准、独立的 before/after 读数、独立的负对照）；但也要足够大，大到仍然携带一个有意义的语义完整主张，不会碎成一句话说不清"为什么这一步值得做"的原子编辑。
+
+**GOAL-033（`core-root⇄core-cli` 依赖环切片，当前 `active`，尚未并入）是这条判据的真实、进行中的例子**：ArchGuard 报出的 package 环有 6 个成员（`"", cli, fan-in, gate, gate/config, gate/factories`）。GOAL-033 显式声明范围是"**SCC 6 → 5，不是 0**"——不去碰 `gate/`、`fan-in/`、`kernel/` 之间的其它互指（非目标明确排除，"不为了让 package 环数归零而顺手处理任何别的边"），因为处理整个环会立刻牵出 `gate`/`fan-in` 的其它职责问题，超出"这一次能独立验收"的范围。同时它也没有切得更碎：移动的两个符号（driver 控制客户端、driver 词表）被作为一个整体切片处理，因为"cli 完整退出 SCC"是一个二元、可核验的主张（ArchGuard 环成员计数 6→5，负对照是在 scratch 副本里重新注入一条边验证 `cli` 会不会回到 SCC），而"只挪一半、留一半在环里"不构成任何可独立验收的语义主张。**这是"小到可机械验证、大到保留语义完整性"两个方向的边界同时被显式画出来的真实样本**，不是复盘其成败（GOAL-033 本身是否最终 achieved 不影响这条判据的说明力）。
+
+### 0.3 与 Search Space / Manifold / Residual Uncertainty / Mechanization 的关联
+
+第 2 节已经把 Manifold 定义为"语义空间里已点亮的轴构成的坐标系"的比喻。这条母命题把 task decomposition 放进同一比喻里：
+
+- **decomposition = 寻找一个局部坐标系（local chart）**——把一个开放式问题切成一个足够小的区域，使得一个廉价的局部 harness 就能覆盖它。`docs/proposals/quay-perpetual-stream-experiment-v5.md` 已经用过这个确切的说法（非本文发明）："Value Trajectory 活在 manifold/atlas 上：相邻 milestone 共享一个 local chart"。
+- **harness = 在这个 chart 内把局部有效路径压缩并稳定下来**——即第 2 节定义的 `Mechanization`/`Π_{S→E}`，没有新内容，只是换了个主语。
+- **稳定下来的能力 = 喂给上一层分解的新 primitive**——对应 `基于几何信息论...md` §5.2 的"支柱化"：被压缩发现的高复用抽象（`G` 的新分量）固化为系统的结构性支柱。残差（`Residual Uncertainty`）是那些还没被任何 chart 覆盖、仍需要下一轮分解才能处理的部分。
+
+### 0.4 Quay 的演化层级
+
+把母命题摆成一个具体的层级，标注每一层当前是「真实运作」还是「设计假设」（详见第 6、7 节）：
+
+| 层级 | 当前状态 | 对应机制 |
+|---|---|---|
+| Task execution（单个任务 ready→done） | **真实运作** | GOAL-030~033 的每一个 slice task |
+| Goal/investigation decomposition（一个 Goal 拆成少量串行 task） | **真实运作** | GOAL-030~033 本身（branch:true Goal 的标准流程） |
+| Meta-driver proposal（对某个长期语义维度持续判断、产出结构化 proposal） | **真实但单一窄域，且当前故障**（见第 6 节） | 现有 `meta-driver.ts` |
+| Meta-driver builder（对"如何正确切分一个新问题"这个模式本身建模/回放/固化） | **纯设计假设，零实现** | 第 7、8 节 |
+
+**越往下越接近"分解本身被 harness 化"（0.1 的第二条必要条件），当前进度也越稀薄**——这张表本身就是对"这条母命题离兑现还有多远"的一次诚实度量，不是进度宣传。
+
 ## 1. 诚实条款（继承，不重新论证）
 
 `geometry-as-llm-architecture-interface.md` §4/§5/§8 已经把判断做完：**连续动力学层**（Fisher 信息度量、自然梯度 `I⁻¹∇L`、本征维度 `d`、压缩率 `ρ` 的数值计算）在本项目「没有算过、也基本算不了」，援引其公式是 **abuse of notation**。`adr/ADR-006` 独立得出同一结论并把它写成 accepted 决策。`维度边界与结晶` §6.3 的诚实条款进一步把「语义空间」这套读法限定在三处真正付过钱的地方：**(a) 目标闭包**（哪些维度存在、暗维度可被探测）、**(b) 迁移**（同一原则跨载体低损复用）、**(c) 共享控制-验证协议**（类型化指令低损传给执行）。
@@ -183,10 +226,10 @@ discover recurring concern
 
 按本仓库既有的证据分级惯例（`维度边界与结晶` §8、`geometry-as-llm...md` §5/§7）：
 
-- **证据充分**：GIT 框架的目标闭包层与迁移层（第 1、2 节）；ownership-first 重构的三次真实实例是硬形变/`Π_{S→E}` 的具体落地（第 4 节）；现有单一 meta-driver 的真实窄域范围与其当前的静默失败状态（第 6 节，现场核实）；退役/归役侧零工具化（第 12 节，两份独立分析交叉确认）。
-- **机制成立，待验**：第 7、8、9 节的 meta-driver builder 设计——结构上可以从既有的 §9 形变提出器 + `SPEC-capability-planes` §12.2 + `experiments/offline-replay` 三个既有构件拼出来，但**没有任何一步被实际跑过**；跨项目 bootstrap 能否真的发现（而非搬运）driver 组合，同属此档。
-- **工作假设，非定理**：「智能=信息压缩/流形搜索」整体表述（第 1、2、11 节）——继承自已被本项目自己审计过"假统一"的连续几何层，本文只在审计许可的三处含义下使用它。
-- **观察项**：第 10 节全部评价指标，含 semantic compression ratio / decision entropy——概念可定义，无实现、无验证，`crystallization-half-life.md` 是现成的反例警示，不作阻塞判据，也不作验收 KPI。
+- **证据充分（已验证事实）**：GIT 框架的目标闭包层与迁移层（第 1、2 节）；ownership-first 重构的三次真实实例是硬形变/`Π_{S→E}` 的具体落地（第 4 节）；现有单一 meta-driver 的真实窄域范围与其当前的静默失败状态（第 6 节，现场核实）；退役/归役侧零工具化（第 12 节，两份独立分析交叉确认）；**GOAL-030~033 是四次真实、可核验的任务分解实例，GOAL-033 的"SCC 6→5 非 0"范围声明是"最小充分颗粒度"判据的真实样本，不是假设的例子**（第 0.2 节）。
+- **机制成立，待验（设计工作假设）**：第 7、8、9 节的 meta-driver builder 设计——结构上可以从既有的 §9 形变提出器 + `SPEC-capability-planes` §12.2 + `experiments/offline-replay` 三个既有构件拼出来，但**没有任何一步被实际跑过**；跨项目 bootstrap 能否真的发现（而非搬运）driver 组合，同属此档；**母命题本身"decomposition = 找 local chart，harness = chart 内压缩，稳定能力 = 喂给上一层的新 primitive"这套映射（第 0.3 节）是一个解释性框架，不是被测量验证过的机制**。
+- **工作假设，非定理**：「智能=信息压缩/流形搜索」整体表述（第 0、1、2、11 节）——继承自已被本项目自己审计过"假统一"的连续几何层，本文只在审计许可的三处含义下使用它。
+- **观察项（研究方向）**：第 10 节全部评价指标，含 semantic compression ratio / decision entropy——概念可定义，无实现、无验证，`crystallization-half-life.md` 是现成的反例警示，不作阻塞判据，也不作验收 KPI；**第 0.4 节"演化层级"表中的第四层（meta-driver builder 对分解本身建模/回放/固化）是全文最具推测性的一层，零实现，是后续实验的方向，不是现状描述**。
 
 ## 14. 一句话压缩版
 

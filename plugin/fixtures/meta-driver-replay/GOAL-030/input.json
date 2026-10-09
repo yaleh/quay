@@ -1,0 +1,163 @@
+{
+  "case_id": "GOAL-030",
+  "cutoff": "2026-10-08T02:00:00.000Z",
+  "cutoff_note": "Strictly before the real activation (goals/GOAL-030-*.md activatedAt=2026-10-08T02:36:17.793Z). Everything below is what was knowable at or before this instant; the chosen target modules/files are deliberately not named here (see reference.json).",
+  "context": {
+    "repo_state_summary": "Quay's goal-branch mechanism exists in the codebase (SPEC-goal-branch) but has only ever been exercised in rehearsals (GOAL-901..905 were rehearsals; GOAL-905 was the only real-sized merge attempted, and its goal->develop merge took 6 suite retries before passing). No real development-direction goal has ever walked the full goal-branch lifecycle (activate -> branch worktree -> preview -> human-triggered merge -> post-merge verification). Separately, task lifecycle status writes (todo->ready, ready->todo) are implemented directly inside orchestration-layer scripts, with no single decision layer and no structured per-transition event log.",
+    "archguard_readings_before": {
+      "source_commit": "develop @97d17da6b",
+      "directory_cycles": 1,
+      "plugin_scripts_to_kernel_edge_strength": 14,
+      "plugin_scripts_to_non_kernel_edge_strength": 44,
+      "packages_to_plugin_edges": 0
+    },
+    "related_landed_tasks": [
+      "gap-status-flip-history-and-parser-diff-readings (done) — replayed historical status-flip events as a pre-check before any lifecycle-write refactor"
+    ],
+    "prior_goal_precedents": [],
+    "prior_goal_precedents_note": "This is the FIRST real (non-rehearsal) goal-branch pilot in this repository's history. There is no prior real sample to learn a pattern from at this cutoff.",
+    "known_mechanism_risks": [
+      "Two prior, unrelated incidents on record show worktree-loaded code silently resolving to the main checkout instead of the branch's own tree (Core plugin-root relocation; quay-native resolving via a node_modules symlink) — i.e. a worktree/preview process is not guaranteed to be running the code it appears to be running.",
+      "SPEC-goal-branch sections 4.10/8 state that preview instances do not run the driver, and a goal that itself changes driver code gets no pre-merge trial of that change."
+    ],
+    "code_pointers": [
+      "plugin/scripts/ready-pool-check.ts — contains the current todo->ready status-write logic (function name intentionally not given here)",
+      "plugin/scripts/ready-pool-check.ts — contains the current ready->todo status-write logic (function name intentionally not given here)"
+    ],
+    "human_trigger_quote": "人 2026-10-08「现在开始执行…正式创建一个真实的重构 goal，并启用 goal branch」",
+    "test_suite_state": "scripts/test.sh green on develop at the cutoff commit; no open red-suite incident affecting the lifecycle-write code paths."
+  },
+  "decision_prompt_schema": {
+    "instructions": "You are advising on what Quay should do next, given ONLY the context above (nothing after the cutoff). Answer the 8 questions below as a single JSON object matching response_schema. Be concrete and falsifiable; do not pad with generic advice.",
+    "questions": [
+      "a) What are the most noteworthy architecture concerns right now, given this context?",
+      "b) Propose at most 3 candidate interventions.",
+      "c) Which one would you recommend doing first, and why?",
+      "d) Should this become an investigation or a goal (with an active branch)?",
+      "e) What is the scope, and what are the explicit non-goals?",
+      "f) What mechanical delta (a concrete, measurable before/after) would you expect evidence of, once done?",
+      "g) What negative control would distinguish 'this actually worked' from 'this looks like it worked'?",
+      "h) What evidence, if it appeared, would make you abandon or materially revise this recommendation?",
+      "i) Decompose the problem: what semantically coherent slices did you consider, and why is your recommended one the minimal-sufficient granularity (not too broad, not too fragmented)? Which sub-problems are already checkable by an existing harness/instrument, and which still need investigation first? What existing stable mechanism(s) are you reusing rather than rebuilding from scratch?"
+    ],
+    "response_schema": {
+      "type": "object",
+      "required": [
+        "concerns",
+        "candidate_interventions",
+        "recommended",
+        "investigation_or_goal",
+        "scope",
+        "expected_mechanical_delta",
+        "negative_control",
+        "revision_evidence",
+        "decomposition_rationale"
+      ],
+      "properties": {
+        "concerns": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "candidate_interventions": {
+          "type": "array",
+          "maxItems": 3,
+          "items": {
+            "type": "object",
+            "properties": {
+              "title": {
+                "type": "string"
+              },
+              "rationale": {
+                "type": "string"
+              }
+            }
+          }
+        },
+        "recommended": {
+          "type": "string"
+        },
+        "investigation_or_goal": {
+          "enum": [
+            "investigation",
+            "goal"
+          ]
+        },
+        "scope": {
+          "type": "object",
+          "properties": {
+            "in_scope": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            },
+            "non_goals": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            }
+          }
+        },
+        "expected_mechanical_delta": {
+          "type": "string"
+        },
+        "negative_control": {
+          "type": "string"
+        },
+        "revision_evidence": {
+          "type": "string"
+        },
+        "decomposition_rationale": {
+          "type": "object",
+          "properties": {
+            "granularity_assessment": {
+              "enum": [
+                "too-broad",
+                "sufficient",
+                "too-fragmented"
+              ]
+            },
+            "why_not_broader": {
+              "type": "string"
+            },
+            "why_not_finer": {
+              "type": "string"
+            },
+            "harnessable_subproblems": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            },
+            "investigation_required_subproblems": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            },
+            "primitives_reused": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            },
+            "coordination_cost_note": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "granularity_assessment",
+            "why_not_broader",
+            "why_not_finer",
+            "harnessable_subproblems",
+            "investigation_required_subproblems",
+            "primitives_reused"
+          ]
+        }
+      }
+    }
+  }
+}

@@ -1,0 +1,50 @@
+{
+  "case_id": "GOAL-033",
+  "selected_concern": "The only real package-level dependency cycle in the codebase is a 6-member SCC; the cheapest, outermost edge to cut is core-root<->core-cli (exactly 2 value edges one way, 34 the normal direction the other way, zero edges from any of the other 4 cycle members to cli). The ownership question is subtle: this is not CLI reaching backward into core, nor core wanting a CLI facade — it's that two primitives genuinely shared by both layers (a driver control-vocabulary table and a driver control client) were placed in cli/ only because their first historical consumer happened to be CLI help text.",
+  "selected_slice": "Move driver-vocab.ts's KINDS/service-name tables and driver.ts's control-client functions (runDriver/runDriverAsync/resolveDriverInvocation and shared prologue) out of cli/ into two new zero-import, core-root-level modules (driver-vocab.ts and driver-control.ts), leaving cli/driver.ts as a thin CLI facade (argv parsing, help text, and — critically — the fan-in instrument-decoration call for 'driver status --kind worker', which must explicitly STAY in cli/ rather than move with the rest of the function).",
+  "why_now": "Fourth real goal-branch pilot; a natural escalation from 'fix a duplication' (GOAL-032) to 'cut a dependency cycle edge' — the cheapest, outermost, best-understood edge of the one real cycle in the repo, chosen specifically because cutting it does not require touching any of the other 5 cycle members.",
+  "why_not_others": "The other 5 members of the 6-node SCC (gate/gate-config/gate-factories/fan-in and their mutual edges) are explicitly NOT touched — the goal is SCC size 6->5, not clearing the whole cycle, and not 'fixing everything in the SCC while we're in there.'",
+  "risk": "The control-client function being moved currently ALSO calls into fan-in/ff-merge.ts to decorate its own stdout with worker-instrument readings for one specific CLI-facing command. fan-in/ already imports from core-root. If the whole function (including that decoration call) were moved verbatim into core-root, it would create a NEW core-root->fan-in edge at the same moment the old core-root->cli edge is cut — trading one cycle-causing edge for a different, newly-created one (root<->fan-in), which is a worse outcome than doing nothing. This exact trap was identified by investigation (reading the function's actual body) BEFORE deciding the slice, not discovered by accident afterward.",
+  "scope_discipline": {
+    "non_goals": [
+      "do not touch any other edge within the 6-member SCC — the fix is exactly the two root->cli edges, nothing else",
+      "do not change driver runtime semantics on any surface (CLI output text, exit codes, refusal reasons stay byte-identical)",
+      "do not restart any production driver/serve process — when the new code takes effect in production is a separate human decision",
+      "do not move the CLI-only instrument-decoration call (probeInstruments) out of cli/driver.ts — it must stay there specifically to avoid creating a new core-root->fan-in edge"
+    ],
+    "stop_signals": [
+      "same structural signals as GOAL-030/031/032 (code-identity falsified, production contamination, isolation failure)",
+      "needing to touch any gate/* or fan-in/* file to finish the slice",
+      "core-root being forced to import fan-in/ to preserve CLI semantics",
+      "need to add a layers.yml edge",
+      "baseline drift",
+      "escalating manual intervention"
+    ]
+  },
+  "acceptance_evidence": "Three ACs (AC-350..352), three-state exit codes, same pattern as prior goals: AC-350 is the structural guard (zero core-root->cli imports, zero NEW core-root->fan-in imports, single definitions, 5 real consumers converged, gate/fan-in/kernel untouched); AC-351 requires an ArchGuard before/after pair plus an explicit negative control (re-injecting one core-to-cli edge in a scratch copy must bring cli back into the SCC) plus a live re-check that the CLI's worker-status output still carries instrument readings while promotion-status does not; AC-352 is the post-merge merge-shape check.",
+  "stop_abandon_condition": "Same abandon discipline as GOAL-030/031/032, plus the two goal-specific stop signals above (touching gate/fan-in, or being forced into a new root->fan-in edge).",
+  "leakage_markers": [
+    "driver-control.ts",
+    "driver-vocab.ts",
+    "probeInstruments",
+    "resolveDriverInvocation"
+  ],
+  "investigation_or_goal_reference": "goal",
+  "granularity_rationale": {
+    "granularity_label": "sufficient",
+    "why_not_broader": "The other 5 members of the 6-node SCC (gate / gate-config / gate-factories / fan-in and their mutual edges) are explicitly not touched -- clearing the WHOLE cycle in one goal would require re-deciding ownership for all of them simultaneously, a much larger and riskier undertaking than cutting the one cheapest, best-understood edge.",
+    "why_not_finer": "The two root->cli edges (a control-vocabulary table and a control client) must move together -- both are consumed in combination by the same 5 downstream call sites; moving just one would leave a partially-converged, harder-to-reason-about intermediate state with no independent acceptance story of its own.",
+    "harnessable_subproblems": [
+      "ArchGuard SCC-membership before/after with a negative control (the SAME before/after+negative-control pattern already used 3 times in GOAL-030/031/032, reused for a 4th time)",
+      "a structural import-grep scan (zero cli-> imports from root) -- mechanical, the pattern is already established"
+    ],
+    "investigation_required_subproblems": [
+      "recognizing a decoration trap: naively moving the control client verbatim would create a NEW root->fan-in edge, trading one cycle-causing edge for a different one -- only visible by reading the function's actual body, not from the dependency graph alone"
+    ],
+    "primitives_reused": [
+      "three-state exit-code convention",
+      "the ArchGuard before/after + negative-control pattern (4th use)",
+      "the branch merge-shape AC pattern (post-merge, same shape used in every prior goal in this series)"
+    ]
+  }
+}

@@ -1,0 +1,52 @@
+{
+  "case_id": "GOAL-031",
+  "selected_concern": "goal-driver.ts has 5 bare-literal task.status === \"needs-human\" comparisons that never import the existing canonical vocabulary module (task-status.ts) that 16 other consumers already migrated to.",
+  "selected_slice": "Investigate the raw dispersion=5 reading before touching anything: github-client.ts's hit is already explicitly exempted by a prior task (a provider package that structurally cannot statically import abi.ts, pinned by its own needle test); observation.ts and workflow-baseline-metrics.ts's hits are false positives (they compare a different vocabulary — a promotion-outcome 'action' field and a workflow 'outcome' field — not task.status). Only goal-driver.ts's 5 of its 6 'needs-human' literal occurrences are genuine, un-migrated task.status comparisons (the 6th, at a different line, compares a GOAL-AC status field, a different vocabulary, and is explicitly excluded). Convert exactly those 5 to consume the existing task-status.ts's isTaskStatus/TASK_STATUS.NEEDS_HUMAN, touching nothing else on the same line (e.g. a line also comparing 'todo'/'ready' leaves those two literals untouched).",
+  "why_now": "Direct continuation of GOAL-030's validated small-real-goal-branch method, chosen as a second, independent, and smaller/safer sample (a pure text-literal substitution, a different SHAPE of change than GOAL-030's new-module-plus-two-call-sites) specifically to get a second data point on whether the goal-branch mechanism itself generalizes.",
+  "why_not_others": "The originally planned canonical source was assumed to be a new kernel/task-transition.ts TASK_STATUSES type — but that module only exists on the still-unmerged goal/GOAL-030 branch at this point in history, and depending on a sibling branch's unmerged artifact would create hidden cross-goal-branch coupling. The investigation corrected the premise mid-flight: the real, already-'done'-status canonical source is the pre-existing abi.ts + task-status.ts pair, not a new kernel module. The original numeric target (dispersion <= 2) was also corrected: the achievable floor is 4 (1 canonical declaration + 1 exempted provider + 2 confirmed false positives), not 2 — the original target didn't account for the canonical declaration itself always carrying the literal, and the two false-positive files never being affected by this change.",
+  "risk": "If the investigation's false-positive/exemption classification is wrong, the 'fixed' count will not actually reach the corrected target, or will silently break the exempted provider's own needle test.",
+  "scope_discipline": {
+    "non_goals": [
+      "do not touch any bare 'todo'/'ready'/'done' literals, even on the same line as a needs-human literal",
+      "do not create a second kernel-level declaration of the vocabulary; do not depend on anything that exists only on the unmerged goal/GOAL-030 branch; do not wait for GOAL-030 to merge",
+      "do not touch the packages/quay/src directory-cycle issue",
+      "do not introduce a shared Verdict primitive",
+      "do not touch the separate parseSemanticSufficiencyVerdict/parseFidelityVerdict duplication"
+    ],
+    "stop_signals": [
+      "same structural signals as GOAL-030 (code-identity falsified, production contamination, isolation failure)",
+      "ANY dependency or interference with the goal/GOAL-030 branch (a new red line specific to this goal, since two real pilots are now running concurrently)",
+      "need to add a layers.yml edge",
+      "new directory cycle",
+      "baseline drift",
+      "escalating manual intervention"
+    ]
+  },
+  "acceptance_evidence": "Three ACs (AC-343..345), three-state exit codes. The core mechanical judgment is a literal re-count: grep -c 'status === \"needs-human\"' plugin/scripts/goal-driver.ts must go from 6 to exactly 1 (only the excluded GOAL-AC-status line remains), and get_literal_dispersion(value:\"needs-human\") must go from 5 to exactly 4, with each of the 4 remaining hits individually justified in the task record (not just asserted as a round number).",
+  "stop_abandon_condition": "Same abandon discipline as GOAL-030, plus: any detected coupling to or interference with the concurrently-running goal/GOAL-030 branch immediately halts scope expansion.",
+  "leakage_markers": [
+    "dispersion 降到 4",
+    "降到 4",
+    "6 精确降到 1",
+    "github-client.ts 已豁免",
+    "observation.ts/workflow-baseline-metrics.ts 异词表假阳性"
+  ],
+  "investigation_or_goal_reference": "goal",
+  "granularity_rationale": {
+    "granularity_label": "sufficient",
+    "why_not_broader": "Could have also converged the two false-positive files' underlying vocabulary confusion, or touched the same-line todo/ready/done literals, but neither recurs the needs-human mechanism specifically and would blur what this slice is actually measuring.",
+    "why_not_finer": "All 5 literal occurrences are the identical mechanical substitution in the same file; splitting per-occurrence would multiply branch-lifecycle overhead (same coordination-cost reasoning as GOAL-030's why_not_finer) for a change that is not independently separable -- a reviewer cannot meaningfully accept 1 of 5 identical-shape edits before the others.",
+    "harnessable_subproblems": [
+      "literal grep-count before/after (a pre-existing, mechanical grep convention)",
+      "ArchGuard get_literal_dispersion before/after (an existing instrument)"
+    ],
+    "investigation_required_subproblems": [
+      "classifying each of the 5 raw dispersion hits as genuine / exempted / false-positive -- required reading each file's actual comparison target, not just counting string matches; this is exactly where the original numeric target (<=2) was discovered to be wrong"
+    ],
+    "primitives_reused": [
+      "three-state exit-code convention",
+      "the existing canonical vocabulary module (already landed by a prior task) -- reused, not reinvented",
+      "the branch self-host identity check pattern introduced in GOAL-030, scaled down since this goal's own dependency risk differs"
+    ]
+  }
+}

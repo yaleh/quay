@@ -1,0 +1,15 @@
+{
+  "case_id": "GOAL-033",
+  "status": "in-progress",
+  "status_note": "GOAL-033 is still 'active' as of this corpus's creation — it has NOT merged. This is a deliberately honest partial outcome, not a fabricated completed result: the task instructions for this corpus explicitly require that an unfinished case say so plainly rather than pretend a landing happened.",
+  "merge_commit": null,
+  "ac_results": {
+    "AC-350": "achieved",
+    "AC-351": "active (not yet achieved — the ArchGuard before/after evidence file .quay/goal-033-evidence/archguard-before-after.json does not exist yet as of this snapshot)",
+    "AC-352": "active (not yet achieved — no landed goal-merge-result event for GOAL-033 exists yet; this is a post-merge AC and is structurally not-evaluated until a merge happens)"
+  },
+  "goal_final_status": "active",
+  "goal_status_log_reason": null,
+  "archguard_delta_direction": "not yet measured (AC-351's evidence file has not been written at the time of this snapshot)",
+  "as_of": "2026-10-09T00:00:00.000Z"
+}

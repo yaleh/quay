@@ -1,0 +1,54 @@
+{
+  "case_id": "GOAL-030",
+  "selected_concern": "Task lifecycle status writes (todo->ready, ready->todo) are scattered in orchestration-layer scripts with no single decision layer or structured per-transition event record; separately, the goal-branch mechanism itself has never been proven on a real development direction (only rehearsed).",
+  "selected_slice": "New kernel module packages/quay/src/kernel/task-transition.ts: the sole definition of LIFECYCLE_EDGES, a decideTransition function (three-state: allow/refuse/not-evaluated), and patchStatusField (sunk down from plugin/scripts/task-ops.ts, which becomes a re-export); each transition writes a structured event to .quay/task-status-events.jsonl (recording the writing module's and entry process's realpath, as a direct-quantity code-identity check). ready-pool-check.ts's two existing write sites are switched to call the kernel. A branch self-host probe script (scripts/branch-selfhost-probe.mjs) is added specifically to prove the branch's own promotion-driver and preview serve load the branch's own code, not the main checkout's.",
+  "why_now": "The goal-branch mechanism has existed but never carried a real development direction through its full lifecycle. Before attempting a larger refactor on a branch, a small, real slice is used specifically to validate that 'Quay running on a branch is proven to be running the branch's own code' — the self-host identity question — rather than assuming it works because it compiles.",
+  "why_not_others": "Fan-in's 4 status-write sites and the 2 needs-human/branch-sync-alignment write sites were considered and explicitly excluded (pinned by an AC asserting their count is unchanged) — the goal is to keep the slice small enough to validate the MECHANISM, not to chase architectural payoff on the first real trial.",
+  "risk": "A worktree or preview process can silently resolve to the main checkout's code rather than the branch's own tree (two prior unrelated incidents on record). If the self-host identity check cannot be proven, the goal-branch mechanism itself is unhealthy and the branch must be abandoned rather than pushed through.",
+  "scope_discipline": {
+    "non_goals": [
+      "do not touch fan-in's 4 status-write sites",
+      "do not give promotion-driver any new automatic-revaluation behavior in production",
+      "do not change gate/lifecycle.ts's CLI-path runtime behavior, only share the same edge-table data",
+      "do not decide whether status writes should go through the ABI vs kernel long-term — this pilot uses kernel writer functions only",
+      "do not do directory-cycle cleanup, do not split large files, do not touch goal-driver/worker-driver mechanisms themselves"
+    ],
+    "stop_signals": [
+      "code-identity falsified (sandbox or preview proven to run main-checkout code)",
+      "production contamination (sandbox run mutates production .quay/ or tasks/)",
+      "isolation failure (a branch commit appears on develop's first-parent chain)",
+      "catch-up drift (repeated conflicts re-syncing with develop)",
+      "merge instability (needs --override to land)",
+      "architecture regression (new directory cycle, need to add a layers.yml edge, new packages->plugin edge)",
+      "baseline drift (characterization snapshot changes unexplainably)",
+      "escalating manual intervention outside the task mechanism"
+    ]
+  },
+  "acceptance_evidence": "Seven ACs (AC-336..342), each a three-state exit code (0 achieved / 1 not-achieved with CAUSE= / 3 not-evaluated). AC-337 and AC-340 each carry an explicit negative control: AC-337 feeds a fabricated event whose writing module lives in the main checkout and asserts it is correctly classified loaded-main-checkout-code; AC-340 registers a main-checkout serve process in a worktree and asserts it is correctly classified serve-runs-foreign-code. AC-339 flips a kernel import on/off in a scratch branch and checks the archguard edge count tracks it (14->15 with the import, back to 14 without).",
+  "stop_abandon_condition": "Any of the listed stop_signals firing means: do not widen scope, do not start the next goal, fix the mechanism gap first; if unrecoverable, abandon and discard the branch (a standing human ruling, numbered as ruling 9 in this project's own convention).",
+  "leakage_markers": [
+    "task-transition.ts",
+    "LIFECYCLE_EDGES",
+    "decideTransition",
+    "patchStatusField",
+    "branch-selfhost-probe.mjs",
+    "task-status-events.jsonl"
+  ],
+  "investigation_or_goal_reference": "goal",
+  "granularity_rationale": {
+    "granularity_label": "sufficient",
+    "why_not_broader": "Could have included fan-in's 4 status-write sites or the needs-human/branch-sync-alignment 2 sites in the same slice, but that would add surface area to debug on the FIRST real trial of the goal-branch mechanism itself -- the thing actually being tested here is whether the self-host identity proof works at all, not architectural coverage.",
+    "why_not_finer": "Could have split todo->ready and ready->todo into two separate goals, but they share the same kernel module and event-schema design question; splitting would double the branch-lifecycle overhead (activate/preview/merge/post-merge-verify, each with its own suite run) for zero independent-acceptance benefit -- a coordination-cost argument, not a correctness one.",
+    "harnessable_subproblems": [
+      "ArchGuard edge-count before/after comparison (an existing instrument, single-root scope analysis)",
+      "branch merge-shape check (first-parent chain, exactly-one-merge-commit -- an established goal-branch mechanics pattern)"
+    ],
+    "investigation_required_subproblems": [
+      "whether a worktree/preview process can be proven to load its OWN branch's code rather than the main checkout's -- no existing instrument covered this before this goal; had to design and build a new self-host identity probe"
+    ],
+    "primitives_reused": [
+      "three-state exit-code convention (0 achieved / 1 not-achieved+CAUSE= / 3 not-evaluated)",
+      "ArchGuard single-root scope analysis for before/after comparison"
+    ]
+  }
+}
