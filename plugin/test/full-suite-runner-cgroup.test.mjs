@@ -33,6 +33,9 @@ import {
   DEFAULT_SYSTEMD_RUN_LIMITS,
   parseSystemdRunLimits,
   systemdRunAvailable,
+  suiteMemoryMax,
+  SUITE_MEMORY_MAX_CEILING,
+  readEffectiveTotalMemBytes,
   parseSystemdConsumedLine,
   parseSystemdTimespanToSeconds,
   parseSystemdBytesToMb,
@@ -891,4 +894,99 @@ test("load-fields — a NON-systemd round (no scope unit) OMITS all four load fi
     fs.rmSync(dir, { recursive: true, force: true });
   }
 });
+
+
+// ── gap-full-suite-runner-memory-max-host-derived-envelope ──────────────────────────────────────────
+// The suite's MemoryMax was a WRITTEN-DOWN "16G". A literal ceiling is only safe on the host it was
+// written for (CLAUDE.md 硬规则 4 推论二); on a small host it exceeds the host total and the cgroup
+// guardrail stops existing. The new default is HOST-DERIVED via the SAME page-aligned
+// `floor(totalmem × 0.25)` formula the driver anchor uses, clamped to the empirical 16G ceiling. The
+// RED LINE: on the 128-core baseline the derived value reaches the ceiling ⇒ the argv is byte-for-byte
+// unchanged (⛔ not "roughly the same").
+const GIB = 1024 ** 3;
+
+test("unit — suiteMemoryMax keeps the 16G ceiling on a big host; the default argv stays byte-identical", () => {
+  // Pure, host-independent: anything at or above the ceiling renders the ceiling STRING (not its bytes).
+  assert.equal(SUITE_MEMORY_MAX_CEILING, "16G");
+  assert.equal(suiteMemoryMax(64 * GIB), "16G", "exactly at the boundary ⇒ the ceiling string");
+  assert.equal(suiteMemoryMax(256 * GIB), "16G");
+  assert.equal(suiteMemoryMax(1024 * GIB), "16G");
+  // The concrete byte-identity claim, asserted ONLY where it holds (a <64G host correctly shrinks):
+  if (os.totalmem() >= 64 * GIB) {
+    assert.equal(DEFAULT_SYSTEMD_RUN_LIMITS.memoryMax, "16G", "on a ≥64G host the default reaches the ceiling");
+    assert.deepEqual(
+      buildSystemdRunArgv("bash scripts/test.sh"),
+      ["systemd-run", "--user", "--scope", "--quiet", "-p", "MemoryMax=16G", "bash", "-c", "bash scripts/test.sh"],
+      "the default argv must be byte-for-byte what it was before this change (红线: 不打断生产测试)",
+    );
+  }
+  assert.ok(os.totalmem() > 0);
+});
+
+test("unit — suiteMemoryMax shrinks PROPORTIONALLY below the ceiling on a memory-limited host", () => {
+  // floor(bytes × 0.25), page-aligned — the driver-anchor formula, reused (⛔ not re-derived).
+  assert.equal(suiteMemoryMax(4 * GIB), String(GIB), "4G ⇒ 1G");
+  assert.equal(suiteMemoryMax(2 * GIB), String(GIB / 2), "2G ⇒ 512M");
+  assert.equal(suiteMemoryMax(8 * GIB), String(2 * GIB), "8G ⇒ 2G");
+  assert.ok(Number(suiteMemoryMax(4 * GIB)) < Number("17179869184"), "a small host gives a value BELOW the 16G ceiling");
+  // proportional (not merely "different" — a literal would give the SAME value for both)
+  assert.equal(Number(suiteMemoryMax(4 * GIB)) / Number(suiteMemoryMax(2 * GIB)), 2, "the value scales with the host (2×)");
+  // page-aligned (a systemd/cgroup rounding difference must not surface as a few-KB mismatch)
+  assert.equal(Number(suiteMemoryMax(7 * GIB + 12345)) % 4096, 0, "the byte count is page-aligned");
+});
+
+test("unit — readEffectiveTotalMemBytes is fail-open (never throws, never 0, never above the host total)", () => {
+  const eff = readEffectiveTotalMemBytes();
+  assert.ok(Number.isInteger(eff) && eff > 0, `effective total mem is a positive byte count (got ${eff})`);
+  assert.ok(eff <= os.totalmem(), "effective can never EXCEED the host total");
+});
+
+test(
+  "REAL cgroup — a real MemoryMax=4G scope shrinks the default proportionally (< 16G), from the cgroup, not os.totalmem()",
+  { skip: systemdRunAvailable() ? false : "not-evaluated: systemd-run --user --scope unavailable on this host" },
+  async () => {
+    // A REAL cgroup construction (systemd-run --scope — the same technique as
+    // driver-anchor-memory-envelope AC4), ⛔ not a mock. The unit name deliberately does NOT match quay's
+    // own envelope prefixes ⇒ it stands in for an EXTERNAL cap (container / VM / slice).
+    const unit = `quay-suite-memtest-${Date.now()}-${process.pid}.scope`;
+    const probe = `import(${JSON.stringify(RUNNER)}).then(m=>console.log(JSON.stringify({effective:m.readEffectiveTotalMemBytes(),memoryMax:m.DEFAULT_SYSTEMD_RUN_LIMITS.memoryMax,totalmem:require("os").totalmem()}))).catch(e=>{console.error(e);process.exit(1)})`;
+    const { code, out, err } = await spawnCmd([
+      "systemd-run", "--user", "--scope", "--quiet", "--unit", unit,
+      "-p", "MemoryMax=4G", "-p", "MemorySwapMax=0",
+      process.execPath, "--experimental-strip-types", "-e", probe,
+    ]);
+    assert.equal(code, 0, `the scoped probe exits 0; stderr=${err}`);
+    const line = (out ?? "").trim().split("\n").filter((l) => l.startsWith("{")).pop();
+    assert.ok(line, `no reading from the scoped probe — stdout=${JSON.stringify(out)} stderr=${JSON.stringify(err)}`);
+    const reading = JSON.parse(line);
+    assert.equal(reading.effective, 4 * GIB, "the effective total is the cgroup cap (4G), read from the real cgroup");
+    assert.equal(reading.memoryMax, String(GIB), "the default MemoryMax is floor(4G × 0.25) = 1G — strictly below the 16G ceiling");
+    assert.ok(reading.totalmem > reading.effective, "os.totalmem() is the big host total ⇒ the SMALL value came from the cgroup cap, not from a small host");
+  },
+);
+
+test(
+  "REAL cgroup negative control — quay's OWN envelope scope name does NOT shrink the suite ceiling (⛔ not external capacity)",
+  { skip: systemdRunAvailable() ? false : "not-evaluated: systemd-run --user --scope unavailable on this host" },
+  async () => {
+    // The RED-LINE mechanism, proved on a real cgroup: the 128-core baseline runs the suite INSIDE quay's
+    // own `quay-anchor-*` envelope scope (≈0.25 × host total). If the reading consumed it, the derived
+    // value would be ≈0.25 × 0.25 × host (< 16G) and the argv WOULD change. A scope named `quay-anchor-*`
+    // with a 1G cap must be IGNORED — the reading falls through to the host total.
+    const unit = `quay-anchor-fsr-probe-${Date.now()}-${process.pid}.scope`;
+    const probe = `import(${JSON.stringify(RUNNER)}).then(m=>console.log(JSON.stringify({effective:m.readEffectiveTotalMemBytes(),memoryMax:m.DEFAULT_SYSTEMD_RUN_LIMITS.memoryMax,totalmem:require("os").totalmem()}))).catch(e=>{console.error(e);process.exit(1)})`;
+    const { code, out, err } = await spawnCmd([
+      "systemd-run", "--user", "--scope", "--quiet", "--unit", unit,
+      "-p", "MemoryMax=1G", "-p", "MemorySwapMax=0",
+      process.execPath, "--experimental-strip-types", "-e", probe,
+    ]);
+    assert.equal(code, 0, `the scoped probe exits 0; stderr=${err}`);
+    const line = (out ?? "").trim().split("\n").filter((l) => l.startsWith("{")).pop();
+    assert.ok(line, `no reading from the scoped probe — stdout=${JSON.stringify(out)} stderr=${JSON.stringify(err)}`);
+    const reading = JSON.parse(line);
+    assert.equal(reading.effective, reading.totalmem, "a quay-anchor-* scope is our own guardrail ⇒ the reading falls through to the host total (the 1G cap is NOT consumed)");
+    assert.notEqual(reading.effective, 1024 * GIB, `effective (${reading.effective}) is the host total, ⛔ not the 1G we set on our own anchor-named scope`);
+    assert.equal(reading.memoryMax, suiteMemoryMax(reading.totalmem), "the derived default follows from the skipped-limit reading — unchanged from the pre-change behaviour");
+  },
+);
 

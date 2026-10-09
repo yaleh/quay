@@ -473,8 +473,13 @@ export function readLoadAvg(): number {
 // SuiteRoundRecord; readScopeConsumedLoad + ScopeConsumedLoadRead at the round-end load capture) and
 // re-exported so the runner's public API surface — and every importer (e.g. full-suite-runner.test.mjs)
 // — is byte-for-byte unchanged.
-import { PhaseDifferentialAccounting, readScopeConsumedLoad, effectiveParallelism } from "./suite-accounting.ts";
+import { PhaseDifferentialAccounting, readScopeConsumedLoad, effectiveParallelism, parseSystemdBytesToMb } from "./suite-accounting.ts";
 import type { PhaseDiffRecord, ScopeConsumedLoadRead } from "./suite-accounting.ts";
+// The suite's host-derived memory envelope reuses THE shared page-aligned `floor(totalmem × fraction)`
+// pure function (⛔ not a second copy — 硬规则 5b). `packages/quay/src/systemd-scope.ts` is a
+// node-builtin-only leaf (the same shared module `driver-runtime.ts` imports for the anchor/serve
+// envelopes), so this `plugin/` → `packages/` edge adds no cycle.
+import { defaultScopeMemoryMax } from "../../packages/quay/src/systemd-scope.ts";
 
 export {
   resolveCgroupV2Dir,
@@ -989,9 +994,103 @@ export interface SystemdRunLimits {
   tasksMax: string; //  -p TasksMax=<v> — "" = NO task limit (人 2026-08-12 裁定③取消 TasksMax=200; 写死的 200 与 CPUQuota 同族, fork: EAGAIN 实证)
 }
 
-/** The suite's default cgroup scope limits. cpuQuota/tasksMax 默认空 = 不设 CPU/任务上限（人裁定）; MemoryMax=16G（人 2026-09-24 裁定：6G 是 4 核旧机上定的；迁到 128 核宿主后 main lane 并发 64/128，suite 无上限时实测峰值 8–10.5G，6G 下每轮顶格数千次 memory.max 事件、回收抖动让时序断言轮换飘红。此前：人 2026-08-12 裁定④ 4G→6G, 04:45 真 cgroup OOM 实证 4G 不足）。 */
+// ── gap-full-suite-runner-memory-max-host-derived-envelope ──────────────────────────────────────
+// The suite's MemoryMax used to be a WRITTEN-DOWN `"16G"` (人 2026-09-24 为本 128 核宿主裁定). A literal
+// ceiling only ever equals "the safe ceiling" on the host it was written for (CLAUDE.md 硬规则 4 推论二):
+// on a 2–8 GB host `MemoryMax=16G` exceeds the host's own total memory, so this cgroup guardrail stops
+// existing — the kill that fires is the kernel's uncontrolled/unaccounted OOM killer, not a controlled
+// `memory.max` oom_kill (the path gap-driver-anchor-runs-without-host-derived-memory-envelope proved for
+// the anchor group; THIS task gives the suite itself the same envelope).
+//
+// Formula = the driver-anchor formula, via the shared page-aligned pure function (⛔ not a re-derivation):
+//     memoryMax = min( floor(effective_total_mem × 0.25) 页对齐, 经验上限 16G )
+// 「经验上限不降低」= on the 128-core baseline host the result is exactly the ceiling STRING `16G` ⇒
+// `buildSystemdRunArgv`'s argv stays byte-for-byte what it was (人明确强调的红线：不打断生产测试).
+
+/** The empirical MemoryMax ceiling (人 2026-09-24 裁定). Kept as a systemd size STRING so the big host's
+ *  argv stays byte-identical (`MemoryMax=16G`, ⛔ not `MemoryMax=17179869184`). */
+export const SUITE_MEMORY_MAX_CEILING = "16G";
+
+const SUITE_MEMORY_MAX_CEILING_MB = parseSystemdBytesToMb(SUITE_MEMORY_MAX_CEILING);
+// A malformed ceiling constant must fail SAFE (never shrink below the empirical ceiling).
+const SUITE_MEMORY_MAX_CEILING_BYTES = SUITE_MEMORY_MAX_CEILING_MB === null ? Infinity : SUITE_MEMORY_MAX_CEILING_MB * 1024 * 1024;
+
+/** quay 自己的 cgroup 包络 scope 的 unit 名前缀: the driver-anchor group, the serve host, and the
+ *  transient `run-*` scopes systemd assigns to a `systemd-run --scope` without `--unit` (the suite's OWN
+ *  scope is one). These are guardrails WE imposed, ⛔ not external capacity: feeding them into the suite's
+ *  own ceiling would compound the same host fraction (0.25 × 0.25) AND make the ceiling depend on the
+ *  limit the suite is already inside (a feedback loop — one nesting level per round). A genuine external
+ *  limit (container / VM / slice) is set at the cgroup-namespace root or a `user.slice`, never under these
+ *  prefixes — so excluding ours keeps the big-host behaviour while still seeing a real container cap. */
+const QUAY_OWN_SCOPE_PREFIXES = ["quay-anchor-", "quay-serve-", "run-"];
+
+/** This process's cgroup v2 path from `/proc/self/cgroup` (`0::<path>`), or null when unreadable
+ *  (fail-open). ⛔ Reads /proc directly (NOT `resolveCgroupV2Dir`) — that resolver carries the
+ *  `QUAY_TEST_CGROUP_DIR` seam, and a host-capacity reading must never be redirected by a test seam. */
+function selfCgroupV2Path(): string | null {
+  try {
+    const m = /(?:^|\n)0::(\S+)/.exec(fs.readFileSync("/proc/self/cgroup", "utf8"));
+    return m ? m[1] : null;
+  } catch {
+    return null;
+  }
+}
+
+/** A cgroup dir's `memory.max` in bytes; `max` / missing / non-numeric ⇒ null = that layer sets no
+ *  memory ceiling (「不限制」is its OWN state, ⛔ never coerced to 0). */
+function readCgroupMemoryMaxBytes(dir: string): number | null {
+  try {
+    const raw = fs.readFileSync(path.join(dir, "memory.max"), "utf8").trim();
+    if (raw === "" || raw === "max") return null;
+    const n = Number(raw);
+    return Number.isFinite(n) && n > 0 ? n : null;
+  } catch {
+    return null;
+  }
+}
+
+/** cgroup-aware「有效总内存」(bytes) — **临时内联实现**.
+ *  ⚠️ 依赖 `gap-effective-capacity-cgroup-cpu-memory-probe`（todo, 未落地）产出的共享探测函数
+ *  (`plugin/scripts/effective-capacity-probe.ts`)。该任务落地后本函数【必须】替换为对它的调用 ——
+ *  ⛔ 不重复发明第二份探测实现（见任务 Finding/Touches 的依赖记录）。
+ *
+ *  Semantics: walk the cgroup v2 hierarchy from its mount root down to this process, take the minimum
+ *  `memory.max` among the layers that are NOT quay's own envelope scopes, then min with `os.totalmem()`.
+ *  Fail-open: no cgroup v2 / no external limit readable ⇒ `os.totalmem()` (⛔ never refuse to run). */
+export function readEffectiveTotalMemBytes(): number {
+  const hostTotal = os.totalmem();
+  const selfPath = selfCgroupV2Path();
+  if (selfPath === null) return hostTotal;
+  const root = "/sys/fs/cgroup";
+  let effective = hostTotal;
+  let dir = root;
+  for (const seg of selfPath.split("/").filter(Boolean)) {
+    dir = path.join(dir, seg);
+    const rel = path.relative(root, dir);
+    if (rel.startsWith("..") || path.isAbsolute(rel)) return hostTotal; // malformed /proc entry — fail open
+    if (seg.endsWith(".scope") && QUAY_OWN_SCOPE_PREFIXES.some((p) => seg.startsWith(p))) continue;
+    const max = readCgroupMemoryMaxBytes(dir);
+    if (max !== null) effective = Math.min(effective, max);
+  }
+  return effective;
+}
+
+/** The suite's MemoryMax for a given effective-memory reading (PURE — the input is a byte COUNT, not
+ *  `os.totalmem()`): `min(floor(effective × 0.25) 页对齐, 16G 上限)`. On a host whose effective memory
+ *  reaches the ceiling (the 128-core baseline) this returns the ceiling STRING unchanged ⇒ argv
+ *  byte-identical; on a genuinely memory-limited host it returns a proportional, page-aligned byte count. */
+export function suiteMemoryMax(effectiveTotalMemBytes: number): string {
+  const derived = defaultScopeMemoryMax(effectiveTotalMemBytes);
+  return Number(derived) >= SUITE_MEMORY_MAX_CEILING_BYTES ? SUITE_MEMORY_MAX_CEILING : derived;
+}
+
+/** The suite's default cgroup scope limits. cpuQuota/tasksMax 默认空 = 不设 CPU/任务上限（人裁定）;
+ *  MemoryMax 宿主推导（公式见上）—— on the 128-core baseline host this resolves to the 16G ceiling
+ *  (人 2026-09-24 裁定：6G 是 4 核旧机上定的；迁到 128 核宿主后 main lane 并发 64/128，suite 无上限时
+ *  实测峰值 8–10.5G，6G 下每轮顶格数千次 memory.max 事件、回收抖动让时序断言轮换飘红。此前：
+ *  人 2026-08-12 裁定④ 4G→6G, 04:45 真 cgroup OOM 实证 4G 不足）。 */
 export const DEFAULT_SYSTEMD_RUN_LIMITS: SystemdRunLimits = {
-  memoryMax: "16G",
+  memoryMax: suiteMemoryMax(readEffectiveTotalMemBytes()),
   cpuQuota: "",
   tasksMax: "",
 };
