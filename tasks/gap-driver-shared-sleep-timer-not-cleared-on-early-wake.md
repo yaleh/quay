@@ -2,7 +2,7 @@
 id: gap-driver-shared-sleep-timer-not-cleared-on-early-wake
 title: driver-shared.ts residentLoopStop().sleep() 的 setTimeout 在提前唤醒时未被
   clearTimeout——driver-shared.test.mjs 耗时从 3.8s 回归到 62.7s（源于 07c0c3ee3）
-status: todo
+status: ready
 labels:
   - gap
 parent: null
