@@ -3,13 +3,19 @@ id: GOAL-032
 title: verdict parser ownership
   收敛试点——parseFidelityVerdict/parseSemanticSufficiencyVerdict 收口进
   kernel（equivalent 调查结论，非 intentionally-divergent）
-status: active
+status: achieved
 kind: goal
 origin: 人 2026-10-09 裁定：对 criterion-fidelity.ts::parseFidelityVerdict 与
   goal-driver.ts::parseSemanticSufficiencyVerdict 做正式等价性调查，结论 equivalent 后创建并激活
   branch:true Goal，严格复用 GOAL-030/031 方法，范围只做这一对 parser 的 ownership 收敛，不碰其它
   verdict 类型/CLI 环/routine quota。调查过程与结论见 body「背景」。
 activatedAt: 2026-10-09T01:55:04.388Z
+statusLog:
+  - at: 2026-10-09T03:17:51.231Z
+    from: active
+    to: achieved
+    actor: goal-driver
+    reason: "I2: all ACs achieved + sufficiency covered"
 branch: true
 ---
 ## 背景
