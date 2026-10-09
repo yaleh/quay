@@ -1,0 +1,147 @@
+{
+  "case_id": "GOAL-031",
+  "stage": "B",
+  "stage_name": "decomposition",
+  "cutoff": "2026-10-08T14:03:00.000Z",
+  "cutoff_label": "T1-decision-ready",
+  "cutoff_rationale": "After the human had classified each hit as genuine / exempted / false-positive and corrected the numeric target from <=2 to 4.",
+  "confirmed_concern": "A bare 'needs-human' status literal is dispersed across several modules; whether that indicates genuinely un-migrated consumers or merely look-alike strings has not been determined.",
+  "investigation_findings": [
+    "task-status.ts is the canonical declaration itself — its occurrence is not a defect.",
+    "github-client.ts is already explicitly exempted by a prior task: an independent provider package cannot statically import abi.ts, and its literal shape is pinned by its own needle test.",
+    "observation.ts and workflow-baseline-metrics.ts are FALSE POSITIVES: they compare a different vocabulary (a promotion-outcome 'action' field and a workflow 'outcome' field), not task.status.",
+    "goal-driver.ts holds the only genuine un-migrated residue: 5 of its 6 occurrences are real task.status comparisons; the 6th compares a GOAL-AC status field (a different vocabulary) and must stay untouched.",
+    "Therefore the achievable dispersion floor is 4, not 2 — the canonical declaration and the two false-positive files are permanent residues, and the exemption is fixed.",
+    "The original numeric target (<=2) was unachievable and has been corrected."
+  ],
+  "context": {
+    "classified_dispersion": "5 raw hits = 1 canonical declaration + 1 explicit provider exemption + 2 false positives (different vocabulary) + 1 file with genuine residue",
+    "genuine_residue": "plugin/scripts/goal-driver.ts: 6 occurrences of the literal, of which 5 are genuine task.status comparisons and 1 is a GOAL-AC status (different vocabulary, out of scope)",
+    "existing_canonical_source": "packages/quay/src/abi.ts (packages tree) + plugin/scripts/task-status.ts (plugin tree); 16 consumers already migrated by a prior DONE task",
+    "corrected_target": "achievable dispersion floor is 4, not the originally assumed 2",
+    "user_constraint_recorded": "do not sweep unrelated status literals (todo/ready/done) in the same file, even for style consistency",
+    "test_suite_state": "scripts/test.sh green on develop at the cutoff commit."
+  },
+  "citable_evidence_refs": [
+    "archguard:literal_dispersion",
+    "repo:canonical_vocab_source",
+    "code:goal_driver_needs_human"
+  ],
+  "task": {
+    "instructions": "You are a NARROW ownership/architecture proposer. This is a DECOMPOSITION stage: the concern below is already confirmed, and the investigation findings are established facts as of T1. Propose the minimal-sufficient slice. Several decompositions may be defensible — you are scored on whether yours is coherent, minimum-sufficient and harnessable, NOT on matching one historical artifact. Cite only the listed evidence refs; do not invent readings.",
+    "questions": [
+      "a) What candidate slices follow from this concern? (<=3, ordered)",
+      "b) Which one should be done first, and why is it minimum-sufficient?",
+      "c) investigate, or propose-goal? Justify from the T1 findings.",
+      "d) Scope and explicit non-goals.",
+      "e) What mechanical before/after delta would evidence success?",
+      "f) What negative control distinguishes 'it worked' from 'it looks like it worked'?",
+      "g) What would make you abandon or materially revise this?",
+      "h) Is this harnessable as stated (inputs/outputs/constraints/acceptance/failure mode)?"
+    ],
+    "response_schema": {
+      "type": "object",
+      "required": [
+        "candidate_slices",
+        "recommended_first",
+        "investigate_or_goal",
+        "scope",
+        "expected_mechanical_delta",
+        "negative_control",
+        "abandon_or_reconsider_condition",
+        "harnessability",
+        "minimum_sufficiency_rationale"
+      ],
+      "properties": {
+        "candidate_slices": {
+          "type": "array",
+          "maxItems": 3,
+          "items": {
+            "type": "object",
+            "properties": {
+              "title": {
+                "type": "string"
+              },
+              "description": {
+                "type": "string"
+              },
+              "why_plausible": {
+                "type": "string"
+              }
+            }
+          }
+        },
+        "recommended_first": {
+          "type": "string"
+        },
+        "investigate_or_goal": {
+          "enum": [
+            "investigate",
+            "propose-goal"
+          ]
+        },
+        "scope": {
+          "type": "object",
+          "properties": {
+            "in_scope": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            },
+            "non_goals": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            }
+          }
+        },
+        "expected_mechanical_delta": {
+          "type": "string"
+        },
+        "negative_control": {
+          "type": "string"
+        },
+        "abandon_or_reconsider_condition": {
+          "type": "string"
+        },
+        "harnessability": {
+          "type": "object",
+          "required": [
+            "inputs",
+            "outputs",
+            "constraints",
+            "acceptance",
+            "failure_mode"
+          ],
+          "properties": {
+            "inputs": {
+              "type": "string"
+            },
+            "outputs": {
+              "type": "string"
+            },
+            "constraints": {
+              "type": "string"
+            },
+            "acceptance": {
+              "type": "string"
+            },
+            "failure_mode": {
+              "type": "string"
+            }
+          }
+        },
+        "minimum_sufficiency_rationale": {
+          "type": "string"
+        }
+      }
+    },
+    "citable_evidence_refs": [
+      "archguard:literal_dispersion",
+      "repo:canonical_vocab_source",
+      "code:goal_driver_needs_human"
+    ]
+  }
+}

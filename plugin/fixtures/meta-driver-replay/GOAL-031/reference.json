@@ -48,5 +48,46 @@
       "the existing canonical vocabulary module (already landed by a prior task) -- reused, not reinvented",
       "the branch self-host identity check pattern introduced in GOAL-030, scaled down since this goal's own dependency risk differs"
     ]
-  }
+  },
+  "timeline": {
+    "t0": "2026-10-08T13:00:00.000Z",
+    "t1": "2026-10-08T14:03:00.000Z",
+    "activated_at": "2026-10-08T14:08:10.301Z",
+    "note": "The human's own origin line records that the original technical premise was wrong and was corrected BEFORE activation. That correction is the T1 content."
+  },
+  "stage_a_reference": {
+    "expected_concerns": [
+      "dispersed literal for one status value across modules, canonical home unclear",
+      "possible duplicated/parallel vocabulary declarations between the packages tree and the plugin tree"
+    ],
+    "abstain_acceptable": false
+  },
+  "stage_b_reference": {
+    "investigate_or_goal": "propose-goal",
+    "investigate_or_goal_rationale": "At T1 every hit is classified and the achievable target is corrected, so the slice is fully specified; the remaining work is a mechanical substitution.",
+    "minimum_sufficiency_rationale": "All 5 genuine occurrences are the identical mechanical substitution in one file, and the correct canonical source already exists and is already used by 16 consumers. Splitting per-occurrence multiplies branch-lifecycle overhead for a change no reviewer can accept piecemeal; broadening to the false-positive files or to unrelated literals would touch things that are not defects.",
+    "reference_slice": "Investigate the raw dispersion=5 reading before touching anything: github-client.ts's hit is already explicitly exempted by a prior task (a provider package that structurally cannot statically import abi.ts, pinned by its own needle test); observation.ts and workflow-baseline-metrics.ts's hits are false positives (they compare a different vocabulary — a promotion-outcome 'action' field and a workflow 'outcome' field — not task.status). Only goal-driver.ts's 5 of its 6 'needs-human' literal occurrences are genuine, un-migrated task.status comparisons (the 6th, at a different line, compares a GOAL-AC status field, a different vocabulary, and is explicitly excluded). Convert exactly those 5 to consume the existing task-status.ts's isTaskStatus/TASK_STATUS.NEEDS_HUMAN, touching nothing else on the same line (e.g. a line also comparing 'todo'/'ready' leaves those two literals untouched).",
+    "alternative_valid_slices": [
+      "Route all status comparisons in goal-driver.ts through the canonical module in one pass (rejected by the recorded user constraint: todo/ready/done literals must stay).",
+      "Introduce a shared Verdict/Status primitive instead of consuming the existing module (rejected: that is a second declaration, not convergence)."
+    ],
+    "adjacent_reasonable_slices": [
+      "Converge mcp-server.ts's hand-copied kind enumeration (a different vocabulary, out of scope)"
+    ],
+    "clearly_too_broad": [
+      "Convert every status literal in the repo",
+      "Touch the false-positive files or the exempted provider",
+      "Chase the originally-assumed dispersion <=2"
+    ],
+    "clearly_too_fragmented": [
+      "One goal per occurrence",
+      "One goal per file"
+    ],
+    "expected_delta_predicted_at_t1": "dispersion count drops by the number of genuine un-migrated consumers; the grep count for the literal in goal-driver.ts falls correspondingly",
+    "expected_delta_observed": "dispersion 5 -> 4 and the goal-driver.ts count 6 -> 1, with each of the 4 residual hits individually justified as a non-defect."
+  },
+  "deprecated_note": "investigation_or_goal_reference is the v1 single-stage gold; use stage_b_reference for the two-stage benchmark.",
+  "t1_belief_gaps": [
+    "Any statement of which module the 5 literals should consume, or the resulting grep count."
+  ]
 }

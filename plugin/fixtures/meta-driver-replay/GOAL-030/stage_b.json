@@ -1,0 +1,147 @@
+{
+  "case_id": "GOAL-030",
+  "stage": "B",
+  "stage_name": "decomposition",
+  "cutoff": "2026-10-08T02:31:00.000Z",
+  "cutoff_label": "T1-decision-ready",
+  "cutoff_rationale": "After the human had located the two write sites and established the placement constraint, but before any artifact existed. 5 min before activatedAt.",
+  "confirmed_concern": "Task lifecycle status writes (todo->ready and ready->todo) live inside orchestration-layer scripts with no single decision layer and no structured per-transition record; and the goal-branch mechanism itself has never been proven on a real development direction.",
+  "investigation_findings": [
+    "The two write sites are applyPromotions (todo->ready, promote edge) and applyRevaluations (ready->todo, retreat edge), both inside plugin/scripts/ready-pool-check.ts.",
+    "The lifecycle edge table currently lives in gate/lifecycle.ts; the status-field patch helper lives in plugin/scripts/task-ops.ts and already has 4 call sites.",
+    "fan-in has 4 separate status-write sites, and the needs-human/branch-sync-alignment path has 2 more. Both are deliberately out of scope for this first trial.",
+    "The mechanism risk is load-bearing: proving a worktree/preview actually runs its own branch's code is an explicit acceptance condition, not an assumption."
+  ],
+  "context": {
+    "goal_branch_mechanism_state": "Rehearsals only; the human has decided to use this refactor as the first REAL pilot of the mechanism, with health gating any scope growth.",
+    "promotion_path_write_sites": "applyPromotions + applyRevaluations in plugin/scripts/ready-pool-check.ts",
+    "existing_shared_data": "the lifecycle edge table in gate/lifecycle.ts; the status-field patch helper in plugin/scripts/task-ops.ts (4 call sites)",
+    "deliberately_excluded": "fan-in (4 write sites) and needs-human/branch-sync alignment (2 write sites)",
+    "placement_constraint_established_during_investigation": "Both packages/* and plugin/scripts must be able to reach the shared decision point without introducing a reverse dependency edge.",
+    "test_suite_state": "scripts/test.sh green on develop at the cutoff commit."
+  },
+  "citable_evidence_refs": [
+    "archguard:edge_strength",
+    "repo:goal_branch_state",
+    "code:ready_pool_check",
+    "task:status_flip_readings"
+  ],
+  "task": {
+    "instructions": "You are a NARROW ownership/architecture proposer. This is a DECOMPOSITION stage: the concern below is already confirmed, and the investigation findings are established facts as of T1. Propose the minimal-sufficient slice. Several decompositions may be defensible — you are scored on whether yours is coherent, minimum-sufficient and harnessable, NOT on matching one historical artifact. Cite only the listed evidence refs; do not invent readings.",
+    "questions": [
+      "a) What candidate slices follow from this concern? (<=3, ordered)",
+      "b) Which one should be done first, and why is it minimum-sufficient?",
+      "c) investigate, or propose-goal? Justify from the T1 findings.",
+      "d) Scope and explicit non-goals.",
+      "e) What mechanical before/after delta would evidence success?",
+      "f) What negative control distinguishes 'it worked' from 'it looks like it worked'?",
+      "g) What would make you abandon or materially revise this?",
+      "h) Is this harnessable as stated (inputs/outputs/constraints/acceptance/failure mode)?"
+    ],
+    "response_schema": {
+      "type": "object",
+      "required": [
+        "candidate_slices",
+        "recommended_first",
+        "investigate_or_goal",
+        "scope",
+        "expected_mechanical_delta",
+        "negative_control",
+        "abandon_or_reconsider_condition",
+        "harnessability",
+        "minimum_sufficiency_rationale"
+      ],
+      "properties": {
+        "candidate_slices": {
+          "type": "array",
+          "maxItems": 3,
+          "items": {
+            "type": "object",
+            "properties": {
+              "title": {
+                "type": "string"
+              },
+              "description": {
+                "type": "string"
+              },
+              "why_plausible": {
+                "type": "string"
+              }
+            }
+          }
+        },
+        "recommended_first": {
+          "type": "string"
+        },
+        "investigate_or_goal": {
+          "enum": [
+            "investigate",
+            "propose-goal"
+          ]
+        },
+        "scope": {
+          "type": "object",
+          "properties": {
+            "in_scope": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            },
+            "non_goals": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            }
+          }
+        },
+        "expected_mechanical_delta": {
+          "type": "string"
+        },
+        "negative_control": {
+          "type": "string"
+        },
+        "abandon_or_reconsider_condition": {
+          "type": "string"
+        },
+        "harnessability": {
+          "type": "object",
+          "required": [
+            "inputs",
+            "outputs",
+            "constraints",
+            "acceptance",
+            "failure_mode"
+          ],
+          "properties": {
+            "inputs": {
+              "type": "string"
+            },
+            "outputs": {
+              "type": "string"
+            },
+            "constraints": {
+              "type": "string"
+            },
+            "acceptance": {
+              "type": "string"
+            },
+            "failure_mode": {
+              "type": "string"
+            }
+          }
+        },
+        "minimum_sufficiency_rationale": {
+          "type": "string"
+        }
+      }
+    },
+    "citable_evidence_refs": [
+      "archguard:edge_strength",
+      "repo:goal_branch_state",
+      "code:ready_pool_check",
+      "task:status_flip_readings"
+    ]
+  }
+}

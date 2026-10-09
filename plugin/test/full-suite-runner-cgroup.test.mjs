@@ -301,9 +301,9 @@ test("unit — backfillFinalCpu is a NO-OP when the final phase already has a re
 // prove the rest of the machine is untouched).
 
 /** Spawn an arbitrary command, collect stdout/stderr, resolve on exit. */
-function spawnCmd(args) {
+function spawnCmd(args, env) {
   return new Promise((resolve, reject) => {
-    const child = spawn(args[0], args.slice(1), { stdio: ["ignore", "pipe", "pipe"] });
+    const child = spawn(args[0], args.slice(1), { stdio: ["ignore", "pipe", "pipe"], env });
     let out = "";
     let err = "";
     child.stdout.on("data", (d) => (out += d));
@@ -984,9 +984,73 @@ test(
     const line = (out ?? "").trim().split("\n").filter((l) => l.startsWith("{")).pop();
     assert.ok(line, `no reading from the scoped probe — stdout=${JSON.stringify(out)} stderr=${JSON.stringify(err)}`);
     const reading = JSON.parse(line);
-    assert.equal(reading.effective, reading.totalmem, "a quay-anchor-* scope is our own guardrail ⇒ the reading falls through to the host total (the 1G cap is NOT consumed)");
+    // gap-full-suite-runner-dedupe-memory-envelope-to-probe: the reading now comes from
+    // effective-capacity-probe.ts, whose OUTPUT CONTRACT is `effective_mem_mb` (MB precision), so the
+    // returned byte count is the host total TRUNCATED to whole MB (measured delta 991232 B = 0.95 MiB
+    // on the 128-core baseline). The assertion below is TIGHTENED to that documented shape: it still
+    // fails loudly if quay's own 1G anchor cap is consumed (effective would collapse to 1G), while
+    // pinning the ONLY difference from the pre-change exact-bytes value (< 1 MiB truncation).
+    assert.ok(
+      reading.effective <= reading.totalmem && reading.effective > reading.totalmem - 2 * 1024 * 1024,
+      `a quay-anchor-* scope is our own guardrail ⇒ the reading falls through to the host total (MB-truncated), NOT the 1G we set; effective=${reading.effective} totalmem=${reading.totalmem}`,
+    );
     assert.notEqual(reading.effective, 1024 * GIB, `effective (${reading.effective}) is the host total, ⛔ not the 1G we set on our own anchor-named scope`);
-    assert.equal(reading.memoryMax, suiteMemoryMax(reading.totalmem), "the derived default follows from the skipped-limit reading — unchanged from the pre-change behaviour");
+    assert.equal(reading.memoryMax, "16G", "the derived default follows from the skipped-limit reading — still exactly the 16G ceiling string");
+    assert.equal(reading.memoryMax, suiteMemoryMax(reading.totalmem), "…and unchanged from the pre-change behaviour (both readings render the ceiling)");
+  },
+);
+
+test(
+  "REAL cgroup NESTED — a quay-anchor-* ANCESTOR scope is skipped while a NON-quay child cgroup one level down IS consumed (gap-full-suite-runner-dedupe-memory-envelope-to-probe)",
+  { skip: systemdRunAvailable() ? false : "not-evaluated: systemd-run --user --scope unavailable on this host" },
+  async () => {
+    // The AC's "在一层嵌套 quay-anchor-* scope 内再跑一层" case, built on a REAL cgroup chain (⛔ not a
+    // mock): the outer scope is a quay-OWN `quay-anchor-*` envelope (1G), and INSIDE it a real CHILD
+    // cgroup is created through the scope's cgroup delegation with `memory.max=4G`.
+    //
+    // ⚠️ The two layers are chosen so the test DISCRIMINATES: the layer that must be EXCLUDED (the
+    // anchor, 1G) is TIGHTER than the layer that must be CONSUMED (the child, 4G). If the quay-own
+    // exclusion stopped working, the reading would collapse to 1G and this test would fail — the
+    // plain "only a quay-anchor scope, no child" negative control above cannot show that, because
+    // there the excluded layer is the only layer.
+    //
+    // Why the exclusion is still NECESSARY after the dedupe (recorded in the task body): the reading
+    // feeds the derivation of a NEW quay envelope, so consuming a quay-imposed ceiling would compound
+    // the same host fraction each nesting level (feedback loop) — and on the 128-core baseline the
+    // process really does run inside a `quay-anchor-*.scope`.
+    const unit = `quay-anchor-fsr-nested-${Date.now()}-${process.pid}.scope`;
+    const probe = `import(${JSON.stringify(RUNNER)}).then(m=>console.log(JSON.stringify({effective:m.readEffectiveTotalMemBytes(),memoryMax:m.DEFAULT_SYSTEMD_RUN_LIMITS.memoryMax,totalmem:require("os").totalmem()}))).catch(e=>{console.error(e);process.exit(1)})`;
+    // Run a REAL nested cgroup by hand: move this shell into a freshly created child of the scope's
+    // own cgroup (delegated ⇒ writable), then enable the memory controller on the parent and cap the
+    // child. The three raw kernel readings are echoed so the assertion can be checked against them.
+    const inner = [
+      "set -e",
+      'P=/sys/fs/cgroup$(cut -d: -f3 /proc/self/cgroup)',
+      'mkdir -p "$P/inner"',
+      'echo $$ > "$P/inner/cgroup.procs"',
+      'echo +memory > "$P/cgroup.subtree_control"',
+      'echo 4294967296 > "$P/inner/memory.max"',
+      'echo "NESTED_SELF=$(cat /proc/self/cgroup)"',
+      'echo "NESTED_ANCHOR_MAX=$(cat "$P/memory.max")"',
+      'echo "NESTED_CHILD_MAX=$(cat "$P/inner/memory.max")"',
+      'exec "$QUAY_NESTED_NODE" --experimental-strip-types -e "$QUAY_NESTED_PROBE"',
+    ].join("\n");
+    const { code, out, err } = await spawnCmd(
+      ["systemd-run", "--user", "--scope", "--quiet", "--unit", unit, "-p", "MemoryMax=1G", "-p", "MemorySwapMax=0", "-p", "Delegate=yes", "bash", "-c", inner],
+      { ...process.env, QUAY_NESTED_NODE: process.execPath, QUAY_NESTED_PROBE: probe },
+    );
+    assert.equal(code, 0, `the nested probe exits 0; stdout=${JSON.stringify(out)} stderr=${JSON.stringify(err)}`);
+    // The construction really produced a two-level chain: anchor 1G, child 4G, process in the child.
+    assert.match(out, /NESTED_SELF=\S*quay-anchor-fsr-nested-[^\s/]*\.scope\/inner/, `the probe ran inside the nested child cgroup; stdout=${JSON.stringify(out)}`);
+    assert.match(out, /NESTED_ANCHOR_MAX=1073741824/, `the ancestor scope's kernel memory.max really is 1G; stdout=${JSON.stringify(out)}`);
+    assert.match(out, /NESTED_CHILD_MAX=4294967296/, `the child cgroup's kernel memory.max really is 4G; stdout=${JSON.stringify(out)}`);
+    const line = (out ?? "").trim().split("\n").filter((l) => l.startsWith("{")).pop();
+    assert.ok(line, `no reading from the nested probe — stdout=${JSON.stringify(out)} stderr=${JSON.stringify(err)}`);
+    const reading = JSON.parse(line);
+    assert.equal(reading.effective, 4 * GIB, `the NON-quay child layer (4G) is CONSUMED and the TIGHTER quay-anchor ancestor (1G) is SKIPPED — effective=${reading.effective}`);
+    assert.notEqual(reading.effective, GIB, "⛔ the quay-own ancestor's 1G was NOT consumed (that would be the feedback loop the exclusion exists to prevent)");
+    assert.equal(reading.memoryMax, String(GIB), "the derived default follows the consumed 4G layer: floor(4G × 0.25) = 1G");
+    assert.ok(reading.totalmem > reading.effective, "os.totalmem() is the big host total ⇒ the 4G came from the cgroup chain, not from a small host");
   },
 );
 

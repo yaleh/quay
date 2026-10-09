@@ -1,0 +1,105 @@
+{
+  "case_id": "GOAL-031",
+  "stage": "A",
+  "stage_name": "discovery",
+  "cutoff": "2026-10-08T13:00:00.000Z",
+  "cutoff_label": "T0-concern-discovery",
+  "cutoff_rationale": "Before the human classified any of the raw dispersion hits. The raw tool output is visible; its interpretation is not.",
+  "context": {
+    "repo_state_summary": "GOAL-030 has landed. The project's ownership-first method calls for small independently-verifiable slices.",
+    "archguard_literal_dispersion": {
+      "tool_call": "get_literal_dispersion(value:\"needs-human\")",
+      "raw_reading": "dispersion=5",
+      "files": [
+        "task-status.ts",
+        "github-client.ts",
+        "observation.ts",
+        "goal-driver.ts",
+        "workflow-baseline-metrics.ts"
+      ],
+      "note": "Raw output only. Whether each hit is a genuine un-migrated consumer, a legitimate exemption, or a false positive has NOT been determined."
+    },
+    "code_pointers": [
+      "plugin/scripts/goal-driver.ts — grep -c 'status === \"needs-human\"' returns 6 at this cutoff; not yet classified"
+    ],
+    "prior_goal_precedents": [
+      {
+        "id": "GOAL-030",
+        "one_line": "lifecycle-write ownership; landed."
+      }
+    ],
+    "test_suite_state": "scripts/test.sh green on develop at the cutoff commit."
+  },
+  "citable_evidence_refs": [
+    "archguard:literal_dispersion",
+    "repo:canonical_vocab_source",
+    "code:goal_driver_needs_human"
+  ],
+  "task": {
+    "instructions": "You are a NARROW ownership/architecture analyst. This is a DISCOVERY stage: identify what, if anything, ownership-shaped is visible in the state below. You are NOT asked to match any historical decision, and you do NOT need to propose a fix. Saying no concern is visible is a valid and sometimes correct answer. Cite only the listed evidence refs; do not invent readings.",
+    "questions": [
+      "a) What ownership / canonicalization / dependency-boundary concerns are visible in this state? (<=3)",
+      "b) For each concern, which evidence refs ground it?",
+      "c) Does it need investigation before any slice can be defined, or is it decision-ready?",
+      "d) How confident are you, and what would raise or lower that confidence?",
+      "e) If nothing ownership-shaped is visible, say so (abstain) — that is a valid answer."
+    ],
+    "response_schema": {
+      "type": "object",
+      "required": [
+        "concerns",
+        "overall_assessment"
+      ],
+      "properties": {
+        "concerns": {
+          "type": "array",
+          "maxItems": 3,
+          "items": {
+            "type": "object",
+            "required": [
+              "concern",
+              "evidence_refs",
+              "needs_investigation",
+              "confidence"
+            ],
+            "properties": {
+              "concern": {
+                "type": "string"
+              },
+              "evidence_refs": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              },
+              "needs_investigation": {
+                "type": "boolean"
+              },
+              "what_to_investigate": {
+                "type": "string"
+              },
+              "confidence": {
+                "enum": [
+                  "low",
+                  "medium",
+                  "high"
+                ]
+              }
+            }
+          }
+        },
+        "overall_assessment": {
+          "enum": [
+            "no_concern_visible",
+            "concerns_found"
+          ]
+        }
+      }
+    },
+    "citable_evidence_refs": [
+      "archguard:literal_dispersion",
+      "repo:canonical_vocab_source",
+      "code:goal_driver_needs_human"
+    ]
+  }
+}
