@@ -40,11 +40,11 @@ GOAL-032 的第二块：在任务①落地之后，在本 goal 的分支/worktre
 
 ## Definition of Done
 
-两份证据文件落地且内容达标，AC-348 的判据能读到这些文件并判定为真。
+两份证据文件落地且内容达标——`selfhost-identity.json` 的 `allMatch === true`、`archguard-before-after.json` 的 before/after 口径与 `consumerConvergenceEvidence` 均符合本任务 AC 的判定，AC-348 的判据能读到这些文件并判定为真。
 
 ## Touches
 
-- .quay/goal-032-evidence/selfhost-identity.json
-- .quay/goal-032-evidence/archguard-before-after.json
-- plugin/scripts/goal032-selfhost-probe.mjs
+- .quay/goal-032-evidence/selfhost-identity.json (new)
+- .quay/goal-032-evidence/archguard-before-after.json (new)
+- plugin/scripts/goal032-selfhost-probe.mjs (new)
 - tasks/gap-goal032-selfhost-and-archguard-evidence.md
