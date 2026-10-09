@@ -70,6 +70,18 @@ $ node -p "Object.keys(require('./plugin/vendor/quay/package.json'))"
 - [ ] 判据在**真实发布装配产物**上取真（不是 `npm pack` 的结果，也不是源树直读）。
 - [ ] 既有面不回归：`sync-vendor.sh --check` 在干净树上绿；仓内 suite 全绿。
 
+## DoD
+
+判据打在**装配后的发布树**上、且能取假：`bash plugin/scripts/sync-vendor.sh --check` 在干净树上 exit 0，在其镜像的 kernel bundle 被人为改一字节后 exit≠0（证明 `--check` 真覆盖了 kernel，而不是「没检查所以没报错」）；向量文件与 `dist/dashboard-kernel.js` 在装配树里按 README 写明的形式可解析，并用与消费方相同的方式（从 `publish-dist-branch.sh` 产出的树 / 装配后的 `plugin/` 镜像，**不是** `npm pack`、**不是**源树直读）import 成功并调用 kernel（断言 `packLanes` / `mergeLiveAndHistoryIntervals` 可调用）。负控制有落痕：回退 `sync-vendor.sh` 后同一条装配树判据非 0，恢复后为 0。⛔ 只在 `packages/quay` 侧验证、或只改 README 未装配 ⇒ 不算达成。
+
+## Touches
+
+- plugin/scripts/sync-vendor.sh
+- plugin/test/sync-vendor.test.mjs
+- packages/quay/src/dashboard-kernel-vectors.json
+- plugin/vendor/quay/package.json
+- packages/quay/README.md
+- tasks/gap-dashboard-kernel-not-packaged-in-plugin-artifact.md
 ## Notes
 
 - 本任务只解决"kernel 到不了发布产物"。**发布本身**是另一件事（`release-cut.sh`），建议本任务落地后再切 0.18.0，否则切出来的版本仍然对消费方无用。
