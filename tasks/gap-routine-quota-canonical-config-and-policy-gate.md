@@ -15,11 +15,11 @@ depends_on: []
 
 ## Proposal
 
-人已裁定三点方向（详见本任务 Finding 的证据链接），本任务落地其中**①配置面 + ②独立 Policy/Gate + ③全局天花板**，**不**改真实调用点（`probe-routine.ts`/`meta-driver.ts` 仍走旧参数形状）——那是下一个任务（`gap-routine-quota-consumer-convergence`，depends_on 本任务）的范围，理由同本任务体系一贯的"一次 slice 只解决一个能独立验收的问题"（`docs/references/ownership-first-refactoring-methodology.md` §4）。
+人已裁定三点方向（详见本任务 Finding 的证据链接），本任务落地其中**①配置面 + ②独立 Policy/Gate + ③全局天花板**，**不**改真实调用点（`probe-routine.ts`/`meta-driver.ts` 仍走旧参数形状）——该范围留给另一个任务（`gap-routine-quota-consumer-convergence`）处理，理由同本任务体系一贯的"一次 slice 只解决一个能独立验收的问题"（`docs/references/ownership-first-refactoring-methodology.md` §4）。
 
 **⛔ 明确排除（本任务边界,不是遗忘）**：
 - 不碰"历史立案计数 vs 当前板压力"的混淆（`gap-routine-rate-gate-board-pressure-and-quota-ownership` 已用测试钉死该缺口,其修复是独立且更难的问题,需要单独设计+验证,不在本任务内；本任务的"全局天花板"**沿用现有"历史立案计数"语义**做全局汇总,⛔ 不重新定义成"板压力",两者不得混同）。
-- 不改 `probe-routine.ts`/`meta-driver.ts` 的真实调用点（consumer convergence 是下一个任务）。
+- 不改 `probe-routine.ts`/`meta-driver.ts` 的真实调用点（另一个任务覆盖）。
 - 不重启任何生产 driver 进程（本任务只落代码，不触发任何运行时重新加载）。
 
 ## Finding（现状证据）
@@ -71,7 +71,7 @@ export function routineK(root: string, routine: string | null): number { /* ... 
 export function routineGlobalCeiling(root: string): number { /* ... */ }
 ```
 
-### 3. `plugin/scripts/routine-file-gate.ts` 新增一个**独立纯函数**（人裁定②：准入决策由独立纯 Policy/Gate 执行），`gateFinding` 内部调用它，但**暂不改 `gateFinding` 现有参数签名**（向后兼容，真实调用点迁移是下一个任务）：
+### 3. `plugin/scripts/routine-file-gate.ts` 新增一个**独立纯函数**（人裁定②：准入决策由独立纯 Policy/Gate 执行），`gateFinding` 内部调用它，但**暂不改 `gateFinding` 现有参数签名**（向后兼容，真实调用点迁移留给另一个任务）：
 
 ```ts
 /** 独立纯 Policy 函数（人裁定②）：给定「本 routine 窗口内计数」与「全局窗口内计数」与配置，产出
@@ -91,7 +91,7 @@ export function routineQuotaDecision(
 }
 ```
 
-`gateFinding` 现有的 `if (recentCount >= K) return {...}` 一行改为调用 `routineQuotaDecision({perRoutine: recentCount, global: recentCount}, {k: K, globalCeiling: Infinity})`（⛔ 过渡期全局天花板设 `Infinity`，保证本任务落地后 `gateFinding` 的**现有调用方行为逐字不变**——这是迁移兼容的关键取假点，见 AC）。真正把 `global` 读数与有限的 `globalCeiling` 一起喂给它，是下一个任务的范围。
+`gateFinding` 现有的 `if (recentCount >= K) return {...}` 一行改为调用 `routineQuotaDecision({perRoutine: recentCount, global: recentCount}, {k: K, globalCeiling: Infinity})`（⛔ 过渡期全局天花板设 `Infinity`，保证 `gateFinding` 的**现有调用方行为逐字不变**——这是迁移兼容的关键取假点，见 AC）。真正把 `global` 读数与有限的 `globalCeiling` 一起喂给它，留给另一个任务。
 
 ## Acceptance Criteria
 
@@ -100,13 +100,13 @@ export function routineQuotaDecision(
 - [ ] `per_routine` 某项 > `global_ceiling` 的荒谬配置（如 `per_routine: {x: 100}, global_ceiling: 12`）必须被拒（fail-closed 到缺省 `per_routine`，或至少不允许该 routine 单独突破全局上限——具体取哪种处理方式由实现者定，但必须有一条断言证明"任何单 routine 的有效 K 不会大于 globalCeiling"这个不变式，无论配置怎么写）
 - [ ] `routineQuotaDecision` 是独立纯函数单测（不经 `gateFinding`，直接调用）：三组对照——全局未满/per-routine 未满 ⇒ accept；全局未满/per-routine 满 ⇒ `rate:` 拒绝；全局满（即使 per-routine 未满）⇒ `global-rate:` 拒绝（**两种拒绝理由前缀不同，可用 regex 区分，⛔ 不同形**）
 - [ ] 负对照（取假）：把 `routineQuotaDecision` 里 `global` 分支暂时注掉重跑用例 ⇒ "全局满但 per-routine 未满"那组断言必须转红；改回原样重跑全绿——执行命令与两次结果进 `## Evidence`
-- [ ] 迁移兼容性取假（硬约束）：本任务落地后，`plugin/test/routine-file-gate.test.mjs` 既有全部 19 条用例（含上一任务刚加的 ⑯⑰）**一字不改、全部仍绿**——`gateFinding` 对现有调用方（`probe-routine.ts`/`meta-driver.ts`）的外部行为逐字不变（因为过渡期 `globalCeiling` 传 `Infinity`）
+- [ ] 迁移兼容性取假（硬约束）：实现完成后在本任务自己的 worktree 内重跑，`plugin/test/routine-file-gate.test.mjs` 既有全部 19 条用例（含上一任务刚加的 ⑯⑰）**一字不改、全部仍绿**——`gateFinding` 对现有调用方（`probe-routine.ts`/`meta-driver.ts`）的外部行为逐字不变（因为过渡期 `globalCeiling` 传 `Infinity`）
 - [ ] `plugin/test/probe-routine.test.mjs`/`plugin/test/meta-driver.test.mjs`/`plugin/test/quality-gate-driver.test.mjs` 三个消费方测试全绿（本任务不改调用点，理论上必然不回归，但须实跑验证而非假设）
 - [ ] ⛔ 本任务不重启任何生产 driver 进程，不触发任何 `.quay/*-control.json` 写入；`git diff` 范围严格限于 Touches 列出的文件
 
 ## Definition of Done
 
-`drivers.yml`/`driver-config.ts` 成为 routine 配额的 canonical source（含全局天花板，配置错误 fail-closed，迁移兼容）；`routineQuotaDecision` 作为独立纯 Policy 函数落地并有完整正反对照；`gateFinding` 内部已切换到调用它，但因过渡期 `globalCeiling=Infinity`，**对外行为逐字不变**（真正把全局读数接上有限天花板是下一个任务）。全部 AC 勾选、既有测试一字不改全绿、无生产重启。
+`drivers.yml`/`driver-config.ts` 成为 routine 配额的 canonical source（含全局天花板，配置错误 fail-closed，迁移兼容）；`routineQuotaDecision` 作为独立纯 Policy 函数落地并有完整正反对照；`gateFinding` 内部已切换到调用它，但因过渡期 `globalCeiling=Infinity`，**对外行为逐字不变**（真正把全局读数接上有限天花板留给另一个任务）。全部 AC 勾选、既有测试一字不改全绿、无生产重启。
 
 ## Touches
 
