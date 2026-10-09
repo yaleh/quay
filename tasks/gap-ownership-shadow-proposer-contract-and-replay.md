@@ -3,7 +3,7 @@ id: gap-ownership-shadow-proposer-contract-and-replay
 title: "ownership/architecture shadow proposer: project-local contract +
   deterministic gate + offline replay over the GOAL-030..033 corpus (no
   task/goal creation)"
-status: todo
+status: ready
 labels:
   - gap
 parent: null
@@ -36,11 +36,11 @@ extra:
 
 ## Touches
 
-- docs/analysis/ownership-shadow-proposer.mjs
-- docs/analysis/ownership-shadow-replay.mjs
-- docs/analysis/ownership-shadow-replay.results.json
-- docs/analysis/ownership-shadow-replay.md
-- plugin/test/ownership-shadow-proposer.test.mjs
+- docs/analysis/ownership-shadow-proposer.mjs (new)
+- docs/analysis/ownership-shadow-replay.mjs (new)
+- docs/analysis/ownership-shadow-replay.results.json (new)
+- docs/analysis/ownership-shadow-replay.md (new)
+- plugin/test/ownership-shadow-proposer.test.mjs (new)
 - tasks/gap-ownership-shadow-proposer-contract-and-replay.md
 
 ## AC
