@@ -1,7 +1,7 @@
 ---
 id: AC-351
-title: ArchGuard before/after：cli 离开 package SCC（6→5，其余五员不变）且负对照可证伪；CLI driver
-  status 的仪器读数语义在被求值树上现场重算不变
+title: ArchGuard before/after：cli 离开 package SCC（6→4：cli 与仅经 cli 入环的 fan-in
+  一同离开，其余四员不变）且负对照可证伪；CLI driver status 的仪器读数语义在被求值树上现场重算不变
 status: active
 kind: criterion
 goal: GOAL-033
@@ -15,9 +15,9 @@ criterion: |-
   const b=d.before||{},a=d.after||{},n=d.negativeControl||{};const srt=(x)=>Array.isArray(x)?[...x].sort():null;
   const want=["","cli","fan-in","gate","gate/config","gate/factories"];
   if(JSON.stringify(srt(b.packageSccMembers))!==JSON.stringify(want)||b.cliPackageFanIn!==2){console.error("CAUSE=before-baseline-wrong — before must reproduce the known 6-member SCC with cli fan-in 2, got members="+JSON.stringify(b.packageSccMembers)+" fanIn="+b.cliPackageFanIn);process.exit(1)}
-  const rest=want.filter(m=>m!=="cli");
+  const rest=want.filter(m=>m!=="cli"&&m!=="fan-in");
   if(a.cliPackageFanIn!==0){console.error("CAUSE=cli-still-has-core-fan-in — after.cliPackageFanIn="+a.cliPackageFanIn);process.exit(1)}
-  if(JSON.stringify(srt(a.packageSccMembers))!==JSON.stringify(rest)){console.error("CAUSE=scc-not-exactly-minus-cli — after members="+JSON.stringify(a.packageSccMembers)+" expected "+JSON.stringify(rest)+" (cli removed, nothing else changed)");process.exit(1)}
+  if(JSON.stringify(srt(a.packageSccMembers))!==JSON.stringify(rest)){console.error("CAUSE=scc-not-exactly-minus-cli — after members="+JSON.stringify(a.packageSccMembers)+" expected "+JSON.stringify(rest)+" (cli leaves, and fan-in with it because cli/driver.ts is its only importer inside the SCC; nothing else changes)");process.exit(1)}
   if(!(n.cliPackageFanIn>=1)||n.packageSccContainsCli!==true){console.error("CAUSE=negative-control-missing — re-injecting one core-to-cli edge must bring cli back into the SCC, got "+JSON.stringify(n));process.exit(1)}
   if(typeof d.archguardVersion!=="string"||!d.archguardVersion){console.error("CAUSE=archguard-version-missing — before/after must name the single ArchGuard build used");process.exit(1)}
   })()' "$ev" || { echo "CAUSE=evidence-check-red — the check above printed the specific CAUSE" >&2; exit 1; }
@@ -27,10 +27,13 @@ criterion: |-
   w=$(probe worker); p=$(probe promotion)
   [ "$w" = "with" ] || { echo "CAUSE=cli-worker-status-lost-instruments — quay driver status --kind worker --json read: $w (expected the instruments key, as before the move)" >&2; exit 1; }
   [ "$p" = "without" ] || { echo "CAUSE=cli-promotion-status-shape-changed — quay driver status --kind promotion --json read: $p (expected no instruments key)" >&2; exit 1; }
-  echo "PASS: ArchGuard before/after shows cli leaving the package SCC (6 -> 5, the other five unchanged) with a falsifying negative control, and the CLI status surface keeps its exact instrument semantics on this tree"
-expect: exit 0 = 证据显示 cli 离开 SCC（6→5 且其余五员不变）、负对照把 cli 拉回 SCC、且被求值树上 worker
-  status 带 instruments 而 promotion 不带；exit 1 = CAUSE=；exit 3 = 证据文件尚未写
-origin: 人 2026-10-09 裁定：调查并推进 core-root<->core-cli 最小依赖环切片
+  echo "PASS: ArchGuard before/after shows cli leaving the package SCC (6 -> 4: cli plus fan-in, the other four unchanged) with a falsifying negative control, and the CLI status surface keeps its exact instrument semantics on this tree"
+expect: exit 0 = 证据显示 SCC 6→4（cli 与 fan-in 离开、其余四员不变）、负对照把 cli 拉回 SCC、且被求值树上
+  worker status 带 instruments 而 promotion 不带；exit 1 = CAUSE=；exit 3 = 证据文件尚未写
+origin: 2026-10-09 goal 作者更正：after 期望由 6→5 改为 6→4。原预测只核了 cli 的入边，漏核 fan-in
+  在环内的唯一入边就是 cli/driver.ts:37（packages/quay/src 内 fan-in/ 的唯一 importer，git grep
+  独立复核，正对照 gate/ 命中 10）；删 "" -> cli 后 fan-in 随 cli 一起离开，边层面无任何新增/删除以外的变化。worker
+  实测 before 6 / after 4 / 负对照 6（archguard 0.1.38，显式 scope）
 activatedAt: 2026-10-09T05:46:02.808Z
 statusLog:
   - at: 2026-10-09T05:46:02.808Z

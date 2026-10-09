@@ -1,0 +1,15 @@
+{
+  "case_id": "GOAL-031",
+  "status": "landed",
+  "merge_commit": "117ee91b8",
+  "merge_commit_note": "git log --oneline --all --grep=\"GOAL-031\" --merges shows '117ee91b8 merge: goal/GOAL-031 into develop'.",
+  "ac_results": {
+    "AC-343": "achieved",
+    "AC-344": "achieved",
+    "AC-345": "achieved"
+  },
+  "goal_final_status": "achieved",
+  "goal_status_log_reason": "I2: all ACs achieved + sufficiency covered",
+  "archguard_delta_direction": "get_literal_dispersion(value:\"needs-human\") went from 5 to 4 (not the originally-planned <=2, a corrected target); grep -c 'status === \"needs-human\"' plugin/scripts/goal-driver.ts went from 6 to exactly 1.",
+  "as_of": "2026-10-09T00:00:00.000Z"
+}

@@ -1,10 +1,10 @@
 ---
 id: GOAL-033
 title: core-root⇄core-cli 依赖环切片：driver 控制客户端与 driver 词表从 cli/ 下沉到 core-root（cli
-  离开 package SCC，6→5），fan-in 仪器附加留在 CLI 以免造出 root⇄fan-in 新互指
+  与仅经 cli 入环的 fan-in 离开 package SCC，6→4），fan-in 仪器附加留在 CLI 以免造出 root⇄fan-in 新互指
 status: active
 kind: goal
-origin: 人 2026-10-09 裁定：调查并推进 core-root<->core-cli 最小依赖环切片
+origin: 2026-10-09 goal 作者更正 SCC 期望 6→5 为 6→4（见 AC-351 origin）
 activatedAt: 2026-10-09T05:46:07.439Z
 statusLog:
   - at: 2026-10-09T05:46:07.439Z
@@ -26,7 +26,7 @@ branch: true
   1. `packages/quay/src/serve-sessions.ts:20` `import { runDriver } from "./cli/driver.ts"` —— 唯一调用点 `handleDriverLifecycle`（`:708`，POST /sessions/driver 的 start/stop/restart）。value 边、静态路径。
   2. `packages/quay/src/serve.ts:50` `import { ALL_SERVICE_NAMES, HOSTED_SERVICE_NAMES } from "./cli/driver-vocab.ts"` —— `ALL_SERVICE_NAMES` 只被 `parseServiceList`（`:145-156`）用；`HOSTED_SERVICE_NAMES` 在 `serve.ts` 内**零使用**（死 import）。value 边、静态路径。
 - cli → core-root 34 条（正常方向，CLI 依赖 core），不是问题。
-- `gate/`、`gate/config`、`gate/factories`、`fan-in/`、`primitives/`、`kernel/` → `cli/`：**0 条** ⇒ 删掉上面 2 条后 `cli` 在环内无入边，**必然离开 SCC**（6 → 5），而其余五个成员与它们之间的边一条不动。
+- `gate/`、`gate/config`、`gate/factories`、`fan-in/`、`primitives/`、`kernel/` → `cli/`：**0 条** ⇒ 删掉上面 2 条后 `cli` 在环内无入边，**必然离开 SCC**；且因为 `cli/driver.ts:37` 是 `packages/quay/src` 内 `fan-in/` 的**唯一** importer，`fan-in` 只经 `cli` 入环，会随之一起离开 ⇒ SCC **6 → 4**（2026-10-09 更正：原写「6 → 5、其余五员不动」，漏核了 fan-in 的入边；由 GOAL-033 ② 的实测读数揭示）。其余四员之间的边一条不动。
 - `fan-in/` → core-root 已存在（`fan-in/ff-merge.ts:30-37` import `plugin-root`/`config`/`runtime-artifacts`）；core-root → `fan-in/` 当前 **0 条**。
 
 判断（ownership）：
@@ -45,7 +45,7 @@ branch: true
 范围：只拆 core-root ⇄ core-cli 这一对；只移动上面点名的符号；只改为它们 import 路径所必需的消费者与机械检查器路径。
 
 非目标（⛔ 有意排除）：
-- ⛔ 不碰 `gate/`、`gate/config`、`gate/factories`、`fan-in/`、`kernel/` 之间的其它互指；**不为了让 package 环数归零而顺手处理任何别的边**——预期结果是 SCC 6 → 5，不是 0。
+- ⛔ 不碰 `gate/`、`gate/config`、`gate/factories`、`fan-in/`、`kernel/` 之间的其它互指；**不为了让 package 环数归零而顺手处理任何别的边**——预期结果是 SCC 6 → 4（cli 与仅经 cli 入环的 fan-in），不是 0。
 - ⛔ 不把 `parseServiceList` 搬进 `cli/server.ts`（它是 CLI flag 解析、放在 `serve.ts` 也是一个 ownership 问题，但词表进 core 后它不再制造跨层边，留作观察项）。
 - ⛔ 不改 `mcp-server.ts:543` 手抄的 kind 枚举（另一个表层漂移点，观察项）。
 - ⛔ 不改 driver 运行时语义：CLI / web / `quay server` 三个表层的输出、拒绝理由、退出码逐字不变。
@@ -70,4 +70,4 @@ branch: true
 
 ## 退出条件
 
-core-root 对 `cli/` 的 import 归零（且没有新增 core-root → `fan-in/` 边）；driver 控制客户端与 driver 词表各在 core-root 有唯一定义、`cli/driver-vocab.ts` 消失、五个消费者真实改口；`enum-surface-parity-check` / `import-graph-check` 不回退；ArchGuard before/after 证明 `cli` 离开 package SCC（6 → 5，其余五员不变）且负对照可证伪；CLI 表层语义（worker status 带仪器读数、promotion 不带）在分支树上现场重算一致；GOAL-033 以恰好一个合并提交进入 develop，落地树核验通过。对应 AC-350（结构与范围护栏）、AC-351（ArchGuard before/after + 语义不变 + 负对照）、AC-352（并入形态 + 并入后核验，post-merge）。
+core-root 对 `cli/` 的 import 归零（且没有新增 core-root → `fan-in/` 边）；driver 控制客户端与 driver 词表各在 core-root 有唯一定义、`cli/driver-vocab.ts` 消失、五个消费者真实改口；`enum-surface-parity-check` / `import-graph-check` 不回退；ArchGuard before/after 证明 `cli` 离开 package SCC（6 → 4：cli 与 fan-in 离开，其余四员不变）且负对照可证伪；CLI 表层语义（worker status 带仪器读数、promotion 不带）在分支树上现场重算一致；GOAL-033 以恰好一个合并提交进入 develop，落地树核验通过。对应 AC-350（结构与范围护栏）、AC-351（ArchGuard before/after + 语义不变 + 负对照）、AC-352（并入形态 + 并入后核验，post-merge）。
