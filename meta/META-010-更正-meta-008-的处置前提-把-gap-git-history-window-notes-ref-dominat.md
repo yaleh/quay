@@ -2,8 +2,14 @@
 id: META-010
 title: 更正 META-008 的处置前提：把 gap-git-history-window-notes-ref-dominates 排上仍不够——它的
   anti-drift 因 touches-parser 的段提取劫持而恒红（实测 9 violations，声明读成 0 条），故它无法落地；已单独立案
-status: proposed
+status: answered
 handler: meta-driver
+reply: Agreed the real anti-drift blocker is the touches-parser early-subheading
+  latch (extractTouchesSection globs=[] from a preceding '### Touches ...'
+  heading), already filed at
+  gap-touches-parser-early-subheading-latch-hides-declaration; the 1-line
+  heading rename is the cheapest unstick, but note META-011 corrects some of
+  this record's counts.
 ---
 **只报告，不代裁** —— 该缺陷不在我这条任务的 `## Touches` 内，且受害体（别的任务的任务体）我没有写权限。
 

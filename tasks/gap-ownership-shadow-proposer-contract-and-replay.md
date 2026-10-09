@@ -42,16 +42,17 @@ extra:
 - docs/analysis/ownership-shadow-replay.md (new)
 - plugin/test/ownership-shadow-proposer.test.mjs (new)
 - tasks/gap-ownership-shadow-proposer-contract-and-replay.md
+- .gitignore (modified — the sandbox carrier's ignore entry)
 
 ## AC
 
-- [ ] `node docs/analysis/ownership-shadow-replay.mjs --out docs/analysis/ownership-shadow-replay.results.json` 退出 0，且 4 个 case 各有结果：`node -e 'const r=require("./docs/analysis/ownership-shadow-replay.results.json"); process.exit(Object.keys(r.cases).length===4?0:1)'`。
-- [ ] **结构性 sandbox 保证**（测试断言，非散文）：`plugin/test/ownership-shadow-proposer.test.mjs` 断言 proposer 模块源码**不含** `fileProposals` / `driveItems` / `fileDecisions` 的引用，且不含任何 `task_write`/`goal` 写调用 ⇒ 退出 0。
-- [ ] **确定性闸可拒**（负对照，每条一个用例）：构造 4 个坏 envelope（缺字段 / evidence_ref 不存在 / concern 越界成产品规划 / recommended_next_action 越权为 create-task），闸必须**逐条拒绝并给出可区分的理由**（⛔ 四种拒因不得同形——硬规则 3b）。
-- [ ] **闸可放行**：一个合法 envelope 必须 accept（⛔ 防止闸恒拒导致「全绿」假象）。
-- [ ] 回放指标写入 results.json 且非退化：每个 case 的 `scoreResponse` 输出含全部维度键（concern_recall/slice/granularity/harnessability/... ），`node -e` 逐 case 断言键存在。
-- [ ] 未创建任何 task/goal：`git status --porcelain tasks/ goals/` 除本任务自身外无新增。
-- [ ] `plugin/scripts/meta-driver.ts` 未被本任务改动。
+- [x] `node docs/analysis/ownership-shadow-replay.mjs --out docs/analysis/ownership-shadow-replay.results.json` 退出 0，且 4 个 case 各有结果：`node -e 'const r=require("./docs/analysis/ownership-shadow-replay.results.json"); process.exit(Object.keys(r.cases).length===4?0:1)'`。—— 实跑 `node docs/analysis/ownership-shadow-replay.mjs --out …` exit 0；`node -e` 数 `Object.keys(r.cases).length===4` exit 0。
+- [x] **结构性 sandbox 保证**（测试断言，非散文）：`plugin/test/ownership-shadow-proposer.test.mjs` 断言 proposer 模块源码**不含** `fileProposals` / `driveItems` / `fileDecisions` 的引用，且不含任何 `task_write`/`goal` 写调用 ⇒ 退出 0。—— `plugin/test/ownership-shadow-proposer.test.mjs` 两条 node:test 全绿（源码零 forbidden 引用 + import 图只有 `node:` 内建）。
+- [x] **确定性闸可拒**（负对照，每条一个用例）：构造 4 个坏 envelope（缺字段 / evidence_ref 不存在 / concern 越界成产品规划 / recommended_next_action 越权为 create-task），闸必须**逐条拒绝并给出可区分的理由**（⛔ 四种拒因不得同形——硬规则 3b）。—— test「四个坏 envelope 四种可区分拒因」绿：code 两两不同且 reason 两两不同（schema_incomplete / evidence_ref_unresolvable / scope_out_of_bounds / forbidden_action）。
+- [x] **闸可放行**：一个合法 envelope 必须 accept（⛔ 防止闸恒拒导致「全绿」假象）。—— test「合法 envelope 必 ACCEPT」绿（外加 `not-evaluated` 独立取值一条）。
+- [x] 回放指标写入 results.json 且非退化：每个 case 的 `scoreResponse` 输出含全部维度键（concern_recall/slice/granularity/harnessability/... ），`node -e` 逐 case 断言键存在。—— test「CLI 端到端 + 逐 case 断言 19 个维度键」绿；独立 `node -e` 复核 4 case × 19 键全在。
+- [x] 未创建任何 task/goal：`git status --porcelain tasks/ goals/` 除本任务自身外无新增。—— `git status --porcelain tasks/ goals/` 除本任务自身外为空（唯一写入是本任务的 ABI task_write）。
+- [x] `plugin/scripts/meta-driver.ts` 未被本任务改动。—— `git diff --name-only HEAD -- plugin/scripts/meta-driver.ts` 输出 0 行。
 
 ## DoD
 
