@@ -24,8 +24,16 @@ GOAL-033/{input.json, reference.json, outcome.json}
   minimal-sufficient granularity, not a bigger or smaller one — see below), plus
   `leakage_markers` — exact strings that must never appear in that case's `input.json`.
 - **`outcome.json`** — real post-execution mechanical readings (merge commit sha, AC results,
-  ArchGuard before/after). GOAL-033 is honestly marked `"status": "in-progress"` — it had not
-  merged as of this corpus's creation, and this file does not fabricate a completed result.
+  ArchGuard before/after), split into `predicted_mechanical_delta` (what was genuinely believed
+  at decision time — not hindsight) versus `observed_mechanical_delta` (what measurement later
+  showed). GOAL-033 is the live example of why this split matters: the real decision-time belief
+  was SCC 6->5, but the measured result was 6->4 (cli AND fan-in both left — fan-in's only
+  in-edge inside the cycle was through cli, so removing it stranded fan-in too; AC-351's own
+  criterion was corrected in place once this was measured). `reference.json` keeps the original
+  `predicted_mechanical_delta` text, unmodified by hindsight — only `outcome.json` carries the
+  observed number and the correction narrative. (GOAL-031 has the same category of event —
+  dispersion assumed <=2, corrected to 4 after measurement — a second independent sample of
+  "the a-priori number was wrong, fix the target, not the measurement.")
 
 ## Decomposition quality — what this corpus is really testing
 

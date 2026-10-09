@@ -169,7 +169,63 @@ test("scoreResponse: known-false sample (generic/irrelevant response) scores nea
   assert.equal(result.chosen_slice_agreement, "no_match");
   assert.equal(result.harnessability, "incomplete");
   assert.equal(result.primitive_reuse.mentioned_any, false);
+  assert.equal(result.primitive_reuse.possible_reinvention, true, "reference names real primitives but candidate named none");
   assert.equal(result.granularity, "disagreement", "candidate said too-broad, reference says sufficient");
+  assert.equal(result.investigation_vs_goal_agreement, false, "candidate said investigation, reference's ground truth is goal");
+  assert.equal(result.expected_delta_quality, "no_numeric_claim");
+  assert.equal(result.falsifiability_negative_control_presence, "absent_or_too_thin");
+  assert.equal(result.abstention_uncertainty_reasonableness, "generic_or_missing");
+  assert.equal(result.scope_expansion_violation, false, "empty non_goals list cannot overlap anything — this is a vacuous pass, not evidence scope-checking works");
+});
+
+test("scoreResponse: scope_expansion_violation fires when the candidate's own scope overlaps a real non-goal", () => {
+  const reference = loadCaseReference("GOAL-030");
+  const violating = {
+    scope: { in_scope: [reference.scope_discipline.non_goals[0]], non_goals: [] },
+  };
+  const result = scoreResponse("GOAL-030", violating);
+  assert.equal(result.scope_expansion_violation, true, "echoing a real non-goal back as in-scope must be caught");
+});
+
+test("scoreResponse: unnecessary_decomposition_flag fires for multiple proposed interventions with no coordination-cost reasoning", () => {
+  const fragmented = {
+    candidate_interventions: [
+      { title: "fix A", rationale: "..." },
+      { title: "fix B", rationale: "..." },
+      { title: "fix C", rationale: "..." },
+    ],
+    decomposition_rationale: { coordination_cost_note: "", why_not_finer: "" },
+  };
+  const result = scoreResponse("GOAL-030", fragmented);
+  assert.equal(result.decomposition_breadth.interventions_proposed, 3);
+  assert.equal(result.coordination_cost_reasoning_given, false);
+  assert.equal(result.unnecessary_decomposition_flag, true, "3 interventions with zero coordination-cost reasoning should flag");
+});
+
+test("scoreResponse: unnecessary_decomposition_flag does NOT fire for multiple interventions that DO carry coordination-cost reasoning", () => {
+  const justified = {
+    candidate_interventions: [
+      { title: "fix A", rationale: "..." },
+      { title: "fix B", rationale: "..." },
+    ],
+    decomposition_rationale: { coordination_cost_note: "these two are independently acceptable and run in parallel without shared state, so splitting them costs nothing extra" },
+  };
+  const result = scoreResponse("GOAL-030", justified);
+  assert.equal(result.coordination_cost_reasoning_given, true);
+  assert.equal(result.unnecessary_decomposition_flag, false, "multiple interventions ARE fine when justified");
+});
+
+test("scoreResponse: granularity is 'not_stated' (not silently 'agreement') when the candidate omits a self-assessment", () => {
+  const result = scoreResponse("GOAL-030", { decomposition_rationale: {} });
+  assert.equal(result.granularity, "not_stated", "an omitted self-assessment must not be conflated with a correct or incorrect one");
+});
+
+test("scoreResponse: slice_semantic_coherence flags a bundled/incoherent recommendation", () => {
+  const bundled = {
+    recommended: "sink the lifecycle writes into a kernel module; as well as rewrite the dashboard UI; and also migrate the CLI to a new argument parser",
+  };
+  const result = scoreResponse("GOAL-030", bundled);
+  assert.match(result.slice_semantic_coherence, /possible_bundling_heuristic/, "multiple unrelated joined clauses should trip the weak coherence heuristic");
 });
 
 test("scoreResponse: known-true sample (a close paraphrase of the real reference decision) scores agreement across overlap-based dimensions", () => {
@@ -198,8 +254,16 @@ test("scoreResponse: known-true sample (a close paraphrase of the real reference
   assert.equal(result.harnessability, "harness_ready");
   assert.equal(result.granularity, "agreement");
   assert.equal(result.primitive_reuse.mentioned_any, true);
+  assert.equal(result.primitive_reuse.possible_reinvention, false);
   assert.ok(result.primitive_reuse.overlap_with_reference > 0.5);
   assert.equal(result.unnecessary_decomposition_flag, false);
+  assert.equal(result.investigation_vs_goal_agreement, true);
+  assert.equal(result.expected_delta_quality, "has_numeric_claim");
+  assert.equal(result.falsifiability_negative_control_presence, "present");
+  assert.equal(result.abstention_uncertainty_reasonableness, "specific");
+  assert.equal(result.scope_expansion_violation, false);
+  assert.ok(result.decomposition_quality.why_not_broader_overlap > 0.5);
+  assert.ok(result.decomposition_quality.why_not_finer_overlap > 0.5);
 });
 
 test("scoreResponse: hindsight_leakage_guard flags a response that happens to contain a real leakage marker", () => {

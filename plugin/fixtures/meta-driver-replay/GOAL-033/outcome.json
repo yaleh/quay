@@ -1,15 +1,17 @@
 {
   "case_id": "GOAL-033",
-  "status": "in-progress",
-  "status_note": "GOAL-033 is still 'active' as of this corpus's creation — it has NOT merged. This is a deliberately honest partial outcome, not a fabricated completed result: the task instructions for this corpus explicitly require that an unfinished case say so plainly rather than pretend a landing happened.",
-  "merge_commit": null,
+  "status": "landed",
+  "merge_commit": "ddb9c6ac0",
+  "merge_commit_note": "git log --oneline --all --grep=\"GOAL-033\" --merges shows 'ddb9c6ac0 merge: goal/GOAL-033 into develop'.",
   "ac_results": {
     "AC-350": "achieved",
-    "AC-351": "active (not yet achieved — the ArchGuard before/after evidence file .quay/goal-033-evidence/archguard-before-after.json does not exist yet as of this snapshot)",
-    "AC-352": "active (not yet achieved — no landed goal-merge-result event for GOAL-033 exists yet; this is a post-merge AC and is structurally not-evaluated until a merge happens)"
+    "AC-351": "achieved (criterion text itself was mid-flight corrected -- see prediction_correction below)",
+    "AC-352": "achieved"
   },
-  "goal_final_status": "active",
-  "goal_status_log_reason": null,
-  "archguard_delta_direction": "not yet measured (AC-351's evidence file has not been written at the time of this snapshot)",
-  "as_of": "2026-10-09T00:00:00.000Z"
+  "goal_final_status": "achieved",
+  "predicted_mechanical_delta": "SCC size 6 -> 5 (cli leaves the package SCC; the other 5 members, including fan-in, unchanged). This was the genuine belief recorded in the goal/AC bodies at decision time (see reference.json's selected_slice/why_not_others) -- it is NOT fabricated hindsight, it is what was actually predicted before execution.",
+  "observed_mechanical_delta": "SCC size 6 -> 4, not 5. BOTH cli AND fan-in leave the SCC, the other 4 members (root, gate, gate/config, gate/factories) unchanged. Measured via archguard MCP (version 0.1.38), scope packages/quay/src, before/after/negative-control all analyzed in one session against the same running MCP server -- see .quay/goal-033-evidence/archguard-before-after.json (gitignored, local evidence; this file is a durable copy of its key numbers). before.packageSccMembers (6): [\"\",\"cli\",\"fan-in\",\"gate\",\"gate/config\",\"gate/factories\"]; after.packageSccMembers (4): [\"\",\"gate\",\"gate/config\",\"gate/factories\"]; negativeControl.packageSccMembers (6, falsifying): re-injecting one core-root->cli edge with a REAL (non-bare) usage brings cli back into a size-6 SCC.",
+  "prediction_correction_narrative": "The original prediction (6->5) only checked cli's own incoming edge count. It missed that fan-in's ONLY incoming edge inside the SCC is cli/driver.ts's import of fan-in/ff-merge.ts (the sole importer of that path in packages/quay/src) -- so removing the one core-root->cli edge necessarily strands fan-in too (fan-in becomes unreachable from inside the SCC once cli leaves), and BOTH leave together. AC-351's own criterion text was corrected in place on 2026-10-09 to assert 6->4 instead of 6->5 (goals/AC-351-*.md origin field: '原预测只核了 cli 的入边，漏核 fan-in 在环内的唯一入边就是 cli/driver.ts...'). This is the SAME category of event as GOAL-031's dispersion-target correction (assumed <=2, corrected to the achievable 4) -- a second, independent instance in this same 4-case corpus of a human correcting an a-priori numeric target after measurement contradicted it, rather than forcing the measurement to match the original guess.",
+  "negative_control_detail": "A bare (unused) import re-injection registered in detect_cycles' file-import graph but did NOT move get_package_metrics' resolved-dependency fan-in count (0, not 1) -- the negative control required a REAL value-use of the re-injected import to actually move both readings. This methodological nuance is itself recorded in the evidence file and is a legitimate observed-outcome detail, not something that could have been predicted at decision time.",
+  "as_of": "2026-10-09T08:00:00.000Z"
 }

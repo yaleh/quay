@@ -2430,12 +2430,17 @@ async function runMetaRoundInner(opts: MetaRoundOptions): Promise<MetaRoundResul
   }
 
   const prompt = buildProbePrompt(objective, readings);
-  const argv = opts.probeArgv ? opts.probeArgv(prompt) : launchArgv("meta-driver", prompt, root);
+  // ⛔ prompt 走 **stdin** 而不是 argv：本轮的 readings JSON 实测可达 >1 MB，作为单个 argv 元素
+  //    必然撞 Linux `MAX_ARG_STRLEN`（128 KiB）⇒ `spawn E2BIG`，语义半每轮必死
+  //    （gap-launchargv-prompt-in-argv-exceeds-max-arg-strlen）。promptViaStdin 只影响本条路径，
+  //    其它调用点的 argv 逐字不变。probeArgv 测试缝存在时不改（它自带完整 argv 语义）。
+  const argv = opts.probeArgv ? opts.probeArgv(prompt) : launchArgv("meta-driver", prompt, root, { promptViaStdin: true });
+  const promptViaStdin = !opts.probeArgv;
   // FILE-ONLY 守卫的前照：spawn 期间 tracked 文件不得被改动（见 probeWriteViolations 上方说明）。
   const beforeChanges = snapshotTrackedChanges(root);
   // ⛔ 语义半不设有限超时：成本结构未实测前不设阈值（硬规则 4 推论一）。v0 是手工触发，
   //    外部 ctrl-c 是兜底；固化成常驻例程前必须先拿到实测耗时再定这个数。
-  const r = await runAsync(argv, { timeoutMs: Infinity, collectStderr: true });
+  const r = await runAsync(argv, { timeoutMs: Infinity, collectStderr: true, stdinData: promptViaStdin ? prompt : undefined });
   if (r.error) {
     const reason = `probe spawn error: ${r.error.message}`;
     return { fact: { name: "meta-driver", value: { ...base, digest }, state: "not-evaluated", reason } };
