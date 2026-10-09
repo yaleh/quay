@@ -2,7 +2,7 @@
 id: gap-effective-capacity-cgroup-cpu-memory-probe
 title: 新增 cgroup v2 感知的"有效资源探测"(cpu.max bandwidth quota + memory.max)——现有
   nproc/os.totalmem() 读数不区分容器/cgroup 配额
-status: todo
+status: ready
 labels:
   - gap
 parent: null
