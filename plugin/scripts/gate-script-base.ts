@@ -28,6 +28,13 @@ export interface CliSpec {
    * language changes; see the parseArgs block below for why the default is not strict.
    */
   strict?: boolean;
+  /**
+   * How `--help` / `-h` is handled. "exit" (default) = the shared contract: print usage to stdout,
+   * exit 0, no business side effect. "return" = set `ParsedArgs.help = true` and return WITHOUT
+   * exiting, so a caller that owns a richer multi-line help text (or must not kill the process)
+   * can print it and return on its own. See the parseArgs block for why this mode exists.
+   */
+  help?: "exit" | "return";
 }
 
 export interface ParsedArgs {
@@ -35,6 +42,12 @@ export interface ParsedArgs {
   args: string[];
   /** Flag values keyed by flag name (without leading --). */
   flags: Record<string, string | boolean>;
+  /**
+   * True iff `spec.help === "return"` and argv carried `--help`/`-h`. Absent on the exit path (which
+   * never returns) and on every normal run — so a caller reads it as `help === true`, never as a
+   * three-valued "did help happen / could I not tell".
+   */
+  help?: boolean;
 }
 
 // ── helpExit ────────────────────────────────────────────────────────────────────────────────────────
@@ -55,6 +68,18 @@ export function helpExit(usage: string): never {
 // `--help` / `-h` anywhere in argv ⇒ print usage to stdout and exit 0 (the shared contract above),
 // evaluated BEFORE the minArgs failure path so `--help` never reads as a missing-arg error.
 // Otherwise exits with code 2 and a usage message if fewer than minArgs positional args are provided.
+//
+// `spec.help: "return"` REPLACES the `--help`/exit arm with a non-exiting one: `--help` sets
+// `result.help = true` and returns immediately (still BEFORE minArgs, same rule), leaving the
+// process alive for the caller to print its OWN usage and return. This exists because the exit-only
+// `--help` was the single blocker named by a `semantic-dedup-scan` pass (.quay/routine-findings.jsonl
+// finding `parse-args-handrolled-variants`, runId `semantic-dedup-scan-1791536153223`, suggestedAction
+// "merge — give the shared parser a non-exiting help mode"): `plugin/scripts/perfile-failure-rate.ts` / `psi-window-join.ts` /
+// `psi-failure-correlation-check.ts` each carry a private if/else flag loop that sets `help:true` and
+// lets `main()` print a multi-line usage, and they COULD NOT adopt this parser while it killed the
+// process on a flag they handle themselves. What the mode does NOT change: the exit path stays the
+// default (so every caller that already relied on `--help` ⇒ exit 0 keeps that byte-for-byte), and
+// `minArgs` is never enforced on the return path (help is not a missing-arg error in either mode).
 //
 // WHY `strict` EXISTS — a semantic-dedup-scan pass (.quay/routine-findings.jsonl, routine
 // `semantic-dedup-scan`, runId `semantic-dedup-scan-1790503843524`, finding `parseargs-local-copies`,
@@ -78,8 +103,10 @@ export function helpExit(usage: string): never {
 //   • a GREEDY list (`--files a b c`, checked-in-write-check.ts): measured, this parser reads
 //     `files:"a"` and leaks `b`,`c` into `args` — folding that caller would silently drop 2 of 3
 //     input files from the judgement.
-//   • a NON-EXITING error return (loadbearing-test-gate.ts returns `{error}`, it must not kill the
-//     process): this parser owns `process.exit` on both the `--help` and minArgs paths.
+//   • a NON-EXITING ERROR return (loadbearing-test-gate.ts returns `{error}` for a bad usage rather
+//     than killing the process): `spec.help: "return"` covers ONLY the `--help` arm — the minArgs
+//     failure path still owns `process.exit(2)`, so a caller whose absent-argument case must stay
+//     alive cannot fold here yet.
 export function parseArgs(argv: string[], spec: CliSpec): ParsedArgs {
   const result: ParsedArgs = { args: [], flags: {} };
   const raw = argv.slice(2);
@@ -87,6 +114,13 @@ export function parseArgs(argv: string[], spec: CliSpec): ParsedArgs {
 
   const scriptName = path.basename(argv[1] || "script");
   if (raw.includes("--help") || raw.includes("-h")) {
+    if (spec.help === "return") {
+      // Non-exiting help mode: return BEFORE minArgs (a `--help` with no positionals is never a
+      // missing-arg error — the same rule the exit path keeps by exiting first). Nothing is parsed
+      // onto the result: the caller is expected to print its own usage and return on `help === true`.
+      result.help = true;
+      return result;
+    }
     helpExit(`usage: ${scriptName} ${spec.usage}`);
   }
 

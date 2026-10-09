@@ -28,7 +28,7 @@
 import fs from "node:fs";
 import path from "node:path";
 import { execFileSync } from "node:child_process";
-import { helpExit, isDirectEntry } from "./gate-script-base.ts";
+import { helpExit, isDirectEntry, parseArgs as baseParseArgs } from "./gate-script-base.ts";
 
 // ── Flag patterns (batch-style SELF-REPORT vocabulary) ──────────────────────────────────────────────
 //
@@ -134,37 +134,59 @@ export function isInnerSelfReport(subject) {
   return /^(inner:|merge )/.test(subject);
 }
 
+// ── CLI ─────────────────────────────────────────────────────────────────────────────────────────
+// The flag loop is the SHARED spec-driven parser (gate-script-base.ts) — this wrapper maps the raw
+// flag strings onto this command's typed shape. It replaces the private `switch`-based variant named
+// by semantic-dedup-scan finding `parse-args-handrolled-variants`
+// (runId `semantic-dedup-scan-1791536153223`): that variant could not fold while the shared parser
+// `process.exit()`ed on `--help`, which `main` handles itself (it prints this command's own usage).
+//
+// `main` takes the SLICED argv tail (`process.argv.slice(2)`, its existing contract); the shared
+// parser reads full `process.argv`, so the two leading slots it skips are re-attached here.
+//
+// A value flag the shared parser could not resolve (a trailing `--flag` with no value) comes back as
+// `""`; `flagStr`/`flagNum` fold that to the command's default. `--text`/`--state` are read as
+// SUPPLIED whenever the key is present, so an explicit `--text ""` stays a (empty) text fixture
+// rather than silently falling through to the git-log source.
 function parseArgs(argv) {
-  const args = {
-    root: process.cwd(),
-    count: 40,
-    convergenceRounds: 3,
-    json: false,
-    state: null,
-    noState: false,
-    text: null,
-    stdin: false,
+  const { flags, help } = baseParseArgs(["node", "self-report-vocab-check.ts", ...argv], {
+    minArgs: 0,
+    usage:
+      "[--root <dir>] [--count <n>] [--convergence-rounds <n>] [--state <file>] [--no-state] " +
+      "[--json] [--text <s>] [--stdin] [--help]",
+    help: "return",
+    flags: {
+      root: { type: "string" },
+      count: { type: "string" },
+      "convergence-rounds": { type: "string" },
+      state: { type: "string" },
+      "no-state": { type: "boolean" },
+      json: { type: "boolean" },
+      text: { type: "string" },
+      stdin: { type: "boolean" },
+    },
+  });
+  const flagStr = (v, dflt) => (typeof v === "string" && v !== "" ? v : dflt);
+  const flagNum = (v, dflt) => {
+    const n = typeof v === "string" && v !== "" ? Number(v) : Number.NaN;
+    return Number.isFinite(n) ? n : dflt;
   };
-  for (let i = 0; i < argv.length; i++) {
-    const a = argv[i];
-    switch (a) {
-      case "--root": args.root = argv[++i]; break;
-      case "--count": args.count = Number(argv[++i]); break;
-      case "--convergence-rounds": args.convergenceRounds = Number(argv[++i]); break;
-      case "--state": args.state = argv[++i]; break;
-      case "--no-state": args.noState = true; break;
-      case "--json": args.json = true; break;
-      case "--text": args.text = argv[++i]; break;
-      case "--stdin": args.stdin = true; break;
-      default: break;
-    }
-  }
-  return args;
+  return {
+    root: flagStr(flags.root, process.cwd()),
+    count: flagNum(flags.count, 40),
+    convergenceRounds: flagNum(flags["convergence-rounds"], 3),
+    json: flags.json === true,
+    state: typeof flags.state === "string" ? flags.state : null,
+    noState: flags["no-state"] === true,
+    text: typeof flags.text === "string" ? flags.text : null,
+    stdin: flags.stdin === true,
+    help: help === true,
+  };
 }
 
 export function main(argv) {
-  if (argv.includes("--help") || argv.includes("-h")) helpExit("usage: node self-report-vocab-check.ts [--root <dir>] [--count <n>] [--convergence-rounds <n>] [--state <file>] [--no-state] [--json] [--text <s>] [--stdin]");
   const args = parseArgs(argv);
+  if (args.help) helpExit("usage: node self-report-vocab-check.ts [--root <dir>] [--count <n>] [--convergence-rounds <n>] [--state <file>] [--no-state] [--json] [--text <s>] [--stdin]");
 
   let textSource;
   let records;

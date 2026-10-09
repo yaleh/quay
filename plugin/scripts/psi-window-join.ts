@@ -45,7 +45,7 @@
 
 import fs from "node:fs";
 import path from "node:path";
-import { readJsonLines } from "./gate-script-base.ts";
+import { readJsonLines, parseArgs as baseParseArgs } from "./gate-script-base.ts";
 import { resolveCarrierRoot } from "./perfile-failure-rate.ts";
 
 export type PsiSample = { t: number; cpu_stall: number };
@@ -145,18 +145,33 @@ export function joinFilePsiWindow(root: string, runId: string, file: string): Jo
 // `resolve-carrier-root-three-byte-identical-silent-zero`): three homes for ONE rule meant a change
 // to the resolution order landing in one copy only, silently, in the other two.
 
+// ── CLI ─────────────────────────────────────────────────────────────────────────────────────────
+// The flag loop is the SHARED spec-driven parser (gate-script-base.ts) — this wrapper only maps the
+// raw flag strings to the typed shape. It replaces one of the three byte-shape-identical private
+// if/else loops named by semantic-dedup-scan finding `parse-args-handrolled-variants`
+// (runId `semantic-dedup-scan-1791536153223`), which could not fold while the shared parser
+// `process.exit()`ed on `--help` — `main` prints this command's own usage.
+//
+// The missing-required-arg case stays in `main` (NOT `minArgs`), so its message is unchanged.
 function parseArgs(argv: string[]) {
-  const out = { runId: "", file: "", root: "", json: false, help: false };
-  for (let i = 0; i < argv.length; i++) {
-    const a = argv[i];
-    const v = argv[i + 1];
-    if (a === "--help" || a === "-h") out.help = true;
-    else if (a === "--run-id" && v) { out.runId = v; i++; }
-    else if (a === "--file" && v) { out.file = v; i++; }
-    else if (a === "--root" && v) { out.root = v; i++; }
-    else if (a === "--json") out.json = true;
-  }
-  return out;
+  const { flags, help } = baseParseArgs(argv, {
+    minArgs: 0,
+    usage: "--run-id <runId> --file <repo-relpath> [--root <repo-root>] [--json] [--help]",
+    help: "return",
+    flags: {
+      "run-id": { type: "string" },
+      file: { type: "string" },
+      root: { type: "string" },
+      json: { type: "boolean" },
+    },
+  });
+  return {
+    runId: typeof flags["run-id"] === "string" ? flags["run-id"] : "",
+    file: typeof flags.file === "string" ? flags.file : "",
+    root: typeof flags.root === "string" ? flags.root : "",
+    json: flags.json === true,
+    help: help === true,
+  };
 }
 
 function fmt(n: number): string {
@@ -174,7 +189,7 @@ function printText(args: ReturnType<typeof parseArgs>, r: JoinResult): void {
 }
 
 function main(): void {
-  const args = parseArgs(process.argv.slice(2));
+  const args = parseArgs(process.argv);
   if (args.help) {
     process.stdout.write(
       "psi-window-join.ts — 单测 PSI 时间窗联接（回答「这个测试这次跑的时候机器多忙」）\n" +

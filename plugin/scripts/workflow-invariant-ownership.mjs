@@ -17,26 +17,46 @@ import path from "node:path";
 // Import extractSection from the canonical task-schema.ts (DIR-124-A3a DD2 / WIRING-CLAIM A3a-PARSE).
 // Node >=20 with --experimental-strip-types (or Node >=23 unflagged) handles .ts imports from .mjs.
 import { extractSection } from "./task-schema.ts";
+// The spec-driven shared arg parser (gate-script-base.ts). This module previously carried its own
+// while-loop flag parser — one of the "three spelling variants" named by semantic-dedup-scan finding
+// `parse-args-handrolled-variants` (runId `semantic-dedup-scan-1791536153223`).
+import { parseArgs as baseParseArgs } from "./gate-script-base.ts";
 
 // ── CLI ────────────────────────────────────────────────────────────────────────────────────────────
+// The flag loop is the SHARED spec-driven parser; this wrapper only maps the raw flag strings onto
+// this command's shape. It could not fold while the shared parser `process.exit()`ed on `--help`
+// (now it uses the non-exiting `help: "return"` mode and prints its own usage from `main`).
+// `main` takes the SLICED argv tail, so the two leading slots the shared parser skips are re-attached.
 function parseArgs(argv) {
-  const args = { manifestPath: null, workspaceRoot: process.cwd(), requireManifest: false, checkDslMirrors: false, checkAdapters: false };
-  let i = 0;
-  while (i < argv.length) {
-    const a = argv[i];
-    if (a === "--workspace-root") { args.workspaceRoot = argv[++i]; }
-    else if (a === "--require-manifest") { args.requireManifest = true; }
-    else if (a === "--check-dsl-mirrors") { args.checkDslMirrors = true; }
-    else if (a === "--check-adapters") { args.checkAdapters = true; }
-    else if (!a.startsWith("--") && !args.manifestPath) { args.manifestPath = a; }
-    i++;
-  }
-  return args;
+  const { args, flags, help } = baseParseArgs(["node", "workflow-invariant-ownership.mjs", ...argv], {
+    minArgs: 0,
+    usage: "<manifest-path> [--workspace-root <dir>] [--require-manifest] [--check-dsl-mirrors|--check-adapters] [--help]",
+    help: "return",
+    flags: {
+      "workspace-root": { type: "string" },
+      "require-manifest": { type: "boolean" },
+      "check-dsl-mirrors": { type: "boolean" },
+      "check-adapters": { type: "boolean" },
+    },
+  });
+  return {
+    manifestPath: args.length > 0 ? args[0] : null,
+    workspaceRoot: typeof flags["workspace-root"] === "string" && flags["workspace-root"] !== "" ? flags["workspace-root"] : process.cwd(),
+    requireManifest: flags["require-manifest"] === true,
+    checkDslMirrors: flags["check-dsl-mirrors"] === true,
+    checkAdapters: flags["check-adapters"] === true,
+    help: help === true,
+  };
 }
 
-function usage() {
-  console.error("usage: node workflow-invariant-ownership.mjs <manifest-path> [--workspace-root <dir>] [--require-manifest] [--check-dsl-mirrors|--check-adapters]");
-  process.exit(2);
+const USAGE_LINE = "usage: node workflow-invariant-ownership.mjs <manifest-path> [--workspace-root <dir>] [--require-manifest] [--check-dsl-mirrors|--check-adapters]";
+
+// `--help` (exit 0, usage on stdout) and a missing manifest (exit 2, usage on stderr) share ONE
+// usage string — the exit code is the only difference.
+function usage(exitCode = 2) {
+  if (exitCode === 0) console.log(USAGE_LINE);
+  else console.error(USAGE_LINE);
+  process.exit(exitCode);
 }
 
 // ── Parsing helpers ────────────────────────────────────────────────────────────────────────────────
@@ -113,6 +133,7 @@ function classifyEntry(entry, invariant) {
 // ── Main ───────────────────────────────────────────────────────────────────────────────────────────
 function main(argv) {
   const args = parseArgs(argv);
+  if (args.help) usage(0);
 
   if (!args.manifestPath) usage();
 
