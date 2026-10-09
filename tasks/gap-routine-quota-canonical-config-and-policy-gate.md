@@ -2,7 +2,7 @@
 id: gap-routine-quota-canonical-config-and-policy-gate
 title: routine 限流①：K/窗口/全局天花板收口进 drivers.yml/driver-config.ts 声明式配置面 + 独立纯
   Policy 函数（人已裁定方向，本任务落地，不接真实调用点）
-status: todo
+status: ready
 labels:
   - gap
 parent: null
