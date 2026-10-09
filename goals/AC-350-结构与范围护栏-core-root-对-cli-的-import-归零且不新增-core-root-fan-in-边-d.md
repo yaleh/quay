@@ -3,7 +3,7 @@ id: AC-350
 title: 结构与范围护栏：core-root 对 cli/ 的 import 归零且不新增 core-root→fan-in
   边；driver-control.ts/driver-vocab.ts 单一定义、五个消费者改口；enum-surface/import-graph
   不回退；gate/fan-in/kernel 未动
-status: active
+status: achieved
 kind: criterion
 goal: GOAL-033
 criterion: |-
@@ -61,6 +61,11 @@ statusLog:
     to: active
     actor: goal-cli
     reason: ""
+  - at: 2026-10-09T06:16:23.975Z
+    from: active
+    to: achieved
+    actor: goal-driver
+    reason: "I2: criterion pass"
 fidelity:
   verdict: not-evaluated
   reason: no judge configured
