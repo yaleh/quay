@@ -40,21 +40,21 @@ This task builds a **first-version (v1), 4-case gold/replay corpus** for GOAL-03
 
 ## Touches
 
-- plugin/fixtures/meta-driver-replay/GOAL-030/input.json
-- plugin/fixtures/meta-driver-replay/GOAL-030/reference.json
-- plugin/fixtures/meta-driver-replay/GOAL-030/outcome.json
-- plugin/fixtures/meta-driver-replay/GOAL-031/input.json
-- plugin/fixtures/meta-driver-replay/GOAL-031/reference.json
-- plugin/fixtures/meta-driver-replay/GOAL-031/outcome.json
-- plugin/fixtures/meta-driver-replay/GOAL-032/input.json
-- plugin/fixtures/meta-driver-replay/GOAL-032/reference.json
-- plugin/fixtures/meta-driver-replay/GOAL-032/outcome.json
-- plugin/fixtures/meta-driver-replay/GOAL-033/input.json
-- plugin/fixtures/meta-driver-replay/GOAL-033/reference.json
-- plugin/fixtures/meta-driver-replay/GOAL-033/outcome.json
-- plugin/fixtures/meta-driver-replay/README.md
-- plugin/test/helpers/meta-driver-replay-harness.mjs
-- plugin/test/meta-driver-replay-corpus.test.mjs
+- plugin/fixtures/meta-driver-replay/GOAL-030/input.json (new)
+- plugin/fixtures/meta-driver-replay/GOAL-030/reference.json (new)
+- plugin/fixtures/meta-driver-replay/GOAL-030/outcome.json (new)
+- plugin/fixtures/meta-driver-replay/GOAL-031/input.json (new)
+- plugin/fixtures/meta-driver-replay/GOAL-031/reference.json (new)
+- plugin/fixtures/meta-driver-replay/GOAL-031/outcome.json (new)
+- plugin/fixtures/meta-driver-replay/GOAL-032/input.json (new)
+- plugin/fixtures/meta-driver-replay/GOAL-032/reference.json (new)
+- plugin/fixtures/meta-driver-replay/GOAL-032/outcome.json (new)
+- plugin/fixtures/meta-driver-replay/GOAL-033/input.json (new)
+- plugin/fixtures/meta-driver-replay/GOAL-033/reference.json (new)
+- plugin/fixtures/meta-driver-replay/GOAL-033/outcome.json (new)
+- plugin/fixtures/meta-driver-replay/README.md (new)
+- plugin/test/helpers/meta-driver-replay-harness.mjs (new)
+- plugin/test/meta-driver-replay-corpus.test.mjs (new)
 - tasks/gap-meta-driver-offline-replay-corpus-goal030-033.md
 
 ## AC
