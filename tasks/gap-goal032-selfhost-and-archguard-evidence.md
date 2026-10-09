@@ -2,7 +2,7 @@
 id: gap-goal032-selfhost-and-archguard-evidence
 title: GOAL-032 ②：分支自举模块身份证明 + ArchGuard before/after 证据（duplicate group /
   canonical count / consumer convergence）
-status: todo
+status: ready
 labels:
   - gap
 parent: null
