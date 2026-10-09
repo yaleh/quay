@@ -1,7 +1,7 @@
 ---
 id: AC-349
 title: 并入形态 + 并入后生产核验：GOAL-032 以恰好一个合并提交进入 develop，两处调用方在 develop 上确已委托给 kernel
-status: active
+status: achieved
 kind: criterion
 goal: GOAL-032
 criterion: |-
@@ -30,8 +30,14 @@ statusLog:
     to: active
     actor: goal-cli
     reason: ""
+  - at: 2026-10-09T03:14:01.006Z
+    from: active
+    to: achieved
+    actor: goal-driver
+    reason: "I2: criterion pass"
 fidelity:
   verdict: not-evaluated
   reason: no judge configured
   at: 2026-10-09T01:55:10.011Z
+phase: post-merge
 ---
