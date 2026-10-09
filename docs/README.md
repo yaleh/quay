@@ -15,7 +15,7 @@ reader coming from the root `README.md` only needs the first row.
 - **Using quay**: the root [`README.md`](../README.md) is self-contained; you don't need anything in this directory.
 - **quay's architecture**: [`proposals/quay-proposal.md`](proposals/quay-proposal.md) (Core/Provider-ABI design) and [`proposals/quay-native-design.md`](proposals/quay-native-design.md) (the native Provider), plus [`proposals/glossary.md`](proposals/glossary.md) for terminology.
 - **quay's own development methodology (BAIME)**: [`proposals/quay-perpetual-stream-experiment-v5.md`](proposals/quay-perpetual-stream-experiment-v5.md) is the current protocol; `experiments/quay-perpetual-stream/` holds its running state.
-- **Refactoring a package/module (ownership-first + `branch:true` Goal verification)**: [`references/ownership-first-refactoring-methodology.md`](references/ownership-first-refactoring-methodology.md) — validated via GOAL-030's first real pilot (ArchGuard before/after, negative control, branch self-host proof).
+- **Refactoring a package/module (ownership-first + `branch:true` Goal verification)**: [`references/ownership-first-refactoring-methodology.md`](references/ownership-first-refactoring-methodology.md) — validated via GOAL-030 and GOAL-031's real pilots (ArchGuard before/after, negative control, branch self-host proof).
 - **Why a rule exists**: [`epistemology-casebook.md`](epistemology-casebook.md) — the forensic record behind `CLAUDE.md`'s "认识论硬规则" table (dates, incidents, cost). Not auto-injected into any session; read it when a rule's one-line summary in `CLAUDE.md` isn't enough context.
 - **The Web UI**: [`webui-guide.md`](webui-guide.md).
 
