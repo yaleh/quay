@@ -417,3 +417,24 @@ test("collectUnownedAcs: `<task-id>: <AC-id>` 全量集合（⛔ 不做 baseline
   fs.writeFileSync(path.join(dir, "tasks", "gap-c.md"), carriesTask("gap-c", "gap-a", "AC1"));
   assert.deepEqual(collectUnownedAcs(dir).entries, []);
 });
+
+// ── Disposition of finding `task-check-flag-loops-duplicate` ────────────────────────────────────────
+// (.quay/routine-findings.jsonl, routine `semantic-dedup-scan`, runId
+//  `semantic-dedup-scan-1791536153223`): the near-identical private flag loop THIS file and
+//  task-contract-check.ts each carried is GONE — both fold onto gate-script-base.parseArgs.
+//  Position-based (硬规则 2): assert the ACTUAL import binding + the ABSENCE of the loop's literal
+//  header, not a keyword mention in a comment.
+
+test("disposition: runCli uses the SHARED parseArgs and carries no private flag loop", () => {
+  const src = fs.readFileSync(CHECKER, "utf8");
+  assert.match(src, /import \{[^}]*\bparseArgs\b[^}]*\} from "\.\/gate-script-base\.ts";/,
+    "the flag parser must be the shared one, imported from gate-script-base");
+  assert.doesNotMatch(src, /for \(let i = 0; i < args\.length; i\+\+\)/,
+    "the private flag loop must not survive as a second parser");
+});
+
+test("disposition: an unknown --flag exits 2 — the shared parser's strict guard", () => {
+  const r = spawnSync(process.execPath, ["--experimental-strip-types", CHECKER, "--bogus"], { encoding: "utf8" });
+  assert.equal(r.status, 2);
+  assert.match(r.stderr, /unknown argument: --bogus/);
+});

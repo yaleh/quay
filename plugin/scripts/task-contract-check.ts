@@ -59,7 +59,7 @@ import { TASK_STATUS } from "./task-status.ts";
 // probe). Reuses wiring-coverage-check.ts's backtick-identifier extraction + the (calibrated)
 // `N 条`+verb declaration heuristic — NOT a second, independently-buggy parser.
 import { checkWiringClaimAcProbe } from "./wiring-coverage-check.ts";
-import { helpExit, isDirectEntry } from "./gate-script-base.ts";
+import { isDirectEntry, parseArgs } from "./gate-script-base.ts";
 // The ONE shrink-only ratchet reader/writer (single-source) — this file reads FOUR baselines (the
 // violation list + three grandfather lists) through it instead of carrying four copies.
 import { readRatchetBaseline, writeRatchetBaseline } from "./ratchet-baseline.ts";
@@ -531,28 +531,34 @@ export function collectContractViolations(wsRoot, list) {
 
 // ── CLI ──────────────────────────────────────────────────────────────────────────────────────────────
 export function runCli(argv) {
-  const args = argv.slice();
-  if (args.includes("--help") || args.includes("-h")) helpExit("usage: node task-contract-check.ts [--root <dir>] [--json] [--write-ratchet] [--allow-growth] [--reset-baseline] [--strict-subset] [--no-block] [<task-file> ...]");
-  let root = null;
-  let json = false;
-  let writeRatchetFlag = false;
-  let allowGrowth = false;
-  let resetBaseline = false;
-  let strictSubset = false;
-  let noBlock = false;
-  const files = [];
-  for (let i = 0; i < args.length; i++) {
-    const a = args[i];
-    if (a === "--root") { root = args[++i]; }
-    else if (a === "--json") { json = true; }
-    else if (a === "--write-ratchet") { writeRatchetFlag = true; }
-    else if (a === "--allow-growth") { allowGrowth = true; }
-    else if (a === "--reset-baseline") { resetBaseline = true; }
-    else if (a === "--strict-subset") { strictSubset = true; }
-    else if (a === "--no-block") { noBlock = true; }
-    else if (a.startsWith("-")) { console.error(`task-contract-check: unknown flag: ${a}`); process.exit(2); }
-    else { files.push(a); }
-  }
+  // Flag parsing is the SHARED spec-driven parser (gate-script-base.parseArgs), not a private
+  // hand-rolled loop — the disposition of the near-identical loop this file shared with
+  // task-ac-carryover-check.ts (.quay/routine-findings.jsonl finding `task-check-flag-loops-duplicate`,
+  // routine `semantic-dedup-scan`, runId `semantic-dedup-scan-1791536153223`, verdict
+  // real-duplication). `strict:true` preserves the loop's unknown-`--flag` guard (exit 2); `minArgs:0`
+  // because the whole-store scan is the zero-positional default. parseArgs owns `--help`/`-h`
+  // (usage to stdout, exit 0) as well.
+  const { args: files, flags } = parseArgs(argv, {
+    minArgs: 0,
+    strict: true,
+    usage: "[--root <dir>] [--json] [--write-ratchet] [--allow-growth] [--reset-baseline] [--strict-subset] [--no-block] [<task-file> ...]",
+    flags: {
+      root: { type: "string" },
+      json: { type: "boolean" },
+      "write-ratchet": { type: "boolean" },
+      "allow-growth": { type: "boolean" },
+      "reset-baseline": { type: "boolean" },
+      "strict-subset": { type: "boolean" },
+      "no-block": { type: "boolean" },
+    },
+  });
+  const root = typeof flags.root === "string" ? flags.root : null;
+  const json = flags.json === true;
+  const writeRatchetFlag = flags["write-ratchet"] === true;
+  const allowGrowth = flags["allow-growth"] === true;
+  const resetBaseline = flags["reset-baseline"] === true;
+  const strictSubset = flags["strict-subset"] === true;
+  const noBlock = flags["no-block"] === true;
   if (resetBaseline && !writeRatchetFlag) {
     console.error("task-contract-check: --reset-baseline requires --write-ratchet (it is the write that re-anchors the ceiling)");
     process.exit(2);
@@ -703,5 +709,6 @@ function finish({ json, perTask, allInfo, currentEntries, newOnes, resolved, bas
 // (gap-drivers-yml-interval-not-honored-for-routine-kinds): a hand-rolled file-identity comparison is
 // true for EVERY inlined module of a dist bundle, so it hijacks any bundle that inlines this module.
 if (isDirectEntry(import.meta, undefined, "task-contract-check")) {
-  runCli(process.argv.slice(2));
+  // parseArgs owns the argv.slice(2) (node + script path) convention, so pass the RAW argv.
+  runCli(process.argv);
 }
