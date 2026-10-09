@@ -2,7 +2,7 @@
 id: gap-routine-semantic-dedup-scan-read-current-state-duplicate
 title: "semantic-dedup-scan: byte-identical JSON.parse-or-null state reader
   declared twice; no shared readJsonOrNull helper exists in plugin/scripts"
-status: ready
+status: done
 labels:
   - gap
   - routine-filed

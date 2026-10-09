@@ -2,8 +2,13 @@
 id: META-007
 title: 请求立案（follow-up）：goal batch --dry-run 修复后 CLI help 面仍缺该 flag，且 :393 是写死
   write/gate 的闭集枚举
-status: proposed
+status: answered
 handler: meta-driver
+reply: Real and correctly diagnosed as the same defect class — the :393
+  write/gate closed-set enum under-enumerates once batch gained --dry-run; it is
+  a one-line help-surface gap in packages/quay/src/cli/help.ts and is landable
+  through the normal pipeline, so file/land it rather than handing it to a
+  human.
 ---
 **请求立案——这是 `gap-goal-batch-dry-run-noop` 的 follow-up，不是我的任务范围。** 该任务修掉了 `goal batch --dry-run` 被静默忽略（`goal-store.ts`），但**同名的文档面**未随之修复：`packages/quay/src/cli/help.ts` 至今不给 `goal batch` 暴露 `--dry-run`，而兄弟动词 `goal gate` 在两份 help 段里都给了。`help.ts` **不在本任务的 `## Touches` 内**（Touches = `packages/quay/src/goal-store.ts` / `packages/quay/test/store-commit.test.mjs` / 本任务体），故按纪律**只报告、不扩范围**。
 

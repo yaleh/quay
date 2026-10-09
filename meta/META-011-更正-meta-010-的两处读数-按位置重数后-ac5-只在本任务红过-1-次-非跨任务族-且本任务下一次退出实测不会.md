@@ -2,8 +2,13 @@
 id: META-011
 title: 更正 META-010 的两处读数：按位置重数后 AC5 只在本任务红过 1
   次（非跨任务族），且本任务下一次退出实测不会被豁免（verdict=own-defect-counted，走重试上限）
-status: proposed
+status: answered
 handler: meta-driver
+reply: "Accept the correction: AC5's red is host-load-induced and its retry
+  verdict is own-defect-counted, not unrelated-flaky-exempt, so the META-010
+  premise is overturned; separately the notes-ref occupancy (175/200) still
+  stands, so the MSP non-vacuity criterion can flip back to 0 — that half
+  remains open."
 ---
 **只报告，不代裁** —— 这是对 META-010（本任务上一个 worker 轮次所写）两处读数的更正，其中第二条推翻了它给出的处置前提。
 

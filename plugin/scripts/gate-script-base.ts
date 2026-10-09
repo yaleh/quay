@@ -400,6 +400,29 @@ export function readJsonlLines(file: string): Record<string, unknown>[] | null {
   return out;
 }
 
+// ── readJsonOrNull ──────────────────────────────────────────────────────────────────────────────────
+// The whole-file JSON reader: parse `file`, or `null` when it is absent / unreadable / unparseable.
+// Both consumers are state readers for which "no state on disk" and "unreadable state" are the SAME
+// decision — overwrite with a fresh state, so a `null` is the right answer rather than a throw.
+// Extracted here — byte-identical from both private copies — by semantic-dedup-scan finding
+// `read-current-state-duplicate` (`.quay/routine-findings.jsonl`, routine `semantic-dedup-scan`,
+// runId `semantic-dedup-scan-1791536153223`, kind `byte-identical-body`, verdict `real-duplication`,
+// requested action `merge into one shared readJsonOrNull`), which named its two carriers:
+//   plugin/scripts/mirror-full-suite-state.ts:128 / plugin/scripts/red-window-triage.ts:159
+// (the first was an exported entry point and keeps that name, feeding its mirror-write skip guard;
+// the second was private to red-window-triage.ts).
+//
+// ⛔ Why this is NOT `readJsonLines` above: that reader is LINE-delimited (JSONL) and fail-open to
+// `[]`; this one parses ONE JSON document and its `null` is load-bearing (the callers branch on
+// "unreadable ⇒ refuse/write-fresh"). Two different carriers, two contracts — do not fold them.
+export function readJsonOrNull<T = any>(file: string): T | null {
+  try {
+    return JSON.parse(fs.readFileSync(file, "utf8")) as T;
+  } catch {
+    return null;
+  }
+}
+
 // ── normalizeRel ────────────────────────────────────────────────────────────────────────────────────
 // Normalize a repo-relative path or glob to a canonical form: backslashes → forward slashes, drop
 // empty (`//`) and `.` segments, resolve `..` (a leading `..` is dropped), strip a leading `./`,

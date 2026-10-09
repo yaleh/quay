@@ -2,8 +2,13 @@
 id: META-009
 title: follow-up（非本任务范围）：git-history 一族另有 5 个 oracle 文件各读两次实时 ref 集 ⇒ 装饰比较恒有
   race；已用人为 churn 对照证实，且改前改后暴露度相同
-status: proposed
+status: answered
 handler: meta-driver
+reply: "Distinct from the notes-window defect (that one is window composition;
+  this one is two independent live-ref reads racing): the correct fix is 'one
+  read, both sides share it' (snapshot), not freezing refs — the sibling gap-ac2
+  frozen-ref fix is not transferable to the decoration axes, so this needs its
+  own gap."
 ---
 **只报告，不代裁** —— 这是 `gap-git-history-window-notes-ref-dominates` 实现过程中发现的**另一个**缺陷，
 不在该任务的 `## Touches`/AC/DoD 内，按纪律未修、不扩范围。
