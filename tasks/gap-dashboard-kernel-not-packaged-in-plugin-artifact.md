@@ -75,3 +75,21 @@ $ node -p "Object.keys(require('./plugin/vendor/quay/package.json'))"
 - 本任务只解决"kernel 到不了发布产物"。**发布本身**是另一件事（`release-cut.sh`），建议本任务落地后再切 0.18.0，否则切出来的版本仍然对消费方无用。
 - 与 `gap-dashboard-kernel-export-for-cross-project-reuse` 的关系：那条任务做的是**算法抽取与子路径声明**（已完成、已合入 develop `2a894daf4`）；本任务是那条的**发布面缺口**——它证明过的 `npm pack` 路径与实际唯一的安装渠道（插件 marketplace）不是同一条。不是重复立案，是其后续。
 - 消费方状态：claudecodeui 侧集成任务 `gap-quay-tab-loop-pulse-gantt-integration` 已立案并**被本缺口阻塞**，AC1 就是前置解除取证。
+
+## Update（2026-10-09）：独立复核 + 交付机制升级为 A/B/C 人工裁决
+
+会话 `Quay Dashboard Gantt Kernel 架构决策` 已独立逐行复核，结论一致，并补充/修正如下（以下每条我均已自行复验）：
+
+1. **`--check` 的形状测试不覆盖本缺口**（修正上文 Requested action 1 的一半）：`sync-vendor.sh` 对 vendor package.json 的形状测试只拒绝四种情况——`name !== 'quay-plugin-vendor'` / `type !== 'module'` / 无 `version` / **有 `dependencies`**（实测该 `node -e` 断言）。**新增一个 `exports` 键不会触发它**。⇒ 镜像 kernel bundle 仍必须新增 `cmp_or_report`（否则漂移无人发现）；但"加 `exports` 会被 `--check` 拦"这个顾虑不成立。
+2. **措辞校正**：`packLanes` 算法本身一直随 Core bundle 出货（抽取前它内联在 `serve-dashboard.ts` 里）。**从未出货的是"可导入的子路径"**，不是算法。
+3. **`/quay:init` 结构上不可能提供模块**：`plugin/skills/init/SKILL.md:9` 明写 "init is a project initializer, NOT an installer"，写入面是六文件闭集（同文件 `## Write surface (the six-file closed set)`）。所以"升级后跑 `/quay:init`"只能切 `.quay/plugin` 的指向，装不出任何可导入物。
+4. **"让文件存在"是必要但可能不充分**（重要，影响方案 B）：从版本化插件缓存路径导入（`~/.claude/plugins/cache/quay/quay/<version>/vendor/quay/dist/…`）结构上脆弱——版本目录每次升级都变，且位于消费方项目构建图之外。
+5. **CI 是红的，与本缺口无关但同为发布门禁**：实测 `gh run list --branch develop --status completed --limit 10` → 最近完成的 8 次中 **6 次 `failure`、2 次 `cancelled`**（2026-10-09 07:27–08:48）；更新的运行全部卡在 `queued`（积压）。**任何发布都被此挡住**，与选哪个交付方案无关。
+
+**交付机制已升级为人工裁决**（由上述会话推动，本任务不单方面选定）：
+
+- **A. quay CLI 直接输出 merged+packed lanes 的 JSON**，消费方 shell 出去取——与既有 `quay driver live --json` 同一模式，**同时满足全部约束**（不 vendor / 不 `file:` / 不 npm 公共渠道），且消费方（claudecodeui）后端本来就对 quay 全程走 CLI 子进程，最贴既有架构。
+- **B. 从插件镜像按路径 import**（上文 options 1/2）——受第 4 条脆弱性影响。
+- **C. 恢复 GitHub Release tarball asset**（`npm install <release-url>`）：保留 `exports` 映射、复用已测过的 AC1 面，不需要公共 npm；但这部分**反转 2026-09-16 取消 npm/SEA 渠道的裁定**，需人工明确同意。
+
+**在 A/B/C 裁决前**：上文 Requested action 的第 1、2、4、5 条仍然成立（无论选哪条，"产物里可达 / 经 CLI 可达"与"判据打在真实装配产物上"都必须满足），但**第 3 条（消费方 import 的确切形式）应等裁决**，不要先按 B 写死。
