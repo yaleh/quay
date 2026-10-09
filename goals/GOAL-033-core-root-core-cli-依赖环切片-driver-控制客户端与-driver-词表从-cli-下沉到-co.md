@@ -2,7 +2,7 @@
 id: GOAL-033
 title: core-root⇄core-cli 依赖环切片：driver 控制客户端与 driver 词表从 cli/ 下沉到 core-root（cli
   与仅经 cli 入环的 fan-in 离开 package SCC，6→4），fan-in 仪器附加留在 CLI 以免造出 root⇄fan-in 新互指
-status: active
+status: achieved
 kind: goal
 origin: 2026-10-09 goal 作者更正 SCC 期望 6→5 为 6→4（见 AC-351 origin）
 activatedAt: 2026-10-09T05:46:07.439Z
@@ -12,6 +12,11 @@ statusLog:
     to: active
     actor: goal-cli
     reason: ""
+  - at: 2026-10-09T07:40:29.048Z
+    from: active
+    to: achieved
+    actor: goal-driver
+    reason: "I2: all ACs achieved + sufficiency covered"
 branch: true
 ---
 ## 背景
