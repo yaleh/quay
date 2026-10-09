@@ -2,7 +2,7 @@
 id: AC-351
 title: ArchGuard before/after：cli 离开 package SCC（6→5，其余五员不变）且负对照可证伪；CLI driver
   status 的仪器读数语义在被求值树上现场重算不变
-status: draft
+status: active
 kind: criterion
 goal: GOAL-033
 criterion: |-
@@ -30,6 +30,16 @@ criterion: |-
   echo "PASS: ArchGuard before/after shows cli leaving the package SCC (6 -> 5, the other five unchanged) with a falsifying negative control, and the CLI status surface keeps its exact instrument semantics on this tree"
 expect: exit 0 = 证据显示 cli 离开 SCC（6→5 且其余五员不变）、负对照把 cli 拉回 SCC、且被求值树上 worker
   status 带 instruments 而 promotion 不带；exit 1 = CAUSE=；exit 3 = 证据文件尚未写
-origin: 人 2026-10-09 裁定：调查并推进 core-root<->core-cli 最小依赖环切片；结论清晰 ⇒ 开 branch:true
-  goal，严格复用 GOAL-030/031/032 方法，只做这一对
+origin: 人 2026-10-09 裁定：调查并推进 core-root<->core-cli 最小依赖环切片
+activatedAt: 2026-10-09T05:46:02.808Z
+statusLog:
+  - at: 2026-10-09T05:46:02.808Z
+    from: draft
+    to: active
+    actor: goal-cli
+    reason: ""
+fidelity:
+  verdict: not-evaluated
+  reason: no judge configured
+  at: 2026-10-09T05:46:02.808Z
 ---
