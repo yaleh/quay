@@ -38,11 +38,11 @@ extra:
 - [ ] AC3 文件级复发回退（可得假）：签名取不到时，以**失败文件**为复发身份查跨任务复发；构造「同一文件在窗口内被另**一个**任务也点名为失败文件」的台账夹具 ⇒ verdict 为 `unrelated-flaky-exempt`。对照臂：窗口内只有本任务一条 ⇒ ⛔ 不得豁免（fail-closed 不变）。贴两臂 verdict 与 reason。
 - [ ] AC4 不得回归既有三态：`ac-not-checked-shortcircuit` / `own-defect-counted` / `unrelated-flaky-exempt` / `insufficient-data-fallback` 四者在既有测试下全部仍可复现（贴既有测试文件名与 pass 数），且 `decideExitedNotLandedAction` 的 kind 分叉对 `insufficient-data-fallback` 之外的取值仍回 `count-and-retry`。
 - [ ] AC5 scoped 门：`bash scripts/test.sh --for-task gap-stop-terminal-reason-hardcodes-attributed-none-to-a-file --allow-thin` exit 0。
-- [ ] AC6 生产读数（待外部——落地后）：本任务合入 develop **之后**新产生的 stop-terminal 判词中，「含 `attributed none to a file`」∧「同一轮 `retry_exemptions[0].failingTestFiles` 非空」的组合计数 **= 0**；前基线 **= 3**（见 Finding，三例已具名）。只计本任务落地之后的时间窗，且该计数可由 `## Finding` 给出的那条谓词命令复算、贴出实际输出（待外部）
+- [ ] AC6 生产载体回放（双向取假）：以 `.quay/worker-round.jsonl` 中 `## Finding` 具名的 3 条既有实例（2026-09-23 `gap-ac179-criterion-cmdline-port-literal-stale` / 2026-10-07 `gap-init-cli-lays-full-closed-set-and-detects-project-values-without-the-shell-script` / 2026-10-09 `gap-direct-to-develop-bypass-check-git-fixture-cost`）为输入，跑**改动后**的停止判词生成路径，产出文本里「attributed none to a file」的出现次数必须 **= 0**（前基线 = 3）。对照臂：同一批输入跑**改动前**的实现（本任务分支的父提交），必须复现 **3**。两臂各贴实际命令与实际输出，⛔ 不是转述。
 
 ## DoD
 
-判词必须改为**读得出就写读得出**：新输出的每一句都要能由 `RetryExemptionJudgment` 的字段复算，⛔ 不得保留任何硬编码的「没读到」断言。AC1/AC2/AC3 三条都必须**双向取假**（各含对照臂），只贴正向臂不算完成。⛔ 不得以放宽 fail-closed 换绿：动作分叉与重试上限语义逐字不变，本任务只改**读数**与**判定顺序**。既有四态测试不得减少、不得弱化。改动落地须经真实任务 worktree 执行与 fan-in；AC6 的生产读数只能在其后产生（待外部）。
+判词必须改为**读得出就写读得出**：新输出的每一句都要能由 `RetryExemptionJudgment` 的字段复算，⛔ 不得保留任何硬编码的「没读到」断言。AC1/AC2/AC3 三条都必须**双向取假**（各含对照臂），只贴正向臂不算完成。⛔ 不得以放宽 fail-closed 换绿：动作分叉与重试上限语义逐字不变，本任务只改**读数**与**判定顺序**。既有四态测试不得减少、不得弱化。改动落地须经真实任务 worktree 执行与 fan-in；AC6 回放的是**既有**生产台账（真实记录，⛔ 不是夹具），两臂都必须贴实际输出。
 
 ## Touches
 
