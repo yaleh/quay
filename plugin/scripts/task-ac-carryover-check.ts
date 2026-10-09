@@ -62,7 +62,7 @@ import { repoRoot } from "./repo-root.ts";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { extractSection, countAcCheckboxes } from "./task-schema.ts";
-import { helpExit, isDirectEntry } from "./gate-script-base.ts";
+import { isDirectEntry, parseArgs } from "./gate-script-base.ts";
 import { recordNoBlockLedger } from "./task-contract-check.ts";
 import { readRatchetBaseline, writeRatchetBaseline } from "./ratchet-baseline.ts";
 import { TASK_STATUS } from "./task-status.ts";
@@ -324,26 +324,33 @@ export function formatTextReport(scan, { baselineCount, newOnes = [], growth = f
 
 // ── CLI ──────────────────────────────────────────────────────────────────────────────────────────
 export function runCli(argv) {
-  const args = argv.slice(2); // skip node + script path (process.argv[0..1])
-  if (args.includes("--help") || args.includes("-h")) helpExit("usage: node task-ac-carryover-check.ts [--root <dir>] [--json] [--write-ratchet] [--allow-growth] [--reset-baseline] [--no-block] [<task-file> ...]");
-  let root = null;
-  let json = false;
-  let writeRatchetFlag = false;
-  let allowGrowth = false;
-  let resetBaseline = false;
-  let noBlock = false;
-  const files = [];
-  for (let i = 0; i < args.length; i++) {
-    const a = args[i];
-    if (a === "--root") root = args[++i];
-    else if (a === "--json") json = true;
-    else if (a === "--write-ratchet") writeRatchetFlag = true;
-    else if (a === "--allow-growth") allowGrowth = true;
-    else if (a === "--reset-baseline") resetBaseline = true;
-    else if (a === "--no-block") noBlock = true;
-    else if (a.startsWith("-")) { console.error(`task-ac-carryover-check: unknown flag: ${a}`); process.exit(2); }
-    else files.push(a);
-  }
+  // Flag parsing is the SHARED spec-driven parser (gate-script-base.parseArgs), not a private
+  // hand-rolled loop. THIS file and task-contract-check.ts carried a near-identical
+  // `--root/--json/--write-ratchet/--allow-growth/--reset-baseline/--no-block/<files>` loop
+  // (.quay/routine-findings.jsonl finding `task-check-flag-loops-duplicate`, routine
+  // `semantic-dedup-scan`, runId `semantic-dedup-scan-1791536153223`, verdict real-duplication);
+  // both now call the one parser gate-script-base already exports. `strict:true` keeps the loop's
+  // unknown-`--flag` guard (exit 2); `minArgs:0` because the whole-store scan is the zero-positional
+  // default. parseArgs owns the `--help`/`-h` contract (usage to stdout, exit 0) too.
+  const { args: files, flags } = parseArgs(argv, {
+    minArgs: 0,
+    strict: true,
+    usage: "[--root <dir>] [--json] [--write-ratchet] [--allow-growth] [--reset-baseline] [--no-block] [<task-file> ...]",
+    flags: {
+      root: { type: "string" },
+      json: { type: "boolean" },
+      "write-ratchet": { type: "boolean" },
+      "allow-growth": { type: "boolean" },
+      "reset-baseline": { type: "boolean" },
+      "no-block": { type: "boolean" },
+    },
+  });
+  const root = typeof flags.root === "string" ? flags.root : null;
+  const json = flags.json === true;
+  const writeRatchetFlag = flags["write-ratchet"] === true;
+  const allowGrowth = flags["allow-growth"] === true;
+  const resetBaseline = flags["reset-baseline"] === true;
+  const noBlock = flags["no-block"] === true;
   if (resetBaseline && !writeRatchetFlag) {
     console.error("task-ac-carryover-check: --reset-baseline requires --write-ratchet");
     process.exit(2);
