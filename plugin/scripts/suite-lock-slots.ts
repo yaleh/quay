@@ -117,7 +117,16 @@ export function suiteLockSlotPaths(base: string): string[] {
  *  `${FULL_SUITE_LOCK_FILE}` env override → `git rev-parse --git-common-dir` (the SHARED lock dir ALL
  *  worktrees of this repo contend on — a per-checkout lock would NOT serialize across worktrees, the
  *  2026-08-07 two-worktree incident) → fall back to `<root>/.git`. `root` is the tested checkout the
- *  probe runs against (a relative git-common-dir is resolved against root, absolute paths pass through). */
+ *  probe runs against (a relative git-common-dir is resolved against root, absolute paths pass through).
+ *
+ *  SCOPE — the slot is PER-REPO, not globally host-wide (gap-cross-project-resource-gate-no-declarative-
+ *  quota-or-shared-slot; DIR-132). The base anchors at THIS repo's own `git-common-dir`, so two
+ *  DIFFERENT repositories (e.g. this one + a second quay-driven project) resolve to two DIFFERENT
+ *  bases and their single-flight slots never intersect: this repo's "at most S suites at once"
+ *  (suiteLockSlotCount) does NOT extend to "this repo + project B at most S". There is no
+ *  cross-repository shared slot/quota and none is added here — resource-gate.sh's GO is a one-shot
+ *  host read (soft), not a reservation. Measured 2026-10-09: bases for two distinct repos are two
+ *  distinct paths ⇒ no intersection; the cross-project lock remains a deferred OBSERVATION ITEM. */
 export function suiteLockBase(root: string): string {
   const envOverride = process.env.FULL_SUITE_LOCK_FILE;
   if (envOverride) return envOverride;
