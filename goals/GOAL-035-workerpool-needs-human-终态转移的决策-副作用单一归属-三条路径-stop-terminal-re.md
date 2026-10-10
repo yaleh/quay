@@ -4,9 +4,16 @@ title: WorkerPool needs-human
   终态转移的决策/副作用单一归属：三条路径（stop-terminal/retry-cap/quick-death）收敛到一个
   applyNeedsHumanTransition，修复 quick-death 路径转移结构上不可见 + kind
   误标两个真实缺陷（Driver/Routine/WorkerPool OOD 重构第二阶段，候选①）
-status: draft
+status: active
 kind: goal
 origin: 继 GOAL-030~034 后第二阶段
+activatedAt: 2026-10-10T09:38:53.155Z
+statusLog:
+  - at: 2026-10-10T09:38:53.155Z
+    from: draft
+    to: active
+    actor: goal-cli
+    reason: ""
 branch: true
 ---
 ## 背景
