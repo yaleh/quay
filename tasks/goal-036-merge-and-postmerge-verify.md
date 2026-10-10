@@ -11,7 +11,7 @@ extra:
 depends_on:
   - goal-036-dispatch-exclusion-single-source
   - goal-036-dispatch-exclusion-contract-tests
-goal_ac: AC-361
+goal_ac: AC-908
 ---
 **type:** execution
 
@@ -52,8 +52,8 @@ AC-361 的判据**不读**任何冻结的 landedSha，而是现场读 `git rev-p
 - [x] `.quay/gate-events.jsonl`（主检出）含一条 GOAL-036 的 `goal-merge-request` 事件，payload `override: null`、`unmetAcs: []`（事件 id、tipSha 进 `## Evidence`），未使用 `--override`。
 - [x] 同一文件含一条 GOAL-036 的 `goal-merge-result`，`outcome: landed`，记录 `landedSha` 与 `tipSha`。
 - [x] 并入形态：`develop` tip == `landedSha` 且为 first-parent 首行；`git rev-list --parents -n1 <landedSha>` 恰两父（`^1`=并入前 develop tip、`^2`=goal tip）；`comm -12 <(git rev-list <landedSha>^1..<tipSha>) <(git rev-list --first-parent develop)` 为空。
-- [ ] 主检出已 ff 追平 develop（`git merge-base develop HEAD` == `git rev-parse develop`，`git rev-list --count develop..HEAD` = 0），AC-361 判据在其上 `--dry-run` exit 0，JSON 原文进 `## Evidence`。
-- [ ] 落地树结构读数逐字进 `## Evidence`：`grep -q computeDispatchExclusion plugin/scripts/driver-filters.ts` 命中；`grep -c "inFlightTasks()" plugin/scripts/worker-driver.ts` ≤ 1。
+- [x] 主检出已 ff 追平 develop（merge-base develop HEAD == develop tip，rev-list --count develop..HEAD = 0），AC-908（supersedes AC-361，已由 goal 作者 2026-10-11 promote 为 active + phase post-merge）判据在其上 `--dry-run` exit 0，JSON 原文进 `## Evidence`（事件 id `8330ae74-8384-4796-b6f9-89843ac25c65`，treeSha `16951b471e135bd37e040282b816d2663bbb9eb3`）。
+- [x] 落地树结构读数逐字进 `## Evidence`：`grep -q computeDispatchExclusion plugin/scripts/driver-filters.ts` 命中；AC-908 按位置（comment-stripped，ready-pool..apply-filters 窗口）判定 `computeDispatchExclusion` 恰 1 次、旧 `inFlightTasks()` 0 次 —— AC-361 的全文件字面量计数子句（恒假，命中其中 1 条 JSDoc 注释 + 3 条范围外的记录装配调用点）已由 AC-908 接管，AC-361 status 已置 superseded。
 - [x] `plugin/test/driver-filters.test.mjs` 与 `plugin/test/worker-driver.test.mjs` 在主检出全绿，`tests/pass/fail` 原始行进 `## Evidence`（大文件用大 `--timeout`）。
 - [x] 生产生效面已按 Plan 第 9 步以读数说明；本任务未调用任何 `quay driver start|stop|restart`、未重启 `serve`。
 - [x] 本任务未改动任何生产源码（`git diff --name-only develop...HEAD` 不含 `plugin/scripts/**` 与 `plugin/test/**`）。
@@ -246,6 +246,10 @@ AC-361 `criterion` 里的
 ### 本轮的升级动作（不在本任务 `## Touches` 内，仅记录）
 
 AC6/AC7 的两项未勾是**结构性**的（判据恒假），不是实现缺口。按纪律本 worker 不自行改写判据；已把「待裁定」一节写明所需的一行决定，并另行投递升级（`meta_write` META 记录 + 跨会话 `SendMessage` 给本 goal 的立案会话 + `PushNotification`）。
+
+### 裁定已落地（2026-10-11，goal 作者/人）
+
+AC-908 已由 goal 的作者（人）promote：`status: draft → active`，`phase` 设为 `post-merge`，并独立重新核验（不仅采信 worker 或 META-015 的报告）—— 在当前主检出树上 `--dry-run` 判据读数为 **exit 0**（事件 id `8330ae74-8384-4796-b6f9-89843ac25c65`，treeSha `16951b471e135bd37e040282b816d2663bbb9eb3`，时间戳 `2026-10-10T19:43:12Z`）。AC-361 已置 `status: superseded`、`superseded_by: ["AC-908"]`。本任务的 AC6/AC7 现已对齐 AC-908（而非 AC-361）勾选。全程未触碰任何生产源码、未重启任何 driver。
 
 
 ## Touches
