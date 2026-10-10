@@ -46,17 +46,17 @@ extra:
 
 ## AC
 
-- [ ] AC1（收编 + 台账点名）：`classifyCandidate` 对一条 `unsatisfiableUnannotatedAc.hits.length > 0` 的候选返回**非空** `unfixable`，其中至少一条含命中项原文；由此经 `computeOutcomeRecords` 产出的记录 `result.detail` **非空**、**含**该原因文本、且 `!== "ineligible-not-fixed"`。用例落在 `plugin/test/promotion-driver-s03.test.mjs`（已直接测 `classifyCandidate`，15 处引用）与 `plugin/test/promotion-driver-s06.test.mjs`（已直接测 `computeOutcomeRecords`，6 处引用）；`node --test <这两个文件>` 退出 0。
+- [x] AC1（收编 + 台账点名）：`classifyCandidate` 对一条 `unsatisfiableUnannotatedAc.hits.length > 0` 的候选返回**非空** `unfixable`，其中至少一条含命中项原文；由此经 `computeOutcomeRecords` 产出的记录 `result.detail` **非空**、**含**该原因文本、且 `!== "ineligible-not-fixed"`。用例落在 `plugin/test/promotion-driver-s03.test.mjs`（已直接测 `classifyCandidate`，15 处引用）与 `plugin/test/promotion-driver-s06.test.mjs`（已直接测 `computeOutcomeRecords`，6 处引用）；`node --test <这两个文件>` 退出 0。
 
-- [ ] AC2（升级路径，能取假）：喂 `RETRY_CAP_DEFAULT`（=3，`plugin/scripts/driver-filters.ts:229`）轮同一「不 spawn fix worker」的拦截 ⇒ 第 3 轮产出 `action:"needs-human"` 记录，且其 `result.detail` 点名原因。取假：恢复 `if (fixedIds.length > 0)` 旧守卫 ⇒ 同一用例转红（红/绿两次输出都贴进 `## Evidence`）。
+- [x] AC2（升级路径，能取假）：喂 `RETRY_CAP_DEFAULT`（=3，`plugin/scripts/driver-filters.ts:229`）轮同一「不 spawn fix worker」的拦截 ⇒ 第 3 轮产出 `action:"needs-human"` 记录，且其 `result.detail` 点名原因。取假：恢复 `if (fixedIds.length > 0)` 旧守卫 ⇒ 同一用例转红（红/绿两次输出都贴进 `## Evidence`）。
 
-- [ ] AC3（负控制：不得把所有不合格都升级）：一条属于既有「可修三类」的不合格（样本：`fourArtifacts=false`）仍走原路径——产出 `action:"fix"`（spawn fix worker），**不**被新升级路径判成 `needs-human`。用例断言。
+- [x] AC3（负控制：不得把所有不合格都升级）：一条属于既有「可修三类」的不合格（样本：`fourArtifacts=false`）仍走原路径——产出 `action:"fix"`（spawn fix worker），**不**被新升级路径判成 `needs-human`。用例断言。
 
-- [ ] AC4（未评估态不与合格同形，硬规则 3b）：新引入的任何分类字段/取值，在任务体没有可识别 AC/DoD 段时取一个与「合格」**不同**的取值；用例断言两个取值不相等。（若实现不引入新字段，本 AC 记为 N/A 并写明理由。）
+- [x] AC4（未评估态不与合格同形，硬规则 3b）：新引入的任何分类字段/取值，在任务体没有可识别 AC/DoD 段时取一个与「合格」**不同**的取值；用例断言两个取值不相等。（若实现不引入新字段，本 AC 记为 N/A 并写明理由。）
 
-- [ ] AC5（存量读数，硬规则 2）：对全仓库 `tasks/*.md` 跑一次 `judgeUnsatisfiableUnannotatedAc`，把命中条数与前 3 条实际内容贴进 `## Evidence`。零命中时，先对着一条**已知为真**的样本干跑一次证明谓词能命中（拼一条含封闭枚举词的未勾项），⛔ 不拿生产任务体当样本改。
+- [x] AC5（存量读数，硬规则 2）：对全仓库 `tasks/*.md` 跑一次 `judgeUnsatisfiableUnannotatedAc`，把命中条数与前 3 条实际内容贴进 `## Evidence`。零命中时，先对着一条**已知为真**的样本干跑一次证明谓词能命中（拼一条含封闭枚举词的未勾项），⛔ 不拿生产任务体当样本改。
 
-- [ ] AC6（scoped 门）：`bash scripts/test.sh --for-task gap-promotion-driver-blind-to-unsatisfiable-ac-block --allow-thin` 退出 0，且确实执行了 ≥1 个测试文件。（`--allow-thin` 是本仓 `.quay/config.yml` `scoped_command` 的生产 argv 形态。）
+- [x] AC6（scoped 门）：`bash scripts/test.sh --for-task gap-promotion-driver-blind-to-unsatisfiable-ac-block --allow-thin` 退出 0，且确实执行了 ≥1 个测试文件。（`--allow-thin` 是本仓 `.quay/config.yml` `scoped_command` 的生产 argv 形态。）
 
 ## DoD
 
@@ -96,3 +96,56 @@ $ node --experimental-strip-types plugin/scripts/ready-pool-check.ts --root . --
 evaluated: 2579   not-evaluated(no AC/DoD): 74
 tasks with >=1 unannotated executor-unsatisfiable item: 18   (done 6 / superseded 12)
 ```
+
+### 实现与取假读数（2026-10-10；task branch `ccd8cc039`，合并 develop 后 `5b8ce285c`）
+
+**AC1 命名台账（s06 直测 `computeOutcomeRecords`）**——由 `classifyCandidate` 产出的 `unfixable` 经台账落盘：
+
+```
+{"status":"hit","fixable":false,
+ "unfixable":["unsatisfiableUnannotatedAc=[AC6 落地后复查：合入 develop 之后 sqlite3 agent 档不再增长]"],
+ "ledgerDetail":"unsatisfiableUnannotatedAc=[AC6 落地后复查：合入 develop 之后 sqlite3 agent 档不再增长]"}
+```
+⇒ `result.detail` 非空、含原因文本、`!== "ineligible-not-fixed"`。
+
+**AC2 升级路径（能取假）**——喂 3 轮（`RETRY_CAP_DEFAULT`）同一「不 spawn fix worker」的拦截：
+
+- 绿：`--max-fix-retries 3 --max-rounds 3` ⇒ 第 3 轮 outcome `action:"needs-human"`，`result.detail` 含 `落地后复查`；磁盘 `status: todo → needs-human`；fix worker 计数文件**不存在**（0 spawn）。
+- 红（取假：把新升级块放回 `if (fixedIds.length > 0)` 旧守卫内）：
+  ```
+  ✖ AC2 — a structurally-unspawnable block is ESCALATED to needs-human after RETRY_CAP_DEFAULT rounds (取假)
+    AssertionError: AC2: the 3rd consecutive interception escalates to needs-human
+  ℹ pass 0 / fail 1
+  ```
+
+**AC3 负控制**——`fourArtifacts=false`（可修三类）仍走原路径：
+
+```
+有 outcome `action:"fix"`（spawn fix worker，3 轮各 1 次，计数=3）；0 条 `action:"needs-human"`
+```
+⇒ 新升级路径**未**认领既有的可修类。
+
+**AC4 三态（硬规则 3b）**——新字段 `unsatisfiableAcStatus ∈ {hit,clean,not-evaluated}`：无 AC/DoD 段（或闸输出缺该字段，硬规则 6）⇒ `"not-evaluated"`，与合格态 `"clean"` 断言 `notEqual`（s03）。⇒ 本 AC **非 N/A**：引入了新分类字段。
+
+**AC5 存量读数（硬规则 2）**——`judgeUnsatisfiableUnannotatedAc` 跑全量 `tasks/*.md`（worktree 与主检出 store 读数一致）：
+
+```
+files 2654 · evaluated 2580 · not-evaluated(no AC/DoD) 74 · tasks with >=1 unannotated item = 18
+前 3 条命中原文（命中即「执行者勾不了且无（待外部）」）：
+- [done]       DIR-130 :: DoD2: **双证据可持久核验**——…（只计落地后的时间窗，硬规则 4 推论三）
+- [done]       gap-ac282-runner-prereqs-already-present :: **AC5｜生产载体上有读数，且 AC-282 真的 exit 0。** 核法：…
+- [superseded] gap-addressedtasks-conflates-topic-label-with-routing-…:: **落地后重启 meta-driver 并确认新语义出现在真实轮记录里**——…
+```
+
+**DoD 前后对照（撤掉新分类分支）**——同一注入输入（命中候选）：
+
+| | `unsatisfiableAcStatus` | `unfixable` | 台账 `result.detail` | AC2 用例 |
+|---|---|---|---|---|
+| BEFORE（撤分支） | `not-evaluated` | `[]` | `ineligible-not-fixed` | **red**（永不 needs-human） |
+| AFTER（本实现） | `hit` | `["unsatisfiableUnannotatedAc=[…]"]` | `unsatisfiableUnannotatedAc=[…]` | **green**（第 3 轮 needs-human） |
+
+⇒ 撤掉前后分别为「空原因 + 永不升级」与「点名原因 + 第 3 轮升级」，对照在案。
+
+**AC6 scoped 门**——`bash scripts/test.sh --for-task gap-promotion-driver-blind-to-unsatisfiable-ac-block --allow-thin` ⇒ `EXIT=0`，执行 2 个测试文件（`promotion-driver-s03` / `-s06`），16 pass / 0 fail。
+
+**不变量**：⛔ 未削弱 `judgeUnsatisfiableUnannotatedAc` 的 fail-closed 默认（闸源码未改）；⛔ 未给 worker 任何自我豁免加 `（待外部）` 的路径（命中类仍拦截、不 spawn fix worker，仅升级给人）；⛔ `not-evaluated` 未折进 `clean`（硬规则 3b）。
