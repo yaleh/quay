@@ -4,7 +4,7 @@ title: gate 包环收敛第一刀：gate/config/utils.ts
   的纯原语（shQuote/resolveRunnerOptions/resolveAcceptanceTimeoutMs/DEFAULT_ACCEPTANCE_TIMEOUT_MS
   + GateConfig/RunnerOptions 类型）下沉 kernel，删除死 re-export shim
   gate/factories/loader.ts（继 GOAL-033 6→4 之后的下一刀，不承诺本刀使 SCC<4）
-status: active
+status: achieved
 kind: goal
 origin: 继 GOAL-030~033 后第五个 goal branch 试点
 activatedAt: 2026-10-10T06:03:50.080Z
@@ -14,6 +14,11 @@ statusLog:
     to: active
     actor: goal-cli
     reason: ""
+  - at: 2026-10-10T07:08:40.465Z
+    from: active
+    to: achieved
+    actor: goal-driver
+    reason: "I2: all ACs achieved + sufficiency covered"
 branch: true
 ---
 ## 背景
