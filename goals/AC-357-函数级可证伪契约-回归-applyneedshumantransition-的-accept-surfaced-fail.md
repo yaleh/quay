@@ -2,7 +2,7 @@
 id: AC-357
 title: 函数级可证伪契约 + 回归：applyNeedsHumanTransition 的 accept/surfaced-failure
   两态测试落地，driver-filters.test.mjs 与 worker-driver.test.mjs 全量回归绿
-status: draft
+status: active
 kind: criterion
 goal: GOAL-035
 criterion: >
@@ -62,6 +62,16 @@ criterion: >
   (ok:false/committed:false, not thrown/swallowed) assertion"
 expect: exit 0 = 两个测试文件全绿 + 契约两态都有断言；exit 1 = CAUSE= 指明哪一项回归；exit 3 =
   applyNeedsHumanTransition 或其测试尚未落地
-origin: 继 GOAL-030~034 后第二阶段：用户 2026-10-10 明确批准，要求脱离纯 import/SCC 清理，审查 Driver
-  生命周期/状态归属、Routine、WorkerPool、声明式 quota + 独立 Policy/Gate 的真实 OOD 候选
+origin: 继 GOAL-030~034 后第二阶段
+activatedAt: 2026-10-10T09:38:56.807Z
+statusLog:
+  - at: 2026-10-10T09:38:56.807Z
+    from: draft
+    to: active
+    actor: goal-cli
+    reason: ""
+fidelity:
+  verdict: not-evaluated
+  reason: no judge configured
+  at: 2026-10-10T09:38:56.806Z
 ---
