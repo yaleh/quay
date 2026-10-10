@@ -3,7 +3,7 @@ id: goal-035-needs-human-transition-unify
 title: WorkerPool needs-human
   终态转移收敛实现：三条路径（stop-terminal/retry-cap/quick-death）统一到
   applyNeedsHumanTransition（GOAL-035 落地任务，分支 goal/GOAL-035）
-status: ready
+status: done
 labels:
   - gap
 parent: null
