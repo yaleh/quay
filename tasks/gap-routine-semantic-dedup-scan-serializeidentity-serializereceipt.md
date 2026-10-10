@@ -2,7 +2,7 @@
 id: gap-routine-semantic-dedup-scan-serializeidentity-serializereceipt
 title: "semantic-dedup-scan: Character-identical canonical-JSON serializer
   (sorted keys, one nesting level) under two names."
-status: ready
+status: done
 labels:
   - gap
   - routine-filed
@@ -88,11 +88,3 @@ extract
 - `plugin/scripts/execution-policy.ts`
 - `plugin/test/gate-script-base.test.mjs`
 - `tasks/gap-routine-semantic-dedup-scan-serializeidentity-serializereceipt.md`
-
-## Blocker
-
-**2026-10-10T12:04:19.078Z — worker 未落地（exited-not-landed）**
-
-- 未落地原因：step=suite: AssertionError [ERR_ASSERTION]: peers ∪ mentions must equal the grep oracle for plugin/scripts/worker-driver.ts
-- run_id：wk-prod-anchor
-- session_id：faf82909-919d-43c3-a221-dace80a61318

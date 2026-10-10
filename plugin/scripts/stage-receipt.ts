@@ -40,7 +40,7 @@ import fs from "node:fs";
 import path from "node:path";
 import { createHash } from "node:crypto";
 import { execSync } from "node:child_process";
-import { createSelftest, parseJsonArg, git, gitLastCommitForPath } from "./gate-script-base.ts";
+import { createSelftest, parseJsonArg, git, gitLastCommitForPath, serializeSortedJson } from "./gate-script-base.ts";
 import {
   SCHEMA_VERSION as A1_SCHEMA_VERSION,
   VALID_STAGES,
@@ -222,22 +222,15 @@ export function sha256File(filePath: string): string {
  * Deterministic single-line JSON: top-level keys sorted; nested plain objects (timing,
  * materialInputHashes, evidenceManifestRef, sourceHashes) serialized with their own keys sorted, so
  * identical receipts serialize byte-identically regardless of key insertion order. Never lossy.
+ *
+ * The body now lives ONCE, in gate-script-base.ts's `serializeSortedJson` (routine
+ * `semantic-dedup-scan`, finding `serializeidentity-serializereceipt`, runId
+ * `semantic-dedup-scan-1791631645924` — its sibling call site is run-identity.ts's
+ * `serializeIdentity`). The name stays exported because workflow-journal.ts and the receipt
+ * contentHash both address it; the function is now a delegation, not a second implementation.
  */
 export function serializeReceipt(receipt: StageReceiptEnvelope): string {
-  const sorted: Record<string, unknown> = {};
-  for (const key of Object.keys(receipt).sort()) {
-    const value = (receipt as Record<string, unknown>)[key];
-    if (value && typeof value === "object" && !Array.isArray(value)) {
-      const nested: Record<string, unknown> = {};
-      for (const k of Object.keys(value as Record<string, unknown>).sort()) {
-        nested[k] = (value as Record<string, unknown>)[k];
-      }
-      sorted[key] = nested;
-    } else {
-      sorted[key] = value;
-    }
-  }
-  return JSON.stringify(sorted);
+  return serializeSortedJson(receipt);
 }
 
 // ── git helpers — the shared fail-closed `git(args, cwd): GitResult` and `gitLastCommitForPath` now

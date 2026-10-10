@@ -14,8 +14,15 @@
 
 import { test } from "node:test";
 import assert from "node:assert/strict";
+import { spawnSync } from "node:child_process";
+import fs from "node:fs";
+import path from "node:path";
+import { fileURLToPath } from "node:url";
 
 import { scanFileText } from "../scripts/tmux-test-isolation-check.ts";
+
+const __dirname = path.dirname(fileURLToPath(import.meta.url));
+const CHECKER = path.join(path.resolve(__dirname, "../.."), "plugin/scripts/tmux-test-isolation-check.ts");
 
 
 // ── AC4 negative control: the bare unqualified shape MUST be red ────────────────────────────────
@@ -96,5 +103,36 @@ test("a `tmux -V` version probe alone is GREEN (no server is started)", () => {
 `;
   const res = scanFileText(src);
   assert.equal(res.isolated, true, "a pure -V availability probe starts no server");
+});
+
+// ── Disposition of finding `runcli-twostill-handrolled` ─────────────────────────────────────────────
+// (.quay/routine-findings.jsonl, routine `semantic-dedup-scan`, runId
+//  `semantic-dedup-scan-1791631645924`): the private `--root/--json/--help` flag loop THIS file and
+//  threshold-scope-check.ts each carried is GONE — both fold onto gate-script-base.parseArgs, the same
+//  fold task-ac-carryover-check.ts / task-contract-check.ts already made for the sibling finding
+//  `task-check-flag-loops-duplicate`. Position-based (硬规则 2): assert the ACTUAL import binding +
+//  the ABSENCE of the loop's literal header, not a keyword mention in a comment.
+
+test("disposition: runCli uses the SHARED parseArgs and carries no private flag loop", () => {
+  const src = fs.readFileSync(CHECKER, "utf8");
+  assert.match(src, /import \{[^}]*\bparseArgs\b[^}]*\} from "\.\/gate-script-base\.ts";/,
+    "the flag parser must be the shared one, imported from gate-script-base");
+  assert.doesNotMatch(src, /for \(let i = 0; i < args\.length; i\+\+\)/,
+    "the private flag loop must not survive as a second parser");
+});
+
+test("disposition: an unknown --flag exits 2 — the shared parser's strict guard", () => {
+  const r = spawnSync(process.execPath, ["--experimental-strip-types", CHECKER, "--bogus"], { encoding: "utf8" });
+  assert.equal(r.status, 2);
+  assert.match(r.stderr, /unknown argument: --bogus/);
+});
+
+test("disposition: a stray positional exits 2 instead of silently scanning the default root", () => {
+  // The private loop let a non-flag token fall through the for/else-if chain and then scanned
+  // process.cwd(), reporting PASS for an input it never read. threshold-scope-check.ts always
+  // rejected positionals; unifying the family means stopping at the same place (硬规则 3b).
+  const r = spawnSync(process.execPath, ["--experimental-strip-types", CHECKER, "/tmp"], { encoding: "utf8" });
+  assert.equal(r.status, 2, `a positional must be a usage error, got exit ${r.status}: ${r.stdout}${r.stderr}`);
+  assert.match(r.stderr, /unexpected positional: \/tmp/);
 });
 
