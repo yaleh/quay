@@ -1,7 +1,7 @@
 ---
 id: AC-360
 title: 函数级契约 + 确定性负对照 + 回归：driver-filters.test.mjs 与 worker-driver.test.mjs 全量回归绿
-status: active
+status: achieved
 kind: criterion
 goal: GOAL-036
 criterion: >
@@ -70,6 +70,11 @@ statusLog:
     to: active
     actor: goal-cli
     reason: ""
+  - at: 2026-10-10T19:09:04.868Z
+    from: active
+    to: achieved
+    actor: goal-driver
+    reason: "I2: criterion pass"
 fidelity:
   verdict: not-evaluated
   reason: no judge configured
