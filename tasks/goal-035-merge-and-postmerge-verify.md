@@ -226,5 +226,17 @@ GOAL-035 以恰好一个合并提交进入 develop，落地树持有本刀全部
 
 ### 自查（Plan 10）
 
-- `node --experimental-strip-types plugin/scripts/task-schema-check.ts tasks/goal-035-merge-and-postmerge-verify.md` ⇒ 见下方收尾读数。
-- `quay task check goal-035-merge-and-postmerge-verify --json` ⇒ `ok:true`、`acChecked == acTotal`。
+- `node --experimental-strip-types plugin/scripts/task-schema-check.ts tasks/goal-035-merge-and-postmerge-verify.md`（任务分支 worktree 副本）⇒ **EXIT=0**，输出原文：
+
+      N/A legacy (no schema marker): …/tasks/goal-035-merge-and-postmerge-verify.md
+      1 total, 0 pass, 1 N/A-legacy, 0 fail
+
+- `quay task check goal-035-merge-and-postmerge-verify --json`（MCP `task_check`）⇒ 原文：
+
+      {"gate":"execute->done","ok":true,"acTotal":10,"acChecked":10,"dodTotal":0,"dodChecked":0,
+       "reason":"all AC and DoD checkboxes checked; eligible to move to done"}
+
+  （勾选前同一读数为 `acTotal:10, acChecked:0` —— 两读数互为前后对照；写入经 Provider ABI 的 `task_write`，未手改 checkbox 字符。）
+- `anti-drift-touches-check.ts --task goal-035-merge-and-postmerge-verify --worktree <wt> --merge-target develop` ⇒ `ANTI-DRIFT OK: … 0 actual file(s), all within declared Touches (2 glob(s))`。
+- 本任务 **delta 为空**：任务分支经 `git merge --no-edit develop` 快进到 develop 尖端（`43cc3c9b6`）⇒ `git diff --name-only develop...HEAD` = **0 行**（其中不含 `plugin/scripts/**` 与 `plugin/test/**`，AC10 成立；空 delta 的落地面见 `## Touches` 的自身条目）。
+- scoped 门：`bash <wt>/scripts/test.sh --for-task goal-035-merge-and-postmerge-verify --allow-thin` ⇒ **EXIT=0**，末行 `selector selected 0 test files (thin allowed); nothing to run, full suite still runs at fan-in`；随后 `worker-driver.ts --write-scoped-gate-cache --task goal-035-merge-and-postmerge-verify --develop-sha 43cc3c9b6428037a327d02f706210aaf20a85be6` ⇒ `{"event":"scoped-gate-cache-written", …}`。
