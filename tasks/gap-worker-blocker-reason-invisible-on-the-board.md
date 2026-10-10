@@ -2,7 +2,7 @@
 id: gap-worker-blocker-reason-invisible-on-the-board
 title: worker 写在任务分支上的阻塞记录到不了 develop/author（且任务记录的 lastFailure/failure 槽从未被写）⇒
   任务为何卡住在看板上不可见、循环静默
-status: todo
+status: ready
 labels:
   - gap
 parent: null
