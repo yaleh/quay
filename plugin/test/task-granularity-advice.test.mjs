@@ -445,27 +445,51 @@ test("production: for real declared paths, peers ∪ mentions equals the step-2b
     const both = peers.map((x) => x.id).filter((id) => mentions.some((m) => m.id === id));
     assert.deepEqual(both, [], "no task may be both a declarer and a pure-prose mention for the SAME path");
     const union = [...new Set([...peers.map((x) => x.id), ...mentions.map((x) => x.id)])].sort();
-    // The oracle: the literal grep of step 2b, restricted to open statuses.
+    // The oracle: stage 1 is the literal mention grep of step 2b; stage 2 restricts its status
+    // predicate to the FRONTMATTER block.
+    //
+    // ⛔ Stage 2 must NOT be the recipe's whole-file `grep -lE '^status: (todo|ready)$'`. That
+    // predicate is LINE-ANCHORED over the whole file, so a task whose BODY carries a line
+    // `status: ready` is read as OPEN even when its frontmatter says `done`. Measured 2026-10-10:
+    // `goal-035-merge-and-postmerge-verify` has a duplicated frontmatter block in its body (as do
+    // `gap-ac297-git-history-page-zh-chrome-nav-current-and-own-title` and
+    // `gap-touches-parser-early-subheading-latch-hides-declaration`), and the whole-file predicate
+    // listed it as open — reddening every fan-in suite for a board state that is not the tool's
+    // fault. The tool reads the FRONTMATTER, which is the side this comparison must follow; the
+    // same finding is recorded by the task that built this comparison
+    // (`gap-task-granularity-advice-script-merge-candidates-and-per-file-history`: "把 grep 的
+    // status 判据限制在 frontmatter 段内后，两侧 0 处不符 … 本工具读 frontmatter 而非全文扫描").
+    //
     // An EMPTY oracle is a legitimate reading of the board, not an evaluation failure. Measured
     // 2026-10-07: all 193 task files naming `plugin/scripts/worker-driver.ts` were already
-    // done/needs-human/superseded, so the inner grep matched nothing, `xargs` exited 123, and the
-    // former `execFileSync` threw BEFORE the assertion could run — reddening every fan-in suite for
-    // a board state that is perfectly valid.
-    // `xargs` exits 0 when its command matched and 123 when that command exited 1-125 (no match).
-    // ⛔ Any OTHER status is a genuine tool failure and must NOT be read as "empty" (硬规则 3b: the
-    // "couldn't evaluate" reading may not share a value with a verdict); it is asserted loudly, and
-    // the `deepEqual` below stays the judge — with an empty oracle it still CAN take false.
-    const grepRes = spawnSync(
-      "bash",
-      ["-c", `grep -lF -- "${p}" tasks/*.md | xargs -r grep -lE '^status: (todo|ready)$'`],
-      { cwd: MAIN, encoding: "utf8" },
-    );
+    // done/needs-human/superseded, so stage 1 matched nothing. Each stage's exit code is asserted
+    // separately (stage 1: grep 0 = matched / 1 = no match; stage 2: awk 0, and it only runs over
+    // the files stage 1 named), so a genuine tool failure in EITHER stage can never be read as
+    // "empty" (硬规则 3b: the "couldn't evaluate" reading may not share a value with a verdict).
+    // The `deepEqual` below stays the judge — with an empty oracle it still CAN take false.
+    const grepRes = spawnSync("bash", ["-c", `grep -lF -- "${p}" tasks/*.md`], { cwd: MAIN, encoding: "utf8" });
     assert.ok(
-      grepRes.status === 0 || grepRes.status === 123,
-      `step-2b oracle pipeline failed (exit ${grepRes.status}): ${(grepRes.stderr || "").trim()}`,
+      grepRes.status === 0 || grepRes.status === 1,
+      `step-2b oracle stage-1 failed (exit ${grepRes.status}): ${(grepRes.stderr || "").trim()}`,
     );
-    const grepOut = grepRes.stdout || "";
-    const oracle = grepOut.split("\n").map((x) => path.basename(x.trim()).replace(/\.md$/, "")).filter(Boolean).sort();
+    const named = (grepRes.stdout || "").split("\n").map((x) => x.trim()).filter(Boolean);
+    const fmRes = named.length
+      ? spawnSync(
+          "awk",
+          [
+            'FNR==1 { fm = ($0 == "---"); next } fm && $0 == "---" { fm = 0; next } fm && /^status: (todo|ready)$/ { print FILENAME; fm = 0 }',
+            ...named,
+          ],
+          { cwd: MAIN, encoding: "utf8" },
+        )
+      : { status: 0, stdout: "", stderr: "" };
+    assert.ok(
+      fmRes.status === 0,
+      `step-2b oracle stage-2 (frontmatter status) failed (exit ${fmRes.status}): ${(fmRes.stderr || "").trim()}`,
+    );
+    const oracle = [...new Set(
+      (fmRes.stdout || "").split("\n").map((x) => path.basename(x.trim()).replace(/\.md$/, "")).filter(Boolean),
+    )].sort();
     assert.deepEqual(union, oracle, `peers ∪ mentions must equal the grep oracle for ${p}`);
   }
 });
