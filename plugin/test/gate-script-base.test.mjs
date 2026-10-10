@@ -1002,3 +1002,72 @@ test("git: both throwing-form former carriers now IMPORT the shared fail-closed 
     );
   }
 });
+
+// ── parseArgs: the four residual hand-rolled flag loops, converged (finding `parseargs-handrolled-residuals`)
+//
+// semantic-dedup-scan (runId `semantic-dedup-scan-1791631645924`, verdict divergent-implementation,
+// suggestedAction `unify`) named four files that still hand-rolled a generic `--flag value` loop
+// although THIS module owns a spec-driven one. Each was blocked on a spec key that did not exist
+// yet — `type:"string[]"` (greedy / repeated), `unknown:"skip"`, `errors:"return"` — so the fold is
+// Part A of gate-script-base.ts's parseArgs block plus Part B here. What this pin can and cannot see
+// is stated rather than implied: it is a SOURCE scan, so it proves the loop idiom is gone and the
+// shared import is present — NOT that the four commands behave identically (that is what their own
+// suites and plugin/test/gate-script-base-arg-modes.test.mjs are for).
+
+/** The four former carriers. Each still declares a local `parseArgs` — that is the ADAPTER, and it is
+ *  supposed to stay (it maps raw flag strings onto the command's own typed shape); what must be gone
+ *  is the loop inside it. */
+const PARSE_ARGS_RESIDUAL_CARRIERS = [
+  "obligation-ledger.ts",
+  "checked-in-write-check.ts",
+  "start-drivers.ts",
+  "suite-scheduler.ts",
+];
+
+/** The hand-rolled loop idiom these four carried, in both index bases used (`0` when the caller had
+ *  already sliced argv, `2` when it walked the whole thing). Keyed on the LOOP, not on the function
+ *  name: a `function parseArgs` scan would sweep in the ~17 other private parsers this finding does
+ *  NOT cover (they have their own input languages) and read a false red. */
+const HANDROLLED_FLAG_LOOP_RE = /for \(let i = [02]; i < argv\.length; i\+\+\)/;
+
+test("parseArgs: the four residual carriers keep NO hand-rolled flag loop", () => {
+  for (const f of PARSE_ARGS_RESIDUAL_CARRIERS) {
+    assert.doesNotMatch(
+      sourceOf(f),
+      HANDROLLED_FLAG_LOOP_RE,
+      `${f} still hand-rolls a generic flag loop instead of calling the shared parser`,
+    );
+  }
+});
+
+test("parseArgs: each of the four now IMPORTS and CALLS the shared spec-driven parser", () => {
+  for (const f of PARSE_ARGS_RESIDUAL_CARRIERS) {
+    const src = sourceOf(f);
+    assert.match(
+      src,
+      /import \{[^}]*\bparseArgs as baseParseArgs\b[^}]*\} from "\.\/gate-script-base\.ts"/,
+      `${f} does not import parseArgs from the base`,
+    );
+    // Deleting the loop without calling the shared parser would still pass the scan above, so this
+    // half is not redundant — it is the half that distinguishes "converged" from "deleted".
+    assert.match(src, /\bbaseParseArgs\(/, `${f} imports the shared parser but never calls it`);
+  }
+});
+
+test("parseArgs: deleting the shared export makes a carrier import fail (the mechanism is real)", () => {
+  // The "删了不红 ⇒ 假" control, same shape as the readJsonLines pair above: a consumer importing an
+  // ABSENT named export must fail to link, and the SAME consumer must link once it exists.
+  withTempDir("parseargs-negctl-", (dir) => {
+    fs.writeFileSync(path.join(dir, "gate-script-base.ts"), "export const OTHER = 1;\n");
+    fs.writeFileSync(
+      path.join(dir, "consumer.ts"),
+      'import { parseArgs as baseParseArgs } from "./gate-script-base.ts";\nconsole.log(baseParseArgs);\n',
+    );
+    const missing = spawnSync("node", ["--experimental-strip-types", "consumer.ts"], { cwd: dir, encoding: "utf8" });
+    assert.notEqual(missing.status, 0, "a consumer importing an absent export must fail to link");
+
+    fs.writeFileSync(path.join(dir, "gate-script-base.ts"), "export function parseArgs() { return { args: [], flags: {} }; }\n");
+    const present = spawnSync("node", ["--experimental-strip-types", "consumer.ts"], { cwd: dir, encoding: "utf8" });
+    assert.equal(present.status, 0, "the same consumer links once the export is present");
+  });
+});
