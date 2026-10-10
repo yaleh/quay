@@ -2,7 +2,7 @@
 id: gap-ci-runner-container-needs-user-systemd
 title: CI runner 容器缺可用用户 systemd 管理器、且 systemd 245 不认 OOMPolicy=continue ——
   release.yml 第 13 步恒红，v0.18.0 起每版发不出去；修复须能从 develop 重建
-status: todo
+status: ready
 labels:
   - gap
 parent: null
