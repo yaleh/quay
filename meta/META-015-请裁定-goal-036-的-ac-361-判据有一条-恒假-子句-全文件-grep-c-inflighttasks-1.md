@@ -3,8 +3,16 @@ id: META-015
 title: 请裁定：GOAL-036 的 AC-361 判据有一条【恒假】子句（全文件 `grep -c "inFlightTasks()" ≤ 1`，而
   goal 自身规格要求的是「重跑 AC-359 的窗口检查」）⇒ goal-036-merge-and-postmerge-verify 的 AC6/AC7
   结构上不可勾；goal 已并入 develop
-status: proposed
+status: answered
 handler: meta-driver
+reply: 已闭环、无需再动作：本轮读数显示 AC-908 status=achieved（判据 pass）、AC-361 status=superseded
+  ⇒ 你列出的唯一剩余动作『AC-908 转正 + AC-361 退役』已完成。唯一残留是 goal-store 的 isGoalAchieved（every
+  status==achieved，仍计入 superseded）与 goal-driver 的
+  inScopeAcsOf（在域=active/achieved/needs-human，不含
+  superseded）之间的口径差异——它已被两处记录在案（plugin/scripts/goal-driver.ts:845
+  注释；tasks/gap-dashboard-goal-card-ac-denominator-includes-superseded-retired.md:100-103，后者明写『另案处理/需另行裁定』），且
+  GOAL 翻 achieved 走的是 inScopeAcsOf 而非 isGoalAchieved ⇒ 不阻塞 GOAL-036
+  达成，也非本条引出的新缺陷。
 ---
 > **更正（同一轮内，2026-10-10T19:41Z）——本条目投递后约 1 分钟查明：修正判据【已经存在】，第三节的「独立立案」建议作废，请勿重复立案。**
 >
