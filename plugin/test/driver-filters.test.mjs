@@ -20,6 +20,7 @@ import {
   TASK_FILTERS,
   applyTaskFilters,
   makeFilterContext,
+  computeDispatchExclusion,
   allDepsDone,
   judgeDeps,
   judgeDepStatus,
@@ -1481,4 +1482,41 @@ test("AC3（负控制，retry-cap 臂）— kind=retry-cap：小标题与提交�
   assert.match(body, /连续修满重试上限仍不合格/, "retry-cap 臂的小标题含「重试上限」（负控制）");
   const subject = git(root, "log", "-1", "--format=%s").trim();
   assert.match(subject, /重试上限机械翻转/, "retry-cap 臂的提交消息含「重试上限」（负控制）");
+});
+
+// ── GOAL-036：computeDispatchExclusion = 一轮派发里 {inFlight, retryExhausted} 的唯一纯函数计算点 ──────
+// WHY：worker-driver 驻留环的 ready-pool 步与 apply-filters 步原本各自独立调用 inFlightTasks()，两处
+// 之间夹着一个 await（readyPoolCheck 子进程调用）——该窗口内 running/coldInflight 变动会让同轮两次
+// 读数互相矛盾。收敛成一次调用即消除该窗口（同 bug 形态见 gap-worker-driver-cold-start-inflight-*）。
+
+test("GOAL-036 AC-359：computeDispatchExclusion 基本正确性 —— inFlight = running ∪ coldInflight（保序），retryExhausted = retryState.needsHuman", () => {
+  const running = [{ task: "gap-a" }, { task: "gap-b" }];
+  const coldInflight = new Set(["gap-c"]);
+  const retryState = { counts: new Map(), needsHuman: new Set(["gap-b"]) };
+
+  const out = computeDispatchExclusion(running, coldInflight, retryState);
+
+  // 与旧闭包 inFlightTasks() 逐字同形：running.map(r=>r.task).concat([...coldInflight])。
+  assert.deepStrictEqual(out.inFlight, ["gap-a", "gap-b", "gap-c"], "inFlight = running 的 task（保序）后接 coldInflight");
+  // 与旧调用点 { inFlight: inFlightTasks(), retryExhausted: retryState.needsHuman } 同形：同一 Set。
+  assert.equal(out.retryExhausted, retryState.needsHuman, "retryExhausted 就是 retryState.needsHuman 本身（同一引用）");
+  assert.deepStrictEqual([...out.retryExhausted], ["gap-b"], "retryExhausted 内容 = retryState.needsHuman 内容");
+});
+
+test("GOAL-036 AC-359/AC-360：确定性负对照 —— 相同输入两次调用 deepStrictEqual，且每次返回【新】数组（纯快照，不会像旧的双调用那样漂移）", () => {
+  const running = [{ task: "t1" }, { task: "t2" }];
+  const coldInflight = new Set(["t3", "t4"]);
+  const retryState = { counts: new Map([["t9", 3]]), needsHuman: new Set(["t9"]) };
+
+  const a = computeDispatchExclusion(running, coldInflight, retryState);
+  const b = computeDispatchExclusion(running, coldInflight, retryState);
+
+  assert.deepStrictEqual(a, b, "相同输入 ⇒ 深度相等输出（纯函数、无隐藏状态/无时间依赖）");
+  assert.deepStrictEqual(a.inFlight, b.inFlight, "两次调用的 inFlight 内容逐字相等");
+  assert.notEqual(a.inFlight, b.inFlight, "但两次调用返回【不同数组实例】——每次是独立快照，旧代码两次重算才会漂移");
+  assert.equal(a.retryExhausted, b.retryExhausted, "retryExhausted 保持指向同一 needsHuman Set");
+  // 纯函数：不改动任何入参（调用前后入参可观察状态不变）。
+  assert.deepStrictEqual(running, [{ task: "t1" }, { task: "t2" }], "running 未被改动");
+  assert.deepStrictEqual([...coldInflight], ["t3", "t4"], "coldInflight 未被改动");
+  assert.deepStrictEqual([...retryState.needsHuman], ["t9"], "retryState.needsHuman 未被改动");
 });
