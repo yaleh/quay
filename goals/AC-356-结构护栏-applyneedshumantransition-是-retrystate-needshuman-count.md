@@ -3,7 +3,7 @@ id: AC-356
 title: 结构护栏：applyNeedsHumanTransition 是 retryState.needsHuman/counts 的唯一
   mutator；三条路径（stop-terminal/retry-cap/quick-death）收敛，quick-death
   转移现在可观测；非目标文件与函数未动
-status: draft
+status: active
 kind: criterion
 goal: GOAL-035
 criterion: |
@@ -44,6 +44,16 @@ criterion: |
   echo "PASS: applyNeedsHumanTransition is the single mutator of retryState.needsHuman/counts in worker-driver.ts; all 3 real call sites (stop-terminal, retry-cap, quick-death) converge on it; the quick-death path now records its result like the other two; non-goal functions and the environment-fatal early return are untouched"
 expect: exit 0 = 单一 mutator + 三路径收敛 + quick-death 可观测 + 非目标未动；exit 1 = CAUSE=
   指明哪一项；exit 3 = applyNeedsHumanTransition 尚未落地
-origin: 继 GOAL-030~034 后第二阶段：用户 2026-10-10 明确批准，要求脱离纯 import/SCC 清理，审查 Driver
-  生命周期/状态归属、Routine、WorkerPool、声明式 quota + 独立 Policy/Gate 的真实 OOD 候选
+origin: 继 GOAL-030~034 后第二阶段
+activatedAt: 2026-10-10T09:38:55.464Z
+statusLog:
+  - at: 2026-10-10T09:38:55.464Z
+    from: draft
+    to: active
+    actor: goal-cli
+    reason: ""
+fidelity:
+  verdict: not-evaluated
+  reason: no judge configured
+  at: 2026-10-10T09:38:55.464Z
 ---
