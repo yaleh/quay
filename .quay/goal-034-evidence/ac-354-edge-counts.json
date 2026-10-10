@@ -1,0 +1,73 @@
+{
+  "ac": "AC-354",
+  "goal": "GOAL-034",
+  "task": "goal-034-edge-count-before-after-negctl",
+  "evaluated_tree": {
+    "worktree": "/home/yale/work/quay-worktrees/goal-034-edge-count-before-after-negctl",
+    "head": "07b659b18bc0ead539ede9420e72438e39bdbcf3",
+    "tree_sha": "20913f348ed29a71df22383cfe8f67959118ce22",
+    "note": "the goal gate evaluated at /data/home/yale/work/quay-worktrees/goal-GOAL-034 (branch-mode goal AC) — that tree is byte-identical to this task worktree: same HEAD 07b659b18 and same tree 20913f34"
+  },
+  "gate_run": {
+    "command": "node --experimental-strip-types packages/quay/bin/quay.ts goal gate AC-354",
+    "cwd": "/home/yale/work/quay-worktrees/goal-034-edge-count-before-after-negctl",
+    "exit": 0,
+    "verdict": "pass",
+    "cause": null,
+    "evaluationRoot": "/data/home/yale/work/quay-worktrees/goal-GOAL-034",
+    "treeSha": "20913f348ed29a71df22383cfe8f67959118ce22",
+    "event_id": "e5756bcd-91e0-40f8-b530-91decb9217aa"
+  },
+  "criterion_stdout_verbatim": {
+    "json_line": "{\"fork_point\":\"162f8c380ed1dd9267167cc791ef8727fd13269d\",\"before\":{\"root_to_gate_config\":1,\"factories_to_config_lines\":5},\"after\":{\"root_to_gate_config\":0,\"factories_to_config_lines\":0},\"negative_control_count_on_scratch_regression\":1}",
+    "pass_line": "PASS: root->gate/config edge count 1 -> 0; gate/factories->gate/config line count 5 -> 0 (file deletion + 2 real redirects); negative control on a scratch regression correctly re-detects the old edge",
+    "how_obtained": "the goal-gate CLI does not surface the criterion's captured stdout (its --json/--dry-run payload carries only verdict/cause/evaluationRoot/treeSha), so the criterion text was read back verbatim via `quay goal show AC-354 --json` and re-run with `sh -c <criterion>` in the SAME cwd the runner uses (evaluationRoot, /data/home/yale/work/quay-worktrees/goal-GOAL-034) — the runner itself uses spawnSync(shellCmd,{cwd,shell:true}) — producing byte-identical stdout"
+  },
+  "fork_point": "162f8c380ed1dd9267167cc791ef8727fd13269d",
+  "before": {
+    "root_to_gate_config": 1,
+    "factories_to_config_lines": 5,
+    "per_file": {
+      "packages/quay/src/gate/factories/utils.ts": 2,
+      "packages/quay/src/gate/factories/goal.ts": 1,
+      "packages/quay/src/gate/factories/loader.ts": 2
+    },
+    "measured_by": "independent re-measurement script reading `git show 162f8c38:<path>` and applying the criterion's own predicate (strip comment lines, then match /from\\s*[\"']\\./gate/config\\// and /from\\s*[\"']\\.\\./config\\// ) — measured, not transcribed from the criterion's baked-in constants"
+  },
+  "after": {
+    "root_to_gate_config": 0,
+    "factories_to_config_lines": 0,
+    "per_file": {
+      "packages/quay/src/gate/factories/utils.ts": 0,
+      "packages/quay/src/gate/factories/goal.ts": 0,
+      "packages/quay/src/gate/factories/loader.ts": null
+    },
+    "note": "loader.ts counts as null (file deleted at the tip — a deletion removes its 2 lines entirely, which is why the 5→0 drop has three contributions: file deletion + 2 real redirects); gate/config/utils.ts is likewise deleted, not left as a re-export shim",
+    "measured_by": "same predicate applied to the branch-tip working tree"
+  },
+  "negative_control": {
+    "method": "copy packages/quay/src/goal-store.ts into a scratch dir, prepend the retired import `import { resolveAcceptanceTimeoutMs } from \"./gate/config/utils.ts\";` at the very top of the copy, recount with the criterion's own predicate",
+    "pristine_copy_count": 0,
+    "count": 1,
+    "falsifiable": true,
+    "independence": "second source — does NOT reuse the criterion's own in-place `replace()` scratch trick; a separate scratch copy and a top-of-file insertion, so a shared bug in the criterion's scratch construction would not reproduce here",
+    "evidence_of_falsifiability": "pristine copy counts 0 while the copy carrying the re-inserted old import counts 1 — the counter demonstrably moves when the retired edge reappears (hard rule 4: a reading that structurally cannot be false is not a measurement)"
+  },
+  "package_scc": {
+    "scopeKey": "1734a0d7",
+    "label": "src (typescript)",
+    "members": ["", "gate", "gate/config", "gate/factories"],
+    "size": 4,
+    "note": "MEASURED at the branch tip on the evaluated tree (archguard_analyze projectRoot=<task worktree>, sources=[\"packages/quay/src\"], lang=typescript, format=json → scopeKey 1734a0d7; then archguard_detect_cycles outputScope=\"package\" scope=\"1734a0d7\"). The fork point 162f8c38 was measured the same way on an extracted tree (scopeKey 61afbb78) and returned the SAME single SCC with the SAME members and size 4. ⇒ the 4-ring did NOT shrink: this cut removed the root→gate/config edge and the factories→config imports, but it did not cut the gate↔gate/config↔gate/factories cycle. Recorded as measured (是几写几); the hand-derived expectation in the GOAL-034 body (4 survives) is hereby confirmed rather than adjusted — no scope was widened to make the number smaller.",
+    "fork_point_reading": {
+      "scopeKey": "61afbb78",
+      "members": ["", "gate", "gate/config", "gate/factories"],
+      "size": 4
+    }
+  },
+  "source_untouched": {
+    "claim": "no packages/quay/src/** file was modified by this task",
+    "check": "`git diff --name-only 07b659b18 -- packages/quay/src` is EMPTY, where 07b659b18 is this task branch's base (the goal/GOAL-034 tip, which already carries the sibling implementation). NB: a diff against the GOAL fork point 162f8c38 DOES list packages/quay/src — that is the prerequisite implementation landed by goal-034-gate-run-options-to-kernel, not this task's work.",
+    "branch_base": "07b659b18bc0ead539ede9420e72438e39bdbcf3"
+  }
+}
