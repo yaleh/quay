@@ -949,7 +949,29 @@ test("AC3 回放·CLI — 全量扫描（生产基线 b11ce720）NOT-EVALUATED�
   const out = jsonOut(r);
   assert.equal(out.evaluated, false, "reflog 剪后必须 NOT-EVALUATED（⛔ 不伪装成「未发现 direct」）");
   assert.equal(out.ok, true, "NOT-EVALUATED 不是 RED");
-  assert.equal(out.reason, "unclassifiable-commits-in-range");
+  // reason 是**双通道**（gap-ac194-reflog-action-vocabulary-incomplete AC2）：
+  //   · 计数形态 `unclassifiable-commits-in-range` —— 不可分类的 commit 在 reflog 里【根本没有条目】（被 gc 剪）；
+  //   · 具名形态 `unsupported-reflog-action: <form>` —— 有 reflog 条目但 action 形读不懂；此时计数形态作为
+  //     **并列信息**保留在 `reasonSecondary`（检查器逐字承诺「既有 reason 作为并列信息保留」）。
+  // ⛔ 两种形态都不得被钉死：本用例扫的是**实时 repo**，reason 取值取决于本 checkout 的 reflog 是否含读不懂的形。
+  //    本仓实测已出现（2026-10-10）：`plugin/scripts/integration-batch-merge.ts:1165` 用**裸 `git update-ref`
+  //    （无 -m）**做 develop 的 ref-level CAS 落地 ⇒ 该条 reflog 消息为空 ⇒ form = `(empty)` ⇒ 具名形态。
+  //    把本行收窄成计数形态会让用例在 reflog 演化时【假红】——正是它挡下了当日所有代码落地（硬规则 4b：
+  //    reason 是 reflog 状态的代理量，不是检查器的性质）。两种形态都仍是 NOT-EVALUATED（exit 3 /
+  //    evaluated:false，见上），本用例的主张（不伪装成「未发现 direct」）不受影响。
+  const NAMED_FORM_RE = /^unsupported-reflog-action: /;
+  assert.ok(
+    out.reason === "unclassifiable-commits-in-range" || NAMED_FORM_RE.test(out.reason ?? ""),
+    `reason 必须是计数形态或具名形态（实际 ${JSON.stringify(out.reason)}）`,
+  );
+  if (NAMED_FORM_RE.test(out.reason ?? "")) {
+    assert.equal(
+      out.reasonSecondary,
+      "unclassifiable-commits-in-range",
+      "具名时计数形态必须在 reasonSecondary 上保留（并列信息，⛔ 不丢）",
+    );
+    assert.ok(out.classification.unclassifiedActionForms.length > 0, "具名 ⇔ 至少一个 action 形被点名");
+  }
   assert.ok(out.unclassifiableCommits > 0, "基线区间内存在 ledger 无记录且 reflog 也查不到的 commit");
   assert.ok(out.denominator.unclassifiableCommits > 0, "denominator 同步暴露 unclassifiable 计数");
   // AC4：分类覆盖率可读数——classified/total/ratio。⚠️ 下界是【检出 reflog 深度】的代理量，不是

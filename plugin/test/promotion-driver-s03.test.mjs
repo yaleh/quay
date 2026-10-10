@@ -197,3 +197,46 @@ test("classifyCandidate — bodyEvaluated=false is its OWN class: ⛔ no fix wor
   // 缺值 = 未查 (硬规则 6): an OLDER gate output without the field must NOT be read as `false`.
   assert.equal(classifyCandidate({ ...base, touchesResolve: false }).fixable, true, "field absent ⇒ pre-change behavior (undefined is not false)");
 });
+
+// ── EXECUTOR-UNSATISFIABLE AC, UNANNOTATED (tasks/gap-promotion-driver-blind-to-unsatisfiable-ac-block) ──
+// The defect: the ready-pool-check gate intercepts an unchecked AC whose OWN text declares the executor
+// cannot satisfy it (`落地后…` etc.) with no `（待外部）` annotation, writing the offending item into
+// `unsatisfiableUnannotatedAc.hits` — but the driver's classifyCandidate did not read it, so `missing`
+// AND `unfixable` were both empty ⇒ the ledger recorded the information-free `ineligible-not-fixed` and
+// the task spun forever. This test pins the收编 half: a hit is its OWN non-fixable class that NAMES the
+// item. AC4 (硬规则 3b) is pinned too: `not-evaluated` (no AC section / field absent) is DISTINCT from
+// the qualified `clean` reading and is never folded into it.
+
+
+test("classifyCandidate — an executor-unsatisfiable unannotated AC is its OWN unfixable class, naming the item verbatim", () => {
+  const base = {
+    id: "gap-a", fourArtifacts: true, missingArtifacts: [], selfTouchOk: true, touchesResolve: true,
+    depsReady: true, retiredMechanism: false, superseded: false, compound: false, prosePrereqGap: [],
+  };
+  const HIT = "AC6 落地后复查：合入 develop 之后 sqlite3 agent 档不再增长";
+  const hit = classifyCandidate({ ...base, unsatisfiableUnannotatedAc: { evaluated: true, status: "hit", hits: [HIT] } });
+  assert.equal(hit.fixable, false, "a structurally-unfillable AC spawns ⛔ no fix worker");
+  assert.equal(hit.prompt, null, "⛔ no fix worker prompt for this class");
+  assert.equal(hit.unfixable.length, 1, "the class is recorded as an unfixable reason");
+  assert.ok(hit.unfixable[0].includes(HIT), `the reason NAMES the offending item verbatim: ${hit.unfixable[0]}`);
+  assert.ok(!hit.missing.length, "⛔ it is NOT a fixable `missing` item — the fix is an author/human rewrite");
+  assert.equal(hit.unsatisfiableAcStatus, "hit");
+  assert.deepEqual(hit.unsatisfiableHits, [HIT]);
+
+  // clean ⇒ no new block (pre-change behaviour preserved for an annotated / satisfiable body).
+  const clean = classifyCandidate({ ...base, unsatisfiableUnannotatedAc: { evaluated: true, status: "clean", hits: [] } });
+  assert.deepEqual(clean.unfixable, [], "a clean reading adds no blocker");
+  assert.equal(clean.unsatisfiableAcStatus, "clean");
+
+  // AC4 (硬规则 3b): not-evaluated (no AC/DoD section) is a value DISTINCT from the qualified `clean`
+  // — and it does NOT block either (only a real hit does; the gate's `four.complete` covers the rest).
+  const notEval = classifyCandidate({ ...base, unsatisfiableUnannotatedAc: { evaluated: false, status: "not-evaluated", hits: [] } });
+  assert.equal(notEval.unsatisfiableAcStatus, "not-evaluated");
+  assert.notEqual(notEval.unsatisfiableAcStatus, clean.unsatisfiableAcStatus, "未评估 ≠ 合格 (硬规则 3b)");
+  assert.deepEqual(notEval.unfixable, [], "not-evaluated does NOT block (it is not a hit)");
+
+  // 缺值 = 未查 (硬规则 6): an OLDER gate output with the field ABSENT is not-evaluated, ⛔ never `clean`.
+  const absent = classifyCandidate({ ...base });
+  assert.equal(absent.unsatisfiableAcStatus, "not-evaluated", "absent field ⇒ not-evaluated (not a silent clean)");
+  assert.notEqual(absent.unsatisfiableAcStatus, clean.unsatisfiableAcStatus);
+});

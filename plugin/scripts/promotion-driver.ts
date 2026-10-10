@@ -224,6 +224,13 @@ export interface CandidateChecks {
   superseded: boolean;
   compound: boolean;
   prosePrereqGap: string[];
+  // EXECUTOR-UNSATISFIABLE AC, UNANNOTATED (gap-promotion-driver-blind-to-unsatisfiable-ac-block): the
+  // gate's three-valued reading ({evaluated,status,hits}) of unchecked AC/DoD items whose OWN text
+  // declares the executor structurally cannot satisfy them. Carried through so the driver's ledger can
+  // NAME the offending item (⛔ the old `detail:"ineligible-not-fixed"` constant named nothing) and so
+  // this class — which can NEVER spawn a fix worker — can reach an escalation. Optional: an older gate
+  // output (field absent) reads `not-evaluated` (硬规则 6 — 缺值 = 未查), never silently `clean`.
+  unsatisfiableUnannotatedAc?: { evaluated: boolean; status: string; hits: string[] };
   // BODY-FRESHNESS (gap-ready-pool-body-still-read-from-stale-main-checkout): `false` ⇒ the gate's
   // body-derived checks above were computed from a read source measurably behind the write face.
   // Optional so an older gate output (field absent) keeps the pre-change behavior (`undefined` is
@@ -244,6 +251,19 @@ export interface FixDecision {
   unfixable: string[];
   prompt: string | null;
   notEvaluated?: boolean;
+  /** EXECUTOR-UNSATISFIABLE AC tri-state (硬规则 3b/6): `"hit"` blocks AND escalates, `"clean"` is the
+   *  qualified reading, `"not-evaluated"` (no AC/DoD section, OR the field absent in an older gate
+   *  output) is DISTINCT from both — ⛔ never folded into `"clean"`. */
+  unsatisfiableAcStatus: "hit" | "clean" | "not-evaluated";
+  /** The offending AC/DoD item texts verbatim (empty unless status === "hit"); names WHICH item blocked. */
+  unsatisfiableHits: string[];
+}
+
+/** FixDecision 是否属于「结构上不可派」的一类：被判拦截、但没有任何可修项 ⇒ fixable=false 且本类
+ *  永不 spawn fix worker。这正是 gap-promotion-driver-blind-to-unsatisfiable-ac-block 的空转面——
+ *  旧升级路径（`if (fixedIds.length > 0)` 后的 advanceRetryCap）对它结构上不可达。 */
+export function isStructuralBlock(d: Pick<FixDecision, "fixable" | "unsatisfiableAcStatus">): boolean {
+  return !d.fixable && d.unsatisfiableAcStatus === "hit";
 }
 
 /** A24 可修三类 → 结构化缺项标识；不可修五类 → 结构化原因。⛔ 不重新设计分类——
@@ -265,9 +285,23 @@ export function classifyCandidate(c: CandidateChecks): FixDecision {
       missing: [],
       notEvaluated: true,
       unfixable: [`bodyNotEvaluated=true freshness=${c.bodyFreshness ?? "unknown"} (闸读源落后写面 ⇒ 该体未被评估,⛔ 不派 fix worker)`],
+      // The body was not evaluated ⇒ the AC reading computed on it is unvouched-for too. `not-evaluated`
+      // (⛔ NOT `clean`): it shares the third state's shape, never the qualified one (硬规则 3b).
+      unsatisfiableAcStatus: "not-evaluated",
+      unsatisfiableHits: [],
       prompt: null,
     };
   }
+  // EXECUTOR-UNSATISFIABLE AC, UNANNOTATED — computed up front (before the A24 classes) so it is
+  // available to both the body-freshness early return above and the reason string below. 硬规则 3b/6:
+  // an explicit `evaluated:false` (no AC/DoD section) OR the field absent in an older gate output is
+  // `not-evaluated` — a value DISTINCT from `clean` (⛔ never folded into the qualified reading).
+  const unsat = c.unsatisfiableUnannotatedAc;
+  const unsatisfiableAcStatus: "hit" | "clean" | "not-evaluated" =
+    unsat && unsat.evaluated === true
+      ? (Array.isArray(unsat.hits) && unsat.hits.length > 0 ? "hit" : "clean")
+      : "not-evaluated";
+  const unsatisfiableHits = unsatisfiableAcStatus === "hit" ? unsat.hits.map(String) : [];
   const missing: string[] = [];
   if (!c.fourArtifacts) missing.push(`fourArtifacts=false missing=[${(c.missingArtifacts || []).join(",")}]`);
   if (!c.selfTouchOk) missing.push("selfTouchOk=false");
@@ -279,10 +313,18 @@ export function classifyCandidate(c: CandidateChecks): FixDecision {
   if (c.superseded) unfixable.push("superseded=true");
   if (c.compound) unfixable.push("compound=true");
   if (c.prosePrereqGap && c.prosePrereqGap.length > 0) unfixable.push(`prosePrereqGap=[${c.prosePrereqGap.join(",")}]`);
+  // EXECUTOR-UNSATISFIABLE AC, UNANNOTATED (gap-promotion-driver-blind-to-unsatisfiable-ac-block): a
+  // hit is NON-fixable — the fix is a HUMAN/AUTHORING rewrite (rewrite the AC, or annotate it
+  // `（待外部）`), and ⛔ a worker must never self-annotate its own AC. So it lands in `unfixable` (no
+  // fix worker) and the reason string NAMES the offending item text verbatim — the same string the
+  // skip ledger writes as `result.detail` (⛔ no longer the information-free `ineligible-not-fixed`).
+  if (unsatisfiableAcStatus === "hit") {
+    unfixable.push(`unsatisfiableUnannotatedAc=[${unsatisfiableHits.join(" | ")}]`);
+  }
   // 只有可修三类、且无任何不可修五类 ⇒ 值得 spawn（否则修了也晋不了，不可修原因才是真阻碍）。
   const fixable = missing.length > 0 && unfixable.length === 0;
   const prompt = fixable ? buildFixWorkerPrompt(c.id, missing) : null;
-  return { id: c.id, fixable, missing, unfixable, prompt };
+  return { id: c.id, fixable, missing, unfixable, prompt, unsatisfiableAcStatus, unsatisfiableHits };
 }
 
 /** Plan 4 (gap-prose-prereq-negation-blind-and-paragraph-scoped)：prosePrereqGap 的【轮级指名读数】。
@@ -441,6 +483,18 @@ export function runPromotionRound(root: string, cmd: string[] | null, cap: numbe
           superseded: !!c.superseded,
           compound: !!c.compound,
           prosePrereqGap: Array.isArray(c.prosePrereqGap) ? c.prosePrereqGap.map(String) : [],
+          // EXECUTOR-UNSATISFIABLE AC, UNANNOTATED (gap-promotion-driver-blind-to-unsatisfiable-ac-block):
+          // pass the gate's three-valued reading THROUGH to classifyCandidate. A MISSING field (older
+          // gate output) ⇒ `undefined` (not-evaluated downstream, 硬规则 6), ⛔ never coerced to a hit
+          // or to `clean`. `hits` items are stringified verbatim so the ledger names the offending item.
+          unsatisfiableUnannotatedAc:
+            c.unsatisfiableUnannotatedAc && typeof c.unsatisfiableUnannotatedAc === "object"
+              ? {
+                  evaluated: c.unsatisfiableUnannotatedAc.evaluated === true,
+                  status: typeof c.unsatisfiableUnannotatedAc.status === "string" ? c.unsatisfiableUnannotatedAc.status : "not-evaluated",
+                  hits: Array.isArray(c.unsatisfiableUnannotatedAc.hits) ? c.unsatisfiableUnannotatedAc.hits.map(String) : [],
+                }
+              : undefined,
           // BODY-FRESHNESS: `undefined` (an older gate output without the field) must NOT read as
           // `false` — 缺值 = 未查 (硬规则 6). Only an explicit `false` marks the third state.
           bodyEvaluated: c.bodyEvaluated === false ? false : true,
@@ -618,6 +672,27 @@ export function computeReverifyOutcome(fixedIds: string[], reRound: PromotionRou
   return { nowEligibleIds, stillIneligibleIds, notEvaluatedIds };
 }
 
+// ── STRUCTURAL-BLOCK ESCALATION (gap-promotion-driver-blind-to-unsatisfiable-ac-block) ──────────────
+// A candidate whose ONLY blockers are structural (⛔ no fix worker CAN be spawned — e.g. an unchecked
+// AC whose own text declares the executor cannot satisfy it) is intercepted every round, yet it never
+// reaches the AC133 escalation above: `fixable=false` ⇒ `fixes[].spawned` false ⇒ `fixedIds` empty ⇒
+// `if (fixedIds.length > 0)` never fires ⇒ `advanceRetryCap` never runs ⇒ the task spins FOREVER with
+// no escalation and (before this change) an information-free `detail:"ineligible-not-fixed"` ledger.
+// This consumes the SAME retry budget through the SAME advanceRetryCap (one source of truth for the
+// count/flip semantics), fed the STRUCTURAL ids instead of the reverify-still-ineligible ids. It is
+// deliberately placed OUTSIDE the `fixedIds.length > 0` guard (AC2 取假: restoring that guard makes it
+// unreachable and the same case goes red). ⛔ It does NOT weaken the gate's fail-closed default and
+// gives the worker NO self-annotation path — the blocked task is still intercepted; it is only
+// ESCALATED (needs-human, a human/authoring decision) rather than silently retried forever.
+export function advanceStructuralBlock(
+  state: RetryState,
+  blocked: Array<{ id: string; reason: string }>,
+  maxRetries: number,
+): Array<{ id: string; reason: string }> {
+  const newly = new Set(advanceRetryCap(state, blocked.map((b) => b.id), maxRetries));
+  return blocked.filter((b) => newly.has(b.id));
+}
+
 // AC133 失败上限（RetryState / advanceRetryCap / markNeedsHuman）已上收 driver-filters.ts（单一真相源
 // —— worker-driver 也从 exited-not-landed 计数派生同一个 retryExhausted 集合，⛔ 不各写一遍计数/翻转）。
 // re-export 保持旧 import 面（promotion-driver.test.mjs 等经同一函数身份 import）。
@@ -657,7 +732,7 @@ export function computeOutcomeRecords(opts: {
   at: string;
   applied: PromotionRound["applied"];
   fixes: FixOutcome[];
-  needsHuman?: Array<{ id: string; ok: boolean; committed: boolean; reason: string }>;
+  needsHuman?: Array<{ id: string; ok: boolean; committed: boolean; reason: string; detail?: string }>;
   reverify?: ReverifyOutcome | null;
 }): PromotionOutcomeRecord[] {
   const out: PromotionOutcomeRecord[] = [];
@@ -714,7 +789,11 @@ export function computeOutcomeRecords(opts: {
       // gap-mark-needs-human-commit-after-write: `committed` 落进 result（同 applyPromotions 的
       // committed）——needs-human 翻转写盘即提交，committed=false 表示 repo-less no-op 或提交失败
       // （可观测非静默）；result.ok 改为 markNeedsHuman 的真实 ok（⛔ 不再硬编码 true）。
-      result: { ok: n.ok, committed: n.committed, detail: n.ok ? "retry-cap-exhausted" : (n.reason ?? "mark-needs-human-failed") },
+      // STRUCTURAL-BLOCK (gap-promotion-driver-blind-to-unsatisfiable-ac-block): an explicit `detail`
+      // (naming the blocked AC/DoD item) takes precedence, so a needs-human escalated from a class that
+      // never spawned a fix worker does NOT misreport `retry-cap-exhausted`. The retry-cap path keeps
+      // its historical constant (⛔ unchanged) since it passes no `detail`.
+      result: { ok: n.ok, committed: n.committed, detail: n.detail ?? (n.ok ? "retry-cap-exhausted" : (n.reason ?? "mark-needs-human-failed")) },
       ts: opts.at,
     });
   }
@@ -868,12 +947,33 @@ export async function runResidentPromotionLoop(opts: ResidentLoopOptions): Promi
       // AC133 AC3：连续修满 N 次仍不合格 ⇒ 标 needs-human（失败上限）。
       newlyNeedsHuman = advanceRetryCap(retryState, reverify.stillIneligibleIds, maxFixRetries);
     }
+    // STRUCTURAL-BLOCK ESCALATION (gap-promotion-driver-blind-to-unsatisfiable-ac-block): the class that
+    // can never spawn a fix worker (isStructuralBlock) is structurally unreachable from the block above
+    // — so escalate it here, OUTSIDE the `fixedIds.length > 0` guard (AC2 取假 restores that guard and
+    // the same case goes red). `reason` reuses the SAME string classifyCandidate put in `unfixable` —
+    // one source of truth for the name that lands in the skip ledger AND the needs-human record.
+    const structuralNeedsHuman = advanceStructuralBlock(
+      retryState,
+      activeDecisions.filter(isStructuralBlock).map((d) => ({
+        id: d.id,
+        reason: d.unfixable.find((u) => u.startsWith("unsatisfiableUnannotatedAc=")) ?? `unsatisfiableUnannotatedAc=[${d.unsatisfiableHits.join(" | ")}]`,
+      })),
+      maxFixRetries,
+    );
     // AC133 AC3：连续修满 N 次仍不合格 ⇒ 标 needs-human（失败上限）。markNeedsHuman 写盘即提交
     // （gap-mark-needs-human-commit-after-write），返回 { id, ok, reason, committed }——⛔ 不再丢弃
     // {ok,reason}；committed 落进 round/outcome 记录（同 applyPromotions 的 committed）。
-    const needsHumanResults = newlyNeedsHuman.map((id) =>
-      markNeedsHuman(root, id, `连续修满 ${maxFixRetries} 次仍不合格（闸在重验证后仍判不合格）`),
-    );
+    // STRUCTURAL-BLOCK：reason 点名被拦截的 AC/DoD 项原文（⛔ 不写「修满 N 次」——本类从不 spawn
+    // fix worker，那句在此不真），并经 result.detail 落进 outcome 台账（AC2 点名原因）。
+    const needsHumanResults = [
+      ...newlyNeedsHuman.map((id) =>
+        markNeedsHuman(root, id, `连续修满 ${maxFixRetries} 次仍不合格（闸在重验证后仍判不合格）`),
+      ),
+      ...structuralNeedsHuman.map((b) => {
+        const r = markNeedsHuman(root, b.id, `${b.reason}（连续 ${maxFixRetries} 轮被结构上不可派的拦截挡住 ⇒ 作者/人改写；⛔ 不派 fix worker）`);
+        return { ...r, detail: r.ok ? r.reason : undefined };
+      }),
+    ];
 
     const promotedIds = [...r.promotedIds, ...rePromotedIds];
     const applied = [...r.applied, ...reApplied];
