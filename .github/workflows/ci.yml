@@ -5,7 +5,19 @@ on:
     branches: [master, develop]
   pull_request:
     branches: [master, develop]
-  workflow_dispatch: {}
+  # `workflow_dispatch` is not only a manual re-run of the push jobs: it is also the ONLY way to
+  # reach the dispatch-gated jobs below (`cold-start-e2e`, `verify-plugin-channel-assertions`).
+  # Those are milestone-cadence jobs (ADR-010), never per-push. This file — not a new workflow —
+  # is their home because GitHub only dispatches a workflow that exists on the DEFAULT branch, and
+  # ci.yml is the one workflow already there that a branch-side change to it can be dispatched
+  # against (`gh workflow run ci.yml --ref <branch>`).
+  workflow_dispatch:
+    inputs:
+      inject_failing_assertion:
+        description: "Negative control for verify-plugin-channel-assertions: inject a defect the gate MUST flag"
+        required: false
+        type: boolean
+        default: false
 
 jobs:
   test:
@@ -370,3 +382,184 @@ jobs:
         run: npm install
       - name: Cold-start e2e (install the plugin from build artifacts, no --push)
         run: bash test/cold-start-e2e.sh --from-build
+
+  # ── verify-plugin-channel-assertions (gap-release-workflow-definition-lags-one-release, AC4/P3) ──
+  # WHY THIS JOB EXISTS. The channel gate `verify-plugin-channel-assertions` is the only gate on
+  # `master`, and until now its ONLY executor was release.yml's `verify-plugin-channel` job — so the
+  # gate first executed as part of a REAL release, and any change to it (or to release.yml) was
+  # first exercised live. `release-cut`'s dispatch used to carry no `--ref` at all, which made that
+  # unrecoverable: a `workflow_dispatch` with no `--ref` runs the DEFAULT BRANCH's copy, so a broken
+  # gate could not even be fixed forward — the fix sits on a branch, the dispatch runs master, and
+  # master only advances AFTER a green release (`release-cut.mjs` now passes `--ref` explicitly; see
+  # AC1/AC2, and its preflight refuses a governing definition that differs from the tag's tree).
+  # This job is the other half: the gate is now EXPLICITLY TRIGGERABLE on any ref, so it can be run
+  # — and seen to pass or fail — before a release exists.
+  #
+  # ⛔ WHAT THIS JOB DOES *NOT* CLAIM. It does not claim "the channel is green". WHICH REF the
+  # artifact is built from is an OPEN QUESTION of that task: `version-consistency` requires a
+  # non-`-dev` version carrier, and a build from a non-`release/*` ref legitimately carries `-dev`,
+  # so a RED reading on the dispatched ref is a REAL reading (the gate correctly refusing a dev
+  # artifact), not a defect in this job. ⛔ No assertion was relaxed to make anything green here.
+  #
+  # NEGATIVE CONTROL (`-f inject_failing_assertion=true`): repoints the scratch project's
+  # `.quay/plugin` at a decoy tree, so `project-pointer` MUST go FAIL and, because the gate exits
+  # non-zero on any FAIL, the job MUST go red. This arm is what rules out "the job's colour is
+  # wired to something other than the assertion verdicts".
+  #
+  # The install/build path is release.yml's `verify-plugin-channel` job verbatim (same canonical
+  # builder `publish-dist-branch.sh`, extracted from the orphan commit with `git archive` — never a
+  # `cp` of the working tree), minus the user-scope leg and the tag pin.
+  verify-plugin-channel-assertions:
+    if: github.event_name == 'workflow_dispatch'
+    # self-hosted (gap-metered-hosted-runner-jobs-to-self-hosted, AC-319) — same metered-runner
+    # refusal as the sibling jobs; node/npm/npx and `claude` all come from the steps below
+    # (tokyo-alpha's image node is v10 with no npm).
+    runs-on: [self-hosted, tokyo-alpha]
+    timeout-minutes: 20
+    permissions:
+      contents: read
+    env:
+      # Declared, not inherited (硬规则 4 推论二) — same reasoning as the `test` job above.
+      LC_ALL: C.UTF-8
+      LANG: C.UTF-8
+      TZ: UTC
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          # publish-dist-branch.sh creates an orphan branch + a throwaway worktree off HEAD and
+          # reads the whole tree; a shallow clone cannot serve that.
+          fetch-depth: 0
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+
+      - name: Install dependencies
+        run: npm install
+
+      - name: Build the plugin subtree from this ref (canonical path, no push)
+        run: bash plugin/scripts/publish-dist-branch.sh --branch plugin-channel-verify
+
+      - name: Extract the built plugin from the orphan commit
+        run: |
+          set -euo pipefail
+          mkdir -p "${RUNNER_TEMP}/plugin-channel-src"
+          git archive plugin-channel-verify | tar -x -C "${RUNNER_TEMP}/plugin-channel-src"
+          test -f "${RUNNER_TEMP}/plugin-channel-src/.claude-plugin/marketplace.json"
+          test -f "${RUNNER_TEMP}/plugin-channel-src/bin/quay"
+
+      - name: Install the Claude Code CLI (the plugin channel's own installer)
+        run: npm install -g @anthropic-ai/claude-code
+
+      - name: Register the built plugin as a marketplace and install it into a scratch project
+        # A SCRATCH project, not this repository: installing quay into the very tree under test
+        # would make the gate depend on the repo's own plugin state.
+        run: |
+          set -euo pipefail
+          SCRATCH="${RUNNER_TEMP}/scratch-project"
+          rm -rf "$SCRATCH"
+          mkdir -p "$SCRATCH"
+          cd "$SCRATCH"
+          claude plugin marketplace add "${RUNNER_TEMP}/plugin-channel-src"
+          claude plugin install quay@quay --scope project -y
+          claude plugin list || true
+
+      - name: Resolve the installed plugin cache directory
+        id: installed
+        # Fail closed if no cache entry carries the CLI entry point: "could not resolve" must not
+        # read as "nothing to check" (硬规则 3b).
+        run: |
+          set -euo pipefail
+          CACHE_ROOT="${HOME}/.claude/plugins/cache/quay/quay"
+          test -d "$CACHE_ROOT" || { echo "ERROR: no plugin cache at ${CACHE_ROOT} — the install did not materialise." >&2; exit 1; }
+          INSTALLED=""
+          for d in "$CACHE_ROOT"/*/; do
+            [ -f "${d}bin/quay" ] || continue
+            INSTALLED="${d%/}"
+          done
+          test -n "$INSTALLED" || { echo "ERROR: no cache entry under ${CACHE_ROOT} carries bin/quay." >&2; ls -la "$CACHE_ROOT" >&2 || true; exit 1; }
+          echo "installed plugin: $INSTALLED"
+          echo "dir=${INSTALLED}" >> "$GITHUB_OUTPUT"
+
+      - name: Init the scratch project from the installed plugin
+        env:
+          INSTALLED: ${{ steps.installed.outputs.dir }}
+        run: |
+          set -euo pipefail
+          SCRATCH="${RUNNER_TEMP}/scratch-project"
+          test -d "$SCRATCH/.git" || git -C "$SCRATCH" init -q
+          # `--test-command` is passed explicitly: `quay init` fails closed without a detectable
+          # test command (gap-quay-init-…), and the scratch project has no package.json.
+          CLAUDE_PLUGIN_ROOT="$INSTALLED" "$INSTALLED/bin/quay" init \
+            --root "$SCRATCH" \
+            --project scratch-project \
+            --repo-root "$SCRATCH" \
+            --test-command 'node --test' \
+            --plugin-root "$INSTALLED"
+          test -f "$SCRATCH/.quay/config.yml"
+
+      - name: Start the drivers and the server, and probe the server over HTTP
+        env:
+          INSTALLED: ${{ steps.installed.outputs.dir }}
+        run: |
+          set -euo pipefail
+          SCRATCH="${RUNNER_TEMP}/scratch-project"
+          QUAY_BIN="${INSTALLED}/bin/quay"
+          for kind in promotion worker; do
+            ( cd "$SCRATCH" && "$QUAY_BIN" driver start --kind "$kind" --root "$SCRATCH" ) || true
+          done
+          # `server start` (⛔ NOT a raw `serve &`): it spawns the host in its own
+          # `quay-serve-*.scope`, which is exactly what the `serve-own-scope` assertion reads.
+          PORT=$(( 20000 + RANDOM % 20000 ))
+          ( cd "$SCRATCH" && "$QUAY_BIN" server start --only web,control --host 127.0.0.1 --port "$PORT" --root "$SCRATCH" )
+          # ANY HTTP response proves the process is up; quay's cold start blocks its event loop for
+          # ~10s, so "no answer yet" is not "failed" — retry instead of sampling once.
+          for i in $(seq 1 60); do
+            code="$(curl -s -o /dev/null -m 5 -w '%{http_code}' "http://127.0.0.1:${PORT}/" || true)"
+            if [ -n "$code" ] && [ "$code" != "000" ]; then
+              echo "serve answered HTTP ${code} after ${i}s on port ${PORT}"
+              exit 0
+            fi
+            sleep 1
+          done
+          echo "ERROR: the quay server did not answer any HTTP response within 60s." >&2
+          cat "$SCRATCH/.quay/serve.log" >&2 || true
+          exit 1
+
+      - name: Negative control — inject a defect the gate MUST flag
+        if: inputs.inject_failing_assertion
+        # `project-pointer` compares the pointer's realpath against the verified install; pointing
+        # it at a decoy makes that comparison FALSE by construction, so the assertion must go FAIL.
+        env:
+          INSTALLED: ${{ steps.installed.outputs.dir }}
+        run: |
+          set -euo pipefail
+          SCRATCH="${RUNNER_TEMP}/scratch-project"
+          mkdir -p "${RUNNER_TEMP}/decoy-plugin"
+          ln -sfn "${RUNNER_TEMP}/decoy-plugin" "$SCRATCH/.quay/plugin"
+          echo "injected: .quay/plugin -> $(readlink -f "$SCRATCH/.quay/plugin") (verified install: ${INSTALLED})"
+
+      - name: Verify the channel — project-scope assertions
+        env:
+          INSTALLED: ${{ steps.installed.outputs.dir }}
+        run: |
+          set -euo pipefail
+          SCRATCH="${RUNNER_TEMP}/scratch-project"
+          node --experimental-strip-types plugin/scripts/verify-plugin-channel-assertions.ts \
+            --installed "$INSTALLED" --project "$SCRATCH" --scope project
+
+      - name: Stop the drivers and the server
+        if: always()
+        # Cleanliness, not correctness: a leftover driver would make the NEXT run's reading pass
+        # for the wrong reason.
+        env:
+          INSTALLED: ${{ steps.installed.outputs.dir }}
+        run: |
+          set -euo pipefail
+          SCRATCH="${RUNNER_TEMP}/scratch-project"
+          if [ -n "${INSTALLED:-}" ] && [ -x "${INSTALLED}/bin/quay" ]; then
+            ( cd "$SCRATCH" && "${INSTALLED}/bin/quay" server stop --only web,control --root "$SCRATCH" ) || true
+            for kind in promotion worker; do
+              ( cd "$SCRATCH" && "${INSTALLED}/bin/quay" driver stop --kind "$kind" --root "$SCRATCH" ) || true
+            done
+          fi
