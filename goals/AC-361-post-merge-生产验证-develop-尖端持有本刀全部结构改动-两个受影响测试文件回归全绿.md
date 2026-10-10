@@ -1,7 +1,7 @@
 ---
 id: AC-361
 title: post-merge 生产验证：develop 尖端持有本刀全部结构改动，两个受影响测试文件回归全绿
-status: active
+status: superseded
 kind: criterion
 goal: GOAL-036
 criterion: >
@@ -60,7 +60,10 @@ criterion: >
   duplicate inFlightTasks() call) and both affected test files pass"
 expect: exit 0 = develop 尖端结构检查 + 两个测试文件全绿；exit 1 = CAUSE= 指明哪一项回归；exit 3 =
   GOAL-036 尚未并入 develop
-origin: 用户 2026-10-11 批准三轨①
+origin: 用户 2026-10-11 批准三轨①（原始立项）；2026-10-11 人裁定：本 AC 的全文件字面量计数子句与 GOAL-036
+  自身声明的窗口范围不一致（把一行 JSDoc 注释和 3 个记录装配消费者误判为违规），由
+  AC-908（窗口内按位置判定、comment-stripped）接管同一检查目的，AC-908 已 pass。本 AC 的既有 verdict
+  历史不回溯改动，只标 superseded。
 activatedAt: 2026-10-10T18:35:03.665Z
 statusLog:
   - at: 2026-10-10T18:35:03.665Z
@@ -68,6 +71,13 @@ statusLog:
     to: active
     actor: goal-cli
     reason: ""
+  - at: 2026-10-10T19:43:54.534Z
+    from: active
+    to: superseded
+    actor: goal-cli
+    reason: ""
+superseded-by:
+  - AC-908
 fidelity:
   verdict: not-evaluated
   reason: no judge configured
