@@ -53,21 +53,72 @@ Land GOAL-035's slice on branch `goal/GOAL-035`: unify the 3 independent "mark t
 
 ## Acceptance Criteria
 
-- [ ] `NeedsHumanKind` includes `"quick-death-backoff"`.
-- [ ] `applyNeedsHumanTransition` is defined exactly once in `driver-filters.ts`, pairs the in-memory latch with the disk commit, and returns the disk-commit result unconditionally.
-- [ ] `worker-driver.ts` has zero direct `retryState.needsHuman.add(`/`retryState.counts.set(` calls; all 3 real call sites (stop-terminal, retry-cap, quick-death) route through `applyNeedsHumanTransition`.
-- [ ] The quick-death path now pushes its result into `needsHumanResults` and emits a `needs-human` json event, matching the other two paths.
-- [ ] `advanceRetryCap`, `reconcileNeedsHumanWithDisk`, `markNeedsHuman`'s signature, `recordQuickDeathBackoff`, and the `environment-fatal` hard-return branch are all unchanged.
-- [ ] `git diff --name-only develop...HEAD` does not touch any of the other six driver files listed as non-goals.
-- [ ] `plugin/test/driver-filters.test.mjs` has new tests for `applyNeedsHumanTransition` covering accept, surfaced-failure (not thrown/swallowed), and idempotency; file is fully green.
-- [ ] `plugin/test/worker-driver.test.mjs` is fully green (full-file regression, not just a subset).
-- [ ] Typecheck passes.
-- [ ] `quay goal gate AC-356` reads exit 0 on this branch.
-- [ ] `quay goal gate AC-357 --timeout 900000` reads exit 0 on this branch.
+- [x] `NeedsHumanKind` includes `"quick-death-backoff"`.
+- [x] `applyNeedsHumanTransition` is defined exactly once in `driver-filters.ts`, pairs the in-memory latch with the disk commit, and returns the disk-commit result unconditionally.
+- [x] `worker-driver.ts` has zero direct `retryState.needsHuman.add(`/`retryState.counts.set(` calls; all 3 real call sites (stop-terminal, retry-cap, quick-death) route through `applyNeedsHumanTransition`.
+- [x] The quick-death path now pushes its result into `needsHumanResults` and emits a `needs-human` json event, matching the other two paths.
+- [x] `advanceRetryCap`, `reconcileNeedsHumanWithDisk`, `markNeedsHuman`'s signature, `recordQuickDeathBackoff`, and the `environment-fatal` hard-return branch are all unchanged.
+- [x] `git diff --name-only develop...HEAD` does not touch any of the other six driver files listed as non-goals.
+- [x] `plugin/test/driver-filters.test.mjs` has new tests for `applyNeedsHumanTransition` covering accept, surfaced-failure (not thrown/swallowed), and idempotency; file is fully green.
+- [x] `plugin/test/worker-driver.test.mjs` is fully green (full-file regression, not just a subset).
+- [x] Typecheck passes.
+- [ ] `quay goal gate AC-356` reads exit 0 on this branch. — ⛔ **BLOCKED: AC-356's criterion is structurally unsatisfiable as written (see `## Evidence`); this is a criterion defect, not an implementation defect. No implementation can pass it.** A worker must not edit the goal criterion that judges its own task — the validated one-command repair is recorded in `## Evidence` for whoever owns the goal record.
+- [x] `quay goal gate AC-357 --timeout 900000` reads exit 0 on this branch.
 
-## Definition of Done
+## Evidence
 
-The slice lands on `goal/GOAL-035` with AC-356 and AC-357 both reading exit 0 when evaluated on this branch, both affected test files green, and no out-of-scope file touched. This task does not merge the goal branch into develop (a separate human-triggered `quay goal merge` step) and does not evaluate AC-358 (post-merge only). Because this slice modifies `worker-driver.ts` itself — the same driver that will execute the mechanical fan-in for this task — be especially careful that `onWorkerFinished` cannot throw on any of its 3 paths; the full regression run in step 8 is the safety net for exactly this risk.
+**Implementation complete and verified green; the task is NOT landable — AC-356's goal criterion is defective.**
+
+### Implementation (AC 1-9, 11 all verified on this branch)
+
+- `plugin/scripts/driver-filters.ts`: `NeedsHumanKind` gained `"quick-death-backoff"`; new exported `applyNeedsHumanTransition(state, root, write, opts)` — the single owner of the needs-human side-effect pair (in-memory latch `needsHuman`/`counts` + disk commit via `markNeedsHuman`), returning the commit result unconditionally. `needsHumanHeading` / `needsHumanCommitLabel` extended for the new kind.
+- `plugin/scripts/worker-driver.ts`: all 3 paths converge — Path A (stop-terminal) now pushes `countsOverride: maxRetries` and no longer mutates state directly; the shared `needsHumanWrites` loop calls `applyNeedsHumanTransition`; Path C (quick-death) calls it, pushes into `needsHumanResults`, and emits the `needs-human` json event (the actual bug fix — its transition was structurally invisible before). The now-unused `markNeedsHuman` import was replaced by `applyNeedsHumanTransition`.
+- Readings: `retryState.needsHuman.add(` = **0**, `retryState.counts.set(` = **0**, `applyNeedsHumanTransition(` call sites = **2**, single definition = **1**.
+- `plugin/test/driver-filters.test.mjs`: 3 new tests (accept / surfaced-failure repo-less no-throw / idempotency with a falsifiable `counts` probe). File green: **72/72**.
+- `plugin/test/worker-driver.test.mjs` full regression green: **129/129** (31.5 s).
+- `npx tsc --noEmit` exit 0.
+- `quay goal gate AC-357 --timeout 900000` ⇒ `verdict: "pass"`, `evaluationRoot` = this worktree.
+- Non-goals untouched; the delta touches only the 3 code/test files (+ this task file).
+
+### AC-356 blocker — a criterion defect, reproducible BEFORE any of my edits
+
+AC-356's criterion scan contains:
+
+```
+const efIdx=wfText.indexOf("environment-fatal");
+const efWindow=wfText.slice(efIdx,efIdx+400);
+if(!/return r;/.test(efWindow)){ ... CAUSE=nongoal-moved -- ... must still hard-return ... }
+```
+
+Two independent bugs make it red on **any** tree:
+
+1. **Wrong anchor.** The first comment-stripped occurrence of `environment-fatal` is the `export type QuickDeathCause = "environment-fatal" | ...` type alias (raw offset 103796), not the halt branch (145462). The 400-char window after the alias contains no `return r;`.
+2. **Window too small even when anchored correctly.** Measured on the comment-stripped text: branch at 145462, the branch's own `return r;` at **+432** — outside the author's 400-char window.
+
+**Proof it is not my diff:** the identical scan against `HEAD` (the goal-branch tip `be2d8e876`, pre-edit) fails the same way, and `bash <original criterion>` on the untouched tree prints `CAUSE=nongoal-moved ... hard-return`. The sub-check was never exercised because the criterion's own first line (`grep -q applyNeedsHumanTransition || exit 3`) short-circuited the whole scan to `exit 3` until an implementation landed.
+
+### Validated repair (one command, ready to apply at the goal root)
+
+Replace the anchor/window pair with a direct positional check of the stated property ("hard-return **before reaching any needs-human code**" — no magic window):
+
+```
+const efIdx=wfText.indexOf("backoff.cause === \x22environment-fatal\x22");
+if(efIdx<0){console.error("CAUSE=nongoal-moved -- the environment-fatal halt branch must still exist, unmodified");process.exit(1)}
+const efTail=wfText.slice(efIdx);
+const efReturn=efTail.indexOf("return r;");
+const efNeedsHuman=efTail.indexOf("applyNeedsHumanTransition(");
+if(efReturn<0||(efNeedsHuman>=0&&efNeedsHuman<efReturn)){console.error("CAUSE=nongoal-moved -- the environment-fatal branch must still hard-return before reaching any needs-human code");process.exit(1)}
+```
+
+Apply with, e.g.:
+
+```
+node packages/quay/bin/quay.js goal write AC-356 --criterion "$(cat <repaired-criterion-file>)" --root <goal root>
+```
+
+**Negative control already run (2026-10-10):** the repaired criterion ⇒ `PASS` / exit 0 on this (correct) tree; after mutating the branch's `return r;` → `return r0;`, ⇒ `CAUSE=nongoal-moved ... hard-return` / exit 1. The **original** criterion is red in **both** cases (it can never pass). Coverage check: `grep -rln "AC-356\|goals/AC-356" packages/*/test plugin/test` ⇒ **no consumers**, so amending the criterion reds no test.
+
+No AC-356-satisfying implementation exists; this task cannot land until AC-356's criterion is repaired by whoever owns the goal record.
 
 ## Touches
 
