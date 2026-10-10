@@ -13,6 +13,21 @@ depends_on:
   - goal-035-needs-human-transition-contract-tests
 goal_ac: AC-358
 ---
+---
+id: goal-035-merge-and-postmerge-verify
+title: GOAL-035 ③：合并请求 + 机械 fan-in + 并入形态与落地树核验（AC-358，post-merge）
+status: ready
+labels:
+  - gap
+parent: null
+children: []
+extra:
+  schema: execution
+depends_on:
+  - goal-035-needs-human-transition-unify
+  - goal-035-needs-human-transition-contract-tests
+goal_ac: AC-358
+---
 **type:** execution
 
 ## Proposal
@@ -238,5 +253,5 @@ GOAL-035 以恰好一个合并提交进入 develop，落地树持有本刀全部
 
   （勾选前同一读数为 `acTotal:10, acChecked:0` —— 两读数互为前后对照；写入经 Provider ABI 的 `task_write`，未手改 checkbox 字符。）
 - `anti-drift-touches-check.ts --task goal-035-merge-and-postmerge-verify --worktree <wt> --merge-target develop` ⇒ `ANTI-DRIFT OK: … 0 actual file(s), all within declared Touches (2 glob(s))`。
-- 本任务 **delta 为空**：任务分支经 `git merge --no-edit develop` 快进到 develop 尖端（`43cc3c9b6`）⇒ `git diff --name-only develop...HEAD` = **0 行**（其中不含 `plugin/scripts/**` 与 `plugin/test/**`，AC10 成立；空 delta 的落地面见 `## Touches` 的自身条目）。
+- 本任务 **delta = 恰一个文件**：`tasks/goal-035-merge-and-postmerge-verify.md`（任务自身文件，在本任务 `## Touches` 之内）——首次 `git merge --no-edit develop` 是快进（delta 0 行），随后本文自身的一次正文修正写入使其成为 1 行；两次读数都**不含** `plugin/scripts/**` 与 `plugin/test/**`，AC10 成立。
 - scoped 门：`bash <wt>/scripts/test.sh --for-task goal-035-merge-and-postmerge-verify --allow-thin` ⇒ **EXIT=0**，末行 `selector selected 0 test files (thin allowed); nothing to run, full suite still runs at fan-in`；随后 `worker-driver.ts --write-scoped-gate-cache --task goal-035-merge-and-postmerge-verify --develop-sha 43cc3c9b6428037a327d02f706210aaf20a85be6` ⇒ `{"event":"scoped-gate-cache-written", …}`。
