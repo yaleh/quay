@@ -1,7 +1,7 @@
 ---
 id: AC-360
 title: 函数级契约 + 确定性负对照 + 回归：driver-filters.test.mjs 与 worker-driver.test.mjs 全量回归绿
-status: draft
+status: active
 kind: criterion
 goal: GOAL-036
 criterion: >
@@ -62,6 +62,16 @@ criterion: >
   worker-driver.test.mjs both green"
 expect: exit 0 = 两个测试文件全绿 + 确定性负对照存在；exit 1 = CAUSE= 指明哪一项回归；exit 3 =
   computeDispatchExclusion 或其测试尚未落地
-origin: 用户 2026-10-11 正式批准推进三条架构改进（Driver/Routine/Pool、Gate/Fan-in、Goal
-  transition），本 goal 是优先项①的实施，②③本轮只设计不实施
+origin: 用户 2026-10-11 批准三轨①
+activatedAt: 2026-10-10T18:35:02.330Z
+statusLog:
+  - at: 2026-10-10T18:35:02.330Z
+    from: draft
+    to: active
+    actor: goal-cli
+    reason: ""
+fidelity:
+  verdict: not-evaluated
+  reason: no judge configured
+  at: 2026-10-10T18:35:02.330Z
 ---
