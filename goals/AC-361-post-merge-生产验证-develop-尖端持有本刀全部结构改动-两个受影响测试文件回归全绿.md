@@ -1,7 +1,7 @@
 ---
 id: AC-361
 title: post-merge 生产验证：develop 尖端持有本刀全部结构改动，两个受影响测试文件回归全绿
-status: draft
+status: active
 kind: criterion
 goal: GOAL-036
 criterion: >
@@ -60,6 +60,16 @@ criterion: >
   duplicate inFlightTasks() call) and both affected test files pass"
 expect: exit 0 = develop 尖端结构检查 + 两个测试文件全绿；exit 1 = CAUSE= 指明哪一项回归；exit 3 =
   GOAL-036 尚未并入 develop
-origin: 用户 2026-10-11 正式批准推进三条架构改进（Driver/Routine/Pool、Gate/Fan-in、Goal
-  transition），本 goal 是优先项①的实施，②③本轮只设计不实施
+origin: 用户 2026-10-11 批准三轨①
+activatedAt: 2026-10-10T18:35:03.665Z
+statusLog:
+  - at: 2026-10-10T18:35:03.665Z
+    from: draft
+    to: active
+    actor: goal-cli
+    reason: ""
+fidelity:
+  verdict: not-evaluated
+  reason: no judge configured
+  at: 2026-10-10T18:35:03.665Z
 ---
