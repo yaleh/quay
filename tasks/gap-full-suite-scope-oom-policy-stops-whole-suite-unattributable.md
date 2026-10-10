@@ -1,7 +1,7 @@
 ---
 id: gap-full-suite-scope-oom-policy-stops-whole-suite-unattributable
 title: 套件 scope 缺 OOMPolicy=continue：任一进程被 OOM 杀即整套被 TERM，且无峰值/OOM 证据，fan-in 归因不出而停派
-status: ready
+status: done
 labels:
   - gap
 parent: null
