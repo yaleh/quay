@@ -26,6 +26,7 @@ import {
   readTaskStatus,
   readTaskStatusAtRef,
   markNeedsHuman,
+  applyNeedsHumanTransition,
   reconcileNeedsHumanWithDisk,
   WORKER_OUTCOME_REL,
   propagateDocBranchToDevelop,
@@ -497,6 +498,76 @@ test("AC2 — commit is pathspec-limited: a pre-staged unrelated file stays stag
   const status = git(root, "status", "--porcelain");
   assert.match(status, /^A  other\.md$/m, `other.md still staged (not swept by the commit): ${JSON.stringify(status)}`);
   assert.doesNotMatch(status, /tasks\/gap-nh\.md/, "task file is committed, not left dirty");
+});
+
+// ── applyNeedsHumanTransition：needs-human 转移决策/副作用的单一拥有者（GOAL-035 AC-357）─────────────
+// WHY 一个函数而不是三处各写一遍：worker-driver 的三条路径（stop-terminal / retry-cap / quick-death）
+// 对「标记 needs-human」这【一个决策】原本有三份独立写法，只有 quick-death 那份丢弃了 markNeedsHuman
+// 的返回值 ⇒ 该转移在 needsHumanResults / `needs-human` json 事件里结构上不可见（硬规则 9：可见性 ≠
+// 执行）。这三条测试分别钉住：accept 路径确实配对（latch + 落盘）、失败态【如实传出】而非被吞/被抛
+// （旧 quick-death 调用点正是丢了返回值的地方）、latch 幂等（countsOverride 不重复应用）。
+
+test("applyNeedsHumanTransition — accept path pairs the in-memory latch with the disk commit", (t) => {
+  const root = makeGitRoot("anht-accept");
+  t.after(() => fs.rmSync(root, { recursive: true, force: true }));
+  writeTask(root, "gap-anht", "---\nid: gap-anht\nstatus: ready\n---");
+  git(root, "add", "--", "tasks/gap-anht.md");
+  git(root, "commit", "-q", "-m", "baseline");
+
+  const state = { counts: new Map(), needsHuman: new Set() };
+  const res = applyNeedsHumanTransition(state, root, { id: "gap-anht", reason: "quick-death test", kind: "quick-death-backoff" });
+  assert.equal(res.ok, true, "status flip lands");
+  assert.equal(res.committed, true, "commit lands (a real git root)");
+  assert.equal(res.id, "gap-anht");
+  assert.equal(state.needsHuman.has("gap-anht"), true, "the in-memory latch is set in the SAME call as the disk commit");
+  assert.match(fs.readFileSync(path.join(root, "tasks", "gap-anht.md"), "utf8"), /^status:\s*needs-human/m, "disk carries needs-human");
+  // the transition is a real commit carrying its kind's label (⛔ not the default retry-cap wording)
+  const subject = git(root, "log", "-1", "--format=%s").trim();
+  assert.match(subject, /快速死亡/, `quick-death kind label reaches the commit message: ${subject}`);
+});
+
+test("applyNeedsHumanTransition — surfaced failure: repo-less temp dir returns ok:false/committed:false WITHOUT throwing", (t) => {
+  const root = makeRoot("anht-norepo");
+  t.after(() => fs.rmSync(root, { recursive: true, force: true }));
+  writeTask(root, "gap-anht-nr", "---\nid: gap-anht-nr\nstatus: todo\n---");
+
+  const state = { counts: new Map(), needsHuman: new Set() };
+  let res;
+  assert.doesNotThrow(() => {
+    res = applyNeedsHumanTransition(state, root, { id: "gap-anht-nr", reason: "test reason", kind: "quick-death-backoff" });
+  }, "the failure must be RETURNED, not thrown (the old quick-death call site could silently lose it)");
+  assert.equal(res.ok, true, "status flip still lands on disk");
+  assert.equal(res.committed, false, "repo-less ⇒ commit no-op, surfaced as committed:false");
+  assert.equal(res.reason, "test reason", "reason is threaded through unchanged");
+  assert.equal(state.needsHuman.has("gap-anht-nr"), true, "latch still set even when the commit is a no-op");
+  // A genuinely-unmarkable task (missing file) is also surfaced, not thrown.
+  const missing = applyNeedsHumanTransition(state, root, { id: "gap-does-not-exist", reason: "r", kind: "retry-cap" });
+  assert.equal(missing.ok, false, "missing task surfaces ok:false");
+  assert.equal(missing.committed, false);
+  assert.equal(missing.reason, "missing");
+});
+
+test("applyNeedsHumanTransition — idempotent: a second call does not re-apply countsOverride", () => {
+  const state = { counts: new Map(), needsHuman: new Set() };
+  const root = makeRoot("anht-idem");
+  try {
+    writeTask(root, "gap-anht-idem", "---\nid: gap-anht-idem\nstatus: todo\n---");
+    const first = applyNeedsHumanTransition(state, root, { id: "gap-anht-idem", reason: "r", kind: "stop-terminal" }, { countsOverride: 3 });
+    assert.equal(first.ok, true);
+    assert.equal(state.counts.get("gap-anht-idem"), 3, "first call applies the override");
+    // The latch is already set ⇒ the second call must NOT touch counts again (idempotent, 同 advanceRetryCap 去重).
+    state.counts.set("gap-anht-idem", 0); // falsifiable probe: if the guard were missing, the override would overwrite this back to 7
+    const second = applyNeedsHumanTransition(state, root, { id: "gap-anht-idem", reason: "r2", kind: "stop-terminal" }, { countsOverride: 7 });
+    // The disk-commit result is still RETURNED (never dropped/throws) — and it is honest: the task already
+    // carries status=needs-human from the first call, so markNeedsHuman refuses with ok:false/not-todo.
+    assert.equal(second.ok, false, "second call surfaces the disk result (not-todo), it is not silently dropped");
+    assert.equal(second.reason, "not-todo", "the already-flipped task is reported honestly");
+    assert.equal(second.committed, false);
+    assert.equal(state.counts.get("gap-anht-idem"), 0, "second call left counts untouched — the override did not re-apply");
+    assert.equal(state.needsHuman.has("gap-anht-idem"), true);
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
 });
 
 test("AC3 — propagateDocBranchToDevelop: a flip on the doc branch reaches develop (⛔ 只提交 doc 分支不 ff ⇒ 假)", (t) => {

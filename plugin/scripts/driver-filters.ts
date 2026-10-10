@@ -868,13 +868,15 @@ export function lastExitedNotLandedReason(root: string, taskId: string): string 
 // 走 RETRY-CAP(3) 路径的停派【0 条】；真因（AC 未全勾短路被误判为「suite 红归因不出」而两轮停派）恒被
 // 写错。⇒ 由调用方传入【停派种类】，小标题/提交消息按种类选择（⛔ 不再写死一个词）。
 /** needs-human 停派种类：`retry-cap` = 达重试上限而翻转；`stop-terminal` = 失败无法归因而停（与重试上限
- *  无关）；`other` = 其它机械停派。 */
-export type NeedsHumanKind = "retry-cap" | "stop-terminal" | "other";
+ *  无关）；`quick-death-backoff` = 快速死亡退避耗尽而停（GOAL-035：此前该路径省略 kind 参数 ⇒ 落盘被静默
+ *  误标成缺省 `retry-cap`，即使原因文案描述的是快速死亡退避）；`other` = 其它机械停派。 */
+export type NeedsHumanKind = "retry-cap" | "stop-terminal" | "quick-death-backoff" | "other";
 
 /** `## Needs-Human` 段小标题（按停派种类选择；⛔ 不写死）。 */
 export function needsHumanHeading(kind: NeedsHumanKind): string {
   if (kind === "retry-cap") return "连续修满重试上限仍不合格（标 needs-human）";
   if (kind === "stop-terminal") return "停派终止（失败无法归因，⛔ 不再重派）";
+  if (kind === "quick-death-backoff") return "连续快速死亡退避耗尽（标 needs-human）";
   return "机械停派（标 needs-human）";
 }
 
@@ -882,6 +884,7 @@ export function needsHumanHeading(kind: NeedsHumanKind): string {
 function needsHumanCommitLabel(kind: NeedsHumanKind): string {
   if (kind === "retry-cap") return "重试上限机械翻转";
   if (kind === "stop-terminal") return "归因不出机械停派";
+  if (kind === "quick-death-backoff") return "快速死亡退避耗尽机械翻转";
   return "机械停派";
 }
 
@@ -937,6 +940,30 @@ export function markNeedsHuman(root: string, id: string, reason: string, kind: N
   const committed = commitTaskFile(root, rel, message);
   syncDocDevelopBidirectional(root); // 分歧检测双向同步（⛔ 不依赖 committed 翻转）
   return { id, ok: true, reason, committed };
+}
+
+/** 「标记一个任务 needs-human」这【一个决策】的全部副作用的唯一拥有者：内存 latch（needsHuman 集合 +
+ *  可选 counts 覆写）与磁盘落盘承诺（markNeedsHuman）在这一处配对。worker-driver 的三条路径
+ *  （stop-terminal / retry-cap / quick-death）都必须经此函数——⛔ 调用方不得再直接动
+ *  state.needsHuman/state.counts（GOAL-035 AC-356 按位置核验：worker-driver.ts 对
+ *  `retryState.needsHuman.add(`/`retryState.counts.set(` 的直接调用各为 0）。
+ *  语义：已标记的 id 不重复加（latch 幂等，与 advanceRetryCap 的去重一致），但【磁盘承诺照常执行并
+ *  返回】——返回值永不丢弃（旧 quick-death 调用点丢弃返回值 ⇒ 该转移在 needsHumanResults/`needs-human`
+ *  json 事件里结构上不可见，正是硬规则 9「可见性 ≠ 执行」的一个真实实例）。
+ *  `countsOverride` 供 stop-terminal 路径把重试预算记满（counts.set(id, maxRetries)，与旧行为逐字一致）；
+ *  仅在该 id 尚未标记时生效（幂等）。失败态（missing / no-frontmatter / not-todo·ready / repo-less
+ *  uncommitted）如实返回 ok:false/committed:false，⛔ 不抛、⛔ 不吞。 */
+export function applyNeedsHumanTransition(
+  state: RetryState,
+  root: string,
+  write: { id: string; reason: string; kind: NeedsHumanKind },
+  opts: { countsOverride?: number } = {},
+): { id: string; ok: boolean; reason: string; committed: boolean } {
+  if (!state.needsHuman.has(write.id)) {
+    state.needsHuman.add(write.id);
+    if (opts.countsOverride !== undefined) state.counts.set(write.id, opts.countsOverride);
+  }
+  return markNeedsHuman(root, write.id, write.reason, write.kind);
 }
 
 /** 候选未被标 needs-human（status 非 needs-human）。读不懂 ⇒ fail-closed 滤掉（⛔ 读不懂 ≠ 合格）。 */
