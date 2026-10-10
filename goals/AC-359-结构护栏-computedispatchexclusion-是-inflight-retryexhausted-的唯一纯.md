@@ -2,7 +2,7 @@
 id: AC-359
 title: 结构护栏：computeDispatchExclusion 是 {inFlight,retryExhausted} 的唯一纯函数计算点，不含
   backoff；两消费者收敛到一次调用
-status: active
+status: achieved
 kind: criterion
 goal: GOAL-036
 criterion: |
@@ -49,6 +49,11 @@ statusLog:
     to: active
     actor: goal-cli
     reason: ""
+  - at: 2026-10-10T19:08:21.926Z
+    from: active
+    to: achieved
+    actor: goal-driver
+    reason: "I2: criterion pass"
 fidelity:
   verdict: not-evaluated
   reason: no judge configured
