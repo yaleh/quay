@@ -90,11 +90,49 @@ export interface ResolvedScopeEnvelope {
   reason: string | null;
 }
 
+/** The property assignments (`-p <assign>` PAIRS) the envelope ALWAYS passes — the **ONE** definition
+ *  the availability probe and the REAL invocation BOTH consume. The whole point of sharing it:
+ *  「探测绿」 must STRUCTURALLY imply the real `systemd-run` accepts the same properties.
+ *
+ *  ── THE DEFECT THIS CLOSES (measured on systemd 245, 2026-10-10, v0.18.0 release triage) ─────────
+ *  The probe passed ONLY `MemoryAccounting=yes` while the real argv added `OOMPolicy=continue` — a
+ *  property systemd 245 does NOT accept on a `.scope` (`Unknown assignment: OOMPolicy=continue`).
+ *  The probe returned rc=0 ⇒ the code took the 「we have a scope」 branch and reported success while
+ *  the REAL call would have failed ⇒ the host silently ran WITHOUT its cgroup envelope. That is the
+ *  硬规则 3b/4 family: 探测绿不蕴含它要认证的那条操作能成 — the probe and the operation it certifies
+ *  must be the SAME thing. ⛔ NEVER spell these properties a second time at either call site. */
+export const SCOPE_PROPERTY_ARGS: readonly string[] = ["-p", "MemoryAccounting=yes", "-p", "OOMPolicy=continue"];
+
+/** The availability probe's argv — `systemd-run --user --scope --quiet <SCOPE_PROPERTY_ARGS> true` — a
+ *  REAL transient scope that carries EXACTLY the properties the real invocation carries (so a green
+ *  probe implies the real call can succeed). `argv[0]` is the binary; the trailing `true` is the no-op
+ *  member. Pure + exported so a test can assert the probe exercises EVERY property the envelope relies
+ *  on (the AC3 mutation control: dropping `OOMPolicy` from here turns that test red). */
+export function scopeProbeArgv(): string[] {
+  return ["systemd-run", "--user", "--scope", "--quiet", ...SCOPE_PROPERTY_ARGS, "true"];
+}
+
+/** Run `argv[0] argv.slice(1)` and report whether it exited 0. ⛔ Returns `false` — NEVER `true` — when
+ *  the binary is missing, the runner REJECTS a property, or the call times out: a probe that could not
+ *  run must not share the 「available」 shape (硬规则 3b: 「没查成」 ≠ 「合格」). Exported so a test can
+ *  drive a KNOWN-BAD property list as a negative control (AC2 of
+ *  gap-systemd-scope-probe-params-differ-from-real-scope). */
+export function runScopeProbe(argv: string[]): boolean {
+  try {
+    execFileSync(argv[0], argv.slice(1), { stdio: "ignore", timeout: 10_000 });
+    return true;
+  } catch {
+    return false;
+  }
+}
+
 let _systemdScopeAvailable: boolean | null = null;
 
 /** Whether `systemd-run --user --scope` works on this host (memoized). The probe runs a REAL
- *  transient scope (`true`): the binary being on PATH is NOT the criterion — a live user manager /
- *  D-Bus must accept `--scope` + properties. `QUAY_TEST_SYSTEMD_RUN_AVAILABLE=0|1` forces the answer.
+ *  transient scope (`true`) carrying **`SCOPE_PROPERTY_ARGS`** — the SAME property list the real
+ *  invocation passes (see the constant's block comment): the binary being on PATH is NOT the criterion
+ *  — a live user manager / D-Bus must accept `--scope` + **those properties**. `QUAY_TEST_SYSTEMD_RUN_AVAILABLE=0|1`
+ *  forces the answer.
  *
  *  ⚠️ The seam is consulted BEFORE the memo on purpose: a test that injects "unavailable" must not be
  *  defeated by an earlier REAL probe in the same process (the fallback branch can only be asserted on
@@ -104,15 +142,7 @@ export function systemdScopeAvailable(): boolean {
   if (forced === "0") return false;
   if (forced === "1") return true;
   if (_systemdScopeAvailable !== null) return _systemdScopeAvailable;
-  try {
-    execFileSync("systemd-run", ["--user", "--scope", "--quiet", "-p", "MemoryAccounting=yes", "true"], {
-      stdio: "ignore",
-      timeout: 10_000,
-    });
-    _systemdScopeAvailable = true;
-  } catch {
-    _systemdScopeAvailable = false;
-  }
+  _systemdScopeAvailable = runScopeProbe(scopeProbeArgv());
   return _systemdScopeAvailable;
 }
 
@@ -214,19 +244,15 @@ export function resolveScopeEnvelope(opts: ScopeEnvelopeOptions): ResolvedScopeE
 /** Wrap `innerArgv` in `systemd-run --user --scope` (`envelope === "none"` ⇒ return `innerArgv`
  *  UNCHANGED = the pre-fix behaviour). `--scope` execs in place ⇒ the inner argv is the TAIL, the pid
  *  is preserved, and ⛔ no shell is inserted. `--collect` reaps the transient scope when the member
- *  exits (including on failure); `OOMPolicy=continue` keeps one OOM-killed member from taking the
- *  unit down. The ceiling is passed only when present (⛔ never as an "equivalent-unlimited" literal). */
+ *  exits (including on failure); the property list is `SCOPE_PROPERTY_ARGS` — the **SAME** array the
+ *  availability probe drives, so 「探测绿」 implies these exact properties are accepted. The ceiling is
+ *  passed only when present (⛔ never as an "equivalent-unlimited" literal). */
 export function scopeLaunchArgv(
   innerArgv: string[],
   res: { envelope: "scope" | "none"; memoryMax: string | null; unit: string | null },
 ): string[] {
   if (res.envelope === "none" || !res.unit) return innerArgv;
-  const argv = [
-    "systemd-run", "--user", "--scope", "--collect",
-    `--unit=${res.unit}`,
-    "-p", "MemoryAccounting=yes",
-    "-p", "OOMPolicy=continue",
-  ];
+  const argv = ["systemd-run", "--user", "--scope", "--collect", `--unit=${res.unit}`, ...SCOPE_PROPERTY_ARGS];
   if (res.memoryMax) argv.push("-p", `MemoryMax=${res.memoryMax}`);
   return [...argv, ...innerArgv];
 }

@@ -2,7 +2,7 @@
 id: AC-354
 title: before/after 边数读数 + 可证伪负对照：root→gate/config 边数
   1→0，gate/factories→gate/config 行数 5→0（4 环是否因此收缩按实测记录，不预先断言）
-status: draft
+status: active
 kind: criterion
 goal: GOAL-034
 criterion: |
@@ -42,8 +42,16 @@ criterion: |
   echo "PASS: root->gate/config edge count 1 -> 0; gate/factories->gate/config line count 5 -> 0 (file deletion + 2 real redirects); negative control on a scratch regression correctly re-detects the old edge"
 expect: exit 0 = 边数读数归零且负对照能检测到回归；exit 1 = CAUSE= 指明哪一项；exit 3 =
   kernel/gate-run-options.ts 尚未落地
-origin: 继 GOAL-030~033 后第五个 goal branch 试点；GOAL-033 显式将
-  gate/、gate/config/、gate/factories/ 之间其它互指列为非目标延后处理，本 goal 承接其中最小、机械证据最充分的一刀（人
-  2026-10-10 指示：推进 Quay 自身 Driver/Routine/Policy/WorkerPool 的 ownership-first
-  OOD 重构实验 A）
+origin: 继 GOAL-030~033 后第五个 goal branch 试点
+activatedAt: 2026-10-10T06:03:57.804Z
+statusLog:
+  - at: 2026-10-10T06:03:57.804Z
+    from: draft
+    to: active
+    actor: goal-cli
+    reason: ""
+fidelity:
+  verdict: not-evaluated
+  reason: no judge configured
+  at: 2026-10-10T06:03:57.803Z
 ---
