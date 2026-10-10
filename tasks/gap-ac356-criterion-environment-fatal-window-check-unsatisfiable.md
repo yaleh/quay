@@ -2,7 +2,7 @@
 id: gap-ac356-criterion-environment-fatal-window-check-unsatisfiable
 title: gap-ac356：AC-356 判据的 environment-fatal hard-return 子检查结构上恒假（锚点落在
   QuickDeathCause 类型别名、400 字符窗口取不到分支自身的 return r;）——就地修判据并加负控制
-status: ready
+status: done
 labels:
   - gap
 parent: null
@@ -330,14 +330,6 @@ and develop has not yet absorbed the GOAL-035 batch — corroborating reading: `
 develop:plugin/scripts/driver-filters.ts | grep -c 'export function applyNeedsHumanTransition'` ⇒ **0**,
 while on `goal/GOAL-035` the same command ⇒ **1**); the anti-drift set above, which subtracts both lines,
 is the discriminating reading. ⛔ `goal/GOAL-035` was not merged (that is AC-358's task).
-
-## Blocker
-
-**2026-10-10T11:12:52.487Z — worker 未落地（exited-not-landed）**
-
-- 未落地原因：AC 未全勾（checked 7/8，剩余未勾 1）——续做只需验证并勾选 AC
-- run_id：wk-prod-anchor
-- session_id：97dacf13-473d-4d04-bdc5-0e7294fc153c
 
 ## Needs-Human
 
