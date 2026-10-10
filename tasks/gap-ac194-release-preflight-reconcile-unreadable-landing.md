@@ -2,7 +2,7 @@
 id: gap-ac194-release-preflight-reconcile-unreadable-landing
 title: AC-194 第六次为假：前一条生产者修复只覆盖 3 个 script 站点；pre-fix 的 release-cut preflight
   reconcile 合并（空 action，无任何脚本/散文载体产出它）仍在 develop~100 窗内 ⇒ evaluated=false ⇒ 判据恒假
-status: ready
+status: done
 labels:
   - gap
   - defect
@@ -87,14 +87,40 @@ criterion 原文逐字跑：
 
 ## AC
 
-- [ ] AC1（现状固化·生产载体）主检出逐字重跑 AC-194 判据（`goals/AC-194-no-direct-to-develop-bypass.md` 的 criterion 原文，⛔ 不改写）⇒ 贴 `EXIT` / `evaluated` / `ok` / `reason` / `reasonSecondary` / `unclassifiableCommits` / `unclassifiableSample` / `unclassifiedActionForms` / `classification.*` 读数；并贴 `git reflog show --date=iso develop | grep 99efed2c` 整条原文（gs 空）、`git log -1 --format='%P %s' 99efed2c`、`git rev-list --count --first-parent 99efed2c..develop`
-- [ ] AC2（根因归属·三 script 站点之外的散文通道）贴 `grep -rn "must not be behind origin/develop\|release-cut preflight\|reconcile the published" plugin/ packages/ experiments/ scripts/ docs/ orchestration/ .claude/` 的逐字读数（零计数时必须**逐字贴命令**并把该谓词对任务体里那行已知为真的 message 干跑一次——硬规则②的零计数配套动作），并贴 `plugin/scripts/release-cut.mjs:337-355` 的 `release-cut-develop-behind-remote` 拒绝逻辑原文 ⇒ 证明 `99efed2c` 的**产出者是 agent/散文手搓 git**，前一条枚举的三处 script 站点结构上覆盖不到它
-- [ ] AC3（结构类·本条核心）贴实现 diff：新增 `publishedReconcile`（空 action + merge ≥2 父 + 全非首父 reachable from remote-tracking ref）结构类，`--json` 与文本输出**可区分**、有独立计数、⛔ 不并入 fan-in 计数；贴生产读数（`99efed2c` 被判为该类，`unclassifiableCommits=0`）
-- [ ] AC4（负控可证伪——单亲/本地 merge/任意 -m 仍 fail-closed）在 scratch clone（⛔ 不在真 develop 注入）逐条贴读数：(a) 空 action 移到**单亲** commit ⇒ `evaluated=false` / exit 3 / reason 逐字点名 `(empty)`；(b) 空 action 移到 merge 但非首父**不** reachable from remote-tracking ref ⇒ 仍 `unknown`；(c) `git update-ref -m "<任意其它文本>"` ⇒ 仍 `unknown`（既有钉保持绿）
-- [ ] AC5（钉子 + 变异检验）`plugin/test/direct-to-develop-bypass-check.test.mjs` 与 `plugin/scripts/checker-mutation-cases/direct-to-develop-bypass-check.sh` 各新增覆盖（生产形 ⇒ 分类 + 独立计数；负控 (a)(b) ⇒ NOT-EVALUATED）；变异检验——把新类临时退回「空一律 unknown」⇒ 新断言**必须变红**，贴红/绿两次读数与恢复后 `git diff --stat` 为空
-- [ ] AC6（判据真值恢复）AC-194 判据（`--baseline develop~100`）读 `exit 0`（`evaluated=true`、`unclassifiableCommits=0`、`ratio=1`），两次取样间隔 ≥25 min、`criterionHash` 一致；⛔ 不得以改 history 或放宽 fail-closed 求绿
-- [ ] AC7（声明与实现一致）`plugin/scripts/capability-catalog-declarations.json` 的 `direct-to-develop-bypass-check.ts` 能力声明/失效前提已更新为含 `publishedReconcile`（或贴出「无需更新」的可核理由）；贴该文件对应的 whole-tree 静态检查读数
-- [ ] AC8（本任务自身的门）`bash scripts/test.sh --for-task gap-ac194-release-preflight-reconcile-unreadable-landing` 绿
+- [x] AC1（现状固化·生产载体）主检出逐字重跑 AC-194 判据（`goals/AC-194-no-direct-to-develop-bypass.md` 的 criterion 原文，⛔ 不改写）⇒ 贴 `EXIT` / `evaluated` / `ok` / `reason` / `reasonSecondary` / `unclassifiableCommits` / `unclassifiableSample` / `unclassifiedActionForms` / `classification.*` 读数；并贴 `git reflog show --date=iso develop | grep 99efed2c` 整条原文（gs 空）、`git log -1 --format='%P %s' 99efed2c`、`git rev-list --count --first-parent 99efed2c..develop`
+- [x] AC2（根因归属·三 script 站点之外的散文通道）贴 `grep -rn "must not be behind origin/develop\|release-cut preflight\|reconcile the published" plugin/ packages/ experiments/ scripts/ docs/ orchestration/ .claude/` 的逐字读数（零计数时必须**逐字贴命令**并把该谓词对任务体里那行已知为真的 message 干跑一次——硬规则②的零计数配套动作），并贴 `plugin/scripts/release-cut.mjs:337-355` 的 `release-cut-develop-behind-remote` 拒绝逻辑原文 ⇒ 证明 `99efed2c` 的**产出者是 agent/散文手搓 git**，前一条枚举的三处 script 站点结构上覆盖不到它
+- [x] AC3（结构类·本条核心）贴实现 diff：新增 `publishedReconcile`（空 action + merge ≥2 父 + 全非首父 reachable from remote-tracking ref）结构类，`--json` 与文本输出**可区分**、有独立计数、⛔ 不并入 fan-in 计数；贴生产读数（`99efed2c` 被判为该类，`unclassifiableCommits=0`）
+- [x] AC4（负控可证伪——单亲/本地 merge/任意 -m 仍 fail-closed）在 scratch clone（⛔ 不在真 develop 注入）逐条贴读数：(a) 空 action 移到**单亲** commit ⇒ `evaluated=false` / exit 3 / reason 逐字点名 `(empty)`；(b) 空 action 移到 merge 但非首父**不** reachable from remote-tracking ref ⇒ 仍 `unknown`；(c) `git update-ref -m "<任意其它文本>"` ⇒ 仍 `unknown`（既有钉保持绿）
+- [x] AC5（钉子 + 变异检验）`plugin/test/direct-to-develop-bypass-check.test.mjs` 与 `plugin/scripts/checker-mutation-cases/direct-to-develop-bypass-check.sh` 各新增覆盖（生产形 ⇒ 分类 + 独立计数；负控 (a)(b) ⇒ NOT-EVALUATED）；变异检验——把新类临时退回「空一律 unknown」⇒ 新断言**必须变红**，贴红/绿两次读数与恢复后 `git diff --stat` 为空
+- [x] AC6（判据真值恢复）AC-194 判据（`--baseline develop~100`）读 `exit 0`（`evaluated=true`、`unclassifiableCommits=0`、`ratio=1`），两次取样间隔 ≥25 min、`criterionHash` 一致；⛔ 不得以改 history 或放宽 fail-closed 求绿
+- [x] AC7（声明与实现一致）`plugin/scripts/capability-catalog-declarations.json` 的 `direct-to-develop-bypass-check.ts` 能力声明/失效前提已更新为含 `publishedReconcile`（或贴出「无需更新」的可核理由）；贴该文件对应的 whole-tree 静态检查读数
+- [x] AC8（本任务自身的门）`bash scripts/test.sh --for-task gap-ac194-release-preflight-reconcile-unreadable-landing` 绿
+
+### Evidence（本轮 · 2026-10-10，主检出 /data/home/yale/work/quay）
+
+**AC1 现状固化（改前）**：criterion 逐字跑 ⇒ criterion 脚本 `exit 1`（checker `exit 3`）`evaluated=false ok=true` `reason="unsupported-reflog-action: (empty)"` `reasonSecondary="unclassifiable-commits-in-range"` `unclassifiableCommits=1` `unclassifiableSample=["99efed2c9495bb71a5061f3b968e22c7e01b19ca"]` `unclassifiedActionForms=[{"form":"(empty)","count":1,"sampleShas":["99efed2c…"]}]` `classification={classified:99,total:100,ratio:0.99,firstParent:100,offSpine:146}` `sanctionedRefMoveIntroducedTotal=0`。
+- `git reflog show --date=iso develop | grep 99efed2c` ⇒ `99efed2c9 develop@{2026-10-10 10:22:10 +0800}: `（gs 空）
+- `git log -1 --format='%P %s' 99efed2c` ⇒ `e9358e97ae3f9ac63640a3bf18f7d68338c0e878 f4600e9acd0f30fb91438bf1662b13ab191f40b0 Merge origin/develop into develop — reconcile the published CI fixes with the loop's local commits (release-cut preflight: local develop must not be behind origin/develop)`
+- `git rev-list --count --first-parent 99efed2c..develop` ⇒ `17`
+
+**AC2 根因归属**：`grep -rn "must not be behind origin/develop\|release-cut preflight\|reconcile the published" plugin/ packages/ experiments/ scripts/ docs/ orchestration/ .claude/` ⇒ **0 命中**（grep exit=1）。零计数配套干跑（硬规则②）：同一谓词对 `tasks/`（含已知为真的 message）⇒ 命中 `gap-ac194-empty-reflog-action-…:40` 与本任务 `:38` 两条。`plugin/scripts/release-cut.mjs:352-357` 的 `release-cut-develop-behind-remote`：`rev-list --count develop..refs/remotes/<remote>/develop !== 0` ⇒ `fail(… 'the cut would tag a tree missing already-published commits (fetch + merge, …)')` ⇒ 产出 `99efed2c` 的是 agent/散文通道手搓 `git merge` + 裸 `update-ref`，前一条枚举的三处 script 站点结构上覆盖不到它。
+
+**AC3 结构类**：新增 `classifyPublishedReconcile`（PURE 三态）+ `gitDevelopDirectCommits` 结构检测 + `--json`/文本独立读数（`denominator.publishedReconcileCommits` / `classification.publishedReconcileIntroduced`，文本行 `published-reconcile landings …` + `PUBLISHED-RECONCILE`）。生产读数（改后）：`exit 0` `evaluated=true ok=true` `reason="no-direct-commits-in-range"` `unclassifiableCommits=0` `ratio=1` `publishedReconcileCommits=1` `publishedReconcileIntroduced=[{tip:99efed2c…,prev:e9358e97…,introduced:[{sha:99efed2c…,codeSurface:true}]}]`；`refMoveIntroducedTotal=0` / `sanctionedRefMoveCommits=0` / `totalDirectCommits=0`（⛔ 未并入 fan-in 计数）。
+
+**AC4 负控（scratch clone，⛔ 未在真 develop 注入）**：
+- (a) 空 action 单亲 ⇒ `{"exit":3,"evaluated":false,"reason":"unsupported-reflog-action: (empty)","unclassifiableCommits":1,"publishedReconcileCommits":0}`
+- (b) 空 action merge 但非首父不 reachable from origin/develop（本地 merge）⇒ `{"exit":3,"evaluated":false,"reason":"unsupported-reflog-action: (empty)","unclassifiableCommits":1,"publishedReconcileCommits":0}`
+- (c) `git update-ref -m "mutation-unknown-form"` ⇒ `{"exit":3,"evaluated":false,"reason":"unsupported-reflog-action: mutation-unknown-form","unclassifiableCommits":1,"publishedReconcileCommits":0}`
+
+**AC5 钉子 + 变异检验**：新增 PURE 断言（生产形 ⇒ publishedReconcile；单亲 / 本地 merge / 任意 -m ⇒ unknown；读不出 ⇒ null）+ CLI 断言 + mutation case ⑤（正向 + 独立计数）/⑥（本地 merge 负控）。变异（`classifyPublishedReconcile` 末行退回 `return "unknown"`）⇒ PURE 断言 ✖、CLI 断言 ✖、mutation case ⑤ RED（`publishedReconcile landing judged NOT GREEN`）、生产读数退回 `exit 3 unclassifiable=1`；`git checkout -- <file>` 恢复后 `git diff --stat` **为空**。
+
+**AC6 判据真值恢复**：两次取样（间隔 ≥25 min）`criterionHash` 一致 = `d3eb8d7a6165b156`（goal blob `64d53fa641aca92a78753b84a893d92d91901f87` 未变），两次均 `exit 0 evaluated=true ok=true unclassifiableCommits=0 ratio=1 publishedReconcileCommits=1`。⛔ 未改 develop history、⛔ 未放宽 fail-closed、⛔ 未加 `RULED_HISTORICAL_COMMITS` 行。
+- sample-1（{"ts":"2026-10-10T05:12:16.123Z","criterionHash":"d3eb8d7a6165b156","goalBlob":"64d53fa641aca92a78753b84a893d92d91901f87","checkerExit":0,"evaluated":true,"ok":true,"reason":"no-direct-commits-in-range","unclassifiableCommits":0,"ratio":1,"publishedReconcileCommits":1,"develop":"91fa3d142fe8fd2f4b289fc6226f199af4addecf"}）
+- sample-2（{"ts":"2026-10-10T05:38:48.973Z","criterionHash":"d3eb8d7a6165b156","goalBlob":"64d53fa641aca92a78753b84a893d92d91901f87","checkerExit":0,"evaluated":true,"ok":true,"reason":"no-direct-commits-in-range","unclassifiableCommits":0,"ratio":1,"publishedReconcileCommits":1,"develop":"b79bc07efc85708deaba46ddc7430b9aa45a81b4"}）
+
+**AC7 声明与实现一致**：`plugin/scripts/capability-catalog-declarations.json` 的 QUESTION 与 INVALIDATION（`direct-to-develop-bypass-check.ts`）已含 `publishedReconcile`（三谓词 + fail-closed 残余 + 单亲/本地 merge/任意 -m 仍 unknown）。静态检查：`bash plugin/scripts/capability-catalog.sh` ⇒ `exit 0`（`summary: 372 scripts | 372 declared | 0 unclassified | 367 ship`）；`node --test plugin/test/capability-catalog.test.mjs` ⇒ `18 pass / 0 fail`。
+
+**AC8 本任务自身的门**：`bash scripts/test.sh --for-task gap-ac194-release-preflight-reconcile-unreadable-landing --allow-thin` ⇒ `exit 0`（含 `sh-census-check` / checker-mutation 负控 / 静态检查全绿）。
 
 ## DoD
 
