@@ -2,7 +2,7 @@
 id: gap-routine-semantic-dedup-scan-serializeidentity-serializereceipt
 title: "semantic-dedup-scan: Character-identical canonical-JSON serializer
   (sorted keys, one nesting level) under two names."
-status: ready
+status: done
 labels:
   - gap
   - routine-filed
