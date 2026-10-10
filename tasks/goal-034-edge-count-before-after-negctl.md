@@ -2,7 +2,7 @@
 id: goal-034-edge-count-before-after-negctl
 title: GOAL-034 读数块（AC-354）：before/after 边数读数 root→gate/config
   1→0、gate/factories→gate/config 行数 5→0 + 可证伪负对照（4 环是否收缩按实测记录）
-status: ready
+status: done
 labels:
   - gap
 parent: null
