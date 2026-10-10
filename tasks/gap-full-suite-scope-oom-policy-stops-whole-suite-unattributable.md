@@ -34,6 +34,17 @@ extra:
 
 真实落地标准：在 claudecodeui 的一个真实 worktree 上，用 `QUAY_TEST_SYSTEMD_RUN_LIMITS=MemoryMax=3G` 把 P1c 的 fan-in 套件跑一次，必然被 OOM；记录里要有 ①`suite-memory-evidence-<runId>.json` 的 `oomKill>=1` 与 `phase`，②失败被归到具体测试文件或明确的 `suite-oom` 类，而不是「无法归因」，③该任务**未**被停派到 needs-human 的「基建疑似」类。贴出这三项的原始读数与 journal 对应行，而不是只贴测试通过。
 
+## Evidence
+
+（2026-10-10，worktree `/home/yale/work/quay-worktrees/gap-full-suite-scope-oom-policy-stops-whole-suite-unattributable`，已并入 develop）
+
+- **AC1/AC2/AC3** — `node --test plugin/test/full-suite-runner-oom-policy.test.mjs`：`tests 5 / pass 5 / fail 0`。含真 cgroup 臂 `AC5 negative control — WITHOUT OOMPolicy=continue the whole scope is TERM'd; WITH it the sibling survives (real cgroup)`（4208ms，green）与 `AC2 — a REAL 300M suite scope OOM-kills one process: the sibling survives, the runner reports a failed (not infra-error) red, and the evidence records oomKill>=1`（9556ms，green）。
+- **AC4** — `node --test plugin/test/worker-driver-suite-oom-attribution.test.mjs`：`tests 4 / pass 4 / fail 0`。含 `AC4 — a red whose per-run evidence shows oom_kill>0 is classified suite-oom, naming peak and limit`、`AC4 negative control — a red WITHOUT evidence keeps the PRE-CHANGE 「无法归因」 reason, verbatim`、`AC5 falsification control — the classification reads THIS round's evidence by runId (删掉证据读取 ⇒ 正例红)`。
+- **Touches 回归** — `node --test plugin/test/full-suite-runner-cgroup.test.mjs`：`tests 38 / pass 38 / fail 0`（两处 argv 逐字节断言随新增常驻属性对更新后仍绿）。
+- **AC6** — typecheck 走 `.quay/config.yml` 的 `ts-typecheck` 命令 `for d in packages/*/; do npx tsc --noEmit -p "$d" || exit 1; done`：`EXIT=0`。⚠️ 诚实说明：本仓库**没有** `npm run typecheck` 脚本，也**没有** eslint/plugin lint 命令（全仓 grep `lint` 无任何可执行 lint 目标）——该条的「lint」半是无对应物的模板措辞；真实类型检查以 config 声明的那条命令为准。
+- **scoped gate（driver fan-in 同款）** — `bash scripts/test.sh --for-task gap-full-suite-scope-oom-policy-stops-whole-suite-unattributable --allow-thin`：`tests 176 / pass 176 / fail 0`，`EXIT=0`；选中并跑绿了本任务两个新测试文件（日志含 `+ plugin/test/worker-driver-suite-oom-attribution.test.mjs`）。
+- ⚠️ **DoD 的真实落地（claudecodeui 侧 P1c 以 MemoryMax=3G 跑一次必然 OOM）未在本轮执行** —— 那是跨工作区动作。本轮以同测试文件内的**真 cgroup 300M 负控制**（AC2/AC5 用例）作为机制的直接证据。`task_check`：`acTotal 6 / acChecked 6 / dodTotal 0`。
+
 ## Touches
 
 - plugin/scripts/full-suite-runner.ts
