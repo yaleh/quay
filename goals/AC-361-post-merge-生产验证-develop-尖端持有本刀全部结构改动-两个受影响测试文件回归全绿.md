@@ -72,4 +72,5 @@ fidelity:
   verdict: not-evaluated
   reason: no judge configured
   at: 2026-10-10T18:35:03.665Z
+phase: post-merge
 ---
