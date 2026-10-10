@@ -4,7 +4,7 @@ title: AC-355 判据在 driver 求值下恒报假：AC-242 轮转与 pre-filing 
   QUAY_GOAL_ACCEPTANCE_ACTIVE=1，被判据末尾的 bare `node --test` 继承 ⇒
   goal-store.test.mjs 8 红 ⇒ 判据报 post-merge-test-regression（同一棵树干净 shell 205/205
   全绿）——修法=让该测试文件对残留重入闸自净；5b 同族另有 6 个 plugin/test goal 文件同缺陷
-status: ready
+status: done
 labels:
   - gap
   - defect
@@ -83,12 +83,12 @@ AC-355 判据末尾用 **bare `node --test`**（⛔ 不经 `scripts/test.sh`）�
 
 ## Acceptance Criteria
 
-- [ ] AC1 — 改前基线可复现：置位下七个文件 `fail 8`、干净下 `fail 0`；两次原始行进 `## Evidence`。
-- [ ] AC2 — 改后：AC-355 判据**文本未改**，在**置位环境**下 exit 0（含 `ℹ fail 0`）。
-- [ ] AC3 — 双向：置位与 `env -u` 两种环境下七个文件都 exit 0 ∧ fail 0（⛔ 不把失败从一个环境挪到另一个）。
-- [ ] AC4 — 强度未减：`goal-store.test.mjs` 的 `test(` 计数不减、无新增 skip；`:1473` 的 `refused:true`（重入闸）断言仍在且通过。
-- [ ] AC5 — 5b：Proposal 末节列出的 6 个 plugin/test 同族文件逐个在置位下 exit 0；枚举命中数（7）+ 前 3 条进提交。
-- [ ] AC6 — 未削弱门：`quay goal show AC-355 --json` 的 `.criterion` 与改前 **md5 相同**（证明修在测试层，⛔ 不是改判据迁就结果）。
+- [x] AC1 — 改前基线可复现：置位下七个文件 `fail 8`、干净下 `fail 0`；两次原始行进 `## Evidence`。
+- [x] AC2 — 改后：AC-355 判据**文本未改**，在**置位环境**下 exit 0（含 `ℹ fail 0`）。
+- [x] AC3 — 双向：置位与 `env -u` 两种环境下七个文件都 exit 0 ∧ fail 0（⛔ 不把失败从一个环境挪到另一个）。
+- [x] AC4 — 强度未减：`goal-store.test.mjs` 的 `test(` 计数不减、无新增 skip；`:1473` 的 `refused:true`（重入闸）断言仍在且通过。
+- [x] AC5 — 5b：Proposal 末节列出的 6 个 plugin/test 同族文件逐个在置位下 exit 0；枚举命中数（7）+ 前 3 条进提交。
+- [x] AC6 — 未削弱门：`quay goal show AC-355 --json` 的 `.criterion` 与改前 **md5 相同**（证明修在测试层，⛔ 不是改判据迁就结果）。
 
 ## Definition of Done
 
@@ -118,3 +118,87 @@ AC-355 判据末尾用 **bare `node --test`**（⛔ 不经 `scripts/test.sh`）�
 - 受控 A/B（立案轮，主检出当前树）：干净 `205/205 exit 0`；置位 `197 pass / 8 fail exit 1`（8 条与台账同签名）。
 - 结构检查（立案轮，主检出）：`kernel/gate-run-options.ts` 在；`gate/config/utils.ts`、`gate/factories/loader.ts` 不在；八个消费点位置扫描 `PASS`。
 - 5b 枚举（立案轮）：见 Proposal 末节（7 命中 + 4 未命中对照；s02 与 goal-invariants-standing 已实测 poison→clean 双向）。
+
+### 执行轮读数（2026-10-10，worktree `gap-ac355-criterion-false-from-goal-acceptance-active-guard`，提交 `b2081cb6b`）
+
+**AC1 改前基线——原始行（改前 = 落到 worktree 上的 develop 尖端）**
+
+```
+$ QUAY_GOAL_ACCEPTANCE_ACTIVE=1 node --no-warnings --experimental-strip-types --test <AC-355 的七个文件>
+⇒ exit=1  ℹ tests 205  ℹ pass 197  ℹ fail 8
+$ env -u QUAY_GOAL_ACCEPTANCE_ACTIVE node --no-warnings --experimental-strip-types --test <同样的七个文件>
+⇒ exit=0  ℹ tests 205  ℹ pass 205  ℹ fail 0
+```
+
+置位下的 8 条（与台账 07:15 同签名）：`I5 — an achieved AC whose criterion now fails lands in checkAchievedFailing`、`I5 bidirectional`、`I5 CLI`、`AC4 — 负控制：1 active goal + achieved AC ⇒ checkAchievedFailing 报 evaluated:true + scopeSize>0`、`AC-242 successor ×4`（轮转后 exit 1 并点名该 AC / 轮转有界 / 判据自己声明 NOT-EVALUATED / 已记录的 fail 更早被重新检查）。
+
+**AC2 + AC3 改后——原始行（同一 worktree，改后）**
+
+```
+$ QUAY_GOAL_ACCEPTANCE_ACTIVE=1 node --no-warnings --experimental-strip-types --test <七个文件>
+⇒ exit=0  ℹ tests 205  ℹ pass 205  ℹ fail 0
+$ env -u QUAY_GOAL_ACCEPTANCE_ACTIVE node --no-warnings --experimental-strip-types --test <七个文件>
+⇒ exit=0  ℹ tests 205  ℹ pass 205  ℹ fail 0
+```
+
+（测试总数 205 前后不变；⛔ 不是把失败从一个环境挪到另一个。）
+
+**AC2 判据原样文本——置位环境实跑（DoD 的直接量）**
+
+```
+$ node … quay goal show AC-355 --json | 取 .criterion 原样写入 /tmp/ac355-criterion.txt
+$ md5sum /tmp/ac355-criterion.txt
+d25dc9ed75082e7dbf397e2d6dafd80e  /tmp/ac355-criterion.txt
+$ QUAY_GOAL_ACCEPTANCE_ACTIVE=1 bash /tmp/ac355-criterion.txt      # cwd = worktree 根
+PASS: develop tip carries the slice (kernel/gate-run-options.ts, dead shim gone, six consumers converged) and the seven affected test files pass
+$ echo $?
+0
+$ grep -E '^ℹ (tests|pass|fail)' /tmp/goal034-ac355-test-output.txt   # 判据自己写的那份输出
+ℹ tests 205
+ℹ pass 205
+ℹ fail 0
+```
+
+反向（干净 shell）同一文本也 `exit 0`（`PASS: …`，code 0）。
+
+**AC4 强度未减**
+
+```
+$ git show develop:packages/quay/test/goal-store.test.mjs | grep -c 'test('   ⇒ 85
+$ grep -c 'test(' packages/quay/test/goal-store.test.mjs                     ⇒ 85
+$ skip/\.skip( 计数：develop 0 → 改后 0
+$ grep -n 'refused, true' packages/quay/test/goal-store.test.mjs
+1497:    assert.equal(r.refused, true, "拒绝是一个【独立取值】（硬规则 3b），⛔ 不是 ran:[] 冒充「跑了 0 条」");
+```
+
+该条（原 `:1473`，插入自净块后为 `:1497`）在 205 全绿之内通过。
+
+**AC5 5b——置位下逐个（`QUAY_GOAL_ACCEPTANCE_ACTIVE=1 node --test <file>`）**
+
+```
+plugin/test/goal-driver-s02.test.mjs          ⇒ ℹ tests 14  ℹ pass 14  ℹ fail 0
+plugin/test/goal-driver-s04.test.mjs          ⇒ ℹ tests 14  ℹ pass 14  ℹ fail 0
+plugin/test/goal-driver-s10.test.mjs          ⇒ ℹ tests 4   ℹ pass 4   ℹ fail 0
+plugin/test/goal-driver-s12.test.mjs          ⇒ ℹ tests 4   ℹ pass 4   ℹ fail 0
+plugin/test/goal-driver-s13.test.mjs          ⇒ ℹ tests 3   ℹ pass 3   ℹ fail 0
+plugin/test/goal-invariants-standing.test.mjs ⇒ ℹ tests 19  ℹ pass 19  ℹ fail 0
+```
+
+枚举命中数 **7**（= 6 个 plugin/test + `packages/quay/test/goal-store.test.mjs`）；前 3 条：`goal-store.test.mjs`、`goal-driver-s02`、`goal-driver-s04`。已贴进提交 `b2081cb6b`。
+
+**AC6 判据文本未改**
+
+```
+$ md5(criterion) 主检出（== develop 尖端） ⇒ d25dc9ed75082e7dbf397e2d6dafd80e
+$ md5(criterion) worktree                ⇒ d25dc9ed75082e7dbf397e2d6dafd80e
+$ git diff --stat develop -- goals/      ⇒ （空）
+```
+
+**附带：scoped 门本轮先红后绿（已在本刀内修，记此以为鉴）**
+
+首版解释性注释把 suite 入口路径写成**字面串**，被 suite-bucket 静态归因读成 `S` 信号，把 4 个此前 `UNRESOLVED`（零信号）的 plugin 测试文件推成 **pure-S** ⇒ `suite-bucket-reattr-ratchet-check` 红（正是 FAMILY-5 形态：**判定器在代码注释上触发**）。**改法 = 改写注释措辞（⛔ 不动 ratchet 基线、⛔ 不动 `docs/analysis/test-file-baseline.txt`）**；bucket 集回到 develop 值（`s02=M`、`s04/s10/s12/s13=UNRESOLVED`、`goal-invariants-standing=P+M`、`goal-store=P`），ratchet `PASS — 0 pure-S un-attributed; 56 S-signal-multi (report-only)`。scoped 门最终：
+
+```
+$ bash scripts/test.sh --for-task gap-ac355-… --allow-thin
+⇒ exit 0   ℹ tests 142  ℹ pass 142  ℹ fail 0
+```

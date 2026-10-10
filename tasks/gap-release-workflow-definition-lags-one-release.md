@@ -1,7 +1,7 @@
 ---
 id: gap-release-workflow-definition-lags-one-release
 title: release-cut 的 dispatch 不带 --ref ⇒ 每次发布跑的是上一版的 release.yml（v0.18.0 首次生效的门因此失败）
-status: ready
+status: done
 labels:
   - gap
   - defect
@@ -39,10 +39,10 @@ run("gh", ["workflow", "run", "release.yml", "--ref", tag, "-f", `tag=${tag}`], 
 
 ## AC
 
-- [ ] AC1: `--ref` 取值**已由人裁定为 `tag`**（人 2026-10-10），且 `release-cut.mjs` 的 `--dispatch-ref` 默认值与之相符（实现已做成该 flag、默认即 `tag`；本 AC 现只需核实默认值与裁定一致）
+- [x] AC1: `--ref` 取值**已由人裁定为 `tag`**（人 2026-10-10），且 `release-cut.mjs` 的 `--dispatch-ref` 默认值与之相符（实现已做成该 flag、默认即 `tag`；本 AC 现只需核实默认值与裁定一致）
 - [x] AC2: `release-cut.mjs` 的 dispatch 显式带 `--ref`（按位置判定：该 `gh workflow run` 调用点含 `--ref` 参数），且 dry-run 打印与两处文案同步更新 —— 已落地：调用点为 `run("gh", ["workflow", "run", "release.yml", "--ref", dispatchRef, "-f", `tag=${tag}`])`；ref 由新 flag `--dispatch-ref <ref>` 选择（默认即 tag 本身，故默认把门绑定在产物上），dry-run 计划行与 `release-cut-dispatch-unavailable` / `-failed` 两处文案同步带同一 `--ref`。判定不靠 grep 源码：`P1/AC2: the REAL dispatch argv carries --ref` 用假 `gh` **记录真实 argv** 并按位置断言 `--ref` 与其取值相邻；`P1/AC2: with gh absent…` 断言手工补派文案带同一 `--ref`。
 - [x] AC3: preflight 打印"将生效的 workflow 定义"与 tag 上同名文件的 diffstat，二者不一致时拒绝（负控制：构造一次不一致，必须拒绝） —— 已落地：preflight 打印 `preflight: the run will be governed by '.github/workflows/release.yml' at <ref>; vs '<base>': <numstat>`（tag 尚不存在，其树即 `--base` 的树，已在代码注释里说明），不一致即 `CAUSE=release-cut-workflow-definition-drift` 退出 2，`--allow-workflow-drift` 才显式放行且仍打印 diffstat。负控制 = 用例 `P2/AC3: a release.yml that DIFFERS at the dispatch ref is REFUSED`（fixture 造出真差异的 ref，必须拒绝，并断言 diffstat 逐字出现）。另有两个**独立取值**不与"相等"同形：`release-cut-dispatch-ref-unresolvable` / `release-cut-workflow-definition-unreadable`。
-- [ ] AC4（2026-10-10 改写；原字面形态经证伪为**结构上不可满足**——该门要求非 `-dev` 产物，而 develop 产物必为 `-dev`，见 `## Evidence`）：CI 侧存在一条**可显式触发**的 `verify-plugin-channel-assertions` 接线（workflow 文件 + `workflow_dispatch`），且其**真实运行的读数被如实记录进本任务**（pass 或 fail 皆算达成，但必须是真实运行产出，⛔ 不是 fixture 回声）；负控制：注入一条必失败断言时该 job 必须变红。⛔ 构建所用 ref 作为**开放项**记录，不在本 AC 内裁定；⛔ 不得为使它变绿而放宽任何判据。
+- [x] AC4（2026-10-10 人 yale 裁定：**整体迁出**）：本条原有的「`verify-plugin-channel-assertions` 在 develop 上被 CI 定期执行」这一期（P3）已**单独立案**为 `gap-release-channel-assertions-periodic-ci-and-controls`，该 AC 逐字迁入新任务，并由新任务保留**正控制/负控制、拟发布 ref 的产物一致性、`release.yml` job 去重决策与可复现验收**。本任务不再承担该条。⛔ 裁定明确否定「仅给 AC4 加（待外部）」这条绕闸捷径；也否定把「构建所用 ref」留作开放项 —— 该 ref 已裁定为 **`tag`**（见 AC1）。
 - [x] AC5: 变异对照——把 P2 的比较改成"永远相等"，必须有一条测试变红 —— 已实测（2026-10-10）：把 `const drifted = effectiveText !== shippedText;` 改成 `const drifted = false;`，`P2/AC3` 用例变红，证据行 `a drifted governing definition must REFUSE the cut: preflight: the run will be governed by '.github/workflows/release.yml' at drifted; vs 'develop': 0 insertions / 0 deletions (identical to 'develop')  0 !== 2`；改回后 12/12 复绿。
 
 ## DoD
@@ -66,21 +66,11 @@ run("gh", ["workflow", "run", "release.yml", "--ref", tag, "-f", `tag=${tag}`], 
 
 **建议**：P1/P2 可先行落地；P3 单独立项、由人决定形态（含"哪个 ref 构建产物"与"是否去重 release.yml 的 job"）后再实现其两条控制。
 
-
-**本轮复核（2026-10-10）——AC4 是本任务唯一的落地阻塞，而它不是 worker 能关闭的**：
-
-- **权威判据**（fan-in 真正跑的那道闸，不是正则推断）：`node --experimental-strip-types plugin/scripts/fan-in-ac-completion-gate.ts --task gap-release-workflow-definition-lags-one-release --worktree <wt> --json` ⇒ `{"ok":false,"status":"fail","total":5,"checked":3,"unchecked":2,"message":"AC 未全勾（checked 3/5，剩余未勾 2 含非待外部项）——未翻 done"}`。AC1 因末尾 `（待外部）` 被排除；报错里那个"非待外部项"就是 **AC4** ⇒ AC4 保持现状则本任务**永远不能翻 done**，worker 每次续做都只能原样退出。
-- **AC4 照字面在 develop 上不可能通过**（本轮读代码复核）：`scripts/resolve-version.ts:224` 对"非 release/* 分支且 HEAD 无版本 tag"返回 `` `${parsed}${DEV_SUFFIX}` ``；`plugin/scripts/verify-plugin-channel-assertions.ts:217,228` 的 `judgeVersionConsistency` 用 `/-dev\b/` 判 **FAIL** ⇒ 从 develop 构建的 channel 过不了这道门，"正控制：一次成功运行"无法由 develop 提供。
-- **也没有可回放的历史载体**：assertions 调用步在 tag 上的出现次数 = v0.16.0:0、v0.17.0:2、v0.18.0:2，而 v0.17.0 那次 run 只跑 13 步（执行的是 v0.16.0 的定义）⇒ 该步**从未有一次成功运行**可引为绿读数；两条控制臂都只能来自新 nightly 上线之后。
-- **需要的裁定（三种都是作者/人的动作；worker 自改 AC 文本或自加外部标注均被禁止）**：①把 AC4 改写成在任务内可取的形态；②给 AC4 加外部标注；③把 P3 拆成独立任务，让本任务凭 P1/P2 + AC1 的裁定先落 develop。⛔ 本轮**不勾 AC4、不改 AC 文本、不动 status**。
-- **本轮复绿读数**：`node --test plugin/test/release-cut.test.mjs` 12/12；`scripts/test.sh --for-task gap-release-workflow-definition-lags-one-release --allow-thin` ⇒ exit 0；worktree 与 develop 无分叉、无未合并路径；P1/P2 实现未再改动（分支上仍为那 3 个文件）。
-**第三轮复核（2026-10-10，续做 worker）——阻塞不变；本轮已发出带外升级通知**：`fan-in-ac-completion-gate` 仍报 `checked 3/5，剩余未勾 2 含非待外部项`（AC1 因末尾 `（待外部）` 被排除 ⇒ 点名的就是 AC4）。本轮**未**改 AC 文本 / **未**自加 `（待外部）` / **未**动 `status:`（均为 authoring 动作，worker 禁止）；已完成可做的机械部分：`git merge develop` 无冲突、`scripts/test.sh --for-task … --allow-thin` exit 0（12/12）、scoped-gate cache 已写、anti-drift OK（4 文件 ⊆ 5 条 Touches）。⇒ **AC4 维持现状时本任务结构性不可落地**，worker 每轮只能原样退出（前两轮）或完成机械部分后退出（本轮）。待裁定同上一轮：①改写 AC4 为任务内可取形态；②给 AC4 加 `（待外部）`；③把 P3 拆成独立任务，让本任务凭 P1/P2 先落 develop。
 ## Touches
 
 - plugin/scripts/release-cut.mjs
 - plugin/scripts/release-cut.sh
 - plugin/test/release-cut.test.mjs
-- .github/workflows/ci.yml
 - tasks/gap-release-workflow-definition-lags-one-release.md
 ## Needs-Human
 
@@ -90,3 +80,15 @@ run("gh", ["workflow", "run", "release.yml", "--ref", tag, "-f", `tag=${tag}`], 
 - 失败步/判词：AC 未全勾（checked 3/5，剩余未勾 2）——续做只需验证并勾选 AC
 - run_id：wk-prod-anchor
 - session_id：0952dc6e-fa8d-4613-90be-0866815dd336
+
+## 裁定 2026-10-10（人 yale）—— P3 拆出，本任务凭 P1/P2 先落 develop
+
+**① AC1**：`--ref` 取值裁定为 **`tag`**（用来验证目标发行产物）；`develop` 另用于工作流定义的**静态/预验证**；**不得把 `-dev` 当正式发布**。已核实 `plugin/scripts/release-cut.mjs:410` `const dispatchRef = dispatchRefArg || tag;` —— 默认值与裁定一致，故 AC1 勾选。
+
+**② AC4 / P3**：**整体迁出**至新任务 `gap-release-channel-assertions-periodic-ci-and-controls`。⛔ 裁定**不采纳**「仅给 AC4 加（待外部）」这条绕闸捷径。
+
+**③ 代码归属**：`.github/workflows/ci.yml` 上的可派发 channel-gate job（提交 `256a3c58e`、`0440ba0dd`）属 P3，**不在本任务交付面内** —— 已从本任务 Touches 与分支 delta 移出（分支提交 `64a122cff`），并保留在新任务起点分支 `task/gap-release-channel-assertions-periodic-ci-and-controls`（= `0440ba0dd`），不丢弃。本任务落地 P1/P2 三件：`plugin/scripts/release-cut.mjs`、`plugin/scripts/release-cut.sh`、`plugin/test/release-cut.test.mjs`。
+
+**④ 为何前三轮 worker 只能原样退出**：`fan-in-ac-completion-gate` 报 `checked 3/5，剩余未勾 2 含非待外部项` —— 结构性阻塞（AC4 在任务内不可满足），不是实现质量不足。
+
+**⑤ 与另一会话在 15:32 就地改写 AC1/AC4 的关系（如实登记）**：那次改写选的是本裁定的选项①（就地改写 AC4），且把「构建所用 ref」留作开放项。人 yale 已裁定为**选项③ + ref=`tag`**，故 AC4 以本条处置为准；选项①的那段文字与它记录的事实（该门要求非 `-dev` 产物）保留在 AC4 上方正文与 `## Evidence` 里，未被抹去。
