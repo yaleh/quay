@@ -1,7 +1,7 @@
 ---
 id: gap-systemd-scope-probe-params-differ-from-real-scope
 title: systemd-scope 的可用性探测与真实建 scope 参数不同 ⇒ 探测绿不蕴含建 scope 能成（systemd 245 上实测假绿）
-status: todo
+status: ready
 labels:
   - gap
   - defect
