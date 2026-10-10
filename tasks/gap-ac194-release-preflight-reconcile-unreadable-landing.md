@@ -2,7 +2,7 @@
 id: gap-ac194-release-preflight-reconcile-unreadable-landing
 title: AC-194 第六次为假：前一条生产者修复只覆盖 3 个 script 站点；pre-fix 的 release-cut preflight
   reconcile 合并（空 action，无任何脚本/散文载体产出它）仍在 develop~100 窗内 ⇒ evaluated=false ⇒ 判据恒假
-status: todo
+status: ready
 labels:
   - gap
   - defect
