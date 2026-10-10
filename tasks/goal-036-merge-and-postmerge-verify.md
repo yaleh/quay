@@ -222,8 +222,9 @@ AC-361 `criterion` 里的
 
 ### 自查（Plan 10）
 
-- `node --experimental-strip-types plugin/scripts/task-schema-check.ts tasks/goal-036-merge-and-postmerge-verify.md` ⇒ `SELFCHECK_SCHEMA`
-- `quay task check goal-036-merge-and-postmerge-verify --json` ⇒ `SELFCHECK_TASKCHECK`
+- `node --experimental-strip-types plugin/scripts/task-schema-check.ts tasks/goal-036-merge-and-postmerge-verify.md` ⇒ `N/A legacy (no schema marker): tasks/goal-036-merge-and-postmerge-verify.md
+      1 total, 0 pass, 1 N/A-legacy, 0 fail`
+- `quay task check goal-036-merge-and-postmerge-verify --json` ⇒ `{"id":"goal-036-merge-and-postmerge-verify","gate":"execute->done","ok":false,"acTotal":10,"acChecked":8,"dodTotal":0,"dodChecked":0,"reason":"8/10 AC checkboxes checked"}`
 - **scoped 门（Plan 2b）本轮跳过**：依 `unsatisfiable-ac-requiring-authoring-loops-the-worker-driver` 的实测纪律，AC 未全勾时 worker-driver 在 fan-in **之前**即以 `short_circuit: "ac-not-checked"` 短路，scoped 门与 scoped-gate 缓存写入**不改变任何结果**；本轮把预算花在记录与升级（此偏离已在任务体说明）。
 - **写入面（本任务体自身的两次正文写入）**：`tasks/<id>.md` 是**全量替换**语义的正文，本次正文含约 10 KB 既有文本 + 约 8 KB 新增 Evidence。为**不重打字**（`task-write-body-is-full-replacement-verify-by-section-diff`、`unsatisfiable-ac-grep-matching-its-own-text` 明写 "you must retype ~16 KB of exact text — corrupting the record is worse"），正文由 `node /tmp/goal036/compose.mjs` **机械合成**（按子串定位 8 条 AC 逐条翻 `- [x]`；Evidence 段插在 `## Touches` **之前**，避开 `append-notes-injects-into-the-trailing-touches-section` 的解析陷阱），再经 **provider ABI** 的 `quay-native task edit <id> --body-file` 落盘（CLAUDE.md 明列 body write 可用 "the native provider's own richer `quay-native task edit`"）。⛔ 未手改任何 checkbox 字符、未用 Read/Edit/Write 触碰任务文件。
 
