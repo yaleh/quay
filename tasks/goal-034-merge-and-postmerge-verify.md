@@ -192,5 +192,6 @@ fan-in step 痕迹（`.quay/fan-in-step-trace.jsonl`，`kind:"goal-merge"` / `ta
 
 ### 自查（Plan 9）
 
-- `node --experimental-strip-types plugin/scripts/task-schema-check.ts tasks/goal-034-merge-and-postmerge-verify.md` ⇒ exit 0；
-- `quay task check goal-034-merge-and-postmerge-verify --json` ⇒ `missing: []`。
+- `node --experimental-strip-types plugin/scripts/task-schema-check.ts tasks/goal-034-merge-and-postmerge-verify.md` ⇒ **EXIT=0**；输出 `N/A legacy (no schema marker): tasks/goal-034-merge-and-postmerge-verify.md` / `1 total, 0 pass, 1 N/A-legacy, 0 fail`。
+- `quay task check goal-034-merge-and-postmerge-verify --json` ⇒ `{"gate":"execute->done","ok":true,"acTotal":8,"acChecked":8,"dodTotal":0,"dodChecked":0,"reason":"all AC and DoD checkboxes checked; eligible to move to done"}`（MCP `task_check` 同读数）。
+  - ⚠️ Plan 第 9 步写的判据是「`missing` 为空」——但 **`missing` 这个字段在当前 `task check` 的输出里不存在**（CLI 与 MCP 两路读数一致，键集合为 `{id, gate, ok, acTotal, acChecked, dodTotal, dodChecked, reason}`）。按硬规则 3b/4c 如实记实际读数，不引用一个取不到的字段名：真实读数是 `ok:true` / `acChecked 8 = acTotal 8`。
