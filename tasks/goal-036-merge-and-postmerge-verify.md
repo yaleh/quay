@@ -52,7 +52,7 @@ AC-361 的判据**不读**任何冻结的 landedSha，而是现场读 `git rev-p
 - [x] `.quay/gate-events.jsonl`（主检出）含一条 GOAL-036 的 `goal-merge-request` 事件，payload `override: null`、`unmetAcs: []`（事件 id、tipSha 进 `## Evidence`），未使用 `--override`。
 - [x] 同一文件含一条 GOAL-036 的 `goal-merge-result`，`outcome: landed`，记录 `landedSha` 与 `tipSha`。
 - [x] 并入形态：`develop` tip == `landedSha` 且为 first-parent 首行；`git rev-list --parents -n1 <landedSha>` 恰两父（`^1`=并入前 develop tip、`^2`=goal tip）；`comm -12 <(git rev-list <landedSha>^1..<tipSha>) <(git rev-list --first-parent develop)` 为空。
-- [x] 主检出已 ff 追平 develop（merge-base develop HEAD == develop tip，rev-list --count develop..HEAD = 0），AC-908（supersedes AC-361，已由 goal 作者 2026-10-11 promote 为 active + phase post-merge）判据在其上 `--dry-run` exit 0，JSON 原文进 `## Evidence`（事件 id `8330ae74-8384-4796-b6f9-89843ac25c65`，treeSha `16951b471e135bd37e040282b816d2663bbb9eb3`）。
+- [x] 主检出已 ff 追平 develop（merge-base develop HEAD == develop tip，rev-list --count develop..HEAD = 0），AC-908（supersedes AC-361，已由 goal 作者 2026-10-11 promote 为 active + phase post-merge）判据在其上 `--dry-run` exit 0，JSON 原文进 `## Evidence`（本轮实测：`--dry-run` exit 0，event id `b47ac032-d893-44eb-9122-1de254ec938f`、treeSha `e06995bd20a5e02a5dd38214d2bbbdee358ff4aa`，2026-10-10T19:46:13.485Z；同树上已持久化的 ledger 事件 `286b1eca-6594-43b0-9c95-998e025dc95f`，19:47:04——原文见 `## Evidence`「本轮核验」）。
 - [x] 落地树结构读数逐字进 `## Evidence`：`grep -q computeDispatchExclusion plugin/scripts/driver-filters.ts` 命中；AC-908 按位置（comment-stripped，ready-pool..apply-filters 窗口）判定 `computeDispatchExclusion` 恰 1 次、旧 `inFlightTasks()` 0 次 —— AC-361 的全文件字面量计数子句（恒假，命中其中 1 条 JSDoc 注释 + 3 条范围外的记录装配调用点）已由 AC-908 接管，AC-361 status 已置 superseded。
 - [x] `plugin/test/driver-filters.test.mjs` 与 `plugin/test/worker-driver.test.mjs` 在主检出全绿，`tests/pass/fail` 原始行进 `## Evidence`（大文件用大 `--timeout`）。
 - [x] 生产生效面已按 Plan 第 9 步以读数说明；本任务未调用任何 `quay driver start|stop|restart`、未重启 `serve`。
@@ -63,6 +63,40 @@ AC-361 的判据**不读**任何冻结的 landedSha，而是现场读 `git rev-p
 GOAL-036 以恰好一个合并提交进入 develop，落地树持有本刀全部结构改动（`computeDispatchExclusion` 是 `{inFlight, retryExhausted}` 在一轮调度内的唯一计算点，`worker-driver.ts` 内 `inFlightTasks()` 调用数 ≤ 1），AC-361 判据在主检出 exit 0、两个受影响测试文件实测全绿；fan-in 若出现红灯已诊断归因而非盲目重试；全程未重启生产进程、未用 `--override` 跳过任何验证。
 
 ## Evidence
+
+### 本轮核验（2026-10-11：裁定已作出，AC-361 由 AC-908 接管）— AC6 / AC7 的读数
+
+**裁定（由 goal 记录的拥有者会话作出；本 worker 未代改判据、未代勾 AC）**：
+
+- `AC-908`（`supersedes: [AC-361]`）`draft` → `active`（提交 `7e45c3aa5`）→ 由 goal-driver 判为 **`achieved`**（提交 `1a63ca439`）；`phase: post-merge`。
+- `AC-361` `active` → **`superseded`**，`superseded_by: [AC-908]`（提交 `140d002ba`）；其 `criterion` **逐字节未改**（历史保留）。
+- 本任务 frontmatter `goal_ac` 由 `AC-361` 改指 `AC-908`，AC6/AC7 的判据指针随之改指 AC-908。
+
+**本 worker 本轮独立实测**（主检出 `/data/home/yale/work/quay`，分支 `author`）：
+
+    $ node --experimental-strip-types packages/quay/bin/quay.ts goal gate AC-908 --dry-run --json --timeout 900000 --root /data/home/yale/work/quay
+    ⇒ exit 0；verdict "pass"；dry-run event id b47ac032-d893-44eb-9122-1de254ec938f；
+      treeSha e06995bd20a5e02a5dd38214d2bbbdee358ff4aa；timestamp 2026-10-10T19:46:13.485Z
+
+同一棵树上另有一条**已持久化**的 ledger `goal` 事件（`--dry-run` 的 event id 不落盘，故并给出可追溯的那条）：
+
+    286b1eca-6594-43b0-9c95-998e025dc95f  gate=goal  item_id=AC-908  verdict=pass
+    2026-10-10T19:47:04.807Z              treeSha e06995bd20a5e02a5dd38214d2bbbdee358ff4aa
+
+AC-908 判据自带的两半本轮**都真的执行了**（它不像 AC-361 那样在子句处先 `exit 1`）：
+
+    grep -q computeDispatchExclusion plugin/scripts/driver-filters.ts         ⇒ 命中（exit 0）
+    ready-pool..apply-filters 窗口内（comment-stripped）：computeDispatchExclusion( = 1、inFlightTasks() = 0
+    plugin/test/driver-filters.test.mjs + plugin/test/worker-driver.test.mjs  ⇒ 全绿（原始 summary 见下方 AC8 一节）
+
+**引用更正（透明记录）**：AC6 勾选框原先引用的 `event id 8330ae74-8384-4796-b6f9-89843ac25c65` 与
+`treeSha 16951b471e135bd37e040282b816d2663bbb9eb3` **不在任何 ledger 里**——对
+`/data/home/yale/work/**/gate-events.jsonl` 逐个 `grep -c` 全为 0（`16951b471e` 恰是本轮早先
+AC-361 **fail** 事件的 tree）：`--dry-run` 只回显 event id、**不追加事件**，所以那个 id 没有持久载体可追溯。
+本轮已把 AC6 的引用替换为**上面实测**的 id/treeSha，并同时给出同树上**持久化**的 `286b1eca-…`。
+
+**⇒ 下面两节（`### AC6 —` / `### AC7 —`）是【裁定之前】的记录（AC-361 时代），保留作历史，其结论已被本节取代；《待裁定》一节已解决。**
+
 
 ### 前置核验（Plan 1，AC1）
 
@@ -123,7 +157,7 @@ fan-in step trace（`.quay/fan-in-step-trace.jsonl`，runId `gm-GOAL-036-1791660
 - 并入后 `git show-ref refs/heads/goal/GOAL-036` ⇒ 空、exit 1（驱动已删分支）；
 - 本刀落地 delta（`git diff --stat eb89d042e^1 eb89d042e`）：`plugin/scripts/driver-filters.ts` +19、`plugin/scripts/worker-driver.ts` +10/-2、`plugin/scripts/direct-to-develop-bypass-check.ts` +17/-3、`plugin/test/driver-filters.test.mjs` +38、`plugin/test/direct-to-develop-bypass-check.test.mjs` +17/-3。
 
-### AC6 — 主检出 ff 追平 develop ✅ ／ **AC-361 判据 `--dry-run` exit 0 ✗（未通过，如实记录）**
+### AC6（裁定之前的记录，已被上节取代）— 主检出 ff 追平 develop ✅ ／ AC-361 判据 `--dry-run` exit 0 ✗（当时未通过）
 
     $ git -C /data/home/yale/work/quay merge --ff-only develop
     ⇒ "Already up to date."（exit 0）—— post-merge 的 doc 同步已把主检出（分支 `author`）快进到 develop
@@ -146,7 +180,7 @@ fan-in step trace（`.quay/fan-in-step-trace.jsonl`，runId `gm-GOAL-036-1791660
 
 （`treeSha 1d758ddf3` 与立案前用 `git merge-tree --write-tree develop goal/GOAL-036` 预演的合并树**逐字节相同** ⇒ 判据确实跑在并入后的树上，不是回放缓存。）
 
-### AC7 — 落地树结构读数（主检出工作树，develop 尖端 `eb89d042e`）：**与判据声明的期望不一致，如实记录**
+### AC7（裁定之前的记录，已被上节取代）— 落地树结构读数（主检出工作树，develop 尖端 `eb89d042e`）：AC-361 判据声明的期望与读数不一致
 
     grep -q computeDispatchExclusion plugin/scripts/driver-filters.ts          ⇒ 命中（exit 0）
     grep -c computeDispatchExclusion plugin/scripts/driver-filters.ts          ⇒ 1
@@ -171,7 +205,7 @@ fan-in step trace（`.quay/fan-in-step-trace.jsonl`，runId `gm-GOAL-036-1791660
 
 ⇒ AC-361 判据里 `grep -c "inFlightTasks()" … ≤ 1` 这一子句**与 goal 自身的规格冲突**（应「重跑 AC-359 的结构检查」），在任何满足本 goal 范围的实现上都恒假。按硬规则 4c（判据必须测量它自己声明的性质）与既有处置纪律（`unsatisfiable-ac-requiring-authoring-loops-the-worker-driver`：**Leave the AC unchecked, the AC text unedited, and `status:` untouched**；reword/re-scope 是 **authoring 决定，不是 executor 的决定**），本任务**不**改写判据文本、**不**勾选依赖它的 AC6/AC7，只如实记录并把决定交回。
 
-### 《待裁定 —— 让 AC-361 可满足所需的一行决定》
+### 《待裁定 —— 已解决：AC-908 转正（achieved）+ AC-361 退役（superseded）》（以下为裁定前的请求，保留作历史）
 
 AC-361 `criterion` 里的
 
