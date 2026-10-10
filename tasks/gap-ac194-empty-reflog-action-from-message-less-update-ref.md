@@ -3,7 +3,7 @@ id: gap-ac194-empty-reflog-action-from-message-less-update-ref
 title: "AC-194 判据第五次变假（NOT-EVALUATED 非真 RED）：develop reflog 出现【空 action】——本仓自己的
   batch-merge/downsync 落地通道以 `git update-ref`（无 -m）移动 develop ⇒
   `unsupported-reflog-action: (empty)` ⇒ 判据恒 fail"
-status: ready
+status: done
 labels:
   - gap
   - defect
