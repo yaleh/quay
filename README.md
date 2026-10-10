@@ -1181,6 +1181,12 @@ has been developed. Start with:
   driven this repository's own iterative development
   ([`experiments/quay-perpetual-stream/`](experiments/quay-perpetual-stream/)
   holds its running log, dashboard, and per-iteration telemetry).
+- [`docs/references/quay-as-self-improving-engineering-system.md`](docs/references/quay-as-self-improving-engineering-system.md)
+  — the long-term identity statement: quay is simultaneously the Builder, the
+  Subject, and the Validator of software change, a loop it runs against both
+  itself (this repository) and other repositories (CloudCLI, the second case
+  study above). Includes a verified, non-speculative case index of six landed
+  architecture Goals and which claims are evidence-backed vs. forward-looking.
 
 If you only want to install and use `quay`, you can stop here — none of
 `docs/proposals/` is required reading for that.

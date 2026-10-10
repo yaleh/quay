@@ -7,6 +7,11 @@
 - 该理论在本项目的经验验证 + 第一个前瞻设计 → `docs/references/维度边界与结晶——从熔融实现中发现原则.md`（九次真实结晶案例；§9「形变提出器」是本文第 7、8 节的直接前身——那里已经提出过一版「部分机械化人类形变供给」的构造协议，标注为「前瞻，不是承诺」）。
 - Ownership-first 重构方法论（worked example，本文不重复其细节） → `docs/references/ownership-first-refactoring-methodology.md`。
 - 硬规则/ADR 母体 → `CLAUDE.md`「GIT review checklist」、`adr/ADR-004~009`、`adr/ADR-021`、`adr/ADR-025~032`（轴框架）、`adr/ADR-033`（schema-agent）、`adr/ADR-035~036`。
+- **后续（本文不重复其内容，只指路）** → `docs/references/quay-as-self-improving-engineering-system.md`
+  在本文的框架之上，补了三件本文没做的事：Quay 的 Builder/Subject/Validator 三位一体身份陈述、
+  GOAL-030~035 的六次真实案例索引（含 GOAL-034/035，本文写成时尚不存在）、以及"Quay 建造其他项目"
+  （CloudCLI）与"Quay 建造自己"摆在同等地位的表述——本文第 0.4 节"演化层级"表与第 4 节"ownership-first
+  作为一个实例"仍是那份后续文档引用的基础，关系是互补,不是取代。
 
 **本文新增的唯一东西**：把上述已验证/已审计的框架，具体应用到 Quay 当前「meta-driver / meta-driver builder」这一真实工作上——这是一个尚未被上述任何文档覆盖的场景（见第 6 节的真实现状核实）。
 

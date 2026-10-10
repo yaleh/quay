@@ -166,6 +166,7 @@ Key cross-cutting facts (require reading several files to see):
 - `adr/ADR-*.md` — first-class decision records (`quay-native adr list`). ADR-004..010 (status: proposed) crystallize the GIT-lens program; read them before extending it.
 - `docs/references/` — the GIT framework (goal-closure `L_T..L_S`, 硬形变/Π_{S→E}, two-phase breathing) AND its limits: the continuous math (Fisher/natural-gradient/intrinsic-dim/ρ) is NOT rigor (ADR-006).
 - `docs/references/task-schema-canonical.md` — canonical task frontmatter schema (readable view of `plugin/scripts/task-schema.ts`): `depends_on` top-level vs legacy `extra: { depends_on: [...] }`, and `task_write` usage.
+- `docs/references/quay-as-self-improving-engineering-system.md` — Quay 的长期身份（Builder/Subject/Validator 三位一体）+ GOAL-030~035 可追踪案例索引 + 分级的 as-is/future 评价指标；与 `docs/references/harness-semantic-compression-and-meta-driver-builder.md` 互补、互相引用，读前者不代替读后者。
 - **Split-decision 路由表** → 正本 `tasks/gap-checksplitrecommendation-preserved-by-adr-022-but-never-wired-into-fast-mode.md`。**STATUS: reference/manual，非生效机制**——`checkSplitRecommendation` 零非测试调用者，没有任何 fast-mode 派发或任务撰写路径调它。**别把它当生效的机制用。**（完整存档 → `casebook#moved-split-decision-status`）
 
 ## Tools
