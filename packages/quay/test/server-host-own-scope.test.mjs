@@ -27,7 +27,15 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { spawnSync } from "node:child_process";
 import { spawnHost } from "../src/cli/server.ts";
-import { systemdScopeAvailable, serveScopeUnavailableReport, SERVE_SCOPE_UNAVAILABLE } from "../src/systemd-scope.ts";
+import {
+  systemdScopeAvailable,
+  serveScopeUnavailableReport,
+  SERVE_SCOPE_UNAVAILABLE,
+  scopeProbeArgv,
+  runScopeProbe,
+  scopeLaunchArgv,
+  resolveScopeEnvelope,
+} from "../src/systemd-scope.ts";
 import { QUAY_CLI, QUAY_NATIVE_CLI } from "./helpers/cli-entry.mjs";
 // The repo's own comment stripper (plugin/scripts/source-text-lib.ts) — the criterion is
 // 「排除注释后」(comments MAY name the literal; CODE may not).
@@ -247,4 +255,98 @@ test("AC2 (shared implementation) — neither spawn site builds a `systemd-run` 
   // …and the shared implementation itself is the one place that spells it.
   const shared = strip(fs.readFileSync(path.join(REPO_ROOT, "packages", "quay", "src", "systemd-scope.ts"), "utf8"));
   assert.equal(/systemd-run/.test(shared), true, "the shared module is where the literal lives");
+});
+
+// ─────────────────────────────────────────────────────────────────────────────────────────────────
+// gap-systemd-scope-probe-params-differ-from-real-scope
+//
+// The availability probe and the REAL invocation must share ONE property definition, so 「probe
+// green」 STRUCTURALLY implies the real `systemd-run` accepts the same properties. Measured defect
+// (systemd 245, 2026-10-10): the probe carried ONLY `MemoryAccounting=yes` while the real argv added
+// `OOMPolicy=continue`, which 245 REJECTS on a `.scope` (`Unknown assignment: OOMPolicy=continue`) ⇒
+// green probe, red real call ⇒ the host silently ran without its cgroup envelope (硬规则 3b/4).
+//
+// NOTE on host coverage (AC2/AC3): this host is systemd 255, where BOTH old and new probes pass — so
+// the 245-specific rejection cannot be reproduced here. The readings are therefore (a) an ISOMORPHIC
+// negative control (inject a property the host's systemd does not recognise → the probe must report
+// unavailable, AC2) and (b) the structural parity + mutation control (AC3). DoD's 「真实落地」 is the
+// probe now carrying the real invocation's property list, proven by a REAL systemd-run execution.
+
+/** The `-p <assign>` VALUES in an argv (the property assignments, ⛔ not the flags). */
+function propertyPairs(argv) {
+  const out = [];
+  for (let i = 0; i < argv.length - 1; i++) if (argv[i] === "-p") out.push(argv[i + 1]);
+  return out;
+}
+
+/** The real invocation's argv with no ceiling (so its property set is the version-sensitive base). */
+function realScopeArgv() {
+  return scopeLaunchArgv(["true"], { envelope: "scope", memoryMax: null, unit: "quay-serve-probe-parity.scope" });
+}
+
+test("probe-parity AC1 — the envelope's property list is defined in ONE place (`OOMPolicy=continue` is not a 2nd literal)", () => {
+  const src = path.join(REPO_ROOT, "packages", "quay", "src", "systemd-scope.ts");
+  const code = stripComments(fs.readFileSync(src, "utf8"));
+  const hits = code.match(/OOMPolicy=continue/g) ?? [];
+  assert.equal(
+    hits.length,
+    1,
+    `the version-sensitive property must appear exactly once as CODE (in the ONE shared definition); got ${hits.length}`,
+  );
+  // 硬规则 2: pair the count with a KNOWN-POSITIVE reading of the SAME predicate — else 「1」 is
+  // indistinguishable from 「the stripper is broken and removed the literal too」.
+  assert.ok(
+    propertyPairs(realScopeArgv()).includes("OOMPolicy=continue"),
+    "the real invocation really does pass the property (the predicate is not vacuous)",
+  );
+});
+
+test("probe-parity AC2 — negative control: an unrecognised property makes the probe report UNAVAILABLE, not a false green", (t) => {
+  // Positive control FIRST: on a host where the probe cannot run at all, both readings are meaningless
+  // ⇒ report the independent 「not-evaluated」 value instead of a fake pass.
+  if (!runScopeProbe(scopeProbeArgv())) {
+    t.skip("not-evaluated: systemd-run --user --scope is not usable on this host — the probe reading was not taken");
+    return;
+  }
+  const argv = scopeProbeArgv();
+  // Inject BEFORE the trailing `true` member — the same shape the systemd-245 `OOMPolicy=continue`
+  // rejection takes (a property assignment the host's systemd does not know).
+  argv.splice(argv.length - 1, 0, "-p", "QuayProbeNegativeControl=xyz");
+  assert.equal(
+    runScopeProbe(argv),
+    false,
+    "a property the host's systemd does not recognise must make the probe report unavailable (⛔ never a green)",
+  );
+});
+
+test("probe-parity AC3 — mutation control: the probe carries EVERY property the real invocation carries", () => {
+  // Reverting the probe to `-p MemoryAccounting=yes` alone (the measured systemd-245 defect) turns
+  // THIS test red: the missing `OOMPolicy=continue` pair is exactly what the loop below asserts.
+  const realProps = propertyPairs(realScopeArgv());
+  const probeProps = propertyPairs(scopeProbeArgv());
+  for (const p of realProps) {
+    assert.ok(
+      probeProps.includes(p),
+      `the probe must exercise the property ${JSON.stringify(p)} the real invocation relies on — else 「probe green」 does NOT imply the real call succeeds`,
+    );
+  }
+  // The probe uses the plain binary name; `--unit`/`--collect` are per-invocation plumbing, not the
+  // version-sensitive mechanism, so they are deliberately NOT part of the parity requirement.
+  assert.equal(scopeProbeArgv()[0], "systemd-run");
+});
+
+test("probe-parity AC4 — systemd-run unavailable and available are two DISTINGUISHABLE values (硬规则 3b)", () => {
+  // (a) a binary that cannot be executed at all ⇒ false (⛔ neither a throw nor a green).
+  assert.equal(
+    runScopeProbe(["quay-no-such-systemd-run-binary-xyz", "--user", "--scope", "true"]),
+    false,
+    "an absent binary reads as 'unavailable', not as an exception and not as 'available'",
+  );
+  // (b) the two values reach INDEPENDENT envelope shapes: 「none」 + a NAMED reason vs 「scope」.
+  const none = resolveScopeEnvelope({ prefix: "quay-serve-", root: "/w/x", limitsEnv: "QUAY_X_PROBE_PARITY", systemdRun: false });
+  const scope = resolveScopeEnvelope({ prefix: "quay-serve-", root: "/w/x", limitsEnv: "QUAY_X_PROBE_PARITY", systemdRun: true, totalmemBytes: 1024 ** 3, nowMs: 1 });
+  assert.equal(none.envelope, "none");
+  assert.ok(none.reason && none.reason.length > 0, "the unavailable value carries a NAMED reason (⛔ not a bare/missing field)");
+  assert.equal(scope.envelope, "scope");
+  assert.notEqual(none.envelope, scope.envelope, "available and unavailable must not share one shape");
 });
