@@ -624,3 +624,40 @@ export interface SuiteRoundRecord {
   bucket_files?: number;
   bucket_duration_ms?: number;
 }
+
+/**
+ * gap-full-suite-scope-oom-policy-stops-whole-suite-unattributable — the per-run cgroup OOM/memory
+ * evidence written to `<state-dir>/suite-memory-evidence-<runId>.json` while the suite scope runs.
+ *
+ * WHY a per-RUN file (⛔ not the single-slot `suite-cgroup-evidence.txt`): that file records only the
+ * APPLIED LIMITS and is overwritten every round — a round's peak / OOM counters were unrecoverable
+ * (the transient `systemd-run --scope` unit is destroyed at suite exit ⇒ `Result=oom-kill` and
+ * `memory.events` cannot be read back afterwards). The runner therefore samples the scope cgroup
+ * DURING the run and lands one file per runId, so two consecutive rounds never overwrite each other
+ * and the worker-driver can attribute an OOM red to THIS round.
+ *
+ * Fields the red-attribution path needs: `oomKill` (the classification trigger), `peakBytes` /
+ * `memoryMaxBytes` (the读数 the stop note must name), `phase` (the phase the OOM happened in),
+ * `runId` (the identity that ties the file to one round).
+ */
+export interface SuiteMemoryEvidence {
+  /** The per-suite runId (the same value the runner writes the state / round record under). */
+  runId: string;
+  /** Peak cgroup memory (bytes) observed during the run — `memory.peak` (cgroup v2 high-water mark),
+   *  falling back to the max of `memory.current`. `null` = never observed (缺值 ≠ 0, 硬规则 6). */
+  peakBytes: number | null;
+  /** The scope's MemoryMax in BYTES (`null` when the scope passed no memory ceiling). */
+  memoryMaxBytes: number | null;
+  /** `memory.events` `oom` counter at the last sample (0 = never observed). */
+  oom: number;
+  /** `memory.events` `oom_kill` counter at the last sample — the red-attribution trigger. */
+  oomKill: number;
+  /** The suite phase NAME at the moment `oomKill` first became positive (else the last phase seen). */
+  phase: string;
+  /** The transient scope unit name when captured (`null` otherwise). */
+  scopeUnit: string | null;
+  /** How many cgroup samples were taken (0 ⇒ the cgroup was never readable — evidence is inert). */
+  samples: number;
+  /** ISO-8601 capture time (the last sample / the teardown read). */
+  capturedAt: string;
+}

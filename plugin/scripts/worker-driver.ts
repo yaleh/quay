@@ -276,6 +276,10 @@ import { defaultLaneCount, readLoadAvg } from "./full-suite-runner.ts";
 // ⛔ 前缀的唯一真相源在 full-suite-runner.ts（writer 侧）——本层是 reader，import 同一常量而不是自己
 // 写一份字面量（两份前缀 = 漂移，硬规则 5b：改了 writer 忘了 reader 时判据静默恒假）。
 import { SUITE_LOG_NOT_RUN_PREFIX, SUITE_LOG_RUN_START_PREFIX } from "./full-suite-runner.ts";
+// gap-full-suite-scope-oom-policy-stops-whole-suite-unattributable — the per-run cgroup OOM evidence
+// TYPE (written by full-suite-runner.ts, read here for the `suite-oom` red classification). Type-only:
+// the leaf module imports nothing back (⛔ no cycle, hard-rule 5b — one definition of the evidence shape).
+import type { SuiteMemoryEvidence } from "./full-suite-runner-types.ts";
 // gap-verification-round-bound-to-quay-shaped-suite-entry：第三方项目（无 scripts/test.sh，suite 由它自己的
 // loop.test_command 跑）不经 full-suite-runner ⇒ 那条唯一 writer 不在路径上 ⇒ /tests 的
 // verification-round.jsonl 结构性不产生（web 恒显示「未接入」）。本层补写【复用既有 shared writer】
@@ -2613,7 +2617,12 @@ export type RetryExemptionVerdict =
   // （都落 insufficient-data-fallback）⇒ 下游当成「suite 红但归因不出」⇒ 两轮即 stop-terminal，停派注记
   // 写「suite 红归因不出」，而真因是 AC 未勾选、没有 suite 跑过（硬规则 3b：读不懂/另一成因不得与已知
   // 成因共用取值）。⇒ 独立 verdict，走既有 count-and-retry 路径（⛔ 不进 stop-terminal）。
-  | "ac-not-checked-shortcircuit";
+  | "ac-not-checked-shortcircuit"
+  // gap-full-suite-scope-oom-policy-stops-whole-suite-unattributable：suite 红，日志里归因不出任何
+  // 失败测试文件（本相位的形态），但本轮 per-run cgroup 证据（suite-memory-evidence-<runId>.json）显示
+  // `oom_kill>0` ⇒ 真因是 OOM（范围/环境），不是「基建/契约疑似」。⛔ 与 insufficient-data-fallback
+  // 分开取值：后者会被下游 stop-terminal 判成「基建疑似」并停派，而这条有确凿读数（峰值/上限/相位）。
+  | "suite-oom";
 
 /** 一次 exited-not-landed 的重试豁免判定结果（可扩展输出，⛔ 不重写接线）。 */
 export interface RetryExemptionJudgment {
@@ -3219,6 +3228,71 @@ function staticPhaseDetail(sp: StaticPhaseFailureParse): string {
   return parts.length ? `; ${parts.join("; ")}` : "";
 }
 
+// ── gap-full-suite-scope-oom-policy-stops-whole-suite-unattributable: per-run OOM evidence reader ────
+// The runner lands `<root>/.quay/suite-memory-evidence-<runId>.json` (one file per runId). The mechanical
+// fan-in suite-log basename embeds the SAME runId (`fan-in-suite-<task>~<runId>~<attempt>.log`, the `~`
+// separator from worker-fan-in.ts) ⇒ this layer derives the runId from the outcome and reads THIS round's
+// evidence (⛔ never the newest file — a concurrent suite's file must not be mis-attributed).
+
+/** The per-suite runId embedded in the mechanical fan-in suite-log basename, or null when the shape is
+ *  not the canonical `<stem>~<runId>~<attempt>.log` (缺值 ≠ 某个 runId, 硬规则 6). */
+export function suiteRunIdFromOutcome(outcome: unknown): string | null {
+  const mfi = (outcome && typeof outcome === "object")
+    ? (outcome as { mechanical_fan_in?: unknown }).mechanical_fan_in
+    : undefined;
+  if (!mfi || typeof mfi !== "object") return null;
+  const basename = (mfi as { suiteLog?: unknown }).suiteLog;
+  if (typeof basename !== "string" || !basename) return null;
+  const parts = basename.split("~");
+  if (parts.length !== 3) return null;
+  const runId = parts[1];
+  return runId ? runId : null;
+}
+
+/** Read the per-run cgroup OOM evidence `<root>/.quay/suite-memory-evidence-<runId>.json`. Returns null
+ *  when the runId is unknown, the file is absent, or it does not carry the ONE field the classification
+ *  needs (`oomKill`) — 「读不到」 ≠ 「无 OOM」 (硬规则 3b/6; the caller falls through unchanged). */
+export function readSuiteMemoryEvidence(root: string, runId: string | null): SuiteMemoryEvidence | null {
+  if (!runId) return null;
+  let raw: unknown;
+  try {
+    raw = JSON.parse(fs.readFileSync(path.join(root, ".quay", `suite-memory-evidence-${runId}.json`), "utf8"));
+  } catch {
+    return null;
+  }
+  if (!raw || typeof raw !== "object") return null;
+  const o = raw as Record<string, unknown>;
+  if (typeof o.oomKill !== "number" || !Number.isFinite(o.oomKill)) return null;
+  return {
+    runId: typeof o.runId === "string" ? o.runId : runId,
+    peakBytes: typeof o.peakBytes === "number" && Number.isFinite(o.peakBytes) ? o.peakBytes : null,
+    memoryMaxBytes: typeof o.memoryMaxBytes === "number" && Number.isFinite(o.memoryMaxBytes) ? o.memoryMaxBytes : null,
+    oom: typeof o.oom === "number" && Number.isFinite(o.oom) ? o.oom : 0,
+    oomKill: o.oomKill,
+    phase: typeof o.phase === "string" ? o.phase : "",
+    scopeUnit: typeof o.scopeUnit === "string" ? o.scopeUnit : null,
+    samples: typeof o.samples === "number" && Number.isFinite(o.samples) ? o.samples : 0,
+    capturedAt: typeof o.capturedAt === "string" ? o.capturedAt : "",
+  };
+}
+
+/** A byte count as a human-readable MiB string (`null`/non-finite ⇒ "unknown", ⛔ never a fabricated 0). */
+function formatEvidenceBytes(v: number | null): string {
+  if (v === null || !Number.isFinite(v)) return "unknown";
+  return `${(v / (1024 * 1024)).toFixed(1)} MiB`;
+}
+
+/** The `suite-oom` judgment reason — names the OOM count, the phase it happened in, and the peak vs the
+ *  MemoryMax limit (the读数 the stop note must carry instead of 「基建/契约疑似」). */
+export function suiteOomReason(ev: SuiteMemoryEvidence): string {
+  const limit = ev.memoryMaxBytes === null ? "unset" : formatEvidenceBytes(ev.memoryMaxBytes);
+  return (
+    `suite red: the cgroup scope OOM-killed ${ev.oomKill} process(es) during phase '${ev.phase || "?"}' ` +
+    `(peak ${formatEvidenceBytes(ev.peakBytes)} vs MemoryMax ${limit}; run ${ev.runId}) — ` +
+    `memory/environment, not an implementable defect`
+  );
+}
+
 /** 重试豁免判定（纯结构性、不调 LLM、不写盘）。对一次 exited-not-landed 判定「本次是否计入该任务自身
  *  重试计数」。⛔ 只判 suite-red（非 suite red = merge 冲突 / typecheck / scoped-gate / ac-gate 等，天然
  *  是任务自身缺陷候选，无「不相关 flaky」可豁免）。读不懂的每一步都回退 insufficient-data-fallback
@@ -3298,6 +3372,24 @@ export function judgeRetryExemption(
     return judgeStaticPhaseAttribution(root, taskId, staticPhase, staticNote);
   }
   if (failingTestFiles.length === 0) {
+    // gap-full-suite-scope-oom-policy-stops-whole-suite-unattributable — BEFORE falling to the
+    // 「无法归因」 fallback, consult THIS round's cgroup OOM evidence. A whole-suite TERM (the
+    // phenomenon: one OOM-killed process stopped the scope) leaves NO failing test file, so the
+    // parser computes 0 of N and the pre-change code called it 「infra/contract suspected」 and parked
+    // the task. When the evidence says `oom_kill>0`, the cause is a MEASURED fact (peak vs limit,
+    // phase) ⇒ classify `suite-oom` with those readings. ⛔ No evidence / oom_kill 0 ⇒ fall through
+    // to the EXISTING branch unchanged (verbatim reason — the negative control).
+    const memoryEvidence = readSuiteMemoryEvidence(root, suiteRunIdFromOutcome(outcome));
+    if (memoryEvidence && memoryEvidence.oomKill > 0) {
+      return {
+        verdict: "suite-oom",
+        reason: suiteOomReason(memoryEvidence),
+        failingTestFiles: [],
+        signatures: [],
+        recurredTasks: [],
+        ...parseNote,
+      };
+    }
     // ⛔ 判词不得写成肯定断言（旧措辞「没有 worker 能修的东西」——依据只是「解析器没读懂」，硬规则 3b）。
     // 只报可核的读数：解析器读到 N 行失败、0 行归因到文件。`0 of N` 与 `0 of 0` 是两种不同的实况。
     const detail = suiteTokenDetail(parsed.pseudoStages, parsed.unclassified);
@@ -5321,7 +5413,12 @@ export async function runResidentLoop(opts: ResidentOptions): Promise<number> {
           }
         } else if (exemption.verdict !== "unrelated-flaky-exempt") {
           for (const id of advanceRetryCap(retryState, [r.taskId], maxRetries)) {
-            needsHumanWrites.push({ id, reason: `worker-driver 连续 ${maxRetries} 次 exited-not-landed 未落地（重试上限）`, kind: "retry-cap" });
+            // gap-full-suite-scope-oom-policy-stops-whole-suite-unattributable：OOM 归因的停派注记必须
+            // 写明峰值/上限/相位（而不是「基建/契约疑似」）——真因是可核的读数，读者据此知道该查内存/范围。
+            const reason = exemption.verdict === "suite-oom"
+              ? `worker-driver 连续 ${maxRetries} 次 exited-not-landed 未落地（重试上限）；本轮 suite 红已归因于 cgroup OOM：${exemption.reason}`
+              : `worker-driver 连续 ${maxRetries} 次 exited-not-landed 未落地（重试上限）`;
+            needsHumanWrites.push({ id, reason, kind: "retry-cap" });
           }
         }
       }
