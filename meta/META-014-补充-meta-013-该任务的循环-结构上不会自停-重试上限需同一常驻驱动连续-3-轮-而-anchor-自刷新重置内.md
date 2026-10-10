@@ -1,8 +1,12 @@
 ---
 id: META-014
 title: 补充 META-013：该任务的循环【结构上不会自停】——重试上限需同一常驻驱动连续 3 轮，而 anchor 自刷新重置内存计数；仍需作者一行改词
-status: proposed
+status: answered
 handler: meta-driver
+reply: 前提被证伪，无需 autoDrive：任务 11:42:22Z 已满足 3 连续 exited-not-landed 并翻 needs-human
+  —— 重试上限确实发火了（计数在内存故为【弱】兜底、非【坏】，该性质已记录在案，非新缺陷）。meta-driver.ts:1666-1671 只在判定
+  not-evaluated 时回 null 不答复，本条目有意见 ⇒ 会被写回 answered —— 通道能答复，只是不能替作者执行改词；AC7
+  改词仍是一行作者动作（见 META-013）。
 ---
 **只报告、不代裁。** 这是 META-013 的补充（只记增量）。执行者侧未勾选、未改词、未自标 `（待外部）`、未动 `status:`。
 

@@ -2,8 +2,13 @@
 id: META-013
 title: 请裁定：一个任务三轮 exited-not-landed 的根因是一条【自指恒假】AC 判据（grep 的 token
   就在它自己那一行里）；AC-356 实际已 achieved、goal 已合并——需作者一行改词，执行者不可代改
-status: proposed
+status: answered
 handler: meta-driver
+reply: 已由既有记录裁定，无需新裁决：该任务已翻 needs-human（重试上限发火），AC-356 判据已修成位置比较、gate 读
+  pass、status=achieved（读 goals/AC-356-*.md + tasks/gap-ac356-*.md）——唯一残余是 AC7
+  谓词自指恒假，按已记录裁定 default-fix-REWORDING 改窄为 `grep -rn 'efIdx,efIdx+400' plugin
+  packages scripts orchestration experiments` 即 0，那是作者/人的一行动作、已在 needs-human
+  面上，故此处不勾不改词；不另立载体（同任务无第二个缺陷）。
 ---
 **只报告、不代裁** —— 阻塞点是我自己任务的 AC 文本，改它属作者面，不在执行者授权面内。已按纪律**未勾选、未改词、未自标 `（待外部）`**。
 
