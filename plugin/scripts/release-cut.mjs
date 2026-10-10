@@ -30,7 +30,8 @@
 //      `release-branch-finish.sh release/v<version> --cut --tag v<version> --root <worktree>`
 //      (merge back → tag the merge point → delete the branch — the SPEC's last three steps);
 //   4. push the tag and `develop`;
-//   5. dispatch `release.yml` on the tag and echo the run URL;
+//   5. dispatch `release.yml` on the tag — with an EXPLICIT `--ref` (see the `--dispatch-ref`
+//      paragraph below) — and echo the run URL;
 //   6. bump `VERSION` on `develop` to the NEXT version + `stamp-version.ts` + re-anchor the
 //      closure-ratchet baseline, and commit;
 //   7. remove the worktree it created.
@@ -40,6 +41,35 @@
 // checkout that OWNS the shared git dir ⇒ the MAIN checkout's `.quay/release-branch-finish.jsonl`.
 // The dry run prints that absolute path (asked of the carrier itself via `--trace-path`, so there
 // is ONE derivation) — a reader can check the landing without running anything.
+//
+// ── `--ref`: WHICH release.yml GOVERNED THE RUN (the implicit-default defect this fixes) ────────
+// Measured 2026-10-10 by the v0.18.0 release incident. `gh workflow run release.yml -f tag=<tag>`
+// WITHOUT `--ref` runs the workflow file on the repository's DEFAULT BRANCH, and here the default
+// branch is `master` — which only advances when a release finishes FULLY GREEN. So release N was
+// always judged by release N−1's DEFINITION:
+//   • v0.17.0's run 37620677788 executed `verify-plugin-channel` with 13 steps and NO assertions
+//     step, although v0.17.0's own tree already carried that step — it ran v0.16.0's file;
+//   • `git diff v0.17.0 v0.18.0 -- .github/workflows/release.yml` is 14 insertions / 13 deletions,
+//     and v0.18.0's run was the FIRST to execute the new step — where it failed.
+// Two distinct harms, both from the same implicitness:
+//   (a) a step can first execute during a REAL release (`.github/workflows/ci.yml` never runs
+//       `verify-plugin-channel-assertions` — grep is empty — so the release is its debut), and
+//   (b) SELF-LOCK: if the broken file is release.yml itself, fixing it does not help, because the
+//       fix is not on `master` and `master` cannot be advanced while the release keeps failing.
+// The fix is to STOP DERIVING the ref silently: `--dispatch-ref <ref>` names it, and the preflight
+// states in plain words which definition will govern the run and how it differs from the tree the
+// tag names (P2 — visibility, hard rule 9: make the effective definition OBSERVABLE instead of
+// leaning on a default-branch semantic). The default is the TAG ITSELF: the run is then governed by
+// exactly the tree the tag names, so re-dispatching one tag reproduces one verdict — the property
+// release.yml's own IDEMPOTENCY contract assumes. `--dispatch-ref develop` gates on the current
+// mainline instead (fix the gate forward, push develop, re-dispatch the same tag) at the price of
+// unbinding gate from artifact. ⛔ Which of the two is POLICY is a human ruling (task
+// gap-release-workflow-definition-lags-one-release AC1); this flag makes either one a flag away
+// rather than a silenced default.
+// ⛔ The comparison below is against `--base`, ⛔ never against `refs/tags/<tag>`: the tag does not
+// exist yet when the preflight runs (step 2 creates it at `--base`'s merge point), and by
+// construction that merge point carries `--base`'s tree — reading a nonexistent ref would report
+// "unreadable" for the ordinary, correct case.
 //
 // ── WHY THIS IS A `.mjs` AND THE `.sh` IS A THIN ENTRY (read before "simplifying" it back) ──────
 // The one-command interface is WRITTEN DOWN as `bash plugin/scripts/release-cut.sh` — in this task's
@@ -64,7 +94,8 @@
 //
 // Usage:
 //   node plugin/scripts/release-cut.mjs <version> [--root <repo>] [--worktree <path>]
-//                  [--remote <name>] [--base <ref>] [--no-push] [--no-dispatch] [--dry-run]
+//                  [--remote <name>] [--base <ref>] [--dispatch-ref <ref>]
+//                  [--allow-workflow-drift] [--no-push] [--no-dispatch] [--dry-run]
 //   <version>    bare X.Y.Z (⛔ no leading `v`, no suffix) — tag = v<version>, branch = release/v<version>
 //   --root       the checkout to cut from (default: the MAIN checkout of the repo this script
 //                lives in — `git rev-parse --git-common-dir`'s parent, so running this from a
@@ -73,6 +104,15 @@
 //                <dirname root>/<basename root>-worktrees/release-v<version>)
 //   --remote     the remote to push to (default: origin)
 //   --base       the ref the cut merges back into (default: develop)
+//   --dispatch-ref <ref>
+//                the ref `gh workflow run release.yml` is dispatched AGAINST (default: the release
+//                tag itself, i.e. `--ref v<version>`). This decides WHICH copy of release.yml
+//                governs the run — 🚫 omitting `--ref` would silently run the DEFAULT BRANCH's copy,
+//                i.e. the PREVIOUS release's definition. `--dispatch-ref develop` gates on the
+//                current mainline instead of on the tagged tree.
+//   --allow-workflow-drift
+//                proceed even when the governing release.yml differs from the tree the tag names;
+//                without it that difference is a REFUSED preflight (see --dispatch-ref)
 //   --no-push    do not push (steps 4 and 6's push) — used by tests and by offline cuts
 //   --no-dispatch do not run `gh workflow run release.yml`
 //   --dry-run    run every READ-ONLY preflight, print the whole plan (worktree path, the
@@ -182,7 +222,8 @@ function mainRootOf(dir) {
 
 const USAGE =
   "用法: bash plugin/scripts/release-cut.sh <X.Y.Z> [--root <repo>] [--worktree <path>] " +
-  "[--remote <name>] [--base <ref>] [--no-push] [--no-dispatch] [--dry-run]\n";
+  "[--remote <name>] [--base <ref>] [--dispatch-ref <ref>] [--allow-workflow-drift] " +
+  "[--no-push] [--no-dispatch] [--dry-run]\n";
 
 const argv = process.argv.slice(2);
 
@@ -199,6 +240,8 @@ let root = "";
 let worktree = "";
 let remote = "origin";
 let base = "develop";
+let dispatchRefArg = "";
+let allowWorkflowDrift = false;
 let doPush = true;
 let doDispatch = true;
 let dryRun = false;
@@ -211,6 +254,8 @@ for (let i = 0; i < argv.length; i++) {
     case "--worktree": worktree = next(); break;
     case "--remote": remote = next(); break;
     case "--base": base = next(); break;
+    case "--dispatch-ref": dispatchRefArg = next(); break;
+    case "--allow-workflow-drift": allowWorkflowDrift = true; break;
     case "--no-push": doPush = false; break;
     case "--no-dispatch": doDispatch = false; break;
     case "--dry-run": dryRun = true; break;
@@ -359,6 +404,67 @@ if (base === "develop" && remote !== "" && doPush) {
   }
 }
 
+// ── preflight ⑤/P1+P2: WHICH release.yml will govern the run, and what that costs ─────────────
+// `dispatchRef` is the ref `gh workflow run --ref` receives. Default: the tag itself (see the
+// `--ref` block in the header) — the run is then governed by the very tree the tag names.
+const dispatchRef = dispatchRefArg || tag;
+const WORKFLOW_PATH = ".github/workflows/release.yml";
+if (doDispatch) {
+  // The tree the tag will name. The tag does not exist yet (step 2 creates it at the merge point of
+  // `base`, which by construction carries `base`'s tree), so `base` IS that tree — see the header.
+  const shippedRef = base;
+  // When the run is dispatched against the tag, the governing definition IS the shipped one; saying
+  // so explicitly is the point (the defect was that this was left to a default-branch semantic).
+  const effectiveRef = dispatchRef === tag ? base : dispatchRef;
+  const effectiveLabel = dispatchRef === tag
+    ? `${tag} (the release tag; its tree is '${base}' at cut time)`
+    : dispatchRef;
+
+  const readWorkflowAt = (ref) => {
+    const r = git(root, "show", `${ref}:${WORKFLOW_PATH}`);
+    return r.status === 0 ? r.stdout : null;
+  };
+  // ENUMERATE, never boolean (hard rule 3/3b): "the ref does not resolve" and "the file is absent
+  // at that ref" are distinct from "both copies were read and agree", and none of the three may
+  // share an output shape with the others.
+  if (git(root, "rev-parse", "--verify", "--quiet", `${effectiveRef}^{commit}`).status !== 0) {
+    fail(
+      "release-cut-dispatch-ref-unresolvable",
+      `'--dispatch-ref ${dispatchRef}' does not resolve to a commit in ${root}, so 'which release.yml will govern the run?' cannot be answered; refusing to dispatch against a ref this command cannot read (硬规则 3b: 读不懂 ≠ 合格)`,
+      2,
+    );
+  }
+  const effectiveText = readWorkflowAt(effectiveRef);
+  const shippedText = readWorkflowAt(shippedRef);
+  if (effectiveText === null || shippedText === null) {
+    fail(
+      "release-cut-workflow-definition-unreadable",
+      `'${WORKFLOW_PATH}' could not be read at ${effectiveText === null ? `--dispatch-ref ${effectiveRef}` : `'${shippedRef}'`} in ${root}; the governing definition is unknown, and "unknown" must not read as "unchanged" (硬规则 3b)`,
+      2,
+    );
+  }
+  const drifted = effectiveText !== shippedText;
+  const numstat = drifted
+    ? git(root, "diff", "--numstat", shippedRef, effectiveRef, "--", WORKFLOW_PATH).stdout.trim()
+    : "";
+  const diffstat = drifted
+    ? (numstat || `${WORKFLOW_PATH} differs (numstat unreadable)`)
+    : `0 insertions / 0 deletions (identical to '${shippedRef}')`;
+  // P2 — MAKE IT VISIBLE. This line is the whole point: the release cutter can read, before
+  // anything is created, which definition will judge the run and how far it is from the artifact.
+  process.stdout.write(
+    `preflight: the run will be governed by '${WORKFLOW_PATH}' at ${effectiveLabel}; vs '${shippedRef}': ${diffstat}\n`,
+  );
+  if (drifted && !allowWorkflowDrift) {
+    fail(
+      "release-cut-workflow-definition-drift",
+      `the release.yml that would govern this run (at '--dispatch-ref ${dispatchRef}') DIFFERS from the one in the tree the tag names ('${shippedRef}') — ${diffstat}\n` +
+        `    ⇒ the run would be judged by a definition the released artifact does not carry. Fix '${dispatchRef}', dispatch the tag itself (--dispatch-ref ${tag}), or pass --allow-workflow-drift to proceed deliberately`,
+      2,
+    );
+  }
+}
+
 // ── the two paths, and the ledger's landing root (asked of the carrier, so there is ONE derivation)
 if (!worktree) {
   worktree = path.join(path.dirname(root), `${path.basename(root)}-worktrees`, `release-${tag}`);
@@ -389,7 +495,10 @@ if (!ledgerPath || traceProbe.status !== 0) {
 
 if (dryRun) {
   const step4 = doPush ? `git -C ${root} push ${remote} ${base} refs/tags/${tag}` : "(skipped: --no-push)";
-  const step5 = doDispatch ? `gh workflow run release.yml -f tag=${tag}` : "(skipped: --no-dispatch)";
+  const step5 = doDispatch
+    ? `gh workflow run release.yml --ref ${dispatchRef} -f tag=${tag}`
+        + `   (the governing definition is ${WORKFLOW_PATH} at ${dispatchRef === tag ? `${tag} — the tagged tree, ⛔ NOT the default branch` : dispatchRef})`
+    : "(skipped: --no-dispatch)";
   const step7 = doPush ? `git -C ${root} push ${remote} ${base}   (the bump commit)` : "(skipped: --no-push)";
   const plan = [
     "dry-run: preflight PASSED — nothing was created and no ref was touched",
@@ -490,15 +599,17 @@ if (doDispatch) {
   if (run("bash", ["-c", "command -v gh"], { stdio: ["ignore", "ignore", "ignore"] }).status !== 0) {
     fail(
       "release-cut-dispatch-unavailable",
-      `'gh' is not on PATH, so release.yml was NOT dispatched; the cut itself is complete (tag ${tag} pushed). Dispatch by hand: gh workflow run release.yml -f tag=${tag}`,
+      `'gh' is not on PATH, so release.yml was NOT dispatched; the cut itself is complete (tag ${tag} pushed). Dispatch by hand: gh workflow run release.yml --ref ${dispatchRef} -f tag=${tag}`,
       1,
     );
   }
-  const dispatched = run("gh", ["workflow", "run", "release.yml", "-f", `tag=${tag}`], { stdio: ["ignore", "pipe", "pipe"] });
+  // ⛔ `--ref` is NOT optional here: without it `gh` runs the workflow file on the repository's
+  // DEFAULT BRANCH, i.e. the PREVIOUS release's definition (see the header's `--ref` block).
+  const dispatched = run("gh", ["workflow", "run", "release.yml", "--ref", dispatchRef, "-f", `tag=${tag}`], { stdio: ["ignore", "pipe", "pipe"] });
   if (dispatched.status !== 0) {
     fail(
       "release-cut-dispatch-failed",
-      `'gh workflow run release.yml -f tag=${tag}' failed (gh exited ${dispatched.status}); the cut itself is complete. Dispatch by hand and record the run id. gh's own reason — ${diagnosticTail(dispatched)}`,
+      `'gh workflow run release.yml --ref ${dispatchRef} -f tag=${tag}' failed (gh exited ${dispatched.status}); the cut itself is complete. Dispatch by hand and record the run id. gh's own reason — ${diagnosticTail(dispatched)}`,
       1,
     );
   }
