@@ -12,6 +12,20 @@ extra:
   schema: execution
 goal_ac: AC-264
 ---
+---
+id: gap-ac264-fleet-project-scope-deployment-rotted
+title: AC-264 第二次立案：quay-fleet 的 project-scope plugin 部署已烂（settings 键被抹、install
+  记录消失、config 绑定指向不存在的 cache 版本、marketplace 源目录被删）——真实重装 + 修复绑定 + 落成提交
+status: todo
+labels:
+  - gap
+  - defect
+parent: null
+children: []
+extra:
+  schema: execution
+goal_ac: AC-264
+---
 **type:** execution
 
 ## Proposal
@@ -102,7 +116,8 @@ python3 -c 'import json;r=[json.loads(l) for l in open("/data/home/yale/work/qua
 ## Definition of Done
 
 - [ ] AC1–AC6 全勾；`quay task check <id>` 的 `missing` 为 `[]`。
-- [ ] **判据在生产上真的翻 pass**：`goals/AC-264-…md` 的 criterion 在本轮落地后 exit 0（直接读数，不是本任务体自称）——即点名的两个文件系统直接量（`settings.json` 键 / `config.yml` 绑定）**同时**为真，且由 driver 在下一轮独立复验（本任务带 `goal_ac: AC-264`）。
+- [ ] **判据翻 pass**：以 cwd=`/data/home/yale/work/quay` 逐字重跑 `goals/AC-264-…md` 的 criterion ⇒ exit 0（直接读数，不是本任务体自称）——即点名的两个文件系统直接量（`settings.json` 键 / `config.yml` 绑定）**同时**为真。
+- [ ] driver 在下一轮独立复验该 criterion 仍 pass（本任务带 `goal_ac: AC-264`）。（待外部）
 - [ ] **REAL LANDING（DIR-026 Reading A）**：不是「文件里写着 quay@quay」，而是 quay-fleet 真的以 project scope 消费了 marketplace 渠道的插件——`installed_plugins.json` 有该项目的 project-scope 记录 ∧ `config.yml` 绑定的 cache 路径 `test -e` 为真 ∧ 该路径**不是**探测/临时形态（不含 `verify-` / `probe` / `/tmp/`）。⛔ 只改文件不重装、或只重装不落提交，都不算。
 - [ ] 负控制做过并留档：把 `settings.json.enabledPlugins` 手工改回 `{}`（或把 config 绑定改回开发检出）⇒ AC-264 判据翻假；恢复 ⇒ 翻真。
 - [ ] scoped 门 `bash scripts/test.sh --for-task <id>` 绿（若本任务未改本仓源码，按 `scripts/test.sh` 的 scoped 语义记录实际读数）。
@@ -130,7 +145,7 @@ $ git -C /data/home/yale/work/quay-fleet log --oneline -2 -- .claude/settings.js
 9009b43 deploy: project-scope quay plugin from the marketplace channel (AC-264)
 2b26f9d fix(config): pin adr/goal/meta dirs to the project, not the quay repo
 
-$ ls /data/home/yale/.claude/plugins/cache/quay/quay/
+$ ls /home/yale/.claude/plugins/cache/quay/quay/
 0.10.0  0.11.0  0.14.0  0.15.0  0.16.0  0.17.0      # config 绑定的 0.9.0 不在其中
 ```
 
