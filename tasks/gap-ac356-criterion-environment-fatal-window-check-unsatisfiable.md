@@ -331,14 +331,6 @@ develop:plugin/scripts/driver-filters.ts | grep -c 'export function applyNeedsHu
 while on `goal/GOAL-035` the same command ⇒ **1**); the anti-drift set above, which subtracts both lines,
 is the discriminating reading. ⛔ `goal/GOAL-035` was not merged (that is AC-358's task).
 
-## Blocker
-
-**2026-10-10T11:12:52.487Z — worker 未落地（exited-not-landed）**
-
-- 未落地原因：AC 未全勾（checked 7/8，剩余未勾 1）——续做只需验证并勾选 AC
-- run_id：wk-prod-anchor
-- session_id：97dacf13-473d-4d04-bdc5-0e7294fc153c
-
 ## Needs-Human
 
 **执行 2026-10-10T11:42:22.734Z — 连续修满重试上限仍不合格（标 needs-human）**
