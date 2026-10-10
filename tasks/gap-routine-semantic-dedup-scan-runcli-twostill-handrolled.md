@@ -85,3 +85,11 @@ unify
 - `plugin/test/threshold-scope-check.test.mjs`
 - `plugin/test/tmux-test-isolation-check.test.mjs`
 - `tasks/gap-routine-semantic-dedup-scan-runcli-twostill-handrolled.md`
+
+## Blocker
+
+**2026-10-10T12:07:24.755Z — worker 未落地（exited-not-landed）**
+
+- 未落地原因：step=suite: AssertionError [ERR_ASSERTION]: peers ∪ mentions must equal the grep oracle for plugin/scripts/worker-driver.ts
+- run_id：wk-prod-anchor
+- session_id：916dadd7-35a9-4d58-893d-6d2ab235f6df
