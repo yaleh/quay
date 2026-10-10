@@ -74,3 +74,4 @@ The slice lands on `goal/GOAL-035` with AC-356 and AC-357 both reading exit 0 wh
 - plugin/scripts/driver-filters.ts
 - plugin/scripts/worker-driver.ts
 - plugin/test/driver-filters.test.mjs
+- tasks/goal-035-needs-human-transition-unify.md
