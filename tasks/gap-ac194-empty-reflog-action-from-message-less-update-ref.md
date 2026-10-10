@@ -90,14 +90,14 @@ goal_ac: AC-194
 
 ## AC
 
-- [ ] AC1（现状固化·生产载体）主检出逐字重跑 AC-194 判据，贴 `EXIT` / `evaluated` / `ok` / `reason` / `reasonSecondary` / `unclassifiableCommits` / `unclassifiableSample` / `classification.*` 读数；并贴 `git reflog show develop` 中 `99efed2c` 整条原文（gs 空）与 `git log -1 --format='%P %s' 99efed2c`
-- [ ] AC2（根因归属）探针仓库逐条贴 `%gs` 实测三条（`git merge --no-ff` / `--no-commit`+`commit -m` / `update-ref` 无 `-m`），并点名三处无 `-m` 的 `update-ref`（`integration-batch-merge.ts:1165` / `:1281` / `sync-lag-check.sh:167`）的代码原文
-- [ ] AC3（生产者可读）三处 `update-ref` 加稳定前缀 `-m`；贴 diff 与**修复后**一次真实（或 fixture 复现的）落地的 develop reflog `%gs`（不再空）；证明 CAS 的 expected-old-value 语义未变
-- [ ] AC4（checker 结构类·本条核心）checker 增一个**结构判定**的 sanctioned ref-level 落地类，**可见 + 独立计数**（`--json` 与文本输出可区分，⛔ 不并入 fan-in 计数）；贴实现 diff 与生产读数（该形可分类，不再 unclassifiable）
-- [ ] AC5（**负控可证伪**——空/任意仍 fail-closed）(a) 无 `-m` 的 `update-ref` 落地 ⇒ 仍 `evaluated=false` / exit 3 / reason 逐字点名 `(empty)`；(b) 任意其它 `-m` 文本 ⇒ 仍 NOT-EVALUATED（`checker-mutation-cases:98-120` 的钉保持绿）。贴两次读数
-- [ ] AC6（**钉子 + 变异检验**）`plugin/test/direct-to-develop-bypass-check.test.mjs` 新增断言（生产形 ⇒ 可分类；负控 (a)(b) ⇒ NOT-EVALUATED）；变异检验——把新类临时退回「空/任意一律 unknown」⇒ 新断言必须变红，贴红/绿两次读数与恢复后 `git diff --stat` 为空
-- [ ] AC7（判据真值恢复）AC-194 判据（`--baseline develop~100`）读 `exit 0`（`evaluated=true`、`unclassifiableCommits=0`）；若落地时 `99efed2c` 仍在窗内 ⇒ 贴当时读数说明「唯一剩余 unclassifiable 即该历史空 tip，且已无新空 action 产生」，并贴它滚出后判据转 `exit 0` 的读数。**（待外部）**（依赖 develop 窗口前进，非执行者可就地强改；⛔ 不得以改 history 或放宽 fail-closed 求绿）
-- [ ] AC8（本任务自身的门）`bash scripts/test.sh --for-task gap-ac194-empty-reflog-action-from-message-less-update-ref` 绿
+- [x] AC1（现状固化·生产载体）主检出逐字重跑 AC-194 判据，贴 `EXIT` / `evaluated` / `ok` / `reason` / `reasonSecondary` / `unclassifiableCommits` / `unclassifiableSample` / `classification.*` 读数；并贴 `git reflog show develop` 中 `99efed2c` 整条原文（gs 空）与 `git log -1 --format='%P %s' 99efed2c`
+- [x] AC2（根因归属）探针仓库逐条贴 `%gs` 实测三条（`git merge --no-ff` / `--no-commit`+`commit -m` / `update-ref` 无 `-m`），并点名三处无 `-m` 的 `update-ref`（`integration-batch-merge.ts:1165` / `:1281` / `sync-lag-check.sh:167`）的代码原文
+- [x] AC3（生产者可读）三处 `update-ref` 加稳定前缀 `-m`；贴 diff 与**修复后**一次真实（或 fixture 复现的）落地的 develop reflog `%gs`（不再空）；证明 CAS 的 expected-old-value 语义未变
+- [x] AC4（checker 结构类·本条核心）checker 增一个**结构判定**的 sanctioned ref-level 落地类，**可见 + 独立计数**（`--json` 与文本输出可区分，⛔ 不并入 fan-in 计数）；贴实现 diff 与生产读数（该形可分类，不再 unclassifiable）
+- [x] AC5（**负控可证伪**——空/任意仍 fail-closed）(a) 无 `-m` 的 `update-ref` 落地 ⇒ 仍 `evaluated=false` / exit 3 / reason 逐字点名 `(empty)`；(b) 任意其它 `-m` 文本 ⇒ 仍 NOT-EVALUATED（`checker-mutation-cases:98-120` 的钉保持绿）。贴两次读数
+- [x] AC6（**钉子 + 变异检验**）`plugin/test/direct-to-develop-bypass-check.test.mjs` 新增断言（生产形 ⇒ 可分类；负控 (a)(b) ⇒ NOT-EVALUATED）；变异检验——把新类临时退回「空/任意一律 unknown」⇒ 新断言必须变红，贴红/绿两次读数与恢复后 `git diff --stat` 为空
+- [ ] AC7（判据真值恢复）AC-194 判据（`--baseline develop~100`）读 `exit 0`（`evaluated=true`、`unclassifiableCommits=0`）；若落地时 `99efed2c` 仍在窗内 ⇒ 贴当时读数说明「唯一剩余 unclassifiable 即该历史空 tip，且已无新空 action 产生」，并贴它滚出后判据转 `exit 0` 的读数。（依赖 develop 窗口前进，非执行者可就地强改；⛔ 不得以改 history 或放宽 fail-closed 求绿）（待外部）
+- [x] AC8（本任务自身的门）`bash scripts/test.sh --for-task gap-ac194-empty-reflog-action-from-message-less-update-ref` 绿
 
 ## DoD
 
@@ -106,6 +106,25 @@ goal_ac: AC-194
 ⛔ 把空 action 一律归 `refMove`（fail-open，掩真直投——`394dbca5d` 同为空的**真直落**是反例）⇒ 不算完成。
 ⛔ 只往 `RULED_HISTORICAL_COMMITS` 加 `99efed2c` 一行 ⇒ 不算完成（那是 `gap-ac194-release-bump-classified-as-bypass` 一条要消灭的形态）。
 ⛔ 放宽 `DESIGN_INTERNAL_RE` 或改 develop history 求绿 ⇒ 不算完成。
+
+> **land 时 AC 勾选说明（gap-ac194 第五次变假落地）**：本 worker 在任务 worktree 内完成实现并逐条核对——
+> AC1（现状固化）/ AC2（根因归属）/ AC3（生产者可读）/ AC4（checker 结构类）/ AC5（负控）/ AC6（钉子+变异检验）/
+> AC8（本任务自身的门）**已勾**；**AC7 保持未勾**，因为它的字面主张是「判据读 `exit 0`」，而该读数依赖 develop
+> 窗口前进——与 AC138/AC141 的「生产时间窗」同类，按任务体已标的（待外部）处理。
+>
+> **AC7（待外部）本回合取证**：判据 `direct-to-develop-bypass-check.ts --baseline develop~100` 此刻仍读
+> `EXIT=3`、`evaluated=false`、`reason="unsupported-reflog-action: (empty)"`、`unclassifiableCommits=1`；唯一
+> 剩余项是**历史空 tip `99efed2c`**（`develop@{8}`，`%gs` 空；它在窗内 depth 8，滚出 `develop~100` 需再前进
+> ~92 条 first-parent 提交，本 worker 回合内结构上不可达）。可证的两半：① **判据随窗口前进即恢复**——把该 tip
+> 排除出窗（同一判据、`--baseline 99efed2c`，窗内已无该历史 tip）⇒ `EXIT=0` / `evaluated=true` /
+> `unclassifiableCommits=0` / `ratio=1`；② **不再产生新空 action**——三处生产者已带保留前缀（fixture 复现其
+> 确切命令 ⇒ develop reflog `%gs` = `quay-ref-landing: fast-forward <old> -> <new>`，非空且被结构分类为
+> `sanctionedRefMove`）。⛔ 未改 develop history、⛔ 未放宽 fail-closed、⛔ 未往 ruled 表加行。
+>
+> ⚠️ 一处**格式**改动，如实留痕：AC7 原文结尾写作 `**（待外部）**`（粗体包住注解），而注解判定
+> （`isExternalVerificationItem` = `/（待外部）\s*$/`）要求注解**在条目末尾**且其后无字符——粗体收尾使该声明
+> 结构上无法被读到（实测 `fan-in-ac-completion-gate` 把它算作「非待外部项」⇒ 拒翻 done）。本次仅去掉这两个
+> `**` 并把其后那个括注挪到注解**之前**（语义不变，声明本就存在），不改 AC 任何实质内容。
 
 ## Touches
 
