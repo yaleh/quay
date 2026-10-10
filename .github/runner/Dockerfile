@@ -97,15 +97,30 @@ RUN apt-get update -qq \
       libpam-systemd \
  && rm -rf /var/lib/apt/lists/*
 
-# Fail the BUILD — not a future job — if a prerequisite did not actually land. A build that
-# succeeds while the image is missing a prerequisite would reproduce exactly the failure mode this
-# image exists to remove (a pile of environment-shaped test failures that read as product defects).
-RUN python3 -c 'import yaml; print("PyYAML", yaml.__version__)' \
- && command -v tmux \
- && command -v pgrep \
- && command -v ps \
- && command -v systemd-run \
- && command -v dbus-daemon
+# ── BUILD-TIME PREREQUISITE ASSERTIONS (AC2) ─────────────────────────────────────────────────────
+# Fail the BUILD — not a future job — if a prerequisite did not actually land. A build that succeeds
+# while the image is missing a prerequisite reproduces exactly the failure mode this file exists to
+# remove: a pile of environment-shaped step failures that read as product defects (and, for the scope
+# envelope, a STRUCTURALLY red release gate — see the triage table in
+# tasks/gap-ci-runner-container-needs-user-systemd.md).
+#
+# ⛔ `systemd-run --user` ITSELF cannot be exercised here: it needs a RUNNING user manager, which
+# needs systemd as PID 1, which exists only once the container is started. Each assertion below and
+# in the second block (just before ENTRYPOINT) is therefore the strongest *buildable* proxy for its
+# runtime prerequisite; the runtime reading is AC1. The template is the pre-existing
+# `command -v tmux/pgrep/ps` group; this extends it to the four gaps this file fixes (p1..p4).
+#
+# p1 (user manager) and p3 (systemd version) are asserted here; p2 (env forwarding / XDG plumbing)
+# and p4 (tool cache) read files the later RUN steps create, so they are asserted after those steps.
+RUN set -eux; \
+    python3 -c 'import yaml; print("PyYAML", yaml.__version__)'; \
+    command -v tmux; \
+    command -v pgrep; \
+    command -v ps; \
+    command -v systemd-run; \
+    command -v dbus-daemon; \
+    systemctl --version; \
+    test "$(systemctl --version | head -n1 | awk '{print $2}')" -ge 255
 
 # Trap 5: root's user manager must be able to start. The stock `10-login-barrier.conf` also waits on
 # a logind a container does not have; the stock `$XDG_RUNTIME_DIR` handling refuses to run without it.
@@ -140,14 +155,20 @@ RUN printf '%s\n' \
 RUN systemctl mask systemd-udevd.service systemd-udev-trigger.service getty@tty1.service \
       systemd-modules-load.service systemd-remount-fs.service >/dev/null 2>&1 || true
 
-# Trap 6: `RUNNER_TOOL_CACHE` must be set EXPLICITLY. The base image ships AGENT_TOOLSDIRECTORY and
-# a preinstalled Node under /opt/hostedtoolcache/node/<v>/x64 (+ `.complete` — the layout
-# `actions/setup-node` looks for), but the runner exports only AGENT_TOOLSDIRECTORY to jobs. Without
-# RUNNER_TOOL_CACHE the action falls back to its own default (/_work/_tool, empty) and DOWNLOADS the
-# toolchain instead: measured 2026-10-10 (release run 38023497714) the download stalled
-# ("Acquiring 24.21.0 … aborted", 7 min), retried, and the job was cancelled at its 25-minute
-# timeout with every remaining step skipped. Pointing at the baked cache removes the external
-# 50 MB download from every release entirely.
+# Trap 6: `RUNNER_TOOL_CACHE` must be set EXPLICITLY. The base sets AGENT_TOOLSDIRECTORY to
+# /opt/hostedtoolcache and creates that directory (runner-owned) — but it ships it EMPTY: measured
+# 2026-10-10, `ls /opt/hostedtoolcache/node/` is "No such file or directory" on the base image AND
+# on the built quay-ci-runner image, i.e. there is no baked toolchain here to find. What the runner
+# does export to jobs is AGENT_TOOLSDIRECTORY, not RUNNER_TOOL_CACHE, so `actions/setup-node` fell
+# back to its own default (/_work/_tool — per-job, discarded with the ephemeral container) and
+# DOWNLOADED node every job: measured release run 38023497714 the download stalled ("Acquiring
+# 24.21.0 … aborted", 7 min), retried, and the job was cancelled at its 25-minute timeout with every
+# remaining step skipped. Pointing RUNNER_TOOL_CACHE at /opt/hostedtoolcache instead makes the action
+# use the runner-owned cache directory — on the runner HOST that path persists across the ephemeral
+# container rotation, which is what removes the per-job download. (That persistence is a property of
+# `gh-runner-quay.service`'s mount on the host, NOT of this image — a fresh container from this image
+# has an empty cache, so do not read this as "the image bakes node". AC1's `.complete` reading is
+# therefore a HOST reading.)
 RUN mkdir -p /etc/systemd/system/gh-runner.service.d \
  && printf '%s\n' \
       '[Service]' \
@@ -157,5 +178,33 @@ RUN mkdir -p /etc/systemd/system/gh-runner.service.d \
 # The runner's OWN job-environment injection point (KEY=VALUE lines are added to every job step's
 # environment). This is what actually reaches the job with XDG_RUNTIME_DIR — see trap 3.
 RUN printf '%s\n' 'XDG_RUNTIME_DIR=/run/user/0' >> /actions-runner/.env
+
+# ── BUILD-TIME STRUCTURAL ASSERTIONS (AC2, cont.) ────────────────────────────────────────────────
+# Same rationale as the first assertion block; these read the unit files / drop-ins / `.env` the RUN
+# steps above created, so they must run AFTER them. Each `grep -q` names the exact line its creating
+# RUN writes — edit one of those RUNs to drop a prerequisite and the BUILD fails here, rather than
+# the release gate failing later in a way that reads as a product defect. 能取假: the predicates test
+# specific file CONTENT, so deleting the corresponding RUN turns each into a hard build failure.
+#   p1 — the PAM module root's user manager dlopens (else "PAM unable to dlopen(pam_systemd.so)"),
+#        the XDG_RUNTIME_DIR drop-in without which `user@0.service` refuses to start (trap 5), and the
+#        PID-1 systemd binary the ENTRYPOINT names.
+#   p2 — the runner unit forwards the container's whole environment (trap 4), starts in the runner
+#        directory WITH an argument (trap 2), and `.env` carries XDG_RUNTIME_DIR to the job (trap 3).
+#   p4 — the tool cache dir the base creates is present, and the drop-in points RUNNER_TOOL_CACHE at
+#        it (trap 6). ⛔ This asserts the IMAGE-controlled facts only: measured 2026-10-10, the base
+#        ships `/opt/hostedtoolcache` EMPTY (no node/<v>/x64, no `.complete`) — tools there are a
+#        property of the runner HOST (the path is persisted across the ephemeral containers), so a
+#        fresh `docker build` CANNOT assert them and this RUN deliberately does not.
+RUN set -eux; \
+    ls /usr/lib/*/security/pam_systemd.so >/dev/null; \
+    grep -q '^Environment=XDG_RUNTIME_DIR=/run/user/0$' /etc/systemd/system/user@0.service.d/20-xdg-runtime.conf; \
+    test -x /lib/systemd/systemd; \
+    grep -q '^PassEnvironment=.*HOME' /etc/systemd/system/gh-runner.service; \
+    grep -q '^PassEnvironment=.*PATH' /etc/systemd/system/gh-runner.service; \
+    grep -q '^WorkingDirectory=/actions-runner$' /etc/systemd/system/gh-runner.service; \
+    grep -q 'Runner\.Listener run' /etc/systemd/system/gh-runner.service; \
+    grep -q '^XDG_RUNTIME_DIR=/run/user/0$' /actions-runner/.env; \
+    test -d /opt/hostedtoolcache; \
+    grep -q '^Environment=RUNNER_TOOL_CACHE=/opt/hostedtoolcache$' /etc/systemd/system/gh-runner.service.d/30-toolcache.conf
 
 ENTRYPOINT ["/lib/systemd/systemd"]
