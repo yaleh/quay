@@ -189,6 +189,26 @@ function breakStamperOnDevelop(root) {
     "the fixture must be clean, or the cut would refuse on CAUSE=release-cut-dirty-tree for the wrong reason");
 }
 
+/**
+ * A ref in the fixture whose `.github/workflows/release.yml` DIFFERS from `develop`'s, so the
+ * `--dispatch-ref` preflight has a real disagreement to judge. Committed on a throwaway branch and
+ * HEAD returned to `author`, so the fixture stays clean (an uncommitted edit would make the cut
+ * refuse on the dirty-tree arm instead — for the wrong reason).
+ */
+function makeDriftedWorkflowRef(root, name) {
+  assert.equal(git(root, "checkout", "-q", "-B", name, "develop").status, 0,
+    `the fixture must be able to branch '${name}' off develop`);
+  // ONE appended line (release.yml ends with a newline), so the diffstat this test asserts is the
+  // exact `1\t0` rather than a shape that happens to hold.
+  appendFileSync(join(root, ".github", "workflows", "release.yml"), "# drift-line-for-release-cut-test\n");
+  assert.equal(git(root, "add", ".github/workflows/release.yml").status, 0, "stage the drifted workflow");
+  assert.equal(git(root, "commit", "-q", "-m", "fixture: a release.yml that differs from the tag's tree").status, 0,
+    "the drift must be COMMITTED, not a working-tree edit");
+  assert.equal(git(root, "checkout", "-q", "author").status, 0, "return HEAD to `author` (production's shape)");
+  assert.equal(git(root, "status", "--porcelain", "--untracked-files=no").stdout.trim(), "",
+    "the fixture must be clean after planting the drift");
+}
+
 /** Every path the command is allowed to create a worktree under. */
 function worktreeDirs(parent) {
   const r = spawnSync("bash", ["-c", `ls -d ${JSON.stringify(parent)}/*-worktrees 2>/dev/null || true`], { encoding: "utf8" });
@@ -249,7 +269,10 @@ test("--dry-run exits 0, lists every step in order (worktree path, --root, ledge
     const iBranch = idx(/create 'release\/v9\.9\.9' at 'develop'/);
     const iFinish = idx(/release-branch-finish\.sh release\/v9\.9\.9 --cut --tag v9\.9\.9 --root /);
     const iPush = idx(/git -C \S+ push origin develop refs\/tags\/v9\.9\.9/);
-    const iDispatch = idx(/gh workflow run release\.yml -f tag=v9\.9\.9/);
+    // ⛔ `--ref` is part of the plan, not decoration: omitting it is the defect this pins
+    // (gap-release-workflow-definition-lags-one-release — the run would execute the DEFAULT
+    // BRANCH's release.yml, i.e. the previous release's definition).
+    const iDispatch = idx(/gh workflow run release\.yml --ref v9\.9\.9 -f tag=v9\.9\.9/);
     const iBump = idx(/bump VERSION 9\.9\.9 -> 9\.10\.0/);
     const iRemove = idx(/worktree remove \S*release-v9\.9\.9/);
     assert.ok(iWorktree < iBranch && iBranch < iFinish && iFinish < iPush && iPush < iDispatch
@@ -463,6 +486,168 @@ test("a failing child on the REAL cut path carries its OWN reason into CAUSE= (n
       `the dispatch stage's OWN CAUSE must be named: ${r.stderr}`);
     assert.match(r.stderr, /CAUSE=release-cut-dispatch-failed[^\n]*GH-BLEW-UP/,
       `the child's own reason must follow the CAUSE on the same line, not be discarded: ${r.stderr}`);
+    // …and the CAUSE must name the SAME invocation that actually ran, `--ref` included. A message
+    // that said `gh workflow run release.yml -f tag=…` while the call site passed `--ref` would be
+    // exactly the text/behaviour split gap-release-workflow-definition-lags-one-release names.
+    assert.match(r.stderr, /gh workflow run release\.yml --ref v9\.9\.7 -f tag=v9\.9\.7/,
+      `the CAUSE text must name the invocation that really ran (with --ref): ${r.stderr}`);
+  } finally {
+    cleanup(c.parent);
+  }
+});
+
+// ══════════════════════════════════════════════════════════════════════════════════════════════
+// gap-release-workflow-definition-lags-one-release P1 (`--dispatch-ref`) / P2 (drift visibility)
+//
+// THE DEFECT: `gh workflow run release.yml -f tag=<tag>` carried NO `--ref`, so it executed the
+// workflow file on the repository's DEFAULT BRANCH — i.e. release N was judged by release N−1's
+// definition (measured: v0.17.0's run executed v0.16.0's release.yml; v0.18.0's was the first to
+// run the new step, where it failed). These tests pin the two halves of the fix at the CALL SITE
+// and at the PREFLIGHT, not by grepping the source for a flag name.
+// ══════════════════════════════════════════════════════════════════════════════════════════════
+
+test("P1: the dry run names the ref the dispatch will run under — ⛔ never the silent default branch", () => {
+  const c = makeClone("dispatchref");
+  try {
+    // Default: bound to the TAG — the run is governed by the tree the tag names.
+    const r = run(["9.9.9", "--dry-run", "--root", c.root]);
+    assert.equal(r.status, 0, `the dry run must pass on a healthy tree: ${r.stdout}${r.stderr}`);
+    assert.match(r.stdout, /gh workflow run release\.yml --ref v9\.9\.9 -f tag=v9\.9\.9/,
+      `the plan must print the dispatch WITH its --ref: ${r.stdout}`);
+    assert.match(r.stdout, /the governing definition is \.github\/workflows\/release\.yml at v9\.9\.9/,
+      `the plan must say WHICH definition governs the run: ${r.stdout}`);
+    assert.match(r.stdout,
+      /preflight: the run will be governed by '\.github\/workflows\/release\.yml' at v9\.9\.9 \(the release tag; its tree is 'develop' at cut time\); vs 'develop': 0 insertions \/ 0 deletions \(identical to 'develop'\)/,
+      `the preflight must state the governing definition and its diffstat against the shipped tree: ${r.stdout}`);
+
+    // `--dispatch-ref develop`: the plan follows the flag rather than a hardcoded literal.
+    const d = run(["9.9.9", "--dry-run", "--root", c.root, "--dispatch-ref", "develop"]);
+    assert.equal(d.status, 0, `--dispatch-ref develop must dry-run cleanly: ${d.stdout}${d.stderr}`);
+    assert.match(d.stdout, /gh workflow run release\.yml --ref develop -f tag=v9\.9\.9/,
+      `--dispatch-ref must reach the printed plan: ${d.stdout}`);
+    assert.match(d.stdout, /the governing definition is \.github\/workflows\/release\.yml at develop/,
+      `the plan must name the flag's ref as the governing definition: ${d.stdout}`);
+  } finally {
+    cleanup(c.parent);
+  }
+});
+
+test("P2/AC3: a release.yml that DIFFERS at the dispatch ref is REFUSED — and the diffstat says how", () => {
+  const c = makeClone("drift");
+  const fakeBin = join(c.parent, "fakebin");
+  try {
+    makeDriftedWorkflowRef(c.root, "drifted");
+    // ⛔ A FAKE `gh` ON PATH FOR EVERY ARM THAT REACHES THE DISPATCH. These runs are NOT `--dry-run`:
+    // they exercise the real path, so if the refusal REGRESSES (mutate the comparison to "always
+    // equal") the cut proceeds all the way to `gh workflow run` — measured 2026-10-10, the first
+    // version of this test did exactly that and hit the LIVE GitHub API for repo `yaleh/quay`
+    // ("HTTP 422: No ref found for: drifted"). A test whose failure mode is a real dispatch against
+    // production is a defect in the test, not a stronger assertion.
+    mkdirSync(fakeBin, { recursive: true });
+    writeFileSync(join(fakeBin, "gh"), '#!/usr/bin/env bash\nexit 0\n', { mode: 0o755 });
+    const env = { ...process.env, PATH: `${fakeBin}:${process.env.PATH}` };
+
+    // ── the positive control, first: the two refs really do differ, read from git, not assumed ──
+    const driftedBlob = git(c.root, "show", "drifted:.github/workflows/release.yml");
+    const developBlob = git(c.root, "show", "develop:.github/workflows/release.yml");
+    assert.equal(driftedBlob.status, 0);
+    assert.equal(developBlob.status, 0);
+    assert.notEqual(driftedBlob.stdout, developBlob.stdout, "the fixture must really carry a diff");
+
+    // ── a run governed by `drifted` would be judged by a definition the artifact does not carry ──
+    const r = run(["9.9.9", "--root", c.root, "--no-push", "--dispatch-ref", "drifted"], { env });
+    assert.equal(r.status, 2, `a drifted governing definition must REFUSE the cut: ${r.stdout}${r.stderr}`);
+    assert.match(r.stderr, /CAUSE=release-cut-workflow-definition-drift/,
+      `the refusal must name its own cause: ${r.stderr}`);
+    assert.match(r.stderr, /1\s+0\s+\.github\/workflows\/release\.yml/,
+      `the refusal must carry the diffstat (1 insertion / 0 deletions), not just prose: ${r.stderr}`);
+    assert.deepEqual(worktreeDirs(c.parent), [], "a refused preflight must not create a worktree");
+    assert.equal(git(c.root, "rev-parse", "--verify", "--quiet", "refs/tags/v9.9.9").status, 1,
+      "a refused preflight must not land the tag");
+
+    // ── ENUMERATE, never boolean (hard rule 3b): a ref that cannot be read is its OWN cause, not
+    //    silently folded into "the definitions agree" ──────────────────────────────────────────
+    const gone = run(["9.9.9", "--root", c.root, "--no-push", "--dispatch-ref", "no-such-ref"], { env });
+    assert.equal(gone.status, 2, `an unresolvable --dispatch-ref must refuse: ${gone.stdout}${gone.stderr}`);
+    assert.match(gone.stderr, /CAUSE=release-cut-dispatch-ref-unresolvable/,
+      `an unreadable ref must NOT read as "unchanged" (硬规则 3b): ${gone.stderr}`);
+    assert.doesNotMatch(gone.stderr, /release-cut-workflow-definition-drift/,
+      "the two causes name different repairs and must not share an output shape");
+
+    // ── the deliberate override: P2 is VISIBILITY, and the difference may be accepted on purpose ─
+    const forced = run(["9.9.9", "--dry-run", "--root", c.root, "--dispatch-ref", "drifted", "--allow-workflow-drift"]);
+    assert.equal(forced.status, 0, `--allow-workflow-drift must let the cut proceed: ${forced.stdout}${forced.stderr}`);
+    assert.match(forced.stdout, /1 insertions? \/ 0 deletions|1\s+0\s+\.github\/workflows\/release\.yml/,
+      `the accepted drift must still be PRINTED, never silenced: ${forced.stdout}`);
+    assert.match(forced.stdout, /gh workflow run release\.yml --ref drifted -f tag=v9\.9\.9/,
+      `the plan must follow the accepted ref: ${forced.stdout}`);
+  } finally {
+    cleanup(c.parent);
+  }
+});
+
+test("P1/AC2: the REAL dispatch argv carries `--ref` — recorded from the child, not grepped from the source", () => {
+  const c = makeClone("dispatchargv");
+  const fakeBin = join(c.parent, "fakebin");
+  const log = join(c.parent, "gh-argv.log");
+  try {
+    mkdirSync(fakeBin, { recursive: true });
+    writeFileSync(join(fakeBin, "gh"),
+      '#!/usr/bin/env bash\nprintf "%s\\n" "$*" >> "$GH_ARGV_LOG"\nexit 0\n', { mode: 0o755 });
+
+    const r = run(["9.9.7", "--root", c.root, "--no-push"], {
+      env: { ...process.env, PATH: `${fakeBin}:${process.env.PATH}`, GH_ARGV_LOG: log },
+    });
+
+    // The dispatch is step 4 — AFTER the landing face — so the tag proves this run really reached it.
+    assert.equal(git(c.root, "rev-parse", "--verify", "--quiet", "refs/tags/v9.9.7").status, 0,
+      `the cut must reach the dispatch step: ${r.stdout}${r.stderr}`);
+    assert.equal(existsSync(log), true, `the fake gh must have been invoked at all: ${r.stdout}${r.stderr}`);
+
+    const lines = readFileSync(log, "utf8").split("\n").map((s) => s.trim()).filter(Boolean);
+    const dispatch = lines.find((l) => l.startsWith("workflow run release.yml"));
+    assert.ok(dispatch, `the real dispatch invocation must be recorded, got: ${JSON.stringify(lines)}`);
+
+    // POSITION-based (硬规则 2): `--ref` must be present AS A FLAG and carry the tag as its value —
+    // a `--ref` appearing inside another token, or without an adjacent value, would not count.
+    const toks = dispatch.split(" ");
+    const i = toks.indexOf("--ref");
+    assert.ok(i > 0, `the dispatch argv must carry a --ref FLAG, got: ${dispatch}`);
+    assert.equal(toks[i + 1], "v9.9.7", `--ref's value must be the tag, got: ${dispatch}`);
+    assert.ok(toks.includes("-f") && toks[toks.indexOf("-f") + 1] === "tag=v9.9.7",
+      `the tag input must still be passed: ${dispatch}`);
+  } finally {
+    cleanup(c.parent);
+  }
+});
+
+test("P1/AC2: with `gh` absent the hand-dispatch instruction names the SAME ref the tool would have used", () => {
+  const c = makeClone("nogh");
+  try {
+    // A PATH with the directory that carries `gh` removed — and an independent probe that the
+    // removal really took effect, so this test cannot pass by exercising the wrong branch.
+    const ghPath = spawnSync("bash", ["-c", "command -v gh"], { encoding: "utf8" }).stdout.trim();
+    assert.ok(ghPath, "the test host must carry a `gh` for this arm to mean anything");
+    const ghDir = dirname(ghPath);
+    const strippedPath = (process.env.PATH ?? "").split(":").filter((d) => d && d !== ghDir).join(":");
+    const probe = spawnSync("bash", ["-c", "command -v gh || true"], {
+      encoding: "utf8", env: { ...process.env, PATH: strippedPath },
+    });
+    assert.equal(probe.stdout.trim(), "", "the fixture must really have removed `gh` from PATH");
+
+    const r = run(["9.9.6", "--root", c.root, "--no-push"], {
+      env: { ...process.env, PATH: strippedPath },
+    });
+
+    assert.equal(r.status, 1, `the cut must reach and fail in the dispatch stage: ${r.stdout}${r.stderr}`);
+    assert.equal(git(c.root, "rev-parse", "--verify", "--quiet", "refs/tags/v9.9.6").status, 0,
+      `the cut landed the tag before the failing step: ${r.stderr}`);
+    assert.match(r.stderr, /CAUSE=release-cut-dispatch-unavailable/,
+      `the hand-dispatch cause must be named: ${r.stderr}`);
+    // The instruction handed to the operator must be the SAME invocation — with its `--ref` — or the
+    // operator re-introduces the very defect by following it.
+    assert.match(r.stderr, /Dispatch by hand: gh workflow run release\.yml --ref v9\.9\.6 -f tag=v9\.9\.6/,
+      `the hand-dispatch instruction must carry --ref: ${r.stderr}`);
   } finally {
     cleanup(c.parent);
   }

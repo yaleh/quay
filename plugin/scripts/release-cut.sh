@@ -23,12 +23,20 @@
 #                                                   CAUSE=release-cut-base-unresolvable /
 #                                                   release-cut-develop-behind-remote /
 #                                                   release-cut-develop-sync-unreadable
+#        the release.yml that WILL GOVERN the run must be readable and, unless
+#        `--allow-workflow-drift`, identical to the one in the tree the tag names
+#                                                   CAUSE=release-cut-dispatch-ref-unresolvable /
+#                                                   release-cut-workflow-definition-unreadable /
+#                                                   release-cut-workflow-definition-drift
 #   2. create a LINKED WORKTREE on `develop` (⛔ never an independent clone, ⛔ never a branch
 #      switch in the main checkout);
 #   3. cut the release branch there and land it in ONE invocation:
 #      `release-branch-finish.sh release/v<version> --cut --tag v<version> --root <worktree>`;
 #   4. push the tag and `develop`;
-#   5. dispatch `release.yml` on the tag and echo the run URL;
+#   5. dispatch `release.yml` — WITH an explicit `--ref` (see `--dispatch-ref` below) — and echo the
+#      run URL. 🚫 Without `--ref`, `gh` runs the workflow file on the repository's DEFAULT BRANCH,
+#      i.e. the PREVIOUS release's definition (measured 2026-10-10: v0.17.0's run executed v0.16.0's
+#      release.yml, and v0.18.0's was the first to run the new step — where it failed);
 #   6. bump `VERSION` on `develop` to the NEXT version + `stamp-version.ts` + re-anchor the
 #      closure-ratchet baseline, and commit;
 #   7. remove the worktree it created.
@@ -41,7 +49,8 @@
 #
 # Usage:
 #   release-cut.sh <version> [--root <repo>] [--worktree <path>] [--remote <name>]
-#                  [--base <ref>] [--no-push] [--no-dispatch] [--dry-run]
+#                  [--base <ref>] [--dispatch-ref <ref>] [--allow-workflow-drift]
+#                  [--no-push] [--no-dispatch] [--dry-run]
 #   <version>    bare X.Y.Z (⛔ no leading `v`, no suffix) — tag = v<version>, branch = release/v<version>
 #   --root       the checkout to cut from (default: the MAIN checkout of the repo this script
 #                lives in — `git rev-parse --git-common-dir`'s parent, so running this from a
@@ -50,6 +59,15 @@
 #                <dirname root>/<basename root>-worktrees/release-v<version>)
 #   --remote     the remote to push to (default: origin)
 #   --base       the ref the cut merges back into (default: develop)
+#   --dispatch-ref <ref>
+#                the ref `gh workflow run release.yml` is dispatched AGAINST (default: the release
+#                tag itself, i.e. `--ref v<version>`). This decides WHICH copy of release.yml
+#                governs the run. `--dispatch-ref develop` gates on current mainline instead of on
+#                the tagged tree; either way the preflight prints which definition will govern and
+#                how it differs from the tree the tag names.
+#   --allow-workflow-drift
+#                proceed even when the governing release.yml differs from the tree the tag names;
+#                without it that difference is a REFUSED preflight (see --dispatch-ref)
 #   --no-push    do not push (steps 4 and 6's push) — used by tests and by offline cuts
 #   --no-dispatch do not run `gh workflow run release.yml`
 #   --dry-run    run every READ-ONLY preflight, print the whole plan (worktree path, the
