@@ -2,7 +2,7 @@
 id: gap-routine-semantic-dedup-scan-runcli-twostill-handrolled
 title: "semantic-dedup-scan: Two members delegate to shared parseArgs; two still
   hand-roll the same --root/--json/--help loop."
-status: ready
+status: done
 labels:
   - gap
   - routine-filed
