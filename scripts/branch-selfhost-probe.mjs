@@ -49,6 +49,7 @@
 // script's own "pass"). `--selftest` exercises that same comparator against injected paths.
 
 import fs from "node:fs";
+import os from "node:os";
 import path from "node:path";
 import crypto from "node:crypto";
 import { spawnSync, execFileSync } from "node:child_process";
@@ -601,17 +602,27 @@ export function selftest() {
   const main = mainCheckoutOf(probeDir()) || root;
   const failures = [];
 
-  // (a) an event whose writerModule lives under MAIN must be judged loaded-main-checkout-code.
-  const mainEvent = {
-    writerModule: path.join(main, "packages", "quay", "src", "kernel", "task-transition.ts"),
-    entry: path.join(main, "plugin", "scripts", "ready-pool-check.ts"),
+  // (a) an event whose writerModule lives OUTSIDE `root` must be judged loaded-main-checkout-code.
+  // ⛔ The injected root must be one that is genuinely distinct from `root` ON EVERY HOST. This
+  // arm used to inject the real main checkout, which holds on a developer's linked-worktree
+  // checkout but NOT in CI: there the checkout IS its own main checkout (measured
+  // `root=/_work/quay/quay main=/_work/quay/quay`), so `mainCheckoutOf()` collapsed to `root`,
+  // the injected path became an IN-TREE path, and the arm failed on every CI run (`--selftest`
+  // exit 1 ⇒ the probe's own `--selftest exits 0` test red). A mkdtemp root is distinct from
+  // `root` by construction, so the comparator is genuinely exercised on every host instead of
+  // silently degrading to a self-comparison.
+  const foreign = realpathOr(fs.mkdtempSync(path.join(os.tmpdir(), "bsp-selftest-foreign-")));
+  const foreignEvent = {
+    writerModule: path.join(foreign, "packages", "quay", "src", "kernel", "task-transition.ts"),
+    entry: path.join(foreign, "plugin", "scripts", "ready-pool-check.ts"),
     from: "todo",
     to: "ready",
     kind: "promote",
   };
-  const a = classifyEventIdentities([mainEvent], root);
+  const a = classifyEventIdentities([foreignEvent], root);
+  fs.rmSync(foreign, { recursive: true, force: true });
   if (a.ok !== false || a.bad.length !== 1) {
-    failures.push(`main-checkout event was NOT flagged (ok=${a.ok}, bad=${a.bad.length})`);
+    failures.push(`out-of-tree event was NOT flagged (ok=${a.ok}, bad=${a.bad.length})`);
   }
 
   // (b) every event inside ROOT must pass.
