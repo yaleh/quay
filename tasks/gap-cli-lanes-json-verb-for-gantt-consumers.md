@@ -2,7 +2,7 @@
 id: gap-cli-lanes-json-verb-for-gantt-consumers
 title: 新增只读 CLI 动词 `quay lanes --json`：复用 dashboard-kernel 直接输出 merged+packed
   lanes（交付机制 A），供 claudecodeui 甘特图消费
-status: ready
+status: done
 labels:
   - gap
 parent: null
