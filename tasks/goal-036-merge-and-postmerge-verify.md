@@ -188,6 +188,21 @@ AC-361 `criterion` 里的
 
 （改判据有**已知副作用**：`amending-a-goal-criterion-reds-tests-that-extract-it-verbatim` —— 落笔前必须先 `grep -rln "AC-361\|goals/AC-361" packages/*/test plugin/test` 并跑命中的测试。建议按先例 `gap-ac356-criterion-environment-fatal-window-check-unsatisfiable`（`done`）**独立立案**，`goal_ac: AC-361`，Touches = goal 记录 + 该任务自身文件，并要求**负控制**证明修好的检查仍有判别力。）
 
+### 决定性 A/B —— 同一份源码，两条判据读数相反（`AC-361` fail ／ `AC-908` pass）
+
+立案会话（`Quay Driver ownership-first OOD 重构`）已于 **`40379cb35`（19:38，早于本任务 META-015 约 1 分钟）** 立了一条 **`AC-908`**（`goals/AC-908-…-按位置重跑-ac-359-的结构检查-dispatch-窗口内恰一次.md`，`status: draft`、`kind: criterion`、`goal: GOAL-036`、**`supersedes: [AC-361]`**），其 `criterion` 正是「按位置重跑 AC-359 的结构检查」的修正版（注释行不参与匹配 + 窗口内 `computeDispatchExclusion` 恰 1 次、旧 `inFlightTasks()` 0 次 + 两个受影响测试文件全绿）——与本任务 AC7 一节独立给出的诊断与建议修法**逐条一致**。
+
+在**同一份源码**上两条判据读数相反：
+
+| 判据 | `treeSha` | 逐字读数 |
+|---|---|---|
+| `AC-361`（原判据） | `1d758ddf3bbcfeeaaef93acebcd0cc2c23d2e088`（= 合并提交 `eb89d042e` 的 tree） | **exit 1** — `CAUSE=post-merge-regression -- worker-driver.ts still has 4 inFlightTasks() call(s) on develop, expected at most 1` |
+| `AC-908`（`supersedes: [AC-361]` 的修正判据） | `003b70bb654a86bc1859cb5fd1886d79acf251ca`（= 当前主检出 HEAD 的 tree） | **exit 0** — `acceptance passed (exit 0)`；criterion 末行 `PASS: develop tip carries GOAL-036's slice -- …`（event `616aee56-cf7e-4ed6-9723-915041400653`，`2026-10-10T19:41:08.223Z`） |
+
+两份源码**逐字节相同**：`git rev-parse 1d758ddf3:plugin/scripts/worker-driver.ts` = `git rev-parse 003b70bb6:plugin/scripts/worker-driver.ts` = `d46bbfb2baa14456cb898d6392e8de95adbd2f61`（`driver-filters.ts` 两 tree 间 `git diff --stat` 亦为空）⇒ **差异只在判据，不在落地树**。这是「判据坏了、树是好的」的**直接量**（硬规则 4c / 3b），不是推断。（两 tree 不同的部分是本任务自己的记账写入：`tasks/<id>.md` 的 Evidence、`meta/META-015-*.md`，以及 AC-908 记录本身。）
+
+⇒ 本任务 AC6/AC7 的未勾**不是实现缺口**：同一棵树上，接管 AC-361 地面的修正判据（AC-908）已经 `exit 0`。AC-361 的退役与 AC-908 的转正（`draft` → `active` / `phase`）仍是**人/作者的决定**，本 worker 不代做。
+
 ### AC8 — 两个受影响测试文件（主检出，原始输出）
 
     $ node --no-warnings --experimental-strip-types --test --test-timeout=900000 \
