@@ -9,7 +9,6 @@ parent: null
 children: []
 extra:
   schema: execution
-  role: primitive
 goal_ac: AC-353
 ---
 **type:** execution
