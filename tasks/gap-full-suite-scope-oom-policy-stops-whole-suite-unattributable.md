@@ -23,12 +23,12 @@ extra:
 
 ## AC
 
-- [ ] `node --test plugin/test/full-suite-runner-oom-policy.test.mjs` 退出码 0：`buildSystemdRunArgv` 的 argv 含 `OOMPolicy=continue`，且探测所用参数数组与真实调用同源（改一处两处同变）
-- [ ] 真 cgroup 负控制（同一测试文件内）：把套件 scope 的 `MemoryMax` 压到 300M，让其中一个子进程超配被 OOM 杀；断言兄弟进程存活、runner 返回的是该子进程的非零退出而不是 TERM 终止，`suite-memory-evidence-<runId>.json` 的 `oom_kill>=1`；systemd 不可用或拒绝 `OOMPolicy` 时输出独立的 skip 原因而不是静默通过
-- [ ] 证据文件内容：含 `peakBytes`、`memoryMaxBytes`、`oomKill`、`phase`（OOM 发生时的阶段名）、`runId`；两次连续运行得到两个不同文件，互不覆盖
-- [ ] `node --test plugin/test/worker-driver-suite-oom-attribution.test.mjs` 退出码 0：`oom_kill>0` 的红 ⇒ 失败原因类 `suite-oom` 且文案含峰值与上限；无证据的红 ⇒ 与改动前逐字相同的「无法归因」文案
-- [ ] 取假形态必须变红：去掉 `OOMPolicy=continue` ⇒ 负控制用例红；证据写成单槽文件 ⇒ 不覆盖用例红；归因忽略证据 ⇒ 归因用例红
-- [ ] `npm run typecheck` 与 plugin 的 lint 命令退出码 0
+- [x] `node --test plugin/test/full-suite-runner-oom-policy.test.mjs` 退出码 0：`buildSystemdRunArgv` 的 argv 含 `OOMPolicy=continue`，且探测所用参数数组与真实调用同源（改一处两处同变）
+- [x] 真 cgroup 负控制（同一测试文件内）：把套件 scope 的 `MemoryMax` 压到 300M，让其中一个子进程超配被 OOM 杀；断言兄弟进程存活、runner 返回的是该子进程的非零退出而不是 TERM 终止，`suite-memory-evidence-<runId>.json` 的 `oom_kill>=1`；systemd 不可用或拒绝 `OOMPolicy` 时输出独立的 skip 原因而不是静默通过
+- [x] 证据文件内容：含 `peakBytes`、`memoryMaxBytes`、`oomKill`、`phase`（OOM 发生时的阶段名）、`runId`；两次连续运行得到两个不同文件，互不覆盖
+- [x] `node --test plugin/test/worker-driver-suite-oom-attribution.test.mjs` 退出码 0：`oom_kill>0` 的红 ⇒ 失败原因类 `suite-oom` 且文案含峰值与上限；无证据的红 ⇒ 与改动前逐字相同的「无法归因」文案
+- [x] 取假形态必须变红：去掉 `OOMPolicy=continue` ⇒ 负控制用例红；证据写成单槽文件 ⇒ 不覆盖用例红；归因忽略证据 ⇒ 归因用例红
+- [x] `npm run typecheck` 与 plugin 的 lint 命令退出码 0
 
 ## DoD
 
@@ -41,4 +41,6 @@ extra:
 - plugin/scripts/worker-driver.ts
 - plugin/test/full-suite-runner-oom-policy.test.mjs (new)
 - plugin/test/worker-driver-suite-oom-attribution.test.mjs (new)
+- plugin/test/full-suite-runner-cgroup.test.mjs (两处 argv 逐字节断言随新增常驻属性对更新)
+- .gitignore (per-run 证据文件的运行时载体)
 - tasks/gap-full-suite-scope-oom-policy-stops-whole-suite-unattributable.md
