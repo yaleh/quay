@@ -93,7 +93,10 @@ export function deterministicGate(envelope, opts = {}) {
     i: envelope.candidate_interventions || [],
     r: envelope.recommended_next_action,
   }).toLowerCase();
-  const hit = FORBIDDEN_ACTIONS.filter((a) => actionText.includes(a));
+  // A forbidden action is a TOKEN. A bare substring test flagged any proposal that merely NAMES a file such as
+  // `ff-merge.ts` or `goal-merge.ts` (observed live: FORBIDDEN_ACTION:merge on a legitimate fan-in proposal), so a name
+  // that continues into a path/identifier character on either side is not an action.
+  const hit = FORBIDDEN_ACTIONS.filter((a) => new RegExp(`(?<![A-Za-z0-9_./-])${a.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}(?![A-Za-z0-9_./-])`).test(actionText));
   if (hit.length) reasons.push(`FORBIDDEN_ACTION:${hit.join(",")}`);
   if (!RECOMMENDED_ACTIONS.includes(envelope.recommended_next_action)) {
     reasons.push(`ACTION_NOT_IN_VOCAB:${String(envelope.recommended_next_action)}`);

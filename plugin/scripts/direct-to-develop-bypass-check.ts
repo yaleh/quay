@@ -553,7 +553,8 @@ export function extractFanInLandedShas(events) {
 //   git branch [-f] <新 b> <t>       → `branch: Created from <t>`                   ⇒ refMove
 //   git reset --hard <t>（b 已检出） → `reset: moving to <full-sha>`                ⇒ refMove
 //   git update-ref（无 -m）          → ``（空 gs）                                  ⇒ unknown
-//   git update-ref -m <msg>          → `<msg>`（任意文本）                          ⇒ unknown
+//   git update-ref -m <任意文本>     → `<msg>`（任意文本）                          ⇒ unknown
+//   git update-ref -m `quay-ref-landing: …` → 保留前缀 ⇒ sanctionedRefMove（见下「第五次变假」）
 //   git rebase / git checkout / 非 ff merge（`merge <b>: Merge made by …`）         ⇒ unknown
 //   ⚠️ `<t>` 是**命令行上传入的那个字面量**（实测：`git branch -f topic HEAD` ⇒ `Reset to HEAD`；
 //      `git branch -f topic <sha>` ⇒ `Reset to <sha>`）——⛔ 不得解析该 token 来判类（它可以是
@@ -562,18 +563,47 @@ export function extractFanInLandedShas(events) {
 //      （`^([a-z() ]+?):` 对 `merge task/gap-foo: Fast-forward` 无匹配——`/` 不在字符类里 ⇒ 该形会被
 //      误判成 unknown ⇒ 整个 ff 括注分类失效）。只能拿 git 自己的 action 词在整串开头匹配。
 //
-// 三态（⛔ unknown 一律 fail-closed，不与「合格」同形，硬规则③b）：
-//   "direct"  = action 以 `commit` 开头 ⇒ 在 develop 上**创建**了 commit（直投候选）
-//   "refMove" = 把 ref 移到**已存在的** commit（不创建 commit）⇒ 与 fan-in `push` 同类的 ref-level 落地
-//   "unknown" = 读不懂的 action 形 ⇒ NOT-EVALUATED（reason 点名该形，见 unclassifiedActionForms）
+// 四态（⛔ unknown 一律 fail-closed，不与「合格」同形，硬规则③b）：
+//   "direct"           = action 以 `commit` 开头 ⇒ 在 develop 上**创建**了 commit（直投候选）
+//   "refMove"          = git 自己的 action 词把 ref 移到**已存在的** commit（不创建 commit）⇒ ref-level 落地
+//   "sanctionedRefMove"= **本仓自己的落地通道**用保留前缀 `quay-ref-landing: …` 声明的 ref-level CAS 落地
+//   "unknown"          = 读不懂的 action 形 ⇒ NOT-EVALUATED（reason 点名该形，见 unclassifiedActionForms）
 //
 // ⚠️ refMove ≠ 「已放行」：它可见而非静默豁免——独立计数 + 带入窗内的 first-parent commit 清单
 //    （`rev-list --first-parent P..T`）及各自 code-surface 标记，⛔ 不得并入 fan-in 计数（那会把
 //    「不知道」伪装成「合格」，硬规则④）。rewind（P 非 T 祖先）引入集为空且单独可见
 //    （classification.nonForwardRefMoves）。
-/** 一条 develop reflog action 的分类（结构判定，三态）。PURE——**判定只留一份**：`isReflogDirectCommit`
+//
+// ── 第五次变假：裸 `git update-ref` 的空 action（tasks/gap-ac194-empty-reflog-action-from-message-less-update-ref）──
+// 缺陷：本仓自己的 ref-level 落地通道（`integration-batch-merge.ts` 的 real-merge / ff CAS、
+//   `sync-lag-check.sh` 的 downsync）用 **`git update-ref`（无 `-m`）** 移动 develop ⇒ git 写出的 reflog
+//   action **为空**（探针实测：`git update-ref <ref> <new> <old>`（无 -m）⇒ `%gs` 为空串）⇒ `reflogActionForm`
+//   给 `(empty)` ⇒ unknown ⇒ 该 tip 落 unclassifiable ⇒ 整个判据 NOT-EVALUATED（exit 3）⇒ AC-194 恒 fail。
+//   `git update-ref` 在 DAG 上与 `git push .` / `git merge --ff-only` 完全同形（都只把 ref 移到已存在
+//   commit），差别只在「有没有留下 action 词」——变的是**读面**，不是判据真值。
+//
+// ⛔ 修法**不是**把空 action 一律归 `refMove`：空 action 一次无消息的 ref 移动**不能区分**「commit 在
+//   develop 上被创建」与「ref 移到已存在 commit」——本仓**两者都真实发生过**：sanctioned 落地（如上）与
+//   **人手外科式直落 develop**（`394dbca5d`，同样是空 action）。把空一律判 refMove = **fail-open**：会掩掉
+//   真直投，且 `checker-mutation-cases/direct-to-develop-bypass-check.sh` 的「读不懂的 action 形 ⇒
+//   NOT-EVALUATED」钉会被打穿。⇒ 修法 = 补【生产者】让 sanctioned 落地**按结构可读**（加保留前缀 `-m`），
+//   并在 checker 侧给该前缀一个**结构判定**的独立分类（下方 sanctionedRefMove），空 / 任意其它 `-m` 文本**仍
+//   unknown**（负控见 `plugin/test/direct-to-develop-bypass-check.test.mjs` 与 mutation case ④）。
+//
+// ⚠️ 为什么保留前缀不是「白名单」：白名单（枚举 git 会写出哪些拼法）对 git 的**下一种**拼法结构上失明——
+//   那是 `branch: Reset to HEAD` 破掉 AC-194 的方式。这里认的不是 git 的 action 词，而是**本仓生产者自己
+//   声明的保留命名空间**：`quay-ref-landing:` 由 `integration-batch-merge.ts` / `sync-lag-check.sh` 在
+//   它们的 CAS `update-ref` 上写出，是一个**会被负控证伪的具体前缀**（任意其它 `-m` 文本 ⇒ 仍 unknown）。
+//   ⛔ 判定只认该前缀 + 非空其余部分，⛔ 不枚举 kind（枚举 kind 会让下一种 kind 静默落回 unknown——同一
+//   漂移源）。sanctionedRefMove 与 refMove 一样**可见而非静默豁免**：独立计数 + 带入窗内的 commit 清单
+//   （classification.sanctionedRefMoveIntroduced / denominator.sanctionedRefMoveCommits），⛔ 不并入 fan-in 计数。
+//
+// ⚠️ 生产者侧的保留前缀常量在**三个站点**各自书写（`integration-batch-merge.ts:1165` / `:1281`、
+//   `sync-lag-check.sh:167`）——bash 站点结构上无法 import TS 常量。⛔ 漂移不是静默的：生产者若改用别的
+//   文本，该 tip 立刻落回 unknown ⇒ reason 逐字点名 `quay-ref-landing`/`(empty)` ⇒ fail-closed 可见。
+/** 一条 develop reflog action 的分类（结构判定，四态）。PURE——**判定只留一份**：`isReflogDirectCommit`
  *  与括注构造都消费它，⛔ 不再各持一份拼法谓词（那是本任务要修的漂移源）。
- *  返回 "direct" | "refMove" | "unknown"（词汇表与实测原文见上方）。 */
+ *  返回 "direct" | "refMove" | "sanctionedRefMove" | "unknown"（词汇表与实测原文见上方）。 */
 export function classifyReflogAction(gs) {
   const s = String(gs ?? "");
   if (!s) return "unknown"; // 空 gs（git update-ref 无 -m）——读不懂，fail-closed
@@ -609,7 +639,11 @@ export function classifyReflogAction(gs) {
   // 都只把 ref 指向**已存在的** commit。
   if (/^branch:\s*(?:Reset to|Created from)\b/.test(s)) return "refMove";
   if (/^reset:\s*moving to\b/.test(s)) return "refMove"; // git reset --hard <target>
-  return "unknown"; // rebase / checkout / 非 ff merge / 任意 update-ref -m 文本 / …（fail-closed）
+  // 本仓自己的落地通道声明的保留前缀（见上方「第五次变假」）——`git update-ref -m "quay-ref-landing: …"`。
+  // ⛔ 只认这个**具体保留前缀** ∧ 其余部分非空：空 gs / 任意其它 `-m` 文本（`mutation-unknown-form` …）
+  //    仍落 `unknown` ⇒ NOT-EVALUATED（负控在测试与 checker-mutation-cases ④）。⛔ 不枚举 kind。
+  if (/^quay-ref-landing:\s*\S/.test(s)) return "sanctionedRefMove";
+  return "unknown"; // rebase / checkout / 非 ff merge / 裸 update-ref（空）/ 任意其它 update-ref -m 文本 / …（fail-closed）
 }
 
 /** 一条 reflog action 的「形」——供 `classification.unclassifiedActionForms` 逐字点名根因。
@@ -652,44 +686,53 @@ export function buildReflogIndex(reflogLines) {
  *  （tasks/gap-ac194-reflog-action-vocabulary-incomplete） */
 
 /** 从有序 reflog 行（`git log -g --format=%H%x09%gs develop` 输出，newest first）建立 ref-level 落地括注
- *  结构。返回 `{ refMoveTips, brackets }`：
+ *  结构。返回 `{ refMoveTips, sanctionedRefMoveTips, brackets }`：
  *   · `refMoveTips` = 所有 `refMove` 落地 tip（`push` / `merge …Fast-forward` / `branch: Reset to|Created from`
  *     / `reset: moving to` / `fetch …`）的 sha 集——tip 自己即一次落地（含 reflog 最老一条
  *     refMove tip，其「之前」超出 reflog 保留、无前一条条目可配对）；
- *   · `brackets` = 时间序（newest first）的 `{T, P}` 对——T = 本次落地 tip，P = 前一条 reflog 条目
- *     （更旧）的 sha；`rev-list --first-parent P..T` 即本次落地带入的 first-parent 提交（中间 commit 无独立
- *     reflog 条目，gap-ac194 括注分类）。
+ *   · `sanctionedRefMoveTips` = 本仓自己通道声明的 ref-level 落地 tip（`quay-ref-landing: …`）**子集**——
+ *     ⛔ 与 `refMoveTips` 分开，使 sanctioned 落地在读数与计数上**独立可见**（第五次变假，见上）；
+ *   · `brackets` = 时间序（newest first）的 `{T, P}` 对——T = 本次落地 tip（**refMove 与 sanctioned 都收**，
+ *     两者都是 ref-level 落地、都要参与覆盖判定），P = 前一条 reflog 条目（更旧）的 sha；
+ *     `rev-list --first-parent P..T` 即本次落地带入的 first-parent 提交（中间 commit 无独立 reflog 条目，
+ *     gap-ac194 括注分类）。
  *   ⛔ 最老一条 reflog 条目（无前一条）不产生括注——其「之前」超出 reflog 保留、不可分类（硬规则③b，不伪装
  *     成合格）。
- *   ⚠️ 判定**只留一份**：本函数消费 `classifyReflogAction(...)==="refMove"`，不再自持拼法谓词。
+ *   ⚠️ 判定**只留一份**：本函数消费 `classifyReflogAction(...)`，不再自持拼法谓词。
  *   PURE。 */
 export function buildRefMoveBrackets(reflogLines) {
   const refMoveTips = new Set();
+  const sanctionedRefMoveTips = new Set();
   const brackets = [];
   const entries = (reflogLines ?? []).map((line) => line.split("\t")).filter((p) => p[0] && p[1] != null);
   for (let i = 0; i < entries.length; i++) {
     const [sha, gs] = entries[i];
-    if (classifyReflogAction(gs) !== "refMove") continue;
-    refMoveTips.add(sha);
+    const kind = classifyReflogAction(gs);
+    if (kind !== "refMove" && kind !== "sanctionedRefMove") continue;
+    if (kind === "sanctionedRefMove") sanctionedRefMoveTips.add(sha);
+    else refMoveTips.add(sha);
     const prev = i + 1 < entries.length ? entries[i + 1][0] : null; // 前一条（更旧）
     if (prev) brackets.push({ T: sha, P: prev });
   }
-  return { refMoveTips, brackets };
+  return { refMoveTips, sanctionedRefMoveTips, brackets };
 }
 
-/** spine 提交的落地方式（gap-ac194 括注分类的三态，纯判定——`gitDevelopDirectCommits` 把括注覆盖集算好后
+/** spine 提交的落地方式（gap-ac194 括注分类，纯判定——`gitDevelopDirectCommits` 把括注覆盖集算好后
  *  逐条喂入）：
- *   "fan-in"         ledger 有记录，或 refMoveTips（ref-level 落地 tip：push / Fast-forward / branch: Reset to
- *                    / Created from / reset: moving to / fetch …），或括注覆盖（中间 commit）
+ *   "fan-in"         ledger 有记录，或 refLevelTips（ref-level 落地 tip：git 自己的 push / Fast-forward /
+ *                    branch: Reset to|Created from / reset: moving to / fetch … **以及**本仓通道声明的
+ *                    sanctionedRefMove `quay-ref-landing: …`——两者都不创建 commit），或括注覆盖（中间 commit）
  *   "direct"         reflog 有「直接 commit」条目（报红候选）
- *   "unclassifiable" ledger 无记录、非 direct、非 refMoveTips、也不在任何括注区间（reflog 被 gc 剪 /
+ *   "unclassifiable" ledger 无记录、非 direct、非 refLevelTips、也不在任何括注区间（reflog 被 gc 剪 /
  *                    落不进括注的老 commit / **未分类 action 形的 tip** ⇒ NOT-EVALUATED，⛔ 不与合格同形）
+ *  ⚠️ `refLevelTips` = `refMoveTips ∪ sanctionedRefMoveTips`（调用方合流）——分类上两者同效（都是 ref-level
+ *     落地），**计数上分列**（sanctioned 的独立可见性在 `gitDevelopDirectCommits` 的读数里，不在这里）。
  *  PURE。 */
-export function classifySpineLandingMode(sha, ledgerShas, directSet, refMoveTips, refMoveCovered) {
+export function classifySpineLandingMode(sha, ledgerShas, directSet, refLevelTips, refMoveCovered) {
   if (ledgerShas?.has(sha)) return "fan-in";
   if (!directSet) return "unclassifiable"; // reflog 不可读
   if (directSet.has(sha)) return "direct";
-  if (refMoveTips?.has(sha) || refMoveCovered?.has(sha)) return "fan-in";
+  if (refLevelTips?.has(sha) || refMoveCovered?.has(sha)) return "fan-in";
   return "unclassifiable";
 }
 
@@ -1005,9 +1048,11 @@ function isAncestor(root, a, b) {
  *     NOT-EVALUATED，⛔ 不伪装成「未发现 direct」，硬规则 3b）
  *
  * 返回 `{ direct, unclassifiable, totalReachable, firstParentCommits, offSpineCommits,
- * refMoveIntroduced, nonForwardRefMoves, unclassifiedActionForms }`（totalReachable = rev-list 命中条数，
- * 供分类覆盖率 `classified / total` 读数——AC4；后三项 = ref-level 落地的可见性读数 + 未分类 action 形的
- * 点名，见任务 gap-ac194-reflog-action-vocabulary-incomplete AC2/AC5/AC6）；rev-list 不可读（git 错误）
+ * refMoveIntroduced, refMoveIntroducedTotal, sanctionedRefMoveIntroduced, sanctionedRefMoveIntroducedTotal,
+ * sanctionedRefMoveCommits, nonForwardRefMoves, unclassifiedActionForms }`（totalReachable = rev-list 命中条数，
+ * 供分类覆盖率 `classified / total` 读数——AC4；后几项 = ref-level 落地的可见性读数 + 未分类 action 形的
+ * 点名，见任务 gap-ac194-reflog-action-vocabulary-incomplete AC2/AC5/AC6 与
+ * gap-ac194-empty-reflog-action-from-message-less-update-ref AC4）；rev-list 不可读（git 错误）
  * ⇒ 返回 null。只报【reachable from develop】的提交（rev-list 本身就只给出 develop 可达集）；baseline 用
  * `git rev-list <baseline>..develop` 一次完成 reachability + baseline 过滤。
  */
@@ -1036,11 +1081,13 @@ export function gitDevelopDirectCommits(root, develop, baseline, ledgerShas) {
   }
   const offSpineCommits = fullDag ? Math.max(0, fullDag.length - reachable.length) : null;
 
-  // reflog：direct（commit 直投）+ ref-level 落地括注（classifyReflogAction 的结构判定——push /
-  // merge …Fast-forward / branch: Reset to|Created from / reset: moving to / fetch …；
-  // ⛔ 不是拼法白名单）。reflogActionBySha 供未分类 action 形点名根因（AC2）。
+  // reflog：direct（commit 直投）+ ref-level 落地括注（classifyReflogAction 的结构判定——git 自己的
+  // `push` / `merge …Fast-forward` / `branch: Reset to|Created from` / `reset: moving to` / `fetch …` **以及**
+  // 本仓通道声明的 `quay-ref-landing: …` sanctionedRefMove；⛔ 不是拼法白名单）。
+  // reflogActionBySha 供未分类 action 形点名根因（AC2）。
   let reflogIndex = null;
   let refMoveTips = new Set();
+  let sanctionedRefMoveTips = new Set();
   let brackets = [];
   const reflogActionBySha = new Map(); // sha → raw `%gs`（同一 sha 多条时取最新一条）
   try {
@@ -1049,6 +1096,7 @@ export function gitDevelopDirectCommits(root, develop, baseline, ledgerShas) {
     reflogIndex = buildReflogIndex(reflogLines);
     const fb = buildRefMoveBrackets(reflogLines);
     refMoveTips = fb.refMoveTips;
+    sanctionedRefMoveTips = fb.sanctionedRefMoveTips;
     brackets = fb.brackets;
     for (const line of reflogLines) {
       const [sha, gs] = line.split("\t");
@@ -1057,6 +1105,9 @@ export function gitDevelopDirectCommits(root, develop, baseline, ledgerShas) {
   } catch {
     reflogIndex = null; // reflog 不可读 ⇒ 所有非 ledger commit 都 unclassifiable（3b）
   }
+  // 覆盖判定用的 ref-level 落地 tip 集 = 两类合流（分类上同效：都不创建 commit）；**计数上分列**
+  // （sanctioned 的独立可见性在下面的读数里，⛔ 不并入 fan-in 计数——第五次变假，见 classifyReflogAction 上方）。
+  const refLevelTips = new Set([...refMoveTips, ...sanctionedRefMoveTips]);
 
   // 括注分类（gap-ac194）：spine 上无独立 reflog 条目的中间 commit，落在某次 ref-level 落地 [P, T] 之间
   // ⇒ fan-in delivered（非直投、非 unclassifiable）。
@@ -1097,10 +1148,12 @@ export function gitDevelopDirectCommits(root, develop, baseline, ledgerShas) {
   }
   const refMoveCovered = new Set();
   const refMoveIntroduced = [];
+  const sanctionedRefMoveIntroduced = [];
   const nonForwardRefMoves = [];
   // 引入 commit 的改动文件改为**循环后一次批量取**（原本逐 commit 一次 gitCommitFiles：实测 6841 次
   // 子进程 = 该扫描 git 子进程总数 15212 的最大单项）。顺序仍按 brackets 序（push 顺序不变）。
-  const pendingRefMoveIntroduced = []; // { tip, prev, intro }
+  // `sanctioned` 标记把 refMove 与 sanctionedRefMove 两类括注分开呈现（读数**独立可见**，⛔ 不并入 fan-in 计数）。
+  const pendingRefMoveIntroduced = []; // { tip, prev, intro, sanctioned }
   if (reflogIndex) {
     for (const { T, P } of brackets) {
       // 准入（见上注——⛔ 不是「T 在当前 first-parent spine 上」）：只排除结构上确证带入不了窗内提交的括注。
@@ -1122,7 +1175,7 @@ export function gitDevelopDirectCommits(root, develop, baseline, ledgerShas) {
           });
           continue;
         }
-        pendingRefMoveIntroduced.push({ tip: T, prev: P, intro });
+        pendingRefMoveIntroduced.push({ tip: T, prev: P, intro, sanctioned: sanctionedRefMoveTips.has(T) });
       } catch {
         // 括注不可读 ⇒ 该括注不覆盖任何 spine commit（其余保持 unclassifiable，fail-closed）
       }
@@ -1132,7 +1185,7 @@ export function gitDevelopDirectCommits(root, develop, baseline, ledgerShas) {
     for (const e of pendingRefMoveIntroduced) for (const s of e.intro) introShas.push(s);
     const introFiles = introShas.length > 0 ? gitCommitFilesBatch(root, introShas) : new Map();
     for (const e of pendingRefMoveIntroduced) {
-      refMoveIntroduced.push({
+      const entry = {
         tip: e.tip,
         prev: e.prev,
         introduced: e.intro.map((s) => {
@@ -1143,16 +1196,23 @@ export function gitDevelopDirectCommits(root, develop, baseline, ledgerShas) {
             files: files ?? null,
           };
         }),
-      });
+      };
+      // 两类分列：sanctionedRefMove（本仓通道声明的 `quay-ref-landing: …`）与 refMove（git 自己的 action 词）
+      // ——读数**独立可见**，⛔ 不并入 fan-in 计数（硬规则④：不得把「不知道」洗成「合格」）。
+      if (e.sanctioned) sanctionedRefMoveIntroduced.push(entry);
+      else refMoveIntroduced.push(entry);
     }
   }
+  // sanctioned 落地的独立计数：窗内 spine 上有多少条 tip 是本仓通道声明的 ref-level 落地（该形**可分类**、
+  // 不再 unclassifiable 的读数——第五次变假 AC4）。与 refMove 分列，⛔ 不并入 fan-in 计数。
+  const sanctionedRefMoveCommits = [...sanctionedRefMoveTips].filter((s) => spineSet.has(s)).length;
 
   const direct = [];
   const unclassifiable = [];
   // pass 1（纯分类，无 git）：确定 direct / unclassifiable —— 顺序与旧单循环一致（unclassifiable 保持 reachable 序）。
   const directShas = [];
   for (const sha of reachable) {
-    const mode = classifySpineLandingMode(sha, ledgerShas, reflogIndex?.direct ?? null, refMoveTips, refMoveCovered);
+    const mode = classifySpineLandingMode(sha, ledgerShas, reflogIndex?.direct ?? null, refLevelTips, refMoveCovered);
     if (mode === "fan-in") continue;
     if (mode === "unclassifiable") { unclassifiable.push(sha); continue; }
     directShas.push(sha);
@@ -1204,6 +1264,8 @@ export function gitDevelopDirectCommits(root, develop, baseline, ledgerShas) {
     firstParentCommits: reachable.length,
     offSpineCommits,
     refMoveIntroduced,
+    sanctionedRefMoveIntroduced,
+    sanctionedRefMoveCommits,
     nonForwardRefMoves,
     unclassifiedActionForms,
   };
@@ -1295,6 +1357,10 @@ export function main(argv) {
   let refMoveIntroduced = [];
   let nonForwardRefMoves = [];
   let unclassifiedActionForms = [];
+  // sanctioned ref-level 落地（本仓通道声明的 `quay-ref-landing: …`）的**独立**读数/计数——两类分列，
+  // ⛔ 不并入 fan-in 计数（gap-ac194-empty-reflog-action-from-message-less-update-ref AC4）。
+  let sanctionedRefMoveIntroduced = [];
+  let sanctionedRefMoveCommits = 0;
 
   // ── ff-lock 时间窗 + ledger 提取（先读 lock-events 文件——ledger 是收集阶段的三态输入之一）─────
   // ⚠️ 缺失文件 = 「从未有过锁持」（可读的空状态），不是「读不懂」——full-suite 的 verify worktree
@@ -1373,6 +1439,8 @@ export function main(argv) {
     refMoveIntroduced = collected.refMoveIntroduced ?? [];
     nonForwardRefMoves = collected.nonForwardRefMoves ?? [];
     unclassifiedActionForms = collected.unclassifiedActionForms ?? [];
+    sanctionedRefMoveIntroduced = collected.sanctionedRefMoveIntroduced ?? [];
+    sanctionedRefMoveCommits = collected.sanctionedRefMoveCommits ?? 0;
   }
 
   const verdict = checkDirectCommits(commits, lockHoldIntervals, releaseBumpCtx);
@@ -1464,6 +1532,10 @@ export function main(argv) {
       // P 非 T 祖先的 refMove（rewind）——带入集为空，单列可见，⛔ 不计入「带入了 commit 的落地」。
       nonForwardRefMoves: nonForwardRefMoves.slice(0, REF_MOVE_READOUT_LIMIT),
       nonForwardRefMovesTotal: nonForwardRefMoves.length,
+      // sanctioned ref-level 落地（本仓通道声明的 `quay-ref-landing: …`）的**独立**读数——形态与 refMoveIntroduced
+      // 完全平行，但**分列**：⛔ 不并入 refMoveIntroduced，也⛔ 不并入 fan-in 计数（第五次变假 AC4）。
+      sanctionedRefMoveIntroduced: sanctionedRefMoveIntroduced.slice(0, REF_MOVE_READOUT_LIMIT),
+      sanctionedRefMoveIntroducedTotal: sanctionedRefMoveIntroduced.length,
       // 读不懂的 action 形（有条目但 classifyReflogAction === "unknown"）——reason 逐字点名它们。
       unclassifiedActionForms,
       // 词汇表（结构判定，非白名单）——写在这里使 --json 的读者不必回读源码。
@@ -1471,10 +1543,16 @@ export function main(argv) {
         "structural classification of the develop reflog action: 'direct' = action starts with `commit` (a commit was CREATED on develop); " +
         "'refMove' = the ref was moved to an EXISTING commit, no commit created (`push` | `merge <b>: Fast-forward` | " +
         "`branch: Reset to <t>` | `branch: Created from <t>` | `reset: moving to <t>` | `fetch …`); " +
+        "'sanctionedRefMove' = the same ref-level landing declared by THIS repo's own landing channels via the RESERVED " +
+        "prefix `quay-ref-landing: <kind> …` (integration-batch-merge.ts real-merge/ff CAS + sync-lag-check.sh downsync " +
+        "CAS; git update-ref -m) — recognized by that specific reserved prefix, NOT by any other `-m` text; " +
         "'unknown' = unreadable action form ⇒ NOT-EVALUATED fail-closed, reason names the form (`unsupported-reflog-action: <form>`). " +
         "⛔ Not a spelling whitelist — a spelling whitelist is structurally blind to the next landing form (that is exactly how " +
-        "`branch: Reset to HEAD` broke AC-194). refMove is VISIBLE, not silently exempt: refMoveIntroduced + nonForwardRefMoves " +
-        "are read-outs ONLY and are never folded into the fan-in counts.",
+        "`branch: Reset to HEAD` broke AC-194). ⛔ An EMPTY action (bare git update-ref, no -m) is NOT classifiable as any landing " +
+        "(it cannot distinguish 'a commit was created on develop' from 'the ref moved to an existing commit' — both really happen " +
+        "here) ⇒ it stays `unknown`/NOT-EVALUATED. refMove AND sanctionedRefMove are VISIBLE, not silently exempt: " +
+        "refMoveIntroduced + sanctionedRefMoveIntroduced + nonForwardRefMoves are read-outs ONLY and are never folded into the " +
+        "fan-in counts.",
     },
     denominator: {
       totalDirectCommits: verdict.totalCommits,
@@ -1487,6 +1565,10 @@ export function main(argv) {
       // ⛔ 不静默掩盖。`releaseBumpNotEvaluatedCommits` 是「两条来源读不出」的独立计数（硬规则 3b）。
       releaseBumpCommits: verdict.releaseBumpCommits,
       releaseBumpNotEvaluatedCommits: verdict.releaseBumpNotEvaluatedCommits,
+      // sanctioned ref-level 落地（`quay-ref-landing: …`）的**独立**计数——窗内 spine 上有多少条 tip 由本仓
+      // 通道声明的 ref-level 落地承载。⛔ 分列于 refMove / fan-in 计数（第五次变假 AC4：该形可分类、不再
+      // unclassifiable 的读数就落在这里）。
+      sanctionedRefMoveCommits,
       unclassifiableCommits: unclassifiable.length,
       classifiedCommits: classified,
       totalScannedCommits: totalScanned,
@@ -1525,12 +1607,18 @@ export function main(argv) {
     process.stdout.write(JSON.stringify(result, null, 2) + "\n");
   } else {
     console.log(`direct-to-develop-bypass-check: evaluated=${evaluated} ok=${ok} (${reason})`);
-    console.log(`  denominator: total=${verdict.totalCommits} code-surface=${verdict.codeSurfaceCommits} design-internal=${verdict.designInternalCommits} in-lock-window=${verdict.inLockWindowCommits} ac65-authorized=${verdict.ac65AuthorizedCommits} ruled-historical=${verdict.ruledHistoricalCommits} release-bump=${verdict.releaseBumpCommits} release-bump-not-evaluated=${verdict.releaseBumpNotEvaluatedCommits} unclassifiable=${unclassifiable.length}`);
+    console.log(`  denominator: total=${verdict.totalCommits} code-surface=${verdict.codeSurfaceCommits} design-internal=${verdict.designInternalCommits} in-lock-window=${verdict.inLockWindowCommits} ac65-authorized=${verdict.ac65AuthorizedCommits} ruled-historical=${verdict.ruledHistoricalCommits} release-bump=${verdict.releaseBumpCommits} release-bump-not-evaluated=${verdict.releaseBumpNotEvaluatedCommits} sanctioned-ref-move=${sanctionedRefMoveCommits} unclassifiable=${unclassifiable.length}`);
     console.log(`  release-bump sources: carrier-paths=${carrierPathsSet ? carrierPathsSet.size : "unreadable"} cut-parents=${cutParents ? cutParents.size : "unreadable"} (${releaseLedgerFile})`);
     console.log(`  classification: classified=${classified} total=${totalScanned} first-parent=${firstParentCommits} off-spine=${offSpineCommits ?? "n/a"} ratio=${totalScanned > 0 ? (classified / totalScanned).toFixed(4) : "n/a"}`);
     console.log(`  lock-window: evaluated=${lockSubEvaluated} (${lockSubReason})`);
     // ref-level 落地可见性（AC5/AC6）：⛔ 这几行只是读数，不参与 RED/GREEN 判定。
     console.log(`  ref-level landings (refMove): brackets=${refMoveIntroduced.length} non-forward=${nonForwardRefMoves.length}${refMoveIntroduced.length > REF_MOVE_READOUT_LIMIT ? ` (showing first ${REF_MOVE_READOUT_LIMIT})` : ""}`);
+    // sanctioned ref-level 落地（本仓通道声明的 `quay-ref-landing: …`）——**独立行**，⛔ 不并入上一行（第五次变假 AC4）。
+    console.log(`  sanctioned ref-level landings (quay-ref-landing): tips-on-spine=${sanctionedRefMoveCommits} brackets=${sanctionedRefMoveIntroduced.length}${sanctionedRefMoveIntroduced.length > REF_MOVE_READOUT_LIMIT ? ` (showing first ${REF_MOVE_READOUT_LIMIT})` : ""}`);
+    for (const rm of sanctionedRefMoveIntroduced.slice(0, REF_MOVE_READOUT_LIMIT)) {
+      console.log(`      SANCTIONED refMove tip=${rm.tip.slice(0, 10)} prev=${rm.prev.slice(0, 10)} introduced=${rm.introduced.length}`);
+      for (const it of rm.introduced) console.log(`        ${it.sha.slice(0, 10)} code-surface=${it.codeSurface}${it.codeSurface && it.files ? ` (${it.files.join(", ")})` : ""}`);
+    }
     for (const rm of refMoveIntroduced.slice(0, REF_MOVE_READOUT_LIMIT)) {
       console.log(`      refMove tip=${rm.tip.slice(0, 10)} prev=${rm.prev.slice(0, 10)} introduced=${rm.introduced.length}`);
       for (const it of rm.introduced) console.log(`        ${it.sha.slice(0, 10)} code-surface=${it.codeSurface}${it.codeSurface && it.files ? ` (${it.files.join(", ")})` : ""}`);

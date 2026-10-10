@@ -1330,12 +1330,23 @@ test("PURE classifyReflogAction — 结构判定：commit 前缀 ⇒ direct；�
   assert.equal(classifyReflogAction("branch: Created from HEAD"), "refMove", "git branch <新 b> <target> ⇒ 也只是指向已存在 commit");
   assert.equal(classifyReflogAction("reset: moving to 4f731764c5f394f5cc465b3f84053abeda3b7c48"), "refMove", "git reset --hard <sha>（b 已检出）");
   assert.equal(classifyReflogAction("fetch -q . f21c1721852fdd7857dbd7e4e354822d9d56061e:refs/heads/dst2: storing ref"), "refMove", "git fetch . <src>:<dst>");
+  // sanctionedRefMove：**本仓自己的落地通道**声明的保留前缀（第五次变假）。⛔ 不是 git 的 action 词——
+  // 是本仓生产者写的保留命名空间，负控见下（空 / 任意其它 -m 文本仍 unknown）。
+  assert.equal(classifyReflogAction("quay-ref-landing: fast-forward 1111111111111111111111111111111111111111 -> 2222222222222222222222222222222222222222"), "sanctionedRefMove", "integration-batch-merge ff CAS");
+  assert.equal(classifyReflogAction("quay-ref-landing: real-merge a -> b"), "sanctionedRefMove", "integration-batch-merge real-merge CAS");
+  assert.equal(classifyReflogAction("quay-ref-landing: downsync fast-forward"), "sanctionedRefMove", "sync-lag-check.sh downsync CAS");
   // unknown：读不懂的形 ⇒ fail-closed（⛔ 不与合格同形，硬规则③b）
   assert.equal(classifyReflogAction("rebase (finish): returning to refs/heads/develop"), "unknown");
   assert.equal(classifyReflogAction("checkout: moving from x to develop"), "unknown");
   assert.equal(classifyReflogAction("merge side: Merge made by the 'ort' strategy."), "unknown", "非 ff merge **创建**了 merge commit，但 action 形读不懂 ⇒ unknown（fail-closed，⛔ 不洗成 refMove）");
   assert.equal(classifyReflogAction("bogus-action-form"), "unknown", "任意 update-ref -m 文本（无 `前缀: rest` 形）");
   assert.equal(classifyReflogAction(""), "unknown", "git update-ref 无 -m ⇒ 空 gs");
+  // 负控（第五次变假 AC5）：保留前缀**不得**退化成「任何 -m 都放行」——只认那个具体前缀 ∧ 其余非空。
+  assert.equal(classifyReflogAction("quay-ref-landing"), "unknown", "只有前缀、无 `:` ⇒ ⛔ 不得放行");
+  assert.equal(classifyReflogAction("quay-ref-landing:"), "unknown", "前缀后其余为空 ⇒ ⛔ 不得放行");
+  assert.equal(classifyReflogAction("mutation-unknown-form"), "unknown", "任意其它 -m 文本 ⇒ 仍 unknown（负控核心）");
+  assert.equal(classifyReflogAction("Quay-Ref-Landing: x"), "unknown", "大小写不同 ⇒ 不认（保留前缀是精确的）");
+  assert.equal(classifyReflogAction("xquay-ref-landing: y"), "unknown", "前缀不在整串开头 ⇒ 不认");
   assert.equal(classifyReflogAction(null), "unknown");
   assert.equal(classifyReflogAction(undefined), "unknown");
 });
@@ -1422,6 +1433,27 @@ test("PURE buildRefMoveBrackets — refMoveTips + 括注对（T=tip, P=前一条
   ]);
   assert.ok(br.refMoveTips.has("dddddddddddddddddddddddddddddddddddddddd"), "branch: Reset to 是 refMove tip（旧 isReflogFanIn 判 false）");
   assert.deepEqual(br.brackets[0], { T: "dddddddddddddddddddddddddddddddddddddddd", P: "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee" });
+  // sanctionedRefMove（`quay-ref-landing: …`）：**分列**于 refMoveTips（⛔ 不并入——独立计数是 AC4 的读数），
+  // 但**同样**产括注（带入窗内的中间 commit 也要被覆盖，否则它们落 unclassifiable）。
+  const sc = buildRefMoveBrackets([
+    "1111111111111111111111111111111111111111\tquay-ref-landing: fast-forward a -> b",
+    "2222222222222222222222222222222222222222\tpush",
+    "3333333333333333333333333333333333333333\tcommit: direct",
+  ]);
+  assert.ok(sc.sanctionedRefMoveTips.has("1111111111111111111111111111111111111111"), "保留前缀 ⇒ sanctionedRefMoveTips");
+  assert.ok(!sc.refMoveTips.has("1111111111111111111111111111111111111111"), "⛔ sanctioned 不得并入 refMoveTips（分列是 AC4 的核心）");
+  assert.ok(sc.refMoveTips.has("2222222222222222222222222222222222222222"), "git 自己的 action 词仍进 refMoveTips");
+  assert.ok(!sc.sanctionedRefMoveTips.has("2222222222222222222222222222222222222222"), "⛔ refMove 不得混进 sanctionedRefMoveTips");
+  assert.equal(sc.brackets.length, 2, "两类都产括注（覆盖判定同效）");
+  assert.deepEqual(sc.brackets[0], { T: "1111111111111111111111111111111111111111", P: "2222222222222222222222222222222222222222" });
+  // 负控：空 / 任意其它 -m 文本仍 unknown ⇒ 不产任何 tip（⇒ 其 sha 落 unclassifiable，fail-closed）。
+  const scNeg = buildRefMoveBrackets([
+    "4444444444444444444444444444444444444444\t",
+    "5555555555555555555555555555555555555555\tquay-ref-landing",
+    "6666666666666666666666666666666666666666\tmutation-unknown-form",
+  ]);
+  assert.equal(scNeg.refMoveTips.size, 0, "空 / 只有前缀 / 任意文本都不得成为 refMove tip");
+  assert.equal(scNeg.sanctionedRefMoveTips.size, 0, "空 / 只有前缀 / 任意文本都不得成为 sanctionedRefMove tip");
   // 读不懂的形不产 tip（⇒ 其 sha 落进 unclassifiable，fail-closed）；夹在中间的 unknown 形仍然充当
   // 后一条 refMove 的 P（括注 P = 前一条 reflog 条目，不要求它自己是 refMove）。
   const unk = buildRefMoveBrackets([
@@ -2114,6 +2146,96 @@ test("AC5 CLI — 词表外 fetch 后缀（`pruned`）落在**真实 reflog 行*
     assert.equal(out.denominator.totalDirectCommits, 0);
   } finally {
     cleanup(dir);
+  }
+});
+
+// ── 第五次变假：本仓自己通道的裸 `git update-ref`（空 reflog action）─────────────────────────────
+// （tasks/gap-ac194-empty-reflog-action-from-message-less-update-ref）
+// 缺口：`integration-batch-merge.ts` 的 real-merge/ff CAS 与 `sync-lag-check.sh` 的 downsync 用**裸
+// `git update-ref`（无 -m）** 移动 develop ⇒ reflog action 为空 ⇒ `(empty)` ⇒ unknown ⇒ unclassifiable
+// ⇒ 判据 NOT-EVALUATED（exit 3）⇒ AC-194 恒 fail。修法 = 生产者补保留前缀 `-m`（AC3）+ checker 给该前缀
+// 一个结构分类 sanctionedRefMove（AC4）。⛔ 空 / 任意其它 `-m` 文本仍 fail-closed（AC5 负控）。
+// 探针实测原文（git 2.43.0）：`git update-ref <ref> <new> <old>`（无 -m）⇒ `%gs` 为空串。
+
+test("AC4 CLI — 本仓通道声明的 `quay-ref-landing: …` 落地代码面 ⇒ GREEN 且**独立计数**（sanctionedRefMoveCommits / sanctionedRefMoveIntroduced，⛔ 不并入 refMove）", () => {
+  const { dir, base } = makeForkedDevelopRepo("cli-sanctioned");
+  try {
+    const tip = commitCodeSurface(dir, "sanctioned.ts");
+    gitCmd(dir, "checkout", "-q", "--detach"); // develop 不再被检出 ⇒ update-ref 可写 develop ref
+    const old = gitCmd(dir, "rev-parse", "develop").stdout.trim();
+    // 与 integration-batch-merge.ts:1165/:1281 同形的保留前缀（CAS：expected old value 仍在第 4 位置）。
+    const ur = gitCmd(dir, "update-ref", "-m", `quay-ref-landing: fast-forward ${old} -> ${tip}`, "refs/heads/develop", tip, old);
+    assert.equal(ur.status, 0, `git update-ref -m 应成功: ${ur.stderr}`);
+    const reflog = gitCmd(dir, "reflog", "show", "develop", "--format=%gs").stdout;
+    assert.match(reflog, /^quay-ref-landing: fast-forward /m, `夹具必须产出保留前缀的真实 reflog 行: ${reflog}`);
+
+    const r = runChecker(["--root", dir, "--develop", "develop", "--baseline", base]);
+    assert.equal(r.status, 0, `sanctioned ref-level 落地不创建 commit ⇒ 不得判直投/NOT-EVALUATED: ${r.stdout}${r.stderr}`);
+    const out = jsonOut(r);
+    assert.equal(out.evaluated, true, "保留前缀 ⇒ 可分类（⛔ 不再 unclassifiable）");
+    assert.equal(out.ok, true);
+    assert.equal(out.unclassifiableCommits, 0, "sanctioned tip 不再落 unclassifiable（裸 update-ref 时恒落——这正是本任务）");
+    assert.equal(out.classification.ratio, 1, "全部 first-parent 提交可分类");
+    assert.equal(out.classification.unclassifiedActionForms.length, 0, "⛔ 不得被点名为「读不懂的 action 形」");
+    // 独立计数（AC4 核心）：sanctioned 与 refMove **分列**。
+    assert.equal(out.denominator.sanctionedRefMoveCommits, 1, "窗内 spine 上有 1 条 sanctioned tip（独立计数）");
+    assert.equal(out.classification.sanctionedRefMoveIntroducedTotal, 1);
+    assert.equal(out.classification.sanctionedRefMoveIntroduced[0].tip, tip);
+    assert.deepEqual(out.classification.sanctionedRefMoveIntroduced[0].introduced.map((i) => i.sha), [tip]);
+    assert.equal(out.classification.sanctionedRefMoveIntroduced[0].introduced[0].codeSurface, true, "plugin/scripts/sanctioned.ts 是 code-surface（可见）");
+    assert.equal(out.classification.refMoveIntroducedTotal, 0, "⛔ sanctioned 不得并入 refMove 读数");
+    assert.equal(out.denominator.totalDirectCommits, 0, "⛔ sanctioned 不得计入直投分母/fan-in 计数");
+    assert.equal(out.denominator.codeSurfaceCommits, 0);
+  } finally {
+    cleanup(dir);
+  }
+});
+
+test("AC5 CLI 负控 — 裸 `git update-ref`（空 action）/ 任意其它 `-m` 文本 ⇒ 仍 NOT-EVALUATED（exit 3，reason 点名该形）", () => {
+  // (a) 空 action：git update-ref **无 -m**（本任务要修的失败形态本身）——⛔ 不得被判 sanctionedRefMove。
+  {
+    const { dir, base } = makeForkedDevelopRepo("cli-emptyform");
+    try {
+      const tip = commitCodeSurface(dir, "emptyform.ts");
+      gitCmd(dir, "checkout", "-q", "--detach");
+      const old = gitCmd(dir, "rev-parse", "develop").stdout.trim();
+      const ur = gitCmd(dir, "update-ref", "refs/heads/develop", tip, old); // 无 -m ⇒ 空 gs
+      assert.equal(ur.status, 0, `裸 git update-ref 应成功: ${ur.stderr}`);
+      const reflog = gitCmd(dir, "reflog", "show", "develop", "--format=%h [%gs]").stdout;
+      assert.match(reflog, /^\S+ \[\](?:\n|$)/m, `夹具必须产出空 action 的真实 reflog 行: ${reflog}`);
+
+      const r = runChecker(["--root", dir, "--develop", "develop", "--baseline", base]);
+      assert.equal(r.status, 3, `空 action 必须 NOT-EVALUATED exit 3（⛔ 不得 fail-open 成合格）: ${r.stdout}${r.stderr}`);
+      const out = jsonOut(r);
+      assert.equal(out.evaluated, false, "硬规则③b：读不懂 ≠ 合格");
+      assert.equal(out.ok, true);
+      assert.equal(out.reason, "unsupported-reflog-action: (empty)", "reason 必须逐字点名 `(empty)`");
+      assert.equal(out.reasonSecondary, "unclassifiable-commits-in-range");
+      assert.equal(out.denominator.sanctionedRefMoveCommits, 0, "⛔ 空 action 不得被算作 sanctioned 落地");
+      assert.equal(out.classification.sanctionedRefMoveIntroducedTotal, 0);
+    } finally {
+      cleanup(dir);
+    }
+  }
+  // (b) 任意其它 `-m` 文本（不是保留前缀）⇒ 仍 NOT-EVALUATED，reason 逐字点名该形（保留前缀**未**退化成白名单）。
+  {
+    const { dir, base } = makeForkedDevelopRepo("cli-arbitraryform");
+    try {
+      const tip = commitCodeSurface(dir, "arbitraryform.ts");
+      gitCmd(dir, "checkout", "-q", "--detach");
+      const old = gitCmd(dir, "rev-parse", "develop").stdout.trim();
+      const ur = gitCmd(dir, "update-ref", "-m", "quay-ref-landing", "refs/heads/develop", tip, old); // 只有前缀、无 `: …`
+      assert.equal(ur.status, 0, `git update-ref -m 应成功: ${ur.stderr}`);
+
+      const r = runChecker(["--root", dir, "--develop", "develop", "--baseline", base]);
+      assert.equal(r.status, 3, `只有保留前缀而无其余部分 ⇒ 仍 NOT-EVALUATED（⛔ 不得放行）: ${r.stdout}${r.stderr}`);
+      const out = jsonOut(r);
+      assert.equal(out.evaluated, false);
+      assert.equal(out.reason, "unsupported-reflog-action: quay-ref-landing", "reason 逐字点名该形");
+      assert.equal(out.denominator.sanctionedRefMoveCommits, 0, "⛔ 不得算作 sanctioned 落地");
+    } finally {
+      cleanup(dir);
+    }
   }
 });
 

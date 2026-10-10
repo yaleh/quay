@@ -159,12 +159,17 @@ if [ "${mode}" = "pull" ]; then
   fi
 
   # Strictly behind: fast-forward local <branch> to origin/<branch>.
+  # `-m` carries the RESERVED `quay-ref-landing: …` form the direct-to-develop bypass checker classifies
+  # structurally (classifyReflogAction ⇒ "sanctionedRefMove"). A bare `update-ref` writes an EMPTY reflog
+  # action the checker cannot tell apart from a hand-rolled direct landing ⇒ NOT-EVALUATED (exit 3) ⇒ AC-194
+  # fail (tasks/gap-ac194-empty-reflog-action-from-message-less-update-ref). No CAS old-value here (this is
+  # a strict fast-forward of a local branch, ref-level only; the caller verified behind>0 ∧ unpushed==0).
   origin_tip="$(git -C "${repo_root}" rev-parse "refs/remotes/${remote}/${branch}" 2>/dev/null || true)"
   if [ -z "${origin_tip}" ]; then
     echo "sync-lag-check: --pull cannot resolve origin/${branch} tip; nothing moved" >&2
     exit 1
   fi
-  if ! git -C "${repo_root}" update-ref "refs/heads/${branch}" "${origin_tip}"; then
+  if ! git -C "${repo_root}" update-ref -m "quay-ref-landing: downsync fast-forward" "refs/heads/${branch}" "${origin_tip}"; then
     echo "sync-lag-check: --pull fast-forward FAILED — local ${branch} not updated; nothing moved" >&2
     exit 1
   fi
