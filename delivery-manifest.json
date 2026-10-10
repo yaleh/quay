@@ -25,6 +25,7 @@
     { "name": "gate", "kind": "cli-command", "sourceRef": "packages/quay/bin/quay.ts:dispatch", "verifiedBy": "packages/quay/test/cli.test.mjs" },
     { "name": "gate-log", "kind": "cli-command", "sourceRef": "packages/quay/bin/quay.ts:dispatch", "verifiedBy": "packages/quay/test/cli.test.mjs" },
     { "name": "goal", "kind": "cli-command", "sourceRef": "packages/quay/bin/quay.ts:dispatch", "verifiedBy": "packages/quay/test/cli.test.mjs" },
+    { "name": "lanes", "kind": "cli-command", "sourceRef": "packages/quay/bin/quay.ts:dispatch", "verifiedBy": "packages/quay/test/lanes-cli.test.mjs" },
     { "name": "init", "kind": "cli-command", "sourceRef": "packages/quay/bin/quay.ts:dispatch", "verifiedBy": "packages/quay/test/cli.test.mjs" },
     { "name": "manager", "kind": "cli-command", "sourceRef": "packages/quay/bin/quay.ts:dispatch", "verifiedBy": "packages/quay/test/cli.test.mjs" },
     { "name": "mcp", "kind": "cli-command", "sourceRef": "packages/quay/bin/quay.ts:dispatch", "verifiedBy": "packages/quay/test/cli.test.mjs" },
