@@ -6,8 +6,8 @@ title: WorkerPool needs-human
   误标两个真实缺陷（Driver/Routine/WorkerPool OOD 重构第二阶段，候选①）
 status: draft
 kind: goal
-origin: 继 GOAL-030~034 后第二阶段：用户 2026-10-10 明确批准，要求脱离纯 import/SCC 清理，审查 Driver
-  生命周期/状态归属、Routine、WorkerPool、声明式 quota + 独立 Policy/Gate 的真实 OOD 候选
+origin: 继 GOAL-030~034 后第二阶段
+branch: true
 ---
 ## 背景
 
