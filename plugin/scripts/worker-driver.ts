@@ -192,7 +192,7 @@ export {
 // AC152：派发前过滤的【可组合谓词列表】单一实现（driver-filters.ts）。worker 的派发环消费
 // applyTaskFilters（函数级复用，⛔ 不各写一遍）。readTaskStatus 亦上收到 driver-filters.ts，
 // 本文件 re-export 保持旧 import 面（worker-driver.test.mjs / computeLandingState 等）。
-import { applyTaskFilters, makeFilterContext, readTaskStatus, advanceRetryCap, applyNeedsHumanTransition, reconcileNeedsHumanWithDisk, RETRY_CAP_DEFAULT, lastExitedNotLandedReason, exitedNotLandedAttempts, formatExitedNotLandedReason, syncDocDevelopBidirectional, WORKER_OUTCOME_REL, type RetryState, type ExitedNotLandedAttempt, type NeedsHumanKind } from "./driver-filters.ts";
+import { applyTaskFilters, makeFilterContext, computeDispatchExclusion, readTaskStatus, advanceRetryCap, applyNeedsHumanTransition, reconcileNeedsHumanWithDisk, RETRY_CAP_DEFAULT, lastExitedNotLandedReason, exitedNotLandedAttempts, formatExitedNotLandedReason, syncDocDevelopBidirectional, WORKER_OUTCOME_REL, type RetryState, type ExitedNotLandedAttempt, type NeedsHumanKind } from "./driver-filters.ts";
 export { readTaskStatus, lastExitedNotLandedReason, exitedNotLandedAttempts, WORKER_OUTCOME_REL } from "./driver-filters.ts";
 // AC155：并发 cap / 轮询间隔 / 协调地板的单一真相源（drivers.yml 经 driver-config 加载，⛔ 不各写一份字面量、
 // ⛔ 不再读 QUAY_MAX_TASK_SUBAGENTS env——env 源已并入声明式配置）。
@@ -5737,7 +5737,11 @@ export async function runResidentLoop(opts: ResidentOptions): Promise<number> {
           break;
         }
         step = "ready-pool";
-        const pool = await readyPoolCheck(rootDir, readyPoolArgv, inFlightTasks(), cap);
+        // GOAL-036：本轮 {inFlight, retryExhausted} 只算【一次】，两个消费者（下面的 ready-pool 与
+        // apply-filters 步）读同一份轮起点快照——⛔ 不再各自独立重算（两处重算之间夹着 await 的
+        // readyPoolCheck 子进程调用，期间 running/coldInflight 变动会让两次读数不一致）。
+        const exclusion = computeDispatchExclusion(running, coldInflight, retryState);
+        const pool = await readyPoolCheck(rootDir, readyPoolArgv, exclusion.inFlight, cap);
         poolSeen = pool.pool;
         const shuffled = shuffle(pool.ready);
         // AC152：派发前过滤消费 driver-filters.ts 的【可组合谓词列表】（notInFlight / depsSatisfied /
@@ -5750,7 +5754,7 @@ export async function runResidentLoop(opts: ResidentOptions): Promise<number> {
         // 与「真快速死亡退避」区分成两个独立 stop_reason 字面量——⛔ 共用 backoff 字面量会把「3 任务全进
         // needsHuman 集、无一次 <60s 快速死亡」误报成退避（硬规则 3b 同形：成因错归则下游改错）。
         step = "apply-filters";
-        const afterTaskFilters = applyTaskFilters(shuffled, makeFilterContext(rootDir, { inFlight: inFlightTasks(), retryExhausted: retryState.needsHuman }));
+        const afterTaskFilters = applyTaskFilters(shuffled, makeFilterContext(rootDir, { inFlight: exclusion.inFlight, retryExhausted: exclusion.retryExhausted }));
         const candidates = afterTaskFilters
           // 快速死亡退避（gap-worker-driver-selector-api-error-no-backoff，AC2）：退避中的 task（backoffUntil
           // 未到）本轮不派——⛔ 只滤掉退避的 task，不滤掉别的候选（退避按 task 记，不全局）。now 每候选

@@ -53,6 +53,25 @@ export function makeFilterContext(
   return { root, inFlight: [], retryExhausted: new Set(), ...overrides };
 }
 
+/** GOAL-036：一轮派发里 {inFlight, retryExhausted} 的【单一计算点】。纯函数——只读入参、无 I/O、无
+ *  await，输入相同必得相同输出（determinism）。抽出的原因：worker-driver 的驻留环里两个消费者
+ *  （ready-pool 与 apply-filters）原本各自独立调用 `inFlightTasks()`，两调用间夹着一个 `await`
+ *  （readyPoolCheck 是异步子进程调用），该窗口内 running/coldInflight 变动 ⇒ 同轮的两次读数可能
+ *  不一致，尽管两者本应看到同一份【轮起点快照】。
+ *  ⛔ 只覆盖 {inFlight, retryExhausted}：backoff（isBackedOff + Date.now()）【不在】本函数内——它必须
+ *  按候选、在过滤那一刻取【新鲜】的 Date.now()，预计算进轮起点快照会复活已修的
+ *  gap-worker-driver-selector-api-error-no-backoff AC2。 */
+export function computeDispatchExclusion(
+  running: { task: string }[],
+  coldInflight: Set<string>,
+  retryState: RetryState,
+): { inFlight: string[]; retryExhausted: Set<string> } {
+  return {
+    inFlight: running.map((r) => r.task).concat([...coldInflight]),
+    retryExhausted: retryState.needsHuman,
+  };
+}
+
 /** 一个可组合过滤谓词。`predicate(ctx)` 从上下文构造 `(id) => boolean`（一次构造、逐候选判定），
  *  `true` = 保留该候选，`false` = 滤掉。 */
 export interface TaskFilter {

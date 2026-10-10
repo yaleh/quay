@@ -464,8 +464,9 @@ export function findRuledHistoricalEntry(sha, table = RULED_HISTORICAL_COMMITS) 
 // 修法 = 一个**结构判定**的直投类别（谓词式，⛔ 非 sha 表），形态对齐既有 `ac65Authorized`：分类可见 +
 //   独立计数（进 denominator，输出行可区分于 AC65-AUTHORIZED / RULED-HISTORICAL），⛔ 非静默掩盖。
 //   三条**相互独立、可机核**的事实合取（任一不成立仍 RED——负控能取假）：
-//     ① subject 命中 release-cut 生成器的唯一字面模板（`release-cut.mjs:516` 是唯一生成处：
-//        `release: bump version to ${nextVersion} after ${tag} (SPEC §12: VERSION + stamp + closure-ratchet re-anchor)`）；
+//     ① subject 命中 release-cut 生成器的唯一字面模板（`release-cut.mjs:659` 是唯一生成处：
+//        `release: bump version to ${nextVersion} after ${tag} (SPEC §12: VERSION + stamp)`；退役前的
+//        `+ closure-ratchet re-anchor` 后缀自 2026-10-07 起被 regex 容为可选——见 RELEASE_BUMP_SUBJECT_RE 注释）；
 //     ② 该提交是 `.quay/release-branch-finish.jsonl` 中一条 `form:"cut"` ∧ `base:<develop>` 记录的
 //        **直接子提交**（parent == 该记录的 sha）——即它确实紧跟一次落痕在案的切版；
 //     ③ 它触及的 **code-surface 文件集 ⊆ 版本载体集**（从单源 `scripts/version-carriers.ts` 派生，
@@ -474,12 +475,20 @@ export function findRuledHistoricalEntry(sha, table = RULED_HISTORICAL_COMMITS) 
 //     ⛔ 不用「往 ruled 表再加一行」收尾。
 
 /**
- * release-cut 的 step-5 bump subject 模板（`release-cut.mjs:516` 的唯一生成处逐字转写）。
+ * release-cut 的 step-5 bump subject 模板（`release-cut.mjs:659` 的唯一生成处逐字转写）。
  * `nextVersion` 是 `X.(Y+1).0`（裸 semver），`tag` 是 `vX.Y.Z`——两处都容许可选的 prerelease 后缀以
  * 不被生成器的未来小改动绊倒，但整串必须锚定在字面模板上（否则「只匹配标题」的放行形可被随意伪造）。
+ *
+ * ⚠️ 尾部的 `+ closure-ratchet re-anchor` 后缀自 2026-10-07 起**可选**（而非被删除）：`e0279c77a0`
+ * （closure ratchet 随 `quay-init-closure-ratchet.ts` 整体退役，`release-cut.mjs:631` 明记该 re-anchor
+ * 「GONE with the ratchet itself」）把生成器模板由 `(SPEC §12: VERSION + stamp + closure-ratchet re-anchor)`
+ * 收窄为 `(SPEC §12: VERSION + stamp)`，但本 regex 当时未同步 ⇒ 此后每次切版的 bump 提交都不命中谓词①
+ * ⇒ 被判 `direct-commit-bypasses-fan-in`（AC-194 第五次变假；2026-10-11 由 0.20.0 bump `8cb36c2` 触发，
+ * 使全量 suite 对**每个**任务的 fan-in 恒红）。保留为**可选**而非直接删除：扫描窗 `develop~100` 可跨越
+ * 10-07 这条退役线，窗口内两侧模板都必须能被识别。
  */
 export const RELEASE_BUMP_SUBJECT_RE =
-  /^release: bump version to \d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)? after v\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)? \(SPEC §12: VERSION \+ stamp \+ closure-ratchet re-anchor\)$/;
+  /^release: bump version to \d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)? after v\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)? \(SPEC §12: VERSION \+ stamp(?: \+ closure-ratchet re-anchor)?\)$/;
 
 /**
  * 从 `.quay/release-branch-finish.jsonl` 记录集中取「cut 落地 commit」sha 集（`form:"cut"` ∧ `base` 匹配）。

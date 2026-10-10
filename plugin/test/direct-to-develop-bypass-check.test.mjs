@@ -724,6 +724,10 @@ test("AC2 回放·CLI — b67a91cf exit 0（ruledHistorical 可见 + README.md �
 // **变异检验**（AC5）：把谓词临时改回「只匹配 subject 字符串」（丢掉 ②/③）⇒ 下面的负控断言必须变红。
 
 const RELEASE_BUMP_SUBJECT =
+  "release: bump version to 0.14.0 after v0.13.0 (SPEC §12: VERSION + stamp)";
+/** 退役前的模板（`+ closure-ratchet re-anchor` 后缀）——`e0279c77a0`（2026-10-07）随 closure ratchet 退役把
+ *  生成器模板收窄为上面那份（见 checker 的 RELEASE_BUMP_SUBJECT_RE 注释）。扫描窗可跨该退役线 ⇒ 两侧都须识别。 */
+const RELEASE_BUMP_SUBJECT_RETIRED =
   "release: bump version to 0.14.0 after v0.13.0 (SPEC §12: VERSION + stamp + closure-ratchet re-anchor)";
 const RELEASE_BUMP_CUT_SHA = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
 /** 载体集 fixture —— 与 `scripts/version-carriers.ts` 的 versionBearingPaths() 同形（10 载体 + 源）。
@@ -743,16 +747,21 @@ const RELEASE_BUMP_CARRIERS = new Set([
 ]);
 const RELEASE_BUMP_CTX = { carrierPaths: RELEASE_BUMP_CARRIERS, cutParents: new Set([RELEASE_BUMP_CUT_SHA]) };
 
-test("PURE RELEASE_BUMP_SUBJECT_RE — 命中生成器唯一模板；近似形不命中（只认字面模板）", () => {
-  assert.equal(RELEASE_BUMP_SUBJECT_RE.test(RELEASE_BUMP_SUBJECT), true);
+test("PURE RELEASE_BUMP_SUBJECT_RE — 命中生成器当前模板（并容忍退役前的后缀形）；近似形不命中（只认字面模板）", () => {
+  assert.equal(RELEASE_BUMP_SUBJECT_RE.test(RELEASE_BUMP_SUBJECT), true, "当前生产模板 (SPEC §12: VERSION + stamp)");
   assert.equal(
-    RELEASE_BUMP_SUBJECT_RE.test("release: bump version to 0.14.0-dev after v0.13.0 (SPEC §12: VERSION + stamp + closure-ratchet re-anchor)"),
+    RELEASE_BUMP_SUBJECT_RE.test(RELEASE_BUMP_SUBJECT_RETIRED),
+    true,
+    "退役前的 + closure-ratchet re-anchor 后缀形仍被容忍（扫描窗可跨越 2026-10-07 退役线）",
+  );
+  assert.equal(
+    RELEASE_BUMP_SUBJECT_RE.test("release: bump version to 0.14.0-dev after v0.13.0 (SPEC §12: VERSION + stamp)"),
     true,
     "可选 prerelease 后缀被容忍（生成器未来小改动不绊倒）",
   );
   assert.equal(RELEASE_BUMP_SUBJECT_RE.test("release: bump version"), false);
   assert.equal(RELEASE_BUMP_SUBJECT_RE.test(`${RELEASE_BUMP_SUBJECT} and more`), false, "整串锚定（尾随内容不放过）");
-  assert.equal(RELEASE_BUMP_SUBJECT_RE.test("release: bump version to 0.14.0 after 0.13.0 (SPEC §12: VERSION + stamp + closure-ratchet re-anchor)"), false, "tag 缺 v 前缀");
+  assert.equal(RELEASE_BUMP_SUBJECT_RE.test("release: bump version to 0.14.0 after 0.13.0 (SPEC §12: VERSION + stamp)"), false, "tag 缺 v 前缀");
 });
 
 test("PURE extractCutParents — 只认 form:'cut' ∧ base 匹配；其余 form / 他 base / 非法 sha 形状都排除", () => {
