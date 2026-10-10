@@ -18,6 +18,11 @@ on:
         required: false
         type: boolean
         default: false
+      build_ref:
+        description: "Ref the verify-plugin-channel-assertions job builds the artifact from (empty = the dispatched ref)"
+        required: false
+        type: string
+        default: ""
 
 jobs:
   test:
@@ -426,6 +431,12 @@ jobs:
     steps:
       - uses: actions/checkout@v4
         with:
+          # `build_ref` (optional) makes the artifact come from a DIFFERENT ref than the one whose
+          # ci.yml is running — the whole point of the input, since WHICH ref the gate is fed is an
+          # OPEN QUESTION of this job's task: `version-consistency` demands a non-`-dev` version and
+          # only a `release/*`-form ref yields one. ⛔ The input does NOT relax any assertion; it
+          # changes the ARTIFACT under test. Empty ⇒ the dispatched ref.
+          ref: ${{ inputs.build_ref || github.ref }}
           # publish-dist-branch.sh creates an orphan branch + a throwaway worktree off HEAD and
           # reads the whole tree; a shallow clone cannot serve that.
           fetch-depth: 0
