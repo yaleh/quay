@@ -57,3 +57,17 @@ extra: {}
 
 - 起点分支 `task/gap-release-channel-assertions-periodic-ci-and-controls`（= `0440ba0dd`）已携带 P3 的可派发 job；本任务从它继续。
 - 与 `gap-release-workflow-definition-lags-one-release` 的关系：该条负责 P1（dispatch 带 `--ref`）+ P2（preflight 打印将生效的定义并拒绝漂移），并把 **AC1 的裁定**（`--ref` 默认 `tag`）记录在案；本条负责 P3。
+
+## 迁入的 AC4（整体迁入，逐字）
+
+以下两段都是**原任务** `gap-release-workflow-definition-lags-one-release` 上 AC4 的逐字形态，按人 yale 2026-10-10 裁定 ③ 整体迁入本条。以 `> ` 引用以免被当成勾选框计入。
+
+**（a）原字面形态** —— 经证伪为**结构上不可满足**（该门要求非 `-dev` 产物，而 develop 产物必为 `-dev`）：
+
+> - [ ] AC4: `verify-plugin-channel-assertions` 在 develop 上被 CI 定期执行（正控制：一次成功运行；负控制：注入一个必失败断言，CI 必须变红）
+
+**（b）另一会话 2026-10-10 15:32 的就地改写形态**（即裁定选项①；**人 yale 未采纳**，且其「构建所用 ref 作为开放项」一句与本裁定冲突）：
+
+> - [ ] AC4（2026-10-10 改写）：CI 侧存在一条**可显式触发**的 `verify-plugin-channel-assertions` 接线（workflow 文件 + `workflow_dispatch`），且其**真实运行的读数被如实记录**（pass 或 fail 皆算达成，但必须是真实运行产出，⛔ 不是 fixture 回声）；负控制：注入一条必失败断言时该 job 必须变红。⛔ 构建所用 ref 作为**开放项**记录，不在本 AC 内裁定；⛔ 不得为使它变绿而放宽任何判据。
+
+**人 yale 2026-10-10 裁定**：采用**选项③**（迁移），并**否定**①把「构建所用 ref」留作开放项 —— 该 ref 已裁定为 **`tag`**（把门绑在目标发行产物上，用来验证目标发行产物）；`develop` 只用于工作流定义的**静态/预验证**；**不得把 `-dev` 当正式发布**。故本任务上面的 AC1–AC6 是 AC4 的**加强形态**，裁定要求保留的四项（正控制/负控制、拟发布 ref 的产物一致性、`release.yml` job 去重决策、可复现验收）一个不少，其中产物一致性落在 AC3、去重决策落在 AC4、可复现验收落在 AC5。
