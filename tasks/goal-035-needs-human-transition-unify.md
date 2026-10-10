@@ -126,3 +126,11 @@ No AC-356-satisfying implementation exists; this task cannot land until AC-356's
 - plugin/scripts/worker-driver.ts
 - plugin/test/driver-filters.test.mjs
 - tasks/goal-035-needs-human-transition-unify.md
+
+## Blocker
+
+**2026-10-10T10:21:22.997Z — worker 未落地（exited-not-landed）**
+
+- 未落地原因：AC 未全勾（AC/DoD 段缺失或无法识别，无法评估 ≠ 合格）——续做需补齐并勾选 AC
+- run_id：wk-prod-anchor
+- session_id：232c5502-5cf2-4e91-8429-88854aaaf087
