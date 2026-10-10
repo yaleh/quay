@@ -1,7 +1,7 @@
 ---
 id: goal-034-merge-and-postmerge-verify
 title: GOAL-034 ③：人工合并请求 + 机械 fan-in + 并入形态与落地树核验（AC-355，post-merge）
-status: todo
+status: ready
 labels:
   - gap
 parent: null
