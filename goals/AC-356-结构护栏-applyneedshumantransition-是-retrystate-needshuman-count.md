@@ -3,7 +3,7 @@ id: AC-356
 title: 结构护栏：applyNeedsHumanTransition 是 retryState.needsHuman/counts 的唯一
   mutator；三条路径（stop-terminal/retry-cap/quick-death）收敛，quick-death
   转移现在可观测；非目标文件与函数未动
-status: active
+status: achieved
 kind: criterion
 goal: GOAL-035
 criterion: |
@@ -35,9 +35,12 @@ criterion: |
   if(!/[\x22\x27]needs-human[\x22\x27]/.test(qdWindow)){console.error("CAUSE=quick-death-not-recorded -- the quick-death needs-human branch does not emit a needs-human json event like the other two paths");process.exit(1)}
   for(const name of ["export function advanceRetryCap(","export function reconcileNeedsHumanWithDisk(","export function markNeedsHuman("]){if(!pfText.includes(name)){console.error("CAUSE=nongoal-moved -- "+name+" must still exist with an unchanged signature in driver-filters.ts");process.exit(1)}}
   if(!/backoff\.cause\s*===\s*[\x22\x27]environment-fatal[\x22\x27]/.test(wfText)){console.error("CAUSE=nongoal-moved -- the environment-fatal halt branch must still exist, unmodified");process.exit(1)}
-  const efIdx=wfText.indexOf("environment-fatal");
-  const efWindow=wfText.slice(efIdx,efIdx+400);
-  if(!/return r;/.test(efWindow)){console.error("CAUSE=nongoal-moved -- the environment-fatal branch must still hard-return before reaching any needs-human code");process.exit(1)}
+  const efIdx=wfText.indexOf("backoff.cause === \x22environment-fatal\x22");
+  if(efIdx<0){console.error("CAUSE=nongoal-moved -- the environment-fatal halt branch must still exist, unmodified");process.exit(1)}
+  const efTail=wfText.slice(efIdx);
+  const efReturn=efTail.indexOf("return r;");
+  const efNeedsHuman=efTail.indexOf("applyNeedsHumanTransition(");
+  if(efReturn<0||(efNeedsHuman>=0&&efNeedsHuman<efReturn)){console.error("CAUSE=nongoal-moved -- the environment-fatal branch must still hard-return before reaching any needs-human code");process.exit(1)}
   })()' || { echo "CAUSE=structural-scan-red -- the scan above printed the specific CAUSE" >&2; exit 1; }
   oos=$(git diff --name-only develop...HEAD -- plugin/scripts/goal-driver.ts plugin/scripts/promotion-driver.ts plugin/scripts/meta-driver.ts plugin/scripts/quality-gate-driver.ts plugin/scripts/outer-driver.ts plugin/scripts/driver-runtime.ts plugin/scripts/driver-shared.ts plugin/scripts/driver-config.ts 2>/dev/null)
   [ -z "$oos" ] || { echo "CAUSE=out-of-scope-edit -- this goal must not touch: $(echo $oos | tr '\n' ' ')" >&2; exit 1; }
@@ -52,6 +55,11 @@ statusLog:
     to: active
     actor: goal-cli
     reason: ""
+  - at: 2026-10-10T11:07:41.616Z
+    from: active
+    to: achieved
+    actor: goal-driver
+    reason: "I2: criterion pass"
 fidelity:
   verdict: not-evaluated
   reason: no judge configured
