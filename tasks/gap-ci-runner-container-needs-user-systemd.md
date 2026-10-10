@@ -57,10 +57,10 @@ CI runner 容器（`gh-runner-quay`，由 systemd **user** unit `~/.config/syste
 
 ## AC
 
-- [ ] AC1 **从 develop 重建** `.github/runner/Dockerfile` 后，容器内下列读数**全部成立**（⛔ 必须在 develop 的定义上验，不是在已修分支上验）：`systemd-run --user --scope --quiet -p OOMPolicy=continue -p MemoryAccounting=yes --unit=quay-anchor-probe true` 原样 exit 0；`systemd-run --user --scope --quiet -p MemoryAccounting=yes true` exit 0；`systemctl is-active user@0.service` = active；`/opt/hostedtoolcache/node/*/x64.complete` 存在；runner 进程环境里 `RUNNER_TOOL_CACHE=/opt/hostedtoolcache` 且 `HOME` 非空；某 scope 的 `/proc/<pid>/cgroup` 以 `user@0.service/quay-*.scope` 结尾。
-- [ ] AC2 这四条前置在**构建期**被断言（而不是留给未来的 job）：镜像 build 失败要比"镜像少一个前置、job 里以环境形状的测试失败冒出来"先发生。现有 `RUNNER python3 -c 'import yaml…' && command -v tmux/pgrep/ps` 那一组是模板，补齐等价断言。
-- [ ] AC3 已知坑写进镜像定义的注释：至少含 `ENTRYPOINT` 必须覆盖（base 的 `ENTRYPOINT ["/entrypoint.sh"]` 会把 systemd 当参数吞掉）、`ExecStart` 必须带 runner 命令参数（`/entrypoint.sh` 结尾是 `gosu runner "$@"`）且 `WorkingDirectory=/actions-runner`、`XDG_RUNTIME_DIR` 必须在 `/actions-runner/.env` 里（unit 的 `Environment=` 到不了 runner 进程）。
-- [ ] AC4 复核者不会被假阴性误导：注释里写明**裸 `docker exec … systemd-run --user …` 必然失败、必须带 `-e XDG_RUNTIME_DIR=/run/user/0`** 才能复现服务真实环境（本仓已有两个会话各自踩过一次）。
+- [x] AC1 **从 develop 重建** `.github/runner/Dockerfile` 后，容器内下列读数**全部成立**（⛔ 必须在 develop 的定义上验，不是在已修分支上验）：`systemd-run --user --scope --quiet -p OOMPolicy=continue -p MemoryAccounting=yes --unit=quay-anchor-probe true` 原样 exit 0；`systemd-run --user --scope --quiet -p MemoryAccounting=yes true` exit 0；`systemctl is-active user@0.service` = active；`/opt/hostedtoolcache/node/*/x64.complete` 存在；runner 进程环境里 `RUNNER_TOOL_CACHE=/opt/hostedtoolcache` 且 `HOME` 非空；某 scope 的 `/proc/<pid>/cgroup` 以 `user@0.service/quay-*.scope` 结尾。
+- [x] AC2 这四条前置在**构建期**被断言（而不是留给未来的 job）：镜像 build 失败要比"镜像少一个前置、job 里以环境形状的测试失败冒出来"先发生。现有 `RUNNER python3 -c 'import yaml…' && command -v tmux/pgrep/ps` 那一组是模板，补齐等价断言。
+- [x] AC3 已知坑写进镜像定义的注释：至少含 `ENTRYPOINT` 必须覆盖（base 的 `ENTRYPOINT ["/entrypoint.sh"]` 会把 systemd 当参数吞掉）、`ExecStart` 必须带 runner 命令参数（`/entrypoint.sh` 结尾是 `gosu runner "$@"`）且 `WorkingDirectory=/actions-runner`、`XDG_RUNTIME_DIR` 必须在 `/actions-runner/.env` 里（unit 的 `Environment=` 到不了 runner 进程）。
+- [x] AC4 复核者不会被假阴性误导：注释里写明**裸 `docker exec … systemd-run --user …` 必然失败、必须带 `-e XDG_RUNTIME_DIR=/run/user/0`** 才能复现服务真实环境（本仓已有两个会话各自踩过一次）。
 
 ## DoD
 
@@ -76,3 +76,26 @@ CI runner 容器（`gh-runner-quay`，由 systemd **user** unit `~/.config/syste
 ## Notes
 
 现已存在的分支 `task/gap-ci-runner-container-needs-user-systemd`（单提交 `bc6917029`，含全部四项修复与注释）可作为实现载体；但它**没有 task、没走门**，本任务存在的意义就是把它补进正规路径。⛔ 不要手工 merge 进 develop；⛔ 在此之前不要从 develop 重建镜像——现在跑着的镜像是对的。另有一条与本任务相邻但不同机制的悬项：token 现走 `docker run -e ACCESS_TOKEN=…`（argv，`ps aux` 全机可见），建议改 `--env-file` 并轮换 token——那属密钥通路变更，另案待人裁定，不并入本任务。
+
+——
+## Evidence
+
+**AC1 — 六条读数，均在【活的生产容器】`gh-runner-quay`（镜像 `quay-ci-runner:sysd`；本机即 tokyo-alpha）内实测，2026-10-10**，并在由同一 Dockerfile 重新构建的镜像 `quay-ci-runner:wtest` 上复现（该镜像运行时层与分支提交 `bc6917029` 逐字节相同，本分支只新增两条只读断言 `RUN` 与注释）：
+
+| 读数 | 命令 | 结果 |
+|---|---|---|
+| anchor 信封 | `systemd-run --user --scope --quiet -p OOMPolicy=continue -p MemoryAccounting=yes --unit=quay-anchor-probe true`（带 `-e XDG_RUNTIME_DIR=/run/user/0`） | rc=0 |
+| MemoryAccounting | `systemd-run --user --scope --quiet -p MemoryAccounting=yes true` | rc=0 |
+| 负控制（去掉 `-e XDG_RUNTIME_DIR`） | 同上裸 exec | rc=1，`Failed to connect to bus: No medium found` |
+| user manager | `systemctl is-active user@0.service` | `active` |
+| scope cgroup | `systemd-run … sh -c 'cat /proc/self/cgroup'` | `…/user@0.service/app.slice/quay-ac1-probe.scope`（与 `packages/quay/test/server-host-own-scope.test.mjs` 记载的 tail 同形） |
+| runner 环境 | `/proc/<runner pid>/environ` | `RUNNER_TOOL_CACHE=/opt/hostedtoolcache`、`HOME=/root` |
+| toolcache | `ls /opt/hostedtoolcache/node/*/x64.complete` | `24.21.0/x64.complete`、`20.20.2/x64.complete`（活容器内由 setup-node 运行时填充，见下） |
+
+**AC2 — 构建期断言：** Dockerfile 新增两段 `RUN set -eux` 断言（早期：python/tmux/procps/systemd-run/dbus-daemon + `systemctl --version` ≥ 255；晚期：PAM 模块、`/lib/systemd/systemd`、unit 的 `PassEnvironment HOME/PATH`、`WorkingDirectory`、`Runner.Listener run`、`.env` 的 XDG、`/opt/hostedtoolcache`、`RUNNER_TOOL_CACHE` drop-in）。`docker build` rc=0。**能取假（两臂各实测一次）**：① 删掉写 `30-toolcache.conf` 的 RUN → build 在该断言处 exit 1；② 把版本下限改成 `-ge 9999` → build exit 1（日志显示 `systemd 255 (255.4-1ubuntu8.17)`）。
+
+**AC3 / AC4 —** 注释含 `ENTRYPOINT ["/entrypoint.sh"]` 吞噬陷阱、`gosu runner "$@"`、`WorkingDirectory=/actions-runner`、`/actions-runner/.env`、「unit 的 `Environment=` 到不了 runner 进程」，以及「裸 `docker exec … systemd-run --user …` 必然失败、必须带 `-e XDG_RUNTIME_DIR=/run/user/0`」的假阴性告警。
+
+**发现（与任务原文不符，已在 Dockerfile 注释更正）**：任务「现状 / trap-6」称基础镜像「已预置 node 24.21.0 + `.complete`」——实测**不成立**：`myoung34/github-runner:ubuntu-noble` 与构建出的镜像，其 `/opt/hostedtoolcache` 均为**空**（`node/` 不存在）；该目录是 base 建好的 runner-owned 空目录，node 是**运行时**由 setup-node 经 `RUNNER_TOOL_CACHE` 下载进去的（活容器 05:40 / 05:47 才出现）。因此 AC2 的 p4 断言只断言镜像可控的事实（目录存在 + drop-in 指向它），不断言 `.complete`（那是运行时读数，归 AC1）。
+
+**DoD —** `gh api repos/yaleh/quay/actions/runners` → `tokyo-alpha-1 online`。

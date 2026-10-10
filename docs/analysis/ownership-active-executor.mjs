@@ -26,6 +26,11 @@ export function resolveArchguardCli() {
   return cands.find((p) => fs.existsSync(p)) || null;
 }
 
+/** Version the INSTALLED CLI reports about itself (`--version`), or null. Never the repo's package.json. */
+export function archguardCliVersion(cli) {
+  try { return execFileSync("node", [cli, "--version"], { encoding: "utf8", timeout: 30_000 }).trim(); } catch { return null; }
+}
+
 /** Clip to a UTF-8 byte budget, reporting truncation (never silently). */
 export function clipBytes(text, max) {
   if (Buffer.byteLength(text, "utf8") <= max) return { text, truncated: false, total_bytes: Buffer.byteLength(text, "utf8") };

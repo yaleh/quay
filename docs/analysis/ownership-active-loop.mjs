@@ -43,6 +43,11 @@ export const CODE_FINGERPRINT = crypto.createHash("sha256").update(
 ).digest("hex").slice(0, 16);
 export const DEFAULT_QUOTA = Object.freeze({ max_proposals: 3, window_ms: 24 * 3600 * 1000 });
 
+/** Which ArchGuard instrument re-measures a concern kind. If it is not reachable on the production tool surface, the
+ *  gap is exposed AT PROPOSAL TIME by this table — not left to the model happening to request it. */
+// canonicalization can be re-measured by value dispersion (a literal) OR by copy detection (a code mechanic): both are relevant
+export const MEASUREMENT_NEEDS = Object.freeze({ duplicate: ["duplicates"], canonicalization: ["literal_dispersion", "duplicates"] });
+
 // ── prompt ────────────────────────────────────────────────────────────────────────────────────
 export function buildInitialFacts({ commit, subject, topDirs, methodologyPresent }) {
   return { repo_commit: commit, head_subject: subject, top_level_dirs: topDirs, methodology_doc: methodologyPresent ? "docs/references/ownership-first-refactoring-methodology.md" : null };
@@ -146,6 +151,7 @@ export function toEnvelope({ terminal, state, slice }) {
       env.negative_control = `${p.negative_control} ${renderNegativeControl(slice)}`.trim();
       if (slice.status !== "evaluated") down.push(`DELTA_${String(slice.status).toUpperCase()}:${slice.reason || ""}`);
       else if (!slice.negative_control.falsified) down.push("NEGATIVE_CONTROL_NOT_FALSIFIED");
+      else if (slice.provenance?.provenance_consistency?.status === "mismatch") down.push("PROVENANCE_MISMATCH:the analysed graph is not shown to come from the commit the proposal cites");
     } else {
       env.expected_mechanical_delta = `UNVERIFIED declared measurement (no ArchGuard primitive computes this for concern_kind=${p.concern_kind}): ${p.declared_measurement}`;
       env.negative_control = p.negative_control;
@@ -275,7 +281,24 @@ export async function runActiveInvestigation({ root, invokeJudge, budget = DEFAU
   if (terminal.kind === "propose_slice" && terminal.step.proposal.concern_kind === "package-cycle") {
     slice = computeSliceDelta({ root, commit, proposal: terminal.step.proposal, deps: deps.sliceDeps || {}, now });
   }
+  // Proposal-time capability check: a non-cycle proposal's success reading needs an instrument. If the production tool
+  // surface cannot take that reading, say so deterministically (the delta stays declared-unverified either way).
+  let measurement = null;
+  if (terminal.kind === "propose_slice" && terminal.step.proposal.concern_kind !== "package-cycle") {
+    const needs = (MEASUREMENT_NEEDS[terminal.step.proposal.concern_kind] || []).map((n) => ({ query: n, q: ARCHGUARD_QUERY_KINDS[n] })).filter((x) => x.q);
+    if (needs.length) {
+      measurement = {
+        concern_kind: terminal.step.proposal.concern_kind,
+        instruments: needs.map(({ query, q }) => ({ needs: q.gap?.capability || query, reachable_on_production_surface: q.implemented, available_via: q.gap?.available_via || null })),
+      };
+      measurement.reachable_on_production_surface = measurement.instruments.some((i) => i.reachable_on_production_surface);
+      for (const { q } of needs) if (!q.implemented && !state.gaps.some((g) => g.capability === q.gap.capability)) state.gaps.push({ ...q.gap, exposed_by: "proposal-time measurement check" });
+    }
+  }
   const { envelope, downgrades } = toEnvelope({ terminal, state, slice });
+  if (measurement && !measurement.reachable_on_production_surface) {
+    envelope.expected_mechanical_delta += ` | RE-MEASUREMENT GAP: ${measurement.instruments.map((i) => `${i.needs} (via ${JSON.stringify(i.available_via)})`).join("; ")} — none is reachable on the production CLI tool surface; this reading can only be taken out-of-band.`;
+  }
 
   const evidenceRefs = new Set(state.evidence.map((e) => e.id));
   const gate = deterministicGate(envelope, { evidenceRefs, existingConcernKeys });
@@ -293,6 +316,7 @@ export async function runActiveInvestigation({ root, invokeJudge, budget = DEFAU
     steps, terminal: { kind: terminal.kind, forced: terminal.forced === true, forced_cause: forced },
     capability_gaps: state.gaps, requested_kinds: [...new Set(state.evidence.filter((e) => e.id !== "ev-0" && e.request.kind !== "trigger").map((e) => e.request.kind === "archguard_query" ? `archguard:${e.request.query}` : e.request.kind))],
     evidence: state.evidence.map((e) => ({ id: e.id, request: e.request, status: e.status, bytes: e.bytes, truncated: e.truncated, provenance: e.provenance, text_head: e.text.slice(0, 1500), text_sha256: sha(e.text), ...(e.cycles ? { cycles: e.cycles } : {}), ...(e.gap ? { gap: e.gap } : {}) })),
+    measurement_capability: measurement,
     slice_delta: slice ? { status: slice.status, reason: slice.reason || null, provenance: slice.provenance, delta: slice.delta || null, guards: slice.guards || null, negative_control: slice.negative_control || null, gap: slice.gap || null } : null,
     downgrades, envelope, gate_ok, gate_reasons: reasons, concern_key: gate.concern_key,
     action: finalAction, executed: false, elapsed_ms: Date.now() - t0,

@@ -85,6 +85,7 @@ import {
   classifyLandingMode,
   buildRefMoveBrackets,
   classifySpineLandingMode,
+  classifyPublishedReconcile,
   RELEASE_BUMP_SUBJECT_RE,
   extractCutParents,
   classifyReleaseBumpCommit,
@@ -1488,6 +1489,30 @@ test("PURE classifySpineLandingMode — ledger/direct/faninTips/括注覆盖 ⇒
   assert.equal(classifySpineLandingMode("L", ledger, null, faninTips, covered), "fan-in", "ledger 优先于 reflog 不可读");
 });
 
+// ── 第六次变假：publishedReconcile（tasks/gap-ac194-release-preflight-reconcile-unreadable-landing）────────
+// release-cut preflight 的 reconcile（`99efed2c`）由散文/agent 通道手搓 `git merge` + 裸 `git update-ref`
+// （无 -m ⇒ 空 action）产出——三个 script 站点的保留前缀修复对它是盲的（硬规则 5b）。它与「人手外科式直落
+// develop」（`394dbca5d`，同为空 action）在 DAG 上可结构区分：前者是 merge（2 父）且非首父 reachable from
+// origin/develop；后者是单亲。⇒ 三谓词结构类（⛔ 非 sha 表、⛔ 非 message 匹配）。
+test("PURE classifyPublishedReconcile — 空 action merge 一条【已发布】外部线 ⇒ publishedReconcile；单亲/本地 merge/任意 -m ⇒ unknown；远端读不出 ⇒ null", () => {
+  // 生产形（99efed2c）：空 action ∧ merge(≥2 父) ∧ 所有非首父 reachable from origin/develop
+  assert.equal(classifyPublishedReconcile("", 2, true), "publishedReconcile");
+  assert.equal(classifyPublishedReconcile("", 3, true), "publishedReconcile", "octopus merge 同形（≥2 父、全部非首父发布）");
+  // 负控 (a)：单亲（394dbca5d 形真直投）⇒ unknown（⛔ 一律判 publishedReconcile 会 fail-open 掩掉它）
+  assert.equal(classifyPublishedReconcile("", 1, true), "unknown");
+  assert.equal(classifyPublishedReconcile("", 0, true), "unknown", "root / 无父 ⇒ 不是 merge ⇒ unknown");
+  // 负控 (b)：merge 但非首父**不** reachable from origin/develop（本地 merge）⇒ unknown
+  assert.equal(classifyPublishedReconcile("", 2, false), "unknown");
+  // 负控 (c)：非空 action（保留前缀 / 任意 -m 文本 / commit (merge) 直投）不在本类
+  assert.equal(classifyPublishedReconcile("quay-ref-landing: x", 2, true), "unknown", "保留前缀由 classifyReflogAction 处置，不在本类");
+  assert.equal(classifyPublishedReconcile("mutation-unknown-form", 2, true), "unknown", "任意 -m 文本 ⇒ 仍 unknown（负控核心）");
+  assert.equal(classifyPublishedReconcile("commit (merge): Merge made by the 'ort' strategy.", 2, true), "unknown", "git 自己创建的 merge commit 是 direct，不在本类");
+  // 第三态（硬规则 3b）：读不出 ⇒ null（NOT-EVALUATED，⛔ 不与 unknown 同形）
+  assert.equal(classifyPublishedReconcile("", 2, null), null, "origin/develop 读不出 ⇒ NOT-EVALUATED");
+  assert.equal(classifyPublishedReconcile("", null, true), null, "父数读不出 ⇒ NOT-EVALUATED");
+  assert.equal(classifyPublishedReconcile("", undefined, undefined), null);
+});
+
 test("AC6 CLI — ff 括注分类：多 commit task 分支 ff 落地 ⇒ 中间 spine commit 判 fan-in delivered、unclassifiable 归零", () => {
   const dir = makeTmp("cli-bracket");
   try {
@@ -2233,6 +2258,83 @@ test("AC5 CLI 负控 — 裸 `git update-ref`（空 action）/ 任意其它 `-m`
       assert.equal(out.evaluated, false);
       assert.equal(out.reason, "unsupported-reflog-action: quay-ref-landing", "reason 逐字点名该形");
       assert.equal(out.denominator.sanctionedRefMoveCommits, 0, "⛔ 不得算作 sanctioned 落地");
+    } finally {
+      cleanup(dir);
+    }
+  }
+});
+
+// ── 第六次变假·CLI（tasks/gap-ac194-release-preflight-reconcile-unreadable-landing）──────────────────
+// release-cut preflight 的 reconcile：**空 action** ∧ merge(≥2 父) ∧ 非首父 reachable from origin/develop
+// ⇒ 被判 publishedReconcile（GREEN + 独立计数），而不是落 unclassifiable / NOT-EVALUATED。负控（本地 merge、
+// 单亲）必须仍 fail-closed。⛔ 判定按结构，⛔ 不是 sha 白名单、⛔ 不是 message 匹配。
+test("AC3/AC4 CLI — 第六次变假：空 action merge 一条【已发布】外部线 ⇒ publishedReconcile（GREEN + 独立计数）；本地 merge / 单亲 ⇒ 仍 NOT-EVALUATED", () => {
+  // (positive) release-cut preflight reconcile 形。
+  {
+    const { dir, base } = makeForkedDevelopRepo("cli-pubrec-pos");
+    try {
+      const published = commitCodeSurface(dir, "published.ts"); // main: base → published
+      gitCmd(dir, "update-ref", "refs/remotes/origin/develop", published); // 已发布外部线
+      gitCmd(dir, "checkout", "-q", "-b", "recontmp", "develop"); // develop = base
+      const mg = gitCmd(dir, "merge", "-q", "--no-ff", "-m", "Merge origin/develop into develop — reconcile the published CI fixes", published);
+      assert.equal(mg.status, 0, `fixture merge 应成功: ${mg.stderr}`);
+      const mergeSha = gitCmd(dir, "rev-parse", "HEAD").stdout.trim();
+      // 锚：确为 merge（2 父）∧ 非首父 reachable from origin/develop（否则夹具本身没钉住结构判定）。
+      const parents = gitCmd(dir, "rev-list", "--parents", "-n1", mergeSha).stdout.trim().split(" ").slice(1);
+      assert.equal(parents.length, 2, "夹具必须产出 2 父 merge");
+      assert.equal(gitCmd(dir, "merge-base", "--is-ancestor", parents[1], "refs/remotes/origin/develop").status, 0, "非首父必须 reachable from origin/develop");
+      gitCmd(dir, "checkout", "-q", "--detach"); // develop 不再被检出 ⇒ update-ref 可写 develop ref
+      const ur = gitCmd(dir, "update-ref", "refs/heads/develop", mergeSha, base); // 裸 update-ref ⇒ 空 action
+      assert.equal(ur.status, 0, `裸 git update-ref 应成功: ${ur.stderr}`);
+      const reflog = gitCmd(dir, "reflog", "show", "develop", "--format=%h [%gs]").stdout;
+      assert.match(reflog, /^\S+ \[\](?:\n|$)/m, `夹具必须产出空 action 的真实 reflog 行: ${reflog}`);
+
+      const r = runChecker(["--root", dir, "--develop", "develop", "--baseline", base]);
+      assert.equal(r.status, 0, `publishedReconcile 落地不得判直投/NOT-EVALUATED: ${r.stdout}${r.stderr}`);
+      const out = jsonOut(r);
+      assert.equal(out.evaluated, true, "按结构分类 ⇒ 可评估");
+      assert.equal(out.ok, true);
+      assert.equal(out.unclassifiableCommits, 0, "publishedReconcile tip 不再落 unclassifiable（空 action 时恒落——这正是本任务）");
+      assert.equal(out.classification.ratio, 1, "全部 first-parent 提交可分类");
+      assert.equal(out.classification.unclassifiedActionForms.length, 0, "⛔ 不得被点名为「读不懂的 action 形」");
+      // 独立计数（AC3 核心）：与 refMove / sanctioned 分列。
+      assert.equal(out.denominator.publishedReconcileCommits, 1, "窗内 spine 上有 1 条 publishedReconcile tip（独立计数）");
+      assert.equal(out.denominator.publishedReconcileNotEvaluatedCommits, 0);
+      assert.equal(out.classification.publishedReconcileIntroducedTotal, 1);
+      assert.equal(out.classification.publishedReconcileIntroduced[0].tip, mergeSha);
+      assert.deepEqual(out.classification.publishedReconcileIntroduced[0].introduced.map((i) => i.sha), [mergeSha], "带入窗内的 first-parent 清单 = merge 自己");
+      assert.equal(out.classification.publishedReconcileIntroduced[0].introduced[0].codeSurface, true, "可见：code-surface 标记（不静默豁免）");
+      assert.equal(out.classification.refMoveIntroducedTotal, 0, "⛔ publishedReconcile 不得并入 refMove 读数");
+      assert.equal(out.denominator.sanctionedRefMoveCommits, 0, "⛔ 不得并入 sanctioned 计数");
+      assert.equal(out.denominator.totalDirectCommits, 0, "⛔ 不得计入直投分母 / fan-in 计数");
+      assert.equal(out.denominator.codeSurfaceCommits, 0);
+    } finally {
+      cleanup(dir);
+    }
+  }
+  // (negative b) 空 action ∧ merge ∧ 非首父**不** reachable from origin/develop（本地 merge）⇒ 仍 NOT-EVALUATED。
+  {
+    const { dir, base } = makeForkedDevelopRepo("cli-pubrec-neg");
+    try {
+      const published = commitCodeSurface(dir, "published.ts");
+      gitCmd(dir, "update-ref", "refs/remotes/origin/develop", published);
+      const local = commitCodeSurface(dir, "local-only.ts"); // 本地新 commit（origin/develop 不含它）
+      assert.notEqual(gitCmd(dir, "merge-base", "--is-ancestor", local, "refs/remotes/origin/develop").status, 0, "锚：local 不得 reachable from origin/develop");
+      gitCmd(dir, "checkout", "-q", "-b", "localmergetmp", "develop");
+      const mg = gitCmd(dir, "merge", "-q", "--no-ff", "-m", "Merge local branch", local);
+      assert.equal(mg.status, 0, `fixture merge 应成功: ${mg.stderr}`);
+      const mergeSha = gitCmd(dir, "rev-parse", "HEAD").stdout.trim();
+      gitCmd(dir, "checkout", "-q", "--detach");
+      const ur = gitCmd(dir, "update-ref", "refs/heads/develop", mergeSha, base);
+      assert.equal(ur.status, 0, `裸 git update-ref 应成功: ${ur.stderr}`);
+
+      const r = runChecker(["--root", dir, "--develop", "develop", "--baseline", base]);
+      assert.equal(r.status, 3, `本地 merge（非已发布线）⇒ 仍 NOT-EVALUATED exit 3（⛔ 不得 fail-open）: ${r.stdout}${r.stderr}`);
+      const out = jsonOut(r);
+      assert.equal(out.evaluated, false, "硬规则③b：读不懂 ≠ 合格");
+      assert.equal(out.reason, "unsupported-reflog-action: (empty)", "reason 逐字点名 `(empty)`");
+      assert.equal(out.denominator.publishedReconcileCommits, 0, "⛔ 本地 merge 不得被分类为 publishedReconcile");
+      assert.equal(out.classification.publishedReconcileIntroducedTotal, 0);
     } finally {
       cleanup(dir);
     }

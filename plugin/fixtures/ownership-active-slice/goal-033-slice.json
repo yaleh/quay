@@ -1,0 +1,50 @@
+{
+  "subject": "",
+  "concern": "core-root ⇄ core-cli 目录级依赖环（packages/quay/src ⇄ packages/quay/src/cli）",
+  "provenance": {
+    "repo": "/data/home/yale/work/quay",
+    "ref": "goal/GOAL-033 fork point（goal 正文记为 1ac06fd85）",
+    "commit": "1ac06fd85094a58d4954640811a787873f8ad2a1",
+    "worktree": "detached worktree at the fork point; analysed subtree treeSha 5213eb614130bf9f8ade9e38b46da7e60fb1c536"
+  },
+  "proposedCut": {
+    "note": "切法由 GOAL-033 正文给出（‘Recommended target ownership’一节），本 fixture 只是把它转写成显式输入；ArchGuard 不发明方案。",
+    "moves": [
+      {
+        "file": "cli/driver.ts",
+        "from": "cli",
+        "to": "",
+        "symbols": ["runDriver", "runDriverAsync", "resolveDriverInvocation", "DriverRunResult"],
+        "note": "driver 控制客户端下沉到 core-root（cli/driver.ts 只保留 CLI facade）"
+      },
+      {
+        "file": "cli/driver-vocab.ts",
+        "from": "cli",
+        "to": "",
+        "symbols": ["ALL_SERVICE_NAMES", "HOSTED_SERVICE_NAMES", "KINDS", "VERBS"],
+        "note": "driver 控制面词表下沉到 core-root（零 import 叶模块，内容逐字搬迁）"
+      }
+    ],
+    "consumers": [
+      { "file": "serve-sessions.ts", "dir": "", "imports": ["runDriver"] },
+      { "file": "serve.ts", "dir": "", "imports": ["ALL_SERVICE_NAMES", "HOSTED_SERVICE_NAMES"] },
+      { "file": "cli/server.ts", "dir": "cli", "imports": ["runDriver", "runDriverAsync"] },
+      { "file": "cli/driver.ts", "dir": "cli", "imports": ["KINDS", "VERBS"] },
+      { "file": "cli/help.ts", "dir": "cli", "imports": ["ALL_SERVICE_NAMES", "KINDS", "VERBS"] }
+    ]
+  },
+  "declaredPrediction": {
+    "sccSize": 5,
+    "sccMembers": ["", "fan-in", "gate", "gate/config", "gate/factories"],
+    "source": "GOAL-033 正文 / AC-351（人写：cli 离开，其余五员不动）—— 与 observed 分开记录，本原型不改写它"
+  },
+  "mustNotChange": {
+    "forbiddenNewEdges": [{ "from": "", "to": "fan-in" }],
+    "untouchedDirs": ["gate", "gate/config", "gate/factories", "kernel"],
+    "note": "搬壳陷阱：把 runDriver 原样搬进 core-root 会新增 core-root -> fan-in 边，而 fan-in -> core-root 已存在 ⇒ 会造出新的双向互指"
+  },
+  "negativeControl": {
+    "description": "在切完的树上重新注入一条 core-root -> cli 边（GOAL-033 的负对照：在 scratch 副本里恢复 serve-sessions.ts 对 cli/driver.ts 的 value import）",
+    "restoreEdges": [{ "from": "", "to": "cli" }]
+  }
+}
