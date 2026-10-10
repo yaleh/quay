@@ -2,9 +2,10 @@
 // @load-sensitive child-spawn
 // @load-sensitive-entry 2026-08-11 child-spawn spawn×9 under suite load (round-215 silent passed=false @7721ms)
 // KNOWN-LOAD-SENSITIVE (see plugin/loop/fast-mode-loop-tick.md "已知负载敏感族") — this harness
-// spawns the threshold-scope-check.ts checker as a REAL node child process (~9 spawnSync calls,
-// AC1-AC9 each spawn once per fixture). Under full-suite main-phase concurrency those spawns are
-// start/schedule-delayed, and round-215 (2026-08-10) showed the exact signature: a silent
+// spawns the threshold-scope-check.ts checker as a REAL node child process (~12 spawnSync calls —
+// AC1-AC9 each spawn once per fixture, plus 3 CLI-disposition spawns). Under full-suite main-phase
+// concurrency those spawns are start/schedule-delayed, and round-215 (2026-08-10) showed the exact
+// signature: a silent
 // passed=false at 7721ms with ZERO harness output lines (an assertion failure would always write
 // FAIL: to fd 2; zero lines = the process died before the harness could report). Solo 4089ms 9/9
 // green. Same child-spawn family as relation-sync / create-mcp / proposal-convergence / checker-cost
@@ -284,4 +285,37 @@ test("AC5 — the violation list is written to docs/analysis/threshold-scope-vio
   assert.ok(countMatch, "baseline-count header missing");
   const entries = text.split(/\r?\n/).filter((l) => l.trim() && !l.trim().startsWith("#"));
   assert.equal(entries.length, Number(countMatch[1]), `entries (${entries.length}) must equal baseline-count (${countMatch[1]})`);
+});
+
+// ── Disposition of finding `runcli-twostill-handrolled` ─────────────────────────────────────────────
+// (.quay/routine-findings.jsonl, routine `semantic-dedup-scan`, runId
+//  `semantic-dedup-scan-1791631645924`): the private `--root/--json/--help` flag loop THIS file and
+//  tmux-test-isolation-check.ts each carried is GONE — both fold onto gate-script-base.parseArgs,
+//  the same fold task-ac-carryover-check.ts / task-contract-check.ts already made for the sibling
+//  finding `task-check-flag-loops-duplicate`. Position-based (硬规则 2): assert the ACTUAL import
+//  binding + the ABSENCE of the loop's literal header, not a keyword mention in a comment.
+
+test("disposition: runCli uses the SHARED parseArgs and carries no private flag loop", () => {
+  const src = fs.readFileSync(CHECKER, "utf8");
+  assert.match(src, /import \{[^}]*\bparseArgs\b[^}]*\} from "\.\/gate-script-base\.ts";/,
+    "the flag parser must be the shared one, imported from gate-script-base");
+  assert.doesNotMatch(src, /for \(let i = 0; i < args\.length; i\+\+\)/,
+    "the private flag loop must not survive as a second parser");
+});
+
+test("disposition: an unknown --flag exits 2 — the shared parser's strict guard", () => {
+  const r = spawnSync(process.execPath, ["--experimental-strip-types", CHECKER, "--bogus"], { encoding: "utf8" });
+  assert.equal(r.status, 2);
+  assert.match(r.stderr, /unknown argument: --bogus/);
+});
+
+test("disposition: a valueless --judge is a usage error, not a silent whole-store scan", () => {
+  // The private loop produced `undefined` here and threw on `path.isAbsolute(undefined)`; the shared
+  // parser's last-token shape is "". Reading "" as absent would judge nothing while printing a
+  // verdict (硬规则 3b), so both spellings must stop at exit 2 with the cause named.
+  for (const argv of [["--judge"], ["--judge="]]) {
+    const r = spawnSync(process.execPath, ["--experimental-strip-types", CHECKER, ...argv], { encoding: "utf8" });
+    assert.equal(r.status, 2, `${argv.join(" ")} must exit 2, got ${r.status}`);
+    assert.match(r.stderr, /--judge requires a <path>/);
+  }
 });

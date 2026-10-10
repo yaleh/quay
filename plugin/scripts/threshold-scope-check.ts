@@ -77,7 +77,7 @@ import { repoRoot } from "./repo-root.ts";
 import path from "node:path";
 import { spawnSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
-import { helpExit, isDirectEntry } from "./gate-script-base.ts";
+import { isDirectEntry, parseArgs } from "./gate-script-base.ts";
 import { buildFileIndex, type FileIndex, readGitignoreBasenames } from "./fs-walk.ts";
 import { readRatchetBaseline, writeRatchetBaseline } from "./ratchet-baseline.ts";
 
@@ -405,24 +405,49 @@ export function writeRatchet(root: string, currentKeys: string[], { reset = fals
 }
 
 // ── CLI ──────────────────────────────────────────────────────────────────────────────────────────────
+// `argv` is the FULL process.argv (parseArgs slices `argv.slice(2)` itself) — the same convention the
+// two already-folded members of this family use (task-ac-carryover-check.ts / task-contract-check.ts).
 export function runCli(argv: string[]): number {
-  const args = argv.slice();
-  if (args.includes("--help") || args.includes("-h")) helpExit("usage: node threshold-scope-check.ts [--root <dir>] [--json] [--judge <j>] [--write-ratchet] [--reset-baseline]");
-  let root: string | null = null;
-  let json = false;
-  let judge: string | null = null;
-  let writeRatchetFlag = false;
-  let resetBaseline = false;
-  for (let i = 0; i < args.length; i++) {
-    const a = args[i];
-    if (a === "--root") root = args[++i];
-    else if (a === "--json") json = true;
-    else if (a === "--judge") judge = args[++i];
-    else if (a === "--write-ratchet") writeRatchetFlag = true;
-    else if (a === "--reset-baseline") resetBaseline = true;
-    else if (a.startsWith("-")) { console.error(`threshold-scope-check: unknown flag: ${a}`); return 2; }
-    else { console.error(`threshold-scope-check: unexpected positional: ${a}`); return 2; }
+  // Flag parsing is the SHARED spec-driven parser (gate-script-base.parseArgs), not a private
+  // hand-rolled loop. THIS file and tmux-test-isolation-check.ts were the two that still carried a
+  // private `--root/--json/--help` loop after task-ac-carryover-check.ts / task-contract-check.ts
+  // folded onto the shared parser (.quay/routine-findings.jsonl finding `runcli-twostill-handrolled`,
+  // routine `semantic-dedup-scan`, runId `semantic-dedup-scan-1791631645924`, verdict
+  // divergent-implementation); both now call the one parser. `strict:true` keeps the loop's
+  // unknown-`--flag` guard (exit 2); `minArgs:0` because every mode here is flag-only. parseArgs owns
+  // the `--help`/`-h` contract (usage to stdout, exit 0) too.
+  const { args: positionals, flags } = parseArgs(argv, {
+    minArgs: 0,
+    strict: true,
+    usage: "[--root <dir>] [--json] [--judge <j>] [--write-ratchet] [--reset-baseline]",
+    flags: {
+      root: { type: "string" },
+      json: { type: "boolean" },
+      judge: { type: "string" },
+      "write-ratchet": { type: "boolean" },
+      "reset-baseline": { type: "boolean" },
+    },
+  });
+  // The private loop REJECTED a positional (`unexpected positional: <a>`, exit 2); the shared parser
+  // collects them instead of rejecting, so the guard is re-stated here. Dropping it would let a
+  // mistyped `threshold-scope-check.ts /some/dir` scan the DEFAULT root and report a verdict for an
+  // input the user never gave (硬规则 3b: 读不懂 must not come back shaped like 合格).
+  if (positionals.length > 0) {
+    console.error(`threshold-scope-check: unexpected positional: ${positionals[0]}`);
+    return 2;
   }
+  const root = typeof flags.root === "string" ? flags.root : null;
+  const json = flags.json === true;
+  // A valueless `--judge` arrives as "" (the shared parser's last-token shape, where the private
+  // loop produced `undefined` and then threw on `path.isAbsolute(undefined)`). Reading "" as
+  // "absent" would silently judge nothing while printing a verdict — a usage error instead.
+  if (flags.judge === "") {
+    console.error("threshold-scope-check: --judge requires a <path>");
+    return 2;
+  }
+  const judge = typeof flags.judge === "string" ? flags.judge : null;
+  const writeRatchetFlag = flags["write-ratchet"] === true;
+  const resetBaseline = flags["reset-baseline"] === true;
   if (resetBaseline && !writeRatchetFlag) {
     console.error("threshold-scope-check: --reset-baseline requires --write-ratchet (it is the write that re-anchors the ceiling)");
     return 2;
@@ -543,5 +568,5 @@ export function runCli(argv: string[]): number {
 }
 
 if (isDirectEntry(import.meta, undefined, "threshold-scope-check")) {
-  process.exit(runCli(process.argv.slice(2)));
+  process.exit(runCli(process.argv));
 }
