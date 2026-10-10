@@ -93,10 +93,20 @@ export function deterministicGate(envelope, opts = {}) {
     i: envelope.candidate_interventions || [],
     r: envelope.recommended_next_action,
   }).toLowerCase();
-  // A forbidden action is a TOKEN. A bare substring test flagged any proposal that merely NAMES a file such as
-  // `ff-merge.ts` or `goal-merge.ts` (observed live: FORBIDDEN_ACTION:merge on a legitimate fan-in proposal), so a name
-  // that continues into a path/identifier character on either side is not an action.
-  const hit = FORBIDDEN_ACTIONS.filter((a) => new RegExp(`(?<![A-Za-z0-9_./-])${a.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}(?![A-Za-z0-9_./-])`).test(actionText));
+  // Forbidden actions are matched by POSITION/FORM, not as bare substrings (hard rule 2). Observed live: a bare substring
+  // flagged a proposal that merely NAMED `ff-merge.ts`, and a bare token still flagged "Merge gate/config/loader.ts into
+  // the factory layer" — merging two MODULES is ordinary refactoring vocabulary, not the forbidden act of merging a
+  // branch/goal. So: hyphenated command forms are tokens that must not continue into a path/identifier; `merge` counts
+  // only as an instruction to merge a git/goal object; and the recommended_next_action field is compared exactly.
+  const tok = (s) => new RegExp(`(?<![A-Za-z0-9_./-])${s}(?![A-Za-z0-9_./-])`, "i");
+  const FORBIDDEN_FORMS = {
+    "create-task": tok("create-task"),
+    "activate-goal": tok("activate-goal"),
+    "write-status": tok("write-status"),
+    "file-task": tok("file-task"),
+    "merge": tok("(?:git merge|goal merge|merge (?:the |this |that |a )?(?:branch|goal|pr|pull[- ]request|to develop|into develop|into master|into main))"),
+  };
+  const hit = FORBIDDEN_ACTIONS.filter((a) => (FORBIDDEN_FORMS[a] || tok(a)).test(actionText) || String(envelope.recommended_next_action).toLowerCase() === a);
   if (hit.length) reasons.push(`FORBIDDEN_ACTION:${hit.join(",")}`);
   if (!RECOMMENDED_ACTIONS.includes(envelope.recommended_next_action)) {
     reasons.push(`ACTION_NOT_IN_VOCAB:${String(envelope.recommended_next_action)}`);
