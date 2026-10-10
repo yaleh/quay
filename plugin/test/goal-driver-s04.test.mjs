@@ -16,6 +16,22 @@
 import { test } from "node:test";
 import { DELIVERED_VERSION, GOAL_ACCEPTANCE_ACTIVE_ENV, PRE_CHANGE_ENTRY, assert, buildGapWorkerPrompt, computeGoalGaps, fs, goalFlipDecision, hasPrefilingEvidence, isFilingGapState, mkTargetRoot, os, path, readFrozenFailing, readHostHealth, recheckFrozenFailing, recheckStandingFailing, repoRoot, runGoalRound, spawn, spawnTargetDriverFixture, sweepFrozenAcs, targetHealthFact, waitForProcessVisible, writeStandingGoalFile } from "./helpers/goal-driver-harness.mjs";
 
+// gap-ac355-criterion-false-from-goal-acceptance-active-guard: this file's behaviour must NOT depend
+// on the host's `QUAY_GOAL_ACCEPTANCE_ACTIVE`. That var is the goal-criterion re-entrancy guard: the
+// goal-evaluation paths (goal-store `checkAchievedFailing` / `sweepFrozen`, goal-driver
+// `runPrefilingRecheck`) set it on their own `process.env` before running a criterion, and a bare
+// `node --test` (exactly how the AC-355 criterion runs these files) inherits it. The suite entry
+// script unsets it before running tests, but the criterion bypasses that entry. Saving and deleting it at module
+// load restores the file's independence for BOTH the in-process readers below and the spawned CLI
+// children (which inherit this `process.env`); a test that WANTS the guard set sets it itself and
+// restores it in its own `finally`. Restored after the file so the deletion never escapes it.
+const __hostGoalAcceptance = process.env[GOAL_ACCEPTANCE_ACTIVE_ENV];
+delete process.env[GOAL_ACCEPTANCE_ACTIVE_ENV];
+test.after(() => {
+  if (__hostGoalAcceptance === undefined) delete process.env[GOAL_ACCEPTANCE_ACTIVE_ENV];
+  else process.env[GOAL_ACCEPTANCE_ACTIVE_ENV] = __hostGoalAcceptance;
+});
+
 test('立案前复核：闸拒绝 ⇒ 独立结局 guard-refused（⛔ 不与「复核通过」同形）；未传/非 violated ⇒ ran:false 零成本', async () => {
   const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'goal-driver-recheck-guard-'));
   try {
