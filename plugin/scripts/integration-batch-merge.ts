@@ -1162,7 +1162,12 @@ function realMerge(): boolean {
   const mergeCommit = stripNl(gitAt(tmpWt, "rev-parse", "HEAD").stdout);
 
   // Advance develop with a CAS on the old tip (atomic; refuses if develop moved concurrently).
-  if (git("update-ref", `refs/heads/${developRef}`, mergeCommit, developTip).status !== 0) {
+  // The `-m` reason is the RESERVED form the direct-to-develop bypass checker classifies structurally
+  // (classifyReflogAction ⇒ "sanctionedRefMove"): a bare `git update-ref` writes an EMPTY reflog action
+  // the checker cannot tell apart from a hand-rolled direct landing ⇒ NOT-EVALUATED ⇒ AC-194 fail
+  // (tasks/gap-ac194-empty-reflog-action-from-message-less-update-ref). CAS semantics UNCHANGED — the
+  // expected old tip is still the 4th positional arg.
+  if (git("update-ref", "-m", `quay-ref-landing: real-merge ${developTip} -> ${mergeCommit}`, `refs/heads/${developRef}`, mergeCommit, developTip).status !== 0) {
     err("integration-batch-merge: update-ref CAS failed — develop moved concurrently? Nothing changed.");
     return false;
   }
@@ -1278,7 +1283,10 @@ if (ffPossible === 1) {
   // Perform the ref-level fast-forward with a CAS on the old develop tip (atomic; refuses if develop
   // moved concurrently — never a blind force-overwrite). gap-merge-green-snapshot-verified-commit-
   // livelock AC3: develop advances to the MERGE TARGET (the verified commit), not the moving HEAD.
-  if (git("update-ref", `refs/heads/${developRef}`, mergeTarget, developTip).status !== 0) {
+  // `-m` reserved form (see the real-merge CAS above): a bare `git update-ref` writes an EMPTY reflog
+  // action ⇒ the direct-to-develop bypass checker reads it as NOT-EVALUATED (fail-closed). CAS semantics
+  // UNCHANGED — expected old tip is still the 4th positional arg.
+  if (git("update-ref", "-m", `quay-ref-landing: fast-forward ${developTip} -> ${mergeTarget}`, `refs/heads/${developRef}`, mergeTarget, developTip).status !== 0) {
     err("integration-batch-merge: update-ref CAS failed — develop moved concurrently? Nothing changed.");
     process.exit(1);
   }
