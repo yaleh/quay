@@ -10,6 +10,18 @@ children: []
 extra:
   schema: execution
 ---
+## Proposal
+
+**做法**：把已在分支 `task/gap-ci-runner-container-needs-user-systemd` 上验证过、且**当前生产镜像正在运行**的那份 `.github/runner/Dockerfile` 带进 develop，并让它的前置在**构建期**被断言，使「从 develop 重建 runner 镜像」重新成为一条安全的操作。
+
+三条具体改动：
+
+1. **镜像自带用户管理器与正确的 systemd 版本**：PID 1 = systemd，runner 作为容器内 `gh-runner.service` 运行；基础镜像从 `myoung34/github-runner:latest`（Ubuntu 20.04 / systemd 245）换成 `ubuntu-noble`（24.04 / systemd 255，与宿主一致），并补 `systemd-sysv` / `dbus` / `libpam-systemd` 与 `user@0.service` 的 `XDG_RUNTIME_DIR` drop-in。
+2. **unit 的容器运行参数与运行时环境**：补 `--cgroupns=host` + `-v /sys/fs/cgroup:/sys/fs/cgroup:rw` + tmpfs `/run`,`/tmp` + `--cap-add SYS_ADMIN/SYS_CHROOT/MKNOD`（⛔ 实测**不需要** `--privileged`）；`PassEnvironment` 覆盖容器**全量**环境；`RUNNER_TOOL_CACHE` 显式指向镜像内已预置的 toolcache。
+3. **把四个已实测的坑写进文件注释**（覆盖 `ENTRYPOINT`、`ExecStart` 必须带参数、`XDG_RUNTIME_DIR` 走 `/actions-runner/.env`、`PassEnvironment` 全量），并写明「复核者别用裸 `docker exec` 造出假阴性」。
+
+**为什么不手工 merge**：本仓对 develop 的改动有既定路径（task → 门 → fan-in），手工合会绕过它——而"绕过"正是本次事故里双方都在避免的形态。本任务的作用就是把已有分支补进正规路径。
+
 ## Contract
 
 CI runner 容器（`gh-runner-quay`，由 systemd **user** unit `~/.config/systemd/user/gh-runner-quay.service` 以 `docker run --rm … quay-ci-runner:<tag>` 拉起，`EPHEMERAL=true`）必须同时满足两条，否则 release.yml 的第 13 步 `Verify the channel — project-scope assertions` 恒红，v0.18.0 及之后每一版都发不出去（`create-github-release` / `advance-master` 恒被 skipped）：
@@ -34,10 +46,6 @@ CI runner 容器（`gh-runner-quay`，由 systemd **user** unit `~/.config/syste
 
 修后 `38025425341` **completed/success**，15/15 步全绿（含第 13、14 步断言），release 对象已建（https://github.com/yaleh/quay/releases/tag/v0.18.0 ）、master 推进到 `a663d1936`。
 
-## Proposal
-
-在 develop 的 `.github/runner/Dockerfile` 上重写镜像定义，使其自带 Contract 两条所需的全部内容：覆盖 base 的 `ENTRYPOINT` 换成 systemd、把可用的用户管理器带进镜像、显式导出 `RUNNER_TOOL_CACHE` / `HOME` / `PATH` 等 runner 进程所需变量，并按 AC2 把四条前置写成构建期 `RUN` 断言、按 AC3/AC4 把已知坑写进注释。实现载体取现有单提交分支 `task/gap-ci-runner-container-needs-user-systemd` 的内容，但必须经 task → 门 → fan-in 落地进 develop，而不是手工 merge。
-
 ## AC
 
 - [ ] AC1 **从 develop 重建** `.github/runner/Dockerfile` 后，容器内下列读数**全部成立**（⛔ 必须在 develop 的定义上验，不是在已修分支上验）：`systemd-run --user --scope --quiet -p OOMPolicy=continue -p MemoryAccounting=yes --unit=quay-anchor-probe true` 原样 exit 0；`systemd-run --user --scope --quiet -p MemoryAccounting=yes true` exit 0；`systemctl is-active user@0.service` = active；`/opt/hostedtoolcache/node/*/x64.complete` 存在；runner 进程环境里 `RUNNER_TOOL_CACHE=/opt/hostedtoolcache` 且 `HOME` 非空；某 scope 的 `/proc/<pid>/cgroup` 以 `user@0.service/quay-*.scope` 结尾。
@@ -58,4 +66,4 @@ CI runner 容器（`gh-runner-quay`，由 systemd **user** unit `~/.config/syste
 
 ## Notes
 
-现已存在的分支 `task/gap-ci-runner-container-needs-user-systemd`（单提交，含全部四项修复与注释）可作为实现载体；但它**没有 task、没走门**，本任务存在的意义就是把它补进正规路径。⛔ 不要手工 merge 进 develop；⛔ 在此之前不要从 develop 重建镜像——现在跑着的镜像是对的。
+现已存在的分支 `task/gap-ci-runner-container-needs-user-systemd`（单提交，含全部四项修复与注释）可作为实现载体；但它**没有 task、没走门**，本任务存在的意义就是把它补进正规路径。⛔ 不要手工 merge 进 develop；⛔ 在此之前不要从 develop 重建镜像——现在跑着的镜像是对的。另有一条与本任务相邻但不同机制的悬项：token 现走 `docker run -e ACCESS_TOKEN=…`（argv，`ps aux` 全机可见），建议改 `--env-file` 并轮换 token——那属密钥通路变更，另案待人裁定，不并入本任务。
