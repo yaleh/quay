@@ -1,7 +1,7 @@
 ---
 id: gap-independent-anchor-memory-envelope-oversubscribes-shared-host
 title: 多个项目各自独立的 anchor/serve memory.max 包络（host×0.25）在共享宿主上求和超过主机总内存 2.2 倍——实测，非推测
-status: ready
+status: done
 labels:
   - gap
 parent: null
