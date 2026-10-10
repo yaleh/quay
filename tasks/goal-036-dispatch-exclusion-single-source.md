@@ -67,3 +67,4 @@ The slice lands on `goal/GOAL-036` with AC-359 and AC-360 both reading exit 0 wh
 - plugin/scripts/driver-filters.ts
 - plugin/scripts/worker-driver.ts
 - plugin/test/driver-filters.test.mjs
+- tasks/goal-036-dispatch-exclusion-single-source.md
