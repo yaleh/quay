@@ -3,7 +3,7 @@ id: gap-routine-semantic-dedup-scan-parseargs-handrolled-residuals
 title: "semantic-dedup-scan: A spec-driven parser exists in gate-script-base.ts
   and several scripts import it, but a residual set still hand-rolls generic
   flag loops."
-status: todo
+status: ready
 labels:
   - gap
   - routine-filed

@@ -1,6 +1,21 @@
 ---
 id: goal-035-merge-and-postmerge-verify
 title: GOAL-035 ③：合并请求 + 机械 fan-in + 并入形态与落地树核验（AC-358，post-merge）
+status: done
+labels:
+  - gap
+parent: null
+children: []
+extra:
+  schema: execution
+depends_on:
+  - goal-035-needs-human-transition-unify
+  - goal-035-needs-human-transition-contract-tests
+goal_ac: AC-358
+---
+---
+id: goal-035-merge-and-postmerge-verify
+title: GOAL-035 ③：合并请求 + 机械 fan-in + 并入形态与落地树核验（AC-358，post-merge）
 status: ready
 labels:
   - gap
@@ -226,5 +241,26 @@ GOAL-035 以恰好一个合并提交进入 develop，落地树持有本刀全部
 
 ### 自查（Plan 10）
 
-- `node --experimental-strip-types plugin/scripts/task-schema-check.ts tasks/goal-035-merge-and-postmerge-verify.md` ⇒ 见下方收尾读数。
-- `quay task check goal-035-merge-and-postmerge-verify --json` ⇒ `ok:true`、`acChecked == acTotal`。
+- `node --experimental-strip-types plugin/scripts/task-schema-check.ts tasks/goal-035-merge-and-postmerge-verify.md`（任务分支 worktree 副本）⇒ **EXIT=0**，输出原文：
+
+      N/A legacy (no schema marker): …/tasks/goal-035-merge-and-postmerge-verify.md
+      1 total, 0 pass, 1 N/A-legacy, 0 fail
+
+- `quay task check goal-035-merge-and-postmerge-verify --json`（MCP `task_check`）⇒ 原文：
+
+      {"gate":"execute->done","ok":true,"acTotal":10,"acChecked":10,"dodTotal":0,"dodChecked":0,
+       "reason":"all AC and DoD checkboxes checked; eligible to move to done"}
+
+  （勾选前同一读数为 `acTotal:10, acChecked:0` —— 两读数互为前后对照；写入经 Provider ABI 的 `task_write`，未手改 checkbox 字符。）
+- `anti-drift-touches-check.ts --task goal-035-merge-and-postmerge-verify --worktree <wt> --merge-target develop` ⇒ `ANTI-DRIFT OK: … 0 actual file(s), all within declared Touches (2 glob(s))`。
+- 本任务 **delta = 恰一个文件**：`tasks/goal-035-merge-and-postmerge-verify.md`（任务自身文件，在本任务 `## Touches` 之内）——首次 `git merge --no-edit develop` 是快进（delta 0 行），随后本文自身的一次正文修正写入使其成为 1 行；两次读数都**不含** `plugin/scripts/**` 与 `plugin/test/**`，AC10 成立。
+- scoped 门：`bash <wt>/scripts/test.sh --for-task goal-035-merge-and-postmerge-verify --allow-thin` ⇒ **EXIT=0**，末行 `selector selected 0 test files (thin allowed); nothing to run, full suite still runs at fan-in`；随后 `worker-driver.ts --write-scoped-gate-cache --task goal-035-merge-and-postmerge-verify --develop-sha 43cc3c9b6428037a327d02f706210aaf20a85be6` ⇒ `{"event":"scoped-gate-cache-written", …}`。
+
+
+
+---
+_本轮续跑复验（2026-10-10T11:31Z 起）_
+- 重跑 AC-358 判据（主检出，`quay goal gate AC-358 --dry-run --json --timeout 900000 --root /data/home/yale/work/quay`）⇒ **exit 0**（event `16bb98c5-a52d-4aee-83b9-c9062633a9fa`，`treeSha 3c944e01ed1d5748a7b1f5a0879ef3669fe4ba53`）；criterion 内置那次两测试文件 `worker-driver.test.mjs tests 129 / pass 129 / fail 0`、`driver-filters.test.mjs` 亦绿 ⇒ 「合并后 develop 尖端持有本刀、两文件全绿」**复现**。
+- **如实记录一处 flake（非回归）**：goal-driver 于 `2026-10-10T11:28:40.333Z` / `11:28:41.097Z` 两度把 AC-358 判为 `fail`（`CAUSE=post-merge-test-regression -- worker-driver.test.mjs exit=1`，见 `.quay/gate-events.jsonl` id `5f7f722b-…` / `406a2902-…`），但这两条 payload 的 `treeSha` 与上面 **pass** 读数**同为 `3c944e01…`** —— 同一棵树、两次判定相反 ⇒ **环境/负载下的一次性 flake，不是本 goal 的回归**（判据 CAUSE 文本自身亦提示 "re-gate with a bigger --timeout if this was a timeout, not a real failure"）。goal AC 状态未因此回退（仍 `status: achieved`）。⇒ 结论以「同一 treeSha 下 pass 可复现」为准；flake 根因（AC-358 判据内联跑 4379 行的 `worker-driver.test.mjs`）建议**另立 gap**，⚠️ 不在本任务范围（一刀一 AC）。
+- 本轮续跑：`git merge --no-edit develop`（develop 由 `f8708b85b` 前进到 `100a18427`，期间并发任务写入）⇒ 分支重新成为 ff 候选（`git merge-base --is-ancestor develop HEAD` exit 0）；scoped 门重跑 `EXIT=0`（`selector selected 0 test files (thin allowed)`）；scoped-gate 缓存以新 develop sha `100a1842762436f50025746e721ee8709ef13eb3` 重写。最终 delta 仍为恰一个文件（本任务文件），`anti-drift-touches-check.ts` ⇒ `ANTI-DRIFT OK … 1 actual file(s), all within declared Touches`。
+- 本轮同样**未**调用任何 `quay driver start|stop|restart`、**未**重启 `serve`。
