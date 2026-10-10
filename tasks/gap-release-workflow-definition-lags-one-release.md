@@ -66,15 +66,6 @@ run("gh", ["workflow", "run", "release.yml", "--ref", tag, "-f", `tag=${tag}`], 
 
 **建议**：P1/P2 可先行落地；P3 单独立项、由人决定形态（含"哪个 ref 构建产物"与"是否去重 release.yml 的 job"）后再实现其两条控制。
 
-
-**本轮复核（2026-10-10）——AC4 是本任务唯一的落地阻塞，而它不是 worker 能关闭的**：
-
-- **权威判据**（fan-in 真正跑的那道闸，不是正则推断）：`node --experimental-strip-types plugin/scripts/fan-in-ac-completion-gate.ts --task gap-release-workflow-definition-lags-one-release --worktree <wt> --json` ⇒ `{"ok":false,"status":"fail","total":5,"checked":3,"unchecked":2,"message":"AC 未全勾（checked 3/5，剩余未勾 2 含非待外部项）——未翻 done"}`。AC1 因末尾 `（待外部）` 被排除；报错里那个"非待外部项"就是 **AC4** ⇒ AC4 保持现状则本任务**永远不能翻 done**，worker 每次续做都只能原样退出。
-- **AC4 照字面在 develop 上不可能通过**（本轮读代码复核）：`scripts/resolve-version.ts:224` 对"非 release/* 分支且 HEAD 无版本 tag"返回 `` `${parsed}${DEV_SUFFIX}` ``；`plugin/scripts/verify-plugin-channel-assertions.ts:217,228` 的 `judgeVersionConsistency` 用 `/-dev\b/` 判 **FAIL** ⇒ 从 develop 构建的 channel 过不了这道门，"正控制：一次成功运行"无法由 develop 提供。
-- **也没有可回放的历史载体**：assertions 调用步在 tag 上的出现次数 = v0.16.0:0、v0.17.0:2、v0.18.0:2，而 v0.17.0 那次 run 只跑 13 步（执行的是 v0.16.0 的定义）⇒ 该步**从未有一次成功运行**可引为绿读数；两条控制臂都只能来自新 nightly 上线之后。
-- **需要的裁定（三种都是作者/人的动作；worker 自改 AC 文本或自加外部标注均被禁止）**：①把 AC4 改写成在任务内可取的形态；②给 AC4 加外部标注；③把 P3 拆成独立任务，让本任务凭 P1/P2 + AC1 的裁定先落 develop。⛔ 本轮**不勾 AC4、不改 AC 文本、不动 status**。
-- **本轮复绿读数**：`node --test plugin/test/release-cut.test.mjs` 12/12；`scripts/test.sh --for-task gap-release-workflow-definition-lags-one-release --allow-thin` ⇒ exit 0；worktree 与 develop 无分叉、无未合并路径；P1/P2 实现未再改动（分支上仍为那 3 个文件）。
-**第三轮复核（2026-10-10，续做 worker）——阻塞不变；本轮已发出带外升级通知**：`fan-in-ac-completion-gate` 仍报 `checked 3/5，剩余未勾 2 含非待外部项`（AC1 因末尾 `（待外部）` 被排除 ⇒ 点名的就是 AC4）。本轮**未**改 AC 文本 / **未**自加 `（待外部）` / **未**动 `status:`（均为 authoring 动作，worker 禁止）；已完成可做的机械部分：`git merge develop` 无冲突、`scripts/test.sh --for-task … --allow-thin` exit 0（12/12）、scoped-gate cache 已写、anti-drift OK（4 文件 ⊆ 5 条 Touches）。⇒ **AC4 维持现状时本任务结构性不可落地**，worker 每轮只能原样退出（前两轮）或完成机械部分后退出（本轮）。待裁定同上一轮：①改写 AC4 为任务内可取形态；②给 AC4 加 `（待外部）`；③把 P3 拆成独立任务，让本任务凭 P1/P2 先落 develop。
 ## Touches
 
 - plugin/scripts/release-cut.mjs
