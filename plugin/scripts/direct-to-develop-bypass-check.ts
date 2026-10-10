@@ -1304,13 +1304,19 @@ export function gitDevelopDirectCommits(root, develop, baseline, ledgerShas) {
           allNonFirstParentsPublished = null; // origin/develop 读不出 ⇒ NOT-EVALUATED
         } else {
           let all = true;
+          let unreadable = false;
           for (const p of parents.slice(2)) {
-            if (ancestry(root, p, originDevelop) !== true) {
-              all = false; // 任一非首父非发布（或 ancestry 读不出）⇒ 不是「已发布外部线」
+            const anc = ancestry(root, p, originDevelop);
+            if (anc === null) {
+              unreadable = true; // ancestry 读不出 ⇒ 独立第三态（硬规则 3b：⛔ 不折叠成「非 reconcile」）
+              break;
+            }
+            if (anc !== true) {
+              all = false; // 该非首父不在 origin/develop 里 ⇒ 本地 merge ⇒ 不是「已发布外部线」
               break;
             }
           }
-          allNonFirstParentsPublished = all;
+          allNonFirstParentsPublished = unreadable ? null : all;
         }
       }
       const cls = classifyPublishedReconcile("", parentCount, allNonFirstParentsPublished);
