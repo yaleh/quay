@@ -199,6 +199,7 @@ import type {
   FailClosedChecker,
   NotEvaluatedChecker,
   SuiteRoundRecord,
+  SuiteMemoryEvidence,
 } from "./full-suite-runner-types.ts";
 export type {
   SuiteStateValue,
@@ -211,6 +212,7 @@ export type {
   FailClosedChecker,
   NotEvaluatedChecker,
   SuiteRoundRecord,
+  SuiteMemoryEvidence,
 } from "./full-suite-runner-types.ts";
 
 const REPO_ROOT = repoRoot();
@@ -473,13 +475,20 @@ export function readLoadAvg(): number {
 // SuiteRoundRecord; readScopeConsumedLoad + ScopeConsumedLoadRead at the round-end load capture) and
 // re-exported so the runner's public API surface — and every importer (e.g. full-suite-runner.test.mjs)
 // — is byte-for-byte unchanged.
-import { PhaseDifferentialAccounting, readScopeConsumedLoad, effectiveParallelism, parseSystemdBytesToMb } from "./suite-accounting.ts";
+import { PhaseDifferentialAccounting, readScopeConsumedLoad, effectiveParallelism, parseSystemdBytesToMb, resolveCgroupV2Dir } from "./suite-accounting.ts";
 import type { PhaseDiffRecord, ScopeConsumedLoadRead } from "./suite-accounting.ts";
 // The suite's host-derived memory envelope reuses THE shared page-aligned `floor(totalmem × fraction)`
 // pure function (⛔ not a second copy — 硬规则 5b). `packages/quay/src/systemd-scope.ts` is a
 // node-builtin-only leaf (the same shared module `driver-runtime.ts` imports for the anchor/serve
 // envelopes), so this `plugin/` → `packages/` edge adds no cycle.
-import { defaultScopeMemoryMax } from "../../packages/quay/src/systemd-scope.ts";
+// gap-full-suite-scope-oom-policy-stops-whole-suite-unattributable — the ALWAYS-present scope
+// properties + the availability probe are reused from the SAME shared module (⛔ not a 2nd literal,
+// 硬规则 5b): SCOPE_PROPERTY_ARGS carries `MemoryAccounting=yes` + `OOMPolicy=continue`, and
+// scopeProbeArgv() is the probe that exercises exactly those properties. `buildSystemdRunArgv` and
+// `systemdRunAvailable` both consume them ⇒ 「探测绿」structurally implies the real suite scope accepts
+// the same properties (a host whose systemd rejects OOMPolicy=continue ⇒ probe unavailable ⇒ the
+// suite runs un-enveloped AND the OOM test reports an explicit not-evaluated skip, never a silent pass).
+import { defaultScopeMemoryMax, scopeProbeArgv, SCOPE_PROPERTY_ARGS } from "../../packages/quay/src/systemd-scope.ts";
 // The cgroup-aware "effective total memory" reading is NOT re-implemented here: the ONE cgroup
 // hierarchy traversal (ancestor walk + quay-own-scope exclusion) and the ONE derivation live in
 // `effective-capacity-probe.ts` (the shared probe). ⛔ 硬规则 5b — 不重复发明第二份探测实现.
@@ -996,6 +1005,12 @@ export interface SystemdRunLimits {
   memoryMax: string; // -p MemoryMax=<v> — "" = no memory limit
   cpuQuota: string; //  -p CPUQuota=<v> — "" = NO CPU limit (人 2026-08-11 裁定「取消 CPU 配额」; 400% 只是当时 4 核机上等价无限制的 measure-first 临时形态, 搬到多核机变成真限制 ⇒ 持久修法 = 不再传 -p CPUQuota=, 见 gap-systemd-run-cancel-cpuquota-keep-memory-guardrail + CLAUDE.md 推论二)
   tasksMax: string; //  -p TasksMax=<v> — "" = NO task limit (人 2026-08-12 裁定③取消 TasksMax=200; 写死的 200 与 CPUQuota 同族, fork: EAGAIN 实证)
+  // gap-full-suite-scope-oom-policy-stops-whole-suite-unattributable — "" = NO swap ceiling (the
+  // pre-change default, byte-for-byte). Set it (e.g. "0") only to make a MemoryMax a REAL ceiling:
+  // with unlimited swap a cgroup can swap past its memory.max instead of OOM-killing, so a test that
+  // must reproduce an OOM sets `MemorySwapMax=0`. Production keeps "" (⛔ this task does not change the
+  // host-derived MemoryMax policy — only the OOM semantics/evidence).
+  memorySwapMax?: string; // -p MemorySwapMax=<v> — ""/absent = no swap limit
 }
 
 // ── gap-full-suite-runner-memory-max-host-derived-envelope ──────────────────────────────────────
@@ -1062,6 +1077,7 @@ export const DEFAULT_SYSTEMD_RUN_LIMITS: SystemdRunLimits = {
   memoryMax: suiteMemoryMax(readEffectiveTotalMemBytes()),
   cpuQuota: "",
   tasksMax: "",
+  memorySwapMax: "",
 };
 
 /**
@@ -1079,6 +1095,7 @@ export function parseSystemdRunLimits(raw?: string): SystemdRunLimits {
     if (key === "MemoryMax") limits.memoryMax = value;
     else if (key === "CPUQuota") limits.cpuQuota = value;
     else if (key === "TasksMax") limits.tasksMax = value;
+    else if (key === "MemorySwapMax") limits.memorySwapMax = value;
   }
   return limits;
 }
@@ -1097,7 +1114,15 @@ export function systemdRunAvailable(): boolean {
   if (forced === "0") return (_systemdRunAvailable = false);
   if (forced === "1") return (_systemdRunAvailable = true);
   try {
-    execFileSync("systemd-run", ["--user", "--scope", "--quiet", "-p", "TasksMax=100", "true"], {
+    // gap-full-suite-scope-oom-policy-stops-whole-suite-unattributable — the probe carries EXACTLY the
+    // always-present properties the real invocation passes (`scopeProbeArgv()` = the shared
+    // SCOPE_PROPERTY_ARGS + a no-op member). The previous probe passed `-p TasksMax=100` — a property
+    // the real call does NOT pass (default tasksMax="") — so a host whose systemd rejects one of the
+    // REAL properties could still report 「available」 and silently run the suite un-enveloped
+    // (硬规则 3b: 探测绿不得与「真调用能成」同形). Sharing the property list makes the probe and the
+    // real call change together (改一处两处同变).
+    const probe = scopeProbeArgv();
+    execFileSync(probe[0], probe.slice(1), {
       stdio: "ignore",
       timeout: 10_000,
     });
@@ -1120,12 +1145,23 @@ export function buildSystemdRunArgv(command: string, limits: SystemdRunLimits = 
     "--user",
     "--scope",
     "--quiet",
+    // gap-full-suite-scope-oom-policy-stops-whole-suite-unattributable — the ALWAYS-present properties,
+    // taken from the ONE shared definition (SCOPE_PROPERTY_ARGS): `MemoryAccounting=yes` (so
+    // memory.peak / memory.events are readable for the per-run evidence) + `OOMPolicy=continue`.
+    // OOMPolicy is the load-bearing one: systemd's DEFAULT scope policy is `stop`, so ONE OOM-killed
+    // process TERMs the WHOLE suite scope — test.sh's abort trap then prints "terminated by an external
+    // signal" and every remaining test is cancelled with NO failing file to attribute (the 2026-10-10
+    // phenomenon). `continue` lets only the OOM'd process die, so its own test file's failure is
+    // attributed; the scope keeps running. Probe parity: `scopeProbeArgv()` (the availability probe)
+    // carries exactly these pairs, so 「probe green」 implies the real call accepts them.
+    ...SCOPE_PROPERTY_ARGS,
   ];
-  // memoryMax/cpuQuota/tasksMax 为空 ⇒ 不传对应 -p — cgroup 对该维不设限制（人裁定：不设限制就在机制上
-  // 不传该参数，字面值只在写它的机器上等价于无限制，CLAUDE.md 推论二）。
+  // memoryMax/cpuQuota/tasksMax/memorySwapMax 为空 ⇒ 不传对应 -p — cgroup 对该维不设限制（人裁定：不设限制
+  // 就在机制上不传该参数，字面值只在写它的机器上等价于无限制，CLAUDE.md 推论二）。
   if (limits.memoryMax) argv.push("-p", `MemoryMax=${limits.memoryMax}`);
   if (limits.cpuQuota) argv.push("-p", `CPUQuota=${limits.cpuQuota}`);
   if (limits.tasksMax) argv.push("-p", `TasksMax=${limits.tasksMax}`);
+  if (limits.memorySwapMax) argv.push("-p", `MemorySwapMax=${limits.memorySwapMax}`);
   argv.push("bash", "-c", command);
   return argv;
 }
@@ -1208,6 +1244,145 @@ export function recordSystemdRunEvidence(stateDir: string, scopeUnit: string, li
   } catch {
     // best-effort — never let evidence capture fail the run
   }
+}
+
+// ── gap-full-suite-scope-oom-policy-stops-whole-suite-unattributable: per-run OOM/memory evidence ────
+// `audit`-time problem this closes: the suite scope's OOM semantics were unobservable. `OOMPolicy` was
+// not set (default `stop` ⇒ ONE OOM-killed process TERMs the whole suite), and `suite-cgroup-evidence.txt`
+// records only the APPLIED LIMITS (a single-slot file overwritten each round) — never a peak or an OOM
+// count. So a fan-in red "terminated by an external signal" had NO attributable failing file and NO
+// evidence saying why. This block samples the running scope cgroup (memory.peak / memory.events) and
+// lands ONE file per runId, so (a) two rounds never overwrite each other and (b) the worker-driver can
+// classify the red as `suite-oom` with the peak / limit / phase.
+//
+// 硬规则 4b: memory.peak / memory.events are the KERNEL's direct counters for THIS cgroup — a直接量,
+// not a proxy. 硬规则 6 / 3b: a counter that could not be read is never written as a fabricated 0
+// (`peakBytes: null`); `samples: 0` marks the whole evidence inert (the cgroup was never readable).
+
+/** Parse a systemd size string (`"300M"`, `"16G"`, `"17179869184"`) to BYTES, or null when unparseable.
+ *  Reuses the ONE size parser (`parseSystemdBytesToMb`, suite-accounting.ts) — ⛔ not a second unit table. */
+export function parseSystemdBytesToBytes(raw: string): number | null {
+  const mb = parseSystemdBytesToMb(raw);
+  return mb === null ? null : Math.round(mb * 1024 * 1024);
+}
+
+/** Read the cgroup v2 `memory.events` counters (`oom`, `oom_kill`). null when the file is unreadable /
+ *  has neither key (⛔ never a fabricated 0 — 硬规则 6; the caller treats null as 「未读到」, not 「无 OOM」). */
+export function readCgroupMemoryEvents(cgroupDir: string): { oom: number; oomKill: number } | null {
+  try {
+    const text = fs.readFileSync(path.join(cgroupDir, "memory.events"), "utf8");
+    const oom = /^oom\s+(\d+)$/m.exec(text);
+    const oomKill = /^oom_kill\s+(\d+)$/m.exec(text);
+    if (!oom && !oomKill) return null;
+    return { oom: oom ? Number(oom[1]) : 0, oomKill: oomKill ? Number(oomKill[1]) : 0 };
+  } catch {
+    return null;
+  }
+}
+
+/** Read the cgroup v2 `memory.peak` high-water mark (bytes), falling back to `memory.current` on older
+ *  kernels. null when neither is readable (⛔ never a fabricated 0 — 硬规则 6). */
+export function readCgroupMemoryPeak(cgroupDir: string): number | null {
+  for (const file of ["memory.peak", "memory.current"]) {
+    try {
+      const v = Number(String(fs.readFileSync(path.join(cgroupDir, file), "utf8")).trim());
+      if (Number.isFinite(v)) return v;
+    } catch {
+      /* try the next file */
+    }
+  }
+  return null;
+}
+
+/** Write the per-run OOM evidence to `<stateDir>/suite-memory-evidence-<runId>.json`. Best-effort —
+ *  evidence capture must never fail the run (mirrors recordSystemdRunEvidence). The runId in the NAME is
+ *  what makes two consecutive runs land in two files (⛔ a single-slot file would overwrite). */
+export function writeSuiteMemoryEvidence(stateDir: string, evidence: SuiteMemoryEvidence): void {
+  try {
+    fs.mkdirSync(stateDir, { recursive: true });
+    fs.writeFileSync(
+      path.join(stateDir, `suite-memory-evidence-${evidence.runId}.json`),
+      `${JSON.stringify(evidence, null, 2)}\n`,
+      "utf8",
+    );
+  } catch {
+    /* best-effort */
+  }
+}
+
+/** A live per-run cgroup memory/OOM sampler. `stop()` takes one final reading and lands the evidence. */
+export interface SuiteMemorySampler {
+  stop(): SuiteMemoryEvidence;
+}
+
+/**
+ * Start sampling the suite scope's cgroup every `intervalMs` (default 2s) and once more on `stop()`.
+ * `cgroupDirProvider` is resolved lazily each sample: at round start the transient scope unit may not
+ * exist yet, so a one-shot resolve would return null and make the whole evidence inert.
+ * `phaseProvider` reads the CURRENT suite phase (the runner's PhaseDifferentialAccounting) so the OOM
+ * can be reported against the phase it happened in (`oomPhase` = the phase at the first sample whose
+ * `oom_kill` was positive; else the last phase seen). The timer is `unref`'d so a missed stop() can
+ * never hold the event loop. Hermetic + host-independent: when `cgroupDirProvider()` is null the
+ * sampler still runs (phaseProvider advances) and lands `samples: 0` — a genuinely inert reading.
+ */
+export function startSuiteMemorySampler(opts: {
+  cgroupDirProvider: () => string | null;
+  stateDir: string;
+  runId: string;
+  memoryMaxBytes: number | null;
+  scopeUnit?: string | null;
+  phaseProvider: () => string;
+  intervalMs?: number;
+}): SuiteMemorySampler {
+  const intervalMs = opts.intervalMs ?? 2000;
+  let peakBytes: number | null = null;
+  let oom = 0;
+  let oomKill = 0;
+  let lastPhase = "";
+  let oomPhase: string | null = null;
+  let samples = 0;
+
+  const sample = (): void => {
+    lastPhase = opts.phaseProvider() || lastPhase;
+    const dir = opts.cgroupDirProvider();
+    if (!dir) return;
+    const peak = readCgroupMemoryPeak(dir);
+    if (peak !== null) peakBytes = peakBytes === null ? peak : Math.max(peakBytes, peak);
+    const ev = readCgroupMemoryEvents(dir);
+    if (ev) {
+      // The phase at the moment oom_kill FIRST became positive is where the OOM happened. Only latch
+      // it on the 0→>0 transition so a later sample in another phase cannot overwrite it.
+      if (ev.oomKill > 0 && oomKill === 0) oomPhase = lastPhase;
+      oom = Math.max(oom, ev.oom);
+      oomKill = Math.max(oomKill, ev.oomKill);
+    }
+    samples += 1;
+  };
+
+  sample();
+  const timer = setInterval(sample, intervalMs);
+  if (typeof timer.unref === "function") timer.unref();
+
+  return {
+    stop(): SuiteMemoryEvidence {
+      clearInterval(timer);
+      // The scope is destroyed the moment the suite child closes ⇒ this is the last readable sample.
+      sample();
+      const evidence: SuiteMemoryEvidence = {
+        runId: opts.runId,
+        peakBytes,
+        memoryMaxBytes: opts.memoryMaxBytes,
+        oom,
+        oomKill,
+        phase: oomPhase ?? lastPhase,
+        scopeUnit: opts.scopeUnit ?? null,
+        samples,
+        capturedAt: new Date().toISOString(),
+      };
+      writeSuiteMemoryEvidence(opts.stateDir, evidence);
+      return evidence;
+    },
+  };
 }
 
 // ── suite log 溯源标记（gap-fan-in-suite-refusal-reports-as-suite-red AC1/AC3）──────────────────────
@@ -1973,6 +2148,23 @@ export async function run(argv: string[]): Promise<number> {
   phaseAccount = new PhaseDifferentialAccounting(child.pid, phaseLanes);
   phaseAccount.init("static");
 
+  // gap-full-suite-scope-oom-policy-stops-whole-suite-unattributable — sample the suite scope's cgroup
+  // (memory.peak / memory.events) while it runs, so a round's peak + OOM counts survive the transient
+  // scope's destruction (the unit vanishes at suite exit ⇒ `Result=oom-kill` and `memory.events` are
+  // then unreadable). Only when a REAL scope wraps the suite — an un-enveloped run has no cgroup to
+  // sample. `cgroupDirProvider` resolves lazily (the scope unit may not exist yet at round start).
+  let memorySampler: SuiteMemorySampler | null = null;
+  if (useSystemdRun) {
+    memorySampler = startSuiteMemorySampler({
+      cgroupDirProvider: () => resolveCgroupV2Dir(child.pid),
+      stateDir,
+      runId,
+      memoryMaxBytes: parseSystemdBytesToBytes(systemdLimits.memoryMax),
+      scopeUnit: null,
+      phaseProvider: () => phaseAccount?.phase ?? "",
+    });
+  }
+
   // AC5 (reason axis) — a signal-kill ⇒ red + reason=aborted (NO correctness conclusion), so the
   // inner's stop-dispatch does NOT fire on an abort. A previously-detected real failure (redDetected)
   // is never downgraded — the failure conclusion stands. abortDetected is the reason-axis marker for
@@ -2692,6 +2884,14 @@ export async function run(argv: string[]): Promise<number> {
     child.once("close", (code, signal) => resolve({ code, signal }));
   });
   const exitCode = exit.code;
+
+  // gap-full-suite-scope-oom-policy-stops-whole-suite-unattributable — take the FINAL cgroup reading
+  // (peak / memory.events) before the transient scope unit is destroyed, and land the per-run evidence
+  // file `<state-dir>/suite-memory-evidence-<runId>.json`. Best-effort: capture must never fail the run.
+  if (memorySampler) {
+    memorySampler.stop();
+    memorySampler = null;
+  }
 
   runDone = true;
   // The suite child closed on its own — the liveness guards are no longer needed; clear them all so a
