@@ -1,7 +1,7 @@
 ---
 id: gap-release-workflow-definition-lags-one-release
 title: release-cut 的 dispatch 不带 --ref ⇒ 每次发布跑的是上一版的 release.yml（v0.18.0 首次生效的门因此失败）
-status: ready
+status: needs-human
 labels:
   - gap
   - defect
@@ -71,3 +71,11 @@ run("gh", ["workflow", "run", "release.yml", "--ref", tag, "-f", `tag=${tag}`], 
 - plugin/test/release-cut.test.mjs
 - .github/workflows/ci.yml
 - tasks/gap-release-workflow-definition-lags-one-release.md
+## Needs-Human
+
+**执行 2026-10-10T06:39:36.186Z — 连续修满重试上限仍不合格（标 needs-human）**
+
+- 阻碍原因：worker-driver 连续 3 次 exited-not-landed 未落地（重试上限）
+- 失败步/判词：AC 未全勾（checked 3/5，剩余未勾 2）——续做只需验证并勾选 AC
+- run_id：wk-prod-anchor
+- session_id：0952dc6e-fa8d-4613-90be-0866815dd336
