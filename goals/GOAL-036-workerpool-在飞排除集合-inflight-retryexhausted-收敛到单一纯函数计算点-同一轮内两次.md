@@ -5,8 +5,8 @@ title: WorkerPool 在飞排除集合（inFlight/retryExhausted）收敛到单一
   2026-10-11 批准三轨①，优先项）
 status: draft
 kind: goal
-origin: 用户 2026-10-11 正式批准推进三条架构改进（Driver/Routine/Pool、Gate/Fan-in、Goal
-  transition），本 goal 是优先项①的实施，②③本轮只设计不实施
+origin: 用户 2026-10-11 批准三轨①
+branch: true
 ---
 ## 背景
 
