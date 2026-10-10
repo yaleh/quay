@@ -24,7 +24,16 @@ extra:
 
 ## Contract
 
-CI runner 容器（`gh-runner-quay`，由 systemd **user** unit `~/.config/systemd/user/gh-runner-quay.service` 以 `docker run --rm … quay-ci-runner:<tag>` 拉起，`EPHEMERAL=true`）必须同时满足两条，否则 release.yml 的第 13 步 `Verify the channel — project-scope assertions` 恒红，v0.18.0 及之后每一版都发不出去（`create-github-release` / `advance-master` 恒被 skipped）：
+```
+invariant 容器内 root 有可用的用户管理器，且该容器的 systemd 版本接受 `-p OOMPolicy=continue`；两条同时成立时 release.yml 第 13 步 project-scope 断言才可能绿
+measure serve_scope_envelope_exit: `docker exec -e XDG_RUNTIME_DIR=/run/user/0 gh-runner-quay systemd-run --user --scope --quiet -p OOMPolicy=continue -p MemoryAccounting=yes --unit=quay-anchor-probe true` → exit_code
+band   n/a: exit_code 是 0/非 0 的二值读数，不设噪声带
+invoke `docker exec -e XDG_RUNTIME_DIR=/run/user/0 gh-runner-quay systemd-run --user --scope --quiet -p MemoryAccounting=yes true`
+control 同一条命令**去掉** `-e XDG_RUNTIME_DIR=/run/user/0` 后必然失败（`Failed to create bus connection`）——这正是两个会话各自踩过的假阴性，以它为负控制
+resume 载体＝分支 `task/gap-ci-runner-container-needs-user-systemd` 的单提交 `bc6917029`；落地即经 task → 门 → fan-in 进 develop，随后 AC1 从 develop 的定义重建并复测
+```
+
+CI runner 容器（`gh-runner-quay`，由 systemd **user** unit `~/.config/systemd/user/gh-runner-quay.service` 以 `docker run --rm … quay-ci-runner:<tag>` 拉起，`EPHEMERAL=true`）必须同时满足上述两条，否则 release.yml 的第 13 步 `Verify the channel — project-scope assertions` 恒红，v0.18.0 及之后每一版都发不出去（`create-github-release` / `advance-master` 恒被 skipped）：
 
 1. **容器内 root 要有可用的用户管理器**：`systemd-run --user --scope` 必须真正建得出 scope（即 `packages/quay/src/systemd-scope.ts` 的可用性探测为真）。否则 `quay server start` 的信封无法施加，serve 静默走**不带 scope 的回退**分支，进程落进调用者 cgroup（读作 `0::/`），`judgeServeCgroup` 判 FAIL。
 2. **容器内 systemd 的版本必须能接受产品实际传的属性**：`systemd-scope.ts:228` 传 `-p OOMPolicy=continue`。systemd **245**（Ubuntu 20.04）对 **scope** 报 `Unknown assignment: OOMPolicy=continue`，driver anchor 起不来。
@@ -66,4 +75,4 @@ CI runner 容器（`gh-runner-quay`，由 systemd **user** unit `~/.config/syste
 
 ## Notes
 
-现已存在的分支 `task/gap-ci-runner-container-needs-user-systemd`（单提交，含全部四项修复与注释）可作为实现载体；但它**没有 task、没走门**，本任务存在的意义就是把它补进正规路径。⛔ 不要手工 merge 进 develop；⛔ 在此之前不要从 develop 重建镜像——现在跑着的镜像是对的。另有一条与本任务相邻但不同机制的悬项：token 现走 `docker run -e ACCESS_TOKEN=…`（argv，`ps aux` 全机可见），建议改 `--env-file` 并轮换 token——那属密钥通路变更，另案待人裁定，不并入本任务。
+现已存在的分支 `task/gap-ci-runner-container-needs-user-systemd`（单提交 `bc6917029`，含全部四项修复与注释）可作为实现载体；但它**没有 task、没走门**，本任务存在的意义就是把它补进正规路径。⛔ 不要手工 merge 进 develop；⛔ 在此之前不要从 develop 重建镜像——现在跑着的镜像是对的。另有一条与本任务相邻但不同机制的悬项：token 现走 `docker run -e ACCESS_TOKEN=…`（argv，`ps aux` 全机可见），建议改 `--env-file` 并轮换 token——那属密钥通路变更，另案待人裁定，不并入本任务。
