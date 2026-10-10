@@ -2,7 +2,7 @@
 id: goal-036-dispatch-exclusion-single-source
 title: WorkerPool 在飞排除集合单一来源化实现：computeDispatchExclusion 收敛 inFlightTasks()
   的两次独立调用（GOAL-036 落地任务，分支 goal/GOAL-036）
-status: ready
+status: done
 labels:
   - gap
 parent: null
