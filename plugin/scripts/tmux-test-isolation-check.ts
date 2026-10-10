@@ -47,7 +47,7 @@
 import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
-import { helpExit } from "./gate-script-base.ts";
+import { parseArgs } from "./gate-script-base.ts";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
@@ -91,16 +91,34 @@ export function scanFileText(text) {
   return { isolated: hasEnvStrip && hasExplicitS, reasons };
 }
 
+// `argv` is the FULL process.argv (parseArgs slices `argv.slice(2)` itself) — the same convention the
+// two already-folded members of this family use (task-ac-carryover-check.ts / task-contract-check.ts).
 export function runCli(argv) {
-  const args = argv.slice();
-  if (args.includes("--help") || args.includes("-h")) helpExit("usage: node tmux-test-isolation-check.ts [--root <dir>] [--json]");
-  let root = process.cwd();
-  let json = false;
-  for (let i = 0; i < args.length; i++) {
-    if (args[i] === "--root") root = path.resolve(args[++i]);
-    else if (args[i] === "--json") json = true;
-    else if (args[i].startsWith("-")) { console.error(`tmux-test-isolation-check: unknown flag: ${args[i]}`); process.exit(2); }
+  // Flag parsing is the SHARED spec-driven parser (gate-script-base.parseArgs), not a private
+  // hand-rolled loop. THIS file and threshold-scope-check.ts were the two that still carried a
+  // private `--root/--json/--help` loop after task-ac-carryover-check.ts / task-contract-check.ts
+  // folded onto the shared parser (.quay/routine-findings.jsonl finding `runcli-twostill-handrolled`,
+  // routine `semantic-dedup-scan`, runId `semantic-dedup-scan-1791631645924`, verdict
+  // divergent-implementation); both now call the one parser. `strict:true` keeps the loop's
+  // unknown-`--flag` guard (exit 2); `minArgs:0` because every mode here is flag-only. parseArgs owns
+  // the `--help`/`-h` contract (usage to stdout, exit 0) too.
+  const { args: positionals, flags } = parseArgs(argv, {
+    minArgs: 0,
+    strict: true,
+    usage: "[--root <dir>] [--json]",
+    flags: { root: { type: "string" }, json: { type: "boolean" } },
+  });
+  // The private loop let a stray positional fall through silently and then scanned the DEFAULT root,
+  // reporting PASS for an input it never read (硬规则 3b). threshold-scope-check.ts already rejected
+  // positionals (exit 2); unifying the family means stopping at the same place, not inheriting the
+  // weaker arm. No caller passes a positional (`scripts/test.sh` and the mutation case both use
+  // `--root <dir>` only).
+  if (positionals.length > 0) {
+    console.error(`tmux-test-isolation-check: unexpected positional: ${positionals[0]}`);
+    process.exit(2);
   }
+  const root = typeof flags.root === "string" && flags.root !== "" ? path.resolve(flags.root) : process.cwd();
+  const json = flags.json === true;
   const files = scanTargets(root);
   const violations = [];
   for (const file of files) {
@@ -126,5 +144,5 @@ export function runCli(argv) {
 }
 
 if (process.argv[1] && import.meta.url === pathToFileURL(path.resolve(process.argv[1])).href) {
-  runCli(process.argv.slice(2));
+  runCli(process.argv);
 }
