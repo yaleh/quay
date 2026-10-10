@@ -2,7 +2,7 @@
 id: gap-ac264-fleet-project-scope-deployment-rotted
 title: AC-264 第二次立案：quay-fleet 的 project-scope plugin 部署已烂（settings 键被抹、install
   记录消失、config 绑定指向不存在的 cache 版本、marketplace 源目录被删）——真实重装 + 修复绑定 + 落成提交
-status: todo
+status: ready
 labels:
   - gap
   - defect
