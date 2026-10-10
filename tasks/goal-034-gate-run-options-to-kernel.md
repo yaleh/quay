@@ -66,3 +66,4 @@ The slice lands on `goal/GOAL-034` with AC-353 and AC-354 both reading exit 0 wh
 - packages/quay/src/gate/registry.ts
 - packages/quay/src/goal-store.ts
 - packages/quay/src/cli/gate.ts
+- tasks/goal-034-gate-run-options-to-kernel.md
