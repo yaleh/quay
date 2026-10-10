@@ -2,7 +2,7 @@
 id: gap-promotion-driver-blind-to-unsatisfiable-ac-block
 title: todo→ready 被判「执行者结构上勾不了的 AC 未标注」拦下时，promotion-driver 既不记原因、也结构上永不
   needs-human ⇒ 该 todo 无限空转（实测 11h12m / 750 轮 / 全库唯一 todo）
-status: todo
+status: ready
 labels:
   - gap
   - defect
