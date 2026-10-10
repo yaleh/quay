@@ -2,7 +2,7 @@
 id: gap-ownership-active-investigation-loop-shadow
 title: "ownership active investigation loop: production shadow with bounded
   evidence requests and ArchGuard slice-delta"
-status: todo
+status: done
 labels:
   - gap
 parent: null
