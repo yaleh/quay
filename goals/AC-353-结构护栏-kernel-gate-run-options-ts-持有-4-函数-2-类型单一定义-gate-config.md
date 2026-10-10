@@ -2,7 +2,7 @@
 id: AC-353
 title: 结构护栏：kernel/gate-run-options.ts 持有 4 函数+2 类型单一定义；gate/config/utils.ts 与
   gate/factories/loader.ts 均删除（无 shim）；七个真实消费点改口；非目标文件未动
-status: active
+status: achieved
 kind: criterion
 goal: GOAL-034
 criterion: |
@@ -50,6 +50,11 @@ statusLog:
     to: active
     actor: goal-cli
     reason: ""
+  - at: 2026-10-10T06:35:59.060Z
+    from: active
+    to: achieved
+    actor: goal-driver
+    reason: "I2: criterion pass"
 fidelity:
   verdict: not-evaluated
   reason: no judge configured
