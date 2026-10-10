@@ -90,8 +90,7 @@ $ node packages/quay/bin/quay.js task view gap-ac355-… --json | jq -r .body | 
 **归属（代码位置）**：
 
 - 产生原因文本：`plugin/scripts/fan-in-ac-completion-gate.ts:63`（`AC 未全勾（checked …）`）与机械 fan-in
-  的 suite 红行 —— 经 `plugin/scripts/driver-filters.ts:770` `formatExitedNotLandingReason`（实为
-  `formatExitedNotLandedReason`）归一。
+  的 suite 红行 —— 经 `plugin/scripts/driver-filters.ts:770` `formatExitedNotLandedReason` 归一。
 - 写进私有台账：`plugin/scripts/worker-driver.ts` `computeOutcome`（`failure_reason`）→
   `appendOutcomeToFile`（`worker-outcome.jsonl` 的**唯一**落盘点；`appendOutcome` 包装同经它）。
 - 任务记录写入面：**此前不存在**（本次新增 `projectBlockerToTaskRecord`，调用点 = `runOneWorker`
