@@ -2,7 +2,7 @@
 id: goal-034-gate-run-options-to-kernel
 title: gate 包环收敛第一刀实现：gate/config/utils.ts 的纯原语 + GateConfig/RunnerOptions 类型下沉
   kernel，删除两个死文件（GOAL-034 落地任务，分支 goal/GOAL-034）
-status: todo
+status: ready
 labels:
   - gap
 parent: null
