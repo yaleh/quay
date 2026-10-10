@@ -34,6 +34,10 @@ CI runner 容器（`gh-runner-quay`，由 systemd **user** unit `~/.config/syste
 
 修后 `38025425341` **completed/success**，15/15 步全绿（含第 13、14 步断言），release 对象已建（https://github.com/yaleh/quay/releases/tag/v0.18.0 ）、master 推进到 `a663d1936`。
 
+## Proposal
+
+在 develop 的 `.github/runner/Dockerfile` 上重写镜像定义，使其自带 Contract 两条所需的全部内容：覆盖 base 的 `ENTRYPOINT` 换成 systemd、把可用的用户管理器带进镜像、显式导出 `RUNNER_TOOL_CACHE` / `HOME` / `PATH` 等 runner 进程所需变量，并按 AC2 把四条前置写成构建期 `RUN` 断言、按 AC3/AC4 把已知坑写进注释。实现载体取现有单提交分支 `task/gap-ci-runner-container-needs-user-systemd` 的内容，但必须经 task → 门 → fan-in 落地进 develop，而不是手工 merge。
+
 ## AC
 
 - [ ] AC1 **从 develop 重建** `.github/runner/Dockerfile` 后，容器内下列读数**全部成立**（⛔ 必须在 develop 的定义上验，不是在已修分支上验）：`systemd-run --user --scope --quiet -p OOMPolicy=continue -p MemoryAccounting=yes --unit=quay-anchor-probe true` 原样 exit 0；`systemd-run --user --scope --quiet -p MemoryAccounting=yes true` exit 0；`systemctl is-active user@0.service` = active；`/opt/hostedtoolcache/node/*/x64.complete` 存在；runner 进程环境里 `RUNNER_TOOL_CACHE=/opt/hostedtoolcache` 且 `HOME` 非空；某 scope 的 `/proc/<pid>/cgroup` 以 `user@0.service/quay-*.scope` 结尾。
@@ -50,6 +54,7 @@ CI runner 容器（`gh-runner-quay`，由 systemd **user** unit `~/.config/syste
 ## Touches
 
 - .github/runner/Dockerfile
+- tasks/gap-ci-runner-container-needs-user-systemd.md
 
 ## Notes
 
