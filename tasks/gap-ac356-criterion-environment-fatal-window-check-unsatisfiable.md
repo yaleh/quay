@@ -311,14 +311,6 @@ instrument — e.g. `grep -rn 'efIdx,efIdx+400' plugin packages scripts orchestr
 or rule the AC satisfied against the executable-carrier reading above. Nothing else about this task
 needs a ruling: the criterion repair itself is landed and AC-356 reads `pass` (AC6).
 
-**2026-10-10, post-hoc authoring note (added by the human/author ruling that unparked this task, not by a
-worker):** the above decision has now been made — AC7's checkbox text in `## Acceptance Criteria` has
-been reworded to the narrowed, satisfiable instrument this section itself proposed
-(`plugin packages scripts orchestration experiments`, excluding `tasks/`/`goals/` narrative corpora), and
-`status` has been moved from `needs-human` back to `ready` so the resuming worker can verify the narrowed
-predicate's own reading and tick AC7. This note is appended rather than rewriting the analysis above,
-per instruction to leave this Evidence section's existing narrative untouched.
-
 ### Non-goals / boundary (hard rule 5b: the boundary is shown, not asserted)
 
 Anti-drift's own file-set, `git log --name-only HEAD --not goal/GOAL-035 develop`, is **exactly the two
