@@ -1,7 +1,7 @@
 ---
 id: AC-358
 title: post-merge 生产验证：develop 尖端持有本刀全部结构改动，两个受影响测试文件回归全绿
-status: active
+status: achieved
 kind: criterion
 goal: GOAL-035
 criterion: >
@@ -69,6 +69,11 @@ statusLog:
     to: active
     actor: goal-cli
     reason: ""
+  - at: 2026-10-10T11:23:53.589Z
+    from: active
+    to: achieved
+    actor: goal-driver
+    reason: "I2: criterion pass"
 fidelity:
   verdict: not-evaluated
   reason: no judge configured
