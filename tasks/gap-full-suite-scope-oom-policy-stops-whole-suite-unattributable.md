@@ -45,6 +45,15 @@ extra:
 - **scoped gate（driver fan-in 同款）** — `bash scripts/test.sh --for-task gap-full-suite-scope-oom-policy-stops-whole-suite-unattributable --allow-thin`：`tests 176 / pass 176 / fail 0`，`EXIT=0`；选中并跑绿了本任务两个新测试文件（日志含 `+ plugin/test/worker-driver-suite-oom-attribution.test.mjs`）。
 - ⚠️ **DoD 的真实落地（claudecodeui 侧 P1c 以 MemoryMax=3G 跑一次必然 OOM）未在本轮执行** —— 那是跨工作区动作。本轮以同测试文件内的**真 cgroup 300M 负控制**（AC2/AC5 用例）作为机制的直接证据。`task_check`：`acTotal 6 / acChecked 6 / dodTotal 0`。
 
+### 2026-10-10 第二轮：fan-in 阻塞的**外来红**（上一轮 `exited-not-landed` 的真因，不在本任务的机制里）
+
+- **真因不是本任务的功能** —— 上一轮红在 `plugin/test/task-granularity-advice.test.mjs` 的 `production: for real declared paths, peers ∪ mentions equals the step-2b grep oracle`；读上一轮真因日志（`.quay/fan-in-suite-gap-full-suite-scope-oom-policy-stops-whole-suite-unattributable~wk-prod-anchor~1791632542261-dc4ddd.log`）得 `actual=['gap-full-suite-scope-oom-policy-stops-whole-suite-unattributable']` / `expected=[…, 'goal-035-merge-and-postmerge-verify']`。该测试文件本轮**之前**的同一套件日志（`…1791631166913-db334c.log`，19:27）里是 `passed=true` ⇒ 差异来自两次运行之间落地的那一刀：`e2283b157`（19:37:13）把 `tasks/goal-035-merge-and-postmerge-verify.md` 的 frontmatter 由 `ready` 翻成 `done`。
+- **口径缺陷（行锚定 grep）** —— oracle 的第二段是**全文行锚定** `grep -lE '^status: (todo|ready)$'`，于是把**正文里带一行 `status: ready`** 的任务读成「开放」。实测全仓只有 3 个任务文件同时满足「提样本路径」与「正文有精确 `status: todo|ready` 行」中的一条，其中**只有 `goal-035-merge-and-postmerge-verify` 同时命中**（它正文里有一份**重复的 frontmatter 块**，第 19 行 `status: ready`；另两例 `gap-ac297-git-history-page-zh-chrome-nav-current-and-own-title`、`gap-touches-parser-early-subheading-latch-hides-declaration` 同形但不提本测试的 4 条样本路径）。工具 `readOpenTasks` 读 **frontmatter**（`status: done` ⇒ 不开放）——这是**正确**的一侧，与建这个比对的父任务自己量到的结论一致（`gap-task-granularity-advice-script-merge-candidates-and-per-file-history`：「把 grep 的 status 判据限制在 **frontmatter 段内**后，两侧 0 处不符 ⇒ 本工具读 frontmatter 而非全文扫描，这是它与那份 grep 食谱的**实质**差别」）。
+- **修法** —— 只把 oracle 的第二段收敛进 frontmatter：stage 1（step 2b 的 mention grep `grep -lF -- "$p" tasks/*.md`）**逐字不变**；stage 2 改跑 `awk 'FNR==1{fm=($0=="---");next} fm&&$0=="---"{fm=0;next} fm&&/^status: (todo|ready)$/{print FILENAME}'`，且**两段的退出码分别断言**（stage 1: grep 0=命中/1=无匹配；stage 2: awk 0）——任一真实工具故障都不会被读成「空 oracle」（硬规则 3b）。空 oracle 仍是合法读数（2026-10-07 的注释保留）。
+- **取假形态（负控制，本轮真跑）** — 把 `computePeers` 变异成 `return []`（工具故障）：该判据红，报文与上一轮逐字同形 `peers ∪ mentions must equal the grep oracle for plugin/scripts/worker-driver.ts`（同轮另 4 条用例一并红）⇒ 判据在**新口径下仍能取假**，不是被改宽成恒真。恢复后 `node --test plugin/test/task-granularity-advice.test.mjs`：`tests 16 / pass 16 / fail 0`。
+- **两侧的实际读数（同一比对，逐 path）** — 4 条样本路径：`plugin/scripts/worker-driver.ts` 的 stage-1 命中 202 个文件、收敛后 oracle = `['gap-full-suite-scope-oom-policy-stops-whole-suite-unattributable']`（= 本任务，声明者/peer）；另 3 条（`rework-predictors.ts` / `packages/quay/bin/quay.ts` / `packages/quay/src/init.ts`）oracle 均为 `[]`。4 条全部 `union==oracle: true`。
+- **不做** —— 没有改 `tasks/goal-035-merge-and-postmerge-verify.md`（那份重复 frontmatter 块是它自己 `task_write` 落下的重复块，属**另一个**任务的载体；本任务只修判据，不代改别的任务文件）。
+
 ## Touches
 
 - plugin/scripts/full-suite-runner.ts
@@ -53,5 +62,15 @@ extra:
 - plugin/test/full-suite-runner-oom-policy.test.mjs (new)
 - plugin/test/worker-driver-suite-oom-attribution.test.mjs (new)
 - plugin/test/full-suite-runner-cgroup.test.mjs (两处 argv 逐字节断言随新增常驻属性对更新)
+- plugin/test/task-granularity-advice.test.mjs (fan-in 外来红：oracle 的 status 判据收敛进 frontmatter，stage 1 逐字不变)
 - .gitignore (per-run 证据文件的运行时载体)
 - tasks/gap-full-suite-scope-oom-policy-stops-whole-suite-unattributable.md
+
+## Blocker
+
+**2026-10-10T11:47:01.924Z — worker 未落地（exited-not-landed）**
+
+- 未落地原因：step=suite: AssertionError [ERR_ASSERTION]: peers ∪ mentions must equal the grep oracle for plugin/scripts/worker-driver.ts
+- run_id：wk-prod-anchor
+- session_id：d544a6de-336b-4bd9-a9fb-71c4574bd963
+- 后续：真因与修法见 `## Evidence` 的「第二轮」小节（外来红，已在本轮修掉）。
