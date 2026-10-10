@@ -85,6 +85,14 @@ import { openServeLog, SERVE_LOG_UNAVAILABLE } from "../../packages/quay/src/ser
 // `packages/quay/src/cli/server.ts:spawnHost` uses, and the same one the driver anchor delegates to.
 // ⛔ Neither this file nor server.ts spells a `systemd-run` argv of its own (硬规则 5b).
 import { resolveServeEnvelope, scopeLaunchArgv, serveScopeUnavailableReport } from "../../packages/quay/src/systemd-scope.ts";
+// ⚠️ The ONE plugin/scripts sibling import. The direct-entry guard at the bottom is still INLINED
+// (that is what this file's own note protects: the guard must not drag a sibling dependency in), and
+// the reason it is safe HERE is mechanical, not stylistic: `gate-script-base.ts` is already a member
+// of the derived laydown set (packages/quay/src/init.ts `deriveLoopScriptsOnce`, source (c) — its
+// explicit list), so importing a parser from it adds NO new file to any laid-down or shipped set.
+// The alternative — keep a private generic flag loop forever — is the duplication this task exists
+// to remove (semantic-dedup-scan `parseargs-handrolled-residuals`).
+import { parseArgs as baseParseArgs } from "./gate-script-base.ts";
 
 /** In-memory ceiling for the serve host this skill starts (2026-09-17 global-OOM remediation).
  *
@@ -672,21 +680,7 @@ interface Options {
   json: boolean;
 }
 
-function parseArgs(argv: string[]): Options | null {
-  const opts: Options = {
-    serveTimeoutMs: DEFAULT_SERVE_TIMEOUT_MS,
-    json: false,
-  };
-  for (let i = 0; i < argv.length; i++) {
-    const a = argv[i];
-    if (a === "--root") opts.root = argv[++i];
-    else if (a === "--host") opts.host = argv[++i];
-    else if (a === "--port") opts.port = Number(argv[++i]);
-    else if (a === "--cli") opts.cli = argv[++i];
-    else if (a === "--serve-timeout") opts.serveTimeoutMs = Number(argv[++i]);
-    else if (a === "--json") opts.json = true;
-    else if (a === "--help" || a === "-h") {
-      process.stdout.write(`start-drivers — start promotion + worker + outer + goal drivers and the web server (idempotent)
+const USAGE = `start-drivers — start promotion + worker + outer + goal drivers and the web server (idempotent)
 
 Usage:
   node --experimental-strip-types plugin/scripts/start-drivers.ts [flags]
@@ -712,20 +706,77 @@ this root (\`already-running\` — reported, ⛔ not folded into a failure). Whe
 \`GET /health\` on the port its carrier names decides: FRESH ⇒ kept; STALE ⇒ RELOADED (SIGTERM that
 host, wait for its pid to die, spawn a fresh one); unreadable ⇒ LEFT ALONE and reported as
 \`staleness: "not-evaluated"\` — ⛔ a reading we could not take is never laundered into either
-\"fresh\" or \"stale\".
-`);
-      return null;
-    } else {
-      process.stderr.write(`start-drivers: unknown argument: ${a}\n`);
-      return null;
-    }
-  }
-  return opts;
+"fresh" or "stale".
+`;
+
+// The flag loop is the SHARED spec-driven parser (gate-script-base.ts); this wrapper only maps the
+// parsed flags onto this command's own `Options` (numeric validation and defaults stay HERE, at the
+// call site). It used to be a private if/else chain — one of the four residual carriers named by
+// semantic-dedup-scan finding `parseargs-handrolled-residuals` (runId
+// `semantic-dedup-scan-1791631645924`, suggestedAction `unify`).
+//
+// The two spec keys that had no equivalent before: `help: "return"` (this command owns the
+// multi-line text above and must not be `process.exit()`ed out from under; the shared switch would
+// have killed the process) and `errors: "return"` (a bad usage is reported by `main`, which owns
+// this command's exit code — the base's default would exit from inside the parser). The composed
+// message is byte-identical to the pre-fold one: `start-drivers: unknown argument: --x`.
+//
+// ONE input-language difference, and it is enumerable: a STRING flag whose value the parser reads as
+// `""` (the flag was the LAST token, or the value was an empty string) folds back to "not supplied"
+// — the same reading the precedent adapters took. Pre-fold, `argv[++i]` past the end was
+// `undefined`, and `Number(undefined)` is NaN: a trailing `--port` / `--serve-timeout` therefore
+// died on the numeric validation rather than resolving a default. Every such input is a flag with
+// no value at all, which names nothing; the defaults below are what this command already means by
+// "not given".
+function parseArgs(argv: string[]): { opts: Options; help: boolean; error?: string } {
+  const { flags, help, error } = baseParseArgs(argv, {
+    minArgs: 0,
+    usage: "[--root <path>] [--host <ip>] [--port <p>] [--cli <path>] [--serve-timeout <ms>] [--json]",
+    help: "return",
+    unknown: "reject",
+    errors: "return",
+    flags: {
+      root: { type: "string" },
+      host: { type: "string" },
+      port: { type: "string" },
+      cli: { type: "string" },
+      "serve-timeout": { type: "string" },
+      json: { type: "boolean" },
+    },
+  });
+  const str = (v: string | boolean | undefined): string | undefined =>
+    typeof v === "string" && v !== "" ? v : undefined;
+  const num = (v: string | boolean | undefined, fallback: number): number => {
+    const s = str(v);
+    return s === undefined ? fallback : Number(s);
+  };
+  return {
+    opts: {
+      root: str(flags.root),
+      host: str(flags.host),
+      port: str(flags.port) === undefined ? undefined : Number(str(flags.port)),
+      cli: str(flags.cli),
+      serveTimeoutMs: num(flags["serve-timeout"], DEFAULT_SERVE_TIMEOUT_MS),
+      json: flags.json === true,
+    },
+    help: help === true,
+    error,
+  };
 }
 
 async function main(argv: string[]): Promise<number> {
-  const opts = parseArgs(argv);
-  if (opts === null) return 2;
+  const parsed = parseArgs(argv);
+  if (parsed.help) {
+    // Unchanged: stdout, exit 2. The shared parser owns the DETECTION; the exit code is this
+    // command's own (it is a skill entry point, not a `-check.ts` under the help-contract sweep).
+    process.stdout.write(USAGE);
+    return 2;
+  }
+  if (parsed.error !== undefined) {
+    process.stderr.write(`start-drivers: ${parsed.error}\n`);
+    return 2;
+  }
+  const opts = parsed.opts;
   // Validate ONLY what was given: `undefined` means the operator named no port and the spawned host
   // resolves its own default (0 = kernel-assigned is then a value that host picks, not one this
   // script injects). A port of 0 given EXPLICITLY is legal and is forwarded verbatim.
@@ -969,7 +1020,11 @@ async function main(argv: string[]): Promise<number> {
 //  the shipped bundle, which is a different thing from a sibling dependency.)
 const _entryBase = path.basename(process.argv[1] ?? "").replace(/\.(js|ts|mjs)$/, "");
 if (_entryBase === "start-drivers") {
-  main(process.argv.slice(2)).then((code) => {
+  // The WHOLE argv: flag parsing is the shared parser's job now, and IT does the `slice(2)` (the
+  // convention every base caller keeps). Passing a pre-sliced argv would make the parser drop the
+  // first two real tokens — measured 2026-10-10 while folding this file: `--help`/`--bogus` were
+  // silently swallowed and the command started the drivers instead.
+  main(process.argv).then((code) => {
     process.exitCode = code;
   });
 }
