@@ -62,8 +62,12 @@ Land GOAL-035's slice on branch `goal/GOAL-035`: unify the 3 independent "mark t
 - [x] `plugin/test/driver-filters.test.mjs` has new tests for `applyNeedsHumanTransition` covering accept, surfaced-failure (not thrown/swallowed), and idempotency; file is fully green.
 - [x] `plugin/test/worker-driver.test.mjs` is fully green (full-file regression, not just a subset).
 - [x] Typecheck passes.
-- [ ] `quay goal gate AC-356` reads exit 0 on this branch. — ⛔ **BLOCKED: AC-356's criterion is structurally unsatisfiable as written (see `## Evidence`); this is a criterion defect, not an implementation defect. No implementation can pass it.** A worker must not edit the goal criterion that judges its own task — the validated one-command repair is recorded in `## Evidence` for whoever owns the goal record.
-- [x] `quay goal gate AC-357 --timeout 900000` reads exit 0 on this branch.
+- [ ] `quay goal gate AC-356` reads exit 0 on this branch. — ⛔ **待外部**：AC-356 的 goal 判据按写法【恒假】 (`wfText.indexOf("environment-fatal")` 锚到了 `QuickDeathCause` 类型别名， 且 400 字符窗口容不下该分支自己的 `return r;`——两次独立测量见下面的 Evidence 段)， 没有任何实现能过；且该读数本身就是【落地后】读数（branch-mode goal 的 AC 在其 goal 判据 worktree 上评估， 本刀落地进 `goal/GOAL-035` 之后那里才有实现）。 承接者：GOAL-035 记录所有者用下面 Evidence 段里已写好并做过负控制的替换文本执行一次 `quay goal write AC-356 --criterion …`（人/manager 动作，⛔ 非自动）。  （待外部）
+- [ ] `quay goal gate AC-357 --timeout 900000` reads exit 0 on this branch. — ⛔ **待外部**：goal gate 对 branch-mode goal 的 AC 是在其 goal 判据 worktree 上评估 ⇒ 该读数落地后才可用 （`quay goal gate AC-357` 现在那里 exit 3 NOT-EVALUATED）。 判据文本本身在本分支根是绿的（两个测试文件全绿——见 `## Evidence`）； 其 goal 级承接者是 sibling 任务 `goal-035-needs-human-transition-contract-tests`（`goal_ac: AC-357`）。  （待外部）
+
+## Definition of Done
+
+The slice lands on `goal/GOAL-035` with AC-356 and AC-357 both reading exit 0 when evaluated on this branch, both affected test files green, and no out-of-scope file touched. This task does not merge the goal branch into develop (a separate human-triggered `quay goal merge` step) and does not evaluate AC-358 (post-merge only). Because this slice modifies `worker-driver.ts` itself — the same driver that will execute the mechanical fan-in for this task — be especially careful that `onWorkerFinished` cannot throw on any of its 3 paths; the full regression run in step 8 is the safety net for exactly this risk.
 
 ## Evidence
 
@@ -120,9 +124,34 @@ node packages/quay/bin/quay.js goal write AC-356 --criterion "$(cat <repaired-cr
 
 No AC-356-satisfying implementation exists; this task cannot land until AC-356's criterion is repaired by whoever owns the goal record.
 
+### 续做轮（2026-10-10，第二次 worker）
+
+- **先修好的、也正是 driver 实际报出的那一条：`## Definition of Done` 段被上一轮的整体 `task_write`（body 是全量替换）静默丢掉了**，
+  于是 fan-in 的 `fan-in-ac-completion-gate.ts` 读到 `sectionFound:false`（`countCompletionCheckboxes` 要求 AC 段 **与** DoD 段都存在）⇒ `not-evaluated`、拒绝翻 done。
+  这正是 `## Blocker` 里 driver 记的那句「AC/DoD 段缺失或无法识别」。本轮把原始 DoD 段（取自本任务首次 `task_write` 提交 `76a1e4cf2`）**逐字**恢复。
+- **AC-356 与 AC-357 都标 `（待外部）`（两项都保持未勾）。**
+  依据 2026-08-22 管理者裁定（`orchestration/manager-tick-log.md`，AC135 条目）：impl 段结构上不可能满足的 AC，
+  「inner 把它们标为『待外部』正是【正确处置】」，⛔ 不是缺陷、不是拖延。两项都属该形态——它们要的是 goal 判据 worktree 上的读数，而那里的实现只有落地之后才存在；AC-356 还叠加了「判据自身恒假」。
+- **承接者（`（待外部）` 的合法性条件，硬规则 4 推论三——否则就是「永远待外部」）**：
+  AC-356 ⇒ GOAL-035 记录所有者执行上面「Validated repair」段那一次 `goal write`；AC-357 ⇒ sibling `goal-035-needs-human-transition-contract-tests`。⛔ 两条都不是本 worker 自动完成的。
+- **本轮独立复核（⛔ 非引述上一轮的读数）**：① `plugin/test/driver-filters.test.mjs` ⇒ **72/72 pass**；② `plugin/test/worker-driver.test.mjs` ⇒ **129/129 pass**（30.3 s）；③ `npx tsc --noEmit` ⇒ exit 0；
+  ④ 判据判别力（修复后的文本）：本树 **exit 0 / PASS**，把本树 `return r;` 改成 `return r0;` 后 **exit 1 / `CAUSE=nongoal-moved … hard-return`**；
+  而**原始**判据在同一对树上都 exit 1（恒假 ⇒ 不是测量，硬规则 4）；⑤ 原始判据在未改动的 goal 分支尖端 `be2d8e876` 上同样 exit 1 ⇒ 与本 diff 无关。
+- **对上一轮 Evidence 的一处更正**：上一轮写「`quay goal gate AC-357` ⇒ verdict pass, evaluationRoot = this worktree」。
+  本轮实测该命令是在 **goal 判据 worktree**（`/data/home/yale/work/quay-worktrees/goal-GOAL-035`）上评估、返回 3（`NOT-EVALUATED`）——
+  「on this branch」只能按【判据文本在本分支根跑】理解，⛔ 不能报告成 goal gate 本身通过。
+
 ## Touches
 
 - plugin/scripts/driver-filters.ts
 - plugin/scripts/worker-driver.ts
 - plugin/test/driver-filters.test.mjs
 - tasks/goal-035-needs-human-transition-unify.md
+
+## Blocker
+
+**2026-10-10T10:21:22.997Z — worker 未落地（exited-not-landed）**
+
+- 未落地原因：AC 未全勾（AC/DoD 段缺失或无法识别，无法评估 ≠ 合格）——续做需补齐并勾选 AC
+- run_id：wk-prod-anchor
+- session_id：232c5502-5cf2-4e91-8429-88854aaaf087
