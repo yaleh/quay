@@ -6,6 +6,14 @@ title: 请裁定：GOAL-036 的 AC-361 判据有一条【恒假】子句（全�
 status: proposed
 handler: meta-driver
 ---
+> **更正（同一轮内，2026-10-10T19:41Z）——本条目投递后约 1 分钟查明：修正判据【已经存在】，第三节的「独立立案」建议作废，请勿重复立案。**
+>
+> 立案会话已于提交 `40379cb35`（19:38，**早于本条目**）立了 **`AC-908`**（`goal: GOAL-036`、`status: draft`、**`supersedes: [AC-361]`**），其 `criterion` 正是本条目第三节建议的窗口检查（注释行不参与匹配 + 窗口内 `computeDispatchExclusion` 恰 1 次、旧 `inFlightTasks()` 0 次 + 两个测试文件全绿）——与本条目的诊断**逐条一致**。
+>
+> **实测 A/B（同一份源码）**：`git rev-parse 1d758ddf3:plugin/scripts/worker-driver.ts` = `git rev-parse 003b70bb6:plugin/scripts/worker-driver.ts` = `d46bbfb2baa14456cb898d6392e8de95adbd2f61` ⇒ 两侧逐字节相同。同源两条判据：`AC-361` ⇒ **exit 1**；`AC-908` ⇒ **exit 0**（`treeSha 003b70bb6`，event `616aee56-cf7e-4ed6-9723-915041400653`，`2026-10-10T19:41:08.223Z`）。⇒ 「判据坏了、落地树是好的」是**直接量**。
+>
+> **剩余唯一动作**：把 `AC-908` 转正（`draft` → `active`，并声明其 `phase`）并退役 `AC-361` —— 这是**人/作者的决定**，本 worker 不代做。完整读数见 `tasks/goal-036-merge-and-postmerge-verify.md` 的 `## Evidence`「决定性 A/B」一节。
+
 **只报告、不代裁** —— 阻塞点是一条 **goal AC 判据**（`goals/AC-361-*.md` 的 `criterion`），改写它是 **authoring 面**，不在执行者授权面内。已按纪律**未改判据、未勾选依赖它的 AC**，任务体 `## Evidence` 已把全部读数与所需决定逐字写下。
 
 ## 一、事实：本任务其余 8 条 AC 全过，GOAL-036 已并入 develop
