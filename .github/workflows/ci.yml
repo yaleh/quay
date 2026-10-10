@@ -5,6 +5,19 @@ on:
     branches: [master, develop]
   pull_request:
     branches: [master, develop]
+  # ── schedule: the PERIODIC executor for the channel gate ──────────────────────────────────────
+  # `verify-plugin-channel-assertions` used to have exactly one executor: release.yml's
+  # `verify-plugin-channel` job. So the gate first ran as part of a REAL release, and any edit to
+  # the gate (or to its wiring) was first exercised live — the failure mode this schedule removes.
+  # GitHub Actions has no per-job scheduler: a cron trigger schedules the WHOLE workflow, so every
+  # per-push job below carries `if: github.event_name != 'schedule'` and only the channel gate (and
+  # the cheap wiring assertion) run on the nightly tick. See the `verify-plugin-channel-assertions`
+  # job for what the nightly run actually checks.
+  #
+  # Minute 37, not :00 — GitHub's own docs note that the start of the hour is the busiest slot and
+  # queued runs are dropped first. The job is a nightly consistency check, not a clock.
+  schedule:
+    - cron: '37 3 * * *'
   # `workflow_dispatch` is not only a manual re-run of the push jobs: it is also the ONLY way to
   # reach the dispatch-gated jobs below (`cold-start-e2e`, `verify-plugin-channel-assertions`).
   # Those are milestone-cadence jobs (ADR-010), never per-push. This file — not a new workflow —
@@ -19,13 +32,16 @@ on:
         type: boolean
         default: false
       build_ref:
-        description: "Ref the verify-plugin-channel-assertions job builds the artifact from (empty = the dispatched ref)"
+        description: "Tag/ref the verify-plugin-channel-assertions job builds the artifact from (empty = the newest release tag)"
         required: false
         type: string
         default: ""
 
 jobs:
   test:
+    # The nightly `schedule` tick exists for the channel gate ONLY (see the `on:` block). Without
+    # this guard the cron would also re-run the whole suite nightly on the shared self-hosted box.
+    if: github.event_name != 'schedule'
     # 2026-09-16: moved off ubuntu-latest onto the self-hosted tokyo-alpha runner (128-core EPYC /
     # 246G, docker-based ephemeral runner registered via systemd --user gh-runner-quay.service on
     # that host). This job is the heavy one (full node --test suite) — the labeled box is a single
@@ -275,6 +291,8 @@ jobs:
   # explicitly NOT a `node --test *.test.mjs` suite and is NOT covered by `scripts/test.sh`/the
   # `test` job above; a green `test` job run says nothing about whether packaging itself works.
   dist-verify-node-floor:
+    # The nightly `schedule` tick exists for the channel gate ONLY (see the `on:` block).
+    if: github.event_name != 'schedule'
     # self-hosted (gap-metered-hosted-runner-jobs-to-self-hosted, AC-319): the metered
     # ubuntu-latest gate refused to START this job on 2026-09-24 (annotation: "recent account
     # payments have failed"). The Node 20 FLOOR this job exists to prove is unaffected — it is
@@ -329,6 +347,8 @@ jobs:
   # Runs version-consistency-check.ts on every push; fails the build if any
   # of the 9 version-bearing artifacts has drifted from the unified version.
   version-consistency:
+    # The nightly `schedule` tick exists for the channel gate ONLY (see the `on:` block).
+    if: github.event_name != 'schedule'
     # self-hosted (gap-metered-hosted-runner-jobs-to-self-hosted, AC-319) — same metered-runner
     # refusal; its node/npx come from the actions/setup-node step below.
     runs-on: [self-hosted, tokyo-alpha]
@@ -388,34 +408,50 @@ jobs:
       - name: Cold-start e2e (install the plugin from build artifacts, no --push)
         run: bash test/cold-start-e2e.sh --from-build
 
-  # ── verify-plugin-channel-assertions (gap-release-workflow-definition-lags-one-release, AC4/P3) ──
+  # ── verify-plugin-channel-assertions (gap-release-channel-assertions-periodic-ci-and-controls) ──
   # WHY THIS JOB EXISTS. The channel gate `verify-plugin-channel-assertions` is the only gate on
-  # `master`, and until now its ONLY executor was release.yml's `verify-plugin-channel` job — so the
+  # `master`, and its ONLY executor used to be release.yml's `verify-plugin-channel` job — so the
   # gate first executed as part of a REAL release, and any change to it (or to release.yml) was
-  # first exercised live. `release-cut`'s dispatch used to carry no `--ref` at all, which made that
-  # unrecoverable: a `workflow_dispatch` with no `--ref` runs the DEFAULT BRANCH's copy, so a broken
-  # gate could not even be fixed forward — the fix sits on a branch, the dispatch runs master, and
-  # master only advances AFTER a green release (`release-cut.mjs` now passes `--ref` explicitly; see
-  # AC1/AC2, and its preflight refuses a governing definition that differs from the tag's tree).
-  # This job is the other half: the gate is now EXPLICITLY TRIGGERABLE on any ref, so it can be run
-  # — and seen to pass or fail — before a release exists.
+  # exercised live for the first time there. `release-cut`'s dispatch used to carry no `--ref` at
+  # all, which made that unrecoverable: a `workflow_dispatch` with no `--ref` runs the DEFAULT
+  # BRANCH's copy, so a broken gate could not even be fixed forward (`release-cut.mjs` now passes
+  # `--ref` explicitly, and its preflight refuses a governing definition that differs from the
+  # tag's tree).
+  # This job is the other half: the gate is executed PERIODICALLY (nightly `schedule`) and can also
+  # be dispatched on demand, so it is exercised — and seen to pass or fail — without a release.
   #
-  # ⛔ WHAT THIS JOB DOES *NOT* CLAIM. It does not claim "the channel is green". WHICH REF the
-  # artifact is built from is an OPEN QUESTION of that task: `version-consistency` requires a
-  # non-`-dev` version carrier, and a build from a non-`release/*` ref legitimately carries `-dev`,
-  # so a RED reading on the dispatched ref is a REAL reading (the gate correctly refusing a dev
-  # artifact), not a defect in this job. ⛔ No assertion was relaxed to make anything green here.
+  # ⛔ THE ARTIFACT IS A RELEASE ARTIFACT, NEVER A `-dev` BUILD (人 yale 2026-10-10 ruling):
+  # `--ref` defaults to a **tag** — the gate is bound to the artifact it is meant to judge. `develop`
+  # carries only this workflow DEFINITION. This is not cosmetic: `version-consistency` requires a
+  # non-`-dev` carrier, and `scripts/resolve-version.ts` stamps `-dev` on any non-`release/*` ref
+  # with no version tag, so a develop-built artifact FAILS that assertion by construction. Measured
+  # on run 38035499264 (2026-10-10), dispatched against a task branch: `version-consistency FAIL —
+  # VERSION=0.19.0-dev, .claude-plugin/plugin.json=0.19.0-dev, bin/quay --version=0.19.0-dev`.
+  # The `build_ref` input overrides the default for a deliberate pre-validation of another ref — and
+  # a RED reading is then a REAL reading (the gate correctly refusing a dev artifact), not a defect
+  # in this job. ⛔ No assertion was relaxed to make anything green here.
   #
   # NEGATIVE CONTROL (`-f inject_failing_assertion=true`): repoints the scratch project's
   # `.quay/plugin` at a decoy tree, so `project-pointer` MUST go FAIL and, because the gate exits
   # non-zero on any FAIL, the job MUST go red. This arm is what rules out "the job's colour is
   # wired to something other than the assertion verdicts".
   #
+  # DE-DUPLICATION vs release.yml (the decision is recorded on the task, with a mechanical judge in
+  # the `release-channel-gate-wiring` job below): KEEP BOTH, divide the labour. This job is the
+  # PRE-RELEASE / periodic exercise of the checker (project scope, against the newest release tag);
+  # release.yml's two steps are the RELEASE BLOCKER (project scope AND user scope, against the
+  # artifact that release is publishing, on the run that would otherwise publish it). Removing
+  # release.yml's steps would delete the user-scope arm and would let a broken artifact ship between
+  # two nightly ticks — the wrong direction for a gate.
+  #
   # The install/build path is release.yml's `verify-plugin-channel` job verbatim (same canonical
   # builder `publish-dist-branch.sh`, extracted from the orphan commit with `git archive` — never a
-  # `cp` of the working tree), minus the user-scope leg and the tag pin.
+  # `cp` of the working tree), minus the user-scope leg.
   verify-plugin-channel-assertions:
-    if: github.event_name == 'workflow_dispatch'
+    # `schedule` is the PERIODIC arm (see the `on:` block); `workflow_dispatch` stays for the
+    # positive/negative control runs at any time. Both arms run the SAME job, so a nightly reading
+    # and a hand-dispatched reading are comparable by construction.
+    if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
     # self-hosted (gap-metered-hosted-runner-jobs-to-self-hosted, AC-319) — same metered-runner
     # refusal as the sibling jobs; node/npm/npx and `claude` all come from the steps below
     # (tokyo-alpha's image node is v10 with no npm).
@@ -431,15 +467,57 @@ jobs:
     steps:
       - uses: actions/checkout@v4
         with:
-          # `build_ref` (optional) makes the artifact come from a DIFFERENT ref than the one whose
-          # ci.yml is running — the whole point of the input, since WHICH ref the gate is fed is an
-          # OPEN QUESTION of this job's task: `version-consistency` demands a non-`-dev` version and
-          # only a `release/*`-form ref yields one. ⛔ The input does NOT relax any assertion; it
-          # changes the ARTIFACT under test. Empty ⇒ the dispatched ref.
-          ref: ${{ inputs.build_ref || github.ref }}
+          # ⛔ NO `ref:` here. The checkout is the WORKFLOW's own ref — for a scheduled run that is
+          # the default branch, for a dispatch it is `--ref`. It is deliberately NOT the artifact's
+          # ref: the artifact ref is resolved by the step below (default: the newest release tag),
+          # and the workflow definition riding on `develop` is exactly the "static definition that
+          # governs the periodic run" this task's ruling puts on `develop`.
+          #
           # publish-dist-branch.sh creates an orphan branch + a throwaway worktree off HEAD and
           # reads the whole tree; a shallow clone cannot serve that.
           fetch-depth: 0
+          # `git describe --tags` in the ref-resolution step needs the tags locally. actions/checkout
+          # v4 defaults `fetch-tags` to FALSE and passes `--no-tags`, so without this line a
+          # scheduled run would see NO tags and the resolution step would fail closed (hard rule 3b:
+          # a fail-closed is the right direction, but an avoidable one is a defect).
+          fetch-tags: true
+
+      - name: Resolve the artifact ref — the release tag, never a `-dev` build
+        id: buildref
+        # WHY THIS IS A STEP AND NOT `ref: ${{ inputs.build_ref || github.ref }}`:
+        # that expression defaults the artifact to the ref whose ci.yml is running, i.e. for a
+        # nightly tick, to `develop` — and a develop build carries `-dev` by construction
+        # (`scripts/resolve-version.ts` stamps `-dev` on any non-`release/*` ref with no version
+        # tag), which `version-consistency` then FAILS. Measured on run 38035499264 (2026-10-10):
+        # `version-consistency FAIL — carriers VERSION=0.19.0-dev, .claude-plugin/plugin.json=
+        # 0.19.0-dev, bin/quay --version=0.19.0-dev`. So the default MUST be a release tag: the gate
+        # is bound to the TARGET RELEASE ARTIFACT (人 yale 2026-10-10 ruling), and `develop` carries
+        # only this workflow DEFINITION.
+        run: |
+          set -euo pipefail
+          REQ='${{ inputs.build_ref }}'
+          if [ -n "$REQ" ]; then
+            REF="$REQ"; SOURCE="input"
+          else
+            # Newest version tag reachable from the checked-out workflow ref. For the nightly tick
+            # that is the most recent release — the artifact the channel gate is about.
+            REF="$(git describe --tags --abbrev=0 --match 'v[0-9]*' 2>/dev/null || true)"
+            SOURCE="default-newest-release-tag"
+          fi
+          if [ -z "$REF" ]; then
+            echo "ERROR: no artifact ref resolved (no 'v<digits>*' tag reachable from $(git rev-parse --short HEAD), and no build_ref input)." >&2
+            echo "The channel gate's subject is a RELEASE artifact; there is none to check, so this is NOT a pass." >&2
+            exit 1
+          fi
+          # Detach onto the artifact ref. Everything below — the build, the checker, the shipped-set
+          # rules and their baseline — then comes from ONE tree, which is exactly what release.yml
+          # does at release time; that is what makes a periodic reading comparable to a release-time
+          # reading.
+          git checkout --detach "$REF"
+          echo "artifact ref: $REF (source=$SOURCE) -> $(git rev-parse HEAD)"
+          echo "artifact ref subject: $(git log -1 --pretty=%s)"
+          echo "ref=${REF}" >> "$GITHUB_OUTPUT"
+          echo "sha=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
 
       - uses: actions/setup-node@v4
         with:
@@ -458,6 +536,23 @@ jobs:
           git archive plugin-channel-verify | tar -x -C "${RUNNER_TEMP}/plugin-channel-src"
           test -f "${RUNNER_TEMP}/plugin-channel-src/.claude-plugin/marketplace.json"
           test -f "${RUNNER_TEMP}/plugin-channel-src/bin/quay"
+
+      - name: Record the artifact's version carriers (the AC1/AC3 reading)
+        # The channel gate's OWN `version-consistency` assertion also reads these three carriers and
+        # prints a verdict — but its PASS line only names the agreed version ("all carriers agree on
+        # X and none is -dev"), so this step prints each carrier SEPARATELY. AC1 requires the log to
+        # carry the carriers themselves (VERSION / plugin.json / quay --version agreeing, none with
+        # `-dev`), and AC3 requires a version-carrier reading next to the config that chose the ref.
+        # ⛔ Reporting only, never a judgement: the gate judges; this line is evidence.
+        run: |
+          set -euo pipefail
+          SRC="${RUNNER_TEMP}/plugin-channel-src"
+          echo "── artifact version carriers (ref=${{ steps.buildref.outputs.ref }}) ──"
+          echo "VERSION:                 $(cat "$SRC/VERSION" 2>/dev/null || echo '<unreadable>')"
+          echo ".claude-plugin/plugin.json: $(node -e 'const fs=require("fs");const p=process.argv[1];try{process.stdout.write(String(JSON.parse(fs.readFileSync(p,"utf8")).version))}catch(e){process.stdout.write("<unreadable: "+e.message+">")}' "$SRC/.claude-plugin/plugin.json")"
+          # Executed EXACTLY as the checker executes it (the shim is spawned, not passed to node) —
+          # a different invocation would be a reading of something other than what the gate reads.
+          echo "bin/quay --version:      $(cd "$SRC" && "$SRC/bin/quay" --version 2>/dev/null | head -1 || echo '<unreadable>')"
 
       - name: Install the Claude Code CLI (the plugin channel's own installer)
         run: npm install -g @anthropic-ai/claude-code
@@ -574,3 +669,79 @@ jobs:
               ( cd "$SCRATCH" && "${INSTALLED}/bin/quay" driver stop --kind "$kind" --root "$SCRATCH" ) || true
             done
           fi
+
+  # ── release-channel-gate-wiring ────────────────────────────────────────────────────────────────
+  # The AC4 mechanical judge for gap-release-channel-assertions-periodic-ci-and-controls: the
+  # DE-DUPLICATION DECISION between the two executors of the channel gate
+  # (`verify-plugin-channel-assertions.ts`) is prose, and prose gets paraphrased away (ADR-004). This
+  # job turns the decision into readings that can go RED, on every push/PR/dispatch/schedule.
+  #
+  # THE DECISION IT JUDGES (recorded on the task): KEEP BOTH, divide the labour.
+  #   • ci.yml   → 1 call, `--scope project`, against the newest RELEASE TAG, nightly. Pre-release
+  #     exercise: the checker is run before a release exists.
+  #   • release.yml → 2 calls, `--scope project` AND `--scope user`, against the artifact that
+  #     release is publishing. The RELEASE BLOCKER.
+  # Neither is a duplicate of the other: they differ in scope (project vs user) and in when they can
+  # stop something.
+  #
+  # ⛔ WHY A POSITION-ANCHORED INVOCATION REGEX, NOT `grep -c <name>`: ci.yml legitimately MENTIONS
+  # the checker's name in this job's own comments and in the dispatch input description. A keyword
+  # count would drift every time a comment is reworded and would count prose as wiring (硬规则 2 —
+  # 注释/字符串里提到不算命中). The regex requires an actual INVOCATION line.
+  # ⛔ The readings are printed verbatim before any comparison, so a red says WHICH reading moved.
+  release-channel-gate-wiring:
+    # Cheap and static: unlike its siblings this job IS wanted on the nightly tick too — the wiring
+    # it judges is exactly what the nightly run depends on.
+    runs-on: [self-hosted, tokyo-alpha]
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+      - name: Assert the channel-gate wiring is exactly the declared shape
+        run: |
+          set -uo pipefail
+          CI=.github/workflows/ci.yml
+          REL=.github/workflows/release.yml
+          INV='^[[:space:]]*node[[:space:]]+--experimental-strip-types[[:space:]]+plugin/scripts/verify-plugin-channel-assertions\.ts'
+          SCOPED='^[[:space:]]*--installed .*--scope '
+          n() { grep -cE "$1" "$2" || true; }
+
+          ci_calls=$(n "$INV" "$CI")
+          rel_calls=$(n "$INV" "$REL")
+          rel_project=$(n "${SCOPED}project" "$REL")
+          rel_user=$(n "${SCOPED}user" "$REL")
+          ci_project=$(n "${SCOPED}project" "$CI")
+          ci_user=$(n "${SCOPED}user" "$CI")
+          # The job id must be declared exactly once across the workflow tree: a second declaration
+          # is either a rename in progress or a duplicate executor nobody decided to add.
+          job_decls=$(grep -rhE '^  verify-plugin-channel-assertions:$' .github/workflows/ | wc -l | tr -d ' ')
+          # The PERIODIC trigger, as a static reading on the workflow definition (AC1's "定期触发确实
+          # 存在于 develop" half — the runtime half is the run itself).
+          crons=$(n '^[[:space:]]+- cron:' "$CI")
+
+          echo "── channel-gate wiring readings ──"
+          echo "ci.yml   invocations of the checker : ${ci_calls}   (want 1)"
+          echo "release.yml invocations             : ${rel_calls}   (want 2)"
+          echo "release.yml --scope project         : ${rel_project}   (want 1)"
+          echo "release.yml --scope user            : ${rel_user}   (want 1)"
+          echo "ci.yml   --scope project            : ${ci_project}   (want 1)"
+          echo "ci.yml   --scope user               : ${ci_user}   (want 0 — the user-scope arm is the release blocker's)"
+          echo "job-id declarations (all workflows) : ${job_decls}   (want 1)"
+          echo "ci.yml schedule entries             : ${crons}   (want >= 1)"
+
+          fail=0
+          eq() { if [ "$2" = "$3" ]; then echo "ok   $1=${2}"; else echo "FAIL $1=${2}, want ${3}"; fail=1; fi; }
+          eq "ci.yml invocations"        "$ci_calls"    1
+          eq "release.yml invocations"   "$rel_calls"   2
+          eq "release.yml scope project" "$rel_project" 1
+          eq "release.yml scope user"    "$rel_user"    1
+          eq "ci.yml scope project"      "$ci_project"  1
+          eq "ci.yml scope user"         "$ci_user"     0
+          eq "job-id declarations"       "$job_decls"   1
+          if [ "$crons" -lt 1 ]; then
+            echo "FAIL ci.yml has no schedule entry — the periodic trigger this task exists to add is gone"
+            fail=1
+          else
+            echo "ok   ci.yml schedule entries=${crons}"
+          fi
+          [ "$fail" = "0" ] || { echo "the channel-gate wiring drifted from the decision recorded on gap-release-channel-assertions-periodic-ci-and-controls" >&2; exit 1; }
+          echo "PASS: channel-gate wiring matches the recorded dedup decision"

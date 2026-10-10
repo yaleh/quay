@@ -251,6 +251,16 @@ jobs:
       # tasks/gap-shipped-plugin-tree-excludes-dev-only-content-and-has-a-shrink-only-size-ratchet:
       # the assembly step (publish-dist-branch.sh, run by the step above) applies the SAME rule set as
       # rsync --exclude args, so "what is excluded" and "what is asserted" cannot drift.
+      #
+      # ── RELATIONSHIP TO ci.yml's PERIODIC `verify-plugin-channel-assertions` JOB ─────────────────
+      # KEEP BOTH; they are NOT duplicates — the dedup decision is recorded on
+      # tasks/gap-release-channel-assertions-periodic-ci-and-controls and judged mechanically by the
+      # `release-channel-gate-wiring` job in ci.yml. The two steps below are the RELEASE BLOCKER:
+      # they run on the run that would otherwise publish, and they are the ONLY place the **user
+      # scope** install shape is asserted. ci.yml's job is the PRE-RELEASE / nightly exercise of the
+      # same checker (project scope only, against the newest release tag) so that the checker's first
+      # live execution is no longer a real release. Deleting these steps would delete the user-scope
+      # arm and would let a broken artifact ship between two nightly ticks.
       - name: Verify the channel — project-scope assertions
         env:
           INSTALLED: ${{ steps.installed.outputs.dir }}
