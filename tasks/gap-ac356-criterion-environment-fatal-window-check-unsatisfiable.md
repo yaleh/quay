@@ -2,7 +2,7 @@
 id: gap-ac356-criterion-environment-fatal-window-check-unsatisfiable
 title: gap-ac356：AC-356 判据的 environment-fatal hard-return 子检查结构上恒假（锚点落在
   QuickDeathCause 类型别名、400 字符窗口取不到分支自身的 return r;）——就地修判据并加负控制
-status: needs-human
+status: ready
 labels:
   - gap
 parent: null
