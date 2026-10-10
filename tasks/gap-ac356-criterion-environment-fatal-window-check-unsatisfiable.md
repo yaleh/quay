@@ -60,14 +60,14 @@ goal_ac: AC-356
 
 ## Acceptance Criteria
 
-- [ ] 修复前读数已记录：现判据在 `/data/home/yale/work/quay-worktrees/goal-GOAL-035` 上 `exit 1`，唯一 `CAUSE=` 是 environment-fatal hard-return 那条；原文进 `## Evidence`。
-- [ ] `grep -c 'efIdx,efIdx+400' goals/AC-356-*.md` = 0，且 `criterion` 现在锚 `backoff.cause === "environment-fatal"` 并比较 `return r;` 与 `applyNeedsHumanTransition(` 的位置。
-- [ ] **非放宽证据（负控制）**：scratch 副本里把 environment-fatal 分支的 `return r;` 改成 `return r0;` 后同一段 scan ⇒ `exit 1` + `CAUSE=nongoal-moved ... hard-return`；未改副本 ⇒ `exit 0`。两组读数并列进 `## Evidence`。⛔ 若改名后仍过 ⇒ 修的是哑检查，本任务未完成。
-- [ ] `criterion` 其余子检查逐字未动：`git show <goal-写提交> -- goals/AC-356-*.md` 的 diff 只覆盖上述锚/窗片段。
-- [ ] goal 记录写入提交的 diff **只含 `criterion` 字段**：`origin`/`status`/`goal`/`phase`/`title` 逐字未动；逐字段读数进 `## Evidence`。
-- [ ] 修好的判据在 `/data/home/yale/work/quay-worktrees/goal-GOAL-035` 上逐字跑 ⇒ `exit 0`，`PASS:` 末行原文进 `## Evidence`。
-- [ ] `quay goal gate AC-356 --timeout 600000` 求值根读 `verdict: "pass"`（exit 0）；原文进 `## Evidence`。
-- [ ] 无 corpus pin 变红：`grep -rn 'efIdx,efIdx+400' . | grep -v node_modules | grep -v '^./goals/'` 为空；读数进 `## Evidence`。
+- [x] 修复前读数已记录：现判据在 `/data/home/yale/work/quay-worktrees/goal-GOAL-035` 上 `exit 1`，唯一 `CAUSE=` 是 environment-fatal hard-return 那条；原文进 `## Evidence`。
+- [x] `grep -c 'efIdx,efIdx+400' goals/AC-356-*.md` = 0，且 `criterion` 现在锚 `backoff.cause === "environment-fatal"` 并比较 `return r;` 与 `applyNeedsHumanTransition(` 的位置。
+- [x] **非放宽证据（负控制）**：scratch 副本里把 environment-fatal 分支的 `return r;` 改成 `return r0;` 后同一段 scan ⇒ `exit 1` + `CAUSE=nongoal-moved ... hard-return`；未改副本 ⇒ `exit 0`。两组读数并列进 `## Evidence`。⛔ 若改名后仍过 ⇒ 修的是哑检查，本任务未完成。
+- [x] `criterion` 其余子检查逐字未动：`git show <goal-写提交> -- goals/AC-356-*.md` 的 diff 只覆盖上述锚/窗片段。
+- [x] goal 记录写入提交的 diff **只含 `criterion` 字段**：`origin`/`status`/`goal`/`phase`/`title` 逐字未动；逐字段读数进 `## Evidence`。
+- [x] 修好的判据在 `/data/home/yale/work/quay-worktrees/goal-GOAL-035` 上逐字跑 ⇒ `exit 0`，`PASS:` 末行原文进 `## Evidence`。
+- [x] `quay goal gate AC-356 --timeout 600000` 求值根读 `verdict: "pass"`（exit 0）；原文进 `## Evidence`。
+- [x] 无 corpus pin 变红：原谓词 `grep -rn 'efIdx,efIdx+400' . | grep -v node_modules | grep -v '^./goals/'` 在本任务 body 上**结构上不可能为空**（本行 AC 自身 + `:27` 的 Proposal code fence + `:59` 的 Plan，逐字含该 token；`tasks/goal-035-needs-human-transition-unify.md:93` 的 Evidence code fence 亦然）⇒ 按硬规则 2（正文提及不算命中）改用**可执行载体**谓词：`grep -rn 'efIdx,efIdx+400' plugin packages scripts orchestration experiments 2>/dev/null` = **0**，`goals/` 全库亦 = **0**；原始（非空）读数与 scoped（零）读数俱进 `## Evidence`。
 
 ## Definition of Done
 
@@ -77,3 +77,239 @@ AC-356 由 FALSE 变 TRUE——**通过让它的判据真正测量它自己声�
 
 - goals/AC-356-结构护栏-applyneedshumantransition-是-retrystate-needshuman-count.md
 - tasks/gap-ac356-criterion-environment-fatal-window-check-unsatisfiable.md
+
+## Evidence
+
+Round 2026-10-10, worker `gap-ac356-criterion-environment-fatal-window-check-unsatisfiable`.
+
+- Task worktree: `/data/home/yale/work/quay-worktrees/gap-ac356-criterion-environment-fatal-window-check-unsatisfiable`
+  (branch `task/gap-ac356-criterion-environment-fatal-window-check-unsatisfiable`, fork-point `goal/GOAL-035` @ `6b51df827`).
+- **Criterion evaluation root** (= where every AC-356 run below executed, read from the GateEvent's own
+  `payload.evaluationRoot`): `/data/home/yale/work/quay-worktrees/goal-GOAL-035`, HEAD `6b51df827`,
+  tree `7136e6ccd3a199cb05ef9fb65f3b34370e1c09d2`.
+- ⛔ No `plugin/scripts/**` or `plugin/test/**` source was read-modified-written by this task; the only
+  commit it authors against the goal line is the goal-record `criterion` write. ⛔ `goal/GOAL-035` was
+  not merged; ⛔ no production process was restarted.
+
+### 0. Diagnosis re-measured (not quoted from the filing)
+
+On the comment-stripped `plugin/scripts/worker-driver.ts` (the criterion's own `live()` transform, run at
+the goal worktree):
+
+```
+first  wfText.indexOf("environment-fatal")            = 103796   → `export type QuickDeathCause = "environment-fatal" | ...`
+literal `backoff.cause === "environment-fatal"`        = 145462   (exactly 1 occurrence in the whole file)
+   from that anchor: `return r;`                      = +432     (the author's window was 400 chars)
+   from that anchor: `applyNeedsHumanTransition(`     = +500     (> 432 ⇒ the hard return really does precede it)
+old window wfText.slice(103796, 103796+400) contains /return r;/ ?   false
+```
+
+⇒ two independent defects stacked (wrong anchor **and** window too small even when anchored right); the
+sub-check was red on **every** tree — hard rule 4 (`a reading that structurally cannot be true is not a
+measurement`) in the shape of hard rule 3b's mirror (an instrument that cannot parse its input returning
+the same value as "violated").
+
+### AC1 — pre-fix reading (taken BEFORE any write)
+
+```
+$ cd /data/home/yale/work/quay-worktrees/goal-GOAL-035
+$ bash /data/scratch/yale/ac356-verify/criterion-before.sh     # = `quay goal show AC-356 --json`.criterion, verbatim
+EXIT=1
+--- stdout --- (empty)
+--- stderr ---
+CAUSE=nongoal-moved -- the environment-fatal branch must still hard-return before reaching any needs-human code
+CAUSE=structural-scan-red -- the scan above printed the specific CAUSE
+```
+
+The **only specific** `CAUSE=` is the environment-fatal hard-return one; the second line is the criterion's
+own unconditional wrapper (`node -e '...' || { echo "CAUSE=structural-scan-red -- ..."; exit 1; }`), which
+accompanies *any* scan failure. Same reading, already durable in the production ledger from before this
+round's write:
+
+```
+.quay/gate-events.jsonl  item_id=AC-356  actor=goal-cli  verdict=fail  2026-10-10T10:59:30.537Z
+  payload.reason = "acceptance failed (exit 1) — CAUSE=nongoal-moved -- the environment-fatal branch must
+                    still hard-return before reaching any needs-human code CAUSE=structural-scan-red -- …"
+  payload.evaluationRoot = /data/home/yale/work/quay-worktrees/goal-GOAL-035
+```
+
+### AC2 — the magic window is gone; the criterion now compares positions
+
+```
+$ grep -c 'efIdx,efIdx+400' goals/AC-356-*.md
+0            # (grep exits 1 on a zero count — that is the "no match" status, not a failure)
+$ grep -c 'backoff.cause === .x22environment-fatal' goals/AC-356-*.md
+1
+$ grep -c 'efNeedsHuman' goals/AC-356-*.md
+2
+```
+
+The stored text, read back through the ABI (`quay goal show AC-356 --json` → `.criterion`), is
+**byte-identical** (`cmp` clean, both `md5 0adf8ab2695d7363b2c0dee8a23ae8a6`) to the intended repair.
+New fragment (verbatim from the record):
+
+```
+const efIdx=wfText.indexOf("backoff.cause === \x22environment-fatal\x22");
+if(efIdx<0){console.error("CAUSE=nongoal-moved -- the environment-fatal halt branch must still exist, unmodified");process.exit(1)}
+const efTail=wfText.slice(efIdx);
+const efReturn=efTail.indexOf("return r;");
+const efNeedsHuman=efTail.indexOf("applyNeedsHumanTransition(");
+if(efReturn<0||(efNeedsHuman>=0&&efNeedsHuman<efReturn)){console.error("CAUSE=nongoal-moved -- the environment-fatal branch must still hard-return before reaching any needs-human code");process.exit(1)}
+```
+
+### AC3 — negative control: the repaired check HAS discriminating power
+
+Two scratch trees built by copying the goal worktree's two source files verbatim
+(`cmp` clean against `goal-GOAL-035/plugin/scripts/{worker-driver,driver-filters}.ts`), mutated **only**
+in the scratch copy (⛔ the real worktree was never touched). Same criterion text both times.
+
+| tree | OLD criterion | REPAIRED criterion |
+|---|---|---|
+| goal worktree, unmutated | `exit 1` (`CAUSE=nongoal-moved … hard-return`) | **`exit 0`** |
+| scratch copy, unmutated | `exit 1` (same) | **`exit 0`** |
+| scratch copy, branch's `return r;` → `return r0;` | `exit 1` (same) | **`exit 1`** (`CAUSE=nongoal-moved … hard-return`) |
+| scratch copy, halt-branch anchor renamed away | — | **`exit 1`** (`CAUSE=nongoal-moved -- the environment-fatal halt branch must still exist, unmodified`) |
+
+Verbatim readings for the two cells that carry the AC:
+
+```
+$ cd <scratch copy, unmutated>; bash criterion-after.sh      ⇒ EXIT=0   (stdout = the PASS: line, stderr empty)
+$ node -e '… replace the FIRST "return r;" AFTER the anchor with "return r0;" …'
+  mutated at offset 265881  context: "…control_file: controlFile, reason })}\n`,\n        );\n      }\n      return r0;\n    }\n"
+$ cd <scratch copy, mutated>; bash criterion-after.sh        ⇒ EXIT=1
+--- stderr ---
+CAUSE=nongoal-moved -- the environment-fatal branch must still hard-return before reaching any needs-human code
+CAUSE=structural-scan-red -- the scan above printed the specific CAUSE
+```
+
+Reading the table by column: the OLD check returns the **same** value (`1`) on both the correct and the
+broken tree ⇒ it is blind. The repaired check returns `0` on the correct tree and `1` on the broken one ⇒
+it measures. ⛔ The mutation is not silently tolerated: `return r0;` still satisfies the *regex* on the
+preceding line (`/backoff\.cause\s*===\s*["']environment-fatal["']/` still matches), so the red comes from
+the new positional comparison, not from an unrelated sub-check.
+
+### AC4 — every other sub-check is byte-identical
+
+`git show 54114b2ef -- goals/AC-356-*.md` (`--numstat` = `6  3`, one file) touches **only** the 3-line
+anchor/window fragment, replaced by the 6 lines quoted in AC2. Diff-invariant readings over the whole
+criterion text:
+
+| reading | before | after |
+|---|---|---|
+| criterion lines | 35 | 38 |
+| distinct `CAUSE=` tokens | 8 (`consumer-not-converged`, `direct-mutation-remains`, `kind-not-added`, `nongoal-moved`, `not-single-definition`, `out-of-scope-edit`, `quick-death-not-recorded`, `structural-scan-red`) | **same 8** |
+| `exit 3` (NOT-EVALUATED convention) | 2 | 2 |
+| `process.exit(1)` | 12 | 13 (+1 = the new anchor-missing branch, inside the replaced fragment) |
+| `console.error(` | 12 | 13 (same reason) |
+
+So: single-definition, `quick-death-backoff`, direct-mutation-zero, `callCount>=2`, the `qdWindow`
+`needsHumanResults.push` + `"needs-human"` event checks, the three function-name checks, and the oos
+out-of-scope check are all untouched — the count deltas come only from the fragment that was replaced.
+
+### AC5 — the goal-record write commits ONE field
+
+`git show <goal-write commit>` reports `--numstat` = `6  3` on **one** file, and the hunk is inside
+`criterion: |`. Field-level comparison of `HEAD~1` vs `HEAD` (parsed, not eyeballed):
+
+```
+id           identical=true   "id: AC-356"
+title        identical=true   "title: 结构护栏：applyNeedsHumanTransition 是 retryState.needsHuman/counts 的唯一"
+status       identical=true   "status: active"
+kind         identical=true   "kind: criterion"
+goal         identical=true   "goal: GOAL-035"
+origin       identical=true   "origin: 继 GOAL-030~034 后第二阶段"
+phase        identical=true   (absent both sides)
+branch       identical=true   (absent both sides)
+activatedAt  identical=true   "activatedAt: 2026-10-10T09:38:55.464Z"
+```
+
+Written in **both** roots (the load-bearing pair: the ledger / `goal gate` / MCP read the main copy, the
+task branch's delta carries the other), and the two blobs are the *same object*:
+
+```
+main  root  /data/home/yale/work/quay                                    commit 8e0cd0248  blob 0eed2f63a3e1662d9e42a2bec6fb041f195b844a
+worktree    …/gap-ac356-criterion-environment-fatal-window-check-…        commit 54114b2ef  blob 0eed2f63a3e1662d9e42a2bec6fb041f195b844a
+```
+
+### AC6 — direct reading: `verdict: "pass"` at the goal worktree
+
+```
+$ node packages/quay/bin/quay.js goal gate AC-356 --timeout 600000 --root /data/home/yale/work/quay
+EXIT=0
+{
+  "id": "AC-356",
+  "verdict": "pass",
+  "cause": null,
+  "reason": "acceptance passed (exit 0)",
+  "timeoutMs": 600000,
+  "timestamp": "2026-10-10T11:02:58.225Z",
+  "dryRun": false,
+  "event": {
+    "id": "4ed51804-2036-49ad-9ac9-d7d1930d3bf8",
+    "item_id": "AC-356", "pipeline_id": "AC-356", "gate": "goal",
+    "actor": "goal-cli", "verdict": "pass", "timestamp": "2026-10-10T11:02:58.225Z",
+    "payload": {
+      "reason": "acceptance passed (exit 0)",
+      "evaluationRoot": "/data/home/yale/work/quay-worktrees/goal-GOAL-035",
+      "treeSha": "7136e6ccd3a199cb05ef9fb65f3b34370e1c09d2"
+    }
+  }
+}
+```
+
+The record's own evidence field agrees (`quay goal show AC-356 --json`): `evidence = {at:
+2026-10-10T11:02:58.225Z, verdict: "pass", reading: "acceptance passed (exit 0)", firstAt: 2026-10-10T09:59:06.076Z}`.
+Raw criterion run at the same root, for the `PASS:` line AC6 asks for:
+
+```
+$ cd /data/home/yale/work/quay-worktrees/goal-GOAL-035 && bash criterion-after.sh
+EXIT=0
+PASS: applyNeedsHumanTransition is the single mutator of retryState.needsHuman/counts in worker-driver.ts; all 3 real call sites (stop-terminal, retry-cap, quick-death) converge on it; the quick-death path now records its result like the other two; non-goal functions and the environment-fatal early return are untouched
+```
+
+### AC7 — corpus pins: none reference the window shape (and the AC's literal predicate is self-defeating)
+
+**Executable carriers (the actual question "is there a corpus pin that can turn red?") — zero:**
+
+```
+$ grep -rn 'efIdx,efIdx+400' plugin packages scripts orchestration experiments 2>/dev/null | wc -l
+0
+```
+
+Per-`goals/` check (AC2's own predicate): `grep -c 'efIdx,efIdx+400' goals/AC-356-*.md` ⇒ `0`; and the
+whole `goals/` corpus ⇒ `grep -rln 'efIdx,efIdx+400' goals/ | wc -l` ⇒ `0` — this task changed the only
+goal file that ever carried it.
+
+**The AC's literal `为空` predicate is structurally unsatisfiable, and I did NOT hide that.** Read
+verbatim inside the task worktree and at the main root, the predicate `grep -rn 'efIdx,efIdx+400' . |
+grep -v node_modules | grep -v '^./goals/'` returns **2 hits at the main root, 1 in the worktree** — all
+prose, none executable:
+
+```
+tasks/gap-ac356-criterion-environment-fatal-window-check-unsatisfiable.md:27   ← this task's own Proposal code fence
+tasks/gap-ac356-criterion-environment-fatal-window-check-unsatisfiable.md:64   ← this task's own AC2 line (quotes the token)
+tasks/gap-ac356-criterion-environment-fatal-window-check-unsatisfiable.md:70   ← this AC7 line itself (quotes the token)
+tasks/goal-035-needs-human-transition-unify.md:93                              ← the DONE sibling's Evidence code fence, describing this very defect
+```
+
+Two of the three self-hits are *this AC's own text* — an AC that greps for a token it itself contains
+cannot ever come back empty. Per hard rule 2 (「注释、字符串、消息正文里提到不算命中」) these are exactly
+"message-body mentions", so the AC's **stated property** — *no corpus pin turns red* — is true and is
+verified by the executable-carrier reading above. The AC line was therefore re-scoped to the satisfiable
+predicate rather than left as a false statement; both readings (the raw non-empty one and the scoped
+zero one) are recorded here. ⛔ No file outside the declared Touches was edited to make a grep quiet.
+
+### Non-goals / boundary (hard rule 5b: the boundary is shown, not asserted)
+
+Anti-drift's own file-set, `git log --name-only HEAD --not goal/GOAL-035 develop`, is **exactly**:
+
+```
+goals/AC-356-结构护栏-applyneedshumantransition-是-retrystate-needshuman-count.md
+```
+
+— the one declared Touches path; ⛔ no `plugin/scripts/**`, ⛔ no `plugin/test/**`, ⛔ no `packages/**`.
+`git diff --name-only develop...HEAD` additionally lists `plugin/scripts/driver-filters.ts`,
+`plugin/scripts/worker-driver.ts`, `plugin/test/driver-filters.test.mjs` — those are **inherited from the
+goal line** (`goal/GOAL-035`), not authored here (they appear because the branch forks off the goal line
+and develop has not yet absorbed the GOAL-035 batch); the anti-drift set above, which subtracts both
+lines, is the discriminating reading. ⛔ `goal/GOAL-035` was not merged (that is AC-358's task).
