@@ -58,10 +58,11 @@ resume 载体＝新增的 CLI 动词文件（实现载体）+ `packages/quay/src
 - packages/quay/src/dashboard-kernel.ts
 - packages/quay/src/cli/help.ts
 - packages/quay/test/cli.test.mjs
+- delivery-manifest.json
 - tasks/gap-cli-lanes-json-verb-for-gantt-consumers.md
 
 ## Notes
 
 **背景（已实测，2026-10-10）**：`v0.18.0` 已把 `vendor/quay/dist/dashboard-kernel.js` + `dashboard-kernel-vectors.json` 打进发布产物（`gap-dashboard-kernel-not-packaged-in-plugin-artifact` 的缺口已修）；但那条路径（B）已被人裁定**不采用**，故本任务的存在理由是 A，不是继续推广 B。kernel 三件套目前唯一消费者是 Web 卡片，消费方要的正是它算出来的东西——所以本任务本质是"给已有的唯一实现开一个只读出口"，⛔ 不是新写一个算法。消费方前端已在 claudecodeui `7fe72e71` 交付（纯渲染组件 + 契约向量 fixture，39/39 vitest 绿、真实浏览器验收过），只差这条动词。
 
-**Touches 加宽说明（2026-10-10）**：原单只列了实现载体。落地时 `quay` 的**动词表层是三个互相钉住的点**，新增一条 verb 必然同时动它们：`src/cli/help.ts`（`--help` Usage 总纲里必须出现 `quay lanes` 一行）、`test/cli.test.mjs` 的 block14（它把「总纲动词集」与一份**硬编码的 dispatch 表**做集合相等断言，新动词不加进那份清单即 `extra` 报红）、以及 `bin/quay.ts` 的兜底 usage 行（block28 从 dispatch 表机械推导期望集，加路由不加 token 即 `missing` 报红）。三者都在本任务自身 delta 内，按 `anti-drift-touches-check` 的「声明太窄」臂加宽，而非回退其中任何一个。
+**Touches 加宽说明（2026-10-10）**：原单只列了实现载体。落地时 `quay` 的**动词表层是四个互相钉住的点**，新增一条 verb 必然同时动它们：`src/cli/help.ts`（`--help` Usage 总纲里必须出现 `quay lanes` 一行）、`test/cli.test.mjs` 的 block14（它把「总纲动词集」与一份**硬编码的 dispatch 表**做集合相等断言，新动词不加进那份清单即 `extra` 报红）、`bin/quay.ts` 的兜底 usage 行（block28 从 dispatch 表机械推导期望集，加路由不加 token 即 `missing` 报红）、以及 `delivery-manifest.json`（`capability-manifest-check` 枚举 dispatch 表与 manifest 的 `capabilities` 双向差集——实测：加路由不加注册 ⇒ `UNREGISTERED: lanes (in source, not in manifest)` / `[cli-command] DRIFT: source=22 manifest=21`，scoped 门 fail-closed 红）。四者都在本任务自身 delta 内，按 `anti-drift-touches-check` 的「声明太窄」臂加宽，而非回退其中任何一个。
