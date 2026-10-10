@@ -2,7 +2,7 @@
 id: AC-359
 title: 结构护栏：computeDispatchExclusion 是 {inFlight,retryExhausted} 的唯一纯函数计算点，不含
   backoff；两消费者收敛到一次调用
-status: draft
+status: active
 kind: criterion
 goal: GOAL-036
 criterion: |
@@ -41,6 +41,16 @@ criterion: |
   echo "PASS: computeDispatchExclusion is the single, pure, round-start source of {inFlight, retryExhausted}; both the ready-pool and apply-filters call sites read its one result instead of independently re-deriving; backoff stays an unchanged per-candidate fresh Date.now() check; Gate/Fan-in/Goal files untouched"
 expect: exit 0 = 单一纯函数 + 双调用归零 + backoff 现场判定不变 + 越界文件未动；exit 1 = CAUSE=
   指明哪一项；exit 3 = computeDispatchExclusion 尚未落地
-origin: 用户 2026-10-11 正式批准推进三条架构改进（Driver/Routine/Pool、Gate/Fan-in、Goal
-  transition），本 goal 是优先项①的实施，②③本轮只设计不实施
+origin: 用户 2026-10-11 批准三轨①
+activatedAt: 2026-10-10T18:35:00.887Z
+statusLog:
+  - at: 2026-10-10T18:35:00.887Z
+    from: draft
+    to: active
+    actor: goal-cli
+    reason: ""
+fidelity:
+  verdict: not-evaluated
+  reason: no judge configured
+  at: 2026-10-10T18:35:00.887Z
 ---
