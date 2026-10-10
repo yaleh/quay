@@ -3,7 +3,7 @@ id: goal-036-dispatch-exclusion-contract-tests
 title: GOAL-036 AC-360 落地：computeDispatchExclusion 函数级契约测试（基本正确性 +
   确定性/纯度负对照）落地，driver-filters.test.mjs 与 worker-driver.test.mjs 全量回归绿（分支
   goal/GOAL-036）
-status: todo
+status: ready
 labels:
   - gap
 parent: null
