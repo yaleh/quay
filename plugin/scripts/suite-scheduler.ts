@@ -67,7 +67,7 @@ import { run } from "node:test";
 import { spec } from "node:test/reporters";
 import { Transform } from "node:stream";
 import path from "node:path";
-import { isDirectEntry } from "./gate-script-base.ts";
+import { isDirectEntry, parseArgs as baseParseArgs } from "./gate-script-base.ts";
 import { classifyFile, type DeclaredGroup } from "./runner-grouping.ts";
 import { loadDurationAverages, orderByLpt, loadBaselineDurations, type LptReport } from "./suite-lpt-order.ts";
 import { readPerFileCpuMs, readPerFileMemPeakKb } from "./measure-suite-reporter.mjs";
@@ -455,6 +455,24 @@ function emitGroup(group: SuiteGroup, concurrency: number, st: GroupStats): void
 
 // ── CLI ──────────────────────────────────────────────────────────────────────────────────────────
 
+// The flag loop is the SHARED spec-driven parser (gate-script-base.ts); this wrapper only maps the
+// parsed flags onto this command's typed shape. It used to be a private if/else chain — one of the
+// four residual carriers named by semantic-dedup-scan finding `parseargs-handrolled-residuals`
+// (runId `semantic-dedup-scan-1791631645924`, suggestedAction `unify`).
+//
+// THIS ONE IS AN ARGV SINK, and that is what the two unusual spec keys are for: `test.sh` forwards
+// its OWN argv straight through to `node --test`, so most tokens here belong to that consumer, not
+// to the scheduler. `unknown: "skip"` drops a flag it does not know WITHOUT eating the token after
+// it (the base's default, "accept", would consume it as though it were the unknown flag's value);
+// `help: "return"` keeps the `--help` TEXT here (the caller owns its multi-line usage) while the
+// base owns the detection — the arm below is unchanged in what it writes and what it returns.
+// `--test-name-pattern` is the arity-1 `string[]` form: REPEATED, accumulating one value per
+// occurrence, which the single-valued `flags` map cannot express (last write would win).
+//
+// ⛔ `--test-concurrency` is DECLARED but deliberately unread — the scheduler owns concurrency, so
+// the value is stripped rather than honored (one source, no drift). An undeclared flag would take
+// the `skip` arm and leave its value as a stray positional; declaring it is what makes the stripping
+// explicit.
 function parseArgs(argv: string[]): {
   budgets: SchedulerBudgets;
   testNamePatterns: string[];
@@ -463,58 +481,51 @@ function parseArgs(argv: string[]): {
   baseline: string;
   groups?: string;
   rounds: number;
+  help: boolean;
 } {
-  const budgets: SchedulerBudgets = { serial: 1, lowconc: 1, main: 1 };
-  const testNamePatterns: string[] = [];
-  let root = process.cwd();
-  let mainRoot = "";
-  let baseline = "";
-  let groups: string | undefined;
+  const { flags, lists, help } = baseParseArgs(argv, {
+    minArgs: 0,
+    usage: "--root <repo> --main-root <main-checkout> --serial-concurrency <S> --lowconc-concurrency <L> --main-concurrency <M> [--groups <csv>] [--rounds <N>] [--baseline <path>] [<node --test flags...>]",
+    help: "return",
+    unknown: "skip",
+    flags: {
+      root: { type: "string" },
+      "main-root": { type: "string" },
+      baseline: { type: "string" },
+      groups: { type: "string" },
+      rounds: { type: "string" },
+      "serial-concurrency": { type: "string" },
+      "lowconc-concurrency": { type: "string" },
+      "main-concurrency": { type: "string" },
+      "test-concurrency": { type: "string" },
+      "test-name-pattern": { type: "string[]" },
+    },
+  });
+  // A flag that carried no value at all reads as "" from the parser (trailing `--flag`, or an
+  // explicit `--flag ""`); neither names a value, so both fall back to the default. The old loop
+  // distinguished them only by SKIPPING a valueless trailing flag entirely — same net reading.
+  const str = (v: string | boolean | undefined): string | undefined =>
+    typeof v === "string" && v !== "" ? v : undefined;
+  const budget = (v: string | boolean | undefined): number => Math.max(1, Number(str(v) ?? "") || 1);
   let rounds = Number(process.env.QUAY_TEST_LPT_ROUNDS);
   if (!Number.isInteger(rounds) || rounds < 1) rounds = 3;
-  for (let i = 2; i < argv.length; i++) {
-    const a = argv[i];
-    if (a === "--serial-concurrency" && i + 1 < argv.length) {
-      budgets.serial = Math.max(1, Number(argv[++i]) || 1);
-    } else if (a === "--lowconc-concurrency" && i + 1 < argv.length) {
-      budgets.lowconc = Math.max(1, Number(argv[++i]) || 1);
-    } else if (a === "--main-concurrency" && i + 1 < argv.length) {
-      budgets.main = Math.max(1, Number(argv[++i]) || 1);
-    } else if (a === "--root" && i + 1 < argv.length) {
-      root = argv[++i];
-    } else if (a.startsWith("--root=")) {
-      root = a.slice("--root=".length);
-    } else if (a === "--main-root" && i + 1 < argv.length) {
-      mainRoot = argv[++i]; // the LPT carrier root (main checkout's .quay/verification-round.jsonl)
-    } else if (a.startsWith("--main-root=")) {
-      mainRoot = a.slice("--main-root=".length);
-    } else if (a === "--baseline" && i + 1 < argv.length) {
-      baseline = argv[++i]; // committed last-resort duration table (used only when the live carrier is empty)
-    } else if (a.startsWith("--baseline=")) {
-      baseline = a.slice("--baseline=".length);
-    } else if (a === "--groups" && i + 1 < argv.length) {
-      groups = argv[++i];
-    } else if (a.startsWith("--groups=")) {
-      groups = a.slice("--groups=".length);
-    } else if (a === "--rounds" && i + 1 < argv.length) {
-      const n = Number(argv[++i]);
-      if (Number.isInteger(n) && n >= 1) rounds = n;
-    } else if (a.startsWith("--rounds=")) {
-      const n = Number(a.slice("--rounds=".length));
-      if (Number.isInteger(n) && n >= 1) rounds = n;
-    } else if (a === "--test-concurrency") {
-      if (i + 1 < argv.length) i++; // strip the space-spelling value (the scheduler owns concurrency)
-    } else if (a.startsWith("--test-concurrency=")) {
-      // strip — the scheduler owns concurrency (one source, no drift)
-    } else if (a === "--test-name-pattern" && i + 1 < argv.length) {
-      testNamePatterns.push(argv[++i]); // map to run()'s testNamePatterns (same parse as suite-lpt-runner.mjs)
-    } else if (a.startsWith("--test-name-pattern=")) {
-      testNamePatterns.push(a.slice("--test-name-pattern=".length));
-    } else if (a.startsWith("-")) {
-      // unknown pass-through flag — skip (no run() equivalent), same as suite-lpt-runner.mjs parseRunnerArgs
-    }
-  }
-  return { budgets, testNamePatterns, root, mainRoot: mainRoot || root, groups, rounds };
+  const n = Number(str(flags.rounds) ?? "");
+  if (Number.isInteger(n) && n >= 1) rounds = n;
+  const root = str(flags.root) ?? process.cwd();
+  const mainRoot = str(flags["main-root"]) ?? "";
+  return {
+    budgets: {
+      serial: budget(flags["serial-concurrency"]),
+      lowconc: budget(flags["lowconc-concurrency"]),
+      main: budget(flags["main-concurrency"]),
+    },
+    testNamePatterns: lists?.["test-name-pattern"] ?? [],
+    root,
+    mainRoot: mainRoot || root,
+    groups: str(flags.groups),
+    rounds,
+    help: help === true,
+  };
 }
 
 /** Read the RAW deduped file list from stdin (one path per line — build_deduped_files' realpaths). */
@@ -528,7 +539,10 @@ async function readFiles(): Promise<string[]> {
 }
 
 async function main(argv: string[]): Promise<number> {
-  if (argv.includes("--help") || argv.includes("-h")) {
+  const { budgets, testNamePatterns, mainRoot, baseline, groups: groupsArg, rounds, help } = parseArgs(argv);
+  if (help) {
+    // `--help` is DETECTED by the shared parser (`help: "return"`) and PRINTED here — the text stays
+    // at the command that owns the contract. Unchanged: stderr, exit 0.
     process.stderr.write(
       "suite-scheduler.ts — unified group-budget suite scheduler (gap-suite-dynamic-waterline-scheduler)\n" +
         "usage: <raw file paths on stdin, one per line> | node suite-scheduler.ts \\\n" +
@@ -538,7 +552,6 @@ async function main(argv: string[]): Promise<number> {
     );
     return 0;
   }
-  const { budgets, testNamePatterns, mainRoot, baseline, groups: groupsArg, rounds } = parseArgs(argv);
   const files = await readFiles();
   if (files.length === 0) {
     process.stderr.write("suite-scheduler: no test files on stdin\n");
