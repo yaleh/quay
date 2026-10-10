@@ -224,9 +224,13 @@ export async function run(argv, ctx = {}) {
   if (cmd === "manager") return (await import("../src/cli/manager.ts")).handleManager(ctx);
   // AC139: unified driver launch surface (start/stop/drain/status/restart --kind promotion|worker).
   if (cmd === "driver") return (await import("../src/cli/driver.ts")).handleDriver(ctx);
+  // gap-cli-lanes-json-verb-for-gantt-consumers: `quay lanes [--json] [--window-hours N] [--root <path>]`
+  // — the read-only, always-JSON exit for the dashboard's packed lanes (same call chain + kernel as
+  // the Web card), so an external consumer can render the gantt without importing quay.
+  if (cmd === "lanes") return (await import("../src/cli/lanes.ts")).handleLanes(ctx);
 
   // QX-005: updated fallback with --help hint (UQ-001/UQ-002).
-  console.error("usage: quay <adr|goal|meta|init|task list|view|create|edit|check|gate|gate-log|complete|adjudicate|promote|retreat|run|migrate|provider|config validate|config check|action list|action run|serve|server start|server add|server stop|server restart|server status|mcp|manager start|manager arm|driver> ...\nRun `quay --help` for full usage documentation.");
+  console.error("usage: quay <adr|goal|meta|init|task list|view|create|edit|check|gate|gate-log|complete|adjudicate|promote|retreat|run|migrate|provider|config validate|config check|action list|action run|serve|server start|server add|server stop|server restart|server status|mcp|manager start|manager arm|driver|lanes> ...\nRun `quay --help` for full usage documentation.");
   process.exitCode = 1;
     }
 }

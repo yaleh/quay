@@ -1269,11 +1269,12 @@ async function block14(workspaceRoot) {
     // The dispatch command set from packages/quay/bin/quay.ts (every `if (cmd === "…")` route).
     // (`provider` joined it with gap-provider-switch-no-dedicated-entry-point — a new route with no
     // synopsis line is exactly the drift this assertion exists to catch, so the list is widened here
-    // in the same change that adds the route.)
+    // in the same change that adds the route. `lanes` joined it the same way with
+    // gap-cli-lanes-json-verb-for-gantt-consumers.)
     const dispatchVerbs = [
       "adr", "goal", "meta", "task", "action", "serve", "server", "mcp", "init", "config", "gate",
       "gate-log", "complete", "adjudicate", "promote", "retreat", "run", "migrate", "provider",
-      "manager", "driver",
+      "manager", "driver", "lanes",
     ];
     const missing = dispatchVerbs.filter((v) => !synopsisVerbs.includes(v));
     const extra = synopsisVerbs.filter((v) => !dispatchVerbs.includes(v));

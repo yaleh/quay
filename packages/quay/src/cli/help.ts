@@ -103,6 +103,7 @@ Usage:
   quay manager start [--dry-run] [--json]
   quay manager arm [--dry-run] [--json] [--verify]
   quay driver <${VERBS.join("|")}> --kind <${KINDS.join("|")}> [--root <path>]
+  quay lanes [--json] [--window-hours <n>] [--root <path>]
 
 Options for task list:
   --status <status>   Filter by status (todo, ready, done, needs-human, superseded)
@@ -651,6 +652,45 @@ Usage:
 
   Identity/misconfiguration is a REFUSAL, not a silent second host: a live host already owning
   this workspace root makes this process exit 0 and print a machine-readable admission marker.
+`);
+  } else if (sub === "lanes") {
+    process.stdout.write(`quay lanes — READ-ONLY: the packed lanes of the dashboard's "Loop pulse" gantt, as JSON
+
+Usage:
+  quay lanes [--window-hours <n>] [--root <path>]
+
+  Prints \`{windowHours, nowMs, lanes[], overflow}\` — the SAME interval merge and greedy 5-lane
+  packing the Web dashboard's live card renders, computed by the SAME kernel
+  (packages/quay/src/dashboard-kernel.ts) over the SAME live telemetry + worker-outcome carriers.
+  ⛔ There is no second packing implementation: a lane change in the kernel moves this output and
+  the card together. The verb exists so an external consumer (claudecodeui's Quay tab) can render
+  the identical gantt from a SUBPROCESS, taking no npm dependency on quay and importing nothing
+  from the plugin bundle path.
+
+  Always JSON (like \`quay driver live\`) — \`--json\` is accepted and is a no-op. Read-only: it never
+  starts/stops/spawns anything and needs no serve process.
+
+  lanes[]     ALWAYS exactly 5 entries (the fixed visual contract: 5 reference lanes are drawn even
+              when the window is empty — ⛔ this is not "how many lanes are in use"). Every interval
+              carries \`taskId/runId/startMs/endMs/phase/finalState/fanInOutcome\`, field-for-field the
+              consumer's \`QuayGanttLanes\` interval shape.
+  overflow    Concurrency beyond the 5 lanes. Counted, NEVER dropped
+              (\`sum(lanes) + overflow\` === the number of in-window intervals).
+
+  --window-hours <n>  The timeline window, in hours — an integer in [1,24]. It RE-FILTERS the two
+              record sources (in-flight runs older than the window, and history that ended before
+              it, are excluded) — ⛔ it is not a visual zoom of an already-built timeline.
+              Missing / illegal / out-of-range (\`abc\`, 0, 999, 1.5) → the default, which is the
+              same value and the same validator the card's \`?hours=\` param uses — 3 hours, whose ONE
+              definition point is \`DEFAULT_TIMELINE_HOURS\` in src/serve-dashboard.ts (⛔ not re-typed
+              at this help site: this file is loaded by EVERY invocation, so it must not import the
+              web render module just to interpolate one number).
+  --root <path>       Workspace root (default: discovered via .quay/config.yml from cwd).
+
+  Exit codes: 0 = a real reading, INCLUDING an empty window (5 empty lanes); 1 = no workspace found,
+  or the live telemetry carrier could not be read. ⛔ "could not read" and "no records in the window"
+  are different states and never share an output (硬规则 3b) — a failed read exits non-zero and
+  prints NO document, rather than 5 empty lanes that would read as "the loop is idle".
 `);
   } else {
     // QX-007: stub for subcommands not yet documented in detail (serve, action, mcp, …).
