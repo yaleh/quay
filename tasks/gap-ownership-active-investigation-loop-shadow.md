@@ -12,8 +12,6 @@ extra:
 ---
 **type:** execution
 
-**PARKED** — 由主会话交互执行中，勿派发/勿晋升；完成时由主会话在【同一次】task_write 里去掉本行并置 done。
-
 该轴仍暗，理由：本任务只新增 docs/analysis 下的只读 shadow 模块与测试，不 import/不改变任何生产包间依赖边，也不碰 god-package 候选，故 L_D 与 L_G 两轴对本任务结构性不适用。
 
 ## Finding
@@ -39,16 +37,19 @@ ownership/architecture 的 benchmark 已证明：给 agent 受限的只读工具
 - docs/analysis/ownership-active-replay-results.json
 - plugin/test/ownership-active-loop.test.mjs
 - tasks/gap-ownership-active-investigation-loop-shadow.md
+- docs/analysis/ownership-shadow-proposer.mjs
+- plugin/fixtures/ownership-active-slice/goal-033-fork-point.arch.json
+- plugin/fixtures/ownership-active-slice/goal-033-slice.json
 
 ## AC
 
-- [ ] 契约与预算：每轮至多 1 个 evidence request；rounds / requests / bytes 硬预算耗尽时终态为 abstain（not-enough-evidence），不产生猜测式提案；deny 路径与越界路径被 gate 拒绝。
-- [ ] 每条证据都带 provenance（tool、repo ref/commit、path+range 或 ArchGuard scope+flags、时间戳、内容 hash）；不可达证据（duplicates 等）返回显式 capability_gap，而不是伪造或静默为空。
-- [ ] propose-slice（package-cycle）的 delta 由 ArchGuard Refactor Slice / Expected Delta 原语计算，模型自述 delta 被 gate 拒绝；原语不可用或负对照未被证伪时提案降级为 investigate。
-- [ ] 全部输出只写 shadow carrier；模块不 import fileProposals / driveItems / fileDecisions，不创建 task/goal，不改代码；judge 无工具。
-- [ ] GOAL-032/033 replay 已跑并记录：GOAL-033 是否主动请求 package-level cycle 查询；GOAL-032 在 duplicates 不可达时是否诚实暴露 capability gap 而非漫游至调用上限。
-- [ ] Quay 当前项目 live shadow 已实跑若干轮，读数记录在报告中；测试全绿。
+- [x] 契约与预算：每轮至多 1 个 evidence request；rounds / requests / bytes 硬预算耗尽时终态为 abstain（not-enough-evidence），不产生猜测式提案；deny 路径与越界路径被 gate 拒绝。 **Verified**: contract.mjs: 8 rounds / 6 requests / 90KB hard budgets; exhaustion => abstain not-enough-evidence; deny paths + scope + ERE dialect refused at the gate (tests + 5 mutation controls)
+- [x] 每条证据都带 provenance（tool、repo ref/commit、path+range 或 ArchGuard scope+flags、时间戳、内容 hash）；不可达证据（duplicates 等）返回显式 capability_gap，而不是伪造或静默为空。 **Verified**: every reading carries tool/ref commit/path+range|scope+flags/ts/sha256; duplicates & literal_dispersion return explicit capability_gap, and are also exposed at proposal time
+- [x] propose-slice（package-cycle）的 delta 由 ArchGuard Refactor Slice / Expected Delta 原语计算，模型自述 delta 被 gate 拒绝；原语不可用或负对照未被证伪时提案降级为 investigate。 **Verified**: delta computed by the INSTALLED archguard 0.1.39 `slice-delta` CLI (version+subcommand probed; version/command/arch+slice+report hashes recorded); self-declared delta refused; unavailable/not-evaluated/unfalsified/provenance-mismatch downgrade to investigate; ArchGuard source-repo path retired and test-forbidden
+- [x] 全部输出只写 shadow carrier；模块不 import fileProposals / driveItems / fileDecisions，不创建 task/goal，不改代码；judge 无工具。 **Verified**: only append site is the shadow carrier; no filing/lifecycle imports; judge launched with --tools ""; not-evaluated is distinct from abstain
+- [x] GOAL-032/033 replay 已跑并记录：GOAL-033 是否主动请求 package-level cycle 查询；GOAL-032 在 duplicates 不可达时是否诚实暴露 capability gap 而非漫游至调用上限。 **Verified**: 25 replay records: GOAL-033 requested package_cycles 5/6 and package_edges 6/6, computed 6->4 twice at T0; GOAL-032 never wandered to a limit (0 forced terminals) and exposed archguard.duplicates / literal_dispersion as capability gaps
+- [x] Quay 当前项目 live shadow 已实跑若干轮，读数记录在报告中；测试全绿。 **Verified**: 9 live shadow investigations on the Quay repo (3 with final code: 0 computed slices, 3 investigate, executed:false); tests green
 
 ## DoD
 
-报告 docs/analysis/ownership-active-replay.md 给出：模块与数据流、live shadow 实际读数、GOAL-032/033 replay 结果、仍缺的 ArchGuard tool surface（duplicates / literal-dispersion 的 CLI 查询、slice-delta 的发布入口）、以及是否具备 limited-proposal 的前提。⛔ 不在线创建 task/goal、不自动改代码、不切生产模型配置；结果 JSON 经凭证扫描。
+报告 docs/analysis/ownership-active-replay.md（提交 9b872fc2a）：模块与数据流、live shadow 读数、GOAL-032/033 回放结果、缺失的 ArchGuard 工具面（CLI 的 duplicates / literal-dispersion 查询、一等的 package-edges 查询、unknown-entity 与 no-edges 区分、--cycles 默认实体级、slice-delta 仅支持既有目录间的符号搬迁）、以及 limited-proposal 就绪度：机制前提已满足，证据前提未满足（live 0/3 产出计算后的切片、T1 发现不稳定、无决策记忆）。⛔ 不在线创建 task/goal、不自动改代码、不切生产模型；结果 JSON 经凭证扫描 0 命中。
