@@ -2,7 +2,7 @@
 id: AC-354
 title: before/after 边数读数 + 可证伪负对照：root→gate/config 边数
   1→0，gate/factories→gate/config 行数 5→0（4 环是否因此收缩按实测记录，不预先断言）
-status: active
+status: achieved
 kind: criterion
 goal: GOAL-034
 criterion: |
@@ -50,6 +50,11 @@ statusLog:
     to: active
     actor: goal-cli
     reason: ""
+  - at: 2026-10-10T06:36:02.267Z
+    from: active
+    to: achieved
+    actor: goal-driver
+    reason: "I2: criterion pass"
 fidelity:
   verdict: not-evaluated
   reason: no judge configured
