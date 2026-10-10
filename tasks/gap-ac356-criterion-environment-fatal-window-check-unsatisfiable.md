@@ -2,7 +2,7 @@
 id: gap-ac356-criterion-environment-fatal-window-check-unsatisfiable
 title: gap-ac356：AC-356 判据的 environment-fatal hard-return 子检查结构上恒假（锚点落在
   QuickDeathCause 类型别名、400 字符窗口取不到分支自身的 return r;）——就地修判据并加负控制
-status: ready
+status: needs-human
 labels:
   - gap
 parent: null
@@ -338,3 +338,12 @@ is the discriminating reading. ⛔ `goal/GOAL-035` was not merged (that is AC-35
 - 未落地原因：AC 未全勾（checked 7/8，剩余未勾 1）——续做只需验证并勾选 AC
 - run_id：wk-prod-anchor
 - session_id：97dacf13-473d-4d04-bdc5-0e7294fc153c
+
+## Needs-Human
+
+**执行 2026-10-10T11:42:22.734Z — 连续修满重试上限仍不合格（标 needs-human）**
+
+- 阻碍原因：worker-driver 连续 3 次 exited-not-landed 未落地（重试上限）
+- 失败步/判词：AC 未全勾（checked 7/8，剩余未勾 1）——续做只需验证并勾选 AC
+- run_id：wk-prod-anchor
+- session_id：023192d3-36b9-4c3d-baca-6fbac9de1ba7
