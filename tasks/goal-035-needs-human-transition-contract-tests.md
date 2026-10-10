@@ -34,15 +34,31 @@ GOAL-035 splits its slice into AC-356 (production-code structural guard: `applyN
 
 ## Acceptance Criteria
 
-- [ ] `grep -c "applyNeedsHumanTransition" plugin/test/driver-filters.test.mjs` is ≥ 2 (one accept case, one surfaced-failure case).
-- [ ] The test file asserts the `ok:false` / `committed:false` failure shape is returned (propagated), not thrown and not swallowed — `grep -qi "committed.*false\|ok.*false" plugin/test/driver-filters.test.mjs` matches.
-- [ ] `node --no-warnings --experimental-strip-types --test plugin/test/driver-filters.test.mjs` exits 0.
-- [ ] `node --no-warnings --experimental-strip-types --test plugin/test/worker-driver.test.mjs` exits 0 (full-file regression, not a subset).
-- [ ] `quay goal gate AC-357 --timeout 900000` reads exit 0 on branch `goal/GOAL-035`.
+- [x] `grep -c "applyNeedsHumanTransition" plugin/test/driver-filters.test.mjs` is ≥ 2 (one accept case, one surfaced-failure case).
+- [x] The test file asserts the `ok:false` / `committed:false` failure shape is returned (propagated), not thrown and not swallowed — `grep -qi "committed.*false\|ok.*false" plugin/test/driver-filters.test.mjs` matches.
+- [x] `node --no-warnings --experimental-strip-types --test plugin/test/driver-filters.test.mjs` exits 0.
+- [x] `node --no-warnings --experimental-strip-types --test plugin/test/worker-driver.test.mjs` exits 0 (full-file regression, not a subset).
+- [x] `quay goal gate AC-357 --timeout 900000` reads exit 0 on branch `goal/GOAL-035`.
 
 ## Definition of Done
 
 `quay goal gate AC-357` — run at the `goal/GOAL-035` tip — exits 0. That criterion mechanically (i) greps `plugin/scripts/driver-filters.ts` and the test file for `applyNeedsHumanTransition`, (ii) re-runs `driver-filters.test.mjs` and `worker-driver.test.mjs` and requires both green, (iii) counts ≥2 references in the test file, and (iv) requires an `ok:false`/`committed:false` assertion. So the real-landing bar is the criterion itself re-run and passing on the branch — not "tests were written". This task does not merge the goal branch into `develop` and does not evaluate AC-358 (post-merge only).
+
+## Evidence
+
+Verified 2026-10-10 on branch `task/goal-035-needs-human-transition-contract-tests` (forked from `goal/GOAL-035` tip `3947c0ae1`). The AC-357 contract tests were already carried by the AC-356 sibling's landing commit `9b01ac3d2`; this task's deliverable is therefore the verification + the goal-level ownership of AC-357, not new test code.
+
+| AC | Reading |
+|---|---|
+| 1 | `grep -c "applyNeedsHumanTransition" plugin/test/driver-filters.test.mjs` = **10** (>= 2) |
+| 2 | `grep -qi "committed.*false\|ok.*false"` -> **match** (first hit `:433`, dedicated surfaced-failure test at `:529`) |
+| 3 | `node --no-warnings --experimental-strip-types --test plugin/test/driver-filters.test.mjs` -> **exit 0** (72 pass / 0 fail) |
+| 4 | `node --no-warnings --experimental-strip-types --test plugin/test/worker-driver.test.mjs` -> **exit 0** (129 pass / 0 fail) |
+| 5 | `quay goal gate AC-357 --timeout 900000` -> **exit 0, verdict=pass** (`evaluationRoot=/home/yale/work/quay-worktrees/goal-GOAL-035`, `treeSha=9d6caab1173219d00ca9b1e31399f1f385d905f3`) |
+
+The three contract tests AC-357 pins: `driver-filters.test.mjs:510` (accept path — in-memory latch paired with the disk commit), `:529` (surfaced failure — repo-less temp dir returns `ok:true/committed:false` WITHOUT throwing, plus a missing-file `ok:false/committed:false`), `:550` (idempotency — a second call does not re-apply `countsOverride`).
+
+Pre-merge: `git merge --no-edit develop` clean; scoped gate `scripts/test.sh --for-task goal-035-needs-human-transition-contract-tests --allow-thin` -> **exit 0** (201 pass / 0 fail); scoped-gate cache recorded.
 
 ## Touches
 
