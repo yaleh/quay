@@ -16,7 +16,8 @@ import {
   validateRequest, gateEvidenceRequest, validateStep,
 } from "../../docs/analysis/ownership-active-contract.mjs";
 import { createExecutor } from "../../docs/analysis/ownership-active-executor.mjs";
-import { buildSliceInput, computeSliceDelta, renderDelta } from "../../docs/analysis/ownership-active-slice-adapter.mjs";
+import { buildSliceInput, computeSliceDelta, renderDelta, resolveSliceDelta, versionAtLeast, MIN_ARCHGUARD_VERSION, SLICE_DELTA_SURFACE } from "../../docs/analysis/ownership-active-slice-adapter.mjs";
+import { execFileSync, spawnSync } from "node:child_process";
 import {
   runActiveInvestigation, parseStep, quotaGate, resolveRuntime, appendCarrier, readCarrierHistory,
   buildStepPrompt, PROPOSER_ID, CARRIER_REL,
@@ -34,7 +35,8 @@ after(() => { for (const d of tmpDirs) fs.rmSync(d, { recursive: true, force: tr
 const stripComments = (s) => s.replace(/\/\*[\s\S]*?\*\//g, "").replace(/(^|[^:"'`\\])\/\/.*$/gm, "$1");
 
 // ── fixtures ───────────────────────────────────────────────────────────────────────────────────
-const ARCHGUARD_FIXTURES = "/data/home/yale/work/archguard/tests/fixtures/slice-delta";
+const ARCHGUARD_FIXTURES = path.join(REPO, "plugin", "fixtures", "ownership-active-slice");   // vendored copies (sha256 recorded in the report)
+const HEAD = execFileSync("git", ["-C", REPO, "rev-parse", "HEAD"], { encoding: "utf8" }).trim();
 const GRAPH = {
   nodes: ["", "cli", "fan-in", "gate", "gate/config", "gate/factories"].map((id) => ({ id, name: id || "(root)", type: "internal" })),
   edges: [
@@ -60,12 +62,12 @@ const proposal = (over = {}) => ({
 });
 
 // A fake executor: counts tool calls, can return scripted evidence per request key.
-function fakeExecutor(script = {}) {
+function fakeExecutor(script = {}, commit = "c0ffee0000000000000000000000000000000000") {
   const calls = [];
   let n = 0;
   return {
     calls,
-    commit: () => "c0ffee0000000000000000000000000000000000",
+    commit: () => commit,
     execute(req) {
       calls.push(req);
       const key = req.kind === "archguard_query" ? `archguard:${req.query}` : req.kind;
@@ -86,7 +88,7 @@ function scriptedJudge(steps) {
 const req = (request, extra = {}) => ({ action: "request_evidence", hypothesis: "root and cli may be mutually dependent", sufficient: false, why: "need the cycle", request, ...extra });
 const REQ_CYCLES = { kind: "archguard_query", query: "package_cycles" };
 const sliceDeps = (over = {}) => ({
-  sliceDelta: { available: true, script: "/x/slice-delta.mjs", script_sha256: "abc", archguard_repo_head: "deadbeef" },
+  sliceDelta: { available: true, cli: "/x/archguard/cli.js", version: "0.1.39", surface: SLICE_DELTA_SURFACE },
   git: (a) => (a[0] === "rev-parse" ? "tree123\n" : ""),
   analyzePackageGraph: () => ({ file: "/dev/null", json: { extensions: { tsAnalysis: { moduleGraph: GRAPH } } } }),
   ...over,
@@ -292,7 +294,7 @@ test("adapter: the REAL primitive computes a redirect cut (probe relocated out o
   if (!REAL_PRIMITIVE) return t.skip("primitive not present");
   const fixture = JSON.parse(fs.readFileSync(path.join(ARCHGUARD_FIXTURES, "goal-033-fork-point.arch.json"), "utf8"));
   const names = fixture.extensions.tsAnalysis.moduleGraph.edges.find((e) => e.from === "cli" && e.to === "fan-in").importedNames;
-  const r = computeSliceDelta({ root: REPO, commit: "abc", deps: { git: (a) => (a[0] === "rev-parse" ? "t\n" : ""), analyzePackageGraph: () => ({ file: "", json: fixture }) },
+  const r = computeSliceDelta({ root: REPO, commit: HEAD, deps: { git: (a) => (a[0] === "rev-parse" ? "t\n" : ""), analyzePackageGraph: () => ({ file: "", json: fixture }) },
     proposal: proposal({ slice: { scope_root: "packages/quay/src", subject: "", moves: [{ file: "fan-in/ff-merge.ts", from: "fan-in", to: "", symbols: names }] } }) });
   assert.equal(r.status, "evaluated", JSON.stringify(r).slice(0, 300));
   assert.equal(r.delta.after.scc_size, 5);
@@ -301,28 +303,49 @@ test("adapter: the REAL primitive computes a redirect cut (probe relocated out o
   assert.deepEqual(r.guards.violations, []);
 });
 
+test("adapter: exit 1 with a clean must-not-change but an UNFALSIFIED control is reported as a computed no-op cut, with its reason", () => {
+  const report = { status: "evaluated", current: { sccSize: 6, sccMembers: ["", "cli", "fan-in", "gate", "gate/config", "gate/factories"] },
+    computedDelta: { sccAfter: ["", "cli", "fan-in", "gate", "gate/config", "gate/factories"], sccLeft: [], removedEdges: [{ from: "gate", to: "gate/factories", importedNames: ["makeGoalGate"], becomes: "intra-directory" }], addedEdges: [] },
+    mustNotChange: { violations: [], forbiddenNewEdges: [] }, negativeControl: { restoreEdges: [{ from: "gate", to: "gate/factories" }], subjectSccMembersAfterRestore: [], subjectBackInScc: false, falsified: false },
+    guards: { clean: false, violations: 0, negativeControlFalsified: false }, proposedCut: { assumptions: [] } };
+  const g = { nodes: GRAPH.nodes, edges: [{ from: "gate", to: "gate/factories", importedNames: ["makeGoalGate"] }, ...GRAPH.edges] };
+  const r = computeSliceDelta({ root: "/r", commit: "abc", deps: { sliceDelta: { available: true, cli: "/x/cli.js", version: "0.1.39", surface: SLICE_DELTA_SURFACE }, git: (a) => (a[0] === "rev-parse" ? "t\n" : ""),
+      analyzePackageGraph: () => ({ file: "", json: { extensions: { tsAnalysis: { moduleGraph: g } } } }),
+      runCli: (cli, argv) => { fs.writeFileSync(argv[argv.indexOf("--json") + 1], JSON.stringify(report)); return { status: 1, stdout: "", stderr: "" }; } },
+    proposal: proposal({ slice: { scope_root: "packages/quay/src", subject: "gate", moves: [{ file: "gate/factories/goal.ts", from: "gate/factories", to: "gate", symbols: ["makeGoalGate"] }] } }) });
+  assert.equal(r.status, "guard-violated");
+  assert.match(r.reason, /^NEGATIVE_CONTROL_NOT_FALSIFIED/);
+  assert.equal(r.guards.violations.length, 0);
+  assert.match(renderDelta(r), /size 6 -> 6.*negative control falsified=false.*nothing for the control to restore/);
+  assert.doesNotMatch(renderDelta(r), /none violated/);
+});
+
 test("adapter: a missing primitive is a capability gap, never an estimated delta", () => {
-  const r = computeSliceDelta({ root: "/r", commit: "abc", proposal: proposal(), deps: { sliceDelta: { available: false, script: "/nope" } } });
+  const r = computeSliceDelta({ root: "/r", commit: "abc", proposal: proposal(), deps: { sliceDelta: { available: false, version: "0.1.38", reason: "ARCHGUARD_VERSION_TOO_OLD:0.1.38<0.1.39" } } });
   assert.equal(r.status, "unavailable");
   assert.equal(r.gap.capability, "archguard.slice_delta");
   assert.equal(r.delta, undefined);
-  assert.equal(r.gap.surface.shipped_in_published_package, false);
+  assert.equal(r.gap.surface.shipped_in_published_package, true, "the capability IS released; this host's install is what is missing/old");
+  assert.equal(r.gap.installed_version, "0.1.38");
+  assert.match(r.gap.reason, new RegExp(`>= ${MIN_ARCHGUARD_VERSION.replace(/\./g, "\\.")}`));
 });
 
-const REAL_PRIMITIVE = fs.existsSync(path.join(ARCHGUARD_FIXTURES, "goal-033-fork-point.arch.json")) && fs.existsSync("/data/home/yale/work/archguard/docs/experiments/layer-map/slice-delta.mjs");
+const INSTALLED = resolveSliceDelta();             // the released CLI, probed (version + subcommand)
+const REAL_PRIMITIVE = INSTALLED.available && fs.existsSync(path.join(ARCHGUARD_FIXTURES, "goal-033-fork-point.arch.json"));
 test("adapter: the REAL primitive on the GOAL-033 fork-point graph yields 6 -> 4 with a falsified control", (t) => {
   if (!REAL_PRIMITIVE) return t.skip("ArchGuard repo / slice-delta primitive not present on this host");
   const fixture = JSON.parse(fs.readFileSync(path.join(ARCHGUARD_FIXTURES, "goal-033-fork-point.arch.json"), "utf8"));
   const p = proposal({ slice: { scope_root: "packages/quay/src", subject: "", moves: [
     { file: "cli/driver.ts", from: "cli", to: "", symbols: ["runDriver", "runDriverAsync", "resolveDriverInvocation", "DriverRunResult"] },
     { file: "cli/driver-vocab.ts", from: "cli", to: "", symbols: ["ALL_SERVICE_NAMES", "HOSTED_SERVICE_NAMES", "KINDS", "VERBS"] } ] } });
-  const r = computeSliceDelta({ root: REPO, commit: "abc", proposal: p, deps: { git: (a) => (a[0] === "rev-parse" ? "t\n" : ""), analyzePackageGraph: () => ({ file: "", json: fixture }) } });
+  const r = computeSliceDelta({ root: REPO, commit: HEAD, proposal: p, deps: { git: (a) => (a[0] === "rev-parse" ? "t\n" : ""), analyzePackageGraph: () => ({ file: "", json: fixture }) } });
   assert.equal(r.status, "evaluated", JSON.stringify(r).slice(0, 400));
   assert.equal(r.delta.before.scc_size, 6);
   assert.equal(r.delta.after.scc_size, 4);
   assert.deepEqual([...r.delta.left].sort(), ["cli", "fan-in"]);
   assert.equal(r.negative_control.falsified, true);
-  assert.match(r.provenance.tool.script_sha256, /^[0-9a-f]{64}$/);
+  assert.equal(r.provenance.archguard_version, INSTALLED.version);
+  assert.match(r.provenance.report_sha256, /^[0-9a-f]{64}$/);
   assert.match(renderDelta(r), /the cycle containing "" \(root\): size 6 -> 4/);
 });
 
@@ -330,7 +353,7 @@ test("adapter: when the model tracks the dir that LEAVES, the headline reading u
   if (!REAL_PRIMITIVE) return t.skip("primitive not present");
   const fixture = JSON.parse(fs.readFileSync(path.join(ARCHGUARD_FIXTURES, "goal-033-fork-point.arch.json"), "utf8"));
   const names = fixture.extensions.tsAnalysis.moduleGraph.edges.find((e) => e.from === "cli" && e.to === "fan-in").importedNames;
-  const r = computeSliceDelta({ root: REPO, commit: "abc", deps: { git: (a) => (a[0] === "rev-parse" ? "t\n" : ""), analyzePackageGraph: () => ({ file: "", json: fixture }) },
+  const r = computeSliceDelta({ root: REPO, commit: HEAD, deps: { git: (a) => (a[0] === "rev-parse" ? "t\n" : ""), analyzePackageGraph: () => ({ file: "", json: fixture }) },
     proposal: proposal({ slice: { scope_root: "packages/quay/src", subject: "fan-in", moves: [{ file: "fan-in/ff-merge.ts", from: "fan-in", to: "", symbols: names }] } }) });
   assert.equal(r.status, "evaluated");
   assert.equal(r.subject.model_chosen, "fan-in");
@@ -347,7 +370,7 @@ test("adapter: a PARTIAL cut (one edge) is reported as no departure — the cont
   if (!REAL_PRIMITIVE) return t.skip("primitive not present");
   const fixture = JSON.parse(fs.readFileSync(path.join(ARCHGUARD_FIXTURES, "goal-033-fork-point.arch.json"), "utf8"));
   const p = proposal({ slice: { scope_root: "packages/quay/src", subject: "", moves: [{ file: "cli/driver-vocab.ts", from: "cli", to: "", symbols: ["ALL_SERVICE_NAMES", "HOSTED_SERVICE_NAMES", "KINDS", "VERBS"] }] } });
-  const r = computeSliceDelta({ root: REPO, commit: "abc", proposal: p, deps: { git: (a) => (a[0] === "rev-parse" ? "t\n" : ""), analyzePackageGraph: () => ({ file: "", json: fixture }) } });
+  const r = computeSliceDelta({ root: REPO, commit: HEAD, proposal: p, deps: { git: (a) => (a[0] === "rev-parse" ? "t\n" : ""), analyzePackageGraph: () => ({ file: "", json: fixture }) } });
   assert.ok(["evaluated", "not-evaluated"].includes(r.status));
   if (r.status === "evaluated") { assert.equal(r.delta.after.scc_size, 6); assert.deepEqual(r.delta.left, []); }
 });
@@ -361,13 +384,13 @@ const REAL_GRAPH_DEPS = () => {
 
 test("loop: request -> evidence -> propose; delta is COMPUTED, envelope is gate-clean and never executed", async (t) => {
   if (!REAL_PRIMITIVE) return t.skip("primitive not present");
-  const ex = fakeExecutor({ "archguard:package_cycles": { status: "ok", text: "Cycle 1 (size 6): a -> b", cycles: [{ size: 6, members: ["", "cli"] }] } });
+  const ex = fakeExecutor({ "archguard:package_cycles": { status: "ok", text: "Cycle 1 (size 6): a -> b", cycles: [{ size: 6, members: ["", "cli"] }] } }, HEAD);
   const real = { moves: [
     { file: "cli/driver.ts", from: "cli", to: "", symbols: ["runDriver", "runDriverAsync", "resolveDriverInvocation", "DriverRunResult"] },
     { file: "cli/driver-vocab.ts", from: "cli", to: "", symbols: ["ALL_SERVICE_NAMES", "HOSTED_SERVICE_NAMES", "KINDS", "VERBS"] }] };
   const judge = scriptedJudge([req(REQ_CYCLES), propose({ slice: { scope_root: "packages/quay/src", subject: "", ...real } })]);
   const deps = { executor: ex, git: () => "", sliceDeps: REAL_GRAPH_DEPS() };
-  const res = await runActiveInvestigation({ root: "/r", invokeJudge: judge, deps });
+  const res = await runActiveInvestigation({ root: REPO, invokeJudge: judge, deps });
   assert.equal(res.terminal.kind, "propose_slice");
   assert.equal(res.action, "propose-goal");
   assert.equal(res.gate_ok, true, res.gate_reasons.join());
@@ -375,6 +398,9 @@ test("loop: request -> evidence -> propose; delta is COMPUTED, envelope is gate-
   assert.equal(res.slice_delta.status, "evaluated");
   assert.match(res.envelope.expected_mechanical_delta, /computed, not estimated.*size 6 -> 4/);
   assert.match(res.envelope.negative_control, /Computed negative control.*falsified=true/);
+  assert.equal(res.slice_delta.provenance.surface.surface, "archguard-cli");
+  assert.equal(res.slice_delta.provenance.archguard_version, INSTALLED.version);
+  assert.match(res.slice_delta.provenance.command, /^archguard slice-delta --arch/);
   assert.deepEqual(res.requested_kinds, ["archguard:package_cycles"]);
   assert.equal(res.usage.evidence_requests, 1);
   assert.equal(ex.calls.length, 1, "exactly one tool call");
@@ -494,12 +520,26 @@ test("loop: unreadable judge output ends in an honest terminal, not a half-forme
 test("loop: if the slice primitive is unavailable the proposal is DOWNGRADED to investigate (no estimated delta)", async () => {
   const ex = fakeExecutor({ "archguard:package_cycles": { status: "ok", text: "Cycle 1 (size 6): a -> b" } });
   const judge = scriptedJudge([req(REQ_CYCLES), propose()]);
-  const res = await runActiveInvestigation({ root: "/r", invokeJudge: judge, deps: { executor: ex, git: () => "", sliceDeps: { sliceDelta: { available: false, script: "/nope" } } } });
+  const res = await runActiveInvestigation({ root: "/r", invokeJudge: judge, deps: { executor: ex, git: () => "", sliceDeps: { sliceDelta: { available: false, reason: "ARCHGUARD_CLI_NOT_INSTALLED" } } } });
   assert.equal(res.slice_delta.status, "unavailable");
   assert.equal(res.action, "investigate");
   assert.match(res.envelope.confidence.basis, /downgraded from propose-goal/);
   assert.match(res.envelope.expected_mechanical_delta, /^NOT COMPUTED: unavailable/);
   assert.equal(res.gate_ok, true);
+});
+
+test("proposal-time capability check: a duplicate/canonicalization proposal exposes every re-measurement gap even if the model never asked", async () => {
+  for (const [kind, caps] of [["duplicate", ["archguard.duplicates"]], ["canonicalization", ["archguard.literal_dispersion", "archguard.duplicates"]]]) {
+    const ex = fakeExecutor();
+    const p = propose({ concern_kind: kind, slice: undefined, declared_measurement: "the flagged group disappears from a same-parameter re-run", evidence_refs: ["ev-1"] });
+    const res = await runActiveInvestigation({ root: "/r", invokeJudge: scriptedJudge([req({ kind: "grep", pattern: "parse", paths: ["packages"] }), p]), deps: { executor: ex, git: () => "" } });
+    assert.equal(res.action, "propose-goal");
+    assert.equal(res.measurement_capability.reachable_on_production_surface, false);
+    assert.deepEqual(res.measurement_capability.instruments.map((i) => i.needs).sort(), [...caps].sort());
+    for (const cap of caps) assert.ok(res.capability_gaps.some((g) => g.capability === cap && g.exposed_by === "proposal-time measurement check"), cap);
+    assert.match(res.envelope.expected_mechanical_delta, /RE-MEASUREMENT GAP/);
+    assert.equal(ex.calls.filter((c) => c.kind === "archguard_query").length, 0, "the gap was exposed without any tool call");
+  }
 });
 
 test("loop: a non-cycle proposal carries an UNVERIFIED declared measurement and cannot be high-confidence", async () => {
@@ -603,6 +643,13 @@ test("shared gate: a proposal that merely NAMES a file like ff-merge.ts is not a
   assert.ok(real.reasons.some((r) => r.startsWith("FORBIDDEN_ACTION:merge")));
   const created = deterministicGate(env({ candidate_interventions: [{ title: "create-task for the cut", rationale: "x" }] }), { evidenceRefs: refs });
   assert.ok(created.reasons.some((r) => r.startsWith("FORBIDDEN_ACTION:create-task")));
+  // merging two MODULES is ordinary refactoring vocabulary (observed live) — only an instruction to merge a git/goal object is forbidden
+  const modules = deterministicGate(env({ candidate_interventions: [{ title: "Merge gate/config/loader.ts into the factory layer it constructs", rationale: "then merge the two re-export shims into one file" }] }), { evidenceRefs: refs });
+  assert.deepEqual(modules.reasons.filter((r) => r.startsWith("FORBIDDEN_ACTION")), [], modules.reasons.join());
+  for (const bad of ["git merge goal/GOAL-040 now", "run quay goal merge", "merge this branch into develop"]) {
+    const g = deterministicGate(env({ candidate_interventions: [{ title: bad, rationale: "x" }] }), { evidenceRefs: refs });
+    assert.ok(g.reasons.some((r) => r.startsWith("FORBIDDEN_ACTION:merge")), bad);
+  }
   const asAction = deterministicGate(env({ recommended_next_action: "merge" }), { evidenceRefs: refs });
   assert.ok(asAction.reasons.some((r) => r.startsWith("FORBIDDEN_ACTION")));
 });
@@ -611,4 +658,98 @@ test("parseStep is fail-closed", () => {
   assert.equal(parseStep(""), null);
   assert.equal(parseStep("no json here"), null);
   assert.deepEqual(parseStep('```json\n{"action":"abstain"}\n```'), { action: "abstain" });
+});
+
+// ── published product surface only (ArchGuard >= 0.1.39) ────────────────────────────────────────
+test("surface: no module may depend on the ArchGuard SOURCE repo or its experiment script (retired path)", () => {
+  const banned = [["docs", "experiments"].join("/"), ["", "work", "archguard"].join("/"), ["ARCHGUARD", "SLICE", "DELTA"].join("_"), ["slice-delta", "mjs"].join("."), "runScript"];
+  for (const f of MODULES) {
+    const code = fs.readFileSync(path.join(ANALYSIS, f), "utf8");
+    for (const b of banned) {
+      // the adapter's own header documents the retirement in prose; code (comments stripped) must be clean
+      assert.ok(!stripComments(code).includes(b), `${f}: still references the retired private surface "${b}"`);
+    }
+  }
+  // fixtures are Quay-owned copies, not read from the ArchGuard repo
+  assert.ok(fs.existsSync(path.join(ARCHGUARD_FIXTURES, "goal-033-fork-point.arch.json")));
+});
+
+test("surface: versionAtLeast is numeric, and an unreadable version is NOT acceptable", () => {
+  assert.equal(versionAtLeast("0.1.39"), true);
+  assert.equal(versionAtLeast("0.1.40"), true);
+  assert.equal(versionAtLeast("0.2.0"), true);
+  assert.equal(versionAtLeast("0.1.38"), false);
+  assert.equal(versionAtLeast("0.1.9"), false, "numeric, not lexical");
+  assert.equal(versionAtLeast(null), false);
+  assert.equal(versionAtLeast("garbage"), false);
+});
+
+test("surface: resolution probes the INSTALLED cli — missing, too old, and missing-subcommand are distinct gaps", () => {
+  assert.equal(resolveSliceDelta({ cli: null }).reason, "ARCHGUARD_CLI_NOT_INSTALLED");
+  assert.match(resolveSliceDelta({ cli: "/x", version: () => "0.1.38" }).reason, /^ARCHGUARD_VERSION_TOO_OLD:0\.1\.38</);
+  assert.match(resolveSliceDelta({ cli: "/x", version: () => null }).reason, /^ARCHGUARD_VERSION_TOO_OLD:unreadable/);
+  assert.equal(resolveSliceDelta({ cli: "/x", version: () => "0.1.39", probeSubcommand: () => ({ status: 1 }) }).reason, "SLICE_DELTA_SUBCOMMAND_MISSING");
+  const ok = resolveSliceDelta({ cli: "/x", version: () => "0.1.39", probeSubcommand: () => ({ status: 0 }) });
+  assert.deepEqual({ a: ok.available, v: ok.version }, { a: true, v: "0.1.39" });
+});
+
+test("surface: THIS host has the released surface installed (>= 0.1.39) and it reports its own version", (t) => {
+  if (!INSTALLED.available) return t.skip(`released ArchGuard slice-delta not available here: ${INSTALLED.reason}`);
+  assert.ok(versionAtLeast(INSTALLED.version));
+  const v = execFileSync("node", [INSTALLED.cli, "--version"], { encoding: "utf8" }).trim();
+  assert.equal(INSTALLED.version, v, "the version used is the one the CLI reports about itself, not a package.json read");
+});
+
+test("cross-repo: the INSTALLED CLI on the GOAL-033 fixture gives SCC 6 -> 4, cli and fan-in leave, negative control falsifiable", (t) => {
+  if (!REAL_PRIMITIVE) return t.skip("released slice-delta not available on this host");
+  const out = path.join(mkTmp(), "report.json");
+  const r = spawnSync("node", [INSTALLED.cli, "slice-delta", "--arch", path.join(ARCHGUARD_FIXTURES, "goal-033-fork-point.arch.json"), "--slice", path.join(ARCHGUARD_FIXTURES, "goal-033-slice.json"), "--root", REPO, "--json", out], { encoding: "utf8" });
+  assert.equal(r.status, 0, r.stderr);
+  const rep = JSON.parse(fs.readFileSync(out, "utf8"));
+  assert.equal(rep.status, "evaluated");
+  assert.equal(rep.computedDelta.sccBefore.length, 6);
+  assert.deepEqual(rep.computedDelta.sccAfter, ["", "gate", "gate/config", "gate/factories"]);
+  assert.deepEqual([...rep.computedDelta.sccLeft].sort(), ["cli", "fan-in"]);
+  assert.equal(rep.negativeControl.falsified, true);
+  assert.equal(rep.negativeControl.subjectBackInScc, true);
+  assert.equal(rep.guards.clean, true);
+  assert.equal(rep.provenance.tool.archguardVersion, INSTALLED.version);
+  assert.equal(rep.provenance.tool.command, "archguard slice-delta");
+  // the human-written prediction (6 -> 5) is kept as a SEPARATE reading and reported as diverging
+  assert.equal(rep.declaredPrediction.sccSize, 5);
+  assert.equal(rep.predictionComparison.declaredVsComputed.relation, "diverges");
+});
+
+test("cross-repo through the ADAPTER: same fixture, structured cut from the slice file, provenance + hashes recorded", (t) => {
+  if (!REAL_PRIMITIVE) return t.skip("released slice-delta not available on this host");
+  const fixture = JSON.parse(fs.readFileSync(path.join(ARCHGUARD_FIXTURES, "goal-033-fork-point.arch.json"), "utf8"));
+  const sl = JSON.parse(fs.readFileSync(path.join(ARCHGUARD_FIXTURES, "goal-033-slice.json"), "utf8"));
+  const p = proposal({ slice: { scope_root: "packages/quay/src", subject: sl.subject, moves: sl.proposedCut.moves, consumers: sl.proposedCut.consumers, forbidden_new_edges: sl.mustNotChange.forbiddenNewEdges } });
+  const r = computeSliceDelta({ root: REPO, commit: HEAD, proposal: p, deps: { git: (a) => (a[0] === "rev-parse" ? "t\n" : ""), analyzePackageGraph: () => ({ file: "", json: fixture }) } });
+  assert.equal(r.status, "evaluated");
+  assert.equal(r.delta.before.scc_size, 6);
+  assert.equal(r.delta.after.scc_size, 4);
+  assert.deepEqual([...r.delta.left].sort(), ["cli", "fan-in"]);
+  assert.equal(r.negative_control.falsified, true);
+  assert.equal(r.guards.clean, true);
+  const pv = r.provenance;
+  assert.equal(pv.archguard_version, INSTALLED.version);
+  assert.equal(pv.tool_reported.archguardVersion, INSTALLED.version);
+  assert.equal(pv.surface.surface, "archguard-cli");
+  assert.match(pv.command, /^archguard slice-delta --arch /);
+  for (const k of ["arch_sha256", "slice_sha256", "report_sha256", "graph_sha256"]) assert.match(pv[k], /^[0-9a-f]{64}$/, k);
+  assert.equal(pv.exit_code, 0);
+  assert.equal(pv.provenance_consistency.status, "match", JSON.stringify(pv.provenance_consistency));
+});
+
+test("gate: a graph that is not shown to come from the cited commit downgrades the proposal (PROVENANCE_MISMATCH)", async (t) => {
+  if (!REAL_PRIMITIVE) return t.skip("released slice-delta not available on this host");
+  const ex = fakeExecutor({ "archguard:package_cycles": { status: "ok", text: "c" } }, "1".repeat(40));   // a commit that is NOT the tree's HEAD
+  const real = { moves: [{ file: "cli/driver.ts", from: "cli", to: "", symbols: ["runDriver", "runDriverAsync", "resolveDriverInvocation", "DriverRunResult"] }, { file: "cli/driver-vocab.ts", from: "cli", to: "", symbols: ["ALL_SERVICE_NAMES", "HOSTED_SERVICE_NAMES", "KINDS", "VERBS"] }] };
+  const deps = { executor: ex, git: () => "", sliceDeps: REAL_GRAPH_DEPS() };
+  const res = await runActiveInvestigation({ root: REPO, invokeJudge: scriptedJudge([req(REQ_CYCLES), propose({ slice: { scope_root: "packages/quay/src", subject: "", ...real } })]), deps });
+  assert.equal(res.slice_delta.status, "evaluated");
+  assert.equal(res.slice_delta.provenance.provenance_consistency.status, "mismatch");
+  assert.equal(res.action, "investigate");
+  assert.match(res.envelope.confidence.basis, /PROVENANCE_MISMATCH/);
 });
