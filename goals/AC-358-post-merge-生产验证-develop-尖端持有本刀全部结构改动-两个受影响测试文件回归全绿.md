@@ -1,7 +1,7 @@
 ---
 id: AC-358
 title: post-merge 生产验证：develop 尖端持有本刀全部结构改动，两个受影响测试文件回归全绿
-status: draft
+status: active
 kind: criterion
 goal: GOAL-035
 criterion: >
@@ -61,6 +61,16 @@ criterion: >
   retryState mutation outside it) and both affected test files pass"
 expect: exit 0 = develop 尖端结构检查 + 两个测试文件全绿；exit 1 = CAUSE= 指明哪一项回归；exit 3 =
   GOAL-035 尚未并入 develop
-origin: 继 GOAL-030~034 后第二阶段：用户 2026-10-10 明确批准，要求脱离纯 import/SCC 清理，审查 Driver
-  生命周期/状态归属、Routine、WorkerPool、声明式 quota + 独立 Policy/Gate 的真实 OOD 候选
+origin: 继 GOAL-030~034 后第二阶段
+activatedAt: 2026-10-10T09:38:58.191Z
+statusLog:
+  - at: 2026-10-10T09:38:58.191Z
+    from: draft
+    to: active
+    actor: goal-cli
+    reason: ""
+fidelity:
+  verdict: not-evaluated
+  reason: no judge configured
+  at: 2026-10-10T09:38:58.190Z
 ---
