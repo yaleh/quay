@@ -447,6 +447,13 @@ jobs:
   # The install/build path is release.yml's `verify-plugin-channel` job verbatim (same canonical
   # builder `publish-dist-branch.sh`, extracted from the orphan commit with `git archive` — never a
   # `cp` of the working tree), minus the user-scope leg.
+  #
+  # ⛔ THE SCRATCH INSTALL RUNS UNDER ITS OWN `HOME` — see the install step. Without that, the
+  # runner image's pre-declared `quay` marketplace (the published GitHub channel) wins over the
+  # locally added one and the job checks the LAST PUBLISHED artifact instead of the one it built
+  # (measured on run 38038188856: built 0.18.0 from tag v0.18.0, installed and judged 0.19.0-dev).
+  # The resolve step additionally fails closed when the installed VERSION ≠ the extracted artifact's
+  # VERSION, so that failure can never again be misreported as a verdict about the artifact.
   verify-plugin-channel-assertions:
     # `schedule` is the PERIODIC arm (see the `on:` block); `workflow_dispatch` stays for the
     # positive/negative control runs at any time. Both arms run the SAME job, so a nightly reading
@@ -560,9 +567,25 @@ jobs:
       - name: Register the built plugin as a marketplace and install it into a scratch project
         # A SCRATCH project, not this repository: installing quay into the very tree under test
         # would make the gate depend on the repo's own plugin state.
+        #
+        # ⛔ AND A SCRATCH `HOME`. THIS IS NOT HYGIENE, IT IS CORRECTNESS. A marketplace name is ONE
+        # machine-wide slot, and the runner image bakes `~/.claude/settings.json` with a `quay`
+        # marketplace already declared (the published GitHub channel). `claude plugin marketplace add
+        # <local dir>` does NOT override an existing declaration — measured on run 38038188856
+        # (2026-10-10): it answered `Marketplace 'quay' already on disk — declared in user settings`,
+        # and `claude plugin install quay@quay` then installed the PUBLISHED artifact (0.19.0-dev,
+        # fetched from the dist-plugin channel) while this job had just built 0.18.0 from tag
+        # v0.18.0. The gate was therefore never checking the artifact the job built — it was checking
+        # whatever had been published last, which is exactly the "the gate's first real execution is
+        # a release" defect this job exists to remove, wearing a different hat.
+        # With its own HOME the only `quay` marketplace is the one registered from the built tree.
+        env:
+          HOME: ${{ runner.temp }}/scratch-home
+          CLAUDE_CONFIG_DIR: ${{ runner.temp }}/scratch-home/.claude
         run: |
           set -euo pipefail
           SCRATCH="${RUNNER_TEMP}/scratch-project"
+          mkdir -p "$HOME"
           rm -rf "$SCRATCH"
           mkdir -p "$SCRATCH"
           cd "$SCRATCH"
@@ -574,6 +597,14 @@ jobs:
         id: installed
         # Fail closed if no cache entry carries the CLI entry point: "could not resolve" must not
         # read as "nothing to check" (硬规则 3b).
+        # ⛔ And fail closed if the installed artifact is not the one THIS job built: comparing the
+        # installed VERSION against the extracted artifact's VERSION is the direct reading of "the
+        # install came from the built tree". Without it, a shadowed marketplace (see the step above)
+        # produces a red that blames the artifact instead of the wiring — run 38038188856 spent its
+        # whole log saying `VERSION=0.19.0-dev` about a tree that was 0.18.0.
+        env:
+          HOME: ${{ runner.temp }}/scratch-home
+          CLAUDE_CONFIG_DIR: ${{ runner.temp }}/scratch-home/.claude
         run: |
           set -euo pipefail
           CACHE_ROOT="${HOME}/.claude/plugins/cache/quay/quay"
@@ -584,12 +615,25 @@ jobs:
             INSTALLED="${d%/}"
           done
           test -n "$INSTALLED" || { echo "ERROR: no cache entry under ${CACHE_ROOT} carries bin/quay." >&2; ls -la "$CACHE_ROOT" >&2 || true; exit 1; }
-          echo "installed plugin: $INSTALLED"
+          BUILT_VERSION="$(cat "${RUNNER_TEMP}/plugin-channel-src/VERSION" 2>/dev/null || true)"
+          INSTALLED_VERSION="$(cat "${INSTALLED}/VERSION" 2>/dev/null || true)"
+          echo "installed plugin: $INSTALLED (version ${INSTALLED_VERSION:-<unreadable>})"
+          echo "built artifact:   ${RUNNER_TEMP}/plugin-channel-src (version ${BUILT_VERSION:-<unreadable>})"
+          if [ -z "$BUILT_VERSION" ] || [ "$BUILT_VERSION" != "$INSTALLED_VERSION" ]; then
+            echo "ERROR: the installed plugin is NOT the artifact this job built." >&2
+            echo "       built=${BUILT_VERSION:-<unreadable>} installed=${INSTALLED_VERSION:-<unreadable>} ref=${{ steps.buildref.outputs.ref }}" >&2
+            echo "       The install did not come from the extracted orphan commit (a pre-registered marketplace named 'quay' shadows a locally added one — see the install step)." >&2
+            exit 1
+          fi
           echo "dir=${INSTALLED}" >> "$GITHUB_OUTPUT"
 
       - name: Init the scratch project from the installed plugin
         env:
           INSTALLED: ${{ steps.installed.outputs.dir }}
+          # Same isolated HOME as the install (see that step) — the plugin cache, the install
+          # record and everything `quay init`/the drivers resolve must be the SAME graph.
+          HOME: ${{ runner.temp }}/scratch-home
+          CLAUDE_CONFIG_DIR: ${{ runner.temp }}/scratch-home/.claude
         run: |
           set -euo pipefail
           SCRATCH="${RUNNER_TEMP}/scratch-project"
@@ -607,6 +651,8 @@ jobs:
       - name: Start the drivers and the server, and probe the server over HTTP
         env:
           INSTALLED: ${{ steps.installed.outputs.dir }}
+          HOME: ${{ runner.temp }}/scratch-home
+          CLAUDE_CONFIG_DIR: ${{ runner.temp }}/scratch-home/.claude
         run: |
           set -euo pipefail
           SCRATCH="${RUNNER_TEMP}/scratch-project"
@@ -638,6 +684,8 @@ jobs:
         # it at a decoy makes that comparison FALSE by construction, so the assertion must go FAIL.
         env:
           INSTALLED: ${{ steps.installed.outputs.dir }}
+          HOME: ${{ runner.temp }}/scratch-home
+          CLAUDE_CONFIG_DIR: ${{ runner.temp }}/scratch-home/.claude
         run: |
           set -euo pipefail
           SCRATCH="${RUNNER_TEMP}/scratch-project"
@@ -648,6 +696,13 @@ jobs:
       - name: Verify the channel — project-scope assertions
         env:
           INSTALLED: ${{ steps.installed.outputs.dir }}
+          HOME: ${{ runner.temp }}/scratch-home
+          CLAUDE_CONFIG_DIR: ${{ runner.temp }}/scratch-home/.claude
+          # `scope-install-shape` reads `<homeDir>/.claude/plugins/installed_plugins.json`. The
+          # checker takes it from QUAY_VERIFY_HOME when set (its documented env seam — release.yml's
+          # user-scope arm uses exactly this), so the record read is pinned to the SAME isolated HOME
+          # the install wrote to instead of relying on the subprocess inheriting HOME.
+          QUAY_VERIFY_HOME: ${{ runner.temp }}/scratch-home
         run: |
           set -euo pipefail
           SCRATCH="${RUNNER_TEMP}/scratch-project"
@@ -660,6 +715,8 @@ jobs:
         # for the wrong reason.
         env:
           INSTALLED: ${{ steps.installed.outputs.dir }}
+          HOME: ${{ runner.temp }}/scratch-home
+          CLAUDE_CONFIG_DIR: ${{ runner.temp }}/scratch-home/.claude
         run: |
           set -euo pipefail
           SCRATCH="${RUNNER_TEMP}/scratch-project"
