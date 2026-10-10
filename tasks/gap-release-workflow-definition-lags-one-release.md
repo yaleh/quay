@@ -10,6 +10,18 @@ children: []
 extra:
   schema: execution
 ---
+---
+id: gap-release-workflow-definition-lags-one-release
+title: release-cut 的 dispatch 不带 --ref ⇒ 每次发布跑的是上一版的 release.yml（v0.18.0 首次生效的门因此失败）
+status: ready
+labels:
+  - gap
+  - defect
+parent: null
+children: []
+extra:
+  schema: execution
+---
 **type:** execution
 
 ## Proposal
@@ -72,6 +84,7 @@ run("gh", ["workflow", "run", "release.yml", "--ref", tag, "-f", `tag=${tag}`], 
 - **也没有可回放的历史载体**：assertions 调用步在 tag 上的出现次数 = v0.16.0:0、v0.17.0:2、v0.18.0:2，而 v0.17.0 那次 run 只跑 13 步（执行的是 v0.16.0 的定义）⇒ 该步**从未有一次成功运行**可引为绿读数；两条控制臂都只能来自新 nightly 上线之后。
 - **需要的裁定（三种都是作者/人的动作；worker 自改 AC 文本或自加外部标注均被禁止）**：①把 AC4 改写成在任务内可取的形态；②给 AC4 加外部标注；③把 P3 拆成独立任务，让本任务凭 P1/P2 + AC1 的裁定先落 develop。⛔ 本轮**不勾 AC4、不改 AC 文本、不动 status**。
 - **本轮复绿读数**：`node --test plugin/test/release-cut.test.mjs` 12/12；`scripts/test.sh --for-task gap-release-workflow-definition-lags-one-release --allow-thin` ⇒ exit 0；worktree 与 develop 无分叉、无未合并路径；P1/P2 实现未再改动（分支上仍为那 3 个文件）。
+**第三轮复核（2026-10-10，续做 worker）——阻塞不变；本轮已发出带外升级通知**：`fan-in-ac-completion-gate` 仍报 `checked 3/5，剩余未勾 2 含非待外部项`（AC1 因末尾 `（待外部）` 被排除 ⇒ 点名的就是 AC4）。本轮**未**改 AC 文本 / **未**自加 `（待外部）` / **未**动 `status:`（均为 authoring 动作，worker 禁止）；已完成可做的机械部分：`git merge develop` 无冲突、`scripts/test.sh --for-task … --allow-thin` exit 0（12/12）、scoped-gate cache 已写、anti-drift OK（4 文件 ⊆ 5 条 Touches）。⇒ **AC4 维持现状时本任务结构性不可落地**，worker 每轮只能原样退出（前两轮）或完成机械部分后退出（本轮）。待裁定同上一轮：①改写 AC4 为任务内可取形态；②给 AC4 加 `（待外部）`；③把 P3 拆成独立任务，让本任务凭 P1/P2 先落 develop。
 ## Touches
 
 - plugin/scripts/release-cut.mjs
