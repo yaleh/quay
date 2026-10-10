@@ -10,6 +10,7 @@ origin: 继 GOAL-030~033 后第五个 goal branch 试点；GOAL-033 显式将
   gate/、gate/config/、gate/factories/ 之间其它互指列为非目标延后处理，本 goal 承接其中最小、机械证据最充分的一刀（人
   2026-10-10 指示：推进 Quay 自身 Driver/Routine/Policy/WorkerPool 的 ownership-first
   OOD 重构实验 A）
+branch: true
 ---
 ## 背景
 
