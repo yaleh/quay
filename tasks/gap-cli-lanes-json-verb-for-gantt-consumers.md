@@ -17,7 +17,7 @@ extra:
 **为什么是 A**：Quay 走 Claude Code plugin 渠道（`dist-plugin` 孤儿分支），消费方 claudecodeui 是**独立项目**、有自己的打包图，从带版本号的插件缓存目录里 import 不是一条稳定路径；而 CLI 子进程正是它**现有的**消费方式（它已经在调 `quay driver live --json`）。选 A 既满足"不 vendor 源码 / 不用 `file:` / 不恢复公共 npm"，也不引入任何新的分发包。
 
 **实现要点（⛔ 复用，不写第二份）**：
-- 数据必须复用**同一条** live 调用链与**同一个** kernel：`packages/quay/src/dashboard-kernel.ts` 的 `mergeLiveAndHistoryIntervals` / `packLen (`packLanes`) / `FIXED_GANTT_LANES`。今天它们唯一的消费者是 Web 卡片 `packages/quay/src/serve-dashboard.ts`（取组在 `:121`，装箱在 `:380`）。
+- 数据必须复用**同一条** live 调用链与**同一个** kernel：`packages/quay/src/dashboard-kernel.ts` 的 `mergeLiveAndHistoryIntervals` / `packLanes` / `FIXED_GANTT_LANES`。今天它们唯一的消费者是 Web 卡片 `packages/quay/src/serve-dashboard.ts`（取组在 `:121`，装箱在 `:380`）。
 - 新增一个 CLI 动词（建议 `quay lanes --json [--window-hours N]`，`--json` 恒开，与 `driver live` 同约定）。⛔ 0.18.0 里**没有**这条动词：`quay driver live` 只报 in-flight worker 集合（`packages/quay/src/cli/driver.ts:136`），不含 packed lanes。
 - 输出形状必须与消费方 `src/shared/types.ts` 的 `QuayGanttLanes` **逐字段一致**：`{windowHours, nowMs, lanes[], overflow}`，区间字段 `taskId/runId/startMs/endMs/phase/finalState/fanInOutcome`。
 - **车道数恒为 `FIXED_GANTT_LANES`(5)** —— 那是**视觉契约**（窗口为空时也要画 5 条参考线），⛔ 不是"占用了几条"。超出 5 条并发的部分照旧计入 `overflow`，⛔ 不得丢弃。
