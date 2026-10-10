@@ -4,7 +4,7 @@ title: AC-355 判据在 driver 求值下恒报假：AC-242 轮转与 pre-filing 
   QUAY_GOAL_ACCEPTANCE_ACTIVE=1，被判据末尾的 bare `node --test` 继承 ⇒
   goal-store.test.mjs 8 红 ⇒ 判据报 post-merge-test-regression（同一棵树干净 shell 205/205
   全绿）——修法=让该测试文件对残留重入闸自净；5b 同族另有 6 个 plugin/test goal 文件同缺陷
-status: ready
+status: done
 labels:
   - gap
   - defect
