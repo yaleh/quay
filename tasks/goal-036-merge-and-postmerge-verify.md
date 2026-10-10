@@ -1,7 +1,7 @@
 ---
 id: goal-036-merge-and-postmerge-verify
 title: GOAL-036 ③：合并请求 + 机械 fan-in + 并入形态与落地树核验（AC-361，post-merge）
-status: ready
+status: done
 labels:
   - gap
 parent: null
