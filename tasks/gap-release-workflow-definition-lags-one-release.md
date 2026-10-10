@@ -1,7 +1,7 @@
 ---
 id: gap-release-workflow-definition-lags-one-release
 title: release-cut 的 dispatch 不带 --ref ⇒ 每次发布跑的是上一版的 release.yml（v0.18.0 首次生效的门因此失败）
-status: todo
+status: ready
 labels:
   - gap
   - defect
