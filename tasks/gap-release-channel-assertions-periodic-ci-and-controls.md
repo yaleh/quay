@@ -3,7 +3,7 @@ id: gap-release-channel-assertions-periodic-ci-and-controls
 title: P3（自 gap-release-workflow-definition-lags-one-release 拆出）：把
   verify-plugin-channel-assertions 接进 develop 上的定期 CI，交付正/负控制、拟发布 ref
   的产物一致性、release.yml job 去重决策与可复现验收
-status: todo
+status: ready
 labels:
   - gap
   - defect
