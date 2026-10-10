@@ -197,10 +197,28 @@ test("AC4: an unreadable carrier FILE still throws (a read failure is not a pars
   const p = path.join(dir, "DOC-002-secret.md");
   fs.writeFileSync(p, "---\nid: DOC-002\ntitle: s\nstatus: active\nkind: skill\n---\nb\n");
   fs.chmodSync(p, 0o000);
+  // ⛔ `chmod 000` is NOT a portable way to construct "unreadable". The CI runner runs the suite
+  // as uid 0 (measured `uid=0`; gap-develop-ci-red-node20-floor-and-static-not-evaluated) and
+  // CAP_DAC_OVERRIDE ignores the mode bits — the read then SUCCEEDS, `assert.throws(/EACCES/)`
+  // finds no exception ("Missing expected exception"), and this test red-ed CI deterministically
+  // on all four sibling stores while passing on every developer checkout.
+  // Rather than SKIP the arm (which would leave the contract unexercised exactly where CI needs
+  // it), fall back to an inducement uid 0 cannot bypass: a DIRECTORY at the same path makes
+  // `readFileSync` throw EISDIR. The listing filter is name-based (`endsWith(".md")`), so the
+  // directory still reaches `readFileSync` — what the assertion pins either way is that a READ
+  // failure throws rather than being collected as a malformed entry (硬规则 3b).
+  let unreadable = false;
+  try { fs.accessSync(p, fs.constants.R_OK); } catch { unreadable = true; }
+  if (!unreadable) {
+    fs.rmSync(p, { force: true });
+    fs.mkdirSync(p);
+  }
   try {
-    assert.throws(() => s.list(), /EACCES/);
-    assert.throws(() => s.listWithMalformed(), /EACCES/);
+    assert.throws(() => s.list(), /EACCES|EISDIR/);
+    assert.throws(() => s.listWithMalformed(), /EACCES|EISDIR/);
   } finally {
-    fs.chmodSync(p, 0o600);
+    // unlink needs write on the DIRECTORY, not on the file, so the 0o000 mode does not block
+    // this; `recursive` covers the directory arm.
+    fs.rmSync(p, { recursive: true, force: true });
   }
 });

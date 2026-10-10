@@ -152,11 +152,20 @@ test("AC1: `--touches <path> --json` exits 0 and emits peers + perFile with the 
 // ── AC2: the negative control AND the known-true control ─────────────────────────────────────────
 
 test("AC2 (negative control): an unknown path ⇒ peers [] and nLanded 0, exit 0", () => {
-  const r = runCli(["--touches", "plugin/scripts/__no_such_file_anywhere__.ts", "--json"]);
+  // ⛔ HERMETIC ROOT, deliberately — this must NOT run against the main checkout. `.quay/worker-
+  // outcome.jsonl` is gitignored (.gitignore:64), so a CI checkout has none; with no readable
+  // carrier the per-file row OMITS `nLanded` entirely (硬规则 3b — exactly what this file's OWN AC4
+  // asserts, and AC4 passes in CI). A bare `assert.equal(..., 0)` therefore read `undefined !== 0`
+  // and red-ed CI deterministically at this line on every run, while passing on any developer
+  // checkout — where the carrier happens to be lying around. Reading the main checkout made this
+  // "negative control" a claim about the developer's disk, not about the CLI. A temp workspace with
+  // a REAL carrier makes `nLanded === 0` an actual reading in every environment.
+  const dir = mkTmpRepo({ "t-other": { status: "todo", touches: ["src/other.ts"] } });
+  const r = runCli(["--root", dir, "--touches", "plugin/scripts/__no_such_file_anywhere__.ts", "--json"]);
   assert.equal(r.code, 0);
   const d = JSON.parse(r.stdout);
   assert.deepEqual(d.peers, [], "no open task declares an unknown path ⇒ no peer");
-  assert.equal(d.perFile[0].nLanded, 0);
+  assert.equal(d.perFile[0].nLanded, 0, "a readable carrier + an undeclared path ⇒ a real 0, not an omitted key");
 });
 
 test("AC2 (known-true control): a todo task's own substantive Touches file puts it in peers", () => {

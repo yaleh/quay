@@ -28,6 +28,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import fs from "node:fs";
+import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { spawnSync } from "node:child_process";
@@ -73,12 +74,25 @@ test("--selftest exits 0 (the probe's own two-sided identity check)", () => {
 
 test("identity comparator flags main-checkout code and accepts in-tree code", () => {
   // (a) a writerModule under the MAIN checkout is NOT this tree's code.
-  const foreign = classifyEventIdentities(
-    [event(path.join(MAIN, "packages", "quay", "src", "kernel", "task-transition.ts"), path.join(MAIN, "plugin", "scripts", "ready-pool-check.ts"))],
-    ROOT,
-  );
-  assert.equal(foreign.ok, false, "a main-checkout writerModule must be flagged");
-  assert.equal(foreign.bad.length, 1);
+  // ⛔ On a linked-worktree checkout the REAL main checkout is the meaningful foreign root — it is
+  // the actual branch-self-host scenario. But in CI the checkout IS its own main checkout
+  // (measured `root=/_work/quay/quay main=/_work/quay/quay`), so `MAIN === ROOT` and injecting it
+  // makes the "foreign" path an IN-TREE one: the arm proved nothing and red-ed CI. Fall back to a
+  // synthetic root, which is distinct from ROOT on every host — the assertion still runs
+  // everywhere (never skipped into vacuity), and on a developer checkout it still exercises the
+  // real main-checkout path.
+  const synthetic = MAIN === ROOT ? realpathOr(fs.mkdtempSync(path.join(os.tmpdir(), "bsp-foreign-"))) : null;
+  const foreignRoot = synthetic ?? MAIN;
+  try {
+    const foreign = classifyEventIdentities(
+      [event(path.join(foreignRoot, "packages", "quay", "src", "kernel", "task-transition.ts"), path.join(foreignRoot, "plugin", "scripts", "ready-pool-check.ts"))],
+      ROOT,
+    );
+    assert.equal(foreign.ok, false, "a writerModule outside this tree must be flagged");
+    assert.equal(foreign.bad.length, 1);
+  } finally {
+    if (synthetic != null) fs.rmSync(synthetic, { recursive: true, force: true });
+  }
 
   // (b) every path inside THIS tree passes.
   const inTree = classifyEventIdentities(
