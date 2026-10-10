@@ -79,3 +79,11 @@ The slice lands on `goal/GOAL-036` with AC-359 and AC-360 both reading exit 0 wh
 - typecheck：`for d in packages/*/; do npx tsc --noEmit -p "$d" || exit 1; done` exit 0。
 - AC-359 / AC-360 criterion（在任务分支工作树 cwd 下执行）双双 exit 0（branch-mode goal：`quay goal gate` 在 goal 工作树评估，落地后由 fan-in 带到 `goal/GOAL-036`）。
 - 越界文件未动：`git diff --name-only develop...HEAD` 仅列出已声明 Touches 的 3 个文件。
+
+## Blocker
+
+**2026-10-10T18:54:25.713Z — worker 未落地（exited-not-landed）**
+
+- 未落地原因：step=suite: # fail 84
+- run_id：wk-prod-anchor
+- session_id：c9c915e6-c48a-490d-a162-63bad62f297a
