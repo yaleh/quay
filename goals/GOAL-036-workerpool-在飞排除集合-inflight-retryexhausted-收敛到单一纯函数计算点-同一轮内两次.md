@@ -3,9 +3,16 @@ id: GOAL-036
 title: WorkerPool 在飞排除集合（inFlight/retryExhausted）收敛到单一纯函数计算点：同一轮内两次独立
   inFlightTasks() 调用可因异步窗口漂移的结构性风险收口（Driver/Routine/WorkerPool OOD 重构，用户
   2026-10-11 批准三轨①，优先项）
-status: draft
+status: active
 kind: goal
 origin: 用户 2026-10-11 批准三轨①
+activatedAt: 2026-10-10T18:34:58.548Z
+statusLog:
+  - at: 2026-10-10T18:34:58.548Z
+    from: draft
+    to: active
+    actor: goal-cli
+    reason: ""
 branch: true
 ---
 ## 背景
