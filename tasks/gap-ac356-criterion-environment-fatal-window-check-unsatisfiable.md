@@ -301,15 +301,20 @@ zero one) are recorded here. ⛔ No file outside the declared Touches was edited
 
 ### Non-goals / boundary (hard rule 5b: the boundary is shown, not asserted)
 
-Anti-drift's own file-set, `git log --name-only HEAD --not goal/GOAL-035 develop`, is **exactly**:
+Anti-drift's own file-set, `git log --name-only HEAD --not goal/GOAL-035 develop`, is **exactly the two
+declared Touches paths** and nothing else:
 
 ```
 goals/AC-356-结构护栏-applyneedshumantransition-是-retrystate-needshuman-count.md
+tasks/gap-ac356-criterion-environment-fatal-window-check-unsatisfiable.md
 ```
 
-— the one declared Touches path; ⛔ no `plugin/scripts/**`, ⛔ no `plugin/test/**`, ⛔ no `packages/**`.
+⛔ no `plugin/scripts/**`, ⛔ no `plugin/test/**`, ⛔ no `packages/**`. (`merge-base(develop, HEAD)` ==
+develop tip `23183dd6b`, so the three-dot diff below is read against the develop tip itself.)
 `git diff --name-only develop...HEAD` additionally lists `plugin/scripts/driver-filters.ts`,
 `plugin/scripts/worker-driver.ts`, `plugin/test/driver-filters.test.mjs` — those are **inherited from the
 goal line** (`goal/GOAL-035`), not authored here (they appear because the branch forks off the goal line
-and develop has not yet absorbed the GOAL-035 batch); the anti-drift set above, which subtracts both
-lines, is the discriminating reading. ⛔ `goal/GOAL-035` was not merged (that is AC-358's task).
+and develop has not yet absorbed the GOAL-035 batch — corroborating reading: `git show
+develop:plugin/scripts/driver-filters.ts | grep -c 'export function applyNeedsHumanTransition'` ⇒ **0**,
+while on `goal/GOAL-035` the same command ⇒ **1**); the anti-drift set above, which subtracts both lines,
+is the discriminating reading. ⛔ `goal/GOAL-035` was not merged (that is AC-358's task).
