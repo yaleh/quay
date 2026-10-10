@@ -180,6 +180,26 @@ cmp_or_report() {
 # ---------------------------------------------------------------------------
 # 1. Vendor dist bundles (Core quay.js + native provider quay-native.js)
 # ---------------------------------------------------------------------------
+# ── + the published dashboard kernel and its equivalence vector ────────────────────────────────────
+# gap-dashboard-kernel-not-packaged-in-plugin-artifact (2026-10-09): `quay/dashboard-kernel`'s bundle
+# (packages/quay/dist/dashboard-kernel.js, built by the SAME build-dist.mjs run as dist/quay.js) is a
+# PUBLISHED subpath of packages/quay — but it was never mirrored here, so for the plugin marketplace
+# channel (the only channel a consuming project actually installs: dist-plugin branch → user scope)
+# the kernel was UNREACHABLE. This overlay used to mirror two bundles by name; the kernel was simply
+# not one of them, and the npm-pack path that WAS proven for it (gap-dashboard-kernel-export-for-
+# cross-project-reuse's AC1) is a different packaging path from this one.
+# The kernel is a ZERO-IMPORT ESM leaf (see src/dashboard-kernel.ts's header), so the mirrored copy is
+# self-contained: a consumer resolves `dashboard-kernel.js` by PATH from the installed plugin and
+# imports it with no node_modules resolution involved.
+# Its contract vector travels with it, for the same reason it exists: a consumer proves "same
+# algorithm" by replaying `dashboard-kernel-vectors.json`, and a vector that does not reach the
+# artifact is not a contract. Both live under dist/ (the mirror has no src/ — this script rebuilds it
+# as dist/-only), and both are covered by --check, so a stale mirror is a loud failure, not drift.
+#
+# ⛔ THE ERROR THIS PREVENTS, stated as the reading a consumer gets: with the file absent,
+# `<installed-plugin>/vendor/quay/dist/dashboard-kernel.js` does not exist — the consumer sees
+# ENOENT/ERR_MODULE_NOT_FOUND, NOT "a missing feature". Shipping a 0.18.0 without this changes
+# nothing for them.
 # gap-ac3b-prove-installed-quay-runs-without-dev-tree (AC1): the installed
 # plugin must be able to lay down a FUNCTIONAL provider runtime into a target
 # project (so the project's mcp_entry points at a project-local copy, never a
@@ -196,6 +216,13 @@ if $CHECK_MODE; then
   echo "[sync-vendor --check] verifying vendor dist bundle ..."
   cmp_or_report "vendor/quay/dist/quay.js" \
     "${SRC}/dist/quay.js" "${DEST}/dist/quay.js"
+  # The published kernel + its contract vector (see section 1's header). Without these two lines
+  # --check would report CLEAN on a mirror that is MISSING the kernel entirely — the exact shape of
+  # false assurance this task exists to remove (硬规则 3b).
+  cmp_or_report "vendor/quay/dist/dashboard-kernel.js" \
+    "${SRC}/dist/dashboard-kernel.js" "${DEST}/dist/dashboard-kernel.js"
+  cmp_or_report "vendor/quay/dist/dashboard-kernel-vectors.json" \
+    "${SRC}/src/dashboard-kernel-vectors.json" "${DEST}/dist/dashboard-kernel-vectors.json"
   echo "[sync-vendor --check] verifying vendor native-provider bundle ..."
   cmp_or_report "vendor/quay-native/dist/quay-native.js" \
     "${NATIVE_SRC}/dist/quay-native.js" "${NATIVE_DEST}/dist/quay-native.js"
@@ -207,10 +234,13 @@ elif $SYNC_DIST_MODE; then
   # every test run). scripts/test.sh's build_dist_once builds BOTH source
   # bundles (quay.js + quay-native.js) before calling --sync-dist, so a missing
   # bundle here is a real failure (never silently papered over).
-  if [ ! -f "${SRC}/dist/quay.js" ]; then
-    echo "ERROR: --sync-dist requires a built Core bundle: ${SRC}/dist/quay.js (run the build first)" >&2
-    exit 2
-  fi
+  # ⛔ The kernel bundle is part of the same built set (build-dist.mjs writes dist/quay.js AND
+  # dist/dashboard-kernel.js in one run), so it is required on the same terms — a build entry that
+  # produced one but not the other would leave the artifact without the published subpath while
+  # every check above still passed.
+  for _bundle in quay.js dashboard-kernel.js; do
+    [ -f "${SRC}/dist/${_bundle}" ] || { echo "ERROR: --sync-dist requires a built Core bundle: ${SRC}/dist/${_bundle} (run the build first)" >&2; exit 2; }
+  done
   if [ ! -f "${NATIVE_SRC}/dist/quay-native.js" ]; then
     echo "ERROR: --sync-dist requires a built native bundle: ${NATIVE_SRC}/dist/quay-native.js (run the build first)" >&2
     exit 2
@@ -218,6 +248,8 @@ elif $SYNC_DIST_MODE; then
   echo "[sync-vendor --sync-dist] mirroring packages/quay/dist/quay.js + packages/quay-native -> plugin/vendor/ (no rebuild)"
   mkdir -p "${DEST}/dist" "${NATIVE_DEST}/dist"
   cp "${SRC}/dist/quay.js" "${DEST}/dist/quay.js"
+  cp "${SRC}/dist/dashboard-kernel.js" "${DEST}/dist/dashboard-kernel.js"
+  cp "${SRC}/src/dashboard-kernel-vectors.json" "${DEST}/dist/dashboard-kernel-vectors.json"
   cp "${NATIVE_SRC}/dist/quay-native.js" "${NATIVE_DEST}/dist/quay-native.js"
   cp "${NATIVE_SRC}/provider.yml" "${NATIVE_DEST}/provider.yml"
 else
@@ -231,6 +263,8 @@ else
   bash "${SRC}/scripts/build-dist.sh"
   mkdir -p "${DEST}/dist"
   cp "${SRC}/dist/quay.js" "${DEST}/dist/quay.js"
+  cp "${SRC}/dist/dashboard-kernel.js" "${DEST}/dist/dashboard-kernel.js"
+  cp "${SRC}/src/dashboard-kernel-vectors.json" "${DEST}/dist/dashboard-kernel-vectors.json"
   echo "[sync-vendor] building + mirroring packages/quay-native dist bundle -> plugin/vendor/quay-native/dist ..."
   bash "${NATIVE_SRC}/scripts/build-dist.sh"
   mkdir -p "${NATIVE_DEST}/dist"
@@ -238,9 +272,10 @@ else
   cp "${NATIVE_SRC}/provider.yml" "${NATIVE_DEST}/provider.yml"
 fi
 
-# --sync-dist is dist-bundle-only: mirror the source bundle and stop. All other
-# vendored assets (skills, scripts, A2 corpus, package.json) are TRACKED in git
-# and kept in sync by the normal commit flow — this mode must never touch them.
+# --sync-dist is dist-bundle-only: mirror the built bundle surface and stop. That surface is
+# dist/quay.js + dist/dashboard-kernel.js + the kernel's contract vector (all generated into the
+# mirror's dist/). All other vendored assets (skills, scripts, A2 corpus, package.json) are TRACKED
+# in git and kept in sync by the normal commit flow — this mode must never touch them.
 if $SYNC_DIST_MODE; then
   echo "[sync-vendor --sync-dist] done."
   exit 0

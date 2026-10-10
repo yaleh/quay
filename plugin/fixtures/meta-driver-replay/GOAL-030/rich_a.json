@@ -1,0 +1,246 @@
+{
+  "case_id": "GOAL-030",
+  "stage": "A",
+  "stage_name": "discovery",
+  "mode": "rich-bundle",
+  "cutoff": "2026-10-08T02:00:00.000Z",
+  "cutoff_label": "T0-concern-discovery",
+  "cutoff_commit": "c8461f5fa569306481aedbcf19c2062e974f4265",
+  "cutoff_commit_time": "2026-10-08T09:09:16+08:00",
+  "dossier": {
+    "total_bytes": 31187,
+    "section_count": 8,
+    "sections": [
+      {
+        "id": "arch:scc",
+        "title": "Package-level dependency cycles",
+        "kind": "arch_scc",
+        "provenance": {
+          "kind": "archguard_derived",
+          "tool": "ArchGuard 0.1.38 analyze (TypeScript scope)",
+          "analysis_commit": "28c72f436f639e3e78c84eb091f4d8d64c6743d1",
+          "stage_commit": "c8461f5fa569306481aedbcf19c2062e974f4265",
+          "scanned_code_identical_to_stage_commit": true,
+          "differing_files_in_scanned_dirs": [],
+          "derivation": "package = directory of the entity's source file; edge = one 'dependency' relation in arch.json",
+          "query": "package-level Tarjan SCC over arch.json dependency relations",
+          "sccs": [
+            6
+          ]
+        },
+        "text": "scanned: 485 source files, 5026 entities, 3218 file-level dependency relations\npackage-level strongly-connected components with more than one member: 1\n  SCC#1 size=6: packages/quay/src | packages/quay/src/cli | packages/quay/src/fan-in | packages/quay/src/gate | packages/quay/src/gate/config | packages/quay/src/gate/factories",
+        "bytes": 328,
+        "text_sha256": "0521a8bb8b92d97976a349fd6c1beb7872a7b66eb194b7ed4c3c49b10e718b75"
+      },
+      {
+        "id": "arch:plugin-to-kernel",
+        "title": "Dependency edges plugin/scripts -> packages/quay/src/kernel",
+        "kind": "arch_pkg_edges",
+        "provenance": {
+          "kind": "archguard_derived",
+          "tool": "ArchGuard 0.1.38 analyze (TypeScript scope)",
+          "analysis_commit": "28c72f436f639e3e78c84eb091f4d8d64c6743d1",
+          "stage_commit": "c8461f5fa569306481aedbcf19c2062e974f4265",
+          "scanned_code_identical_to_stage_commit": true,
+          "differing_files_in_scanned_dirs": [],
+          "derivation": "package = directory of the entity's source file; edge = one 'dependency' relation in arch.json",
+          "query": "edges plugin/scripts -> packages/quay/src/kernel",
+          "relations": 17
+        },
+        "text": "edges  plugin/scripts  ->  packages/quay/src/kernel  :  17 dependency relations\n    17  -> packages/quay/src/kernel\nfile pairs (relations per pair):\n    4  plugin/scripts/ready-pool-check.ts  ->  packages/quay/src/kernel/task-shape-artifacts.ts\n    4  plugin/scripts/worker-driver.ts  ->  packages/quay/src/kernel/proc-identity.ts\n    2  plugin/scripts/profile-policy.ts  ->  packages/quay/src/kernel/env-merge.ts\n    2  plugin/scripts/worktree-process-reaper.ts  ->  packages/quay/src/kernel/proc-identity.ts\n    1  plugin/scripts/manager-tick-readings.ts  ->  packages/quay/src/kernel/proc-identity.ts\n    1  plugin/scripts/orphan-session-check.ts  ->  packages/quay/src/kernel/proc-identity.ts\n    1  plugin/scripts/send-to-session.ts  ->  packages/quay/src/kernel/proc-identity.ts\n    1  plugin/scripts/serve-binding-literal-check.ts  ->  packages/quay/src/kernel/control-plane-http.ts\n    1  plugin/scripts/supervisor-preempt-candidates.ts  ->  packages/quay/src/kernel/proc-identity.ts",
+        "bytes": 991,
+        "text_sha256": "441551bae5d2a8191b70c4eb648abde317f44c7d18421982cfd2ad144addf6d6"
+      },
+      {
+        "id": "arch:plugin-outbound",
+        "title": "Where plugin/scripts depends on inside packages/ (edge counts per target package)",
+        "kind": "arch_pkg_edges",
+        "provenance": {
+          "kind": "archguard_derived",
+          "tool": "ArchGuard 0.1.38 analyze (TypeScript scope)",
+          "analysis_commit": "28c72f436f639e3e78c84eb091f4d8d64c6743d1",
+          "stage_commit": "c8461f5fa569306481aedbcf19c2062e974f4265",
+          "scanned_code_identical_to_stage_commit": true,
+          "differing_files_in_scanned_dirs": [],
+          "derivation": "package = directory of the entity's source file; edge = one 'dependency' relation in arch.json",
+          "query": "edges plugin/scripts -> packages/*",
+          "relations": 86
+        },
+        "text": "edges  plugin/scripts  ->  packages/*  :  86 dependency relations\n    65  -> packages/quay/src\n    17  -> packages/quay/src/kernel\n     2  -> packages/quay/src/gate\n     2  -> packages/quay/src/fan-in",
+        "bytes": 200,
+        "text_sha256": "6121233be3cfb2d1be27b88db5a49f46f7bcddda44ed764492ac1ab033f2cf92"
+      },
+      {
+        "id": "code:status-writers",
+        "title": "Callers of the status-field patch helper (non-test sources)",
+        "kind": "git_grep",
+        "provenance": {
+          "kind": "git_grep",
+          "commit": "c8461f5fa569306481aedbcf19c2062e974f4265",
+          "command": "git grep -nE 'patchStatusField\\(' c8461f5fa569 -- plugin/scripts packages/quay/src",
+          "hit_lines": 9,
+          "truncated": false
+        },
+        "text": "plugin/scripts/driver-filters.ts:567:    const patched = patchStatusField(split.frontmatterRaw, status);\nplugin/scripts/driver-filters.ts:909:  const patched = patchStatusField(split.frontmatterRaw, TASK_STATUS.NEEDS_HUMAN);\nplugin/scripts/ready-pool-check.ts:3666:  let patched = patchStatusField(split.frontmatterRaw, newStatus, TASK_STATUS.TODO);\nplugin/scripts/ready-pool-check.ts:3788:  const patched = patchStatusField(split.frontmatterRaw, TASK_STATUS.TODO);\nplugin/scripts/task-ops.ts:64:export function patchStatusField(\nplugin/scripts/worker-fan-in.ts:1167:    const flipped = patchStatusField(split.frontmatterRaw, \"done\");\nplugin/scripts/worker-fan-in.ts:1175:    const reset = patchStatusField(split.frontmatterRaw, \"ready\");\nplugin/scripts/worker-fan-in.ts:1182:    const flipped = patchStatusField(reset.fm, \"done\");\nplugin/scripts/worker-fan-in.ts:1221:    const flipped = patchStatusField(split.frontmatterRaw, \"done\");",
+        "bytes": 936,
+        "text_sha256": "8023996a29668d3936733511acb8798afa377ebe8f5eefc5521f220519e09cd7"
+      },
+      {
+        "id": "code:patchStatusField",
+        "title": "task-ops.ts: patchStatusField",
+        "kind": "git_func",
+        "provenance": {
+          "kind": "git_file",
+          "commit": "c8461f5fa569306481aedbcf19c2062e974f4265",
+          "path": "plugin/scripts/task-ops.ts",
+          "ranges": [
+            [
+              59,
+              77
+            ]
+          ],
+          "symbol": "patchStatusField",
+          "command": "git show c8461f5fa569:plugin/scripts/task-ops.ts  (function patchStatusField + leading doc comment)",
+          "truncated": false,
+          "total_chars": 1347
+        },
+        "text": "   59| /** Replace the `status:` scalar value in a frontmatter, preserving every other byte. `fromStatus`, when\n   60|  *  set, makes the patch apply ONLY when the current status line equals that value (whitespace-tolerant) —\n   61|  *  otherwise the frontmatter is returned UNCHANGED with `replaced:false` (a no-op, NOT an error: callers\n   62|  *  that already judged \"is it <fromStatus>\" via the develop ref use this to avoid clobbering a\n   63|  *  concurrently-flipped disk, see setTaskStatus). No `status:` line ⇒ fail-closed (ok:false). */\n   64| export function patchStatusField(\n   65|   frontmatterRaw: string,\n   66|   toStatus: string,\n   67|   fromStatus?: string,\n   68| ): { ok: true; fm: string; from: string; replaced: boolean; to: string } | { ok: false; reason: string } {\n   69|   const statusLineRe = /^status:[ \\t]*[^\\r\\n]*$/m;\n   70|   const line = frontmatterRaw.match(statusLineRe);\n   71|   if (!line) return { ok: false, reason: \"no-status-line\" };\n   72|   const from = line[0].replace(/^status:[ \\t]*/, \"\").trim();\n   73|   if (fromStatus !== undefined && from !== fromStatus) {\n   74|     return { ok: true, fm: frontmatterRaw, from, replaced: false, to: toStatus };\n   75|   }\n   76|   return { ok: true, fm: frontmatterRaw.replace(statusLineRe, `status: ${toStatus}`), from, replaced: true, to: toStatus };\n   77| }",
+        "bytes": 1351,
+        "text_sha256": "b286325eb55465ee5e8d99964ce80626d16f1dad367216cfd5fa6d3acb2e7b8c"
+      },
+      {
+        "id": "doc:spec-goal-branch",
+        "title": "orchestration/SPEC-goal-branch-2026-10-03.md (goal-branch mechanism spec)",
+        "kind": "git_cat",
+        "provenance": {
+          "kind": "git_file",
+          "commit": "c8461f5fa569306481aedbcf19c2062e974f4265",
+          "path": "orchestration/SPEC-goal-branch-2026-10-03.md",
+          "ranges": null,
+          "command": "git show c8461f5fa569:orchestration/SPEC-goal-branch-2026-10-03.md",
+          "truncated": true,
+          "total_chars": 31628
+        },
+        "text": "# SPEC：goal 独立分支（goal branch）—— 让成熟度不同的开发方向互不阻塞发布\n\n**作者**：会话 `goal branch discussion`｜**日期**：2026-10-03｜\n**状态**：**ruled**（设计点全部裁定；§9.2 只剩实现期残留，不需人裁定）——人 2026-10-01→10-02 裁定 §1 ①–⑨；2026-10-03 裁定 §5 的 B1/B2 方案、\n最终 fan-in 红后的修复路径、历史形态、以及「并入后判 + 人工触发并入」（§1 ⑩–⑭）；同日人追加两个约束（⑮⑯），引出预览实例（§4.10）；同日裁定 Q6–Q12（§1 ⑰–㉓）。\n**来源**：人 2026-10-01「为 goal 提供一个单独的 branch」→ 三轮讨论后人要求成文。\n**前置阅读**：\n- `SPEC-release-and-hotfix-branching-2026-09-15.md`（现行分支拓扑：`master` / `develop` / `author` / `task/<id>` / `release/*`——**本 SPEC 在它之上增加一条临时线**，不改其它任何线的角色）\n- `SPEC-per-task-suite-verification-2026-08-13.md` + `orchestration/archive/AC58-retired-clauses.md#R22/R23`（integration 分支的退役理由——§2 逐条对照）\n- `adr/ADR-015-…`（driver 分支退役）、`adr/ADR-034-fan-in-workflow-driver-holder.md`（fan-in 锁生命周期 = 进程生命周期）\n- `SPEC-goal-mechanism-2026-09-06.md`（goal 数据模型；§3.4「派生量一律不存储」）\n\n**证据标注**：【读码】= 起草时读当前源码（2026-10-03，主检出 `author`）；【转引】= 引自其它 SPEC/ADR；【人裁定】= 本次讨论中人的原话或选项。⛔ 未标注来源的断言不得进入本文件。\n\n---\n\n## 0. 一句话\n\n**一个 goal 可以 opt-in 一条 `goal/<GOAL-NNN>` 分支：为它服务的任务（以 `goal_ac` 识别）从该分支开 worktree、fan-in 回该分支，\n每次落地时顺带把 `develop` 追平进来；人在 goal 的预览实例上试用，pre-merge AC 也在那里求值；pre-merge AC 全部达成后由人触发并入（`--no-ff` 一个合并提交），worker-driver 经一次全量验证把整条分支 fan-in 到 `develop` 并删除分支；\n之后 goal 按现有机制（含只能在 develop 上判的 post-merge AC）走到 `achieved`。\n放弃的 goal 直接丢弃分支。**\n\n⚠️ **按现有代码直接实现会死锁**：goal 判据在主检出上求值（§5 B1），任务状态翻转落在 mergeTarget 上（§5 B2）——\n只接上 `mergeTarget` 而不解决这两点，goal 永远不会 `achieved`，任务会被反复派发。**这两点是本 SPEC 的核心设计内容，不是实现细节。**\n\n---\n\n## 1. 人的裁定（本文件其余部分都是它们的展开）\n\n| # | 日期 | 裁定 | 来源 |\n|---|---|---|---|\n| ① | 10-01 | goal 可选一个自己的 branch；为该 goal 开发的 task 均先 fan-in 到该 branch；goal 完成后整个 goal branch 再 fan-in 到 develop | 【人裁定】原话 |\n| ② | 10-02 | 动机：「会有一些较大的改进，需要足够成熟后才适合 merge 到 develop 和发布。但当前的机制，几个开发方向（如 goals）并行时，任务会交替 fan-in，无法区分。甚至一个方向的实现有问题，会堵着所有的发布。」 | 【人裁定】原话 |\n| ③ | 10-02 | 漂移控制：**每个任务落地时顺带追平 develop**（不是只在 goal 完成时一次性合并） | 【人裁定】选项 |\n| ④ | 10-02 | **opt-in**：每个 goal 显式开启；未开启的 goal 行为不变 | 【人裁定】选项 |\n| ⑤ | 10-02 | 「成熟」= AC 达成只是必要条件；**断言者沿用当前判断 goal 完成的元语**（不新造 gate 类型）——落点见 §4.7 | 【人裁定】选项 + 原话 |\n| ⑥ | 10-02 | 每个 goal branch 有自己独立的 fan-in 锁 | 【人裁定】原话 |\n| ⑦ | 10-02 | `target-identity-literal-check.ts` 从字面量集合改为「模式匹配 + 存在性校验」 | 【人裁定】同意 |\n| ⑧ | 10-02 | `goal_ac` 标注成为强依赖，是采用期最大的人为失误面，须在文档/校验里强调 | 【人裁定】同意 |\n| ⑨ | 10-02 | goal 被放弃/supersede：**分支废弃**；如需救出变更，由人工提出并单独驱动执行 | 【人裁定】原话 |\n| ⑩ | 10-03 | B1：接受「每个 branch-mode goal 一个 detached 判据 worktree」 | 【人裁定】 |\n| ⑪ | 10-03 | B2：接受「`done` = 已落到 mergeTarget」的语义改变与状态双写 | 【人裁定】 |\n| ⑫ | 10-03 | 最终 fan-in 红后：走现有 gap-filing 立任务，落 goal 分支 | 【人裁定】 |\n| ⑬ | 10-03 | 历史形态：「历史上发生的形态不是堵住发布，而是多个 goal 的变更混在 develop 里」——读数见 §2.1 | 【人裁定】原话 |\n| ⑭ | 10-03 | Q5 取 c（并入后判）：「现在看来也只有 Check after merge 可行了。当然，这会要求在 Goal 进入 Done 之前就 merge。那么，这一 merge 就必须人工触发。」——落点 §4.7 | 【人裁定】原话 |\n| ⑮ | 10-03 | 「提出这一机制的目的之一就是为了在 merge 到 develop 之前可以试用和验证。这一目的如何实现？」——**并入前必须能试用**，⛔ 不能把试用推到并入之后 | 【人裁定】原话 ⇒ §4.10 |\n| ⑯ | 10-03 | 「在 goal branch merge 到 develop 后继续检查一些 AC 问题不大」，问题在于「如果需要继续修改，是在 goal branch 还是 develop？」 | 【人裁定】原话 ⇒ §4.11 |\n| ⑰ | 10-03 | Q6：维持 §4.9（报告 `goal-branch-untagged-overlap` 读数，攒发生率），首个 branch-mode goal 跑起来后再看 | 【人裁定】⇒ §4.9 |\n| ⑱ | 10-03 | Q7：必拦 goal 非 active / 非 branch-mode / 分支不存在 / 已并入；pre-merge AC 未全部 achieved ⇒ 拒绝，允许 `--override \"<理由>\"`、理由进 GateEvent；sufficiency 判据只展示不拦 | 【人裁定】⇒ §4.7 |\n| ⑲ | 10-03 | Q8：`--no-ff` 产生一个合并提交，再把 develop ff 到它（develop 仍只做 ff） | 【人裁定】⇒ §4.7 |\n| ⑳ | 10-03 | Q9：**自动重试**——「重要的是 goal 的业务目标，不是单个 task 的描述。」 | 【人裁定】原话 ⇒ §4.7 |\n| ㉑ | 10-03 | Q10：不允许同一 goal 重开分支；需要隔离就立新 goal、`supersedes` 旧 goal | 【人裁定】⇒ §4.1、§4.11 |\n| ㉒ | 10-03 | Q11：goal-driver 负责刷新预览 worktree；serve 由人用 `quay goal preview <GOAL> start\\|stop` 起停；没起 serve ⇒ live-probe AC 判不出 ⇒ 不能并入，「人确实试用过」成为并入前置条件 | 【人裁定】⇒ §4.10 |\n| ㉓ | 10-03 | Q12：复制主检出 `.quay/` 只读快照，预览内写操作随刷新丢弃；⛔ 预览代码不读写生产数据 | 【人裁定】⇒ §4.10 |\n\n---\n\n## 2. 它与两次已退役的「中间分支」有什么不同\n\n本仓库两次退役过「任务先汇入中间分支、再进 develop」的形状（ADR-015 driver 分支；2026-08 的 `develop + integration` 两线）。\n本 SPEC **不是**第三次重来，区别必须逐条成立：\n\n| 退役根因【转引 R22/R23、per-task SPEC §2】 | integration 分支 | goal branch |\n|---|---|---|\n| 共享面：所有方向的任务汇入同一条线 | 全局唯一 | **按方向分片**；未 opt-in 的任务照旧直落 develop |\n| 漂移：`integration..develop = 187`，从不追平 | 无追平机制 | **每次任务落地都把 develop 合入**（裁定③，§4.4），漂移上界 = 该 goal 两次落地的间隔 |\n| 脏树假证书：被测的树 ≠ 被合的树 | 批量、周期性、在共享树上验证 | **验证单元仍是单任务隔离 worktree**；最终 goal→develop 也是一次隔离的全量验证，且在锁内 ff-only（§4.7） |\n| 合入频率 | 持续 drip | goal→develop **只发生一次** |\n\n**⊢ 仍然继承的风险**：一个长期不落地的 goal 分支会变旧（追平只在落地时发生）。§4.4 末给出补救；不作为前置（硬规则 12，无发生率读数）。\n\n### 2.1 历史读数：多个 goal 的变更在 develop 上混在一起（裁定⑬，硬规则 12b）\n\n【git 实测 2026-10-03】窗口：`develop` 上 2026-09-03 起的机械 fan-in 翻 done 提交（`翻 <id> done（driver 机械 fan-in）`），\n每条在**该提交时刻**用 `git show <sha>:tasks/<id>.md` 读 `goal_ac`，再经 `goals/AC-*.md` 的 `goal:` 映射到 GOAL。脚本 `/tmp/gb-interleave.mjs`（临时，未入库）。\n\n| 量 | 值 |\n|---|---|\n| 翻 done 提交数 / 去重任务数 | 882 / 754 |\n| 其中带 `goal_ac` 的提交数 / 去重任务数 | 305 / 270 |\n| **不带 `goal_ac` 的提交数** | **577（65%）** |\n| 涉及的 GOAL 数 | 23（最多：GOAL-009 65、GOAL-024 48、GOAL-003 32、GOAL-020 19） |\n| 305 条带 goal 落地按时间排序后的「同 goal 连续段」数 | **138**（平均连续段长 2.2） |\n| 有落地的天数 / 其中 ≥2 个 goal 同日落地的天数 | 22 / **17** |\n\n**读法**：一个 goal 的落地平均每 2.2 条就被别的 goal 打断一次；23 天里 17 天有多个方向同日混入。\n这就是裁定⑬说的「混在 develop 里」的实测形态——**它是常态，不是偶发**。\n**本机制上线后的对照量**：对 branch-mode goal，它在 develop 上的连续段数应恰为 **1**（一次并入）。\n\n**⊢ 同一读数暴露的第二件事**：65% 的落地不带 `goal_ac`。这些任务在本机制下一律直落 develop——裁定⑧的风险量级由此可见，见 §4.9（已裁定⑰：先报告、攒读数）。\n\n---\n\n## 3. 现状盘点（读码，2026-10-03）\n\n| 事实 | 位置 | 对本 SPEC 的意义 |\n|---|---|---|\n| goal 是独立记录类型，schema 无 branch 字段；task 只经 `goal_ac` 单向指向 AC | `goal-store.ts:643-671`；`docs/references/task-schema-canonical.md:99-122` | 需要新增 opt-in 字段；任务→goal 的解析链 `goal_ac → AC.goal → GOAL` 已存在 |\n| goal status 枚举 `draft/active/achieved/superseded/retired/needs-human` | `abi.ts:103` | 生命周期挂钩点现成，无需新增状态 |\n| goal `achieved` 唯一机械写入点；判据 = I2 ∧ sufficiency `covered` ∧ 无 close-block | `goal-driver.ts:3407,3421`；`goalFlipDecision` `:869` | 裁定⑤的落点（§4.7） |\n| fan-in `mergeTarget` 全链路已支持，但生产派发从不传，永远落默认 `develop` | `worker-fan-in.ts:1557`；`worker-driver.ts:4238` | 主要接线点；**不是新机制** |\n| `?? \"develop\"` 形态的默认值共 **20 处 / 17 个文件**（前 3 条：`defect-latency-pair.ts:755`、`anti-drift-touches-check.ts:405`、`quay-init.sh:1927` 注释） | 起草时 grep（ERE，已对已知实例 `worker-fan-in.ts:1557` 干跑命中） | 影响面上界；不是每一处都需要改（§6） |\n| ff-merge 的源分支硬编码 `refs/heads/task/${task}` | `fan-in/ff-merge.ts:562,825,911,980` | goal→develop 的最终合入不能直接复用，须参数化源分支 |\n| fan-in 锁 `acquireFanInLock` 已接受可选 `lockFile` | `worker-fan-in.ts:980-988` | 裁定⑥的 N+1 锁域只需按分支派生锁文件名 |\n| worktree 开设脚本已有 `--base <ref>`（默认 develop）及 fork-point 自检 | `dispatch-worktree-setup.sh:61,84` | 从 goal 分支开 worktree 已有入口 |\n| 分支模型只有 `develop` 一个落地基线角色 | `branch-model.ts:67` `LANDING_BASELINE_ROLE` | 需新增 goal 角色 |\n| 身份字面量封闭枚举 | `target-identity-literal-check.ts:67` | 裁定⑦ |\n| goal 判据 `cwd` = 主检出的 git root（3 个求值点） | `goal-store.ts:1789-1799, 2069, 2450` | **§5 B1** |\n| 任务 `done` 翻转提交在任务分支上，随 ff 进 mergeTarget；落地判断读 mergeTarget | `worker-fan-in.ts` `flipTaskDone`（:1106 起） | **§5 B2** |\n| suite-red 刹车 `consecutive_red` 结构上恒为 0（读的账本只有绿记录写入者） | `ready-pool-check.ts` `computeSuiteBlocking`；见 memory `suite-red-brake-reads-a-ledger…` | ⛔ 不能把「方向内红污染隔离」寄托在这个刹车上（§4.5） |\n\n---\n\n## 4. 设计\n\n### 4.1 数据模型\n\n- goal frontmatter 新增 **`branch: true`**（opt-in，缺省 = false = 现状）。字段只表达「开不开」。\n- **分支名是派生量，不存储**：`goal/<GOAL-NNN>`（`SPEC-goal-mechanism §3.4`、硬规则 4b）。不允许人填任意分支名——这正是裁定⑦能做成「模式 + 存在性」校验的前提。\n- 任务侧**不新增字段**：任务归属哪个 goal 分支 = `goal_ac → AC 所属 GOAL → 该 GOAL 的 branch 字段`，派发时解析（§4.3）。\n- `branch` 只能在 goal 处于 `draft`/`active` 且分支尚不存在时改动；分支存在后改为 false ⇒ 拒绝（否则在飞任务的 mergeTarget 中途改变）；**并入后同样锁定，⛔ 不得重开**（已裁定㉑）。\n\n### 4.2 分支生命周期\n\n| 事件 | 动作 |\n|---|---|\n| goal 转 `active` 且 `branch: true` | 从当前 `develop` tip 懒创建 `goal/<id>`（⛔ 不在建档时创建——draft goal 可能长期不激活） |\n| 该 goal 的任务落地 | 分支前进（§4.4） |\n| pre-merge AC 全部 achieved ∧ 人触发 `quay goal merge` | worker-driver 执行 goal→develop fan-in（§4.7）；成功后删除分支与其判据 worktree；goal 仍 active，之后按现有机制走到 achieved |\n| goal 转 `superseded` / `retired` | **丢弃分支**（裁定⑨）；删除前把分支 tip SHA 写入该 goal 的 `statusLog` reason，供人工救援时 `git branch <name> <sha>` 恢复——这是唯一的留痕，不另建机制 |\n| goal 转 `needs-human` | 分支保留不动，等人 |\n\n### 4.3 派发：mergeTarget 解析\n\n- 在 `worker-driver.ts:4238` 的 `spawnMechanicalFanIn` 调用前，以及开 worktree 前，解析一次：\n  `resolveTaskMergeTarget(task) = goal_ac 指向的 GOAL 为 active ∧ branch:true ∧ 分支存在 ? \"goal/<id>\" : \"develop\"`。\n- 同一结果同时用于：`dispatch-worktree-setup.sh --base`、fan-in 的 `mergeTarget`、fan-in 锁文件选择。**单一解析函数，三处共用**——否则 fork 点与落点可能不一致。\n- 解析结果写进派发记录（`dispatch-record.ts`），使「这个任务落到了哪条线」事后可查（直接回答裁定②的「无法区分」）。\n\n### 4.4 任务 fan-in 到 goal 分支（含追平）\n\n现有机械 fan-in 五步不变，只把「合入 mergeTarget」这一步扩为两次合并，**都在任务自己的 worktree 里做**：\n\n1. `git merge goal/<id>`（同今天 merge develop）\n2. **`git merge develop`**（裁定③的追平——放在任务 worktree 里，被该任务自己的全量 suite 一并验证）\n3. anti-drift / typecheck / scoped gate / 全量 suite（不变）\n4. 持 **goal 分支锁** → flip done → ff `goal/<id>` 到任务 tip\n\n**为什么追平放在任务 worktree 而不是单独对 goal 分支做**：goal 分支没有自己的工作树可以做 merge commit；放进任务 worktree 后，「追平后的树」恰好就是被全量 suite 验证过、随后被 ff 的那棵树——没有一棵未经验证的中间树。\n\n**anti-drift 的 diff 基准**：仍取 `mergeTarget...HEAD`（`anti-drift-touches-check.ts:405`）。追平合入的 develop 变更会出现在这个 diff 里 ⇒ **基准必须改为「goal 分支与 develop 两者合并基的并集」**，否则每个追平都会被判越界。这是实现期必须先做的一处改动。\n\n**长期无落地的 goal**（§2 继承风险）：观察项。若出现「goal 分支落后 develop 超过 N 提交」的实测读数再加周期追平，⛔ 不作为首版前置（硬规则 12）。\n\n### 4.5 方向内出错不传染 develop\n\n隔离来自拓扑本身：goal 分支上的提交在 goal 完成前**不进入 develop**，所以一个方向的缺陷不会出现在 develop 上，也就不会堵 release（release 只从 develop 切，`SPEC-release-and-hotfix §4`）。\n⛔ **不依赖** suite-red 刹车：它在 develop 上本身就不会触发（§3 末行）。按分支参数化刹车只在它先被修好之后才有意义，记为后续项。\n\n### 4.6 每个 goal 分支独立 fan-in 锁（裁定⑥）\n\n- 锁文件：`<git-common-dir>/fan-in.goal-<GOAL-NNN>.lock`，经 `acquireFanInLock({ lockFile })` 获取；develop 的锁不变。持有者仍是 driver 的非分离子进程（ADR-034 约束原样适用）。\n- **加锁顺序固定为「goal 锁 → develop 锁」**：只有 §4.7 的最终合入同时持两把；任务 fan-in 只持一把。固定顺序避免死锁。\n- 锁事件仍写 `.quay/fan-in-lock-events.jsonl`，增加 `lock` 字段区分锁域，供 `readFanInLockHold` 按锁域分别读。\n\n### 4.7 goal → develop 的最终 fan-in\n\n> **2026-10-03 改写**（裁定⑭）：原稿把触发挂在 `goal-driver.ts:3421` 的 `achieved` 写入上、由 goal-driver 执行。\n> 两处都不成立：①裁定⑭ 要求并入**先于** achieved；②原稿的执行者本身就违反 DIR-131（人 2026-09-07：「task 落地由 task 机制驱动，goal 机制负责 task 以外的生命周期」，\n> 由 `goal-driver-task-boundary-check.ts` 按位置强制，goal-driver 里出现 fan-in 载体引用即 RED）——起草时漏查。\n\n**生命周期顺序（裁定⑭）**：\n\n```\npre-merge AC 全部 achieved（在判据 worktree 上求值）\n  → 人触发并入请求（quay goal merge）\n  → worker-driver 执行 goal→develop fan-in\n  → 分支删除，goal 变回普通 goal（仍是 active）\n  → 全部 AC（含 post-merge）在主检出上照常求值\n  → 现有 goalFlipDecision（I2 ∧ sufficiency ∧ 无 close-block）写 achieved\n```\n\n**⊢ I2 不需要改**：achieved 仍然要求**全部** AC achieved（裁定⑤ 的「现有元语」原样管 achieved）。变的只是**并入的前置条件**用一个子集（pre-merge AC）——\n这比 §9.2 原 Q5-c 的描述代价小：原描述说「要改 I2」，在「并入先于 achieved」的顺序下不成立。\n\n**⊢ 关闭前置多一条分支前置（2026-10-04 增补；来源：GOAL-904 合并演练直接量）**：上面的顺序图里「全部 AC\n在主检出上照常求值 → 写 achieved」在**一个 AC 全是 pre-merge 的 branch-mode goal** 上会**先于并入**发生——\n它并入之前就满足 I2 ∧ sufficiency `covered` ⇒ `goalFlipDecision` 把它提前翻成 `achieved` ⇒ `quay goal merge`\n因 `goal-not-active`（只允许 active 的 goal 可并入）被拒 ⇒ **分支永远并不进去的死结**；人手工重开 `achieved →\nactive`，下一轮又被翻回。实测读数（GOAL-904）：statusLog `from: active to: achieved actor: goal-driver\nreason: \"I2: all ACs achieved + sufficiency covered\"`，而同一时刻 `git merge-base --is-ancestor goal/GOAL-9\n… [truncated: first 11000 of 31628 chars]",
+        "bytes": 18695,
+        "text_sha256": "23e9a29360a8213c2b281cd9067a297a5edadda59c134f0b7a8fafa53ef5d38f"
+      },
+      {
+        "id": "goal:GOAL-905",
+        "title": "Prior goal GOAL-905 (goal-branch rehearsal)",
+        "kind": "git_cat",
+        "provenance": {
+          "kind": "git_file",
+          "commit": "c8461f5fa569306481aedbcf19c2062e974f4265",
+          "path": "goals/GOAL-905-goal-分支第二次演练-drill-并发落地-分支落后-真实大小并入-刷新与预览自动装配-不是真实开发方向.md",
+          "ranges": null,
+          "command": "git show c8461f5fa569:goals/GOAL-905-goal-分支第二次演练-drill-并发落地-分支落后-真实大小并入-刷新与预览自动装配-不是真实开发方向.md",
+          "truncated": false,
+          "total_chars": 1749
+        },
+        "text": "---\nid: GOAL-905\ntitle: goal 分支第二次演练（drill）——并发落地、分支落后、真实大小并入、刷新与预览自动装配；不是真实开发方向\nstatus: achieved\nkind: goal\norigin: 人 2026-10-05「补上没覆盖的路径」：对 GOAL-028 做第二次演练（多任务并发落同一 goal 分支、goal 分支落后\n  develop、真实大小的并入、修复后的刷新与预览自动装配）；判据能在生产实例上判假（落笔当轮读数见各 AC 的验证）。\nactivatedAt: 2026-10-05T14:27:57.193Z\nstatusLog:\n  - at: 2026-10-05T14:27:57.193Z\n    from: draft\n    to: active\n    actor: cli\n    reason: 人 2026-10-05 授权第二次合并演练：三条 AC 已激活、三个承接任务已立并停放；激活 GOAL 即从 develop tip 懒建\n      goal/GOAL-905\n  - at: 2026-10-05T21:11:45.361Z\n    from: active\n    to: achieved\n    actor: goal-driver\n    reason: \"I2: all ACs achieved + sufficiency covered\"\nbranch: true\n---\n## 背景\n\n**这是第二次演练（drill），不是真实开发方向。** 第一次演练（GOAL-904）只覆盖了「单个任务、doc-only、手工补了两处」的路径，并在过程中挖出 5 个缺陷（均已修）。本次演练补第一次没覆盖的路径，且**不做任何手工干预**——需要手工才能继续的地方本身就是发现：\n1. **多个任务并发落到同一个 goal 分支**：三个 Touches 互不相交的任务同时被派发，竞争同一把 `fan-in.goal-GOAL-905.lock`，先落地者推进 goal tip，后落地者的 ff 非快进 ⇒ 走再追平重试。\n2. **goal 分支落后 develop**：goal 分支在激活时从 develop tip 分出，任务在 develop 前进若干提交之后才派发，追平步骤要真的合入 develop 的新提交。\n3. **真实大小的并入**：三个任务各加 8 篇文档（共 24 个文件、约一千行），并入走完整的合并、typecheck、scoped 门、全量 suite、ff。\n4. **修复后的刷新**：每次落地后 goal-driver 把判据 worktree 刷新到新 tip（读数 `refreshed`，此前只读到过 `current`）。\n5. **预览自动装配依赖**：`quay goal preview GOAL-905 start` 在判据 worktree 上直接起来，不手工链接 `node_modules`。\n\n承载内容刻意无害：三批托管文档 `DOC-910…917`、`DOC-920…927`、`DOC-930…937`（`docs-managed/`，kind: drill）。它们只存在于 `goal/GOAL-905` 上——预览实例的 `/doc` 页列得出，生产实例在并入前列不出。\n\n## 范围与非目标\n\n- 范围：三个任务（`gap-goal905-drill-docs-a`、`-b`、`-c`）、三条 live-probe AC（AC-905/906/907，各自检查一批的首篇）。\n- 非目标：不改任何产品代码；不改 GOAL-028 的任何判据；演练文档并入后保留，作为演练记录，清理另立任务。\n\n## 退出条件\n\n提供本 workspace 的 quay serve 实例，其 `/doc` 页同时列出三批演练文档的首篇 DOC-910、DOC-920、DOC-930——并入前由预览实例满足，并入后由生产实例满足（三条 AC 的判据对两种实例同形：读该 workspace root 下登记在册的 serve）。\n",
+        "bytes": 3119,
+        "text_sha256": "c7bc2518f1bdb66240c7ef6011a8b6e82ffafd0439d73ae9a27ff63671f81c3d"
+      },
+      {
+        "id": "task:status-flip-readings",
+        "title": "tasks/gap-status-flip-history-and-parser-diff-readings.md (landed task)",
+        "kind": "git_cat",
+        "provenance": {
+          "kind": "git_file",
+          "commit": "c8461f5fa569306481aedbcf19c2062e974f4265",
+          "path": "tasks/gap-status-flip-history-and-parser-diff-readings.md",
+          "ranges": null,
+          "command": "git show c8461f5fa569:tasks/gap-status-flip-history-and-parser-diff-readings.md",
+          "truncated": false,
+          "total_chars": 3600
+        },
+        "text": "---\nid: gap-status-flip-history-and-parser-diff-readings\ntitle: 取证读数：git 历史状态翻转对照 TRANSITIONS（17.7% 表外，缺的是 needs-human/superseded 边）+ 两份\n  Task 解析器在全部任务文件上零分叉\nstatus: done\nlabels:\n  - gap\nparent: null\nchildren: []\nextra:\n  schema: execution\n---\n**type:** finding\n\n## Finding\n\n2026-10-03 对本仓库做的两项只读取证（前置 1），读数如下；复跑方法在末尾。**本任务是读数的存档，不改任何代码。**\n\n### 读数 1：git 历史里的状态翻转 × gate/lifecycle.ts `TRANSITIONS`\n\n范围：10348 个提交（2026-07-15 起）、5183 次 tasks/*.md frontmatter `status:` 翻转（只取 diff 行号 ≤ 40 的变更以避开正文）、2309 个任务文件。表内 4265 次（82.3%），表外 918 次（17.7%）。\n\n表内：ready→done 2168、todo→ready 1639、done→ready 327、needs-human→todo 94、ready→todo 37。\n表外：todo→done 374、ready→needs-human 215、needs-human→ready 111、needs-human→done 56、todo→needs-human 48、todo/ready/needs-human→superseded 共 76、其余 38（done→todo 9、旧状态 in-progress/in_progress 共 16、superseded→ready 4、done→needs-human 7、done→superseded 2）。\n\n时间分布决定解读：todo→done 374 次里 371 次在 2026-08 中旬之前（早期历史），之后只有 3 次；2026-09-20 以后总共 22 次表外翻转，全部涉及 needs-human 或 superseded（ready→needs-human 13、needs-human→ready 5、ready→superseded 3、needs-human→done 1），三个核心状态（todo/ready/done）之间没有违规。\n\n结论：不是「生产在违反转移表」，而是「表缺了 needs-human / superseded 的入边与出边」。因此「状态翻转统一查表」之前必须先补表，否则会拒绝掉生产上最常见的 needs-human 流转。\n\n口径与局限：同一提交内 todo→ready→done 连翻两次只显示成一次 todo→done，fan-in 提交里的 26 次 todo→done 可能是这种情况（未逐条核对）；创建时 status 因早期 frontmatter 含自由文本无法可靠解析，不报创建分布；仅 tasks/*.md，不含 goals/、adr/。自检：提交信息含「promotion-driver 机械晋升」的 958 个提交里 956 个解析出 todo→ready（谓词对已知真样本命中）。\n\n### 读数 2：Core 与 plugin 两份 Task 解析器差分\n\n对象：packages/quay/src/task-parsing.ts ↔ plugin/scripts/task-schema.ts 的 extractSection / parseFrontmatterCompletely / countAcCheckboxes，外加 plugin/scripts/task-status-drift-check.ts 里的第二个 countAcCheckboxes。读数：2507 个 tasks/*.md；extractSection 32376 次调用（每个文件的 9 个标准节名 + 文件里全部 ##/### 标题）；countAcCheckboxes 2393 次；分叉数 0 / 0 / 0 / 0（自检：注入不同输入时差分谓词报不同）。\n\n这两份是有意保留的副本（plugin 打包时不带 packages/ 目录，无法静态 import；task-parsing.ts 头注释已写明，靠 plugin/test/task-parsing-parity.test.mjs 钉死一致）。但该 parity 测试只用 1 份手写样本、5 条用例，没读过真实任务；本次差分补上了它缺的那一半。\n\n附带发现（两份相同，故 parity 不报）：extractSection(text, heading) 把 heading 原样拼进 new RegExp，heading 含 ( ) | + ? 等字符时被当成正则（\"Plan (draft)\"、\"A+B\" 返回 null，含不平衡括号会抛错）。生产调用者传固定字面量，所以是潜在问题；prepare-admission-check.ts:557 是 .map((h) => extractSection(taskBody, h))，h 来源未核对。\n\n### 复跑\n\n状态翻转回放：git log --no-merges --reverse -p -U0 --no-renames --format='@@C %H %ct %s' -- 'tasks/*.md' > /tmp/log.txt，再喂给一个按 hunk 行号 ≤ 40 配对 -status/+status 的解析脚本。解析器差分：在 node --experimental-strip-types 下同时 import 两份实现，对 tasks/*.md 逐文件、逐标题比较 JSON 化输出。两个脚本当前位于 worktree .claude/worktrees/layers-yml-draft/docs/rup/（preflight-status-flip-replay.mjs、preflight-parser-diff.mjs、preflight-forensics.md，均未提交、不在 develop）；本任务不依赖它们存在，Finding 中的读数是自足的存档。\n\n后续立案（依据本读数）：gap-transitions-table-lacks-needs-human-and-superseded-edges、gap-extract-section-heading-interpolated-unescaped-into-regexp、gap-carrier-registry-declaration-with-unregistered-red-check、gap-characterization-baseline-serve-routes-and-concurrent-writes。\n\n## AC\n\n- [x] 读数 1 已存档：`grep -c 'todo→done' tasks/gap-status-flip-history-and-parser-diff-readings.md` 输出 ≥ 1，且正文含「表内 4265」「表外 918」两个数字\n- [x] 读数 2 已存档：`grep -c '分叉数 0 / 0 / 0 / 0' tasks/gap-status-flip-history-and-parser-diff-readings.md` 输出 ≥ 1\n- [x] 两项读数都带自检说明（已知真样本命中 / 注入不同输入报不同）：`grep -c '自检' tasks/gap-status-flip-history-and-parser-diff-readings.md` 输出 ≥ 2\n\n## DoD\n\n读数已作为任务体存入任务库、可被 `quay task get` 读回，不再只存在于未提交的 worktree 文件里；四个依据本读数的后续任务各自引用本任务 id 作为证据来源。本任务不改任何源码，所以不跑 suite；真实落地 = 读数进入了生产载体（任务库）。\n\n该轴仍暗,理由:本任务只存档只读取证读数、不改任何源码，L_D/L_G 均未被触及。\n\n## Touches\n\n- tasks/gap-status-flip-history-and-parser-diff-readings.md\n",
+        "bytes": 5567,
+        "text_sha256": "82d598ccb024e8c3fa77ef49d195d5690afa2125bb6a41bcb6458736f1d36092"
+      }
+    ]
+  },
+  "citable_evidence_refs": [
+    "arch:scc",
+    "arch:plugin-to-kernel",
+    "arch:plugin-outbound",
+    "code:status-writers",
+    "code:patchStatusField",
+    "doc:spec-goal-branch",
+    "goal:GOAL-905",
+    "task:status-flip-readings"
+  ],
+  "task": {
+    "instructions": "You are a NARROW ownership/architecture analyst. This is a DISCOVERY stage: identify what, if anything, ownership-shaped is visible in the state below. You are NOT asked to match any historical decision, and you do NOT need to propose a fix. Saying no concern is visible is a valid and sometimes correct answer. Cite only the listed evidence refs; do not invent readings. The EVIDENCE DOSSIER is raw tool output and source excerpts: it contains material unrelated to the concern (other duplicate groups, unrelated call sites, etc.) — judging relevance is part of the task. Section ids ARE the citable evidence refs.",
+    "questions": [
+      "a) What ownership / canonicalization / dependency-boundary concerns are visible in this state? (<=3)",
+      "b) For each concern, which evidence refs ground it?",
+      "c) Does it need investigation before any slice can be defined, or is it decision-ready?",
+      "d) How confident are you, and what would raise or lower that confidence?",
+      "e) If nothing ownership-shaped is visible, say so (abstain) — that is a valid answer."
+    ],
+    "response_schema": {
+      "type": "object",
+      "required": [
+        "concerns",
+        "overall_assessment"
+      ],
+      "properties": {
+        "concerns": {
+          "type": "array",
+          "maxItems": 3,
+          "items": {
+            "type": "object",
+            "required": [
+              "concern",
+              "evidence_refs",
+              "needs_investigation",
+              "confidence"
+            ],
+            "properties": {
+              "concern": {
+                "type": "string"
+              },
+              "evidence_refs": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              },
+              "needs_investigation": {
+                "type": "boolean"
+              },
+              "what_to_investigate": {
+                "type": "string"
+              },
+              "confidence": {
+                "enum": [
+                  "low",
+                  "medium",
+                  "high"
+                ]
+              }
+            }
+          }
+        },
+        "overall_assessment": {
+          "enum": [
+            "no_concern_visible",
+            "concerns_found"
+          ]
+        }
+      }
+    },
+    "citable_evidence_refs": [
+      "arch:scc",
+      "arch:plugin-to-kernel",
+      "arch:plugin-outbound",
+      "code:status-writers",
+      "code:patchStatusField",
+      "doc:spec-goal-branch",
+      "goal:GOAL-905",
+      "task:status-flip-readings"
+    ]
+  }
+}

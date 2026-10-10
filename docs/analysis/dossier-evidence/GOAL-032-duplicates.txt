@@ -1,0 +1,45 @@
+archguard_detect_duplicates  (ArchGuard 0.1.38, MCP tool, TypeScript scope "GOAL-032 (typescript)")
+params:   minStatements=3 minTokens=30 includeTests=false topN=46   (ranked by savableLines desc)
+scanned:  472 files, 9866 functions, 86 duplicate groups total
+rows 1-20 of 86 shown; members abbreviated as  file:startLine-endLine name
+
+ 1. savable=96 stmts=37 tokens=450  maskComments x3
+      plugin/scripts/kernel-sibling-resolution-check.ts:217-264 | plugin/test/fixtures/criterion-fidelity/kernel-sibling-post-aca7a0511.ts:142-189 | plugin/test/fixtures/criterion-fidelity/kernel-sibling-pre-aca7a0511.ts:113-160
+ 2. savable=61 stmts=45 tokens=586  scanText x2
+      plugin/scripts/kernel-sibling-resolution-check.ts:324-384 | plugin/test/fixtures/criterion-fidelity/kernel-sibling-post-aca7a0511.ts:265-325
+ 3. savable=60 stmts=24 tokens=215  templateLiteralBodies x3
+      plugin/scripts/kernel-sibling-resolution-check.ts:268-297 | ...post-aca7a0511.ts:209-238 | ...pre-aca7a0511.ts:180-209
+ 4. savable=60 stmts=45 tokens=480  main x2
+      experiments/quay-perpetual-stream/scripts/drain-scheduler.ts:85-144 | plugin/gate-scripts/drain-scheduler.ts:85-144
+ 5. savable=40 stmts=13 tokens=174  parseFlags x3
+      packages/quay-backlog/bin/quay-backlog.ts:23-42 | packages/quay-github/bin/quay-github.ts:33-52 | packages/quay-native/bin/quay-native.ts:83-102
+ 6. savable=33 stmts=25 tokens=426  main x2
+      plugin/test/fixtures/criterion-fidelity/kernel-sibling-post-aca7a0511.ts:382-414 | ...pre-aca7a0511.ts:334-366
+ 7. savable=31 stmts=21 tokens=261  expandGlob x2
+      plugin/scripts/canonical-test-files.ts:41-71 | scripts/test-coverage-check.ts:122-152
+ 8. savable=30 stmts=3  tokens=49   verify(arrow) x4
+      plugin/scripts/red-on-omission-audit.ts:216-225 | :232-239 | :262-269 | :374-381
+ 9. savable=28 stmts=26 tokens=316  pathCandidates x2
+      plugin/scripts/threshold-scope-check.ts:162-189 | plugin/scripts/tick-core-static-check.ts:253-275
+10. savable=27 stmts=27 tokens=343  main x2
+      experiments/quay-perpetual-stream/scripts/drain-dispose-corruption-check.ts:95-121 | plugin/gate-scripts/drain-dispose-corruption-check.ts:95-121
+11. savable=26 stmts=10 tokens=102  declarationBlockLines x3
+      plugin/scripts/kernel-sibling-resolution-check.ts:300-312 | ...post-aca7a0511.ts:241-253 | ...pre-aca7a0511.ts:212-224
+12. savable=24 stmts=4  tokens=66   check x4
+      experiments/quay-perpetual-stream/scripts/chart-headroom.ts:84-91 | .../chart2-s1-distribution-reliability.ts:111-118 | .../human-steered-classify.ts:84-91 | plugin/scripts/candidate-contracts.ts:201-208
+13. savable=24 stmts=5  tokens=35   deliveryStateLabel/actionFor/countKeyFor x3
+      packages/quay/src/serve-send.ts:379-386 | plugin/scripts/pool-quality-judge.ts:142-153 | plugin/scripts/pool-quality-judge.ts:156-167
+14. savable=22 stmts=8  tokens=174  checkBodyIntegrity x2
+      experiments/quay-perpetual-stream/scripts/drain-dispose-corruption-check.ts:67-88 | plugin/gate-scripts/drain-dispose-corruption-check.ts:67-88
+15. savable=20 stmts=12 tokens=197  parseFidelityVerdict / parseSemanticSufficiencyVerdict x2      [hash 0cac7de2dd5ee549]
+      packages/quay/src/criterion-fidelity.ts:71-87 | plugin/scripts/goal-driver.ts:1142-1161
+16. savable=20 stmts=13 tokens=198  runCheck x2
+      plugin/test/fixtures/criterion-fidelity/kernel-sibling-post-aca7a0511.ts:356-375 | ...pre-aca7a0511.ts:308-327
+17. savable=19 stmts=18 tokens=253  scanSurface x2
+      plugin/test/fixtures/criterion-fidelity/kernel-sibling-post-aca7a0511.ts:335-353 | ...pre-aca7a0511.ts:287-305
+18. savable=16 stmts=3  tokens=113  judge x2
+      plugin/scripts/sh-census-check.ts:751-755 | plugin/scripts/shipped-set-rules.ts:466-481
+19. savable=16 stmts=10 tokens=164  serializeIdentity/serializeReceipt x2
+      plugin/scripts/run-identity.ts:287-302 | plugin/scripts/stage-receipt.ts:226-241
+20. savable=15 stmts=5  tokens=66   lineOf x4
+      archive/2026-09-07-zero-call-scripts/plugin/scripts/live-repo-literal-assert-check.ts:290-294 | plugin/scripts/source-text-lib.ts:151-155 | ...post-aca7a0511.ts:192-196 | ...pre-aca7a0511.ts:163-167

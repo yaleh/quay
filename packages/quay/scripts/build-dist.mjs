@@ -195,6 +195,19 @@ export async function buildDashboardKernel(opts = {}) {
       format: "esm",
       target: ["es2022"],
       outfile,
+      // ⛔ `absWorkingDir` IS LOAD-BEARING, not a tidiness setting (measured 2026-10-09,
+      // gap-dashboard-kernel-not-packaged-in-plugin-artifact). Without it esbuild renders its
+      // emitted `// <entry path>` banner relative to `process.cwd()`, so the SAME source produced a
+      // 2074-byte bundle when built from the worktree root and a 2060-byte one when built from
+      // `packages/quay` (and a third from anywhere else) — differing ONLY in that comment line.
+      // That made the artifact's IDENTITY a function of the caller's cwd, which is fatal for the
+      // plugin mirror: `plugin/scripts/sync-vendor.sh --check` compares the mirrored
+      // `vendor/quay/dist/dashboard-kernel.js` byte-for-byte against the source build, so any
+      // out-of-band rebuild from a different cwd reds a check whose subject never changed (observed
+      // live: a lone kernel rebuild during a test run desynchronised the mirror). Pinning the
+      // working dir makes the bundle a function of its SOURCE alone — reproducible across cwd and
+      // across machines (esbuild only uses this to spell paths, never to resolve the entry).
+      absWorkingDir: pkgDir,
       logLevel,
     });
   } catch (err) {

@@ -1,0 +1,1069 @@
+{
+  "judge": {
+    "launcher": "claude",
+    "model": "sonnet",
+    "blind": true
+  },
+  "results": {
+    "baseline:GOAL-032:A:B:1": {
+      "key": "baseline:GOAL-032:A:B:1",
+      "control": false,
+      "kind": null,
+      "expect": null,
+      "mode": "baseline",
+      "case_id": "GOAL-032",
+      "stage": "A",
+      "group": "B",
+      "prompt_sha": "d84db866ab9441d4",
+      "judge": {
+        "top_concern_class": "matches-expected",
+        "any_matches_expected": true,
+        "reasoning": "The first concern identifies duplicate verdict-parsing implementations across packages/quay and plugin/scripts, and notes equivalence is not yet established. That matches both expected concerns: cross-boundary duplication without a single owner, and unresolved equivalence making a merge premature."
+      },
+      "state": "verified",
+      "duration_ms": 7665
+    },
+    "control:GOAL-032:alternative": {
+      "key": "control:GOAL-032:alternative",
+      "control": true,
+      "kind": "alternative",
+      "expect": [
+        "alternative-valid",
+        "equivalent-to-reference"
+      ],
+      "mode": null,
+      "case_id": "GOAL-032",
+      "stage": "B",
+      "group": null,
+      "prompt_sha": "4ffd8ef389a8e537",
+      "judge": {
+        "slice_class": "equivalent-to-reference",
+        "scope_ok": true,
+        "concrete_edits_overlap_with_reference": "most",
+        "reasoning": "The candidate adopts the reference's chosen approach, which is to sink the shared parsing algorithm into a kernel module and leave both callers unchanged. It does not name the module, the generic function signature, or the thin-wrapper delegation, so the overlap is 'most' rather than 'all'. Its scope does not unify orchestration or touch other verdict types, so it stays minimal."
+      },
+      "state": "verified",
+      "duration_ms": 9748
+    },
+    "baseline:GOAL-030:A:A:1": {
+      "key": "baseline:GOAL-030:A:A:1",
+      "control": false,
+      "kind": null,
+      "expect": null,
+      "mode": "baseline",
+      "case_id": "GOAL-030",
+      "stage": "A",
+      "group": "A",
+      "prompt_sha": "27f7257c38223697",
+      "judge": {
+        "top_concern_class": "matches-expected",
+        "any_matches_expected": true,
+        "reasoning": "The first concern says status transitions are written inside orchestration scripts, with no single decision layer and no structured per-transition record. That is the first expected concern. Concern 3 also touches the plugin/scripts boundary, and concern 2 touches the goal-branch mechanism."
+      },
+      "state": "verified",
+      "duration_ms": 11264
+    },
+    "control:GOAL-033:reference": {
+      "key": "control:GOAL-033:reference",
+      "control": true,
+      "kind": "reference",
+      "expect": [
+        "equivalent-to-reference"
+      ],
+      "mode": null,
+      "case_id": "GOAL-033",
+      "stage": "B",
+      "group": null,
+      "prompt_sha": "e3f3f148545604c6",
+      "judge": {
+        "slice_class": "equivalent-to-reference",
+        "scope_ok": true,
+        "concrete_edits_overlap_with_reference": "all",
+        "reasoning": "The candidate's recommended slice and in-scope item are verbatim identical to the reference: the same two modules move to core root, cli/driver.ts stays a thin facade, and the fan-in decoration stays in cli/. The scope is a single minimum-sufficient item. Empty non-goals are acceptable, since nothing broader is in scope."
+      },
+      "state": "verified",
+      "duration_ms": 8280
+    },
+    "baseline:GOAL-033:A:B:1": {
+      "key": "baseline:GOAL-033:A:B:1",
+      "control": false,
+      "kind": null,
+      "expect": null,
+      "mode": "baseline",
+      "case_id": "GOAL-033",
+      "stage": "A",
+      "group": "B",
+      "prompt_sha": "1f6d51a06e30cde0",
+      "judge": {
+        "top_concern_class": "matches-expected",
+        "any_matches_expected": true,
+        "reasoning": "The first concern identifies the package-level 6-member SCC cycle, matching the expected cycle/ownership-inversion concern. The second concern (root<->cli backwards dependency, draft layers.yml listing it) also touches the ownership inversion and the unlanded draft layers rule."
+      },
+      "state": "verified",
+      "duration_ms": 7938
+    },
+    "control:GOAL-030:alternative": {
+      "key": "control:GOAL-030:alternative",
+      "control": true,
+      "kind": "alternative",
+      "expect": [
+        "alternative-valid",
+        "equivalent-to-reference"
+      ],
+      "mode": null,
+      "case_id": "GOAL-030",
+      "stage": "B",
+      "group": null,
+      "prompt_sha": "753246e842ffc2c3",
+      "judge": {
+        "slice_class": "alternative-valid",
+        "scope_ok": true,
+        "concrete_edits_overlap_with_reference": "some",
+        "reasoning": "This is the first listed alternative: sink only the todo->ready promote edge and defer retreat. It keeps a single decision point and blast radius is smaller. It leaves out the retreat edge and the branch self-host probe, which the reference includes. Because the in-scope text only restates the alternative, it gives no concrete files or non-goals."
+      },
+      "state": "verified",
+      "duration_ms": 7526
+    },
+    "tool:GOAL-032:A:B:1": {
+      "key": "tool:GOAL-032:A:B:1",
+      "control": false,
+      "kind": null,
+      "expect": null,
+      "mode": "tool",
+      "case_id": "GOAL-032",
+      "stage": "A",
+      "group": "B",
+      "prompt_sha": "d9a3783ab2ccc1f3",
+      "judge": {
+        "top_concern_class": "unrelated",
+        "any_matches_expected": false,
+        "reasoning": "The first concern is about the routine filing quota's constants lacking a canonical config owner, which is not about a duplicate implementation across the packages/plugin boundary. The other concerns (differing recentCount semantics, a second drivers.yml reader) also don't cover duplicate implementation or unresolved equivalence."
+      },
+      "state": "verified",
+      "duration_ms": 6560
+    },
+    "tool:GOAL-032:B:B:1": {
+      "key": "tool:GOAL-032:B:B:1",
+      "control": false,
+      "kind": null,
+      "expect": null,
+      "mode": "tool",
+      "case_id": "GOAL-032",
+      "stage": "B",
+      "group": "B",
+      "prompt_sha": "b70d4e6fc1b05cf4",
+      "judge": {
+        "slice_class": "unsound",
+        "scope_ok": false,
+        "concrete_edits_overlap_with_reference": "none",
+        "reasoning": "The candidate analyzes a different duplicate group (Touches parsers in observation.ts versus touches-parser.ts) than the verdict-parse pair in the gold. It sinks nothing into a shared kernel module. It adds a parity test and fixes one function. That leaves both implementations in place, so the duplication finding is not resolved."
+      },
+      "state": "verified",
+      "duration_ms": 6138
+    },
+    "rich:GOAL-030:A:B:1": {
+      "key": "rich:GOAL-030:A:B:1",
+      "control": false,
+      "kind": null,
+      "expect": null,
+      "mode": "rich",
+      "case_id": "GOAL-030",
+      "stage": "A",
+      "group": "B",
+      "prompt_sha": "be7103a4330ad95d",
+      "judge": {
+        "top_concern_class": "matches-expected",
+        "reasoning": "The first concern describes lifecycle status writes scattered across multiple modules via a raw helper with no single decision layer or structured transition record, and the Core lifecycle table isn't on those paths. This is the same underlying issue as the first expected concern."
+      },
+      "state": "verified",
+      "duration_ms": 6430
+    },
+    "baseline:GOAL-032:B:B:1": {
+      "key": "baseline:GOAL-032:B:B:1",
+      "control": false,
+      "kind": null,
+      "expect": null,
+      "mode": "baseline",
+      "case_id": "GOAL-032",
+      "stage": "B",
+      "group": "B",
+      "prompt_sha": "70004e14cce9a6eb",
+      "judge": {
+        "slice_class": "equivalent-to-reference",
+        "scope_ok": true,
+        "concrete_edits_overlap_with_reference": "all",
+        "reasoning": "Both sink the domain-agnostic fail-closed three-state parser into a kernel module with the vocabulary passed as data. Both turn the two original parsers into thin delegating calls and leave caller orchestration unchanged. The candidate adds unit tests and comment updates, which are natural accompaniments. Its non-goals exclude all the broader moves."
+      },
+      "state": "verified",
+      "duration_ms": 5909
+    },
+    "rich:GOAL-032:B:A:1": {
+      "key": "rich:GOAL-032:B:A:1",
+      "control": false,
+      "kind": null,
+      "expect": null,
+      "mode": "rich",
+      "case_id": "GOAL-032",
+      "stage": "B",
+      "group": "A",
+      "prompt_sha": "fe445876178b0c5a",
+      "judge": {
+        "slice_class": "equivalent-to-reference",
+        "scope_ok": true,
+        "concrete_edits_overlap_with_reference": "all",
+        "reasoning": "Candidate adds a generic kernel verdict-parse module with positive/negative tokens as arguments. Both parseFidelityVerdict and parseSemanticSufficiencyVerdict become thin wrappers with unchanged names and signatures. Caller orchestration is untouched, and unifying verdict types and token lists is excluded. This matches the reference edits and scope."
+      },
+      "state": "verified",
+      "duration_ms": 6350
+    },
+    "rich:GOAL-032:A:A:1": {
+      "key": "rich:GOAL-032:A:A:1",
+      "control": false,
+      "kind": null,
+      "expect": null,
+      "mode": "rich",
+      "case_id": "GOAL-032",
+      "stage": "A",
+      "group": "A",
+      "prompt_sha": "f856c055fab6c37a",
+      "judge": {
+        "top_concern_class": "matches-expected",
+        "any_matches_expected": true,
+        "reasoning": "The first concern identifies a duplicate verdict-parser implementation split across packages/quay and plugin/scripts with no canonical owner. That matches the first expected concern. It does not say the equivalence question is unresolved, but it does say the two parsers differ only in vocabulary."
+      },
+      "state": "verified",
+      "duration_ms": 5691
+    },
+    "rich:GOAL-031:A:A:1": {
+      "key": "rich:GOAL-031:A:A:1",
+      "control": false,
+      "kind": null,
+      "expect": null,
+      "mode": "rich",
+      "case_id": "GOAL-031",
+      "stage": "A",
+      "group": "A",
+      "prompt_sha": "3129433de534b994",
+      "judge": {
+        "top_concern_class": "matches-expected",
+        "any_matches_expected": true,
+        "reasoning": "The first concern identifies the task-status vocabulary duplicated between packages/quay/src/abi.ts and plugin/scripts/task-status.ts, with no single canonical owner. This matches both the dispersed-literal concern and the packages-vs-plugin parallel-declaration concern."
+      },
+      "state": "verified",
+      "duration_ms": 6575
+    },
+    "rich:GOAL-030:B:B:1": {
+      "key": "rich:GOAL-030:B:B:1",
+      "control": false,
+      "kind": null,
+      "expect": null,
+      "mode": "rich",
+      "case_id": "GOAL-030",
+      "stage": "B",
+      "group": "B",
+      "prompt_sha": "ac9dfb9277a7adf2",
+      "judge": {
+        "slice_class": "alternative-valid",
+        "scope_ok": true,
+        "concrete_edits_overlap_with_reference": "most",
+        "reasoning": "Same core: single three-state decision function, the same two ready-pool-check write sites, and a structured per-transition record. It differs by putting the function in gate/lifecycle.ts rather than a new kernel module, leaving patchStatusField in place, and probing branch code identity via an acceptance condition rather than a probe script. It is coherent, minimal, and excludes the fan-in sites."
+      },
+      "state": "verified",
+      "duration_ms": 8265
+    },
+    "rich:GOAL-032:B:B:1": {
+      "key": "rich:GOAL-032:B:B:1",
+      "control": false,
+      "kind": null,
+      "expect": null,
+      "mode": "rich",
+      "case_id": "GOAL-032",
+      "stage": "B",
+      "group": "B",
+      "prompt_sha": "b7b82ecda3a19f2d",
+      "judge": {
+        "slice_class": "equivalent-to-reference",
+        "scope_ok": true,
+        "concrete_edits_overlap_with_reference": "most",
+        "reasoning": "Both sink the domain-agnostic parsing algorithm into a new kernel module with a generic function parameterised by legal values. Both keep the two original functions as thin wrappers with unchanged names and signatures, and both leave caller orchestration alone. The candidate adds a unit test and a doc-comment update, which are minor. The non-goals exclude the broader moves."
+      },
+      "state": "verified",
+      "duration_ms": 9120
+    },
+    "tool:GOAL-033:A:B:1": {
+      "key": "tool:GOAL-033:A:B:1",
+      "control": false,
+      "kind": null,
+      "expect": null,
+      "mode": "tool",
+      "case_id": "GOAL-033",
+      "stage": "A",
+      "group": "B",
+      "prompt_sha": "65cd1d0afba1950d",
+      "judge": {
+        "top_concern_class": "adjacent-defensible",
+        "any_matches_expected": true,
+        "reasoning": "First concern is duplicated source-checkout logic across Core and kernel, a real ownership issue but not one of the expected concerns. Second concern describes a package/directory dependency cycle with ownership inversion (goal-store vs gate), matching the expected cycle concern."
+      },
+      "state": "verified",
+      "duration_ms": 14174
+    },
+    "baseline:GOAL-033:B:B:1": {
+      "key": "baseline:GOAL-033:B:B:1",
+      "control": false,
+      "kind": null,
+      "expect": null,
+      "mode": "baseline",
+      "case_id": "GOAL-033",
+      "stage": "B",
+      "group": "B",
+      "prompt_sha": "5f081a497dd40c10",
+      "judge": {
+        "slice_class": "equivalent-to-reference",
+        "scope_ok": true,
+        "concrete_edits_overlap_with_reference": "most",
+        "reasoning": "Both move the driver control client and service-name vocabulary out of cli/ to non-CLI owners, cutting both root->cli edges together with no shim. The candidate adds a dead-import removal and doesn't specify the cli facade or fan-in decoration, but the core edits match. Non-goals exclude the SCC-wide broadening."
+      },
+      "state": "verified",
+      "duration_ms": 15389
+    },
+    "control:GOAL-032:reference": {
+      "key": "control:GOAL-032:reference",
+      "control": true,
+      "kind": "reference",
+      "expect": [
+        "equivalent-to-reference"
+      ],
+      "mode": null,
+      "case_id": "GOAL-032",
+      "stage": "B",
+      "group": null,
+      "prompt_sha": "e131fa846d48fd24",
+      "judge": {
+        "slice_class": "equivalent-to-reference",
+        "scope_ok": true,
+        "concrete_edits_overlap_with_reference": "all",
+        "reasoning": "The candidate's recommended slice is word-for-word the reference slice. It adds a new kernel module with parseBinaryVerdict and turns both original parsers into thin wrappers, with no caller or orchestration changes. Scope matches the minimum-sufficient set. NON-GOALS is empty, but the slice text itself excludes the broader moves."
+      },
+      "state": "verified",
+      "duration_ms": 17053
+    },
+    "rich:GOAL-033:B:A:1": {
+      "key": "rich:GOAL-033:B:A:1",
+      "control": false,
+      "kind": null,
+      "expect": null,
+      "mode": "rich",
+      "case_id": "GOAL-033",
+      "stage": "B",
+      "group": "A",
+      "prompt_sha": "43738f17d9498a77",
+      "judge": {
+        "slice_class": "equivalent-to-reference",
+        "scope_ok": true,
+        "concrete_edits_overlap_with_reference": "most",
+        "reasoning": "Candidate moves driver-vocab and the runDriver core out of cli/ into new root-level modules, with cli/driver.ts left as the CLI-only facade, which matches the reference. It splits this into two serial tasks under one goal, and the goal's scope excludes the other SCC members. Gold's fan-in decoration detail is not mentioned."
+      },
+      "state": "verified",
+      "duration_ms": 8727
+    },
+    "rich:GOAL-033:A:A:1": {
+      "key": "rich:GOAL-033:A:A:1",
+      "control": false,
+      "kind": null,
+      "expect": null,
+      "mode": "rich",
+      "case_id": "GOAL-033",
+      "stage": "A",
+      "group": "A",
+      "prompt_sha": "35d71f3b7d3fa0d5",
+      "judge": {
+        "top_concern_class": "matches-expected",
+        "any_matches_expected": true,
+        "reasoning": "The first concern identifies a persistent package-level dependency cycle (6-member SCC) that earlier goals left unresolved. That matches the expected concern about a package cycle indicating an ownership inversion. The candidate's other concern covers a different issue, so only the first matches."
+      },
+      "state": "verified",
+      "duration_ms": 11749
+    },
+    "rich:GOAL-030:A:A:1": {
+      "key": "rich:GOAL-030:A:A:1",
+      "control": false,
+      "kind": null,
+      "expect": null,
+      "mode": "rich",
+      "case_id": "GOAL-030",
+      "stage": "A",
+      "group": "A",
+      "prompt_sha": "189af8b7dff43360",
+      "judge": {
+        "top_concern_class": "adjacent-defensible",
+        "any_matches_expected": true,
+        "reasoning": "Top concern is a package-level dependency cycle, which isn't among the expected concerns, though it's a genuine architecture issue. Concern 2 touches the goal-branch mechanism and concern 3 matches scattered status writes, so some candidate concern matches an expected one."
+      },
+      "state": "verified",
+      "duration_ms": 36861
+    },
+    "baseline:GOAL-033:A:A:1": {
+      "key": "baseline:GOAL-033:A:A:1",
+      "control": false,
+      "kind": null,
+      "expect": null,
+      "mode": "baseline",
+      "case_id": "GOAL-033",
+      "stage": "A",
+      "group": "A",
+      "prompt_sha": "5fe2331bd03c7467",
+      "judge": {
+        "top_concern_class": "matches-expected",
+        "any_matches_expected": true,
+        "reasoning": "The first concern identifies the root↔cli dependency cycle as an unresolved ownership boundary and notes the draft layers rule naming it as a violation. That matches the expected cycle/ownership-inversion concern, and it touches the unlanded draft rule. Concern 3 also matches the unlanded-rule item."
+      },
+      "state": "verified",
+      "duration_ms": 7745
+    },
+    "baseline:GOAL-032:B:A:1": {
+      "key": "baseline:GOAL-032:B:A:1",
+      "control": false,
+      "kind": null,
+      "expect": null,
+      "mode": "baseline",
+      "case_id": "GOAL-032",
+      "stage": "B",
+      "group": "A",
+      "prompt_sha": "6c88c042ec60e43d",
+      "judge": {
+        "slice_class": "equivalent-to-reference",
+        "scope_ok": true,
+        "concrete_edits_overlap_with_reference": "most",
+        "reasoning": "Both sink the domain-agnostic parse algorithm into a shared kernel module with positive/negative literals as parameters, rewire both call sites to delegate, and leave orchestration untouched. The candidate is less specific on the module path, function name and thin-wrapper signature preservation, but the edits are the same. The non-goals exclude the broader moves."
+      },
+      "state": "verified",
+      "duration_ms": 6319
+    },
+    "control:GOAL-031:too-broad": {
+      "key": "control:GOAL-031:too-broad",
+      "control": true,
+      "kind": "too-broad",
+      "expect": [
+        "too-broad"
+      ],
+      "mode": null,
+      "case_id": "GOAL-031",
+      "stage": "B",
+      "group": null,
+      "prompt_sha": "fe9e811f60ff7710",
+      "judge": {
+        "slice_class": "too-broad",
+        "scope_ok": false,
+        "concrete_edits_overlap_with_reference": "some",
+        "reasoning": "Converting every status literal in the repo is explicitly listed as clearly too broad. It would touch the exempted provider, the false-positive files, and todo/ready/done literals the user constraint says must stay. It does include the 5 genuine goal-driver edits, but it skips the investigation and has no non-goals."
+      },
+      "state": "verified",
+      "duration_ms": 7723
+    },
+    "baseline:GOAL-031:A:B:1": {
+      "key": "baseline:GOAL-031:A:B:1",
+      "control": false,
+      "kind": null,
+      "expect": null,
+      "mode": "baseline",
+      "case_id": "GOAL-031",
+      "stage": "A",
+      "group": "B",
+      "prompt_sha": "8d5115e5e6567640",
+      "judge": {
+        "top_concern_class": "matches-expected",
+        "any_matches_expected": true,
+        "reasoning": "The first concern identifies the \"needs-human\" status literal scattered across multiple files and layers with no clear single owner, questioning whether task-status.ts is canonical. This matches the expected dispersed-literal concern, though it does not address the packages-vs-plugin duplication."
+      },
+      "state": "verified",
+      "duration_ms": 13116
+    },
+    "baseline:GOAL-031:A:A:1": {
+      "key": "baseline:GOAL-031:A:A:1",
+      "control": false,
+      "kind": null,
+      "expect": null,
+      "mode": "baseline",
+      "case_id": "GOAL-031",
+      "stage": "A",
+      "group": "A",
+      "prompt_sha": "26d44cfc9839e4bf",
+      "judge": {
+        "top_concern_class": "matches-expected",
+        "any_matches_expected": true,
+        "reasoning": "The first concern names the 'needs-human' status literal dispersed across 5 modules with no clear canonical owner. That is the same issue as the first expected concern. None of the candidate concerns covers the packages-vs-plugin duplicated vocabulary."
+      },
+      "state": "verified",
+      "duration_ms": 7797
+    },
+    "tool:GOAL-033:A:A:1": {
+      "key": "tool:GOAL-033:A:A:1",
+      "control": false,
+      "kind": null,
+      "expect": null,
+      "mode": "tool",
+      "case_id": "GOAL-033",
+      "stage": "A",
+      "group": "A",
+      "prompt_sha": "39d06618dc9edaea",
+      "judge": {
+        "top_concern_class": "adjacent-defensible",
+        "any_matches_expected": false,
+        "reasoning": "The first concern describes duplicated primitives across product and plugin layers with ownership decided ad hoc. This is related to the 'two primitives with no unambiguous owner' concern, but the candidate frames it as intentional duplication guarded by parity tests. The other candidates don't match the expected concerns either. I judge the first one real but adjacent."
+      },
+      "state": "verified",
+      "duration_ms": 5707
+    },
+    "rich:GOAL-031:B:B:1": {
+      "key": "rich:GOAL-031:B:B:1",
+      "control": false,
+      "kind": null,
+      "expect": null,
+      "mode": "rich",
+      "case_id": "GOAL-031",
+      "stage": "B",
+      "group": "B",
+      "prompt_sha": "728093f30a367fca",
+      "judge": {
+        "slice_class": "equivalent-to-reference",
+        "scope_ok": true,
+        "concrete_edits_overlap_with_reference": "all",
+        "reasoning": "Candidate converts exactly goal-driver.ts's five task.status 'needs-human' literals to TASK_STATUS.NEEDS_HUMAN, excludes the :823 AC-status comparison, leaves todo/ready/done literals alone, and excludes the false-positive files and the exempted github-client. This matches the reference edits and boundaries."
+      },
+      "state": "verified",
+      "duration_ms": 12175
+    },
+    "control:GOAL-030:too-fragmented": {
+      "key": "control:GOAL-030:too-fragmented",
+      "control": true,
+      "kind": "too-fragmented",
+      "expect": [
+        "too-fragmented"
+      ],
+      "mode": null,
+      "case_id": "GOAL-030",
+      "stage": "B",
+      "group": null,
+      "prompt_sha": "7c966a76acb979a1",
+      "judge": {
+        "slice_class": "too-fragmented",
+        "scope_ok": false,
+        "concrete_edits_overlap_with_reference": "none",
+        "reasoning": "One goal per single status literal is explicitly listed as clearly too fragmented. It creates no shared kernel decision layer, no structured transition event schema, and no branch self-host proof. The promote and retreat directions would be split into pieces that can't be accepted independently, so the concern isn't resolved."
+      },
+      "state": "verified",
+      "duration_ms": 5232
+    },
+    "tool:GOAL-033:B:A:1": {
+      "key": "tool:GOAL-033:B:A:1",
+      "control": false,
+      "kind": null,
+      "expect": null,
+      "mode": "tool",
+      "case_id": "GOAL-033",
+      "stage": "B",
+      "group": "A",
+      "prompt_sha": "f8b58b7794809838",
+      "judge": {
+        "slice_class": "equivalent-to-reference",
+        "scope_ok": true,
+        "concrete_edits_overlap_with_reference": "most",
+        "reasoning": "Candidate moves the zero-import vocab leaf and the driver run-core (runDriver/runDriverAsync/resolveDriverInvocation) out of cli/ into root modules, leaving cli/driver.ts as a dispatcher. It matches the reference's two-module split and cuts both edges together. The non-goals exclude the broader SCC work. The only gap is that the instrument-decoration call is not explicitly pinned to stay in cli/. The candidate instead moves withWorkerInstrumentReadings into the root module."
+      },
+      "state": "verified",
+      "duration_ms": 6290
+    },
+    "rich:GOAL-033:B:B:1": {
+      "key": "rich:GOAL-033:B:B:1",
+      "control": false,
+      "kind": null,
+      "expect": null,
+      "mode": "rich",
+      "case_id": "GOAL-033",
+      "stage": "B",
+      "group": "B",
+      "prompt_sha": "9c938ea1d8d5b094",
+      "judge": {
+        "slice_class": "equivalent-to-reference",
+        "scope_ok": true,
+        "concrete_edits_overlap_with_reference": "most",
+        "reasoning": "Both move driver-vocab.ts and the driver-invocation core (runDriver, runDriverAsync, resolveDriverInvocation) into two zero-import root-level modules, leaving cli/driver.ts as the CLI orchestrator. Both cut the two root→cli edges together. The candidate moves withWorkerInstrumentReadings to root, while the reference keeps the instrument decoration in cli/, which is a minor divergence. Non-goals exclude the broader SCC work."
+      },
+      "state": "verified",
+      "duration_ms": 9353
+    },
+    "baseline:GOAL-030:B:A:1": {
+      "key": "baseline:GOAL-030:B:A:1",
+      "control": false,
+      "kind": null,
+      "expect": null,
+      "mode": "baseline",
+      "case_id": "GOAL-030",
+      "stage": "B",
+      "group": "A",
+      "prompt_sha": "c4b0b6e75b2c64d4",
+      "judge": {
+        "slice_class": "defensible-but-different",
+        "scope_ok": true,
+        "concrete_edits_overlap_with_reference": "most",
+        "reasoning": "Candidate unifies both promotion-path sites (todo->ready, ready->todo) behind one shared decision point with a structured per-transition record, and excludes fan-in/needs-human sites, matching the reference's core. It differs: no kernel module/three-state decision or sunk patchStatusField is specified, and the self-host proof is an acceptance criterion rather than a dedicated probe script. Plausible and sufficient."
+      },
+      "state": "verified",
+      "duration_ms": 5906
+    },
+    "control:GOAL-032:too-fragmented": {
+      "key": "control:GOAL-032:too-fragmented",
+      "control": true,
+      "kind": "too-fragmented",
+      "expect": [
+        "too-fragmented"
+      ],
+      "mode": null,
+      "case_id": "GOAL-032",
+      "stage": "B",
+      "group": null,
+      "prompt_sha": "87d5a67efc66cb6a",
+      "judge": {
+        "slice_class": "too-fragmented",
+        "scope_ok": false,
+        "concrete_edits_overlap_with_reference": "none",
+        "reasoning": "Converting only one of the two call sites leaves the other implementation duplicated, so the detect_duplicates finding isn't resolved. The gold explicitly lists this as too fragmented. The scope lists the same single-site conversion, with no kernel module and no shared algorithm. Non-goals are empty."
+      },
+      "state": "verified",
+      "duration_ms": 7531
+    },
+    "rich:GOAL-033:A:B:1": {
+      "key": "rich:GOAL-033:A:B:1",
+      "control": false,
+      "kind": null,
+      "expect": null,
+      "mode": "rich",
+      "case_id": "GOAL-033",
+      "stage": "A",
+      "group": "B",
+      "prompt_sha": "ee8b439076802b05",
+      "judge": {
+        "top_concern_class": "matches-expected",
+        "any_matches_expected": true,
+        "reasoning": "The first-ranked concern identifies a package-level dependency cycle (SCC of size 6 among core root, cli, fan-in, gate) and infers an ownership inversion where something the core uses is owned by the CLI layer. This matches the expected cycle/ownership-inversion concern."
+      },
+      "state": "verified",
+      "duration_ms": 7365
+    },
+    "control:GOAL-031:alternative": {
+      "key": "control:GOAL-031:alternative",
+      "control": true,
+      "kind": "alternative",
+      "expect": [
+        "alternative-valid",
+        "equivalent-to-reference"
+      ],
+      "mode": null,
+      "case_id": "GOAL-031",
+      "stage": "B",
+      "group": null,
+      "prompt_sha": "bd7a41ff7938aee4",
+      "judge": {
+        "slice_class": "alternative-valid",
+        "scope_ok": false,
+        "concrete_edits_overlap_with_reference": "some",
+        "reasoning": "The candidate text is the reference's own rejected alternative: routing all status comparisons in goal-driver.ts through the canonical module. That would also convert the todo/ready/done literals, which the recorded user constraint says must stay, so it is not an acceptable slice. It does cover the 5 needs-human edits, but it adds out-of-scope conversions and doesn't investigate the false positives."
+      },
+      "state": "verified",
+      "duration_ms": 7059
+    },
+    "baseline:GOAL-031:B:B:1": {
+      "key": "baseline:GOAL-031:B:B:1",
+      "control": false,
+      "kind": null,
+      "expect": null,
+      "mode": "baseline",
+      "case_id": "GOAL-031",
+      "stage": "B",
+      "group": "B",
+      "prompt_sha": "ea6e0a4452d86a88",
+      "judge": {
+        "slice_class": "equivalent-to-reference",
+        "scope_ok": true,
+        "concrete_edits_overlap_with_reference": "all",
+        "reasoning": "Candidate migrates exactly the 5 genuine task.status 'needs-human' comparisons in goal-driver.ts to the canonical task-status.ts symbol, leaves the 6th GOAL-AC literal and todo/ready/done literals alone, and excludes the exempted provider and false-positive files. The added pinning test is a minor, non-broadening addition."
+      },
+      "state": "verified",
+      "duration_ms": 6882
+    },
+    "baseline:GOAL-032:A:A:1": {
+      "key": "baseline:GOAL-032:A:A:1",
+      "control": false,
+      "kind": null,
+      "expect": null,
+      "mode": "baseline",
+      "case_id": "GOAL-032",
+      "stage": "A",
+      "group": "A",
+      "prompt_sha": "d8422b0cbf2c2953",
+      "judge": {
+        "top_concern_class": "matches-expected",
+        "any_matches_expected": true,
+        "reasoning": "The candidate identifies verdict parsing duplicated across packages/quay and plugin/scripts with no canonical owner, and explicitly states the equivalence classification is unresolved (possible false positive vs. canonicalization defect). This covers both expected concerns."
+      },
+      "state": "verified",
+      "duration_ms": 12211
+    },
+    "rich:GOAL-032:A:B:1": {
+      "key": "rich:GOAL-032:A:B:1",
+      "control": false,
+      "kind": null,
+      "expect": null,
+      "mode": "rich",
+      "case_id": "GOAL-032",
+      "stage": "A",
+      "group": "B",
+      "prompt_sha": "0e8f1ea2d6f740db",
+      "judge": {
+        "top_concern_class": "matches-expected",
+        "any_matches_expected": true,
+        "reasoning": "The first concern identifies a duplicated implementation of verdict parsing across packages/quay and plugin/scripts, with no shared owner, and notes only vocabulary differs. This matches the expected duplicate-across-boundary concern. It doesn't clearly address the unresolved-equivalence point, but the core issue matches."
+      },
+      "state": "verified",
+      "duration_ms": 5841
+    },
+    "rich:GOAL-031:A:B:1": {
+      "key": "rich:GOAL-031:A:B:1",
+      "control": false,
+      "kind": null,
+      "expect": null,
+      "mode": "rich",
+      "case_id": "GOAL-031",
+      "stage": "A",
+      "group": "B",
+      "prompt_sha": "368b01268b12ec6b",
+      "judge": {
+        "top_concern_class": "matches-expected",
+        "any_matches_expected": true,
+        "reasoning": "The first concern identifies task-status vocabulary owned in both packages/quay/src/abi.ts and plugin/scripts/task-status.ts, kept in sync only by a comment, plus the literal in the kernel module. That matches both the parallel packages/plugin declarations and the dispersed literal with unclear canonical home."
+      },
+      "state": "verified",
+      "duration_ms": 5490
+    },
+    "control:GOAL-031:too-fragmented": {
+      "key": "control:GOAL-031:too-fragmented",
+      "control": true,
+      "kind": "too-fragmented",
+      "expect": [
+        "too-fragmented"
+      ],
+      "mode": null,
+      "case_id": "GOAL-031",
+      "stage": "B",
+      "group": null,
+      "prompt_sha": "687b454fd2fb4e1d",
+      "judge": {
+        "slice_class": "too-fragmented",
+        "scope_ok": false,
+        "concrete_edits_overlap_with_reference": "some",
+        "reasoning": "One goal per occurrence is explicitly listed as clearly too fragmented. The five goal-driver.ts substitutions are one mechanical change that can't be accepted piecemeal. The candidate also gives no investigation of the false-positive and exempted files, and its scope and non-goals are not concrete."
+      },
+      "state": "verified",
+      "duration_ms": 6118
+    },
+    "tool:GOAL-032:A:A:1": {
+      "key": "tool:GOAL-032:A:A:1",
+      "control": false,
+      "kind": null,
+      "expect": null,
+      "mode": "tool",
+      "case_id": "GOAL-032",
+      "stage": "A",
+      "group": "A",
+      "prompt_sha": "e1e3b9ee9426f461",
+      "judge": {
+        "top_concern_class": "unrelated",
+        "any_matches_expected": false,
+        "reasoning": "The first concern is about rate-limit literals living outside the declarative config surface (drivers.yml). It does not identify a duplicate implementation across the packages/plugin boundary or an unresolved equivalence question. The other two concerns (quota input ownership, routine identity) also don't match."
+      },
+      "state": "verified",
+      "duration_ms": 7390
+    },
+    "control:GOAL-032:too-broad": {
+      "key": "control:GOAL-032:too-broad",
+      "control": true,
+      "kind": "too-broad",
+      "expect": [
+        "too-broad"
+      ],
+      "mode": null,
+      "case_id": "GOAL-032",
+      "stage": "B",
+      "group": null,
+      "prompt_sha": "50471b55e4c925a7",
+      "judge": {
+        "slice_class": "too-broad",
+        "scope_ok": false,
+        "concrete_edits_overlap_with_reference": "some",
+        "reasoning": "The candidate recommends unifying all verdict-shaped types in one pass, which is exactly the reference's 'clearly too broad' item. The minimum is sinking the shared parsing algorithm for the two parsers. The candidate's scope is unbounded and has no non-goals excluding orchestration merging or other verdict types."
+      },
+      "state": "verified",
+      "duration_ms": 7679
+    },
+    "baseline:GOAL-030:A:B:1": {
+      "key": "baseline:GOAL-030:A:B:1",
+      "control": false,
+      "kind": null,
+      "expect": null,
+      "mode": "baseline",
+      "case_id": "GOAL-030",
+      "stage": "A",
+      "group": "B",
+      "prompt_sha": "f8df5f73df281ff4",
+      "judge": {
+        "top_concern_class": "matches-expected",
+        "any_matches_expected": true,
+        "reasoning": "Concern 1 (lifecycle status writes living in an orchestration script, with no single decision layer and no structured per-transition record) matches the first expected concern. Concerns 2 and 3 match the other two expected concerns: the weak plugin-to-kernel boundary and the unproven goal-branch mechanism."
+      },
+      "state": "verified",
+      "duration_ms": 5756
+    },
+    "rich:GOAL-030:B:A:1": {
+      "key": "rich:GOAL-030:B:A:1",
+      "control": false,
+      "kind": null,
+      "expect": null,
+      "mode": "rich",
+      "case_id": "GOAL-030",
+      "stage": "B",
+      "group": "A",
+      "prompt_sha": "c99ed2cc20f06a2a",
+      "judge": {
+        "slice_class": "alternative-valid",
+        "scope_ok": true,
+        "concrete_edits_overlap_with_reference": "most",
+        "reasoning": "Same two write sites (promote/retreat) routed through one decision layer with structured per-transition record and a branch live-probe. It differs in placing the layer in the gate layer (not a new kernel module), reusing the gate-event store (not a new jsonl), and keeping patchStatusField in task-ops. Scope excludes fan-in and needs-human sites."
+      },
+      "state": "verified",
+      "duration_ms": 9899
+    },
+    "baseline:GOAL-030:B:B:1": {
+      "key": "baseline:GOAL-030:B:B:1",
+      "control": false,
+      "kind": null,
+      "expect": null,
+      "mode": "baseline",
+      "case_id": "GOAL-030",
+      "stage": "B",
+      "group": "B",
+      "prompt_sha": "de8f73896d56a77a",
+      "judge": {
+        "slice_class": "alternative-valid",
+        "scope_ok": true,
+        "concrete_edits_overlap_with_reference": "most",
+        "reasoning": "Same two ready-pool-check write sites, a shared decision point, a structured per-transition record, and branch-self-host proof. It differs in placement (gate/lifecycle.ts rather than a new kernel module), and it leaves patchStatusField in place. The non-goals exclude fan-in and needs-human, so the slice stays minimal and sufficient."
+      },
+      "state": "verified",
+      "duration_ms": 6608
+    },
+    "control:GOAL-033:too-fragmented": {
+      "key": "control:GOAL-033:too-fragmented",
+      "control": true,
+      "kind": "too-fragmented",
+      "expect": [
+        "too-fragmented"
+      ],
+      "mode": null,
+      "case_id": "GOAL-033",
+      "stage": "B",
+      "group": null,
+      "prompt_sha": "4e66e66563221df2",
+      "judge": {
+        "slice_class": "too-fragmented",
+        "scope_ok": false,
+        "concrete_edits_overlap_with_reference": "some",
+        "reasoning": "The candidate moves only one of the two root<->cli edges. The reference says both must move together, and that moving one alone leaves a partially converged state with no independent acceptance story. This is the reference's named too-fragmented example. The candidate also names no concrete edits and no non-goals."
+      },
+      "state": "verified",
+      "duration_ms": 9931
+    },
+    "control:GOAL-030:reference": {
+      "key": "control:GOAL-030:reference",
+      "control": true,
+      "kind": "reference",
+      "expect": [
+        "equivalent-to-reference"
+      ],
+      "mode": null,
+      "case_id": "GOAL-030",
+      "stage": "B",
+      "group": null,
+      "prompt_sha": "5651f201924a4e5a",
+      "judge": {
+        "slice_class": "equivalent-to-reference",
+        "scope_ok": true,
+        "concrete_edits_overlap_with_reference": "all",
+        "reasoning": "The candidate's recommended slice and in-scope text are word-for-word identical to the reference: the same kernel module, the same three-state decider, patchStatusField sunk with a re-export, the same event log, the same two write sites, and the same probe script. It adds no extra work beyond the reference. The empty NON-GOALS list is a minor weakness, but the scope itself is minimal."
+      },
+      "state": "verified",
+      "duration_ms": 7354
+    },
+    "control:GOAL-033:too-broad": {
+      "key": "control:GOAL-033:too-broad",
+      "control": true,
+      "kind": "too-broad",
+      "expect": [
+        "too-broad"
+      ],
+      "mode": null,
+      "case_id": "GOAL-033",
+      "stage": "B",
+      "group": null,
+      "prompt_sha": "6286a1f290ee9568",
+      "judge": {
+        "slice_class": "too-broad",
+        "scope_ok": false,
+        "concrete_edits_overlap_with_reference": "some",
+        "reasoning": "Clearing the whole 6-member SCC in one goal is explicitly listed as clearly too broad. It bundles re-deciding ownership for gate, gate/config, gate/factories and fan-in, beyond the cheapest root<->cli edge cut. Scope is unbounded and there are no non-goals excluding broader moves."
+      },
+      "state": "verified",
+      "duration_ms": 7045
+    },
+    "rich:GOAL-031:B:A:1": {
+      "key": "rich:GOAL-031:B:A:1",
+      "control": false,
+      "kind": null,
+      "expect": null,
+      "mode": "rich",
+      "case_id": "GOAL-031",
+      "stage": "B",
+      "group": "A",
+      "prompt_sha": "3a88aa697887786c",
+      "judge": {
+        "slice_class": "equivalent-to-reference",
+        "scope_ok": true,
+        "concrete_edits_overlap_with_reference": "all",
+        "reasoning": "Candidate migrates the same 5 genuine task.status 'needs-human' comparisons in goal-driver.ts to TASK_STATUS.NEEDS_HUMAN via the existing task-status.ts. It leaves line 823 (GOAL-AC), github-client, observation, workflow-baseline-metrics, and the todo/ready/done literals untouched. Scope and non-goals match the reference."
+      },
+      "state": "verified",
+      "duration_ms": 5591
+    },
+    "control:GOAL-031:reference": {
+      "key": "control:GOAL-031:reference",
+      "control": true,
+      "kind": "reference",
+      "expect": [
+        "equivalent-to-reference"
+      ],
+      "mode": null,
+      "case_id": "GOAL-031",
+      "stage": "B",
+      "group": null,
+      "prompt_sha": "299a47b63ab4297f",
+      "judge": {
+        "slice_class": "equivalent-to-reference",
+        "scope_ok": true,
+        "concrete_edits_overlap_with_reference": "all",
+        "reasoning": "The candidate's recommended slice is word-for-word identical to the reference: it investigates the dispersion reading, excludes the exempted provider and false-positive files, and converts exactly the 5 genuine goal-driver.ts occurrences to the existing task-status.ts helpers, leaving other literals on the same line untouched. Its scope is a single minimum-sufficient item."
+      },
+      "state": "verified",
+      "duration_ms": 7015
+    },
+    "baseline:GOAL-033:B:A:1": {
+      "key": "baseline:GOAL-033:B:A:1",
+      "control": false,
+      "kind": null,
+      "expect": null,
+      "mode": "baseline",
+      "case_id": "GOAL-033",
+      "stage": "B",
+      "group": "A",
+      "prompt_sha": "84de79437f952bc7",
+      "judge": {
+        "slice_class": "equivalent-to-reference",
+        "scope_ok": true,
+        "concrete_edits_overlap_with_reference": "most",
+        "reasoning": "The candidate moves the same two primitives (control client and vocabulary) from cli/ into new core-root driver-control.ts and driver-vocab.ts, with cli consuming them downward. It also removes both root→cli edges together. Scope stays narrow, and the non-goals exclude the wider SCC. It doesn't mention the reference's explicit keep-in-cli decoration call, which is a small gap."
+      },
+      "state": "verified",
+      "duration_ms": 6571
+    },
+    "control:GOAL-030:too-broad": {
+      "key": "control:GOAL-030:too-broad",
+      "control": true,
+      "kind": "too-broad",
+      "expect": [
+        "too-broad"
+      ],
+      "mode": null,
+      "case_id": "GOAL-030",
+      "stage": "B",
+      "group": null,
+      "prompt_sha": "730a0b307577d9f4",
+      "judge": {
+        "slice_class": "too-broad",
+        "scope_ok": false,
+        "concrete_edits_overlap_with_reference": "some",
+        "reasoning": "Refactoring all six lifecycle write sites at once is explicitly listed as clearly too broad. It includes the two promotion sites the reference covers, but adds fan-in's four and needs-human's two. That widens debugging surface on the first real trial of the branch mechanism. It also omits the kernel module, event schema and self-host probe, and NON-GOALS is empty."
+      },
+      "state": "verified",
+      "duration_ms": 7815
+    },
+    "baseline:GOAL-031:B:A:1": {
+      "key": "baseline:GOAL-031:B:A:1",
+      "control": false,
+      "kind": null,
+      "expect": null,
+      "mode": "baseline",
+      "case_id": "GOAL-031",
+      "stage": "B",
+      "group": "A",
+      "prompt_sha": "5c0e0f7a4c2c1b73",
+      "judge": {
+        "slice_class": "equivalent-to-reference",
+        "scope_ok": true,
+        "concrete_edits_overlap_with_reference": "all",
+        "reasoning": "Candidate migrates exactly the 5 genuine task.status 'needs-human' literals in goal-driver.ts to the canonical task-status source, leaves the 6th GOAL-AC occurrence, and excludes github-client, observation, workflow-baseline-metrics, and todo/ready/done literals. The added before/after reading and floor-guard are evidence, not extra edits."
+      },
+      "state": "verified",
+      "duration_ms": 7008
+    },
+    "tool:GOAL-033:B:B:1": {
+      "key": "tool:GOAL-033:B:B:1",
+      "control": false,
+      "kind": null,
+      "expect": null,
+      "mode": "tool",
+      "case_id": "GOAL-033",
+      "stage": "B",
+      "group": "B",
+      "prompt_sha": "476c9bbbb26a0664",
+      "judge": {
+        "slice_class": "equivalent-to-reference",
+        "scope_ok": true,
+        "concrete_edits_overlap_with_reference": "most",
+        "reasoning": "Both move driver-vocab.ts to root and extract the instrument-free driver delegation core (resolveDriverInvocation, spawn arms) into a root module. Both keep the fan-in instrument decoration in cli/driver.ts. The candidate puts the core in a different module layout and adds explicit importer repoints. Scope stays on the two root→cli edges and excludes the broader SCC."
+      },
+      "state": "verified",
+      "duration_ms": 11877
+    },
+    "control:GOAL-033:alternative": {
+      "key": "control:GOAL-033:alternative",
+      "control": true,
+      "kind": "alternative",
+      "expect": [
+        "alternative-valid",
+        "equivalent-to-reference"
+      ],
+      "mode": null,
+      "case_id": "GOAL-033",
+      "stage": "B",
+      "group": null,
+      "prompt_sha": "3b22ead5d9936226",
+      "judge": {
+        "slice_class": "equivalent-to-reference",
+        "scope_ok": true,
+        "concrete_edits_overlap_with_reference": "most",
+        "reasoning": "The candidate quotes the reference's own 'selected approach' (cut both root<->cli edges, sink both shared primitives to root layer), which matches the gold slice. It lacks detail such as the fan-in decoration staying in cli/. It does not widen to the other SCC members, so its scope stays minimal."
+      },
+      "state": "verified",
+      "duration_ms": 8344
+    }
+  }
+}

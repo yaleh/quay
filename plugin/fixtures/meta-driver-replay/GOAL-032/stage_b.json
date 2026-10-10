@@ -1,0 +1,148 @@
+{
+  "case_id": "GOAL-032",
+  "stage": "B",
+  "stage_name": "decomposition",
+  "cutoff": "2026-10-09T01:50:00.000Z",
+  "cutoff_label": "T1-decision-ready",
+  "cutoff_rationale": "After the equivalence investigation concluded (the human's own origin line states the goal was created AFTER the conclusion). 5 min before activatedAt.",
+  "confirmed_concern": "A duplicate-implementation group flagged by detect_duplicates spans a packages/ parser and a plugin/ parser; whether they are semantically equivalent or intentionally divergent is undetermined.",
+  "investigation_findings": [
+    "The two parsers are STRUCTURALLY IDENTICAL and semantically EQUIVALENT (not intentionally-divergent): the algorithm is byte-for-byte the same shape, and the only difference is which two literal strings count as the positive/negative verdict values.",
+    "This is deliberate copying, not convergent evolution: criterion-fidelity.ts's own source comment says it reuses goal-driver.ts's fail-closed approach verbatim, and a test file independently describes the parser as mirroring it.",
+    "The PARSER ALGORITHM is domain-agnostic — 'parse a judge's raw stdout into a three-state verdict, fail closed if unreadable' does not depend on whether the domain is fidelity or sufficiency; the legal-value word list is DATA, not logic.",
+    "The two CALLERS' orchestration genuinely differs and should stay different (one synchronous/uncached via an injected judge seam; one async, two-sample-agreement before caching, with split failure causes).",
+    "Kernel placement is reachable from both trees without creating a reverse edge (the principle established by GOAL-030)."
+  ],
+  "context": {
+    "equivalence_verdict": "equivalent (identical algorithm; only the two legal-value literals differ)",
+    "evidence_of_deliberate_copy": "criterion-fidelity.ts source comment claims verbatim reuse; a sibling test file independently describes mirroring it",
+    "domain_agnosticism": "the parse algorithm is independent of which verdict vocabulary is passed in",
+    "caller_orchestration_differs_and_stays": "sync/uncached/injected-seam vs async/two-sample-agreement/split-causes",
+    "placement_principle": "kernel is reachable from both packages/ and plugin/ without a reverse edge",
+    "test_suite_state": "scripts/test.sh green on develop at the cutoff commit."
+  },
+  "citable_evidence_refs": [
+    "archguard:detect_duplicates",
+    "code:criterion_fidelity",
+    "code:goal_driver_parser",
+    "methodology:ownership_first"
+  ],
+  "task": {
+    "instructions": "You are a NARROW ownership/architecture proposer. This is a DECOMPOSITION stage: the concern below is already confirmed, and the investigation findings are established facts as of T1. Propose the minimal-sufficient slice. Several decompositions may be defensible — you are scored on whether yours is coherent, minimum-sufficient and harnessable, NOT on matching one historical artifact. Cite only the listed evidence refs; do not invent readings.",
+    "questions": [
+      "a) What candidate slices follow from this concern? (<=3, ordered)",
+      "b) Which one should be done first, and why is it minimum-sufficient?",
+      "c) investigate, or propose-goal? Justify from the T1 findings.",
+      "d) Scope and explicit non-goals.",
+      "e) What mechanical before/after delta would evidence success?",
+      "f) What negative control distinguishes 'it worked' from 'it looks like it worked'?",
+      "g) What would make you abandon or materially revise this?",
+      "h) Is this harnessable as stated (inputs/outputs/constraints/acceptance/failure mode)?"
+    ],
+    "response_schema": {
+      "type": "object",
+      "required": [
+        "candidate_slices",
+        "recommended_first",
+        "investigate_or_goal",
+        "scope",
+        "expected_mechanical_delta",
+        "negative_control",
+        "abandon_or_reconsider_condition",
+        "harnessability",
+        "minimum_sufficiency_rationale"
+      ],
+      "properties": {
+        "candidate_slices": {
+          "type": "array",
+          "maxItems": 3,
+          "items": {
+            "type": "object",
+            "properties": {
+              "title": {
+                "type": "string"
+              },
+              "description": {
+                "type": "string"
+              },
+              "why_plausible": {
+                "type": "string"
+              }
+            }
+          }
+        },
+        "recommended_first": {
+          "type": "string"
+        },
+        "investigate_or_goal": {
+          "enum": [
+            "investigate",
+            "propose-goal"
+          ]
+        },
+        "scope": {
+          "type": "object",
+          "properties": {
+            "in_scope": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            },
+            "non_goals": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            }
+          }
+        },
+        "expected_mechanical_delta": {
+          "type": "string"
+        },
+        "negative_control": {
+          "type": "string"
+        },
+        "abandon_or_reconsider_condition": {
+          "type": "string"
+        },
+        "harnessability": {
+          "type": "object",
+          "required": [
+            "inputs",
+            "outputs",
+            "constraints",
+            "acceptance",
+            "failure_mode"
+          ],
+          "properties": {
+            "inputs": {
+              "type": "string"
+            },
+            "outputs": {
+              "type": "string"
+            },
+            "constraints": {
+              "type": "string"
+            },
+            "acceptance": {
+              "type": "string"
+            },
+            "failure_mode": {
+              "type": "string"
+            }
+          }
+        },
+        "minimum_sufficiency_rationale": {
+          "type": "string"
+        }
+      }
+    },
+    "citable_evidence_refs": [
+      "archguard:detect_duplicates",
+      "code:criterion_fidelity",
+      "code:goal_driver_parser",
+      "methodology:ownership_first"
+    ]
+  }
+}

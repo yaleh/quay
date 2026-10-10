@@ -2,7 +2,7 @@
 id: gap-dashboard-kernel-not-packaged-in-plugin-artifact
 title: dashboard-kernel 不在任何发布产物里：sync-vendor 只按文件名镜像 dist/quay.js，vendor
   package.json 又被重写成无 exports——发布 0.18.0 也对消费方不可达
-status: ready
+status: done
 labels:
   - gap
   - defect
@@ -64,11 +64,11 @@ $ node -p "Object.keys(require('./plugin/vendor/quay/package.json'))"
 
 ## AC
 
-- [ ] `ls plugin/vendor/quay/dist/dashboard-kernel.js` 存在；`bash plugin/scripts/sync-vendor.sh --check` 对拉起的漂移会红（证明 `--check` 真的覆盖了新文件，而不是"没检查所以没报错"）。
-- [ ] 向量文件在插件镜像里可达，路径写进 README。
-- [ ] README 写明消费方 import 的确切形式（路径或子路径名），且该形式经过一次真实装配树验证。
-- [ ] 判据在**真实发布装配产物**上取真（不是 `npm pack` 的结果，也不是源树直读）。
-- [ ] 既有面不回归：`sync-vendor.sh --check` 在干净树上绿；仓内 suite 全绿。
+- [x] `ls plugin/vendor/quay/dist/dashboard-kernel.js` 存在；`bash plugin/scripts/sync-vendor.sh --check` 对拉起的漂移会红（证明 `--check` 真的覆盖了新文件，而不是"没检查所以没报错"）。 —— 实测：`plugin/vendor/quay/dist/dashboard-kernel.js` 存在，且与 `packages/quay/dist/dashboard-kernel.js` 逐字节相同。本任务顺带修掉了一处会让这条判据【恒假】的构建性质：kernel bundle 的字节原本随构建进程的 cwd 变化（esbuild 把入口路径按 cwd 相对写进首行注释——实测同一源树 cwd=worktree 2074 B / cwd=packages/quay 2060 B，唯一差异就是那一行），⇒ 任何带外的单独 build 都会让「镜像 vs 源」错误变红（本轮实测到一次，见 Disposition）。修法：`build-dist.mjs` 的 `buildDashboardKernel` 固定 `absWorkingDir: pkgDir`；实测四种 cwd（worktree / 主检出 / packages/quay / /tmp）现在产出同一字节（2060 B，md5 `320ae9d5a3752f3a7afccacd491b81f0`）；真实树上把该镜像改一字节 ⇒ `bash plugin/scripts/sync-vendor.sh --check` exit 1 且输出 `DRIFT: vendor/quay/dist/dashboard-kernel.js differs…`，`cp` 回备份后 exit 0（落痕 /tmp/ac-kernel-negctl.txt）。覆盖性对照：把新增的两行 `cmp_or_report` 从脚本里删掉后，同一处改字节 ⇒ exit 0 / `CLEAN`、全文 0 处提到 kernel（/tmp/ac-kernel-checkcov-negctl.txt）——即红来自这两行检查，不是别的文件。`plugin/test/sync-vendor.test.mjs` 在一次性拷贝树里把正反两向都钉住。
+- [x] 向量文件在插件镜像里可达，路径写进 README。 —— `plugin/vendor/quay/dist/dashboard-kernel-vectors.json`（9637 B）与 `packages/quay/src/dashboard-kernel-vectors.json` 逐字节相同。README `## Public API: quay/dashboard-kernel` 以 `new URL("vendor/quay/dist/dashboard-kernel-vectors.json", pluginRoot)` 写明该路径；`plugin/test/sync-vendor.test.mjs` 从 README 里【解析出这两个路径】再逐个 stat 插件镜像（不是关键词匹配），并断言 README 交出的正是这两条。
+- [x] README 写明消费方 import 的确切形式（路径或子路径名），且该形式经过一次真实装配树验证。 —— README 写明的形式是【插件根下的文件路径】：`<plugin-root>/vendor/quay/dist/dashboard-kernel.js` 与其旁的向量文件，动态 `import()` 即用（kernel 是零 import 的 ESM 叶子，不涉及 node_modules 解析）。该形式在【真实发布产物】上验证：`/tmp/kernel-art/tree`（由 `publish-dist-branch.sh` 在 throwaway stub 仓装配出的 266 文件树）里 `import()` 成功、返回 `packLanes`/`mergeLiveAndHistoryIntervals`（函数）、`FIXED_GANTT_LANES=5`，3/3 契约向量逐字节复现。⛔ 未按方案 B 的【子路径名】写死（`quay/dashboard-kernel` 那条仍等 A/B/C 人工裁决）；文件路径形式是 Requested action 1/2「无论选哪条都成立」的那一半，故不构成对裁决的预判。
+- [x] 判据在**真实发布装配产物**上取真（不是 `npm pack` 的结果，也不是源树直读）。 —— 判据取真的载体就是发布装配产物而非 `npm pack` 或源树直读：`bash plugin/scripts/publish-dist-branch.sh --no-build --branch probe-dist`（stub 仓、真脚本）→ `git archive` 出来的树里 `vendor/quay/dist/{dashboard-kernel.js,dashboard-kernel-vectors.json}` 在场，`--verify-closure-dir` 与 shipped-set 规则都放行（`isExcluded=false`，由测试用真规则判定），并从中 import + 复现向量（上一条）。
+- [x] 既有面不回归：`sync-vendor.sh --check` 在干净树上绿；仓内 suite 全绿。 —— 干净树上 `bash plugin/scripts/sync-vendor.sh --check` ⇒ exit 0 / `CLEAN`（含 `OK (identical): vendor/quay/dist/dashboard-kernel.js` 与向量两行）；`--sync-dist` 的缺 bundle 前置校验现覆盖 kernel bundle（缺即 exit 2）。本轮的 scoped 门（`scripts/test.sh --for-task gap-dashboard-kernel-not-packaged-in-plugin-artifact --allow-thin`）由本轮跑绿；全量 suite 是 fan-in 的步骤，本轮不含。附带两次棘轮重锚均取【产物自身的读数】并已提交：`plugin/shipped-set-baseline.json` shipped 264→266 文件、`plugin/sh-census-baseline.json` embeddedInterpreterLines 6559→6566（`sync-vendor.sh` +7 行，差分实测：回退该文件后同一条检查读回 6559）。
 
 ## DoD
 
@@ -81,7 +81,11 @@ $ node -p "Object.keys(require('./plugin/vendor/quay/package.json'))"
 - packages/quay/src/dashboard-kernel-vectors.json
 - plugin/vendor/quay/package.json
 - packages/quay/README.md
+- packages/quay/scripts/build-dist.mjs
 - tasks/gap-dashboard-kernel-not-packaged-in-plugin-artifact.md
+- plugin/shipped-set-baseline.json
+- plugin/sh-census-baseline.json
+
 ## Notes
 
 - 本任务只解决"kernel 到不了发布产物"。**发布本身**是另一件事（`release-cut.sh`），建议本任务落地后再切 0.18.0，否则切出来的版本仍然对消费方无用。
@@ -105,3 +109,14 @@ $ node -p "Object.keys(require('./plugin/vendor/quay/package.json'))"
 - **C. 恢复 GitHub Release tarball asset**（`npm install <release-url>`）：保留 `exports` 映射、复用已测过的 AC1 面，不需要公共 npm；但这部分**反转 2026-09-16 取消 npm/SEA 渠道的裁定**，需人工明确同意。
 
 **在 A/B/C 裁决前**：上文 Requested action 的第 1、2、4、5 条仍然成立（无论选哪条，"产物里可达 / 经 CLI 可达"与"判据打在真实装配产物上"都必须满足），但**第 3 条（消费方 import 的确切形式）应等裁决**，不要先按 B 写死。
+## Disposition（2026-10-09，worker 落地）
+
+实现面（commit `320b9bffb`，分支 `task/gap-dashboard-kernel-not-packaged-in-plugin-artifact`）：
+
+- `plugin/scripts/sync-vendor.sh`：两种模式（full build 与 `--sync-dist`）都镜像 `packages/quay/dist/dashboard-kernel.js` → `plugin/vendor/quay/dist/dashboard-kernel.js`、`packages/quay/src/dashboard-kernel-vectors.json` → `plugin/vendor/quay/dist/dashboard-kernel-vectors.json`；`--check` 对两者各加一条 `cmp_or_report`；`--sync-dist` 的「缺 bundle 即 exit 2」前置校验由单文件 `if` 扩成对 `quay.js dashboard-kernel.js` 的循环（同样 fail-closed）。
+- `packages/quay/README.md`：新增「从已安装插件取用」一节，写明插件根下的两条路径与零 import/零解析的消费方式；并把 Distribution note 更正为「活渠道是插件 marketplace」。
+- `plugin/test/sync-vendor.test.mjs`：四条读数——镜像逐字节一致、shipped-set 规则不排除这两条路径、`--check` 双向控制（一次性拷贝树：干净 exit 0 / 改一字节 exit≠0 且点名 kernel）、README 写明的路径被解析后从【拷出仓库的树】导入并复现镜像向量。
+- 两次棘轮重锚（取产物自身读数）：`plugin/shipped-set-baseline.json`（shipped 264→266 文件，`--reanchor` 由真装配树写出）、`plugin/sh-census-baseline.json`（6559→6566）。 ⛔ 其中 `shipped.bytes` 是【报告值、不设闸】（`SIZE_GATED_AXES = ["files","shLines"]`），且它随 bundle 内嵌的 cwd 路径注释浮动（见上），故不逐字节对齐；两个【设闸】轴（`files` 266 / `shLines` 7345）是精确值，重锚后 `plugin/test/shipped-set.test.mjs` 两次实跑均 10/10 绿。
+- 本轮实测到、并【顺手修掉】的一条先存性质：`dist/dashboard-kernel.js` 把【相对构建进程 cwd】的入口路径写进产物首行注释，于是同一个源树在不同 cwd 下构建出的 bundle 字节不同（实测 cwd=worktree 2074 B / cwd=packages/quay 2060 B；`.js` 其余部分逐字节相同）。这颗雷本来就存在（`dist/quay.js` 同样把路径写进产物），但本任务把 kernel 加进 `--check` 的逐字节比较后它就会【从无害变成会错误地判红】：验证过程中实测到一次带外的单独 kernel 重建让镜像与源失配、`--check` 变红（重建 + 重新镜像即恢复）。修法：`packages/quay/scripts/build-dist.mjs` 的 `buildDashboardKernel` 加 `absWorkingDir: pkgDir`（只影响 esbuild 如何拼写路径，不影响入口解析）。⛔ `buildDist`（quay.js）未一并改：它的产物更大、被更多既有断言间接约束，且它今天不出问题（构建与 `--sync-dist` 永远成对），改它是独立的一件事。
+
+**与 `## Update` 里 A/B/C 裁决的关系**：本任务只落地 Requested action 的 1/2/4/5（镜像 + `--check` 覆盖 + 真实装配产物上的判据），第 3 条的【消费方 import 的确切形式】按裁决前的指示【未按方案 B 的子路径名写死】——README 写的是 artifact 内的文件路径契约（方案 A 的 CLI 输出与方案 C 的 tarball 都不改变「产物里文件可达」这一必要条件）。裁决落地后若选 B/A，README 那一节按裁决改写即可，本任务的产物与检查不需要回退。

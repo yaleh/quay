@@ -36,7 +36,7 @@ criterion: >-
   --format='%H %ct' | head -1; }
 
   goal_merges() { git log develop --merges --format='%H %ct %s' | grep -E
-  "goal/$1([^0-9]|\$)"; }
+  "goal/$1[^ ]* into develop([^0-9]|\$)"; }
 
   classify() { F=$1; Mg=$2; if [ -n "$Mg" ]; then if git merge-base
   --is-ancestor "$F" "$Mg"; then if git merge-base --is-ancestor "$F" "$Mg^1";
@@ -81,7 +81,10 @@ expect: exit 0 = 每个已并入的 live branch-mode goal 恰有 1 个合并提�
   develop；exit 3 = 尚无 goal 并入，或已并入但无可归属的任务落地（零是空转）。⛔ 不依赖 first-parent。
 origin: 人 2026-10-01「为 goal 提供一个单独的 branch」→ 三轮讨论成文
   orchestration/SPEC-goal-branch-2026-10-03.md（d4b7ca1c2，裁定①–㉓）；人
-  2026-10-03「按上面的建议，新建一个 GOAL，同时手工预先立好 §10 的任务」。
+  2026-10-03「按上面的建议，新建一个 GOAL，同时手工预先立好 §10 的任务」；2026-10-09 收紧 goal_merges()
+  选择器（gap-ac321-goal-merge-selector-matches-task-catchup-merge）：原宽正则同时命中「任务分支追平
+  goal 分支」的合并（subject 含 goal/<id>、目标为 task 分支），且 Mg 用 tail -1 取到最旧一条 ⇒
+  把那次追平合并误当成 goal 并入；改为要求合并提交的目标必须是 develop。
 activatedAt: 2026-10-03T08:30:27.718Z
 statusLog:
   - at: 2026-10-03T08:30:27.718Z

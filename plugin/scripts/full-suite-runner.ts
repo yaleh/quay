@@ -480,6 +480,10 @@ import type { PhaseDiffRecord, ScopeConsumedLoadRead } from "./suite-accounting.
 // node-builtin-only leaf (the same shared module `driver-runtime.ts` imports for the anchor/serve
 // envelopes), so this `plugin/` → `packages/` edge adds no cycle.
 import { defaultScopeMemoryMax } from "../../packages/quay/src/systemd-scope.ts";
+// The cgroup-aware "effective total memory" reading is NOT re-implemented here: the ONE cgroup
+// hierarchy traversal (ancestor walk + quay-own-scope exclusion) and the ONE derivation live in
+// `effective-capacity-probe.ts` (the shared probe). ⛔ 硬规则 5b — 不重复发明第二份探测实现.
+import { collectReadings, computeEffectiveCapacity } from "./effective-capacity-probe.ts";
 
 export {
   resolveCgroupV2Dir,
@@ -1015,64 +1019,29 @@ const SUITE_MEMORY_MAX_CEILING_MB = parseSystemdBytesToMb(SUITE_MEMORY_MAX_CEILI
 // A malformed ceiling constant must fail SAFE (never shrink below the empirical ceiling).
 const SUITE_MEMORY_MAX_CEILING_BYTES = SUITE_MEMORY_MAX_CEILING_MB === null ? Infinity : SUITE_MEMORY_MAX_CEILING_MB * 1024 * 1024;
 
-/** quay 自己的 cgroup 包络 scope 的 unit 名前缀: the driver-anchor group, the serve host, and the
- *  transient `run-*` scopes systemd assigns to a `systemd-run --scope` without `--unit` (the suite's OWN
- *  scope is one). These are guardrails WE imposed, ⛔ not external capacity: feeding them into the suite's
- *  own ceiling would compound the same host fraction (0.25 × 0.25) AND make the ceiling depend on the
- *  limit the suite is already inside (a feedback loop — one nesting level per round). A genuine external
- *  limit (container / VM / slice) is set at the cgroup-namespace root or a `user.slice`, never under these
- *  prefixes — so excluding ours keeps the big-host behaviour while still seeing a real container cap. */
-const QUAY_OWN_SCOPE_PREFIXES = ["quay-anchor-", "quay-serve-", "run-"];
+/** quay 自己的 cgroup 包络 scope 前缀与「祖先链最紧 memory.max」的遍历，**正本在
+ *  `plugin/scripts/effective-capacity-probe.ts`**（`QUAY_OWN_SCOPE_PREFIXES` /
+ *  `effectiveAncestorMemoryLimit`）—— 本文件⛔不再自带第二份实现（硬规则 5b）。 */
 
-/** This process's cgroup v2 path from `/proc/self/cgroup` (`0::<path>`), or null when unreadable
- *  (fail-open). ⛔ Reads /proc directly (NOT `resolveCgroupV2Dir`) — that resolver carries the
- *  `QUAY_TEST_CGROUP_DIR` seam, and a host-capacity reading must never be redirected by a test seam. */
-function selfCgroupV2Path(): string | null {
-  try {
-    const m = /(?:^|\n)0::(\S+)/.exec(fs.readFileSync("/proc/self/cgroup", "utf8"));
-    return m ? m[1] : null;
-  } catch {
-    return null;
-  }
-}
-
-/** A cgroup dir's `memory.max` in bytes; `max` / missing / non-numeric ⇒ null = that layer sets no
- *  memory ceiling (「不限制」is its OWN state, ⛔ never coerced to 0). */
-function readCgroupMemoryMaxBytes(dir: string): number | null {
-  try {
-    const raw = fs.readFileSync(path.join(dir, "memory.max"), "utf8").trim();
-    if (raw === "" || raw === "max") return null;
-    const n = Number(raw);
-    return Number.isFinite(n) && n > 0 ? n : null;
-  } catch {
-    return null;
-  }
-}
-
-/** cgroup-aware「有效总内存」(bytes) — **临时内联实现**.
- *  ⚠️ 依赖 `gap-effective-capacity-cgroup-cpu-memory-probe`（todo, 未落地）产出的共享探测函数
- *  (`plugin/scripts/effective-capacity-probe.ts`)。该任务落地后本函数【必须】替换为对它的调用 ——
- *  ⛔ 不重复发明第二份探测实现（见任务 Finding/Touches 的依赖记录）。
+/** cgroup-aware「有效总内存」(bytes) — 通过共享探测模块 `effective-capacity-probe.ts` 的
+ *  `computeEffectiveCapacity` 求得（probe 落地后本条已按承诺替换掉旧的**临时内联实现**）。
  *
- *  Semantics: walk the cgroup v2 hierarchy from its mount root down to this process, take the minimum
- *  `memory.max` among the layers that are NOT quay's own envelope scopes, then min with `os.totalmem()`.
- *  Fail-open: no cgroup v2 / no external limit readable ⇒ `os.totalmem()` (⛔ never refuse to run). */
+ *  ⛔ 走 `memoryLayers:"ancestors"` 而不是 probe 默认的 "self"：外部容器/VM/slice 的上限设在
+ *  **祖先层**上，只读本进程自己的 cgroup 目录会漏掉它；同时祖先遍历按 `QUAY_OWN_SCOPE_PREFIXES`
+ *  跳过 quay 自己的 `quay-anchor-*`/`quay-serve-*`/`run-*` scope —— 那是我们自己设的护栏，
+ *  喂进"推导新护栏"会形成反馈环（每嵌套一层就再乘一次 0.25）。**这条排除语义必须保留**：
+ *  本机（128核）进程实际就跑在 `quay-anchor-*.scope`（实测 memory.max=66295676928B）里，
+ *  吞掉它会让派生值掉到 16G 上限以下、argv 不再逐字节不变。
+ *
+ *  ⛔ `ignoreEnvSeams:true`：生产宿主容量读数**不得**被 `EFFECTIVE_CAPACITY_TEST_*` 测试缝
+ *  重定向（与原来 `selfCgroupV2Path` 对 `QUAY_TEST_CGROUP_DIR` 的同一条纪律）。
+ *
+ *  Fail-open: no cgroup v2 / no external limit readable ⇒ `os.totalmem()`（probe 的
+ *  `free-fallback`），⛔ never refuse to run. `effective_mem_mb` 是 MB 精度（probe 的输出契约），
+ *  换回 bytes 后与旧实现的差 < 1MB —— 大宿主上两者都越过 16G 上限 ⇒ argv 逐字节不变。 */
 export function readEffectiveTotalMemBytes(): number {
-  const hostTotal = os.totalmem();
-  const selfPath = selfCgroupV2Path();
-  if (selfPath === null) return hostTotal;
-  const root = "/sys/fs/cgroup";
-  let effective = hostTotal;
-  let dir = root;
-  for (const seg of selfPath.split("/").filter(Boolean)) {
-    dir = path.join(dir, seg);
-    const rel = path.relative(root, dir);
-    if (rel.startsWith("..") || path.isAbsolute(rel)) return hostTotal; // malformed /proc entry — fail open
-    if (seg.endsWith(".scope") && QUAY_OWN_SCOPE_PREFIXES.some((p) => seg.startsWith(p))) continue;
-    const max = readCgroupMemoryMaxBytes(dir);
-    if (max !== null) effective = Math.min(effective, max);
-  }
-  return effective;
+  const readings = collectReadings(process.env, { memoryLayers: "ancestors", ignoreEnvSeams: true });
+  return computeEffectiveCapacity(readings).effective_mem_mb * 1024 * 1024;
 }
 
 /** The suite's MemoryMax for a given effective-memory reading (PURE — the input is a byte COUNT, not

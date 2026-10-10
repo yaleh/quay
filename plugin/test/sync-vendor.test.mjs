@@ -30,10 +30,14 @@ import { spawnSync } from "node:child_process";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
-import { fileURLToPath } from "node:url";
+import { fileURLToPath, pathToFileURL } from "node:url";
+
+import { makeTmpDir } from "./helpers/tmp-workspace.mjs";
+import { isExcluded, parseRules, RULES_FILE_REL } from "../scripts/shipped-set-rules.ts";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const REPO_ROOT = path.resolve(__dirname, "../..");
+const PLUGIN_DIR = path.join(REPO_ROOT, "plugin");
 
 const POSTINSTALL_WARN =
   "[postinstall] WARNING: sync-vendor.sh failed -- plugin/vendor/quay/dist/quay.js may be missing or stale";
@@ -152,5 +156,145 @@ test("AC1/AC3 negative control: strict flag modes (--check / unknown flag) never
     );
   } finally {
     fs.rmSync(tmp, { recursive: true, force: true });
+  }
+});
+
+// ═══════════════════════════════════════════════════════════════════════════════════════════════════
+// gap-dashboard-kernel-not-packaged-in-plugin-artifact: the published kernel must reach a CONSUMER
+// ═══════════════════════════════════════════════════════════════════════════════════════════════════
+//
+// WHAT WAS BROKEN (measured 2026-10-09): `quay/dashboard-kernel` is a PUBLISHED subpath of
+// packages/quay, but the plugin artifact — the only channel a consuming project installs (marketplace
+// → the `dist-plugin` orphan branch → user scope) — carried only `dist/quay.js`. The kernel's bundle
+// and its equivalence vector never reached `plugin/vendor/quay/`, so a consumer's import was an
+// ENOENT/ERR_MODULE_NOT_FOUND, not a missing feature. The `npm pack` path that WAS proven for the
+// subpath (packages/quay's own `files` allowlist) is a DIFFERENT packaging path, which is exactly how
+// this stayed invisible: the proven path and the used path are not the same one.
+//
+// The four readings below are taken in the order a consumer hits them, and none of them is a source
+// tree read: (1) the mirror carries both files, byte-identical to the built artifacts; (2) the
+// shipped-set rules — the ONE definition of what the publish step excludes — do not exclude them, so
+// they really reach the published branch; (3) `--check` covers them, proved two-sided against a
+// throwaway COPY of the tree (this test never writes inside the repo); (4) copied fully OUT of the
+// tree, the bundle imports, exposes the published API, and replays the mirrored vectors exactly.
+
+const KERNEL_REL = "vendor/quay/dist/dashboard-kernel.js";
+const VECTORS_REL = "vendor/quay/dist/dashboard-kernel-vectors.json";
+const MIRRORED_KERNEL = path.join(PLUGIN_DIR, KERNEL_REL);
+const MIRRORED_VECTORS = path.join(PLUGIN_DIR, VECTORS_REL);
+const SOURCE_KERNEL = path.join(REPO_ROOT, "packages", "quay", "dist", "dashboard-kernel.js");
+const SOURCE_VECTORS = path.join(REPO_ROOT, "packages", "quay", "src", "dashboard-kernel-vectors.json");
+
+test("AC1/AC2: the plugin mirror carries the published kernel bundle and its contract vector, byte-identical to the built source", () => {
+  for (const [mirror, source, what] of [
+    [MIRRORED_KERNEL, SOURCE_KERNEL, "the kernel bundle"],
+    [MIRRORED_VECTORS, SOURCE_VECTORS, "the kernel's equivalence vector"],
+  ]) {
+    assert.ok(fs.existsSync(source), `${what} must be built in packages/quay first (scripts/test.sh builds it) — missing ${source}`);
+    assert.ok(fs.existsSync(mirror), `${what} must be mirrored into the plugin artifact — missing ${mirror} (this is the defect this task fixes)`);
+    assert.deepEqual(
+      fs.readFileSync(mirror),
+      fs.readFileSync(source),
+      `${what} in the plugin mirror must be byte-identical to the built artifact — a stale mirror is drift, not a copy`
+    );
+  }
+});
+
+test("AC4: the shipped-set rules do not exclude the mirrored kernel or its vector — they really reach the published branch", () => {
+  // The publish step rsyncs plugin/ MINUS the rule-excluded set (plugin/shipped-set-rules.txt, read
+  // through its one parser). Asserting the files exist under plugin/ is therefore necessary but not
+  // sufficient: a rule that matched them would keep them out of the artifact while every
+  // plugin/-relative check above stayed green. Judged with the REAL rules, not a copy of them.
+  const rules = parseRules(fs.readFileSync(path.join(REPO_ROOT, RULES_FILE_REL), "utf8"));
+  assert.ok(rules.length > 0, "the shipped-set rule file must yield rules (an empty set would make this vacuous)");
+  for (const rel of [KERNEL_REL, VECTORS_REL]) {
+    assert.equal(
+      isExcluded(rel, false, rules),
+      false,
+      `${rel} must NOT match a shipped-set exclusion rule — a matching rule ships the artifact without the kernel`
+    );
+  }
+});
+
+test("AC1/DoD: `--check` covers the mirrored kernel bundle — a clean copy exits 0, a one-byte change to it turns the check RED", () => {
+  // The control runs against a THROWAWAY COPY of the tree (packages/ + experiments/ symlinked to the
+  // real ones so the comparison has real sources; plugin/ copied so it can be mutated). sync-vendor.sh
+  // derives every path from its OWN location, so the copy is judged exactly as the real tree is —
+  // without this test writing a single entry inside the checkout.
+  const root = makeTmpDir("sv-check-");
+  fs.symlinkSync(path.join(REPO_ROOT, "packages"), path.join(root, "packages"), "dir");
+  fs.symlinkSync(path.join(REPO_ROOT, "experiments"), path.join(root, "experiments"), "dir");
+  fs.cpSync(PLUGIN_DIR, path.join(root, "plugin"), { recursive: true });
+  const script = path.join(root, "plugin", "scripts", "sync-vendor.sh");
+
+  // Positive control: the fixture starts CLEAN. Without this the negative control below could pass
+  // on a tree that is red for any reason at all (硬规则 3b — a red that says nothing about the kernel).
+  const clean = spawnSync("bash", [script, "--check"], { encoding: "utf8" });
+  assert.equal(
+    clean.status,
+    0,
+    `the fixture tree must be CLEAN before the control (otherwise the control is vacuous). stdout:\n${clean.stdout}\nstderr:\n${clean.stderr}`
+  );
+  assert.match(
+    clean.stdout,
+    /OK \(identical\): vendor\/quay\/dist\/dashboard-kernel\.js/,
+    "a CLEAN reading must report the kernel bundle as verified — silence about it is how the gap hid"
+  );
+
+  // Negative control: flip one byte of the MIRRORED bundle (same size, so this is a content drift,
+  // not a truncation). The check must name it as DRIFT and exit non-zero.
+  const mirrored = path.join(root, "plugin", KERNEL_REL);
+  const bytes = fs.readFileSync(mirrored);
+  bytes[Math.floor(bytes.length / 2)] ^= 0xff;
+  fs.writeFileSync(mirrored, bytes);
+
+  const dirty = spawnSync("bash", [script, "--check"], { encoding: "utf8" });
+  assert.notEqual(dirty.status, 0, "a mutated mirrored kernel bundle must fail --check");
+  assert.match(
+    `${dirty.stdout}${dirty.stderr}`,
+    /DRIFT: vendor\/quay\/dist\/dashboard-kernel\.js/,
+    "the failure must NAME the kernel bundle — a non-zero exit from some other file's drift would not prove this check covers it"
+  );
+});
+
+test("AC3/AC4: the README's documented consumer import form resolves on the artifact — the mirrored bundle, copied out of the tree, imports and replays the mirrored vectors", async () => {
+  // (a) Read the consumer form OUT of the README and resolve it against the mirror. This is the
+  // positional half of AC3: the paths the doc hands a reader are the paths that must exist, and the
+  // assertion is on the RESOLVED FILES, not on the prose.
+  const readme = fs.readFileSync(path.join(REPO_ROOT, "packages", "quay", "README.md"), "utf8");
+  const documented = [...readme.matchAll(/new URL\("(vendor\/quay\/dist\/[^"]+)", pluginRoot\)/g)].map((m) => m[1]);
+  assert.deepEqual(
+    documented,
+    [KERNEL_REL, VECTORS_REL],
+    "packages/quay/README.md must hand the reader exactly these two artifact-relative paths (the kernel and its vector)"
+  );
+  for (const rel of documented) {
+    assert.ok(fs.existsSync(path.join(PLUGIN_DIR, rel)), `the README's documented path ${rel} must exist in the installed plugin`);
+  }
+
+  // (b) The form itself, on a tree the repo cannot help: copy ONLY the mirror's `dist/` plus the
+  // vendor package.json (whose `type: module` is what makes a bare `.js` in that directory an ES
+  // module — copying it is part of "the artifact", not scaffolding), then import from there.
+  const tmp = makeTmpDir("sv-kernel-consumer-");
+  const distDir = path.join(tmp, "vendor", "quay", "dist");
+  fs.mkdirSync(distDir, { recursive: true });
+  fs.copyFileSync(path.join(PLUGIN_DIR, "vendor", "quay", "package.json"), path.join(tmp, "vendor", "quay", "package.json"));
+  fs.copyFileSync(MIRRORED_KERNEL, path.join(distDir, "dashboard-kernel.js"));
+  fs.copyFileSync(MIRRORED_VECTORS, path.join(distDir, "dashboard-kernel-vectors.json"));
+
+  const kernel = await import(pathToFileURL(path.join(distDir, "dashboard-kernel.js")).href);
+  assert.equal(typeof kernel.packLanes, "function", "the mirrored bundle must expose the published packLanes");
+  assert.equal(typeof kernel.mergeLiveAndHistoryIntervals, "function", "…and mergeLiveAndHistoryIntervals");
+  assert.equal(kernel.FIXED_GANTT_LANES, 5, "…and the lane count that is the visual contract");
+
+  // The cross-project equivalence vector, replayed through the COPIED bundle: a consumer proving
+  // "same algorithm, not a look-alike" is exactly this loop, and it can only run if the vector
+  // travelled with the kernel.
+  const doc = JSON.parse(fs.readFileSync(path.join(distDir, "dashboard-kernel-vectors.json"), "utf8"));
+  assert.ok(Array.isArray(doc.vectors) && doc.vectors.length >= 3, "the mirrored vector must carry its cases");
+  for (const v of doc.vectors) {
+    const merged = kernel.mergeLiveAndHistoryIntervals(v.input.inFlight, v.input.records, v.input.windowStartMs, v.input.nowMs);
+    assert.deepEqual(merged, v.expectedMerged, `[${v.name}] the ARTIFACT's kernel must replay the shipped vector exactly`);
+    assert.deepEqual(kernel.packLanes(merged), v.expectedLanes, `[${v.name}] …including lane packing and overflow`);
   }
 });

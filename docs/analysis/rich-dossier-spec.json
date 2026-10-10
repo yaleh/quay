@@ -1,0 +1,585 @@
+{
+  "scanned_dirs": [
+    "packages",
+    "plugin/scripts",
+    "scripts"
+  ],
+  "cases": {
+    "GOAL-030": {
+      "id": "GOAL-030",
+      "t0_commit": "c8461f5fa569306481aedbcf19c2062e974f4265",
+      "t1_commit": "28c72f436f639e3e78c84eb091f4d8d64c6743d1",
+      "analysis_commit": "28c72f436f639e3e78c84eb091f4d8d64c6743d1",
+      "archguard_wt": "/data/scratch/yale/replay-cutoffs/GOAL-030",
+      "A": [
+        {
+          "id": "arch:scc",
+          "title": "Package-level dependency cycles",
+          "kind": "arch_scc"
+        },
+        {
+          "id": "arch:plugin-to-kernel",
+          "title": "Dependency edges plugin/scripts -> packages/quay/src/kernel",
+          "kind": "arch_pkg_edges",
+          "from": "plugin/scripts",
+          "to": "packages/quay/src/kernel",
+          "pairs": true,
+          "max_pairs": 30
+        },
+        {
+          "id": "arch:plugin-outbound",
+          "title": "Where plugin/scripts depends on inside packages/ (edge counts per target package)",
+          "kind": "arch_pkg_edges",
+          "from": "plugin/scripts",
+          "to": "packages/*",
+          "pairs": false
+        },
+        {
+          "id": "code:status-writers",
+          "title": "Callers of the status-field patch helper (non-test sources)",
+          "kind": "git_grep",
+          "pattern": "patchStatusField\\(",
+          "pathspec": [
+            "plugin/scripts",
+            "packages/quay/src"
+          ],
+          "max_lines": 30
+        },
+        {
+          "id": "code:patchStatusField",
+          "title": "task-ops.ts: patchStatusField",
+          "kind": "git_func",
+          "path": "plugin/scripts/task-ops.ts",
+          "symbol": "patchStatusField"
+        },
+        {
+          "id": "doc:spec-goal-branch",
+          "title": "orchestration/SPEC-goal-branch-2026-10-03.md (goal-branch mechanism spec)",
+          "kind": "git_cat",
+          "path": "orchestration/SPEC-goal-branch-2026-10-03.md",
+          "max_chars": 11000
+        },
+        {
+          "id": "goal:GOAL-905",
+          "title": "Prior goal GOAL-905 (goal-branch rehearsal)",
+          "kind": "git_cat",
+          "dir": "goals",
+          "glob_prefix": "GOAL-905",
+          "max_chars": 4500
+        },
+        {
+          "id": "task:status-flip-readings",
+          "title": "tasks/gap-status-flip-history-and-parser-diff-readings.md (landed task)",
+          "kind": "git_cat",
+          "path": "tasks/gap-status-flip-history-and-parser-diff-readings.md",
+          "max_chars": 5000
+        }
+      ],
+      "B": [
+        {
+          "id": "code:applyPromotions",
+          "title": "ready-pool-check.ts: applyPromotions",
+          "kind": "git_func",
+          "path": "plugin/scripts/ready-pool-check.ts",
+          "symbol": "applyPromotions",
+          "max_chars": 7000
+        },
+        {
+          "id": "code:applyRevaluations",
+          "title": "ready-pool-check.ts: applyRevaluations",
+          "kind": "git_func",
+          "path": "plugin/scripts/ready-pool-check.ts",
+          "symbol": "applyRevaluations",
+          "max_chars": 7000
+        },
+        {
+          "id": "code:lifecycle-edge-table",
+          "title": "packages/quay/src/gate/lifecycle.ts: header + LIFECYCLE_EDGES declaration",
+          "kind": "git_file",
+          "path": "packages/quay/src/gate/lifecycle.ts",
+          "ranges": [
+            [
+              12,
+              20
+            ],
+            [
+              94,
+              150
+            ]
+          ],
+          "max_chars": 9000
+        },
+        {
+          "id": "code:other-write-sites",
+          "title": "Other status-write sites (worker-fan-in.ts, driver-filters.ts) with context",
+          "kind": "git_grep",
+          "pattern": "patchStatusField\\(",
+          "pathspec": [
+            "plugin/scripts/worker-fan-in.ts",
+            "plugin/scripts/driver-filters.ts"
+          ],
+          "context": 3,
+          "max_lines": 70
+        },
+        {
+          "id": "code:edge-table-consumers",
+          "title": "Who reads LIFECYCLE_EDGES / lifecycleEdge today",
+          "kind": "git_grep",
+          "pattern": "LIFECYCLE_EDGES|lifecycleEdge\\(|isDeclaredIllegalPair",
+          "pathspec": [
+            "plugin",
+            "packages"
+          ],
+          "exclude_re": "/test/",
+          "max_lines": 25
+        },
+        {
+          "id": "findings:T1",
+          "title": "Investigation findings established by T1",
+          "kind": "authored",
+          "from_spec": "t1_findings"
+        }
+      ]
+    },
+    "GOAL-031": {
+      "id": "GOAL-031",
+      "t0_commit": "a8abf1a6dd0fd70b3e3f6ef8529447797e36b053",
+      "t1_commit": "a8abf1a6dd0fd70b3e3f6ef8529447797e36b053",
+      "analysis_commit": "a8abf1a6dd0fd70b3e3f6ef8529447797e36b053",
+      "archguard_wt": "/data/scratch/yale/replay-cutoffs/GOAL-031",
+      "A": [
+        {
+          "id": "arch:literal-dispersion",
+          "title": "ArchGuard literal-dispersion reading (TaskStatus values)",
+          "kind": "evidence_file",
+          "file": "GOAL-031-literal-dispersion.txt",
+          "tool": "archguard_detect_shape_smells"
+        },
+        {
+          "id": "code:needs-human-comparisons",
+          "title": "Every comparison against the literal \"needs-human\" in non-test sources",
+          "kind": "git_grep",
+          "pattern": "[=!]==? *[\"']needs-human[\"']|[\"']needs-human[\"'] *[=!]==?",
+          "pathspec": [
+            "plugin/scripts",
+            "packages/quay/src",
+            "packages/quay-github/src",
+            "packages/quay-native/src"
+          ],
+          "max_lines": 40
+        },
+        {
+          "id": "code:task-status-canonical",
+          "title": "plugin/scripts/task-status.ts (existing status vocabulary module)",
+          "kind": "git_cat",
+          "path": "plugin/scripts/task-status.ts",
+          "max_chars": 5000
+        },
+        {
+          "id": "code:abi-task-status",
+          "title": "packages/quay/src/abi.ts: TASK_STATUS declaration",
+          "kind": "git_grep",
+          "pattern": "export const TASK_STATUS",
+          "pathspec": [
+            "packages/quay/src/abi.ts"
+          ],
+          "context": 14,
+          "max_lines": 40
+        },
+        {
+          "id": "code:task-status-importers",
+          "title": "Modules that import the plugin-side status vocabulary",
+          "kind": "git_grep",
+          "pattern": "from [\"']\\./task-status\\.ts[\"']",
+          "pathspec": [
+            "plugin/scripts"
+          ],
+          "max_lines": 40
+        },
+        {
+          "id": "goal:GOAL-030",
+          "title": "Prior goal GOAL-030 (kernel transition decision pilot)",
+          "kind": "git_cat",
+          "dir": "goals",
+          "glob_prefix": "GOAL-030",
+          "max_chars": 7000
+        },
+        {
+          "id": "goal:GOAL-905",
+          "title": "Prior goal GOAL-905 (goal-branch rehearsal)",
+          "kind": "git_cat",
+          "dir": "goals",
+          "glob_prefix": "GOAL-905",
+          "max_chars": 3500
+        }
+      ],
+      "B": [
+        {
+          "id": "code:needs-human-in-observation",
+          "title": "observation.ts occurrences of needs-human, with context",
+          "kind": "git_grep",
+          "pattern": "needs-human",
+          "pathspec": [
+            "packages/quay/src/observation.ts"
+          ],
+          "context": 3,
+          "max_lines": 40
+        },
+        {
+          "id": "code:needs-human-in-baseline-metrics",
+          "title": "workflow-baseline-metrics.ts occurrences of needs-human, with context",
+          "kind": "git_grep",
+          "pattern": "needs-human",
+          "pathspec": [
+            "plugin/scripts/workflow-baseline-metrics.ts"
+          ],
+          "context": 3,
+          "max_lines": 40
+        },
+        {
+          "id": "code:needs-human-in-github-client",
+          "title": "github-client.ts occurrences of needs-human, with context",
+          "kind": "git_grep",
+          "pattern": "needs-human|exempt|statically import|needle",
+          "pathspec": [
+            "packages/quay-github/src/github-client.ts"
+          ],
+          "context": 4,
+          "max_lines": 60
+        },
+        {
+          "id": "code:needs-human-in-goal-driver",
+          "title": "goal-driver.ts occurrences of needs-human, with context",
+          "kind": "git_grep",
+          "pattern": "needs-human",
+          "pathspec": [
+            "plugin/scripts/goal-driver.ts"
+          ],
+          "context": 3,
+          "max_lines": 90
+        },
+        {
+          "id": "code:goal-driver-status-fields",
+          "title": "goal-driver.ts: which status field each comparison reads (task.status vs GOAL/AC records)",
+          "kind": "git_grep",
+          "pattern": "\\.status === [\"'](active|achieved|needs-human|todo|ready|done)[\"']",
+          "pathspec": [
+            "plugin/scripts/goal-driver.ts"
+          ],
+          "max_lines": 40
+        },
+        {
+          "id": "findings:T1",
+          "title": "Investigation findings established by T1",
+          "kind": "authored",
+          "from_spec": "t1_findings"
+        }
+      ]
+    },
+    "GOAL-032": {
+      "id": "GOAL-032",
+      "t0_commit": "30c619f1a10eac97c238c6d941e4cd87b6a65092",
+      "t1_commit": "273ef15b1ebebbbc5573bf08254c9dcd741920dc",
+      "analysis_commit": "273ef15b1ebebbbc5573bf08254c9dcd741920dc",
+      "archguard_wt": "/data/scratch/yale/replay-cutoffs/GOAL-032",
+      "A": [
+        {
+          "id": "arch:duplicates",
+          "title": "ArchGuard duplicate-function groups (top 20 of 86 by savable lines)",
+          "kind": "evidence_file",
+          "file": "GOAL-032-duplicates.txt",
+          "tool": "archguard_detect_duplicates"
+        },
+        {
+          "id": "code:packages-side-member",
+          "title": "Duplicate-group member (packages side): criterion-fidelity.ts lines 71-87",
+          "kind": "git_file",
+          "path": "packages/quay/src/criterion-fidelity.ts",
+          "ranges": [
+            [
+              71,
+              87
+            ]
+          ]
+        },
+        {
+          "id": "code:plugin-side-member",
+          "title": "Duplicate-group member (plugin side): goal-driver.ts lines 1142-1161",
+          "kind": "git_file",
+          "path": "plugin/scripts/goal-driver.ts",
+          "ranges": [
+            [
+              1142,
+              1161
+            ]
+          ]
+        },
+        {
+          "id": "code:kernel-dir",
+          "title": "packages/quay/src/kernel/ directory listing",
+          "kind": "git_ls",
+          "path": "packages/quay/src/kernel"
+        },
+        {
+          "id": "doc:methodology",
+          "title": "docs/references/ownership-first-refactoring-methodology.md",
+          "kind": "git_cat",
+          "path": "docs/references/ownership-first-refactoring-methodology.md",
+          "max_chars": 17500
+        },
+        {
+          "id": "goal:GOAL-030",
+          "title": "Prior goal GOAL-030 (kernel transition decision pilot)",
+          "kind": "git_cat",
+          "dir": "goals",
+          "glob_prefix": "GOAL-030",
+          "max_chars": 5000
+        },
+        {
+          "id": "goal:GOAL-031",
+          "title": "Prior goal GOAL-031 (status-vocabulary canonicalization pilot)",
+          "kind": "git_cat",
+          "dir": "goals",
+          "glob_prefix": "GOAL-031",
+          "max_chars": 5000
+        }
+      ],
+      "B": [
+        {
+          "id": "code:parseFidelityVerdict-full",
+          "title": "criterion-fidelity.ts: parseFidelityVerdict with its doc comment",
+          "kind": "git_func",
+          "path": "packages/quay/src/criterion-fidelity.ts",
+          "symbol": "parseFidelityVerdict"
+        },
+        {
+          "id": "code:parseSemanticSufficiencyVerdict-full",
+          "title": "goal-driver.ts: parseSemanticSufficiencyVerdict with its doc comment",
+          "kind": "git_func",
+          "path": "plugin/scripts/goal-driver.ts",
+          "symbol": "parseSemanticSufficiencyVerdict"
+        },
+        {
+          "id": "code:parser-call-sites",
+          "title": "Every call site of the two parsers (sources + tests)",
+          "kind": "git_grep",
+          "pattern": "parseFidelityVerdict\\(|parseSemanticSufficiencyVerdict\\(",
+          "pathspec": [
+            "packages",
+            "plugin"
+          ],
+          "max_lines": 40
+        },
+        {
+          "id": "code:fidelity-caller",
+          "title": "criterion-fidelity.ts: criterionFidelityVerdict (the caller of parseFidelityVerdict)",
+          "kind": "git_func",
+          "path": "packages/quay/src/criterion-fidelity.ts",
+          "symbol": "criterionFidelityVerdict",
+          "max_chars": 6000
+        },
+        {
+          "id": "code:sufficiency-caller",
+          "title": "goal-driver.ts: sampleSemanticSufficiency (the caller of parseSemanticSufficiencyVerdict)",
+          "kind": "git_func",
+          "path": "plugin/scripts/goal-driver.ts",
+          "symbol": "sampleSemanticSufficiency",
+          "max_chars": 6000
+        },
+        {
+          "id": "code:imports-both-files",
+          "title": "import lines of the two parser files",
+          "kind": "git_grep",
+          "pattern": "^import ",
+          "pathspec": [
+            "packages/quay/src/criterion-fidelity.ts",
+            "plugin/scripts/goal-driver.ts"
+          ],
+          "max_lines": 40
+        },
+        {
+          "id": "code:plugin-imports-packages",
+          "title": "How plugin/scripts reaches into packages/ today (kernel imports)",
+          "kind": "git_grep",
+          "pattern": "from [\"'][./]*packages/quay/src/kernel/",
+          "pathspec": [
+            "plugin/scripts"
+          ],
+          "max_lines": 20
+        },
+        {
+          "id": "findings:T1",
+          "title": "Investigation findings established by T1",
+          "kind": "authored",
+          "from_spec": "t1_findings"
+        }
+      ]
+    },
+    "GOAL-033": {
+      "id": "GOAL-033",
+      "t0_commit": "a6ef1a3f14abcbf49fd1f76e96b8b9505317a145",
+      "t1_commit": "1025ab9512de3e7b260214d2360a4b035ca80957",
+      "analysis_commit": "1025ab9512de3e7b260214d2360a4b035ca80957",
+      "archguard_wt": "/data/scratch/yale/replay-cutoffs/GOAL-033",
+      "A": [
+        {
+          "id": "arch:scc",
+          "title": "Package-level dependency cycles",
+          "kind": "arch_scc"
+        },
+        {
+          "id": "arch:package-metrics",
+          "title": "Package fan-in / fan-out under packages/quay/src",
+          "kind": "arch_metrics",
+          "prefix": "packages/quay/src",
+          "top": 12
+        },
+        {
+          "id": "code:cli-dir",
+          "title": "packages/quay/src/cli/ directory listing",
+          "kind": "git_ls",
+          "path": "packages/quay/src/cli"
+        },
+        {
+          "id": "doc:methodology",
+          "title": "docs/references/ownership-first-refactoring-methodology.md",
+          "kind": "git_cat",
+          "path": "docs/references/ownership-first-refactoring-methodology.md",
+          "max_chars": 20000
+        },
+        {
+          "id": "doc:spec-layer-architecture",
+          "title": "orchestration/SPEC-methodology-layer-architecture-2026-08-25.md",
+          "kind": "git_cat",
+          "path": "orchestration/SPEC-methodology-layer-architecture-2026-08-25.md",
+          "max_chars": 7000
+        },
+        {
+          "id": "goal:GOAL-032",
+          "title": "Prior goal GOAL-032 (verdict-parser ownership)",
+          "kind": "git_cat",
+          "dir": "goals",
+          "glob_prefix": "GOAL-032",
+          "max_chars": 6000
+        },
+        {
+          "id": "goal:GOAL-031",
+          "title": "Prior goal GOAL-031 (status-vocabulary canonicalization pilot)",
+          "kind": "git_cat",
+          "dir": "goals",
+          "glob_prefix": "GOAL-031",
+          "max_chars": 4500
+        }
+      ],
+      "B": [
+        {
+          "id": "arch:cycle-matrix",
+          "title": "Relation counts between the six cycle members",
+          "kind": "arch_matrix",
+          "members": [
+            "packages/quay/src",
+            "packages/quay/src/cli",
+            "packages/quay/src/fan-in",
+            "packages/quay/src/gate",
+            "packages/quay/src/gate/config",
+            "packages/quay/src/gate/factories"
+          ]
+        },
+        {
+          "id": "arch:root-to-cli",
+          "title": "Dependency edges packages/quay/src (root) -> packages/quay/src/cli, with file pairs",
+          "kind": "arch_pkg_edges",
+          "from": "packages/quay/src",
+          "to": "packages/quay/src/cli",
+          "pairs": true
+        },
+        {
+          "id": "arch:cli-to-root",
+          "title": "Dependency edges packages/quay/src/cli -> packages/quay/src (root), with file pairs",
+          "kind": "arch_pkg_edges",
+          "from": "packages/quay/src/cli",
+          "to": "packages/quay/src",
+          "pairs": true,
+          "max_pairs": 25
+        },
+        {
+          "id": "code:root-imports-cli",
+          "title": "Import lines in root-level source files that reach into ./cli/",
+          "kind": "git_grep",
+          "pattern": "from [\"']\\./cli/",
+          "pathspec": [
+            ":(glob)packages/quay/src/*.ts"
+          ],
+          "max_lines": 20
+        },
+        {
+          "id": "code:serve-sessions-use",
+          "title": "serve-sessions.ts: the import and the runDriver call site",
+          "kind": "git_file",
+          "path": "packages/quay/src/serve-sessions.ts",
+          "ranges": [
+            [
+              17,
+              22
+            ],
+            [
+              690,
+              712
+            ]
+          ]
+        },
+        {
+          "id": "code:serve-use",
+          "title": "serve.ts: the import and every use of the two imported names",
+          "kind": "git_grep",
+          "pattern": "ALL_SERVICE_NAMES|HOSTED_SERVICE_NAMES",
+          "pathspec": [
+            "packages/quay/src/serve.ts"
+          ],
+          "max_lines": 20
+        },
+        {
+          "id": "code:cli-driver-vocab",
+          "title": "cli/driver-vocab.ts (whole file)",
+          "kind": "git_cat",
+          "path": "packages/quay/src/cli/driver-vocab.ts",
+          "max_chars": 7000
+        },
+        {
+          "id": "code:driver-vocab-consumers",
+          "title": "Every file that references driver-vocab",
+          "kind": "git_grep",
+          "pattern": "driver-vocab",
+          "pathspec": [
+            "packages",
+            "plugin/scripts"
+          ],
+          "exclude_re": "/test/|\\.mjs:",
+          "max_lines": 30
+        },
+        {
+          "id": "code:runDriver-def",
+          "title": "cli/driver.ts: runDriver and its result type",
+          "kind": "git_file",
+          "path": "packages/quay/src/cli/driver.ts",
+          "ranges": [
+            [
+              323,
+              360
+            ],
+            [
+              433,
+              446
+            ]
+          ]
+        },
+        {
+          "id": "findings:T1",
+          "title": "Investigation findings established by T1",
+          "kind": "authored",
+          "from_spec": "t1_findings"
+        }
+      ]
+    }
+  }
+}

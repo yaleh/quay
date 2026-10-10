@@ -1,0 +1,25 @@
+archguard_detect_shape_smells  (ArchGuard 0.1.38, MCP tool, layer=literal-dispersion)
+analyzed tree: commit a8abf1a6d (GOAL-031 decision cutoff)
+run 1  params: dispersionThreshold=2, sources omitted (tool default)  -> result: totalSmells=0   (NOTE: empty, not 'no dispersion' — the default source scope matched nothing)
+run 2  params: dispersionThreshold=2, sources=[plugin/scripts, packages]  -> result: totalSmells=248 (all warning)
+shown: all smells whose value == "needs-human" (any typeName), plus the other TaskStatus values for scale; dispersion = distinct files
+
+== value "needs-human" ==
+typeName=TaskStatus dispersion=4
+    packages/quay-github/src/github-client.ts
+    packages/quay/src/observation.ts
+    plugin/scripts/task-status.ts
+    plugin/scripts/workflow-baseline-metrics.ts
+  locations: plugin/scripts/task-status.ts:9, plugin/scripts/workflow-baseline-metrics.ts:643, plugin/scripts/workflow-baseline-metrics.ts:643, plugin/scripts/workflow-baseline-metrics.ts:776, plugin/scripts/workflow-baseline-metrics.ts:776, packages/quay-github/src/github-client.ts:646, packages/quay/src/observation.ts:1443, packages/quay/src/observation.ts:1451
+typeName=TaskStatus dispersion=4
+    packages/quay-github/src/github-client.ts
+    packages/quay/src/kernel/task-transition.ts
+    packages/quay/src/observation.ts
+    plugin/scripts/workflow-baseline-metrics.ts
+  locations: packages/quay/src/kernel/task-transition.ts:72, plugin/scripts/workflow-baseline-metrics.ts:643, plugin/scripts/workflow-baseline-metrics.ts:643, plugin/scripts/workflow-baseline-metrics.ts:776, plugin/scripts/workflow-baseline-metrics.ts:776, packages/quay-github/src/github-client.ts:646, packages/quay/src/observation.ts:1443, packages/quay/src/observation.ts:1451
+
+== other values of typeName TaskStatus (value -> dispersion) ==
+  done  dispersion=14
+  ready  dispersion=7
+  superseded  dispersion=6
+  todo  dispersion=6

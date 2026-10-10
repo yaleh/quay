@@ -47,5 +47,49 @@
       "the branch merge-shape AC pattern (post-merge, same shape used in every prior goal in this series)"
     ]
   },
-  "predicted_mechanical_delta": "SCC size 6 -> 5 (cli leaves; the other 5 members, including fan-in, believed unchanged). This was the real decision-time belief, later corrected by measurement -- see outcome.json observed_mechanical_delta (6 -> 4) and prediction_correction_narrative for what was missed and why."
+  "predicted_mechanical_delta": "SCC size 6 -> 5 (cli leaves; the other 5 members, including fan-in, believed unchanged). This was the real decision-time belief, later corrected by measurement -- see outcome.json observed_mechanical_delta (6 -> 4) and prediction_correction_narrative for what was missed and why.",
+  "timeline": {
+    "t0": "2026-10-09T05:00:00.000Z",
+    "t1": "2026-10-09T05:41:00.000Z",
+    "activated_at": "2026-10-09T05:46:07.439Z",
+    "note": "CRITICAL hindsight control: the real T1 belief was that the SCC would go 6 -> 5 with the other five members unchanged. The later measurement showed 6 -> 4 because fan-in's only in-edge was through cli. That correction is recorded as OUTCOME only and must not appear in the T1 input."
+  },
+  "stage_a_reference": {
+    "expected_concerns": [
+      "a package-level dependency cycle indicates an ownership inversion somewhere among its members",
+      "two primitives shared by two layers have no unambiguous owner",
+      "a draft layers rule exists but is unlanded, so a declared boundary is documented but not enforced"
+    ],
+    "abstain_acceptable": false
+  },
+  "stage_b_reference": {
+    "investigate_or_goal": "propose-goal",
+    "investigate_or_goal_rationale": "At T1 the exact edges in both directions are enumerated and the zero-inbound property of the other members is established, so the cut is specified. 'Investigate' would repeat finished work.",
+    "minimum_sufficiency_rationale": "The two root->cli edges must move together — they are consumed in combination by the same downstream call sites, and moving one alone leaves a partially-converged state with no independent acceptance story. Broadening to the other five SCC members would require re-deciding ownership for all of them at once, which is a far larger and riskier undertaking than cutting the one cheapest, best-understood edge.",
+    "reference_slice": "Move driver-vocab.ts's KINDS/service-name tables and driver.ts's control-client functions (runDriver/runDriverAsync/resolveDriverInvocation and shared prologue) out of cli/ into two new zero-import, core-root-level modules (driver-vocab.ts and driver-control.ts), leaving cli/driver.ts as a thin CLI facade (argv parsing, help text, and — critically — the fan-in instrument-decoration call for 'driver status --kind worker', which must explicitly STAY in cli/ rather than move with the rest of the function).",
+    "alternative_valid_slices": [
+      "Cut the two edges and sink both shared primitives to the root layer (the selected approach).",
+      "Keep the primitives under cli/ and invert instead by making cli own the composition surface — defensible if cli is the true owner, but the T1 ownership reading says the two primitives are shared, not CLI-specific.",
+      "Land the draft layers rule first as a declared-rule gate and cut later — defensible as a smaller first step, but it enforces nothing until the edge is actually gone."
+    ],
+    "adjacent_reasonable_slices": [
+      "The needs-human / branch-sync status-alignment writes (a different mechanism, already excluded by GOAL-030)"
+    ],
+    "clearly_too_broad": [
+      "Clear the entire 6-member SCC in one goal",
+      "Re-decide ownership for gate, gate/config, gate/factories and fan-in simultaneously"
+    ],
+    "clearly_too_fragmented": [
+      "Move only one of the two edges",
+      "Relocate a single symbol rather than the shared primitive as a unit"
+    ],
+    "expected_delta_predicted_at_t1": "the package SCC shrinks and cli's package fan-in from the root falls to zero; the other cycle members unchanged",
+    "expected_delta_observed": "SCC 6 -> 4 (not the predicted 5): cli AND fan-in both left, because fan-in's only in-edge inside the cycle was through cli/driver.ts. The other four members were unchanged, and a negative control (re-injecting one used root->cli edge) brought cli back in."
+  },
+  "deprecated_note": "investigation_or_goal_reference is the v1 single-stage gold; use stage_b_reference for the two-stage benchmark.",
+  "t1_belief_gaps": [
+    "The chosen destination module paths and symbol names for the two moved primitives.",
+    "The fan-in collateral effect discovered later (that fan-in's only in-edge was through cli, so it leaves the SCC too) — at T1 the belief was that the other five members were unchanged.",
+    "The measured before/after SCC membership and the negative-control result."
+  ]
 }

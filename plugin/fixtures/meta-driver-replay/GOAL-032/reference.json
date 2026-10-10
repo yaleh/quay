@@ -47,5 +47,48 @@
       "the kernel-module-as-sink-layer pattern established in GOAL-030",
       "the thin-wrapper-preserves-callers pattern (zero caller-signature changes)"
     ]
-  }
+  },
+  "timeline": {
+    "t0": "2026-10-09T01:00:00.000Z",
+    "t1": "2026-10-09T01:50:00.000Z",
+    "activated_at": "2026-10-09T01:55:04.388Z",
+    "note": "This case is the clearest T0/T1 example in the corpus: the v1 input already carried an investigation conclusion under a T0 cutoff, which is exactly the hindsight mismatch the redesign removes."
+  },
+  "stage_a_reference": {
+    "expected_concerns": [
+      "a duplicate implementation of one concept exists across the packages/plugin boundary and has no single owner",
+      "the equivalence question is unresolved, so any merge is premature"
+    ],
+    "abstain_acceptable": false
+  },
+  "stage_b_reference": {
+    "investigate_or_goal": "propose-goal",
+    "investigate_or_goal_rationale": "The equivalence investigation is COMPLETE as of T1, so 'investigate' would re-do finished work. Note the trap the v1 benchmark fell into: it labelled this 'goal' while feeding a T0 state, which made 'investigate' look wrong for the right reason.",
+    "minimum_sufficiency_rationale": "Converging only one of the two call sites does not clear the duplicate-detection finding at all — the minimal unit that resolves the signal is both sides sharing one implementation. Nothing smaller is still a complete answer; nothing larger is needed because the callers' orchestration legitimately differs and the other verdict types are a separate, larger gap.",
+    "reference_slice": "Having confirmed the parsing ALGORITHM (not the caller orchestration) is domain-agnostic — 'parse a judge's raw stdout into a three-state verdict, fail closed if unreadable' doesn't care whether the domain is fidelity or sufficiency, the legal-value strings are DATA not logic — sink exactly that shared algorithm into a new kernel module packages/quay/src/kernel/verdict-parse.ts exporting a generic parseBinaryVerdict(stdout, exitCode, positive, negative). The two original functions (parseFidelityVerdict, parseSemanticSufficiencyVerdict) become thin wrappers that call the kernel function, keeping their own name/signature/return type and zero caller changes — the caller-side orchestration differences (sync/uncached vs async/runAsync/2-sample-agreement/cache) are explicitly NOT touched, because ownership-first's own principle is that orchestration can legitimately stay where it is even when the underlying computation is unified.",
+    "alternative_valid_slices": [
+      "Sink the shared algorithm and keep both callers unchanged (the selected approach) — zero caller churn.",
+      "Sink the algorithm AND unify the two callers' orchestration — rejected: over-generalises, the orchestration difference is intentional.",
+      "Leave the duplication and record it as an accepted cross-tree exemption — defensible only if the two were intentionally divergent, which T1 rules out."
+    ],
+    "adjacent_reasonable_slices": [
+      "The ~27 dispersed literal files for other verdict types (a separate, larger gap)"
+    ],
+    "clearly_too_broad": [
+      "Unify all verdict-shaped types in one pass",
+      "Merge the two callers' orchestration as well as the parser",
+      "Touch the packages/ directory-cycle issue in the same goal"
+    ],
+    "clearly_too_fragmented": [
+      "Convert only one of the two call sites",
+      "Add a shared helper without making either original function delegate to it"
+    ],
+    "expected_delta_predicted_at_t1": "the duplicate-detection group disappears and the canonical definition count for this algorithm drops to one, with both call chains confirmed to have actually changed what they call",
+    "expected_delta_observed": "Duplicate group cleared; canonical-definition count for the shared algorithm 2 -> 1; both call chains independently verified to delegate."
+  },
+  "deprecated_note": "investigation_or_goal_reference is the v1 single-stage gold; use stage_b_reference for the two-stage benchmark.",
+  "t1_belief_gaps": [
+    "The chosen new module path and the generic function's name/signature.",
+    "The measured canonical-definition count delta."
+  ]
 }

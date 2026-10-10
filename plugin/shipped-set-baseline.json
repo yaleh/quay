@@ -48,6 +48,30 @@
         "shLines": 8286
       },
       "why": "DOWNWARD re-anchor — the intended direction of this task, not a regression. tasks/gap-shipped-shell-limited-to-runtime-reachable-set-and-delivery-verify-tools-leave-the-artifact pruned the 19 .sh no runtime surface reaches (12 retired classic-pipeline gates under gate-scripts/, the dev asset-sync sync.sh, and 3 delivery/verification tools of the npm/tgz channel cancelled by human ruling 2026-09-16). Artifact built by the real publish-dist-branch.sh in a throwaway stub repo: 283 -> 264 files, 17545 -> 8286 .sh code lines. The ratchet's three forbidden axes stay 0."
+    },
+    {
+      "when": "2026-10-09T11:13:12.358Z",
+      "from": {
+        "files": 0,
+        "bytes": 0,
+        "shLines": 0,
+        "shipped": {
+          "files": 264,
+          "bytes": 53926575,
+          "shLines": 8286
+        }
+      },
+      "to": {
+        "files": 0,
+        "bytes": 0,
+        "shLines": 0
+      },
+      "shipped": {
+        "files": 266,
+        "bytes": 56445117,
+        "shLines": 7345
+      },
+      "why": "gap-dashboard-kernel-not-packaged-in-plugin-artifact: the artifact now carries the published quay/dashboard-kernel bundle (vendor/quay/dist/dashboard-kernel.js) and its contract vector (vendor/quay/dist/dashboard-kernel-vectors.json), mirrored by plugin/scripts/sync-vendor.sh. files 264 -> 266 (exactly +2: the two new shipped files; shLines 8286 -> the artifact's OWN current reading, which is LOWER, so the .sh axis did not grow). Read from a real publish-dist-branch.sh artifact assembled in a throwaway stub repo from this branch's plugin/ tree (266 files / 56261340 bytes). Recorded from the artifact's own reading, never hand-fitted."
     }
   ],
   "_axes": {
@@ -61,8 +85,8 @@
   "bytes": 0,
   "shLines": 0,
   "shipped": {
-    "files": 264,
-    "bytes": 53926575,
-    "shLines": 8286
+    "files": 266,
+    "bytes": 56445117,
+    "shLines": 7345
   }
 }

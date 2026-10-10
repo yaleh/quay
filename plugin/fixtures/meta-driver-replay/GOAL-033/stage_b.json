@@ -1,0 +1,154 @@
+{
+  "case_id": "GOAL-033",
+  "stage": "B",
+  "stage_name": "decomposition",
+  "cutoff": "2026-10-09T05:41:00.000Z",
+  "cutoff_label": "T1-decision-ready",
+  "cutoff_rationale": "After the human had enumerated the exact edges in both directions and the zero-inbound property of every other SCC member. 5 min before activatedAt.",
+  "confirmed_concern": "One package-level dependency cycle (a 6-member SCC) exists, and the root<->cli edge is the outermost, cheapest candidate to cut; the ownership question is which side should own the shared primitives the edge crosses.",
+  "investigation_findings": [
+    "core-root -> cli is exactly 2 value edges, both static paths, confirmed by grep and by the package fan-in reading (fanIn = 2): one imports a driver control client into a session handler; the other imports a service-name vocabulary into the server entry — of which one imported symbol is entirely unused (a dead import).",
+    "cli -> core-root is the normal direction with 34 edges and is not itself a problem.",
+    "Every other SCC member (gate, gate/config, gate/factories, fan-in, primitives, kernel) contributes ZERO edges into cli.",
+    "Therefore removing those 2 edges leaves cli with no inbound edge from inside the cycle, so cli MUST leave the SCC.",
+    "The ownership reading: this is not CLI reaching backward into core, nor core wanting a CLI facade — two primitives genuinely shared by both layers were placed under cli/ only because their first historical consumer was CLI help text."
+  ],
+  "context": {
+    "scc_members": [
+      "packages/quay/src root",
+      "cli",
+      "fan-in",
+      "gate",
+      "gate/config",
+      "gate/factories"
+    ],
+    "root_to_cli_edges": "exactly 2, both static value edges (one control-client import used by a session handler; one service-name vocabulary import at the server entry, one symbol of which is dead)",
+    "cli_to_root_edges": "34 (the expected direction; not a problem)",
+    "other_members_to_cli_edges": "0 (gate, gate/config, gate/factories, fan-in, primitives, kernel all contribute none)",
+    "derived_property": "after removing the 2 root->cli edges, cli has no inbound edge from within the cycle, so it must leave the SCC",
+    "ownership_reading": "two primitives shared by both layers were filed under cli/ because their first consumer was CLI help text",
+    "test_suite_state": "scripts/test.sh green on develop at the cutoff commit."
+  },
+  "citable_evidence_refs": [
+    "archguard:detect_cycles",
+    "code:core_root_to_cli_edges",
+    "repo:draft_layers_yml"
+  ],
+  "task": {
+    "instructions": "You are a NARROW ownership/architecture proposer. This is a DECOMPOSITION stage: the concern below is already confirmed, and the investigation findings are established facts as of T1. Propose the minimal-sufficient slice. Several decompositions may be defensible — you are scored on whether yours is coherent, minimum-sufficient and harnessable, NOT on matching one historical artifact. Cite only the listed evidence refs; do not invent readings.",
+    "questions": [
+      "a) What candidate slices follow from this concern? (<=3, ordered)",
+      "b) Which one should be done first, and why is it minimum-sufficient?",
+      "c) investigate, or propose-goal? Justify from the T1 findings.",
+      "d) Scope and explicit non-goals.",
+      "e) What mechanical before/after delta would evidence success?",
+      "f) What negative control distinguishes 'it worked' from 'it looks like it worked'?",
+      "g) What would make you abandon or materially revise this?",
+      "h) Is this harnessable as stated (inputs/outputs/constraints/acceptance/failure mode)?"
+    ],
+    "response_schema": {
+      "type": "object",
+      "required": [
+        "candidate_slices",
+        "recommended_first",
+        "investigate_or_goal",
+        "scope",
+        "expected_mechanical_delta",
+        "negative_control",
+        "abandon_or_reconsider_condition",
+        "harnessability",
+        "minimum_sufficiency_rationale"
+      ],
+      "properties": {
+        "candidate_slices": {
+          "type": "array",
+          "maxItems": 3,
+          "items": {
+            "type": "object",
+            "properties": {
+              "title": {
+                "type": "string"
+              },
+              "description": {
+                "type": "string"
+              },
+              "why_plausible": {
+                "type": "string"
+              }
+            }
+          }
+        },
+        "recommended_first": {
+          "type": "string"
+        },
+        "investigate_or_goal": {
+          "enum": [
+            "investigate",
+            "propose-goal"
+          ]
+        },
+        "scope": {
+          "type": "object",
+          "properties": {
+            "in_scope": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            },
+            "non_goals": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            }
+          }
+        },
+        "expected_mechanical_delta": {
+          "type": "string"
+        },
+        "negative_control": {
+          "type": "string"
+        },
+        "abandon_or_reconsider_condition": {
+          "type": "string"
+        },
+        "harnessability": {
+          "type": "object",
+          "required": [
+            "inputs",
+            "outputs",
+            "constraints",
+            "acceptance",
+            "failure_mode"
+          ],
+          "properties": {
+            "inputs": {
+              "type": "string"
+            },
+            "outputs": {
+              "type": "string"
+            },
+            "constraints": {
+              "type": "string"
+            },
+            "acceptance": {
+              "type": "string"
+            },
+            "failure_mode": {
+              "type": "string"
+            }
+          }
+        },
+        "minimum_sufficiency_rationale": {
+          "type": "string"
+        }
+      }
+    },
+    "citable_evidence_refs": [
+      "archguard:detect_cycles",
+      "code:core_root_to_cli_edges",
+      "repo:draft_layers_yml"
+    ]
+  }
+}

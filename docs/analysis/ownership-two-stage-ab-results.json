@@ -1,0 +1,1728 @@
+{
+  "experiment": "two-stage GOAL-030..033 benchmark — runtime+model A/B",
+  "groups": {
+    "A": {
+      "launcher": "claude-fjdac",
+      "model": "v4.1flash-anthropic"
+    },
+    "B": {
+      "launcher": "claude",
+      "model": "opus"
+    }
+  },
+  "controls": {
+    "corpus": "plugin/fixtures/meta-driver-replay",
+    "profiles_carrier": "fixture .quay/profiles.yml under a temp root; repo carrier untouched",
+    "leakage": "stage A reads stage_a.json only; stage B reads stage_b.json only; reference.json is evaluator-side"
+  },
+  "harness_self_test": {
+    "prompts_identical_across_groups_per_cell": true,
+    "cells": {
+      "GOAL-030:A": {
+        "prompt_shas": [
+          "856c5dbcc9411319"
+        ],
+        "identical_across_groups": true
+      },
+      "GOAL-030:B": {
+        "prompt_shas": [
+          "fae8d3e67cdec7a0"
+        ],
+        "identical_across_groups": true
+      },
+      "GOAL-031:A": {
+        "prompt_shas": [
+          "5b8c0c96e16a1cd2"
+        ],
+        "identical_across_groups": true
+      },
+      "GOAL-031:B": {
+        "prompt_shas": [
+          "8e64373108a21db7"
+        ],
+        "identical_across_groups": true
+      },
+      "GOAL-032:A": {
+        "prompt_shas": [
+          "119020adf8d87e9a"
+        ],
+        "identical_across_groups": true
+      },
+      "GOAL-032:B": {
+        "prompt_shas": [
+          "c2fc12b322c94329"
+        ],
+        "identical_across_groups": true
+      },
+      "GOAL-033:A": {
+        "prompt_shas": [
+          "81ab2cba3eb29219"
+        ],
+        "identical_across_groups": true
+      },
+      "GOAL-033:B": {
+        "prompt_shas": [
+          "ff8ff380a3860fd6"
+        ],
+        "identical_across_groups": true
+      }
+    }
+  },
+  "reps": 1,
+  "stages": [
+    "A",
+    "B"
+  ],
+  "runs": [
+    {
+      "case_id": "GOAL-030",
+      "stage": "A",
+      "group": "A",
+      "provenance": {
+        "role": "ab-a",
+        "profile": "gw",
+        "launcher": "claude-fjdac",
+        "model_from_profile": "v4.1flash-anthropic",
+        "model_flag_in_argv": "v4.1flash-anthropic",
+        "gateway_env_dropped": false,
+        "prompt_sha256_16": "856c5dbcc9411319",
+        "prompt_chars": 3678,
+        "started_at": "2026-10-09T14:09:39.340Z",
+        "duration_ms": 37607
+      },
+      "state": "verified",
+      "error": null,
+      "exit_status": 0,
+      "response": {
+        "concerns": [
+          {
+            "concern": "Ownership of task-lifecycle status transitions is not consolidated: status writes live inside orchestration-layer scripts rather than at a single decision layer, and there is no structured per-transition record — flip history is only reconstructed by replay.",
+            "evidence_refs": [
+              "repo:goal_branch_state",
+              "code:ready_pool_check",
+              "task:status_flip_readings"
+            ],
+            "needs_investigation": true,
+            "what_to_investigate": "Enumerate every status-write site. The code pointer names only ready-pool-check.ts and explicitly leaves its function names unresolved, while the summary implies scripts in the plural; confirm whether promote and retreat share one decision layer or duplicate it, and whether any structured per-transition record exists on disk (task:status_flip_readings shows history reaching consumers only through replay).",
+            "confidence": "medium"
+          },
+          {
+            "concern": "Runtime canonicalization of code is ambiguous: a worktree is not guaranteed to execute its own code (two observed incidents), and a goal-branch preview does not run the driver — so a goal that changes driver code has no pre-merge trial of the artifact it is supposed to be authoritative for.",
+            "evidence_refs": [
+              "repo:goal_branch_state"
+            ],
+            "needs_investigation": true,
+            "what_to_investigate": "Establish which module-resolution path a goal-branch preview takes for kernel/driver code, and confirm from the SPEC-goal-branch 4.10/8 text whether any pre-merge trial exists for driver-changing goals. Keep this distinct from the separate fact that no real (non-rehearsal) goal sample exists yet.",
+            "confidence": "medium"
+          },
+          {
+            "concern": "Dependency boundary of whatever layer would host a consolidated decision: plugin/scripts carries heavy coupling (14 kernel + 44 non-kernel edge strength) and one directory cycle, even though packages->plugin is a clean 0 — the candidate host layer is not cleanly bounded.",
+            "evidence_refs": [
+              "archguard:edge_strength"
+            ],
+            "needs_investigation": true,
+            "what_to_investigate": "Identify what the 44 non-kernel edges and the single directory cycle actually are, and whether the cycle crosses the boundary a canonical status-decision layer would need to occupy.",
+            "confidence": "low"
+          }
+        ],
+        "overall_assessment": "concerns_found"
+      },
+      "scores": {
+        "case_id": "GOAL-030",
+        "stage": "A",
+        "concerns_returned": 3,
+        "concern_validity": {
+          "any_matches_expected": true,
+          "per_concern": [
+            {
+              "concern": "Ownership of task-lifecycle status transitions is not consolidated: status writes live inside orchestration-layer scripts rather than at a single decision layer",
+              "matches_expected": true,
+              "matched_reference": "lifecycle status writes scattered across orchestration scripts with no single decision layer / no structured per-transition record",
+              "overlap": 0.857,
+              "evidence_refs": 3,
+              "unsupported_evidence_refs": [],
+              "grounded": true,
+              "needs_investigation": true,
+              "confidence": "medium"
+            },
+            {
+              "concern": "Runtime canonicalization of code is ambiguous: a worktree is not guaranteed to execute its own code (two observed incidents), and a goal-branch preview does not",
+              "matches_expected": false,
+              "matched_reference": null,
+              "overlap": 0.222,
+              "evidence_refs": 1,
+              "unsupported_evidence_refs": [],
+              "grounded": true,
+              "needs_investigation": true,
+              "confidence": "medium"
+            },
+            {
+              "concern": "Dependency boundary of whatever layer would host a consolidated decision: plugin/scripts carries heavy coupling (14 kernel + 44 non-kernel edge strength) and on",
+              "matches_expected": true,
+              "matched_reference": "plugin/scripts reaches the kernel on far fewer edges than it does non-kernel modules (boundary under-use)",
+              "overlap": 0.417,
+              "evidence_refs": 1,
+              "unsupported_evidence_refs": [],
+              "grounded": true,
+              "needs_investigation": true,
+              "confidence": "low"
+            }
+          ]
+        },
+        "grounding": {
+          "all_cited_refs_resolve": true,
+          "unsupported_claims": []
+        },
+        "ranking": {
+          "valid_concern_ranked_first": true
+        },
+        "abstention": {
+          "abstained": false,
+          "acceptable_here": false,
+          "verdict": "proposed_concerns"
+        },
+        "man": "manual_review_suggested"
+      },
+      "rep": 1
+    },
+    {
+      "case_id": "GOAL-030",
+      "stage": "A",
+      "group": "B",
+      "provenance": {
+        "role": "ab-b",
+        "profile": "native",
+        "launcher": "/tmp/two-stage-ab-jJbsdt/B/launcher.sh",
+        "model_from_profile": "opus",
+        "model_flag_in_argv": "opus",
+        "gateway_env_dropped": true,
+        "prompt_sha256_16": "856c5dbcc9411319",
+        "prompt_chars": 3678,
+        "started_at": "2026-10-09T14:10:16.949Z",
+        "duration_ms": 20564
+      },
+      "state": "verified",
+      "error": null,
+      "exit_status": 0,
+      "response": {
+        "concerns": [
+          {
+            "concern": "Task lifecycle status has no single owner. Status writes for both promote and retreat sit inside an orchestration-layer script (plugin/scripts/ready-pool-check.ts) instead of a decision layer such as a kernel lifecycle module. Nothing structured is recorded per transition, so history can only be rebuilt afterwards by replaying flip events, which is what gap-status-flip-history-and-parser-diff-readings had to do. Ownership of the todo/ready/done transition is spread across callers.",
+            "evidence_refs": [
+              "code:ready_pool_check",
+              "repo:goal_branch_state",
+              "task:status_flip_readings"
+            ],
+            "needs_investigation": true,
+            "what_to_investigate": "The evidence does not name the functions that write status. List every place that writes status: the functions in ready-pool-check.ts plus any other orchestration scripts, CLI verbs or driver filters. For each one, record the transition it performs and whether it leaves a record. Also check whether a kernel lifecycle API already exists that these writers bypass. A slice can only be scoped once that list exists.",
+            "confidence": "medium"
+          },
+          {
+            "concern": "The dependency boundary between plugin/scripts and the kernel is weak. The plugin/scripts→non-kernel edge strength (44) is about three times the plugin/scripts→kernel edge strength (14), and there is one directory cycle. This suggests the orchestration scripts depend mostly on each other or on internals rather than on a canonical kernel API. That would fit with lifecycle logic living in scripts. The packages→plugin direction is clean (0 edges), so the boundary problem is on the plugin side only.",
+            "evidence_refs": [
+              "archguard:edge_strength"
+            ],
+            "needs_investigation": true,
+            "what_to_investigate": "Find which directories form the cycle. Break down the 44 non-kernel edges by target and check whether any of them are to lifecycle or status logic that belongs in the kernel. Also check whether the cycle involves ready-pool-check.ts. If neither is true, this concern drops to background noise.",
+            "confidence": "low"
+          },
+          {
+            "concern": "It is not clear which code actually runs in a goal branch. No real goal has gone through the full goal-branch lifecycle yet (GOAL-901..905 were rehearsals, and GOAL-905's merge needed 6 suite retries). Code loaded in a worktree has twice resolved silently to the main checkout, and a goal that changes driver code gets no trial before merge. If this goal moves status-write ownership into driver or lifecycle code, its own branch cannot prove the change before landing.",
+            "evidence_refs": [
+              "repo:goal_branch_state"
+            ],
+            "needs_investigation": true,
+            "what_to_investigate": "Check whether the modules this goal would touch (ready-pool-check.ts and any lifecycle module) are among those that resolve to the main checkout from a worktree. Also check whether moving status-write ownership counts as 'driver code' under SPEC-goal-branch 4.10/8.",
+            "confidence": "low"
+          }
+        ],
+        "overall_assessment": "concerns_found"
+      },
+      "scores": {
+        "case_id": "GOAL-030",
+        "stage": "A",
+        "concerns_returned": 3,
+        "concern_validity": {
+          "any_matches_expected": true,
+          "per_concern": [
+            {
+              "concern": "Task lifecycle status has no single owner. Status writes for both promote and retreat sit inside an orchestration-layer script (plugin/scripts/ready-pool-check.",
+              "matches_expected": true,
+              "matched_reference": "lifecycle status writes scattered across orchestration scripts with no single decision layer / no structured per-transition record",
+              "overlap": 0.857,
+              "evidence_refs": 3,
+              "unsupported_evidence_refs": [],
+              "grounded": true,
+              "needs_investigation": true,
+              "confidence": "medium"
+            },
+            {
+              "concern": "The dependency boundary between plugin/scripts and the kernel is weak. The plugin/scripts→non-kernel edge strength (44) is about three times the plugin/scripts→",
+              "matches_expected": true,
+              "matched_reference": "plugin/scripts reaches the kernel on far fewer edges than it does non-kernel modules (boundary under-use)",
+              "overlap": 0.5,
+              "evidence_refs": 1,
+              "unsupported_evidence_refs": [],
+              "grounded": true,
+              "needs_investigation": true,
+              "confidence": "low"
+            },
+            {
+              "concern": "It is not clear which code actually runs in a goal branch. No real goal has gone through the full goal-branch lifecycle yet (GOAL-901..905 were rehearsals, and ",
+              "matches_expected": false,
+              "matched_reference": null,
+              "overlap": 0.333,
+              "evidence_refs": 1,
+              "unsupported_evidence_refs": [],
+              "grounded": true,
+              "needs_investigation": true,
+              "confidence": "low"
+            }
+          ]
+        },
+        "grounding": {
+          "all_cited_refs_resolve": true,
+          "unsupported_claims": []
+        },
+        "ranking": {
+          "valid_concern_ranked_first": true
+        },
+        "abstention": {
+          "abstained": false,
+          "acceptable_here": false,
+          "verdict": "proposed_concerns"
+        },
+        "man": "manual_review_suggested"
+      },
+      "rep": 1
+    },
+    {
+      "case_id": "GOAL-030",
+      "stage": "B",
+      "group": "A",
+      "provenance": {
+        "role": "ab-a",
+        "profile": "gw",
+        "launcher": "claude-fjdac",
+        "model_from_profile": "v4.1flash-anthropic",
+        "model_flag_in_argv": "v4.1flash-anthropic",
+        "gateway_env_dropped": false,
+        "prompt_sha256_16": "fae8d3e67cdec7a0",
+        "prompt_chars": 5051,
+        "started_at": "2026-10-09T14:10:37.515Z",
+        "duration_ms": 31865
+      },
+      "state": "verified",
+      "error": null,
+      "exit_status": 0,
+      "response": {
+        "candidate_slices": [
+          {
+            "title": "Single status-decision layer for the promotion path, landed on the goal-branch pilot",
+            "description": "Create one shared decision point that owns the todo<->ready transition — resolving the edge from the lifecycle edge table (gate/lifecycle.ts) and applying the status-field patch via the task-ops.ts helper — and emits one structured per-transition record (task id, from, to, edge, originating site, timestamp). Route both applyPromotions (todo->ready) and applyRevaluations (ready->todo) in plugin/scripts/ready-pool-check.ts through it. Place the module so both packages/* and plugin/scripts can import it with no reverse dependency edge (checked with archguard:edge_strength). Land it as the first real goal-branch pilot, with acceptance including proof that the pilot worktree/preview executes its own branch's code, not develop's.",
+            "why_plausible": "Smallest cut that exercises BOTH transition directions and both clauses of the concern. The two named sites are exactly the promotion path, so the extraction touches promote and retreat while fan-in (4) and needs-human (2) stay untouched."
+          },
+          {
+            "title": "Record-only instrumentation (no extraction)",
+            "description": "Add the structured per-transition record at the two existing sites without moving the decision data: the edge table stays in gate/lifecycle.ts and the patch helper stays in plugin/scripts/task-ops.ts.",
+            "why_plausible": "Lower blast radius and no placement problem to solve, but it does not satisfy the 'no single decision layer' half of the concern — two independent decision sites remain."
+          },
+          {
+            "title": "Full lifecycle-write consolidation",
+            "description": "Move every status write (promotion path + fan-in's 4 sites + needs-human/branch-sync-alignment's 2 sites) behind the shared decision point in a single change.",
+            "why_plausible": "Complete by construction, but explicitly excluded by context and contradicts health-gated scope growth; it converts the pilot into a multi-surface refactor and endangers the mechanism proof."
+          }
+        ],
+        "recommended_first": "Slice 1 — route the two promotion-path sites through one shared decision point that also emits a structured per-transition record, landed as the goal-branch pilot.",
+        "investigate_or_goal": "propose-goal",
+        "scope": {
+          "in_scope": [
+            "One shared lifecycle decision point for the todo<->ready transition, importable from both packages/* and plugin/scripts without a reverse dependency edge.",
+            "Route applyPromotions and applyRevaluations in plugin/scripts/ready-pool-check.ts through it, removing their inline decision logic.",
+            "Consolidate the transition data it consumes: the lifecycle edge table (gate/lifecycle.ts) and the status-field patch helper (plugin/scripts/task-ops.ts) become inputs to the decision point, not independent copies.",
+            "One structured record emitted per transition (task id, from, to, edge, originating site, timestamp).",
+            "Land the change on a goal branch as the first real pilot, proving the pilot's worktree/preview runs its own branch's code."
+          ],
+          "non_goals": [
+            "fan-in's 4 status-write sites.",
+            "the needs-human / branch-sync-alignment 2 write sites.",
+            "Any change to lifecycle edge semantics (todo->ready->done, terminal needs-human) or introduction of new states.",
+            "Core CLI task edit full-field parity and other product surfaces unrelated to the two promotion sites."
+          ]
+        },
+        "expected_mechanical_delta": "Before: two inline decision/write sites inside ready-pool-check.ts, zero structured transition records. After: those two sites contain zero inline status-patch calls (grep at the sites = 0) and instead call the shared decision point; a run flipping N tasks yields exactly one record per transition carrying task id + edge, and an input with zero eligible transitions yields zero records. Mechanism half: the goal-branch pilot's worktree/preview reading (e.g. a health/version marker) reflects the goal branch's own code.",
+        "negative_control": "Two-part. (1) Disable/mutate the shared decision point (return without applying the patch) and re-run: if a todo->ready or ready->todo transition still occurs, or a record is still written, the old inline sites are still live and the extraction was cosmetic — the delta is an echo, not a measurement. (2) For the mechanism proof, run the same worktree/preview reading with the branch's distinctive change absent (or against develop): if the reading is identical whether or not the branch change is present, the 'preview runs its own branch' acceptance is vacuous. Confirm the record count discriminates, not merely that records exist.",
+        "abandon_or_reconsider_condition": "Abandon the single-decision-layer claim and fall back to the record-only slice if archguard:edge_strength shows the shared point cannot be reached from both packages/* and plugin/scripts without introducing a reverse dependency edge or a cycle. Materially revise scope if the goal-branch pilot's health gate shows the refactor destabilizes the loop — the human gated every scope growth on health. Re-investigate first if the two named sites turn out to be thin wrappers over a third live write site, which would make the '2 promotion sites' reading non-representative.",
+        "harnessability": {
+          "inputs": "A task store containing tasks eligible for todo->ready and ready->todo; the existing lifecycle edge table (gate/lifecycle.ts) and status-patch helper (plugin/scripts/task-ops.ts); a goal branch created for the pilot; scripts/test.sh.",
+          "outputs": "A shared decision module reachable from both layers; the two ready-pool-check.ts sites routed through it; structured per-transition records; goal-branch pilot artifacts (branch commit plus the worktree/preview reading).",
+          "constraints": "No reverse dependency edge between packages/* and plugin/scripts (archguard:edge_strength); no change to lifecycle edge semantics; scripts/test.sh stays green (it is green on develop at the cutoff commit); any scope growth is health-gated.",
+          "acceptance": "(1) zero inline status-patch calls remain at the two named sites; (2) at least one structured record per real transition, carrying task id/from/to/edge, with zero records for an input that has no eligible transitions; (3) the pilot worktree/preview demonstrably runs its own branch's code (negative control passes); (4) scripts/test.sh green on the landing branch.",
+          "failure_mode": "Extraction is cosmetic — old inline sites still fire, so records are emitted but do not discriminate; and the mechanism proof passes on form (a preview exists) rather than on evidence (the preview reads its own branch), which is the 'looks like it worked' failure."
+        },
+        "minimum_sufficiency_rationale": "It resolves both clauses of the confirmed concern in one move. The shared decision point plus the structured per-transition record removes the 'no single decision layer / no per-transition record' defect on the two sites that together exercise both edges (promote and retreat); running that exact refactor as the goal-branch pilot supplies the missing mechanism proof (worktree runs its own branch's code) as an acceptance condition rather than as a separate effort. Fan-in (4) and needs-human (2) are excluded because they add blast radius without adding a new transition direction or a new mechanism question — they are the same pattern at more sites, and the human gated scope growth on health."
+      },
+      "scores": {
+        "case_id": "GOAL-030",
+        "stage": "B",
+        "slice": {
+          "matches_reference": false,
+          "matches_alternative": true,
+          "novel_not_in_reference": false,
+          "reference_overlap": 0.309,
+          "alternative_overlap": 0.435,
+          "note": "auxiliary: the historical slice is one defensible answer among several, not the sole target"
+        },
+        "granularity": {
+          "verdict": "too-broad",
+          "too_broad_overlap": 0.7,
+          "too_fragmented_overlap": 0.833
+        },
+        "investigate_or_goal": {
+          "candidate": "propose-goal",
+          "reference": "propose-goal",
+          "agreement": true,
+          "scored_at": "T1-decision-ready"
+        },
+        "scope_discipline": {
+          "non_goals_present": true,
+          "in_scope_count": 5,
+          "violation": false
+        },
+        "harnessability": {
+          "fields_present": "5/5",
+          "complete": true,
+          "missing": []
+        },
+        "expected_delta_quality": "quantified",
+        "falsifiability": "substantive",
+        "abandon_condition": "specific",
+        "evidence_citations_resolve": true,
+        "manual_review": null
+      },
+      "rep": 1
+    },
+    {
+      "case_id": "GOAL-030",
+      "stage": "B",
+      "group": "B",
+      "provenance": {
+        "role": "ab-b",
+        "profile": "native",
+        "launcher": "/tmp/two-stage-ab-jJbsdt/B/launcher.sh",
+        "model_from_profile": "opus",
+        "model_flag_in_argv": "opus",
+        "gateway_env_dropped": true,
+        "prompt_sha256_16": "fae8d3e67cdec7a0",
+        "prompt_chars": 5051,
+        "started_at": "2026-10-09T14:11:09.382Z",
+        "duration_ms": 46948
+      },
+      "state": "verified",
+      "error": null,
+      "exit_status": 0,
+      "response": {
+        "candidate_slices": [
+          {
+            "title": "S1: Route only the promotion-path edges through a single lifecycle decision point, on a real goal branch",
+            "description": "Add one decision function next to the existing edge table in gate/lifecycle.ts. Given (taskId, from, to, cause), it returns {allowed, record}, where record is a structured per-transition record. Rewire only the two write sites in plugin/scripts/ready-pool-check.ts: applyPromotions (the todo->ready promote edge) and applyRevaluations (the ready->todo retreat edge). Each asks the decision point first, then writes through the existing status-field patch helper in task-ops.ts and appends the record. The decision layer never imports task-ops.ts or anything under plugin/scripts. The work runs as a goal branch, which is the first real pilot of that mechanism. Part of the acceptance is proof that the goal worktree/preview executes the branch's own ready-pool-check/lifecycle code.",
+            "why_plausible": "code:ready_pool_check names exactly two write sites on the promotion path. The edge table already lives in gate/lifecycle.ts, so putting the decision there adds no new module and gives a dependency edge pointing plugin/scripts -> packages only (archguard:edge_strength), which meets the placement constraint. Two edges in one file is the smallest real direction that can exercise the goal-branch mechanism (repo:goal_branch_state: rehearsals only)."
+          },
+          {
+            "title": "S2: Extend the same decision point to fan-in's 4 status-write sites",
+            "description": "After S1 is healthy, route fan-in's done flips and the related writes through the same decision function and record format.",
+            "why_plausible": "This is the largest remaining group of writes outside a decision layer, and it reuses S1's API unchanged. It is deferred because the human gated scope growth on the pilot's health."
+          },
+          {
+            "title": "S3: Extend to needs-human / branch-sync status alignment (2 write sites)",
+            "description": "Route the needs-human flip and the done>needs-human>ready>todo alignment writes through the decision point, and add a record for each.",
+            "why_plausible": "This finishes the single decision layer. It is deferred because the alignment priority rule is a separate concern, and it touches the author/develop sync path, which is more fragile."
+          }
+        ],
+        "recommended_first": "S1. It is the smallest change that both fixes the confirmed concern on one real path and runs the goal-branch mechanism on a real development direction. The scope is two write sites in one file, a decision function placed beside the edge table that already exists, and an unchanged patch helper. Fewer sites would not cover both directions of a lifecycle edge (promote and retreat), so the structured record could not be shown to handle a reversal. More sites would bring in fan-in or the sync path before the mechanism is proven, which goes against the human's 'health gates growth' ruling.",
+        "investigate_or_goal": "propose-goal",
+        "scope": {
+          "in_scope": [
+            "A decision function in gate/lifecycle.ts that reads the existing edge table and returns {allowed, record}. It must not import plugin/scripts/*",
+            "Rewiring applyPromotions (todo->ready) and applyRevaluations (ready->todo) in plugin/scripts/ready-pool-check.ts to call the decision point before writing",
+            "One structured record per transition, appended to a durable carrier: {ts, taskId, from, to, edge, cause, allowed, decider}",
+            "Running the work on a goal branch, with explicit evidence that the goal worktree/preview executes the branch's own code",
+            "Unit tests: legal and illegal edges for both directions, plus record shape"
+          ],
+          "non_goals": [
+            "Fan-in's 4 status-write sites",
+            "Needs-human and branch-sync alignment (2 write sites)",
+            "Changing the task-ops.ts status-field patch helper or its other call sites",
+            "Changing the lifecycle edge table's contents (no new or removed edges)",
+            "Changing promotion eligibility logic (artifactsComplete / shape dispatch)",
+            "Generalizing the goal-branch mechanism beyond what this pilot needs"
+          ]
+        },
+        "expected_mechanical_delta": "Before: ready-pool-check.ts makes 2 status writes with no decision call and no per-transition record. The carrier has 0 records from this path. ArchGuard shows no plugin/scripts -> gate/lifecycle edge for this decision, and no packages/* -> plugin/scripts edge. After: (1) In ready-pool-check.ts, the count of status writes not preceded by a decision-point call goes from 2 to 0, and the first 3 matches are printed so the count can be checked. (2) The production carrier holds at least 1 todo->ready record and at least 1 ready->todo record from real driver rounds, counted only after landing (not fixture-injected). (3) archguard:edge_strength shows a new plugin/scripts -> packages/quay gate/lifecycle edge, with 0 packages/* -> plugin/scripts edges and no new SCC. (4) scripts/test.sh is still green. (5) The goal worktree's executing module paths resolve inside the goal worktree, not the main checkout.",
+        "negative_control": "There are two controls, one for each way S1 could falsely look like it worked. (a) Mechanism control: in the goal worktree/preview, run one promotion round with the branch's decision call stubbed out, or with the run pointed at develop's code. Zero records must appear, and the resolved module path must change. If records still appear, or the path never pointed into the goal worktree, then the preview was running main/develop code and any green result proves nothing about the branch. (b) Decision control: feed the decision point an edge that is not in the table (for example todo->done on the promotion path). It must refuse with allowed:false and still produce a record, and the task file must stay unchanged. If the illegal edge is written, the 'decision layer' was only a pass-through logger. Before trusting any zero count from the grep for undecided writes, run the same grep against the pre-change ready-pool-check.ts and confirm it finds both sites.",
+        "abandon_or_reconsider_condition": "Revise or abandon if any of these happen: (1) The goal worktree/preview cannot be shown to run its own branch code. The pilot then fails on its explicit acceptance condition, so stop scope growth and file a mechanism defect instead of landing the refactor. (2) Placing the decision point anywhere reachable from both packages/* and plugin/scripts would require a packages -> plugin/scripts edge or would create a new SCC. Then move the decision point to a neutral leaf module instead of lifecycle.ts. (3) The two sites can't share one decision signature without per-site special cases. That means 'single decision layer' is the wrong abstraction for these edges. (4) task:status_flip_readings shows the promotion path is not actually where most unrecorded flips come from, which would make S1 the wrong first slice. (5) Goal-branch overhead (catch-up merges, anti-drift baselines) dominates the work, which signals that the mechanism is not healthy enough to justify S2 or S3.",
+        "harnessability": {
+          "inputs": "develop at the cutoff commit with scripts/test.sh green. plugin/scripts/ready-pool-check.ts (applyPromotions, applyRevaluations). gate/lifecycle.ts edge table. The task-ops.ts patch helper. The goal-branch mechanism (repo:goal_branch_state).",
+          "outputs": "A decision function in gate/lifecycle.ts. Two rewired call sites. A per-transition record carrier with production records. Unit tests. A mechanism-proof artifact showing the goal worktree executed its own code. An ArchGuard edge reading taken before and after.",
+          "constraints": "No packages/* -> plugin/scripts import. Edge-table contents unchanged. The task-ops.ts helper and its other call sites unchanged. Fan-in and needs-human/sync sites untouched. Status files still end on develop. No new cycle.",
+          "acceptance": "Undecided writes in ready-pool-check.ts go from 2 to 0 (matches printed, and the grep dry-run on the pre-change file hits both sites). At least 1 production record per direction, counted after landing. Illegal-edge refusal is tested. Negative control (a) shows that the worktree's code path and the records depend on the branch. ArchGuard shows a forward-only edge and no new SCC. scripts/test.sh is green on the goal branch and after merge.",
+          "failure_mode": "If the mechanism proof fails, the goal stays unmerged and a mechanism gap is filed; the refactor does not land under a green suite that never exercised branch code. If a placement violation is found, the work stops before rewiring. If no production records appear after landing, the decision call is unreachable in production, so the result is reported as NOT-EVALUATED, not passed."
+        },
+        "minimum_sufficiency_rationale": "The concern has two halves: no single decision layer with per-transition records, and a goal-branch mechanism that has never been proven. S1 addresses both with the least new structure. The edge table already exists, so the decision lives beside it. The patch helper already exists, so writes still go through it. Only 2 call sites move, both in one file (code:ready_pool_check). Covering both promote and retreat is necessary: with only one direction, the record format and decision API would never be tested on a reversal, and S2 and S3 would inherit an unvalidated contract. Anything bigger brings in fan-in's 4 sites or the 2 sync sites before the mechanism has a single proven real run, which the human ruled out. The placement constraint is met by letting dependencies point only from plugin/scripts to packages (archguard:edge_strength), so no inversion layer is needed for this slice."
+      },
+      "scores": {
+        "case_id": "GOAL-030",
+        "stage": "B",
+        "slice": {
+          "matches_reference": false,
+          "matches_alternative": true,
+          "novel_not_in_reference": false,
+          "reference_overlap": 0.338,
+          "alternative_overlap": 0.381,
+          "note": "auxiliary: the historical slice is one defensible answer among several, not the sole target"
+        },
+        "granularity": {
+          "verdict": "too-broad",
+          "too_broad_overlap": 0.7,
+          "too_fragmented_overlap": 0.667
+        },
+        "investigate_or_goal": {
+          "candidate": "propose-goal",
+          "reference": "propose-goal",
+          "agreement": true,
+          "scored_at": "T1-decision-ready"
+        },
+        "scope_discipline": {
+          "non_goals_present": true,
+          "in_scope_count": 5,
+          "violation": false
+        },
+        "harnessability": {
+          "fields_present": "5/5",
+          "complete": true,
+          "missing": []
+        },
+        "expected_delta_quality": "quantified",
+        "falsifiability": "substantive",
+        "abandon_condition": "specific",
+        "evidence_citations_resolve": true,
+        "manual_review": null
+      },
+      "rep": 1
+    },
+    {
+      "case_id": "GOAL-031",
+      "stage": "A",
+      "group": "A",
+      "provenance": {
+        "role": "ab-a",
+        "profile": "gw",
+        "launcher": "claude-fjdac",
+        "model_from_profile": "v4.1flash-anthropic",
+        "model_flag_in_argv": "v4.1flash-anthropic",
+        "gateway_env_dropped": false,
+        "prompt_sha256_16": "5b8c0c96e16a1cd2",
+        "prompt_chars": 3074,
+        "started_at": "2026-10-09T14:11:56.331Z",
+        "duration_ms": 39960
+      },
+      "state": "verified",
+      "error": null,
+      "exit_status": 0,
+      "response": {
+        "concerns": [
+          {
+            "concern": "Canonicalization: no single module is shown to own the controlled status vocabulary. The lifecycle token \"needs-human\" is compared as a bare literal across 5 modules (task-status.ts, github-client.ts, observation.ts, goal-driver.ts, workflow-baseline-metrics.ts) — spanning the core status module, a provider, an observation module, a driver, and a metrics module. Cross-module literal dispersion of a controlled value is the repo's own missing-abstraction / Shotgun-Surgery signal: a change to the status set would have to be swept across providers, drivers, and metrics rather than landing in one owner.",
+            "evidence_refs": [
+              "archguard:literal_dispersion",
+              "repo:canonical_vocab_source"
+            ],
+            "needs_investigation": true,
+            "what_to_investigate": "Determine which module is the canonical source of the status vocabulary and enumerate its exported tokens; then classify each of the 5 file hits as (a) genuine un-migrated consumer, (b) legitimate exemption, or (c) false positive — the reading is explicitly unclassified.",
+            "confidence": "medium"
+          },
+          {
+            "concern": "Dependency boundary: a lifecycle actor holds its own copy of the status predicate. goal-driver.ts performs 6 literal `status === \"needs-human\"` comparisons, i.e. the driver reaches directly into the status vocabulary instead of depending on the canonical status module. Six inline comparisons in one driver is the concrete shape of that driver→vocabulary coupling.",
+            "evidence_refs": [
+              "code:goal_driver_needs_human",
+              "archguard:literal_dispersion"
+            ],
+            "needs_investigation": true,
+            "what_to_investigate": "Confirm whether goal-driver.ts already imports/uses a shared status module; if it does, the 6 literals are stragglers to be re-pointed, and if it does not, the driver→vocabulary boundary coupling is itself the defect.",
+            "confidence": "medium"
+          },
+          {
+            "concern": "Ownership basis is unestablished in the evidence: the canonical vocabulary source carries no reading here, so none of the dispersed hits can be judged in- or out-of-contract, and the ownership of the vocabulary cannot be assigned to a file. This is the reason the concern cannot be sized into a slice yet.",
+            "evidence_refs": [
+              "repo:canonical_vocab_source",
+              "archguard:literal_dispersion"
+            ],
+            "needs_investigation": true,
+            "what_to_investigate": "Read the canonical status/vocabulary source, record its exported tokens, and re-check every dispersion hit against it (a reading, not a re-inference) before defining any slice.",
+            "confidence": "medium"
+          }
+        ],
+        "overall_assessment": "concerns_found"
+      },
+      "scores": {
+        "case_id": "GOAL-031",
+        "stage": "A",
+        "concerns_returned": 3,
+        "concern_validity": {
+          "any_matches_expected": true,
+          "per_concern": [
+            {
+              "concern": "Canonicalization: no single module is shown to own the controlled status vocabulary. The lifecycle token \"needs-human\" is compared as a bare literal across 5 mo",
+              "matches_expected": true,
+              "matched_reference": "dispersed literal for one status value across modules, canonical home unclear",
+              "overlap": 0.556,
+              "evidence_refs": 2,
+              "unsupported_evidence_refs": [],
+              "grounded": true,
+              "needs_investigation": true,
+              "confidence": "medium"
+            },
+            {
+              "concern": "Dependency boundary: a lifecycle actor holds its own copy of the status predicate. goal-driver.ts performs 6 literal `status === \"needs-human\"` comparisons, i.e",
+              "matches_expected": false,
+              "matched_reference": null,
+              "overlap": 0.333,
+              "evidence_refs": 2,
+              "unsupported_evidence_refs": [],
+              "grounded": true,
+              "needs_investigation": true,
+              "confidence": "medium"
+            },
+            {
+              "concern": "Ownership basis is unestablished in the evidence: the canonical vocabulary source carries no reading here, so none of the dispersed hits can be judged in- or ou",
+              "matches_expected": false,
+              "matched_reference": null,
+              "overlap": 0.222,
+              "evidence_refs": 2,
+              "unsupported_evidence_refs": [],
+              "grounded": true,
+              "needs_investigation": true,
+              "confidence": "medium"
+            }
+          ]
+        },
+        "grounding": {
+          "all_cited_refs_resolve": true,
+          "unsupported_claims": []
+        },
+        "ranking": {
+          "valid_concern_ranked_first": true
+        },
+        "abstention": {
+          "abstained": false,
+          "acceptable_here": false,
+          "verdict": "proposed_concerns"
+        },
+        "man": "manual_review_suggested"
+      },
+      "rep": 1
+    },
+    {
+      "case_id": "GOAL-031",
+      "stage": "A",
+      "group": "B",
+      "provenance": {
+        "role": "ab-b",
+        "profile": "native",
+        "launcher": "/tmp/two-stage-ab-jJbsdt/B/launcher.sh",
+        "model_from_profile": "opus",
+        "model_flag_in_argv": "opus",
+        "gateway_env_dropped": true,
+        "prompt_sha256_16": "5b8c0c96e16a1cd2",
+        "prompt_chars": 3074,
+        "started_at": "2026-10-09T14:12:36.292Z",
+        "duration_ms": 20186
+      },
+      "state": "verified",
+      "error": null,
+      "exit_status": 0,
+      "response": {
+        "concerns": [
+          {
+            "concern": "The status literal \"needs-human\" may lack a single owner. It appears in 5 files across different layers: status vocabulary (task-status.ts), a provider client (github-client.ts), observation/metrics (observation.ts, workflow-baseline-metrics.ts) and a driver (goal-driver.ts). If task-status.ts is meant to be the canonical source of the status vocabulary, the other 4 files may be consumers that never moved to it after the GOAL-030 lifecycle-write ownership work. This is still a hypothesis. The reading is raw: none of the 5 hits has been classified as an un-migrated consumer, a legitimate exemption (for example, github-client.ts mapping an external label at the provider boundary is arguably correct), or a false positive (comments, strings, test fixtures).",
+            "evidence_refs": [
+              "archguard:literal_dispersion"
+            ],
+            "needs_investigation": true,
+            "what_to_investigate": "1) Classify each of the 5 hits by where it appears, not by keyword match. Is it a code-level comparison or assignment, a comment or string, or a provider-boundary translation? 2) Confirm which module, if any, is the canonical vocabulary source and whether it exports a constant or predicate the consumers could use. No reading for repo:canonical_vocab_source was supplied, so I don't assume task-status.ts is the owner. 3) Check that dispersion=5 is not a tool artifact by running the same query on a literal known to be dispersed (dry-run the predicate on a known-true sample).",
+            "confidence": "low"
+          },
+          {
+            "concern": "goal-driver.ts may be the heaviest concentration of hand-rolled status comparisons. It has 6 occurrences of `status === \"needs-human\"`, which suggests it decides on raw status strings itself instead of through an owned predicate or the lifecycle module that GOAL-030 established. If that is true, goal-driver.ts would be the natural first independently verifiable slice: route its comparisons through the canonical owner, with the dispersion count as the before/after reading. It is not decision-ready yet, because the 6 matches are unclassified. Some may be comments or log strings, and some may compare a different object's status field, such as a goal rather than a task status, which would make them a separate vocabulary.",
+            "evidence_refs": [
+              "code:goal_driver_needs_human",
+              "archguard:literal_dispersion"
+            ],
+            "needs_investigation": true,
+            "what_to_investigate": "Print the 6 matched lines with their surrounding context. For each, record which entity's status is being compared (task or goal) and whether it is executable code. Check whether a canonical predicate (an isNeedsHuman/terminal-status style helper) already exists for it to use. If the goal and task vocabularies turn out to be separate, this is a different concern, a vocabulary split rather than a missing owner.",
+            "confidence": "low"
+          }
+        ],
+        "overall_assessment": "concerns_found"
+      },
+      "scores": {
+        "case_id": "GOAL-031",
+        "stage": "A",
+        "concerns_returned": 2,
+        "concern_validity": {
+          "any_matches_expected": true,
+          "per_concern": [
+            {
+              "concern": "The status literal \"needs-human\" may lack a single owner. It appears in 5 files across different layers: status vocabulary (task-status.ts), a provider client (",
+              "matches_expected": true,
+              "matched_reference": "dispersed literal for one status value across modules, canonical home unclear",
+              "overlap": 0.444,
+              "evidence_refs": 1,
+              "unsupported_evidence_refs": [],
+              "grounded": true,
+              "needs_investigation": true,
+              "confidence": "low"
+            },
+            {
+              "concern": "goal-driver.ts may be the heaviest concentration of hand-rolled status comparisons. It has 6 occurrences of `status === \"needs-human\"`, which suggests it decide",
+              "matches_expected": false,
+              "matched_reference": null,
+              "overlap": 0.222,
+              "evidence_refs": 2,
+              "unsupported_evidence_refs": [],
+              "grounded": true,
+              "needs_investigation": true,
+              "confidence": "low"
+            }
+          ]
+        },
+        "grounding": {
+          "all_cited_refs_resolve": true,
+          "unsupported_claims": []
+        },
+        "ranking": {
+          "valid_concern_ranked_first": true
+        },
+        "abstention": {
+          "abstained": false,
+          "acceptable_here": false,
+          "verdict": "proposed_concerns"
+        },
+        "man": "manual_review_suggested"
+      },
+      "rep": 1
+    },
+    {
+      "case_id": "GOAL-031",
+      "stage": "B",
+      "group": "A",
+      "provenance": {
+        "role": "ab-a",
+        "profile": "gw",
+        "launcher": "claude-fjdac",
+        "model_from_profile": "v4.1flash-anthropic",
+        "model_flag_in_argv": "v4.1flash-anthropic",
+        "gateway_env_dropped": false,
+        "prompt_sha256_16": "8e64373108a21db7",
+        "prompt_chars": 5274,
+        "started_at": "2026-10-09T14:12:56.479Z",
+        "duration_ms": 30648
+      },
+      "state": "verified",
+      "error": null,
+      "exit_status": 0,
+      "response": {
+        "candidate_slices": [
+          {
+            "title": "Migrate goal-driver.ts genuine task.status 'needs-human' literals to the canonical source",
+            "description": "In plugin/scripts/goal-driver.ts, replace the 5 genuine task.status comparisons that spell the bare 'needs-human' literal with the canonical vocabulary accessor declared in packages/quay/src/abi.ts / plugin/scripts/task-status.ts, and leave the 6th occurrence (a GOAL-AC status field) untouched. Carry the archguard:literal_dispersion reading before and after as the mechanical evidence.",
+            "why_plausible": "T1 identifies goal-driver.ts as the only genuine un-migrated residue (5 of its 6 occurrences are real task.status comparisons). It is the sole site whose migration moves the metric, so it is the direct fix for the confirmed concern."
+          },
+          {
+            "title": "Pin the achievable dispersion floor of 4 with an executable, residue-named guard",
+            "description": "Add or extend a check that asserts the 'needs-human' task.status literal appears only in the 4 permanent residues (task-status.ts canonical, github-client.ts exempt, observation.ts, workflow-baseline-metrics.ts) and fails when a new file enters — with a fixture proving the fail path.",
+            "why_plausible": "A migration without a pin re-disperses silently. The floor is now known and countable, so it can be enforced mechanically rather than by prose (ADR-004). It is the natural acceptance carrier for the migration slice."
+          },
+          {
+            "title": "Rejected: full status-vocabulary unification sweep",
+            "description": "Also migrate todo / ready / done literals and any other needs-human-shaped strings across both trees for style consistency.",
+            "why_plausible": "Tempting as a 'finish the job' move, but it is explicitly excluded by the recorded user constraint (do not sweep unrelated status literals, even for style consistency) and widens the slice far past the confirmed concern."
+          }
+        ],
+        "recommended_first": "Slice 1 — migrate goal-driver.ts's 5 genuine task.status 'needs-human' occurrences to the canonical source, with the archguard:literal_dispersion before/after reading as evidence.",
+        "investigate_or_goal": "propose-goal",
+        "scope": {
+          "in_scope": [
+            "plugin/scripts/goal-driver.ts: the 5 genuine task.status comparisons that spell 'needs-human' — replace the bare literal with the canonical accessor from task-status.ts / abi.ts",
+            "A mechanical before/after archguard:literal_dispersion reading over task.status for the 'needs-human' literal (5 files → 4; goal-driver occurrences 6 → 1)",
+            "An executable regression guard pinning the floor at 4, naming the 4 permanent residues"
+          ],
+          "non_goals": [
+            "packages/quay/src/abi.ts + plugin/scripts/task-status.ts — the canonical declaration itself",
+            "github-client.ts — the explicitly exempted provider literal, already pinned by its own needle test",
+            "observation.ts and workflow-baseline-metrics.ts — false positives: a promotion-outcome 'action' field and a workflow 'outcome' field, not task.status",
+            "The 6th goal-driver.ts occurrence — a GOAL-AC status field, a different vocabulary, must stay untouched",
+            "Sweeping unrelated status literals (todo / ready / done) in any file, even for style consistency (recorded user constraint)",
+            "Pursuing the original target of <=2, which is below the achievable floor"
+          ]
+        },
+        "expected_mechanical_delta": "archguard:literal_dispersion for the 'needs-human' literal over task.status drops from 5 files to 4 (the floor). Within plugin/scripts/goal-driver.ts the occurrence count drops from 6 to 1, the single remaining hit being the GOAL-AC status comparison. The 5 migrated sites resolve the status through the canonical vocabulary source instead of a bare literal.",
+        "negative_control": "Two controls, both must hold. (i) Over-sweep control: the goal-driver occurrence count must land at 1, not 0 — the GOAL-AC literal must still register as a hit after migration. If it disappears, the migration clobbered an out-of-scope, different-vocabulary string and the observed delta is not the intended one. (ii) Instrument control: re-run the reading with the migration reverted on a scratch copy and confirm the count returns to 5, proving the drop is attributable to the code change and not to a narrowed pattern, a moved file, or a silently-empty instrument (hard rule 5 — an empty reading is NOT-EVALUATED, not pass). Additionally, all 4 permanent residues must still be counted as hits, showing the floor of 4 is real rather than an artifact of a pattern that stopped matching.",
+        "abandon_or_reconsider_condition": "Abandon or materially revise if: (a) on inspection the 5 'genuine' goal-driver occurrences turn out not to be task.status reads but a third vocabulary — they then become permanent residues and the true floor is 5, not 4; (b) the canonical accessor in task-status.ts cannot be reached from the plugin tree (tree boundary / circular import) without restructuring — the residue is then recorded as a fixed exemption and the slice collapses to the floor guard alone; (c) archguard:literal_dispersion cannot attribute hits by file and vocabulary, so no mechanical before/after is obtainable — acceptance becomes unrunnable and the slice must be re-scoped or dropped.",
+        "harnessability": {
+          "inputs": "Repo at the T1 cutoff commit; the archguard:literal_dispersion query for the 'needs-human' literal; the source of plugin/scripts/goal-driver.ts; the canonical declaration in task-status.ts / abi.ts.",
+          "outputs": "A patched plugin/scripts/goal-driver.ts (5 sites resolve via the canonical accessor; the GOAL-AC site untouched); a before/after dispersion reading; the floor guard.",
+          "constraints": "Leaves the 4 permanent residues untouched; leaves the GOAL-AC occurrence untouched; does not sweep other status literals; scripts/test.sh stays green.",
+          "acceptance": "archguard:literal_dispersion reports exactly 4 files and 1 goal-driver occurrence for the literal; the floor guard passes on HEAD and fails on a fixture that introduces a 5th genuine file.",
+          "failure_mode": "Over-sweep (GOAL-AC literal clobbered, count 6→0) or under-sweep (count stays 5, nothing migrated); or a silently-empty / unchanged instrument reading that is read as 'no dispersion' (false-zero, hard rule 5) — this must surface as NOT-EVALUATED, not as pass."
+        },
+        "minimum_sufficiency_rationale": "After T1 classification the confirmed concern reduces to exactly one file with genuine residue. Migrating its 5 task.status occurrences to the canonical source is the smallest change that moves the metric to the achievable floor of 4; the floor cannot go lower because the canonical declaration, the fixed provider exemption, and the two different-vocabulary false positives are structurally permanent. Pinning the floor with a residue-named guard is the minimum enforcement that keeps the gained reduction from silently regressing. Anything beyond that — sweeping other status literals — is outside the confirmed concern and excluded by the recorded user constraint. The slice is therefore both sufficient (it resolves the concern) and minimal (it touches only the genuine residue and its guard). No investigation remains: the concern is confirmed and the residue, target, and constraint are all established at T1, which is exactly the input a goal needs — so this is propose-goal, not investigate."
+      },
+      "scores": {
+        "case_id": "GOAL-031",
+        "stage": "B",
+        "slice": {
+          "matches_reference": true,
+          "matches_alternative": true,
+          "novel_not_in_reference": false,
+          "reference_overlap": 0.394,
+          "alternative_overlap": 0.526,
+          "note": "auxiliary: the historical slice is one defensible answer among several, not the sole target"
+        },
+        "granularity": {
+          "verdict": "too-fragmented",
+          "too_broad_overlap": 0.4,
+          "too_fragmented_overlap": 0.667
+        },
+        "investigate_or_goal": {
+          "candidate": "propose-goal",
+          "reference": "propose-goal",
+          "agreement": true,
+          "scored_at": "T1-decision-ready"
+        },
+        "scope_discipline": {
+          "non_goals_present": true,
+          "in_scope_count": 3,
+          "violation": true
+        },
+        "harnessability": {
+          "fields_present": "5/5",
+          "complete": true,
+          "missing": []
+        },
+        "expected_delta_quality": "quantified",
+        "falsifiability": "substantive",
+        "abandon_condition": "specific",
+        "evidence_citations_resolve": true,
+        "manual_review": null
+      },
+      "rep": 1
+    },
+    {
+      "case_id": "GOAL-031",
+      "stage": "B",
+      "group": "B",
+      "provenance": {
+        "role": "ab-b",
+        "profile": "native",
+        "launcher": "/tmp/two-stage-ab-jJbsdt/B/launcher.sh",
+        "model_from_profile": "opus",
+        "model_flag_in_argv": "opus",
+        "gateway_env_dropped": true,
+        "prompt_sha256_16": "8e64373108a21db7",
+        "prompt_chars": 5274,
+        "started_at": "2026-10-09T14:13:27.128Z",
+        "duration_ms": 49831
+      },
+      "state": "verified",
+      "error": null,
+      "exit_status": 0,
+      "response": {
+        "candidate_slices": [
+          {
+            "title": "S1: Migrate the 5 real task.status comparisons in goal-driver.ts to the canonical constant",
+            "description": "In plugin/scripts/goal-driver.ts, replace the 5 bare 'needs-human' literals that are compared against task.status with the canonical symbol exported by plugin/scripts/task-status.ts (the plugin-tree canonical source; refs: repo:canonical_vocab_source, code:goal_driver_needs_human). Leave the 6th occurrence, which compares a GOAL-AC status field from a different vocabulary, as a literal. Do not touch the todo/ready/done literals in the same file.",
+            "why_plausible": "Per T1, goal-driver.ts is the only file with genuine residue (archguard:literal_dispersion). The canonical source already exists and a prior DONE task already moved 16 consumers to it, so this applies an established pattern to its last real consumer. No new abstraction is needed."
+          },
+          {
+            "title": "S2: Lock the dispersion floor at 4 with a classified allowlist",
+            "description": "Add a needle/ratchet check that fails when the bare 'needs-human' literal appears outside a named, classified set. The set is: the canonical declaration (task-status.ts), the provider exemption (github-client.ts), and the two other-vocabulary sites (observation.ts 'action', workflow-baseline-metrics.ts 'outcome'), plus the one GOAL-AC site in goal-driver.ts identified by position. Each entry carries its reason.",
+            "why_plausible": "Once S1 lands, the corrected floor of 4 is the steady state. Without a ratchet, a new un-migrated consumer would push dispersion back to 5 and nothing would notice. The classification work is already done (archguard:literal_dispersion), so the only cost is encoding it."
+          },
+          {
+            "title": "S3 (deferred): Give the other vocabularies their own named constants",
+            "description": "Introduce named constants for the promotion-outcome 'action' value and the workflow 'outcome' value in observation.ts and workflow-baseline-metrics.ts, and for the GOAL-AC status in goal-driver.ts. The look-alike strings would then stop appearing in raw literal scans.",
+            "why_plausible": "It would make the 'false positive' class disappear from future dispersion readings. It is not a defect fix, though: T1 classifies these as correct uses of a different vocabulary, and the user constraint warns against sweeping unrelated literals. So it stays an option, not a requirement."
+          }
+        ],
+        "recommended_first": "S1. It removes all of the genuine residue that T1 established (5 of 6 sites in the one remaining file) and nothing else. Every other occurrence is canonical, exempted or a different vocabulary, so after S1 there is no genuine un-migrated task.status consumer left (archguard:literal_dispersion, code:goal_driver_needs_human). S2 is a cheap follow-up that keeps the result from regressing, but it does not move the defect count. S3 is cosmetic.",
+        "investigate_or_goal": "propose-goal",
+        "scope": {
+          "in_scope": [
+            "plugin/scripts/goal-driver.ts: the 5 occurrences of 'needs-human' that are compared against task.status",
+            "Adding one import of the canonical needs-human symbol from plugin/scripts/task-status.ts into goal-driver.ts (repo:canonical_vocab_source)",
+            "A test or check that pins which goal-driver.ts site keeps the literal (the GOAL-AC comparison) and that the 5 migrated sites use the canonical symbol"
+          ],
+          "non_goals": [
+            "The 6th goal-driver.ts occurrence (GOAL-AC status, a different vocabulary). It must stay a literal.",
+            "The todo/ready/done literals in goal-driver.ts, even for style consistency (recorded user constraint)",
+            "task-status.ts, which is the canonical declaration",
+            "packages/quay-github github-client.ts, whose exemption is fixed and pinned by its own needle test",
+            "observation.ts and workflow-baseline-metrics.ts (false positives, different vocabularies)",
+            "packages/quay/src/abi.ts or any change to the canonical value or to how the two trees are split",
+            "Driving dispersion below 4 (T1 shows that floor cannot be beaten)"
+          ]
+        },
+        "expected_mechanical_delta": "Before: the archguard:literal_dispersion reading for 'needs-human' shows 5 files, and goal-driver.ts has 6 literal occurrences. After: 4 files, and goal-driver.ts has exactly 1, which must be the GOAL-AC status comparison. goal-driver.ts also gains 1 reference to the canonical symbol at each of the 5 migrated sites, plus 1 import from task-status.ts. The counts of 'todo', 'ready' and 'done' literals in goal-driver.ts are byte-for-byte unchanged before and after, which shows nothing outside the slice was swept. scripts/test.sh is still green.",
+        "negative_control": "A file-count reading of 5→4 cannot tell a correct result from two wrong ones, because both also produce 4. (1) Migrating all 6 sites, including the GOAL-AC one, takes goal-driver.ts out of the hit list just the same. (2) Hiding the literal, for example as 'needs-' + 'human' or as a local const copy, removes the hits without importing the canonical source. The control is therefore a check by position, not by count. It must assert all of the following: the one remaining literal sits at the GOAL-AC comparison; each of the 5 task.status sites resolves to the symbol imported from task-status.ts; and no local re-declaration of the value exists. Mutation check: point one migrated site back to the literal and the check must go red. Point the GOAL-AC site at the canonical symbol and it must also go red. In addition, a behavioral goal-driver test with a task in needs-human status, and one with a GOAL-AC in needs-human status, must give the same results before and after.",
+        "abandon_or_reconsider_condition": "Revise the plan if any of these turns up: (1) on reading, one of the 5 'genuine' sites is actually a different vocabulary, or the GOAL-AC site actually compares task.status, so the 5/1 split in code:goal_driver_needs_human is wrong; (2) importing task-status.ts into goal-driver.ts is blocked by an import-graph or cycle ratchet or a layering rule, which would make the change a layering question rather than a mechanical migration; (3) the canonical constant's value or type differs from the literal it replaces, which would change behavior; (4) after landing, archguard:literal_dispersion reports something other than 4 files, which would mean the T1 classification was incomplete. Drop the work if a concurrent task has already migrated these sites.",
+        "harnessability": {
+          "inputs": "plugin/scripts/goal-driver.ts at the cutoff commit; the canonical symbol in plugin/scripts/task-status.ts; the classified dispersion from archguard:literal_dispersion; the 5-genuine/1-GOAL-AC site split from code:goal_driver_needs_human.",
+          "outputs": "goal-driver.ts with 5 sites using the canonical symbol plus one import; one test or check that pins the retained GOAL-AC literal by position and the 5 migrated sites by symbol; a before/after reading showing the dispersion going from 5 files to 4.",
+          "constraints": "Touch only goal-driver.ts plus its test. Keep the GOAL-AC literal and all todo/ready/done literals. Do not edit github-client.ts, observation.ts, workflow-baseline-metrics.ts, task-status.ts or abi.ts. Introduce no new import cycle. scripts/test.sh must stay green.",
+          "acceptance": "(1) archguard:literal_dispersion for 'needs-human' = 4 files: task-status.ts, github-client.ts, observation.ts, workflow-baseline-metrics.ts, with goal-driver.ts either absent or counted only through its GOAL-AC site, as declared by the classification. (2) goal-driver.ts has exactly 1 literal, located at the GOAL-AC comparison. (3) The 5 task.status sites reference the imported canonical symbol. (4) The todo/ready/done literal counts in goal-driver.ts are unchanged. (5) The mutation checks in the negative control go red. (6) scripts/test.sh is green.",
+          "failure_mode": "Detectable failures: over-migration (the GOAL-AC site gets migrated; the position check reds); under-migration (a literal is left at a task.status site; count is 2 and the position check reds); laundering (concatenation or a local copy; the symbol-provenance check reds); scope creep (todo/ready/done changed; the count diff reds); a layering break (the import-graph ratchet reds). Each failure produces its own distinct signal, and none of them looks like a pass."
+        },
+        "minimum_sufficiency_rationale": "T1 has already settled the investigation: of 5 hits, 4 are permanent or out of scope, and the only genuine residue is 5 sites in a single file. So the smallest change that removes every real defect is to migrate exactly those 5 sites to a canonical source that already exists. That needs one file, one import and no new abstraction. Anything less leaves known task.status consumers un-migrated. Anything more (renaming other vocabularies, sweeping todo/ready/done, touching the provider exemption) either changes code T1 judged correct or breaks the recorded user constraint. The corrected target of 4 is reachable with this slice alone."
+      },
+      "scores": {
+        "case_id": "GOAL-031",
+        "stage": "B",
+        "slice": {
+          "matches_reference": true,
+          "matches_alternative": true,
+          "novel_not_in_reference": false,
+          "reference_overlap": 0.437,
+          "alternative_overlap": 0.474,
+          "note": "auxiliary: the historical slice is one defensible answer among several, not the sole target"
+        },
+        "granularity": {
+          "verdict": "too-broad",
+          "too_broad_overlap": 0.6,
+          "too_fragmented_overlap": 0.667
+        },
+        "investigate_or_goal": {
+          "candidate": "propose-goal",
+          "reference": "propose-goal",
+          "agreement": true,
+          "scored_at": "T1-decision-ready"
+        },
+        "scope_discipline": {
+          "non_goals_present": true,
+          "in_scope_count": 3,
+          "violation": true
+        },
+        "harnessability": {
+          "fields_present": "5/5",
+          "complete": true,
+          "missing": []
+        },
+        "expected_delta_quality": "quantified",
+        "falsifiability": "substantive",
+        "abandon_condition": "specific",
+        "evidence_citations_resolve": true,
+        "manual_review": null
+      },
+      "rep": 1
+    },
+    {
+      "case_id": "GOAL-032",
+      "stage": "A",
+      "group": "A",
+      "provenance": {
+        "role": "ab-a",
+        "profile": "gw",
+        "launcher": "claude-fjdac",
+        "model_from_profile": "v4.1flash-anthropic",
+        "model_flag_in_argv": "v4.1flash-anthropic",
+        "gateway_env_dropped": false,
+        "prompt_sha256_16": "119020adf8d87e9a",
+        "prompt_chars": 3304,
+        "started_at": "2026-10-09T14:14:16.960Z",
+        "duration_ms": 13902
+      },
+      "state": "verified",
+      "error": null,
+      "exit_status": 0,
+      "response": {
+        "concerns": [
+          {
+            "concern": "A duplicate-implementation group straddles an ownership boundary: verdict parsing exists independently in packages/quay/src/criterion-fidelity.ts (the Core/product surface) and plugin/scripts/goal-driver.ts (the plugin/methodology layer). Because the two are flagged only by surface shape, neither a canonical owner nor the semantic-equivalence classification is established at this cutoff — so it is unresolved whether one contract has two owners (a canonicalization defect) or two genuinely distinct verdict dialects are merely shape-identical (a detector false positive).",
+            "evidence_refs": [
+              "archguard:detect_duplicates",
+              "code:criterion_fidelity",
+              "code:goal_driver_parser",
+              "methodology:ownership_first"
+            ],
+            "needs_investigation": true,
+            "what_to_investigate": "Compare the two parsers' accepted exit/token grammars and JSON verdict field schemas to decide whether they encode the same verdict contract. If the same: identify which module is the canonical owner and whether plugin/goal-driver duplicates logic that Core should own rather than importing it from packages/quay (dependency-boundary direction). If different: the ArchGuard group is a false positive and no ownership concern follows. The two prior precedents in evidence (GOAL-030 lifecycle-write ownership, GOAL-031 status-literal convergence) indicate 'one contract, one owner' is a live axis in this repo, which is why the classification is the load-bearing step rather than the duplicate flag alone.",
+            "confidence": "low"
+          }
+        ],
+        "overall_assessment": "concerns_found"
+      },
+      "scores": {
+        "case_id": "GOAL-032",
+        "stage": "A",
+        "concerns_returned": 1,
+        "concern_validity": {
+          "any_matches_expected": true,
+          "per_concern": [
+            {
+              "concern": "A duplicate-implementation group straddles an ownership boundary: verdict parsing exists independently in packages/quay/src/criterion-fidelity.ts (the Core/prod",
+              "matches_expected": true,
+              "matched_reference": "a duplicate implementation of one concept exists across the packages/plugin boundary and has no single owner",
+              "overlap": 0.7,
+              "evidence_refs": 4,
+              "unsupported_evidence_refs": [],
+              "grounded": true,
+              "needs_investigation": true,
+              "confidence": "low"
+            }
+          ]
+        },
+        "grounding": {
+          "all_cited_refs_resolve": true,
+          "unsupported_claims": []
+        },
+        "ranking": {
+          "valid_concern_ranked_first": true
+        },
+        "abstention": {
+          "abstained": false,
+          "acceptable_here": false,
+          "verdict": "proposed_concerns"
+        },
+        "man": null
+      },
+      "rep": 1
+    },
+    {
+      "case_id": "GOAL-032",
+      "stage": "A",
+      "group": "B",
+      "provenance": {
+        "role": "ab-b",
+        "profile": "native",
+        "launcher": "/tmp/two-stage-ab-jJbsdt/B/launcher.sh",
+        "model_from_profile": "opus",
+        "model_flag_in_argv": "opus",
+        "gateway_env_dropped": true,
+        "prompt_sha256_16": "119020adf8d87e9a",
+        "prompt_chars": 3304,
+        "started_at": "2026-10-09T14:14:30.863Z",
+        "duration_ms": 16020
+      },
+      "state": "verified",
+      "error": null,
+      "exit_status": 0,
+      "response": {
+        "concerns": [
+          {
+            "concern": "Two modules may each own the same verdict-parsing protocol. ArchGuard flags a fidelity-verdict parser in Core (packages/quay/src/criterion-fidelity.ts) and a sufficiency-verdict parser in the plugin layer (plugin/scripts/goal-driver.ts) as a duplicate group. Both use the same four steps: a non-zero exit means not-evaluated; check for a bare token; scan upward from the last line for a JSON verdict object; otherwise not-evaluated. If the two verdicts follow one contract, keeping two copies risks them drifting apart, for example one parser gaining a new verdict state the other lacks. The evidence does not yet show that they follow one contract.",
+            "evidence_refs": [
+              "archguard:detect_duplicates",
+              "code:criterion_fidelity",
+              "code:goal_driver_parser",
+              "methodology:ownership_first"
+            ],
+            "needs_investigation": true,
+            "what_to_investigate": "Classify the pair as semantically equivalent or only structurally similar. Compare (1) the bare-token vocabularies, (2) the JSON verdict shapes and key names, (3) what non-zero exit and an unparseable result mean to each caller, including whether both keep not-evaluated separate from a passing verdict, and (4) whether the two verdict protocols are meant to change together, using git history of both files. If the vocabularies or meanings differ, this is a false duplicate and nothing should be merged.",
+            "confidence": "low"
+          },
+          {
+            "concern": "If the parsers do turn out to be equivalent, the open question is where the shared parser should live and which way the dependency should point. One copy is in Core (packages/quay) and the other is in plugin/scripts. A shared helper must not make Core depend on plugin/scripts. This concern only applies if the first one confirms equivalence.",
+            "evidence_refs": [
+              "code:criterion_fidelity",
+              "code:goal_driver_parser",
+              "methodology:ownership_first"
+            ],
+            "needs_investigation": true,
+            "what_to_investigate": "Check the current import direction between plugin/scripts/goal-driver.ts and packages/quay/src. Also check whether a shared parser would be a domain primitive (it belongs in Core) or a driver-specific convention (it stays in the plugin, and Core keeps its own parser).",
+            "confidence": "low"
+          }
+        ],
+        "overall_assessment": "concerns_found"
+      },
+      "scores": {
+        "case_id": "GOAL-032",
+        "stage": "A",
+        "concerns_returned": 2,
+        "concern_validity": {
+          "any_matches_expected": false,
+          "per_concern": [
+            {
+              "concern": "Two modules may each own the same verdict-parsing protocol. ArchGuard flags a fidelity-verdict parser in Core (packages/quay/src/criterion-fidelity.ts) and a su",
+              "matches_expected": false,
+              "matched_reference": null,
+              "overlap": 0.3,
+              "evidence_refs": 4,
+              "unsupported_evidence_refs": [],
+              "grounded": true,
+              "needs_investigation": true,
+              "confidence": "low"
+            },
+            {
+              "concern": "If the parsers do turn out to be equivalent, the open question is where the shared parser should live and which way the dependency should point. One copy is in ",
+              "matches_expected": false,
+              "matched_reference": null,
+              "overlap": 0.333,
+              "evidence_refs": 3,
+              "unsupported_evidence_refs": [],
+              "grounded": true,
+              "needs_investigation": true,
+              "confidence": "low"
+            }
+          ]
+        },
+        "grounding": {
+          "all_cited_refs_resolve": true,
+          "unsupported_claims": []
+        },
+        "ranking": {
+          "valid_concern_ranked_first": false
+        },
+        "abstention": {
+          "abstained": false,
+          "acceptable_here": false,
+          "verdict": "proposed_concerns"
+        },
+        "man": "manual_review_suggested"
+      },
+      "rep": 1
+    },
+    {
+      "case_id": "GOAL-032",
+      "stage": "B",
+      "group": "A",
+      "provenance": {
+        "role": "ab-a",
+        "profile": "gw",
+        "launcher": "claude-fjdac",
+        "model_from_profile": "v4.1flash-anthropic",
+        "model_flag_in_argv": "v4.1flash-anthropic",
+        "gateway_env_dropped": false,
+        "prompt_sha256_16": "c2fc12b322c94329",
+        "prompt_chars": 5244,
+        "started_at": "2026-10-09T14:14:46.885Z",
+        "duration_ms": 25672
+      },
+      "state": "verified",
+      "error": null,
+      "exit_status": 0,
+      "response": {
+        "candidate_slices": [
+          {
+            "title": "Extract the domain-agnostic three-state verdict parser into a shared kernel, vocabulary passed in as data",
+            "description": "Lift the parser algorithm ('parse a judge's raw stdout into a three-state verdict, fail closed if unreadable') out of both criterion-fidelity.ts and goal-driver.ts into a single kernel module reachable from both packages/ and plugin/ without a reverse edge. The only per-caller input is the pair of legal-value literals (positive/negative), passed as a parameter; the algorithm itself carries no domain knowledge. Both call sites are then rewired to delegate, each keeping its own orchestration.",
+            "why_plausible": "Directly matches every T1 finding: the two bodies are byte-for-byte the same shape and semantically equivalent, the only delta is the two literal verdict values, the algorithm is explicitly domain-agnostic, and the GOAL-030 placement principle is already established as reachable from both trees without a reverse edge (archguard:detect_duplicates; code:criterion_fidelity; code:goal_driver_parser; methodology:ownership_first)."
+          },
+          {
+            "title": "Keep both copies; add a characterization/anti-drift guard pinning the two parsers as equivalent",
+            "description": "Declare the duplicate 'equivalent, intentionally kept' and add a test that fails if the two parser bodies diverge, without creating any new shared module or dependency edge.",
+            "why_plausible": "Lowest-risk option: no new cross-tree dependency, no change to either caller. Defensible when the extraction cost or the ownership edge is judged too high — but it leaves the flagged group in archguard:detect_duplicates permanently and converts a structural fact into a maintained invariant."
+          },
+          {
+            "title": "Consolidate the whole goal-driver helper surface (parser + fail-closed protocol + surrounding helpers) into one shared module",
+            "description": "Excise not just the parser but the broader fail-closed machinery both sides share into a single goal-driver kernel.",
+            "why_plausible": "Removes more duplication and could reduce future copy-paste pressure — but the T1 findings only establish the parser as the domain-agnostic, byte-identical unit; the surrounding helpers are not evidenced as equivalent, and finding 4 says the orchestration genuinely differs and should stay different, so this reaches past the established scope."
+          }
+        ],
+        "recommended_first": "Extract the domain-agnostic three-state verdict parser into a shared kernel, vocabulary passed in as data",
+        "investigate_or_goal": "propose-goal",
+        "scope": {
+          "in_scope": [
+            "A single kernel definition of the three-state verdict parser with fail-closed-on-unreadable semantics",
+            "The legal-value vocabulary (positive/negative literals) carried as caller-supplied data — a parameter, not a hardcoded constant in the kernel",
+            "Placement such that both packages/ and plugin/ reach the kernel without creating a reverse edge (per the GOAL-030 placement principle)",
+            "Rewiring both call sites (criterion-fidelity.ts and goal-driver.ts) to delegate to the kernel",
+            "Tests: kernel-level characterization of the parse + fail-closed behavior, plus each caller's existing behavior preserved unchanged"
+          ],
+          "non_goals": [
+            "Unifying the two callers' orchestration — sync/uncached via an injected judge seam vs async/two-sample-agreement-before-caching with split failure causes both stay as they are (finding 4)",
+            "Changing either caller's verdict vocabulary or the meaning of its legal values",
+            "Changing fail-closed semantics (unreadable input must still be distinguishable from a legitimate verdict)",
+            "Extracting the surrounding goal-driver helpers beyond the parser (not evidenced as equivalent)",
+            "A general repo-wide 'dedupe everything detect_duplicates flags' sweep",
+            "Touching the judge seams or the caching/agreement logic"
+          ]
+        },
+        "expected_mechanical_delta": "Run archguard:detect_duplicates before and after. Before: the report contains a duplicate group with ≥2 members covering criterion-fidelity.ts's parser and goal-driver.ts's parser. After the extraction the parser body exists exactly once (in the kernel), so that group is absent from the report, and a body-level check for the shared algorithm body — and for the paired positive/negative literal definitions — in the two caller files returns nothing while returning exactly one hit in the kernel. scripts/test.sh remains green (suite state at cutoff). Both callers' existing tests pass with no assertion changes, which is the evidence that behavior was preserved rather than re-specified.",
+        "negative_control": "Three checks, each of which must be able to fail. (1) Detector sensitivity: re-introduce one caller's private copy of the parser body on a scratch branch and confirm archguard:detect_duplicates re-flags the group — this rules out 'the group vanished for the wrong reason' (stale cache, path exclusion, token-threshold drift) and distinguishes a real de-duplication from a report that merely stopped looking. (2) Wiring completeness: break the kernel's fail-closed handling and confirm BOTH callers' suites go red; if only one goes red, that caller is not actually routed through the kernel and the delta is cosmetic. (3) Vocabulary parameterization: feed each caller a verdict literal belonging to the other caller's vocabulary and confirm it fails closed — proving the word list is genuinely caller-owned data rather than a constant that happens to satisfy both today.",
+        "abandon_or_reconsider_condition": "Abandon or materially revise if any of the following holds: (a) a caller turns out to depend on a behavioral difference beyond the two legal-value literals — i.e. the 'semantically equivalent' T1 finding is falsified by a third-state, trimming, or fail-closed divergence that the equivalence verdict did not capture; (b) the kernel cannot be placed where both trees reach it without introducing a reverse edge, which falsifies the premise of the whole slice and leaves the anti-drift-guard slice as the fallback; (c) producing the shared algorithm requires the kernel to know anything about fidelity vs sufficiency semantics (the vocabulary stops being data); (d) the extraction cannot be evidenced mechanically — if the only available acceptance is 'a human read both files', the slice is not harnessable and should be revised before claiming success.",
+        "harnessability": {
+          "inputs": "The two existing source modules (criterion-fidelity.ts and goal-driver.ts) and their parsers; the archguard:detect_duplicates report at the cutoff commit as the 'before' reading; each caller's existing test suite as the behavior-preservation oracle.",
+          "outputs": "One kernel module defining the three-state verdict parser with fail-closed semantics and a caller-supplied vocabulary parameter; both call sites rewired to delegate; a 'before/after' detect_duplicates comparison; each caller's tests green with unchanged assertions.",
+          "constraints": "The kernel must be reachable from both packages/ and plugin/ with no reverse edge (GOAL-030 principle, methodology:ownership_first). The verdict vocabulary must be a parameter owned by each caller, never a constant in the kernel. Neither caller's orchestration, caching, judge seam, or failure-cause split may change. The kernel must not import either caller's domain module.",
+          "acceptance": "The detect_duplicates group spanning the two parsers is absent after the change; the algorithm body and the paired literal definitions occur exactly once, in the kernel; both callers' existing tests pass unchanged; scripts/test.sh is green; the break-the-kernel control turns both callers' suites red.",
+          "failure_mode": "The extraction appears complete but one caller silently retains its private copy (its file still contains the parser body and the literal pair), or the kernel is placed behind a reverse edge that merely relocates the duplication. Both are 'looks like it worked': the group disappears from the report while the duplication or the structural defect survives. Detected by the per-caller body grep plus negative controls (1) and (2)."
+        },
+        "minimum_sufficiency_rationale": "The T1 findings already settle the question the concern raised (equivalent, not intentionally divergent) and localize the entire difference to two literals, with the algorithm explicitly domain-agnostic. That makes the minimum sufficient action the extraction of exactly that one domain-agnostic function, with the vocabulary carried as data — no more. It is sufficient because it eliminates the flagged duplicate at its root rather than by suppression, and it satisfies the placement principle already established for this codebase (reachable from both trees, no reverse edge). It is minimum because every other element the concern might tempt one to sweep in is explicitly excluded by finding 4 (the orchestration differs and stays) and by the absence of evidence that the surrounding helpers are equivalent. The alternative of adding an anti-drift guard keeps the copy and only converts the duplication into a maintained obligation, and the broad consolidation reaches beyond what the findings establish — both are larger commitments to a smaller evidentiary base. Because the equivalence and domain-agnosticism facts are already in hand, this is a propose-goal, not an investigate: further investigation would re-litigate a settled finding, and the remaining risk (wiring completeness, placement) is discharged by mechanical checks during implementation, not by more reading."
+      },
+      "scores": {
+        "case_id": "GOAL-032",
+        "stage": "B",
+        "slice": {
+          "matches_reference": true,
+          "matches_alternative": true,
+          "novel_not_in_reference": false,
+          "reference_overlap": 0.346,
+          "alternative_overlap": 0.417,
+          "note": "auxiliary: the historical slice is one defensible answer among several, not the sole target"
+        },
+        "granularity": {
+          "verdict": "too-fragmented",
+          "too_broad_overlap": 0.4,
+          "too_fragmented_overlap": 0.75
+        },
+        "investigate_or_goal": {
+          "candidate": "propose-goal",
+          "reference": "propose-goal",
+          "agreement": true,
+          "scored_at": "T1-decision-ready"
+        },
+        "scope_discipline": {
+          "non_goals_present": true,
+          "in_scope_count": 5,
+          "violation": false
+        },
+        "harnessability": {
+          "fields_present": "5/5",
+          "complete": true,
+          "missing": []
+        },
+        "expected_delta_quality": "quantified",
+        "falsifiability": "substantive",
+        "abandon_condition": "specific",
+        "evidence_citations_resolve": true,
+        "manual_review": null
+      },
+      "rep": 1
+    },
+    {
+      "case_id": "GOAL-032",
+      "stage": "B",
+      "group": "B",
+      "provenance": {
+        "role": "ab-b",
+        "profile": "native",
+        "launcher": "/tmp/two-stage-ab-jJbsdt/B/launcher.sh",
+        "model_from_profile": "opus",
+        "model_flag_in_argv": "opus",
+        "gateway_env_dropped": true,
+        "prompt_sha256_16": "c2fc12b322c94329",
+        "prompt_chars": 5244,
+        "started_at": "2026-10-09T14:15:12.559Z",
+        "duration_ms": 47614
+      },
+      "state": "verified",
+      "error": null,
+      "exit_status": 0,
+      "response": {
+        "candidate_slices": [
+          {
+            "title": "S1: Move the shared three-state verdict parser into the kernel, with the verdict vocabulary passed in as a parameter",
+            "description": "Write one domain-agnostic function in the kernel layer: parseVerdict(rawStdout, {positive, negative}) → {state: positive | negative | unreadable, ...}. It keeps the fail-closed behaviour the two copies share today. The two existing parsers (in criterion-fidelity.ts and goal-driver.ts) become one-line calls that pass their own two legal values as data. Neither caller's orchestration changes.",
+            "why_plausible": "The T1 findings show the two copies use the same algorithm and differ only in the two legal-value strings (archguard:detect_duplicates; code:criterion_fidelity; code:goal_driver_parser). The algorithm doesn't depend on the domain, and the vocabulary is data. Both trees can reach the kernel without a reverse edge (methodology:ownership_first). This is the smallest change that leaves one owner of the algorithm."
+          },
+          {
+            "title": "S2: Keep both copies but pin them together with a parity test",
+            "description": "Leave both parsers where they are. Add a characterization test that runs the same raw-stdout corpus through both, after mapping their vocabularies, and requires the same three-state output, so that any drift turns the test red.",
+            "why_plausible": "It costs less and stops silent divergence. But the duplicate group stays, the copied algorithm still has two owners, and drift is caught after the fact instead of being impossible. Since equivalence is already confirmed, this is a fallback, not the fix."
+          },
+          {
+            "title": "S3: Unify the callers' orchestration too (shared judge-invocation or caching layer)",
+            "description": "Go beyond the parser and merge how the two callers invoke the judge: injected seam vs async, caching, two-sample agreement, and split failure causes.",
+            "why_plausible": "It looks tempting because the callers sit next to each other. The T1 findings say outright that their orchestration really differs and should stay different (code:criterion_fidelity vs code:goal_driver_parser). Listed only to rule it out as over-reach."
+          }
+        ],
+        "recommended_first": "S1. The duplicate that is confirmed is the parse algorithm, and nothing else. Moving exactly that algorithm into the kernel, with the vocabulary passed as a parameter, removes the duplicate group and leaves one owner of the fail-closed parse logic. Callers' orchestration stays where it is, and no new dependency direction appears, because the kernel is reachable from both trees (methodology:ownership_first). Anything smaller (S2) leaves two owners. Anything larger (S3) touches orchestration the findings say should stay different.",
+        "investigate_or_goal": "propose-goal",
+        "scope": {
+          "in_scope": [
+            "One kernel-resident, domain-agnostic verdict parser. Inputs: raw judge stdout and a {positive, negative} vocabulary. Output: a three-state verdict, failing closed to 'unreadable' when the input can't be read.",
+            "Replace the parse body in criterion-fidelity.ts (code:criterion_fidelity) with a call that passes the fidelity vocabulary.",
+            "Replace the parse body in goal-driver.ts (code:goal_driver_parser) with a call that passes the sufficiency vocabulary.",
+            "Direct unit tests for the kernel parser: both vocabularies × {positive, negative, empty, garbage, both-tokens-present, wrong-vocabulary token} → expected state, including fail-closed cases.",
+            "Update the existing source comment and the mirroring test file that describe the copy, so they point at the single owner instead of saying it is 'reused verbatim' or 'mirrored'."
+          ],
+          "non_goals": [
+            "Changing either caller's orchestration: sync/uncached/injected judge seam stays in one, async/two-sample agreement/caching/split failure causes stays in the other.",
+            "Changing either domain's legal-value vocabulary, or the meaning of any verdict.",
+            "Building a shared judge-invocation, caching or retry layer (S3).",
+            "Touching other duplicate groups that detect_duplicates reports.",
+            "Relaxing fail-closed: unreadable input must still never come back in the same form as a positive verdict."
+          ]
+        },
+        "expected_mechanical_delta": "Before: archguard:detect_duplicates reports a group whose members include the parser in criterion-fidelity.ts and the parser in goal-driver.ts. Each file defines its own copy of the parse algorithm, and there are zero kernel parser definitions. After: that group is gone from the detect_duplicates output, run with the same scope as before. The kernel defines the parser exactly once. Both caller files import it and define zero local copies, which you can count with a definition-site check by position rather than keyword, printing the first three hits. scripts/test.sh is still green. No new import edge runs from packages/ into plugin/ or the reverse: the package-dependency edge set differs from the baseline only by the two new edges into the kernel.",
+        "negative_control": "1) Mutation: in the kernel parser, make 'unreadable' map to the positive state. Unit tests for both vocabularies must go red, and so must at least one existing test on each caller's path. If only one side goes red, the other caller is still on a private copy, so it only looks like it worked. 2) Wrapper-copy control: run detect_duplicates on a scratch branch where one caller keeps an inlined copy behind a wrapper. It must still report the group, which shows that the group disappearing in (1) means the copy was really removed and not that the detector went blind. 3) Vocabulary-leak control: feed the fidelity vocabulary's positive token to the parser configured with the sufficiency vocabulary. It must return 'unreadable', not positive, which shows the vocabulary really is a parameter and not a hard-coded union.",
+        "abandon_or_reconsider_condition": "Revise to S2, or stop, if any of these turn up during implementation: (a) one caller depends on a parse-side behaviour the other doesn't have, such as different whitespace or case handling, multi-token precedence, or a different error payload. That would contradict the T1 'equivalent' finding (code:criterion_fidelity vs code:goal_driver_parser), so go back to investigation. (b) Putting the parser in the kernel would require a reverse edge or a new cycle, contradicting methodology:ownership_first. (c) Callers can only adopt the shared parser if their orchestration changes, which means the parse and orchestration boundary isn't where the findings say. (d) detect_duplicates still flags the group after the copies are removed, which points to a detector or scope problem that needs a report to archguard rather than a workaround.",
+        "harnessability": {
+          "inputs": "The two existing parser implementations (code:criterion_fidelity, code:goal_driver_parser); the detect_duplicates group (archguard:detect_duplicates); the kernel placement principle (methodology:ownership_first); develop at the cutoff commit, where scripts/test.sh is green.",
+          "outputs": "One kernel parser module plus its unit tests; two caller files reduced to calls with their vocabulary; updated comment and test description; recorded before/after readings from detect_duplicates and the definition-site counts.",
+          "constraints": "Callers' orchestration doesn't change. Vocabulary is passed as data. Fail-closed is kept, and 'unreadable' stays a separate state that never shares the positive verdict's form. No reverse or new cyclic dependency edge. scripts/test.sh stays green.",
+          "acceptance": "(1) detect_duplicates, run with the same scope as the baseline, no longer reports the group. (2) The kernel parser is defined exactly once, and zero local parser copies remain in the two caller files (position-based count, first three hits shown). (3) All three negative controls behave as stated: the mutation reds both sides, the wrapper-copy is still flagged, the cross-vocabulary token returns unreadable. (4) scripts/test.sh is green. (5) The dependency edge set changes only by the two new edges into the kernel.",
+          "failure_mode": "Silent half-migration: one caller keeps a private copy behind a wrapper, so tests stay green while the duplicate survives. Controls 1 and 2 catch this. Also: losing fail-closed through a default that returns positive on unreadable input, which control 1 and the vocabulary-leak control catch. And a detector false-negative from a scope change, so before and after readings must use the same scope."
+        },
+        "minimum_sufficiency_rationale": "The confirmed defect is two owners of one domain-agnostic algorithm. The only thing that differs between them is the two legal-value strings, and that is data (archguard:detect_duplicates; code:criterion_fidelity; code:goal_driver_parser). One owner, with the vocabulary as a parameter, is therefore necessary, since anything less leaves the duplicate. It is also sufficient: nothing outside the parser was found to be duplicated, and the orchestration that does differ is explicitly out of scope. The kernel is the smallest placement both trees can reach without a reverse edge (methodology:ownership_first), so no extra layering work is needed."
+      },
+      "scores": {
+        "case_id": "GOAL-032",
+        "stage": "B",
+        "slice": {
+          "matches_reference": true,
+          "matches_alternative": true,
+          "novel_not_in_reference": false,
+          "reference_overlap": 0.346,
+          "alternative_overlap": 0.417,
+          "note": "auxiliary: the historical slice is one defensible answer among several, not the sole target"
+        },
+        "granularity": {
+          "verdict": "too-broad",
+          "too_broad_overlap": 0.8,
+          "too_fragmented_overlap": 0.333
+        },
+        "investigate_or_goal": {
+          "candidate": "propose-goal",
+          "reference": "propose-goal",
+          "agreement": true,
+          "scored_at": "T1-decision-ready"
+        },
+        "scope_discipline": {
+          "non_goals_present": true,
+          "in_scope_count": 5,
+          "violation": false
+        },
+        "harnessability": {
+          "fields_present": "5/5",
+          "complete": true,
+          "missing": []
+        },
+        "expected_delta_quality": "qualitative_only",
+        "falsifiability": "substantive",
+        "abandon_condition": "specific",
+        "evidence_citations_resolve": true,
+        "manual_review": null
+      },
+      "rep": 1
+    },
+    {
+      "case_id": "GOAL-033",
+      "stage": "A",
+      "group": "A",
+      "provenance": {
+        "role": "ab-a",
+        "profile": "gw",
+        "launcher": "claude-fjdac",
+        "model_from_profile": "v4.1flash-anthropic",
+        "model_flag_in_argv": "v4.1flash-anthropic",
+        "gateway_env_dropped": false,
+        "prompt_sha256_16": "81ab2cba3eb29219",
+        "prompt_chars": 3311,
+        "started_at": "2026-10-09T14:16:00.174Z",
+        "duration_ms": 26700
+      },
+      "state": "verified",
+      "error": null,
+      "exit_status": 0,
+      "response": {
+        "concerns": [
+          {
+            "concern": "The root↔cli relationship is a declared-but-unresolved ownership boundary: packages/quay/src (core root) and its cli subpackage co-depend, and the draft layers rule already names this edge as a known violation recommending it be tightened — but which side owns the shared responsibility (i.e. which direction of dependency is intended, and what moves) is not decided.",
+            "evidence_refs": [
+              "repo:draft_layers_yml",
+              "code:core_root_to_cli_edges"
+            ],
+            "needs_investigation": true,
+            "what_to_investigate": "Enumerate the concrete root→cli and cli→root edges (code:core_root_to_cli_edges) and classify each as incidental vs structural, to fix the intended direction the draft leaves open. The draft says 'tighten' without saying which way, so the canonical ownership of the shared code is currently unassigned.",
+            "confidence": "medium"
+          },
+          {
+            "concern": "The package-level SCC cut is unestablished: the sole 6-member SCC (core root, cli, fan-in, gate, gate/config, gate/factories) has no identified cheapest-to-cut edge, and the effect of removing any single edge on the rest of the SCC is explicitly not established — so no dependency-boundary slice can yet be bounded.",
+            "evidence_refs": [
+              "archguard:detect_cycles",
+              "code:core_root_to_cli_edges"
+            ],
+            "needs_investigation": true,
+            "what_to_investigate": "Per-edge removal analysis: for each edge in the SCC, determine whether cutting it renders the 6-member SCC acyclic and which members remain mutually reachable (the reading explicitly states this has NOT been established). This is the missing prerequisite for defining a slice.",
+            "confidence": "high"
+          },
+          {
+            "concern": "Canonicalization is aspirational, not in force: the only artifact that would pin the layering boundary is an unlanded draft, so there is no enforced single source of truth for package layering. Any slice defined now would be re-deriving a boundary the draft already asserts without settling.",
+            "evidence_refs": [
+              "repo:draft_layers_yml"
+            ],
+            "needs_investigation": false,
+            "confidence": "medium"
+          }
+        ],
+        "overall_assessment": "concerns_found"
+      },
+      "scores": {
+        "case_id": "GOAL-033",
+        "stage": "A",
+        "concerns_returned": 3,
+        "concern_validity": {
+          "any_matches_expected": true,
+          "per_concern": [
+            {
+              "concern": "The root↔cli relationship is a declared-but-unresolved ownership boundary: packages/quay/src (core root) and its cli subpackage co-depend, and the draft layers ",
+              "matches_expected": true,
+              "matched_reference": "a draft layers rule exists but is unlanded, so a declared boundary is documented but not enforced",
+              "overlap": 0.556,
+              "evidence_refs": 2,
+              "unsupported_evidence_refs": [],
+              "grounded": true,
+              "needs_investigation": true,
+              "confidence": "medium"
+            },
+            {
+              "concern": "The package-level SCC cut is unestablished: the sole 6-member SCC (core root, cli, fan-in, gate, gate/config, gate/factories) has no identified cheapest-to-cut ",
+              "matches_expected": false,
+              "matched_reference": null,
+              "overlap": 0.3,
+              "evidence_refs": 2,
+              "unsupported_evidence_refs": [],
+              "grounded": true,
+              "needs_investigation": true,
+              "confidence": "high"
+            },
+            {
+              "concern": "Canonicalization is aspirational, not in force: the only artifact that would pin the layering boundary is an unlanded draft, so there is no enforced single sour",
+              "matches_expected": true,
+              "matched_reference": "a draft layers rule exists but is unlanded, so a declared boundary is documented but not enforced",
+              "overlap": 0.444,
+              "evidence_refs": 1,
+              "unsupported_evidence_refs": [],
+              "grounded": true,
+              "needs_investigation": false,
+              "confidence": "medium"
+            }
+          ]
+        },
+        "grounding": {
+          "all_cited_refs_resolve": true,
+          "unsupported_claims": []
+        },
+        "ranking": {
+          "valid_concern_ranked_first": true
+        },
+        "abstention": {
+          "abstained": false,
+          "acceptable_here": false,
+          "verdict": "proposed_concerns"
+        },
+        "man": "manual_review_suggested"
+      },
+      "rep": 1
+    },
+    {
+      "case_id": "GOAL-033",
+      "stage": "A",
+      "group": "B",
+      "provenance": {
+        "role": "ab-b",
+        "profile": "native",
+        "launcher": "/tmp/two-stage-ab-jJbsdt/B/launcher.sh",
+        "model_from_profile": "opus",
+        "model_flag_in_argv": "opus",
+        "gateway_env_dropped": true,
+        "prompt_sha256_16": "81ab2cba3eb29219",
+        "prompt_chars": 3311,
+        "started_at": "2026-10-09T14:16:26.876Z",
+        "duration_ms": 17178
+      },
+      "state": "verified",
+      "error": null,
+      "exit_status": 0,
+      "response": {
+        "concerns": [
+          {
+            "concern": "Dependency-boundary concern: there is one package-level cycle, a 6-member SCC made of the packages/quay/src root, cli, fan-in, gate, gate/config and gate/factories. These six packages cannot be layered or owned separately while the cycle exists. The concern is real, but nobody has worked out where to cut it: which single edge is cheapest to remove is unknown, and so is which members would leave the SCC along with it.",
+            "evidence_refs": [
+              "archguard:detect_cycles"
+            ],
+            "needs_investigation": true,
+            "what_to_investigate": "List the edges inside the SCC between packages, with how many imports and symbols each one carries. For each candidate cut, work out which members would leave the SCC: some may only be reachable through the cut node, so cutting one edge can remove several members, not just one. Pick the cut by the resulting member set, not by edge count alone.",
+            "confidence": "high"
+          },
+          {
+            "concern": "Ownership concern: the core root and cli depend on each other (root<->cli). The root depending on cli is backwards, because the core should not depend on its CLI front end. That points to something owned by cli that the root needs, such as a helper, type or constant, and that should probably live in the root or a lower layer. The draft layers.yml already lists this edge as a known violation and recommends tightening it, but it does not say whether to move the symbol down, invert the dependency, or split the package.",
+            "evidence_refs": [
+              "code:core_root_to_cli_edges",
+              "repo:draft_layers_yml",
+              "archguard:detect_cycles"
+            ],
+            "needs_investigation": true,
+            "what_to_investigate": "List every root->cli import, with the file, symbol and whether it is a value or a type-only import. Classify each one by its real owner: should it move down, be injected, or is it a type-only edge that is cheap to remove? Then check whether cutting root->cli alone breaks the 6-member SCC, or only shrinks it.",
+            "confidence": "medium"
+          }
+        ],
+        "overall_assessment": "concerns_found"
+      },
+      "scores": {
+        "case_id": "GOAL-033",
+        "stage": "A",
+        "concerns_returned": 2,
+        "concern_validity": {
+          "any_matches_expected": true,
+          "per_concern": [
+            {
+              "concern": "Dependency-boundary concern: there is one package-level cycle, a 6-member SCC made of the packages/quay/src root, cli, fan-in, gate, gate/config and gate/factor",
+              "matches_expected": true,
+              "matched_reference": "a package-level dependency cycle indicates an ownership inversion somewhere among its members",
+              "overlap": 0.5,
+              "evidence_refs": 1,
+              "unsupported_evidence_refs": [],
+              "grounded": true,
+              "needs_investigation": true,
+              "confidence": "high"
+            },
+            {
+              "concern": "Ownership concern: the core root and cli depend on each other (root<->cli). The root depending on cli is backwards, because the core should not depend on its CL",
+              "matches_expected": false,
+              "matched_reference": null,
+              "overlap": 0.3,
+              "evidence_refs": 3,
+              "unsupported_evidence_refs": [],
+              "grounded": true,
+              "needs_investigation": true,
+              "confidence": "medium"
+            }
+          ]
+        },
+        "grounding": {
+          "all_cited_refs_resolve": true,
+          "unsupported_claims": []
+        },
+        "ranking": {
+          "valid_concern_ranked_first": true
+        },
+        "abstention": {
+          "abstained": false,
+          "acceptable_here": false,
+          "verdict": "proposed_concerns"
+        },
+        "man": "manual_review_suggested"
+      },
+      "rep": 1
+    },
+    {
+      "case_id": "GOAL-033",
+      "stage": "B",
+      "group": "A",
+      "provenance": {
+        "role": "ab-a",
+        "profile": "gw",
+        "launcher": "claude-fjdac",
+        "model_from_profile": "v4.1flash-anthropic",
+        "model_flag_in_argv": "v4.1flash-anthropic",
+        "gateway_env_dropped": false,
+        "prompt_sha256_16": "ff8ff380a3860fd6",
+        "prompt_chars": 5294,
+        "started_at": "2026-10-09T14:16:44.056Z",
+        "duration_ms": 164275
+      },
+      "state": "verified",
+      "error": null,
+      "exit_status": 0,
+      "response": {
+        "candidate_slices": [
+          {
+            "title": "Relocate the two shared primitives out of cli/ into core-root — core-root owns them, cli consumes them",
+            "description": "Extract the driver control client (cli/driver.ts's runDriver/runDriverAsync half) and the driver/service-name vocabulary (cli/driver-vocab.ts) into root-layer modules (packages/quay/src/driver-control.ts, packages/quay/src/driver-vocab.ts). Re-point the two root consumers: the session handler (serve-sessions.ts) at the control client, the server entry (serve.ts) at the vocabulary — dropping the entirely-unused HOSTED_SERVICE_NAMES symbol from that import. Update cli/* (help.ts, server.ts, driver.ts) and any non-code consumer that names the moved modules by path to the new locations, so cli imports them downward, joining the existing cli->core-root direction. Result: root->cli value edges = 0.",
+            "why_plausible": "It is the only slice that removes BOTH edges, which is exactly what the derived property requires. It also matches the ownership reading rather than fighting it: the two modules are genuinely shared (cli/help.ts still consumes the vocabulary for CLI help text), so the defect is placement, not layering intent — the primitive belongs to the layer both consumers already sit under."
+          },
+          {
+            "title": "Consumer-side cut — remove core-root's need for the cli module instead of moving the primitive",
+            "description": "Treat the two edges independently and delete the dependency at the consumer: drop the vocabulary import at the server entry outright if the whole import proves dead, and give the session handler a root-owned way to start a driver (or move that handler's driver-starting concern into cli).",
+            "why_plausible": "Smallest blast radius per edge, and it is the correct answer if one named 'primitive' is actually a CLI-only concern that core is misusing — the evidence flags one imported symbol as entirely unused, so at least part of one edge is dead weight. It is insufficient as stated only because the derived property is joint: cutting one edge leaves one inbound edge and cli stays in the SCC."
+          },
+          {
+            "title": "Declare the direction and make it an invariant — adopt docs/layers.yml (draft) and tighten core-root -> core-cli",
+            "description": "Land the draft layer map with `core-root -> core-cli` moved out of `allowed` into `forbidden`, and give it an in-repo CI consumer so it is a checked invariant rather than a declaration; record the pre-cut SCC in `known_violations` as a shrink-only ratchet baseline.",
+            "why_plausible": "The draft already flags that exact edge as 实测存在 / 建议收紧, and its own header states it is '只是声明，不是不变量' until a repo-internal, CI-wired consumer exists — so the declaration is right but is not by itself a mechanism. It removes zero edges, therefore it cannot satisfy the derived property alone; it is the durable guard for whichever cut is chosen."
+          }
+        ],
+        "recommended_first": "Slice 1 — relocate the two shared primitives from cli/ into core-root and re-point both consumers (with the dead-symbol deletion riding along as its zero-risk first step).",
+        "investigate_or_goal": "propose-goal",
+        "scope": {
+          "in_scope": [
+            "Move the driver control client and the driver/service-name vocabulary out of packages/quay/src/cli/ so each is declared once in core-root and imported downward.",
+            "Re-point both root-layer consumers at the new homes (serve-sessions.ts for the control client; serve.ts for the vocabulary), and delete the unused HOSTED_SERVICE_NAMES symbol from that vocabulary import.",
+            "Update cli/* and any non-code consumer that names the moved modules by path (a stale path literal is not a compile error — it goes silently vacuous).",
+            "Take and record the before/after archguard detect_cycles reading at a PINNED scope, plus position-based (statement-position) import counts.",
+            "Confirm single-definition per relocated symbol and a green scripts/test.sh."
+          ],
+          "non_goals": [
+            "The other 34 cli->core-root edges — that is the normal direction and is not part of the concern.",
+            "The residual cycle among root / gate / gate-config / gate-factories that survives the cut.",
+            "No new workspace package and no new neutral third layer.",
+            "No behavior change: driver start/stop protocol, service-name values, server-entry semantics, CLI help-text output.",
+            "Making cli's internals layer-clean; cli/driver.ts stays the verb layer.",
+            "Landing docs/layers.yml (slice 3) as part of this slice."
+          ]
+        },
+        "expected_mechanical_delta": "Before (at the cutoff commit, pinned scope): archguard:detect_cycles reports one 6-member SCC {root, cli, fan-in, gate, gate/config, gate/factories}, and a position-based count of real import/export statements matching './cli' among the root-layer files = exactly 2 (serve-sessions.ts, serve.ts). After: the same position-based count = 0; the enumerated SCC member set at the pinned scope no longer contains cli; cli's inbound-edge count from the former members = 0; and the total number of nodes participating in cycles strictly decreases. Pre-registered prediction: 6 -> 4 ({root, gate, gate/config, gate/factories}), because fan-in's only return path threads root->cli — a measured 5 would falsify that reachability claim rather than the cut. Additionally each relocated symbol has exactly one definition site repo-wide, and scripts/test.sh stays green. Caveat on measurement: the before-reading must be taken at the cutoff commit — the working tree has since moved past it (HEAD already reads `import { runDriver } from \"./driver-control.ts\"` and `from \"./driver-vocab.ts\"`), so a before-reading taken now would be vacuous.",
+        "negative_control": "Four controls, all of which must be run, because all four failure forms are indistinguishable from success on a file-diff reading. (1) Duplication control — the cheapest way to make the two edges vanish is to copy the primitives into root and leave cli's copies: assert that each relocated symbol is declared in exactly one file repo-wide and that cli imports rather than redeclares it; a green cycle metric plus two definitions is a regression, not a fix. (2) Re-export-shim control — an cli/ barrel that re-exports the moved modules keeps a root->cli value edge alive if root imports through it: verify on the IMPORTER files (serve.ts, serve-sessions.ts) that the specifier does not traverse cli/, not merely that the moved files no longer mention cli. (3) Mutation control — reintroduce exactly one root->cli value import and confirm detect_cycles puts cli back in the SCC; if the reading does not flip, the instrument is not measuring the edge you think it is. (4) Relocation control — assert the third quantity (total nodes in cycles) strictly decreases, not merely that cli left; a primitive moved into a module that already reaches root swaps membership and cuts nothing. Plus a not-evaluated guard: detect_cycles must return evaluated:true with an enumerated member list at the pinned scope — a bare empty list, or an unpinned-scope call, is the graph failing to be read, not the graph being clean.",
+        "abandon_or_reconsider_condition": "Abandon or materially revise if any of the following is measured. (a) The pre-change control shows root->cli is not exactly 2 static value edges — a type-only or dynamic edge, or a disagreement between the position-based grep and the archguard reading, invalidates the enumeration and therefore the derived property; go back to investigation. (b) No cycle-free home exists: every candidate home for a primitive is itself reachable from root, so the change relocates the cycle instead of cutting it and the total cycle-node count does not fall — the edge is then load-bearing at the layer level and the concern must be re-framed (cut a different SCC edge, or declare the direction and accept the cycle). (c) Measurement shows one of the two 'shared primitives' is in fact used only by cli, with the core consumer's use being the accident — the ownership reading is falsified for that edge and the consumer-side cut (slice 2) is the right answer for it. (d) The post-change member count does not strictly decrease. (e) An independent reading of history shows the cli/ placement was deliberate rather than an accident of first consumption.",
+        "harnessability": {
+          "inputs": "The repo at the cutoff commit (the pre-cut state); the pinned archguard scope that produced the 6-member SCC (an unpinned call is silently empty, so the scope is part of the input, not an option); the two implicated cli/ modules and the two root consumers; the existing import-graph ratchet baseline.",
+          "outputs": "A code diff that relocates both modules, re-points both consumers, and deletes the dead symbol; a before/after detect_cycles pair at the pinned scope with the enumerated member sets; position-based import counts (before = 2, after = 0); a single-definition check per relocated symbol; a green scripts/test.sh.",
+          "constraints": "No behavior change to driver start/stop, service-name values, server-entry semantics, or CLI help text. No new package or layer. Must not introduce a new cycle. Do not touch the other 34 cli->core-root edges or the residual gate sub-cycle. The before-reading must be landed at the cutoff commit, not at HEAD.",
+          "acceptance": "Root->cli value-edge count = 0, established by position on the importer files (both real import statements re-pointed), not on the moved files. archguard:detect_cycles at the pinned scope returns evaluated:true with an enumerated member set that omits cli and is strictly smaller than the 6 before. Each relocated symbol has exactly one definition site repo-wide. No path literal anywhere in the repo still names the old cli/ locations. scripts/test.sh green.",
+          "failure_mode": "Green metric, unaddressed concern — the edges can be made to disappear by duplicating the primitives into root and leaving cli's copies (graph clean, single-home property now violated), by leaving a cli/ re-export barrel that root imports through (the value edge survives although the moved files no longer mention cli), or by relocating a primitive into a module that already reaches root (membership swaps, count unchanged). A fourth form is a reading rather than a change: a detect_cycles result that is empty because the scope was not pinned — the graph failing to be read, reported in the same shape as the graph being clean."
+        },
+        "minimum_sufficiency_rationale": "The derived property is binary and joint: cli leaves the SCC only when BOTH inbound edges from within the cycle are gone, and the findings establish the edge set is closed at exactly 2 (the other 34 run the normal way, and every other SCC member contributes zero edges into cli). Slice 1 removes exactly that set and nothing more — no smaller slice can work (one edge removed leaves one inbound edge and the cycle persists, so the dead-symbol cleanup is a free rider rather than a fix), and anything larger edits edges the findings show are not the problem, or chases the residual gate sub-cycle that the cut itself proves is not this concern's. It requires no new package, no new layer and no new instrument: the guard against regression is the ratchet and the layer declaration that already exist. And it fixes the cause named by the ownership reading rather than its symptom — the primitives are shared, so the answer is that core-root owns them and cli consumes them, not that cli should keep a facade core reaches back into."
+      },
+      "scores": {
+        "case_id": "GOAL-033",
+        "stage": "B",
+        "slice": {
+          "matches_reference": true,
+          "matches_alternative": true,
+          "novel_not_in_reference": false,
+          "reference_overlap": 0.395,
+          "alternative_overlap": 0.6,
+          "note": "auxiliary: the historical slice is one defensible answer among several, not the sole target"
+        },
+        "granularity": {
+          "verdict": "too-fragmented",
+          "too_broad_overlap": 0.2,
+          "too_fragmented_overlap": 1
+        },
+        "investigate_or_goal": {
+          "candidate": "propose-goal",
+          "reference": "propose-goal",
+          "agreement": true,
+          "scored_at": "T1-decision-ready"
+        },
+        "scope_discipline": {
+          "non_goals_present": true,
+          "in_scope_count": 5,
+          "violation": false
+        },
+        "harnessability": {
+          "fields_present": "5/5",
+          "complete": true,
+          "missing": []
+        },
+        "expected_delta_quality": "quantified",
+        "falsifiability": "substantive",
+        "abandon_condition": "specific",
+        "evidence_citations_resolve": true,
+        "manual_review": null
+      },
+      "rep": 1
+    },
+    {
+      "case_id": "GOAL-033",
+      "stage": "B",
+      "group": "B",
+      "provenance": {
+        "role": "ab-b",
+        "profile": "native",
+        "launcher": "/tmp/two-stage-ab-jJbsdt/B/launcher.sh",
+        "model_from_profile": "opus",
+        "model_flag_in_argv": "opus",
+        "gateway_env_dropped": true,
+        "prompt_sha256_16": "ff8ff380a3860fd6",
+        "prompt_chars": 5294,
+        "started_at": "2026-10-09T14:19:28.332Z",
+        "duration_ms": 54716
+      },
+      "state": "verified",
+      "error": null,
+      "exit_status": 0,
+      "response": {
+        "candidate_slices": [
+          {
+            "title": "S1: Move the two shared primitives out of cli/ to a non-CLI owner and delete the dead import",
+            "description": "Move the driver control client (used by a core-root session handler) and the service-name vocabulary (used by the server entry) out of cli/. Put them in core-root or a lower module that core-root already owns. Point both consumers, core-root and cli, at the new location. cli imports them in the normal cli -> core direction, which is one of its existing 34 root-bound edges. Delete the unused symbol from the server-entry import while editing it. cli/ keeps no re-export shim that core-root could import through. Net result: both root -> cli value edges are gone.",
+            "why_plausible": "This matches the ownership reading: these are primitives both layers share, and they were filed under cli/ only because CLI help text used them first. Moving them fixes where they live instead of hiding the edge. Per code:core_root_to_cli_edges there are exactly 2 root -> cli edges. Per archguard:detect_cycles no other SCC member has an edge into cli. So removing these 2 edges is enough on its own for cli to leave the SCC."
+          },
+          {
+            "title": "S2: Inversion — inject the control client and vocabulary from the CLI side",
+            "description": "Leave the primitives in cli/. Change the session handler and the server entry so they receive the control client and the service-name vocabulary as parameters or registrations supplied by the CLI bootstrap. This removes the static root -> cli imports without moving any files.",
+            "why_plausible": "It also cuts the 2 edges. But it goes against the ownership reading: the primitives are shared by both layers and are not CLI-owned. It adds indirection, and it makes core depend at runtime on CLI wiring. Keep it only as a fallback in case relocation turns out to drag cli-internal dependencies along."
+          },
+          {
+            "title": "S3: Ratchet — forbid core-root -> cli in the layer rules and enforce it",
+            "description": "Add a rule to the draft layer declaration (repo:draft_layers_yml) that core-root must not depend on cli. Wire a mechanical check so that a new root -> cli import fails.",
+            "why_plausible": "Without a ratchet, the next help-text-first primitive brings the edge back. This slice is about keeping the fix in place, not about cutting the cycle, so it comes after S1."
+          }
+        ],
+        "recommended_first": "S1. It is the smallest change that removes both root -> cli edges, and it fixes the root cause the T1 ownership reading names (shared primitives put in the wrong folder). It changes two import sites and the two primitives' locations. It adds no new abstractions and changes no behaviour. The dead-import removal is folded in because it is on the same line. S3 follows as a separate slice.",
+        "investigate_or_goal": "propose-goal",
+        "scope": {
+          "in_scope": [
+            "Move the driver control client primitive from cli/ to a non-CLI owner (core-root or lower) that does not import cli",
+            "Move the service-name vocabulary primitive from cli/ to the same kind of non-CLI owner",
+            "Point the core-root session handler and server entry at the new locations",
+            "Point existing cli consumers at the new locations (cli -> core direction, allowed)",
+            "Delete the unused symbol from the server-entry import",
+            "Check that the moved modules have no imports of their own back into cli (otherwise the edge just moves)"
+          ],
+          "non_goals": [
+            "Breaking the rest of the 6-member SCC (the gate, gate/config, gate/factories and fan-in internal edges) is out of scope; only cli's membership is targeted",
+            "No reduction of the 34 cli -> core-root edges; that direction is correct",
+            "No renaming or behaviour change to the control client or the vocabulary; this is a move only",
+            "No new CLI facade or DI framework (S2 is not the plan)",
+            "The layer-rule ratchet (S3) is a follow-up, not part of this slice",
+            "No claim about exactly which other members leave the SCC; only cli's exit is predicted"
+          ]
+        },
+        "expected_mechanical_delta": "Before: archguard:detect_cycles, with scope passed explicitly over packages/quay/src, reports one package-level SCC of 6 members, cli among them. A package fan-in reading of cli from core-root gives 2 (code:core_root_to_cli_edges). After: the core-root -> cli fan-in is 0, and a grep for imports from cli/ in core-root files finds nothing. archguard:detect_cycles reports no SCC containing cli. The SCC size is at most 5 (strictly fewer than 6). The prediction is only that cli leaves. If other members could reach the cycle only through cli, they may leave too, so the exact post-change member set is a measured result, not something asserted in advance. The cli -> core-root edge count stays about the same (34, plus at most the re-pointed imports). scripts/test.sh stays green.",
+        "negative_control": "(1) Instrument check: run archguard:detect_cycles with the same explicit scope on the pre-change cutoff commit and confirm it returns the 6-member SCC with cli in it. If that run returns no cycle, a post-change 'no cycle' result carries no information (wrong scope or broken tool) and must be reported as NOT-EVALUATED, not as success. (2) Mutation check: on a scratch copy of the post-change tree, add back a single core-root -> cli import, for example by importing the vocabulary from its old path through a cli/ re-export. Confirm that detect_cycles puts cli back into the SCC. This rules out the 'it looks like it worked' case where files moved but cli/ kept a re-export shim that core-root still reaches, or where the analyzer ignores the edge kind used.",
+        "abandon_or_reconsider_condition": "Revise or abandon in any of these cases. (a) The pre-change detect_cycles reading does not show cli in the SCC, or the fan-in reading is not 2, for example because of dynamic or type-only edges the T1 count missed. (b) Either primitive turns out to import cli-internal helpers, so moving it would bring a new root -> cli or new-home -> cli edge with it; in that case move to S2 or split the primitive first. (c) After the change cli is still in an SCC, which would mean an edge exists outside the T1 finding that the other members contribute zero edges into cli; the premise is then wrong and needs re-investigation. (d) The move turns scripts/test.sh red in ways not explained by import-path updates.",
+        "harnessability": {
+          "inputs": "The develop commit at the cutoff; the two named root -> cli import sites (code:core_root_to_cli_edges); the archguard:detect_cycles reading with explicit scope; the draft layer declaration (repo:draft_layers_yml) for the destination layer of the moved primitives.",
+          "outputs": "A diff that moves two modules out of cli/, updates their importers in core-root and cli, and removes the dead import symbol. Before/after detect_cycles readings and root -> cli fan-in readings, recorded together.",
+          "constraints": "Move only; no behaviour change; no re-export shim in cli/ that core-root uses; the new location must not import cli; no edits to the internal edges of gate, gate/config, gate/factories or fan-in; scripts/test.sh green.",
+          "acceptance": "Four checks. (1) The core-root -> cli fan-in reading is 0, and a grep of core-root files for cli/ imports finds nothing, with the grep first dry-run on the pre-change tree to show it finds the 2 known edges. (2) detect_cycles with explicit scope reports no SCC containing cli, and the largest SCC has fewer than 6 members. (3) The negative controls pass: the pre-change reading shows 6 members with cli, and adding the edge back on a scratch tree puts cli back in the SCC. (4) scripts/test.sh is green.",
+          "failure_mode": "If cli is still in an SCC, report the edge that keeps it there; that contradicts the T1 findings and calls for re-investigation, not a wider patch. If the pre-change control fails to reproduce the 6-member SCC, report NOT-EVALUATED. If tests go red, revert the move and report which consumer broke."
+        },
+        "minimum_sufficiency_rationale": "Sufficient: per archguard:detect_cycles and code:core_root_to_cli_edges, the only edges into cli from inside the cycle are the 2 root -> cli edges, so removing both is all it takes for cli to leave the SCC. Minimum: the dead symbol cannot be dropped on its own, because a live symbol shares that import edge. Removing only one of the two edges leaves cli in the cycle. Anything beyond moving the two primitives (breaking gate or fan-in internal edges, adding a facade, adding the ratchet) is not needed to cut this edge. Moving rather than injecting (S2) is the cheapest change that also matches the ownership reading, so the fix addresses the misplacement instead of hiding it."
+      },
+      "scores": {
+        "case_id": "GOAL-033",
+        "stage": "B",
+        "slice": {
+          "matches_reference": false,
+          "matches_alternative": true,
+          "novel_not_in_reference": false,
+          "reference_overlap": 0.279,
+          "alternative_overlap": 0.6,
+          "note": "auxiliary: the historical slice is one defensible answer among several, not the sole target"
+        },
+        "granularity": {
+          "verdict": "too-fragmented",
+          "too_broad_overlap": 0,
+          "too_fragmented_overlap": 0.667
+        },
+        "investigate_or_goal": {
+          "candidate": "propose-goal",
+          "reference": "propose-goal",
+          "agreement": true,
+          "scored_at": "T1-decision-ready"
+        },
+        "scope_discipline": {
+          "non_goals_present": true,
+          "in_scope_count": 6,
+          "violation": false
+        },
+        "harnessability": {
+          "fields_present": "5/5",
+          "complete": true,
+          "missing": []
+        },
+        "expected_delta_quality": "quantified",
+        "falsifiability": "substantive",
+        "abandon_condition": "specific",
+        "evidence_citations_resolve": true,
+        "manual_review": null
+      },
+      "rep": 1
+    }
+  ]
+}

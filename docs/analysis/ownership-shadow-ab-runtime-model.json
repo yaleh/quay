@@ -1,0 +1,1887 @@
+{
+  "experiment": "ownership-shadow semantic proposer — runtime+model A/B",
+  "design": {
+    "A": {
+      "launcher": "claude-fjdac",
+      "model": "v4.1flash-anthropic",
+      "backend": "LiteLLM gateway 127.0.0.1:26510 -> deepseek/deepseek-flash (DeepSeek-V4.1-Flash)"
+    },
+    "B": {
+      "launcher": "claude",
+      "model": "opus",
+      "backend": "claude.ai login (native Anthropic)",
+      "gateway_env_dropped": [
+        "ANTHROPIC_BASE_URL",
+        "ANTHROPIC_API_KEY",
+        "ANTHROPIC_AUTH_TOKEN",
+        "ANTHROPIC_DEFAULT_OPUS_MODEL",
+        "ANTHROPIC_DEFAULT_SONNET_MODEL",
+        "ANTHROPIC_DEFAULT_HAIKU_MODEL"
+      ]
+    },
+    "controls": {
+      "profiles_carrier": "fixture .quay/profiles.yml under a temp root — repo .quay/profiles.yml NOT modified",
+      "prompt": "built once per case from input.json only, reused verbatim by both groups",
+      "leakage": "reference.json / outcome.json never opened"
+    }
+  },
+  "harness_self_test": {
+    "prompts_identical_across_groups_per_case": true,
+    "per_case": {
+      "GOAL-030": {
+        "prompt_shas": [
+          "0c05f1c46e251ec6"
+        ],
+        "identical_across_groups": true
+      },
+      "GOAL-031": {
+        "prompt_shas": [
+          "cb1e41cfaa66f782"
+        ],
+        "identical_across_groups": true
+      },
+      "GOAL-032": {
+        "prompt_shas": [
+          "68d7ce7cb45a9de9"
+        ],
+        "identical_across_groups": true
+      },
+      "GOAL-033": {
+        "prompt_shas": [
+          "723350928439057d"
+        ],
+        "identical_across_groups": true
+      }
+    }
+  },
+  "reps": 2,
+  "runs": [
+    {
+      "case_id": "GOAL-030",
+      "group": "A",
+      "provenance": {
+        "role": "ab-a",
+        "profile": "gw",
+        "launcher": "claude-fjdac",
+        "model_from_profile": "v4.1flash-anthropic",
+        "model_flag_in_argv": "v4.1flash-anthropic",
+        "prompt_via_stdin": true,
+        "prompt_sha256_16": "0c05f1c46e251ec6",
+        "prompt_chars": 2610,
+        "gateway_env_dropped": false,
+        "started_at": "2026-10-09T14:02:48.775Z",
+        "ended_at": "2026-10-09T14:03:08.648Z",
+        "duration_ms": 19873
+      },
+      "state": "verified",
+      "error": null,
+      "exit_status": 0,
+      "envelope": {
+        "proposer_id": "ownership-shadow-semantic",
+        "concern": "In plugin/scripts, dependency edge strength into non-kernel modules (44) is more than three times that into the kernel (14), so the majority of plugin-script behavior is owned by modules that are not the canonical entry surface — with one directory cycle indicating at least one such boundary is not layered.",
+        "evidence_refs": [
+          "archguard:case_readings",
+          "methodology:ownership-first",
+          "goals:status_tally",
+          "tasks:status_tally"
+        ],
+        "candidate_interventions": [
+          {
+            "title": "Enumerate and classify the 44 plugin_scripts→non_kernel edges by owning module",
+            "rationale": "The two aggregate counts (14 kernel / 44 non-kernel) name an asymmetry but not a defect: methodology §2 warns that a canonical source is not the same as caller convergence, so the first slice is to list each edge's target module and ask whether that module has a kernel-side owner or is an orphan. This is investigation, not a refactor."
+          },
+          {
+            "title": "Localize the single directory cycle and declare which node owns the shared state",
+            "rationale": "architecture has exactly 1 directory cycle; a cycle is a dependency-boundary fact only if the two members share mutable state rather than merely importing a type/constant. Slice = the cycle's two directories named, plus a one-line statement of which side is canonical."
+          },
+          {
+            "title": "Fix the direction of the plugin↔packages boundary in writing before touching edges",
+            "rationale": "packages_to_plugin_edges = 0 is the one reading that is already clean and is worth pinning as a declared rule (methodology §7 layer 2: declared rules), so that any later re-pointing of the 44 edges cannot quietly introduce a packages→plugin dependency."
+          }
+        ],
+        "recommended_next_action": "investigate",
+        "scope": {
+          "in_scope": [
+            "edge-level classification of plugin/scripts dependencies (kernel vs non-kernel target module)",
+            "identification of the 1 directory cycle's members and its shared mutable state, if any",
+            "a written declaration of the plugin/scripts ↔ packages direction"
+          ],
+          "non_goals": [
+            "reducing the raw count 44 as a number (methodology §8: mechanical pass ≠ architecture good)",
+            "introducing a pattern zoo or new abstraction layer to 'fix' the ratio (methodology §3)",
+            "any product/roadmap/prioritisation judgement, or choosing which goal to attach this to"
+          ]
+        },
+        "expected_mechanical_delta": "Before: plugin_scripts_to_kernel_edge_strength=14, plugin_scripts_to_non_kernel_edge_strength=44, directory_cycles=1 (aggregate only, targets unnamed). After the investigate slice: a per-edge table naming each of the 44 targets with an owner-or-orphan verdict, the cycle's two members named, and a kernel/non-kernel recount that states whether the split is 14/44 or differs once multi-target imports are counted individually. Only if a re-pointing is later justified would the numbers move (kernel 14→14+N, non-kernel 44→44−N); the investigate slice itself is expected to change readings, not counts.",
+        "negative_control": "Two checks that must be able to fail. (1) Known-true dry run of the classifier: pick a plugin script that demonstrably imports a kernel module and confirm it is counted as a kernel edge — if the predicate does not fire on a known-true sample, the 14 is an instrument artifact, not a measurement. (2) Shell-move discriminator: if a candidate edge is re-pointed to a kernel entry yet the target module turns out to be kernel-owned but merely located outside the kernel directory, the kernel count rises while canonical ownership is unchanged — that outcome must be reported as 'looked like it worked', not as convergence. Also require an explicit NOT-EVALUATED value for edges whose target module cannot be resolved, so 'unreadable' is never reported as 'kernel'.",
+        "abandon_or_reconsider_condition": "Abandon if the classification shows the 44 non-kernel edges are dominated by modules whose ownership is legitimately elsewhere (test helpers, fixtures, generated data), or if the single directory cycle is confined to a leaf directory with no shared mutable state — in which case the asymmetry is a directory-layout fact and not an ownership defect. Also abandon if the edge counts cannot be reproduced from case_readings with named targets (aggregate-only evidence is insufficient to name an owner).",
+        "confidence": {
+          "level": "low",
+          "basis": "Grounded only in two aggregate edge counts and one cycle count from archguard @97d17da6b; goals:status_tally and tasks:status_tally are both empty, so there is no evidence of recurrence, no prior incidence reading, and no basis to rank this above other candidates (methodology §12 / rule 12: no rate ⇒ observation, not a blocker). The one clean reading (packages_to_plugin_edges=0) is what makes the direction question well-posed enough to investigate rather than abstain."
+        }
+      },
+      "scores": {
+        "case_id": "GOAL-030",
+        "concern_recall": 0,
+        "concern_precision": 0,
+        "chosen_slice_agreement": "no_match",
+        "chosen_slice_overlap_score": 0.1323529411764706,
+        "investigation_vs_goal_agreement": false,
+        "scope_expansion_violation": false,
+        "expected_delta_quality": "has_numeric_claim",
+        "falsifiability_negative_control_presence": "present",
+        "decomposition_quality": {
+          "structured_fields_present": "2/2 prose fields, 3/3 array fields non-empty",
+          "why_not_broader_overlap": 0,
+          "why_not_finer_overlap": 0.375
+        },
+        "slice_semantic_coherence": "possible_bundling_heuristic(4_joins)",
+        "granularity": "agreement",
+        "harnessability": "harness_ready",
+        "harnessability_components": {
+          "has_scope_non_goals": true,
+          "has_negative_control": true,
+          "has_numeric_expected_delta": true,
+          "has_failure_mode": true
+        },
+        "primitive_reuse": {
+          "mentioned_any": true,
+          "overlap_with_reference": 0.5,
+          "possible_reinvention": false
+        },
+        "decomposition_breadth": {
+          "concerns_named": 1,
+          "interventions_proposed": 3
+        },
+        "coordination_cost_reasoning_given": true,
+        "unnecessary_decomposition_flag": false,
+        "hindsight_leakage_guard": {
+          "flagged": false,
+          "matched_markers": []
+        },
+        "abstention_uncertainty_reasonableness": "specific",
+        "note": "rule-assisted, minimal-viable metrics — not a calibrated aggregate score (see README.md)"
+      },
+      "cited_refs": [
+        "archguard:case_readings",
+        "methodology:ownership-first",
+        "goals:status_tally",
+        "tasks:status_tally"
+      ],
+      "unresolved_refs": [],
+      "is_abstain": false,
+      "intervention_count": 3,
+      "rep": 1
+    },
+    {
+      "case_id": "GOAL-030",
+      "group": "B",
+      "provenance": {
+        "role": "ab-b",
+        "profile": "native",
+        "launcher": "/tmp/ownership-ab-fJviCe/B/launcher.sh",
+        "model_from_profile": "opus",
+        "model_flag_in_argv": "opus",
+        "prompt_via_stdin": true,
+        "prompt_sha256_16": "0c05f1c46e251ec6",
+        "prompt_chars": 2610,
+        "gateway_env_dropped": true,
+        "started_at": "2026-10-09T14:03:08.650Z",
+        "ended_at": "2026-10-09T14:03:27.325Z",
+        "duration_ms": 18675
+      },
+      "state": "verified",
+      "error": null,
+      "exit_status": 0,
+      "envelope": {
+        "proposer_id": "ownership-shadow-semantic",
+        "concern": "plugin/scripts reaches into non-kernel modules at roughly 3x the strength it reaches the kernel (edge strength 44 vs 14), and there is 1 directory cycle. This suggests plugin/scripts may not have a clear owner for logic it consumes, so it bypasses a canonical kernel surface instead of converging on it.",
+        "evidence_refs": [
+          "archguard:case_readings",
+          "methodology:ownership-first"
+        ],
+        "candidate_interventions": [
+          {
+            "title": "Attribute the plugin_scripts→non-kernel edges and the single directory cycle to concrete module pairs",
+            "rationale": "The evidence gives aggregate edge strengths only. Ownership-first (§1) asks who should own each consumed responsibility before any move. The 44 non-kernel edges have to be listed by target before anyone can say whether they are a boundary leak or legitimate peer reuse."
+          },
+          {
+            "title": "Pick one consumed responsibility in the non-kernel set that has a kernel-shaped owner and converge its callers (one small slice)",
+            "rationale": "Methodology §2/§4: canonical source ≠ caller convergence. A real slice moves the callers onto one owner and does not just relocate a shell. It has to be one slice that can be accepted on its own, not a sweep."
+          },
+          {
+            "title": "Determine whether the 1 directory cycle passes through plugin/scripts",
+            "rationale": "If the cycle includes plugin/scripts, then it is the concrete dependency-boundary defect, and breaking it is the smallest falsifiable intervention. If it does not, it belongs to a different concern and should not be bundled here."
+          }
+        ],
+        "recommended_next_action": "investigate",
+        "scope": {
+          "in_scope": [
+            "plugin/scripts outbound dependency edges (kernel vs non-kernel)",
+            "the 1 reported directory cycle and its member directories",
+            "ownership attribution of the responsibilities behind the 44 non-kernel edges"
+          ],
+          "non_goals": [
+            "packages/ → plugin boundary (already 0 edges; no concern evidenced)",
+            "goal/task backlog health (status tallies are empty and carry no signal)",
+            "large-scale OO restructuring or pattern introduction (methodology §3/§11)",
+            "product, roadmap, or UI work"
+          ]
+        },
+        "expected_mechanical_delta": "For a converged slice: on develop, the archguard reading of plugin_scripts_to_non_kernel_edge_strength drops below 44 and plugin_scripts_to_kernel_edge_strength rises or holds, with the callers of the moved responsibility importing one owner. If the cycle is in scope: directory_cycles goes from 1 to 0. Before and after must both be read from archguard on develop at named commits.",
+        "negative_control": "Re-read the edge strengths after the slice. Also check with find_callers or get_dependents that the old non-kernel location has zero remaining callers for the moved responsibility. A wrapper or re-export that keeps the edge count the same, or moves edges without changing which module callers import, means it only looks like it worked (methodology §2: moving the shell). The AC should be one that fails if the old module is left in place as a pass-through.",
+        "abandon_or_reconsider_condition": "Abandon if attribution shows the non-kernel targets are other plugin/scripts siblings or shared utilities with no kernel-shaped owner. In that case 44 vs 14 is healthy internal cohesion, not a leak. Also abandon if the directory cycle lies entirely outside plugin/scripts and the edge targets show no repeated responsibility across callers.",
+        "confidence": {
+          "level": "low",
+          "basis": "The only ownership signal is three aggregate archguard numbers (cycles=1, 14 vs 44 edge strength, packages→plugin=0), all at develop @97d17da6b. No per-edge or per-module breakdown is given, so a 44 vs 14 ratio does not show the edges are misplaced. The goal and task status tallies are empty and add nothing. Investigating is warranted; proposing a goal is not."
+        }
+      },
+      "scores": {
+        "case_id": "GOAL-030",
+        "concern_recall": 0,
+        "concern_precision": 0,
+        "chosen_slice_agreement": "no_match",
+        "chosen_slice_overlap_score": 0.10294117647058823,
+        "investigation_vs_goal_agreement": false,
+        "scope_expansion_violation": false,
+        "expected_delta_quality": "has_numeric_claim",
+        "falsifiability_negative_control_presence": "present",
+        "decomposition_quality": {
+          "structured_fields_present": "2/2 prose fields, 3/3 array fields non-empty",
+          "why_not_broader_overlap": 0,
+          "why_not_finer_overlap": 0.375
+        },
+        "slice_semantic_coherence": "possible_bundling_heuristic(2_joins)",
+        "granularity": "agreement",
+        "harnessability": "harness_ready",
+        "harnessability_components": {
+          "has_scope_non_goals": true,
+          "has_negative_control": true,
+          "has_numeric_expected_delta": true,
+          "has_failure_mode": true
+        },
+        "primitive_reuse": {
+          "mentioned_any": true,
+          "overlap_with_reference": 0.5,
+          "possible_reinvention": false
+        },
+        "decomposition_breadth": {
+          "concerns_named": 1,
+          "interventions_proposed": 3
+        },
+        "coordination_cost_reasoning_given": true,
+        "unnecessary_decomposition_flag": false,
+        "hindsight_leakage_guard": {
+          "flagged": false,
+          "matched_markers": []
+        },
+        "abstention_uncertainty_reasonableness": "specific",
+        "note": "rule-assisted, minimal-viable metrics — not a calibrated aggregate score (see README.md)"
+      },
+      "cited_refs": [
+        "archguard:case_readings",
+        "methodology:ownership-first"
+      ],
+      "unresolved_refs": [],
+      "is_abstain": false,
+      "intervention_count": 3,
+      "rep": 1
+    },
+    {
+      "case_id": "GOAL-030",
+      "group": "A",
+      "provenance": {
+        "role": "ab-a",
+        "profile": "gw",
+        "launcher": "claude-fjdac",
+        "model_from_profile": "v4.1flash-anthropic",
+        "model_flag_in_argv": "v4.1flash-anthropic",
+        "prompt_via_stdin": true,
+        "prompt_sha256_16": "0c05f1c46e251ec6",
+        "prompt_chars": 2610,
+        "gateway_env_dropped": false,
+        "started_at": "2026-10-09T14:03:27.326Z",
+        "ended_at": "2026-10-09T14:03:49.405Z",
+        "duration_ms": 22079
+      },
+      "state": "verified",
+      "error": null,
+      "exit_status": 0,
+      "envelope": {
+        "proposer_id": "ownership-shadow-semantic",
+        "concern": "plugin/scripts draws ~3x more dependency edges from non-kernel code (44) than from the kernel (14), so it is undefined whether the scripts directory owns behaviour that should sit behind a kernel surface or merely consumes declared ones — an ownership/canonicalization boundary that no task or goal state currently reflects (both tallies empty).",
+        "evidence_refs": [
+          "archguard:case_readings",
+          "methodology:ownership-first"
+        ],
+        "candidate_interventions": [
+          {
+            "title": "Enumerate and classify the 44 plugin->non-kernel edges against a declared-surface list",
+            "rationale": "The 44:14 split is only an ownership finding once the targets are named: each non-kernel edge is either a legitimate consumer of a declared lower-layer surface (no violation) or a direct reach-through into an internal module (script owns what a kernel surface should own). Methodology point 4 (one independently-verifiable slice) requires the classification before any cut; without it we would be moving shells, not responsibilities (point 2)."
+          },
+          {
+            "title": "Name the single directory cycle's member set and its shared-ownership status",
+            "rationale": "A directory-level cycle is the canonical 'who owns this' failure. The reading reports directory_cycles:1 but not the members; the prerequisite slice is to name the SCC member set and check whether its members legitimately share one owner. This is the same member-set-vs-edge-set discipline the repo already applies to package SCCs."
+          },
+          {
+            "title": "Pin packages->plugin = 0 as an executable one-way-boundary invariant",
+            "rationale": "packages_to_plugin_edges:0 is the one firm healthy fact in the evidence: the product layer never depends on plugin tooling. A currently-clean direction that is only remembered will drift silently; pinning it as a mechanical ratchet is a small, independently-verifiable slice and converts a remembered fact into an executable invariant (methodology points 7 and 10: mechanical facts over prose)."
+          }
+        ],
+        "recommended_next_action": "investigate",
+        "scope": {
+          "in_scope": [
+            "the plugin/scripts dependency footprint: 44 non-kernel edges vs 14 kernel edges",
+            "the single directory cycle (members, owners, boundary crossing)",
+            "the packages->plugin direction (currently 0) as a pinnable one-way boundary"
+          ],
+          "non_goals": [
+            "product planning, roadmap, or task prioritisation",
+            "UI/frontend work",
+            "wholesale redefinition of the kernel boundary",
+            "the continuous-math L_T/L_C/L_D/L_G/L_S program (not rigor per ADR-006)"
+          ]
+        },
+        "expected_mechanical_delta": "Before: {plugin_scripts_to_kernel_edge_strength:14, plugin_scripts_to_non_kernel_edge_strength:44, directory_cycles:1, packages_to_plugin_edges:0}. After a naming pass plus the one slice actually cut: the 44 resolves into a named count of declared-surface consumers vs enumerated reach-throughs, the cycle's member set is printed, and the intended delta is a reduction in reach-through edges while packages_to_plugin_edges holds at 0 (not merely a relocation of edges onto a renamed target).",
+        "negative_control": "Two falsifiable checks. (1) For the pinned boundary: inject a synthetic packages->plugin import and confirm the invariant check fails — a guard that cannot fail on a real violation is an echo, not a measurement. (2) For the classification claim: test the classifier against an edge known by construction to be an illegitimate reach-through; if the classifier labels it a legitimate declared-surface consumer, the 'ownership violation' reading is not being measured and the concern must be dropped rather than reported.",
+        "abandon_or_reconsider_condition": "Abandon if enumerating the 44 non-kernel edges shows they are all declared public surfaces of a lower layer — i.e. 'non-kernel' is only a scope label, not a reach-through — in which case there is no ownership violation to fix; or if the single directory cycle's members are one cohesive package that legitimately co-owns, in which case the cycle is a labeling artifact and not an ownership defect.",
+        "confidence": {
+          "level": "low",
+          "basis": "The only ownership-shaped reading is a single aggregate edge-strength pair (44 vs 14) with no named target modules, and both goals and tasks status tallies are empty, so no landed work corroborates or contradicts it. The asymmetry is suggestive and in-domain, but direction alone does not establish a boundary violation, so this is a naming prerequisite, not yet a cuttable slice."
+        }
+      },
+      "scores": {
+        "case_id": "GOAL-030",
+        "concern_recall": 0,
+        "concern_precision": 0,
+        "chosen_slice_agreement": "no_match",
+        "chosen_slice_overlap_score": 0.16176470588235295,
+        "investigation_vs_goal_agreement": false,
+        "scope_expansion_violation": false,
+        "expected_delta_quality": "has_numeric_claim",
+        "falsifiability_negative_control_presence": "present",
+        "decomposition_quality": {
+          "structured_fields_present": "2/2 prose fields, 3/3 array fields non-empty",
+          "why_not_broader_overlap": 0,
+          "why_not_finer_overlap": 0.375
+        },
+        "slice_semantic_coherence": "possible_bundling_heuristic(8_joins)",
+        "granularity": "agreement",
+        "harnessability": "harness_ready",
+        "harnessability_components": {
+          "has_scope_non_goals": true,
+          "has_negative_control": true,
+          "has_numeric_expected_delta": true,
+          "has_failure_mode": true
+        },
+        "primitive_reuse": {
+          "mentioned_any": true,
+          "overlap_with_reference": 0.5,
+          "possible_reinvention": false
+        },
+        "decomposition_breadth": {
+          "concerns_named": 1,
+          "interventions_proposed": 3
+        },
+        "coordination_cost_reasoning_given": true,
+        "unnecessary_decomposition_flag": false,
+        "hindsight_leakage_guard": {
+          "flagged": false,
+          "matched_markers": []
+        },
+        "abstention_uncertainty_reasonableness": "specific",
+        "note": "rule-assisted, minimal-viable metrics — not a calibrated aggregate score (see README.md)"
+      },
+      "cited_refs": [
+        "archguard:case_readings",
+        "methodology:ownership-first"
+      ],
+      "unresolved_refs": [],
+      "is_abstain": false,
+      "intervention_count": 3,
+      "rep": 2
+    },
+    {
+      "case_id": "GOAL-030",
+      "group": "B",
+      "provenance": {
+        "role": "ab-b",
+        "profile": "native",
+        "launcher": "/tmp/ownership-ab-fJviCe/B/launcher.sh",
+        "model_from_profile": "opus",
+        "model_flag_in_argv": "opus",
+        "prompt_via_stdin": true,
+        "prompt_sha256_16": "0c05f1c46e251ec6",
+        "prompt_chars": 2610,
+        "gateway_env_dropped": true,
+        "started_at": "2026-10-09T14:03:49.406Z",
+        "ended_at": "2026-10-09T14:04:05.464Z",
+        "duration_ms": 16058
+      },
+      "state": "verified",
+      "error": null,
+      "exit_status": 0,
+      "envelope": {
+        "proposer_id": "ownership-shadow-semantic",
+        "concern": "plugin/scripts reaches into non-kernel modules about 3× as often as it reaches into the kernel (edge strength 44 vs 14), and one directory cycle exists; together these suggest that ownership of shared logic is split between the kernel and other modules instead of being concentrated in a canonical owner.",
+        "evidence_refs": [
+          "archguard:case_readings",
+          "methodology:ownership-first"
+        ],
+        "candidate_interventions": [
+          {
+            "title": "Read-only investigation: list the 44 plugin_scripts→non-kernel edges by target and find the one directory cycle",
+            "rationale": "The evidence gives only aggregate edge strengths. It does not name the targets or the cycle members. Ownership-first says to ask who should own a responsibility before moving anything. That question cannot be answered until we know what the 44 edges point at and which directories form the cycle."
+          },
+          {
+            "title": "If one target module dominates the non-kernel edges, converge that single responsibility onto its canonical owner",
+            "rationale": "Methodology §2 and §4: make one small slice that can be accepted on its own, and make callers actually converge on the owner. Avoid a shell-move, where a file is relocated but callers still import the old place."
+          }
+        ],
+        "recommended_next_action": "investigate",
+        "scope": {
+          "in_scope": [
+            "plugin/scripts → non-kernel dependency edges (target breakdown)",
+            "the single reported directory cycle (member identification)",
+            "deciding whether any of those edges represent logic the kernel should canonically own"
+          ],
+          "non_goals": [
+            "packages/ → plugin edges (already 0; no concern)",
+            "large-scale OO restructuring or pattern introduction (methodology §3/§11)",
+            "task/goal prioritisation (status tallies are empty and out of domain)",
+            "relocating files without converging their callers"
+          ]
+        },
+        "expected_mechanical_delta": "If a slice is later carried out, archguard on develop would show plugin_scripts_to_non_kernel_edge_strength dropping from 44 by the number of edges in that slice, plugin_scripts_to_kernel staying flat or rising only by the re-routed calls, directory_cycles going from 1 to 0 if the cycle is in the slice, and packages_to_plugin_edges staying at 0.",
+        "negative_control": "Re-run archguard on the same source commit (develop @97d17da6b) before any change and confirm it reproduces 44/14/1/0. After the change, check that the old non-kernel target module has no remaining importers for the moved responsibility, using caller count rather than file location. A shell-move would leave the non-kernel edge count unchanged while only file paths change.",
+        "abandon_or_reconsider_condition": "Abandon in any of these cases: the 44 non-kernel edges spread thinly across many unrelated targets with no dominant shared responsibility; the targets are legitimately plugin-local utilities that the kernel should not own; or the single directory cycle lies entirely outside plugin/scripts and the kernel boundary.",
+        "confidence": {
+          "level": "low",
+          "basis": "The only signal is aggregate archguard counts (44 vs 14, 1 cycle) with no target or cycle-member breakdown, and the goal and task status tallies are empty. That supports a reason to investigate, not a specific goal."
+        }
+      },
+      "scores": {
+        "case_id": "GOAL-030",
+        "concern_recall": 0,
+        "concern_precision": 0,
+        "chosen_slice_agreement": "no_match",
+        "chosen_slice_overlap_score": 0.09523809523809523,
+        "investigation_vs_goal_agreement": false,
+        "scope_expansion_violation": false,
+        "expected_delta_quality": "has_numeric_claim",
+        "falsifiability_negative_control_presence": "present",
+        "decomposition_quality": {
+          "structured_fields_present": "2/2 prose fields, 3/3 array fields non-empty",
+          "why_not_broader_overlap": 0,
+          "why_not_finer_overlap": 0.375
+        },
+        "slice_semantic_coherence": "possible_bundling_heuristic(1_joins)",
+        "granularity": "agreement",
+        "harnessability": "harness_ready",
+        "harnessability_components": {
+          "has_scope_non_goals": true,
+          "has_negative_control": true,
+          "has_numeric_expected_delta": true,
+          "has_failure_mode": true
+        },
+        "primitive_reuse": {
+          "mentioned_any": true,
+          "overlap_with_reference": 0.5,
+          "possible_reinvention": false
+        },
+        "decomposition_breadth": {
+          "concerns_named": 1,
+          "interventions_proposed": 2
+        },
+        "coordination_cost_reasoning_given": true,
+        "unnecessary_decomposition_flag": false,
+        "hindsight_leakage_guard": {
+          "flagged": false,
+          "matched_markers": []
+        },
+        "abstention_uncertainty_reasonableness": "specific",
+        "note": "rule-assisted, minimal-viable metrics — not a calibrated aggregate score (see README.md)"
+      },
+      "cited_refs": [
+        "archguard:case_readings",
+        "methodology:ownership-first"
+      ],
+      "unresolved_refs": [],
+      "is_abstain": false,
+      "intervention_count": 2,
+      "rep": 2
+    },
+    {
+      "case_id": "GOAL-031",
+      "group": "A",
+      "provenance": {
+        "role": "ab-a",
+        "profile": "gw",
+        "launcher": "claude-fjdac",
+        "model_from_profile": "v4.1flash-anthropic",
+        "model_flag_in_argv": "v4.1flash-anthropic",
+        "prompt_via_stdin": true,
+        "prompt_sha256_16": "cb1e41cfaa66f782",
+        "prompt_chars": 2917,
+        "gateway_env_dropped": false,
+        "started_at": "2026-10-09T14:04:05.465Z",
+        "ended_at": "2026-10-09T14:04:20.048Z",
+        "duration_ms": 14583
+      },
+      "state": "verified",
+      "error": null,
+      "exit_status": 0,
+      "envelope": {
+        "proposer_id": "ownership-shadow-semantic",
+        "concern": "The lifecycle token \"needs-human\" appears as a raw string literal in 5 modules (task-status.ts, github-client.ts, observation.ts, goal-driver.ts, workflow-baseline-metrics.ts), so its canonical owner and true consumer set are indeterminate — an ownership/canonicalization ambiguity that cannot yet be told apart from legitimate exemptions or false positives.",
+        "evidence_refs": [
+          "archguard:case_readings",
+          "methodology:ownership-first"
+        ],
+        "candidate_interventions": [
+          {
+            "title": "Classify the 5 dispersion hits before any code move",
+            "rationale": "The archguard reading is explicitly raw and uninvestigated; per methodology §2 (canonical source ≠ callers truly converge) a dispersion count alone cannot distinguish genuine un-migrated consumers from legitimate arch-exemptions from false positives on an unrelated field sharing the string. Each of the 5 files must be labelled (a) genuine un-migrated consumer, (b) declared exemption, or (c) false positive, with the field it actually compares."
+          },
+          {
+            "title": "Name the canonical owner of the \"needs-human\" token and measure derivation",
+            "rationale": "Ownership-first (methodology §1) asks who should own the token before looking at classes. Determine whether one module (candidate: task-status.ts) is the single source and whether the other hits import/derive from it or re-declare the literal. This is a single-source-of-truth question, not a file-relocation one."
+          },
+          {
+            "title": "Small slice: import the canonical constant instead of re-typing the literal — only for hits classified (a)",
+            "rationale": "One independently-verifiable slice (methodology §4) per genuine consumer, replacing the raw comparison with an import from the canonical owner. Skipped entirely for hits classified (b)/(c) so no pattern-zoo or shell-move is created (methodology §3)."
+          }
+        ],
+        "recommended_next_action": "investigate",
+        "scope": {
+          "in_scope": [
+            "literal dispersion of the \"needs-human\" lifecycle token across the 5 named modules",
+            "canonical definition and ownership of that token (single declaring module)",
+            "dependency direction: which modules import the token vs re-declare it",
+            "before/after dispersion count as the mechanical reading"
+          ],
+          "non_goals": [
+            "changing lifecycle semantics or status transitions",
+            "product/roadmap/UI or prioritisation work",
+            "other string literals not present in this reading",
+            "relocating files purely to reduce the count (shell-move, methodology §2)"
+          ]
+        },
+        "expected_mechanical_delta": "Re-running get_literal_dispersion(value:\"needs-human\") after the classified-as-(a) migrations: before = 5 files containing the literal; after = the number of files still containing a raw literal comparison (canonical owner + any hits classified (b)/(c)). A real convergence shows a decrease equal to the count of classified-(a) consumers, with each migrated consumer now importing the token; a zero delta with no file edits shows nothing moved.",
+        "negative_control": "Two checks to separate 'it worked' from 'it looks like it worked': (1) re-introduce a raw \"needs-human\" literal in a migrated file and confirm the checker re-flags it — proving a zero reading is real convergence, not the checker going blind to the token's new form; (2) confirm each hit classified (c) still compares its genuinely unrelated field (e.g. a value that is not the quay-native token), proving the migration did not over-reach across a coincidental string match.",
+        "abandon_or_reconsider_condition": "If investigation classifies all 5 hits as false positives (unrelated fields that merely share the string) or as legitimate arch-exemptions, there is no canonicalization defect and this concern is abandoned; likewise if task-status.ts is already the sole declarer and the other 4 provably import it (the reading counts a literal the checker cannot resolve to the import).",
+        "confidence": {
+          "level": "low",
+          "basis": "Only one of the four evidence sources carries signal (a single raw archguard reading explicitly marked uninvestigated); both status tallies are empty and give no corroboration, and the archguard note itself states the genuine-vs-exemption-vs-false-positive split is undetermined."
+        }
+      },
+      "scores": {
+        "case_id": "GOAL-031",
+        "concern_recall": 1,
+        "concern_precision": 1,
+        "chosen_slice_agreement": "near_match",
+        "chosen_slice_overlap_score": 0.29577464788732394,
+        "investigation_vs_goal_agreement": false,
+        "scope_expansion_violation": false,
+        "expected_delta_quality": "has_numeric_claim",
+        "falsifiability_negative_control_presence": "present",
+        "decomposition_quality": {
+          "structured_fields_present": "2/2 prose fields, 3/3 array fields non-empty",
+          "why_not_broader_overlap": 0,
+          "why_not_finer_overlap": 0.125
+        },
+        "slice_semantic_coherence": "possible_bundling_heuristic(4_joins)",
+        "granularity": "agreement",
+        "harnessability": "harness_ready",
+        "harnessability_components": {
+          "has_scope_non_goals": true,
+          "has_negative_control": true,
+          "has_numeric_expected_delta": true,
+          "has_failure_mode": true
+        },
+        "primitive_reuse": {
+          "mentioned_any": true,
+          "overlap_with_reference": 0.16666666666666666,
+          "possible_reinvention": false
+        },
+        "decomposition_breadth": {
+          "concerns_named": 1,
+          "interventions_proposed": 3
+        },
+        "coordination_cost_reasoning_given": true,
+        "unnecessary_decomposition_flag": false,
+        "hindsight_leakage_guard": {
+          "flagged": false,
+          "matched_markers": []
+        },
+        "abstention_uncertainty_reasonableness": "specific",
+        "note": "rule-assisted, minimal-viable metrics — not a calibrated aggregate score (see README.md)"
+      },
+      "cited_refs": [
+        "archguard:case_readings",
+        "methodology:ownership-first"
+      ],
+      "unresolved_refs": [],
+      "is_abstain": false,
+      "intervention_count": 3,
+      "rep": 1
+    },
+    {
+      "case_id": "GOAL-031",
+      "group": "B",
+      "provenance": {
+        "role": "ab-b",
+        "profile": "native",
+        "launcher": "/tmp/ownership-ab-fJviCe/B/launcher.sh",
+        "model_from_profile": "opus",
+        "model_flag_in_argv": "opus",
+        "prompt_via_stdin": true,
+        "prompt_sha256_16": "cb1e41cfaa66f782",
+        "prompt_chars": 2917,
+        "gateway_env_dropped": true,
+        "started_at": "2026-10-09T14:04:20.049Z",
+        "ended_at": "2026-10-09T14:04:38.212Z",
+        "duration_ms": 18163
+      },
+      "state": "verified",
+      "error": null,
+      "exit_status": 0,
+      "envelope": {
+        "proposer_id": "ownership-shadow-semantic",
+        "concern": "The lifecycle status literal \"needs-human\" appears in 5 files (task-status.ts, github-client.ts, observation.ts, goal-driver.ts, workflow-baseline-metrics.ts). If task-status.ts is meant to be the canonical owner of task-status values, the other 4 files may be comparing against a hand-copied string instead of importing it. Nobody has yet classified the 5 hits, so this is a suspected ownership problem, not a confirmed one.",
+        "evidence_refs": [
+          "archguard:case_readings",
+          "methodology:ownership-first"
+        ],
+        "candidate_interventions": [
+          {
+            "title": "Classify each of the 5 \"needs-human\" hits",
+            "rationale": "Methodology §1/§7 say to decide who should own the value before changing anything. Each hit needs one of three labels: (a) genuine consumer that should import the value from task-status.ts, (b) legitimate exemption, such as github-client.ts mapping an external GitHub label name, or (c) false positive, where an unrelated field happens to hold the same string. Until that is done, the dispersion count of 5 does not tell us how many hits actually need migrating."
+          },
+          {
+            "title": "If any hit is class (a), move one consumer per slice onto the canonical export",
+            "rationale": "Methodology §2 and §4: make the calling code actually use the canonical value, not a thin wrapper around a copy. Change one small, separately testable slice at a time. The most likely candidates are goal-driver.ts and observation.ts, but they must be confirmed by classification first."
+          },
+          {
+            "title": "Record class-(b) exemptions where the dispersion check can see them",
+            "rationale": "Methodology §8 says a mechanical result can be out of date. If an exemption is never recorded, it will be flagged again on every archguard run and will look like work that was never finished."
+          }
+        ],
+        "recommended_next_action": "investigate",
+        "scope": {
+          "in_scope": [
+            "Classify the 5 files archguard reported for the literal \"needs-human\"",
+            "Find out whether task-status.ts exports a canonical constant or type for this status"
+          ],
+          "non_goals": [
+            "Changing lifecycle semantics or adding statuses",
+            "Moving other status literals (todo/ready/done) in this slice",
+            "Product, UI or roadmap changes",
+            "Reorganising code into OO patterns beyond what ownership convergence needs (§3, §11)"
+          ]
+        },
+        "expected_mechanical_delta": "Before: get_literal_dispersion(\"needs-human\") reports 5 files. After: the count equals 1 (the owner) plus the documented class-(b) exemptions plus the class-(c) false positives, if archguard cannot filter those. Every class-(a) consumer instead shows an import edge to task-status.ts, which get_dependencies can confirm.",
+        "negative_control": "Temporarily change the canonical value in task-status.ts on a scratch branch. Every migrated consumer should then change behaviour or fail its tests. Any file that still behaves the same is still matching its own copied string, so the migration only looks done. Separately, a lower dispersion count with no new import edges means the literal was hidden, not converged.",
+        "abandon_or_reconsider_condition": "Abandon this if classification shows that all 4 non-owner hits are class (b) or (c), for example an external GitHub label mapping, a telemetry field name, or an unrelated value. In that case the spread is not a real ownership problem, and the right fix is to record the exemptions, not to refactor. Also reconsider if task-status.ts turns out not to be the declared owner of lifecycle status values.",
+        "confidence": {
+          "level": "low",
+          "basis": "The only evidence is one archguard reading that the evidence itself labels as uninvestigated, with no classification of the hits. The goal and task status tallies are empty, so there is no sign this has caused problems. That supports investigating, not proposing a goal."
+        }
+      },
+      "scores": {
+        "case_id": "GOAL-031",
+        "concern_recall": 1,
+        "concern_precision": 1,
+        "chosen_slice_agreement": "near_match",
+        "chosen_slice_overlap_score": 0.28169014084507044,
+        "investigation_vs_goal_agreement": false,
+        "scope_expansion_violation": false,
+        "expected_delta_quality": "has_numeric_claim",
+        "falsifiability_negative_control_presence": "present",
+        "decomposition_quality": {
+          "structured_fields_present": "2/2 prose fields, 3/3 array fields non-empty",
+          "why_not_broader_overlap": 0,
+          "why_not_finer_overlap": 0.125
+        },
+        "slice_semantic_coherence": "possible_bundling_heuristic(2_joins)",
+        "granularity": "agreement",
+        "harnessability": "harness_ready",
+        "harnessability_components": {
+          "has_scope_non_goals": true,
+          "has_negative_control": true,
+          "has_numeric_expected_delta": true,
+          "has_failure_mode": true
+        },
+        "primitive_reuse": {
+          "mentioned_any": true,
+          "overlap_with_reference": 0.16666666666666666,
+          "possible_reinvention": false
+        },
+        "decomposition_breadth": {
+          "concerns_named": 1,
+          "interventions_proposed": 3
+        },
+        "coordination_cost_reasoning_given": true,
+        "unnecessary_decomposition_flag": false,
+        "hindsight_leakage_guard": {
+          "flagged": false,
+          "matched_markers": []
+        },
+        "abstention_uncertainty_reasonableness": "specific",
+        "note": "rule-assisted, minimal-viable metrics — not a calibrated aggregate score (see README.md)"
+      },
+      "cited_refs": [
+        "archguard:case_readings",
+        "methodology:ownership-first"
+      ],
+      "unresolved_refs": [],
+      "is_abstain": false,
+      "intervention_count": 3,
+      "rep": 1
+    },
+    {
+      "case_id": "GOAL-031",
+      "group": "A",
+      "provenance": {
+        "role": "ab-a",
+        "profile": "gw",
+        "launcher": "claude-fjdac",
+        "model_from_profile": "v4.1flash-anthropic",
+        "model_flag_in_argv": "v4.1flash-anthropic",
+        "prompt_via_stdin": true,
+        "prompt_sha256_16": "cb1e41cfaa66f782",
+        "prompt_chars": 2917,
+        "gateway_env_dropped": false,
+        "started_at": "2026-10-09T14:04:38.213Z",
+        "ended_at": "2026-10-09T14:04:53.472Z",
+        "duration_ms": 15259
+      },
+      "state": "verified",
+      "error": null,
+      "exit_status": 0,
+      "envelope": {
+        "proposer_id": "ownership-shadow-semantic",
+        "concern": "The task lifecycle status literal \"needs-human\" is dispersed across five modules (task-status.ts, github-client.ts, observation.ts, goal-driver.ts, workflow-baseline-metrics.ts), suggesting the status vocabulary has no single canonical owner and provider/driver/telemetry layers compare it directly instead of through one abstraction.",
+        "evidence_refs": [
+          "archguard:case_readings",
+          "methodology:ownership-first"
+        ],
+        "candidate_interventions": [
+          {
+            "title": "Classify the 5 \"needs-human\" hit sites before any convergence",
+            "rationale": "The tool output is explicitly uninvestigated; each site must be read to decide genuine un-migrated consumer vs. provider-boundary translation (legitimate) vs. false positive on an unrelated field that merely shares the string. This is the ownership-first step (§1: ask who should own it) and follows rule-2 positional judgment rather than keyword counting."
+          },
+          {
+            "title": "Converge genuine consumers onto a single status owner",
+            "rationale": "If GitHub-client/observation/goal-driver sites are reading the task status, they should import the predicate/constant owned by task-status.ts rather than re-literal a lifecycle value; a small slice touching only the confirmed genuine consumers respects §4 (one independently-verifiable slice) and §2 (canonical source ≠ callers converged — avoid moving shells without re-pointing callers)."
+          },
+          {
+            "title": "Add a falsifiable dispersion check with declared exemptions",
+            "rationale": "Make the owner enforceable: a check that flags new dispersed \"needs-human\" literals unless the file is in a declared exemption list, runnable as a before/after measurement (§9/§10). Without it, the convergence is invisible to regression."
+          }
+        ],
+        "recommended_next_action": "investigate",
+        "scope": {
+          "in_scope": [
+            "ownership of the task lifecycle status vocabulary",
+            "canonicalization of the \"needs-human\" literal into one module",
+            "dependency direction between task-status.ts and provider (github-client), telemetry (workflow-baseline-metrics), and driver (goal-driver, observation) layers"
+          ],
+          "non_goals": [
+            "product planning, roadmap, or prioritisation",
+            "UI work",
+            "changing task store semantics or adding new statuses",
+            "building a pattern zoo / premature OO (§3)"
+          ]
+        },
+        "expected_mechanical_delta": "Re-running get_literal_dispersion(value:\"needs-human\") after the slice: dispersion falls from 5 files to 1 (the owner) plus any explicitly-exempted provider-boundary file; declared-exemption count and remaining file list are both printed, so the delta is a named set, not just a decreased number.",
+        "negative_control": "Two-sided: (a) for the non-zero reading, print the first 3 actual matching lines per file and confirm each references the task status field — a site comparing an unrelated field is excluded, so its absence from the post-slice set is not evidence of migration; (b) run the same dispersion query on a sibling lifecycle literal (e.g. \"ready\"/\"todo\") that was deliberately left untouched — if it also disperses, dispersion is the baseline norm and a 5→1 drop on one literal is not by itself proof the vocabulary gained an owner.",
+        "abandon_or_reconsider_condition": "If classification shows all five hits are legitimate architectural exemptions (provider-ABI translation, telemetry serialization) or false positives on unrelated fields sharing the string, then no canonicalization defect exists and this concern dissolves; also abandon if the empty goals/tasks tallies turn out to mean no status vocabulary is currently in flux, making a convergence slice inert.",
+        "confidence": {
+          "level": "low",
+          "basis": "Grounded in a single raw archguard reading explicitly flagged as uninvestigated, plus empty goal/task status tallies and a methodology excerpt that names ownership convergence as the current stage — no verified reading of any call site, so the concern is a candidate to investigate, not a conclusion."
+        }
+      },
+      "scores": {
+        "case_id": "GOAL-031",
+        "concern_recall": 1,
+        "concern_precision": 1,
+        "chosen_slice_agreement": "near_match",
+        "chosen_slice_overlap_score": 0.352112676056338,
+        "investigation_vs_goal_agreement": false,
+        "scope_expansion_violation": false,
+        "expected_delta_quality": "has_numeric_claim",
+        "falsifiability_negative_control_presence": "present",
+        "decomposition_quality": {
+          "structured_fields_present": "2/2 prose fields, 3/3 array fields non-empty",
+          "why_not_broader_overlap": 0,
+          "why_not_finer_overlap": 0.125
+        },
+        "slice_semantic_coherence": "possible_bundling_heuristic(6_joins)",
+        "granularity": "agreement",
+        "harnessability": "harness_ready",
+        "harnessability_components": {
+          "has_scope_non_goals": true,
+          "has_negative_control": true,
+          "has_numeric_expected_delta": true,
+          "has_failure_mode": true
+        },
+        "primitive_reuse": {
+          "mentioned_any": true,
+          "overlap_with_reference": 0.16666666666666666,
+          "possible_reinvention": false
+        },
+        "decomposition_breadth": {
+          "concerns_named": 1,
+          "interventions_proposed": 3
+        },
+        "coordination_cost_reasoning_given": true,
+        "unnecessary_decomposition_flag": false,
+        "hindsight_leakage_guard": {
+          "flagged": false,
+          "matched_markers": []
+        },
+        "abstention_uncertainty_reasonableness": "specific",
+        "note": "rule-assisted, minimal-viable metrics — not a calibrated aggregate score (see README.md)"
+      },
+      "cited_refs": [
+        "archguard:case_readings",
+        "methodology:ownership-first"
+      ],
+      "unresolved_refs": [],
+      "is_abstain": false,
+      "intervention_count": 3,
+      "rep": 2
+    },
+    {
+      "case_id": "GOAL-031",
+      "group": "B",
+      "provenance": {
+        "role": "ab-b",
+        "profile": "native",
+        "launcher": "/tmp/ownership-ab-fJviCe/B/launcher.sh",
+        "model_from_profile": "opus",
+        "model_flag_in_argv": "opus",
+        "prompt_via_stdin": true,
+        "prompt_sha256_16": "cb1e41cfaa66f782",
+        "prompt_chars": 2917,
+        "gateway_env_dropped": true,
+        "started_at": "2026-10-09T14:04:53.472Z",
+        "ended_at": "2026-10-09T14:05:12.892Z",
+        "duration_ms": 19420
+      },
+      "state": "verified",
+      "error": null,
+      "exit_status": 0,
+      "envelope": {
+        "proposer_id": "ownership-shadow-semantic",
+        "concern": "The status literal \"needs-human\" appears in 5 files (task-status.ts, github-client.ts, observation.ts, goal-driver.ts, workflow-baseline-metrics.ts). That suggests task-status.ts may not be the only owner of the terminal-status vocabulary, but no hit has been classified yet as an un-migrated consumer, a legitimate exemption, or a false positive.",
+        "evidence_refs": [
+          "archguard:case_readings",
+          "methodology:ownership-first"
+        ],
+        "candidate_interventions": [
+          {
+            "title": "Classify the 4 non-canonical needs-human hits",
+            "rationale": "The reading is raw and unchecked. Ownership-first (§1) means first deciding who should own the status vocabulary, and §2 warns against counting a move to a canonical source as convergence. So each hit outside task-status.ts should be tagged as one of three things: (a) a consumer comparing task status that should import the canonical constant or predicate, (b) a boundary translation with a legitimate exemption, such as github-client mapping GitHub labels or state onto the view-model, or (c) an unrelated field that happens to share the string. No refactor should start until this is done."
+          },
+          {
+            "title": "If any (a)-class hits exist, migrate only those as one small slice",
+            "rationale": "Per §4, one problem per slice that can be accepted on its own: route the confirmed (a)-class consumers through the task-status.ts export. Leave (b) and (c) hits in place and record why they are exempt, so the dispersion number is not driven down cosmetically."
+          }
+        ],
+        "recommended_next_action": "investigate",
+        "scope": {
+          "in_scope": [
+            "Classify each of the 5 needs-human literal hits as canonical owner, un-migrated consumer, boundary-translation exemption, or false positive",
+            "Decide whether task-status.ts is the declared canonical owner of the lifecycle status vocabulary"
+          ],
+          "non_goals": [
+            "Changing lifecycle semantics or the todo→ready→done/needs-human state machine",
+            "Migrating other status literals (done/ready/todo) in the same slice",
+            "Removing the GitHub provider's own label/state mapping",
+            "Driving the dispersion count to 1 as a target in itself"
+          ]
+        },
+        "expected_mechanical_delta": "Before: get_literal_dispersion(\"needs-human\") = 5, with no classification. After the investigation: a 5-row table giving each hit's class. The count stays at 5 until a migration happens. If a migration follows, dispersion should fall by exactly the number of (a)-class hits, and the remaining hits should match the recorded exemptions one-for-one.",
+        "negative_control": "Before migrating, change the canonical needs-human value in task-status.ts on a scratch copy and run the tests: every (a)-class consumer that is supposed to converge should fail or change behaviour, and the (b)/(c) hits should not. After migration, the same scratch change should propagate to all migrated consumers with no literal left behind. If dispersion drops but the scratch change still leaves a consumer comparing a stale string (for example through a re-declared local constant), the move only relocated the literal (§2).",
+        "abandon_or_reconsider_condition": "Drop this if all 4 non-canonical hits turn out to be (b) boundary translations or (c) unrelated fields. For example: github-client maps external labels, observation.ts or workflow-baseline-metrics.ts only read historical log records, and goal-driver.ts compares a goal-status field with its own vocabulary. In that case dispersion=5 is the correct architecture, not drift.",
+        "confidence": {
+          "level": "low",
+          "basis": "The only ownership signal is one uninvestigated archguard dispersion reading, explicitly labelled as not yet classified. The goal and task status tallies are empty, so they give no corroborating backlog or regression signal. This evidence justifies an investigation, not a goal."
+        }
+      },
+      "scores": {
+        "case_id": "GOAL-031",
+        "concern_recall": 1,
+        "concern_precision": 1,
+        "chosen_slice_agreement": "near_match",
+        "chosen_slice_overlap_score": 0.2535211267605634,
+        "investigation_vs_goal_agreement": false,
+        "scope_expansion_violation": false,
+        "expected_delta_quality": "has_numeric_claim",
+        "falsifiability_negative_control_presence": "present",
+        "decomposition_quality": {
+          "structured_fields_present": "2/2 prose fields, 3/3 array fields non-empty",
+          "why_not_broader_overlap": 0,
+          "why_not_finer_overlap": 0.125
+        },
+        "slice_semantic_coherence": "possible_bundling_heuristic(1_joins)",
+        "granularity": "agreement",
+        "harnessability": "harness_ready",
+        "harnessability_components": {
+          "has_scope_non_goals": true,
+          "has_negative_control": true,
+          "has_numeric_expected_delta": true,
+          "has_failure_mode": true
+        },
+        "primitive_reuse": {
+          "mentioned_any": true,
+          "overlap_with_reference": 0.16666666666666666,
+          "possible_reinvention": false
+        },
+        "decomposition_breadth": {
+          "concerns_named": 1,
+          "interventions_proposed": 2
+        },
+        "coordination_cost_reasoning_given": true,
+        "unnecessary_decomposition_flag": false,
+        "hindsight_leakage_guard": {
+          "flagged": false,
+          "matched_markers": []
+        },
+        "abstention_uncertainty_reasonableness": "specific",
+        "note": "rule-assisted, minimal-viable metrics — not a calibrated aggregate score (see README.md)"
+      },
+      "cited_refs": [
+        "archguard:case_readings",
+        "methodology:ownership-first"
+      ],
+      "unresolved_refs": [],
+      "is_abstain": false,
+      "intervention_count": 2,
+      "rep": 2
+    },
+    {
+      "case_id": "GOAL-032",
+      "group": "A",
+      "provenance": {
+        "role": "ab-a",
+        "profile": "gw",
+        "launcher": "claude-fjdac",
+        "model_from_profile": "v4.1flash-anthropic",
+        "model_flag_in_argv": "v4.1flash-anthropic",
+        "prompt_via_stdin": true,
+        "prompt_sha256_16": "68d7ce7cb45a9de9",
+        "prompt_chars": 3304,
+        "gateway_env_dropped": false,
+        "started_at": "2026-10-09T14:05:12.893Z",
+        "ended_at": "2026-10-09T14:05:42.464Z",
+        "duration_ms": 29571
+      },
+      "state": "verified",
+      "error": null,
+      "exit_status": 0,
+      "envelope": {
+        "proposer_id": "ownership-shadow-semantic",
+        "concern": "Two modules independently own the same decision function — 'parse a verdict + exit-code from a driver's output' (packages/quay/src/criterion-fidelity.ts::parseFidelityVerdict and plugin/scripts/goal-driver.ts::parseSemanticSufficiencyVerdict) — with no declared owner for that algorithm, so the two copies can drift apart silently.",
+        "evidence_refs": [
+          "archguard:case_readings",
+          "methodology:ownership-first"
+        ],
+        "candidate_interventions": [
+          {
+            "title": "Classify the pair before touching it: same concern or intentional divergence?",
+            "rationale": "The archguard reading explicitly states structural similarity alone does NOT establish semantic equivalence or intentional divergence — that classification is missing at this cutoff. The three plausible owners (exit-code tri-state; bare-token match; last-line JSON blob scan) could be one shared 'verdict-from-process-output' concern (criterion fidelity) or two different concerns (criterion fidelity vs. semantic sufficiency) that happen to share a shape. Methodology §2 warns that canonicalizing before this call is made produces 搬壳 (moving the shell) — the duplication disappears while the real behaviors stay divergent."
+          },
+          {
+            "title": "If convergent: extract one owned verdict-parser parameterized by the accept/reject token set",
+            "rationale": "The only textual difference reported is which two literal strings count as positive/negative. If that is the whole difference, ownership should sit in one module consumed by both call sites, with the token sets passed in — a single small slice (methodology §4), independently verifiable, with the shared not-evaluated semantics stated once."
+          },
+          {
+            "title": "If divergent: declare the boundary, do not merge",
+            "rationale": "Methodology §2 — a canonical source is not the same as callers actually converging. If the two call sites parse different output contracts (different verdict JSON shape, or different failure/trust semantics), the correct ownership move is to record why they are deliberately separate so a future detect_duplicates run is not re-triaged as a merge candidate. This outcome has a zero code delta and must not be reported as failure."
+          }
+        ],
+        "recommended_next_action": "investigate",
+        "scope": {
+          "in_scope": [
+            "the verdict/exit-code parsing algorithm shared in shape by criterion-fidelity.ts and goal-driver.ts",
+            "ownership of that algorithm (single module vs. two declared-divergent owners)",
+            "the accept/reject token sets as the parameterization boundary if merged"
+          ],
+          "non_goals": [
+            "rewriting goal-driver.ts or criterion-fidelity.ts beyond the parse function",
+            "changing criterion/acceptance gate semantics or the exit-code contract itself",
+            "product planning, roadmap, prioritisation, or UI work"
+          ]
+        },
+        "expected_mechanical_delta": "Before: detect_duplicates reports 1 duplicate-implementation group covering these two functions. After a convergent extraction: that group count for the pair goes 1 → 0, and each function body reduces to a call into the shared module (its normalized token hash collapses to the call-site form). After a divergence ruling: the pair count stays 1, but a recorded classification exists — the delta is 0 and that is the correct measured outcome, not a miss.",
+        "negative_control": "Distinguish 'it worked' from 'it looks like it worked': (a) mutate the shared token sets (swap accept/reject) and confirm at least one call site's existing test goes red — proving the two sites are actually distinguishable and the merge did not vacuously absorb a difference; (b) feed each call site a non-zero exit code and confirm both still return not-evaluated, and feed a bare positive token and confirm it is still matched — proving the merge preserved the shared tri-state rather than relocating only the happy path (the §2 搬壳 trap).",
+        "abandon_or_reconsider_condition": "Reading both call sites shows they parse different output contracts (different verdict JSON shape/field, or one is a fidelity/audit reading and the other a sufficiency reading with different trust or failure semantics), OR either call site's tests pin its current literal token values in a way that reveals the divergence is load-bearing. Any of these ⇒ abandon the merge and take the declare-the-boundary intervention instead.",
+        "confidence": {
+          "level": "medium",
+          "basis": "The structural-similarity fact is a direct archguard reading (detect_duplicates, one group flagged) and is squarely in-domain for canonicalization. Confidence is not high because the same reading states the safe-to-merge vs. intentionally-divergent classification has not been made, and there are no task/goal tallies to indicate prior triage or intent — so the concern is real but its resolution is genuinely undetermined, which is why the recommendation is investigate rather than propose-goal."
+        }
+      },
+      "scores": {
+        "case_id": "GOAL-032",
+        "concern_recall": 0,
+        "concern_precision": 0,
+        "chosen_slice_agreement": "no_match",
+        "chosen_slice_overlap_score": 0.19753086419753085,
+        "investigation_vs_goal_agreement": false,
+        "scope_expansion_violation": false,
+        "expected_delta_quality": "has_numeric_claim",
+        "falsifiability_negative_control_presence": "present",
+        "decomposition_quality": {
+          "structured_fields_present": "2/2 prose fields, 3/3 array fields non-empty",
+          "why_not_broader_overlap": 0.2,
+          "why_not_finer_overlap": 0.25
+        },
+        "slice_semantic_coherence": "possible_bundling_heuristic(6_joins)",
+        "granularity": "agreement",
+        "harnessability": "harness_ready",
+        "harnessability_components": {
+          "has_scope_non_goals": true,
+          "has_negative_control": true,
+          "has_numeric_expected_delta": true,
+          "has_failure_mode": true
+        },
+        "primitive_reuse": {
+          "mentioned_any": true,
+          "overlap_with_reference": 0.16666666666666666,
+          "possible_reinvention": false
+        },
+        "decomposition_breadth": {
+          "concerns_named": 1,
+          "interventions_proposed": 3
+        },
+        "coordination_cost_reasoning_given": true,
+        "unnecessary_decomposition_flag": false,
+        "hindsight_leakage_guard": {
+          "flagged": false,
+          "matched_markers": []
+        },
+        "abstention_uncertainty_reasonableness": "specific",
+        "note": "rule-assisted, minimal-viable metrics — not a calibrated aggregate score (see README.md)"
+      },
+      "cited_refs": [
+        "archguard:case_readings",
+        "methodology:ownership-first"
+      ],
+      "unresolved_refs": [],
+      "is_abstain": false,
+      "intervention_count": 3,
+      "rep": 1
+    },
+    {
+      "case_id": "GOAL-032",
+      "group": "B",
+      "provenance": {
+        "role": "ab-b",
+        "profile": "native",
+        "launcher": "/tmp/ownership-ab-fJviCe/B/launcher.sh",
+        "model_from_profile": "opus",
+        "model_flag_in_argv": "opus",
+        "prompt_via_stdin": true,
+        "prompt_sha256_16": "68d7ce7cb45a9de9",
+        "prompt_chars": 3304,
+        "gateway_env_dropped": true,
+        "started_at": "2026-10-09T14:05:42.465Z",
+        "ended_at": "2026-10-09T14:06:02.699Z",
+        "duration_ms": 20234
+      },
+      "state": "verified",
+      "error": null,
+      "exit_status": 0,
+      "envelope": {
+        "proposer_id": "ownership-shadow-semantic",
+        "concern": "Two structurally identical verdict-parsing routines live in two separate places: packages/quay/src/criterion-fidelity.ts::parseFidelityVerdict in the Core product package and plugin/scripts/goal-driver.ts::parseSemanticSufficiencyVerdict in the plugin layer. No one has yet decided whether this is one concern that should have a single canonical owner, or two concerns that only happen to look alike.",
+        "evidence_refs": [
+          "archguard:case_readings",
+          "methodology:ownership-first"
+        ],
+        "candidate_interventions": [
+          {
+            "title": "Classify the duplicate pair before touching code",
+            "rationale": "The archguard reading says outright that detect_duplicates flags structural similarity only and that the merge-safe vs intentionally-divergent call has not been made. Methodology §1 says to ask 'who should own this' before extracting anything, and §8 says a mechanical signal is not an architecture judgment. So the first step is a semantic classification: are the not-evaluated and fail-closed semantics, the bare-token rules and the verdict vocabularies the same contract? If not, are they meant to drift apart independently?"
+          },
+          {
+            "title": "If they are the same concern, give one owner a single parameterized parser and move both callers onto it",
+            "rationale": "Both functions run the same steps: nonzero exit => not-evaluated, then a bare-token match, then a last-line-upward scan for a {\"verdict\":...} blob, else not-evaluated. Only the positive/negative literals differ. One owner exposing a parser that takes the verdict vocabulary would remove the duplication. Per methodology §2, both callers must actually import the canonical function; adding a shared helper while either copy survives just moves the shell around. The owner also has to respect the dependency direction between plugin/scripts and packages/quay, and the slice should not create a new import cycle or a new package fan-in edge."
+          },
+          {
+            "title": "If they are different concerns, record why and keep them separate",
+            "rationale": "If the two verdict protocols are meant to change independently, merging them would couple two owners for no gain. The right result is then a recorded divergence, for example a note in the code or an archguard suppression with its reason, rather than a refactor."
+          }
+        ],
+        "recommended_next_action": "investigate",
+        "scope": {
+          "in_scope": [
+            "Semantic classification of parseFidelityVerdict vs parseSemanticSufficiencyVerdict (same contract or not)",
+            "Deciding which layer, Core or plugin, should canonically own the verdict-parsing algorithm if they are the same",
+            "Checking the dependency direction of any proposed shared location"
+          ],
+          "non_goals": [
+            "Unifying other verdict or JSON parsers that this duplicate group did not flag",
+            "Changing either verdict vocabulary or any caller behaviour",
+            "Broader OO restructuring of goal-driver.ts or criterion-fidelity.ts",
+            "Product, roadmap or prioritisation decisions"
+          ]
+        },
+        "expected_mechanical_delta": "If the two are merged: archguard detect_duplicates goes from 1 group to 0 for this pair. The count of definitions implementing the last-line verdict-JSON scan goes from 2 to 1. Both former call sites resolve to the single canonical symbol in archguard find_callers. There are 0 new import cycles and no unintended new package fan-in edge. If the two are classified as divergent: no code delta. The only output is a recorded classification, and the duplicate group stays flagged with a documented reason.",
+        "negative_control": "First, confirm that both original function bodies are gone, not just wrapped: grep for the scan logic should hit exactly one definition. Second, mutate the canonical parser, for example by breaking the last-line JSON scan, and check that the existing tests for both callers turn red. Then feed each caller its own verdict literals and the other caller's literals, and check that it accepts only its own. If the tests of only one caller turn red, the other caller has not really converged.",
+        "abandon_or_reconsider_condition": "Abandon the merge if classification shows the two parsers have, or are meant to have, different contracts. Examples: different handling of exit codes or malformed output, different tolerance for trailing text, or verdict protocols owned by separately evolving specs. Also abandon it if the only possible shared location would add a plugin→Core or Core→plugin dependency edge that the declared layer rules forbid.",
+        "confidence": {
+          "level": "low",
+          "basis": "The only evidence is one archguard duplicate reading that describes the two as structurally identical except for the verdict literals. The reading itself says the semantic classification has not been made. Goal and task tallies are empty, so there is no signal that anyone already owns this. That justifies investigating, not proposing a goal."
+        }
+      },
+      "scores": {
+        "case_id": "GOAL-032",
+        "concern_recall": 0,
+        "concern_precision": 0,
+        "chosen_slice_agreement": "no_match",
+        "chosen_slice_overlap_score": 0.16049382716049382,
+        "investigation_vs_goal_agreement": false,
+        "scope_expansion_violation": false,
+        "expected_delta_quality": "has_numeric_claim",
+        "falsifiability_negative_control_presence": "present",
+        "decomposition_quality": {
+          "structured_fields_present": "2/2 prose fields, 3/3 array fields non-empty",
+          "why_not_broader_overlap": 0.2,
+          "why_not_finer_overlap": 0.25
+        },
+        "slice_semantic_coherence": "possible_bundling_heuristic(4_joins)",
+        "granularity": "agreement",
+        "harnessability": "harness_ready",
+        "harnessability_components": {
+          "has_scope_non_goals": true,
+          "has_negative_control": true,
+          "has_numeric_expected_delta": true,
+          "has_failure_mode": true
+        },
+        "primitive_reuse": {
+          "mentioned_any": true,
+          "overlap_with_reference": 0.16666666666666666,
+          "possible_reinvention": false
+        },
+        "decomposition_breadth": {
+          "concerns_named": 1,
+          "interventions_proposed": 3
+        },
+        "coordination_cost_reasoning_given": true,
+        "unnecessary_decomposition_flag": false,
+        "hindsight_leakage_guard": {
+          "flagged": false,
+          "matched_markers": []
+        },
+        "abstention_uncertainty_reasonableness": "specific",
+        "note": "rule-assisted, minimal-viable metrics — not a calibrated aggregate score (see README.md)"
+      },
+      "cited_refs": [
+        "archguard:case_readings",
+        "methodology:ownership-first"
+      ],
+      "unresolved_refs": [],
+      "is_abstain": false,
+      "intervention_count": 3,
+      "rep": 1
+    },
+    {
+      "case_id": "GOAL-032",
+      "group": "A",
+      "provenance": {
+        "role": "ab-a",
+        "profile": "gw",
+        "launcher": "claude-fjdac",
+        "model_from_profile": "v4.1flash-anthropic",
+        "model_flag_in_argv": "v4.1flash-anthropic",
+        "prompt_via_stdin": true,
+        "prompt_sha256_16": "68d7ce7cb45a9de9",
+        "prompt_chars": 3304,
+        "gateway_env_dropped": false,
+        "started_at": "2026-10-09T14:06:02.700Z",
+        "ended_at": "2026-10-09T14:06:14.921Z",
+        "duration_ms": 12221
+      },
+      "state": "verified",
+      "error": null,
+      "exit_status": 0,
+      "envelope": {
+        "proposer_id": "ownership-shadow-semantic",
+        "concern": "Two structurally identical verdict-parsing functions live in two different ownership layers — packages/quay/src/criterion-fidelity.ts::parseFidelityVerdict (product Core) and plugin/scripts/goal-driver.ts::parseSemanticSufficiencyVerdict (methodology tooling) — with no established canonical owner for 'parse a verdict from (exitCode, stdout)'.",
+        "evidence_refs": [
+          "archguard:case_readings",
+          "methodology:ownership-first"
+        ],
+        "candidate_interventions": [
+          {
+            "title": "Classify semantic equivalence of the two verdict parsers before any merge",
+            "rationale": "archguard detect_duplicates establishes only structural similarity and explicitly leaves open whether the two call sites are the same concern; the ownership/canonicalization decision is undecidable without this classification. methodology §2 warns that a canonical source does not mean call sites actually converge, and §4 requires one independently-verifiable slice at a time."
+          },
+          {
+            "title": "Name the owning layer for 'parse verdict from (exitCode, stdout)'",
+            "rationale": "The duplication straddles a real boundary — product package vs plugin methodology scripts. Ownership-first (§1) asks which layer should own the primitive; settling this fixes the direction of any shared extraction (does the plugin import from the product package, or does the primitive live in a neutral module) before code moves."
+          },
+          {
+            "title": "If equivalent, extract one parameterized verdict-parser slice",
+            "rationale": "§4 small real slice: the two functions differ only in which literal strings count as positive/negative verdicts, so a single primitive parameterized by those tokens lets both call sites converge on one owner rather than relocating a shell."
+          }
+        ],
+        "recommended_next_action": "investigate",
+        "scope": {
+          "in_scope": [
+            "ownership of the verdict-parsing primitive",
+            "canonicalization across packages/quay/src vs plugin/scripts",
+            "dependency-boundary direction of any shared extraction"
+          ],
+          "non_goals": [
+            "product planning, roadmap, prioritisation, or UI work",
+            "changing gate/verdict semantics or the set of accepted verdict tokens",
+            "merging the two definitions before semantic equivalence is established"
+          ]
+        },
+        "expected_mechanical_delta": "A before/after detect_duplicates reading: before = one duplicate group with 2 members (parseFidelityVerdict, parseSemanticSufficiencyVerdict); after a genuine canonicalization = that group absent (or a single canonical definition plus thin call sites), with both call sites' existing tests still green.",
+        "negative_control": "Re-run detect_duplicates with the positive/negative token literals swapped (a mutation) — if the group persists regardless, the check is keying on token-identical structure rather than the shared algorithm; and confirm both consumers' own tests still fail when the shared primitive's exit-code or JSON-blob branch is broken, proving the call sites truly converge rather than one merely delegating to the other.",
+        "abandon_or_reconsider_condition": "If classification shows the two are intentionally divergent — different verdict vocabularies, different blob shapes, or different failure semantics driven by genuinely different concerns — then the duplication is incidental and no canonical owner should be imposed (methodology §3: do not build a pattern zoo; §8: a deterministic flag may be an improvement or a stale declaration).",
+        "confidence": {
+          "level": "low",
+          "basis": "A single archguard duplicate-group reading whose own note states the semantic-equivalence classification is not yet made, empty goals/tasks tallies, and no call-site or dependency-direction evidence in this cutoff."
+        }
+      },
+      "scores": {
+        "case_id": "GOAL-032",
+        "concern_recall": 0,
+        "concern_precision": 0,
+        "chosen_slice_agreement": "no_match",
+        "chosen_slice_overlap_score": 0.20987654320987653,
+        "investigation_vs_goal_agreement": false,
+        "scope_expansion_violation": false,
+        "expected_delta_quality": "has_numeric_claim",
+        "falsifiability_negative_control_presence": "present",
+        "decomposition_quality": {
+          "structured_fields_present": "2/2 prose fields, 3/3 array fields non-empty",
+          "why_not_broader_overlap": 0.2,
+          "why_not_finer_overlap": 0.25
+        },
+        "slice_semantic_coherence": "possible_bundling_heuristic(6_joins)",
+        "granularity": "agreement",
+        "harnessability": "harness_ready",
+        "harnessability_components": {
+          "has_scope_non_goals": true,
+          "has_negative_control": true,
+          "has_numeric_expected_delta": true,
+          "has_failure_mode": true
+        },
+        "primitive_reuse": {
+          "mentioned_any": true,
+          "overlap_with_reference": 0.16666666666666666,
+          "possible_reinvention": false
+        },
+        "decomposition_breadth": {
+          "concerns_named": 1,
+          "interventions_proposed": 3
+        },
+        "coordination_cost_reasoning_given": true,
+        "unnecessary_decomposition_flag": false,
+        "hindsight_leakage_guard": {
+          "flagged": false,
+          "matched_markers": []
+        },
+        "abstention_uncertainty_reasonableness": "specific",
+        "note": "rule-assisted, minimal-viable metrics — not a calibrated aggregate score (see README.md)"
+      },
+      "cited_refs": [
+        "archguard:case_readings",
+        "methodology:ownership-first"
+      ],
+      "unresolved_refs": [],
+      "is_abstain": false,
+      "intervention_count": 3,
+      "rep": 2
+    },
+    {
+      "case_id": "GOAL-032",
+      "group": "B",
+      "provenance": {
+        "role": "ab-b",
+        "profile": "native",
+        "launcher": "/tmp/ownership-ab-fJviCe/B/launcher.sh",
+        "model_from_profile": "opus",
+        "model_flag_in_argv": "opus",
+        "prompt_via_stdin": true,
+        "prompt_sha256_16": "68d7ce7cb45a9de9",
+        "prompt_chars": 3304,
+        "gateway_env_dropped": true,
+        "started_at": "2026-10-09T14:06:14.921Z",
+        "ended_at": "2026-10-09T14:06:36.722Z",
+        "duration_ms": 21801
+      },
+      "state": "verified",
+      "error": null,
+      "exit_status": 0,
+      "envelope": {
+        "proposer_id": "ownership-shadow-semantic",
+        "concern": "The same verdict-parsing algorithm (non-zero exit ⇒ not-evaluated; bare-token match; last-line-upward scan for a {\"verdict\":\"...\"} blob; otherwise not-evaluated) has two owners, packages/quay/src/criterion-fidelity.ts::parseFidelityVerdict in Core and plugin/scripts/goal-driver.ts::parseSemanticSufficiencyVerdict in the plugin layer, and nobody has yet decided whether this is one concern that needs a single canonical owner or two concerns that only happen to look alike.",
+        "evidence_refs": [
+          "archguard:case_readings",
+          "methodology:ownership-first"
+        ],
+        "candidate_interventions": [
+          {
+            "title": "Decide whether the two parsers are the same concern before any merge",
+            "rationale": "The archguard reading says detect_duplicates found structural similarity only, and that the merge-safe versus intentionally-divergent question was still open at cutoff. Methodology §1 says to ask who should own something before extracting anything, and §7 says a semantic judgment must sit on top of the mechanical facts. So the first step is to check whether both callers need the same not-evaluated semantics, i.e. the same three-state result (positive, negative, not-evaluated) and the same behaviour on malformed or ambiguous output. Only after that should anyone choose an owner."
+          },
+          {
+            "title": "If they are the same concern: one parser parameterised by its verdict vocabulary, owned on a single side of the Core/plugin boundary, with both callers switched to it",
+            "rationale": "The only textual difference is the pair of literal verdict strings, so a single function that takes {positive, negative} tokens would cover both callers. Methodology §2 warns that a canonical source is not the same as callers converging on it. The slice only counts if both call sites actually import the shared function and both local bodies are deleted, not wrapped. Where the function lives has to respect the dependency direction between packages/quay and plugin/scripts. That direction is not stated in this evidence, so it must be checked before deciding."
+          },
+          {
+            "title": "If they are deliberately different: record why, and leave the code duplicated",
+            "rationale": "If the two vocabularies are expected to change independently, the duplication is incidental. Merging them would couple two separate concerns across a package boundary. The right fix then is a note at the definition site saying why they differ, not an extraction (methodology §3: no pattern zoo)."
+          }
+        ],
+        "recommended_next_action": "investigate",
+        "scope": {
+          "in_scope": [
+            "packages/quay/src/criterion-fidelity.ts::parseFidelityVerdict",
+            "plugin/scripts/goal-driver.ts::parseSemanticSufficiencyVerdict",
+            "the call sites and tests of these two functions",
+            "the allowed import direction between packages/quay and plugin/scripts for any shared helper"
+          ],
+          "non_goals": [
+            "unifying any other verdict or JSON-blob parsers that this reading did not flag",
+            "changing the verdict vocabularies or what a fidelity or sufficiency judgment means",
+            "a general OO or pattern refactor of goal-driver.ts or criterion-fidelity.ts",
+            "any product, roadmap or UI work"
+          ]
+        },
+        "expected_mechanical_delta": "If merged: archguard detect_duplicates goes from 1 flagged group to 0 for this pair. The number of function bodies implementing the scan-last-line-upward-for-a-verdict-blob algorithm goes from 2 to 1. The existing tests for both callers stay green with the same verdicts on the same fixtures, and no new package-level dependency edge or cycle appears in archguard detect_cycles or package fan-in. If kept separate: the duplicate count stays at 1 and a written divergence rationale exists at both definition sites.",
+        "negative_control": "Two checks. (1) Grep both call sites for imports of the shared function and confirm both old local function bodies are gone. A thin wrapper that keeps the old body, or a canonical copy that only one caller uses, would also clear the archguard duplicate group and would only look like convergence. (2) Feed both callers the same set of inputs: a non-zero exit, a bare token, a JSON blob on a non-final line, a blob carrying the other caller's vocabulary, and empty output. Confirm the classification matches the pre-change behaviour exactly, and that the other caller's tokens give not-evaluated rather than a positive or negative verdict. If cross-vocabulary input ever produces a verdict, the parameterisation is leaking.",
+        "abandon_or_reconsider_condition": "Drop the merge if the investigation finds that the two callers already differ, or are meant to differ, on not-evaluated handling or edge-case parsing. Also drop it if the only allowed place for a shared helper would create a new cross-package dependency edge or cycle. Reconsider altogether if archguard stops flagging the pair, which would mean one side has already diverged.",
+        "confidence": {
+          "level": "medium",
+          "basis": "The structural duplication is mechanically observed: one flagged group, the same algorithm shape, differing only in two literals. But the archguard reading states outright that the semantic classification has not been made, the goal and task status tallies are empty, and the dependency direction between the two packages is not in the evidence. That supports investigating, not proposing a goal."
+        }
+      },
+      "scores": {
+        "case_id": "GOAL-032",
+        "concern_recall": 0,
+        "concern_precision": 0,
+        "chosen_slice_agreement": "no_match",
+        "chosen_slice_overlap_score": 0.19753086419753085,
+        "investigation_vs_goal_agreement": false,
+        "scope_expansion_violation": false,
+        "expected_delta_quality": "has_numeric_claim",
+        "falsifiability_negative_control_presence": "present",
+        "decomposition_quality": {
+          "structured_fields_present": "2/2 prose fields, 3/3 array fields non-empty",
+          "why_not_broader_overlap": 0.2,
+          "why_not_finer_overlap": 0.25
+        },
+        "slice_semantic_coherence": "possible_bundling_heuristic(2_joins)",
+        "granularity": "agreement",
+        "harnessability": "harness_ready",
+        "harnessability_components": {
+          "has_scope_non_goals": true,
+          "has_negative_control": true,
+          "has_numeric_expected_delta": true,
+          "has_failure_mode": true
+        },
+        "primitive_reuse": {
+          "mentioned_any": true,
+          "overlap_with_reference": 0.16666666666666666,
+          "possible_reinvention": false
+        },
+        "decomposition_breadth": {
+          "concerns_named": 1,
+          "interventions_proposed": 3
+        },
+        "coordination_cost_reasoning_given": true,
+        "unnecessary_decomposition_flag": false,
+        "hindsight_leakage_guard": {
+          "flagged": true,
+          "matched_markers": [
+            "thin wrapper"
+          ]
+        },
+        "abstention_uncertainty_reasonableness": "specific",
+        "note": "rule-assisted, minimal-viable metrics — not a calibrated aggregate score (see README.md)"
+      },
+      "cited_refs": [
+        "archguard:case_readings",
+        "methodology:ownership-first"
+      ],
+      "unresolved_refs": [],
+      "is_abstain": false,
+      "intervention_count": 3,
+      "rep": 2
+    },
+    {
+      "case_id": "GOAL-033",
+      "group": "A",
+      "provenance": {
+        "role": "ab-a",
+        "profile": "gw",
+        "launcher": "claude-fjdac",
+        "model_from_profile": "v4.1flash-anthropic",
+        "model_flag_in_argv": "v4.1flash-anthropic",
+        "prompt_via_stdin": true,
+        "prompt_sha256_16": "723350928439057d",
+        "prompt_chars": 2883,
+        "gateway_env_dropped": false,
+        "started_at": "2026-10-09T14:06:36.723Z",
+        "ended_at": "2026-10-09T14:06:49.145Z",
+        "duration_ms": 12422
+      },
+      "state": "verified",
+      "error": null,
+      "exit_status": 0,
+      "envelope": {
+        "proposer_id": "ownership-shadow-semantic",
+        "concern": "The packages/quay/src root package sits in a single 6-member package-level SCC together with cli, fan-in, gate, gate/config and gate/factories, so no declared layer rule can hold until it is decided whether the root is a composition root (owns wiring only) or a shared kernel (owns reusable primitives).",
+        "evidence_refs": [
+          "archguard:case_readings",
+          "methodology:ownership-first"
+        ],
+        "candidate_interventions": [
+          {
+            "title": "Name the owner of the root package before touching any file",
+            "rationale": "Ownership-first (§1) says ask who should own the responsibility first. The reading gives the member set but not which edge is load-bearing; deciding root = composition root vs root = shared kernel is the one question whose answer changes which edge is even legal to cut."
+          },
+          {
+            "title": "Cut exactly one edge out of the SCC and re-measure the member set",
+            "rationale": "§4 asks for one independently acceptable slice. The draft layers.yml already flags root<->cli as a violation but does not decide the fix, so this is the smallest slice that has a declared rule behind it and a mechanical before/after reading."
+          },
+          {
+            "title": "Recompute reachability of every remaining member through the removed edge node",
+            "rationale": "A cut node can be the only route between two other members; prior experience in this repo had an SCC go 6→4, not 6→5, because the member set is not edge-set invariant. Without this step a green reading after the cut would not show the cycle is gone."
+          }
+        ],
+        "recommended_next_action": "investigate",
+        "scope": {
+          "in_scope": [
+            "packages/quay/src package boundaries and the 6-member SCC {root, cli, fan-in, gate, gate/config, gate/factories}",
+            "the root<->cli edge flagged as a violation by the unlanded draft layers.yml",
+            "the declared-rules layer itself (what the layer declaration asserts vs. what detect_cycles(package) reads)"
+          ],
+          "non_goals": [
+            "product roadmap, prioritisation or UI work",
+            "landing the draft layers.yml as a declaration of intent",
+            "scale-out OO refactoring or introducing design patterns (§3 pattern zoo, §11)",
+            "any cycle outside the one SCC named in the reading"
+          ]
+        },
+        "expected_mechanical_delta": "detect_cycles(outputScope: package) before: one SCC of size 6 with the listed member set. After one edge removal: either size 0 (no package cycle) or a strictly smaller SCC whose member set is recomputed from reachability, reported as size N with the full member list — never as a bare boolean.",
+        "negative_control": "Remove an edge into a member that is reachable through some other member as well. The SCC must stay size 6 and the member list unchanged. If it shrinks anyway, the shrink came from the edit itself and not from the ownership cut; and if the cut edge cannot be removed without the SCC re-forming via a second path, the declared root<->cli violation was not the SCC-defining edge.",
+        "abandon_or_reconsider_condition": "If removing the flagged root<->cli edge leaves the 6-member SCC intact because the other members stay mutually reachable, or if the same cycle re-forms immediately through another path, then the root<->cli flag was a symptom and the real owner is elsewhere — drop this slice rather than splitting packages to satisfy the reading.",
+        "confidence": {
+          "level": "low",
+          "basis": "One mechanical reading only: goals:status_tally and tasks:status_tally are both empty, so there is no task/goal corpus corroborating the concern. The reading fixes the SCC member set but not the edge set, and the only stated fixing hint comes from a draft layers.yml that lives in an unmerged worktree and therefore is not a verified declaration. The member set is known to be non-invariant under edge cuts in this repo, so the intervention's outcome cannot be predicted from the evidence given."
+        }
+      },
+      "scores": {
+        "case_id": "GOAL-033",
+        "concern_recall": 1,
+        "concern_precision": 1,
+        "chosen_slice_agreement": "no_match",
+        "chosen_slice_overlap_score": 0.09302325581395349,
+        "investigation_vs_goal_agreement": false,
+        "scope_expansion_violation": false,
+        "expected_delta_quality": "has_numeric_claim",
+        "falsifiability_negative_control_presence": "present",
+        "decomposition_quality": {
+          "structured_fields_present": "2/2 prose fields, 3/3 array fields non-empty",
+          "why_not_broader_overlap": 0,
+          "why_not_finer_overlap": 0.25
+        },
+        "slice_semantic_coherence": "possible_bundling_heuristic(6_joins)",
+        "granularity": "agreement",
+        "harnessability": "harness_ready",
+        "harnessability_components": {
+          "has_scope_non_goals": true,
+          "has_negative_control": true,
+          "has_numeric_expected_delta": true,
+          "has_failure_mode": true
+        },
+        "primitive_reuse": {
+          "mentioned_any": true,
+          "overlap_with_reference": 1,
+          "possible_reinvention": false
+        },
+        "decomposition_breadth": {
+          "concerns_named": 1,
+          "interventions_proposed": 3
+        },
+        "coordination_cost_reasoning_given": true,
+        "unnecessary_decomposition_flag": false,
+        "hindsight_leakage_guard": {
+          "flagged": false,
+          "matched_markers": []
+        },
+        "abstention_uncertainty_reasonableness": "specific",
+        "note": "rule-assisted, minimal-viable metrics — not a calibrated aggregate score (see README.md)"
+      },
+      "cited_refs": [
+        "archguard:case_readings",
+        "methodology:ownership-first"
+      ],
+      "unresolved_refs": [],
+      "is_abstain": false,
+      "intervention_count": 3,
+      "rep": 1
+    },
+    {
+      "case_id": "GOAL-033",
+      "group": "B",
+      "provenance": {
+        "role": "ab-b",
+        "profile": "native",
+        "launcher": "/tmp/ownership-ab-fJviCe/B/launcher.sh",
+        "model_from_profile": "opus",
+        "model_flag_in_argv": "opus",
+        "prompt_via_stdin": true,
+        "prompt_sha256_16": "723350928439057d",
+        "prompt_chars": 2883,
+        "gateway_env_dropped": true,
+        "started_at": "2026-10-09T14:06:49.146Z",
+        "ended_at": "2026-10-09T14:07:08.402Z",
+        "duration_ms": 19256
+      },
+      "state": "verified",
+      "error": null,
+      "exit_status": 0,
+      "envelope": {
+        "proposer_id": "ownership-shadow-semantic",
+        "concern": "The packages/quay/src root module and cli are mutually dependent inside a single 6-member package SCC {root, cli, fan-in, gate, gate/config, gate/factories}, so nothing establishes whether the root or cli owns the shared logic on that edge.",
+        "evidence_refs": [
+          "archguard:case_readings",
+          "methodology:ownership-first",
+          "goals:status_tally",
+          "tasks:status_tally"
+        ],
+        "candidate_interventions": [
+          {
+            "title": "Ownership audit of the root<->cli edge before any cut",
+            "rationale": "Methodology §1 says to ask who should own the code before looking for a class. List each import on both sides of root->cli and cli->root. For each symbol, decide whether it belongs to root as core, to cli as the entry surface, or to a third owner. Only then choose which edge direction to remove."
+          },
+          {
+            "title": "Single-slice cut: invert or relocate the cli-ward dependency from root",
+            "rationale": "If the audit shows root reaches into cli for logic that cli does not truly own, move that logic into root or a leaf module. Then make cli the only caller, so callers actually converge (§2, avoid relocating a shell). Do one edge only, so the slice can be accepted on its own (§4)."
+          },
+          {
+            "title": "Predict the post-cut SCC membership before claiming the delta",
+            "rationale": "Removing one edge does not drop SCC size by exactly one. Members that reach the cycle only through the cut node leave together. Compute the expected member set from the edge list first, so the AC states a specific set and not just 'smaller'."
+          }
+        ],
+        "recommended_next_action": "investigate",
+        "scope": {
+          "in_scope": [
+            "Import edges between packages/quay/src root and cli",
+            "Reachability of fan-in, gate, gate/config and gate/factories through those two nodes",
+            "Recording the ownership decision as input to the draft layers.yml rule"
+          ],
+          "non_goals": [
+            "Breaking every edge in the SCC in one change",
+            "Adding new abstractions or patterns before the boundary is decided (§3)",
+            "Landing or rewriting the unmerged draft layers.yml",
+            "Changing CLI behaviour or product features"
+          ]
+        },
+        "expected_mechanical_delta": "Before: detect_cycles(outputScope: package) reports exactly one SCC with 6 members. After: the root<->cli mutual edge is gone, and the SCC either disappears or shrinks to the member set predicted in advance from the edge list. Package-cycle count is 0, or 1 with the predicted members.",
+        "negative_control": "On the pre-change tree, run the same detect_cycles call and check that the AC predicate fails (6 members, root and cli both present). Also re-add one removed import in a scratch copy and check that the predicate fails again. That shows the AC measures the edge rather than holding trivially. Check one more thing: grep cli callers for symbols moved into root. If cli still re-exports or wraps them, the change only relocated a shell, and the ownership did not actually move.",
+        "abandon_or_reconsider_condition": "Abandon or reconsider if any of these hold: (a) the audit shows root->cli and cli->root are both legitimate, and the real coupling runs through gate/fan-in, so the root<->cli edge is a symptom; (b) a fresh detect_cycles reading no longer shows the 6-member SCC; (c) an existing goal or task already owns this cut. The goal and task tallies in the evidence are empty, so this cannot be ruled out yet and must be checked before proposing a goal.",
+        "confidence": {
+          "level": "medium",
+          "basis": "The cycle is a mechanical reading of one concrete SCC, and the draft layers.yml independently flags root<->cli. But the evidence names no specific imported symbols, the draft does not decide how to fix it, and the empty goal/task tallies leave open whether this work is already underway. So 'investigate' is justified, and 'propose-goal' is not yet."
+        }
+      },
+      "scores": {
+        "case_id": "GOAL-033",
+        "concern_recall": 1,
+        "concern_precision": 1,
+        "chosen_slice_agreement": "no_match",
+        "chosen_slice_overlap_score": 0.11627906976744186,
+        "investigation_vs_goal_agreement": false,
+        "scope_expansion_violation": false,
+        "expected_delta_quality": "has_numeric_claim",
+        "falsifiability_negative_control_presence": "present",
+        "decomposition_quality": {
+          "structured_fields_present": "2/2 prose fields, 3/3 array fields non-empty",
+          "why_not_broader_overlap": 0,
+          "why_not_finer_overlap": 0.25
+        },
+        "slice_semantic_coherence": "possible_bundling_heuristic(2_joins)",
+        "granularity": "agreement",
+        "harnessability": "harness_ready",
+        "harnessability_components": {
+          "has_scope_non_goals": true,
+          "has_negative_control": true,
+          "has_numeric_expected_delta": true,
+          "has_failure_mode": true
+        },
+        "primitive_reuse": {
+          "mentioned_any": true,
+          "overlap_with_reference": 1,
+          "possible_reinvention": false
+        },
+        "decomposition_breadth": {
+          "concerns_named": 1,
+          "interventions_proposed": 3
+        },
+        "coordination_cost_reasoning_given": true,
+        "unnecessary_decomposition_flag": false,
+        "hindsight_leakage_guard": {
+          "flagged": false,
+          "matched_markers": []
+        },
+        "abstention_uncertainty_reasonableness": "specific",
+        "note": "rule-assisted, minimal-viable metrics — not a calibrated aggregate score (see README.md)"
+      },
+      "cited_refs": [
+        "archguard:case_readings",
+        "methodology:ownership-first",
+        "goals:status_tally",
+        "tasks:status_tally"
+      ],
+      "unresolved_refs": [],
+      "is_abstain": false,
+      "intervention_count": 3,
+      "rep": 1
+    },
+    {
+      "case_id": "GOAL-033",
+      "group": "A",
+      "provenance": {
+        "role": "ab-a",
+        "profile": "gw",
+        "launcher": "claude-fjdac",
+        "model_from_profile": "v4.1flash-anthropic",
+        "model_flag_in_argv": "v4.1flash-anthropic",
+        "prompt_via_stdin": true,
+        "prompt_sha256_16": "723350928439057d",
+        "prompt_chars": 2883,
+        "gateway_env_dropped": false,
+        "started_at": "2026-10-09T14:07:08.403Z",
+        "ended_at": "2026-10-09T14:07:22.553Z",
+        "duration_ms": 14150
+      },
+      "state": "verified",
+      "error": null,
+      "exit_status": 0,
+      "envelope": {
+        "proposer_id": "ownership-shadow-semantic",
+        "concern": "The Core root package (packages/quay/src, reported as the empty-string package \"\") sits inside a 6-member package-level SCC with cli, fan-in, gate, gate/config, and gate/factories, so no single package can be named the owner of the entry surface and the root<->cli edge (already flagged as a violation by an unmerged draft layers.yml) has an undecided cut direction.",
+        "evidence_refs": [
+          "archguard:case_readings",
+          "methodology:ownership-first"
+        ],
+        "candidate_interventions": [
+          {
+            "title": "One-slice cut of the root<->cli edge, with the SCC member set re-read before and after",
+            "rationale": "Methodology §4 (one independently-verifiable slice at a time) and §11 (ownership convergence before scale) prescribe cutting exactly one edge rather than dissolving the whole SCC. Cutting root<->cli is the only edge the evidence already names as a declared violation, so it is the highest-signal single slice; the before/after SCC membership (not just the cycle count) is the acceptance reading."
+          },
+          {
+            "title": "Ownership-first naming of the canonical owner for each symbol crossing the six package boundaries",
+            "rationale": "Methodology §1 (ask who should own it, not which class) and §2 (canonical source != caller convergence; avoid moving shells). Without a symbol-level owner map, any edge cut risks relocating a re-export barrel (搬壳) instead of moving ownership, which would leave the SCC intact under a new file layout."
+          },
+          {
+            "title": "Decide the disposition of the draft layers.yml as declared-rule evidence, not as the fix",
+            "rationale": "Methodology §7 separates mechanical facts / declared rules / semantic judgment. The unmerged draft flags root<->cli but explicitly does not decide HOW, so it is layer-2 input to the slice decision (§8: mechanical pass != architecture good) and should not be landed as if it were the resolution."
+          }
+        ],
+        "recommended_next_action": "investigate",
+        "scope": {
+          "in_scope": [
+            "package-boundary ownership of the six SCC members {root(\"\"), cli, fan-in, gate, gate/config, gate/factories}",
+            "selection and ordering of a single edge to cut, starting with root<->cli",
+            "symbol-level owner map for what crosses each of the six package boundaries",
+            "whether the empty-string root package is a real package or a path-grouping artifact",
+            "disposition (adjust / land / discard) of the unmerged draft layers.yml as a declared rule"
+          ],
+          "non_goals": [
+            "intra-module refactoring inside any single package",
+            "product features, roadmap, or milestone prioritisation",
+            "UI/web work",
+            "coverage or test-count targets",
+            "performance or bundle-size work",
+            "reporting a cycle count without the member set"
+          ]
+        },
+        "expected_mechanical_delta": "`archguard detect_cycles(outputScope: package)` before: one SCC with member set {\"\", cli, fan-in, gate, gate/config, gate/factories} (size 6). After cutting the root<->cli edge: the same command reports either a strictly smaller SCC size (<=5) with the reduced member set printed, or zero cycles; the root package's fan-out to cli disappears while its fan-in/fan-out to the remaining members is unchanged. The measured quantity is the printed member set and size, not a boolean 'has cycle'.",
+        "negative_control": "Re-run `detect_cycles(outputScope: package)` on the pre-change commit (or with the root<->cli edge restored) and confirm it reproduces the exact same 6-member set. A reading of 'zero cycles' counts only if the instrument is shown still able to return the known 6-member SCC when the edge is present; otherwise the zero is a not-evaluated result masquerading as a pass (root-package scope resolution silently empty), which is the failure the check must exclude.",
+        "abandon_or_reconsider_condition": "If the root<->cli edge proves to be a pure TypeScript barrel/re-export carrying no ownership, or if the empty-string root package is an artifact of path-based package grouping rather than a real package, then the 6-member SCC is a naming/grouping artifact and not an ownership defect - abandon the edge-cut and instead re-scope the package grouping (or the scan's scope definition) so the reading reflects owned boundaries.",
+        "confidence": {
+          "level": "low",
+          "basis": "A single mechanical reading is present; the goals and tasks status tallies are empty, so no corroborating landing or status evidence exists for either the cycle or a prior ownership pass. The SCC's root member is the empty-string package, which may be a grouping artifact rather than a real package, and the only declared-rule input is a draft layers.yml living in an unmerged worktree. This supports an ownership concern and an investigation, but not yet a specific, verifiable goal."
+        }
+      },
+      "scores": {
+        "case_id": "GOAL-033",
+        "concern_recall": 1,
+        "concern_precision": 1,
+        "chosen_slice_agreement": "no_match",
+        "chosen_slice_overlap_score": 0.11627906976744186,
+        "investigation_vs_goal_agreement": false,
+        "scope_expansion_violation": false,
+        "expected_delta_quality": "has_numeric_claim",
+        "falsifiability_negative_control_presence": "present",
+        "decomposition_quality": {
+          "structured_fields_present": "2/2 prose fields, 3/3 array fields non-empty",
+          "why_not_broader_overlap": 0,
+          "why_not_finer_overlap": 0.25
+        },
+        "slice_semantic_coherence": "possible_bundling_heuristic(6_joins)",
+        "granularity": "agreement",
+        "harnessability": "harness_ready",
+        "harnessability_components": {
+          "has_scope_non_goals": true,
+          "has_negative_control": true,
+          "has_numeric_expected_delta": true,
+          "has_failure_mode": true
+        },
+        "primitive_reuse": {
+          "mentioned_any": true,
+          "overlap_with_reference": 1,
+          "possible_reinvention": false
+        },
+        "decomposition_breadth": {
+          "concerns_named": 1,
+          "interventions_proposed": 3
+        },
+        "coordination_cost_reasoning_given": true,
+        "unnecessary_decomposition_flag": false,
+        "hindsight_leakage_guard": {
+          "flagged": false,
+          "matched_markers": []
+        },
+        "abstention_uncertainty_reasonableness": "specific",
+        "note": "rule-assisted, minimal-viable metrics — not a calibrated aggregate score (see README.md)"
+      },
+      "cited_refs": [
+        "archguard:case_readings",
+        "methodology:ownership-first"
+      ],
+      "unresolved_refs": [],
+      "is_abstain": false,
+      "intervention_count": 3,
+      "rep": 2
+    },
+    {
+      "case_id": "GOAL-033",
+      "group": "B",
+      "provenance": {
+        "role": "ab-b",
+        "profile": "native",
+        "launcher": "/tmp/ownership-ab-fJviCe/B/launcher.sh",
+        "model_from_profile": "opus",
+        "model_flag_in_argv": "opus",
+        "prompt_via_stdin": true,
+        "prompt_sha256_16": "723350928439057d",
+        "prompt_chars": 2883,
+        "gateway_env_dropped": true,
+        "started_at": "2026-10-09T14:07:22.554Z",
+        "ended_at": "2026-10-09T14:07:46.905Z",
+        "duration_ms": 24351
+      },
+      "state": "verified",
+      "error": null,
+      "exit_status": 0,
+      "envelope": {
+        "proposer_id": "ownership-shadow-semantic",
+        "concern": "The packages/quay/src root package and cli sit in one 6-member package-level SCC with fan-in, gate, gate/config and gate/factories, so no member has a single clear owner or a one-way dependency direction, and the root<->cli edge is the flagged violation whose fix direction nobody has decided.",
+        "evidence_refs": [
+          "archguard:case_readings",
+          "methodology:ownership-first"
+        ],
+        "candidate_interventions": [
+          {
+            "title": "Ownership audit of the root<->cli edge before any code move",
+            "rationale": "Ownership-first (§1) says to ask who should own the symbols behind this edge before reaching for structure. The draft layers.yml only flags the edge and does not say which side owns it. Step one is to list the imported symbols in each direction and assign each one a canonical owner. That turns 'flagged' into a decision."
+          },
+          {
+            "title": "Single-slice inversion of the root->cli direction",
+            "rationale": "Once owners are known, cut only the import direction that breaks the layer rule (§4: one small slice that can be accepted on its own). Callers must actually converge on the canonical owner, not import through a re-export shim. A shim would move the shell without fixing ownership (§2)."
+          },
+          {
+            "title": "Land the layers.yml declaration with the edge as an explicit known violation",
+            "rationale": "Today the rule exists only in an unmerged worktree, so nothing can check it. Landing it splits the issue into mechanical facts (the SCC), declared rules (layers.yml) and semantic judgment (§7). It also gives a future fix a rule it can measurably satisfy."
+          }
+        ],
+        "recommended_next_action": "investigate",
+        "scope": {
+          "in_scope": [
+            "Import edges between packages/quay/src root and cli",
+            "Canonical-owner assignment for symbols crossing that edge",
+            "Package-level SCC membership as reported by archguard detect_cycles(outputScope: package)"
+          ],
+          "non_goals": [
+            "Breaking the whole 6-member SCC in one change",
+            "Restructuring gate, gate/config or gate/factories internals",
+            "Adopting design patterns or broad OO conversion (§3, §11)",
+            "Deciding layers.yml rules beyond the root<->cli edge"
+          ]
+        },
+        "expected_mechanical_delta": "Before: detect_cycles(outputScope: package) reports one SCC with 6 members, including root and cli. After a successful slice: the root<->cli edge is gone in the violating direction and the SCC member count goes down. The investigation must predict the exact post-cut membership by checking which members are reachable only through the cut edge, not assume it drops by one.",
+        "negative_control": "Re-run detect_cycles after the change and also count direct import sites of the moved symbols, so that a re-export shim cannot pass as a fix. If callers still reach the old location through a forwarding module, or the SCC members are unchanged, it only looks like it worked. A deliberately re-added reverse import must make the cycle check fail again.",
+        "abandon_or_reconsider_condition": "Abandon this slice if the ownership audit shows the symbols on the root<->cli edge are genuinely shared and have no defensible single owner. Also abandon if cutting the edge provably leaves SCC membership unchanged because the cycle closes through gate or fan-in paths anyway. In that case the root<->cli edge is not the load-bearing edge and the concern should move to the edge that is.",
+        "confidence": {
+          "level": "medium",
+          "basis": "There is one concrete mechanical reading (the 6-member SCC) and an independent draft declaration flagging the same root<->cli edge, so the concern is real. But no edge-level symbol data is in the evidence, the draft does not decide the fix direction, and the task and goal tallies are empty. That supports investigating, not proposing a goal yet."
+        }
+      },
+      "scores": {
+        "case_id": "GOAL-033",
+        "concern_recall": 1,
+        "concern_precision": 1,
+        "chosen_slice_agreement": "no_match",
+        "chosen_slice_overlap_score": 0.11627906976744186,
+        "investigation_vs_goal_agreement": false,
+        "scope_expansion_violation": false,
+        "expected_delta_quality": "has_numeric_claim",
+        "falsifiability_negative_control_presence": "present",
+        "decomposition_quality": {
+          "structured_fields_present": "2/2 prose fields, 3/3 array fields non-empty",
+          "why_not_broader_overlap": 0,
+          "why_not_finer_overlap": 0.25
+        },
+        "slice_semantic_coherence": "possible_bundling_heuristic(2_joins)",
+        "granularity": "agreement",
+        "harnessability": "harness_ready",
+        "harnessability_components": {
+          "has_scope_non_goals": true,
+          "has_negative_control": true,
+          "has_numeric_expected_delta": true,
+          "has_failure_mode": true
+        },
+        "primitive_reuse": {
+          "mentioned_any": true,
+          "overlap_with_reference": 1,
+          "possible_reinvention": false
+        },
+        "decomposition_breadth": {
+          "concerns_named": 1,
+          "interventions_proposed": 3
+        },
+        "coordination_cost_reasoning_given": true,
+        "unnecessary_decomposition_flag": false,
+        "hindsight_leakage_guard": {
+          "flagged": false,
+          "matched_markers": []
+        },
+        "abstention_uncertainty_reasonableness": "specific",
+        "note": "rule-assisted, minimal-viable metrics — not a calibrated aggregate score (see README.md)"
+      },
+      "cited_refs": [
+        "archguard:case_readings",
+        "methodology:ownership-first"
+      ],
+      "unresolved_refs": [],
+      "is_abstain": false,
+      "intervention_count": 3,
+      "rep": 2
+    }
+  ]
+}

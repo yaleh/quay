@@ -208,6 +208,10 @@ CHANNEL="npm-global"         # step① 验证哪条安装路径：npm-global（�
 CWD="$(pwd -P)"
 VC_NODE="${VC_NODE:-node}"                    # 启动弹窗探针的 node 接缝（测试可覆盖）
 VC_TMUX_SOCKET="${VC_TMUX_SOCKET:-}"          # 启动弹窗探针的 tmux 套接字覆盖（测试可覆盖）
+# 读 JSON 文件（$1 = 路径）的 node -e 前导：多个 ac25*_* 读取器共用同一段（去重复副本），
+# 载荷非 JSON ⇒ exit 1（调用方各自决定「读不出」怎么表示，前导只负责解析失败这一态）。
+VC_JSON_PRE='const fs = require("fs");
+let d; try { d = JSON.parse(fs.readFileSync(process.argv[1], "utf8")); } catch (e) { process.exit(1); }'
 
 # ── AC5 锚（人 2026-08-16 裁定：达成 = 该 build 的 commit sha 新于本次阶段切换 2026-08-16）──
 # 判据只锚定事后仍可核的对象：commit sha / 内容 sha256 / ISO 提交时间 —— 不引用 worktree 产物路径。
@@ -1029,6 +1033,17 @@ ac207_select_implementation_commit() {
   return 1
 }
 
+# 记账自证（按位置）：文件列表 JSON 至少含一条【不在 tasks/goals/.quay 之下】的路径 ⇒ 0，否则 1。
+# AC-207 / AC-239 / AC-248 三个写入器共用同一判定（去重复副本，⛔ 不是三份各写一遍——硬规则 5b）。
+ac_files_non_bookkeeping() {
+  printf '%s' "$1" | "$VC_NODE" --no-warnings -e '
+    let s=""; process.stdin.on("data",d=>s+=d).on("end",()=>{
+      let f; try { f=JSON.parse(s); } catch { process.exit(1); }
+      if (!Array.isArray(f) || f.length===0) process.exit(1);
+      process.exit(f.some(p => !/^(tasks|goals|\.quay)\//.test(String(p))) ? 0 : 1);
+    });'
+}
+
 # ── AC-207 记录写（fail-closed，硬规则 3b）────────────────────────────────────────────────
 # 写 GOAL-009-AC-207 记录（经 ac_record_append 统一补 top-level build_sha/ts——AC-214 新鲜度锚）。
 # 缺任一有效读数 ⇒ 不写 return 1（缺值≠合格，也≠静默跳过）。字段逐字满足 criterion 过滤：
@@ -1048,12 +1063,7 @@ write_ac207_record() {
   [ "$produced_by_driver" = "true" ] || return 1
   [ -n "$commit_files_json" ] || return 1
   # 记账自证（按位置）：文件列表必须至少含一条【不在 tasks/goals/.quay 之下】的路径。
-  printf '%s' "$commit_files_json" | "$VC_NODE" --no-warnings -e '
-    let s=""; process.stdin.on("data",d=>s+=d).on("end",()=>{
-      let f; try { f=JSON.parse(s); } catch { process.exit(1); }
-      if (!Array.isArray(f) || f.length===0) process.exit(1);
-      process.exit(f.some(p => !/^(tasks|goals|\.quay)\//.test(String(p))) ? 0 : 1);
-    });' || return 1
+  ac_files_non_bookkeeping "$commit_files_json" || return 1
   ac_record_append ",\"ac\":\"GOAL-009-AC-207\",\"host\":\"$host\",\"project_root\":\"$project_root\",\"commit_sha\":\"$commit_sha\",\"commit_files\":$commit_files_json,\"task_id\":\"$task_id\",\"task_status\":\"$task_status\",\"gate_events\":$gate_events,\"produced_by_driver\":$produced_by_driver"
 }
 
@@ -1077,12 +1087,7 @@ write_ac239_record() {
   [ "$gate_events" -gt 0 ] 2>/dev/null || return 1
   [ "$produced_by_driver" = "true" ] || return 1
   [ -n "$commit_files_json" ] || return 1
-  printf '%s' "$commit_files_json" | "$VC_NODE" --no-warnings -e '
-    let s=""; process.stdin.on("data",d=>s+=d).on("end",()=>{
-      let f; try { f=JSON.parse(s); } catch { process.exit(1); }
-      if (!Array.isArray(f) || f.length===0) process.exit(1);
-      process.exit(f.some(p => !/^(tasks|goals|\.quay)\//.test(String(p))) ? 0 : 1);
-    });' || return 1
+  ac_files_non_bookkeeping "$commit_files_json" || return 1
   ac_record_append ",\"ac\":\"GOAL-009-AC-239\",\"host\":\"$host\",\"project_root\":\"$project_root\",\"commit_sha\":\"$commit_sha\",\"commit_files\":$commit_files_json,\"task_id\":\"$task_id\",\"task_status\":\"$task_status\",\"gate_events\":$gate_events,\"produced_by_driver\":$produced_by_driver"
 }
 
@@ -1338,10 +1343,16 @@ BODY
 # no-mcp-entry / unrecognized-shape (NOT-EVALUATED) · unreadable (the checker could not run at all —
 # ⛔ a distinct word, never confused with 合格).
 binding_state() {
-  local r="$1" out
+  local r="$1" out state
+  # ⛔ 2>&1 (BOTH streams) is load-bearing: gate-script-base.emitVerdict writes its JSON on the stream
+  #    its caller picks, and provider-binding-resolvability-check writes its NOT-EVALUATED verdicts
+  #    (no-mcp-entry / unrecognized-shape / an audit throw) to **stderr** while PASS/FAIL go to stdout.
+  #    Reading stdout alone collapsed every not-evaluated state into "unreadable" — "readable and
+  #    not-evaluated" and "could not run at all" shared one word (硬规则 3b). `--no-warnings` keeps
+  #    stderr JSON-only so the merge stays parseable; a genuine crash still yields "unreadable".
   out="$(node --no-warnings --experimental-strip-types \
-    "$SCRIPT_DIR/provider-binding-resolvability-check.ts" --root "$r" --json 2>/dev/null)"
-  printf '%s' "$out" | python3 -c '
+    "$SCRIPT_DIR/provider-binding-resolvability-check.ts" --root "$r" --json 2>&1)"
+  state="$(printf '%s' "$out" | python3 -c '
 import json,sys
 try:
     d = json.load(sys.stdin)
@@ -1354,7 +1365,23 @@ for p in rows:
     if p.get("state") in ("bare-path-name", "dangling-absolute", "dangling-relative"):
         print(p["state"]); raise SystemExit
 print(rows[0].get("state", "unrecognized-shape"))
-' 2>/dev/null || echo "unreadable"
+' 2>/dev/null || echo "unreadable")"
+  # ── new-semantics binding (76f89ce82 / gap-project-quay-pointer-is-init-plugin-root-…): the native
+  #    provider no longer CARRIES path/mcp_entry — Core resolves <plugin-root>/vendor/quay-native, and
+  #    the project's binding IS its `.quay/plugin` link. The checker was written for the OLD
+  #    config-carried form, so it reports `no-mcp-entry` ("nothing to judge") for the CURRENT form.
+  #    Judge that form here: a `.quay/plugin` link whose vendored quay-native bundle is a real file IS
+  #    a project-controlled, $PATH-independent binding ⇒ path-resolved. ⛔ Not a blanket relaxation —
+  #    the AC-238 gate still compares the resolved bundle's sha to the DELIVERED one (RUNTIME_REPLACED
+  #    ③), so a stale/absent link fails closed. RED states above are returned before this branch.
+  if [ "$state" = "no-mcp-entry" ]; then
+    local pj=""
+    pj="$(cd "$r/.quay/plugin" 2>/dev/null && pwd -P || true)"
+    if [ -n "$pj" ] && [ -f "$pj/vendor/quay-native/dist/quay-native.js" ]; then
+      printf 'path-resolved'; return 0
+    fi
+  fi
+  printf '%s' "$state"
 }
 
 step_upgrade_existing() {
@@ -1453,7 +1480,7 @@ step_upgrade_existing() {
   #   0 个 backup ref（该旗标在不需要采纳时是 no-op，故可以无条件传）。
   set +e
   CLAUDE_PLUGIN_ROOT="$(dirname "$(dirname "$qinit")")" \
-    bash "$qinit" --root "$root" --repo-root "$root" \
+    bash "$qinit" init --root "$root" --repo-root "$root" \
       --worktree-root "$(dirname "$root")/$(basename "$root")-worktrees" \
       --adopt-branch-model \
       --auto-commit-skip >"$root/.quay-upgrade-init.log" 2>&1
@@ -2005,9 +2032,7 @@ EOF
 ac257_delivery_cli() {
   local plugin_root="$1" pkg="$1/../package.json" rel="" dir=""
   [ -f "$pkg" ] || return 1
-  rel="$("$VC_NODE" --no-warnings -e '
-    const fs = require("fs");
-    let d; try { d = JSON.parse(fs.readFileSync(process.argv[1], "utf8")); } catch (e) { process.exit(1); }
+  rel="$("$VC_NODE" --no-warnings -e "$VC_JSON_PRE"'
     const b = d && d.bin;
     let v = "";
     if (typeof b === "string") { v = b; }
@@ -2158,11 +2183,6 @@ EOF
 # install_scope=user 锚在 `~/.claude/plugins/installed_plugins.json` 的 **scope 字段**上，即 Claude Code
 # 自己 materialize 出来的**实际**安装记录 —— 两者不是同一个量，⛔ 不可互相代替。
 
-# ~/.claude/plugins/<name>.json 的路径（$1 = HOME）。
-ac258_plugins_json() {
-  printf '%s\n' "${1:?}/.claude/plugins/$2"
-}
-
 # `~/.claude/settings.json` 的【非 quay 键集】—— merge_preserved 读数①的产生处。
 # 定义（可复算，⛔ 不是「整个文件」）：顶层除 extraKnownMarketplaces / enabledPlugins 两个容器之外的
 # 全部键，加上两个容器里【除 quay 那条】以外的全部条目。
@@ -2173,9 +2193,7 @@ ac258_plugins_json() {
 ac258_nonkay_keyset() {
   local f="$1"
   [ -f "$f" ] || return 1
-  "$VC_NODE" --no-warnings -e '
-    const fs = require("fs");
-    let d; try { d = JSON.parse(fs.readFileSync(process.argv[1], "utf8")); } catch (e) { process.exit(1); }
+  "$VC_NODE" --no-warnings -e "$VC_JSON_PRE"'
     if (typeof d !== "object" || d === null || Array.isArray(d)) process.exit(1);
     const top = {};
     for (const k of Object.keys(d)) { if (k !== "extraKnownMarketplaces" && k !== "enabledPlugins") top[k] = d[k]; }
@@ -2189,9 +2207,7 @@ ac258_nonkay_keyset() {
 ac258_settings_marketplace_path() {
   local f="$1" name="${2:-quay}"
   [ -f "$f" ] || return 1
-  "$VC_NODE" --no-warnings -e '
-    const fs = require("fs");
-    let d; try { d = JSON.parse(fs.readFileSync(process.argv[1], "utf8")); } catch (e) { process.exit(1); }
+  "$VC_NODE" --no-warnings -e "$VC_JSON_PRE"'
     const mk = d && d.extraKnownMarketplaces ? d.extraKnownMarketplaces[process.argv[2]] : null;
     const p = mk && mk.source && mk.source.path ? String(mk.source.path) : "";
     if (p) { process.stdout.write(p + "\n"); process.exit(0); }
@@ -2204,9 +2220,7 @@ ac258_settings_marketplace_path() {
 ac258_known_marketplace_path() {
   local f="$1" name="${2:-quay}"
   [ -f "$f" ] || return 1
-  "$VC_NODE" --no-warnings -e '
-    const fs = require("fs");
-    let d; try { d = JSON.parse(fs.readFileSync(process.argv[1], "utf8")); } catch (e) { process.exit(1); }
+  "$VC_NODE" --no-warnings -e "$VC_JSON_PRE"'
     const mk = d && d[process.argv[2]] ? d[process.argv[2]] : null;
     const cands = [];
     if (mk && mk.source && mk.source.path) cands.push(String(mk.source.path));
@@ -2220,9 +2234,7 @@ ac258_known_marketplace_path() {
 ac258_installed_entry_count() {
   local f="$1" name="${2:-quay@quay}"
   [ -f "$f" ] || return 1
-  "$VC_NODE" --no-warnings -e '
-    const fs = require("fs");
-    let d; try { d = JSON.parse(fs.readFileSync(process.argv[1], "utf8")); } catch (e) { process.exit(1); }
+  "$VC_NODE" --no-warnings -e "$VC_JSON_PRE"'
     const pl = d && d.plugins ? d.plugins : null;
     if (!pl) process.exit(1);
     const arr = Array.isArray(pl[process.argv[2]]) ? pl[process.argv[2]] : null;
@@ -2900,12 +2912,7 @@ write_ac248_record() {
   [ -n "$probe" ] || return 1
   # 记账自证（按位置，与 AC-207/AC-239 同一判定）：文件列表必须至少含一条【不在 tasks/goals/.quay
   # 之下】的路径——否则「只翻了状态、没有实现」会被写成一次「能让外部判据翻转的修复」。
-  printf '%s' "$commit_files_json" | "$VC_NODE" --no-warnings -e '
-    let s=""; process.stdin.on("data",d=>s+=d).on("end",()=>{
-      let f; try { f=JSON.parse(s); } catch { process.exit(1); }
-      if (!Array.isArray(f) || f.length===0) process.exit(1);
-      process.exit(f.some(p => !/^(tasks|goals|\.quay)\//.test(String(p))) ? 0 : 1);
-    });' || return 1
+  ac_files_non_bookkeeping "$commit_files_json" || return 1
   ac_record_append ",\"ac\":\"GOAL-016-AC-248\",\"host\":\"$host\",\"project_root\":\"$project_root\",\"commit_sha\":\"$commit_sha\",\"commit_files\":$commit_files_json,\"task_id\":\"$task_id\",\"task_status\":\"$task_status\",\"gate_events\":$gate_events,\"produced_by_driver\":$produced_by_driver,\"adr_check_before_detects\":$before,\"adr_check_after_detects\":$after,\"adr_check_probe_tool\":\"$probe\"${extras_json}"
 }
 
@@ -3853,11 +3860,10 @@ step_ac257_project_scope() {
   # 文件弄坏了**（那正是 DoD 逐字禁止的「弄脏被取证项目」）。失败形态仍是「记录没写出来」，与
   # 「机制坏了」同形（硬规则 3b）。⇒ 先 `task view`：读得到 ⇒ 复用（⛔ 绝不调 create）；读不到 ⇒ 才
   # create，create 之后再核一次存在性（读不出 ⇒ fail-closed）。两条路径打印【可区分】的痕迹。
-  local create_rc=0 task_exists=0 task_view_json="" status_at_entry=""
+  local create_rc=0 task_view_json="" status_at_entry=""
   task_view_json="$( (cd "$root" && node "$qrl" task view "$task_id" --root "$root" --json) 2>/dev/null || true)"
   if [ -n "$task_view_json" ] \
      && printf '%s' "$task_view_json" | grep -q "\"id\"[[:space:]]*:[[:space:]]*\"$task_id\""; then
-    task_exists=1
     status_at_entry="$(printf '%s' "$task_view_json" | "$VC_NODE" --no-warnings -e 'let s="";process.stdin.on("data",d=>s+=d).on("end",()=>{try{const j=JSON.parse(s);console.log(j&&j.status?String(j.status):"")}catch{console.log("")}})')"
     echo "  [⑨h2] REUSING existing task $task_id (status=$status_at_entry) — ⛔ 不调 task create（它在已存在的 id 上会前置第二段 frontmatter，把该任务「创建」成 todo）"
   else
@@ -3867,7 +3873,7 @@ step_ac257_project_scope() {
     set -e
     if [ "$create_rc" = "0" ] \
        && [ -n "$( (cd "$root" && node "$qrl" task view "$task_id" --root "$root" --json) 2>/dev/null | grep -o "\"id\"[[:space:]]*:[[:space:]]*\"$task_id\"" || true)" ]; then
-      task_exists=1; status_at_entry="todo"
+      status_at_entry="todo"
       echo "  [⑨h2] task created: $task_id (create rc=0 ∧ 建后可见)"
     else
       echo "  AC257-NOT-EVALUATED: task create rc=$create_rc 且该 id 读不出来 ⇒ 记录 NOT written (fail-closed)" >&2
@@ -4321,11 +4327,10 @@ step_ac258_user_scope() {
     return 1
   fi
   AC258_TASK_ID="$task_id"
-  local create_rc=0 task_exists=0 task_view_json="" status_at_entry=""
+  local create_rc=0 task_view_json="" status_at_entry=""
   task_view_json="$( (cd "$root" && node "$qrl" task view "$task_id" --root "$root" --json) 2>/dev/null || true)"
   if [ -n "$task_view_json" ] \
      && printf '%s' "$task_view_json" | grep -q "\"id\"[[:space:]]*:[[:space:]]*\"$task_id\""; then
-    task_exists=1
     status_at_entry="$(printf '%s' "$task_view_json" | "$VC_NODE" --no-warnings -e 'let s="";process.stdin.on("data",d=>s+=d).on("end",()=>{try{const j=JSON.parse(s);console.log(j&&j.status?String(j.status):"")}catch{console.log("")}})')"
     echo "  [⑩i2] REUSING existing task $task_id (status=$status_at_entry) — ⛔ 不调 task create（它在已存在的 id 上会前置第二段 frontmatter）"
   else
@@ -4348,7 +4353,7 @@ step_ac258_user_scope() {
     set -e
     if [ "$create_rc" = "0" ] \
        && [ -n "$( (cd "$root" && node "$qrl" task view "$task_id" --root "$root" --json) 2>/dev/null | grep -o "\"id\"[[:space:]]*:[[:space:]]*\"$task_id\"" || true)" ]; then
-      task_exists=1; status_at_entry="todo"
+      status_at_entry="todo"
       echo "  [⑩i2] task created: $task_id (create rc=0 ∧ 建后可见)"
     else
       echo "  AC258-NOT-EVALUATED: task create rc=$create_rc 且该 id 读不出来 ⇒ 记录 NOT written (fail-closed)" >&2
@@ -4405,9 +4410,7 @@ step_ac258_user_scope() {
 ac257_settings_stop_segment() {
   local f="$1"
   [ -f "$f" ] || return 1
-  "$VC_NODE" --no-warnings -e '
-    const fs = require("fs");
-    let d; try { d = JSON.parse(fs.readFileSync(process.argv[1], "utf8")); } catch (e) { process.exit(1); }
+  "$VC_NODE" --no-warnings -e "$VC_JSON_PRE"'
     const stop = d && d.hooks ? d.hooks.Stop : undefined;
     if (stop === undefined) { process.exit(1); }
     process.stdout.write(JSON.stringify(stop) + "\n");' "$f" 2>/dev/null
@@ -4418,9 +4421,7 @@ ac257_settings_stop_segment() {
 ac257_settings_enabled_plugins() {
   local f="$1"
   [ -f "$f" ] || return 1
-  "$VC_NODE" --no-warnings -e '
-    const fs = require("fs");
-    let d; try { d = JSON.parse(fs.readFileSync(process.argv[1], "utf8")); } catch (e) { process.exit(1); }
+  "$VC_NODE" --no-warnings -e "$VC_JSON_PRE"'
     const ep = d && d.enabledPlugins;
     process.stdout.write(JSON.stringify(ep && typeof ep === "object" ? ep : {}) + "\n");' "$f" 2>/dev/null
 }
@@ -4580,8 +4581,7 @@ step2_init() {
   git -C "$ROOT" config user.email "verify@localhost" 2>/dev/null || true
   git -C "$ROOT" config user.name "verify" 2>/dev/null || true
   printf '{"name":"%s","scripts":{"test":"%s"}}\n' "$PROJECT" "$TEST_CMD" > "$ROOT/package.json"
-  if ! CLAUDE_PLUGIN_ROOT="$plugin_root" bash "$qinit" \
-      --all --loop \
+  if ! CLAUDE_PLUGIN_ROOT="$plugin_root" bash "$qinit" init \
       --root "$ROOT" \
       --project "$PROJECT" \
       --repo-root "$ROOT" \
@@ -4632,9 +4632,9 @@ profile_worker_default_field() {
 # ⛔ 刻意【不】引入 yaml 依赖：远端不保证有 PyYAML，而这里要解的形态是闭集（`mcp_entry:` 后跟
 # `- item` 列表或 `[a, b]` 内联）。解析结果只参与 fail-closed 门（== 本次交付物），解错即门不开。
 config_native_mcp_entry() {
-  local root="$1"
+  local root="$1" out pj
   [ -f "$root/.quay/config.yml" ] || return 0
-  python3 - "$root/.quay/config.yml" <<'PY'
+  out="$(python3 - "$root/.quay/config.yml" <<'PY'
 import re, sys
 path = sys.argv[1]
 in_block = False
@@ -4660,6 +4660,21 @@ for line in open(path, encoding="utf-8"):
 cand = [i for i in items if i.startswith("/") and i.endswith(".js")]
 sys.stdout.write(cand[0] if cand else "")
 PY
+)"
+  # ── new-semantics fallback (76f89ce82 / gap-project-quay-pointer-is-init-plugin-root-…): after the
+  #    upgrade the native provider carries NO path/mcp_entry — Core resolves <plugin-root>/vendor/
+  #    quay-native, and the project's binding IS its `.quay/plugin` link. A check written for the OLD
+  #    config-carried form reads `<unread>`/fail-closed here even though the binding is fine. Resolve
+  #    the link: the linked bundle IS the runtime the project is bound to. ⛔ Not "any path counts" —
+  #    the caller compares this entry's sha256 to the DELIVERED bundle (AC238_RUNTIME_REPLACED ③), so
+  #    an absent or stale link still fails the gate.
+  if [ -z "$out" ]; then
+    pj="$(cd "$root/.quay/plugin" 2>/dev/null && pwd -P || true)"
+    if [ -n "$pj" ] && [ -f "$pj/vendor/quay-native/dist/quay-native.js" ]; then
+      out="$pj/vendor/quay-native/dist/quay-native.js"
+    fi
+  fi
+  printf '%s' "$out"
 }
 
 # resolve_driving_profiles — 驱动方仓库 profiles 路径推导：--driving-profiles 显式 >
@@ -5901,11 +5916,11 @@ case "$cmd" in
     printf '#!/bin/sh\necho "quay-native 0.6.1-fake"\n' > "$pkg/bin/quay-native"; chmod +x "$pkg/bin/quay-native"
     cp "$pkg/bin/quay" "$prefix/bin/quay"; chmod +x "$prefix/bin/quay"
     cp "$pkg/bin/quay-native" "$prefix/bin/quay-native"; chmod +x "$prefix/bin/quay-native"
-    : > "$pkg/plugin/scripts/quay-init.sh"
+    : > "$pkg/plugin/scripts/quay-init.sh"; cp "$pkg/bin/quay" "$pkg/plugin/bin/quay"; chmod +x "$pkg/plugin/bin/quay"
     # 段①/② 断言的 shipped 入口是 <pkg>/plugin/bin/quay（quay-init.sh 自本任务起退化为 ≤40 行垫片，
     # 但插件自己的 CLI 入口仍是 bin/quay —— 夹具必须铺出【产品真会装出来的布局】，否则 selfcheck 里
     # 的 `[ -f "$qinit" ]` 会在一个假布局上失败（硬规则 5b：改调用点要连同一载体里的兄弟夹具一起改）。
-    printf '#!/usr/bin/env node\nconsole.log("0.6.1-fake");\n' > "$pkg/plugin/bin/quay"; chmod +x "$pkg/plugin/bin/quay"
+    # 内容与上面的 $pkg/bin/quay 逐字相同 ⇒ 直接 cp，⛔ 不再写第二遍 printf（净减 1 有效行）。
     printf '%s\n' '{"name":"quay","plugins":[{"name":"quay"}]}' > "$pkg/plugin/.claude-plugin/marketplace.json"
     printf '%s\n' '{"name":"quay"}' > "$pkg/plugin/.claude-plugin/plugin.json"
     cp "${FAKE_NPM_REGISTER_SRC:?}" "$pkg/scripts/register-plugin.mjs"
@@ -5960,7 +5975,7 @@ FAKE_NPM
   # point，与 control 16/17 同形）。
   local ac203_file="$tmp/ac203.jsonl" ac203_wrote=0 ac203_fields_ok=0 ac203_refused=0 ac203_ts="2026-09-09T00:00:00Z"
   local ac203_sha_hex=0 ac203_line="" ac203_neg_rc=0 ac203_neg_msg=0 ac203_neg_err="" ac203_lb=0 ac203_la=0
-  local ac203_kind_missing=0 ac203_kind_bad=0 ac203_kind_line=""
+  local ac203_kind_missing=0 ac203_kind_bad=0
   AC89="$ac203_file"; TS="$ac203_ts"; BUILD_SHA="0123456789abcdef0123456789abcdef01234567"
   if write_ac203_record "hostB-fake" "/tmp/third-party-fake" "0" "1" "5" "goal"; then
     ac203_wrote=1
@@ -5981,7 +5996,6 @@ FAKE_NPM
   fi
   # kind 维度的 fail-closed（gap-ac203-record-schema-has-no-kind-dimension AC1/AC2）：空 kind 与
   # 形状非法的 kind【都】拒写（缺值≠合格；typed kind 与拼错的 kind 不可互换）——两者行数都不变。
-  ac203_kind_line="$(tail -n 1 "$ac203_file" 2>/dev/null || true)"
   if write_ac203_record "hostB-fake" "/tmp/third-party-fake" "0" "1" "5" "" >/dev/null 2>&1; then ac203_kind_missing=1; fi
   if write_ac203_record "hostB-fake" "/tmp/third-party-fake" "0" "1" "5" "Promotion X" >/dev/null 2>&1; then ac203_kind_bad=1; fi
   # AC4 负控制：读数全有效、唯独 BUILD_SHA 空 ⇒ helper 拒写（rc≠0 ∧ stderr 带拒写提示 ∧ 行数不变）。
