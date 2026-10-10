@@ -17,6 +17,11 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 
+// The shared-host envelope's ONE implementation lives in driver-runtime.ts (see the long comment
+// there: `probe → runner-concurrency → driver-runtime` is an existing value-import chain, so adding
+// `driver-runtime → probe` would close a NEW cycle against a `valueSccs: 0` ratchet baseline).
+import { sharedHostCeilingBytes, listSharedHostScopes, SHARED_HOST_MIN_CEILING_BYTES, SHARED_HOST_OBSERVED_PEAK_BYTES } from "../scripts/driver-runtime.ts";
+
 import {
   isFailureLine,
   isAbortLine,
@@ -34,6 +39,7 @@ import {
   parseSystemdRunLimits,
   systemdRunAvailable,
   suiteMemoryMax,
+  defaultSuiteMemoryMax,
   SUITE_MEMORY_MAX_CEILING,
   readEffectiveTotalMemBytes,
   parseSystemdConsumedLine,
@@ -1076,3 +1082,58 @@ test(
   },
 );
 
+
+// ── gap-independent-anchor-memory-envelope-oversubscribes-shared-host (suite half) ───────────────
+// The SUITE is a second long-lived consumer of the same host-derived fraction: it and the anchor
+// groups are alive at the same time, so the suite's `0.25 × effective` adds to the same sum. It is
+// wired through the SAME `sharedHostCeilingBytes` (⛔ one implementation, 硬规则 5b — this file owns
+// no second copy of the formula).
+//
+// ⚠️ The behaviour difference here is bounded by the suite's OWN empirical ceiling (16G): the shared
+// floor is 2 × the largest measured long-run anchor peak (13.0 GiB) = 26 GiB, i.e. ABOVE 16G, so
+//     min(0.25 × effective, max(effective/(N+1), 26 GiB))  renders as `16G`  ⟺  0.25 × effective ≥ 16 GiB
+// which is exactly when the project-blind value renders as `16G` too. The tests below pin that as an
+// INVARIANT rather than a coincidence — it is what keeps `buildSystemdRunArgv`'s argv byte-identical
+// (红线: 不打断生产测试).
+
+test("unit — the shared-host step NEVER changes the suite's MemoryMax (the byte-identity red line)", () => {
+  const effective = readEffectiveTotalMemBytes();
+  const reading = listSharedHostScopes();
+  const sharedCeiling = sharedHostCeilingBytes(effective, reading.count);
+  // The wiring is real: the production default is the shared-host ceiling fed through suiteMemoryMax…
+  assert.equal(defaultSuiteMemoryMax(), suiteMemoryMax(effective, sharedCeiling));
+  assert.equal(DEFAULT_SYSTEMD_RUN_LIMITS.memoryMax, defaultSuiteMemoryMax());
+  // …and it renders the SAME value the project-blind derivation would, on any host.
+  assert.equal(defaultSuiteMemoryMax(), suiteMemoryMax(effective), "the suite's ceiling must be invariant under the sibling count");
+  // The invariant's REASON, asserted rather than asserted-about: the floor is at or above the suite's
+  // own empirical ceiling, so a tightened shared ceiling can never render below `16G` unless the
+  // project-blind one would have too.
+  assert.ok(SHARED_HOST_MIN_CEILING_BYTES >= suiteMemoryMaxCeilingBytes(), `${SHARED_HOST_MIN_CEILING_BYTES} must be ≥ the suite's own empirical ceiling`);
+  assert.equal(reading.count === null || reading.count >= 0, true, "the count is either a real reading or the explicit not-evaluated value");
+});
+
+/** The suite's own empirical ceiling in BYTES, read from the exported constant (⛔ not a literal here). */
+function suiteMemoryMaxCeilingBytes() {
+  return parseSystemdBytesToMb(SUITE_MEMORY_MAX_CEILING) * 1024 * 1024;
+}
+
+test("unit — suiteMemoryMax honours an explicitly supplied ceiling (the wiring is not decorative)", () => {
+  // Absent ⇒ byte-for-byte the pre-change 1-argument behaviour (that is why every existing caller and
+  // test in this file is untouched by this task).
+  assert.equal(suiteMemoryMax(4 * GIB, undefined), suiteMemoryMax(4 * GIB));
+  assert.equal(suiteMemoryMax(4 * GIB, undefined), String(GIB));
+  // Present ⇒ used verbatim (page-aligned by the caller, and compared against the empirical ceiling).
+  assert.equal(suiteMemoryMax(4 * GIB, GIB), String(GIB));
+  assert.equal(suiteMemoryMax(1024 * GIB, 12345), "12345", "a supplied ceiling below the empirical one is returned as-is");
+  assert.equal(suiteMemoryMax(1024 * GIB, 32 * GIB), "16G", "a supplied ceiling above the empirical one renders the ceiling STRING");
+  // Two different supplied ceilings ⇒ two different rendered values (⛔ not a constant in disguise).
+  assert.notEqual(suiteMemoryMax(1024 * GIB, 2 * GIB), suiteMemoryMax(1024 * GIB, 8 * GIB));
+  // The real producer of that argument, end to end: the measured peak bounds it, and it still renders `16G`.
+  assert.equal(sharedHostCeilingBytes(1024 * GIB, 10 ** 6), SHARED_HOST_MIN_CEILING_BYTES);
+  assert.equal(SHARED_HOST_MIN_CEILING_BYTES, 2 * SHARED_HOST_OBSERVED_PEAK_BYTES);
+  assert.equal(suiteMemoryMax(1024 * GIB, sharedHostCeilingBytes(1024 * GIB, 10 ** 6)), "16G");
+  // …and on a genuinely small EFFECTIVE memory (a container) the floor makes the shared step inert
+  // too — which is why the REAL-cgroup 4G test above keeps its `floor(4G × 0.25) = 1G` expectation.
+  assert.equal(suiteMemoryMax(4 * GIB, sharedHostCeilingBytes(4 * GIB, 10 ** 6)), suiteMemoryMax(4 * GIB));
+  assert.equal(sharedHostCeilingBytes(4 * GIB, 10 ** 6), Number(suiteMemoryMax(4 * GIB)));
+});

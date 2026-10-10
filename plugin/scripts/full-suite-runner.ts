@@ -137,7 +137,7 @@ import { runOnce, isRunnerInFlight, type SuiteState as TriggerSuiteState } from 
 // excluded). The runner snapshots that surface to DETECT a mid-round edit to a file the running round
 // reads — reuse the single source, never a hand-rolled copy (CLAUDE.md 硬规则 1).
 import { resolveAssertionSurface } from "./precommit-guard.ts";
-import { resolveKernelSibling, resolveKernelPluginRoot } from "./driver-runtime.ts";
+import { resolveKernelSibling, resolveKernelPluginRoot, sharedHostCeilingBytes, listSharedHostScopes } from "./driver-runtime.ts";
 import { getLoad1 } from "./checker-cost.ts";
 import { scanFamily, kindForFile } from "./known-load-sensitive.ts";
 // gap-leak-residue-per-run-namespace-isolation — the runner-level unified cleanup REUSES the
@@ -1060,12 +1060,40 @@ export function readEffectiveTotalMemBytes(): number {
 }
 
 /** The suite's MemoryMax for a given effective-memory reading (PURE — the input is a byte COUNT, not
- *  `os.totalmem()`): `min(floor(effective × 0.25) 页对齐, 16G 上限)`. On a host whose effective memory
- *  reaches the ceiling (the 128-core baseline) this returns the ceiling STRING unchanged ⇒ argv
- *  byte-identical; on a genuinely memory-limited host it returns a proportional, page-aligned byte count. */
-export function suiteMemoryMax(effectiveTotalMemBytes: number): string {
-  const derived = defaultScopeMemoryMax(effectiveTotalMemBytes);
+ *  `os.totalmem()`): `min(derived 页对齐, 16G 上限)`，其中 `derived` 缺省是项目盲的
+ *  `floor(effective × 0.25)`。On a host whose effective memory reaches the ceiling (the 128-core
+ *  baseline) this returns the ceiling STRING unchanged ⇒ argv byte-identical; on a genuinely
+ *  memory-limited host it returns a proportional, page-aligned byte count.
+ *
+ *  `ceilingBytes`（可选）: the caller's OWN derived ceiling, **already page-aligned** — the shared-host
+ *  path (see below) passes it so this file needs no second copy of the sibling-count formula
+ *  (硬规则 5b). ⛔ Absent ⇒ byte-for-byte the pre-`gap-independent-anchor-memory-envelope-…` behaviour,
+ *  which is why every existing 1-argument caller and test is untouched. */
+export function suiteMemoryMax(effectiveTotalMemBytes: number, ceilingBytes?: number): string {
+  const derived = ceilingBytes === undefined ? defaultScopeMemoryMax(effectiveTotalMemBytes) : String(ceilingBytes);
   return Number(derived) >= SUITE_MEMORY_MAX_CEILING_BYTES ? SUITE_MEMORY_MAX_CEILING : derived;
+}
+
+/** 套件的宿主推导 MemoryMax **算上共享宿主那一步**（`gap-independent-anchor-memory-envelope-
+ *  oversubscribes-shared-host`）：套件与 anchor 同时挂着，各自 0.25 × host 的 ceiling 之和同样会超过宿主
+ *  总内存，故套件也按宿主上活着的同类 scope 数收紧自己的那一份。
+ *
+ *  ⛔ 实现只有一份：公式与枚举都在 `driver-runtime.ts`（`sharedHostCeilingBytes` /
+ *  `listSharedHostScopes`，那里有完整的实测与两个校准依据），本文件只做「取读数 → 交给
+ *  `suiteMemoryMax`」。⛔ 不 import `effective-capacity-probe.ts` 的那份：`probe` 与
+ *  `driver-runtime` 之间加边会闭合成新的值导入环（`import-graph-baseline.json` 的 `valueSccs` = 0）。
+ *
+ *  ⚠️ **这一步在套件上是 inert 的，而且是可证的**：收紧后的 ceiling 是
+ *  `min(0.25 × effective, max(effective/(N+1), 26.0 GiB))`，而本套件自己还有 16G 的经验上限。
+ *    · `0.25 × effective ≤ 26.0 GiB` ⇒ `min` 取到 `0.25 × effective` 本身 ⇒ 与项目盲值**逐字节相同**；
+ *    · `0.25 × effective > 26.0 GiB` ⇒ 收紧后的值 ≥ 26.0 GiB > 16G ⇒ 渲染成 `16G`；项目盲值同样 > 16G
+ *      ⇒ 也渲染成 `16G`。
+ *  两个分支都相同 ⇒ **在任何宿主上，套件的 MemoryMax 都不因这一步而变**（下界 26.0 GiB 高于套件自己的
+ *  16G 上限，收紧根本触不到它）。这正是红线「不打断生产测试」所需要的，且它不是巧合而是被
+ *  `full-suite-runner-cgroup.test.mjs` 的「不变量」用例钉住的**性质**。 */
+export function defaultSuiteMemoryMax(): string {
+  const effective = readEffectiveTotalMemBytes();
+  return suiteMemoryMax(effective, sharedHostCeilingBytes(effective, listSharedHostScopes().count));
 }
 
 /** The suite's default cgroup scope limits. cpuQuota/tasksMax 默认空 = 不设 CPU/任务上限（人裁定）;
@@ -1074,7 +1102,7 @@ export function suiteMemoryMax(effectiveTotalMemBytes: number): string {
  *  实测峰值 8–10.5G，6G 下每轮顶格数千次 memory.max 事件、回收抖动让时序断言轮换飘红。此前：
  *  人 2026-08-12 裁定④ 4G→6G, 04:45 真 cgroup OOM 实证 4G 不足）。 */
 export const DEFAULT_SYSTEMD_RUN_LIMITS: SystemdRunLimits = {
-  memoryMax: suiteMemoryMax(readEffectiveTotalMemBytes()),
+  memoryMax: defaultSuiteMemoryMax(),
   cpuQuota: "",
   tasksMax: "",
   memorySwapMax: "",

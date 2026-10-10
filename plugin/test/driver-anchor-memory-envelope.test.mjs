@@ -29,16 +29,25 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import fs from "node:fs";
 import os from "node:os";
-import { spawnSync } from "node:child_process";
+import path from "node:path";
+import { spawn, spawnSync } from "node:child_process";
+import { makeTmpDir } from "./helpers/tmp-workspace.mjs";
 import {
   ANCHOR_ENVELOPE_HOST_FRACTION,
   ANCHOR_LIMITS_ENV,
   ANCHOR_UNIT_PREFIX,
+  SHARED_HOST_MIN_CEILING_BYTES,
+  SHARED_HOST_OBSERVED_PEAK_BYTES,
+  SHARED_HOST_SCOPE_PREFIXES,
   anchorLaunchArgv,
   anchorSystemdRunAvailable,
   defaultAnchorMemoryMax,
+  listSharedHostScopes,
   readAnchorEnvelope,
   resolveAnchorEnvelope,
+  selfScopeUnitName,
+  sharedHostCeilingBytes,
+  sharedHostEnvelopeFraction,
 } from "../scripts/driver-runtime.ts";
 
 const GIB = 1024 ** 3;
@@ -62,8 +71,10 @@ hog.on("exit", (code, signal) => {
 }
 
 test("AC1(a) — MemoryMax is host-derived: two injected host sizes give two different values", () => {
-  const small = resolveAnchorEnvelope({ root: "/w/small", totalmemBytes: 64 * GIB, limitsRaw: undefined, systemdRun: true, nowMs: 1 });
-  const big = resolveAnchorEnvelope({ root: "/w/big", totalmemBytes: 256 * GIB, limitsRaw: undefined, systemdRun: true, nowMs: 1 });
+  // `siblingScopeCount: 0` pins the SINGLE-PROJECT case — the case this task's regression requirement
+  // (AC3) names, and the case where the shared-host step must return the pre-change value byte for byte.
+  const small = resolveAnchorEnvelope({ root: "/w/small", totalmemBytes: 64 * GIB, limitsRaw: undefined, systemdRun: true, nowMs: 1, siblingScopeCount: 0 });
+  const big = resolveAnchorEnvelope({ root: "/w/big", totalmemBytes: 256 * GIB, limitsRaw: undefined, systemdRun: true, nowMs: 1, siblingScopeCount: 0 });
   assert.equal(small.source, "host-derived");
   assert.equal(big.source, "host-derived");
   assert.notEqual(small.memoryMax, big.memoryMax, "a literal default would give the SAME value for two different hosts");
@@ -72,7 +83,7 @@ test("AC1(a) — MemoryMax is host-derived: two injected host sizes give two dif
   assert.equal(big.memoryMax, defaultAnchorMemoryMax(256 * GIB));
   assert.equal(Number(big.memoryMax) / Number(small.memoryMax), 4, "the value must scale with the host (4×)");
   // 比例本身是宿主推导量，⛔ 不是某台机器的常量：派生的上限必须随注入值连续变化。
-  const mid = resolveAnchorEnvelope({ root: "/w/mid", totalmemBytes: 100 * GIB, limitsRaw: undefined, systemdRun: true, nowMs: 1 });
+  const mid = resolveAnchorEnvelope({ root: "/w/mid", totalmemBytes: 100 * GIB, limitsRaw: undefined, systemdRun: true, nowMs: 1, siblingScopeCount: 0 });
   assert.ok(Number(mid.memoryMax) > Number(small.memoryMax) && Number(mid.memoryMax) < Number(big.memoryMax));
   assert.equal(os.totalmem() > 0, true);
   assert.ok(ANCHOR_ENVELOPE_HOST_FRACTION > 0 && ANCHOR_ENVELOPE_HOST_FRACTION < 1);
@@ -234,3 +245,165 @@ console.log(JSON.stringify({
   assert.equal(reading.cgroupMax, planned, "the kernel's in-effect value must equal the planned one");
   assert.equal(reading.systemctl, `MemoryMax=${planned}`, "systemctl must agree with the cgroup and the plan");
 });
+
+// ── gap-independent-anchor-memory-envelope-oversubscribes-shared-host ────────────────────────────
+// MEASURED 2026-10-10 on this host: 12 live `quay-anchor-*` / `quay-serve-*` scopes, EACH carrying
+// `memory.max = 66 295 676 928` (= 0.25 × the 247 GiB host) ⇒ the sum is 2.75 × the host's total
+// memory. The fraction `0.25` silently assumes "this host runs ONE project's quay"; nothing
+// coordinates the projects, so the assumption is simply false. The fix is read-only (count the live
+// same-kind scopes, then tighten) and these tests pin its three load-bearing properties:
+//   ① N ≤ 3 ⇒ BYTE-IDENTICAL to the pre-change value (the crossover: the old formula only starts
+//      oversubscribing the host at N+1 = 5, i.e. (N+1) × 0.25 > 1);
+//   ② N ≥ 4 ⇒ strictly tighter, and never below the measured-demand floor;
+//   ③ the count itself is a REAL cgroup reading (real sibling scopes, a real tree walk) — not a mock.
+
+const HOST_BYTES = os.totalmem();
+
+test("shared-host — N≤3 is BYTE-IDENTICAL to the pre-change value; N≥4 tightens; the floor holds", () => {
+  const projectBlind = Number(defaultAnchorMemoryMax(HOST_BYTES));
+  // Fail-open: a count that was NOT evaluated returns the project-blind value, never a fabricated number.
+  assert.equal(sharedHostCeilingBytes(HOST_BYTES, null), projectBlind);
+  assert.equal(sharedHostEnvelopeFraction(HOST_BYTES, null), ANCHOR_ENVELOPE_HOST_FRACTION, "not-evaluated ⇒ the ORIGINAL fraction, exactly");
+  // ① the crossover. (N+1) × 0.25 ≤ 1 ⟺ N ≤ 3 — below it the old formula was not oversubscribing
+  // anything, so tightening there would be a behaviour change with no defect behind it.
+  for (const n of [0, 1, 2, 3]) {
+    assert.equal(sharedHostCeilingBytes(HOST_BYTES, n), projectBlind, `N=${n} must be byte-identical to the pre-change value`);
+    assert.equal(sharedHostEnvelopeFraction(HOST_BYTES, n), ANCHOR_ENVELOPE_HOST_FRACTION, `N=${n} fraction`);
+  }
+  // ② N=4 is the first tightening step, and the sum over the live scopes is now bounded by the host.
+  const four = sharedHostCeilingBytes(HOST_BYTES, 4);
+  assert.ok(four < projectBlind, `N=4 must be strictly tighter (got ${four} vs ${projectBlind})`);
+  assert.equal(four, Math.floor(HOST_BYTES / 5 / 4096) * 4096, "N=4 ⇒ the page-aligned host/(N+1) split");
+  // Monotone: more live siblings can only make each ceiling smaller (up to the floor).
+  let prev = projectBlind;
+  for (const n of [4, 5, 6, 7, 8, 9, 12, 32]) {
+    const c = sharedHostCeilingBytes(HOST_BYTES, n);
+    assert.ok(c <= prev, `N=${n}: ${c} must not exceed the value at the previous count (${prev})`);
+    assert.ok(c >= SHARED_HOST_MIN_CEILING_BYTES, `N=${n}: ${c} must never drop below the measured-demand floor`);
+    prev = c;
+  }
+  // The floor itself, and where it comes from: 2 × the largest measured long-run anchor peak.
+  assert.equal(SHARED_HOST_OBSERVED_PEAK_BYTES, Math.round(13.0 * GIB), "the calibration input is the MEASURED peak (13.0 GiB, cantus, 6 days)");
+  assert.equal(SHARED_HOST_MIN_CEILING_BYTES, 2 * SHARED_HOST_OBSERVED_PEAK_BYTES);
+  assert.equal(sharedHostCeilingBytes(HOST_BYTES, 10 ** 6), SHARED_HOST_MIN_CEILING_BYTES, "an absurd count clamps AT the floor (⛔ never a bare 1/(N+1) collapse)");
+  // The two peaks the task's Finding names must stay clearly below the tightened ceiling — that is the
+  // 「不能收紧到低于已观测的真实需求」 requirement, expressed against the same numbers the Finding used.
+  const cantusPeak = 13.0 * GIB;
+  const claudecodeuiPeak = 12.2 * GIB;
+  const ceilingAtFloor = sharedHostCeilingBytes(HOST_BYTES, 10 ** 6);
+  assert.ok(ceilingAtFloor >= 2 * cantusPeak && ceilingAtFloor >= 2 * claudecodeuiPeak, `${ceilingAtFloor} must keep ≥2× headroom over both measured peaks`);
+  // 硬规则 4: the value is host-DERIVED — two injected hosts must give two different ceilings.
+  assert.notEqual(sharedHostCeilingBytes(64 * GIB, 8), sharedHostCeilingBytes(256 * GIB, 8));
+  assert.equal(sharedHostCeilingBytes(64 * GIB, 0), Number(defaultAnchorMemoryMax(64 * GIB)));
+});
+
+test("shared-host — the count is a REAL read-only cgroup walk: same-kind only, our own unit excluded, not-evaluated is its OWN value", () => {
+  const root = makeTmpDir("anchor-sibling-count-");
+  const slice = path.join(root, "user.slice", "user-1000.slice", "user@1000.service", "app.slice");
+  fs.mkdirSync(slice, { recursive: true });
+  const own = "quay-anchor-own-1.scope";
+  const counted = ["quay-anchor-a-2.scope", "quay-serve-b-3.scope"];
+  for (const u of [...counted, own, "run-u9.scope", "session-1.scope", "app-com.google.Chrome-7.scope"]) {
+    fs.mkdirSync(path.join(slice, u), { recursive: true });
+  }
+  // A scope's INNER cgroup is its delegated subtree, not a unit — it must not be walked into.
+  fs.mkdirSync(path.join(slice, "quay-anchor-a-2.scope", "inner"), { recursive: true });
+  // A different slice still belongs to the same host: the walk is over the tree, ⛔ not over one dir.
+  const other = path.join(root, "user.slice", "user-1001.slice", "user@1001.service", "app.slice");
+  fs.mkdirSync(path.join(other, "quay-anchor-c-4.scope"), { recursive: true });
+
+  const r = listSharedHostScopes({ cgroupRoot: root, ownUnit: own });
+  assert.equal(r.count, 3, `only the same-kind scopes outside our own unit: ${JSON.stringify(r.units)}`);
+  assert.deepEqual(r.units, ["quay-anchor-a-2.scope", "quay-anchor-c-4.scope", "quay-serve-b-3.scope"], "sorted, enumerable, and our own unit is NOT in it");
+  assert.equal(r.units.includes(own), false, "our own scope is the `+1` in `N+1`, never one of the N");
+  assert.equal(r.units.some((u) => u.startsWith("run-")), false, "transient per-suite scopes are a different kind");
+  assert.equal(r.units.some((u) => u.includes("inner")), false, "a scope's delegated subtree is not a unit");
+  assert.equal(r.reason, null);
+  // The own unit is derived from /proc/self/cgroup's unified line — read it for real, too.
+  assert.equal(selfScopeUnitName("0::/user.slice/user-1000.slice/user@1000.service/app.slice/" + own + "\n"), own);
+  assert.equal(selfScopeUnitName("0::/user.slice/user-1000.slice/user@1000.service\n"), null, "not inside a .scope ⇒ no unit to exclude");
+  assert.equal(selfScopeUnitName(null), null, "unreadable /proc/self/cgroup ⇒ null, ⛔ not a fabricated name");
+
+  // 硬规则 3b: "could not read" must NOT share a value with "read it; there are none".
+  const missing = listSharedHostScopes({ cgroupRoot: path.join(root, "does-not-exist") });
+  assert.equal(missing.count, null, "an unreadable root is NOT zero");
+  assert.equal(missing.count === 0, false);
+  assert.equal(typeof missing.reason, "string");
+  assert.ok(missing.reason.length > 0, "…and it carries a NAMED reason");
+  const empty = path.join(root, "empty-root");
+  fs.mkdirSync(empty);
+  assert.equal(listSharedHostScopes({ cgroupRoot: empty }).count, 0, "a readable root with no same-kind scope IS zero");
+  assert.notEqual(listSharedHostScopes({ cgroupRoot: empty }).count, missing.count, "the two states must not share an output value");
+  // The prefix list is derived from the two EXISTING single sources, ⛔ not a third copy of the strings.
+  assert.deepEqual([...SHARED_HOST_SCOPE_PREFIXES], ["quay-anchor-", "quay-serve-"]);
+});
+
+test("shared-host — an absurd sibling count on a tiny host cannot push the ceiling ABOVE the project-blind value", () => {
+  for (const total of [GIB, 8 * GIB, 64 * GIB, 1024 * GIB]) {
+    const projectBlind = Number(defaultAnchorMemoryMax(total));
+    for (const n of [0, 1, 5, 50, 10 ** 9]) {
+      assert.ok(sharedHostCeilingBytes(total, n) <= projectBlind, `total=${total} N=${n}: tightening must never LOOSEN`);
+    }
+  }
+});
+
+test(
+  "REAL cgroup — live sibling scopes are really COUNTED, and the derived ceiling really tightens",
+  { skip: anchorSystemdRunAvailable() ? false : "not-evaluated: systemd-run --user --scope unavailable on this host" },
+  async () => {
+    // A REAL cgroup construction (systemd-run --scope — the same technique as the AC4 negative
+    // control below and as the anchor's own spawn path), ⛔ not a mock and ⛔ not an injected count:
+    // four genuinely live same-kind scopes are started and then read back off the kernel's tree.
+    const tag = `${Date.now()}-${process.pid}`;
+    const units = [0, 1, 2, 3].map((i) => `quay-anchor-sibling-probe-${tag}-${i}.scope`);
+    const started = [];
+    try {
+      for (const unit of units) {
+        // `sleep 30` is the scope's member: it exits on its own, so a crashed test cannot leave the
+        // scope behind (the fixture-leak mode this task's AC1 is about).
+        const child = spawn(
+          "systemd-run",
+          ["--user", "--scope", "--quiet", "--collect", `--unit=${unit}`, "-p", "MemoryMax=64M", "-p", "MemorySwapMax=0", "sleep", "30"],
+          { detached: true, stdio: "ignore" },
+        );
+        child.unref();
+        started.push(unit);
+      }
+      // Bounded poll: the scopes appear in the cgroup tree when their units start (⛔ not "assume started").
+      const deadline = Date.now() + 15_000;
+      let reading = listSharedHostScopes();
+      for (;;) {
+        const seen = new Set(reading.units);
+        if (units.every((u) => seen.has(u))) break;
+        if (Date.now() >= deadline) break;
+        await new Promise((r) => setTimeout(r, 200));
+        reading = listSharedHostScopes();
+      }
+      // ① the walk really sees live scopes off the real kernel tree — by NAME, not merely "a count moved".
+      const seen = new Set(reading.units);
+      for (const u of units) assert.ok(seen.has(u), `${u} must appear in the real enumeration: ${JSON.stringify(reading.units)}`);
+      assert.ok(reading.count >= units.length, `count ${reading.count} must be at least the ${units.length} scopes just started`);
+      assert.equal(reading.units.includes(selfScopeUnitName() ?? "\u0000"), false, "our own scope must not be counted");
+
+      // ② the PRODUCTION path uses that measured count: `resolveAnchorEnvelope` with no injected seam
+      //    must resolve exactly to the formula evaluated at the count it reports back.
+      const res = resolveAnchorEnvelope({ root: "/w/real-siblings", systemdRun: true, nowMs: 1 });
+      assert.equal(res.siblingScopeCount, reading.count, "the returned provenance must be the count that was actually used");
+      assert.equal(res.memoryMax, String(sharedHostCeilingBytes(os.totalmem(), res.siblingScopeCount)));
+      assert.equal(res.source, "host-derived");
+      assert.equal(res.siblingScopeReason, null);
+
+      // ③ the ceiling really TIGHTENED relative to the project-blind one (≥4 live siblings guarantees it).
+      assert.ok(res.siblingScopeCount >= 4, `expected ≥4 live same-kind scopes, got ${res.siblingScopeCount}`);
+      const projectBlind = Number(defaultAnchorMemoryMax(os.totalmem()));
+      assert.ok(Number(res.memoryMax) < projectBlind, `${res.memoryMax} must be strictly below the project-blind ${projectBlind}`);
+      assert.ok(Number(res.memoryMax) >= SHARED_HOST_MIN_CEILING_BYTES, "and never below the measured-demand floor");
+      // Deterministic mirror of the same claim, with the count injected (immune to host churn).
+      const injected = resolveAnchorEnvelope({ root: "/w/real-siblings", systemdRun: true, nowMs: 1, siblingScopeCount: 4 });
+      assert.equal(injected.memoryMax, String(sharedHostCeilingBytes(os.totalmem(), 4)));
+      assert.ok(Number(injected.memoryMax) < projectBlind, "4 live siblings ⇒ strictly tighter than the single-project ceiling");
+    } finally {
+      for (const unit of started) spawnSync("systemctl", ["--user", "stop", unit], { encoding: "utf8", timeout: 20_000 });
+    }
+  },
+);
