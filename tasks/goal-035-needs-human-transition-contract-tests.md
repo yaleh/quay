@@ -3,7 +3,7 @@ id: goal-035-needs-human-transition-contract-tests
 title: GOAL-035 AC-357 落地：applyNeedsHumanTransition 函数级两态契约测试（accept +
   surfaced-failure）落地，driver-filters.test.mjs 与 worker-driver.test.mjs 全量回归绿（分支
   goal/GOAL-035）
-status: ready
+status: done
 labels:
   - gap
 parent: null
