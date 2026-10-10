@@ -1,7 +1,7 @@
 {
   "$schema": "delivery-manifest-v1",
   "description": "Single source of truth for quay release artifacts. release.yml must produce exactly this set — no more, no less. The npm-pack (.tgz) and Node-SEA (single-file executable) lines were CANCELLED by the human ruling of 2026-09-16 (orchestration/SPEC-release-and-hotfix-branching-2026-09-15.md §11: 「取消 sea 和 npm release。这些是我们最近没有精力去保障的。」), so no npm-tarballs / sea-binaries entries are declared: release.yml no longer produces them, and a manifest that still declared them would be the drift this checker exists to catch. The release channel is the Claude Code plugin channel, gated by a real marketplace install of the released tag (release.yml job verify-plugin-channel).",
-  "version": "0.19.0-dev",
+  "version": "0.20.0-dev",
   "artifacts": {
     "plugin": {
       "id": "quay",
