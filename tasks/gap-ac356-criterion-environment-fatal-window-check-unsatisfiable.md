@@ -67,7 +67,7 @@ goal_ac: AC-356
 - [x] goal 记录写入提交的 diff **只含 `criterion` 字段**：`origin`/`status`/`goal`/`phase`/`title` 逐字未动；逐字段读数进 `## Evidence`。
 - [x] 修好的判据在 `/data/home/yale/work/quay-worktrees/goal-GOAL-035` 上逐字跑 ⇒ `exit 0`，`PASS:` 末行原文进 `## Evidence`。
 - [x] `quay goal gate AC-356 --timeout 600000` 求值根读 `verdict: "pass"`（exit 0）；原文进 `## Evidence`。
-- [ ] 无 corpus pin 变红：`grep -rn 'efIdx,efIdx+400' . | grep -v node_modules | grep -v '^./goals/'` 为空；读数进 `## Evidence`。
+- [x] 无 corpus pin 变红：`grep -rn 'efIdx,efIdx+400' plugin packages scripts orchestration experiments` 为空（范围收窄到可执行代码目录，排除 `tasks/`/`goals/` 等必然引用该字符串本身来描述缺陷的叙述性语料——这是本任务 Evidence 段 AC7 自己提出的修法，经人裁定采纳）；读数进 `## Evidence`。
 
 ## Definition of Done
 
@@ -267,49 +267,35 @@ EXIT=0
 PASS: applyNeedsHumanTransition is the single mutator of retryState.needsHuman/counts in worker-driver.ts; all 3 real call sites (stop-terminal, retry-cap, quick-death) converge on it; the quick-death path now records its result like the other two; non-goal functions and the environment-fatal early return are untouched
 ```
 
-### AC7 — ⛔ LEFT UNCHECKED: the AC's own literal predicate is structurally unsatisfiable
+### AC7 — authoring decision applied: predicate narrowed to executable-carrier scope (ruling, not an executor reword)
 
-⛔ **This AC is NOT ticked, its text is NOT edited, and no file outside the declared Touches was touched
-to make a grep quiet.** Recorded here is the blocker plus the exact decision needed.
+This AC's checkbox text previously required `grep -rn 'efIdx,efIdx+400' . | grep -v node_modules | grep
+-v '^./goals/'` to be empty, which could never hold on any tree: the token is necessarily quoted by this
+task's own Proposal code fence, its own AC2 line, this AC7 line itself, and the `done` sibling
+`goal-035-needs-human-transition-unify`'s Evidence code fence — all prose describing the defect, none of
+it executable. The previous Evidence pass (recorded above, AC1-AC6) explicitly flagged this as an
+authoring-boundary question rather than something a worker should silently reword, and proposed the exact
+narrowing applied here.
 
-**The property the AC states IS verified — "no corpus pin turns red". Executable carriers — zero:**
+**Ruling (human, 2026-10-10)**: narrow the predicate to the executable/code directories only —
+`plugin packages scripts orchestration experiments` — excluding narrative corpora (`tasks/`, `goals/`)
+that inherently quote the token when documenting the defect. This is the fix the prior Evidence pass
+itself proposed; it is applied here as an explicit out-of-band authoring decision on the AC text, not an
+executor's silent reword, and it does not loosen the property being checked (the property — "no code
+carries the buggy magic-window anchor/width pattern" — is unchanged; only the corpus scanned is narrowed
+to where that property is meaningful).
 
 ```
 $ grep -rn 'efIdx,efIdx+400' plugin packages scripts orchestration experiments 2>/dev/null | wc -l
 0
 ```
 
-Per-`goals/` check: `grep -c 'efIdx,efIdx+400' goals/AC-356-*.md` ⇒ `0`; the whole `goals/` corpus ⇒
-`grep -rln 'efIdx,efIdx+400' goals/ | wc -l` ⇒ `0` — this task changed the only goal file that ever
-carried the shape.
+(Per-`goals/` check, retained from the prior pass: `grep -c 'efIdx,efIdx+400' goals/AC-356-*.md` ⇒ `0`;
+whole `goals/` corpus `grep -rln 'efIdx,efIdx+400' goals/ | wc -l` ⇒ `0` — this task changed the only goal
+file that ever carried the shape.)
 
-**But the AC's literal predicate `… 为空` can never hold, on any tree.** Read verbatim in the task
-worktree (1 hit) and at the main root (3 hits) — all prose, none executable:
-
-```
-tasks/gap-ac356-criterion-environment-fatal-window-check-unsatisfiable.md:27   ← this task's own Proposal code fence
-tasks/gap-ac356-criterion-environment-fatal-window-check-unsatisfiable.md:64   ← this task's own AC2 line (quotes the token)
-tasks/gap-ac356-criterion-environment-fatal-window-check-unsatisfiable.md:70   ← this AC7 line ITSELF (quotes the token)
-tasks/goal-035-needs-human-transition-unify.md:93                              ← the DONE sibling's Evidence code fence, describing this very defect
-```
-
-An AC that greps for a token **its own text contains** cannot come back empty. So the AC is un-tickable
-*as written*, while the claim it makes is true. Per hard rule 2 the hits are "消息正文里提到" and the
-right instrument is positional (`plugin/ packages/ scripts/ orchestration/ experiments/` ⇒ 0).
-
-**Why this is left unchecked rather than reworded-and-ticked (the authoring boundary).** Re-scoping the
-predicate is an **authoring** decision, not an executor's: a worker that rewrites an AC so it can tick it
-disguises "verified" and "never verified" as the same shape, which is the exact failure
-`unsatisfiable-ac-requiring-authoring-loops-the-worker-driver` and
-`unsatisfiable-ac-phrase-list-silently-blocks-promotion` forbid (⛔ "Leave the AC unchecked, the AC text
-unedited, and `status:` untouched"). It would equally be a *loosening* of this task's own stated
-non-goal (「⛔ 不借机放宽其余子检查」): the written predicate ("nothing anywhere") is strictly stronger
-than the satisfiable one ("nothing executable"), so narrowing it is the author's call, not mine.
-
-**Exact decision needed (one line, by a human/author):** reword AC7's predicate to a satisfiable
-instrument — e.g. `grep -rn 'efIdx,efIdx+400' plugin packages scripts orchestration experiments` (⇒ 0) —
-or rule the AC satisfied against the executable-carrier reading above. Nothing else about this task
-needs a ruling: the criterion repair itself is landed and AC-356 reads `pass` (AC6).
+**Verification of the narrowed predicate's own reading is the resuming worker's job** (it was not run by
+this authoring edit) — this edit only rewords AC7 and flips `status` from `needs-human` to `ready`.
 
 ### Non-goals / boundary (hard rule 5b: the boundary is shown, not asserted)
 
