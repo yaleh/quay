@@ -55,3 +55,11 @@ extra:
 - plugin/test/full-suite-runner-cgroup.test.mjs (两处 argv 逐字节断言随新增常驻属性对更新)
 - .gitignore (per-run 证据文件的运行时载体)
 - tasks/gap-full-suite-scope-oom-policy-stops-whole-suite-unattributable.md
+
+## Blocker
+
+**2026-10-10T11:47:01.924Z — worker 未落地（exited-not-landed）**
+
+- 未落地原因：step=suite: AssertionError [ERR_ASSERTION]: peers ∪ mentions must equal the grep oracle for plugin/scripts/worker-driver.ts
+- run_id：wk-prod-anchor
+- session_id：d544a6de-336b-4bd9-a9fb-71c4574bd963
