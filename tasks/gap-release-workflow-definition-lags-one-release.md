@@ -25,7 +25,13 @@ extra:
 - (b) **自锁**：若坏的是 release.yml **自身**，修它无效——修复不在 master 上，而 master 因发布被卡而推不动。本次能救回纯属故障在 release.yml 之外（runner 环境）。
 
 **三条改进**：
-- **P1** 显式化 ref：`run("gh", ["workflow","run","release.yml","--ref", tag, "-f", \`tag=${tag}\`], …)`，并同步 `:392`（dry-run 打印）与 `:493`/`:501` 两处失败/提示文案——否则文案与行为不一致。取值二选一（**需人裁定**）：`--ref <tag>` = 门与产物绑定、同一 tag 重派得到同一判定（与 release.yml 自身的 IDEMPOTENCY 契约一致），代价是 tag 不可变、坏门只能回退或重切；`--ref develop` = 门是当前主干、可向前修（推 develop 后重派同一 tag），代价是门与产物不绑定。
+- **P1** 显式化 ref：
+
+```
+run("gh", ["workflow", "run", "release.yml", "--ref", tag, "-f", `tag=${tag}`], …)
+```
+
+并同步 `:392`（dry-run 打印）与 `:493`/`:501` 两处失败/提示文案——否则文案与行为不一致。取值二选一（**需人裁定**）：`--ref <tag>` = 门与产物绑定、同一 tag 重派得到同一判定（与 release.yml 自身的 IDEMPOTENCY 契约一致），代价是 tag 不可变、坏门只能回退或重切；`--ref develop` = 门是当前主干、可向前修（推 develop 后重派同一 tag），代价是门与产物不绑定。
 - **P2** preflight 可见性：取**将要供给 workflow 的那个 ref** 上的 release.yml 与**该 tag** 上的同名文件比对，打印 diffstat，有差异即拒绝（或要求显式确认）。这是硬规则 9 的形态：让"实际会生效的定义"可见，而不是靠默认分支语义隐含。
 - **P3** 把门接进 CI：让 `verify-plugin-channel-assertions` 在 develop 上被**定期**执行（夜间/定时，非逐 PR——它需要真实安装），使"某道门第一次执行就是一次真实发布"这个类整体消失。
 
