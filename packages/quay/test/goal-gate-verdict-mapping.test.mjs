@@ -47,11 +47,12 @@ import {
   resolveAcceptanceTimeout,
   ACCEPTANCE_TIMEOUT_ENV,
 } from "../src/gate/acceptance-runner.ts";
-// ⛔ The default's ONE home is `gate/config/utils.ts` (the sibling task
-// gap-goal-criterion-timeout-hardcoded-60s-ignores-acceptance-timeout moved it there — a second
-// `60_000` literal in the runner is the drift that task removed). Imported from its home, not
-// re-exported through the runner, so `grep` finds exactly one definition.
-import { DEFAULT_ACCEPTANCE_TIMEOUT_MS } from "../src/gate/config/utils.ts";
+// ⛔ The default's ONE home is `kernel/gate-run-options.ts` (GOAL-034 moved the shared
+// acceptance-runner primitives there from `gate/config/utils.ts`; the sibling task
+// gap-goal-criterion-timeout-hardcoded-60s-ignores-acceptance-timeout had earlier moved it out of
+// the runner — a second `60_000` literal in the runner is the drift that task removed). Imported
+// from its home, not re-exported through the runner, so `grep` finds exactly one definition.
+import { DEFAULT_ACCEPTANCE_TIMEOUT_MS } from "../src/kernel/gate-run-options.ts";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 

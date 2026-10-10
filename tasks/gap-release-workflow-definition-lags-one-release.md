@@ -35,12 +35,14 @@ run("gh", ["workflow", "run", "release.yml", "--ref", tag, "-f", `tag=${tag}`], 
 - **P2** preflight 可见性：取**将要供给 workflow 的那个 ref** 上的 release.yml 与**该 tag** 上的同名文件比对，打印 diffstat，有差异即拒绝（或要求显式确认）。这是硬规则 9 的形态：让"实际会生效的定义"可见，而不是靠默认分支语义隐含。
 - **P3** 把门接进 CI：让 `verify-plugin-channel-assertions` 在 develop 上被**定期**执行（夜间/定时，非逐 PR——它需要真实安装），使"某道门第一次执行就是一次真实发布"这个类整体消失。
 
+**P3 前提修正（2026-10-10）**：P3 原设想"把这道门接进 CI、在 develop 上定期跑"**不成立**——`verify-plugin-channel-assertions.ts:201` 要求 "none may carry a `-dev` suffix"，而 `scripts/resolve-version.ts` 对非 `release/*` 分支且 HEAD 无版本 tag 的产物返回 `X.Y.Z-dev`（v0.18.0 那次能过，只因为产物是在 tag 上构建的）。故 AC4 已改写为"接线存在 + 真实读数被如实记录"，而"nightly 该从哪个 ref 构建产物 / 这道门该不该容忍非发布渠道的 `-dev`"作为**开放设计问题**保留，⛔ 不在本任务内擅自裁定。
+
 ## AC
 
-- [ ] AC1: `--ref` 取值由人裁定为 `tag` 或 `develop`，裁定结论写入本任务（待外部）
+- [ ] AC1: `--ref` 取值**已由人裁定为 `tag`**（人 2026-10-10），且 `release-cut.mjs` 的 `--dispatch-ref` 默认值与之相符（实现已做成该 flag、默认即 `tag`；本 AC 现只需核实默认值与裁定一致）
 - [x] AC2: `release-cut.mjs` 的 dispatch 显式带 `--ref`（按位置判定：该 `gh workflow run` 调用点含 `--ref` 参数），且 dry-run 打印与两处文案同步更新 —— 已落地：调用点为 `run("gh", ["workflow", "run", "release.yml", "--ref", dispatchRef, "-f", `tag=${tag}`])`；ref 由新 flag `--dispatch-ref <ref>` 选择（默认即 tag 本身，故默认把门绑定在产物上），dry-run 计划行与 `release-cut-dispatch-unavailable` / `-failed` 两处文案同步带同一 `--ref`。判定不靠 grep 源码：`P1/AC2: the REAL dispatch argv carries --ref` 用假 `gh` **记录真实 argv** 并按位置断言 `--ref` 与其取值相邻；`P1/AC2: with gh absent…` 断言手工补派文案带同一 `--ref`。
 - [x] AC3: preflight 打印"将生效的 workflow 定义"与 tag 上同名文件的 diffstat，二者不一致时拒绝（负控制：构造一次不一致，必须拒绝） —— 已落地：preflight 打印 `preflight: the run will be governed by '.github/workflows/release.yml' at <ref>; vs '<base>': <numstat>`（tag 尚不存在，其树即 `--base` 的树，已在代码注释里说明），不一致即 `CAUSE=release-cut-workflow-definition-drift` 退出 2，`--allow-workflow-drift` 才显式放行且仍打印 diffstat。负控制 = 用例 `P2/AC3: a release.yml that DIFFERS at the dispatch ref is REFUSED`（fixture 造出真差异的 ref，必须拒绝，并断言 diffstat 逐字出现）。另有两个**独立取值**不与"相等"同形：`release-cut-dispatch-ref-unresolvable` / `release-cut-workflow-definition-unreadable`。
-- [ ] AC4: `verify-plugin-channel-assertions` 在 develop 上被 CI 定期执行（正控制：一次成功运行；负控制：注入一个必失败断言，CI 必须变红）
+- [ ] AC4（2026-10-10 改写；原字面形态经证伪为**结构上不可满足**——该门要求非 `-dev` 产物，而 develop 产物必为 `-dev`，见 `## Evidence`）：CI 侧存在一条**可显式触发**的 `verify-plugin-channel-assertions` 接线（workflow 文件 + `workflow_dispatch`），且其**真实运行的读数被如实记录进本任务**（pass 或 fail 皆算达成，但必须是真实运行产出，⛔ 不是 fixture 回声）；负控制：注入一条必失败断言时该 job 必须变红。⛔ 构建所用 ref 作为**开放项**记录，不在本 AC 内裁定；⛔ 不得为使它变绿而放宽任何判据。
 - [x] AC5: 变异对照——把 P2 的比较改成"永远相等"，必须有一条测试变红 —— 已实测（2026-10-10）：把 `const drifted = effectiveText !== shippedText;` 改成 `const drifted = false;`，`P2/AC3` 用例变红，证据行 `a drifted governing definition must REFUSE the cut: preflight: the run will be governed by '.github/workflows/release.yml' at drifted; vs 'develop': 0 insertions / 0 deletions (identical to 'develop')  0 !== 2`；改回后 12/12 复绿。
 
 ## DoD
@@ -80,3 +82,11 @@ run("gh", ["workflow", "run", "release.yml", "--ref", tag, "-f", `tag=${tag}`], 
 - plugin/test/release-cut.test.mjs
 - .github/workflows/ci.yml
 - tasks/gap-release-workflow-definition-lags-one-release.md
+## Needs-Human
+
+**执行 2026-10-10T06:39:36.186Z — 连续修满重试上限仍不合格（标 needs-human）**
+
+- 阻碍原因：worker-driver 连续 3 次 exited-not-landed 未落地（重试上限）
+- 失败步/判词：AC 未全勾（checked 3/5，剩余未勾 2）——续做只需验证并勾选 AC
+- run_id：wk-prod-anchor
+- session_id：0952dc6e-fa8d-4613-90be-0866815dd336
