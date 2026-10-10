@@ -98,9 +98,6 @@ python3 -c 'import json;r=[json.loads(l) for l in open("/data/home/yale/work/qua
 → 读数：最后一条 `ts` / `plugin_cache_path` 为**本轮**新写入。
 
 - [ ] AC6（诊断 + 是否加常驻检查，带证据）：在 `## Result` 给出上一轮键消失 / 源目录被删 / cache 被顶的可证伪定位（`stat` / `git log` / transcript 锚点，至少一条直接量），并据此决定是否新增一道取假常驻检查：若新增，给出其**取假读数**（改动前如何红、改回如何绿）；若判定为一次性手工操作且给出证据，明记「无需常驻检查」。⛔ 不允许无证据的「可能是……」。
-```
-（AC 之间的边界需保留）
-```
 
 ## Definition of Done
 
