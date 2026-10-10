@@ -2,7 +2,7 @@
 id: AC-908
 title: AC-361 的 post-merge 判据改为「按位置重跑 AC-359 的结构检查」：dispatch 窗口内恰一次
   computeDispatchExclusion、零次旧 inFlightTasks()（注释行不参与匹配），develop 尖端两个受影响测试文件全绿
-status: active
+status: achieved
 kind: criterion
 goal: GOAL-036
 criterion: >-
@@ -88,6 +88,11 @@ statusLog:
     to: active
     actor: goal-cli
     reason: ""
+  - at: 2026-10-10T19:47:22.090Z
+    from: active
+    to: achieved
+    actor: goal-driver
+    reason: "I2: criterion pass"
 supersedes:
   - AC-361
 fidelity:
