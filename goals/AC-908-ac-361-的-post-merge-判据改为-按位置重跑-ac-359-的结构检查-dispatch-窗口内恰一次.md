@@ -80,14 +80,7 @@ criterion: >-
 expect: develop 尖端重跑 AC-359 的结构检查通过（dispatch 窗口内恰 1 次 computeDispatchExclusion、0
   次旧 inFlightTasks()，按位置判定而非全文件字面量计数），且 driver-filters.test.mjs 与
   worker-driver.test.mjs 全绿；一行提到 inFlightTasks() 的 JSDoc 注释不会使它变红。
-origin: criteria[2]=AC-361（active）本轮 verdict=fail，reason 逐字为
-  `CAUSE=post-merge-regression -- worker-driver.ts still has 4 inFlightTasks()
-  call(s) on develop, expected at most 1`；同一棵树上
-  criteria[0]=AC-359（窗口内判据）verdict=pass。该 4
-  个字面量命中里，plugin/scripts/worker-driver.ts:1666 是一行 JSDoc 注释——grep -c
-  把散文当成了调用；三个真实调用点都是同一个共享闭包的记录装配消费者，位于 dispatch 决策之外。人裁定（本会话 2026-10-11）：采纳
-  AC-908 作为 AC-361 的接管判据，promote 为 active + phase post-merge；AC-361 同时
-  retire（superseded_by AC-908），不回溯改动已有的 verdict 历史。
+origin: 人裁定 2026-10-11：采纳接管 AC-361
 activatedAt: 2026-10-10T19:43:53.625Z
 statusLog:
   - at: 2026-10-10T19:43:53.625Z
@@ -101,4 +94,5 @@ fidelity:
   verdict: not-evaluated
   reason: no judge configured
   at: 2026-10-10T19:43:53.625Z
+phase: post-merge
 ---
