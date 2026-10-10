@@ -67,6 +67,8 @@ The slice lands on `goal/GOAL-036` with AC-359 and AC-360 both reading exit 0 wh
 - plugin/scripts/driver-filters.ts
 - plugin/scripts/worker-driver.ts
 - plugin/test/driver-filters.test.mjs
+- plugin/scripts/direct-to-develop-bypass-check.ts
+- plugin/test/direct-to-develop-bypass-check.test.mjs
 - tasks/goal-036-dispatch-exclusion-single-source.md
 
 ## Evidence
@@ -78,12 +80,8 @@ The slice lands on `goal/GOAL-036` with AC-359 and AC-360 both reading exit 0 wh
 - `plugin/test/worker-driver.test.mjs`：129 pass / 0 fail。
 - typecheck：`for d in packages/*/; do npx tsc --noEmit -p "$d" || exit 1; done` exit 0。
 - AC-359 / AC-360 criterion（在任务分支工作树 cwd 下执行）双双 exit 0（branch-mode goal：`quay goal gate` 在 goal 工作树评估，落地后由 fan-in 带到 `goal/GOAL-036`）。
-- 越界文件未动：`git diff --name-only develop...HEAD` 仅列出已声明 Touches 的 3 个文件。
-
-## Blocker
-
-**2026-10-10T18:54:25.713Z — worker 未落地（exited-not-landed）**
-
-- 未落地原因：step=suite: # fail 84
-- run_id：wk-prod-anchor
-- session_id：c9c915e6-c48a-490d-a162-63bad62f297a
+- 越界（AC-5 禁止面）未动：`git diff --name-only develop...HEAD` 不触及 `packages/quay/src/gate/`、`goal-store.ts`、`goal-merge.ts`、`worker-fan-in.ts`、`ready-pool-check.ts`、`promotion-driver.ts`。
+- **[develop 全域红自修，与 GOAL-036 切片无关但阻断每个任务的全量 suite]** `direct-to-develop-bypass-check` 的 `RELEASE_BUMP_SUBJECT_RE` 在 2026-10-07 `e0279c77a0`（closure ratchet 随 `quay-init-closure-ratchet.ts` 整体退役、生成器模板收窄为 `(SPEC §12: VERSION + stamp)`）时未同步，仍要求 `+ closure-ratchet re-anchor` 后缀 ⇒ 0.20.0 bump `8cb36c2` 不命中谓词① ⇒ 被判 `direct-commit-bypasses-fan-in` ⇒ 顶层 suite 中止 `STATIC_CHECK_FAILED: direct-to-develop-bypass-check exit=1`（读数 `# tests 0 · # pass 0 · # fail 84`，与 2026-10-03 `gap-goal-branch-antidrift-two-line-base` 同形）。**ownerless 三条件已证**：无 ready/todo 任务 Touches 该文件、无 peer 分支携带不同 regex、唯一在飞 worker 即本 worker ⇒ 自修 + 加宽 Touches（`casebook#orphaned-develop-wide-static-red-self-fix`）。**修法**：后缀容为可选（扫描窗 `develop~100` 可跨 10-07 退役线，两侧模板都必须能识别），测试 fixture 改为当前生产模板并钉住两代模板。
+  - 证据：`plugin/test/direct-to-develop-bypass-check.test.mjs` **76 pass / 0 fail**。
+  - 复合证据（同一 `--baseline develop~100`）：对本机 develop 运行本 checker，**修复前** exit 1、candidate `8cb36c2` `confirmedBypass=true` ⇒ **修复后** exit 0、candidate `8cb36c2` `releaseBump=true` / `confirmedBypass=false`。
+  - 负控：`plugin/scripts/checker-mutation-cases/direct-to-develop-bypass-check.sh` PASS（exit 0）——放宽后缀未削弱该 checker 的可取假性。
