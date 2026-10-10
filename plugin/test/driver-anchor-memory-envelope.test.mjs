@@ -189,15 +189,21 @@ test("AC4 — real-cgroup negative control: the KERNEL OOM-kills the hog inside 
   const line = (r.stdout ?? "").trim().split("\n").filter((l) => l.startsWith("{")).pop();
   assert.ok(line, `no reading from the control — stdout=${JSON.stringify(r.stdout)} stderr=${JSON.stringify(r.stderr)} exit=${r.status}`);
   const reading = JSON.parse(line);
-  // ① 内层进程确实在那个 scope 里（⛔ 不是「我们以为它在」）。
-  assert.match(reading.cgroup, /\/quay-anchor-.*\.scope$/, `not in our scope: ${reading.cgroup}`);
+  // ⛔ ①/④ 判据必须点名**本次负控制创建的那个单元**（`res.unit`），⛔ 不是「凡是 quay-anchor-*.scope」。
+  //    `/quay-anchor-.*\.scope$/` 是一个**代理量**，而它代理的那件事不是本测试要证的事（硬规则 4b）：两层
+  //    循环里套件**本来就**跑在生产 anchor 的 `quay-anchor-*` scope 内 ⇒ 这个正则恒假、判据恒红，而它红
+  //    的原因与「内层进程在不在控制 scope 里」毫无关系。直接量是**单元名相等**：内层进程在**控制**的 scope
+  //    里、本测试进程**不**在控制的 scope 里——两句都点名 `res.unit`，与套件自己跑在哪个 scope 无关。
+  const controlScopeRe = new RegExp(`/${res.unit.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}$`);
+  assert.ok(res.unit, "the control must have created a named unit for the comparison to be about");
+  assert.match(reading.cgroup, controlScopeRe, `the inner process must be in the CONTROL's scope (${res.unit}): ${reading.cgroup}`);
   // ② allocator 被内核杀掉（SIGKILL / 非零），⛔ 不是自己退出的。
   assert.equal(reading.hogSignal, "SIGKILL", `hog must be SIGKILLed by the kernel, got code=${reading.hogCode} signal=${reading.hogSignal}`);
   // ③ 杀掉这件事有**内核直接量**：该 scope 自己的 memory.events 里 oom_kill ≥ 1（⛔ 不是我们的日志行）。
   assert.ok(Number(reading.oomKill) >= 1, `scope memory.events must record the kill: ${reading.events}`);
-  // ④ 负控制另一半：scope 外（本测试进程）不受影响 —— 我还活着，且我自己的 cgroup 不是那个 scope。
+  // ④ 负控制另一半：**控制 scope 之外**（本测试进程）不受影响 —— 我还活着，且我不在控制的那个 scope 里。
   assert.equal(process.pid > 0, true);
-  assert.doesNotMatch(fs.readFileSync("/proc/self/cgroup", "utf8"), /quay-anchor-/);
+  assert.doesNotMatch(fs.readFileSync("/proc/self/cgroup", "utf8"), controlScopeRe, "this test process must NOT be inside the control's scope");
   assert.ok(process.memoryUsage().rss > 0);
   // ⑤ scope 被 --collect 回收（⛔ 不在 user manager 里堆积）。⚠️ 回收是**异步**的：命令退出后的一小段
   // 窗口里 `LoadState` 仍是 `loaded`（实测：全量 suite 负载下必然撞上）⇒ 有界轮询到终态，⛔ 不是查一次就判死。
