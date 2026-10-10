@@ -3,7 +3,7 @@ id: AC-356
 title: 结构护栏：applyNeedsHumanTransition 是 retryState.needsHuman/counts 的唯一
   mutator；三条路径（stop-terminal/retry-cap/quick-death）收敛，quick-death
   转移现在可观测；非目标文件与函数未动
-status: active
+status: achieved
 kind: criterion
 goal: GOAL-035
 criterion: |
@@ -55,6 +55,11 @@ statusLog:
     to: active
     actor: goal-cli
     reason: ""
+  - at: 2026-10-10T11:07:41.616Z
+    from: active
+    to: achieved
+    actor: goal-driver
+    reason: "I2: criterion pass"
 fidelity:
   verdict: not-evaluated
   reason: no judge configured
