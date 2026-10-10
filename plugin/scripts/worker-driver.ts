@@ -148,7 +148,7 @@ import {
 import { lookupGoalBranchMode } from "./target-identity-literal-check.ts";
 // gap-task-ops-consolidate-driver-frontmatter-writers：flipTaskDone 的 status 读/写经 task-ops.ts
 // （splitTaskFile / statusFromFrontmatter / patchStatusField，单一 parser，⛔ 不再手搓 status 行正则）。
-import { splitTaskFile, statusFromFrontmatter, patchStatusField } from "./task-ops.ts";
+import { splitTaskFile, statusFromFrontmatter, patchStatusField, commitTaskFile } from "./task-ops.ts";
 import { repoRoot } from "./repo-root.ts";
 // 转义正则元字符（task id 进 `new RegExp` 前）—— the single regex-literal escaper, the kernel leaf
 // reached via the plugin shim. Own copy was one of the twelve byte-identical bodies extracted by
@@ -192,7 +192,7 @@ export {
 // AC152：派发前过滤的【可组合谓词列表】单一实现（driver-filters.ts）。worker 的派发环消费
 // applyTaskFilters（函数级复用，⛔ 不各写一遍）。readTaskStatus 亦上收到 driver-filters.ts，
 // 本文件 re-export 保持旧 import 面（worker-driver.test.mjs / computeLandingState 等）。
-import { applyTaskFilters, makeFilterContext, readTaskStatus, advanceRetryCap, markNeedsHuman, reconcileNeedsHumanWithDisk, RETRY_CAP_DEFAULT, lastExitedNotLandedReason, exitedNotLandedAttempts, WORKER_OUTCOME_REL, type RetryState, type ExitedNotLandedAttempt, type NeedsHumanKind } from "./driver-filters.ts";
+import { applyTaskFilters, makeFilterContext, readTaskStatus, advanceRetryCap, markNeedsHuman, reconcileNeedsHumanWithDisk, RETRY_CAP_DEFAULT, lastExitedNotLandedReason, exitedNotLandedAttempts, formatExitedNotLandedReason, syncDocDevelopBidirectional, WORKER_OUTCOME_REL, type RetryState, type ExitedNotLandedAttempt, type NeedsHumanKind } from "./driver-filters.ts";
 export { readTaskStatus, lastExitedNotLandedReason, exitedNotLandedAttempts, WORKER_OUTCOME_REL } from "./driver-filters.ts";
 // AC155：并发 cap / 轮询间隔 / 协调地板的单一真相源（drivers.yml 经 driver-config 加载，⛔ 不各写一份字面量、
 // ⛔ 不再读 QUAY_MAX_TASK_SUBAGENTS env——env 源已并入声明式配置）。
@@ -1440,6 +1440,139 @@ export function appendOutcomeToFile(file: string, outcome: ReturnType<typeof com
 /** 把一条 outcome 追加写入 <root>/.quay/worker-outcome.jsonl（gitignored 运行时日志）。 */
 export function appendOutcome(root: string, outcome: ReturnType<typeof computeOutcome>): string {
   return appendOutcomeToFile(path.join(root, WORKER_OUTCOME_REL), outcome);
+}
+
+// ── 「为什么卡住」投影到【任务记录】（gap-worker-blocker-reason-invisible-on-the-board）────────────────
+// 缺陷（两处逐字读数见任务体 / AC1）：
+//  ① worker 在 worktree 里写进 `tasks/<id>.md` 的阻塞记录，只有在 fan-in 的 ff 真的落地时才进 develop
+//     —— 任务因故不落地 ⇒ 它自己的说明永远不落地。
+//  ② 失败原因其实【已经在】唯一的耐久台账 `.quay/worker-outcome.jsonl`（`failure_reason`），但那是
+//     gitignored 运行态：干净 checkout 里根本没有，看板（读 provider 任务存储）也读不到
+//     ⇒ 「任务为何卡住」在人看的地方不可见、循环静默。
+//
+// 归属（AC1 指名）：写 reason 的是本文件 computeOutcome（`failure_reason`）→ appendOutcomeToFile
+// （worker-outcome.jsonl 的【唯一】落盘点）；而任务记录上此前【从未】被写任何失败字段——`lastFailure`
+// 不是 canonical schema 的键（`task-schema.ts` 无此字段），任务体里那两处命中是正文散文而非 frontmatter
+// （硬规则 2：按位置判定，不按关键词）。
+//
+// 裁定（AC4）：复用【任务记录】作为通道——不新开一个 `.quay/` 运行态文件，那类通道**已经存在**、正是本
+// 缺陷。投影成任务体上 driver 独占的 `## Blocker` 段（与 markNeedsHuman 的 `## Needs-Human` 同形；放
+// 正文而非 frontmatter：frontmatter 无处安放自由文本，且 `lastFailure` 槽并不存在）。同一原因不重复重写
+// （不 churn）；落地（completed）即清除，故已落地的任务读出来是空的（AC3 负控制靠这条）。
+
+/** 任务记录上「卡住原因」段的标题。driver 独占；⛔ 不与 `## Needs-Human` 共用——后者语义是「已停派」，
+ *  一个仍在被重派的任务挂 Needs-Human 标题就是「小标题谎报成因」（gap-park-reason-mislabels-... 的同族）。 */
+export const BLOCKER_HEADING = "## Blocker";
+
+/** 投影段里承载原因的行标签。⛔ 刻意【不】用 `阻碍原因：`——serve-needs-human.ts 的
+ *  `extractNeedsHumanReason` 用 `/^[-*]\s*阻碍原因[：:]\s*(.+)$/m` 取**全篇第一个**匹配，同标签会让
+ *  它在「先写了 Blocker 段」的任务上取到卡住原因、冒充 needs-human 的阻碍原因。 */
+const BLOCKER_REASON_LABEL = "未落地原因";
+
+/** 从任务体切掉 `## Blocker` 段（标题行到下一个 `## ` 标题止）。无该段 ⇒ 原样返回（逐字不变，
+ *  ⛔ 不做全局空白重排——那会顺手改动无关内容）。仅处理行首精确 `## Blocker`，⛔ 不匹配前缀相同的
+ *  其它标题（如 `## BlockerNotes`）。 */
+export function stripBlockerSection(body: string): string {
+  const lines = body.split("\n");
+  const start = lines.findIndex((l) => l.trim() === BLOCKER_HEADING);
+  if (start < 0) return body;
+  let end = lines.length;
+  for (let i = start + 1; i < lines.length; i += 1) {
+    if (/^## /.test(lines[i])) { end = i; break; }
+  }
+  const before = lines.slice(0, start);
+  const after = lines.slice(end);
+  // 只吃掉删除处两侧留下的空行，⛔ 不 collapse 全篇空白（硬规则 5b：只修被点名的那个实例不够，
+  // 但也不能借机重排——逐字保留其余内容）。
+  while (before.length > 0 && before[before.length - 1].trim() === "") before.pop();
+  while (after.length > 0 && after[0].trim() === "") after.shift();
+  const head = before.join("\n");
+  const tail = after.join("\n");
+  return [head, tail].filter((s) => s !== "").join("\n\n") + "\n";
+}
+
+/** 把 `## Blocker` 段写进任务体：先切旧的，再（section 非 null 时）追加到末尾。section=null ⇒ 只切不收
+ *  （清除）。⛔ 永远只留一个 `## Blocker` 段（不会一轮一段地堆积——旧实现形态的病根）。 */
+export function upsertBlockerSection(body: string, section: string | null): string {
+  const base = stripBlockerSection(body).replace(/\s+$/, "");
+  if (section == null) return `${base}\n`;
+  return `${base}\n\n${section}\n`;
+}
+
+/** 段里已记录的原因（无段 / 无该行 ⇒ null）。用于「同一原因不重复重写」的去重。 */
+export function blockerReasonInBody(body: string): string | null {
+  const m = new RegExp(`^[-*]\\s*${BLOCKER_REASON_LABEL}[：:]\\s*(.+)$`, "m").exec(body);
+  return m ? m[1].trim() : null;
+}
+
+/** 由一次 exited-not-landed 构造 `## Blocker` 段文本。reason=null（读不懂）⇒ 如实写「(原因读不出)」，
+ *  ⛔ 不伪造一个原因（硬规则 3b：读不懂不得与「合格/无原因」同形）。 */
+export function buildBlockerSection(
+  reason: string | null,
+  meta: { ts?: string | null; runId?: string | null; sessionId?: string | null } = {},
+): string {
+  const ts = meta.ts && meta.ts.trim() !== "" ? meta.ts : new Date().toISOString();
+  const lines = [
+    BLOCKER_HEADING,
+    "",
+    `**${ts} — worker 未落地（exited-not-landed）**`,
+    "",
+    `- ${BLOCKER_REASON_LABEL}：${reason && reason.trim() !== "" ? reason : "(原因读不出)"}`,
+  ];
+  if (meta.runId) lines.push(`- run_id：${meta.runId}`);
+  if (meta.sessionId) lines.push(`- session_id：${meta.sessionId}`);
+  return lines.join("\n");
+}
+
+/** 投影「上一次卡住的原因」到任务记录（AC4 裁定的通道，AC2 的一条命令读的就是它）。
+ *  exited-not-landed ⇒ 写/更新 `## Blocker`；completed ⇒ 清除（已落地不留噪声，AC3）；其它 final_state
+ *  ⇒ no-op（本任务只裁 exited-not-landed——failed/killed/timed-out 的成因另有观测面）。
+ *  返回 { ok, changed, committed }（**独立取值，⛔ 不折叠**，硬规则 3b）：
+ *    ok=false       任务文件缺失 / 无 frontmatter（读不懂，⛔ 不等于「没有卡住」）
+ *    changed=false  本次没改（无段可写 / 原因与上次逐字相同 / 已落地且本无段）
+ *    committed=false 未提交（repo-less 单测临时目录 no-op，或 git 提交失败——与 markNeedsHuman 同形） */
+export function projectBlockerToTaskRecord(
+  root: string,
+  taskId: string,
+  finalState: string,
+  reason: string | null,
+  meta: { ts?: string | null; runId?: string | null; sessionId?: string | null } = {},
+): { ok: boolean; changed: boolean; committed: boolean } {
+  if (finalState !== "exited-not-landed" && finalState !== "completed") {
+    return { ok: false, changed: false, committed: false };
+  }
+  const rel = path.join("tasks", `${taskId}.md`);
+  let raw: string;
+  try {
+    raw = fs.readFileSync(path.join(root, rel), "utf8");
+  } catch {
+    return { ok: false, changed: false, committed: false };
+  }
+  const split = splitTaskFile(raw);
+  if (!split) return { ok: false, changed: false, committed: false };
+
+  if (finalState === "completed") {
+    // 落地即清除。本无段 ⇒ 不写盘、不提交（成功路径零副作用——⛔ 不让每个正常落地都产生一条提交）。
+    if (split.body.trim() === stripBlockerSection(split.body).trim()) {
+      return { ok: true, changed: false, committed: false };
+    }
+    const body = upsertBlockerSection(split.body, null);
+    fs.writeFileSync(path.join(root, rel), `${split.open}${split.frontmatterRaw}${split.close}${body}`);
+    const committed = commitTaskFile(root, rel, `tasks: ${taskId} 清除未落地原因（已落地）`);
+    syncDocDevelopBidirectional(root);
+    return { ok: true, changed: true, committed };
+  }
+
+  // exited-not-landed：同一原因不重复重写（去重靠原因文本，⛔ 不靠时间戳——每轮新 ts 会让去重失效）。
+  const rendered = reason && reason.trim() !== "" ? reason : "(原因读不出)";
+  if (blockerReasonInBody(split.body) === rendered) {
+    return { ok: true, changed: false, committed: false };
+  }
+  const body = upsertBlockerSection(split.body, buildBlockerSection(reason, meta));
+  fs.writeFileSync(path.join(root, rel), `${split.open}${split.frontmatterRaw}${split.close}${body}`);
+  const committed = commitTaskFile(root, rel, `tasks: ${taskId} 记录未落地原因（worker exited-not-landed）`);
+  syncDocDevelopBidirectional(root);
+  return { ok: true, changed: true, committed };
 }
 
 // liveness 检查（gap-resident-driver-stable-carrier-liveness Finding）已上收 driver-runtime.ts
@@ -4734,10 +4867,28 @@ function runOneWorker({
           ? { ...baseOutcome, worktree_preserved: true }
           : baseOutcome;
       appendOutcomeToFile(outcomeFile, finalOutcome);
+      // gap-worker-blocker-reason-invisible-on-the-board（AC4 的落点）：worker 一退出就把「为什么没落地」
+      // 投影到【任务记录】（看板读的载体）——worker-outcome.jsonl 是 gitignored 运行态，干净 checkout 里
+      // 没有、看板也读不到 ⇒ 「任务为何卡住」不可见。这里跑在 worker 已退出之后（⛔ 不与在飞 worker 的
+      // task_write 抢同一个任务文件），落点与 markNeedsHuman 同族（写盘即提交 + 双向同步）。投影失败
+      // ⛔ 不致命（记录卡住不该搞死整轮），但**不静默**：结果落 worker-done 事件的 blockerNote 字段。
+      let blockerNote: ReturnType<typeof projectBlockerToTaskRecord> | null = null;
+      try {
+        blockerNote = projectBlockerToTaskRecord(
+          rootDir,
+          taskId,
+          finalOutcome.final_state,
+          formatExitedNotLandedReason(finalOutcome.failure_reason, (finalOutcome as { mechanical_fan_in?: unknown }).mechanical_fan_in),
+          { ts: finalOutcome.ts, runId: finalOutcome.run_id, sessionId: finalOutcome.session_id },
+        );
+      } catch (e) {
+        blockerNote = { ok: false, changed: false, committed: false };
+        process.stderr.write(`worker-driver: blocker-note projection failed for ${taskId}: ${(e as Error)?.message ?? String(e)}\n`);
+      }
       // 终态已算 ⇒ dispatch 已了结，清持久记录（gap-worker-driver-restart-orphan-no-outcome-no-timeout）。
       // 记录本不存在（spawn-failed / not-dispatched 未写）时 removeDispatchRecord 是 no-op。
       removeDispatchRecord(dispatchStoreFile(rootDir), taskId);
-      if (json) process.stdout.write(`${JSON.stringify({ event: "worker-done", task: taskId, ...finalOutcome })}\n`);
+      if (json) process.stdout.write(`${JSON.stringify({ event: "worker-done", task: taskId, blockerNote, ...finalOutcome })}\n`);
       let exitCode: number;
       if (finalOutcome.final_state === "completed") exitCode = 0;
       else if (finalOutcome.final_state === "timed-out") exitCode = 128 + signalExitCode(signal ?? "SIGTERM");
