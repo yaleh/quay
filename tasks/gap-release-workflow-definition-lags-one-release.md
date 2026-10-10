@@ -49,13 +49,20 @@ run("gh", ["workflow", "run", "release.yml", "--ref", tag, "-f", `tag=${tag}`], 
 
 ## Evidence
 
-**已实现并验证（P1 + P2）**：`plugin/scripts/release-cut.mjs` 的 dispatch 调用点带 `--ref <ref>`；dry-run 计划行与两处文案同步；preflight 打印将生效的 workflow 定义及其与 tag 树（= `--base`）的 diffstat，不一致即拒绝。`plugin/scripts/release-cut.sh` 头部（`--help` 正本）同步更新。
+**已实现并验证（P1 + P2）**：`plugin/scripts/release-cut.mjs` 的 dispatch 调用点带 `--ref <ref>`；dry-run 计划行与两处文案同步；preflight 打印将生效的 workflow 定义及其与 tag 树（= `--base`）的 diffstat，不一致即拒绝。`plugin/scripts/release-cut.sh` 头部（`--help` 正本）同步更新。scoped gate 绿（`scripts/test.sh --for-task gap-release-workflow-definition-lags-one-release --allow-thin` → exit 0）；anti-drift `ANTI-DRIFT OK — 3 actual file(s), all within declared Touches (5 glob(s))`。
 
-**测试**：`node --test plugin/test/release-cut.test.mjs` 12/12 绿（25.3s）。新增 4 条用例按位置判定，不 grep 源码。⚠️ 其中 drift 用例的 PATH 上放了一个**假 `gh`**——实测该用例第一版在"拒绝"被变异掉时会打到**真实 GitHub API**（`HTTP 422: No ref found for: drifted`，repo yaleh/quay）；测试自身的失败模式不应是一次真实派发，故已隔离。
+**测试**：`node --test plugin/test/release-cut.test.mjs` 12/12 绿。新增 4 条用例按位置判定，不 grep 源码。⚠️ 其中 drift 用例的 PATH 上放了一个**假 `gh`**——实测该用例第一版在"拒绝"被变异掉时会打到**真实 GitHub API**（`HTTP 422: No ref found for: drifted`，repo yaleh/quay）；测试自身的失败模式不应是一次真实派发，故已隔离。
 
 **AC1（待外部）**：`--ref` 取 `tag` 还是 `develop` 是人裁定项。本实现把两者都做成一个 flag，默认 `tag`（门绑定产物、同一 tag 重派得同一判定）；裁定后改默认值即可，无需改实现。
 
-**AC4 未落地，且按现文没有可直接实现的机制**（留待作者/人裁定，本 worker 不自行给 AC 加标注）：①`verify-plugin-channel-assertions` 的断言包含"版本载体一致且**不带 `-dev`**"，而 `publish-dist-branch.sh` 的 build 模式只在 `release/*` / tag 上写 `X.Y.Z` ⇒ **从 develop 构建的 channel 必然带 `-dev`**，"在 develop 上定期执行"不能照字面实现；可选形态（用最新 tag 的产物 + develop 的 checker）需要对"用哪个 ref 构建、是否与 release.yml 的 job 去重、谁触发"作决定。②`publish-plugin-dist.yml` 已被 2026-09-14 人裁定为"只能显式发布、不得隐式触发"，定时发布不可取。③AC4 的两条判据（真实 CI 的绿/红各一轮）都是落地后外部验证，而新 nightly job 的首次执行本身就是本任务要消灭的那一类"首跑即真实发布"。建议 P3 单独立项后再落地。
+**AC4 未落地 —— 且它的两条判据都不在本 worker 可诚实取得的证据范围内**（留待作者/人裁定；本 worker ⛔ 不自行给 AC 加标注，也不自行加无人值守的 nightly）：
+
+1. **照字面读不通（已实测，非注释转述）**：`verify-plugin-channel-assertions` 断言版本载体"不带 `-dev`"，而 `resolveVersion(VERSION,'build')`（`scripts/resolve-version.ts:215-229`）在非 `release/*` 且 HEAD 无版本 tag 时返回 `X.Y.Z-dev` —— 实测 `resolveVersion("0.18.0",{mode:"build",branch:"develop"})` ⇒ `0.18.0-dev`，`branch:"release/v0.18.0"` ⇒ `0.18.0`。⇒ **从 develop 构建的 channel 永远过不了这道门**，"在 develop 上被 CI 定期执行"只能取"**job 定义在 develop 上、定期跑，产物取自一个 release-form 的 ref（如最新 tag）**"这一读法 —— 而"取哪个 ref"本身是要拍板的选择。
+2. **按该读法落地，新增的是一处无人值守的 nightly**：要在共享自托管 runner（tokyo-alpha）上 `npm install -g @anthropic-ai/claude-code`、真实安装插件、起 driver 与 server。加不加、用哪个 ref 构建、是否与 release.yml 的 `verify-plugin-channel` job 去重，都是需要人决定的运维动作；本任务 AC1 本身就在等人裁定，说明人已在此环内。
+3. `publish-plugin-dist.yml` 已被 2026-09-14 人裁定为"只能显式发布、**不得隐式触发**"（其头部原话），定时发布这条路不可取。
+4. AC4 的两条判据（真实 CI 的绿/红各一轮）都是**落地后外部验证**；而新 nightly 的首次执行本身就是本任务要消灭的那一类"首跑即真实发布"。
+
+**建议**：P1/P2 可先行落地；P3 单独立项、由人决定形态（含"哪个 ref 构建产物"与"是否去重 release.yml 的 job"）后再实现其两条控制。
 
 ## Touches
 
