@@ -1,7 +1,7 @@
 ---
 id: gap-full-suite-scope-oom-policy-stops-whole-suite-unattributable
 title: 套件 scope 缺 OOMPolicy=continue：任一进程被 OOM 杀即整套被 TERM，且无峰值/OOM 证据，fan-in 归因不出而停派
-status: ready
+status: done
 labels:
   - gap
 parent: null
@@ -65,12 +65,3 @@ extra:
 - plugin/test/task-granularity-advice.test.mjs (fan-in 外来红：oracle 的 status 判据收敛进 frontmatter，stage 1 逐字不变)
 - .gitignore (per-run 证据文件的运行时载体)
 - tasks/gap-full-suite-scope-oom-policy-stops-whole-suite-unattributable.md
-
-## Blocker
-
-**2026-10-10T11:47:01.924Z — worker 未落地（exited-not-landed）**
-
-- 未落地原因：step=suite: AssertionError [ERR_ASSERTION]: peers ∪ mentions must equal the grep oracle for plugin/scripts/worker-driver.ts
-- run_id：wk-prod-anchor
-- session_id：d544a6de-336b-4bd9-a9fb-71c4574bd963
-- 后续：真因与修法见 `## Evidence` 的「第二轮」小节（外来红，已在本轮修掉）。
