@@ -192,7 +192,7 @@ export {
 // AC152：派发前过滤的【可组合谓词列表】单一实现（driver-filters.ts）。worker 的派发环消费
 // applyTaskFilters（函数级复用，⛔ 不各写一遍）。readTaskStatus 亦上收到 driver-filters.ts，
 // 本文件 re-export 保持旧 import 面（worker-driver.test.mjs / computeLandingState 等）。
-import { applyTaskFilters, makeFilterContext, readTaskStatus, advanceRetryCap, markNeedsHuman, reconcileNeedsHumanWithDisk, RETRY_CAP_DEFAULT, lastExitedNotLandedReason, exitedNotLandedAttempts, formatExitedNotLandedReason, syncDocDevelopBidirectional, WORKER_OUTCOME_REL, type RetryState, type ExitedNotLandedAttempt, type NeedsHumanKind } from "./driver-filters.ts";
+import { applyTaskFilters, makeFilterContext, readTaskStatus, advanceRetryCap, applyNeedsHumanTransition, reconcileNeedsHumanWithDisk, RETRY_CAP_DEFAULT, lastExitedNotLandedReason, exitedNotLandedAttempts, formatExitedNotLandedReason, syncDocDevelopBidirectional, WORKER_OUTCOME_REL, type RetryState, type ExitedNotLandedAttempt, type NeedsHumanKind } from "./driver-filters.ts";
 export { readTaskStatus, lastExitedNotLandedReason, exitedNotLandedAttempts, WORKER_OUTCOME_REL } from "./driver-filters.ts";
 // AC155：并发 cap / 轮询间隔 / 协调地板的单一真相源（drivers.yml 经 driver-config 加载，⛔ 不各写一份字面量、
 // ⛔ 不再读 QUAY_MAX_TASK_SUBAGENTS env——env 源已并入声明式配置）。
@@ -5280,7 +5280,7 @@ export async function runResidentLoop(opts: ResidentOptions): Promise<number> {
       // 续做态，继续 CONTINUE 重派（merge develop 再 ff 自愈），⛔ 不把 3 次 branch-lag 误判成真缺陷
       // 标 needs-human（那会静置 RECOMMENDED 不派，需人手动救回）。真缺陷（suite red / merge-develop
       // 冲突 / anti-drift 违反 / ff 步的其它失败）仍照常计数达上限标 needs-human。
-      const needsHumanWrites: Array<{ id: string; reason: string; kind: NeedsHumanKind }> = [];
+      const needsHumanWrites: Array<{ id: string; reason: string; kind: NeedsHumanKind; countsOverride?: number }> = [];
       if (!isFfNotFastForwardFailure(r.outcome)) {
         // 重试上限豁免（gap-retry-cap-flip-conflates-own-defect-with-unrelated-flaky）：suite red 的失败
         // 测试文件与任务 Touches/diff 无关 ∧ 断言签名跨任务复发（≥2 不同任务）⇒ 不计入该任务自身重试
@@ -5307,9 +5307,10 @@ export async function runResidentLoop(opts: ResidentOptions): Promise<number> {
         if (decision.kind === "stop-terminal") {
           // 停 = 不重派：内存集合（retryCapNotExhausted 过滤）挡下一轮 + 磁盘 status 翻转双保险。
           // 预算照扣（counts 记满，⛔ 不因判不出而放行——与既有「照常计数」语义一致），只是不再重派。
+          // GOAL-035 AC-356：这里【不再】直接动 retryState.needsHuman/counts——latch + 预算覆写
+          // （countsOverride 把预算记满）一律交给 applyNeedsHumanTransition（批处理循环处调用）。
+          // 保留下面的 has() 守卫是为了「已 needs-human 的任务不再入队」，与旧行为一致。
           if (!retryState.needsHuman.has(r.taskId)) {
-            retryState.needsHuman.add(r.taskId);
-            retryState.counts.set(r.taskId, maxRetries);
             needsHumanWrites.push({
               id: r.taskId,
               // gap-park-reason-mislabels-ac-precheck-as-suite-red 点 3：停派种类由调用方传入 markNeedsHuman
@@ -5317,6 +5318,7 @@ export async function runResidentLoop(opts: ResidentOptions): Promise<number> {
               // 这条路径也可能是「没有 mechanical_fan_in（没跑过 suite）」的无法归因（point 2）。
               reason: `exited-not-landed 失败无法归因（基建/契约疑似，非实现缺陷）——停止重派，⛔ 不再拿新会话撞同一堵墙：${decision.reason}`,
               kind: "stop-terminal",
+              countsOverride: maxRetries,
             });
           }
         } else if (exemption.verdict !== "unrelated-flaky-exempt") {
@@ -5326,10 +5328,15 @@ export async function runResidentLoop(opts: ResidentOptions): Promise<number> {
         }
       }
       for (const w of needsHumanWrites) {
-        // gap-mark-needs-human-commit-after-write：markNeedsHuman 写盘即提交，返回
-        // { id, ok, reason, committed }——⛔ 不再丢弃 {ok,reason}；结果经 writeRound 落进 round 记录
-        // （生产载体），json 事件供测试/手动观测。
-        const nh = markNeedsHuman(rootDir, w.id, w.reason, w.kind);
+        // GOAL-035：三条路径（stop-terminal / retry-cap / quick-death）的唯一 mutator + 唯一落盘入口。
+        // gap-mark-needs-human-commit-after-write：写盘即提交，返回 { id, ok, reason, committed }——
+        // ⛔ 不再丢弃 {ok,reason}；结果经 writeRound 落进 round 记录（生产载体），json 事件供测试/手动观测。
+        const nh = applyNeedsHumanTransition(
+          retryState,
+          rootDir,
+          w,
+          w.countsOverride !== undefined ? { countsOverride: w.countsOverride } : {},
+        );
         needsHumanResults.push(nh);
         if (json) process.stdout.write(`${JSON.stringify({ event: "needs-human", ...nh })}\n`);
       }
@@ -5369,20 +5376,27 @@ export async function runResidentLoop(opts: ResidentOptions): Promise<number> {
       }
       return r;
     }
+    // 注记必须让读者一眼区分真因（plan item 4）：本路径【没有】exited-not-landed 尝试 ⇒ 注记的
+    // 「失败步/判词」行结构上缺省，若不带上快速死亡分类器的取值，这条翻转就只剩模板句、与其他路径
+    // 同形。故如实把分类器取值写进阻碍原因（ordinary / unclassifiable 两态；transient-external
+    // 结构上到不了这里）。⛔ 该分类器只管重试计数——它不再是「needs-human 成因字段」的一部分
+    // （gap-retire-needs-human-cause-enumeration 已删除该字段）。⛔ transient-external 不自动回捞
+    // （终态由人/上层裁决）。
+    // GOAL-035 修的两个真实缺陷（硬规则 9 的实例，不是比喻）：(1) 旧代码在此【丢弃】markNeedsHuman
+    // 的返回值 ⇒ 本路径的转移既不入 needsHumanResults、也不发 `needs-human` json 事件，在 production
+    // telemetry 里结构上不可见（另两条路径都留痕）；(2) 旧代码省略 kind 参数 ⇒ 落盘被静默误标成缺省
+    // `retry-cap`，即使原因文案描述的是快速死亡退避。现统一走 applyNeedsHumanTransition + 正确 kind
+    // `quick-death-backoff`，并像另两条路径一样 push 结果 + 发事件。
     if (backoff.newlyNeedsHuman) {
-      retryState.needsHuman.add(r.taskId);
-      // 注记必须让读者一眼区分真因（plan item 4）：本路径【没有】exited-not-landed 尝试 ⇒ 注记的
-      // 「失败步/判词」行结构上缺省，若不带上快速死亡分类器的取值，这条翻转就只剩模板句、与其他路径
-      // 同形。故如实把分类器取值写进阻碍原因（ordinary / unclassifiable 两态；transient-external
-      // 结构上到不了这里）。⛔ 该分类器只管重试计数——它不再是「needs-human 成因字段」的一部分
-      // （gap-retire-needs-human-cause-enumeration 已删除该字段）。⛔ transient-external 不自动回捞
-      // （终态由人/上层裁决）。
-      markNeedsHuman(
-        rootDir,
-        r.taskId,
-        `worker-driver 连续 ${maxRetries} 次 <${backoffCfg.quickDeathMs}ms 快速死亡（退避上限）` +
+      const nh = applyNeedsHumanTransition(retryState, rootDir, {
+        id: r.taskId,
+        reason:
+          `worker-driver 连续 ${maxRetries} 次 <${backoffCfg.quickDeathMs}ms 快速死亡（退避上限）` +
           `；快速死亡分类：${backoff.cause ?? "unclassifiable"}`,
-      );
+        kind: "quick-death-backoff",
+      });
+      needsHumanResults.push(nh);
+      if (json) process.stdout.write(`${JSON.stringify({ event: "needs-human", ...nh })}\n`);
     }
     if (backoff.quickDeath && json) {
       process.stdout.write(
