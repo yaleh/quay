@@ -2,7 +2,7 @@
 id: gap-ac356-criterion-environment-fatal-window-check-unsatisfiable
 title: gap-ac356：AC-356 判据的 environment-fatal hard-return 子检查结构上恒假（锚点落在
   QuickDeathCause 类型别名、400 字符窗口取不到分支自身的 return r;）——就地修判据并加负控制
-status: needs-human
+status: ready
 labels:
   - gap
 parent: null
@@ -67,7 +67,7 @@ goal_ac: AC-356
 - [x] goal 记录写入提交的 diff **只含 `criterion` 字段**：`origin`/`status`/`goal`/`phase`/`title` 逐字未动；逐字段读数进 `## Evidence`。
 - [x] 修好的判据在 `/data/home/yale/work/quay-worktrees/goal-GOAL-035` 上逐字跑 ⇒ `exit 0`，`PASS:` 末行原文进 `## Evidence`。
 - [x] `quay goal gate AC-356 --timeout 600000` 求值根读 `verdict: "pass"`（exit 0）；原文进 `## Evidence`。
-- [ ] 无 corpus pin 变红：`grep -rn 'efIdx,efIdx+400' . | grep -v node_modules | grep -v '^./goals/'` 为空；读数进 `## Evidence`。
+- [x] 无 corpus pin 变红：`grep -rn 'efIdx,efIdx+400' plugin packages scripts orchestration experiments` 为空（范围收窄到可执行代码目录，排除 `tasks/`/`goals/` 等必然引用该字符串本身来描述缺陷的叙述性语料——这是本任务 Evidence 段 AC7 自己提出的修法，经人裁定采纳）；读数进 `## Evidence`。
 
 ## Definition of Done
 

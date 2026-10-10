@@ -55,7 +55,7 @@ import { pathToFileURL } from "node:url";
 import { validateDischargeVerdict, deriveObligationId, DISCHARGE_VERDICT_SCHEMA } from "./obligation-discharge-agent.ts";
 // readJsonLines — semantic-dedup-scan finding `readjsonlines-seven-defs-three-behaviors`: this module
 // carried its own private copy; the ledger reader now lives in gate-script-base.ts, once.
-import { readJsonLines } from "./gate-script-base.ts";
+import { readJsonLines, parseArgs as baseParseArgs } from "./gate-script-base.ts";
 
 // ── generator registry — the SINGLE SOURCE the obligation set is DERIVED from (三层共用) ─────────────
 // The `condition` describes WHEN the obligation is live (needs handling). `semantic:true` means the
@@ -302,23 +302,49 @@ function buildReport(
 }
 
 // ── CLI ─────────────────────────────────────────────────────────────────────────────────────────────
-
-function parseArgs(argv: string[]): Record<string, string> {
+// The flag loop is the SHARED spec-driven parser (gate-script-base.ts); this wrapper only maps the
+// parsed flags back onto the loose `Record<string, string>` this command's dispatch reads (presence
+// + raw value). It used to be a private generic `--key value` loop — one of the four residual
+// carriers named by semantic-dedup-scan finding `parseargs-handrolled-residuals` (runId
+// `semantic-dedup-scan-1791631645924`, suggestedAction `unify`).
+//
+// TWO input-language axes move with the fold, both deliberately:
+//   · UNKNOWN flags are now REJECTED (exit 2) instead of silently absorbed into the map. The old
+//     loop kept every `--<anything>` key and the dispatcher read only the keys it knew, so a typo
+//     (`--ledgre`) fell through to `defaultLedgerPath()` — the silent substitution of a value the
+//     user never supplied that 硬规则 3b forbids. The flag set below is the command's documented
+//     closed set, so nothing legitimate is rejected.
+//   · `--help` now prints this command's own multi-line USAGE and exits 0 (`help: "return"` — the
+//     reason that mode exists). Before, `--help` was absorbed as an unknown key and the command fell
+//     through to the "no command" door: the SAME text on stderr with exit 2.
+function parseArgs(argv: string[]): { flags: Record<string, string>; help: boolean } {
+  const { flags, help } = baseParseArgs(argv, {
+    minArgs: 0,
+    usage: "[--report --round <N> --readings <file|->] [--oldest] [--round-close-check] [--schema]",
+    help: "return",
+    unknown: "reject",
+    flags: {
+      root: { type: "string" },
+      ledger: { type: "string" },
+      schema: { type: "boolean" },
+      discharge: { type: "string" },
+      defer: { type: "string" },
+      reason: { type: "string" },
+      unblock: { type: "string" },
+      by: { type: "string" },
+      oldest: { type: "boolean" },
+      "round-close-check": { type: "boolean" },
+      report: { type: "boolean" },
+      round: { type: "string" },
+      "age-threshold": { type: "string" },
+      generators: { type: "string" },
+      readings: { type: "string" },
+      lenient: { type: "boolean" },
+    },
+  });
   const out: Record<string, string> = {};
-  for (let i = 0; i < argv.length; i++) {
-    const a = argv[i];
-    if (a.startsWith("--")) {
-      const key = a.slice(2);
-      const next = argv[i + 1];
-      if (next !== undefined && !next.startsWith("--")) {
-        out[key] = next;
-        i++;
-      } else {
-        out[key] = "true";
-      }
-    }
-  }
-  return out;
+  for (const [k, v] of Object.entries(flags)) out[k] = typeof v === "string" ? v : "true";
+  return { flags: out, help: help === true };
 }
 
 function loadGenerators(file: string | undefined): ObligationGenerator[] {
@@ -363,7 +389,12 @@ usage:
   --schema  (print DISCHARGE_VERDICT_SCHEMA)`;
 
 function main(argv: string[]): void {
-  const args = parseArgs(argv);
+  const parsed = parseArgs(argv);
+  if (parsed.help) {
+    process.stdout.write(USAGE + "\n");
+    return;
+  }
+  const args = parsed.flags;
   const root = args.root ?? process.cwd();
   const ledger = args.ledger ?? defaultLedgerPath(root);
 
@@ -438,5 +469,6 @@ function main(argv: string[]): void {
 // Run the CLI only when executed directly — importing this module (tests) must not trigger main().
 const isMain = process.argv[1] !== undefined && import.meta.url === pathToFileURL(process.argv[1]).href;
 if (isMain) {
-  main(process.argv.slice(2));
+  // The WHOLE argv — the shared parser does the `slice(2)` (the convention every base caller keeps).
+  main(process.argv);
 }

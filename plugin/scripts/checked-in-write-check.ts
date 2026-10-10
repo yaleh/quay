@@ -73,7 +73,7 @@ import os from "node:os";
 import path from "node:path";
 import { spawnSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
-import { helpExit, emitPass, emitFail, emitNotEvaluated } from "./gate-script-base.ts";
+import { emitPass, emitFail, emitNotEvaluated, parseArgs as baseParseArgs } from "./gate-script-base.ts";
 import { repoRoot } from "./repo-root.ts";
 
 /** Default judged root = the repo this script is checked into (this file is <repo>/plugin/scripts/). */
@@ -371,49 +371,69 @@ export function checkCheckedInWrites(opts: {
   return { ...base, ok: parsed.violations.length === 0, evaluated: true };
 }
 
-// ⛔ NOT foldable onto gate-script-base's spec-driven parseArgs — and the blocker is a MEASURED
-// input-language difference, not tidiness (semantic-dedup-scan finding `parseargs-local-copies`,
-// runId `semantic-dedup-scan-1790503843524`, which named this file's copy as one of its exemplars).
-// `--files` is a GREEDY LIST: `--files a b c` is one flag carrying three values (documented at the
-// top of this file as `[--files <f> [<f>…]]`). The shared parser reads ONE value per `--flag`:
-//     parseArgs(["node","s","--files","a","b","c"], spec) ⇒ flags.files = "a", args = ["b","c"]
-// so adopting it here would DROP `b` and `c` from the judgement while the checker still reports a
-// verdict — a silent reduction of the input set, the exact 硬规则 3b shape ("读不懂" returned in the
-// shape of "合格"). Absorbing this caller needs a greedy-list flag type in the base first.
+// The flag loop is the SHARED spec-driven parser (gate-script-base.ts); this wrapper only maps the
+// raw `--flag <value>` strings onto this command's typed shape. It used to be a private switch loop
+// — one of the four residual carriers named by semantic-dedup-scan finding
+// `parseargs-handrolled-residuals` (runId `semantic-dedup-scan-1791631645924`, suggestedAction
+// `unify`), and the one whose own comment recorded WHY it could not fold: `--files` is a GREEDY LIST
+// (`--files a b c` = one flag, three values, documented at the top of this file), and the base read
+// ONE value per `--flag` — measured, `--files a b c` came back as `files:"a"` with `b`,`c` leaked
+// into `args`, i.e. folding would have SILENTLY dropped 2 of 3 input files from the judgement while
+// the checker still printed a verdict (硬规则 3b). The base now expresses that flag as
+// `{ type: "string[]", greedy: true }`, so the measurement that blocked this caller is the control
+// that keeps it honest: plugin/test/gate-script-base-arg-modes.test.mjs pins the greedy reading.
 function parseArgs(argv: string[]): { root: string; dir?: string; files: string[]; json: boolean; timeoutMs?: number; changed: boolean; base?: string } {
-  let root = DEFAULT_ROOT;
-  let dir: string | undefined;
-  let timeoutMs: number | undefined;
-  const files: string[] = [];
-  let json = false;
-  let changed = false;
-  let base: string | undefined;
-  for (let i = 0; i < argv.length; i++) {
-    switch (argv[i]) {
-      case "--root": root = argv[++i]; break;
-      case "--dir": dir = argv[++i]; break;
-      case "--files": while (i + 1 < argv.length && !argv[i + 1].startsWith("--")) files.push(argv[++i]); break;
-      case "--changed": changed = true; break;
-      case "--base": base = argv[++i]; break;
-      case "--json": json = true; break;
-      case "--timeout-ms": timeoutMs = Number(argv[++i]); break;
-      default: console.error(`unknown: ${argv[i]}`); process.exit(2);
-    }
+  const { flags, lists, args } = baseParseArgs(argv, {
+    minArgs: 0,
+    usage: "[--root <dir>] [--dir <dir>] [--files <f> [<f>…]] [--changed [--base <ref>]] [--json] [--timeout-ms <n>]",
+    unknown: "reject",
+    flags: {
+      root: { type: "string" },
+      dir: { type: "string" },
+      files: { type: "string[]", greedy: true },
+      changed: { type: "boolean" },
+      base: { type: "string" },
+      json: { type: "boolean" },
+      "timeout-ms": { type: "string" },
+    },
+  });
+  // A bare positional is a usage error for this command (it takes flags only) — the pre-fold loop's
+  // `default:` arm caught those too, and its message is kept verbatim for them. `--flag` typos now
+  // go through the base's own `unknown argument: --<name>` door (same exit 2).
+  if (args.length > 0) {
+    console.error(`unknown: ${args[0]}`);
+    process.exit(2);
   }
+  const rawTimeout = flags["timeout-ms"];
+  // "" here is the base's spelling for a flag that carried no value at all (`--timeout-ms` last,
+  // or `--timeout-ms ""`): both mean "no ceiling named", so the default applies. A value that IS
+  // present but unparseable stays NaN — the pre-fold reading — rather than being laundered into a
+  // number the user never supplied.
+  const timeoutMs = typeof rawTimeout === "string" && rawTimeout !== "" ? Number(rawTimeout) : undefined;
+  const files = lists?.files ?? [];
+  const dir = typeof flags.dir === "string" ? flags.dir : undefined;
+  const base = typeof flags.base === "string" ? flags.base : undefined;
+  const changed = flags.changed === true;
   if (changed && (files.length > 0 || dir !== undefined)) {
     console.error("--changed selects its own inputs from the git delta; it cannot be combined with --files/--dir");
     process.exit(2);
   }
-  return { root, dir, files, json, timeoutMs, changed, base };
+  return {
+    root: typeof flags.root === "string" ? flags.root : DEFAULT_ROOT,
+    dir,
+    files,
+    json: flags.json === true,
+    timeoutMs,
+    changed,
+    base,
+  };
 }
 
 export function main(argv: string[]): number {
-  if (argv.includes("--help") || argv.includes("-h")) {
-    helpExit(
-      "usage: node checked-in-write-check.ts [--root <dir>] [--dir <dir>] [--files <f>…] " +
-        "[--changed [--base <ref>]] [--json] [--timeout-ms <n>]",
-    );
-  }
+  // No `--help` arm here: the shared parser owns it (`help: "exit"` is the default — usage to
+  // stdout, exit 0, no side effect), which is the ONE contract this checker and its ~160 peers are
+  // swept against (plugin/test/help-contract-incompatible-behaviors.test.mjs). `argv` is the WHOLE
+  // process.argv — the parser does the `slice(2)` (the convention every base caller follows).
   const { root, dir, files, json, timeoutMs, changed, base } = parseArgs(argv);
 
   if (changed) {
@@ -494,5 +514,5 @@ function render(
 }
 
 if (process.argv[1] && fileURLToPath(import.meta.url) === process.argv[1]) {
-  process.exitCode = main(process.argv.slice(2));
+  process.exitCode = main(process.argv);
 }

@@ -11,8 +11,20 @@ import path from "node:path";
 // ── Types ───────────────────────────────────────────────────────────────────────────────────────────
 
 export interface FlagSpec {
-  type: "string" | "boolean";
+  type: "string" | "boolean" | "string[]";
   description?: string;
+  /**
+   * `type: "string[]"` ONLY. GREEDY: one occurrence consumes EVERY consecutive following token that
+   * is not itself a `--flag` (`--files a b c` ⇒ `["a","b","c"]`) — the "one flag, N values" shape.
+   * Default (arity-1): one value per occurrence, so a REPEATED flag accumulates
+   * (`--pat a --pat b` ⇒ `["a","b"]`). Ignored for the other types.
+   *
+   * ⛔ The two arms differ on ONE input, deliberately: greedy STOPS at a `--flag`, arity-1 takes the
+   * next token unconditionally — exactly the rule a scalar `type: "string"` flag has always had here
+   * (`--flag --other` ⇒ `flag = "--other"`). That is not tidiness; each arm has to reproduce the
+   * input language of the callers it absorbed, or folding them would change what they accept.
+   */
+  greedy?: boolean;
 }
 
 export interface CliSpec {
@@ -26,8 +38,31 @@ export interface CliSpec {
    * Reject an UNRECOGNIZED `--flag` (stderr `unknown argument: --<flag>`, exit 2) instead of
    * accepting it as an undeclared string flag. Default false, so no existing caller's input
    * language changes; see the parseArgs block below for why the default is not strict.
+   *
+   * Kept as the boolean spelling of `unknown: "reject"` (its pre-existing meaning); when both are
+   * given, `unknown` wins (it is the finer-grained form and the only one that can say "skip").
    */
   strict?: boolean;
+  /**
+   * What to do with an UNRECOGNIZED `--flag`:
+   *   · "accept" (default) — pre-existing behavior: keep it as an undeclared string flag.
+   *   · "reject" — stderr `unknown argument: --<flag>`, exit 2 (≡ `strict: true`).
+   *   · "skip"   — DROP the token and consume NOTHING after it. This is for the ARGV-SINK caller
+   *                (a script that forwards its own argv to a subprocess — `test.sh` → this → `node
+   *                --test`): an unknown flag's VALUE must not be eaten as though it were the
+   *                unknown flag's own value, because the token after it belongs to the real
+   *                consumer. `"accept"` cannot express this: measured, it reads
+   *                `["--bogus","--json"]` as `{bogus: "--json"}` and silently LOSES `--json`.
+   */
+  unknown?: "accept" | "skip" | "reject";
+  /**
+   * How a USAGE ERROR (unrecognized flag under `unknown:"reject"` / too few positional args) is
+   * reported. "exit" (default) = the shared contract: message to stderr, exit 2. "return" = set
+   * `ParsedArgs.error` and return WITHOUT exiting, so a caller that owns its own exit code (or must
+   * not kill the process) can report it itself. Only the two usage-error paths consult this — a
+   * `--help` arm is governed by `help` alone.
+   */
+  errors?: "exit" | "return";
   /**
    * How `--help` / `-h` is handled. "exit" (default) = the shared contract: print usage to stdout,
    * exit 0, no business side effect. "return" = set `ParsedArgs.help = true` and return WITHOUT
@@ -43,11 +78,23 @@ export interface ParsedArgs {
   /** Flag values keyed by flag name (without leading --). */
   flags: Record<string, string | boolean>;
   /**
+   * `type: "string[]"` flag values, keyed by flag name (without leading --). An ABSENT key means
+   * "not supplied" and is distinct from a present-but-empty array (a greedy flag with no values) —
+   * the same three-valued reading `flags` gives for strings (硬规则 3b).
+   */
+  lists?: Record<string, string[]>;
+  /**
    * True iff `spec.help === "return"` and argv carried `--help`/`-h`. Absent on the exit path (which
    * never returns) and on every normal run — so a caller reads it as `help === true`, never as a
    * three-valued "did help happen / could I not tell".
    */
   help?: boolean;
+  /**
+   * Set IFF `spec.errors === "return"` and a usage error was found; absent on every successful parse
+   * (so `error === undefined` is "parsed fine", never "could not tell"). The message is the same one
+   * the exit path writes to stderr, WITHOUT the trailing newline.
+   */
+  error?: string;
 }
 
 // ── helpExit ────────────────────────────────────────────────────────────────────────────────────────
@@ -98,19 +145,28 @@ export function helpExit(usage: string): never {
 // call sites (enum-surface-parity-check / prepare-admission-check / proposal-convergence — none of
 // which passes a `strict` key) keep their input language byte-for-byte.
 //
-// ⛔ Still NOT expressible by this spec, and deliberately not added here — each is a separate CLI
-// contract, not incidental trivia, so folding those callers needs its own finding:
-//   • a GREEDY list (`--files a b c`, checked-in-write-check.ts): measured, this parser reads
-//     `files:"a"` and leaks `b`,`c` into `args` — folding that caller would silently drop 2 of 3
-//     input files from the judgement.
-//   • a NON-EXITING ERROR return (loadbearing-test-gate.ts returns `{error}` for a bad usage rather
-//     than killing the process): `spec.help: "return"` covers ONLY the `--help` arm — the minArgs
-//     failure path still owns `process.exit(2)`, so a caller whose absent-argument case must stay
-//     alive cannot fold here yet.
+// THE CAPABILITIES THAT BLOCKED THE RESIDUAL SET ARE NOW IN THE SPEC, as opt-in keys — the same
+// shape `strict` took, so every existing caller's input language stays byte-for-byte:
+//   • `type: "string[]"` (`greedy` or arity-1) — the GREEDY form is what checked-in-write-check.ts
+//     needs (`--files a b c`); measured before this change, the parser read `files:"a"` and leaked
+//     `b`,`c` into `args`, i.e. folding that caller would have silently dropped 2 of 3 input files
+//     from the judgement. The arity-1 form is what a REPEATED flag needs (suite-scheduler's
+//     `--test-name-pattern a --test-name-pattern b`), which the single-valued `flags` map cannot
+//     express at all (last write wins).
+//   • `errors: "return"` — `spec.help: "return"` covered ONLY the `--help` arm; the two usage-error
+//     paths (unknown flag under `reject`, minArgs) still owned `process.exit(2)`, so a caller that
+//     reports the error itself and returns its own exit code (start-drivers.ts) could not fold in.
+//   • `unknown: "accept" | "skip" | "reject"` — `strict: boolean` could only say two of the three.
+//     `"skip"` is the ARGV-SINK case (suite-scheduler.ts receives test.sh's pass-through argv), where
+//     the tokens after an unknown flag belong to the real consumer.
+// Filed as semantic-dedup-scan finding `parseargs-handrolled-residuals` (runId
+// `semantic-dedup-scan-1791631645924`, verdict `divergent-implementation`, suggestedAction `unify`),
+// which named exactly the four residual carriers those keys absorb.
 export function parseArgs(argv: string[], spec: CliSpec): ParsedArgs {
   const result: ParsedArgs = { args: [], flags: {} };
   const raw = argv.slice(2);
   const flagDefs = spec.flags || {};
+  const unknownMode = spec.unknown ?? (spec.strict ? "reject" : "accept");
 
   const scriptName = path.basename(argv[1] || "script");
   if (raw.includes("--help") || raw.includes("-h")) {
@@ -124,22 +180,41 @@ export function parseArgs(argv: string[], spec: CliSpec): ParsedArgs {
     helpExit(`usage: ${scriptName} ${spec.usage}`);
   }
 
+  /** The single usage-error door: `errors:"return"` hands the message back, the default exits 2. */
+  const usageError = (message: string): ParsedArgs => {
+    if (spec.errors === "return") {
+      result.error = message;
+      return result;
+    }
+    console.error(message);
+    process.exit(2);
+  };
+
   for (let i = 0; i < raw.length; i++) {
     const a = raw[i];
     if (a.startsWith("--")) {
       const eqIdx = a.indexOf("=");
       const name = eqIdx >= 0 ? a.slice(2, eqIdx) : a.slice(2);
       const def = flagDefs[name];
-      if (!def && spec.strict) {
-        console.error(`unknown argument: --${name}`);
-        process.exit(2);
-      }
+      if (!def && unknownMode === "reject") return usageError(`unknown argument: --${name}`);
+      // ARGV SINK: drop the token and consume NOTHING after it — the very next token belongs to
+      // whatever consumes the pass-through argv (it is not this unknown flag's value).
+      if (!def && unknownMode === "skip") continue;
       if (def?.type === "boolean") {
         result.flags[name] = true;
+      } else if (def?.type === "string[]") {
+        if (!result.lists) result.lists = {};
+        const list = (result.lists[name] ??= []);
+        // `--flag=v` names exactly one value even for a greedy flag (the `=` form is the explicit
+        // single-value spelling); greediness is about the SPACE form's token run.
+        if (eqIdx >= 0) list.push(a.slice(eqIdx + 1));
+        else if (def.greedy) {
+          while (i + 1 < raw.length && !raw[i + 1]!.startsWith("--")) list.push(raw[++i]!);
+        } else if (i + 1 < raw.length) list.push(raw[++i]!);
       } else if (eqIdx >= 0) {
         result.flags[name] = a.slice(eqIdx + 1);
       } else if (i + 1 < raw.length) {
-        result.flags[name] = raw[++i];
+        result.flags[name] = raw[++i]!;
       } else {
         result.flags[name] = "";
       }
@@ -150,8 +225,7 @@ export function parseArgs(argv: string[], spec: CliSpec): ParsedArgs {
 
   const minArgs = spec.minArgs ?? 1;
   if (result.args.length < minArgs) {
-    console.error(`Usage: ${scriptName} ${spec.usage}`);
-    process.exit(2);
+    return usageError(`Usage: ${scriptName} ${spec.usage}`);
   }
 
   return result;
