@@ -327,23 +327,36 @@ test("AC1 unit — buildSystemdRunArgv wraps a command in systemd-run --user --s
   const argv = buildSystemdRunArgv("bash scripts/test.sh", DEFAULT_SYSTEMD_RUN_LIMITS);
   // DEFAULT has cpuQuota:"" ⇒ NO -p CPUQuota= (人裁定: 不设 CPU 上限; a literal only equals
   // "unlimited" on the machine it was written for — CLAUDE.md 推论二)
+  // gap-full-suite-scope-oom-policy-stops-whole-suite-unattributable: the ALWAYS-present properties
+  // (MemoryAccounting=yes + OOMPolicy=continue, shared with the availability probe) now precede the
+  // conditional limits. MemoryMax=16G is STILL byte-identical (the 红线: 不打断生产测试).
   assert.deepEqual(argv, [
     "systemd-run",
     "--user",
     "--scope",
     "--quiet",
     "-p",
+    "MemoryAccounting=yes",
+    "-p",
+    "OOMPolicy=continue",
+    "-p",
     "MemoryMax=16G",
     "bash",
     "-c",
     "bash scripts/test.sh",
   ]);
+  assert.ok(argv.includes("OOMPolicy=continue"), "the scope sets OOMPolicy=continue (one OOM-killed process must not TERM the whole suite)");
   assert.ok(!argv.includes("CPUQuota="), "default argv carries NO CPUQuota — the cgroup has no CPU limit");
   assert.ok(!argv.includes("TasksMax="), "default argv carries NO TasksMax — the cgroup has no task limit (人 2026-08-12 裁定③)");
+  assert.ok(!argv.includes("MemorySwapMax="), "default argv carries NO MemorySwapMax — ⛔ no new default property (byte-for-byte except the OOM/accounting pair)");
   // a custom limit set flows through (explicit cpuQuota IS passed)
   const custom = buildSystemdRunArgv("true", { memoryMax: "64M", cpuQuota: "100%", tasksMax: "20" });
   assert.ok(custom.includes("-p") && custom.includes("MemoryMax=64M"));
   assert.ok(custom.includes("CPUQuota=100%") && custom.includes("TasksMax=20"));
+  // gap-full-suite-scope-oom-policy-stops-whole-suite-unattributable: MemorySwapMax flows through when set
+  // (the deterministic OOM negative control sets it to 0).
+  const swapless = buildSystemdRunArgv("true", { memoryMax: "300M", cpuQuota: "", tasksMax: "", memorySwapMax: "0" });
+  assert.ok(swapless.includes("MemorySwapMax=0"), "an explicit MemorySwapMax is passed (⛔ never a default)");
 });
 
 test("AC1 unit — parseSystemdRunLimits merges a seam override over the defaults; unknown keys fall back", () => {
@@ -914,10 +927,19 @@ test("unit — suiteMemoryMax keeps the 16G ceiling on a big host; the default a
   // The concrete byte-identity claim, asserted ONLY where it holds (a <64G host correctly shrinks):
   if (os.totalmem() >= 64 * GIB) {
     assert.equal(DEFAULT_SYSTEMD_RUN_LIMITS.memoryMax, "16G", "on a ≥64G host the default reaches the ceiling");
+    // gap-full-suite-scope-oom-policy-stops-whole-suite-unattributable: the MemoryMax=16G half is
+    // byte-for-byte unchanged (红线: 不打断生产测试); the argv now additionally carries the shared
+    // always-present properties (MemoryAccounting=yes + OOMPolicy=continue).
     assert.deepEqual(
       buildSystemdRunArgv("bash scripts/test.sh"),
-      ["systemd-run", "--user", "--scope", "--quiet", "-p", "MemoryMax=16G", "bash", "-c", "bash scripts/test.sh"],
-      "the default argv must be byte-for-byte what it was before this change (红线: 不打断生产测试)",
+      [
+        "systemd-run", "--user", "--scope", "--quiet",
+        "-p", "MemoryAccounting=yes",
+        "-p", "OOMPolicy=continue",
+        "-p", "MemoryMax=16G",
+        "bash", "-c", "bash scripts/test.sh",
+      ],
+      "the MemoryMax half must be byte-for-byte what it was (红线: 不打断生产测试); only the OOM/accounting pair was added",
     );
   }
   assert.ok(os.totalmem() > 0);

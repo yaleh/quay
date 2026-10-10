@@ -84,6 +84,11 @@ packages/quay/plugin/
 # moves from /tmp to .quay/ (durable — /tmp is system-cleanup terrain;本机实测积压 3389 个遗留目录);
 # the bare `*.log` rule above would also match, but an explicit entry documents the intent.
 **/.quay/fan-in-*.log
+# gap-full-suite-scope-oom-policy-stops-whole-suite-unattributable (2026-10-10): the suite runner's
+# per-run cgroup OOM/memory evidence (.quay/suite-memory-evidence-<runId>.json), one file per suite
+# round (peak / memory.events / phase). Runtime state, never git-tracked — a live file in the checkout
+# would dirty the tree the same way the fan-in logs above did. Same gitignored runtime-state family.
+**/.quay/suite-memory-evidence-*.json
 # gap-ac134-promotion-outcome-ledger (2026-08-22): the promotion driver's per-task outcome record
 # (.quay/promotion-outcome.jsonl) — runtime state, one line per determination/promotion/fix
 # (manager-phase-goal ### AC134: outer reads it for cross-task promotion-pattern recognition, never
