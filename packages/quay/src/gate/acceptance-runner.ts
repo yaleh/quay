@@ -16,10 +16,11 @@ import fs from "node:fs";
 import path from "node:path";
 // `DEFAULT_ACCEPTANCE_TIMEOUT_MS` is the ONE definition of the runner's default kill deadline
 // (gap-goal-criterion-timeout-hardcoded-60s-ignores-acceptance-timeout). ⛔ The direction of this
-// import matters: config/utils.ts never imports back from here, so importing the constant into
-// both `runAcceptance` and `runAcceptanceCapture` adds no cycle — the reverse (defining it here
-// and importing it into utils) would create one, since utils is upstream of this file.
-import { shQuote, DEFAULT_ACCEPTANCE_TIMEOUT_MS } from "./config/utils.ts";
+// import matters: `kernel/gate-run-options.ts` never imports back from here (it is a kernel leaf),
+// so importing the constant into both `runAcceptance` and `runAcceptanceCapture` adds no cycle —
+// the reverse (defining it here and importing it into the kernel) would create one, since the
+// kernel module is upstream of this file.
+import { shQuote, DEFAULT_ACCEPTANCE_TIMEOUT_MS } from "../kernel/gate-run-options.ts";
 import type { GateVerdictKind } from "./types.ts";
 
 export interface AcceptanceResult {
@@ -140,7 +141,7 @@ export interface AcceptanceTimeout {
  * > `DEFAULT_ACCEPTANCE_TIMEOUT_MS`.
  *
  * ⛔ The record half is the ONLY thing this function adds: everything below it is the SAME chain
- * `config/utils.ts:resolveAcceptanceTimeoutMs` owns (env > the gate's own `timeoutMs` > the ONE
+ * `kernel/gate-run-options.ts:resolveAcceptanceTimeoutMs` owns (env > the gate's own `timeoutMs` > the ONE
  * default), and the goal paths pass no gate config. The default is therefore IMPORTED, not
  * re-declared — two `60_000` literals is exactly the drift the sibling task
  * (gap-goal-criterion-timeout-hardcoded-60s-ignores-acceptance-timeout) removed.

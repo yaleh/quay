@@ -11,7 +11,7 @@ import path from "node:path";
 import YAML from "yaml";
 import type { GateFn } from "../types.ts";
 import { gateFactories } from "../factories/index.ts";
-import { type GateConfig, resolveRunnerOptions } from "./utils.ts";
+import { type GateConfig, resolveRunnerOptions } from "../../kernel/gate-run-options.ts";
 import type {
   It0Entry,
   FixedEntry,

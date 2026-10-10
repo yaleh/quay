@@ -85,7 +85,7 @@ import {
 // ⛔ `resolveAcceptanceTimeout` (above) is the RECORD-aware sibling the `goal gate` verb uses: it is
 // this same chain with the record's own `timeoutMs` in front of it, so a per-record deadline is
 // honoured WITHOUT a second default literal (gap-goal-gate-verdict-single-mapping-not-evaluated AC4).
-import { resolveAcceptanceTimeoutMs } from "./gate/config/utils.ts";
+import { resolveAcceptanceTimeoutMs } from "./kernel/gate-run-options.ts";
 import { queryGateEvents } from "./gate/gate-event-store.ts";
 import { commitStoreWrite, commitStoreBatch, resolveGitRoot, type CommitOutcome } from "./store-commit.ts";
 import { criterionFidelityVerdict, type FidelityInvokeJudge } from "./criterion-fidelity.ts";
