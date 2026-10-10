@@ -47,16 +47,16 @@ Land GOAL-036's slice on branch `goal/GOAL-036`: in `plugin/scripts/worker-drive
 
 ## Acceptance Criteria
 
-- [ ] `computeDispatchExclusion` is defined exactly once in `driver-filters.ts`, is a pure function (no `fs`/`spawn`/`await` inside it), and does NOT reference `isBackedOff`/backoff in any form.
-- [ ] Between `worker-driver.ts`'s `step = "ready-pool"` and `step = "apply-filters"` markers, `computeDispatchExclusion(` appears exactly once and `inFlightTasks()` appears zero times.
-- [ ] The backoff filter immediately after `step = "apply-filters"` still calls `Date.now()` per-candidate, unchanged.
-- [ ] `advanceRetryCap`, `RetryState`'s definition, and `isBackedOff` are all unchanged.
-- [ ] `git diff --name-only develop...HEAD` does not touch any file under `packages/quay/src/gate/`, nor `goal-store.ts`, `goal-merge.ts`, `worker-fan-in.ts`, `ready-pool-check.ts`, or `promotion-driver.ts`.
-- [ ] `plugin/test/driver-filters.test.mjs` has new tests for `computeDispatchExclusion` covering basic correctness and a determinism/purity negative control (`assert.deepStrictEqual` on two calls with identical inputs); file is fully green.
-- [ ] `plugin/test/worker-driver.test.mjs` is fully green (full-file regression).
-- [ ] Typecheck passes.
-- [ ] `quay goal gate AC-359` reads exit 0 on this branch.
-- [ ] `quay goal gate AC-360 --timeout 900000` reads exit 0 on this branch.
+- [x] `computeDispatchExclusion` is defined exactly once in `driver-filters.ts`, is a pure function (no `fs`/`spawn`/`await` inside it), and does NOT reference `isBackedOff`/backoff in any form.
+- [x] Between `worker-driver.ts`'s `step = "ready-pool"` and `step = "apply-filters"` markers, `computeDispatchExclusion(` appears exactly once and `inFlightTasks()` appears zero times.
+- [x] The backoff filter immediately after `step = "apply-filters"` still calls `Date.now()` per-candidate, unchanged.
+- [x] `advanceRetryCap`, `RetryState`'s definition, and `isBackedOff` are all unchanged.
+- [x] `git diff --name-only develop...HEAD` does not touch any file under `packages/quay/src/gate/`, nor `goal-store.ts`, `goal-merge.ts`, `worker-fan-in.ts`, `ready-pool-check.ts`, or `promotion-driver.ts`.
+- [x] `plugin/test/driver-filters.test.mjs` has new tests for `computeDispatchExclusion` covering basic correctness and a determinism/purity negative control (`assert.deepStrictEqual` on two calls with identical inputs); file is fully green.
+- [x] `plugin/test/worker-driver.test.mjs` is fully green (full-file regression).
+- [x] Typecheck passes.
+- [x] `quay goal gate AC-359` reads exit 0 on this branch.
+- [x] `quay goal gate AC-360 --timeout 900000` reads exit 0 on this branch.
 
 ## Definition of Done
 
@@ -68,3 +68,14 @@ The slice lands on `goal/GOAL-036` with AC-359 and AC-360 both reading exit 0 wh
 - plugin/scripts/worker-driver.ts
 - plugin/test/driver-filters.test.mjs
 - tasks/goal-036-dispatch-exclusion-single-source.md
+
+## Evidence
+
+- `computeDispatchExclusion` 落地 `plugin/scripts/driver-filters.ts`（单一 `export function`；AC-359 机械扫描：defCount=1，函数体无 `backedOff`/`fs.`/`spawn(`/`await `）。
+- 两消费者收敛：`worker-driver.ts` 的 `step = "ready-pool"` 与 `step = "apply-filters"` 窗口内 `computeDispatchExclusion(` 恰好 1 次、`inFlightTasks()` 0 次；`inFlightTasks()` 闭包保留供轮/错误记录（5299/5317）使用。
+- backoff 未动：`step = "apply-filters"` 之后的 `.filter((id) => !isBackedOff(backoffState, id, Date.now()))` 逐字不变（每候选新鲜 `Date.now()`）。
+- `plugin/test/driver-filters.test.mjs`：74 pass / 0 fail（新增 2 条：基本正确性 + 确定性负对照 `assert.deepStrictEqual` 两次调用）。
+- `plugin/test/worker-driver.test.mjs`：129 pass / 0 fail。
+- typecheck：`for d in packages/*/; do npx tsc --noEmit -p "$d" || exit 1; done` exit 0。
+- AC-359 / AC-360 criterion（在任务分支工作树 cwd 下执行）双双 exit 0（branch-mode goal：`quay goal gate` 在 goal 工作树评估，落地后由 fan-in 带到 `goal/GOAL-036`）。
+- 越界文件未动：`git diff --name-only develop...HEAD` 仅列出已声明 Touches 的 3 个文件。
