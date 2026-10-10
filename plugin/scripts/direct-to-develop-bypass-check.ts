@@ -119,6 +119,25 @@
 //     ① subject 命中生成器唯一模板；② 它是 release-branch-finish.jsonl 一条 form:"cut" 记录的直接子提交；
 //     ③ code-surface 文件集 ⊆ 版本载体集（单源 scripts/version-carriers.ts）。任一不成立仍 RED。
 //
+// publishedReconcile 结构分类（tasks/gap-ac194-release-preflight-reconcile-unreadable-landing，本判据第六次变假）：
+//   第五次修复补了【生产者】（三个 script 站点的保留前缀 `quay-ref-landing:`）与 checker 的 sanctionedRefMove 类，
+//   但生产上仍有一条**空 action** 的落地读不懂：`99efed2c`（`Merge origin/develop into develop — reconcile the
+//   published CI fixes with the loop's local commits (release-cut preflight: …)`）由**散文 / agent 通道**手搓
+//   `git merge` + 裸 `git update-ref`（无 -m）产出——为满足 `scripts/release-cut.mjs:337-355` 的
+//   `release-cut-develop-behind-remote` 前置（该脚本拒绝在 develop 落后 origin/develop 时切版）。
+//   **没有任何脚本产出它**（`grep -rn "reconcile the published" plugin/ packages/ scripts/ …` = 0 命中）⇒ 硬规则 5b：
+//   第五次只枚举了三个 **script** 站点，而这一整类生产者（**散文通道**）结构上不在枚举里，修复对它是盲的、且可复发。
+//   它与「人手外科式直落 develop」（`394dbca5d`，同为空 action）在 DAG 上**可结构区分**：
+//     · `394dbca5d`（真直投）= **单亲**（nparents=1——本地 cherry-pick 的新 commit）；
+//     · `99efed2c`（release reconcile）= **merge**（2 父），且非首父 `f4600e9a` 是 `origin/develop` 的祖先
+//       （`git merge-base --is-ancestor f4600e9a origin/develop` → 真 ⇒ 被并入的线【已发布】）。
+//   ⇒ 给「空 action ∧ merge(≥2 父) ∧ **所有非首父** reachable from origin/develop」一个与 refMove / sanctionedRefMove
+//   并列的结构类 `publishedReconcile`（可见 + 独立计数，⛔ 不并入 fan-in 计数）。
+//   ⛔ 空 action **一律**判 refMove/本类 = fail-open（会掩掉 `394dbca5d` 形真直投）⇒ 单亲 / 非首父非发布 /
+//   任意 `-m` 文本**仍 unknown**（fail-closed）。⛔ 判定按**结构**（父数 + 远端可达性），⛔ 不是 sha 白名单、
+//   ⛔ 不是 message 匹配（人手可写任意 message——`99efed2c` 的 subject 不可作判据）。⚠️ 残余风险如实标注：merge 可
+//   携带手写冲突解（本地内容变更）⇒ 该类**必须可见可审计**（独立计数 + 带入窗内的 commit 清单），⛔ 不得静默豁免。
+//
 // Run:
 //   node --experimental-strip-types direct-to-develop-bypass-check.ts --root <dir>
 //       [--develop <ref>] [--baseline <ref>] [--lock-events <file>] [--release-ledger <file>]
@@ -736,6 +755,34 @@ export function classifySpineLandingMode(sha, ledgerShas, directSet, refLevelTip
   return "unclassifiable";
 }
 
+/** 一条 reflog tip 的 `publishedReconcile` 结构判定（第六次变假，tasks/gap-ac194-release-preflight-reconcile-unreadable-landing）。
+ *
+ *  形态：一条 **空 action**（裸 `git update-ref` 无 `-m`）的 ref-level 落地，其 moved-to commit 是 **merge**
+ *  （≥2 父），且**所有非首父**都 reachable from `origin/develop`（被并入的线**已发布**）。三谓词合取：
+ *    ① action 为空（`classifyReflogAction` 判 unknown 的其中一种——保留前缀 / 任意 `-m` 文本由它各自处置，
+ *       ⛔ 不在本类的范围）；
+ *    ② 该 commit 是 merge（父数 ≥ 2）——单亲是「人手外科式直落 develop」（`394dbca5d` 形）⇒ 仍 fail-closed；
+ *    ③ 所有非首父都 reachable from `origin/develop` ⇒ 被并入的是**已发布**的外部线；本地分支 merge ⇒ 仍 fail-closed。
+ *
+ *  ⛔ 判定按结构（父数 + 远端可达性），⛔ 不是 sha 白名单、⛔ 不是 message 匹配（人手可写任意 message）。
+ *  返回 `"publishedReconcile" | "unknown" | null`：
+ *    · 非空 action ⇒ `"unknown"`（保留前缀 / 任意 -m 文本不在本类）；
+ *    · 空 action ∧ 父数 < 2（单亲真直投形）⇒ `"unknown"`（⛔ fail-open 会掩掉 `394dbca5d`）；
+ *    · 空 action ∧ merge ∧ 非首父**不完全**发布 ⇒ `"unknown"`（本地 merge）；
+ *    · 空 action ∧ merge ∧ 全部非首父发布 ⇒ `"publishedReconcile"`；
+ *    · 父数 **或** 远端可达性**读不出** ⇒ `null` = NOT-EVALUATED（硬规则 3b：⛔ 不折叠成「非 reconcile」，
+ *      该 tip 落回 unclassifiable ⇒ 整体 NOT-EVALUATED / exit 3）。
+ *  PURE。 */
+export function classifyPublishedReconcile(action, parentCount, allNonFirstParentsPublished) {
+  if (String(action ?? "") !== "") return "unknown"; // ① 只认【空 action】
+  if (parentCount === null || parentCount === undefined) return null; // 父数读不出 ⇒ NOT-EVALUATED（3b）
+  if (parentCount < 2) return "unknown"; // ② 单亲（真直投形）/ root ⇒ fail-closed
+  if (allNonFirstParentsPublished === null || allNonFirstParentsPublished === undefined) {
+    return null; // ③ 远端可达性读不出 ⇒ NOT-EVALUATED（3b：⛔ 不折叠成「非 reconcile」）
+  }
+  return allNonFirstParentsPublished ? "publishedReconcile" : "unknown"; // 非首父非发布 ⇒ 本地 merge ⇒ fail-closed
+}
+
 /** 一条 commit 的落地方式（AC2/AC3 三态）。
  *   "fan-in"          ledger 有记录，或 reflog 有非 commit 条目（merge … Fast-forward）
  *   "direct"          reflog 有「直接 commit」条目（报红候选）
@@ -1049,7 +1096,8 @@ function isAncestor(root, a, b) {
  *
  * 返回 `{ direct, unclassifiable, totalReachable, firstParentCommits, offSpineCommits,
  * refMoveIntroduced, refMoveIntroducedTotal, sanctionedRefMoveIntroduced, sanctionedRefMoveIntroducedTotal,
- * sanctionedRefMoveCommits, nonForwardRefMoves, unclassifiedActionForms }`（totalReachable = rev-list 命中条数，
+ * sanctionedRefMoveCommits, publishedReconcileIntroduced, publishedReconcileCommits,
+ * publishedReconcileNotEvaluatedCommits, nonForwardRefMoves, unclassifiedActionForms }`（totalReachable = rev-list 命中条数，
  * 供分类覆盖率 `classified / total` 读数——AC4；后几项 = ref-level 落地的可见性读数 + 未分类 action 形的
  * 点名，见任务 gap-ac194-reflog-action-vocabulary-incomplete AC2/AC5/AC6 与
  * gap-ac194-empty-reflog-action-from-message-less-update-ref AC4）；rev-list 不可读（git 错误）
@@ -1090,6 +1138,7 @@ export function gitDevelopDirectCommits(root, develop, baseline, ledgerShas) {
   let sanctionedRefMoveTips = new Set();
   let brackets = [];
   const reflogActionBySha = new Map(); // sha → raw `%gs`（同一 sha 多条时取最新一条）
+  const prevShaBySha = new Map(); // sha → reflog 中更旧的那条条目的 sha（本次落地的「老 tip」）——publishedReconcile 读数用
   try {
     const out = git(root, ["log", "-g", "--format=%H%x09%gs", develop]);
     const reflogLines = out.split("\n").filter(Boolean);
@@ -1098,9 +1147,12 @@ export function gitDevelopDirectCommits(root, develop, baseline, ledgerShas) {
     refMoveTips = fb.refMoveTips;
     sanctionedRefMoveTips = fb.sanctionedRefMoveTips;
     brackets = fb.brackets;
-    for (const line of reflogLines) {
-      const [sha, gs] = line.split("\t");
-      if (sha && !reflogActionBySha.has(sha)) reflogActionBySha.set(sha, String(gs ?? ""));
+    for (let i = 0; i < reflogLines.length; i++) {
+      const [sha, gs] = reflogLines[i].split("\t");
+      if (!sha) continue;
+      if (!reflogActionBySha.has(sha)) reflogActionBySha.set(sha, String(gs ?? ""));
+      const older = i + 1 < reflogLines.length ? reflogLines[i + 1].split("\t")[0] : null;
+      if (older && !prevShaBySha.has(sha)) prevShaBySha.set(sha, older);
     }
   } catch {
     reflogIndex = null; // reflog 不可读 ⇒ 所有非 ledger commit 都 unclassifiable（3b）
@@ -1207,6 +1259,99 @@ export function gitDevelopDirectCommits(root, develop, baseline, ledgerShas) {
   // 不再 unclassifiable 的读数——第五次变假 AC4）。与 refMove 分列，⛔ 不并入 fan-in 计数。
   const sanctionedRefMoveCommits = [...sanctionedRefMoveTips].filter((s) => spineSet.has(s)).length;
 
+  // ── 第六次变假：publishedReconcile（release-cut preflight reconcile 的空 action merge）──────────────────
+  // 见文件头「publishedReconcile 结构分类」：第五次补了三个 script 站点的保留前缀，但 release-cut preflight
+  // 的 reconcile 由**散文/agent 通道**手搓 `git merge` + 裸 `git update-ref`（无 -m）产出——任何脚本都不产出它
+  // （硬规则 5b），故此处按**结构**（父数 + 远端可达性）给它一个独立可分类的类。
+  // 只对 spine 上【空 action ∧ 未被 ledger / 其它 ref-level 类 / 括注覆盖】的 tip 跑一次结构判定（成本 = 每条
+  // tip 1~2 次 git 子进程；生产实测该类候选仅 1 条）。⛔ 判定的三态（unknown / publishedReconcile / null）
+  // 全部 fail-closed：只有**确证**是「空 action merge 一条已发布外部线」才分类。
+  const publishedReconcileTips = new Set();
+  const publishedReconcileIntroduced = [];
+  const publishedReconcileNotEvaluated = [];
+  if (reflogIndex) {
+    // 远端发布线（被并入的线**已发布** = 该 commit reachable from `origin/develop`）。⛔ 读不出 ⇒ 候选全部
+    // NOT-EVALUATED（硬规则 3b：⛔ 不折叠成「非 reconcile」）。⛔ 不枚举「任意 remote-tracking ref」——本仓有
+    // `refs/remotes/local/develop` 这类**本地 develop 镜像**，用它会把本地 merge 误判成已发布（fail-open）；
+    // `origin/develop` 才是「外部已发布线」的正主（Plan 逐字：远端 ref 用 origin/develop）。
+    let originDevelop = null;
+    try {
+      originDevelop = git(root, ["rev-parse", "--verify", "--quiet", "origin/develop"]).trim() || null;
+    } catch {
+      originDevelop = null;
+    }
+    // 候选 = spine 上【空 action】且未被更高优先级分类（ledger / refMove / sanctioned / 括注覆盖）的 tip。
+    const candidates = [];
+    for (const sha of reachable) {
+      if (reflogActionBySha.get(sha) !== "") continue; // 只认空 action（保留前缀 / 任意 -m 由 classifyReflogAction 处置）
+      if (ledgerShas?.has(sha)) continue;
+      if (refLevelTips.has(sha)) continue; // refMove / sanctionedRefMove tip 已分类
+      if (refMoveCovered.has(sha)) continue; // 已被某次 ref-level 落地的括注覆盖
+      candidates.push(sha);
+    }
+    for (const T of candidates) {
+      let parents = null;
+      try {
+        parents = git(root, ["rev-list", "--parents", "-n1", T]).trim().split(" ").filter(Boolean);
+      } catch {
+        parents = null; // 父数读不出 ⇒ parentCount=null ⇒ classifyPublishedReconcile 返回 null（NOT-EVALUATED）
+      }
+      const parentCount = parents ? parents.length - 1 : null;
+      // 非首父的发布可达性：parentCount < 2 时无需求（classifyPublishedReconcile 直接判 unknown，不查远端）。
+      let allNonFirstParentsPublished = null;
+      if (parentCount !== null && parentCount >= 2) {
+        if (originDevelop === null) {
+          allNonFirstParentsPublished = null; // origin/develop 读不出 ⇒ NOT-EVALUATED
+        } else {
+          let all = true;
+          for (const p of parents.slice(2)) {
+            if (ancestry(root, p, originDevelop) !== true) {
+              all = false; // 任一非首父非发布（或 ancestry 读不出）⇒ 不是「已发布外部线」
+              break;
+            }
+          }
+          allNonFirstParentsPublished = all;
+        }
+      }
+      const cls = classifyPublishedReconcile("", parentCount, allNonFirstParentsPublished);
+      if (cls === "publishedReconcile") {
+        publishedReconcileTips.add(T);
+        // 可见性读数（AC3：独立计数 + 带入窗内的 commit 清单）：与 refMove 读数同形——P = reflog 中更旧的那条
+        // （本次落地前的 develop 老 tip），`rev-list --first-parent P..T` 即本次落地带入窗内的 first-parent 提交。
+        const P = prevShaBySha.get(T) ?? null;
+        let intro = [];
+        if (P) {
+          try {
+            intro = git(root, ["rev-list", "--first-parent", `${P}..${T}`]).split("\n").filter(Boolean);
+          } catch {
+            intro = []; // 括注读不出 ⇒ 引入集不详（读数，不参与判定；判定已由上一步确证）
+          }
+        }
+        const introFiles = intro.length > 0 ? gitCommitFilesBatch(root, intro) : new Map();
+        publishedReconcileIntroduced.push({
+          tip: T,
+          prev: P,
+          introduced: intro.map((s) => {
+            const files = introFiles.has(s) ? introFiles.get(s) : null;
+            return {
+              sha: s,
+              codeSurface: files !== null && files.some((f) => !isDesignInternalPath(f)),
+              files: files ?? null,
+            };
+          }),
+        });
+      } else if (cls === null) {
+        publishedReconcileNotEvaluated.push({ tip: T, reason: "origin/develop-unreadable" });
+      }
+    }
+    // 分类上并入覆盖集（publishedReconcile 与 refMove / sanctioned 同效：都不创建 commit）；**计数上分列**。
+    for (const t of publishedReconcileTips) refLevelTips.add(t);
+  }
+  // publishedReconcile 的独立计数（窗内 spine 上）——候选来自 spine，故 = tips.size；与 refMove / sanctioned / fan-in
+  // 计数分列，⛔ 不并入（硬规则④：可见读数不得洗进判定）。`...NotEvaluated` 是远端读不出的独立第三态（硬规则 3b）。
+  const publishedReconcileCommits = publishedReconcileTips.size;
+  const publishedReconcileNotEvaluatedCommits = publishedReconcileNotEvaluated.length;
+
   const direct = [];
   const unclassifiable = [];
   // pass 1（纯分类，无 git）：确定 direct / unclassifiable —— 顺序与旧单循环一致（unclassifiable 保持 reachable 序）。
@@ -1266,6 +1411,9 @@ export function gitDevelopDirectCommits(root, develop, baseline, ledgerShas) {
     refMoveIntroduced,
     sanctionedRefMoveIntroduced,
     sanctionedRefMoveCommits,
+    publishedReconcileIntroduced,
+    publishedReconcileCommits,
+    publishedReconcileNotEvaluatedCommits,
     nonForwardRefMoves,
     unclassifiedActionForms,
   };
@@ -1299,6 +1447,12 @@ const usage = `direct-to-develop-bypass-check.ts — 直接提交 develop 绕过
     .quay/release-branch-finish.jsonl 一条 form:"cut" ∧ base:<develop> 记录的直接子提交 ∧ code-surface
     文件集 ⊆ 版本载体集（单源 scripts/version-carriers.ts 派生，⛔ 不手抄文件名清单）。两条来源任一读不出
     ⇒ releaseBump 未评估（null，独立第三态，⛔ 不与「非 release bump」同形）且 bypass 仍真（fail-closed）
+  · publishedReconcile 结构分类 = release-cut preflight 的 reconcile（散文/agent 通道手搓 \`git merge\` +
+    裸 \`git update-ref\`，无 -m ⇒ 空 action）——任何脚本都不产出它（硬规则 5b）。三谓词合取 ⇒ 报为
+    publishedReconcile（可见分类，独立计数，⛔ 不并入 fan-in 计数；输出行 PUBLISHED-RECONCILE）：空 action ∧
+    该提交是 merge（≥2 父）∧ **所有非首父** reachable from \`origin/develop\`（被并入的线**已发布**）。
+    任一不成立仍 \`unknown\`（单亲真直投形 / 本地 merge / 任意其它 -m 文本）；origin/develop 读不出 ⇒
+    未评估（null，独立第三态，硬规则 3b）。⛔ 按结构判，⛔ 不是 sha 白名单、⛔ 不是 message 匹配
 
 Usage:
   node --experimental-strip-types direct-to-develop-bypass-check.ts [--root <dir>]
@@ -1361,6 +1515,12 @@ export function main(argv) {
   // ⛔ 不并入 fan-in 计数（gap-ac194-empty-reflog-action-from-message-less-update-ref AC4）。
   let sanctionedRefMoveIntroduced = [];
   let sanctionedRefMoveCommits = 0;
+  // publishedReconcile（散文通道的 release-cut preflight reconcile：空 action merge 一条已发布外部线）的**独立**
+  // 读数/计数——与 refMove / sanctioned 分列，⛔ 不并入 fan-in 计数（gap-ac194-release-preflight-reconcile-unreadable-landing）。
+  let publishedReconcileIntroduced = [];
+  let publishedReconcileCommits = 0;
+  let publishedReconcileNotEvaluated = [];
+  let publishedReconcileNotEvaluatedCommits = 0;
 
   // ── ff-lock 时间窗 + ledger 提取（先读 lock-events 文件——ledger 是收集阶段的三态输入之一）─────
   // ⚠️ 缺失文件 = 「从未有过锁持」（可读的空状态），不是「读不懂」——full-suite 的 verify worktree
@@ -1441,6 +1601,10 @@ export function main(argv) {
     unclassifiedActionForms = collected.unclassifiedActionForms ?? [];
     sanctionedRefMoveIntroduced = collected.sanctionedRefMoveIntroduced ?? [];
     sanctionedRefMoveCommits = collected.sanctionedRefMoveCommits ?? 0;
+    publishedReconcileIntroduced = collected.publishedReconcileIntroduced ?? [];
+    publishedReconcileCommits = collected.publishedReconcileCommits ?? 0;
+    publishedReconcileNotEvaluated = collected.publishedReconcileNotEvaluated ?? [];
+    publishedReconcileNotEvaluatedCommits = collected.publishedReconcileNotEvaluatedCommits ?? 0;
   }
 
   const verdict = checkDirectCommits(commits, lockHoldIntervals, releaseBumpCtx);
@@ -1536,6 +1700,11 @@ export function main(argv) {
       // 完全平行，但**分列**：⛔ 不并入 refMoveIntroduced，也⛔ 不并入 fan-in 计数（第五次变假 AC4）。
       sanctionedRefMoveIntroduced: sanctionedRefMoveIntroduced.slice(0, REF_MOVE_READOUT_LIMIT),
       sanctionedRefMoveIntroducedTotal: sanctionedRefMoveIntroduced.length,
+      // publishedReconcile（散文通道的 release-cut preflight reconcile：空 action merge 一条**已发布**外部线）的
+      // **独立**读数——形态与 refMoveIntroduced 平行，但分列：⛔ 不并入 refMove / sanctioned / fan-in 计数
+      // （gap-ac194-release-preflight-reconcile-unreadable-landing）。
+      publishedReconcileIntroduced: publishedReconcileIntroduced.slice(0, REF_MOVE_READOUT_LIMIT),
+      publishedReconcileIntroducedTotal: publishedReconcileIntroduced.length,
       // 读不懂的 action 形（有条目但 classifyReflogAction === "unknown"）——reason 逐字点名它们。
       unclassifiedActionForms,
       // 词汇表（结构判定，非白名单）——写在这里使 --json 的读者不必回读源码。
@@ -1546,13 +1715,19 @@ export function main(argv) {
         "'sanctionedRefMove' = the same ref-level landing declared by THIS repo's own landing channels via the RESERVED " +
         "prefix `quay-ref-landing: <kind> …` (integration-batch-merge.ts real-merge/ff CAS + sync-lag-check.sh downsync " +
         "CAS; git update-ref -m) — recognized by that specific reserved prefix, NOT by any other `-m` text; " +
-        "'unknown' = unreadable action form ⇒ NOT-EVALUATED fail-closed, reason names the form (`unsupported-reflog-action: <form>`). " +
+        "'unknown' = unreadable action form ⇒ NOT-EVALUATED fail-closed, reason names the form (`unsupported-reflog-action: <form>`); " +
+        "'publishedReconcile' = an EMPTY action (bare git update-ref, no -m) whose moved-to commit is a MERGE (≥2 parents) whose " +
+        "EVERY non-first parent is reachable from origin/develop (the merged line is already PUBLISHED) — the release-cut preflight " +
+        "reconcile. " +
         "⛔ Not a spelling whitelist — a spelling whitelist is structurally blind to the next landing form (that is exactly how " +
-        "`branch: Reset to HEAD` broke AC-194). ⛔ An EMPTY action (bare git update-ref, no -m) is NOT classifiable as any landing " +
-        "(it cannot distinguish 'a commit was created on develop' from 'the ref moved to an existing commit' — both really happen " +
-        "here) ⇒ it stays `unknown`/NOT-EVALUATED. refMove AND sanctionedRefMove are VISIBLE, not silently exempt: " +
-        "refMoveIntroduced + sanctionedRefMoveIntroduced + nonForwardRefMoves are read-outs ONLY and are never folded into the " +
-        "fan-in counts.",
+        "`branch: Reset to HEAD` broke AC-194). ⛔ A BARE empty action (git update-ref, no -m) is NOT classifiable from the action " +
+        "alone (it cannot distinguish 'a commit was created on develop' from 'the ref moved to an existing commit' — both really " +
+        "happen here) — UNLESS the moved-to commit is STRUCTURALLY a `publishedReconcile` (see above). That one form is classified " +
+        "VISIBLY; a SINGLE-PARENT empty action (the surgical direct-to-develop form), a merge whose non-first parent is NOT " +
+        "published (a LOCAL merge), and any other `-m` text stay `unknown`/NOT-EVALUATED (fail-closed). refMove, sanctionedRefMove " +
+        "AND publishedReconcile are VISIBLE, not silently exempt: " +
+        "refMoveIntroduced + sanctionedRefMoveIntroduced + publishedReconcileIntroduced + nonForwardRefMoves are read-outs ONLY " +
+        "and are never folded into the fan-in counts.",
     },
     denominator: {
       totalDirectCommits: verdict.totalCommits,
@@ -1569,6 +1744,11 @@ export function main(argv) {
       // 通道声明的 ref-level 落地承载。⛔ 分列于 refMove / fan-in 计数（第五次变假 AC4：该形可分类、不再
       // unclassifiable 的读数就落在这里）。
       sanctionedRefMoveCommits,
+      // publishedReconcile 的**独立**计数——窗内 spine 上有多少条 tip 被按结构判为「空 action merge 一条已发布
+      // 外部线」。⛔ 分列于 refMove / sanctioned / fan-in 计数（硬规则④：可见读数不得洗进判定）。
+      // `...NotEvaluatedCommits` = 远端（origin/develop）读不出的独立第三态（硬规则 3b）。
+      publishedReconcileCommits,
+      publishedReconcileNotEvaluatedCommits,
       unclassifiableCommits: unclassifiable.length,
       classifiedCommits: classified,
       totalScannedCommits: totalScanned,
@@ -1607,7 +1787,7 @@ export function main(argv) {
     process.stdout.write(JSON.stringify(result, null, 2) + "\n");
   } else {
     console.log(`direct-to-develop-bypass-check: evaluated=${evaluated} ok=${ok} (${reason})`);
-    console.log(`  denominator: total=${verdict.totalCommits} code-surface=${verdict.codeSurfaceCommits} design-internal=${verdict.designInternalCommits} in-lock-window=${verdict.inLockWindowCommits} ac65-authorized=${verdict.ac65AuthorizedCommits} ruled-historical=${verdict.ruledHistoricalCommits} release-bump=${verdict.releaseBumpCommits} release-bump-not-evaluated=${verdict.releaseBumpNotEvaluatedCommits} sanctioned-ref-move=${sanctionedRefMoveCommits} unclassifiable=${unclassifiable.length}`);
+    console.log(`  denominator: total=${verdict.totalCommits} code-surface=${verdict.codeSurfaceCommits} design-internal=${verdict.designInternalCommits} in-lock-window=${verdict.inLockWindowCommits} ac65-authorized=${verdict.ac65AuthorizedCommits} ruled-historical=${verdict.ruledHistoricalCommits} release-bump=${verdict.releaseBumpCommits} release-bump-not-evaluated=${verdict.releaseBumpNotEvaluatedCommits} sanctioned-ref-move=${sanctionedRefMoveCommits} published-reconcile=${publishedReconcileCommits} published-reconcile-not-evaluated=${publishedReconcileNotEvaluatedCommits} unclassifiable=${unclassifiable.length}`);
     console.log(`  release-bump sources: carrier-paths=${carrierPathsSet ? carrierPathsSet.size : "unreadable"} cut-parents=${cutParents ? cutParents.size : "unreadable"} (${releaseLedgerFile})`);
     console.log(`  classification: classified=${classified} total=${totalScanned} first-parent=${firstParentCommits} off-spine=${offSpineCommits ?? "n/a"} ratio=${totalScanned > 0 ? (classified / totalScanned).toFixed(4) : "n/a"}`);
     console.log(`  lock-window: evaluated=${lockSubEvaluated} (${lockSubReason})`);
@@ -1618,6 +1798,15 @@ export function main(argv) {
     for (const rm of sanctionedRefMoveIntroduced.slice(0, REF_MOVE_READOUT_LIMIT)) {
       console.log(`      SANCTIONED refMove tip=${rm.tip.slice(0, 10)} prev=${rm.prev.slice(0, 10)} introduced=${rm.introduced.length}`);
       for (const it of rm.introduced) console.log(`        ${it.sha.slice(0, 10)} code-surface=${it.codeSurface}${it.codeSurface && it.files ? ` (${it.files.join(", ")})` : ""}`);
+    }
+    // publishedReconcile（空 action merge 一条**已发布**外部线）——**独立行**，⛔ 不并入上面两行。
+    console.log(`  published-reconcile landings (empty action merge of a published external line): tips-on-spine=${publishedReconcileCommits} not-evaluated=${publishedReconcileNotEvaluatedCommits} brackets=${publishedReconcileIntroduced.length}${publishedReconcileIntroduced.length > REF_MOVE_READOUT_LIMIT ? ` (showing first ${REF_MOVE_READOUT_LIMIT})` : ""}`);
+    for (const pr of publishedReconcileIntroduced.slice(0, REF_MOVE_READOUT_LIMIT)) {
+      console.log(`      PUBLISHED-RECONCILE tip=${pr.tip.slice(0, 10)} prev=${(pr.prev ?? "?").slice(0, 10)} introduced=${pr.introduced.length}`);
+      for (const it of pr.introduced) console.log(`        ${it.sha.slice(0, 10)} code-surface=${it.codeSurface}${it.codeSurface && it.files ? ` (${it.files.join(", ")})` : ""}`);
+    }
+    for (const ne of publishedReconcileNotEvaluated.slice(0, REF_MOVE_READOUT_LIMIT)) {
+      console.log(`      PUBLISHED-RECONCILE NOT-EVALUATED tip=${ne.tip.slice(0, 10)} — ${ne.reason}`);
     }
     for (const rm of refMoveIntroduced.slice(0, REF_MOVE_READOUT_LIMIT)) {
       console.log(`      refMove tip=${rm.tip.slice(0, 10)} prev=${rm.prev.slice(0, 10)} introduced=${rm.introduced.length}`);

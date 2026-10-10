@@ -20,6 +20,13 @@
 #      裸 `git update-ref`（无 -m）写出的空 action 与「人手外科直落 develop」同形 ⇒ 不可分类；修法是
 #      生产者补保留前缀 + checker 给该前缀一个结构类。⛔ ④ 与 ③ 配对：③ 钉「任意其它 -m 仍 fail-closed」，
 #      ④ 钉「那个具体前缀被分类」。变异钉：把 sanctionedRefMove 分支退回 unknown ⇒ ④ 立刻变 NOT-EVALUATED。
+#   ⑤ publishedReconcile（第六次变假，tasks/gap-ac194-release-preflight-reconcile-unreadable-landing）：
+#      **空 action** merge 一条【已发布】外部线（非首父 reachable from origin/develop）⇒ 必须 GREEN 且
+#      **被结构分类**（独立计数 ≥1）。它由**散文 / agent 通道**手搓 `git merge` + 裸 `git update-ref` 产出
+#      （硬规则 5b：④ 只枚举了三个 **script** 站点，结构上覆盖不到这个散文通道生产者，且可复发）。
+#   ⑥ publishedReconcile 负控：空 action merge 一条**本地**线（origin/develop 存在但第二父不在其中）
+#      ⇒ 仍 NOT-EVALUATED（「空一律判 publishedReconcile」= fail-open，会掩掉 `394dbca5d` 形真直投）。
+#      变异钉：把 publishedReconcile 退回「空一律 unknown」⇒ ⑤ 立刻 NOT-EVALUATED（exit 3）⇒ 本 case 报红。
 # 实测原文（git 2.43.0）：`git branch -f <已存在 b> <t>` ⇒ `branch: Reset to <t>`；
 # `git update-ref -m <msg> <ref> <sha>` ⇒ `<msg>`。⚠️ `git branch -f <b>` 只在 <b> 未被检出时允许
 # ⇒ 这几支先 `git checkout --detach`。
@@ -165,5 +172,75 @@ if [ "${sanctioned_count}" -lt 1 ] 2>/dev/null; then
   exit 1
 fi
 
-echo "direct-to-develop-bypass-check mutation case: PASS (code-surface direct commit caught; design-internal restored; refMove landing GREEN; unknown action form NOT-EVALUATED with the form named; reserved quay-ref-landing prefix CLASSIFIED with an independent count)" >&2
+# ── ⑤ publishedReconcile：空 action merge 一条【已发布】外部线 ⇒ 必须 GREEN 且**被结构分类** ──────────
+# 第六次变假（tasks/gap-ac194-release-preflight-reconcile-unreadable-landing）：release-cut preflight 的
+# reconcile（生产样本 `99efed2c`）由**散文 / agent 通道**手搓 `git merge` + **裸 `git update-ref`（无 -m）**
+# 产出——reflog action 为空，与「人手外科式直落 develop」（`394dbca5d`）同形；④ 修的三个 **script** 站点
+# 结构上覆盖不到它（硬规则 5b：散文通道这一整类生产者不在枚举里）。两者在 DAG 上**可结构区分**：它是 merge
+# （2 父）且非首父 reachable from origin/develop（被并入的线**已发布**）⇒ publishedReconcile。
+# 本支是两个方向的钉子（缺一个就不能取假）：
+#   · 正向：空 action ∧ merge ∧ 非首父已发布 ⇒ 必须 GREEN 且独立计数 ≥1（⛔ 不得落 NOT-EVALUATED/exit 3）；
+#   · 变异钉：把 publishedReconcile 退回「空一律 unknown」⇒ 本支立刻 NOT-EVALUATED（exit 3）⇒ 本 case 报红。
+git checkout -q --detach
+printf 'export const pub = 1;\n' > "${repo}/plugin/scripts/pub.ts"
+git add -A
+GIT_AUTHOR_DATE="2026-08-06T00:00:00Z" GIT_COMMITTER_DATE="2026-08-06T00:00:00Z" \
+  git commit -q -m "feat: published external line (reachable from origin/develop)"
+published_sha="$(git rev-parse HEAD)"
+git update-ref refs/remotes/origin/develop "${published_sha}"      # 已发布外部线（remote-tracking ref）
+reconcile_base="$(git rev-parse refs/heads/develop)"
+git checkout -q -b recontmp "${reconcile_base}"
+GIT_AUTHOR_DATE="2026-08-07T00:00:00Z" GIT_COMMITTER_DATE="2026-08-07T00:00:00Z" \
+  git merge -q --no-ff -m "Merge origin/develop into develop — reconcile the published CI fixes" "${published_sha}"
+merge_sha="$(git rev-parse HEAD)"
+merge_tokens="$(git rev-list --parents -n1 "${merge_sha}" | wc -w)"
+[ "${merge_tokens}" -eq 3 ] || { echo "FIXTURE: expected a 2-parent merge (3 tokens sha+parents), got ${merge_tokens}" >&2; exit 4; }
+git checkout -q --detach
+git update-ref refs/heads/develop "${merge_sha}" "${reconcile_base}"   # 裸 update-ref ⇒ 空 action
+reflog_line="$(git reflog show develop --format=%gs | head -1)"
+[ -z "${reflog_line}" ] || { echo "FIXTURE: expected an EMPTY reflog action, got '${reflog_line}'" >&2; exit 4; }
+if checker_cmd; then :; else
+  echo "publishedReconcile landing judged NOT GREEN: an empty-action merge of a PUBLISHED (origin/develop) line must be CLASSIFIED (publishedReconcile), not fall to NOT-EVALUATED (exit 3) — 硬规则 5b: the prose-channel producer is structurally invisible to the three-script-site fix" >&2
+  exit 1
+fi
+pubrec_count="$(checker_json | node -e 'let s="";process.stdin.on("data",(d)=>{s+=d}).on("end",()=>{try{process.stdout.write(String((JSON.parse(s).denominator||{}).publishedReconcileCommits??""))}catch{process.stdout.write("")}})')"
+if [ "${pubrec_count}" -lt 1 ] 2>/dev/null; then
+  echo "publishedReconcileCommits must count the empty-action published-reconcile landing (got '${pubrec_count}') — GREEN must come from the CLASS, not from a silent exemption" >&2
+  exit 1
+fi
+
+# ── ⑥ publishedReconcile 负控：空 action merge 一条**本地**（非发布）线 ⇒ 仍 NOT-EVALUATED（exit 3）──────
+# 「空一律判 publishedReconcile」= fail-open（会掩掉 `394dbca5d` 形真直投）⇒ 本支钉住「本地 merge」：
+# origin/develop **存在**，但第二父不在其中 ⇒ 必须仍 unknown ⇒ NOT-EVALUATED 且 reason 逐字点名 `(empty)`。
+# （单亲 / 任意 -m 文本两个负控已由 ③ 与 AC5 测试覆盖，此处补「merge 但非发布」这一支。）
+printf 'export const loc = 1;\n' > "${repo}/plugin/scripts/localonly.ts"
+git add -A
+GIT_AUTHOR_DATE="2026-08-08T00:00:00Z" GIT_COMMITTER_DATE="2026-08-08T00:00:00Z" \
+  git commit -q -m "feat: local-only line (NOT reachable from origin/develop)"
+local_sha="$(git rev-parse HEAD)"
+local_base="$(git rev-parse refs/heads/develop)"
+git checkout -q -b localmergetmp "${local_base}"
+GIT_AUTHOR_DATE="2026-08-09T00:00:00Z" GIT_COMMITTER_DATE="2026-08-09T00:00:00Z" \
+  git merge -q --no-ff -m "Merge local branch" "${local_sha}"
+localmerge_sha="$(git rev-parse HEAD)"
+git checkout -q --detach
+git update-ref refs/heads/develop "${localmerge_sha}" "${local_base}"   # 空 action ∧ merge ∧ 非首父本地
+localmerge_rc=0
+if checker_cmd; then localmerge_rc=0; else localmerge_rc=$?; fi
+if [ "${localmerge_rc}" -ne 3 ]; then
+  echo "local merge (non-published second parent) under an empty action must stay NOT-EVALUATED (exit 3), got exit ${localmerge_rc} — publishedReconcile must be falsifiable (fail-open hides the surgical direct-to-develop form)" >&2
+  exit 1
+fi
+localmerge_reason="$(checker_json | node -e 'let s="";process.stdin.on("data",(d)=>{s+=d}).on("end",()=>{try{process.stdout.write(String(JSON.parse(s).reason??""))}catch{process.stdout.write("")}})')"
+if [ "${localmerge_reason}" != "unsupported-reflog-action: (empty)" ]; then
+  echo "reason must name the empty action form verbatim, got: '${localmerge_reason}'" >&2
+  exit 1
+fi
+localmerge_pubrec="$(checker_json | LM_SHA="${localmerge_sha}" node -e 'let s="";process.stdin.on("data",(d)=>{s+=d}).on("end",()=>{try{const o=JSON.parse(s);const l=(o.classification&&o.classification.publishedReconcileIntroduced)||[];process.stdout.write(String(l.some((e)=>e.tip===process.env.LM_SHA)))}catch{process.stdout.write("")}})')"
+if [ "${localmerge_pubrec}" != "false" ]; then
+  echo "a local (non-published) merge must NOT be classified as publishedReconcile (tip ${localmerge_sha} present=${localmerge_pubrec}) — fail-open hides the surgical direct-to-develop form" >&2
+  exit 1
+fi
+
+echo "direct-to-develop-bypass-check mutation case: PASS (code-surface direct commit caught; design-internal restored; refMove landing GREEN; unknown action form NOT-EVALUATED with the form named; reserved quay-ref-landing prefix CLASSIFIED with an independent count; empty-action merge of a PUBLISHED line CLASSIFIED as publishedReconcile with an independent count; a LOCAL merge under an empty action stays NOT-EVALUATED)" >&2
 exit 0
