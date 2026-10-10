@@ -3,9 +3,9 @@
 //
 // Extracted from gate/factories/ to reduce fanOut (DIR-087).
 
+export type { GateConfig, RunnerOptions } from "../../kernel/gate-run-options.ts";
+
 export type {
-  GateConfig,
-  RunnerOptions,
   It0Entry,
   FixedEntry,
   TestPassEntry,
@@ -14,7 +14,7 @@ export type {
   GatesConfig,
 } from "./types.ts";
 
-export { shQuote, resolveRunnerOptions } from "./utils.ts";
+export { shQuote, resolveRunnerOptions } from "../../kernel/gate-run-options.ts";
 
 export {
   discoverWorkspaceRoot,

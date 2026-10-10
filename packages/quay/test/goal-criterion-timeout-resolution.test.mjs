@@ -39,7 +39,7 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { spawnSync, execFileSync } from "node:child_process";
-import { resolveAcceptanceTimeoutMs, DEFAULT_ACCEPTANCE_TIMEOUT_MS } from "../src/gate/config/utils.ts";
+import { resolveAcceptanceTimeoutMs, DEFAULT_ACCEPTANCE_TIMEOUT_MS } from "../src/kernel/gate-run-options.ts";
 import { runAcceptance } from "../src/gate/acceptance-runner.ts";
 
 const GOAL_STORE = new URL("../src/goal-store.ts", import.meta.url).pathname;
@@ -318,17 +318,20 @@ test("AC2 — 60000 默认值只在一处定义，其余引用该导出常量", 
       else if (e.name.endsWith(".ts")) files.push(p);
     }
   };
+  // GOAL-034: the constant's home moved out of `gate/` into `kernel/` — the walk follows it, so a
+  // NEW file spelling the literal in either tree is still caught.
   walk(path.join(srcDir, "gate"));
+  walk(path.join(srcDir, "kernel"));
   files.push(path.join(srcDir, "goal-store.ts"));
 
   const DEFAULT_LITERAL = /=\s*60_?000\b|timeoutMs = 60000|: 60000\)/;
   const hits = files.filter((f) => DEFAULT_LITERAL.test(fs.readFileSync(f, "utf8")));
   assert.deepEqual(
     hits.map((f) => path.relative(srcDir, f)),
-    ["gate/config/utils.ts"],
+    ["kernel/gate-run-options.ts"],
     `exactly one definition of the default, and it is the exported constant:\n${hits.join("\n")}`,
   );
-  const utils = fs.readFileSync(path.join(srcDir, "gate", "config", "utils.ts"), "utf8");
+  const utils = fs.readFileSync(path.join(srcDir, "kernel", "gate-run-options.ts"), "utf8");
   assert.match(utils, /export const DEFAULT_ACCEPTANCE_TIMEOUT_MS = 60000;/, "the one definition is EXPORTED (⛔ not a private literal by another name)");
   // The runner's two entry points must reference it rather than respell it — the other half of
   // "one definition": a constant nobody imports is just a comment.

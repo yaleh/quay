@@ -9,7 +9,7 @@ import { runGate } from "../gate/engine.ts";
 import { listGates, listGatesVerbose } from "../gate/registry.ts";
 import { resolveGateLogPath } from "../gate/gate-log.ts";
 import { runAcceptanceCapture } from "../gate/acceptance-runner.ts";
-import { resolveRunnerOptions } from "../gate/config/utils.ts";
+import { resolveRunnerOptions } from "../kernel/gate-run-options.ts";
 import {
   parseFlags,
   parseVerbless,

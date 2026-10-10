@@ -1,6 +1,9 @@
 // Gate config types — extracted from gate/factories/ to reduce fanOut.
-// Types used by the config/loader.ts and workspace-gate builder, plus
-// the shared GateConfig / RunnerOptions originally in factories/utils.ts.
+// Types used by the config/loader.ts and workspace-gate builder.
+//
+// ⛔ `GateConfig` / `RunnerOptions` moved OUT of this file (GOAL-034): they are not config-loading
+// types but the shared acceptance-runner primitives, and now live in
+// `packages/quay/src/kernel/gate-run-options.ts` together with the four functions that use them.
 
 /** Source provenance: which file and line a gate entry was defined at. */
 export interface GateSource {
@@ -12,23 +15,6 @@ export interface GateSource {
 export interface GateDiagnostic {
   level: "WARNING" | "ERROR";
   message: string;
-}
-
-/** Shared gate configuration (cwd/timeoutMs). */
-export interface GateConfig {
-  cwd?: string;
-  timeoutMs?: number;
-}
-
-/** Resolved runner configuration (always concrete). */
-export interface RunnerOptions {
-  cwd: string;
-  timeoutMs: number;
-  /** Per-provider `acceptance_env` file path, resolved and pinned via
-   *  QUAY_ACCEPTANCE_ENV at the CLI/MCP layer — DIR-103-C. When set, the
-   *  runner dot-sources this file before the acceptance command; missing
-   *  file fails closed pre-execution. Undefined means no env file. */
-  envFile?: string;
 }
 
 // ---------------------------------------------------------------------------

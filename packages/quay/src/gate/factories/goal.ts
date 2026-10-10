@@ -16,7 +16,7 @@
 import path from "node:path";
 import type { GateFn } from "../types.ts";
 import { runAcceptance, verdictFromAcceptance } from "../acceptance-runner.ts";
-import { resolveRunnerOptions } from "../config/utils.ts";
+import { resolveRunnerOptions } from "../../kernel/gate-run-options.ts";
 import { createGoalStore } from "../../goal-store.ts";
 import type { Task } from "../../abi.ts";
 
