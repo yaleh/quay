@@ -67,6 +67,7 @@ extra:
 - plugin/scripts/promotion-driver.ts
 - plugin/test/promotion-driver-s03.test.mjs
 - plugin/test/promotion-driver-s06.test.mjs
+- plugin/test/direct-to-develop-bypass-check.test.mjs
 - tasks/gap-promotion-driver-blind-to-unsatisfiable-ac-block.md
 
 ## Evidence
@@ -149,3 +150,5 @@ files 2654 · evaluated 2580 · not-evaluated(no AC/DoD) 74 · tasks with >=1 un
 **AC6 scoped 门**——`bash scripts/test.sh --for-task gap-promotion-driver-blind-to-unsatisfiable-ac-block --allow-thin` ⇒ `EXIT=0`，执行 2 个测试文件（`promotion-driver-s03` / `-s06`），16 pass / 0 fail。
 
 **不变量**：⛔ 未削弱 `judgeUnsatisfiableUnannotatedAc` 的 fail-closed 默认（闸源码未改）；⛔ 未给 worker 任何自我豁免加 `（待外部）` 的路径（命中类仍拦截、不 spawn fix worker，仅升级给人）；⛔ `not-evaluated` 未折进 `clean`（硬规则 3b）。
+
+**落地轮：清除 develop-wide 环境红（2026-10-10）**——分支为让全量 suite 转绿，另修了 `plugin/test/direct-to-develop-bypass-check.test.mjs:952` 一处**与本任务无关的**存量红（故加入 Touches）：该用例对实时 repo 断言 `reason === "unclassifiable-commits-in-range"`，而检查器的 reason 是双通道（具名形 `unsupported-reflog-action: <form>` 时计数形保留在 `reasonSecondary`）。当日 `integration-batch-merge.ts:1165` 的裸 `git update-ref`（无 `-m`，ref-level CAS 落地 develop）写入了一条空消息 reflog 条目 ⇒ form=`(empty)` ⇒ reason 转具名 ⇒ 该断言假红并挡下**所有**代码落地（在**主检出** `--root /data/home/yale/work/quay` 上逐字节复现 ⇒ 非本分支引入）。改为断言双通道契约（两形态任一合法；具名时 `reasonSecondary` 必须计数形 + `unclassifiedActionForms` 非空），fail-closed 断言（exit 3 / evaluated:false / ok:true / unclassifiable>0 / ratio<1）全部原样保留。**落地轮 scoped 门复跑读数见本轮提交信息**（⚠️ 上方 AC6 的「2 个测试文件 / 16 pass」是 tick 轮读数；本文件加入 Touches 后选择集会包含第三个文件）。
