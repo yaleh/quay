@@ -2,7 +2,7 @@
 id: AC-357
 title: 函数级可证伪契约 + 回归：applyNeedsHumanTransition 的 accept/surfaced-failure
   两态测试落地，driver-filters.test.mjs 与 worker-driver.test.mjs 全量回归绿
-status: active
+status: achieved
 kind: criterion
 goal: GOAL-035
 criterion: >
@@ -70,6 +70,11 @@ statusLog:
     to: active
     actor: goal-cli
     reason: ""
+  - at: 2026-10-10T10:45:00.182Z
+    from: active
+    to: achieved
+    actor: goal-driver
+    reason: "I2: criterion pass"
 fidelity:
   verdict: not-evaluated
   reason: no judge configured
