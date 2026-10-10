@@ -29,7 +29,7 @@
 // SPLIT from promotion-driver.test.mjs by gap-suite-split-15-over-30s-test-files — shard 6/8 (6 tests). Shared fixtures: ./helpers/promotion-driver-harness.mjs (single source).
 
 import { test } from "node:test";
-import { OUTCOME_LOG_REL, appendOutcomeRecord, assert, computeOutcomeRecords, fixWorkerCaptureCmd, fs, makeRoot, makeSelfContainedRoot, path, readOutcomeLines, readRoundLines, readStatus, realReadyPoolCmd, runDriver, writeDepBlockedTask, writeDodShortTask, writeTask } from "./helpers/promotion-driver-harness.mjs";
+import { OUTCOME_LOG_REL, appendOutcomeRecord, assert, classifyCandidate, computeOutcomeRecords, fixWorkerCaptureCmd, fixWorkerNoopCounter, fs, makeRoot, makeSelfContainedRoot, path, readOutcomeLines, readRoundLines, readStatus, realReadyPoolCmd, runDriver, writeDepBlockedTask, writeDodShortTask, writeTask } from "./helpers/promotion-driver-harness.mjs";
 
 test("AC132 AC2 — DoD<40 todo ⇒ fix worker prompt contains the structured missing identifier (falsifiable)", (t) => {
   const root = makeRoot("ac132-ac2");
@@ -175,3 +175,126 @@ test("AC134 AC2 — real gate + real tasks ⇒ outcome ledger holds real promote
 });
 
 // ── AC133 (falsifiable): 修完重跑同一个闸验证（⛔ 不信 worker 自述）+ 失败上限 needs-human ─────────
+
+// ── EXECUTOR-UNSATISFIABLE AC, UNANNOTATED (tasks/gap-promotion-driver-blind-to-unsatisfiable-ac-block) ──
+// The driver half of the defect: the gate's `unsatisfiableUnannotatedAc.hits` was never read by
+// classifyCandidate ⇒ the ledger wrote the information-free `detail:"ineligible-not-fixed"`, and — the
+// worse half — a class that can NEVER spawn a fix worker (`fixable=false` ⇒ no spawn ⇒ `fixedIds` empty)
+// was structurally unreachable from the AC133 retry-cap escalation, so the task spun FOREVER with no
+// needs-human flip. AC1 pins the named-reason ledger record; AC2 pins the escalation OFF the
+// `if (fixedIds.length > 0)` guard (取假: restore that guard and AC2 goes red); AC3 is the negative
+// control — an EXISTING fixable class (fourArtifacts=false) still walks the fix path, NOT this one.
+
+/** A space-free injectable ready-pool stub that emits ONE candidate carrying `cand`'s checks.
+ *  `splitArgs` splits `--ready-pool-cmd` on whitespace, so the command text must carry none; JSON.stringify
+ *  emits none, and the `hits` strings below are space-free by construction. The stub proves the DRIVER's
+ *  consumption of the gate field deterministically (⛔ no dependence on a real task body). */
+function stubReadyPoolCandidate(cand) {
+  const payload = JSON.stringify({ pool: 1, should_apply: false, candidates: [cand], promotions: [], applied_promotions: [] });
+  return `node -e console.log(${JSON.stringify(payload)})`;
+}
+
+// Space-free offending-item text (the only constraint the injectable stub places on it).
+const UNSAT_HIT = "落地后复查";
+
+const UNSAT_CANDIDATE = {
+  id: "gap-unsat", eligible: false, fourArtifacts: true, missingArtifacts: [], selfTouchOk: true,
+  touchesResolve: true, touchesNarrow: true, depsReady: true, retiredMechanism: false, superseded: false,
+  compound: false, prosePrereqGap: [],
+  unsatisfiableUnannotatedAc: { evaluated: true, status: "hit", hits: [UNSAT_HIT] },
+};
+
+const FIXABLE_CANDIDATE = {
+  id: "gap-fixable", eligible: false, fourArtifacts: false, missingArtifacts: ["dod"], selfTouchOk: true,
+  touchesResolve: true, touchesNarrow: true, depsReady: true, retiredMechanism: false, superseded: false,
+  compound: false, prosePrereqGap: [],
+  unsatisfiableUnannotatedAc: { evaluated: true, status: "clean", hits: [] },
+};
+
+
+test("computeOutcomeRecords — an unsatisfiable-AC block records a NAMED reason, ⛔ never the empty 'ineligible-not-fixed'", () => {
+  const at = "2026-10-10T00:00:00.000Z";
+  const HIT = "AC6 落地后复查：合入 develop 之后 sqlite3 agent 档不再增长";
+  const base = {
+    id: "gap-unsat", fourArtifacts: true, missingArtifacts: [], selfTouchOk: true, touchesResolve: true,
+    depsReady: true, retiredMechanism: false, superseded: false, compound: false, prosePrereqGap: [],
+  };
+  // End-to-end through the producer: classifyCandidate builds the unfixable reason, the ledger writes it.
+  const decision = classifyCandidate({ ...base, unsatisfiableUnannotatedAc: { evaluated: true, status: "hit", hits: [HIT] } });
+  const recs = computeOutcomeRecords({
+    at, applied: [],
+    fixes: [{ id: decision.id, spawned: false, missing: decision.missing, unfixable: decision.unfixable, exitCode: null }],
+  });
+  assert.equal(recs.length, 1);
+  const rec = recs[0];
+  assert.equal(rec.action, "skip");
+  assert.notEqual(rec.result.detail, "ineligible-not-fixed", "AC1: the information-free fallback IS the defect");
+  assert.ok(rec.result.detail.length > 0, "AC1: result.detail is non-empty");
+  assert.ok(rec.result.detail.includes(HIT), `AC1: result.detail contains the reason text: ${rec.result.detail}`);
+  assert.ok(rec.gate.missing.includes(decision.unfixable[0]), "the reason is also carried on gate.missing");
+});
+
+
+test("AC2 — a structurally-unspawnable block is ESCALATED to needs-human after RETRY_CAP_DEFAULT rounds (取假)", (t) => {
+  const root = makeRoot("unsat-escalate");
+  t.after(() => fs.rmSync(root, { recursive: true, force: true }));
+  // A valid todo on disk (markNeedsHuman needs frontmatter + todo status); the injected gate supplies
+  // the unsatisfiable reading, so the body content is irrelevant to the judgment under test.
+  writeTask(root, "gap-unsat", "todo");
+
+  const counter = path.join(root, "fix.cnt");
+  // RETRY_CAP_DEFAULT = 3 (driver-filters.ts) — 3 rounds, and the escalation must land on the LAST one.
+  runDriver(root, [
+    "--ready-pool-cmd", stubReadyPoolCandidate(UNSAT_CANDIDATE),
+    "--fix-worker-cmd", fixWorkerNoopCounter(counter),
+    "--resource-gate-cmd", "node -e process.exit(0)",
+    "--cap", "5", "--max-fix-retries", "3", "--max-rounds", "3", "--interval", "5",
+  ]);
+
+  const outcomes = readOutcomeLines(root);
+  const mine = outcomes.filter((o) => o.task_id === "gap-unsat");
+
+  // The class is structurally UNSPAWNABLE: zero fix workers over the 3 rounds (this is why the old
+  // `fixedIds.length > 0` escalation could never fire for it).
+  assert.equal(fs.existsSync(counter), false, "⛔ no fix worker is spawned for a structurally-unspawnable class");
+
+  // Every interception's skip record NAMES the reason (⛔ not the empty fallback).
+  const skips = mine.filter((o) => o.action === "skip");
+  assert.ok(skips.length >= 1, `skip records exist: ${JSON.stringify(mine.map((o) => o.action))}`);
+  for (const s of skips) {
+    assert.notEqual(s.result.detail, "ineligible-not-fixed", "the ledger NAMES a reason");
+    assert.ok(s.result.detail.includes(UNSAT_HIT), `detail names the offending item: ${s.result.detail}`);
+  }
+
+  // Escalation: the 3rd consecutive interception flips it (取假: restoring `if (fixedIds.length > 0)`
+  // around the escalation makes this assertion fail — no needs-human record is ever produced).
+  const nh = mine.find((o) => o.action === "needs-human");
+  assert.ok(nh, "AC2: the 3rd consecutive interception escalates to needs-human");
+  assert.ok(nh.result.detail.includes(UNSAT_HIT), `AC2: the needs-human detail names the reason: ${nh.result.detail}`);
+  assert.equal(readStatus(root, "gap-unsat"), "needs-human", "AC2: status flipped todo → needs-human on disk");
+});
+
+
+test("AC3 — a fixable ineligible (fourArtifacts=false) still walks the fix path, ⛔ not the structural escalation", (t) => {
+  const root = makeRoot("unsat-negative-ctl");
+  t.after(() => fs.rmSync(root, { recursive: true, force: true }));
+  writeTask(root, "gap-fixable", "todo");
+
+  const counter = path.join(root, "fix.cnt");
+  // max-fix-retries 5 > 3 rounds ⇒ the fixable class never hits the retry cap within this window, so a
+  // needs-human record can ONLY come from the new structural path — which must NOT claim this class.
+  runDriver(root, [
+    "--ready-pool-cmd", stubReadyPoolCandidate(FIXABLE_CANDIDATE),
+    "--fix-worker-cmd", fixWorkerNoopCounter(counter),
+    "--resource-gate-cmd", "node -e process.exit(0)",
+    "--cap", "5", "--max-fix-retries", "5", "--max-rounds", "3", "--interval", "5",
+  ]);
+
+  const outcomes = readOutcomeLines(root);
+  assert.ok(outcomes.some((o) => o.task_id === "gap-fixable" && o.action === "fix"),
+    "the fixable class spawns a fix worker (action:fix) via the ORIGINAL path");
+  assert.ok(!outcomes.some((o) => o.task_id === "gap-fixable" && o.action === "needs-human"),
+    "⛔ the new structural escalation did NOT claim the existing fixable class");
+  assert.equal(fs.readFileSync(counter, "utf8"), "3", "the fix worker ran once per round (3 rounds)");
+});
+
