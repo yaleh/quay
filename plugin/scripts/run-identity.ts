@@ -32,7 +32,7 @@ import fs from "node:fs";
 import path from "node:path";
 import { createHash } from "node:crypto";
 import { execSync } from "node:child_process";
-import { createSelftest, parseJsonArg, git, gitLastCommitForPath } from "./gate-script-base.ts";
+import { createSelftest, parseJsonArg, git, gitLastCommitForPath, serializeSortedJson } from "./gate-script-base.ts";
 
 // ── Types ───────────────────────────────────────────────────────────────────────────────────────────
 
@@ -283,22 +283,15 @@ export function mintRunIdentity(input: MintRunIdentityInput): RunIdentity {
  * Deterministic single-line JSON: top-level keys sorted, and the nested `materialInputHashes`
  * object serialized with its own keys sorted, so identical identities serialize byte-identically
  * (C8) regardless of key insertion order. Never lossy — every field survives.
+ *
+ * The body now lives ONCE, in gate-script-base.ts's `serializeSortedJson` (routine
+ * `semantic-dedup-scan`, finding `serializeidentity-serializereceipt`, runId
+ * `semantic-dedup-scan-1791631645924` — its second call site is stage-receipt.ts's
+ * `serializeReceipt`). The name stays exported because it is this module's public surface and the
+ * C8 tests address it; the function is now a delegation, not a second implementation.
  */
 export function serializeIdentity(identity: RunIdentity): string {
-  const sorted: Record<string, unknown> = {};
-  for (const key of Object.keys(identity).sort()) {
-    const value = (identity as Record<string, unknown>)[key];
-    if (value && typeof value === "object" && !Array.isArray(value)) {
-      const nested: Record<string, unknown> = {};
-      for (const k of Object.keys(value as Record<string, unknown>).sort()) {
-        nested[k] = (value as Record<string, unknown>)[k];
-      }
-      sorted[key] = nested;
-    } else {
-      sorted[key] = value;
-    }
-  }
-  return JSON.stringify(sorted);
+  return serializeSortedJson(identity);
 }
 
 // ── Build-manifest projection (CLAIM-B1-C7) — consumable where build-evidence-manifest's

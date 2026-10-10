@@ -629,6 +629,47 @@ export function gitLastCommitForPath(cwd: string, relPath: string): string {
   return result.ok ? result.stdout : "";
 }
 
+// ── Deterministic canonical JSON serialization ───────────────────────────────────────────────────────
+// The ONE implementation of "single-line JSON whose key ORDER cannot leak into the bytes": top-level
+// keys sorted, and each nested plain object's keys sorted too, so two structurally-equal values
+// serialize byte-identically regardless of key insertion order. Never lossy — every field survives,
+// including array elements and nulls, which are emitted as-is (arrays are NOT re-ordered: their order
+// is data, not a set).
+//
+// WHY THIS EXPORT EXISTS — it is an extraction, not a new idea (same mandate as `flagValue` / `git` /
+// `gitLastCommitForPath` above; ADR-004/DIR-091). A `semantic-dedup-scan` pass
+// (.quay/routine-findings.jsonl, routine `semantic-dedup-scan`, runId `semantic-dedup-scan-1791631645924`,
+// finding `serializeidentity-serializereceipt`, verdict `real-duplication`, suggestedAction `extract`)
+// found the body CHARACTER-IDENTICAL under two names — `serializeIdentity` (run-identity.ts) and
+// `serializeReceipt` (stage-receipt.ts) — and the same principle-5b sweep of this carrier found a third
+// copy inlined in `execution-policy.ts`'s `bindPolicyHash`. All three callers already import this
+// module, so the shared accessor belongs here rather than in a new file.
+//
+// ⛔ ONE NESTING LEVEL, NOT RECURSIVE — deliberately, and this is load-bearing, not an oversight.
+// `serializePolicy` (execution-policy.ts) sorts RECURSIVELY and is intentionally left alone; folding it
+// onto this helper would change the bytes it hashes. Here, a value nested two levels deep keeps its own
+// insertion order. That asymmetry is the pre-extraction behavior of all three call sites (measured, not
+// assumed), and the serialized bytes of a stage receipt are HASH-BOUND (contentHash), so widening the
+// sort would silently re-hash every existing receipt. Use a recursive serializer where depth is
+// unbounded; use this one where the envelope is a flat record of scalars + one level of sub-records.
+export function serializeSortedJson(value: unknown): string {
+  const source = value as Record<string, unknown>;
+  const sorted: Record<string, unknown> = {};
+  for (const key of Object.keys(source).sort()) {
+    const v = source[key];
+    if (v && typeof v === "object" && !Array.isArray(v)) {
+      const nested: Record<string, unknown> = {};
+      for (const k of Object.keys(v as Record<string, unknown>).sort()) {
+        nested[k] = (v as Record<string, unknown>)[k];
+      }
+      sorted[key] = nested;
+    } else {
+      sorted[key] = v;
+    }
+  }
+  return JSON.stringify(sorted);
+}
+
 // ── Selftest harness (ADR-018 selfcheck-fixture pattern) ─────────────────────────────────────────────
 // The ONE implementation of the per-gate `--selftest` fixture harness. Every ADR-018 selfcheck needs the
 // same four things — a `check(name, condition, detail)` assertion, a pass/fail tally, the verdict, and a

@@ -33,6 +33,7 @@ import {
   readJsonlLines,
   readJsonOrNull,
   git,
+  serializeSortedJson,
 } from "../scripts/gate-script-base.ts";
 
 /** plugin/scripts — derived from THIS file's location so the source-scan control below cannot drift. */
@@ -1001,4 +1002,184 @@ test("git: both throwing-form former carriers now IMPORT the shared fail-closed 
       `${f} does not import git from the base`,
     );
   }
+});
+
+// ── serializeSortedJson: the canonical-JSON serializer is a single source ───────────────────────────
+//
+// The finding (routine `semantic-dedup-scan`, runId `semantic-dedup-scan-1791631645924`, verdict
+// `real-duplication`, suggestedAction `extract`) named `serializeIdentity` (run-identity.ts) and
+// `serializeReceipt` (stage-receipt.ts) as a character-identical body under two names. Both are now
+// delegations, and the carrier sweep the repo's principle-5b requires turned up a THIRD copy inlined
+// in execution-policy.ts's `bindPolicyHash` — so the ratchet below covers three former carriers, not
+// the two the finding named.
+//
+// ⚠️ The pin keys on the STRUCTURE, not on any identifier — and that is not stylistic. The three
+// carriers spelled the body with DIFFERENT names (`value` vs `v`, `sorted[key]` vs `sorted[k]`,
+// `nk` vs `k`, and execution-policy's inner `for` had no braces). A first draft of this regex keyed
+// on `v` + `sorted[key]` and matched gate-script-base.ts while matching NONE of the pre-extraction
+// carriers — an always-true-in-the-wrong-direction ratchet, i.e. one that would not have caught the
+// duplication it exists to prevent (硬规则 4c: 判据恒真但什么也没验到，与「验过了」同形). The
+// `SORTED_COPY_SAMPLES` control below is what keeps that from recurring: the predicate is dry-run
+// against the three ORIGINAL bodies on every run, so a regex that stops matching the real idiom goes
+// RED here instead of silently passing.
+//
+// Files legitimately NOT matched, deliberately: build-evidence-manifest.ts's `manifestRefForReceipt`
+// sorts top-level keys only (no nested level) and execution-policy.ts's own `serializePolicy` sorts
+// RECURSIVELY. Those are different contracts, deliberately NOT folded — a recursive sort would
+// re-hash every existing stage receipt's contentHash — so the idiom is matched, never the name.
+const SORTED_COPY_STRIP_WS = (s) => s.replace(/\s+/g, "");
+const SORTED_COPY_RE =
+  /if\(\w+&&typeof\w+==="object"&&!Array\.isArray\(\w+\)\)\{const\w+:Record<string,unknown>=\{\};for\(const\w+ofObject\.keys\(\w+asRecord<string,unknown>\)\.sort\(\)\)\{?\w+\[\w+\]=\(\w+asRecord<string,unknown>\)\[\w+\];\}?\w+\[\w+\]=\w+;\}else\{\w+\[\w+\]=\w+;\}/;
+const SORTED_JSON_FORMER_CARRIERS = ["run-identity.ts", "stage-receipt.ts", "execution-policy.ts"];
+
+/** The three pre-extraction bodies, verbatim from `develop` at the commit before this finding was
+ *  disposed (read with `git show develop:plugin/scripts/<f>`). Known-true samples for the predicate. */
+const SORTED_COPY_SAMPLES = [
+  `  const sorted: Record<string, unknown> = {};
+  for (const key of Object.keys(identity).sort()) {
+    const value = (identity as Record<string, unknown>)[key];
+    if (value && typeof value === "object" && !Array.isArray(value)) {
+      const nested: Record<string, unknown> = {};
+      for (const k of Object.keys(value as Record<string, unknown>).sort()) {
+        nested[k] = (value as Record<string, unknown>)[k];
+      }
+      sorted[key] = nested;
+    } else {
+      sorted[key] = value;
+    }
+  }`,
+  `    const sorted: Record<string, unknown> = {};
+    for (const k of Object.keys(copy).sort()) {
+      const v = copy[k];
+      if (v && typeof v === "object" && !Array.isArray(v)) {
+        const nested: Record<string, unknown> = {};
+        for (const nk of Object.keys(v as Record<string, unknown>).sort()) nested[nk] = (v as Record<string, unknown>)[nk];
+        sorted[k] = nested;
+      } else {
+        sorted[k] = v;
+      }
+    }`,
+];
+
+test("serializeSortedJson: the predicate MATCHES the pre-extraction bodies (guards against a vacuous ratchet)", () => {
+  for (const [i, sample] of SORTED_COPY_SAMPLES.entries()) {
+    assert.match(
+      SORTED_COPY_STRIP_WS(sample),
+      SORTED_COPY_RE,
+      `the scan would have MISSED pre-extraction carrier sample #${i + 1} — the ratchet is vacuous`,
+    );
+  }
+  // The negative half of the same dry run: the two deliberately-divergent neighbours must NOT match,
+  // or the ratchet would red on legitimate code and get "fixed" by weakening it.
+  const recursiveSort = `if (Array.isArray(v)) return v.map(sortValue);
+    if (v && typeof v === "object") {
+      const o: Record<string, unknown> = {};
+      for (const k of Object.keys(v as Record<string, unknown>).sort()) o[k] = sortValue((v as Record<string, unknown>)[k]);
+      return o;
+    }`;
+  assert.doesNotMatch(SORTED_COPY_STRIP_WS(recursiveSort), SORTED_COPY_RE, "the recursive variant must not match");
+});
+
+test("serializeSortedJson: the two-level sorted-copy body is defined exactly ONCE under plugin/scripts", () => {
+  const defs = scriptTsFiles().filter((f) => SORTED_COPY_RE.test(SORTED_COPY_STRIP_WS(sourceOf(f))));
+  assert.deepEqual(
+    defs,
+    ["gate-script-base.ts"],
+    `the two-level sorted-copy body must have a single definition; found: ${defs.length ? defs.join(", ") : "none"}`,
+  );
+});
+
+test("serializeSortedJson: no former carrier re-inlines the body, and each IMPORTS the shared one", () => {
+  for (const f of SORTED_JSON_FORMER_CARRIERS) {
+    assert.doesNotMatch(
+      SORTED_COPY_STRIP_WS(sourceOf(f)),
+      SORTED_COPY_RE,
+      `${f} must not re-inline the two-level sorted-copy body`,
+    );
+    // Same non-redundancy as the git pair above: deleting the inlined body without importing the
+    // shared one would pass the line above while proving nothing.
+    assert.match(
+      sourceOf(f),
+      /import \{[^}]*\bserializeSortedJson\b[^}]*\} from "\.\/gate-script-base\.ts"/,
+      `${f} does not import serializeSortedJson from the base`,
+    );
+  }
+});
+
+/** The PRE-extraction body, copied verbatim from run-identity.ts / stage-receipt.ts at the commit
+ *  before `semantic-dedup-scan-1791631645924` was disposed. Kept here as the differential oracle: the
+ *  whole risk of an extraction is that it changes a byte, and this is the only thing in the repo that
+ *  can still say what the old bytes were. */
+function preExtractionSerialize(value) {
+  const sorted = {};
+  for (const key of Object.keys(value).sort()) {
+    const v = value[key];
+    if (v && typeof v === "object" && !Array.isArray(v)) {
+      const nested = {};
+      for (const k of Object.keys(v).sort()) {
+        nested[k] = v[k];
+      }
+      sorted[key] = nested;
+    } else {
+      sorted[key] = v;
+    }
+  }
+  return JSON.stringify(sorted);
+}
+
+test("serializeSortedJson: byte-identical to the pre-extraction body on a battery of inputs", () => {
+  const cases = [
+    { b: 1, a: 2 },
+    { z: { y: 1, x: 2 }, a: [{ b: 1, a: 2 }] }, // arrays keep ELEMENT order; objects inside keep theirs
+    { nested: { second: { two: 1, one: 2 }, first: null } }, // two levels deep — NOT recursed
+    { n: null, u: undefined, s: "x", arr: [], obj: {}, num: 0, bool: false },
+    { materialInputHashes: { "b.ts": "h2", "a.ts": "h1" }, taskIds: ["t2", "t1"], attempt: 1 },
+    {},
+  ];
+  for (const c of cases) {
+    assert.equal(
+      serializeSortedJson(c),
+      preExtractionSerialize(c),
+      `extraction changed the bytes for ${JSON.stringify(c)}`,
+    );
+  }
+});
+
+test("serializeSortedJson: key insertion order is invisible at both sorted levels, but NOT below them", () => {
+  // Level 1 and level 2 are sorted (the property the three callers' hashes depend on).
+  const a = serializeSortedJson({ z: 1, a: { q: 1, b: 2 } });
+  const b = serializeSortedJson({ a: { b: 2, q: 1 }, z: 1 });
+  assert.equal(a, b, "top-level AND one-level-nested key order must not reach the bytes");
+  // Level 3 is deliberately NOT sorted — the drift-detecting half: if someone makes the shared helper
+  // recursive, `deep` below stops mattering and this assertion goes red, forcing the change to be a
+  // deliberate decision (it would re-hash every stage receipt's contentHash) rather than a silent one.
+  assert.notEqual(
+    serializeSortedJson({ a: { b: { y: 1, x: 2 } } }),
+    serializeSortedJson({ a: { b: { x: 2, y: 1 } } }),
+    "the shared helper is one level deep by contract; a recursive rewrite must be a conscious change",
+  );
+});
+
+test("serializeSortedJson: every field survives (never lossy)", () => {
+  const input = { b: 1, a: "x", c: null, d: [1, 2], e: { f: 3 } };
+  const parsed = JSON.parse(serializeSortedJson(input));
+  assert.deepEqual(Object.keys(parsed), ["a", "b", "c", "d", "e"]);
+  assert.equal(parsed.d.length, 2, "array elements are data, not a set — order and length survive");
+  assert.equal(parsed.e.f, 3);
+});
+
+test("serializeSortedJson: deleting the shared export makes a consumer import fail (the mechanism is real)", () => {
+  withTempDir("serialize-sorted-json-negctl-", (dir) => {
+    fs.writeFileSync(path.join(dir, "gate-script-base.ts"), "export const OTHER = 1;\n");
+    fs.writeFileSync(
+      path.join(dir, "consumer.ts"),
+      'import { serializeSortedJson } from "./gate-script-base.ts";\nconsole.log(serializeSortedJson({ b: 1, a: 2 }));\n',
+    );
+    const missing = spawnSync("node", ["--experimental-strip-types", "consumer.ts"], { cwd: dir, encoding: "utf8" });
+    assert.notEqual(missing.status, 0, "a consumer importing an absent export must fail to link");
+
+    fs.writeFileSync(path.join(dir, "gate-script-base.ts"), "export function serializeSortedJson() { return '{}'; }\n");
+    const present = spawnSync("node", ["--experimental-strip-types", "consumer.ts"], { cwd: dir, encoding: "utf8" });
+    assert.equal(present.status, 0, "the same consumer links once the export is present");
+  });
 });

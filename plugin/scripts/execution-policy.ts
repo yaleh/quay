@@ -30,7 +30,7 @@
 // Byte-identical mirror: plugin/scripts/execution-policy.ts
 
 import { createHash } from "node:crypto";
-import { createSelftest, parseJsonArg } from "./gate-script-base.ts";
+import { createSelftest, parseJsonArg, serializeSortedJson } from "./gate-script-base.ts";
 
 // ── Contract version ───────────────────────────────────────────────────────────────────────────────
 
@@ -290,18 +290,12 @@ export function bindPolicyHash<T extends { contentHash?: string }>(receipt: T, p
   // a caller that does not need a re-bound contentHash can ignore this).
   if (receipt && typeof receipt === "object" && "contentHash" in receipt) {
     const copy: Record<string, unknown> = { ...bound, contentHash: "" };
-    const sorted: Record<string, unknown> = {};
-    for (const k of Object.keys(copy).sort()) {
-      const v = copy[k];
-      if (v && typeof v === "object" && !Array.isArray(v)) {
-        const nested: Record<string, unknown> = {};
-        for (const nk of Object.keys(v as Record<string, unknown>).sort()) nested[nk] = (v as Record<string, unknown>)[nk];
-        sorted[k] = nested;
-      } else {
-        sorted[k] = v;
-      }
-    }
-    (bound as Record<string, unknown>).contentHash = sha256OfString(JSON.stringify(sorted));
+    // The inline two-level sorted-copy that used to sit here was character-identical to
+    // run-identity.ts's serializeIdentity / stage-receipt.ts's serializeReceipt; it now goes through
+    // the same shared accessor (routine `semantic-dedup-scan`, finding
+    // `serializeidentity-serializereceipt`, runId `semantic-dedup-scan-1791631645924` — this third
+    // call site was found by the principle-5b sweep of the same carrier, not named by the finding).
+    (bound as Record<string, unknown>).contentHash = sha256OfString(serializeSortedJson(copy));
   }
   return bound as T & { policyHash: string };
 }
