@@ -1,7 +1,7 @@
 ---
 id: AC-355
 title: post-merge 生产验证：develop 尖端持有本刀全部结构改动，七个受影响测试文件回归全绿
-status: draft
+status: active
 kind: criterion
 goal: GOAL-034
 criterion: |
@@ -29,8 +29,16 @@ criterion: |
   echo "PASS: develop tip carries the slice (kernel/gate-run-options.ts, dead shim gone, six consumers converged) and the seven affected test files pass"
 expect: exit 0 = develop 尖端结构检查 + 七个测试文件全绿；exit 1 = CAUSE= 指明哪一项回归；exit 3 =
   GOAL-034 尚未并入 develop
-origin: 继 GOAL-030~033 后第五个 goal branch 试点；GOAL-033 显式将
-  gate/、gate/config/、gate/factories/ 之间其它互指列为非目标延后处理，本 goal 承接其中最小、机械证据最充分的一刀（人
-  2026-10-10 指示：推进 Quay 自身 Driver/Routine/Policy/WorkerPool 的 ownership-first
-  OOD 重构实验 A）
+origin: 继 GOAL-030~033 后第五个 goal branch 试点
+activatedAt: 2026-10-10T06:03:59.236Z
+statusLog:
+  - at: 2026-10-10T06:03:59.236Z
+    from: draft
+    to: active
+    actor: goal-cli
+    reason: ""
+fidelity:
+  verdict: not-evaluated
+  reason: no judge configured
+  at: 2026-10-10T06:03:59.236Z
 ---

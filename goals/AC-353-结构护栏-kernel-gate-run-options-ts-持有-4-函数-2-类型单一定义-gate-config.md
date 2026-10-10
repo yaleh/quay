@@ -2,7 +2,7 @@
 id: AC-353
 title: 结构护栏：kernel/gate-run-options.ts 持有 4 函数+2 类型单一定义；gate/config/utils.ts 与
   gate/factories/loader.ts 均删除（无 shim）；七个真实消费点改口；非目标文件未动
-status: draft
+status: active
 kind: criterion
 goal: GOAL-034
 criterion: |
@@ -42,8 +42,16 @@ criterion: |
   echo "PASS: kernel/gate-run-options.ts holds the single definitions of the 4 functions + 2 types; gate/config/utils.ts and gate/factories/loader.ts are both gone (no shell-move shim); seven real consumers converged; non-goal files (loader.ts config-loading functions, the config-to-factories wiring import, abi.ts) are untouched"
 expect: exit 0 = 单一定义 + 两个死文件/shim 均删除 + 七个消费点改口 + 非目标未动；exit 1 = CAUSE=
   指明哪一项；exit 3 = kernel/gate-run-options.ts 尚未落地
-origin: 继 GOAL-030~033 后第五个 goal branch 试点；GOAL-033 显式将
-  gate/、gate/config/、gate/factories/ 之间其它互指列为非目标延后处理，本 goal 承接其中最小、机械证据最充分的一刀（人
-  2026-10-10 指示：推进 Quay 自身 Driver/Routine/Policy/WorkerPool 的 ownership-first
-  OOD 重构实验 A）
+origin: 继 GOAL-030~033 后第五个 goal branch 试点
+activatedAt: 2026-10-10T06:03:56.415Z
+statusLog:
+  - at: 2026-10-10T06:03:56.415Z
+    from: draft
+    to: active
+    actor: goal-cli
+    reason: ""
+fidelity:
+  verdict: not-evaluated
+  reason: no judge configured
+  at: 2026-10-10T06:03:56.415Z
 ---
