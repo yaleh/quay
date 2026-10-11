@@ -626,6 +626,23 @@ Description:
       const sink = json || result.autoCommit.state === "declined" ? process.stderr : process.stdout;
       sink.write(`  auto-commit: ${result.autoCommit.detail}\n`);
     }
+    // ── A post-write branch-model failure is still a failure ─────────────────────────────────────
+    // ⛔ This is the ONLY place a `written` / `rebuilt` run can carry a branch-model failure. Every
+    // PRE-write refusal returns from `runInit` with its own outcome (`branch-model-blocked` /
+    // `doc-branch-blocked`) and is answered by the arm above, so `postWriteBranchModelFailure` can
+    // only have come from the unborn-repository re-judgment that runs AFTER the write section
+    // (gap-init-branch-model-runs-before-auto-commit-fresh-repo-needs-two-runs). The config is on
+    // disk by then, so that arm's promise ("NOTHING WAS WRITTEN") cannot be repeated — but exiting 0
+    // over a refused landing baseline would report a refusal as a success, which is the one thing
+    // the pre-write arm exists to prevent. The verdict itself was already printed above by the
+    // branch-model / doc-branch reports, with their own remedy lines; this names the consequence and
+    // sets the exit code. ⛔ Its own message, never the pre-write one: the two differ in exactly the
+    // fact an operator acts on — whether the tree was written.
+    if (result.postWriteBranchModelFailure) {
+      console.error("");
+      console.error(`ERROR: ${result.postWriteBranchModelFailure}`);
+      process.exitCode = 1;
+    }
     if (result.installSteps && !json) say(result.installSteps);
     if (!json) printNextSteps("native", result.tasksDir);
   } catch (err) {

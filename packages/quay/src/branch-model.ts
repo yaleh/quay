@@ -106,6 +106,18 @@ export interface BranchModelReport {
   ok: boolean;
   /** True when the repo could not be classified at all (no git / no commits) — provisioning skipped. */
   skipped: boolean;
+  /**
+   * WHY nothing could be classified — `null` when the model WAS judged.
+   *
+   * ⛔ First-class on purpose (hard rule 2: judge by position, never by matching a keyword in
+   * `entries[0].detail`): the two skips are NOT the same answer to the caller. `not-a-git-worktree`
+   * is permanent for this target, whereas `no-commits` is the UNBORN repository — a state a LATER
+   * step of the SAME run can resolve, because `autoCommitClosedSet` creates the first commit. Only
+   * the caller that knows what else this run will do can act on that difference, which is exactly
+   * why the reason belongs on the report rather than being re-derived from a prose string
+   * (gap-init-branch-model-runs-before-auto-commit-fresh-repo-needs-two-runs).
+   */
+  skipReason: "not-a-git-worktree" | "no-commits" | null;
   /** The project's default branch (`master` role), or null when unresolvable. */
   defaultBranch: string | null;
   entries: BranchModelEntry[];
@@ -368,6 +380,8 @@ export function ensureBranchModel(root: string, opts: EnsureBranchModelOptions =
     return {
       ok: true,
       skipped: true,
+      // The probe's own reason, carried through VERBATIM — never a second predicate (ADR-004).
+      skipReason: probe.reason,
       defaultBranch,
       entries: [
         {
@@ -495,6 +509,7 @@ export function ensureBranchModel(root: string, opts: EnsureBranchModelOptions =
   return {
     ok: blocked.length === 0,
     skipped: false,
+    skipReason: null,
     defaultBranch,
     entries,
     remedy:
@@ -510,7 +525,22 @@ export function ensureBranchModel(root: string, opts: EnsureBranchModelOptions =
 /** One-line-per-entry rendering shared by the CLI and the task-body evidence. */
 export function formatBranchModelReport(report: BranchModelReport): string {
   if (report.skipped) {
-    return `branch model: SKIPPED — ${report.entries[0]?.detail ?? "repository not classifiable"}`;
+    const head = `branch model: SKIPPED — ${report.entries[0]?.detail ?? "repository not classifiable"}`;
+    // ⛔ The two skips are NOT the same answer and must not render the same (hard rule 3b): "there is
+    // no git here" is a verdict about the TARGET, while "there are no commits YET" is a verdict about
+    // the target's MOMENT — and a caller that already knows what else this run does (the fresh-install
+    // auto-commit creates the first commit) can leave this state behind inside the same run. Rendering
+    // them identically is how a 0-commit repo came back `SKIPPED` with no hint that a single re-run
+    // converges (gap-init-branch-model-runs-before-auto-commit-fresh-repo-needs-two-runs).
+    if (report.skipReason === "no-commits") {
+      return (
+        `${head}\n` +
+        `  [NOT-EVALUATED] branch-model -> ${LANDING_BASELINE_ROLE} — no verdict was reached, so this ` +
+        `is NOT a pass: re-run \`quay init\` once the repository has a first commit (nothing in a ` +
+        `commit-less repository can be judged against a baseline that does not exist yet).`
+      );
+    }
+    return head;
   }
   const lines = [`branch model (default branch: ${report.defaultBranch ?? "UNRESOLVED"}):`];
   for (const e of report.entries) {
@@ -578,6 +608,15 @@ export interface DocBranchReport {
   ok: boolean;
   /** True iff the verdict was withheld (`state === "unreadable"`) — distinct from `ok === true`. */
   notEvaluated: boolean;
+  /**
+   * True when this report is a PLAN: `action` names what WOULD happen, and nothing was moved.
+   *
+   * ⛔ On the report rather than inferred by the renderer: `action: "created"` under `--dry-run` and
+   * `action: "created"` on a real run are two different facts about the world, and a rendering that
+   * prints the same sentence for both states a plan in the past tense (hard rule 3b — "would do" must
+   * never be shaped like "did").
+   */
+  dryRun: boolean;
   /** The requested doc-branch name (echoed verbatim; never invented here). */
   name: string;
   checkedOut: string | null;
@@ -633,6 +672,7 @@ export function ensureDocBranch(root: string, opts: EnsureDocBranchOptions): Doc
   const dryRun = opts.dryRun === true;
   const adopt = opts.adopt === true;
   const base = {
+    dryRun,
     name,
     checkedOut: null as string | null,
     baselineSha: null as string | null,
@@ -1028,10 +1068,31 @@ export function formatDocBranchReport(report: DocBranchReport): string {
       : report.action === "failed"
         ? "FAILED"
         : report.action.toUpperCase();
-  return [
+  const lines = [
     `doc branch (name: ${report.name === "" ? "(none supplied)" : report.name}, landing baseline: ${LANDING_BASELINE_ROLE}):`,
     `  [${mark}] doc-branch -> ${report.name === "" ? "(none)" : report.name} — ${report.detail}`,
-  ].join("\n");
+  ];
+  // ── The main-checkout MOVE, named as its own summary line (AC2) ──────────────────────────────────
+  // ⛔ This is NOT decoration and NOT a re-judgment (ADR-004): it renders the SAME `action` the line
+  // above renders, read as the ONE fact an operator actually needs — WHICH branch their working copy
+  // is now on, and what it was before. A `git checkout` of the main checkout is a side effect on the
+  // user's own working position, and burying it inside a `[CREATED] …` sentence made it read as a
+  // property of the branch rather than as a change to THEIR checkout: measured 2026-10-12 on a fresh
+  // repository, the branch flipped `develop` → `author` between two runs with no summary line saying
+  // so (gap-init-branch-model-runs-before-auto-commit-fresh-repo-needs-two-runs).
+  // Only the three actions that MOVE it can print it; `noop`/`blocked`/`unreadable`/`failed` leave
+  // the checkout where it was and must not claim otherwise.
+  const movedCheckout =
+    report.action === "created" || report.action === "switched" || report.action === "adopted";
+  if (movedCheckout && report.checkedOut !== null) {
+    lines.push(
+      `  main checkout: ${report.checkedOut} -> ${report.name}` +
+        (report.dryRun
+          ? " (WOULD MOVE — this run was a plan; the working copy is still on the left-hand branch)"
+          : " (this working copy was switched)"),
+    );
+  }
+  return lines.join("\n");
 }
 
 // ── GOAL BRANCH role (orchestration/SPEC-goal-branch-2026-10-03.md §4.1/§4.2) ─────────────────────
