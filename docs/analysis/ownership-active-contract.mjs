@@ -47,7 +47,7 @@ export const ARCHGUARD_QUERY_KINDS = Object.freeze({
 export const STEP_ACTIONS = Object.freeze(["request_evidence", "investigate_more", "abstain", "propose_slice"]);
 export const CONCERN_KINDS = Object.freeze(["package-cycle", "duplicate", "canonicalization", "other-boundary"]);
 
-/** Paths the investigator may never read: evaluator-side benchmark artefacts and tool/runtime state. */
+/** Paths the investigator may never read: evaluator-side benchmark artefacts, HOLDOUT answer surfaces, and tool/runtime state. */
 export const DENY_PATH_PATTERNS = Object.freeze([
   /(^|\/)reference\.json$/,
   /(^|\/)outcome\.json$/,
@@ -56,6 +56,16 @@ export const DENY_PATH_PATTERNS = Object.freeze([
   /^docs\/analysis\/dossier-evidence\//,
   /^docs\/analysis\/rich-dossier-spec\.json$/,
   /^docs\/analysis\/two-stage-corpus-spec\.json$/,
+  // HOLDOUT answer surfaces (GOAL-034 blind-benchmark follow-up, 2026-10-11): the GOAL bodies carry the
+  // human-authored fork-point cuts, and these docs/tasks carry the ranked candidate lists and blind-test
+  // results the investigator is meant to REDISCOVER from source. Reading them (or returning them as grep
+  // hits) hands the answer over, so the whole surface is closed rather than one filename.
+  /^goals\//,
+  /^tasks\//,
+  /^docs\/architecture\//,
+  /^docs\/references\//,
+  /^docs\/plans\//,
+  /^docs\/analysis\/architecture-evidence-store/,
   /^\.quay\//,
   /^\.git(\/|$)/,
   /^\.archguard\//,

@@ -96,7 +96,14 @@ export function createExecutor({ root, ref = null, budget = DEFAULT_BUDGET, deps
     };
   };
   // `git grep -n` rows are `path:line:content`; repo paths never contain ':' here.
-  const denyFilter = (rows) => rows.filter((r) => !DENY_PATH_PATTERNS.some((re) => re.test(r.split(":")[0])));
+  // git C-quotes a path with non-ASCII bytes (`"goals/GOAL-034-…md":12:…`), so a deny anchored at the path
+  // root would MISS exactly the holdout files it must block. Unquote the path token before testing — a denied
+  // row must be dropped whether git emitted the path raw or quoted (hard rule 3b: no silent pass-through).
+  const rowPath = (r) => {
+    const p = r.split(":")[0];
+    return p.length > 1 && p.startsWith('"') && p.endsWith('"') ? p.slice(1, -1) : p;
+  };
+  const denyFilter = (rows) => rows.filter((r) => !DENY_PATH_PATTERNS.some((re) => re.test(rowPath(r))));
 
   function readFile(req) {
     const c = resolveCommit();
