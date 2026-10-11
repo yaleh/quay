@@ -167,6 +167,7 @@ Key cross-cutting facts (require reading several files to see):
 - `docs/references/` — the GIT framework (goal-closure `L_T..L_S`, 硬形变/Π_{S→E}, two-phase breathing) AND its limits: the continuous math (Fisher/natural-gradient/intrinsic-dim/ρ) is NOT rigor (ADR-006).
 - `docs/references/task-schema-canonical.md` — canonical task frontmatter schema (readable view of `plugin/scripts/task-schema.ts`): `depends_on` top-level vs legacy `extra: { depends_on: [...] }`, and `task_write` usage.
 - `docs/references/quay-as-self-improving-engineering-system.md` — Quay 的长期身份（Builder/Subject/Validator 三位一体）+ GOAL-030~035 可追踪案例索引 + 分级的 as-is/future 评价指标；与 `docs/references/harness-semantic-compression-and-meta-driver-builder.md` 互补、互相引用，读前者不代替读后者。
+- `docs/references/architecture-evolution-closed-loop.md` — 把上述两份文档共享的"观察→语义判断→可证伪实验→实施→反馈"五步闭环，在"判断"与"反馈"两步上拆成具名角色（Architecture Evidence Store / Semantic Investigator / Evolution Planner / 独立 Evaluator / Learning Store），映射到 L1 Execution/L2 Architecture Evolution/L3 Methodology Evolution 三层，给出 A/B/C/D 四阶段路线图。**全文零实现，设计假设**；与"端到端架构自举实验"协作会话分工（本文只设计闭环形状，该会话负责 Evidence/Hypothesis 载体与 Goal 候选的真实落地），不要重复发明。
 - **Split-decision 路由表** → 正本 `tasks/gap-checksplitrecommendation-preserved-by-adr-022-but-never-wired-into-fast-mode.md`。**STATUS: reference/manual，非生效机制**——`checkSplitRecommendation` 零非测试调用者，没有任何 fast-mode 派发或任务撰写路径调它。**别把它当生效的机制用。**（完整存档 → `casebook#moved-split-decision-status`）
 
 ## Tools
