@@ -49,16 +49,79 @@ The results are in the production evidence store under `experiment: E-HYPGEN-1` 
 6. Write `docs/analysis/arch-hypothesis-generation-report.md` with the round-1 readings above, regenerated from the landed tool on pin `e3163e519`, with arm A and arm B labelled.
 
 ## Acceptance Criteria
-- [ ] `node --test plugin/test/arch-hypothesis-generation.test.mjs` exits 0. Use fixture stubs for the model calls (inject the runner), and cover each of these as its own case:
+- [x] `node --test plugin/test/arch-hypothesis-generation.test.mjs` exits 0. Use fixture stubs for the model calls (inject the runner), and cover each of these as its own case:
   - (a) A non-empty cwd makes the investigator refuse.
   - (b) A missing or mismatched pre-registration hash makes scoring refuse.
   - (c) The contamination scan refuses when an inventory entry names both sides of a sealed pair.
   - (d) An unparseable investigator output is recorded as a failed run, not as zero hypotheses.
   - (e) A verifier that hits its turn limit maps to `undetermined`, never `refuted`.
   - (f) A labels file is never read before all runs exist: assert on the file-read order.
-- [ ] Static check: `grep -n "probe-routine\|meta-driver\|routine-file-gate" docs/analysis/arch-hypothesis-generation.mjs` returns only the line that resolves the launcher module, if any. The tool's code and prompt files contain no holdout-specific text. Paste the output.
-- [ ] Real reproduction on pin `e3163e519`: run the inventory step only (no model call). The inventory sha256 equals `fe87bd79420ba4f4f107fab17d1cfb62df47deb5a6776f93e19cd67a6057838c` for arm A settings, and `186a7355d35a642ac82dd9a4d07880eabc78a4aae33e8e6372764fcb1f83ac9f` for arm B settings. Paste both.
-- [ ] Mutation control: make the investigator skip the cwd check and show case (a) goes red. Paste the output, then revert.
+
+  ```
+  $ node --test plugin/test/arch-hypothesis-generation.test.mjs
+  ✔ AC1(a): investigator refuses when cwd is not the empty neutral dir — and never calls the model
+  ✔ AC1(b): scoring refuses on a missing pre-registration file and on a mismatched hash
+  ✔ AC1(c): contamination scan refuses an entry naming BOTH sides of a sealed pair
+  ✔ AC1(d): an unparseable investigator output is recorded as a failed run (n_hyps null), never as 0
+  ✔ AC1(e): turn-limit and unparseable verifier outputs map to undetermined, never refuted
+  ✔ AC1(f): labels are read only AFTER every declared run file exists (assert on read order)
+  ✔ bounds: max-runs, max-clusters and max-ms each refuse with a distinct exit code
+  ✔ inventory: exports/carriers are deduped, capped and identical for every component
+  ✔ match: a hypothesis hit needs one component on each side AND an admissible concept kind
+  ✔ clustering: same kind + overlapping components merge; order is confidence then run
+  ✔ records: match/verify/review records validate against the production evidence store
+  ✔ hardening: the launcher argv pins tools off, no session, strict MCP (and --max-turns when bounded)
+  ✔ report: aggregates recorded artifacts into markdown with both arms labelled
+  ℹ tests 13
+  ℹ pass 13
+  ℹ fail 0
+  ```
+- [x] Static check: `grep -n "probe-routine\|meta-driver\|routine-file-gate" docs/analysis/arch-hypothesis-generation.mjs` returns only the line that resolves the launcher module, if any. The tool's code and prompt files contain no holdout-specific text. Paste the output.
+
+  ```
+  $ grep -n "probe-routine\|meta-driver\|routine-file-gate" docs/analysis/arch-hypothesis-generation.mjs
+  652:  const argv = launchArgv("meta-driver", prompt, root, { promptViaStdin: true });
+
+  $ grep -rn "probe-routine\|meta-driver\|routine-file-gate" docs/analysis/arch-hypothesis-generation-prompts/
+  (no matches — exit 1)
+  ```
+- [x] Real reproduction on pin `e3163e519`: run the inventory step only (no model call). The inventory sha256 equals `fe87bd79420ba4f4f107fab17d1cfb62df47deb5a6776f93e19cd67a6057838c` for arm A settings, and `186a7355d35a642ac82dd9a4d07880eabc78a4aae33e8e6372764fcb1f83ac9f` for arm B settings. Paste both.
+
+  ```
+  $ node --experimental-strip-types docs/analysis/arch-hypothesis-generation.mjs inventory \
+      --pin e3163e519 --max-exports 15 --max-carriers 6 --carrier-forms literal \
+      --contamination-pairs <sealed-pairs.json> --out /tmp/ac3-A.txt --json
+  { "components": 283, "bytes": 133615,
+    "sha256": "fe87bd79420ba4f4f107fab17d1cfb62df47deb5a6776f93e19cd67a6057838c",
+    "carrier_forms": "literal", "contamination": { "cross": [], "ok": true } }
+
+  $ node --experimental-strip-types docs/analysis/arch-hypothesis-generation.mjs inventory \
+      --pin e3163e519 --max-exports 1000 --max-carriers 12 --carrier-forms literal+join \
+      --contamination-pairs <sealed-pairs.json> --out /tmp/ac3-B.txt --json
+  { "components": 283, "bytes": 170625,
+    "sha256": "186a7355d35a642ac82dd9a4d07880eabc78a4aae33e8e6372764fcb1f83ac9f",
+    "carrier_forms": "literal+join", "contamination": { "cross": [], "ok": true } }
+
+  $ sha256sum /tmp/ac3-A.txt /tmp/ac3-B.txt
+  fe87bd79420ba4f4f107fab17d1cfb62df47deb5a6776f93e19cd67a6057838c  /tmp/ac3-A.txt
+  186a7355d35a642ac82dd9a4d07880eabc78a4aae33e8e6372764fcb1f83ac9f  /tmp/ac3-B.txt
+  ```
+- [x] Mutation control: make the investigator skip the cwd check and show case (a) goes red. Paste the output, then revert.
+
+  ```
+  # mutation: `if (refusal && false) return …` in runInvestigator
+  $ node --test --test-name-pattern="AC1\(a\)" plugin/test/arch-hypothesis-generation.test.mjs
+  ✖ AC1(a): investigator refuses when cwd is not the empty neutral dir — and never calls the model
+  ℹ tests 1
+  ℹ pass 0
+  ℹ fail 1
+
+  # reverted (md5 restored), mutation gone:
+  $ grep -c "MUTATION CONTROL" docs/analysis/arch-hypothesis-generation.mjs
+  0
+  $ node --test plugin/test/arch-hypothesis-generation.test.mjs
+  ℹ tests 13   ℹ pass 13   ℹ fail 0
+  ```
 
 ## Definition of Done
 - All AC ticked with output pasted.
@@ -73,3 +136,11 @@ The results are in the production evidence store under `experiment: E-HYPGEN-1` 
 - docs/analysis/arch-hypothesis-generation-prompts/verifier.txt (new)
 - docs/analysis/arch-hypothesis-generation-prompts/reviewer.txt (new)
 - plugin/test/arch-hypothesis-generation.test.mjs (new)
+
+## Blocker
+
+**2026-10-11T15:19:19.697Z — worker 未落地（exited-not-landed）**
+
+- 未落地原因：step=anti-drift: ANTI-DRIFT HARD FAIL: task gap-architecture-hypothesis-generation-shadow-stage-not-in-repo — 1 violation(s)
+- run_id：wk-prod-anchor
+- session_id：bc22e1be-d234-411e-aab5-686ddd91da3a
