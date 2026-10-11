@@ -26,6 +26,7 @@ import { spawnSync } from "node:child_process";
 import {
   checkNonFfFanIn,
   buildLockHoldIntervals,
+  lockHoldKey,
   checkSuiteInLock,
   checkLockHoldDuration,
   checkSuiteCoveredByFanInLock,
@@ -100,7 +101,10 @@ test("PURE buildLockHoldIntervals — pairs acquire/release; unpaired or unparse
     { event: "release", epoch: 101, taskId: "a", pid: 1 },
   ]);
   assert.equal(ok.malformed, false);
-  assert.deepEqual(ok.intervals, [{ start: 100, end: 101, key: "a|1", taskId: "a" }]);
+  // The pairing key is the SHARED lockHoldKey (taskId, runId, pid) — this fixture carries no runId,
+  // so that slot renders as "?" for acquire and release alike (same key ⇒ still pairs).
+  assert.equal(lockHoldKey({ taskId: "a", pid: 1 }), "a|?|1");
+  assert.deepEqual(ok.intervals, [{ start: 100, end: 101, key: "a|?|1", taskId: "a" }]);
   // release without acquire
   const bad = buildLockHoldIntervals([{ event: "release", epoch: 100, taskId: "a", pid: 1 }]);
   assert.equal(bad.malformed, true);
@@ -110,6 +114,66 @@ test("PURE buildLockHoldIntervals — pairs acquire/release; unpaired or unparse
   // non-numeric epoch
   const bad3 = buildLockHoldIntervals([{ event: "acquire", epoch: "x", taskId: "a", pid: 1 }]);
   assert.equal(bad3.malformed, true);
+});
+
+// ── AC (a)/(b) — gap-fan-in-lock-hold-pairing-two-divergent-keys ─────────────────────────────────────
+// The checker keyed on `(taskId, pid)` while fan-in-queueing-model.ts's pairLockHolds keyed on the
+// canonical `(taskId, runId, pid)` that readFanInLockHold selects on — two keys for one carrier, so
+// the SAME log yielded different intervals and different malformed verdicts. Both now use the single
+// exported `lockHoldKey`; only the POLICY over that key stays per-consumer.
+
+test("AC(a) two runs of the SAME task under the SAME pid pair into 2 intervals — NOT a double acquire", () => {
+  // pid 4242 is reused across two runs of one task. TWO log shapes, because they differ in what they
+  // can falsify, and the VERDICT-bearing one is asserted FIRST (the AC's own claims — "pairs into 2
+  // intervals", "does not flag it malformed" — must be what goes red under AC3's mutation, not a key
+  // string that happens to be checked earlier).
+  //
+  // Interleaved: a second holder of the same task ran while the first held a DIFFERENT lock domain
+  // (SPEC-goal-branch §4.6 — develop's `fan-in.lock` vs a goal branch's, both logged here), under the
+  // recycled pid. Old `taskId|pid` key: wk-2's acquire hit wk-1's still-open key ⇒ malformed, wk-2
+  // was dropped, and the ONE reported interval was built from the wrong start (100, wk-1's acquire,
+  // closed by wk-2's release). Shared key: two intervals, no violation.
+  const interleaved = [
+    { event: "acquire", epoch: 100, taskId: "t", runId: "wk-1", pid: 4242 },
+    { event: "acquire", epoch: 150, taskId: "t", runId: "wk-2", pid: 4242 },
+    { event: "release", epoch: 200, taskId: "t", runId: "wk-2", pid: 4242 },
+    { event: "release", epoch: 250, taskId: "t", runId: "wk-1", pid: 4242 },
+  ];
+  const gotInt = buildLockHoldIntervals(interleaved);
+  assert.equal(gotInt.malformed, false, "a second holder under a recycled pid is NOT a double acquire");
+  assert.equal(gotInt.intervals.length, 2, "two runs ⇒ two intervals (not one, and not the wrong start)");
+  assert.deepEqual(
+    gotInt.intervals.map((i) => [i.start, i.end]).sort((a, b) => a[0] - b[0]),
+    [[100, 250], [150, 200]],
+    "each run pairs with its OWN release (the old key reported one interval closed by the other run's release)",
+  );
+
+  // Sequential (the common shape: run 1 closes before run 2 opens). This one the old key ALSO gets
+  // right — the second run's acquire finds the key already closed — so it witnesses the key spelling,
+  // not the verdict; it is kept because the AC's scenario is literally this shape.
+  const seq = [
+    { event: "acquire", epoch: 100, taskId: "t", runId: "wk-1", pid: 4242 },
+    { event: "release", epoch: 101, taskId: "t", runId: "wk-1", pid: 4242 },
+    { event: "acquire", epoch: 200, taskId: "t", runId: "wk-2", pid: 4242 },
+    { event: "release", epoch: 203, taskId: "t", runId: "wk-2", pid: 4242 },
+  ];
+  const gotSeq = buildLockHoldIntervals(seq);
+  assert.equal(gotSeq.malformed, false, "two runs of one task under one pid is NOT a double acquire");
+  assert.equal(gotSeq.intervals.length, 2);
+  assert.deepEqual(gotSeq.intervals.map((i) => [i.start, i.end]), [[100, 101], [200, 203]]);
+  assert.deepEqual(gotSeq.intervals.map((i) => i.key), ["t|wk-1|4242", "t|wk-2|4242"]);
+});
+
+test("AC(b) a TRUE double acquire within one (taskId, runId, pid) is still flagged (POLICY kept)", () => {
+  const got = buildLockHoldIntervals([
+    { event: "acquire", epoch: 100, taskId: "t", runId: "wk-1", pid: 4242 },
+    { event: "acquire", epoch: 150, taskId: "t", runId: "wk-1", pid: 4242 },
+    { event: "release", epoch: 160, taskId: "t", runId: "wk-1", pid: 4242 },
+  ]);
+  assert.equal(got.malformed, true, "the same key acquired twice is a protocol violation");
+  // FIRST acquire wins (the checker's policy; the model's is last-wins + counted) — the interval is
+  // built from epoch 100, not from the violating second acquire at 150.
+  assert.deepEqual(got.intervals, [{ start: 100, end: 160, key: "t|wk-1|4242", taskId: "t" }]);
 });
 
 test("PURE checkSuiteInLock — overlap ⇒ red; disjoint ⇒ clean; no suite-run ⇒ not-evaluated", () => {

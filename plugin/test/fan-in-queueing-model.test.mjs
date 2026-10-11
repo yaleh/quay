@@ -95,6 +95,49 @@ test("AC1 未配对的 acquire / release 都计数，⛔ 不静默丢弃", () =>
   assert.equal(p.unpairedReleases, 1);
 });
 
+// ── AC(a) gap-fan-in-lock-hold-pairing-two-divergent-keys：同一个任务同 pid 两次 run ─────────────
+// 本函数的键曾与协议检查器的键不同（检查器 `taskId|pid`、本文件 `taskId runId pid`）⇒ 同一份日志
+// 两份区间、两种 malformed 判定。现在两边都引用 fan-in-ff-protocol-check.ts 里那一份 `lockHoldKey`。
+test("AC(a) 同任务同 pid 的两个 run（不同 runId）配成 2 个区间——与协议检查器读同一份日志同解", () => {
+  const log = [
+    { event: "acquire", epoch: 100, taskId: "t", runId: "wk-1", pid: 4242 },
+    { event: "release", epoch: 101, taskId: "t", runId: "wk-1", pid: 4242 },
+    { event: "acquire", epoch: 200, taskId: "t", runId: "wk-2", pid: 4242 },
+    { event: "release", epoch: 203, taskId: "t", runId: "wk-2", pid: 4242 },
+  ];
+  const p = pairLockHolds(log);
+  assert.equal(p.holds.length, 2, "两个 run 是两个持有区间（pid 复用不得把它们并成一个键）");
+  assert.deepEqual(
+    p.holds.map((h) => [h.taskId, h.runId, h.acquire, h.release, h.holdSecs]),
+    [
+      ["t", "wk-1", 100, 101, 1],
+      ["t", "wk-2", 200, 203, 3],
+    ],
+  );
+  // 政策差异是有意的：模型把「同一键再次 acquire」当统计（最后一次胜出），检查器当协议违规。
+  assert.equal(p.unpairedAcquires, 0);
+  assert.equal(p.unpairedReleases, 0);
+
+  // 交叉（同一任务第二个持有者持【另一锁域】，见 SPEC-goal-branch §4.6，且 pid 被复用）——这一形
+  // 才把两个键分开：旧键下 wk-2 的 acquire **覆盖** wk-1 的（最后一次胜出）⇒ 只配出 1 个区间，且
+  // wk-1 的 release 变成「未配对 release」。共享键下两个 run 各配各的。
+  const p2 = pairLockHolds([
+    { event: "acquire", epoch: 100, taskId: "t", runId: "wk-1", pid: 4242 },
+    { event: "acquire", epoch: 150, taskId: "t", runId: "wk-2", pid: 4242 },
+    { event: "release", epoch: 200, taskId: "t", runId: "wk-2", pid: 4242 },
+    { event: "release", epoch: 250, taskId: "t", runId: "wk-1", pid: 4242 },
+  ]);
+  assert.deepEqual(
+    p2.holds.map((h) => [h.runId, h.acquire, h.release]),
+    [
+      ["wk-1", 100, 250],
+      ["wk-2", 150, 200],
+    ],
+  );
+  assert.equal(p2.unpairedReleases, 0, "每个 release 都配回自己的 run");
+  assert.equal(p2.unpairedAcquires, 0);
+});
+
 test("AC1 epoch 是【秒】不是毫秒——持有 40 秒的区间必须读成 40 而不是 0.04", () => {
   const p = pairLockHolds([
     { event: "acquire", epoch: 1000, taskId: "a", runId: "r", pid: 1 },

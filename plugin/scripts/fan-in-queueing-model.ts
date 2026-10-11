@@ -44,6 +44,10 @@
 import fs from "node:fs";
 import path from "node:path";
 import { spawnSync } from "node:child_process";
+// 锁事件配对键 (taskId, runId, pid) 的【唯一】定义在 fan-in-ff-protocol-check.ts 的 `lockHoldKey`；
+// 本文件只**引用**它，⛔ 不自造第二套键（硬规则 5b）。键共享、策略各自留在消费者处——见
+// `pairLockHolds` 的 POLICY 注解（gap-fan-in-lock-hold-pairing-two-divergent-keys）。
+import { lockHoldKey } from "./fan-in-ff-protocol-check.ts";
 
 // ── 取值词表：三态，⛔ 「未评估」不得与数值共用形状 ───────────────────────────────
 export const NOT_EVALUATED = "NOT-EVALUATED" as const;
@@ -159,9 +163,16 @@ export function readLockEvents(file: string): { events: Array<Record<string, unk
 }
 
 /**
- * 把 acquire/release 配成持有区间。键 = (taskId, runId, pid)——与 `readFanInLockHold`
- * （worker-driver.ts）同一套键，⛔ 不另造一套（硬规则 5b：同一原则不在两处各写一遍）。
- * 未配对的两种都**计数返回**，⛔ 不静默丢弃（丢弃会让「锁坏了」与「锁没被用过」同形）。
+ * 把 acquire/release 配成持有区间。键 = `lockHoldKey`（fan-in-ff-protocol-check.ts 里**唯一一处
+ * 定义**）的 (taskId, runId, pid)——与 `readFanInLockHold`（worker-fan-in.ts）同一套键，⛔ 不另造一套
+ * （硬规则 5b：同一原则不在两处各写一遍；本文件曾自写 `${taskId} ${runId} ${pid}` 而检查器另写
+ * `${taskId}|${pid}` ⇒ 同一份日志两份区间、两种 malformed 判定，见
+ * gap-fan-in-lock-hold-pairing-two-divergent-keys）。
+ *
+ * POLICY（本消费者这一半，⛔ 与检查器【有意】不同，不要统一）：这里做的是统计——同一键上再次
+ * acquire 是**覆盖**（最后一次 acquire 胜出），未配对的 acquire/release 都**计数返回**，⛔ 不静默丢弃
+ * （丢弃会让「锁坏了」与「锁没被用过」同形）。检查器把同一件事读成**协议违规**（`malformed`），因为
+ * 对它而言「一个键上两次 acquire」本身就是持锁协议的破坏。键共享，策略各自留在各自的消费者处。
  */
 export function pairLockHolds(events: Array<Record<string, unknown>>): LockPairing {
   const open = new Map<string, number>();
@@ -170,7 +181,7 @@ export function pairLockHolds(events: Array<Record<string, unknown>>): LockPairi
   for (const e of events) {
     const epoch = e.epoch;
     if (typeof epoch !== "number" || !Number.isFinite(epoch)) continue;
-    const key = `${String(e.taskId)} ${String(e.runId)} ${String(e.pid)}`;
+    const key = lockHoldKey(e);
     if (e.event === "acquire") {
       open.set(key, epoch);
     } else if (e.event === "release") {

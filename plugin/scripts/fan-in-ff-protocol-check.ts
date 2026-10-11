@@ -110,21 +110,49 @@ export function checkNonFfFanIn(mergeSubjects) {
 // ── Pure: 判据2b (suite call inside the locked section) ───────────────────────────────────────────────
 
 /**
+ * THE pairing key for lock-event acquire/release pairing: `(taskId, runId, pid)` — the same set
+ * `readFanInLockHold` (worker-fan-in.ts) selects an event by, i.e. the key the codebase itself calls
+ * canonical. ⛔ ONE definition, two consumers (`buildLockHoldIntervals` below; `pairLockHolds` in
+ * fan-in-queueing-model.ts) — 硬规则 5b. With two key definitions the SAME lock-event log yields two
+ * different interval sets and two different malformed verdicts, so a verdict about a carrier depends
+ * on which consumer asked (gap-fan-in-lock-hold-pairing-two-divergent-keys: this checker keyed on
+ * `(taskId, pid)` while the model keyed on `(taskId, runId, pid)`, so two runs of one task under a
+ * recycled pid read as two intervals to the model and as a double-acquire violation here).
+ *
+ * Only the KEY is shared. Each consumer keeps its own POLICY over it, written down at the consumer:
+ * this checker treats a second acquire on an OPEN key as a protocol violation (`malformed`); the
+ * model treats unpaired events as counted statistics (last acquire wins). ⛔ Do not unify the policy.
+ * PURE.
+ */
+export function lockHoldKey(e) {
+  const taskId = e?.taskId ?? "?";
+  const runId = e?.runId ?? "?";
+  const pid = e?.pid ?? "?";
+  return `${taskId}|${runId}|${pid}`;
+}
+
+/**
  * Build lock-hold intervals from the lock-events log lines. Each line: `{event:"acquire"|"release",
  * epoch:number, ...}`. A hold interval is the pair (acquireEpoch, next releaseEpoch) for the same
- * taskId/pid. Returns `{ intervals, malformed }` — malformed=true when a log cannot be paired
- * (a release without a preceding acquire, an acquire with no following release, an unparseable line).
+ * lockHoldKey (taskId, runId, pid). Returns `{ intervals, malformed }` — malformed=true when a log
+ * cannot be paired (a release without a preceding acquire, an acquire with no following release, an
+ * unparseable line).
+ *
+ * POLICY (this consumer's half of the shared key — ⛔ intentionally NOT the model's): a second
+ * acquire while a key is already open is a PROTOCOL VIOLATION, not a new interval, so the FIRST
+ * acquire wins and the log is reported malformed. A run that legitimately acquires twice does so
+ * under a different runId (a retry) ⇒ a different key ⇒ a second interval, not a violation.
  * PURE.
  * @param {Array<Record<string, any>>} events
  */
 export function buildLockHoldIntervals(events) {
   const intervals = [];
-  const open = new Map(); // key `${taskId}|${pid}` → acquire epoch
+  const open = new Map(); // lockHoldKey(event) → acquire epoch
   let malformed = false;
   for (const e of events) {
     if (!e || (e.event !== "acquire" && e.event !== "release")) { malformed = true; continue; }
     if (typeof e.epoch !== "number" || Number.isNaN(e.epoch)) { malformed = true; continue; }
-    const key = `${e.taskId ?? "?"}|${e.pid ?? "?"}`;
+    const key = lockHoldKey(e);
     if (e.event === "acquire") {
       if (open.has(key)) { malformed = true; continue; } // double acquire without release
       open.set(key, e.epoch);
