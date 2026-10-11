@@ -443,7 +443,7 @@ Description:
       say(`Created ${result.tasksDir}/ (or already existed)`);
       say(`Created ${result.launchSettingsPath}`);
       console.log(`Created ${result.profilesPath}`);
-      printNextSteps("native", result.tasksDir);
+      printNextSteps("native", result.tasksDir, result.workspaceRoot);
     } catch (err) {
       console.error(`quay-native init: ${err instanceof Error ? err.message : String(err)}`);
       process.exitCode = 1;

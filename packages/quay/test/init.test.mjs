@@ -2200,3 +2200,34 @@ test("worktree_root existing: a non-canonical value already in config is PRESERV
   assert.equal(doc.loop.worktree_root, legacy, "an existing value is preserved verbatim, not rewritten to the canonical default");
 });
 
+test("printNextSteps: 'Workspace ready at:' is the --root ITSELF, and agrees with loop.repo_root (never the parent dir)", () => {
+  // gap-init-summary-workspace-ready-prints-parent-dir. The pre-fix summary printed
+  // `path.dirname(path.dirname(tasksDir))`, which equals the workspace only while the tasks dir is
+  // literally `<root>/tasks` — i.e. the bug is INVISIBLE when `--root` is the CWD (init.ts's
+  // `path.join(root, "tasks")` makes the two dirnames land back on root). So the fixture must make
+  // `--root` a SUBDIR of the CWD, exactly as the reported cold start did
+  // (`/data/home/yale/work/quay-fleet` under `/data/home/yale/work` printed `/data/home/yale/work`).
+  const dir = tmpDir("ready-root"); // CWD: the PARENT
+  const targetDir = path.join(dir, "subdir"); // --root: the workspace
+  fs.mkdirSync(targetDir, { recursive: true });
+  seedDetectable(targetDir);
+
+  const out = runQuay(["init", "--root", targetDir], dir);
+  const line = out.split("\n").find((l) => l.includes("Workspace ready at:"));
+  assert.ok(line, `the summary must carry a "Workspace ready at:" line:\n${out}`);
+
+  // (1) equals the --root value…
+  assert.equal(line.trim(), `Workspace ready at: ${targetDir}`);
+  // …and NOT its parent — the discriminating half. `dir` is what the pre-fix expression printed.
+  assert.notEqual(line.trim(), `Workspace ready at: ${dir}`, "the parent dir must never be printed as the workspace");
+
+  // (2) …and equals the persisted loop.repo_root, i.e. the summary does not contradict the config.
+  const doc = YAML.parse(fs.readFileSync(path.join(targetDir, ".quay", "config.yml"), "utf8"));
+  assert.equal(doc.loop.repo_root, targetDir, "loop.repo_root is the workspace root");
+  assert.equal(line.trim().slice("Workspace ready at: ".length), doc.loop.repo_root);
+
+  // Negative-control precondition (none of the above is vacuous): the fixture really does put the
+  // root one level below the CWD, and the two candidate answers really do differ.
+  assert.notEqual(dir, targetDir, "fixture: --root must be a SUBDIR of the CWD for this check to bite");
+});
+

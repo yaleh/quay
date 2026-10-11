@@ -663,6 +663,17 @@ export interface InitResult {
   upgradeIssues?: ConfigIssue[];
   /** Absolute path to the config file that was (or would be) written. */
   configPath: string;
+  /**
+   * The RESOLVED workspace root (`path.resolve(opts.root)`) — the directory the whole init ran
+   * against, and the value `printNextSteps` prints as "Workspace ready at:".
+   *
+   * ⛔ Carried rather than re-derived by the caller. The root is `<root>/tasks`'s GRANDPARENT only
+   * while the tasks dir keeps the default name `tasks`; a summary that recomputes it from
+   * `tasksDir` (the pre-fix `dirname(dirname(tasksDir))`) prints the PARENT of the workspace for a
+   * `--root <subdir>` run, contradicting the `Tasks dir:` line printed right below it
+   * (gap-init-summary-workspace-ready-prints-parent-dir).
+   */
+  workspaceRoot: string;
   /** Absolute path to the tasks dir that was (or would be) created. */
   tasksDir: string;
   /** The full generated config YAML content (for dry-run printing). */
@@ -1660,10 +1671,14 @@ export function runInit(opts: InitOptions): InitResult {
   if (pluginVersionForProject.state === "mismatch") {
     process.stderr.write(formatProjectVersionMismatchWarning(pluginVersionForProject) + "\n");
   }
-  return { ...runInitImpl(opts), pluginVersionForProject };
+  // `workspaceRoot` is attached HERE, not at each of `runInitImpl`'s dozen return sites: this wrapper
+  // already resolves the root, and a root derived in twelve places is twelve chances to derive a
+  // different one. `runInitImpl` returns the result WITHOUT it (see its signature) so the compiler
+  // forces exactly this one site to supply it.
+  return { ...runInitImpl(opts), workspaceRoot: root, pluginVersionForProject };
 }
 
-function runInitImpl(opts: InitOptions): InitResult {
+function runInitImpl(opts: InitOptions): Omit<InitResult, "workspaceRoot"> {
   const root = path.resolve(opts.root);
   const quayDir = path.join(root, ".quay");
   const configPath = path.join(quayDir, "config.yml");
@@ -2434,8 +2449,15 @@ function resolveProviderPath(workspaceRoot: string): string {
 
 /**
  * Print next-step instructions after a successful init.
+ *
+ * `workspaceRoot` is the RESOLVED root the run used (`InitResult.workspaceRoot`) — passed in, never
+ * re-derived from `tasksDir`. The pre-fix body printed `dirname(dirname(tasksDir))`, which is the
+ * workspace only while the tasks dir is literally `<root>/tasks`; on `quay init --root <subdir>` it
+ * printed the PARENT of the workspace while the `Tasks dir:` line below named the real root, so the
+ * summary contradicted itself
+ * (gap-init-summary-workspace-ready-prints-parent-dir).
  */
-export function printNextSteps(providerId: string, tasksDir: string): void {
+export function printNextSteps(providerId: string, tasksDir: string, workspaceRoot: string): void {
   console.log(`
 Next steps:
   1. Create your first task:
@@ -2450,7 +2472,7 @@ Next steps:
   4. Run the gate engine on a task:
        quay gate TASK-001
 
-  Workspace ready at: ${path.dirname(path.dirname(tasksDir))}
+  Workspace ready at: ${workspaceRoot}
   Provider: ${providerId}
   Tasks dir: ${tasksDir}
 `);

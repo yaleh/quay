@@ -644,7 +644,7 @@ Description:
       process.exitCode = 1;
     }
     if (result.installSteps && !json) say(result.installSteps);
-    if (!json) printNextSteps("native", result.tasksDir);
+    if (!json) printNextSteps("native", result.tasksDir, result.workspaceRoot);
   } catch (err) {
     console.error(`quay init: ${err instanceof Error ? err.message : String(err)}`);
     process.exitCode = 1;
