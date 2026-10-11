@@ -2,7 +2,7 @@
 id: gap-errorsignature-merges-different-exit-codes
 title: errorSignature turns every exit code into <n>, merging OOM-kill, timeout
   and ordinary failures into one signature
-status: todo
+status: ready
 labels:
   - gap
   - architecture-discovery
