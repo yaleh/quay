@@ -25,10 +25,10 @@ extra:
 
 ## AC
 
-- [ ] AC1（按位置）：release.yml 的 project-scope 注册/安装步骤在独立 `HOME`/`CLAUDE_CONFIG_DIR` 下运行
-- [ ] AC2：新增的"装上版本 == 构建版本"前置检查存在，不一致时以独立原因失败并打印双方版本与 marketplace 来源
-- [ ] AC3（负控制，真实路径）：预先在共享 HOME 写入一个指向别处的 `quay` 声明，再跑该序列——必须**不受影响**（隔离生效）；再在隔离 HOME 内人为制造版本不一致，前置检查必须以独立原因失败。贴两次输出
-- [ ] AC4（变异对照）：去掉前置检查后，AC3 第二臂必须退化为原来的 `version-consistency` 误报；贴输出证明该检查确实在验
+- [x] AC1（按位置）：release.yml 的 project-scope 注册/安装步骤在独立 `HOME`/`CLAUDE_CONFIG_DIR` 下运行
+- [x] AC2：新增的"装上版本 == 构建版本"前置检查存在，不一致时以独立原因失败并打印双方版本与 marketplace 来源
+- [x] AC3（负控制，真实路径）：预先在共享 HOME 写入一个指向别处的 `quay` 声明，再跑该序列——必须**不受影响**（隔离生效）；再在隔离 HOME 内人为制造版本不一致，前置检查必须以独立原因失败。贴两次输出
+- [x] AC4（变异对照）：去掉前置检查后，AC3 第二臂必须退化为原来的 `version-consistency` 误报；贴输出证明该检查确实在验
 - [ ] AC5（读生产载体）：落地后的下一次真实 release run，step 8 日志出现 `Successfully added marketplace: quay`，且安装路径版本 == 该 tag 的版本；贴 run id 与日志行（待外部）
 
 ## DoD
