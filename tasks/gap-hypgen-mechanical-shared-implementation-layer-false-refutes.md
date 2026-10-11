@@ -3,7 +3,7 @@ id: gap-hypgen-mechanical-shared-implementation-layer-false-refutes
 title: "arch-hypothesis-generation: the mechanical shared-implementation layer
   issues a REFUTED verdict while named components that do not import the definer
   carry the claimed divergence, and it falsely refuted a confirmed real defect"
-status: todo
+status: ready
 labels:
   - gap
   - architecture-discovery
