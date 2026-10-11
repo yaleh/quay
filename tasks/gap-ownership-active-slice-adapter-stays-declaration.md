@@ -1,0 +1,75 @@
+---
+id: gap-ownership-active-slice-adapter-stays-declaration
+title: "ownership-active slice adapter: emit ArchGuard's proposedCut.stays
+  declaration to make the 2/11 real coverage-gap candidates computable on
+  released archguard 0.1.39 (no tool change needed)"
+status: ready
+labels:
+  - gap
+parent: null
+children: []
+extra:
+  schema: execution
+---
+**type:** execution
+
+<!-- dedup-ref -->
+本任务承接「端到端架构自举实验」对生产 carrier（`.quay/ownership-shadow-proposals.jsonl`）11 条真实 ArchGuard `slice-delta` 拒绝记录的逐条分类（「Quay refactor architecture liaison」会话 2026-10-11 直接读 archguard 源码+核对文件系统后给出）：4/11 是 `MOVE_TO_NOT_AN_INTERNAL_DIR`（目标目录真实不存在，结构性不可表示，已由该会话在 archguard 侧立案 `gap-slice-delta-explicit-new-destination-dir`，与本任务零重叠，不碰）；7/11 是覆盖类拒绝,其中 **2 条**（`cli -> gate/config` 未覆盖 `resolveRunnerOptions`；`gate -> gate/config` 未覆盖 4 个符号）**今天就能用已发布的 archguard 0.1.39 修好,不需要任何工具侧改动**——`ownership-active-slice-adapter.mjs` 已经计算"完全覆盖"的边集合(`restore`),但从未计算过它的补集并声明为 `proposedCut.stays`,而这个声明字段在 archguard 侧已经存在且被忽略。去重已查:`tasks/*.md` 对 "slice-adapter" 搜索只命中已 done 的 `gap-ownership-active-investigation-loop-shadow`(建了本模块,未做本次改动);本任务与正在实现中的 `gap-ownership-active-proposal-repair-loop`(有界 judge 重试修复)Touches 零重叠(该任务不碰 `ownership-active-slice-adapter.mjs`),两者互补:本任务是"机械、确定性、无需 judge 重试"的那一类修复,不依赖本任务是否先落地。
+
+**⚠️ 2026-10-11 新增,立案后、落地前补入(liaison 实测复现,非理论)**：ArchGuard `simulate.ts` 的边对账范围**与其自己的文档承诺不一致**——`:338` 文档写"本实现只对账进入 moved-from 目录的边"，但实测代码对账的是**全图所有边**（`orderedEdges`,`:365-368`），且匹配按符号名全局（不看 `e.to`）。复现：最小图 `""->X`、`""->Y` 都有 `importedNames:["foo"]`，只搬 `foo: X->D`、不带任何 `stays`/`consumers`，实测 `removedEdges` 里连 `""->Y` 都被标成"retargeted-to:D"——`Y` 根本不是被搬出目录。liaison 已在 archguard 侧立案 `gap-slice-delta-reconciliation-scope-name-global`（**不归本任务修,原语侧缺陷,liaison 正在修**）。但这**直接威胁本任务两个真实候选的正确性断言**——如果 `resolveRunnerOptions` 或另外 4 个符号名,碰巧也出现在 `packages/quay/src` 图里某条无关的边上,本任务声明 `stays` 后重跑出来的 delta 可能在看不见的地方把那条无关边也错误标成移除——本任务原有的 AC1/AC2(只断言"目标边没被移除")**不足以**发现这种情况。新增 AC10 堵这个口子。
+
+**⚠️ 2026-10-11 第二次补入(liaison 指出 AC10 的前向兼容陷阱,立案后、落地前)**：AC10 最初写成"断言能检测到误标"——这个措辞的自然实现会去断言"真实原语确实把无关边标错了",**把测试焊死在 archguard 当前这个 bug 的存在上**。一旦 liaison 那边的 `gap-slice-delta-reconciliation-scope-name-global` 落地修复,这个断言会从绿变红,看起来像本任务的回归,其实什么都没坏。**已拆成两半(见下方 AC10a/AC10b)**:检测器逻辑本身用构造的合成数据断言(永远绿,不依赖原语当前行为);真实候选跑真实原语只做**读数记录**,不做断言(今天读到"有额外边"、以后读到"没有额外边"都是合法读数,不能让后者红了整个 suite)。
+
+**⚠️ 2026-10-11 第三次补入（落地 worker 实测，非理论）——标题与提案的"已发布 archguard 0.1.39"前提不成立**：`proposedCut.stays` 只存在于 archguard **源码** worktree，**不在已发布的 `@yalehwang/archguard@0.1.39` artifact 里**。证据：`npm pack @yalehwang/archguard@0.1.39` 解包后 `dist/analysis/slice-delta/simulate.js` 是 **426 行、`stays` 出现 0 次**；而 release 提交（`954fd7f4`，2026-10-10 13:11 +0800）之后约 5 小时，`ac525558`/`e3c77aef`（18:18/18:24）才把该子句落进源码，且 `package.json` 仍是 `0.1.39`（未发版的 working state）。**后果**：`resolveArchguardCli()` 默认解析到的那个 CLI 会**忽略**本任务发出的 `stays`，两个真实候选在**生产默认路径上仍然 `not-evaluated`**（实测：拒绝文本与 carrier 记录 75/76 逐字一致）——本任务的改动是**正确、前向兼容、零副作用**的，但在 archguard 发布含 `stays` 的版本之前是**惰性的**。适配器现在把这份惰性**报出来**（`stays_declared` + `stays_ignored_by_tool: true`，硬规则 3b：不伪装成通过），而不是让它静默。AC1/AC2/AC3/AC4 的读数因此由**带 `stays` 子句的 0.1.39 构建**取得并逐字记录在 `docs/analysis/ownership-active-slice-adapter-stays-replay.md` §1/§4；在只有已发布 artifact 的宿主上这四个测试**显式 skip 并写明原因**（不静默变绿）。另：AC10b 实测确认 liaison 的全图误移除反例**与 `stays` 同批到达**（已发布构建不复现、含子句构建复现 `"" -> Y` 被误标），两个真实候选**未触发**该反例（`unexpected=[]`，已核对）。—— 本任务不改任何 archguard 代码：让 `stays` 可用的那一步是 archguard 发版，不是本任务。
+
+## Proposal
+
+修改 `docs/analysis/ownership-active-slice-adapter.mjs`:在构造 `simulateRefactorSlice` 请求时,对每条进入"被搬出目录"(moved-from dir)但**只有部分**导入名被移动集覆盖的边,计算未覆盖名的补集,按 archguard 的真实契约(「Quay refactor architecture liaison」2026-10-11 直接读 `types.ts`+`simulate.ts` 给出,逐字记录):
+
+- `stays` 挂在 **`slice.proposedCut.stays`**(顶层数组,不是挂在每个 move 上,不是按边),形状 `{ dir: string; symbols: string[]; note?: string }[]`;`dir` = 该边的**目标**(即被搬出目录本身,例如 `gate/config`),`symbols` = 该目录上声明"不动"的符号字面量名。
+- 补集计算必须按"进入该被搬出目录的边"聚合(逐边的 `importedNames` 减去 `moves[].symbols`),**不得凭空产生任何符号名**——每一个 `stays` 符号都必须真实出现在某条真实边的 `importedNames` 里(对应 AC6)。
+- **这不是"让检查通过"的补丁,而是进入 archguard 自己文档化的"部分迁移"路径**:覆盖检查通过后(`simulate.ts:382`,`uncovered` 为空),**边不会被移除**——原边 `A -> B` 继续存在于结果里(不进 `removedEdges`),每个真正移动的符号各自新增一条 `addedEdges`(`source: "retarget-from-removed-edge"`),`affectedConsumers[].becomes === "survives"`,`accounting[]` 对该边记 `survives: true, staying: [...], strength: null`(`strength` 永远是 `null`——目录级图没有符号级定位,不做按符号数的拟合估算)。本任务的 AC 必须断言**这个确切形状**,不能假设"覆盖满足=边消失"(那是全覆盖/完全搬迁的另一条路径,不是本任务要触发的路径)。
+- **`stays` 是受信任输入,archguard 只做结构校验**(同一符号在两个不同 `dir` 都声明 stay、或同一符号既在 `moves` 又在 `stays` ⇒ `not-evaluated`"目的地冲突";`dir` 必须是图内部节点;`symbols` 非空数组),**不校验 `stays` 的符号是否真的出现在任何边上**——与本机制已知的"未知符号不被检测"是同一类风险,本任务的补集计算因为是从真实边的 `importedNames` 反算出来的,结构上不会凭空产生符号,但仍需测试断言这一点(不能假设"我写的代码是对的,不用测")。
+- **⚠️ 匹配是按符号名全局的,不是按边的**(`simulate.ts:382`/`:388` 的 `uncovered`/`staying` 判定只查 `destOfSymbol.has(n)`/`stayedSymbolDir.has(n)`,两者都不看边的 `to`)。意味着:给目录 A 声明的 `stays` 符号,如果同名符号也出现在进入**另一个**目录 B 的边上,会"顺带"覆盖 B 的那条边——这是 archguard 原语本身的行为(可能是故意支持 barrel/re-export 场景),**本任务不试图在 Quay 侧修正或绕过它**,只需要诚实应对:AC 断言必须钉在**具体那条边自己的 `accounting` 条目**上(不能只看整体 `status` 翻绿),避免"同名符号跨目录误覆盖"把一个不相关的断言结果误判为成功(对应 AC4)。
+- **跨目录冲突的降级**:若同一符号名在同一个 slice 里,同时是进入两个**不同**被搬出目录的边上的未覆盖名,朴素地各自声明一条 `stays` 会触发 archguard 的"目的地冲突"校验(两个不同 dir 都声明同一符号 stay)⇒ `not-evaluated`。本模块检测到这种情况时**不得**硬塞两条冲突声明,必须诚实退回原始覆盖不足结果(保持 `not-evaluated`,不是伪造一个"修复成功")(对应 AC5)。
+- **⚠️ 全图范围误移除的责任划分(对应 AC10a/AC10b)**:由于 `gap-slice-delta-reconciliation-scope-name-global`(archguard 原语侧,本任务不修,liaison 正在修),任何参与本次 `moves`/`stays` 的符号名,如果也出现在**无关边**的 `importedNames` 里,archguard 可能把那条无关边也错误标进 `removedEdges`。**检测这件事的代码**(给定一份 `removedEdges` 列表,找出意料之外的条目)用**合成数据**断言,永远绿,不依赖原语今天是否有这个 bug(AC10a)。**真实候选跑真实原语产生的 `removedEdges`** 只做**读数记录**,不做通过/失败断言——今天记"有额外边"、liaison 修完后记"没有额外边",两者都是合法读数(AC10b)。
+
+## Plan
+
+1. 在 `ownership-active-slice-adapter.mjs` 里,`restore`(完全覆盖边)旁新增一个补集计算:对每条进入被搬出目录但未被 `restore` 收录、且确实有部分覆盖(至少一个符号被移动)的边,算出该边 `importedNames` 中未被移动集覆盖的名字,按目标目录聚合成 `stays` 条目,写入请求的 `proposedCut.stays`。
+2. **真实两个候选的回归(AC1/AC2)**:从生产 carrier(`.quay/ownership-shadow-proposals.jsonl`)里读出这两条真实记录(`cli -> gate/config` 未覆盖 `resolveRunnerOptions`;`gate -> gate/config` 未覆盖 4 个符号)各自记录的 `ref_commit`/`scope_root`(锁定复用,不改用当前 develop 尖端,避免图漂移),补上 `stays` 后重跑 `slice-delta`,断言:`status` 不再是 `not-evaluated`;`removedEdges` 不含该边;`accounting` 对该边的条目为 `survives: true, staying: [<未覆盖名>], unaccounted: []`。
+3. **负对照①(AC3)**:故意漏掉一个真实未覆盖名不放进 `stays`,断言该边仍然 `unaccounted` 非空或仍是 `not-evaluated`——证明断言不是摆设。
+4. **名字全局匹配的诚实断言(AC4)**:构造一个 fixture,让同一个符号名同时出现在两条进入不同"非本次被搬出"目录的边上,断言测试对**目标边自己的 `accounting`** 做断言,而不是只看整体 `status`;并在报告里如实记录"archguard 的覆盖匹配是按符号名全局,不是按边"这一原语特性(不是本任务的缺陷,也不是本任务要修的东西)。
+5. **跨目录冲突降级(AC5)**:构造一个 fixture,让同一符号名在同一个 slice 里是两个不同被搬出目录各自的未覆盖名,断言模块检测到后不发出冲突的 `stays` 声明,结果保持原始 `not-evaluated`(诚实退化,不伪造成功)。
+6. **不凭空造符号(AC6)**:测试断言模块产出的每一个 `stays` 符号都能在输入边的真实 `importedNames` 里找到来源,不存在凭空符号。
+7. **moved/stayed 互斥(AC7)**:测试断言 `stays` 符号集合与 `moves[].symbols` 集合永远不相交。
+8. **真实落地复跑(AC8)**:用步骤 2 的两个真实候选,实际重跑并把 before/after(拒绝原因 → 计算成功的具体 delta 形状)写入报告 `docs/analysis/ownership-active-slice-adapter-stays-replay.md`。
+9. **额外边检测器(AC10a,单测,永远绿)**:写一个纯函数(给定 `removedEdges` 数组 + 期望的目标边),返回"有没有额外条目"。测试喂它一份合成的 `removedEdges`(一条期望 + 一条额外),断言能正确识别出那条额外的——这个测试只测 Quay 自己的函数逻辑,不调用真实 `slice-delta`,不受 archguard 当前是否有 bug 影响,设计上永远绿。
+10. **真实候选的额外边读数(AC10b,记录不断言)**:对两个真实候选重跑真实 `slice-delta` 后,把步骤 9 的检测器应用在真实 `removedEdges` 上,**把读数(有没有额外边、是哪条)原样写入报告**,不设置 pass/fail 门槛——`gap-slice-delta-reconciliation-scope-name-global` 落地前后,这里的读数预期会变,变化本身是正常的,**不是测试维护负担**;另加一个合成 fixture(liaison 给的最小反例:同名符号出现在两条不同目标的边上,只搬一条)跑过步骤 9 的检测器,同样是读数记录,不断言某个特定结果。
+11. 全量回归绿。
+
+## Touches
+
+- docs/analysis/ownership-active-slice-adapter.mjs
+- docs/analysis/ownership-active-slice-adapter-stays-replay.md
+- plugin/test/ownership-active-slice-adapter.test.mjs
+- plugin/fixtures/ownership-active-slice/locked-tree-00467d64.arch.json
+- tasks/gap-ownership-active-slice-adapter-stays-declaration.md
+
+## AC
+
+- [x] AC1 真实候选①可计算:`cli -> gate/config`(未覆盖 `resolveRunnerOptions`)在锁定的原始 `ref_commit`/`scope_root` 下,补 `stays` 后 `status` 不再是 `not-evaluated`,`removedEdges` 不含该边,`accounting` 该边条目为 `survives:true, staying:["resolveRunnerOptions"], unaccounted:[]`。
+- [x] AC2 真实候选②可计算:`gate -> gate/config`(4 个未覆盖符号)同上模式验证,4 个符号全部出现在 `staying`,`unaccounted:[]`。
+- [x] AC3 负对照①:漏放一个真实未覆盖名,该边仍 `unaccounted` 非空或仍 `not-evaluated`,不是伪造通过。
+- [x] AC4 名字全局匹配的诚实断言:构造同名符号跨目录的 fixture,测试断言钉在目标边自己的 `accounting` 条目,不是整体 `status`;报告如实记录该原语特性。
+- [x] AC5 跨目录冲突降级:同一符号名同时是两个不同被搬出目录的未覆盖名时,模块不发出冲突 `stays` 声明,结果诚实保持 `not-evaluated`。
+- [x] AC6 不凭空造符号:每个产出的 `stays` 符号都能在输入边真实 `importedNames` 里找到来源。
+- [x] AC7 moved/stayed 互斥:`stays` 符号集合与 `moves[].symbols` 永不相交。
+- [x] AC8 真实落地复跑:两个真实候选的 before/after 读数写入 `docs/analysis/ownership-active-slice-adapter-stays-replay.md`。
+- [x] AC9 全量回归绿:`bash scripts/test.sh --for-task gap-ownership-active-slice-adapter-stays-declaration` exit 0。
+- [x] AC10a 额外边检测器(合成数据单测,永远绿,不依赖 archguard 当前行为):构造一份含一条期望+一条额外的 `removedEdges`,断言检测器正确识别出额外条目。
+- [x] AC10b 真实候选额外边读数(记录,不设 pass/fail 门槛):两个真实候选重跑后把检测器应用在真实 `removedEdges` 上,读数原样写入报告;liaison 修复 `gap-slice-delta-reconciliation-scope-name-global` 落地前后这里的读数预期会变,变化本身合法,不作为回归信号。
+
+## DoD
+
+`docs/analysis/ownership-active-slice-adapter-stays-replay.md` 提交,记录两个真实候选从 `not-evaluated` 变为可计算的确切 delta 形状(边存活 + 新增边 + accounting survives 读数)、「Quay refactor architecture liaison」提供的精确契约引用(字段位置/校验规则/名字全局匹配特性)、跨目录冲突与名字全局匹配两个边界情形的处理方式、**以及 AC10b 的真实读数(即使两个真实候选恰好没有触发额外边也要写"核对过,未触发"而不是不提)**。⛔ 本任务不改任何 ArchGuard/archguard 仓库代码,不碰 `gap-ownership-active-proposal-repair-loop` 的任何文件,不创建或激活任何 Goal/task,不改变现有安全闸门与 3 连续轮次准入门限——本任务只让 `slice_delta` 对这 2 个真实候选能计算出结果,不保证它们最终能通过受限提案的其它门限。全部新增测试绿。
