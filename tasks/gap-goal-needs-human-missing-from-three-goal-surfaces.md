@@ -115,3 +115,11 @@ The defect is latent: 0 goals are in needs-human today. The checker at HEAD prin
 - plugin/scripts/enum-surface-parity-check.ts
 - packages/quay/test/serve-goal-status-needs-human.test.mjs (new)
 - packages/quay/test/gap-webui-goal-list-title-search-and-ac-rollup-sort.test.mjs
+
+## Blocker
+
+**2026-10-11T13:04:41.651Z — worker 未落地（exited-not-landed）**
+
+- 未落地原因：step=suite: AssertionError [ERR_ASSERTION]: route snapshot: 1 route(s) changed vs the baseline — a rendering change, or a genuine refactor that needs UPDATE_SNAPSHOT=1:
+- run_id：wk-prod-anchor
+- session_id：a1b45208-f0a9-437b-af81-74a6c402ebcd
