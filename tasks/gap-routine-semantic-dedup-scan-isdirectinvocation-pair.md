@@ -3,7 +3,7 @@ id: gap-routine-semantic-dedup-scan-isdirectinvocation-pair
 title: "semantic-dedup-scan: Byte-identical bodies; fold the pair as-is, but do
   NOT retarget onto name-based isDirectEntry (that is a behavior change), and
   concurrent-batch-scheduler.ts's "
-status: ready
+status: done
 labels:
   - gap
   - routine-filed
