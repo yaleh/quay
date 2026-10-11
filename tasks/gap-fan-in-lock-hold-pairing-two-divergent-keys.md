@@ -3,7 +3,7 @@ id: gap-fan-in-lock-hold-pairing-two-divergent-keys
 title: fan-in lock hold intervals are paired by two independent functions with
   different keys and double-acquire handling, so the same lock-event log yields
   different intervals and verdicts
-status: todo
+status: ready
 labels:
   - gap
   - architecture-discovery
