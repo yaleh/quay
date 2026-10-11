@@ -3,7 +3,7 @@ id: gap-entry-bar-c3-passes-on-absent-or-unreadable-decision-memory
 title: 'limited-proposal entry bar fails OPEN on condition 3: an absent
   decision_memory or one with unreadable_input:true is read as "not-known" and
   passes; malformed carrier lines are silently dropped from the streak input'
-status: ready
+status: done
 labels:
   - gap
   - defect

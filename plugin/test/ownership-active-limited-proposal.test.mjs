@@ -8,6 +8,7 @@
 
 import { test, after } from "node:test";
 import assert from "node:assert/strict";
+import { spawnSync } from "node:child_process";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
@@ -15,10 +16,10 @@ import { fileURLToPath } from "node:url";
 
 import { createGoalStore } from "../../packages/quay/src/goal-store.ts";
 import {
-  ENTRY_BAR_STREAK, CONDITIONS, APPROVAL_REQUIRED_LINE,
-  evaluateEntryBar, deriveConcernKind, deltaEvidence, decisionMemoryStatus, isProductionRun,
-  deltaFingerprint, groupByCandidate, nextGoalId, nextAcId, buildDraftGoal, proposeDraftGoal,
-  createGoalStoreWrite,
+  ENTRY_BAR_STREAK, CONDITIONS, APPROVAL_REQUIRED_LINE, MEMORY_NOT_EVALUATED,
+  evaluateEntryBar, deriveConcernKind, deltaEvidence, decisionMemoryStatus, decisionMemoryReading,
+  isProductionRun, deltaFingerprint, groupByCandidate, readCarrier, evaluateCarrier,
+  nextGoalId, nextAcId, buildDraftGoal, proposeDraftGoal, createGoalStoreWrite,
 } from "../../docs/analysis/ownership-active-limited-proposal.mjs";
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
@@ -260,4 +261,132 @@ test("sandbox: the module imports no filing machinery, writes no non-draft statu
   assert.doesNotMatch(code, /lifecycle_(promote|complete|retreat|adjudicate)/);
   // the module's own persistence is only via the injected seam; it never opens a file for writing
   assert.doesNotMatch(code, /\b(writeFileSync|appendFileSync|unlinkSync|renameSync|copyFileSync)\b/);
+});
+
+// ════════════════════════════════════════════════════════════════════════════════════════════════
+// gap-entry-bar-c3-passes-on-absent-or-unreadable-decision-memory (2026-10-11)
+//   Condition 3 used to FAIL OPEN: `decisionMemoryStatus` returned the loop's `not-known` DEFAULT for a
+//   record with no `decision_memory`, and ignored `architecture-decision-memory.mjs`'s `unreadable_input`
+//   flag — so "the memory was never consulted" and "the memory could not read its input" both passed C3 as
+//   "已查过、非已知豁免" (硬规则 6: 缺值 = 未查). Separately the CLI DROPPED unparseable carrier lines instead of
+//   counting them, which can silently un-break a run-streak (condition 4's input, fail-open).
+// ════════════════════════════════════════════════════════════════════════════════════════════════
+
+// ── AC1: `decision_memory` absent / unreadable ⇒ its OWN value, never the loop's `not-known` default ──
+test("AC1(c3): decisionMemoryStatus distinguishes 'never consulted' from 'nothing matched'", () => {
+  // ABSENT ≠ not-known — the memory was never consulted for this run.
+  assert.equal(decisionMemoryStatus(rec({ decision_memory: undefined })), MEMORY_NOT_EVALUATED);
+  assert.notEqual(decisionMemoryStatus(rec({ decision_memory: undefined })), "not-known");
+  assert.equal(decisionMemoryReading(rec({ decision_memory: undefined })).cause, "absent");
+  // A present `unreadable_input:true` is the SAME undetermined state, with its own cause — the memory's
+  // own "I could not read my input" flag now crosses the call boundary (硬规则 4c).
+  const unread = rec({ decision_memory: { status: "not-known", unreadable_input: true } });
+  assert.equal(decisionMemoryStatus(unread), MEMORY_NOT_EVALUATED);
+  assert.equal(decisionMemoryReading(unread).cause, "unreadable");
+  // A READ verdict is copied verbatim — the memory's own enum is untouched.
+  assert.equal(decisionMemoryStatus(rec({ decision_memory: { status: "not-known", unreadable_input: false } })), "not-known");
+  assert.equal(decisionMemoryStatus(rec({ decision_memory: { status: "exempted" } })), "exempted");
+  // A present object with no readable status is UNREAD, not "nothing matched".
+  assert.equal(decisionMemoryReading(rec({ decision_memory: {} })).cause, "unreadable");
+  assert.equal(decisionMemoryReading(rec({ decision_memory: "not-known" })).cause, "unreadable");
+  assert.equal(decisionMemoryReading(rec({ decision_memory: null })).cause, "absent");
+});
+
+test("AC1(c3): an ABSENT decision memory fails C3 as UNDETERMINED, and the reason names the absence", () => {
+  const v = evaluateEntryBar([rec({ decision_memory: undefined })]);
+  assert.equal(v.eligible, false);
+  assert.ok(v.reason.startsWith("CONDITION_3_UNDETERMINED"), v.reason);
+  assert.match(v.reason, /decision_memory is ABSENT/);
+  assert.match(v.reason, /缺席/);
+  assert.doesNotMatch(v.reason, /^CONDITION_3_NOT_MET/, "absence is UNDETERMINED, not a positive 'exempted' finding");
+});
+
+test("AC1(c3): an UNREADABLE decision-memory input fails C3 as UNDETERMINED, and the reason says why", () => {
+  const v = evaluateEntryBar([rec({ decision_memory: { status: "not-known", unreadable_input: true } })]);
+  assert.equal(v.eligible, false);
+  assert.ok(v.reason.startsWith("CONDITION_3_UNDETERMINED"), v.reason);
+  assert.match(v.reason, /不可读/);
+  assert.match(v.reason, /could not be READ/);
+  assert.match(v.reason, /unreadable_input=true/);
+});
+
+// ── AC2: negative/positive control — C3 refuses the unread states but still admits a READ not-known ──
+test("AC2(c3): an otherwise fully-qualifying record is refused at C3 when the memory is unread — with a positive control", () => {
+  // NEGATIVE CONTROL 1: every other condition satisfied, ONLY `decision_memory` removed ⇒ refused at C3.
+  const absent = (id) => rec({ run_id: id, decision_memory: undefined });
+  const vAbsent = evaluateEntryBar([absent("live:1"), absent("live:2"), absent("live:3")]);
+  assert.equal(vAbsent.eligible, false);
+  assert.ok(vAbsent.reason.startsWith("CONDITION_3_UNDETERMINED"), vAbsent.reason);
+
+  // NEGATIVE CONTROL 2: same record set with `unreadable_input:true` ⇒ refused the same way.
+  const unread = (id) => rec({ run_id: id, decision_memory: { status: "not-known", unreadable_input: true } });
+  const vUnread = evaluateEntryBar([unread("live:1"), unread("live:2"), unread("live:3")]);
+  assert.equal(vUnread.eligible, false);
+  assert.ok(vUnread.reason.startsWith("CONDITION_3_UNDETERMINED"), vUnread.reason);
+
+  // POSITIVE CONTROL: a READ `not-known` clears C3 — so the refusals above are not a blanket rejection.
+  // (The same 3 records become fully eligible, i.e. C4 passes too.)
+  const read = (id) => rec({ run_id: id, decision_memory: { status: "not-known", unreadable_input: false } });
+  const vOk = evaluateEntryBar([read("live:1"), read("live:2"), read("live:3")]);
+  assert.equal(vOk.eligible, true, vOk.reason);
+  assert.deepEqual(vOk.matchedConditions, [CONDITIONS.KIND, CONDITIONS.DELTA, CONDITIONS.MEMORY, CONDITIONS.STREAK]);
+  // and with a single record, C3 having passed is visible as "C4 is the first failure".
+  assert.ok(evaluateEntryBar([read("live:1")]).reason.startsWith("CONDITION_4_NOT_MET"));
+});
+
+// ── AC3: the carrier reader COUNTS malformed lines, and a malformed line fails EVERY candidate closed ──
+test("AC3(c3): readCarrier counts unreadable lines instead of silently dropping them", () => {
+  const dir = mkTmp();
+  const f = path.join(dir, "carrier.jsonl");
+  const good = [rec({ run_id: "live:1" }), rec({ run_id: "live:2" }), rec({ run_id: "live:3" })];
+  fs.writeFileSync(f, [...good.map((r) => JSON.stringify(r)), "{not json", ""].join("\n"));
+  const { records, malformed_lines, exists } = readCarrier(f);
+  assert.equal(exists, true);
+  assert.equal(records.length, 3, "the readable records are still returned");
+  assert.equal(malformed_lines, 1, "the bad line is COUNTED, never dropped");
+  // a missing file is not a malformed file
+  assert.deepEqual(readCarrier(path.join(dir, "absent.jsonl")), { records: [], malformed_lines: 0, exists: false });
+});
+
+test("AC3(c3): a malformed carrier line fails EVERY candidate closed; --write therefore cannot fire", () => {
+  const dir = mkTmp();
+  const f = path.join(dir, "carrier.jsonl");
+  const good = [rec({ run_id: "live:1" }), rec({ run_id: "live:2" }), rec({ run_id: "live:3" })];
+  fs.writeFileSync(f, good.map((r) => JSON.stringify(r)).join("\n") + "\n");
+  const clean = evaluateCarrier(readCarrier(f));
+  assert.equal(clean.malformed_lines, 0);
+  assert.equal(clean.carrier_unreadable, false);
+  assert.equal(clean.candidates.length, 1);
+  assert.equal(clean.candidates[0].eligible, true, "control: the clean carrier's candidate IS eligible");
+
+  // NEGATIVE CONTROL: append ONE non-JSON line — the SAME candidate must become ineligible.
+  fs.appendFileSync(f, "{ this is not json\n");
+  const dirty = evaluateCarrier(readCarrier(f));
+  assert.equal(dirty.malformed_lines, 1);
+  assert.equal(dirty.carrier_unreadable, true);
+  assert.equal(dirty.candidates.length, 1);
+  assert.equal(dirty.candidates[0].eligible, false, "a bad line anywhere makes the streak input untrustworthy");
+  assert.ok(dirty.candidates[0].reason.startsWith("MALFORMED_CARRIER_LINES"), dirty.candidates[0].reason);
+  assert.match(dirty.candidates[0].reason, /1 unreadable/);
+  assert.equal(dirty.candidates[0].suppressed_by, "MALFORMED_CARRIER_LINES");
+  // the raw slice rides along for the write path but is never serialised by evaluateCarrier itself
+  assert.equal(dirty.candidates[0].groupRecords.length, 3);
+});
+
+test("AC3(c3): the CLI reports malformed_lines and writes NO Goal when the carrier has a bad line", () => {
+  const dir = mkTmp();
+  const f = path.join(dir, "carrier.jsonl");
+  const goalDir = path.join(dir, "goals");
+  fs.mkdirSync(goalDir, { recursive: true });
+  const good = [rec({ run_id: "live:1" }), rec({ run_id: "live:2" }), rec({ run_id: "live:3" })];
+  fs.writeFileSync(f, good.map((r) => JSON.stringify(r)).join("\n") + "\n{ broken\n");
+  const r = spawnSync("node", ["--experimental-strip-types", path.join(REPO, MODULE_REL), "--carrier", f, "--root", dir, "--write"], { encoding: "utf8", timeout: 60_000 });
+  assert.equal(r.status, 0, r.stderr);
+  const out = JSON.parse(r.stdout);
+  assert.equal(out.malformed_lines, 1);
+  assert.equal(out.carrier_unreadable, true);
+  assert.equal(out.results.every((x) => x.eligible === false), true);
+  assert.equal(out.results.every((x) => x.reason.startsWith("MALFORMED_CARRIER_LINES")), true);
+  assert.equal(out.results.every((x) => x.proposed === undefined), true, "no Goal is proposed");
+  assert.equal(fs.readdirSync(goalDir).length, 0, "the store dir is empty — no Goal was written");
 });

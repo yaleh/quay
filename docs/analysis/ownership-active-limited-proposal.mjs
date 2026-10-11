@@ -26,7 +26,9 @@
 //   (1) concern_kind === "package-cycle"   — the only kind with a computable, falsifiable delta;
 //   (2) the delta was COMPUTED by the ArchGuard `slice-delta` primitive (not model-asserted), its negative
 //       control is falsified, and `provenanceConsistency === "match"`;
-//   (3) the decision memory says "not a known exemption / not a known-not-yet-filed item";
+//   (3) the decision memory was CONSULTED, its input was READABLE, and it says "not-known" (not a known
+//       exemption / not a known-not-yet-filed item). An absent `decision_memory` field or an
+//       `unreadable_input:true` reading is `MEMORY_NOT_EVALUATED` — 未查, which fails closed (硬规则 6);
 //   (4) ≥ N consecutive PRODUCTION live runs on the same candidate carry a consistent computed delta.
 
 import fs from "node:fs";
@@ -68,11 +70,51 @@ export function deriveConcernKind(rec) {
   return m ? m[1] : null;
 }
 
-/** The decision-memory verdict carried on the record (an enum; absent ⇒ `not-known`, the loop's default). */
-export function decisionMemoryStatus(rec) {
+/**
+ * The verdict when the decision memory was never consulted / could not be read. It gets its OWN value
+ * (硬规则 3b: "I could not evaluate" must not be shaped like "I evaluated and nothing matched") and it is
+ * NOT a member of `architecture-decision-memory.mjs`'s `DECISION_STATUS` enum on purpose: the memory's
+ * `not-known` means "the matcher ran and no entry matched", while this means "the matcher's verdict never
+ * reached this record at all" — the two must never collapse (硬规则 6: 缺值 = 未查, 不是「为假」).
+ */
+export const MEMORY_NOT_EVALUATED = "not-evaluated";
+
+/**
+ * Read the decision-memory verdict carried on a carrier record, ENUMERATING the reason it could not be read
+ * (the C3 refusal reason must be able to name WHICH kind of unreadability — 硬规则 4c: the guarantee that
+ * `architecture-decision-memory.mjs::isKnownExemption` makes for `unreadable_input` did not survive the call
+ * boundary, because only `status` was copied across it).
+ *
+ * @returns {{status:string, cause:"read"|"absent"|"unreadable", detail:string|null}}
+ *   `cause:"absent"`     — the record carries no `decision_memory` field at all (the memory was never consulted
+ *                           for this run). This is the MAJORITY state of the production carrier (see the
+ *                           report's C3 section for the dated reading) — previously read as `not-known`.
+ *   `cause:"unreadable"` — the field is present but cannot be read: `unreadable_input === true` (the memory's
+ *                           own "I could not read my input" flag), or no readable `status` at all.
+ */
+export function decisionMemoryReading(rec) {
   const dm = rec?.decision_memory;
-  if (!isObj(dm)) return "not-known";
-  return isStr(dm.status, 1) ? dm.status : "not-known";
+  if (dm === undefined || dm === null) {
+    return { status: MEMORY_NOT_EVALUATED, cause: "absent", detail: "the record carries no decision_memory field (the decision memory was never consulted for this run)" };
+  }
+  if (!isObj(dm)) {
+    return { status: MEMORY_NOT_EVALUATED, cause: "unreadable", detail: `decision_memory is present but is not an object (${JSON.stringify(dm)})` };
+  }
+  if (dm.unreadable_input === true) {
+    return { status: MEMORY_NOT_EVALUATED, cause: "unreadable", detail: "the decision memory reports unreadable_input=true — its input could not be read, so the absence of a match is UNREAD, not 'nothing matched'" };
+  }
+  if (!isStr(dm.status, 1)) {
+    return { status: MEMORY_NOT_EVALUATED, cause: "unreadable", detail: `decision_memory carries no readable status (${JSON.stringify(dm.status ?? null)})` };
+  }
+  return { status: dm.status, cause: "read", detail: null };
+}
+
+/**
+ * The decision-memory verdict carried on the record — the STATUS ENUM only (see `decisionMemoryReading` for
+ * the enumerated cause). An absent or unreadable memory returns `MEMORY_NOT_EVALUATED`, never `not-known`.
+ */
+export function decisionMemoryStatus(rec) {
+  return decisionMemoryReading(rec).status;
 }
 
 /**
@@ -159,10 +201,20 @@ export function evaluateEntryBar(carrierRecords) {
   if (!d.provenance_match) return withMatched(mismatch(`CONDITION_2_NOT_MET:provenanceConsistency=${String(d.provenance_status)} — the analysed graph is not shown to come from the commit the proposal cites`), matched);
   matched.push(CONDITIONS.DELTA);
 
-  // (3) decision memory: a recorded exemption or a known-but-unfiled item must NOT be repackaged as a Goal
-  const memory = decisionMemoryStatus(head);
+  // (3) decision memory: a recorded exemption or a known-but-unfiled item must NOT be repackaged as a Goal.
+  //     硬规则 6/3b (gap-entry-bar-c3-passes-on-absent-or-unreadable-decision-memory): an ABSENT memory
+  //     (the memory was never consulted for this run) and a present-but-UNREADABLE one are BOTH 未查 —
+  //     they must not pass as "已查过、非已知豁免". Only a READ verdict of `not-known` clears the bar.
+  const memoryReading = decisionMemoryReading(head);
+  const memory = memoryReading.status;
   if (memory === "exempted") return withMatched(mismatch(`CONDITION_3_NOT_MET:decision_memory=exempted (${head.decision_memory?.matched_entry?.id ?? "unknown entry"}) — a human already ruled this item is not to be changed`), matched);
   if (memory === "known-not-yet-filed") return withMatched(mismatch(`CONDITION_3_NOT_MET:decision_memory=known-not-yet-filed (${head.decision_memory?.matched_entry?.id ?? "unknown entry"}) — a known defect must be filed through its own path, not re-wrapped by this mechanism`), matched);
+  if (memory === MEMORY_NOT_EVALUATED) {
+    const named = memoryReading.cause === "absent"
+      ? "is ABSENT on the record (缺席 — the decision memory was never consulted for this run; 缺值 = 未查, never 'not-known')"
+      : `could not be READ (不可读 — ${memoryReading.detail})`;
+    return withMatched(mismatch(`CONDITION_3_UNDETERMINED:decision_memory ${named} — a candidate whose decision-memory verdict is not evaluated may not clear the entry bar`), matched);
+  }
   if (memory !== "not-known") return withMatched(mismatch(`CONDITION_3_UNDETERMINED:decision_memory status ${JSON.stringify(memory)} is not a recognised verdict`), matched);
   matched.push(CONDITIONS.MEMORY);
 
@@ -203,6 +255,78 @@ export function groupByCandidate(records) {
     groups.get(key).push(r);
   }
   return groups;
+}
+
+// ── reading a carrier FILE (a line that cannot be read is COUNTED, never silently dropped) ──────────────
+/**
+ * Read a carrier file into `{records, malformed_lines}`.
+ *
+ * 硬规则 3b/5 (gap-entry-bar-c3-passes-on-absent-or-unreadable-decision-memory): a line that cannot be
+ * parsed is NOT "a line that was not there". Dropping it silently is fail-OPEN in the worst place — if the
+ * dropped line is the non-qualifying production run that would have BROKEN a run-streak, the streak looks
+ * un-broken and condition 4's input is falsified. The field name `malformed_lines` mirrors
+ * `architecture-evidence-store.mjs::readCarrier` so both readers of the same carrier report the same thing.
+ *
+ * A line counts as malformed when it is non-empty AND (its JSON does not parse OR it does not parse to an
+ * object). Blank lines are structural (they separate records) and are not malformed.
+ *
+ * @returns {{records:Array<object>, malformed_lines:number, exists:boolean}}
+ */
+export function readCarrier(file) {
+  if (!file || !fs.existsSync(file)) return { records: [], malformed_lines: 0, exists: false };
+  const records = [];
+  let malformed = 0;
+  for (const line of fs.readFileSync(file, "utf8").split("\n")) {
+    if (line.trim() === "") continue;
+    let v;
+    try { v = JSON.parse(line); } catch { malformed++; continue; }
+    if (!isObj(v)) { malformed++; continue; }
+    records.push(v);
+  }
+  return { records, malformed_lines: malformed, exists: true };
+}
+
+/** The ONE fail-closed reason for an unreadable carrier, so the CLI and `evaluateCarrier` cannot drift. */
+function malformedCarrierReason(malformedLines, underlyingReason) {
+  return `MALFORMED_CARRIER_LINES:the carrier contains ${malformedLines} unreadable (non-JSON / non-record) line(s); a malformed line cannot be attributed to a candidate, so it cannot be excluded from that candidate's run-streak and the streak input is untrustworthy — every candidate is refused (硬规则 3b/5) [underlying verdict: ${underlyingReason}]`;
+}
+
+/**
+ * Judge an ENTIRE carrier (as returned by `readCarrier`) candidate by candidate.
+ *
+ * ⛔ FAIL-CLOSED on any malformed line (硬规则 3b/4c): because a bad line cannot be attributed to a
+ *    candidate, NO candidate's streak can be trusted while one exists — so every candidate's `eligible`
+ *    is forced to `false` and its `reason` names the bad-line count. The underlying per-candidate verdict is
+ *    preserved verbatim in the same reason string, so the reading is still inspectable.
+ *
+ * @returns {{malformed_lines:number, carrier_unreadable:boolean, candidates:Array<object>}}
+ *   each candidate entry carries `groupRecords` (its raw slice — used by the CLI's `--write` path); the CLI
+ *   must NOT serialise that field to stdout.
+ */
+export function evaluateCarrier(carrier) {
+  const records = Array.isArray(carrier?.records) ? carrier.records : [];
+  const malformed_lines = Number.isInteger(carrier?.malformed_lines) && carrier.malformed_lines > 0 ? carrier.malformed_lines : 0;
+  const carrier_unreadable = malformed_lines > 0;
+  const candidates = [];
+  for (const [key, group] of groupByCandidate(records)) {
+    const verdict = evaluateEntryBar(group);
+    const row = {
+      candidate: key,
+      n_records: group.length,
+      eligible: verdict.eligible,
+      reason: verdict.reason,
+      matchedConditions: verdict.matchedConditions,
+      streak: verdict.streak,
+      groupRecords: group,
+    };
+    if (carrier_unreadable) {
+      row.eligible = false;
+      row.reason = malformedCarrierReason(malformed_lines, verdict.reason);
+      row.suppressed_by = "MALFORMED_CARRIER_LINES";
+    }
+    candidates.push(row);
+  }
+  return { malformed_lines, carrier_unreadable, candidates };
 }
 
 // ── numbering (dynamic; no literal id is ever hard-coded — 硬规则 8: ids are never reused) ───────────
@@ -356,9 +480,8 @@ async function cli() {
   const val = (n, d) => { const i = args.indexOf(n); return i >= 0 ? args[i + 1] : d; };
   const root = val("--root", REPO_ROOT);
   const carrier = val("--carrier", path.join(root, ".quay", "ownership-shadow-proposals.jsonl"));
-  const records = fs.existsSync(carrier)
-    ? fs.readFileSync(carrier, "utf8").split("\n").filter(Boolean).map((l) => { try { return JSON.parse(l); } catch { return null; } }).filter(Boolean)
-    : [];
+  const { records, malformed_lines } = readCarrier(carrier);
+  const evaluated = evaluateCarrier({ records, malformed_lines });
   const out = [];
   const write = args.includes("--write");
   let store = null, writeSeam = null;
@@ -367,16 +490,19 @@ async function cli() {
     store = createGoalStore(path.join(root, "goals"), {});
     writeSeam = createGoalStoreWrite(store);
   }
-  for (const [key, group] of groupByCandidate(records)) {
-    const verdict = evaluateEntryBar(group);
-    const row = { candidate: key, n_records: group.length, eligible: verdict.eligible, reason: verdict.reason, matchedConditions: verdict.matchedConditions, streak: verdict.streak };
-    if (verdict.eligible && write) {
+  for (const row of evaluated.candidates) {
+    // Explicitly pick the report fields — `row.groupRecords` must never reach stdout (it is the raw carrier slice).
+    const outRow = { candidate: row.candidate, n_records: row.n_records, eligible: row.eligible, reason: row.reason, matchedConditions: row.matchedConditions, streak: row.streak };
+    if (row.suppressed_by) outRow.suppressed_by = row.suppressed_by;
+    // `--write` cannot fire on a malformed carrier: evaluateCarrier has already forced eligible=false for
+    // EVERY candidate, so no Goal can be written from an unreadable streak input.
+    if (row.eligible && write) {
       const existing = store.list().map((g) => g.id);
-      row.proposed = proposeDraftGoal(group[group.length - 1], existing, { write: writeSeam, existingAcIds: existing });
+      outRow.proposed = proposeDraftGoal(row.groupRecords[row.groupRecords.length - 1], existing, { write: writeSeam, existingAcIds: existing });
     }
-    out.push(row);
+    out.push(outRow);
   }
-  process.stdout.write(JSON.stringify({ carrier, records: records.length, candidates: out.length, results: out }, null, 2) + "\n");
+  process.stdout.write(JSON.stringify({ carrier, records: records.length, malformed_lines, carrier_unreadable: evaluated.carrier_unreadable, candidates: out.length, results: out }, null, 2) + "\n");
 }
 
 if (import.meta.url === `file://${process.argv[1]}`) cli();
