@@ -35,7 +35,7 @@ None of the earlier hypothesis-generation runs named this pair, and no task cove
 
 ## Definition of Done
 - All AC ticked with output pasted. ✅ (Evidence ①-④ below; the mutation/negative-control carriers were restored from a `cp` backup and `git diff` on the mutated file is empty.)
-- `scripts/test.sh --for-task gap-per-task-suite-record-required-fields-declared-twice` green. ✅ (Evidence ⑤.)
+- `scripts/test.sh --for-task gap-per-task-suite-record-required-fields-declared-twice` green. ✅ (Evidence ⑤: `SCOPED-GATE-EXIT=0`.)
 
 ## Evidence
 
@@ -118,8 +118,30 @@ A value-equal copy is exactly the drift this task removes, and the identity asse
 ### ⑤ DoD — the scoped gate
 ```
 $ bash scripts/test.sh --for-task gap-per-task-suite-record-required-fields-declared-twice --allow-thin
-<green — see the scoped-gate cache written for this task>
+SCOPED-GATE-EXIT=0
+
+== scoped static checks (change-relevant tier; the complete set still runs in the full-suite gate) ==
+superseded-capability check: PASS — every superseded capability is removed from the executable layer and not taught (5 superseded)
+NOT-EVALUATED: it0-split-or-commit-check --changed — no task file in this delta (base develop); nothing for the delta-scoped judgment to attribute (⛔ NOT conflated with PASS). The full-tier whole-store registration still runs at the full-suite gate.
+mirror-pair-drift-check: PASS — every mirror pair matches or is allow-listed with an unchanged signature.
+registry-path-literal-check: PASS — 0 second copies of the registry path in plugin/scripts or packages/quay/src ...
+serve-binding-literal-check: PASS — 1 quoted bind default, at packages/quay/src/serve-binding.ts:43 (SERVE_BINDING_FALLBACK) ...
+PASS — reattribution ratchet: 0 pure-S un-attributed test(s) (layer 1, blocking); 0 zombie entr(y|ies) (layer 3, blocking); 57 S-signal-multi un-attributed (layer 2, report-only)
+PASS — every declared landing target == forward branch 'develop' (0 violations)
+PASS — valueSccs=0 ≤ 0, typeSccs=0 ≤ 0, reverseEdges=0 ≤ 0 (headBaseline {"valueSccs":0,"typeSccs":0,"reverseEdges":0})
+target-identity-literal-check: PASS — 418 kernel file(s) scanned, 0 override-less identity literal(s)
+PASS — every suite-slot SSoT invariant holds (0 RED)
+PASS — embeddedInterpreterLines=6566 ≤ 6566, duplicateCopies=0 ≤ 0 (headBaseline {"embeddedInterpreterLines":6566,"duplicateCopies":0})
+PASS — every concurrency literal is at a QUAY_MAX_* definition point or a declared fallback (0 violations)
+...
+✔ declared-once — the checker's REQUIRED_FIELDS IS the writer's array object (===), not a second literal (0.035949ms)
+✔ declared-once — the checker source declares no `export const REQUIRED_FIELDS` of its own (0.259534ms)
+ℹ tests 62
+ℹ pass 62
+ℹ fail 0
+ℹ duration_ms 1244.081804
 ```
+The scoped gate ran against `develop` sha `e2947c363fe02f00a6b80438c50f927a5471537e` in the task worktree; the scoped-gate cache was then written for fan-in.
 
 ## Touches
 - tasks/gap-per-task-suite-record-required-fields-declared-twice.md
