@@ -4,7 +4,7 @@ title: "proposal-repair never engages on ArchGuard-origin refusals:
   computeSliceDelta drops the graph's legal-dir list on the not-evaluated path,
   so repair abstains at attempt 0 (NO_RECORDED_LEGAL_DIRS) for the only class
   that reaches ArchGuard"
-status: ready
+status: done
 labels:
   - gap
   - defect
