@@ -5,6 +5,24 @@
 // `inventory.mjs` / `investigate.mjs` / `verify.mjs` / `match.mjs` / `review.mjs` / `write-findings.mjs`)
 // so its readings are reproducible from the repo instead of from a scratch directory.
 //
+// ── THE INVENTORY FORMS, AND THE MECHANICAL PRE-VERIFICATION LAYER ──────────────────────────────────
+// The round-1 (2026-10-11) acceptance replay measured 6 of 7 refuted clusters as REUSE MISREAD AS
+// DUPLICATION: the components named by the hypothesis import ONE shared implementation, which one import
+// lookup would settle — a verifier model call (16–70 s) was spent refuting each one. The cause was the
+// INVENTORY: it carried exported names but no import edges, so similar export names looked like separate
+// implementations. (gap-hypgen-inventory-lacks-import-provenance-so-reuse-reads-as-duplication.)
+//   • `--inventory-form neutral` (DEFAULT) is the round-1 form, byte-for-byte frozen — its sha256 at the
+//     round-1 pin is a fixed quantity and must not move.
+//   • `--inventory-form provenance` is OPT-IN. Every entry gains the same two STRUCTURAL fields:
+//     `imports` (repo-relative module + the names taken from it) and `imported_by` (the fan-in modules).
+//     Re-exports (`export … from`, `export * from`) are imports like any other. A provenance run is a
+//     DIFFERENT experiment: it needs its own new prompt file, hashed in its own pre-registration (the
+//     frozen investigator prompt — `19be8974…` — is never touched).
+//   • The mechanical layer (`mechanicalRefutation`) runs BEFORE any verifier model call. When the
+//     hypothesis's intra-set import edges converge on one component and ≥2 members import from it, the
+//     cluster is recorded `refuted` / `shared-implementation` with the import lines as evidence and
+//     spends NO model call. Every other cluster goes to the model verifier unchanged.
+//
 // ── WHAT IT ANSWERS ─────────────────────────────────────────────────────────────────────────────────
 // Given a NEUTRAL inventory of every `plugin/scripts/*.ts` component at a pinned commit, can a model that
 // has (a) no repo access (`--tools ""`), (b) an EMPTY cwd (no CLAUDE.md / project memory) and (c) a fixed
@@ -57,6 +75,11 @@ import { fileURLToPath, pathToFileURL } from "node:url";
 import { execFileSync } from "node:child_process";
 import { sha256, appendRecord } from "./architecture-evidence-store.mjs";
 import { Sink } from "./arch-discovery-space.mjs";
+// Reuse the repo's OWN import parser (硬规则 1 — the parser behind `import-graph-check.ts`): it locates
+// the specifier + LINE with the code-position discipline (a mention inside a comment or a string is not
+// an edge). This module adds only the imported NAMES, which that parser does not return and which the
+// provenance form exists to expose; `resolveSpecifier` maps a relative specifier onto an in-scope node.
+import { extractImports, resolveSpecifier } from "../../plugin/scripts/import-graph-check.ts";
 // The ONE digest helper, re-exported so a caller (and the tests) hash bytes exactly the way the
 // pre-registration gate does — never a second, subtly different convention.
 export { sha256 };
@@ -110,6 +133,10 @@ export const EXPERIMENT_KEYS = Object.freeze(["experiment", "experiment_id", "ac
 /** Exported top-level names, in source order, de-duplicated, capped. ⛔ No import/call edges — the
  *  declared round-1 choice: they would point at specific pairs and un-blind the investigator. */
 export const EXPORT_RE = /^export\s+(?:async\s+)?(?:function\*?|const|let|class|type|interface|enum)\s+([A-Za-z_$][\w$]*)/gm;
+/** The inventory FORMS. `neutral` is the round-1 form and the DEFAULT (its rendered bytes are a frozen
+ *  quantity — the round-1 pin's sha256 must not move); `provenance` is opt-in and adds, for EVERY
+ *  component, the two structural fields `imports` / `imported_by`. */
+export const INVENTORY_FORMS = Object.freeze(["neutral", "provenance"]);
 export const CARRIER_LITERAL_RE = /\.quay\/[A-Za-z0-9._-]+\.(?:jsonl|json|log|yml)/g;
 export const CARRIER_JOIN_RE = /path\.join\(\s*["']\.quay["']\s*,\s*["']([A-Za-z0-9._-]+\.(?:jsonl|json|log|yml))["']/g;
 
@@ -122,6 +149,78 @@ export function extractCarriers(src, { forms = "literal", maxCarriers = 6 } = {}
   if (forms === "literal+join") out.push(...[...s.matchAll(CARRIER_JOIN_RE)].map((m) => `.quay/${m[1]}`));
   return [...new Set(out)].slice(0, maxCarriers);
 }
+
+// ── provenance form: the import graph, resolved to repo-relative in-scope modules (pure) ─────────────
+/** The SOURCE names a clause imports/exports. `{ a, b as c }` ⇒ `a`, `b` (the name in the DEFINING
+ *  module, never the local alias); `*` (a namespace import, or `export *`) ⇒ `["*"]`; a default binding
+ *  ⇒ `["default"]`. A re-export clause (`export { x } from "…"`, `export * from "…"`) is read by exactly
+ *  the same rule, so a re-export contributes an import edge like any other. */
+export function importClauseNames(clause) {
+  let c = String(clause ?? "").trim().replace(/^type\s+/, "").trim();
+  if (c.startsWith("*")) return ["*"];
+  const out = [];
+  const bi = c.indexOf("{");
+  const head = (bi >= 0 ? c.slice(0, bi) : c).replace(/,\s*$/, "").trim();
+  if (head && /^[A-Za-z_$][\w$]*$/.test(head)) out.push("default");
+  if (bi >= 0) {
+    for (const part of c.slice(bi + 1, c.lastIndexOf("}")).split(",")) {
+      const p = part.trim().replace(/^type\s+/, "");
+      if (!p) continue;
+      const src = p.split(/\s+as\s+/)[0].trim().replace(/^["']|["']$/g, "");
+      if (src && /^[A-Za-z_$][\w$]*$/.test(src)) out.push(src);
+    }
+  }
+  return [...new Set(out)];
+}
+
+/** The imported SOURCE names of the statement `extractImports` located at `line` with specifier `spec`.
+ *  That parser already proved the keyword and `from` sit at CODE positions, so this only has to slice
+ *  the clause out — re-reading the statement's lines, since a `import {\n … \n} from "x"` spans several. */
+export function importedNames(src, line, spec) {
+  const lines = String(src).split("\n");
+  let buf = "";
+  for (let i = Math.max(0, line - 1); i < Math.min(lines.length, line + 30); i++) {
+    buf += (i > line - 1 ? "\n" : "") + lines[i];
+    if (buf.includes(`"${spec}"`) || buf.includes(`'${spec}'`)) break;
+  }
+  const m = /(?:^|[\n;])[ \t]*(?:import|export)\b([\s\S]*?)\bfrom\b/.exec(buf);
+  return m ? importClauseNames(m[1]) : [];
+}
+
+/** Resolve every inventoried component's ES import edges onto REPO-RELATIVE in-scope modules.
+ *  `importsOf(f)` = `[{module, names, line}, …]` sorted deterministically; `importedBy(f)` = the fan-in.
+ *  A specifier that does not resolve to an in-scope node (a bare package, a `.json` data import, a file
+ *  outside the inventory) is NOT an edge and is dropped — the inventory is closed over its own scope. */
+export function buildProvenance({ files, readSource, scope = INVENTORY_SCOPE }) {
+  const names = [...files].sort();
+  const nodes = new Set(names.map((f) => repoRelComponent(f, scope)));
+  const importsOf = new Map();
+  for (const f of names) {
+    const src = readSource(f);
+    const seen = new Map();
+    for (const im of extractImports(src)) {
+      const module = resolveSpecifier(repoRelComponent(f, scope), im.spec, nodes);
+      if (!module) continue;
+      const key = `${module}\t${im.line}`;
+      const taken = importedNames(src, im.line, im.spec).sort();
+      if (seen.has(key)) seen.get(key).names = [...new Set([...seen.get(key).names, ...taken])].sort();
+      else seen.set(key, { module, names: taken, line: im.line });
+    }
+    importsOf.set(f, [...seen.values()].sort((a, b) => (a.module < b.module ? -1 : a.module > b.module ? 1 : 0) || a.line - b.line));
+  }
+  const importedBy = new Map(names.map((f) => [f, []]));
+  for (const f of names) for (const im of importsOf.get(f)) {
+    const target = names.find((n) => repoRelComponent(n, scope) === im.module);
+    if (target) importedBy.get(target).push(repoRelComponent(f, scope));
+  }
+  for (const [f, list] of importedBy) importedBy.set(f, [...new Set(list)].sort());
+  return { importsOf, importedBy };
+}
+
+/** The provenance rendering: the neutral line plus the two structural fields. Named implicitly (-) when
+ *  a component imports nothing in scope / nothing imports it. */
+export const renderProvenanceEntry = (e) =>
+  `${renderEntry(e)} | imports: ${(e.imports ?? []).map((i) => `${i.module}(${i.names.join("|") || "-"})`).join(", ") || "-"} | imported_by: ${(e.imported_by ?? []).join(", ") || "-"}`;
 
 /** Parse the capability catalog's check lines into `{ "<file>.ts": "<question>" }`. The catalog is the
  *  single declaration surface (its header owns the format); this reader is deliberately the same one the
@@ -143,23 +242,51 @@ export const renderEntry = (e) =>
 /** Build the neutral inventory. `files` = bare `.ts` basenames; `readSource(f)` returns its bytes;
  *  `catalog` is the capability-catalog output text. PURE — the caller supplies every input, so a fixture
  *  test can reproduce a hash without a repo. */
-export function buildInventory({ files, readSource, catalog, maxExports = 15, maxCarriers = 6, carrierForms = "literal" }) {
+export function buildInventory({ files, readSource, catalog, maxExports = 15, maxCarriers = 6, carrierForms = "literal", form = "neutral", scope = INVENTORY_SCOPE }) {
   if (!CARRIER_FORMS.includes(carrierForms)) throw new Error(`--carrier-forms must be one of ${CARRIER_FORMS.join("|")}, got ${carrierForms}`);
+  if (!INVENTORY_FORMS.includes(form)) throw new Error(`--inventory-form must be one of ${INVENTORY_FORMS.join("|")}, got ${form}`);
   const q = parseCatalog(catalog);
-  const entries = [...files].sort().map((f) => {
-    const src = readSource(f);
-    return {
+  const names = [...files].sort();
+  // Read each source ONCE: the neutral form reads it for exports/carriers, the provenance form also for
+  // its edges, and both must judge the SAME bytes.
+  const sources = new Map(names.map((f) => [f, readSource(f)]));
+  const prov = form === "provenance" ? buildProvenance({ files: names, readSource: (f) => sources.get(f), scope }) : null;
+  const entries = names.map((f) => {
+    const src = sources.get(f);
+    const e = {
       c: f,
       q: (q[f] || "(no catalog entry)").slice(0, 240),
       exports: extractExports(src, maxExports),
       carriers: extractCarriers(src, { forms: carrierForms, maxCarriers }),
     };
+    if (prov) {
+      e.imports = prov.importsOf.get(f) ?? [];
+      e.imported_by = prov.importedBy.get(f) ?? [];
+      // The source hash is NOT rendered (the form declares exactly `imports` + `imported_by`); it travels
+      // in the structured artifact and is what the mechanical layer cites as each import line's sha256.
+      e.sha256 = sha256(src);
+    }
+    return e;
   });
-  const text = entries.map(renderEntry).join("\n") + "\n";
-  return { entries, text, sha256: sha256(text), bytes: Buffer.byteLength(text, "utf8") };
+  const text = entries.map(form === "provenance" ? renderProvenanceEntry : renderEntry).join("\n") + "\n";
+  return { entries, text, sha256: sha256(text), bytes: Buffer.byteLength(text, "utf8"), form };
 }
 
 // ── contamination scan (pure) ────────────────────────────────────────────────────────────────────────
+/** Entry fields that are STRUCTURAL — a content hash, and (with the `provenance` form) the import /
+ *  fan-in EDGES — and are therefore NOT part of the contamination scan. An edge is a neutral repository
+ *  fact that every component carries many of, not a label; scanning it would flag the whole inventory
+ *  (and it is exactly the signal the mechanical layer reads, never a leak of a sealed pair). */
+export const CONTAMINATION_EXCLUDED_FIELDS = Object.freeze(["imports", "imported_by", "sha256"]);
+
+/** The text a contamination cross-mention can hide in: the entry with its STRUCTURAL fields removed.
+ *  Byte-for-byte the round-1 behaviour for the `neutral` form (whose entries carry none of them). */
+export function contaminationText(e) {
+  const o = {};
+  for (const k of Object.keys(e ?? {})) if (!CONTAMINATION_EXCLUDED_FIELDS.includes(k)) o[k] = e[k];
+  return JSON.stringify(o);
+}
+
 /**
  * Refuse to run if any ONE inventory entry names BOTH sides of a sealed pair. An entry "touches" a group
  * if it IS a member of it or its rendered text MENTIONS a member other than itself; two touched groups ⇒
@@ -170,7 +297,7 @@ export function buildInventory({ files, readSource, catalog, maxExports = 15, ma
 export function contaminationScan(entries, pairs) {
   const cross = [];
   for (const e of entries) {
-    const s = JSON.stringify(e);
+    const s = contaminationText(e);
     const self = String(e.c).replace(/\.ts$/, "");
     for (const p of pairs) {
       const groups = p.groups ?? [p.a, p.b].filter(Boolean);
@@ -379,24 +506,99 @@ export function verifierVerdict({ stdout = "", stderr = "", status = 0 } = {}) {
   return { verdict: j.verdict, reason: null, parsed: j };
 }
 
+// ── the mechanical pre-verification layer (pure, no model call) ──────────────────────────────────────
+/** Index a provenance artifact — an array of entries, or `{entries:[…]}` — by component BASENAME, so a
+ *  hypothesis's bare `touches-parser.ts` and the entry's repo-relative module land on one key. */
+export function provenanceIndex(provenance) {
+  const entries = Array.isArray(provenance) ? provenance : (provenance?.entries ?? []);
+  const byBase = new Map();
+  for (const e of entries) if (e?.c) byBase.set(path.posix.basename(String(e.c)), e);
+  return byBase;
+}
+
+/**
+ * THE MECHANICAL PRE-VERIFICATION — the verifier's own definition of `refuted` is "the components share a
+ * single implementation (one imports the other's function/constant)", and that is DECIDABLE from the
+ * import graph. So a model call is spent only when it is not.
+ * Predicate (exactly): among the hypothesis's components, the intra-set import edges all converge on ONE
+ * component (the DEFINER), and at least TWO members import from it. The definer imports no other member
+ * (a second target would break the convergence), so the set is a star. `symbol` = the names EVERY
+ * importer takes from the definer — empty when they take different names, and the edge still settles it.
+ * ⛔ With no provenance, or fewer than two KNOWN components, this returns `null`: "could not evaluate"
+ * must not be shaped like a refutation (硬规则 3b).
+ * @returns {null|{definer:string, symbol:string[]|null, importers:string[], evidence:object[]}}
+ */
+export function sharedImplementation({ components = [], provenance = null } = {}) {
+  if (!provenance) return null;
+  const byBase = provenanceIndex(provenance);
+  const set = [...new Set((components ?? []).map((c) => path.posix.basename(String(c).trim())))].filter((c) => byBase.has(c));
+  if (set.length < 2) return null;
+  const edges = [];
+  for (const c of set) {
+    for (const im of byBase.get(c).imports ?? []) {
+      const to = path.posix.basename(String(im.module ?? ""));
+      if (!to || to === c || !set.includes(to)) continue;
+      edges.push({ from: c, to, line: im.line ?? null, names: im.names ?? [] });
+    }
+  }
+  const targets = [...new Set(edges.map((e) => e.to))];
+  const importers = [...new Set(edges.map((e) => e.from))];
+  if (targets.length !== 1 || importers.length < 2) return null;
+  const definer = targets[0];
+  const nameSets = importers.map((c) => new Set(edges.filter((e) => e.from === c).flatMap((e) => e.names)));
+  const shared = [...(nameSets[0] ?? [])].filter((n) => nameSets.every((s) => s.has(n))).sort();
+  const evidence = edges
+    .slice()
+    .sort((a, b) => (a.from < b.from ? -1 : a.from > b.from ? 1 : 0) || (a.line ?? 0) - (b.line ?? 0))
+    .map((e) => ({ file: repoRelComponent(e.from), line: e.line, sha256: byBase.get(e.from)?.sha256 ?? null, imports: repoRelComponent(e.to), names: e.names }));
+  return { definer: repoRelComponent(definer), symbol: shared.length ? shared : null, importers: importers.map((c) => repoRelComponent(c)).sort(), evidence };
+}
+
+/** A pre-verification hit, in the verifier's OWN vocabulary: `refuted` with the reason
+ *  `shared-implementation` (⛔ never `undetermined` — import edges are positive evidence, not a budget
+ *  exhaustion). `null` ⇒ no mechanical refutation, the cluster goes on to the model verifier unchanged. */
+export function mechanicalRefutation({ components = [], provenance = null } = {}) {
+  const hit = sharedImplementation({ components, provenance });
+  return hit ? { verdict: "refuted", verdict_reason: "shared-implementation", ...hit } : null;
+}
+
 /**
  * Run the bounded verifier over the pre-registered selection (highest confidence first, cap = clusters).
- * Refuses unless cwd is the stripped pinned tree.
+ * Refuses unless cwd is the stripped pinned tree. The MECHANICAL layer is applied to every cluster
+ * BEFORE the model loop, so a mechanically refuted cluster spends no model call.
  * @param {(prompt:string, ctx:object)=>Promise<object>} o.runModel INJECTABLE
+ * @param {object[]|null} o.provenance structural inventory entries (see `sharedImplementation`)
  */
-export async function runVerifier({ clusters, pinDir, cwd, promptTemplate, runModel, maxClusters = HARD_MAX_CLUSTERS, concurrency = 5, maxMs = null }) {
+export async function runVerifier({ clusters, pinDir, cwd, promptTemplate, runModel, maxClusters = HARD_MAX_CLUSTERS, concurrency = 5, maxMs = null, provenance = null }) {
   if (maxClusters > HARD_MAX_CLUSTERS) return { ok: false, code: EXIT.maxClusters, reasons: [`MAX_CLUSTERS_ABOVE_CEILING:${maxClusters}>${HARD_MAX_CLUSTERS}`] };
   const refusal = verifyCwdRefusal(cwd, pinDir);
   if (refusal) return { ok: false, code: EXIT.cwdNotNeutral, reasons: [refusal] };
   const selected = clusters.slice(0, maxClusters);
   const results = new Array(selected.length);
   const t0 = Date.now();
+  // The mechanical layer is computed for EVERY selected cluster up front (pure, no model call), so a
+  // mechanically refuted cluster can never reach `runModel` — the "spends no model call" claim is a
+  // property of this loop, not of the caller's discipline.
+  const mech = selected.map((c) => mechanicalRefutation({ components: c.rep.components, provenance }));
   const runOne = async (k) => {
     const c = selected[k];
     const hyp = {
       components: c.rep.components, concept_kind: c.rep.concept_kind, claim: c.rep.claim,
       evidence_needed: c.rep.evidence_needed, counterexample_requirement: c.rep.counterexample_requirement,
     };
+    if (mech[k]) {
+      const m = mech[k];
+      results[k] = {
+        cluster: k + 1, members: c.members, kind: c.rep.concept_kind, comps: c.rep.comps,
+        claim: String(c.rep.claim ?? "").slice(0, 200),
+        wall_ms: 0, out_bytes: 0, exit: null,
+        verdict: m.verdict, verdict_reason: m.verdict_reason, mechanical: true,
+        definer: m.definer, shared_symbol: m.symbol,
+        intentional: null, evidence: m.evidence, counterexample: null,
+        summary: `shared implementation: ${m.importers.length} components import from ${m.definer}`,
+      };
+      return;
+    }
     const prompt = String(promptTemplate).replace("{{HYP}}", JSON.stringify(hyp));
     const t0 = Date.now();
     const r = await runModel(prompt, { cluster: k + 1, kind: c.rep.concept_kind });
@@ -406,7 +608,7 @@ export async function runVerifier({ clusters, pinDir, cwd, promptTemplate, runMo
       cluster: k + 1, members: c.members, kind: c.rep.concept_kind, comps: c.rep.comps,
       claim: String(c.rep.claim ?? "").slice(0, 200),
       wall_ms: Date.now() - t0, out_bytes: String(r?.stdout ?? "").length, exit: r?.status ?? null,
-      verdict: m.verdict, verdict_reason: m.reason,
+      verdict: m.verdict, verdict_reason: m.reason, mechanical: false,
       intentional: j?.intentional_difference_found ?? null,
       evidence: Array.isArray(j?.evidence) ? j.evidence : [],
       counterexample: j?.counterexample ?? null,
@@ -419,7 +621,9 @@ export async function runVerifier({ clusters, pinDir, cwd, promptTemplate, runMo
   }
   return {
     ok: true, clusters_total: clusters.length, verified: selected.length,
-    beyond_cap: Math.max(0, clusters.length - selected.length), results,
+    beyond_cap: Math.max(0, clusters.length - selected.length),
+    mechanical_refuted: mech.filter(Boolean).length,
+    results,
   };
 }
 
@@ -635,14 +839,14 @@ export function emit(records, { out, writeStore = false, root = null, budget = n
 /** Materialise `plugin/scripts` at `rev` into `dir` and read the catalog + sources from there. The
  *  catalog is a thin wrapper that resolves its OWN directory, so a materialised copy reproduces the pin's
  *  catalog byte-for-byte (verified against the round-1 hashes). */
-export function inventoryAtPin({ root, rev, dir, maxExports = 15, maxCarriers = 6, carrierForms = "literal" }) {
+export function inventoryAtPin({ root, rev, dir, maxExports = 15, maxCarriers = 6, carrierForms = "literal", form = "neutral" }) {
   const tar = execFileSync("git", ["-C", root, "archive", "--format=tar", rev, "plugin/scripts"], { maxBuffer: 1 << 30 });
   fs.mkdirSync(dir, { recursive: true });
   execFileSync("tar", ["-x", "-C", dir], { input: tar, maxBuffer: 1 << 26 });
   const scriptsDir = path.join(dir, "plugin", "scripts");
   const catalog = execFileSync("bash", [path.join(scriptsDir, "capability-catalog.sh")], { cwd: dir, encoding: "utf8", maxBuffer: 1 << 26 });
   const files = fs.readdirSync(scriptsDir).filter((f) => f.endsWith(".ts"));
-  const built = buildInventory({ files, readSource: (f) => fs.readFileSync(path.join(scriptsDir, f), "utf8"), catalog, maxExports, maxCarriers, carrierForms });
+  const built = buildInventory({ files, readSource: (f) => fs.readFileSync(path.join(scriptsDir, f), "utf8"), catalog, maxExports, maxCarriers, carrierForms, form });
   return { ...built, rev };
 }
 
@@ -834,9 +1038,11 @@ async function cli(argv = process.argv.slice(2)) {
     const keep = has(args, "--keep-tree");
     const dir = argOf(args, "--work", null) ?? fs.mkdtempSync(path.join(os.tmpdir(), "hypgen-pin-"));
     const carrierForms = argOf(args, "--carrier-forms", "literal");
+    const form = argOf(args, "--inventory-form", "neutral");
     const maxExports = Number(argOf(args, "--max-exports", 15));
     const maxCarriers = Number(argOf(args, "--max-carriers", 6));
-    const inv = inventoryAtPin({ root, rev: pin, dir, maxExports, maxCarriers, carrierForms });
+    if (!INVENTORY_FORMS.includes(form)) { console.error(`${TOOL} inventory: --inventory-form must be one of ${INVENTORY_FORMS.join("|")}, got ${form}`); return EXIT.usage; }
+    const inv = inventoryAtPin({ root, rev: pin, dir, maxExports, maxCarriers, carrierForms, form });
     const pairsFile = argOf(args, "--contamination-pairs", null);
     let scan = { ok: true, cross: [] };
     if (pairsFile) {
@@ -844,11 +1050,19 @@ async function cli(argv = process.argv.slice(2)) {
       scan = contaminationScan(inv.entries, pairs);
     }
     if (!keep && !argOf(args, "--work", null)) fs.rmSync(dir, { recursive: true, force: true });
-    const outFile = argOf(args, "--out", path.join(outDir, `inventory-${carrierForms === "literal" ? "A" : "B"}.txt`));
+    const tag = form === "provenance" ? "provenance" : (carrierForms === "literal" ? "A" : "B");
+    const outFile = argOf(args, "--out", path.join(outDir, `inventory-${tag}.txt`));
     if (scan.ok) { fs.mkdirSync(path.dirname(outFile), { recursive: true }); fs.writeFileSync(outFile, inv.text, "utf8"); }
-    const report = { tool: TOOL, verb, rev: pin, components: inv.entries.length, bytes: inv.bytes, sha256: inv.sha256, carrier_forms: carrierForms, max_exports: maxExports, max_carriers: maxCarriers, contamination: scan, out: scan.ok ? outFile : null };
+    // The STRUCTURED sidecar. The rendered text carries exactly the two declared fields; the sidecar adds
+    // each component's source sha256, which is what the mechanical layer cites as an import line's hash.
+    const entriesFile = argOf(args, "--out-entries", null);
+    if (scan.ok && entriesFile) {
+      fs.mkdirSync(path.dirname(path.resolve(entriesFile)), { recursive: true });
+      fs.writeFileSync(path.resolve(entriesFile), JSON.stringify({ form, rev: pin, sha256: inv.sha256, components: inv.entries.length, entries: inv.entries }, null, 1), "utf8");
+    }
+    const report = { tool: TOOL, verb, rev: pin, form, components: inv.entries.length, bytes: inv.bytes, sha256: inv.sha256, carrier_forms: carrierForms, max_exports: maxExports, max_carriers: maxCarriers, contamination: scan, out: scan.ok ? outFile : null, entries_out: scan.ok && entriesFile ? path.resolve(entriesFile) : null };
     if (json) console.log(JSON.stringify(report, null, 1));
-    else console.log(`${TOOL} inventory rev=${String(pin).slice(0, 9)} components=${inv.entries.length} sha256=${inv.sha256} contamination=${scan.ok ? "clean" : `REFUSED(${scan.cross.length})`}`);
+    else console.log(`${TOOL} inventory rev=${String(pin).slice(0, 9)} form=${form} components=${inv.entries.length} sha256=${inv.sha256} contamination=${scan.ok ? "clean" : `REFUSED(${scan.cross.length})`}`);
     return scan.ok ? 0 : EXIT.contamination;
   }
 
@@ -898,14 +1112,19 @@ async function cli(argv = process.argv.slice(2)) {
     if (!runtime.ok) { console.error(`${TOOL} verify: ${runtime.reason}`); return EXIT.usage; }
     const { launchArgv, runAsync } = runtime.mod;
     const maxTurns = Number(argOf(args, "--max-turns", 8));
+    // The provenance sidecar (from `inventory --inventory-form provenance --out-entries`) turns on the
+    // MECHANICAL pre-verification layer. Absent ⇒ the verifier behaves exactly as before (no edge data =
+    // no mechanical refutation, 硬规则 3b).
+    const provenanceFile = argOf(args, "--provenance", null);
+    const provenance = provenanceFile ? JSON.parse(fs.readFileSync(provenanceFile, "utf8")) : null;
     const runModel = async (p) => runAsync(hardenedArgv(launchArgv, p, root, { tools: "Read,Grep", maxTurns }), { timeoutMs: Number(argOf(args, "--timeout-ms", 300_000)), collectStderr: true, stdinData: p });
-    const res = await runVerifier({ clusters, pinDir, cwd: process.cwd(), promptTemplate: template, runModel, maxClusters: Number(argOf(args, "--max-clusters", HARD_MAX_CLUSTERS)), maxMs: argOf(args, "--max-ms", null) === null ? null : Number(argOf(args, "--max-ms")) });
+    const res = await runVerifier({ clusters, pinDir, cwd: process.cwd(), promptTemplate: template, runModel, provenance, maxClusters: Number(argOf(args, "--max-clusters", HARD_MAX_CLUSTERS)), maxMs: argOf(args, "--max-ms", null) === null ? null : Number(argOf(args, "--max-ms")) });
     if (!res.ok) { console.error(`${TOOL} verify: ${res.reasons.join(", ")}`); return res.code; }
     const outFile = path.resolve(argOf(args, "--out", path.join(outDir, "verify.json")));
     fs.mkdirSync(path.dirname(outFile), { recursive: true });
-    fs.writeFileSync(outFile, JSON.stringify({ clusters_total: res.clusters_total, verified: res.verified, beyond_cap: res.beyond_cap, results: res.results }, null, 1));
+    fs.writeFileSync(outFile, JSON.stringify({ clusters_total: res.clusters_total, verified: res.verified, beyond_cap: res.beyond_cap, mechanical_refuted: res.mechanical_refuted, results: res.results }, null, 1));
     const tally = emit(verifyRecords({ verify: res, experiment }), { out: path.join(outDir, "verify-records.jsonl"), writeStore: has(args, "--write-store"), root: has(args, "--write-store") ? root : null });
-    console.log(JSON.stringify({ clusters_total: res.clusters_total, verified: res.verified, beyond_cap: res.beyond_cap, verdicts: res.results.reduce((a, r) => ((a[r.verdict] = (a[r.verdict] ?? 0) + 1), a), {}), validator: { accepted: tally.accepted, refused: tally.refused } }, null, json ? 1 : 0));
+    console.log(JSON.stringify({ clusters_total: res.clusters_total, verified: res.verified, beyond_cap: res.beyond_cap, mechanical_refuted: res.mechanical_refuted, verdicts: res.results.reduce((a, r) => ((a[r.verdict] = (a[r.verdict] ?? 0) + 1), a), {}), validator: { accepted: tally.accepted, refused: tally.refused } }, null, json ? 1 : 0));
     return 0;
   }
 
@@ -1006,9 +1225,14 @@ async function cli(argv = process.argv.slice(2)) {
   console.error("  file it used plus that file's hash, and the pre-registration gate re-derives each run's recorded");
   console.error("  prompt digest from the prompt + inventory bytes supplied here (--prompt-sha / --inventory-sha are");
   console.error("  optional extra assertions, never the gate).");
-  console.error("  inventory   --pin <rev> [--max-exports N] [--max-carriers N] [--carrier-forms literal|literal+join] [--contamination-pairs <f>] [--out <f>]");
+  console.error("  inventory   --pin <rev> [--inventory-form neutral|provenance] [--max-exports N] [--max-carriers N] [--carrier-forms literal|literal+join] [--contamination-pairs <f>] [--out <f>] [--out-entries <f>]");
+  console.error("              --inventory-form provenance adds `imports` / `imported_by` to every entry (opt-in; the");
+  console.error("              neutral form is the DEFAULT and its bytes are frozen). A provenance run needs its OWN");
+  console.error("              prompt file + pre-registration; the frozen investigator prompt is never touched.");
   console.error("  investigate --inventory <f> --neutral-dir <dir> [--investigator-prompt <f>] [--runs N] [--max-runs N] [--max-ms N] [--timeout-ms N] [--out-dir <dir>]");
-  console.error("  verify      --pin-dir <dir> --runs <dir> --inventory <f> [--prereg <f>] [--investigator-prompt <f>] [--experiment <id>] [--max-clusters N] [--max-turns N] [--max-ms N]");
+  console.error("  verify      --pin-dir <dir> --runs <dir> --inventory <f> [--provenance <f>] [--prereg <f>] [--investigator-prompt <f>] [--experiment <id>] [--max-clusters N] [--max-turns N] [--max-ms N]");
+  console.error("              --provenance <f> turns on the MECHANICAL pre-verification layer: a cluster whose members'");
+  console.error("              edges converge on one component is recorded refuted/shared-implementation with NO model call.");
   console.error("  match       --runs <dir> --labels <f> --inventory <f> [--prereg <f>] [--investigator-prompt <f>] [--experiment <id>] [--run-count N] [--write-store]");
   console.error("  review      --runs <dir> --labels <f> --matches <f> --neutral-dir <dir> --inventory <f> [--prereg <f>] [--experiment <id>]");
   console.error("  report      --artifacts <dir> [--labels <f>] [--out <md>]");

@@ -3,7 +3,7 @@ id: gap-hypgen-verifier-budget-exhaustion-is-unobservable-and-unscoped
 title: "arch-hypothesis-generation verifier: turn-budget exhaustion is
   unobservable (no per-turn record), searches are unscoped, and there is no
   mechanical evidence pack or budget-aware ordering"
-status: todo
+status: ready
 labels:
   - gap
   - architecture-discovery
