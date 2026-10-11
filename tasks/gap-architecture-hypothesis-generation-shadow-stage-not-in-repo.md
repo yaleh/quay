@@ -3,7 +3,7 @@ id: gap-architecture-hypothesis-generation-shadow-stage-not-in-repo
 title: Land the blind cross-component hypothesis-generation shadow stage
   (pre-registered, sealed eval set, bounded verifier) as a report-only analysis
   tool
-status: ready
+status: done
 labels:
   - gap
   - architecture-discovery
