@@ -41,15 +41,15 @@ depends_on:
 
 ## AC
 
-- [ ] AC1 证据装配:commit 锁定、限定 `scopeRoot`、遵守 deny-list、经 redact;章程注释按注释块起止位置提取(测试:一个仅在注释里提到某文件名的块不产生依赖类证据);每条证据有 `id/kind/定位/sha256`;字节上限生效且截断显式记录;对 bundle 做键名扫描,断言不含 `scc`/`cycle`/`delta`/`sccLeft`/`slice_delta`(负对照:人为注入一个 `sccLeft` 字段时测试转红)。
-- [ ] AC2 机械事实正/负对照(真实 commit):P1(见 AC4,`gate/config/utils.ts → kernel` @`162f8c380`)`dest_boundary_violation=false`;N1(`gate/config/loader.ts` 的 `discoverWorkspaceRoot`/`resolveWorkspaceRootOrThrow`/`readGatesConfig`/`loadWorkspaceGateMetadata`/`loadWorkspaceGates` → `kernel` @`162f8c380`)`dest_boundary_violation=true` 且 `io_pull` 非空;`live:2026-10-11T11-03-06-609Z:1` 的 stores→kernel 切法 `dest_boundary_violation=true`;生产候选 `gate/config/loader.ts → gate`(record 91 move 3)的 `transferred_dependencies` 含指向 `src/config.ts`(core-root)的边。
-- [ ] AC2b 边界来源不一致可见:对 `gate/config` 节点在 `add3e7318` 计算 `dest_boundary`,若图出边缺失 `gate/config/index.ts` 的两条 `export … from "../../kernel/gate-run-options.ts"` 重导出边,则 `boundary_source_agreement` 必须为 `graph_missing_edges` 且差异清单点名这两条;若图已包含它们则为 `agree`——**两种都是合法读数,但不得出现"缺边却报 agree"**(负对照:人为从解析结果中删去一条边,状态必须变为 `parse_missing_edges`)。
-- [ ] AC3 judge 契约:审查函数签名不含标签(结构测试);编造证据 id ⇒ 该 move `not-evaluated`/`UNGROUNDED_CITATION`;不可解析输出 ⇒ `not-evaluated`(≠`abstain`);整体合成规则逐分支有测试;带边界违例而未在 `counter_evidence_refs` 引用之的 `review` 被降为 `abstain`。
-- [ ] AC4 隔离评估集:`cases.json` 至少含——**人工标注正例** P1 = GOAL-034 已落地切法(`gate/config/utils.ts`+`types.ts` 的 `shQuote`/`DEFAULT_ACCEPTANCE_TIMEOUT_MS`/`resolveAcceptanceTimeoutMs`/`resolveRunnerOptions`/`GateConfig`/`RunnerOptions` → `kernel`,@`162f8c380`)、P2 = GOAL-033 已落地切法(取 `plugin/fixtures/ownership-active-slice/goal-033-slice.json` 的 moves,@`1ac06fd85`);**人工标注负例** N1(见 AC2,标签来源 = GOAL-034 正文"停止扩大范围的信号"所列被否决的宽移动);以及**派生标签/无标签**的生产候选(上述三次 `loader → gate`、record 91 三步切法、stores→kernel),每条带 `label_source ∈ {human-approved, human-rejected, derived, unlabeled}`,计分时分开统计。`DENY_PATH_PATTERNS` 新增 `^plugin\/fixtures\/ownership-semantic-eval\/`(负对照:投研器 `read_file` 该文件 ⇒ `PATH_DENIED`)。
-- [ ] AC5 真实评估运行(默认 launcher,真 judge):全集跑一遍,并对 P1、N1 各重复 1 次报告一致性;逐案记录建议/置信度/引用/机械事实/judge 调用数/bundle 字节/耗时;对人工标注案例给出混淆读数(误报 FP = 对正例判 reject;漏报 FN = 对负例判 review;abstain 单列、不算正确);小 n 只报读数不报比率。**运行前记录 judge prompt 的 sha256;看到结果后若改 prompt,必须全集重跑并同时报告两次**(防止按标签调参)。任何结果都是合法终态。
-- [ ] AC6 泄露审计:对每个**实际发送**的 bundle 扫描 holdout 词汇(`GOAL-034`、`ownership-wrong`、`宽移动`、`Holdout B`、`not config-loading`)⇒ 0 命中;正对照:同一审计对一个未 redact 的 `gate/config/types.ts` bundle 必须报警。
-- [ ] AC7 advisory 接入不改门:`--review` 开与关时,每个候选的 `eligible`/`reason`/`streak` 逐字相同(测试断言);`--write` 写出的 draft 正文含审查摘要与证据引用;无 `--write` 时不写任何 Goal。
-- [ ] AC8 回归:既有 ownership-active / architecture-* 测试与新增测试全绿;`bash scripts/test.sh --for-task gap-ownership-semantic-review-of-proposed-slice` exit 0。
+- [x] AC1 证据装配:commit 锁定、限定 `scopeRoot`、遵守 deny-list、经 redact;章程注释按注释块起止位置提取(测试:一个仅在注释里提到某文件名的块不产生依赖类证据);每条证据有 `id/kind/定位/sha256`;字节上限生效且截断显式记录;对 bundle 做键名扫描,断言不含 `scc`/`cycle`/`delta`/`sccLeft`/`slice_delta`(负对照:人为注入一个 `sccLeft` 字段时测试转红)。
+- [x] AC2 机械事实正/负对照(真实 commit):P1(见 AC4,`gate/config/utils.ts → kernel` @`162f8c380`)`dest_boundary_violation=false`;N1(`gate/config/loader.ts` 的 `discoverWorkspaceRoot`/`resolveWorkspaceRootOrThrow`/`readGatesConfig`/`loadWorkspaceGateMetadata`/`loadWorkspaceGates` → `kernel` @`162f8c380`)`dest_boundary_violation=true` 且 `io_pull` 非空;`live:2026-10-11T11-03-06-609Z:1` 的 stores→kernel 切法 `dest_boundary_violation=true`;生产候选 `gate/config/loader.ts → gate`(record 91 move 3)的 `transferred_dependencies` 含指向 `src/config.ts`(core-root)的边。
+- [x] AC2b 边界来源不一致可见:对 `gate/config` 节点在 `add3e7318` 计算 `dest_boundary`,若图出边缺失 `gate/config/index.ts` 的两条 `export … from "../../kernel/gate-run-options.ts"` 重导出边,则 `boundary_source_agreement` 必须为 `graph_missing_edges` 且差异清单点名这两条;若图已包含它们则为 `agree`——**两种都是合法读数,但不得出现"缺边却报 agree"**(负对照:人为从解析结果中删去一条边,状态必须变为 `parse_missing_edges`)。
+- [x] AC3 judge 契约:审查函数签名不含标签(结构测试);编造证据 id ⇒ 该 move `not-evaluated`/`UNGROUNDED_CITATION`;不可解析输出 ⇒ `not-evaluated`(≠`abstain`);整体合成规则逐分支有测试;带边界违例而未在 `counter_evidence_refs` 引用之的 `review` 被降为 `abstain`。
+- [x] AC4 隔离评估集:`cases.json` 至少含——**人工标注正例** P1 = GOAL-034 已落地切法(`gate/config/utils.ts`+`types.ts` 的 `shQuote`/`DEFAULT_ACCEPTANCE_TIMEOUT_MS`/`resolveAcceptanceTimeoutMs`/`resolveRunnerOptions`/`GateConfig`/`RunnerOptions` → `kernel`,@`162f8c380`)、P2 = GOAL-033 已落地切法(取 `plugin/fixtures/ownership-active-slice/goal-033-slice.json` 的 moves,@`1ac06fd85`);**人工标注负例** N1(见 AC2,标签来源 = GOAL-034 正文"停止扩大范围的信号"所列被否决的宽移动);以及**派生标签/无标签**的生产候选(上述三次 `loader → gate`、record 91 三步切法、stores→kernel),每条带 `label_source ∈ {human-approved, human-rejected, derived, unlabeled}`,计分时分开统计。`DENY_PATH_PATTERNS` 新增 `^plugin\/fixtures\/ownership-semantic-eval\/`(负对照:投研器 `read_file` 该文件 ⇒ `PATH_DENIED`)。
+- [x] AC5 真实评估运行(默认 launcher,真 judge):全集跑一遍,并对 P1、N1 各重复 1 次报告一致性;逐案记录建议/置信度/引用/机械事实/judge 调用数/bundle 字节/耗时;对人工标注案例给出混淆读数(误报 FP = 对正例判 reject;漏报 FN = 对负例判 review;abstain 单列、不算正确);小 n 只报读数不报比率。**运行前记录 judge prompt 的 sha256;看到结果后若改 prompt,必须全集重跑并同时报告两次**(防止按标签调参)。任何结果都是合法终态。
+- [x] AC6 泄露审计:对每个**实际发送**的 bundle 扫描 holdout 词汇(`GOAL-034`、`ownership-wrong`、`宽移动`、`Holdout B`、`not config-loading`)⇒ 0 命中;正对照:同一审计对一个未 redact 的 `gate/config/types.ts` bundle 必须报警。
+- [x] AC7 advisory 接入不改门:`--review` 开与关时,每个候选的 `eligible`/`reason`/`streak` 逐字相同(测试断言);`--write` 写出的 draft 正文含审查摘要与证据引用;无 `--write` 时不写任何 Goal。
+- [x] AC8 回归:既有 ownership-active / architecture-* 测试与新增测试全绿;`bash scripts/test.sh --for-task gap-ownership-semantic-review-of-proposed-slice` exit 0。
 
 ## DoD
 
@@ -63,5 +63,6 @@ depends_on:
 - docs/analysis/ownership-active-limited-proposal.mjs
 - docs/analysis/ownership-active-contract.mjs
 - plugin/fixtures/ownership-semantic-eval/cases.json (new)
+- plugin/fixtures/ownership-semantic-eval/arch-add3e7318-packages-quay-src.json (new)
 - plugin/test/ownership-semantic-review.test.mjs (new)
 - tasks/gap-ownership-semantic-review-of-proposed-slice.md
