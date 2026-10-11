@@ -57,15 +57,15 @@ extra:
 
 ## Touches
 
-- docs/analysis/ownership-active-proposal-repair.mjs
+- docs/analysis/ownership-active-proposal-repair.mjs (new)
 - docs/analysis/ownership-active-loop.mjs
 - docs/analysis/architecture-evidence-store.mjs
-- docs/analysis/ownership-active-proposal-repair-replay.md
-- plugin/test/ownership-active-proposal-repair.test.mjs
-- plugin/fixtures/ownership-active-slice/repair-invalid-move-fixture.arch.json
-- plugin/fixtures/ownership-active-slice/repair-tool-limitation-fixture.arch.json
-- plugin/fixtures/ownership-active-slice/repair-missing-consumer-fixture.arch.json
-- plugin/fixtures/ownership-active-slice/repair-unknown-symbol-fixture.arch.json
+- docs/analysis/ownership-active-proposal-repair-replay.md (new)
+- plugin/test/ownership-active-proposal-repair.test.mjs (new)
+- plugin/fixtures/ownership-active-slice/repair-invalid-move-fixture.arch.json (new)
+- plugin/fixtures/ownership-active-slice/repair-tool-limitation-fixture.arch.json (new)
+- plugin/fixtures/ownership-active-slice/repair-missing-consumer-fixture.arch.json (new)
+- plugin/fixtures/ownership-active-slice/repair-unknown-symbol-fixture.arch.json (new)
 - tasks/gap-ownership-active-proposal-repair-loop.md
 
 ## AC
