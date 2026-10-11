@@ -92,5 +92,6 @@ I mapped the existing discovery paths on 2026-10-11. Findings, with file:line:
 - plugin/test/arch-discovery-routine.test.mjs (new)
 - docs/carrier-registry.json
 - plugin/scripts/capability-catalog.sh
+- plugin/scripts/capability-catalog-declarations.json
 - .gitignore
 - .quay/config.yml
