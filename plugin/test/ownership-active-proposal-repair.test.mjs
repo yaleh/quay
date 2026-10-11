@@ -12,6 +12,7 @@ import assert from "node:assert/strict";
 import fs from "node:fs";
 import path from "node:path";
 import crypto from "node:crypto";
+import { execFileSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
 
 import {
@@ -495,21 +496,34 @@ test("AC3: NEGATIVE CONTROL — the guard still has teeth: a fabricated name and
 });
 
 test("AC4: NEGATIVE CONTROL — an UNCOMMITTED working-tree export is not evidence; only the locked commit counts", () => {
-  const rel = "packages/quay/src/gate/types.ts";
-  const target = path.join(REPO, rel);
-  const backup = fs.readFileSync(target);                 // cp-style backup — never `git checkout` (repo mutation rule)
-  const marker = "Ac4UncommittedProbeSymbol";
+  // ⛔ The mutation deliberately targets a DISPOSABLE repo under os.tmpdir, never a tracked file: `scripts/
+  // test.sh`'s `checked-in-write-check` refuses any test that writes into the checked-in tree, and it is
+  // right to — a test that mutates a tracked source file is a machine for flaking its neighbours. Restoring
+  // is `rmSync` of the whole repo, which is strictly stronger than a cp backup (nothing to restore).
+  const dir = fs.mkdtempSync(path.join(process.env.TMPDIR || "/tmp", "ac4-commit-scope-"));
   try {
-    fs.appendFileSync(target, `\n// appended at EOF so no existing line number moves\nexport type ${marker} = true;\n`);
+    const git = (...args) => execFileSync("git", ["-C", dir, "-c", "user.email=t@example.com", "-c", "user.name=t", ...args], { encoding: "utf8" });
+    const rel = "packages/demo/src/gate/types.ts";
+    fs.mkdirSync(path.dirname(path.join(dir, rel)), { recursive: true });
+    fs.writeFileSync(path.join(dir, rel), "export interface CommittedThing {}\n");
+    git("init", "-q"); git("add", "-A"); git("commit", "-q", "-m", "seed");
+    const commit = git("rev-parse", "HEAD").trim();
+    const reader = (spec) => defaultReadFileAtCommit(dir, spec);   // the module's own production default
+    assert.ok(declaredExportNames(reader(`${commit}:${rel}`)).has("CommittedThing"), "a committed export must be proved");
+
+    // The UNCOMMITTED append: present in the working tree, absent from the commit.
+    fs.appendFileSync(path.join(dir, rel), "export type UncommittedProbe = true;\n");
     // CONTROL (硬规则 4 推论四): the append really landed — the WORKING TREE text carries the export, so the
     // assertions below are not vacuous…
-    assert.ok(declaredExportNames(fs.readFileSync(target, "utf8")).has(marker), "the append did not land — the assertion below would be vacuous");
-    // …the commit-scoped read still does NOT see it…
-    assert.ok(!declaredExportNames(liveReader(`${LIVE_COMMIT}:${rel}`)).has(marker), "the reader must read the COMMIT, not the working tree");
-    // …so the criterion reports it unknown.
-    assert.deepEqual(unknownSymbols(liveGraph(), [{ file: "gate/types.ts", from: "gate", to: "kernel", symbols: [marker] }], liveSymbolOpts), [marker]);
-  } finally { fs.writeFileSync(target, backup); }
-  assert.ok(!fs.readFileSync(target, "utf8").includes(marker), "the working tree was restored");
+    assert.ok(declaredExportNames(fs.readFileSync(path.join(dir, rel), "utf8")).has("UncommittedProbe"), "the append did not land — the assertion below would be vacuous");
+    // …the commit-scoped read does NOT see it…
+    assert.ok(!declaredExportNames(reader(`${commit}:${rel}`)).has("UncommittedProbe"), "the reader must read the COMMIT, not the working tree");
+    // …so the criterion proves the committed name and reports the uncommitted one unknown — the two are
+    // distinguished by the ONE thing that differs between them: whether the locked commit exports them.
+    const graph = { nodes: [{ id: "gate", type: "internal" }], edges: [] };
+    const opts = { scopeRoot: "packages/demo/src", commit, readFileAtCommit: reader };
+    assert.deepEqual(unknownSymbols(graph, [{ file: "gate/types.ts", from: "gate", to: "kernel", symbols: ["CommittedThing", "UncommittedProbe"] }], opts), ["UncommittedProbe"]);
+  } finally { fs.rmSync(dir, { recursive: true, force: true }); }
 });
 
 test("AC3: fail-closed — a graph that was never built stays listless, and the repair still abstains at attempt 0", async () => {
