@@ -2,7 +2,7 @@
 id: gap-init-worktree-root-default-written-unnormalized
 title: quay init writes default loop.worktree_root with a literal /../ segment
   (string template, no path.resolve)
-status: todo
+status: ready
 labels:
   - gap
 parent: null
