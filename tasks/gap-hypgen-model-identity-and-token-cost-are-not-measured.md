@@ -2,7 +2,7 @@
 id: gap-hypgen-model-identity-and-token-cost-are-not-measured
 title: "arch-hypothesis-generation: the investigator cannot be run on a chosen
   model, and no model call records its actual model identity or token cost"
-status: todo
+status: ready
 labels:
   - gap
   - architecture-discovery
