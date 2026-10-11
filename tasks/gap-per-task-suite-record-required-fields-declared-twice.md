@@ -3,7 +3,7 @@ id: gap-per-task-suite-record-required-fields-declared-twice
 title: "per-task-suite-record: the checker declares its own copy of
   REQUIRED_FIELDS instead of importing the writer's, so the record contract can
   drift silently"
-status: ready
+status: done
 labels:
   - gap
   - architecture-discovery
