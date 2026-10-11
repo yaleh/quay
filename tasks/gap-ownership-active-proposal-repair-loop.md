@@ -62,6 +62,7 @@ extra:
 - docs/analysis/architecture-evidence-store.mjs
 - docs/analysis/ownership-active-proposal-repair-replay.md (new)
 - plugin/test/ownership-active-proposal-repair.test.mjs (new)
+- plugin/test/architecture-evidence-store.test.mjs
 - plugin/fixtures/ownership-active-slice/repair-invalid-move-fixture.arch.json (new)
 - plugin/fixtures/ownership-active-slice/repair-tool-limitation-fixture.arch.json (new)
 - plugin/fixtures/ownership-active-slice/repair-missing-consumer-fixture.arch.json (new)
@@ -70,19 +71,29 @@ extra:
 
 ## AC
 
-- [ ] AC1 四类拒绝分类枚举且 fail-closed:4 种真实拒绝文本精确分类;合成未知文本 → `honest_abstain`;模拟 `not-evaluated`/`capability_gap` → `tool_limitation`;`evidence_gap` 如实标注"生产未见"。
-- [ ] AC2 锁定同一 commit+scope:篡改任一值时函数抛错拒绝执行。
-- [ ] AC3 目录反馈不独立计算,覆盖两种 liaison 指出的不一致负样本。
-- [ ] AC4 负对照①(tool_limitation 零重试,两种来源)。
-- [ ] AC5 负对照②(四个有界维度任一耗尽仍诚实 abstain,含总 judge 调用数与 wall-clock 上限两项新增维度的独立测试)。
-- [ ] AC6 负对照③(遗漏消费者不被误判为修复成功)。
-- [ ] AC7 负对照④(未知/编造符号不产出伪造 delta)。
-- [ ] AC8 反作弊:不硬编码四环答案,不读取/不 import 任何 GOAL 正文、架构文档、已完成任务 body、Holdout A/B 记录作为反馈或候选生成来源。
-- [ ] AC9 可复现盲测修复成功路径(fixture,重试轮次 ≤3)。
-- [ ] AC10 真实 live 复跑——pre-merge(worktree)与 post-merge(develop 新尖端)**各一次独立记录**,结果如实写入报告,无论 computed 还是 honest_abstain。
-- [ ] AC11 既有机制不回退:`evaluateEntryBar`/`deterministicGate`/`quotaGate`/run-streak/3 连续轮次准入/人工批准机制的既有回归测试全绿,本任务未触碰其判据。
-- [ ] AC12 全量回归绿:`bash scripts/test.sh --for-task gap-ownership-active-proposal-repair-loop` exit 0。
+- [x] AC1 四类拒绝分类枚举且 fail-closed:4 种真实拒绝文本精确分类;合成未知文本 → `honest_abstain`;模拟 `not-evaluated`/`capability_gap` → `tool_limitation`;`evidence_gap` 如实标注"生产未见"。
+- [x] AC2 锁定同一 commit+scope:篡改任一值时函数抛错拒绝执行。
+- [x] AC3 目录反馈不独立计算,覆盖两种 liaison 指出的不一致负样本。
+- [x] AC4 负对照①(tool_limitation 零重试,两种来源)。
+- [x] AC5 负对照②(四个有界维度任一耗尽仍诚实 abstain,含总 judge 调用数与 wall-clock 上限两项新增维度的独立测试)。
+- [x] AC6 负对照③(遗漏消费者不被误判为修复成功)。
+- [x] AC7 负对照④(未知/编造符号不产出伪造 delta)。
+- [x] AC8 反作弊:不硬编码四环答案,不读取/不 import 任何 GOAL 正文、架构文档、已完成任务 body、Holdout A/B 记录作为反馈或候选生成来源。
+- [x] AC9 可复现盲测修复成功路径(fixture,重试轮次 ≤3)。
+- [ ] AC10 真实 live 复跑——pre-merge(worktree)已完成并写入报告(§4a);post-merge(develop 新尖端)的结构性外部件见 §4b/## Evidence。（待外部）
+- [x] AC11 既有机制不回退:`evaluateEntryBar`/`deterministicGate`/`quotaGate`/run-streak/3 连续轮次准入/人工批准机制的既有回归测试全绿,本任务未触碰其判据。
+- [x] AC12 全量回归绿:`bash scripts/test.sh --for-task gap-ownership-active-proposal-repair-loop` exit 0。
 
 ## DoD
 
 `docs/analysis/ownership-active-proposal-repair-replay.md` 提交,记录:四类拒绝分类定义与真实样例分布、与两个 ArchGuard 相关会话核实的结论原文引用、四个负对照的读数(含遗漏消费者/未知符号两个新增)、pre-merge 与 post-merge 两次独立 live 复跑的诚实终态(含成本:轮次/judge 调用数/字节数/耗时)、修复前后候选质量对比(拒绝原因分布变化,即使没有候选真正变为可提案)。⛔ 本任务不新建任何不存在的目录、不改任何生产源码(仅 `docs/analysis/`/`plugin/test/`/`plugin/fixtures/` 范围)、不硬编码四环的真实答案、不用 holdout 结果指导候选生成、不触碰 `evaluateEntryBar` 四条件/安全闸门/run-streak/3 连续轮次准入/人工批准机制、不创建或激活任何 Goal(至多产出一个 `draft`,且仍按 `gap-ownership-active-limited-proposal-mode` 既有门限,不降低)、不派发任何架构重构任务、不改任何生产 Gate。全部新增测试 + 既有回归绿。
+
+## Evidence
+
+**交付物**：`docs/analysis/ownership-active-proposal-repair.mjs`（新，`classifyRejection` / `attemptRepair` / 四类枚举 / 四个硬界 / 四个负对照）+ `plugin/test/ownership-active-proposal-repair.test.mjs`（23 test，全绿）+ 四个 fixture + `docs/analysis/ownership-active-proposal-repair-replay.md`。集成点：`ownership-active-loop.mjs` 的 `--repair`（默认关闭）+ 记录字段 `proposed_slice` / `slice_delta.detail`；新载体记录类型 `repair_attempt` 落在 `architecture-evidence-store.mjs`。
+
+**AC 读数**：scoped gate `bash scripts/test.sh --for-task gap-ownership-active-proposal-repair-loop --allow-thin` → exit 0（89 test，0 fail）。既有回归（`ownership-active-loop.test.mjs` 53、`ownership-active-limited-proposal.test.mjs` 18、`architecture-evidence-store.test.mjs` 13）分别单独跑全绿。11 条真实 `slice_delta` 拒绝（读自 `.quay/ownership-shadow-proposals.jsonl`）全部被判为 `invalid_move`。
+
+**pre-merge live 盲测（本任务 worktree）**：§4a，命令与两次独立调用的诚实终态写在报告里。
+
+**AC10 的 post-merge 半 · 承接者（这是 `（待外部）` 的合法性条件）**：`--live --repair --rounds 1` 在 **develop 新尖端**上再跑一次——那条命令写在 `docs/analysis/ownership-active-proposal-repair-replay.md §4b`，逐字可复制；产生它的前提（develop 含本任务代码）由 fan-in 的 ff-merge 造出，因此它在结构上不可能由本 worker 在本回合执行（本 worker 在 fan-in 之前退出）。最后一跳是**人工/外层派发**，不是自动探针——如实记录：本任务只有一条 CLI 命令作为承接路径，没有注册任何自动 freshness 探针。
