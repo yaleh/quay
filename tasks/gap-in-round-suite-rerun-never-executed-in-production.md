@@ -2,7 +2,7 @@
 id: gap-in-round-suite-rerun-never-executed-in-production
 title: The in-round rerun of red suite files has never run in production; this
   repo never declared loop.rerun_command
-status: todo
+status: ready
 labels:
   - gap
   - architecture-discovery
