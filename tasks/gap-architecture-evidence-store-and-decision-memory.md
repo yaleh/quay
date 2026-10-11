@@ -52,6 +52,8 @@ extra:
 - plugin/fixtures/ownership-active-slice/goal-035-fork-point.arch.json (new)
 - plugin/fixtures/ownership-active-slice/goal-036-fork-point.arch.json (new)
 - tasks/gap-architecture-evidence-store-and-decision-memory.md
+- .gitignore
+- docs/analysis/architecture-evidence-store-replay-results.json (new)
 
 ## AC
 
