@@ -1,0 +1,204 @@
+{
+  "_comment": [
+    "SINGLE SOURCE for the freshness subject -> producer mapping (AC7/AC8 of",
+    "tasks/gap-ac214-upgrade-face-refresh-and-mechanical-freshness-trigger).",
+    "",
+    "WHY THIS FILE EXISTS: the evidence of the subjects below must stay within K delivery-face",
+    "commits of the develop tip (goal AC-214). Refreshing them is a real cross-machine PRODUCER",
+    "run, and before this file that mapping lived only in the prose of whichever one-off task was",
+    "closing the gap at the time. Cost, measured: the gap re-crossed 4 times in 5 days",
+    "(2026-09-13 x2, 2026-09-14 x2), each crossing closed by a manual re-run with no trigger.",
+    "",
+    "WHO READS IT (one source, three readers -- never a second copy):",
+    "  * plugin/scripts/freshness-producer-coverage-check.ts -- the completeness judge (which",
+    "    subject has no registered producer at all) AND (since 2026-09-25) the ONE implementation of",
+    "    the freshness CLOCK's counting rule, declared in `delivery_face` below;",
+    "  * plugin/probes/freshness-refresh.md -- the routine probe (which producer to name in a",
+    "    finding, and each producer's wall clock for the threshold arithmetic);",
+    "  * goals/AC-214-*.md -- the freshness criterion itself, which reads `delivery_face.command`",
+    "    from this file instead of carrying its own copy of the counting rule.",
+    "",
+    "`wallclock_hours` is a MEASURED quantity, not an estimate: it is the end-to-end wall clock of",
+    "one producer run observed on this repo, and it feeds the probe's threshold",
+    "THRESHOLD_fraction = (wallclock_hours + interval_hours) * rate_per_hour / K. A wrong value",
+    "here moves a threshold, so each entry records where its number came from.",
+    "",
+    "`preconditions` (optional) names ENVIRONMENTAL requirements a producer's subjects need BEFORE",
+    "re-running it can refresh them. It exists because 're-run the producer' is not always a complete",
+    "remedy: the session-delivery entry's subject only refreshes on a machine that already HAS a live",
+    "session whose settings allow inbound, which this repo does not control (measured 2026-09-15: host",
+    "C's only live session holds unidentified peers). Read it before filing a finding that says",
+    "'just re-run <producer id>' — that file is the probe's ONLY input for which producer to name."
+  ],
+  "carrier": ".quay/productization-verification.jsonl",
+  "margin_snapshot": ".quay/goal-freshness-margin.json",
+  "subject_id_pattern": "^GOAL-009-AC-\\d+$",
+  "subject_requires_build_sha": true,
+  "_scope_note": "A carrier record counts as a REFRESHABLE SUBJECT iff its `ac` matches subject_id_pattern AND it carries a top-level 40-hex build_sha. Measured on the real carrier 2026-09-14, that rule yields exactly the seven subjects below: GOAL-009-AC-204/206 match the pattern but carry no build_sha; GOAL-018-AC-257 carries a build_sha but not the GOAL-009 prefix.",
+  "delivery_face": {
+    "_comment": [
+      "THE SINGLE SOURCE for the AC-214 freshness CLOCK's counting rule",
+      "(tasks/gap-ac214-ninth-crossing-freshness-clock-counts-fan-in-merges, 2026-09-25).",
+      "",
+      "WHY IT EXISTS: the criterion measured 'how old is this evidence' as `git rev-list --count",
+      "<build_sha>..develop -- <delivery-face paths>`. With a pathspec that ALSO counts MERGE commits,",
+      "and this repo's fan-in topology makes `Merge branch 'develop' into task/<X>` a routine step of",
+      "every landing. Such a merge re-imports content develop already had, whose own non-merge commits",
+      "are counted separately -- so the same change was counted twice. Measured on this repo",
+      "2026-09-25 over `c80040ad..develop`: 203 total, 84 of them merges, 71 of those 84 byte-identical",
+      "to the clean auto-merge of their two parents (zero independent content) and 82/84 titled",
+      "`Merge branch 'develop'`. The clock therefore ran ~1.7x faster than the delivery face, and the",
+      "object under test could push it faster by merging develop more often (hard rule 4). The gap",
+      "crossed for the ninth time because of it.",
+      "",
+      "THE RULE (now): a commit counts iff it CHANGED delivery-face CONTENT -- every non-merge commit",
+      "touching a delivery-face path, PLUS every merge whose own tree is NOT byte-identical to the",
+      "clean auto-merge of its parents (`git merge-tree --write-tree`). A merge that HAS no clean",
+      "auto-merge (both sides touched the same file => a human resolved a conflict) or has one that",
+      "differs from the recorded tree (an 'evil merge') MAY carry content present in neither parent,",
+      "so it is counted. The complement is dropped because it provably carries nothing new. The",
+      "delivery-face path set is derived mechanically inside the same implementation",
+      "(packages/quay/package.json `files` that exist, + `plugin`, + `packages/quay-native/src`).",
+      "",
+      "`command` is an argv ARRAY (no shell quoting to mis-split) and is the PREFIX both readers",
+      "extend: the AC-214 criterion appends `--from <build_sha> --json`; the probe",
+      "(plugin/probes/freshness-refresh.md 3) appends `--since \"<window>\" --json`. Neither reader",
+      "copies the argv: the criterion READS this field, and",
+      "plugin/test/freshness-distance-counting.test.mjs asserts the probe's shown command line is",
+      "rendered from this same field (a drift -- text changed on one side only -- reddens the suite).",
+      "",
+      "`rule` names the implementation by EXPORT (a file:line is not stable); `exit` states the",
+      "three-state contract a reader MUST handle (hard rule 3b): 0 = computed (integer distance, 0 is",
+      "a legal value), 3 = NOT-EVALUATED (`empty-path-set` | `not-evaluated`; `distance` is null --",
+      "never 0, never a PASS shape), 2 = usage. `empty-path-set` is its own state because a distance",
+      "over an empty path set is structurally 0, i.e. 'everything is fresh'."
+    ],
+    "command": [
+      "node",
+      "--experimental-strip-types",
+      "plugin/scripts/freshness-producer-coverage-check.ts",
+      "--delivery-face-distance"
+    ],
+    "mode_args": {
+      "from": "--from",
+      "since": "--since",
+      "json": "--json"
+    },
+    "rule": "measureDeliveryFaceDistance",
+    "implementation": "plugin/scripts/freshness-producer-coverage-check.ts",
+    "exit": {
+      "0": "computed",
+      "3": "empty-path-set | not-evaluated",
+      "2": "usage"
+    },
+    "consumers": [
+      "goals/AC-214-交付证据必须新鲜-四条载体型判据不得-一旦转绿即永久绿.md (criterion, via subprocess)",
+      "plugin/probes/freshness-refresh.md (3)",
+      "plugin/test/freshness-distance-counting.test.mjs"
+    ]
+  },
+  "execution_probe": {
+    "_comment": [
+      "MECHANICAL reading of 'are the producers below EXECUTABLE FROM THE HOST that runs the loop?'",
+      "(tasks/gap-ac214-seventh-crossing-blocked-remedy-has-no-consumer).",
+      "",
+      "WHY THIS EXISTS: until now the answer to that question was produced by the PROBE (an LLM agent)",
+      "as an undeclared field (`inventory.producers_executable_from_this_host`), derived by the agent",
+      "from the prose `preconditions` below. Measured 2026-09-25: that field appeared in the carrier's",
+      "scan-round record, named its own cause, and had ZERO consumers — the same round still filed two",
+      "dispatchable `ready` tasks whose requested action ('re-run coldstart-face') cannot be performed",
+      "on this host at all. A reading that no mechanism reads is shaped exactly like 'nothing happened'.",
+      "",
+      "WHAT IT IS NOT: this is a REACHABILITY probe (one BatchMode ssh with a trivial remote command).",
+      "It is NOT a producer run — the FILE-ONLY boundary in plugin/probes/freshness-refresh.md is",
+      "unchanged, and a routine must never execute a producer.",
+      "",
+      "`blocked_pattern` is load-bearing: ONLY a definite AUTHORIZATION denial makes the reading",
+      "`blocked`. Anything else that returns non-zero (network down, DNS failure for a short alias,",
+      "host key mismatch) is NOT `blocked` — it is the third state (`not-evaluated`), because from such",
+      "a failure one cannot tell whether the authorization holds. Measured 2026-09-25 on this host:",
+      "`ssh -o BatchMode=yes -o ConnectTimeout=8 yale@orangevps.wan.hwang.men 'true'` => `Permission",
+      "denied (publickey,password).` rc=255; the short alias `orangevps` instead gives `Could not",
+      "resolve hostname` rc=255 (no ~/.ssh/config on this host) — same rc, different state.",
+      "",
+      "`remedy` is quoted VERBATIM into the human-visible escalation task this reading produces when",
+      "`blocked`; the per-producer command is NOT copied here — the escalation quotes each finding's",
+      "own `producers[].command` (single source)."
+    ],
+    "id": "host-b-ssh",
+    "command": ["ssh", "-o", "BatchMode=yes", "-o", "ConnectTimeout=8", "yale@orangevps.wan.hwang.men", "true"],
+    "timeout_ms": 20000,
+    "blocked_pattern": "Permission denied",
+    "producers": ["coldstart-face", "session-delivery", "upgrade-face"],
+    "remedy": {
+      "host": "yale@orangevps.wan.hwang.men",
+      "action": "把本机 `~/.ssh/id_ed25519.pub` 逐字追加到**该 finding 自己的 producer 在 `--hosts` 里声明的每一台**的 `~/.ssh/authorized_keys`（目标侧动作，需人授权）。⚠️ 不是只加 B 这一台 —— 本探针只读 B，而 coldstart-face 与 session-delivery 的 `--hosts` 含 B 与 C 两台：只加 B 时本探针会读成 `executable`，这两条 producer 却仍跑不动。实测 2026-09-25 从本机跑 coldstart-face（develop tip 5fd1128a68aa）：构建成功（两个 .tgz 均出），随后 B `⇒ yale@orangevps.wan.hwang.men: Permission denied (publickey,password).` 与 C `⇒ yale@ad-arm1.wan.hwang.men: Permission denied (publickey).` **同时**拒绝，rc=1 / 20s / 载体零追加。upgrade-face 的 `--hosts` 只含 B ⇒ 它只需 B。",
+      "alternative": "或改在**一台已被该 producer 自己 `--hosts` 全部主机授权**的主机上跑本 finding 自己那条 producer 命令（逐字见本文件 `producers[].command`），⛔ 不在此处复制第二份"
+    }
+  },
+  "producers": [
+    {
+      "id": "coldstart-face",
+      "command": "bash plugin/scripts/develop-deliver-tgz.sh --verify-coldstart --ac207-e2e --hosts \"B C\" --force --root <main-checkout> --driving-profiles <profile-the-target-host-gateway-serves>",
+      "wallclock_hours": 0.34,
+      "_wallclock_measured": "20m36s end-to-end, measured on this repo (recorded in the AC-214 gap history; the coldstart face is the cheap half of the pair).",
+      "preconditions": [
+        "⚠️【被推送的 profiles 文件 = 目标项目 worker-default 的 launcher/model/auth 的单一真相源 —— `--driving-profiles` 覆盖入口】本产出者把驱动方本地的 profiles 文件 scp 成目标的 `~/quay-driving-profiles.yml`：给了 `--driving-profiles <本地路径>` 就用它，未给才用驱动方仓库自己的 `.quay/profiles.yml`。⚠️ 该文件里 `worker-default.model` 必须是【目标主机网关】认得的名字 —— 驱动方的模型名是**主机专属**的（本仓 `.quay/profiles.yml` 自 2026-09-23 起是 `v4.1flash-anthropic`，只有驱动主机自己的 127.0.0.1 网关认它），⛔ **不保证在 B/C 可用**。实测 2026-09-25 原样推送该文件的后果：host B 上 AC-207 腿连续 4 次 `API Error: 400 Invalid model name passed in model=v4.1flash-` 后翻 needs-human、AC-239 腿的隔离副本 worker-driver 于 11:10:59Z 自停（`halted_by: worker-driver:environment-fatal`，签名 `unrecognized_model`），两条腿**都不产出记录**，且失败形态与『机制坏了』同形。⇒ 跑本产出者时必须给一个【目标主机认得的】profile；⛔ 脚本里不写死任何模型名（硬规则 4 推论二），用哪个名字由运行者提供。给了一个不存在的路径 ⇒ 脚本在第一处 scp/ssh 之前就以 NOT-EVALUATED + exit 2 停住，⛔ **不回落**开发机 profile（硬规则 3b）。"
+      ],
+      "subjects": [
+        "GOAL-009-AC-201",
+        "GOAL-009-AC-203",
+        "GOAL-009-AC-207",
+        "GOAL-009-AC-232"
+      ]
+    },
+    {
+      "id": "session-delivery",
+      "command": "bash plugin/scripts/develop-deliver-tgz.sh --verify-coldstart --ac207-e2e --hosts \"B C\" --force --root <main-checkout> --driving-profiles <profile-the-target-host-gateway-serves>",
+      "_same_run_as": "coldstart-face — AC-205 由同一次运行的 ⑦ --ac205-session 腿产出，⛔ 不存在单独的命令。两条 producer 条目【共用同一条命令行】：改其中一处必须同时改另一处（行文相同的重复是这里唯一的真相源，本条 _same_run_as 就是它的指针）。",
+      "wallclock_hours": 0.34,
+      "_wallclock_measured": "同 coldstart-face 的 20m36s 端到端实测 —— AC-205 腿在那次运行之内，没有单独测量，所以 ⛔ 不编一个更小的数（W 相同 ⇒ 探针的阈值算术不变，不会因为拆分而移动任何阈值）。",
+      "preconditions": [
+        "验证机上必须有一个【活】会话 —— 进程活着（kill(pid,0) 不抛 ESRCH ∧ procStart 相符）；⛔ 「socket 文件存在」不算（进程死后 socket 不被 unlink，见 verify-deliver-coldstart.sh 的 find_ac205_target_session 活性闸）。",
+        "【且】该会话的 settings 具备 permissions.defaultMode=bypassPermissions 或 crossSessionInbound=accept 之一（判据的直接量；SPEC-web-session-observability-and-control-2026-08-24.md §10.1 四样本单变量对照）。发送前即可检测：send-to-session.ts --pid <pid> --precheck 打印 hold-precheck=direct|will-hold|unknown。",
+        "两者皆无 ⇒ probe 被按 `Held peer message`（type:system/subtype:informational）扣下 ⇒ 本腿落痕 delivery_outcome=held、不落账。2026-09-15 实测 host C：其唯一活会话（cwd=/home/yale/work/archguard）两键皆无 ⇒ held。⛔ 这不是缺陷，是判据在工作。",
+        "⇒ 本前置【不由本仓库保证】（取决于验证机上别的会话的配置，那些会话属于别的项目）⇒ AC-205 不能与 coldstart-face 的其余四个主体同等对待：那四条「重跑即刷新」，本条【先要满足前置】才谈得上刷新（host B 满足 ⇒ 可产出；host C 不满足 ⇒ 产不出，且两种失败现在落痕不同形）。",
+        "⚠️【被推送的 profiles 文件 = 目标项目 worker-default 的 launcher/model/auth 的单一真相源 —— `--driving-profiles` 覆盖入口】本产出者把驱动方本地的 profiles 文件 scp 成目标的 `~/quay-driving-profiles.yml`：给了 `--driving-profiles <本地路径>` 就用它，未给才用驱动方仓库自己的 `.quay/profiles.yml`。⚠️ 该文件里 `worker-default.model` 必须是【目标主机网关】认得的名字 —— 驱动方的模型名是**主机专属**的（本仓 `.quay/profiles.yml` 自 2026-09-23 起是 `v4.1flash-anthropic`，只有驱动主机自己的 127.0.0.1 网关认它），⛔ **不保证在 B/C 可用**。实测 2026-09-25 原样推送该文件的后果：host B 上 AC-207 腿连续 4 次 `API Error: 400 Invalid model name passed in model=v4.1flash-` 后翻 needs-human、AC-239 腿的隔离副本 worker-driver 于 11:10:59Z 自停（`halted_by: worker-driver:environment-fatal`，签名 `unrecognized_model`），两条腿**都不产出记录**，且失败形态与『机制坏了』同形。⇒ 跑本产出者时必须给一个【目标主机认得的】profile；⛔ 脚本里不写死任何模型名（硬规则 4 推论二），用哪个名字由运行者提供。给了一个不存在的路径 ⇒ 脚本在第一处 scp/ssh 之前就以 NOT-EVALUATED + exit 2 停住，⛔ **不回落**开发机 profile（硬规则 3b）。"
+      ],
+      "subjects": [
+        "GOAL-009-AC-205"
+      ]
+    },
+    {
+      "id": "upgrade-face",
+      "command": "bash plugin/scripts/develop-deliver-tgz.sh --verify-upgrade --upgrade-source <aged-third-party-project> --ac239-e2e --hosts B --force --root <main-checkout> --driving-profiles <profile-the-target-host-gateway-serves>",
+      "wallclock_hours": 0.38,
+      "_wallclock_measured": "0.38h (22m49s) — MEASURED END-TO-END on 2026-09-17 (start 04:41:51Z, last line written 05:04:40Z, `--hosts B`), the first complete run of this producer on record. ⚠️ The PREVIOUS value (2h) was a BOUND, never a measurement — it is REPLACED, not supplemented, and the paragraph below records why it was there and what changed. What the 22m49s run actually did (all of it inside that window, per the transported carrier records): build the two .tgz at the develop tip → scp the script closure + both .tgz to host B → npm-install → `quay-init` upgrade of an isolated `cp -a` of an AGED third-party project (runtime_age_days=27.238) → the AC-238 readings → the AC-239 leg (`AC239_WRITTEN_THIS_RUN=1`, a real defect task driven to done by THAT project's own drivers) → transport + dedup-append of BOTH records with an identical `project_root` (`UPGRADE-PAIR OK`). ⛔ WHY THE OLD CAVEAT IS GONE: it claimed the AC-239 half was *structurally unreachable* because 'the shipped artifact carries no dist/driver-anchor.js, so `quay driver start` returns rc=1 in every installed layout' — both halves of that claim are now false: (i) `plugin/scripts/dist/driver-anchor.js` EXISTS (1.4 MB; `gap-dist-closure-missing-driver-anchor-js` done), and (ii) AC-239 records were in fact produced on 2026-09-14T23:14:12Z and again on 2026-09-17T04:43:09Z, each paired with its AC-238 record on the SAME `project_root`. The 3600s `AC239_POLL_SECS` bound remains (a run that overruns it writes no record), so it is still the mechanical ceiling — it is just no longer the binding constraint. ⚠️ Conservative direction check, UNCHANGED and now load-bearing: W only ever INCREASES the probe's threshold, so an over-estimate files early (safe, mild noise) and an under-estimate files late (loses the window). Lowering W from 2 to the measured 0.38 lowers the upgrade-face threshold from (2+2)*R/K = 0.36 to (0.38+2)*R/K = 0.214. That does NOT weaken today's filing: the subject was filed at margin/K = -0.02, far below either. But it is ONE sample of a variable-duration leg (the AC-239 half drives an unknown-size defect), so treat 0.38 as a floor to re-measure, not as a settled constant.",
+      "_aged_source": "⚠️ `--upgrade-source` is NOT a free variable: this producer requires an AGED real third-party project that still carries the OLD vendored layout `.quay/runtime/bin/*`. The designated source `work/meta-cc` was upgraded IN PLACE on 2026-09-14T15:06Z by a bare `quay-init`, which retired its `.quay/runtime` into `.quay/quay-init-backups/1789398411/runtime`; an exhaustive search of both hosts found no other real project with that layout. The source actually used (2026-09-17, and on 2026-09-14 before it) is `work/meta-cc-aged-ac238-copy` ON HOST B — a `cp -a` of meta-cc whose `.quay/runtime` was restored from meta-cc's OWN backup and whose `.quay/*-driver*.pid`/`-control-plane.json` were removed. Its provenance is written to `AGED-SOURCE-PROVENANCE.txt` inside that copy. Measured today: `runtime_age_days=27.238` (mtime Aug 20, preserved), `pre_upgrade_task_count=103` = `post_upgrade_task_count`, `taskset_stable=true`. ⇒ A future run MUST either reuse that copy (it still exists on host B) or rebuild an equivalent one; pointing `--upgrade-source` at plain `work/meta-cc` yields `NOT-EVALUATED: no .../.quay/runtime/bin` and zero records (measured this round, run 1).",
+      "_ac239_refresh_shape": "⚠️ AC-239 的刷新形态（2026-09-24 按位置复核；这一条是 finding 题面『the AC-239 leg has no separate command，所以它与 AC-238 一起老化』的机器可核版本）：两个主体【同一次运行产出】在判据侧确有机械保证，但二者的耦合是**单向**的，⛔ 不是一条原子提交。 (i)【无独立命令】⑦b 的调用点 `verify-deliver-coldstart.sh:8803-8804` 嵌在 `if [ \"$UPGRADE_EXISTING\" = 1 ]`（同文件 :8796）之内，而 `UPGRADE_EXISTING=1` 只由 `--upgrade-existing` 置位；`--ac239-e2e` 在 `develop-deliver-tgz.sh` 里只有两个读数点（:1778 / :1857），两处都在 `verify_upgrade_mode` 函数体内 ⇒ 单独传 `--ac239-e2e`（不带 `--verify-upgrade`）**不产任何 AC-239 记录**；⛔ 但它也不是『什么都不做』——它静默落进**默认交付路径**（同文件 §5 收尾 :3065-3078：build → scp → install → serve 验证），那条路径与 ⑦b 无关、照样会撞上同一个 ssh 墙。⇒ ⛔ 不存在『只刷新 AC-239』的命令；AC-239 的唯一刷新路径就是 AC-238 那条，且必须**同时**带 `--verify-upgrade` 与 `--ac239-e2e`。 (ii)【落账发生在判定之前 —— 这条⛔不是好消息】`transport_evidence_append`（同文件 :1837）先把取回的整份 evidence 追加进载体，**之后**才跑 `check_evidence_completeness`（:1847，本次声明集 `GOAL-009-AC-238 GOAL-009-AC-239`，见 :1785）与 `check_upgrade_pairing`（:1826）；这两个判定只改**退出码**（rc=2 = PARTIAL + `UPGRADE_PAIR_MISSING=1` / `missing=GOAL-009-AC-239`，:1875-1877），⛔ 不回滚已追加的记录。⇒ **一次只产出 AC-238 的运行会刷新 AC-238 的 margin，而 AC-239 留在旧读数上**（『ages out with AC-238』只在**成功**方向上成立）。⇒ 读到 `--verify-upgrade PARTIAL` 必须读成『AC-239 未刷新』，⛔ 不是『这次没跑』。⚠️ 判定侧本身是双向的、可区分取值守住了（硬规则 3b）：AC-238-only 夹具上 `upgrade-pairing` rc=2 + `AC238_roots=['/home/verify/up-root'] AC239_roots=[]`、`evidence-completeness` rc=2 + `missing=GOAL-009-AC-239`（2026-09-24 按位置取真实 step 跑，夹具在 /tmp，⛔ 未碰真实载体）。",
+      "preconditions": [
+        "⚠️【0 号前置 —— 排在下面那条磁盘前置【之前】，且失败得更早】从**本工作区的驱动主机**到 B 的 ssh 必须被授权。产出者用 `ssh_opts=(-o BatchMode=yes -o ConnectTimeout=8 …)` + `host_target[B]=\"orangevps.wan.hwang.men\"`（plugin/scripts/develop-deliver-tgz.sh:193 与 :1437；BatchMode ⇒ ⛔ 无口令回退，被拒就是硬停）。实测 2026-09-24（本工作区宿主 `VM-16-5-ubuntu`，命令逐字 `ssh -o BatchMode=yes -o ConnectTimeout=8 yale@orangevps.wan.hwang.men 'df -h /'`）逐字返回 `yale@orangevps.wan.hwang.men: Permission denied (publickey,password).`，rc=255 ⇒ 产出者在 scp（同文件 :1658 / :1816）就被挡住，远端 ⑦ 无从谈起，而下面那条磁盘前置的读数**也复核不了**（复核它本身要先 ssh）⇒ 『re-run the producer』在**本主机**上不是一条可执行的补救。⚠️ 且【不要】按下面那条前置里写的短别名形式复核：本机**没有 `~/.ssh/config`**，`ssh orangevps 'df -h /'` 实测报 `ssh: Could not resolve hostname orangevps: Temporary failure in name resolution`（rc=255）——那与磁盘、与授权都无关，是**第三种**失败形态，⛔ 别把它读成网络故障；在本机可复现的形式是上面那个 FQDN 形式。补救 = **目标侧**动作：把本机 `~/.ssh/id_ed25519.pub` 加进 `yale@orangevps.wan.hwang.men` 的 `authorized_keys`，或改在一台**已被 B 授权**的主机上跑该产出者 —— 两者都需人授权，⛔ 不是 producer 重跑、⛔ 也不由本仓的例程代做。⚠️ 佐证（方向同向、⛔ 不单独构成结论）：本载体 `.quay/productization-verification.jsonl` 共 291 行，`ts >= 2026-09-23` 的记录数为 **0**（末条 `2026-09-20T13:50:36Z`）⇒ 本工作区当前的驱动主机上，各交付面产出者**一条记录都没产出过**。⚠️【这是**回归**，⛔ 不是「从未授权」—— 选补救的人必须据此区分】同一宿主、同一密钥（`~/.ssh/id_ed25519` mtime `2026-09-16 10:39`，**早于** 09-19 那次成功运行 ⇒ 本机侧未轮换密钥）在 `2026-09-19` 的运行里**成功**跑完了全部跨机传输（`.quay/ac238-20260919/producer-run.log` 逐字 `remote stdout persisted → … (rc=0)`，且该次记录自带 `isolated_copy:true` —— 只有 scp 成功才可能出现）⇒ 变化落在**目标机 B 的 authorized_keys 侧**，⛔ 不在本机 —— 本机侧无任何可修项；`2026-09-25` 复跑逐字复现同一 rc=255（`closure scp FAILED (…) ⇒ Permission denied (publickey,password).`）。",
+        "⚠️ 目标机上必须有够用的【空余磁盘】来放这一次的隔离副本 —— 这是『重跑 producer 就能刷新』覆盖不到的一步：远端 ⑦ 先 `rm -rf \"$root\"`（plugin/scripts/verify-deliver-coldstart.sh:1397）再 `cp -a \"$UPGRADE_SOURCE\" \"$root\"`（同文件 :1399），ENOSPC 就死在后者上。落痕形态：远端 `NOT-EVALUATED: cp -a … -> … failed` + `VERIFY-RC 1` + `EVIDENCE-ABSENT`，本地 `--verify-upgrade FAILED`，载体**零追加**（fail-closed，⛔ 与『合格』不同形 —— 这里 硬规则 3b 是守住的）。",
+        "实测 2026-09-19T06:10:14Z（develop tip 097fe2d7b，`--hosts B`）：host B 根文件系统 **100% 满（96G 用满、剩 4.1MB；inode 仅用 18% ⇒ 是字节不是 inode）**，`cp -a` 死在 12 条 `No space left on device` 上；同一次运行的**其余各步全部成功**（本地 build 出两个 .tgz → scp 闭包 → 远端 ① fresh install 回读 `quay dist --version` = `0.10.0-dev`）⇒ **卡住的只有 ⑦ 这一步**，⛔ 不是工具链/网络/交付物/aged-source 的问题。一条命令复现该读数：`ssh orangevps 'df -h /'`。该机在本仓之外还住着 ESP-IDF(9.6G) / Arduino(8.9G) / VS Code server(5.8G) 等 ⇒ **清盘是目标机运维动作（需人授权）**，⛔ 不由本 producer 或本仓库的例程代删。",
+        "⚠️ 这是环境**状态**读数，⛔ 不是该 producer 的固有属性：09-17 的两次完整运行（`609dd467` / `b29affe9`）在**同一台机**上成功写出了记录（见本条目 `_wallclock_measured`）⇒ 该机是在那之后才被写满的；空间清出来后本前置自动消失。⇒ 引用本条目**必须连同观测日期一起引**，且『re-run the producer』这句话只有在当场复核过盘量之后才成立 —— 探针的 `suggestedAction` 尤其不要无条件地写它（这正是本字段存在的理由，见文件头 _comment）。",
+        "⚠️【上面那条『100% 满』读数已被**同一天**的落账推翻，⛔ 不要当现状引用】实测 `2026-09-19T11:06:09Z` 有一条 AC-238 记录**落账成功**（build_sha `fa1cae202e02138a983f4118d108aa9fdd73917a`，`project_root=/home/yale/quay-verify-upgrade-fa1cae20-root`，载体第 269 行），其自带字段 `isolated_copy:true` / `runtime_replaced:true` / `upgrade_init_rc:0` 只有 ⑦ 的 `cp -a` **成功**才可能出现；**负控制**就在同一天 06:10:14Z 那次：同一代码路径上 `cp -a` 失败 ⇒ 远端 `NOT-EVALUATED: cp -a … failed` + `VERIFY-RC 1` + `EVIDENCE-ABSENT`，载体**零追加**（`.quay/ac238-20260919/producer-run.log` 逐字；跑前 md5 `c5a0939f9e717a13e3f66125d24c36ff` / 268 行）。⇒ B 在 `11:06:09Z` 那一刻至少有 ~700M 余量，『100% 满』是**瞬时状态**读数且 5 小时内自解 —— 引用它必须连同观测日期与这条例外一起引；而『当场复核盘量』这一步现在又被上面的 0 号前置挡着。",
+        "⚠️【AC-239 腿【自己】的门槛 —— 与 AC-238 同一次运行，但严格多于 AC-238；任一不成立就【不写 AC-239 记录】，而此时 AC-238 的记录已经落账（见上一条 `_ac239_refresh_shape` (ii)）】⑦b（`verify-deliver-coldstart.sh:1653` `step_upgrade_drive_continue`）的入口条件逐条按位置：① `AC239_E2E=1`（`:1660`，未传 ⇒ 打印 `not-evaluated` 并 return 0）；② `AC238_EVALUATED=1` ∧ `AC238_PROJECT_ROOT` 逐字 == `$root`（`:1664`，函数头注释逐字写明这是『本 AC 防自证的全部机制』——另起一个全新项目跑一遍 e2e 也会产出一条字段齐全的 AC-239）；③ `AC238_RUNTIME_REPLACED=1`（`:1668`）；其后还要求该副本 `AC239_PROFILES_STATUS=configured`（`:1686`）、登录 shell 能解析到 `go`（`:1703`，否则 `go-absent` —— 目标项目是 Go 项目，worker 跑不了 `go test ./...`）、落地基线 `develop` 非 divergent/absent（`:1735`，其注释记着真机实测 1566 文件的全分叉那份）。另有 `AC239_POLL_SECS` 默认 **3600s** 的墙钟上界（`develop-deliver-tgz.sh:1782`）：超时即不写记录（fail-closed，⛔ 不无限等）。⇒ 这些全是**环境**要求，落在【升级后的那个副本】上：它得有可用的 go 工具链、配得上的 profiles、接得上主线的 develop 基线。⇒ 『re-run the producer』这句话对 AC-239 而言，前置严格多于对 AC-238 而言 —— 这正是本字段存在的理由（见文件头 `_comment`：\"'re-run the producer' is not always a complete remedy\"）。",
+        "⚠️【被推送的 profiles 文件 = 目标项目 worker-default 的 launcher/model/auth 的单一真相源 —— `--driving-profiles` 覆盖入口】本产出者把驱动方本地的 profiles 文件 scp 成目标的 `~/quay-driving-profiles.yml`：给了 `--driving-profiles <本地路径>` 就用它，未给才用驱动方仓库自己的 `.quay/profiles.yml`。⚠️ 该文件里 `worker-default.model` 必须是【目标主机网关】认得的名字 —— 驱动方的模型名是**主机专属**的（本仓 `.quay/profiles.yml` 自 2026-09-23 起是 `v4.1flash-anthropic`，只有驱动主机自己的 127.0.0.1 网关认它），⛔ **不保证在 B/C 可用**。实测 2026-09-25 原样推送该文件的后果：host B 上 AC-207 腿连续 4 次 `API Error: 400 Invalid model name passed in model=v4.1flash-` 后翻 needs-human、AC-239 腿的隔离副本 worker-driver 于 11:10:59Z 自停（`halted_by: worker-driver:environment-fatal`，签名 `unrecognized_model`），两条腿**都不产出记录**，且失败形态与『机制坏了』同形。⇒ 跑本产出者时必须给一个【目标主机认得的】profile；⛔ 脚本里不写死任何模型名（硬规则 4 推论二），用哪个名字由运行者提供。给了一个不存在的路径 ⇒ 脚本在第一处 scp/ssh 之前就以 NOT-EVALUATED + exit 2 停住，⛔ **不回落**开发机 profile（硬规则 3b）。"
+      ],
+      "subjects": [
+        "GOAL-009-AC-238",
+        "GOAL-009-AC-239"
+      ]
+    }
+  ],
+  "_not_registered_note": [
+    "Subjects that appear in the carrier but are deliberately NOT registered here, so a future reader",
+    "does not 'fix' the omission:",
+    "  * GOAL-009-AC-204 / GOAL-009-AC-206 -- written by the coldstart face but carry no build_sha,",
+    "    so they fall outside the declared scope rule (they track driver/state readings, not",
+    "    delivery-face freshness).",
+    "  * GOAL-015-AC-234, GOAL-016-AC-247/248/249/250, GOAL-018-AC-257, AC88/AC107/AC118/... -- other",
+    "    faces (browser render, goal-write, third-party install) writing the same carrier; the",
+    "    AC-214 criterion does not track them and neither does this mapping."
+  ]
+}

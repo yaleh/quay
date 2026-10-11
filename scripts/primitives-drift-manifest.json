@@ -1,0 +1,13 @@
+{
+  "_comment": "Pinned provenance for packages/quay/src/primitives/*.mjs — the local byte-identity contract with quay-fleet. Read by plugin/scripts/primitives-drift-check.ts. See packages/quay/src/primitives/PROVENANCE.md for the prose half. Updating the pin means editing fleetRepo/fleetSha/fleetSourceDir AND every sha256 in the same commit.",
+  "fleetRepo": "/home/yale/work/quay-fleet",
+  "fleetSha": "446ba9aa860833206945068c92ceac8d0064082b",
+  "fleetSourceDir": "packages/agent-core/src",
+  "localDir": "packages/quay/src/primitives",
+  "files": {
+    "pty-frame.mjs": "0e0934cfc16d3d47f852a4e4eff8c17309b445e74787c15d847e6b9bd85f963a",
+    "delivery-audit.mjs": "5da101bc15d135a9ecd2bc8ac97382424794673feeef31f2ef59e5b7e7f4d239",
+    "session-liveness.mjs": "f2a462a963efe17225a9c32bc58b7fdc6f8a930830417b0c8df1f56cf6a8dab4",
+    "session-schema.mjs": "36350484ebf0d366b49834f0ca7d59cfa1756af39fe06de7aefc9158263cb9b5"
+  }
+}

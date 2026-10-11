@@ -1,0 +1,15 @@
+{
+  "name": "quay",
+  "version": "0.19.0",
+  "description": "quay: a provider-agnostic task board. Bundles the quay MCP server, skills (execute, quay-directive, quay-file-task, loop-driver, init, cold-start, drivers, quay-task-operator, quay-task-to-plan, routines, quay-native-methodology, quay-webui-bootstrap-methodology, manager), vendored agent types, and distributable workflows and gate scripts for Tier-3 full-methodology workspace adoption.",
+  "author": {
+    "name": "Yale Huang",
+    "url": "https://github.com/yaleh"
+  },
+  "license": "MIT",
+  "homepage": "https://github.com/yaleh/quay",
+  "repository": "https://github.com/yaleh/quay",
+  "agents": [
+    "./agents/quay-task.md"
+  ]
+}
