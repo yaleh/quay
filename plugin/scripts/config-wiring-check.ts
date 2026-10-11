@@ -60,7 +60,7 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import { helpExit, readFileSafe, createSelftest } from "./gate-script-base.ts";
+import { helpExit, readFileSafe, createSelftest, isDirectEntry } from "./gate-script-base.ts";
 import { repoRoot } from "./repo-root.ts";
 import { stripComments } from "./source-text-lib.ts";
 
@@ -681,27 +681,23 @@ async function runSelftest(): Promise<number> {
   return st.report() ? 0 : 1;
 }
 
-// gap-config-wiring-check-symlink-noop: raw string equality between `process.argv[1]` (NEVER
-// resolved through a symlink — stays exactly as typed on the command line) and
-// `fileURLToPath(import.meta.url)` (ALWAYS resolved through symlinks to the real file's absolute
-// path by Node's ESM loader) can never be true when this script is invoked via the
-// `experiments/quay-perpetual-stream/scripts/` mirror symlink — `main()` would silently never run,
-// falling through to a clean exit 0 indistinguishable from "ran and found zero issues." Resolving
-// BOTH sides through `fs.realpathSync` (after `path.resolve` to handle a relative argv[1]) makes
-// the two invocation paths compare equal, so the mirror path now behaves identically to the real
-// path instead of silently no-opping.
-function isDirectInvocation(): boolean {
-  if (!process.argv[1]) return false;
-  try {
-    const invokedReal = fs.realpathSync(path.resolve(process.argv[1]));
-    const moduleReal = fileURLToPath(import.meta.url);
-    return invokedReal === moduleReal;
-  } catch {
-    return false;
-  }
-}
-
-const isDirect = isDirectInvocation();
+// gap-config-wiring-check-symlink-noop: the entrypoint guard must fire when this file is invoked
+// via the `experiments/quay-perpetual-stream/scripts/` MIRROR SYMLINK — `process.argv[1]` stays
+// exactly as typed (the symlink path) while Node's ESM loader resolves `import.meta.url` through it
+// to the real file — so the guard cannot be raw string equality between the two. A guard that never
+// fires here is a silent exit 0 indistinguishable from "ran and found zero issues".
+//
+// It now uses the SHARED `isDirectEntry` (NAME identity, `expectedBase` a REQUIRED literal) instead
+// of the local realpath-comparing helper this file and drivable-workspace-check.ts each carried —
+// the fold requested by routine `semantic-dedup-scan`, finding `isDirectInvocation-pair`, runId
+// `semantic-dedup-scan-1791733865369`. The name form is not merely equivalent here, it is REQUIRED:
+// under esbuild bundling (`build-plugin-dist.mjs`) every inlined module shares the bundle's
+// `import.meta.url`, so the file-identity form is TRUE for every inlined module and the first one in
+// bundle order hijacks the entry's CLI (that helper's own header documents the measured incident).
+// The name form holds for THIS entry alone in both layouts — source `…/config-wiring-check.ts`, its
+// mirror symlink (same basename), and the bundle `…/config-wiring-check.js` — so `main()` still runs
+// on every path this file is actually invoked by, and never fires when this module is merely inlined.
+const isDirect = isDirectEntry(import.meta, undefined, "config-wiring-check");
 if (isDirect) {
   main(process.argv).then((code) => process.exit(code));
 }

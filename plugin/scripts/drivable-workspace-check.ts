@@ -33,7 +33,7 @@ import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { parse as parseYaml } from "yaml";
-import { helpExit, createSelftest } from "./gate-script-base.ts";
+import { helpExit, createSelftest, isDirectEntry } from "./gate-script-base.ts";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
@@ -241,21 +241,19 @@ async function main(argv: string[]): Promise<number> {
 // real file's absolute path by Node's ESM loader) can never be true when this script is invoked
 // via a real symlink pointing at it from elsewhere on disk (a workspace-portable concern, not tied
 // to any one caller's layout) — `main()` would silently never run, falling through to a clean exit
-// 0 indistinguishable from "ran and found zero issues" / "PASS." Resolving BOTH sides through
-// `fs.realpathSync` (after `path.resolve` to handle a relative argv[1]) makes the two invocation
-// paths compare equal.
-function isDirectInvocation(): boolean {
-  if (!process.argv[1]) return false;
-  try {
-    const invokedReal = fs.realpathSync(path.resolve(process.argv[1]));
-    const moduleReal = fileURLToPath(import.meta.url);
-    return invokedReal === moduleReal;
-  } catch {
-    return false;
-  }
-}
-
-const isDirect = isDirectInvocation();
+// 0 indistinguishable from "ran and found zero issues" / "PASS."
+//
+// Folded onto the SHARED `isDirectEntry` (NAME identity, `expectedBase` a REQUIRED literal) by
+// routine `semantic-dedup-scan`, finding `isDirectInvocation-pair`, runId
+// `semantic-dedup-scan-1791733865369` — this file and config-wiring-check.ts carried byte-identical
+// local helpers. The name form is also the CORRECT form here, not just the shared one: this module is
+// statically imported as a LIBRARY by `external-dogfooding-check.ts`, so esbuild inlines it into that
+// entry's bundle, where every inlined module shares the bundle's `import.meta.url`. The old
+// file-identity form therefore evaluated TRUE inside the bundle and `external-dogfooding-check`'s
+// shipped `dist/` CLI ran THIS module's `main()` instead of its own (measured 2026-10-12: the built
+// bundle printed `usage: node drivable-workspace-check.ts …` and exited 2). The name form compares
+// the executed file's basename and is inert when inlined, so the bundle runs its own main.
+const isDirect = isDirectEntry(import.meta, undefined, "drivable-workspace-check");
 if (isDirect) {
   main(process.argv).then((code) => process.exit(code));
 }
