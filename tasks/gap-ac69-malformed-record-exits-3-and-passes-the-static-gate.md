@@ -234,14 +234,3 @@ sequence is 0,2,1,0 (baseline / delete / drop-conclusion / restore) — no 3.
 Before this task it WAS a member of the class — the Proposal's table records the malformed
 arm exiting 3 while the old case accepted any non-zero (so the production gate stayed green).
 ```
-
-## Blocker
-
-**2026-10-11T16:47:05.315Z — worker 未落地（exited-not-landed）**
-
-- 未落地原因：step=suite: # fail 87
-- run_id：wk-prod-anchor
-- session_id：778d8c38-c1e0-4667-9eab-666459d07b32
-
-（续做轮 2026-10-12 已定位该 suite red 的真因：本条 mutation case 把 wrapper 的
-`STATIC_CHECK_FAILED:` 机器行回显进了静态相位流 —— 见 §AC3b。修复后再无任何失败模式行。）
