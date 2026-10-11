@@ -5,7 +5,7 @@ title: "holdout leaks through source comments: packages/quay/src carries
   \"moved OUT … (GOAL-034): they are not config-loading\"), reachable by the
   investigator's read_file/grep despite the path deny-list — add a shared
   decision-reference redactor"
-status: todo
+status: ready
 labels:
   - gap
   - defect
