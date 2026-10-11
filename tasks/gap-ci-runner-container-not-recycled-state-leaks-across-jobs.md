@@ -2,7 +2,7 @@
 id: gap-ci-runner-container-not-recycled-state-leaks-across-jobs
 title: CI runner 改为 PID1=systemd 后容器不再回收：EPHEMERAL runner
   只在容器内重启服务（NRestarts=378），跨 job 累积的 /root 状态让 v0.19.0 发布门误判
-status: todo
+status: needs-human
 labels:
   - gap
   - defect
@@ -43,3 +43,9 @@ extra:
 - .github/runner/Dockerfile
 - plugin/test/ci-runner-container-recycle.test.mjs
 - tasks/gap-ci-runner-container-not-recycled-state-leaks-across-jobs.md
+
+## Needs-Human
+
+**执行 2026-10-11T01:07:44.177Z — 连续修满重试上限仍不合格（标 needs-human）**
+
+- 阻碍原因：unsatisfiableUnannotatedAc=[AC1（读生产载体）：修复落地后，runner 连续执行 ≥2 个 job，每个 job 开始时 `docker ps` 的容器创建时刻**互不相同**（即每 job 新容器）；把读数贴进本任务]（连续 3 轮被结构上不可派的拦截挡住 ⇒ 作者/人改写；⛔ 不派 fix worker）
