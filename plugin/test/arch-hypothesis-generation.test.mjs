@@ -26,6 +26,7 @@ import {
   FROZEN_VERIFIER_PROMPT, FROZEN_VERIFIER_PROMPT_SHA256, defaultVerifierPrompt,
   EVIDENCE_PACK_VERIFIER_PROMPT, evidencePackVerifierPrompt, VERIFIER_STRATEGIES,
   DEFAULT_EVIDENCE_MAX_LINES, UNINSTRUMENTED, citedSymbols, isDefinitionLine,
+  MODEL_UNVERIFIED, MODEL_NOT_APPLICABLE, modelCallFields, callText, modelPreregRefusal, applyModel,
   definitionLinesFor, importLinesFor, buildEvidencePack, parseVerifierStream,
   neutralCwdRefusal, verifyCwdRefusal, parseJsonObject, parseHypotheses, runInvestigator,
   clusterHypotheses, verifierVerdict, runVerifier,
@@ -984,4 +985,168 @@ test("AC-arm(e): the --arm id vocabulary admits only [A-Za-z0-9]+", () => {
   for (const bad of ["", "A-B", "A B", "A/B", "../A", "A.B", "A_B"]) assert.equal(ARM_ID_RE.test(bad), false, bad);
   assert.equal(armScopedKey("inventory", "B"), "inventory-B");
   assert.equal(armScopedKey("inventory", null), "inventory");
+});
+
+// ═════════════════════════════════════════════════════════════════════════════════════════════════════
+// gap-hypgen-model-identity-and-token-cost-are-not-measured — AC (a)…(f)
+// The investigator must be runnable on a CHOSEN model (a per-call override, never global config), and
+// every model call must record the model the gateway ACTUALLY served (not the requested proxy) and its
+// token cost / usage — read structurally from the stream, never by keyword.
+// ═════════════════════════════════════════════════════════════════════════════════════════════════════
+
+/** A `system`/`init` stream event: the ONE place the ACTUAL served model is reported. */
+const initEvent = (model) => ({ type: "system", subtype: "init", model });
+
+// ── AC(a): --model puts X into the argv and changes NOTHING else (shared by investigate/verify/review) ─
+test("AC-model(a): --model overrides only the model in the hardened argv, for every verb", () => {
+  const fake = () => ["claude", "--model", "v4.1flash-anthropic", "-n", "quay-meta-driver", "-p"];
+  const base = hardenedArgv(fake, "PROMPT", "/repo");
+  assert.equal(modelFromArgv(base), "v4.1flash-anthropic");
+  const withX = hardenedArgv(fake, "PROMPT", "/repo", { model: "X" });
+  assert.equal(modelFromArgv(withX), "X");
+  // nothing else changes: same length, every token but the --model VALUE is identical
+  assert.equal(withX.length, base.length);
+  const expected = base.slice(); expected[expected.indexOf("--model") + 1] = "X";
+  assert.deepEqual(withX, expected, "the override touches ONLY the --model value");
+  // no override ⇒ byte-identical to the pre-override argv
+  assert.deepEqual(hardenedArgv(fake, "PROMPT", "/repo", { model: null }), base);
+  // the launcher resolving NO --model still gains the pair, and it never lands after the prompt flag
+  const noModel = () => ["claude", "-n", "role", "-p"];
+  const inserted = hardenedArgv(noModel, "P", "/r", { model: "X" });
+  assert.equal(modelFromArgv(inserted), "X");
+  assert.equal(inserted[inserted.length - 1], "-p", "the trailing prompt flag stays last");
+  // the same override composes with the stream-json instrumentation every call now uses
+  const streamed = hardenedArgv(fake, "P", "/r", { model: "X", outputFormat: "stream-json" });
+  assert.equal(streamed[streamed.indexOf("--output-format") + 1], "stream-json");
+  assert.ok(streamed.includes("--verbose"));
+  assert.deepEqual(applyModel(["c", "--model", "a", "-p"], "b"), ["c", "--model", "b", "-p"]);
+});
+
+// ── AC(b): the init event's model records actual_model; requested≠actual is a recorded mismatch ──────
+test("AC-model(b): the init event's model is recorded as actual_model, and a mismatch is recorded", async () => {
+  const dir = tmp();
+  const neutral = path.join(dir, "neutral"); fs.mkdirSync(neutral);
+  const runWith = async (stdout, model) => (await runInvestigator({
+    prompt: "PROMPT", neutralDir: neutral, cwd: neutral, runs: 1, model,
+    runModel: async () => ({ stdout, status: 0 }), outDir: dir, writeFile: () => {}, budget: { maxRuns: 3 },
+  })).records[0];
+
+  const mismatch = await runWith(sse([initEvent("Y"), streamResult({ result: "[]" })]), "X");
+  assert.equal(mismatch.requested_model, "X");
+  assert.equal(mismatch.actual_model, "Y");
+  assert.equal(mismatch.model_mismatch, true, "requested ≠ actual must be recorded, never silently passed");
+
+  // CONTROL: the SAME stream with a request that AGREES is not flagged — the flag tracks the comparison
+  const agree = await runWith(sse([initEvent("Y"), streamResult({ result: "[]" })]), "Y");
+  assert.equal(agree.actual_model, "Y");
+  assert.equal(agree.model_mismatch, false);
+});
+
+// ── AC(c): a stream with no init model ⇒ not-evaluated:model-unverified (never the requested proxy) ──
+test("AC-model(c): a stream without an init model records not-evaluated:model-unverified", async () => {
+  const dir = tmp();
+  const neutral = path.join(dir, "neutral"); fs.mkdirSync(neutral);
+  const run = async (stdout) => (await runInvestigator({
+    prompt: "PROMPT", neutralDir: neutral, cwd: neutral, runs: 1, model: "requested-x",
+    runModel: async () => ({ stdout, status: 0 }), outDir: dir, writeFile: () => {}, budget: { maxRuns: 3 },
+  })).records[0];
+
+  // a parsed stream that simply carries no init model: the actual identity is unmeasured
+  const noInit = await run(sse([streamResult({ result: "[]" })]));
+  assert.equal(noInit.actual_model, MODEL_UNVERIFIED);
+  assert.equal(noInit.actual_model, "not-evaluated:model-unverified");
+  assert.notEqual(noInit.actual_model, "requested-x", "the requested model is a PROXY, never copied into the actual one");
+  assert.equal(noInit.model_mismatch, false, "no actual reading ⇒ no mismatch claim");
+  assert.equal(noInit.usage, null);
+  // non-stream stdout (the pre-instrumentation path) is the SAME not-evaluated value
+  assert.equal((await run("[]")).actual_model, MODEL_UNVERIFIED);
+});
+
+// ── AC(d): the result event's usage and total_cost_usd are recorded ──────────────────────────────────
+test("AC-model(d): the result event's token usage and total_cost_usd are recorded on the call", async () => {
+  const dir = tmp();
+  const neutral = path.join(dir, "neutral"); fs.mkdirSync(neutral);
+  const usage = { input_tokens: 11, output_tokens: 22, cache_read_input_tokens: 33 };
+  const withUsage = sse([initEvent("Y"), streamResult({ result: "[]", usage, total_cost_usd: 0.0123 })]);
+  const one = (await runInvestigator({
+    prompt: "PROMPT", neutralDir: neutral, cwd: neutral, runs: 1, model: "Y",
+    runModel: async () => ({ stdout: withUsage, status: 0 }), outDir: dir, writeFile: () => {}, budget: { maxRuns: 3 },
+  })).records[0];
+  assert.deepEqual(one.usage, usage, "the usage numbers from the result event are recorded verbatim");
+  assert.equal(one.cost_usd, 0.0123);
+  // a call whose result event carries no usage keeps null — never a fabricated zero object (硬规则 3b)
+  const bare = (await runInvestigator({
+    prompt: "PROMPT", neutralDir: neutral, cwd: neutral, runs: 1, model: "Y",
+    runModel: async () => ({ stdout: sse([initEvent("Y"), streamResult({ result: "[]" })]), status: 0 }), outDir: dir, writeFile: () => {}, budget: { maxRuns: 3 },
+  })).records[0];
+  assert.equal(bare.usage, null);
+  assert.equal(bare.cost_usd, null);
+
+  // the SAME fields reach a verify row (the shared modelCallFields seam)
+  const pin = tmp();
+  const clusters = clusterHypotheses([{ run: 1, hyps: [{ id: "H1", components: ["a.ts", "b.ts"], concept_kind: "policy", claim: "c", confidence: "high" }] }]);
+  const rv = await runVerifier({
+    clusters, pinDir: pin, cwd: pin, promptTemplate: "{{HYP}}", model: "Y",
+    runModel: async () => ({ stdout: sse([initEvent("Y"), streamResult({ result: JSON.stringify({ verdict: "supported" }), usage, total_cost_usd: 0.02 })]), stderr: "", status: 0 }),
+  });
+  assert.equal(rv.results[0].requested_model, "Y");
+  assert.equal(rv.results[0].actual_model, "Y");
+  assert.deepEqual(rv.results[0].usage, usage);
+  assert.equal(rv.results[0].cost_usd, 0.02);
+  // …and a mechanically refuted row (NO model call) is `not-applicable`, a DIFFERENT value from unverified
+  const prov = [
+    { c: "a.ts", imports: [], imported_by: ["plugin/scripts/b.ts", "plugin/scripts/c.ts"], sha256: "a".repeat(64) },
+    { c: "b.ts", imports: [{ module: "plugin/scripts/a.ts", names: ["s"], line: 1 }], imported_by: [], sha256: "b".repeat(64) },
+    { c: "c.ts", imports: [{ module: "plugin/scripts/a.ts", names: ["s"], line: 1 }], imported_by: [], sha256: "c".repeat(64) },
+  ];
+  const cl3 = clusterHypotheses([{ run: 1, hyps: [{ id: "H1", components: ["a.ts", "b.ts", "c.ts"], concept_kind: "policy", claim: "c", confidence: "high" }] }]);
+  const rm = await runVerifier({ clusters: cl3, pinDir: pin, cwd: pin, promptTemplate: "{{HYP}}", provenance: prov, runModel: async () => ({ stdout: "{}" }) });
+  assert.equal(rm.results[0].actual_model, MODEL_NOT_APPLICABLE);
+  assert.notEqual(MODEL_NOT_APPLICABLE, MODEL_UNVERIFIED);
+});
+
+// ── AC(e): the stream's result text parses to the SAME hypotheses as the same text as plain stdout ───
+test("AC-model(e): hypotheses from the stream's result text equal those from the same plain stdout", async () => {
+  const dir = tmp();
+  const neutral = path.join(dir, "neutral"); fs.mkdirSync(neutral);
+  const hypsText = '[{"id":"H1","components":["a.ts","b.ts"],"concept_kind":"policy","claim":"c","confidence":"high"}]';
+  const parseOne = async (stdout) => (await runInvestigator({
+    prompt: "P", neutralDir: neutral, cwd: neutral, runs: 1, model: "Y",
+    runModel: async () => ({ stdout, status: 0 }), outDir: dir, writeFile: () => {}, budget: { maxRuns: 3 },
+  })).records[0];
+  const plain = await parseOne(hypsText);
+  const streamed = await parseOne(sse([initEvent("Y"), streamResult({ result: hypsText })]));
+  assert.deepEqual(streamed.hyps, plain.hyps, "stream-json must not change what was parsed");
+  assert.equal(streamed.n_hyps, 1);
+  assert.equal(callText(sse([initEvent("Y"), streamResult({ result: hypsText })])), hypsText, "the result text is what is parsed");
+});
+
+// ── AC(f): a prereg `models` map contradicting the run's requested model makes scoring refuse ────────
+test("AC-model(f): a prereg models map that contradicts the run's requested model refuses scoring", () => {
+  const P = "PROMPT-BYTES", I = "INVENTORY-BYTES";
+  const runsWithModel = (model) => [{ run: 1, hyps: [], prompt_sha256: runPromptDigest(P, I), requested_model: model }];
+  // (i) the map's value differs from the run's requested model ⇒ refusal
+  const dir = tmp();
+  const bad = preregFixture({ dir, runs: runsWithModel("v4.1flash-anthropic"), mutate: ({ hashes }) => ({ hashes, models: { model: "v4pro-anthropic" } }) });
+  const refused = scoreFixture(dir, bad, 1);
+  assert.equal(refused.ok, false);
+  assert.equal(refused.code, EXIT.prereg);
+  assert.ok(refused.reasons.some((r) => r.startsWith("PREREG_MODEL_MISMATCH")), refused.reasons.join(","));
+  // CONTROL: the SAME fixture with a MATCHING value scores — the refusal was the mismatch, not the fixture
+  const dir2 = tmp();
+  const good = preregFixture({ dir: dir2, runs: runsWithModel("v4.1flash-anthropic"), mutate: ({ hashes }) => ({ hashes, models: { model: "v4.1flash-anthropic" } }) });
+  assert.equal(scoreFixture(dir2, good, 1).ok, true);
+  // no `models` key ⇒ the prereg expresses no opinion ⇒ scoring unchanged (back-compat)
+  const dir3 = tmp();
+  assert.equal(scoreFixture(dir3, preregFixture({ dir: dir3, runs: runsWithModel("anything") }), 1).ok, true);
+  // a declared map that does NOT cover the arm is fail-closed, never a silent pass
+  const dir4 = tmp();
+  const armGap = preregFixture({ dir: dir4, runs: runsWithModel("x"), mutate: ({ hashes }) => ({ hashes, models: { "model-B": "x" } }) });
+  const r4 = scoreFixture(dir4, armGap, 1);
+  assert.equal(r4.code, EXIT.prereg);
+  assert.deepEqual(r4.reasons, ["PREREG_MODEL_ABSENT:model"]);
+  // the pure helper reports the same values, including a run that recorded no requested model
+  assert.equal(modelPreregRefusal({ prereg: { models: { model: "a" } }, runs: [{ run: 1, requested_model: "a" }] }), null);
+  assert.deepEqual(modelPreregRefusal({ prereg: { models: { model: "a" } }, runs: [{ run: 1, requested_model: "b" }] }).reasons, ["PREREG_MODEL_MISMATCH:1:b!=a"]);
+  assert.deepEqual(modelPreregRefusal({ prereg: { models: { model: "a" } }, runs: [{ run: 1 }] }).reasons, ["RUN_MODEL_ABSENT:1"]);
 });

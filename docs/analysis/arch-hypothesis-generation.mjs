@@ -429,6 +429,36 @@ export function runPromptRefusal({ runs, promptBytes = null, inventoryBytes = nu
   return reasons.length ? { code: EXIT.prereg, reasons } : null;
 }
 
+/**
+ * The run⇄prereg MODEL binding (Plan 5). A pre-registered A/B experiment compares one model against
+ * another, so a run has to be bound to the model its arm pre-registered. The prereg MAY declare a
+ * `models` map keyed by the arm-scoped model key (`armScopedKey("model", arm)` — `"model"` unscoped,
+ * `"model-B"` under `--arm B`); when it does, every run's `requested_model` must equal that entry.
+ *   • No `models` key at all ⇒ the prereg expresses no opinion ⇒ no refusal (byte-identical back-compat).
+ *   • A declared map that does NOT cover this arm ⇒ `PREREG_MODEL_ABSENT` — its OWN refusal, never a
+ *     silent pass (硬规则 3b; the same shape as an undeclared arm-scoped HASH key).
+ *   • A run that recorded no requested model cannot satisfy a declared map ⇒ `RUN_MODEL_ABSENT`.
+ * ⛔ The value compared is the run's REQUESTED model, not its actual: the pre-registration names what was
+ * asked for; a gateway that serves something else is a `model_mismatch` on the run, reported elsewhere.
+ * @returns {null|{code:number, reasons:string[]}}
+ */
+export function modelPreregRefusal({ prereg, runs, arm = null } = {}) {
+  const models = prereg?.models;
+  if (models == null) return null;                       // not declared ⇒ no opinion
+  const reasons = [];
+  if (typeof models !== "object" || Array.isArray(models)) return { code: EXIT.prereg, reasons: ["PREREG_MODELS_NOT_AN_OBJECT"] };
+  const key = armScopedKey("model", arm);
+  const expected = models[key];
+  if (expected === undefined) return { code: EXIT.prereg, reasons: [`PREREG_MODEL_ABSENT:${key}`] };
+  for (const r of runs ?? []) {
+    const id = r?.run ?? "?";
+    const req = r?.requested_model ?? r?.model ?? null;
+    if (req == null) { reasons.push(`RUN_MODEL_ABSENT:${id}`); continue; }
+    if (req !== expected) reasons.push(`PREREG_MODEL_MISMATCH:${id}:${req}!=${expected}`);
+  }
+  return reasons.length ? { code: EXIT.prereg, reasons } : null;
+}
+
 /** The experiment id every record of a pass is tagged with: the caller's flag, else the PREREG's own
  *  field, else `null` (the caller decides what a null means — the tool never invents an id, because an
  *  invented one is indistinguishable from a real round's). */
@@ -524,12 +554,16 @@ export async function runInvestigator({ prompt, neutralDir, cwd, runs = 3, runMo
     const tCall = Date.now();
     const r = await runModel(prompt, i);
     const stdout = String(r?.stdout ?? "");
-    const { hyps, parse_error } = parseHypotheses(stdout);
+    // Plan 4: the hypotheses come from the RESULT TEXT the stream carries, so the SAME text parsed as plain
+    // stdout and parsed from the stream yield identical hypotheses (the run may now use stream-json).
+    const { hyps, parse_error } = parseHypotheses(callText(stdout));
     const rec = {
       run: i + 1, prompt_sha256: promptSha256,
       // Which prompt file produced this run, and the hashes binding it: the prompt file's own hash and the
       // inventory's, so the run stays joinable to its pre-registration even without the composite digest.
       model, prompt_file: promptFile, prompt_file_sha256: promptFileSha256, inventory_sha256: inventorySha256,
+      // The model identity (requested vs ACTUAL) and the call's cost, read structurally from the stream.
+      ...modelCallFields({ requested: model, stdout }),
       exit: r?.status ?? null,
       error: r?.error ? String(r.error.message ?? r.error).slice(0, 200) : null,
       wall_ms: Date.now() - tCall,
@@ -568,6 +602,14 @@ export function clusterHypotheses(runs, { threshold = 0.5 } = {}) {
  *  "not evaluated" and must be shaped like one (硬规则 3b) — the acceptance run's defeat was that the turn
  *  budget was consumed with no surviving record of HOW. */
 export const UNINSTRUMENTED = "not-evaluated:uninstrumented";
+/** The marker for a model call whose ACTUAL identity the stream did not report. The recorded `model` is the
+ *  one the launcher was ASKED for (`modelFromArgv`), which is a proxy; without the init event's `model`
+ *  there is no direct reading and the actual identity is "not measured" — its OWN value, never a copy of
+ *  the requested one (硬规则 3b/4b: "could not measure" must not be shaped like "measured"). */
+export const MODEL_UNVERIFIED = "not-evaluated:model-unverified";
+/** The marker for a row that spent NO model call (a mechanically refuted verify cluster). Distinct from
+ *  MODEL_UNVERIFIED: "no call was made" is not "a call was made and its model is unknown". */
+export const MODEL_NOT_APPLICABLE = "not-applicable:no-model-call";
 /** How much of a tool call's arguments a per-turn record keeps. The HEAD is what names the target
  *  (`file_path` / `pattern`+`path`); the full input is bulky and is not what the reading needs. */
 export const ARGS_HEAD_MAX = 160;
@@ -587,14 +629,23 @@ const argsHead = (input) => {
 };
 
 /**
- * Parse a `--output-format stream-json` verifier stdout into the PER-TURN record the task exists to
- * produce: one entry per tool call — `{ tool, args_head, result_bytes }` — plus the final verdict text.
+ * Parse a `--output-format stream-json` stdout into the PER-TURN record the task exists to produce: one
+ * entry per tool call — `{ tool, args_head, result_bytes }` — plus the final verdict text, the ACTUAL
+ * model identity, and the call's token usage / cost.
+ *
+ * The MODEL identity and the USAGE are read STRUCTURALLY, never by keyword:
+ *   • the `system`/`init` event's `model` field is the model the gateway ACTUALLY served (硬规则 4b: the
+ *     requested `--model` is a proxy recorded as if it were the direct reading; this is the direct one);
+ *   • the final `result` event's `usage` (input/output/cache token counts) and `total_cost_usd`.
+ * ⛔ Missing init model / missing usage is reported as ABSENT (`model:null`, `usage:null`) — never defaulted
+ * to the requested model or to zeros (硬规则 3b: "not measured" must not be shaped like a measurement).
  * ⛔ Non-stream stdout (the pre-instrumentation path, and the unit fixtures) yields `ok:false` and an
  * EMPTY turn list; the caller must report that as `not-evaluated:uninstrumented`, never as "zero turns".
- * @returns {{ok:boolean, turns:object[], finalText:string, subtype:string|null, num_turns:number|null, is_error:boolean|null}}
+ * @returns {{ok:boolean, turns:object[], finalText:string, subtype:string|null, num_turns:number|null,
+ *            is_error:boolean|null, model:string|null, usage:object|null, cost_usd:number|null}}
  */
 export function parseVerifierStream(stdout) {
-  const out = { ok: false, turns: [], finalText: "", subtype: null, num_turns: null, is_error: null };
+  const out = { ok: false, turns: [], finalText: "", subtype: null, num_turns: null, is_error: null, model: null, usage: null, cost_usd: null };
   if (typeof stdout !== "string" || !stdout.trim()) return out;
   let parsedLines = 0;
   const pending = new Map();               // tool_use id → the record awaiting its result's bytes
@@ -606,6 +657,11 @@ export function parseVerifierStream(stdout) {
     try { ev = JSON.parse(line); } catch { continue; }
     if (!ev || typeof ev !== "object") continue;
     parsedLines++;
+    // The ACTUAL served model: the init event's `model`. FIRST one wins; a stream with no init model keeps
+    // `model:null` (its own value — never a fallback to the requested one).
+    if (out.model == null && ev.type === "system" && ev.subtype === "init" && typeof ev.model === "string" && ev.model.trim()) {
+      out.model = ev.model;
+    }
     const content = ev.message?.content;
     if (Array.isArray(content)) {
       for (const b of content) {
@@ -628,12 +684,49 @@ export function parseVerifierStream(stdout) {
       out.num_turns = Number.isFinite(ev.num_turns) ? ev.num_turns : null;
       out.is_error = typeof ev.is_error === "boolean" ? ev.is_error : null;
       if (typeof ev.result === "string" && ev.result.trim()) out.finalText = ev.result;
+      // The token accounting, read from the SAME structural event the turns are: a call whose cost is not
+      // observable keeps `usage:null` (its own value, never a fabricated zero-usage object).
+      if (out.usage == null && ev.usage && typeof ev.usage === "object") out.usage = ev.usage;
+      if (out.cost_usd == null && Number.isFinite(ev.total_cost_usd)) out.cost_usd = ev.total_cost_usd;
     }
   }
   out.ok = parsedLines > 0;
   if (!out.finalText) out.finalText = textParts.join("\n");
   return out;
 }
+
+/**
+ * The model-identity + cost fields EVERY model-call record carries (`investigate` run files, `verify`
+ * rows, `review` rows): the model that was REQUESTED, the model the stream reports was ACTUALLY served,
+ * whether they disagree, and the call's token usage / cost. The mechanism is the same for all three verbs
+ * so a review row and a run row spell the reading identically.
+ *   • `actual_model` is `MODEL_UNVERIFIED` when the stream carries no init model — the recorded requested
+ *     model is a PROXY, and copying it into `actual_model` is exactly the defect this closes (硬规则 4b).
+ *   • `model_mismatch` is TRUE only when an actual model WAS read and it differs from the request: a
+ *     mismatch is recorded, never silently passed.
+ *   • `usage` / `cost_usd` are `null` when the result event carried none — never a zero object.
+ * @returns {{requested_model:string|null, actual_model:string, model_mismatch:boolean, usage:object|null, cost_usd:number|null}}
+ */
+export function modelCallFields({ requested = null, stdout = "" } = {}) {
+  const stream = parseVerifierStream(stdout);
+  const actual = stream.ok && stream.model ? stream.model : null;
+  return {
+    requested_model: requested ?? null,
+    actual_model: actual ?? MODEL_UNVERIFIED,
+    model_mismatch: actual != null && requested != null && actual !== requested,
+    usage: stream.ok ? (stream.usage ?? null) : null,
+    cost_usd: stream.ok ? (stream.cost_usd ?? null) : null,
+  };
+}
+
+/** the final assistant text of a call: the stream's `result` text when the stream parsed, else raw stdout.
+ *  Plan 4: the investigator's hypotheses are parsed from the SAME text whether it arrives as a stream or as
+ *  plain stdout, so turning on `--output-format stream-json` cannot change what was parsed. */
+export const callText = (stdout) => {
+  const s = String(stdout ?? "");
+  const stream = parseVerifierStream(s);
+  return stream.ok && stream.finalText ? stream.finalText : s;
+};
 
 /** Map a verifier call's result to a verdict. A TURN-LIMIT exit and an unparseable output both map to
  *  `undetermined` — ⛔ NEVER `refuted` (a budget exhaustion refutes nothing; 硬规则 3b).
@@ -871,7 +964,12 @@ export function buildEvidencePack({ components = [], claim = "", sources = {}, p
  * `strategy: "evidence-pack"` is OPT-IN: each cluster's deterministic pack is assembled first, and the
  * clusters the mechanical layer already decides run first (`run_order`), so no model call is spent on
  * them; the rest get the pack in their prompt.
+ *
+ * EVERY model call also carries the MODEL IDENTITY + COST fields (`modelCallFields`): the requested model,
+ * the ACTUAL one the stream reports was served, a mismatch flag, and the call's usage / cost.
  * @param {(prompt:string, ctx:object)=>Promise<object>} o.runModel INJECTABLE
+ * @param {?string} o.model the model REQUESTED for these calls (the `--model` override, or the launcher's
+ *   resolved default), recorded on each row as `requested_model`. `null` ⇒ no claim was made.
  * @param {object[]|null} o.provenance structural inventory entries (see `sharedImplementation`)
  * @param {number|null} o.onlyCluster 1-based position in the FULL cluster list (diagnostic: one call)
  * @param {{sources?:object, provenance?:object|null, hits?:object[], maxLines?:number}} o.evidence
@@ -879,7 +977,7 @@ export function buildEvidencePack({ components = [], claim = "", sources = {}, p
 export async function runVerifier({
   clusters, pinDir, cwd, promptTemplate, runModel,
   maxClusters = HARD_MAX_CLUSTERS, concurrency = 5, maxMs = null, provenance = null,
-  onlyCluster = null, strategy = "default", evidence = null,
+  onlyCluster = null, strategy = "default", evidence = null, model = null,
 }) {
   if (!VERIFIER_STRATEGIES.includes(strategy)) return { ok: false, code: EXIT.usage, reasons: [`STRATEGY_NOT_IN_VOCAB:${strategy}`] };
   if (maxClusters > HARD_MAX_CLUSTERS) return { ok: false, code: EXIT.maxClusters, reasons: [`MAX_CLUSTERS_ABOVE_CEILING:${maxClusters}>${HARD_MAX_CLUSTERS}`] };
@@ -927,8 +1025,10 @@ export async function runVerifier({
         definer: m.definer, shared_symbol: m.symbol,
         intentional: null, evidence: m.evidence, counterexample: null,
         // A cluster decided WITHOUT a model call has no turns to record; that is "not applicable", which
-        // is its own marker and must not read as "not-evaluated" (硬规则 3/3b).
+        // is its own marker and must not read as "not-evaluated" (硬规则 3/3b). Its model identity is
+        // not-applicable for the SAME reason — no call was made, so there is nothing to verify.
         instrumented: false, instrumentation: "not-applicable:mechanical", turns: null, turns_used: 0, cli_num_turns: null,
+        requested_model: null, actual_model: MODEL_NOT_APPLICABLE, model_mismatch: false, usage: null, cost_usd: null,
         pack: packs[k] ? { counts: packs[k].counts, capped: packs[k].capped, lines: packs[k].lines } : null,
         summary: `shared implementation: ${m.importers.length} components import from ${m.definer}`,
       };
@@ -950,6 +1050,9 @@ export async function runVerifier({
       instrumented: stream.ok, instrumentation: stream.ok ? "stream-json" : UNINSTRUMENTED,
       turns: stream.ok ? stream.turns : null, turns_used: stream.ok ? stream.turns.length : null,
       cli_num_turns: stream.num_turns,
+      // The model identity + cost this task exists to make observable: the REQUESTED model is the caller's
+      // claim; the ACTUAL one and the usage are read from the same stream the turns are.
+      ...modelCallFields({ requested: model, stdout }),
       intentional: j?.intentional_difference_found ?? null,
       evidence: Array.isArray(j?.evidence) ? j.evidence : [],
       counterexample: j?.counterexample ?? null,
@@ -1055,6 +1158,10 @@ export function loadRunsGated({ runDir, runCount, preregPath, expected = {}, pro
   // The declared hashes are checked against the prereg above; the RUNS are bound to the artifacts here.
   const runGate = runPromptRefusal({ runs, promptBytes, inventoryBytes, expectedPromptSha: expected[armScopedKey("prompt-investigator", arm)] ?? null });
   if (runGate) return { ok: false, code: runGate.code, reasons: runGate.reasons };
+  // The MODEL binding (Plan 5): when the prereg declares a `models` map, each run's REQUESTED model must
+  // match the arm's pre-registered one. A run that recorded no model is its own refusal under a declared map.
+  const modelGate = modelPreregRefusal({ prereg, runs, arm });
+  if (modelGate) return { ok: false, code: modelGate.code, reasons: modelGate.reasons };
   return { ok: true, runs, runFiles, prereg };
 }
 
@@ -1312,10 +1419,24 @@ export function buildReport({ armA = null, armB = null, inventoryA = null, inven
 const argOf = (args, n, d = null) => { const i = args.indexOf(n); return i >= 0 ? args[i + 1] : d; };
 const has = (args, n) => args.includes(n);
 
+/** Override ONLY this call's `--model`: replace the VALUE the launcher resolved, in place, so every other
+ *  token is untouched and a call WITHOUT an override is byte-identical to before. This is a PER-CALL
+ *  override, never global launcher config — editing the launcher to run a model comparison would also
+ *  change production drivers. When the launcher resolved no `--model`, the pair is inserted before the
+ *  trailing prompt flag (⛔ never appended after it, which would be read as the prompt). */
+export function applyModel(argv, model) {
+  const i = argv.indexOf("--model");
+  if (i >= 0) argv[i + 1] = String(model);
+  else argv.splice(argv.length - 1, 0, "--model", String(model));
+  return argv;
+}
+
 /** The hardened launcher argv: no tools, no slash commands, no session, strict MCP. The ONE line that
  *  resolves the launcher role is the `launchArgv(...)` call below — every other line of this module, and
- *  all three prompt files, are free of any holdout-specific text. */
-export function hardenedArgv(launchArgv, prompt, root, { tools = "", maxTurns = null, outputFormat = null } = {}) {
+ *  all three prompt files, are free of any holdout-specific text.
+ *  `model` is the OPTIONAL per-call override (a model comparison without touching global config); `null`
+ *  leaves the launcher's resolved model exactly as it was. */
+export function hardenedArgv(launchArgv, prompt, root, { tools = "", maxTurns = null, outputFormat = null, model = null } = {}) {
   const argv = launchArgv("meta-driver", prompt, root, { promptViaStdin: true });
   const extra = ["--tools", tools, "--disable-slash-commands", "--no-session-persistence", "--strict-mcp-config"];
   if (maxTurns !== null) extra.push("--max-turns", String(maxTurns));
@@ -1324,6 +1445,7 @@ export function hardenedArgv(launchArgv, prompt, root, { tools = "", maxTurns = 
   // turns that consumed it (the acceptance defect this task closes).
   if (outputFormat !== null) extra.push("--output-format", String(outputFormat), "--verbose");
   argv.splice(argv.length - 1, 0, ...extra);
+  if (model != null) applyModel(argv, model);
   return argv;
 }
 
@@ -1450,16 +1572,28 @@ async function cli(argv = process.argv.slice(2)) {
     const runtime = await importDriverRuntime();
     if (!runtime.ok) { console.error(`${TOOL} investigate: ${runtime.reason}`); return EXIT.usage; }
     const { launchArgv, runAsync } = runtime.mod;
-    const model = modelFromArgv(hardenedArgv(launchArgv, "", root));
+    // The model this call is ASKED for: the `--model` override when given, else the launcher's resolved
+    // default. `hardenedArgv(..., { model })` is what actually places it in the argv.
+    const modelOverride = argOf(args, "--model", null);
+    const model = modelFromArgv(hardenedArgv(launchArgv, "", root, { model: modelOverride }));
     if (!model) { console.error(`${TOOL} investigate: launchArgv("meta-driver") resolved no --model — refusing to record runs whose model is unknown`); return EXIT.usage; }
-    const runModel = async (p) => runAsync(hardenedArgv(launchArgv, p, root), { timeoutMs: Number(argOf(args, "--timeout-ms", 900_000)), collectStderr: true, stdinData: p });
+    // stream-json so the run records the ACTUAL served model and the token cost, not just the request.
+    const runModel = async (p) => runAsync(hardenedArgv(launchArgv, p, root, { model: modelOverride, outputFormat: "stream-json" }), { timeoutMs: Number(argOf(args, "--timeout-ms", 900_000)), collectStderr: true, stdinData: p });
     const res = await runInvestigator({
       prompt, neutralDir, cwd: process.cwd(), runs: Number(argOf(args, "--runs", 3)), runModel, outDir, model,
       promptFile: path.relative(root, inputs.promptPath), promptFileSha256: sha256(promptBytes), inventorySha256: sha256(inventoryBytes),
       writeFile: (f, t) => { fs.mkdirSync(path.dirname(f), { recursive: true }); fs.writeFileSync(f, t, "utf8"); },
       budget: { maxRuns: Number(argOf(args, "--max-runs", 3)), maxMs: argOf(args, "--max-ms", null) === null ? null : Number(argOf(args, "--max-ms")) },
     });
-    console.log(JSON.stringify(json ? res : { ...res, records: (res.records ?? []).map((r) => ({ run: r.run, exit: r.exit, n_hyps: r.n_hyps, parse_error: r.parse_error, wall_ms: r.wall_ms })) }, null, json ? 1 : 0));
+    console.log(JSON.stringify(json ? res : {
+      ...res,
+      // The per-run summary names the model identity + cost this task makes observable, so the reading is
+      // legible from the default output without `--json` (the AC's real-call evidence).
+      records: (res.records ?? []).map((r) => ({
+        run: r.run, exit: r.exit, n_hyps: r.n_hyps, parse_error: r.parse_error, wall_ms: r.wall_ms,
+        requested_model: r.requested_model, actual_model: r.actual_model, model_mismatch: r.model_mismatch, usage: r.usage, cost_usd: r.cost_usd,
+      })),
+    }, null, json ? 1 : 0));
     return res.ok ? 0 : res.code;
   }
 
@@ -1524,15 +1658,18 @@ async function cli(argv = process.argv.slice(2)) {
       return sources;
     };
     // ⛔ EVERY verify model call is instrumented: `--output-format stream-json` is what leaves the per-turn
-    // record. Without it a budget exhaustion is again a 28-byte string and nothing else.
-    const runModel = async (p) => runAsync(hardenedArgv(launchArgv, p, root, { tools: "Read,Grep", maxTurns, outputFormat: "stream-json" }), { timeoutMs: Number(argOf(args, "--timeout-ms", 300_000)), collectStderr: true, stdinData: p });
+    // record AND the actual model identity + token cost. Without it a budget exhaustion is again a 28-byte
+    // string and the served model / cost are unobservable.
+    const modelOverride = argOf(args, "--model", null);
+    const requestedModel = modelFromArgv(hardenedArgv(launchArgv, "", root, { model: modelOverride }));
+    const runModel = async (p) => runAsync(hardenedArgv(launchArgv, p, root, { tools: "Read,Grep", maxTurns, outputFormat: "stream-json", model: modelOverride }), { timeoutMs: Number(argOf(args, "--timeout-ms", 300_000)), collectStderr: true, stdinData: p });
     const selectedForSources = onlyCluster != null ? [clusters[onlyCluster - 1]] : clusters.slice(0, Number(argOf(args, "--max-clusters", HARD_MAX_CLUSTERS)));
     const evidence = strategy === "evidence-pack"
       ? { sources: readEvidenceSources(selectedForSources.flatMap((c) => c.rep.components ?? [])), provenance, hits: packHits, maxLines: evidenceMaxLines }
       : null;
     const res = await runVerifier({
       clusters, pinDir, cwd: process.cwd(), promptTemplate: template, runModel, provenance,
-      onlyCluster, strategy, evidence,
+      onlyCluster, strategy, evidence, model: requestedModel,
       maxClusters: Number(argOf(args, "--max-clusters", HARD_MAX_CLUSTERS)),
       maxMs: argOf(args, "--max-ms", null) === null ? null : Number(argOf(args, "--max-ms")),
     });
@@ -1583,13 +1720,23 @@ async function cli(argv = process.argv.slice(2)) {
     const runtime = await importDriverRuntime();
     if (!runtime.ok) { console.error(`${TOOL} review: ${runtime.reason}`); return EXIT.usage; }
     const { launchArgv, runAsync } = runtime.mod;
+    // Each reviewer call is asked for the SAME model the rest of the pass uses (the `--model` override when
+    // given, else the launcher's default) and runs with stream-json, so the row records the ACTUAL model
+    // and the cost. The review verdict is parsed from the STREAM's result text (Plan 4), never raw stdout.
+    const modelOverride = argOf(args, "--model", null);
+    const requestedModel = modelFromArgv(hardenedArgv(launchArgv, "", root, { model: modelOverride }));
     const reviews = [];
     for (const m of matches) {
       const c = (res.labels.cases ?? []).find((x) => x.id === m.case);
       const prompt = template.replace("{{CASE}}", c?.description ?? "").replace("{{HYP}}", JSON.stringify({ components: m.comps, concept_kind: m.kind, claim: m.claim, counterexample_requirement: m.counter }));
       const t0 = Date.now();
-      const r = await runAsync(hardenedArgv(launchArgv, prompt, root), { timeoutMs: 300_000, collectStderr: true, stdinData: prompt });
-      reviews.push({ case: m.case, run: m.run, hid: m.hid, comps: m.comps, wall_ms: Date.now() - t0, review: parseJsonObject(String(r?.stdout ?? "")) ?? { unparseable: true } });
+      const r = await runAsync(hardenedArgv(launchArgv, prompt, root, { model: modelOverride, outputFormat: "stream-json" }), { timeoutMs: 300_000, collectStderr: true, stdinData: prompt });
+      const stdout = String(r?.stdout ?? "");
+      reviews.push({
+        case: m.case, run: m.run, hid: m.hid, comps: m.comps, wall_ms: Date.now() - t0,
+        ...modelCallFields({ requested: requestedModel, stdout }),
+        review: parseJsonObject(callText(stdout)) ?? { unparseable: true },
+      });
     }
     const outFile = path.resolve(argOf(args, "--out", path.join(outDir, "review.json")));
     fs.mkdirSync(path.dirname(outFile), { recursive: true });
@@ -1651,8 +1798,8 @@ async function cli(argv = process.argv.slice(2)) {
   console.error("              prompt file, hashed in its OWN pre-registration under the arm key (`--arm <id>`); the");
   console.error("              frozen investigator prompt is never touched. ONE prereg covers every arm: with `--arm X`");
   console.error("              the gate compares the supplied bytes against `prompt-investigator-X` / `inventory-X`.");
-  console.error("  investigate --inventory <f> --neutral-dir <dir> [--investigator-prompt <f>] [--runs N] [--max-runs N] [--max-ms N] [--timeout-ms N] [--out-dir <dir>]");
-  console.error("  verify      --pin-dir <dir> --runs <dir> --inventory <f> [--provenance <f>] [--prereg <f>] [--investigator-prompt <f>] [--arm <id>] [--experiment <id>] [--max-clusters N] [--max-turns N] [--max-ms N]");
+  console.error("  investigate --inventory <f> --neutral-dir <dir> [--investigator-prompt <f>] [--model <id>] [--runs N] [--max-runs N] [--max-ms N] [--timeout-ms N] [--out-dir <dir>]");
+  console.error("  verify      --pin-dir <dir> --runs <dir> --inventory <f> [--provenance <f>] [--prereg <f>] [--investigator-prompt <f>] [--arm <id>] [--experiment <id>] [--model <id>] [--max-clusters N] [--max-turns N] [--max-ms N]");
   console.error("              --provenance <f> turns on the MECHANICAL pre-verification layer: a cluster whose members'");
   console.error("              edges converge on one component is recorded refuted/shared-implementation with NO model call.");
   console.error("              [--strategy default|evidence-pack] [--only-cluster N] [--evidence-source-root <dir>] [--evidence-max-lines N] [--evidence-hits <f>] [--prompt <f>]");
@@ -1663,12 +1810,18 @@ async function cli(argv = process.argv.slice(2)) {
   console.error("              verifier-evidence-pack.txt and runs the mechanically decided clusters first (run_order).");
   console.error("              ⛔ the pinned tree must carry NONE of: " + PIN_FORBIDDEN_DIRS.join(", ") + " (scope enforcement).");
   console.error("  match       --runs <dir> --labels <f> --inventory <f> [--prereg <f>] [--investigator-prompt <f>] [--arm <id>] [--experiment <id>] [--run-count N] [--write-store]");
-  console.error("  review      --runs <dir> --labels <f> --matches <f> --neutral-dir <dir> --inventory <f> [--prereg <f>] [--arm <id>] [--experiment <id>]");
+  console.error("  review      --runs <dir> --labels <f> --matches <f> --neutral-dir <dir> --inventory <f> [--prereg <f>] [--arm <id>] [--experiment <id>] [--model <id>]");
   console.error("  --arm <id> ([A-Za-z0-9]+) scopes the pre-registration gate to one arm of an A/B experiment: the");
   console.error("  gate reads `prompt-investigator-<id>` / `inventory-<id>`, and a prereg lacking them refuses with");
   console.error("  PREREG_HASH_ABSENT (⛔ never a fallback to the unscoped keys). Omitted ⇒ single-arm, unchanged.");
   console.error("  report      --artifacts <dir> [--labels <f>] [--out <md>]");
   console.error("  --experiment <id> overrides the id read from the prereg (fields: experiment | experiment_id | acceptance_run).");
+  console.error("  --model <id> (investigate|verify|review) overrides ONLY that call's model in the hardened argv — a");
+  console.error("  per-call override for a model comparison, never global launcher config; omitted ⇒ byte-identical. Every");
+  console.error("  model call records requested_model, actual_model (the stream init event's model; absent ⇒");
+  console.error("  `not-evaluated:model-unverified`), model_mismatch, usage and cost_usd. A prereg `models` map (if");
+  console.error("  present) must name each run's requested model under the arm-scoped key `model` / `model-<id>`, or");
+  console.error("  scoring refuses (PREREG_MODEL_ABSENT / PREREG_MODEL_MISMATCH).");
   return EXIT.usage;
 }
 
