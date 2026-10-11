@@ -4,7 +4,7 @@ title: "ownership-active investigation loop: bounded proposal-repair on
   ArchGuard slice-delta rejection (classify
   evidence_gap/invalid_move/tool_limitation/honest_abstain, retry ≤3 rounds,
   same commit+scope, no new dirs, no source edits, no hardcoded answer)"
-status: todo
+status: ready
 labels:
   - gap
 parent: null
