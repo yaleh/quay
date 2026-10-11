@@ -32,7 +32,7 @@ import { spawn, type ChildProcess } from "node:child_process";
 import { isDirectEntry } from "./gate-script-base.ts";
 // Layer 0（driver-runtime 单一实现）：ts（round 记录时间戳）、appendHeartbeatLine（心跳/载体落点）。
 // ⛔ 不再 import DRIVER_KINDS / isHalted / sleep（常驻 driver kind 面已按人 2026-09-07 裁定退役）。
-import { ts, appendHeartbeatLine } from "./driver-runtime.ts";
+import { ts, appendHeartbeatLine, splitArgs, isNonNegInt } from "./driver-runtime.ts";
 // suite 槽路径单一真相源（TS 侧；与 bash suite-slot-lib.sh 同语义）。
 import { suiteLockBase } from "./suite-lock-slots.ts";
 
@@ -316,14 +316,10 @@ const HELP = [
   "  --json                     结果向 stdout 打一条 JSON 事件行",
 ].join("\n");
 
-/** 空格分隔 argv 切分（与 driver-runtime.splitArgs 同族；测试缝注入覆盖命令）。 */
-export function splitArgs(cmd: string): string[] {
-  return cmd.trim().split(/\s+/).filter(Boolean);
-}
-
-function isNonNegInt(s: string): boolean {
-  return /^\d+$/.test(s);
-}
+// splitArgs / isNonNegInt：单一实现已上收 driver-runtime.ts（routine semantic-dedup-scan finding
+// `splitArgs-isNonNegInt-trio`，runId semantic-dedup-scan-1791733865369——三份 byte-identical 副本
+// 归并为一份，同 process-kill-lib 的手法）。splitArgs 仍从本模块 re-export，保留既有 import 面。
+export { splitArgs };
 
 export async function main(argv: string[]): Promise<number> {
   const args = argv.slice(2);

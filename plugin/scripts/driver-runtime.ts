@@ -1982,7 +1982,10 @@ export function notifyManager(opts: {
 // （python3+jq，且不套 L2 的主备回退/加载校验/继承去重）。quay-launch.sh 保留给非驱动路径
 // （manager/outer/inner 长驻会话，经 manager-start.sh / session-bootstrap.sh 直接调用）。
 
-/** 空格分隔 argv 切分（⛔ 无 shell 元字符 / 引号；用于覆盖命令与默认 claude -p）。 */
+/** 空格分隔 argv 切分（⛔ 无 shell 元字符 / 引号；用于覆盖命令与默认 claude -p）。
+ *  单一实现（routine semantic-dedup-scan finding `splitArgs-isNonNegInt-trio`，runId
+ *  semantic-dedup-scan-1791733865369）：suite-driver / quality-gate-driver 从这里 import 并
+ *  re-export，⛔ 不再各带一份 byte-identical 副本。 */
 export function splitArgs(cmd: string): string[] {
   return cmd.trim().split(/\s+/).filter(Boolean);
 }
@@ -4146,7 +4149,9 @@ function parseKernelArgs(argv: string[]) {
   return { cmd, kind, root, interval, reconcileInterval, cap, restartDelay, runId, confirmTimeout, json };
 }
 
-function isNonNegInt(s: string): boolean {
+/** 非负整数判定（`/^\d+$/`）。单一实现（同 splitArgs 的 finding `splitArgs-isNonNegInt-trio`）：
+ *  suite-driver / quality-gate-driver 从这里 import，⛔ 不再各带一份副本。 */
+export function isNonNegInt(s: string): boolean {
   return /^\d+$/.test(s);
 }
 
