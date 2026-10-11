@@ -347,6 +347,72 @@ function nextId(prefix, ids) {
   return `${prefix}-${String(max + 1).padStart(3, "0")}`;
 }
 
+// ── ADVISORY ownership review (gap-ownership-semantic-review-of-proposed-slice) ────────────────────
+// ⛔ THIS CHANGES NO JUDGEMENT. `evaluateEntryBar` / `evaluateCarrier` are untouched by the flag, and the
+//    test suite asserts every candidate's `eligible` / `reason` / `streak` is byte-identical with the flag
+//    on and off. The review is printed beside the verdict and (only under the pre-existing `--write`)
+//    attached to the draft body a human still has to rule on. Whether `reject` should become a FIFTH entry
+//    condition is a question for a human AFTER this layer's readings exist (硬规则 12 / 硬规则 4 推论).
+
+/** The record whose slice the review judges: the LATEST run that carries a computed delta and a slice. */
+export function reviewableRecord(groupRecords) {
+  const records = Array.isArray(groupRecords) ? groupRecords.filter(isObj) : [];
+  for (let i = records.length - 1; i >= 0; i--) {
+    const r = records[i];
+    const d = deltaEvidence(r);
+    if (d.computed && isObj(r.proposed_slice) && Array.isArray(r.proposed_slice.moves) && r.proposed_slice.moves.length) {
+      return { ok: true, record: r, reason: `run_id=${r.run_id ?? "n/a"}` };
+    }
+  }
+  return { ok: false, record: null, reason: "NO_COMPUTED_DELTA_WITH_SLICE: no run of this candidate carries both a computed delta and a proposed slice — there is no cut to review" };
+}
+
+/**
+ * Review ONE candidate's slice. PURE apart from the injected judge: it assembles commit-locked evidence,
+ * derives the mechanical facts, and asks the blind judge. The slice's own record supplies commit /
+ * scope_root / moves — nothing is taken from a GOAL body.
+ *
+ * @returns {Promise<object>} `{state, cause?, review?}` — `state:"not-evaluated"` with a named cause when
+ *          the review could not run; it is NEVER reported as an abstain (硬规则 3b).
+ */
+export async function reviewCandidate(groupRecords, { root, invokeJudge, graph = null, deps = {} }) {
+  const pick = reviewableRecord(groupRecords);
+  if (!pick.ok) return { state: "not-evaluated", cause: "NO_COMPUTED_DELTA_WITH_SLICE", reason: pick.reason };
+  const rec = pick.record;
+  const slice = rec.proposed_slice;
+  if (typeof invokeJudge !== "function" && !deps.reviewOwnership) {
+    return { state: "not-evaluated", cause: "NO_JUDGE_SEAM", reason: "no launcher was injected — refusing to report a review that never ran (硬规则 3b)" };
+  }
+  const mod = deps.reviewModule || await import("./ownership-semantic-review.mjs");
+  const commit = isStr(rec.commit, 1) ? rec.commit : null;
+  if (commit === null) return { state: "not-evaluated", cause: "RECORD_HAS_NO_COMMIT", reason: "the run record carries no commit, so no reading could be taken at a pinned tree" };
+  const bundle = mod.assembleOwnershipEvidence({ root, commit, scopeRoot: slice.scope_root, slice });
+  const facts = mod.ownershipFacts(bundle, graph);
+  const leakage = mod.auditHoldoutLeakage(bundle);
+  const review = await (deps.reviewOwnership ?? mod.reviewOwnership)({ bundle, facts, invokeJudge });
+  return { state: review.state, review, facts, leakage, bundle_bytes: bundle.bytes, commit, run_id: rec.run_id ?? null };
+}
+
+/** Render the review as the lines a draft body carries. Deterministic — no prose is invented here. */
+export function renderReviewSection(reviewResult) {
+  if (!reviewResult || reviewResult.state !== "evaluated") {
+    return [`- 归属审查：未评估（${reviewResult?.cause ?? "unknown"}）——${String(reviewResult?.reason ?? "").slice(0, 300)}`];
+  }
+  const r = reviewResult.review;
+  const lines = [
+    `- 整体建议：**${r.overall.recommendation}**（置信度 ${r.overall.confidence ?? "n/a"}）`,
+    `- judge prompt sha256：${r.prompt_sha256}`,
+    `- 逐 move：`,
+  ];
+  for (const m of r.moves) {
+    lines.push(`  - move ${m.move_index}（${m.file} → ${m.to}）：**${m.recommendation}**/${m.confidence ?? "n/a"}${m.cause ? ` [${m.cause}${m.downgraded_from ? ` ← ${m.downgraded_from}` : ""}]` : ""}`);
+    if (m.responsibility_hypothesis) lines.push(`    - 假设：${m.responsibility_hypothesis}`);
+    lines.push(`    - 证据：${m.evidence_refs.length ? m.evidence_refs.join(", ") : "(none)"}${m.counter_evidence_refs.length ? `；反证回应：${m.counter_evidence_refs.join(", ")}` : ""}`);
+  }
+  lines.push("- 本审查为 advisory 层，不改变准入判据；是否升格为准入条件由人裁定。");
+  return lines;
+}
+
 // ── the constrained write: exactly one draft Goal (and its exit-condition AC) ─────────────────────
 /**
  * Build the two records a draft Goal needs. PURE — no I/O. The GOAL body carries, as the task requires:
@@ -354,8 +420,12 @@ function nextId(prefix, ids) {
  * the human-approval line. The AC is the goal's exit condition and is written FIRST: the goal write surface
  * refuses a GOAL born in {draft, active} with zero ACs, and that refusal is the store's own invariant
  * (AC-217), not this module's.
+ *
+ * `review` is OPTIONAL and ADVISORY: when supplied it only appends a section to the body. It cannot change
+ * the status (still hard-coded `draft`), the title, the origin, or the AC — a review can never authorise
+ * anything (硬规则 12: the layer measures first, the human rules after).
  */
-export function buildDraftGoal(eligibleRecord, { goalId, acId }) {
+export function buildDraftGoal(eligibleRecord, { goalId, acId, review = null }) {
   const kind = deriveConcernKind(eligibleRecord) ?? "unknown";
   const delta = eligibleRecord.slice_delta?.delta ?? null;
   const evidenceIds = [
@@ -391,6 +461,8 @@ export function buildDraftGoal(eligibleRecord, { goalId, acId }) {
     "## 预测 delta（由 ArchGuard slice-delta 原语计算，非模型自述）",
     renderedDelta,
     `- 负对照：falsified=true；provenanceConsistency=match`,
+    "",
+    ...(review ? ["", "## 领域归属审查（advisory；不改变准入判据）", ...renderReviewSection(review)] : []),
     "",
     "## 范围与非目标",
     `- 在范围内：${kind} 候选本身声明的 slice（见上 delta）。`,
@@ -440,7 +512,7 @@ export function buildDraftGoal(eligibleRecord, { goalId, acId }) {
 export function proposeDraftGoal(eligibleRecord, existingGoalIds, deps = {}) {
   const goalId = nextGoalId(existingGoalIds);
   const acId = nextAcId(deps.existingAcIds ?? []);
-  const { goal, ac } = buildDraftGoal(eligibleRecord, { goalId, acId });
+  const { goal, ac } = buildDraftGoal(eligibleRecord, { goalId, acId, review: deps.review ?? null });
   if (typeof deps.write !== "function") {
     return { ok: false, id: null, goal: null, ac: null, reason: "NO_WRITE_SEAM:refusing to report a draft Goal that was not persisted (硬规则 3b)" };
   }
@@ -473,10 +545,20 @@ export function createGoalStoreWrite(store) {
 }
 
 // ── CLI: a real (non-fixture) reading + an optional constrained write ────────────────────────────────
-async function cli() {
+/**
+ * The CLI body, exported so the suite can drive the REAL flag path in-process (and inject the judge)
+ * instead of spawning a process that would have to reach a model to answer AC7. `cli()` is a thin wrapper.
+ *
+ * @param {object} o
+ * @param {string[]} o.argv   the argument vector (without the node/script prefix)
+ * @param {string} o.repoRoot the module's own repo root (for the goal store + driver-runtime)
+ * @param {object} [o.deps]   { invokeJudge } — injected only by the suite
+ * @returns {Promise<object>} the object the CLI serialises
+ */
+export async function runProposalCli({ argv, repoRoot, deps = {} }) {
   const { fileURLToPath } = await import("node:url");
-  const REPO_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..", "..");
-  const args = process.argv.slice(2);
+  const REPO_ROOT = repoRoot ?? path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..", "..");
+  const args = argv;
   const val = (n, d) => { const i = args.indexOf(n); return i >= 0 ? args[i + 1] : d; };
   const root = val("--root", REPO_ROOT);
   const carrier = val("--carrier", path.join(root, ".quay", "ownership-shadow-proposals.jsonl"));
@@ -490,19 +572,51 @@ async function cli() {
     store = createGoalStore(path.join(root, "goals"), {});
     writeSeam = createGoalStoreWrite(store);
   }
+  // ADVISORY review seam: the SAME tool-less launcher the investigation loop uses. Built only when asked,
+  // so a run without `--review` neither spawns a model nor loads the review module.
+  const reviewOn = args.includes("--review");
+  let invokeJudge = deps.invokeJudge ?? null;
+  if (reviewOn && !invokeJudge) {
+    const { launchArgv, runAsync } = await import(path.join(REPO_ROOT, "plugin", "scripts", "driver-runtime.ts"));
+    const role = val("--role", "meta-driver");
+    invokeJudge = async (prompt) => {
+      const argv = launchArgv(role, prompt, root, { promptViaStdin: true });
+      argv.splice(argv.length - 1, 0, "--tools", "", "--disable-slash-commands", "--no-session-persistence", "--strict-mcp-config");
+      return runAsync(argv, { timeoutMs: 600_000, collectStderr: true, stdinData: prompt });
+    };
+  }
+  const graphFile = val("--graph", null);
+  const graph = graphFile ? (() => { try { return JSON.parse(fs.readFileSync(graphFile, "utf8"))?.extensions?.tsAnalysis?.moduleGraph ?? null; } catch { return null; } })() : null;
+
   for (const row of evaluated.candidates) {
     // Explicitly pick the report fields — `row.groupRecords` must never reach stdout (it is the raw carrier slice).
     const outRow = { candidate: row.candidate, n_records: row.n_records, eligible: row.eligible, reason: row.reason, matchedConditions: row.matchedConditions, streak: row.streak };
     if (row.suppressed_by) outRow.suppressed_by = row.suppressed_by;
+    // ADVISORY, and placed AFTER the verdict fields are already fixed: every verdict field above is computed
+    // by evaluateCarrier and is untouched by this flag (asserted byte-for-byte by the test suite).
+    let reviewResult = null;
+    if (reviewOn && !evaluated.carrier_unreadable) {
+      // `--repo` is the tree the evidence is read from (git); `--root` is the workspace the Goal would be
+      // written into. They coincide by default and are separate because the review must read the real repo
+      // even when the write target is a scratch workspace.
+      reviewResult = await reviewCandidate(row.groupRecords, { root: val("--repo", REPO_ROOT), invokeJudge, graph });
+      outRow.review = { state: reviewResult.state, cause: reviewResult.cause ?? null, commit: reviewResult.commit ?? null, run_id: reviewResult.run_id ?? null, bundle_bytes: reviewResult.bundle_bytes ?? null, leakage: reviewResult.leakage ? { ok: reviewResult.leakage.ok, hits: reviewResult.leakage.hits.length } : null, overall: reviewResult.review?.overall ?? null, moves: (reviewResult.review?.moves ?? []).map((m) => ({ move_index: m.move_index, file: m.file, to: m.to, recommendation: m.recommendation, confidence: m.confidence, cause: m.cause, evidence_refs: m.evidence_refs, counter_evidence_refs: m.counter_evidence_refs, hypothesis: m.responsibility_hypothesis })) };
+    }
     // `--write` cannot fire on a malformed carrier: evaluateCarrier has already forced eligible=false for
     // EVERY candidate, so no Goal can be written from an unreadable streak input.
     if (row.eligible && write) {
       const existing = store.list().map((g) => g.id);
-      outRow.proposed = proposeDraftGoal(row.groupRecords[row.groupRecords.length - 1], existing, { write: writeSeam, existingAcIds: existing });
+      outRow.proposed = proposeDraftGoal(row.groupRecords[row.groupRecords.length - 1], existing, { write: writeSeam, existingAcIds: existing, review: reviewResult });
     }
     out.push(outRow);
   }
-  process.stdout.write(JSON.stringify({ carrier, records: records.length, malformed_lines, carrier_unreadable: evaluated.carrier_unreadable, candidates: out.length, results: out }, null, 2) + "\n");
+  return { carrier, records: records.length, malformed_lines, carrier_unreadable: evaluated.carrier_unreadable, candidates: out.length, results: out };
+}
+
+// ── CLI entry (a thin wrapper over the exported body) ───────────────────────────────────────────────
+async function cli() {
+  const out = await runProposalCli({ argv: process.argv.slice(2) });
+  process.stdout.write(JSON.stringify(out, null, 2) + "\n");
 }
 
 if (import.meta.url === `file://${process.argv[1]}`) cli();

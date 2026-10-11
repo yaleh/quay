@@ -1,0 +1,139 @@
+{
+  "fixture": "ownership-semantic-eval/cases",
+  "version": "1",
+  "note": "ISOLATED evaluation set for the ownership semantic review. This directory is in the shared DENY_PATH_PATTERNS, so the investigation loop's read_file/grep cannot reach it, and no review-path function accepts a label — labels are read only by the scorer, after the review has returned.",
+  "label_sources": {
+    "human-approved": "a cut a human landed and ruled correct. Enters the confusion readings.",
+    "human-rejected": "a cut a human explicitly ruled OUT. Enters the confusion readings.",
+    "derived": "a PRODUCTION candidate whose label is derived OFFLINE from a human ruling that covers its class (never from a ruling on this candidate). Reported, never pooled into the confusion readings.",
+    "unlabeled": "a production candidate nobody has ruled on. Reported, never scored — this is the open question the advisory layer exists to expose."
+  },
+  "outcomes": {
+    "approve": "the cut should be kept",
+    "reject": "the cut should not be kept"
+  },
+  "cases": [
+    {
+      "id": "P1-goal-034-utils-to-kernel",
+      "label": "approve",
+      "label_source": "human-approved",
+      "label_note": "GOAL-034 (achieved 2026-10-10T07:08:40Z, one merge commit into develop): gate/config/utils.ts's four pure primitives plus the two types they need moved to kernel/gate-run-options.ts. Landed by a human as ownership-correct.",
+      "commit": "162f8c380ed1dd9267167cc791ef8727fd13269d",
+      "commit_note": "GOAL-034's recorded fork point (its AC-354 baseline commit). packages/quay/src tree = 00467d64403217aadacda527b8d7a1b898d312e5.",
+      "scope_root": "packages/quay/src",
+      "subject": "gate/config",
+      "graph_fixture": "plugin/fixtures/ownership-active-slice/locked-tree-00467d64.arch.json",
+      "graph_note": "ArchGuard snapshot whose analysed tree IS packages/quay/src@162f8c380 (tree sha 00467d64…), vendored by the stays-replay work — not a graph from a different tree.",
+      "moves": [
+        { "file": "gate/config/utils.ts", "from": "gate/config", "to": "kernel", "symbols": ["shQuote", "DEFAULT_ACCEPTANCE_TIMEOUT_MS", "resolveAcceptanceTimeoutMs", "resolveRunnerOptions"] },
+        { "file": "gate/config/types.ts", "from": "gate/config", "to": "kernel", "symbols": ["GateConfig", "RunnerOptions"] }
+      ]
+    },
+    {
+      "id": "P2-goal-033-cli-to-root",
+      "label": "approve",
+      "label_source": "human-approved",
+      "label_note": "GOAL-033 (achieved 2026-10-09): cli/driver.ts's control client and cli/driver-vocab.ts's vocabulary moved down into the core root. Landed by a human as ownership-correct; moved the package SCC 6->4.",
+      "commit": "1ac06fd85094a58d4954640811a787873f8ad2a1",
+      "commit_note": "GOAL-033's recorded fork point. packages/quay/src tree = 5213eb614130bf9f8ade9e38b46da7e60fb1c536.",
+      "scope_root": "packages/quay/src",
+      "subject": "",
+      "graph_fixture": "plugin/fixtures/ownership-active-slice/goal-033-fork-point.arch.json",
+      "graph_note": "Analysed root recorded as /tmp/g033-before/packages/quay/src at 2026-10-09T10:57 — the GOAL-033 fork-point tree.",
+      "moves": [
+        { "file": "cli/driver.ts", "from": "cli", "to": "", "symbols": ["runDriver", "runDriverAsync", "resolveDriverInvocation", "DriverRunResult"] },
+        { "file": "cli/driver-vocab.ts", "from": "cli", "to": "", "symbols": ["ALL_SERVICE_NAMES", "HOSTED_SERVICE_NAMES", "KINDS", "VERBS"] }
+      ]
+    },
+    {
+      "id": "N1-goal-034-rejected-wide-move",
+      "label": "reject",
+      "label_source": "human-rejected",
+      "label_note": "GOAL-034 body, section 停止扩大范围的信号, verbatim: '或为了让 AC-354 的 SCC 数字好看而顺手把 discoverWorkspaceRoot 等真实 config 加载逻辑也搬进 kernel——任一出现 ⇒ 不扩大范围'. The same goal's 非目标 section lists these three as '真实的 config 加载逻辑，留在 gate/config/loader.ts'.",
+      "commit": "162f8c380ed1dd9267167cc791ef8727fd13269d",
+      "scope_root": "packages/quay/src",
+      "subject": "gate/config",
+      "graph_fixture": "plugin/fixtures/ownership-active-slice/locked-tree-00467d64.arch.json",
+      "moves": [
+        { "file": "gate/config/loader.ts", "from": "gate/config", "to": "kernel", "symbols": ["discoverWorkspaceRoot", "resolveWorkspaceRootOrThrow", "readGatesConfig", "loadWorkspaceGateMetadata", "loadWorkspaceGates"] }
+      ]
+    },
+    {
+      "id": "D1-prod-2026-10-11T09-28-34-loader-to-gate",
+      "label": "reject",
+      "label_source": "derived",
+      "label_note": "PRODUCTION carrier record live:2026-10-11T09-28-34-622Z:1 (line 91 of .quay/ownership-shadow-proposals.jsonl), move 3. Derived label: GOAL-034's 非目标 section rules these three symbols are real config-loading logic that STAYS in gate/config, so moving them out of it (here into gate, not kernel) is the same rejected class as N1. Derived offline from the goal body; the goal body is NOT an input to the review.",
+      "commit": "ec00fcc00da73c8f8e7f64a6d69bd734285a02b2",
+      "scope_root": "packages/quay/src",
+      "subject": "gate/config",
+      "moves": [
+        { "file": "gate/config/loader.ts", "from": "gate/config", "to": "gate", "symbols": ["loadWorkspaceGates", "loadWorkspaceGateMetadata", "readGatesConfig", "discoverWorkspaceRoot", "resolveWorkspaceRootOrThrow", "GatesConfig"] }
+      ]
+    },
+    {
+      "id": "D2-prod-2026-10-11T10-11-51-loader-to-gate",
+      "label": "reject",
+      "label_source": "derived",
+      "label_note": "Pinned ISOLATED run live:2026-10-11T10-11-51-115Z:2 (line 2 of .quay/joint-regress-2026-10-11/pinned-isolated-carrier.jsonl). Same derived label class as D1.",
+      "commit": "755bda59785adf87cca1a41b6e95f4e8c7e93363",
+      "scope_root": "packages/quay/src",
+      "subject": "gate/config",
+      "moves": [
+        { "file": "gate/config/loader.ts", "from": "gate/config", "to": "gate", "symbols": ["discoverWorkspaceRoot", "loadWorkspaceGates", "loadWorkspaceGateMetadata", "readGatesConfig"] },
+        { "file": "gate/config/types.ts", "from": "gate/config", "to": "gate", "symbols": ["GatesConfig"] }
+      ]
+    },
+    {
+      "id": "D3-prod-2026-10-11T10-24-36-loader-to-gate",
+      "label": "reject",
+      "label_source": "derived",
+      "label_note": "PRODUCTION carrier record live:2026-10-11T10-24-36-709Z:2 (line 93), the only one of the three that carries a COMPUTED delta (4->3, negative control falsified, provenance match). Same derived label class as D1.",
+      "commit": "138c99d24bb5d88e3aeaa5f8dffc16e9b4f528e1",
+      "scope_root": "packages",
+      "subject": "quay/src/gate/config",
+      "moves": [
+        { "file": "quay/src/gate/config/loader.ts", "from": "quay/src/gate/config", "to": "quay/src/gate", "symbols": ["discoverWorkspaceRoot", "loadWorkspaceGates", "loadWorkspaceGateMetadata", "readGatesConfig", "GatesConfig"] },
+        { "file": "quay/src/gate/config/index.ts", "from": "quay/src/gate/config", "to": "quay/src/gate", "symbols": ["GateConfig", "RunnerOptions", "shQuote", "resolveRunnerOptions"] }
+      ]
+    },
+    {
+      "id": "U1-prod-2026-10-11T11-03-06-stores-to-kernel",
+      "label": null,
+      "label_source": "unlabeled",
+      "label_note": "Isolated run live:2026-10-11T11-03-06-609Z:1 (line 1 of .quay/joint-regress-2026-10-11-r2/isolated-carrier-partial.jsonl), develop add3e7318. Structurally clean (4->3, negative control falsified, provenance match) and NOBODY has ruled on its ownership. This is precisely the case the advisory layer exists to surface.",
+      "commit": "add3e73184ffaba9049141702347bf2191eb39a3",
+      "scope_root": "packages/quay/src",
+      "subject": "gate/factories",
+      "graph_fixture": "plugin/fixtures/ownership-semantic-eval/arch-add3e7318-packages-quay-src.json",
+      "graph_note": "ArchGuard 0.1.40 `analyze -s <add3e7318 tree>/packages/quay/src -f json --diagrams package`, built from a detached checkout of add3e7318 itself (the source tree is never written; the run uses temp work/cache/output dirs).",
+      "moves": [
+        { "file": "gate/types.ts", "from": "gate", "to": "kernel", "symbols": ["GateFn", "GateVerdict", "GateVerdictKind", "GateDefinition"] },
+        { "file": "gate/acceptance-runner.ts", "from": "gate", "to": "kernel", "symbols": ["runAcceptance", "runAcceptanceCapture", "verdictFromAcceptance", "verdictFromGateCheck", "resolveAcceptanceTimeout", "timeoutKnobHint", "gateCostName", "gateLoadAvg", "recordGateCost", "withFailureOutput", "ACCEPTANCE_TIMEOUT_ENV", "FAILURE_REASON_MAX_CHARS"] },
+        { "file": "abi.ts", "from": "", "to": "kernel", "symbols": ["Task", "TaskStatus", "TASK_STATUS", "TASK_STATUSES"] },
+        { "file": "adr-store.ts", "from": "", "to": "kernel", "symbols": ["createAdrStore"] },
+        { "file": "document-store.ts", "from": "", "to": "kernel", "symbols": ["createDocumentStore"] },
+        { "file": "goal-store.ts", "from": "", "to": "kernel", "symbols": ["createGoalStore"] },
+        { "file": "contract-validator.ts", "from": "", "to": "kernel", "symbols": ["validateContracts"] }
+      ]
+    },
+    {
+      "id": "U2-prod-2026-10-11T10-24-36-gate-contract-split",
+      "label": null,
+      "label_source": "unlabeled",
+      "label_note": "PRODUCTION carrier record live:2026-10-11T10-24-36-709Z:1 (line 92, the record at 0-based index 91). Its slice targets two directories that do not exist in the analysed graph at all — a case the review must handle without inventing a boundary for them.",
+      "commit": "354ea7c85644836da29fe9f6d12247ccd47c2468",
+      "scope_root": "packages/quay/src",
+      "subject": "gate",
+      "moves": [
+        { "file": "gate/types.ts", "from": "gate", "to": "gate-contract", "symbols": ["GateFn", "GateVerdict", "GateVerdictKind", "GateDefinition"] },
+        { "file": "gate/acceptance-runner.ts", "from": "gate", "to": "gate-contract", "symbols": ["runAcceptance", "runAcceptanceCapture", "verdictFromAcceptance", "resolveAcceptanceTimeout"] },
+        { "file": "abi.ts", "from": "", "to": "contract", "symbols": ["Task", "TaskStatus", "TASK_STATUS", "TASK_STATUSES"] },
+        { "file": "adr-store.ts", "from": "", "to": "contract", "symbols": ["createAdrStore"] },
+        { "file": "config.ts", "from": "", "to": "contract", "symbols": ["findConfig", "resolveConfig"] },
+        { "file": "contract-validator.ts", "from": "", "to": "contract", "symbols": ["validateContracts"] },
+        { "file": "document-store.ts", "from": "", "to": "contract", "symbols": ["createDocumentStore"] },
+        { "file": "goal-store.ts", "from": "", "to": "contract", "symbols": ["createGoalStore"] }
+      ]
+    }
+  ]
+}

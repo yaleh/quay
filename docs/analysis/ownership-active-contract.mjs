@@ -52,6 +52,11 @@ export const DENY_PATH_PATTERNS = Object.freeze([
   /(^|\/)reference\.json$/,
   /(^|\/)outcome\.json$/,
   /^plugin\/fixtures\/meta-driver-replay\//,
+  // The ownership semantic review's ISOLATED EVALUATION SET (gap-ownership-semantic-review-of-proposed-slice
+  // AC4). It carries the human labels the review is supposed to rediscover from source; the review function
+  // itself never receives a label (only the scorer does), and closing the path keeps the investigator from
+  // reading the answer set even by accident.
+  /^plugin\/fixtures\/ownership-semantic-eval\//,
   /^docs\/analysis\/ownership-/,
   /^docs\/analysis\/dossier-evidence\//,
   /^docs\/analysis\/rich-dossier-spec\.json$/,
@@ -139,11 +144,22 @@ function commentBlocks(lines, contentOf) {
   return blocks;
 }
 
+/**
+ * 0-based inclusive [start,end] ranges of EVERY comment block in raw source `lines`.
+ *
+ * Exported as the POSITION-based half of the redactor: the ownership semantic review extracts a target
+ * directory's "charter" (its files' header comments) by these ranges, never by keyword — a comment that
+ * MENTIONS a filename is not a dependency on it (gap-ownership-semantic-review-of-proposed-slice AC1).
+ * One block extractor, two consumers — copying the 15 lines into the review module would be the drift
+ * CLAUDE.md's single-source rule names.
+ */
+export function commentBlockRanges(lines) {
+  return commentBlocks(lines, (i) => lines[i]).map((b) => [b.start, b.end]);
+}
+
 /** 0-based inclusive [start,end] ranges of comment blocks in raw source `lines` that carry a decision reference. */
 export function redactedCommentBlockRanges(lines) {
-  return commentBlocks(lines, (i) => lines[i])
-    .filter((b) => lines.slice(b.start, b.end + 1).some(hasDecisionReference))
-    .map((b) => [b.start, b.end]);
+  return commentBlockRanges(lines).filter(([s, e]) => lines.slice(s, e + 1).some(hasDecisionReference));
 }
 
 /**
