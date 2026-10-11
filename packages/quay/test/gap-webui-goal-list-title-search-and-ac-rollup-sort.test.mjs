@@ -326,6 +326,9 @@ test("AC2: q AND status; a no-match state DISTINCT from the empty-store state; e
   ], "every sortable header link keeps `q` (and the AC 达成 header IS one of them)");
   assert.deepEqual(statusNavHrefs(withQ.body), [
     "/goal?status=draft&q=layer",
+    // gap-goal-needs-human-missing-from-three-goal-surfaces: the ABI's 6th goal status joined the
+    // filter row (it had no entry point at all); it sits right after draft. Re-pinned, not deleted.
+    "/goal?status=needs-human&q=layer",
     "/goal?status=active&q=layer",
     "/goal?status=achieved&q=layer",
     "/goal?status=superseded&q=layer",

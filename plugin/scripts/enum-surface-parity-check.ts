@@ -180,9 +180,18 @@ const SURFACES: SurfaceSpec[] = [
     derivesFrom: { file: "packages/quay/src/driver-vocab.ts", symbol: "VERBS", extract: "ts-array", spelling: "quay driver <\\$\\{[^}]*\\bVERBS\\b[^}]*\\}>" } },
   // ── goal status ────────────────────────────────────────────────────────────────────────────────
   { id: "goal-store-valid-statuses", authority: "goal-status", file: "packages/quay/src/goal-store.ts", extract: "ts-array", symbol: "VALID_GOAL_STATUSES", policy: "exact" },
+  // Core 的两个 goal_* 工具描述。⚠️ 它们是【后加的】表层（goal_* 家族 2026-10-03 才在 Core 重新
+  // 暴露，见 mcp-handlers.ts 该处注释），比本登记表还新 ⇒ 上一轮枚举任务没看见它们，而 --discover
+  // 只找【数组/字符串联合字面量】，看不见 `a|b|c` 形态的 text 面 ⇒ 两条漂移既未登记、也未被发现
+  // （硬规则 5：在某来源搜不到 ≠ 不存在；本任务的 5b 扫描才发现）。现已补齐登记。
+  { id: "core-goal-list-desc", authority: "goal-status", file: "packages/quay/src/mcp-handlers.ts", extract: "text", anchor: "goal→AC lifecycle: ([a-z|-]+)", policy: "exact" },
+  { id: "core-goal-write-desc", authority: "goal-status", file: "packages/quay/src/mcp-handlers.ts", extract: "text", anchor: "one goal record[^\\n]*?status ∈ ([a-z|-]+)", policy: "exact" },
   { id: "native-goal-write-desc", authority: "goal-status", file: "packages/quay-native/src/mcp-server.ts", extract: "text", anchor: "one goal record[^\\n]*?status ∈ ([a-z|-]+)", policy: "exact" },
   { id: "serve-goal-status-order", authority: "goal-status", file: "packages/quay/src/serve-goal.ts", extract: "ts-array", symbol: "GOAL_STATUS_ORDER", policy: "exact" },
-  { id: "serve-goal-status-tabs", authority: "goal-status", file: "packages/quay/src/serve-goal.ts", extract: "ts-array", anchor: "\\[\"draft\",\\s*\"active\"", policy: "exact" },
+  // anchor 是本数组字面量的头两个元素（该数组就地写在 JSX 里，没有 symbol 可锚）。本任务把
+  // needs-human 插在 draft 之后 ⇒ 头部两个元素随之改变，anchor 同步重锚（锚不匹配 ⇒
+  // `matched 0 times` ⇒ NOT-EVALUATED，是响的失败，⛔ 不是静默放行）。
+  { id: "serve-goal-status-tabs", authority: "goal-status", file: "packages/quay/src/serve-goal.ts", extract: "ts-array", anchor: "\\[\"draft\",\\s*\"needs-human\"", policy: "exact" },
   // ── meta status ────────────────────────────────────────────────────────────────────────────────
   { id: "meta-store-valid-statuses", authority: "meta-status", file: "packages/quay/src/meta-store.ts", extract: "ts-array", symbol: "VALID_META_STATUSES", policy: "exact" },
   { id: "core-meta-write-desc", authority: "meta-status", file: "packages/quay/src/mcp-handlers.ts", extract: "text", anchor: "META record[^\\n]*?status ∈ ([a-z|-]+)", policy: "exact" },
@@ -217,24 +226,6 @@ const KNOWN_DRIFT: KnownDriftEntry[] = [
     extra: [],
     missing: ["outer", "quality", "meta", "goal"],
     reason: "文档面（plugin/skills/drivers/SKILL.md）存量归位不在本任务内；本任务只负责报出。",
-  },
-  {
-    surface: "native-goal-write-desc",
-    extra: [],
-    missing: ["needs-human"],
-    reason: "quay-native 的 goal_write 描述未同步 ABI 修正后的取值；属同一类漂移的另一实例，归位待另行立案（本任务只负责报出）。",
-  },
-  {
-    surface: "serve-goal-status-order",
-    extra: [],
-    missing: ["needs-human"],
-    reason: "serve-goal.ts 的显示排序表没有 needs-human（排序表是有意排序的子集，但缺一个态会让该态沉底）；归位待另行立案。",
-  },
-  {
-    surface: "serve-goal-status-tabs",
-    extra: [],
-    missing: ["needs-human"],
-    reason: "goals tab 的状态筛选项没有 needs-human（缺入口）；归位待另行立案。",
   },
 ];
 

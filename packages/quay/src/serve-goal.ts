@@ -219,18 +219,22 @@ const SEARCHED_FIELDS: Record<"goal" | "criterion", string[]> = {
 // gap-webui-goal-list-tab-split-goal-ac: the merged view is gone — GOAL and AC are two different
 // objects that no longer share one table, so their default orders split too. The Goals tab's
 // highest-frequency query is "which goals are being worked on now", hence status priority (active
-// first, then draft → achieved → superseded → retired, id asc within each group) instead of the old
-// pure id-locale order. Unknown statuses sink to the bottom (fail-closed: never interleave with
-// ranked states — hard rule 3b).
-const GOAL_STATUS_ORDER = ["active", "draft", "achieved", "superseded", "retired"];
+// first, then draft → needs-human → achieved → superseded → retired, id asc within each group)
+// instead of the old pure id-locale order. Unknown statuses sink to the bottom (fail-closed: never
+// interleave with ranked states — hard rule 3b).
+// gap-goal-needs-human-missing-from-three-goal-surfaces: `needs-human` sits directly after `draft`
+// — both are states WAITING ON A HUMAN (draft = awaiting adjudication; needs-human = blocked and
+// escalated). Before this element existed the state fell through `goalStatusRank`'s unknown branch
+// and sank to the BOTTOM, i.e. the goals most in need of a human sorted last.
+const GOAL_STATUS_ORDER = ["active", "draft", "needs-human", "achieved", "superseded", "retired"];
 
 function goalStatusRank(s: unknown): number {
   const i = GOAL_STATUS_ORDER.indexOf(String(s));
   return i === -1 ? GOAL_STATUS_ORDER.length : i;
 }
 
-/** Goals-tab default order: status priority (active → draft → achieved → superseded → retired),
- *  then id asc within each group. */
+/** Goals-tab default order: status priority
+ *  (active → draft → needs-human → achieved → superseded → retired), then id asc within each group. */
 function defaultSortGoalRows(rows: Record<string, unknown>[]): Record<string, unknown>[] {
   return [...rows].sort((a, b) => {
     const ra = goalStatusRank(a.status);
@@ -618,9 +622,10 @@ export async function handleGoalList(
 
   const statusNav = [
     !statusFilter ? html`<strong>All</strong>` : html`<a href="${goalListHref({ kind: kindFilter, goal: goalFilter, q: qFilter })}">All</a>`,
-    // draft 排在最前：它是唯一需要人动作的态（此前该筛选项缺失 ⇒ ?status=draft 有记录
-    // 但页面上没有任何入口能到达它）。
-    ...["draft", "active", "achieved", "superseded", "retired"].map((s) =>
+    // draft / needs-human 排在最前：这两个态都在等【人】动作（此前 draft 该筛选项缺失 ⇒
+    // ?status=draft 有记录但页面上没有任何入口能到达它；needs-human 曾同样缺入口 ⇒ 该态的 goal
+    // 在页面上完全不可达，见 gap-goal-needs-human-missing-from-three-goal-surfaces）。
+    ...["draft", "needs-human", "active", "achieved", "superseded", "retired"].map((s) =>
       s === statusFilter
         ? html`<strong>${s}</strong>`
         : html`<a href="${goalListHref({ status: s, kind: kindFilter, goal: goalFilter, q: qFilter })}">${s}</a>`
