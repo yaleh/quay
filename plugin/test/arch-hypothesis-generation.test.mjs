@@ -20,6 +20,7 @@ import {
   contaminationScan, contaminationText, CONTAMINATION_EXCLUDED_FIELDS,
   preregRefusal, runPromptDigest, runPromptRefusal,
   resolveExperimentId, repoRelComponent, repoRelSubjectKey,
+  expectedFromArtifacts, armScopedKey, ARM_ID_RE,
   STRIPPED_DIRS, FROZEN_INVESTIGATOR_PROMPT, defaultInvestigatorPrompt, sha256,
   SCOPE_FORBIDDEN_DIRS, PIN_FORBIDDEN_DIRS,
   FROZEN_VERIFIER_PROMPT, FROZEN_VERIFIER_PROMPT_SHA256, defaultVerifierPrompt,
@@ -866,4 +867,121 @@ test("prompt: the tool's default investigator prompt is the frozen round-1 file,
   const variant = fs.readFileSync(path.join(path.dirname(p), "investigator.txt"), "utf8");
   assert.notEqual(sha256(variant), sha256(frozen), "the variant must not be the default's bytes");
   assert.match(variant, /VARIANT, NOT THE DEFAULT/);
+});
+
+// ═════════════════════════════════════════════════════════════════════════════════════════════════════
+// gap-hypgen-prereg-gate-is-single-arm-so-ab-arm-b-cannot-be-scored — AC(a)…(e)
+// ONE pre-registration must cover BOTH arms of a pre-registered A/B experiment. With `--arm X` the gate
+// reads the arm-scoped keys `prompt-investigator-X` / `inventory-X`; an arm key the prereg does not carry
+// refuses as PREREG_HASH_ABSENT — never a fallback to the unscoped key, which would score the WRONG arm's
+// bytes as pre-registered (硬规则 3b: "could not evaluate" must not be shaped like a pass).
+// ═════════════════════════════════════════════════════════════════════════════════════════════════════
+
+const PROMPT_A = "PROMPT-A-BYTES", INV_A = "INVENTORY-A-BYTES";
+const PROMPT_B = "PROMPT-B-BYTES", INV_B = "INVENTORY-B-BYTES";
+
+/** A two-arm prereg fixture, in the shape the real `E-HYPGEN-AB-1` prereg has: the unscoped keys name arm
+ *  A, and each arm carries its own `-A` / `-B` keys. `armKeys:false` drops the `-B` pair (case (b)). */
+function armFixture({ dir, runs, armKeys = true }) {
+  const labelsText = JSON.stringify({ cases: [] });
+  const labels = write(path.join(dir, "labels.json"), labelsText);
+  runs.forEach((r, i) => write(path.join(dir, `run-${i + 1}.json`), r));
+  const hashes = {
+    "prompt-investigator": sha256(PROMPT_A), inventory: sha256(INV_A),
+    "prompt-investigator-A": sha256(PROMPT_A), "inventory-A": sha256(INV_A),
+    labels: sha256(labelsText),
+  };
+  if (armKeys) { hashes["prompt-investigator-B"] = sha256(PROMPT_B); hashes["inventory-B"] = sha256(INV_B); }
+  const prereg = write(path.join(dir, "prereg.json"), { hashes });
+  fs.utimesSync(prereg, new Date(Date.now() - 60_000), new Date(Date.now() - 60_000));
+  return { labels, prereg };
+}
+const armRun = (prompt, inventory, extra = {}) => ({ run: 1, hyps: [], prompt_sha256: runPromptDigest(prompt, inventory), ...extra });
+/** Score the fixture for one arm exactly as the CLI does: `expected` is derived from the bytes + the arm. */
+const scoreArm = (dir, f, runCount, arm, bytes = { promptBytes: PROMPT_B, inventoryBytes: INV_B }) =>
+  score({
+    runDir: dir, runCount, labelsPath: f.labels, preregPath: f.prereg, arm,
+    expected: expectedFromArtifacts({ ...bytes, arm }), promptBytes: bytes.promptBytes, inventoryBytes: bytes.inventoryBytes,
+  });
+
+// ── AC(a): --arm B with matching -B keys passes ──────────────────────────────────────────────────────
+test("AC-arm(a): --arm B scores when the prereg records the matching -B keys", () => {
+  const dir = tmp();
+  const f = armFixture({ dir, runs: [armRun(PROMPT_B, INV_B)] });
+  const ok = scoreArm(dir, f, 1, "B");
+  assert.equal(ok.ok, true, ok.reasons?.join(","));
+  // CONTROL (硬规则 4 推论四): the SAME fixture + SAME bytes under --arm A refuse, so the pass above is
+  // caused by the arm SELECTION and not by the fixture being scoreable in general.
+  const wrong = scoreArm(dir, f, 1, "A");
+  assert.equal(wrong.ok, false);
+  assert.equal(wrong.code, EXIT.prereg);
+  assert.deepEqual(wrong.reasons, ["PREREG_HASH_MISMATCH:prompt-investigator-A", "PREREG_HASH_MISMATCH:inventory-A"]);
+});
+
+// ── AC(b): an absent arm key is its OWN refusal, never a fallback ────────────────────────────────────
+test("AC-arm(b): --arm B with no -B key refuses as ABSENT and never falls back to the unscoped keys", () => {
+  const dir = tmp();
+  const f = armFixture({ dir, runs: [armRun(PROMPT_B, INV_B)], armKeys: false });
+  const refused = scoreArm(dir, f, 1, "B");
+  assert.equal(refused.ok, false);
+  assert.equal(refused.code, EXIT.prereg);
+  assert.deepEqual(refused.reasons, ["PREREG_HASH_ABSENT:prompt-investigator-B", "PREREG_HASH_ABSENT:inventory-B"]);
+  // The unscoped keys ARE present in this prereg (they name arm A), so a fallback could only have produced
+  // a MISMATCH — their absence from the reasons is the direct evidence that no fallback happened.
+  assert.equal(refused.reasons.some((r) => r.includes("MISMATCH")), false, refused.reasons.join(","));
+});
+
+// ── AC(c): a run whose recorded B-prompt identity does not match the B bytes is refused ──────────────
+test("AC-arm(c): --arm B refuses a run whose recorded prompt identity is not the B one", () => {
+  // (i) the run recorded the digest of a DIFFERENT prompt than the B bytes supplied
+  const dir = tmp();
+  const bad = scoreArm(dir, armFixture({ dir, runs: [armRun("A DIFFERENT PROMPT", INV_B)] }), 1, "B");
+  assert.equal(bad.code, EXIT.prereg);
+  assert.deepEqual(bad.reasons, ["PREREG_HASH_MISMATCH:run-prompt:1"]);
+
+  // (ii) the digest matches but the run names a DIFFERENT prompt FILE hash. The binding must read the
+  // arm-scoped key (`prompt-investigator-B`), so arm A's file hash is a mismatch, not an accepted value.
+  const dir2 = tmp();
+  const bad2 = scoreArm(dir2, armFixture({ dir: dir2, runs: [armRun(PROMPT_B, INV_B, { prompt_file_sha256: sha256(PROMPT_A) })] }), 1, "B");
+  assert.equal(bad2.code, EXIT.prereg);
+  assert.deepEqual(bad2.reasons, ["PREREG_HASH_MISMATCH:run-prompt-file:1"]);
+
+  // CONTROL: the same run naming its OWN arm's prompt-file hash scores.
+  const dir3 = tmp();
+  const ok3 = scoreArm(dir3, armFixture({ dir: dir3, runs: [armRun(PROMPT_B, INV_B, { prompt_file_sha256: sha256(PROMPT_B) })] }), 1, "B");
+  assert.equal(ok3.ok, true, ok3.reasons?.join(","));
+});
+
+// ── AC(d): without --arm, the single-arm behaviour is byte-identical ─────────────────────────────────
+test("AC-arm(d): without --arm the round-1 single-arm keys are unchanged", () => {
+  // the expectation SHAPE is the round-1 one: exactly two unscoped keys, no arm suffix
+  assert.deepEqual(Object.keys(expectedFromArtifacts({ promptBytes: "P", inventoryBytes: "I" })), ["prompt-investigator", "inventory"]);
+  assert.deepEqual(
+    expectedFromArtifacts({ promptBytes: "P", inventoryBytes: "I", arm: null }),
+    expectedFromArtifacts({ promptBytes: "P", inventoryBytes: "I" }),
+  );
+  assert.deepEqual(
+    expectedFromArtifacts({ promptBytes: "P", inventoryBytes: "I", arm: "B" }),
+    { "prompt-investigator-B": sha256("P"), "inventory-B": sha256("I") },
+  );
+  // an EXISTING single-arm fixture (the AC2 helpers, unscoped keys only) still scores with no --arm …
+  const dir = tmp();
+  const single = preregFixture({ dir, runs: [run("PROMPT-BYTES", "INVENTORY-BYTES")] });
+  assert.equal(scoreFixture(dir, single, 1).ok, true, "the unscoped fixture is unaffected");
+  assert.deepEqual(single.expected, { "prompt-investigator": sha256("PROMPT-BYTES"), inventory: sha256("INVENTORY-BYTES") });
+  // … and the SAME single-arm prereg under --arm B is ABSENT — i.e. `--arm` really switches the key set.
+  const refused = score({
+    runDir: dir, runCount: 1, labelsPath: single.labels, preregPath: single.prereg, arm: "B",
+    expected: expectedFromArtifacts({ promptBytes: single.prompt, inventoryBytes: single.inventory, arm: "B" }),
+    promptBytes: single.prompt, inventoryBytes: single.inventory,
+  });
+  assert.deepEqual(refused.reasons, ["PREREG_HASH_ABSENT:prompt-investigator-B", "PREREG_HASH_ABSENT:inventory-B"]);
+});
+
+// ── AC(e): the --arm id vocabulary — a rejected id can never become a key suffix ─────────────────────
+test("AC-arm(e): the --arm id vocabulary admits only [A-Za-z0-9]+", () => {
+  for (const ok of ["A", "B", "AB1", "arm2"]) assert.equal(ARM_ID_RE.test(ok), true, ok);
+  for (const bad of ["", "A-B", "A B", "A/B", "../A", "A.B", "A_B"]) assert.equal(ARM_ID_RE.test(bad), false, bad);
+  assert.equal(armScopedKey("inventory", "B"), "inventory-B");
+  assert.equal(armScopedKey("inventory", null), "inventory");
 });
