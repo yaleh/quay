@@ -2,7 +2,7 @@
 id: gap-goal-needs-human-missing-from-three-goal-surfaces
 title: Goal status needs-human is missing from three goal surfaces registered as
   KNOWN_DRIFT with no owning task
-status: ready
+status: done
 labels:
   - gap
   - architecture-discovery
