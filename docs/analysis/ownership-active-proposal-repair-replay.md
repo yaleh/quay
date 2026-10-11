@@ -263,7 +263,7 @@ established by the fixture corpus only.
 
 ---
 
-## 7. post-merge independent blind test + the legal-dirs fix
+## 7. post-merge independent blind test + the legal-dirs fix（post-merge 独立盲测 + legal-dirs 修复）
 
 Task: `gap-ownership-active-repair-legal-dirs-lost-on-archguard-refusal`. §4a closed with a recorded next
 increment — *"the adapter records `detail.valid_dirs` only on the cut-builder refusal path; a refusal reported
