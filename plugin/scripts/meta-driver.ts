@@ -51,7 +51,7 @@ import { launchArgv, runAsync, ts, aliveness, carrierStats, KNOWN_KINDS, resolve
 import { resolveCliInvocation } from "./start-drivers.ts";
 import { runResidentQualityGateLoop, computeRoundRecord } from "./quality-gate-driver.ts";
 import { readProbeSpec } from "./read-probe-spec.ts";
-import { gateFinding, findingKey, DEFAULT_RATE, countRecentFilings, FILING_WINDOW_MS, routineQuotaDecision } from "./routine-file-gate.ts";
+import { gateFinding, findingKey, DEFAULT_RATE, countRecentFilings, FILING_WINDOW_MS, routineQuotaDecision, BoardKeys, type BoardKeyOwner } from "./routine-file-gate.ts";
 // 载体相对路径的单一真相源（⛔ 不在此处硬写字面量「.quay/routine-findings.jsonl」——那会制造第二份
 // 定义，本文件读的全局窗口合计必须与 probe-routine.ts 写的是同一个文件；硬规则 5b）。
 import { ROUTINE_FINDINGS_REL } from "./probe-routine.ts";
@@ -1100,9 +1100,35 @@ export function proposalCandidateText(p: { title?: string; criterion?: string | 
   return `## Finding\n${p.title ?? ""}\n\n${p.origin ?? ""}\n\n${p.criterion ?? ""}\n`;
 }
 
-/** 既有 AC 记录的 key 集（用于 dedup）。用与候选相同的渲染 + findingKey。 */
-export function existingProposalKeys(records: Array<Record<string, unknown>>): Set<string> {
-  const keys = new Set<string>();
+/** 把 **goal/AC 记录自己的 `status`** 映射进**看板的任务状态词汇**，好让同一个 `dedupReading`
+ *  判定可以直接套用（⛔ 不另写一套 dedup——本任务的 Plan 明确要求复用 probe 路径的形状）。
+ *
+ *  ⚠️ 缺陷原样（本任务 Proposal ③）：`existingProposalKeys` 此前把**每一条** `AC-*` 记录的 key
+ *  都塞进集合而**完全不看 status**，于是被 `superseded`/`achieved` 的旧 AC 永久压制同名提案——
+ *  这正是 probe 路径已由 `dedupReading` 的 `done-only` 态修掉的同一个「done key 永久压制」形状，
+ *  只是提案路径漏了。此外那个裸 `Set` 被 `dedupReading` 判成 `unknown`，拒绝理由读作
+ *  「bare Set … NOT EVALUATED」——那**不实**：它明明被评估过，只是没带拥有者状态。
+ *
+ *  三态映射（硬规则 3b：第三态是 `null`，⛔ 不与任一已知态同形）：
+ *    · 未决（`draft` / `active` / `needs-human`）→ `"ready"`（→ `live` ⇒ 拦：AC(c) 的
+ *      「active-goal draft AC 仍拒」）；
+ *    · 已了结（`achieved` / `superseded` / `retired`）→ `"done"`（→ `done-only` ⇒ 不拦：AC(c)
+ *      的 superseded 被接受；`retired`「已撤回」同为了结态，一并算闭——硬规则 5b 的兄弟实例）；
+ *    · 其它 / 缺失 → `null`（拥有者状态读不出 ⇒ `unknown` ⇒ fail-closed，⛔ 冒充不了 `done-only`）。 */
+export function proposalBoardStatus(status: unknown): string | null {
+  const s = status == null ? "" : String(status).trim().toLowerCase();
+  if (s === "draft" || s === "active" || s === "needs-human") return "ready";
+  if (s === "achieved" || s === "superseded" || s === "retired") return "done";
+  return null;
+}
+
+/** 既有 AC 记录的 key 集（用于 dedup）。用与候选相同的渲染 + findingKey。
+ *
+ *  ⚠️ 返回类型是 `BoardKeys`（`Set<string>` 的子类，带每个 key 的**拥有者状态**）——所以
+ *  `dedupReading` 能像 probe 路径那样按 status 分类，而不是把裸 Set 一律判成 `unknown`。
+ *  所有既有读法（`.size` / `[...keys]` / `.has` / `.add`）逐字不变。 */
+export function existingProposalKeys(records: Array<Record<string, unknown>>): BoardKeys {
+  const owners = new Map<string, BoardKeyOwner[]>();
   for (const r of records) {
     if (!String(r.id ?? "").startsWith("AC-")) continue;
     const k = findingKey(proposalCandidateText({
@@ -1110,9 +1136,12 @@ export function existingProposalKeys(records: Array<Record<string, unknown>>): S
       criterion: r.criterion == null ? "" : String(r.criterion),
       origin: r.origin == null ? "" : String(r.origin),
     }));
-    if (k) keys.add(k);
+    if (!k) continue;
+    const owner: BoardKeyOwner = { file: `${String(r.id)}.md`, status: proposalBoardStatus(r.status) };
+    const list = owners.get(k);
+    if (list) list.push(owner); else owners.set(k, [owner]);
   }
-  return keys;
+  return new BoardKeys(owners);
 }
 
 /** 下一个可用 AC id（max + 1，三位补零）。⛔ 不复用已存在的编号（硬规则 8：编号不得复用）。 */
@@ -1523,6 +1552,30 @@ export function resolveEvidence(readings: MetaRoundReadings, key: string): unkno
   return cur;
 }
 
+/** 证据闸对一条 evidenceKey 的**三态**读数（硬规则 3/3b：三种结局三个取值，⛔ 不得同形）。
+ *
+ *  ⚠️ 缺陷原样（本任务 Proposal ②）：`driveItems`/`fileDecisions` 此前只拒 `undefined`，于是一个
+ *  **值本身是 `null`** 的读数（含义「没读出来」，例如某个 driver 的 `running: null`）像证据一样
+ *  过了闸。`undefined`（路径解析不出）与 `null`（解析得出、但该读数「无法读取」）是**两件事**，
+ *  同用一个返回值就把「读不懂」伪装成了「有证据」（硬规则 3b）。
+ *
+ *  ⛔ `0` / `false` / `""` 是**合法读数**，照样准入——本函数只把 `null` 单列，⛔ 不波及它们。 */
+export type EvidenceGateReading =
+  | { state: "admitted"; value: unknown }
+  | { state: "missing"; reason: string }
+  | { state: "unreadable"; reason: string };
+
+export function readEvidenceForGate(readings: MetaRoundReadings, key: string): EvidenceGateReading {
+  const v = resolveEvidence(readings, key);
+  if (v === undefined) {
+    return { state: "missing", reason: `evidenceKey ${JSON.stringify(key)} 在本轮读数里解析不出 ⇒ 拒（⛔ 不接受凭空证据）` };
+  }
+  if (v === null) {
+    return { state: "unreadable", reason: `evidenceKey ${JSON.stringify(key)} 解析得到 null——该读数「没读出来」（例如 driver 的 running: null）⇒ 拒（⛔ 读不出 ≠ 有证据；这与「键不在读数里」是两回事）` };
+  }
+  return { state: "admitted", value: v };
+}
+
 /** 既有任务里是否已有人在管这个机制（按机制词搜，⛔ 不按症状词——memory 记的那次真实漏抓）。
  *  **带上状态**：只报文件名不足以判断——「有人正在做」与「有人说做完了但问题还在」需要相反的处置，
  *  而后者（done 却问题依旧）恰恰是最该被驱动的信号，不是拦截的理由。 */
@@ -1533,6 +1586,12 @@ export function findOwningTasks(root: string, keyword: string, cap = 5): OwningT
   const dir = path.join(root, "tasks");
   let files: string[];
   try { files = fs.readdirSync(dir).filter((f) => f.endsWith(".md")); } catch { return []; }
+  // ⚠️ 缺陷原样（本任务 Proposal ①）：扫描曾在 `hits.length >= cap` 处**提前 break**——而 cap 在
+  // 【状态过滤之前】生效。板上 2622/2698 任务是 done ⇒ 一个常见机制词的前 5 个命中可能全是 done，
+  // 板上的第 6 个（真正在办的）owner 结构上永远看不见 ⇒ 条目被当重复挡下，闸却报「没有在办的 owner」。
+  // 这正是硬规则 3b：闸读不到 ⇒ 报了一个与「查过且没有」同形的答案。
+  // ⇒ 现在扫全板，cap 只作用在【报告面】——且**按类别分别截断**：未决 owner 先入列，done/closed
+  //   的是「假完成证据」（会进任务体），不因截断把 live owner 挤出可见集。
   const hits: OwningTask[] = [];
   for (const f of files) {
     try {
@@ -1542,10 +1601,11 @@ export function findOwningTasks(root: string, keyword: string, cap = 5): OwningT
       const fm = text.startsWith("---") ? text.slice(3, text.indexOf("\n---", 3)) : "";
       const m = fm.match(/^status:\s*(\S+)\s*$/m);
       hits.push({ file: f, status: m ? m[1] : "unknown" });
-      if (hits.length >= cap) break;
     } catch { /* 读不了就跳过这一个 */ }
   }
-  return hits;
+  const live = hits.filter((o) => o.status !== "done" && o.status !== "superseded");
+  const closed = hits.filter((o) => o.status === "done" || o.status === "superseded");
+  return [...live.slice(0, cap), ...closed.slice(0, cap)];
 }
 
 /** 只有【未完成】的任务才构成「已有人在管」的拦截理由。done/superseded 的命中不拦——
@@ -1779,11 +1839,12 @@ export async function driveItems(
       out.push({ item, id: null, accepted: false, reason: `rate: 本轮已自动驱动 ${filed} 条，上限 ${opts.cap}` });
       continue;
     }
-    const ev = resolveEvidence(readings, item.evidenceKey);
-    if (ev === undefined) {
-      out.push({ item, id: null, accepted: false, reason: `evidenceKey ${JSON.stringify(item.evidenceKey)} 在本轮读数里解析不出 ⇒ 拒（⛔ 不接受凭空证据）` });
+    const evg = readEvidenceForGate(readings, item.evidenceKey);
+    if (evg.state !== "admitted") {
+      out.push({ item, id: null, accepted: false, reason: evg.reason });
       continue;
     }
+    const ev = evg.value;
     const owners = findOwningTasks(root, item.mechanismKeyword);
     const blocking = blockingOwners(owners);
     if (blocking.length > 0) {
@@ -2120,11 +2181,12 @@ export async function fileDecisions(
       out.push({ item, id: null, accepted: false, reason: `rate: 本轮已路由 ${filed} 条决策，上限 ${opts.cap}` });
       continue;
     }
-    const ev = resolveEvidence(readings, item.evidenceKey);
-    if (ev === undefined) {
-      out.push({ item, id: null, accepted: false, reason: `evidenceKey ${JSON.stringify(item.evidenceKey)} 解析不出 ⇒ 拒（⛔ 决策也要有实测依据）` });
+    const evg = readEvidenceForGate(readings, item.evidenceKey);
+    if (evg.state !== "admitted") {
+      out.push({ item, id: null, accepted: false, reason: evg.reason });
       continue;
     }
+    const ev = evg.value;
     const q = decisionQuality(item);
     if (!q.ok) { out.push({ item, id: null, accepted: false, reason: q.reason }); continue; }
 
