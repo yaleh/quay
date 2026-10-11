@@ -37,11 +37,13 @@ import {
   resolveBoundaryEpoch,
   REAL_AC57_CERT_ROUNDS,
   REAL_FF_NO_DOC_CHECK,
+  REQUIRED_FIELDS as CHECKER_REQUIRED_FIELDS,
 } from "../scripts/per-task-suite-record-check.ts";
 import {
   buildRecord,
   toIsoTimestamp,
   resolveSharedCheckout,
+  REQUIRED_FIELDS as WRITER_REQUIRED_FIELDS,
 } from "../scripts/per-task-suite-record.ts";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -280,6 +282,33 @@ test("判据2 — an absent file (null) is handled by the CLI as NOT-EVALUATED, 
   const v = checkRecordFile(null);
   assert.equal(v.ok, true);
   assert.equal(v.evaluated, false);
+});
+
+// ── declared-once (gap-per-task-suite-record-required-fields-declared-twice) ─────────────────────────
+// The checker used to declare its OWN copy of the writer's REQUIRED_FIELDS literal. Two literals with
+// the same 7 names can drift silently: a field added to ONE of them changes what the writer requires
+// or what the checker enforces, and nothing fails. The contract is now identity — the checker
+// re-exports the writer's array object. `===` is the whole point: a re-declared literal with equal
+// contents would pass a deepEqual, so the assertion must be on object identity, not on value.
+
+test("declared-once — the checker's REQUIRED_FIELDS IS the writer's array object (===), not a second literal", () => {
+  assert.equal(
+    CHECKER_REQUIRED_FIELDS,
+    WRITER_REQUIRED_FIELDS,
+    "the checker must re-export the writer's REQUIRED_FIELDS, not declare its own copy",
+  );
+  assert.equal(CHECKER_REQUIRED_FIELDS.length, 7, "still exactly the AC72 判据2 fields");
+});
+
+test("declared-once — the checker source declares no `export const REQUIRED_FIELDS` of its own", () => {
+  // The identity assertion above pins the VALUE binding; this pins the source SHAPE, so the fix cannot
+  // be undone by reintroducing a copy under the same exported name (the drift this task removes).
+  const src = fs.readFileSync(CHECKER, "utf8");
+  assert.doesNotMatch(
+    src,
+    /export\s+const\s+REQUIRED_FIELDS\b/,
+    "per-task-suite-record-check.ts must import the writer's REQUIRED_FIELDS, not declare its own",
+  );
 });
 
 // ── AC63 判据1: the doc-check trace shape (OPTIONAL field, shape-checked WHEN PRESENT) ───────────────

@@ -66,18 +66,16 @@ import { execFileSync } from "node:child_process";
 // copies of the indexOf+next-arg idiom in plugin/scripts; .quay/routine-findings.jsonl finding
 // `arg-parsing-helper-family`, routine `semantic-dedup-scan`).
 import { isDirectEntry, flagValue } from "./gate-script-base.ts";
-import { resolveSharedCheckout } from "./per-task-suite-record.ts";
+import { resolveSharedCheckout, REQUIRED_FIELDS } from "./per-task-suite-record.ts";
 
 // ── 判据2 — the required record shape (AC72 判据2 fields) ────────────────────────────────────────────
-export const REQUIRED_FIELDS = [
-  "taskId",
-  "runId",
-  "state",
-  "laneCount",
-  "durationMs",
-  "startedAt",
-  "finishedAt",
-];
+// SINGLE SOURCE (gap-per-task-suite-record-required-fields-declared-twice): this is the WRITER's
+// array, re-exported — NOT a second literal. The checker used to declare its own copy of the same 7
+// names, and the two could drift silently: a field added to the writer would not become required by
+// the checker (or the other way round) and nothing would fail. The re-export keeps the checker's
+// public name `REQUIRED_FIELDS` so existing importers keep working, while making the two literally
+// the same object (`===`, asserted by plugin/test/per-task-suite-record-check.test.mjs).
+export { REQUIRED_FIELDS };
 
 // ── AC72 判据3 conditional boundaries (fold-into-ac63-retry) ────────────────────────────────────────
 // The record writer's basename (for resolving the mechanism-landed boundary via git — the commit
