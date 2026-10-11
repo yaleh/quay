@@ -2,7 +2,7 @@
 id: AC-264
 title: 收口：quay-fleet 以 project scope + marketplace 渠道真实部署，driver 驱一条真任务到 done，免
   npm 与免 QUAY_PLUGIN_ROOT 由文件系统直接量确认
-status: achieved
+status: superseded
 kind: criterion
 goal: GOAL-019
 criterion: >-
@@ -98,6 +98,16 @@ statusLog:
     to: achieved
     actor: goal-driver
     reason: "I2: criterion pass"
+  - at: 2026-10-11T20:25:46.833Z
+    from: achieved
+    to: superseded
+    actor: worker:gap-ac264-supersede-config-binding-reversed-by-plugin-root-ruling
+    reason: |-
+      终态 superseded —— 本判据的 config.yml 绑定支与仓当前【人裁定的】意图结构性互斥，不是漂移，且不可能稳定为真。
+      (i) 根因 = 裁定反转，不是腐烂：AC-264 立条时（2026-09-15）把「走的是 marketplace 渠道」的机制证据定为 config.yml 里一条指向 .claude/plugins/cache/ 的绑定行。此后人于 2026-10-06 裁定反转（任务 gap-project-quay-pointer-is-init-plugin-root-and-version-records-derive-from-it，修法 (D) 逐字）：native provider 的 config.yml 不再写 `path`/`mcp_entry`（即 path/mcp_entry 这两项绑定），Core 缺省按 plugin-root.ts 解析 <插件根>/vendor/quay-native，自定义 provider 仍写显式 path；/quay:init 对已有 config 的迁移必须逐行删除这两项。逐字理由（packages/quay/src/init.ts:1004-1005）：一条 declared path 会把运行时冻结到写下它的那次 install-cache 版本上（install-cache 冻结运行时），插件升级永不生效。并把三类量切开：绑定（决定行为，目标为零）/ 指引（只有 .quay/plugin）/ 读数（观察运行中的进程）。
+      (ii) ⇒「绑定行数 = 0」是当前仓的明文意图，而判据要求绑定行数 >= 1 且落在 cache 下 ⇒ 二者结构性互斥；任何「把判据修绿」的动作都只能把 path 加回去，那既是倒退、又会在下一次 quay init 被逐行删除。2026-10-12 01:11 quay-fleet 跑的一次真 quay init（fleet 提交 8bce695，subject 逐字 chore(quay-init): initialize quay project files (plugin v0.19.0)）正是按 (D) 把上述两行绑定逐行删掉的。前两次立案（gap-ac264-quay-fleet-project-scope-plugin-only-deployment / gap-ac264-fleet-project-scope-deployment-rotted）都不是修错了：它们被一次正确的、人裁定的后续操作推翻。
+      (iii) 不降覆盖（supersede 前逐条实测，fail-closed）：AC-264 真正断言的【保证】（quay-fleet 以 project scope 走 marketplace 渠道真实部署、且自足：不经 npm、不设 QUAY_PLUGIN_ROOT、不绑开发检出）仍被活体承接者承载 —— quay-fleet/.claude/settings.json 的 enabledPlugins = {"quay@quay": true}；~/.claude/plugins/installed_plugins.json 含 scope=project ∧ projectPath=/data/home/yale/work/quay-fleet ∧ installPath=/data/home/yale/.claude/plugins/cache/quay/quay/0.19.0 ∧ version=0.19.0；运行中进程 cmdline = /data/home/yale/.claude/plugins/cache/quay/quay/0.19.0/scripts/dist/driver-anchor.js __anchor --root /data/home/yale/work/quay-fleet；「不绑开发检出」由【缺席】表达 —— quay-fleet/.quay/config.yml 的非注释 path/mcp_entry 行数 = 0（即绑定为 0，比钉一条 cache 版本更自足：无版本可冻、无开发检出可指）；该缺席是一条被钉的契约，不是巧合：plugin/test/quay-init.test.mjs:160-161 的两条 doesNotMatch，且 plugin/scripts/provider-binding-resolvability-check.ts 对省略形态给 NOT-EVALUATED (exit 3)，不与「合格」同形（硬规则 3b）。⇒ 被撤销的只是「用 config.yml 绑定行当证据」这一种形态，保证本身另有承接者。
+      (iv) 连带面：AC-242 的 criterion 逐字是 goal-store.ts check --stale-pass，它此刻是 achievedButFailing: ["AC-242"] 的唯一成因；本条 supersede 后该读数随之消失（同 gap-ac259-supersede-frozen-cycle-literal-and-restore-develop-dev 的先例形态）。⛔ 不改写 AC-264 的 criterion 文本使其通过（那是取巧路径），⛔ 不把 path/mcp_entry 加回 quay-fleet/.quay/config.yml（那是倒退，直接违反 2026-10-06 人裁定 (D)）。
 fidelity:
   verdict: faithful
   reason: "fidelity judge: faithful"
