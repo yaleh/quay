@@ -28,11 +28,11 @@ extra:
 
 ## AC
 
-- [ ] AC1 `docs/analysis/ownership-active-contract.mjs` 导出一个纯函数 `redactDecisionReferences(text)`:把**包含决策标识**(`GOAL-\d+`、`AC-\d+`、`DIR-\d+`、`ADR-\d+`、`SPEC-[\w-]+`、`gap-[a-z0-9-]{6,}` 任务 id)的**整段连续注释块**(`//` 连续行、`/* … */`、`*` 续行)替换为 `// [redacted: decision reference]`,代码行不动;返回 `{ text, redacted_blocks }`。
-- [ ] AC2 executor 的 `read_file` 与 `grep` 输出都经过该函数(grep 对命中行所在文件做同样处理:命中行若位于被 redact 的注释块内则整行替换);证据记录新增 `redacted_blocks` 计数;`text_sha256` 仍按**实际交给 judge 的文本**计算。
-- [ ] AC3 负对照(真实文件):对 `packages/quay/src/gate/config/types.ts` 在 `add3e7318` 的 `read_file`(第 1-20 行)返回文本中**不含** `GOAL-034`、`not config-loading`;对 pattern `GateConfig` 作用域 `packages/quay/src/gate` 的 grep 返回行中不含任何 `GOAL-0` 字样。
-- [ ] AC4 正对照(不误伤代码):同一文件的 `export`/`import` 代码行原样保留;`packages/quay/src/kernel/task-transition.ts` 中不含决策标识的头注释(例如 kernel 边界规则说明)原样保留;`declaredExportNames` 等对源码的机械解析结果不变(redaction 只作用于交给 judge 的证据文本,不作用于存在性/导出解析)。
-- [ ] AC5 既有回归全绿(`plugin/test/ownership-active-loop.test.mjs` 等);准入门限/streak=3/fail-closed/只写 draft 不触碰;`bash scripts/test.sh --for-task gap-ownership-active-code-comment-decision-leak` exit 0。
+- [x] AC1 `docs/analysis/ownership-active-contract.mjs` 导出一个纯函数 `redactDecisionReferences(text)`:把**包含决策标识**(`GOAL-\d+`、`AC-\d+`、`DIR-\d+`、`ADR-\d+`、`SPEC-[\w-]+`、`gap-[a-z0-9-]{6,}` 任务 id)的**整段连续注释块**(`//` 连续行、`/* … */`、`*` 续行)替换为 `// [redacted: decision reference]`,代码行不动;返回 `{ text, redacted_blocks }`。
+- [x] AC2 executor 的 `read_file` 与 `grep` 输出都经过该函数(grep 对命中行所在文件做同样处理:命中行若位于被 redact 的注释块内则整行替换);证据记录新增 `redacted_blocks` 计数;`text_sha256` 仍按**实际交给 judge 的文本**计算。
+- [x] AC3 负对照(真实文件):对 `packages/quay/src/gate/config/types.ts` 在 `add3e7318` 的 `read_file`(第 1-20 行)返回文本中**不含** `GOAL-034`、`not config-loading`;对 pattern `GateConfig` 作用域 `packages/quay/src/gate` 的 grep 返回行中不含任何 `GOAL-0` 字样。
+- [x] AC4 正对照(不误伤代码):同一文件的 `export`/`import` 代码行原样保留;`packages/quay/src/kernel/task-transition.ts` 中不含决策标识的头注释(例如 kernel 边界规则说明)原样保留;`declaredExportNames` 等对源码的机械解析结果不变(redaction 只作用于交给 judge 的证据文本,不作用于存在性/导出解析)。
+- [x] AC5 既有回归全绿(`plugin/test/ownership-active-loop.test.mjs` 等);准入门限/streak=3/fail-closed/只写 draft 不触碰;`bash scripts/test.sh --for-task gap-ownership-active-code-comment-decision-leak` exit 0。
 
 ## DoD
 
