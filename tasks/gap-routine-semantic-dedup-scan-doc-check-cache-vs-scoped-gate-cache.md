@@ -3,7 +3,7 @@ id: gap-routine-semantic-dedup-scan-doc-check-cache-vs-scoped-gate-cache
 title: "semantic-dedup-scan: Bodies byte-identical modulo name/cast and the
   entry interfaces are structurally identical; worker-fan-in.ts:67 ALREADY
   imports the doc-check-cache pair yet re"
-status: todo
+status: ready
 labels:
   - gap
   - routine-filed
