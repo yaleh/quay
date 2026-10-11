@@ -30,6 +30,8 @@ The defect is latent: 0 goals are in needs-human today. The checker at HEAD prin
 - Do not touch `serve-dashboard.ts` `AC_ROLLUP_IN_DOMAIN_STATUSES`. It is an intentional subset with its own rationale and exhaustiveness test, and it serves as the negative control.
 - **[found during implementation — the 5b carrier scan]** Two MORE goal-status delivery surfaces carried the same 5-value list and were NOT in the ledger, because the registry never knew about them: Core's own `goal_list` / `goal_write` tool descriptions in `packages/quay/src/mcp-handlers.ts`. They are a LATER surface than the registry (the `goal_*` family was re-exposed in Core on 2026-10-03 — see the comment above `registerGoalHandlers`), and the checker's `--discover` only finds array/string-union literals, so an `a|b|c` TEXT surface is structurally invisible to it (hard rule 5: "not found in a source ≠ absent"). Fixed here and REGISTERED (`core-goal-list-desc`, `core-goal-write-desc`) so they cannot drift silently again. Reporting them "for a later task" is precisely the pattern this task exists to fix — the ledger reason "归位待另行立案" is what left three surfaces ownerless in the first place.
 
+- **[found at fan-in — the characterization baseline]** The `needs-human` tab link is a real `/goal` rendering change, and `packages/quay/test/characterization-serve-routes.test.mjs` pins the `/goal` rendered bytes against a checked-in baseline (`packages/quay/test/fixtures/characterization/serve-routes.snapshot.json`). The prior round red the suite here (step=suite, "1 route(s) changed vs the baseline"). Re-pinned with `UPDATE_SNAPSHOT=1`; verified the snapshot diff is EXACTLY the one nav-link insertion inside `/goal` — every other route byte-identical. The fixture is declared in `## Touches` because anti-drift arm (a) hard-fails an out-of-declared write, and the file ships in every full suite (which is where the drift bit, not the scoped gate).
+
 ## Acceptance Criteria
 - [x] `node --experimental-strip-types plugin/scripts/enum-surface-parity-check.ts` exits 0, and its output reports `3 known drift` (down from 6) and `0 not evaluated`.
   - Evidence (all five goal-status surfaces now in sync — three fixed, two newly registered):
@@ -115,3 +117,12 @@ The defect is latent: 0 goals are in needs-human today. The checker at HEAD prin
 - plugin/scripts/enum-surface-parity-check.ts
 - packages/quay/test/serve-goal-status-needs-human.test.mjs (new)
 - packages/quay/test/gap-webui-goal-list-title-search-and-ac-rollup-sort.test.mjs
+- packages/quay/test/fixtures/characterization/serve-routes.snapshot.json
+
+## Blocker
+
+**2026-10-11T13:04:41.651Z — worker 未落地（exited-not-landed）**
+
+- 未落地原因：step=suite: AssertionError [ERR_ASSERTION]: route snapshot: 1 route(s) changed vs the baseline — a rendering change, or a genuine refactor that needs UPDATE_SNAPSHOT=1:
+- run_id：wk-prod-anchor
+- session_id：a1b45208-f0a9-437b-af81-74a6c402ebcd
