@@ -29,11 +29,11 @@ extra:
 
 ## AC
 
-- [ ] AC1 存在性判据改为直接量:一个 move 符号被视为"存在"当且仅当它出现在某条图边的 `importedNames` 中,**或**是该 move 声明的源文件(`move.file`,相对 `scope_root`)在**锁定 commit** 上的真实导出(经 git-at-commit 读取 + 导出解析,或经 ArchGuard 逐文件实体查询;二者择一,须同一 commit,不得读工作树、不得凭名字猜测)。
-- [ ] AC2 生产形状回归:对上述真实候选(第 91 条记录的 `proposed_slice`,锁定 `ec00fcc00`),修复后 `unknownSymbols` 对 16 个原始符号返回 `[]`(6 个误报消失)。
-- [ ] AC3 负对照(守卫仍有牙):同一候选加入 `fabricatedLoaderFn`(及一个拼写近似的假名如 `loadWorkspaceGatez`)后,`unknownSymbols` 恰好返回这两个名字,不多不少;`attemptRepair` 对含它们的修订仍以 `UNKNOWN_SYMBOL` 作废该轮。
-- [ ] AC4 负对照(不读工作树):在工作树里临时给源文件追加一个未提交的导出名,该名字仍被判为未知(判据只认锁定 commit)。测试结束恢复文件(cp 备份法,不用 git checkout)。
-- [ ] AC5 既有回归全绿(`plugin/test/ownership-active-proposal-repair.test.mjs` 等);准入门限/streak=3/fail-closed/只写 draft 均不触碰;`bash scripts/test.sh --for-task gap-ownership-active-repair-unknown-symbol-guard-false-positive` exit 0。
+- [x] AC1 存在性判据改为直接量:一个 move 符号被视为"存在"当且仅当它出现在某条图边的 `importedNames` 中,**或**是该 move 声明的源文件(`move.file`,相对 `scope_root`)在**锁定 commit** 上的真实导出(经 git-at-commit 读取 + 导出解析,或经 ArchGuard 逐文件实体查询;二者择一,须同一 commit,不得读工作树、不得凭名字猜测)。
+- [x] AC2 生产形状回归:对上述真实候选(第 91 条记录的 `proposed_slice`,锁定 `ec00fcc00`),修复后 `unknownSymbols` 对 16 个原始符号返回 `[]`(6 个误报消失)。
+- [x] AC3 负对照(守卫仍有牙):同一候选加入 `fabricatedLoaderFn`(及一个拼写近似的假名如 `loadWorkspaceGatez`)后,`unknownSymbols` 恰好返回这两个名字,不多不少;`attemptRepair` 对含它们的修订仍以 `UNKNOWN_SYMBOL` 作废该轮。
+- [x] AC4 负对照(不读工作树):在工作树里临时给源文件追加一个未提交的导出名,该名字仍被判为未知(判据只认锁定 commit)。测试结束恢复文件(cp 备份法,不用 git checkout)。
+- [x] AC5 既有回归全绿(`plugin/test/ownership-active-proposal-repair.test.mjs` 等);准入门限/streak=3/fail-closed/只写 draft 均不触碰;`bash scripts/test.sh --for-task gap-ownership-active-repair-unknown-symbol-guard-false-positive` exit 0。
 
 ## DoD
 
