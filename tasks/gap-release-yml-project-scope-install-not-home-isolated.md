@@ -2,7 +2,7 @@
 id: gap-release-yml-project-scope-install-not-home-isolated
 title: release.yml 的 project-scope 安装未隔离
   HOME，且装上的版本与刚构建的版本不一致时不先失败——渠道被遮蔽时误报为"产物带 -dev"
-status: todo
+status: needs-human
 labels:
   - gap
   - defect
@@ -41,3 +41,9 @@ extra:
 - plugin/scripts/verify-plugin-channel-assertions.ts
 - plugin/test/verify-plugin-channel-assertions.test.mjs
 - tasks/gap-release-yml-project-scope-install-not-home-isolated.md
+
+## Needs-Human
+
+**执行 2026-10-11T01:07:44.347Z — 连续修满重试上限仍不合格（标 needs-human）**
+
+- 阻碍原因：unsatisfiableUnannotatedAc=[AC5（读生产载体）：落地后的下一次真实 release run，step 8 日志出现 `Successfully added marketplace: quay`，且安装路径版本 == 该 tag 的版本；贴 run id 与日志行]（连续 3 轮被结构上不可派的拦截挡住 ⇒ 作者/人改写；⛔ 不派 fix worker）
