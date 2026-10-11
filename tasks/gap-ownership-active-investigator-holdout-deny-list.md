@@ -33,11 +33,11 @@ extra:
 
 ## AC
 
-- [ ] AC1 `DENY_PATH_PATTERNS` 新增覆盖:`^goals\/`、`^tasks\/`、`^docs\/architecture\/`、`^docs\/references\/`、`^docs\/plans\/`、`^docs\/analysis\/architecture-evidence-store`(其余既有条目不删不改)。
-- [ ] AC2 `read_file` 负对照:对 `goals/` 下一个真实存在的 GOAL-034 文件路径、`docs/architecture/quay-domain-model-2026-10-11.md`、`tasks/` 下任一真实任务文件各发一次请求,均被 gate 以 `PATH_DENIED` 拒绝(真实路径,不是编造路径——证明不是"文件不存在"造成的拒绝)。
-- [ ] AC3 `grep` 输出过滤负对照:用一个在 `goals/GOAL-034-*.md` 与 `packages/quay/src` 下**都**会命中的 pattern(如 `loadWorkspaceGates`),对作用域 `.` 发 grep,断言返回行中**没有**任何以上述被拒前缀开头的行、`denied_rows_dropped > 0`,且 `packages/quay/src` 下的命中行仍然保留(证明不是把 grep 整体关掉)。
-- [ ] AC4 正对照:对 `packages/quay/src/gate/config/loader.ts` 的 `read_file` 与对 `packages/quay/src` 的 grep 仍然 `ok`——投研的源码证据能力不退化。
-- [ ] AC5 既有回归全绿:`plugin/test/ownership-active-loop.test.mjs`、`plugin/test/ownership-active-proposal-repair.test.mjs`、`plugin/test/ownership-active-limited-proposal.test.mjs`;`bash scripts/test.sh --for-task gap-ownership-active-investigator-holdout-deny-list` exit 0。
+- [x] AC1 `DENY_PATH_PATTERNS` 新增覆盖:`^goals\/`、`^tasks\/`、`^docs\/architecture\/`、`^docs\/references\/`、`^docs\/plans\/`、`^docs\/analysis\/architecture-evidence-store`(其余既有条目不删不改)。
+- [x] AC2 `read_file` 负对照:对 `goals/` 下一个真实存在的 GOAL-034 文件路径、`docs/architecture/quay-domain-model-2026-10-11.md`、`tasks/` 下任一真实任务文件各发一次请求,均被 gate 以 `PATH_DENIED` 拒绝(真实路径,不是编造路径——证明不是"文件不存在"造成的拒绝)。
+- [x] AC3 `grep` 输出过滤负对照:用一个在 `goals/GOAL-034-*.md` 与 `packages/quay/src` 下**都**会命中的 pattern(如 `loadWorkspaceGates`),对作用域 `.` 发 grep,断言返回行中**没有**任何以上述被拒前缀开头的行、`denied_rows_dropped > 0`,且 `packages/quay/src` 下的命中行仍然保留(证明不是把 grep 整体关掉)。
+- [x] AC4 正对照:对 `packages/quay/src/gate/config/loader.ts` 的 `read_file` 与对 `packages/quay/src` 的 grep 仍然 `ok`——投研的源码证据能力不退化。
+- [x] AC5 既有回归全绿:`plugin/test/ownership-active-loop.test.mjs`、`plugin/test/ownership-active-proposal-repair.test.mjs`、`plugin/test/ownership-active-limited-proposal.test.mjs`;`bash scripts/test.sh --for-task gap-ownership-active-investigator-holdout-deny-list` exit 0。
 
 ## DoD
 
@@ -46,5 +46,6 @@ extra:
 ## Touches
 
 - docs/analysis/ownership-active-contract.mjs
+- docs/analysis/ownership-active-executor.mjs
 - plugin/test/ownership-active-loop.test.mjs
 - tasks/gap-ownership-active-investigator-holdout-deny-list.md
