@@ -18,7 +18,7 @@
 //
 // Run: scripts/test.sh plugin/test/arch-discovery-routine.test.mjs
 
-import { test } from "node:test";
+import { test, after } from "node:test";
 import assert from "node:assert/strict";
 import fs from "node:fs";
 import os from "node:os";
@@ -45,9 +45,23 @@ const ROUTINE_SRC = path.join(REPO_ROOT, "plugin", "scripts", "arch-discovery-ro
 const GIT_ENV = { ...process.env, GIT_AUTHOR_NAME: "t", GIT_AUTHOR_EMAIL: "t@t", GIT_COMMITTER_NAME: "t", GIT_COMMITTER_EMAIL: "t@t" };
 
 // ── fixtures ────────────────────────────────────────────────────────────────────────────────────────
+// Every temp dir goes through tmpDir() and is removed by the module-level after() hook (the
+// carrier-array pattern required by tmp-leak-pairing-check / test-isolation-check R6).
+const _tmpDirs = [];
+after(() => {
+  for (const d of _tmpDirs) {
+    try { fs.rmSync(d, { recursive: true, force: true }); } catch { /* best-effort */ }
+  }
+});
+function tmpDir(prefix) {
+  const d = fs.mkdtempSync(path.join(os.tmpdir(), prefix));
+  _tmpDirs.push(d);
+  return d;
+}
+
 /** A temp workspace: `.quay/` + empty `tasks/`/`goals/`, git-initialised (case (9) reads git status). */
 function makeWorkspace() {
-  const ws = fs.mkdtempSync(path.join(os.tmpdir(), "arch-disc-ws-"));
+  const ws = tmpDir("arch-disc-ws-");
   fs.mkdirSync(path.join(ws, ".quay"), { recursive: true });
   fs.mkdirSync(path.join(ws, "tasks"), { recursive: true });
   fs.mkdirSync(path.join(ws, "goals"), { recursive: true });
@@ -214,7 +228,7 @@ test("case (5) — instrument failure modes ⇒ failed, carrier byte-identical, 
     // A pre-existing carrier line: the failure must leave it BYTE-IDENTICAL.
     fs.writeFileSync(carrierPath(ws), JSON.stringify({ kind: "finding", finding_fp: "seed", subject_key: "seed", verdict: "v" }) + "\n", "utf8");
     const before = fs.readFileSync(carrierPath(ws), "utf8");
-    const dir = fs.mkdtempSync(path.join(os.tmpdir(), "arch-disc-fix-"));
+    const dir = tmpDir("arch-disc-fix-");
     const s = spec(dir, ws);
     const prefix = { space: ["node", fixtureInstrument(dir, "space.mjs", s)], time: ["node", fixtureInstrument(dir, "time.mjs", s)] };
     const fact = await runArchDiscovery(ws, runOpts(ws, { spawnFn: syncSpawn, argvPrefix: prefix }));
@@ -253,7 +267,7 @@ test("case (5) — instrument failure modes ⇒ failed, carrier byte-identical, 
 test("case (6) — two rounds on identical inputs ⇒ round 2 appends 0 finding lines + 1 scan-round (new=0, repeated=N)", async () => {
   const ws = makeWorkspace();
   writeConfig(ws, ENABLED_YAML);
-  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "arch-disc-fix-"));
+  const dir = tmpDir("arch-disc-fix-");
   const rows = [
     { kind: "evidence", validator_ok: true, subject_key: "k1", sha256: "aa" },
     findingRow("fp1", "k1", "rule:drift"),
@@ -287,7 +301,7 @@ test("case (6) — two rounds on identical inputs ⇒ round 2 appends 0 finding 
 test("argv — each instrument is bounded, and the time scan pins BOTH window ends", async () => {
   const ws = makeWorkspace();
   writeConfig(ws, ENABLED_YAML);
-  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "arch-disc-fix-"));
+  const dir = tmpDir("arch-disc-fix-");
   const empty = { space: ["node", fixtureInstrument(dir, "space.mjs", { rows: [] })], time: ["node", fixtureInstrument(dir, "time.mjs", { rows: [] })] };
   const spawn = countingSpawn(syncSpawn);
   await runArchDiscovery(ws, runOpts(ws, { spawnFn: spawn, argvPrefix: empty }));
@@ -308,7 +322,7 @@ test("argv — each instrument is bounded, and the time scan pins BOTH window en
 test("case (7) — a changed verdict ⇒ exactly 1 new finding line and 1 transition", async () => {
   const ws = makeWorkspace();
   writeConfig(ws, ENABLED_YAML);
-  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "arch-disc-fix-"));
+  const dir = tmpDir("arch-disc-fix-");
   const clock = { t: Date.parse("2026-10-11T00:00:00Z") };
 
   const inst = (rows) => ({ space: ["node", fixtureInstrument(dir, "space.mjs", { rows })], time: ["node", fixtureInstrument(dir, "time.mjs", { rows: [] })] });
@@ -333,7 +347,7 @@ test("case (7) — a changed verdict ⇒ exactly 1 new finding line and 1 transi
 test("case (9) — after a full round nothing under tasks/ or goals/ changed, and the source is filing-free", async () => {
   const ws = makeWorkspace();
   writeConfig(ws, ENABLED_YAML);
-  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "arch-disc-fix-"));
+  const dir = tmpDir("arch-disc-fix-");
   const rows = [findingRow("fp1", "k1", "rule:drift")];
   const prefix = { space: ["node", fixtureInstrument(dir, "space.mjs", { rows })], time: ["node", fixtureInstrument(dir, "time.mjs", { rows: [] })] };
 
