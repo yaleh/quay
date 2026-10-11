@@ -2108,3 +2108,95 @@ test("plugin-version cross-check negative control: a MATCHING registry prints NO
   assert.doesNotMatch(out.stderr, /will load quay plugin/, `a match must not warn:\n${out.stderr}`);
 });
 
+// ── gap-init-worktree-root-default-written-unnormalized ───────────────────────────────────────────
+// The DEFAULT loop.worktree_root used to be built as a string template — `${repoRoot}/../<name>-worktrees`
+// — which RESOLVES correctly but PERSISTS a literal `..` segment into .quay/config.yml. Every other
+// path field (tasks_dir, repo_root, QUAY_NATIVE_*_DIR) is already canonical; this was the lone
+// straggler, and a non-canonical path in config is a string-equality hazard for any consumer that
+// compares paths by text. Three cases pin the three arms of the fix; a fourth pins the negative
+// control that keeps the first one from being vacuous.
+
+/** A workspace ON A REAL DISK with a detectable test command. `tmpDir()` is not usable here: the
+ *  default worktree root must survive `validateWorktreeRoot`'s tmpfs probe, and the resolved tmp root
+ *  is a host property we do not control. `uniqueDiskDir` (/var/tmp) is the file's existing
+ *  disk-backed fixture, already used by the worktree-root tests above. */
+function diskWorkspace(tag) {
+  const d = uniqueDiskDir(`ws-${tag}`);
+  seedDetectable(d);
+  return d;
+}
+
+test("worktree_root default: a fresh init with NO --worktree-root persists the RESOLVED sibling — no '..' segment", () => {
+  const ws = diskWorkspace("wtroot-default");
+  const out = runQuayAllowFail(["init", "--root", ws], ws);
+  assert.equal(out.exitCode, 0, `a fresh init must succeed:\n${out.stdout}${out.stderr}`);
+
+  const doc = YAML.parse(fs.readFileSync(path.join(ws, ".quay", "config.yml"), "utf8"));
+  const persisted = doc.loop.worktree_root;
+  assert.equal(
+    persisted,
+    path.resolve(ws, "..", `${path.basename(ws)}-worktrees`),
+    "the persisted default is the RESOLVED sibling of repo_root (repo_root defaults to the workspace root here)",
+  );
+  assert.doesNotMatch(String(persisted), /(^|\/)\.\.(\/|$)/, `the persisted path carries no '..' segment:\n${persisted}`);
+
+  // NEGATIVE CONTROL for the assertion above: on this fixture the old string template produced a
+  // DIFFERENT string, so `equal(…, path.resolve(…))` is not vacuously true of any path at all.
+  // If these ever coincide the first assertion would pass without testing normalization.
+  assert.notEqual(
+    persisted,
+    `${ws}/../${path.basename(ws)}-worktrees`,
+    "the string template the fix replaced would have written a different (non-canonical) string here",
+  );
+});
+
+test("worktree_root default: a SECOND init on the same workspace reports .quay/config.yml unchanged (idempotent)", () => {
+  const ws = diskWorkspace("wtroot-idempotent");
+  const cfgPath = path.join(ws, ".quay", "config.yml");
+
+  const first = runQuayAllowFail(["init", "--root", ws], ws);
+  assert.equal(first.exitCode, 0, `the first init must succeed:\n${first.stdout}${first.stderr}`);
+  const afterFirst = fs.readFileSync(cfgPath, "utf8");
+
+  const second = runQuayAllowFail(["init", "--root", ws], ws);
+  assert.equal(second.exitCode, 0, `the re-run must succeed:\n${second.stdout}${second.stderr}`);
+  assert.equal(fs.readFileSync(cfgPath, "utf8"), afterFirst, "a re-run leaves .quay/config.yml BYTE-identical");
+  assert.match(
+    second.stdout,
+    /unchanged: \.quay\/config\.yml/,
+    `the re-run must REPORT the config unchanged (not silently rewrite it):\n${second.stdout}`,
+  );
+});
+
+test("worktree_root explicit: --worktree-root is persisted EXACTLY as given — never normalized", () => {
+  const ws = diskWorkspace("wtroot-explicit");
+  // Deliberately non-canonical: this is the same hazard class as the default the fix normalizes, so
+  // it discriminates "the explicit arm is untouched" from "everything got resolve()d".
+  const given = `${ws}/../${path.basename(ws)}-explicit-wt`;
+
+  const out = runQuayAllowFail(["init", "--root", ws, "--worktree-root", given], ws);
+  assert.equal(out.exitCode, 0, `an explicit --worktree-root must be accepted:\n${out.stdout}${out.stderr}`);
+
+  const doc = YAML.parse(fs.readFileSync(path.join(ws, ".quay", "config.yml"), "utf8"));
+  assert.equal(doc.loop.worktree_root, given, "the operator's spelling is persisted verbatim");
+  assert.notEqual(path.resolve(given), given, "fixture: the given value IS non-canonical (the check is not vacuous)");
+  assert.notEqual(doc.loop.worktree_root, path.resolve(given), "…and init did NOT normalize it (only the DEFAULT is normalized)");
+});
+
+test("worktree_root existing: a non-canonical value already in config is PRESERVED on re-run (documented preserve arm)", () => {
+  // The write-side decision, pinned: an existing loop.worktree_root written by an older quay keeps its
+  // spelling. Silently rewriting one of the four project-derived loop values would be an unrequested
+  // edit to a file this command's doctrine is to preserve; what the fix guarantees is only that quay
+  // never WRITES the `/../` spelling itself again.
+  const ws = diskWorkspace("wtroot-existing");
+  const legacy = `${ws}/../${path.basename(ws)}-legacy-wt`;
+
+  const seed = runQuayAllowFail(["init", "--root", ws, "--worktree-root", legacy], ws);
+  assert.equal(seed.exitCode, 0, `seed init must succeed:\n${seed.stdout}${seed.stderr}`);
+
+  const rerun = runQuayAllowFail(["init", "--root", ws], ws); // no flag: existing value wins over the default
+  assert.equal(rerun.exitCode, 0, `the re-run must succeed:\n${rerun.stdout}${rerun.stderr}`);
+  const doc = YAML.parse(fs.readFileSync(path.join(ws, ".quay", "config.yml"), "utf8"));
+  assert.equal(doc.loop.worktree_root, legacy, "an existing value is preserved verbatim, not rewritten to the canonical default");
+});
+
