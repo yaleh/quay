@@ -27,6 +27,10 @@ const HERE = path.dirname(fileURLToPath(import.meta.url));
 const REPO = path.resolve(HERE, "..", "..");
 const ANALYSIS = path.join(REPO, "docs", "analysis");
 const MODULES = ["ownership-active-contract.mjs", "ownership-active-executor.mjs", "ownership-active-slice-adapter.mjs", "ownership-active-loop.mjs"];
+// The decision-memory / evidence-store / metrics triple the loop now consults is held to the SAME structural
+// sandbox: it too must not reach filing machinery, and its only sink is append-only.
+const SUPPORT_MODULES = ["architecture-decision-memory.mjs", "architecture-evidence-store.mjs", "architecture-metrics.mjs"];
+const ALL_MODULES = [...MODULES, ...SUPPORT_MODULES];
 
 const tmpDirs = [];
 const mkTmp = () => { const d = fs.mkdtempSync(path.join(os.tmpdir(), "own-active-test-")); tmpDirs.push(d); return d; };
@@ -570,7 +574,7 @@ test("gate: dedup and the 24h proposal quota are enforced downstream of the mode
 
 // ── 8. structure: no-write guard, judge has no tools, carrier is the only sink, runtime seam ──
 test("no-write guard: the modules never import task/goal filing machinery and never name a forbidden action", () => {
-  for (const f of MODULES) {
+  for (const f of ALL_MODULES) {
     const code = stripComments(fs.readFileSync(path.join(ANALYSIS, f), "utf8"));
     assert.doesNotMatch(code, /\bfileProposals\b|\bdriveItems\b|\bfileDecisions\b|task_write|quay-native|lifecycle_promote/, `${f}: reaches filing/lifecycle machinery`);
     assert.doesNotMatch(code, /["'`](create-task|activate-goal|write-status|file-task)["'`]/, `${f}: names a forbidden action as a value`);
@@ -579,13 +583,20 @@ test("no-write guard: the modules never import task/goal filing machinery and ne
 
 test("no-write guard: the only persistent write is the carrier append; temp files stay under os.tmpdir", () => {
   const writers = {};
-  for (const f of MODULES) {
+  for (const f of ALL_MODULES) {
     const code = stripComments(fs.readFileSync(path.join(ANALYSIS, f), "utf8"));
     const hits = code.match(/\b(writeFileSync|appendFileSync|rmSync|unlinkSync|renameSync|copyFileSync|mkdirSync)\b/g) || [];
     if (hits.length) writers[f] = [...new Set(hits)].sort();
   }
-  assert.deepEqual(Object.keys(writers).sort(), ["ownership-active-executor.mjs", "ownership-active-loop.mjs", "ownership-active-slice-adapter.mjs"].filter((f) => writers[f]).sort());
+  assert.deepEqual(Object.keys(writers).sort(), ["ownership-active-executor.mjs", "ownership-active-loop.mjs", "ownership-active-slice-adapter.mjs", "architecture-evidence-store.mjs"].filter((f) => writers[f]).sort());
   assert.ok(!("ownership-active-contract.mjs" in writers), "the contract is pure");
+  assert.ok(!("architecture-metrics.mjs" in writers), "the metrics module is pure arithmetic");
+  assert.ok(!("architecture-decision-memory.mjs" in writers), "the decision memory only classifies");
+  // the evidence store's ONLY sink is the append below its validators — no rm/rename/copy anywhere near it
+  const store = stripComments(fs.readFileSync(path.join(ANALYSIS, "architecture-evidence-store.mjs"), "utf8"));
+  assert.equal((store.match(/appendFileSync/g) || []).length, 1, "exactly one append site in the evidence store");
+  assert.match(store, /EVIDENCE_STORE_REL = "\.quay\/architecture-evidence-store\.jsonl"/);
+  assert.equal((store.match(/mkdirSync/g) || []).length, 1, "and one directory-creation site, immediately before the append");
   const loop = stripComments(fs.readFileSync(path.join(ANALYSIS, "ownership-active-loop.mjs"), "utf8"));
   assert.equal((loop.match(/appendFileSync/g) || []).length, 1, "exactly one append site");
   assert.match(loop, /CARRIER_REL = "\.quay\/ownership-shadow-proposals\.jsonl"/);
@@ -652,6 +663,111 @@ test("shared gate: a proposal that merely NAMES a file like ff-merge.ts is not a
   }
   const asAction = deterministicGate(env({ recommended_next_action: "merge" }), { evidenceRefs: refs });
   assert.ok(asAction.reasons.some((r) => r.startsWith("FORBIDDEN_ACTION")));
+});
+
+// ── 9. decision memory + evidence store, wired into the loop ──────────────────────────────────
+// The exact historical misjudgment input: the live shadow run re-proposed canonicalising the
+// `github-client.ts` status literals (docs/analysis/ownership-active-replay.md §3), an item an earlier
+// goal had explicitly exempted. The proposal below is that record's envelope, reconstructed.
+const githubClientProposal = (over = {}) => ({
+  concern_kind: "canonicalization",
+  concern: "The task-status vocabulary has an un-owned second copy: `packages/quay-github/src/github-client.ts` compares statuses with bare literals while the declared single owner sits elsewhere.",
+  declared_measurement: "grep count of bare status literals in github-client.ts goes from 13 to 0 and TASK_STATUS. occurrences from 0 to >= 12",
+  evidence_refs: ["ev-1"],
+  candidate_interventions: [{ title: "Converge the ABI-status literals in `packages/quay-github/src/github-client.ts` onto the shared table", rationale: "caller-side convergence, the definition site stays single" }],
+  scope: { in_scope: ["packages/quay-github/src/github-client.ts (the ~13 literal compare/assign sites)"], non_goals: ["any behaviour change in GitHub status mapping"] },
+  negative_control: "if the literal count does not reach zero the convergence did not happen",
+  abandon_or_reconsider_condition: "if the provider package is forbidden a value import of the status table",
+  confidence: { level: "medium", basis: "line-precise literals in a file that already imports the canonical module" },
+  ...over,
+});
+const proposeStep = (proposal) => ({ action: "propose_slice", hypothesis: "an un-owned second copy of the status vocabulary exists in the provider package", sufficient: true, proposal });
+
+test("AC2: the historically re-proposed exempted item now terminates as abstain(known-exemption)", async () => {
+  const res = await runActiveInvestigation({
+    root: "/r",
+    invokeJudge: scriptedJudge([req(REQ_CYCLES), proposeStep(githubClientProposal())]),
+    deps: { executor: fakeExecutor(), git: () => "" },
+  });
+  assert.equal(res.terminal.kind, "abstain", "an exempted item must NOT become a proposal");
+  assert.equal(res.decision_memory.status, "exempted");
+  assert.equal(res.decision_memory.matched_entry.id, "dm-001-github-client-status-literals");
+  assert.equal(res.action, "abstain");
+  assert.equal(res.envelope.recommended_next_action, "abstain");
+  // the reason field of the terminal carries the decision, so the record is self-explaining
+  assert.match(res.envelope.abandon_or_reconsider_condition, /known-exemption: dm-001-github-client-status-literals/);
+  assert.match(res.envelope.confidence.basis, /known-exemption/);
+  assert.equal(res.envelope.expected_mechanical_delta.startsWith("n/a — no slice proposed"), true);
+});
+
+test("AC2 negative control: the SAME shape aimed at a file the memory does not know still proposes", async () => {
+  const known = githubClientProposal();
+  const unknown = githubClientProposal({
+    concern: "The task-status vocabulary has a third copy: `packages/quay/src/serve.ts` compares statuses with bare literals while the declared single owner sits elsewhere.",
+    candidate_interventions: [{ title: "Converge the status literals in `packages/quay/src/serve.ts` onto the shared table", rationale: "caller-side convergence" }],
+    scope: { in_scope: ["packages/quay/src/serve.ts (the literal compare/assign sites)"], non_goals: ["behaviour change"] },
+  });
+  assert.equal(known.concern_kind, unknown.concern_kind, "the control differs ONLY in the location");
+  const res = await runActiveInvestigation({
+    root: "/r",
+    invokeJudge: scriptedJudge([req(REQ_CYCLES), proposeStep(unknown)]),
+    deps: { executor: fakeExecutor(), git: () => "" },
+  });
+  assert.equal(res.terminal.kind, "propose_slice", "an unknown location must still be allowed to propose");
+  assert.equal(res.decision_memory.status, "not-known");
+});
+
+test("a `known-not-yet-filed` hit does NOT terminate the investigation — it is flagged, not silenced", async () => {
+  const proposal = githubClientProposal({
+    concern_kind: "other-boundary",
+    concern: "`packages/quay/src/goal-store.ts` disposal after an achieved goal never appends a status-log entry while the sibling transition path always does.",
+    candidate_interventions: [{ title: "Make `packages/quay/src/goal-store.ts` append a status-log entry on the dispose path", rationale: "one action, two audit guarantees" }],
+    scope: { in_scope: ["packages/quay/src/goal-store.ts"], non_goals: ["the transition table work"] },
+  });
+  const res = await runActiveInvestigation({
+    root: "/r",
+    invokeJudge: scriptedJudge([req(REQ_CYCLES), proposeStep(proposal)]),
+    deps: { executor: fakeExecutor(), git: () => "" },
+  });
+  assert.equal(res.terminal.kind, "propose_slice");
+  assert.equal(res.decision_memory.status, "known-not-yet-filed");
+});
+
+test("evidence store: opt-in persistence writes the four record kinds to their own carrier, and off by default", async () => {
+  const root = mkTmp();
+  const abstainJudge = () => scriptedJudge([req(REQ_CYCLES), { action: "abstain", hypothesis: "no ownership concern is established", sufficient: false, why: "nothing in the facts supports one" }]);
+  const without = await runActiveInvestigation({ root, invokeJudge: abstainJudge(), deps: { executor: fakeExecutor(), git: () => "" } });
+  assert.equal(without.evidence_store_writes, undefined, "off by default — the pure loop writes nothing new");
+  assert.equal(fs.existsSync(path.join(root, ".quay", "architecture-evidence-store.jsonl")), false);
+
+  const res = await runActiveInvestigation({ root, invokeJudge: abstainJudge(), deps: { executor: fakeExecutor(), git: () => "" }, evidenceStore: true, evidenceStoreRunId: "test:run:1" });
+  assert.equal(res.run_id, "test:run:1");
+  assert.equal(res.metrics.evidenceCost.rounds, res.usage.rounds);
+  assert.deepEqual(res.metrics.falsePositiveRate, { state: "not-evaluated" }, "a run with no ground truth has no false-positive reading");
+  const w = res.evidence_store_writes;
+  for (const k of ["hypothesis", "experiment", "outcome"]) assert.equal(w[k].ok, true, `${k}: ${w[k].reasons?.join(",")}`);
+  assert.ok(w.evidence.length >= 1 && w.evidence.every((e) => e.ok), "each reading is recorded as evidence");
+  const file = path.join(root, ".quay", "architecture-evidence-store.jsonl");
+  const records = fs.readFileSync(file, "utf8").split("\n").filter(Boolean).map((l) => JSON.parse(l));
+  assert.deepEqual([...new Set(records.map((r) => r.kind))].sort(), ["evidence", "experiment", "hypothesis", "outcome"]);
+  assert.equal(records.find((r) => r.kind === "outcome").verdict, "abstained");
+  // the legacy proposal carrier is untouched by this: a pure run still writes nothing at all
+  assert.deepEqual(fs.readdirSync(path.join(root, ".quay")), ["architecture-evidence-store.jsonl"], "the loop itself still never appends the proposal carrier");
+});
+
+test("evidence store: a memory-exempted run records the outcome as `exempted`, not as an abstain", async () => {
+  const root = mkTmp();
+  const res = await runActiveInvestigation({
+    root,
+    invokeJudge: scriptedJudge([req(REQ_CYCLES), proposeStep(githubClientProposal())]),
+    deps: { executor: fakeExecutor(), git: () => "" }, evidenceStore: true, evidenceStoreRunId: "test:exempt",
+  });
+  const outcome = res.evidence_store_writes.outcome;
+  assert.equal(outcome.ok, true);
+  const rec = JSON.parse(fs.readFileSync(outcome.file, "utf8").split("\n").filter(Boolean).find((l) => JSON.parse(l).kind === "outcome"));
+  assert.equal(rec.verdict, "exempted");
+  assert.equal(rec.run_id, "test:exempt");
+  assert.deepEqual(rec.metrics.falsePositiveRate, { state: "not-evaluated" });
 });
 
 test("parseStep is fail-closed", () => {

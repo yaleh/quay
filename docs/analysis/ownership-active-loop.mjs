@@ -29,6 +29,11 @@ import {
 import { createExecutor } from "./ownership-active-executor.mjs";
 import { computeSliceDelta, renderDelta, renderNegativeControl } from "./ownership-active-slice-adapter.mjs";
 import { emptyEnvelope, deterministicGate, normalizeConcernKey } from "./ownership-shadow-proposer.mjs";
+// Decision memory + the four-object evidence store. Both are pure/append-only and import NOTHING that
+// could file a task or write a status (the no-write guard in ownership-active-loop.test.mjs covers them).
+import { isKnownExemption, candidateFromProposal } from "./architecture-decision-memory.mjs";
+import { persistRunRecords } from "./architecture-evidence-store.mjs";
+import { computeRunMetrics } from "./architecture-metrics.mjs";
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const REPO_ROOT = path.resolve(HERE, "..", "..");
@@ -183,7 +188,7 @@ export function toEnvelope({ terminal, state, slice }) {
  * @param {function} o.invokeJudge  async (prompt) => {stdout,status,error}
  * @param {object} [o.deps]         { executor?, sliceDeps?, history? , now? }
  */
-export async function runActiveInvestigation({ root, invokeJudge, budget = DEFAULT_BUDGET, deps = {}, existingConcernKeys = [], history = [], quota = DEFAULT_QUOTA, onRound = () => {}, label = "live", triggers = [] }) {
+export async function runActiveInvestigation({ root, invokeJudge, budget = DEFAULT_BUDGET, deps = {}, existingConcernKeys = [], history = [], quota = DEFAULT_QUOTA, onRound = () => {}, label = "live", triggers = [], evidenceStore = false, evidenceStoreRunId = null }) {
   const executor = deps.executor || createExecutor({ root, budget });
   const now = deps.now || (() => new Date().toISOString());
   const state = newState(budget);
@@ -277,6 +282,23 @@ export async function runActiveInvestigation({ root, invokeJudge, budget = DEFAU
     terminal = { kind: "abstain", step: null, hypothesis: steps.filter((s) => s.hypothesis).slice(-1)[0]?.hypothesis || "none established", why: forced || "no terminal action", forced: true };
   }
 
+  // ── DECISION MEMORY — consulted BEFORE a terminal proposal becomes an envelope ────────────────
+  // Without this the loop re-proposed `github-client.ts` status literals, an item an earlier goal had
+  // EXPLICITLY exempted (docs/analysis/ownership-active-replay.md §3: no decision memory). A recorded
+  // exemption is not a hint — it terminates the investigation as an honest abstain carrying the reason.
+  // `known-not-yet-filed` is deliberately NOT terminal: a recorded defect nobody has filed is still fair
+  // to propose, it just must be flagged as already-known rather than re-discovered.
+  let decisionMemory = null;
+  if (terminal.kind === "propose_slice") {
+    decisionMemory = isKnownExemption(candidateFromProposal(terminal.step.proposal));
+    if (decisionMemory.status === "exempted") {
+      terminal = {
+        kind: "abstain", step: null, hypothesis: terminal.hypothesis, forced: false,
+        why: `known-exemption: ${decisionMemory.matched_entry.id} — ${decisionMemory.matched_entry.reason}`,
+      };
+    }
+  }
+
   let slice = null;
   if (terminal.kind === "propose_slice" && terminal.step.proposal.concern_kind === "package-cycle") {
     slice = computeSliceDelta({ root, commit, proposal: terminal.step.proposal, deps: deps.sliceDeps || {}, now });
@@ -310,7 +332,7 @@ export async function runActiveInvestigation({ root, invokeJudge, budget = DEFAU
   }
   const gate_ok = reasons.length === 0;
 
-  return {
+  const out = {
     contract_version: CONTRACT_VERSION, code_fingerprint: CODE_FINGERPRINT, proposer_id: PROPOSER_ID, label,
     commit, facts, triggers: triggers.map((x) => ({ source: x.source, analysed_tree: x.analysed_tree ?? null, text_sha256: sha(String(x.text)) })), budget, usage: { rounds: state.rounds_used, evidence_requests: state.requests_used, evidence_bytes: state.bytes_used },
     steps, terminal: { kind: terminal.kind, forced: terminal.forced === true, forced_cause: forced },
@@ -318,9 +340,19 @@ export async function runActiveInvestigation({ root, invokeJudge, budget = DEFAU
     evidence: state.evidence.map((e) => ({ id: e.id, request: e.request, status: e.status, bytes: e.bytes, truncated: e.truncated, provenance: e.provenance, text_head: e.text.slice(0, 1500), text_sha256: sha(e.text), ...(e.cycles ? { cycles: e.cycles } : {}), ...(e.gap ? { gap: e.gap } : {}) })),
     measurement_capability: measurement,
     slice_delta: slice ? { status: slice.status, reason: slice.reason || null, provenance: slice.provenance, delta: slice.delta || null, guards: slice.guards || null, negative_control: slice.negative_control || null, gap: slice.gap || null } : null,
+    decision_memory: decisionMemory,
     downgrades, envelope, gate_ok, gate_reasons: reasons, concern_key: gate.concern_key,
-    action: finalAction, executed: false, elapsed_ms: Date.now() - t0,
+    action: finalAction, executed: false, ts_iso: new Date().toISOString(), elapsed_ms: Date.now() - t0,
   };
+  // The four-object projection goes to its own carrier, ALONGSIDE the proposal carrier (which keeps the
+  // existing `ownership-shadow-proposer.mjs` consumption chain working). A production run has no ground
+  // truth, so its metrics are honestly `not-evaluated` for the three judgement readings.
+  if (evidenceStore) {
+    out.run_id = evidenceStoreRunId ?? `${label}:${commit.slice(0, 12)}:${out.steps.length}`;
+    out.metrics = computeRunMetrics(out);
+    out.evidence_store_writes = persistRunRecords(root, out, { runId: out.run_id, metrics: out.metrics });
+  }
+  return out;
 }
 
 const execGit = (root, args) => execFileSync("git", ["-C", root, ...args], { encoding: "utf8", timeout: 30_000, maxBuffer: 8 * 1024 * 1024 });
@@ -362,15 +394,17 @@ async function cli() {
   const out = [];
   if (args.includes("--live")) {
     const root = REPO_ROOT;
+    const startedAt = new Date().toISOString().replace(/[:.]/g, "-");
     for (let i = 0; i < rounds; i++) {
       const carrier = path.join(root, CARRIER_REL);
       const history = readCarrierHistory(carrier);
       const existing = history.filter((h) => h.state !== "not-evaluated").map((h) => h.concern_key).filter(Boolean);
-      const res = await runActiveInvestigation({ root, invokeJudge, existingConcernKeys: existing, history, label: "live" });
+      const roundId = `live:${startedAt}:${i + 1}`;
+      const res = await runActiveInvestigation({ root, invokeJudge, existingConcernKeys: existing, history, label: "live", evidenceStore: true, evidenceStoreRunId: roundId });
       const rec = { ts_iso: new Date().toISOString(), runtime, ...res };
       appendCarrier(root, rec);
       out.push(rec);
-      process.stderr.write(`live round ${i + 1}: ${res.terminal.kind}${res.terminal.forced ? "(forced:" + res.terminal.forced_cause + ")" : ""} action=${res.action} gate_ok=${res.gate_ok} rounds=${res.usage.rounds} requests=${res.usage.evidence_requests}\n`);
+      process.stderr.write(`live round ${i + 1} [${roundId}]: ${res.terminal.kind}${res.terminal.forced ? "(forced:" + res.terminal.forced_cause + ")" : ""} action=${res.action} gate_ok=${res.gate_ok} rounds=${res.usage.rounds} requests=${res.usage.evidence_requests} memory=${res.decision_memory?.status ?? "n/a"}\n`);
       if (res.state === "not-evaluated") await new Promise((r) => setTimeout(r, 20_000));   // do not hammer an unavailable judge
     }
   } else if (args.includes("--replay")) {
