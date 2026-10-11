@@ -30,25 +30,62 @@ A pre-registered experiment needs to compare the current investigator model with
 5. Pre-registration: when `--model` is used, the run records the model, and a prereg `models` map (if present) must match the run's requested model, or scoring refuses.
 
 ## Acceptance Criteria
-- [ ] `node --test plugin/test/arch-hypothesis-generation.test.mjs` exits 0. New cases use a stubbed stream:
+- [x] `node --test plugin/test/arch-hypothesis-generation.test.mjs` exits 0. New cases use a stubbed stream:
   - (a) `--model X` puts `X` into the argv of investigate/verify/review, and nothing else changes.
   - (b) An init event with model `Y` records `actual_model: Y`.
   - (c) A stream without an init model ⇒ `not-evaluated:model-unverified`.
   - (d) The usage numbers from the result event are recorded.
   - (e) The hypotheses parsed from the stream's result text equal those parsed from the same text given as plain stdout.
   - (f) A prereg `models` map whose value differs from the run's requested model makes scoring refuse.
-- [ ] Real calls:
+
+  Output (`node --test plugin/test/arch-hypothesis-generation.test.mjs`): `ℹ tests 40 / ℹ pass 40 / ℹ fail 0`, with the 6 new cases green:
+  ```
+  ✔ AC-model(a): --model overrides only the model in the hardened argv, for every verb
+  ✔ AC-model(b): the init event's model is recorded as actual_model, and a mismatch is recorded
+  ✔ AC-model(c): a stream without an init model records not-evaluated:model-unverified
+  ✔ AC-model(d): the result event's token usage and total_cost_usd are recorded on the call
+  ✔ AC-model(e): hypotheses from the stream's result text equal those from the same plain stdout
+  ✔ AC-model(f): a prereg models map that contradicts the run's requested model refuses scoring
+  ```
+  (a) asserts the override changes ONLY the `--model` value (`deepEqual(withX, base` with the one slot swapped `)`) and that no override is byte-identical; (c) asserts the requested proxy `requested-x` is NEVER copied into `actual_model`.
+- [x] Real calls:
   - one `investigate --runs 1` with no `--model`;
   - one with `--model v4pro-anthropic`;
   - both on a tiny 3-component inventory fixture and an empty neutral cwd.
 
-  Paste each run's `requested_model`, `actual_model`, `usage` and wall_ms. Report whatever the gateway returns, including a mismatch or an error.
-- [ ] Mutation control: make the recorder copy `requested_model` into `actual_model`, and show case (c) goes red. Paste the output, then revert.
+  Fixture: 3 lines `alpha.ts`/`beta.ts`/`gamma.ts`, neutral dir empty; `cd neutral && node --experimental-strip-types docs/analysis/arch-hypothesis-generation.mjs investigate --inventory inventory.txt --neutral-dir neutral --runs 1 …`.
+  Run 1 (no `--model`):
+  ```
+  {"run":1,"exit":0,"n_hyps":8,"parse_error":null,"wall_ms":23532,
+   "requested_model":"v4.1flash-anthropic","actual_model":"v4.1flash-anthropic","model_mismatch":false,
+   "usage":{"input_tokens":19112,"cache_creation_input_tokens":0,"cache_read_input_tokens":0,"output_tokens":3809,...},
+   "cost_usd":0.190785}
+  ```
+  Run 2 (`--model v4pro-anthropic`):
+  ```
+  {"run":1,"exit":0,"n_hyps":4,"parse_error":null,"wall_ms":25129,
+   "requested_model":"v4pro-anthropic","actual_model":"v4pro-anthropic","model_mismatch":false,
+   "usage":{"input_tokens":19163,"cache_creation_input_tokens":0,"cache_read_input_tokens":0,"output_tokens":2121,...},
+   "cost_usd":0.14884}
+  ```
+  Reported as the gateway returned it: in BOTH runs the init event's `model` equals the requested alias (`v4pro-anthropic` served as `v4pro-anthropic`), so `model_mismatch:false`; no error. The cost is now directly observed (wall time only before).
+- [x] Mutation control: make the recorder copy `requested_model` into `actual_model`, and show case (c) goes red. Paste the output, then revert.
+
+  Mutation (`modelCallFields`, line 715): `actual_model: actual ?? MODEL_UNVERIFIED,` → `actual_model: actual ?? (requested ?? MODEL_UNVERIFIED),`.
+  ```
+  ✖ AC-model(c): a stream without an init model records not-evaluated:model-unverified
+    AssertionError [ERR_ASSERTION]: Expected values to be strictly equal:
+    + actual - expected
+    + 'requested-x'
+    - 'not-evaluated:model-unverified'
+  ℹ tests 6 / ℹ pass 5 / ℹ fail 1
+  ```
+  Reverted from a `cp` backup ⇒ `AC-model(c)` ✔ again, 6/6 pass; `git status` clean.
 
 ## Definition of Done
-- All AC ticked with outputs pasted.
-- `scripts/test.sh --for-task gap-hypgen-model-identity-and-token-cost-are-not-measured` green.
-- No change to frozen prompt files or to global launcher config.
+- [x] All AC ticked with outputs pasted.
+- [x] `scripts/test.sh --for-task gap-hypgen-model-identity-and-token-cost-are-not-measured` green (exit 0; 40/40; scoped-gate cache written for develop `97b08eb91`).
+- [x] No change to frozen prompt files or to global launcher config.
 
 ## Touches
 - tasks/gap-hypgen-model-identity-and-token-cost-are-not-measured.md
