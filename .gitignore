@@ -58,6 +58,13 @@ packages/quay/plugin/
 # the same family as the two shadow carriers above (they are READ-ONLY instruments; this dir is their
 # only persistence). The directory form is ignored, so `--scan`'s per-run files are covered too.
 **/.quay/arch-discovery-shadow/
+# arch-DISCOVERY ROUTINE carrier (.quay/arch-discovery-findings.jsonl) —
+# gap-arch-discovery-not-wired-into-routine-track-report-only. The periodic routine appends one finding
+# line per NEW finding_fp plus one scan-round line per round. Runtime state, never git-tracked — the
+# same family as quality-round.jsonl / gate-events.jsonl (the routine's ONLY persistence besides the
+# existing quality-round fact). Declared in docs/carrier-registry.json (owner:
+# plugin/scripts/arch-discovery-routine.ts).
+**/.quay/arch-discovery-findings.jsonl
 # (.quay/goal-freshness-margin.json) — AC6 runtime carrier: the achieved-AC freshness
 # margin (distance/K) snapshot written by AC-214's criterion, so the margin is readable BEFORE
 # the criterion turns red (the runner surfaces a criterion's output only on failure). Runtime

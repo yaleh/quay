@@ -38,6 +38,12 @@
       "readers": "unaudited"
     },
     {
+      "name": "arch-discovery-findings.jsonl",
+      "kind": "jsonl-log",
+      "owner": "plugin/scripts/arch-discovery-routine.ts",
+      "readers": "unaudited"
+    },
+    {
       "name": "blocked-escalations.jsonl",
       "kind": "jsonl-log",
       "owner": "unowned-yet",
