@@ -4,7 +4,7 @@ title: "ownership-active investigator can read holdout answers:
   DENY_PATH_PATTERNS omits goals/, docs/architecture/, docs/references/,
   docs/plans/, tasks/ and docs/analysis/architecture-evidence-store-* (GOAL-034
   body and the ranked candidate list are readable via read_file/grep)"
-status: todo
+status: ready
 labels:
   - gap
   - defect
