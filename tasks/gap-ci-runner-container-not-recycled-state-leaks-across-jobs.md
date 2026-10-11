@@ -30,7 +30,7 @@ extra:
 
 ## AC
 
-- [ ] AC0（worktree 内可验）：`plugin/test/ci-runner-container-recycle.test.mjs` 按位置断言 `.github/runner/Dockerfile` 定义的 `gh-runner.service` 带有"服务退出即令容器退出"的配置（如 `SuccessAction=exit` / `FailureAction=exit` 或等价的终止 PID1 的 `ExecStopPost`）；变异对照：删去该配置后此测试必须变红，把变红输出贴进任务
+- [x] AC0（worktree 内可验）：`plugin/test/ci-runner-container-recycle.test.mjs` 按位置断言 `.github/runner/Dockerfile` 定义的 `gh-runner.service` 带有"服务退出即令容器退出"的配置（如 `SuccessAction=exit` / `FailureAction=exit` 或等价的终止 PID1 的 `ExecStopPost`）；变异对照：删去该配置后此测试必须变红，把变红输出贴进任务
 - [ ] AC1（读生产载体）：修复落地后，runner 连续执行 ≥2 个 job，每个 job 开始时 `docker ps` 的容器创建时刻**互不相同**（即每 job 新容器）；把读数贴进本任务（待外部）
 - [ ] AC2（读生产载体）：任一 job 开始时容器内 `/root/.claude/settings.json` 不存在或不含 `extraKnownMarketplaces.quay`，且 `NRestarts` = 0；贴读数（待外部）
 - [ ] AC3（负控制）：去掉该退出配置后重复 AC1，必须观察到同一容器跨 job 存活（NRestarts 递增）；贴读数（待外部）
@@ -46,6 +46,60 @@ extra:
 - .github/runner/Dockerfile
 - plugin/test/ci-runner-container-recycle.test.mjs
 - tasks/gap-ci-runner-container-not-recycled-state-leaks-across-jobs.md
+
+## Evidence
+
+实现分支 `task/gap-ci-runner-container-not-recycled-state-leaks-across-jobs`，提交 `3e228226d`（worktree `/home/yale/work/quay-worktrees/gap-ci-runner-container-not-recycled-state-leaks-across-jobs`）。
+
+**产物**
+- `.github/runner/Dockerfile`：`gh-runner.service` 的 **`[Unit]` 段**新增 `SuccessAction=exit` / `FailureAction=exit`（服务一停 ⇒ systemd 管理器退出 ⇒ 容器退出 ⇒ 宿主 unit `Restart=always` 从镜像重建全新容器）；同一 unit 的 build-time 断言块新增对应两条 `grep -q`（p5）。
+- `plugin/test/ci-runner-container-recycle.test.mjs`（新）：**按位置**断言——从 Dockerfile 里真正被写出去的那份 unit（`printf '%s\n' … > /etc/systemd/system/gh-runner.service` 的引号实参）取行，再断言这两条位于 `[Unit]` 段。判据不 grep 整文件：同一字符串也出现在注释与断言块里，整文件 grep 会被注释满足。
+
+**AC0 绿（修复后，worktree 内）**
+```
+$ node --experimental-strip-types --test plugin/test/ci-runner-container-recycle.test.mjs
+✔ AC0: the CI runner unit exits the container when the runner service stops (1.414627ms)
+✔ AC0 (能取假): the predicate goes FALSE when the exit config is deleted or misplaced (0.387411ms)
+ℹ tests 2 / pass 2 / fail 0
+```
+
+**变异对照 1 —— 删去该配置**（`cp` 备份 → 删两行 → 跑 → `cp` 还原；还原后 md5 `f607f257c8ae4d62265f2d0c7f895add` 与备份一致）
+```
+✖ AC0: the CI runner unit exits the container when the runner service stops (2.780135ms)
+  AssertionError [ERR_ASSERTION]: the ephemeral runner's container is never recycled: without the
+  missing directive(s) below, systemd (now PID 1) stays alive after the runner stops and
+  `Restart=always` restarts the runner IN PLACE, so every job inherits the previous job's /root state
+    SuccessAction=exit — covers the runner's normal end — an ephemeral runner exits 0 after its one job
+    FailureAction=exit — covers a crashed listener, or an ExecStart that cannot exec (measured: container exits 203)
+  + actual - expected
+  + [ 'SuccessAction=exit', 'FailureAction=exit' ]
+  - []
+✖ AC0 (能取假): the predicate goes FALSE when the exit config is deleted or misplaced
+ℹ tests 2 / pass 0 / fail 2
+```
+
+**变异对照 2 —— 同两行只改位置（挪进 `[Service]` 段），字节一个不改**
+```
+✖ AC0: the CI runner unit exits the container when the runner service stops (2.455703ms)
+  （同上 AssertionError，两条仍被判为缺失）
+✖ AC0 (能取假): the predicate goes FALSE when the exit config is deleted or misplaced
+ℹ tests 2 / pass 0 / fail 2
+```
+⇒ 判据读的是**位置**而非字符串：只做字符串 grep 的判据会把"看起来配了、实际被 systemd 静默丢弃"的配置判绿——正是本次事故那一类缺陷。
+
+**机制读数（2026-10-11，全部在一次性 scratch 容器里跑 `quay-ci-runner:sysd`，宿主生产 runner 未被触碰）**
+
+| `gh-runner.service` 配置 | 容器是否回收 |
+|---|---|
+| 现状基线：`Restart=always`、无 action | ✖ 一直 `Up`，90s 内 `NRestarts=26` |
+| 同两条写在 **`[Service]`** 段 | ✖ 仍 `Up`；`systemctl show -p SuccessAction` = **`none`**，而 `systemctl cat` 照样显示该行 ⇒ systemd **静默丢弃** |
+| 写在 **`[Unit]`** 段，服务退出码 0 | ✔ 服务停后 ~3s 容器退出（exit code 0） |
+| 写在 **`[Unit]`** 段，服务退出码 1 | ✔ ~3s 退出 |
+| 写在 **`[Unit]`** 段，`ExecStart` 根本 exec 不起来 | ✔ ~1s 退出（exit code 203） |
+
+⇒ 三种停止路径（正常 job 结束 / 崩溃 / 起不来）全覆盖。另实测：`[Unit]` 写法**不会**被 `Restart=always` 抢占（`[Unit] SuccessAction=exit` + `Restart=always` 仍退出容器），故 `Restart=always` 保留——万一 action 失效，退化回今天的行为，而不是留下"容器活着但 runner 没了"的死容器。同一 unit 的 build-time 断言已按同样内容加了两条 `grep -q`（并在本地用同一 print 出来的 unit 文本做过正/负控制）。
+
+**未完成部分（如实记录）**：AC1–AC5 与 DoD 需宿主侧动作（从 develop 重建镜像 + 重启 `gh-runner-quay.service`）后读生产载体，按作者 `（待外部）` 标注不由 worker 执行；本任务交付的是镜像侧配置 + 它的位置判据与变异对照。
 
 ## Needs-Human
 
