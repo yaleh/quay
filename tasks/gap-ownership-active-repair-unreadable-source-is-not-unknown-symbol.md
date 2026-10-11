@@ -3,7 +3,7 @@ id: gap-ownership-active-repair-unreadable-source-is-not-unknown-symbol
 title: repair loop folds "declared source file unreadable at the locked commit"
   into UNKNOWN_SYMBOL — split it into a distinct not-evaluated state so the
   judge is told the file path is wrong, not that the symbol is fabricated
-status: todo
+status: ready
 labels:
   - gap
   - defect
