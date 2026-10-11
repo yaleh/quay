@@ -269,6 +269,18 @@ test("redaction AC2/AC3 negative control: a real GOAL-034 comment is gone from r
   assert.match(grep.text, /^packages\/quay\/src\/gate\/config\/types\.ts:4:\/\/ \[redacted: decision reference\]$/m);
   assert.match(grep.text, /export type \{ GateConfig, RunnerOptions \} from "\.\.\/\.\.\/kernel\/gate-run-options\.ts";/);
   assert.match(grep.text, /import \{ type GateConfig, resolveRunnerOptions \} from "\.\.\/\.\.\/kernel\/gate-run-options\.ts";/);
+
+  // the AC pins the premise at add3e7318 (where the leak was measured); verify at that commit too, when the
+  // object is present — a live-rsync checkout can be torn, so a missing object is skipped, not failed.
+  if (spawnSync("git", ["-C", REPO, "cat-file", "-e", "add3e7318^{commit}"]).status === 0) {
+    const at = createExecutor({ root: REPO, ref: "add3e7318" });
+    const readAt = at.execute({ kind: "read_file", path: "packages/quay/src/gate/config/types.ts", start_line: 1, end_line: 20 });
+    assert.equal(readAt.status, "ok");
+    assert.ok(!readAt.text.includes("GOAL-034"), "GOAL-034 must be gone at add3e7318, where the leak was measured");
+    assert.ok(!readAt.text.includes("not config-loading"));
+    const grepAt = at.execute({ kind: "grep", pattern: "GateConfig", fixed: false, paths: ["packages/quay/src/gate"] });
+    assert.ok(!/GOAL-0/.test(grepAt.text), `no GOAL-0 may survive a source grep at add3e7318:\n${grepAt.text}`);
+  }
 });
 
 test("redaction AC4 positive control: code and id-free kernel comments survive; a mechanical source parse is unaffected", () => {
