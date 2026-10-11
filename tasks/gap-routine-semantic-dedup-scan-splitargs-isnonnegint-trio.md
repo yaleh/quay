@@ -3,7 +3,7 @@ id: gap-routine-semantic-dedup-scan-splitargs-isnonnegint-trio
 title: "semantic-dedup-scan: Both bodies byte-identical across the three peer
   driver modules, whose comments even say 'same family as
   driver-runtime.splitArgs' yet carry their own copy"
-status: ready
+status: done
 labels:
   - gap
   - routine-filed

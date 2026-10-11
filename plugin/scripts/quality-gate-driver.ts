@@ -50,6 +50,8 @@ import {
   registerKindStop,
   residentLoopStop,
   resourceGateCheck,
+  splitArgs,
+  isNonNegInt,
   type DriverKind,
   type Fact,
   type RoutineSpec,
@@ -1150,14 +1152,10 @@ const HELP = [
   "  --json                    每轮向 stdout 打一条 JSON 事件行",
 ].join("\n");
 
-/** 空格分隔 argv 切分（与 driver-runtime.splitArgs 同族；测试缝注入覆盖命令）。 */
-export function splitArgs(cmd: string): string[] {
-  return cmd.trim().split(/\s+/).filter(Boolean);
-}
-
-function isNonNegInt(s: string): boolean {
-  return /^\d+$/.test(s);
-}
+// splitArgs / isNonNegInt：单一实现已上收 driver-runtime.ts（routine semantic-dedup-scan finding
+// `splitArgs-isNonNegInt-trio`，runId semantic-dedup-scan-1791733865369——三份 byte-identical 副本
+// 归并为一份，同 process-kill-lib 的手法）。splitArgs 仍从本模块 re-export，保留既有 import 面。
+export { splitArgs };
 
 export async function main(argv: string[]): Promise<number> {
   const args = argv.slice(2);
