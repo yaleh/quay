@@ -22,7 +22,6 @@ const readOnly = (over = {}) => ({
 });
 const proposing = (files, over = {}) => readOnly({
   terminal: { kind: "propose_slice" },
-  slice_delta: { delta: { moves: files.map((f) => ({ file: f, from: "cli", to: "" })) } },
   envelope: { concern: `relocate ${files[0]} into the root layer`, scope: { in_scope: files.map((f) => `${f} (the module to relocate)`) }, candidate_interventions: [{ title: `Move ${files[0]} to the root`, rationale: "lower layer" }] },
   ...over,
 });

@@ -46,6 +46,12 @@ packages/quay/plugin/
 # never git-tracked — same family as gate-events.jsonl. Leaving it untracked-but-visible made it
 # committable, which is exactly the "sandbox" property the shadow design depends on.
 **/.quay/ownership-shadow-proposals.jsonl
+# architecture evidence store carrier (gap-architecture-evidence-store-and-decision-memory): the four
+# record kinds (evidence/hypothesis/experiment/outcome) the active-investigation loop appends to. Same
+# runtime-state family and same sandbox reasoning as the proposal carrier above — a carrier that is
+# untracked-but-visible is committable, which is exactly what "the loop only ever writes shadow carriers"
+# must make impossible.
+**/.quay/architecture-evidence-store.jsonl
 # (.quay/goal-freshness-margin.json) — AC6 runtime carrier: the achieved-AC freshness
 # margin (distance/K) snapshot written by AC-214's criterion, so the margin is readable BEFORE
 # the criterion turns red (the runner surfaces a criterion's output only on failure). Runtime
