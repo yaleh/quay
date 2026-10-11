@@ -58,6 +58,11 @@ packages/quay/plugin/
 # the same family as the two shadow carriers above (they are READ-ONLY instruments; this dir is their
 # only persistence). The directory form is ignored, so `--scan`'s per-run files are covered too.
 **/.quay/arch-discovery-shadow/
+# blind hypothesis-GENERATION shadow stage output dir (gap-architecture-hypothesis-generation-shadow-
+# stage-not-in-repo): `docs/analysis/arch-hypothesis-generation.mjs` defaults `--out-dir` under here, so a
+# default run must not leave untracked files in the shared checkout. Runtime state, never git-tracked —
+# the same family as the discovery dir above (a report-only instrument; this dir is its only persistence).
+**/.quay/arch-hypothesis-generation/
 # (.quay/goal-freshness-margin.json) — AC6 runtime carrier: the achieved-AC freshness
 # margin (distance/K) snapshot written by AC-214's criterion, so the margin is readable BEFORE
 # the criterion turns red (the runner surfaces a criterion's output only on failure). Runtime
