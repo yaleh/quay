@@ -1,0 +1,12 @@
+You are an independent reviewer. You get ONE reference case (a known architectural situation) and ONE hypothesis produced by someone who never saw the case. Judge strictly from the two texts.
+
+Reference case:
+{{CASE}}
+
+Hypothesis:
+{{HYP}}
+
+Answer two questions:
+1. same_concept: does the hypothesis identify the same underlying situation as the case (same components AND the same kind of duplicated concept), not merely the same files?
+2. partial: if not fully the same, does it identify a strict sub-part of the case?
+Output ONLY JSON: {"same_concept":true|false,"partial":true|false,"reason":"one sentence"}
