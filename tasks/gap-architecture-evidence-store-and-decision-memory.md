@@ -68,11 +68,3 @@ extra:
 ## DoD
 
 `docs/analysis/architecture-evidence-store-replay.md` 提交,记录 Holdout A(25 条,已知答案)与 Holdout B(3 条,盲测,GOAL-034/035/036 fork-point)的五项量化读数对比、生产 3 轮 live shadow 的 `evidenceCost` 读数与 `not-evaluated` 诚实性、决策记忆命中/未命中清单(至少 1 条命中案例 = github-client.ts 回归)。⛔ 本任务不创建、不激活任何 Goal/task,不改变机制"只写 shadow carrier"的性质——向真实 Goal 的受限提案是 `gap-ownership-active-limited-proposal-mode` 的范围,本任务只负责证据/决策记忆/量化读数三件事。全部新增测试 + 既有 `ownership-active-loop.test.mjs` 绿。
-
-## Blocker
-
-**2026-10-11T03:12:22.008Z — worker 未落地（exited-not-landed）**
-
-- 未落地原因：step=anti-drift: ANTI-DRIFT HARD FAIL: task gap-architecture-evidence-store-and-decision-memory — 2 violation(s)
-- run_id：wk-prod-anchor
-- session_id：8c4084ce-be5e-4a15-a509-029c973d09ce
