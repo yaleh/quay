@@ -132,6 +132,79 @@ test("scope: paths cannot escape the root or reach reference/outcome/benchmark/r
   assert.deepEqual(normalizeRepoPath("./packages//quay/src/./serve.ts"), { ok: true, path: "packages/quay/src/serve.ts" });
 });
 
+// ── 2b. holdout answer surface (GOAL-034 blind benchmark, 2026-10-11) ──────────────────────────
+// The investigator must REDISCOVER the fork-point cut from source. The GOAL bodies, the ranked candidate
+// list and the blind-test reports carry the answer, so every one of them is denied on BOTH read paths:
+// the gate (normalizeRepoPath, for read_file) and the executor row filter (for grep output).
+const HOLDOUT_PREFIXES = ["goals/", "tasks/", "docs/architecture/", "docs/references/", "docs/plans/", "docs/analysis/architecture-evidence-store"];
+
+test("scope: DENY_PATH_PATTERNS closes the holdout answer surface without disturbing the older entries", () => {
+  // AC1: every declared prefix is denied, with the distinct PATH_DENIED code.
+  for (const p of ["goals/GOAL-034-x.md", "tasks/x.md", "docs/architecture/x.md", "docs/references/x.md",
+    "docs/plans/x.md", "docs/analysis/architecture-evidence-store-replay.md", "docs/analysis/architecture-evidence-store-limited-proposal-report.md"]) {
+    assert.equal(normalizeRepoPath(p).ok, false, p);
+    assert.equal(normalizeRepoPath(p).reason, "PATH_DENIED", p);
+  }
+  // the previously-covered surface is unchanged (the new patterns ADD coverage, they do not replace it)
+  for (const p of ["plugin/fixtures/meta-driver-replay/G/reference.json", "docs/analysis/ownership-x.jsonl",
+    "docs/analysis/dossier-evidence/G/dup.txt", "docs/analysis/rich-dossier-spec.json",
+    "docs/analysis/two-stage-corpus-spec.json", ".quay/x.jsonl", ".git/config", ".archguard/x.json",
+    ".claude/settings.json", "deep/node_modules/x/index.js"]) {
+    assert.equal(normalizeRepoPath(p).reason, "PATH_DENIED", p);
+  }
+  // the source evidence the investigator MUST keep is untouched by the widening
+  assert.deepEqual(normalizeRepoPath("packages/quay/src/gate/config/loader.ts"), { ok: true, path: "packages/quay/src/gate/config/loader.ts" });
+  assert.ok(normalizeRepoPath("plugin/scripts/driver-runtime.ts").ok);
+});
+
+test("scope: the gate refuses REAL holdout files (GOAL-034 body, the candidate list, a task body) with PATH_DENIED", () => {
+  const goal = fs.readdirSync(path.join(REPO, "goals")).find((f) => f.startsWith("GOAL-034-"));
+  assert.ok(goal, "the GOAL-034 holdout body must exist — a denial of a non-existent path proves nothing");
+  const real = [`goals/${goal}`, "docs/architecture/quay-domain-model-2026-10-11.md",
+    "tasks/gap-ownership-active-investigator-holdout-deny-list.md"];
+  for (const p of real) {
+    assert.ok(fs.existsSync(path.join(REPO, p)), `${p} must exist on disk, so the refusal is the DENY set and not PATH_NOT_IN_REF`);
+    const r = validateRequest({ kind: "read_file", path: p, start_line: 1, end_line: 5 });
+    assert.equal(r.ok, false, p);
+    assert.ok(r.reasons.includes("PATH_DENIED"), `${p}: ${r.reasons}`);
+  }
+});
+
+test("executor: a repo-wide grep drops real GOAL-034 rows while keeping source hits (grep is filtered, not switched off)", () => {
+  const pattern = "loadWorkspaceGates";
+  const head = execFileSync("git", ["-C", REPO, "rev-parse", "HEAD"], { encoding: "utf8" }).trim();
+  const rawPaths = (paths) => execFileSync("git", ["-C", REPO, "-c", "core.quotePath=false", "grep", "-nE", "--no-color", "-I", "-e", pattern, head, "--", ...paths],
+    { encoding: "utf8", maxBuffer: 64 * 1024 * 1024 }).split("\n").filter(Boolean).map((l) => l.slice(`${head}:`.length).split(":")[0]);
+  // Non-vacuity: the SAME pattern must really hit the holdout body AND the source tree.
+  assert.ok(rawPaths(["goals/"]).some((p) => p.startsWith("goals/GOAL-034-")), "the pattern must hit the real GOAL-034 body");
+  assert.ok(rawPaths(["packages/quay/src"]).some((p) => p.startsWith("packages/quay/src/")), "the pattern must also hit the source tree");
+  // The gate refuses a repo-wide '.' scope for the model, so the executor's row filter is the layer that must
+  // hold for whatever scope does reach it — exercise it directly on scope '.'. The result clip is raised so
+  // that what survives is decided by the DENY filter, not by max_result_bytes cutting the reading short.
+  const ev = createExecutor({ root: REPO, budget: { ...DEFAULT_BUDGET, max_grep_hits: 400, max_result_bytes: 4_000_000 } })
+    .execute({ kind: "grep", pattern, fixed: false, paths: ["."] });
+  assert.equal(ev.status, "ok");
+  assert.ok(ev.denied_rows_dropped > 0, "holdout rows must be dropped, and the count must report it");
+  const rowPath = (l) => { const m = /^("(?:[^"\\]|\\.)*"|[^:]+):\d+:/.exec(l); return m ? m[1].replace(/^"|"$/g, "") : null; };
+  const returned = ev.text.split("\n").map(rowPath).filter(Boolean);
+  for (const p of returned) assert.ok(!HOLDOUT_PREFIXES.some((pre) => p.startsWith(pre)), `a holdout row survived into the reading: ${p}`);
+  assert.ok(!returned.some((p) => p.includes("GOAL-034")), "no GOAL-034 row may survive");
+  assert.ok(returned.some((p) => p.startsWith("packages/quay/src/")), "source hits must still be returned");
+});
+
+test("scope: source evidence still reads — read_file on a real module and a scoped grep both stay ok", () => {
+  const p = "packages/quay/src/gate/config/loader.ts";
+  assert.ok(validateRequest({ kind: "read_file", path: p, start_line: 1, end_line: 20 }).ok, "the module path must remain admissible");
+  const ex = createExecutor({ root: REPO });
+  const r = ex.execute({ kind: "read_file", path: p, start_line: 1, end_line: 20 });
+  assert.equal(r.status, "ok");
+  assert.ok(r.provenance.total_lines > 20);
+  const g = ex.execute({ kind: "grep", pattern: "loadWorkspaceGates", fixed: false, paths: ["packages/quay/src"] });
+  assert.equal(g.status, "ok");
+  assert.match(g.text, /^packages\/quay\/src\//m, "the source hits must be present");
+  assert.equal(g.denied_rows_dropped, 0, "no source row is under a holdout prefix");
+});
+
 // ── 3. budgets, dedup, allow-list at the gate ─────────────────────────────────────────────────
 test("budget: requests, bytes and duplicates are refused with distinct codes; state is not mutated", () => {
   const st = newState({ ...DEFAULT_BUDGET, max_evidence_requests: 2 });
