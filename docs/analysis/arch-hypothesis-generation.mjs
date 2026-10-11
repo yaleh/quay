@@ -47,6 +47,11 @@
 // `--prompt-sha` / `--inventory-sha` survive only as OPTIONAL extra assertions.
 // The investigator prompt the runs are bound to is the FROZEN round-1 file, and it is the DEFAULT:
 // a reproduction that silently runs on a different prompt is the defect this binds shut.
+// `--arm <id>` scopes the gate to ONE ARM of a pre-registered A/B experiment: the expected keys become
+// `prompt-investigator-<id>` / `inventory-<id>`, so a single prereg written before every run covers both
+// arms (gap-hypgen-prereg-gate-is-single-arm-so-ab-arm-b-cannot-be-scored). An arm key the prereg does not
+// carry refuses as `PREREG_HASH_ABSENT:…-<id>` — never a silent fallback to the unscoped keys. Omitted,
+// the keys are today's and every byte of the single-arm behaviour is preserved.
 //
 // ── SEALED LABELS ARE AN INPUT PATH, NEVER A CONSTANT ───────────────────────────────────────────────
 // The labels are passed as `--labels <file>` and are read ONLY by `match` and `review`, and ONLY after
@@ -364,6 +369,17 @@ export function contaminationScan(entries, pairs) {
 }
 
 // ── pre-registration (pure over supplied stats/text) ─────────────────────────────────────────────────
+/** The `--arm` vocabulary: a non-empty run of ASCII letters/digits. It is a KEY SUFFIX (`inventory-B`),
+ *  never a path fragment, so no separator or dot is admitted. */
+export const ARM_ID_RE = /^[A-Za-z0-9]+$/;
+
+/** The pre-registration KEY for an artifact under an arm. Without `--arm` (`arm == null`) the key is the
+ *  round-1 single-arm one and every byte of today's behaviour is preserved; with `--arm X` it gains the
+ *  `-X` suffix. (gap-hypgen-prereg-gate-is-single-arm-so-ab-arm-b-cannot-be-scored: ONE pre-registration
+ *  must cover BOTH arms of a pre-registered A/B experiment; a post-hoc second prereg would violate the
+ *  mtime rule that makes a prereg a prereg, so arm B could not be scored at all.) */
+export const armScopedKey = (key, arm = null) => (arm == null ? key : `${key}-${arm}`);
+
 /**
  * Scoring is refused unless the pre-registration file (a) exists, (b) records a hash for every expected
  * artifact that matches the artifact's ACTUAL bytes, and (c) is strictly older than every run file.
@@ -1021,8 +1037,10 @@ const statMsWith = (fsImpl, p) => { try { return fsImpl.statSync(p).mtimeMs; } c
  * The gated loader that reads the RUN files and nothing else. Refuses unless (1) EVERY declared run file
  * exists and (2) the pre-registration gate passes. `verify` uses this — it needs the runs, not the labels.
  * @param {object} o.fs INJECTABLE — tests wrap it to record the file-read ORDER
+ * @param {?string} o.arm `--arm` id; when given, `expected` already carries the arm-scoped keys and the
+ *   run⇄prereg binding reads the arm-scoped prompt key (never the unscoped one).
  */
-export function loadRunsGated({ runDir, runCount, preregPath, expected = {}, promptBytes = null, inventoryBytes = null, fs: fsImpl = nodeFs }) {
+export function loadRunsGated({ runDir, runCount, preregPath, expected = {}, promptBytes = null, inventoryBytes = null, arm = null, fs: fsImpl = nodeFs }) {
   const runFiles = Array.from({ length: runCount }, (_, i) => path.join(runDir, `run-${i + 1}.json`));
   const runMtimes = [], missing = [];
   for (const f of runFiles) { const ms = statMsWith(fsImpl, f); if (ms === null) missing.push(path.basename(f)); else runMtimes.push(ms); }
@@ -1035,7 +1053,7 @@ export function loadRunsGated({ runDir, runCount, preregPath, expected = {}, pro
 
   const runs = runFiles.map((f) => JSON.parse(fsImpl.readFileSync(f, "utf8")));
   // The declared hashes are checked against the prereg above; the RUNS are bound to the artifacts here.
-  const runGate = runPromptRefusal({ runs, promptBytes, inventoryBytes, expectedPromptSha: expected["prompt-investigator"] ?? null });
+  const runGate = runPromptRefusal({ runs, promptBytes, inventoryBytes, expectedPromptSha: expected[armScopedKey("prompt-investigator", arm)] ?? null });
   if (runGate) return { ok: false, code: runGate.code, reasons: runGate.reasons };
   return { ok: true, runs, runFiles, prereg };
 }
@@ -1047,8 +1065,8 @@ export function loadRunsGated({ runDir, runCount, preregPath, expected = {}, pro
  * edited after the pre-registration therefore refuses (gap-hypgen-prereg-gate-…: the labels were
  * previously never hashed at all, so a post-hoc edit scored as pre-registered).
  */
-export function score({ runDir, runCount, labelsPath, preregPath, expected = {}, promptBytes = null, inventoryBytes = null, fs: fsImpl = nodeFs }) {
-  const loaded = loadRunsGated({ runDir, runCount, preregPath, expected, promptBytes, inventoryBytes, fs: fsImpl });
+export function score({ runDir, runCount, labelsPath, preregPath, expected = {}, promptBytes = null, inventoryBytes = null, arm = null, fs: fsImpl = nodeFs }) {
+  const loaded = loadRunsGated({ runDir, runCount, preregPath, expected, promptBytes, inventoryBytes, arm, fs: fsImpl });
   if (!loaded.ok) return loaded;
   const labelsRead = readTextWith(fsImpl, labelsPath);
   if (!labelsRead.ok) return { ok: false, code: EXIT.usage, reasons: [`LABELS_UNREADABLE:${labelsRead.error}`] };
@@ -1338,9 +1356,15 @@ export function modelFromArgv(argv) {
 }
 
 /** The hashes the PREREG must record, computed from the artifact BYTES the caller supplied — never from a
- *  `--*-sha` flag, which is a claim about the bytes rather than a reading of them. */
-export function expectedFromArtifacts({ promptBytes, inventoryBytes }) {
-  return { "prompt-investigator": sha256(promptBytes), inventory: sha256(inventoryBytes) };
+ *  `--*-sha` flag, which is a claim about the bytes rather than a reading of them. With `--arm X` the keys
+ *  are ARM-SCOPED (`prompt-investigator-X` / `inventory-X`); ⛔ the unscoped keys are NEVER emitted as a
+ *  fallback, so a prereg that records them for arm A cannot silently score arm B — an absent arm key is
+ *  its OWN refusal (`PREREG_HASH_ABSENT:prompt-investigator-X`), never a match. */
+export function expectedFromArtifacts({ promptBytes, inventoryBytes, arm = null }) {
+  return {
+    [armScopedKey("prompt-investigator", arm)]: sha256(promptBytes),
+    [armScopedKey("inventory", arm)]: sha256(inventoryBytes),
+  };
 }
 
 /** `--prompt-sha` / `--inventory-sha` survive as OPTIONAL EXTRA assertions (they are no longer the gate):
@@ -1363,6 +1387,16 @@ function readRunInputs(args) {
   if (!inventoryPath) return { ok: false, reason: "INVENTORY_REQUIRED" };
   try { return { ok: true, promptPath, promptBytes: fs.readFileSync(promptPath, "utf8"), inventoryBytes: fs.readFileSync(inventoryPath, "utf8") }; }
   catch (err) { return { ok: false, reason: `RUN_INPUT_UNREADABLE:${String(err?.message ?? err).split("\n")[0].slice(0, 200)}` }; }
+}
+
+/** Parse `--arm <id>`. Absent ⇒ `{ok:true, arm:null}` (today's single-arm behaviour, byte-identical). A
+ *  value that is not `[A-Za-z0-9]+` is a USAGE refusal rather than a silently-unsuffixed key: a typo that
+ *  fell back to the unscoped keys would score the wrong arm as pre-registered (硬规则 3b). */
+function armFromArgs(args) {
+  const v = argOf(args, "--arm", null);
+  if (v === null) return { ok: true, arm: null };
+  if (!ARM_ID_RE.test(v)) return { ok: false, reason: `--arm must match ${ARM_ID_RE.source}, got ${JSON.stringify(v)}` };
+  return { ok: true, arm: v };
 }
 
 async function cli(argv = process.argv.slice(2)) {
@@ -1436,13 +1470,16 @@ async function cli(argv = process.argv.slice(2)) {
     const runCount = Number(argOf(args, "--run-count", 3));
     const inputs = readRunInputs(args);
     if (!inputs.ok) { console.error(`${TOOL} verify: ${inputs.reason}`); return EXIT.usage; }
+    const armSpec = armFromArgs(args);
+    if (!armSpec.ok) { console.error(`${TOOL} verify: ${armSpec.reason}`); return EXIT.usage; }
     const extra = cliExtraShaRefusals(args, inputs);
     if (extra.length) { console.error(`${TOOL} verify: ${extra.join(", ")}`); return EXIT.prereg; }
     // verify needs the RUNS, not the labels (labels stay confined to match/review) — but it must still bind
     // the runs to the pre-registered prompt + inventory, so those two artifacts are required here.
     const gate = loadRunsGated({
       runDir: runsDir, runCount, preregPath: argOf(args, "--prereg", null),
-      expected: expectedFromArtifacts(inputs), promptBytes: inputs.promptBytes, inventoryBytes: inputs.inventoryBytes,
+      expected: expectedFromArtifacts({ ...inputs, arm: armSpec.arm }), promptBytes: inputs.promptBytes, inventoryBytes: inputs.inventoryBytes,
+      arm: armSpec.arm,
     });
     if (!gate.ok) { console.error(`${TOOL} verify: ${gate.reasons.join(", ")}`); return gate.code; }
     const experiment = resolveExperimentId({ flag: argOf(args, "--experiment", null), prereg: gate.prereg }) ?? STORE_EXPERIMENT;
@@ -1515,11 +1552,14 @@ async function cli(argv = process.argv.slice(2)) {
     if (!labelsPath) { console.error(`${TOOL} ${verb}: --labels is required`); return EXIT.usage; }
     const inputs = readRunInputs(args);
     if (!inputs.ok) { console.error(`${TOOL} ${verb}: ${inputs.reason}`); return EXIT.usage; }
+    const armSpec = armFromArgs(args);
+    if (!armSpec.ok) { console.error(`${TOOL} ${verb}: ${armSpec.reason}`); return EXIT.usage; }
     const extra = cliExtraShaRefusals(args, inputs);
     if (extra.length) { console.error(`${TOOL} ${verb}: ${extra.join(", ")}`); return EXIT.prereg; }
     const res = score({
       runDir, runCount: Number(argOf(args, "--run-count", 3)), labelsPath, preregPath,
-      expected: expectedFromArtifacts(inputs), promptBytes: inputs.promptBytes, inventoryBytes: inputs.inventoryBytes,
+      expected: expectedFromArtifacts({ ...inputs, arm: armSpec.arm }), promptBytes: inputs.promptBytes, inventoryBytes: inputs.inventoryBytes,
+      arm: armSpec.arm,
     });
     if (!res.ok) { console.error(`${TOOL} ${verb}: ${res.reasons.join(", ")}`); return res.code; }
     // The experiment id is read from the PREREG (`--experiment` overrides): a constant here is what made an
@@ -1608,9 +1648,11 @@ async function cli(argv = process.argv.slice(2)) {
   console.error("  inventory   --pin <rev> [--inventory-form neutral|provenance] [--max-exports N] [--max-carriers N] [--carrier-forms literal|literal+join] [--contamination-pairs <f>] [--out <f>] [--out-entries <f>]");
   console.error("              --inventory-form provenance adds `imports` / `imported_by` to every entry (opt-in; the");
   console.error("              neutral form is the DEFAULT and its bytes are frozen). A provenance run needs its OWN");
-  console.error("              prompt file + pre-registration; the frozen investigator prompt is never touched.");
+  console.error("              prompt file, hashed in its OWN pre-registration under the arm key (`--arm <id>`); the");
+  console.error("              frozen investigator prompt is never touched. ONE prereg covers every arm: with `--arm X`");
+  console.error("              the gate compares the supplied bytes against `prompt-investigator-X` / `inventory-X`.");
   console.error("  investigate --inventory <f> --neutral-dir <dir> [--investigator-prompt <f>] [--runs N] [--max-runs N] [--max-ms N] [--timeout-ms N] [--out-dir <dir>]");
-  console.error("  verify      --pin-dir <dir> --runs <dir> --inventory <f> [--provenance <f>] [--prereg <f>] [--investigator-prompt <f>] [--experiment <id>] [--max-clusters N] [--max-turns N] [--max-ms N]");
+  console.error("  verify      --pin-dir <dir> --runs <dir> --inventory <f> [--provenance <f>] [--prereg <f>] [--investigator-prompt <f>] [--arm <id>] [--experiment <id>] [--max-clusters N] [--max-turns N] [--max-ms N]");
   console.error("              --provenance <f> turns on the MECHANICAL pre-verification layer: a cluster whose members'");
   console.error("              edges converge on one component is recorded refuted/shared-implementation with NO model call.");
   console.error("              [--strategy default|evidence-pack] [--only-cluster N] [--evidence-source-root <dir>] [--evidence-max-lines N] [--evidence-hits <f>] [--prompt <f>]");
@@ -1620,8 +1662,11 @@ async function cli(argv = process.argv.slice(2)) {
   console.error("              --strategy evidence-pack is opt-in: it uses the SEPARATE prompt file");
   console.error("              verifier-evidence-pack.txt and runs the mechanically decided clusters first (run_order).");
   console.error("              ⛔ the pinned tree must carry NONE of: " + PIN_FORBIDDEN_DIRS.join(", ") + " (scope enforcement).");
-  console.error("  match       --runs <dir> --labels <f> --inventory <f> [--prereg <f>] [--investigator-prompt <f>] [--experiment <id>] [--run-count N] [--write-store]");
-  console.error("  review      --runs <dir> --labels <f> --matches <f> --neutral-dir <dir> --inventory <f> [--prereg <f>] [--experiment <id>]");
+  console.error("  match       --runs <dir> --labels <f> --inventory <f> [--prereg <f>] [--investigator-prompt <f>] [--arm <id>] [--experiment <id>] [--run-count N] [--write-store]");
+  console.error("  review      --runs <dir> --labels <f> --matches <f> --neutral-dir <dir> --inventory <f> [--prereg <f>] [--arm <id>] [--experiment <id>]");
+  console.error("  --arm <id> ([A-Za-z0-9]+) scopes the pre-registration gate to one arm of an A/B experiment: the");
+  console.error("  gate reads `prompt-investigator-<id>` / `inventory-<id>`, and a prereg lacking them refuses with");
+  console.error("  PREREG_HASH_ABSENT (⛔ never a fallback to the unscoped keys). Omitted ⇒ single-arm, unchanged.");
   console.error("  report      --artifacts <dir> [--labels <f>] [--out <md>]");
   console.error("  --experiment <id> overrides the id read from the prereg (fields: experiment | experiment_id | acceptance_run).");
   return EXIT.usage;
