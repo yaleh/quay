@@ -4,7 +4,7 @@ title: AC-264 台账恒假的收口：criterion 要求 quay-fleet 的 config.yml
   .claude/plugins/cache/ 的绑定行，而人 2026-10-06 裁定 native provider 必须【不】写
   path/mcp_entry（「绑定（决定行为，目标为零）」）⇒ 二者结构性互斥，且 2026-10-12 的一次正确 init
   已把上一轮修复的绑定逐行删除 ⇒ 合法终态只能是 superseded + 枚举存续保证的活体承接者
-status: ready
+status: done
 labels:
   - gap
   - defect
