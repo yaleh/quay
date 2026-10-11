@@ -81,12 +81,37 @@
 // ⛔ No regression case is named in this file or in any prompt: the acceptance cluster is identified by
 // POSITION (`--only-cluster`), and the strategy is validated against `VERIFIER_STRATEGIES`.
 
+// ── THE FINGERPRINT SOURCE: CLUSTERS THAT COME FROM A MECHANISM, NOT FROM A MODEL ───────────────────
+// The `investigate` arm asks a model to NAME duplicated logic, so every one of its runs is bound to a
+// prompt and the whole pre-registration hangs off `prompt_sha256`. That makes a cluster which comes from a
+// MECHANICAL fingerprint impossible to score: no prompt produced it, so no recorded prompt digest can ever
+// equal the one the gate re-derives (gap-hypgen-has-no-fingerprint-source-for-code-duplication-recall).
+// The `fingerprint` verb closes that by producing the SAME hypothesis-shaped record from a mechanism:
+//   • arm `exact` runs ArchGuard's OWN duplicate grouping — the package's exported `detectDuplicates`, the
+//     same function the `archguard_detect_duplicates` MCP tool calls. ⛔ The hashing is NEVER re-implemented
+//     here; this module adapts the group SHAPE and carries ArchGuard's `hash` through verbatim.
+//   • arm `callshape` is a SECOND, coarser instrument: the ordered callee names + control-flow node kinds of
+//     each function body, with local identifiers normalized to a positional marker and literals to their
+//     kind. It is computed with the `typescript` the ArchGuard PACKAGE ships (resolved FROM
+//     `--archguard-root`): the repo's own compiler has no JS AST API, so resolving the wrong one is a
+//     `not-evaluated`, never a silent zero-group run (硬规则 3b).
+// The output is a RUN FILE like any other, distinguished by the artifact itself: it declares
+// `fingerprint_source` and records a `source_digest` (sha256 over the verb inputs + the raw grouping
+// output) IN PLACE OF `prompt_sha256`. `verify` / `match` / `review` therefore need no new verb and no new
+// verifier: they read the run's KIND off the run file (硬规则 2 — never off a CLI flag) and bind it to
+// `hashes["fingerprint-<arm>"]` in the prereg. ⛔ A missing key is its OWN refusal — the fingerprint gate
+// never falls back to the prompt keys, and the prompt gate never falls back to the fingerprint key.
+// ⛔ NOT-EVALUATED IS ITS OWN EXIT CODE (11): an unresolvable ArchGuard root, or a compiler the package
+// does not ship, writes NO run file at all. "The instrument could not run" must never be shaped like
+// "the instrument ran and found nothing" (硬规则 3b) — that is the whole defect this arm could reintroduce.
+
 // ── FAIL-CLOSED BOUNDS, ONE EXIT CODE EACH ──────────────────────────────────────────────────────────
 //   2 usage/env   3 investigator refused: cwd is not the empty neutral dir
 //   4 prereg (every pre-registration refusal: an absent/mismatched hash, a run whose recorded prompt
 //     digest does not match the supplied artifacts, a prereg not older than the runs — the REASON string
 //     is what distinguishes them)   5 contamination   6 max-runs   7 max-clusters   8 max-ms
-//   9 labels-before-runs  10 runs-incomplete. A breach writes NOTHING (never a partial carrier).
+//   9 labels-before-runs  10 runs-incomplete  11 fingerprint not-evaluated (the instrument could not be
+//     loaded — its OWN code, never a zero-group run). A breach writes NOTHING (never a partial carrier).
 //
 // ⛔ STRUCTURAL SANDBOX: creates no task, goal or AC; changes no status; edits no code. Its only
 // persistence is the caller's `--out` carrier (default under `.quay/arch-hypothesis-generation/`, which is
@@ -97,6 +122,7 @@
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
+import { createRequire } from "node:module";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { execFileSync } from "node:child_process";
 import { sha256, appendRecord } from "./architecture-evidence-store.mjs";
@@ -120,6 +146,7 @@ export const STORE_EXPERIMENT = "E-HYPGEN-1";
 export const EXIT = Object.freeze({
   usage: 2, cwdNotNeutral: 3, prereg: 4, contamination: 5,
   maxRuns: 6, maxClusters: 7, maxMs: 8, labelsBeforeRuns: 9, runsIncomplete: 10,
+  fingerprintNotEvaluated: 11,
 });
 
 /** The verifier verdict vocabulary. `undetermined` is an INDEPENDENT value, never folded into `refuted`
@@ -1128,6 +1155,400 @@ export function scoreCases({ labels, matches }) {
   };
 }
 
+// ── the fingerprint source: a mechanical cluster, under the SAME pre-registration ────────────────────
+/** The two fingerprint ARMS, in the pre-registered vocabulary. `exact` = ArchGuard's own AST-normalized
+ *  body grouping; `callshape` = this module's coarser callee-name + control-flow signature. They are two
+ *  INSTRUMENTS, so each gets its own prereg key — a run of one arm can never be judged by the other's. */
+export const FINGERPRINT_ARMS = Object.freeze(["exact", "callshape"]);
+/** The prereg key a fingerprint arm's digest is recorded under. ⛔ Deliberately NOT an arm-SCOPED
+ *  `prompt-investigator-<arm>` key: those name the model arm, and a fingerprint run has no prompt. */
+export const fingerprintKey = (arm) => `fingerprint-${arm}`;
+/** Default thresholds. They are ONE convention shared by both arms (and by the MCP tool's own defaults
+ *  for `minStatements`), so a count read off one arm is comparable with a count read off the other. */
+export const DEFAULT_MIN_STATEMENTS = 2;
+export const DEFAULT_MIN_TOKENS = 20;
+/** The ArchGuard module that OWNS the duplicate grouping. Its `detectDuplicates` is what the `exact` arm
+ *  runs — the hashing is never re-implemented here (硬规则 1: use the instrument). */
+export const ARCHGUARD_DUP_MODULE = path.join("dist", "analysis", "duplicates", "group.js");
+/** Where the ArchGuard package is looked for when the caller names no root: the plugin npm-cache the MCP
+ *  server itself is loaded from. A host that carries the plugin elsewhere sets `ARCHGUARD_ROOT`. */
+export const defaultArchguardRoot = (home = os.homedir()) =>
+  path.join(home, ".claude", "plugins", "npm-cache", "node_modules", "@yalehwang", "archguard");
+/** The concept kind every fingerprint cluster carries. The mechanism reads STRUCTURE, never purpose, so a
+ *  fingerprint collision is an `identity` claim and nothing stronger. */
+export const FINGERPRINT_CONCEPT_KIND = "identity";
+
+/** The value `fingerprint` returns when the instrument could not run. ⛔ A distinct SHAPE from a result
+ *  with zero groups: the caller must print it and exit 11, and write no carrier at all (硬规则 3b). */
+export const notEvaluated = (reason) => ({ ok: false, not_evaluated: true, code: EXIT.fingerprintNotEvaluated, reason: String(reason) });
+
+/**
+ * Resolve the ArchGuard package root. ⛔ An EXPLICIT `--archguard-root` is AUTHORITATIVE: when the caller
+ * names one, an invalid one is `""` (⇒ not-evaluated) and NEVER a silent fall back to the default — a
+ * fallback would let a typo measure a different build than the one the caller believed it was reading,
+ * and the two builds' counts are not comparable (硬规则 4b: the instrument must be the one named).
+ * Only when NO root was named do the env var and the plugin npm-cache default apply, in that order.
+ * A candidate counts as a root only when it really carries the duplicates module.
+ */
+export function resolveArchguardRoot(explicit = null, { env = process.env, existsSync = fs.existsSync, realpathSync = fs.realpathSync, home = os.homedir() } = {}) {
+  const candidates = explicit
+    ? [explicit]
+    : [env?.ARCHGUARD_ROOT, defaultArchguardRoot(home)];
+  for (const c of candidates) {
+    if (!c) continue;
+    try {
+      const abs = realpathSync(c);
+      if (existsSync(path.join(abs, ARCHGUARD_DUP_MODULE))) return abs;
+    } catch { /* try next */ }
+  }
+  return "";
+}
+
+/** Load ArchGuard's OWN duplicate instrument from a resolved root. The version is read for the report and
+ *  for the digest; a package whose version cannot be read reports `null` rather than inventing one. */
+export async function loadArchguardInstrument(archguardRoot, { importModule = (u) => import(u) } = {}) {
+  try {
+    const mod = await importModule(pathToFileURL(path.join(archguardRoot, ARCHGUARD_DUP_MODULE)).href);
+    if (typeof mod?.detectDuplicates !== "function") return { ok: false, reason: "ARCHGUARD_API_MISSING:detectDuplicates" };
+    if (typeof mod?.collectSourceFiles !== "function") return { ok: false, reason: "ARCHGUARD_API_MISSING:collectSourceFiles" };
+    let version = null;
+    try { version = JSON.parse(fs.readFileSync(path.join(archguardRoot, "package.json"), "utf8"))?.version ?? null; } catch { /* version stays null, never invented */ }
+    return { ok: true, detectDuplicates: mod.detectDuplicates, collectSourceFiles: mod.collectSourceFiles, version };
+  } catch (err) {
+    return { ok: false, reason: `ARCHGUARD_IMPORT_FAILED:${err?.code ? `${err.code}:` : ""}${String(err?.message ?? err).split("\n")[0].slice(0, 200)}` };
+  }
+}
+
+/**
+ * Resolve the `typescript` the ArchGuard PACKAGE ships, FROM the package root (`createRequire` rooted at
+ * its `package.json`, so Node walks the package's own resolution chain). ⛔ This is the whole point of the
+ * `callshape` arm's dependency: the repo's own `typescript` has no JS AST API, so resolving the repo's
+ * copy would silently produce a different instrument. Unresolvable ⇒ not-evaluated, never zero groups.
+ */
+export async function resolveArchguardTypescript(archguardRoot, { createRequire: makeRequire = createRequire, importModule = (p) => import(p) } = {}) {
+  let resolved;
+  try { resolved = makeRequire(path.join(archguardRoot, "package.json")).resolve("typescript"); }
+  catch (err) { return { ok: false, reason: `TS_RESOLVE_FAILED:${err?.code ? `${err.code}:` : ""}${String(err?.message ?? err).split("\n")[0].slice(0, 160)}` }; }
+  try {
+    const mod = await importModule(resolved);
+    const ts = mod?.default ?? mod;
+    if (typeof ts?.createSourceFile !== "function") return { ok: false, reason: `TS_NO_AST_API:${resolved}` };
+    return { ok: true, ts, path: resolved, version: ts.version ?? null };
+  } catch (err) {
+    return { ok: false, reason: `TS_IMPORT_FAILED:${err?.code ? `${err.code}:` : ""}${String(err?.message ?? err).split("\n")[0].slice(0, 160)}` };
+  }
+}
+
+/** The function-likes a call-structure fingerprint is taken over — the same set ArchGuard's own
+ *  fingerprint walks, so a component the `exact` arm sees is never invisible to `callshape`. */
+const isFunctionLikeNode = (ts, node) =>
+  ts.isFunctionDeclaration(node) || ts.isArrowFunction(node) || ts.isFunctionExpression(node) ||
+  ts.isMethodDeclaration(node) || ts.isConstructorDeclaration(node) ||
+  ts.isGetAccessorDeclaration(node) || ts.isSetAccessorDeclaration(node);
+
+/** The names bound INSIDE `fn` (parameters, variable declarations, nested function names). A reference to
+ *  one of these is normalized to a positional marker, so two bodies that differ only in what they CALL
+ *  their locals carry the same signature — the same normalization ArchGuard's own fingerprint applies. */
+function callshapeLocals(ts, fn) {
+  const names = new Set();
+  const addBinding = (name) => {
+    if (!name) return;
+    if (ts.isIdentifier(name)) { names.add(name.text); return; }
+    for (const el of name.elements ?? []) if (ts.isBindingElement(el)) addBinding(el.name);
+  };
+  const visit = (node) => {
+    if (ts.isParameter(node) || ts.isVariableDeclaration(node)) addBinding(node.name);
+    else if ((ts.isFunctionDeclaration(node) || ts.isFunctionExpression(node)) && node.name && node !== fn) names.add(node.name.text);
+    ts.forEachChild(node, visit);
+  };
+  visit(fn);
+  return names;
+}
+
+/** Control-flow and declaration node kinds, by their `ts.SyntaxKind` NAME (so the map is built from the
+ *  resolved `ts` and cannot drift from the compiler actually in use). Everything else contributes no
+ *  token — this arm reads STRUCTURE, not the full AST the `exact` arm already hashes. */
+const CALLSHAPE_CONTROL = Object.freeze([
+  ["IfStatement", "if"], ["ForStatement", "for"], ["ForInStatement", "for-in"], ["ForOfStatement", "for-of"],
+  ["WhileStatement", "while"], ["DoStatement", "do"], ["SwitchStatement", "switch"], ["CaseClause", "case"],
+  ["DefaultClause", "default"], ["TryStatement", "try"], ["CatchClause", "catch"], ["ReturnStatement", "return"],
+  ["ThrowStatement", "throw"], ["BreakStatement", "break"], ["ContinueStatement", "continue"],
+  ["AwaitExpression", "await"], ["YieldExpression", "yield"], ["ConditionalExpression", "cond"],
+  ["SpreadElement", "spread"], ["DeleteExpression", "delete"], ["TypeOfExpression", "typeof"],
+]);
+/** Literal kinds — every literal of a kind collapses to ONE token, which is what makes two bodies that
+ *  differ only in their literals carry the same signature. */
+const CALLSHAPE_LITERALS = Object.freeze([
+  "StringLiteral", "NumericLiteral", "BigIntLiteral", "RegularExpressionLiteral",
+  "NoSubstitutionTemplateLiteral", "TrueKeyword", "FalseKeyword", "NullKeyword",
+  "TemplateHead", "TemplateMiddle", "TemplateTail",
+]);
+const CALLSHAPE_STATEMENTS = Object.freeze([
+  "VariableStatement", "ExpressionStatement", "IfStatement", "DoStatement", "WhileStatement", "ForStatement",
+  "ForInStatement", "ForOfStatement", "ContinueStatement", "BreakStatement", "ReturnStatement",
+  "WithStatement", "SwitchStatement", "LabeledStatement", "ThrowStatement", "TryStatement",
+  "DebuggerStatement", "FunctionDeclaration", "ClassDeclaration",
+]);
+
+/** The ordered fingerprint tokens of ONE function body: each CALL by the name it calls (a local callee ⇒
+ *  `call:local`), each control-flow node by its kind, each local reference ⇒ `local`, each non-local ⇒
+ *  `id:<name>`, each literal ⇒ `lit`. PURE (the compiler is passed in), deterministic, and independent of
+ *  formatting: it never reads a token's text position, only the tree. */
+export function callshapeTokens(ts, fn) {
+  const locals = callshapeLocals(ts, fn);
+  const control = new Map(CALLSHAPE_CONTROL.map(([k, label]) => [ts.SyntaxKind[k], label]).filter(([k]) => k !== undefined));
+  const literals = new Set(CALLSHAPE_LITERALS.map((k) => ts.SyntaxKind[k]).filter((k) => k !== undefined));
+  const statements = new Set(CALLSHAPE_STATEMENTS.map((k) => ts.SyntaxKind[k]).filter((k) => k !== undefined));
+  const tokens = [];
+  let statementCount = 0;
+  const callee = (expr) => {
+    if (!expr) return "?";
+    if (ts.isIdentifier(expr)) return locals.has(expr.text) ? "local" : expr.text;
+    if (ts.isPropertyAccessExpression(expr) || ts.isPropertyAccessChain?.(expr)) return expr.name?.text ?? "?";
+    if (ts.isElementAccessExpression(expr) || ts.isElementAccessChain?.(expr)) return "[]";
+    if (ts.isParenthesizedExpression(expr)) return callee(expr.expression);
+    if (ts.isCallExpression(expr)) return "call";
+    return "?";
+  };
+  const emit = (node) => {
+    if (!node) return;
+    if (ts.isTypeNode?.(node)) return;                                   // type annotations say nothing about behaviour
+    if (statements.has(node.kind)) statementCount++;
+    if (ts.isCallExpression(node)) {
+      tokens.push(`call:${callee(node.expression)}`);
+      for (const a of node.arguments ?? []) emit(a);
+      return;
+    }
+    if (ts.isNewExpression(node)) {
+      tokens.push(`new:${callee(node.expression)}`);
+      for (const a of node.arguments ?? []) emit(a);
+      return;
+    }
+    if (ts.isTaggedTemplateExpression(node)) {
+      tokens.push(`tag:${callee(node.tag)}`);
+      return;
+    }
+    if (ts.isVariableDeclarationList(node)) {
+      // The declaration KIND is a token, but its initializers are the body's real content — so this branch
+      // tags and then falls through to the child walk below (it never returns early).
+      tokens.push(node.flags & ts.NodeFlags.Const ? "decl:const" : node.flags & ts.NodeFlags.Let ? "decl:let" : "decl:var");
+    } else if (literals.has(node.kind)) { tokens.push("lit"); return; }
+    else if (ts.isIdentifier(node)) { tokens.push(locals.has(node.text) ? "local" : `id:${node.text}`); return; }
+    else { const label = control.get(node.kind); if (label) tokens.push(label); }
+    ts.forEachChild(node, emit);
+  };
+  if (fn.body) emit(fn.body);
+  return { tokens, statementCount };
+}
+
+/** One uniform GROUP record, whichever arm produced it. `hash` is the arm's OWN digest carried through
+ *  verbatim (ArchGuard's token hash for `exact`); the rest is a deterministic shape the records and the
+ *  `source_digest` are built from. */
+const normalizeGroup = (g) => ({
+  hash: g.hash,
+  tokenCount: g.tokenCount ?? null,
+  statementCount: g.statementCount ?? null,
+  lineCount: g.lineCount ?? null,
+  members: [...g.members].map((m) => ({ file: m.file, startLine: m.startLine, endLine: m.endLine, name: m.name }))
+    .sort((a, b) => (a.file < b.file ? -1 : a.file > b.file ? 1 : 0) || a.startLine - b.startLine),
+});
+
+/** The `exact` arm: ArchGuard's own grouping, adapted — never re-derived. `topN` is deliberately left
+ *  undefined so the reading is the arm's FULL group count, comparable with the MCP tool's `totalGroups`. */
+async function exactGroups({ root, sources, minStatements, minTokens, instrument }) {
+  const analysis = await instrument.detectDuplicates(root, sources, { minStatements, minTokens, includeTests: false });
+  return {
+    groups: (analysis.groups ?? []).map(normalizeGroup).sort((a, b) => (a.hash < b.hash ? -1 : a.hash > b.hash ? 1 : 0)),
+    scannedFiles: analysis.manifest?.scannedFiles ?? null,
+    scannedFunctions: analysis.manifest?.scannedFunctions ?? null,
+  };
+}
+
+/** The `callshape` arm: fingerprint every function in scope with the PACKAGE's compiler, then group equal
+ *  signatures across ≥2 DISTINCT FILES (a signature repeated inside one file is not a cross-component
+ *  finding, and the inventory this stage reasons over is component-level).
+ *  ⛔ The two thresholds are applied to THIS arm's own counts. Its token stream is deliberately sparser
+ *  than the `exact` arm's (a token per call and per control-flow node, not per AST node + closing marker),
+ *  so one `--min-tokens` value is not the same cut on both arms — both counts are reported either way. */
+function callshapeGroups({ root, sources, ts, collectSourceFiles, minStatements, minTokens }) {
+  const files = collectSourceFiles(root, sources, false);
+  const byHash = new Map();
+  let scannedFunctions = 0;
+  for (const abs of files) {
+    const rel = path.relative(root, abs).split(path.sep).join("/");
+    let text;
+    try { text = fs.readFileSync(abs, "utf8"); } catch { continue; }
+    let sf;
+    try { sf = ts.createSourceFile(rel, text, ts.ScriptTarget.Latest, true); } catch { continue; }
+    const visit = (node) => {
+      if (isFunctionLikeNode(ts, node) && node.body) {
+        scannedFunctions++;
+        const { tokens, statementCount } = callshapeTokens(ts, node);
+        if (statementCount >= minStatements && tokens.length >= minTokens) {
+          const hash = sha256(tokens.join(" "));
+          const startLine = sf.getLineAndCharacterOfPosition(node.getStart(sf)).line + 1;
+          const endLine = sf.getLineAndCharacterOfPosition(node.getEnd()).line + 1;
+          const name = node.name?.getText?.(sf) ?? (ts.isConstructorDeclaration(node) ? "constructor" : "<anonymous>");
+          const bucket = byHash.get(hash);
+          const entry = { file: rel, startLine, endLine, name, tokenCount: tokens.length, statementCount };
+          if (bucket) bucket.push(entry); else byHash.set(hash, [entry]);
+        }
+      }
+      ts.forEachChild(node, visit);
+    };
+    visit(sf);
+  }
+  const groups = [];
+  for (const [hash, entries] of byHash) {
+    if (new Set(entries.map((m) => m.file)).size < 2) continue;
+    const sorted = [...entries].sort((a, b) => (a.file < b.file ? -1 : a.file > b.file ? 1 : 0) || a.startLine - b.startLine);
+    const lineCount = Math.max(...sorted.map((m) => m.endLine - m.startLine + 1));
+    // The token count is shared by construction (the hash IS over the tokens); the statement count is not
+    // hashed, so the group reports the LARGEST one rather than pretending they are all equal.
+    groups.push({
+      hash,
+      tokenCount: sorted[0].tokenCount,
+      statementCount: Math.max(...sorted.map((m) => m.statementCount)),
+      lineCount,
+      members: sorted.map((m) => ({ file: m.file, startLine: m.startLine, endLine: m.endLine, name: m.name })),
+    });
+  }
+  groups.sort((a, b) => (a.hash < b.hash ? -1 : a.hash > b.hash ? 1 : 0));
+  return { groups, scannedFiles: files.length, scannedFunctions };
+}
+
+/**
+ * Run ONE fingerprint arm over a pinned tree. ⛔ EVERY failure to load an instrument returns
+ * `not-evaluated` — its own shape, with no `groups` key at all, so a caller cannot read "the instrument
+ * was missing" as "the instrument found zero groups" (硬规则 3b).
+ * @param {object} o
+ * @param {"exact"|"callshape"} o.arm
+ * @param {string} o.archguardRoot a root ALREADY resolved by `resolveArchguardRoot` ("" ⇒ not-evaluated)
+ * @param {string[]} o.sources directories relative to `pinDir`, the same enumeration the MCP tool takes
+ * @param {(u:string)=>Promise<any>} [o.importModule] INJECTABLE loader seam (tests)
+ */
+export async function fingerprintGroups({ pinDir, arm, archguardRoot, minStatements = DEFAULT_MIN_STATEMENTS, minTokens = DEFAULT_MIN_TOKENS, sources = [INVENTORY_SCOPE], importModule } = {}) {
+  if (!FINGERPRINT_ARMS.includes(arm)) return notEvaluated(`FINGERPRINT_ARM_NOT_IN_VOCAB:${arm}`);
+  if (!pinDir) return notEvaluated("PIN_DIR_REQUIRED");
+  if (!archguardRoot) return notEvaluated("ARCHGUARD_ROOT_UNRESOLVED");
+  const instrument = await loadArchguardInstrument(archguardRoot, importModule ? { importModule } : {});
+  if (!instrument.ok) return notEvaluated(instrument.reason);
+  const srcs = [...sources];
+  // The `callshape` arm's dependency is resolved BEFORE the walk and reported on its own: a compiler the
+  // package does not ship is a not-evaluated with the resolve/import cause, never "no collisions found".
+  let out;
+  if (arm === "callshape") {
+    const tsr = await resolveArchguardTypescript(archguardRoot, importModule ? { importModule } : {});
+    if (!tsr.ok) return notEvaluated(tsr.reason);
+    try {
+      out = { ...callshapeGroups({ root: pinDir, sources: srcs, ts: tsr.ts, collectSourceFiles: instrument.collectSourceFiles, minStatements, minTokens }), ts_version: tsr.version };
+    } catch (err) {
+      return notEvaluated(`FINGERPRINT_RUN_FAILED:${String(err?.message ?? err).split("\n")[0].slice(0, 200)}`);
+    }
+  } else {
+    try { out = await exactGroups({ root: pinDir, sources: srcs, minStatements, minTokens, instrument }); }
+    catch (err) { return notEvaluated(`FINGERPRINT_RUN_FAILED:${String(err?.message ?? err).split("\n")[0].slice(0, 200)}`); }
+  }
+  return { ok: true, arm, groups: out.groups, scanned_files: out.scannedFiles, scanned_functions: out.scannedFunctions, archguard_version: instrument.version, ts_version: out.ts_version ?? null };
+}
+
+/** The verb's INPUTS as a canonical, order-fixed object. They are hashed into `source_digest`, so a re-run
+ *  at different thresholds, a different source list, a different pin, or a different ArchGuard build is a
+ *  DIFFERENT pre-registered arm — never a silent substitution. */
+export const fingerprintInputs = ({ pinDir, archguardRoot, arm, minStatements, minTokens, sources, archguardVersion = null }) => ({
+  pin_dir: pinDir, archguard_root: archguardRoot, archguard_version: archguardVersion, arm,
+  min_statements: minStatements, min_tokens: minTokens, sources: [...sources].sort(),
+});
+
+/** The digest a fingerprint RUN records, in place of `prompt_sha256`: sha256 over the canonical inputs
+ *  and the raw grouping output. Deterministic (the grouping is deterministic), so a reproduction of the
+ *  same pin + thresholds + build re-derives it byte for byte — which is what the prereg key binds. */
+export const fingerprintDigest = ({ inputs, groups }) => sha256(`${JSON.stringify(inputs)}${JSON.stringify(groups)}`);
+
+/** The TEMPLATED, neutral claim for one fingerprint group. It names the members and their line ranges and
+ *  says only what the mechanism measured: a shared fingerprint is shared STRUCTURE, and a fingerprint
+ *  cannot tell a true duplicate from two independent implementations that happen to normalize alike. */
+export function fingerprintClaim({ arm, members }) {
+  const label = arm === "exact" ? "AST-normalized body fingerprint" : "call-structure fingerprint";
+  const named = members.map((m) => `${m.file}:${m.startLine}-${m.endLine} (${m.name})`).join(", ");
+  return `${members.length} functions carry one ${label}: ${named}. A shared fingerprint is shared structure; it is not by itself evidence of a shared contract.`;
+}
+
+/** The hypothesis-shaped records one fingerprint group set produces — the SAME shape the investigator
+ *  emits, so clustering, the verifier and the matcher all consume it with no new code path. */
+export function fingerprintRecords({ groups, arm }) {
+  return groups.map((g, i) => ({
+    id: `FP${i + 1}`,
+    components: [...new Set(g.members.map((m) => m.file))].sort(),
+    concept_kind: FINGERPRINT_CONCEPT_KIND,
+    claim: fingerprintClaim({ arm, members: g.members }),
+    why_suspected: `mechanical ${arm} fingerprint collision (${g.hash}); ${g.members.length} bodies over ${new Set(g.members.map((m) => m.file)).size} files`,
+    evidence_needed: g.members.map((m) => `${m.file}:${m.startLine}-${m.endLine}`),
+    counterexample_requirement: "name one member whose contract, ownership or failure policy differs from the others'",
+    confidence: "medium",
+  }));
+}
+
+/** The run FILE a fingerprint pass writes. It carries `fingerprint_source` (the marker `runKind` reads)
+ *  and `source_digest` in place of `prompt_sha256` — ⛔ a run file never carries both. */
+export function fingerprintRunRecord({ arm, digest, inputs, groups, hyps, scanned = {} }) {
+  return {
+    run: 1,
+    fingerprint_source: arm,
+    source_digest: digest,
+    inputs,
+    scanned_files: scanned.files ?? null,
+    scanned_functions: scanned.functions ?? null,
+    groups: groups.length,
+    n_hyps: hyps.length,
+    hyps,
+    groups_raw: groups,
+  };
+}
+
+/** The KIND of a run file, read from the artifact (硬规则 2 — never from a CLI flag). A run that declares
+ *  `fingerprint_source` is a fingerprint run; one that records `prompt_sha256` is an investigator run. A
+ *  run that carries BOTH is `ambiguous` — its OWN value, refused rather than resolved by precedence
+ *  (硬规则 3b: a tie must not be silently broken in favour of a passing gate). */
+export function runKind(run) {
+  const fp = run?.fingerprint_source != null;
+  const prompt = run?.prompt_sha256 != null;
+  if (fp && prompt) return "ambiguous";
+  return fp ? "fingerprint" : "prompt";
+}
+
+/** Which fingerprint arm the run set at `runDir` came from, read from `run-1.json` itself. `null` = not a
+ *  fingerprint run (or no run yet — the loader's own `RUNS_MISSING` covers that case). */
+export function fingerprintArmAt({ runDir, fs: fsImpl = nodeFs } = {}) {
+  const read = readJsonWith(fsImpl, path.join(runDir, "run-1.json"));
+  if (!read.ok) return null;
+  return read.value?.fingerprint_source != null ? String(read.value.fingerprint_source) : null;
+}
+
+/**
+ * The run⇄prereg binding for a FINGERPRINT run. The prereg must carry `hashes["fingerprint-<arm>"]` equal
+ * to the digest every run RECORDED, and `--arm` must name that arm.
+ * ⛔ Three independent refusals, never a fallback: no `--arm` (`FINGERPRINT_ARM_REQUIRED`), an arm the
+ * prereg does not declare (`PREREG_HASH_ABSENT`), a run whose own arm or digest disagrees.
+ * ⛔ This is the ONE place a fingerprint run is judged; the prompt gate is never consulted for it.
+ * @returns {null|{code:number, reasons:string[]}}
+ */
+export function fingerprintPreregRefusal({ prereg, runs, arm = null } = {}) {
+  if (arm == null) return { code: EXIT.prereg, reasons: ["FINGERPRINT_ARM_REQUIRED"] };
+  if (!FINGERPRINT_ARMS.includes(arm)) return { code: EXIT.prereg, reasons: [`FINGERPRINT_ARM_NOT_IN_VOCAB:${arm}`] };
+  const key = fingerprintKey(arm);
+  const declared = prereg?.hashes?.[key];
+  if (declared === undefined) return { code: EXIT.prereg, reasons: [`PREREG_HASH_ABSENT:${key}`] };
+  const reasons = [];
+  for (const r of runs ?? []) {
+    const id = r?.run ?? "?";
+    if (r?.fingerprint_source !== arm) { reasons.push(`RUN_FINGERPRINT_ARM_MISMATCH:${id}:${r?.fingerprint_source}!=${arm}`); continue; }
+    if (r?.source_digest == null) { reasons.push(`RUN_SOURCE_DIGEST_ABSENT:${id}`); continue; }
+    if (r.source_digest !== declared) reasons.push(`PREREG_HASH_MISMATCH:${key}:${id}`);
+  }
+  return reasons.length ? { code: EXIT.prereg, reasons } : null;
+}
+
 // ── scoring with the labels-read-order guarantee (fs seam is injectable) ─────────────────────────────
 const nodeFs = { readFileSync: fs.readFileSync, existsSync: fs.existsSync, statSync: fs.statSync, writeFileSync: fs.writeFileSync };
 
@@ -1139,9 +1560,21 @@ const statMsWith = (fsImpl, p) => { try { return fsImpl.statSync(p).mtimeMs; } c
 /**
  * The gated loader that reads the RUN files and nothing else. Refuses unless (1) EVERY declared run file
  * exists and (2) the pre-registration gate passes. `verify` uses this — it needs the runs, not the labels.
+ *
+ * The runs are read BEFORE the hash gate because their KIND decides WHICH gate binds them, and the kind is
+ * a property of the artifact (`runKind`), never of a CLI flag — so a caller cannot make a fingerprint run
+ * be judged by the prompt gate (or the reverse) by passing or omitting a switch.
+ *   • kind `fingerprint` ⇒ `hashes["fingerprint-<arm>"]` ⇄ the run's `source_digest`, via
+ *     `fingerprintPreregRefusal`; the prompt/inventory bytes are not required and the model binding does
+ *     not apply (a mechanical run makes no model call).
+ *   • kind `prompt` ⇒ every byte of today's behaviour: `prompt-investigator` / `inventory` hashes, the
+ *     run⇄prompt digest, then the model map.
+ * ⛔ Neither gate falls back to the other's keys; a run set of MIXED kinds, or a run carrying both markers,
+ * is its own refusal rather than being resolved by precedence.
  * @param {object} o.fs INJECTABLE — tests wrap it to record the file-read ORDER
- * @param {?string} o.arm `--arm` id; when given, `expected` already carries the arm-scoped keys and the
- *   run⇄prereg binding reads the arm-scoped prompt key (never the unscoped one).
+ * @param {?string} o.arm `--arm` id; for a prompt run `expected` already carries the arm-scoped keys and
+ *   the run⇄prereg binding reads the arm-scoped prompt key (never the unscoped one). For a fingerprint run
+ *   the arm NAMES the instrument (`exact` / `callshape`) and keys the prereg hash.
  */
 export function loadRunsGated({ runDir, runCount, preregPath, expected = {}, promptBytes = null, inventoryBytes = null, arm = null, fs: fsImpl = nodeFs }) {
   const runFiles = Array.from({ length: runCount }, (_, i) => path.join(runDir, `run-${i + 1}.json`));
@@ -1151,10 +1584,35 @@ export function loadRunsGated({ runDir, runCount, preregPath, expected = {}, pro
 
   const preregRead = readJsonWith(fsImpl, preregPath);
   const prereg = preregRead.ok ? preregRead.value : null;
-  const gate = preregRefusal({ prereg, expected, preregMtimeMs: statMsWith(fsImpl, preregPath), runMtimesMs: runMtimes });
+  const preregMtimeMs = statMsWith(fsImpl, preregPath);
+
+  const runs = [];
+  for (const f of runFiles) {
+    const read = readJsonWith(fsImpl, f);
+    if (!read.ok) return { ok: false, code: EXIT.usage, reasons: [`RUN_UNREADABLE:${path.basename(f)}`] };
+    runs.push(read.value);
+  }
+  const kinds = [...new Set(runs.map(runKind))].sort();
+  if (kinds.length > 1) return { ok: false, code: EXIT.prereg, reasons: [`MIXED_RUN_KINDS:${kinds.join(",")}`] };
+  const kind = kinds[0];
+  if (kind === "ambiguous") return { ok: false, code: EXIT.prereg, reasons: ["RUN_KIND_AMBIGUOUS:carries-both-fingerprint_source-and-prompt_sha256"] };
+
+  // The hash gate's EXPECTED map is kind-specific. A fingerprint run's digest is read off the run itself
+  // (the prereg must have declared the same value BEFORE the run existed — the mtime rule below is what
+  // makes that a pre-registration rather than a transcription); an unnamed `--arm` leaves the map empty so
+  // the refusal comes from `fingerprintPreregRefusal` with its OWN reason.
+  const gateExpected = kind === "fingerprint"
+    ? (arm == null ? {} : { [fingerprintKey(arm)]: runs[0]?.source_digest })
+    : expected;
+  const gate = preregRefusal({ prereg, expected: gateExpected, preregMtimeMs, runMtimesMs: runMtimes });
   if (gate) return { ok: false, code: gate.code, reasons: gate.reasons };
 
-  const runs = runFiles.map((f) => JSON.parse(fsImpl.readFileSync(f, "utf8")));
+  if (kind === "fingerprint") {
+    const fg = fingerprintPreregRefusal({ prereg, runs, arm });
+    if (fg) return { ok: false, code: fg.code, reasons: fg.reasons };
+    return { ok: true, kind, runs, runFiles, prereg };
+  }
+
   // The declared hashes are checked against the prereg above; the RUNS are bound to the artifacts here.
   const runGate = runPromptRefusal({ runs, promptBytes, inventoryBytes, expectedPromptSha: expected[armScopedKey("prompt-investigator", arm)] ?? null });
   if (runGate) return { ok: false, code: runGate.code, reasons: runGate.reasons };
@@ -1162,7 +1620,7 @@ export function loadRunsGated({ runDir, runCount, preregPath, expected = {}, pro
   // match the arm's pre-registered one. A run that recorded no model is its own refusal under a declared map.
   const modelGate = modelPreregRefusal({ prereg, runs, arm });
   if (modelGate) return { ok: false, code: modelGate.code, reasons: modelGate.reasons };
-  return { ok: true, runs, runFiles, prereg };
+  return { ok: true, kind, runs, runFiles, prereg };
 }
 
 /**
@@ -1182,7 +1640,7 @@ export function score({ runDir, runCount, labelsPath, preregPath, expected = {},
   const actual = sha256(labelsRead.text);
   if (declared !== actual) return { ok: false, code: EXIT.prereg, reasons: [`PREREG_HASH_MISMATCH:labels`] };
   let labels; try { labels = JSON.parse(labelsRead.text); } catch (e) { return { ok: false, code: EXIT.usage, reasons: [`LABELS_UNREADABLE:${String(e?.message ?? e)}`] }; }
-  return { ok: true, labels, runs: loaded.runs, runFiles: loaded.runFiles, prereg: loaded.prereg, matches: mechanicalMatch({ runs: loaded.runs, labels }) };
+  return { ok: true, kind: loaded.kind, labels, runs: loaded.runs, runFiles: loaded.runFiles, prereg: loaded.prereg, matches: mechanicalMatch({ runs: loaded.runs, labels }) };
 }
 
 // ── record emission (production validator, then the caller's sink or the production store) ───────────
@@ -1597,22 +2055,89 @@ async function cli(argv = process.argv.slice(2)) {
     return res.ok ? 0 : res.code;
   }
 
+  if (verb === "fingerprint") {
+    const pinArg = argOf(args, "--pin-dir", null);
+    if (!pinArg) { console.error(`${TOOL} fingerprint: --pin-dir <stripped pinned tree> is required`); return EXIT.usage; }
+    const pinDir = path.resolve(pinArg);
+    if (!fs.existsSync(pinDir)) { console.error(`${TOOL} fingerprint: PIN_DIR_MISSING:${pinDir}`); return EXIT.usage; }
+    // ONE arm per invocation: each is a different instrument and gets its own prereg key, so an
+    // invocation that silently ran both would produce two run sets under one name (硬规则 3).
+    const arm = argOf(args, "--arm", null);
+    if (arm === null) { console.error(`${TOOL} fingerprint: --arm <${FINGERPRINT_ARMS.join("|")}> is required`); return EXIT.usage; }
+    if (!FINGERPRINT_ARMS.includes(arm)) { console.error(`${TOOL} fingerprint: --arm must be one of ${FINGERPRINT_ARMS.join("|")}, got ${arm}`); return EXIT.usage; }
+    const minStatements = Number(argOf(args, "--min-statements", DEFAULT_MIN_STATEMENTS));
+    const minTokens = Number(argOf(args, "--min-tokens", DEFAULT_MIN_TOKENS));
+    const sources = [];
+    for (let i = 0; i < args.length; i++) if (args[i] === "--source") sources.push(args[i + 1]);
+    const srcs = sources.length ? sources : [INVENTORY_SCOPE];
+    // ⛔ An explicit `--archguard-root` is authoritative: an unresolvable one is not-evaluated, NEVER a
+    // silent fall back to the plugin default (the two builds' counts are not comparable).
+    const archguardRoot = resolveArchguardRoot(argOf(args, "--archguard-root", null));
+    const res = await fingerprintGroups({ pinDir, arm, archguardRoot, minStatements, minTokens, sources: srcs });
+    if (!res.ok) {
+      // ⛔ NOT-EVALUATED writes NOTHING and exits on its OWN code: a zero-group carrier would be
+      // indistinguishable from "the instrument ran and found nothing" (硬规则 3b).
+      console.error(`${TOOL} fingerprint: NOT_EVALUATED:${res.reason}`);
+      return res.code;
+    }
+    const inputs = fingerprintInputs({ pinDir, archguardRoot, arm, minStatements, minTokens, sources: srcs, archguardVersion: res.archguard_version });
+    const digest = fingerprintDigest({ inputs, groups: res.groups });
+    const hyps = fingerprintRecords({ groups: res.groups, arm });
+    const report = {
+      tool: TOOL, verb, arm, pin_dir: pinDir, archguard_root: archguardRoot,
+      archguard_version: res.archguard_version, ts_version: res.ts_version,
+      min_statements: minStatements, min_tokens: minTokens, sources: srcs,
+      scanned_files: res.scanned_files, scanned_functions: res.scanned_functions,
+      groups: res.groups.length, hypotheses: hyps.length, source_digest: digest, inputs,
+    };
+    // `--prereg-out` writes (or updates) the pre-registration an ARM's digest goes into, and writes NO
+    // run: the run has to POSTDATE the prereg for the mtime rule to mean anything. Without it the caller
+    // reads `source_digest` off the report and re-runs, since the grouping is deterministic.
+    const preregOut = argOf(args, "--prereg-out", null);
+    if (preregOut) {
+      const p = path.resolve(preregOut);
+      let doc = { hashes: {} };
+      try { doc = JSON.parse(fs.readFileSync(p, "utf8")); } catch { /* a new prereg is created, never a silent overwrite of an unreadable one */ }
+      if (doc == null || typeof doc !== "object" || Array.isArray(doc)) doc = {};
+      doc.hashes = { ...(doc.hashes ?? {}), [fingerprintKey(arm)]: digest };
+      fs.mkdirSync(path.dirname(p), { recursive: true });
+      fs.writeFileSync(p, JSON.stringify(doc, null, 1), "utf8");
+      report.prereg_out = p;
+      report.run_written = null;
+    } else {
+      const runsDir = path.resolve(argOf(args, "--runs", path.join(outDir, `fingerprint-${arm}`)));
+      const runFile = path.join(runsDir, "run-1.json");
+      fs.mkdirSync(runsDir, { recursive: true });
+      fs.writeFileSync(runFile, JSON.stringify(fingerprintRunRecord({ arm, digest, inputs, groups: res.groups, hyps, scanned: { files: res.scanned_files, functions: res.scanned_functions } }), null, 1), "utf8");
+      report.run_written = runFile;
+    }
+    if (json) console.log(JSON.stringify(report, null, 1));
+    else console.log(`${TOOL} fingerprint arm=${arm} groups=${res.groups.length} hypotheses=${hyps.length} files=${res.scanned_files} functions=${res.scanned_functions} source_digest=${digest}${report.run_written ? ` run=${report.run_written}` : ""}${report.prereg_out ? ` prereg=${report.prereg_out}` : ""}`);
+    return 0;
+  }
+
   if (verb === "verify") {
     const pinDir = argOf(args, "--pin-dir", null);
     const runsDir = path.resolve(argOf(args, "--runs", outDir));
     if (!pinDir) { console.error(`${TOOL} verify: --pin-dir is required`); return EXIT.usage; }
-    const runCount = Number(argOf(args, "--run-count", 3));
-    const inputs = readRunInputs(args);
+    // The run KIND decides whether a prompt + inventory are needed at all; read it off the artifact.
+    const fpArm = fingerprintArmAt({ runDir: runsDir });
+    const runCount = Number(argOf(args, "--run-count", fpArm ? 1 : 3));
+    const inputs = fpArm ? { ok: true, promptBytes: null, inventoryBytes: null } : readRunInputs(args);
     if (!inputs.ok) { console.error(`${TOOL} verify: ${inputs.reason}`); return EXIT.usage; }
     const armSpec = armFromArgs(args);
     if (!armSpec.ok) { console.error(`${TOOL} verify: ${armSpec.reason}`); return EXIT.usage; }
-    const extra = cliExtraShaRefusals(args, inputs);
-    if (extra.length) { console.error(`${TOOL} verify: ${extra.join(", ")}`); return EXIT.prereg; }
+    if (!fpArm) {
+      const extra = cliExtraShaRefusals(args, inputs);
+      if (extra.length) { console.error(`${TOOL} verify: ${extra.join(", ")}`); return EXIT.prereg; }
+    }
     // verify needs the RUNS, not the labels (labels stay confined to match/review) — but it must still bind
-    // the runs to the pre-registered prompt + inventory, so those two artifacts are required here.
+    // the runs to their pre-registration: prompt + inventory for an investigator run, `fingerprint-<arm>`
+    // for a fingerprint one (the loader picks the gate from the run's own kind).
     const gate = loadRunsGated({
       runDir: runsDir, runCount, preregPath: argOf(args, "--prereg", null),
-      expected: expectedFromArtifacts({ ...inputs, arm: armSpec.arm }), promptBytes: inputs.promptBytes, inventoryBytes: inputs.inventoryBytes,
+      expected: fpArm ? {} : expectedFromArtifacts({ ...inputs, arm: armSpec.arm }),
+      promptBytes: inputs.promptBytes, inventoryBytes: inputs.inventoryBytes,
       arm: armSpec.arm,
     });
     if (!gate.ok) { console.error(`${TOOL} verify: ${gate.reasons.join(", ")}`); return gate.code; }
@@ -1687,15 +2212,21 @@ async function cli(argv = process.argv.slice(2)) {
     const labelsPath = argOf(args, "--labels", null);
     const preregPath = argOf(args, "--prereg", null);
     if (!labelsPath) { console.error(`${TOOL} ${verb}: --labels is required`); return EXIT.usage; }
-    const inputs = readRunInputs(args);
+    // A fingerprint run has no prompt and no inventory; its KIND (read off the run file) says so, so the
+    // artifacts are required only for an investigator run — never as a precondition the mechanism lacks.
+    const fpArm = fingerprintArmAt({ runDir });
+    const inputs = fpArm ? { ok: true, promptBytes: null, inventoryBytes: null } : readRunInputs(args);
     if (!inputs.ok) { console.error(`${TOOL} ${verb}: ${inputs.reason}`); return EXIT.usage; }
     const armSpec = armFromArgs(args);
     if (!armSpec.ok) { console.error(`${TOOL} ${verb}: ${armSpec.reason}`); return EXIT.usage; }
-    const extra = cliExtraShaRefusals(args, inputs);
-    if (extra.length) { console.error(`${TOOL} ${verb}: ${extra.join(", ")}`); return EXIT.prereg; }
+    if (!fpArm) {
+      const extra = cliExtraShaRefusals(args, inputs);
+      if (extra.length) { console.error(`${TOOL} ${verb}: ${extra.join(", ")}`); return EXIT.prereg; }
+    }
     const res = score({
-      runDir, runCount: Number(argOf(args, "--run-count", 3)), labelsPath, preregPath,
-      expected: expectedFromArtifacts({ ...inputs, arm: armSpec.arm }), promptBytes: inputs.promptBytes, inventoryBytes: inputs.inventoryBytes,
+      runDir, runCount: Number(argOf(args, "--run-count", fpArm ? 1 : 3)), labelsPath, preregPath,
+      expected: fpArm ? {} : expectedFromArtifacts({ ...inputs, arm: armSpec.arm }),
+      promptBytes: inputs.promptBytes, inventoryBytes: inputs.inventoryBytes,
       arm: armSpec.arm,
     });
     if (!res.ok) { console.error(`${TOOL} ${verb}: ${res.reasons.join(", ")}`); return res.code; }
@@ -1786,7 +2317,7 @@ async function cli(argv = process.argv.slice(2)) {
     return 0;
   }
 
-  console.error(`usage: ${TOOL} <inventory|investigate|verify|match|review|report> [options]`);
+  console.error(`usage: ${TOOL} <inventory|fingerprint|investigate|verify|match|review|report> [options]`);
   console.error(`  The investigator prompt defaults to the FROZEN round-1 file (${FROZEN_INVESTIGATOR_PROMPT});`);
   console.error("  `investigator.txt` is the reworded VARIANT and is never the default. Every run records the prompt");
   console.error("  file it used plus that file's hash, and the pre-registration gate re-derives each run's recorded");
@@ -1799,6 +2330,14 @@ async function cli(argv = process.argv.slice(2)) {
   console.error("              frozen investigator prompt is never touched. ONE prereg covers every arm: with `--arm X`");
   console.error("              the gate compares the supplied bytes against `prompt-investigator-X` / `inventory-X`.");
   console.error("  investigate --inventory <f> --neutral-dir <dir> [--investigator-prompt <f>] [--model <id>] [--runs N] [--max-runs N] [--max-ms N] [--timeout-ms N] [--out-dir <dir>]");
+  console.error("  fingerprint --pin-dir <dir> --arm <exact|callshape> [--archguard-root <dir>] [--min-statements N] [--min-tokens N] [--source <dir>]... [--runs <dir>] [--prereg-out <f>]");
+  console.error("              writes a RUN file whose clusters come from a MECHANISM: `exact` runs ArchGuard's own");
+  console.error("              detectDuplicates (never re-implemented), `callshape` fingerprints each body by its callee");
+  console.error("              names + control-flow kinds with the `typescript` the ArchGuard package ships. The run");
+  console.error("              records `fingerprint_source` + `source_digest` IN PLACE OF `prompt_sha256`, and");
+  console.error(`              \`verify\`/\`match\`/\`review\` bind it to hashes["fingerprint-<arm>"] (--run-count defaults to 1).`);
+  console.error("              ⛔ an unresolvable root/compiler exits 11 and writes NOTHING — never a zero-group run.");
+  console.error("              --prereg-out writes that key into a prereg and writes no run (the run must postdate it).");
   console.error("  verify      --pin-dir <dir> --runs <dir> --inventory <f> [--provenance <f>] [--prereg <f>] [--investigator-prompt <f>] [--arm <id>] [--experiment <id>] [--model <id>] [--max-clusters N] [--max-turns N] [--max-ms N]");
   console.error("              --provenance <f> turns on the MECHANICAL pre-verification layer: a cluster whose members'");
   console.error("              edges converge on one component is recorded refuted/shared-implementation with NO model call.");

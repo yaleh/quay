@@ -34,6 +34,10 @@ import {
   mechanicalMatch, matchVerdict, scoreCases,
   score, matchRecords, verifyRecords, reviewRecords, emit,
   buildReport, hardenedArgv, importDriverRuntime, modelFromArgv,
+  FINGERPRINT_ARMS, FINGERPRINT_CONCEPT_KIND, DEFAULT_MIN_STATEMENTS, DEFAULT_MIN_TOKENS, fingerprintKey,
+  resolveArchguardRoot, loadArchguardInstrument, resolveArchguardTypescript, callshapeTokens,
+  fingerprintGroups, fingerprintInputs, fingerprintDigest, fingerprintClaim, fingerprintRecords,
+  fingerprintRunRecord, runKind, fingerprintArmAt, fingerprintPreregRefusal, loadRunsGated, cli,
 } from "../../docs/analysis/arch-hypothesis-generation.mjs";
 
 const tmp = () => fs.mkdtempSync(path.join(os.tmpdir(), "hypgen-test-"));
@@ -1149,4 +1153,290 @@ test("AC-model(f): a prereg models map that contradicts the run's requested mode
   assert.equal(modelPreregRefusal({ prereg: { models: { model: "a" } }, runs: [{ run: 1, requested_model: "a" }] }), null);
   assert.deepEqual(modelPreregRefusal({ prereg: { models: { model: "a" } }, runs: [{ run: 1, requested_model: "b" }] }).reasons, ["PREREG_MODEL_MISMATCH:1:b!=a"]);
   assert.deepEqual(modelPreregRefusal({ prereg: { models: { model: "a" } }, runs: [{ run: 1 }] }).reasons, ["RUN_MODEL_ABSENT:1"]);
+});
+
+// ══ THE FINGERPRINT SOURCE (gap-hypgen-has-no-fingerprint-source-for-code-duplication-recall) ═══════
+// A cluster that comes from a MECHANISM, not from a model: `fingerprint` runs either ArchGuard's own
+// duplicate grouping (`exact`) or a call-structure signature built with the compiler the ArchGuard package
+// ships (`callshape`), and writes the result as a run file whose `source_digest` stands in for
+// `prompt_sha256`. `verify` / `match` / `review` then bind it to `hashes["fingerprint-<arm>"]`.
+//
+// AC(a)-(c) drive the REAL instrument, so they need a real ArchGuard root; when the host carries none they
+// SKIP with the reason printed rather than passing vacuously. AC(d) and AC(e) are hermetic and always run
+// (AC(d) is in fact STRONGER on a host that does carry ArchGuard: the explicit-root refusal is asserted
+// while the plugin default is present and would have been a valid fallback).
+
+const ARCHGUARD_ROOT = resolveArchguardRoot(null);
+const NO_ARCHGUARD = ARCHGUARD_ROOT ? null : "no ArchGuard root on this host (--archguard-root / ARCHGUARD_ROOT / the plugin npm-cache)";
+
+/** A stripped pinned tree carrying `plugin/scripts/*.ts` — the shape `fingerprint` walks. */
+function pinTree(files) {
+  const pin = path.join(tmp(), "pin");
+  fs.mkdirSync(path.join(pin, "plugin", "scripts"), { recursive: true });
+  for (const [name, text] of Object.entries(files)) write(path.join(pin, "plugin", "scripts", name), text);
+  return pin;
+}
+/** Run the CLI with its stdout/stderr captured, so a test can assert on the report without polluting TAP. */
+async function captureCli(argv) {
+  const logs = [], errs = [];
+  const ol = console.log, oe = console.error;
+  console.log = (...a) => logs.push(a.join(" "));
+  console.error = (...a) => errs.push(a.join(" "));
+  try { return { code: await cli(argv), logs, errs }; } finally { console.log = ol; console.error = oe; }
+}
+// Two byte-identical bodies (the body IS the whole function text, so the `exact` arm groups them).
+const DUP_BODY = `export function tally(values: number[]) {
+  let sum = 0;
+  for (const v of values) {
+    if (v > 0) { sum = sum + v; }
+  }
+  return sum;
+}
+`;
+
+// ── AC(a): two byte-identical bodies in two files ⇒ ONE group holding BOTH files ──────────────────────
+test("AC-fp(a): the `exact` arm groups a byte-identical pair, and the verb writes it as a run file", async (t) => {
+  if (NO_ARCHGUARD) return t.skip(NO_ARCHGUARD);
+  const pin = pinTree({ "a.ts": DUP_BODY, "b.ts": DUP_BODY });
+  const res = await fingerprintGroups({ pinDir: pin, arm: "exact", archguardRoot: ARCHGUARD_ROOT, minStatements: 2, minTokens: 20 });
+  assert.equal(res.ok, true, JSON.stringify(res));
+  assert.equal(res.groups.length, 1, "exactly the byte-identical pair groups");
+  assert.deepEqual(res.groups[0].members.map((m) => m.file), ["plugin/scripts/a.ts", "plugin/scripts/b.ts"]);
+  // the group record names the NEW function's line range, so the claim the records carry is checkable
+  assert.equal(res.groups[0].members[0].startLine, 1);
+  assert.equal(res.groups[0].members[0].endLine, 7);
+
+  // and the VERB writes it: one run file, marked as a fingerprint run, carrying a digest not a prompt hash
+  const runs = path.join(tmp(), "runs");
+  const { code, logs } = await captureCli(["fingerprint", "--pin-dir", pin, "--arm", "exact", "--archguard-root", ARCHGUARD_ROOT, "--min-statements", "2", "--min-tokens", "20", "--runs", runs, "--json"]);
+  assert.equal(code, 0, logs.join("\n"));
+  const rec = JSON.parse(fs.readFileSync(path.join(runs, "run-1.json"), "utf8"));
+  assert.equal(rec.fingerprint_source, "exact");
+  assert.equal(rec.prompt_sha256, undefined, "a fingerprint run never records a prompt hash");
+  assert.match(rec.source_digest, /^[0-9a-f]{64}$/);
+  assert.equal(rec.hyps.length, 1);
+  assert.deepEqual(rec.hyps[0].components, ["plugin/scripts/a.ts", "plugin/scripts/b.ts"]);
+  assert.equal(rec.hyps[0].concept_kind, FINGERPRINT_CONCEPT_KIND);
+  // the grouping is deterministic, so the recorded digest is re-derivable from the run file alone
+  assert.equal(fingerprintDigest({ inputs: rec.inputs, groups: rec.groups_raw }), rec.source_digest);
+});
+
+// ── AC(b): the same NAME with different bodies is NOT a group (with a known-good pair as the control) ─
+test("AC-fp(b): two functions with the same name but different bodies are never grouped", async (t) => {
+  if (NO_ARCHGUARD) return t.skip(NO_ARCHGUARD);
+  const pin = pinTree({
+    "same1.ts": `export function same(values: number[]) {
+  let sum = 0;
+  for (const v of values) { sum = sum + v; }
+  return sum;
+}
+`,
+    "same2.ts": `export function same(values: number[]) {
+  if (values.length === 0) { throw new Error("empty input"); }
+  return values.reduce((acc, v) => acc * v, 1);
+}
+`,
+    // CONTROL: a genuinely identical pair in the SAME fixture — a zero-group reading here would be caused
+    // by the fixture or the instrument, not by the property under test (硬规则 2: the predicate is dry-run
+    // against a sample known to be true).
+    "dup1.ts": DUP_BODY,
+    "dup2.ts": DUP_BODY,
+  });
+  const res = await fingerprintGroups({ pinDir: pin, arm: "exact", archguardRoot: ARCHGUARD_ROOT, minStatements: 2, minTokens: 20 });
+  assert.equal(res.ok, true, JSON.stringify(res));
+  assert.equal(res.groups.length, 1, "only the identical control pair groups");
+  const files = res.groups[0].members.map((m) => m.file);
+  assert.deepEqual(files, ["plugin/scripts/dup1.ts", "plugin/scripts/dup2.ts"]);
+  assert.equal(files.includes("plugin/scripts/same1.ts"), false);
+  assert.equal(files.includes("plugin/scripts/same2.ts"), false);
+});
+
+// ── AC(c): the `callshape` arm groups bodies that differ only in local names and literals ─────────────
+test("AC-fp(c): `callshape` groups bodies differing only in local names/literals, and not different calls", async (t) => {
+  if (NO_ARCHGUARD) return t.skip(NO_ARCHGUARD);
+  const pin = pinTree({
+    "one.ts": `export function alpha(seed: number) {
+  let total = seed;
+  for (const step of [1, 2, 3]) { total = total + step; }
+  return total;
+}
+`,
+    // same calls, same control flow; every local name and every literal differs
+    "two.ts": `export function omega(input: number) {
+  let acc = input;
+  for (const part of [7, 8, 9]) { acc = acc + part; }
+  return acc;
+}
+`,
+    // NEGATIVE: same shape but a DIFFERENT control flow — a fingerprint that ignored this would be reading
+    // nothing but "two functions of similar size"
+    "three.ts": `export function gamma(seed: number) {
+  let total = seed;
+  while (total > 0) { total = total - 1; }
+  return total;
+}
+`,
+  });
+  const res = await fingerprintGroups({ pinDir: pin, arm: "callshape", archguardRoot: ARCHGUARD_ROOT, minStatements: 2, minTokens: 4 });
+  assert.equal(res.ok, true, JSON.stringify(res));
+  assert.ok(res.ts_version, "the callshape arm records the compiler identity it actually used");
+  assert.equal(res.groups.length, 1, JSON.stringify(res.groups));
+  assert.deepEqual(res.groups[0].members.map((m) => m.file), ["plugin/scripts/one.ts", "plugin/scripts/two.ts"]);
+  // the pure tokenizer is the mechanism, asserted directly: identical tokens for the renamed pair
+  const tsr = await resolveArchguardTypescript(ARCHGUARD_ROOT);
+  assert.equal(tsr.ok, true, tsr.reason);
+  const toks = (src) => {
+    const sf = tsr.ts.createSourceFile("x.ts", src, tsr.ts.ScriptTarget.Latest, true);
+    return callshapeTokens(tsr.ts, sf.statements.find((s) => tsr.ts.isFunctionDeclaration(s))).tokens;
+  };
+  const one = toks(fs.readFileSync(path.join(pin, "plugin", "scripts", "one.ts"), "utf8"));
+  const two = toks(fs.readFileSync(path.join(pin, "plugin", "scripts", "two.ts"), "utf8"));
+  const three = toks(fs.readFileSync(path.join(pin, "plugin", "scripts", "three.ts"), "utf8"));
+  assert.deepEqual(one, two, "renamed locals/literals leave the signature unchanged");
+  assert.notDeepEqual(one, three, "a different control flow changes the signature");
+});
+
+// ── AC(d): an unresolvable root is NOT-EVALUATED — its own value, never zero groups ───────────────────
+test("AC-fp(d): an unresolvable ArchGuard root or compiler gives not-evaluated, never zero groups", async () => {
+  const pin = pinTree({ "a.ts": DUP_BODY, "b.ts": DUP_BODY });
+  // ⛔ An EXPLICIT root is authoritative — no silent fall back to the plugin default (which is PRESENT on
+  // any host where AC(a)-(c) ran at all, so a fallback would have measured a build nobody named).
+  assert.equal(resolveArchguardRoot("/definitely/not/an/archguard/root"), "");
+  assert.equal(resolveArchguardRoot("/definitely/not/an/archguard/root"), "", "and it stays unresolved");
+
+  const res = await fingerprintGroups({ pinDir: pin, arm: "exact", archguardRoot: "" });
+  assert.equal(res.ok, false);
+  assert.equal(res.not_evaluated, true);
+  assert.equal(res.code, EXIT.fingerprintNotEvaluated);
+  assert.equal(res.reason, "ARCHGUARD_ROOT_UNRESOLVED");
+  assert.equal("groups" in res, false, "a not-evaluated result carries NO group list — not an empty one");
+
+  // an arm outside the vocabulary is refused before anything is loaded
+  assert.equal((await fingerprintGroups({ pinDir: pin, arm: "guesswork", archguardRoot: ARCHGUARD_ROOT || "/x" })).reason, "FINGERPRINT_ARM_NOT_IN_VOCAB:guesswork");
+
+  // the `callshape` arm's OWN dependency, three distinct causes — each its own reason
+  const noResolve = await resolveArchguardTypescript("/some/root", { createRequire: () => ({ resolve: () => { throw Object.assign(new Error("Cannot find module 'typescript'"), { code: "ERR_MODULE_NOT_FOUND" }); } }) });
+  assert.equal(noResolve.ok, false);
+  assert.match(noResolve.reason, /^TS_RESOLVE_FAILED:ERR_MODULE_NOT_FOUND/);
+  const noImport = await resolveArchguardTypescript("/some/root", { createRequire: () => ({ resolve: () => "/some/root/typescript.js" }), importModule: async () => { throw Object.assign(new Error("boom"), { code: "ERR_MODULE_NOT_FOUND" }); } });
+  assert.match(noImport.reason, /^TS_IMPORT_FAILED:ERR_MODULE_NOT_FOUND/);
+  const noApi = await resolveArchguardTypescript("/some/root", { createRequire: () => ({ resolve: () => "/some/root/typescript.js" }), importModule: async () => ({ version: "0.0.0" }) });
+  assert.equal(noApi.reason, "TS_NO_AST_API:/some/root/typescript.js");
+  // and through the whole verb: the loader succeeds, the compiler does not
+  const noTs = await fingerprintGroups({
+    pinDir: pin, arm: "callshape", archguardRoot: "/some/root",
+    importModule: async (u) => (String(u).includes("typescript")
+      ? (() => { throw Object.assign(new Error("Cannot find module 'typescript'"), { code: "ERR_MODULE_NOT_FOUND" }); })()
+      : { detectDuplicates: async () => ({ groups: [], manifest: {} }), collectSourceFiles: () => [] }),
+  });
+  assert.equal(noTs.ok, false);
+  assert.equal(noTs.not_evaluated, true);
+  assert.match(noTs.reason, /^TS_RESOLVE_FAILED|^TS_IMPORT_FAILED/);
+  assert.equal("groups" in noTs, false);
+
+  // the CLI: exit code 11 AND no carrier at all — a zero-group run file would be indistinguishable from
+  // "the instrument ran and found nothing"
+  const runs = path.join(tmp(), "runs");
+  const { code, errs } = await captureCli(["fingerprint", "--pin-dir", pin, "--arm", "exact", "--archguard-root", "/definitely/not/an/archguard/root", "--runs", runs]);
+  assert.equal(code, EXIT.fingerprintNotEvaluated);
+  assert.ok(errs.some((l) => l.includes("NOT_EVALUATED:ARCHGUARD_ROOT_UNRESOLVED")), errs.join("\n"));
+  assert.equal(fs.existsSync(runs), false, "a not-evaluated run writes no carrier directory at all");
+});
+
+// ── AC(e): a fingerprint run is bound to hashes["fingerprint-<arm>"], with NO fallback ────────────────
+const fingerprintFixture = ({ dir, arm = "exact", digest = "a".repeat(64), declared = undefined, hyps = [] }) => {
+  write(path.join(dir, "run-1.json"), { run: 1, fingerprint_source: arm, source_digest: digest, n_hyps: hyps.length, hyps });
+  const labelsText = JSON.stringify({ cases: [] });
+  const labels = write(path.join(dir, "labels.json"), labelsText);
+  const hashes = declared === undefined ? { [fingerprintKey(arm)]: digest } : { ...declared };
+  hashes.labels = sha256(labelsText);
+  const prereg = write(path.join(dir, "prereg.json"), { hashes });
+  fs.utimesSync(prereg, new Date(Date.now() - 60_000), new Date(Date.now() - 60_000));
+  return { labels, prereg, digest };
+};
+const scoreFingerprint = (dir, f, arm) =>
+  score({ runDir: dir, runCount: 1, labelsPath: f.labels, preregPath: f.prereg, expected: {}, promptBytes: null, inventoryBytes: null, arm });
+
+test("AC-fp(e): a fingerprint run is scored only against hashes[\"fingerprint-<arm>\"] — never the prompt keys", () => {
+  // CONTROL: a prereg that declares the run's own digest scores, with no prompt/inventory bytes anywhere
+  const dir = tmp();
+  const good = fingerprintFixture({ dir, hyps: [{ id: "FP1", components: ["plugin/scripts/a.ts", "plugin/scripts/b.ts"], concept_kind: "identity", claim: "c" }] });
+  const scored = scoreFingerprint(dir, good, "exact");
+  assert.equal(scored.ok, true, scored.reasons?.join(","));
+  assert.equal(scored.kind, "fingerprint");
+
+  // the declared digest differs from the run's ⇒ refused, and the reason names the ARM's key
+  const dir2 = tmp();
+  const bad = fingerprintFixture({ dir: dir2, digest: "b".repeat(64), declared: { "fingerprint-exact": "c".repeat(64) } });
+  const refused = scoreFingerprint(dir2, bad, "exact");
+  assert.equal(refused.ok, false);
+  assert.equal(refused.code, EXIT.prereg);
+  assert.ok(refused.reasons.some((r) => r.startsWith("PREREG_HASH_MISMATCH:fingerprint-exact")), refused.reasons.join(","));
+
+  // ⛔ NO FALLBACK: a prereg carrying the (entirely plausible) prompt-investigator + inventory keys instead
+  // is its OWN refusal — the fingerprint gate never reads the prompt keys, and cannot be satisfied by them
+  const dir3 = tmp();
+  const wrongKeys = fingerprintFixture({ dir: dir3, declared: { "prompt-investigator": "d".repeat(64), inventory: "e".repeat(64) } });
+  const absent = scoreFingerprint(dir3, wrongKeys, "exact");
+  assert.equal(absent.code, EXIT.prereg);
+  assert.deepEqual(absent.reasons, ["PREREG_HASH_ABSENT:fingerprint-exact"]);
+
+  // no `--arm` at all ⇒ its own refusal, never an unscoped key
+  const dir4 = tmp();
+  const unarmed = fingerprintFixture({ dir: dir4 });
+  const noArm = scoreFingerprint(dir4, unarmed, null);
+  assert.equal(noArm.code, EXIT.prereg);
+  assert.deepEqual(noArm.reasons, ["FINGERPRINT_ARM_REQUIRED"]);
+
+  // an arm naming the OTHER instrument does not judge this run
+  const dir5 = tmp();
+  const otherArm = fingerprintFixture({ dir: dir5, declared: { "fingerprint-callshape": "a".repeat(64) } });
+  const crossed = scoreFingerprint(dir5, otherArm, "callshape");
+  assert.equal(crossed.code, EXIT.prereg);
+  assert.deepEqual(crossed.reasons, ["RUN_FINGERPRINT_ARM_MISMATCH:1:exact!=callshape"]);
+
+  // a run that declares no digest at all is its own cause, never a pass
+  const dir6 = tmp();
+  const noDigestFixture = fingerprintFixture({ dir: dir6, declared: { "fingerprint-exact": "a".repeat(64) } });
+  write(path.join(dir6, "run-1.json"), { run: 1, fingerprint_source: "exact", hyps: [] });   // strip the digest
+  const noDigest = scoreFingerprint(dir6, noDigestFixture, "exact");
+  assert.equal(noDigest.code, EXIT.prereg);
+  assert.deepEqual(noDigest.reasons, ["PREREG_HASH_MISMATCH:fingerprint-exact"]);
+
+  // the KIND is read from the run file, and a run carrying BOTH markers is its own refusal rather than
+  // being resolved by precedence (硬规则 3b: a tie must not be broken in favour of a passing gate)
+  assert.equal(fingerprintKey("exact"), "fingerprint-exact");
+  assert.equal(runKind({ fingerprint_source: "exact", source_digest: "a" }), "fingerprint");
+  assert.equal(runKind({ prompt_sha256: "a" }), "prompt");
+  assert.equal(runKind({ fingerprint_source: "exact", prompt_sha256: "a" }), "ambiguous");
+  const dir7 = tmp();
+  const both = fingerprintFixture({ dir: dir7 });
+  const rec7 = JSON.parse(fs.readFileSync(path.join(dir7, "run-1.json"), "utf8"));
+  write(path.join(dir7, "run-1.json"), { ...rec7, prompt_sha256: "f".repeat(64) });
+  const mixed = scoreFingerprint(dir7, both, "exact");
+  assert.equal(mixed.code, EXIT.prereg);
+  assert.deepEqual(mixed.reasons, ["RUN_KIND_AMBIGUOUS:carries-both-fingerprint_source-and-prompt_sha256"]);
+});
+
+// ── AC(e) through the CLI: `match` needs no prompt and no inventory for a fingerprint run ─────────────
+test("AC-fp(e-cli): `match --arm <id>` scores a fingerprint run with no --inventory and no prompt file", async () => {
+  const dir = tmp();
+  const f = fingerprintFixture({ dir, hyps: [{ id: "FP1", components: ["plugin/scripts/a.ts", "plugin/scripts/b.ts"], concept_kind: "identity", claim: "c", confidence: "medium" }] });
+  const out = tmp();
+  // (i) the matching prereg scores, WITHOUT --inventory (which `readRunInputs` would otherwise demand)
+  const okRun = await captureCli(["match", "--runs", dir, "--labels", f.labels, "--prereg", f.prereg, "--arm", "exact", "--out-dir", out]);
+  assert.equal(okRun.code, 0, okRun.errs.join("\n"));
+  // (ii) and a digest the prereg does not declare refuses, from the CLI, with the same cause
+  const dir2 = tmp();
+  const bad = fingerprintFixture({ dir: dir2, declared: { "fingerprint-exact": "c".repeat(64) } });
+  const refused = await captureCli(["match", "--runs", dir2, "--labels", bad.labels, "--prereg", bad.prereg, "--arm", "exact", "--out-dir", tmp()]);
+  assert.equal(refused.code, EXIT.prereg);
+  assert.ok(refused.errs.some((l) => l.includes("PREREG_HASH_MISMATCH:fingerprint-exact")), refused.errs.join("\n"));
+  // (iii) NEGATIVE CONTROL: with NO run file at all the CLI never enters the fingerprint path — it makes
+  // the ordinary usage refusal (no --inventory), so (ii)'s PREREG_HASH_MISMATCH came from the run's own
+  // digest rather than from a path that would have refused anything.
+  const empty = tmp();
+  const missing = await captureCli(["match", "--runs", empty, "--labels", f.labels, "--prereg", f.prereg, "--arm", "exact", "--out-dir", tmp()]);
+  assert.equal(missing.code, EXIT.usage);
+  assert.ok(missing.errs.some((l) => l.includes("INVENTORY_REQUIRED")), missing.errs.join("\n"));
 });
