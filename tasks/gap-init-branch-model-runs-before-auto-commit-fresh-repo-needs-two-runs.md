@@ -2,7 +2,7 @@
 id: gap-init-branch-model-runs-before-auto-commit-fresh-repo-needs-two-runs
 title: "quay init: branch model is judged before auto-commit, so a fresh
   0-commit repo needs two runs and run 2 silently switches develop->author"
-status: todo
+status: ready
 labels:
   - gap
 parent: null
