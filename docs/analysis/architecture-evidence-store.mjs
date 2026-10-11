@@ -212,8 +212,9 @@ export function subjectFilesOf(run) {
   if (Array.isArray(env.scope?.in_scope)) env.scope.in_scope.forEach(add);   // a declared in-scope entry that names a file IS a location
   for (const c of env.candidate_interventions || []) add(c?.title);
   add(env.concern);
-  const slice = run.slice_delta?.delta;
-  if (slice && Array.isArray(slice.moves)) for (const mv of slice.moves) if (isStr(mv?.file, 3)) out.add(String(mv.file).replace(/^\.\//, ""));
+  // NOTE: `slice_delta.delta` is the ARCHGUARD-COMPUTED result (before/after SCC members, removed edges) — it
+  // carries no file list, and the files the cut moves are named by the proposal itself, i.e. in the envelope
+  // above. Reading moves off the delta would be a dead branch pretending to be a source.
   return [...out].sort();
 }
 

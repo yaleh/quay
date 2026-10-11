@@ -1,0 +1,2864 @@
+{
+  "experiment": "architecture evidence store + decision memory + quality/cost metrics for the ownership-active investigation loop (phase A+B of the end-to-end architecture self-bootstrap)",
+  "code": {
+    "modules": [
+      "docs/analysis/architecture-evidence-store.mjs",
+      "docs/analysis/architecture-decision-memory.mjs",
+      "docs/analysis/architecture-metrics.mjs",
+      "docs/analysis/ownership-active-loop.mjs"
+    ],
+    "carrier_rel": ".quay/architecture-evidence-store.jsonl",
+    "code_fingerprint": null
+  },
+  "carriers": {
+    "note": "the store lives in the INVESTIGATED workspace",
+    "holdoutA": "<repo>/.quay/architecture-evidence-store.jsonl",
+    "holdoutB": "<blind tree>/.quay/architecture-evidence-store.jsonl x3",
+    "production": "<develop-tip tree>/.quay/architecture-evidence-store.jsonl",
+    "consolidated_for_the_jq_check": "<repo>/.quay/evidence-store-consolidated.jsonl"
+  },
+  "ground_truth_basis": {
+    "holdoutA": "the files the goal's real merge commit changed: git diff <merge>^1 <merge> — GOAL-032 @ 0da918926, GOAL-033 @ ddb9c6ac0",
+    "holdoutB": "none — blind",
+    "production": "none — blind"
+  },
+  "holdoutA": {
+    "n": 25,
+    "aggregate": {
+      "runs": 25,
+      "evidenceCost": {
+        "rounds": 172,
+        "requests": 140,
+        "bytes": 647717
+      },
+      "falsePositiveRate": {
+        "state": "evaluated",
+        "value": 0.4,
+        "evaluated_runs": 25,
+        "false_positives": 10
+      },
+      "locality": {
+        "state": "evaluated",
+        "value": 0.36190476190476184,
+        "evaluated_runs": 25
+      },
+      "recoveryRounds": {
+        "state": "evaluated",
+        "recovered": 13,
+        "rounds": 121
+      }
+    },
+    "rows": [
+      {
+        "run_id": "holdoutA:replay:GOAL-032:A:discovery#1",
+        "label": "replay:GOAL-032:A:discovery",
+        "goal": "GOAL-032",
+        "code_fingerprint": "24f53829e9473eb6",
+        "terminal": "propose_slice",
+        "action": "propose-goal",
+        "gate_ok": true,
+        "decoded_terminal": "propose_slice",
+        "proposed_files": [
+          "packages/quay/src/config.ts",
+          "packages/quay/src/gate/config/loader.ts",
+          "packages/quay/src/gate/config/utils.ts",
+          "packages/quay/src/goal-store.ts"
+        ],
+        "subject_key": "unknown|packages/quay/src/config.ts,packages/quay/src/gate/config/loader.ts,packages/quay/src/gate/config/utils.ts,packages/quay/src/goal-store.ts",
+        "evidenceCost": {
+          "rounds": 8,
+          "requests": 6,
+          "bytes": 15869
+        },
+        "falsePositiveRate": {
+          "state": "evaluated",
+          "value": 1,
+          "proposals": 1,
+          "proposed_files": [
+            "packages/quay/src/config.ts",
+            "packages/quay/src/gate/config/loader.ts",
+            "packages/quay/src/gate/config/utils.ts",
+            "packages/quay/src/goal-store.ts"
+          ],
+          "matched_slice_files": []
+        },
+        "locality": {
+          "state": "evaluated",
+          "value": 0,
+          "touched": 4,
+          "in_goal": 0
+        },
+        "recoveryRounds": {
+          "state": "evaluated",
+          "rounds": 8,
+          "recovered": false
+        }
+      },
+      {
+        "run_id": "holdoutA:replay:GOAL-032:A:discovery#2",
+        "label": "replay:GOAL-032:A:discovery",
+        "goal": "GOAL-032",
+        "code_fingerprint": "24f53829e9473eb6",
+        "terminal": "propose_slice",
+        "action": "propose-goal",
+        "gate_ok": true,
+        "decoded_terminal": "propose_slice",
+        "proposed_files": [
+          "packages/quay/src/gate/registry.ts"
+        ],
+        "subject_key": "unknown|packages/quay/src/gate/registry.ts",
+        "evidenceCost": {
+          "rounds": 7,
+          "requests": 6,
+          "bytes": 8709
+        },
+        "falsePositiveRate": {
+          "state": "evaluated",
+          "value": 1,
+          "proposals": 1,
+          "proposed_files": [
+            "packages/quay/src/gate/registry.ts"
+          ],
+          "matched_slice_files": []
+        },
+        "locality": {
+          "state": "evaluated",
+          "value": 0,
+          "touched": 1,
+          "in_goal": 0
+        },
+        "recoveryRounds": {
+          "state": "evaluated",
+          "rounds": 7,
+          "recovered": false
+        }
+      },
+      {
+        "run_id": "holdoutA:replay:GOAL-032:A:discovery#3",
+        "label": "replay:GOAL-032:A:discovery",
+        "goal": "GOAL-032",
+        "code_fingerprint": "431a93683c259068",
+        "terminal": "propose_slice",
+        "action": "investigate",
+        "gate_ok": true,
+        "decoded_terminal": "propose_slice",
+        "proposed_files": [
+          "packages/quay/src/gate/factories/document-contract.ts",
+          "packages/quay/src/gate/factories/goal.ts",
+          "packages/quay/src/gate/factories/index.ts"
+        ],
+        "subject_key": "unknown|packages/quay/src/gate/factories/document-contract.ts,packages/quay/src/gate/factories/goal.ts,packages/quay/src/gate/factories/index.ts",
+        "evidenceCost": {
+          "rounds": 8,
+          "requests": 6,
+          "bytes": 21671
+        },
+        "falsePositiveRate": {
+          "state": "evaluated",
+          "value": 1,
+          "proposals": 1,
+          "proposed_files": [
+            "packages/quay/src/gate/factories/document-contract.ts",
+            "packages/quay/src/gate/factories/goal.ts",
+            "packages/quay/src/gate/factories/index.ts"
+          ],
+          "matched_slice_files": []
+        },
+        "locality": {
+          "state": "evaluated",
+          "value": 0,
+          "touched": 4,
+          "in_goal": 0
+        },
+        "recoveryRounds": {
+          "state": "evaluated",
+          "rounds": 8,
+          "recovered": false
+        }
+      },
+      {
+        "run_id": "holdoutA:replay:GOAL-032:A:triggered#4",
+        "label": "replay:GOAL-032:A:triggered",
+        "goal": "GOAL-032",
+        "code_fingerprint": "24f53829e9473eb6",
+        "terminal": "not-evaluated",
+        "action": "not-evaluated",
+        "gate_ok": null,
+        "decoded_terminal": "not-evaluated",
+        "proposed_files": [],
+        "subject_key": "unknown|",
+        "evidenceCost": {
+          "rounds": 3,
+          "requests": 2,
+          "bytes": 15137
+        },
+        "falsePositiveRate": {
+          "state": "evaluated",
+          "value": 0,
+          "proposals": 0,
+          "reason": "no proposal was produced by this run"
+        },
+        "locality": {
+          "state": "evaluated",
+          "value": 1,
+          "touched": 1,
+          "in_goal": 1
+        },
+        "recoveryRounds": {
+          "state": "evaluated",
+          "rounds": 2,
+          "recovered": true
+        }
+      },
+      {
+        "run_id": "holdoutA:replay:GOAL-032:A:triggered#5",
+        "label": "replay:GOAL-032:A:triggered",
+        "goal": "GOAL-032",
+        "code_fingerprint": "24f53829e9473eb6",
+        "terminal": "propose_slice",
+        "action": "propose-goal",
+        "gate_ok": true,
+        "decoded_terminal": "propose_slice",
+        "proposed_files": [
+          "plugin/scripts/fs-walk.ts",
+          "plugin/scripts/threshold-scope-check.ts",
+          "plugin/scripts/tick-core-static-check.ts"
+        ],
+        "subject_key": "unknown|plugin/scripts/fs-walk.ts,plugin/scripts/threshold-scope-check.ts,plugin/scripts/tick-core-static-check.ts",
+        "evidenceCost": {
+          "rounds": 8,
+          "requests": 6,
+          "bytes": 31196
+        },
+        "falsePositiveRate": {
+          "state": "evaluated",
+          "value": 1,
+          "proposals": 1,
+          "proposed_files": [
+            "plugin/scripts/fs-walk.ts",
+            "plugin/scripts/threshold-scope-check.ts",
+            "plugin/scripts/tick-core-static-check.ts"
+          ],
+          "matched_slice_files": []
+        },
+        "locality": {
+          "state": "evaluated",
+          "value": 0,
+          "touched": 3,
+          "in_goal": 0
+        },
+        "recoveryRounds": {
+          "state": "evaluated",
+          "rounds": 8,
+          "recovered": false
+        }
+      },
+      {
+        "run_id": "holdoutA:replay:GOAL-032:A:triggered#6",
+        "label": "replay:GOAL-032:A:triggered",
+        "goal": "GOAL-032",
+        "code_fingerprint": "24f53829e9473eb6",
+        "terminal": "propose_slice",
+        "action": "propose-goal",
+        "gate_ok": true,
+        "decoded_terminal": "propose_slice",
+        "proposed_files": [
+          "packages/quay/src/criterion-fidelity.ts",
+          "plugin/scripts/goal-driver.ts",
+          "plugin/test/criterion-fidelity-historical-case.test.mjs",
+          "plugin/test/goal-sufficiency-semantic-covered.test.mjs"
+        ],
+        "subject_key": "unknown|packages/quay/src/criterion-fidelity.ts,plugin/scripts/goal-driver.ts,plugin/test/criterion-fidelity-historical-case.test.mjs,plugin/test/goal-sufficiency-semantic-covered.test.mjs",
+        "evidenceCost": {
+          "rounds": 7,
+          "requests": 6,
+          "bytes": 33655
+        },
+        "falsePositiveRate": {
+          "state": "evaluated",
+          "value": 0,
+          "proposals": 1,
+          "proposed_files": [
+            "packages/quay/src/criterion-fidelity.ts",
+            "plugin/scripts/goal-driver.ts",
+            "plugin/test/criterion-fidelity-historical-case.test.mjs",
+            "plugin/test/goal-sufficiency-semantic-covered.test.mjs"
+          ],
+          "matched_slice_files": [
+            "packages/quay/src/criterion-fidelity.ts",
+            "plugin/scripts/goal-driver.ts"
+          ]
+        },
+        "locality": {
+          "state": "evaluated",
+          "value": 0.5,
+          "touched": 4,
+          "in_goal": 2
+        },
+        "recoveryRounds": {
+          "state": "evaluated",
+          "rounds": 1,
+          "recovered": true
+        }
+      },
+      {
+        "run_id": "holdoutA:replay:GOAL-032:A:triggered#7",
+        "label": "replay:GOAL-032:A:triggered",
+        "goal": "GOAL-032",
+        "code_fingerprint": "431a93683c259068",
+        "terminal": "propose_slice",
+        "action": "propose-goal",
+        "gate_ok": true,
+        "decoded_terminal": "propose_slice",
+        "proposed_files": [
+          "packages/quay/src/criterion-fidelity.ts",
+          "plugin/scripts/driver-runtime.ts",
+          "plugin/scripts/goal-driver.ts"
+        ],
+        "subject_key": "unknown|packages/quay/src/criterion-fidelity.ts,plugin/scripts/driver-runtime.ts,plugin/scripts/goal-driver.ts",
+        "evidenceCost": {
+          "rounds": 8,
+          "requests": 6,
+          "bytes": 42365
+        },
+        "falsePositiveRate": {
+          "state": "evaluated",
+          "value": 0,
+          "proposals": 1,
+          "proposed_files": [
+            "packages/quay/src/criterion-fidelity.ts",
+            "plugin/scripts/driver-runtime.ts",
+            "plugin/scripts/goal-driver.ts"
+          ],
+          "matched_slice_files": [
+            "packages/quay/src/criterion-fidelity.ts",
+            "plugin/scripts/goal-driver.ts"
+          ]
+        },
+        "locality": {
+          "state": "evaluated",
+          "value": 0.6666666666666666,
+          "touched": 3,
+          "in_goal": 2
+        },
+        "recoveryRounds": {
+          "state": "evaluated",
+          "rounds": 1,
+          "recovered": true
+        }
+      },
+      {
+        "run_id": "holdoutA:replay:GOAL-032:A:triggered#8",
+        "label": "replay:GOAL-032:A:triggered",
+        "goal": "GOAL-032",
+        "code_fingerprint": "d67c8b258a9b3050",
+        "terminal": "propose_slice",
+        "action": "propose-goal",
+        "gate_ok": true,
+        "decoded_terminal": "propose_slice",
+        "proposed_files": [
+          "packages/quay/src/criterion-fidelity.ts",
+          "plugin/scripts/goal-driver.ts"
+        ],
+        "subject_key": "unknown|packages/quay/src/criterion-fidelity.ts,plugin/scripts/goal-driver.ts",
+        "evidenceCost": {
+          "rounds": 7,
+          "requests": 6,
+          "bytes": 21812
+        },
+        "falsePositiveRate": {
+          "state": "evaluated",
+          "value": 0,
+          "proposals": 1,
+          "proposed_files": [
+            "packages/quay/src/criterion-fidelity.ts",
+            "plugin/scripts/goal-driver.ts"
+          ],
+          "matched_slice_files": [
+            "packages/quay/src/criterion-fidelity.ts",
+            "plugin/scripts/goal-driver.ts"
+          ]
+        },
+        "locality": {
+          "state": "evaluated",
+          "value": 1,
+          "touched": 2,
+          "in_goal": 2
+        },
+        "recoveryRounds": {
+          "state": "evaluated",
+          "rounds": 1,
+          "recovered": true
+        }
+      },
+      {
+        "run_id": "holdoutA:replay:GOAL-032:A:triggered#9",
+        "label": "replay:GOAL-032:A:triggered",
+        "goal": "GOAL-032",
+        "code_fingerprint": "d7b33aaa5032c502",
+        "terminal": "propose_slice",
+        "action": "propose-goal",
+        "gate_ok": true,
+        "decoded_terminal": "propose_slice",
+        "proposed_files": [
+          "packages/quay/src/criterion-fidelity.ts",
+          "plugin/scripts/goal-driver.ts"
+        ],
+        "subject_key": "unknown|packages/quay/src/criterion-fidelity.ts,plugin/scripts/goal-driver.ts",
+        "evidenceCost": {
+          "rounds": 7,
+          "requests": 6,
+          "bytes": 27195
+        },
+        "falsePositiveRate": {
+          "state": "evaluated",
+          "value": 0,
+          "proposals": 1,
+          "proposed_files": [
+            "packages/quay/src/criterion-fidelity.ts",
+            "plugin/scripts/goal-driver.ts"
+          ],
+          "matched_slice_files": [
+            "packages/quay/src/criterion-fidelity.ts",
+            "plugin/scripts/goal-driver.ts"
+          ]
+        },
+        "locality": {
+          "state": "evaluated",
+          "value": 1,
+          "touched": 2,
+          "in_goal": 2
+        },
+        "recoveryRounds": {
+          "state": "evaluated",
+          "rounds": 7,
+          "recovered": true
+        }
+      },
+      {
+        "run_id": "holdoutA:replay:GOAL-032:A:triggered#10",
+        "label": "replay:GOAL-032:A:triggered",
+        "goal": "GOAL-032",
+        "code_fingerprint": "d7b33aaa5032c502",
+        "terminal": "propose_slice",
+        "action": "propose-goal",
+        "gate_ok": true,
+        "decoded_terminal": "propose_slice",
+        "proposed_files": [
+          "packages/quay-backlog/bin/quay-backlog.ts",
+          "packages/quay-github/bin/quay-github.ts",
+          "packages/quay-native/bin/quay-native.ts",
+          "packages/quay/bin/quay.ts",
+          "packages/quay/src/cli/flags.ts"
+        ],
+        "subject_key": "unknown|packages/quay-backlog/bin/quay-backlog.ts,packages/quay-github/bin/quay-github.ts,packages/quay-native/bin/quay-native.ts,packages/quay/bin/quay.ts,packages/quay/src/cli/flags.ts",
+        "evidenceCost": {
+          "rounds": 7,
+          "requests": 6,
+          "bytes": 31754
+        },
+        "falsePositiveRate": {
+          "state": "evaluated",
+          "value": 1,
+          "proposals": 1,
+          "proposed_files": [
+            "packages/quay-backlog/bin/quay-backlog.ts",
+            "packages/quay-github/bin/quay-github.ts",
+            "packages/quay-native/bin/quay-native.ts",
+            "packages/quay/bin/quay.ts",
+            "packages/quay/src/cli/flags.ts"
+          ],
+          "matched_slice_files": []
+        },
+        "locality": {
+          "state": "evaluated",
+          "value": 0,
+          "touched": 7,
+          "in_goal": 0
+        },
+        "recoveryRounds": {
+          "state": "evaluated",
+          "rounds": 7,
+          "recovered": false
+        }
+      },
+      {
+        "run_id": "holdoutA:replay:GOAL-032:B:discovery#11",
+        "label": "replay:GOAL-032:B:discovery",
+        "goal": "GOAL-032",
+        "code_fingerprint": "24f53829e9473eb6",
+        "terminal": "propose_slice",
+        "action": "propose-goal",
+        "gate_ok": true,
+        "decoded_terminal": "propose_slice",
+        "proposed_files": [
+          "plugin/scripts/task-status.ts",
+          "plugin/scripts/worker-fan-in.ts"
+        ],
+        "subject_key": "unknown|plugin/scripts/task-status.ts,plugin/scripts/worker-fan-in.ts",
+        "evidenceCost": {
+          "rounds": 7,
+          "requests": 6,
+          "bytes": 33524
+        },
+        "falsePositiveRate": {
+          "state": "evaluated",
+          "value": 1,
+          "proposals": 1,
+          "proposed_files": [
+            "plugin/scripts/task-status.ts",
+            "plugin/scripts/worker-fan-in.ts"
+          ],
+          "matched_slice_files": []
+        },
+        "locality": {
+          "state": "evaluated",
+          "value": 0,
+          "touched": 3,
+          "in_goal": 0
+        },
+        "recoveryRounds": {
+          "state": "evaluated",
+          "rounds": 7,
+          "recovered": false
+        }
+      },
+      {
+        "run_id": "holdoutA:replay:GOAL-032:B:discovery#12",
+        "label": "replay:GOAL-032:B:discovery",
+        "goal": "GOAL-032",
+        "code_fingerprint": "431a93683c259068",
+        "terminal": "propose_slice",
+        "action": "propose-goal",
+        "gate_ok": true,
+        "decoded_terminal": "propose_slice",
+        "proposed_files": [
+          "packages/quay/src/cli/driver.ts",
+          "packages/quay/src/fan-in/ff-merge.ts"
+        ],
+        "subject_key": "unknown|packages/quay/src/cli/driver.ts,packages/quay/src/fan-in/ff-merge.ts",
+        "evidenceCost": {
+          "rounds": 7,
+          "requests": 6,
+          "bytes": 22401
+        },
+        "falsePositiveRate": {
+          "state": "evaluated",
+          "value": 1,
+          "proposals": 1,
+          "proposed_files": [
+            "packages/quay/src/cli/driver.ts",
+            "packages/quay/src/fan-in/ff-merge.ts"
+          ],
+          "matched_slice_files": []
+        },
+        "locality": {
+          "state": "evaluated",
+          "value": 0,
+          "touched": 3,
+          "in_goal": 0
+        },
+        "recoveryRounds": {
+          "state": "evaluated",
+          "rounds": 7,
+          "recovered": false
+        }
+      },
+      {
+        "run_id": "holdoutA:replay:GOAL-032:B:discovery#13",
+        "label": "replay:GOAL-032:B:discovery",
+        "goal": "GOAL-032",
+        "code_fingerprint": "d7b33aaa5032c502",
+        "terminal": "propose_slice",
+        "action": "propose-goal",
+        "gate_ok": true,
+        "decoded_terminal": "propose_slice",
+        "proposed_files": [
+          "plugin/scripts/driver-filters.ts"
+        ],
+        "subject_key": "unknown|plugin/scripts/driver-filters.ts",
+        "evidenceCost": {
+          "rounds": 8,
+          "requests": 6,
+          "bytes": 33817
+        },
+        "falsePositiveRate": {
+          "state": "evaluated",
+          "value": 1,
+          "proposals": 1,
+          "proposed_files": [
+            "plugin/scripts/driver-filters.ts"
+          ],
+          "matched_slice_files": []
+        },
+        "locality": {
+          "state": "evaluated",
+          "value": 0,
+          "touched": 2,
+          "in_goal": 0
+        },
+        "recoveryRounds": {
+          "state": "evaluated",
+          "rounds": 8,
+          "recovered": false
+        }
+      },
+      {
+        "run_id": "holdoutA:replay:GOAL-032:B:triggered#14",
+        "label": "replay:GOAL-032:B:triggered",
+        "goal": "GOAL-032",
+        "code_fingerprint": "24f53829e9473eb6",
+        "terminal": "propose_slice",
+        "action": "propose-goal",
+        "gate_ok": true,
+        "decoded_terminal": "propose_slice",
+        "proposed_files": [
+          "packages/quay/src/criterion-fidelity.ts",
+          "packages/quay/src/kernel/verdict-parse.ts",
+          "plugin/scripts/goal-driver.ts",
+          "plugin/scripts/verdict-parse.ts"
+        ],
+        "subject_key": "unknown|packages/quay/src/criterion-fidelity.ts,packages/quay/src/kernel/verdict-parse.ts,plugin/scripts/goal-driver.ts,plugin/scripts/verdict-parse.ts",
+        "evidenceCost": {
+          "rounds": 7,
+          "requests": 6,
+          "bytes": 40447
+        },
+        "falsePositiveRate": {
+          "state": "evaluated",
+          "value": 0,
+          "proposals": 1,
+          "proposed_files": [
+            "packages/quay/src/criterion-fidelity.ts",
+            "packages/quay/src/kernel/verdict-parse.ts",
+            "plugin/scripts/goal-driver.ts",
+            "plugin/scripts/verdict-parse.ts"
+          ],
+          "matched_slice_files": [
+            "packages/quay/src/criterion-fidelity.ts",
+            "packages/quay/src/kernel/verdict-parse.ts",
+            "plugin/scripts/goal-driver.ts"
+          ]
+        },
+        "locality": {
+          "state": "evaluated",
+          "value": 0.75,
+          "touched": 4,
+          "in_goal": 3
+        },
+        "recoveryRounds": {
+          "state": "evaluated",
+          "rounds": 1,
+          "recovered": true
+        }
+      },
+      {
+        "run_id": "holdoutA:replay:GOAL-032:B:triggered#15",
+        "label": "replay:GOAL-032:B:triggered",
+        "goal": "GOAL-032",
+        "code_fingerprint": "24f53829e9473eb6",
+        "terminal": "not-evaluated",
+        "action": "not-evaluated",
+        "gate_ok": null,
+        "decoded_terminal": "not-evaluated",
+        "proposed_files": [],
+        "subject_key": "unknown|",
+        "evidenceCost": {
+          "rounds": 1,
+          "requests": 0,
+          "bytes": 0
+        },
+        "falsePositiveRate": {
+          "state": "evaluated",
+          "value": 0,
+          "proposals": 0,
+          "reason": "no proposal was produced by this run"
+        },
+        "locality": {
+          "state": "evaluated",
+          "value": 0,
+          "touched": 0,
+          "in_goal": 0
+        },
+        "recoveryRounds": {
+          "state": "evaluated",
+          "rounds": 1,
+          "recovered": false
+        }
+      },
+      {
+        "run_id": "holdoutA:replay:GOAL-032:B:triggered#16",
+        "label": "replay:GOAL-032:B:triggered",
+        "goal": "GOAL-032",
+        "code_fingerprint": "431a93683c259068",
+        "terminal": "propose_slice",
+        "action": "propose-goal",
+        "gate_ok": true,
+        "decoded_terminal": "propose_slice",
+        "proposed_files": [
+          "packages/quay/src/criterion-fidelity.ts",
+          "packages/quay/src/verdict-parse.ts",
+          "plugin/scripts/driver-runtime.ts",
+          "plugin/scripts/goal-driver.ts",
+          "plugin/test/criterion-fidelity-historical-case.test.mjs",
+          "plugin/test/goal-sufficiency-semantic-covered.test.mjs"
+        ],
+        "subject_key": "unknown|packages/quay/src/criterion-fidelity.ts,packages/quay/src/verdict-parse.ts,plugin/scripts/driver-runtime.ts,plugin/scripts/goal-driver.ts,plugin/test/criterion-fidelity-historical-case.test.mjs,plugin/test/goal-sufficiency-semantic-covered.test.mjs",
+        "evidenceCost": {
+          "rounds": 7,
+          "requests": 6,
+          "bytes": 42970
+        },
+        "falsePositiveRate": {
+          "state": "evaluated",
+          "value": 0,
+          "proposals": 1,
+          "proposed_files": [
+            "packages/quay/src/criterion-fidelity.ts",
+            "packages/quay/src/verdict-parse.ts",
+            "plugin/scripts/driver-runtime.ts",
+            "plugin/scripts/goal-driver.ts",
+            "plugin/test/criterion-fidelity-historical-case.test.mjs",
+            "plugin/test/goal-sufficiency-semantic-covered.test.mjs"
+          ],
+          "matched_slice_files": [
+            "packages/quay/src/criterion-fidelity.ts",
+            "plugin/scripts/goal-driver.ts"
+          ]
+        },
+        "locality": {
+          "state": "evaluated",
+          "value": 0.3333333333333333,
+          "touched": 6,
+          "in_goal": 2
+        },
+        "recoveryRounds": {
+          "state": "evaluated",
+          "rounds": 3,
+          "recovered": true
+        }
+      },
+      {
+        "run_id": "holdoutA:replay:GOAL-032:B:triggered#17",
+        "label": "replay:GOAL-032:B:triggered",
+        "goal": "GOAL-032",
+        "code_fingerprint": "d67c8b258a9b3050",
+        "terminal": "propose_slice",
+        "action": "propose-goal",
+        "gate_ok": true,
+        "decoded_terminal": "propose_slice",
+        "proposed_files": [
+          "packages/quay/src/criterion-fidelity.ts",
+          "plugin/scripts/goal-driver.ts"
+        ],
+        "subject_key": "unknown|packages/quay/src/criterion-fidelity.ts,plugin/scripts/goal-driver.ts",
+        "evidenceCost": {
+          "rounds": 7,
+          "requests": 6,
+          "bytes": 30231
+        },
+        "falsePositiveRate": {
+          "state": "evaluated",
+          "value": 0,
+          "proposals": 1,
+          "proposed_files": [
+            "packages/quay/src/criterion-fidelity.ts",
+            "plugin/scripts/goal-driver.ts"
+          ],
+          "matched_slice_files": [
+            "packages/quay/src/criterion-fidelity.ts",
+            "plugin/scripts/goal-driver.ts"
+          ]
+        },
+        "locality": {
+          "state": "evaluated",
+          "value": 1,
+          "touched": 2,
+          "in_goal": 2
+        },
+        "recoveryRounds": {
+          "state": "evaluated",
+          "rounds": 1,
+          "recovered": true
+        }
+      },
+      {
+        "run_id": "holdoutA:replay:GOAL-032:B:triggered#18",
+        "label": "replay:GOAL-032:B:triggered",
+        "goal": "GOAL-032",
+        "code_fingerprint": "d7b33aaa5032c502",
+        "terminal": "propose_slice",
+        "action": "propose-goal",
+        "gate_ok": true,
+        "decoded_terminal": "propose_slice",
+        "proposed_files": [
+          "packages/quay/src/criterion-fidelity.ts",
+          "plugin/scripts/goal-driver.ts"
+        ],
+        "subject_key": "unknown|packages/quay/src/criterion-fidelity.ts,plugin/scripts/goal-driver.ts",
+        "evidenceCost": {
+          "rounds": 7,
+          "requests": 6,
+          "bytes": 32660
+        },
+        "falsePositiveRate": {
+          "state": "evaluated",
+          "value": 0,
+          "proposals": 1,
+          "proposed_files": [
+            "packages/quay/src/criterion-fidelity.ts",
+            "plugin/scripts/goal-driver.ts"
+          ],
+          "matched_slice_files": [
+            "packages/quay/src/criterion-fidelity.ts",
+            "plugin/scripts/goal-driver.ts"
+          ]
+        },
+        "locality": {
+          "state": "evaluated",
+          "value": 1,
+          "touched": 2,
+          "in_goal": 2
+        },
+        "recoveryRounds": {
+          "state": "evaluated",
+          "rounds": 1,
+          "recovered": true
+        }
+      },
+      {
+        "run_id": "holdoutA:replay:GOAL-032:B:triggered#19",
+        "label": "replay:GOAL-032:B:triggered",
+        "goal": "GOAL-032",
+        "code_fingerprint": "d7b33aaa5032c502",
+        "terminal": "propose_slice",
+        "action": "propose-goal",
+        "gate_ok": true,
+        "decoded_terminal": "propose_slice",
+        "proposed_files": [
+          "packages/quay/src/cli/driver.ts",
+          "packages/quay/src/fan-in/ff-merge.ts"
+        ],
+        "subject_key": "unknown|packages/quay/src/cli/driver.ts,packages/quay/src/fan-in/ff-merge.ts",
+        "evidenceCost": {
+          "rounds": 7,
+          "requests": 6,
+          "bytes": 23628
+        },
+        "falsePositiveRate": {
+          "state": "evaluated",
+          "value": 1,
+          "proposals": 1,
+          "proposed_files": [
+            "packages/quay/src/cli/driver.ts",
+            "packages/quay/src/fan-in/ff-merge.ts"
+          ],
+          "matched_slice_files": []
+        },
+        "locality": {
+          "state": "evaluated",
+          "value": 0.3333333333333333,
+          "touched": 3,
+          "in_goal": 1
+        },
+        "recoveryRounds": {
+          "state": "evaluated",
+          "rounds": 2,
+          "recovered": true
+        }
+      },
+      {
+        "run_id": "holdoutA:replay:GOAL-033:A:discovery#20",
+        "label": "replay:GOAL-033:A:discovery",
+        "goal": "GOAL-033",
+        "code_fingerprint": "24f53829e9473eb6",
+        "terminal": "propose_slice",
+        "action": "propose-goal",
+        "gate_ok": true,
+        "decoded_terminal": "propose_slice",
+        "proposed_files": [],
+        "subject_key": "unknown|",
+        "evidenceCost": {
+          "rounds": 8,
+          "requests": 6,
+          "bytes": 29336
+        },
+        "falsePositiveRate": {
+          "state": "evaluated",
+          "value": 0,
+          "proposals": 0,
+          "reason": "no proposal was produced by this run"
+        },
+        "locality": {
+          "state": "evaluated",
+          "value": 0.5,
+          "touched": 2,
+          "in_goal": 1
+        },
+        "recoveryRounds": {
+          "state": "evaluated",
+          "rounds": 6,
+          "recovered": true
+        }
+      },
+      {
+        "run_id": "holdoutA:replay:GOAL-033:A:discovery#21",
+        "label": "replay:GOAL-033:A:discovery",
+        "goal": "GOAL-033",
+        "code_fingerprint": "431a93683c259068",
+        "terminal": "propose_slice",
+        "action": "propose-goal",
+        "gate_ok": true,
+        "decoded_terminal": "propose_slice",
+        "proposed_files": [
+          "packages/quay/src/cli/driver.ts",
+          "packages/quay/src/fan-in/ff-merge.ts",
+          "packages/quay/src/instrument-probe.ts",
+          "packages/quay/src/observation.ts"
+        ],
+        "subject_key": "unknown|packages/quay/src/cli/driver.ts,packages/quay/src/fan-in/ff-merge.ts,packages/quay/src/instrument-probe.ts,packages/quay/src/observation.ts",
+        "evidenceCost": {
+          "rounds": 7,
+          "requests": 6,
+          "bytes": 19093
+        },
+        "falsePositiveRate": {
+          "state": "evaluated",
+          "value": 0,
+          "proposals": 1,
+          "proposed_files": [
+            "packages/quay/src/cli/driver.ts",
+            "packages/quay/src/fan-in/ff-merge.ts",
+            "packages/quay/src/instrument-probe.ts",
+            "packages/quay/src/observation.ts"
+          ],
+          "matched_slice_files": [
+            "packages/quay/src/cli/driver.ts"
+          ]
+        },
+        "locality": {
+          "state": "evaluated",
+          "value": 0.25,
+          "touched": 4,
+          "in_goal": 1
+        },
+        "recoveryRounds": {
+          "state": "evaluated",
+          "rounds": 7,
+          "recovered": true
+        }
+      },
+      {
+        "run_id": "holdoutA:replay:GOAL-033:A:discovery#22",
+        "label": "replay:GOAL-033:A:discovery",
+        "goal": "GOAL-033",
+        "code_fingerprint": "d7b33aaa5032c502",
+        "terminal": "propose_slice",
+        "action": "propose-goal",
+        "gate_ok": true,
+        "decoded_terminal": "propose_slice",
+        "proposed_files": [
+          "packages/quay/src/cli/driver-vocab.ts",
+          "packages/quay/src/cli/driver.ts",
+          "packages/quay/src/cli/help.ts",
+          "packages/quay/src/cli/server.ts",
+          "packages/quay/src/serve-sessions.ts",
+          "packages/quay/src/serve.ts"
+        ],
+        "subject_key": "unknown|packages/quay/src/cli/driver-vocab.ts,packages/quay/src/cli/driver.ts,packages/quay/src/cli/help.ts,packages/quay/src/cli/server.ts,packages/quay/src/serve-sessions.ts,packages/quay/src/serve.ts",
+        "evidenceCost": {
+          "rounds": 7,
+          "requests": 6,
+          "bytes": 27310
+        },
+        "falsePositiveRate": {
+          "state": "evaluated",
+          "value": 0,
+          "proposals": 1,
+          "proposed_files": [
+            "packages/quay/src/cli/driver-vocab.ts",
+            "packages/quay/src/cli/driver.ts",
+            "packages/quay/src/cli/help.ts",
+            "packages/quay/src/cli/server.ts",
+            "packages/quay/src/serve-sessions.ts",
+            "packages/quay/src/serve.ts"
+          ],
+          "matched_slice_files": [
+            "packages/quay/src/cli/driver.ts"
+          ]
+        },
+        "locality": {
+          "state": "evaluated",
+          "value": 0.7142857142857143,
+          "touched": 7,
+          "in_goal": 5
+        },
+        "recoveryRounds": {
+          "state": "evaluated",
+          "rounds": 5,
+          "recovered": true
+        }
+      },
+      {
+        "run_id": "holdoutA:replay:GOAL-033:B:discovery#23",
+        "label": "replay:GOAL-033:B:discovery",
+        "goal": "GOAL-033",
+        "code_fingerprint": "24f53829e9473eb6",
+        "terminal": "investigate_more",
+        "action": "investigate",
+        "gate_ok": true,
+        "decoded_terminal": "investigate_more",
+        "proposed_files": [],
+        "subject_key": "unknown|",
+        "evidenceCost": {
+          "rounds": 8,
+          "requests": 6,
+          "bytes": 18547
+        },
+        "falsePositiveRate": {
+          "state": "evaluated",
+          "value": 0,
+          "proposals": 0,
+          "reason": "no proposal was produced by this run"
+        },
+        "locality": {
+          "state": "evaluated",
+          "value": 0,
+          "touched": 1,
+          "in_goal": 0
+        },
+        "recoveryRounds": {
+          "state": "evaluated",
+          "rounds": 8,
+          "recovered": false
+        }
+      },
+      {
+        "run_id": "holdoutA:replay:GOAL-033:B:discovery#24",
+        "label": "replay:GOAL-033:B:discovery",
+        "goal": "GOAL-033",
+        "code_fingerprint": "431a93683c259068",
+        "terminal": "propose_slice",
+        "action": "investigate",
+        "gate_ok": true,
+        "decoded_terminal": "propose_slice",
+        "proposed_files": [],
+        "subject_key": "unknown|",
+        "evidenceCost": {
+          "rounds": 7,
+          "requests": 6,
+          "bytes": 23381
+        },
+        "falsePositiveRate": {
+          "state": "evaluated",
+          "value": 0,
+          "proposals": 0,
+          "reason": "no proposal was produced by this run"
+        },
+        "locality": {
+          "state": "evaluated",
+          "value": 0,
+          "touched": 1,
+          "in_goal": 0
+        },
+        "recoveryRounds": {
+          "state": "evaluated",
+          "rounds": 7,
+          "recovered": false
+        }
+      },
+      {
+        "run_id": "holdoutA:replay:GOAL-033:B:discovery#25",
+        "label": "replay:GOAL-033:B:discovery",
+        "goal": "GOAL-033",
+        "code_fingerprint": "d7b33aaa5032c502",
+        "terminal": "propose_slice",
+        "action": "investigate",
+        "gate_ok": true,
+        "decoded_terminal": "propose_slice",
+        "proposed_files": [
+          "packages/quay/src/gate/config/loader.ts"
+        ],
+        "subject_key": "unknown|packages/quay/src/gate/config/loader.ts",
+        "evidenceCost": {
+          "rounds": 7,
+          "requests": 6,
+          "bytes": 21009
+        },
+        "falsePositiveRate": {
+          "state": "evaluated",
+          "value": 1,
+          "proposals": 1,
+          "proposed_files": [
+            "packages/quay/src/gate/config/loader.ts"
+          ],
+          "matched_slice_files": []
+        },
+        "locality": {
+          "state": "evaluated",
+          "value": 0,
+          "touched": 2,
+          "in_goal": 0
+        },
+        "recoveryRounds": {
+          "state": "evaluated",
+          "rounds": 7,
+          "recovered": false
+        }
+      }
+    ]
+  },
+  "holdoutB": {
+    "n": 3,
+    "removed_from_commit": [
+      "goals",
+      "tasks",
+      "experiments",
+      "docs/analysis",
+      ".quay",
+      ".claude",
+      "CLAUDE.md"
+    ],
+    "rows": [
+      {
+        "run_id": "holdoutB:GOAL-034@162f8c380ed1",
+        "goal": "GOAL-034",
+        "fork_point": "162f8c380ed1dd9267167cc791ef8727fd13269d",
+        "terminal": {
+          "kind": "propose_slice",
+          "forced": false,
+          "forced_cause": null
+        },
+        "action": "investigate",
+        "gate_ok": true,
+        "usage": {
+          "rounds": 7,
+          "evidence_requests": 6,
+          "evidence_bytes": 22317
+        },
+        "decision_memory": "not-known",
+        "outcome_id": "outcome-631e6d5ad199b5c1",
+        "subject_key": "unknown|packages/quay/src/gate/config/loader.ts",
+        "envelope_concern": "gate/config (a config-parsing package) closes a 4-package SCC because its loader imports gate's types, the gate/factories registry, and the root config — mixing config parsing with gate construction.",
+        "code_fingerprint": "41665b370d5e7da5"
+      },
+      {
+        "run_id": "holdoutB:GOAL-035@1b87254733ca",
+        "goal": "GOAL-035",
+        "fork_point": "1b87254733ca2ac33412e708c65ea2d1e160f9c1",
+        "terminal": {
+          "kind": "propose_slice",
+          "forced": false,
+          "forced_cause": null
+        },
+        "action": "investigate",
+        "gate_ok": true,
+        "usage": {
+          "rounds": 7,
+          "evidence_requests": 6,
+          "evidence_bytes": 20543
+        },
+        "decision_memory": "not-known",
+        "outcome_id": "outcome-bf9aaebd92964098",
+        "subject_key": "unknown|packages/quay/src/gate/acceptance-runner.ts,packages/quay/src/gate/types.ts",
+        "envelope_concern": "gate/config and gate/factories depend on their parent package gate for the shared gate contract (GateFn type, acceptance runner), while gate depends back on both children via gate/registry.ts, closing a 4-package cycle through quay/src.",
+        "code_fingerprint": "41665b370d5e7da5"
+      },
+      {
+        "run_id": "holdoutB:GOAL-036@8cb36c2fd946",
+        "goal": "GOAL-036",
+        "fork_point": "8cb36c2fd94616aa7169dbe475d6671ee939adf6",
+        "terminal": {
+          "kind": "propose_slice",
+          "forced": false,
+          "forced_cause": null
+        },
+        "action": "propose-goal",
+        "gate_ok": true,
+        "usage": {
+          "rounds": 8,
+          "evidence_requests": 6,
+          "evidence_bytes": 8236
+        },
+        "decision_memory": "not-known",
+        "outcome_id": "outcome-960751097ab23a45",
+        "subject_key": "unknown|packages/quay/src/gate/config/loader.ts",
+        "envelope_concern": "gate/config participates in a 4-package cycle (gate/config -> gate/factories -> root -> gate -> gate/config) only because config/loader.ts pulls in the gateFactories dispatch and gate pulls config's loader exports back.",
+        "code_fingerprint": "41665b370d5e7da5"
+      }
+    ]
+  },
+  "production": {
+    "note": "3 real (non-replay) live shadow rounds on the develop tip e0d39a7c3, analysed root = a detached worktree at that commit, PRODUCTION code = this task's branch.",
+    "n": 3,
+    "rows": [
+      {
+        "run_id": "live:develop-e0d39a7c3:2026-10-11T02-49-23-101Z:1",
+        "commit": "e0d39a7c3cf1a6a1ed474406749729426303da14",
+        "terminal": {
+          "kind": "propose_slice",
+          "forced": false,
+          "forced_cause": null
+        },
+        "action": "investigate",
+        "gate_ok": true,
+        "usage": {
+          "rounds": 7,
+          "evidence_requests": 6,
+          "evidence_bytes": 17544
+        },
+        "decision_memory": "not-known",
+        "outcome_id": "outcome-365b6944715449ad",
+        "outcome_verdict": "proposed",
+        "subject_key": "unknown|packages/quay/src/gate/config/index.ts,packages/quay/src/gate/config/loader.ts,packages/quay/src/gate/registry.ts",
+        "metrics": {
+          "evidenceCost": {
+            "rounds": 7,
+            "requests": 6,
+            "bytes": 17544
+          },
+          "falsePositiveRate": {
+            "state": "not-evaluated"
+          },
+          "locality": {
+            "state": "not-evaluated"
+          },
+          "recoveryRounds": {
+            "state": "not-evaluated"
+          }
+        },
+        "envelope_concern": "gate/config is meant to be a low-level config reader but loader.ts makes it depend back on gate, gate/factories and quay/src, holding the package cycle together.",
+        "code_fingerprint": "41665b370d5e7da5"
+      },
+      {
+        "run_id": "live:develop-e0d39a7c3:2026-10-11T02-49-23-101Z:2",
+        "commit": "e0d39a7c3cf1a6a1ed474406749729426303da14",
+        "terminal": {
+          "kind": "propose_slice",
+          "forced": false,
+          "forced_cause": null
+        },
+        "action": "investigate",
+        "gate_ok": true,
+        "usage": {
+          "rounds": 7,
+          "evidence_requests": 6,
+          "evidence_bytes": 21813
+        },
+        "decision_memory": "not-known",
+        "outcome_id": "outcome-a30df8075303e0d3",
+        "outcome_verdict": "proposed",
+        "subject_key": "unknown|packages/quay/src/gate/registry.ts",
+        "metrics": {
+          "evidenceCost": {
+            "rounds": 7,
+            "requests": 6,
+            "bytes": 21813
+          },
+          "falsePositiveRate": {
+            "state": "not-evaluated"
+          },
+          "locality": {
+            "state": "not-evaluated"
+          },
+          "recoveryRounds": {
+            "state": "not-evaluated"
+          }
+        },
+        "envelope_concern": "quay/src/gate/config is a child package that imports back up into its parent (GateFn from ../types.ts) and across to its sibling (gateFactories from ../factories/index.ts) and up to the package root (findConfig from quay/src/config.ts), which together with gate->config re-exports closes a 4-package SCC with gate, gate/factories and quay/src.",
+        "code_fingerprint": "41665b370d5e7da5"
+      },
+      {
+        "run_id": "live:develop-e0d39a7c3:2026-10-11T02-49-23-101Z:3",
+        "commit": "e0d39a7c3cf1a6a1ed474406749729426303da14",
+        "terminal": {
+          "kind": "propose_slice",
+          "forced": false,
+          "forced_cause": null
+        },
+        "action": "propose-goal",
+        "gate_ok": true,
+        "usage": {
+          "rounds": 7,
+          "evidence_requests": 6,
+          "evidence_bytes": 15504
+        },
+        "decision_memory": "not-known",
+        "outcome_id": "outcome-91ee59ad6aa3e5b7",
+        "outcome_verdict": "proposed",
+        "subject_key": "unknown|packages/quay/src/gate/types.ts",
+        "metrics": {
+          "evidenceCost": {
+            "rounds": 7,
+            "requests": 6,
+            "bytes": 15504
+          },
+          "falsePositiveRate": {
+            "state": "not-evaluated"
+          },
+          "locality": {
+            "state": "not-evaluated"
+          },
+          "recoveryRounds": {
+            "state": "not-evaluated"
+          }
+        },
+        "envelope_concern": "The shared gate contract type `GateFn` is owned by packages/quay/src/gate/types.ts (directory `src/gate`), forcing packages/quay/src/gate/factories and packages/quay/src/gate/config to import upward into quay/src/gate, contributing two of the four edges in the 4-node package cycle.",
+        "code_fingerprint": "41665b370d5e7da5"
+      }
+    ]
+  },
+  "production_aggregate": {
+    "runs": 3,
+    "evidenceCost": {
+      "rounds": 21,
+      "requests": 18,
+      "bytes": 54861
+    },
+    "falsePositiveRate": {
+      "state": "not-evaluated",
+      "value": null,
+      "evaluated_runs": 0,
+      "false_positives": 0
+    },
+    "locality": {
+      "state": "not-evaluated",
+      "value": null,
+      "evaluated_runs": 0
+    },
+    "recoveryRounds": {
+      "state": "not-evaluated",
+      "recovered": 0,
+      "rounds": 0
+    }
+  },
+  "decision_memory": {
+    "seeds": [
+      {
+        "id": "dm-001-github-client-status-literals",
+        "type": "exempted",
+        "concern_kinds": [
+          "canonicalization"
+        ],
+        "files": [
+          "packages/quay-github/src/github-client.ts"
+        ],
+        "source": "tasks/gap-abi-status-lifecycle-vocab-scattered-no-named-type.md (AC2 exemption record) + goals/GOAL-031-needs-human-状态词汇-canonicalization-试点-goal-driver-ts-5-处裸字面量收.md (why_not_others). Re-proposed by the shadow loop: docs/analysis/ownership-active-replay.md §3."
+      },
+      {
+        "id": "dm-002-flipgoal-disposeold-statuslog",
+        "type": "known-not-yet-filed",
+        "concern_kinds": [
+          "other-boundary"
+        ],
+        "files": [
+          "packages/quay/src/goal-store.ts"
+        ],
+        "source": "goals/GOAL-036-workerpool-在飞排除集合-inflight-retryexhausted-收敛到单一纯函数计算点-同一轮内两次.md §相关但本轮不落地 (③Goal transition contract)."
+      },
+      {
+        "id": "dm-003-status-vocab-false-positives",
+        "type": "exempted",
+        "concern_kinds": [
+          "canonicalization"
+        ],
+        "files": [
+          "packages/quay/src/observation.ts",
+          "plugin/scripts/workflow-baseline-metrics.ts",
+          "plugin/scripts/workflow-replay.ts"
+        ],
+        "source": "goals/GOAL-031-needs-human-状态词汇-canonicalization-试点-goal-driver-ts-5-处裸字面量收.md (why_not_others: 不碰 observation.ts / workflow-baseline-metrics.ts / workflow-replay.ts)."
+      }
+    ],
+    "hits": [
+      {
+        "corpus": "holdoutA-replay",
+        "label": "replay:GOAL-032:A:discovery",
+        "status": "known-not-yet-filed",
+        "entry": "dm-002-flipgoal-disposeold-statuslog",
+        "matched_files": [
+          "packages/quay/src/goal-store.ts"
+        ]
+      },
+      {
+        "corpus": "historical-live",
+        "label": "live",
+        "status": "exempted",
+        "entry": "dm-001-github-client-status-literals",
+        "matched_files": [
+          "packages/quay-github/src/github-client.ts"
+        ]
+      }
+    ],
+    "hit_count": 2,
+    "miss_count": 30,
+    "missed_examples": [
+      {
+        "corpus": "holdoutA-replay",
+        "label": "replay:GOAL-032:A:discovery"
+      },
+      {
+        "corpus": "holdoutA-replay",
+        "label": "replay:GOAL-032:A:discovery"
+      },
+      {
+        "corpus": "holdoutA-replay",
+        "label": "replay:GOAL-032:A:triggered"
+      }
+    ]
+  },
+  "isolation": {
+    "counts": {
+      "holdoutA": 25,
+      "holdoutB": 3,
+      "production": 3,
+      "decision_memory_seed_ids": 3
+    },
+    "record_id_sets": {
+      "holdoutA": [
+        "outcome-02ec015cf16532fe",
+        "outcome-076761fb4c939cce",
+        "outcome-08f0ce7fced33284",
+        "outcome-0b56fc6316547910",
+        "outcome-155453b2225a7a24",
+        "outcome-16d51aea58793df2",
+        "outcome-1740e10ac2392ecc",
+        "outcome-199d99141b058162",
+        "outcome-2582a3192b727b8b",
+        "outcome-27249493a29de10a",
+        "outcome-441ba34a55ee033c",
+        "outcome-55f0055a6940ea00",
+        "outcome-5647e09394a59769",
+        "outcome-62260b579a94b7b6",
+        "outcome-6e6216fff6699731",
+        "outcome-843ffdc5dacffa55",
+        "outcome-9563bdafe7dc3317",
+        "outcome-9be6d06207e1557e",
+        "outcome-ab7b8a5c163df86e",
+        "outcome-ace11fae2e0b2523",
+        "outcome-b0176aa9ec9856fe",
+        "outcome-b616278a5842d667",
+        "outcome-c2221a3a3539fd40",
+        "outcome-de0b8f6fb956f798",
+        "outcome-f8799096c53e076a"
+      ],
+      "holdoutB": [
+        "outcome-631e6d5ad199b5c1",
+        "outcome-960751097ab23a45",
+        "outcome-bf9aaebd92964098"
+      ],
+      "decision_memory": [
+        "dm-001-github-client-status-literals",
+        "dm-002-flipgoal-disposeold-statuslog",
+        "dm-003-status-vocab-false-positives"
+      ],
+      "A_cap_B": [],
+      "A_cap_DM": [],
+      "B_cap_DM": []
+    },
+    "subject_identities": {
+      "holdoutA": [
+        "unknown|",
+        "unknown|packages/quay-backlog/bin/quay-backlog.ts,packages/quay-github/bin/quay-github.ts,packages/quay-native/bin/quay-native.ts,packages/quay/bin/quay.ts,packages/quay/src/cli/flags.ts",
+        "unknown|packages/quay/src/cli/driver-vocab.ts,packages/quay/src/cli/driver.ts,packages/quay/src/cli/help.ts,packages/quay/src/cli/server.ts,packages/quay/src/serve-sessions.ts,packages/quay/src/serve.ts",
+        "unknown|packages/quay/src/cli/driver.ts,packages/quay/src/fan-in/ff-merge.ts",
+        "unknown|packages/quay/src/cli/driver.ts,packages/quay/src/fan-in/ff-merge.ts,packages/quay/src/instrument-probe.ts,packages/quay/src/observation.ts",
+        "unknown|packages/quay/src/config.ts,packages/quay/src/gate/config/loader.ts,packages/quay/src/gate/config/utils.ts,packages/quay/src/goal-store.ts",
+        "unknown|packages/quay/src/criterion-fidelity.ts,packages/quay/src/kernel/verdict-parse.ts,plugin/scripts/goal-driver.ts,plugin/scripts/verdict-parse.ts",
+        "unknown|packages/quay/src/criterion-fidelity.ts,packages/quay/src/verdict-parse.ts,plugin/scripts/driver-runtime.ts,plugin/scripts/goal-driver.ts,plugin/test/criterion-fidelity-historical-case.test.mjs,plugin/test/goal-sufficiency-semantic-covered.test.mjs",
+        "unknown|packages/quay/src/criterion-fidelity.ts,plugin/scripts/driver-runtime.ts,plugin/scripts/goal-driver.ts",
+        "unknown|packages/quay/src/criterion-fidelity.ts,plugin/scripts/goal-driver.ts",
+        "unknown|packages/quay/src/criterion-fidelity.ts,plugin/scripts/goal-driver.ts,plugin/test/criterion-fidelity-historical-case.test.mjs,plugin/test/goal-sufficiency-semantic-covered.test.mjs",
+        "unknown|packages/quay/src/gate/config/loader.ts",
+        "unknown|packages/quay/src/gate/factories/document-contract.ts,packages/quay/src/gate/factories/goal.ts,packages/quay/src/gate/factories/index.ts",
+        "unknown|packages/quay/src/gate/registry.ts",
+        "unknown|plugin/scripts/driver-filters.ts",
+        "unknown|plugin/scripts/fs-walk.ts,plugin/scripts/threshold-scope-check.ts,plugin/scripts/tick-core-static-check.ts",
+        "unknown|plugin/scripts/task-status.ts,plugin/scripts/worker-fan-in.ts"
+      ],
+      "holdoutB": [
+        "unknown|packages/quay/src/gate/acceptance-runner.ts,packages/quay/src/gate/types.ts",
+        "unknown|packages/quay/src/gate/config/loader.ts"
+      ],
+      "A_cap_B": [
+        "unknown|packages/quay/src/gate/config/loader.ts"
+      ],
+      "B_subject_files_cap_DM_seed_files": []
+    },
+    "seed_source_goals_cap_holdoutB_goals": [
+      "GOAL-036"
+    ],
+    "record_ids_pairwise_disjoint": true,
+    "subject_identity_pairwise_disjoint": false,
+    "jq_check": {
+      "command": "jq -s 'map(select(.kind==\"outcome\")) as $all | ($all|map(select(.run_id|startswith(\"holdoutB:\")))|map(.id)) as $b | ($all|map(select(.run_id|startswith(\"holdoutA:\")))|map(.id)) as $a | {b_count:($b|length), a_count:($a|length), b_cap_a: ($b - ($b - $a)), b_cap_a_len: (($b - ($b - $a))|length), disjoint: ((($b - ($b - $a))|length)==0)}' <consolidated>",
+      "result": {
+        "b_count": 3,
+        "a_count": 25,
+        "b_cap_a": [],
+        "b_cap_a_len": 0,
+        "disjoint": true
+      }
+    }
+  },
+  "outcome_records": {
+    "holdoutA": [
+      {
+        "kind": "outcome",
+        "id": "outcome-9be6d06207e1557e",
+        "experiment_ref": "bounded shadow investigation (replay:GOAL-032:A:discovery) — declarative evidence requests under hard budgets, no write surface",
+        "verdict": "proposed",
+        "run_id": "holdoutA:replay:GOAL-032:A:discovery#1",
+        "label": "replay:GOAL-032:A:discovery",
+        "commit": "30c619f1a10eac97c238c6d941e4cd87b6a65092",
+        "subject_key": "unknown|packages/quay/src/config.ts,packages/quay/src/gate/config/loader.ts,packages/quay/src/gate/config/utils.ts,packages/quay/src/goal-store.ts",
+        "subject_files": [
+          "packages/quay/src/config.ts",
+          "packages/quay/src/gate/config/loader.ts",
+          "packages/quay/src/gate/config/utils.ts",
+          "packages/quay/src/goal-store.ts"
+        ],
+        "concern_key": "config resolution ownership is split the root package imports gate config for the acceptance timeout knob while gate config imports the root for workspace config discovery findconfig forming a two sym",
+        "gate_ok": true,
+        "ts": "2026-10-10T05:14:44.471Z",
+        "metrics": {
+          "evidenceCost": {
+            "rounds": 8,
+            "requests": 6,
+            "bytes": 15869
+          },
+          "falsePositiveRate": {
+            "state": "evaluated",
+            "value": 1,
+            "proposals": 1,
+            "proposed_files": [
+              "packages/quay/src/config.ts",
+              "packages/quay/src/gate/config/loader.ts",
+              "packages/quay/src/gate/config/utils.ts",
+              "packages/quay/src/goal-store.ts"
+            ],
+            "matched_slice_files": []
+          },
+          "locality": {
+            "state": "evaluated",
+            "value": 0,
+            "touched": 4,
+            "in_goal": 0
+          },
+          "recoveryRounds": {
+            "state": "evaluated",
+            "rounds": 8,
+            "recovered": false
+          }
+        }
+      },
+      {
+        "kind": "outcome",
+        "id": "outcome-08f0ce7fced33284",
+        "experiment_ref": "bounded shadow investigation (replay:GOAL-032:A:discovery) — declarative evidence requests under hard budgets, no write surface",
+        "verdict": "proposed",
+        "run_id": "holdoutA:replay:GOAL-032:A:discovery#2",
+        "label": "replay:GOAL-032:A:discovery",
+        "commit": "30c619f1a10eac97c238c6d941e4cd87b6a65092",
+        "subject_key": "unknown|packages/quay/src/gate/registry.ts",
+        "subject_files": [
+          "packages/quay/src/gate/registry.ts"
+        ],
+        "concern_key": "the gate factory layer exposes a second aliasing surface over gate config factories loader ts re exporting config loader ts factories utils ts re exporting config types utils ts and its factories are ",
+        "gate_ok": true,
+        "ts": "2026-10-10T05:27:16.209Z",
+        "metrics": {
+          "evidenceCost": {
+            "rounds": 7,
+            "requests": 6,
+            "bytes": 8709
+          },
+          "falsePositiveRate": {
+            "state": "evaluated",
+            "value": 1,
+            "proposals": 1,
+            "proposed_files": [
+              "packages/quay/src/gate/registry.ts"
+            ],
+            "matched_slice_files": []
+          },
+          "locality": {
+            "state": "evaluated",
+            "value": 0,
+            "touched": 1,
+            "in_goal": 0
+          },
+          "recoveryRounds": {
+            "state": "evaluated",
+            "rounds": 7,
+            "recovered": false
+          }
+        }
+      },
+      {
+        "kind": "outcome",
+        "id": "outcome-5647e09394a59769",
+        "experiment_ref": "bounded shadow investigation (replay:GOAL-032:A:discovery) — declarative evidence requests under hard budgets, no write surface",
+        "verdict": "proposed",
+        "run_id": "holdoutA:replay:GOAL-032:A:discovery#3",
+        "label": "replay:GOAL-032:A:discovery",
+        "commit": "30c619f1a10eac97c238c6d941e4cd87b6a65092",
+        "subject_key": "unknown|packages/quay/src/gate/factories/document-contract.ts,packages/quay/src/gate/factories/goal.ts,packages/quay/src/gate/factories/index.ts",
+        "subject_files": [
+          "packages/quay/src/gate/factories/document-contract.ts",
+          "packages/quay/src/gate/factories/goal.ts",
+          "packages/quay/src/gate/factories/index.ts"
+        ],
+        "concern_key": "the gate factory files document contract ts goal ts import the root module dir which is the edge gate factories that closes the 6 package cycle cli fan in gate gate config gate factories the factory l",
+        "gate_ok": true,
+        "ts": "2026-10-10T05:58:47.696Z",
+        "metrics": {
+          "evidenceCost": {
+            "rounds": 8,
+            "requests": 6,
+            "bytes": 21671
+          },
+          "falsePositiveRate": {
+            "state": "evaluated",
+            "value": 1,
+            "proposals": 1,
+            "proposed_files": [
+              "packages/quay/src/gate/factories/document-contract.ts",
+              "packages/quay/src/gate/factories/goal.ts",
+              "packages/quay/src/gate/factories/index.ts"
+            ],
+            "matched_slice_files": []
+          },
+          "locality": {
+            "state": "evaluated",
+            "value": 0,
+            "touched": 4,
+            "in_goal": 0
+          },
+          "recoveryRounds": {
+            "state": "evaluated",
+            "rounds": 8,
+            "recovered": false
+          }
+        }
+      },
+      {
+        "kind": "outcome",
+        "id": "outcome-62260b579a94b7b6",
+        "experiment_ref": "bounded shadow investigation (replay:GOAL-032:A:triggered) — declarative evidence requests under hard budgets, no write surface",
+        "verdict": "not-evaluated",
+        "run_id": "holdoutA:replay:GOAL-032:A:triggered#4",
+        "label": "replay:GOAL-032:A:triggered",
+        "commit": "30c619f1a10eac97c238c6d941e4cd87b6a65092",
+        "subject_key": "unknown|",
+        "subject_files": [],
+        "concern_key": null,
+        "gate_ok": null,
+        "ts": "2026-10-10T05:12:12.352Z",
+        "metrics": {
+          "evidenceCost": {
+            "rounds": 3,
+            "requests": 2,
+            "bytes": 15137
+          },
+          "falsePositiveRate": {
+            "state": "evaluated",
+            "value": 0,
+            "proposals": 0,
+            "reason": "no proposal was produced by this run"
+          },
+          "locality": {
+            "state": "evaluated",
+            "value": 1,
+            "touched": 1,
+            "in_goal": 1
+          },
+          "recoveryRounds": {
+            "state": "evaluated",
+            "rounds": 2,
+            "recovered": true
+          }
+        }
+      },
+      {
+        "kind": "outcome",
+        "id": "outcome-441ba34a55ee033c",
+        "experiment_ref": "bounded shadow investigation (replay:GOAL-032:A:triggered) — declarative evidence requests under hard budgets, no write surface",
+        "verdict": "proposed",
+        "run_id": "holdoutA:replay:GOAL-032:A:triggered#5",
+        "label": "replay:GOAL-032:A:triggered",
+        "commit": "30c619f1a10eac97c238c6d941e4cd87b6a65092",
+        "subject_key": "unknown|plugin/scripts/fs-walk.ts,plugin/scripts/threshold-scope-check.ts,plugin/scripts/tick-core-static-check.ts",
+        "subject_files": [
+          "plugin/scripts/fs-walk.ts",
+          "plugin/scripts/threshold-scope-check.ts",
+          "plugin/scripts/tick-core-static-check.ts"
+        ],
+        "concern_key": "pathcandidates and its path ext re top levels constant pair exists as two near identical copies in plugin scripts threshold scope check ts and plugin scripts tick core static check ts so the same is t",
+        "gate_ok": true,
+        "ts": "2026-10-10T05:14:46.840Z",
+        "metrics": {
+          "evidenceCost": {
+            "rounds": 8,
+            "requests": 6,
+            "bytes": 31196
+          },
+          "falsePositiveRate": {
+            "state": "evaluated",
+            "value": 1,
+            "proposals": 1,
+            "proposed_files": [
+              "plugin/scripts/fs-walk.ts",
+              "plugin/scripts/threshold-scope-check.ts",
+              "plugin/scripts/tick-core-static-check.ts"
+            ],
+            "matched_slice_files": []
+          },
+          "locality": {
+            "state": "evaluated",
+            "value": 0,
+            "touched": 3,
+            "in_goal": 0
+          },
+          "recoveryRounds": {
+            "state": "evaluated",
+            "rounds": 8,
+            "recovered": false
+          }
+        }
+      },
+      {
+        "kind": "outcome",
+        "id": "outcome-de0b8f6fb956f798",
+        "experiment_ref": "bounded shadow investigation (replay:GOAL-032:A:triggered) — declarative evidence requests under hard budgets, no write surface",
+        "verdict": "proposed",
+        "run_id": "holdoutA:replay:GOAL-032:A:triggered#6",
+        "label": "replay:GOAL-032:A:triggered",
+        "commit": "30c619f1a10eac97c238c6d941e4cd87b6a65092",
+        "subject_key": "unknown|packages/quay/src/criterion-fidelity.ts,plugin/scripts/goal-driver.ts,plugin/test/criterion-fidelity-historical-case.test.mjs,plugin/test/goal-sufficiency-semantic-covered.test.mjs",
+        "subject_files": [
+          "packages/quay/src/criterion-fidelity.ts",
+          "plugin/scripts/goal-driver.ts",
+          "plugin/test/criterion-fidelity-historical-case.test.mjs",
+          "plugin/test/goal-sufficiency-semantic-covered.test.mjs"
+        ],
+        "concern_key": "one fail closed three state verdict parser is maintained as two and likely three independent copies across the core plugin boundary so a fix or a fail closed regression at one copy does not reach the ",
+        "gate_ok": true,
+        "ts": "2026-10-10T05:31:19.972Z",
+        "metrics": {
+          "evidenceCost": {
+            "rounds": 7,
+            "requests": 6,
+            "bytes": 33655
+          },
+          "falsePositiveRate": {
+            "state": "evaluated",
+            "value": 0,
+            "proposals": 1,
+            "proposed_files": [
+              "packages/quay/src/criterion-fidelity.ts",
+              "plugin/scripts/goal-driver.ts",
+              "plugin/test/criterion-fidelity-historical-case.test.mjs",
+              "plugin/test/goal-sufficiency-semantic-covered.test.mjs"
+            ],
+            "matched_slice_files": [
+              "packages/quay/src/criterion-fidelity.ts",
+              "plugin/scripts/goal-driver.ts"
+            ]
+          },
+          "locality": {
+            "state": "evaluated",
+            "value": 0.5,
+            "touched": 4,
+            "in_goal": 2
+          },
+          "recoveryRounds": {
+            "state": "evaluated",
+            "rounds": 1,
+            "recovered": true
+          }
+        }
+      },
+      {
+        "kind": "outcome",
+        "id": "outcome-b0176aa9ec9856fe",
+        "experiment_ref": "bounded shadow investigation (replay:GOAL-032:A:triggered) — declarative evidence requests under hard budgets, no write surface",
+        "verdict": "proposed",
+        "run_id": "holdoutA:replay:GOAL-032:A:triggered#7",
+        "label": "replay:GOAL-032:A:triggered",
+        "commit": "30c619f1a10eac97c238c6d941e4cd87b6a65092",
+        "subject_key": "unknown|packages/quay/src/criterion-fidelity.ts,plugin/scripts/driver-runtime.ts,plugin/scripts/goal-driver.ts",
+        "subject_files": [
+          "packages/quay/src/criterion-fidelity.ts",
+          "plugin/scripts/driver-runtime.ts",
+          "plugin/scripts/goal-driver.ts"
+        ],
+        "concern_key": "one fail closed verdict parse mechanic is maintained as three separate copies two inside plugin scripts goal driver ts one in packages quay src criterion fidelity ts so the whitelist check and the fai",
+        "gate_ok": true,
+        "ts": "2026-10-10T05:45:40.649Z",
+        "metrics": {
+          "evidenceCost": {
+            "rounds": 8,
+            "requests": 6,
+            "bytes": 42365
+          },
+          "falsePositiveRate": {
+            "state": "evaluated",
+            "value": 0,
+            "proposals": 1,
+            "proposed_files": [
+              "packages/quay/src/criterion-fidelity.ts",
+              "plugin/scripts/driver-runtime.ts",
+              "plugin/scripts/goal-driver.ts"
+            ],
+            "matched_slice_files": [
+              "packages/quay/src/criterion-fidelity.ts",
+              "plugin/scripts/goal-driver.ts"
+            ]
+          },
+          "locality": {
+            "state": "evaluated",
+            "value": 0.6666666666666666,
+            "touched": 3,
+            "in_goal": 2
+          },
+          "recoveryRounds": {
+            "state": "evaluated",
+            "rounds": 1,
+            "recovered": true
+          }
+        }
+      },
+      {
+        "kind": "outcome",
+        "id": "outcome-2582a3192b727b8b",
+        "experiment_ref": "bounded shadow investigation (replay:GOAL-032:A:triggered) — declarative evidence requests under hard budgets, no write surface",
+        "verdict": "proposed",
+        "run_id": "holdoutA:replay:GOAL-032:A:triggered#8",
+        "label": "replay:GOAL-032:A:triggered",
+        "commit": "30c619f1a10eac97c238c6d941e4cd87b6a65092",
+        "subject_key": "unknown|packages/quay/src/criterion-fidelity.ts,plugin/scripts/goal-driver.ts",
+        "subject_files": [
+          "packages/quay/src/criterion-fidelity.ts",
+          "plugin/scripts/goal-driver.ts"
+        ],
+        "concern_key": "two structurally identical fail closed json token verdict parsers live one on each side of the packages quay plugin boundary packages quay src criterion fidelity ts 71 87 parsefidelityverdict and plug",
+        "gate_ok": true,
+        "ts": "2026-10-10T05:58:35.479Z",
+        "metrics": {
+          "evidenceCost": {
+            "rounds": 7,
+            "requests": 6,
+            "bytes": 21812
+          },
+          "falsePositiveRate": {
+            "state": "evaluated",
+            "value": 0,
+            "proposals": 1,
+            "proposed_files": [
+              "packages/quay/src/criterion-fidelity.ts",
+              "plugin/scripts/goal-driver.ts"
+            ],
+            "matched_slice_files": [
+              "packages/quay/src/criterion-fidelity.ts",
+              "plugin/scripts/goal-driver.ts"
+            ]
+          },
+          "locality": {
+            "state": "evaluated",
+            "value": 1,
+            "touched": 2,
+            "in_goal": 2
+          },
+          "recoveryRounds": {
+            "state": "evaluated",
+            "rounds": 1,
+            "recovered": true
+          }
+        }
+      },
+      {
+        "kind": "outcome",
+        "id": "outcome-9563bdafe7dc3317",
+        "experiment_ref": "bounded shadow investigation (replay:GOAL-032:A:triggered) — declarative evidence requests under hard budgets, no write surface",
+        "verdict": "proposed",
+        "run_id": "holdoutA:replay:GOAL-032:A:triggered#9",
+        "label": "replay:GOAL-032:A:triggered",
+        "commit": "30c619f1a10eac97c238c6d941e4cd87b6a65092",
+        "subject_key": "unknown|packages/quay/src/criterion-fidelity.ts,plugin/scripts/goal-driver.ts",
+        "subject_files": [
+          "packages/quay/src/criterion-fidelity.ts",
+          "plugin/scripts/goal-driver.ts"
+        ],
+        "concern_key": "the three state fail closed verdict parser has two definition points packages quay src criterion fidelity ts 71 87 and plugin scripts goal driver ts 1142 1161 and criterion fidelity ts 28 67 documents",
+        "gate_ok": true,
+        "ts": "2026-10-10T05:08:52.569Z",
+        "metrics": {
+          "evidenceCost": {
+            "rounds": 7,
+            "requests": 6,
+            "bytes": 27195
+          },
+          "falsePositiveRate": {
+            "state": "evaluated",
+            "value": 0,
+            "proposals": 1,
+            "proposed_files": [
+              "packages/quay/src/criterion-fidelity.ts",
+              "plugin/scripts/goal-driver.ts"
+            ],
+            "matched_slice_files": [
+              "packages/quay/src/criterion-fidelity.ts",
+              "plugin/scripts/goal-driver.ts"
+            ]
+          },
+          "locality": {
+            "state": "evaluated",
+            "value": 1,
+            "touched": 2,
+            "in_goal": 2
+          },
+          "recoveryRounds": {
+            "state": "evaluated",
+            "rounds": 7,
+            "recovered": true
+          }
+        }
+      },
+      {
+        "kind": "outcome",
+        "id": "outcome-0b56fc6316547910",
+        "experiment_ref": "bounded shadow investigation (replay:GOAL-032:A:triggered) — declarative evidence requests under hard budgets, no write surface",
+        "verdict": "proposed",
+        "run_id": "holdoutA:replay:GOAL-032:A:triggered#10",
+        "label": "replay:GOAL-032:A:triggered",
+        "commit": "30c619f1a10eac97c238c6d941e4cd87b6a65092",
+        "subject_key": "unknown|packages/quay-backlog/bin/quay-backlog.ts,packages/quay-github/bin/quay-github.ts,packages/quay-native/bin/quay-native.ts,packages/quay/bin/quay.ts,packages/quay/src/cli/flags.ts",
+        "subject_files": [
+          "packages/quay-backlog/bin/quay-backlog.ts",
+          "packages/quay-github/bin/quay-github.ts",
+          "packages/quay-native/bin/quay-native.ts",
+          "packages/quay/bin/quay.ts",
+          "packages/quay/src/cli/flags.ts"
+        ],
+        "concern_key": "cli flag parsing is triplicated verbatim inside the three provider bin entry points with no shared owner while an exported canonical parser already exists in core and is consumed only by packages quay",
+        "gate_ok": true,
+        "ts": "2026-10-10T05:08:30.531Z",
+        "metrics": {
+          "evidenceCost": {
+            "rounds": 7,
+            "requests": 6,
+            "bytes": 31754
+          },
+          "falsePositiveRate": {
+            "state": "evaluated",
+            "value": 1,
+            "proposals": 1,
+            "proposed_files": [
+              "packages/quay-backlog/bin/quay-backlog.ts",
+              "packages/quay-github/bin/quay-github.ts",
+              "packages/quay-native/bin/quay-native.ts",
+              "packages/quay/bin/quay.ts",
+              "packages/quay/src/cli/flags.ts"
+            ],
+            "matched_slice_files": []
+          },
+          "locality": {
+            "state": "evaluated",
+            "value": 0,
+            "touched": 7,
+            "in_goal": 0
+          },
+          "recoveryRounds": {
+            "state": "evaluated",
+            "rounds": 7,
+            "recovered": false
+          }
+        }
+      },
+      {
+        "kind": "outcome",
+        "id": "outcome-f8799096c53e076a",
+        "experiment_ref": "bounded shadow investigation (replay:GOAL-032:B:discovery) — declarative evidence requests under hard budgets, no write surface",
+        "verdict": "proposed",
+        "run_id": "holdoutA:replay:GOAL-032:B:discovery#11",
+        "label": "replay:GOAL-032:B:discovery",
+        "commit": "273ef15b1ebebbbc5573bf08254c9dcd741920dc",
+        "subject_key": "unknown|plugin/scripts/task-status.ts,plugin/scripts/worker-fan-in.ts",
+        "subject_files": [
+          "plugin/scripts/task-status.ts",
+          "plugin/scripts/worker-fan-in.ts"
+        ],
+        "concern_key": "in plugin scripts worker fan in ts the task status decision and write sites pass compare raw lifecycle literals ready done rather than the plugin tree s canonical task status constants even though the",
+        "gate_ok": true,
+        "ts": "2026-10-10T05:20:42.261Z",
+        "metrics": {
+          "evidenceCost": {
+            "rounds": 7,
+            "requests": 6,
+            "bytes": 33524
+          },
+          "falsePositiveRate": {
+            "state": "evaluated",
+            "value": 1,
+            "proposals": 1,
+            "proposed_files": [
+              "plugin/scripts/task-status.ts",
+              "plugin/scripts/worker-fan-in.ts"
+            ],
+            "matched_slice_files": []
+          },
+          "locality": {
+            "state": "evaluated",
+            "value": 0,
+            "touched": 3,
+            "in_goal": 0
+          },
+          "recoveryRounds": {
+            "state": "evaluated",
+            "rounds": 7,
+            "recovered": false
+          }
+        }
+      },
+      {
+        "kind": "outcome",
+        "id": "outcome-6e6216fff6699731",
+        "experiment_ref": "bounded shadow investigation (replay:GOAL-032:B:discovery) — declarative evidence requests under hard budgets, no write surface",
+        "verdict": "proposed",
+        "run_id": "holdoutA:replay:GOAL-032:B:discovery#12",
+        "label": "replay:GOAL-032:B:discovery",
+        "commit": "273ef15b1ebebbbc5573bf08254c9dcd741920dc",
+        "subject_key": "unknown|packages/quay/src/cli/driver.ts,packages/quay/src/fan-in/ff-merge.ts",
+        "subject_files": [
+          "packages/quay/src/cli/driver.ts",
+          "packages/quay/src/fan-in/ff-merge.ts"
+        ],
+        "concern_key": "packages quay src cli reaches into packages quay src fan in to borrow an instrument availability probe that fan in does not own creating a cli fan in package edge that participates in the 6 package cy",
+        "gate_ok": true,
+        "ts": "2026-10-10T05:53:02.389Z",
+        "metrics": {
+          "evidenceCost": {
+            "rounds": 7,
+            "requests": 6,
+            "bytes": 22401
+          },
+          "falsePositiveRate": {
+            "state": "evaluated",
+            "value": 1,
+            "proposals": 1,
+            "proposed_files": [
+              "packages/quay/src/cli/driver.ts",
+              "packages/quay/src/fan-in/ff-merge.ts"
+            ],
+            "matched_slice_files": []
+          },
+          "locality": {
+            "state": "evaluated",
+            "value": 0,
+            "touched": 3,
+            "in_goal": 0
+          },
+          "recoveryRounds": {
+            "state": "evaluated",
+            "rounds": 7,
+            "recovered": false
+          }
+        }
+      },
+      {
+        "kind": "outcome",
+        "id": "outcome-ab7b8a5c163df86e",
+        "experiment_ref": "bounded shadow investigation (replay:GOAL-032:B:discovery) — declarative evidence requests under hard budgets, no write surface",
+        "verdict": "proposed",
+        "run_id": "holdoutA:replay:GOAL-032:B:discovery#13",
+        "label": "replay:GOAL-032:B:discovery",
+        "commit": "273ef15b1ebebbbc5573bf08254c9dcd741920dc",
+        "subject_key": "unknown|plugin/scripts/driver-filters.ts",
+        "subject_files": [
+          "plugin/scripts/driver-filters.ts"
+        ],
+        "concern_key": "three caller sites in plugin scripts hand write the terminal dependency status pair done superseded instead of routing through the canonical judgedepstatus so the status rule table has three undeclare",
+        "gate_ok": true,
+        "ts": "2026-10-10T05:10:38.239Z",
+        "metrics": {
+          "evidenceCost": {
+            "rounds": 8,
+            "requests": 6,
+            "bytes": 33817
+          },
+          "falsePositiveRate": {
+            "state": "evaluated",
+            "value": 1,
+            "proposals": 1,
+            "proposed_files": [
+              "plugin/scripts/driver-filters.ts"
+            ],
+            "matched_slice_files": []
+          },
+          "locality": {
+            "state": "evaluated",
+            "value": 0,
+            "touched": 2,
+            "in_goal": 0
+          },
+          "recoveryRounds": {
+            "state": "evaluated",
+            "rounds": 8,
+            "recovered": false
+          }
+        }
+      },
+      {
+        "kind": "outcome",
+        "id": "outcome-1740e10ac2392ecc",
+        "experiment_ref": "bounded shadow investigation (replay:GOAL-032:B:triggered) — declarative evidence requests under hard budgets, no write surface",
+        "verdict": "proposed",
+        "run_id": "holdoutA:replay:GOAL-032:B:triggered#14",
+        "label": "replay:GOAL-032:B:triggered",
+        "commit": "273ef15b1ebebbbc5573bf08254c9dcd741920dc",
+        "subject_key": "unknown|packages/quay/src/criterion-fidelity.ts,packages/quay/src/kernel/verdict-parse.ts,plugin/scripts/goal-driver.ts,plugin/scripts/verdict-parse.ts",
+        "subject_files": [
+          "packages/quay/src/criterion-fidelity.ts",
+          "packages/quay/src/kernel/verdict-parse.ts",
+          "plugin/scripts/goal-driver.ts",
+          "plugin/scripts/verdict-parse.ts"
+        ],
+        "concern_key": "the fail closed stdout three state verdict never fall back to the positive value parser exists as two byte identical copies packages quay src criterion fidelity ts 71 87 and plugin scripts goal driver",
+        "gate_ok": true,
+        "ts": "2026-10-10T05:11:50.543Z",
+        "metrics": {
+          "evidenceCost": {
+            "rounds": 7,
+            "requests": 6,
+            "bytes": 40447
+          },
+          "falsePositiveRate": {
+            "state": "evaluated",
+            "value": 0,
+            "proposals": 1,
+            "proposed_files": [
+              "packages/quay/src/criterion-fidelity.ts",
+              "packages/quay/src/kernel/verdict-parse.ts",
+              "plugin/scripts/goal-driver.ts",
+              "plugin/scripts/verdict-parse.ts"
+            ],
+            "matched_slice_files": [
+              "packages/quay/src/criterion-fidelity.ts",
+              "packages/quay/src/kernel/verdict-parse.ts",
+              "plugin/scripts/goal-driver.ts"
+            ]
+          },
+          "locality": {
+            "state": "evaluated",
+            "value": 0.75,
+            "touched": 4,
+            "in_goal": 3
+          },
+          "recoveryRounds": {
+            "state": "evaluated",
+            "rounds": 1,
+            "recovered": true
+          }
+        }
+      },
+      {
+        "kind": "outcome",
+        "id": "outcome-16d51aea58793df2",
+        "experiment_ref": "bounded shadow investigation (replay:GOAL-032:B:triggered) — declarative evidence requests under hard budgets, no write surface",
+        "verdict": "not-evaluated",
+        "run_id": "holdoutA:replay:GOAL-032:B:triggered#15",
+        "label": "replay:GOAL-032:B:triggered",
+        "commit": "273ef15b1ebebbbc5573bf08254c9dcd741920dc",
+        "subject_key": "unknown|",
+        "subject_files": [],
+        "concern_key": null,
+        "gate_ok": null,
+        "ts": "2026-10-10T05:12:12.577Z",
+        "metrics": {
+          "evidenceCost": {
+            "rounds": 1,
+            "requests": 0,
+            "bytes": 0
+          },
+          "falsePositiveRate": {
+            "state": "evaluated",
+            "value": 0,
+            "proposals": 0,
+            "reason": "no proposal was produced by this run"
+          },
+          "locality": {
+            "state": "evaluated",
+            "value": 0,
+            "touched": 0,
+            "in_goal": 0
+          },
+          "recoveryRounds": {
+            "state": "evaluated",
+            "rounds": 1,
+            "recovered": false
+          }
+        }
+      },
+      {
+        "kind": "outcome",
+        "id": "outcome-ace11fae2e0b2523",
+        "experiment_ref": "bounded shadow investigation (replay:GOAL-032:B:triggered) — declarative evidence requests under hard budgets, no write surface",
+        "verdict": "proposed",
+        "run_id": "holdoutA:replay:GOAL-032:B:triggered#16",
+        "label": "replay:GOAL-032:B:triggered",
+        "commit": "273ef15b1ebebbbc5573bf08254c9dcd741920dc",
+        "subject_key": "unknown|packages/quay/src/criterion-fidelity.ts,packages/quay/src/verdict-parse.ts,plugin/scripts/driver-runtime.ts,plugin/scripts/goal-driver.ts,plugin/test/criterion-fidelity-historical-case.test.mjs,plugin/test/goal-sufficiency-semantic-covered.test.mjs",
+        "subject_files": [
+          "packages/quay/src/criterion-fidelity.ts",
+          "packages/quay/src/verdict-parse.ts",
+          "plugin/scripts/driver-runtime.ts",
+          "plugin/scripts/goal-driver.ts",
+          "plugin/test/criterion-fidelity-historical-case.test.mjs",
+          "plugin/test/goal-sufficiency-semantic-covered.test.mjs"
+        ],
+        "concern_key": "three independent copies of the fail closed three state verdict parser identical json scan loop differing only in accepted tokens return shape mean a fix or hardening to the fail closed discipline can",
+        "gate_ok": true,
+        "ts": "2026-10-10T05:42:25.173Z",
+        "metrics": {
+          "evidenceCost": {
+            "rounds": 7,
+            "requests": 6,
+            "bytes": 42970
+          },
+          "falsePositiveRate": {
+            "state": "evaluated",
+            "value": 0,
+            "proposals": 1,
+            "proposed_files": [
+              "packages/quay/src/criterion-fidelity.ts",
+              "packages/quay/src/verdict-parse.ts",
+              "plugin/scripts/driver-runtime.ts",
+              "plugin/scripts/goal-driver.ts",
+              "plugin/test/criterion-fidelity-historical-case.test.mjs",
+              "plugin/test/goal-sufficiency-semantic-covered.test.mjs"
+            ],
+            "matched_slice_files": [
+              "packages/quay/src/criterion-fidelity.ts",
+              "plugin/scripts/goal-driver.ts"
+            ]
+          },
+          "locality": {
+            "state": "evaluated",
+            "value": 0.3333333333333333,
+            "touched": 6,
+            "in_goal": 2
+          },
+          "recoveryRounds": {
+            "state": "evaluated",
+            "rounds": 3,
+            "recovered": true
+          }
+        }
+      },
+      {
+        "kind": "outcome",
+        "id": "outcome-199d99141b058162",
+        "experiment_ref": "bounded shadow investigation (replay:GOAL-032:B:triggered) — declarative evidence requests under hard budgets, no write surface",
+        "verdict": "proposed",
+        "run_id": "holdoutA:replay:GOAL-032:B:triggered#17",
+        "label": "replay:GOAL-032:B:triggered",
+        "commit": "273ef15b1ebebbbc5573bf08254c9dcd741920dc",
+        "subject_key": "unknown|packages/quay/src/criterion-fidelity.ts,plugin/scripts/goal-driver.ts",
+        "subject_files": [
+          "packages/quay/src/criterion-fidelity.ts",
+          "plugin/scripts/goal-driver.ts"
+        ],
+        "concern_key": "one fail closed verdict parsing algorithm exists as two verbatim copies plus a third partial copy of the same candidate scan idiom so the unreadable output never degrades to a permissive verdict invar",
+        "gate_ok": true,
+        "ts": "2026-10-10T05:58:50.479Z",
+        "metrics": {
+          "evidenceCost": {
+            "rounds": 7,
+            "requests": 6,
+            "bytes": 30231
+          },
+          "falsePositiveRate": {
+            "state": "evaluated",
+            "value": 0,
+            "proposals": 1,
+            "proposed_files": [
+              "packages/quay/src/criterion-fidelity.ts",
+              "plugin/scripts/goal-driver.ts"
+            ],
+            "matched_slice_files": [
+              "packages/quay/src/criterion-fidelity.ts",
+              "plugin/scripts/goal-driver.ts"
+            ]
+          },
+          "locality": {
+            "state": "evaluated",
+            "value": 1,
+            "touched": 2,
+            "in_goal": 2
+          },
+          "recoveryRounds": {
+            "state": "evaluated",
+            "rounds": 1,
+            "recovered": true
+          }
+        }
+      },
+      {
+        "kind": "outcome",
+        "id": "outcome-c2221a3a3539fd40",
+        "experiment_ref": "bounded shadow investigation (replay:GOAL-032:B:triggered) — declarative evidence requests under hard budgets, no write surface",
+        "verdict": "proposed",
+        "run_id": "holdoutA:replay:GOAL-032:B:triggered#18",
+        "label": "replay:GOAL-032:B:triggered",
+        "commit": "273ef15b1ebebbbc5573bf08254c9dcd741920dc",
+        "subject_key": "unknown|packages/quay/src/criterion-fidelity.ts,plugin/scripts/goal-driver.ts",
+        "subject_files": [
+          "packages/quay/src/criterion-fidelity.ts",
+          "plugin/scripts/goal-driver.ts"
+        ],
+        "concern_key": "the three state fail closed verdict parser is duplicated verbatim across the core plugin boundary criterion fidelity ts faithful vacuous not evaluated vs goal driver ts covered insufficient not evalua",
+        "gate_ok": true,
+        "ts": "2026-10-10T05:07:00.394Z",
+        "metrics": {
+          "evidenceCost": {
+            "rounds": 7,
+            "requests": 6,
+            "bytes": 32660
+          },
+          "falsePositiveRate": {
+            "state": "evaluated",
+            "value": 0,
+            "proposals": 1,
+            "proposed_files": [
+              "packages/quay/src/criterion-fidelity.ts",
+              "plugin/scripts/goal-driver.ts"
+            ],
+            "matched_slice_files": [
+              "packages/quay/src/criterion-fidelity.ts",
+              "plugin/scripts/goal-driver.ts"
+            ]
+          },
+          "locality": {
+            "state": "evaluated",
+            "value": 1,
+            "touched": 2,
+            "in_goal": 2
+          },
+          "recoveryRounds": {
+            "state": "evaluated",
+            "rounds": 1,
+            "recovered": true
+          }
+        }
+      },
+      {
+        "kind": "outcome",
+        "id": "outcome-27249493a29de10a",
+        "experiment_ref": "bounded shadow investigation (replay:GOAL-032:B:triggered) — declarative evidence requests under hard budgets, no write surface",
+        "verdict": "proposed",
+        "run_id": "holdoutA:replay:GOAL-032:B:triggered#19",
+        "label": "replay:GOAL-032:B:triggered",
+        "commit": "273ef15b1ebebbbc5573bf08254c9dcd741920dc",
+        "subject_key": "unknown|packages/quay/src/cli/driver.ts,packages/quay/src/fan-in/ff-merge.ts",
+        "subject_files": [
+          "packages/quay/src/cli/driver.ts",
+          "packages/quay/src/fan-in/ff-merge.ts"
+        ],
+        "concern_key": "quay src fan in sits in a package cycle only because quay src cli driver ts imports the instrumentation probe probeinstruments instrumentprobe instrumentreading from fan in ff merge ts no other cycle ",
+        "gate_ok": true,
+        "ts": "2026-10-10T05:05:07.442Z",
+        "metrics": {
+          "evidenceCost": {
+            "rounds": 7,
+            "requests": 6,
+            "bytes": 23628
+          },
+          "falsePositiveRate": {
+            "state": "evaluated",
+            "value": 1,
+            "proposals": 1,
+            "proposed_files": [
+              "packages/quay/src/cli/driver.ts",
+              "packages/quay/src/fan-in/ff-merge.ts"
+            ],
+            "matched_slice_files": []
+          },
+          "locality": {
+            "state": "evaluated",
+            "value": 0.3333333333333333,
+            "touched": 3,
+            "in_goal": 1
+          },
+          "recoveryRounds": {
+            "state": "evaluated",
+            "rounds": 2,
+            "recovered": true
+          }
+        }
+      },
+      {
+        "kind": "outcome",
+        "id": "outcome-b616278a5842d667",
+        "experiment_ref": "bounded shadow investigation (replay:GOAL-033:A:discovery) — declarative evidence requests under hard budgets, no write surface",
+        "verdict": "proposed",
+        "run_id": "holdoutA:replay:GOAL-033:A:discovery#20",
+        "label": "replay:GOAL-033:A:discovery",
+        "commit": "a6ef1a3f14abcbf49fd1f76e96b8b9505317a145",
+        "subject_key": "unknown|",
+        "subject_files": [],
+        "concern_key": "packages quay src and packages quay src cli form a dependency cycle whose src cli half is purely accidental ownership the serve layer src serve ts src serve sessions ts reaches into the cli package fo",
+        "gate_ok": true,
+        "ts": "2026-10-10T05:18:55.708Z",
+        "metrics": {
+          "evidenceCost": {
+            "rounds": 8,
+            "requests": 6,
+            "bytes": 29336
+          },
+          "falsePositiveRate": {
+            "state": "evaluated",
+            "value": 0,
+            "proposals": 0,
+            "reason": "no proposal was produced by this run"
+          },
+          "locality": {
+            "state": "evaluated",
+            "value": 0.5,
+            "touched": 2,
+            "in_goal": 1
+          },
+          "recoveryRounds": {
+            "state": "evaluated",
+            "rounds": 6,
+            "recovered": true
+          }
+        }
+      },
+      {
+        "kind": "outcome",
+        "id": "outcome-02ec015cf16532fe",
+        "experiment_ref": "bounded shadow investigation (replay:GOAL-033:A:discovery) — declarative evidence requests under hard budgets, no write surface",
+        "verdict": "proposed",
+        "run_id": "holdoutA:replay:GOAL-033:A:discovery#21",
+        "label": "replay:GOAL-033:A:discovery",
+        "commit": "a6ef1a3f14abcbf49fd1f76e96b8b9505317a145",
+        "subject_key": "unknown|packages/quay/src/cli/driver.ts,packages/quay/src/fan-in/ff-merge.ts,packages/quay/src/instrument-probe.ts,packages/quay/src/observation.ts",
+        "subject_files": [
+          "packages/quay/src/cli/driver.ts",
+          "packages/quay/src/fan-in/ff-merge.ts",
+          "packages/quay/src/instrument-probe.ts",
+          "packages/quay/src/observation.ts"
+        ],
+        "concern_key": "packages quay src contains one 6 package dependency cycle cli fan in gate gate config gate factories in which the fan in arm is held by a single cross package import of instrument probe helpers that t",
+        "gate_ok": true,
+        "ts": "2026-10-10T05:49:45.914Z",
+        "metrics": {
+          "evidenceCost": {
+            "rounds": 7,
+            "requests": 6,
+            "bytes": 19093
+          },
+          "falsePositiveRate": {
+            "state": "evaluated",
+            "value": 0,
+            "proposals": 1,
+            "proposed_files": [
+              "packages/quay/src/cli/driver.ts",
+              "packages/quay/src/fan-in/ff-merge.ts",
+              "packages/quay/src/instrument-probe.ts",
+              "packages/quay/src/observation.ts"
+            ],
+            "matched_slice_files": [
+              "packages/quay/src/cli/driver.ts"
+            ]
+          },
+          "locality": {
+            "state": "evaluated",
+            "value": 0.25,
+            "touched": 4,
+            "in_goal": 1
+          },
+          "recoveryRounds": {
+            "state": "evaluated",
+            "rounds": 7,
+            "recovered": true
+          }
+        }
+      },
+      {
+        "kind": "outcome",
+        "id": "outcome-55f0055a6940ea00",
+        "experiment_ref": "bounded shadow investigation (replay:GOAL-033:A:discovery) — declarative evidence requests under hard budgets, no write surface",
+        "verdict": "proposed",
+        "run_id": "holdoutA:replay:GOAL-033:A:discovery#22",
+        "label": "replay:GOAL-033:A:discovery",
+        "commit": "a6ef1a3f14abcbf49fd1f76e96b8b9505317a145",
+        "subject_key": "unknown|packages/quay/src/cli/driver-vocab.ts,packages/quay/src/cli/driver.ts,packages/quay/src/cli/help.ts,packages/quay/src/cli/server.ts,packages/quay/src/serve-sessions.ts,packages/quay/src/serve.ts",
+        "subject_files": [
+          "packages/quay/src/cli/driver-vocab.ts",
+          "packages/quay/src/cli/driver.ts",
+          "packages/quay/src/cli/help.ts",
+          "packages/quay/src/cli/server.ts",
+          "packages/quay/src/serve-sessions.ts",
+          "packages/quay/src/serve.ts"
+        ],
+        "concern_key": "the shared driver service control surface service name vocabulary rundriver rundriverasync core is owned by cli but root level consumers packages quay src serve ts packages quay src serve sessions ts ",
+        "gate_ok": true,
+        "ts": "2026-10-10T05:08:30.978Z",
+        "metrics": {
+          "evidenceCost": {
+            "rounds": 7,
+            "requests": 6,
+            "bytes": 27310
+          },
+          "falsePositiveRate": {
+            "state": "evaluated",
+            "value": 0,
+            "proposals": 1,
+            "proposed_files": [
+              "packages/quay/src/cli/driver-vocab.ts",
+              "packages/quay/src/cli/driver.ts",
+              "packages/quay/src/cli/help.ts",
+              "packages/quay/src/cli/server.ts",
+              "packages/quay/src/serve-sessions.ts",
+              "packages/quay/src/serve.ts"
+            ],
+            "matched_slice_files": [
+              "packages/quay/src/cli/driver.ts"
+            ]
+          },
+          "locality": {
+            "state": "evaluated",
+            "value": 0.7142857142857143,
+            "touched": 7,
+            "in_goal": 5
+          },
+          "recoveryRounds": {
+            "state": "evaluated",
+            "rounds": 5,
+            "recovered": true
+          }
+        }
+      },
+      {
+        "kind": "outcome",
+        "id": "outcome-843ffdc5dacffa55",
+        "experiment_ref": "bounded shadow investigation (replay:GOAL-033:B:discovery) — declarative evidence requests under hard budgets, no write surface",
+        "verdict": "investigated",
+        "run_id": "holdoutA:replay:GOAL-033:B:discovery#23",
+        "label": "replay:GOAL-033:B:discovery",
+        "commit": "1025ab9512de3e7b260214d2360a4b035ca80957",
+        "subject_key": "unknown|",
+        "subject_files": [],
+        "concern_key": "ownership dependency boundary concern unresolved packages quay src has one 6 package cycle ev 3 whose hub is the scope root itself hosts both the service layer which imports gate via rungate appendgat",
+        "gate_ok": true,
+        "ts": "2026-10-10T05:13:31.832Z",
+        "metrics": {
+          "evidenceCost": {
+            "rounds": 8,
+            "requests": 6,
+            "bytes": 18547
+          },
+          "falsePositiveRate": {
+            "state": "evaluated",
+            "value": 0,
+            "proposals": 0,
+            "reason": "no proposal was produced by this run"
+          },
+          "locality": {
+            "state": "evaluated",
+            "value": 0,
+            "touched": 1,
+            "in_goal": 0
+          },
+          "recoveryRounds": {
+            "state": "evaluated",
+            "rounds": 8,
+            "recovered": false
+          }
+        }
+      },
+      {
+        "kind": "outcome",
+        "id": "outcome-155453b2225a7a24",
+        "experiment_ref": "bounded shadow investigation (replay:GOAL-033:B:discovery) — declarative evidence requests under hard budgets, no write surface",
+        "verdict": "proposed",
+        "run_id": "holdoutA:replay:GOAL-033:B:discovery#24",
+        "label": "replay:GOAL-033:B:discovery",
+        "commit": "1025ab9512de3e7b260214d2360a4b035ca80957",
+        "subject_key": "unknown|",
+        "subject_files": [],
+        "concern_key": "the 6 package scc cli fan in gate gate config gate factories exists because the scope root is both the top of the dependency graph and a shared leaf that five sub packages point back into removing a s",
+        "gate_ok": true,
+        "ts": "2026-10-10T05:45:19.634Z",
+        "metrics": {
+          "evidenceCost": {
+            "rounds": 7,
+            "requests": 6,
+            "bytes": 23381
+          },
+          "falsePositiveRate": {
+            "state": "evaluated",
+            "value": 0,
+            "proposals": 0,
+            "reason": "no proposal was produced by this run"
+          },
+          "locality": {
+            "state": "evaluated",
+            "value": 0,
+            "touched": 1,
+            "in_goal": 0
+          },
+          "recoveryRounds": {
+            "state": "evaluated",
+            "rounds": 7,
+            "recovered": false
+          }
+        }
+      },
+      {
+        "kind": "outcome",
+        "id": "outcome-076761fb4c939cce",
+        "experiment_ref": "bounded shadow investigation (replay:GOAL-033:B:discovery) — declarative evidence requests under hard budgets, no write surface",
+        "verdict": "proposed",
+        "run_id": "holdoutA:replay:GOAL-033:B:discovery#25",
+        "label": "replay:GOAL-033:B:discovery",
+        "commit": "1025ab9512de3e7b260214d2360a4b035ca80957",
+        "subject_key": "unknown|packages/quay/src/gate/config/loader.ts",
+        "subject_files": [
+          "packages/quay/src/gate/config/loader.ts"
+        ],
+        "concern_key": "gate config which should be a leaf of shared config types utilities sits inside the 6 package scc because gate config loader ts imports the concrete gate factories factories index ts the gate root typ",
+        "gate_ok": true,
+        "ts": "2026-10-10T05:04:59.601Z",
+        "metrics": {
+          "evidenceCost": {
+            "rounds": 7,
+            "requests": 6,
+            "bytes": 21009
+          },
+          "falsePositiveRate": {
+            "state": "evaluated",
+            "value": 1,
+            "proposals": 1,
+            "proposed_files": [
+              "packages/quay/src/gate/config/loader.ts"
+            ],
+            "matched_slice_files": []
+          },
+          "locality": {
+            "state": "evaluated",
+            "value": 0,
+            "touched": 2,
+            "in_goal": 0
+          },
+          "recoveryRounds": {
+            "state": "evaluated",
+            "rounds": 7,
+            "recovered": false
+          }
+        }
+      }
+    ],
+    "holdoutB": [
+      {
+        "kind": "outcome",
+        "id": "outcome-631e6d5ad199b5c1",
+        "experiment_ref": "bounded shadow investigation (holdoutB:GOAL-034@162f8c380ed1) — declarative evidence requests under hard budgets, no write surface",
+        "verdict": "proposed",
+        "run_id": "holdoutB:GOAL-034@162f8c380ed1",
+        "label": "holdoutB:GOAL-034@162f8c380ed1",
+        "commit": "d4a11cea785f8effe979c9bea081f886e04de92a",
+        "subject_key": "unknown|packages/quay/src/gate/config/loader.ts",
+        "subject_files": [
+          "packages/quay/src/gate/config/loader.ts"
+        ],
+        "concern_key": "gate config a config parsing package closes a 4 package scc because its loader imports gate s types the gate factories registry and the root config mixing config parsing with gate construction",
+        "gate_ok": true,
+        "ts": "2026-10-11T02:45:43.534Z",
+        "metrics": {
+          "evidenceCost": {
+            "rounds": 7,
+            "requests": 6,
+            "bytes": 22317
+          },
+          "falsePositiveRate": {
+            "state": "not-evaluated"
+          },
+          "locality": {
+            "state": "not-evaluated"
+          },
+          "recoveryRounds": {
+            "state": "not-evaluated"
+          }
+        }
+      },
+      {
+        "kind": "outcome",
+        "id": "outcome-bf9aaebd92964098",
+        "experiment_ref": "bounded shadow investigation (holdoutB:GOAL-035@1b87254733ca) — declarative evidence requests under hard budgets, no write surface",
+        "verdict": "proposed",
+        "run_id": "holdoutB:GOAL-035@1b87254733ca",
+        "label": "holdoutB:GOAL-035@1b87254733ca",
+        "commit": "d50e0cc73080c3447d3384b65f85efbfa9cf0012",
+        "subject_key": "unknown|packages/quay/src/gate/acceptance-runner.ts,packages/quay/src/gate/types.ts",
+        "subject_files": [
+          "packages/quay/src/gate/acceptance-runner.ts",
+          "packages/quay/src/gate/types.ts"
+        ],
+        "concern_key": "gate config and gate factories depend on their parent package gate for the shared gate contract gatefn type acceptance runner while gate depends back on both children via gate registry ts closing a 4 ",
+        "gate_ok": true,
+        "ts": "2026-10-11T02:37:27.288Z",
+        "metrics": {
+          "evidenceCost": {
+            "rounds": 7,
+            "requests": 6,
+            "bytes": 20543
+          },
+          "falsePositiveRate": {
+            "state": "not-evaluated"
+          },
+          "locality": {
+            "state": "not-evaluated"
+          },
+          "recoveryRounds": {
+            "state": "not-evaluated"
+          }
+        }
+      },
+      {
+        "kind": "outcome",
+        "id": "outcome-960751097ab23a45",
+        "experiment_ref": "bounded shadow investigation (holdoutB:GOAL-036@8cb36c2fd946) — declarative evidence requests under hard budgets, no write surface",
+        "verdict": "proposed",
+        "run_id": "holdoutB:GOAL-036@8cb36c2fd946",
+        "label": "holdoutB:GOAL-036@8cb36c2fd946",
+        "commit": "cba9552115445485273bfe5b0b20282c2930385c",
+        "subject_key": "unknown|packages/quay/src/gate/config/loader.ts",
+        "subject_files": [
+          "packages/quay/src/gate/config/loader.ts"
+        ],
+        "concern_key": "gate config participates in a 4 package cycle gate config gate factories root gate gate config only because config loader ts pulls in the gatefactories dispatch and gate pulls config s loader exports ",
+        "gate_ok": true,
+        "ts": "2026-10-11T02:41:18.197Z",
+        "metrics": {
+          "evidenceCost": {
+            "rounds": 8,
+            "requests": 6,
+            "bytes": 8236
+          },
+          "falsePositiveRate": {
+            "state": "not-evaluated"
+          },
+          "locality": {
+            "state": "not-evaluated"
+          },
+          "recoveryRounds": {
+            "state": "not-evaluated"
+          }
+        }
+      }
+    ],
+    "production": [
+      {
+        "kind": "outcome",
+        "id": "outcome-365b6944715449ad",
+        "experiment_ref": "bounded shadow investigation (live) — declarative evidence requests under hard budgets, no write surface",
+        "verdict": "proposed",
+        "run_id": "live:develop-e0d39a7c3:2026-10-11T02-49-23-101Z:1",
+        "label": "live",
+        "commit": "e0d39a7c3cf1a6a1ed474406749729426303da14",
+        "subject_key": "unknown|packages/quay/src/gate/config/index.ts,packages/quay/src/gate/config/loader.ts,packages/quay/src/gate/registry.ts",
+        "subject_files": [
+          "packages/quay/src/gate/config/index.ts",
+          "packages/quay/src/gate/config/loader.ts",
+          "packages/quay/src/gate/registry.ts"
+        ],
+        "concern_key": "gate config is meant to be a low level config reader but loader ts makes it depend back on gate gate factories and quay src holding the package cycle together",
+        "gate_ok": true,
+        "ts": "2026-10-11T02:53:22.105Z",
+        "metrics": {
+          "evidenceCost": {
+            "rounds": 7,
+            "requests": 6,
+            "bytes": 17544
+          },
+          "falsePositiveRate": {
+            "state": "not-evaluated"
+          },
+          "locality": {
+            "state": "not-evaluated"
+          },
+          "recoveryRounds": {
+            "state": "not-evaluated"
+          }
+        }
+      },
+      {
+        "kind": "outcome",
+        "id": "outcome-a30df8075303e0d3",
+        "experiment_ref": "bounded shadow investigation (live) — declarative evidence requests under hard budgets, no write surface",
+        "verdict": "proposed",
+        "run_id": "live:develop-e0d39a7c3:2026-10-11T02-49-23-101Z:2",
+        "label": "live",
+        "commit": "e0d39a7c3cf1a6a1ed474406749729426303da14",
+        "subject_key": "unknown|packages/quay/src/gate/registry.ts",
+        "subject_files": [
+          "packages/quay/src/gate/registry.ts"
+        ],
+        "concern_key": "quay src gate config is a child package that imports back up into its parent gatefn from types ts and across to its sibling gatefactories from factories index ts and up to the package root findconfig ",
+        "gate_ok": true,
+        "ts": "2026-10-11T02:58:05.594Z",
+        "metrics": {
+          "evidenceCost": {
+            "rounds": 7,
+            "requests": 6,
+            "bytes": 21813
+          },
+          "falsePositiveRate": {
+            "state": "not-evaluated"
+          },
+          "locality": {
+            "state": "not-evaluated"
+          },
+          "recoveryRounds": {
+            "state": "not-evaluated"
+          }
+        }
+      },
+      {
+        "kind": "outcome",
+        "id": "outcome-91ee59ad6aa3e5b7",
+        "experiment_ref": "bounded shadow investigation (live) — declarative evidence requests under hard budgets, no write surface",
+        "verdict": "proposed",
+        "run_id": "live:develop-e0d39a7c3:2026-10-11T02-49-23-101Z:3",
+        "label": "live",
+        "commit": "e0d39a7c3cf1a6a1ed474406749729426303da14",
+        "subject_key": "unknown|packages/quay/src/gate/types.ts",
+        "subject_files": [
+          "packages/quay/src/gate/types.ts"
+        ],
+        "concern_key": "the shared gate contract type gatefn is owned by packages quay src gate types ts directory src gate forcing packages quay src gate factories and packages quay src gate config to import upward into qua",
+        "gate_ok": true,
+        "ts": "2026-10-11T02:59:52.877Z",
+        "metrics": {
+          "evidenceCost": {
+            "rounds": 7,
+            "requests": 6,
+            "bytes": 15504
+          },
+          "falsePositiveRate": {
+            "state": "not-evaluated"
+          },
+          "locality": {
+            "state": "not-evaluated"
+          },
+          "recoveryRounds": {
+            "state": "not-evaluated"
+          }
+        }
+      }
+    ]
+  }
+}

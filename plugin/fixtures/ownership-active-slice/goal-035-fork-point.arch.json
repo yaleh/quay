@@ -1,0 +1,1507 @@
+{
+ "version": "1.1",
+ "language": "typescript",
+ "timestamp": "2026-10-11T02:48:16.055Z",
+ "sourceFiles": [
+  "packages/quay/bin/quay.js",
+  "packages/quay/bin/quay.ts",
+  "packages/quay/scripts/version-sea-shim.js",
+  "packages/quay/src/abi.ts",
+  "packages/quay/src/action.ts",
+  "packages/quay/src/adr-store.ts",
+  "packages/quay/src/branch-model.ts",
+  "packages/quay/src/cli/action.ts",
+  "packages/quay/src/cli/adr.ts",
+  "packages/quay/src/cli/config.ts",
+  "packages/quay/src/cli/context.ts",
+  "packages/quay/src/cli/driver.ts",
+  "packages/quay/src/cli/flags.ts",
+  "packages/quay/src/cli/gate-log.ts",
+  "packages/quay/src/cli/gate.ts",
+  "packages/quay/src/cli/goal.ts",
+  "packages/quay/src/cli/help.ts",
+  "packages/quay/src/cli/init.ts",
+  "packages/quay/src/cli/lanes.ts",
+  "packages/quay/src/cli/lifecycle.ts",
+  "packages/quay/src/cli/manager.ts",
+  "packages/quay/src/cli/mcp.ts",
+  "packages/quay/src/cli/meta.ts",
+  "packages/quay/src/cli/migrate.ts",
+  "packages/quay/src/cli/provider.ts",
+  "packages/quay/src/cli/run.ts",
+  "packages/quay/src/cli/serve.ts",
+  "packages/quay/src/cli/server.ts",
+  "packages/quay/src/cli/shared.ts",
+  "packages/quay/src/cli/task-check.ts",
+  "packages/quay/src/cli/task-create.ts",
+  "packages/quay/src/cli/task-edit.ts",
+  "packages/quay/src/cli/task-list.ts",
+  "packages/quay/src/cli/task-view.ts",
+  "packages/quay/src/config-validate.ts",
+  "packages/quay/src/config.ts",
+  "packages/quay/src/contract-validator.ts",
+  "packages/quay/src/criterion-fidelity.ts",
+  "packages/quay/src/dashboard-kernel.ts",
+  "packages/quay/src/document-store.ts",
+  "packages/quay/src/driver-control.ts",
+  "packages/quay/src/driver-vocab.ts",
+  "packages/quay/src/fan-in/ff-merge.ts",
+  "packages/quay/src/frontmatter-store-base.ts",
+  "packages/quay/src/gate/acceptance-runner.ts",
+  "packages/quay/src/gate/config/index.ts",
+  "packages/quay/src/gate/config/loader.ts",
+  "packages/quay/src/gate/config/types.ts",
+  "packages/quay/src/gate/dark-axis-record.ts",
+  "packages/quay/src/gate/driver.ts",
+  "packages/quay/src/gate/engine.ts",
+  "packages/quay/src/gate/factories/adr.ts",
+  "packages/quay/src/gate/factories/coverage-floor.ts",
+  "packages/quay/src/gate/factories/document-contract.ts",
+  "packages/quay/src/gate/factories/fixed-script.ts",
+  "packages/quay/src/gate/factories/goal.ts",
+  "packages/quay/src/gate/factories/index.ts",
+  "packages/quay/src/gate/factories/it0.ts",
+  "packages/quay/src/gate/factories/red-green.ts",
+  "packages/quay/src/gate/factories/test-pass.ts",
+  "packages/quay/src/gate/factories/utils.ts",
+  "packages/quay/src/gate/gate-event-store.ts",
+  "packages/quay/src/gate/gate-log.ts",
+  "packages/quay/src/gate/lifecycle.ts",
+  "packages/quay/src/gate/registry.ts",
+  "packages/quay/src/gate/types.ts",
+  "packages/quay/src/goal-ac-write-face.ts",
+  "packages/quay/src/goal-merge.ts",
+  "packages/quay/src/goal-preview.ts",
+  "packages/quay/src/goal-store.ts",
+  "packages/quay/src/init.ts",
+  "packages/quay/src/kernel/control-plane-http.ts",
+  "packages/quay/src/kernel/control-state.ts",
+  "packages/quay/src/kernel/env-merge.ts",
+  "packages/quay/src/kernel/gate-run-options.ts",
+  "packages/quay/src/kernel/proc-identity.ts",
+  "packages/quay/src/kernel/regex-escape.ts",
+  "packages/quay/src/kernel/shape-sections.ts",
+  "packages/quay/src/kernel/task-shape-artifacts.ts",
+  "packages/quay/src/kernel/task-transition.ts",
+  "packages/quay/src/kernel/verdict-parse.ts",
+  "packages/quay/src/kernel/write-json-atomic.ts",
+  "packages/quay/src/loaded-version.ts",
+  "packages/quay/src/loop-params.ts",
+  "packages/quay/src/mcp-handlers.ts",
+  "packages/quay/src/mcp-server.ts",
+  "packages/quay/src/meta-store.ts",
+  "packages/quay/src/migrate.ts",
+  "packages/quay/src/observation.ts",
+  "packages/quay/src/plugin-root.ts",
+  "packages/quay/src/provider-client.ts",
+  "packages/quay/src/provider-env.ts",
+  "packages/quay/src/relative-time.ts",
+  "packages/quay/src/runtime-artifacts.ts",
+  "packages/quay/src/search-index.ts",
+  "packages/quay/src/serve-adr.ts",
+  "packages/quay/src/serve-architecture.ts",
+  "packages/quay/src/serve-binding.ts",
+  "packages/quay/src/serve-board.ts",
+  "packages/quay/src/serve-dashboard.ts",
+  "packages/quay/src/serve-doc.ts",
+  "packages/quay/src/serve-git.ts",
+  "packages/quay/src/serve-goal.ts",
+  "packages/quay/src/serve-handlers.ts",
+  "packages/quay/src/serve-http-json.ts",
+  "packages/quay/src/serve-i18n.ts",
+  "packages/quay/src/serve-lang.ts",
+  "packages/quay/src/serve-live.ts",
+  "packages/quay/src/serve-log.ts",
+  "packages/quay/src/serve-needs-human.ts",
+  "packages/quay/src/serve-render.ts",
+  "packages/quay/src/serve-send.ts",
+  "packages/quay/src/serve-sessions.ts",
+  "packages/quay/src/serve-system.ts",
+  "packages/quay/src/serve-task.ts",
+  "packages/quay/src/serve-tests.ts",
+  "packages/quay/src/serve.ts",
+  "packages/quay/src/server-state.ts",
+  "packages/quay/src/start-end-like.ts",
+  "packages/quay/src/store-commit.ts",
+  "packages/quay/src/systemd-scope.ts",
+  "packages/quay/src/task-parsing.ts",
+  "packages/quay/src/ts-demo/word-count.ts",
+  "packages/quay/src/version.ts",
+  "packages/quay/src/worktree-deps.ts",
+  "packages/quay/src/worktree-namespace.ts"
+ ],
+ "entities": [
+  {
+   "id": "bin",
+   "name": "bin",
+   "type": "package",
+   "visibility": "public",
+   "members": [],
+   "sourceLocation": {
+    "file": "",
+    "startLine": 0,
+    "endLine": 0
+   }
+  },
+  {
+   "id": "scripts",
+   "name": "scripts",
+   "type": "package",
+   "visibility": "public",
+   "members": [],
+   "sourceLocation": {
+    "file": "",
+    "startLine": 0,
+    "endLine": 0
+   }
+  },
+  {
+   "id": "src/cli",
+   "name": "src/cli",
+   "type": "package",
+   "visibility": "public",
+   "members": [],
+   "sourceLocation": {
+    "file": "",
+    "startLine": 0,
+    "endLine": 0
+   }
+  },
+  {
+   "id": "src/fan-in",
+   "name": "src/fan-in",
+   "type": "package",
+   "visibility": "public",
+   "members": [],
+   "sourceLocation": {
+    "file": "",
+    "startLine": 0,
+    "endLine": 0
+   }
+  },
+  {
+   "id": "src/gate/config",
+   "name": "src/gate/config",
+   "type": "package",
+   "visibility": "public",
+   "members": [],
+   "sourceLocation": {
+    "file": "",
+    "startLine": 0,
+    "endLine": 0
+   }
+  },
+  {
+   "id": "src/gate/factories",
+   "name": "src/gate/factories",
+   "type": "package",
+   "visibility": "public",
+   "members": [],
+   "sourceLocation": {
+    "file": "",
+    "startLine": 0,
+    "endLine": 0
+   }
+  },
+  {
+   "id": "src/gate",
+   "name": "src/gate",
+   "type": "package",
+   "visibility": "public",
+   "members": [],
+   "sourceLocation": {
+    "file": "",
+    "startLine": 0,
+    "endLine": 0
+   }
+  },
+  {
+   "id": "src/kernel",
+   "name": "src/kernel",
+   "type": "package",
+   "visibility": "public",
+   "members": [],
+   "sourceLocation": {
+    "file": "",
+    "startLine": 0,
+    "endLine": 0
+   }
+  },
+  {
+   "id": "src/ts-demo",
+   "name": "src/ts-demo",
+   "type": "package",
+   "visibility": "public",
+   "members": [],
+   "sourceLocation": {
+    "file": "",
+    "startLine": 0,
+    "endLine": 0
+   }
+  },
+  {
+   "id": "src",
+   "name": "src",
+   "type": "package",
+   "visibility": "public",
+   "members": [],
+   "sourceLocation": {
+    "file": "",
+    "startLine": 0,
+    "endLine": 0
+   }
+  }
+ ],
+ "relations": [
+  {
+   "id": "bin_dependency_src/cli",
+   "type": "dependency",
+   "source": "bin",
+   "target": "src/cli"
+  },
+  {
+   "id": "bin_dependency_src",
+   "type": "dependency",
+   "source": "bin",
+   "target": "src"
+  },
+  {
+   "id": "src_dependency_src/gate",
+   "type": "dependency",
+   "source": "src",
+   "target": "src/gate"
+  },
+  {
+   "id": "src_dependency_src/kernel",
+   "type": "dependency",
+   "source": "src",
+   "target": "src/kernel"
+  },
+  {
+   "id": "src/cli_dependency_src/fan-in",
+   "type": "dependency",
+   "source": "src/cli",
+   "target": "src/fan-in"
+  },
+  {
+   "id": "src/cli_dependency_src/gate/config",
+   "type": "dependency",
+   "source": "src/cli",
+   "target": "src/gate/config"
+  },
+  {
+   "id": "src/cli_dependency_src/gate",
+   "type": "dependency",
+   "source": "src/cli",
+   "target": "src/gate"
+  },
+  {
+   "id": "src/cli_dependency_src/kernel",
+   "type": "dependency",
+   "source": "src/cli",
+   "target": "src/kernel"
+  },
+  {
+   "id": "src/cli_dependency_src",
+   "type": "dependency",
+   "source": "src/cli",
+   "target": "src"
+  },
+  {
+   "id": "src/fan-in_dependency_src",
+   "type": "dependency",
+   "source": "src/fan-in",
+   "target": "src"
+  },
+  {
+   "id": "src/gate_dependency_src/gate/config",
+   "type": "dependency",
+   "source": "src/gate",
+   "target": "src/gate/config"
+  },
+  {
+   "id": "src/gate_dependency_src/gate/factories",
+   "type": "dependency",
+   "source": "src/gate",
+   "target": "src/gate/factories"
+  },
+  {
+   "id": "src/gate_dependency_src/kernel",
+   "type": "dependency",
+   "source": "src/gate",
+   "target": "src/kernel"
+  },
+  {
+   "id": "src/gate_dependency_src",
+   "type": "dependency",
+   "source": "src/gate",
+   "target": "src"
+  },
+  {
+   "id": "src/gate/config_dependency_src/gate/factories",
+   "type": "dependency",
+   "source": "src/gate/config",
+   "target": "src/gate/factories"
+  },
+  {
+   "id": "src/gate/config_dependency_src/gate",
+   "type": "dependency",
+   "source": "src/gate/config",
+   "target": "src/gate"
+  },
+  {
+   "id": "src/gate/config_dependency_src/kernel",
+   "type": "dependency",
+   "source": "src/gate/config",
+   "target": "src/kernel"
+  },
+  {
+   "id": "src/gate/config_dependency_src",
+   "type": "dependency",
+   "source": "src/gate/config",
+   "target": "src"
+  },
+  {
+   "id": "src/gate/factories_dependency_src/gate",
+   "type": "dependency",
+   "source": "src/gate/factories",
+   "target": "src/gate"
+  },
+  {
+   "id": "src/gate/factories_dependency_src/kernel",
+   "type": "dependency",
+   "source": "src/gate/factories",
+   "target": "src/kernel"
+  },
+  {
+   "id": "src/gate/factories_dependency_src",
+   "type": "dependency",
+   "source": "src/gate/factories",
+   "target": "src"
+  }
+ ],
+ "workspaceRoot": "packages/quay",
+ "extensions": {
+  "tsAnalysis": {
+   "version": "1.0",
+   "moduleGraph": {
+    "nodes": [
+     {
+      "id": "@modelcontextprotocol/sdk",
+      "name": "@modelcontextprotocol/sdk",
+      "type": "node_modules",
+      "fileCount": 0,
+      "stats": {
+       "classes": 0,
+       "interfaces": 0,
+       "functions": 0,
+       "enums": 0
+      }
+     },
+     {
+      "id": "bin",
+      "name": "bin",
+      "type": "internal",
+      "fileCount": 2,
+      "stats": {
+       "classes": 0,
+       "interfaces": 0,
+       "functions": 1,
+       "enums": 0
+      }
+     },
+     {
+      "id": "node:buffer",
+      "name": "node:buffer",
+      "type": "node_modules",
+      "fileCount": 0,
+      "stats": {
+       "classes": 0,
+       "interfaces": 0,
+       "functions": 0,
+       "enums": 0
+      }
+     },
+     {
+      "id": "node:child_process",
+      "name": "node:child_process",
+      "type": "node_modules",
+      "fileCount": 0,
+      "stats": {
+       "classes": 0,
+       "interfaces": 0,
+       "functions": 0,
+       "enums": 0
+      }
+     },
+     {
+      "id": "node:crypto",
+      "name": "node:crypto",
+      "type": "node_modules",
+      "fileCount": 0,
+      "stats": {
+       "classes": 0,
+       "interfaces": 0,
+       "functions": 0,
+       "enums": 0
+      }
+     },
+     {
+      "id": "node:fs",
+      "name": "node:fs",
+      "type": "node_modules",
+      "fileCount": 0,
+      "stats": {
+       "classes": 0,
+       "interfaces": 0,
+       "functions": 0,
+       "enums": 0
+      }
+     },
+     {
+      "id": "node:http",
+      "name": "node:http",
+      "type": "node_modules",
+      "fileCount": 0,
+      "stats": {
+       "classes": 0,
+       "interfaces": 0,
+       "functions": 0,
+       "enums": 0
+      }
+     },
+     {
+      "id": "node:os",
+      "name": "node:os",
+      "type": "node_modules",
+      "fileCount": 0,
+      "stats": {
+       "classes": 0,
+       "interfaces": 0,
+       "functions": 0,
+       "enums": 0
+      }
+     },
+     {
+      "id": "node:path",
+      "name": "node:path",
+      "type": "node_modules",
+      "fileCount": 0,
+      "stats": {
+       "classes": 0,
+       "interfaces": 0,
+       "functions": 0,
+       "enums": 0
+      }
+     },
+     {
+      "id": "node:url",
+      "name": "node:url",
+      "type": "node_modules",
+      "fileCount": 0,
+      "stats": {
+       "classes": 0,
+       "interfaces": 0,
+       "functions": 0,
+       "enums": 0
+      }
+     },
+     {
+      "id": "node:util",
+      "name": "node:util",
+      "type": "node_modules",
+      "fileCount": 0,
+      "stats": {
+       "classes": 0,
+       "interfaces": 0,
+       "functions": 0,
+       "enums": 0
+      }
+     },
+     {
+      "id": "scripts",
+      "name": "scripts",
+      "type": "internal",
+      "fileCount": 1,
+      "stats": {
+       "classes": 0,
+       "interfaces": 0,
+       "functions": 0,
+       "enums": 0
+      }
+     },
+     {
+      "id": "src",
+      "name": "src",
+      "type": "internal",
+      "fileCount": 61,
+      "stats": {
+       "classes": 3,
+       "interfaces": 206,
+       "functions": 571,
+       "enums": 0
+      }
+     },
+     {
+      "id": "src/cli",
+      "name": "src/cli",
+      "type": "internal",
+      "fileCount": 27,
+      "stats": {
+       "classes": 0,
+       "interfaces": 7,
+       "functions": 52,
+       "enums": 0
+      }
+     },
+     {
+      "id": "src/fan-in",
+      "name": "src/fan-in",
+      "type": "internal",
+      "fileCount": 1,
+      "stats": {
+       "classes": 0,
+       "interfaces": 5,
+       "functions": 6,
+       "enums": 0
+      }
+     },
+     {
+      "id": "src/gate",
+      "name": "src/gate",
+      "type": "internal",
+      "fileCount": 9,
+      "stats": {
+       "classes": 0,
+       "interfaces": 31,
+       "functions": 40,
+       "enums": 0
+      }
+     },
+     {
+      "id": "src/gate/config",
+      "name": "src/gate/config",
+      "type": "internal",
+      "fileCount": 3,
+      "stats": {
+       "classes": 0,
+       "interfaces": 9,
+       "functions": 7,
+       "enums": 0
+      }
+     },
+     {
+      "id": "src/gate/factories",
+      "name": "src/gate/factories",
+      "type": "internal",
+      "fileCount": 10,
+      "stats": {
+       "classes": 0,
+       "interfaces": 1,
+       "functions": 8,
+       "enums": 0
+      }
+     },
+     {
+      "id": "src/kernel",
+      "name": "src/kernel",
+      "type": "internal",
+      "fileCount": 11,
+      "stats": {
+       "classes": 0,
+       "interfaces": 12,
+       "functions": 32,
+       "enums": 0
+      }
+     },
+     {
+      "id": "src/ts-demo",
+      "name": "src/ts-demo",
+      "type": "internal",
+      "fileCount": 1,
+      "stats": {
+       "classes": 0,
+       "interfaces": 0,
+       "functions": 1,
+       "enums": 0
+      }
+     },
+     {
+      "id": "yaml",
+      "name": "yaml",
+      "type": "node_modules",
+      "fileCount": 0,
+      "stats": {
+       "classes": 0,
+       "interfaces": 0,
+       "functions": 0,
+       "enums": 0
+      }
+     },
+     {
+      "id": "zod",
+      "name": "zod",
+      "type": "node_modules",
+      "fileCount": 0,
+      "stats": {
+       "classes": 0,
+       "interfaces": 0,
+       "functions": 0,
+       "enums": 0
+      }
+     }
+    ],
+    "edges": [
+     {
+      "from": "bin",
+      "to": "node:child_process",
+      "strength": 1,
+      "typeOnlyStrength": 0,
+      "valueStrength": 1,
+      "importedNames": [
+       "spawn"
+      ]
+     },
+     {
+      "from": "bin",
+      "to": "node:fs",
+      "strength": 1,
+      "typeOnlyStrength": 0,
+      "valueStrength": 1,
+      "importedNames": [
+       "fs"
+      ]
+     },
+     {
+      "from": "bin",
+      "to": "node:path",
+      "strength": 1,
+      "typeOnlyStrength": 0,
+      "valueStrength": 1,
+      "importedNames": [
+       "path"
+      ]
+     },
+     {
+      "from": "bin",
+      "to": "node:url",
+      "strength": 2,
+      "typeOnlyStrength": 0,
+      "valueStrength": 2,
+      "importedNames": [
+       "fileURLToPath",
+       "pathToFileURL"
+      ]
+     },
+     {
+      "from": "bin",
+      "to": "src",
+      "strength": 1,
+      "typeOnlyStrength": 0,
+      "valueStrength": 1,
+      "importedNames": [
+       "QUAY_VERSION"
+      ]
+     },
+     {
+      "from": "bin",
+      "to": "src/cli",
+      "strength": 30,
+      "typeOnlyStrength": 0,
+      "valueStrength": 30,
+      "importedNames": [
+       "parseFlags",
+       "resolveJsonFlag",
+       "printHelp",
+       "parseVerbless",
+       "resolvePageSize",
+       "relativeTimeCli",
+       "stripHeadings"
+      ]
+     },
+     {
+      "from": "src",
+      "to": "@modelcontextprotocol/sdk",
+      "strength": 5,
+      "typeOnlyStrength": 0,
+      "valueStrength": 5,
+      "importedNames": [
+       "McpServer",
+       "StdioServerTransport",
+       "Client",
+       "StdioClientTransport"
+      ]
+     },
+     {
+      "from": "src",
+      "to": "node:child_process",
+      "strength": 16,
+      "typeOnlyStrength": 0,
+      "valueStrength": 16,
+      "importedNames": [
+       "execFile",
+       "execFileSync",
+       "spawn",
+       "spawnSync"
+      ]
+     },
+     {
+      "from": "src",
+      "to": "node:crypto",
+      "strength": 4,
+      "typeOnlyStrength": 0,
+      "valueStrength": 4,
+      "importedNames": [
+       "randomUUID",
+       "createHash"
+      ]
+     },
+     {
+      "from": "src",
+      "to": "node:fs",
+      "strength": 32,
+      "typeOnlyStrength": 0,
+      "valueStrength": 32,
+      "importedNames": [
+       "fs",
+       "readFileSync",
+       "existsSync",
+       "readdirSync",
+       "openSync",
+       "readSync",
+       "closeSync",
+       "statSync"
+      ]
+     },
+     {
+      "from": "src",
+      "to": "node:http",
+      "strength": 17,
+      "typeOnlyStrength": 16,
+      "valueStrength": 1,
+      "importedNames": [
+       "IncomingMessage",
+       "ServerResponse",
+       "Server",
+       "http"
+      ]
+     },
+     {
+      "from": "src",
+      "to": "node:os",
+      "strength": 6,
+      "typeOnlyStrength": 0,
+      "valueStrength": 6,
+      "importedNames": [
+       "os"
+      ]
+     },
+     {
+      "from": "src",
+      "to": "node:path",
+      "strength": 37,
+      "typeOnlyStrength": 0,
+      "valueStrength": 37,
+      "importedNames": [
+       "path"
+      ]
+     },
+     {
+      "from": "src",
+      "to": "node:url",
+      "strength": 5,
+      "typeOnlyStrength": 0,
+      "valueStrength": 5,
+      "importedNames": [
+       "fileURLToPath",
+       "pathToFileURL"
+      ]
+     },
+     {
+      "from": "src",
+      "to": "node:util",
+      "strength": 3,
+      "typeOnlyStrength": 0,
+      "valueStrength": 3,
+      "importedNames": [
+       "promisify"
+      ]
+     },
+     {
+      "from": "src",
+      "to": "src/gate",
+      "strength": 10,
+      "typeOnlyStrength": 0,
+      "valueStrength": 10,
+      "importedNames": [
+       "listGates",
+       "appendGateEvent",
+       "queryGateEvents",
+       "runAcceptance",
+       "resolveAcceptanceTimeout",
+       "timeoutKnobHint",
+       "verdictFromAcceptance",
+       "runGate",
+       "resolveGateLogPath",
+       "runGateLogQuery",
+       "runComplete",
+       "runAdjudicate",
+       "runPromote",
+       "runRetreat",
+       "runCompleteOutOfBand"
+      ]
+     },
+     {
+      "from": "src",
+      "to": "src/kernel",
+      "strength": 12,
+      "typeOnlyStrength": 0,
+      "valueStrength": 12,
+      "importedNames": [
+       "parseBinaryVerdict",
+       "resolveAcceptanceTimeoutMs",
+       "mergeEnv",
+       "escapeRegExp",
+       "readProcCmdline",
+       "isQuayServe",
+       "readProcCmdlineText",
+       "serveControlPlane",
+       "CONTROL_PLANE_DEFAULT_HOST",
+       "ControlPlaneHandle",
+       "writeJsonAtomic"
+      ]
+     },
+     {
+      "from": "src",
+      "to": "yaml",
+      "strength": 10,
+      "typeOnlyStrength": 0,
+      "valueStrength": 10,
+      "importedNames": [
+       "YAML",
+       "parse"
+      ]
+     },
+     {
+      "from": "src",
+      "to": "zod",
+      "strength": 2,
+      "typeOnlyStrength": 0,
+      "valueStrength": 2,
+      "importedNames": [
+       "z"
+      ]
+     },
+     {
+      "from": "src/cli",
+      "to": "node:buffer",
+      "strength": 1,
+      "typeOnlyStrength": 0,
+      "valueStrength": 1,
+      "importedNames": [
+       "Buffer"
+      ]
+     },
+     {
+      "from": "src/cli",
+      "to": "node:child_process",
+      "strength": 2,
+      "typeOnlyStrength": 0,
+      "valueStrength": 2,
+      "importedNames": [
+       "spawnSync",
+       "spawn"
+      ]
+     },
+     {
+      "from": "src/cli",
+      "to": "node:fs",
+      "strength": 7,
+      "typeOnlyStrength": 0,
+      "valueStrength": 7,
+      "importedNames": [
+       "fs",
+       "fsPromises"
+      ]
+     },
+     {
+      "from": "src/cli",
+      "to": "node:os",
+      "strength": 1,
+      "typeOnlyStrength": 0,
+      "valueStrength": 1,
+      "importedNames": [
+       "os"
+      ]
+     },
+     {
+      "from": "src/cli",
+      "to": "node:path",
+      "strength": 5,
+      "typeOnlyStrength": 0,
+      "valueStrength": 5,
+      "importedNames": [
+       "path"
+      ]
+     },
+     {
+      "from": "src/cli",
+      "to": "src",
+      "strength": 41,
+      "typeOnlyStrength": 1,
+      "valueStrength": 40,
+      "importedNames": [
+       "composePayload",
+       "deliverTrigger",
+       "loadConfig",
+       "readFanInAttempts",
+       "readLiveWorkers",
+       "FanInAttemptsResult",
+       "InFlightTask",
+       "KINDS",
+       "VERBS",
+       "runDriver",
+       "resolveRoot",
+       "relativeTime",
+       "stripHeadings",
+       "GoalRecord",
+       "runGoalStoreCli",
+       "ALL_SERVICE_NAMES",
+       "SERVE_BINDING_FALLBACK",
+       "runInit",
+       "printNextSteps",
+       "buildInitReport",
+       "printInstallSteps",
+       "providerRuntimeExistenceReport",
+       "deliverySurfaceL1Report",
+       "ensureDocBranch",
+       "formatBaselineCheckoutReport",
+       "formatDocBranchReport",
+       "landingBaselineEstablishedNow",
+       "moveCheckoutOntoLandingBaseline",
+       "readLive",
+       "readWorkerOutcomeRecords",
+       "FIXED_GANTT_LANES",
+       "mergeLiveAndHistoryIntervals",
+       "packLanes",
+       "LiveGanttInterval",
+       "DEFAULT_TIMELINE_HOURS",
+       "parseTimelineHours",
+       "resolvePluginScript",
+       "migrateTasks",
+       "switchEnabledProviderText",
+       "validateConfigText",
+       "findConfig",
+       "readServerState",
+       "pidAlive",
+       "probeWebService",
+       "probeControlService",
+       "serverStatePath",
+       "ServiceProbe",
+       "parseServiceList",
+       "readServiceState",
+       "writeServiceState",
+       "DRIVER_SERVICE_KINDS",
+       "HOSTED_SERVICE_NAMES",
+       "runDriverAsync",
+       "openServeLog",
+       "SERVE_LOG_UNAVAILABLE",
+       "resolveServeEnvelope",
+       "scopeLaunchArgv",
+       "serveScopeUnavailableReport",
+       "serveHostLoadedVersionReading",
+       "activeProvider",
+       "providerMcpEntry",
+       "connectProvider",
+       "resolveProviderEnv"
+      ]
+     },
+     {
+      "from": "src/cli",
+      "to": "src/fan-in",
+      "strength": 1,
+      "typeOnlyStrength": 0,
+      "valueStrength": 1,
+      "importedNames": [
+       "probeInstruments",
+       "InstrumentProbe",
+       "InstrumentReading"
+      ]
+     },
+     {
+      "from": "src/cli",
+      "to": "src/gate",
+      "strength": 9,
+      "typeOnlyStrength": 0,
+      "valueStrength": 9,
+      "importedNames": [
+       "runGateLogQuery",
+       "runGate",
+       "listGates",
+       "listGatesVerbose",
+       "resolveGateLogPath",
+       "runAcceptanceCapture",
+       "runComplete",
+       "runAdjudicate",
+       "runPromote",
+       "runRetreat",
+       "runOnce",
+       "runLoop"
+      ]
+     },
+     {
+      "from": "src/cli",
+      "to": "src/gate/config",
+      "strength": 5,
+      "typeOnlyStrength": 0,
+      "valueStrength": 5,
+      "importedNames": [
+       "resolveWorkspaceRootOrThrow"
+      ]
+     },
+     {
+      "from": "src/cli",
+      "to": "src/kernel",
+      "strength": 1,
+      "typeOnlyStrength": 0,
+      "valueStrength": 1,
+      "importedNames": [
+       "resolveRunnerOptions"
+      ]
+     },
+     {
+      "from": "src/fan-in",
+      "to": "node:child_process",
+      "strength": 1,
+      "typeOnlyStrength": 0,
+      "valueStrength": 1,
+      "importedNames": [
+       "spawn",
+       "spawnSync"
+      ]
+     },
+     {
+      "from": "src/fan-in",
+      "to": "node:fs",
+      "strength": 1,
+      "typeOnlyStrength": 0,
+      "valueStrength": 1,
+      "importedNames": [
+       "fs"
+      ]
+     },
+     {
+      "from": "src/fan-in",
+      "to": "node:path",
+      "strength": 1,
+      "typeOnlyStrength": 0,
+      "valueStrength": 1,
+      "importedNames": [
+       "path"
+      ]
+     },
+     {
+      "from": "src/fan-in",
+      "to": "src",
+      "strength": 5,
+      "typeOnlyStrength": 1,
+      "valueStrength": 4,
+      "importedNames": [
+       "resolvePluginRoot",
+       "loadConfig",
+       "activeProvider",
+       "classifyRuntimeArtifactDirty",
+       "isRuntimeArtifactPath",
+       "loadRuntimeArtifactPatterns",
+       "runtimeArtifactManifestPath",
+       "runtimeArtifactPatternRe",
+       "runtimeArtifactAreaPattern",
+       "RuntimeArtifactDirty"
+      ]
+     },
+     {
+      "from": "src/gate",
+      "to": "node:child_process",
+      "strength": 1,
+      "typeOnlyStrength": 0,
+      "valueStrength": 1,
+      "importedNames": [
+       "spawnSync"
+      ]
+     },
+     {
+      "from": "src/gate",
+      "to": "node:crypto",
+      "strength": 2,
+      "typeOnlyStrength": 0,
+      "valueStrength": 2,
+      "importedNames": [
+       "randomUUID"
+      ]
+     },
+     {
+      "from": "src/gate",
+      "to": "node:fs",
+      "strength": 4,
+      "typeOnlyStrength": 0,
+      "valueStrength": 4,
+      "importedNames": [
+       "fs",
+       "appendFileSync",
+       "existsSync",
+       "mkdirSync",
+       "readFileSync"
+      ]
+     },
+     {
+      "from": "src/gate",
+      "to": "node:path",
+      "strength": 6,
+      "typeOnlyStrength": 0,
+      "valueStrength": 6,
+      "importedNames": [
+       "path",
+       "dirname"
+      ]
+     },
+     {
+      "from": "src/gate",
+      "to": "node:url",
+      "strength": 1,
+      "typeOnlyStrength": 0,
+      "valueStrength": 1,
+      "importedNames": [
+       "fileURLToPath"
+      ]
+     },
+     {
+      "from": "src/gate",
+      "to": "src",
+      "strength": 5,
+      "typeOnlyStrength": 3,
+      "valueStrength": 2,
+      "importedNames": [
+       "TASK_STATUS",
+       "Task",
+       "TASK_STATUSES",
+       "TaskStatus"
+      ]
+     },
+     {
+      "from": "src/gate",
+      "to": "src/gate/config",
+      "strength": 3,
+      "typeOnlyStrength": 1,
+      "valueStrength": 2,
+      "importedNames": [
+       "discoverWorkspaceRoot",
+       "loadWorkspaceGates",
+       "loadWorkspaceGateMetadata",
+       "readGatesConfig",
+       "GatesConfig"
+      ]
+     },
+     {
+      "from": "src/gate",
+      "to": "src/gate/factories",
+      "strength": 2,
+      "typeOnlyStrength": 0,
+      "valueStrength": 2,
+      "importedNames": [
+       "makeDocumentContractGate",
+       "makeGoalGate"
+      ]
+     },
+     {
+      "from": "src/gate",
+      "to": "src/kernel",
+      "strength": 3,
+      "typeOnlyStrength": 0,
+      "valueStrength": 3,
+      "importedNames": [
+       "shQuote",
+       "DEFAULT_ACCEPTANCE_TIMEOUT_MS",
+       "LIFECYCLE_EDGES",
+       "LifecycleEdge",
+       "LifecycleEdgeKind",
+       "LifecycleActor",
+       "resolveRunnerOptions"
+      ]
+     },
+     {
+      "from": "src/gate/config",
+      "to": "node:fs",
+      "strength": 1,
+      "typeOnlyStrength": 0,
+      "valueStrength": 1,
+      "importedNames": [
+       "fs"
+      ]
+     },
+     {
+      "from": "src/gate/config",
+      "to": "node:path",
+      "strength": 1,
+      "typeOnlyStrength": 0,
+      "valueStrength": 1,
+      "importedNames": [
+       "path"
+      ]
+     },
+     {
+      "from": "src/gate/config",
+      "to": "src",
+      "strength": 1,
+      "typeOnlyStrength": 0,
+      "valueStrength": 1,
+      "importedNames": [
+       "findConfig"
+      ]
+     },
+     {
+      "from": "src/gate/config",
+      "to": "src/gate",
+      "strength": 1,
+      "typeOnlyStrength": 1,
+      "valueStrength": 0,
+      "importedNames": [
+       "GateFn"
+      ]
+     },
+     {
+      "from": "src/gate/config",
+      "to": "src/gate/factories",
+      "strength": 1,
+      "typeOnlyStrength": 0,
+      "valueStrength": 1,
+      "importedNames": [
+       "gateFactories"
+      ]
+     },
+     {
+      "from": "src/gate/config",
+      "to": "src/kernel",
+      "strength": 3,
+      "typeOnlyStrength": 1,
+      "valueStrength": 2,
+      "importedNames": [
+       "GateConfig",
+       "RunnerOptions",
+       "shQuote",
+       "resolveRunnerOptions"
+      ]
+     },
+     {
+      "from": "src/gate/config",
+      "to": "yaml",
+      "strength": 1,
+      "typeOnlyStrength": 0,
+      "valueStrength": 1,
+      "importedNames": [
+       "YAML"
+      ]
+     },
+     {
+      "from": "src/gate/factories",
+      "to": "node:child_process",
+      "strength": 1,
+      "typeOnlyStrength": 0,
+      "valueStrength": 1,
+      "importedNames": [
+       "spawnSync"
+      ]
+     },
+     {
+      "from": "src/gate/factories",
+      "to": "node:path",
+      "strength": 2,
+      "typeOnlyStrength": 0,
+      "valueStrength": 2,
+      "importedNames": [
+       "path"
+      ]
+     },
+     {
+      "from": "src/gate/factories",
+      "to": "src",
+      "strength": 8,
+      "typeOnlyStrength": 4,
+      "valueStrength": 4,
+      "importedNames": [
+       "createAdrStore",
+       "Task",
+       "createDocumentStore",
+       "validateContracts",
+       "createGoalStore"
+      ]
+     },
+     {
+      "from": "src/gate/factories",
+      "to": "src/gate",
+      "strength": 15,
+      "typeOnlyStrength": 9,
+      "valueStrength": 6,
+      "importedNames": [
+       "GateFn",
+       "runAcceptance",
+       "verdictFromAcceptance"
+      ]
+     },
+     {
+      "from": "src/gate/factories",
+      "to": "src/kernel",
+      "strength": 3,
+      "typeOnlyStrength": 1,
+      "valueStrength": 2,
+      "importedNames": [
+       "resolveRunnerOptions",
+       "GateConfig",
+       "RunnerOptions",
+       "shQuote"
+      ]
+     },
+     {
+      "from": "src/kernel",
+      "to": "@modelcontextprotocol/sdk",
+      "strength": 3,
+      "typeOnlyStrength": 0,
+      "valueStrength": 3,
+      "importedNames": []
+     },
+     {
+      "from": "src/kernel",
+      "to": "node:crypto",
+      "strength": 2,
+      "typeOnlyStrength": 0,
+      "valueStrength": 2,
+      "importedNames": [
+       "randomUUID",
+       "randomBytes"
+      ]
+     },
+     {
+      "from": "src/kernel",
+      "to": "node:fs",
+      "strength": 4,
+      "typeOnlyStrength": 0,
+      "valueStrength": 4,
+      "importedNames": [
+       "fs"
+      ]
+     },
+     {
+      "from": "src/kernel",
+      "to": "node:http",
+      "strength": 1,
+      "typeOnlyStrength": 0,
+      "valueStrength": 1,
+      "importedNames": [
+       "createServer"
+      ]
+     },
+     {
+      "from": "src/kernel",
+      "to": "node:path",
+      "strength": 5,
+      "typeOnlyStrength": 0,
+      "valueStrength": 5,
+      "importedNames": [
+       "path"
+      ]
+     },
+     {
+      "from": "src/kernel",
+      "to": "node:url",
+      "strength": 1,
+      "typeOnlyStrength": 0,
+      "valueStrength": 1,
+      "importedNames": [
+       "fileURLToPath"
+      ]
+     },
+     {
+      "from": "src/kernel",
+      "to": "zod",
+      "strength": 1,
+      "typeOnlyStrength": 0,
+      "valueStrength": 1,
+      "importedNames": []
+     }
+    ],
+    "cycles": [
+     {
+      "modules": [
+       "src/gate/config",
+       "src/gate/factories",
+       "src/gate",
+       "src"
+      ],
+      "severity": "error"
+     }
+    ],
+    "unevaluatedDynamicImports": 1
+   }
+  },
+  "projectSemantics": {
+   "version": "1.0",
+   "nonProductionPatterns": [],
+   "barrelFiles": [],
+   "additionalTestPatterns": [],
+   "customAssertionPatterns": []
+  },
+  "quay_fixture": {
+   "kind": "ownership-active-slice/fork-point",
+   "goal": "goal-035",
+   "commit": "1b87254733ca2ac33412e708c65ea2d1e160f9c1",
+   "archguard_version": "0.1.39",
+   "scope_root": "packages/quay",
+   "produced_from": "git archive 1b87254733ca2ac33412e708c65ea2d1e160f9c1 packages",
+   "generated_at": "2026-10-11T02:48:16.451Z"
+  }
+ },
+ "metrics": {
+  "level": "package",
+  "entityCount": 10,
+  "relationCount": 21,
+  "relationTypeBreakdown": {
+   "dependency": 21
+  },
+  "stronglyConnectedComponents": 7,
+  "inferredRelationRatio": 0,
+  "cycles": [
+   {
+    "size": 4,
+    "members": [
+     "src/gate/config",
+     "src/gate/factories",
+     "src/gate",
+     "src"
+    ],
+    "memberNames": [
+     "src",
+     "src/gate",
+     "src/gate/config",
+     "src/gate/factories"
+    ],
+    "files": []
+   }
+  ]
+ },
+ "metricVector": {
+  "schemaVersion": 1,
+  "totalEntities": 10,
+  "totalRelations": 21,
+  "inferredRelationRatio": 0,
+  "sccCount": 1,
+  "relationTypeBreakdown": {
+   "dependency": 21
+  },
+  "maxInDegree": 0,
+  "maxOutDegree": 0,
+  "maxPackageSize": 61,
+  "giniInDegree": 0,
+  "giniPackageSize": 0.6365079365079365,
+  "packageCount": 10,
+  "entityCoverageRatio": null
+ }
+}
