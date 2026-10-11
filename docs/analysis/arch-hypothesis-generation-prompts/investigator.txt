@@ -1,3 +1,5 @@
+[VARIANT, NOT THE DEFAULT — this is the reworded investigator prompt. It is kept because it does not hard-code the extraction caps ("a fixed number", true for any --max-exports/--max-carriers), but its text is NOT the pre-registered round-1 prompt. Reproduction runs must use `investigator-round1-frozen.txt` (sha256 19be897494996db41e05cc3862cfbb53361d0e5f10a82e41f91e99a2e0ad16ea), which is the tool's default.]
+
 You are an architecture investigator. Below is an inventory of every TypeScript component in one directory of a repository. Each line gives: the component file, the question the component claims to answer (Q), up to a fixed number of exported names, and up to a fixed number of runtime state/carrier file paths it mentions.
 
 Task: propose hypotheses that TWO OR MORE DIFFERENT components implement the SAME underlying domain concept separately, in ways that could drift apart so that the same fact gets different verdicts. Concept kinds:

@@ -23,6 +23,12 @@
 // Scoring is REFUSED unless `--prereg` names a file whose recorded hashes match the actual prompt /
 // inventory / labels bytes AND whose mtime is older than EVERY run file. A post-hoc rule is not a
 // pre-registered one; the tool makes that a mechanical precondition instead of a promise.
+// The gate is REFUSED FROM THE PREREG, not from the command line (gap-hypgen-prereg-gate-trusts-caller-
+// and-run-identity-collides): every run's RECORDED `prompt_sha256` is re-derived from the prompt +
+// inventory bytes the caller actually supplied, and the labels file is hashed from the bytes just read.
+// `--prompt-sha` / `--inventory-sha` survive only as OPTIONAL extra assertions.
+// The investigator prompt the runs are bound to is the FROZEN round-1 file, and it is the DEFAULT:
+// a reproduction that silently runs on a different prompt is the defect this binds shut.
 //
 // ── SEALED LABELS ARE AN INPUT PATH, NEVER A CONSTANT ───────────────────────────────────────────────
 // The labels are passed as `--labels <file>` and are read ONLY by `match` and `review`, and ONLY after
@@ -33,8 +39,10 @@
 //
 // ── FAIL-CLOSED BOUNDS, ONE EXIT CODE EACH ──────────────────────────────────────────────────────────
 //   2 usage/env   3 investigator refused: cwd is not the empty neutral dir
-//   4 prereg      5 contamination   6 max-runs   7 max-clusters   8 max-ms   9 labels-before-runs
-//  10 runs-incomplete. A breach writes NOTHING (never a partial carrier).
+//   4 prereg (every pre-registration refusal: an absent/mismatched hash, a run whose recorded prompt
+//     digest does not match the supplied artifacts, a prereg not older than the runs — the REASON string
+//     is what distinguishes them)   5 contamination   6 max-runs   7 max-clusters   8 max-ms
+//   9 labels-before-runs  10 runs-incomplete. A breach writes NOTHING (never a partial carrier).
 //
 // ⛔ STRUCTURAL SANDBOX: creates no task, goal or AC; changes no status; edits no code. Its only
 // persistence is the caller's `--out` carrier (default under `.quay/arch-hypothesis-generation/`, which is
@@ -49,6 +57,9 @@ import { fileURLToPath, pathToFileURL } from "node:url";
 import { execFileSync } from "node:child_process";
 import { sha256, appendRecord } from "./architecture-evidence-store.mjs";
 import { Sink } from "./arch-discovery-space.mjs";
+// The ONE digest helper, re-exported so a caller (and the tests) hash bytes exactly the way the
+// pre-registration gate does — never a second, subtly different convention.
+export { sha256 };
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 export const TOOL = "arch-hypothesis-generation";
@@ -76,6 +87,24 @@ export const HARD_MAX_CLUSTERS = 15;
 export const DEFAULT_OUT_DIR = ".quay/arch-hypothesis-generation";
 
 export const defaultOutDir = (root) => path.join(root, DEFAULT_OUT_DIR);
+
+/** The investigator prompt the runs are bound to. The FROZEN round-1 file is the DEFAULT: a reproduction
+ *  that silently runs on a different prompt is exactly the defect this default closes. The reworded text
+ *  survives as `investigator.txt` — a named VARIANT, never the default. */
+export const PROMPTS_DIR = "arch-hypothesis-generation-prompts";
+export const FROZEN_INVESTIGATOR_PROMPT = "investigator-round1-frozen.txt";
+export const defaultInvestigatorPrompt = (here = HERE) => path.join(here, PROMPTS_DIR, FROZEN_INVESTIGATOR_PROMPT);
+
+/** The inventoried scope. Component names are normalised ONTO it, so a record written from bare basenames
+ *  (round 2) and one written from repo-relative paths (round 1) share ONE `subject_key` and can be joined. */
+export const INVENTORY_SCOPE = "plugin/scripts";
+
+/** Directories that MUST be absent from the verifier's pinned tree: their presence means the verifier is
+ *  reading the methodology layer, not the code — the exact un-blinding the stripped tree exists to stop. */
+export const STRIPPED_DIRS = Object.freeze(["tasks", "goals", "docs", "orchestration"]);
+
+/** Prereg fields that may name the experiment, first present wins. The tool never invents one. */
+export const EXPERIMENT_KEYS = Object.freeze(["experiment", "experiment_id", "acceptance_run"]);
 
 // ── inventory (pure) ─────────────────────────────────────────────────────────────────────────────────
 /** Exported top-level names, in source order, de-duplicated, capped. ⛔ No import/call edges — the
@@ -176,6 +205,52 @@ export function preregRefusal({ prereg, expected = {}, preregMtimeMs = null, run
   return reasons.length ? { code: EXIT.prereg, reasons } : null;
 }
 
+/** The digest a run MUST record: sha256 of the EXACT text handed to the model (the investigator prompt
+ *  file followed by the inventory). The investigator composes and hashes the same pair, so this is a
+ *  recomputation of the recorded value, not a second convention. */
+export const runPromptDigest = (promptBytes, inventoryBytes) => sha256(`${promptBytes}${inventoryBytes}`);
+
+/**
+ * The run⇄prereg binding. `preregRefusal` above can only check hashes the CALLER hands it, so a run made
+ * with a different prompt still scored as pre-registered. This closes that: the digest each run RECORDED
+ * is re-derived from the prompt + inventory bytes actually supplied and compared.
+ * ⛔ 硬规则 3b: "no bytes to compare against" is its OWN refusal (`RUN_PROMPT_UNVERIFIABLE`), never a pass.
+ * @returns {null|{code:number, reasons:string[]}}
+ */
+export function runPromptRefusal({ runs, promptBytes = null, inventoryBytes = null, expectedPromptSha = null } = {}) {
+  if (promptBytes == null || inventoryBytes == null) return { code: EXIT.prereg, reasons: ["RUN_PROMPT_UNVERIFIABLE:prompt-or-inventory-bytes-not-supplied"] };
+  const digest = runPromptDigest(promptBytes, inventoryBytes);
+  const reasons = [];
+  for (const r of runs ?? []) {
+    const id = r?.run ?? "?";
+    if (r?.prompt_sha256 == null) { reasons.push(`RUN_PROMPT_HASH_ABSENT:${id}`); continue; }
+    if (r.prompt_sha256 !== digest) reasons.push(`PREREG_HASH_MISMATCH:run-prompt:${id}`);
+    // A run that also names the prompt FILE's hash must name the pre-registered one. Absent is fine — the
+    // composite digest above already binds it — but a PRESENT-and-different value is a mismatch.
+    if (r.prompt_file_sha256 != null && expectedPromptSha != null && r.prompt_file_sha256 !== expectedPromptSha) {
+      reasons.push(`PREREG_HASH_MISMATCH:run-prompt-file:${id}`);
+    }
+  }
+  return reasons.length ? { code: EXIT.prereg, reasons } : null;
+}
+
+/** The experiment id every record of a pass is tagged with: the caller's flag, else the PREREG's own
+ *  field, else `null` (the caller decides what a null means — the tool never invents an id, because an
+ *  invented one is indistinguishable from a real round's). */
+export function resolveExperimentId({ flag = null, prereg = null } = {}) {
+  if (flag) return String(flag);
+  for (const k of EXPERIMENT_KEYS) if (prereg && prereg[k]) return String(prereg[k]);
+  return null;
+}
+
+/** Normalise a component name to a REPO-RELATIVE path. A bare basename is a member of the inventoried
+ *  scope; anything already carrying a path is left alone (minus a leading `./`). This is what lets a
+ *  round-1 `subject_key` (`plugin/scripts/x.ts`) and a round-2 one (`x.ts`) name the SAME subject. */
+export function repoRelComponent(c, scope = INVENTORY_SCOPE) {
+  const s = String(c).trim().replace(/^\.\//, "");
+  return s.includes("/") ? s : `${scope}/${s}`;
+}
+
 // ── investigator isolation (pure) ────────────────────────────────────────────────────────────────────
 /** The investigator runs with the process cwd set to an EMPTY directory, so no CLAUDE.md or project
  *  memory reaches the model. `null` = isolated; a string = the refusal reason. */
@@ -184,11 +259,19 @@ export function neutralCwdRefusal(cwd, neutralDir) {
   if (path.resolve(cwd) !== path.resolve(neutralDir)) return "CWD_NOT_NEUTRAL";
   return null;
 }
-/** The verifier reads the repo, so it must run inside the STRIPPED pinned tree (docs/methodology
- *  directories removed). Same three-valued shape as above. */
-export function verifyCwdRefusal(cwd, pinDir) {
+/**
+ * The verifier reads the repo, so it must run inside the STRIPPED pinned tree (docs/methodology
+ * directories removed). Same three-valued shape as above.
+ * ⛔ Checking `cwd === --pin-dir` alone proves nothing about the tree: the caller can name an
+ * UNSTRIPPED directory and the guard passes. The directories are therefore enumerated by POSITION
+ * (硬规则 2) and their presence is its own refusal, naming which ones (硬规则 3).
+ * `existsSync` is injectable so a fixture can exercise the check without building a tree.
+ */
+export function verifyCwdRefusal(cwd, pinDir, { existsSync = fs.existsSync } = {}) {
   if (!pinDir) return "PIN_DIR_NOT_GIVEN";
   if (path.resolve(cwd) !== path.resolve(pinDir)) return "CWD_NOT_STRIPPED_PIN";
+  const present = STRIPPED_DIRS.filter((d) => { try { return existsSync(path.join(pinDir, d)); } catch { return false; } });
+  if (present.length) return `PIN_NOT_STRIPPED:${present.join(",")}`;
   return null;
 }
 
@@ -227,13 +310,16 @@ export function parseHypotheses(stdout) {
  * @param {(prompt:string, i:number)=>Promise<object>} o.runModel  INJECTABLE: the only model seam
  * @param {(file:string, text:string)=>void} o.writeFile           INJECTABLE fs seam (recorded in tests)
  */
-export async function runInvestigator({ prompt, neutralDir, cwd, runs = 3, runModel, outDir, writeFile, budget = {} }) {
+export async function runInvestigator({ prompt, neutralDir, cwd, runs = 3, runModel, outDir, writeFile, budget = {}, model = null, promptFile = null, promptFileSha256 = null, inventorySha256 = null }) {
   const refusal = neutralCwdRefusal(cwd, neutralDir);
   if (refusal) return { ok: false, code: EXIT.cwdNotNeutral, reasons: [refusal] };
   const maxRuns = budget.maxRuns ?? null;
   if (maxRuns !== null && runs > maxRuns) {
     return { ok: false, code: EXIT.maxRuns, reasons: [`RUNS_EXCEED_BOUND:${runs}>${maxRuns}`] };
   }
+  // The model is RECORDED, so an unresolved one is a refusal and not a silent `null` — a run file whose
+  // model is unknown cannot be compared with any other run's (硬规则 3b: "did not resolve" ≠ "ran").
+  if (!model) return { ok: false, code: EXIT.usage, reasons: ["MODEL_UNRESOLVED"] };
   const promptSha256 = sha256(prompt);
   const records = [];
   const t0 = Date.now();
@@ -246,6 +332,9 @@ export async function runInvestigator({ prompt, neutralDir, cwd, runs = 3, runMo
     const { hyps, parse_error } = parseHypotheses(stdout);
     const rec = {
       run: i + 1, prompt_sha256: promptSha256,
+      // Which prompt file produced this run, and the hashes binding it: the prompt file's own hash and the
+      // inventory's, so the run stays joinable to its pre-registration even without the composite digest.
+      model, prompt_file: promptFile, prompt_file_sha256: promptFileSha256, inventory_sha256: inventorySha256,
       exit: r?.status ?? null,
       error: r?.error ? String(r.error.message ?? r.error).slice(0, 200) : null,
       wall_ms: Date.now() - tCall,
@@ -388,6 +477,8 @@ export function scoreCases({ labels, matches }) {
 const nodeFs = { readFileSync: fs.readFileSync, existsSync: fs.existsSync, statSync: fs.statSync, writeFileSync: fs.writeFileSync };
 
 const readJsonWith = (fsImpl, p) => { try { return { ok: true, value: JSON.parse(fsImpl.readFileSync(p, "utf8")) }; } catch (e) { return { ok: false, error: String(e?.message ?? e) }; } };
+/** Raw text — the labels hash must be taken over the SAME bytes that are parsed, never a second read. */
+const readTextWith = (fsImpl, p) => { try { return { ok: true, text: fsImpl.readFileSync(p, "utf8") }; } catch (e) { return { ok: false, error: String(e?.message ?? e) }; } };
 const statMsWith = (fsImpl, p) => { try { return fsImpl.statSync(p).mtimeMs; } catch { return null; } };
 
 /**
@@ -395,35 +486,53 @@ const statMsWith = (fsImpl, p) => { try { return fsImpl.statSync(p).mtimeMs; } c
  * exists and (2) the pre-registration gate passes. `verify` uses this — it needs the runs, not the labels.
  * @param {object} o.fs INJECTABLE — tests wrap it to record the file-read ORDER
  */
-export function loadRunsGated({ runDir, runCount, preregPath, expected = {}, fs: fsImpl = nodeFs }) {
+export function loadRunsGated({ runDir, runCount, preregPath, expected = {}, promptBytes = null, inventoryBytes = null, fs: fsImpl = nodeFs }) {
   const runFiles = Array.from({ length: runCount }, (_, i) => path.join(runDir, `run-${i + 1}.json`));
   const runMtimes = [], missing = [];
   for (const f of runFiles) { const ms = statMsWith(fsImpl, f); if (ms === null) missing.push(path.basename(f)); else runMtimes.push(ms); }
   if (missing.length) return { ok: false, code: EXIT.runsIncomplete, reasons: [`RUNS_MISSING:${missing.join(",")}`] };
 
   const preregRead = readJsonWith(fsImpl, preregPath);
-  const gate = preregRefusal({ prereg: preregRead.ok ? preregRead.value : null, expected, preregMtimeMs: statMsWith(fsImpl, preregPath), runMtimesMs: runMtimes });
+  const prereg = preregRead.ok ? preregRead.value : null;
+  const gate = preregRefusal({ prereg, expected, preregMtimeMs: statMsWith(fsImpl, preregPath), runMtimesMs: runMtimes });
   if (gate) return { ok: false, code: gate.code, reasons: gate.reasons };
 
   const runs = runFiles.map((f) => JSON.parse(fsImpl.readFileSync(f, "utf8")));
-  return { ok: true, runs, runFiles };
+  // The declared hashes are checked against the prereg above; the RUNS are bound to the artifacts here.
+  const runGate = runPromptRefusal({ runs, promptBytes, inventoryBytes, expectedPromptSha: expected["prompt-investigator"] ?? null });
+  if (runGate) return { ok: false, code: runGate.code, reasons: runGate.reasons };
+  return { ok: true, runs, runFiles, prereg };
 }
 
 /**
  * The ONLY path that reads the labels file. The runs are read IN FULL first, so the labels are the LAST
  * thing read: their read order is a property of the code, not of the caller's discipline (硬规则 3b).
+ * The labels' hash is then taken over the bytes JUST read and compared with the prereg's — a labels file
+ * edited after the pre-registration therefore refuses (gap-hypgen-prereg-gate-…: the labels were
+ * previously never hashed at all, so a post-hoc edit scored as pre-registered).
  */
-export function score({ runDir, runCount, labelsPath, preregPath, expected = {}, fs: fsImpl = nodeFs }) {
-  const loaded = loadRunsGated({ runDir, runCount, preregPath, expected, fs: fsImpl });
+export function score({ runDir, runCount, labelsPath, preregPath, expected = {}, promptBytes = null, inventoryBytes = null, fs: fsImpl = nodeFs }) {
+  const loaded = loadRunsGated({ runDir, runCount, preregPath, expected, promptBytes, inventoryBytes, fs: fsImpl });
   if (!loaded.ok) return loaded;
-  const labelsRead = readJsonWith(fsImpl, labelsPath);
+  const labelsRead = readTextWith(fsImpl, labelsPath);
   if (!labelsRead.ok) return { ok: false, code: EXIT.usage, reasons: [`LABELS_UNREADABLE:${labelsRead.error}`] };
-  return { ok: true, labels: labelsRead.value, runs: loaded.runs, runFiles: loaded.runFiles, matches: mechanicalMatch({ runs: loaded.runs, labels: labelsRead.value }) };
+  const declared = (loaded.prereg?.hashes ?? {}).labels;
+  if (declared === undefined) return { ok: false, code: EXIT.prereg, reasons: ["PREREG_HASH_ABSENT:labels"] };
+  const actual = sha256(labelsRead.text);
+  if (declared !== actual) return { ok: false, code: EXIT.prereg, reasons: [`PREREG_HASH_MISMATCH:labels`] };
+  let labels; try { labels = JSON.parse(labelsRead.text); } catch (e) { return { ok: false, code: EXIT.usage, reasons: [`LABELS_UNREADABLE:${String(e?.message ?? e)}`] }; }
+  return { ok: true, labels, runs: loaded.runs, runFiles: loaded.runFiles, prereg: loaded.prereg, matches: mechanicalMatch({ runs: loaded.runs, labels }) };
 }
 
 // ── record emission (production validator, then the caller's sink or the production store) ───────────
-/** Build the store records for a mechanical-match pass. Pure. */
-export function matchRecords({ matches, labels, runDir }) {
+/** The `subject_key` for a set of components, in REPO-RELATIVE form so two rounds over the same concept
+ *  produce the same key (gap-hypgen-prereg-gate-…: round 1 wrote `plugin/scripts/x.ts`, round 2 wrote
+ *  `x.ts`, and the same concept could not be joined). */
+export const repoRelSubjectKey = (kind, comps) => `hypgen:${kind}|${comps.map((c) => repoRelComponent(c)).sort().join(",")}`;
+
+/** Build the store records for a mechanical-match pass. Pure. `experiment` comes from the PREREG (see
+ *  `resolveExperimentId`) — a hard-coded one makes an acceptance run indistinguishable from round 1. */
+export function matchRecords({ matches, labels, runDir, experiment = STORE_EXPERIMENT }) {
   const recs = [];
   const ts = new Date().toISOString();
   for (const m of matches) {
@@ -434,18 +543,18 @@ export function matchRecords({ matches, labels, runDir }) {
       rec: {
         statement: `[${m.case}] ${String(m.claim ?? "").slice(0, 380)}`,
         source_evidence: [`${file}#${m.hid}`, `label:${m.case}`],
-        concept_kind: m.kind, components: m.comps, case_id: m.case, ts,
-        experiment: STORE_EXPERIMENT,
+        concept_kind: m.kind, components: [...m.comps].map((c) => repoRelComponent(c)), case_id: m.case, ts,
+        experiment,
       },
     });
     recs.push({
       kind: "outcome",
       rec: {
-        experiment_ref: `${STORE_EXPERIMENT} mechanical-match`,
+        experiment_ref: `${experiment} mechanical-match`,
         verdict: matchVerdict(m, caseSpec?.role),
-        subject_key: `${m.case}|${[...m.comps].sort().join(",")}`,
+        subject_key: `${m.case}|${[...m.comps].map((c) => repoRelComponent(c)).sort().join(",")}`,
         case_id: m.case, run: m.run, hypothesis_id: m.hid, concept_kind: m.kind,
-        ts, experiment: STORE_EXPERIMENT,
+        ts, experiment,
       },
     });
   }
@@ -453,18 +562,18 @@ export function matchRecords({ matches, labels, runDir }) {
 }
 
 /** Build the store records for a verifier pass. Pure. */
-export function verifyRecords({ verify }) {
+export function verifyRecords({ verify, experiment = STORE_EXPERIMENT }) {
   const recs = [];
   const ts = new Date().toISOString();
   for (const v of verify.results ?? []) {
-    const subjectKey = `hypgen:${v.kind}|${[...(v.comps ?? [])].sort().join(",")}`;
+    const key = repoRelSubjectKey(v.kind, v.comps ?? []);
     recs.push({
       kind: "outcome",
       rec: {
-        experiment_ref: `${STORE_EXPERIMENT} cluster ${v.cluster}`,
-        verdict: v.verdict, subject_key: subjectKey, cluster: v.cluster, members: v.members,
+        experiment_ref: `${experiment} cluster ${v.cluster}`,
+        verdict: v.verdict, subject_key: key, cluster: v.cluster, members: v.members,
         intentional_difference_found: v.intentional, verifier_wall_ms: v.wall_ms,
-        verdict_reason: v.verdict_reason, ts, experiment: STORE_EXPERIMENT,
+        verdict_reason: v.verdict_reason, ts, experiment,
       },
     });
     // A verifier that reports an INTENTIONAL difference is a counterexample to the hypothesis — its own
@@ -474,9 +583,9 @@ export function verifyRecords({ verify }) {
         kind: "counterexample",
         rec: {
           counterexample_of: String(v.claim ?? "").slice(0, 120),
-          source_evidence: (v.evidence ?? []).filter((e) => e?.file).slice(0, 3).map((e) => `${e.file}:${e.line}`).concat([`${STORE_EXPERIMENT}#cluster-${v.cluster}`]).slice(0, 4),
-          statement: String(v.counterexample).slice(0, 400), subject_key: subjectKey,
-          ts, experiment: STORE_EXPERIMENT,
+          source_evidence: (v.evidence ?? []).filter((e) => e?.file).slice(0, 3).map((e) => `${e.file}:${e.line}`).concat([`${experiment}#cluster-${v.cluster}`]).slice(0, 4),
+          statement: String(v.counterexample).slice(0, 400), subject_key: key,
+          ts, experiment,
         },
       });
     }
@@ -485,7 +594,7 @@ export function verifyRecords({ verify }) {
 }
 
 /** Build the store records for a review pass. Pure. */
-export function reviewRecords({ reviews, runDir }) {
+export function reviewRecords({ reviews, runDir, experiment = STORE_EXPERIMENT }) {
   const recs = [];
   const ts = new Date().toISOString();
   for (const r of reviews) {
@@ -493,12 +602,12 @@ export function reviewRecords({ reviews, runDir }) {
     recs.push({
       kind: "outcome",
       rec: {
-        experiment_ref: `${STORE_EXPERIMENT} review`,
+        experiment_ref: `${experiment} review`,
         verdict: same ? "supported" : (r.review?.partial === true ? "undetermined" : "refuted"),
-        subject_key: `${r.case}|${(r.comps ?? []).sort().join(",")}`,
+        subject_key: `${r.case}|${(r.comps ?? []).map((c) => repoRelComponent(c)).sort().join(",")}`,
         case_id: r.case, run: r.run, hypothesis_id: r.hid, reviewer_wall_ms: r.wall_ms,
         same_concept: r.review?.same_concept ?? null, partial: r.review?.partial ?? null,
-        ts, experiment: STORE_EXPERIMENT,
+        ts, experiment,
       },
     });
   }
@@ -656,6 +765,62 @@ export function hardenedArgv(launchArgv, prompt, root, { tools = "", maxTurns = 
   return argv;
 }
 
+/**
+ * Resolve the launcher module, surfacing the REAL cause. `catch(() => ({}))` collapsed every failure — a
+ * missing `node_modules`, a missing export, a syntax error — into "driver-runtime.ts unavailable", which
+ * is the shape 硬规则 3b forbids: a cause-free refusal reads like a policy decision rather than an
+ * environment fault. (The acceptance run's real cause was `ERR_MODULE_NOT_FOUND: yaml`, in a worktree with
+ * no `node_modules`.) `load` is injectable so the failure path is testable without a broken checkout.
+ */
+export async function importDriverRuntime(load = () => import("../../plugin/scripts/driver-runtime.ts")) {
+  let mod;
+  try { mod = await load(); }
+  catch (err) {
+    const code = err?.code ? String(err.code) : "NO_CODE";
+    const msg = String(err?.message ?? err).split("\n")[0].slice(0, 300);
+    return { ok: false, reason: `DRIVER_RUNTIME_IMPORT_FAILED:${code}:${msg}` };
+  }
+  if (!mod?.launchArgv) return { ok: false, reason: "DRIVER_RUNTIME_MISSING_EXPORT:launchArgv" };
+  if (!mod?.runAsync) return { ok: false, reason: "DRIVER_RUNTIME_MISSING_EXPORT:runAsync" };
+  return { ok: true, mod };
+}
+
+/** The model the launcher resolved (the `--model <m>` pair in the hardened argv), or `null`. Recording it
+ *  is not cosmetic: two runs whose model is unknown cannot be compared, and a recorded `null` is a lie. */
+export function modelFromArgv(argv) {
+  const a = argv ?? [];
+  const i = a.indexOf("--model");
+  return i >= 0 && a[i + 1] ? String(a[i + 1]) : null;
+}
+
+/** The hashes the PREREG must record, computed from the artifact BYTES the caller supplied — never from a
+ *  `--*-sha` flag, which is a claim about the bytes rather than a reading of them. */
+export function expectedFromArtifacts({ promptBytes, inventoryBytes }) {
+  return { "prompt-investigator": sha256(promptBytes), inventory: sha256(inventoryBytes) };
+}
+
+/** `--prompt-sha` / `--inventory-sha` survive as OPTIONAL EXTRA assertions (they are no longer the gate):
+ *  a caller that passes one is stating what it believes, and a belief that contradicts the bytes is a
+ *  refusal with its own reason. Omitted ⇒ no opinion, and the prereg gate still governs. */
+function cliExtraShaRefusals(args, { promptBytes, inventoryBytes }) {
+  const reasons = [];
+  const ps = argOf(args, "--prompt-sha", null);
+  const is = argOf(args, "--inventory-sha", null);
+  if (ps && ps !== sha256(promptBytes)) reasons.push("CLI_PROMPT_SHA_MISMATCH");
+  if (is && is !== sha256(inventoryBytes)) reasons.push("CLI_INVENTORY_SHA_MISMATCH");
+  return reasons;
+}
+
+/** The prompt + inventory bytes a run's recorded digest is re-derived from. The prompt defaults to the
+ *  FROZEN round-1 file: a reproduction that silently runs on a different prompt is the defect itself. */
+function readRunInputs(args) {
+  const promptPath = path.resolve(argOf(args, "--investigator-prompt", defaultInvestigatorPrompt()));
+  const inventoryPath = argOf(args, "--inventory", null);
+  if (!inventoryPath) return { ok: false, reason: "INVENTORY_REQUIRED" };
+  try { return { ok: true, promptPath, promptBytes: fs.readFileSync(promptPath, "utf8"), inventoryBytes: fs.readFileSync(inventoryPath, "utf8") }; }
+  catch (err) { return { ok: false, reason: `RUN_INPUT_UNREADABLE:${String(err?.message ?? err).split("\n")[0].slice(0, 200)}` }; }
+}
+
 async function cli(argv = process.argv.slice(2)) {
   const verb = argv[0];
   const args = argv.slice(1);
@@ -689,15 +854,20 @@ async function cli(argv = process.argv.slice(2)) {
 
   if (verb === "investigate") {
     const neutralDir = argOf(args, "--neutral-dir", null);
-    const promptFile = argOf(args, "--prompt", path.join(HERE, "arch-hypothesis-generation-prompts", "investigator.txt"));
-    const inventoryFile = argOf(args, "--inventory", null);
-    if (!neutralDir || !inventoryFile) { console.error(`${TOOL} investigate: --neutral-dir and --inventory are required`); return EXIT.usage; }
-    const prompt = fs.readFileSync(promptFile, "utf8") + fs.readFileSync(inventoryFile, "utf8");
-    const { launchArgv, runAsync } = await import("../../plugin/scripts/driver-runtime.ts").catch(() => ({}));
-    if (!launchArgv) { console.error(`${TOOL} investigate: driver-runtime.ts unavailable — the model seam cannot be resolved`); return EXIT.usage; }
+    const inputs = readRunInputs(args);
+    if (!neutralDir) { console.error(`${TOOL} investigate: --neutral-dir is required`); return EXIT.usage; }
+    if (!inputs.ok) { console.error(`${TOOL} investigate: ${inputs.reason}`); return EXIT.usage; }
+    const promptBytes = inputs.promptBytes, inventoryBytes = inputs.inventoryBytes;
+    const prompt = promptBytes + inventoryBytes;
+    const runtime = await importDriverRuntime();
+    if (!runtime.ok) { console.error(`${TOOL} investigate: ${runtime.reason}`); return EXIT.usage; }
+    const { launchArgv, runAsync } = runtime.mod;
+    const model = modelFromArgv(hardenedArgv(launchArgv, "", root));
+    if (!model) { console.error(`${TOOL} investigate: launchArgv("meta-driver") resolved no --model — refusing to record runs whose model is unknown`); return EXIT.usage; }
     const runModel = async (p) => runAsync(hardenedArgv(launchArgv, p, root), { timeoutMs: Number(argOf(args, "--timeout-ms", 900_000)), collectStderr: true, stdinData: p });
     const res = await runInvestigator({
-      prompt, neutralDir, cwd: process.cwd(), runs: Number(argOf(args, "--runs", 3)), runModel, outDir,
+      prompt, neutralDir, cwd: process.cwd(), runs: Number(argOf(args, "--runs", 3)), runModel, outDir, model,
+      promptFile: path.relative(root, inputs.promptPath), promptFileSha256: sha256(promptBytes), inventorySha256: sha256(inventoryBytes),
       writeFile: (f, t) => { fs.mkdirSync(path.dirname(f), { recursive: true }); fs.writeFileSync(f, t, "utf8"); },
       budget: { maxRuns: Number(argOf(args, "--max-runs", 3)), maxMs: argOf(args, "--max-ms", null) === null ? null : Number(argOf(args, "--max-ms")) },
     });
@@ -710,13 +880,23 @@ async function cli(argv = process.argv.slice(2)) {
     const runsDir = path.resolve(argOf(args, "--runs", outDir));
     if (!pinDir) { console.error(`${TOOL} verify: --pin-dir is required`); return EXIT.usage; }
     const runCount = Number(argOf(args, "--run-count", 3));
-    // verify needs the RUNS, not the labels (labels stay confined to match/review).
-    const gate = loadRunsGated({ runDir: runsDir, runCount, preregPath: argOf(args, "--prereg", null) });
+    const inputs = readRunInputs(args);
+    if (!inputs.ok) { console.error(`${TOOL} verify: ${inputs.reason}`); return EXIT.usage; }
+    const extra = cliExtraShaRefusals(args, inputs);
+    if (extra.length) { console.error(`${TOOL} verify: ${extra.join(", ")}`); return EXIT.prereg; }
+    // verify needs the RUNS, not the labels (labels stay confined to match/review) — but it must still bind
+    // the runs to the pre-registered prompt + inventory, so those two artifacts are required here.
+    const gate = loadRunsGated({
+      runDir: runsDir, runCount, preregPath: argOf(args, "--prereg", null),
+      expected: expectedFromArtifacts(inputs), promptBytes: inputs.promptBytes, inventoryBytes: inputs.inventoryBytes,
+    });
     if (!gate.ok) { console.error(`${TOOL} verify: ${gate.reasons.join(", ")}`); return gate.code; }
+    const experiment = resolveExperimentId({ flag: argOf(args, "--experiment", null), prereg: gate.prereg }) ?? STORE_EXPERIMENT;
     const clusters = clusterHypotheses(gate.runs);
     const template = fs.readFileSync(argOf(args, "--prompt", path.join(HERE, "arch-hypothesis-generation-prompts", "verifier.txt")), "utf8");
-    const { launchArgv, runAsync } = await import("../../plugin/scripts/driver-runtime.ts").catch(() => ({}));
-    if (!launchArgv) { console.error(`${TOOL} verify: driver-runtime.ts unavailable`); return EXIT.usage; }
+    const runtime = await importDriverRuntime();
+    if (!runtime.ok) { console.error(`${TOOL} verify: ${runtime.reason}`); return EXIT.usage; }
+    const { launchArgv, runAsync } = runtime.mod;
     const maxTurns = Number(argOf(args, "--max-turns", 8));
     const runModel = async (p) => runAsync(hardenedArgv(launchArgv, p, root, { tools: "Read,Grep", maxTurns }), { timeoutMs: Number(argOf(args, "--timeout-ms", 300_000)), collectStderr: true, stdinData: p });
     const res = await runVerifier({ clusters, pinDir, cwd: process.cwd(), promptTemplate: template, runModel, maxClusters: Number(argOf(args, "--max-clusters", HARD_MAX_CLUSTERS)), maxMs: argOf(args, "--max-ms", null) === null ? null : Number(argOf(args, "--max-ms")) });
@@ -724,7 +904,7 @@ async function cli(argv = process.argv.slice(2)) {
     const outFile = path.resolve(argOf(args, "--out", path.join(outDir, "verify.json")));
     fs.mkdirSync(path.dirname(outFile), { recursive: true });
     fs.writeFileSync(outFile, JSON.stringify({ clusters_total: res.clusters_total, verified: res.verified, beyond_cap: res.beyond_cap, results: res.results }, null, 1));
-    const tally = emit(verifyRecords({ verify: res }), { out: path.join(outDir, "verify-records.jsonl"), writeStore: has(args, "--write-store"), root: has(args, "--write-store") ? root : null });
+    const tally = emit(verifyRecords({ verify: res, experiment }), { out: path.join(outDir, "verify-records.jsonl"), writeStore: has(args, "--write-store"), root: has(args, "--write-store") ? root : null });
     console.log(JSON.stringify({ clusters_total: res.clusters_total, verified: res.verified, beyond_cap: res.beyond_cap, verdicts: res.results.reduce((a, r) => ((a[r.verdict] = (a[r.verdict] ?? 0) + 1), a), {}), validator: { accepted: tally.accepted, refused: tally.refused } }, null, json ? 1 : 0));
     return 0;
   }
@@ -734,17 +914,24 @@ async function cli(argv = process.argv.slice(2)) {
     const labelsPath = argOf(args, "--labels", null);
     const preregPath = argOf(args, "--prereg", null);
     if (!labelsPath) { console.error(`${TOOL} ${verb}: --labels is required`); return EXIT.usage; }
-    const expected = {};
-    if (argOf(args, "--inventory-sha", null)) expected["inventory"] = argOf(args, "--inventory-sha");
-    if (argOf(args, "--prompt-sha", null)) expected["prompt-investigator"] = argOf(args, "--prompt-sha");
-    const res = score({ runDir, runCount: Number(argOf(args, "--run-count", 3)), labelsPath, preregPath, expected });
+    const inputs = readRunInputs(args);
+    if (!inputs.ok) { console.error(`${TOOL} ${verb}: ${inputs.reason}`); return EXIT.usage; }
+    const extra = cliExtraShaRefusals(args, inputs);
+    if (extra.length) { console.error(`${TOOL} ${verb}: ${extra.join(", ")}`); return EXIT.prereg; }
+    const res = score({
+      runDir, runCount: Number(argOf(args, "--run-count", 3)), labelsPath, preregPath,
+      expected: expectedFromArtifacts(inputs), promptBytes: inputs.promptBytes, inventoryBytes: inputs.inventoryBytes,
+    });
     if (!res.ok) { console.error(`${TOOL} ${verb}: ${res.reasons.join(", ")}`); return res.code; }
+    // The experiment id is read from the PREREG (`--experiment` overrides): a constant here is what made an
+    // acceptance run's records indistinguishable from round 1's.
+    const experiment = resolveExperimentId({ flag: argOf(args, "--experiment", null), prereg: res.prereg }) ?? STORE_EXPERIMENT;
     if (verb === "match") {
       const scored = scoreCases({ labels: res.labels, matches: res.matches });
       const outFile = path.resolve(argOf(args, "--out", path.join(outDir, "mechanical-matches.json")));
       fs.mkdirSync(path.dirname(outFile), { recursive: true });
       fs.writeFileSync(outFile, JSON.stringify({ run_files: res.runFiles.map((f) => path.basename(f)), matches: res.matches }, null, 1));
-      const tally = emit(matchRecords({ matches: res.matches, labels: res.labels, runDir }), { out: path.join(outDir, "match-records.jsonl"), writeStore: has(args, "--write-store"), root: has(args, "--write-store") ? root : null });
+      const tally = emit(matchRecords({ matches: res.matches, labels: res.labels, runDir, experiment }), { out: path.join(outDir, "match-records.jsonl"), writeStore: has(args, "--write-store"), root: has(args, "--write-store") ? root : null });
       console.log(JSON.stringify(json ? { ...scored, validator: { accepted: tally.accepted, refused: tally.refused } } : { matches: res.matches.length, by_case: scored.by_case, recall_positive: scored.recall_positive, holdout: scored.holdout, negative_false_positive: scored.negative_false_positive, validator: { accepted: tally.accepted, refused: tally.refused } }, null, json ? 1 : 0));
       return 0;
     }
@@ -754,8 +941,9 @@ async function cli(argv = process.argv.slice(2)) {
     const neutralDir = argOf(args, "--neutral-dir", null);
     const cwdRefusal = neutralCwdRefusal(process.cwd(), neutralDir);
     if (cwdRefusal) { console.error(`${TOOL} review: ${cwdRefusal}`); return EXIT.cwdNotNeutral; }
-    const { launchArgv, runAsync } = await import("../../plugin/scripts/driver-runtime.ts").catch(() => ({}));
-    if (!launchArgv) { console.error(`${TOOL} review: driver-runtime.ts unavailable`); return EXIT.usage; }
+    const runtime = await importDriverRuntime();
+    if (!runtime.ok) { console.error(`${TOOL} review: ${runtime.reason}`); return EXIT.usage; }
+    const { launchArgv, runAsync } = runtime.mod;
     const reviews = [];
     for (const m of matches) {
       const c = (res.labels.cases ?? []).find((x) => x.id === m.case);
@@ -767,7 +955,7 @@ async function cli(argv = process.argv.slice(2)) {
     const outFile = path.resolve(argOf(args, "--out", path.join(outDir, "review.json")));
     fs.mkdirSync(path.dirname(outFile), { recursive: true });
     fs.writeFileSync(outFile, JSON.stringify(reviews, null, 1));
-    const tally = emit(reviewRecords({ reviews, runDir }), { out: path.join(outDir, "review-records.jsonl"), writeStore: has(args, "--write-store"), root: has(args, "--write-store") ? root : null });
+    const tally = emit(reviewRecords({ reviews, runDir, experiment }), { out: path.join(outDir, "review-records.jsonl"), writeStore: has(args, "--write-store"), root: has(args, "--write-store") ? root : null });
     console.log(JSON.stringify({ reviewed: reviews.length, reviews, validator: { accepted: tally.accepted, refused: tally.refused } }, null, json ? 1 : 0));
     return 0;
   }
@@ -813,12 +1001,18 @@ async function cli(argv = process.argv.slice(2)) {
   }
 
   console.error(`usage: ${TOOL} <inventory|investigate|verify|match|review|report> [options]`);
+  console.error(`  The investigator prompt defaults to the FROZEN round-1 file (${FROZEN_INVESTIGATOR_PROMPT});`);
+  console.error("  `investigator.txt` is the reworded VARIANT and is never the default. Every run records the prompt");
+  console.error("  file it used plus that file's hash, and the pre-registration gate re-derives each run's recorded");
+  console.error("  prompt digest from the prompt + inventory bytes supplied here (--prompt-sha / --inventory-sha are");
+  console.error("  optional extra assertions, never the gate).");
   console.error("  inventory   --pin <rev> [--max-exports N] [--max-carriers N] [--carrier-forms literal|literal+join] [--contamination-pairs <f>] [--out <f>]");
-  console.error("  investigate --inventory <f> --neutral-dir <dir> [--runs N] [--max-runs N] [--max-ms N] [--timeout-ms N] [--out-dir <dir>]");
-  console.error("  verify      --pin-dir <dir> --runs <dir> [--prereg <f>] [--max-clusters N] [--max-turns N] [--timeout-ms N] [--max-ms N]");
-  console.error("  match       --runs <dir> --labels <f> [--prereg <f>] [--run-count N] [--write-store]");
-  console.error("  review      --runs <dir> --labels <f> --matches <f> --neutral-dir <dir> [--prereg <f>]");
+  console.error("  investigate --inventory <f> --neutral-dir <dir> [--investigator-prompt <f>] [--runs N] [--max-runs N] [--max-ms N] [--timeout-ms N] [--out-dir <dir>]");
+  console.error("  verify      --pin-dir <dir> --runs <dir> --inventory <f> [--prereg <f>] [--investigator-prompt <f>] [--experiment <id>] [--max-clusters N] [--max-turns N] [--max-ms N]");
+  console.error("  match       --runs <dir> --labels <f> --inventory <f> [--prereg <f>] [--investigator-prompt <f>] [--experiment <id>] [--run-count N] [--write-store]");
+  console.error("  review      --runs <dir> --labels <f> --matches <f> --neutral-dir <dir> --inventory <f> [--prereg <f>] [--experiment <id>]");
   console.error("  report      --artifacts <dir> [--labels <f>] [--out <md>]");
+  console.error("  --experiment <id> overrides the id read from the prereg (fields: experiment | experiment_id | acceptance_run).");
   return EXIT.usage;
 }
 
