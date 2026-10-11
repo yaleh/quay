@@ -21,6 +21,11 @@ import {
   preregRefusal, runPromptDigest, runPromptRefusal,
   resolveExperimentId, repoRelComponent, repoRelSubjectKey,
   STRIPPED_DIRS, FROZEN_INVESTIGATOR_PROMPT, defaultInvestigatorPrompt, sha256,
+  SCOPE_FORBIDDEN_DIRS, PIN_FORBIDDEN_DIRS,
+  FROZEN_VERIFIER_PROMPT, FROZEN_VERIFIER_PROMPT_SHA256, defaultVerifierPrompt,
+  EVIDENCE_PACK_VERIFIER_PROMPT, evidencePackVerifierPrompt, VERIFIER_STRATEGIES,
+  DEFAULT_EVIDENCE_MAX_LINES, UNINSTRUMENTED, citedSymbols, isDefinitionLine,
+  definitionLinesFor, importLinesFor, buildEvidencePack, parseVerifierStream,
   neutralCwdRefusal, verifyCwdRefusal, parseJsonObject, parseHypotheses, runInvestigator,
   clusterHypotheses, verifierVerdict, runVerifier,
   sharedImplementation, mechanicalRefutation, provenanceIndex,
@@ -685,6 +690,171 @@ test("AC(d): the mechanical layer refutes all-import-from-one-module, not each-d
   assert.equal(called2, 1, "without edge data the verifier behaves exactly as before");
   assert.equal(rv2.results[0].verdict, "supported");
   assert.equal(rv2.mechanical_refuted, 0);
+});
+
+// ═════════════════════════════════════════════════════════════════════════════════════════════════════
+// gap-hypgen-verifier-budget-exhaustion-is-unobservable-and-unscoped — AC (a)…(d)
+// Turn-budget OBSERVABILITY, scope enforcement, and the opt-in evidence pack.
+// ═════════════════════════════════════════════════════════════════════════════════════════════════════
+
+const oneCluster = () => clusterHypotheses([{ run: 1, hyps: [
+  { id: "H1", components: ["a.ts", "b.ts"], concept_kind: "policy", claim: "c", confidence: "high" },
+] }]);
+const sse = (events) => events.map((e) => JSON.stringify(e)).join("\n");
+const toolUse = (id, name, input) => ({ type: "assistant", message: { content: [{ type: "tool_use", id, name, input }] } });
+const toolResult = (id, content) => ({ type: "user", message: { content: [{ type: "tool_result", tool_use_id: id, content }] } });
+const streamResult = (o) => ({ type: "result", ...o });
+
+// ── AC(a): the pinned tree may not carry .quay/ (or any other out-of-scope top-level dir) ────────────
+test("AC(a): a pin dir containing .quay/ (or any scope dir) is refused, and no model call happens", async () => {
+  const dir = tmp();
+  fs.mkdirSync(path.join(dir, ".quay"));
+  assert.equal(verifyCwdRefusal(dir, dir), "PIN_NOT_STRIPPED:.quay");
+  for (const d of ["archive", "milestones", "measurements"]) fs.mkdirSync(path.join(dir, d));
+  assert.equal(verifyCwdRefusal(dir, dir), "PIN_NOT_STRIPPED:.quay,archive,milestones,measurements", "every present dir is named (硬规则 3)");
+  assert.deepEqual([...SCOPE_FORBIDDEN_DIRS], [".quay", "archive", "milestones", "measurements"]);
+  // ⛔ the dependency task's strippedness list is COMPLEMENTED, not rewritten
+  assert.deepEqual([...STRIPPED_DIRS], ["tasks", "goals", "docs", "orchestration"]);
+  assert.deepEqual([...PIN_FORBIDDEN_DIRS], ["tasks", "goals", "docs", "orchestration", ".quay", "archive", "milestones", "measurements"]);
+  // and it refuses THROUGH runVerifier, before any model call
+  let called = 0;
+  const res = await runVerifier({
+    clusters: oneCluster(), pinDir: dir, cwd: dir, promptTemplate: "{{HYP}}",
+    runModel: async () => { called++; return { stdout: "{}", status: 0 }; },
+  });
+  assert.equal(res.ok, false);
+  assert.equal(res.code, EXIT.cwdNotNeutral);
+  assert.deepEqual(res.reasons, ["PIN_NOT_STRIPPED:.quay,archive,milestones,measurements"]);
+  assert.equal(called, 0, "no model call may happen before the scope check");
+});
+
+// ── AC(b): an exhausted verifier leaves a PER-TURN record and is undetermined/turn-budget ────────────
+test("AC(b): an exhausted verifier leaves a per-turn record, cause turn-budget, and is never refuted", async () => {
+  const dir = tmp();
+  // The stream the CLI actually emits: the result event carries the STRUCTURAL subtype, and (in
+  // stream-json mode) no "Reached max turns" text exists ANYWHERE — so the cause must not be read by
+  // keyword. Two tool calls with their result payload sizes are what the acceptance run never recorded.
+  const stdout = sse([
+    toolUse("t1", "Grep", { pattern: "window_ms", path: "/pin", output_mode: "content" }),
+    toolResult("t1", "x".repeat(4096)),
+    toolUse("t2", "Read", { file_path: "/pin/plugin/scripts/a.ts" }),
+    toolResult("t2", "y".repeat(512)),
+    streamResult({ subtype: "error_max_turns", is_error: true, num_turns: 2 }),
+  ]);
+  assert.equal(stdout.includes("max turns"), false, "the fixture proves keyword matching cannot be the cause");
+  const res = await runVerifier({
+    clusters: oneCluster(), pinDir: dir, cwd: dir, promptTemplate: "{{HYP}}",
+    runModel: async () => ({ stdout, stderr: "", status: 1 }),
+  });
+  const row = res.results[0];
+  assert.equal(row.verdict, "undetermined");
+  assert.notEqual(row.verdict, "refuted");
+  assert.equal(row.verdict_cause, "turn-budget");
+  assert.equal(row.instrumented, true);
+  assert.equal(row.instrumentation, "stream-json");
+  assert.deepEqual(row.turns.map((t) => t.tool), ["Grep", "Read"]);
+  assert.deepEqual(row.turns.map((t) => t.result_bytes), [4096, 512], "the per-turn record carries the result byte size");
+  assert.ok(row.turns[0].args_head.includes("window_ms"), "the argument head names what was searched");
+  assert.equal(row.turns_used, 2);
+  assert.equal(row.cli_num_turns, 2);
+  // the emitted store row carries the observability the acceptance run lacked
+  const rec = verifyRecords({ verify: res })[0].rec;
+  assert.equal(rec.verdict, "undetermined");
+  assert.equal(rec.verifier_instrumentation, "stream-json");
+  assert.equal(rec.verifier_turns_used, 2);
+
+  // ⛔ a call with NO parseable stream is "not evaluated", never "zero turns" (硬规则 3b)
+  const plain = await runVerifier({
+    clusters: oneCluster(), pinDir: dir, cwd: dir, promptTemplate: "{{HYP}}",
+    runModel: async () => ({ stdout: "Error: Reached max turns (8)", stderr: "", status: 1 }),
+  });
+  assert.equal(plain.results[0].verdict, "undetermined");
+  assert.equal(plain.results[0].verdict_cause, "turn-budget");
+  assert.equal(plain.results[0].instrumentation, UNINSTRUMENTED);
+  assert.equal(plain.results[0].turns, null);
+  assert.equal(plain.results[0].turns_used, null);
+  // and a stream that parsed but spent NO tool call is zero turns — a different reading from the above
+  const zero = parseVerifierStream(sse([streamResult({ subtype: "success", num_turns: 1, result: "{\"verdict\":\"refuted\"}" })]));
+  assert.equal(zero.ok, true);
+  assert.deepEqual(zero.turns, []);
+  assert.equal(zero.finalText, '{"verdict":"refuted"}');
+});
+
+// ── AC(c): the evidence pack names the definition lines and the import lines, and respects the cap ───
+test("AC(c): the evidence pack names definition lines and import lines, and respects the line cap", () => {
+  const sources = {
+    "alpha.ts": "export const window_ms = 1000;\nexport function shared() {}\n",
+    "beta.ts": 'import { shared } from "./alpha.ts";\nexport const window_ms = 2000;\n',
+  };
+  const provenance = [
+    { c: "alpha.ts", imports: [], imported_by: ["plugin/scripts/beta.ts"], sha256: "a".repeat(64) },
+    { c: "beta.ts", imports: [{ module: "plugin/scripts/alpha.ts", names: ["shared"], line: 1 }], imported_by: [], sha256: "b".repeat(64) },
+  ];
+  const claim = "the routine quota window_ms is declared separately in alpha.ts and beta.ts";
+  assert.deepEqual(citedSymbols(claim), ["window_ms"], "only the code-shaped token is a cited symbol");
+  assert.equal(isDefinitionLine("export const window_ms = 1000;", "window_ms"), true);
+  assert.equal(isDefinitionLine("  // window_ms is parsed here", "window_ms"), false, "a mention is not a definition (硬规则 2)");
+
+  const pack = buildEvidencePack({ components: ["alpha.ts", "beta.ts"], claim, sources, provenance, hits: [] });
+  const defs = pack.sections.definitions;
+  assert.deepEqual(defs.map((d) => `${d.component}:${d.line}`), ["plugin/scripts/alpha.ts:1", "plugin/scripts/beta.ts:2"]);
+  assert.ok(defs.every((d) => d.symbol === "window_ms"));
+  assert.ok(pack.text.includes("DEF plugin/scripts/alpha.ts:1"), pack.text);
+  assert.ok(pack.text.includes("DEF plugin/scripts/beta.ts:2"));
+  const imps = pack.sections.imports;
+  assert.equal(imps.length, 1);
+  assert.equal(imps[0].from, "plugin/scripts/beta.ts");
+  assert.equal(imps[0].to, "plugin/scripts/alpha.ts");
+  assert.ok(pack.text.includes("IMP plugin/scripts/beta.ts:1 -> plugin/scripts/alpha.ts"), pack.text);
+  assert.equal(pack.capped, false);
+  assert.equal(DEFAULT_EVIDENCE_MAX_LINES, 40);
+
+  // THE LINE CAP: more evidence than the cap ⇒ the rendered lines never exceed it, and `capped` says so
+  const many = buildEvidencePack({
+    components: ["alpha.ts", "beta.ts"], claim, sources, provenance,
+    hits: Array.from({ length: 20 }, (_, i) => ({ file: "plugin/scripts/alpha.ts", line: i + 1, text: `hit ${i}` })), maxLines: 5,
+  });
+  assert.ok(many.lines.length <= 5, `cap respected: ${many.lines.length} > 5`);
+  assert.equal(many.capped, true);
+  assert.ok(many.counts.total > many.lines.length);
+  // ROUND-ROBIN: a cap can never starve a whole evidence class of its first line
+  assert.ok(many.lines.some((l) => l.startsWith("- DEF ")));
+  assert.ok(many.lines.some((l) => l.startsWith("- IMP ")));
+  assert.ok(many.lines.some((l) => l.startsWith("- HIT ")));
+  // PURE: identical inputs ⇒ byte-identical pack (the pack is assembled before the model call, not by it)
+  const mk = () => buildEvidencePack({ components: ["alpha.ts", "beta.ts"], claim, sources, provenance, hits: [] });
+  assert.equal(mk().text, mk().text);
+  // ⛔ a component with no source is SKIPPED, never treated as an empty file (硬规则 6)
+  assert.deepEqual(definitionLinesFor({ symbols: ["window_ms"], components: ["ghost.ts"], sources }).length, 0);
+  assert.deepEqual(importLinesFor({ components: ["alpha.ts", "beta.ts"], provenance })[0].names, ["shared"]);
+});
+
+// ── AC(d): the default verifier prompt is byte-identical; the pack prompt is a separate opt-in file ──
+test("AC(d): the default verifier prompt is byte-identical to the frozen value and carries no pack slot", () => {
+  const p = defaultVerifierPrompt();
+  assert.equal(path.basename(p), FROZEN_VERIFIER_PROMPT);
+  assert.equal(sha256(fs.readFileSync(p, "utf8")), FROZEN_VERIFIER_PROMPT_SHA256);
+  assert.equal(FROZEN_VERIFIER_PROMPT_SHA256, "dba2e67157aac12ccb769fe10bfa75fb91cfe8955cf9eca66b71301f01981f2d");
+  assert.equal(fs.readFileSync(p, "utf8").includes("{{PACK}}"), false, "the frozen prompt has no pack placeholder");
+  const pack = evidencePackVerifierPrompt();
+  assert.equal(path.basename(pack), EVIDENCE_PACK_VERIFIER_PROMPT);
+  const packText = fs.readFileSync(pack, "utf8");
+  assert.notEqual(sha256(packText), FROZEN_VERIFIER_PROMPT_SHA256, "the pack strategy is a DIFFERENT prompt file");
+  assert.ok(packText.includes("{{PACK}}") && packText.includes("{{HYP}}"));
+  assert.deepEqual([...VERIFIER_STRATEGIES], ["default", "evidence-pack"]);
+});
+
+// ── Plan 5: no regression case is named in the module or in any prompt ───────────────────────────────
+test("Plan 5: neither the module nor the verifier prompts name a regression case label", () => {
+  const analysisDir = new URL("../../docs/analysis/", import.meta.url);
+  const modSrc = fs.readFileSync(new URL("arch-hypothesis-generation.mjs", analysisDir), "utf8");
+  const promptFiles = ["verifier.txt", "verifier-evidence-pack.txt", "investigator.txt", "investigator-round1-frozen.txt", "reviewer.txt"];
+  const texts = [["arch-hypothesis-generation.mjs", modSrc], ...promptFiles.map((f) => [f, fs.readFileSync(new URL(`arch-hypothesis-generation-prompts/${f}`, analysisDir), "utf8")])];
+  for (const [name, text] of texts) {
+    // An acceptance cluster is addressed by POSITION (`--only-cluster N`), never by its label. The labels
+    // themselves are NOT reproduced here either — this file is not the place a skipped case could hide.
+    assert.equal(/\bc13\b/i.test(text), false, `${name} must not name a regression case`);
+  }
 });
 
 test("prompt: the tool's default investigator prompt is the frozen round-1 file, byte for byte", () => {

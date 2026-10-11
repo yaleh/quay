@@ -55,6 +55,27 @@
 // file is never opened before the runs exist. Both files are supplied by the caller and are NOT checked in.
 // (The three prompt files under `arch-hypothesis-generation-prompts/` carry no holdout text either.)
 //
+// ── OBSERVABILITY OF THE VERIFIER'S TURN BUDGET, SCOPE ENFORCEMENT, AND THE EVIDENCE PACK ───────────
+// The acceptance verify file (`E-HYPGEN-ACCEPT-1`) showed 7 of 15 clusters `undetermined` at the 8-turn
+// limit, each output a 28-byte `Error: Reached max turns (8)`, and NO trace of which turns consumed the
+// budget (the run is `--no-session-persistence` and recorded only the final stdout). Three additions:
+//   • INSTRUMENTATION. Every verify call runs with `--output-format stream-json`; `parseVerifierStream`
+//     turns the stream into a per-turn record (tool, argument head, result bytes). In that mode the CLI
+//     prints no "Reached max turns" text at all, so exhaustion is read STRUCTURALLY from the result
+//     event's `subtype` (硬规则 2). A call whose stream did not parse is `not-evaluated:uninstrumented` —
+//     its own value, never "zero turns" (硬规则 3b).
+//   • SCOPE ENFORCEMENT. The pinned tree must carry none of `PIN_FORBIDDEN_DIRS`: the dependency task's
+//     strippedness list PLUS `.quay/`, `archive/`, `milestones/`, `measurements/`. The defect: the
+//     "stripped" pin still carried tracked `.quay/` evidence files that the verifier's Greps walked.
+//   • THE EVIDENCE PACK (opt-in, `--strategy evidence-pack`). Before the model call, `buildEvidencePack`
+//     deterministically assembles the definition lines of the symbols the claim cites, the import lines
+//     among the named components, and bounded grep hits, and passes them through a NEW prompt file
+//     (`verifier-evidence-pack.txt`). The frozen `verifier.txt` stays the default and its bytes are pinned.
+//     Clusters the mechanical layer already decides run FIRST (budget-aware ordering), so no model call is
+//     spent on them, and `turns_used` is recorded per cluster.
+// ⛔ No regression case is named in this file or in any prompt: the acceptance cluster is identified by
+// POSITION (`--only-cluster`), and the strategy is validated against `VERIFIER_STRATEGIES`.
+
 // ── FAIL-CLOSED BOUNDS, ONE EXIT CODE EACH ──────────────────────────────────────────────────────────
 //   2 usage/env   3 investigator refused: cwd is not the empty neutral dir
 //   4 prereg (every pre-registration refusal: an absent/mismatched hash, a run whose recorded prompt
@@ -118,13 +139,44 @@ export const PROMPTS_DIR = "arch-hypothesis-generation-prompts";
 export const FROZEN_INVESTIGATOR_PROMPT = "investigator-round1-frozen.txt";
 export const defaultInvestigatorPrompt = (here = HERE) => path.join(here, PROMPTS_DIR, FROZEN_INVESTIGATOR_PROMPT);
 
+/** The verifier prompt the `verify` step runs on. The FROZEN file is the DEFAULT: the acceptance verify
+ *  file's verdicts were produced on these bytes, so replacing it silently would make a reproduction a
+ *  different experiment. The evidence-pack strategy ships in its OWN file (opt-in) — a second, named
+ *  artifact, never an edit to this one (gap-hypgen-verifier-budget-exhaustion-…). */
+export const FROZEN_VERIFIER_PROMPT = "verifier.txt";
+/** The sha256 of the frozen verifier prompt, taken from the file at the acceptance pin (`e3163e519`). It
+ *  is a PIN, not a second copy of the text: the test re-derives it from the file's bytes. */
+export const FROZEN_VERIFIER_PROMPT_SHA256 = "dba2e67157aac12ccb769fe10bfa75fb91cfe8955cf9eca66b71301f01981f2d";
+export const defaultVerifierPrompt = (here = HERE) => path.join(here, PROMPTS_DIR, FROZEN_VERIFIER_PROMPT);
+/** The opt-in evidence-pack verifier prompt (`--strategy evidence-pack`). Its bytes carry a `{{PACK}}`
+ *  placeholder the frozen file does not; it is never the default. */
+export const EVIDENCE_PACK_VERIFIER_PROMPT = "verifier-evidence-pack.txt";
+export const evidencePackVerifierPrompt = (here = HERE) => path.join(here, PROMPTS_DIR, EVIDENCE_PACK_VERIFIER_PROMPT);
+/** The two verifier strategies. `default` is the frozen prompt with no pack; `evidence-pack` is opt-in and
+ *  passes a deterministically assembled pack (definition lines, import lines, bounded grep hits). */
+export const VERIFIER_STRATEGIES = Object.freeze(["default", "evidence-pack"]);
+
 /** The inventoried scope. Component names are normalised ONTO it, so a record written from bare basenames
  *  (round 2) and one written from repo-relative paths (round 1) share ONE `subject_key` and can be joined. */
 export const INVENTORY_SCOPE = "plugin/scripts";
 
 /** Directories that MUST be absent from the verifier's pinned tree: their presence means the verifier is
- *  reading the methodology layer, not the code — the exact un-blinding the stripped tree exists to stop. */
+ *  reading the methodology layer, not the code — the exact un-blinding the stripped tree exists to stop.
+ *  ⛔ This list is OWNED by the dependency task (gap-hypgen-inventory-…); the scope list below is a
+ *  SECOND, additive concept — see there. */
 export const STRIPPED_DIRS = Object.freeze(["tasks", "goals", "docs", "orchestration"]);
+
+/** SCOPE ENFORCEMENT (gap-hypgen-verifier-budget-exhaustion-…): top-level directories the verifier must
+ *  not search, which the strippedness check above does not cover. The acceptance defect: the "stripped"
+ *  pin still carried tracked `.quay/` evidence files, and verifier Greps walked `scripts/test.sh` comments
+ *  and `.quay/**` JSON — oversized result payloads that consumed the turn budget.
+ *  ⛔ A SEPARATE list, not an extension of `STRIPPED_DIRS`: that list is the dependency task's contract
+ *  (its test pins the exact four names), and "complements … do not duplicate it" means ADD a concept, not
+ *  rewrite the one already landed. Both lists are enumerated by the SAME single mechanism below. */
+export const SCOPE_FORBIDDEN_DIRS = Object.freeze([".quay", "archive", "milestones", "measurements"]);
+/** Every directory the verifier refuses to run against, in ONE enumeration. The check below loops over
+ *  THIS, so there is exactly one place that decides "present ⇒ refuse" (硬规则 3: every present dir named). */
+export const PIN_FORBIDDEN_DIRS = Object.freeze([...STRIPPED_DIRS, ...SCOPE_FORBIDDEN_DIRS]);
 
 /** Prereg fields that may name the experiment, first present wins. The tool never invents one. */
 export const EXPERIMENT_KEYS = Object.freeze(["experiment", "experiment_id", "acceptance_run"]);
@@ -397,7 +449,7 @@ export function neutralCwdRefusal(cwd, neutralDir) {
 export function verifyCwdRefusal(cwd, pinDir, { existsSync = fs.existsSync } = {}) {
   if (!pinDir) return "PIN_DIR_NOT_GIVEN";
   if (path.resolve(cwd) !== path.resolve(pinDir)) return "CWD_NOT_STRIPPED_PIN";
-  const present = STRIPPED_DIRS.filter((d) => { try { return existsSync(path.join(pinDir, d)); } catch { return false; } });
+  const present = PIN_FORBIDDEN_DIRS.filter((d) => { try { return existsSync(path.join(pinDir, d)); } catch { return false; } });
   if (present.length) return `PIN_NOT_STRIPPED:${present.join(",")}`;
   return null;
 }
@@ -495,15 +547,94 @@ export function clusterHypotheses(runs, { threshold = 0.5 } = {}) {
   return clusters;
 }
 
+// ── per-turn instrumentation (pure) ──────────────────────────────────────────────────────────────────
+/** The marker for a call whose turns were NOT captured. An ABSENT record is not "zero turns": it is
+ *  "not evaluated" and must be shaped like one (硬规则 3b) — the acceptance run's defeat was that the turn
+ *  budget was consumed with no surviving record of HOW. */
+export const UNINSTRUMENTED = "not-evaluated:uninstrumented";
+/** How much of a tool call's arguments a per-turn record keeps. The HEAD is what names the target
+ *  (`file_path` / `pattern`+`path`); the full input is bulky and is not what the reading needs. */
+export const ARGS_HEAD_MAX = 160;
+
+/** Serialise one tool_result payload to the byte length the model actually received. `content` is a
+ *  string or an array of `{type:"text",text}` blocks; anything else is JSON-stringified, never dropped. */
+const toolResultBytes = (content) => {
+  if (typeof content === "string") return Buffer.byteLength(content, "utf8");
+  if (Array.isArray(content)) return Buffer.byteLength(content.map((b) => (typeof b === "string" ? b : String(b?.text ?? ""))).join(""), "utf8");
+  if (content == null) return 0;
+  return Buffer.byteLength(JSON.stringify(content), "utf8");
+};
+const argsHead = (input) => {
+  let s;
+  try { s = typeof input === "string" ? input : JSON.stringify(input ?? {}); } catch { s = String(input ?? ""); }
+  return String(s ?? "").slice(0, ARGS_HEAD_MAX);
+};
+
+/**
+ * Parse a `--output-format stream-json` verifier stdout into the PER-TURN record the task exists to
+ * produce: one entry per tool call — `{ tool, args_head, result_bytes }` — plus the final verdict text.
+ * ⛔ Non-stream stdout (the pre-instrumentation path, and the unit fixtures) yields `ok:false` and an
+ * EMPTY turn list; the caller must report that as `not-evaluated:uninstrumented`, never as "zero turns".
+ * @returns {{ok:boolean, turns:object[], finalText:string, subtype:string|null, num_turns:number|null, is_error:boolean|null}}
+ */
+export function parseVerifierStream(stdout) {
+  const out = { ok: false, turns: [], finalText: "", subtype: null, num_turns: null, is_error: null };
+  if (typeof stdout !== "string" || !stdout.trim()) return out;
+  let parsedLines = 0;
+  const pending = new Map();               // tool_use id → the record awaiting its result's bytes
+  const textParts = [];
+  for (const raw of stdout.split("\n")) {
+    const line = raw.trim();
+    if (!line || line[0] !== "{") continue;
+    let ev;
+    try { ev = JSON.parse(line); } catch { continue; }
+    if (!ev || typeof ev !== "object") continue;
+    parsedLines++;
+    const content = ev.message?.content;
+    if (Array.isArray(content)) {
+      for (const b of content) {
+        if (b?.type === "tool_use") {
+          const rec = { tool: String(b.name ?? "?"), args_head: argsHead(b.input), result_bytes: null };
+          out.turns.push(rec);
+          if (b.id) pending.set(b.id, rec);
+        } else if (b?.type === "tool_result") {
+          const rec = b.tool_use_id ? pending.get(b.tool_use_id) : null;
+          const bytes = toolResultBytes(b.content);
+          if (rec) rec.result_bytes = bytes;
+          else out.turns.push({ tool: "(result-without-a-recorded-call)", args_head: "", result_bytes: bytes });
+        } else if (b?.type === "text" && typeof b.text === "string") {
+          textParts.push(b.text);
+        }
+      }
+    }
+    if (ev.type === "result") {
+      out.subtype = ev.subtype == null ? null : String(ev.subtype);
+      out.num_turns = Number.isFinite(ev.num_turns) ? ev.num_turns : null;
+      out.is_error = typeof ev.is_error === "boolean" ? ev.is_error : null;
+      if (typeof ev.result === "string" && ev.result.trim()) out.finalText = ev.result;
+    }
+  }
+  out.ok = parsedLines > 0;
+  if (!out.finalText) out.finalText = textParts.join("\n");
+  return out;
+}
+
 /** Map a verifier call's result to a verdict. A TURN-LIMIT exit and an unparseable output both map to
- *  `undetermined` — ⛔ NEVER `refuted` (a budget exhaustion refutes nothing; 硬规则 3b). */
-export function verifierVerdict({ stdout = "", stderr = "", status = 0 } = {}) {
+ *  `undetermined` — ⛔ NEVER `refuted` (a budget exhaustion refutes nothing; 硬规则 3b).
+ *  `cause` is the COARSE, stable class of the outcome (`turn-budget` / `uninstrumented-exit-N` /
+ *  `unparseable` / `verdict-not-in-vocab`); `reason` stays the fine-grained diagnostic. 硬规则 2: the
+ *  exhaustion signal is read from the stream's STRUCTURAL `subtype` when a stream is present (in
+ *  `stream-json` mode the CLI prints no "Reached max turns" text at all), and only falls back to the
+ *  text shape for the pre-instrumentation path. */
+export function verifierVerdict({ stdout = "", stderr = "", status = 0, stream = null } = {}) {
+  if (stream?.subtype === "error_max_turns") return { verdict: "undetermined", reason: "TURN_LIMIT", cause: "turn-budget", parsed: null };
   const blob = `${stdout}\n${stderr}`;
-  if (/reached max turns|max(?:imum)?\s+turns|turn limit/i.test(blob)) return { verdict: "undetermined", reason: "TURN_LIMIT", parsed: null };
-  const j = parseJsonObject(stdout);
-  if (!j) return { verdict: "undetermined", reason: status !== 0 ? `EXIT_${status}` : "UNPARSEABLE", parsed: null };
-  if (!VERIFIER_VERDICTS.includes(j.verdict)) return { verdict: "undetermined", reason: `VERDICT_NOT_IN_VOCAB:${String(j.verdict)}`, parsed: j };
-  return { verdict: j.verdict, reason: null, parsed: j };
+  if (/reached max turns|max(?:imum)?\s+turns|turn limit/i.test(blob)) return { verdict: "undetermined", reason: "TURN_LIMIT", cause: "turn-budget", parsed: null };
+  const source = stream?.ok && stream.finalText ? stream.finalText : stdout;
+  const j = parseJsonObject(source);
+  if (!j) return { verdict: "undetermined", reason: status !== 0 ? `EXIT_${status}` : "UNPARSEABLE", cause: status !== 0 ? `exit-${status}` : "unparseable", parsed: null };
+  if (!VERIFIER_VERDICTS.includes(j.verdict)) return { verdict: "undetermined", reason: `VERDICT_NOT_IN_VOCAB:${String(j.verdict)}`, cause: "verdict-not-in-vocab", parsed: j };
+  return { verdict: j.verdict, reason: null, cause: null, parsed: j };
 }
 
 // ── the mechanical pre-verification layer (pure, no model call) ──────────────────────────────────────
@@ -562,26 +693,210 @@ export function mechanicalRefutation({ components = [], provenance = null } = {}
   return hit ? { verdict: "refuted", verdict_reason: "shared-implementation", ...hit } : null;
 }
 
+// ── the mechanical EVIDENCE PACK (opt-in strategy; pure, no model call) ──────────────────────────────
+/** Total rendered evidence lines a pack may carry. The cap is what makes "bounded grep hits" bounded:
+ *  the acceptance defect was searches returning oversized payloads, so a pack that could grow without
+ *  limit would reproduce it. */
+export const DEFAULT_EVIDENCE_MAX_LINES = 40;
+/** How many symbols a claim may contribute, and how many definition lines each symbol may contribute. */
+export const DEFAULT_EVIDENCE_MAX_SYMBOLS = 8;
+const symbolEsc = (s) => s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+
+/** The code-looking identifiers a claim CITES, in first-mention order, de-duplicated, capped. A token
+ *  qualifies when it is not a plain English word: it carries `_`, is camelCase, is ALL-CAPS, or was
+ *  written in backticks/quotes. Deterministic — no stemming, no dictionary. */
+export function citedSymbols(claim, { max = DEFAULT_EVIDENCE_MAX_SYMBOLS } = {}) {
+  const quoted = new Set();
+  for (const m of String(claim ?? "").matchAll(/[`"'“”]([A-Za-z_$][\w$]*)[`"'“”]/g)) quoted.add(m[1]);
+  const out = [];
+  for (const m of String(claim ?? "").matchAll(/[A-Za-z_$][\w$]*/g)) {
+    const t = m[0];
+    if (out.length >= max) break;
+    if (out.includes(t)) continue;
+    const codeShaped = t.includes("_") || /[a-z][A-Z]/.test(t) || /^[A-Z]{2,}$/.test(t) || (t.length >= 4 && /[A-Za-z]/.test(t) && /\d/.test(t));
+    if (!codeShaped && !quoted.has(t)) continue;
+    out.push(t);
+  }
+  return out;
+}
+
+/** TRUE when `text` DEFINES `sym` at the top level — a declaration keyword, or a property/assignment.
+ *  Structural (a declaration), never a bare mention (硬规则 2). */
+export function isDefinitionLine(text, sym) {
+  const s = symbolEsc(sym);
+  return new RegExp(`^\\s*(?:export\\s+)?(?:declare\\s+)?(?:default\\s+)?(?:async\\s+)?(?:function\\*?|class|const|let|var|type|interface|enum)\\s+${s}(?![\\w$])`).test(String(text))
+    || new RegExp(`^\\s*(?:readonly\\s+|public\\s+|private\\s+|static\\s+)*${s}\\s*[:=]`).test(String(text));
+}
+
+/** Resolve a component name onto a key of `sources` (exact, else by basename). `null` when absent — a
+ *  component with no source is NOT silently treated as empty (硬规则 6). */
+function sourceOf(sources, comp) {
+  if (sources && Object.prototype.hasOwnProperty.call(sources, comp)) return sources[comp];
+  const base = path.posix.basename(String(comp));
+  for (const k of Object.keys(sources ?? {})) if (path.posix.basename(k) === base) return sources[k];
+  return null;
+}
+
+/** The DEFINITION LINE of each cited symbol in EACH named component that declares it (the first
+ *  declaration per component, at most `maxComponentsPerSymbol` components per symbol). Plural on purpose:
+ *  the question is whether the SAME symbol is declared separately in several components, which one line
+ *  from one component cannot answer. Returns `[{component, symbol, line, text}]`. */
+export function definitionLinesFor({ symbols = [], components = [], sources = {}, maxComponentsPerSymbol = 4 } = {}) {
+  const out = [];
+  const uniq = [...new Set(components.map((c) => path.posix.basename(String(c))))].sort();
+  for (const sym of symbols) {
+    let taken = 0;
+    for (const comp of uniq) {
+      if (taken >= maxComponentsPerSymbol) break;
+      const src = sourceOf(sources, comp);
+      if (src == null) continue;
+      const lines = String(src).split("\n");
+      for (let i = 0; i < lines.length; i++) {
+        if (!isDefinitionLine(lines[i], sym)) continue;
+        out.push({ component: repoRelComponent(comp), symbol: sym, line: i + 1, text: lines[i].trim().slice(0, 200) });
+        taken++;
+        break;
+      }
+    }
+  }
+  return out;
+}
+
+/** The IMPORT LINES **among the named components only** — an edge from a named component to another named
+ *  component. Prefers the provenance sidecar (the same edges the mechanical layer reads); falls back to
+ *  parsing the supplied sources with the repo's own import parser. Returns `[{from, to, line, names, text}]`. */
+export function importLinesFor({ components = [], provenance = null, sources = {} } = {}) {
+  const bases = [...new Set(components.map((c) => path.posix.basename(String(c))))].sort();
+  const inSet = new Set(bases);
+  const out = [];
+  const byBase = provenance ? provenanceIndex(provenance) : null;
+  for (const comp of bases) {
+    let edges = [];
+    if (byBase) {
+      edges = (byBase.get(comp)?.imports ?? []).map((im) => ({ module: path.posix.basename(String(im.module ?? "")), line: im.line ?? null, names: im.names ?? [] }));
+    } else {
+      const src = sourceOf(sources, comp);
+      if (src == null) continue;
+      const lines = String(src).split("\n");
+      edges = extractImports(src).map((im) => ({
+        module: path.posix.basename(String(im.spec ?? "").replace(/\.[a-z]+$/, "") + ".ts"),
+        line: im.line ?? null,
+        names: importedNames(src, im.line, im.spec),
+        _line: lines[(im.line ?? 1) - 1],
+      }));
+    }
+    for (const e of edges) {
+      const to = path.posix.basename(String(e.module));
+      if (!to || to === comp || !inSet.has(to)) continue;
+      const src = sourceOf(sources, comp);
+      const rawText = e._line ?? (src != null && e.line ? String(src).split("\n")[e.line - 1] : "");
+      out.push({ from: repoRelComponent(comp), to: repoRelComponent(to), line: e.line, names: e.names ?? [], text: String(rawText ?? "").trim().slice(0, 200) });
+    }
+  }
+  return out.sort((a, b) => (a.from < b.from ? -1 : a.from > b.from ? 1 : 0) || (a.line ?? 0) - (b.line ?? 0));
+}
+
+/**
+ * Assemble the deterministic evidence pack for one cluster: the definition lines of the cited symbols,
+ * the import lines among the named components, and the caller's bounded grep hits. Section lines are
+ * allocated ROUND-ROBIN, so a cap can never starve a whole evidence class (and `capped` says so).
+ * PURE — every input is supplied; no fs, no model.
+ * @returns {{components:string[], symbols:string[], lines:string[], text:string, capped:boolean,
+ *            counts:object, sections:{definitions:object[],imports:object[],hits:object[]}}}
+ */
+export function buildEvidencePack({ components = [], claim = "", sources = {}, provenance = null, hits = [], maxLines = DEFAULT_EVIDENCE_MAX_LINES, maxSymbols = DEFAULT_EVIDENCE_MAX_SYMBOLS, maxComponentsPerSymbol = 4 } = {}) {
+  const symbols = citedSymbols(claim, { max: maxSymbols });
+  const definitions = definitionLinesFor({ symbols, components, sources, maxComponentsPerSymbol });
+  const imports = importLinesFor({ components, provenance, sources });
+  const normHits = (Array.isArray(hits) ? hits : []).map((h) => ({
+    file: String(h?.file ?? ""), line: Number.isFinite(h?.line) ? h.line : null, text: String(h?.text ?? "").trim().slice(0, 200),
+  })).filter((h) => h.file);
+  const render = {
+    definitions: (d) => `- DEF ${d.component}:${d.line}  ${d.symbol} | ${d.text || "(empty line)"}`,
+    imports: (i) => `- IMP ${i.from}:${i.line ?? "?"} -> ${i.to} | ${i.text || (i.names.length ? `{${i.names.join(", ")}}` : "(side-effect import)")}`,
+    hits: (h) => `- HIT ${h.file}:${h.line ?? "?"} | ${h.text}`,
+  };
+  const queues = [
+    definitions.map((x) => render.definitions(x)),
+    imports.map((x) => render.imports(x)),
+    normHits.map((x) => render.hits(x)),
+  ];
+  const total = queues.reduce((n, q) => n + q.length, 0);
+  const budget = Math.max(0, Math.floor(maxLines));
+  const picked = [];
+  for (let i = 0; picked.length < budget; i++) {
+    let progressed = false;
+    for (const q of queues) { if (i < q.length && picked.length < budget) { picked.push(q[i]); progressed = true; } }
+    if (!progressed) break;
+  }
+  const header = [
+    "## Mechanical evidence pack (assembled deterministically BEFORE the model call)",
+    `components: ${components.map((c) => repoRelComponent(c)).join(", ") || "-"}`,
+    `cited symbols: ${symbols.join(", ") || "-"}`,
+    `sections: definitions=${definitions.length} imports=${imports.length} hits=${normHits.length}${total > picked.length ? ` (rendered ${picked.length}/${total}, capped at ${budget})` : ""}`,
+  ];
+  return {
+    components: components.map((c) => repoRelComponent(c)), symbols,
+    lines: picked, text: [...header, ...picked].join("\n"), capped: total > picked.length,
+    counts: { definitions: definitions.length, imports: imports.length, hits: normHits.length, rendered: picked.length, total },
+    sections: { definitions, imports, hits: normHits },
+  };
+}
+
 /**
  * Run the bounded verifier over the pre-registered selection (highest confidence first, cap = clusters).
- * Refuses unless cwd is the stripped pinned tree. The MECHANICAL layer is applied to every cluster
- * BEFORE the model loop, so a mechanically refuted cluster spends no model call.
+ * Refuses unless cwd is the forbidden-directory-free pinned tree. The MECHANICAL layer is applied to
+ * every cluster BEFORE the model loop, so a mechanically refuted cluster spends no model call.
+ *
+ * EVERY model call is INSTRUMENTED: the caller runs the launcher with `--output-format stream-json`, and
+ * each row carries the per-turn tool calls (`turns`) plus `turns_used`. A call whose stream did not parse
+ * is `not-evaluated:uninstrumented` — never "zero turns" (硬规则 3b).
+ *
+ * `strategy: "evidence-pack"` is OPT-IN: each cluster's deterministic pack is assembled first, and the
+ * clusters the mechanical layer already decides run first (`run_order`), so no model call is spent on
+ * them; the rest get the pack in their prompt.
  * @param {(prompt:string, ctx:object)=>Promise<object>} o.runModel INJECTABLE
  * @param {object[]|null} o.provenance structural inventory entries (see `sharedImplementation`)
+ * @param {number|null} o.onlyCluster 1-based position in the FULL cluster list (diagnostic: one call)
+ * @param {{sources?:object, provenance?:object|null, hits?:object[], maxLines?:number}} o.evidence
  */
-export async function runVerifier({ clusters, pinDir, cwd, promptTemplate, runModel, maxClusters = HARD_MAX_CLUSTERS, concurrency = 5, maxMs = null, provenance = null }) {
+export async function runVerifier({
+  clusters, pinDir, cwd, promptTemplate, runModel,
+  maxClusters = HARD_MAX_CLUSTERS, concurrency = 5, maxMs = null, provenance = null,
+  onlyCluster = null, strategy = "default", evidence = null,
+}) {
+  if (!VERIFIER_STRATEGIES.includes(strategy)) return { ok: false, code: EXIT.usage, reasons: [`STRATEGY_NOT_IN_VOCAB:${strategy}`] };
   if (maxClusters > HARD_MAX_CLUSTERS) return { ok: false, code: EXIT.maxClusters, reasons: [`MAX_CLUSTERS_ABOVE_CEILING:${maxClusters}>${HARD_MAX_CLUSTERS}`] };
   const refusal = verifyCwdRefusal(cwd, pinDir);
   if (refusal) return { ok: false, code: EXIT.cwdNotNeutral, reasons: [refusal] };
-  const selected = clusters.slice(0, maxClusters);
-  const results = new Array(selected.length);
+  // SELECTION. `onlyCluster` picks ONE cluster by its position in the FULL list, so a diagnostic run pays
+  // for one model call AND the row keeps the cluster's own number — the reading is addressed by POSITION,
+  // never by a case label. An out-of-range value is its own refusal, never a silently empty selection.
+  let idxs;
+  if (onlyCluster != null) {
+    if (!Number.isInteger(onlyCluster) || onlyCluster < 1 || onlyCluster > clusters.length) {
+      return { ok: false, code: EXIT.usage, reasons: [`ONLY_CLUSTER_OUT_OF_RANGE:${onlyCluster}`] };
+    }
+    idxs = [onlyCluster - 1];
+  } else {
+    idxs = Array.from({ length: Math.min(maxClusters, clusters.length) }, (_, i) => i);
+  }
+  const results = new Array(idxs.length);
   const t0 = Date.now();
   // The mechanical layer is computed for EVERY selected cluster up front (pure, no model call), so a
   // mechanically refuted cluster can never reach `runModel` — the "spends no model call" claim is a
   // property of this loop, not of the caller's discipline.
-  const mech = selected.map((c) => mechanicalRefutation({ components: c.rep.components, provenance }));
+  const mech = idxs.map((i) => mechanicalRefutation({ components: clusters[i].rep.components, provenance }));
+  const packs = strategy === "evidence-pack"
+    ? idxs.map((i) => buildEvidencePack({
+      components: clusters[i].rep.components, claim: clusters[i].rep.claim,
+      sources: evidence?.sources ?? {}, provenance: evidence?.provenance ?? provenance,
+      hits: evidence?.hits ?? [], maxLines: evidence?.maxLines ?? DEFAULT_EVIDENCE_MAX_LINES,
+    }))
+    : idxs.map(() => null);
   const runOne = async (k) => {
-    const c = selected[k];
+    const i = idxs[k];
+    const c = clusters[i];
     const hyp = {
       components: c.rep.components, concept_kind: c.rep.concept_kind, claim: c.rep.claim,
       evidence_needed: c.rep.evidence_needed, counterexample_requirement: c.rep.counterexample_requirement,
@@ -589,40 +904,57 @@ export async function runVerifier({ clusters, pinDir, cwd, promptTemplate, runMo
     if (mech[k]) {
       const m = mech[k];
       results[k] = {
-        cluster: k + 1, members: c.members, kind: c.rep.concept_kind, comps: c.rep.comps,
+        cluster: i + 1, members: c.members, kind: c.rep.concept_kind, comps: c.rep.comps,
         claim: String(c.rep.claim ?? "").slice(0, 200),
-        wall_ms: 0, out_bytes: 0, exit: null,
-        verdict: m.verdict, verdict_reason: m.verdict_reason, mechanical: true,
+        wall_ms: 0, out_bytes: 0, exit: null, strategy,
+        verdict: m.verdict, verdict_reason: m.verdict_reason, verdict_cause: null, mechanical: true,
         definer: m.definer, shared_symbol: m.symbol,
         intentional: null, evidence: m.evidence, counterexample: null,
+        // A cluster decided WITHOUT a model call has no turns to record; that is "not applicable", which
+        // is its own marker and must not read as "not-evaluated" (硬规则 3/3b).
+        instrumented: false, instrumentation: "not-applicable:mechanical", turns: null, turns_used: 0, cli_num_turns: null,
+        pack: packs[k] ? { counts: packs[k].counts, capped: packs[k].capped, lines: packs[k].lines } : null,
         summary: `shared implementation: ${m.importers.length} components import from ${m.definer}`,
       };
       return;
     }
-    const prompt = String(promptTemplate).replace("{{HYP}}", JSON.stringify(hyp));
-    const t0 = Date.now();
-    const r = await runModel(prompt, { cluster: k + 1, kind: c.rep.concept_kind });
-    const m = verifierVerdict(r ?? {});
+    let prompt = String(promptTemplate).replace("{{HYP}}", JSON.stringify(hyp));
+    if (packs[k]) prompt = prompt.replace("{{PACK}}", packs[k].text);
+    const tCall = Date.now();
+    const r = await runModel(prompt, { cluster: i + 1, kind: c.rep.concept_kind, pack: packs[k]?.text ?? null });
+    const stdout = String(r?.stdout ?? "");
+    const stream = parseVerifierStream(stdout);
+    const m = verifierVerdict({ stdout, stderr: String(r?.stderr ?? ""), status: r?.status ?? 0, stream: stream.ok ? stream : null });
     const j = m.parsed;
     results[k] = {
-      cluster: k + 1, members: c.members, kind: c.rep.concept_kind, comps: c.rep.comps,
+      cluster: i + 1, members: c.members, kind: c.rep.concept_kind, comps: c.rep.comps,
       claim: String(c.rep.claim ?? "").slice(0, 200),
-      wall_ms: Date.now() - t0, out_bytes: String(r?.stdout ?? "").length, exit: r?.status ?? null,
-      verdict: m.verdict, verdict_reason: m.reason, mechanical: false,
+      wall_ms: Date.now() - tCall, out_bytes: stdout.length, exit: r?.status ?? null, strategy,
+      verdict: m.verdict, verdict_reason: m.reason, verdict_cause: m.cause ?? null, mechanical: false,
+      instrumented: stream.ok, instrumentation: stream.ok ? "stream-json" : UNINSTRUMENTED,
+      turns: stream.ok ? stream.turns : null, turns_used: stream.ok ? stream.turns.length : null,
+      cli_num_turns: stream.num_turns,
       intentional: j?.intentional_difference_found ?? null,
       evidence: Array.isArray(j?.evidence) ? j.evidence : [],
       counterexample: j?.counterexample ?? null,
-      summary: j?.summary ?? String(r?.stdout ?? "").slice(0, 300),
+      pack: packs[k] ? { counts: packs[k].counts, capped: packs[k].capped, lines: packs[k].lines } : null,
+      summary: j?.summary ?? String(stream.ok ? stream.finalText : stdout).slice(0, 300),
     };
   };
-  for (let i = 0; i < selected.length; i += Math.max(1, concurrency)) {
+  // Budget-aware ORDERING (opt-in): the mechanically decided clusters run first, so a run that exhausts
+  // its wall budget spends it on clusters a model call can actually change.
+  const order = idxs.map((_, k) => k).sort((a, b) => (mech[a] ? 0 : 1) - (mech[b] ? 0 : 1) || a - b);
+  const step = Math.max(1, concurrency);
+  for (let i = 0; i < order.length; i += step) {
     if (maxMs != null && Date.now() - t0 >= maxMs) return { ok: false, code: EXIT.maxMs, reasons: [`MAX_MS_EXCEEDED:${Date.now() - t0}>=${maxMs}`], results: results.filter(Boolean) };
-    await Promise.all(selected.slice(i, i + concurrency).map((_, k) => runOne(i + k)));
+    await Promise.all(order.slice(i, i + step).map((k) => runOne(k)));
   }
   return {
-    ok: true, clusters_total: clusters.length, verified: selected.length,
-    beyond_cap: Math.max(0, clusters.length - selected.length),
+    ok: true, clusters_total: clusters.length, verified: idxs.length,
+    beyond_cap: onlyCluster != null ? 0 : Math.max(0, clusters.length - idxs.length),
     mechanical_refuted: mech.filter(Boolean).length,
+    decided_without_model: mech.filter(Boolean).length,
+    strategy, run_order: order.map((k) => idxs[k] + 1),
     results,
   };
 }
@@ -778,6 +1110,10 @@ export function verifyRecords({ verify, experiment = STORE_EXPERIMENT }) {
         verdict: v.verdict, subject_key: key, cluster: v.cluster, members: v.members,
         intentional_difference_found: v.intentional, verifier_wall_ms: v.wall_ms,
         verdict_reason: v.verdict_reason, ts, experiment,
+        // The observability the budget-exhaustion defect lacked: how the call was instrumented and how many
+        // tool-call turns it spent. A row that predates the instrumentation omits them (⛔ no invented 0).
+        ...(v.instrumentation !== undefined ? { verifier_instrumentation: v.instrumentation } : {}),
+        ...(Number.isFinite(v.turns_used) ? { verifier_turns_used: v.turns_used } : {}),
       },
     });
     // A verifier that reports an INTENTIONAL difference is a counterexample to the hypothesis — its own
@@ -961,10 +1297,14 @@ const has = (args, n) => args.includes(n);
 /** The hardened launcher argv: no tools, no slash commands, no session, strict MCP. The ONE line that
  *  resolves the launcher role is the `launchArgv(...)` call below — every other line of this module, and
  *  all three prompt files, are free of any holdout-specific text. */
-export function hardenedArgv(launchArgv, prompt, root, { tools = "", maxTurns = null } = {}) {
+export function hardenedArgv(launchArgv, prompt, root, { tools = "", maxTurns = null, outputFormat = null } = {}) {
   const argv = launchArgv("meta-driver", prompt, root, { promptViaStdin: true });
   const extra = ["--tools", tools, "--disable-slash-commands", "--no-session-persistence", "--strict-mcp-config"];
   if (maxTurns !== null) extra.push("--max-turns", String(maxTurns));
+  // `stream-json` is what makes the per-turn record POSSIBLE: `--verbose` is required with it in print
+  // mode. Without it the CLI emits only the final text, and a budget exhaustion leaves NO trace of the
+  // turns that consumed it (the acceptance defect this task closes).
+  if (outputFormat !== null) extra.push("--output-format", String(outputFormat), "--verbose");
   argv.splice(argv.length - 1, 0, ...extra);
   return argv;
 }
@@ -1107,7 +1447,20 @@ async function cli(argv = process.argv.slice(2)) {
     if (!gate.ok) { console.error(`${TOOL} verify: ${gate.reasons.join(", ")}`); return gate.code; }
     const experiment = resolveExperimentId({ flag: argOf(args, "--experiment", null), prereg: gate.prereg }) ?? STORE_EXPERIMENT;
     const clusters = clusterHypotheses(gate.runs);
-    const template = fs.readFileSync(argOf(args, "--prompt", path.join(HERE, "arch-hypothesis-generation-prompts", "verifier.txt")), "utf8");
+    // The SELECTION, before any prompt is read: `--only-cluster <n>` is a diagnostic selector (one model
+    // call for one cluster, by its position in the FULL list). An out-of-range value is caught HERE, so no
+    // prompt file is opened for a run that cannot happen.
+    const onlyCluster = argOf(args, "--only-cluster", null) === null ? null : Number(argOf(args, "--only-cluster"));
+    if (onlyCluster !== null && (!Number.isInteger(onlyCluster) || onlyCluster < 1 || onlyCluster > clusters.length)) {
+      console.error(`${TOOL} verify: ONLY_CLUSTER_OUT_OF_RANGE:${argOf(args, "--only-cluster")} (1..${clusters.length})`);
+      return EXIT.usage;
+    }
+    const strategy = argOf(args, "--strategy", "default");
+    if (!VERIFIER_STRATEGIES.includes(strategy)) { console.error(`${TOOL} verify: --strategy must be one of ${VERIFIER_STRATEGIES.join("|")}, got ${strategy}`); return EXIT.usage; }
+    // The frozen verifier prompt is the DEFAULT; the evidence-pack prompt is a SEPARATE file and is never
+    // reached unless that strategy was named (an accidental default would silently change the experiment).
+    const defaultPromptFile = strategy === "evidence-pack" ? evidencePackVerifierPrompt() : defaultVerifierPrompt();
+    const template = fs.readFileSync(argOf(args, "--prompt", defaultPromptFile), "utf8");
     const runtime = await importDriverRuntime();
     if (!runtime.ok) { console.error(`${TOOL} verify: ${runtime.reason}`); return EXIT.usage; }
     const { launchArgv, runAsync } = runtime.mod;
@@ -1117,14 +1470,41 @@ async function cli(argv = process.argv.slice(2)) {
     // no mechanical refutation, 硬规则 3b).
     const provenanceFile = argOf(args, "--provenance", null);
     const provenance = provenanceFile ? JSON.parse(fs.readFileSync(provenanceFile, "utf8")) : null;
-    const runModel = async (p) => runAsync(hardenedArgv(launchArgv, p, root, { tools: "Read,Grep", maxTurns }), { timeoutMs: Number(argOf(args, "--timeout-ms", 300_000)), collectStderr: true, stdinData: p });
-    const res = await runVerifier({ clusters, pinDir, cwd: process.cwd(), promptTemplate: template, runModel, provenance, maxClusters: Number(argOf(args, "--max-clusters", HARD_MAX_CLUSTERS)), maxMs: argOf(args, "--max-ms", null) === null ? null : Number(argOf(args, "--max-ms")) });
+    // The pack's SOURCES are read from the PIN, by position: only the named components' files, never a
+    // repo-wide walk. `--evidence-source-root <dir>` defaults to the pin dir.
+    const evidenceRoot = argOf(args, "--evidence-source-root", pinDir);
+    const evidenceMaxLines = Number(argOf(args, "--evidence-max-lines", DEFAULT_EVIDENCE_MAX_LINES));
+    const packHitsFile = argOf(args, "--evidence-hits", null);
+    const packHits = packHitsFile ? JSON.parse(fs.readFileSync(packHitsFile, "utf8")) : [];
+    const readEvidenceSources = (components) => {
+      const sources = {};
+      for (const c of components) {
+        const rel = repoRelComponent(c);
+        for (const p of [path.join(evidenceRoot, rel), path.join(evidenceRoot, "plugin", "scripts", path.basename(rel))]) {
+          try { if (fs.existsSync(p)) { sources[path.posix.basename(rel)] = fs.readFileSync(p, "utf8"); break; } } catch { /* try next */ }
+        }
+      }
+      return sources;
+    };
+    // ⛔ EVERY verify model call is instrumented: `--output-format stream-json` is what leaves the per-turn
+    // record. Without it a budget exhaustion is again a 28-byte string and nothing else.
+    const runModel = async (p) => runAsync(hardenedArgv(launchArgv, p, root, { tools: "Read,Grep", maxTurns, outputFormat: "stream-json" }), { timeoutMs: Number(argOf(args, "--timeout-ms", 300_000)), collectStderr: true, stdinData: p });
+    const selectedForSources = onlyCluster != null ? [clusters[onlyCluster - 1]] : clusters.slice(0, Number(argOf(args, "--max-clusters", HARD_MAX_CLUSTERS)));
+    const evidence = strategy === "evidence-pack"
+      ? { sources: readEvidenceSources(selectedForSources.flatMap((c) => c.rep.components ?? [])), provenance, hits: packHits, maxLines: evidenceMaxLines }
+      : null;
+    const res = await runVerifier({
+      clusters, pinDir, cwd: process.cwd(), promptTemplate: template, runModel, provenance,
+      onlyCluster, strategy, evidence,
+      maxClusters: Number(argOf(args, "--max-clusters", HARD_MAX_CLUSTERS)),
+      maxMs: argOf(args, "--max-ms", null) === null ? null : Number(argOf(args, "--max-ms")),
+    });
     if (!res.ok) { console.error(`${TOOL} verify: ${res.reasons.join(", ")}`); return res.code; }
     const outFile = path.resolve(argOf(args, "--out", path.join(outDir, "verify.json")));
     fs.mkdirSync(path.dirname(outFile), { recursive: true });
-    fs.writeFileSync(outFile, JSON.stringify({ clusters_total: res.clusters_total, verified: res.verified, beyond_cap: res.beyond_cap, mechanical_refuted: res.mechanical_refuted, results: res.results }, null, 1));
+    fs.writeFileSync(outFile, JSON.stringify({ clusters_total: res.clusters_total, verified: res.verified, beyond_cap: res.beyond_cap, mechanical_refuted: res.mechanical_refuted, strategy: res.strategy, run_order: res.run_order, results: res.results }, null, 1));
     const tally = emit(verifyRecords({ verify: res, experiment }), { out: path.join(outDir, "verify-records.jsonl"), writeStore: has(args, "--write-store"), root: has(args, "--write-store") ? root : null });
-    console.log(JSON.stringify({ clusters_total: res.clusters_total, verified: res.verified, beyond_cap: res.beyond_cap, mechanical_refuted: res.mechanical_refuted, verdicts: res.results.reduce((a, r) => ((a[r.verdict] = (a[r.verdict] ?? 0) + 1), a), {}), validator: { accepted: tally.accepted, refused: tally.refused } }, null, json ? 1 : 0));
+    console.log(JSON.stringify({ clusters_total: res.clusters_total, verified: res.verified, beyond_cap: res.beyond_cap, mechanical_refuted: res.mechanical_refuted, strategy: res.strategy, run_order: res.run_order, verdicts: res.results.reduce((a, r) => ((a[r.verdict] = (a[r.verdict] ?? 0) + 1), a), {}), turns_used: res.results.map((r) => r.turns_used), validator: { accepted: tally.accepted, refused: tally.refused } }, null, json ? 1 : 0));
     return 0;
   }
 
@@ -1233,6 +1613,13 @@ async function cli(argv = process.argv.slice(2)) {
   console.error("  verify      --pin-dir <dir> --runs <dir> --inventory <f> [--provenance <f>] [--prereg <f>] [--investigator-prompt <f>] [--experiment <id>] [--max-clusters N] [--max-turns N] [--max-ms N]");
   console.error("              --provenance <f> turns on the MECHANICAL pre-verification layer: a cluster whose members'");
   console.error("              edges converge on one component is recorded refuted/shared-implementation with NO model call.");
+  console.error("              [--strategy default|evidence-pack] [--only-cluster N] [--evidence-source-root <dir>] [--evidence-max-lines N] [--evidence-hits <f>] [--prompt <f>]");
+  console.error("              every model call runs with --output-format stream-json, so each row carries the per-turn");
+  console.error("              tool calls (`turns`) and `turns_used`; a call with no parseable stream is");
+  console.error("              `not-evaluated:uninstrumented`. --only-cluster N runs ONE cluster by its 1-based position.");
+  console.error("              --strategy evidence-pack is opt-in: it uses the SEPARATE prompt file");
+  console.error("              verifier-evidence-pack.txt and runs the mechanically decided clusters first (run_order).");
+  console.error("              ⛔ the pinned tree must carry NONE of: " + PIN_FORBIDDEN_DIRS.join(", ") + " (scope enforcement).");
   console.error("  match       --runs <dir> --labels <f> --inventory <f> [--prereg <f>] [--investigator-prompt <f>] [--experiment <id>] [--run-count N] [--write-store]");
   console.error("  review      --runs <dir> --labels <f> --matches <f> --neutral-dir <dir> --inventory <f> [--prereg <f>] [--experiment <id>]");
   console.error("  report      --artifacts <dir> [--labels <f>] [--out <md>]");
