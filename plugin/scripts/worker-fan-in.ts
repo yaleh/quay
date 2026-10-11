@@ -64,7 +64,8 @@ import {
 // gate-script-base 是叶子（只 import node 内建）——⛔ 不成环。normalizeRel 供本文件的 suite 日志
 // 失败行解析（自 worker-driver.ts 迁入，见该簇的注释）。
 import { normalizeRel } from "./gate-script-base.ts";
-import { computeDocCheckFaceKey, readDocCheckCache, writeDocCheckCache } from "./doc-check-cache.ts";
+import { computeDocCheckFaceKey, readDocCheckCache, writeDocCheckCache, readGreenCache, writeGreenCache } from "./doc-check-cache.ts";
+import type { GreenCacheEntry } from "./doc-check-cache.ts";
 import { buildMirrorState, writeMirrorState, shouldSkipMirrorWrite, readCurrentState } from "./mirror-full-suite-state.ts";
 import { defaultLaneCount, readLoadAvg } from "./full-suite-runner.ts";
 import { SUITE_LOG_NOT_RUN_PREFIX, SUITE_LOG_RUN_START_PREFIX } from "./full-suite-runner.ts";
@@ -1549,6 +1550,8 @@ export function appendFanInTrace(file: string, entry: Record<string, unknown>): 
 // developSha 完全一致才跳过 scoped-gate（可证明冗余——worker 已对着这个确切状态验证过绿）；develop
 // 前进 / 缓存缺失 / 读不懂 ⇒ 照跑（fail-closed，与 docCheckLeg 的「面未变才命中、算不出就照跑」同一条
 // 纪律）。只缓存绿、⛔ 键算不出 ⇒ 照跑。
+// 读/写原语【只有一处实现】= doc-check-cache.ts 的 readGreenCache/writeGreenCache（下面的
+// readScopedGateCache/writeScopedGateCache 是别名而非复制）——两面的缓存曾是逐字相同的两份函数体。
 
 /** 缓存键 = `${task}\t${developSha}`（task id 不含 \t；developSha 是 develop tip 的完整 sha）。
  *  (task, developSha) 二元组唯一确定键——develop 前进一个提交即失配（未命中照跑）。 */
@@ -1556,42 +1559,19 @@ export function scopedGateKey(task: string, developSha: string): string {
   return `${task}\t${developSha}`;
 }
 
-/** 缓存条目形：最后一个 GREEN scoped-gate verdict，键 = scopedGateKey(task, developSha)。 */
-export interface ScopedGateCacheEntry {
-  key: string;
-  ok: true;
-  ts: string;
-}
+/** 缓存条目形：最后一个 GREEN scoped-gate verdict，键 = scopedGateKey(task, developSha)。
+ *  ⛔ 不是第二份声明——green-verdict 条目形只有一处定义：doc-check-cache.ts 的 GreenCacheEntry。 */
+export type ScopedGateCacheEntry = GreenCacheEntry;
 
 /** 读键为 `key` 的缓存绿 verdict。命中（key 完全一致 + ok:true）⇒ true；未命中/缺失/损坏/非绿 ⇒
- *  null（fail-closed——null 永不是命中）。签名与 readDocCheckCache 对齐。 */
-export function readScopedGateCache(cacheFile: string, key: string): boolean | null {
-  try {
-    if (!fs.existsSync(cacheFile)) return null;
-    const raw: unknown = JSON.parse(fs.readFileSync(cacheFile, "utf8"));
-    if (!raw || typeof raw !== "object" || Array.isArray(raw)) return null;
-    const entry = raw as ScopedGateCacheEntry;
-    if (entry.key !== key) return null;
-    if (entry.ok !== true) return null; // only GREEN verdicts are cacheable
-    return true;
-  } catch {
-    return null;
-  }
-}
+ *  null（fail-closed——null 永不是命中）。实现 = doc-check-cache.ts 的共享 readGreenCache（别名，
+ *  ⛔ 不复制函数体——本函数体曾与 readDocCheckCache 逐字相同，见 gap-routine-semantic-dedup-scan-
+ *  doc-check-cache-vs-scoped-gate-cache）。 */
+export const readScopedGateCache = readGreenCache;
 
 /** 写 GREEN verdict（原子替换；只有绿才被缓存——worker 仅在 scoped 门跑绿后调用）。best-effort：
- *  写失败 ≠ fan-in 失败。签名与 writeDocCheckCache 对齐。 */
-export function writeScopedGateCache(cacheFile: string, key: string): void {
-  try {
-    fs.mkdirSync(path.dirname(cacheFile), { recursive: true });
-    const entry: ScopedGateCacheEntry = { key, ok: true, ts: new Date().toISOString() };
-    const tmp = `${cacheFile}.tmp`;
-    fs.writeFileSync(tmp, JSON.stringify(entry) + "\n", "utf8");
-    fs.renameSync(tmp, cacheFile);
-  } catch {
-    // best-effort runtime cache — never let a cache write fail the fan-in
-  }
-}
+ *  写失败 ≠ fan-in 失败。实现 = doc-check-cache.ts 的共享 writeGreenCache（别名，⛔ 不复制函数体）。 */
+export const writeScopedGateCache = writeGreenCache;
 
 // ── scoped 门取值（三态；gap-scoped-gate-thin-selection-not-same-shape-as-green）─────────────────────
 // 缺陷：scoped 命令【取零个测试文件】时退出 0，fan-in 把它记成与「真评了 ≥1 个文件且全绿」同形的
