@@ -5,7 +5,7 @@ title: "independent domain-ownership semantic review of a proposed_slice:
   blind judge emitting auditable hypotheses, counter-evidence, confidence and
   review/reject/abstain — evaluated on an isolated human-labeled set (advisory;
   no gate change)"
-status: ready
+status: done
 labels:
   - gap
 parent: null
