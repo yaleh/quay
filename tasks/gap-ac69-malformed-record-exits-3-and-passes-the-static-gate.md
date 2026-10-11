@@ -3,7 +3,7 @@ id: gap-ac69-malformed-record-exits-3-and-passes-the-static-gate
 title: "ac69 check: a malformed measurement record exits 3, which run_checker
   treats as non-fatal, so the static gate stays green although the registry and
   mutation case expect RED"
-status: ready
+status: done
 labels:
   - gap
   - architecture-discovery
@@ -120,28 +120,65 @@ rc=0
 
 ### §AC3 — mutation case GREEN (rc=0); then the exit-3 negative control makes it FAIL (rc=3 STAYED-GREEN); then reverted
 
+The case echoes the checker's OWN verdict lines but not the wrapper's `STATIC_CHECK_FAILED:` machine line — see §AC3b for why.
+
 ```console
+$ bash plugin/scripts/checker-mutation-cases/ac69-slot-queue-gap-check.sh "$D"   # D = a fresh temp workdir
 ac69-slot-queue-gap-check: PASS — measurement record present and structurally complete
   task=gap-ac69-suite-slot-full-should-queue-not-wait measuredAt=2026-08-14T00:00:00Z conclusion=maintain medianSeconds=123.4
-ac69-slot-queue-gap-check: NOT-EVALUATED (record absent) — measurement record NOT FOUND: /tmp/ac69-mut-7y3nPt/docs/analysis/ac69-slot-release-vs-dispatch-gap.json
-STATIC_CHECK_FAILED: ac69-slot-queue-gap-check exit=2
+ac69-slot-queue-gap-check: NOT-EVALUATED (record absent) — measurement record NOT FOUND: /tmp/ac69-casecheck-J56VgQ/docs/analysis/ac69-slot-release-vs-dispatch-gap.json
 ac69-slot-queue-gap-check: FAIL (malformed) — missing required field(s): conclusion
-STATIC_CHECK_FAILED: ac69-slot-queue-gap-check exit=1
 ac69-slot-queue-gap-check: PASS — measurement record present and structurally complete
   task=gap-ac69-suite-slot-full-should-queue-not-wait measuredAt=2026-08-14T00:00:00Z conclusion=maintain medianSeconds=123.4
-ac3 rc=0
+rc=0
 ```
+
+Negative control — `EXIT_MALFORMED` temporarily reverted to 3, then restored (md5 verified byte-identical, `git status --porcelain` empty):
 
 ```console
 ac69-slot-queue-gap-check: PASS — measurement record present and structurally complete
   task=gap-ac69-suite-slot-full-should-queue-not-wait measuredAt=2026-08-14T00:00:00Z conclusion=maintain medianSeconds=123.4
-ac69-slot-queue-gap-check: NOT-EVALUATED (record absent) — measurement record NOT FOUND: /tmp/ac69-mut-s0V7bW/docs/analysis/ac69-slot-release-vs-dispatch-gap.json
-STATIC_CHECK_FAILED: ac69-slot-queue-gap-check exit=2
+ac69-slot-queue-gap-check: NOT-EVALUATED (record absent) — measurement record NOT FOUND: /tmp/ac69-negctl-E5aR1z/docs/analysis/ac69-slot-release-vs-dispatch-gap.json
 ac69-slot-queue-gap-check: FAIL (malformed) — missing required field(s): conclusion
 STATIC_CHECK_NOT_EVALUATED: ac69-slot-queue-gap-check
 STAYED-GREEN: the production gate stayed green with the conclusion field DROPPED
-ac3-reverted rc=3
+rc=3
 ```
+
+### §AC3b — the false fan-in red this round removed (the case must not publish the harness's own red marker)
+
+Plan step 2 makes the case judge each fault through `run_checker` — so the case now RUNS the production wrapper, whose stderr carries `STATIC_CHECK_FAILED: <name> exit=<rc>` on any non-zero. The first implementation echoed the wrapper's full output to the case's stdout. That is a self-inflicted red:
+
+- `checker-mutation-check` captures a case's stdout+stderr (`spawn(..., {stdio:["ignore","pipe","pipe"]})`) and re-emits it into the full-suite stream in plain (`--check`) mode.
+- `runner-static-gate.ts` runs `checker-mutation-check --check` (full tier) and `--check-changed` (change tier) inside the STATIC-CHECK phase of the suite, i.e. BEFORE `testPhaseStarted`.
+- `full-suite-runner`'s `^STATIC_CHECK_FAILED:` pattern (`isStaticCheckFailureLine`) fires on any such line in that phase and flips the WHOLE round red (`reason=static-check`, `failures[]` = every accumulated `VIOLATION:` line + the fail-closed checkers).
+
+Measured 2026-10-11 (prior round, `exited-not-landed`): the fan-in suite reported `# fail 87` / `# suite red failed` while `# pass 10911` and `tapFail=0` — no test failed, no `__PERFILE__ … passed=false`. The only failure-pattern lines in the entire pre-test phase were exactly the four `STATIC_CHECK_FAILED: ac69-slot-queue-gap-check exit={2,1}` lines this case echoed (2 runs × 2 arms). Removing them leaves ZERO failure-pattern matches in the pre-test phase:
+
+```console
+$ sed -n '1,2307p' <suite.log> | grep -nE 'new since baseline:[[:space:]]*[1-9]|(over|exceeds|exceeded) the ratchet ceiling|ceiling was RAISED|CEILING BREACH|FAIL:[[:space:]]*[0-9]+[[:space:]]+(ratchet[[:space:]]+)?violation|^STATIC_CHECK_FAILED:|^not ok|^[#ℹ][[:space:]]*(fail|cancelled)[[:space:]]+[1-9]|^✖[[:space:]]|^__PERFILE__[[:space:]]+duration_ms=.*passed=false|tmux-leak-scan: FAIL' | grep -v ac69-slot-queue-gap-check
+(no match)
+```
+
+Fix: `gate_red` writes the wrapper's output to `${workdir}/gate.out` and echoes it through `grep -v '^STATIC_CHECK_FAILED:'`, so the case reports the gate verdict (its own exit code + the checker's verdict line) without publishing the harness's marker. The exit-3 arm's `STATIC_CHECK_NOT_EVALUATED:` line matches no runner failure pattern, so it is kept.
+
+Verification (the exact producer that leaked, run as the suite runs it — `scripts/test.sh:314` exports `TZ=UTC`, which the case's dynamic `date -u` label depends on):
+
+```console
+$ TZ=UTC bash plugin/scripts/checker-mutation-check.sh --check
+…
+checkers_total: 87
+checkers_with_mutation: 87
+mutations_that_stayed_green: 0
+mutations_that_always_red: 0
+uncovered (registered checker with no mutation case): 0
+errors: 0
+not_evaluated: 0
+RESULT: PASS — every registered checker went RED under its injected defect and GREEN on restore; mutations_that_stayed_green = 0.
+$ echo $?  ⇒ 0   # and `grep -c '^STATIC_CHECK_FAILED:'` over that output = 0
+```
+
+⛔ Scope note (NOT fixed here, reported): the runner's guard for fixture output is `!testPhaseStarted`, so it only protects the TEST phase. Any mutation case that echoes a wrapper machine line during the static-check phase will re-create this false red. The three sibling cases that also call `run_checker` (`repo-root-derivation-check`, `checked-in-write-check`, `checker-count-drift-check`) avoid it by construction — they run the checker directly and never print the wrapper's machine line. A runner-side guard (e.g. `checker-mutation-check` not re-emitting case output in `--check` mode, or the runner ignoring markers while `checker-mutation-check` is on the stack) would be the general fix; it is outside this task's `## Touches`.
 
 ### §AC4 — class scan (Plan step 4 / hard rule 5b)
 
@@ -197,11 +234,3 @@ sequence is 0,2,1,0 (baseline / delete / drop-conclusion / restore) — no 3.
 Before this task it WAS a member of the class — the Proposal's table records the malformed
 arm exiting 3 while the old case accepted any non-zero (so the production gate stayed green).
 ```
-
-## Blocker
-
-**2026-10-11T16:47:05.315Z — worker 未落地（exited-not-landed）**
-
-- 未落地原因：step=suite: # fail 87
-- run_id：wk-prod-anchor
-- session_id：778d8c38-c1e0-4667-9eab-666459d07b32

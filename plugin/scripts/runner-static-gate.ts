@@ -656,11 +656,19 @@ run_static_checks() {
   # (docs/analysis/ac69-slot-release-vs-dispatch-gap.json) must be LANDED and structurally complete
   # (task/measuredAt/dataSource/method/stats.medianSeconds/conclusion/conclusionReason all present,
   # conclusion ∈ maintain|change) — a task whose AC says「已测」needs a mechanical product (硬规则 9:
-  # 可见性 ≠ 执行). Absent/corrupt record ⇒ NOT-EVALUATED (exit 2/3), distinct from 合格 (exit 0) —
-  # 硬规则 3b: 读不懂输入不得返回与合格同形的值. The checker validates the COMMITTED record; it does
-  # NOT recompute live .quay/ data (gitignored, worktree 副本) — the measurement itself is the
-  # documented analysis in the record's dataSource/method. Mutation case + unit tests carry the
-  # negative control (delete record / drop conclusion ⇒ RED, restore ⇒ GREEN).
+  # 可见性 ≠ 执行). Exit codes match what the checker ACTUALLY returns (hard rule 4c — the earlier
+  # prose claimed "exit 2/3" and the 3 was wrong): absent record ⇒ exit 2, present-but-invalid
+  # (corrupt JSON / missing field / bad conclusion) ⇒ exit 1. BOTH are non-zero ⇒ run_checker fails
+  # closed (STATIC_CHECK_FAILED, red). ⛔ The malformed case is deliberately NOT exit 3: 3 is
+  # run_checker's non-fatal NOT-EVALUATED (STATIC_CHECK_NOT_EVALUATED, rc 0 ⇒ the gate stays green),
+  # and a record that has been READ AND JUDGED invalid is a determined FAIL, not an "I could not
+  # check" (gap-ac69-malformed-record-exits-3-and-passes-the-static-gate — the old exit 3 made a
+  # corrupted record silently land). 硬规则 3b applies to the ABSENT case (exit 2 ≠ 0): 读不懂输入不得
+  # 返回与合格同形的值. The checker validates the COMMITTED record; it does NOT recompute live .quay/
+  # data (gitignored, worktree 副本) — the measurement itself is the documented analysis in the
+  # record's dataSource/method. Mutation case + unit tests carry the negative control (delete record /
+  # drop conclusion ⇒ RED, restore ⇒ GREEN); the mutation case judges through `run_checker`
+  # semantics, NOT the raw exit code, so it can see the exit-3 defect this task fixed.
   # @static-tier change
   # @static-object docs/analysis/ac69-slot-release-vs-dispatch-gap.json plugin/scripts/ac69-slot-queue-gap-check.ts plugin/scripts/checker-mutation-cases/ac69-slot-queue-gap-check.sh plugin/test/ac69-slot-queue-gap-check.test.mjs
   run_checker "ac69-slot-queue-gap-check" node --no-warnings --experimental-strip-types "${repo_root}/plugin/scripts/ac69-slot-queue-gap-check.ts" --root "${repo_root}"

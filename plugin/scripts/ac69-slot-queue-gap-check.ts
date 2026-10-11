@@ -9,8 +9,9 @@
 //
 // 本检查器验证的是【测量记录本身】（docs/analysis/ac69-slot-release-vs-dispatch-gap.json）：
 // 记录存在、结构完整（task/measuredAt/dataSource/method/stats.medianSeconds/conclusion/
-// conclusionReason 全在）、conclusion ∈ {maintain, change}。记录缺席或字段缺失 ⇒ 「未评估」，
-// 与「查过且合格」用不同退出码区分（硬规则 3b：读不懂输入不得返回与合格同形的值）。
+// conclusionReason 全在）、conclusion ∈ {maintain, change}。记录缺席 ⇒ 无法评估（exit 2），
+// 记录存在但损坏/缺字段 ⇒ 确定的 FAIL（exit 1）：两个非零都被 run_checker 当红，
+// 且各自与「查过且合格」（exit 0）不同形（硬规则 3b：读不懂输入不得返回与合格同形的值）。
 //
 // 它【不重新计算】活数据：verification-round.jsonl 在 .quay/（gitignored），任务 worktree 的
 // .quay/ 是副本；对已提交记录做结构校验在任何检出都成立。重新测量是文档化的手工分析
@@ -18,8 +19,16 @@
 //
 // 退出码（fail-closed 语义只落在「记录缺席/损坏」上，不替人重新判测量结论）：
 //   0 = 记录存在且结构完整（查过且合格）
+//   1 = 记录存在但损坏/缺字段（已读到并判过 ⇒ 确定的 FAIL，RED）
 //   2 = 记录缺席（无法评估——与合格区分，硬规则 3b）
-//   3 = 记录存在但损坏/缺字段（无法评估——与合格区分，硬规则 3b）
+//
+// ⛔ 损坏为什么是 1（RED）而不是 3（NOT-EVALUATED）：
+//   gap-ac69-malformed-record-exits-3-and-passes-the-static-gate。一条【存在但结构不合法】的
+//   记录已经被读到、也被判过了——它不是「没查成」，而是一次确定的「不合格」。exit 3 是
+//   checker-cost-lib.sh 的第三态：run_checker 把它当**非致命**结果（打印
+//   STATIC_CHECK_NOT_EVALUATED、返回 0、不阻断落地）⇒ 把一次确定的 FAIL 编码成 3，等于让
+//   一条损坏的记录静默放行（registry 注释与 mutation case 都按 RED 预期，实测两处都读不到红）。
+//   「无法评估」在本检查器里只剩一种形态：记录缺席（exit 2），它是 fail-closed 的红。
 //
 // Run:
 //   node --no-warnings --experimental-strip-types plugin/scripts/ac69-slot-queue-gap-check.ts
@@ -52,7 +61,10 @@ export const VALID_CONCLUSIONS = ["maintain", "change"] as const;
 
 /** Sentinel exit codes — distinct from 0 (合格) per 硬规则 3b. */
 export const EXIT_NOT_FOUND = 2;
-export const EXIT_MALFORMED = 3;
+/** Present-but-invalid record ⇒ a determined FAIL (RED). NOT the checker convention's exit 3:
+ *  run_checker maps 3 to a non-fatal NOT-EVALUATED and the landing stays green
+ *  (gap-ac69-malformed-record-exits-3-and-passes-the-static-gate). */
+export const EXIT_MALFORMED = 1;
 
 export interface RecordSummary {
   ok: boolean;
@@ -151,7 +163,7 @@ if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.me
   if (json) {
     process.stdout.write(JSON.stringify({ ok: result.ok, reason: result.reason, code: result.code, fields: result.fields, root }) + "\n");
   } else {
-    const tag = result.ok ? "PASS" : result.code === EXIT_NOT_FOUND ? "NOT-EVALUATED (record absent)" : "NOT-EVALUATED (malformed)";
+    const tag = result.ok ? "PASS" : result.code === EXIT_NOT_FOUND ? "NOT-EVALUATED (record absent)" : "FAIL (malformed)";
     process.stdout.write(`ac69-slot-queue-gap-check: ${tag} — ${result.reason}\n`);
     if (result.ok) {
       const f = result.fields as Record<string, unknown>;

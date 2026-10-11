@@ -12,9 +12,16 @@
 //   (b) the REAL committed measurement record is GREEN (CLI exit 0) — the「先量再改」deliverable landed;
 //   (c) the NEGATIVE CONTROLS (硬规则 3b —「无法评估」≠「合格」，退出码必须区分):
 //       (1) record absent ⇒ exit 2 (NOT-EVALUATED, NOT 0);
-//       (2) record malformed JSON ⇒ exit 3 (NOT-EVALUATED, NOT 0);
-//       (3) record missing a required field (no conclusion) ⇒ exit 3;
-//       (4) record with an invalid conclusion value ⇒ exit 3.
+//       (2) record malformed JSON ⇒ exit 1 (RED — a present-but-invalid record has been read and
+//           judged, it is a determined FAIL, NOT the non-fatal exit-3 NOT-EVALUATED);
+//       (3) record missing a required field (no conclusion) ⇒ exit 1;
+//       (4) record with an invalid conclusion value ⇒ exit 1.
+//
+// The malformed exit code is pinned LITERALLY (EXIT_MALFORMED === 1) because it is a CONTRACT with
+// the production wrapper `run_checker` (checker-cost-lib.sh): 0=pass, 3=non-fatal not-evaluated,
+// any other non-zero=RED (STATIC_CHECK_FAILED). A record missing `conclusion` must make the STATIC
+// GATE go red — the raw-checker exit code alone proves nothing
+// (gap-ac69-malformed-record-exits-3-and-passes-the-static-gate).
 //
 // Run:
 //   scripts/test.sh plugin/test/ac69-slot-queue-gap-check.test.mjs
@@ -152,43 +159,57 @@ test("硬规则 3b 负控制 — record ABSENT ⇒ exit 2 (NOT-EVALUATED), never
   assert.match(r.stdout, /NOT FOUND/);
 });
 
-test("硬规则 3b 负控制 — record MALFORMED JSON ⇒ exit 3 (NOT-EVALUATED), never 0", () => {
+test("硬规则 3b 负控制 — record MALFORMED JSON ⇒ exit 1 (RED), never 0 or 3", () => {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), "ac69-neg-json-"));
   after(() => fs.rmSync(dir, { recursive: true, force: true }));
   const file = path.join(dir, "bad.json");
   fs.writeFileSync(file, "{ not json", "utf8");
   const r = runCli({ record: file });
-  assert.equal(r.status, EXIT_MALFORMED, `malformed JSON must exit ${EXIT_MALFORMED}:\n${r.stdout}\n${r.stderr}`);
+  assert.equal(r.status, 1, `malformed JSON must exit 1 (RED):\n${r.stdout}\n${r.stderr}`);
+  assert.equal(r.status, EXIT_MALFORMED, "…which is the exported EXIT_MALFORMED");
   assert.notEqual(r.status, 0, "malformed record must NOT look like a pass (硬规则 3b)");
+  assert.notEqual(r.status, 3, "…and must NOT be the non-fatal exit-3 NOT-EVALUATED run_checker ignores");
   assert.match(r.stdout, /not valid JSON/);
 });
 
-test("硬规则 3b 负控制 — record MISSING required field ⇒ exit 3 (NOT-EVALUATED), never 0", () => {
+test("硬规则 3b 负控制 — record MISSING required field ⇒ exit 1 (RED), never 0 or 3", () => {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), "ac69-neg-field-"));
   after(() => fs.rmSync(dir, { recursive: true, force: true }));
   const file = path.join(dir, "missing-conclusion.json");
   const { conclusion, ...noConclusion } = validRecord();
   fs.writeFileSync(file, JSON.stringify(noConclusion), "utf8");
   const r = runCli({ record: file });
-  assert.equal(r.status, EXIT_MALFORMED, `missing field must exit ${EXIT_MALFORMED}:\n${r.stdout}\n${r.stderr}`);
+  // AC1 of gap-ac69-malformed-record-exits-3-and-passes-the-static-gate: a record missing
+  // `conclusion` gives exit 1 — pinned as a LITERAL so a re-introduced exit 3 cannot hide behind
+  // the exported constant.
+  assert.equal(r.status, 1, `missing field must exit 1 (RED):\n${r.stdout}\n${r.stderr}`);
+  assert.equal(r.status, EXIT_MALFORMED, "…which is the exported EXIT_MALFORMED");
   assert.notEqual(r.status, 0, "missing-field record must NOT look like a pass (硬规则 3b)");
+  assert.notEqual(r.status, 3, "…and must NOT be the non-fatal exit-3 NOT-EVALUATED run_checker ignores");
   assert.match(r.stdout, /missing required field/);
 });
 
-test("硬规则 3b 负控制 — record INVALID conclusion value ⇒ exit 3 (NOT-EVALUATED), never 0", () => {
+test("硬规则 3b 负控制 — record INVALID conclusion value ⇒ exit 1 (RED), never 0 or 3", () => {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), "ac69-neg-concl-"));
   after(() => fs.rmSync(dir, { recursive: true, force: true }));
   const file = path.join(dir, "bad-conclusion.json");
   fs.writeFileSync(file, JSON.stringify(validRecord({ conclusion: "maybe" })), "utf8");
   const r = runCli({ record: file });
-  assert.equal(r.status, EXIT_MALFORMED, `invalid conclusion must exit ${EXIT_MALFORMED}:\n${r.stdout}\n${r.stderr}`);
+  assert.equal(r.status, 1, `invalid conclusion must exit 1 (RED):\n${r.stdout}\n${r.stderr}`);
+  assert.equal(r.status, EXIT_MALFORMED, "…which is the exported EXIT_MALFORMED");
   assert.notEqual(r.status, 0, "invalid-conclusion record must NOT look like a pass (硬规则 3b)");
+  assert.notEqual(r.status, 3, "…and must NOT be the non-fatal exit-3 NOT-EVALUATED run_checker ignores");
   assert.match(r.stdout, /conclusion must be one of/);
 });
 
 // ── exit-code separation is structural (硬规则 3b) ───────────────────────────────────────────────────
 
-test("硬规则 3b — the three exit codes are pairwise distinct (0 ≠ 2 ≠ 3)", () => {
+test("硬规则 3b — the three exit codes are pairwise distinct (0 ≠ 1 ≠ 2) and RED ≠ the non-fatal 3", () => {
+  // The literal is the CONTRACT with run_checker (checker-cost-lib.sh): 3 is non-fatal
+  // (STATIC_CHECK_NOT_EVALUATED, rc 0 ⇒ the static gate stays green). A present-but-invalid record
+  // is a determined FAIL, so its code must not be 3 and must not be 0.
+  assert.equal(EXIT_MALFORMED, 1, "a present-but-invalid record ⇒ RED (exit 1), the code run_checker treats as fail-closed");
+  assert.notEqual(EXIT_MALFORMED, 3, "exit 3 is run_checker's non-fatal NOT-EVALUATED — a corrupted record must not hide there");
   assert.notEqual(EXIT_NOT_FOUND, 0);
   assert.notEqual(EXIT_MALFORMED, 0);
   assert.notEqual(EXIT_NOT_FOUND, EXIT_MALFORMED);

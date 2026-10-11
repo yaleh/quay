@@ -1,20 +1,52 @@
 #!/usr/bin/env bash
 # Mutation case for ac69-slot-queue-gap-check (tasks/gap-ac69-suite-slot-full-should-queue-not-wait,
-# AC1 + DoD). Fixture: a temp workspace carrying docs/analysis/ac69-slot-release-vs-dispatch-gap.json
-# with the required fields → GREEN. Inject: (1) DELETE the record — the「测量记录没落地」shape AC1/DoD
-# requires the checker to go RED on → MUST go non-zero; (2) DROP the conclusion field — a record that
-# doesn't state 改法或维持 is NOT a valid AC69 measurement → MUST go non-zero. Restore: put the record
-# back complete → GREEN.
+# AC1 + DoD; exit-code contract per tasks/gap-ac69-malformed-record-exits-3-and-passes-the-static-gate).
+# Fixture: a temp workspace carrying docs/analysis/ac69-slot-release-vs-dispatch-gap.json with the
+# required fields → GREEN. Inject: (1) DELETE the record — the「测量记录没落地」shape AC1/DoD requires
+# the checker to go RED on → MUST go red; (2) DROP the conclusion field — a record that doesn't state
+# 改法或维持 is NOT a valid AC69 measurement → MUST go red. Restore: put the record back → GREEN.
+#
+# ⛔ Each fault is judged through the PRODUCTION wrapper `run_checker` (checker-cost-lib.sh), NOT the
+# raw checker exit code. run_checker maps exit 3 (NOT-EVALUATED) to a NON-FATAL result: it prints
+# STATIC_CHECK_NOT_EVALUATED, returns 0, and the static gate stays green (a corrupted record would
+# not block a landing). So "the raw checker exited non-zero" proves nothing — a checker that exits 3
+# on a corrupt record passes that assertion while the production gate never goes red. This case
+# previously made exactly that mistake (gap-ac69-malformed-record-exits-3-and-passes-the-static-gate).
+# A fault counts as caught ONLY when run_checker returns non-zero (a fail-closed RED).
+#
+# ⛔ The wrapper's `STATIC_CHECK_FAILED:` machine line is NEVER echoed to this case's stdout. That
+# line is the HARNESS's control channel: checker-mutation-check captures a case's stdout+stderr and
+# re-emits it into the full-suite stream during the STATIC-CHECK phase (before `testPhaseStarted`),
+# where the runner's `^STATIC_CHECK_FAILED:` pattern flips the WHOLE round red (reason=static-check,
+# failures[] = every VIOLATION line + the fail-closed checkers). A negative control that prints the
+# red marker it exists to guard is a self-inflicted false red — measured 2026-10-11: this case's
+# echoed output red the fan-in suite with `# fail 87` while every test passed (tapFail=0). The
+# checker's OWN verdict line (stdout) is still echoed so the log shows WHY.
 set -u
 name="ac69-slot-queue-gap-check"
 workdir="${1:?usage: $name.sh <workdir>}"
 checker_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 
+# The production wrapper, with its cost ledger redirected into the throwaway workdir.
+. "${checker_dir}/checker-cost-lib.sh"
+CHECKER_COST_FILE="${workdir}/checker-cost.jsonl"
+RUN_CHECKER_PARALLEL=0
+
 mkdir -p "${workdir}/docs/analysis"
 cd "${workdir}"
 
-checker_cmd() {
-  node --no-warnings --experimental-strip-types "${checker_dir}/ac69-slot-queue-gap-check.ts" --root "$1" >/dev/null 2>&1
+# Gate verdict for one injected state: return 0 iff the PRODUCTION gate went RED (a landing blocker),
+# 1 iff it stayed GREEN (a pass, or the non-fatal exit-3 NOT-EVALUATED). The checker's OWN verdict
+# line(s) are echoed so the log shows WHY; the wrapper's `STATIC_CHECK_FAILED:` machine line is
+# filtered out (see the header) — it is the harness's channel, not a fixture's to publish. The
+# exit-3 `STATIC_CHECK_NOT_EVALUATED:` line matches no runner failure pattern (it is the third state
+# this task distinguishes) and is kept.
+gate_red() {
+  local _rc=0
+  run_checker "${name}" node --no-warnings --experimental-strip-types \
+    "${checker_dir}/ac69-slot-queue-gap-check.ts" --root "$1" >"${workdir}/gate.out" 2>&1 || _rc=$?
+  grep -v '^STATIC_CHECK_FAILED:' "${workdir}/gate.out" || true
+  [ "${_rc}" -ne 0 ]
 }
 
 complete_record() {
@@ -31,21 +63,21 @@ complete_record() {
 EOF
 }
 
-# GREEN baseline: complete record present → exit 0.
+# GREEN baseline: complete record present → the gate stays green.
 complete_record
-if checker_cmd "${workdir}"; then :; else
+if gate_red "${workdir}"; then
   echo "baseline RED on a complete measurement record (checker always-red?)" >&2
   exit 4
 fi
 
-# INJECT (1): DELETE the record — AC1/DoD「测量记录已落地」is now absent → MUST go non-zero.
+# INJECT (1): DELETE the record — AC1/DoD「测量记录已落地」is now absent → the gate MUST go RED.
 rm -f "${workdir}/docs/analysis/ac69-slot-release-vs-dispatch-gap.json"
-if checker_cmd "${workdir}"; then
-  echo "STAYED-GREEN: checker exited 0 with the measurement record DELETED" >&2
+if ! gate_red "${workdir}"; then
+  echo "STAYED-GREEN: the production gate stayed green with the measurement record DELETED" >&2
   exit 3
 fi
 
-# INJECT (2): DROP the conclusion field — a record that doesn't state 改法或维持 is invalid → MUST go non-zero.
+# INJECT (2): DROP the conclusion field — a record that doesn't state 改法或维持 is invalid → MUST go red.
 complete_record
 python3 - <<'PY'
 import json
@@ -54,15 +86,15 @@ d = json.load(open(p))
 del d["conclusion"]
 json.dump(d, open(p, "w"))
 PY
-if checker_cmd "${workdir}"; then
-  echo "STAYED-GREEN: checker exited 0 with the conclusion field DROPPED" >&2
+if ! gate_red "${workdir}"; then
+  echo "STAYED-GREEN: the production gate stayed green with the conclusion field DROPPED" >&2
   exit 3
 fi
 
-# RESTORE: put the complete record back → GREEN.
+# RESTORE: put the complete record back → the gate stays green.
 complete_record
-if checker_cmd "${workdir}"; then :; else
-  echo "ALWAYS-RED: checker still non-zero after restoring the complete record" >&2
+if gate_red "${workdir}"; then
+  echo "ALWAYS-RED: the production gate is still red after restoring the complete record" >&2
   exit 4
 fi
 
