@@ -22,6 +22,19 @@
 //   undetermined     ⇐ anything else, INCLUDING any evidence not-evaluated
 // Labels are read ONLY in the scoring step, after every verdict exists (see DEFAULT_LABELS / --labels).
 //
+// ── TWO MODES ───────────────────────────────────────────────────────────────────────────────────────
+// EXPERIMENT (`--pre <rev> --post <rev>`, optional `--labels`): the pre-registered 2026-10-11 reading —
+//   a candidate SET at PRE scored against human labels. Every reading of it is unchanged.
+// SCAN (`--scan [--rev <rev>] [--registry <json>]`): the same readings over ONE rev (default HEAD),
+//   with NO labels and NO pre/post pair — the form a periodic scan can actually run. Candidates come
+//   from the checker as shipped in this instrument's own checkout. A3 is skipped (it is an experiment-A3
+//   artifact, reported as `not-applicable`), and every finding carries a run-stable `finding_fp`.
+//   `--registry` lets a fixture/foreign tree declare its own authorities+surfaces (the checker's own
+//   registry file format), which is what makes a scan of a NON-repo tree possible.
+// BOUNDS (both modes, all opt-in): `--max-ms` / `--max-records` / `--max-candidates`. A breach exits
+//   with its OWN non-zero code and writes NOTHING (fail-closed — never a partial output carrier).
+//   jsonl carriers are STREAMED, so a 144 MB `.quay/gate-events.jsonl` is never resident as one string.
+//
 // ⛔ STRUCTURAL SANDBOX: creates no task, goal, or AC; changes no status; writes NO production carrier.
 // Its only persistence is the caller-given `--out` jsonl (default under `.quay/arch-discovery-shadow/`,
 // never `.quay/architecture-evidence-store.jsonl`). The checker's own `note`/KNOWN_DRIFT `reason` text is
@@ -35,6 +48,7 @@
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
+import { StringDecoder } from "node:string_decoder";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { execFileSync } from "node:child_process";
 import { sha256, subjectKey, validateRecord } from "./architecture-evidence-store.mjs";
@@ -124,10 +138,115 @@ export function e3Hits({ testFiles, moduleFile, symbol, mode = "import" }) {
   return { state: "evaluated", hits };
 }
 
+// ── bounds: fail-closed. A breached budget exits with its OWN code and writes NOTHING ───────────────
+/** One exit code per bound so a breach is diagnosable from the status alone (硬规则 3: a distinct value,
+ *  never shared with "clean"). `--max-candidates` and `--max-groups` share code 6 because they are the
+ *  same KIND of bound (a cap on the input the run consumes) on the two instruments — the two can never
+ *  both be in play. 2 = usage/env is the gate-script-base convention and is NOT reused here. */
+export const BOUND_EXIT_CODES = Object.freeze({ "max-ms": 4, "max-records": 5, "max-candidates": 6, "max-groups": 6 });
+
+export class BoundExceeded extends Error {
+  constructor(bound, detail) {
+    super(`${bound} exceeded — ${detail}`);
+    this.name = "BoundExceeded";
+    this.bound = bound;
+    this.detail = detail;
+    this.exitCode = BOUND_EXIT_CODES[bound];
+  }
+}
+
+/** The budget object threaded through a run. Every bound is opt-in (`null` = no cap — 硬规则 4 推论二:
+ *  "no limit" is expressed by NOT installing a limit, never by a large literal). */
+export function makeBudget({ maxMs = null, maxRecords = null, maxCandidates = null, maxGroups = null, t0 = Date.now() } = {}) {
+  const breach = (bound, detail) => { throw new BoundExceeded(bound, detail); };
+  return {
+    maxMs, maxRecords, maxCandidates, maxGroups,
+    /** Consulted at every emission boundary AND inside the stream reader, so a 144 MB carrier cannot
+     *  outlive `--max-ms` merely because nothing was emitted yet. Breach is `elapsed >= maxMs`, so
+     *  `--max-ms 0` means "abort at the first consultation" (deterministic, not a race on the clock). */
+    checkTime(now = Date.now()) { if (maxMs !== null && now - t0 >= maxMs) breach("max-ms", `elapsed ${now - t0}ms >= ${maxMs}ms`); },
+    countRecords(n) { if (maxRecords !== null && n > maxRecords) breach("max-records", `${n} records > ${maxRecords}`); },
+    countCandidates(n) { if (maxCandidates !== null && n > maxCandidates) breach("max-candidates", `${n} candidates > ${maxCandidates}`); },
+    countGroups(n) { if (maxGroups !== null && n > maxGroups) breach("max-groups", `${n} groups > ${maxGroups}`); },
+  };
+}
+
+// ── streaming jsonl reader: O(chunk) memory instead of O(file) ──────────────────────────────────────
+/** Call `onLine(line, lineNo)` for every `\n`-terminated line of `file`, reading it in `chunk`-sized
+ *  pieces. A 144 MB `.quay/gate-events.jsonl` no longer has to be resident as one string. Multibyte
+ *  sequences split across a chunk boundary are held by a `StringDecoder` (the carriers carry CJK text,
+ *  so a naive `buf.toString()` per chunk would silently corrupt every straddling character).
+ *  Missing file → `{lines:0, missing:true}` (this reader is used on OPTIONAL carriers). */
+export function streamLines(file, onLine, { chunk = 1 << 20, budget = null, tickEvery = 20000 } = {}) {
+  let fd; try { fd = fs.openSync(file, "r"); } catch { return { lines: 0, missing: true }; }
+  const dec = new StringDecoder("utf8");
+  const buf = Buffer.allocUnsafe(chunk);
+  let rest = ""; let lineNo = 0;
+  try {
+    for (;;) {
+      const read = fs.readSync(fd, buf, 0, chunk, null);
+      if (read === 0) break;
+      const parts = (rest + dec.write(buf.subarray(0, read))).split("\n");
+      rest = parts.pop();
+      for (const line of parts) {
+        lineNo++; onLine(line, lineNo);
+        if (budget && lineNo % tickEvery === 0) budget.checkTime();
+      }
+    }
+    const tail = rest + dec.end();
+    if (tail.length) { lineNo++; onLine(tail, lineNo); }
+  } finally { fs.closeSync(fd); }
+  return { lines: lineNo, missing: false };
+}
+
+/** Stream a jsonl carrier, keeping only the rows `pred` accepts. Same row shape the tools used before
+ *  (`{line, raw, r}`) so every call site stays a drop-in; unparseable lines are DROPPED and COUNTED. */
+export function streamJsonl(file, pred = () => true, { chunk = 1 << 20, budget = null } = {}) {
+  const rows = []; let malformed = 0;
+  const res = streamLines(file, (line, lineNo) => {
+    if (!line.trim()) return;
+    let r; try { r = JSON.parse(line); } catch { malformed++; return; }
+    if (pred(r)) rows.push({ line: lineNo, raw: line, r });
+  }, { chunk, budget });
+  return { rows, malformed, missing: res.missing };
+}
+
+// ── finding identity: stable across runs, blind to every wall-clock field ───────────────────────────
+/** `finding_fp = sha256(subject_key + verdict + sorted evidence sha256s)`. ⛔ No `ts` participates —
+ *  neither the record's own emission time nor anything derived from it — so two runs over identical
+ *  inputs produce identical fingerprint sets even though every record carries a fresh `ts`. */
+export function findingFp(subjectKey, verdict, evidenceSha256s = []) {
+  const hashes = [...new Set(evidenceSha256s.filter((h) => typeof h === "string" && h))].sort();
+  return sha256([String(subjectKey ?? ""), String(verdict ?? ""), ...hashes].join("\n"));
+}
+
+/** Stamp `finding_fp` on every `outcome` / `counterexample` row. The evidence set of a finding is the
+ *  set of evidence rows that carry the SAME `subject_key` — the instrument already tags every reading
+ *  with the subject it belongs to, so no citation-graph resolution is needed (and in particular none
+ *  that would go through `ref`, which for a commit-pinned reading is a sha shared by many subjects).
+ *  PURE apart from mutating the rows it is handed. */
+export function assignFindingFps(rows) {
+  const hashesBySubject = new Map();
+  for (const r of rows) {
+    if (r.kind !== "evidence" || typeof r.sha256 !== "string") continue;
+    const k = String(r.subject_key ?? "");
+    if (!hashesBySubject.has(k)) hashesBySubject.set(k, []);
+    hashesBySubject.get(k).push(r.sha256);
+  }
+  for (const r of rows) {
+    if (r.kind !== "outcome" && r.kind !== "counterexample") continue;
+    const subject = String(r.subject_key ?? "");
+    const verdict = r.kind === "outcome" ? (r.rule_verdict ?? r.verdict ?? "") : "counterexample";
+    r.finding_fp = findingFp(subject, verdict, hashesBySubject.get(subject) ?? []);
+  }
+  return rows;
+}
+
 // ── the sink: validate with the PRODUCTION store, then write to the caller path ─────────────────────
 export class Sink {
-  constructor() { this.rows = []; this.validator = { accepted: 0, refused: 0, reasons: {} }; }
+  constructor(budget = null) { this.rows = []; this.budget = budget; this.validator = { accepted: 0, refused: 0, reasons: {} }; }
   add(kind, rec) {
+    if (this.budget) this.budget.countRecords(this.rows.length + 1);
     const v = validateRecord(kind, rec);
     if (v.ok) this.validator.accepted++;
     else { this.validator.refused++; for (const r of v.reasons) this.validator.reasons[r] = (this.validator.reasons[r] || 0) + 1; }
@@ -164,9 +283,12 @@ export function makeGit(root) {
  *  and the test-file scan actually read.) */
 export const TREE_PATHS = ["CLAUDE.md", "packages", "plugin/scripts", "plugin/skills", "plugin/test"];
 
-/** Materialise the tracked files at `rev` into `dir` (read-only analysis; nothing is written back to the repo). */
-export function materialize(git, rev, dir) {
-  const existing = git(["ls-tree", "--name-only", rev, "--", ...TREE_PATHS]).split("\n").filter(Boolean);
+/** Materialise the tracked files at `rev` into `dir` (read-only analysis; nothing is written back to the repo).
+ *  `extraPaths` adds whatever ELSE the caller's registry reads (a scan of a foreign tree whose files live
+ *  outside TREE_PATHS); paths that do not exist at `rev` are dropped by the `ls-tree` filter. */
+export function materialize(git, rev, dir, extraPaths = []) {
+  const wanted = [...new Set([...TREE_PATHS, ...extraPaths])];
+  const existing = git(["ls-tree", "--name-only", rev, "--", ...wanted]).split("\n").filter(Boolean);
   const tar = execFileSync("git", ["-C", git.root ?? ".", "archive", "--format=tar", rev, ...existing], { maxBuffer: 1 << 30 });
   fs.mkdirSync(dir, { recursive: true });
   execFileSync("tar", ["-x", "-C", dir], { input: tar, maxBuffer: 1 << 26 });
@@ -203,6 +325,7 @@ export function testFileList(git, rev) {
 export function parseArgs(argv) {
   const has = (n) => argv.includes(n);
   const val = (n, d) => { const i = argv.indexOf(n); return i >= 0 ? argv[i + 1] : d; };
+  const num = (n) => { const v = val(n, null); return v === null ? null : Number(v); };
   return {
     root: path.resolve(val("--root", process.cwd())),
     pre: val("--pre", null),
@@ -213,13 +336,151 @@ export function parseArgs(argv) {
     e3Mode: val("--e3-mode", "import"),
     keep: has("--keep-trees"),
     json: has("--json"),
+    // ── scan mode (a periodic reading of ONE rev: no labels, no pre/post pair) ──
+    scan: has("--scan"),
+    rev: val("--rev", "HEAD"),
+    registry: val("--registry", null),
+    // ── bounds (all opt-in; null = no cap) ──
+    maxMs: num("--max-ms"),
+    maxRecords: num("--max-records"),
+    maxCandidates: num("--max-candidates"),
   };
 }
 
+/** Build the candidate rows from ONE checker result. The checker's own `note`/KNOWN_DRIFT `reason`
+ *  text is NEVER read here — it carries the human adjudication, i.e. the answer. */
+export function buildCandidates(REG, preRes, authVals) {
+  const authSpec = Object.fromEntries(REG.authorities.map((a) => [a.id, a]));
+  const surfSpec = Object.fromEntries(REG.surfaces.map((s) => [s.id, s]));
+  const cands = [];
+  for (const k of preRes.knownDrift) { const s = surfSpec[k.surface]; if (!s) continue; cands.push({ id: k.surface, registered: true, authority: s.authority, file: s.file, spec: s, missing: k.missing, extra: k.extra }); }
+  for (const d of preRes.discovered) {
+    const missing = (authVals[d.authority] || []).filter((v) => !(d.values || []).includes(v));
+    cands.push({ id: `discovered:${d.file}:${d.line}`, registered: false, authority: d.authority, file: d.file, line: d.line, values: d.values, missing, extra: [] });
+  }
+  return { cands, authSpec };
+}
+
+/** The per-candidate body — the SAME reading in experiment mode and in scan mode. Returns the row the
+ *  caller reports. `preSha`/`preDir` are the rev and tree the candidate set was taken from; `postRes` is
+ *  the checker result at the OTHER rev (identical to `preRes` in scan mode, where pre = post = rev). */
+export function analyzeCandidate({ c, git, chk, preRes, postRes, preSha, preDir, authSpec, authFirstCache, testFiles, sink, provenanceTask, e3Mode }) {
+  const authorityFirstContains = (authId, v) => {
+    const key = `${authId}|${v}`; if (key in authFirstCache) return authFirstCache[key];
+    const a = authSpec[authId];
+    const commits = git(["log", "--reverse", "--format=%H %ct", preSha, "--", a.file]).split("\n").filter(Boolean);
+    let res = { state: "not-evaluated", reason: "authority never contained value in history" };
+    for (const row of commits) {
+      const [h, ct] = row.split(" ");
+      let src; try { src = git(["show", `${h}:${a.file}`]); } catch { continue; }
+      let ex; try { ex = chk.extract(src, a.extract, a); } catch { continue; }
+      const vals = ex && ex.ok && Array.isArray(ex.groups) ? ex.groups.flatMap((g) => g.values) : null;
+      if (vals && vals.includes(v)) { res = { state: "found", commit: h, time: Number(ct) }; break; }
+    }
+    return (authFirstCache[key] = res);
+  };
+  {
+    const abs = path.join(preDir, c.file);
+    let src = ""; try { src = fs.readFileSync(abs, "utf8"); } catch { /* unreadable → located by nothing, reported not-evaluated */ }
+    const line = locateLine(c.spec, c.line, src);
+    const skey = subjectKey(`enum-surface:${c.authority}`, [`${c.file}#${line ?? "?"}`]);
+    const lineText = line && src ? (src.split("\n")[line - 1] ?? "") : "";
+    const base = sink.add("evidence", sourceEvidence("enum-surface-parity-check", c.file, line ?? 0, lineText, preSha, { subject_key: skey, provenance_task: provenanceTask, reading: { authority: c.authority, missing: c.missing, extra: c.extra } }));
+
+    // E1
+    let e1 = { state: "not-evaluated" };
+    if (line && c.missing.length) {
+      const blame = git(["blame", "-L", `${line},${line}`, "--porcelain", preSha, "--", c.file]);
+      const litTime = Number(/committer-time (\d+)/.exec(blame)[1]);
+      const auth = c.missing.map((v) => ({ v, ...authorityFirstContains(c.authority, v) }));
+      if (auth.every((a) => a.state === "found")) e1 = { state: auth.every((a) => litTime < a.time) ? "stale" : "authored-after", litTime: new Date(litTime * 1000).toISOString(), authority: auth.map((a) => ({ v: a.v, commit: a.commit, time: new Date(a.time * 1000).toISOString() })) };
+      else e1 = { state: "not-evaluated", auth };
+    }
+    const e1r = sink.add("evidence", { tool: "git-blame+git-log", ref: preSha, ts: new Date().toISOString(), sha256: sha256(JSON.stringify(e1)), confidence: { level: e1.state === "not-evaluated" ? "low" : "high", basis: "commit timestamps, position only" }, path: c.file, range: [line ?? 0, line ?? 0], subject_key: skey, provenance_task: provenanceTask, reading: { E1: e1 } });
+
+    // E2
+    const block = line && src ? commentAbove(src, line) : null;
+    const e2 = block === null ? { state: "not-evaluated" } : { state: "evaluated", named: c.missing.filter((v) => new RegExp(`(^|[^\\w-])${escapeRe(v)}([^\\w-]|$)`).test(block)), block_lines: block ? block.split("\n").length : 0 };
+    const e2r = sink.add("evidence", { tool: "comment-block-above-literal", ref: preSha, ts: new Date().toISOString(), sha256: sha256(block ?? ""), confidence: { level: "medium", basis: "position: contiguous comment block directly above the literal" }, path: c.file, range: [line ?? 0, line ?? 0], subject_key: skey, provenance_task: provenanceTask, reading: { E2: e2 } });
+
+    // E3 — both readings: the weak "name" one and the import-resolution fix.
+    const sym = line && src ? (c.spec?.symbol || declSymbol(src, line)) : null;
+    const e3name = e3Hits({ testFiles, moduleFile: c.file, symbol: sym, mode: "name" });
+    const e3fixed = e3Hits({ testFiles, moduleFile: c.file, symbol: sym, mode: "import" });
+    const e3 = e3Mode === "name" ? e3name : e3fixed;
+    const e3r = sink.add("evidence", { tool: "test-files-importing-literal-module", ref: preSha, ts: new Date().toISOString(), sha256: sha256(JSON.stringify(e3fixed)), confidence: { level: "medium", basis: "test file IMPORTS the literal's own module (specifier resolved) and names the symbol" }, path: c.file, range: [line ?? 0, line ?? 0], subject_key: skey, provenance_task: provenanceTask, reading: { E3: { ...e3fixed, symbol: sym, hits_by_bare_name: e3name.state === "evaluated" ? e3name.hits.length : e3name.state } } });
+
+    const rule = classifySpace({ e1: e1.state, e2, e3 });
+    const refs = [base, e1r, e2r, e3r].map((r) => r.ref);
+    const driftStmt = `${c.id}: surface is a stale copy that lags authority ${c.authority} (missing ${c.missing.join(",")})`;
+    const legitStmt = `${c.id}: surface is an intentional subset of ${c.authority}`;
+    const hD = sink.add("hypothesis", { statement: driftStmt, source_evidence: refs, ts: new Date().toISOString(), subject_key: skey, provenance_task: provenanceTask });
+    const hL = sink.add("hypothesis", { statement: legitStmt, source_evidence: refs, ts: new Date().toISOString(), subject_key: skey, provenance_task: provenanceTask });
+    // counterexamples refute a NAMED hypothesis — carried as the store's own `counterexample` kind.
+    const ceOf = [];
+    if (e2.state === "evaluated" && e2.named.length) ceOf.push({ of: hD.statement, ev: e2r.ref, why: `comment block above the literal names ${e2.named.join(",")}` });
+    if (e3.state === "evaluated" && e3.hits.length) ceOf.push({ of: hD.statement, ev: e3r.ref, why: `test(s) import the literal's module and pin the symbol: ${e3.hits.slice(0, 3).join(",")}` });
+    if (e1.state === "stale") ceOf.push({ of: hL.statement, ev: e1r.ref, why: "the literal was last changed before the authority gained the missing value(s)" });
+    for (const ce of ceOf) sink.add("counterexample", { counterexample_of: ce.of, source_evidence: [ce.ev], ts: new Date().toISOString(), subject_key: skey, provenance_task: provenanceTask, why: ce.why });
+    const exp = sink.add("experiment", { hypothesis_ref: hD.statement, method: "pre-registered rule E1∧¬E2∧¬E3 ⇒ drift; (E2∨E3)∧¬stale ⇒ legit", budget: { git_calls_cap: 4000 }, ts: new Date().toISOString(), subject_key: skey, provenance_task: provenanceTask });
+    sink.add("outcome", { experiment_ref: exp.hypothesis_ref, verdict: RULE_TO_STORE_VERDICT[rule], rule_verdict: rule, ts: new Date().toISOString(), subject_key: skey, provenance_task: provenanceTask });
+
+    // post state at the POST rev
+    let postState = "not-applicable";
+    if (c.registered) {
+      const ps = postRes.surfaces.find((s) => s.surface === c.id);
+      postState = !ps ? "surface-unregistered" : ps.occurrences.some((o) => c.missing.some((v) => o.missing.includes(v))) ? "persisting" : "resolved";
+    } else {
+      const pd = postRes.discovered.find((d) => d.file === c.file && JSON.stringify(d.values) === JSON.stringify(c.values));
+      postState = pd ? "persisting" : "changed-or-gone";
+    }
+    return { id: c.id, file: c.file, line, authority: c.authority, missing: c.missing, E1: e1.state, E2: e2.state === "evaluated" ? e2.named : e2.state, E3: e3.state === "evaluated" ? e3.hits.length : e3.state, E3_by_bare_name: e3name.state === "evaluated" ? e3name.hits.length : e3name.state, symbol: sym, verdict: rule, post: postState, subject_key: skey };
+  }
+}
+
+/** Score the candidate rows against the label set. Labels are read ONLY here, after every verdict exists. */
+export function scoreResults(results, { labels, e3Mode }) {
+  const score = { e3_mode: e3Mode, tp: [], fp: [], fn: [], tn: [], undetermined_on_labelled: [], unlabelled: [] };
+  for (const r of results) {
+    const lab = labels[r.id];
+    if (!lab) { score.unlabelled.push(`${r.id}=${r.verdict}`); continue; }
+    if (r.verdict === RULE_UNDETERMINED) { score.undetermined_on_labelled.push(`${r.id} (label ${lab})`); continue; }
+    const predDrift = r.verdict === RULE_DRIFT;
+    if (lab === "drift") (predDrift ? score.tp : score.fn).push(r.id);
+    else (predDrift ? score.fp : score.tn).push(r.id);
+  }
+  return score;
+}
+
+/** The dependency task's CARRIER, grounded on a real line of its task file. Absent file ⇒ no record
+ *  (this is an OPTIONAL provenance anchor, not a reading that failed). */
+export function addProvenanceCarrier({ root, sink, provenanceTask }) {
+  const provFile = `tasks/${provenanceTask}.md`;
+  let provLine = null, provText = "";
+  try {
+    provText = fs.readFileSync(path.join(root, provFile), "utf8").split("\n");
+    const i = provText.findIndex((l) => /^## /.test(l));
+    provLine = (i >= 0 ? i : 0) + 1;
+  } catch { provLine = null; }
+  if (!provLine) return null;
+  return sink.add("evidence", carrierEvidence("dependency-task-carrier", provFile, provLine, provText[provLine - 1], { provenance_task: provenanceTask, reading: { why: "the task that supplied this instrument's record kinds/verdicts/provenance form" } }));
+}
+
+/** Materialise every test file the E3 scan reads, at `rev`, out of the materialised tree `dir`. */
+function readTestFiles(git, rev, dir) {
+  return testFileList(git, rev)
+    .map((p) => { try { return { path: p, content: fs.readFileSync(path.join(dir, p), "utf8") }; } catch { return { path: p, content: "" }; } })
+    .filter((f) => f.content !== "");
+}
+
+// ── the runs ─────────────────────────────────────────────────────────────────────────────────────────
+/** EXPERIMENT mode (`--pre`/`--post` + labels): the pre-registered 2026-10-11 experiment, unchanged. */
 export async function runSpace(opts) {
   const { root, pre, post } = opts;
   if (!pre) throw new Error("--pre <rev> is required");
   if (!["import", "name"].includes(opts.e3Mode)) throw new Error(`--e3-mode must be import|name, got ${opts.e3Mode}`);
+  const budget = opts.budget ?? null;
+  if (budget) budget.checkTime();
   const { git, state } = makeGit(root);
   const preSha = git(["rev-parse", pre]).trim();
   const postSha = git(["rev-parse", post]).trim();
@@ -234,140 +495,92 @@ export async function runSpace(opts) {
   const postChk = await import(pathToFileURL(path.join(postDir, "plugin/scripts/enum-surface-parity-check.ts")).href);
   const preRes = preChk.runCheck({ root: preDir, registry: preChk.DEFAULT_REGISTRY });
   const postRes = postChk.runCheck({ root: postDir, registry: postChk.DEFAULT_REGISTRY });
-  const REG = preChk.DEFAULT_REGISTRY;
   const authVals = Object.fromEntries(preRes.authorities.map((a) => [a.id, a.values]));
-  const authSpec = Object.fromEntries(REG.authorities.map((a) => [a.id, a]));
-  const surfSpec = Object.fromEntries(REG.surfaces.map((s) => [s.id, s]));
 
   // ── candidates (answer-free fields only — the checker's note/reason text is never read) ──
-  const cands = [];
-  for (const k of preRes.knownDrift) { const s = surfSpec[k.surface]; if (!s) continue; cands.push({ id: k.surface, registered: true, authority: s.authority, file: s.file, spec: s, missing: k.missing, extra: k.extra }); }
-  for (const d of preRes.discovered) {
-    const missing = (authVals[d.authority] || []).filter((v) => !(d.values || []).includes(v));
-    cands.push({ id: `discovered:${d.file}:${d.line}`, registered: false, authority: d.authority, file: d.file, line: d.line, values: d.values, missing, extra: [] });
-  }
+  const { cands, authSpec } = buildCandidates(preChk.DEFAULT_REGISTRY, preRes, authVals);
+  if (budget) budget.countCandidates(cands.length);
 
+  const testFiles = readTestFiles(git, preSha, preDir);
+  const sink = new Sink(budget);
   const authFirstCache = {};
-  const authorityFirstContains = (authId, v) => {
-    const key = `${authId}|${v}`; if (key in authFirstCache) return authFirstCache[key];
-    const a = authSpec[authId];
-    const commits = git(["log", "--reverse", "--format=%H %ct", preSha, "--", a.file]).split("\n").filter(Boolean);
-    let res = { state: "not-evaluated", reason: "authority never contained value in history" };
-    for (const row of commits) {
-      const [h, ct] = row.split(" ");
-      let src; try { src = git(["show", `${h}:${a.file}`]); } catch { continue; }
-      let ex; try { ex = preChk.extract(src, a.extract, a); } catch { continue; }
-      const vals = ex && ex.ok && Array.isArray(ex.groups) ? ex.groups.flatMap((g) => g.values) : null;
-      if (vals && vals.includes(v)) { res = { state: "found", commit: h, time: Number(ct) }; break; }
-    }
-    return (authFirstCache[key] = res);
-  };
-
-  const testFiles = testFileList(git, preSha)
-    .map((p) => { try { return { path: p, content: fs.readFileSync(path.join(preDir, p), "utf8") }; } catch { return { path: p, content: "" }; } })
-    .filter((f) => f.content !== "");
-
-  const sink = new Sink();
   const results = [];
   for (const c of cands) {
-    const abs = path.join(preDir, c.file);
-    let src = ""; try { src = fs.readFileSync(abs, "utf8"); } catch { /* unreadable → located by nothing, reported not-evaluated */ }
-    const line = locateLine(c.spec, c.line, src);
-    const skey = subjectKey(`enum-surface:${c.authority}`, [`${c.file}#${line ?? "?"}`]);
-    const lineText = line && src ? (src.split("\n")[line - 1] ?? "") : "";
-    const base = sink.add("evidence", sourceEvidence("enum-surface-parity-check", c.file, line ?? 0, lineText, preSha, { subject_key: skey, provenance_task: opts.provenanceTask, reading: { authority: c.authority, missing: c.missing, extra: c.extra } }));
-
-    // E1
-    let e1 = { state: "not-evaluated" };
-    if (line && c.missing.length) {
-      const blame = git(["blame", "-L", `${line},${line}`, "--porcelain", preSha, "--", c.file]);
-      const litTime = Number(/committer-time (\d+)/.exec(blame)[1]);
-      const auth = c.missing.map((v) => ({ v, ...authorityFirstContains(c.authority, v) }));
-      if (auth.every((a) => a.state === "found")) e1 = { state: auth.every((a) => litTime < a.time) ? "stale" : "authored-after", litTime: new Date(litTime * 1000).toISOString(), authority: auth.map((a) => ({ v: a.v, commit: a.commit, time: new Date(a.time * 1000).toISOString() })) };
-      else e1 = { state: "not-evaluated", auth };
-    }
-    const e1r = sink.add("evidence", { tool: "git-blame+git-log", ref: preSha, ts: new Date().toISOString(), sha256: sha256(JSON.stringify(e1)), confidence: { level: e1.state === "not-evaluated" ? "low" : "high", basis: "commit timestamps, position only" }, path: c.file, range: [line ?? 0, line ?? 0], subject_key: skey, provenance_task: opts.provenanceTask, reading: { E1: e1 } });
-
-    // E2
-    const block = line && src ? commentAbove(src, line) : null;
-    const e2 = block === null ? { state: "not-evaluated" } : { state: "evaluated", named: c.missing.filter((v) => new RegExp(`(^|[^\\w-])${escapeRe(v)}([^\\w-]|$)`).test(block)), block_lines: block ? block.split("\n").length : 0 };
-    const e2r = sink.add("evidence", { tool: "comment-block-above-literal", ref: preSha, ts: new Date().toISOString(), sha256: sha256(block ?? ""), confidence: { level: "medium", basis: "position: contiguous comment block directly above the literal" }, path: c.file, range: [line ?? 0, line ?? 0], subject_key: skey, provenance_task: opts.provenanceTask, reading: { E2: e2 } });
-
-    // E3 — both readings: the weak "name" one and the import-resolution fix.
-    const sym = line && src ? (c.spec?.symbol || declSymbol(src, line)) : null;
-    const e3name = e3Hits({ testFiles, moduleFile: c.file, symbol: sym, mode: "name" });
-    const e3fixed = e3Hits({ testFiles, moduleFile: c.file, symbol: sym, mode: "import" });
-    const e3 = opts.e3Mode === "name" ? e3name : e3fixed;
-    const e3r = sink.add("evidence", { tool: "test-files-importing-literal-module", ref: preSha, ts: new Date().toISOString(), sha256: sha256(JSON.stringify(e3fixed)), confidence: { level: "medium", basis: "test file IMPORTS the literal's own module (specifier resolved) and names the symbol" }, path: c.file, range: [line ?? 0, line ?? 0], subject_key: skey, provenance_task: opts.provenanceTask, reading: { E3: { ...e3fixed, symbol: sym, hits_by_bare_name: e3name.state === "evaluated" ? e3name.hits.length : e3name.state } } });
-
-    const rule = classifySpace({ e1: e1.state, e2, e3 });
-    const refs = [base, e1r, e2r, e3r].map((r) => r.ref);
-    const driftStmt = `${c.id}: surface is a stale copy that lags authority ${c.authority} (missing ${c.missing.join(",")})`;
-    const legitStmt = `${c.id}: surface is an intentional subset of ${c.authority}`;
-    const hD = sink.add("hypothesis", { statement: driftStmt, source_evidence: refs, ts: new Date().toISOString(), subject_key: skey, provenance_task: opts.provenanceTask });
-    const hL = sink.add("hypothesis", { statement: legitStmt, source_evidence: refs, ts: new Date().toISOString(), subject_key: skey, provenance_task: opts.provenanceTask });
-    // counterexamples refute a NAMED hypothesis — carried as the store's own `counterexample` kind.
-    const ceOf = [];
-    if (e2.state === "evaluated" && e2.named.length) ceOf.push({ of: hD.statement, ev: e2r.ref, why: `comment block above the literal names ${e2.named.join(",")}` });
-    if (e3.state === "evaluated" && e3.hits.length) ceOf.push({ of: hD.statement, ev: e3r.ref, why: `test(s) import the literal's module and pin the symbol: ${e3.hits.slice(0, 3).join(",")}` });
-    if (e1.state === "stale") ceOf.push({ of: hL.statement, ev: e1r.ref, why: "the literal was last changed before the authority gained the missing value(s)" });
-    for (const ce of ceOf) sink.add("counterexample", { counterexample_of: ce.of, source_evidence: [ce.ev], ts: new Date().toISOString(), subject_key: skey, provenance_task: opts.provenanceTask, why: ce.why });
-    const exp = sink.add("experiment", { hypothesis_ref: hD.statement, method: "pre-registered rule E1∧¬E2∧¬E3 ⇒ drift; (E2∨E3)∧¬stale ⇒ legit", budget: { git_calls_cap: 4000 }, ts: new Date().toISOString(), subject_key: skey, provenance_task: opts.provenanceTask });
-    sink.add("outcome", { experiment_ref: exp.hypothesis_ref, verdict: RULE_TO_STORE_VERDICT[rule], rule_verdict: rule, ts: new Date().toISOString(), subject_key: skey, provenance_task: opts.provenanceTask });
-
-    // post state at the POST rev
-    let postState = "not-applicable";
-    if (c.registered) {
-      const ps = postRes.surfaces.find((s) => s.surface === c.id);
-      postState = !ps ? "surface-unregistered" : ps.occurrences.some((o) => c.missing.some((v) => o.missing.includes(v))) ? "persisting" : "resolved";
-    } else {
-      const pd = postRes.discovered.find((d) => d.file === c.file && JSON.stringify(d.values) === JSON.stringify(c.values));
-      postState = pd ? "persisting" : "changed-or-gone";
-    }
-    results.push({ id: c.id, file: c.file, line, authority: c.authority, missing: c.missing, E1: e1.state, E2: e2.state === "evaluated" ? e2.named : e2.state, E3: e3.state === "evaluated" ? e3.hits.length : e3.state, E3_by_bare_name: e3name.state === "evaluated" ? e3name.hits.length : e3name.state, symbol: sym, verdict: rule, post: postState, subject_key: skey });
+    if (budget) budget.checkTime();
+    results.push(analyzeCandidate({ c, git, chk: preChk, preRes, postRes, preSha, preDir, authSpec, authFirstCache, testFiles, sink, provenanceTask: opts.provenanceTask, e3Mode: opts.e3Mode }));
   }
 
-  // ── scoring: labels are read ONLY now ──
   const labels = opts.labels ? JSON.parse(fs.readFileSync(opts.labels, "utf8")) : DEFAULT_LABELS;
-  const score = { e3_mode: opts.e3Mode, tp: [], fp: [], fn: [], tn: [], undetermined_on_labelled: [], unlabelled: [] };
-  for (const r of results) {
-    const lab = labels[r.id];
-    if (!lab) { score.unlabelled.push(`${r.id}=${r.verdict}`); continue; }
-    if (r.verdict === RULE_UNDETERMINED) { score.undetermined_on_labelled.push(`${r.id} (label ${lab})`); continue; }
-    const predDrift = r.verdict === RULE_DRIFT;
-    if (lab === "drift") (predDrift ? score.tp : score.fn).push(r.id);
-    else (predDrift ? score.fp : score.tn).push(r.id);
-  }
-
-  // ── the dependency task's CARRIER, grounded on a real line of its task file ──
-  const provFile = `tasks/${opts.provenanceTask}.md`;
-  let provLine = null, provText = "";
-  try {
-    provText = fs.readFileSync(path.join(root, provFile), "utf8").split("\n");
-    const i = provText.findIndex((l) => /^## /.test(l));
-    provLine = (i >= 0 ? i : 0) + 1;
-  } catch { provLine = null; }
-  if (provLine) {
-    sink.add("evidence", carrierEvidence("dependency-task-carrier", provFile, provLine, provText[provLine - 1], { provenance_task: opts.provenanceTask, reading: { why: "the task that supplied this instrument's record kinds/verdicts/provenance form" } }));
-  }
+  const score = scoreResults(results, { labels, e3Mode: opts.e3Mode });
+  addProvenanceCarrier({ root, sink, provenanceTask: opts.provenanceTask });
 
   // ── A3: time-semantics controls ──
-  const a3 = runA3({ root, git, rev: postSha, sink, provenanceTask: opts.provenanceTask });
+  const a3 = runA3({ root, git, rev: postSha, sink, provenanceTask: opts.provenanceTask, budget });
 
   const cost = { wall_ms: Date.now() - t0, git_calls: state.calls, candidates: cands.length };
+  assignFindingFps(sink.rows);
   if (!opts.keep) fs.rmSync(tmp, { recursive: true, force: true });
-  return { tool: TOOL, pre: preSha, post: postSha, cost, results, score, a3, validator: sink.validator, sink };
+  return { tool: TOOL, mode: "experiment", pre: preSha, post: postSha, cost, results, score, a3, validator: sink.validator, sink };
+}
+
+/** SCAN mode (`--scan`): score ONE rev (default HEAD) with NO labels. This is the periodic reading —
+ *  there is no pre/post pair to compare and no human ruling to score against, so every candidate lands
+ *  in `score.unlabelled`. The candidate SET comes from the checker as shipped in THIS instrument's own
+ *  checkout (scan asks "what does the current checker say about this tree"), while the analysed tree is
+ *  materialised at `--rev` — the two coincide on the default real-data run (`--root` = this repo, HEAD).
+ *  A3 is NOT run here: it is a one-off time-semantics control from experiment A3, not a per-scan finding. */
+export async function runSpaceScan(opts) {
+  const { root } = opts;
+  if (!["import", "name"].includes(opts.e3Mode)) throw new Error(`--e3-mode must be import|name, got ${opts.e3Mode}`);
+  const budget = opts.budget ?? null;
+  if (budget) budget.checkTime();
+  const { git, state } = makeGit(root);
+  const rev = git(["rev-parse", opts.rev || "HEAD"]).trim();
+  const t0 = Date.now();
+
+  const chk = await import(pathToFileURL(path.join(HERE, "..", "..", "plugin/scripts/enum-surface-parity-check.ts")).href);
+  const registry = opts.registry ? JSON.parse(fs.readFileSync(opts.registry, "utf8")) : chk.DEFAULT_REGISTRY;
+  // ⛔ An empty registry is NOT a pass — it means nothing was evaluated (硬规则 3b).
+  if (!Array.isArray(registry.authorities) || registry.authorities.length === 0) throw new Error("registry has no authorities — nothing would be evaluated");
+
+  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "arch-discovery-scan-"));
+  const dir = path.join(tmp, "tree");
+  const registryPaths = [...registry.authorities, ...(registry.surfaces || [])].map((x) => x && x.file).filter(Boolean);
+  materialize(Object.assign(git, { root }), rev, dir, registryPaths);
+  const res = chk.runCheck({ root: dir, registry });
+  const authVals = Object.fromEntries(res.authorities.map((a) => [a.id, a.values]));
+  const { cands, authSpec } = buildCandidates(registry, res, authVals);
+  if (budget) budget.countCandidates(cands.length);
+
+  const testFiles = readTestFiles(git, rev, dir);
+  const sink = new Sink(budget);
+  const authFirstCache = {};
+  const results = [];
+  for (const c of cands) {
+    if (budget) budget.checkTime();
+    // pre === post === rev, so the same checker result answers both "found now" and "still there".
+    results.push(analyzeCandidate({ c, git, chk, preRes: res, postRes: res, preSha: rev, preDir: dir, authSpec, authFirstCache, testFiles, sink, provenanceTask: opts.provenanceTask, e3Mode: opts.e3Mode }));
+  }
+
+  const score = scoreResults(results, { labels: {}, e3Mode: opts.e3Mode });   // no labels in scan mode
+  addProvenanceCarrier({ root, sink, provenanceTask: opts.provenanceTask });
+
+  const cost = { wall_ms: Date.now() - t0, git_calls: state.calls, candidates: cands.length };
+  assignFindingFps(sink.rows);
+  if (!opts.keep) fs.rmSync(tmp, { recursive: true, force: true });
+  return {
+    tool: TOOL, mode: "scan", rev, cost, results, score,
+    a3: { skipped: true, reason: "A3 is a one-off time-semantics control from experiment A3; a periodic scan scores the candidate set only" },
+    validator: sink.validator, sink,
+  };
 }
 
 /** Experiment A3 — two time readings of the same fact. Naive = commit offset dropped; aware = offset honoured. */
-export function runA3({ root, git, rev, sink, provenanceTask }) {
+export function runA3({ root, git, rev, sink, provenanceTask, budget = null }) {
   const q = (a, p) => { const s = [...a].sort((x, y) => x - y); return s.length ? s[Math.min(s.length - 1, Math.floor(p * s.length))] : null; };
-  const readJsonl = (file, pred = () => true) => {
-    let malformed = 0; const rows = [];
-    let lines; try { lines = fs.readFileSync(file, "utf8").split("\n"); } catch { return { rows, malformed: 0 }; }
-    lines.forEach((line, i) => { if (!line.trim()) return; let r; try { r = JSON.parse(line); } catch { malformed++; return; } if (pred(r)) rows.push({ line: i + 1, raw: line, r }); });
-    return { rows, malformed };
-  };
+  // `.quay/gate-events.jsonl` is 144 MB: streaming keeps the run at O(chunk) memory and lets
+  // `--max-ms` interrupt the read (a whole-file readSync cannot be interrupted at all).
+  const readJsonl = (file, pred = () => true) => streamJsonl(file, pred, { budget });
   // A3a
   const flips = git(["log", rev, "--format=%H\t%cI\t%s", "--grep=^tasks: 翻 .* done"]).split("\n").filter(Boolean).map((l) => {
     const [h, ci, s] = l.split("\t"); const m = /^tasks: 翻 (\S+) done/.exec(s); return m ? { h, ci, task: m[1] } : null;
@@ -426,21 +639,42 @@ export function runA3({ root, git, rev, sink, provenanceTask }) {
 }
 
 // ── CLI ─────────────────────────────────────────────────────────────────────────────────────────────
+/** Default output carrier when `--out` is absent: under `.quay/`, and covered by the
+ *  `.quay/arch-discovery-shadow/` ignore rule in `.gitignore` (a default run must not leave
+ *  untracked files in the shared checkout). */
+export const DEFAULT_OUT = ".quay/arch-discovery-shadow/space-records.jsonl";
+export const defaultOut = (root) => path.join(root, DEFAULT_OUT);
+
 export async function cli(argv = process.argv.slice(2)) {
   const opts = parseArgs(argv);
-  const out = await runSpace(opts);
-  const outFile = opts.out ?? path.join(opts.root, ".quay/arch-discovery-shadow/space-records.jsonl");
+  const budget = makeBudget({ maxMs: opts.maxMs, maxRecords: opts.maxRecords, maxCandidates: opts.maxCandidates });
+  const outFile = opts.out ?? defaultOut(opts.root);
+  let out;
+  try {
+    out = opts.scan ? await runSpaceScan({ ...opts, budget }) : await runSpace({ ...opts, budget });
+  } catch (e) {
+    if (e instanceof BoundExceeded) { console.error(`${TOOL}: ${e.message} — nothing written to ${outFile}`); return e.exitCode; }
+    throw e;
+  }
   out.sink.write(outFile);
   const { sink, ...rest } = out;
   const report = { ...rest, out: outFile };
   if (opts.json) { console.log(JSON.stringify(report, null, 1)); return 0; }
-  console.log(`arch-discovery-space: pre=${out.pre.slice(0, 9)} post=${out.post.slice(0, 9)} candidates=${out.cost.candidates} git_calls=${out.cost.git_calls} wall_ms=${out.cost.wall_ms} e3_mode=${out.score.e3_mode}`);
+  const head = out.mode === "scan"
+    ? `arch-discovery-space: SCAN rev=${out.rev.slice(0, 9)}`
+    : `arch-discovery-space: pre=${out.pre.slice(0, 9)} post=${out.post.slice(0, 9)}`;
+  console.log(`${head} candidates=${out.cost.candidates} git_calls=${out.cost.git_calls} wall_ms=${out.cost.wall_ms} e3_mode=${out.score.e3_mode}`);
   console.log("verdict           post            E1             E2                    E3=fix/name  candidate");
   for (const r of out.results) console.log(`${r.verdict.padEnd(17)} ${String(r.post).padEnd(15)} ${String(r.E1).padEnd(14)} ${JSON.stringify(r.E2).padEnd(21)} ${`${r.E3}/${r.E3_by_bare_name}`.padEnd(12)} ${r.id}`);
   const s = out.score;
   console.log(`\n[e3_mode=${s.e3_mode}] TP=${s.tp.length} FP=${s.fp.length} FN=${s.fn.length} TN=${s.tn.length} abstains-on-labelled=${s.undetermined_on_labelled.length} unlabelled=${s.unlabelled.length}`);
-  console.log(`A3a ${out.a3.a3a.verdict}: flips=${out.a3.a3a.flips} paired=${out.a3.a3a.paired} naive_median_h=${out.a3.a3a.naive_median_h} aware_median_h=${out.a3.a3a.aware_median_h}`);
-  console.log(`A3b ${out.a3.a3b.verdict}: paired=${out.a3.a3b.paired} p90_s=${out.a3.a3b.p90_s}`);
+  const fps = new Set(sink.rows.filter((r) => r.finding_fp).map((r) => r.finding_fp));
+  console.log(`finding_fp: ${fps.size} distinct over ${sink.rows.filter((r) => r.finding_fp).length} outcome/counterexample rows`);
+  if (out.a3.skipped) console.log(`A3 not-applicable: ${out.a3.reason}`);
+  else {
+    console.log(`A3a ${out.a3.a3a.verdict}: flips=${out.a3.a3a.flips} paired=${out.a3.a3a.paired} naive_median_h=${out.a3.a3a.naive_median_h} aware_median_h=${out.a3.a3a.aware_median_h}`);
+    console.log(`A3b ${out.a3.a3b.verdict}: paired=${out.a3.a3b.paired} p90_s=${out.a3.a3b.p90_s}`);
+  }
   console.log(`records → ${outFile}  validator: accepted=${sink.validator.accepted} refused=${sink.validator.refused} ${JSON.stringify(sink.validator.reasons)}`);
   return 0;
 }
