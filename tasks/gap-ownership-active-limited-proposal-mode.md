@@ -3,7 +3,7 @@ id: gap-ownership-active-limited-proposal-mode
 title: "ownership-active investigation loop: limited-proposal mode — one new
   call site that may create exactly one draft Goal (never activates), gated by
   the phase A+B entry bar (phase C of end-to-end architecture self-bootstrap)"
-status: todo
+status: ready
 labels:
   - gap
 parent: null
