@@ -1871,3 +1871,118 @@ test("GOAL-029⑥: init --dry-run on an existing config reports the plan and wri
   assert.match(out, /Dry run — nothing written/, "and it says so");
   assert.equal(fs.readFileSync(cfgPath, "utf8"), before, "dry-run must not write the config");
 });
+
+// ---------------------------------------------------------------------------
+// gap-init-branch-model-runs-before-auto-commit-fresh-repo-needs-two-runs
+//
+// The branch model is judged BEFORE the auto-commit — load-bearing, because it must precede the
+// config WRITE (a refused project keeps its tree untouched), and the retired shell entry had the
+// same order (`ensure_target_branch_model` then `auto_commit_laid_down`). But on a repository with
+// ZERO commits the auto-commit is also the event that brings the model's entire INPUT into
+// existence, so a single init could not converge: run 1 printed `branch model: SKIPPED` +
+// `[NOT-EVALUATED] doc-branch`, then committed; run 2 created the doc branch and silently switched
+// the user's working branch. These tests pin the converged behaviour and the fallback signal.
+// ---------------------------------------------------------------------------
+
+/** A git repo with N commits and a detectable test command — the fresh-repo fixtures' base. */
+function freshGitRepo(tag, branch, { commit = false } = {}) {
+  const dir = tmpDir(tag);
+  const g = (...args) => execFileSync("git", ["-C", dir, ...args], { encoding: "utf8" }).trim();
+  g("init", "-q", "-b", branch);
+  g("config", "user.name", "init-test");
+  g("config", "user.email", "init@example.com");
+  if (commit) {
+    fs.writeFileSync(path.join(dir, "a.txt"), "1\n");
+    g("add", "-A");
+    g("commit", "-q", "-m", "base");
+  }
+  return { dir, g };
+}
+
+test("AC1 (unborn repo): ONE init converges — the branch model ends DECIDED, never SKIPPED-with-no-hint", () => {
+  const { dir, g } = freshGitRepo("unborn-decided", "develop");
+  // Precondition, not assumption: the repository really has zero commits as init starts.
+  assert.throws(() => g("rev-parse", "--verify", "HEAD"), /./, "fixture: HEAD must be unborn");
+
+  const out = runQuayAllowFail(["init", "--root", dir, "--auto-commit-confirm"], dir);
+  assert.equal(out.exitCode, 0, `one init must converge:\n${out.stdout}${out.stderr}`);
+  // ⛔ The defect: this exact line, with no verdict following it, used to be all run 1 produced.
+  assert.doesNotMatch(out.stdout, /branch model: SKIPPED/, `the model must be JUDGED in the same run:\n${out.stdout}`);
+  assert.match(out.stdout, /branch model \(default branch: develop\)/, "a real verdict header is present");
+  assert.match(out.stdout, /\[REUSED\] landing-baseline -> develop/, "…and the landing baseline is decided");
+  // …and the convergence is real, not only textual: the auto-commit's commit is what made it decidable.
+  assert.equal(g("rev-list", "--count", "HEAD"), "1", "the auto-commit created the first commit");
+  assert.equal(g("rev-parse", "--abbrev-ref", "HEAD"), "author", "and the doc branch was established in the SAME run");
+});
+
+test("AC1 (negative control): with NO commit created, the verdict stays WITHHELD and carries an explicit needs-rerun signal", () => {
+  // ⛔ The other half of AC1 — and the arm that keeps the fix honest. `--auto-commit-skip` leaves the
+  // repository exactly as unborn as it started, so no second judgment can decide anything. The state
+  // must keep its own NOT-EVALUATED shape (hard rule 3b) and must NAME the remedy: "SKIPPED" alone is
+  // the reading this task exists to delete.
+  const { dir, g } = freshGitRepo("unborn-skipped", "develop");
+  const out = runQuayAllowFail(["init", "--root", dir, "--auto-commit-skip"], dir);
+  assert.equal(out.exitCode, 0, `a commit-less repo is not a failure:\n${out.stdout}${out.stderr}`);
+  assert.match(out.stdout, /branch model: SKIPPED/, "still honestly skipped — nothing could be judged");
+  assert.match(out.stdout, /\[NOT-EVALUATED\] branch-model -> develop/, "…and it is NOT dressed as a verdict");
+  assert.match(out.stdout, /re-run `quay init` once the repository has a first commit/, "the remedy is named");
+  assert.throws(() => g("rev-parse", "--verify", "HEAD"), /./, "negative control: no commit was created");
+});
+
+test("AC2: when init switches the main checkout, the summary names BOTH branches", () => {
+  const { dir, g } = freshGitRepo("switch-named", "main");
+  // ⛔ `symbolic-ref`, not `rev-parse --abbrev-ref`: on an UNBORN HEAD `rev-parse` fails outright
+  // (status 128, "ambiguous argument 'HEAD'"), so a fixture that read it that way could only ever be
+  // written for an already-committed repo — which is the one shape this task is NOT about.
+  const before = g("symbolic-ref", "--short", "HEAD");
+
+  const out = runQuayAllowFail(["init", "--root", dir, "--auto-commit-confirm"], dir);
+  assert.equal(out.exitCode, 0, `${out.stdout}${out.stderr}`);
+  const after = g("rev-parse", "--abbrev-ref", "HEAD");
+  assert.notEqual(after, before, "fixture: this run DOES move the working copy (else the test proves nothing)");
+
+  // A `git init -b main` repo is moved TWICE, by two different steps — and each step names its OWN
+  // move, which is what lets an operator trace `main -> develop -> author`. Asserting only the second
+  // would let the handoff line rot away unnoticed.
+  assert.match(out.stdout, /landing-baseline checkout \(from: main, to: develop\)/, "the handoff names its move");
+  // ⛔ Read the two names OUT of the summary line and check them against git itself — a test that
+  // grepped for a literal `/develop -> author/` would pass even if the line named the wrong branches.
+  const m = out.stdout.match(/^\s*main checkout: (\S+) -> (\S+) \(this working copy was switched\)$/m);
+  assert.ok(m, `the summary must name the move as its own line:\n${out.stdout}`);
+  assert.equal(m[1], "develop", "…the branch the checkout was on (the handoff moved it there first)");
+  assert.equal(m[2], after, "…and the branch git says it is on NOW");
+});
+
+test("AC2 (negative control): a run that moves nothing prints no main-checkout line", () => {
+  // A checkout that is ALREADY off the landing baseline — the doc-branch judgment's `independent`
+  // arm, the state every converged project sits in. Nothing moves, so no line may claim otherwise.
+  const { dir, g } = freshGitRepo("switch-none", "develop", { commit: true });
+  g("checkout", "-q", "-b", "author");
+  const out = runQuayAllowFail(["init", "--root", dir, "--auto-commit-skip"], dir);
+  assert.match(out.stdout, /\[NOOP\] doc-branch/, `fixture: this run's doc-branch judgment is a no-op:\n${out.stdout}`);
+  assert.doesNotMatch(out.stdout, /main checkout: /, "⇒ no move line may be claimed");
+  assert.equal(g("symbolic-ref", "--short", "HEAD"), "author", "and the checkout really did not move");
+});
+
+test("AC3: re-running init on the converged repo changes NOTHING (idempotent)", () => {
+  const { dir, g } = freshGitRepo("converged-idempotent", "develop");
+  const first = runQuayAllowFail(["init", "--root", dir, "--auto-commit-confirm"], dir);
+  assert.match(first.stdout, /\[CREATED\] doc-branch -> author/, `fixture: run 1 converges:\n${first.stdout}`);
+
+  const cfgPath = path.join(dir, ".quay", "config.yml");
+  const before = {
+    head: g("rev-parse", "--abbrev-ref", "HEAD"),
+    branches: g("branch", "-a"),
+    sha: g("rev-parse", "HEAD"),
+    config: fs.readFileSync(cfgPath, "utf8"),
+  };
+
+  const second = runQuayAllowFail(["init", "--root", dir, "--auto-commit-confirm"], dir);
+  assert.equal(second.exitCode, 0, `a re-run must stay clean:\n${second.stdout}${second.stderr}`);
+  assert.match(second.stdout, /\[NOOP\] doc-branch -> author/, "the doc-branch judgment is a no-op");
+  assert.doesNotMatch(second.stdout, /branch model: SKIPPED/, "and the model is judged, not skipped again");
+  assert.equal(g("rev-parse", "--abbrev-ref", "HEAD"), before.head, "HEAD is where run 1 left it");
+  assert.equal(g("branch", "-a"), before.branches, "no branch was created, moved or removed");
+  assert.equal(g("rev-parse", "HEAD"), before.sha, "and no new commit appeared");
+  assert.equal(fs.readFileSync(cfgPath, "utf8"), before.config, "the config is byte-identical");
+});
