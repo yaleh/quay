@@ -33,7 +33,7 @@ So the mechanism is implemented and its tests are green, but it has never run in
 - [ ] `grep -n rerun_command .quay/config.yml` in the main checkout shows the declared argv template. A task worktree created after landing shows the same key.
 - [ ] Dry run: run the declared command, with `{files}` substituted, on one known-green test file. It exits 0. On a temporary copy of that file with one assertion flipped, it exits non-zero. Paste both outputs.
 - [ ] A count of the 16 `no-failing-lines-in-suite-log` records, each with task id and ts, plus a one-line finding per record, or a grouped finding with the first 3 samples.
-- [ ] Production carrier (counts only records with ts after this task lands): at least 1 `worker-outcome.jsonl` record has `mechanical_fan_in.rerun.state` in {`rerun-green`, `rerun-red`}. If no suite red occurs in the window, leave this AC unticked and write "未读到" (not read), not "satisfied".
+- [ ] Production carrier (counts only records with ts after this task lands): at least 1 `worker-outcome.jsonl` record has `mechanical_fan_in.rerun.state` in {`rerun-green`, `rerun-red`}. If no suite red occurs in the window, leave this AC unticked and write "未读到" (not read), not "satisfied". （待外部）
 
 ## Definition of Done
 - AC1–AC3 ticked with output pasted.
