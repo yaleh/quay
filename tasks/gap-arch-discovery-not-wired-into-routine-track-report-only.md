@@ -182,3 +182,13 @@ I mapped the existing discovery paths on 2026-10-11. Findings, with file:line:
 - plugin/scripts/capability-catalog-declarations.json
 - .gitignore
 - .quay/config.yml
+
+## Blocker
+
+**2026-10-11T15:29:36.342Z — worker 未落地（exited-not-landed）**
+
+- 未落地原因：step=merge-develop: Auto-merging .gitignore
+CONFLICT (content): Merge conflict in .gitignore
+Automatic merge failed; fix conflicts and then commit the result.
+- run_id：wk-prod-anchor
+- session_id：34afca92-1eaf-407d-b5be-2e722adf1e93
