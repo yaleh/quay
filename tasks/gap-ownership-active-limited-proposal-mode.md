@@ -59,3 +59,11 @@ depends_on:
 ## DoD
 
 `docs/analysis/architecture-evidence-store-limited-proposal-report.md` 提交,记录 AC5 的真实 dry-run 结果。若该轮确实产出了一个 draft Goal,报告里必须含该 Goal 的完整正文、预测 delta、可逆性评估,且该 Goal 在任务落地时仍是 `draft`(未被本任务或任何自动机制转为 `active`)——这是人工审批前的唯一合法终态。⛔ 本任务不激活任何 Goal,不开任何 goal branch,不执行任何重构代码改动;"是否批准该 draft 转 active"留给人在报告产出后单独裁定。全部新增测试绿。
+
+## Blocker
+
+**2026-10-11T03:45:30.197Z — worker 未落地（exited-not-landed）**
+
+- 未落地原因：step=suite: __PERFILE__ duration_ms=39764 /data/home/yale/work/quay-worktrees/gap-ownership-active-limited-proposal-mode/packages/quay/test/cli.test.mjs passed=false end_ms=1791690220868 cpu_ms=19096.819 mem_peak_kb=115428
+- run_id：wk-prod-anchor
+- session_id：dacf3a6f-c6de-45e4-ad19-dce3d3df30c7
