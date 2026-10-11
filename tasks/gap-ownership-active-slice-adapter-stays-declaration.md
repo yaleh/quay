@@ -20,6 +20,8 @@ extra:
 
 **⚠️ 2026-10-11 第二次补入(liaison 指出 AC10 的前向兼容陷阱,立案后、落地前)**：AC10 最初写成"断言能检测到误标"——这个措辞的自然实现会去断言"真实原语确实把无关边标错了",**把测试焊死在 archguard 当前这个 bug 的存在上**。一旦 liaison 那边的 `gap-slice-delta-reconciliation-scope-name-global` 落地修复,这个断言会从绿变红,看起来像本任务的回归,其实什么都没坏。**已拆成两半(见下方 AC10a/AC10b)**:检测器逻辑本身用构造的合成数据断言(永远绿,不依赖原语当前行为);真实候选跑真实原语只做**读数记录**,不做断言(今天读到"有额外边"、以后读到"没有额外边"都是合法读数,不能让后者红了整个 suite)。
 
+**⚠️ 2026-10-11 第三次补入（落地 worker 实测，非理论）——标题与提案的"已发布 archguard 0.1.39"前提不成立**：`proposedCut.stays` 只存在于 archguard **源码** worktree，**不在已发布的 `@yalehwang/archguard@0.1.39` artifact 里**。证据：`npm pack @yalehwang/archguard@0.1.39` 解包后 `dist/analysis/slice-delta/simulate.js` 是 **426 行、`stays` 出现 0 次**；而 release 提交（`954fd7f4`，2026-10-10 13:11 +0800）之后约 5 小时，`ac525558`/`e3c77aef`（18:18/18:24）才把该子句落进源码，且 `package.json` 仍是 `0.1.39`（未发版的 working state）。**后果**：`resolveArchguardCli()` 默认解析到的那个 CLI 会**忽略**本任务发出的 `stays`，两个真实候选在**生产默认路径上仍然 `not-evaluated`**（实测：拒绝文本与 carrier 记录 75/76 逐字一致）——本任务的改动是**正确、前向兼容、零副作用**的，但在 archguard 发布含 `stays` 的版本之前是**惰性的**。适配器现在把这份惰性**报出来**（`stays_declared` + `stays_ignored_by_tool: true`，硬规则 3b：不伪装成通过），而不是让它静默。AC1/AC2/AC3/AC4 的读数因此由**带 `stays` 子句的 0.1.39 构建**取得并逐字记录在 `docs/analysis/ownership-active-slice-adapter-stays-replay.md` §1/§4；在只有已发布 artifact 的宿主上这四个测试**显式 skip 并写明原因**（不静默变绿）。另：AC10b 实测确认 liaison 的全图误移除反例**与 `stays` 同批到达**（已发布构建不复现、含子句构建复现 `"" -> Y` 被误标），两个真实候选**未触发**该反例（`unexpected=[]`，已核对）。—— 本任务不改任何 archguard 代码：让 `stays` 可用的那一步是 archguard 发版，不是本任务。
+
 ## Proposal
 
 修改 `docs/analysis/ownership-active-slice-adapter.mjs`:在构造 `simulateRefactorSlice` 请求时,对每条进入"被搬出目录"(moved-from dir)但**只有部分**导入名被移动集覆盖的边,计算未覆盖名的补集,按 archguard 的真实契约(「Quay refactor architecture liaison」2026-10-11 直接读 `types.ts`+`simulate.ts` 给出,逐字记录):
@@ -51,21 +53,22 @@ extra:
 - docs/analysis/ownership-active-slice-adapter.mjs
 - docs/analysis/ownership-active-slice-adapter-stays-replay.md
 - plugin/test/ownership-active-slice-adapter.test.mjs
+- plugin/fixtures/ownership-active-slice/locked-tree-00467d64.arch.json
 - tasks/gap-ownership-active-slice-adapter-stays-declaration.md
 
 ## AC
 
-- [ ] AC1 真实候选①可计算:`cli -> gate/config`(未覆盖 `resolveRunnerOptions`)在锁定的原始 `ref_commit`/`scope_root` 下,补 `stays` 后 `status` 不再是 `not-evaluated`,`removedEdges` 不含该边,`accounting` 该边条目为 `survives:true, staying:["resolveRunnerOptions"], unaccounted:[]`。
-- [ ] AC2 真实候选②可计算:`gate -> gate/config`(4 个未覆盖符号)同上模式验证,4 个符号全部出现在 `staying`,`unaccounted:[]`。
-- [ ] AC3 负对照①:漏放一个真实未覆盖名,该边仍 `unaccounted` 非空或仍 `not-evaluated`,不是伪造通过。
-- [ ] AC4 名字全局匹配的诚实断言:构造同名符号跨目录的 fixture,测试断言钉在目标边自己的 `accounting` 条目,不是整体 `status`;报告如实记录该原语特性。
-- [ ] AC5 跨目录冲突降级:同一符号名同时是两个不同被搬出目录的未覆盖名时,模块不发出冲突 `stays` 声明,结果诚实保持 `not-evaluated`。
-- [ ] AC6 不凭空造符号:每个产出的 `stays` 符号都能在输入边真实 `importedNames` 里找到来源。
-- [ ] AC7 moved/stayed 互斥:`stays` 符号集合与 `moves[].symbols` 永不相交。
-- [ ] AC8 真实落地复跑:两个真实候选的 before/after 读数写入 `docs/analysis/ownership-active-slice-adapter-stays-replay.md`。
-- [ ] AC9 全量回归绿:`bash scripts/test.sh --for-task gap-ownership-active-slice-adapter-stays-declaration` exit 0。
-- [ ] AC10a 额外边检测器(合成数据单测,永远绿,不依赖 archguard 当前行为):构造一份含一条期望+一条额外的 `removedEdges`,断言检测器正确识别出额外条目。
-- [ ] AC10b 真实候选额外边读数(记录,不设 pass/fail 门槛):两个真实候选重跑后把检测器应用在真实 `removedEdges` 上,读数原样写入报告;liaison 修复 `gap-slice-delta-reconciliation-scope-name-global` 落地前后这里的读数预期会变,变化本身合法,不作为回归信号。
+- [x] AC1 真实候选①可计算:`cli -> gate/config`(未覆盖 `resolveRunnerOptions`)在锁定的原始 `ref_commit`/`scope_root` 下,补 `stays` 后 `status` 不再是 `not-evaluated`,`removedEdges` 不含该边,`accounting` 该边条目为 `survives:true, staying:["resolveRunnerOptions"], unaccounted:[]`。
+- [x] AC2 真实候选②可计算:`gate -> gate/config`(4 个未覆盖符号)同上模式验证,4 个符号全部出现在 `staying`,`unaccounted:[]`。
+- [x] AC3 负对照①:漏放一个真实未覆盖名,该边仍 `unaccounted` 非空或仍 `not-evaluated`,不是伪造通过。
+- [x] AC4 名字全局匹配的诚实断言:构造同名符号跨目录的 fixture,测试断言钉在目标边自己的 `accounting` 条目,不是整体 `status`;报告如实记录该原语特性。
+- [x] AC5 跨目录冲突降级:同一符号名同时是两个不同被搬出目录的未覆盖名时,模块不发出冲突 `stays` 声明,结果诚实保持 `not-evaluated`。
+- [x] AC6 不凭空造符号:每个产出的 `stays` 符号都能在输入边真实 `importedNames` 里找到来源。
+- [x] AC7 moved/stayed 互斥:`stays` 符号集合与 `moves[].symbols` 永不相交。
+- [x] AC8 真实落地复跑:两个真实候选的 before/after 读数写入 `docs/analysis/ownership-active-slice-adapter-stays-replay.md`。
+- [x] AC9 全量回归绿:`bash scripts/test.sh --for-task gap-ownership-active-slice-adapter-stays-declaration` exit 0。
+- [x] AC10a 额外边检测器(合成数据单测,永远绿,不依赖 archguard 当前行为):构造一份含一条期望+一条额外的 `removedEdges`,断言检测器正确识别出额外条目。
+- [x] AC10b 真实候选额外边读数(记录,不设 pass/fail 门槛):两个真实候选重跑后把检测器应用在真实 `removedEdges` 上,读数原样写入报告;liaison 修复 `gap-slice-delta-reconciliation-scope-name-global` 落地前后这里的读数预期会变,变化本身合法,不作为回归信号。
 
 ## DoD
 
