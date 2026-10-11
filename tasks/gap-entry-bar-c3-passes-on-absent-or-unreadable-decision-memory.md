@@ -30,11 +30,11 @@ extra:
 
 ## AC
 
-- [ ] AC1 `decisionMemoryStatus`:`decision_memory` 缺席 ⇒ 返回一个非 `not-known` 的独立值(如 `"not-evaluated"`);`decision_memory.unreadable_input === true` ⇒ 同样返回 `"not-evaluated"`;二者都经条件 3 既有的 `CONDITION_3_UNDETERMINED` 分支失败关闭,`reason` 点名是"缺席"还是"不可读"。
-- [ ] AC2 负对照:一条其余条件全满足、仅 `decision_memory` 缺席的合成生产记录 ⇒ `eligible:false` 且 `reason` 以 `CONDITION_3_UNDETERMINED` 开头;同一条记录把 `decision_memory` 改为 `{status:"not-known", unreadable_input:true}` ⇒ 同样不合格;改为 `{status:"not-known", unreadable_input:false}` ⇒ 条件 3 通过(正对照,证明不是一律拒绝)。
-- [ ] AC3 CLI 读 carrier 时统计并输出 `malformed_lines`;`malformed_lines > 0` 时,所有候选的 `eligible` 一律为 `false`,`reason` 点名坏行数(无法把坏行归属到候选,streak 输入不可信 ⇒ 失败关闭);`--write` 在此情形下不写任何 Goal。负对照:在临时 carrier 副本末尾追加一行非 JSON,原本合格的合成候选变为不合格。
-- [ ] AC4 生产读数(记录,不设门槛):对生产 carrier 跑一次 dry-run,报告中写明修复前后各候选 `reason` 的变化(预期:原先只因条件 2 失败的记录,修复后条件 3 读数变为 UNDETERMINED/缺席——但首个失败条件仍按既有顺序报告,不改条件求值顺序)、`malformed_lines` 读数。
-- [ ] AC5 门限只收紧不放宽:streak=3、条件 1/2/4 判据、只写 `draft`、绝不激活均不改;既有 `plugin/test/ownership-active-limited-proposal.test.mjs` 全绿(若某既有测试依赖"缺席 ⇒ not-known"的旧读法,显式更新并在提交说明里列出);`bash scripts/test.sh --for-task gap-entry-bar-c3-passes-on-absent-or-unreadable-decision-memory` exit 0。
+- [x] AC1 `decisionMemoryStatus`:`decision_memory` 缺席 ⇒ 返回一个非 `not-known` 的独立值(如 `"not-evaluated"`);`decision_memory.unreadable_input === true` ⇒ 同样返回 `"not-evaluated"`;二者都经条件 3 既有的 `CONDITION_3_UNDETERMINED` 分支失败关闭,`reason` 点名是"缺席"还是"不可读"。
+- [x] AC2 负对照:一条其余条件全满足、仅 `decision_memory` 缺席的合成生产记录 ⇒ `eligible:false` 且 `reason` 以 `CONDITION_3_UNDETERMINED` 开头;同一条记录把 `decision_memory` 改为 `{status:"not-known", unreadable_input:true}` ⇒ 同样不合格;改为 `{status:"not-known", unreadable_input:false}` ⇒ 条件 3 通过(正对照,证明不是一律拒绝)。
+- [x] AC3 CLI 读 carrier 时统计并输出 `malformed_lines`;`malformed_lines > 0` 时,所有候选的 `eligible` 一律为 `false`,`reason` 点名坏行数(无法把坏行归属到候选,streak 输入不可信 ⇒ 失败关闭);`--write` 在此情形下不写任何 Goal。负对照:在临时 carrier 副本末尾追加一行非 JSON,原本合格的合成候选变为不合格。
+- [x] AC4 生产读数(记录,不设门槛):对生产 carrier 跑一次 dry-run,报告中写明修复前后各候选 `reason` 的变化(预期:原先只因条件 2 失败的记录,修复后条件 3 读数变为 UNDETERMINED/缺席——但首个失败条件仍按既有顺序报告,不改条件求值顺序)、`malformed_lines` 读数。
+- [x] AC5 门限只收紧不放宽:streak=3、条件 1/2/4 判据、只写 `draft`、绝不激活均不改;既有 `plugin/test/ownership-active-limited-proposal.test.mjs` 全绿(若某既有测试依赖"缺席 ⇒ not-known"的旧读法,显式更新并在提交说明里列出);`bash scripts/test.sh --for-task gap-entry-bar-c3-passes-on-absent-or-unreadable-decision-memory` exit 0。
 
 ## DoD
 
