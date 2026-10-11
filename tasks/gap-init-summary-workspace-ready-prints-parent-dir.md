@@ -2,7 +2,7 @@
 id: gap-init-summary-workspace-ready-prints-parent-dir
 title: quay init summary prints 'Workspace ready at:' as the parent of the
   project (extra dirname)
-status: todo
+status: ready
 labels:
   - gap
 parent: null
