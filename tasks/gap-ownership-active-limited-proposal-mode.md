@@ -42,9 +42,9 @@ depends_on:
 
 ## Touches
 
-- docs/analysis/ownership-active-limited-proposal.mjs
-- docs/analysis/architecture-evidence-store-limited-proposal-report.md
-- plugin/test/ownership-active-limited-proposal.test.mjs
+- docs/analysis/ownership-active-limited-proposal.mjs (new)
+- docs/analysis/architecture-evidence-store-limited-proposal-report.md (new)
+- plugin/test/ownership-active-limited-proposal.test.mjs (new)
 - tasks/gap-ownership-active-limited-proposal-mode.md
 
 ## AC
