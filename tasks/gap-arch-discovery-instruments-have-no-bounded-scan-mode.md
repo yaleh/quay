@@ -3,7 +3,7 @@ id: gap-arch-discovery-instruments-have-no-bounded-scan-mode
 title: "arch-discovery instruments only run as a one-off pre/post experiment: no
   bounded periodic scan mode, unstable finding identity, output dir not
   gitignored"
-status: todo
+status: ready
 labels:
   - gap
   - architecture-discovery
