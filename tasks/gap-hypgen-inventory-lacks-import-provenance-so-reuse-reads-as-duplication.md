@@ -2,7 +2,7 @@
 id: gap-hypgen-inventory-lacks-import-provenance-so-reuse-reads-as-duplication
 title: "arch-hypothesis-generation: inventory and verifier lack import/call
   provenance, so shared reuse is repeatedly misread as duplication"
-status: ready
+status: done
 labels:
   - gap
   - architecture-discovery
