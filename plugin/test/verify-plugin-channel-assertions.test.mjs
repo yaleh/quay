@@ -31,7 +31,13 @@ import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { spawnSync } from "node:child_process";
-import { judgeShippedSetClean } from "../scripts/verify-plugin-channel-assertions.ts";
+import {
+  describeMarketplaceSource,
+  judgeInstallMatchesBuiltArtifact,
+  judgeShippedSetClean,
+  readBuiltArtifact,
+  readMarketplaceReading,
+} from "../scripts/verify-plugin-channel-assertions.ts";
 import { parseRules, readShippedSet } from "../scripts/shipped-set-rules.ts";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -125,6 +131,18 @@ function makeHome(tag, entries) {
   const dir = freshDir(tag);
   fs.mkdirSync(path.join(dir, ".claude", "plugins"), { recursive: true });
   fs.writeFileSync(path.join(dir, ".claude", "plugins", "installed_plugins.json"), JSON.stringify({ version: 2, plugins: { "quay@quay": entries } }));
+  return dir;
+}
+
+/** A fixture HOME carrying BOTH the install record AND a `known_marketplaces.json` registering
+ *  `quay` at `source` — the two readings the built-vs-installed pre-check consumes
+ *  (tasks/gap-release-yml-project-scope-install-not-home-isolated). */
+function makeMarketplaceHome(tag, entries, source, installLocation) {
+  const dir = makeHome(tag, entries);
+  fs.writeFileSync(
+    path.join(dir, ".claude", "plugins", "known_marketplaces.json"),
+    JSON.stringify({ quay: { source, installLocation: installLocation ?? null, lastUpdated: "2026-10-10T00:00:00.000Z" } }),
+  );
   return dir;
 }
 
@@ -238,6 +256,139 @@ test("②b the dev tree's own carriers (-dev everywhere) are still FAIL, not PAS
     QUAY_VERIFY_HOME: makeHome("devall-home", []),
   });
   assert.match(assertionLine(r.stdout, "version-consistency"), /^version-consistency FAIL/);
+});
+
+// ── ②c THE PRE-CHECK: is the artifact about to be judged the one THIS run built? ──────────────────
+// (tasks/gap-release-yml-project-scope-install-not-home-isolated). Emitted FIRST, with its OWN id —
+// ⛔ deliberately NOT folded into `version-consistency`, whose -dev FAIL text blames the build when
+// the real cause is a preregistered marketplace that shadowed the one this run added.
+
+test("install-not-the-built-artifact: install == this run's build ⇒ PASS, and it is the FIRST line", () => {
+  const built = makeInstall("bvm-built", { version: "0.19.0", withCli: false });
+  const installed = makeInstall("bvm-inst", { version: "0.19.0", withInit: true });
+  const project = makeProject("bvm-proj", { pointerTarget: installed, serverPid: 4242, serveLogBytes: 12 });
+  const procRoot = makeProcRoot("bvm-proc", 4242, "/user.slice/user-1004.slice/user@1004.service/app.slice/quay-serve-test-123.scope");
+  const home = makeMarketplaceHome(
+    "bvm-home",
+    [{ scope: "project", projectPath: project, installPath: installed, version: "0.19.0" }],
+    { source: "directory", path: built },
+    built,
+  );
+  const r = runScript(["--installed", installed, "--project", project, "--scope", "project", "--built", built], {
+    QUAY_VERIFY_PROC_ROOT: procRoot,
+    QUAY_VERIFY_HOME: home,
+  });
+  assert.equal(r.status, 0, r.stdout + r.stderr);
+  const line = assertionLine(r.stdout, "install-not-the-built-artifact");
+  assert.equal(lines(r.stdout)[0], line, "the pre-check must be the FIRST assertion emitted");
+  assert.match(line, /^install-not-the-built-artifact PASS/);
+  assert.match(line, /0\.19\.0/);
+  // the detail names WHERE the install came from — the reading that explains any mismatch
+  assert.match(line, new RegExp(`directory:${built.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}`));
+});
+
+test("install-not-the-built-artifact: a shadowed marketplace ⇒ FAIL naming BOTH versions and the marketplace, as its OWN id", () => {
+  const built = makeInstall("bvm2-built", { version: "0.19.0", withCli: false });
+  // The v0.19.0 incident verbatim: the install came from the published channel (0.19.0-dev) while
+  // this run had just built 0.19.0.
+  const installed = makeInstall("bvm2-inst", { version: "0.19.0-dev", pluginJson: "0.19.0-dev", versionFile: "0.19.0-dev" });
+  const project = makeProject("bvm2-proj", { pointerTarget: installed });
+  const home = makeMarketplaceHome("bvm2-home", [], { source: "github", repo: "yaleh/quay" }, null);
+  const r = runScript(["--installed", installed, "--project", project, "--scope", "project", "--built", built], {
+    QUAY_VERIFY_PROC_ROOT: makeProcRoot("bvm2-proc", 1, "/nowhere"),
+    QUAY_VERIFY_HOME: home,
+  });
+  assert.equal(r.status, 1, r.stdout + r.stderr);
+  const line = assertionLine(r.stdout, "install-not-the-built-artifact");
+  assert.match(line, /^install-not-the-built-artifact FAIL/);
+  assert.match(line, /installed=0\.19\.0-dev/);
+  assert.match(line, /built=0\.19\.0\b/);
+  // the marketplace that ACTUALLY served the install — what makes the failure actionable
+  assert.match(line, /github:yaleh\/quay/);
+  // …and it does NOT share a failure shape with version-consistency: two ids, two details
+  const vc = assertionLine(r.stdout, "version-consistency");
+  assert.match(vc, /^version-consistency FAIL/);
+  assert.notEqual(line, vc);
+  assert.match(vc, /-dev/, "the artifact-level assertion's own (misattributing) text is unchanged");
+});
+
+test("install-not-the-built-artifact: an unreadable BUILT tree ⇒ NOT-EVALUATED (≠ PASS), never a silent pass", () => {
+  const built = freshDir("bvm3-built"); // no .claude-plugin/plugin.json
+  const installed = makeInstall("bvm3-inst", { version: "0.19.0" });
+  const project = makeProject("bvm3-proj", { pointerTarget: installed });
+  const home = makeMarketplaceHome("bvm3-home", [], { source: "directory", path: built }, built);
+  const r = runScript(["--installed", installed, "--project", project, "--scope", "project", "--built", built], {
+    QUAY_VERIFY_PROC_ROOT: makeProcRoot("bvm3-proc", 1, "/nowhere"),
+    QUAY_VERIFY_HOME: home,
+  });
+  assert.notEqual(r.status, 0, "could-not-read must not share the all-PASS exit code");
+  assert.match(assertionLine(r.stdout, "install-not-the-built-artifact"), /^install-not-the-built-artifact NOT-EVALUATED.*not "the install matches the build"/);
+});
+
+test("install-not-the-built-artifact: an unreadable INSTALLED plugin.json ⇒ NOT-EVALUATED, not a version compare", () => {
+  const built = makeInstall("bvm4-built", { version: "0.19.0", withCli: false });
+  const installed = makeInstall("bvm4-inst", { version: "0.19.0", pluginJson: null });
+  const project = makeProject("bvm4-proj", { pointerTarget: installed });
+  const home = makeMarketplaceHome("bvm4-home", [], { source: "directory", path: built }, built);
+  const r = runScript(["--installed", installed, "--project", project, "--scope", "project", "--built", built], {
+    QUAY_VERIFY_PROC_ROOT: makeProcRoot("bvm4-proc", 1, "/nowhere"),
+    QUAY_VERIFY_HOME: home,
+  });
+  assert.match(assertionLine(r.stdout, "install-not-the-built-artifact"), /^install-not-the-built-artifact NOT-EVALUATED/);
+});
+
+test("mutation control: dropping --built (the pre-check REMOVED) leaves only version-consistency's misattribution", () => {
+  // AC4: with the pre-check removed, the same shadowed install no longer produces a line naming the
+  // real cause — the run's only version complaint is the one that blames the build.
+  const installed = makeInstall("bvm5-inst", { version: "0.19.0-dev", pluginJson: "0.19.0-dev", versionFile: "0.19.0-dev" });
+  const project = makeProject("bvm5-proj", { pointerTarget: installed });
+  const home = makeMarketplaceHome("bvm5-home", [], { source: "github", repo: "yaleh/quay" }, null);
+  const r = runScript(["--installed", installed, "--project", project, "--scope", "project"], {
+    QUAY_VERIFY_PROC_ROOT: makeProcRoot("bvm5-proc", 1, "/nowhere"),
+    QUAY_VERIFY_HOME: home,
+  });
+  assert.equal(r.status, 1, r.stdout + r.stderr);
+  assert.equal(
+    lines(r.stdout).filter((l) => l.startsWith("install-not-the-built-artifact ")).length,
+    0,
+    `the mutant must emit NO pre-check line; got:\n${r.stdout}`,
+  );
+  assert.match(assertionLine(r.stdout, "version-consistency"), /^version-consistency FAIL.*not rebuilt into the byte bundle/);
+});
+
+test("describeMarketplaceSource / readMarketplaceReading render both registry shapes and the unreadable state", () => {
+  assert.equal(describeMarketplaceSource({ source: "directory", path: "/x" }), "directory:/x");
+  assert.equal(describeMarketplaceSource({ source: "github", repo: "yaleh/quay" }), "github:yaleh/quay");
+  assert.equal(describeMarketplaceSource(null), "null");
+
+  const home = makeMarketplaceHome("bvm6-home", [], { source: "directory", path: "/built/tree" }, "/built/tree");
+  const read = readMarketplaceReading(home, "quay");
+  assert.equal(read.evaluated, true);
+  assert.equal(read.source, "directory:/built/tree");
+  assert.equal(read.installLocation, "/built/tree");
+
+  // ⛔硬规则 3b: a registry that cannot be read is its OWN state, never folded into "registered".
+  const bare = freshDir("bvm6-bare");
+  const missing = readMarketplaceReading(bare, "quay");
+  assert.equal(missing.evaluated, false);
+  assert.match(missing.reason, /no /);
+});
+
+test("readBuiltArtifact + judgeInstallMatchesBuiltArtifact are pure over their inputs", () => {
+  const built = makeInstall("bvm7-built", { version: "0.19.0", versionFile: "0.19.0", withCli: false });
+  const reading = readBuiltArtifact(built);
+  assert.equal(reading.pluginJsonVersion, "0.19.0");
+  assert.equal(reading.versionFile, "0.19.0");
+  assert.deepEqual(reading.unreadable, []);
+
+  const mkt = { name: "quay", evaluated: true, source: "directory:/built", installLocation: "/built", reason: null };
+  assert.equal(judgeInstallMatchesBuiltArtifact("0.19.0", reading, mkt).state, "PASS");
+  assert.equal(judgeInstallMatchesBuiltArtifact("0.19.0-dev", reading, mkt).state, "FAIL");
+  assert.equal(judgeInstallMatchesBuiltArtifact(null, reading, mkt).state, "NOT-EVALUATED");
+  assert.equal(judgeInstallMatchesBuiltArtifact("0.19.0", readBuiltArtifact(freshDir("bvm7-empty")), mkt).state, "NOT-EVALUATED");
+  // the not-read marketplace is reported as such rather than silently rendered as a blank source
+  const notRead = judgeInstallMatchesBuiltArtifact("0.19.0", reading, { name: "quay", evaluated: false, source: null, installLocation: null, reason: "no registry" });
+  assert.match(notRead.detail, /could NOT be read — no registry/);
 });
 
 // ── ③ `.quay/plugin` points at another version directory ⇒ FAIL ──────────────────────────────────

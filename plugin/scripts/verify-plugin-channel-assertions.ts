@@ -42,6 +42,7 @@
 // Run (CI and local replay use the SAME invocation):
 //   node --experimental-strip-types plugin/scripts/verify-plugin-channel-assertions.ts \
 //     --installed <installed-plugin-dir> --project <scratch-project-dir> --scope user|project
+//   … --built <built-plugin-tree>             # PRE-CHECK: the install came from THIS run's build
 //   … --upgrade-from <previous-plugin-tree>   # local upgrade drill (见 --upgrade-from)
 //
 // ⛔ Run from a SOURCE checkout, not from the installed artifact: the installed artifact strips raw
@@ -153,6 +154,28 @@ export function runInstalledCli(
   };
 }
 
+/** Parse the `version` field out of a `.claude-plugin/plugin.json`'s text. ONE rule for BOTH the
+ *  installed tree and the built tree (see readBuiltArtifact): the two are compared AGAINST EACH
+ *  OTHER, so parsing them by different rules would be comparing different quantities (硬规则 4c).
+ *  `reason` is null on success. */
+function parsePluginJsonVersion(raw: string | null): { version: string | null; reason: string | null } {
+  if (raw === null) return { version: null, reason: "unreadable" };
+  try {
+    const v = (JSON.parse(raw) as { version?: unknown })?.version;
+    if (typeof v === "string" && v.trim() !== "") return { version: v.trim(), reason: null };
+    return { version: null, reason: "no string `version`" };
+  } catch {
+    return { version: null, reason: "unparsable" };
+  }
+}
+
+/** The installed plugin's `.claude-plugin/plugin.json` version, or null — the carrier the
+ *  built-vs-installed pre-check compares. Shares `parsePluginJsonVersion` with
+ *  `readInstalledVersions`, so the installed tree is NEVER parsed by two rules. */
+export function readPluginJsonVersion(installedDir: string): string | null {
+  return parsePluginJsonVersion(readText(path.join(installedDir, ".claude-plugin", "plugin.json"))).version;
+}
+
 /** The three version carriers, read directly. */
 export function readInstalledVersions(installedDir: string): InstalledVersions {
   const unreadable: string[] = [];
@@ -160,19 +183,9 @@ export function readInstalledVersions(installedDir: string): InstalledVersions {
   const versionFile = readText(path.join(installedDir, "VERSION"));
   if (versionFile === null) unreadable.push("VERSION");
 
-  let pluginJson: string | null = null;
-  const pluginJsonRaw = readText(path.join(installedDir, ".claude-plugin", "plugin.json"));
-  if (pluginJsonRaw === null) {
-    unreadable.push(".claude-plugin/plugin.json");
-  } else {
-    try {
-      const v = (JSON.parse(pluginJsonRaw) as { version?: unknown })?.version;
-      if (typeof v === "string" && v.trim() !== "") pluginJson = v.trim();
-      else unreadable.push(".claude-plugin/plugin.json (no string `version`)");
-    } catch {
-      unreadable.push(".claude-plugin/plugin.json (unparsable)");
-    }
-  }
+  const pj = parsePluginJsonVersion(readText(path.join(installedDir, ".claude-plugin", "plugin.json")));
+  const pluginJson: string | null = pj.version;
+  if (pluginJson === null) unreadable.push(`.claude-plugin/plugin.json (${pj.reason})`);
 
   let cliVersion: string | null = null;
   const cli = runInstalledCli(installedDir, ["--version"], installedDir, 60_000);
@@ -192,11 +205,150 @@ export function readInstalledVersions(installedDir: string): InstalledVersions {
   };
 }
 
+// ── THE BUILT ARTIFACT + the marketplace that served the install ─────────────────────────────────
+//
+// tasks/gap-release-yml-project-scope-install-not-home-isolated. The gate must judge THE ARTIFACT
+// THIS RUN BUILT. Two readings make that checkable, and neither existed:
+//   ① the built tree's own version carrier (`--built <dir>`), and
+//   ② which marketplace named `quay` the HOME actually has registered — because a marketplace NAME
+//      is ONE machine-wide slot, and a pre-declared `quay` slot makes
+//      `claude plugin marketplace add <built-dir>` a SILENT NO-OP (measured 2026-10-10, ci.yml
+//      run 38038188856: `Marketplace 'quay' already on disk — declared in user settings`), so the
+//      install comes from THAT source and the version assertion then blames the build.
+
+/** The BUILT artifact's own version carriers (read the same way the installed tree's are). */
+export interface BuiltArtifactReading {
+  /** `<dir>/.claude-plugin/plugin.json` `.version`, or null when absent/unreadable. */
+  pluginJsonVersion: string | null;
+  /** `<dir>/VERSION` (trimmed), or null — secondary evidence rendered into the FAIL detail. */
+  versionFile: string | null;
+  /** Why the primary carrier could not be read; empty when it was read. */
+  unreadable: string[];
+}
+
+/** Read the built artifact's carriers. A missing/unreadable carrier yields null + a reason rather
+ *  than a throw — "could not read the build" must stay a DISTINCT state from "the install matches
+ *  the build" (硬规则 3b), and the judge turns it into NOT-EVALUATED. */
+export function readBuiltArtifact(dir: string): BuiltArtifactReading {
+  const unreadable: string[] = [];
+  const pj = parsePluginJsonVersion(readText(path.join(dir, ".claude-plugin", "plugin.json")));
+  if (pj.version === null) unreadable.push(`.claude-plugin/plugin.json at ${dir} (${pj.reason})`);
+  const versionFileRaw = readText(path.join(dir, "VERSION"));
+  return {
+    pluginJsonVersion: pj.version,
+    versionFile: versionFileRaw === null ? null : versionFileRaw.trim(),
+    unreadable,
+  };
+}
+
+/** Which marketplace NAMED `name` this HOME has registered, and WHERE it points. */
+export interface MarketplaceReading {
+  name: string;
+  /** false ⟺ the registry (or the entry) could not be read — a state DISTINCT from
+   *  "registered and pointing at the built tree" (硬规则 3b), never folded into it. */
+  evaluated: boolean;
+  /** e.g. `directory:/path/to/tree`, `github:owner/repo`; null when not evaluated. */
+  source: string | null;
+  /** The registry's own `installLocation`, when present. */
+  installLocation: string | null;
+  /** Why it could not be read; null when evaluated. */
+  reason: string | null;
+}
+
+/** Render a `known_marketplaces.json` `source` object as ONE readable token. */
+export function describeMarketplaceSource(source: unknown): string {
+  if (source && typeof source === "object") {
+    const o = source as Record<string, unknown>;
+    const kind = typeof o.source === "string" ? o.source : null;
+    if (kind === "directory" && typeof o.path === "string") return `directory:${o.path}`;
+    if (kind === "github" && typeof o.repo === "string") return `github:${o.repo}`;
+    if (kind !== null) return `${kind}:${JSON.stringify(o)}`;
+  }
+  return JSON.stringify(source ?? null);
+}
+
+/** The effect `judgeInstallMatchesBuiltArtifact` needs: the registered marketplace named `name`. */
+export function readMarketplaceReading(homeDir: string, name: string): MarketplaceReading {
+  const registryPath = path.join(homeDir, ".claude", "plugins", "known_marketplaces.json");
+  const raw = readText(registryPath);
+  if (raw === null) {
+    return { name, evaluated: false, source: null, installLocation: null, reason: `no ${registryPath}` };
+  }
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(raw);
+  } catch {
+    return { name, evaluated: false, source: null, installLocation: null, reason: `${registryPath} is unparsable` };
+  }
+  const entry = (parsed as Record<string, unknown> | null)?.[name];
+  if (!entry || typeof entry !== "object") {
+    return { name, evaluated: false, source: null, installLocation: null, reason: `no marketplace named '${name}' is registered in this HOME (${registryPath})` };
+  }
+  const o = entry as Record<string, unknown>;
+  return {
+    name,
+    evaluated: true,
+    source: describeMarketplaceSource(o.source),
+    installLocation: typeof o.installLocation === "string" ? o.installLocation : null,
+    reason: null,
+  };
+}
+
 // ── pure judges ──────────────────────────────────────────────────────────────────────────────────
 //
 // Each judge is pure (given already-read values it returns an AssertionResult) so the fixture tests
 // can drive the SAME judgement the runner uses — a test that re-implements the rule would be a test
 // of the fixture, not of the shipping predicate.
+
+/** Is the artifact we are about to judge THE ONE THIS RUN BUILT?
+ *
+ *  ⛔ WHY THIS IS ITS OWN ASSERTION AND NOT PART OF `version-consistency` (硬规则 3b). The two
+ *  answer different questions: `version-consistency` asks "do this artifact's own carriers agree,
+ *  with no `-dev`?" — a claim ABOUT the artifact; this asks "did the install come from the tree this
+ *  run built?" — a claim about the WIRING. When a pre-registered marketplace named `quay` shadows
+ *  the locally added one (measured 2026-10-10, run 38038188856), `version-consistency` still fails —
+ *  correctly, the installed artifact really is `-dev` — but its detail MISATTRIBUTES the cause to the
+ *  build (`gap-release-bundle-embeds-dev-version-after-stamp`) when the build was correct and the
+ *  install came from somewhere else. That sends the reader to the wrong subsystem, so the mismatch
+ *  gets its own id and NAMES the marketplace that actually served the install. */
+export function judgeInstallMatchesBuiltArtifact(
+  installedVersion: string | null,
+  built: BuiltArtifactReading,
+  marketplace: MarketplaceReading,
+): AssertionResult {
+  const id = "install-not-the-built-artifact";
+  const where = marketplace.evaluated
+    ? `marketplace '${marketplace.name}' is registered as ${marketplace.source ?? "<no source>"}${
+        marketplace.installLocation ? ` (installLocation ${marketplace.installLocation})` : ""
+      }`
+    : `marketplace '${marketplace.name}' could NOT be read — ${marketplace.reason ?? "unknown reason"}`;
+  if (built.pluginJsonVersion === null) {
+    return {
+      id,
+      state: "NOT-EVALUATED",
+      detail: `could not read the built artifact's version: ${built.unreadable.join("; ")} — ⛔ not "the install matches the build". ${where}`,
+    };
+  }
+  if (installedVersion === null) {
+    return {
+      id,
+      state: "NOT-EVALUATED",
+      detail: `the installed plugin's .claude-plugin/plugin.json carries no readable \`version\` — cannot compare it to the built ${built.pluginJsonVersion}. ${where}`,
+    };
+  }
+  if (installedVersion !== built.pluginJsonVersion) {
+    const secondary =
+      built.versionFile !== null && built.versionFile !== built.pluginJsonVersion
+        ? `, built VERSION file says ${built.versionFile}`
+        : "";
+    return {
+      id,
+      state: "FAIL",
+      detail: `the INSTALLED plugin is NOT the artifact this run built: installed=${installedVersion} built=${built.pluginJsonVersion}${secondary} — the install was served by a marketplace registered elsewhere, which shadows the one this run added. ${where}`,
+    };
+  }
+  return { id, state: "PASS", detail: `the installed plugin is this run's build (${installedVersion}). ${where}` };
+}
 
 /** Version carriers must all agree and none may carry a `-dev` suffix. */
 export function judgeVersionConsistency(v: InstalledVersions): AssertionResult {
@@ -711,9 +863,18 @@ export interface RunnerOptions {
   procRoot?: string;
   /** Test seam: HOME for the install-record lookup. Default `process.env.HOME`. */
   homeDir?: string;
+  /** The tree THIS RUN BUILT (the extracted orphan-commit plugin tree). When given, the
+   *  built-vs-installed pre-check is emitted FIRST. Omitted ⇒ no pre-check (a caller that does not
+   *  hold the built tree, e.g. the periodic ci.yml exercise against a release tag, which resolves
+   *  "the built version" from a shell-level comparison instead). */
+  builtDir?: string;
   upgradeFrom?: string;
   onAssertion?: (r: AssertionResult) => void;
 }
+
+/** The marketplace name the quay plugin is published under — the same slot `quay@quay` in the
+ *  install record names (see readScopeInstallRecord). */
+const INSTALL_MARKETPLACE_NAME = "quay";
 
 /** Run every assertion. Effects only; judgement lives in the `judge*` functions above. */
 export async function runAssertions(opts: RunnerOptions): Promise<AssertionResult[]> {
@@ -762,6 +923,19 @@ export async function runAssertions(opts: RunnerOptions): Promise<AssertionResul
     const last = results[results.length - 1];
     last.id = "upgrade-validate-after";
     return results;
+  }
+
+  // 0. THE PRE-CHECK — emitted BEFORE every other assertion, and before any of them can attribute a
+  //    shadowed-marketplace mismatch to the artifact (see judgeInstallMatchesBuiltArtifact). It is
+  //    the FIRST result, so the run's first FAIL line names the real cause.
+  if (opts.builtDir) {
+    push(
+      judgeInstallMatchesBuiltArtifact(
+        readPluginJsonVersion(opts.installedDir),
+        readBuiltArtifact(opts.builtDir),
+        readMarketplaceReading(homeDir, INSTALL_MARKETPLACE_NAME),
+      ),
+    );
   }
 
   // 1. config validate (CLI) — the config `/quay:init` wrote must be accepted.
@@ -879,8 +1053,14 @@ export function runUpgradeInit(installedDir: string, projectDir: string): { erro
 
 function usage(): string {
   return [
-    "Usage: verify-plugin-channel-assertions.ts --installed <dir> --project <dir> [--scope user|project|local] [--json]",
+    "Usage: verify-plugin-channel-assertions.ts --installed <dir> --project <dir> [--scope user|project|local] [--built <dir>] [--json]",
     "       verify-plugin-channel-assertions.ts --installed <dir> --project <dir> --upgrade-from <previous-plugin-tree> [--json]",
+    "",
+    "--built <dir>: the tree THIS RUN built. When given, `install-not-the-built-artifact` is emitted",
+    "  as the FIRST assertion — it compares the installed plugin.json version against the built",
+    "  tree's and FAILs with its OWN reason (naming the registered marketplace) when a marketplace",
+    "  named `quay` registered elsewhere shadowed the one this run added. ⛔ Deliberately a separate",
+    "  id from `version-consistency`: that one judges the artifact, this one judges the wiring.",
     "",
     "Asserts a Claude Code plugin-channel install is CORRECT — not merely installable: the config the",
     "init wrote validates (CLI + MCP), the version carriers agree and carry no -dev, the shipped set",
@@ -912,6 +1092,7 @@ async function main(argv: string[]): Promise<number> {
   const projectDir = flagValue(argv, "--project");
   const scope = flagValue(argv, "--scope") ?? "project";
   const upgradeFrom = flagValue(argv, "--upgrade-from");
+  const builtDir = flagValue(argv, "--built");
   const json = argv.includes("--json");
 
   if (!installedDir || !projectDir) {
@@ -929,6 +1110,7 @@ async function main(argv: string[]): Promise<number> {
     scope,
     procRoot: process.env.QUAY_VERIFY_PROC_ROOT,
     homeDir: process.env.QUAY_VERIFY_HOME,
+    builtDir: builtDir ? path.resolve(builtDir) : undefined,
     upgradeFrom: upgradeFrom ? path.resolve(upgradeFrom) : undefined,
   });
 

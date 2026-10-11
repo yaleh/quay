@@ -75,8 +75,13 @@ jobs:
   # orphan commit with `git archive` (the artifact, never a `cp` of the working tree), matching
   # test/cold-start-e2e.sh --from-build.
   #
-  # The environment is naturally isolated: a GitHub-hosted runner starts empty, so the marketplace
-  # cache, the Claude Code config and the scratch project below are all fresh per run.
+  # ⛔ NOT "naturally isolated" — this job runs on a SELF-HOSTED runner (see `runs-on` below), whose
+  # `~/.claude` PERSISTS across runs and already carries a `quay` marketplace declaration. The
+  # GitHub-hosted premise ("the runner starts empty") was true when this comment was written and
+  # stopped being true at AC-319; leaving it is what made the project-scope arm below check the
+  # wrong artifact (tasks/gap-release-yml-project-scope-install-not-home-isolated, v0.19.0). Every
+  # scope arm therefore builds its OWN scratch `HOME`, and a defect here is not a stale comment but
+  # a gate that silently judges a differently-sourced install.
   verify-plugin-channel:
     # self-hosted (gap-metered-hosted-runner-jobs-to-self-hosted, AC-319): the metered
     # ubuntu-latest gate refused to START this job on 2026-09-24, which is why the v0.12.0 release
@@ -126,9 +131,25 @@ jobs:
         # released would make the gate depend on the repo's own plugin state (and on the repo's own
         # .claude/settings.json), i.e. self-installation. The scratch dir is empty and permanent
         # only for this run.
+        #
+        # ⛔ AND A SCRATCH `HOME`. THIS IS NOT HYGIENE, IT IS CORRECTNESS
+        # (tasks/gap-release-yml-project-scope-install-not-home-isolated, found by the v0.19.0
+        # release). A marketplace name is ONE machine-wide slot, and the self-hosted runner image
+        # bakes `~/.claude/settings.json` with a `quay` marketplace already declared (the published
+        # GitHub channel). `claude plugin marketplace add <local dir>` does NOT override an existing
+        # declaration: it answers `Marketplace 'quay' already on disk — declared in user settings`,
+        # and `claude plugin install quay@quay` then installs the PUBLISHED artifact — so the
+        # assertions below judge something other than the tree this run built. This is the PROJECT
+        # scope arm; the user-scope arm below already had its own HOME, and ci.yml's channel job
+        # carries the same fix (`ci.yml` "Register the built plugin …"). Both arms must be isolated,
+        # or the scope that is not is the one that silently checks the wrong artifact.
+        env:
+          HOME: ${{ runner.temp }}/scratch-home
+          CLAUDE_CONFIG_DIR: ${{ runner.temp }}/scratch-home/.claude
         run: |
           set -euo pipefail
           SCRATCH="${RUNNER_TEMP}/scratch-project"
+          mkdir -p "$HOME"
           rm -rf "$SCRATCH"
           mkdir -p "$SCRATCH"
           cd "$SCRATCH"
@@ -143,6 +164,11 @@ jobs:
         # INSTALLED copy (the CLI entry + its bundle, from the cache), not the build directory — the
         # same path the 2026-09-16 manual verification used. Fail closed if no cache entry carries
         # the CLI entry point: "could not resolve" must not read as "nothing to check".
+        # ⛔ Same isolated HOME as the install step: the cache this reads must be the one that
+        # install wrote (tasks/gap-release-yml-project-scope-install-not-home-isolated).
+        env:
+          HOME: ${{ runner.temp }}/scratch-home
+          CLAUDE_CONFIG_DIR: ${{ runner.temp }}/scratch-home/.claude
         run: |
           set -euo pipefail
           CACHE_ROOT="${HOME}/.claude/plugins/cache/quay/quay"
@@ -160,6 +186,11 @@ jobs:
       - name: init the scratch project from the installed plugin
         env:
           INSTALLED: ${{ steps.installed.outputs.dir }}
+          # The SAME isolated HOME as the install: the plugin cache, the install record and
+          # everything `quay init` resolves must be one graph
+          # (tasks/gap-release-yml-project-scope-install-not-home-isolated).
+          HOME: ${{ runner.temp }}/scratch-home
+          CLAUDE_CONFIG_DIR: ${{ runner.temp }}/scratch-home/.claude
         run: |
           set -euo pipefail
           SCRATCH="${RUNNER_TEMP}/scratch-project"
@@ -176,6 +207,11 @@ jobs:
       - name: Start the promotion + worker drivers and assert both are alive
         env:
           INSTALLED: ${{ steps.installed.outputs.dir }}
+          # Same isolated HOME (tasks/gap-release-yml-project-scope-install-not-home-isolated): the
+          # drivers resolve their plugin/config state from it, so a shared HOME would run them
+          # against a different graph than the one installed and initialised above.
+          HOME: ${{ runner.temp }}/scratch-home
+          CLAUDE_CONFIG_DIR: ${{ runner.temp }}/scratch-home/.claude
         run: |
           set -euo pipefail
           SCRATCH="${RUNNER_TEMP}/scratch-project"
@@ -200,6 +236,9 @@ jobs:
       - name: Run quay's unified server in the scratch project and probe it
         env:
           INSTALLED: ${{ steps.installed.outputs.dir }}
+          # Same isolated HOME (tasks/gap-release-yml-project-scope-install-not-home-isolated).
+          HOME: ${{ runner.temp }}/scratch-home
+          CLAUDE_CONFIG_DIR: ${{ runner.temp }}/scratch-home/.claude
         run: |
           set -euo pipefail
           SCRATCH="${RUNNER_TEMP}/scratch-project"
@@ -264,11 +303,25 @@ jobs:
       - name: Verify the channel — project-scope assertions
         env:
           INSTALLED: ${{ steps.installed.outputs.dir }}
+          # The SAME isolated HOME the install/init/drivers used
+          # (tasks/gap-release-yml-project-scope-install-not-home-isolated).
+          HOME: ${{ runner.temp }}/scratch-home
+          CLAUDE_CONFIG_DIR: ${{ runner.temp }}/scratch-home/.claude
+          # `scope-install-shape` reads `<homeDir>/.claude/plugins/installed_plugins.json`; the
+          # checker takes it from QUAY_VERIFY_HOME when set, pinning the record read to the SAME
+          # isolated HOME the install wrote to instead of relying on HOME inheritance.
+          QUAY_VERIFY_HOME: ${{ runner.temp }}/scratch-home
         run: |
           set -euo pipefail
           SCRATCH="${RUNNER_TEMP}/scratch-project"
+          # `--built` turns on the FIRST assertion, `install-not-the-built-artifact`: it compares the
+          # installed plugin.json version against the tree THIS run built and, on mismatch, FAILs
+          # with its OWN reason (naming the registered marketplace) instead of letting
+          # `version-consistency` misattribute the cause to the build
+          # (tasks/gap-release-yml-project-scope-install-not-home-isolated).
           node --experimental-strip-types plugin/scripts/verify-plugin-channel-assertions.ts \
-            --installed "$INSTALLED" --project "$SCRATCH" --scope project
+            --installed "$INSTALLED" --project "$SCRATCH" --scope project \
+            --built "${RUNNER_TEMP}/plugin-channel-src"
 
       # ── user-scope install + the same assertion set (verified locally, 2026-10-06, with exactly
       # these commands under an isolated HOME — see the task's completion record). WHY A FRESH HOME:
@@ -311,6 +364,10 @@ jobs:
         # pass for the wrong reason.
         env:
           INSTALLED: ${{ steps.installed.outputs.dir }}
+          # Same isolated HOME as the start (tasks/gap-release-yml-project-scope-install-not-home-
+          # isolated): stop must reach the SAME driver/server state the start created.
+          HOME: ${{ runner.temp }}/scratch-home
+          CLAUDE_CONFIG_DIR: ${{ runner.temp }}/scratch-home/.claude
         run: |
           set -euo pipefail
           SCRATCH="${RUNNER_TEMP}/scratch-project"
