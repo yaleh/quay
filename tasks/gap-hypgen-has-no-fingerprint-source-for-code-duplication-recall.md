@@ -3,7 +3,7 @@ id: gap-hypgen-has-no-fingerprint-source-for-code-duplication-recall
 title: "arch-hypothesis-generation: no mechanical fingerprint source
   (AST-normalized body / call structure) can feed clusters into verify/match
   under the same pre-registration"
-status: ready
+status: done
 labels:
   - gap
   - architecture-discovery
