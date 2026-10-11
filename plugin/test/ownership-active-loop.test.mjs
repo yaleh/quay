@@ -6,6 +6,7 @@
 
 import { test, after } from "node:test";
 import assert from "node:assert/strict";
+import crypto from "node:crypto";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
@@ -13,10 +14,11 @@ import { fileURLToPath } from "node:url";
 
 import {
   DEFAULT_BUDGET, EVIDENCE_KINDS, ARCHGUARD_QUERY_KINDS, newState, normalizeRepoPath,
-  validateRequest, gateEvidenceRequest, validateStep,
+  validateRequest, gateEvidenceRequest, validateStep, redactDecisionReferences, REDACTED_COMMENT,
 } from "../../docs/analysis/ownership-active-contract.mjs";
 import { createExecutor } from "../../docs/analysis/ownership-active-executor.mjs";
 import { buildSliceInput, computeSliceDelta, renderDelta, resolveSliceDelta, versionAtLeast, MIN_ARCHGUARD_VERSION, SLICE_DELTA_SURFACE } from "../../docs/analysis/ownership-active-slice-adapter.mjs";
+import { declaredExportNames } from "../../docs/analysis/ownership-active-proposal-repair.mjs";
 import { execFileSync, spawnSync } from "node:child_process";
 import {
   runActiveInvestigation, parseStep, quotaGate, resolveRuntime, appendCarrier, readCarrierHistory,
@@ -203,6 +205,93 @@ test("scope: source evidence still reads — read_file on a real module and a sc
   assert.equal(g.status, "ok");
   assert.match(g.text, /^packages\/quay\/src\//m, "the source hits must be present");
   assert.equal(g.denied_rows_dropped, 0, "no source row is under a holdout prefix");
+});
+
+// ── 2c. decision-reference redaction: the CONTENT half of the holdout guard ────────────────────
+// The path deny-list (2b) cannot see INSIDE a file. `gate/config/types.ts` used to hand the investigator a
+// GOAL-034 comment stating WHY those types are "not config-loading" — the very ownership ruling the blind
+// benchmark meant it to rediscover from source. `redactDecisionReferences` is the content guard: a comment
+// BLOCK that names a decision is blanked, whole, before the text can reach the judge.
+const sha256 = (s) => crypto.createHash("sha256").update(s).digest("hex");
+
+test("redaction AC1: a pure redactDecisionReferences blanks every comment block naming a decision, and nothing else", () => {
+  // one case per declared namespace; the WHOLE block goes, not only the line carrying the id
+  for (const [src, id] of [
+    ["// GOAL-034 moved this out\n// and the reason continues here\n", "GOAL-034"],
+    ["// AC-353 first\n", "AC-353"],
+    ["// see DIR-035\n", "DIR-035"],
+    ["// (ADR-016)\n", "ADR-016"],
+    ["// SPEC-goal-mechanism-2026-09-06.md §2\n", "SPEC-goal-mechanism-2026-09-06.md"],
+    ["// gap-ownership-active-investigator-holdout-deny-list did this\n", "gap-ownership-active-investigator-holdout-deny-list"],
+  ]) {
+    const r = redactDecisionReferences(src);
+    assert.equal(r.redacted_blocks, 1, id);
+    assert.equal(r.text, REDACTED_COMMENT + "\n", id);
+    assert.ok(!r.text.includes(id), id);
+  }
+  // an id-free comment block is returned EXACTLY as-is
+  const plain = "// a plain note\n// with two lines\n\nconst x = 1;\n";
+  assert.deepEqual(redactDecisionReferences(plain), { text: plain, redacted_blocks: 0 });
+  // a bare `//` line is a paragraph separator: only the paragraph carrying the id is redacted
+  const split = "// keep this paragraph\n\n// GOAL-034 drop this one\n// it continues\n";
+  assert.deepEqual(redactDecisionReferences(split), { text: "// keep this paragraph\n\n" + REDACTED_COMMENT + "\n", redacted_blocks: 1 });
+  // a /* … */ block INCLUDING its `*` continuation lines is one block, and the code after it is kept
+  const block = "/**\n * why: GOAL-034\n * because\n */\nconst y = 2;\n";
+  assert.deepEqual(redactDecisionReferences(block), { text: REDACTED_COMMENT + "\nconst y = 2;\n", redacted_blocks: 1 });
+  const mixed = "// GOAL-034\n\n/** an ordinary doc comment */\nexport const z = 3;\n";
+  assert.deepEqual(redactDecisionReferences(mixed), { text: REDACTED_COMMENT + "\n\n/** an ordinary doc comment */\nexport const z = 3;\n", redacted_blocks: 1 });
+  // CODE lines are never touched — even one that merely mentions an id in a string or a trailing comment
+  const code = 'export const s = "GOAL-034";\nconst t = 1; // AC-9 trailing\n';
+  assert.deepEqual(redactDecisionReferences(code), { text: code, redacted_blocks: 0 });
+});
+
+test("redaction AC2/AC3 negative control: a real GOAL-034 comment is gone from read_file AND grep, count on the record", () => {
+  const ex = createExecutor({ root: REPO });
+  const read = ex.execute({ kind: "read_file", path: "packages/quay/src/gate/config/types.ts", start_line: 1, end_line: 20 });
+  assert.equal(read.status, "ok");
+  assert.ok(!read.text.includes("GOAL-034"), "the GOAL-034 comment must not survive read_file");
+  assert.ok(!read.text.includes("not config-loading"), "the WHOLE block goes, not only the id-bearing line");
+  assert.equal(read.redacted_blocks, 1, "the redaction is counted on the evidence record");
+  assert.match(read.text, /export interface GateSource \{/, "code lines in the same range are untouched");
+  assert.match(read.text, /\/\*\* Source provenance/, "an id-free comment block is preserved");
+  // the hash covers what the JUDGE receives: the redacted text, not the raw slice
+  assert.equal(read.provenance.content_sha256, sha256(read.text));
+  const raw = execFileSync("git", ["-C", REPO, "show", "HEAD:packages/quay/src/gate/config/types.ts"], { encoding: "utf8" })
+    .split("\n").slice(0, 20).map((l, i) => `${String(1 + i).padStart(5)}| ${l}`).join("\n");
+  assert.notEqual(read.provenance.content_sha256, sha256(raw), "redaction must happen BEFORE the hash is taken");
+
+  const grep = ex.execute({ kind: "grep", pattern: "GateConfig", fixed: false, paths: ["packages/quay/src/gate"] });
+  assert.equal(grep.status, "ok");
+  assert.ok(!/GOAL-0/.test(grep.text), `no GOAL-0 may survive a source grep:\n${grep.text}`);
+  assert.ok(!grep.text.includes("not config-loading"));
+  assert.equal(grep.redacted_blocks, 1, "one comment block was redacted out of the grep reading");
+  // the hit row is rewritten in place, not dropped — redaction does not switch grep off
+  assert.match(grep.text, /^packages\/quay\/src\/gate\/config\/types\.ts:4:\/\/ \[redacted: decision reference\]$/m);
+  assert.match(grep.text, /export type \{ GateConfig, RunnerOptions \} from "\.\.\/\.\.\/kernel\/gate-run-options\.ts";/);
+  assert.match(grep.text, /import \{ type GateConfig, resolveRunnerOptions \} from "\.\.\/\.\.\/kernel\/gate-run-options\.ts";/);
+});
+
+test("redaction AC4 positive control: code and id-free kernel comments survive; a mechanical source parse is unaffected", () => {
+  const ex = createExecutor({ root: REPO });
+  // utils.ts: the id-bearing header is redacted, the two re-export CODE lines are not
+  const u = ex.execute({ kind: "read_file", path: "packages/quay/src/gate/factories/utils.ts", start_line: 1, end_line: 6 });
+  assert.equal(u.status, "ok");
+  assert.equal(u.redacted_blocks, 1);
+  assert.ok(!u.text.includes("GOAL-034"));
+  assert.match(u.text, /export type \{ GateConfig, RunnerOptions \} from "\.\.\/\.\.\/kernel\/gate-run-options\.ts";/);
+  assert.match(u.text, /export \{ shQuote, resolveRunnerOptions \} from "\.\.\/\.\.\/kernel\/gate-run-options\.ts";/);
+  // task-transition.ts: the id-FREE title paragraph and the kernel-boundary rule comments are preserved
+  const t = ex.execute({ kind: "read_file", path: "packages/quay/src/kernel/task-transition.ts", start_line: 1, end_line: 30 });
+  assert.ok(t.redacted_blocks >= 1, "the GOAL-030 paragraph is redacted");
+  assert.ok(!t.text.includes("GOAL-030"));
+  assert.match(t.text, /task-transition\.ts — the KERNEL single source of the task-status TRANSITION model:/, "the id-free file-title header survives");
+  assert.match(t.text, /A kernel file may import nothing outside `kernel\/` except bare specifiers/, "the kernel-boundary rule comment survives");
+  // redaction is an EVIDENCE-TEXT concern only: a mechanical parse reads the COMMITTED source
+  const rawUtils = execFileSync("git", ["-C", REPO, "show", "HEAD:packages/quay/src/gate/factories/utils.ts"], { encoding: "utf8" });
+  const names = declaredExportNames(rawUtils);
+  assert.ok(names.has("GateConfig") && names.has("RunnerOptions"), "the re-exports are proved from raw source");
+  // and blanking the header comment does not disturb what the same parser finds in the redacted text
+  assert.deepEqual([...declaredExportNames(redactDecisionReferences(rawUtils).text)].sort(), [...names].sort());
 });
 
 // ── 3. budgets, dedup, allow-list at the gate ─────────────────────────────────────────────────

@@ -9,6 +9,11 @@
 // content hash). A request the production tool surface cannot answer is returned as `capability_gap`
 // with the surfaces that DO exist — it is never faked and never silently empty (hard rule 3b).
 //
+// read_file and grep outputs additionally pass through `redactDecisionReferences` (ownership-active-contract):
+// a comment block that names a historical decision (GOAL/AC/DIR/ADR/SPEC/task id) is blanked BEFORE the text,
+// and therefore before its hash, reaches the judge. That closes the path deny-list's blind spot — it can only
+// see a file's NAME, never the ruling buried in its comments (GOAL-034 blind-benchmark follow-up, 2026-10-11).
+//
 // All I/O goes through injectable `deps`, so the test-suite exercises the policy without git/ArchGuard/LLM.
 
 import fs from "node:fs";
@@ -16,7 +21,7 @@ import os from "node:os";
 import path from "node:path";
 import crypto from "node:crypto";
 import { execFileSync } from "node:child_process";
-import { ARCHGUARD_QUERY_KINDS, DEFAULT_BUDGET, DENY_PATH_PATTERNS } from "./ownership-active-contract.mjs";
+import { ARCHGUARD_QUERY_KINDS, DEFAULT_BUDGET, DENY_PATH_PATTERNS, REDACTED_COMMENT, redactDecisionReferences, redactedCommentBlockRanges } from "./ownership-active-contract.mjs";
 
 const sha = (s) => crypto.createHash("sha256").update(s).digest("hex");
 const SCANNED_DIRS = ["packages", "plugin/scripts", "scripts"];
@@ -105,6 +110,55 @@ export function createExecutor({ root, ref = null, budget = DEFAULT_BUDGET, deps
   };
   const denyFilter = (rows) => rows.filter((r) => !DENY_PATH_PATTERNS.some((re) => re.test(rowPath(r))));
 
+  // `git grep -n` row: `path:line:content` (a C-quoted path keeps its quotes). The path is what the deny
+  // filter already unquotes; here we also need the LINE NUMBER, because a hit row must be redacted when its
+  // line sits inside a decision-reference comment block — the id may be on a sibling line the row never shows.
+  const GREP_ROW = /^("(?:[^"\\]|\\.)*"|[^:]+):(\d+):([\s\S]*)$/;
+  const parseRow = (row) => {
+    const m = GREP_ROW.exec(row);
+    if (!m) return null;
+    const p = m[1].length > 1 && m[1].startsWith('"') && m[1].endsWith('"') ? m[1].slice(1, -1) : m[1];
+    return { path: p, line: Number(m[2]), content: m[3] };
+  };
+
+  /**
+   * Redact grep hits by their FILE's comment blocks (a hit line inside a redacted block is replaced whole,
+   * keeping its `path:line:` prefix so the row shape and the file it names survive). Files are read at the
+   * SAME commit the rows came from and cached. `redacted_blocks` counts the distinct blocks that changed a row.
+   */
+  function redactGrepRows(rows, commit) {
+    const fileLines = new Map();   // path -> string[] | null (unreadable at this commit)
+    const linesAt = (p) => {
+      if (!fileLines.has(p)) {
+        try {
+          const t = deps.gitMaybe(["cat-file", "-t", `${commit}:${p}`]);
+          fileLines.set(p, t.code === 0 && t.out.trim() === "blob" ? deps.git(["show", `${commit}:${p}`]).split("\n") : null);
+        } catch { fileLines.set(p, null); }
+      }
+      return fileLines.get(p);
+    };
+    const changed = new Set();     // `${path}#${blockIndex}` — a redacted block that actually removed a row's content
+    const out = rows.map((row) => {
+      const pr = parseRow(row);
+      if (!pr) return row;
+      const stem = row.slice(0, row.length - pr.content.length);   // `path:line:`
+      const lines = linesAt(pr.path);
+      if (!lines) {
+        // unreadable at the commit: classify the row's own content (a single-line comment hit still redacts).
+        // A continuation line cannot be classified this way — never silently kept, the attempt is reported.
+        const single = redactDecisionReferences(pr.content);
+        if (single.redacted_blocks === 0) return row;
+        changed.add(`${pr.path}#?`);
+        return stem + REDACTED_COMMENT;
+      }
+      const idx = redactedCommentBlockRanges(lines).findIndex(([s0, e0]) => pr.line - 1 >= s0 && pr.line - 1 <= e0);
+      if (idx === -1) return row;
+      changed.add(`${pr.path}#${idx}`);
+      return stem + REDACTED_COMMENT;
+    });
+    return { rows: out, redacted_blocks: changed.size };
+  }
+
   function readFile(req) {
     const c = resolveCommit();
     const t = deps.gitMaybe(["cat-file", "-t", `${c}:${req.path}`]);
@@ -114,7 +168,8 @@ export function createExecutor({ root, ref = null, budget = DEFAULT_BUDGET, deps
     const s = req.start_line, e = Math.min(req.end_line, lines.length);
     if (s > lines.length) return base(req, "error", `start_line ${s} beyond end of file (${lines.length} lines)`, { tool: "read_file", path: req.path, total_lines: lines.length }, { reason: "RANGE_PAST_EOF" });
     const body = lines.slice(s - 1, e).map((l, i) => `${String(s + i).padStart(5)}| ${l}`).join("\n");
-    return base(req, "ok", body, { tool: "read_file", path: req.path, range: [s, e], total_lines: lines.length, command: `git show ${c.slice(0, 12)}:${req.path}` });
+    const red = redactDecisionReferences(body);
+    return base(req, "ok", red.text, { tool: "read_file", path: req.path, range: [s, e], total_lines: lines.length, command: `git show ${c.slice(0, 12)}:${req.path}` }, { redacted_blocks: red.redacted_blocks });
   }
 
   function grep(req) {
@@ -126,9 +181,10 @@ export function createExecutor({ root, ref = null, budget = DEFAULT_BUDGET, deps
     const rows = denyFilter(all);
     const dropped = all.length - rows.length;
     const kept = rows.slice(0, budget.max_grep_hits).map((l) => (l.length > 220 ? l.slice(0, 220) + " …" : l));
-    const text = (kept.length ? kept.join("\n") : "(no matches)") + (rows.length > kept.length ? `\n… ${rows.length - kept.length} more hits omitted` : "");
+    const red = redactGrepRows(kept, c);
+    const text = (red.rows.length ? red.rows.join("\n") : "(no matches)") + (rows.length > kept.length ? `\n… ${rows.length - kept.length} more hits omitted` : "");
     return base(req, "ok", text, { tool: "grep", pattern: req.pattern, fixed: req.fixed, paths: req.paths, command: `git grep ${req.fixed ? "-nF" : "-nE"} -e '${req.pattern}' ${c.slice(0, 12)} -- ${req.paths.join(" ")}` },
-      { hits: rows.length, denied_rows_dropped: dropped });
+      { hits: rows.length, denied_rows_dropped: dropped, redacted_blocks: red.redacted_blocks });
   }
 
   function archguard(req) {

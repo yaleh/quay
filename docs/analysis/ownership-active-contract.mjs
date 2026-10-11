@@ -73,6 +73,102 @@ export const DENY_PATH_PATTERNS = Object.freeze([
   /(^|\/)node_modules\//,
 ]);
 
+/**
+ * CONTENT half of the holdout guard (GOAL-034 blind benchmark follow-up, 2026-10-11).
+ *
+ * The path deny-list (above) closes whole answer surfaces, but a source comment can carry the SAME answer:
+ * `gate/config/types.ts` says "GateConfig / RunnerOptions moved OUT of this file (GOAL-034): they are not
+ * config-loading" — that is the ownership ruling the investigator is meant to REDISCOVER from the source.
+ * read_file/grep filter by PATH only, so the reading used to hand it over.
+ *
+ * A DECISION REFERENCE is an identifier that names a historical ruling (a goal, an acceptance criterion, a
+ * directive/ADR/SPEC, or a filed task id). Whatever comment block contains one is redacted — structurally,
+ * before it can reach the judge — rather than hoped to be short (hard rule 3b: close it, don't trust the clip).
+ */
+export const DECISION_REFERENCE_PATTERNS = Object.freeze([
+  /\bGOAL-\d+/,
+  /\bAC-\d+/,
+  /\bDIR-\d+/,
+  /\bADR-\d+/,
+  /\bSPEC-[\w-]+/,
+  /\bgap-[a-z0-9-]{6,}/,
+]);
+
+/** True if this line's text names a decision reference (decides whether its whole comment block is redacted). */
+export function hasDecisionReference(line) {
+  return DECISION_REFERENCE_PATTERNS.some((re) => re.test(line));
+}
+
+/** The single line a redacted comment block collapses to. Also what a redacted grep row's content becomes. */
+export const REDACTED_COMMENT = "// [redacted: decision reference]";
+
+// read_file renders each line as `%5d| <content>`. Strip that render prefix before classifying a line, but
+// keep it on whatever survives so the numbers still name the real file.
+const LINE_NUMBER_PREFIX = /^\s*\d+\| /;
+const splitLinePrefix = (line) => {
+  const m = LINE_NUMBER_PREFIX.exec(line);
+  return m ? [m[0], line.slice(m[0].length)] : ["", line];
+};
+
+/**
+ * Contiguous comment blocks over a list of lines: a run of `//` lines, or a `/* … *\/` block (its `*`
+ * continuation lines are inside the returned range). `contentOf(i)` yields the comment-relevant content of
+ * line i (a caller that renders line numbers strips them first). Returns [{start,end}], 0-based inclusive.
+ * A `/*` only opens a block when the line's content STARTS with it — a glob like `"**\/*.ts"` inside code is
+ * not a comment. A BARE `//` line (nothing after the slashes) is a paragraph separator, not part of a block:
+ * real headers use it between topics, and folding across it would blank a file's whole id-free header because
+ * one distant paragraph named a decision.
+ */
+const isLineComment = (t) => t.startsWith("//") && t.slice(2).trim().length > 0;
+function commentBlocks(lines, contentOf) {
+  const blocks = [];
+  let i = 0;
+  while (i < lines.length) {
+    const t = contentOf(i).trimStart();
+    if (isLineComment(t)) {
+      const start = i;
+      while (i < lines.length && isLineComment(contentOf(i).trimStart())) i++;
+      blocks.push({ start, end: i - 1 });
+    } else if (t.startsWith("/*")) {
+      const start = i;
+      while (i < lines.length && !contentOf(i).includes("*/")) i++;
+      if (i < lines.length) i++;                       // include the line carrying */
+      blocks.push({ start, end: i - 1 });
+    } else i++;
+  }
+  return blocks;
+}
+
+/** 0-based inclusive [start,end] ranges of comment blocks in raw source `lines` that carry a decision reference. */
+export function redactedCommentBlockRanges(lines) {
+  return commentBlocks(lines, (i) => lines[i])
+    .filter((b) => lines.slice(b.start, b.end + 1).some(hasDecisionReference))
+    .map((b) => [b.start, b.end]);
+}
+
+/**
+ * Replace EVERY contiguous comment block that contains a decision reference with a single
+ * `// [redacted: decision reference]` line; leave code lines and id-free comment blocks untouched. Pure.
+ * `text` may be raw source OR the executor's line-numbered render — a `NNNNN| ` prefix is preserved on the
+ * collapsed line so the surviving line numbers still name the real file. Returns { text, redacted_blocks }.
+ */
+export function redactDecisionReferences(text) {
+  const src = typeof text === "string" ? text : String(text ?? "");
+  if (!src) return { text: src, redacted_blocks: 0 };
+  const lines = src.split("\n");
+  const contents = lines.map((l) => splitLinePrefix(l)[1]);
+  const blocks = commentBlocks(lines, (i) => contents[i]).filter((b) => contents.slice(b.start, b.end + 1).some(hasDecisionReference));
+  if (!blocks.length) return { text: src, redacted_blocks: 0 };
+  const collapse = new Map(blocks.map((b) => [b.start, b]));
+  const out = [];
+  for (let i = 0; i < lines.length; i++) {
+    const b = collapse.get(i);
+    if (b) { out.push(splitLinePrefix(lines[i])[0] + REDACTED_COMMENT); i = b.end; }
+    else out.push(lines[i]);
+  }
+  return { text: out.join("\n"), redacted_blocks: blocks.length };
+}
+
 const IDENT = /^[A-Za-z0-9_$.:/@<>-]{1,120}$/;
 
 /** Normalise a repo-relative POSIX path; returns {ok, path|reason}. Never touches the filesystem. */
