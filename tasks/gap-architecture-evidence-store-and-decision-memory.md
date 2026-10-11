@@ -39,18 +39,18 @@ extra:
 
 ## Touches
 
-- docs/analysis/architecture-evidence-store.mjs
-- docs/analysis/architecture-decision-memory.mjs
-- docs/analysis/architecture-metrics.mjs
+- docs/analysis/architecture-evidence-store.mjs (new)
+- docs/analysis/architecture-decision-memory.mjs (new)
+- docs/analysis/architecture-metrics.mjs (new)
 - docs/analysis/ownership-active-loop.mjs
-- docs/analysis/architecture-evidence-store-replay.md
-- plugin/test/architecture-evidence-store.test.mjs
-- plugin/test/architecture-decision-memory.test.mjs
-- plugin/test/architecture-metrics.test.mjs
+- docs/analysis/architecture-evidence-store-replay.md (new)
+- plugin/test/architecture-evidence-store.test.mjs (new)
+- plugin/test/architecture-decision-memory.test.mjs (new)
+- plugin/test/architecture-metrics.test.mjs (new)
 - plugin/test/ownership-active-loop.test.mjs
-- plugin/fixtures/ownership-active-slice/goal-034-fork-point.arch.json
-- plugin/fixtures/ownership-active-slice/goal-035-fork-point.arch.json
-- plugin/fixtures/ownership-active-slice/goal-036-fork-point.arch.json
+- plugin/fixtures/ownership-active-slice/goal-034-fork-point.arch.json (new)
+- plugin/fixtures/ownership-active-slice/goal-035-fork-point.arch.json (new)
+- plugin/fixtures/ownership-active-slice/goal-036-fork-point.arch.json (new)
 - tasks/gap-architecture-evidence-store-and-decision-memory.md
 
 ## AC
