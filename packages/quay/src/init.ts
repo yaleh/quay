@@ -693,6 +693,18 @@ export interface InitResult {
    */
   baselineCheckoutReport?: string;
   /**
+   * The POST-WRITE branch-model re-judgment's own failure channel — set ONLY on the unborn-repository
+   * path (the auto-commit created the first commit, so the model was judged a second time AFTER the
+   * write). Carries the reason verbatim, for the same purpose as `failureReason` on the pre-write
+   * arms.
+   *
+   * ⛔ It cannot reuse `failureReason`: those arms promise "NOTHING WAS WRITTEN", and by the time this
+   * one can fire the config IS on disk. A caller must be able to tell the two apart, or the CLI would
+   * have to state a falsehood about the tree to report a true one about the verdict.
+   * (gap-init-branch-model-runs-before-auto-commit-fresh-repo-needs-two-runs)
+   */
+  postWriteBranchModelFailure?: string;
+  /**
    * The `.quay/plugin` link step's outcome for THIS run. Three states, never folded into a boolean
    * (硬规则 3b): `linked` (the link was refreshed), `not-evaluated` (the step RAN and could not
    * decide — an unknown or source-checkout plugin root) and `not-run` (this outcome path never
@@ -1643,11 +1655,14 @@ export function runInit(opts: InitOptions): InitResult {
   // now, so that first step has to live here; leaving it inside the fresh-install arm would make an
   // upgrade stop judging its baseline (silently writing `fork_baseline: develop` for a `develop` it
   // never validated) and `/quay:init` stop creating the doc branch.
-  const branchModel = ensureBranchModel(root, {
+  // `let`, not `const`: a repo that is UNBORN as this judgment runs gets a SECOND judgment later in
+  // the SAME run (the auto-commit below creates its first commit) — see the re-evaluation block
+  // after the write section. Every other path keeps the pre-write verdict, byte-identical.
+  let branchModel = ensureBranchModel(root, {
     adopt: opts.adoptBranchModel === true,
     dryRun: opts.dryRun === true,
   });
-  const branchModelReport = formatBranchModelReport(branchModel);
+  let branchModelReport = formatBranchModelReport(branchModel);
   if (!branchModel.ok && !opts.dryRun) {
     return {
       outcome: "branch-model-blocked",
@@ -1708,12 +1723,12 @@ export function runInit(opts: InitOptions): InitResult {
       };
     }
   }
-  const docBranch = ensureDocBranch(root, {
+  let docBranch = ensureDocBranch(root, {
     name: docBranchName,
     dryRun: opts.dryRun === true,
     adopt: opts.adoptBranchModel === true,
   });
-  const docBranchReport = formatDocBranchReport(docBranch);
+  let docBranchReport = formatDocBranchReport(docBranch);
   if (!docBranch.ok && opts.dryRun !== true) {
     return {
       outcome: "doc-branch-blocked",
@@ -1734,7 +1749,10 @@ export function runInit(opts: InitOptions): InitResult {
       failureReason: docBranch.detail,
     };
   }
-  const docBranchFields = {
+  // `let`: the unborn-repository re-evaluation after the write section REBUILDS this bundle from the
+  // second judgment. Every return ABOVE keeps the pre-write one, which is the whole point — the
+  // pre-write judgment is what makes a refused project leave the tree untouched.
+  let docBranchFields = {
     docBranch,
     docBranchReport,
     ...(baselineCheckoutReport !== null ? { baselineCheckoutReport } : {}),
@@ -2009,6 +2027,9 @@ export function runInit(opts: InitOptions): InitResult {
   const installStepsText = printInstallSteps();
   let autoCommit: AutoCommitReading | undefined;
   let pluginLink: PluginLinkOutcome = { state: "not-run", reason: "the run aborted before the link step" };
+  // The unborn-repository re-judgment's own failure channel (see the block after this try). `null`
+  // while nothing has gone wrong — including on every path that never reaches that block.
+  let postWriteBranchModelFailure: string | null = null;
   const gitignoreWarnings: string[] = [];
   try {
     // The backup lands FIRST (and only now, past every gate): between the copy and the rebuild there
@@ -2096,6 +2117,95 @@ export function runInit(opts: InitOptions): InitResult {
     };
   }
 
+  // ── The UNBORN-repository re-evaluation ───────────────────────────────────────────────────────
+  // (gap-init-branch-model-runs-before-auto-commit-fresh-repo-needs-two-runs)
+  //
+  // ============================ WHY THE ORDER IS WHAT IT IS ============================
+  // The branch model MUST be judged before the config WRITE — that is the load-bearing half: a
+  // project whose `develop` is a foreign line is refused with the tree untouched, and a run that had
+  // already rewritten the config could not keep that promise (a half-initialized project is worse
+  // than an uninitialized one). Verbatim inherited: the retired `quay-init.sh` ran
+  // `ensure_target_branch_model` at its line 1290 and `auto_commit_laid_down` at its 1328 — i.e.
+  // branch model → closed-set write → auto-commit, the SAME sequence, since long before this engine.
+  //
+  // ⛔ But "before the COMMIT" is NOT the load-bearing half, and it is the half that bites. An
+  // auto-commit is by construction a commit OF the just-written config, so it can only ever run after
+  // the write — and on a repository with ZERO commits it is also the event that brings the branch
+  // model's entire input into existence. `ensureBranchModel` therefore judged an unborn repository
+  // (`skipReason: "no-commits"`), `ensureDocBranch` read an unborn HEAD (`NOT-EVALUATED`), and the
+  // first commit appeared one step LATER. Measured 2026-10-12 on `git init -b develop` (0 commits):
+  // run 1 printed `branch model: SKIPPED` + `[NOT-EVALUATED] doc-branch`, then
+  // `auto-commit: committed 5 file(s)`; run 2 printed `[CREATED] doc-branch -> author … and switched
+  // the main checkout to it`. One init could not converge, and the run that DID converge changed the
+  // user's working branch with a bracketed line as its only notice.
+  //
+  // ============================ WHAT THIS BLOCK IS (AND IS NOT) ============================
+  // ⛔ NOT a second judgment path and NOT a relaxation of the pre-write gate: it re-runs the SAME
+  // `ensureBranchModel` / `moveCheckoutOntoLandingBaseline` / `ensureDocBranch` primitives, in the
+  // SAME order, that the NEXT `quay init` would have run — so one run now reaches the fixpoint two
+  // runs used to (ADR-004: one judgment source, never a second predicate).
+  //
+  // Gated on `skipReason === "no-commits"` — a POSITION, never a keyword match on a prose detail
+  // (hard rule 2). `not-a-git-worktree` is excluded on purpose: no commit this run makes can change
+  // it, so re-judging would only re-print the same verdict. Every repo that already HAD a commit
+  // keeps its pre-write verdict byte-identical — the common path is untouched.
+  if (branchModel.skipReason === "no-commits") {
+    const reJudged = ensureBranchModel(root, { adopt: opts.adoptBranchModel === true });
+    // The verdict is replaced EITHER WAY: the pre-write report said only "SKIPPED … nothing to branch
+    // from", so there is nothing in it to lose. What differs is whether the replacement is a VERDICT
+    // or a still-withheld one.
+    branchModel = reJudged;
+    branchModelReport = formatBranchModelReport(reJudged);
+    if (reJudged.skipReason !== null) {
+      // Still unborn: this run's auto-commit did not create a commit (declined, skipped, or not a
+      // repo). The verdict is genuinely WITHHELD, and `formatBranchModelReport` already renders it in
+      // the NOT-EVALUATED shape — the one that names the remedy ("re-run once the repository has a
+      // first commit"). ⛔ Never reshaped into the ok value (hard rule 3b).
+      postWriteBranchModelFailure = null;
+    } else if (!reJudged.ok) {
+      // A refusal from the SECOND judgment. Argued unreachable — `develop` can only enter this branch
+      // ABSENT (any resolvable `develop` would have made the pre-write probe return a real
+      // classification instead of `no-commits`), and an absent role is CREATED at the default tip, so
+      // it comes out `compatible`. Carried anyway because the alternative is to fall through and
+      // report a refused landing baseline as a written config with exit 0 — the one thing the
+      // pre-write arm exists to prevent (hard rule 3b).
+      postWriteBranchModelFailure =
+        "the branch model RE-JUDGED after the auto-commit created the repository's first commit is a " +
+        "REFUSAL — this run's config is already on disk, and the landing baseline is not a continuation " +
+        "of the project's default branch. Carry out the remedy above, then re-run init.";
+    } else {
+      // The baseline→checkout handoff, under the SAME two conditions the pre-write step uses (a
+      // baseline (re)established by THIS judgment AND a ref rename with zero tree effect). A fresh
+      // `git init -b main` reaches here with `develop` ABSENT ⇒ the call above just created it, and
+      // without this the doc-branch judgment would read the unmoved checkout and truthfully report a
+      // NO-OP — the exact silent no-op that handoff exists to end.
+      // ⛔ A FAILED handoff is NOT swallowed: continuing would land in that same silent no-op, so the
+      // failure rides the post-write channel instead (the pre-write step refuses with the same
+      // failure — only the wording about the tree differs, because here the tree was already written).
+      if (landingBaselineEstablishedNow(reJudged)) {
+        const checkout = moveCheckoutOntoLandingBaseline(root);
+        baselineCheckoutReport = formatBaselineCheckoutReport(checkout);
+        if (!checkout.ok) {
+          postWriteBranchModelFailure =
+            "could not move the main checkout onto the landing baseline this run established — " +
+            "refusing to report a converged branch model, because the doc-branch judgment below read " +
+            "the UNMOVED checkout and its NO-OP would then be an artefact of the failed move, not a " +
+            "statement about the project.";
+        }
+      }
+      docBranch = ensureDocBranch(root, {
+        name: docBranchName,
+        adopt: opts.adoptBranchModel === true,
+      });
+      docBranchReport = formatDocBranchReport(docBranch);
+      docBranchFields = {
+        docBranch,
+        docBranchReport,
+        ...(baselineCheckoutReport !== null ? { baselineCheckoutReport } : {}),
+      };
+    }
+  }
+
   return {
     outcome: isRebuild ? "rebuilt" : "written",
     configState: existing.state,
@@ -2117,6 +2227,9 @@ export function runInit(opts: InitOptions): InitResult {
     ...(freshVerdict.ok ? {} : { validationIssues: freshVerdict.issues }),
     installSteps: installStepsText,
     ...(autoCommit ? { autoCommit } : {}),
+    ...(postWriteBranchModelFailure !== null
+      ? { postWriteBranchModelFailure }
+      : {}),
     ...(gitignoreWarnings.length > 0 ? { failureDetail: gitignoreWarnings } : {}),
   };
 }
