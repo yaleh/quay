@@ -92,9 +92,52 @@ export function buildSliceInput({ graph, proposal, provenance }) {
   }
   if (restore.size === 0) return bad("NO_EDGE_EXPLAINED_BY_MOVES", { note: "no edge into a moved-from dir has its whole imported-name set covered by the moved symbols — the cut explains no edge, so there is no delta to compute (a partial cover is not guessed or pro-rated)" });
 
+  // ── Partial-cover complement: which names STAY? ─────────────────────────────────────────────────
+  // An edge into a moved-from dir whose importedNames are only PARTLY covered (≥1 name moves, ≥1 does not)
+  // is refused by ArchGuard (`切法覆盖不足`) unless the caller declares the remaining names as
+  // `proposedCut.stays`. The complement is computed from the SAME real edges — a name is emitted only if it
+  // literally occurs in some edge's `importedNames` — aggregated per moved-from dir, and emitted as
+  // `{ dir, symbols }[]` (the primitive's SliceStay shape). It is NOT a "make it pass" patch: it enters the
+  // primitive's documented PARTIAL-MIGRATION path, where the original edge SURVIVES (it is not removed) and
+  // each genuinely-moved symbol adds a retargeted edge. A declaration that ArchGuard cannot reconcile is
+  // refused HERE rather than emitted: the same name declared staying under two different dirs, or a name both
+  // moved and staying, makes the report `目的地冲突` => not-evaluated. The honest degradation is to emit no
+  // `stays` at all and let the cut stay under-covered — never a fabricated success.
+  // (Two further invariants hold BY CONSTRUCTION and are asserted on the output in the test rather than
+  //  guarded here: a declared name always occurs on a real edge's `importedNames`, and the declared set is
+  //  always disjoint from every `moves[].symbols` — both follow from `allMoved` below.)
+  const allMoved = new Set();
+  for (const [, syms] of movedFrom) for (const x of syms) allMoved.add(x);
+  const staysByDir = new Map();      // destination dir -> Set(name) that stays there
+  const stayedOwners = new Map();    // name -> Set(dir) it was seen staying in
+  // Scope: EVERY internal edge the cut touches — the primitive decides "touched" by imported NAME
+  // (`names.some(n => destOfSymbol.has(n))`), NOT by `e.to` being a moved-from dir. An edge `X -> Y` whose
+  // importedNames merely CONTAIN a moved name is reconciled too (the name may be re-exported through Y), so
+  // its non-moved names must be declared staying in Y as well. Covering only edges INTO a moved-from dir
+  // leaves exactly those collateral edges uncovered.
+  for (const e of graph.edges || []) {
+    if (e.from === e.to || !dirs.has(e.to)) continue;
+    const names = e.importedNames || [];
+    if (!names.some((n) => allMoved.has(n))) continue;   // the cut does not touch this edge at all
+    for (const n of names) {
+      if (allMoved.has(n)) continue;                     // this name is moved, not staying
+      if (!staysByDir.has(e.to)) staysByDir.set(e.to, new Set());
+      staysByDir.get(e.to).add(n);
+      if (!stayedOwners.has(n)) stayedOwners.set(n, new Set());
+      stayedOwners.get(n).add(e.to);
+    }
+  }
+  const crossDir = [...stayedOwners.entries()].filter(([, owners]) => owners.size > 1).map(([n]) => n).sort();
+  let stays = [], staysSkipped = null;
+  if (staysByDir.size === 0) staysSkipped = null;                                  // nothing partial — byte-identical output
+  else if (crossDir.length) staysSkipped = `CROSS_DIR_CONFLICT:${crossDir.join(",")}`;
+  else stays = [...staysByDir.entries()].map(([dir, set]) => ({ dir, symbols: [...set].sort() })).sort((a, b) => (a.dir < b.dir ? -1 : a.dir > b.dir ? 1 : 0));
+  const partialEdges = stays.length === 0 ? [] : (graph.edges || []).filter((e) => e.from !== e.to && dirs.has(e.to) && (e.importedNames || []).some((n) => allMoved.has(n)) && (e.importedNames || []).some((n) => !allMoved.has(n))).map((e) => ({ from: e.from, to: e.to }));
+
   // dirs the cut legitimately changes: subject, move endpoints, declared consumers, AND both ends of every edge the cut
-  // removes (an importer dir such as `cli` loses an edge by construction — it is not "untouched").
-  const involved = new Set([s.subject, ...s.moves.flatMap((m) => [m.from, m.to]), ...(Array.isArray(s.consumers) ? s.consumers.map((c) => c.dir) : []), ...[...restore.values()].flatMap((e) => [e.from, e.to])]);
+  // removes (an importer dir such as `cli` loses an edge by construction — it is not "untouched") — and both ends of
+  // every PARTIAL edge (its importer keeps the surviving edge but gains a retargeted one, so it is not "untouched" either).
+  const involved = new Set([s.subject, ...s.moves.flatMap((m) => [m.from, m.to]), ...(Array.isArray(s.consumers) ? s.consumers.map((c) => c.dir) : []), ...[...restore.values()].flatMap((e) => [e.from, e.to]), ...partialEdges.flatMap((e) => [e.from, e.to])]);
   const forbidden = [];
   for (const f of Array.isArray(s.forbidden_new_edges) ? s.forbidden_new_edges : []) {
     if (f && dirs.has(f.from) && dirs.has(f.to)) forbidden.push({ from: f.from, to: f.to });
@@ -103,11 +146,14 @@ export function buildSliceInput({ graph, proposal, provenance }) {
   return {
     ok: true,
     explained_by: explainedBy,
+    stays,
+    stays_skipped: staysSkipped,
+    partial_edges: partialEdges,
     slice: {
       subject: s.subject,
       concern: String(proposal.concern).slice(0, 300),
       provenance,
-      proposedCut: { note: "structured cut supplied by the semantic investigator; the delta below is computed from the graph", moves: s.moves.map(({ file, from, to, symbols, note }) => ({ file, from, to, symbols, ...(note ? { note } : {}) })), consumers },
+      proposedCut: { note: "structured cut supplied by the semantic investigator; the delta below is computed from the graph", moves: s.moves.map(({ file, from, to, symbols, note }) => ({ file, from, to, symbols, ...(note ? { note } : {}) })), consumers, ...(stays.length ? { stays } : {}) },
       mustNotChange: { forbiddenNewEdges: forbidden, untouchedDirs: [...dirs].filter((d) => !involved.has(d)).sort(), note: "untouchedDirs derived: every internal dir the cut does not name" },
       negativeControl: { description: "re-inject the cut edge(s); the subject's cycle membership must return to its before-state", restoreEdges: [...restore.values()] },
     },
@@ -153,6 +199,12 @@ export function normalizeReport(report, exit_code) {
       forbidden_new_edges: (report.mustNotChange || {}).forbiddenNewEdges || [],
     },
     strengthened_edges: cd.strengthenedEdges || [],
+    // Per-edge reconciliation, emitted by ArchGuard only on the partial-migration path (a `stays` clause /
+    // a multi-destination or barrel edge). Read it to pin a claim on ONE edge's own entry instead of on the
+    // report-wide status — the primitive matches coverage by symbol NAME, not by edge, so a name declared
+    // staying for dir A also settles the same-named import on an edge into dir B.
+    accounting: (report.accounting || []).map((a) => ({ edge: a.edge, names: a.names || [], moving: a.moving || [], staying: a.staying || [], unaccounted: a.unaccounted || [], destinations: a.destinations || [], barrel: !!a.barrel, certainty: a.certainty ?? null, ...(a.survives ? { survives: true, strength: a.strength ?? null } : {}) })),
+    affected_consumers: (report.affectedConsumers || []).map((c) => ({ edge: c.edge, source_dir: c.sourceDir, moved_from_dir: c.movedFromDir, moved_to_dir: c.movedToDir, imported_names: c.importedNames || [], becomes: c.becomes })),
     negative_control: { restore_edges: nc.restoreEdges || [], members_after_restore: nc.subjectSccMembersAfterRestore || [], subject_back_in_scc: !!nc.subjectBackInScc, falsified: !!nc.falsified },
     exit_code,
   };
@@ -209,7 +261,15 @@ export function computeSliceDelta({ root, commit, proposal, deps = {}, now = () 
   const full = { ...baseProv, slice_sha256: first.slice_sha256, report_sha256: first.report_sha256, command: first.command, exit_code: first.r.status, explained_by: built2.explained_by,
     tool_reported: first.report?.provenance?.tool ?? null, provenance_consistency: first.report?.provenance?.provenanceConsistency ?? null };
   if (!first.report) return { status: "not-evaluated", reason: `NO_REPORT:exit=${first.r.status}`, provenance: full };
-  if (first.report.status !== "evaluated" || first.r.status === 2) return { status: "not-evaluated", reason: String(first.report.reason || "ArchGuard slice-delta reported not-evaluated").slice(0, 300), provenance: full };
+  if (first.report.status !== "evaluated" || first.r.status === 2) {
+    // Honesty signal (rule 3b): if we DECLARED a partial cover (`stays`) and the tool still refused for a
+    // coverage shortfall, the installed CLI does not implement the `stays` clause — the declaration is inert
+    // here. Distinguish "the declaration worked" from "the tool ignored it" instead of reporting one shape.
+    const declared = built2.slice.proposedCut.stays || [];
+    const reason = String(first.report.reason || "ArchGuard slice-delta reported not-evaluated").slice(0, 300);
+    const ignored = declared.length > 0 && /覆盖不足|uncovered/i.test(reason);
+    return { status: "not-evaluated", reason, provenance: full, ...(declared.length ? { stays_declared: declared, stays_ignored_by_tool: ignored } : {}) };
+  }
 
   // The primitive reports the cycle AS SEEN FROM `subject`. If the model chose the dir that LEAVES (e.g. fan-in), `sccLeft`
   // lists everyone else and a naive "size 6 -> 1" reads as nonsense. Headline reading = a CANONICAL subject chosen by rule
