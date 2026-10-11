@@ -2,7 +2,7 @@
 id: gap-ci-runner-container-not-recycled-state-leaks-across-jobs
 title: CI runner 改为 PID1=systemd 后容器不再回收：EPHEMERAL runner
   只在容器内重启服务（NRestarts=378），跨 job 累积的 /root 状态让 v0.19.0 发布门误判
-status: needs-human
+status: todo
 labels:
   - gap
   - defect
