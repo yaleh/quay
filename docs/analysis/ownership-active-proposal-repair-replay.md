@@ -328,6 +328,18 @@ const legalDirs = () => ({ valid_dirs: [...internalNodes(graph)].sort() });
 `recordedLegalDirs` is untouched: it still reads only `detail.valid_dirs` and still never runs its own
 `find`/`grep`. No threshold, no gate, and no fail-closed behaviour was relaxed; no Goal was created.
 
+**The negative control resolves into two arms, and it is worth naming both** (the task's AC3 writes them as
+one). For a graph that was never built, the refusal reason is `PACKAGE_GRAPH_BUILD_FAILED` /
+`ARCHGUARD_CLI_NOT_FOUND` / `NO_MODULE_GRAPH_IN_ARCHJSON` — all three are in the module's **pre-existing**
+`TOOL_LIMITATION_PREFIXES`, so `attemptRepair` terminates **by classification** (`tool_limitation`) at attempt
+0, before the legal-dirs check is ever reached: 0 judge calls, 0 rounds, no `detail`. The literal
+`NO_RECORDED_LEGAL_DIRS` abstention is the *other* arm: a **repairable** refusal
+(`NO_EDGE_EXPLAINED_BY_MOVES` / `MOVE_TO_NOT_AN_INTERNAL_DIR`) whose record carries no list — covered by the
+pre-existing test *"a record with NO recorded legal dirs abstains instead of recomputing a list of its own"*.
+Both arms are fail-closed and both make 0 judge calls; neither is reachable by fabricating a list. AC3 is
+satisfied across the two. ⛔ This task did **not** re-classify those three reasons as repairable to make the
+AC's sentence literally true — that would be exactly the gate relaxation the DoD forbids.
+
 ### 7.4 Production-shape replay — the measurement (AC2)
 
 Input = the **real** record's `proposed_slice` from the run above, plus the package graph of
