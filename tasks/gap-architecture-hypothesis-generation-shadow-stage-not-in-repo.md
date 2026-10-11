@@ -136,6 +136,7 @@ The results are in the production evidence store under `experiment: E-HYPGEN-1` 
 - docs/analysis/arch-hypothesis-generation-prompts/verifier.txt (new)
 - docs/analysis/arch-hypothesis-generation-prompts/reviewer.txt (new)
 - plugin/test/arch-hypothesis-generation.test.mjs (new)
+- .gitignore
 
 ## Blocker
 
