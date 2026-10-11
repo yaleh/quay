@@ -12,6 +12,7 @@ import assert from "node:assert/strict";
 import fs from "node:fs";
 import path from "node:path";
 import crypto from "node:crypto";
+import { execFileSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
 
 import {
@@ -20,6 +21,7 @@ import {
   repairLockIdentity, resolveRepairLock, RepairLockError, assertRepairBudget,
   buildRepairFeedback, renderRepairPrompt, parseRepairRevision, isPositiveDelta,
   attemptRepair, REPAIR_VERSION, PRODUCTION_OBSERVED_CLASSES,
+  declaredExportNames, declaredExportsForMoves, defaultReadFileAtCommit, moveSourcePath,
 } from "../../docs/analysis/ownership-active-proposal-repair.mjs";
 import { computeSliceDelta, SLICE_DELTA_SURFACE } from "../../docs/analysis/ownership-active-slice-adapter.mjs";
 import { runActiveInvestigation } from "../../docs/analysis/ownership-active-loop.mjs";
@@ -424,6 +426,104 @@ test("AC2: the ARCHGUARD-ORIGIN refusal now engages the repair — production re
   const shown = JSON.parse(judge.prompts[0].slice(judge.prompts[0].indexOf("{", judge.prompts[0].indexOf("STRUCTURAL FACTS"))));
   assert.deepEqual(shown.legal_dirs, ["", "cli", "fan-in", "gate", "gate/config", "gate/factories", "kernel", "ts-demo"]);
   assert.equal(shown.locked.subject, "gate/config");
+});
+
+// ── gap-ownership-active-repair-unknown-symbol-guard-false-positive (2026-10-11) ─────────────────
+// SYMBOL EXISTENCE IS A DIRECT QUANTITY (硬规则 4b). The guard used to ask "does a directory edge import
+// it?" — a PROXY that reads `false` for every real export no OTHER directory imports yet, so 6/16 genuine
+// symbols of the live candidate were recorded as FABRICATED and every repair round was voided. The
+// criterion is now the union of the two quantities that can each be read directly: the graph edges'
+// `importedNames` ∪ the DECLARED EXPORTS of the move's own file AT THE LOCKED COMMIT (`git show`, so an
+// uncommitted working-tree edit is invisible). Nothing below injects a symbol list; the second source is
+// the real repository at `ec00fcc00`, read by the module's own production default reader.
+const liveReader = (spec) => defaultReadFileAtCommit(REPO, spec);
+const liveSymbolOpts = { scopeRoot: "packages/quay/src", commit: LIVE_COMMIT, readFileAtCommit: liveReader };
+const LIVE_MOVE_SYMBOLS = LIVE_PROPOSED_SLICE.moves.flatMap((m) => m.symbols);
+const LIVE_FALSE_POSITIVES = ["AcceptanceResult", "AcceptanceVerdict", "GateDefinition", "GateVerdict", "GateVerdictKind", "NotEvaluatedCause"];
+
+test("AC1: existence = graph edges ∪ the move's own file exports at the LOCKED commit — parsed, never guessed", () => {
+  // (a) the export parser reads the declaration forms AND the multi-line export-list (re-export) form
+  const typesAtCommit = liveReader(`${LIVE_COMMIT}:packages/quay/src/gate/types.ts`);
+  const loaderAtCommit = liveReader(`${LIVE_COMMIT}:packages/quay/src/gate/config/loader.ts`);
+  assert.equal(typeof typesAtCommit, "string", "the production default reader must read a committed blob");
+  assert.equal(typeof loaderAtCommit, "string");
+  for (const n of ["GateVerdict", "GateDefinition", "GateVerdictKind", "GateFn"]) assert.ok(declaredExportNames(typesAtCommit).has(n), n);
+  assert.ok(declaredExportNames(loaderAtCommit).has("GatesConfig"), "the multi-line `export type { … }` re-export form counts");
+  assert.ok(declaredExportNames("export const a = 1;\nexport async function b() {}\nexport { a as c, b };\nexport class D {}").has("c"));
+  // (b) a name that occurs only in a COMMENT is not an export — judge the code, not the prose (硬规则 2)
+  assert.ok(!declaredExportNames("// export type NotReal = 1;").has("NotReal"));
+  assert.ok(!declaredExportNames("/* export const AlsoNotReal = 1; */").has("AlsoNotReal"));
+  // (c) the file is read scope-root-relative and cannot escape the scope
+  assert.equal(moveSourcePath("packages/quay/src", "gate/types.ts"), "packages/quay/src/gate/types.ts");
+  for (const bad of ["../../etc/passwd", "/etc/passwd", ""]) assert.equal(moveSourcePath("packages/quay/src", bad), null, JSON.stringify(bad));
+  // (d) an unreadable blob proves NOTHING — `null`, never "the file exports everything" (硬规则 3b)
+  assert.equal(defaultReadFileAtCommit(REPO, `${LIVE_COMMIT}:packages/quay/src/gate/nope.ts`), null);
+  assert.equal(defaultReadFileAtCommit("/nonexistent-root-for-ac1", `${LIVE_COMMIT}:packages/quay/src/gate/types.ts`), null);
+  assert.deepEqual(unknownSymbols(liveGraph(), [{ file: "gate/nope.ts", from: "gate", to: "kernel", symbols: ["ghost"] }], liveSymbolOpts), ["ghost"]);
+});
+
+test("AC2: PRODUCTION SHAPE — the live candidate's 6 false positives disappear; all 16 symbols are accounted for", () => {
+  assert.equal(LIVE_MOVE_SYMBOLS.length, 16, "the carrier's cut moved 16 symbols");
+  // CONTROL (硬规则 4 推论四): with the SECOND source switched off, the SAME call reproduces the defect
+  // exactly. If the fix did nothing, this is what the fixed call would have returned.
+  assert.deepEqual(unknownSymbols(liveGraph(), LIVE_PROPOSED_SLICE.moves), LIVE_FALSE_POSITIVES);
+  // THE FIX: every one of the 16 is accounted for — the 6 real exports of `gate/types.ts` /
+  // `gate/acceptance-runner.ts` at `ec00fcc00` are proved by the file they are declared in.
+  assert.deepEqual(unknownSymbols(liveGraph(), LIVE_PROPOSED_SLICE.moves, liveSymbolOpts), []);
+
+  // …and the JUDGE is shown the same two-source notion of "known": the prompt must not tell the judge that
+  // a real export "the graph does not know" is not a fix (that is the same mislabelling one layer up).
+  const declaredUnion = [...declaredExportsForMoves(LIVE_PROPOSED_SLICE.moves, liveSymbolOpts).values()].flatMap((s) => [...s]);
+  const fb = buildRepairFeedback({ graph: liveGraph(), legalDirs: ["gate"], sliceDelta: { status: "not-evaluated", reason: "NO_EDGE_EXPLAINED_BY_MOVES" }, moves: LIVE_PROPOSED_SLICE.moves, hypothesis: "h", concernKey: "k", declaredSymbols: declaredUnion });
+  for (const n of LIVE_FALSE_POSITIVES) assert.ok(fb.known_symbols.includes(n), `the judge must not be told a real export is unknown: ${n}`);
+});
+
+test("AC3: NEGATIVE CONTROL — the guard still has teeth: a fabricated name and a near-miss spelling void the round", async () => {
+  const fabricated = LIVE_PROPOSED_SLICE.moves.map((m, i) => (i === 2 ? { ...m, symbols: [...m.symbols, "fabricatedLoaderFn", "loadWorkspaceGatez"] } : m));
+  assert.deepEqual(unknownSymbols(liveGraph(), fabricated, liveSymbolOpts), ["fabricatedLoaderFn", "loadWorkspaceGatez"], "exactly the two — no more, no fewer");
+  const refused = liveComputeDelta()({ commit: LIVE_COMMIT, proposal: LIVE_PROPOSAL });
+  const carrier = { contract_version: "ownership-active-investigation/1", commit: LIVE_COMMIT, concern_key: "package-cycle|gate/config", envelope: { concern: "the gate 4-package cycle" }, proposed_slice: LIVE_PROPOSED_SLICE, slice_delta: refused };
+  const judge = scriptedJudge([{ action: "revise", moves: fabricated, why: "move everything into kernel" }]);
+  const delta = liveComputeDelta();
+  // root = REPO and NO injected reader: this drives the module's own production default (a commit-scoped git show).
+  const res = await attemptRepair({ candidateRecord: carrier, root: REPO, invokeJudge: judge, deps: { graph: liveGraph(), computeDelta: delta } });
+  assert.equal(delta.calls.length, 0, "an unaccounted symbol must never reach the primitive");
+  assert.equal(res.outcome, "abstained");
+  assert.equal(res.repaired_delta, null);
+  assert.equal(res.judge_calls, 3);
+  assert.ok(res.attempts.filter((a) => a.judge_called).every((a) => a.bucket === "unknown_symbol" && a.matched === "UNKNOWN_SYMBOL" && a.computed === false), JSON.stringify(res.attempts));
+  assert.deepEqual(res.attempts.find((a) => a.judge_called).unknown_symbols, ["fabricatedLoaderFn", "loadWorkspaceGatez"]);
+});
+
+test("AC4: NEGATIVE CONTROL — an UNCOMMITTED working-tree export is not evidence; only the locked commit counts", () => {
+  // ⛔ The mutation deliberately targets a DISPOSABLE repo under os.tmpdir, never a tracked file: `scripts/
+  // test.sh`'s `checked-in-write-check` refuses any test that writes into the checked-in tree, and it is
+  // right to — a test that mutates a tracked source file is a machine for flaking its neighbours. Restoring
+  // is `rmSync` of the whole repo, which is strictly stronger than a cp backup (nothing to restore).
+  const dir = fs.mkdtempSync(path.join(process.env.TMPDIR || "/tmp", "ac4-commit-scope-"));
+  try {
+    const git = (...args) => execFileSync("git", ["-C", dir, "-c", "user.email=t@example.com", "-c", "user.name=t", ...args], { encoding: "utf8" });
+    const rel = "packages/demo/src/gate/types.ts";
+    fs.mkdirSync(path.dirname(path.join(dir, rel)), { recursive: true });
+    fs.writeFileSync(path.join(dir, rel), "export interface CommittedThing {}\n");
+    git("init", "-q"); git("add", "-A"); git("commit", "-q", "-m", "seed");
+    const commit = git("rev-parse", "HEAD").trim();
+    const reader = (spec) => defaultReadFileAtCommit(dir, spec);   // the module's own production default
+    assert.ok(declaredExportNames(reader(`${commit}:${rel}`)).has("CommittedThing"), "a committed export must be proved");
+
+    // The UNCOMMITTED append: present in the working tree, absent from the commit.
+    fs.appendFileSync(path.join(dir, rel), "export type UncommittedProbe = true;\n");
+    // CONTROL (硬规则 4 推论四): the append really landed — the WORKING TREE text carries the export, so the
+    // assertions below are not vacuous…
+    assert.ok(declaredExportNames(fs.readFileSync(path.join(dir, rel), "utf8")).has("UncommittedProbe"), "the append did not land — the assertion below would be vacuous");
+    // …the commit-scoped read does NOT see it…
+    assert.ok(!declaredExportNames(reader(`${commit}:${rel}`)).has("UncommittedProbe"), "the reader must read the COMMIT, not the working tree");
+    // …so the criterion proves the committed name and reports the uncommitted one unknown — the two are
+    // distinguished by the ONE thing that differs between them: whether the locked commit exports them.
+    const graph = { nodes: [{ id: "gate", type: "internal" }], edges: [] };
+    const opts = { scopeRoot: "packages/demo/src", commit, readFileAtCommit: reader };
+    assert.deepEqual(unknownSymbols(graph, [{ file: "gate/types.ts", from: "gate", to: "kernel", symbols: ["CommittedThing", "UncommittedProbe"] }], opts), ["UncommittedProbe"]);
+  } finally { fs.rmSync(dir, { recursive: true, force: true }); }
 });
 
 test("AC3: fail-closed — a graph that was never built stays listless, and the repair still abstains at attempt 0", async () => {

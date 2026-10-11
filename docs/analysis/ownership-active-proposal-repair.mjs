@@ -16,15 +16,29 @@
 //   * writes no source file, creates no directory that does not already exist;
 //   * uses NO holdout (A/B) result as feedback or as a candidate-generation source;
 //   * hardcodes NO answer — the legal directories and symbols are read from the SAME ArchGuard graph
-//     data the original investigation round already held, never from a freshly invented list.
+//     data the original investigation round already held, never from a freshly invented list;
+//   * holds NO filesystem capability of its own: every file it reads is read through the injected,
+//     COMMIT-SCOPED blob reader (`git show <commit>:<path>` by default) — never the working tree, and
+//     never by guessing a name.
+//
+// SYMBOL EXISTENCE IS A DIRECT QUANTITY (硬规则 4b, 2026-10-11). "The graph's directory edges import it"
+// was a PROXY for "the symbol exists", and it reads `false` for every real export that no OTHER directory
+// imports yet — including the 6 genuine exports (`GateVerdict`, `GateDefinition`, `GateVerdictKind`,
+// `AcceptanceResult`, `AcceptanceVerdict`, `NotEvaluatedCause`) of the live candidate, which the old
+// criterion branded as FABRICATED. A guard that accuses real code cannot repair anything: every round
+// voided, the evidence mislabelled. The criterion is now the union of the two quantities that can each be
+// read directly: the graph edges' `importedNames` ∪ the DECLARED EXPORTS of the move's own source file at
+// the LOCKED commit (a `git show`, so an uncommitted working-tree edit is invisible).
 //
 // FAIL-CLOSED (硬规则 3b): a rejection that cannot be parsed, or that is not one of the known cut-level
 // classes, is `honest_abstain` — never silently shaped like "repairable". A judge revision naming a
-// symbol absent from the graph is NOT "covered but missing"; it is an invalid revision.
+// symbol absent from BOTH sources is NOT "covered but missing"; it is an invalid revision. And a file the
+// reader could not read proves NO export — "unreadable" is never reported in the shape of "proved".
 
 import crypto from "node:crypto";
-import { DEFAULT_BUDGET } from "./ownership-active-contract.mjs";
+import { DEFAULT_BUDGET, normalizeRepoPath } from "./ownership-active-contract.mjs";
 import { computeSliceDelta } from "./ownership-active-slice-adapter.mjs";
+import { defaultDeps } from "./ownership-active-executor.mjs";
 import { appendRepairAttemptRecord } from "./architecture-evidence-store.mjs";
 
 const sha = (s) => crypto.createHash("sha256").update(s).digest("hex");
@@ -122,14 +136,98 @@ export function graphSymbols(graph) {
   return s;
 }
 
+// ── the SECOND, direct source of symbol existence: the move's own file AT THE LOCKED COMMIT ────────
 /**
- * Symbols a revision names that appear NOWHERE in the graph. An unknown symbol is NOT "in the graph but
- * uncovered" — the revision is invalid and must not be able to produce a computed delta.
+ * Names a TypeScript module declares as exported, parsed from its SOURCE TEXT. Covers the declaration
+ * forms (`export [declare] [abstract] [async] function|class|interface|type|enum|const|let|var NAME`)
+ * and the export-list forms (`export { a, b as c }`, `export type { … }`, with or without a `from`).
+ *
+ * ⛔ Declared boundaries, each of which makes the reading NARROWER (the fail-closed direction, 硬规则 3b):
+ * it does NOT follow `export * from "…"` (the name is declared in ANOTHER file, which this criterion does
+ * not read) and does not resolve `export default` (not importable by name anyway). A name behind either
+ * boundary stays "unproven" — it is never assumed exported.
  */
-export function unknownSymbols(graph, moves) {
-  const known = graphSymbols(graph);
+export function declaredExportNames(source) {
   const out = new Set();
-  for (const m of moves || []) for (const s of m?.symbols || []) if (!known.has(s)) out.add(s);
+  if (typeof source !== "string" || !source) return out;
+  // A name mentioned in a comment is not an export (硬规则 2: judge the code, not the prose).
+  const code = source.replace(/\/\*[\s\S]*?\*\//g, "").replace(/(^|[^:"'`\\])\/\/.*$/gm, "$1");
+  const decl = /\bexport\s+(?:declare\s+)?(?:abstract\s+)?(?:(?:async\s+)?function\s+|(?:const|let|var)\s+(?:enum\s+)?|class\s+|interface\s+|type\s+|enum\s+)([A-Za-z_$][\w$]*)/g;
+  for (const m of code.matchAll(decl)) out.add(m[1]);
+  const list = /\bexport\s+(?:type\s+)?\{([^}]*)\}/g;
+  for (const m of code.matchAll(list)) {
+    for (const part of m[1].split(",")) {
+      const t = part.trim();
+      if (!t) continue;
+      const alias = t.match(/\bas\s+([A-Za-z_$][\w$]*)\s*$/);
+      const name = alias ? alias[1] : t.match(/^([A-Za-z_$][\w$]*)/)?.[1];
+      if (name) out.add(name);
+    }
+  }
+  return out;
+}
+
+/**
+ * The repo-relative path a move's `file` names, or `null` when it is not a well-formed in-repo path.
+ * `file` is declared RELATIVE TO `scope_root`, and the same `normalizeRepoPath` the loop's own executor
+ * uses refuses absolute paths, `..` segments and denied paths — a path that does not normalise proves no
+ * export (it is never reinterpreted, never guessed at).
+ */
+export function moveSourcePath(scopeRoot, file) {
+  if (typeof file !== "string" || typeof scopeRoot !== "string" || !file.trim()) return null;
+  // `file` is RELATIVE to scope_root by contract: an absolute one is refused rather than silently re-rooted.
+  if (file.startsWith("/") || file.includes("\0")) return null;
+  const n = normalizeRepoPath(scopeRoot ? `${scopeRoot}/${file}` : file);
+  return n.ok ? n.path : null;
+}
+
+/**
+ * Read ONE blob AT A COMMIT — `git show <commit>:<path>`, never the working tree. This is the direct
+ * quantity the guard was missing (硬规则 4b). The default goes through the same injectable git surface
+ * the rest of the analysis layer uses; an injected reader lets the suite drive the criterion with no git.
+ * An unreadable blob returns `null` — fail-closed: "could not read the file" must never be reported in
+ * the same shape as "the file proves the symbol" (硬规则 3b).
+ */
+export function defaultReadFileAtCommit(root, spec) {
+  const r = defaultDeps(root).gitMaybe(["show", spec]);
+  return r.code === 0 && typeof r.out === "string" ? r.out : null;
+}
+
+/**
+ * The declared exports of every file the given moves name, at the LOCKED commit, keyed by `move.file`.
+ * A move with no `file`, or whose path does not normalise, or whose blob cannot be read, maps to an
+ * EMPTY set — never to "everything is exported".
+ */
+export function declaredExportsForMoves(moves, { scopeRoot, commit, readFileAtCommit } = {}) {
+  const out = new Map();
+  if (typeof readFileAtCommit !== "function" || typeof scopeRoot !== "string" || !isStr(commit, 6)) return out;
+  for (const m of moves || []) {
+    if (!isStr(m?.file) || out.has(m.file)) continue;
+    const rel = moveSourcePath(scopeRoot, m.file);
+    out.set(m.file, rel === null ? new Set() : declaredExportNames(readFileAtCommit(`${commit}:${rel}`)));
+  }
+  return out;
+}
+
+/**
+ * Symbols a revision names that NO direct source can account for. A symbol EXISTS when it appears on some
+ * graph edge's `importedNames` **or** is a real export of the source file the move declares, read AT THE
+ * LOCKED COMMIT. An unknown symbol is NOT "in the graph but uncovered" — the revision is invalid and must
+ * not be able to produce a computed delta.
+ *
+ * @param {object} [opts] `{ scopeRoot, commit, readFileAtCommit }` — the second, direct source. Omitted or
+ *                        unreadable ⇒ graph-only, i.e. exactly the pre-fix reading (no silent widening).
+ */
+export function unknownSymbols(graph, moves, opts = {}) {
+  const known = graphSymbols(graph);
+  const needing = (moves || []).filter((m) => (m?.symbols || []).some((s) => !known.has(s)));
+  // Only names that no edge carries need the second source — read each such move's file at the commit once.
+  const declared = needing.length ? declaredExportsForMoves(needing, opts) : new Map();
+  const out = new Set();
+  for (const m of moves || []) {
+    const d = isStr(m?.file) ? declared.get(m.file) : null;
+    for (const s of m?.symbols || []) if (!known.has(s) && !(d && d.has(s))) out.add(s);
+  }
   return [...out].sort();
 }
 
@@ -210,8 +308,13 @@ export function assertRepairBudget({ maxRounds = REPAIR_LIMITS.maxRounds, maxWal
 }
 
 // ── the judge-facing feedback + prompt (facts only — no historical answer, no holdout) ──────────
-/** Build the STRUCTURED facts fed to the tool-less repair judge. Pure; contains no "correct answer". */
-export function buildRepairFeedback({ graph, legalDirs, sliceDelta, moves, hypothesis, concernKey, attemptNo = 1, scopeRoot = "", subject = "" }) {
+/**
+ * Build the STRUCTURED facts fed to the tool-less repair judge. Pure; contains no "correct answer".
+ * `declaredSymbols` are the LOCKED-COMMIT exports of the files the current moves name — without them the
+ * prompt would tell the judge that real exports "the graph does not know" are not fixes, which is the very
+ * mislabelling this module was fixed to stop (a fact the judge is shown must be as direct as the guard).
+ */
+export function buildRepairFeedback({ graph, legalDirs, sliceDelta, moves, hypothesis, concernKey, attemptNo = 1, scopeRoot = "", subject = "", declaredSymbols = [] }) {
   return {
     attempt_no: attemptNo,
     concern_key: concernKey ?? null,
@@ -221,7 +324,7 @@ export function buildRepairFeedback({ graph, legalDirs, sliceDelta, moves, hypot
     // Legal directories come from the ORIGINAL round's ArchGuard graph data — never a fresh find/grep.
     legal_dirs: Array.isArray(legalDirs) ? legalDirs : internalNodeIds(graph),
     uncovered_symbols: isArr(moves) ? coverageGaps(graph, moves) : [],
-    known_symbols: [...graphSymbols(graph)].sort(),
+    known_symbols: [...new Set([...graphSymbols(graph), ...(isArr(declaredSymbols) ? declaredSymbols : [])])].sort(),
   };
 }
 
@@ -350,6 +453,12 @@ export async function attemptRepair({ candidateRecord, root, invokeJudge, maxRou
     return result("abstained", "no ArchGuard graph data available to check symbol coverage against");
   }
   const computeDelta = deps.computeDelta || (({ proposal }) => computeSliceDelta({ root, commit: lock.commit, proposal, deps: deps.sliceDeps || {}, now: () => new Date(clock()).toISOString() }));
+  // The direct source of symbol existence: the round's own files read AT THE LOCKED COMMIT (硬规则 4b).
+  // `deps.readFileAtCommit(root, spec)` is injectable; the default is a commit-scoped `git show`.
+  const readFileAtCommit = typeof deps.readFileAtCommit === "function"
+    ? (spec) => deps.readFileAtCommit(root, spec)
+    : (spec) => defaultReadFileAtCommit(root, spec);
+  const symbolOpts = { scopeRoot: lock.scope_root, commit: lock.commit, readFileAtCommit };
 
   let current = candidateRecord.slice_delta, moves = proposed.moves || [];
   let round = 0;
@@ -359,7 +468,10 @@ export async function attemptRepair({ candidateRecord, root, invokeJudge, maxRou
       return result("abstained", "wall-clock ceiling reached");
     }
     round++;
-    const feedback = buildRepairFeedback({ graph, legalDirs, sliceDelta: current, moves, hypothesis, concernKey, attemptNo: round, scopeRoot: lock.scope_root, subject: proposed.subject ?? lock.scope_root });
+    // The judge is shown the same two-source notion of "known" the guard enforces — a real export nobody
+    // imports across a directory edge is a legitimate move, and the prompt must not say otherwise.
+    const declaredNow = [...declaredExportsForMoves(moves, symbolOpts).values()].flatMap((s) => [...s]);
+    const feedback = buildRepairFeedback({ graph, legalDirs, sliceDelta: current, moves, hypothesis, concernKey, attemptNo: round, scopeRoot: lock.scope_root, subject: proposed.subject ?? lock.scope_root, declaredSymbols: declaredNow });
     const rendered = renderRepairPrompt({ feedback });
     const r = await invokeJudge(rendered.prompt);
     if (!r || r.error || (typeof r.status === "number" && r.status !== 0)) {
@@ -372,9 +484,10 @@ export async function attemptRepair({ candidateRecord, root, invokeJudge, maxRou
     // LOCK: a revision that tries to move the scope is a tampering of the locked value — refused, not retried.
     if (rev.scope_root !== undefined && rev.scope_root !== lock.scope_root) throw new RepairLockError("LOCK_SCOPE_TAMPERED", `the repair revision tried to change the locked scope_root to ${JSON.stringify(rev.scope_root)}`);
     moves = rev.moves;
-    // A symbol the graph does not know is NOT "in the graph but uncovered": the revision is invalid, the round
-    // is consumed, and NO delta is computed for it (a formally-passing stub result must never be reached).
-    const unknown = unknownSymbols(graph, moves);
+    // A symbol NEITHER source can account for (no graph edge imports it AND the locked commit does not
+    // export it from the move's own file) is NOT "in the graph but uncovered": the revision is invalid, the
+    // round is consumed, and NO delta is computed for it (a formally-passing stub result must never be reached).
+    const unknown = unknownSymbols(graph, moves, symbolOpts);
     if (unknown.length) { record({ attempt_no: round, bucket: "unknown_symbol", matched: "UNKNOWN_SYMBOL", judge_called: true, unknown_symbols: unknown, computed: false }); continue; }
     const gaps = coverageGaps(graph, moves);
     // The revised cut is expressed as a proposal the adapter understands: only `moves` may differ, scope+subject stay locked.
