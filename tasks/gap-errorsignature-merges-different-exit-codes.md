@@ -25,14 +25,17 @@ The impact is latent today: the action-record reading is `unthresholded` in prod
 Preserve the leading `Exit code N` token verbatim. Keep normalising every other number, hex string and path as today. No other change.
 
 ## Acceptance Criteria
-- [ ] `node --test plugin/test/meta-driver.test.mjs` exits 0, with new cases:
+- [x] `node --test plugin/test/meta-driver.test.mjs` exits 0, with new cases:
   - (a) `Exit code 137` and `Exit code 1` with otherwise identical text give different signatures.
   - (b) `Exit code 1 … line 42` and `Exit code 1 … line 99` still give the same signature.
-- [ ] Real-data reading: apply the new `errorSignature` to every record of `/data/home/yale/work/quay/.quay/action-record-scan.json`. Paste three things:
+  - Evidence: `node --test plugin/test/meta-driver.test.mjs` → `tests 138 / pass 138 / fail 0`, exit 0; new case `errorSignature: 保留开头 Exit code N；其余数字照常归一化` ✔ (asserts (a) notEqual + `^Exit code 137\b`/`^Exit code 1\b`, and (b) equal).
+- [x] Real-data reading: apply the new `errorSignature` to every record of `/data/home/yale/work/quay/.quay/action-record-scan.json`. Paste three things:
   - the group count before and after;
   - the count of groups that mix exit codes, which must be 0 after;
   - the 3 largest groups after.
-- [ ] Mutation control: revert to the plain `\d+` replacement and show case (a) goes red. Paste the output, then revert.
+  - Evidence (`.quay/ac-signature-measure.mts`, 3636 records): group count before = **2632**, after = **2650**. Groups mixing exit codes: before = **9**, after = **0**. 3 largest groups after: `n=76 Exit code 144`; `n=62 Exit code 143 Command timed out after <n>m <n>s`; `n=55 File does not exist. Note: your current working directory is <path>`. (Before, the largest group was `n=160 Exit code <n>` spanning codes 144/1/123/2/255/137/5/124/7.)
+- [x] Mutation control: revert to the plain `\d+` replacement and show case (a) goes red. Paste the output, then revert.
+  - Evidence (plain `\d+` replacement restored): `node --test --test-name-pattern "保留开头 Exit code N" plugin/test/meta-driver.test.mjs` → `tests 1 / pass 0 / fail 1`, `AssertionError [ERR_ASSERTION]: 不同退出码（OOM vs 普通失败）不得并成同一个签名` — `actual: 'Exit code <n>: killed'`, `expected: 'Exit code <n>: killed'`. Reverted to the fix afterwards; same test then `pass 1 / fail 0`.
 
 ## Definition of Done
 - All AC ticked with output pasted.
