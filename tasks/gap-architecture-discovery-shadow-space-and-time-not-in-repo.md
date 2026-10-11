@@ -2,7 +2,7 @@
 id: gap-architecture-discovery-shadow-space-and-time-not-in-repo
 title: Land the two architecture-discovery shadow instruments (cross-object
   consistency, failure recurrence) as read-only analysis tools
-status: todo
+status: ready
 labels:
   - gap
   - architecture-discovery
