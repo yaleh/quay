@@ -2,7 +2,7 @@
 id: gap-arch-discovery-not-wired-into-routine-track-report-only
 title: Wire the arch-discovery scans into the quality-gate routine track as a
   report-only, bounded, killable mechanical routine
-status: ready
+status: done
 labels:
   - gap
   - architecture-discovery
