@@ -3,7 +3,7 @@ id: gap-ac69-malformed-record-exits-3-and-passes-the-static-gate
 title: "ac69 check: a malformed measurement record exits 3, which run_checker
   treats as non-fatal, so the static gate stays green although the registry and
   mutation case expect RED"
-status: ready
+status: done
 labels:
   - gap
   - architecture-discovery
