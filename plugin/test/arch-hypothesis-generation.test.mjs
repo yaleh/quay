@@ -26,11 +26,11 @@ import {
   FROZEN_VERIFIER_PROMPT, FROZEN_VERIFIER_PROMPT_SHA256, defaultVerifierPrompt,
   EVIDENCE_PACK_VERIFIER_PROMPT, evidencePackVerifierPrompt, VERIFIER_STRATEGIES,
   DEFAULT_EVIDENCE_MAX_LINES, UNINSTRUMENTED, citedSymbols, isDefinitionLine,
-  MODEL_UNVERIFIED, MODEL_NOT_APPLICABLE, modelCallFields, callText, modelPreregRefusal, applyModel,
+  MODEL_UNVERIFIED, modelCallFields, callText, modelPreregRefusal, applyModel,
   definitionLinesFor, importLinesFor, buildEvidencePack, parseVerifierStream,
   neutralCwdRefusal, verifyCwdRefusal, parseJsonObject, parseHypotheses, runInvestigator,
   clusterHypotheses, verifierVerdict, runVerifier,
-  sharedImplementation, mechanicalRefutation, provenanceIndex,
+  sharedImplementation, mechanicalEvidenceLines, mechanicalSummaryField, provenanceIndex,
   mechanicalMatch, matchVerdict, scoreCases,
   score, matchRecords, verifyRecords, reviewRecords, emit,
   buildReport, hardenedArgv, importDriverRuntime, modelFromArgv,
@@ -631,8 +631,9 @@ test("AC(c): contamination ignores structural edges but still refuses a free-tex
   assert.equal(contaminationScan(neutral, pairs).ok, false);
 });
 
-// ── AC(d): the mechanical layer refutes a shared implementation, never an independent one ────────────
-test("AC(d): the mechanical layer refutes all-import-from-one-module, not each-defines-it", async () => {
+// ── AC(d): the mechanical finding is EVIDENCE, and never decides a cluster ───────────────────────────
+// (gap-hypgen-mechanical-shared-implementation-layer-false-refutes)
+test("AC(d): the shared-import finding is reported as evidence and decides nothing", async () => {
   const shared = [
     { c: "a.ts", imports: [], imported_by: ["plugin/scripts/b.ts", "plugin/scripts/c.ts"], sha256: "a".repeat(64) },
     { c: "b.ts", imports: [{ module: "plugin/scripts/a.ts", names: ["shared"], line: 3 }], imported_by: [], sha256: "b".repeat(64) },
@@ -642,33 +643,52 @@ test("AC(d): the mechanical layer refutes all-import-from-one-module, not each-d
   assert.equal(hit.definer, "plugin/scripts/a.ts");
   assert.deepEqual(hit.symbol, ["shared"], "the name every importer takes from the definer");
   assert.deepEqual(hit.importers, ["plugin/scripts/b.ts", "plugin/scripts/c.ts"]);
+  assert.deepEqual(hit.non_importers, [], "every known component here is the definer or an importer");
+  assert.deepEqual(hit.unknown_components, []);
   assert.equal(hit.evidence.length, 2);
   for (const e of hit.evidence) {
     assert.match(e.file, /^plugin\/scripts\/[bc]\.ts$/, "evidence names the importing FILE (repo-relative)");
     assert.ok(e.line > 0 && e.sha256, "…with a line and the file's sha256");
     assert.equal(e.imports, "plugin/scripts/a.ts");
   }
-  const m = mechanicalRefutation({ components: ["a.ts", "b.ts", "c.ts"], provenance: shared });
-  assert.equal(m.verdict, "refuted");
-  assert.equal(m.verdict_reason, "shared-implementation");
+  // ⛔ NO verdict is produced anywhere by this layer: the finding is the whole output.
+  assert.equal(Object.prototype.hasOwnProperty.call(hit, "verdict"), false);
+  assert.equal(Object.prototype.hasOwnProperty.call(hit, "verdict_reason"), false);
 
-  // NEGATIVE: three components that each DEFINE the symbol import nothing — no refutation
+  // The finding NAMES the components that do not import the definer, and keeps NOT-INVENTORIED apart:
+  // a component the inventory does not cover was never observed, so "does not import" is not a reading
+  // this layer may make of it (硬规则 6).
+  const withOutsider = [
+    ...shared,
+    { c: "d.ts", imports: [{ module: "plugin/scripts/z.ts", names: ["q"], line: 1 }], imported_by: [], sha256: "d".repeat(64) },
+  ];
+  const f2 = sharedImplementation({ components: ["a.ts", "b.ts", "c.ts", "d.ts", "ghost.ts"], provenance: withOutsider });
+  assert.deepEqual(f2.importers, ["plugin/scripts/b.ts", "plugin/scripts/c.ts"]);
+  assert.deepEqual(f2.non_importers, ["plugin/scripts/d.ts"], "known, and takes no edge to the definer");
+  assert.deepEqual(f2.unknown_components, ["plugin/scripts/ghost.ts"], "absent from the inventory ⇒ NOT a non-importer");
+  const lines = mechanicalEvidenceLines({ components: ["a.ts", "b.ts", "c.ts", "d.ts", "ghost.ts"], provenance: withOutsider });
+  assert.ok(lines.some((l) => l.includes("NOT-importing plugin/scripts/d.ts")), lines.join("\n"));
+  assert.ok(lines.some((l) => l.includes("NOT-INVENTORIED plugin/scripts/ghost.ts")), lines.join("\n"));
+  assert.ok(lines.some((l) => l.includes("import plugin/scripts/b.ts:3 -> plugin/scripts/a.ts")), lines.join("\n"));
+
+  // NEGATIVE: three components that each DEFINE the symbol import nothing — no finding at all
   const indie = ["x.ts", "y.ts", "z.ts"].map((c) => ({ c, imports: [], imported_by: [], sha256: "d".repeat(64) }));
   assert.equal(sharedImplementation({ components: ["x.ts", "y.ts", "z.ts"], provenance: indie }), null);
-  // …but the claim is refuted only for a STAR: two distinct targets means several implementations
+  assert.deepEqual(mechanicalEvidenceLines({ components: ["x.ts", "y.ts", "z.ts"], provenance: indie }), []);
+  // …and a finding needs a STAR: two distinct targets means several implementations
   const twoTargets = [
     { c: "p.ts", imports: [], imported_by: ["plugin/scripts/q.ts", "plugin/scripts/r.ts"], sha256: "e".repeat(64) },
     { c: "q.ts", imports: [{ module: "plugin/scripts/p.ts", names: ["s"], line: 1 }], imported_by: ["plugin/scripts/r.ts"], sha256: "f".repeat(64) },
     { c: "r.ts", imports: [{ module: "plugin/scripts/p.ts", names: ["s"], line: 1 }, { module: "plugin/scripts/q.ts", names: ["t"], line: 2 }], imported_by: [], sha256: "0".repeat(64) },
   ];
   assert.equal(sharedImplementation({ components: ["p.ts", "q.ts", "r.ts"], provenance: twoTargets }), null);
-  // ⛔ "could not evaluate" is NOT a refutation: no provenance, or fewer than two known components
+  // ⛔ "could not evaluate" is NOT a finding: no provenance, or fewer than two known components
   assert.equal(sharedImplementation({ components: ["a.ts", "b.ts"], provenance: null }), null);
-  assert.equal(mechanicalRefutation({ components: ["ghost.ts"], provenance: shared }), null);
-  assert.equal(mechanicalRefutation({}), null);
+  assert.equal(sharedImplementation({ components: ["ghost.ts"], provenance: shared }), null);
+  assert.equal(sharedImplementation({}), null);
 
-  // THROUGH runVerifier: a mechanically refuted cluster spends NO model call, and the emitted row still
-  // validates as {refuted, shared-implementation} with the import lines as its evidence.
+  // THROUGH runVerifier: the cluster STILL gets its model call, its verdict is the MODEL's, and the
+  // finding rides along as `mechanical_evidence`.
   const dir = tmp();
   const clusters = clusterHypotheses([{ run: 1, hyps: [{ id: "H1", components: ["a.ts", "b.ts", "c.ts"], concept_kind: "policy", claim: "three independent impls", confidence: "high" }] }]);
   let called = 0;
@@ -677,25 +697,148 @@ test("AC(d): the mechanical layer refutes all-import-from-one-module, not each-d
     runModel: async () => { called++; return { stdout: JSON.stringify({ verdict: "supported" }), status: 0 }; },
   });
   assert.equal(rv.ok, true);
-  assert.equal(called, 0, "a mechanically refuted cluster must spend no model call");
-  assert.equal(rv.mechanical_refuted, 1);
-  assert.equal(rv.results[0].verdict, "refuted");
-  assert.equal(rv.results[0].verdict_reason, "shared-implementation");
-  assert.equal(rv.results[0].mechanical, true);
+  assert.equal(called, 1, "⛔ a shared-import finding must NOT save the model call");
+  assert.equal(rv.mechanical_evidence, 1, "…it is COUNTED as evidence, and named as such");
+  assert.equal(Object.prototype.hasOwnProperty.call(rv, "mechanical_refuted"), false, "the refutation count is gone");
+  assert.equal(rv.results[0].verdict, "supported", "the verdict is the MODEL's");
+  assert.equal(rv.results[0].verdict_reason, null);
+  assert.equal(rv.results[0].mechanical, false);
+  assert.equal(rv.results[0].mechanical_evidence.definer, "plugin/scripts/a.ts");
+  assert.deepEqual(rv.results[0].mechanical_evidence.importers, ["plugin/scripts/b.ts", "plugin/scripts/c.ts"]);
+  // …and the store record is the model's verdict, with no `shared-implementation` reason anywhere
   const emitted = verifyRecords({ verify: rv });
-  assert.equal(emitted[0].rec.verdict, "refuted");
-  assert.equal(emitted[0].rec.verdict_reason, "shared-implementation");
+  assert.equal(emitted[0].rec.verdict, "supported");
+  assert.equal(emitted[0].rec.verdict_reason, null);
   const tally = emit(emitted, { out: path.join(dir, "records.jsonl") });
   assert.equal(tally.refused, 0, JSON.stringify(tally.reasons));
-  // CONTROL: with NO provenance the same cluster goes to the model and its verdict is the model's
+  // CONTROL: with NO provenance the same cluster goes to the model too — and carries no evidence key
   let called2 = 0;
   const rv2 = await runVerifier({
     clusters, pinDir: dir, cwd: dir, promptTemplate: "{{HYP}}",
     runModel: async () => { called2++; return { stdout: JSON.stringify({ verdict: "supported" }), status: 0 }; },
   });
-  assert.equal(called2, 1, "without edge data the verifier behaves exactly as before");
+  assert.equal(called2, 1);
   assert.equal(rv2.results[0].verdict, "supported");
-  assert.equal(rv2.mechanical_refuted, 0);
+  assert.equal(rv2.mechanical_evidence, 0);
+  assert.equal(Object.prototype.hasOwnProperty.call(rv2.results[0], "mechanical_evidence"), false);
+});
+
+// ═════════════════════════════════════════════════════════════════════════════════════════════════════
+// gap-hypgen-mechanical-shared-implementation-layer-false-refutes — AC (a)…(c)
+// The mechanical shared-import layer attaches EVIDENCE, never a verdict: it fired as `refuted`/
+// `shared-implementation` on 6 clusters in `E-DT-1`, every one of them carrying named components that do
+// NOT import the definer — including Hf c15, a CONFIRMED real defect.
+// ═════════════════════════════════════════════════════════════════════════════════════════════════════
+
+// ── AC(a): converging edges PLUS a named non-importer ⇒ evidence, and the pack names the non-importer ─
+test("AC(a): a star with a named non-importer yields no verdict, and its pack lists the non-importer", async () => {
+  // b.ts and c.ts import the definer; d.ts is NAMED by the hypothesis and imports something else. This is
+  // the Hf-c15 SHAPE: `checker-mechanical-spine-check.ts` holds the conflicting contract and imports
+  // nothing from `checker-io.ts`, so an import-edge verdict never looked at it.
+  const prov = [
+    { c: "a.ts", imports: [], imported_by: ["plugin/scripts/b.ts", "plugin/scripts/c.ts", "plugin/scripts/d.ts"], sha256: "a".repeat(64) },
+    { c: "b.ts", imports: [{ module: "plugin/scripts/a.ts", names: ["shared"], line: 3 }], imported_by: [], sha256: "b".repeat(64) },
+    { c: "c.ts", imports: [{ module: "plugin/scripts/a.ts", names: ["shared"], line: 5 }], imported_by: [], sha256: "c".repeat(64) },
+    { c: "d.ts", imports: [{ module: "plugin/scripts/elsewhere.ts", names: ["exit"], line: 2 }], imported_by: [], sha256: "d".repeat(64) },
+  ];
+  const components = ["a.ts", "b.ts", "c.ts", "d.ts"];
+  const f = sharedImplementation({ components, provenance: prov });
+  assert.equal(f.definer, "plugin/scripts/a.ts");
+  assert.deepEqual(f.importers, ["plugin/scripts/b.ts", "plugin/scripts/c.ts"]);
+  assert.deepEqual(f.non_importers, ["plugin/scripts/d.ts"]);
+  const pack = buildEvidencePack({ components, claim: "the exit-code contract diverges", sources: {}, provenance: prov, hits: [] });
+  assert.ok(pack.text.includes("NOT-importing plugin/scripts/d.ts"), pack.text);
+  assert.ok(pack.text.includes("NOT a verdict"), pack.text);
+
+  // THROUGH runVerifier: no mechanical verdict — the MODEL decides, and the row carries the finding.
+  const dir = tmp();
+  const clusters = clusterHypotheses([{ run: 1, hyps: [{ id: "H1", components, concept_kind: "invariant", claim: "the exit-code contract diverges", confidence: "high" }] }]);
+  let called = 0;
+  const rv = await runVerifier({
+    clusters, pinDir: dir, cwd: dir, promptTemplate: "{{HYP}}", provenance: prov, strategy: "evidence-pack", evidence: { provenance: prov },
+    runModel: async () => { called++; return { stdout: JSON.stringify({ verdict: "supported" }), status: 0 }; },
+  });
+  assert.equal(called, 1, "the finding must not decide the cluster");
+  assert.equal(rv.mechanical_evidence, 1);
+  assert.equal(rv.results[0].verdict, "supported");
+  assert.equal(rv.results[0].verdict_reason, null);
+  assert.equal(rv.results[0].mechanical, false);
+  assert.deepEqual(rv.results[0].mechanical_evidence.non_importers, ["plugin/scripts/d.ts"]);
+  assert.ok(rv.results[0].pack.lines.some((l) => l.includes("NOT-importing plugin/scripts/d.ts")), rv.results[0].pack.lines.join("\n"));
+});
+
+// ── AC(b): every component imports the definer ⇒ still no verdict, and the import lines ride along ────
+test("AC(b): a perfect star yields no verdict and still carries its import lines as evidence", async () => {
+  const prov = [
+    { c: "a.ts", imports: [], imported_by: ["plugin/scripts/b.ts", "plugin/scripts/c.ts"], sha256: "a".repeat(64) },
+    { c: "b.ts", imports: [{ module: "plugin/scripts/a.ts", names: ["shared"], line: 3 }], imported_by: [], sha256: "b".repeat(64) },
+    { c: "c.ts", imports: [{ module: "plugin/scripts/a.ts", names: ["shared"], line: 5 }], imported_by: [], sha256: "c".repeat(64) },
+  ];
+  const components = ["a.ts", "b.ts", "c.ts"];
+  const f = sharedImplementation({ components, provenance: prov });
+  assert.deepEqual(f.non_importers, [], "every named component is the definer or an importer");
+  const lines = mechanicalEvidenceLines({ components, provenance: prov });
+  assert.equal(lines.length, 3, "the summary line + one line per import edge");
+  assert.ok(lines.some((l) => l.includes("import plugin/scripts/b.ts:3 -> plugin/scripts/a.ts")), lines.join("\n"));
+  assert.ok(lines.some((l) => l.includes("import plugin/scripts/c.ts:5 -> plugin/scripts/a.ts")), lines.join("\n"));
+  // ⛔ a PERFECT star is exactly the case that was wrongly refuted: it must still go to the model. The
+  // `E-HYPGEN-AB-1` arm A c15 counterexample (the inert `routine_quota.window_ms`) is of this shape —
+  // importing the constant is not consuming the configured value.
+  const dir = tmp();
+  const clusters = clusterHypotheses([{ run: 1, hyps: [{ id: "H1", components, concept_kind: "invariant", claim: "window_ms is inert", confidence: "high" }] }]);
+  let called = 0;
+  const rv = await runVerifier({
+    clusters, pinDir: dir, cwd: dir, promptTemplate: "{{HYP}}", provenance: prov,
+    runModel: async () => { called++; return { stdout: JSON.stringify({ verdict: "refuted" }), status: 0 }; },
+  });
+  assert.equal(called, 1);
+  assert.equal(rv.results[0].verdict, "refuted", "the verdict is the model's, and may well be refuted");
+  assert.equal(rv.results[0].verdict_reason, null, "⛔ never `shared-implementation`");
+  assert.equal(rv.results[0].mechanical_evidence.definer, "plugin/scripts/a.ts");
+});
+
+// ── AC(c): without `--provenance`, the output is byte-identical to the pre-change rendering ───────────
+test("AC(c): a provenance-free run is byte-identical to the pre-change output", async () => {
+  // (i) THE PACK. sha256 FROZEN from the module AS IT WAS before this change
+  // (`git show HEAD:docs/analysis/arch-hypothesis-generation.mjs`): the mechanical section is APPENDED
+  // only when a finding exists, so a pack assembled without a provenance sidecar does not move.
+  const sources = { "alpha.ts": "export const window_ms = 1000;\n", "beta.ts": "export const window_ms = 2000;\n" };
+  const noProv = buildEvidencePack({ components: ["alpha.ts", "beta.ts"], claim: "the window_ms quota", sources, hits: [] });
+  assert.equal(sha256(noProv.text), "5bef83a6668a00d6fcdd5c3d63761e4f202fe81c5247a0ce15f39a3bf0aab980");
+  assert.equal(noProv.text.includes("MECH"), false, "no mechanical line without a provenance sidecar");
+  assert.deepEqual(noProv.sections.mechanical, []);
+  assert.equal(Object.prototype.hasOwnProperty.call(noProv.counts, "mechanical"), false, "no new counts key");
+  assert.ok(noProv.text.includes("sections: definitions=2 imports=0 hits=0\n"), "the sections line is unchanged");
+  // …and the SAME pack WITH a sidecar DOES carry the finding (the control that the gate is real)
+  const withProv = buildEvidencePack({
+    components: ["alpha.ts", "beta.ts"], claim: "the window_ms quota", sources, hits: [],
+    provenance: [
+      { c: "alpha.ts", imports: [], imported_by: ["plugin/scripts/beta.ts"], sha256: "a".repeat(64) },
+      { c: "beta.ts", imports: [{ module: "plugin/scripts/alpha.ts", names: ["x"], line: 1 }], imported_by: [], sha256: "b".repeat(64) },
+    ],
+  });
+  assert.notEqual(sha256(withProv.text), sha256(noProv.text));
+
+  // (ii) THE ROW. The key set is FROZEN from the pre-change module; `mechanical_evidence` is a NEW key
+  // present only when a finding exists, so a provenance-free row is unchanged key-for-key.
+  const PRE_CHANGE_ROW_KEYS = ["cluster", "members", "kind", "comps", "claim", "wall_ms", "out_bytes",
+    "exit", "strategy", "verdict", "verdict_reason", "verdict_cause", "mechanical", "instrumented",
+    "instrumentation", "turns", "turns_used", "cli_num_turns", "requested_model", "actual_model",
+    "model_mismatch", "usage", "cost_usd", "intentional", "evidence", "counterexample", "pack", "summary"];
+  const dir = tmp();
+  const clusters = clusterHypotheses([{ run: 1, hyps: [{ id: "H1", components: ["a.ts", "b.ts"], concept_kind: "policy", claim: "c", confidence: "high" }] }]);
+  const rv = await runVerifier({
+    clusters, pinDir: dir, cwd: dir, promptTemplate: "{{HYP}}",
+    runModel: async () => ({ stdout: JSON.stringify({ verdict: "supported" }), status: 0 }),
+  });
+  assert.deepEqual(Object.keys(rv.results[0]), PRE_CHANGE_ROW_KEYS);
+  assert.equal(Object.prototype.hasOwnProperty.call(rv, "mechanical_refuted"), false, "the run-level refutation count is gone");
+  assert.equal(Object.prototype.hasOwnProperty.call(rv, "decided_without_model"), false);
+
+  // (iii) THE ARTIFACT'S RUN-LEVEL FIELD. Without a sidecar the pre-change NAME and value are kept, so
+  // `verify.json` is byte-identical; with one it is named for what it counts.
+  assert.deepEqual(mechanicalSummaryField({ provenance: null, mechanical_evidence: 0 }), { mechanical_refuted: 0 });
+  assert.deepEqual(mechanicalSummaryField({ provenance: [{ c: "a.ts" }], mechanical_evidence: 3 }), { mechanical_evidence: 3 });
 });
 
 // ═════════════════════════════════════════════════════════════════════════════════════════════════════
@@ -1097,16 +1240,21 @@ test("AC-model(d): the result event's token usage and total_cost_usd are recorde
   assert.equal(rv.results[0].actual_model, "Y");
   assert.deepEqual(rv.results[0].usage, usage);
   assert.equal(rv.results[0].cost_usd, 0.02);
-  // …and a mechanically refuted row (NO model call) is `not-applicable`, a DIFFERENT value from unverified
+  // ⛔ RETIRED: the `not-applicable:no-model-call` row (a mechanically refuted cluster). A cluster
+  // carrying a shared-import finding IS a model row now, so it goes through the SAME `modelCallFields`
+  // seam — there is no second row shape (gap-hypgen-mechanical-shared-implementation-layer-false-refutes).
   const prov = [
     { c: "a.ts", imports: [], imported_by: ["plugin/scripts/b.ts", "plugin/scripts/c.ts"], sha256: "a".repeat(64) },
     { c: "b.ts", imports: [{ module: "plugin/scripts/a.ts", names: ["s"], line: 1 }], imported_by: [], sha256: "b".repeat(64) },
     { c: "c.ts", imports: [{ module: "plugin/scripts/a.ts", names: ["s"], line: 1 }], imported_by: [], sha256: "c".repeat(64) },
   ];
   const cl3 = clusterHypotheses([{ run: 1, hyps: [{ id: "H1", components: ["a.ts", "b.ts", "c.ts"], concept_kind: "policy", claim: "c", confidence: "high" }] }]);
-  const rm = await runVerifier({ clusters: cl3, pinDir: pin, cwd: pin, promptTemplate: "{{HYP}}", provenance: prov, runModel: async () => ({ stdout: "{}" }) });
-  assert.equal(rm.results[0].actual_model, MODEL_NOT_APPLICABLE);
-  assert.notEqual(MODEL_NOT_APPLICABLE, MODEL_UNVERIFIED);
+  const rm = await runVerifier({
+    clusters: cl3, pinDir: pin, cwd: pin, promptTemplate: "{{HYP}}", provenance: prov, model: "Y",
+    runModel: async () => ({ stdout: sse([initEvent("Y"), streamResult({ result: JSON.stringify({ verdict: "refuted" }) })]), status: 0 }),
+  });
+  assert.equal(rm.results[0].actual_model, "Y", "the finding did not suppress the call, so the model IS recorded");
+  assert.equal(rm.results[0].mechanical_evidence.definer, "plugin/scripts/a.ts");
 });
 
 // ── AC(e): the stream's result text parses to the SAME hypotheses as the same text as plain stdout ───

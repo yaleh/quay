@@ -18,10 +18,18 @@
 //     Re-exports (`export … from`, `export * from`) are imports like any other. A provenance run is a
 //     DIFFERENT experiment: it needs its own new prompt file, hashed in its own pre-registration (the
 //     frozen investigator prompt — `19be8974…` — is never touched).
-//   • The mechanical layer (`mechanicalRefutation`) runs BEFORE any verifier model call. When the
-//     hypothesis's intra-set import edges converge on one component and ≥2 members import from it, the
-//     cluster is recorded `refuted` / `shared-implementation` with the import lines as evidence and
-//     spends NO model call. Every other cluster goes to the model verifier unchanged.
+//   • The mechanical layer (`sharedImplementation`) runs BEFORE any verifier model call and produces
+//     EVIDENCE, ⛔ never a verdict (gap-hypgen-mechanical-shared-implementation-layer-false-refutes).
+//     It fired as a refutation until 2026-10-12: "the intra-set import edges converge on one component
+//     and ≥2 members import from it" was recorded `refuted` / `shared-implementation` and spent NO model
+//     call. Measured in `E-DT-1` (Hf c4/c14/c15, Hp c3/c6/c15), EVERY one of those 6 refutations had ≥2
+//     named components that do not import the definer — the rule never looked at them — and one of them
+//     (Hf c15) is a CONFIRMED REAL DEFECT. A stricter variant is not safe either: `E-HYPGEN-AB-1` arm A
+//     c15 (the inert `routine_quota.window_ms`) has every component importing the definer and is still
+//     real, because importing a constant is not consuming it. An import edge is evidence about REUSE.
+//     The finding is now attached to the cluster's evidence pack — the converging import lines AND the
+//     named components that do NOT import the definer (and those the inventory does not cover) — and
+//     every cluster, including a perfect star, goes to the model verifier.
 //
 // ── WHAT IT ANSWERS ─────────────────────────────────────────────────────────────────────────────────
 // Given a NEUTRAL inventory of every `plugin/scripts/*.ts` component at a pinned commit, can a model that
@@ -73,11 +81,10 @@
 //     strippedness list PLUS `.quay/`, `archive/`, `milestones/`, `measurements/`. The defect: the
 //     "stripped" pin still carried tracked `.quay/` evidence files that the verifier's Greps walked.
 //   • THE EVIDENCE PACK (opt-in, `--strategy evidence-pack`). Before the model call, `buildEvidencePack`
-//     deterministically assembles the definition lines of the symbols the claim cites, the import lines
-//     among the named components, and bounded grep hits, and passes them through a NEW prompt file
-//     (`verifier-evidence-pack.txt`). The frozen `verifier.txt` stays the default and its bytes are pinned.
-//     Clusters the mechanical layer already decides run FIRST (budget-aware ordering), so no model call is
-//     spent on them, and `turns_used` is recorded per cluster.
+//     deterministically assembles the mechanical shared-import finding, the definition lines of the
+//     symbols the claim cites, the import lines among the named components, and bounded grep hits, and
+//     passes them through a NEW prompt file (`verifier-evidence-pack.txt`). The frozen `verifier.txt`
+//     stays the default and its bytes are pinned. `turns_used` is recorded per cluster.
 // ⛔ No regression case is named in this file or in any prompt: the acceptance cluster is identified by
 // POSITION (`--only-cluster`), and the strategy is validated against `VERIFIER_STRATEGIES`.
 
@@ -634,9 +641,11 @@ export const UNINSTRUMENTED = "not-evaluated:uninstrumented";
  *  there is no direct reading and the actual identity is "not measured" — its OWN value, never a copy of
  *  the requested one (硬规则 3b/4b: "could not measure" must not be shaped like "measured"). */
 export const MODEL_UNVERIFIED = "not-evaluated:model-unverified";
-/** The marker for a row that spent NO model call (a mechanically refuted verify cluster). Distinct from
- *  MODEL_UNVERIFIED: "no call was made" is not "a call was made and its model is unknown". */
-export const MODEL_NOT_APPLICABLE = "not-applicable:no-model-call";
+/** ⛔ RETIRED (2026-10-12): `MODEL_NOT_APPLICABLE = "not-applicable:no-model-call"` marked the rows the
+ *  mechanical layer decided without a model call. No such row exists any more — the layer emits EVIDENCE,
+ *  never a verdict, so EVERY verify row is a model row (gap-hypgen-mechanical-shared-implementation-layer-
+ *  false-refutes). The marker is deleted rather than left unproducible: a value nothing can emit reads as
+ *  a state that can still occur (硬规则 3b in the other direction). */
 /** How much of a tool call's arguments a per-turn record keeps. The HEAD is what names the target
  *  (`file_path` / `pattern`+`path`); the full input is bulky and is not what the reading needs. */
 export const ARGS_HEAD_MAX = 160;
@@ -784,21 +793,39 @@ export function provenanceIndex(provenance) {
 }
 
 /**
- * THE MECHANICAL PRE-VERIFICATION — the verifier's own definition of `refuted` is "the components share a
- * single implementation (one imports the other's function/constant)", and that is DECIDABLE from the
- * import graph. So a model call is spent only when it is not.
+ * THE MECHANICAL SHARED-IMPORT FINDING — EVIDENCE about reuse, ⛔ NEVER a verdict on the claim
+ * (gap-hypgen-mechanical-shared-implementation-layer-false-refutes). It was a refutation until 2026-10-12:
+ * "all in-set edges converge on one module with ≥2 importers" was read as `refuted`/`shared-implementation`
+ * and the cluster spent no model call. Measured in `E-DT-1` (Hf c4/c14/c15, Hp c3/c6/c15) EVERY refutation
+ * had ≥2 named components that do NOT import the definer — the rule never looked at them. The confirmed
+ * false refutation is Hf c15: the checker exit-code cluster, whose 2-vs-3 NOT-EVALUATED divergence is a
+ * real defect (`checker-io.ts:54` vs `gate-script-base.ts:578`) that the control task
+ * `gap-ac69-malformed-record-exits-3-and-passes-the-static-gate` confirmed; it was refuted because
+ * `dead-code-after-return-check.ts` and `outer-anchor-check.ts` import `driverResultToExit` from
+ * `checker-io.ts` — while `checker-mechanical-spine-check.ts`, the component holding the conflicting
+ * contract, imports nothing from it and was never consulted. An import edge is evidence about REUSE; it
+ * cannot settle a claim about BEHAVIOUR (importing a constant is not consuming the configured value —
+ * `E-HYPGEN-AB-1` arm A c15, the inert `routine_quota.window_ms`).
+ *
  * Predicate (exactly): among the hypothesis's components, the intra-set import edges all converge on ONE
  * component (the DEFINER), and at least TWO members import from it. The definer imports no other member
  * (a second target would break the convergence), so the set is a star. `symbol` = the names EVERY
- * importer takes from the definer — empty when they take different names, and the edge still settles it.
+ * importer takes from the definer — null when they take different names, and the edge still reports it.
+ * The finding carries the OTHER named components too, which is what the verdict used to ignore:
+ *   • `non_importers` — named components the inventory covers that take NO edge to the definer.
+ *   • `unknown_components` — named components the inventory does NOT cover. Their edges were never
+ *     observed, so "does not import the definer" is NOT a reading this function may make of them
+ *     (硬规则 6: an absent value is "not looked at", never "false").
  * ⛔ With no provenance, or fewer than two KNOWN components, this returns `null`: "could not evaluate"
- * must not be shaped like a refutation (硬规则 3b).
- * @returns {null|{definer:string, symbol:string[]|null, importers:string[], evidence:object[]}}
+ * must not be shaped like a finding (硬规则 3b).
+ * @returns {null|{definer:string, symbol:string[]|null, importers:string[], non_importers:string[],
+ *                 unknown_components:string[], evidence:object[]}}
  */
 export function sharedImplementation({ components = [], provenance = null } = {}) {
   if (!provenance) return null;
   const byBase = provenanceIndex(provenance);
-  const set = [...new Set((components ?? []).map((c) => path.posix.basename(String(c).trim())))].filter((c) => byBase.has(c));
+  const named = [...new Set((components ?? []).map((c) => path.posix.basename(String(c).trim())))];
+  const set = named.filter((c) => byBase.has(c));
   if (set.length < 2) return null;
   const edges = [];
   for (const c of set) {
@@ -818,15 +845,33 @@ export function sharedImplementation({ components = [], provenance = null } = {}
     .slice()
     .sort((a, b) => (a.from < b.from ? -1 : a.from > b.from ? 1 : 0) || (a.line ?? 0) - (b.line ?? 0))
     .map((e) => ({ file: repoRelComponent(e.from), line: e.line, sha256: byBase.get(e.from)?.sha256 ?? null, imports: repoRelComponent(e.to), names: e.names }));
-  return { definer: repoRelComponent(definer), symbol: shared.length ? shared : null, importers: importers.map((c) => repoRelComponent(c)).sort(), evidence };
+  const importersRel = importers.map((c) => repoRelComponent(c)).sort();
+  const nonImportersRel = set
+    .filter((c) => c !== definer && !importers.includes(c))
+    .map((c) => repoRelComponent(c))
+    .sort();
+  const unknownRel = named.filter((c) => !byBase.has(c)).map((c) => repoRelComponent(c)).sort();
+  return {
+    definer: repoRelComponent(definer), symbol: shared.length ? shared : null,
+    importers: importersRel, non_importers: nonImportersRel, unknown_components: unknownRel, evidence,
+  };
 }
 
-/** A pre-verification hit, in the verifier's OWN vocabulary: `refuted` with the reason
- *  `shared-implementation` (⛔ never `undetermined` — import edges are positive evidence, not a budget
- *  exhaustion). `null` ⇒ no mechanical refutation, the cluster goes on to the model verifier unchanged. */
-export function mechanicalRefutation({ components = [], provenance = null } = {}) {
-  const hit = sharedImplementation({ components, provenance });
-  return hit ? { verdict: "refuted", verdict_reason: "shared-implementation", ...hit } : null;
+/** The shared-import finding RENDERED as evidence-pack lines. `[]` when there is no finding (no
+ *  provenance, or no star) — an EMPTY list, so a caller that concatenates it changes nothing. */
+export function mechanicalEvidenceLines({ components = [], provenance = null } = {}) {
+  const f = sharedImplementation({ components, provenance });
+  if (!f) return [];
+  const namedCount = 1 + f.importers.length + f.non_importers.length + f.unknown_components.length;
+  const out = [
+    `- MECH ${f.importers.length}/${namedCount} named components import ${f.definer}`
+      + (f.symbol ? ` | shared names: {${f.symbol.join(", ")}}` : " | (different names taken from it)")
+      + (f.non_importers.length || f.unknown_components.length ? " — NOT a verdict: see the NOT-importing lines" : ""),
+  ];
+  for (const e of f.evidence) out.push(`- MECH   import ${e.file}:${e.line ?? "?"} -> ${e.imports} | {${(e.names ?? []).join(", ")}}`);
+  for (const n of f.non_importers) out.push(`- MECH   NOT-importing ${n} | named by the hypothesis, imports nothing from the definer`);
+  for (const u of f.unknown_components) out.push(`- MECH   NOT-INVENTORIED ${u} | named by the hypothesis, absent from the inventory (its edges were never observed)`);
+  return out;
 }
 
 // ── the mechanical EVIDENCE PACK (opt-in strategy; pure, no model call) ──────────────────────────────
@@ -933,15 +978,22 @@ export function importLinesFor({ components = [], provenance = null, sources = {
 }
 
 /**
- * Assemble the deterministic evidence pack for one cluster: the definition lines of the cited symbols,
- * the import lines among the named components, and the caller's bounded grep hits. Section lines are
- * allocated ROUND-ROBIN, so a cap can never starve a whole evidence class (and `capped` says so).
+ * Assemble the deterministic evidence pack for one cluster: the MECHANICAL shared-import finding, the
+ * definition lines of the cited symbols, the import lines among the named components, and the caller's
+ * bounded grep hits. Section lines are allocated ROUND-ROBIN, so a cap can never starve a whole evidence
+ * class (and `capped` says so).
+ *
+ * The MECH section is computed HERE from `provenance` rather than passed in, so a caller cannot forget it:
+ * the finding is evidence the MODEL weighs, and every pack assembled with a provenance sidecar carries it
+ * (`mechanicalEvidenceLines` returns `[]` without one — the pack is then byte-identical to the pre-2026-10-12
+ * rendering, which is what the `--provenance`-free path is pinned to).
  * PURE — every input is supplied; no fs, no model.
  * @returns {{components:string[], symbols:string[], lines:string[], text:string, capped:boolean,
- *            counts:object, sections:{definitions:object[],imports:object[],hits:object[]}}}
+ *            counts:object, sections:{mechanical:string[],definitions:object[],imports:object[],hits:object[]}}}
  */
 export function buildEvidencePack({ components = [], claim = "", sources = {}, provenance = null, hits = [], maxLines = DEFAULT_EVIDENCE_MAX_LINES, maxSymbols = DEFAULT_EVIDENCE_MAX_SYMBOLS, maxComponentsPerSymbol = 4 } = {}) {
   const symbols = citedSymbols(claim, { max: maxSymbols });
+  const mechanical = mechanicalEvidenceLines({ components, provenance });
   const definitions = definitionLinesFor({ symbols, components, sources, maxComponentsPerSymbol });
   const imports = importLinesFor({ components, provenance, sources });
   const normHits = (Array.isArray(hits) ? hits : []).map((h) => ({
@@ -953,6 +1005,7 @@ export function buildEvidencePack({ components = [], claim = "", sources = {}, p
     hits: (h) => `- HIT ${h.file}:${h.line ?? "?"} | ${h.text}`,
   };
   const queues = [
+    mechanical,
     definitions.map((x) => render.definitions(x)),
     imports.map((x) => render.imports(x)),
     normHits.map((x) => render.hits(x)),
@@ -969,28 +1022,36 @@ export function buildEvidencePack({ components = [], claim = "", sources = {}, p
     "## Mechanical evidence pack (assembled deterministically BEFORE the model call)",
     `components: ${components.map((c) => repoRelComponent(c)).join(", ") || "-"}`,
     `cited symbols: ${symbols.join(", ") || "-"}`,
-    `sections: definitions=${definitions.length} imports=${imports.length} hits=${normHits.length}${total > picked.length ? ` (rendered ${picked.length}/${total}, capped at ${budget})` : ""}`,
+    // ⛔ The mechanical count is APPENDED only when the finding exists, so a pack built without a
+    // provenance sidecar renders byte-for-byte as it did before the finding existed.
+    `sections: definitions=${definitions.length} imports=${imports.length} hits=${normHits.length}`
+      + `${mechanical.length ? ` mechanical=${mechanical.length}` : ""}`
+      + `${total > picked.length ? ` (rendered ${picked.length}/${total}, capped at ${budget})` : ""}`,
   ];
   return {
     components: components.map((c) => repoRelComponent(c)), symbols,
     lines: picked, text: [...header, ...picked].join("\n"), capped: total > picked.length,
-    counts: { definitions: definitions.length, imports: imports.length, hits: normHits.length, rendered: picked.length, total },
-    sections: { definitions, imports, hits: normHits },
+    counts: { definitions: definitions.length, imports: imports.length, hits: normHits.length, rendered: picked.length, total, ...(mechanical.length ? { mechanical: mechanical.length } : {}) },
+    sections: { mechanical, definitions, imports, hits: normHits },
   };
 }
 
 /**
  * Run the bounded verifier over the pre-registered selection (highest confidence first, cap = clusters).
- * Refuses unless cwd is the forbidden-directory-free pinned tree. The MECHANICAL layer is applied to
- * every cluster BEFORE the model loop, so a mechanically refuted cluster spends no model call.
+ * Refuses unless cwd is the forbidden-directory-free pinned tree.
+ *
+ * ⛔ NO CLUSTER IS DECIDED WITHOUT A MODEL CALL (gap-hypgen-mechanical-shared-implementation-layer-
+ * false-refutes). The mechanical layer is applied to every cluster BEFORE the model loop, but it only
+ * ATTACHES its shared-import finding to the row as `mechanical_evidence` — an import edge is evidence
+ * about reuse, never a verdict on the claim. A row carrying a finding is otherwise a model row like any
+ * other, and its verdict / verdict_reason are the model's.
  *
  * EVERY model call is INSTRUMENTED: the caller runs the launcher with `--output-format stream-json`, and
  * each row carries the per-turn tool calls (`turns`) plus `turns_used`. A call whose stream did not parse
  * is `not-evaluated:uninstrumented` — never "zero turns" (硬规则 3b).
  *
- * `strategy: "evidence-pack"` is OPT-IN: each cluster's deterministic pack is assembled first, and the
- * clusters the mechanical layer already decides run first (`run_order`), so no model call is spent on
- * them; the rest get the pack in their prompt.
+ * `strategy: "evidence-pack"` is OPT-IN: each cluster's deterministic pack — the mechanical finding
+ * first — is assembled first and passed in the prompt.
  *
  * EVERY model call also carries the MODEL IDENTITY + COST fields (`modelCallFields`): the requested model,
  * the ACTUAL one the stream reports was served, a mismatch flag, and the call's usage / cost.
@@ -1024,10 +1085,10 @@ export async function runVerifier({
   }
   const results = new Array(idxs.length);
   const t0 = Date.now();
-  // The mechanical layer is computed for EVERY selected cluster up front (pure, no model call), so a
-  // mechanically refuted cluster can never reach `runModel` — the "spends no model call" claim is a
-  // property of this loop, not of the caller's discipline.
-  const mech = idxs.map((i) => mechanicalRefutation({ components: clusters[i].rep.components, provenance }));
+  // The mechanical finding is computed for EVERY selected cluster up front (pure, no model call) so the
+  // row can carry it. It is EVIDENCE: no cluster is short-circuited by it, every one still reaches
+  // `runModel` (that is the property this loop is responsible for, not the caller's discipline).
+  const mech = idxs.map((i) => sharedImplementation({ components: clusters[i].rep.components, provenance }));
   const packs = strategy === "evidence-pack"
     ? idxs.map((i) => buildEvidencePack({
       components: clusters[i].rep.components, claim: clusters[i].rep.claim,
@@ -1042,25 +1103,6 @@ export async function runVerifier({
       components: c.rep.components, concept_kind: c.rep.concept_kind, claim: c.rep.claim,
       evidence_needed: c.rep.evidence_needed, counterexample_requirement: c.rep.counterexample_requirement,
     };
-    if (mech[k]) {
-      const m = mech[k];
-      results[k] = {
-        cluster: i + 1, members: c.members, kind: c.rep.concept_kind, comps: c.rep.comps,
-        claim: String(c.rep.claim ?? "").slice(0, 200),
-        wall_ms: 0, out_bytes: 0, exit: null, strategy,
-        verdict: m.verdict, verdict_reason: m.verdict_reason, verdict_cause: null, mechanical: true,
-        definer: m.definer, shared_symbol: m.symbol,
-        intentional: null, evidence: m.evidence, counterexample: null,
-        // A cluster decided WITHOUT a model call has no turns to record; that is "not applicable", which
-        // is its own marker and must not read as "not-evaluated" (硬规则 3/3b). Its model identity is
-        // not-applicable for the SAME reason — no call was made, so there is nothing to verify.
-        instrumented: false, instrumentation: "not-applicable:mechanical", turns: null, turns_used: 0, cli_num_turns: null,
-        requested_model: null, actual_model: MODEL_NOT_APPLICABLE, model_mismatch: false, usage: null, cost_usd: null,
-        pack: packs[k] ? { counts: packs[k].counts, capped: packs[k].capped, lines: packs[k].lines } : null,
-        summary: `shared implementation: ${m.importers.length} components import from ${m.definer}`,
-      };
-      return;
-    }
     let prompt = String(promptTemplate).replace("{{HYP}}", JSON.stringify(hyp));
     if (packs[k]) prompt = prompt.replace("{{PACK}}", packs[k].text);
     const tCall = Date.now();
@@ -1083,13 +1125,19 @@ export async function runVerifier({
       intentional: j?.intentional_difference_found ?? null,
       evidence: Array.isArray(j?.evidence) ? j.evidence : [],
       counterexample: j?.counterexample ?? null,
+      // The mechanical finding, ATTACHED as evidence. The key is present only when there IS one, so a
+      // `--provenance`-free row stays byte-identical to the pre-2026-10-12 rendering (where the field did
+      // not exist) and a provenance-free run's artifact is unchanged.
+      ...(mech[k] ? { mechanical_evidence: mech[k] } : {}),
       pack: packs[k] ? { counts: packs[k].counts, capped: packs[k].capped, lines: packs[k].lines } : null,
       summary: j?.summary ?? String(stream.ok ? stream.finalText : stdout).slice(0, 300),
     };
   };
-  // Budget-aware ORDERING (opt-in): the mechanically decided clusters run first, so a run that exhausts
-  // its wall budget spends it on clusters a model call can actually change.
-  const order = idxs.map((_, k) => k).sort((a, b) => (mech[a] ? 0 : 1) - (mech[b] ? 0 : 1) || a - b);
+  // ⛔ NO budget-aware reordering: it existed only to run the mechanically DECIDED clusters first, and
+  // nothing is decided here any more. Every cluster needs its model call, so ordering by the finding would
+  // be a claim about relative call cost that has never been measured (硬规则 4 推论四). The selection order
+  // is the execution order.
+  const order = idxs.map((_, k) => k);
   const step = Math.max(1, concurrency);
   for (let i = 0; i < order.length; i += step) {
     if (maxMs != null && Date.now() - t0 >= maxMs) return { ok: false, code: EXIT.maxMs, reasons: [`MAX_MS_EXCEEDED:${Date.now() - t0}>=${maxMs}`], results: results.filter(Boolean) };
@@ -1098,11 +1146,24 @@ export async function runVerifier({
   return {
     ok: true, clusters_total: clusters.length, verified: idxs.length,
     beyond_cap: onlyCluster != null ? 0 : Math.max(0, clusters.length - idxs.length),
-    mechanical_refuted: mech.filter(Boolean).length,
-    decided_without_model: mech.filter(Boolean).length,
+    // How many rows carry a mechanical shared-import finding. ⛔ NOT a refutation count: nothing here is
+    // refuted by the layer (that is the whole point of `mechanicalEvidenceLines`).
+    mechanical_evidence: mech.filter(Boolean).length,
     strategy, run_order: order.map((k) => idxs[k] + 1),
     results,
   };
+}
+
+/**
+ * The run-level mechanical count as the ARTIFACT spells it. A `--provenance` run names it
+ * `mechanical_evidence` (what it counts). A provenance-free run keeps the pre-2026-10-12 name and value
+ * (`mechanical_refuted: 0`) — that path's `verify.json` is byte-identical to the artifact written before
+ * the finding existed, which is what "behaviour without `--provenance` is unchanged" is pinned to. ⛔ The
+ * zero is a READING, not a literal: without a provenance sidecar no finding can exist.
+ * @returns {object} a one-key object, spread into the verify.json / stdout summary
+ */
+export function mechanicalSummaryField({ provenance = null, mechanical_evidence = 0 } = {}) {
+  return provenance ? { mechanical_evidence } : { mechanical_refuted: mechanical_evidence };
 }
 
 // ── mechanical match (pure) ──────────────────────────────────────────────────────────────────────────
@@ -2162,8 +2223,8 @@ async function cli(argv = process.argv.slice(2)) {
     const { launchArgv, runAsync } = runtime.mod;
     const maxTurns = Number(argOf(args, "--max-turns", 8));
     // The provenance sidecar (from `inventory --inventory-form provenance --out-entries`) turns on the
-    // MECHANICAL pre-verification layer. Absent ⇒ the verifier behaves exactly as before (no edge data =
-    // no mechanical refutation, 硬规则 3b).
+    // MECHANICAL shared-import finding. Absent ⇒ no edge data, so no finding to attach and the verifier's
+    // rows and packs are byte-identical to the pre-2026-10-12 rendering (硬规则 3b: no data ⇒ no reading).
     const provenanceFile = argOf(args, "--provenance", null);
     const provenance = provenanceFile ? JSON.parse(fs.readFileSync(provenanceFile, "utf8")) : null;
     // The pack's SOURCES are read from the PIN, by position: only the named components' files, never a
@@ -2201,9 +2262,10 @@ async function cli(argv = process.argv.slice(2)) {
     if (!res.ok) { console.error(`${TOOL} verify: ${res.reasons.join(", ")}`); return res.code; }
     const outFile = path.resolve(argOf(args, "--out", path.join(outDir, "verify.json")));
     fs.mkdirSync(path.dirname(outFile), { recursive: true });
-    fs.writeFileSync(outFile, JSON.stringify({ clusters_total: res.clusters_total, verified: res.verified, beyond_cap: res.beyond_cap, mechanical_refuted: res.mechanical_refuted, strategy: res.strategy, run_order: res.run_order, results: res.results }, null, 1));
+    const mechField = mechanicalSummaryField({ provenance, mechanical_evidence: res.mechanical_evidence });
+    fs.writeFileSync(outFile, JSON.stringify({ clusters_total: res.clusters_total, verified: res.verified, beyond_cap: res.beyond_cap, ...mechField, strategy: res.strategy, run_order: res.run_order, results: res.results }, null, 1));
     const tally = emit(verifyRecords({ verify: res, experiment }), { out: path.join(outDir, "verify-records.jsonl"), writeStore: has(args, "--write-store"), root: has(args, "--write-store") ? root : null });
-    console.log(JSON.stringify({ clusters_total: res.clusters_total, verified: res.verified, beyond_cap: res.beyond_cap, mechanical_refuted: res.mechanical_refuted, strategy: res.strategy, run_order: res.run_order, verdicts: res.results.reduce((a, r) => ((a[r.verdict] = (a[r.verdict] ?? 0) + 1), a), {}), turns_used: res.results.map((r) => r.turns_used), validator: { accepted: tally.accepted, refused: tally.refused } }, null, json ? 1 : 0));
+    console.log(JSON.stringify({ clusters_total: res.clusters_total, verified: res.verified, beyond_cap: res.beyond_cap, ...mechField, strategy: res.strategy, run_order: res.run_order, verdicts: res.results.reduce((a, r) => ((a[r.verdict] = (a[r.verdict] ?? 0) + 1), a), {}), turns_used: res.results.map((r) => r.turns_used), validator: { accepted: tally.accepted, refused: tally.refused } }, null, json ? 1 : 0));
     return 0;
   }
 
@@ -2339,14 +2401,16 @@ async function cli(argv = process.argv.slice(2)) {
   console.error("              ⛔ an unresolvable root/compiler exits 11 and writes NOTHING — never a zero-group run.");
   console.error("              --prereg-out writes that key into a prereg and writes no run (the run must postdate it).");
   console.error("  verify      --pin-dir <dir> --runs <dir> --inventory <f> [--provenance <f>] [--prereg <f>] [--investigator-prompt <f>] [--arm <id>] [--experiment <id>] [--model <id>] [--max-clusters N] [--max-turns N] [--max-ms N]");
-  console.error("              --provenance <f> turns on the MECHANICAL pre-verification layer: a cluster whose members'");
-  console.error("              edges converge on one component is recorded refuted/shared-implementation with NO model call.");
+  console.error("              --provenance <f> attaches the MECHANICAL shared-import finding: a cluster whose members'");
+  console.error("              edges converge on one component carries it as `mechanical_evidence` AND in its pack, with the");
+  console.error("              named components that do NOT import the definer. ⛔ it is EVIDENCE, never a verdict: every");
+  console.error("              cluster still gets a model call (an import edge cannot settle a claim about behaviour).");
   console.error("              [--strategy default|evidence-pack] [--only-cluster N] [--evidence-source-root <dir>] [--evidence-max-lines N] [--evidence-hits <f>] [--prompt <f>]");
   console.error("              every model call runs with --output-format stream-json, so each row carries the per-turn");
   console.error("              tool calls (`turns`) and `turns_used`; a call with no parseable stream is");
   console.error("              `not-evaluated:uninstrumented`. --only-cluster N runs ONE cluster by its 1-based position.");
   console.error("              --strategy evidence-pack is opt-in: it uses the SEPARATE prompt file");
-  console.error("              verifier-evidence-pack.txt and runs the mechanically decided clusters first (run_order).");
+  console.error("              verifier-evidence-pack.txt, whose pack leads with the mechanical shared-import finding.");
   console.error("              ⛔ the pinned tree must carry NONE of: " + PIN_FORBIDDEN_DIRS.join(", ") + " (scope enforcement).");
   console.error("  match       --runs <dir> --labels <f> --inventory <f> [--prereg <f>] [--investigator-prompt <f>] [--arm <id>] [--experiment <id>] [--run-count N] [--write-store]");
   console.error("  review      --runs <dir> --labels <f> --matches <f> --neutral-dir <dir> --inventory <f> [--prereg <f>] [--arm <id>] [--experiment <id>] [--model <id>]");
