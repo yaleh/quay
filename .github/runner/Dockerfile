@@ -133,11 +133,50 @@ RUN mkdir -p /etc/systemd/system/user@0.service.d \
 # The runner becomes a systemd service: PID 1 is systemd (see ENTRYPOINT below), so the runner can
 # no longer be the container's entrypoint. `PassEnvironment` carries the whole container environment
 # (trap 4); `XDG_RUNTIME_DIR` is the user-manager location the scope envelope needs (trap 3).
+#
+# ── WHY THE UNIT EXITS THE CONTAINER WHEN THE RUNNER STOPS (trap 7) ──────────────────────────────
+# Making the runner a service BROKE the recycling the whole runner design rests on. The runner is
+# EPHEMERAL: it registers, takes ONE job, exits. When it was PID 1 (the base image's ENTRYPOINT),
+# its exit ended the container, `--rm` removed it, and `gh-runner-quay.service`'s `Restart=always`
+# started a fresh one from this image ~5s later. With PID 1 = systemd that stops being true: the
+# runner exiting is just ONE SERVICE stopping, and systemd sits there forever. `Restart=always`
+# then actively pins the container: the runner restarts IN PLACE, so the container is immortal and
+# every job inherits the previous job's `/root`, `/tmp` and node-install state.
+#
+# Measured 2026-10-11 (release run 38075693986, v0.19.0): container `Up 19 hours`,
+# `systemctl show gh-runner.service -p NRestarts` = **378** — one restart per job, 378 jobs' worth
+# of accumulated state in one container. The leak that broke the release: `ci.yml`'s
+# `npm install -g <tgz>` postinstall writes `extraKnownMarketplaces.quay` into the container's
+# `/root/.claude/settings.json`; on a container that has already run a node-floor job, the release
+# job's `marketplace add <build artifact>` is then a silent no-op ("already on disk — declared in
+# user settings") and the gate installs the npm-published `X.Y.Z-dev` instead of the built one.
+# A FRESH container has neither `/root/.claude` nor the cache (verified: `docker run --rm
+# --entrypoint sh quay-ci-runner:sysd -c 'ls /root/.claude /opt/hostedtoolcache/node'` ⇒ both
+# absent), which is exactly why v0.18.0 passed and v0.19.0 did not.
+#
+# `SuccessAction=`/`FailureAction=` are systemd's "act on the state the unit just entered" knobs
+# (`exit` = shut the manager down, propagating the main process's status to the container manager).
+# Together they cover every way the runner can stop: success (a completed ephemeral job, exit 0),
+# failure (a crashed listener, non-zero) and failed-to-start (`ExecStart` cannot exec — measured
+# below). The host unit's `Restart=always` then rebuilds a fresh container from this image.
+#
+# ⛔ TRAP 7 — the section is LOAD-BEARING, and getting it wrong fails SILENTLY. These two are
+# UNIT-level settings (systemd.unit(5), not systemd.service(5)). Measured 2026-10-11 on systemd 255
+# in this image: with both written under `[Service]`, `systemctl show gh-runner.service` reports
+# `SuccessAction=none` while `FailureAction=exit` survives, `Result=success`, NRestarts climbing,
+# and the container stays up (NRestarts=26 in a 90s probe). Under `[Unit]` both take effect and the
+# container exits 3s after the service stops. `Restart=always` does NOT preempt the action (measured:
+# `[Unit] SuccessAction=exit` + `Restart=always` still exits the container), so it is KEPT — if the
+# exit actions ever stop firing, the failure degrades to today's behaviour instead of a container
+# that sits alive with no runner at all. `plugin/test/ci-runner-container-recycle.test.mjs` pins the
+# placement (and goes red if the config is deleted) for exactly this reason.
 RUN printf '%s\n' \
       '[Unit]' \
       'Description=GitHub Actions runner (yaleh/quay)' \
       'After=network-online.target user@0.service' \
       'Wants=network-online.target user@0.service' \
+      'SuccessAction=exit' \
+      'FailureAction=exit' \
       '[Service]' \
       'Type=simple' \
       'Environment=XDG_RUNTIME_DIR=/run/user/0' \
@@ -195,6 +234,11 @@ RUN printf '%s\n' 'XDG_RUNTIME_DIR=/run/user/0' >> /actions-runner/.env
 #        ships `/opt/hostedtoolcache` EMPTY (no node/<v>/x64, no `.complete`) — tools there are a
 #        property of the runner HOST (the path is persisted across the ephemeral containers), so a
 #        fresh `docker build` CANNOT assert them and this RUN deliberately does not.
+#   p5 — the runner unit carries the container-exit actions (trap 7), so a tree where they were
+#        dropped fails the BUILD instead of producing a container that never recycles. ⛔ This grep
+#        only proves the LINE is present; WHICH SECTION it sits in is the silent-drop trap, and that
+#        half is pinned by plugin/test/ci-runner-container-recycle.test.mjs (a `[Service]` placement
+#        passes this grep and still does nothing — measured).
 RUN set -eux; \
     ls /usr/lib/*/security/pam_systemd.so >/dev/null; \
     grep -q '^Environment=XDG_RUNTIME_DIR=/run/user/0$' /etc/systemd/system/user@0.service.d/20-xdg-runtime.conf; \
@@ -205,6 +249,8 @@ RUN set -eux; \
     grep -q 'Runner\.Listener run' /etc/systemd/system/gh-runner.service; \
     grep -q '^XDG_RUNTIME_DIR=/run/user/0$' /actions-runner/.env; \
     test -d /opt/hostedtoolcache; \
-    grep -q '^Environment=RUNNER_TOOL_CACHE=/opt/hostedtoolcache$' /etc/systemd/system/gh-runner.service.d/30-toolcache.conf
+    grep -q '^Environment=RUNNER_TOOL_CACHE=/opt/hostedtoolcache$' /etc/systemd/system/gh-runner.service.d/30-toolcache.conf; \
+    grep -q '^SuccessAction=exit$' /etc/systemd/system/gh-runner.service; \
+    grep -q '^FailureAction=exit$' /etc/systemd/system/gh-runner.service
 
 ENTRYPOINT ["/lib/systemd/systemd"]
