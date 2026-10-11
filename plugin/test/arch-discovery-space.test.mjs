@@ -168,22 +168,25 @@ test("streamJsonl reads every line the whole-file read would, holding multibyte 
 
 // ── scan mode on a FIXTURE repo: determinism (a), bounds (b) ────────────────────────────────────────
 /** A tiny git repo the scan can read: one authority + two surfaces that lag it by one value, plus a
- *  test file importing surface A. Everything is inside `plugin/` so the checker's own discovery roots
- *  and the E3 test glob both see it. The registry is passed with `--registry` (the checker's own fixture
- *  seam), so the scan never touches this repo's real registry. */
+ *  test file importing surface A (which is what makes E3 read `evaluated`). The E3 glob only sees test
+ *  files under `plugin/test/`, so the fixture's test file lives there and its surface files live in a
+ *  sibling `fixture/` dir — ⛔ deliberately NOT under `plugin/scripts/`, because `test-impl-census-check`
+ *  treats any `…/scripts/<name>` literal in a TEST FILE's source as "the tested implementation", and this
+ *  fixture's module exists only in the temp repo. (The registry is what tells the scan where to look;
+ *  the discovery roots only affect the informational `discovered` list, which this fixture does not use.) */
 function makeScanFixture() {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), "arch-scan-fixture-"));
-  fs.mkdirSync(path.join(dir, "plugin/scripts"), { recursive: true });
+  fs.mkdirSync(path.join(dir, "fixture"), { recursive: true });
   fs.mkdirSync(path.join(dir, "plugin/test"), { recursive: true });
-  fs.writeFileSync(path.join(dir, "plugin/scripts/fixture-authority.ts"), `export const FIXTURE_VALUES = ["alpha", "beta"];\n`);
-  fs.writeFileSync(path.join(dir, "plugin/scripts/fixture-surface-a.ts"), `export const FIXTURE_SURFACE_A = ["alpha"];\n`);
-  fs.writeFileSync(path.join(dir, "plugin/scripts/fixture-surface-b.ts"), `export const FIXTURE_SURFACE_B = ["alpha"];\n`);
-  fs.writeFileSync(path.join(dir, "plugin/test/fixture-surface.test.mjs"), `import { FIXTURE_SURFACE_A } from "../scripts/fixture-surface-a.ts";\nexport const seen = FIXTURE_SURFACE_A;\n`);
+  fs.writeFileSync(path.join(dir, "fixture/authority.ts"), `export const FIXTURE_VALUES = ["alpha", "beta"];\n`);
+  fs.writeFileSync(path.join(dir, "fixture/surface-a.ts"), `export const FIXTURE_SURFACE_A = ["alpha"];\n`);
+  fs.writeFileSync(path.join(dir, "fixture/surface-b.ts"), `export const FIXTURE_SURFACE_B = ["alpha"];\n`);
+  fs.writeFileSync(path.join(dir, "plugin/test/fixture-surface.test.mjs"), `import { FIXTURE_SURFACE_A } from "../../fixture/surface-a.ts";\nexport const seen = FIXTURE_SURFACE_A;\n`);
   const registry = {
-    authorities: [{ id: "fixture-values", file: "plugin/scripts/fixture-authority.ts", symbol: "FIXTURE_VALUES", extract: "ts-array" }],
+    authorities: [{ id: "fixture-values", file: "fixture/authority.ts", symbol: "FIXTURE_VALUES", extract: "ts-array" }],
     surfaces: [
-      { id: "fixture-surface-a", authority: "fixture-values", file: "plugin/scripts/fixture-surface-a.ts", extract: "ts-array", symbol: "FIXTURE_SURFACE_A", policy: "exact" },
-      { id: "fixture-surface-b", authority: "fixture-values", file: "plugin/scripts/fixture-surface-b.ts", extract: "ts-array", symbol: "FIXTURE_SURFACE_B", policy: "exact" },
+      { id: "fixture-surface-a", authority: "fixture-values", file: "fixture/surface-a.ts", extract: "ts-array", symbol: "FIXTURE_SURFACE_A", policy: "exact" },
+      { id: "fixture-surface-b", authority: "fixture-values", file: "fixture/surface-b.ts", extract: "ts-array", symbol: "FIXTURE_SURFACE_B", policy: "exact" },
     ],
     knownDrift: [
       { surface: "fixture-surface-a", extra: [], missing: ["beta"], reason: "fixture: recorded drift (a)" },
