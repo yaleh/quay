@@ -26,13 +26,16 @@ extra:
 
 **修法方向**：恢复"每 job 一个全新容器"——runner 服务退出时让容器退出（例如 `gh-runner.service` 上 `SuccessAction=exit`/`FailureAction=exit` 或 `ExecStopPost` 终止 PID1），由宿主 unit `Restart=always` 从镜像重建。⛔ 不得以"每次手工重启宿主 unit"代替机制。注：宿主侧 unit 在仓库之外（`~/.config/systemd/user/gh-runner-quay.service`），容器内 unit 由 `.github/runner/Dockerfile` 定义。
 
+**AC 外部性说明（作者，2026-10-11）**：AC1–AC5 都要求把新镜像部署到 tokyo-alpha 共享生产 runner 后才能读取（重建镜像 + 重启宿主 unit），这是宿主侧动作，⛔ worker 不得执行，故标 `（待外部）`；AC0 是 worker 在 worktree 内唯一可完成、可验证的部分。
+
 ## AC
 
-- [ ] AC1（读生产载体）：修复落地后，runner 连续执行 ≥2 个 job，每个 job 开始时 `docker ps` 的容器创建时刻**互不相同**（即每 job 新容器）；把读数贴进本任务
-- [ ] AC2（读生产载体）：任一 job 开始时容器内 `/root/.claude/settings.json` 不存在或不含 `extraKnownMarketplaces.quay`，且 `NRestarts` = 0；贴读数
-- [ ] AC3（负控制）：去掉该退出配置后重复 AC1，必须观察到同一容器跨 job 存活（NRestarts 递增）；贴读数
-- [ ] AC4：`serve-own-scope` 断言在修复后仍 PASS（不得为回收容器而丢掉用户 systemd 管理器）
-- [ ] AC5：由 `.github/runner/Dockerfile` 从 develop 重建镜像后上述性质成立（不依赖手工改容器）
+- [ ] AC0（worktree 内可验）：`plugin/test/ci-runner-container-recycle.test.mjs` 按位置断言 `.github/runner/Dockerfile` 定义的 `gh-runner.service` 带有"服务退出即令容器退出"的配置（如 `SuccessAction=exit` / `FailureAction=exit` 或等价的终止 PID1 的 `ExecStopPost`）；变异对照：删去该配置后此测试必须变红，把变红输出贴进任务
+- [ ] AC1（读生产载体）：修复落地后，runner 连续执行 ≥2 个 job，每个 job 开始时 `docker ps` 的容器创建时刻**互不相同**（即每 job 新容器）；把读数贴进本任务（待外部）
+- [ ] AC2（读生产载体）：任一 job 开始时容器内 `/root/.claude/settings.json` 不存在或不含 `extraKnownMarketplaces.quay`，且 `NRestarts` = 0；贴读数（待外部）
+- [ ] AC3（负控制）：去掉该退出配置后重复 AC1，必须观察到同一容器跨 job 存活（NRestarts 递增）；贴读数（待外部）
+- [ ] AC4：`serve-own-scope` 断言在修复后仍 PASS（不得为回收容器而丢掉用户 systemd 管理器）（待外部）
+- [ ] AC5：由 `.github/runner/Dockerfile` 从 develop 重建镜像后上述性质成立（不依赖手工改容器）（待外部）
 
 ## DoD
 
