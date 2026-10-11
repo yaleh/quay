@@ -239,3 +239,12 @@ export function routineK(root: string, routine: string | null): number {
 export function routineGlobalCeiling(root: string): number {
   return loadRoutineQuotaConfig(root).globalCeiling;
 }
+
+/** 单一入口：rate 窗口（ms，尾窗宽度）。立案计数的两个调用点（probe-routine.ts 的 per-routine /
+ *  全局读数、meta-driver.ts 的 driveItems 全局读数）都从这里取窗口，⛔ 不再各自引用孤儿常量
+ *  FILING_WINDOW_MS——那正是「`window_ms` 解析出来却无人消费」的缺口（硬规则 3b / 规则 9：
+ *  声明了却不生效的旋钮，与「没有这个旋钮」同形）。缺省 = DEFAULT_ROUTINE_QUOTA_WINDOW_MS（24h），
+ *  与旧常量逐字相等 ⇒ 缺省行为逐字节不变。 */
+export function routineWindowMs(root: string): number {
+  return loadRoutineQuotaConfig(root).windowMs;
+}

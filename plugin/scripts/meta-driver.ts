@@ -51,7 +51,7 @@ import { launchArgv, runAsync, ts, aliveness, carrierStats, KNOWN_KINDS, resolve
 import { resolveCliInvocation } from "./start-drivers.ts";
 import { runResidentQualityGateLoop, computeRoundRecord } from "./quality-gate-driver.ts";
 import { readProbeSpec } from "./read-probe-spec.ts";
-import { gateFinding, findingKey, DEFAULT_RATE, countRecentFilings, FILING_WINDOW_MS, routineQuotaDecision, BoardKeys, type BoardKeyOwner } from "./routine-file-gate.ts";
+import { gateFinding, findingKey, DEFAULT_RATE, countRecentFilings, routineQuotaDecision, BoardKeys, type BoardKeyOwner } from "./routine-file-gate.ts";
 // 载体相对路径的单一真相源（⛔ 不在此处硬写字面量「.quay/routine-findings.jsonl」——那会制造第二份
 // 定义，本文件读的全局窗口合计必须与 probe-routine.ts 写的是同一个文件；硬规则 5b）。
 import { ROUTINE_FINDINGS_REL } from "./probe-routine.ts";
@@ -62,7 +62,9 @@ import { snapshotTrackedChanges, probeWriteViolations } from "./probe-write-guar
 // AC155（gap-drivers-yml-interval-not-honored-for-routine-kinds）：轮询间隔的单一真相源——
 // drivers.yml 经 driver-config 加载，⛔ 不在本文件另写一份字面量（goal/quality/outer 同款接法）。
 // routineGlobalCeiling 同属该配置面：driveItems 的真实全局天花板从这里读（本任务新增）。
-import { defaultDriverConfig, loadDriverConfig, routineGlobalCeiling } from "./driver-config.ts";
+// routineWindowMs 亦同（gap-routine-quota-window-ms-parsed-but-inert）：rate 窗口从 drivers.yml
+// `routine_quota.window_ms` 读，⛔ 不再引用孤儿常量 FILING_WINDOW_MS（它曾让 window_ms 改了没用）。
+import { defaultDriverConfig, loadDriverConfig, routineGlobalCeiling, routineWindowMs } from "./driver-config.ts";
 // stripEvidenceTimestamp 的单一真相源在 Core（goal-store）——本文件与 goal-store 的提交决策
 // 必须用同一判据「什么算实质变化」（gap-goal-gate-timestamp-commit-flood），⛔ 不各写一份。
 // meta 记录是第五种 store kind（gap-meta-records-should-be-a-first-class-store-kind-not-a-task-label）：
@@ -1832,7 +1834,9 @@ export async function driveItems(
   // 读不到载体 ⇒ `countRecentFilings` 返回 0（与「窗口内确实 0 条」同值——两者都只让闸更松，不回退）。
   const carrierPath = path.join(root, ROUTINE_FINDINGS_REL);
   const nowMs = Date.now();
-  const globalBase = countRecentFilings(carrierPath, nowMs, FILING_WINDOW_MS, null);
+  // 窗口从 drivers.yml `routine_quota.window_ms` 读（⛔ 不是常量 FILING_WINDOW_MS）——与 probe-routine.ts
+  // 的 ① 同源同值，否则两条立案路径会对同一个载体用两个不同的尾窗。
+  const globalBase = countRecentFilings(carrierPath, nowMs, routineWindowMs(root), null);
   const globalCeiling = routineGlobalCeiling(root);
   for (const item of items) {
     if (filed >= opts.cap) {
