@@ -25,11 +25,19 @@ export const sha256 = (s) => sha(s);
 /** The one fixed sink (relative to the investigated root), same convention as the proposal carrier. */
 export const EVIDENCE_STORE_REL = ".quay/architecture-evidence-store.jsonl";
 
-export const RECORD_KINDS = Object.freeze(["evidence", "hypothesis", "experiment", "outcome", "repair_attempt"]);
+export const RECORD_KINDS = Object.freeze(["evidence", "hypothesis", "experiment", "outcome", "repair_attempt", "counterexample"]);
 
 /** Outcome verdict vocabulary. `exempted` is a TERMINAL outcome produced by the decision memory
- *  (`architecture-decision-memory.mjs`): the item was already judged and must not be re-proposed. */
-export const OUTCOME_VERDICTS = Object.freeze(["proposed", "abstained", "investigated", "not-evaluated", "exempted"]);
+ *  (`architecture-decision-memory.mjs`): the item was already judged and must not be re-proposed.
+ *  The last three are the DISCOVERY-FINDING verdicts (task gap-evidence-store-cannot-record-discovery-
+ *  verdicts-and-counterexamples): they record what a cross-object consistency check CONCLUDED, which the
+ *  five ownership-loop verdicts above cannot express. They are deliberately domain-neutral (`supported` /
+ *  `refuted` / `undetermined`) — a domain word like `drift` or `legit` belongs in the hypothesis statement,
+ *  not in the verdict vocabulary, so the store never grows one enum value per domain. */
+export const OUTCOME_VERDICTS = Object.freeze([
+  "proposed", "abstained", "investigated", "not-evaluated", "exempted",
+  "supported", "refuted", "undetermined",
+]);
 
 const isStr = (x, n = 1) => typeof x === "string" && x.trim().length >= n;
 const isObj = (x) => x !== null && typeof x === "object" && !Array.isArray(x);
@@ -47,6 +55,13 @@ export const REQUIRED_FIELDS = Object.freeze({
   // One bounded proposal-repair round: which attempt it was, what the rejection was re-classified as, the
   // commit+scope the session was LOCKED to, the hypothesis it started from, and what the round cost.
   repair_attempt: Object.freeze(["tool", "ref", "ts", "sha256", "attempt_no", "bucket", "locked_commit", "locked_scope", "original_hypothesis", "elapsed_ms"]),
+  // A counterexample REFUTES a named hypothesis. It is its own kind — not a `hypothesis` with an extra
+  // field — because a hypothesis is a CLAIM and a counterexample is a DISPROOF of one; carried as a
+  // hypothesis it was indistinguishable from the thing it refutes on every validated field (硬规则 3b:
+  // the validator understood none of it and returned a result shaped exactly like a valid one).
+  // `counterexample_of` names the refuted hypothesis (its statement or its id); `source_evidence`
+  // grounds the disproof in at least one reading, exactly as a hypothesis must be grounded.
+  counterexample: Object.freeze(["counterexample_of", "source_evidence", "ts"]),
 });
 
 /**
@@ -69,13 +84,21 @@ export function validateRecord(kind, rec) {
   if (kind === "evidence") {
     if (!isObj(rec.confidence) || !CONF_LEVELS.includes(rec.confidence.level) || !isStr(rec.confidence.basis, 4)) reasons.push("FIELD_INVALID:confidence");
     if (!isStr(rec.tool, 1)) reasons.push("FIELD_INVALID:tool");
-    // `ref` is the commit sha the reading was taken AT — an unpinned reading is not evidence.
-    if (!isStr(rec.ref, 6)) reasons.push("FIELD_INVALID:ref");
-    if (!/^[0-9a-f]{64}$/.test(String(rec.sha256))) reasons.push("FIELD_INVALID:sha256");
-    // A reading is located EITHER by a file+range OR by a tool scope+flags. Neither is optional.
+    // A reading is located by a file+range, by a tool scope+flags, OR by one exact CARRIER LINE
+    // (`carrier:{path,line,line_sha256}`). The third form is for readings taken from a runtime carrier
+    // (a `.jsonl` outcome/gate ledger, a log, journalctl): no commit sha applies, so `ref` may be the
+    // carrier path, and provenance is the 1-based line number + the sha256 OF THAT LINE.
     const byFile = isStr(rec.path, 1) && Array.isArray(rec.range) && rec.range.length === 2 && rec.range.every(isNum);
     const byScope = isStr(rec.scope, 1) && Array.isArray(rec.flags);
-    if (!byFile && !byScope) reasons.push("EVIDENCE_LOCATION_MISSING:needs-(path+range)-or-(scope+flags)");
+    const byCarrier = isObj(rec.carrier) && isStr(rec.carrier.path, 1) && Number.isInteger(rec.carrier.line) && rec.carrier.line >= 1 && /^[0-9a-f]{64}$/.test(String(rec.carrier.line_sha256));
+    // A supplied-but-malformed carrier is its OWN cause (硬规则 3b) — never silently waved through just
+    // because another location form happens to be present.
+    if (rec.carrier !== undefined && !byCarrier) reasons.push("FIELD_INVALID:carrier-needs-{path,line,line_sha256(64-hex)}");
+    if (!byFile && !byScope && !byCarrier) reasons.push("EVIDENCE_LOCATION_MISSING:needs-(path+range)-or-(scope+flags)-or-carrier");
+    // `ref` is the commit sha the reading was taken AT — EXCEPT for a carrier-line reading, where there is
+    // no commit and `ref` carries the carrier path instead, so only non-emptiness is required there.
+    if (byCarrier ? !isStr(rec.ref, 1) : !isStr(rec.ref, 6)) reasons.push("FIELD_INVALID:ref");
+    if (!/^[0-9a-f]{64}$/.test(String(rec.sha256))) reasons.push("FIELD_INVALID:sha256");
   } else if (kind === "hypothesis") {
     if (!isStr(rec.statement, 10)) reasons.push("FIELD_INVALID:statement");
     if (!Array.isArray(rec.source_evidence) || rec.source_evidence.length === 0 || !rec.source_evidence.every((x) => isStr(x, 1))) {
@@ -100,6 +123,14 @@ export function validateRecord(kind, rec) {
     if (typeof rec.locked_scope !== "string") reasons.push("FIELD_INVALID:locked_scope");
     if (!isStr(rec.original_hypothesis, 1)) reasons.push("FIELD_INVALID:original_hypothesis");
     if (!isNum(rec.elapsed_ms) || rec.elapsed_ms < 0) reasons.push("FIELD_INVALID:elapsed_ms");
+  } else if (kind === "counterexample") {
+    // Present-but-empty (or wrong-typed) is a DIFFERENT cause from absent: absent is `SCHEMA_MISSING:
+    // counterexample_of` (above); the check below guards only a supplied-but-invalid value, so the two
+    // never collapse into one refusal code.
+    if (supplied(rec, "counterexample_of") && !isStr(rec.counterexample_of, 1)) reasons.push("COUNTEREXAMPLE_UNREFUTED:counterexample_of-must-name-the-hypothesis-it-refutes");
+    if (!Array.isArray(rec.source_evidence) || rec.source_evidence.length === 0 || !rec.source_evidence.every((x) => isStr(x, 1))) {
+      reasons.push("COUNTEREXAMPLE_UNGROUNDED:source_evidence-must-cite-at-least-one-reading");
+    }
   }
   return { ok: reasons.length === 0, reasons };
 }
@@ -132,6 +163,8 @@ export const appendHypothesisRecord = (root, rec) => appendRecord(root, "hypothe
 export const appendExperimentRecord = (root, rec) => appendRecord(root, "experiment", rec);
 export const appendOutcomeRecord = (root, rec) => appendRecord(root, "outcome", rec);
 export const appendRepairAttemptRecord = (root, rec) => appendRecord(root, "repair_attempt", rec);
+/** A counterexample REFUTES a named hypothesis — refused unless it names it and cites a reading. */
+export const appendCounterexampleRecord = (root, rec) => appendRecord(root, "counterexample", rec);
 
 /** Read the carrier back. Unparseable lines are DROPPED and COUNTED (never silently). */
 export function readRecords(file) {

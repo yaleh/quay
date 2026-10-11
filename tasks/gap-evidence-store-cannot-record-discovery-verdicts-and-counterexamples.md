@@ -2,7 +2,7 @@
 id: gap-evidence-store-cannot-record-discovery-verdicts-and-counterexamples
 title: Evidence store has no verdict, counterexample, or runtime-carrier
   provenance slot for architecture-discovery findings
-status: ready
+status: done
 labels:
   - gap
   - architecture-discovery

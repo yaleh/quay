@@ -12,7 +12,7 @@ import path from "node:path";
 import {
   EVIDENCE_STORE_REL, RECORD_KINDS, OUTCOME_VERDICTS, REQUIRED_FIELDS, storeFile,
   validateRecord, appendRecord, appendEvidenceRecord, appendHypothesisRecord,
-  appendExperimentRecord, appendOutcomeRecord, appendRepairAttemptRecord, readRecords, recordId,
+  appendExperimentRecord, appendOutcomeRecord, appendRepairAttemptRecord, appendCounterexampleRecord, readRecords, recordId,
   evidenceRecordFromReading, buildRunRecords, persistRunRecords, confidence,
   subjectFilesOf, subjectKey, extractPathTokens,
 } from "../../docs/analysis/architecture-evidence-store.mjs";
@@ -30,8 +30,9 @@ const GOOD = {
   experiment: { hypothesis_ref: "the gate core forms a cycle", method: "bounded shadow investigation", budget: { max_rounds: 8 }, ts: "2026-10-11T00:00:00Z" },
   outcome: { experiment_ref: "bounded shadow investigation", verdict: "abstained", ts: "2026-10-11T00:00:00Z" },
   repair_attempt: { tool: "ownership-active-proposal-repair", ref: "abc1234567890def", ts: "2026-10-11T00:00:00Z", sha256: "b".repeat(64), attempt_no: 1, bucket: "invalid_move", locked_commit: "abc1234567890def", locked_scope: "packages/quay/src", original_hypothesis: "a package-level cycle ties the gate core to the root", elapsed_ms: 42 },
+  counterexample: { counterexample_of: "the gate core forms a package-level cycle with the root", source_evidence: ["ev-2"], ts: "2026-10-11T00:00:00Z" },
 };
-const APPEND = { evidence: appendEvidenceRecord, hypothesis: appendHypothesisRecord, experiment: appendExperimentRecord, outcome: appendOutcomeRecord, repair_attempt: appendRepairAttemptRecord };
+const APPEND = { evidence: appendEvidenceRecord, hypothesis: appendHypothesisRecord, experiment: appendExperimentRecord, outcome: appendOutcomeRecord, repair_attempt: appendRepairAttemptRecord, counterexample: appendCounterexampleRecord };
 
 // ── 1. AC1: a missing required field is refused, with a distinct reason, and NOTHING is appended ──
 test("AC1: each append function REFUSES a record missing a required field, and appends nothing", () => {
@@ -42,6 +43,7 @@ test("AC1: each append function REFUSES a record missing a required field, and a
     experiment: "budget",
     outcome: "verdict",
     repair_attempt: "bucket",
+    counterexample: "counterexample_of",
   };
   for (const kind of RECORD_KINDS) {
     const field = missing[kind];
@@ -126,7 +128,76 @@ test("readRecords counts unparseable lines instead of silently dropping them", (
 test("appendRecord refuses a kind that is not in the vocabulary", () => {
   assert.equal(appendRecord(mkTmp(), "goal", {}).ok, false);
   assert.match(appendRecord(mkTmp(), "goal", {}).reasons.join(), /KIND_NOT_IN_VOCAB/);
-  assert.deepEqual([...OUTCOME_VERDICTS], ["proposed", "abstained", "investigated", "not-evaluated", "exempted"]);
+  // The five ownership-loop verdicts are UNCHANGED and still lead the list; the discovery-finding
+  // verdicts are appended, so no pre-existing prefix of the vocabulary shifted.
+  assert.deepEqual([...OUTCOME_VERDICTS].slice(0, 5), ["proposed", "abstained", "investigated", "not-evaluated", "exempted"]);
+  assert.deepEqual([...OUTCOME_VERDICTS].slice(5), ["supported", "refuted", "undetermined"]);
+});
+
+// ── 3. discovery-finding verdicts, the counterexample kind, and the carrier-line location ──────────
+// (task gap-evidence-store-cannot-record-discovery-verdicts-and-counterexamples). Before this, a
+// consistency finding's verdict was REFUSED (VERDICT_NOT_IN_VOCAB), a counterexample could only be
+// written as a `hypothesis` with an unchecked extension field, and a reading taken from a runtime
+// carrier had nowhere to record WHICH line it came from.
+test("AC-a: an outcome carrying the discovery verdict `refuted` is accepted (and reads back)", () => {
+  const root = mkTmp();
+  const r = appendOutcomeRecord(root, { ...GOOD.outcome, verdict: "refuted" });
+  assert.equal(r.ok, true, r.reasons?.join(","));
+  assert.match(r.id, /^outcome-/);
+  const { records } = readRecords(storeFile(root));
+  assert.equal(records.length, 1);
+  assert.equal(records[0].verdict, "refuted");
+  // All three discovery verdicts are accepted; they are the only additions.
+  for (const v of ["supported", "refuted", "undetermined"]) {
+    assert.equal(appendOutcomeRecord(root, { ...GOOD.outcome, verdict: v }).ok, true, v);
+  }
+});
+
+test("AC-b: a domain-specific verdict `legit-difference` is STILL refused with VERDICT_NOT_IN_VOCAB", () => {
+  const root = mkTmp();
+  const r = appendOutcomeRecord(root, { ...GOOD.outcome, verdict: "legit-difference" });
+  assert.equal(r.ok, false);
+  assert.deepEqual(r.reasons, ["VERDICT_NOT_IN_VOCAB:legit-difference"]);
+  assert.equal(lines(root), 0, "a refused verdict writes nothing");
+  // Same for the other domain word that motivated this task — the domain belongs in the hypothesis.
+  assert.deepEqual(appendOutcomeRecord(root, { ...GOOD.outcome, verdict: "drift-hypothesis" }).reasons, ["VERDICT_NOT_IN_VOCAB:drift-hypothesis"]);
+});
+
+test("AC-c: a counterexample missing `counterexample_of` is refused with a reason distinct from SCHEMA_MISSING:source_evidence", () => {
+  const root = mkTmp();
+  const rec = { ...GOOD.counterexample };
+  delete rec.counterexample_of;
+  const r = appendCounterexampleRecord(root, rec);
+  assert.equal(r.ok, false, "a counterexample that names no hypothesis is refused");
+  assert.deepEqual(r.reasons, ["SCHEMA_MISSING:counterexample_of"]);
+  assert.notEqual(r.reasons[0], "SCHEMA_MISSING:source_evidence");
+  assert.equal(lines(root), 0, "nothing is appended on refusal");
+  // An ungrounded counterexample is refused with its OWN code, never the hypothesis's code.
+  assert.deepEqual(appendCounterexampleRecord(root, { ...GOOD.counterexample, source_evidence: [] }).reasons, ["COUNTEREXAMPLE_UNGROUNDED:source_evidence-must-cite-at-least-one-reading"]);
+  assert.deepEqual(appendCounterexampleRecord(root, { ...GOOD.counterexample, counterexample_of: "" }).reasons, ["COUNTEREXAMPLE_UNREFUTED:counterexample_of-must-name-the-hypothesis-it-refutes"]);
+  // A complete counterexample is accepted and is its OWN kind — distinguishable from the hypothesis it refutes.
+  const ok = appendCounterexampleRecord(root, GOOD.counterexample);
+  assert.equal(ok.ok, true, ok.reasons?.join(","));
+  assert.equal(readRecords(storeFile(root)).records[0].kind, "counterexample");
+});
+
+test("AC-d: an evidence reading located by a carrier LINE is accepted; a non-hex line_sha256 is refused", () => {
+  const root = mkTmp();
+  const carrier = { ...GOOD.evidence };
+  delete carrier.path; delete carrier.range;                     // no path+range…
+  carrier.carrier = { path: ".quay/worker-outcome.jsonl", line: 42, line_sha256: "d".repeat(64) };
+  carrier.ref = ".quay/worker-outcome.jsonl";                    // …so `ref` is the carrier path, not a commit sha
+  assert.equal(validateRecord("evidence", carrier).ok, true, validateRecord("evidence", carrier).reasons?.join(","));
+  assert.equal(appendEvidenceRecord(root, carrier).ok, true);
+  // A non-hex line_sha256 is refused, with its OWN cause (a malformed supplied carrier, not a missing location).
+  const bad = { ...carrier, carrier: { ...carrier.carrier, line_sha256: "not-hex" } };
+  const r = appendEvidenceRecord(root, bad);
+  assert.equal(r.ok, false);
+  assert.match(r.reasons.join(","), /FIELD_INVALID:carrier/);
+  // The bare (path+range / scope+flags) forms are untouched — the carrier is a THIRD form, not a replacement.
+  assert.equal(validateRecord("evidence", GOOD.evidence).ok, true);
+  assert.equal(validateRecord("evidence", { ...GOOD.evidence, path: undefined, range: undefined, scope: "repo", flags: ["--cycles"] }).ok, true);
+  assert.equal(lines(root), 1, "only the one valid carrier record was appended");
 });
 
 // ── 2. run → four records ─────────────────────────────────────────────────────────────────────
