@@ -3,7 +3,7 @@ id: gap-hypgen-prereg-gate-is-single-arm-so-ab-arm-b-cannot-be-scored
 title: "arch-hypothesis-generation: the pre-registration gate only knows
   single-arm keys, so arm B of a pre-registered A/B experiment is refused by
   match/verify/review"
-status: todo
+status: ready
 labels:
   - gap
   - architecture-discovery
