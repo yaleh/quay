@@ -2,7 +2,7 @@
 id: gap-release-yml-project-scope-install-not-home-isolated
 title: release.yml 的 project-scope 安装未隔离
   HOME，且装上的版本与刚构建的版本不一致时不先失败——渠道被遮蔽时误报为"产物带 -dev"
-status: needs-human
+status: todo
 labels:
   - gap
   - defect
