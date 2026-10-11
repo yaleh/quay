@@ -62,12 +62,77 @@ Constraints carried into the implementation:
 5. Add `docs/analysis/arch-discovery-shadow-report.md` with the readings regenerated at landing time, the pre-registered rules, the post-hoc items marked as such, and the cost.
 
 ## Acceptance Criteria
-- [ ] `node --test plugin/test/arch-discovery-space.test.mjs plugin/test/arch-discovery-time.test.mjs` exits 0, covering the four fixture families in Plan step 4.
-- [ ] Production reading, space: `node --experimental-strip-types docs/analysis/arch-discovery-space.mjs --root /data/home/yale/work/quay --pre c010f023a --post develop --labels <labels>` reports TP=3, FP=0, FN=0 on the six labelled candidates. Paste the per-candidate table with E1/E2/E3, verdict, and post state.
-- [ ] Production reading, time: `node docs/analysis/arch-discovery-time.mjs --root /data/home/yale/work/quay --cut 2026-10-09T11:31:00Z --file plugin/test/worktree-process-reaper.test.mjs` reports: B1 prediction-held, or refuted if a reaper red has since appeared, pasting it verbatim either way; B2 split; B3 = 0; B4 red/green ratio < 2 with the verdict text; B5 enrichment printed. Counts are read at the time of the run and pasted.
-- [ ] Negative control, space: with the E3 import-resolution fix, paste the verdicts for `crystallization-half-life.ts:594` (symbol `partial`) and `dev-stats-collect.ts:196` (symbol `named`) together with their E3 hit counts before and after the fix.
-- [ ] Mutation control, time: change the grouping key to file-only. B2 must report `merged(refuted)`. Paste the output, then revert.
-- [ ] Every record written passes the store validator: refused = 0. Paste the tally.
+- [x] `node --test plugin/test/arch-discovery-space.test.mjs plugin/test/arch-discovery-time.test.mjs` exits 0, covering the four fixture families in Plan step 4.
+  - Evidence (worktree `gap-architecture-discovery-shadow-space-and-time-not-in-repo`): `TEST_EXIT=0`, `tests 21 / pass 21 / fail 0 / cancelled 0 / skipped 0`, `duration_ms 59.5`. Families: (1) `rule: E1=stale ∧ ¬E2 ∧ ¬E3 ⇒ drift-hypothesis`, `rule: (E2 ∨ E3) ∧ E1≠stale ⇒ legit-difference`, `rule: everything else ⇒ undetermined — including stale-with-a-named-comment`; (2) `E3 (old, by bare name) counts a generic local in ANY test` vs `E3 (fixed) counts ONLY a test that imports the literal's own module — a 197→1 collapse`; (3) `grouping key: file+signature keeps two signatures on ONE file apart; file-only merges them` + `B2: a real split reports split; the file-only mutation reports merged(refuted)`; (4) `B4: reds enriched 4× AND greens enriched the same ⇒ the red-specific association is REFUTED` + `B1: ONE post-change red refutes the prediction`. Two further cases validate the emitted record forms against the production store.
+- [x] Production reading, space: `node --experimental-strip-types docs/analysis/arch-discovery-space.mjs --root /data/home/yale/work/quay --pre c010f023a --post develop --labels <labels>` reports TP=3, FP=0, FN=0 on the six labelled candidates. Paste the per-candidate table with E1/E2/E3, verdict, and post state.
+  - Evidence (run at landing, `--labels /data/home/yale/work/quay-scratch/arch-discovery-shadow/labels-A.json`; the built-in `DEFAULT_LABELS` is identical):
+    ```
+    arch-discovery-space: pre=c010f023a post=ed24554bf candidates=17 git_calls=134 wall_ms=4263 e3_mode=import
+    verdict           post            E1             E2                    E3=fix/name  candidate
+    undetermined      persisting      authored-after []                    0/40         start-drivers-kinds
+    drift-hypothesis  persisting      stale          []                    not-evaluated/not-evaluated claude-md-driver-kind
+    undetermined      persisting      authored-after []                    not-evaluated/not-evaluated drivers-skill-kind
+    drift-hypothesis  resolved        stale          []                    not-evaluated/not-evaluated native-goal-write-desc
+    drift-hypothesis  resolved        stale          []                    0/0          serve-goal-status-order
+    drift-hypothesis  resolved        stale          []                    0/0          serve-goal-status-tabs
+    undetermined      persisting      authored-after []                    not-evaluated/not-evaluated discovered:packages/quay/src/mcp-handlers.ts:954
+    undetermined      persisting      not-evaluated  []                    not-evaluated/not-evaluated discovered:packages/quay/src/mcp-server.ts:543
+    legit-difference  persisting      authored-after ["draft","superseded","retired"] 1/1          discovered:packages/quay/src/serve-dashboard.ts:1009
+    undetermined      persisting      not-evaluated  []                    1/3          discovered:packages/quay/src/kernel/task-transition.ts:75
+    undetermined      persisting      authored-after []                    not-evaluated/not-evaluated discovered:packages/quay-native/src/mcp-server.ts:467
+    legit-difference  persisting      authored-after []                    1/1          discovered:plugin/scripts/criterion-failure-attribution-check.ts:105
+    undetermined      persisting      authored-after []                    0/70         discovered:plugin/scripts/crystallization-half-life.ts:594
+    undetermined      persisting      not-evaluated  []                    1/197        discovered:plugin/scripts/dev-stats-collect.ts:196
+    legit-difference  persisting      authored-after []                    1/1          discovered:plugin/scripts/driver-filters.ts:315
+    undetermined      persisting      authored-after []                    0/0          discovered:plugin/scripts/routine-file-gate.ts:375
+    undetermined      persisting      authored-after []                    0/0          discovered:plugin/scripts/routine-file-gate.ts:378
+
+    [e3_mode=import] TP=3 FP=0 FN=0 TN=1 abstains-on-labelled=2 unlabelled=11
+    ```
+    TP = `native-goal-write-desc`, `serve-goal-status-order`, `serve-goal-status-tabs`; TN = `serve-dashboard.ts:1009`; the 2 labelled `legit`s (`routine-file-gate.ts:375/378`) are honest abstains. A3 controls (same instrument): `A3a unexplained: flips=1863 paired=1096 naive_median_h=0.00984 aware_median_h=0.000329`; `A3b consistent: paired=2188 p90_s=0.001`. POST-HOC strata (declared as such): `+08:00 n=335 naive_median_h=7.9998 aware_median_h=0.00021` (representation difference, not drift); `+00:00 n=761 aware_over_0_5h=89` (hypothesis only).
+- [x] Production reading, time: `node docs/analysis/arch-discovery-time.mjs --root /data/home/yale/work/quay --cut 2026-10-09T11:31:00Z --file plugin/test/worktree-process-reaper.test.mjs` reports: B1 prediction-held, or refuted if a reaper red has since appeared, pasting it verbatim either way; B2 split; B3 = 0; B4 red/green ratio < 2 with the verdict text; B5 enrichment printed. Counts are read at the time of the run and pasted.
+  - Evidence (verbatim):
+    ```
+    arch-discovery-time: head=ed24554bf cut=2026-10-09T11:31:00Z groups=101 recurrent=7 wall_ms=5859
+    capture: {"suite_red_rows":791,"suite_red_events_by_file":825,"malformed":0,"nh":109,"oom":698,"worker_loop_starts":87,"orphan_finalisations":199}
+    B1 prediction-held: file=plugin/test/worktree-process-reaper.test.mjs pre_events=14 pre_tasks=10 change=6cc0ee3919 2026-10-09T19:23:02+08:00 observed_after=0 window_h=50.8
+    B2 split: [{"sigKey":"nosig","events":3,"first":"2026-10-07T07:50:14.653Z"},{"sigKey":"311a83b0ca46","events":3,"first":"2026-10-10T11:47:01.924Z"}]
+    B3 groups_spanning_files=0
+    B4 not-red-specific (suite-running confound): oom_kills=698 eligible=252 real=180 control_mean=45 enrichment=4 green_enrichment=3.96 red_over_green=1.01
+    B5 restart-induced-burst: worker_loop_starts=87 orphan_finalisations=199 real=94 control_mean=3.5 enrichment=26.86 orphan_tasks=170
+    B6: retreats=109 distinct_tasks=73 repeat_cycles=13 max_cycles=7 link={"preceded_by_recurrent_multi_task_group":1,"preceded_by_single_task_reds_only":57,"no_suite_red_in_7d":51}
+    ```
+    B1 holds with 0 reds in the 50.8h since `6cc0ee3919`; B2 splits; B3 = 0; B4 `red_over_green=1.01 < 2` with the verdict text `not-red-specific (suite-running confound)`; B5 enrichment `26.86` printed.
+- [x] Negative control, space: with the E3 import-resolution fix, paste the verdicts for `crystallization-half-life.ts:594` (symbol `partial`) and `dev-stats-collect.ts:196` (symbol `named`) together with their E3 hit counts before and after the fix.
+  - Evidence — `--e3-mode name` (no fix) vs `--e3-mode import` (the fix), same PRE/POST:
+    | candidate | symbol | E3 by bare name | E3 with the fix | verdict, no fix | verdict, fixed |
+    |---|---|---|---|---|---|
+    | `discovered:plugin/scripts/crystallization-half-life.ts:594` | `partial` | 70 | **0** | `legit-difference` | `undetermined` |
+    | `discovered:plugin/scripts/dev-stats-collect.ts:196` | `named` | 197 | **1** | `undetermined` | `undetermined` |
+    ```
+    [e3_mode=name]   legit-difference  persisting  authored-after []  70/70   discovered:plugin/scripts/crystallization-half-life.ts:594
+    [e3_mode=name]   undetermined      persisting  not-evaluated  [] 197/197  discovered:plugin/scripts/dev-stats-collect.ts:196
+    [e3_mode=import] undetermined      persisting  authored-after []   0/70   discovered:plugin/scripts/crystallization-half-life.ts:594
+    [e3_mode=import] undetermined      persisting  not-evaluated  []   1/197  discovered:plugin/scripts/dev-stats-collect.ts:196
+    ```
+    Six-labelled scoring is unchanged by the fix (`TP=3 FP=0 FN=0` in both modes). `start-drivers-kinds` also moves 40→0, confirming its former "legit" reading was the same artefact.
+- [x] Mutation control, time: change the grouping key to file-only. B2 must report `merged(refuted)`. Paste the output, then revert.
+  - Mutation: `export const GROUP_KEY_BY = "file+signature";` → `"file-only"`. Output:
+    ```
+    arch-discovery-time: head=ed24554bf cut=2026-10-09T11:31:00Z groups=46 recurrent=12 wall_ms=5749
+    B1 prediction-held: file=plugin/test/worktree-process-reaper.test.mjs pre_events=14 pre_tasks=10 change=6cc0ee3919 2026-10-09T19:23:02+08:00 observed_after=0 window_h=50.7
+    B2 merged(refuted): [{"sigKey":"nosig","events":6,"first":"2026-10-07T07:50:14.653Z"}]
+    B3 groups_spanning_files=0
+    records → .quay/ac-arch-discovery/time-records.jsonl  validator: accepted=39 refused=0 {}
+    ```
+    **B2 reports `merged(refuted)`** (2 groups collapse into 1 on the file-only key; groups 101→46). The pinning test also goes red under the mutation: `node --test --test-name-pattern "B2" plugin/test/arch-discovery-time.test.mjs` → `tests 1 / pass 0 / fail 1`. Mutation **reverted** (`--e3`/key unchanged; full file re-run green).
+- [x] Every record written passes the store validator: refused = 0. Paste the tally.
+  - Evidence — validator tallies printed by the tools:
+    ```
+    space: accepted=154 refused=0 {}
+    time : accepted= 57 refused=0 {}
+    ```
+    `refused = 0` in both; records use the store's discovery verdicts (`supported`/`refuted`/`undetermined`), its `counterexample` kind, and its `carrier:{path,line,line_sha256}` provenance form.
 
 ## Definition of Done
 - All AC ticked with outputs pasted.
