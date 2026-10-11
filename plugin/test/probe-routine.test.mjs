@@ -43,7 +43,7 @@ import {
   selectProbeRoutines,
 } from "../scripts/probe-routine.ts";
 import { findingKey, recurrenceByKey, renderRoutineTaskBody, routineFindingCandidateText, countRecentFilings, FILING_WINDOW_MS } from "../scripts/routine-file-gate.ts";
-import { routineK, routineGlobalCeiling } from "../scripts/driver-config.ts";
+import { routineK, routineGlobalCeiling, routineWindowMs } from "../scripts/driver-config.ts";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const REPO_ROOT = path.resolve(__dirname, "..", "..");
@@ -442,12 +442,15 @@ async function runFilingRoutine(root, finding, extra = {}) {
   return { facts, written };
 }
 
-/** 给工作区装一份 `drivers.yml` 的 `routine_quota` 段（K / 全局天花板的**声明式真相源**）。
- *  ⛔ 让 `llmProbeRoutine` 的真实生产路径（routineK / routineGlobalCeiling）能读到有限天花板。 */
-function seedRoutineQuota(root, { globalCeiling, defaultK = 3 } = {}) {
+/** 给工作区装一份 `drivers.yml` 的 `routine_quota` 段（K / 全局天花板 / 窗口宽度的**声明式真相源**）。
+ *  ⛔ 让 `llmProbeRoutine` 的真实生产路径（routineK / routineGlobalCeiling / routineWindowMs）能读到。
+ *  `windowMs` 不给 ⇒ 不写 `window_ms` 行（⇒ 走缺省，用于「缺省 vs 显式」的对照臂）。 */
+function seedRoutineQuota(root, { globalCeiling, defaultK = 3, windowMs } = {}) {
   fs.mkdirSync(path.join(root, "plugin", "scripts"), { recursive: true });
-  fs.writeFileSync(path.join(root, "plugin", "scripts", "drivers.yml"),
-    ["routine_quota:", `  default_k: ${defaultK}`, `  global_ceiling: ${globalCeiling}`, ""].join("\n"), "utf8");
+  const lines = ["routine_quota:", `  default_k: ${defaultK}`, `  global_ceiling: ${globalCeiling}`];
+  if (windowMs !== undefined) lines.push(`  window_ms: ${windowMs}`);
+  lines.push("");
+  fs.writeFileSync(path.join(root, "plugin", "scripts", "drivers.yml"), lines.join("\n"), "utf8");
 }
 
 /** 预填载体里的 `filing-round` 记录（rate 窗口的唯一读数来源）。每条 = 一个 routine 本轮立案 N 条；
@@ -590,6 +593,76 @@ test("FILING QUOTA AC4 — 正反对照：同一夹具把 global_ceiling 调大�
   assert.equal(written.length, 1, "天花板放宽后，同一输入必须被接受——证明 AC3 的红不是闸恒红（硬规则 4 取假）");
   const round = readCarrier(root).filter((r) => r.kind === "filing-round").at(-1);
   assert.equal(round.filed.length, 1);
+});
+
+// ── FILING WINDOW (gap-routine-quota-window-ms-parsed-but-inert) — `routine_quota.window_ms` is a
+//    DECLARED knob that was parsed and then read by nobody: both filing paths counted the window with
+//    the constant `FILING_WINDOW_MS`, so editing `window_ms` silently did nothing (硬规则 3b / 规则 9:
+//    a knob that cannot change an outcome is indistinguishable from no knob).
+//
+// The fixture is the same record under TWO window widths — the ONLY moving part is `window_ms`:
+//   narrow (window_ms: 3600000 = 1h)  ⇒ the 2h-old filing-round is OUTSIDE the window ⇒ not counted;
+//   default (window_ms absent ⇒ 24h)  ⇒ the SAME record is INSIDE the window ⇒ counted.
+// Both arms are asserted on the REAL call chain (llmProbeRoutine → selectFilings → countRecentFilings),
+// and the per-routine (`rate:`) and global (`global-rate:`) readings are exercised separately so the
+// test pins BOTH call sites the task names (probe-routine.ts's two countRecentFilings reads).
+/** 本任务夹具：载体里一条 **2 小时前** 的 `filing-round`（1h 窗外、24h 窗内），配置窗口宽度可切。
+ *  ⛔ 唯一变化点是 `window_ms`（及其它配额字段按臂设定），记录逐字相同。 */
+function makeWindowWorkspace({ windowMs, defaultK, globalCeiling }) {
+  const root = makeFilingWorkspace({ registeredProducers: [FRESHNESS_FINDING.producer] });
+  seedRoutineQuota(root, { globalCeiling, defaultK, windowMs });
+  seedCarrierFilings(root, new Date(QUOTA_NOW - 7_200_000).toISOString(), [
+    { routine: "freshness-refresh", filed: 1 }, // 2h 前 —— 1h 窗外、24h 窗内
+  ]);
+  return root;
+}
+
+test("FILING WINDOW AC1(a) — per-routine 读数：window_ms:3600000 让 2h 前的记录不占 K（缺省 24h 则占）", async () => {
+  // 臂①（窄窗 1h）：K=1，2h 前的记录在窗外 ⇒ recentBase=0 < K ⇒ 接受。
+  const narrow = makeWindowWorkspace({ windowMs: 3_600_000, defaultK: 1, globalCeiling: 10 });
+  const narrowCarrier = path.join(narrow, ".quay", path.basename(ROUTINE_FINDINGS_REL));
+  // 夹具自检（硬规则 4c）：配置读出的窗口真是 1h，且同一记录在两种窗宽下计数翻转（⛔ 不靠猜测）。
+  assert.equal(routineWindowMs(narrow), 3_600_000, "drivers.yml 的 window_ms:3600000 必须被读到");
+  assert.equal(countRecentFilings(narrowCarrier, QUOTA_NOW, routineWindowMs(narrow), "freshness-refresh"), 0,
+    "1h 窗：2h 前的记录不计数");
+  assert.equal(countRecentFilings(narrowCarrier, QUOTA_NOW, FILING_WINDOW_MS, "freshness-refresh"), 1,
+    "缺省 24h 窗：同一条记录被计数（同一输入，唯一变化是窗宽）");
+  const rNarrow = await runFilingRoutine(narrow, FRESHNESS_FINDING, { now: () => QUOTA_NOW });
+  assert.equal(rNarrow.written.length, 1, "1h 窗下 2h 前的记录不占 K ⇒ 本条必须被接受");
+
+  // 臂②（对照，缺省 24h）：唯一变化是不写 window_ms ⇒ 旧记录占满 K=1 ⇒ `rate:` 拒。
+  const wide = makeWindowWorkspace({ defaultK: 1, globalCeiling: 10 });
+  const wideCarrier = path.join(wide, ".quay", path.basename(ROUTINE_FINDINGS_REL));
+  assert.equal(routineWindowMs(wide), FILING_WINDOW_MS, "缺省 ⇒ 等于旧常量 FILING_WINDOW_MS（迁移兼容）");
+  assert.equal(countRecentFilings(wideCarrier, QUOTA_NOW, routineWindowMs(wide), "freshness-refresh"), 1,
+    "缺省窗：记录被计数");
+  const rWide = await runFilingRoutine(wide, FRESHNESS_FINDING, { now: () => QUOTA_NOW });
+  assert.equal(rWide.written.length, 0, "24h 窗下同一记录占满 K=1 ⇒ 本条必须被 rate: 拒绝");
+  const wideRound = readCarrier(wide).filter((r) => r.kind === "filing-round").at(-1);
+  assert.match(wideRound.rejected[0].reason, /^rate:/,
+    "per-routine 拒绝读作 rate:（⛔ 不得与 global-rate: 同形）");
+});
+
+test("FILING WINDOW AC1(a) — 全局读数：window_ms:3600000 让 2h 前的记录不占全局天花板（缺省 24h 则占）", async () => {
+  // 臂①（窄窗 1h）：K 放宽到 10（让全局先判），globalCeiling=1，2h 前的记录在窗外 ⇒ 全局合计 0 ⇒ 接受。
+  const narrow = makeWindowWorkspace({ windowMs: 3_600_000, defaultK: 10, globalCeiling: 1 });
+  const narrowCarrier = path.join(narrow, ".quay", path.basename(ROUTINE_FINDINGS_REL));
+  assert.equal(routineWindowMs(narrow), 3_600_000);
+  assert.equal(countRecentFilings(narrowCarrier, QUOTA_NOW, routineWindowMs(narrow), null), 0,
+    "1h 窗：全局合计 0 < ceiling 1");
+  const rNarrow = await runFilingRoutine(narrow, FRESHNESS_FINDING, { now: () => QUOTA_NOW });
+  assert.equal(rNarrow.written.length, 1, "1h 窗下全局合计 0 < ceiling 1 ⇒ 本条必须被接受");
+
+  // 臂②（对照，缺省 24h）：唯一变化是不写 window_ms ⇒ 全局合计 1 ≥ ceiling 1 ⇒ `global-rate:` 拒。
+  const wide = makeWindowWorkspace({ defaultK: 10, globalCeiling: 1 });
+  const wideCarrier = path.join(wide, ".quay", path.basename(ROUTINE_FINDINGS_REL));
+  assert.equal(countRecentFilings(wideCarrier, QUOTA_NOW, routineWindowMs(wide), null), 1,
+    "缺省窗：全局合计 1 ≥ ceiling 1");
+  const rWide = await runFilingRoutine(wide, FRESHNESS_FINDING, { now: () => QUOTA_NOW });
+  assert.equal(rWide.written.length, 0, "24h 窗下全局合计触及 ceiling ⇒ 本条必须被拒");
+  const wideRound = readCarrier(wide).filter((r) => r.kind === "filing-round").at(-1);
+  assert.match(wideRound.rejected[0].reason, /^global-rate:/,
+    "全局拒绝读作 global-rate:（⛔ 不得与 per-routine 的 rate: 同形）");
 });
 
 // ── FILING PRIORITY — the real round, replayed (gap-routine-semantic-dedup-scan-recurring-cluster-

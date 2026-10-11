@@ -2,7 +2,7 @@
 id: gap-routine-quota-window-ms-parsed-but-inert
 title: routine_quota.window_ms is parsed from drivers.yml but no consumer reads
   it; both filing paths use a hard-coded window constant
-status: ready
+status: done
 labels:
   - gap
   - architecture-discovery

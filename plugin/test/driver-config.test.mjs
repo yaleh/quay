@@ -24,6 +24,7 @@ import {
   loadRoutineQuotaConfig,
   routineK,
   routineGlobalCeiling,
+  routineWindowMs,
 } from "../scripts/driver-config.ts";
 import { DEFAULT_RATE, FILING_WINDOW_MS } from "../scripts/routine-file-gate.ts";
 
@@ -237,8 +238,29 @@ test("routine_quota (AC3) — per_routine 荒谬项（> global_ceiling）被拒�
   assert.ok(routineK(dir2, "anything") <= routineGlobalCeiling(dir2), "不变式仍成立");
 });
 
-test("routine_quota — 留痕区分「读不到」与「读到但荒谬」（硬规则 3b：两者都归一到缺省，但不得同形）", () => {
-  const missing = tmpdir(); // 无 drivers.yml
+// gap-routine-quota-window-ms-parsed-but-inert：`window_ms` 此前只被 loadRoutineQuotaConfig 解析、
+// 没有任何消费者 ⇒ 改它静默无效。`routineWindowMs` 是它的单一入口（同 routineK / routineGlobalCeiling）。
+test("routineWindowMs — 窗口宽度的单一入口：读 drivers.yml 的 window_ms；缺省/荒谬 ⇒ 回退旧常量（迁移兼容）", () => {
+  // 真实仓库：缺省窗口 = 既有 FILING_WINDOW_MS（24h），逐字相等。
+  assert.equal(routineWindowMs(REPO_ROOT), FILING_WINDOW_MS, "真实 drivers.yml ⇒ 窗口 = 旧常量（迁移兼容）");
+
+  // 取假点：显式 window_ms ⇒ 读数跟着变（证明读的是文件，不是代码默认）。
+  const dir = tmpdir();
+  writeDriversYml(dir, "version: 1\nroutine_quota:\n  window_ms: 3600000\n");
+  assert.equal(routineWindowMs(dir), 3_600_000, "改 window_ms ⇒ 读数跟着变");
+
+  // 缺 drivers.yml ⇒ 缺省旧常量（与「显式写成 24h」同值——两者都只表示「用缺省」）。
+  assert.equal(routineWindowMs(tmpdir()), DEFAULT_ROUTINE_QUOTA_WINDOW_MS, "读不到 ⇒ 缺省");
+
+  // 荒谬值（0/负数/非数）⇒ fail-closed 回退缺省（窗口取 0 会让计数恒 0、限流变松，是危险方向）。
+  for (const bad of ["0", "-1", "1.5", "'3600000'", "abc"]) {
+    const d = tmpdir();
+    writeDriversYml(d, `version: 1\nroutine_quota:\n  window_ms: ${bad}\n`);
+    assert.equal(routineWindowMs(d), DEFAULT_ROUTINE_QUOTA_WINDOW_MS, `window_ms=${bad} ⇒ 回退缺省`);
+  }
+});
+
+test("routine_quota — 留痕区分「读不到」与「读到但荒谬」（硬规则 3b：两者都归一到缺省，但不得同形）", () => {  const missing = tmpdir(); // 无 drivers.yml
   const a = loadRoutineQuotaConfig(missing);
   assert.deepEqual(a.warnings, [], "读不到 ⇒ 无留痕");
   assert.equal(a.globalCeiling, DEFAULT_ROUTINE_QUOTA_GLOBAL_CEILING);

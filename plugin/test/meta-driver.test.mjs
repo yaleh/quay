@@ -92,7 +92,7 @@ import {
 import { createMetaStore } from '../../packages/quay/src/meta-store.ts';
 // 全局天花板的单一真相源：载体相对路径（probe-routine.ts）与配置读取面（driver-config.ts）。
 import { ROUTINE_FINDINGS_REL } from '../scripts/probe-routine.ts';
-import { routineGlobalCeiling } from '../scripts/driver-config.ts';
+import { routineGlobalCeiling, routineWindowMs } from '../scripts/driver-config.ts';
 // 读回 supersedes 用 store 自己的投影（⛔ 不 grep 落盘文本：字段名在 YAML 里的排版是序列化细节，
 // 断言它会把「字段没写进去」与「排版变了」混为一谈）。
 import { createGoalStore } from '../../packages/quay/src/goal-store.ts';
@@ -914,6 +914,47 @@ test('driveItems AC2 (green control) — 同一夹具把 global_ceiling 调大�
     const r = await driveItems(root, [goodItem], ecoReadings, { cap: 1, dryRun: true, at: 'now' });
     assert.equal(r[0].accepted, true, r[0].reason);
   } finally { fs.rmSync(root, { recursive: true, force: true }); }
+});
+
+// ── driveItems 的 rate 窗口宽度（gap-routine-quota-window-ms-parsed-but-inert AC1(a) 的 meta-driver 半边）──
+// THE DEFECT: driveItems 的全局计数此前把窗口硬写成常量 FILING_WINDOW_MS ⇒ `routine_quota.window_ms`
+// 改了没用（声明了却不生效的旋钮）。修后全局窗口从 drivers.yml 读出（routineWindowMs(root)）。
+// 同一记录（2h 前）、同一输入，唯一变化是窗宽：窄窗（1h）⇒ 不计数 ⇒ 接受；缺省（24h）⇒ 计数 ⇒ 拒。
+function makeMetaWindowRoot({ globalCeiling, windowMs, filedAgoMs = 7_200_000 }) {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'meta-driver-window-'));
+  fs.mkdirSync(path.join(root, 'tasks'), { recursive: true });
+  fs.mkdirSync(path.join(root, '.quay'), { recursive: true });
+  fs.mkdirSync(path.join(root, 'plugin', 'scripts'), { recursive: true });
+  const lines = ['routine_quota:', '  default_k: 3', `  global_ceiling: ${globalCeiling}`];
+  if (windowMs !== undefined) lines.push(`  window_ms: ${windowMs}`);
+  lines.push('');
+  fs.writeFileSync(path.join(root, 'plugin', 'scripts', 'drivers.yml'), lines.join('\n'), 'utf8');
+  const ts = new Date(Date.now() - filedAgoMs).toISOString();
+  const rec = JSON.stringify({
+    ts, kind: 'filing-round', routine: 'freshness-refresh', probe: 'freshness-refresh',
+    runId: 'freshness-refresh-seed', evaluated: true, candidates: 1,
+    filed: ['freshness-refresh-seed-0'], escalated: [], rejected: [], errors: [],
+  });
+  fs.writeFileSync(path.join(root, ROUTINE_FINDINGS_REL), rec + '\n', 'utf8');
+  return root;
+}
+
+test('driveItems AC1(a) — 全局计数尊 `window_ms`：1h 窗下 2h 前的记录不计数（缺省 24h 则计数 ⇒ global-rate:）', async () => {
+  const narrow = makeMetaWindowRoot({ globalCeiling: 1, windowMs: 3_600_000 });
+  try {
+    assert.equal(routineWindowMs(narrow), 3_600_000, '夹具自检：drivers.yml 的 window_ms:3600000 真的被读到');
+    const r = await driveItems(narrow, [goodItem], ecoReadings, { cap: 1, dryRun: true, at: 'now' });
+    assert.equal(r[0].accepted, true,
+      `1h 窗下 2h 前的记录在窗外 ⇒ 全局合计 0 < ceiling 1 ⇒ 应接受（实得：${r[0].reason}）`);
+  } finally { fs.rmSync(narrow, { recursive: true, force: true }); }
+
+  const wide = makeMetaWindowRoot({ globalCeiling: 1 }); // 唯一变化：不写 window_ms ⇒ 缺省 24h
+  try {
+    assert.equal(routineWindowMs(wide), 86_400_000, '缺省 ⇒ 24h（迁移兼容，等于旧常量）');
+    const r = await driveItems(wide, [goodItem], ecoReadings, { cap: 1, dryRun: true, at: 'now' });
+    assert.equal(r[0].accepted, false, '同一记录 24h 窗内 ⇒ 全局合计 1 ≥ ceiling 1 ⇒ 必须拒绝');
+    assert.match(r[0].reason, /global-rate:/, '拒绝理由必须是 global-rate:');
+  } finally { fs.rmSync(wide, { recursive: true, force: true }); }
 });
 
 test('renderAutoDriveBody: Touches 来自被修机制、且机械补上 self-touch', () => {
