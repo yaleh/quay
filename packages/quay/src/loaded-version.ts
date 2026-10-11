@@ -199,18 +199,24 @@ export interface LoadedHostProbe {
   fallback?(root: string, hostPid: number): { script: string; source: LoadedScriptSource } | null;
 }
 
-/** 已安装版本的**注册表**读数（`~/.claude/plugins/installed_plugins.json` 的 `quay@quay` 条目）。
- *  取**最高**版本那条（同一 host 上同一插件可有多个 scope/多个项目条目；「已安装的是什么版本」的答案
- *  是其中最高的那个），并带回它的安装时刻与 scope 供排障。
- *  ⛔ 文件缺失/不可解析/无 `quay@quay` 条目/条目都没有合法版本 ⇒ null（调用方 fail-closed）。 */
-export interface InstalledRegistryReading {
+/** 一个已安装条目的**规范化**形态。`projectPath` 只有**项目层**读数才需要——「这个项目实际会加载哪一版」
+ *  的答案由会话层的**分层规则**决定，而那条规则键在 `projectPath` 上（见 `projectScopedVersionReading`）；
+ *  `installedVersionFromRegistry` 从不读它。 */
+interface QuayRegistryEntry {
   version: string;
   installedAt: string | null;
   scope: string | null;
   installPath: string | null;
+  projectPath: string | null;
 }
 
-export function installedVersionFromRegistry(homeDir: string): InstalledRegistryReading | null {
+/** 唯一的注册表**解析**（`~/.claude/plugins/installed_plugins.json` 的 `quay@quay` 条目 → 规范化条目表）。
+ *  `null` = 记录读不出（文件缺失/不可读/不可解析/`quay@quay` 不是数组）——**唯一**一处区分「没有记录」与
+ *  「有记录」的地方，下面两个读数（`installedVersionFromRegistry` / `projectScopedVersionReading`）共用，
+ *  ⛔ 不各写一份解析器（硬规则 5b：第二份解析必然漂移）。
+ *  条目里没有合法 `version` 的被**跳过**（一个没有版本的条目不是一个版本读数）；条目表可以是空数组
+ *  （有记录、但一个合法条目都没有），那与「记录读不出」**不同形**。 */
+function readQuayRegistryEntries(homeDir: string): QuayRegistryEntry[] | null {
   let raw: string;
   try {
     raw = fs.readFileSync(path.join(homeDir, ".claude", "plugins", "installed_plugins.json"), "utf8");
@@ -221,32 +227,186 @@ export function installedVersionFromRegistry(homeDir: string): InstalledRegistry
     const j = JSON.parse(raw) as { plugins?: Record<string, unknown> };
     const entries = j?.plugins?.["quay@quay"];
     if (!Array.isArray(entries)) return null;
-    let best: InstalledRegistryReading | null = null;
+    const out: QuayRegistryEntry[] = [];
     for (const e of entries) {
       if (!e || typeof e !== "object") continue;
       const o = e as Record<string, unknown>;
       const version = typeof o.version === "string" && o.version.trim() !== "" ? o.version.trim() : null;
       if (version === null) continue;
-      const installedAt =
-        typeof o.lastUpdated === "string" ? o.lastUpdated : typeof o.installedAt === "string" ? o.installedAt : null;
-      const cand: InstalledRegistryReading = {
+      out.push({
         version,
-        installedAt,
+        installedAt:
+          typeof o.lastUpdated === "string" ? o.lastUpdated : typeof o.installedAt === "string" ? o.installedAt : null,
         scope: typeof o.scope === "string" ? o.scope : null,
         installPath: typeof o.installPath === "string" ? o.installPath : null,
-      };
-      if (best === null) {
-        best = cand;
-        continue;
-      }
-      const c = compareVersions(cand.version, best.version);
-      // 不可排序 ⇒ 字典序兜底：保证「取最高」在任意版本串上都给一个**确定**答案（⛔ 不返回第一个）。
-      if (c === null ? cand.version > best.version : c > 0) best = cand;
+        projectPath: typeof o.projectPath === "string" ? o.projectPath : null,
+      });
     }
-    return best;
+    return out;
   } catch {
     return null;
   }
+}
+
+/** 条目表里**最高**版本那条（同一 host 上同一插件可有多个 scope/多个项目条目）。
+ *  ⛔ 不可排序 ⇒ 字典序兜底：保证「取最高」在任意版本串上都给一个**确定**答案（⛔ 不返回第一个）。 */
+function highestVersionEntry(entries: readonly QuayRegistryEntry[]): QuayRegistryEntry | null {
+  let best: QuayRegistryEntry | null = null;
+  for (const cand of entries) {
+    if (best === null) {
+      best = cand;
+      continue;
+    }
+    const c = compareVersions(cand.version, best.version);
+    if (c === null ? cand.version > best.version : c > 0) best = cand;
+  }
+  return best;
+}
+
+/** 已安装版本的**注册表**读数（`~/.claude/plugins/installed_plugins.json` 的 `quay@quay` 条目）。
+ *  取**最高**版本那条（同一 host 上同一插件可有多个 scope/多个项目条目；「已安装的是什么版本」的答案
+ *  是其中最高的那个），并带回它的安装时刻与 scope 供排障。
+ *  ⛔ 文件缺失/不可解析/无 `quay@quay` 条目/条目都没有合法版本 ⇒ null（调用方 fail-closed）。
+ *
+ *  ⚠️ 这回答的是「这台机器上装了哪些版本」，⛔ 不是「**这个项目**会加载哪一版」——后者见
+ *  `projectScopedVersionReading`（两者在项目级条目比用户级**旧**时必然分叉，那正是 init 静默的那个缺陷）。 */
+export interface InstalledRegistryReading {
+  version: string;
+  installedAt: string | null;
+  scope: string | null;
+  installPath: string | null;
+}
+
+export function installedVersionFromRegistry(homeDir: string): InstalledRegistryReading | null {
+  const entries = readQuayRegistryEntries(homeDir);
+  if (entries === null) return null;
+  const best = highestVersionEntry(entries);
+  if (best === null) return null;
+  return { version: best.version, installedAt: best.installedAt, scope: best.scope, installPath: best.installPath };
+}
+
+/** 会话层分层规则命中的一层：`project` = 一条 `projectPath` 匹配本项目的 project/local 条目；
+ *  `user` = 退回的 user 条目。 */
+export type RegistryScopeTier = "project" | "user";
+
+/**
+ * 「**这个项目**实际会加载哪一版已装插件 vs init 自己跑的是哪一版」的读数。
+ *
+ * WHY THIS EXISTS (gap-init-plugin-version-crosscheck-project-scope-shadow): 上面那个
+ * `installedVersionFromRegistry` 取的是**全部**条目里的最高版本 —— 那是「这台机器上装了哪些版本」的
+ * 答案，⛔ 不是「这个项目会加载哪一版」。两者在「项目级条目比用户级**旧**」时**必然分叉**：init 按最高
+ * 版本（用户级 0.19.0）写配置并把 `.quay/plugin` 指向它，而 Claude Code 会话层按**分层规则**加载
+ * `projectPath` 匹配的 project/local 条目（0.17.0）——于是一个 0.19.0 的 init 生成了 0.19.0 的配置，
+ * 运行时却加载 0.17.0，**全程零告警**。
+ *
+ * 分层规则（**已核实**，非假设）：`init.ts` 的 plugin-link 头注释记录（2026-10-06 实测）——
+ * 「the registry tier rule (`projectPath`-matching local/project entry wins, else the `user` entry)」，
+ * 即 `projectPath` 匹配的 **project 或 local** 条目胜过 user 条目。⇒ 本条据照抄该规则，⛔ 不另立一条。
+ *
+ * 三态（硬规则 3b）：`match` / `mismatch`（两个版本 + 命中的 scope 都带回）/ `not-evaluated`
+ * （记录缺失或不可解析、无本项目条目、或 init 自身版本读不出）。⛔ `not-evaluated` **绝不**读作 `match`。
+ */
+export interface ProjectScopedVersionReading {
+  state: "match" | "mismatch" | "not-evaluated";
+  /** 本项目实际会加载的版本（分层规则命中的那条）；not-evaluated ⇒ null。 */
+  loaded: string | null;
+  /** init 自己跑的版本（比较基准）；读不出 ⇒ null。 */
+  self: string | null;
+  /** 命中条目来自哪一层。 */
+  scope: RegistryScopeTier | null;
+  /** 命中条目的原始 `scope:` 字段（`project` / `local` / `user`）——告警文本要点名它。 */
+  registryScope: string | null;
+  /** 命中条目的 `projectPath`（仅 project 层；user 层为 null）。 */
+  projectPath: string | null;
+  /** not-evaluated 的原因（⛔ 该态下必非空——空原因与「没问题」同形）。 */
+  reason: string | null;
+}
+
+/** 一个路径的**符号链接已解析**形态（存在则 realpath，否则 resolve）。尾斜杠 / 符号链接差异会让字符串
+ *  比较假阴性——`projectPath` 是 Claude Code 自己写的绝对路径，与 init 的 `root` 不能假设逐字相等。 */
+function normalizeProjectPath(p: string): string {
+  try {
+    return fs.realpathSync(p);
+  } catch {
+    return path.resolve(p);
+  }
+}
+
+/** `projectPath` 匹配本项目的 project/local 作用域（会话层分层规则的「上层」）。 */
+const PROJECT_SCOPES: ReadonlySet<string> = new Set(["project", "local"]);
+
+/**
+ * 「这个项目实际会加载哪一版」——按会话层的分层规则从注册表读出，并与 `selfVersion` 比较。
+ *
+ * `selfVersion` = init 自己跑的版本（调用方从 **plugin root 的版本记录**读，⛔ 不是从注册表读——
+ * 注册表回答的是另一个问题，拿它当基准就是把被检验对象当基准）。
+ *
+ * 找不到本项目条目时**退回 user 层**（这正是会话层的规则）；两层都没有 ⇒ `not-evaluated`，
+ * ⛔ 不猜、也不读作 match。
+ */
+export function projectScopedVersionReading(
+  homeDir: string,
+  root: string,
+  selfVersion: string | null,
+): ProjectScopedVersionReading {
+  const degraded = (reason: string, extra: Partial<ProjectScopedVersionReading> = {}): ProjectScopedVersionReading => ({
+    state: "not-evaluated",
+    loaded: null,
+    self: null,
+    scope: null,
+    registryScope: null,
+    projectPath: null,
+    reason,
+    ...extra,
+  });
+
+  const entries = readQuayRegistryEntries(homeDir);
+  if (entries === null) {
+    return degraded(
+      "the plugin install record (~/.claude/plugins/installed_plugins.json) is missing, unreadable or unparsable — " +
+        "cannot tell which plugin version this project will load",
+    );
+  }
+
+  const rootNorm = normalizeProjectPath(root);
+  const projectEntries = entries.filter(
+    (e) =>
+      e.scope !== null &&
+      PROJECT_SCOPES.has(e.scope) &&
+      e.projectPath !== null &&
+      normalizeProjectPath(e.projectPath) === rootNorm,
+  );
+  const isProjectTier = projectEntries.length > 0;
+  const winner = isProjectTier ? highestVersionEntry(projectEntries) : highestVersionEntry(entries.filter((e) => e.scope === "user"));
+  if (winner === null) {
+    return degraded(
+      `the install record carries no quay@quay entry for this project (no project/local entry whose projectPath ` +
+        `resolves to ${rootNorm}, and no user entry)`,
+    );
+  }
+
+  const loaded = winner.version;
+  const self = selfVersion !== null && selfVersion.trim() !== "" ? selfVersion.trim() : null;
+  if (self === null) {
+    return degraded("cannot read the version init itself is running as (no readable plugin-root version record)", {
+      loaded,
+      scope: isProjectTier ? "project" : "user",
+      registryScope: winner.scope,
+      projectPath: winner.projectPath,
+    });
+  }
+
+  const c = compareVersions(loaded, self);
+  const equal = c === null ? loaded === self : c === 0;
+  return {
+    state: equal ? "match" : "mismatch",
+    loaded,
+    self,
+    scope: isProjectTier ? "project" : "user",
+    registryScope: winner.scope,
+    projectPath: winner.projectPath,
+    reason: null,
+  };
 }
 
 /** `.quay/config.yml` 的 `providers:` 块里每个 `path:` 带出的版本段。⛔ 只扫 `providers:` 块

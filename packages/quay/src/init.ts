@@ -40,6 +40,11 @@ import { resolveProviderEntry, NATIVE_PROVIDER_UNRESOLVABLE } from "./config.ts"
 // upgrade engine validates its candidate TEXT through the SAME `runChecks` pipeline
 // `quay config validate` and MCP `config_validate` use — never a second copy of the checks.
 import { validateConfigText, type ConfigIssue } from "./config-validate.ts";
+// The project-scope version cross-check (gap-init-plugin-version-crosscheck-project-scope-shadow):
+// what version THIS project will actually load (the session layer's projectPath tier rule) vs the
+// version running init. The reading lives in loaded-version.ts — the ONE module that reads the install
+// record — ⛔ not re-parsed here (硬规则 5b).
+import { projectScopedVersionReading, type ProjectScopedVersionReading } from "./loaded-version.ts";
 
 // ── Three-state classification of an existing `.quay/config.yml` ────────────────────────────────────
 // (SPEC-quay-init-reconcile-and-native-implementation-2026-09-18 §3.3; AC1.)
@@ -738,6 +743,13 @@ export interface InitResult {
   autoCommit?: AutoCommitReading;
   /** The explicit install-steps text a fresh install prints (`printInstallSteps`). */
   installSteps?: string;
+  /**
+   * The project-scope plugin-version cross-check (gap-init-plugin-version-crosscheck-project-scope-shadow):
+   * which version THIS project will actually load (the session layer's `projectPath` tier rule) vs the
+   * version running init. Carried on EVERY outcome (the wrapper attaches it) so a caller can tell
+   * `match` from `mismatch` from `not-evaluated` without parsing the warning sentence (硬规则 3b).
+   */
+  pluginVersionForProject?: ProjectScopedVersionReading;
 }
 
 /** One closed-set item's state, measured against the pre-write snapshot. */
@@ -1589,12 +1601,52 @@ const SHIPPED_PROFILES_TEMPLATE = [
 ].join("\n");
 
 /**
+ * The operator-facing WARNING for a project-scope version cross-check `mismatch` — the sentence
+ * `runInit` emits (to STDERR) when `projectScopedVersionReading` reports `mismatch`.
+ *
+ * ⛔ 它必须同时点名**两个版本**与**命中的 scope**：只说「版本不一致」会让操作者去查是哪一个入口的版本、
+ * 以及为什么配置与运行时不同 —— 而那正是本条缺陷在修好前让人查不到的东西
+ * (gap-init-plugin-version-crosscheck-project-scope-shadow)。⛔ 不含任何动作 —— warn-only，
+ * 退出码不变（硬规则 12：读数不得阻塞一次合法 init）。
+ */
+export function formatProjectVersionMismatchWarning(r: ProjectScopedVersionReading): string {
+  const scope = r.registryScope ?? r.scope ?? "unknown";
+  return (
+    `warning: this project will load quay plugin ${r.loaded} (scope "${scope}"), but init is running as ` +
+    `${r.self}. Claude Code resolves a projectPath-matching project/local entry over the user entry, so this ` +
+    `project's sessions load ${r.loaded} while init wrote a ${r.self} config. Align the "${scope}"-scope entry ` +
+    `for this project with ${r.self} (inspect with \`claude plugin list --json\`), or the config's runtime and ` +
+    `the loaded runtime will keep disagreeing. (warning only — init's exit code is unchanged)`
+  );
+}
+
+/**
  * Run the init operation.
  *
  * @returns InitResult on success.
  * @throws Error on unexpected filesystem errors (permissions, etc.).
  */
 export function runInit(opts: InitOptions): InitResult {
+  // ── the project-scope version cross-check (gap-init-plugin-version-crosscheck-project-scope-shadow) ──
+  // BEFORE the engine runs: answer "which plugin version will THIS project actually load" — the session
+  // layer's projectPath tier rule, NOT "the highest version installed on this machine" — and warn when it
+  // disagrees with the version running init. ⛔ WARN-ONLY: the exit code is unchanged (硬规则 12 — a
+  // reading must not block a legitimate init), and the sentence goes to STDERR (a warning is not progress
+  // on stdout, and `--json` promises stdout carries exactly one document).
+  const root = path.resolve(opts.root);
+  const homeDir = process.env.HOME ?? os.homedir();
+  const pluginVersionForProject = projectScopedVersionReading(
+    homeDir,
+    root,
+    readPluginRootVersion(opts.pluginRoot ?? null),
+  );
+  if (pluginVersionForProject.state === "mismatch") {
+    process.stderr.write(formatProjectVersionMismatchWarning(pluginVersionForProject) + "\n");
+  }
+  return { ...runInitImpl(opts), pluginVersionForProject };
+}
+
+function runInitImpl(opts: InitOptions): InitResult {
   const root = path.resolve(opts.root);
   const quayDir = path.join(root, ".quay");
   const configPath = path.join(quayDir, "config.yml");

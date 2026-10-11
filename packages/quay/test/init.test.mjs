@@ -28,6 +28,9 @@ import {
   providerEntryFile,
 } from "../src/init.ts";
 import { SERVE_BINDING_FALLBACK } from "../src/serve-binding.ts";
+// The project-scope version cross-check reader (gap-init-plugin-version-crosscheck-project-scope-shadow):
+// the ONE module that reads the install record, unit-tested here for its three states.
+import { projectScopedVersionReading } from "../src/loaded-version.ts";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const quayBin = QUAY_CLI;
@@ -1986,3 +1989,122 @@ test("AC3: re-running init on the converged repo changes NOTHING (idempotent)", 
   assert.equal(g("rev-parse", "HEAD"), before.sha, "and no new commit appeared");
   assert.equal(fs.readFileSync(cfgPath, "utf8"), before.config, "the config is byte-identical");
 });
+
+// ---------------------------------------------------------------------------
+// gap-init-plugin-version-crosscheck-project-scope-shadow
+//
+// `quay init` used to answer "what version is installed here" (the HIGHEST entry in the install
+// record) and report nothing about "what will THIS project load" (the session layer's
+// projectPath-matching project/local entry, else the user entry). When a project-scope entry is
+// OLDER than the user entry, init generated a config for the version it was NOT running as while
+// Claude Code loaded the older one — with zero warning. These tests pin the fix: a three-valued
+// reading, a warn-only line that names BOTH versions and the scope, and a negative control that
+// "cannot read the record" never reads as "match".
+// ---------------------------------------------------------------------------
+
+/** Write a fixture `~/.claude/plugins/installed_plugins.json` under a fresh HOME dir; return the HOME. */
+function registryHome(tag, entries) {
+  const home = makeTmpDir(`quay-init-reg-${tag}-`);
+  fs.mkdirSync(path.join(home, ".claude", "plugins"), { recursive: true });
+  fs.writeFileSync(
+    path.join(home, ".claude", "plugins", "installed_plugins.json"),
+    JSON.stringify({ version: 2, plugins: { "quay@quay": entries } }),
+  );
+  return home;
+}
+
+/** A minimal but REAL plugin root the post-init runtime check accepts: a `.claude-plugin/plugin.json`
+ *  (whose `version` is init's own version) and the native bundle path the check requires to exist.
+ *  The bundle's content is irrelevant — the freshness check compares it to ITSELF. */
+function fixturePluginRoot(version) {
+  const dir = makeTmpDir("quay-init-pvplugin-");
+  fs.mkdirSync(path.join(dir, ".claude-plugin"), { recursive: true });
+  fs.mkdirSync(path.join(dir, "vendor", "quay-native", "dist"), { recursive: true });
+  fs.writeFileSync(path.join(dir, ".claude-plugin", "plugin.json"), JSON.stringify({ name: "quay", version }));
+  fs.writeFileSync(path.join(dir, "vendor", "quay-native", "dist", "quay-native.js"), "// fixture\n");
+  return dir;
+}
+
+/** Run `quay <args>` with an env override (HOME pointed at a fixture), capturing BOTH streams. */
+function runQuayEnv(args, cwd, env) {
+  const r = spawnSync("node", [quayBin, ...args], { encoding: "utf8", cwd, env });
+  return { stdout: r.stdout ?? "", stderr: r.stderr ?? "", exitCode: r.status ?? 1 };
+}
+
+const REG_USER = (version = "0.19.0") => ({ scope: "user", installPath: "/u", version, installedAt: "t", lastUpdated: "t" });
+const REG_PROJECT = (projectPath, version, scope = "project") => ({
+  scope, projectPath, installPath: "/p", version, installedAt: "t", lastUpdated: "t",
+});
+
+test("plugin-version cross-check unit: the five registry fixtures yield the expected one of three states", () => {
+  const root = makeTmpDir("quay-init-pvroot-");
+  const self = "0.19.0";
+
+  // ① user-only ⇒ the user entry IS this project's effective version; equal ⇒ match.
+  assert.equal(projectScopedVersionReading(registryHome("userOnly", [REG_USER()]), root, self).state, "match");
+
+  // ② project-shadows-user (OLDER) ⇒ mismatch. This is the defect: the effective version (0.17.0)
+  //    is the PROJECT entry, while the highest installed version is the user entry (0.19.0).
+  const shadow = projectScopedVersionReading(registryHome("shadow", [REG_PROJECT(root, "0.17.0"), REG_USER()]), root, self);
+  assert.equal(shadow.state, "mismatch");
+  assert.equal(shadow.loaded, "0.17.0", "the project-scope entry is the effective version");
+  assert.equal(shadow.self, "0.19.0");
+  assert.equal(shadow.scope, "project", "…and the tier that decided it is reported");
+
+  // ③ project-same-version ⇒ match (the project tier still wins; the two versions agree).
+  assert.equal(projectScopedVersionReading(registryHome("same", [REG_PROJECT(root, "0.19.0"), REG_USER()]), root, self).state, "match");
+
+  // ④ registry absent ⇒ not-evaluated.
+  assert.equal(projectScopedVersionReading(makeTmpDir("quay-init-reg-absent-"), root, self).state, "not-evaluated");
+
+  // ⑤ malformed JSON ⇒ not-evaluated.
+  const bad = makeTmpDir("quay-init-reg-bad-");
+  fs.mkdirSync(path.join(bad, ".claude", "plugins"), { recursive: true });
+  fs.writeFileSync(path.join(bad, ".claude", "plugins", "installed_plugins.json"), "{not json");
+  assert.equal(projectScopedVersionReading(bad, root, self).state, "not-evaluated");
+});
+
+test("plugin-version cross-check negative control: an unreadable/empty registry is not-evaluated, NEVER match", () => {
+  const root = makeTmpDir("quay-init-pvneg-root-");
+  // (a) the file is simply absent.
+  const absent = projectScopedVersionReading(makeTmpDir("quay-init-pvneg-absent-"), root, "0.19.0");
+  assert.notEqual(absent.state, "match", "an absent registry must never read as match");
+  assert.equal(absent.state, "not-evaluated");
+  assert.ok(absent.reason && absent.reason.length > 0, "not-evaluated must carry a reason — a blank one reads like 'fine'");
+  // (b) the record EXISTS but carries no entry for this project (only someone else's project entry).
+  const otherProject = projectScopedVersionReading(
+    registryHome("pvneg-other", [REG_PROJECT("/some/other/project", "0.17.0")]),
+    root,
+    "0.19.0",
+  );
+  assert.equal(otherProject.state, "not-evaluated", "a foreign project's entry answers nothing about THIS project");
+  // (c) a record with no legal version at all is the same reading as an absent one, not a match.
+  assert.equal(projectScopedVersionReading(registryHome("pvneg-noversion", [{ scope: "project", projectPath: root }]), root, "0.19.0").state, "not-evaluated");
+});
+
+test("plugin-version cross-check: init WARNS naming BOTH versions and the scope, exit code UNCHANGED", () => {
+  const proj = tmpDir("pv-mismatch");
+  const home = registryHome("pv-mismatch", [REG_PROJECT(proj, "0.17.0"), REG_USER("0.19.0")]);
+  const pluginRoot = fixturePluginRoot("0.19.0"); // init IS 0.19.0; the project will load 0.17.0
+
+  const out = runQuayEnv(["init", "--plugin-root", pluginRoot], proj, { ...process.env, HOME: home });
+
+  // ⛔ The warning is warn-ONLY: the exit code stays 0 (硬规则 12 — a reading must not block init).
+  assert.equal(out.exitCode, 0, `the warning must not change init's exit code:\n${out.stdout}${out.stderr}`);
+  assert.ok(out.stderr.includes("0.17.0"), `the effective (loaded) version must be named:\n${out.stderr}`);
+  assert.ok(out.stderr.includes("0.19.0"), `init's own version must be named:\n${out.stderr}`);
+  assert.ok(out.stderr.includes('"project"'), `the scope that decided the effective version must be named:\n${out.stderr}`);
+  // …and init really did succeed (the warning is not a symptom of a half-run).
+  assert.ok(fs.existsSync(path.join(proj, ".quay", "config.yml")), "the config was still written");
+});
+
+test("plugin-version cross-check negative control: a MATCHING registry prints NO warning (exit 0)", () => {
+  const proj = tmpDir("pv-match");
+  const home = registryHome("pv-match", [REG_USER("0.19.0")]);
+  const pluginRoot = fixturePluginRoot("0.19.0");
+
+  const out = runQuayEnv(["init", "--plugin-root", pluginRoot], proj, { ...process.env, HOME: home });
+  assert.equal(out.exitCode, 0);
+  assert.doesNotMatch(out.stderr, /will load quay plugin/, `a match must not warn:\n${out.stderr}`);
+});
+
