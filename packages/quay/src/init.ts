@@ -1430,8 +1430,25 @@ export function resolveProjectLoopValues(
   }
 
   // worktree_root: explicit → existing → a sibling of repo_root. Validated (tmpfs ⇒ fail closed).
+  //
+  // The DEFAULT is `path.resolve`d, never string-templated. `${repoRoot}/../x-worktrees` resolves to
+  // the same directory but PERSISTS a literal `..` segment into .quay/config.yml, and a
+  // non-canonical path is a string-equality hazard for every consumer that compares paths by text
+  // (gap-init-worktree-root-default-written-unnormalized). Normalization happens here, BEFORE
+  // `validateWorktreeRoot`, so the tmpfs probe and the value actually written are the same string.
+  //
+  // Only the DEFAULT is normalized. An EXPLICIT `--worktree-root` and an EXISTING
+  // `loop.worktree_root` read back from config are both persisted VERBATIM — the spelling a user put
+  // in their config is theirs, and silently rewriting one of the four project-derived loop values
+  // would be an unrequested edit to a file this command's whole doctrine is to preserve. So a config
+  // written by an older quay keeps its `/../` spelling until the operator changes it (delete the key
+  // to re-derive the default, or pass --worktree-root); what this fix guarantees is that quay never
+  // WRITES that spelling itself again. This also makes re-running init idempotent: the resolved
+  // default matches what the first run wrote, so the merge in writeInitConfig sees `current === value`
+  // and reports the config unchanged.
   let worktreeRoot = explicit.worktreeRoot && explicit.worktreeRoot !== "" ? explicit.worktreeRoot : readExistingLoopValue(configPath, "worktree_root");
-  if (worktreeRoot === "") worktreeRoot = `${repoRoot}/../${path.basename(repoRoot)}-worktrees`;
+  const defaultWorktreeRoot = path.resolve(repoRoot, "..", `${path.basename(repoRoot)}-worktrees`);
+  if (worktreeRoot === "") worktreeRoot = defaultWorktreeRoot;
   const wt = validateWorktreeRoot(worktreeRoot);
   if (!wt.ok) {
     return {
@@ -1440,7 +1457,7 @@ export function resolveProjectLoopValues(
         reason: `worktree root '${worktreeRoot}' is on tmpfs ('${wt.probe}' is tmpfs) — this is memory, not disk.`,
         detail: [
           "Every worktree under it consumes RAM; the 2026-08-04 machine-wide OOM traced straight to it.",
-          `Change it to a real disk path — e.g. '${repoRoot}/../${path.basename(repoRoot)}-worktrees', or pass --worktree-root.`,
+          `Change it to a real disk path — e.g. '${defaultWorktreeRoot}', or pass --worktree-root.`,
         ],
       },
     };
