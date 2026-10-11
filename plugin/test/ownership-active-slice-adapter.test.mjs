@@ -19,7 +19,7 @@ import crypto from "node:crypto";
 import { spawnSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
 
-import { buildSliceInput, computeSliceDelta, resolveSliceDelta, unexpectedRemovedEdges } from "../../docs/analysis/ownership-active-slice-adapter.mjs";
+import { buildSliceInput, computeSliceDelta, resolveSliceDelta, unexpectedRemovedEdges, SLICE_DELTA_SURFACE } from "../../docs/analysis/ownership-active-slice-adapter.mjs";
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const REPO = path.resolve(HERE, "..", "..");
@@ -177,6 +177,72 @@ test("stays: a CLI that ignores the clause is REPORTED, not silently mistaken fo
   assert.ok(p.reason.startsWith(RECORDED_75), `tool refusal must reproduce carrier record 75:\n  got  ${p.reason}\n  want ${RECORDED_75}`);
   const p76 = runCandidate(MOVE_76, LOCKED.commit_76);
   assert.ok(p76.reason.startsWith(RECORDED_76), `tool refusal must reproduce carrier record 76:\n  got  ${p76.reason}\n  want ${RECORDED_76}`);
+});
+
+// ── AC1 (gap-ownership-active-repair-legal-dirs-lost-on-archguard-refusal): the legal-dir list must SURVIVE
+// every `not-evaluated` return once the graph exists ─────────────────────────────────────────────────────
+// The ArchGuard-origin refusal is the ONLY class that reaches the primitive, and it was the ONE branch that
+// returned without `detail.valid_dirs`, so `recordedLegalDirs` saw nothing and the bounded repair abstained at
+// attempt 0 (NO_RECORDED_LEGAL_DIRS). These tests pin the list on BOTH sides of the boundary: carried on every
+// branch after the graph is built, absent on the branches where no graph was ever built (fail-closed, 3b).
+const SYNTH_GRAPH = { nodes: ["", "core", "a", "b"].map((id) => ({ id, type: "internal" })), edges: [{ from: "b", to: "a", importedNames: ["helper"] }], cycles: [] };
+const synthDeps = (over = {}) => ({
+  sliceDelta: { available: true, cli: "/x/cli.js", version: "0.1.39", surface: SLICE_DELTA_SURFACE },
+  git: (a) => (a[0] === "rev-parse" ? "tree123\n" : ""),
+  analyzePackageGraph: () => ({ file: "", json: { extensions: { tsAnalysis: { moduleGraph: SYNTH_GRAPH } } } }),
+  ...over,
+});
+const synthRun = (moves, over = {}) => computeSliceDelta({
+  root: "/r", commit: "c0ffee0000000000000000000000000000000000",
+  proposal: { concern: "c", slice: { scope_root: "src", subject: "a", moves, consumers: [] } },
+  deps: synthDeps(over),
+});
+// A CLI that refuses exactly the way the published 0.1.39 artifact does (exit 2 + a not-evaluated report).
+const refusingCli = (reason) => (cli, argv) => {
+  fs.writeFileSync(argv[argv.indexOf("--json") + 1], JSON.stringify({ status: "not-evaluated", reason }));
+  return { status: 2, stdout: "", stderr: "" };
+};
+
+test("AC1: ArchGuard's OWN refusal carries detail.valid_dirs — the same list the pre-flight branch emits", () => {
+  const MOVES = [{ file: "a/lib.ts", from: "a", to: "b", symbols: ["helper"] }];
+  const refused = synthRun(MOVES, { runCli: refusingCli("切法覆盖不足：边 b -> a 的 importedNames=[helper] 中 [] 未被任何 move 的 symbols 覆盖") });
+  assert.equal(refused.status, "not-evaluated");
+  assert.match(refused.reason, /覆盖不足/);
+  assert.deepEqual(refused.detail.valid_dirs, ["", "a", "b", "core"], "the graph's internal nodes, sorted");
+
+  // SAME source, SAME function: `buildSliceInput`'s own pre-flight refusal over the same graph emits the
+  // identical list — so the two branches cannot drift apart again.
+  const preflight = synthRun([{ file: "a/lib.ts", from: "a", to: "nope", symbols: ["helper"] }], { runCli: refusingCli("unreachable") });
+  assert.match(preflight.reason, /^MOVE_TO_NOT_AN_INTERNAL_DIR/);
+  assert.deepEqual(preflight.detail.valid_dirs, refused.detail.valid_dirs);
+
+  // ...and the list is the graph's, not the filesystem's: `core` has no edge in this graph but IS an internal
+  // node, while a directory that exists on disk but is not a node is never listed.
+  assert.equal(refused.detail.valid_dirs.includes("core"), true);
+  assert.equal(refused.detail.valid_dirs.includes("scripts"), false);
+});
+
+test("AC1: the no-report branch (CLI wrote nothing) carries it too — every branch AFTER the graph is built", () => {
+  const r = synthRun([{ file: "a/lib.ts", from: "a", to: "b", symbols: ["helper"] }], { runCli: () => ({ status: 2, stdout: "", stderr: "" }) });
+  assert.equal(r.status, "not-evaluated");
+  assert.match(r.reason, /^NO_REPORT:exit=2$/);
+  assert.deepEqual(r.detail.valid_dirs, ["", "a", "b", "core"]);
+});
+
+test("AC3: no graph => NO detail.valid_dirs (the list is never invented for a branch that never built one)", () => {
+  const boom = synthRun([{ file: "a/lib.ts", from: "a", to: "b", symbols: ["helper"] }], { analyzePackageGraph: () => { throw new Error("analyze failed"); } });
+  assert.equal(boom.status, "not-evaluated");
+  assert.match(boom.reason, /^PACKAGE_GRAPH_BUILD_FAILED/);
+  assert.equal("detail" in boom, false, "a failed build must not fabricate a legal-dir list");
+
+  const nulled = synthRun([{ file: "a/lib.ts", from: "a", to: "b", symbols: ["helper"] }], { analyzePackageGraph: () => null });
+  assert.equal(nulled.status, "unavailable");
+  assert.equal("detail" in nulled, false);
+
+  const noGraph = synthRun([{ file: "a/lib.ts", from: "a", to: "b", symbols: ["helper"] }], { analyzePackageGraph: () => ({ file: "", json: { extensions: {} } }) });
+  assert.equal(noGraph.status, "not-evaluated");
+  assert.match(noGraph.reason, /^NO_MODULE_GRAPH_IN_ARCHJSON/);
+  assert.equal("detail" in noGraph, false);
 });
 
 // ── AC10: the whole-graph reconciliation hazard (see gap-slice-delta-reconciliation-scope-name-global) ──

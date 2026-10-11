@@ -254,6 +254,16 @@ export function computeSliceDelta({ root, commit, proposal, deps = {}, now = () 
   const graph = built.json?.extensions?.tsAnalysis?.moduleGraph;
   if (!graph) return { status: "not-evaluated", reason: "NO_MODULE_GRAPH_IN_ARCHJSON", provenance: prov({ scope_root: scopeRel, tree_sha: treeSha }) };
 
+  // 硬规则 4c — the legal-dir list must SURVIVE every layer between where it is produced and where it is read.
+  // `internalNodes(graph)` is the SAME source (same function) `buildSliceInput` refuses on, below. Once the graph
+  // exists, EVERY `not-evaluated` return carries it as `detail.valid_dirs`, so the reader downstream
+  // (`recordedLegalDirs` in ownership-active-proposal-repair.mjs) sees it whether the refusal came from our own
+  // pre-flight OR from ArchGuard itself. The ArchGuard-origin refusal is the ONLY class that ever reaches the
+  // primitive — and it used to be the ONE branch that dropped the list, leaving the bounded repair to abstain at
+  // attempt 0 with NO_RECORDED_LEGAL_DIRS. The graph-unavailable branches above carry NO detail: a list that was
+  // never built is not a list we may invent (fail-closed, 硬规则 3b).
+  const legalDirs = () => ({ valid_dirs: [...internalNodes(graph)].sort() });
+
   const provenance = { repo: root, ref: commit, commit, worktree: `analysed subtree ${scopeRel || "."} treeSha ${treeSha}`, scope_root: scopeRel, tracked_changes_in_scope: changed.slice(0, 10) };
   const built2 = buildSliceInput({ graph, proposal, provenance });
   const archText = JSON.stringify(built.json);
@@ -278,7 +288,7 @@ export function computeSliceDelta({ root, commit, proposal, deps = {}, now = () 
   const first = evaluate(built2.slice);
   const full = { ...baseProv, slice_sha256: first.slice_sha256, report_sha256: first.report_sha256, command: first.command, exit_code: first.r.status, explained_by: built2.explained_by,
     tool_reported: first.report?.provenance?.tool ?? null, provenance_consistency: first.report?.provenance?.provenanceConsistency ?? null };
-  if (!first.report) return { status: "not-evaluated", reason: `NO_REPORT:exit=${first.r.status}`, provenance: full };
+  if (!first.report) return { status: "not-evaluated", reason: `NO_REPORT:exit=${first.r.status}`, detail: legalDirs(), provenance: full };
   if (first.report.status !== "evaluated" || first.r.status === 2) {
     // Honesty signal (rule 3b): if we DECLARED a partial cover (`stays`) and the tool still refused for a
     // coverage shortfall, the installed CLI does not implement the `stays` clause — the declaration is inert
@@ -286,7 +296,7 @@ export function computeSliceDelta({ root, commit, proposal, deps = {}, now = () 
     const declared = built2.slice.proposedCut.stays || [];
     const reason = String(first.report.reason || "ArchGuard slice-delta reported not-evaluated").slice(0, 300);
     const ignored = declared.length > 0 && /覆盖不足|uncovered/i.test(reason);
-    return { status: "not-evaluated", reason, provenance: full, ...(declared.length ? { stays_declared: declared, stays_ignored_by_tool: ignored } : {}) };
+    return { status: "not-evaluated", reason, detail: legalDirs(), provenance: full, ...(declared.length ? { stays_declared: declared, stays_ignored_by_tool: ignored } : {}) };
   }
 
   // The primitive reports the cycle AS SEEN FROM `subject`. If the model chose the dir that LEAVES (e.g. fan-in), `sccLeft`

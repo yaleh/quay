@@ -11,6 +11,7 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import fs from "node:fs";
 import path from "node:path";
+import crypto from "node:crypto";
 import { fileURLToPath } from "node:url";
 
 import {
@@ -323,6 +324,136 @@ test("AC9: a deterministic fixable invalid_move is repaired within 3 rounds (fix
   // the feedback the judge saw carried the recorded legal dirs (from the graph) and the graph's known symbols
   assert.match(judge.prompts[0], /legal_dirs/);
   assert.match(judge.prompts[0], /helper/);
+});
+
+// ── AC2/AC3 (gap-ownership-active-repair-legal-dirs-lost-on-archguard-refusal): PRODUCTION-SHAPE regression ──
+// The pre-fix production reading (carrier `.quay/ownership-shadow-proposals.jsonl`, record 91, run_id
+// `live:2026-10-11T09-28-34-622Z:1`): ArchGuard refused the real cut (`切法覆盖不足`, exit 2) and the adapter
+// returned WITHOUT the legal-dir list, so the repair abstained at attempt 0 (NO_RECORDED_LEGAL_DIRS, judge
+// called 0 times) — for the only rejection class that ever reaches the primitive. Nothing below injects a
+// legal-dir list: the record is the one the FIXED adapter actually produces from the vendored graph.
+// (A count of the detail-key token over this file must stay 3 — the three PRE-EXISTING hand-injection sites.
+// This test adds none, and that is the point: a criterion only a fixture can satisfy is not a measurement.)
+const LIVE_FIXTURE = path.join(FIXTURES, "live-ec00fcc00-coverage-gap.json");
+const LIVE_FIXTURE_SHA256 = "68e93d1a516e581212dd6843e0297da39a8162863b0670b09897ad86a424f50c";
+// The carrier's own `slice_delta.provenance.graph_sha256` — the cross-check that the vendored graph IS the graph
+// the production run was judged against (not merely one rebuilt from the same commit).
+const LIVE_GRAPH_SHA256 = "a3946f0828a93ecba114457e1c0586ee17718cc9efa3e910ae3a46829158c9a2";
+const LIVE_COMMIT = "ec00fcc00da73c8f8e7f64a6d69bd734285a02b2";
+const LIVE_TREE_SHA = "20898960d55309de503c474aec960ba2567f1dd8";
+// Verbatim from the carrier (the recorded reason is clipped to 300 chars by the recorder — quoted as stored).
+const LIVE_REASON = "切法覆盖不足：边  -> gate 的 importedNames=[listGates, appendGateEvent, queryGateEvents, runAcceptance, resolveAcceptanceTimeout, timeoutKnobHint, verdictFromAcceptance, runGate, resolveGateLogPath, runGateLogQuery, runComplete, runAdjudicate, runPromote, runRetreat, runCompleteOutOfBand] 中 [listGates, appen";
+const LIVE_PROPOSED_SLICE = {
+  scope_root: "packages/quay/src", subject: "gate/config",
+  moves: [
+    { file: "gate/types.ts", from: "gate", to: "kernel", symbols: ["GateFn", "GateVerdict", "GateDefinition", "GateVerdictKind"] },
+    { file: "gate/acceptance-runner.ts", from: "gate", to: "kernel", symbols: ["runAcceptance", "verdictFromAcceptance", "resolveAcceptanceTimeout", "AcceptanceResult", "AcceptanceVerdict", "NotEvaluatedCause"] },
+    { file: "gate/config/loader.ts", from: "gate/config", to: "gate", symbols: ["loadWorkspaceGates", "loadWorkspaceGateMetadata", "readGatesConfig", "discoverWorkspaceRoot", "resolveWorkspaceRootOrThrow", "GatesConfig"] },
+  ],
+  consumers: [
+    { file: "gate/registry.ts", dir: "gate", imports: ["loadWorkspaceGates", "loadWorkspaceGateMetadata", "discoverWorkspaceRoot"] },
+    { file: "gate/factories/index.ts", dir: "gate/factories", imports: ["GateFn"] },
+    { file: "gate/factories/adr.ts", dir: "gate/factories", imports: ["runAcceptance", "GateFn"] },
+    { file: "gate/factories/goal.ts", dir: "gate/factories", imports: ["runAcceptance", "verdictFromAcceptance", "GateFn"] },
+  ],
+  forbidden_new_edges: [{ from: "gate/config", to: "gate" }, { from: "kernel", to: "gate" }, { from: "kernel", to: "gate/factories" }],
+};
+const liveArchJson = () => JSON.parse(fs.readFileSync(LIVE_FIXTURE, "utf8"));
+const liveGraph = () => liveArchJson().extensions.tsAnalysis.moduleGraph;
+const LIVE_PROPOSAL = { concern: "the gate cycle", slice: LIVE_PROPOSED_SLICE };
+/** The REAL adapter over the vendored graph, with a stub CLI reproducing the published 0.1.39 refusal. */
+const liveComputeDelta = (report = { status: "not-evaluated", reason: LIVE_REASON }) => {
+  const fn = ({ commit, proposal }) => computeSliceDelta({ root: "/r", commit, proposal, deps: {
+    sliceDelta: { available: true, cli: "/x/cli.js", version: "0.1.39", surface: SLICE_DELTA_SURFACE },
+    git: (a) => (a[0] === "rev-parse" ? `${LIVE_TREE_SHA}\n` : ""),
+    analyzePackageGraph: () => ({ file: LIVE_FIXTURE, json: liveArchJson() }),
+    runCli: (cli, argv) => { fs.writeFileSync(argv[argv.indexOf("--json") + 1], JSON.stringify(typeof report === "function" ? report(proposal) : report)); return { status: 2, stdout: "", stderr: "" }; },
+  } });
+  fn.calls = [];
+  const wrapped = (o) => { fn.calls.push(o.proposal); return fn(o); };
+  wrapped.calls = fn.calls;
+  return wrapped;
+};
+/** A revision whose whole imported-name set is covered, so the cut is re-JUDGED by the primitive (and refused). */
+const LIVE_REVISE = revise([{ file: "gate/registry.ts", from: "gate", to: "kernel", symbols: ["GateFn", "runAcceptance", "verdictFromAcceptance"] }], { why: "move the three names the cut explains into kernel" });
+
+test("AC2: the ARCHGUARD-ORIGIN refusal now engages the repair — production record, production graph, nothing injected", async () => {
+  // The fixture IS the production graph: file bytes are the committed ones, and the graph hash matches the
+  // carrier's own recorded `graph_sha256` (so the replay cannot silently drift onto a different snapshot).
+  assert.equal(crypto.createHash("sha256").update(fs.readFileSync(LIVE_FIXTURE)).digest("hex"), LIVE_FIXTURE_SHA256);
+  assert.equal(crypto.createHash("sha256").update(JSON.stringify(liveGraph())).digest("hex"), LIVE_GRAPH_SHA256);
+  assert.deepEqual(liveGraph().cycles.map((c) => c.modules), [["gate/config", "gate/factories", "gate", ""]]);
+
+  // ① re-judge the REAL proposed_slice against the REAL graph — the stub CLI refuses exactly as 0.1.39 did.
+  const refused = liveComputeDelta()({ commit: LIVE_COMMIT, proposal: LIVE_PROPOSAL });
+  assert.equal(refused.status, "not-evaluated");
+  assert.equal(refused.reason, LIVE_REASON);
+  assert.equal(refused.stays_declared.length, 1, "the declared `stays` went out");
+  assert.deepEqual(recordedLegalDirs({ slice_delta: refused }), ["", "cli", "fan-in", "gate", "gate/config", "gate/factories", "kernel", "ts-demo"]);
+
+  const carrier = { contract_version: "ownership-active-investigation/1", commit: LIVE_COMMIT, concern_key: "package-cycle|gate/config", envelope: { concern: "the gate 4-package cycle" }, proposed_slice: LIVE_PROPOSED_SLICE, slice_delta: refused };
+
+  // ② CONTROL (硬规则 4 推论四): re-creating the PRE-FIX branch — the SAME record with the list dropped —
+  // abstains at attempt 0 with zero judge calls. If the fix did nothing, this is what the test above would see.
+  const preFix = { ...carrier, slice_delta: { ...refused, detail: null } };
+  assert.equal(recordedLegalDirs(preFix), null);
+  const dead = await attemptRepair({ candidateRecord: preFix, root: "/r", invokeJudge: async () => { throw new Error("judge must not be called"); }, deps: { graph: liveGraph(), computeDelta: liveComputeDelta() } });
+  assert.equal(dead.outcome, "abstained");
+  assert.equal(dead.judge_calls, 0);
+  assert.equal(dead.attempts.at(-1).matched, "NO_RECORDED_LEGAL_DIRS");
+
+  // ③ THE FIX: the untouched record the fixed adapter produced → the repair ENGAGES. The primitive refuses every
+  // revision, so the session ends by exhausting its bound (not by abstaining before it ever started).
+  const judge = scriptedJudge([LIVE_REVISE]);
+  const delta = liveComputeDelta();
+  const res = await attemptRepair({ candidateRecord: carrier, root: "/r", invokeJudge: judge, deps: { graph: liveGraph(), computeDelta: delta } });
+  assert.ok(!res.attempts.some((a) => a.matched === "NO_RECORDED_LEGAL_DIRS"), `abstained at attempt 0 despite a recorded list: ${JSON.stringify(res.attempts)}`);
+  assert.equal(res.attempts[0].judge_called, true);
+  assert.equal(res.attempts[0].attempt_no, 1);
+  assert.equal(res.judge_calls, 3, "the bound is what ends it — every round reached the judge");
+  assert.equal(delta.calls.length, 3, "and every round re-ran the primitive");
+  // Every engaged round is a genuine re-judgement of a revised cut against the primitive (the same
+  // `invalid_move` class as production). The graph-derived missing-consumer guard fires on the ` -> gate` edge
+  // before the tool's own coverage text is reached, so `MISSING_CONSUMER` — not the raw tool reason — is the
+  // recorded `matched`; the bucket is what the loop keys on, and it is `invalid_move` throughout.
+  assert.ok(res.attempts.filter((a) => a.judge_called).every((a) => a.bucket === "invalid_move" && a.computed === "not-evaluated"), JSON.stringify(res.attempts));
+  assert.equal(res.outcome, "abstained");
+  assert.match(res.reason, /budget exhausted/);
+  // the feedback the judge was shown carried the graph's OWN legal dirs — including the two the production cut
+  // named as move destinations (`kernel`, `gate`), which is exactly what the pre-fix branch could never supply.
+  const shown = JSON.parse(judge.prompts[0].slice(judge.prompts[0].indexOf("{", judge.prompts[0].indexOf("STRUCTURAL FACTS"))));
+  assert.deepEqual(shown.legal_dirs, ["", "cli", "fan-in", "gate", "gate/config", "gate/factories", "kernel", "ts-demo"]);
+  assert.equal(shown.locked.subject, "gate/config");
+});
+
+test("AC3: fail-closed — a graph that was never built stays listless, and the repair still abstains at attempt 0", async () => {
+  for (const [name, reason, analyzePackageGraph] of [
+    ["analyzePackageGraph throws", /^PACKAGE_GRAPH_BUILD_FAILED/, () => { throw new Error("archguard analyze failed"); }],
+    ["analyzePackageGraph returns null", /^ARCHGUARD_CLI_NOT_FOUND$/, () => null],
+    ["the ArchJSON carries no module graph", /^NO_MODULE_GRAPH_IN_ARCHJSON$/, () => ({ file: "", json: { extensions: {} } })],
+  ]) {
+    const r = computeSliceDelta({ root: "/r", commit: LIVE_COMMIT, proposal: LIVE_PROPOSAL, deps: {
+      sliceDelta: { available: true, cli: "/x/cli.js", version: "0.1.39", surface: SLICE_DELTA_SURFACE },
+      git: (a) => (a[0] === "rev-parse" ? `${LIVE_TREE_SHA}\n` : ""),
+      analyzePackageGraph,
+      runCli: () => { throw new Error("the primitive must not be reached"); },
+    } });
+    assert.match(r.reason, reason);
+    // (a) the fix does NOT turn "there really is no graph" into "here is a list anyway" (硬规则 3b).
+    assert.equal("detail" in r, false, `${name}: no list may be invented for a graph that was never built`);
+    assert.equal(recordedLegalDirs({ slice_delta: r }), null, name);
+    // (b) and the repair still does not start: zero judge calls, zero rounds. These three reasons classify as
+    // `tool_limitation` (a capability boundary), so the session terminates by CLASSIFICATION at attempt 0 —
+    // the same terminal outcome the pre-existing NO_RECORDED_LEGAL_DIRS test covers for a repairable class.
+    let called = 0;
+    const res = await attemptRepair({ candidateRecord: { contract_version: "ownership-active-investigation/1", commit: LIVE_COMMIT, concern_key: "package-cycle|gate/config", envelope: { concern: "the gate 4-package cycle" }, proposed_slice: LIVE_PROPOSED_SLICE, slice_delta: r }, root: "/r", invokeJudge: async () => { called++; return { status: 0, stdout: "{}" }; }, deps: { graph: liveGraph() } });
+    assert.equal(called, 0, name);
+    assert.equal(res.outcome, "abstained", name);
+    assert.equal(res.judge_calls, 0, name);
+    assert.equal(res.rounds, 0, name);
+    assert.equal(res.class, "tool_limitation", name);
+    assert.equal(res.attempts[0].bucket, "tool_limitation", name);
+  }
 });
 
 // ── integration: the loop records the structured cut + the refusal detail (opt-in repair plumbing) ─

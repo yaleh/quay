@@ -260,3 +260,155 @@ established by the fixture corpus only.
 - The loop's `--repair` flag is **opt-in and default OFF**; without it the loop's behaviour is byte-identical
   to before (the two additive record fields `proposed_slice` / `slice_delta.detail` are the only change to
   the default path).
+
+---
+
+## 7. post-merge independent blind test + the legal-dirs fix
+
+Task: `gap-ownership-active-repair-legal-dirs-lost-on-archguard-refusal`. §4a closed with a recorded next
+increment — *"the adapter records `detail.valid_dirs` only on the cut-builder refusal path; a refusal reported
+by ArchGuard itself carries no `detail`, so this — the dominant real refusal — can never reach the judge."*
+This section is that increment, executed and measured.
+
+### 7.1 The post-merge reading that motivated it (2026-10-11 joint regression)
+
+`gap-ownership-active-proposal-repair-loop`'s **AC10 post-merge half** was run on the clean develop tip
+`ec00fcc00` (`.quay/ownership-shadow-proposals.jsonl`, record 91, `run_id`
+`live:2026-10-11T09-28-34-622Z:1`; default resolution path = published `@yalehwang/archguard@0.1.39`,
+`snapshot_matches_ref: true`, `tracked_changes_in_scope: []`). The investigation drew a 4-package cycle and
+produced a `propose_slice` (3 moves: `gate→kernel` ×2, `gate/config→gate`). ArchGuard refused it
+(`切法覆盖不足`, edge ` -> gate`, exit 2). `attemptRepair` classified it correctly and then **abstained at
+attempt 0 with zero judge calls**:
+
+```
+outcome      = abstained          judge_calls = 0        rounds = 0
+class        = invalid_move       original_matched = INVALID_MOVE:COVERAGE_INSUFFICIENT
+locked       = { commit: ec00fcc00da73c8f8e7f64a6d69bd734285a02b2, scope_root: packages/quay/src }
+attempt[0]   = { bucket: honest_abstain, matched: NO_RECORDED_LEGAL_DIRS, judge_called: false }
+reason       = no recorded legal-dir list in the original evidence; refusing to recompute one independently
+slice_delta.detail = null          ← the defect, recorded verbatim in the carrier
+```
+
+### 7.2 Root cause, by position
+
+`recordedLegalDirs(candidateRecord)` reads exactly one place: `slice_delta.detail.valid_dirs`
+(`docs/analysis/ownership-active-proposal-repair.mjs`). `computeSliceDelta`
+(`docs/analysis/ownership-active-slice-adapter.mjs`) filled `detail` on **its own** pre-flight refusal only
+(`buildSliceInput` → `bad(...)`, carrying `valid_dirs`). The branch where **ArchGuard itself** refuses
+(`first.report.status !== "evaluated"`) returned `{status, reason, provenance, stays_*}` — **no `detail`** —
+even though the very same function had built and was still holding that graph a few lines earlier
+(`built.json…moduleGraph`; `internalNodes(graph)` *is* the source of `valid_dirs`). This is 硬规则 4c: the
+list existed at the producer and was dropped at a layer boundary before the reader.
+
+**Consequence:** repair could only ever start on Quay pre-flight refusals
+(`NO_EDGE_EXPLAINED_BY_MOVES` / `MOVE_TO_NOT_AN_INTERNAL_DIR`). The class that actually reaches ArchGuard —
+the repair loop's whole reason to exist — was **structurally unable** to start.
+
+**Incidence (硬规则 12, from history, not from waiting):** 2/2 — §4a's pre-merge live draw (draw 4 r1) and
+this post-merge draw. The unit suite was green because 3 tests hand-inject `detail.valid_dirs`
+(`grep -c valid_dirs plugin/test/ownership-active-proposal-repair.test.mjs` = 3) — a criterion only a fixture
+can satisfy is not a measurement (硬规则 4 推论三).
+
+### 7.3 The fix
+
+One helper, placed immediately after the graph is validated, and attached to **every** `not-evaluated` return
+reachable once the graph exists:
+
+```js
+const legalDirs = () => ({ valid_dirs: [...internalNodes(graph)].sort() });
+```
+
+| branch | carries `detail.valid_dirs`? |
+|---|---|
+| pre-flight refusal (`buildSliceInput` → `bad`) | already did — unchanged, same `internalNodes` |
+| `NO_REPORT:exit=…` | **now yes** |
+| ArchGuard's own refusal (`切法覆盖不足`, exit 2) | **now yes** ← the one that mattered |
+| `PACKAGE_GRAPH_BUILD_FAILED` / `ARCHGUARD_CLI_NOT_FOUND` / `NO_MODULE_GRAPH_IN_ARCHJSON` | **no** — deliberate: a list that was never built is not a list we may invent (3b) |
+
+`recordedLegalDirs` is untouched: it still reads only `detail.valid_dirs` and still never runs its own
+`find`/`grep`. No threshold, no gate, and no fail-closed behaviour was relaxed; no Goal was created.
+
+### 7.4 Production-shape replay — the measurement (AC2)
+
+Input = the **real** record's `proposed_slice` from the run above, plus the package graph of
+`packages/quay/src` **at `ec00fcc00`**, produced by `git archive` + `archguard analyze` and vendored as
+`plugin/fixtures/ownership-active-slice/live-ec00fcc00-coverage-gap.json`:
+
+- `tree_sha` = `20898960d55309de503c474aec960ba2567f1dd8` — **equal** to the carrier's recorded `tree_sha`;
+- `moduleGraph` sha256 = `a3946f0828a93ecba114457e1c0586ee17718cc9efa3e910ae3a46829158c9a2` — **equal** to the
+  carrier's recorded `graph_sha256`, i.e. the fixture *is* the snapshot the production run was judged
+  against (20 nodes / 55 edges; cycle `["gate/config","gate/factories","gate",""]`), not merely one rebuilt
+  from the same commit;
+- file sha256 = `68e93d1a516e581212dd6843e0297da39a8162863b0670b09897ad86a424f50c`.
+
+The stub CLI reproduces the published 0.1.39 refusal verbatim (exit 2 + the carrier's own recorded reason
+string). **Nothing injects a legal-dir list anywhere in this test.**
+
+| | pre-fix control (`detail: null`, the recorded shape) | after the fix (the adapter's real output) |
+|---|---|---|
+| `recordedLegalDirs` | `null` | `["", "cli", "fan-in", "gate", "gate/config", "gate/factories", "kernel", "ts-demo"]` |
+| `attempts[0].matched` | `NO_RECORDED_LEGAL_DIRS` | — (absent) |
+| `attempts[0].judge_called` | `false` | **`true`** |
+| `judge_calls` | 0 | **3** (the bound ends it) |
+| primitive re-runs | 0 | **3** |
+| engaged-round bucket / matched | — | `invalid_move` / `MISSING_CONSUMER`, `computed: not-evaluated` |
+| feedback shown to the judge | never built | `legal_dirs` = the 8 graph dirs; `locked.subject` = `gate/config` |
+
+Each engaged round is a genuine re-judgement of a revised cut by the primitive; the graph-derived
+missing-consumer guard fires on the ` -> gate` edge before the tool's coverage text is reached, which is why
+the recorded `matched` is `MISSING_CONSUMER` and the bucket is `invalid_move` throughout. The session ends by
+**exhausting its bound** (`budget exhausted without a positive delta`), not by abstaining before it started —
+which is the whole difference this task buys.
+
+**Negative control (硬规则 4 推论四).** The one-line fix was reverted and both suites re-run: exactly the two
+tests targeting the ArchGuard-refusal branch go red (the adapter AC1 test and the repair AC2 test), 33 stay
+green. The tests measure the fix; they do not echo it.
+
+### 7.5 AC6 live reading
+
+Run inside this task's worktree, default resolution path:
+
+```
+node --experimental-strip-types docs/analysis/ownership-active-loop.mjs --live --repair --rounds 1
+```
+
+This draw ran against a tree that **contains the fix** (worktree HEAD `b287ad904417d85ba88707d867fe6002c8ce0218`)
+— the property §4b structurally could not have. It is a fresh, blind draw: nothing is steered, the judge is the
+same tool-less `claude -p` completion (`role meta-driver`), and the primitive is the installed ArchGuard CLI.
+
+The prescribed round was followed by four more draws (same command, `--rounds 4`) so that the "not triggered"
+reading is not a one-draw accident. All five ran against worktree HEAD
+`b287ad904417d85ba88707d867fe6002c8ce0218`:
+
+| # | run_id | terminal | action | cost (rounds / requests / evidence bytes / wall ms) | `proposed_slice` | `slice_delta` | repair |
+|---|---|---|---|---|---|---|---|
+| 1 | `live:2026-10-11T09-40-40-920Z:1` | `investigate_more` | `investigate` | 8 / 1 / 8 071 / 48 951 | **null** | null | **未触发** |
+| 2 | `live:2026-10-11T09-41-39-387Z:1` | `propose_slice` | `propose-goal` | 7 / 4 / 17 292 / 116 150 | **null** — a goal concern, not a `package-cycle` cut | null | **未触发** |
+| 3 | `live:2026-10-11T09-41-39-387Z:2` | `abstain` (forced `not-enough-evidence:rounds`) | `abstain` | 8 / 2 / 9 067 / 66 618 | null | null | **未触发** |
+| 4 | `live:2026-10-11T09-41-39-387Z:3` | `investigate_more` | `investigate` | 8 / 6 / 30 549 / 164 931 | null | null | **未触发** |
+| 5 | `live:2026-10-11T09-41-39-387Z:4` | `abstain` | `abstain` | 8 / 1 / 8 071 / 70 579 | null | null | **未触发** |
+
+**Reading, stated exactly — 0/5 triggered, and why.**
+
+1. `attemptRepair` is invoked only when `res.proposed_slice` exists **and** `isRepairableRejection(res.slice_delta)`
+   holds. None of the five draws produced a `proposed_slice` (every round's `envelope.concern_kind` is `null`),
+   so the repair loop correctly did not start. There is **no live post-fix repair reading in this section**, and
+   none is fabricated (硬规则 4 推论三).
+
+2. **Four of the five draws landed on this task's own defect as their concern.** Their `envelope.concern`
+   strings name it directly — *"The legal-dir list is a single graph-derived quantity (internalNodes of the built
+   package graph) but is materialized on only one exit path of computeSliceDelta…"*. That is not a coincidence
+   and it is worth recording: the loop's evidence reader resolves file contents with
+   `git show <commit>:<path>` at the **run-start commit** (`b287ad904`), where this task's fix is **not yet
+   committed**. The judge therefore keeps rediscovering the un-fixed source and proposing to fix it, instead of
+   roaming for a package-cycle refactor. The consequence for this reading is bounded and one-directional: it
+   depresses the draw rate for the class that would exercise the repair, and it is an artefact of the fix being
+   uncommitted at run time — not a property of the fix.
+
+3. The positive live reading this task was aiming at is the one §7.1 recorded **before** the fix
+   (`abstained` / 0 judge calls / `NO_RECORDED_LEGAL_DIRS`). §7.4 reproduces that exact production record and
+   the exact production graph deterministically, where the identical input yields `judge_called: true` and 3
+   judge calls. A *live* post-fix repair remains a registered follow-up, not a claim: reaching it needs a draw
+   that lands on a `package-cycle`, and the observed base rate is low (§4a: one refusal across 8 draws; §7.5
+   adds five more draws and no cut). This is recorded as the honest limit of the live half, not smoothed over.
+
