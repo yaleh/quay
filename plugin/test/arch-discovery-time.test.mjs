@@ -9,12 +9,16 @@
 
 import { test } from "node:test";
 import assert from "node:assert/strict";
+import fs from "node:fs";
+import os from "node:os";
+import path from "node:path";
 
 import {
   groupKey, groupsOf, recurrentWindows, recurrentGroups, b1Verdict, b2Verdict, b4Verdict, b5Verdict,
   enrichment, W48, GROUP_KEY_BY,
+  scanWindow, runTimeScan, cli, B1_SCAN_VERDICT, B1_NOT_APPLICABLE_REASON, defaultOut,
 } from "../../docs/analysis/arch-discovery-time.mjs";
-import { carrierEvidence } from "../../docs/analysis/arch-discovery-space.mjs";
+import { carrierEvidence, BOUND_EXIT_CODES } from "../../docs/analysis/arch-discovery-space.mjs";
 import { validateRecord } from "../../docs/analysis/architecture-evidence-store.mjs";
 
 const T0 = Date.parse("2026-01-01T00:00:00Z");
@@ -89,4 +93,104 @@ test("the time instrument's carrier-form evidence validates against the store", 
   const lineText = `{"ts":"2026-10-03T11:42:12.901Z","task":"gap-x","mechanical_fan_in":{"step":"suite","outcome":"red"}}`;
   const rec = carrierEvidence("worker-outcome suite-red grouping", ".quay/worker-outcome.jsonl", 2677, lineText, { scope: "plugin/test/a.test.mjs", flags: ["47c794ad30a1"] });
   assert.deepEqual(validateRecord("evidence", rec), { ok: true, reasons: [] });
+});
+
+// ── the scan window: `--since` is REQUIRED, `--until` is the freezing knob ──────────────────────────
+test("scanWindow refuses a missing/unparsable --since and an inverted window (never a silent default)", () => {
+  assert.throws(() => scanWindow({ since: null }), /--scan requires --since/);
+  assert.throws(() => scanWindow({ since: "not-a-date" }), /not a parsable date/);
+  assert.throws(() => scanWindow({ since: "2026-01-02T00:00:00Z", until: "2026-01-01T00:00:00Z" }), /precedes/);
+  const w = scanWindow({ since: "2026-01-01T00:00:00Z", until: "2026-01-02T00:00:00Z" });
+  assert.equal(w.contains(Date.parse("2026-01-01T12:00:00Z")), true);
+  assert.equal(w.contains(Date.parse("2026-01-03T00:00:00Z")), false);
+  assert.equal(w.contains(Date.parse("2025-12-31T23:59:59Z")), false);
+  // an OPEN until means "no upper bound installed", not a large literal (硬规则 4 推论二).
+  const open = scanWindow({ since: "2026-01-01T00:00:00Z" });
+  assert.equal(open.until, null);
+  assert.equal(open.contains(Date.now()), true);
+});
+
+// ── scan mode on a FIXTURE workspace: (a) determinism, (b) bounds, (c) --since required, (d) B1 ─────
+const WINDOW = { since: "2026-01-01T00:00:00Z", until: "2026-01-02T00:00:00Z" };
+const WINDOW_ARGS = ["--since", WINDOW.since, "--until", WINDOW.until];
+const redRow = ({ ts, task, file, sig }) => JSON.stringify({
+  ts, task, started_at: ts, ended_at: ts,
+  mechanical_fan_in: { step: "suite", outcome: "red", failedTestFiles: { evaluated: true, files: [file] }, suiteSignatures: [sig] },
+});
+const landedRow = ({ ts, task }) => JSON.stringify({ ts, task, started_at: ts, ended_at: ts, mechanical_fan_in: { step: "suite", outcome: "landed" } });
+
+/** A window-contained workspace: two (file, signature) groups inside `[since, until]`, one outside it. */
+function makeTimeFixture() {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "arch-time-fixture-"));
+  fs.mkdirSync(path.join(dir, ".quay"), { recursive: true });
+  const rows = [
+    redRow({ ts: "2026-01-01T10:00:00Z", task: "t1", file: "plugin/test/a.test.mjs", sig: "sigA" }),
+    redRow({ ts: "2026-01-01T11:00:00Z", task: "t2", file: "plugin/test/a.test.mjs", sig: "sigA" }),
+    redRow({ ts: "2026-01-01T12:00:00Z", task: "t3", file: "plugin/test/b.test.mjs", sig: "sigB" }),
+    redRow({ ts: "2026-03-01T12:00:00Z", task: "t9", file: "plugin/test/outside.test.mjs", sig: "sigZ" }),   // OUT of window
+    landedRow({ ts: "2026-01-01T09:00:00Z", task: "t0" }),
+  ];
+  fs.writeFileSync(path.join(dir, ".quay/worker-outcome.jsonl"), rows.join("\n") + "\n");
+  return { dir, cleanup: () => fs.rmSync(dir, { recursive: true, force: true }) };
+}
+const scanOpts = (dir) => ({ root: dir, ...WINDOW, file: "plugin/test/a.test.mjs", b2File: "plugin/test/a.test.mjs" });
+const fpsOf = (out) => out.sink.rows.filter((r) => r.finding_fp).map((r) => r.finding_fp).sort();
+
+test("(a) two --scan runs on the same fixture give identical finding_fp sets", () => {
+  const fx = makeTimeFixture();
+  try {
+    const a = runTimeScan(scanOpts(fx.dir));
+    const b = runTimeScan(scanOpts(fx.dir));
+    assert.equal(a.grouping.groups, 2, "only the two in-window (file, signature) groups are scored");
+    assert.ok(fpsOf(a).length > 0, "the fixture must yield at least one fingerprinted finding");
+    assert.deepEqual(fpsOf(a), fpsOf(b));
+    assert.equal(a.validator.refused, 0, `every emitted record must validate: ${JSON.stringify(a.validator.reasons)}`);
+    assert.equal(a.capture.orphan_finalisations, 0);
+  } finally { fx.cleanup(); }
+});
+
+test("(b) each bound exits with its own code and leaves the out file byte-identical", () => {
+  const fx = makeTimeFixture();
+  const out = path.join(fx.dir, "out.jsonl");
+  const SENTINEL = "PRE-EXISTING OUTPUT\n";
+  try {
+    for (const [bound, value, code] of [["--max-ms", "0", 4], ["--max-records", "1", 5], ["--max-groups", "1", 6]]) {
+      fs.writeFileSync(out, SENTINEL);
+      const got = cli(["--scan", ...WINDOW_ARGS, "--root", fx.dir, "--out", out, bound, value]);
+      assert.equal(got, code, `${bound} ${value} must exit ${code}`);
+      assert.equal(fs.readFileSync(out, "utf8"), SENTINEL, `${bound} ${value} must write NOTHING`);
+    }
+    assert.equal(BOUND_EXIT_CODES["max-groups"], 6);
+  } finally { fx.cleanup(); }
+});
+
+test("(c) time --scan without --since is refused (exit 2) and writes nothing", () => {
+  const fx = makeTimeFixture();
+  const out = path.join(fx.dir, "out.jsonl");
+  const SENTINEL = "PRE-EXISTING OUTPUT\n";
+  try {
+    fs.writeFileSync(out, SENTINEL);
+    assert.equal(cli(["--scan", "--root", fx.dir, "--out", out]), 2);
+    assert.equal(fs.readFileSync(out, "utf8"), SENTINEL);
+    assert.equal(fs.existsSync(path.join(fx.dir, ".quay/arch-discovery-shadow")), false, "no default out dir was created");
+  } finally { fx.cleanup(); }
+});
+
+test("(d) B1 reports not-applicable in scan mode — with its reason, never as a silent pass", () => {
+  const fx = makeTimeFixture();
+  try {
+    const out = runTimeScan(scanOpts(fx.dir));
+    assert.equal(out.B1.verdict, B1_SCAN_VERDICT);
+    assert.equal(out.B1.verdict, "not-applicable");
+    assert.equal(out.B1.reason, B1_NOT_APPLICABLE_REASON);
+    assert.match(out.B1.reason, /no cut/);
+    // the record it emits must say not-evaluated in the store's own vocabulary — NOT "supported".
+    const outcome = out.sink.rows.find((r) => r.kind === "outcome" && String(r.rule_verdict).startsWith("B1:"));
+    assert.equal(outcome.rule_verdict, "B1:not-applicable");
+    assert.equal(outcome.verdict, "not-evaluated");
+  } finally { fx.cleanup(); }
+});
+
+test("the default --out path is the one the repo's .gitignore covers", () => {
+  assert.equal(defaultOut("/x"), "/x/.quay/arch-discovery-shadow/time-records.jsonl");
 });

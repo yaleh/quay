@@ -11,11 +11,17 @@
 
 import { test } from "node:test";
 import assert from "node:assert/strict";
+import fs from "node:fs";
+import os from "node:os";
+import path from "node:path";
+import { execFileSync } from "node:child_process";
 
 import {
   classifySpace, e3Hits, importSpecifiers, resolveSpecifier, sameModuleResolved,
   RULE_TO_STORE_VERDICT, sourceEvidence, carrierEvidence, Sink,
   RULE_DRIFT, RULE_LEGIT, RULE_UNDETERMINED,
+  findingFp, assignFindingFps, makeBudget, BoundExceeded, BOUND_EXIT_CODES,
+  streamLines, streamJsonl, runSpaceScan, cli, PROVENANCE_TASK_DEFAULT, defaultOut,
 } from "../../docs/analysis/arch-discovery-space.mjs";
 import { validateRecord } from "../../docs/analysis/architecture-evidence-store.mjs";
 
@@ -107,4 +113,127 @@ test("a Sink tally separates accepted from refused (a malformed record is REPORT
   assert.equal(s.validator.accepted, 1);
   assert.equal(s.validator.refused, 1);
   assert.ok(Object.keys(s.validator.reasons).some((r) => r.startsWith("SCHEMA_MISSING:")));
+});
+
+// ── finding identity: stable across runs, blind to every wall-clock field ───────────────────────────
+test("finding_fp is identical for two otherwise-identical records that differ only in ts", () => {
+  const rows = (ts) => [
+    { kind: "evidence", ref: "r", sha256: "a".repeat(64), subject_key: "s|f#1", ts },
+    { kind: "outcome", verdict: "supported", rule_verdict: "drift-hypothesis", subject_key: "s|f#1", experiment_ref: "h", ts },
+  ];
+  const a = assignFindingFps(rows("2020-01-01T00:00:00.000Z"))[1].finding_fp;
+  const b = assignFindingFps(rows("2026-10-11T23:59:59.999Z"))[1].finding_fp;
+  assert.equal(a, b);
+  // ... and it still DISCRIMINATES: a different evidence hash (or subject/verdict) moves it.
+  const c = assignFindingFps([
+    { kind: "evidence", ref: "r", sha256: "b".repeat(64), subject_key: "s|f#1", ts: "2026-01-01T00:00:00Z" },
+    { kind: "outcome", verdict: "supported", rule_verdict: "drift-hypothesis", subject_key: "s|f#1", experiment_ref: "h", ts: "2026-01-01T00:00:00Z" },
+  ])[1].finding_fp;
+  assert.notEqual(a, c);
+  assert.equal(findingFp("s", "v", ["z", "a"]), findingFp("s", "v", ["a", "z"]));   // order-insensitive
+  assert.equal(findingFp("s", "v"), findingFp("s", "v", []));
+});
+
+// ── bounds: a breach exits with its OWN code and writes NOTHING (fail-closed) ───────────────────────
+test("bounds: makeBudget gives each bound a distinct code; a breached budget throws BoundExceeded", () => {
+  assert.equal(BOUND_EXIT_CODES["max-ms"], 4);
+  assert.equal(BOUND_EXIT_CODES["max-records"], 5);
+  assert.equal(BOUND_EXIT_CODES["max-candidates"], 6);
+  const b = makeBudget({ maxRecords: 2, maxCandidates: 1, maxGroups: 0 });
+  b.countRecords(2);                                        // at the cap: allowed
+  assert.throws(() => b.countRecords(3), (e) => e instanceof BoundExceeded && e.exitCode === 5);
+  assert.throws(() => b.countCandidates(2), (e) => e.exitCode === 6);
+  assert.throws(() => b.countGroups(1), (e) => e.bound === "max-groups" && e.exitCode === 6);
+  // `--max-ms 0` breaches at the FIRST consultation — deterministic, not a race against the clock.
+  assert.throws(() => makeBudget({ maxMs: 0 }).checkTime(), (e) => e.exitCode === 4);
+  // ⛔ no bound installed ⇒ no bound enforced (硬规则 4 推论二: "no limit" is the ABSENCE of the limit).
+  assert.doesNotThrow(() => { const n = makeBudget(); n.countRecords(1e9); n.checkTime(Date.now() + 1e12); });
+});
+
+// ── the streaming reader: same rows as a whole-file read, bounded memory, multibyte-safe ────────────
+test("streamJsonl reads every line the whole-file read would, holding multibyte chars across chunks", () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "arch-stream-"));
+  const file = path.join(dir, "c.jsonl");
+  const rows = Array.from({ length: 50 }, (_, i) => JSON.stringify({ i, note: `中文-${i}-${"汉".repeat(20)}` }));
+  fs.writeFileSync(file, rows.join("\n") + "\n");
+  const seen = [];
+  const res = streamLines(file, (l) => seen.push(l), { chunk: 64 });   // tiny chunks → many boundary splits
+  assert.equal(res.lines, 50);
+  const parsed = streamJsonl(file, () => true, { chunk: 64 });
+  assert.deepEqual(parsed.rows.map((r) => JSON.parse(r.raw).i), [...Array(50).keys()]);
+  for (const { raw } of parsed.rows) assert.ok(!raw.includes("�"), "no multibyte character was split");
+  assert.equal(streamJsonl(path.join(dir, "absent.jsonl")).missing, true);
+  fs.rmSync(dir, { recursive: true, force: true });
+});
+
+// ── scan mode on a FIXTURE repo: determinism (a), bounds (b) ────────────────────────────────────────
+/** A tiny git repo the scan can read: one authority + two surfaces that lag it by one value, plus a
+ *  test file importing surface A. Everything is inside `plugin/` so the checker's own discovery roots
+ *  and the E3 test glob both see it. The registry is passed with `--registry` (the checker's own fixture
+ *  seam), so the scan never touches this repo's real registry. */
+function makeScanFixture() {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "arch-scan-fixture-"));
+  fs.mkdirSync(path.join(dir, "plugin/scripts"), { recursive: true });
+  fs.mkdirSync(path.join(dir, "plugin/test"), { recursive: true });
+  fs.writeFileSync(path.join(dir, "plugin/scripts/fixture-authority.ts"), `export const FIXTURE_VALUES = ["alpha", "beta"];\n`);
+  fs.writeFileSync(path.join(dir, "plugin/scripts/fixture-surface-a.ts"), `export const FIXTURE_SURFACE_A = ["alpha"];\n`);
+  fs.writeFileSync(path.join(dir, "plugin/scripts/fixture-surface-b.ts"), `export const FIXTURE_SURFACE_B = ["alpha"];\n`);
+  fs.writeFileSync(path.join(dir, "plugin/test/fixture-surface.test.mjs"), `import { FIXTURE_SURFACE_A } from "../scripts/fixture-surface-a.ts";\nexport const seen = FIXTURE_SURFACE_A;\n`);
+  const registry = {
+    authorities: [{ id: "fixture-values", file: "plugin/scripts/fixture-authority.ts", symbol: "FIXTURE_VALUES", extract: "ts-array" }],
+    surfaces: [
+      { id: "fixture-surface-a", authority: "fixture-values", file: "plugin/scripts/fixture-surface-a.ts", extract: "ts-array", symbol: "FIXTURE_SURFACE_A", policy: "exact" },
+      { id: "fixture-surface-b", authority: "fixture-values", file: "plugin/scripts/fixture-surface-b.ts", extract: "ts-array", symbol: "FIXTURE_SURFACE_B", policy: "exact" },
+    ],
+    knownDrift: [
+      { surface: "fixture-surface-a", extra: [], missing: ["beta"], reason: "fixture: recorded drift (a)" },
+      { surface: "fixture-surface-b", extra: [], missing: ["beta"], reason: "fixture: recorded drift (b)" },
+    ],
+  };
+  const registryFile = path.join(dir, "fixture-registry.json");
+  fs.writeFileSync(registryFile, JSON.stringify(registry));
+  const git = (args) => execFileSync("git", ["-C", dir, ...args], { encoding: "utf8" });
+  git(["init", "-q"]);
+  git(["add", "-A"]);
+  git(["-c", "user.email=fixture@example.com", "-c", "user.name=fixture", "-c", "commit.gpgsign=false", "commit", "-q", "-m", "fixture"]);
+  return { dir, registryFile, cleanup: () => fs.rmSync(dir, { recursive: true, force: true }) };
+}
+
+const scanOpts = (fx) => ({ root: fx.dir, rev: "HEAD", registry: fx.registryFile, e3Mode: "import", provenanceTask: PROVENANCE_TASK_DEFAULT });
+const fpsOf = (out) => out.sink.rows.filter((r) => r.finding_fp).map((r) => r.finding_fp).sort();
+
+test("(a) two --scan runs on the same fixture give identical finding_fp sets", async () => {
+  const fx = makeScanFixture();
+  try {
+    const a = await runSpaceScan(scanOpts(fx));
+    const b = await runSpaceScan(scanOpts(fx));
+    assert.equal(a.cost.candidates, 2, "the fixture's two known-drift surfaces are the candidate set");
+    assert.ok(fpsOf(a).length > 0, "the fixture must yield at least one fingerprinted finding");
+    assert.deepEqual(fpsOf(a), fpsOf(b));
+    assert.deepEqual(a.results.map((r) => r.verdict), b.results.map((r) => r.verdict));
+    assert.equal(a.a3.skipped, true, "A3 is not-applicable in scan mode");
+    // scan mode scores nothing: there is no label set to score against.
+    assert.equal(a.score.unlabelled.length, a.results.length);
+    assert.equal(a.validator.refused, 0, `every emitted record must validate: ${JSON.stringify(a.validator.reasons)}`);
+  } finally { fx.cleanup(); }
+});
+
+test("(b) each bound exits with its own code and leaves the out file byte-identical", async () => {
+  const fx = makeScanFixture();
+  const out = path.join(fx.dir, "out.jsonl");
+  const SENTINEL = "PRE-EXISTING OUTPUT\n";
+  try {
+    // `--max-ms 0` breaches at the first consultation; the record/candidate caps breach at the 2nd row.
+    for (const [bound, value, code] of [["--max-ms", "0", 4], ["--max-records", "1", 5], ["--max-candidates", "1", 6]]) {
+      fs.writeFileSync(out, SENTINEL);
+      const got = await cli(["--scan", "--root", fx.dir, "--registry", fx.registryFile, "--out", out, bound, value]);
+      assert.equal(got, code, `${bound} ${value} must exit ${code}`);
+      assert.equal(fs.readFileSync(out, "utf8"), SENTINEL, `${bound} ${value} must write NOTHING`);
+    }
+  } finally { fx.cleanup(); }
+});
+
+test("the default --out path is the one the repo's .gitignore covers", () => {
+  assert.equal(defaultOut("/x"), "/x/.quay/arch-discovery-shadow/space-records.jsonl");
+  assert.match(path.join("/x", ".quay/arch-discovery-shadow/"), /\.quay\/arch-discovery-shadow\/$/);
 });
