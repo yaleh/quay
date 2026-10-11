@@ -1,0 +1,23 @@
+{
+  "_fixture": "repair-invalid-move",
+  "_note": "Deterministic, fixable invalid_move scenario for the bounded proposal-repair module. A cycle a -> core -> b -> a exists; the first cut names a destination that is NOT an internal node ('nope'), so the primitive refuses with MOVE_TO_NOT_AN_INTERNAL_DIR. The correct destination 'b' IS an internal node and covers the whole imported-name set of the b -> a edge, so the second cut computes. The legal destination is one of THIS fixture's own graph nodes (never a fresh find/grep, never a hardcoded answer).",
+  "extensions": {
+    "tsAnalysis": {
+      "moduleGraph": {
+        "nodes": [
+          { "id": "", "name": "(root)", "type": "internal" },
+          { "id": "a", "name": "a", "type": "internal" },
+          { "id": "b", "name": "b", "type": "internal" },
+          { "id": "core", "name": "core", "type": "internal" }
+        ],
+        "edges": [
+          { "from": "b", "to": "a", "importedNames": ["helper", "types"], "kind": "import" },
+          { "from": "a", "to": "core", "importedNames": ["base"], "kind": "import" },
+          { "from": "core", "to": "b", "importedNames": ["fb"], "kind": "import" },
+          { "from": "", "to": "a", "importedNames": ["pubA"], "kind": "import" }
+        ],
+        "cycles": [{ "modules": ["a", "b", "core"], "severity": "error" }]
+      }
+    }
+  }
+}

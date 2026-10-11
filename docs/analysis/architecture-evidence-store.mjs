@@ -25,7 +25,7 @@ export const sha256 = (s) => sha(s);
 /** The one fixed sink (relative to the investigated root), same convention as the proposal carrier. */
 export const EVIDENCE_STORE_REL = ".quay/architecture-evidence-store.jsonl";
 
-export const RECORD_KINDS = Object.freeze(["evidence", "hypothesis", "experiment", "outcome"]);
+export const RECORD_KINDS = Object.freeze(["evidence", "hypothesis", "experiment", "outcome", "repair_attempt"]);
 
 /** Outcome verdict vocabulary. `exempted` is a TERMINAL outcome produced by the decision memory
  *  (`architecture-decision-memory.mjs`): the item was already judged and must not be re-proposed. */
@@ -44,6 +44,9 @@ export const REQUIRED_FIELDS = Object.freeze({
   hypothesis: Object.freeze(["statement", "source_evidence", "ts"]),
   experiment: Object.freeze(["hypothesis_ref", "method", "budget", "ts"]),
   outcome: Object.freeze(["experiment_ref", "verdict", "ts"]),
+  // One bounded proposal-repair round: which attempt it was, what the rejection was re-classified as, the
+  // commit+scope the session was LOCKED to, the hypothesis it started from, and what the round cost.
+  repair_attempt: Object.freeze(["tool", "ref", "ts", "sha256", "attempt_no", "bucket", "locked_commit", "locked_scope", "original_hypothesis", "elapsed_ms"]),
 });
 
 /**
@@ -85,6 +88,18 @@ export function validateRecord(kind, rec) {
   } else if (kind === "outcome") {
     if (!isStr(rec.experiment_ref, 1)) reasons.push("FIELD_INVALID:experiment_ref");
     if (!OUTCOME_VERDICTS.includes(rec.verdict)) reasons.push(`VERDICT_NOT_IN_VOCAB:${String(rec.verdict)}`);
+  } else if (kind === "repair_attempt") {
+    if (!isStr(rec.tool, 1)) reasons.push("FIELD_INVALID:tool");
+    if (!isStr(rec.ref, 6)) reasons.push("FIELD_INVALID:ref");
+    if (!/^[0-9a-f]{64}$/.test(String(rec.sha256))) reasons.push("FIELD_INVALID:sha256");
+    // `attempt_no` is 0 for the terminal-by-classification rounds (no judge call) and 1..N for real rounds.
+    if (!isNum(rec.attempt_no) || rec.attempt_no < 0) reasons.push("FIELD_INVALID:attempt_no");
+    if (!isStr(rec.bucket, 1)) reasons.push("FIELD_INVALID:bucket");
+    if (!isStr(rec.locked_commit, 6)) reasons.push("FIELD_INVALID:locked_commit");
+    // `locked_scope` may legitimately be "" (the analysed tree's root) — presence + string type is the check.
+    if (typeof rec.locked_scope !== "string") reasons.push("FIELD_INVALID:locked_scope");
+    if (!isStr(rec.original_hypothesis, 1)) reasons.push("FIELD_INVALID:original_hypothesis");
+    if (!isNum(rec.elapsed_ms) || rec.elapsed_ms < 0) reasons.push("FIELD_INVALID:elapsed_ms");
   }
   return { ok: reasons.length === 0, reasons };
 }
@@ -116,6 +131,7 @@ export const appendEvidenceRecord = (root, rec) => appendRecord(root, "evidence"
 export const appendHypothesisRecord = (root, rec) => appendRecord(root, "hypothesis", rec);
 export const appendExperimentRecord = (root, rec) => appendRecord(root, "experiment", rec);
 export const appendOutcomeRecord = (root, rec) => appendRecord(root, "outcome", rec);
+export const appendRepairAttemptRecord = (root, rec) => appendRecord(root, "repair_attempt", rec);
 
 /** Read the carrier back. Unparseable lines are DROPPED and COUNTED (never silently). */
 export function readRecords(file) {

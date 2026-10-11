@@ -1,0 +1,25 @@
+{
+  "_fixture": "repair-missing-consumer",
+  "_note": "The 'missing consumer' trap: a revised cut moves exactly the symbols of one edge (b -> a) so the primitive's own coverage rule is satisfied and the delta would COMPUTE — but a second importer c -> a shares one of those symbols ('helper') and additionally imports 'other', which the move does not cover. The bounded repair must not read that as success: its own coverage check (over the SAME ArchGuard graph data) finds the partially-covered edge and refuses to accept the round.",
+  "extensions": {
+    "tsAnalysis": {
+      "moduleGraph": {
+        "nodes": [
+          { "id": "", "name": "(root)", "type": "internal" },
+          { "id": "a", "name": "a", "type": "internal" },
+          { "id": "b", "name": "b", "type": "internal" },
+          { "id": "c", "name": "c", "type": "internal" },
+          { "id": "core", "name": "core", "type": "internal" }
+        ],
+        "edges": [
+          { "from": "b", "to": "a", "importedNames": ["helper", "types"], "kind": "import" },
+          { "from": "c", "to": "a", "importedNames": ["helper", "other"], "kind": "import" },
+          { "from": "a", "to": "core", "importedNames": ["base"], "kind": "import" },
+          { "from": "core", "to": "b", "importedNames": ["fb"], "kind": "import" },
+          { "from": "", "to": "a", "importedNames": ["pubA"], "kind": "import" }
+        ],
+        "cycles": [{ "modules": ["a", "b", "core"], "severity": "error" }]
+      }
+    }
+  }
+}

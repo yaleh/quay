@@ -12,7 +12,7 @@ import path from "node:path";
 import {
   EVIDENCE_STORE_REL, RECORD_KINDS, OUTCOME_VERDICTS, REQUIRED_FIELDS, storeFile,
   validateRecord, appendRecord, appendEvidenceRecord, appendHypothesisRecord,
-  appendExperimentRecord, appendOutcomeRecord, readRecords, recordId,
+  appendExperimentRecord, appendOutcomeRecord, appendRepairAttemptRecord, readRecords, recordId,
   evidenceRecordFromReading, buildRunRecords, persistRunRecords, confidence,
   subjectFilesOf, subjectKey, extractPathTokens,
 } from "../../docs/analysis/architecture-evidence-store.mjs";
@@ -29,17 +29,19 @@ const GOOD = {
   hypothesis: { statement: "the gate core forms a package-level cycle with the root", source_evidence: ["ev-1"], ts: "2026-10-11T00:00:00Z" },
   experiment: { hypothesis_ref: "the gate core forms a cycle", method: "bounded shadow investigation", budget: { max_rounds: 8 }, ts: "2026-10-11T00:00:00Z" },
   outcome: { experiment_ref: "bounded shadow investigation", verdict: "abstained", ts: "2026-10-11T00:00:00Z" },
+  repair_attempt: { tool: "ownership-active-proposal-repair", ref: "abc1234567890def", ts: "2026-10-11T00:00:00Z", sha256: "b".repeat(64), attempt_no: 1, bucket: "invalid_move", locked_commit: "abc1234567890def", locked_scope: "packages/quay/src", original_hypothesis: "a package-level cycle ties the gate core to the root", elapsed_ms: 42 },
 };
-const APPEND = { evidence: appendEvidenceRecord, hypothesis: appendHypothesisRecord, experiment: appendExperimentRecord, outcome: appendOutcomeRecord };
+const APPEND = { evidence: appendEvidenceRecord, hypothesis: appendHypothesisRecord, experiment: appendExperimentRecord, outcome: appendOutcomeRecord, repair_attempt: appendRepairAttemptRecord };
 
 // ── 1. AC1: a missing required field is refused, with a distinct reason, and NOTHING is appended ──
-test("AC1: each of the four append functions REFUSES a record missing a required field, and appends nothing", () => {
+test("AC1: each append function REFUSES a record missing a required field, and appends nothing", () => {
   const root = mkTmp();
   const missing = {
     evidence: "ref",            // named in the AC: an evidence record without its commit ref
     hypothesis: "source_evidence",
     experiment: "budget",
     outcome: "verdict",
+    repair_attempt: "bucket",
   };
   for (const kind of RECORD_KINDS) {
     const field = missing[kind];
@@ -55,7 +57,7 @@ test("AC1: each of the four append functions REFUSES a record missing a required
   assert.equal(fs.existsSync(storeFile(root)), false, "no carrier file was created by refusals alone");
 });
 
-test("AC1: each of the four append functions ACCEPTS a complete record, and it reads back", () => {
+test("AC1: each append function ACCEPTS a complete record, and it reads back", () => {
   const root = mkTmp();
   for (const kind of RECORD_KINDS) {
     const r = APPEND[kind](root, GOOD[kind]);
@@ -64,7 +66,7 @@ test("AC1: each of the four append functions ACCEPTS a complete record, and it r
   }
   const { records, malformed_lines } = readRecords(storeFile(root));
   assert.equal(malformed_lines, 0);
-  assert.equal(records.length, 4);
+  assert.equal(records.length, RECORD_KINDS.length);
   assert.deepEqual(records.map((r) => r.kind).sort(), [...RECORD_KINDS].sort());
   assert.equal(records.find((r) => r.kind === "evidence").tool, "read_file");
   assert.equal(storeFile(root), path.join(root, EVIDENCE_STORE_REL));

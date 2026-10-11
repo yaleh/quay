@@ -26,8 +26,10 @@ import {
   CONTRACT_VERSION, DEFAULT_BUDGET, ARCHGUARD_QUERY_KINDS, STEP_ACTIONS,
   newState, gateEvidenceRequest, validateStep, roundsExhausted, requestKey,
 } from "./ownership-active-contract.mjs";
-import { createExecutor } from "./ownership-active-executor.mjs";
+import { createExecutor, defaultAnalyzePackageGraph } from "./ownership-active-executor.mjs";
 import { computeSliceDelta, renderDelta, renderNegativeControl } from "./ownership-active-slice-adapter.mjs";
+// The bounded proposal-repair layer (opt-in via --repair; default OFF so the loop's behaviour is unchanged).
+import { attemptRepair, isRepairableRejection, REPAIR_LIMITS } from "./ownership-active-proposal-repair.mjs";
 import { emptyEnvelope, deterministicGate, normalizeConcernKey } from "./ownership-shadow-proposer.mjs";
 // Decision memory + the four-object evidence store. Both are pure/append-only and import NOTHING that
 // could file a task or write a status (the no-write guard in ownership-active-loop.test.mjs covers them).
@@ -339,7 +341,12 @@ export async function runActiveInvestigation({ root, invokeJudge, budget = DEFAU
     capability_gaps: state.gaps, requested_kinds: [...new Set(state.evidence.filter((e) => e.id !== "ev-0" && e.request.kind !== "trigger").map((e) => e.request.kind === "archguard_query" ? `archguard:${e.request.query}` : e.request.kind))],
     evidence: state.evidence.map((e) => ({ id: e.id, request: e.request, status: e.status, bytes: e.bytes, truncated: e.truncated, provenance: e.provenance, text_head: e.text.slice(0, 1500), text_sha256: sha(e.text), ...(e.cycles ? { cycles: e.cycles } : {}), ...(e.gap ? { gap: e.gap } : {}) })),
     measurement_capability: measurement,
-    slice_delta: slice ? { status: slice.status, reason: slice.reason || null, provenance: slice.provenance, delta: slice.delta || null, guards: slice.guards || null, negative_control: slice.negative_control || null, gap: slice.gap || null } : null,
+    // The STRUCTURED cut the model proposed (moves/subject/consumers) and, on a refusal, the builder's `detail`
+    // (which directories ARE internal nodes of the graph it judged against). Both are recorded so a downstream
+    // bounded-repair session can lock the same commit+scope and reuse the ORIGINAL round's graph data instead of
+    // recomputing a directory list of its own.
+    proposed_slice: terminal.kind === "propose_slice" && terminal.step?.proposal?.concern_kind === "package-cycle" ? terminal.step.proposal.slice : null,
+    slice_delta: slice ? { status: slice.status, reason: slice.reason || null, detail: slice.detail || null, provenance: slice.provenance, delta: slice.delta || null, guards: slice.guards || null, negative_control: slice.negative_control || null, gap: slice.gap || null } : null,
     decision_memory: decisionMemory,
     downgrades, envelope, gate_ok, gate_reasons: reasons, concern_key: gate.concern_key,
     action: finalAction, executed: false, ts_iso: new Date().toISOString(), elapsed_ms: Date.now() - t0,
@@ -391,6 +398,9 @@ async function cli() {
     return runAsync(argv, { timeoutMs: 600_000, collectStderr: true, stdinData: prompt });
   };
   const rounds = Number(val("--rounds", 1));
+  // OPT-IN bounded repair of a refused cut. Default OFF: without --repair the loop behaves exactly as before.
+  const repairOn = args.includes("--repair");
+  const repairRounds = val("--repair-rounds", undefined) !== undefined ? Number(val("--repair-rounds")) : REPAIR_LIMITS.maxRounds;
   const out = [];
   if (args.includes("--live")) {
     const root = REPO_ROOT;
@@ -402,9 +412,21 @@ async function cli() {
       const roundId = `live:${startedAt}:${i + 1}`;
       const res = await runActiveInvestigation({ root, invokeJudge, existingConcernKeys: existing, history, label: "live", evidenceStore: true, evidenceStoreRunId: roundId });
       const rec = { ts_iso: new Date().toISOString(), runtime, ...res };
+      // OPT-IN: only a cut-level refusal (invalid_move / evidence_gap) is handed to the bounded repair session.
+      if (repairOn && res.proposed_slice && isRepairableRejection(res.slice_delta)) {
+        rec.repair = await attemptRepair({
+          candidateRecord: rec, root, invokeJudge, maxRounds: repairRounds,
+          deps: {
+            evidenceStore: true, storeRoot: root,
+            // Reuse the SAME ArchGuard module graph the primitive judges against — never a fresh find/grep.
+            getGraph: (scopeRoot) => { const built = defaultAnalyzePackageGraph(path.join(root, scopeRoot || ".")); return built?.json?.extensions?.tsAnalysis?.moduleGraph ?? null; },
+          },
+          onRound: (a) => process.stderr.write(`  repair attempt ${a.attempt_no}: bucket=${a.bucket} matched=${a.matched} judge=${a.judge_called} computed=${a.computed}\n`),
+        });
+      }
       appendCarrier(root, rec);
       out.push(rec);
-      process.stderr.write(`live round ${i + 1} [${roundId}]: ${res.terminal.kind}${res.terminal.forced ? "(forced:" + res.terminal.forced_cause + ")" : ""} action=${res.action} gate_ok=${res.gate_ok} rounds=${res.usage.rounds} requests=${res.usage.evidence_requests} memory=${res.decision_memory?.status ?? "n/a"}\n`);
+      process.stderr.write(`live round ${i + 1} [${roundId}]: ${res.terminal.kind}${res.terminal.forced ? "(forced:" + res.terminal.forced_cause + ")" : ""} action=${res.action} gate_ok=${res.gate_ok} rounds=${res.usage.rounds} requests=${res.usage.evidence_requests} memory=${res.decision_memory?.status ?? "n/a"}${rec.repair ? ` repair=${rec.repair.outcome}/${rec.repair.class} judge_calls=${rec.repair.judge_calls}` : ""}\n`);
       if (res.state === "not-evaluated") await new Promise((r) => setTimeout(r, 20_000));   // do not hammer an unavailable judge
     }
   } else if (args.includes("--replay")) {
@@ -415,7 +437,7 @@ async function cli() {
     const res = await runActiveInvestigation({ root: tree.dir, invokeJudge, triggers: trig, label: `replay:${caseId}:${stage}${trig.length ? ":triggered" : ":discovery"}` });
     out.push({ ts_iso: new Date().toISOString(), runtime, tree: { dir: tree.dir, commit: tree.commit, archguard_snapshot: tree.archguard_snapshot }, ...res });
   } else {
-    console.error("usage: ownership-active-loop.mjs --live [--rounds N] | --replay GOAL-0xx --stage A|B   [--role meta-driver]");
+    console.error("usage: ownership-active-loop.mjs --live [--rounds N] [--repair [--repair-rounds N]] | --replay GOAL-0xx --stage A|B   [--role meta-driver]");
     process.exit(2);
   }
   console.log(JSON.stringify(out, null, 2));

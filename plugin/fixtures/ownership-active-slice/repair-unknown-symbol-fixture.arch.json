@@ -1,0 +1,23 @@
+{
+  "_fixture": "repair-unknown-symbol",
+  "_note": "The 'fabricated symbol' trap: a judge revision names a symbol ('ghostSymbol') that appears in NO edge of the ArchGuard graph data. Even though a stub primitive would happily compute a formally-passing delta for it, the bounded repair must treat the revision as invalid — 'not in the graph' is NOT 'in the graph but uncovered' — consume the round, and never accept a computed delta for a symbol that does not exist. Known symbols here are exactly the union of this fixture's edge importedNames.",
+  "extensions": {
+    "tsAnalysis": {
+      "moduleGraph": {
+        "nodes": [
+          { "id": "", "name": "(root)", "type": "internal" },
+          { "id": "a", "name": "a", "type": "internal" },
+          { "id": "b", "name": "b", "type": "internal" },
+          { "id": "core", "name": "core", "type": "internal" }
+        ],
+        "edges": [
+          { "from": "b", "to": "a", "importedNames": ["helper", "types"], "kind": "import" },
+          { "from": "a", "to": "core", "importedNames": ["base"], "kind": "import" },
+          { "from": "core", "to": "b", "importedNames": ["fb"], "kind": "import" },
+          { "from": "", "to": "a", "importedNames": ["pubA"], "kind": "import" }
+        ],
+        "cycles": [{ "modules": ["a", "b", "core"], "severity": "error" }]
+      }
+    }
+  }
+}

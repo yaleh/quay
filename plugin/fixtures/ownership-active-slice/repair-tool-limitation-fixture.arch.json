@@ -1,0 +1,25 @@
+{
+  "_fixture": "repair-tool-limitation",
+  "_note": "A rejection that is the PRIMITIVE's own capability boundary, not a fixable cut: the ArchGuard surface returns not-evaluated/capability_gap for this analysed tree. The bounded repair must NOT fold it into invalid_move and must make ZERO judge calls (the fix would require creating a directory or editing source, not revising the cut).",
+  "_fixture_rejection": {
+    "status": "not-evaluated",
+    "reason": "capability_gap: archguard.slice_delta cannot evaluate a cut whose analysed tree carries no module graph",
+    "gap": { "capability": "archguard.slice_delta", "reason": "no module graph in the analysed tree at this scope" }
+  },
+  "extensions": {
+    "tsAnalysis": {
+      "moduleGraph": {
+        "nodes": [
+          { "id": "", "name": "(root)", "type": "internal" },
+          { "id": "a", "name": "a", "type": "internal" },
+          { "id": "b", "name": "b", "type": "internal" }
+        ],
+        "edges": [
+          { "from": "b", "to": "a", "importedNames": ["helper"], "kind": "import" },
+          { "from": "a", "to": "b", "importedNames": ["fb"], "kind": "import" }
+        ],
+        "cycles": [{ "modules": ["a", "b"], "severity": "error" }]
+      }
+    }
+  }
+}
