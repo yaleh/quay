@@ -905,7 +905,7 @@ export function registerGoalHandlers(
   server.registerTool(
     "goal_list",
     {
-      description: "List goal records (GOAL-NNN + AC-NNN) on an enabled Provider, optionally filtered by status/kind/goal. Goal records are a separate kind from tasks (goal→AC lifecycle: draft|active|achieved|superseded|retired).",
+      description: "List goal records (GOAL-NNN + AC-NNN) on an enabled Provider, optionally filtered by status/kind/goal. Goal records are a separate kind from tasks (goal→AC lifecycle: draft|active|achieved|superseded|retired|needs-human).",
       inputSchema: {
         provider: z.string().optional(),
         status: z.string().optional(),
@@ -937,7 +937,7 @@ export function registerGoalHandlers(
   server.registerTool(
     "goal_write",
     {
-      description: "Write/patch one goal record (GOAL-NNN or AC-NNN) on an enabled Provider. status ∈ draft|active|achieved|superseded|retired. A GOAL record requires a non-empty body + origin; an AC record requires criterion + expect + goal: GOAL-NNN + origin. Returns isError:true on validation failure or if the Provider does not support goals.",
+      description: "Write/patch one goal record (GOAL-NNN or AC-NNN) on an enabled Provider. status ∈ draft|active|achieved|superseded|retired|needs-human. A GOAL record requires a non-empty body + origin; an AC record requires criterion + expect + goal: GOAL-NNN + origin. Returns isError:true on validation failure or if the Provider does not support goals.",
       inputSchema: {
         provider: z.string().optional(),
         id: z.string(),
