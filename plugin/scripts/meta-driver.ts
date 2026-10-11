@@ -687,9 +687,15 @@ export function errorSignature(text: string): string {
   // commit sha / uuid 片段（先于纯数字，长跑优先）。要求命中里【含数字】——否则英文里
   // 恰好由 a–f 组成的普通词（`defaced`/`acceded`）会被当成 sha 抹掉，把不同错误并成一个签名。
   s = s.replace(/\b[0-9a-f]{7,40}\b/gi, (m) => (/\d/.test(m) ? "<hex>" : m));
+  // 退出码是失败的【类别】，不是一次性取值：137(SIGKILL/OOM 形) / 124(timeout) / 1|2(普通失败)
+  // 是不同失败类别，抹成 <n> 会把它们并成一个签名（实测 2026-10-11：`Exit code <n>` 一组 160 条，
+  // 覆盖 144/1/123/2/255/137/5/124/7 九个码）。开头的 `Exit code N` 逐字摘出，其余照常归一化。
+  const exitCode = s.match(/^Exit code (\d+)/);
+  if (exitCode) s = "\u0001" + s.slice(exitCode[0].length); // 占位符不含数字 ⇒ 下面规则命中不到
   s = s.replace(/\d+/g, "<n>");                       // 行号 / 计数 / 时间戳数字
   s = s.replace(/(?:\/[\w.@+-]+){2,}/g, "<path>");    // 路径
   s = s.replace(/["'`][^"'`]{24,}["'`]/g, "<quoted>"); // 一次性长引文
+  if (exitCode) s = exitCode[0] + s.slice(1);         // 原样接回退出码 token
   return s.slice(0, 200);
 }
 

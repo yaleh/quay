@@ -2218,6 +2218,23 @@ test('errorSignature: 抹掉一次性的数字/路径/sha；不同错误不得�
   assert.ok(errorSignature('the process defaced its output').includes('defaced'));
 });
 
+// errorSignature：退出码是失败【类别】而非一次性取值——137(SIGKILL/OOM) / 124(timeout) / 1|2
+// 是不同类别。开头的 `Exit code N` 必须逐字保留，否则会把不同失败类别并成一个签名。
+test('errorSignature: 保留开头 Exit code N；其余数字照常归一化', () => {
+  // (a) 退出码不同 ⇒ 签名必须不同（正文其余部分完全相同）。
+  assert.notEqual(
+    errorSignature('Exit code 137: killed'),
+    errorSignature('Exit code 1: killed'),
+    '不同退出码（OOM vs 普通失败）不得并成同一个签名');
+  assert.match(errorSignature('Exit code 137: killed'), /^Exit code 137\b/);
+  assert.match(errorSignature('Exit code 1: killed'), /^Exit code 1\b/);
+  // (b) 退出码相同、其余一次性数字（行号）不同 ⇒ 仍归一到同一个签名。
+  assert.equal(
+    errorSignature('Exit code 1 boom at line 42'),
+    errorSignature('Exit code 1 boom at line 99'),
+    '同退出码下，行号等一次性数字仍须归一化');
+});
+
 // collectActionRecordFailures：扫描（成本旋钮）与越阈判定（判断旋钮）解耦——
 // 「不定阈值」不得等于「不看语料」（否则 AC7 落空），也⛔不得等于「替人定一个数」。
 test('collectActionRecordFailures: 未定阈值 ⇒ unthresholded（清单照出、crossed 为 null，不触扫描）', async () => {
