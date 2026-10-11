@@ -550,7 +550,11 @@ test("AC4: cases.json carries human positives, a human negative, and derived/unl
   assert.equal(ids["P1-goal-034-utils-to-kernel"].commit, C_GOAL034);
   assert.equal(ids["P2-goal-033-cli-to-root"].commit, C_GOAL033);
   assert.equal(ids["N1-goal-034-rejected-wide-move"].commit, C_GOAL034);
-  assert.ok(ids["P2-goal-033-cli-to-root"].moves.some((m) => m.file === "cli/driver.ts" && m.to === ""));
+  // P2's moves are the RECORDED GOAL-033 slice, not a re-typed copy: compare against the fixture itself
+  const g33 = JSON.parse(fs.readFileSync(path.join(REPO, "plugin/fixtures/ownership-active-slice/goal-033-slice.json"), "utf8"));
+  const norm = (ms) => ms.map((m) => ({ file: m.file, from: m.from, to: m.to, symbols: [...m.symbols] }));
+  assert.deepEqual(norm(ids["P2-goal-033-cli-to-root"].moves), norm(g33.proposedCut.moves));
+  assert.equal(ids["P2-goal-033-cli-to-root"].commit, g33.provenance.commit);
   // every case points at a readable graph fixture or at none at all — never at a graph from another tree
   for (const c of loaded.cases) if (c.graph_fixture) assert.ok(fs.existsSync(path.join(REPO, c.graph_fixture)), c.graph_fixture);
 });
