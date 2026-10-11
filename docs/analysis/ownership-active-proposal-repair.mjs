@@ -23,7 +23,6 @@
 // symbol absent from the graph is NOT "covered but missing"; it is an invalid revision.
 
 import crypto from "node:crypto";
-import path from "node:path";
 import { DEFAULT_BUDGET } from "./ownership-active-contract.mjs";
 import { computeSliceDelta } from "./ownership-active-slice-adapter.mjs";
 import { appendRepairAttemptRecord } from "./architecture-evidence-store.mjs";
