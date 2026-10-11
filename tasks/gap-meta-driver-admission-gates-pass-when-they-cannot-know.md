@@ -3,7 +3,7 @@ id: gap-meta-driver-admission-gates-pass-when-they-cannot-know
 title: "meta-driver admission gates report pass/novel when they could not
   actually evaluate: owner search caps before the status filter, null evidence
   admitted, proposal dedup ignores status"
-status: todo
+status: ready
 labels:
   - gap
   - architecture-discovery
