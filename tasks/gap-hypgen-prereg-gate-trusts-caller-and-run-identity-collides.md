@@ -3,7 +3,7 @@ id: gap-hypgen-prereg-gate-trusts-caller-and-run-identity-collides
 title: "arch-hypothesis-generation: pre-registration gate trusts caller-supplied
   hashes, default prompt is not the frozen one, run identity collides across
   experiments"
-status: ready
+status: done
 labels:
   - gap
   - architecture-discovery
