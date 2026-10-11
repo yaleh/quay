@@ -32,6 +32,13 @@
 //
 // This module is a LIBRARY (imported by worker-driver.ts), not a standalone checker — it carries no
 // exit-code/--json spine (checker-mechanical-spine-check's *-check.{ts,sh} derivation skips it).
+//
+// It ALSO owns the repo's ONE green-verdict cache primitive (readGreenCache / writeGreenCache below).
+// The `.quay/scoped-gate-cache.json` pair in worker-fan-in.ts (gap-worker-premerge-scoped-gate-cache)
+// was byte-identical to this file's pair modulo name/cast/entry-interface, and worker-fan-in.ts
+// ALREADY imports this file ⇒ the copy was extracted HERE rather than kept as two bodies that drift
+// independently (task gap-routine-semantic-dedup-scan-doc-check-cache-vs-scoped-gate-cache). This file
+// is the lower-level module (worker-fan-in.ts imports it; the reverse edge would be a value cycle).
 
 import { createHash } from "node:crypto";
 import { execFileSync } from "node:child_process";
@@ -101,21 +108,24 @@ export function computeDocCheckFaceKey(worktree: string): string | null {
   return h.digest("hex");
 }
 
-/** The cached entry shape: the last GREEN verdict, keyed by the docs-face key it was produced under. */
-export interface DocCheckCacheEntry {
+/** The cached entry shape: the last GREEN verdict, keyed by the input-face key it was produced under.
+ *  ONE definition for every green-verdict cache in this repo (the docs face here, the scoped-gate face
+ *  in worker-fan-in.ts) — those caches alias this type, they do not re-declare it. */
+export interface GreenCacheEntry {
   key: string;
   ok: true;
   ts: string;
 }
 
-/** Read the cached green verdict for `key`. Returns true on a HIT (same key + ok:true), null on
- *  MISS / absent / corrupt / not-green (fail-closed — null is never a hit). */
-export function readDocCheckCache(cacheFile: string, key: string): boolean | null {
+/** Read the cached green verdict for `key` from `cacheFile`. Returns true on a HIT (same key + ok:true),
+ *  null on MISS / absent / corrupt / not-green (fail-closed — null is never a hit; 硬规则 3b). This is
+ *  the single implementation both cache faces call; `readDocCheckCache` below is an ALIAS, not a copy. */
+export function readGreenCache(cacheFile: string, key: string): boolean | null {
   try {
     if (!fs.existsSync(cacheFile)) return null;
     const raw: unknown = JSON.parse(fs.readFileSync(cacheFile, "utf8"));
     if (!raw || typeof raw !== "object" || Array.isArray(raw)) return null;
-    const entry = raw as DocCheckCacheEntry;
+    const entry = raw as GreenCacheEntry;
     if (entry.key !== key) return null;
     if (entry.ok !== true) return null; // only GREEN verdicts are cacheable
     return true;
@@ -124,12 +134,13 @@ export function readDocCheckCache(cacheFile: string, key: string): boolean | nul
   }
 }
 
-/** Write the GREEN verdict under `key` (atomic replace; only green is ever cached — worker-driver
- *  calls this ONLY when the doc-check passed). Best-effort: a write failure ≠ a fan-in failure. */
-export function writeDocCheckCache(cacheFile: string, key: string): void {
+/** Write the GREEN verdict under `key` (atomic replace; only green is ever cached — callers invoke this
+ *  ONLY after their check passed). Best-effort: a write failure ≠ a fan-in failure. Single
+ *  implementation; `writeDocCheckCache` below is an ALIAS, not a copy. */
+export function writeGreenCache(cacheFile: string, key: string): void {
   try {
     fs.mkdirSync(path.dirname(cacheFile), { recursive: true });
-    const entry: DocCheckCacheEntry = { key, ok: true, ts: new Date().toISOString() };
+    const entry: GreenCacheEntry = { key, ok: true, ts: new Date().toISOString() };
     const tmp = `${cacheFile}.tmp`;
     fs.writeFileSync(tmp, JSON.stringify(entry) + "\n", "utf8");
     fs.renameSync(tmp, cacheFile);
@@ -137,3 +148,8 @@ export function writeDocCheckCache(cacheFile: string, key: string): void {
     // best-effort runtime cache — never let a cache write fail the fan-in
   }
 }
+
+/** The docs-face cache's own names for the shared primitive. Both are ALIASES (⛔ no second body to
+ *  drift from the scoped-gate face) — the public import surface of this module is unchanged. */
+export type DocCheckCacheEntry = GreenCacheEntry;
+export { readGreenCache as readDocCheckCache, writeGreenCache as writeDocCheckCache };
