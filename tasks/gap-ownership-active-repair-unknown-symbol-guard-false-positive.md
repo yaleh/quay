@@ -3,7 +3,7 @@ id: gap-ownership-active-repair-unknown-symbol-guard-false-positive
 title: "repair loop's fabricated-symbol guard flags real exports as unknown:
   graphSymbols() only sees names that cross a directory edge, so 6/16 genuine
   symbols of the live candidate would burn every repair round as UNKNOWN_SYMBOL"
-status: ready
+status: done
 labels:
   - gap
   - defect
