@@ -14,13 +14,16 @@ import os from "node:os";
 import path from "node:path";
 
 import {
-  EXIT, CARRIER_FORMS, HARD_MAX_CLUSTERS, VERIFIER_VERDICTS,
+  EXIT, CARRIER_FORMS, HARD_MAX_CLUSTERS, VERIFIER_VERDICTS, INVENTORY_FORMS,
   extractExports, extractCarriers, parseCatalog, buildInventory, renderEntry,
-  contaminationScan, preregRefusal, runPromptDigest, runPromptRefusal,
+  importClauseNames, importedNames, buildProvenance, renderProvenanceEntry,
+  contaminationScan, contaminationText, CONTAMINATION_EXCLUDED_FIELDS,
+  preregRefusal, runPromptDigest, runPromptRefusal,
   resolveExperimentId, repoRelComponent, repoRelSubjectKey,
   STRIPPED_DIRS, FROZEN_INVESTIGATOR_PROMPT, defaultInvestigatorPrompt, sha256,
   neutralCwdRefusal, verifyCwdRefusal, parseJsonObject, parseHypotheses, runInvestigator,
   clusterHypotheses, verifierVerdict, runVerifier,
+  sharedImplementation, mechanicalRefutation, provenanceIndex,
   mechanicalMatch, matchVerdict, scoreCases,
   score, matchRecords, verifyRecords, reviewRecords, emit,
   buildReport, hardenedArgv, importDriverRuntime, modelFromArgv,
@@ -517,6 +520,173 @@ test("AC2(f): each run file records a non-null model; an unresolved model is a r
 });
 
 // ── the DEFAULT investigator prompt is the FROZEN round-1 one ────────────────────────────────────────
+// ═════════════════════════════════════════════════════════════════════════════════════════════════════
+// gap-hypgen-inventory-lacks-import-provenance-so-reuse-reads-as-duplication — AC (a)…(d)
+// The provenance inventory form + the mechanical pre-verification layer.
+// ═════════════════════════════════════════════════════════════════════════════════════════════════════
+
+/** A fixture whose edges are unambiguous: `beta` imports the symbol, `gamma` RE-EXPORTS it, `delta`
+ *  re-exports the whole module. Every one of the three is an import edge. */
+const PROV_FIXTURE = {
+  sources: {
+    "alpha.ts": 'export const A = 1;\nexport function shared() {}\nconst c = ".quay/alpha.jsonl";\n',
+    "beta.ts": 'import { shared } from "./alpha.ts";\nexport const B = 2;\n',
+    "gamma.ts": 'export { shared } from "./alpha.ts";\nexport const G = 3;\n',
+    "delta.ts": 'export * from "./alpha.ts";\nexport const D = 4;\n',
+  },
+  catalog: "header\n  alpha.ts  answers alpha\n  beta.ts   answers beta\n  gamma.ts  answers gamma\n  delta.ts  answers delta\n",
+};
+const PROV_FILES = Object.keys(PROV_FIXTURE.sources);
+const buildProv = (form) => buildInventory({
+  files: PROV_FILES, readSource: (f) => PROV_FIXTURE.sources[f], catalog: PROV_FIXTURE.catalog,
+  maxExports: 15, maxCarriers: 6, carrierForms: "literal", form,
+});
+
+// ── AC(a): the DEFAULT form's bytes are frozen — the opt-in form must not perturb them ───────────────
+test("AC(a): the default (neutral) inventory form's sha256 is unchanged, and provenance is opt-in", () => {
+  const dflt = buildProv();                                     // no `form` ⇒ the round-1 form
+  // FROZEN: computed from the module BEFORE the provenance form existed. A non-md5 regression pin —
+  // if this moves, the round-1 reproduction at pin `e3163e519` has been perturbed.
+  assert.equal(dflt.sha256, "3a475a3011ed253054024decb02f618d3726269f774e58608a7c199f26a8677e");
+  assert.equal(dflt.form, "neutral");
+  assert.equal(dflt.text.includes("imports:"), false, "the neutral form carries NO structural fields");
+  assert.equal(dflt.text.includes("imported_by:"), false);
+  assert.equal(buildProv("neutral").sha256, dflt.sha256, "naming the default form changes nothing");
+  // and the opt-in form IS a different artifact (a different experiment, hence a different prompt/prereg)
+  assert.notEqual(buildProv("provenance").sha256, dflt.sha256);
+  assert.deepEqual([...INVENTORY_FORMS], ["neutral", "provenance"]);
+  assert.throws(() => buildProv("provenence"), /--inventory-form must be one of/);
+});
+
+// ── AC(b): the provenance form lists imports/imported_by for EVERY component, including re-exports ───
+test("AC(b): the provenance form lists `imports` and `imported_by` for every component, incl. re-exports", () => {
+  const prov = buildProv("provenance");
+  for (const e of prov.entries) {
+    assert.ok(Array.isArray(e.imports), `${e.c} carries an imports array`);
+    assert.ok(Array.isArray(e.imported_by), `${e.c} carries an imported_by array`);
+  }
+  const at = (c) => prov.entries.find((e) => e.c === c);
+  // a plain import
+  assert.deepEqual(at("beta.ts").imports, [{ module: "plugin/scripts/alpha.ts", names: ["shared"], line: 1 }]);
+  // a RE-EXPORT of a name is an import edge like any other
+  assert.deepEqual(at("gamma.ts").imports, [{ module: "plugin/scripts/alpha.ts", names: ["shared"], line: 1 }]);
+  // `export * from "…"` re-exports the whole module
+  assert.deepEqual(at("delta.ts").imports, [{ module: "plugin/scripts/alpha.ts", names: ["*"], line: 1 }]);
+  // the fan-in is the reverse of those edges, repo-relative and sorted
+  assert.deepEqual(at("alpha.ts").imports, []);
+  assert.deepEqual(at("alpha.ts").imported_by, ["plugin/scripts/beta.ts", "plugin/scripts/delta.ts", "plugin/scripts/gamma.ts"]);
+  assert.deepEqual(at("beta.ts").imported_by, []);
+  // the rendered line carries both fields for every component (the model sees the same fields as the code)
+  const renderedLines = prov.text.trimEnd().split("\n");
+  assert.equal(renderedLines.length, 4);
+  assert.ok(renderedLines.every((l) => l.includes(" | imports: ") && l.includes(" | imported_by: ")));
+  assert.match(renderedLines.find((l) => l.startsWith("- alpha.ts")), /imported_by: plugin\/scripts\/beta\.ts, plugin\/scripts\/delta\.ts, plugin\/scripts\/gamma\.ts$/);
+  // the clause reader itself: aliases bind the DEFINING name, `*` is a namespace, default is named
+  assert.deepEqual(importClauseNames("{ a, b as c }"), ["a", "b"]);
+  assert.deepEqual(importClauseNames("* as ns"), ["*"]);
+  assert.deepEqual(importClauseNames("*"), ["*"]);
+  assert.deepEqual(importClauseNames("D, { a }"), ["default", "a"]);
+  assert.deepEqual(importClauseNames(""), []);
+  // and names are read from the statement the parser located (a multi-line brace form included)
+  const multi = 'import {\n  one,\n  two as three\n} from "./x.ts";\n';
+  assert.deepEqual(importedNames(multi, 1, "./x.ts"), ["one", "two"]);
+  // a side-effect import contributes an edge but no names
+  assert.deepEqual(importedNames('import "./x.ts";\n', 1, "./x.ts"), []);
+  // out-of-scope specifiers (bare packages, data files) are NOT edges
+  const b = buildProvenance({ files: ["a.ts"], readSource: () => 'import fs from "node:fs";\nimport j from "./d.json";\n', });
+  assert.deepEqual(b.importsOf.get("a.ts"), []);
+});
+
+// ── AC(c): the contamination scan ignores STRUCTURAL edges, still refuses a free-text cross-mention ──
+test("AC(c): contamination ignores structural edges but still refuses a free-text cross-mention", () => {
+  const pairs = [{ id: "PAIR", groups: [["alpha.ts"], ["beta.ts"]] }];
+  // an entry whose STRUCTURAL fields (the provenance edges) name both sides is NOT contaminated
+  const structural = [{
+    c: "alpha.ts", q: "nothing to see", exports: [], carriers: [],
+    imports: [{ module: "plugin/scripts/beta.ts", names: ["x"], line: 1 }],
+    imported_by: ["plugin/scripts/beta.ts"], sha256: "0".repeat(64),
+  }];
+  assert.equal(contaminationScan(structural, pairs).ok, true, "edges are neutral repository facts");
+  assert.equal(contaminationText(structural[0]).includes("beta.ts"), false, "the edges are out of the scanned text");
+  assert.deepEqual([...CONTAMINATION_EXCLUDED_FIELDS], ["imports", "imported_by", "sha256"]);
+  // CONTROL: the same entry with the mention in FREE TEXT still refuses — the guard was not weakened
+  const freeText = [{ ...structural[0], q: "see beta.ts for the other half" }];
+  const refused = contaminationScan(freeText, pairs);
+  assert.equal(refused.ok, false);
+  assert.deepEqual(refused.cross, [{ entry: "alpha.ts", pair: "PAIR", groups: [0, 1] }]);
+  // and the neutral-form behaviour the round-1 run relied on is byte-identical
+  const neutral = [{ c: "alpha.ts", q: "runs alongside beta.ts", exports: ["beta.ts"], carriers: [] }];
+  assert.equal(contaminationText(neutral[0]), JSON.stringify(neutral[0]), "no field of a neutral entry is dropped");
+  assert.equal(contaminationScan(neutral, pairs).ok, false);
+});
+
+// ── AC(d): the mechanical layer refutes a shared implementation, never an independent one ────────────
+test("AC(d): the mechanical layer refutes all-import-from-one-module, not each-defines-it", async () => {
+  const shared = [
+    { c: "a.ts", imports: [], imported_by: ["plugin/scripts/b.ts", "plugin/scripts/c.ts"], sha256: "a".repeat(64) },
+    { c: "b.ts", imports: [{ module: "plugin/scripts/a.ts", names: ["shared"], line: 3 }], imported_by: [], sha256: "b".repeat(64) },
+    { c: "c.ts", imports: [{ module: "plugin/scripts/a.ts", names: ["shared"], line: 5 }], imported_by: [], sha256: "c".repeat(64) },
+  ];
+  const hit = sharedImplementation({ components: ["a.ts", "b.ts", "c.ts"], provenance: shared });
+  assert.equal(hit.definer, "plugin/scripts/a.ts");
+  assert.deepEqual(hit.symbol, ["shared"], "the name every importer takes from the definer");
+  assert.deepEqual(hit.importers, ["plugin/scripts/b.ts", "plugin/scripts/c.ts"]);
+  assert.equal(hit.evidence.length, 2);
+  for (const e of hit.evidence) {
+    assert.match(e.file, /^plugin\/scripts\/[bc]\.ts$/, "evidence names the importing FILE (repo-relative)");
+    assert.ok(e.line > 0 && e.sha256, "…with a line and the file's sha256");
+    assert.equal(e.imports, "plugin/scripts/a.ts");
+  }
+  const m = mechanicalRefutation({ components: ["a.ts", "b.ts", "c.ts"], provenance: shared });
+  assert.equal(m.verdict, "refuted");
+  assert.equal(m.verdict_reason, "shared-implementation");
+
+  // NEGATIVE: three components that each DEFINE the symbol import nothing — no refutation
+  const indie = ["x.ts", "y.ts", "z.ts"].map((c) => ({ c, imports: [], imported_by: [], sha256: "d".repeat(64) }));
+  assert.equal(sharedImplementation({ components: ["x.ts", "y.ts", "z.ts"], provenance: indie }), null);
+  // …but the claim is refuted only for a STAR: two distinct targets means several implementations
+  const twoTargets = [
+    { c: "p.ts", imports: [], imported_by: ["plugin/scripts/q.ts", "plugin/scripts/r.ts"], sha256: "e".repeat(64) },
+    { c: "q.ts", imports: [{ module: "plugin/scripts/p.ts", names: ["s"], line: 1 }], imported_by: ["plugin/scripts/r.ts"], sha256: "f".repeat(64) },
+    { c: "r.ts", imports: [{ module: "plugin/scripts/p.ts", names: ["s"], line: 1 }, { module: "plugin/scripts/q.ts", names: ["t"], line: 2 }], imported_by: [], sha256: "0".repeat(64) },
+  ];
+  assert.equal(sharedImplementation({ components: ["p.ts", "q.ts", "r.ts"], provenance: twoTargets }), null);
+  // ⛔ "could not evaluate" is NOT a refutation: no provenance, or fewer than two known components
+  assert.equal(sharedImplementation({ components: ["a.ts", "b.ts"], provenance: null }), null);
+  assert.equal(mechanicalRefutation({ components: ["ghost.ts"], provenance: shared }), null);
+  assert.equal(mechanicalRefutation({}), null);
+
+  // THROUGH runVerifier: a mechanically refuted cluster spends NO model call, and the emitted row still
+  // validates as {refuted, shared-implementation} with the import lines as its evidence.
+  const dir = tmp();
+  const clusters = clusterHypotheses([{ run: 1, hyps: [{ id: "H1", components: ["a.ts", "b.ts", "c.ts"], concept_kind: "policy", claim: "three independent impls", confidence: "high" }] }]);
+  let called = 0;
+  const rv = await runVerifier({
+    clusters, pinDir: dir, cwd: dir, promptTemplate: "{{HYP}}", provenance: shared,
+    runModel: async () => { called++; return { stdout: JSON.stringify({ verdict: "supported" }), status: 0 }; },
+  });
+  assert.equal(rv.ok, true);
+  assert.equal(called, 0, "a mechanically refuted cluster must spend no model call");
+  assert.equal(rv.mechanical_refuted, 1);
+  assert.equal(rv.results[0].verdict, "refuted");
+  assert.equal(rv.results[0].verdict_reason, "shared-implementation");
+  assert.equal(rv.results[0].mechanical, true);
+  const emitted = verifyRecords({ verify: rv });
+  assert.equal(emitted[0].rec.verdict, "refuted");
+  assert.equal(emitted[0].rec.verdict_reason, "shared-implementation");
+  const tally = emit(emitted, { out: path.join(dir, "records.jsonl") });
+  assert.equal(tally.refused, 0, JSON.stringify(tally.reasons));
+  // CONTROL: with NO provenance the same cluster goes to the model and its verdict is the model's
+  let called2 = 0;
+  const rv2 = await runVerifier({
+    clusters, pinDir: dir, cwd: dir, promptTemplate: "{{HYP}}",
+    runModel: async () => { called2++; return { stdout: JSON.stringify({ verdict: "supported" }), status: 0 }; },
+  });
+  assert.equal(called2, 1, "without edge data the verifier behaves exactly as before");
+  assert.equal(rv2.results[0].verdict, "supported");
+  assert.equal(rv2.mechanical_refuted, 0);
+});
+
 test("prompt: the tool's default investigator prompt is the frozen round-1 file, byte for byte", () => {
   const p = defaultInvestigatorPrompt();
   assert.equal(path.basename(p), FROZEN_INVESTIGATOR_PROMPT);
