@@ -2,7 +2,8 @@
 
 Task: `gap-ownership-active-limited-proposal-mode`.
 Code: `docs/analysis/ownership-active-limited-proposal.mjs` (new; imports nothing from the shadow loop).
-Tests: `plugin/test/ownership-active-limited-proposal.test.mjs` (18).
+Tests: `plugin/test/ownership-active-limited-proposal.test.mjs` (25 = 18 original + 7 regression tests added by
+`gap-entry-bar-c3-passes-on-absent-or-unreadable-decision-memory`, §5 below).
 Depends on: `gap-architecture-evidence-store-and-decision-memory` (decision memory `isKnownExemption`,
 quantitative readings `computeRunMetrics`, the evidence-store carrier) — consumed, **not** re-implemented.
 
@@ -109,3 +110,89 @@ evaluated). This is recorded as a limit, not papered over; if the store is to be
   reading, not a derived one.
 - The run-streak only counts the **tail**: three qualifying runs that are followed by a non-qualifying
   production run are not eligible — deliberately, since the point is to propose from the *current* state.
+
+## 5. Condition 3 fails OPEN on an absent / unreadable decision memory — fixed
+
+Task: `gap-entry-bar-c3-passes-on-absent-or-unreadable-decision-memory` (2026-10-11), a 硬规则 5b sibling sweep
+of the "读不到 ⇒ 返回空/默认值 ⇒ 调用方读成实质结论" shape, taken on the entry bar itself.
+
+### 5.1 The defect (by position)
+
+1. `decisionMemoryStatus(rec)` returned the loop's **default** `"not-known"` when the record carried no
+   `decision_memory` field, and ignored `architecture-decision-memory.mjs`'s `unreadable_input` flag entirely
+   (it copied only `status` across the call boundary — 硬规则 4c: the guarantee did **not** survive the layer).
+2. `isKnownExemption` returns `{status:"not-known", …, unreadable_input:true}` for an unreadable input, with a
+   comment saying unreadable input must NOT be shaped like "nothing matched" — but the value it returns **is**
+   the "nothing matched" value. The distinction lived only in a side flag the caller never read.
+3. So `evaluateEntryBar`'s condition 3 passed **both** "the memory was never consulted" and "the memory could
+   not read its input" as *"已查过、非已知豁免"* — a direct 硬规则 6 violation (缺值 = 未查, 不是「为假」). The
+   `CONDITION_3_UNDETERMINED` branch already existed for unrecognised statuses; these two cases never reached it.
+4. The CLI's carrier read was `JSON.parse … catch { return null }` + `.filter(Boolean)` — **silently dropping**
+   unparseable lines, with no count. A dropped line is fail-open in the worst place: if it is the
+   non-qualifying production run that would have *broken* a run-streak, the streak looks un-broken and
+   condition 4's input is falsified.
+
+### 5.2 The fix
+
+| change | effect |
+|---|---|
+| `MEMORY_NOT_EVALUATED = "not-evaluated"` + `decisionMemoryReading(rec)` | an absent field, `unreadable_input:true`, a non-object, and a present-but-unreadable status all return their own value with an enumerated `cause` (`absent` / `unreadable`); a *read* status is copied verbatim |
+| condition 3 | the two unread states fail closed through the existing `CONDITION_3_UNDETERMINED` branch; the reason names **缺席** vs **不可读** |
+| `readCarrier(file)` | returns `{records, malformed_lines, exists}` — non-JSON and non-record lines are **counted**, never dropped (same field name as `architecture-evidence-store.mjs`) |
+| `evaluateCarrier(carrier)` | if `malformed_lines > 0`, **every** candidate is forced `eligible:false` with `reason` starting `MALFORMED_CARRIER_LINES:` naming the count — a bad line cannot be attributed to a candidate, so no streak can be trusted |
+
+⛔ No threshold was touched: `ENTRY_BAR_STREAK = 3`, conditions 1/2/4, the condition **evaluation order**, the
+`draft`-only write surface and the never-active red line are all unchanged. `--write` cannot fire on a
+malformed carrier because every candidate is already `eligible:false`.
+
+### 5.3 Production reading (AC4)
+
+Frozen snapshot of the live carrier (the loop is appending, so a moving target is not a reading):
+
+| reading | value |
+|---|---|
+| carrier | `.quay/ownership-shadow-proposals.jsonl` |
+| sha256 | `2cec3f53d354d0a5f7357a171df98262c749531d20daf12e214344a977a56456` |
+| lines / records / `malformed_lines` | 93 / 93 / **0** |
+| candidates (grouped as before) | 24 |
+
+Dry-run (`node docs/analysis/ownership-active-limited-proposal.mjs --carrier <frozen>`, no `--write`),
+**before** (the `develop` module) vs **after**:
+
+| first failing condition | before | after |
+|---|---|---|
+| `CONDITION_2_NOT_MET` (delta not computed) | 14 | 14 |
+| `CONDITION_1_UNDETERMINED` (no run shape) | 7 | 7 |
+| `CONDITION_1_NOT_MET` (kind ≠ package-cycle) | 3 | 3 |
+| eligible | 0 | 0 |
+
+**Per-candidate top-level `reason` changes: 0 of 24.** That is the expected result and not a null one: the
+first failing condition is still reported in the existing order, and **no production candidate reaches
+condition 3** (all 24 stop at C1 or C2 — the delta is never computed, §2). The fix is invisible at the
+top-level bucket level *today* and decisive the moment a candidate clears C2 — which is now reachable, since
+`@yalehwang/archguard@0.1.40` can compute a falsifiable delta (the Finding's "条件 2 不再必然挡住").
+
+The condition-3 reading itself, taken directly on each candidate's head record:
+
+| C3 reading of the candidate head | candidates |
+|---|---|
+| `not-known` → **`not-evaluated`** (`cause:absent`) | **20** |
+| `not-known` → `not-known` (`cause:read`) | 4 |
+| `unreadable_input:true` | 0 |
+
+Cross-tabulated with the first failing condition: `CONDITION_2_NOT_MET | C3=absent` **10**,
+`CONDITION_2_NOT_MET | C3=read` 4, `CONDITION_1_UNDETERMINED | C3=absent` 7, `CONDITION_1_NOT_MET | C3=absent` 3.
+
+So **20 of 24 candidates previously cleared condition 3 on a record that never carried a decision-memory
+verdict** — i.e. they were 10 gate-core `package-cycle` candidates plus 10 out-of-scope ones, all of which
+would have been *passed* by C3 had they reached it. They are now refused as UNDETERMINED(缺席) until a run
+actually records a consulted, readable decision memory.
+
+### 5.4 What was NOT done
+
+No Goal was created or activated; no goal branch was opened; no code was refactored; no decision-memory seed
+was taken from `GOAL-034` (Holdout B); the production run above was read-only (`--write` not passed). The
+malformed-line path is exercised by tests against temp carriers (§AC3 of the task) plus a CLI spawn that
+asserts an empty goal store — the production carrier currently has **0** malformed lines, so that branch has
+no production reading to report yet, and none is claimed.
+
