@@ -3,7 +3,7 @@ id: gap-architecture-evidence-store-and-decision-memory
 title: architecture evidence store + decision memory + quality/cost metrics for
   the ownership-active investigation loop (phase A+B of end-to-end architecture
   self-bootstrap)
-status: todo
+status: ready
 labels:
   - gap
 parent: null
