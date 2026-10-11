@@ -31,11 +31,11 @@ depends_on:
 
 ## AC
 
-- [ ] AC1 `declaredExportsForMoves`(或其替代)对每个 move 区分三态:`exports`(读到文件,给出导出集合)/ `source_unreadable`(无 `file`、路径不可规范化、或锁定 commit 上读不到该 blob,附原因码)——不得再把后者表示为空集合。
-- [ ] AC2 `attemptRepair` 对 `source_unreadable` 记录**独立**的 bucket/matched(例如 `source_unreadable` / `MOVE_SOURCE_NOT_AT_COMMIT`),不是 `unknown_symbol`;该轮仍不计算 delta、仍消耗轮次(fail-closed 不放宽);给 judge 的反馈文本点名"move.file 在锁定 commit 上不存在/不可读",不点名符号为未知。
-- [ ] AC3 负对照①:move.file 指向锁定 commit 上不存在的路径(如 `gate/config/does-not-exist.ts`)、符号为真实导出 ⇒ 记录 `source_unreadable`,不出现 `UNKNOWN_SYMBOL`。
-- [ ] AC4 负对照②(守卫仍有牙):move.file 正确、符号为编造名(`fabricatedLoaderFn`)⇒ 仍记录 `UNKNOWN_SYMBOL`;move.file 正确、符号为不与任何真实导出冲突的近似拼写(`loadWorkspaceGatez`,`git grep -w` 在 `packages`/`plugin/scripts` 0 命中)⇒ 仍为 `UNKNOWN_SYMBOL`。
-- [ ] AC5 既有回归与上游任务的 AC2/AC3/AC4 测试全绿;准入门限/streak=3/fail-closed/只写 draft 不触碰;`bash scripts/test.sh --for-task gap-ownership-active-repair-unreadable-source-is-not-unknown-symbol` exit 0。
+- [x] AC1 `declaredExportsForMoves`(或其替代)对每个 move 区分三态:`exports`(读到文件,给出导出集合)/ `source_unreadable`(无 `file`、路径不可规范化、或锁定 commit 上读不到该 blob,附原因码)——不得再把后者表示为空集合。
+- [x] AC2 `attemptRepair` 对 `source_unreadable` 记录**独立**的 bucket/matched(例如 `source_unreadable` / `MOVE_SOURCE_NOT_AT_COMMIT`),不是 `unknown_symbol`;该轮仍不计算 delta、仍消耗轮次(fail-closed 不放宽);给 judge 的反馈文本点名"move.file 在锁定 commit 上不存在/不可读",不点名符号为未知。
+- [x] AC3 负对照①:move.file 指向锁定 commit 上不存在的路径(如 `gate/config/does-not-exist.ts`)、符号为真实导出 ⇒ 记录 `source_unreadable`,不出现 `UNKNOWN_SYMBOL`。
+- [x] AC4 负对照②(守卫仍有牙):move.file 正确、符号为编造名(`fabricatedLoaderFn`)⇒ 仍记录 `UNKNOWN_SYMBOL`;move.file 正确、符号为不与任何真实导出冲突的近似拼写(`loadWorkspaceGatez`,`git grep -w` 在 `packages`/`plugin/scripts` 0 命中)⇒ 仍为 `UNKNOWN_SYMBOL`。
+- [x] AC5 既有回归与上游任务的 AC2/AC3/AC4 测试全绿;准入门限/streak=3/fail-closed/只写 draft 不触碰;`bash scripts/test.sh --for-task gap-ownership-active-repair-unreadable-source-is-not-unknown-symbol` exit 0。
 
 ## DoD
 
