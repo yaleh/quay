@@ -266,7 +266,18 @@ rates_reported = false   ← n=3 只报读数、不报比率
 `not config-loading`（两条都来自 `gate/config/types.ts` 的头部注释）。同一 slice 走真实 redactor ⇒ 0 命中。
 测试同时钉住这两半。
 
-**过程中发现并修掉的一条真实泄露路径**（不是测试跑通后才想到的，是 AC6 把 D3 判红暴露出来的）：
+### 过程中发现并修掉的两条真实缺陷
+
+两条都是**测试/审计把它判红**才暴露的，不是事后补记；两者都有回归测试钉住。
+
+**（一）C-quoted 路径被当成真实路径 ⇒ 文件静默消失。** `git ls-tree --name-only` 与 `git grep`
+都会把**非 ASCII 文件名**输出成 C-quoted 形态（`"goals/AC-201-\347\274\226…"`）。把它当路径用，
+`git show <commit>:<quoted>` 直接 fatal。实测：一次 scope 覆盖全仓的装配里 **83 次 git 调用失败、
+83 个文件被静默排除**在清单与解析器节点集之外——正是硬规则 3b 说的「读不懂伪装成不存在」。
+修法：`ls-tree` 改用 `-z`（NUL 分隔、逐字输出），`grep` 命中行做**完整的 C 反转义**
+（`\ooo` 是 UTF-8 **字节**，必须累积成字节再一起解码——逐个解码会得到与真实路径不再相等的乱码）。
+
+**（二）grep 命中行携带注释原文 ⇒ holdout 泄露。**
 
 `git grep` 的命中行**携带该行文本**；`git grep -w GateConfig … -- packages` 会命中
 `packages/quay/src/gate/config/types.ts:4`，而那正是 GOAL-034 的裁定原文。修法：

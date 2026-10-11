@@ -10,6 +10,7 @@
 import { test, after } from "node:test";
 import assert from "node:assert/strict";
 import crypto from "node:crypto";
+import { execFileSync } from "node:child_process";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
@@ -20,6 +21,7 @@ import {
   IO_MODULES, assembleOwnershipEvidence, ownershipFacts, reviewOwnership, buildReviewPrompt,
   parseReview, synthesizeOverallRecommendation, findStructuralKeyLeaks, assertBundleClean, auditHoldoutLeakage,
   compareBoundaries, declarationBlock, exportedNames, statementNames, admitPath, clipToBytes,
+  unquoteGitPath,
 } from "../../docs/analysis/ownership-semantic-review.mjs";
 import { loadCases, scoreCase, summarize, runEval, LABEL_SOURCES } from "../../docs/analysis/ownership-semantic-review-eval.mjs";
 import { validateRequest, DENY_PATH_PATTERNS } from "../../docs/analysis/ownership-active-contract.mjs";
@@ -78,7 +80,8 @@ const scriptedJudge = (refs, recommendation = "review", confidence = "medium") =
 /** A canned `git` seam: `{ "path": "text" }` served at one commit, with `ls-tree`/`show`/`grep` shapes. */
 function fakeGit(files, commit = "f".repeat(40)) {
   return (args) => {
-    if (args[0] === "ls-tree") return Object.keys(files).filter((p) => p.startsWith("packages/quay/src/")).join("\n") + "\n";
+    // `-z` is the real protocol: NUL-separated, verbatim (never C-quoted) paths.
+    if (args[0] === "ls-tree") return Object.keys(files).filter((p) => p.startsWith("packages/quay/src/")).join("\0") + "\0";
     if (args[0] === "show") {
       const p = args[1].slice(commit.length + 1);
       if (!(p in files)) { const e = new Error("not found"); e.status = 128; throw e; }
@@ -197,6 +200,25 @@ test("AC1: all judge-facing text is redacted — a real file whose header names 
   assert.ok(typesCharter.redacted_blocks > 0, "the header block naming GOAL-034 was redacted");
   assert.ok(!/GOAL-034/.test(typesCharter.text), "the reference is gone");
   for (const e of bundle.evidence) assert.ok(!/GOAL-\d/.test(e.text), `un-redacted decision reference in ${e.id}`);
+});
+
+test("AC1: git's C-quoted paths are DECODED — a non-ASCII path may not become a phantom file", () => {
+  assert.equal(unquoteGitPath('"a\\346\\236\\232b"'), "a枚b", "octal escapes are UTF-8 BYTES, decoded together");
+  assert.equal(unquoteGitPath("plain/path.ts"), "plain/path.ts", "an unquoted path is returned untouched");
+  assert.equal(unquoteGitPath('"a\\"b"'), 'a"b');
+  // A scope-wide assembly greps files with non-ASCII names. `git grep` C-quotes those paths; if the quoted
+  // string is used as a path, `git show <commit>:<quoted>` fails and the row is attributed to a file that
+  // does not exist. Measured before the fix: 83 failing git calls in this one assembly.
+  const bundle = assembleOwnershipEvidence({
+    root: REPO, commit: C_GOAL034, scopeRoot: "",
+    slice: { subject: "t", moves: [{ file: "packages/quay/src/abi.ts", from: "packages/quay/src", to: "packages/quay/src/kernel", symbols: ["TASK_STATUS"] }] },
+  });
+  const tree = new Set(execFileSync("git", ["-C", REPO, "ls-tree", "-r", "--name-only", "-z", C_GOAL034], { encoding: "utf8", maxBuffer: 64 * 1024 * 1024 }).split("\0").filter(Boolean));
+  const rows = bundle.evidence.filter((e) => e.kind === "callers").flatMap((e) => e.by_dir).flatMap((b) => b.files);
+  assert.ok(rows.length > 0, "the scope-wide grep produced caller rows");
+  assert.ok(rows.some((f) => /[^\x00-\x7f]/.test(f)), "and at least one of them is a non-ASCII path");
+  for (const f of rows) assert.ok(tree.has(f), `a caller row names a file that is not in the tree: ${JSON.stringify(f)}`);
+  assert.equal(rows.some((f) => f.includes("\\3")), false, "no C-escaped path survived");
 });
 
 test("AC1: helpers are position-based, not keyword-based", () => {
@@ -361,7 +383,7 @@ test("AC2b: io_pull is the CONJUNCTION it says it is — a real pull into an I/O
     "packages/quay/src/gate/config/reader.ts": 'import fs from "node:fs";\nexport function readIt() { return fs; }\n',
   };
   const git = (args) => {
-    if (args[0] === "ls-tree") return Object.keys(files).join("\n") + "\n";
+    if (args[0] === "ls-tree") return Object.keys(files).join("\0") + "\0";
     if (args[0] === "show") { const p = args[1].split(":").slice(1).join(":"); if (!(p in files)) { const e = new Error("x"); e.status = 128; throw e; } return files[p]; }
     return "";
   };

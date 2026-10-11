@@ -204,6 +204,25 @@ export function statementNames(stmt) {
   return def ? [def[1]] : [];
 }
 
+/**
+ * Undo git's C-style path quoting (`"goals/AC-201-\347\274\226…"`). `\ooo` escapes are UTF-8 BYTES, so they
+ * are accumulated as bytes and decoded together — decoding each escape separately would produce mojibake that
+ * no longer matches the real path (and would then be read as "that file is not in this commit").
+ */
+export function unquoteGitPath(token) {
+  if (!(token.startsWith('"') && token.endsWith('"') && token.length > 1)) return token;
+  const body = token.slice(1, -1);
+  const bytes = [];
+  for (let i = 0; i < body.length; i++) {
+    if (body[i] !== "\\") { bytes.push(...Buffer.from(body[i], "utf8")); continue; }
+    const oct = /^[0-7]{1,3}/.exec(body.slice(i + 1));
+    if (oct) { bytes.push(parseInt(oct[0], 8)); i += oct[0].length; continue; }
+    const c = body[++i];
+    bytes.push(...Buffer.from(c === "n" ? "\n" : c === "t" ? "\t" : c, "utf8"));
+  }
+  return Buffer.from(bytes).toString("utf8");
+}
+
 /** The statement text containing `spec`, assembled from the lines around its `line` (1-based). */
 function statementAt(src, line, spec) {
   const lines = src.split("\n");
@@ -286,9 +305,13 @@ export function assembleOwnershipEvidence({ root, commit, scopeRoot, slice, budg
     symbols: Array.isArray(m.symbols) ? [...m.symbols] : [],
   }));
 
-  // the analysed subtree's file set at THIS commit — the resolver's node universe
-  const treeOut = maybe(["ls-tree", "-r", "--name-only", commit, "--", NORM(scopeRoot) || "."]);
-  const treeFiles = (treeOut.code === 0 ? treeOut.out : "").split("\n").map(NORM).filter(Boolean);
+  // The analysed subtree's file set at THIS commit — the resolver's node universe AND the per-directory
+  // inventory. ⛔ `-z`: without it git C-QUOTES every non-ASCII path (`"goals/AC-201-\347…"`), and those
+  // quoted strings are not paths — `git show <commit>:<quoted>` fails and the file is silently dropped from
+  // the inventory and from the resolver's universe. Measured: on a scope-wide assembly that silently lost
+  // 83 files and issued 83 failing git calls (硬规则 3b — "could not read it" must not look like "not there").
+  const treeOut = maybe(["ls-tree", "-r", "--name-only", "-z", commit, "--", NORM(scopeRoot) || "."]);
+  const treeFiles = (treeOut.code === 0 ? treeOut.out : "").split("\0").map(NORM).filter(Boolean);
   const nodes = new Set(treeFiles);
 
   const srcCache = new Map();
@@ -347,7 +370,11 @@ export function assembleOwnershipEvidence({ root, commit, scopeRoot, slice, budg
     const revPrefix = `${commit}:`;
     const rows = (grep.code === 0 ? grep.out : "").split("\n").filter(Boolean)
       .map((raw) => {
-        const r = raw.startsWith(revPrefix) ? raw.slice(revPrefix.length) : raw;
+        // `git grep` C-quotes a non-ASCII path the same way `ls-tree` does; unquote it the way the executor
+        // does (`rowPath`) before testing the deny-list or grouping by directory (硬规则 3b).
+        const stripped = raw.startsWith(revPrefix) ? raw.slice(revPrefix.length) : raw;
+        const q = /^"(?:[^"\\]|\\.)*"/.exec(stripped);
+        const r = q ? unquoteGitPath(q[0]) + stripped.slice(q[0].length) : stripped;
         const i = r.indexOf(":"), j = r.indexOf(":", i + 1);
         if (i < 0 || j < 0) return null;
         const line = Number(r.slice(i + 1, j));
