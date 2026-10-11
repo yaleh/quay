@@ -52,7 +52,10 @@ test("rule labels map onto the store's DISCOVERY verdict vocabulary (no domain w
 // ── family 2: the E3 import-resolution fix ──────────────────────────────────────────────────────────
 const MOD = "plugin/scripts/dev-stats-collect.ts";
 const SRC_TEST = { path: "plugin/test/dev-stats-collect.test.mjs", content: `import { collect } from "../scripts/dev-stats-collect.ts";\nconst named = ["done"];` };
-const OTHER_TEST = { path: "plugin/test/elsewhere.test.mjs", content: `import { x } from "../scripts/other.ts";\nconst named = ["done"];` };
+// A test that names the symbol but imports a DIFFERENT module — the E3 fix must not count it. The other
+// module is a real sibling script on purpose: a fixture import of a non-existent `scripts/<name>` would be
+// read as a real (impl-deleted) import by `test-impl-census-check.ts`.
+const OTHER_TEST = { path: "plugin/test/elsewhere.test.mjs", content: `import { statuses } from "../scripts/task-status.ts";\nconst named = ["done"];` };
 const BARE_TEST = { path: "plugin/test/mention-only.test.mjs", content: `const named = ["done"];` };
 
 test("E3 (old, by bare name) counts a generic local in ANY test — the known weakness", () => {
