@@ -25,6 +25,7 @@ import {
   divergenceKey,
   proposalCandidateText,
   existingProposalKeys,
+  proposalBoardStatus,
   nextAcId,
   parseProbeOutput,
   fileProposals,
@@ -35,7 +36,9 @@ import {
   stripEvidenceTimestamp,
   settleEvidenceWrites,
   resolveEvidence,
+  readEvidenceForGate,
   driveItems,
+  findOwningTasks,
   renderAutoDriveBody,
   blockingOwners,
   taskFileStatus,
@@ -2230,5 +2233,94 @@ test('locateMetaCcMcp: 无候选 ⇒ null；QUAY_META_CC_MCP 指向不存在 ⇒
     assert.equal(locateMetaCcMcp({}, fakeHome), null, '没有 cache 也没有 ~/.local/bin ⇒ null，⛔ 不抛');
   } finally {
     fs.rmSync(fakeHome, { recursive: true, force: true });
+  }
+});
+
+// ── gap-meta-driver-admission-gates-pass-when-they-cannot-know ────────────────────────────────────
+// 同一缺陷族（硬规则 3b：一个「评估不了」的闸返回了与「评估过且合格」同形的答案）的三个实例，
+// 每例一条对照 AC：(a) owner 搜索在状态过滤【之前】被 cap 截断；(b) null 读数被当证据准入；
+// (c) 提案 dedup 不看 owner 状态（superseded/achieved 的旧 key 永久压制）。
+
+// (a) cap 必须在【状态过滤之后】——前 5 条 done 不得把板上的第 6 条 live owner 挤出可见集。
+test('AC(a) — findOwningTasks 扫全板：前 5 条 done 遮不住第 6 条 ready owner（driveItems 据此拒）', async () => {
+  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'meta-driver-caporder-'));
+  try {
+    fs.mkdirSync(path.join(tmp, 'tasks'));
+    // 前 5 条（readdir 序）done，第 6 条 ready。命中名按【字典序】与【创建序】都把 ready 排在最后，
+    // 故无论 readdir 按哪种序返回，旧实现「攒够 cap 就 break」都必然漏掉它。
+    for (let i = 1; i <= 5; i++) {
+      fs.writeFileSync(path.join(tmp, 'tasks', `gap-owner-${i}-done.md`),
+        `---\nid: gap-owner-${i}-done\nstatus: done\n---\n涉及 syncDevelopToDoc 的修复 ${i}\n`);
+    }
+    fs.writeFileSync(path.join(tmp, 'tasks', 'gap-owner-6-ready.md'),
+      '---\nid: gap-owner-6-ready\nstatus: ready\n---\n涉及 syncDevelopToDoc 的修复 6\n');
+
+    // 夹具自检：6 条都命中关键词，且第 6 条确实被找到（否则本用例与「一条都没搜到」同形，硬规则 2）。
+    const owners = findOwningTasks(tmp, 'syncDevelopToDoc');
+    assert.equal(owners.filter((o) => o.status === 'done').length, 5, `夹具：5 条 done 必须都命中：${JSON.stringify(owners)}`);
+    assert.ok(owners.some((o) => o.file === 'gap-owner-6-ready.md'), `第 6 条 ready owner 必须被找到：${JSON.stringify(owners)}`);
+
+    const r = await driveItems(tmp, [{ ...goodItem, mechanismKeyword: 'syncDevelopToDoc' }], ecoReadings,
+      { cap: 1, dryRun: true, at: 'now' });
+    assert.equal(r[0].accepted, false, `板上真有 live owner ⇒ 必须拦，⛔ 不得回报「没有在办的 owner」：${r[0].reason}`);
+    assert.match(r[0].reason, /未完成的既有任务已在管/);
+    assert.match(r[0].reason, /gap-owner-6-ready\.md\[ready\]/, '拒绝理由必须点名那条 ready 任务（硬规则 3：枚举不布尔）');
+  } finally {
+    fs.rmSync(tmp, { recursive: true, force: true });
+  }
+});
+
+// (b) null 读数（「没读出来」）不得冒充证据；0/false/"" 是合法读数、仍准入。
+test('AC(b) — value 为 null 的 evidenceKey 被拒且理由与「解析不出」不同形；0/false/"" 仍准入', async () => {
+  assert.equal(resolveEvidence(ecoReadings, 'drivers.outer.carrierLastTs'), null, '夹具自检：该 key 真的解析得到 null');
+
+  const rNull = await driveItems('/tmp', [{ ...goodItem, evidenceKey: 'drivers.outer.carrierLastTs' }], ecoReadings,
+    { cap: 1, dryRun: true, at: 'now' });
+  assert.equal(rNull[0].accepted, false, `null 读数必须被拒：${rNull[0].reason}`);
+  const rMissing = await driveItems('/tmp', [{ ...goodItem, evidenceKey: 'syncHealth.fabricated' }], ecoReadings,
+    { cap: 1, dryRun: true, at: 'now' });
+  assert.match(rMissing[0].reason, /解析不出/);
+  assert.notEqual(rNull[0].reason, rMissing[0].reason, 'null 与 not-found 必须是两个可区分的拒绝取值（硬规则 3b）');
+  assert.doesNotMatch(rNull[0].reason, /解析不出/, 'null 的理由不得读作「解析不出」');
+
+  // 三态直读（同一判定的另一面，纯函数）。
+  assert.equal(readEvidenceForGate(ecoReadings, 'drivers.outer.carrierLastTs').state, 'unreadable');
+  assert.equal(readEvidenceForGate(ecoReadings, 'syncHealth.fabricated').state, 'missing');
+  assert.equal(readEvidenceForGate(ecoReadings, 'syncHealth.semanticConflict').state, 'admitted');
+
+  // 0 / false / "" ⇒ admitted（合法读数，⛔ 不因 null 修复而波及）。
+  for (const key of ['syncHealth.semanticAlignFailed', 'drivers.outer.running']) {
+    const r = await driveItems('/tmp', [{ ...goodItem, evidenceKey: key }], ecoReadings, { cap: 1, dryRun: true, at: 'now' });
+    assert.equal(r[0].accepted, true, `${key} 是合法读数，必须准入：${r[0].reason}`);
+  }
+  const withEmpty = { ...ecoReadings, syncHealth: { ...ecoReadings.syncHealth, note: '' } };
+  const rEmpty = await driveItems('/tmp', [{ ...goodItem, evidenceKey: 'syncHealth.note' }], withEmpty, { cap: 1, dryRun: true, at: 'now' });
+  assert.equal(rEmpty[0].accepted, true, `"" 是合法读数，必须准入：${rEmpty[0].reason}`);
+});
+
+// (c) 提案 dedup 带 owner 状态：已了结的 AC 不永久压制；未决的 AC 仍拦且理由是「已评估」。
+test('AC(c) — 提案 dedup 读 owner 状态：superseded/achieved 不拦；draft/active 仍拒且理由不含 NOT EVALUATED', async () => {
+  // 映射本身的对照（纯函数）。
+  assert.equal(proposalBoardStatus('superseded'), 'done');
+  assert.equal(proposalBoardStatus('achieved'), 'done');
+  assert.equal(proposalBoardStatus('retired'), 'done');
+  assert.equal(proposalBoardStatus('draft'), 'ready');
+  assert.equal(proposalBoardStatus('active'), 'ready');
+  assert.equal(proposalBoardStatus(undefined), null, '读不出状态 ⇒ null（第三态，⛔ 不冒充 done）');
+
+  const rec = (id, status) => ({ id, title: goodProposal.title, criterion: goodProposal.criterion, origin: goodProposal.origin, status });
+  const opts = { k: 3, activeGoalIds: new Set(['GOAL-001']), dryRun: true };
+
+  for (const status of ['superseded', 'achieved', 'retired']) {
+    const r = await fileProposals('/tmp', [goodProposal], [rec('AC-145', status)], opts);
+    assert.equal(r[0].accepted, true, `${status} 的等价 AC 不得永久压制后续提案：${r[0].reason}`);
+  }
+
+  for (const status of ['draft', 'active', 'needs-human']) {
+    const r = await fileProposals('/tmp', [goodProposal], [rec('AC-147', status)], opts);
+    assert.equal(r[0].accepted, false, `未决（${status}）的等价 AC 必须仍拦：${r[0].reason}`);
+    assert.match(r[0].reason, /dedup/);
+    assert.doesNotMatch(r[0].reason, /NOT EVALUATED/, '它【已】被评估过 ⇒ 理由不得读作「未评估」');
+    assert.doesNotMatch(r[0].reason, /bare Set/, '理由不得再自述为「裸 Set」');
   }
 });
