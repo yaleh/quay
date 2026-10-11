@@ -22,6 +22,8 @@ import {
   buildRepairFeedback, renderRepairPrompt, parseRepairRevision, isPositiveDelta,
   attemptRepair, REPAIR_VERSION, PRODUCTION_OBSERVED_CLASSES,
   declaredExportNames, declaredExportsForMoves, defaultReadFileAtCommit, moveSourcePath,
+  declaredSourcesForMoves, symbolExistence, SOURCE_STATES, SOURCE_UNREADABLE_REASONS,
+  SOURCE_UNAVAILABLE_REASONS, defaultCommitResolvable,
 } from "../../docs/analysis/ownership-active-proposal-repair.mjs";
 import { computeSliceDelta, SLICE_DELTA_SURFACE } from "../../docs/analysis/ownership-active-slice-adapter.mjs";
 import { runActiveInvestigation } from "../../docs/analysis/ownership-active-loop.mjs";
@@ -586,6 +588,164 @@ test("integration: the loop records proposed_slice + slice_delta.detail so a rep
   assert.equal(isRepairableRejection(res.slice_delta), true);
   assert.deepEqual(recordedLegalDirs({ slice_delta: res.slice_delta }), ["", "a", "b", "core"]);
   assert.equal(REPAIR_VERSION, "ownership-active-proposal-repair/1");
+});
+
+// ── gap-ownership-active-repair-unreadable-source-is-not-unknown-symbol (2026-10-11) ─────────────
+// "COULD NOT EVALUATE" IS ITS OWN FINDING (硬规则 3b, and 4c on the way through the call site). The
+// criterion above reads symbol existence from the move's own file AT THE LOCKED COMMIT — but a file the
+// reader could NOT read (no `file`, an un-normalisable path, or no readable blob at that commit) proves
+// nothing, and the first version of this criterion folded that into the same output shape as "read it, and
+// it does not declare the name": the move mapped to an EMPTY export set, its non-edge symbols were
+// recorded `UNKNOWN_SYMBOL`, and the judge was told a SYMBOL was fabricated when the real defect was the
+// move's `file` path. The fix is a THIRD VALUE, never a weaker guard: a `source_unreadable` round still
+// voids, still computes no delta, still costs a round. Nothing below injects a symbol list or a graph —
+// the second source is the real repository at `ec00fcc00`, read by the module's own production default
+// reader, and the unreadable cases are real paths that really are absent from that commit.
+const UNS = "gap-ownership-active-repair-unreadable-source-is-not-unknown-symbol";
+const BOGUS_FILE = "gate/config/does-not-exist.ts";   // a well-formed in-scope path with no blob at LIVE_COMMIT
+const liveCarrier = (sliceDelta) => ({ contract_version: "ownership-active-investigation/1", commit: LIVE_COMMIT, concern_key: "package-cycle|gate/config", envelope: { concern: "the gate 4-package cycle" }, proposed_slice: LIVE_PROPOSED_SLICE, slice_delta: sliceDelta });
+
+test(`${UNS} AC1: every move's source is exports | source_unreadable WITH a reason code — never "read it, it exports nothing"`, () => {
+  const opts = { scopeRoot: "packages/quay/src", commit: LIVE_COMMIT, readFileAtCommit: liveReader };
+  const moves = [
+    { file: "gate/types.ts", from: "gate", to: "kernel", symbols: ["GateVerdict"] },   // readable
+    { file: BOGUS_FILE, from: "gate", to: "kernel", symbols: ["GateVerdict"] },         // no blob at the commit
+    { file: "gate", from: "gate", to: "kernel", symbols: ["GateVerdict"] },             // a DIRECTORY at the commit
+    { file: "../../etc/passwd", from: "gate", to: "kernel", symbols: ["GateVerdict"] }, // does not normalise
+    { from: "gate", to: "kernel", symbols: ["GateVerdict"] },                           // no `file` at all
+  ];
+  const states = declaredSourcesForMoves(moves, opts);
+  // the mapping is TOTAL and one-per-move: a sparse map is how "no entry" starts meaning two things at once
+  assert.equal(states.length, moves.length);
+  assert.deepEqual(states.map((s) => s.state), ["exports", "source_unreadable", "source_unreadable", "source_unreadable", "source_unreadable"]);
+  assert.deepEqual(states.map((s) => s.reason), [null, "BLOB_NOT_AT_COMMIT", "BLOB_NOT_AT_COMMIT", "PATH_NOT_NORMALIZABLE", "NO_FILE_DECLARED"]);
+  assert.deepEqual([...SOURCE_STATES], ["exports", "source_unreadable", "source_unavailable"]);
+  assert.deepEqual([...SOURCE_UNREADABLE_REASONS].sort(), ["BLOB_NOT_AT_COMMIT", "NO_FILE_DECLARED", "PATH_NOT_NORMALIZABLE"]);
+  // (a) the `exports` state is not vacuous — it carries what the locked commit actually declares…
+  assert.ok(states[0].exports.has("GateVerdict"), "the readable move must be proved from its own file at the commit");
+  // (b) ⛔ …and NO unreadable entry wears that shape: none is `exports`, and each one says WHY (硬规则 3b).
+  for (const s of states.slice(1)) {
+    assert.notEqual(s.state, "exports", "an unreadable source must not be shaped as a successful read");
+    assert.ok(SOURCE_UNREADABLE_REASONS.includes(s.reason), JSON.stringify(s));
+  }
+  // (c) the THIRD state is its own value, not a silent second meaning of the second: a session in which the
+  // second source cannot be consulted at all (nothing supplied; or a commit that does not resolve here)
+  // reports `source_unavailable` with its own reason — never "every move's file is missing".
+  for (const [label, o] of [["nothing supplied", {}], ["no commit", { ...opts, commit: null }], ["unresolvable commit", { ...opts, commitResolvable: false }]]) {
+    const un = declaredSourcesForMoves(moves, o);
+    assert.equal(un.length, moves.length, label);
+    assert.ok(un.every((s) => s.state === "source_unavailable"), `${label}: ${JSON.stringify(un)}`);
+    assert.ok(un.every((s) => SOURCE_UNAVAILABLE_REASONS.includes(s.reason)), label);
+    assert.ok(un.every((s) => s.exports.size === 0), label);
+  }
+  assert.equal(declaredSourcesForMoves(moves, { ...opts, commitResolvable: false })[0].reason, "COMMIT_NOT_RESOLVABLE");
+  assert.equal(declaredSourcesForMoves(moves, {})[0].reason, "SECOND_SOURCE_NOT_CONFIGURED");
+  // (d) the lossy Set projection survives for union-only callers, and agrees with the three-state reading.
+  const projection = declaredExportsForMoves(moves, opts);
+  assert.deepEqual([...projection.keys()], ["gate/types.ts"]);
+  assert.deepEqual([...projection.get("gate/types.ts")].sort(), [...states[0].exports].sort());
+});
+
+test(`${UNS} AC2: an unreadable move source gets its OWN bucket/matched, still voids the round, and the judge is told to fix the FILE`, async () => {
+  // The discriminator the whole split rests on: the LOCKED COMMIT must be readable AT ALL. On a root where
+  // it is not, "no blob at the commit" cannot be concluded for any single move — the guard falls back to
+  // its graph-only reading instead of branding every move a broken path.
+  assert.equal(defaultCommitResolvable(REPO, LIVE_COMMIT), true, "the locked commit is in this tree");
+  assert.equal(defaultCommitResolvable("/r", LIVE_COMMIT), false, "a bare fixture root cannot read ANY commit");
+  assert.equal(defaultCommitResolvable(REPO, "0".repeat(40)), false, "an unresolvable sha is not a readable commit");
+
+  const judge = scriptedJudge([revise([{ file: BOGUS_FILE, from: "gate", to: "kernel", symbols: ["GateVerdict"] }], { why: "move the export" })]);
+  const delta = liveComputeDelta();
+  const res = await attemptRepair({ candidateRecord: liveCarrier(liveComputeDelta()({ commit: LIVE_COMMIT, proposal: LIVE_PROPOSAL })), root: REPO, invokeJudge: judge, deps: { graph: liveGraph(), computeDelta: delta } });
+  const rounds = res.attempts.filter((a) => a.judge_called);
+  assert.equal(delta.calls.length, 0, "an unevaluable name must never reach the primitive");
+  assert.equal(res.outcome, "abstained");
+  assert.equal(res.repaired_delta, null);
+  assert.equal(res.judge_calls, 3, "the round is still consumed — the BOUND is what ends the session (fail-closed unchanged)");
+  assert.equal(rounds.length, 3);
+  assert.ok(rounds.every((a) => a.bucket === "source_unreadable" && a.matched === "MOVE_SOURCE_NOT_AT_COMMIT" && a.computed === false), JSON.stringify(rounds));
+  assert.ok(rounds.every((a) => a.unknown_symbols.length === 0), "no symbol may be reported unknown for an unreadable source");
+  assert.deepEqual(rounds[0].source_unreadable, [{ file: BOGUS_FILE, reason: "BLOB_NOT_AT_COMMIT", symbols: ["GateVerdict"] }], "the record names the FILE and the reason code, not the symbol");
+
+  // CONTROL (硬规则 4 推论四): round 1 is judged against the record's ORIGINAL cut — every one of its files is
+  // in the commit, so the feedback carries an EMPTY list. If the fact were hardcoded the two would not differ.
+  const factsOf = (p) => JSON.parse(p.slice(p.indexOf("{", p.indexOf("STRUCTURAL FACTS"))));
+  assert.deepEqual(factsOf(judge.prompts[0]).unreadable_move_sources, []);
+  // and from round 2 on the prompt names the offending path and the LOCKED commit, so the judge repairs the
+  // `file` rather than rewriting the symbol.
+  assert.match(judge.prompts[1], /unreadable_move_sources/);
+  assert.match(judge.prompts[1], /does-not-exist\.ts/);
+  assert.match(judge.prompts[1], /LOCKED commit/);
+  assert.deepEqual(factsOf(judge.prompts[1]).unreadable_move_sources, [{ file: BOGUS_FILE, reason: "BLOB_NOT_AT_COMMIT" }]);
+});
+
+test(`${UNS} AC3: NEGATIVE CONTROL ① — a REAL export named under a file that is not at the locked commit is source_unreadable, never UNKNOWN_SYMBOL`, async () => {
+  // The symbol is genuinely real — declared by `gate/types.ts` at the locked commit — so this cannot be
+  // waved away as "the name was fake anyway". The ONLY defect is the move's `file`, and the reading must say so.
+  assert.ok(declaredExportNames(liveReader(`${LIVE_COMMIT}:packages/quay/src/gate/types.ts`)).has("GateVerdict"));
+  assert.ok(!graphSymbols(liveGraph()).has("GateVerdict"), "…and it crosses no directory edge, so the graph alone cannot prove it");
+  const opts = { scopeRoot: "packages/quay/src", commit: LIVE_COMMIT, readFileAtCommit: liveReader };
+  const bogus = [{ file: BOGUS_FILE, from: "gate", to: "kernel", symbols: ["GateVerdict"] }];
+  assert.deepEqual(symbolExistence(liveGraph(), bogus, opts), { unknown: [], source_unreadable: [{ file: BOGUS_FILE, reason: "BLOB_NOT_AT_COMMIT", symbols: ["GateVerdict"] }] });
+  // the same symbol under its REAL file is PROVED — so the state above is about the path, not about GateVerdict
+  assert.deepEqual(symbolExistence(liveGraph(), [{ file: "gate/types.ts", from: "gate", to: "kernel", symbols: ["GateVerdict"] }], opts), { unknown: [], source_unreadable: [] });
+  // …and the union view still rejects it (the split changes the vocabulary, not the verdict — fail-closed)
+  assert.deepEqual(unknownSymbols(liveGraph(), bogus, opts), ["GateVerdict"]);
+
+  const judge = scriptedJudge([revise(bogus)]);
+  const res = await attemptRepair({ candidateRecord: liveCarrier(liveComputeDelta()({ commit: LIVE_COMMIT, proposal: LIVE_PROPOSAL })), root: REPO, invokeJudge: judge, maxJudgeCalls: 1, deps: { graph: liveGraph(), computeDelta: liveComputeDelta() } });
+  const called = res.attempts.filter((a) => a.judge_called);
+  assert.equal(called.length, 1);
+  assert.equal(called[0].bucket, "source_unreadable");
+  assert.equal(called[0].matched, "MOVE_SOURCE_NOT_AT_COMMIT");
+  assert.ok(!JSON.stringify(res.attempts).includes("UNKNOWN_SYMBOL"), `the record must not brand the name unknown: ${JSON.stringify(res.attempts)}`);
+});
+
+test(`${UNS} AC4: NEGATIVE CONTROL ② — the guard still has teeth: a fabricated name and a near-miss spelling stay UNKNOWN_SYMBOL`, async () => {
+  // `loadWorkspaceGatez` is a near-miss of the real `loadWorkspaceGates` and occurs NOWHERE in the sources
+  // (the AC's own `git grep -w` oracle over packages/ + plugin/scripts/), so no source can account for it.
+  // `git grep` exits 1 with no match; stdout is read either way so "no hits" and "could not run" differ.
+  const nearMiss = (() => { try { return execFileSync("git", ["-C", REPO, "grep", "-w", "-l", "loadWorkspaceGatez", "--", "packages", "plugin/scripts"], { encoding: "utf8" }).trim(); } catch (e) { return String(e.stdout ?? "").trim(); } })();
+  assert.equal(nearMiss, "", "the near-miss must occur nowhere, or this is not a negative control");
+  // (a) pure partition: this move's file WAS read — both names are POSITIVELY unknown, not unevaluable.
+  const opts = { scopeRoot: "packages/quay/src", commit: LIVE_COMMIT, readFileAtCommit: liveReader };
+  const moves = [{ file: "gate/config/loader.ts", from: "gate", to: "kernel", symbols: ["GatesConfig", "fabricatedLoaderFn", "loadWorkspaceGatez"] }];
+  assert.deepEqual(symbolExistence(liveGraph(), moves, opts), { unknown: ["fabricatedLoaderFn", "loadWorkspaceGatez"], source_unreadable: [] });
+  assert.deepEqual(unknownSymbols(liveGraph(), moves, opts), ["fabricatedLoaderFn", "loadWorkspaceGatez"]);
+  // CONTROL: with the second source OFF the same two names come back — the teeth are the OLD criterion's,
+  // not something the new state lent them (they were never "unproved only because nothing could be read").
+  assert.deepEqual(unknownSymbols(liveGraph(), moves), ["fabricatedLoaderFn", "loadWorkspaceGatez"]);
+
+  // (b) end to end over the production carrier: the fabricated revision still voids every round as UNKNOWN_SYMBOL.
+  const fabricated = LIVE_PROPOSED_SLICE.moves.map((m, i) => (i === 2 ? { ...m, symbols: [...m.symbols, "fabricatedLoaderFn", "loadWorkspaceGatez"] } : m));
+  const judge = scriptedJudge([revise(fabricated)]);
+  const delta = liveComputeDelta();
+  const res = await attemptRepair({ candidateRecord: liveCarrier(liveComputeDelta()({ commit: LIVE_COMMIT, proposal: LIVE_PROPOSAL })), root: REPO, invokeJudge: judge, deps: { graph: liveGraph(), computeDelta: delta } });
+  assert.equal(delta.calls.length, 0);
+  assert.equal(res.outcome, "abstained");
+  assert.ok(res.attempts.filter((a) => a.judge_called).every((a) => a.bucket === "unknown_symbol" && a.matched === "UNKNOWN_SYMBOL" && a.computed === false), JSON.stringify(res.attempts));
+  assert.deepEqual(res.attempts.find((a) => a.judge_called).unknown_symbols, ["fabricatedLoaderFn", "loadWorkspaceGatez"], "exactly the two — no more, no fewer");
+  assert.deepEqual(res.attempts.find((a) => a.judge_called).source_unreadable, [], "every file in this revision is in the commit");
+});
+
+test(`${UNS} AC5: the split widens nothing — the graph-only reading, the bounds, and the module's sandbox are unchanged`, () => {
+  // 既有回归 ①: with the second source off, the reading is the PRE-FIX one, byte for byte.
+  assert.deepEqual(unknownSymbols(liveGraph(), LIVE_PROPOSED_SLICE.moves), LIVE_FALSE_POSITIVES);
+  // 既有回归 ②: an absent second source is its own value — never silently "all moves unreadable".
+  assert.ok(declaredSourcesForMoves(LIVE_PROPOSED_SLICE.moves, { scopeRoot: "packages/quay/src", commit: LIVE_COMMIT }).every((s) => s.state === "source_unavailable"));
+  // the four hard bounds and the rejection vocabulary are untouched by the split
+  assert.deepEqual(REPAIR_LIMITS, { maxRounds: 3, maxJudgeCalls: 3, maxWallClockMs: 1_800_000, maxEvidenceBytesPerRound: 90_000 });
+  assert.deepEqual([...REJECTION_CLASSES].sort(), ["evidence_gap", "honest_abstain", "invalid_move", "tool_limitation"]);
+  assert.deepEqual([...REPAIRABLE_CLASSES].sort(), ["evidence_gap", "invalid_move"]);
+  assert.equal(REPAIR_VERSION, "ownership-active-proposal-repair/1");
+  // 准入门限 / streak / draft-only: the split added no reference to any of the gate machinery (the AC8 test
+  // asserts the full list statically; this pins that THIS diff contributed none).
+  const code = stripComments(REPAIR_SRC);
+  for (const forbidden of ["evaluateEntryBar", "deterministicGate", "quotaGate", "runStreak", "fileProposals", "driveItems", "fileDecisions", "proposeDraftGoal"]) assert.ok(!code.includes(forbidden), `must not touch ${forbidden}`);
+  assert.doesNotMatch(code, /Holdout/i);
+  assert.doesNotMatch(code, /GOAL-0/);
+  // fail-closed: an unreadable source is still REJECTED — the split renamed the reason, not the verdict.
+  assert.deepEqual(unknownSymbols(liveGraph(), [{ file: BOGUS_FILE, from: "gate", to: "kernel", symbols: ["GateVerdict"] }], { scopeRoot: "packages/quay/src", commit: LIVE_COMMIT, readFileAtCommit: liveReader }), ["GateVerdict"]);
 });
 
 // ── parse + positive-delta helpers ───────────────────────────────────────────────────────────────
