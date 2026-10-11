@@ -187,16 +187,48 @@ The test mutates the module's **own emitted slice** (rewrites the `--slice` file
 `resolveRunnerOptions` from the declaration) and hands it to the real CLI. The cut is refused again. The AC1/AC2
 assertions are therefore not vacuous: a declaration missing one real name does not compute.
 
-## 8. Coverage of the change
+## 8. AC10 — the whole-graph reconciliation hazard: readings, explicitly not gated
 
-- `plugin/test/ownership-active-slice-adapter.test.mjs` — 9 tests. On a host whose ArchGuard implements
-  `stays`: **9 pass**. On a host carrying only the released `@yalehwang/archguard@0.1.39` (this one's default):
-  **5 pass, 4 skip** — AC1/AC2/AC3/AC4 and the rule-3b test skip, each with an explicit reason naming the
-  released-version gap and reporting `stays_ignored_by_tool`. They are never silently green.
+ArchGuard reconciles an edge as soon as its `importedNames` contain a moved **name**, over the whole graph
+(§2), while its own doc block claims it reconciles only edges into a moved-from dir. A name shared with an
+edge into an unrelated directory can therefore drag that edge into `removedEdges`. That is an archguard-side
+defect (`gap-slice-delta-reconciliation-scope-name-global`, **not fixed here**) and it would silently corrupt
+this task's AC1/AC2 reading, because "the target edge was not removed" says nothing about *other* edges.
+
+`unexpectedRemovedEdges(removedEdges, expected)` is a pure reading helper: it filters the entries the cut did
+not set out to remove. Its logic is asserted on **synthetic** data only (AC10a), so it stays green whatever the
+primitive currently does. The real readings below are **recorded, never gated** — an extra entry today and none
+after the archguard fix are both legitimate readings of the same cut.
+
+**AC10b readings** (`node --test`, `t.diagnostic` output):
+
+| run | CLI | `removedEdges` | `unexpected` |
+|---|---|---|---|
+| minimal counterexample (`""->X`, `""->Y` both import `foo`; move `foo: X->D` only) | ArchGuard 0.1.39 **with** the clause | `[" -> X", " -> Y"]` | **`[" -> Y"]`** |
+| minimal counterexample, same graph | released `@yalehwang/archguard@0.1.39` | `[" -> X"]` | `[]` |
+| candidate ① @ b1e844f | 0.1.39 with the clause | `[" -> gate/config"]` | `[]` |
+| candidate ② @ dd7ddf5 | 0.1.39 with the clause | `[" -> gate/config"]` | `[]` |
+
+Two things to read off this:
+
+- The liaison's counterexample reproduces: the unrelated `"" -> Y` **is** mis-marked as removed. The hazard is
+  real, and the detector finds it.
+- **The two real candidates do NOT trigger it** — checked, not assumed: their only removed edge is the
+  fully-covered `"" -> gate/config`. So the AC1/AC2 readings above stand on their own, and the hazard remains
+  an archguard-side issue rather than a caveat on this delivery.
+- The hazard and the `stays` clause arrive **together**: the released artifact does neither (it reconciles
+  moved-from dirs only, and ignores `stays`). §1's premise correction covers both.
+
+## 9. Coverage of the change
+
+- `plugin/test/ownership-active-slice-adapter.test.mjs` — 11 tests. On a host whose ArchGuard implements
+  `stays`: **11 pass**. On a host carrying only the released `@yalehwang/archguard@0.1.39` (this one's default):
+  **7 pass, 4 skip** — AC1/AC2/AC3/AC4 skip, each with an explicit reason naming the released-version gap and
+  reporting `stays_ignored_by_tool`. They are never silently green. AC10a and AC10b always run.
 - `plugin/test/ownership-active-loop.test.mjs` — 53/53 pass unchanged (the fully-covered path emits no
   `stays`).
 
-## 9. Boundary — what this does NOT do
+## 10. Boundary — what this does NOT do
 
 - It does **not** touch the ArchGuard/archguard repository, create or activate any Goal/task, or change any
   existing safety gate or the three-consecutive-rounds admission threshold.

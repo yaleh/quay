@@ -19,7 +19,7 @@ import crypto from "node:crypto";
 import { spawnSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
 
-import { buildSliceInput, computeSliceDelta, resolveSliceDelta } from "../../docs/analysis/ownership-active-slice-adapter.mjs";
+import { buildSliceInput, computeSliceDelta, resolveSliceDelta, unexpectedRemovedEdges } from "../../docs/analysis/ownership-active-slice-adapter.mjs";
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const REPO = path.resolve(HERE, "..", "..");
@@ -177,6 +177,63 @@ test("stays: a CLI that ignores the clause is REPORTED, not silently mistaken fo
   assert.ok(p.reason.startsWith(RECORDED_75), `tool refusal must reproduce carrier record 75:\n  got  ${p.reason}\n  want ${RECORDED_75}`);
   const p76 = runCandidate(MOVE_76, LOCKED.commit_76);
   assert.ok(p76.reason.startsWith(RECORDED_76), `tool refusal must reproduce carrier record 76:\n  got  ${p76.reason}\n  want ${RECORDED_76}`);
+});
+
+// ── AC10: the whole-graph reconciliation hazard (see gap-slice-delta-reconciliation-scope-name-global) ──
+// ArchGuard reconciles an edge when its importedNames contain a moved NAME, graph-wide. A name shared with an
+// edge into an unrelated directory can therefore drag that edge into removedEdges. The detector is asserted
+// with SYNTHETIC data only (never on the primitive's current behaviour); the real readings are recorded, not
+// gated — an extra edge today and none after the archguard-side fix are both legitimate readings.
+test("AC10a: the unexpected-removed-edge detector finds the extra entry (synthetic data, no slice-delta call)", () => {
+  const removed = [
+    { from: "", to: "X", importedNames: ["foo"], becomes: "retargeted-to:D" },   // this cut's own edge
+    { from: "", to: "Y", importedNames: ["foo"], becomes: "retargeted-to:D" },   // unrelated: Y is not moved-from
+  ];
+  const extra = unexpectedRemovedEdges(removed, [{ from: "", to: "X" }]);
+  assert.deepEqual(extra, [{ from: "", to: "Y", names: ["foo"], becomes: "retargeted-to:D" }]);
+  assert.deepEqual(unexpectedRemovedEdges(removed, [{ from: "", to: "X" }, { from: "", to: "Y" }]), [], "no extras when both are expected");
+  assert.deepEqual(unexpectedRemovedEdges([], [{ from: "", to: "X" }]), []);
+  // the reading never invents an entry and never drops one: it is a filter over what it was handed
+  assert.equal(unexpectedRemovedEdges(removed, []).length, removed.length);
+});
+
+// Liaison's minimal counterexample: one name on two edges into different dirs, only one of them moved out.
+const MINIMAL = {
+  nodes: ["", "X", "Y", "D"].map((id) => ({ id, type: "internal" })),
+  edges: [
+    { from: "", to: "X", importedNames: ["foo"], valueStrength: 1, typeOnlyStrength: 0 },
+    { from: "", to: "Y", importedNames: ["foo"], valueStrength: 1, typeOnlyStrength: 0 },
+    { from: "X", to: "", importedNames: ["back"], valueStrength: 1, typeOnlyStrength: 0 },
+  ],
+  cycles: [{ modules: ["", "X"] }],   // the self-check requires the recomputed SCCs to agree
+};
+const minimalRun = () => computeSliceDelta({
+  root: REPO, commit: "0000000000000000000000000000000000000000",
+  proposal: proposalFor([{ file: "x.ts", from: "X", to: "D", symbols: ["foo"] }]),
+  deps: { analyzePackageGraph: () => ({ file: "", json: { extensions: { tsAnalysis: { moduleGraph: MINIMAL } } } }), git: (a) => (a[0] === "rev-parse" ? "t\n" : "") },
+});
+
+test("AC10b: readings — the detector applied to the real candidates and to the minimal counterexample is RECORDED, not gated", (t) => {
+  if (!INSTALLED.available) return t.skip(`no usable ArchGuard slice-delta on this host (${INSTALLED.reason})`);
+  // (a) the minimal counterexample — runs on any CLI (no `stays` needed)
+  const m = minimalRun();
+  assert.ok(["evaluated", "guard-violated", "not-evaluated"].includes(m.status), JSON.stringify(m).slice(0, 300));
+  if (m.status !== "not-evaluated") {
+    const extra = unexpectedRemovedEdges(m.delta.removed_edges, [{ from: "", to: "X" }]);
+    for (const e of extra) assert.deepEqual(Object.keys(e).sort(), ["becomes", "from", "names", "to"]);
+    t.diagnostic(`AC10b reading (minimal counterexample, ArchGuard ${INSTALLED.version}): removedEdges=${JSON.stringify(m.delta.removed_edges.map((e) => `${e.from} -> ${e.to}`))}; unexpected=${JSON.stringify(extra.map((e) => `${e.from} -> ${e.to}`))}`);
+  } else {
+    t.diagnostic(`AC10b reading (minimal counterexample): not-evaluated (${m.reason})`);
+  }
+  // (b) the two real candidates — only inspectable where the cut computes at all
+  if (!STAYS_CAPABLE()) { t.diagnostic("AC10b reading (real candidates): cut is not-evaluated on this CLI, so there is no removedEdges reading to apply the detector to"); return; }
+  for (const [moves, commit] of [[MOVE_75, LOCKED.commit_75], [MOVE_76, LOCKED.commit_76]]) {
+    const r = runCandidate(moves, commit);
+    // The cut sets out to remove exactly the fully-covered edge `"" -> gate/config`.
+    const extra = unexpectedRemovedEdges(r.delta.removed_edges, [{ from: "", to: "gate/config" }]);
+    t.diagnostic(`AC10b reading (${commit.slice(0, 7)}): removedEdges=${JSON.stringify(r.delta.removed_edges.map((e) => `${e.from} -> ${e.to}`))}; unexpected=${JSON.stringify(extra.map((e) => `${e.from} -> ${e.to}`))}`);
+    for (const e of extra) assert.deepEqual(Object.keys(e).sort(), ["becomes", "from", "names", "to"]);
+  }
 });
 
 test("fixture: the vendored locked-tree graph is byte-stable", () => {

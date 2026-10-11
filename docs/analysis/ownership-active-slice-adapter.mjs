@@ -160,6 +160,24 @@ export function buildSliceInput({ graph, proposal, provenance }) {
   };
 }
 
+/**
+ * Pure READING helper: which entries of a `removedEdges` list are NOT edges this cut set out to remove?
+ *
+ * ArchGuard reconciles an edge when its `importedNames` contain a moved NAME, graph-wide — its own doc block
+ * claims "本实现只对账进入 moved-from 目录的边", the code walks every internal edge. So a name shared with an
+ * edge into an unrelated directory can drag that edge into `removedEdges`. This function just REPORTS the
+ * unexpected entries; it does not judge them. Whether any appear depends on the analysed graph and on the
+ * primitive's current reconciliation scope (archguard task `gap-slice-delta-reconciliation-scope-name-global`),
+ * so a caller must record the reading rather than gate on it — an empty list today and a non-empty one
+ * tomorrow are both legitimate readings of the same cut.
+ */
+export function unexpectedRemovedEdges(removedEdges, expected) {
+  const want = new Set((expected || []).map((e) => `${e.from}\t${e.to}`));
+  return (removedEdges || [])
+    .map((e) => ({ from: e.from, to: e.to, names: e.importedNames || e.names || [], becomes: e.becomes ?? null }))
+    .filter((e) => !want.has(`${e.from}\t${e.to}`));
+}
+
 /** Deterministic text for the envelope — built by JS from the report, never by the model. */
 export function renderDelta(r) {
   if (r.status !== "evaluated" && r.status !== "guard-violated") return `NOT COMPUTED: ${r.status}${r.reason ? ` (${r.reason})` : ""}`;
