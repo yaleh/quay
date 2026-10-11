@@ -49,12 +49,12 @@ depends_on:
 
 ## AC
 
-- [ ] AC1 四类准入反例逐一拒绝且理由具体:构造 kind≠package-cycle、delta 未计算/provenanceConsistency≠match、命中决策记忆(exempted 或 known-not-yet-filed)、run-streak<3 四个独立反例,每个 `evaluateEntryBar` 调用返回 `eligible:false` 且 `reason` 明确指向该条件(不是同一句笼统文案)。
-- [ ] AC2 编号动态性 + 无冲突:stub `existingGoalIds={GOAL-030..036}` 时选出 `GOAL-037`;stub 追加 `GOAL-037` 后再调用时选出 `GOAL-038`——证明编号从输入动态算出,不是写死字面量。
-- [ ] AC3 结构红线:`grep -En 'status\s*[:=]\s*["'"'"']active["'"'"']|lifecycle_promote' docs/analysis/ownership-active-limited-proposal.mjs` 零命中。
-- [ ] AC4 写入即 draft:对一个满足全部四条准入条件的合成 eligible 记录调用 `proposeDraftGoal`,读回创建的 Goal,断言其 `status === "draft"`(不是 active),且 body 含"须人工审批"字样与证据链引用。
-- [ ] AC5 诚实的生产 dry run:对当前 develop 尖端跑一次真实 `evaluateEntryBar`(消费 `gap-architecture-evidence-store-and-decision-memory` 产出的真实记录),结果写入 `docs/analysis/architecture-evidence-store-limited-proposal-report.md`——无论是"未满足,还差 N 轮"还是"满足,已产出 draft Goal <id>",两者均视为达成;不得为了让本 AC 好看而拼出一个假 eligible 记录,真实读数如实记录即可。
-- [ ] AC6 全量回归绿:`bash scripts/test.sh --for-task gap-ownership-active-limited-proposal-mode` exit 0。
+- [x] AC1 四类准入反例逐一拒绝且理由具体:构造 kind≠package-cycle、delta 未计算/provenanceConsistency≠match、命中决策记忆(exempted 或 known-not-yet-filed)、run-streak<3 四个独立反例,每个 `evaluateEntryBar` 调用返回 `eligible:false` 且 `reason` 明确指向该条件(不是同一句笼统文案)。
+- [x] AC2 编号动态性 + 无冲突:stub `existingGoalIds={GOAL-030..036}` 时选出 `GOAL-037`;stub 追加 `GOAL-037` 后再调用时选出 `GOAL-038`——证明编号从输入动态算出,不是写死字面量。
+- [x] AC3 结构红线:`grep -En 'status\s*[:=]\s*["'"'"']active["'"'"']|lifecycle_promote' docs/analysis/ownership-active-limited-proposal.mjs` 零命中。
+- [x] AC4 写入即 draft:对一个满足全部四条准入条件的合成 eligible 记录调用 `proposeDraftGoal`,读回创建的 Goal,断言其 `status === "draft"`(不是 active),且 body 含"须人工审批"字样与证据链引用。
+- [x] AC5 诚实的生产 dry run:对当前 develop 尖端跑一次真实 `evaluateEntryBar`(消费 `gap-architecture-evidence-store-and-decision-memory` 产出的真实记录),结果写入 `docs/analysis/architecture-evidence-store-limited-proposal-report.md`——无论是"未满足,还差 N 轮"还是"满足,已产出 draft Goal <id>",两者均视为达成;不得为了让本 AC 好看而拼出一个假 eligible 记录,真实读数如实记录即可。
+- [x] AC6 全量回归绿:`bash scripts/test.sh --for-task gap-ownership-active-limited-proposal-mode` exit 0。
 
 ## DoD
 
