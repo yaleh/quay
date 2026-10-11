@@ -55,13 +55,13 @@ extra:
 
 ## AC
 
-- [ ] AC1 新载体 schema 校验:对 `architecture-evidence-store.mjs` 的四个 append 函数,各构造一条缺必填字段(`evidence` 类缺 `ref`)的记录调用,断言写入被拒绝(抛错或返回 `{ok:false}`)且 `.quay/architecture-evidence-store.jsonl` 未被追加该条;正常完整记录能成功追加并可读回。
-- [ ] AC2 决策记忆回归:用 `ownership-active-replay.md` 记录的历史误判输入(重提 `github-client.ts` 状态字面量)重放,断言新流程输出为 `abstain(known-exemption)`,与历史记录的旧输出(`propose_slice` 误提案)不同。
-- [ ] AC3 Holdout A 量化读数:对既有 25 条 GOAL-032/033 回放记录跑 `computeRunMetrics`,产出的 outcome 记录可读、`evidenceCost`/`falsePositiveRate`/`locality`/`recoveryRounds` 四项均为具体数值(非 not-evaluated,因为有 ground truth)。
-- [ ] AC4 Holdout B 盲测 + 反作弊隔离:对 GOAL-034/035/036 三个 fork-point commit 各跑一次盲投研,三条记录写入新载体;`jq` 交集检查确认这三条记录的 id 与 Holdout A 25 条记录的 id、与决策记忆种子清单引用的 id,三者两两交集为空。
-- [ ] AC5 生产实跑 not-evaluated 诚实性:对 develop 尖端跑 ≥3 轮真实 live shadow,产出的 outcome 记录里 `falsePositiveRate`/`locality` 字段值严格等于 `{state:"not-evaluated"}`(不是猜测值、不是省略字段)。
-- [ ] AC6 结构红线不回退:`plugin/test/ownership-active-loop.test.mjs` 既有"不 import fileProposals/driveItems/fileDecisions"断言测试,在本任务改动后继续通过(`node --test plugin/test/ownership-active-loop.test.mjs` exit 0)。
-- [ ] AC7 全量回归绿:`bash scripts/test.sh --for-task gap-architecture-evidence-store-and-decision-memory` exit 0。
+- [x] AC1 新载体 schema 校验:对 `architecture-evidence-store.mjs` 的四个 append 函数,各构造一条缺必填字段(`evidence` 类缺 `ref`)的记录调用,断言写入被拒绝(抛错或返回 `{ok:false}`)且 `.quay/architecture-evidence-store.jsonl` 未被追加该条;正常完整记录能成功追加并可读回。
+- [x] AC2 决策记忆回归:用 `ownership-active-replay.md` 记录的历史误判输入(重提 `github-client.ts` 状态字面量)重放,断言新流程输出为 `abstain(known-exemption)`,与历史记录的旧输出(`propose_slice` 误提案)不同。
+- [x] AC3 Holdout A 量化读数:对既有 25 条 GOAL-032/033 回放记录跑 `computeRunMetrics`,产出的 outcome 记录可读、`evidenceCost`/`falsePositiveRate`/`locality`/`recoveryRounds` 四项均为具体数值(非 not-evaluated,因为有 ground truth)。
+- [x] AC4 Holdout B 盲测 + 反作弊隔离:对 GOAL-034/035/036 三个 fork-point commit 各跑一次盲投研,三条记录写入新载体;`jq` 交集检查确认这三条记录的 id 与 Holdout A 25 条记录的 id、与决策记忆种子清单引用的 id,三者两两交集为空。
+- [x] AC5 生产实跑 not-evaluated 诚实性:对 develop 尖端跑 ≥3 轮真实 live shadow,产出的 outcome 记录里 `falsePositiveRate`/`locality` 字段值严格等于 `{state:"not-evaluated"}`(不是猜测值、不是省略字段)。
+- [x] AC6 结构红线不回退:`plugin/test/ownership-active-loop.test.mjs` 既有"不 import fileProposals/driveItems/fileDecisions"断言测试,在本任务改动后继续通过(`node --test plugin/test/ownership-active-loop.test.mjs` exit 0)。
+- [x] AC7 全量回归绿:`bash scripts/test.sh --for-task gap-architecture-evidence-store-and-decision-memory` exit 0。
 
 ## DoD
 
