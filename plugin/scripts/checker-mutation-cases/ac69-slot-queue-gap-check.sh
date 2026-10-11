@@ -12,8 +12,16 @@
 # not block a landing). So "the raw checker exited non-zero" proves nothing — a checker that exits 3
 # on a corrupt record passes that assertion while the production gate never goes red. This case
 # previously made exactly that mistake (gap-ac69-malformed-record-exits-3-and-passes-the-static-gate).
-# A fault counts as caught ONLY when run_checker returns non-zero (fail-closed RED, surfaced on
-# stderr as `STATIC_CHECK_FAILED: <name> exit=<rc>`).
+# A fault counts as caught ONLY when run_checker returns non-zero (a fail-closed RED).
+#
+# ⛔ The wrapper's `STATIC_CHECK_FAILED:` machine line is NEVER echoed to this case's stdout. That
+# line is the HARNESS's control channel: checker-mutation-check captures a case's stdout+stderr and
+# re-emits it into the full-suite stream during the STATIC-CHECK phase (before `testPhaseStarted`),
+# where the runner's `^STATIC_CHECK_FAILED:` pattern flips the WHOLE round red (reason=static-check,
+# failures[] = every VIOLATION line + the fail-closed checkers). A negative control that prints the
+# red marker it exists to guard is a self-inflicted false red — measured 2026-10-11: this case's
+# echoed output red the fan-in suite with `# fail 87` while every test passed (tapFail=0). The
+# checker's OWN verdict line (stdout) is still echoed so the log shows WHY.
 set -u
 name="ac69-slot-queue-gap-check"
 workdir="${1:?usage: $name.sh <workdir>}"
@@ -28,13 +36,16 @@ mkdir -p "${workdir}/docs/analysis"
 cd "${workdir}"
 
 # Gate verdict for one injected state: return 0 iff the PRODUCTION gate went RED (a landing blocker),
-# 1 iff it stayed GREEN (a pass, or the non-fatal exit-3 NOT-EVALUATED). The wrapper's own
-# STATIC_CHECK_FAILED / STATIC_CHECK_NOT_EVALUATED machine line is echoed so the log shows WHY.
+# 1 iff it stayed GREEN (a pass, or the non-fatal exit-3 NOT-EVALUATED). The checker's OWN verdict
+# line(s) are echoed so the log shows WHY; the wrapper's `STATIC_CHECK_FAILED:` machine line is
+# filtered out (see the header) — it is the harness's channel, not a fixture's to publish. The
+# exit-3 `STATIC_CHECK_NOT_EVALUATED:` line matches no runner failure pattern (it is the third state
+# this task distinguishes) and is kept.
 gate_red() {
-  local _rc=0 _out
-  _out="$(run_checker "${name}" node --no-warnings --experimental-strip-types \
-    "${checker_dir}/ac69-slot-queue-gap-check.ts" --root "$1" 2>&1)" || _rc=$?
-  printf '%s\n' "${_out}"
+  local _rc=0
+  run_checker "${name}" node --no-warnings --experimental-strip-types \
+    "${checker_dir}/ac69-slot-queue-gap-check.ts" --root "$1" >"${workdir}/gate.out" 2>&1 || _rc=$?
+  grep -v '^STATIC_CHECK_FAILED:' "${workdir}/gate.out" || true
   [ "${_rc}" -ne 0 ]
 }
 
