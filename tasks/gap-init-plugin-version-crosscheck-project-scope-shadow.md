@@ -2,7 +2,7 @@
 id: gap-init-plugin-version-crosscheck-project-scope-shadow
 title: quay init does not cross-check installed plugin version for the target
   project; a project-scope 0.17.0 silently shadowed the 0.19.0 init
-status: ready
+status: done
 labels:
   - gap
 parent: null
