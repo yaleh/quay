@@ -28,5 +28,7 @@ All ACs ticked with command output pasted; rule-5b grep count and first 3 hits r
 
 ## Touches
 - packages/quay/src/init.ts
+- packages/quay/src/cli/init.ts
+- packages/quay-native/bin/quay-native.ts
 - packages/quay/test/init.test.mjs
 - tasks/gap-init-summary-workspace-ready-prints-parent-dir.md
