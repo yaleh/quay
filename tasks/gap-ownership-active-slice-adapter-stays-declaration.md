@@ -3,7 +3,7 @@ id: gap-ownership-active-slice-adapter-stays-declaration
 title: "ownership-active slice adapter: emit ArchGuard's proposedCut.stays
   declaration to make the 2/11 real coverage-gap candidates computable on
   released archguard 0.1.39 (no tool change needed)"
-status: todo
+status: ready
 labels:
   - gap
 parent: null
