@@ -136,3 +136,11 @@ The results are in the production evidence store under `experiment: E-HYPGEN-1` 
 - docs/analysis/arch-hypothesis-generation-prompts/verifier.txt (new)
 - docs/analysis/arch-hypothesis-generation-prompts/reviewer.txt (new)
 - plugin/test/arch-hypothesis-generation.test.mjs (new)
+
+## Blocker
+
+**2026-10-11T15:19:19.697Z — worker 未落地（exited-not-landed）**
+
+- 未落地原因：step=anti-drift: ANTI-DRIFT HARD FAIL: task gap-architecture-hypothesis-generation-shadow-stage-not-in-repo — 1 violation(s)
+- run_id：wk-prod-anchor
+- session_id：bc22e1be-d234-411e-aab5-686ddd91da3a
