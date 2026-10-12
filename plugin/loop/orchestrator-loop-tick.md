@@ -833,7 +833,7 @@ verification-round-N / 滚动派发语义 = 合规。**每个 tick 必报**本�
 **上面两个入口点共用一份判定**：`self-report-vocab-check.ts` 不自带模式表、不自带停止态规则、也不自带收敛计数
 ——它 import `self-report-vocab-audit.ts` 的 `BATCH_FLAG_PATTERNS` / `STOPPED_MARKERS` / `auditSelfReports`，
 所以同一段自述在两条命令下判定逐字相同（parity 由 `plugin/test/self-report-vocab-check.test.mjs` 钉死）。
-曾经它是同一任务第二份实现、且与主表分叉（`batch4a` / 无数字的 `Batch of` / 停止态窗口三处判定不一致），
+曾经它是同一任务第二份实现、且与主表分叉（历史批名 `batch4a` 形态 / 无数字的 `Batch of` 短语 / 停止态窗口三处判定不一致），
 2026-10-12 收敛为单一来源：`gap-self-report-vocab-audit-check-pattern-tables-diverge`。
 
 ### 2. 分类本 tick 的动作
