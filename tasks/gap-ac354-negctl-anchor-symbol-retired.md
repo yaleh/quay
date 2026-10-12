@@ -63,12 +63,12 @@ if (negCount !== afterRoot + 1) { console.error("CAUSE=negative-control-not-fals
 
 ## AC
 
-- [ ] **AC1（judge 已重锚且不减强度）**：`goals/AC-354-*.md` 的 `criterion`（经 `quay goal write` 落库、`quay goal show AC-354` 可读回）其负对照**不再引用 goal-store.ts 的任何符号或行**，且断言为 `negCount !== afterRoot + 1`；其余 8 条结构断言与 `expect` 语义逐字不变 —— 贴 `git diff`，只有负对照那几行与「为什么改」变化。
-- [ ] **AC2（正控制：目标树上为真）**：`node packages/quay/bin/quay.js goal gate AC-354` ⇒ **exit 0**，逐字贴 stdout JSON（四键）与 `.quay/gate-events.jsonl` 新增的 `item_id=AC-354` / `verdict=pass` 事件行（含 `timestamp` 与 `payload.criterionHash`，须 ≠ `c1f3186e6c56cfd3`）。
-- [ ] **AC3（负控制双向，硬规则 4 / 4c）**：① 计数强制 0 ⇒ exit 1 且 CAUSE=`negative-control-not-falsifiable`；② 计数重复计数 ⇒ exit 1。两次均贴退出码 + 逐字 stderr，并各贴一条证明变异确实改动了文本的读数。⛔ 只贴「改了判据文本」不算 —— 要贴**变异后跑出的红**。
-- [ ] **AC4（结构断言一条不减）**：逐条命令可核 —— `kernel/gate-run-options.ts` 存在；`gate/config/utils.ts` 与 `gate/factories/loader.ts` **不存在**；`goal-store.ts` 的 `from "./gate/config/` 计数 = 0；`gate/factories/utils.ts` / `gate/factories/goal.ts` 的 `from "../config/` 计数 = 0。
-- [ ] **AC5（耐久夹具）**：`packages/quay/test/ac354-negative-control-falsifiable.test.mjs` 存在，逐字抽取判据文本跑 exit 0、跑「计数强制 0」变异 exit 1，且变异无效时自身报红；`node --no-warnings --experimental-strip-types --test packages/quay/test/ac354-negative-control-falsifiable.test.mjs` 报 `fail 0`。
-- [ ] **AC6（不回归 + 不越界）**：`bash scripts/test.sh --for-task gap-ac354-negctl-anchor-symbol-retired` 绿；`git diff --name-only develop...HEAD -- packages/quay/src` 输出为空。
+- [x] **AC1（judge 已重锚且不减强度）**：`goals/AC-354-*.md` 的 `criterion`（经 `quay goal write` 落库、`quay goal show AC-354` 可读回）其负对照**不再引用 goal-store.ts 的任何符号或行**，且断言为 `negCount !== afterRoot + 1`；其余 8 条结构断言与 `expect` 语义逐字不变 —— 贴 `git diff`，只有负对照那几行与「为什么改」变化。
+- [x] **AC2（正控制：目标树上为真）**：`node packages/quay/bin/quay.js goal gate AC-354` ⇒ **exit 0**，逐字贴 stdout JSON（四键）与 `.quay/gate-events.jsonl` 新增的 `item_id=AC-354` / `verdict=pass` 事件行（含 `timestamp` 与 `payload.criterionHash`，须 ≠ `c1f3186e6c56cfd3`）。
+- [x] **AC3（负控制双向，硬规则 4 / 4c）**：① 计数强制 0 ⇒ exit 1 且 CAUSE=`negative-control-not-falsifiable`；② 计数重复计数 ⇒ exit 1。两次均贴退出码 + 逐字 stderr，并各贴一条证明变异确实改动了文本的读数。⛔ 只贴「改了判据文本」不算 —— 要贴**变异后跑出的红**。
+- [x] **AC4（结构断言一条不减）**：逐条命令可核 —— `kernel/gate-run-options.ts` 存在；`gate/config/utils.ts` 与 `gate/factories/loader.ts` **不存在**；`goal-store.ts` 的 `from "./gate/config/` 计数 = 0；`gate/factories/utils.ts` / `gate/factories/goal.ts` 的 `from "../config/` 计数 = 0。
+- [x] **AC5（耐久夹具）**：`packages/quay/test/ac354-negative-control-falsifiable.test.mjs` 存在，逐字抽取判据文本跑 exit 0、跑「计数强制 0」变异 exit 1，且变异无效时自身报红；`node --no-warnings --experimental-strip-types --test packages/quay/test/ac354-negative-control-falsifiable.test.mjs` 报 `fail 0`。
+- [x] **AC6（不回归 + 不越界）**：`bash scripts/test.sh --for-task gap-ac354-negctl-anchor-symbol-retired` 绿；`git diff --name-only develop...HEAD -- packages/quay/src` 输出为空。
 
 ## DoD
 
@@ -90,3 +90,53 @@ if (negCount !== afterRoot + 1) { console.error("CAUSE=negative-control-not-fals
 ## Evidence
 
 （filing 轮读数，供 worker 复核起点）本轮直跑 AC-354 判据：exit 1，`CAUSE=negative-control-not-falsifiable`（`.quay/gate-events.jsonl` `timestamp=2026-10-12T21:09:36.859Z`、`criterionHash=c1f3186e6c56cfd3`、`verdict=fail`）。逐条复跑：8 条结构断言全通过，第 9 条负对照转假。锚点符号消失的机械证据：`git log -S'./kernel/gate-run-options.ts' -- packages/quay/src/goal-store.ts` 只回 `56ba0b61b`（加入）与 `411bb34c7`（移除）；`grep -nE 'import\s*\{\s*resolveAcceptanceTimeoutMs' packages/quay/src/goal-store.ts` 零命中。上游 stale 读数：`.quay/gate-events.jsonl` 里 `item_id=AC-242` 的一条 `reason` 逐字写着 `stale-pass: frozen achieved AC(s) whose criterion is CURRENTLY false: AC-353, AC-354, AC-355`。
+
+### Worker round（gap-ac354-negctl-anchor-symbol-retired，2026-10-13）
+
+**AC1 —— 重锚 diff（只有负对照 + origin 变化）**：`git diff <fork> -- goals/AC-354-*.md` 的两个 hunk 是：① 负对照 6 行 → 4 行；② `origin:` 1 行 → 10 行。`expect:` 一行未动，其余 8 条结构断言行未动，块标量指示符 `criterion: |` 亦未动（⛔ 不出现 `|-` 重排）。新负对照不触碰 goal-store.ts 的任何行：`scratchWithRegression=NEGCTL_LINE+rd(path.join(src,"goal-store.ts"))`，断言 `negCount!==afterRoot+1`。
+
+**AC2 —— 正控制（主检出 `node packages/quay/bin/quay.js goal gate AC-354` ⇒ exit 0）**
+
+stdout 逐字（JSON 四键）：
+
+```json
+{"fork_point":"162f8c380ed1dd9267167cc791ef8727fd13269d","before":{"root_to_gate_config":1,"factories_to_config_lines":5},"after":{"root_to_gate_config":0,"factories_to_config_lines":0},"negative_control_count_on_scratch_regression":1}
+```
+
+`.quay/gate-events.jsonl` 逐字（`item_id=AC-354` / `gate=goal` / `verdict=pass`）：
+
+```json
+{"id":"734d6274-e51b-4b61-87aa-80d8899150c2","item_id":"AC-354","pipeline_id":"AC-354","gate":"goal","actor":"goal-amend","verdict":"pass","timestamp":"2026-10-12T21:31:11.410Z","payload":{"reason":"acceptance passed (exit 0)","criterionHash":"979cbd96153fc08a","evaluationRoot":"/data/home/yale/work/quay","treeSha":"a6240829dadcaf85f145194bcc32b12869f9a566"}}
+```
+
+`criterionHash = 979cbd96153fc08a ≠ c1f3186e6c56cfd3`。独立读数（同一量换一个来源）：用 shipped `criterionFingerprint()` 对改前 / 改后的判据文本各算一次 —— 改前 `c1f3186e6c56cfd3`（与本任务引用的旧 hash 逐字相同），改后 `979cbd96153fc08a`。
+
+⚠️ 读数口径：`payload.criterionHash` 由**修订面**（`actor=goal-amend`，即 `quay goal write`）与 `goal-sweep` 落账；`quay goal gate` 自己写的事件**不带**该字段（本轮 21:09 那条 fail 事件同样没有）—— 故这里贴的是 goal write 落下的那条 pass 事件，不是 dry-run 输出。
+
+**AC3 —— 负控制双向（退出码 + 逐字 stderr + 文本确已改变的读数）**
+
+基线判据文本 sha256 = `0d4feca513994655135b50a550f00e95fc50ef1cd96ac71abb0b7efe57977909`。两臂都只改一行：`const negCount=countRootToGateConfig(scratchWithRegression);`。
+
+① 变异为 `const negCount=0;` ⇒ 变异后 sha256 `0e8ce668638da9bbc02558bdca3ce2835a1eb7b1bcb08f160c8c0f2bf53c9af0`（≠ 基线 ⇒ 文本确实改了），`EXIT=1`，stderr 逐字：
+
+```
+CAUSE=negative-control-not-falsifiable -- a scratch copy of goal-store.ts with the retired import prepended did not raise the ./gate/config/ count by exactly one (after=0, scratch=0); the counter cannot be trusted to detect a real regression
+CAUSE=before-after-scan-red -- the scan above printed the specific CAUSE
+```
+
+② 变异为 `const negCount=afterRoot+2;` ⇒ 变异后 sha256 `a8a73605739648f1827ec9fe66f8f2abcaf588eef2a01ee5e682f292837a2fd5`（≠ 基线），`EXIT=1`，stderr 逐字：
+
+```
+CAUSE=negative-control-not-falsifiable -- a scratch copy of goal-store.ts with the retired import prepended did not raise the ./gate/config/ count by exactly one (after=0, scratch=2); the counter cannot be trusted to detect a real regression
+CAUSE=before-after-scan-red -- the scan above printed the specific CAUSE
+```
+
+⛔ ② 在旧写法 `negCount<1` 下会**通过**（2 ≥ 1）—— 它钉住的正是本任务「从 `>=1` 加强为**恰好** `afterRoot+1`」那一步；漏检（0）与重复计数（>1）现在都判红。
+
+**AC4 —— 8 条结构断言逐条命令可核（worktree）**：① `packages/quay/src/kernel/gate-run-options.ts` 存在（107 行）；② `gate/config/utils.ts` 不存在；③ `gate/factories/loader.ts` 不存在；④ `gate/config/loader.ts` 命中 1 处、`gate/config/index.ts` 命中 2 处 `kernel/gate-run-options.ts`；⑤ `goal-store.ts` 的 `from "./gate/config/` 计数 = 0；⑥ `gate/factories/utils.ts` 的 `from "../config/` 计数 = 0；⑦ `gate/factories/goal.ts` 的 `from "../config/` 计数 = 0。
+
+**AC5 —— 耐久夹具**：`node --no-warnings --experimental-strip-types --test packages/quay/test/ac354-negative-control-falsifiable.test.mjs` ⇒ `pass 5 / fail 0`。五个用例：抽取逐字性与旧锚点确已消失（`scratchBefore` / `.replace(` / 旧符号作行正则 —— 三个谓词在判据文本上均不命中）+ 本树正控制（bash 臂，读回 JSON 四键并按读数断言 `negative_control_count_on_scratch_regression === after.root_to_gate_config + 1`）+ 生产 shell（`/bin/sh`）正控制 + 变异臂 A（计数→0）与 B（计数→重复）各自的红与 CAUSE。两处变异臂都断言「文本确实变了」（sha256 或字符串不等，未变即报红，⛔ 不静默通过）。
+
+**AC6 —— 不回归 + 不越界**：`bash scripts/test.sh --for-task gap-ac354-negctl-anchor-symbol-retired --allow-thin` ⇒ `EXIT=0`（scoped 静态检查全 PASS —— test-framework-policy / test-group-downgrade / test-isolation / tmp-leak-pairing / checked-in-write / touches-one-entry-one-path / landing-target / import-graph 等；新夹具 `fail 0`）。`git diff --name-only develop...HEAD -- packages/quay/src` ⇒ **空输出**。anti-drift（fan-in 的同一入口）：`ANTI-DRIFT OK: task gap-ac354-negctl-anchor-symbol-retired — 1 actual file(s), all within declared Touches (3 glob(s))`。
+
+**落地读数（DoD 1）**：`git show develop:goals/AC-354-*.md` 已含重锚后的负对照，且与 worktree 副本 `cmp` 逐字节相同 —— 主检出 `quay goal write` 的提交经 doc→develop 同步已到 develop（`develop` = `b72e605bd goals: AC-354 field:goal,criterion,origin by cli:4088076`）。worktree 内亦有一份同内容提交（`845d203f3` / `0f7216804`），故任务分支的 delta 里也带着它。
