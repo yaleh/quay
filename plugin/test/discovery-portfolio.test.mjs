@@ -38,6 +38,7 @@ import {
   assignFindingDomain, coverageMap, autonomousEvidenceFor, methodClaimsDomain, methodTrust,
   NON_CONTRIBUTING_METHOD_STATUSES,
 } from "../../docs/analysis/discovery-portfolio.mjs";
+import { METHOD_STATUSES } from "../../docs/analysis/discovery-method-registry.mjs";
 import { carrierFile, resolveCarrierRoot } from "../../docs/analysis/discovery-experience-ledger.mjs";
 
 const tmpDirs = [];
@@ -549,15 +550,20 @@ test("(b) coverage: a retired or contaminated method adds nothing; a live one do
   assert.equal(methodClaimsDomain({ applicability: sig }, "state-transitions"), "state transitions");
   assert.equal(methodTrust({ status: "retired" }, { contaminatedVerdictIds: [] }).why, "RETIRED");
   // The contribution rule is an inspectable list, not an inline comparison: `retired` is the only
-  // NON-contributing status, so a status the registry adds later (`trial`) is a pre-active method that
+  // NON-contributing status, so a status the registry declares but has not promoted (`draft`, and `trial`
+  // since gap-discovery-evidence-level-teaching-vs-independent landed it) is a method still in play and
   // lifts a domain to `assisted` rather than silently dropping out. An UNRECOGNISED status is refused,
-  // not counted — that is the half that must fail closed.
+  // not counted — that is the half that must fail closed (硬规则 3b).
   assert.deepEqual(NON_CONTRIBUTING_METHOD_STATUSES, ["retired"]);
-  assert.deepEqual(methodTrust({ status: "trial" }), {
+  assert.deepEqual(["draft", "trial", "active"].map((s) => methodTrust({ status: s }, { contaminatedVerdictIds: [] }).contributes), [true, true, true]);
+  assert.equal(methodTrust({ status: "retired" }, { contaminatedVerdictIds: [] }).contributes, false);
+  assert.deepEqual(methodTrust({ status: "not-a-status" }), {
     method_id: null, version: null, status: null, verdict_ref: null,
     contaminated: false, contributes: false, why: "STATUS_NOT_IN_VOCAB",
   });
-  assert.equal(methodTrust({ status: "active" }, { contaminatedVerdictIds: [] }).contributes, true);
+  // A status the registry gains later must not silently flip to "contributes": the module's own
+  // vocabulary is the list this reads, so the two can never drift apart without a refusal.
+  assert.ok(METHOD_STATUSES.includes("retired") && METHOD_STATUSES.includes("active"));
 
   // With only the retired and contaminated methods present, the same domain grades `none` — the 1-versus-2
   // arm proves the two refusals above are checks and not a blanket refusal of every method.
