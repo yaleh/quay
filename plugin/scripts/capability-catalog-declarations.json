@@ -401,7 +401,8 @@
     "shipped-set-rules.ts": "发布产物(plugin artifact)里【不该出现的东西】还有没有剩下,以及产物自己有多大 —— 规则声明在 plugin/shipped-set-rules.txt(目录/模式,不是文件名清单:test/、tests/、fixtures/、checker-mutation-cases/、*.test.*/*.spec.*、*-baseline.json/*-exceptions.txt/*-exemptions.*/*-violations.txt/*-violators.txt 及本规则/基线文件自身),本模块是它【唯一】的解析器与匹配器。它对一份已装配的产物给出两类读数:①规则排除、却仍然存在的路径(逐条列举 + 命中的那条规则)及其 files/bytes/.sh 有效行三个量 —— 这就是只降不升棘轮的三个轴,正确发布时应恒为 0;②产物自身的三项总量。同一份规则同时驱动【发布装配】(publish-dist-branch.sh 的 rsync --exclude,经 --print-rsync-excludes)与【发布门禁断言】(verify-plugin-channel-assertions.ts 的 shipped-set-clean),所以「排除什么」与「断言什么」结构上不可能各说各话(tasks/gap-shipped-plugin-tree-excludes-dev-only-content-and-has-a-shrink-only-size-ratchet;GOAL-029「收窄发布集合」,人 2026-10-07 裁定)?",
     "task-granularity-advice.ts": "At filing time, which OPEN tasks already declare the files this draft will touch (merge candidates), and how has each of those files behaved historically (landed tasks / changed lines / worker rounds)? And — across task sizes — what is the real worker cost per unit of landed work (worker-hours per 1000 changed lines), with a re-runnable cost model?",
     "quay-init-closure-assertion.ts": "Is every relative path of a REAL quay-init laydown a member of the SPEC §6 six-item closed set (∪ tasks/ descendants) with ZERO .claude/{skills,workflows,agents} / plugin/scripts copies (closed-set MEMBERSHIP — distinct from the ratchet's count-only judgment; NOT-EVALUATED when the laydown cannot run) (SPEC AC168 收缩本体, tasks/gap-quay-init-closure-shrink-body)?",
-    "task-status-events-reconcile.ts": "本仓库 .quay/task-status-events.jsonl 里【缺了】的 task 状态转移，能不能【只从 git】补齐 —— 即把载体（v0 与 v1 两代一起读，逐行三值分类 v0/v1/corrupt）与 git log --no-merges <ref> -- tasks/ 上真实发生过的 status 行变更（每个非 merge 提交上，任务文件在【该提交】与【其第一父】两处的 frontmatter status 经同一个 parser 读出后不同）逐条配对，报出每条边 from→to 的 git 计数 / 事件计数 / 缺失数，并且只对【有 git 证据而载体没有】的转移（--apply 时）追加 inferred:true 事件：at 只许取那个提交的 committer 时间、evidence.commit 就是那个提交、actor.kind 记 unknown（提交消息是【声称】不是按位置读数，⛔ 不从模板文案猜 writer）；因此「崩溃与接线前窗口留下的空洞」第一次有了一个默认只读、可幂等重跑（第二次 --apply 追加 0）的收敛口，且【没有任何 git 证据的转移永不凭空造事件】（tasks/gap-task-status-events-contract-v1-all-driver-writers Plan §4）？"
+    "task-status-events-reconcile.ts": "本仓库 .quay/task-status-events.jsonl 里【缺了】的 task 状态转移，能不能【只从 git】补齐 —— 即把载体（v0 与 v1 两代一起读，逐行三值分类 v0/v1/corrupt）与 git log --no-merges <ref> -- tasks/ 上真实发生过的 status 行变更（每个非 merge 提交上，任务文件在【该提交】与【其第一父】两处的 frontmatter status 经同一个 parser 读出后不同）逐条配对，报出每条边 from→to 的 git 计数 / 事件计数 / 缺失数，并且只对【有 git 证据而载体没有】的转移（--apply 时）追加 inferred:true 事件：at 只许取那个提交的 committer 时间、evidence.commit 就是那个提交、actor.kind 记 unknown（提交消息是【声称】不是按位置读数，⛔ 不从模板文案猜 writer）；因此「崩溃与接线前窗口留下的空洞」第一次有了一个默认只读、可幂等重跑（第二次 --apply 追加 0）的收敛口，且【没有任何 git 证据的转移永不凭空造事件】（tasks/gap-task-status-events-contract-v1-all-driver-writers Plan §4）？",
+    "carrier-retention.ts": "每个 *.jsonl 轮载体（meta-driver / goal / verification / outer / worker / promotion-round）【能不能在不悄悄改写任何读取者读数的前提下被有界化】 —— 具体说：每个载体的每个非测试读取者落在哪个位置（硬规则 2 按位置不按关键词）、它真正需要的历史窗口是【全量 / 最近 N / 某纪元之后】哪一档、以及把整行前缀搬进 <carrier>/archive/<carrier>/<carrier>.<YYYY-MM-DD>[-N].jsonl[.gz] 之后，同一读取者读出的值是否逐字不变（archive 是【搬移】不是删除：分段按序 + live 尾的字节拼接与原文件逐字节相等，并发 appender 一个字节不丢不重，中途失败时 live 载体逐字节不变，读取者经 materializeAllRecords 拿到与归档前同形的全量历史）。默认【关闭】：.quay/config.yml 无 retention: 段 ⇒ 一次写入都不做；--dry-run 只报计划不落盘。tasks/gap-driver-round-carriers-unbounded-growth-retention-design"
   },
   "GUARD_OBJECT": {
     "manager-tick-log-check.sh": "file:orchestration/manager-tick-log.md",
@@ -788,7 +789,8 @@
     "shipped-set-rules.ts": "每轮",
     "task-granularity-advice.ts": "按需",
     "quay-init-closure-assertion.ts": "按需",
-    "task-status-events-reconcile.ts": "按需"
+    "task-status-events-reconcile.ts": "按需",
+    "carrier-retention.ts": "按需"
   },
   "INVALIDATION": {
     "verify-plugin-channel-assertions.ts": "失效前提：Claude Code plugin 仍是唯一的发布/安装渠道，且 release.yml 的 verify-plugin-channel 仍是发布门禁（门禁若移到别处，断言实现不变但调用点须同步）；断言依赖的直接量仍存在——VERSION、.claude-plugin/plugin.json、bin/quay --version、项目 .quay/plugin 链接、.quay/config.yml 的 providers.native、/proc/<pid>/cgroup、.quay/server.json、.quay/serve.log、installed_plugins.json。任一量改由另一个载体承载（例如版本改从被测对象自报接口取）⇒ 本条口径需同步，否则会把读不懂误判为合格。",
@@ -1166,7 +1168,8 @@
     "shipped-set-rules.ts": "失效前提:①发布装配仍是 plugin/scripts/publish-dist-branch.sh 的 rsync 那一步 —— 渠道换成别的机制、或排除改由构建器而非 rsync 表达时,--print-rsync-excludes 这半边退休(断言半边仍有效,但规则与装配须重新对齐);②发布门禁仍是 plugin/scripts/verify-plugin-channel-assertions.ts(断言若移到别处,调用点须同步);③esbuild 仍把内联模块的路径以【相对】形式写进产物 —— 若改为绝对路径或不写路径,bytes 轴可以重新设门,SIZE_GATED_AXES 只门 files/shLines 的取舍须重估(实测:同一份源码在不同构建树位置下相差 225,828 字节,同一构建重复跑相差 ±3 字节);④产物仍由「源码树 rsync + 删原始 .ts + 打 dist bundle」三步装配 —— 装配形变会改变三个总量的含义。",
     "task-granularity-advice.ts": "失效前提：生产载体 .quay/worker-outcome.jsonl 仍由 worker-driver 按次写记录、任务落地仍以 Merge branch 'develop' into task/<id> 提交为可观测落点（体量取自其 develop 一侧父提交的 numstat）、且 ## Touches 仍是任务的声明面（peers 按解析后的 Touches 判重叠）；若落地不再产生该 merge 提交或改由别的落地路径、或 outcome 记录粒度改为按轮而非按次、或任务粒度不再由 Touches/体量判断，本条无对象，退休",
     "quay-init-closure-assertion.ts": "失效前提：quay-init.sh 会写入 §6 闭集之外的任何路径（.claude/{skills,workflows,agents}、plugin/scripts、orchestration、docs/analysis、.quay/runtime 副本）；若 AC168 收缩本体落地、写入面收敛到六项闭集，本检查器判定闭集成员（仍有对象，不退休）",
-    "task-status-events-reconcile.ts": "失效前提：转移事件载体仍是 .quay/task-status-events.jsonl（v0 行按原样读作 v0、v1 行带 schema=task-status-event/v1 与 evidence.commit），且状态变更仍落在 tasks/*.md 的 frontmatter status: 行上、仍由 git 提交承载。任一改变（例如状态改由另一个载体承载、或 v1 记录的 evidence 字段改名/改语义）⇒ 配对与幂等判据须同步，否则会把「读不懂」伪装成「已覆盖」。"
+    "task-status-events-reconcile.ts": "失效前提：转移事件载体仍是 .quay/task-status-events.jsonl（v0 行按原样读作 v0、v1 行带 schema=task-status-event/v1 与 evidence.commit），且状态变更仍落在 tasks/*.md 的 frontmatter status: 行上、仍由 git 提交承载。任一改变（例如状态改由另一个载体承载、或 v1 记录的 evidence 字段改名/改语义）⇒ 配对与幂等判据须同步，否则会把「读不懂」伪装成「已覆盖」。",
+    "carrier-retention.ts": "失效前提：① 六个载体的读取者名单仍是本文件 census 的那一份（新增读取者 / 某读取者把窗口从「最近 N」改成「全量」会使「归档后读数不变」这条判据的覆盖面失效，须重新普查）；② .quay/config.yml 仍是 retention 策略的唯一来源且默认缺省（若默认翻成 enabled，则「无配置即零写入」这条 AC5 判据失去判据源）；③ 轮载体仍是 append-only 的「一行一 JSON」形态（若某载体改写成原地更新或非行式格式，按行切分的前提消失）"
   },
   "LAST_REAFFIRMED": {
     "verify-plugin-channel-assertions.ts": "2026-10-06",
@@ -1544,7 +1547,8 @@
     "shipped-set-rules.ts": "2026-10-07",
     "task-granularity-advice.ts": "2026-10-07",
     "quay-init-closure-assertion.ts": "2026-09-08",
-    "task-status-events-reconcile.ts": "2026-10-13"
+    "task-status-events-reconcile.ts": "2026-10-13",
+    "carrier-retention.ts": "2026-10-13"
   },
   "MATCHING": {
     "verify-plugin-channel-assertions.ts": "position",
@@ -1922,7 +1926,8 @@
     "shipped-set-rules.ts": "position",
     "task-granularity-advice.ts": "position",
     "quay-init-closure-assertion.ts": "enumerative",
-    "task-status-events-reconcile.ts": "position"
+    "task-status-events-reconcile.ts": "position",
+    "carrier-retention.ts": "position"
   },
   "CONSUMER": {
     "verify-plugin-channel-assertions.ts": ".github/workflows/release.yml 的 verify-plugin-channel 步骤（CI 门禁调用点）与发布前本地演练（README「发布前本地演练」）。",
@@ -2103,7 +2108,8 @@
     "shipped-set-rules.ts": "谁按:①scripts/test.sh 的 plugin/test/shipped-set.test.mjs(双控:真产物必须 0 违规且三轴不超基线、把排除列表从 rsync 行拿掉必须红、往干净产物塞 foo.test.mjs 必须红、棘轮 over/raised/reanchor 三向、零规则必须 NOT-EVALUATED);②.github/workflows/release.yml 的 verify-plugin-channel 两个 scope 步骤经 verify-plugin-channel-assertions.ts 的 shipped-set-clean 断言按(先判规则排除内容为 0,再判 files/shLines 不超记录值);③人按:本文件的 CLI —— --check <artifactDir>(读一份已装配的产物;退出 0/1/2)、--reanchor(从产物【自己的读数】重锚,有规则排除内容在时拒绝)、--print-rsync-excludes(publish-dist-branch.sh 用它生成 rsync --exclude)。⛔ 本模块【不进产物】(与 verify-plugin-channel-assertions.ts 同一条纪律):它的两个输入 —— 规则 plugin/shipped-set-rules.txt 与基线 plugin/shipped-set-baseline.json —— 都被排除规则本身排除了,所以一份打好的 bundle 只可能回答 NOT-EVALUATED;它永远从源码检出运行。数据文件:规则 plugin/shipped-set-rules.txt、基线 plugin/shipped-set-baseline.json(三轴只降不升,且相对 git HEAD 的值也只许降);条件=要判『发布集合是否在重新长回开发期内容、体积是否在回升』—— 这正是 GOAL-029 的取假点",
     "task-granularity-advice.ts": "谁按：立案者 / quay-file-task 第 2b 步（plugin/skills/quay-file-task/SKILL.md）在立案前查合并候选与每文件历史时按（node --experimental-strip-types plugin/scripts/task-granularity-advice.ts --touches <草稿 Touches> --json）；条件=要判「这条草稿是否与已有开放任务在实质源码文件上重叠」，或要复核 docs/analysis/task-granularity-and-throughput-2026-10-07.md 的体量读数时跑 --report",
     "quay-init-closure-assertion.ts": "谁按：其自有测试 + 周期复核（当前未接进 run_static_checks @static-tier——AC2 只要求可运行+NOT-EVALUATED 可区分）；条件=枚举一次真实 quay-init laydown 的相对路径、断言均 ∈ 六项闭集 ∪ tasks/ 后代且零扩展/脚本副本",
-    "task-status-events-reconcile.ts": "谁按：本仓库的人或机制在【源码检出】里判断「任务状态事件的缺口在哪」时按（CLI：--root <repo> / --ref develop / --since <ISO> / --apply / --json，用法见其 --help）；覆盖读数（per-edge coverage 表）也由本命令产出；条件=载体事件数少于 git 实际发生的状态转移数（例如某个 driver writer 尚未接线、或一次写入崩溃），需要从 git 把缺失的转移补回载体而不许凭空造事件。⛔ 本模块【不进产物】：它读的 .quay/task-status-events.jsonl 与 tasks/ 的 git 历史只在本仓库检出里齐备，没有任何运行时面（driver / skill / probes / workflow）会启动它，因此本声明按 catalog 惯例只写机制与条件、不写带解释器前缀的调用形 —— catalog 声明不是 build-plugin-dist 的入口面（INVOCATION_RE：catalogs are NOT entrypoints）。"
+    "task-status-events-reconcile.ts": "谁按：本仓库的人或机制在【源码检出】里判断「任务状态事件的缺口在哪」时按（CLI：--root <repo> / --ref develop / --since <ISO> / --apply / --json，用法见其 --help）；覆盖读数（per-edge coverage 表）也由本命令产出；条件=载体事件数少于 git 实际发生的状态转移数（例如某个 driver writer 尚未接线、或一次写入崩溃），需要从 git 把缺失的转移补回载体而不许凭空造事件。⛔ 本模块【不进产物】：它读的 .quay/task-status-events.jsonl 与 tasks/ 的 git 历史只在本仓库检出里齐备，没有任何运行时面（driver / skill / probes / workflow）会启动它，因此本声明按 catalog 惯例只写机制与条件、不写带解释器前缀的调用形 —— catalog 声明不是 build-plugin-dist 的入口面（INVOCATION_RE：catalogs are NOT entrypoints）。",
+    "carrier-retention.ts": "谁按：①人 / 外层在决定「要不要对某个 workspace 开启 retention」之前，用本模块的 CLI（--root <workspace> --dry-run）看每个载体将被切成几段、各多少字节，再据此决定是否授权——本任务【不】对任何生产 .quay 写入，开启是另一次显式人授权动作；②需要全量历史的读取者改调本模块导出的 materializeAllRecords(livePath, dest)，把分段拼回一个文件后按原样读；只需要尾部的读取者不变。条件=要判「把这个载体有界化会不会改变任何读取者的读数」。⛔ 本模块【不进产物、也【无】运行时自动调用面】：它读的 *.jsonl 只在本仓库检出里齐备，没有任何 driver / skill / probe / workflow 会启动它，因此本声明按 catalog 惯例只写机制与条件、不写带解释器前缀的调用形 —— catalog 声明不是 build-plugin-dist 的入口面（INVOCATION_RE：catalogs are NOT entrypoints）。"
   },
   "SUPERSEDED": {
     "send-keys-verified.sh": "REMOVED 2026-08-10 (gap-retired-script-still-callable, human ruling) — superseded by send-keys-reliable.sh under outer ruling F (2026-08-04); its md5 pane-hash criterion is ADR-016-forbidden. Deleted with its test (send-keys-verified.test.mjs) and leak doc (send-keys-verified-test-leaks-tmux-servers.md). Crystallization residue poisons context — the implementation must NOT exist.",
