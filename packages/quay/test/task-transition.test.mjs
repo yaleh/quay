@@ -46,6 +46,7 @@ import {
   statusEventAppendFailureCount,
   resetStatusEventAppendFailureCount,
   gitBlobSha,
+  taskStatusEventId,
   normalizeActor,
   taskStatusEventsPath,
   taskStatusEventsEpochPath,
@@ -220,6 +221,48 @@ test("(a) appendTaskStatusEvent: the v1 record shape, and `eventId` is STABLE ac
 test("normalizeActor: a bare string names an entry point, so the class is recorded as `unknown` (never guessed)", () => {
   assert.deepEqual(normalizeActor("ready-pool-check --apply"), { kind: "unknown", id: "ready-pool-check --apply" });
   assert.deepEqual(normalizeActor({ kind: "fan-in", id: "x" }), { kind: "fan-in", id: "x" });
+});
+
+// ── 3b. a CREATION is a transition with no `from` ────────────────────────────────────────────────
+// gap-task-status-events-abi-writes-and-creation: the ABI write surface creates tasks
+// (`quay task create`), and a creation IS a status transition — but it has no prior status. The
+// record must say `from:null`, and the distinction that matters is null vs ABSENT: JSON.stringify
+// DROPS an `undefined` value, so a create path that left `from` unset would emit a record whose
+// `from` key is missing entirely — and every consumer would read that as "not recorded" (缺值 = 未查)
+// rather than "this task did not exist". Same carrier, same reader, two different facts.
+test("(a-create) a creation appends a v1 record with `from:null` — null, NOT an absent key", () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "task-status-events-create-"));
+  try {
+    const written = appendTaskStatusEvent(root, {
+      taskId: "NEW-1",
+      from: null,
+      to: "todo",
+      kind: "create",
+      actor: { kind: "cli", id: "cli:1234" },
+      evidence: { commit: null, commitAbsentReason: "the store's tasks dir is not inside a git work tree" },
+    });
+    assert.equal(written.ok, true, `write failed: ${written.ok === false ? written.reason : ""}`);
+
+    const line = readTaskStatusEventCarrier(root).lines[0];
+    assert.equal(line.klass, "v1", "a create record is a v1 record like any other — not a v0 line, not corrupt");
+    const rec = line.record;
+    assert.ok("from" in rec, "`from` must be PRESENT on a create record — an absent key would mean 'not recorded'");
+    assert.equal(rec.from, null, "…and its value must be null: the task had no prior status");
+    assert.equal(rec.to, "todo");
+    assert.equal(rec.kind, "create");
+    // A null commit is likewise present-with-null and carries WHY (the Plan's "commit:null plus a
+    // reason") — "no commit because this path never commits" must not look like "the commit failed".
+    assert.ok("commit" in rec.evidence);
+    assert.equal(rec.evidence.commit, null);
+    assert.equal(rec.evidence.commitAbsentReason, "the store's tasks dir is not inside a git work tree");
+
+    // The dedup id is computed over the transition, and a null `from` must not collapse it into some
+    // other pair (the id falls back to `at` when there is no commit — a create has neither).
+    const sameId = taskStatusEventId({ taskId: "NEW-1", from: null, to: "todo", commit: null, at: rec.at, writer: rec.producer.writerModule });
+    assert.equal(sameId, rec.eventId, "a retried create append must compute the SAME eventId");
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
 });
 
 // ── 4b. seq under two concurrent writer PROCESSES ────────────────────────────────────────────────

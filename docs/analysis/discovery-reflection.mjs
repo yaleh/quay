@@ -873,6 +873,32 @@ export const APPLIES_VOCAB = Object.freeze(["yes", "no", "undetermined"]);
  *  because it does not cover the case. It is NOT a failed reading and NOT a failed method. */
 export const OUTCOME_NOT_APPLICABLE = "not-applicable";
 
+/** The report-only state a non-`independent` level may reach. Spelled once, so no reader has to
+ *  remember which word the cap uses. */
+export const PROMOTION_REPORT_ONLY_STATUS = "trial";
+
+/**
+ * THE LEVEL CAP — the promotion path's own decision, as a NAMED function.
+ *
+ * A correct prediction moves the candidate; WHICH state it moves to is decided here and nowhere else:
+ * an `independent` verdict licenses `active`, and every OTHER level (`teaching`, `transfer`,
+ * `production-open`, and `unlabelled` for a record that never declared one) caps at the report-only
+ * `trial`, which `activeMethods()` never hands to a consumer.
+ *
+ * ⛔ WHY IT IS EXTRACTED (task gap-open-discovery-periodic-baseline-vs-guided-gain, AC (e)). A paired
+ *   baseline-vs-guided gain round is `production-open` evidence and must NEVER be read as independent
+ *   generalization evidence. That claim is only checkable against the REAL decision, so the decision
+ *   is a function a caller can name and a test can call — not an inline ternary a test would have to
+ *   re-implement (which would then agree with itself rather than with production).
+ *
+ * @param {unknown} level  any evidence level, or anything else (read through `evidenceLevelOf`, so an
+ *                         absent/garbage value reads as `unlabelled` and takes the STRICT branch).
+ * @returns {"active"|"trial"}
+ */
+export function promotionStatusForLevel(level) {
+  return isIndependentEvidenceLevel(level) ? "active" : PROMOTION_REPORT_ONLY_STATUS;
+}
+
 /**
  * The verifier prompt. It asks for the APPLICABILITY decision FIRST, then — only if the method covers
  * the target — the blind prediction, WITHOUT telling the verifier that case's ground-truth role.
@@ -1193,7 +1219,7 @@ async function runGeneralization({ candidate, heldOutCase, registry = [], model,
   //   to a consumer (`activeMethods()` returns only `status:"active"`) and it is never shown as
   //   generalization. The candidate still moves (the reading is real) — it just moves to a state that
   //   cannot be mistaken for a proof.
-  const promotedStatus = isIndependentEvidenceLevel(level) ? "active" : "trial";
+  const promotedStatus = promotionStatusForLevel(level);
   if (correct) {
     return {
       ok: true, called: true, outcome: "evaluated", model_call: call, applies, applies_reason: appliesReason,

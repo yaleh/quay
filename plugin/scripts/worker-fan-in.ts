@@ -984,6 +984,23 @@ const SIG_NOT_OK_RE = /^not ok\b(?:\s+\d+)?\s*-\s*(.*)$/i;
 const SIG_ASSERTION_RE = /AssertionError(?:\s*\[[^\]]*\])?:\s*(.+)$/;
 /** 断言文本的有界前瞻行数（`__PERFILE__ passed=false` 之后紧跟 TAP 明细块）。 */
 const SIG_ASSERTION_LOOKAHEAD = 8;
+// ── node spec reporter（本仓库 `scripts/test.sh` 的真实输出形态，⛔ 不是 TAP）────────────────────────
+// gap-fan-in-baseline-comparison-blind-to-spec-reporter-misparks-develop-wide-red：真实 suite 日志里
+// `^not ok` 一行也没有（2026-10-13 生产读数：0 条），失败以 `✖ <test name> (<ms>)` 出现在
+// `✖ failing tests:` 块下，身份由 `test at <file>:<line>:<col>` 给出 ⇒ 旧解析器恒 `no-failure-signature-lines`
+// （基线侧）⇒ A/B `not-evaluated` ⇒ 一份 develop 本来就红的日志被当成归因不出的基建之谜，健康的任务被停派。
+const SIG_TEST_AT_RE = /^test at\s+(\S+?):(\d+):(\d+)\s*$/;
+/** `✖ <test name> (<ms>)` —— 只认【紧跟在 `test at` 之后】的那一条：日志里 `✖ failing tests:`（块头）与
+ *  文件级汇总里的独立 `✖` 行都没有 `test at` 配对，把它们当失败点会凭空造出签名。 */
+const SIG_SPEC_FAIL_RE = /^✖\s+(.+)$/u;
+/** 测试名尾部的 ` (<ms>)` —— **必须剥掉**：它是耗时，同一红点在两棵树上不同（实测 15439.958259ms vs
+ *  12802.349732ms）⇒ 不剥会把「同一个红点」判成 `changed-assertion`（假红）。 */
+const SIG_SPEC_DURATION_RE = /\s+\([0-9]+(?:\.[0-9]+)?ms\)$/;
+/** 错误码行（`code: 'ERR_STRING_TOO_LONG'`）——**稳定**的失败成因 token，作为 detail 并入签名文本
+ *  （⛔ 不取 `Error: …` 消息行 / 栈帧：那两者含路径与易变量，取了会让两棵树对不上）。 */
+const SIG_SPEC_CODE_RE = /^\s*code:\s*['"]([^'"]+)['"]\s*$/;
+/** 从 `test at` 行起、找配对的 `✖` 行与错误码行的有界前瞻（一个 spec 失败块的长度量级）。 */
+const SIG_SPEC_LOOKAHEAD = 40;
 
 /** 绝对路径 → repo-relative；不在 root 下 / 无 root ⇒ null（**读不懂的独立取值**，⛔ 不削成「看着像
  *  repo-relative」的假路径——那会把两棵树上不同的文件判成同一个）。相对路径原样归一。 */
@@ -998,22 +1015,41 @@ function signatureRelPath(token: string, root: string | null): string | null {
   return null;
 }
 
-/** suite 日志 → 失败签名集合（三态）。识别两类失败行（本仓库与第三方 TAP 的共同形态）：
+/** suite 日志 → 失败签名集合（三态）。识别三类失败行（本仓库与第三方 TAP 的共同形态）：
  *  ① `__PERFILE__ duration_ms=… <path> passed=false` —— 文件级失败标记；断言文本取紧随其后的第一条
  *     `AssertionError: …`（有界前瞻），读不到 ⇒ ""（⛔ 不伪造文本）。
  *  ② `^not ok [N] - <head>: <detail>` —— TAP 行；`<head>` 是测试/文件身份，`<detail>` 是断言文本。
- *  两类都按 `root` 归一文件身份。一条签名也没解析出、但**确实见到了**失败行 ⇒ `evaluated:false`
- *  （成因 `failure-lines-without-resolvable-identity`，⛔ 不与「日志里没有失败行」同形）。 */
+ *  ③ node **spec reporter**：`test at <file>:<line>:<col>` + 紧随其后的 `✖ <test name> (<ms>)`，
+ *     块内的 `code: 'ERR_…'` 作为 detail（gap-fan-in-baseline-comparison-blind-to-spec-reporter-…
+ *     ——真实 suite 日志一个 `^not ok` 都没有，只认 TAP 等于对生产日志全盲）。
+ *  三类都按 `root` 归一文件身份。一条签名也没解析出、但**确实见到了**失败行 ⇒ `evaluated:false`
+ *  （成因 `failure-lines-without-resolvable-identity`，⛔ 不与「日志里没有失败行」同形）。
+ *
+ *  **粒度归并**：`__PERFILE__` 是**文件级**标记（它不带测试身份，读不到断言文本时 `text` 为空串）；当一个
+ *  文件在同一份日志里另有 ≥1 条 spec **测试级**签名时，该文件级标记被**吸收**（丢弃）——否则「任务侧整份
+ *  suite 日志带 `__PERFILE__`、基线侧重跑日志不带」这一纯粹的**记录粒度差**会被读成 `task-introduced-red`
+ *  （同一红点集合，一侧多一条无名空签名 ⇒ 假红、假阻塞）。⛔ 只吸收 `__PERFILE__` 那一条，TAP 行不受影响。 */
 export function parseFailureSignatures(logText: string, root?: string | null): FailureSignatureParse {
   const text = String(logText ?? "");
   if (text.trim() === "") return { evaluated: false, reason: "empty-suite-log" };
   const lines = text.split("\n");
-  const signatures: FailureSignature[] = [];
+  // 行序去重累加器：`fromMarker` = 这条签名来自 `__PERFILE__`（文件级标记），`fromSpec` = 它也以 spec
+  // 测试级形态出现过。两者都置位 ⇒ 不被吸收（它有一条货真价实的测试级身份）。
+  const byKey = new Map<string, { sig: FailureSignature; fromMarker: boolean; fromSpec: boolean }>();
+  const order: string[] = [];
   const unresolvable: string[] = [];
-  const push = (file: string, sig: string): void => {
+  const push = (file: string, sig: string, origin: "marker" | "tap" | "spec"): void => {
     const f = file.trim();
     if (!f) return;
-    if (!signatures.some((s) => s.file === f && s.text === sig)) signatures.push({ file: f, text: sig });
+    const k = `${f}\u0000${sig}`;
+    let e = byKey.get(k);
+    if (e === undefined) {
+      e = { sig: { file: f, text: sig }, fromMarker: false, fromSpec: false };
+      byKey.set(k, e);
+      order.push(k);
+    }
+    if (origin === "marker") e.fromMarker = true;
+    if (origin === "spec") e.fromSpec = true;
   };
   // ⛔ 身份定位不出的失败行**不得**用原样 token 兜底（那会把「两棵树上各自不同的绝对路径」判成两个身份，
   // 或者反过来把同一个绝对路径判成「同一个」）——硬规则 3b：读不懂 = 未评估，⛔ 不落成一个签名。
@@ -1031,7 +1067,7 @@ export function parseFailureSignatures(logText: string, root?: string | null): F
         const m = SIG_ASSERTION_RE.exec(lines[j].trim());
         if (m) { sig = m[1].trim(); break; }
       }
-      push(rel, sig);
+      push(rel, sig, "marker");
       continue;
     }
     const no = SIG_NOT_OK_RE.exec(line);
@@ -1043,7 +1079,35 @@ export function parseFailureSignatures(logText: string, root?: string | null): F
       const detail = (ci < 0 ? "" : rest.slice(ci + 1)).trim();
       const rel = signatureRelPath(head, root ?? null);
       if (rel === null) { noteUnresolvable(head); continue; }
-      push(rel, detail);
+      push(rel, detail, "tap");
+      continue;
+    }
+    const at = SIG_TEST_AT_RE.exec(line);
+    if (at) {
+      // `:line:col` 只作定位信息，⛔ 不入身份——行号在两条分支之间必然漂移（Plan 第 1 条）。
+      sawFailureLine = true;
+      const rel = signatureRelPath(at[1], root ?? null);
+      if (rel === null) { noteUnresolvable(at[1]); continue; }
+      // 配对的 `✖ <name>`：从 `test at` 的下一行起有界前瞻，取**第一条**非空行；它必须以 `✖` 开头，
+      // 否则这个块读不懂（⛔ 不拿别的行冒充测试名）。
+      let name: string | null = null;
+      let codeLine = -1;
+      const end = Math.min(lines.length, i + 1 + SIG_SPEC_LOOKAHEAD);
+      for (let j = i + 1; j < end; j += 1) {
+        const l = lines[j].trim();
+        if (l === "") continue;
+        if (SIG_TEST_AT_RE.test(l)) break; // 下一个失败块开始 ⇒ 本块结束（⛔ 不越界取名）
+        if (name === null) {
+          const m = SIG_SPEC_FAIL_RE.exec(l);
+          if (!m) break;
+          name = m[1].trim().replace(SIG_SPEC_DURATION_RE, "").trim();
+          continue;
+        }
+        if (SIG_SPEC_CODE_RE.test(l)) { codeLine = j; break; }
+      }
+      if (name === null || name === "") continue; // 没有配对的 `✖` 行 ⇒ 不是 spec 失败块（⛔ 不落签名）
+      const code = codeLine < 0 ? "" : (SIG_SPEC_CODE_RE.exec(lines[codeLine].trim())?.[1] ?? "");
+      push(rel, code === "" ? name : `${name} [code: ${code}]`, "spec");
       continue;
     }
   }
@@ -1055,6 +1119,12 @@ export function parseFailureSignatures(logText: string, root?: string | null): F
       reason: `failure-line identity unresolvable for ${unresolvable.length} token(s): ${unresolvable.slice(0, 3).join(", ")}${unresolvable.length > 3 ? " …" : ""}`,
     };
   }
+  const entries = order.map((k) => byKey.get(k)!);
+  // 文件级标记的吸收（见函数头注释）：该文件另有测试级 spec 签名 ⇒ 丢弃那条无测试身份的 `__PERFILE__`。
+  const specFiles = new Set(entries.filter((e) => e.fromSpec).map((e) => e.sig.file));
+  const signatures = entries
+    .filter((e) => !(e.fromMarker && !e.fromSpec && specFiles.has(e.sig.file)))
+    .map((e) => e.sig);
   if (signatures.length > 0) return { evaluated: true, signatures };
   return {
     evaluated: false,

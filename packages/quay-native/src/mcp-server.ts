@@ -270,6 +270,22 @@ export async function startMcpServer({ tasksDir, adrDir, goalDir, metaDir, defau
         // (design §6). Omitted entirely => store.write()'s existing,
         // unaffected behavior (no CAS check performed).
         expectedStatus: z.string().optional(),
+        // ── PROVENANCE, not task fields (gap-task-status-events-abi-writes-and-creation) ─────────
+        // These three say WHO is writing and why; they are never persisted (store.write() builds the
+        // frontmatter from explicit field assignments, so an unknown input key can only be dropped).
+        // They must be DECLARED here to cross the ABI at all: the MCP SDK validates `arguments`
+        // against this schema and strips every undeclared key BEFORE the handler runs (measured —
+        // an undeclared key never reaches store.write), so an undeclared provenance field would
+        // silently vanish and every ABI status event would record `actor.kind:"unknown"`.
+        //   actorKind      the writer CLASS the front door declares: `cli` (a CLI invocation), `mcp`
+        //                  (the Core MCP server). Omitted => the event records `unknown`, never a guess.
+        //   correlationId  the caller's own id for the operation, copied into the event's `cause`.
+        // The session id is deliberately NOT here: it is what the environment already knows
+        // (`CLAUDE_CODE_SESSION_ID`, inherited by this provider process from the front door's shell),
+        // so store.write() reads it directly rather than adding a fourth field every caller must
+        // thread by hand.
+        actorKind: z.string().optional(),
+        correlationId: z.string().optional(),
       },
     },
     async ({ id, ...patch }) => {

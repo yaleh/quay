@@ -119,6 +119,7 @@
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
+import { createHash } from "node:crypto";
 import { execFileSync, spawn } from "node:child_process";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import YAML from "yaml";
@@ -162,6 +163,24 @@ export const CARRIER_REL = path.posix.join(".quay", "open-semantic-discovery-fin
  *  discovery-method's 240 is not shared silently. */
 export const BUDGET_LEDGER_REL = path.posix.join(".quay", "open-semantic-discovery-model-budget.jsonl");
 export const BUDGET_LOCK_REL = path.posix.join(".quay", "open-semantic-discovery-model-budget.lock");
+/** The PAIRED round's pre-registration: one small JSON file, whose only load-bearing property is its
+ *  MTIME — a pre-registration that is not older than the calls it scores is not a pre-registration.
+ *  ⛔ It is not a `.jsonl` carrier and does not go through `appendCarrierRecords`: it is a single
+ *  OVERWRITTEN declaration per paired round, because a second, later copy of the same declaration is
+ *  exactly the thing the mtime rule exists to catch. */
+export const PREREG_REL = path.posix.join(".quay", "open-semantic-discovery-prereg.json");
+
+/** How long the round yields the clock between WRITING the pre-registration and the first arm call.
+ *  ⛔ WHY IT EXISTS: "older than every call" is judged in whole milliseconds off the file's own mtime
+ *  (the reused engine rule), and a write and a call inside the SAME millisecond are unprovable — a
+ *  refusal there would be a FALSE refusal of a perfectly good declaration, and a pairing cadence that
+ *  sometimes refuses its own pre-registration is worse than useless. The settle can only ever make the
+ *  declaration OLDER than the calls, never younger, so it cannot manufacture a false pass. */
+export const PREREG_SETTLE_MS = 25;
+
+/** sha256 of the EXACT bytes handed to a model or declared in a pre-registration. One definition, so
+ *  the digest written into the pre-registration and the digest a reader recomputes cannot diverge. */
+export const sha256Of = (s: string): string => createHash("sha256").update(s, "utf8").digest("hex");
 
 /** Env override for the temp root the stripped pins are materialised under (tests point it at their own
  *  scratch dir so a run cannot litter the shared `/tmp`; production leaves it unset). */
@@ -177,6 +196,12 @@ export const MIN_INTERVAL_MINUTES = 60;
  *  uses (`interval_until` is REQUIRED below it, so a faster cadence can only ever be a declared,
  *  expiring window). */
 export const DEFAULT_INTERVAL_MINUTES = 360;
+
+/** How often (in ELIGIBLE rounds) the PAIRED baseline-vs-guided instrument runs, when the section does
+ *  not declare `gain_every_rounds`. Six is a stated default rather than an invented one: a paired round
+ *  doubles the round's model calls, so it must be rare enough that production is not dominated by
+ *  measurement — and rare enough that the two arms' pins differ by the width of the interval. */
+export const DEFAULT_GAIN_EVERY_ROUNDS = 6;
 
 // ── the model steps' tool and turn envelopes (see the header) ────────────────────────────────────────
 /** The INVESTIGATOR's tools. It reads code and context ITSELF, rooted at the pinned tree, instead of
@@ -200,6 +225,69 @@ export const VALUE_TOOLS = "Read,Grep";
 /** The NOVELTY checker's tools: the same read-only envelope. It is a JUDGMENT call like the refuter, not
  *  an exploration — it may re-read the source to settle whether a claim is new, and nothing more. */
 export const NOVELTY_TOOLS = "Read,Grep";
+
+// ── the ANSWER RESERVE (task gap-open-semantic-discovery-investigator-exits-before-hypotheses-zero-semantic-output) ──
+// THE DEFECT THIS CLOSES. In production the first two resident rounds each recorded `exit 1`, `turns: 13`
+// under `--max-turns 12`, `0 hypotheses`, `confirmed.count 0` — and the call record kept NEITHER the
+// stream's `result.subtype` NOR any stderr, so "the model was killed mid-exploration before it could
+// answer" and "the model explored and found nothing" were THE SAME RECORD (硬规则 3b). Two independent
+// things are needed and neither replaces the other: (i) the failure must be LEGIBLE (§failure legibility
+// below), and (ii) the answer must be BUDGETED FOR, because a hard turn cap with no reservation kills the
+// run at exactly the moment it was about to report.
+//
+// ⛔ SEMANTIC FIRST. The reserve is a SECOND MODEL CALL, not a mechanical substitute for exploration: it
+// hands the run its own exploration notes back and asks it to report. Nothing here decides what a
+// hypothesis may say.
+/** How many of the investigator's turns are RESERVED for printing the answer. Two is stated rather than
+ *  measured-with-nothing: the protocol needs one turn to write the block, and one turn of slack absorbs a
+ *  model that closes an exploration it had already finished thinking about. It is a PROMPT-side
+ *  reservation — the `--max-turns` cap itself is NOT raised by it. */
+export const ANSWER_RESERVE_PROMPT_TURNS = 2;
+/** The answer reserve's own call is TOOL-LESS: one turn, no further reading. `stepArgv` already forces
+ *  one turn for a tool-less step, so there is no second budget to keep in sync. */
+export const ANSWER_RESERVE_TOOLS = "";
+/** How much of the model's OWN prose is carried back into the reserve call. A BOUND, not a policy: the
+ *  tail is where a narration that was about to conclude sits, and an unbounded carry would make one
+ *  rescue call as expensive as the exploration it is rescuing. */
+export const ASSISTANT_TAIL_MAX = 4000;
+/** How much of a failed call's stderr is kept. The tail is where a launcher's cause usually is ("Reached
+ *  maximum number of turns", an auth refusal, a gateway 500); the head is progress output. */
+export const STDERR_TAIL_MAX = 400;
+
+/** The TURN RESERVE directive, prepended to BOTH arms' investigator prompts — and it must be prepended to
+ *  BOTH, because the paired instrument's whole claim is that the two arms differ by the GUIDANCE BLOCK and
+ *  nothing else. It states the cap, the reservation and the consequence, in the model's own terms. */
+export function turnReserveDirective(maxTurns: number): string {
+  const reserve = Math.max(1, Math.min(ANSWER_RESERVE_PROMPT_TURNS, Math.max(1, maxTurns - 1)));
+  const stopBy = Math.max(1, maxTurns - reserve);
+  return [
+    "TURN BUDGET — READ THIS BEFORE YOU START.",
+    `This call is capped at ${maxTurns} assistant turns and the cap is HARD: when it is reached the run is`,
+    "killed immediately and NOTHING you have written is used, because no final answer is ever emitted.",
+    `Reserve the last ${reserve} turn(s) for the answer. Concretely: STOP calling tools by turn ${stopBy}, and`,
+    "spend your remaining turn(s) printing the hypothesis JSON block as your final message.",
+    "An incomplete exploration WITH a printed block is worth strictly more than a complete exploration",
+    "without one: a run cut off at the cap reports ZERO hypotheses and is discarded.",
+  ].join("\n");
+}
+
+/** The instruction the reserve call carries. It is deliberately explicit that NO TOOLS are available, so a
+ *  model that would keep exploring is told there is nothing left to explore with. */
+export const ANSWER_RESERVE_INSTRUCTION = [
+  "YOUR TURN BUDGET IS EXHAUSTED. You were cut off at the hard cap before printing your hypothesis block,",
+  "which is why the run produced ZERO hypotheses. THIS call has NO TOOLS — you cannot read anything more.",
+  "Report NOW, from the exploration notes appended below. Print ONLY the hypothesis JSON array your",
+  "instructions require, with nothing else around it. If the notes do not settle a required field, state",
+  "your best reading of it there rather than dropping the hypothesis; if they support no hypothesis at all,",
+  "print [].",
+].join("\n");
+
+/** The reserve call's prompt: the run's OWN prompt (so the required JSON schema, the focus directive and
+ *  the inventory are all still in front of the model), then the stop-exploring instruction, then the tail
+ *  of the run's own narration — last, where recency is strongest. */
+export function buildAnswerReservePrompt(basePrompt: string, explored: string): string {
+  return `${basePrompt}\n\n${ANSWER_RESERVE_INSTRUCTION}\n\n--- YOUR EXPLORATION NOTES (tail) ---\n${explored}\n--- END OF NOTES ---\n`;
+}
 
 /** The stated per-call USD ceiling used when a call's realized gateway cost could not be read. Basis: the
  *  2026-10-12 GAIN1 capability-gain run measured ≈$0.05 for an investigator call and ≈$0.5 for a verifier
@@ -320,6 +408,11 @@ export interface OpenSemanticDiscoveryConfig {
   maxWallMs: number;
   maxModelCallsPer24h: number;
   maxUsdPer24h: number;
+  /** How many ELIGIBLE rounds apart a PAIRED (same-budget baseline vs guided) gain round is run — the
+   *  cadence of the instrument that measures whether method guidance helps at all. It is an OPTIONAL
+   *  extra key (like `investigator_max_turns`), NOT one of the ten declared keys: a section written
+   *  before the paired instrument existed must keep parsing to the stated cadence rather than failing. */
+  gainEveryRounds: number;
 }
 
 /** `present` = the section exists; `config` = the parsed section (null when malformed); `error` = a
@@ -344,6 +437,7 @@ const DISABLED_DEFAULTS: OpenSemanticDiscoveryConfig = {
   maxWallMs: 1_200_000,
   maxModelCallsPer24h: 120,
   maxUsdPer24h: 30,
+  gainEveryRounds: DEFAULT_GAIN_EVERY_ROUNDS,
 };
 
 /** Pure parse of ONE `loop.open_semantic_discovery` value. `enabled` is required and boolean; a disabled
@@ -424,6 +518,15 @@ export function parseOpenSemanticDiscoverySection(raw: unknown): { config: OpenS
     ? { value: DEFAULT_INVESTIGATOR_MAX_TURNS, error: null }
     : intKey("investigator_max_turns", 1);
   if (invTurns.error) return { config: null, error: invTurns.error };
+  // `gain_every_rounds` is the SECOND optional extra bound (same rationale: the operator's declared
+  // budget surface is the ten required keys, and this one is the paired instrument's cadence). Absent ⇒
+  // the stated default; present ⇒ a well-formed integer >= 1. ⛔ `0` is REFUSED rather than read as
+  // "never": an omitted key and a `0` would then mean the same thing while only one of them is stated,
+  // so "the paired instrument was switched off" could not be told from "nobody declared it".
+  const gainEvery = rec.gain_every_rounds === undefined || rec.gain_every_rounds === null
+    ? { value: DEFAULT_GAIN_EVERY_ROUNDS, error: null }
+    : intKey("gain_every_rounds", 1);
+  if (gainEvery.error) return { config: null, error: gainEvery.error };
   // ⛔ `0` is a legitimate value for `max_model_calls_per_24h` (a mechanical-only declaration is coherent)
   // — the gate is integrality and non-negativity, not a made-up positive floor. The USD ceiling is the one
   // bound where 0 would be incoherent (a round that may spend nothing is a round that may never run), so it
@@ -449,6 +552,7 @@ export function parseOpenSemanticDiscoverySection(raw: unknown): { config: OpenS
       maxWallMs: parsed.max_wall_ms,
       maxModelCallsPer24h: parsed.max_model_calls_per_24h,
       maxUsdPer24h: usd,
+      gainEveryRounds: gainEvery.value as number,
     },
     error: null,
   };
@@ -632,6 +736,66 @@ export function spawnModelCall(
   });
 }
 
+// ── failure legibility: what a finished call says about HOW it ended (Plan item 1) ────────────────────
+/** A bounded TAIL of a text stream, with the truncation itself RECORDED rather than implied. Truncating
+ *  silently would make a short tail and a complete one read identically (硬规则 3b), so a reader gets
+ *  `truncated` alongside the tail and never has to infer whether the cause was cut off. */
+export function boundedTail(s: unknown, max: number): { tail: string; truncated: boolean; chars: number } {
+  const text = typeof s === "string" ? s : "";
+  return text.length <= max
+    ? { tail: text, truncated: false, chars: text.length }
+    : { tail: text.slice(text.length - max), truncated: true, chars: text.length };
+}
+
+/** The `not-evaluated:<…>` token a FINISHED call must be reported as, or `null` when the call really ran.
+ *  ⛔ 硬规则 3b, and this helper exists because the production record violated it: `exit 1` with `turns: 13`
+ *  under a 12-turn cap and nothing else, so a call CUT OFF before it could answer was shaped exactly like
+ *  a call that explored and found nothing ("0 hypotheses"). The stream's own `result.subtype` is the
+ *  structural cause (`error_max_turns` / `error_during_execution`); a stream that did not parse has no
+ *  subtype at all, and THAT is `uninstrumented` — never a silent success. `exit: 0` is the ONLY exit that
+ *  reads as "the call ran". */
+export function callNotEvaluatedToken(rec: Record<string, unknown> | null | undefined): string | null {
+  if (rec === null || rec === undefined || typeof rec !== "object") return "not-evaluated:no-call-record";
+  if (typeof rec.spawn_error === "string" && rec.spawn_error !== "") return "not-evaluated:spawn-error";
+  const exit = rec.exit;
+  if (exit === null || exit === undefined) return "not-evaluated:no-exit-status";
+  if (exit === 0) return null;
+  const subtype = typeof rec.subtype === "string" && rec.subtype !== "" ? rec.subtype : null;
+  return subtype === null ? `not-evaluated:uninstrumented-exit-${String(exit)}` : `not-evaluated:${subtype}`;
+}
+
+/** The FIRST `not-evaluated:<…>` token across a round's call records, or `null` when every call ran. The
+ *  FIRST is the CAUSE: a round whose investigator was cut off and whose later steps then had nothing to
+ *  read is ONE failure, and naming the last step would name a symptom of it. */
+export function firstNotEvaluatedToken(calls: readonly Record<string, unknown>[]): string | null {
+  for (const c of calls) {
+    const t = callNotEvaluatedToken(c);
+    if (t !== null) return t;
+  }
+  return null;
+}
+
+/** The reading of ONE step's answer-reserve calls, taken off the call records themselves. A step "was
+ *  attempted" once per `*-report` call it left on the record, and "was rescued" when that call itself
+ *  answered. PURE — the round's summary is a VIEW of its own ledger rather than a parallel counter that
+ *  could disagree with it (硬规则 5b). */
+export function summarizeReserve(calls: readonly Record<string, unknown>[]): {
+  turns_reserved: number;
+  attempted: number;
+  rescued: number;
+  not_evaluated: string[];
+  steps: string[];
+} {
+  const reportCalls = calls.filter((c) => String(c.step).endsWith("-report"));
+  return {
+    turns_reserved: ANSWER_RESERVE_PROMPT_TURNS,
+    attempted: reportCalls.length,
+    rescued: reportCalls.filter((c) => callNotEvaluatedToken(c) === null).length,
+    not_evaluated: reportCalls.filter((c) => typeof c.not_evaluated === "string").map((c) => String(c.not_evaluated)),
+    steps: reportCalls.map((c) => String(c.step)),
+  };
+}
+
 // ── the engine modules: resolved from DISK at runtime, never statically imported (see the header) ────
 export const HYPOTHESIS_MODULE_FILE = "arch-hypothesis-generation.mjs";
 export const PORTFOLIO_MODULE_FILE = "discovery-portfolio.mjs";
@@ -658,6 +822,12 @@ export interface HypothesisModule {
   runVerifier: (opts: Record<string, unknown>) => Promise<Record<string, unknown>>;
   buildInventory: (opts: Record<string, unknown>) => Record<string, unknown>;
   parseJsonObject: (stdout: string) => Record<string, unknown> | null;
+  /** The engine's OWN pre-registration gate. Consumed, never re-derived: the "older than every run"
+   *  mtime rule and the hash vocabulary are declared once, in `arch-hypothesis-generation.mjs`. */
+  preregRefusal: (o: {
+    prereg: Record<string, unknown> | null; expected: Record<string, string>;
+    preregMtimeMs: number | null; runMtimesMs: number[];
+  }) => { code: number; reasons: string[] } | null;
   parseVerifierStream: (stdout: string) => { ok?: boolean; num_turns?: unknown; model?: unknown; usage?: unknown; cost_usd?: unknown };
   callText: (stdout: string) => string;
   defaultVerifierPrompt: (here?: string) => string;
@@ -1599,8 +1769,391 @@ export function openShadowDiscoveryRecordId(roundTs: string, cluster: number): s
   return `${OPEN_DISCOVERY_REF_PREFIX}${roundTs}#shadow#${cluster}`;
 }
 
+/** The record id of a PAIRED round's UNGUIDED (baseline) cluster. The segment keeps it from colliding
+ *  with the same index's production cluster — and, more importantly, from being RESOLVED as one: a
+ *  measurement arm's record is not a production finding. */
+export function openBaselineDiscoveryRecordId(roundTs: string, cluster: number): string {
+  return `${OPEN_DISCOVERY_REF_PREFIX}${roundTs}#baseline#${cluster}`;
+}
+
+// ── THE PAIRED GAIN ROUND (task gap-open-discovery-periodic-baseline-vs-guided-gain) ─────────────────
+//
+// UNDER SEMANTIC FIRST, MECHANIZE LATER (user ruling 2026-10-12) this is the INSTRUMENT that later
+// decides what may be crystallized into mechanical code — and it must keep running AFTER any
+// crystallization, as the baseline/degradation monitor (semantic arm vs crystallized arm).
+//
+// WHY A PAIRED ROUND AND NOT A NUMBER. Whether method guidance helps has to be measured in production
+// rather than asserted, and it must not reuse a contaminated hold-out as "independent" evidence: the
+// 2026-10-12 capability-gain experiment showed an apparent +1 that did not survive recheck (a "new"
+// finding duplicated an earlier one, and a second was refuted). A single arm's net-new count cannot
+// tell guidance from luck, because the pin, the inventory and the model all move between rounds. So
+// the same round is run TWICE on the SAME pin, the SAME inventory, the SAME model and the SAME budget
+// — only the investigator prompt differs — and the DIFFERENCE is recorded, negative values included.
+//
+// ⛔ WHAT IS MECHANICAL HERE, AND WHAT IS NOT. Everything below is arithmetic over the two arms'
+// records: counting, subtracting, and deciding when the pair is due. NOTHING here judges whether a
+// finding is real (the verifier + refuter + novelty check do that, unchanged and per arm), nothing is
+// smoothed into one score, and no threshold is introduced — a gain of −2 is recorded as −2.
+//
+// ⛔ EVIDENCE LEVEL. These rounds are `production-open`: open exploration, no labels, no held-out case.
+// They are NEVER counted as `independent` generalization evidence for a method promotion. Promotion
+// stays governed by the evidence-level rules of gap-discovery-evidence-level-teaching-vs-independent
+// (a correct prediction reaches `active` only on an `independent` verdict; every other level — this one
+// included — caps at the report-only `trial`). The record says so on its own bytes
+// (`counts_as_independent_evidence:false`) so a reader does not have to re-derive it from the level.
+
+/** The two arms of a paired round. `baseline` is the UNGUIDED exploration; `guided` is the same
+ *  exploration with at least one eligible method's guidance prepended to the investigator prompt. */
+export const PAIRED_ARM_BASELINE = "baseline" as const;
+export const PAIRED_ARM_GUIDED = "guided" as const;
+export type PairedArm = typeof PAIRED_ARM_BASELINE | typeof PAIRED_ARM_GUIDED;
+export const PAIRED_ARMS: readonly PairedArm[] = [PAIRED_ARM_BASELINE, PAIRED_ARM_GUIDED];
+
+/** The carrier `kind` of a paired round's gain record, and of the rolling summary appended beside it.
+ *  ⛔ Named kinds, so "is this line a gain record?" is a field read rather than a guess, and so a
+ *  promotion reader that resolves a ref can tell a gain record from a generalization verdict. */
+export const GAIN_RECORD_KIND = "open-discovery-gain";
+export const GAIN_SUMMARY_KIND = "open-discovery-gain-summary";
+
+/** The evidence level every record of this instrument carries. `production-open` is one of the ledger's
+ *  own `EVIDENCE_LEVELS`; it is NOT `independent`, and that is the whole point of carrying it. */
+export const PRODUCTION_OPEN_EVIDENCE_LEVEL = "production-open";
+
+/** The ONE spelling of "there was nothing to pair" — its own reason token, never a zero gain. A round
+ *  with no eligible method produces NO gain record at all; the summary counts this state separately, so
+ *  "we could not measure" can never be read as "guidance gained nothing". */
+export const PAIRED_NOT_EVALUATED_NO_ELIGIBLE_METHOD = "not-evaluated:no-eligible-method";
+
+/** The four counts a paired round scores each arm on (Plan item 3), plus the readings a reviewer needs
+ *  to tell "nothing was found" from "nothing ran". */
+export interface PairedArmCounts {
+  arm: PairedArm;
+  /** Confirmed findings whose novelty disposition is `novel` — AFTER the novelty check, so a duplicate
+   *  or a restatement is excluded here by the SAME rule the Portfolio obeys. */
+  confirmed_net_new: number;
+  /** Confirmed findings the novelty check called already-known (duplicate / restatement) plus the
+   *  byte-identical repeats deduped mechanically. Never counted as net-new. */
+  duplicates: number;
+  /** Clusters the verifier or the refuter REFUTED — false positives. Never counted as net-new (a
+   *  refuted cluster is not `confirmed`). */
+  refuted: number;
+  /** Clusters that were neither confirmed nor refuted — reported so a reader is not left to infer it. */
+  undetermined: number;
+  confirmed_total: number;
+  /** `true` when the arm produced no confirmed cluster at all — a different statement from `0 net-new`,
+   *  which is what an arm that confirmed 3 duplicates reads as. */
+  nothing_found: boolean;
+  model_calls: number;
+  /** The arm's gateway USD, summed over its OWN calls (`cost_charged_usd`, which already counts an
+   *  unreadable price at the per-call ceiling rather than 0). */
+  usd: number;
+}
+
+/** The arm's own budget ENVELOPE. Both arms of a pair must be run under an IDENTICAL envelope — the
+ *  comparison is "same budget, different prompt", so an arm that got more turns or more clusters is not
+ *  an arm of the same experiment (see `pairedBudgetRefusal`). */
+export interface PairedArmBudget {
+  investigator_runs: number;
+  max_clusters_verified: number;
+  investigator_max_turns: number;
+  verifier_max_turns: number;
+  refutation_max_turns: number;
+}
+
+/** The envelope BOTH arms are run under, read once from the round's config so the two arms cannot
+ *  disagree by construction. */
+export function pairedArmBudget(cfg: OpenSemanticDiscoveryConfig): PairedArmBudget {
+  return {
+    investigator_runs: cfg.investigatorRuns,
+    max_clusters_verified: cfg.maxClustersVerified,
+    investigator_max_turns: cfg.investigatorMaxTurns,
+    verifier_max_turns: cfg.verifierMaxTurns,
+    refutation_max_turns: cfg.refutationMaxTurns,
+  };
+}
+
+/** ⛔ AC (a): arms with DIFFERENT budgets are REFUSED. A paired round is only a controlled comparison
+ *  while the two arms share one envelope; a gate that let them differ would record "guidance helped"
+ *  for a round in which guidance also got twice the verifier calls. PURE. */
+export function pairedBudgetRefusal(a: PairedArmBudget, b: PairedArmBudget): { code: string; reasons: string[] } | null {
+  const reasons: string[] = [];
+  for (const key of Object.keys(a) as (keyof PairedArmBudget)[]) {
+    if (a[key] !== b[key]) reasons.push(`PAIRED_ARM_BUDGETS_DIFFER:${key}:${String(a[key])}!=${String(b[key])}`);
+  }
+  return reasons.length ? { code: "PAIRED_ARM_BUDGETS_DIFFER", reasons } : null;
+}
+
+/** Score ONE arm on the four counts (Plan item 3). PURE over the arm's own cluster records, the novelty
+ *  outcomes decided for them and its own call records.
+ *
+ *  ⛔ THE ONE RULE ACs (c) and (d) SHARE: `confirmed_net_new` counts a cluster only when it is
+ *  CONFIRMED (it survived the independent refuter) AND its novelty disposition is `novel`. A refuted
+ *  cluster is never confirmed, so it can never be net-new however the arm's rows are ordered; and
+ *  `duplicate` / `restatement` / `mechanical-duplicate` / `unjudged` are each a different value from
+ *  `novel`, so none of them can be counted as new. The two counts are therefore not "conventions" that
+ *  a caller could get wrong — they are read from the record's own fields. */
+export function pairedArmCounts(opts: {
+  arm: PairedArm;
+  clusters: readonly Record<string, unknown>[];
+  novelty: readonly { cluster: number; disposition: string }[];
+  calls: readonly { cost_charged_usd?: unknown }[];
+}): PairedArmCounts {
+  const dispositionOf = new Map<number, string>();
+  for (const o of opts.novelty) dispositionOf.set(Number(o.cluster), String(o.disposition));
+  const refutedOf = (c: Record<string, unknown>): boolean =>
+    c.verifier_verdict === "refuted" || c.refutation_verdict === "refuted";
+  const DUPLICATE_DISPOSITIONS = ["duplicate", "restatement", "mechanical-duplicate"];
+  let netNew = 0;
+  let duplicates = 0;
+  let refuted = 0;
+  let undetermined = 0;
+  let confirmedTotal = 0;
+  for (const c of opts.clusters) {
+    // ⛔ AC (d), read STRICTLY: a REFUTED cluster is never net-new and never a duplicate, whatever else
+    // the record says about it. A row that carried both `confirmed:true` and a refuted verdict is a
+    // contradiction, and the direction a contradiction must fail is toward NOT counting it as a
+    // finding — the rule is a property of the refutation, not of the `confirmed` flag beside it.
+    if (refutedOf(c)) { refuted++; continue; }
+    if (c.confirmed !== true) { undetermined++; continue; }
+    confirmedTotal++;
+    const disposition = dispositionOf.get(Number(c.cluster));
+    if (disposition === "novel") netNew++;
+    else if (disposition !== undefined && DUPLICATE_DISPOSITIONS.includes(disposition)) duplicates++;
+  }
+  let usd = 0;
+  for (const call of opts.calls) {
+    const v = call.cost_charged_usd;
+    usd += typeof v === "number" && Number.isFinite(v) && v >= 0 ? v : PER_CALL_USD_CEILING;
+  }
+  return {
+    arm: opts.arm,
+    confirmed_net_new: netNew,
+    duplicates,
+    refuted,
+    undetermined,
+    confirmed_total: confirmedTotal,
+    nothing_found: confirmedTotal === 0,
+    model_calls: opts.calls.length,
+    usd: round6(usd),
+  };
+}
+
+/** The arm's counts folded into the `novelty` array `pairedArmCounts` reads, so the two arms are scored
+ *  by the same function from the same shape. */
+export const armNoveltyRows = (outcomes: readonly NoveltyOutcome[]): { cluster: number; disposition: string }[] =>
+  outcomes.map((o) => ({ cluster: Number(o.cluster), disposition: String(o.disposition) }));
+
+/** The call records ONE arm left on the round, selected by the reservation step NAME the arm stamps on
+ *  every call (`baseline-*` for the unguided arm, everything except the shadow arm's own pass for the
+ *  guided one). ⛔ Read by POSITION on the step field, never by order: the shadow pass belongs to a
+ *  THIRD thing (a draft/trial method's isolated arm) and folding its calls into the guided arm's cost
+ *  would charge the guided arm for work no eligible method guided. */
+export function callsOfArm(calls: readonly Record<string, unknown>[], arm: PairedArm): Record<string, unknown>[] {
+  const baselinePrefix = `${PAIRED_ARM_BASELINE}-`;
+  if (arm === PAIRED_ARM_BASELINE) return calls.filter((c) => String(c.step).startsWith(baselinePrefix));
+  // `shadow-*` covers the shadow pass AND its answer-reserve call: both belong to the third arm, and a
+  // prefix match (rather than two literal names) is what keeps a future shadow step from being charged to
+  // the guided arm by omission.
+  return calls.filter((c) => !String(c.step).startsWith("shadow-") && !String(c.step).startsWith(baselinePrefix));
+}
+
+/**
+ * GAIN = guided − baseline, per metric, NEGATIVE VALUES INCLUDED (Plan item 3, AC (c)). ⛔ There is no
+ * clamping, no `Math.max(0, …)`, and no absolute value anywhere below: an arm that found FEWER net-new
+ * findings under guidance is a real, recorded −N. `usd` is signed the same way (guidance costs money).
+ */
+export function gainOf(baseline: PairedArmCounts, guided: PairedArmCounts): {
+  net_new: number; duplicates: number; refuted: number; undetermined: number; usd: number; model_calls: number;
+} {
+  return {
+    net_new: guided.confirmed_net_new - baseline.confirmed_net_new,
+    duplicates: guided.duplicates - baseline.duplicates,
+    refuted: guided.refuted - baseline.refuted,
+    undetermined: guided.undetermined - baseline.undetermined,
+    usd: round6(guided.usd - baseline.usd),
+    model_calls: guided.model_calls - baseline.model_calls,
+  };
+}
+
+/** ⛔ AC (b): a pre-registration written AFTER the first call is REFUSED — a "pre-registration" that
+ *  postdates the run it scores is a post-hoc rationalisation, not a pre-registration.
+ *
+ *  The gate REUSES the engine's own `preregRefusal` (硬规则 5b — the mtime rule and the hash vocabulary
+ *  are declared once, in `arch-hypothesis-generation.mjs`, and a second copy here would be a second
+ *  convention to keep in step). What this adds is the shape a PAIRED round needs: the expected key set
+ *  (each arm's prompt digest under an arm-scoped key, plus the inventory and budget the two arms SHARE)
+ *  and the arm calls' own start times.
+ *
+ *  ⛔ 硬规则 3b: "no call time was supplied" is its OWN refusal — with nothing to be older than, a
+ *  pre-registration cannot be checked, and passing it would report an unverifiable pair as clean. */
+export const pairedPreregKeys = (hashes: {
+  baselinePrompt: string; guidedPrompt: string; inventory: string; budget: string;
+}): Record<string, string> => ({
+  [`${PAIRED_ARM_BASELINE}-prompt`]: hashes.baselinePrompt,
+  [`${PAIRED_ARM_GUIDED}-prompt`]: hashes.guidedPrompt,
+  inventory: hashes.inventory,
+  budget: hashes.budget,
+});
+
+export function pairedPreregRefusal(opts: {
+  prereg: Record<string, unknown> | null;
+  preregMtimeMs: number | null;
+  expected: Record<string, string>;
+  armCallMtimesMs: readonly number[];
+  /** The reused engine gate (`arch-hypothesis-generation.mjs` `preregRefusal`) — injected, never
+   *  re-derived, so this module holds no second copy of the hash/mtime vocabulary. */
+  preregRefusalFn: (o: {
+    prereg: Record<string, unknown> | null; expected: Record<string, string>;
+    preregMtimeMs: number | null; runMtimesMs: number[];
+  }) => { code: number; reasons: string[] } | null;
+}): { code: number | string; reasons: string[] } | null {
+  if (opts.armCallMtimesMs.length === 0) {
+    return { code: "PAIRED_PREREG_UNVERIFIABLE", reasons: ["PAIRED_PREREG_UNVERIFIABLE:no-arm-call-start-time-was-supplied-so-a-pre-registration-cannot-be-shown-to-precede-any-call"] };
+  }
+  return opts.preregRefusalFn({
+    prereg: opts.prereg,
+    expected: opts.expected,
+    preregMtimeMs: opts.preregMtimeMs,
+    runMtimesMs: [...opts.armCallMtimesMs],
+  });
+}
+
+/** The gain record ONE paired round appends. It carries BOTH arms' counts, the signed gain, the shared
+ *  pin/inventory/prereg and the evidence level — everything a later reviewer needs to re-read the
+ *  comparison, and nothing that could be mistaken for a promotion. */
+export function buildGainRecord(opts: {
+  roundTs: string;
+  invokedBy: InvokedBy;
+  pinRev: string;
+  inventorySha: string | null;
+  prereg: { path: string | null; mtime_ms: number | null; keys: string[]; refusal: string | null };
+  budget: PairedArmBudget;
+  budgetLedgerRel: string;
+  baseline: PairedArmCounts;
+  guided: PairedArmCounts;
+  guidedBy: readonly string[];
+  ordinal: number;
+  everyRounds: number;
+}): Record<string, unknown> {
+  return {
+    kind: GAIN_RECORD_KIND,
+    routine: OPEN_SEMANTIC_DISCOVERY_NAME,
+    invoked_by: opts.invokedBy,
+    ts: opts.roundTs,
+    paired: true,
+    every_rounds: opts.everyRounds,
+    eligible_round_ordinal: opts.ordinal,
+    pin: { rev: opts.pinRev },
+    inventory: { sha256: opts.inventorySha },
+    prereg: opts.prereg,
+    budget: { ...opts.budget, ledger: opts.budgetLedgerRel, shared_by_arms: true },
+    guided_by: [...opts.guidedBy],
+    arms: { [PAIRED_ARM_BASELINE]: opts.baseline, [PAIRED_ARM_GUIDED]: opts.guided },
+    gain: gainOf(opts.baseline, opts.guided),
+    evidence_level: PRODUCTION_OPEN_EVIDENCE_LEVEL,
+    // ⛔ The reader does not have to know which levels are independent to read this record correctly.
+    counts_as_independent_evidence: false,
+    promotion: {
+      licenses: "nothing",
+      why: "a production-open open-exploration round names no held-out case, so it can never be generalization evidence; promotion stays governed by the evidence-level rules (only an independent verdict reaches active)",
+    },
+  };
+}
+
+/** The ROLLING SUMMARY across every paired round so far, plus the rounds that produced none. ⛔ It is
+ *  never smoothed into a single positive number: every round's signed gain is listed under its own
+ *  metric, `totals` only SUM them, and the rounds that could not be measured at all are counted under
+ *  their own token instead of contributing a 0. */
+export function gainRollup(records: readonly Record<string, unknown>[]): Record<string, unknown> {
+  const gains = records.filter((r) => r.kind === GAIN_RECORD_KIND);
+  // The rounds that produced NO gain record are counted under their own token, read off the ROUND's own
+  // `paired.not_evaluated` field — never inferred from the absence of a gain line, which would make
+  // "not measured" and "measured zero" the same reading (硬规则 3b).
+  const notEvaluated: Record<string, number> = {};
+  for (const r of records) {
+    if (r.kind !== "scan-round") continue;
+    const paired = r.paired;
+    if (paired === null || typeof paired !== "object" || Array.isArray(paired)) continue;
+    const token = (paired as Record<string, unknown>).not_evaluated;
+    if (typeof token !== "string" || token === "") continue;
+    notEvaluated[token] = (notEvaluated[token] ?? 0) + 1;
+  }
+  const series = (metric: string): number[] => gains.map((r) => {
+    const g = (r.gain ?? {}) as Record<string, unknown>;
+    const v = g[metric];
+    return typeof v === "number" && Number.isFinite(v) ? v : 0;
+  });
+  const netNew = series("net_new");
+  const duplicates = series("duplicates");
+  const refuted = series("refuted");
+  const usd = series("usd");
+  const sum = (xs: readonly number[]) => round6(xs.reduce((a, b) => a + b, 0));
+  const negatives = (xs: readonly number[]) => xs.filter((x) => x < 0).length;
+  return {
+    kind: GAIN_SUMMARY_KIND,
+    routine: OPEN_SEMANTIC_DISCOVERY_NAME,
+    ts: new Date().toISOString(),
+    paired_rounds: gains.length,
+    not_evaluated: notEvaluated,
+    evidence_level: PRODUCTION_OPEN_EVIDENCE_LEVEL,
+    counts_as_independent_evidence: false,
+    // Every round's own signed value, in order — the raw series, not a blended score.
+    series: { net_new: netNew, duplicates, refuted, usd },
+    totals: { net_new: sum(netNew), duplicates: sum(duplicates), refuted: sum(refuted), usd: sum(usd) },
+    negative_rounds: { net_new: negatives(netNew), duplicates: negatives(duplicates), refuted: negatives(refuted), usd: negatives(usd) },
+    smoothing: "none: every paired round's gain is listed in `series`; no single blended score is produced and no value is clamped",
+  };
+}
+
+/** How many ELIGIBLE rounds the carrier already records: resident scan-rounds that actually ran GUIDED.
+ *  This is the ordinal the pairing cadence counts against, read off the carrier so it survives a driver
+ *  restart (a counter kept in memory would restart at 0 and re-run the pair early). PURE. */
+export function eligibleRoundsOf(records: readonly Record<string, unknown>[]): number {
+  let n = 0;
+  for (const r of records) {
+    if (r.kind !== "scan-round") continue;
+    if (r.invoked_by !== INVOKED_BY_RESIDENT) continue;
+    const methods = r.methods as Record<string, unknown> | undefined;
+    if (methods && methods.mode === "guided") n++;
+  }
+  return n;
+}
+
+/** Is THIS round a paired one? PURE. ⛔ AC (f): with no eligible method there is no pair to run, and the
+ *  answer is its own token (`not-evaluated:no-eligible-method`) rather than "gain 0" — an unmeasured
+ *  round and a measured zero must not be the same bytes. */
+export function pairedRoundDecision(opts: {
+  eligibleRounds: number;
+  gainEveryRounds: number;
+  eligibleMethods: number;
+}): { due: boolean; ordinal: number; reason: string } {
+  // The ordinal is reported in EVERY case, including the two that can never be due: where the cadence
+  // stands is a separate fact from whether this round is the M-th one.
+  const ordinal = opts.eligibleRounds + 1;
+  if (opts.eligibleMethods < 1) {
+    return { due: false, ordinal, reason: PAIRED_NOT_EVALUATED_NO_ELIGIBLE_METHOD };
+  }
+  if (!(opts.gainEveryRounds >= 1)) {
+    return { due: false, ordinal, reason: "not-due:gain_every_rounds-is-not-a-positive-integer" };
+  }
+  return ordinal % opts.gainEveryRounds === 0
+    ? { due: true, ordinal, reason: `paired-round:the-${ordinal}-th-eligible-round-${(opts.eligibleMethods)}-method(s)-eligible` }
+    : { due: false, ordinal, reason: `not-due:eligible-round-${ordinal}-of-every-${opts.gainEveryRounds}` };
+}
+
 // ── the round ────────────────────────────────────────────────────────────────────────────────────────
-export type ModelStepKind = "investigator" | "verifier" | "refuter" | "value-assessment" | "novelty-check" | "shadow-investigator";
+export type ModelStepKind =
+  | "investigator" | "verifier" | "refuter" | "value-assessment" | "novelty-check" | "shadow-investigator"
+  // The ANSWER RESERVE's own calls (Plan item 2): ONE tool-less call granted to a step that was cut off
+  // at the turn cap. ⛔ Its OWN step name — the reservation ledger must say WHY the call was spent, or a
+  // rescue would read as a second exploration and the round's call count would stop being explicable.
+  | "investigator-report" | "verifier-report" | "refuter-report" | "value-assessment-report" | "novelty-check-report"
+  | "shadow-investigator-report"
+  // The PAIRED round's UNGUIDED arm runs the same steps under their own kinds, so "which arm spent this
+  // call" is readable straight off the reservation ledger instead of inferred from call order.
+  | "baseline-investigator" | "baseline-verifier" | "baseline-refuter" | "baseline-value-assessment" | "baseline-novelty-check"
+  | "baseline-investigator-report" | "baseline-verifier-report" | "baseline-refuter-report"
+  | "baseline-value-assessment-report" | "baseline-novelty-check-report";
 
 export interface OpenSemanticDiscoveryRunOptions {
   config: OpenSemanticDiscoveryConfig | null;
@@ -1818,6 +2371,17 @@ export async function runOpenSemanticDiscovery(root: string, opts: OpenSemanticD
     registry: selection.registry,
   };
 
+  // ④c THE PAIRED-GAIN DECISION (Plan item 1, AC (f)): is THIS eligible round the M-th one? The ordinal
+  //     is counted off the CARRIER (resident scan-rounds that actually ran guided), never off a counter
+  //     in memory — a counter would restart at 0 after a driver restart and re-run the pair early.
+  //     ⛔ No eligible method ⇒ no paired round at all, and the decision says so with its own token
+  //     (`not-evaluated:no-eligible-method`) rather than a zero gain (Plan item 5).
+  const pairedDecision = pairedRoundDecision({
+    eligibleRounds: eligibleRoundsOf(carrierRounds),
+    gainEveryRounds: config.gainEveryRounds,
+    eligibleMethods: selection.production.length,
+  });
+
   // ⑤ (a) pin the current develop tip into a STRIPPED tree, then build the inventory over the declared
   //    scope. BOTH are recorded; NEITHER is a gate. See step ⑥ for why.
   const rev = (opts.revFn ?? developTip)(root);
@@ -1880,6 +2444,9 @@ export async function runOpenSemanticDiscovery(root: string, opts: OpenSemanticD
       throw e;
     }
     const { turns } = readRealizedTurns(res?.stdout, (s: string) => hyp.parseVerifierStream(s));
+    // The launcher's stderr, bounded and kept. Production kept NONE of it, so a round-1-style zero-token
+    // exit could not be diagnosed at all (Plan item 3) — the cause existed only inside the child process.
+    const stderrTail = boundedTail(res?.stderr, STDERR_TAIL_MAX);
     budget.outcome(r.id, res.error ? classifyModelFailure(res.error) : "completed", turns, res.error ? "SPAWN_ERROR" : null);
     // The realized price: the gateway rate applied to the stream's own usage when BOTH are readable, else
     // NULL — and NULL counts as the per-call ceiling in `usdBudgetUsage`, never as free.
@@ -1910,15 +2477,76 @@ export async function runOpenSemanticDiscovery(root: string, opts: OpenSemanticD
     costUsd += charged;
     tokensIn += Number(usage?.input_tokens ?? 0);
     tokensOut += Number(usage?.output_tokens ?? 0);
-    const rec = {
+    const rec: Record<string, unknown> = {
       step: kind, tools, max_turns: maxTurns, argv_tools_index: argv.indexOf("--tools"), cwd: asRel(root, pinned),
       exit: res?.status ?? null, spawn_error: res?.error ? String(res.error.message ?? res.error).slice(0, 200) : null,
       turns, actual_model: servedModel ?? "not-evaluated:model-unverified",
       tokens: { input: Number(usage?.input_tokens ?? 0), output: Number(usage?.output_tokens ?? 0) },
       cost_usd: realized, cost_source: costSource, cost_charged_usd: charged,
+      // ── HOW THE CALL ENDED (Plan item 1) ─────────────────────────────────────────────────────────────
+      // The stream's OWN structural `result` fields, carried onto the record. ⛔ Before this, an `exit 1`
+      // was all the round kept, so a call killed at the turn cap and a call that explored and found
+      // nothing produced the SAME record — the defect this task exists to close (硬规则 3b). `subtype` is
+      // `null` when the stream did not parse: "not read" keeps its own value, it is never defaulted to a
+      // success, and `stream_ok`/`stdout_bytes` let a reader tell "no stream" from "stream said nothing".
+      stream_ok: stream.ok === true,
+      subtype: stream.ok ? (stream.subtype ?? null) : null,
+      num_turns: stream.ok && Number.isFinite(stream.num_turns) ? (stream.num_turns as number) : null,
+      is_error: stream.ok && typeof stream.is_error === "boolean" ? (stream.is_error as boolean) : null,
+      stdout_bytes: Buffer.byteLength(String(res?.stdout ?? ""), "utf8"),
+      stderr_chars: stderrTail.chars,
+      stderr_tail: stderrTail.tail,
+      stderr_tail_truncated: stderrTail.truncated,
+      not_evaluated: null as string | null,
     };
+    rec.not_evaluated = callNotEvaluatedToken(rec);
+    // The model's OWN prose, kept ONLY for a call that did not run. It is the material the answer reserve
+    // hands back (Plan item 2), and on a call that DID run there is a parsed answer instead — so this is
+    // not a second transcript on the happy path, it is the salvage on the unhappy one.
+    if (rec.not_evaluated !== null) {
+      const narration = boundedTail(hyp.callText(String(res?.stdout ?? "")), ASSISTANT_TAIL_MAX);
+      rec.assistant_text_tail = narration.tail;
+      rec.assistant_text_tail_truncated = narration.truncated;
+    }
     callRecords.push(rec);
     return { res, stream, argv, rec };
+  }
+
+  // ── THE ANSWER RESERVE (Plan item 2) ────────────────────────────────────────────────────────────────
+  // ONE tool-less call for ANY step whose call was CUT OFF at the turn cap. It goes through
+  // `reservingStep` like every other call, so it is reserved on the SAME trailing-24h ledger and a refusal
+  // at the ceiling throws the round's ordinary `BudgetRefusedError` rather than spending a call nobody
+  // granted.
+  //
+  // ⛔ WHY IT IS NOT INVESTIGATOR-ONLY (硬规则 5b — fixing one instance is not fixing the class): the AC2
+  // production round of 2026-10-12 measured the SAME defect one step downstream. Of its six calls, three
+  // were `error_max_turns` — two verifiers (`verifier_cause:"turn-budget"` on 2 of 3 clusters) and the
+  // refuter — so `confirmed.count` was 0 on a round that had just produced 12 real, evidenced hypotheses.
+  // A turn cap that kills a verifier before it reports is the identical failure: "not evaluated" reading
+  // as "nothing found". Every single-answer step gets the same one-shot second chance.
+  //
+  // ⛔ It fires for `error_max_turns` ONLY. An auth, gateway or spawn failure has no exploration notes to
+  // report from, so a second call would only reproduce the failure and burn a reservation doing it.
+  //
+  // The engine parses whatever stream `runModel` RETURNS, so the rescue's stream is what must be handed
+  // back: that is what makes the rescue an ANSWER rather than a side note. The cut-off call itself stays
+  // on the round's call list under its own `not-evaluated:error_max_turns` token, so the round still says
+  // a call was lost and does not launder it into a clean one.
+  async function reportIfCutOff(
+    prompt: string,
+    res: { status: number | null; stdout: string; stderr: string; error: Error | null },
+    rec: Record<string, unknown>,
+    reportStep: ModelStepKind,
+  ): Promise<{ res: { status: number | null; stdout: string; stderr: string; error: Error | null }; rec: Record<string, unknown>; rescued: boolean }> {
+    if (callNotEvaluatedToken(rec) !== "not-evaluated:error_max_turns") return { res, rec, rescued: false };
+    const explored = typeof rec.assistant_text_tail === "string" ? (rec.assistant_text_tail as string) : "";
+    const rescue = await reservingStep(reportStep, {
+      prompt: buildAnswerReservePrompt(prompt, explored),
+      tools: ANSWER_RESERVE_TOOLS,
+      maxTurns: BLIND_INVESTIGATOR_MAX_TURNS,
+      model: requestedModel,
+    });
+    return { res: rescue.res, rec: rescue.rec, rescued: callNotEvaluatedToken(rescue.rec) === null };
   }
 
   // ⑥ (b) SEMANTIC EXPLORATION ON REAL SOURCE. The investigator runs with Read/Grep/Glob rooted at the
@@ -1935,7 +2563,6 @@ export async function runOpenSemanticDiscovery(root: string, opts: OpenSemanticD
       return i >= 0 && typeof probe[i + 1] === "string" ? probe[i + 1] : null;
     } catch { return null; }
   })();
-  const investigatorTexts: string[] = [];
   let midRound: { kind: ModelStepKind; used: number; cap: number } | null = null;
   let investigatorBlock: Record<string, unknown> = { ran: false };
   let clusters: Array<Record<string, unknown>> = [];
@@ -1951,61 +2578,169 @@ export async function runOpenSemanticDiscovery(root: string, opts: OpenSemanticD
     // method was selected, its guidance block is prepended BETWEEN the focus directive and the frozen
     // instruction: guidance first, instruction second, and the instruction never modified.
     const basePrompt = fs.readFileSync(hyp.defaultInvestigatorPrompt(), "utf8");
-    const prompt = `${focusDirective(focuses)}\n${selection.production_text}${basePrompt}\n\n${inventory.ok === true ? String(inventory.text ?? "") : ""}`;
-    const inv = await hyp.runInvestigator({
-      prompt,
-      // `neutralDir` is unused on the pinned path (the cwd gate switches to `verifyCwdRefusal`); it is
-      // passed equal to the pin so BOTH gates agree on which tree this is.
-      neutralDir: pinned,
-      cwd: pinned,
-      pinDir: pinned,
-      runs: config.investigatorRuns,
-      outDir: path.join(pinned, ".open-semantic-discovery-runs"),
-      writeFile: (f: string, t: string) => { fs.mkdirSync(path.dirname(f), { recursive: true }); fs.writeFileSync(f, t, "utf8"); },
-      budget: { maxRuns: config.investigatorRuns, maxMs: config.maxWallMs },
-      model: requestedModel ?? "not-evaluated:model-unverified",
-      tools: INVESTIGATOR_TOOLS,
-      maxTurns: config.investigatorMaxTurns,
-      runModel: async (p: string) => {
-        const { res } = await reservingStep("investigator", { prompt: p, tools: INVESTIGATOR_TOOLS, maxTurns: config.investigatorMaxTurns, model: requestedModel });
-        investigatorTexts.push(hyp.callText(String(res?.stdout ?? "")));
-        return res;
-      },
-    });
-    if (inv.ok !== true) {
-      const reasons = Array.isArray(inv.reasons) ? (inv.reasons as string[]) : [];
-      return fact("failed", { ...base, enabled: true, interval: intervalInfo, due: dueInfo }, `investigator refused — ${reasons[0] ?? "no reason reported"} (nothing appended, last-run not advanced)`);
-    }
-    const records = Array.isArray(inv.records) ? (inv.records as Record<string, unknown>[]) : [];
-    const statedFocus = investigatorTexts.map((t) => focusFromText(t)).find((f) => typeof f === "string" && f !== "") ?? null;
-    investigatorBlock = {
-      ran: true, runs: config.investigatorRuns, runs_with_hypotheses: Number(inv.parsed ?? 0),
-      tools: INVESTIGATOR_TOOLS, max_turns: config.investigatorMaxTurns, cwd: asRel(root, pinned),
-      stated_focus: statedFocus, prior_focuses: focuses,
-      guided_by: selection.production.map((m) => methodLabel(m)),
+    // ⛔ The MAP is identical for both arms: the inventory is the pin's own index, and a paired round
+    // whose arms read different maps would be comparing two experiments rather than two prompts. Only
+    // the guidance block BETWEEN the focus directive and the frozen instruction differs.
+    const inventoryText = inventory.ok === true ? String(inventory.text ?? "") : "";
+    // ONE instant for the round: it is the scan-round's `ts` AND the first half of every cluster's
+    // `record_id`, so a cluster is addressable by `<round>#<index>` without a second identity scheme.
+    const roundTs = new Date(now()).toISOString();
+
+    // The two arms' prompts, built ONCE and shared with the pre-registration below, so the bytes that
+    // are hashed are the bytes that are handed to the model rather than a recomputation of them.
+    // ⛔ The TURN RESERVE directive (Plan item 2) goes into BOTH arms, and into the same position in both:
+    // the cap it describes is part of the shared envelope, so putting it in only one arm would make the
+    // paired instrument's two prompts differ by something other than the guidance block.
+    const reserveDirective = turnReserveDirective(config.investigatorMaxTurns);
+    const armPrompts: Record<PairedArm | "guided", string> = {
+      [PAIRED_ARM_GUIDED]: `${focusDirective(focuses)}\n${reserveDirective}\n${selection.production_text}${basePrompt}\n\n${inventoryText}`,
+      [PAIRED_ARM_BASELINE]: `${focusDirective(focuses)}\n${reserveDirective}\n${basePrompt}\n\n${inventoryText}`,
     };
-    // (b, cont.) `clusterHypotheses` merges near-duplicates ACROSS the runs by component-set overlap. It
-    // is dedup ASSISTANCE ONLY — nothing here discards a cluster by shape, and the cap below is a COUNT.
-    clusters = hyp.clusterHypotheses(records, {});
-    if (breached()) {
-      return fact("failed", { ...base, enabled: true, interval: intervalInfo, due: dueInfo, pin: { rev, dir: asRel(root, pinned) }, inventory, investigator: investigatorBlock }, `budget breach — wall ${now() - started}ms >= max_wall_ms ${config.maxWallMs} after the investigator (nothing appended, last-run not advanced)`);
-    }
+    // The instant the PAIRED round's FIRST call began. The pre-registration below is judged against it:
+    // a pre-registration that is not strictly older than the first call it scores is a post-hoc
+    // rationalisation (Plan item 2). `null` until that call happens — and a paired round that never
+    // reached a call has nothing for the pre-registration to precede, which is its own refusal.
+    let firstPairedCallMs: number | null = null;
+
+    // ── ONE ARM'S WHOLE PIPELINE ─────────────────────────────────────────────────────────────────────
+    // The paired instrument runs the SAME exploration twice, so the pipeline is written ONCE and
+    // parameterised by the arm: the investigator prompt (the only intended difference), the method
+    // attribution stamped on each cluster, the record-id mint, and the reservation step KINDS (so the
+    // ledger says which arm spent a call rather than leaving it to be inferred from call order).
+    // ⛔ It is a closure over THIS round's pin, budget seam and model — not a second scheduler: it reads
+    // no config and decides nothing about whether it should run.
+    type ArmRun =
+      | {
+        ok: true;
+        investigator: Record<string, unknown>;
+        clusters: Record<string, unknown>[];
+        verifiedRows: Record<string, unknown>[];
+        clusterRecords: Record<string, unknown>[];
+        novelty: NoveltyOutcome[];
+        noveltyByCluster: Map<number, NoveltyOutcome>;
+      }
+      | { ok: false; reason: string };
+
+    const runArm = async (spec: {
+      arm: PairedArm | "guided";
+      methodPicks: readonly MethodIncluded[];
+      methodArm: MethodArm;
+      /** The id mint for a cluster index. The BASELINE arm gets its own segment so a baseline record
+       *  can never be resolved as a production one — the same discipline the shadow arm follows. */
+      recordIdFor: (index: number) => string;
+      /** `true` ⇒ this run is one arm of a paired round; the arm is stamped on every cluster record. */
+      markPaired: boolean;
+    }): Promise<ArmRun> => {
+      const unguided = spec.arm === PAIRED_ARM_BASELINE;
+      const armPrefix = unguided ? "baseline arm: " : "";
+      /** This arm's step name for one of its five model steps (或 that step's answer-reserve call). */
+      const STEP_NAMES = ["investigator", "verifier", "refuter", "value-assessment", "novelty-check"] as const;
+      type StepName = (typeof STEP_NAMES)[number];
+      const stepKind = (kind: StepName | `${StepName}-report`): ModelStepKind =>
+        (unguided ? `baseline-${kind}` : kind) as ModelStepKind;
+      const armStamp: Record<string, unknown> = spec.markPaired ? { paired: true, paired_arm: spec.arm } : {};
+      const prompt = armPrompts[unguided ? PAIRED_ARM_BASELINE : PAIRED_ARM_GUIDED];
+      const armTexts: string[] = [];
+      const armOutDir = unguided
+        ? path.join(pinned, ".open-semantic-discovery-runs", PAIRED_ARM_BASELINE)
+        : path.join(pinned, ".open-semantic-discovery-runs");
+      // Every call this ARM made, in call order.
+      const armCallRecords: Record<string, unknown>[] = [];
+      /** Put a call on the arm's list, ONCE. ⛔ `reportIfCutOff` hands the SAME record back when it did not
+       *  fire, so pushing unconditionally would list one call twice — and the arm's `calls` reading (and
+       *  anything derived from it) would claim two calls where one was made. A COUNT that lies is the same
+       *  family of defect as a boolean that lies (硬规则 3b). */
+      const noteArmCall = (r: Record<string, unknown>): void => {
+        if (!armCallRecords.includes(r)) armCallRecords.push(r);
+      };
+      const inv = await hyp.runInvestigator({
+        prompt,
+        // `neutralDir` is unused on the pinned path (the cwd gate switches to `verifyCwdRefusal`); it is
+        // passed equal to the pin so BOTH gates agree on which tree this is.
+        neutralDir: pinned,
+        cwd: pinned,
+        pinDir: pinned,
+        runs: config.investigatorRuns,
+        // A separate runs directory per arm: the unguided pass must not overwrite the guided pass's runs.
+        outDir: armOutDir,
+        writeFile: (f: string, t: string) => { fs.mkdirSync(path.dirname(f), { recursive: true }); fs.writeFileSync(f, t, "utf8"); },
+        budget: { maxRuns: config.investigatorRuns, maxMs: config.maxWallMs },
+        model: requestedModel ?? "not-evaluated:model-unverified",
+        tools: INVESTIGATOR_TOOLS,
+        maxTurns: config.investigatorMaxTurns,
+        runModel: async (p: string, i: number) => {
+          if (spec.markPaired && firstPairedCallMs === null) firstPairedCallMs = now();
+          const { res, rec } = await reservingStep(stepKind("investigator"), { prompt: p, tools: INVESTIGATOR_TOOLS, maxTurns: config.investigatorMaxTurns, model: requestedModel });
+          noteArmCall(rec);
+          // A run cut off at the cap is rescued BEFORE the engine parses it, so the engine's `hyps` (and
+          // therefore the run file it writes, and `inv.parsed`) are the RESCUE's answer rather than zero.
+          const out = await reportIfCutOff(p, res, rec, stepKind("investigator-report"));
+          noteArmCall(out.rec);
+          armTexts.push(hyp.callText(String(out.res?.stdout ?? "")));
+          return out.res;
+        },
+      });
+      if (inv.ok !== true) {
+        const reasons = Array.isArray(inv.reasons) ? (inv.reasons as string[]) : [];
+        return { ok: false, reason: `${armPrefix}investigator refused — ${reasons[0] ?? "no reason reported"} (nothing appended, last-run not advanced)` };
+      }
+      const records = Array.isArray(inv.records) ? (inv.records as Record<string, unknown>[]) : [];
+      const statedFocus = armTexts.map((t) => focusFromText(t)).find((f) => typeof f === "string" && f !== "") ?? null;
+      const investigator = {
+        ran: true, runs: config.investigatorRuns,
+        // Read from the engine's OWN records, which already reflect any rescue (the rescue's stream is what
+        // `runModel` returned, so the engine parsed it). A run rescued into hypotheses therefore counts as
+        // a run WITH hypotheses — the summary cannot contradict the clusters it produced.
+        runs_with_hypotheses: Number(inv.parsed ?? 0),
+        tools: INVESTIGATOR_TOOLS, max_turns: config.investigatorMaxTurns, cwd: asRel(root, pinned),
+        stated_focus: statedFocus, prior_focuses: focuses,
+        guided_by: spec.methodPicks.map((m) => methodLabel(m)),
+        // ── HOW EACH CALL ENDED (Plan item 1) ─────────────────────────────────────────────────────────
+        // The per-call reading a reviewer needs to tell "explored, found nothing" from "was killed before
+        // it could answer". `subtype` is the stream's own structural result, `stderr_tail` the launcher's
+        // own cause, and `not_evaluated` the ONE token that combines them.
+        calls: armCallRecords.map((c) => ({
+          step: c.step, exit: c.exit, spawn_error: c.spawn_error,
+          stream_ok: c.stream_ok, subtype: c.subtype, num_turns: c.num_turns, is_error: c.is_error,
+          turns: c.turns, tokens: c.tokens, cost_charged_usd: c.cost_charged_usd,
+          stderr_chars: c.stderr_chars, stderr_tail: c.stderr_tail, stderr_tail_truncated: c.stderr_tail_truncated,
+          not_evaluated: c.not_evaluated,
+        })),
+        not_evaluated: firstNotEvaluatedToken(armCallRecords),
+        // ── THE ANSWER RESERVE, as the ARM saw it ─────────────────────────────────────────────────────
+        // Read back off the arm's OWN call records rather than from a counter kept in a side variable: a
+        // rescue IS a reservation with its own step name, so the ledger and this reading are the same fact
+        // rather than two that can drift (硬规则 5b).
+        answer_reserve: summarizeReserve(armCallRecords.filter((c) => String(c.step).includes("investigator"))),
+      };
+      // (b, cont.) `clusterHypotheses` merges near-duplicates ACROSS the runs by component-set overlap. It
+      // is dedup ASSISTANCE ONLY — nothing here discards a cluster by shape, and the cap below is a COUNT.
+      const armClusters = hyp.clusterHypotheses(records, {});
+      if (breached()) {
+        return { ok: false, reason: `${armPrefix}budget breach — wall ${now() - started}ms >= max_wall_ms ${config.maxWallMs} after the investigator (nothing appended, last-run not advanced)` };
+      }
 
     // ⑦ (c) VERIFY at most K clusters, with Read,Grep on the pin and an explicit turn budget.
     let verification: Record<string, unknown> = { verified: 0, results: [] };
-    if (clusters.length > 0) {
+    if (armClusters.length > 0) {
       const v = await hyp.runVerifier({
-        clusters, pinDir: pinned, cwd: pinned, promptTemplate: verifierPromptText,
+        clusters: armClusters, pinDir: pinned, cwd: pinned, promptTemplate: verifierPromptText,
         maxClusters: config.maxClustersVerified, concurrency: 1, maxMs: config.maxWallMs, // concurrency-default-fallback: ONE verifier call at a time — the engine can fan out, but concurrent calls reserve from several places at once and the per-step cost ledger stops being readable in call order
         strategy: "default", onlyCluster: null, evidence: null, model: requestedModel,
         runModel: async (p: string) => {
-          const { res } = await reservingStep("verifier", { prompt: p, tools: VERIFIER_TOOLS, maxTurns: config.verifierMaxTurns, model: requestedModel });
-          return res;
+          const { res, rec } = await reservingStep(stepKind("verifier"), { prompt: p, tools: VERIFIER_TOOLS, maxTurns: config.verifierMaxTurns, model: requestedModel });
+          noteArmCall(rec);
+          // A verifier cut off at its OWN cap is the same failure as an investigator cut off at its own:
+          // its `undetermined`/`turn-budget` verdict refutes and supports nothing, and the round would read
+          // as "verified 3, confirmed 0" for a reason that never appears on the record.
+          const out = await reportIfCutOff(p, res, rec, stepKind("verifier-report"));
+          noteArmCall(out.rec);
+          return out.res;
         },
       });
       if (v.ok !== true) {
         const reasons = Array.isArray(v.reasons) ? (v.reasons as string[]) : [];
-        return fact("failed", { ...base, enabled: true, interval: intervalInfo, due: dueInfo }, `verifier refused — ${reasons[0] ?? "no reason reported"} (nothing appended, last-run not advanced)`);
+        return { ok: false, reason: `${armPrefix}verifier refused — ${reasons[0] ?? "no reason reported"} (nothing appended, last-run not advanced)` };
       }
       verification = v;
     }
@@ -2015,12 +2750,9 @@ export async function runOpenSemanticDiscovery(root: string, opts: OpenSemanticD
     //    input is the claim and the components — it never sees the first verifier's reasoning. A cluster is
     //    reported `confirmed` ONLY if it survives.
     const clusterRecords: Record<string, unknown>[] = [];
-    // ONE instant for the round: it is the scan-round's `ts` AND the first half of every cluster's
-    // `record_id`, so a cluster is addressable by `<round>#<index>` without a second identity scheme.
-    const roundTs = new Date(now()).toISOString();
     for (const row of verifiedRows) {
       const idx = Number(row.cluster ?? 0);
-      const cluster = clusters[idx - 1] ?? null;
+      const cluster = armClusters[idx - 1] ?? null;
       const rep = (cluster?.rep ?? {}) as Record<string, unknown>;
       const entry: Record<string, unknown> = {
         kind: "cluster",
@@ -2029,7 +2761,7 @@ export async function runOpenSemanticDiscovery(root: string, opts: OpenSemanticD
         ts: new Date(now()).toISOString(),
         // The record's OWN id — the ref the Portfolio resolves its `origin_ref` by, and the back-pointer an
         // Experience's `source_ref` carries. Minted here, once, so both readers agree by construction.
-        record_id: openDiscoveryRecordId(roundTs, idx),
+        record_id: spec.recordIdFor(idx),
         cluster: idx,
         members: row.members ?? cluster?.members ?? [],
         concept_kind: rep.concept_kind ?? null,
@@ -2044,7 +2776,10 @@ export async function runOpenSemanticDiscovery(root: string, opts: OpenSemanticD
         // WHICH METHOD GUIDED THIS CLUSTER (null for a baseline round). It is the link the post-round
         // ingestion turns into the Experience's own attribution, so "which method produced this outcome"
         // is answerable from the record rather than reconstructed from the round's mode.
-        method_guidance: methodGuidanceBlock(selection.production, METHOD_ARM_PRODUCTION),
+        method_guidance: methodGuidanceBlock(spec.methodPicks, spec.methodArm),
+        // WHICH ARM of a paired round produced this cluster. Absent on an ordinary round, so an
+        // existing scan-round's records are byte-identical to what they were before pairing existed.
+        ...armStamp,
       };
       let refutation: Record<string, unknown> | null = null;
       if (row.verdict === "supported") {
@@ -2053,13 +2788,16 @@ export async function runOpenSemanticDiscovery(root: string, opts: OpenSemanticD
           maxClusters: 1, concurrency: 1, maxMs: config.maxWallMs, strategy: "default", onlyCluster: 1, // concurrency-default-fallback: ONE cluster, ONE call
           evidence: null, model: requestedModel,
           runModel: async (p: string) => {
-            const { res } = await reservingStep("refuter", { prompt: p, tools: REFUTER_TOOLS, maxTurns: config.refutationMaxTurns, model: requestedModel });
-            return res;
+            const { res, rec } = await reservingStep(stepKind("refuter"), { prompt: p, tools: REFUTER_TOOLS, maxTurns: config.refutationMaxTurns, model: requestedModel });
+            noteArmCall(rec);
+            const out = await reportIfCutOff(p, res, rec, stepKind("refuter-report"));
+            noteArmCall(out.rec);
+            return out.res;
           },
         });
         if (one.ok !== true) {
           const reasons = Array.isArray(one.reasons) ? (one.reasons as string[]) : [];
-          return fact("failed", { ...base, enabled: true, interval: intervalInfo, due: dueInfo }, `refuter refused — ${reasons[0] ?? "no reason reported"} (nothing appended, last-run not advanced)`);
+          return { ok: false, reason: `${armPrefix}refuter refused — ${reasons[0] ?? "no reason reported"} (nothing appended, last-run not advanced)` };
         }
         refutation = (Array.isArray(one.results) ? one.results[0] : null) as Record<string, unknown> | null;
         entry.refutation_verdict = refutation?.verdict ?? null;
@@ -2081,13 +2819,16 @@ export async function runOpenSemanticDiscovery(root: string, opts: OpenSemanticD
           maxClusters: 1, concurrency: 1, maxMs: config.maxWallMs, strategy: "default", onlyCluster: 1, // concurrency-default-fallback: ONE cluster, ONE call
           evidence: null, model: requestedModel,
           runModel: async (p: string) => {
-            const { res } = await reservingStep("value-assessment", { prompt: p, tools: VALUE_TOOLS, maxTurns: config.refutationMaxTurns, model: requestedModel });
-            return res;
+            const { res, rec } = await reservingStep(stepKind("value-assessment"), { prompt: p, tools: VALUE_TOOLS, maxTurns: config.refutationMaxTurns, model: requestedModel });
+            noteArmCall(rec);
+            const out = await reportIfCutOff(p, res, rec, stepKind("value-assessment-report"));
+            noteArmCall(out.rec);
+            return out.res;
           },
         });
         if (one.ok !== true) {
           const reasons = Array.isArray(one.reasons) ? (one.reasons as string[]) : [];
-          return fact("failed", { ...base, enabled: true, interval: intervalInfo, due: dueInfo }, `value assessment refused — ${reasons[0] ?? "no reason reported"} (nothing appended, last-run not advanced)`);
+          return { ok: false, reason: `${armPrefix}value assessment refused — ${reasons[0] ?? "no reason reported"} (nothing appended, last-run not advanced)` };
         }
         const va = (Array.isArray(one.results) ? one.results[0] : null) as Record<string, unknown> | null;
         // The mapping is explicit because the shared verifier row is what parses the JSON: the template
@@ -2105,7 +2846,7 @@ export async function runOpenSemanticDiscovery(root: string, opts: OpenSemanticD
       }
       clusterRecords.push(entry);
       if (breached()) {
-        return fact("failed", { ...base, enabled: true, interval: intervalInfo, due: dueInfo, investigator: investigatorBlock }, `budget breach — wall ${now() - started}ms >= max_wall_ms ${config.maxWallMs} during verification (nothing appended, last-run not advanced)`);
+        return { ok: false, reason: `${armPrefix}budget breach — wall ${now() - started}ms >= max_wall_ms ${config.maxWallMs} during verification (nothing appended, last-run not advanced)` };
       }
     }
 
@@ -2118,7 +2859,11 @@ export async function runOpenSemanticDiscovery(root: string, opts: OpenSemanticD
     // A SHADOW cluster is never a prior production cluster: the mechanical dedup below compares against
     // this routine's own earlier PRODUCTION records, and a draft method's unverified hypothesis must not
     // make a production finding look like a repeat of something already seen.
-    const priorClusterRecords = carrierRounds.filter((r) => r.kind === "cluster" && r.invoked_by === INVOKED_BY_RESIDENT && r.shadow !== true);
+    // A SHADOW cluster is never a prior production cluster, and neither is a PAIRED round's BASELINE
+    // arm: both are measurement records, and letting one make a production finding look like a repeat of
+    // something already seen would delete a finding on the strength of a measurement.
+    const priorClusterRecords = carrierRounds.filter((r) =>
+      r.kind === "cluster" && r.invoked_by === INVOKED_BY_RESIDENT && r.shadow !== true && r.paired_arm !== PAIRED_ARM_BASELINE);
     const noveltyOutcomes: NoveltyOutcome[] = [];
     const noveltyByCluster = new Map<number, NoveltyOutcome>();
     for (const c of clusterRecords) {
@@ -2148,9 +2893,13 @@ export async function runOpenSemanticDiscovery(root: string, opts: OpenSemanticD
         evidence: Array.isArray(c.evidence_lines) ? (c.evidence_lines as string[]) : [],
         candidates: retrieval.candidates, broad: retrieval.broad, broadTruncated: retrieval.broad_truncated,
       });
-      const { res, rec: callRec } = await reservingStep("novelty-check", {
+      const { res: noveltyRes, rec: callRec } = await reservingStep(stepKind("novelty-check"), {
         prompt, tools: NOVELTY_TOOLS, maxTurns: config.refutationMaxTurns, model: requestedModel,
       });
+      noteArmCall(callRec);
+      const noveltyOut = await reportIfCutOff(prompt, noveltyRes, callRec, stepKind("novelty-check-report"));
+      noteArmCall(noveltyOut.rec);
+      const res = noveltyOut.res;
       const parsed = parseNoveltyVerdict(hyp.parseJsonObject(hyp.callText(String(res?.stdout ?? ""))));
       // A `duplicate` verdict is only usable when the record it names is a candidate that RESOLVES on the
       // write path. Naming anything else is DOWNGRADED to `restatement` — recorded, never silently
@@ -2171,8 +2920,13 @@ export async function runOpenSemanticDiscovery(root: string, opts: OpenSemanticD
         duplicate_of: duplicateOf ?? parsed?.duplicate_of ?? null,
         reasoning: parsed?.reasoning ?? null,
         summary: parsed?.summary ?? null,
-        retrieved: retrieval.candidates.length, broad: retrieval.broad.length, calls: 1,
-        cost_usd: typeof callRec.cost_charged_usd === "number" ? (callRec.cost_charged_usd as number) : null,
+        retrieved: retrieval.candidates.length, broad: retrieval.broad.length,
+        // BOTH calls when the check was rescued: the novelty check's cost is what the round actually spent
+        // on it, and charging only the cut-off call would under-report the ledger's own reading.
+        calls: noveltyOut.rec === callRec ? 1 : 2,
+        cost_usd: typeof callRec.cost_charged_usd === "number" || typeof noveltyOut.rec.cost_charged_usd === "number"
+          ? round6(Number(callRec.cost_charged_usd ?? 0) + (noveltyOut.rec === callRec ? 0 : Number(noveltyOut.rec.cost_charged_usd ?? 0)))
+          : null,
         retrieval: {
           totals: retrieval.totals, absent: retrieval.absent, errors: retrieval.errors,
           broad_truncated: retrieval.broad_truncated, mechanical_duplicate_of: null,
@@ -2181,7 +2935,152 @@ export async function runOpenSemanticDiscovery(root: string, opts: OpenSemanticD
       noveltyOutcomes.push(outcome);
       noveltyByCluster.set(idx, outcome);
       if (breached()) {
-        return fact("failed", { ...base, enabled: true, interval: intervalInfo, due: dueInfo, investigator: investigatorBlock }, `budget breach — wall ${now() - started}ms >= max_wall_ms ${config.maxWallMs} during the novelty check (nothing appended, last-run not advanced)`);
+        return { ok: false, reason: `${armPrefix}budget breach — wall ${now() - started}ms >= max_wall_ms ${config.maxWallMs} during the novelty check (nothing appended, last-run not advanced)` };
+      }
+    }
+    return { ok: true, investigator, clusters: armClusters, verifiedRows, clusterRecords, novelty: noveltyOutcomes, noveltyByCluster };
+    };
+
+    // ── THE PRE-REGISTRATION (Plan item 2), WRITTEN BEFORE THE FIRST CALL ────────────────────────────
+    // Each arm's prompt digest, the inventory hash and the budget digest go to disk BEFORE any call, so
+    // that the comparison is a DECLARATION rather than a description written after the fact. Only a
+    // paired round has one: an ordinary round has no second arm to bind.
+    const preregBlock: { path: string | null; mtime_ms: number | null; keys: string[]; expected: Record<string, string>; body: Record<string, unknown> | null; refusal: string | null } = {
+      path: null, mtime_ms: null, keys: [], expected: {}, body: null, refusal: null,
+    };
+    // ⛔ A round that is merely NOT the M-th one is not "not evaluated" — it was never an instrument.
+    // Only a round that COULD have measured and could not carries a token, so the rolling summary's
+    // not-evaluated counts cannot be inflated by ordinary rounds (Plan item 5).
+    let pairedNotEvaluated: string | null = !pairedDecision.due && pairedDecision.reason === PAIRED_NOT_EVALUATED_NO_ELIGIBLE_METHOD
+      ? PAIRED_NOT_EVALUATED_NO_ELIGIBLE_METHOD
+      : null;
+    const pairedEnvelope = pairedArmBudget(config);
+    if (pairedDecision.due) {
+      // ⛔ AC (a) in production form: the two arms are ENVELOPES read from ONE config, and they are
+      // compared before either runs. A future path that handed one arm a different envelope would be
+      // refused here rather than recorded as a comparison it never was.
+      const budgetRefusal = pairedBudgetRefusal(pairedEnvelope, pairedArmBudget(config));
+      if (budgetRefusal) {
+        return fact("failed", { ...base, enabled: true, interval: intervalInfo, due: dueInfo }, `paired round refused — ${budgetRefusal.reasons.join("; ")} (nothing appended, last-run not advanced)`);
+      }
+      const keys = pairedPreregKeys({
+        baselinePrompt: sha256Of(armPrompts[PAIRED_ARM_BASELINE]),
+        guidedPrompt: sha256Of(armPrompts[PAIRED_ARM_GUIDED]),
+        inventory: sha256Of(inventoryText),
+        budget: sha256Of(JSON.stringify(pairedEnvelope)),
+      });
+      const preregPath = path.join(root, PREREG_REL);
+      const body: Record<string, unknown> = {
+        kind: "open-discovery-prereg",
+        routine: OPEN_SEMANTIC_DISCOVERY_NAME,
+        ts: new Date(now()).toISOString(),
+        eligible_round_ordinal: pairedDecision.ordinal,
+        every_rounds: config.gainEveryRounds,
+        pin_rev: rev,
+        arms: [...PAIRED_ARMS],
+        budget: pairedEnvelope,
+        hashes: keys,
+      };
+      try {
+        fs.mkdirSync(path.dirname(preregPath), { recursive: true });
+        fs.writeFileSync(preregPath, `${JSON.stringify(body, null, 1)}\n`, "utf8");
+        preregBlock.path = asRel(root, preregPath);
+        preregBlock.mtime_ms = fs.statSync(preregPath).mtimeMs;
+      } catch (e) {
+        return fact("failed", { ...base, enabled: true, interval: intervalInfo, due: dueInfo }, `pre-registration could not be written — ${(e as Error).message} (nothing appended, last-run not advanced)`);
+      }
+      preregBlock.keys = Object.keys(keys).sort();
+      preregBlock.expected = keys;
+      preregBlock.body = body;
+      // …and the clock is yielded ONCE, so the declaration is provably older than the first call it
+      // scores (see PREREG_SETTLE_MS — it can only make it older, never younger).
+      await new Promise((resolve) => setTimeout(resolve, PREREG_SETTLE_MS));
+    }
+
+    // ⑥ (b) SEMANTIC EXPLORATION ON REAL SOURCE — the GUIDED arm (this round's production arm). It is
+    //    the round's own work whether or not a paired round is due; when one IS due, this run is the
+    //    pair's `guided` arm and the unguided baseline arm runs beside it on the same pin.
+    const guidedRun = await runArm({
+      arm: "guided",
+      methodPicks: selection.production,
+      methodArm: METHOD_ARM_PRODUCTION,
+      recordIdFor: (i: number) => openDiscoveryRecordId(roundTs, i),
+      markPaired: pairedDecision.due,
+    });
+    if (!guidedRun.ok) {
+      return fact("failed", { ...base, enabled: true, interval: intervalInfo, due: dueInfo }, guidedRun.reason);
+    }
+    investigatorBlock = guidedRun.investigator;
+    clusters = guidedRun.clusters;
+    const verifiedRows = guidedRun.verifiedRows;
+    const clusterRecords = guidedRun.clusterRecords;
+    const noveltyOutcomes = guidedRun.novelty;
+    const noveltyByCluster = guidedRun.noveltyByCluster;
+
+    // ── THE UNGUIDED ARM OF A PAIRED ROUND (Plan items 1-3) ──────────────────────────────────────────
+    // The SAME pin, the SAME inventory, the SAME model and the SAME budget envelope — only the
+    // investigator prompt differs. ⛔ The baseline arm's clusters ride the carrier (marked
+    // `paired_arm:"baseline"` with their own record-id segment) and are SCORED, but they reach NEITHER
+    // the Experience ledger NOR the Portfolio: the instrument measures, it does not file. That is also
+    // what keeps the two arms' novelty checks comparable — both read the PRE-round Portfolio, so
+    // neither can be credited with a finding the other has just written.
+    let baselineRun: ArmRun | null = null;
+    let gainRecord: Record<string, unknown> | null = null;
+    let pairedCounts: { baseline: PairedArmCounts; guided: PairedArmCounts } | null = null;
+    if (pairedDecision.due) {
+      baselineRun = await runArm({
+        arm: PAIRED_ARM_BASELINE,
+        methodPicks: [],
+        methodArm: METHOD_ARM_PRODUCTION,
+        recordIdFor: (i: number) => openBaselineDiscoveryRecordId(roundTs, i),
+        markPaired: true,
+      });
+      // The pre-registration is re-read NOW, not trusted from before the arms: a declaration rewritten
+      // during the round it scores is exactly what the mtime rule exists to catch.
+      let preregNowMs: number | null = null;
+      try { preregNowMs = fs.statSync(path.join(root, PREREG_REL)).mtimeMs; } catch { preregNowMs = null; }
+      const preregResult = pairedPreregRefusal({
+        prereg: preregBlock.body,
+        preregMtimeMs: preregNowMs,
+        expected: preregBlock.expected,
+        armCallMtimesMs: firstPairedCallMs === null ? [] : [firstPairedCallMs],
+        preregRefusalFn: hyp.preregRefusal,
+      });
+      if (preregResult) {
+        // Recorded, never shaped as a gain: a pair whose declaration does not precede its own calls has
+        // no measured gain to report, and reporting 0 would be the exact confusion Plan item 5 forbids.
+        preregBlock.refusal = preregResult.reasons.join("; ");
+        pairedNotEvaluated = `not-evaluated:prereg-${preregResult.reasons.join(",")}`;
+      } else if (!baselineRun.ok) {
+        pairedNotEvaluated = `not-evaluated:baseline-arm-${baselineRun.reason}`;
+      } else {
+        const baselineCounts = pairedArmCounts({
+          arm: PAIRED_ARM_BASELINE,
+          clusters: baselineRun.clusterRecords,
+          novelty: armNoveltyRows(baselineRun.novelty),
+          calls: callsOfArm(callRecords, PAIRED_ARM_BASELINE),
+        });
+        const guidedCounts = pairedArmCounts({
+          arm: PAIRED_ARM_GUIDED,
+          clusters: clusterRecords,
+          novelty: armNoveltyRows(noveltyOutcomes),
+          calls: callsOfArm(callRecords, PAIRED_ARM_GUIDED),
+        });
+        gainRecord = buildGainRecord({
+          roundTs,
+          invokedBy,
+          pinRev: rev,
+          inventorySha: typeof inventory.sha256 === "string" ? inventory.sha256 : null,
+          prereg: { path: preregBlock.path, mtime_ms: preregBlock.mtime_ms, keys: preregBlock.keys, refusal: null },
+          budget: pairedEnvelope,
+          budgetLedgerRel: asRel(root, ledgerPath),
+          baseline: baselineCounts,
+          guided: guidedCounts,
+          guidedBy: selection.production.map((m) => methodLabel(m)),
+          ordinal: pairedDecision.ordinal,
+          everyRounds: config.gainEveryRounds,
+        });
+        pairedCounts = { baseline: baselineCounts, guided: guidedCounts };
       }
     }
 
@@ -2202,8 +3101,10 @@ export async function runOpenSemanticDiscovery(root: string, opts: OpenSemanticD
     let shadowClusters: Array<Record<string, unknown>> = [];
     let shadowClusterRecords: Record<string, unknown>[] = [];
     if (selection.shadow.length > 0) {
-      const shadowPrompt = `${focusDirective(focuses)}\n${selection.shadow_text}${basePrompt}\n\n${inventory.ok === true ? String(inventory.text ?? "") : ""}`;
+      const shadowOutDir = path.join(pinned, ".open-semantic-discovery-runs", "shadow");
+      const shadowPrompt = `${focusDirective(focuses)}\n${reserveDirective}\n${selection.shadow_text}${basePrompt}\n\n${inventory.ok === true ? String(inventory.text ?? "") : ""}`;
       let shadowCalls = 0;
+      const shadowCallRecords: Record<string, unknown>[] = [];
       const shadowInv = await hyp.runInvestigator({
         prompt: shadowPrompt,
         neutralDir: pinned,
@@ -2211,16 +3112,24 @@ export async function runOpenSemanticDiscovery(root: string, opts: OpenSemanticD
         pinDir: pinned,
         runs: config.investigatorRuns,
         // A separate runs directory: the shadow pass must not overwrite the production pass's run files.
-        outDir: path.join(pinned, ".open-semantic-discovery-runs", "shadow"),
+        outDir: shadowOutDir,
         writeFile: (f: string, t: string) => { fs.mkdirSync(path.dirname(f), { recursive: true }); fs.writeFileSync(f, t, "utf8"); },
         budget: { maxRuns: config.investigatorRuns, maxMs: config.maxWallMs },
         model: requestedModel ?? "not-evaluated:model-unverified",
         tools: INVESTIGATOR_TOOLS,
         maxTurns: config.investigatorMaxTurns,
-        runModel: async (p: string) => {
-          const { res } = await reservingStep("shadow-investigator", { prompt: p, tools: INVESTIGATOR_TOOLS, maxTurns: config.investigatorMaxTurns, model: requestedModel });
+        runModel: async (p: string, i: number) => {
+          const { res, rec } = await reservingStep("shadow-investigator", { prompt: p, tools: INVESTIGATOR_TOOLS, maxTurns: config.investigatorMaxTurns, model: requestedModel });
           shadowCalls++;
-          return res;
+          // Same one-entry-per-call discipline as the production arms: `reportIfCutOff` returns the SAME
+          // record when it did not fire.
+          if (!shadowCallRecords.includes(rec)) shadowCallRecords.push(rec);
+          // The shadow pass gets the SAME one-shot reserve: it is an isolated measurement, but a shadow run
+          // cut off at the cap measures nothing, and its calls already count against the same ledger.
+          const out = await reportIfCutOff(p, res, rec, "shadow-investigator-report");
+          if (!shadowCallRecords.includes(out.rec)) shadowCallRecords.push(out.rec);
+          if (out.rec !== rec) shadowCalls++;
+          return out.res;
         },
       });
       if (shadowInv.ok !== true) {
@@ -2259,6 +3168,10 @@ export async function runOpenSemanticDiscovery(root: string, opts: OpenSemanticD
         shadowBlock = {
           ...shadowBlock, calls: shadowCalls,
           clusters: { total: shadowClusters.length, claims: shadowClusters.map((c) => (c.rep as Record<string, unknown>)?.claim ?? null) },
+          // The shadow arm's failure is its OWN reading, never the production round's: an extra arm that
+          // was cut off must not make a production round that DID explore read as not-evaluated.
+          not_evaluated: firstNotEvaluatedToken(shadowCallRecords),
+          answer_reserve: summarizeReserve(shadowCallRecords),
         };
       }
     }
@@ -2317,10 +3230,39 @@ export async function runOpenSemanticDiscovery(root: string, opts: OpenSemanticD
         usd_used_at_start: usdUsage.usd,
         ledger: asRel(root, ledgerPath),
       },
+      // ── THE PAIRED INSTRUMENT (Plan items 1-5) ────────────────────────────────────────────────────
+      // Whether a pair ran this round, and — when it did not — WHY, as its own token. ⛔ `not_evaluated`
+      // is non-null ONLY when the round COULD have measured and could not; a round that merely was not
+      // the M-th one carries `null`, so the rolling summary's counts cannot be inflated by ordinary
+      // rounds (Plan item 5: "no eligible method" ≠ "zero gain").
+      paired: {
+        due: pairedDecision.due,
+        ordinal: pairedDecision.ordinal,
+        every_rounds: config.gainEveryRounds,
+        reason: pairedDecision.reason,
+        not_evaluated: pairedNotEvaluated,
+        budget: pairedEnvelope,
+        prereg: preregBlock.path === null
+          ? null
+          : { path: preregBlock.path, mtime_ms: preregBlock.mtime_ms, keys: preregBlock.keys, refusal: preregBlock.refusal },
+        baseline_arm: baselineRun === null || !baselineRun.ok
+          ? null
+          : {
+            clusters: baselineRun.clusterRecords.length,
+            confirmed: baselineRun.clusterRecords.filter((c) => c.confirmed === true).length,
+          },
+        gain: gainRecord === null ? null : gainRecord.gain,
+        gain_record_ts: gainRecord === null ? null : roundTs,
+      },
       budget_24h: countBudgetBlock,
       budget_usd_24h: usdBudgetBlock,
       wall_ms: wallMs,
       model_calls: budget.grantedCount,
+      // ── THE ANSWER RESERVE, round-wide (Plan item 2) ──────────────────────────────────────────────
+      // Every step's rescue calls, read off the round's own call records: how many were granted, how many
+      // answered, and which are still not evaluated. A `rescued: N` with `attempted: N` says the turn cap
+      // cost the round calls that had to be paid for twice; `attempted: 0` says no step was cut off.
+      answer_reserve: summarizeReserve(callRecords),
       calls: callRecords,
       tokens: { input: tokensIn, output: tokensOut },
       cost_usd: round6(costUsd),
@@ -2328,7 +3270,16 @@ export async function runOpenSemanticDiscovery(root: string, opts: OpenSemanticD
     // The shadow arm's cluster records ride the SAME append as the production ones, each marked
     // `shadow:true` — they are on the carrier (so a reviewer can read what the draft method elicited)
     // and structurally OUTSIDE the ingestion below, which is fed `clusterRecords` alone.
-    appendCarrierRecords(carrier, [round, ...clusterRecords, ...shadowClusterRecords]);
+    appendCarrierRecords(carrier, [
+      round,
+      ...clusterRecords,
+      ...shadowClusterRecords,
+      ...(baselineRun !== null && baselineRun.ok ? baselineRun.clusterRecords : []),
+      ...(gainRecord === null ? [] : [gainRecord]),
+    ]);
+    // The ROLLING SUMMARY is recomputed from the carrier at every paired round and appended as its own
+    // line: a VIEW of every gain so far, never a smoothed score over them.
+    if (gainRecord !== null) appendCarrierRecords(carrier, [gainRollup([...carrierRounds, gainRecord])]);
 
     // ⑩b THE WRITES — carrier record → Experience → Portfolio. They run AFTER the append because a
     //     Portfolio row's `origin_ref` must resolve in a carrier record that is really there, and the
@@ -2379,6 +3330,26 @@ export async function runOpenSemanticDiscovery(root: string, opts: OpenSemanticD
     if (midRound !== null) {
       return fact("not-evaluated", round, `budget: the ${midRound.kind} step was refused by the 24h ceiling (${midRound.used} >= cap ${midRound.cap}) — ${budget.grantedCount} call(s) were already made and stay RESERVED; the round persisted what it did but did NOT advance the production last-run${revertedNote}${legacyNote}`);
     }
+    // ── "NOT EVALUATED" IS NOT "FOUND NOTHING" (Plan item 1, 硬规则 3b) ───────────────────────────────
+    // The defect this task closes: production recorded `exit 1`, `turns 13` under `--max-turns 12`, zero
+    // hypotheses — and the Fact said the round ran. A round whose calls did NOT answer is reported by the
+    // token that says WHY, so the two states can never be read for one another again.
+    // The shadow arm's own reading is computed FIRST, so this sentence can name it too: a round whose
+    // production calls did not answer but whose draft-method arm ran is a different statement from one
+    // where nothing ran at all.
+    const shadowNote = selection.shadow.length === 0
+      ? ""
+      : `; shadow arm ${shadowBlock.ran === true ? `ran ${Number(shadowBlock.calls ?? 0)} call(s) under ${selection.shadow.map((m) => methodLabel(m)).join(",")} (${shadowClusters.length} hypothesis cluster(s), NEVER ingested)` : `did not run (${String(shadowBlock.reason ?? "")})`}`;
+    const failedCalls = callRecords.filter((c) => typeof c.not_evaluated === "string");
+    const firstFailed = failedCalls.length === 0 ? null : String(failedCalls[0].not_evaluated);
+    const failedTokens = [...new Set(failedCalls.map((c) => String(c.not_evaluated)))];
+    if (firstFailed !== null && clusters.length === 0 && confirmedClusters.length === 0) {
+      return fact(
+        "not-evaluated",
+        round,
+        `${firstFailed}: the investigator produced NO parsed hypothesis cluster — ${budget.grantedCount} model call(s), ${failedCalls.length} of them NOT EVALUATED (${failedTokens.join(",")}), costing $${round6(costUsd)}, wall ${wallMs}ms. The scan-round line IS persisted, so the round's own record says what happened; ⛔ do NOT read this as "explored and found nothing" — the model never got to answer${resident ? " (the production last-run WAS advanced)" : " (MANUAL: the production last-run was NOT advanced)"}${shadowNote}${revertedNote}${legacyNote}`,
+      );
+    }
     // An ingestion that FAILED is not folded into a success sentence: the round's semantic work is real
     // and already persisted, but the Fact must say the ledgers did not all get written.
     const ingestionNote = ingestionError !== null
@@ -2387,13 +3358,24 @@ export async function runOpenSemanticDiscovery(root: string, opts: OpenSemanticD
     const methodNote = selection.mode === "guided"
       ? `; methods GUIDED by ${selection.production.map((m) => methodLabel(m)).join(",")}`
       : `; methods BASELINE (${selection.baseline_reason})`;
-    const shadowNote = selection.shadow.length === 0
+    // A round that produced work AND had calls that did not answer says BOTH: the counts above are counts
+    // over the calls that replied, and a reader who is not told that would take them for the whole round.
+    const failedNote = failedCalls.length === 0
       ? ""
-      : `; shadow arm ${shadowBlock.ran === true ? `ran ${Number(shadowBlock.calls ?? 0)} call(s) under ${selection.shadow.map((m) => methodLabel(m)).join(",")} (${shadowClusters.length} hypothesis cluster(s), NEVER ingested)` : `did not run (${String(shadowBlock.reason ?? "")})`}`;
+      : `; ⛔ ${failedCalls.length} of ${callRecords.length} call(s) were NOT EVALUATED (${failedTokens.join(",")}) — the counts above are over the calls that answered, not over the exploration that was asked for`;
+    // ⛔ The paired note NEVER reports a gain in place of "not measured", and never reports 0 where the
+    // instrument could not run: the two states are different sentences (Plan item 5).
+    const pairedNote = !pairedDecision.due
+      ? (pairedNotEvaluated === null
+        ? ""
+        : `; paired instrument ${pairedNotEvaluated} (eligible-round ${pairedDecision.ordinal} of every ${config.gainEveryRounds})`)
+      : gainRecord === null || pairedCounts === null
+        ? `; PAIRED round ${pairedDecision.ordinal} was NOT measured — ${String(pairedNotEvaluated)} (no gain record written)`
+        : `; PAIRED round ${pairedDecision.ordinal}: baseline ${pairedCounts.baseline.confirmed_net_new} net-new / ${pairedCounts.baseline.duplicates} duplicate / ${pairedCounts.baseline.refuted} refuted / $${pairedCounts.baseline.usd}; guided ${pairedCounts.guided.confirmed_net_new} / ${pairedCounts.guided.duplicates} / ${pairedCounts.guided.refuted} / $${pairedCounts.guided.usd}; gain ${JSON.stringify(gainRecord.gain)}`;
     return fact(
       "verified",
       round,
-      `round ran (invoked_by:${invokedBy}, interval ${intervalMinutes}m): investigator read the pin with ${INVESTIGATOR_TOOLS} (focus: ${investigatorBlock.stated_focus ?? "<not stated>"}), ${clusters.length} cluster(s) from ${investigatorBlock.runs_with_hypotheses} run(s), ${verifiedRows.length} verified, ${confirmedClusters.length} CONFIRMED after independent refutation, ${budget.grantedCount} model call(s) costing $${round6(costUsd)}, wall ${wallMs}ms; appended 1 scan-round + ${clusterRecords.length} cluster record(s) to ${asRel(root, carrier)}${resident ? " and advanced the production last-run" : " — MANUAL: the production last-run was NOT advanced"}${ingestionNote}${methodNote}${shadowNote}${revertedNote}${legacyNote}`,
+      `round ran (invoked_by:${invokedBy}, interval ${intervalMinutes}m): investigator read the pin with ${INVESTIGATOR_TOOLS} (focus: ${investigatorBlock.stated_focus ?? "<not stated>"}), ${clusters.length} cluster(s) from ${investigatorBlock.runs_with_hypotheses} run(s), ${verifiedRows.length} verified, ${confirmedClusters.length} CONFIRMED after independent refutation, ${budget.grantedCount} model call(s) costing $${round6(costUsd)}, wall ${wallMs}ms; appended 1 scan-round + ${clusterRecords.length} cluster record(s) to ${asRel(root, carrier)}${resident ? " and advanced the production last-run" : " — MANUAL: the production last-run was NOT advanced"}${ingestionNote}${methodNote}${shadowNote}${pairedNote}${failedNote}${revertedNote}${legacyNote}`,
     );
   } catch (e) {
     if (isBudgetRefused(e)) {

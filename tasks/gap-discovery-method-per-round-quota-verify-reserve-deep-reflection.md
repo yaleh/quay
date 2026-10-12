@@ -199,3 +199,25 @@ Independently confirmed on the live production round: the manual round's line la
 - plugin/test/discovery-reflection.test.mjs
 - plugin/scripts/capability-catalog-declarations.json
 - .quay/config.yml
+
+## Blocker
+
+**2026-10-12T18:21:17.342Z — worker 未落地（exited-not-landed）**
+
+- 未落地原因：step=suite: __PERFILE__ duration_ms=32924 plugin/test/prod-data-audit.test.mjs passed=false end_ms=1791829065438 cpu_ms=34036.67 mem_peak_kb=1873720
+- run_id：wk-prod-anchor
+- session_id：93355eb5-4eb6-4a83-90dd-85a89407a2b7
+
+## Needs-Human
+
+**执行 2026-10-12T18:21:18.302Z — 停派终止（失败无法归因，⛔ 不再重派）**
+
+- 阻碍原因：exited-not-landed 失败无法归因（基建/契约疑似，非实现缺陷）——停止重派，⛔ 不再拿新会话撞同一堵墙：suite red could not be attributed to any failing test file in 2 consecutive rounds (bounded to at most one retry) — infra/contract suspected, not an implementable defect (parser attributed 1 failing file(s) in this round: plugin/test/prod-data-audit.test.mjs); stopping instead of spending another worker session
+- 失败步/判词：step=suite: __PERFILE__ duration_ms=32924 plugin/test/prod-data-audit.test.mjs passed=false end_ms=1791829065438 cpu_ms=34036.67 mem_peak_kb=1873720
+- run_id：wk-prod-anchor
+- session_id：93355eb5-4eb6-4a83-90dd-85a89407a2b7
+- suite 日志：/data/home/yale/work/quay/.quay/fan-in-suite-gap-discovery-method-per-round-quota-verify-reserve-deep-reflection~wk-prod-anchor~1791828953643-00613d.log
+- fan-in 日志：/data/home/yale/work/quay/.quay/fan-in-gap-discovery-method-per-round-quota-verify-reserve-deep-reflection-wk-prod-anchor.log
+
+
+**2026-10-12T18:40Z: needs-human cause resolved; restored to ready for a fresh fan-in (NOT done).** The suite red was develop-wide and outside this task's delta: plugin/test/prod-data-audit.test.mjs threw ERR_STRING_TOO_LONG because .quay/meta-driver-round.jsonl (538,347,520 B) exceeded V8's string limit. The develop baseline had the same 2 failures, and the 'unattributable' verdict came from the baseline comparator only parsing TAP (fix tracked in gap-fan-in-baseline-comparison-blind-to-spec-reporter-misparks-develop-wide-red). With user authorization, the carrier was rotated at 18:35:39Z with full history preserved (archive + verified backup in /data/home/yale/work/quay-carrier-archive/meta-driver-round/, identity sha256 verified). Afterwards prod-data-audit.test.mjs reads 10/10 pass. All AC were already ticked. The task still has to pass its own fan-in (suite included) before it can be done.
