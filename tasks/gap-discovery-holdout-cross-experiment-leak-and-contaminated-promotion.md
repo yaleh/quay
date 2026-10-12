@@ -56,7 +56,7 @@ The remaining risk is RE-promotion and a recurrence of the leak.
    - `activeMethods()` excludes any method whose promoting verdict is listed and reports it as `excluded_contaminated` (defence in depth).
 6. **No scoring change and no promotion relaxation.** The correctness rule and the gates are unchanged. This task promotes nothing; `activeMethods()` stays `[]`.
 
-**What was built (all four Plan items, no scoring/gate change).**
+**What was built (Plan items 1–5; item 6 unchanged — no scoring change, nothing promoted).**
 - `docs/analysis/discovery-reflection.mjs`: `buildCaseIdentityIndex` / `writeCaseIdentityIndex` / `readCaseIdentityIndex` / `caseIndexSha256` / `readSealedSet` / `caseComponentsOf` / `fixCommitsOf` / `caseCollisions` / `checkSealedSetContamination` / `validateCaseLabelTiming` / `validateSealedSetBinding` / `caseLabelSha256`; `validateGeneralization` gains the `caseIdentityIndex` gate (`HELD_OUT_PREVIOUSLY_USED`) and the label-timing gate, and records `label_sha256` / `index_sha256` / `previously_used_ok` on the verdict.
 - `docs/analysis/discovery-method-registry.mjs`: the contaminated-verdict carrier (`CONTAMINATED_VERDICTS_REL`), `appendContaminatedVerdict`, `backfillContaminatedVerdicts`, `contaminatedVerdictIds`; the promotion rule gains the `VERDICT_CONTAMINATED` cause and requires `previously_used_ok !== false`; `activeMethods` reports `excluded_contaminated`.
 - One collision arm is deliberately WEAKER than the others: a single component shared with a case the sealed files mark `diagnostic-public` already refuses, because a case surfaced in the open reached the labeller through a channel no component identity can represent (this is the arm that catches the C5-derived case; it is spelled as its own kind, `shared_diagnostic_component`).
@@ -70,7 +70,7 @@ The remaining risk is RE-promotion and a recurrence of the leak.
   - (e) a genuinely unseen case (no shared pair, fix or id) ⇒ accepted;
   - (f) promotion citing a listed verdict ⇒ `VERDICT_CONTAMINATED`;
   - (g) `activeMethods()` excludes a method promoted on a listed verdict;
-  - (h) a new case with `labeled_at` after the preregm mtime ⇒ refused.
+  - (h) a new case with `labeled_at` after the prereg mtime ⇒ refused.
 
   ```
   ℹ tests 81
