@@ -2,7 +2,7 @@
 id: gap-discovery-method-per-round-quota-verify-reserve-deep-reflection
 title: "discovery-method per-round quota after 24h=240: verification reserve,
   bounded code-reading reflection, partial persistence on wall breach"
-status: needs-human
+status: ready
 labels:
   - gap
   - discovery-method
@@ -218,3 +218,6 @@ Independently confirmed on the live production round: the manual round's line la
 - session_id：93355eb5-4eb6-4a83-90dd-85a89407a2b7
 - suite 日志：/data/home/yale/work/quay/.quay/fan-in-suite-gap-discovery-method-per-round-quota-verify-reserve-deep-reflection~wk-prod-anchor~1791828953643-00613d.log
 - fan-in 日志：/data/home/yale/work/quay/.quay/fan-in-gap-discovery-method-per-round-quota-verify-reserve-deep-reflection-wk-prod-anchor.log
+
+
+**2026-10-12T18:40Z: needs-human cause resolved; restored to ready for a fresh fan-in (NOT done).** The suite red was develop-wide and outside this task's delta: plugin/test/prod-data-audit.test.mjs threw ERR_STRING_TOO_LONG because .quay/meta-driver-round.jsonl (538,347,520 B) exceeded V8's string limit. The develop baseline had the same 2 failures, and the 'unattributable' verdict came from the baseline comparator only parsing TAP (fix tracked in gap-fan-in-baseline-comparison-blind-to-spec-reporter-misparks-develop-wide-red). With user authorization, the carrier was rotated at 18:35:39Z with full history preserved (archive + verified backup in /data/home/yale/work/quay-carrier-archive/meta-driver-round/, identity sha256 verified). Afterwards prod-data-audit.test.mjs reads 10/10 pass. All AC were already ticked. The task still has to pass its own fan-in (suite included) before it can be done.
