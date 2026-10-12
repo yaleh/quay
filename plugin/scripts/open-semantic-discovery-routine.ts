@@ -170,6 +170,14 @@ export const BUDGET_LOCK_REL = path.posix.join(".quay", "open-semantic-discovery
  *  exactly the thing the mtime rule exists to catch. */
 export const PREREG_REL = path.posix.join(".quay", "open-semantic-discovery-prereg.json");
 
+/** How long the round yields the clock between WRITING the pre-registration and the first arm call.
+ *  ⛔ WHY IT EXISTS: "older than every call" is judged in whole milliseconds off the file's own mtime
+ *  (the reused engine rule), and a write and a call inside the SAME millisecond are unprovable — a
+ *  refusal there would be a FALSE refusal of a perfectly good declaration, and a pairing cadence that
+ *  sometimes refuses its own pre-registration is worse than useless. The settle can only ever make the
+ *  declaration OLDER than the calls, never younger, so it cannot manufacture a false pass. */
+export const PREREG_SETTLE_MS = 25;
+
 /** sha256 of the EXACT bytes handed to a model or declared in a pre-registration. One definition, so
  *  the digest written into the pre-registration and the digest a reader recomputes cannot diverge. */
 export const sha256Of = (s: string): string => createHash("sha256").update(s, "utf8").digest("hex");
@@ -2723,6 +2731,9 @@ export async function runOpenSemanticDiscovery(root: string, opts: OpenSemanticD
       preregBlock.keys = Object.keys(keys).sort();
       preregBlock.expected = keys;
       preregBlock.body = body;
+      // …and the clock is yielded ONCE, so the declaration is provably older than the first call it
+      // scores (see PREREG_SETTLE_MS — it can only make it older, never younger).
+      await new Promise((resolve) => setTimeout(resolve, PREREG_SETTLE_MS));
     }
 
     // ⑥ (b) SEMANTIC EXPLORATION ON REAL SOURCE — the GUIDED arm (this round's production arm). It is

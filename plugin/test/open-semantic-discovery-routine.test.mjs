@@ -2295,6 +2295,12 @@ test("WIRING — a due paired round runs BOTH arms on one pin and files only the
   assert.notEqual(prereg.hashes[`${PAIRED_ARM_BASELINE}-prompt`], prereg.hashes[`${PAIRED_ARM_GUIDED}-prompt`],
     "the two arms' prompts really differ (the guidance block is the difference)");
   assert.equal(g.prereg.refusal, null);
+  // …and it PROVABLY precedes the pair's first call — the property the mtime rule exists to check, read
+  // off the reservation ledger rather than off the round's own report of itself.
+  const firstReserve = ledgerReserves(ws).find((l) => l.step === "investigator");
+  assert.ok(firstReserve, "the guided arm's first call was reserved");
+  assert.ok(Date.parse(firstReserve.ts) > fs.statSync(preregFile(ws)).mtimeMs,
+    `the pre-registration (${fs.statSync(preregFile(ws)).mtimeMs}) must be OLDER than the first call (${firstReserve.ts})`);
   // The rolling summary is appended beside it, as a series rather than a score.
   const summaries = gainSummaries(ws);
   assert.equal(summaries.length, 1);
