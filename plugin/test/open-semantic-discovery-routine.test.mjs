@@ -93,6 +93,29 @@ import {
   openShadowDiscoveryRecordId,
   METHOD_ARM_PRODUCTION,
   METHOD_ARM_SHADOW,
+  DEFAULT_GAIN_EVERY_ROUNDS,
+  PAIRED_ARM_BASELINE,
+  PAIRED_ARM_GUIDED,
+  PAIRED_ARMS,
+  GAIN_RECORD_KIND,
+  GAIN_SUMMARY_KIND,
+  PRODUCTION_OPEN_EVIDENCE_LEVEL,
+  PAIRED_NOT_EVALUATED_NO_ELIGIBLE_METHOD,
+  PREREG_REL,
+  sha256Of,
+  pairedArmBudget,
+  pairedBudgetRefusal,
+  pairedArmCounts,
+  armNoveltyRows,
+  gainOf,
+  pairedPreregKeys,
+  pairedPreregRefusal,
+  buildGainRecord,
+  gainRollup,
+  eligibleRoundsOf,
+  pairedRoundDecision,
+  openBaselineDiscoveryRecordId,
+  callsOfArm,
 } from "../scripts/open-semantic-discovery-routine.ts";
 import { ROUTINE_LAST_RUN_REL, readLastRunMap } from "../scripts/probe-routine.ts";
 import { qualityGateRoutines } from "../scripts/quality-gate-driver.ts";
@@ -104,6 +127,9 @@ import * as realHyp from "../../docs/analysis/arch-hypothesis-generation.mjs";
 import * as realPortfolio from "../../docs/analysis/discovery-portfolio.mjs";
 import * as realLedger from "../../docs/analysis/discovery-experience-ledger.mjs";
 import * as realRegistry from "../../docs/analysis/discovery-method-registry.mjs";
+// The PROMOTION PATH itself, imported for REAL: AC (e) is a claim about what THAT module decides, and a
+// re-implementation of its level rule here would agree with itself rather than with production.
+import { validateGeneralization, promotionStatusForLevel, PROMOTION_REPORT_ONLY_STATUS } from "../../docs/analysis/discovery-reflection.mjs";
 
 const SCRIPT_DIR = path.dirname(fileURLToPath(import.meta.url));
 const REPO_ROOT = path.resolve(SCRIPT_DIR, "..", "..");
@@ -158,6 +184,14 @@ function cfgYaml(overrides = {}) {
     const val = Object.prototype.hasOwnProperty.call(overrides, k) ? overrides[k] : v;
     if (val === null) continue;
     lines.push(`    ${k}: ${val}`);
+  }
+  // Keys the declared set does not carry (the OPTIONAL extras, e.g. `gain_every_rounds`) are emitted
+  // after it — an override map that silently dropped them would make a case test the DEFAULT while
+  // reading as though it had declared something.
+  for (const [k, v] of Object.entries(overrides)) {
+    if (SECTION_KEYS.some(([declared]) => declared === k)) continue;
+    if (v === null) continue;
+    lines.push(`    ${k}: ${v}`);
   }
   return lines.join("\n") + "\n";
 }
@@ -316,6 +350,9 @@ function makeEngine({ hyps = HYPS, verdictFor = alwaysSupported } = {}) {
     callText: realHyp.callText,
     defaultVerifierPrompt: realHyp.defaultVerifierPrompt,
     defaultInvestigatorPrompt: realHyp.defaultInvestigatorPrompt,
+    // The engine's OWN pre-registration gate, consumed by the paired instrument rather than re-derived
+    // (硬规则 5b) — so the stub engine must carry it exactly as the real module does.
+    preregRefusal: realHyp.preregRefusal,
     TOOL: realHyp.TOOL,
     runInvestigator: investigatorStub(hyps, investigatorCalls),
     runVerifier: verifierStub(verifierCalls, verdictFor),
@@ -344,6 +381,38 @@ function armAwareInvestigator({ productionHyps = HYPS, shadowHyps = [] } = {}) {
   };
   fn.calls = sink;
   return fn;
+}
+
+/** The PAIRED round's arms need an investigator whose hypotheses depend on WHICH ARM is asking, and the
+ *  arm is identifiable structurally: each arm is handed its own runs directory (the baseline arm's ends
+ *  in its own segment). Nothing here reads the prompt to decide the arm — a prompt-reading stub would
+ *  make the comparison agree with itself. */
+function pairedAwareInvestigator({ guidedHyps = HYPS, baselineHyps = HYPS } = {}) {
+  const sink = [];
+  const fn = async (o) => {
+    const segment = String(o.outDir).split(path.sep).pop();
+    const isBaseline = segment === PAIRED_ARM_BASELINE;
+    const hyps = isBaseline ? baselineHyps : guidedHyps;
+    const records = [];
+    for (let i = 0; i < o.runs; i++) {
+      const r = await o.runModel(o.prompt, i);
+      sink.push({ arm: isBaseline ? PAIRED_ARM_BASELINE : PAIRED_ARM_GUIDED, cwd: o.cwd, prompt: o.prompt });
+      records.push({ run: i + 1, hyps, stdout: r?.stdout ?? "", exit: r?.status ?? null });
+    }
+    return { ok: true, records, parsed: records.length, total: o.runs };
+  };
+  fn.calls = sink;
+  return fn;
+}
+
+/** The engine seam for the paired-round cases: the real engine + real ledgers + real registry, with the
+ *  paired-aware investigator. Everything else is `makeEngine`'s. */
+function makePairedEngine(opts = {}) {
+  const engine = makeEngine({ verdictFor: opts.verdictFor ?? alwaysSupported });
+  const investigator = pairedAwareInvestigator(opts);
+  engine.modules.hyp.runInvestigator = investigator;
+  engine.investigator = investigator;
+  return engine;
 }
 
 /** The engine seam for the METHOD cases: the real engine + real ledgers + real registry, with the
@@ -1896,6 +1965,397 @@ test("NEGATIVE CONTROL (d) — ignore the quarantine walk in a scratch copy ⇒ 
   assert.deepEqual(real.excluded.map((m) => m.method_id), ["quarantined-ancestor"]);
   assert.deepEqual(mutated.excluded, [], "the mutant excludes nothing — the successor moved into `included`");
   process.stdout.write(`    NEGATIVE CONTROL (d): mutant SELECTED ${mutated.included.map((m) => methodLabel(m)).join(",")} for the shadow arm (claim was «never selected, even as the only record»); the real module excluded it via ${real.excluded[0].reasons.join("; ")}\n`);
+});
+
+// ── THE PAIRED BASELINE-VS-GUIDED GAIN ROUND (task gap-open-discovery-periodic-baseline-vs-guided-gain)
+//
+// Coverage map for this task's Acceptance Criteria:
+//   (a) arms with DIFFERENT budgets                        ⇒ refused
+//   (b) a pre-registration written AFTER the first call    ⇒ refused
+//   (c) a NEGATIVE gain is recorded as negative
+//   (d) duplicates and refuted findings never count as net-new, in EITHER arm
+//   (e) a paired-round record cannot be read as `independent` by the PROMOTION PATH
+//   (f) no eligible method                                 ⇒ `not-evaluated:no-eligible-method`
+// plus the round-level wiring (both arms really run, the baseline arm files nothing) and the
+// in-scratch-copy NEGATIVE CONTROL the task names for (e).
+
+const gainRecords = (ws) => carrierLines(ws).filter((l) => l.kind === GAIN_RECORD_KIND);
+const gainSummaries = (ws) => carrierLines(ws).filter((l) => l.kind === GAIN_SUMMARY_KIND);
+const baselineClusters = (ws) => carrierLines(ws).filter((l) => l.kind === "cluster" && l.paired_arm === PAIRED_ARM_BASELINE);
+const preregFile = (ws) => path.join(ws, PREREG_REL);
+
+/** A REAL (empty) git directory — a valid STRIPPED pin for the promotion-path cases, which read a pin
+ *  rather than materialising one. */
+function mkGitTmp() {
+  const d = tmpDir("paired-pin-");
+  spawnSync("git", ["init", "-q"], { cwd: d, encoding: "utf8", env: GIT_ENV });
+  return d;
+}
+
+/** The promotion path's OWN fixtures: a draft candidate and a held-out case whose role demands
+ *  `refuted`. Shaped like the ones `discovery-reflection.test.mjs` uses, so the reading is comparable. */
+const promotionCandidate = (over = {}) => ({
+  kind: "method", method_id: "paired-fixture-method", version: 1,
+  provenance_evidence: ["experience-inbatch000000"],
+  applicability: { domain_signals: ["fixture domain signal"], preconditions: ["a fixture precondition holds"] },
+  operation: { steps: ["read the fixture source"], tools: [] },
+  expected_invariant: "the fixture invariant holds at every call site",
+  falsification: "a call site violates the fixture invariant",
+  cost_budget: { max_candidates: 1, max_model_calls: 0, max_wall_ms: 1000 },
+  status: "draft", retirement_reason: null, supersedes: null,
+  ...over,
+});
+const promotionHeldOut = (over = {}) => ({
+  kind: "experience", id: "experience-heldout0000000", case_id: "EXP-heldout",
+  ts: "2026-10-12T00:00:00.000Z", role: "confirmed-negative", reported_by: "system",
+  source_ref: "outcome-heldout00000000", evidence: [{ ref: "outcome-heldout00000000", sha256: "0".repeat(64) }],
+  components: ["plugin/scripts/heldout.ts"],
+  summary: "a held-out fixture case whose summary clears the ledger's own floor comfortably",
+  evaluation_pin: "1".repeat(40),
+  ...over,
+});
+const promotionModel = (obj, counter = null) => async () => {
+  if (counter) counter.calls++;
+  return { stdout: typeof obj === "string" ? obj : JSON.stringify(obj), status: 0 };
+};
+const CORRECT_REFUTATION = { invariant_holds: false, verdict: "refuted", reasoning: "the claim does not hold" };
+
+/** A SCRATCH copy of the PROMOTION PATH whose relative imports still resolve (siblings symlinked, the
+ *  module itself a real mutated file). Used only by the (e) negative control. */
+function scratchReflectionModule(mutate) {
+  const dir = tmpDir("reflection-mutant-");
+  const analysis = path.join(dir, "docs", "analysis");
+  fs.mkdirSync(analysis, { recursive: true });
+  fs.symlinkSync(path.join(REPO_ROOT, "node_modules"), path.join(dir, "node_modules"));
+  for (const f of fs.readdirSync(path.join(REPO_ROOT, "docs", "analysis"))) {
+    if (f === "discovery-reflection.mjs") continue;
+    fs.symlinkSync(path.join(REPO_ROOT, "docs", "analysis", f), path.join(analysis, f));
+  }
+  const src = fs.readFileSync(path.join(REPO_ROOT, "docs", "analysis", "discovery-reflection.mjs"), "utf8");
+  const out = mutate(src);
+  assert.notEqual(out, src, "the mutation control must actually change the source");
+  const p = path.join(analysis, "discovery-reflection.mjs");
+  fs.writeFileSync(p, out, "utf8");
+  return p;
+}
+
+/** The DECLARED section as a raw object, so a case can add a key the YAML fixture does not emit. */
+const rawSection = (over = {}) => {
+  const out = { enabled: true };
+  for (const [k, v] of SECTION_KEYS) {
+    if (k === "enabled") continue;
+    out[k] = v === "true" ? true : (v === "false" ? false : (/^-?\d+$/.test(v) ? Number(v) : v));
+  }
+  return { ...out, ...over };
+};
+
+test("AC (gain-config) — `gain_every_rounds` is OPTIONAL (absent ⇒ the stated default), and an integer >= 1 when declared", () => {
+  const absent = parseOpenSemanticDiscoverySection(rawSection());
+  assert.equal(absent.error, null);
+  assert.equal(absent.config.gainEveryRounds, DEFAULT_GAIN_EVERY_ROUNDS,
+    "a section written before the paired instrument existed still parses to the stated cadence");
+  assert.equal(DEFAULT_GAIN_EVERY_ROUNDS, 6, "the stated default is six eligible rounds");
+  const declared = parseOpenSemanticDiscoverySection(rawSection({ gain_every_rounds: 3 }));
+  assert.equal(declared.error, null);
+  assert.equal(declared.config.gainEveryRounds, 3);
+  const viaYaml = makeWorkspace();
+  writeConfig(viaYaml, cfgYaml({ gain_every_rounds: "3" }));
+  assert.equal(readOpenSemanticDiscoveryConfig(viaYaml).config.gainEveryRounds, 3, "…and the key is read off `.quay/config.yml`");
+  // ⛔ `0` is REFUSED: an omitted key and a `0` would otherwise mean the same thing while only one of
+  // them is STATED, so "the instrument was switched off" could not be told from "nobody declared it".
+  const zero = parseOpenSemanticDiscoverySection(rawSection({ gain_every_rounds: 0 }));
+  assert.equal(zero.config, null);
+  assert.match(zero.error, /gain_every_rounds/);
+  const bogus = parseOpenSemanticDiscoverySection(rawSection({ gain_every_rounds: 1.5 }));
+  assert.equal(bogus.config, null, "a non-integer cadence is a config error, not a rounding");
+  process.stdout.write(`    AC (gain-config): absent ⇒ ${String(absent.config.gainEveryRounds)}; declared 3 ⇒ ${String(declared.config.gainEveryRounds)}; 0 ⇒ ${String(zero.error)}\n`);
+});
+
+test("AC (a) — arms with DIFFERENT budgets are refused, naming every field that differs", () => {
+  const ws = makeWorkspace();
+  writeConfig(ws, cfgYaml());
+  const cfg = readOpenSemanticDiscoveryConfig(ws).config;
+  const same = pairedArmBudget(cfg);
+  assert.equal(pairedBudgetRefusal(same, pairedArmBudget(cfg)), null, "one config read twice ⇒ one envelope");
+  const other = { ...same, max_clusters_verified: same.max_clusters_verified + 1 };
+  const refusal = pairedBudgetRefusal(same, other);
+  assert.ok(refusal, "a differing envelope must be REFUSED — the comparison would not be controlled");
+  assert.equal(refusal.code, "PAIRED_ARM_BUDGETS_DIFFER");
+  assert.deepEqual(refusal.reasons, [`PAIRED_ARM_BUDGETS_DIFFER:max_clusters_verified:${same.max_clusters_verified}!=${other.max_clusters_verified}`]);
+  // …and a DIFFERENT turns bound is caught too, not just the cluster cap.
+  const turns = pairedBudgetRefusal(same, { ...same, verifier_max_turns: same.verifier_max_turns + 4 });
+  assert.ok(turns.reasons.some((r) => r.startsWith("PAIRED_ARM_BUDGETS_DIFFER:verifier_max_turns")));
+  process.stdout.write(`    AC (a): ${JSON.stringify(refusal.reasons)}\n`);
+});
+
+test("AC (b) — a pre-registration written AFTER the first call is refused; older-than ⇒ clean", () => {
+  const keys = pairedPreregKeys({ baselinePrompt: "b", guidedPrompt: "g", inventory: "i", budget: "u" });
+  const prereg = { hashes: keys };
+  const callAt = 1_000_000;
+  // (i) the pre-registration PRECEDES the call: clean.
+  assert.equal(pairedPreregRefusal({
+    prereg, preregMtimeMs: callAt - 5_000, expected: keys, armCallMtimesMs: [callAt],
+    preregRefusalFn: realHyp.preregRefusal,
+  }), null);
+  // (ii) it was written AFTER the first call: refused, with the engine's own reason.
+  const late = pairedPreregRefusal({
+    prereg, preregMtimeMs: callAt + 1, expected: keys, armCallMtimesMs: [callAt],
+    preregRefusalFn: realHyp.preregRefusal,
+  });
+  assert.ok(late, "a pre-registration newer than the call it scores is a post-hoc rationalisation");
+  assert.ok(late.reasons.includes("PREREG_NOT_OLDER_THAN_RUNS"), `⇒ ${JSON.stringify(late.reasons)}`);
+  // …and the SAME mtime is refused too: "not older" is not "older".
+  const equal = pairedPreregRefusal({
+    prereg, preregMtimeMs: callAt, expected: keys, armCallMtimesMs: [callAt],
+    preregRefusalFn: realHyp.preregRefusal,
+  });
+  assert.ok(equal.reasons.includes("PREREG_NOT_OLDER_THAN_RUNS"));
+  // A hash that does not match the arm's actual prompt is its own refusal (the engine's vocabulary).
+  const mismatched = pairedPreregRefusal({
+    prereg: { hashes: { ...keys, [`${PAIRED_ARM_GUIDED}-prompt`]: "not-the-guided-prompt" } },
+    preregMtimeMs: callAt - 1, expected: keys, armCallMtimesMs: [callAt],
+    preregRefusalFn: realHyp.preregRefusal,
+  });
+  assert.ok(mismatched.reasons.includes(`PREREG_HASH_MISMATCH:${PAIRED_ARM_GUIDED}-prompt`));
+  // ⛔ 硬规则 3b: with NO call time there is nothing to be older than, so the answer is its OWN refusal
+  // rather than a pass — an unverifiable pre-registration must not read as a verified one.
+  const unverifiable = pairedPreregRefusal({ prereg, preregMtimeMs: callAt - 1, expected: keys, armCallMtimesMs: [], preregRefusalFn: realHyp.preregRefusal });
+  assert.equal(unverifiable.code, "PAIRED_PREREG_UNVERIFIABLE");
+  process.stdout.write(`    AC (b): late-reprereg ⇒ ${JSON.stringify(late.reasons)}; no-call-time ⇒ ${unverifiable.code}\n`);
+});
+
+test("AC (c) — a NEGATIVE gain is recorded as negative (for the round's metrics AND its USD)", () => {
+  const counts = (arm, over = {}) => ({
+    arm, confirmed_net_new: 0, duplicates: 0, refuted: 0, undetermined: 0, confirmed_total: 0,
+    nothing_found: true, model_calls: 0, usd: 0, ...over,
+  });
+  const baseline = counts(PAIRED_ARM_BASELINE, { confirmed_net_new: 3, confirmed_total: 3, nothing_found: false, usd: 0.4, model_calls: 6 });
+  const guided = counts(PAIRED_ARM_GUIDED, { confirmed_net_new: 1, confirmed_total: 1, nothing_found: false, duplicates: 2, refuted: 1, usd: 0.9, model_calls: 9 });
+  const gain = gainOf(baseline, guided);
+  assert.equal(gain.net_new, -2, "guidance found FEWER net-new findings ⇒ a real −2, never clamped to 0");
+  assert.equal(gain.duplicates, 2);
+  assert.equal(gain.refuted, 1);
+  assert.ok(gain.usd > 0, "…and the USD gain is signed the same way (guidance cost more here)");
+  // The record carries the signed value, not a magnitude: a reader must be able to see the SIGN.
+  const rec = buildGainRecord({
+    roundTs: "2026-10-12T00:00:00.000Z", invokedBy: INVOKED_BY_RESIDENT, pinRev: "0".repeat(40),
+    inventorySha: "a".repeat(64),
+    prereg: { path: ".quay/x.json", mtime_ms: 1, keys: ["inventory"], refusal: null },
+    budget: { investigator_runs: 1, max_clusters_verified: 3, investigator_max_turns: 12, verifier_max_turns: 8, refutation_max_turns: 6 },
+    budgetLedgerRel: ".quay/ledger.jsonl", baseline, guided, guidedBy: ["m@v1"], ordinal: 6, everyRounds: 6,
+  });
+  assert.equal(rec.gain.net_new, -2);
+  assert.equal(rec.arms[PAIRED_ARM_BASELINE].confirmed_net_new, 3);
+  assert.equal(rec.arms[PAIRED_ARM_GUIDED].confirmed_net_new, 1);
+  // ⛔ …and the ROLLING SUMMARY lists the raw series rather than a smoothed score.
+  const later = buildGainRecord({
+    roundTs: "2026-10-12T06:00:00.000Z", invokedBy: INVOKED_BY_RESIDENT, pinRev: "0".repeat(40),
+    inventorySha: null, prereg: { path: null, mtime_ms: null, keys: [], refusal: null },
+    budget: { investigator_runs: 1, max_clusters_verified: 3, investigator_max_turns: 12, verifier_max_turns: 8, refutation_max_turns: 6 },
+    budgetLedgerRel: ".quay/ledger.jsonl", baseline: counts(PAIRED_ARM_BASELINE, { confirmed_net_new: 1, confirmed_total: 1, nothing_found: false }),
+    guided: counts(PAIRED_ARM_GUIDED, { confirmed_net_new: 4, confirmed_total: 4, nothing_found: false }), guidedBy: [], ordinal: 12, everyRounds: 6,
+  });
+  const rollup = gainRollup([{ kind: "scan-round", paired: { not_evaluated: PAIRED_NOT_EVALUATED_NO_ELIGIBLE_METHOD } }, rec, later]);
+  assert.deepEqual(rollup.series.net_new, [-2, 3], "every round's own value, in order — not a blended number");
+  assert.equal(rollup.totals.net_new, 1);
+  assert.equal(rollup.negative_rounds.net_new, 1, "the negative round is COUNTED, not smoothed away");
+  assert.deepEqual(rollup.not_evaluated, { [PAIRED_NOT_EVALUATED_NO_ELIGIBLE_METHOD]: 1 }, "the unmeasured round is its own count, never a 0");
+  assert.match(String(rollup.smoothing), /no single blended score/);
+  process.stdout.write(`    AC (c): gain=${JSON.stringify(rec.gain)}; rollup.series.net_new=${JSON.stringify(rollup.series.net_new)} totals=${JSON.stringify(rollup.totals)}\n`);
+});
+
+test("AC (d) — duplicates and refuted findings never count as net-new, in EITHER arm", () => {
+  const cluster = (i, over = {}) => ({ cluster: i, confirmed: true, ...over });
+  const clusters = [
+    cluster(1),                                                             // confirmed, novel ⇒ net-new
+    cluster(2),                                                             // confirmed, judge says duplicate
+    cluster(3, { verifier_verdict: "refuted", confirmed: false }),          // refuted by the FIRST verifier
+    cluster(4, { refutation_verdict: "refuted", confirmed: false }),        // refuted by the REFUTER
+    cluster(5, { verifier_verdict: "undetermined", confirmed: false }),     // neither confirmed nor refuted
+    cluster(6),                                                             // confirmed, UNJUDGED by the novelty call
+    cluster(7, { refutation_verdict: "refuted", confirmed: false }),        // refuted AND disposition "novel"
+  ];
+  const novelty = [
+    { cluster: 1, disposition: "novel" },
+    { cluster: 2, disposition: "duplicate" },
+    { cluster: 3, disposition: "novel" },          // a refuted cluster can never be counted, whatever it says
+    { cluster: 6, disposition: "unjudged" },
+    { cluster: 7, disposition: "novel" },          // …and neither can one the refuter refused
+  ];
+  for (const arm of PAIRED_ARMS) {
+    const counts = pairedArmCounts({ arm, clusters, novelty, calls: [{ cost_charged_usd: 0.25 }] });
+    assert.equal(counts.confirmed_net_new, 1,
+      `arm ${arm}: ONLY the confirmed-and-novel cluster is net-new (got ${counts.confirmed_net_new})`);
+    assert.equal(counts.refuted, 3, "both verifier verdicts are compared, and a refuted cluster is never confirmed");
+    assert.equal(counts.duplicates, 1);
+    assert.equal(counts.undetermined, 1, "«neither confirmed nor refuted» is its own count, not folded into refuted");
+    assert.equal(counts.usd, 0.25);
+  }
+  // The NEGATIVE CONTROL on the same predicate: a cluster marked confirmed AND refuted is still not
+  // net-new, because the net-new rule requires the novelty disposition `novel` (not merely `confirmed`).
+  const poisoned = pairedArmCounts({ arm: PAIRED_ARM_BASELINE, clusters: [cluster(1, { refutation_verdict: "refuted" })], novelty: [{ cluster: 1, disposition: "novel" }], calls: [] });
+  assert.equal(poisoned.confirmed_net_new, 0, "a refuted cluster recorded as confirmed is STILL not net-new");
+  assert.equal(poisoned.refuted, 1);
+  process.stdout.write(`    AC (d): per-arm net-new=${pairedArmCounts({ arm: PAIRED_ARM_GUIDED, clusters, novelty, calls: [] }).confirmed_net_new} from ${clusters.length} clusters (1 novel, 1 duplicate, 3 refuted, 1 undetermined, 1 unjudged)\n`);
+});
+
+test("AC (f) — no eligible method ⇒ `not-evaluated:no-eligible-method`, NEVER a zero gain", async () => {
+  // (i) PURE: the decision itself.
+  const none = pairedRoundDecision({ eligibleRounds: 5, gainEveryRounds: 6, eligibleMethods: 0 });
+  assert.equal(none.due, false);
+  assert.equal(none.reason, PAIRED_NOT_EVALUATED_NO_ELIGIBLE_METHOD);
+  assert.equal(none.ordinal, 6, "where the cadence stands is still reported");
+  // (ii) …and the M-th round WITH an eligible method IS due (the non-zero control on the same predicate).
+  const due = pairedRoundDecision({ eligibleRounds: 5, gainEveryRounds: 6, eligibleMethods: 1 });
+  assert.equal(due.due, true);
+  assert.equal(due.ordinal, 6);
+  assert.equal(pairedRoundDecision({ eligibleRounds: 0, gainEveryRounds: 6, eligibleMethods: 1 }).due, false);
+
+  // (iii) ROUND-LEVEL: a round with no eligible method records the token and writes NO gain record.
+  const ws = makeWorkspace();
+  writeConfig(ws, cfgYaml({ gain_every_rounds: "1" }));   // due on the very first eligible round
+  const fact = await runOpenSemanticDiscovery(ws, { ...runOpts(ws, { engine: makeMethodEngine() }), spawnFn: countingSpawn(), pinFn: pinStub() });
+  assert.equal(fact.state, "verified");
+  const round = rounds(ws)[0];
+  assert.equal(round.methods.mode, "baseline");
+  assert.equal(round.paired.due, false);
+  assert.equal(round.paired.not_evaluated, PAIRED_NOT_EVALUATED_NO_ELIGIBLE_METHOD);
+  assert.equal(round.paired.gain, null);
+  assert.equal(gainRecords(ws).length, 0, "no eligible method ⇒ no gain record at all (NOT a gain of 0)");
+  assert.equal(eligibleRoundsOf(carrierLines(ws)), 0, "a baseline round is not an ELIGIBLE round");
+  assert.match(fact.reason, /not-evaluated:no-eligible-method/);
+  process.stdout.write(`    AC (f): round.paired=${JSON.stringify({ due: round.paired.due, ordinal: round.paired.ordinal, not_evaluated: round.paired.not_evaluated })} gain_records=${gainRecords(ws).length}\n`);
+});
+
+test("WIRING — a due paired round runs BOTH arms on one pin and files only the guided one", async () => {
+  const ws = makeWorkspace();
+  writeConfig(ws, cfgYaml({ gain_every_rounds: "1" }));
+  writeMethodRegistry(ws, [methodRec({ method_id: "fixture-active", status: "active" })]);
+  // The arms answer DIFFERENTLY, identified structurally by their runs directory: the unguided arm
+  // finds TWO clusters, the guided arm only ONE. Nothing here inspects a prompt to decide the arm.
+  const engine = makePairedEngine({ guidedHyps: [HYPS[0]], baselineHyps: HYPS });
+  const spawn = countingSpawn();
+  const pin = pinStub();
+  const fact = await runOpenSemanticDiscovery(ws, { ...runOpts(ws, { engine }), spawnFn: spawn, pinFn: pin });
+  assert.equal(fact.state, "verified");
+  const round = rounds(ws)[0];
+  assert.equal(round.paired.due, true);
+  assert.equal(round.paired.ordinal, 1);
+  assert.equal(round.paired.not_evaluated, null, "a measured pair carries no not-evaluated token");
+
+  // BOTH arms ran, on the SAME pin, with the SAME model and the SAME budget envelope.
+  assert.deepEqual(engine.investigator.calls.map((c) => c.arm), [PAIRED_ARM_GUIDED, PAIRED_ARM_BASELINE]);
+  for (const c of engine.investigator.calls) assert.equal(c.cwd, pin.pins[0], "both arms are rooted at the ONE pin");
+  assert.deepEqual(round.paired.budget, pairedArmBudget(readOpenSemanticDiscoveryConfig(ws).config));
+  const steps = resumeSteps(ws);
+  assert.ok(steps.includes("baseline-investigator"), "the unguided arm's investigator reserved under its OWN step name");
+  assert.ok(steps.includes("baseline-verifier") && steps.includes("baseline-refuter") && steps.includes("baseline-novelty-check"),
+    `the whole pipeline runs per arm (steps: ${JSON.stringify(steps)})`);
+
+  // The arms' records are distinguishable, and the baseline arm's id can never resolve as production's.
+  const base = baselineClusters(ws);
+  assert.equal(base.length, 2, "the baseline arm's clusters ride the carrier (so a reviewer can read them)");
+  for (const c of base) {
+    assert.equal(c.paired, true);
+    assert.ok(String(c.record_id).includes("#baseline#"), `a baseline record carries its own id segment (${c.record_id})`);
+    assert.equal(openBaselineDiscoveryRecordId("T", 1), `${OPEN_DISCOVERY_REF_PREFIX}T#baseline#1`);
+  }
+  // The GUIDED arm's clusters (production, not baseline): `productionClusters` above is the
+  // method-guidance helper and would also catch the baseline arm's, which are marked the same way.
+  const guidedClusters = carrierLines(ws).filter((l) => l.kind === "cluster" && l.shadow !== true && l.paired_arm !== PAIRED_ARM_BASELINE);
+  assert.deepEqual(guidedClusters.map((c) => c.paired_arm), [PAIRED_ARM_GUIDED]);
+  assert.deepEqual(guidedClusters.map((c) => c.method_guidance.methods), [[{ method_id: "fixture-active", version: 1 }]],
+    "the guided arm's clusters carry their method attribution");
+  for (const c of baselineClusters(ws)) assert.equal(c.method_guidance, null, "…and the BASELINE arm's carry none");
+
+  // ⛔ NOTHING the BASELINE arm found reaches the ledgers — an instrument measures, it does not file.
+  assert.equal(baselineClusters(ws).length, 2);
+  assert.equal(portfolioRecords(ws).length, 1, "one Portfolio row — the GUIDED arm's one confirmed cluster");
+  assert.equal(experienceRecords(ws).length, 1);
+  for (const row of portfolioRecords(ws)) assert.ok(!String(row.origin_ref).includes("#baseline#"), "no Portfolio row resolves a baseline record");
+
+  // The gain record: both arms' counts, the signed gain, and the level that forbids reading it as proof.
+  const gains = gainRecords(ws);
+  assert.equal(gains.length, 1);
+  const g = gains[0];
+  assert.equal(g.evidence_level, PRODUCTION_OPEN_EVIDENCE_LEVEL);
+  assert.equal(g.counts_as_independent_evidence, false);
+  assert.equal(g.promotion.licenses, "nothing");
+  assert.equal(g.arms[PAIRED_ARM_BASELINE].confirmed_net_new, 2);
+  assert.equal(g.arms[PAIRED_ARM_GUIDED].confirmed_net_new, 1);
+  assert.equal(g.gain.net_new, -1, "guidance found FEWER net-new findings here ⇒ a recorded −1");
+  assert.deepEqual(g.guided_by, ["fixture-active@v1"]);
+  assert.equal(g.budget.shared_by_arms, true);
+  assert.match(String(g.budget.ledger), /open-semantic-discovery-model-budget\.jsonl$/, "both arms reserve from the ONE 24h ledger");
+  // The pre-registration EXISTS, precedes the calls, and names the two arms' prompt digests.
+  assert.ok(fs.existsSync(preregFile(ws)), "the pre-registration is on disk");
+  const prereg = JSON.parse(fs.readFileSync(preregFile(ws), "utf8"));
+  assert.deepEqual(prereg.arms, [...PAIRED_ARMS]);
+  assert.deepEqual(Object.keys(prereg.hashes).sort(), [`${PAIRED_ARM_BASELINE}-prompt`, `${PAIRED_ARM_GUIDED}-prompt`, "budget", "inventory"].sort());
+  assert.notEqual(prereg.hashes[`${PAIRED_ARM_BASELINE}-prompt`], prereg.hashes[`${PAIRED_ARM_GUIDED}-prompt`],
+    "the two arms' prompts really differ (the guidance block is the difference)");
+  assert.equal(g.prereg.refusal, null);
+  // …and it PROVABLY precedes the pair's first call — the property the mtime rule exists to check, read
+  // off the reservation ledger rather than off the round's own report of itself.
+  const firstReserve = ledgerReserves(ws).find((l) => l.step === "investigator");
+  assert.ok(firstReserve, "the guided arm's first call was reserved");
+  assert.ok(Date.parse(firstReserve.ts) > fs.statSync(preregFile(ws)).mtimeMs,
+    `the pre-registration (${fs.statSync(preregFile(ws)).mtimeMs}) must be OLDER than the first call (${firstReserve.ts})`);
+  // The rolling summary is appended beside it, as a series rather than a score.
+  const summaries = gainSummaries(ws);
+  assert.equal(summaries.length, 1);
+  assert.deepEqual(summaries[0].series.net_new, [-1]);
+  assert.deepEqual(summaries[0].totals.net_new, -1);
+  assert.equal(summaries[0].paired_rounds, 1);
+  // …and the round's OWN fact says which arm produced what, without inventing a gain.
+  assert.match(fact.reason, /PAIRED round 1: baseline 2 net-new/);
+  process.stdout.write(`    wiring: ${fact.reason.slice(fact.reason.indexOf("PAIRED round"))}\n`);
+});
+
+test("AC (e) — a paired-round record is NOT independent evidence: the promotion path caps it at trial", async () => {
+  // The record's OWN declared level, and the promotion path's OWN predicate over it.
+  const grant = { evidence_level: PRODUCTION_OPEN_EVIDENCE_LEVEL, counts_as_independent_evidence: false };
+  assert.equal(grant.evidence_level, "production-open");
+  assert.equal(promotionStatusForLevel(grant.evidence_level), PROMOTION_REPORT_ONLY_STATUS);
+  assert.notEqual(promotionStatusForLevel(grant.evidence_level), "active");
+  // The non-zero control on the SAME predicate: an `independent` verdict DOES reach `active`.
+  assert.equal(promotionStatusForLevel("independent"), "active");
+
+  // …and END-TO-END through the REAL promotion path: a CORRECT prediction at this level promotes the
+  // candidate to a report-only state, which `activeMethods()` never hands to a consumer.
+  const vg = await validateGeneralization({
+    candidate: promotionCandidate(), heldOutCase: promotionHeldOut(),
+    model: promotionModel(CORRECT_REFUTATION), budget: {}, pinDir: mkGitTmp(),
+    evidenceLevel: PRODUCTION_OPEN_EVIDENCE_LEVEL,
+  });
+  assert.equal(vg.ok, true);
+  assert.equal(vg.correct, true, "the prediction was right — this is NOT a failed reading");
+  assert.equal(vg.promoted, true);
+  assert.equal(vg.promoted_to, PROMOTION_REPORT_ONLY_STATUS);
+  assert.notEqual(vg.candidate_after.status, "active", "⇒ a paired-round record can NEVER license `active`");
+  assert.equal(vg.candidate_after.status, PROMOTION_REPORT_ONLY_STATUS);
+  process.stdout.write(`    AC (e): production-open ⇒ promoted_to=${vg.promoted_to} (candidate_after.status=${vg.candidate_after.status}); independent ⇒ ${promotionStatusForLevel("independent")}\n`);
+});
+
+test("NEGATIVE CONTROL (e) — let the promotion path accept `production-open` in a scratch copy ⇒ (e) goes RED", async () => {
+  const ANCHOR = "  return isIndependentEvidenceLevel(level) ? \"active\" : PROMOTION_REPORT_ONLY_STATUS;";
+  const mutantPath = scratchReflectionModule((src) => {
+    assert.ok(src.includes(ANCHOR), "the level-cap anchor is present in the promotion path");
+    return src.replace(ANCHOR, "  return \"active\"; // MUTATION: the level cap is dropped — ANY level now licenses active");
+  });
+  const mutant = await import(pathToFileURL(mutantPath).href);
+  // The mutation is EXACTLY "the level cap is dropped": nothing else about the promotion path changes.
+  assert.notEqual(mutant.promotionStatusForLevel(PRODUCTION_OPEN_EVIDENCE_LEVEL), PROMOTION_REPORT_ONLY_STATUS,
+    "⇒ the (e) claim («production-open caps at trial») is FALSIFIED — the control is live");
+  assert.equal(mutant.promotionStatusForLevel(PRODUCTION_OPEN_EVIDENCE_LEVEL), "active");
+  const vg = await mutant.validateGeneralization({
+    candidate: promotionCandidate(), heldOutCase: promotionHeldOut(),
+    model: promotionModel(CORRECT_REFUTATION), budget: {}, pinDir: mkGitTmp(),
+    evidenceLevel: PRODUCTION_OPEN_EVIDENCE_LEVEL,
+  });
+  assert.equal(vg.candidate_after.status, "active",
+    "⇒ with the cap dropped, a production-open gain record WOULD promote to `active` — the (e) claim is FALSIFIED");
+  process.stdout.write(`    NEGATIVE CONTROL (e): mutant promoted a ${PRODUCTION_OPEN_EVIDENCE_LEVEL} verdict to status=${vg.candidate_after.status} (claim was «never active»)\n`);
 });
 
 // ── misc contracts ───────────────────────────────────────────────────────────────────────────────────
