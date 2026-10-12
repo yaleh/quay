@@ -2,7 +2,7 @@
 id: gap-discovery-method-generalization-lineage-and-temporal-binding
 title: "Discovery Method: held-out generalization must exclude the whole method
   lineage and bind expected labels to an evaluation pin"
-status: todo
+status: ready
 labels:
   - gap
   - architecture-discovery
