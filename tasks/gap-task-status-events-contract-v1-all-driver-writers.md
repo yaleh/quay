@@ -11,6 +11,8 @@ labels:
 parent: null
 children: []
 extra: {}
+depends_on:
+  - gap-open-semantic-discovery-routine-track
 ---
 ## Proposal
 Quay already has a task status-transition event writer, `packages/quay/src/kernel/task-transition.ts` `appendTaskStatusEvent`, writing to carrier `.quay/task-status-events.jsonl` (owner registered in `docs/carrier-registry.json`; built by the done tasks `gap-goal030-kernel-task-transition-and-status-event` / `gap-goal030-promotion-writes-via-kernel-transition`). It is the right single carrier. Two measured problems make it unusable as a transition source.
