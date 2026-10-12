@@ -2271,6 +2271,8 @@ export function priorFocuses(records: readonly Record<string, unknown>[], max: n
 // read lives in `readTaskLogContext` below, which touches no Fact, no `isDue`, no `halted` and no spawn —
 // `case (e)` pins the shape, and the injected-gate negative control in the test file is its live control.
 
+/** One page entry of the read surface's published document — named ONCE so the dedup key and the
+ *  offered-event projection are typed against the surface's own shape rather than a local re-description. */
 type TaskLogTransition = TaskLogDocument["transitions"][number];
 
 /**
@@ -2280,7 +2282,7 @@ type TaskLogTransition = TaskLogDocument["transitions"][number];
  * has none and one is NEVER fabricated (硬规则 6) — its carrier position, which is precisely the order the
  * cursor pages by, is its key instead.
  */
-export function taskLogDedupKey(t: { eventId: string | null; order: number }): string {
+export function taskLogDedupKey(t: Pick<TaskLogTransition, "eventId" | "order">): string {
   return t.eventId !== null ? `eventId:${t.eventId}` : `order:${t.order}`;
 }
 
