@@ -168,3 +168,11 @@ AC4 says to leave unticked for.
 - plugin/scripts/capability-catalog-declarations.json
 - docs/carrier-registry.json
 - .quay/config.yml
+
+## Blocker
+
+**2026-10-12T09:15:12.691Z — worker 未落地（exited-not-landed）**
+
+- 未落地原因：step=anti-drift: ANTI-DRIFT HARD FAIL: task gap-discovery-method-routine-report-only — 3 violation(s)
+- run_id：wk-prod-anchor
+- session_id：76d53bd1-9089-40aa-b842-08ec3d05e473
