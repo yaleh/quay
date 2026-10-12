@@ -339,22 +339,24 @@ $ git show --stat 5a04e28fa | tail -2
 
 **配套夹具同步**：`93c2650aa test(ac197): keep the fixture comment true after the criterion rationale stopped quoting the old predicate verbatim` —— 夹具里那句「the block's own COMMENT quotes the old text verbatim」在改动后不再成立，改为「**describes** …；逐字的旧谓词在 `origin`」。断言本身**按位置**判定（只剔除 `#` 行），⛔ 判定强度未变；夹具重跑仍 **7/7 pass**。
 
-**本轮新读数（同一时刻，HEAD `93c2650aa` / tree `5e19ea12d1d3d41f3b50334fdb27318e9555adeb`）**：
+**本轮新读数（同一时刻 —— **合并 develop 之后的最终树**）**：HEAD `d629c20c6171dee452c70383a865d17f89564496` / tree `edb378445acbe5c6613b18f7d005384d76a9dd93`；develop tip `fa76ebca6a0177e0d82cfe4573946df980385d3f`（本节首次测量时 develop 还是 `1d05f47e…`，中途前进 5 个提交 ⇒ 已 `git merge develop` 后**重测全部读数**，下表是重测值；⛔ 不是拿旧读数配新缓存）。
 
 | 项 | 命令 | 读数 |
 |---|---|---|
-| AC3 正控制 | `quay goal gate AC-197` | `verdict=pass`，`EXIT=0`，`2026-10-12T18:23:21.400Z`，`actor=goal-cli`，`evaluationRoot` = 本 worktree |
-| AC6 新指纹 | `quay goal check --stale-pass --sweep --budget 1` | `EXIT=0`；`sweep.ran=[{"id":"AC-197","verdict":"pass",…}]`；台账尾事件 `2026-10-12T18:23:29.581Z` / `verdict:"pass"` / `actor:"goal-amend"` / **`criterionHash:"ce927a78256e078f"` ≠ `5a7dc1fc29c3b9a3`** |
+| AC3 正控制 | `quay goal gate AC-197` | `verdict=pass`，`EXIT=0`，`2026-10-12T18:26:53.787Z`，`actor=goal-cli`，`evaluationRoot` = 本 worktree |
+| AC6 新指纹 | `quay goal check --stale-pass --sweep --budget 1` | `EXIT=0`；`sweep.ran=[{"id":"AC-197","verdict":"pass",…}]`；台账尾事件 `2026-10-12T18:26:57.799Z`（`id` 前缀 `c7900ac5`）/ `verdict:"pass"` / `actor:"goal-amend"` / `treeSha:"edb378445acb…"`（= 上表 HEAD 的 tree） / **`criterionHash:"ce927a78256e078f"` ≠ `5a7dc1fc29c3b9a3`** |
 | AC2 负控制① | 临时 root：`meta-store.ts` 去掉全部调用点、**保留** `import … from "./store-commit.ts"` | `CAUSE=store-commit-call-site-missing-in-all-5 — 依赖并调用共享原语的 store 文件数 n=4 ≠ 5（五种 kind：tasks/goals/meta/adr/docs-managed）`，`EXIT=1` |
 | AC2 负控制② | 临时 root：`commitKindFile` 函数体改为 `return "unchanged";`（第二套并行原语） | `CAUSE=second-primitive — commitKindFile 未委托 commitStoreWrite（出现第二套并行原语）`，`EXIT=1` —— 与①**不同形** |
 | AC2 正控制 | 未突变临时 root | `OK — one shared store-commit primitive (commitStoreWrite + delegating commitKindFile) and 5/5 store kinds wired to it (module dependency + call site each)`，`EXIT=0` |
 | AC5① | `bash scripts/test.sh --for-task gap-ac197-… --allow-thin` | `SCOPED_GATE_EXIT=0`，夹具 7/7 pass；**输出无 `SCOPED-THIN` 标记** ⇒ 真评了 ≥1 个文件，⛔ 不是 thin 假绿（`parseScopedThin` 的三态） |
 | AC5② | 四份 per-kind 拷贝 + 唯一包装 | `grep -c 'function commitKindFile'` 四个 store 全 **0**；`grep -c 'export function commitKindFile' packages/quay/src/store-commit.ts` = **1** |
 | 预合并（1c） | `anti-drift-touches-check.ts --task … --worktree <wt> --merge-target develop` | `ANTI-DRIFT OK: … 3 actual file(s), all within declared Touches (3 glob(s))`，`EXIT=0` |
-| scoped 门缓存（1b-iv） | `worker-driver.ts --write-scoped-gate-cache --task … --develop-sha 1d05f47e… --root /data/home/yale/work/quay` | `{"event":"scoped-gate-cache-written",…,"developSha":"1d05f47ef04c81b8dbfa56a1bf75209b4f8533f2","cacheFile":"/data/home/yale/work/quay/.quay/scoped-gate-cache.json"}` ⇒ 键 = `(task, developTip)`，fan-in 对**同一 develop tip** 可证冗余而跳过 |
+| scoped 门缓存（1b-iv） | `worker-driver.ts --write-scoped-gate-cache --task … --develop-sha fa76ebca… --root /data/home/yale/work/quay` | `{"event":"scoped-gate-cache-written",…,"developSha":"fa76ebca6a0177e0d82cfe4573946df980385d3f","cacheFile":"/data/home/yale/work/quay/.quay/scoped-gate-cache.json"}` ⇒ 键 = `(task, developTip)`，fan-in 对**同一 develop tip** 可证冗余而跳过 |
 
 ⚠️ **本轮的 `ce927a78256e078f` 与第 3 轮记录的 `1e3db4143593300b` 不同，不是矛盾**：第 3 轮之后 criterion 文本又被改过一次（即本轮的注释改写），指纹随文本而变，正是它应有的行为。两者都 **≠ 修复前的 `5a7dc1fc29c3b9a3`**。
 
-⚠️ **台账仍是 worktree 本地那一份**（`refresh-worktree-quay.sh` 的 clobber，见上文第 0 条）。本轮的**顺序**已按此安排：先跑 scoped 门（它会 clobber `.quay/`），**再**跑 `goal gate` + 有界轮转，⇒ 退出时台账尾事件就是上表那两条（`18:23:21` pass / `18:23:29` pass+新 hash）。持久收敛走同一条路径：重锚版随 fan-in 落 develop ⇒ `syncDevelopToDoc` ⇒ 生产轮转按**修订优先**路径把生产台账尾事件翻成新 hash 的 pass（与 `gap-ac289-…` 记录的收敛形态相同）。
+⚠️ **台账仍是 worktree 本地那一份**（`refresh-worktree-quay.sh` 的 clobber，见上文第 0 条）。本轮的**顺序**已按此安排：先跑 scoped 门（它会 clobber `.quay/`），**再**跑 `goal gate` + 有界轮转，⇒ 退出时台账尾事件就是上表那两条（`18:26:53` pass / `18:26:57` pass+新 hash）。持久收敛走同一条路径：重锚版随 fan-in 落 develop ⇒ `syncDevelopToDoc` ⇒ 生产轮转按**修订优先**路径把生产台账尾事件翻成新 hash 的 pass（与 `gap-ac289-…` 记录的收敛形态相同）。
 
 **本轮删除了两份重复的 `## Evidence` 块（落点映射，硬规则 5）**：原文件有 **3** 份 `## Evidence`（起于第 113 / 269 / 447 行），逐块 diff 显示第 3 块是前两块的**严格超集** —— `diff ev1 ev3` 仅 **2** 行删除、`diff ev2 ev3` 仅 **1** 行删除，且这三行**全部被 ev3 的扩展版取代**（`SCOPED_GATE_EXIT=0（…；9 条 static check 全 PASS）`、`两条如实说明` → `三条如实说明`）。⇒ 前两块里的**每一条**读数都在第 3 块里有落点，⛔ 无内容丢失；合并后本文件只剩一份 `## Evidence`。同一次替换也修掉了三块里**逐字重复的同一句假读数**。
+
+**⚠️ develop 在本轮中途前进过 —— scoped 门缓存因此重写过两次。** 第一次写缓存时 develop 是 `1d05f47e…`，而 scoped 门当时跑在**以它为基**的树上；随后 develop 前进到 `fa76ebca…`（5 个提交）。缓存的前提是「worker 对着**这个确切的 develop tip** 验证过绿」，所以旧缓存**不成立**，⛔ 没有拿它凑数：先 `git merge develop`（`d629c20c…`，无冲突），**在新树上重跑** `scripts/test.sh --for-task … --allow-thin`（`SCOPED_GATE_EXIT=0`，7/7，无 `SCOPED-THIN`），**再**用新 tip 写缓存。⇒ 上表所有读数都是**重测值**，缓存里的 `developSha` 与被我验证过的那棵树一致（`rev-list --count HEAD..develop` = 0）。
