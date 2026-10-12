@@ -1,0 +1,50 @@
+{
+ "root": "/data/home/yale/work/quay",
+ "model": "v4.1flash-anthropic",
+ "fact": {
+  "name": "discovery-method",
+  "value": {
+   "kind": "scan-round",
+   "routine": "discovery-method",
+   "ts": "2026-10-12T09:10:40.114Z",
+   "wall_ms": 14,
+   "ingested": {
+    "experiences": 0,
+    "scanned": 0,
+    "duplicates": 0,
+    "advanced_to": 270
+   },
+   "reflected": null,
+   "candidates": {
+    "minted": 0,
+    "persisted": 0,
+    "records": []
+   },
+   "held_out": {
+    "read": false,
+    "cases": null,
+    "unreadable": null
+   },
+   "verdicts": {
+    "total": 0,
+    "evaluated": 0,
+    "correct": 0,
+    "not_evaluated": 0,
+    "skipped_budget": 0,
+    "records": []
+   },
+   "promotions": [],
+   "retirements": [],
+   "model_calls": 0,
+   "tokens": {
+    "input": null,
+    "output": null,
+    "cache_read": null,
+    "cache_creation": null
+   },
+   "cost_usd": null
+  },
+  "state": "verified",
+  "reason": "round ran: ingested 0 experience(s), reflected 0 unit(s), minted 0 candidate(s), 0 evaluated verdict(s) (0 correct), 0 promotion(s), 0 retirement(s), 0 model call(s), wall 14ms; appended 1 scan-round line to .quay/discovery-method-findings.jsonl"
+ }
+}

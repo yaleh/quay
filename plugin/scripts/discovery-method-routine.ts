@@ -431,10 +431,10 @@ export async function runDiscoveryMethod(root: string, opts: DiscoveryMethodRunO
   let verdictsSkipped = 0;
   // The held-out pool is read ONLY when there is something to validate — a round that minted nothing
   // must not even open the ledger (and must not turn an unreadable ledger into a round failure).
-  const heldOut = candidates.length > 0
-    ? (opts.heldOutFn ?? readHeldOutCases)(root)
-    : { ok: true, cases: [] as Record<string, unknown>[], reason: null, malformed_lines: 0 };
-  if (candidates.length > 0 && heldOut.ok) {
+  // ⛔ `null` (not `[]`) is the "not read" value: a round that validated nothing must not report the
+  // population it never looked at as "0 held-out cases" (硬规则 3b).
+  const heldOut = candidates.length > 0 ? (opts.heldOutFn ?? readHeldOutCases)(root) : null;
+  if (heldOut !== null && heldOut.ok) {
     const registryRead = readMethodRegistry(root, { history: true });
     const registry = Array.isArray(registryRead.history) ? registryRead.history : [];
     const isAncestor = gitIsAncestor(root);
@@ -514,7 +514,7 @@ export async function runDiscoveryMethod(root: string, opts: DiscoveryMethodRunO
     if (breached()) {
       return fact("failed", { ...base, enabled: true, ingest, reflection }, `budget breach — wall ${now() - started}ms >= max_wall_ms ${config.maxWallMs} during generalization (nothing appended, last-run not advanced)`);
     }
-  } else if (candidates.length > 0 && !heldOut.ok) {
+  } else if (heldOut !== null && !heldOut.ok) {
     // The held-out pool could not be read ⇒ its OWN value. The candidates still landed (they are drafts,
     // not claims); the generalization step is `not-evaluated`, never "0 verdicts ⇒ nothing passed".
     reflection = { ...(reflection ?? {}), held_out_unreadable: heldOut.reason };
@@ -531,7 +531,11 @@ export async function runDiscoveryMethod(root: string, opts: DiscoveryMethodRunO
     ingested: { experiences: ingested, scanned: Number(ingest.scanned ?? 0), duplicates: Number(ingest.duplicates ?? 0), advanced_to: ingest.advanced_to ?? null },
     reflected: reflection,
     candidates: { minted: candidates.length, persisted: persisted.filter((p) => p.ok === true).length, records: persisted },
-    held_out: { cases: heldOut.ok ? heldOut.cases.length : null, unreadable: heldOut.ok ? null : heldOut.reason },
+    held_out: {
+      read: heldOut !== null,
+      cases: heldOut === null || !heldOut.ok ? null : heldOut.cases.length,
+      unreadable: heldOut !== null && !heldOut.ok ? heldOut.reason : null,
+    },
     verdicts: {
       total: verdicts.length,
       evaluated: verdicts.filter((v) => v.outcome === "evaluated").length,
