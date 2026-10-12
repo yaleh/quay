@@ -83,7 +83,16 @@ import {
   loadOpenDiscoveryModules,
   HYPOTHESIS_MODULE_FILE,
   LEDGER_MODULE_FILE,
+  REGISTRY_MODULE_FILE,
   ANALYSIS_DIR_REL,
+  selectMethodsForRound,
+  methodDirective,
+  methodLabel,
+  methodLabelsOf,
+  methodGuidanceBlock,
+  openShadowDiscoveryRecordId,
+  METHOD_ARM_PRODUCTION,
+  METHOD_ARM_SHADOW,
 } from "../scripts/open-semantic-discovery-routine.ts";
 import { ROUTINE_LAST_RUN_REL, readLastRunMap } from "../scripts/probe-routine.ts";
 import { qualityGateRoutines } from "../scripts/quality-gate-driver.ts";
@@ -94,6 +103,7 @@ import { appendLedgerRecords } from "../scripts/discovery-method-routine.ts";
 import * as realHyp from "../../docs/analysis/arch-hypothesis-generation.mjs";
 import * as realPortfolio from "../../docs/analysis/discovery-portfolio.mjs";
 import * as realLedger from "../../docs/analysis/discovery-experience-ledger.mjs";
+import * as realRegistry from "../../docs/analysis/discovery-method-registry.mjs";
 
 const SCRIPT_DIR = path.dirname(fileURLToPath(import.meta.url));
 const REPO_ROOT = path.resolve(SCRIPT_DIR, "..", "..");
@@ -314,7 +324,36 @@ function makeEngine({ hyps = HYPS, verdictFor = alwaysSupported } = {}) {
     ...realPortfolio,
     loadGatewayRates: () => ({ ok: true, rates: { model_group: FIXTURE_MODEL, input_cost_per_token: 0.000001, output_cost_per_token: 0.000002 } }),
   };
-  return { modules: { hyp, portfolio, ledger: realLedger }, investigatorCalls, verifierCalls };
+  return { modules: { hyp, portfolio, ledger: realLedger, registry: realRegistry }, investigatorCalls, verifierCalls };
+}
+
+/** The method-guidance fixtures need an investigator whose HYPOTHESES depend on WHICH ARM is asking, and
+ *  the arm is identifiable structurally: the shadow pass is handed its own runs directory. Nothing here
+ *  inspects the prompt to decide the arm (a prompt-reading stub would make the test agree with itself). */
+function armAwareInvestigator({ productionHyps = HYPS, shadowHyps = [] } = {}) {
+  const sink = [];
+  const fn = async (o) => {
+    const hyps = String(o.outDir).split(path.sep).pop() === "shadow" ? shadowHyps : productionHyps;
+    const records = [];
+    for (let i = 0; i < o.runs; i++) {
+      const r = await o.runModel(o.prompt, i);
+      sink.push({ arm: String(o.outDir).split(path.sep).pop() === "shadow" ? "shadow" : "production", cwd: o.cwd, pinDir: o.pinDir, tools: o.tools, maxTurns: o.maxTurns, prompt: o.prompt });
+      records.push({ run: i + 1, hyps, stdout: r?.stdout ?? "", exit: r?.status ?? null });
+    }
+    return { ok: true, records, parsed: records.length, total: o.runs };
+  };
+  fn.calls = sink;
+  return fn;
+}
+
+/** The engine seam for the METHOD cases: the real engine + real ledgers + real registry, with the
+ *  arm-aware investigator. Everything else is `makeEngine`'s. */
+function makeMethodEngine(opts = {}) {
+  const engine = makeEngine({ hyps: opts.productionHyps ?? HYPS, verdictFor: opts.verdictFor ?? alwaysSupported });
+  const investigator = armAwareInvestigator(opts);
+  engine.modules.hyp.runInvestigator = investigator;
+  engine.investigator = investigator;
+  return engine;
 }
 
 /** A pin seam that makes a directory carrying (or NOT carrying) the inventory scope. `pins` records every
@@ -1352,6 +1391,345 @@ test("ingestion — the novelty check's tool envelope is the read-only one, and 
   assert.equal(Number(reserve.max_turns) >= 1, true);
 });
 
+// ── METHODS AS OPTIONAL GUIDANCE (task gap-open-discovery-method-guidance-active-shadow) ─────────────
+//
+// Coverage map for this task's Acceptance Criteria:
+//   (a) 0 active                    ⇒ baseline round runs
+//   (b) an active method            ⇒ guided production round, ids recorded
+//   (c) a draft/trial method        ⇒ shadow arm only, records `shadow:true`, nothing reaches Portfolio
+//   (d) retired / quarantined / contaminated ⇒ never selected, even as the only record
+//   (e) guidance text naming a seed component ⇒ excluded with reason
+//   (f) shadow calls reserve against the SAME 24h ledger
+//   (g) a guided round's outcome is ingested as an Experience naming the method id and version
+
+const METHOD_REGISTRY_REL_T = ".quay/discovery-method-registry.jsonl";
+const CONTAMINATED_VERDICTS_REL_T = ".quay/discovery-contaminated-verdicts.jsonl";
+
+/** A method record shaped like the registry's own contract. Only the fields the SELECTION reads matter
+ *  here — selection never re-validates a record (that is the write path's job), so a fixture can be
+ *  written straight to the carrier. */
+function methodRec(over = {}) {
+  return {
+    kind: "method",
+    method_id: "fixture-method",
+    version: 1,
+    ts: "2026-10-12T00:00:00.000Z",
+    provenance_evidence: ["experience-fixture"],
+    applicability: { domain_signals: ["fixture domain signal"], preconditions: ["a fixture precondition holds"] },
+    operation: { steps: ["read the fixture source", "compare the two declarations"], tools: [] },
+    expected_invariant: "the fixture invariant holds at every call site",
+    falsification: "a call site violates the fixture invariant",
+    cost_budget: { max_candidates: 1, max_model_calls: 0, max_wall_ms: 1000 },
+    status: "draft",
+    retirement_reason: null,
+    supersedes: null,
+    ...over,
+  };
+}
+function writeMethodRegistry(ws, recs) {
+  fs.mkdirSync(path.join(ws, ".quay"), { recursive: true });
+  fs.writeFileSync(path.join(ws, METHOD_REGISTRY_REL_T), recs.map((r) => JSON.stringify(r)).join("\n") + "\n", "utf8");
+}
+/** A hand-written Experience line — enough for the ledger's own deny-list reader (the selection scans
+ *  against the UNION of every registered case's components/case_ids). */
+function writeExperienceLine(ws, { case_id = "EXP-fixture", components = [], summary = "a fixture experience summary long enough to clear the ledger's own floor" } = {}) {
+  fs.mkdirSync(path.join(ws, ".quay"), { recursive: true });
+  fs.appendFileSync(path.join(ws, realLedger.EXPERIENCE_LEDGER_REL),
+    JSON.stringify({ kind: "experience", id: `experience-${case_id}`, case_id, ts: "2026-10-12T00:00:00.000Z", role: "found-unresolved", reported_by: "system", authored_by: { actor: "ingester", ref: "fixture" }, source_ref: "fixture-record", evidence: [{ ref: "fixture-record", sha256: "a".repeat(64) }], components, summary, evaluation_pin: null, evidence_level: "production-open", source_case_id: null }) + "\n",
+    "utf8");
+}
+function writeContaminatedVerdict(ws, { verdict_id = "verdict-fixture", reason = "VERDICT_CONTAMINATED:fixture reason" } = {}) {
+  fs.mkdirSync(path.join(ws, ".quay"), { recursive: true });
+  fs.appendFileSync(path.join(ws, CONTAMINATED_VERDICTS_REL_T),
+    JSON.stringify({ kind: "contaminated_verdict", verdict_id, reason, collisions: [], authored_by: "fixture", ts: "2026-10-12T00:00:00.000Z" }) + "\n", "utf8");
+}
+const GUIDANCE_CLAUSE = "OPTIONAL GUIDANCE";
+const shadowClusters = (ws) => carrierLines(ws).filter((l) => l.kind === "cluster" && l.shadow === true);
+const productionClusters = (ws) => carrierLines(ws).filter((l) => l.kind === "cluster" && l.shadow !== true);
+
+test("AC (a) — with 0 active methods the round runs BASELINE (unguided) and still spawns", async () => {
+  const ws = makeWorkspace();
+  writeConfig(ws, cfgYaml());
+  const engine = makeMethodEngine();
+  const spawn = countingSpawn();
+  const fact = await runOpenSemanticDiscovery(ws, { ...runOpts(ws, { engine }), spawnFn: spawn, pinFn: pinStub() });
+  assert.equal(fact.state, "verified", `the round RAN (reason: ${fact.reason})`);
+  assert.ok(spawn.calls.length > 0, "a baseline round still spawns model calls — 'no method' is never 'no round'");
+  const round = rounds(ws)[0];
+  assert.equal(round.methods.mode, "baseline");
+  assert.equal(round.methods.ok, true, "the registry WAS readable — baseline-by-empty, not baseline-by-failure");
+  assert.equal(round.methods.evaluated, 0);
+  assert.deepEqual(round.methods.included, []);
+  assert.deepEqual(round.methods.excluded, []);
+  assert.match(round.methods.baseline_reason, /no-method-recorded/);
+  assert.equal(round.methods.shadow.ran, false);
+  const inv = engine.investigator.calls[0];
+  assert.equal(inv.arm, "production");
+  assert.ok(!inv.prompt.includes(GUIDANCE_CLAUSE), "no guidance block is appended when nothing was selected");
+  assert.equal(round.investigator.guided_by.length, 0);
+  assert.equal(productionClusters(ws)[0].method_guidance, null, "a baseline cluster names no method");
+  console.log(`    AC (a): mode=${round.methods.mode} evaluated=0 reason="${round.methods.baseline_reason}"`);
+});
+
+test("AC (a) — a registry whose ONLY records are excluded also runs baseline (and says how many were excluded)", async () => {
+  const ws = makeWorkspace();
+  writeConfig(ws, cfgYaml());
+  writeMethodRegistry(ws, [methodRec({ method_id: "fixture-retired", status: "retired", retirement_reason: "superseded by a cheaper instrument" })]);
+  const engine = makeMethodEngine();
+  const spawn = countingSpawn();
+  const fact = await runOpenSemanticDiscovery(ws, { ...runOpts(ws, { engine }), spawnFn: spawn, pinFn: pinStub() });
+  assert.equal(fact.state, "verified");
+  const round = rounds(ws)[0];
+  assert.equal(round.methods.mode, "baseline");
+  assert.equal(round.methods.evaluated, 1);
+  assert.deepEqual(round.methods.included, []);
+  assert.equal(round.methods.excluded.length, 1);
+  assert.match(round.methods.baseline_reason, /no-eligible-method/);
+  assert.ok(!engine.investigator.calls[0].prompt.includes(GUIDANCE_CLAUSE));
+});
+
+test("AC (b) — an ACTIVE method GUIDES the production round; ids recorded on the record and in the prompt", async () => {
+  const ws = makeWorkspace();
+  writeConfig(ws, cfgYaml());
+  writeMethodRegistry(ws, [methodRec({ method_id: "fixture-active", status: "active" })]);
+  const engine = makeMethodEngine();
+  const spawn = countingSpawn();
+  const fact = await runOpenSemanticDiscovery(ws, { ...runOpts(ws, { engine }), spawnFn: spawn, pinFn: pinStub() });
+  assert.equal(fact.state, "verified");
+  const round = rounds(ws)[0];
+  assert.equal(round.methods.mode, "guided");
+  assert.equal(round.methods.baseline_reason, null, "a guided round has no baseline reason");
+  assert.deepEqual(round.methods.included.map((m) => [m.method_id, m.version, m.status, m.arm]),
+    [["fixture-active", 1, "active", METHOD_ARM_PRODUCTION]]);
+  assert.ok(round.methods.included[0].guidance_chars > 0, "the size of the guidance handed over is recorded");
+  // The protocol: the guidance block is in the prompt, and the engine's frozen instruction is unmodified.
+  const inv = engine.investigator.calls.find((c) => c.arm === "production");
+  assert.ok(inv.prompt.includes(GUIDANCE_CLAUSE), "the guidance block is prepended to the investigator prompt");
+  assert.ok(inv.prompt.includes("read the fixture source"), "…and carries the method's own step text");
+  assert.ok(inv.prompt.includes(methodLabel({ method_id: "fixture-active", version: 1 })), "…under the id@vN label");
+  assert.ok(inv.prompt.includes("You are an architecture investigator"), "the frozen instruction is still there");
+  // The carrier records the guidance per cluster, and the round records the outcome per method.
+  const cluster = productionClusters(ws)[0];
+  assert.equal(cluster.method_guidance.arm, METHOD_ARM_PRODUCTION);
+  assert.deepEqual(cluster.method_guidance.methods, [{ method_id: "fixture-active", version: 1 }]);
+  assert.deepEqual(round.methods.outcome.map((o) => o.method_id), ["fixture-active"]);
+  assert.equal(round.methods.outcome[0].arm, METHOD_ARM_PRODUCTION);
+  assert.equal(round.methods.outcome[0].clusters, 2);
+  assert.equal(round.methods.outcome[0].confirmed, 2);
+  assert.equal(round.methods.outcome[0].nothing_found, false);
+  console.log(`    AC (b): mode=${round.methods.mode} included=${JSON.stringify(round.methods.included.map((m) => methodLabel(m)))}`);
+});
+
+test("AC (c) — a DRAFT method guides the SHADOW arm only: records carry shadow:true and NOTHING reaches Portfolio", async () => {
+  const ws = makeWorkspace();
+  writeConfig(ws, cfgYaml());
+  writeMethodRegistry(ws, [methodRec({ method_id: "fixture-draft", status: "draft" })]);
+  // The production arm answers with NO hypotheses, so anything that reaches the ledgers would have to
+  // have come from the shadow arm — which is exactly the claim under test.
+  const engine = makeMethodEngine({ productionHyps: [], shadowHyps: HYPS });
+  const spawn = countingSpawn();
+  const fact = await runOpenSemanticDiscovery(ws, { ...runOpts(ws, { engine }), spawnFn: spawn, pinFn: pinStub() });
+  assert.equal(fact.state, "verified");
+  const round = rounds(ws)[0];
+  // The PRODUCTION arm is unguided: a draft never steers production.
+  assert.equal(round.methods.mode, "baseline");
+  assert.deepEqual(round.methods.included.map((m) => m.arm), [METHOD_ARM_SHADOW]);
+  const productionInv = engine.investigator.calls.find((c) => c.arm === "production");
+  assert.ok(!productionInv.prompt.includes(GUIDANCE_CLAUSE), "the draft method's text is NOT in the production prompt");
+  // The SHADOW arm ran, guided, on the same pin, and its records say so.
+  assert.equal(round.methods.shadow.shadow, true);
+  assert.equal(round.methods.shadow.ran, true);
+  assert.deepEqual(round.methods.shadow.methods.map((m) => methodLabel(m)), ["fixture-draft@v1"]);
+  assert.equal(round.methods.shadow.calls, 1, "the shadow arm's own call count is recorded");
+  const shadowInv = engine.investigator.calls.find((c) => c.arm === "shadow");
+  assert.ok(shadowInv.prompt.includes(GUIDANCE_CLAUSE), "the draft method's text IS in the shadow prompt");
+  assert.ok(shadowInv.prompt.includes("read the fixture source"));
+  assert.equal(shadowInv.cwd, engine.investigator.calls.find((c) => c.arm === "production").cwd, "the shadow arm explores the SAME pin");
+  const shadow = shadowClusters(ws);
+  assert.equal(shadow.length, 2, "the shadow arm's hypothesis clusters are ON the carrier");
+  for (const rec of shadow) {
+    assert.equal(rec.shadow, true, "every shadow record is marked shadow:true");
+    assert.match(rec.record_id, /#shadow#/);
+    assert.equal(rec.confirmed, false, "no verdict is invented for a never-verified shadow hypothesis");
+    assert.equal(rec.verifier_verdict, null);
+    assert.equal(rec.refutation_verdict, "not-run");
+    assert.equal(rec.method_guidance.arm, METHOD_ARM_SHADOW);
+  }
+  // ⛔ Nothing reaches Portfolio (and nothing reaches the Experience ledger either — the shadow arm is
+  // not ingested at all): the production arm found nothing and the shadow arm is structurally excluded.
+  assert.deepEqual(portfolioRecords(ws), []);
+  assert.deepEqual(experienceRecords(ws), []);
+  assert.equal(round.ingestion.checked, 0);
+  assert.deepEqual(fact.value.ingestion.writes, [], "the ingestion wrote nothing — the shadow arm is not ingested at all");
+  assert.ok(!JSON.stringify(portfolioRecords(ws)).includes("#shadow#"));
+  assert.ok(!JSON.stringify(experienceRecords(ws)).includes("#shadow#"), "nor does any Experience point at a shadow record");
+  console.log(`    AC (c): mode=${round.methods.mode} shadow.ran=${round.methods.shadow.ran} shadow clusters=${shadow.length} portfolio rows=0`);
+});
+
+test("AC (d) — retired / quarantined / contaminated methods are NEVER selected, even as the only record", async () => {
+  // (i) RETIRED.
+  {
+    const ws = makeWorkspace();
+    writeConfig(ws, cfgYaml());
+    writeMethodRegistry(ws, [methodRec({ method_id: "only-retired", status: "retired", retirement_reason: "cost more than it found" })]);
+    const sel = selectMethodsForRound(ws, makeMethodEngine().modules);
+    assert.equal(sel.mode, "baseline");
+    assert.deepEqual(sel.included, []);
+    assert.deepEqual(sel.excluded[0].reasons.filter((r) => r.startsWith("RETIRED")).length, 1);
+  }
+  // (ii) a DRAFT SUCCESSOR OF A QUARANTINED VERSION — the status is selectable, the lineage is not.
+  {
+    const ws = makeWorkspace();
+    writeConfig(ws, cfgYaml());
+    writeMethodRegistry(ws, [
+      methodRec({ method_id: "quarantined-ancestor", version: 1, status: "retired", retirement_reason: "QUARANTINE 2026-10-12 (operator): promoted on contaminated holdout evidence" }),
+      methodRec({ method_id: "quarantined-ancestor", version: 2, status: "draft", supersedes: "quarantined-ancestor", retirement_reason: null }),
+    ]);
+    const sel = selectMethodsForRound(ws, makeMethodEngine().modules);
+    assert.equal(sel.mode, "baseline");
+    assert.deepEqual(sel.included, [], "a draft that supersedes a quarantined version is NOT shadow-eligible");
+    const reasons = sel.excluded[0].reasons;
+    assert.ok(reasons.some((r) => r.startsWith("QUARANTINED_LINEAGE")), `the quarantine is named (got ${JSON.stringify(reasons)})`);
+    assert.equal(sel.excluded[0].status, "draft", "…and it was the selectable STATUS that the lineage overrode");
+  }
+  // (iii) CONTAMINATED — an `active` method whose promoting verdict is on the contaminated ledger.
+  {
+    const ws = makeWorkspace();
+    writeConfig(ws, cfgYaml());
+    writeMethodRegistry(ws, [methodRec({
+      method_id: "only-contaminated", status: "active",
+      generalization_evidence: { verdict_ref: "verdict-fixture", held_out_case_id: "CASE-x" },
+    })]);
+    writeContaminatedVerdict(ws, { verdict_id: "verdict-fixture" });
+    const sel = selectMethodsForRound(ws, makeMethodEngine().modules);
+    assert.equal(sel.mode, "baseline");
+    assert.deepEqual(sel.included, [], "a contaminated `active` method never guides production");
+    assert.ok(sel.excluded[0].reasons.some((r) => r.startsWith("CONTAMINATED_PROMOTION")), JSON.stringify(sel.excluded[0].reasons));
+  }
+  // (iv) the same three, in a ROUND: never selected ⇒ nothing is appended under their names, and the
+  //      round still runs baseline.
+  {
+    const ws = makeWorkspace();
+    writeConfig(ws, cfgYaml());
+    writeMethodRegistry(ws, [methodRec({ method_id: "only-retired", status: "retired", retirement_reason: "QUARANTINE 2026-10-12 (operator): unsound evidence" })]);
+    const engine = makeMethodEngine();
+    const fact = await runOpenSemanticDiscovery(ws, { ...runOpts(ws, { engine }), spawnFn: countingSpawn(), pinFn: pinStub() });
+    assert.equal(fact.state, "verified", "the round RUNS even when the only method is unselectable");
+    const round = rounds(ws)[0];
+    assert.equal(round.methods.mode, "baseline");
+    assert.equal(round.methods.shadow.ran, false);
+    assert.deepEqual(shadowClusters(ws), [], "no shadow arm was run for it");
+    assert.equal(productionClusters(ws)[0].method_guidance, null);
+  }
+  console.log("    AC (d): retired, quarantined-lineage and contaminated methods each excluded as the only record; the round still ran baseline");
+});
+
+test("AC (e) — a guidance text naming a Registered seed component (or case id) ⇒ excluded, with the value named", async () => {
+  // The method does NOT cite the Experience that names `secret-fixture.ts` — so the registry's own
+  // seed rule (which scans a record against its OWN provenance) never sees it. The guidance scan uses
+  // the ledger's UNION deny-list, which is exactly the hole this closes.
+  const ws = makeWorkspace();
+  writeConfig(ws, cfgYaml());
+  writeExperienceLine(ws, { case_id: "EXP-secret", components: ["plugin/scripts/secret-fixture.ts"] });
+  writeMethodRegistry(ws, [
+    methodRec({ method_id: "leaky", status: "active", operation: { steps: ["open secret-fixture.ts and read the parser"], tools: [] } }),
+    methodRec({ method_id: "clean", status: "active" }),
+  ]);
+  const sel = selectMethodsForRound(ws, makeMethodEngine().modules);
+  const leaky = sel.excluded.find((m) => m.method_id === "leaky");
+  assert.ok(leaky, `the leaky method is excluded (included: ${JSON.stringify(sel.included.map((m) => m.method_id))})`);
+  const leak = leaky.reasons.find((r) => r.startsWith("GUIDANCE_TEXT_NAMES_SEED"));
+  assert.ok(leak, `the refusal is the seed-leak code (got ${JSON.stringify(leaky.reasons)})`);
+  assert.ok(leak.includes("secret-fixture.ts"), `the refusal NAMES the leaking value (got ${leak})`);
+  // The clean method beside it is unaffected: this is a per-record judgment, not a kill switch.
+  assert.deepEqual(sel.included.map((m) => m.method_id), ["clean"]);
+  assert.equal(sel.mode, "guided");
+  // And the leaky text really would have leaked: the deny-list flags it directly, so the exclusion is a
+  // reading rather than a guess.
+  const denied = realLedger.experienceDenyList(ws);
+  assert.equal(realLedger.scanExperienceLeak(denied, realRegistry.methodGuidanceText(methodRec({ method_id: "leaky", status: "active", operation: { steps: ["open secret-fixture.ts and read the parser"], tools: [] } }))).flagged, true);
+  console.log(`    AC (e): excluded ${leaky.method_id} ⇒ ${leak}`);
+});
+
+test("AC (f) — the shadow arm's calls reserve against the SAME 24h ledger as every other step", async () => {
+  const ws = makeWorkspace();
+  writeConfig(ws, cfgYaml());
+  writeMethodRegistry(ws, [methodRec({ method_id: "fixture-draft", status: "draft" })]);
+  const engine = makeMethodEngine({ productionHyps: [], shadowHyps: HYPS });
+  const spawn = countingSpawn();
+  const fact = await runOpenSemanticDiscovery(ws, { ...runOpts(ws, { engine }), spawnFn: spawn, pinFn: pinStub() });
+  assert.equal(fact.state, "verified");
+  const steps = resumeSteps(ws);
+  assert.deepEqual(steps, ["investigator", "shadow-investigator"], `the shadow call is a RESERVATION in the round's own ledger (got ${steps.join(",")})`);
+  assert.equal(spawn.calls.length, steps.length, "one spawn per reservation — including the shadow arm's");
+  const reserve = ledgerReserves(ws).find((r) => r.step === "shadow-investigator");
+  assert.equal(reserve.tools, INVESTIGATOR_TOOLS);
+  assert.equal(Number(reserve.max_turns) >= 1, true, "the shadow subprocess is bounded like every other one");
+  // ONE ledger: the same file the round already reports, and the round's own call count includes it.
+  const round = rounds(ws)[0];
+  assert.equal(round.reservations.ledger, BUDGET_LEDGER_REL);
+  assert.equal(round.model_calls, steps.length, "the shadow call is counted in the round's own totals");
+  assert.equal(round.calls.map((c) => c.step).includes("shadow-investigator"), true);
+  console.log(`    AC (f): reservations in ${round.reservations.ledger} = ${steps.join(",")}`);
+});
+
+test("AC (g) — a guided round's outcome is ingested as an Experience naming the method id and version", async () => {
+  const ws = makeWorkspace();
+  writeConfig(ws, cfgYaml());
+  writeMethodRegistry(ws, [methodRec({ method_id: "fixture-active", version: 1, status: "active" })]);
+  const engine = makeMethodEngine();
+  const fact = await runOpenSemanticDiscovery(ws, { ...runOpts(ws, { engine }), spawnFn: countingSpawn(), pinFn: pinStub() });
+  assert.equal(fact.state, "verified");
+  const label = "fixture-active@v1";
+  const experiences = experienceRecords(ws);
+  assert.ok(experiences.length > 0, "the guided round's confirmed clusters became Experiences");
+  for (const e of experiences) {
+    assert.ok(String(e.summary).includes(`guided by method ${label}`), `the Experience names the method (${e.summary})`);
+    assert.equal(e.source_ref.includes("#shadow#"), false, "…and it is a PRODUCTION record");
+  }
+  // The Portfolio row carries the same name in the field the coverage map reads.
+  const rows = portfolioRecords(ws);
+  assert.equal(rows.length, 2);
+  for (const r of rows) assert.equal(r.method_ref, label);
+  // The round's own per-method outcome block closes the loop: the carrier line carries the OUTCOME
+  // counts (novel/duplicate/refuted/nothing-found) as appended, and the post-ingestion Experience and
+  // Portfolio counts ride the Fact — the same asymmetry `ingestion.writes` has, and for the same reason
+  // (the carrier line is written before the writes happen, and appending must stay append-only).
+  const round = rounds(ws)[0];
+  assert.equal(round.methods.outcome[0].nothing_found, false);
+  assert.equal(round.methods.outcome[0].novel, 2);
+  assert.equal(fact.value.methods.outcome[0].experiences, experiences.length);
+  assert.equal(fact.value.methods.outcome[0].portfolio_rows, rows.length);
+  console.log(`    AC (g): ${experiences.length} Experience(s) and ${rows.length} Portfolio row(s) name ${label}`);
+});
+
+test("AC — REAL registry reading: selection against the PRODUCTION registry, with reasons", async () => {
+  // ⛔ This reads the LIVE registry, so the assertions are INVARIANTS that hold whatever the registry
+  // currently contains (a pin on "0 active" would red the suite the day a method is promoted) — and it
+  // PRINTS the full reading, which is the AC's evidence.
+  const mods = await loadOpenDiscoveryModules(REPO_ROOT);
+  const sel = selectMethodsForRound(REPO_ROOT, mods);
+  assert.equal(sel.ok, true, "the production registry is readable");
+  for (const m of sel.production) assert.equal(m.status, "active", "only an ACTIVE method may guide production");
+  for (const m of sel.included) assert.ok(m.status === "active" || m.status === "draft" || m.status === "trial", `selectable status (got ${m.status})`);
+  for (const m of sel.excluded) {
+    const q = mods.registry.quarantinedLineageOf(mods.registry.readMethodRegistry(REPO_ROOT).latest.find((r) => r.method_id === m.method_id) ?? {}, mods.registry.readMethodRegistry(REPO_ROOT, { history: true }).history ?? []);
+    if (q.quarantined) {
+      assert.ok(m.reasons.some((r) => r.startsWith("QUARANTINED_LINEAGE") || r.startsWith("RETIRED")),
+        `a quarantined method is excluded with a refusal that shows it: ${m.method_id} ⇒ ${JSON.stringify(m.reasons)}`);
+    }
+  }
+  const lines = [
+    `    AC real-registry: ok=${sel.ok} mode=${sel.mode} evaluated=${sel.evaluated}`,
+    `      baseline_reason: ${sel.baseline_reason ?? "<guided>"}`,
+    `      registry: ${JSON.stringify(sel.registry)}`,
+    ...sel.included.map((m) => `      INCLUDED ${methodLabel(m)} [${m.arm}] guidance_chars=${m.guidance_chars}`),
+    ...sel.excluded.map((m) => `      EXCLUDED ${m.method_id}@v${m.version ?? "?"} (${m.status}) ⇒ ${m.reasons.join("; ")}`),
+  ];
+  process.stdout.write(`${lines.join("\n")}\n`);
+  assert.equal(sel.evaluated, sel.included.length + sel.excluded.length, "every latest version is classified");
+});
+
 // ── the in-scratch-copy NEGATIVE CONTROLS ────────────────────────────────────────────────────────────
 /** Build a SCRATCH copy of the routine whose relative imports still resolve: the sibling scripts and the
  *  analysis directory are SYMLINKED in, and only the module under test is a real (mutated) file. */
@@ -1485,6 +1863,36 @@ test("NEGATIVE CONTROL (ingestion) — disable the novelty check in a scratch co
   assert.equal(d.rows.length, 2, "⇒ the (d) claim («ONE Portfolio record, not two») is FALSIFIED — the control is live");
 
   process.stdout.write(`    NEGATIVE CONTROL (ingestion): mutant called a Portfolio duplicate disposition=${a.outcome.disposition} (role ${experienceRecords(a.ws)[0].role}), left duplicate_of=${String(a2rows[0].duplicate_of)} for the task-Touches duplicate, and wrote ${d.rows.length} Portfolio rows for one cluster seen twice (claims were «duplicate», «duplicate_of set» and «one row»)\n`);
+});
+
+test("NEGATIVE CONTROL (d) — ignore the quarantine walk in a scratch copy ⇒ the (d) claim goes RED", async () => {
+  // The mutation is EXACTLY "selection ignores the quarantine list": the lineage walk still runs (its
+  // call site is untouched) but its answer is a constant, so a draft that supersedes a QUARANTINEd
+  // version looks selectable. Nothing else changes.
+  const MUT_ANCHOR = "      const q = modules.registry.quarantinedLineageOf(rec, history);";
+  const mutantPath = scratchModule((src) => {
+    assert.ok(src.includes(MUT_ANCHOR), "the quarantine-walk anchor is present");
+    return src.replace(MUT_ANCHOR, "      const q = { quarantined: false, versions: [], reasons: [] }; // MUTATION: the quarantine list is ignored");
+  });
+  const mutant = await import(pathToFileURL(mutantPath).href);
+  const ws = makeWorkspace();
+  writeConfig(ws, cfgYaml());
+  writeMethodRegistry(ws, [
+    methodRec({ method_id: "quarantined-ancestor", version: 1, status: "retired", retirement_reason: "QUARANTINE 2026-10-12 (operator): promoted on contaminated holdout evidence" }),
+    methodRec({ method_id: "quarantined-ancestor", version: 2, status: "draft", supersedes: "quarantined-ancestor", retirement_reason: null }),
+  ]);
+  const modules = makeMethodEngine().modules;
+  // On the REAL module the successor is excluded and never selected (the AC (d) claim).
+  const real = selectMethodsForRound(ws, modules);
+  assert.deepEqual(real.included, [], "the real module refuses it");
+  // The mutant selects it: the (d) claim is FALSIFIED, so the control is live.
+  const mutated = mutant.selectMethodsForRound(ws, modules);
+  assert.deepEqual(mutated.included.map((m) => [m.method_id, m.arm]), [["quarantined-ancestor", METHOD_ARM_SHADOW]],
+    "⇒ the (d) claim («a quarantined lineage is NEVER selected») is FALSIFIED — the control is live");
+  // The only difference is where the successor lands: excluded on the real module, selected on the mutant.
+  assert.deepEqual(real.excluded.map((m) => m.method_id), ["quarantined-ancestor"]);
+  assert.deepEqual(mutated.excluded, [], "the mutant excludes nothing — the successor moved into `included`");
+  process.stdout.write(`    NEGATIVE CONTROL (d): mutant SELECTED ${mutated.included.map((m) => methodLabel(m)).join(",")} for the shadow arm (claim was «never selected, even as the only record»); the real module excluded it via ${real.excluded[0].reasons.join("; ")}\n`);
 });
 
 // ── misc contracts ───────────────────────────────────────────────────────────────────────────────────

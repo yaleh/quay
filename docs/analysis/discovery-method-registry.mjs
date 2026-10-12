@@ -688,6 +688,51 @@ export function seedReasons(rec, seeds) {
   return reasons;
 }
 
+// ── guidance text: what a round HANDS THE MODEL when this method is selected ─────────────────────
+//
+// A method is GUIDANCE, never a rule and never a compiled check (Plan item 2b of
+// gap-open-discovery-method-guidance-active-shadow). This is the ONE place the text that would be
+// appended to an investigator prompt is composed, so the consumer that appends it and any scanner that
+// judges it read the SAME string — and so the SEED scan (`seedScannedTexts`) and the guidance text can
+// never disagree about which fields of a record carry free text.
+
+/**
+ * The GUIDANCE TEXT of one method: a deterministic block composed ONLY from the record's own declared
+ * fields — the ones `seedScannedTexts` already reads (`operation.steps`, `expected_invariant`,
+ * `falsification`, `applicability`), plus the `method_id@vN` label. PURE.
+ *
+ * ⛔ `operation.tools` is deliberately EXCLUDED. The tools are instrument names ("run
+ * import-graph-check.ts"), and a round hands the model a prompt whose tool envelope is Read/Grep/Glob —
+ * naming an instrument the model cannot invoke would read as an instruction to call it, which is exactly
+ * the "compiled into a rule" shape this task forbids. The steps/invariant/falsification/applicability
+ * are what the model can actually USE while reading source.
+ *
+ * ⛔ The text is NOT truncated. A length cap would create a seam where a seed name spanning the cut is
+ * neither present in the handed-over text nor absent from the record — the deny-list scan would then be
+ * judging different bytes than the model sees (硬规则 4c).
+ *
+ * @param {object} rec  a method record
+ * @returns {string} `""` for a non-object (there is nothing to hand over)
+ */
+export function methodGuidanceText(rec) {
+  if (!isObj(rec)) return "";
+  const label = `${isStr(rec.method_id, 1) ? rec.method_id : "<unnamed-method>"}@${isInt(rec.version) ? `v${rec.version}` : "v?"}`;
+  const lines = [label];
+  const steps = Array.isArray(rec?.operation?.steps) ? rec.operation.steps.filter((s) => isStr(s, 1)) : [];
+  if (steps.length > 0) lines.push(`operation: ${steps.join(" | ")}`);
+  if (isStr(rec.expected_invariant, 1)) lines.push(`expected invariant: ${rec.expected_invariant}`);
+  if (isStr(rec.falsification, 1)) lines.push(`falsification: ${rec.falsification}`);
+  const ap = rec?.applicability;
+  if (isObj(ap)) {
+    const parts = [
+      ...(Array.isArray(ap.domain_signals) ? ap.domain_signals : []),
+      ...(Array.isArray(ap.preconditions) ? ap.preconditions : []),
+    ].filter((s) => isStr(s, 1));
+    if (parts.length > 0) lines.push(`applies when: ${parts.join(" | ")}`);
+  }
+  return lines.join("\n");
+}
+
 // ── validation ──────────────────────────────────────────────────────────────────────────────────
 
 /**

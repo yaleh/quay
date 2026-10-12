@@ -1073,7 +1073,11 @@ export function formatDiscoveryMethodAssembly(dm: {
  * have expired ⇒ the round reverts to the permanent default), BOTH 24h ceilings (they are per-routine and
  * are not shared with discovery-method's 240), and the per-step turn bounds — because "which bounds are
  * production actually running under" is answerable at startup ONLY from this line (硬规则 3b/9: an
- * assembly that cannot say what it assembled is indistinguishable from one that assembled nothing). */
+ * assembly that cannot say what it assembled is indistinguishable from one that assembled nothing).
+ * It ALSO names the METHOD-GUIDANCE policy the loaded module carries (task
+ * gap-open-discovery-method-guidance-active-shadow): a routine module is not a watched source file, so
+ * the only visible evidence that the resident driver reloaded a routine whose PROMPT policy changed is a
+ * line in this file. */
 export function formatOpenSemanticDiscoveryAssembly(od: {
   enabled: boolean;
   intervalMinutes: number | null;
@@ -1085,13 +1089,18 @@ export function formatOpenSemanticDiscoveryAssembly(od: {
   verifierMaxTurns: number | null;
   refutationMaxTurns: number | null;
 }): string {
+  // The policy the loaded routine module implements, stated as what it IS rather than as config:
+  // `active` ⇒ production guidance, `draft`/`trial` ⇒ an isolated shadow arm, retired/quarantined/
+  // contaminated ⇒ never, none ⇒ baseline. A routine module is NOT in `watchedSourceFiles`, so this
+  // clause is the reload's evidence for a prompt-policy change.
+  const methods = ", methods: active ⇒ 生产轮 guidance / draft|trial ⇒ shadow 臂（shadow:true，不入 Portfolio）/ retired|quarantined|contaminated ⇒ 永不选取 / 无 ⇒ baseline（不抑制轮次）";
   if (!od.enabled) return "open-semantic-discovery 例程已装配（enabled:false — 每轮记 not-evaluated:disabled，零 spawn）";
   const until = od.intervalUntil === null ? "" : `, interval_until=${new Date(od.intervalUntil).toISOString()}`;
   const calls = od.maxModelCallsPer24h === null ? "" : `, max_model_calls_per_24h=${od.maxModelCallsPer24h} (HARD: pre-spawn reservation per subprocess, trailing-24h; a reservation with no outcome still counts as spent)`;
   const usd = od.maxUsdPer24h === null ? "" : `, max_usd_per_24h=$${od.maxUsdPer24h} (HARD: realized gateway cost from the same ledger; an unknown price counts as the per-call ceiling, never 0)`;
   const shape = od.investigatorRuns === null ? "" : `, investigator_runs=${od.investigatorRuns}, max_clusters_verified=${od.maxClustersVerified}`;
   const turns = od.verifierMaxTurns === null ? "" : `, verifier_max_turns=${od.verifierMaxTurns}, refutation_max_turns=${od.refutationMaxTurns}`;
-  return `open-semantic-discovery 例程已装配（enabled, interval=${od.intervalMinutes}m${until}${calls}${usd}${shape}${turns}, report-only: 不立案、不写 tasks/ 或 goals/）`;
+  return `open-semantic-discovery 例程已装配（enabled, interval=${od.intervalMinutes}m${until}${calls}${usd}${shape}${turns}${methods}, report-only: 不立案、不写 tasks/ 或 goals/）`;
 }
 
 // ── 常驻循环（例程型：每轮评估 due 例程 → 跑 due → 汇集 Facts → 写 round 心跳）────────────────
