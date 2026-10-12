@@ -33,7 +33,14 @@ import {
   appendExperienceCorrection, readExperienceCorrections, applyExperienceCorrections, backfillIngestSkips,
   CLAIM_BEARING_KINDS, claimIndex, joinOutcomeToClaims,
   JOIN_LINKED, JOIN_NO_CLAIM_RECORD, JOIN_INDEX_UNAVAILABLE,
+  // The evidence level (task gap-discovery-evidence-level-teaching-vs-independent).
+  EVIDENCE_LEVELS, EVIDENCE_LEVEL_VALUES, UNLABELLED_EVIDENCE_LEVEL, INDEPENDENT_EVIDENCE_LEVEL,
+  CASE_REUSE_EVIDENCE_LEVELS, SOURCE_CASE_REQUIRED, SOURCE_CASE_NOT_APPLICABLE_FOR_INDEPENDENT,
+  evidenceLevelOf, isIndependentEvidenceLevel, allowsCaseReuse,
 } from "../../docs/analysis/discovery-experience-ledger.mjs";
+
+/** The writable "no claim" level, spelled once so the fixtures below cannot drift from the vocabulary. */
+const UNLABELLED = UNLABELLED_EVIDENCE_LEVEL;
 import { appendOutcomeRecord, appendHypothesisRecord, appendCounterexampleRecord, readRecords, storeFile, sha256 } from "../../docs/analysis/architecture-evidence-store.mjs";
 // The CANONICAL shared-checkout resolver (`plugin/scripts/per-task-suite-record.ts`). The ledger module
 // cannot import it (a `.ts` specifier needs type-stripping that plain `node` does not do for a
@@ -151,7 +158,7 @@ test("AC1(b): a case with zero evidence refs is refused, with a code distinct fr
     assert.equal(r.ok, false, `evidenceRefs=${JSON.stringify(empty)} must be refused`);
     assert.ok(r.reasons.some((x) => x.startsWith("EVIDENCE_UNGROUNDED:")), `distinct code, got ${r.reasons.join(",")}`);
   }
-  const rec = { case_id: "x", ts: "2026-10-12T00:00:00Z", role: "found-and-fixed", reported_by: "user", authored_by: OPERATOR, user_provenance: USER_PROV, source_ref: null, components: [], summary: SUMMARY };
+  const rec = { case_id: "x", ts: "2026-10-12T00:00:00Z", role: "found-and-fixed", reported_by: "user", authored_by: OPERATOR, user_provenance: USER_PROV, source_ref: null, components: [], summary: SUMMARY, evidence_level: UNLABELLED };
   delete rec.evidence;
   assert.deepEqual(validateExperienceRecord(rec).reasons, ["SCHEMA_MISSING:evidence"], "absent is a DIFFERENT cause from present-but-empty");
   assert.equal(lines(root), 0);
@@ -317,7 +324,7 @@ test("a PARTIALLY readable ledger is reported as not-ok, never read as a complet
 
 test("the refusal vocabulary is enumerable — every required field has its own absent-key code", () => {
   const root = mkTmp();
-  const GOOD = { case_id: "x", ts: "2026-10-12T00:00:00Z", role: "found-and-fixed", reported_by: "user", authored_by: OPERATOR, user_provenance: USER_PROV, source_ref: null, evidence: [{ ref: "a", sha256: sha256("a") }], components: [], summary: SUMMARY };
+  const GOOD = { case_id: "x", ts: "2026-10-12T00:00:00Z", role: "found-and-fixed", reported_by: "user", authored_by: OPERATOR, user_provenance: USER_PROV, source_ref: null, evidence: [{ ref: "a", sha256: sha256("a") }], components: [], summary: SUMMARY, evidence_level: UNLABELLED };
   assert.deepEqual(validateExperienceRecord(null).reasons, ["RECORD_NOT_OBJECT"]);
   for (const f of REQUIRED_EXPERIENCE_FIELDS) {
     const rec = { ...GOOD }; delete rec[f];
@@ -331,7 +338,7 @@ test("the refusal vocabulary is enumerable — every required field has its own 
 
 test("source_ref is a structural invariant in BOTH directions, each with its own code", () => {
   const root = mkTmp();
-  const base = { case_id: "x", ts: "2026-10-12T00:00:00Z", role: "found-and-fixed", authored_by: OPERATOR, evidence: [{ ref: "a", sha256: sha256("a") }], components: [], summary: SUMMARY };
+  const base = { case_id: "x", ts: "2026-10-12T00:00:00Z", role: "found-and-fixed", authored_by: OPERATOR, evidence: [{ ref: "a", sha256: sha256("a") }], components: [], summary: SUMMARY, evidence_level: UNLABELLED };
   assert.deepEqual(validateExperienceRecord({ ...base, reported_by: "system", source_ref: null }).reasons, ["SOURCE_REF_REQUIRED_FOR_SYSTEM:reported_by=system-must-name-the-evidence-store-record-it-was-derived-from"]);
   assert.deepEqual(validateExperienceRecord({ ...base, reported_by: "user", user_provenance: USER_PROV, source_ref: "outcome-deadbeef" }).reasons, ["SOURCE_REF_MUST_BE_NULL_FOR_USER:reported_by=user-was-not-derived-from-any-record"]);
   assert.equal(validateExperienceRecord({ ...base, reported_by: "system", source_ref: "outcome-deadbeef" }).ok, true);
@@ -1001,7 +1008,7 @@ test("AC1(b): a claim of human provenance that cannot quote the human is refused
   const sys = {
     case_id: "x", ts: "2026-10-12T00:00:00Z", role: "found-and-fixed", reported_by: "system",
     authored_by: OPERATOR, source_ref: "outcome-x", evidence: [{ ref: "o", sha256: sha256("o") }],
-    components: [], summary: SUMMARY, user_provenance: USER_PROV,
+    components: [], summary: SUMMARY, user_provenance: USER_PROV, evidence_level: UNLABELLED,
   };
   assert.deepEqual(validateExperienceRecord(sys).reasons, ["USER_PROVENANCE_NOT_APPLICABLE_FOR_SYSTEM:reported_by=system-was-not-derived-from-a-human-message"]);
   assert.equal(lines(root), 1, "only the one accepted manual entry was appended");
@@ -1373,4 +1380,54 @@ test("JOIN(d): the join keys on `subject_key` EXACTLY — a look-alike subject i
   const r = ingestNewOutcomes(root);
   assert.equal(r.ok, true);
   assert.deepEqual(r.entries.map((e) => e.join_status), [JOIN_LINKED, JOIN_NO_CLAIM_RECORD]);
+});
+
+// ══════════════════════════════════════════════════════════════════════════════════════════════════
+// THE EVIDENCE LEVEL on Experience records (task gap-discovery-evidence-level-teaching-vs-independent,
+// Plan item 1). A new record must SAY what its evidence is worth; a record that predates the field —
+// or a caller that declares nothing — is `unlabelled`, which is never `independent`. A `teaching` or
+// `transfer` record may reuse a known case only by NAMING it.
+// ══════════════════════════════════════════════════════════════════════════════════════════════════
+
+test("AC(level): a new Experience must carry a level from the vocabulary; an unknown value is its OWN refusal", () => {
+  const root = mkTmp();
+  // The vocabulary is DATA, and `unlabelled` is writable — it is the explicit "no claim" value, distinct
+  // from the four declared levels (a missing label is an absent claim, not a weak positive).
+  assert.deepEqual([...EVIDENCE_LEVELS], ["teaching", "transfer", "independent", "production-open"]);
+  assert.equal(EVIDENCE_LEVEL_VALUES.includes(UNLABELLED_EVIDENCE_LEVEL), true);
+  assert.equal(EVIDENCE_LEVELS.includes(UNLABELLED_EVIDENCE_LEVEL), false, "…and it is NOT one of the declared levels");
+
+  const base = { case_id: "x", ts: "2026-10-12T00:00:00Z", role: "found-and-fixed", authored_by: OPERATOR, evidence: [{ ref: "a", sha256: sha256("a") }], components: [], summary: SUMMARY };
+  assert.deepEqual(validateExperienceRecord({ ...base, reported_by: "user", user_provenance: USER_PROV, source_ref: null, evidence_level: "guessed" }).reasons,
+    ["EVIDENCE_LEVEL_NOT_IN_VOCAB:guessed"], "a typo is refused, never silently downgraded to `unlabelled`");
+  assert.equal(validateExperienceRecord({ ...base, reported_by: "user", user_provenance: USER_PROV, source_ref: null, evidence_level: "teaching", source_case_id: "TEACH-source-case" }).ok, true);
+  // A `teaching`/`transfer` record that does not name the case it reused is refused on its own code.
+  assert.deepEqual(validateExperienceRecord({ ...base, reported_by: "user", user_provenance: USER_PROV, source_ref: null, evidence_level: "transfer" }).reasons,
+    [`${SOURCE_CASE_REQUIRED}:evidence_level=transfer-must-name-the-known-case-it-reuses-in-source_case_id`]);
+  // …and the mirror: naming a reused case while claiming `independent` is a claim the level contradicts.
+  assert.deepEqual(validateExperienceRecord({ ...base, reported_by: "user", user_provenance: USER_PROV, source_ref: null, evidence_level: "independent", source_case_id: "TEACH-source-case" }).reasons,
+    [`${SOURCE_CASE_NOT_APPLICABLE_FOR_INDEPENDENT}:evidence_level=independent-was-not-derived-from-a-previously-used-case`]);
+  assert.equal(lines(root), 0, "every one of these is a pure validation, nothing was written");
+});
+
+test("AC(level): the ledger WRITES a level on every new entry, and reads `unlabelled` for one that predates the field", () => {
+  const root = mkTmp();
+  // A declared level travels through the real ingestion path.
+  const r = ingestUser(root, { caseId: "TEACH-x", role: "missed-by-tooling", evidenceRefs: ["ref-a"], summary: SUMMARY, evidenceLevel: "teaching", sourceCaseId: "EXP-known" });
+  assert.equal(r.ok, true, r.reasons?.join(","));
+  assert.equal(r.record.evidence_level, "teaching");
+  assert.equal(r.record.source_case_id, "EXP-known");
+  // An undeclared one is written as the explicit `unlabelled`, never as an absent key.
+  assert.equal(ingestUser(root, { caseId: "TEACH-y", role: "missed-by-tooling", evidenceRefs: ["ref-b"], summary: SUMMARY }).record.evidence_level, "unlabelled");
+
+  // The READ path tolerates a line written BEFORE the field existed — that is what "legacy" means —
+  // and it reads as `unlabelled`, the fail-closed direction.
+  const legacyFile = ledgerFile(root);
+  fs.appendFileSync(legacyFile, JSON.stringify({ kind: "experience", id: "experience-legacy00000000", case_id: "EXP-legacy", role: "found-and-fixed", reported_by: "system", authored_by: OPERATOR, source_ref: "outcome-legacy", evidence: [{ ref: "o", sha256: sha256("o") }], components: [], summary: SUMMARY }) + "\n", "utf8");
+  const legacy = readExperienceLedger(root).records.find((x) => x.id === "experience-legacy00000000");
+  assert.equal(evidenceLevelOf(legacy), UNLABELLED_EVIDENCE_LEVEL);
+  assert.equal(isIndependentEvidenceLevel(legacy), false, "a record with no level is NEVER independent");
+  assert.equal(allowsCaseReuse(legacy), false, "…and it is not exempt from the exclusion either");
+  assert.equal(evidenceLevelOf({ evidence_level: "independent" }), "independent");
+  assert.equal(evidenceLevelOf(null), "unlabelled", "an unreadable input reads as the WEAKEST level, never a pass");
 });
