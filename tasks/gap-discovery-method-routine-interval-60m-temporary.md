@@ -3,7 +3,7 @@ id: gap-discovery-method-routine-interval-60m-temporary
 title: "discovery-method routine: temporary 60m cadence (user-requested,
   expiring), timed from the last REAL driver invocation, with a 24h model-call
   cap"
-status: ready
+status: done
 labels:
   - gap
   - architecture-discovery
