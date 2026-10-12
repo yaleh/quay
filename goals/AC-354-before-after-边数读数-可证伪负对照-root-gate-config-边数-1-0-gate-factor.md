@@ -5,7 +5,7 @@ title: before/after 边数读数 + 可证伪负对照：root→gate/config 边�
 status: achieved
 kind: criterion
 goal: GOAL-034
-criterion: |
+criterion: |-
   set -u
   root=$(git rev-parse --show-toplevel 2>/dev/null) || { echo "NOT-EVALUATED: not inside a git repository" >&2; exit 3; }
   cd "$root"
@@ -31,18 +31,23 @@ criterion: |
   if(afterUtils!==0){console.error("CAUSE=factories-to-config-not-cleared -- gate/factories/utils.ts still has "+afterUtils+" import(s) matching ../config/ (before="+BEFORE_FACTORIES_TO_CONFIG_UTILS+")");process.exit(1)}
   const afterGoalFactory=countFactoriesToConfig(rd(path.join(src,"gate/factories/goal.ts")));
   if(afterGoalFactory!==0){console.error("CAUSE=factories-to-config-not-cleared -- gate/factories/goal.ts still has "+afterGoalFactory+" import(s) matching ../config/ (before="+BEFORE_FACTORIES_TO_CONFIG_GOAL+")");process.exit(1)}
-  const scratchBefore=rd(path.join(src,"goal-store.ts")).replace(
-    /import\s*\{\s*resolveAcceptanceTimeoutMs[^\n]*\n/,
-    (m)=>m+"import { resolveAcceptanceTimeoutMs as __negctl } from \"./gate/config/utils.ts\";\n"
-  );
-  const negCount=countRootToGateConfig(scratchBefore);
-  if(negCount<1){console.error("CAUSE=negative-control-not-falsifiable -- re-inserting the old import into a scratch copy of goal-store.ts did not raise the count, the checker above cannot be trusted to detect a real regression");process.exit(1)}
+  const NEGCTL_LINE="import { resolveAcceptanceTimeoutMs as __negctl } from \"./gate/config/utils.ts\";\n";
+  const scratchWithRegression=NEGCTL_LINE+rd(path.join(src,"goal-store.ts"));
+  const negCount=countRootToGateConfig(scratchWithRegression);
+  if(negCount!==afterRoot+1){console.error("CAUSE=negative-control-not-falsifiable -- a scratch copy of goal-store.ts with the retired import prepended did not raise the ./gate/config/ count by exactly one (after="+afterRoot+", scratch="+negCount+"); the counter cannot be trusted to detect a real regression");process.exit(1)}
   console.log(JSON.stringify({fork_point:FORK_POINT,before:{root_to_gate_config:BEFORE_ROOT_TO_GATE_CONFIG,factories_to_config_lines:BEFORE_FACTORIES_TO_CONFIG_UTILS+BEFORE_FACTORIES_TO_CONFIG_GOAL+BEFORE_FACTORIES_TO_CONFIG_LOADER},after:{root_to_gate_config:afterRoot,factories_to_config_lines:afterUtils+afterGoalFactory},negative_control_count_on_scratch_regression:negCount}));
   })()' "$src" || { echo "CAUSE=before-after-scan-red -- the scan above printed the specific CAUSE" >&2; exit 1; }
   echo "PASS: root->gate/config edge count 1 -> 0; gate/factories->gate/config line count 5 -> 0 (file deletion + 2 real redirects); negative control on a scratch regression correctly re-detects the old edge"
 expect: exit 0 = 边数读数归零且负对照能检测到回归；exit 1 = CAUSE= 指明哪一项；exit 3 =
   kernel/gate-run-options.ts 尚未落地
-origin: 继 GOAL-030~033 后第五个 goal branch 试点
+origin: 重锚 AC-354 的负对照（gap-ac354-negctl-anchor-symbol-retired）：旧负对照把「重插那条被退休的
+  import」的落点用一个正则锚在 goal-store.ts 的某一行上，而该行已被与 GOAL-034 无关的合法重构
+  411bb34c7（goal-store 的 deadline 解析改为 record-aware）删除，于是 replace 匹配不到、scratch
+  与原文逐字相同、计数恒为 0 ⇒ 恒红 CAUSE=negative-control-not-falsifiable（gate-events
+  2026-10-12T21:09:36.859Z，旧
+  criterionHash=c1f3186e6c56cfd3）。新负对照改为「不依赖原文任何一行」的前插：NEGCTL_LINE +
+  rd(goal-store.ts)，断言从 >= 1 加强为 !== afterRoot + 1（漏检 0 与重复计数 > 1 双向判红）。判据其余 8
+  条结构断言与 expect 语义逐字不变。原 origin：继 GOAL-030~033 后第五个 goal branch 试点
 activatedAt: 2026-10-10T06:03:57.804Z
 statusLog:
   - at: 2026-10-10T06:03:57.804Z
