@@ -3,7 +3,7 @@ id: gap-routine-semantic-dedup-scan-serveheapcapmb-cross-layer-copy
 title: "semantic-dedup-scan: two byte-identical bodies including the
   incident-derived magic numbers 4096/512/5 — drifting policy rather than a leaf
   constant — and the 'kernel does not reac"
-status: ready
+status: done
 labels:
   - gap
   - routine-filed

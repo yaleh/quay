@@ -14,9 +14,12 @@
 // still forces the full suite (suite-bucket-hub-list.ts HUB_FILES glob `plugin/scripts/runner-grouping*`
 // matches it).
 //
-// CLASSIFICATION SEMANTICS ARE BYTE-IDENTICAL to the OLD grep|awk (and to
-// plugin/scripts/runner-grouping-metadata.mjs, which is the one-pass realpath-dedup + @test-group reader
-// test.sh still uses for the metadata modes — that helper's groupOf is THIS module's groupOf):
+// CLASSIFICATION SEMANTICS ARE BYTE-IDENTICAL to the OLD grep|awk. This module is the ONE classifier:
+// plugin/scripts/runner-grouping-metadata.mjs (the one-pass realpath-dedup + @test-group reader test.sh
+// uses for the metadata modes) IMPORTS classifyFile from here — until
+// gap-routine-semantic-dedup-scan-runner-grouping-groupof-copy it carried a private byte-identical copy
+// of groupOf / failClosed / RECOGNIZED / the NUL detector, so the two could drift (finding
+// `runner-grouping-groupof-copy`, routine `semantic-dedup-scan`). Do NOT re-add a copy there.
 //   - groupOf(content) — the first `@test-group` + inline whitespace + a lowercase word; awk's 2nd field.
 //     A MISSING declaration defaults to engine (AC7). An UNRECOGNIZED name is FAIL-CLOSED (exit 3) in
 //     classifyFile — never silently degraded to engine (the r10 dropped-group regression must stay hard).
@@ -45,7 +48,8 @@ export function isRecognizedGroup(g: string): g is DeclaredGroup {
   return RECOGNIZED.has(g);
 }
 
-/** groupOf(content) — mirror of the OLD grep|awk and of runner-grouping-metadata.mjs groupOf:
+/** groupOf(content) — mirror of the OLD grep|awk; the ONE implementation (the metadata helper
+ *  runner-grouping-metadata.mjs imports classifyFile from this module, never a private copy):
  *     grep -m1 -oE '@test-group[[:space:]]+[a-z]+' "$f" | awk '{print $2}'
  *  The first `@test-group` + inline whitespace + a lowercase word; awk's 2nd whitespace field is the
  *  group name. POSIX [[:space:]] within a grep line == [ \t\v\f\r]. An absent declaration → "engine"

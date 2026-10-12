@@ -3,7 +3,7 @@ id: gap-routine-semantic-dedup-scan-runner-grouping-groupof-copy
 title: "semantic-dedup-scan: normalized bodies are byte-identical (18 tokens)
   across a .mjs and a .ts that already share a filename stem — one
   suite-grouping classifier implemented twice o"
-status: ready
+status: done
 labels:
   - gap
   - routine-filed
