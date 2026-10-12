@@ -49,7 +49,7 @@ import { isDirectEntry } from "./gate-script-base.ts";
 // spawn）、launchArgv（LLM 调用配置单一构造点）、splitArgs（测试缝覆盖命令切分）、Fact / RoutineSpec
 // （Layer 1b 例程契约）、parseBinaryVerdict（GOAL-032 判定器 stdout → 三态 verdict 的解析算法，
 // kernel leaf；⛔ 本文件只表达「我需要这个符号」，布局知识留 Layer 0 —— 同 regex-escape 的落点论证）。
-import { DRIVER_KINDS, runAsync, launchArgv, splitArgs, kernelSiblingArgv, kernelConfigPath, resolveQuayCodeRoot, parseBinaryVerdict, type Fact, type RoutineSpec } from "./driver-runtime.ts";
+import { DRIVER_KINDS, runAsync, launchArgv, splitArgs, kernelSiblingArgv, kernelConfigPath, resolveQuayCodeRoot, parseBinaryVerdict, goalDriverChildTimeoutMs, GOAL_STORE_SIGTERM_GRACE_MS, readLockPid, type Fact, type RoutineSpec } from "./driver-runtime.ts";
 // The ONE regex-literal escaper (kernel leaf via the plugin shim) — replaces an inline escape body at
 // the heading-literal site (finding `escaperegexp-sweep-missed-two`, routine `semantic-dedup-scan`).
 import { escapeRegExp } from "./regex-escape.ts";
@@ -103,7 +103,15 @@ export const GOAL_CONTROL_STATE_REL = path.posix.join(".quay", GOAL_SPEC.control
 /** 轮间隔缺省（毫秒）。AC155：值从 drivers.yml 派生（单一真相源）；生产由 --interval 覆盖，测试传小值。 */
 export const INTERVAL_MS_DEFAULT = defaultDriverConfig().goal.intervalMs;
 
-/** 机械 spawn（跑一条 criterion / 一次 check）的 wall-clock 上限（毫秒）——全部是快速机械 node 调用。 */
+/** 机械 spawn（一次 `list` / 一次 `check --staleness` …）的 wall-clock 上限（毫秒）——那些确实是快速
+ *  机械 node 调用。
+ *
+ *  ⛔ 它【不再】用于跑 criterion 的两条路径（`gate` / 激活 `write`）：那两条包裹的是**任意慢的用户
+ *  工作**，其截止由 record 的 `timeoutMs` 声明，而本字面量低于该声明时会把内层 deadline 提前杀掉
+ *  （实测 4 个项目 104 次 `spawn timeout after 120000ms`）。二者的上限现由
+ *  `goalDriverChildTimeoutMs(record.timeoutMs, kind)` 从**内层 deadline 派生**（外层 > 内层，构造上
+ *  成立）——见两台 spawn 各自的调用点。
+ *  (tasks/gap-goal-driver-hardcoded-120s-spawn-kill-preempts-record-timeout-and-orphans-goal-locks) */
 export const CRITERION_TIMEOUT_MS = 120_000;
 
 /** 读【复核执行根新鲜度】的两条本地只读 git 命令的 wall-clock 上界（毫秒）。⛔ 不是性能阈值
@@ -287,8 +295,18 @@ export async function gateCriterion(
   scriptRoot: string | null,
   id: string,
   dataRoot: string,
+  opts: { recordTimeoutMs?: unknown } = {},
 ): Promise<{ verdict: "pass" | "fail" | "not-evaluated"; reason: string; cause: string | null }> {
-  const r = await runAsync(goalStoreArgv(scriptRoot, ["gate", id], dataRoot), { timeoutMs: CRITERION_TIMEOUT_MS, collectStderr: true });
+  // The OUTER bound is DERIVED from the child's own inner deadline (its record's `timeoutMs` >
+  // env > default), ⛔ never the mechanical `CRITERION_TIMEOUT_MS`: a record declaring a deadline
+  // ≥ that literal would be pre-empted by the driver's SIGKILL before `goal gate` could reach its own
+  // verdict (gap-goal-driver-hardcoded-120s-spawn-kill-preempts-record-timeout-and-orphans-goal-locks).
+  const r = await runAsync(goalStoreArgv(scriptRoot, ["gate", id], dataRoot), {
+    timeoutMs: goalDriverChildTimeoutMs(opts.recordTimeoutMs, "gate"),
+    collectStderr: true,
+    // SIGTERM first (the gate child holds no lock, but a graceful exit still avoids a hard kill).
+    killGraceMs: GOAL_STORE_SIGTERM_GRACE_MS,
+  });
   if (r.error) return { verdict: "not-evaluated", reason: `gate spawn error: ${r.error.message}`, cause: "spawn" };
   // exit 0 = pass, 1 = fail（含空 criterion 的 fail-closed）, 2 = 用法/记录不存在 ⇒ 无法评估。
   if (r.status === 2) return { verdict: "not-evaluated", reason: `gate usage error: ${(r.stderr || "").trim().slice(0, 200)}`, cause: "usage" };
@@ -320,7 +338,7 @@ export async function writeGoalStatus(
   id: string,
   status: string,
   dataRoot: string,
-  opts: { actor?: string; reason?: string; fidelityJudgeArgv?: string } = {},
+  opts: { actor?: string; reason?: string; fidelityJudgeArgv?: string; recordTimeoutMs?: unknown; spawnTimeoutMs?: number } = {},
 ): Promise<{ ok: boolean; reason: string }> {
   const extra: string[] = [];
   if (opts.actor) extra.push("--actor", opts.actor);
@@ -330,10 +348,41 @@ export async function writeGoalStatus(
   // fail-open）。⛔ 不入每轮 gate 路径（本函数只被 ⑧ 激活与 I2 达成两处调用，达成不传）。
   if (opts.fidelityJudgeArgv) extra.push("--fidelity-judge-argv", opts.fidelityJudgeArgv);
   const argv = goalStoreArgv(scriptRoot, ["write", id, "--status", status, ...extra], dataRoot);
-  const r = await runAsync(argv, { timeoutMs: CRITERION_TIMEOUT_MS, collectStderr: true });
-  if (r.error) return { ok: false, reason: `write spawn error: ${r.error.message}` };
+  // The OUTER bound is DERIVED from the child's own inner deadline + the P6b fidelity-judge bound
+  // (activation runs BOTH), ⛔ never `CRITERION_TIMEOUT_MS`: the child holds `goals/<id>.lock`
+  // (withFileLock) across the criterion AND the judge, so a hard-coded literal below the record's
+  // declared `timeoutMs` both pre-empts the child AND orphans that lock
+  // (gap-goal-driver-hardcoded-120s-spawn-kill-preempts-record-timeout-and-orphans-goal-locks).
+  // ⚠️ `spawnTimeoutMs` is the TEST SEAM (a short bound to exercise the kill path); production omits it.
+  const timeoutMs = opts.spawnTimeoutMs ?? goalDriverChildTimeoutMs(opts.recordTimeoutMs, "activation");
+  const r = await runAsync(argv, { timeoutMs, collectStderr: true, killGraceMs: GOAL_STORE_SIGTERM_GRACE_MS });
+  if (r.error) {
+    // The child we just killed was mid-`withFileLock` (it is why we killed it); its `finally` never
+    // ran (SIGTERM is deferred while it is blocked in the criterion's spawnSync, then SIGKILL). Remove
+    // the lock IF AND ONLY IF it is the one WE orphaned — its content equals the killed child's pid.
+    // ⛔ Never remove a lock a live process now holds (a different pid).
+    removeOrphanedGoalLock(dataRoot, id, r.pid);
+    return { ok: false, reason: `write spawn error: ${r.error.message}` };
+  }
   if (r.status !== 0) return { ok: false, reason: `write exit ${r.status}: ${(r.stderr || "").trim().slice(0, 200)}` };
   return { ok: true, reason: "written" };
+}
+
+/** Remove `goals/<id>.lock` when (and ONLY when) its recorded pid equals the child we just killed.
+ *  `pid === null` (spawn failed / no pid) ⇒ nothing to remove. Returns whether a lock was removed —
+ *  a returned `false` is NOT "nothing was wrong": it also covers "the lock was already gone" (the
+ *  child released it, or the store's stale-recovery did). The caller does not gate on it; it is for
+ *  the test to read. Exported so AC4's test asserts the pid-match guard directly. */
+export function removeOrphanedGoalLock(dataRoot: string, id: string, pid: number | null): boolean {
+  if (pid === null) return false;
+  const lockPath = path.join(dataRoot, "goals", `${id}.lock`);
+  if (readLockPid(lockPath) !== pid) return false;
+  try {
+    fs.rmSync(lockPath, { force: true });
+    return true;
+  } catch {
+    return false;
+  }
 }
 
 /** 保真性判定器 argv 前缀的 JSON 编码（真 LLM，launchArgv 单一构造点——⛔ 不手拼 `claude -p`）。
@@ -637,9 +686,14 @@ async function runPrefilingRecheck(
   scriptRoot: string | null,
   dataRoot: string,
   targets: string[],
+  // The round's records, when the caller has them — used ONLY to read each target's declared
+  // `timeoutMs` so the OUTER spawn bound exceeds the child's inner deadline. Absent (test path) ⇒
+  // the bound falls back to the shared env/default chain, which is the pre-existing behaviour.
+  records: Array<Record<string, unknown>> = [],
 ): Promise<PrefilingRecheckReading> {
   const empty: PrefilingRecheckReading = { ran: false, attempted: 0, entries: [], guardRefused: false };
   if (targets.length === 0) return empty;
+  const timeoutById = new Map(records.map((r) => [String(r.id ?? ""), r.timeoutMs]));
   const host = readHostHealth();
   // 复核执行根的新鲜度（**版本半边**，见 `RecheckRootFreshness`）：本函数跑判据的根就是 `dataRoot`
   // ——生产里即主检出工作树，它可能滞后 `develop`（修复落在 develop 而主检出要等下一次 ff）。
@@ -676,7 +730,7 @@ async function runPrefilingRecheck(
       // 复用 pass 1 的 acceptance 执行路径（`goal-store gate <id>`）：同一条命令、同一个闸、
       // 同一本台账。⛔ 不在此处直接 spawn criterion 文本（那会绕开 store 的 verdict 语义与落账）。
       const t0 = Date.now();
-      const { verdict, reason } = await gateCriterion(scriptRoot, ac, dataRoot);
+      const { verdict, reason } = await gateCriterion(scriptRoot, ac, dataRoot, { recordTimeoutMs: timeoutById.get(ac) });
       const entry = {
         ac, verdict, reason, durationMs: Date.now() - t0,
         hostFreeBytes: host.hostFreeBytes, load1: host.load1,
@@ -714,9 +768,10 @@ export async function recheckFrozenFailing(
   scriptRoot: string | null,
   dataRoot: string,
   reading: FrozenFailingReading | null,
+  records: Array<Record<string, unknown>> = [],
 ): Promise<PrefilingRecheckReading> {
   if (reading === null || reading.judgment !== "violated") return { ran: false, attempted: 0, entries: [], guardRefused: false };
-  return runPrefilingRecheck(scriptRoot, dataRoot, [...reading.failing]);
+  return runPrefilingRecheck(scriptRoot, dataRoot, [...reading.failing], records);
 }
 
 /**
@@ -740,9 +795,10 @@ export async function recheckStandingFailing(
   scriptRoot: string | null,
   dataRoot: string,
   standings: { achievedButFailing: string[]; evaluated: boolean } | null,
+  records: Array<Record<string, unknown>> = [],
 ): Promise<PrefilingRecheckReading> {
   if (standings === null) return { ran: false, attempted: 0, entries: [], guardRefused: false };
-  return runPrefilingRecheck(scriptRoot, dataRoot, [...standings.achievedButFailing]);
+  return runPrefilingRecheck(scriptRoot, dataRoot, [...standings.achievedButFailing], records);
 }
 
 /** AC-242 successor 的【动作】半边（gap-achieved-ac-rot-invisible-when-ledger-tail-is-stale-pass）：
@@ -3679,7 +3735,7 @@ export async function runGoalRound(root: string, opts: GoalRoundOptions = {}): P
         criteria.push({ id, goal: gid, status: String(ac.status ?? ""), verdict: "not-evaluated", reason: "pre-merge-phase" });
         continue;
       }
-      const { verdict, reason, cause } = await gateCriterion(scriptRoot, id, dataRoot);
+      const { verdict, reason, cause } = await gateCriterion(scriptRoot, id, dataRoot, { recordTimeoutMs: ac.timeoutMs });
       criteria.push({ id, goal: gid, status: String(ac.status ?? ""), verdict, reason });
       // SPEC-goal-branch §4.7 裁定⑮ 辅助读数: a PRE-merge AC under a branch-mode goal that ended in
       // carrier-absence (exit 3 ⇒ cause `declared`) on the goal-branch tree is a HINT that it may
@@ -3691,7 +3747,7 @@ export async function runGoalRound(root: string, opts: GoalRoundOptions = {}): P
       // I2（AC 层）：判据 pass 且 AC 为 active ⇒ 机械 flip active→achieved（裁定 5 的确定性推导，不算自动晋升）。
       // ⛔ 裁定 3：draft→active（激活）是人/manager 手动——本驱动不得把 draft（或 superseded/retired）AC 翻成 achieved。
       if (verdict === "pass" && ac.status === "active") {
-        const w = await writeGoalStatus(scriptRoot, id, "achieved", dataRoot, { actor: "goal-driver", reason: "I2: criterion pass" });
+        const w = await writeGoalStatus(scriptRoot, id, "achieved", dataRoot, { actor: "goal-driver", reason: "I2: criterion pass", recordTimeoutMs: ac.timeoutMs });
         flips.push({ id, to: "achieved", ok: w.ok, reason: w.reason });
         if (w.ok) ac.status = "achieved";
       }
@@ -3792,7 +3848,7 @@ export async function runGoalRound(root: string, opts: GoalRoundOptions = {}): P
   // 集合与 computeGoalGaps 取自同一处枚举（standingReverifyAcs），⛔ 不各自重推一遍口径（硬规则 5b）。
   for (const ac of standingReverifyAcs(records, activeGoalIds)) {
     const id = String(ac.id);
-    const { verdict, reason } = await gateCriterion(scriptRoot, id, dataRoot);
+    const { verdict, reason } = await gateCriterion(scriptRoot, id, dataRoot, { recordTimeoutMs: ac.timeoutMs });
     criteria.push({ id, goal: String(ac.goal ?? ""), status: String(ac.status ?? ""), verdict, reason });
   }
 
@@ -3902,7 +3958,7 @@ export async function runGoalRound(root: string, opts: GoalRoundOptions = {}): P
                 : `blocked-branch-absent: goal/${gid}`,
         });
       } else {
-        const w = await writeGoalStatus(scriptRoot, gid, "achieved", dataRoot, { actor: "goal-driver", reason: "I2: all ACs achieved + sufficiency covered" });
+        const w = await writeGoalStatus(scriptRoot, gid, "achieved", dataRoot, { actor: "goal-driver", reason: "I2: all ACs achieved + sufficiency covered", recordTimeoutMs: goal.timeoutMs });
         flips.push({ id: gid, to: "achieved", ok: w.ok, reason: w.reason });
         if (w.ok) goal.status = "achieved";
       }
@@ -3923,7 +3979,7 @@ export async function runGoalRound(root: string, opts: GoalRoundOptions = {}): P
   // （逐条三态 + `durationMs` + 复核那一刻的宿主健康量 ⇒ 环境类误读与真回归事后可分）。
   // ⛔ 成本：只对命中的（通常 0–1 条）跑，实测 avg 1.31s/criterion。⛔ 与 ③b 不重叠：两个 population
   // 互斥（域内 vs 域外），同一轮不会对同一条 AC 跑两遍。
-  const standingRecheck = await recheckStandingFailing(scriptRoot, dataRoot, achievedFailing);
+  const standingRecheck = await recheckStandingFailing(scriptRoot, dataRoot, achievedFailing, records);
 
   // ③ 冻结population 的「此刻为假」读数（**纯读**：`check --stale-pass` 不传 `--sweep` ⇒ 零 criterion
   // 执行，与 AC-242 判据同一条命令、同一成本类）。⛔ 它【不是】`sweepFrozenAcs` 的结果——那个是【动作】
@@ -3936,7 +3992,7 @@ export async function runGoalRound(root: string, opts: GoalRoundOptions = {}): P
   // 「此刻为假」里。产物落两处：`.quay/gate-events.jsonl`（actor=goal-cli 的这次复核）+ 本轮 fact
   // 的 `frozenRecheck`（逐条三态落痕）。
   // ⛔ 成本：只对 `failing` 命中的跑（通常 0–1 条），实测 avg 1.31s/criterion。
-  const frozenRecheck = await recheckFrozenFailing(scriptRoot, dataRoot, frozenFailing);
+  const frozenRecheck = await recheckFrozenFailing(scriptRoot, dataRoot, frozenFailing, records);
 
   // ⑤ 算缺口（G7 + G9 stalled + AC-216 复验域 + 冻结population）：读 tasks/*.md 的 goal_ac → 对每条
   // active AC 给四态，对每条 AC-216 复验域 AC 给「此刻成立 / 违反 / 读不到」，对每条冻结population 的
@@ -3979,6 +4035,9 @@ export async function runGoalRound(root: string, opts: GoalRoundOptions = {}): P
   // 激活路径经 `--fidelity-judge-argv` 把 launchArgv("fix-worker") 的真 LLM argv 前缀传给 goal-store，
   // 由 goal-store 跑判定并拒 vacuous/not-evaluated（P6b）。profiles.yml 缺失 ⇒ 不传 ⇒ goal-store
   // 诚实记 "no judge configured"（fail-open + 留痕）。⛔ 不在每轮 gate 路径（gateCriterion 不碰它）。
+  // The activation spawn's OUTER bound is derived from the AC's own declared `timeoutMs` (the child
+  // runs BOTH the criterion and the P6b fidelity judge under `withFileLock`) — see writeGoalStatus.
+  const recordTimeoutById = new Map(records.map((r) => [String(r.id ?? ""), r.timeoutMs]));
   for (const t of triage) {
     if (t.decision !== "activate") continue;
     let fidelityJudgeArgv: string | undefined;
@@ -3989,6 +4048,7 @@ export async function runGoalRound(root: string, opts: GoalRoundOptions = {}): P
     }
     const w = await writeGoalStatus(scriptRoot, t.ac, "active", dataRoot, {
       actor: "goal-driver", reason: "triage: activate", fidelityJudgeArgv,
+      recordTimeoutMs: recordTimeoutById.get(t.ac),
     });
     flips.push({ id: t.ac, to: "active", ok: w.ok, reason: w.reason });
   }
