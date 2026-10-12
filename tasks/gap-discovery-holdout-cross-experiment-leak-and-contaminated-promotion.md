@@ -3,7 +3,7 @@ id: gap-discovery-holdout-cross-experiment-leak-and-contaminated-promotion
 title: "Discovery Method: holdouts reused across experiments promoted two
   methods; exclusion must span every sealed set and seeds, and contaminated
   verdicts must never license promotion"
-status: todo
+status: ready
 labels:
   - gap
   - architecture-discovery
