@@ -2,7 +2,7 @@
 id: gap-discovery-method-record-tool-vs-subject-leak
 title: "Discovery Method: method records memorize the seed (tool = subject file,
   seed names in method text)"
-status: ready
+status: done
 labels:
   - gap
   - architecture-discovery
