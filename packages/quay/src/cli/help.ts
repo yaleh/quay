@@ -17,6 +17,11 @@
 // kind 在产品表层等于不存在。
 
 import { ALL_SERVICE_NAMES, KINDS, VERBS } from "../driver-vocab.ts";
+// The task-status-event actor-kind vocabulary the `task log` contract below prints. DERIVED, not
+// re-typed — same rule as VERBS/KINDS above (⛔ this file must never become a second definition point
+// for a vocabulary). The kernel module is a LEAF (node builtins only), so importing it costs the
+// per-spawn floor nothing the way cli/shared.ts's provider machinery would.
+import { TASK_STATUS_EVENT_ACTOR_KINDS } from "../kernel/task-transition.ts";
 // The web binding's ONE fallback (a leaf module, zero closure deps). Interpolated rather than
 // re-typed: the help text is a DERIVED surface, so the default it prints is the same value the
 // resolver uses — the two cannot drift (gap-serve-binding-defaults-three-copies-to-one-definition-point AC8).
@@ -64,6 +69,8 @@ Usage:
   quay task create <task-id> --title <title> [--body <text>|--body-file <path>] [--status <status>] [--labels <a,b>] [--parent <id>] [--children <a,b>] [--depends-on <a,b>] [--goal-ac <AC-NNN>] [--extra <json>] [--json]
   quay task edit <task-id> [--title <title>] [--status <status>] [--body <text>|--body-file <path>] [--labels <a,b>] [--extra <json>] [--parent <id>] [--children <a,b>] [--depends-on <a,b>] [--goal-ac <AC-NNN>] [--expect-status <status>] [--acceptance <cmd>] [--append-notes <text>] [--enforce-gate] [--json]
   quay task check <task-id> [--json]
+  quay task log [--since <ISO8601|cursor>] [--until <ISO8601>] [--limit <n≤500>] [--json] [--root <path>]
+  quay task trace <task-id> [--json] [--root <path>]
   quay adr list [--status <status>] [--tag <tag>] [--json] [--root <path>]
   quay adr view <id> [--json] [--root <path>]
   quay adr new <id> --title <title> [--status <status>] [--body <text>|--body-file <path>] [--json] [--root <path>]
@@ -168,6 +175,73 @@ Options for task edit:
   upsert-as-create; a missing or empty --title is refused with a usage error instead of silently
   creating a titleless or empty-titled task — use 'quay task create' for a dedicated create path
   instead).
+
+task log / task trace — the READ surface over the task-status transition carrier
+(gap-quay-task-log-trace-read-surface; the WRITE side is the kernel's appendTaskStatusEvent):
+  task log [--since <ISO8601|cursor>] [--until <ISO8601>] [--limit <n≤500>] [--json] [--root <path>]
+                    Print a PAGE of the transition carrier <root>/.quay/task-status-events.jsonl,
+                    oldest first. Read-only and zero model calls: it never writes a carrier and never
+                    creates the epoch sidecar it reads. Exit 0 = a real reading (including an empty
+                    page); 1 = usage error or no workspace.
+  task trace <task-id> [--json] [--root <path>]
+                    One task's transitions (same order) plus its CURRENT status, read through the
+                    Provider ABI (the provider is the authority on a status — never the last carrier
+                    event, which is exactly the quantity the coverage block warns may be incomplete).
+                    Exit 0 = read; 1 = usage/no workspace; 3 = NO SUCH TASK — deliberately distinct
+                    from 0, so "this task does not exist" can never read as "a task with no
+                    transitions".
+
+The published CONTRACT (task log --json; task trace --json is the same document minus
+transitions/nextCursor/complete/rebase, plus its own taskId/status):
+  {
+    "transitions": [ { "order": 0, "schema": "v1", "seq": 0, "eventId": "<sha256[0:32]>",
+                       "carrierEpoch": "<epoch>", "taskId": "<id>", "from": "todo", "to": "ready",
+                       "kind": "promote", "at": "<ISO>", "recordedAt": "<ISO>",
+                       "actor": { "kind": "${TASK_STATUS_EVENT_ACTOR_KINDS.join("|")}", "id": "<entry point>" },
+                       "cause": { "runId?": "…", "dispatchId?": "…", "sessionId?": "…", "correlationId?": "…" },
+                       "evidence": { "commit": "<sha|null>", "statusBlobSha": "<sha>", "commitAbsentReason?": "…" },
+                       "reason": "…",
+                       "source": "task-status-events|git", "inferred": false, "commit": "<sha|null>" } ],
+    "nextCursor": { "v": 1, "carrierEpoch": "<epoch>", "seq": 3 },
+    "complete": false,
+    "coverage": { "carrier": { "path": "…", "exists": true, "epoch": "…", "lines": 0, "v0": 0, "v1": 0, "corrupt": 0 },
+                  "writerClasses": [ { "id": "<class>", "wired": true, "inScope": true, "callSites": ["…"], "reason": "…" } ],
+                  "unwiredInScope": [ "<class>" ],
+                  "reconcile": { "ref": "develop", "watermark": { "commit": "<sha>", "at": "<ISO>" },
+                                 "newestWrittenAt": "<ISO|null>", "state": "current|lagging|not-run|not-evaluated",
+                                 "reason": "…" },
+                  "reasons": [ "…" ] },
+    "generatedAt": "<ISO>", "rebase": false, "rebaseReason": null
+  }
+
+  order       The CARRIER POSITION (0-based line index) and the sort key. On an append-only carrier a
+              v1 record's position equals its \`seq\`; a v0 record has no \`seq\` at all (null) but still
+              has exactly one position.
+  source      "task-status-events" for an event a LIVE writer appended; "git" with inferred:true for
+              one the reconcile pass derived from a commit's status-line diff. ⛔ A commit SUBJECT is
+              never a source — a message is a claim, not a positional reading.
+  cursor      OPAQUE: {v, carrierEpoch, seq}. Pass it back verbatim as --since to resume. Delivery is
+              AT-LEAST-ONCE: nextCursor.seq names the LAST DELIVERED event and the resume is INCLUSIVE
+              of it, so a consumer that crashes between "read a page" and "process it" re-receives
+              that one boundary event instead of losing it. DEDUPE BY \`eventId\` — that is the
+              documented, and only, dedup key.
+  rebase      true iff the supplied cursor's carrierEpoch does not match the carrier's current epoch
+              (a rotation, or the first v1 append onto a legacy v0-only carrier, whose epoch literal is
+              "pre-epoch"). The read then REPLAYS FROM THE BEGINNING of the current epoch and says so
+              in rebaseReason — ⛔ never a silent skip.
+  coverage    ENUMERATED, not boolean: which writer classes are wired (declared in the kernel and kept
+              in sync with the real call sites by a test), which are NOT (with the reason), the
+              carrier's epoch and line census, and the reconcile watermark. complete:true requires ALL
+              of: the page reached the end of what it was reading, every IN-SCOPE writer class is
+              wired, and reconcile is current. Otherwise false, with every unmet condition named in
+              coverage.reasons — so "nothing happened" and "this class of change is invisible here"
+              are never the same reading.
+
+  RETENTION: the carrier is APPEND-ONLY — no truncation in v1. Any future rotation must bump
+  \`carrierEpoch\` and keep the old file readable, which is exactly what turns a consumer's stale cursor
+  into a reported \`rebase\` instead of a silent gap. The HELP contract above is the pin a cross-project
+  consumer (e.g. ClaudeCodeUI's \`changes\` feed) can accept against; it is not a second implementation
+  of the read — the shape is produced by packages/quay/src/cli/task-log.ts.
 
 Gate engine commands (QENG-1/2) — evaluate a named check and append an immutable GateEvent:
   gate <task-id>    Run a named gate check against <task-id> (default gate: acceptance — runs

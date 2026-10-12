@@ -156,7 +156,7 @@ export async function run(argv, ctx = {}) {
   // --json (serve, mcp) never read wantsJson, so this is a no-op for them.
   const jsonFlag = resolveJsonFlag(flags);
   const jsonCommands =
-    (cmd === "task" && ["list", "view", "edit", "check", "create"].includes(sub)) ||
+    (cmd === "task" && ["list", "view", "edit", "check", "create", "log", "trace"].includes(sub)) ||
     (cmd === "adr" && ["list", "show", "view", "new", "accept", "deprecate", "reject", "supersede"].includes(sub)) ||
     (cmd === "meta" && ["list", "show", "view", "get", "write", "new", "reply"].includes(sub)) ||
     (cmd === "action" && ["list", "run"].includes(sub)) ||
@@ -191,6 +191,11 @@ export async function run(argv, ctx = {}) {
   if (cmd === "task" && sub === "create") return (await import("../src/cli/task-create.ts")).handleTaskCreate(ctx);
   if (cmd === "task" && sub === "edit") return (await import("../src/cli/task-edit.ts")).handleTaskEdit(ctx);
   if (cmd === "task" && sub === "check") return (await import("../src/cli/task-check.ts")).handleTaskCheck(ctx);
+  // task_trace P1 (gap-quay-task-log-trace-read-surface): the READ surface over the task-status
+  // transition carrier `.quay/task-status-events.jsonl` — `task log` (a paged, cursor-resumable feed)
+  // and `task trace` (one task's transitions + its live status). Read-only, zero model calls.
+  if (cmd === "task" && sub === "log") return (await import("../src/cli/task-log.ts")).handleTaskLog(ctx);
+  if (cmd === "task" && sub === "trace") return (await import("../src/cli/task-log.ts")).handleTaskTrace(ctx);
   if (cmd === "action" && sub === "list") return (await import("../src/cli/action.ts")).handleActionList(ctx);
   if (cmd === "action" && sub === "run") return (await import("../src/cli/action.ts")).handleActionRun(ctx);
   if (cmd === "serve") return (await import("../src/cli/serve.ts")).handleServe(ctx);
@@ -230,7 +235,7 @@ export async function run(argv, ctx = {}) {
   if (cmd === "lanes") return (await import("../src/cli/lanes.ts")).handleLanes(ctx);
 
   // QX-005: updated fallback with --help hint (UQ-001/UQ-002).
-  console.error("usage: quay <adr|goal|meta|init|task list|view|create|edit|check|gate|gate-log|complete|adjudicate|promote|retreat|run|migrate|provider|config validate|config check|action list|action run|serve|server start|server add|server stop|server restart|server status|mcp|manager start|manager arm|driver|lanes> ...\nRun `quay --help` for full usage documentation.");
+  console.error("usage: quay <adr|goal|meta|init|task list|view|create|edit|check|log|trace|gate|gate-log|complete|adjudicate|promote|retreat|run|migrate|provider|config validate|config check|action list|action run|serve|server start|server add|server stop|server restart|server status|mcp|manager start|manager arm|driver|lanes> ...\nRun `quay --help` for full usage documentation.");
   process.exitCode = 1;
     }
 }
