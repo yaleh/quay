@@ -1,7 +1,7 @@
 ---
 id: gap-fanin-suite-gate-no-baseline-equivalent-exception
 title: fan-in 的 suite 步没有"已证明与 develop 基线等价的既存红"豁免档，导致多个独立修复互为落地门槛（三任务循环死锁实例）
-status: ready
+status: done
 labels:
   - gap
   - infra
@@ -79,13 +79,3 @@ extra:
 
 - 签名比对用**逐字**（不折易变量）：Proposal 的判据就是「逐字相同」，折数字会把 AC3 的「文本变了」并回「同一个」。代价是：断言文本里嵌了易变量（pid/耗时）的既存红在两棵树间不会匹配 ⇒ 退回硬红 ⇒ **保守方向**（等于现状），⛔ 不会造成误放行。
 - 落地后复验（设计方向 ③）：本实现把「基线树重跑读数」经 `mechanical_fan_in.baselineEquivalence`（含 `baselineWorktree` / `log`）与 `.quay/baseline-red-rounds.jsonl` 双载体留痕，且 ff 闸证书额外带 `baseline_red_exempt=true`（放行轮）——下一个任务的 A/B 因而可直接看到「上一轮对着哪个 develop tip 证明了哪一组既存红」。⛔ 本任务未新起「落地后对 develop HEAD 再跑一次全量 suite」的独立步骤（那是 9-11min/落地 的额外成本，且其读数信息量与基线树重跑重叠）；若后续认为必需，应作为独立任务、先取发生率读数（硬规则 12）。
-
-## Blocker
-
-**2026-10-12T15:33:24.247Z — worker 未落地（exited-not-landed）**
-
-- 未落地原因：step=ff: fan-in-ff-merge: suite 证书 — suite_head..tip 恰为本任务的单个 flip-done 提交（身份判定：仅 M tasks/gap-fanin-suite-gate-no-baseline-equivalent-exception.md）⇒ 判惰性，⛔ 未调分类器
-fan-in-ff-merge: FF FAILED — To .; not a fast-forward. Retry record written (attempt 1). Return to 无锁段 step 1 (merge develop again — 必须 merge 不得 rebase, AC75), re-judge the delta (step 2) and re-run.
-fan-in-ff-merge: measure ff_only_locked=false
-- run_id：wk-prod-anchor
-- session_id：ac5d5dd4-040f-4c51-b070-01a33a9ab628

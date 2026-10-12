@@ -344,6 +344,9 @@ import {
   // ⛔ 不能 import 本文件（值环）。单一真相源住在被依赖的下层，本文件只 re-export 给既有消费者。
   parseSuiteLogFailures,
   failingTestFilesFromSuiteLog,
+  // gap-fanin-suite-gate-no-baseline-equivalent-exception：既存红死锁的电路断路器（AC4）。判定住在
+  // worker-fan-in.ts（耐久载体的写者与签名的定义处），本文件只消费它的读数 ⇒ 单一真相源。
+  baselineRedDeadlockReading,
   runGoalMergeFanIn,
   appendGoalMergeResultEvent,
   type GoalMergeFanInOptions,
@@ -412,6 +415,18 @@ export {
   runMechanicalFanIn,
   spawnMechanicalFanIn,
   mirrorMechanicalFanInSuiteState,
+  // 既存红死锁电路断路器（AC4）与其纯函数面（夹具经此处消费，⛔ 不各写一份判定）。
+  baselineRedDeadlockReading,
+  decideBaselineRedCircuitBreaker,
+  compareFailureSignatures,
+  parseFailureSignatures,
+  failureSignatureSetKey,
+  readBaselineRedRounds,
+  appendBaselineRedRound,
+  type FailureSignature,
+  type BaselineEquivalenceVerdict,
+  type BaselineRedRound,
+  type CircuitBreakerVerdict,
 } from "./worker-fan-in.ts";
 
 // ── 常量 ───────────────────────────────────────────────────────────────────────────────────────────
@@ -5396,7 +5411,30 @@ export async function runResidentLoop(opts: ResidentOptions): Promise<number> {
         const decision = decideExitedNotLandedAction(rootDir, r.taskId, r.outcome, exemption);
         exitedNotLandedStops.push({ task: r.taskId, kind: decision.kind, verdict: decision.verdict, reason: decision.reason, suiteLogHash: decision.suiteLogHash });
         if (json) process.stdout.write(`${JSON.stringify({ event: "exited-not-landed-action", task: r.taskId, ...decision })}\n`);
-        if (decision.kind === "stop-terminal") {
+        // gap-fanin-suite-gate-no-baseline-equivalent-exception AC4 —— 电路断路器。既有路径对「归因不出」
+        // 有「至多一次重试 + 停派」，对 `unrelated-flaky-exempt`（跨任务签名复发）更是**从不**计数 ⇒ 一条
+        // 三方循环死锁可以无限重派下去，而每一轮都只是换个任务去撞同一堵墙。这里在【同一份耐久载体】
+        // （.quay/baseline-red-rounds.jsonl，fan-in 写）上判定：同一任务连续 `maxRetries` 轮撞**同一签名**
+        // ⇒ 主动停派 + 落一段可读的「循环死锁」诊断（点名同签名的其它任务 + 建议落地顺序）。
+        // ⛔ 它只回答「该不该再拿一个新会话去撞同一堵墙」：判定住在 worker-fan-in.ts（签名定义处），本处
+        // 只消费；`count-and-retry` 的诊断与计数仍由既有 advanceRetryCap 路径负责（下面 else 链）。
+        const deadlock = decision.kind === "count-and-retry"
+          ? baselineRedDeadlockReading(rootDir, r.taskId, maxRetries)
+          : ({ kind: "continue", consecutive: 0 } as const);
+        if (deadlock.kind === "stop-terminal") {
+          exitedNotLandedStops.push({ task: r.taskId, kind: "stop-terminal", verdict: exemption.verdict, reason: deadlock.diagnostic, suiteLogHash: null });
+          if (json) process.stdout.write(`${JSON.stringify({ event: "baseline-red-deadlock", task: r.taskId, ...deadlock })}\n`);
+          if (!retryState.needsHuman.has(r.taskId)) {
+            needsHumanWrites.push({
+              id: r.taskId,
+              reason:
+                `${deadlock.diagnostic} — 停止自动重派（电路断路器：同一既存红签名连续 ${deadlock.consecutive} 轮未变）。` +
+                `⛔ 判据未放宽：本次新增 / 断言文本变化的红点仍然硬红（既存红等价豁免只覆盖「不变差」的方向）。`,
+              kind: "stop-terminal",
+              countsOverride: maxRetries,
+            });
+          }
+        } else if (decision.kind === "stop-terminal") {
           // 停 = 不重派：内存集合（retryCapNotExhausted 过滤）挡下一轮 + 磁盘 status 翻转双保险。
           // 预算照扣（counts 记满，⛔ 不因判不出而放行——与既有「照常计数」语义一致），只是不再重派。
           // GOAL-035 AC-356：这里【不再】直接动 retryState.needsHuman/counts——latch + 预算覆写
