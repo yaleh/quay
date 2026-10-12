@@ -3,7 +3,7 @@ id: gap-discovery-portfolio-value-evidence-ledger
 title: "Discovery Portfolio: join each Finding to fix, landing, recurrence,
   human rating and gateway cost; value = landed net-new fixes, not finding
   counts"
-status: todo
+status: ready
 labels:
   - gap
   - architecture-discovery
