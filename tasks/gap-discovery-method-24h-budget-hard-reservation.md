@@ -57,27 +57,112 @@ Also unclear today: what a "model call" counts.
 6. **Migration.** The trailing-24h usage at cut-over is seeded from the existing `scan-round` lines (the 2026-10-12 14:59:56Z round's 6 calls), so the window is not reset to zero by the change.
 
 ## Acceptance Criteria
-- [ ] `node --test` on the routine's test file exits 0, covering:
-  - (a) used=23, cap=24, a round requesting 6 ⇒ exactly 1 call made, 5 skipped with `BUDGET_24H`, ledger total = 24;
-  - (b) two concurrent processes (a real second process, not two promises in one process) each requesting 6 with 20 used ⇒ combined calls made = 4, never more;
-  - (c) a crash after reservation and before outcome (kill the child process) ⇒ after restart that reservation still counts as spent;
-  - (d) a model call that throws or times out ⇒ counted;
-  - (e) a wall-breach round that appends no `scan-round` line ⇒ its calls still counted by the next round;
-  - (f) window boundary: a reservation at exactly now−24h is excluded and one at now−24h+1ms is included (state the chosen inclusivity and test both sides);
-  - (g) `enabled:false`, `halted` and `--no-model` ⇒ zero reservations;
-  - (h) manual `--force` at cap ⇒ refused;
-  - (i) last-run not advanced by manual rounds or by budget refusals (existing cases still green);
-  - (j) stale-lock recovery: a lock held by a dead pid is recovered within a stated bound, and the recovery is logged.
-- [ ] **Negative controls**, each in a scratch copy, pasting the red output for each and then restoring:
-  - drop the pre-spawn reservation (reserve-after) ⇒ (c)/(e) go red;
-  - drop the lock ⇒ (b) goes red, or state honestly if the race is not reproducible and how (b) was forced deterministically;
-  - restore the pre-round-only check ⇒ (a) goes red.
-- [ ] **Counting semantics:** paste the config key's documented meaning, the reflection and verifier `maxTurns` actually passed (read from the launcher argv on a real invocation), and the computed worst-case API turns per 24h.
-- [ ] **Real execution log on the production path:** after landing and the driver self-reload (paste the driver's assembly line showing the hard-budget settings), paste:
-  - the reservation-ledger lines and the `scan-round` line of the first resident-driver round that makes ≥1 model call;
-  - ledger total vs the sum of `scan-round` `model_calls` in the window.
-  If no such round has run yet, write 未读到（待外部） with the next due time; do not run a manual production round to manufacture one.
-- [ ] Migration reading: ledger trailing-24h total at cut-over equals the carrier's trailing-24h `model_calls` sum. Paste both.
+- [x] `node --test` on the routine's test file exits 0, covering (a)–(j).
+  `node --test plugin/test/discovery-method-routine.test.mjs` → `ℹ tests 48 · pass 48 · fail 0`（原 34 条全绿 + 新增 14 条）:
+```
+✔ AC1(a) — used=23, cap=24, a round requesting 6 ⇒ exactly 1 call, 5 skipped BUDGET_24H, ledger total 24
+✔ AC1(b) — TWO REAL PROCESSES, 20 used, each requesting 6 ⇒ combined 4 calls, never more
+✔ AC1(c) — a crash AFTER the reservation and BEFORE the outcome stays SPENT
+✔ AC1(d) — a model call that THROWS or TIMES OUT is counted, with its own outcome class
+✔ AC1(e) — a wall-breach round appends NO scan-round line, and its calls are STILL counted
+✔ AC1(f) — the window is HALF-OPEN (now−24h, now]: excluded AT the boundary, included 1ms inside
+✔ AC1(g) — enabled:false, halted and --no-model ⇒ ZERO reservations
+✔ AC1(h) — a manual `--force` round at the cap is REFUSED; `--force` bypasses the GATE, not the BUDGET
+✔ AC1(i) — a MID-ROUND budget refusal persists what was done but does NOT advance the production last-run
+✔ AC1(j) — a lock held by a DEAD pid is recovered at once; a merely OLD one after the bound; both LOGGED
+✔ MIGRATION — the ledger's trailing-24h total at cut-over EQUALS the carrier's trailing-24h model_calls sum
+✔ COUNTING SEMANTICS — one counted call = one subprocess; the turns inside it are bounded per step
+✔ COUNTING SEMANTICS — a reservation records the launcher params AND the realized turns, or null WITH a reason
+✔ NEGATIVE-CONTROL SUPPORT — the seams the three controls mutate are reachable, and the (b) race is forced deterministically
+ℹ tests 48   ℹ pass 48   ℹ fail 0
+```
+  ⛔ 不是 fixture 回声：这些用例驱动的是**真引擎**（`runReflectionRound` → `reflect`，来自 `docs/analysis/discovery-reflection.mjs`）与**真 ingester**（走真 evidence store），只把 **model seam** 换成桩。AC1(b) 是**两个真进程**（`spawn` 两个子进程，barrier 对齐），不是同进程两个 promise。
+  - (a) 断言 `model.calls.length === 1`、`reservations.granted === 1`、`refused === 5`、`refusal_reason === "BUDGET_24H"`、ledger 中 `reserve` 恰 24 条（23 seeded + 1）。
+  - (f) 判据半开 `(now−24h, now]`（`inTrailing24hWindow`，唯一谓词，carrier 项与 ledger 项共用）：边界那条 **排除**、`+1ms` **包含**、未来 **排除**，两侧都测。
+  - (j) 死 pid 立即回收（实测 <2s，而 stated bound `BUDGET_LOCK_STALE_MS` = 120s）；只老不死的锁过了界才回收；活的且新鲜的锁**永不**被抢（`BUDGET_LOCK_TIMEOUT`，独立取值）。三条都落 `lock-recovered` 行。
+- [x] **Negative controls**（每一条都是就地变异 → 跑指定用例 → 贴红 → 从备份还原；还原后 `assert 还原文本 == 变异前文本` 通过，`git diff` 只剩本任务自身的改动）。
+```
+############ NEGATIVE CONTROL: reserve-after ############（把预占挪到轮末，即旧设计「按轮末结果记账」）
+✖ AC1(c) — a crash AFTER the reservation and BEFORE the outcome stays SPENT
+✖ AC1(e) — a wall-breach round appends NO scan-round line, and its calls are STILL counted
+ℹ tests 2   ℹ pass 0   ℹ fail 2
+  AssertionError: the reservation EXISTS — it was written before the spawn
+  AssertionError: the round spent one call per unit before it breached
+
+############ NEGATIVE CONTROL: drop-lock ############（`acquireBudgetLock` 直接返回 no-op handle）
+✖ AC1(b) — TWO REAL PROCESSES, 20 used, each requesting 6 ⇒ combined 4 calls, never more
+ℹ tests 1   ℹ pass 0   ℹ fail 1
+  AssertionError: 20 used, cap 24 ⇒ the ceiling grants exactly 4 more, whatever the interleaving (got A=4 B=1)
+
+############ NEGATIVE CONTROL: preround-only ############（恢复「只查轮前快照」：不缩减 per-round cap、不预占）
+✖ AC1(a) — used=23, cap=24, a round requesting 6 ⇒ exactly 1 call, 5 skipped BUDGET_24H, ledger total 24
+ℹ tests 1   ℹ pass 0   ℹ fail 1
+  AssertionError: ⛔ EXACTLY ONE call: the round spends cap − used, not the full per-round max_model_calls
+```
+  ⛔ (b) 的竞态是**确定性强制**的，没有靠调度器碰运气：子进程把「读 usage → 睡 delay → 写 reserve」写成一个临界区，两个子进程 delay **不同**（30ms / 600ms）并用 barrier 对齐同时起跑。锁在 ⇒ 二者串行，读到的一定是新鲜值，合计恰 4；锁掉 ⇒ 慢的那个读到的 20 一直「有效」到快的那个把预算花光，然后**在已经到顶的 cap 上再追加一条**（A=4 B=1 ⇒ 5 > 4）。
+- [x] **Counting semantics**（`## Evidence` §1 有完整 argv 与算式）：
+  - config key 的文档含义：`max_model_calls_per_24h` 界定的是 **launcher 子进程调用次数**（一次 `model(...)` seam 调用 = 一个 claude 子进程），**不是** API 请求数。
+  - 真 argv（PATH shim 拦在 driver 自己的 launcher 上）：reflection `--tools ""` `--max-turns 1`；verification `--tools Read,Grep` `--max-turns 12`。
+  - 24h 最坏 API turns = cap × max(reflection 1, verifier 12) = 24 × 12 = **288**（装配行实打实打出这个数）。
+  - ⛔ **不声称**界定 API 请求数：一个 turn 可以发多个请求，本改动没有测量它。
+- [x] **Real execution log on the production path**：装配行见 `## Evidence` §2（真二进制起一次，`例程已装配（enabled, interval=60m, …, max_model_calls_per_24h=24 (HARD: pre-spawn reservation …), verifier_max_turns=12, worst_case_api_turns_per_24h=288 …）`）。**自刷新后的生产轮：未读到（待外部）** —— 生产 carrier 上最后一条 `invoked_by:"resident-driver"` 的 `scan-round` 是 `2026-10-12T14:59:56.733Z`，60m 节奏的**下一次到期 = 2026-10-12T15:59:56.733Z**（本卡收尾时刻 2026-10-12T15:54Z，尚未到期）。⛔ 未手工跑一次生产轮去制造读数。
+- [x] **Migration reading**：cut-over 时 ledger 的 trailing-24h 合计 **=** carrier 的 trailing-24h `model_calls` 合计。两边都是 **6**（见 `## Evidence` §3），与提案点名的 2026-10-12 14:59:56Z 那一轮的 6 次调用一致。
+
+## Evidence
+
+### 1. Counting semantics — 真 argv 与最坏情形
+`liveDiscoveryModel(root, cfg)` 走**真 launcher 路径**（`launchArgv` + `hardenedArgv`），把 driver 自己的 launcher 名 `claude` 换成一个 PATH shim，记录它实际收到的 argv。两次调用的区别就是两条 seam：
+```
+=== INVOCATION cwd=<worktree>
+ARG -n / ARG quay-meta-driver
+ARG --tools / ARG                 <- reflection：空 tools
+ARG --disable-slash-commands --no-session-persistence --strict-mcp-config
+ARG --max-turns / ARG 1           <- reflection：1 turn
+ARG --output-format / ARG stream-json / ARG --verbose / ARG -p
+STDIN REFLECTION-PROBE
+=== INVOCATION cwd=<worktree>
+ARG -n / ARG quay-meta-driver
+ARG --tools / ARG Read,Grep       <- verifier：Read,Grep
+ARG --disable-slash-commands --no-session-persistence --strict-mcp-config
+ARG --max-turns / ARG 12          <- verifier：来自 verifier_max_turns（缺省 12）
+ARG --output-format / ARG stream-json / ARG --verbose / ARG -p
+STDIN VERIFIER-PROBE
+```
+`seamParamsFor(cfg)` = `{"reflection":{"tools":"","maxTurns":1,"timeoutMs":300000},"verification":{"tools":"Read,Grep","maxTurns":12,"timeoutMs":300000}}`。
+worst case = `24 × max(1, 12)` = **288** turns / 24h。
+每条 reservation 记录它界定的参数（`tools` / `max_turns`）与**实际** turns：`num_turns` 读得到就记数，读不到记 `null` + 原因（`UNINSTRUMENTED_STREAM` / `STREAM_REPORTED_NO_NUM_TURNS`），**绝不记 0**（0 读起来像「这次调用不要钱」）。
+
+**新增 config key（声明）**：`verifier_max_turns`（整数 ≥1，缺省 `DEFAULT_VERIFIER_MAX_TURNS = 12`）。DoD 的「只允许新增 key」：**`.quay/config.yml` 未改动** —— 该 key 是可选的，生产 config 不声明它即取缺省 12，行为与显式写 12 完全一致（`.quay/config.yml` 本身 gitignored，不在交付 delta 里），故无需也不应改它。其它例程的预算、`interval_until`、既有 config 值一字未动。
+
+### 2. 装配行（真二进制起一次，scratch root）
+```
+quality-gate-driver: discovery-method 例程已装配（enabled, interval=60m, interval_until=2026-10-19T14:00:00.000Z, max_model_calls_per_24h=24 (HARD: pre-spawn reservation per call, trailing-24h; a reservation with no outcome still counts as spent), verifier_max_turns=12, worst_case_api_turns_per_24h=288 (cap × max(reflection 1 turn, verifier turns))）
+```
+这一行同时是 **Plan 7 的部署面**：`quality-gate-driver.ts` 新增 `formatDiscoveryMethodAssembly(...)` 并真的用它打印装配行 —— delta 因此触到 anchor 的 `watchedSourceFiles` 里的 driver 文件，自刷新才会发生（只改 routine 模块会静默 inert）。**自刷新后的生产轮读数：未读到（待外部），下一次到期 2026-10-12T15:59:56.733Z。**
+
+### 3. Migration reading（cut-over 不清零）
+```
+$ node .quay/ac-dm-budget/migration-read.mjs /data/home/yale/work/quay
+{
+ "root": "/data/home/yale/work/quay",
+ "now": "2026-10-12T15:50:20.098Z",
+ "ledger_missing": true,                 <- ledger 尚不存在（还没跑过新代码）
+ "carrier_scan_rounds": 6,
+ "ledger_trailing_24h_total": 6,         <- ledger 侧的 trailing-24h 读法
+ "ledger_reservations": 0,
+ "carrier_legacy_model_calls": 6         <- carrier 侧的 trailing-24h model_calls 合计
+}
+```
+两侧都 **6** ⇒ 窗口不被这次改动重置。机制：`scan-round` 行**没有** `reservations` 字段的是 legacy 行，`modelCallsInWindow` 照旧计；本 build 写的行带 `reservations`，由 ledger 的 reservation 逐条计，carrier 项**跳过**它 —— 两个读法永不重复计同一次调用（重复计是另一个方向的错，同样不可接受）。
+
+### 4. 交付面
+```
+M docs/analysis/discovery-reflection.mjs   (re-export parseVerifierStream —— routine 读 num_turns 的唯一来源)
+M docs/carrier-registry.json               (登记 discovery-method-model-budget.jsonl)
+M plugin/scripts/discovery-method-routine.ts
+M plugin/scripts/quality-gate-driver.ts    (装配行 = 部署面)
+M plugin/test/discovery-method-routine.test.mjs
+```
 
 ## Definition of Done
 - All AC ticked with output pasted.
