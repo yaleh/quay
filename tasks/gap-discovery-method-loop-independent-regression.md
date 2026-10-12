@@ -3,7 +3,7 @@ id: gap-discovery-method-loop-independent-regression
 title: "Discovery Method: independent regression — no-shared-ancestry
   generalization, failing method not promoted, persistence, auto-ingest, real
   cost"
-status: ready
+status: done
 labels:
   - gap
   - architecture-discovery
