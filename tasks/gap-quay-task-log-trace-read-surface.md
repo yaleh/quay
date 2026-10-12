@@ -160,3 +160,19 @@ The same help block carries the cursor/at-least-once rule ("DEDUPE BY `eventId`"
 - packages/quay/src/cli/help.ts
 - packages/quay/src/kernel/task-transition.ts
 - packages/quay/test/task-log.test.mjs
+
+## Blocker
+
+**2026-10-12T18:37:11.188Z — worker 未落地（exited-not-landed）**
+
+- 未落地原因：step=typecheck: fan-in-ts-typecheck-gate: task gap-quay-task-log-trace-read-surface — Touches cover new/moved .ts files (1); type graph changed
+fan-in-ts-typecheck-gate: running ts-typecheck gate in worktree /data/home/yale/work/quay-worktrees/gap-quay-task-log-trace-read-surface...
+fan-in-ts-typecheck-gate: command [the workspace's own declaration (name: ts-typecheck)]: for d in packages/*/; do npx tsc --noEmit -p "$d" || exit 1; done
+fan-in-ts-typecheck-gate: typecheck RED — BLOCKED (exit 1); do NOT fan in on scoped-green alone
+fan-in-ts-typecheck-gate: last lines:
+packages/quay/src/cli/task-log.ts(483,50): error TS2339: Property 'reason' does not exist on type 'LimitArg'.
+  Property 'reason' does not exist on type '{ ok: true; limit: number; }'.
+packages/quay/src/cli/task-log.ts(498,37): error TS2339: Property 'reason' does not exist on type 'TaskLogReading'.
+  Property 'reason' does not exist on type '{ ok: true; document: TaskLogDocument; }'.
+- run_id：wk-prod-anchor
+- session_id：fdcdb86c-85bd-4015-bc8b-72655c30488d
