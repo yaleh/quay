@@ -3,7 +3,7 @@ id: gap-worker-prompt-omits-anti-drift-pre-exit-check-costs-a-session-per-touche
 title: "cross-project: worker prompts never run the anti-drift Touches check
   before exit ⇒ every out-of-Touches write costs a whole extra worker session
   (162 bounces in 6 projects)"
-status: todo
+status: ready
 labels:
   - gap
   - defect
