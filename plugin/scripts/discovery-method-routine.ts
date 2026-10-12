@@ -719,7 +719,12 @@ export function budgetUsage(opts: {
  *  argv parameters (see the header): they are written ON the reservation so "what did this call bound
  *  inside itself" travels with the record instead of living only in the code that built the argv. */
 export interface ReservationMeta {
-  step: "reflection" | "verification";
+  /** WHICH STEP of WHICH routine this reservation guards. ⛔ `string`, not a closed union:
+   *  this ledger is SHARED — discovery-method's own two steps (`reflection`/`verification`) and
+   *  open-semantic-discovery's four (`investigator`/`verifier`/`refuter`/`value-assessment`) both write
+   *  here, and a union owned by one routine cannot name the other's steps without the ledger lying about
+   *  what it guards. The value is recorded verbatim and nothing switches on it. */
+  step: string;
   tools: string;
   max_turns: number;
   round?: string | null;

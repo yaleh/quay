@@ -3,7 +3,7 @@ id: gap-open-semantic-discovery-routine-track
 title: "P0: periodic open-ended semantic architecture discovery on the routine
   track (hypothesis gen + Read/Grep verify + independent refutation,
   report-only, hard-budgeted)"
-status: ready
+status: done
 labels:
   - gap
   - discovery-method

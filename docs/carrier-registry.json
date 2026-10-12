@@ -92,6 +92,18 @@
       "readers": "unaudited"
     },
     {
+      "name": "open-semantic-discovery-findings.jsonl",
+      "kind": "jsonl-log",
+      "owner": "plugin/scripts/open-semantic-discovery-routine.ts",
+      "readers": "unaudited"
+    },
+    {
+      "name": "open-semantic-discovery-model-budget.jsonl",
+      "kind": "jsonl-log",
+      "owner": "plugin/scripts/open-semantic-discovery-routine.ts",
+      "readers": "unaudited"
+    },
+    {
       "name": "discovery-method-model-budget.jsonl",
       "kind": "jsonl-log",
       "owner": "plugin/scripts/discovery-method-routine.ts",

@@ -3,7 +3,7 @@ id: gap-open-discovery-method-guidance-active-shadow
 title: "P1: registry methods as optional guidance for open discovery — active
   guides, draft/trial shadow-only, quarantined/retired never, baseline when
   none"
-status: todo
+status: ready
 labels:
   - gap
   - discovery-method
