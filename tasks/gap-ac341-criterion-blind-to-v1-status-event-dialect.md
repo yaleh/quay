@@ -2,7 +2,7 @@
 id: gap-ac341-criterion-blind-to-v1-status-event-dialect
 title: AC-341 判据只认 v0 方言的 ts 字段 ⇒ 7/154 次生产晋升被误判「有翻转无事件」，实测 0/154 真缺——修判定机件读两处方言
   + 给「读不懂」独立取值
-status: todo
+status: ready
 labels:
   - gap
   - defect
@@ -65,7 +65,7 @@ STDOUT: PASS: all 154 production promotion-driver todo→ready flips since the m
 
 ### 为什么上一轮的修复没有保住（`done` 任务 `gap-goal030-post-merge-promotion-events-reading`）
 
-那不是回归，是**潜伏的方言耦合**：那条任务按自身范围是 read-only（且它自己写死「⛔ 不改判据」），2009-10-09…2026-10-09 取读数时载体**只有 2 行 v0**（其 Evidence 逐字记录了那 2 行），判据「只读 `ts`」的假设当时成立，`exit 0` 是**当时正确**的读数。**2026-10-12T18:21Z 起写入方切到 v1 方言**（状态事件契约 v1 落地，`gap-task-status-events-abi-writes-and-creation` / `gap-task-status-events-contract-v1-all-driver-writers` 一族），判据随即开始把 v1 写出的翻转误报成缺事件。⇒ 判据从不曾与 v1 方言一起被验证过；**写作侧（4c）漏了这一层**：那个量在「产生处→读取处」之间的中间层（写入方言）换过一次。
+那不是回归，是**潜伏的方言耦合**：那条任务按自身范围是 read-only（且它自己写死「⛔ 不改判据」），2026-10-09 取读数时载体**只有 2 行 v0**（其 Evidence 逐字记录了那 2 行），判据「只读 `ts`」的假设当时成立，`exit 0` 是**当时正确**的读数。**2026-10-12T18:21Z 起写入方切到 v1 方言**（状态事件契约 v1 落地，`gap-task-status-events-abi-writes-and-creation` / `gap-task-status-events-contract-v1-all-driver-writers` 一族），判据随即开始把 v1 写出的翻转误报成缺事件。⇒ 判据从不曾与 v1 方言一起被验证过；**写作侧（4c）漏了这一层**：那个量在「产生处→读取处」之间的中间层（写入方言）换过一次。
 
 ### 这是【判定机件】缺陷，不是生产缺陷（硬规则 3b）
 
