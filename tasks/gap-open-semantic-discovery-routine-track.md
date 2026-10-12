@@ -15,6 +15,11 @@ depends_on:
   - gap-discovery-method-24h-budget-hard-reservation
 ---
 ## Proposal
+**Governing principle — SEMANTIC FIRST, MECHANIZE LATER** (user ruling, 2026-10-12): the first phase builds an end-to-end SEMANTIC loop. The model reads source and context, explores openly, builds and refutes hypotheses, verifies independently, assesses engineering value, and reflects on successes and failures into Discovery Methods / meta-methods that steer the next round.
+- Mechanical code is limited to scheduling, state/provenance persistence, dedup *assistance*, safety isolation, budget and tool wrapping. It never replaces a semantic judgment, never gates whether the model may look, and "no mechanical change" never suppresses a semantic round.
+- Hard-coded rules, classifiers, fingerprints or pattern tables for *finding* problems are out of scope. Crystallizing a step into code comes later, only for high-repetition, low-ambiguity, stable steps after the loop has shown real findings, reviewable reasoning, method reuse and measured gain — and always keeps a semantic fallback, a baseline comparison and degradation monitoring.
+- **Building the automation is not success. A semantic round that ran on real source and produced reviewable reasoning is.**
+
 Measured 2026-10-12 (operator read-only audit of `.quay/quality-round.jsonl`, `routine-findings.jsonl`, `arch-discovery-findings.jsonl`, `meta-driver-round.jsonl`): continuous automatic architecture discovery produced **zero confirmed new code problems in 24h**. The routines and their limits:
 - `arch-discovery` is purely mechanical, with no model and no verification. Its 2 "new" fingerprints on 13:58Z were test-red signals.
 - `semantic-dedup-scan` is model-driven, but only every 1440m and only for the duplication class. Its last batch, 10-11 15:51Z, gave F01–F03.
@@ -32,9 +37,15 @@ This task wires that path into the EXISTING quality-driver routine track as a bo
    - Declare its carrier (`.quay/open-semantic-discovery-findings.jsonl`) in `docs/carrier-registry.json`.
 2. **One round** (all steps reuse `arch-hypothesis-generation.mjs` functions, no re-implementation):
    - (a) pin the current develop tip into a stripped tree (`PIN_FORBIDDEN_DIRS` enforced) and build the inventory over a declared scope;
-   - (b) `runInvestigator` with N blind runs in a neutral empty cwd with `--tools ""`, then `clusterHypotheses`;
+   - (b) **Semantic exploration on real source.** The investigator runs with `--tools Read,Grep,Glob` rooted at the pinned tree and an explicit `--max-turns`, so the model reads code and context itself. It does not reason only over a mechanically pre-digested inventory, which is what `runInvestigator` does today (`--tools ""` plus an empty cwd, built for blind experiments; `arch-hypothesis-generation.mjs:36`).
+     - The inventory may be passed as an optional map. It is never a filter or a prerequisite: no "mechanical candidate first".
+     - The model chooses its exploration focus and states it.
+     - A persisted list of previously explored focuses (mechanical state) is passed back so later rounds can choose to go elsewhere. The choice stays the model's.
+     - The blind tool-less mode stays available for controlled experiments (the P2 task), not as the production default.
+     - Hypotheses go through `clusterHypotheses` only to merge near-duplicates, never to discard by pattern;
    - (c) `runVerifier` on at most K clusters with `--tools Read,Grep` on the pin and an explicit `--max-turns`;
    - (d) an **independent refutation pass**: each `supported` cluster gets a separate fresh-context call whose only job is to refute it from the code (no access to the first verifier's reasoning beyond the claim and components); a cluster is reported `confirmed` only if it survives;
+   - (d2) **semantic value assessment**: each confirmed cluster gets a bounded call that states the engineering impact, the evidence and a candidate fix outline. It is recorded as `model_value_assessment` and is never a human rating;
    - (e) append one `scan-round` line plus per-cluster records (claim, components, verifier verdict, refutation verdict, evidence lines, model identity, per-call turns, tokens, gateway cost) to the carrier.
    - No task, Goal, Portfolio or Experience write in this task; that is the follow-on.
 3. **Config section** `loop.open_semantic_discovery` in `.quay/config.yml`. All keys required, fail-closed on any malformed key:
@@ -60,17 +71,22 @@ This task wires that path into the EXISTING quality-driver routine track as a bo
   - (f) every spawned argv carries `--max-turns` (investigator `--tools ""` ⇒ 1);
   - (g) a cluster that the verifier supports and the refuter refutes ⇒ NOT `confirmed`;
   - (h) manual `--once` does not advance last-run;
-  - (i) no write to `tasks/`, Goals, Portfolio or Experience — enforced by a static control on the module's imports.
+  - (i) no write to `tasks/`, Goals, Portfolio or Experience — enforced by a static control on the module's imports;
+  - (j) the investigator argv carries `Read,Grep,Glob` rooted at the pin plus `--max-turns`, and its cwd is the pin;
+  - (k) a round runs when the pin is unchanged since the last round, when arch-discovery reports 0 new fingerprints, and when the inventory is empty or missing. None of these suppresses the semantic round;
+  - (l) the module contains no table of problem-class patterns or regexes used to select or reject hypotheses (static control naming what it scans for). Dedup assistance on identical component sets is allowed and named.
 - [ ] Negative control: in a scratch copy, remove the refutation step ⇒ (g) goes red. Paste the output.
 - [ ] Static control: the module has no static import of `docs/analysis/`, and the shipped-bundle checks stay green. Paste both.
 - [ ] Driver assembly line after the self-reload shows the routine and its settings. Paste the anchor.log line.
-- [ ] Production reading: the first `invoked_by:"resident-driver"` round after landing, with ≥1 investigator call and ≥1 verifier call — paste the scan-round line, the per-cluster records (claim, verifier verdict, refuter verdict, turns, cost), and the ledger reservations. （待外部）
+- [ ] Negative control: in a scratch copy, gate the round on "arch-discovery reported new fingerprints" ⇒ (k) goes red. Paste the output.
+- [ ] Production reading: the first `invoked_by:"resident-driver"` round after landing, with ≥1 investigator call and ≥1 verifier call — paste the scan-round line, the investigator's stated focus and the files it actually read (from the stream's tool calls), the per-cluster records (claim, verifier verdict, refuter verdict, value assessment, turns, cost), and the ledger reservations. （待外部）
 - [ ] Honest outcome: from that production round, name every `confirmed` cluster (claim + components) or state 0 confirmed; never re-run to chase a non-zero result. （待外部）
 
 ## Definition of Done
 - All AC ticked with output pasted; production AC may remain （待外部） with the next due time stated.
 - `scripts/test.sh --for-task gap-open-semantic-discovery-routine-track` green.
 - No change to other routines' cadence or budgets.
+- No mechanical finding logic (classifier, fingerprint gate, pattern table) added; any mechanical piece is listed in the evidence with its role (scheduling / persistence / dedup-assist / isolation / budget / tool wrapper).
 
 ## Touches
 - tasks/gap-open-semantic-discovery-routine-track.md
