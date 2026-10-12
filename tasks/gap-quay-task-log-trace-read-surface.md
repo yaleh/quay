@@ -45,6 +45,18 @@ Consumers need a supported read surface for `.quay/task-status-events.jsonl`, no
 
 ## Evidence
 
+**Why this round exists — the two REDs the prior round exited on, both deltas against develop.**
+(1) The fan-in ts-typecheck gate exited 1 on two `TS2339`s in `task-log.ts` — `Property 'reason' does
+not exist on … 'LimitArg'` / `… 'TaskLogReading'`. Cause: the root `tsconfig.json` is `strict: false`,
+under which the NEGATIVE branch of a boolean-discriminant union is NOT narrowed, so `if (!x.ok)`
+leaves `x` the full union and `x.reason` is not a member of it. Fixed with the repo's established
+idiom, `x.ok === false` (the same note `packages/quay/src/branch-model.ts:430` carries inline).
+(2) After merging develop, test (h) went RED — `packages/quay-native/src/store.ts` calls
+`appendTaskStatusEvent` and no declared writer class owned it. `gap-task-status-events-abi-writes-and-creation`
+(which landed AFTER this registry was first written) had closed exactly the gap the `cli` / `mcp`
+entries enumerated as open, so those two are now `wired: true` naming that one call site. Neither
+change touches the published contract; both are recorded under (c) and (h) below.
+
 **AC1 — tests exit 0** (`node --test --experimental-strip-types packages/quay/test/task-log.test.mjs`, in the task worktree):
 ```
 ✔ (a) paging by --limit covers every event; a resumed cursor is AT-LEAST-ONCE (dedup by eventId)
@@ -62,8 +74,10 @@ Consumers need a supported read surface for `.quay/task-status-events.jsonl`, no
 ```
 (a) asserts the raw page boundaries are `[[0,1,2],[2,3,4],[4,5,6],[6]]` (10 raw deliveries, 7 distinct), that every page after the first re-delivers the previous page's LAST event (at-least-once), and that the union DEDUPED by `eventId` is exactly the written set — no loss, no invention.
 (b) is asserted on both rotations this repo can produce: a full carrier replaced under a new epoch, and a legacy v0-only carrier whose declared `PRE_EPOCH` literal the first v1 append rotates.
-(c) has three arms: unwired in-scope classes are NAMED (`["cli","mcp"]` with the reason text), a lagging reconcile is named, and — the falsifiability control — an all-wired registry over a current carrier DOES reach `complete:true` with `reasons:[]`, so `complete:false` is a measurement rather than a constant. (d) asserts `order=[0,1,2]`, `schema=["v0","v1","v1"]`, `source=["task-status-events","task-status-events","git"]`, `seq=[null,0,1]` and that the v1 subset is in ascending `seq` order (carrier position and `seq` agree on an append-only carrier; a v0 record has no `seq` and gets none — never a fabricated one). (e) runs the real CLI against a real native-provider workspace.
-(h) is the "kept in sync with the actual call sites" check: it enumerates every non-test `.ts` under `plugin/` + `packages/` that calls `appendTaskStatusEvent(` (comments stripped, so a prose mention is not a call site) and requires each file to be owned by a declared writer class, and each `wired:true` class to name an existing call site that still calls it.
+(c) has three arms. The unwired-naming arm is driven through the injectable `writerClasses` SEAM — an in-scope class flipped to `wired:false` in a fixture registry — and deliberately NOT through the real registry: an arm pinned to the real registry's open gaps goes silent at exactly the moment the last one closes, which is what happened here (`gap-task-status-events-abi-writes-and-creation` wired the Provider ABI write path, so the `cli` and `mcp` classes this task originally enumerated as unwired are wired today). The same test therefore also asserts the real registry's `unwiredInScope` is `[]` as a READING of the declaration — not an omission; that the declaration still matches the tree is (h)'s job. The other two arms are a lagging reconcile watermark, and — the falsifiability control — an all-wired registry over a current carrier, where `complete` DOES reach `true` with `reasons:[]`, so `complete:false` is a measurement rather than a constant.
+(d) asserts `order=[0,1,2]`, `schema=["v0","v1","v1"]`, `source=["task-status-events","task-status-events","git"]`, `seq=[null,0,1]` and that the v1 subset is in ascending `seq` order (carrier position and `seq` agree on an append-only carrier; a v0 record has no `seq` and gets none — never a fabricated one).
+(e) runs the real CLI against a real native-provider workspace.
+(h) is the "kept in sync with the actual call sites" check: it enumerates every non-test `.ts` under `plugin/` + `packages/` that calls `appendTaskStatusEvent(` (comments stripped, so a prose mention is not a call site) and requires each file to be owned by a declared writer class, and each `wired:true` class to name an existing call site that still calls it. ⛔ It is the check that caught the merge-time drift: `packages/quay-native/src/store.ts` was a real call site with no owner, and it is now owned by `cli` and `mcp` — two ids for one implementation, kept separate because the front doors can regress independently (which door a write came through is carried per-event as `actor.kind`, not as a separate writer).
 
 **AC2 — negative control** (test (g); the mutation is applied to a scratch COPY of the CLI's module graph, never to the checked-in file):
 ```
@@ -72,34 +86,29 @@ Consumers need a supported read surface for `.quay/task-status-events.jsonl`, no
 ```
 The control is non-vacuous by construction: it asserts the mutation ANCHOR line exists before replacing it, and asserts the real module reports `rebase:true` on the same fixture before the mutant is run. With the epoch comparison replaced by `if (false)`, the mutant reads the stale cursor as honourable and never reports the rebase — exactly the silent skip (b) forbids.
 
-**AC3 — real readings** (worktree CLI, `--root /data/home/yale/work/quay`; trimmed for length, the transition array is elided with `…`):
+**AC3 — real readings** (worktree CLI, `--root /data/home/yale/work/quay`; re-taken this round, so they read the post-`083b4a644` tree. The transition array is elided with `…`).
 
 `quay task log --since 2026-10-12T00:00:00Z --json`:
 ```json
 {
-  "transitions": [ { "order": 112, "schema": "v0", "seq": null, "eventId": null, "carrierEpoch": null,
-                     "taskId": "gap-discovery-method-registry-and-versioned-contract",
-                     "from": "todo", "to": "ready", "kind": "promote", "at": "2026-10-12T03:08:01.622Z",
-                     "recordedAt": null, "actor": { "kind": "unknown", "id": "ready-pool-check --apply" },
-                     "source": "task-status-events", "inferred": false, "commit": null }, … 38 total ],
-  "nextCursor": { "v": 1, "carrierEpoch": "pre-epoch", "seq": 149 },
+  "transitions": [ … 55 total ],
+  "nextCursor": { "v": 1, "carrierEpoch": "f0abc6d11b8c4c6aefdd687eb6b308dc", "seq": 166 },
   "complete": false,
   "rebase": false,
   "rebaseReason": null,
   "coverage": {
     "carrier": { "path": "/data/home/yale/work/quay/.quay/task-status-events.jsonl", "exists": true,
-                 "epoch": "pre-epoch", "lines": 150, "v0": 150, "v1": 0, "corrupt": 0 },
-    "unwiredInScope": [ "cli", "mcp" ],
-    "reconcile": { "ref": "develop", "watermark": null, "newestWrittenAt": null, "state": "not-run",
+                 "epoch": "f0abc6d11b8c4c6aefdd687eb6b308dc", "lines": 167, "v0": 150, "v1": 17, "corrupt": 0 },
+    "unwiredInScope": [],
+    "reconcile": { "ref": "develop", "watermark": null, "newestWrittenAt": "2026-10-12T18:59:40.439Z",
+                   "state": "not-run",
                    "reason": "no reconcile-inferred event is present — either no reconcile pass has run against develop, or one ran and found no gap. The carrier alone cannot tell these apart (硬规则 3b), so this is reported as not-run rather than as \"current\"." },
     "reasons": [
-      "writer class \"cli\" is IN SCOPE but not wired: the Core CLI's status writes (Provider ABI task_write / `task edit --status`) flip tasks/*.md without appending a carrier event",
-      "writer class \"mcp\" is IN SCOPE but not wired: the Core MCP server's task_write path does not append a carrier event",
       "reconcile is not current (not-run): no reconcile-inferred event is present — either no reconcile pass has run against develop, or one ran and found no gap. The carrier alone cannot tell these apart (硬规则 3b), so this is reported as not-run rather than as \"current\"." ] },
-  "generatedAt": "2026-10-12T18:21:11.494Z"
+  "generatedAt": "2026-10-12T19:02:20.578Z"
 }
 ```
-`complete:false` with three enumerated reasons — the carrier is still entirely v0 (150 lines, 0 v1), so it predates the epoch sidecar (`epoch: "pre-epoch"`), and the two in-scope writer classes that write statuses through the Provider ABI without appending an event (`cli`, `mcp`) are exactly the invisible-change classes a consumer must be told about. This is the reading, not a defect of the verb.
+`complete:false` with exactly ONE reason: the reconcile watermark has never been stamped on this carrier (`state: "not-run"` — honestly distinct from both `lagging` and `current`). `unwiredInScope` is EMPTY: the two in-scope classes that this task originally reported as unwired (`cli`, `mcp`) were wired by `gap-task-status-events-abi-writes-and-creation`, so no in-scope gap remains. The census shows the epoch rotation has occurred — 167 lines = 150 legacy v0 + 17 v1 records under epoch `f0abc6d1…`, no longer `pre-epoch` — which is the carrier reading the earlier round could not produce.
 
 `quay task trace gap-discovery-portfolio-append-only-correction-fold --json`:
 ```json
@@ -110,12 +119,17 @@ The control is non-vacuous by construction: it asserts the mutation ANCHOR line 
                      "recordedAt": null,
                      "actor": { "kind": "unknown", "id": "ready-pool-check --apply" },
                      "source": "task-status-events", "inferred": false, "commit": null } ],
-  "generatedAt": "2026-10-12T18:21:15.172Z",
-  "coverage": { "carrier": { "exists": true, "epoch": "pre-epoch", "lines": 150, "v0": 150, "v1": 0, "corrupt": 0 },
-                "unwiredInScope": [ "cli", "mcp" ],
-                "reconcile": { "state": "not-run", "watermark": null }, "reasons": [ …same three… ] } }
+  "generatedAt": "2026-10-12T19:02:29.965Z",
+  "coverage": { "carrier": { "path": "/data/home/yale/work/quay/.quay/task-status-events.jsonl", "exists": true,
+                             "epoch": "f0abc6d11b8c4c6aefdd687eb6b308dc", "lines": 167, "v0": 150, "v1": 17, "corrupt": 0 },
+                "unwiredInScope": [], "reconcile": { "ref": "develop", "watermark": null, "state": "not-run" },
+                "reasons": [ …the one reconcile reason above… ] } }
 ```
-`status:"done"` comes from the Provider ABI (the authority), while the carrier holds only the `todo→ready` transition — the honest gap between "what the writers recorded" and "what the task store says", which is precisely what `coverage.reasons` exists to expose. The unknown-task arm, same workspace: exit **3**, empty stdout, `quay task trace: no such task: NO-SUCH-TASK-ZZZ (exit 3 — NOT an empty success)` on stderr.
+`status:"done"` comes from the Provider ABI (the authority), while the carrier holds only the `todo→ready` transition (a v0 record — this task pre-dates the epoch) — the honest gap between "what the writers recorded" and "what the task store says", which is precisely what `coverage.reasons` exists to expose.
+
+A second trace, on a task whose whole life is post-rotation, shows the v1 path reading in PRODUCTION (the mixed v0/v1/inferred arm of (d) was previously only exercised on a fixture): `quay task trace gap-driver-round-carriers-unbounded-growth-retention-design --json` ⇒ `status:"done"` with three `schema:"v1"` transitions in ascending `seq` — `seq 4 create from:null→todo`, `seq 6 todo→ready`, `seq 15 ready→done` — every one `source:"task-status-events"`, `inferred:false`.
+
+The unknown-task arm, same workspace: exit **3**, empty stdout, `quay task trace: no such task: NO-SUCH-TASK-ZZZ (exit 3 — NOT an empty success)` on stderr.
 
 **AC4 — the contract excerpt a cross-project acceptance can pin** (`quay --help`, verbatim):
 ```
@@ -144,10 +158,9 @@ transitions/nextCursor/complete/rebase, plus its own taskId/status):
 ```
 The same help block carries the cursor/at-least-once rule ("DEDUPE BY `eventId`"), the `rebase` rule, the meaning of `order`/`source`/`coverage`, and `RETENTION: the carrier is APPEND-ONLY — no truncation in v1`. The `actor.kind` enum in that excerpt is DERIVED from the kernel's `TASK_STATUS_EVENT_ACTOR_KINDS` (⛔ not re-typed in help.ts), the same single-source rule the driver block already follows. ClaudeCodeUI's own consumer change is deliberately NOT in this task's delta.
 
-**AC(f) — verb-surface parity.** `node --experimental-strip-types packages/quay/test/cli.test.mjs` ends `All QN-033 bin/quay.js CLI dispatch tests passed.` — that script's `block14` (the `--help` Usage synopsis verb set == the dispatch table set) and `block28` (the fallback `usage: quay <…>` line's command set == the dispatch-table command set, derived from every `cmd === "X"` and `cmd === "X" && sub === "Y"` route) run unconditionally, and the script prints `N test(s) FAILED` if any assertion throws. The new `task log` / `task trace` routes therefore had to appear in the synopsis AND in the fallback usage line's bare-`task` token run (`task list|view|create|edit|check|log|trace`) — both were widened in this change. `capability-manifest-check` (the fourth registry, the `delivery-manifest.json` capabilities array) reads only the TOP-LEVEL `cmd === "…"` set, which is unchanged: `PASS — no unregistered capability, no stale registration`.
+**AC(f) — verb-surface parity.** `node --experimental-strip-types packages/quay/test/cli.test.mjs` ends `All QN-033 bin/quay.js CLI dispatch tests passed.` — that script's `block14` (the `--help` Usage synopsis verb set == the dispatch table set) and `block28` (the fallback `usage: quay <…>` line's command set == the dispatch-table command set, derived from every `cmd === "X"` and `cmd === "X" && sub === "Y"` route) run unconditionally, and the script prints `N test(s) FAILED` if any assertion throws. The new `task log` / `task trace` routes therefore had to appear in the synopsis AND in the fallback usage line's bare-`task` token run (`task list|view|create|edit|check|log|trace`) — both were widened in this change. `capability-manifest-check` (the fourth registry, the `delivery-manifest.json` capabilities array) reads only the TOP-LEVEL `cmd === "…"` set, which is unchanged: `PASS — no unregistered capability, no stale registration` (`[cli-command] ok: source=22 manifest=22`).
 
-**DoD — `scripts/test.sh --for-task gap-quay-task-log-trace-read-surface --allow-thin`** (after `git merge develop` in the worktree): exit **0**, `ℹ tests 114  ℹ pass 114  ℹ fail 0`, and `packages/quay/test/task-log.test.mjs` is in the selected set. `anti-drift-touches-check.ts --task gap-quay-task-log-trace-read-surface --worktree <wt> --merge-target develop` ⇒ `ANTI-DRIFT OK: 5 actual file(s), all within declared Touches (6 glob(s))`. Zero model calls; the new module never writes a carrier and never creates the epoch sidecar it reads (`readCarrierEpoch` is the read-only counterpart of the writer's read-or-create).
-
+**DoD — `scripts/test.sh --for-task gap-quay-task-log-trace-read-surface --allow-thin`** (after `git merge develop` in the worktree): exit **0**, `ℹ tests 115  ℹ pass 115  ℹ fail 0`, and `packages/quay/test/task-log.test.mjs` is in the selected set. `anti-drift-touches-check.ts --task gap-quay-task-log-trace-read-surface --worktree <wt> --merge-target develop` ⇒ `ANTI-DRIFT OK: 5 actual file(s), all within declared Touches (6 glob(s))`. The fan-in ts-typecheck gate (`for d in packages/*/; do npx tsc --noEmit -p "$d"; done`) is green across all four packages. Zero model calls; the new module never writes a carrier and never creates the epoch sidecar it reads (`readCarrierEpoch` is the read-only counterpart of the writer's read-or-create).
 ## Definition of Done
 - All AC ticked with output pasted.
 - `scripts/test.sh --for-task gap-quay-task-log-trace-read-surface` green.
