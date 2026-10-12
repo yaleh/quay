@@ -43,6 +43,13 @@ export async function handleTaskCreate({ positional, flags, wantsJson }: CliCtx)
   if (flags["depends-on"] !== undefined) patch.depends_on = String(flags["depends-on"]).split(",").filter(Boolean);
   if (flags["goal-ac"] !== undefined) patch.goal_ac = flags["goal-ac"];
 
+  // gap-task-status-events-abi-writes-and-creation: the creation's provenance (kept out of `patch`
+  // for the same reason as `task edit`'s — it is not a task field and must not be persisted).
+  // A creation is a REAL transition (`from:null → <initial>`), so the Provider records one for it;
+  // `--correlation-id` is how a caller groups a create with the writes that follow it.
+  const provenance: Record<string, string> = { actorKind: "cli" };
+  if (flags["correlation-id"] !== undefined) provenance.correlationId = String(flags["correlation-id"]);
+
   await withProvider(async (client) => {
     // gap-quay-native-task-create-duplicate-id-prepends-frontmatter: `create` must not be a
     // silent upsert. This verb is Core-side and provider-agnostic, so it can only reach the
@@ -66,7 +73,7 @@ export async function handleTaskCreate({ positional, flags, wantsJson }: CliCtx)
       process.exitCode = 1;
       return;
     }
-    const t = await client.taskWrite({ id, ...patch });
+    const t = await client.taskWrite({ id, ...patch, ...provenance });
     if (wantsJson) printJson(t);
     else console.log(`${t.id}: ${t.title} [${t.status}]`);
   }, { providerId: flags.provider, root: flags.root });

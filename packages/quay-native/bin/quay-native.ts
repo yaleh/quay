@@ -513,6 +513,13 @@ Description:
       // first-class fields the native MCP task_write zod schema accepts) get their CLI surface.
       if (flags["depends-on"] !== undefined) patch.depends_on = String(flags["depends-on"]).split(",").filter(Boolean);
       if (flags["goal-ac"] !== undefined) patch.goal_ac = flags["goal-ac"];
+      // gap-task-status-events-abi-writes-and-creation: the two PROVENANCE fields (never persisted —
+      // see the task_write zod schema's own note). They are declared on BOTH write surfaces so the
+      // CLI↔MCP parity check stays a real invariant rather than an exception list: any field a caller
+      // can reach over MCP is reachable from the CLI too. `--actor-kind` defaults to `cli`, which is
+      // the honest class for a direct CLI invocation.
+      if (flags["actor-kind"] !== undefined) patch.actorKind = flags["actor-kind"];
+      if (flags["correlation-id"] !== undefined) patch.correlationId = flags["correlation-id"];
       if (flags["append-notes"] !== undefined) {
         const t = store.appendNote(id, flags["append-notes"]);
         if (flags.json) printJson(t);

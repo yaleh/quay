@@ -31,8 +31,22 @@ import { LIFECYCLE_EDGES, type LifecycleEdge, type LifecycleEdgeKind, type Lifec
 
 interface ProviderClient {
   taskGet: (id: string) => Promise<Task | null>;
-  taskWrite: (args: { id: string; status: string; expectedStatus: string; body?: string }) => Promise<unknown>;
+  // `actorKind`/`correlationId` (gap-task-status-events-abi-writes-and-creation) are PROVENANCE, not
+  // task fields: the Provider forwards them to its status-event record (`actor.kind` / `cause.
+  // correlationId`) and persists neither. They ride this call because the event is written by the
+  // Provider's store, which cannot see the Core front door that decided the flip.
+  taskWrite: (args: { id: string; status: string; expectedStatus: string; body?: string; actorKind?: string; correlationId?: string }) => Promise<unknown>;
   taskCheck: (id: string) => Promise<{ ok: boolean; reason: string }>;
+}
+
+/** The provenance terms to stamp on a lifecycle write — computed from the caller's args, so every
+ *  `taskWrite` below carries the same pair and a `undefined` term is OMITTED rather than sent as an
+ *  empty string (hard rule 6: an absent value must stay absent, not become a blank one). */
+function provenanceOf(args: { actorKind?: string; correlationId?: string }): { actorKind?: string; correlationId?: string } {
+  return {
+    ...(args.actorKind !== undefined ? { actorKind: args.actorKind } : {}),
+    ...(args.correlationId !== undefined ? { correlationId: args.correlationId } : {}),
+  };
 }
 
 /**
@@ -167,6 +181,13 @@ export interface LifecycleArgs {
    *  root, threaded to runGate so lifecycle-driven gate executions also record their cost. Omitted
    *  for in-process/test callers → the gate recorder skips (no synthetic rows). */
   workspaceRoot?: string;
+  /** gap-task-status-events-abi-writes-and-creation: WHO is running this verb (`cli` / `mcp`) and the
+   *  caller's own id for the operation. Both are stamped on the Provider's status-event record for
+   *  the flip this verb performs — the lifecycle verbs are one of the four ABI surfaces a human or an
+   *  agent session acts through, so their flips must be attributable like any other. Omitted ⇒ the
+   *  record says `unknown` / carries no correlation id; neither is guessed. */
+  actorKind?: string;
+  correlationId?: string;
 }
 
 export interface RetreatArgs extends LifecycleArgs {
@@ -246,7 +267,7 @@ export interface RetreatResult {
  * status UNCHANGED. Not-`ready` → exit 1, no gate, no write (store.write does not
  * enforce edges and acceptance is status-independent — the guard is load-bearing).
  */
-export async function runComplete({ client, id, logPath, actor = "quay-cli", workspaceRoot }: LifecycleArgs): Promise<LifecycleResult> {
+export async function runComplete({ client, id, logPath, actor = "quay-cli", workspaceRoot, actorKind, correlationId }: LifecycleArgs): Promise<LifecycleResult> {
   const task = await client.taskGet(id);
   if (!task) throw new Error(`no such task: ${id}`);
   if (task.status !== TASK_STATUS.READY) {
@@ -273,7 +294,7 @@ export async function runComplete({ client, id, logPath, actor = "quay-cli", wor
     process.exitCode = 1;
     return { ok: false, reason, exitCode: 1 };
   }
-  await client.taskWrite({ id, status: TASK_STATUS.DONE, expectedStatus: TASK_STATUS.READY });
+  await client.taskWrite({ id, status: TASK_STATUS.DONE, expectedStatus: TASK_STATUS.READY, ...provenanceOf({ actorKind, correlationId }) });
   appendGateEvent(
     logPath,
     mkLifecycleEvent({ id, gate: "complete", actor, verdict: "pass", payload: { from: TASK_STATUS.READY, to: TASK_STATUS.DONE } })
@@ -307,7 +328,7 @@ export interface LoopCompleteArgs extends LifecycleArgs {
  * On pass: write status=done (CAS `expectedStatus:"ready"`) + append a `complete`
  * pass event to `logPath` (`.quay/gate-events.jsonl`), readable via gate-log.
  */
-export async function runCompleteLoop({ client, id, logPath, actor = "quay-loop", workspaceRoot, verifiedBy }: LoopCompleteArgs): Promise<LifecycleResult> {
+export async function runCompleteLoop({ client, id, logPath, actor = "quay-loop", workspaceRoot, verifiedBy, actorKind, correlationId }: LoopCompleteArgs): Promise<LifecycleResult> {
   const task = await client.taskGet(id);
   if (!task) throw new Error(`no such task: ${id}`);
   if (task.status !== TASK_STATUS.READY) {
@@ -341,7 +362,7 @@ export async function runCompleteLoop({ client, id, logPath, actor = "quay-loop"
     }
   }
 
-  await client.taskWrite({ id, status: TASK_STATUS.DONE, expectedStatus: TASK_STATUS.READY });
+  await client.taskWrite({ id, status: TASK_STATUS.DONE, expectedStatus: TASK_STATUS.READY, ...provenanceOf({ actorKind, correlationId }) });
   appendGateEvent(
     logPath,
     mkLifecycleEvent({
@@ -401,7 +422,7 @@ export interface OutOfBandCompleteArgs extends LifecycleArgs {
  * It still honours the ADR-007 dark-axis precondition that both sibling completion paths enforce —
  * "forced" must not mean "a way around the dark axes".
  */
-export async function runCompleteOutOfBand({ client, id, logPath, actor = "quay-cli", workspaceRoot, reason, expectedStatus }: OutOfBandCompleteArgs): Promise<LifecycleResult> {
+export async function runCompleteOutOfBand({ client, id, logPath, actor = "quay-cli", workspaceRoot, reason, expectedStatus, actorKind, correlationId }: OutOfBandCompleteArgs): Promise<LifecycleResult> {
   const reasonChars = typeof reason === "string" ? reason.replace(/\s+/g, "").length : 0;
   if (reasonChars < MIN_COMPLETE_REASON_CHARS) {
     const r = `out-of-band completion refused: reason must carry ≥${MIN_COMPLETE_REASON_CHARS} non-whitespace chars (got ${reasonChars}) — a forced completion must record WHY it bypassed the gate`;
@@ -420,7 +441,7 @@ export async function runCompleteOutOfBand({ client, id, logPath, actor = "quay-
   if (darkAxisFail) return darkAxisFail;
 
   const from = task.status;
-  await client.taskWrite({ id, status: TASK_STATUS.DONE, expectedStatus: expectedStatus ?? from });
+  await client.taskWrite({ id, status: TASK_STATUS.DONE, expectedStatus: expectedStatus ?? from, ...provenanceOf({ actorKind, correlationId }) });
   appendGateEvent(
     logPath,
     mkLifecycleEvent({
@@ -470,14 +491,14 @@ export async function runAdjudicate({ client, id, logPath, actor = "quay-cli" }:
  * delegates to runComplete (the single gate-guarded path to done); `todo→ready`
  * runs the `dod` author gate then writes. Illegal forward edge → throws.
  */
-export async function runPromote({ client, id, logPath, actor = "quay-cli", workspaceRoot }: LifecycleArgs): Promise<PromoteResult> {
+export async function runPromote({ client, id, logPath, actor = "quay-cli", workspaceRoot, actorKind, correlationId }: LifecycleArgs): Promise<PromoteResult> {
   const task = await client.taskGet(id);
   if (!task) throw new Error(`no such task: ${id}`);
   assertTransition(task.status, "forward");
   const next = legalForward(task.status);
 
   if (task.status === TASK_STATUS.READY) {
-    const r = await runComplete({ client, id, logPath, actor, workspaceRoot });
+    const r = await runComplete({ client, id, logPath, actor, workspaceRoot, actorKind, correlationId });
     return { ...r, to: r.ok ? TASK_STATUS.DONE : null };
   }
 
@@ -490,7 +511,7 @@ export async function runPromote({ client, id, logPath, actor = "quay-cli", work
     process.exitCode = 1;
     return { ok: false, reason, to: null, exitCode: 1 };
   }
-  await client.taskWrite({ id, status: next!, expectedStatus: task.status });
+  await client.taskWrite({ id, status: next!, expectedStatus: task.status, ...provenanceOf({ actorKind, correlationId }) });
   appendGateEvent(
     logPath,
     mkLifecycleEvent({ id, gate: "promote", actor, verdict: "pass", payload: { from: task.status, to: next } })
@@ -580,7 +601,7 @@ function uncheckAcBoxes(body: string): string {
  * ACs; ready→todo / needs-human→todo roll back before completion, so their
  * (normally unchecked) ACs are left alone.
  */
-export async function runRetreat({ client, id, reason, logPath, actor = "quay-cli" }: RetreatArgs): Promise<RetreatResult> {
+export async function runRetreat({ client, id, reason, logPath, actor = "quay-cli", actorKind, correlationId }: RetreatArgs): Promise<RetreatResult> {
   if (typeof reason !== "string" || reason.trim() === "") {
     console.error("quay retreat: --reason <r> is required (the reason is the deliverable of a retreat)");
     // @deprecated — process.exitCode set for CLI backward-compat; MCP callers should
@@ -610,6 +631,7 @@ export async function runRetreat({ client, id, reason, logPath, actor = "quay-cl
     status: prev!,
     expectedStatus: task.status,
     ...(body !== task.body ? { body } : {}),
+    ...provenanceOf({ actorKind, correlationId }),
   });
   appendGateEvent(
     logPath,

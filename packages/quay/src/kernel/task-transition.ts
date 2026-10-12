@@ -321,7 +321,10 @@ export interface TaskStatusEventProducer {
  *  identity (`eventId`), the position (`seq`), the epoch and the two timestamps. */
 export interface TaskStatusEventInput {
   taskId: string;
-  from: string;
+  /** The status the task was in — or `null` for a CREATION, which has no `from`. `null` is a real
+   *  value here, not a missing one: `from:null` is what distinguishes "this task did not exist" from
+   *  "it existed in some status we could not read" (硬规则 3b — the two must not share a spelling). */
+  from: string | null;
   to: string;
   /** The transition's semantic role (see `LifecycleEdgeKind`) — or `null` when the pair is not a
    *  declared edge (a reconcile-inferred flip). */
@@ -357,7 +360,8 @@ export interface TaskStatusEventRecord {
    *  a consumer can tell "the carrier I was reading was replaced" from "more lines were appended". */
   carrierEpoch: string;
   taskId: string;
-  from: string;
+  /** `null` == this record is a CREATION (no prior status existed), see `TaskStatusEventInput.from`. */
+  from: string | null;
   to: string;
   kind: string | null;
   /** Time the status write happened. */
