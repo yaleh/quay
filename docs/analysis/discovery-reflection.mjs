@@ -58,10 +58,10 @@ import { pathToFileURL } from "node:url";
 // The ONE signature primitive (`subjectKey`), the content-addressing + carrier reader, the Experience
 // ledger's role vocabulary, and the method registry's OWN validator + carrier — all imported. A second
 // definition of any of them would be a second definition to keep in sync.
-import { subjectKey, sha256, recordId, readRecords } from "./architecture-evidence-store.mjs";
-import { EXPERIENCE_ROLES, ROLE_VERDICT_COMPAT, readExperienceLedger } from "./discovery-experience-ledger.mjs";
+import { subjectKey, recordId, readRecords } from "./architecture-evidence-store.mjs";
+import { ROLE_VERDICT_COMPAT, readExperienceLedger } from "./discovery-experience-ledger.mjs";
 import {
-  readMethodRegistry, validateMethodRecord, defaultToolNames, METHOD_STATUSES,
+  readMethodRegistry, validateMethodRecord, defaultToolNames,
 } from "./discovery-method-registry.mjs";
 // The model-identity / cost machinery + the hardened launcher argv, reused by import (硬规则 5b).
 import {
@@ -101,7 +101,6 @@ const isObj = (x) => x !== null && typeof x === "object" && !Array.isArray(x);
 const isStr = (x, n = 1) => typeof x === "string" && x.trim().length >= n;
 const isInt = (x) => Number.isInteger(x);
 const supplied = (o, k) => Object.prototype.hasOwnProperty.call(o, k) && o[k] !== undefined;
-const nonWs = (s) => String(s ?? "").replace(/\s+/g, "").length;
 
 /** Normalise a caller-supplied budget over the defaults. Pure. A bad value is REFUSED (its own
  *  reason) rather than silently coerced — a budget that cannot be read is not a licence to spend. */
@@ -432,10 +431,11 @@ export function assembleCandidate({ rec, unit, registry, budget, nowIso }) {
  * @param {(prompt:string)=>Promise<{stdout:string}>} o.model  INJECTABLE model seam (no spawn in-logic)
  * @param {object}   [o.budget]      `{enabled,maxPerRun,maxModelCalls,maxWallMs}`
  * @param {string}   [o.root]        repo root used to resolve the capability-catalog default
+ * @param {string}   [o.modelId]     the model the launcher was ASKED for (recorded as `requested_model`)
  * @param {number}   [o.nowMs]
  * @returns {Promise<object>} `{ok, decisions[], model_calls, skipped_budget, wall_ms, cost}`
  */
-export async function reflect({ experiences, registry = [], model, budget = {}, root = null, nowMs = Date.now() } = {}) {
+export async function reflect({ experiences, registry = [], model, budget = {}, root = null, modelId = null, nowMs = Date.now() } = {}) {
   const guard = disabledGuard(budget);
   if (guard) return guard;
   if (typeof model !== "function") return { ok: false, reason: "model-seam-missing", model_calls: 0 };
@@ -468,7 +468,7 @@ export async function reflect({ experiences, registry = [], model, budget = {}, 
     const prompt = buildReflectionPrompt({ unit, registry, toolNames });
     const tCall = Date.now();
     const { stdout } = await modelCall(model, prompt);
-    const fields = modelCallFields({ requested: null, stdout });
+    const fields = modelCallFields({ requested: modelId, stdout });
     const call = { ...fields, wall_ms: Date.now() - tCall };
     calls.push(call);
 
@@ -569,7 +569,7 @@ export function buildGeneralizationPrompt({ candidate, heldOutCase }) {
  * @returns {Promise<object>} `{ok, called, predicted_verdict, expected_verdicts, correct, promoted,
  *                              candidate_after, retirement_reason, not_evaluated_reason, model_call}`
  */
-export async function validateGeneralization({ candidate, heldOutCase, registry = [], model, budget = {}, nowMs = Date.now() } = {}) {
+export async function validateGeneralization({ candidate, heldOutCase, registry = [], model, budget = {}, modelId = null, nowMs = Date.now() } = {}) {
   const guard = disabledGuard(budget);
   if (guard) return guard;
   if (typeof model !== "function") return { ok: false, reason: "model-seam-missing", called: false };
@@ -588,7 +588,7 @@ export async function validateGeneralization({ candidate, heldOutCase, registry 
   const prompt = buildGeneralizationPrompt({ candidate, heldOutCase });
   const tCall = Date.now();
   const { stdout } = await modelCall(model, prompt);
-  const call = { ...modelCallFields({ requested: null, stdout }), wall_ms: Date.now() - tCall };
+  const call = { ...modelCallFields({ requested: modelId, stdout }), wall_ms: Date.now() - tCall };
   const parsed = parseJsonObject(callText(stdout));
   const nextV = nextVersion(registry, candidate.method_id);
 
@@ -698,7 +698,7 @@ export function learningQuality(verdicts) {
  * only. Candidate PERSISTENCE (into the method registry) is the CALLER's call — this function returns
  * the decisions and lets the caller `appendMethodRecord` what it wants to keep.
  */
-export async function runReflectionRound(root, { model, budget = {}, nowMs = Date.now() } = {}) {
+export async function runReflectionRound(root, { model, budget = {}, modelId = null, nowMs = Date.now() } = {}) {
   const guard = disabledGuard(budget);
   if (guard) return guard;
   const b = resolveBudget(budget).budget;
@@ -707,7 +707,7 @@ export async function runReflectionRound(root, { model, budget = {}, nowMs = Dat
   const prior = readReflectionAttempts(root);
   const sel = selectExperiencesForReflection(ledger, prior, { budget: b, nowMs });
   if (!sel.ok) return sel;
-  const res = await reflect({ experiences: sel.selected, registry, model, budget: b, root, nowMs });
+  const res = await reflect({ experiences: sel.selected, registry, model, budget: b, root, modelId, nowMs });
   if (!res.ok) return res;
   for (const d of res.decisions) {
     recordReflectionAttempt(root, {
@@ -766,7 +766,7 @@ async function cli(argv = process.argv.slice(2)) {
   if (verb === "reflect") {
     const live = await liveModelFactory({ root, tools: "", timeoutMs: Number(argOf(args, "--timeout-ms", 300_000)) });
     if (!live.ok) { console.error(`${TOOL}: ${live.reason}`); return 1; }
-    const out = await runReflectionRound(root, { model: live.run, budget });
+    const out = await runReflectionRound(root, { model: live.run, budget, modelId: live.model });
     console.log(JSON.stringify({ model: live.model, ...out }, null, 1));
     return out.ok ? 0 : 1;
   }
