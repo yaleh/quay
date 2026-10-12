@@ -109,3 +109,11 @@ exit 0
 - `tasks/gap-ac197-criterion-commitstorewrite-identifier-pin-stale.md`
 
 （说明：第一条是落地面——criterion 的谓词，经 `quay goal write AC-197 --criterion …` 落库，`expect` 与正文语义按「为什么改」同步；第二条是配套夹具（按 marker 从 goal 文件逐字抽取谓词块，与 `packages/quay/test/ac288-criterion-address-derivation.test.mjs` 同族）；第三条是 self-touch。⛔ 不新增 `plugin/scripts/*.ts`。⛔ `packages/quay/src/store-commit.ts` 与四个 store、`packages/quay/test/store-commit.test.mjs` **不在本 Touches 内**——它们是保证的承载体，本任务只重锚判据、不回退已落地去重；AC2② 的负控制只在临时副本上做。）
+
+## Blocker
+
+**2026-10-12T18:35:28.029Z — worker 未落地（exited-not-landed）**
+
+- 未落地原因：step=suite: __PERFILE__ duration_ms=31274 /data/home/yale/work/quay-worktrees/gap-ac197-criterion-commitstorewrite-identifier-pin-stale/plugin/test/prod-data-audit.test.mjs passed=false end_ms=1791829892568 cpu_ms=31960.598 mem_peak_kb=1910120
+- run_id：wk-prod-anchor
+- session_id：bbba55c6-a9dc-49b5-b485-9b5315fe30d8
