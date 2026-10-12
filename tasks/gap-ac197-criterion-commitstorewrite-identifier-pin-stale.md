@@ -360,3 +360,10 @@ $ git show --stat 5a04e28fa | tail -2
 **本轮删除了两份重复的 `## Evidence` 块（落点映射，硬规则 5）**：原文件有 **3** 份 `## Evidence`（起于第 113 / 269 / 447 行），逐块 diff 显示第 3 块是前两块的**严格超集** —— `diff ev1 ev3` 仅 **2** 行删除、`diff ev2 ev3` 仅 **1** 行删除，且这三行**全部被 ev3 的扩展版取代**（`SCOPED_GATE_EXIT=0（…；9 条 static check 全 PASS）`、`两条如实说明` → `三条如实说明`）。⇒ 前两块里的**每一条**读数都在第 3 块里有落点，⛔ 无内容丢失；合并后本文件只剩一份 `## Evidence`。同一次替换也修掉了三块里**逐字重复的同一句假读数**。
 
 **⚠️ develop 在本轮中途前进过 —— scoped 门缓存因此重写过两次。** 第一次写缓存时 develop 是 `1d05f47e…`，而 scoped 门当时跑在**以它为基**的树上；随后 develop 前进到 `fa76ebca…`（5 个提交）。缓存的前提是「worker 对着**这个确切的 develop tip** 验证过绿」，所以旧缓存**不成立**，⛔ 没有拿它凑数：先 `git merge develop`（`d629c20c…`，无冲突），**在新树上重跑** `scripts/test.sh --for-task … --allow-thin`（`SCOPED_GATE_EXIT=0`，7/7，无 `SCOPED-THIN`），**再**用新 tip 写缓存。⇒ 上表所有读数都是**重测值**，缓存里的 `developSha` 与被我验证过的那棵树一致（`rev-list --count HEAD..develop` = 0）。
+## Blocker
+
+**2026-10-12T18:35:28.029Z — worker 未落地（exited-not-landed）**
+
+- 未落地原因：step=suite: __PERFILE__ duration_ms=31274 /data/home/yale/work/quay-worktrees/gap-ac197-criterion-commitstorewrite-identifier-pin-stale/plugin/test/prod-data-audit.test.mjs passed=false end_ms=1791829892568 cpu_ms=31960.598 mem_peak_kb=1910120
+- run_id：wk-prod-anchor
+- session_id：bbba55c6-a9dc-49b5-b485-9b5315fe30d8
