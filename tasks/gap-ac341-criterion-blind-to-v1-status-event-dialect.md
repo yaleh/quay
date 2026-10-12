@@ -2,7 +2,7 @@
 id: gap-ac341-criterion-blind-to-v1-status-event-dialect
 title: AC-341 判据只认 v0 方言的 ts 字段 ⇒ 7/154 次生产晋升被误判「有翻转无事件」，实测 0/154 真缺——修判定机件读两处方言
   + 给「读不懂」独立取值
-status: ready
+status: done
 labels:
   - gap
   - defect
