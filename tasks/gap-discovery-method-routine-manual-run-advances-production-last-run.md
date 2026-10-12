@@ -2,7 +2,7 @@
 id: gap-discovery-method-routine-manual-run-advances-production-last-run
 title: "discovery-method routine: a manual/acceptance --once run advances the
   PRODUCTION last-run and suppressed the resident 360m cycle"
-status: ready
+status: done
 labels:
   - gap
   - architecture-discovery
