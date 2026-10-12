@@ -2,7 +2,7 @@
 id: gap-discovery-experience-ledger-provenance-and-skip-audit
 title: "Experience ledger: worker-written entries labelled user, no author
   field, and 5 filtered outcomes leave no per-record trace"
-status: ready
+status: done
 labels:
   - gap
   - architecture-discovery
