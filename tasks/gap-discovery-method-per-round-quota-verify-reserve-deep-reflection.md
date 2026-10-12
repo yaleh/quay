@@ -2,7 +2,7 @@
 id: gap-discovery-method-per-round-quota-verify-reserve-deep-reflection
 title: "discovery-method per-round quota after 24h=240: verification reserve,
   bounded code-reading reflection, partial persistence on wall breach"
-status: todo
+status: ready
 labels:
   - gap
   - discovery-method
