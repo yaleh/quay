@@ -2,7 +2,7 @@
 id: gap-discovery-method-routine-report-only
 title: "Discovery Method: minimal report-only routine on the existing routine
   track (only after the independent regression)"
-status: todo
+status: ready
 labels:
   - gap
   - architecture-discovery
