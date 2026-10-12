@@ -202,3 +202,11 @@ The reader set is exactly one: `task-status-events-reconcile.ts`, whose report f
 - plugin/test/driver-filters.test.mjs
 - plugin/scripts/capability-catalog-declarations.json
 - docs/carrier-registry.json
+
+## Blocker
+
+**2026-10-12T17:46:13.317Z — worker 未落地（exited-not-landed）**
+
+- 未落地原因：step=suite: AssertionError [ERR_ASSERTION]: the artifact's totals must be ≤ the recorded clean build: measured {"files":267,"bytes":58016392,"shLines":7345} vs {"files":266,"bytes":56445117,"shLines":7345}
+- run_id：wk-prod-anchor
+- session_id：792a1875-111a-459b-811b-78d38ac77086
