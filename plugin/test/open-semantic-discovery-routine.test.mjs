@@ -1520,50 +1520,53 @@ test("AC (b) — an ACTIVE method GUIDES the production round; ids recorded on t
   console.log(`    AC (b): mode=${round.methods.mode} included=${JSON.stringify(round.methods.included.map((m) => methodLabel(m)))}`);
 });
 
-test("AC (c) — a DRAFT method guides the SHADOW arm only: records carry shadow:true and NOTHING reaches Portfolio", async () => {
-  const ws = makeWorkspace();
-  writeConfig(ws, cfgYaml());
-  writeMethodRegistry(ws, [methodRec({ method_id: "fixture-draft", status: "draft" })]);
-  // The production arm answers with NO hypotheses, so anything that reaches the ledgers would have to
-  // have come from the shadow arm — which is exactly the claim under test.
-  const engine = makeMethodEngine({ productionHyps: [], shadowHyps: HYPS });
-  const spawn = countingSpawn();
-  const fact = await runOpenSemanticDiscovery(ws, { ...runOpts(ws, { engine }), spawnFn: spawn, pinFn: pinStub() });
-  assert.equal(fact.state, "verified");
-  const round = rounds(ws)[0];
-  // The PRODUCTION arm is unguided: a draft never steers production.
-  assert.equal(round.methods.mode, "baseline");
-  assert.deepEqual(round.methods.included.map((m) => m.arm), [METHOD_ARM_SHADOW]);
-  const productionInv = engine.investigator.calls.find((c) => c.arm === "production");
-  assert.ok(!productionInv.prompt.includes(GUIDANCE_CLAUSE), "the draft method's text is NOT in the production prompt");
-  // The SHADOW arm ran, guided, on the same pin, and its records say so.
-  assert.equal(round.methods.shadow.shadow, true);
-  assert.equal(round.methods.shadow.ran, true);
-  assert.deepEqual(round.methods.shadow.methods.map((m) => methodLabel(m)), ["fixture-draft@v1"]);
-  assert.equal(round.methods.shadow.calls, 1, "the shadow arm's own call count is recorded");
-  const shadowInv = engine.investigator.calls.find((c) => c.arm === "shadow");
-  assert.ok(shadowInv.prompt.includes(GUIDANCE_CLAUSE), "the draft method's text IS in the shadow prompt");
-  assert.ok(shadowInv.prompt.includes("read the fixture source"));
-  assert.equal(shadowInv.cwd, engine.investigator.calls.find((c) => c.arm === "production").cwd, "the shadow arm explores the SAME pin");
-  const shadow = shadowClusters(ws);
-  assert.equal(shadow.length, 2, "the shadow arm's hypothesis clusters are ON the carrier");
-  for (const rec of shadow) {
-    assert.equal(rec.shadow, true, "every shadow record is marked shadow:true");
-    assert.match(rec.record_id, /#shadow#/);
-    assert.equal(rec.confirmed, false, "no verdict is invented for a never-verified shadow hypothesis");
-    assert.equal(rec.verifier_verdict, null);
-    assert.equal(rec.refutation_verdict, "not-run");
-    assert.equal(rec.method_guidance.arm, METHOD_ARM_SHADOW);
+test("AC (c) — a DRAFT or TRIAL method guides the SHADOW arm only: records carry shadow:true, nothing reaches Portfolio", async () => {
+  // Both non-production statuses, because the AC names both and they must behave identically.
+  for (const status of ["draft", "trial"]) {
+    const ws = makeWorkspace();
+    writeConfig(ws, cfgYaml());
+    writeMethodRegistry(ws, [methodRec({ method_id: "fixture-nonproduction", status })]);
+    // The production arm answers with NO hypotheses, so anything that reaches the ledgers would have to
+    // have come from the shadow arm — which is exactly the claim under test.
+    const engine = makeMethodEngine({ productionHyps: [], shadowHyps: HYPS });
+    const spawn = countingSpawn();
+    const fact = await runOpenSemanticDiscovery(ws, { ...runOpts(ws, { engine }), spawnFn: spawn, pinFn: pinStub() });
+    assert.equal(fact.state, "verified");
+    const round = rounds(ws)[0];
+    // The PRODUCTION arm is unguided: a draft/trial never steers production.
+    assert.equal(round.methods.mode, "baseline");
+    assert.deepEqual(round.methods.included.map((m) => [m.arm, m.status]), [[METHOD_ARM_SHADOW, status]]);
+    const productionInv = engine.investigator.calls.find((c) => c.arm === "production");
+    assert.ok(!productionInv.prompt.includes(GUIDANCE_CLAUSE), `the ${status} method's text is NOT in the production prompt`);
+    // The SHADOW arm ran, guided, on the same pin, and its records say so.
+    assert.equal(round.methods.shadow.shadow, true);
+    assert.equal(round.methods.shadow.ran, true);
+    assert.deepEqual(round.methods.shadow.methods.map((m) => methodLabel(m)), ["fixture-nonproduction@v1"]);
+    assert.equal(round.methods.shadow.calls, 1, "the shadow arm's own call count is recorded");
+    const shadowInv = engine.investigator.calls.find((c) => c.arm === "shadow");
+    assert.ok(shadowInv.prompt.includes(GUIDANCE_CLAUSE), `the ${status} method's text IS in the shadow prompt`);
+    assert.ok(shadowInv.prompt.includes("read the fixture source"));
+    assert.equal(shadowInv.cwd, engine.investigator.calls.find((c) => c.arm === "production").cwd, "the shadow arm explores the SAME pin");
+    const shadow = shadowClusters(ws);
+    assert.equal(shadow.length, 2, "the shadow arm's hypothesis clusters are ON the carrier");
+    for (const rec of shadow) {
+      assert.equal(rec.shadow, true, "every shadow record is marked shadow:true");
+      assert.match(rec.record_id, /#shadow#/);
+      assert.equal(rec.confirmed, false, "no verdict is invented for a never-verified shadow hypothesis");
+      assert.equal(rec.verifier_verdict, null);
+      assert.equal(rec.refutation_verdict, "not-run");
+      assert.equal(rec.method_guidance.arm, METHOD_ARM_SHADOW);
+    }
+    // ⛔ Nothing reaches Portfolio (and nothing reaches the Experience ledger either — the shadow arm is
+    // not ingested at all): the production arm found nothing and the shadow arm is structurally excluded.
+    assert.deepEqual(portfolioRecords(ws), []);
+    assert.deepEqual(experienceRecords(ws), []);
+    assert.equal(round.ingestion.checked, 0);
+    assert.deepEqual(fact.value.ingestion.writes, [], "the ingestion wrote nothing — the shadow arm is not ingested at all");
+    assert.ok(!JSON.stringify(portfolioRecords(ws)).includes("#shadow#"));
+    assert.ok(!JSON.stringify(experienceRecords(ws)).includes("#shadow#"), "nor does any Experience point at a shadow record");
+    console.log(`    AC (c) [${status}]: mode=${round.methods.mode} shadow.ran=${round.methods.shadow.ran} shadow clusters=${shadow.length} portfolio rows=0`);
   }
-  // ⛔ Nothing reaches Portfolio (and nothing reaches the Experience ledger either — the shadow arm is
-  // not ingested at all): the production arm found nothing and the shadow arm is structurally excluded.
-  assert.deepEqual(portfolioRecords(ws), []);
-  assert.deepEqual(experienceRecords(ws), []);
-  assert.equal(round.ingestion.checked, 0);
-  assert.deepEqual(fact.value.ingestion.writes, [], "the ingestion wrote nothing — the shadow arm is not ingested at all");
-  assert.ok(!JSON.stringify(portfolioRecords(ws)).includes("#shadow#"));
-  assert.ok(!JSON.stringify(experienceRecords(ws)).includes("#shadow#"), "nor does any Experience point at a shadow record");
-  console.log(`    AC (c): mode=${round.methods.mode} shadow.ran=${round.methods.shadow.ran} shadow clusters=${shadow.length} portfolio rows=0`);
 });
 
 test("AC (d) — retired / quarantined / contaminated methods are NEVER selected, even as the only record", async () => {
