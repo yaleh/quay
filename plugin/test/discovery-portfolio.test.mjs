@@ -36,6 +36,7 @@ import {
   gatewayRatesFromResponse, readGatewayKey, resolveOriginRef, taskExistsOnBranch, taskTouchesOnBranch,
   findDuplicate, ingestFinding, rateFinding, readPortfolio, valueMetrics, portfolioFile, backfill,
   assignFindingDomain, coverageMap, autonomousEvidenceFor, methodClaimsDomain, methodTrust,
+  NON_CONTRIBUTING_METHOD_STATUSES,
 } from "../../docs/analysis/discovery-portfolio.mjs";
 import { carrierFile, resolveCarrierRoot } from "../../docs/analysis/discovery-experience-ledger.mjs";
 
@@ -547,6 +548,16 @@ test("(b) coverage: a retired or contaminated method adds nothing; a live one do
   assert.equal(methodClaimsDomain({ applicability: { domain_signals: ["a shared mutable artifact"], preconditions: ["x"] } }, "state-transitions"), null);
   assert.equal(methodClaimsDomain({ applicability: sig }, "state-transitions"), "state transitions");
   assert.equal(methodTrust({ status: "retired" }, { contaminatedVerdictIds: [] }).why, "RETIRED");
+  // The contribution rule is an inspectable list, not an inline comparison: `retired` is the only
+  // NON-contributing status, so a status the registry adds later (`trial`) is a pre-active method that
+  // lifts a domain to `assisted` rather than silently dropping out. An UNRECOGNISED status is refused,
+  // not counted — that is the half that must fail closed.
+  assert.deepEqual(NON_CONTRIBUTING_METHOD_STATUSES, ["retired"]);
+  assert.deepEqual(methodTrust({ status: "trial" }), {
+    method_id: null, version: null, status: null, verdict_ref: null,
+    contaminated: false, contributes: false, why: "STATUS_NOT_IN_VOCAB",
+  });
+  assert.equal(methodTrust({ status: "active" }, { contaminatedVerdictIds: [] }).contributes, true);
 
   // With only the retired and contaminated methods present, the same domain grades `none` — the 1-versus-2
   // arm proves the two refusals above are checks and not a blanket refusal of every method.

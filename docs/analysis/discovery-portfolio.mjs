@@ -983,6 +983,15 @@ export function methodClaimsDomain(rec, domain) {
   return aliases.find((a) => text.includes(a.toLowerCase())) ?? null;
 }
 
+/** The method statuses that contribute NO coverage. `retired` is the registry's own "stop applying
+ *  this". Every OTHER declared status is a method the system may still apply (`active`) or is still
+ *  validating (`draft`, and `trial` when the registry gains it) ⇒ it can lift a domain to `assisted`,
+ *  never to `autonomous` (which needs a finding, not a method).
+ *  ⛔ A status outside `METHOD_STATUSES` contributes NOTHING — `methodTrust` reports it as `null` with
+ *  `STATUS_NOT_IN_VOCAB`, so a status this reader cannot classify is never silently counted as fine
+ *  (硬规则 3b). */
+export const NON_CONTRIBUTING_METHOD_STATUSES = Object.freeze(["retired"]);
+
 /**
  * A method's TRUST state for coverage purposes. PURE. A method contributes coverage only while it is
  * neither `retired` nor on the contaminated-verdict ledger (Plan 4) — a retired method is one the
@@ -1000,10 +1009,10 @@ export function methodTrust(rec, { contaminatedVerdictIds: ids = null } = {}) {
     status,
     verdict_ref: verdictRef,
     contaminated: onContaminatedList,
-    contributes: status !== null && status !== "retired" && !onContaminatedList,
+    contributes: status !== null && !NON_CONTRIBUTING_METHOD_STATUSES.includes(status) && !onContaminatedList,
     why: status === null ? "STATUS_NOT_IN_VOCAB"
-      : status === "retired" ? "RETIRED"
-        : onContaminatedList ? "CONTAMINATED_PROMOTION"
+      : onContaminatedList ? "CONTAMINATED_PROMOTION"
+        : NON_CONTRIBUTING_METHOD_STATUSES.includes(status) ? "RETIRED"
           : `CONTRIBUTES:${status}`,
   };
 }
