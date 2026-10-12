@@ -16,11 +16,11 @@ import { execFileSync, spawn } from "node:child_process";
 
 import {
   EXPERIENCE_LEDGER_REL, EXPERIENCE_KIND, EXPERIENCE_ROLES, REPORTED_BY_VOCAB, MIN_SUMMARY_CHARS,
-  REQUIRED_EXPERIENCE_FIELDS, ROLE_VERDICT_COMPAT, DISCOVERY_CARRIERS,
+  REQUIRED_EXPERIENCE_FIELDS, ROLE_VERDICT_COMPAT,
   SHARED_CHECKOUT_UNRESOLVED, DUPLICATE_ID, CARRIER_NOT_TORN,
   ledgerFile, validateExperienceRecord, appendExperienceRecord, readExperienceLedger,
   ingestFeedback, ingestFromEvidenceStoreOutcome, experienceDenyList, scanExperienceLeak,
-  experienceRecordId, resolveCarrierRoot, carrierFile, appendCarrierLine, readCarrier, repairCarrier,
+  experienceRecordId, resolveCarrierRoot, repairCarrier,
 } from "../../docs/analysis/discovery-experience-ledger.mjs";
 import { appendOutcomeRecord, storeFile, sha256 } from "../../docs/analysis/architecture-evidence-store.mjs";
 // The CANONICAL shared-checkout resolver (`plugin/scripts/per-task-suite-record.ts`). The ledger module
