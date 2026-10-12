@@ -564,13 +564,29 @@ export function parseHypotheses(stdout) {
 
 // ── investigator (injectable runner) ─────────────────────────────────────────────────────────────────
 /**
- * Run N identical investigator calls. Refuses (no model call) unless cwd is the neutral dir.
+ * Run N identical investigator calls.
+ *
+ * TWO CWD POLICIES, and the caller must say which one it wants (task
+ * gap-open-semantic-discovery-routine-track). The BLIND policy (the default, `pinDir:null`) is unchanged
+ * and is what the controlled experiments use: the run happens in an EMPTY neutral directory, so the model
+ * has no repository to read and reasons over the prompt alone.
+ * ⛔ The PINNED policy (`pinDir` given) is a DIFFERENT experiment, not a relaxation: the model is rooted at
+ * a STRIPPED pinned tree and reads real source with tools. It is gated by the SAME three-valued discipline
+ * `runVerifier` uses — `verifyCwdRefusal` checks BOTH that cwd === the pin AND that the pin really is
+ * stripped (naming which forbidden directories are still present), because "the caller named a directory"
+ * proves nothing about the tree. Two policies, two checks: one gate for both would let a blind experiment
+ * silently become a source-reading one.
  * @param {object} o
  * @param {(prompt:string, i:number)=>Promise<object>} o.runModel  INJECTABLE: the only model seam
  * @param {(file:string, text:string)=>void} o.writeFile           INJECTABLE fs seam (recorded in tests)
+ * @param {string|null} o.pinDir   the stripped pinned tree; `null` ⇒ the blind neutral-dir policy
+ * @param {string} o.tools         the tool envelope the CALLER will launch with (recorded on each run, so
+ *                                 "what could this run read?" travels with the record instead of living
+ *                                 only in the caller's argv)
+ * @param {number|null} o.maxTurns the caller's `--max-turns` (same reason)
  */
-export async function runInvestigator({ prompt, neutralDir, cwd, runs = 3, runModel, outDir, writeFile, budget = {}, model = null, promptFile = null, promptFileSha256 = null, inventorySha256 = null }) {
-  const refusal = neutralCwdRefusal(cwd, neutralDir);
+export async function runInvestigator({ prompt, neutralDir, cwd, runs = 3, runModel, outDir, writeFile, budget = {}, model = null, promptFile = null, promptFileSha256 = null, inventorySha256 = null, pinDir = null, tools = "", maxTurns = null }) {
+  const refusal = pinDir === null ? neutralCwdRefusal(cwd, neutralDir) : verifyCwdRefusal(cwd, pinDir);
   if (refusal) return { ok: false, code: EXIT.cwdNotNeutral, reasons: [refusal] };
   const maxRuns = budget.maxRuns ?? null;
   if (maxRuns !== null && runs > maxRuns) {
@@ -596,6 +612,9 @@ export async function runInvestigator({ prompt, neutralDir, cwd, runs = 3, runMo
       // Which prompt file produced this run, and the hashes binding it: the prompt file's own hash and the
       // inventory's, so the run stays joinable to its pre-registration even without the composite digest.
       model, prompt_file: promptFile, prompt_file_sha256: promptFileSha256, inventory_sha256: inventorySha256,
+      // Which cwd policy governed this run and what it could read: `null` pin = the blind neutral policy.
+      // Recorded here (not only in the caller) so a run file says by itself whether the model had source.
+      pin_dir: pinDir, tools, max_turns: maxTurns,
       // The model identity (requested vs ACTUAL) and the call's cost, read structurally from the stream.
       ...modelCallFields({ requested: model, stdout }),
       exit: r?.status ?? null,
