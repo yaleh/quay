@@ -330,10 +330,10 @@ Candidate × holdout — every pairing:
 ["multi-writer-guard-equivalence@2", "shared-contract-divergence@6"]
 ```
 
-registry before → after:
+registry before → after (verbatim from `ev/stage3.json`):
 
 ```
-before: ["carrier-persistence-check@1:draft","Shared-contract-divergence@1:draft", …, "non-substantive-verdict-triage@9:retired", "composite-subject-verdict-decomposition@2:retired"]
+before: ["carrier-persistence-check@3:draft","composite-subject-verdict-decomposition@2:retired","multi-writer-guard-equivalence@1:draft","non-substantive-verdict-triage@9:retired","shared-contract-divergence@3:draft"]
 after : ["carrier-persistence-check@3:draft","composite-subject-verdict-decomposition@2:retired","multi-writer-guard-equivalence@2:active","non-substantive-verdict-triage@9:retired","shared-contract-divergence@6:active"]
 ```
 
