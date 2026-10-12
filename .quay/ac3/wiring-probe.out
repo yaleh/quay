@@ -1,3 +1,0 @@
-{"present":true,"error":null,"enabled":true,"intervalMinutes":360,"maxExperiences":8,"maxModelCalls":6,"maxWallMs":900000}
-{"name":"discovery-method","schedule":{"kind":"interval","minutes":360}}
-{"modelSeamOk":true,"modelId":"v4.1flash-anthropic","reason":null}
