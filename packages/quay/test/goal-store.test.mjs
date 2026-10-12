@@ -903,6 +903,36 @@ test("AC4 (P6) — 激活不可评估 criterion 的 AC 被拒（stderr 含 not-e
   assert.equal(JSON.parse(n(["get", "AC-021"]).stdout).status, "active");
 });
 
+// ── gap-goal-driver-hardcoded-120s-spawn-kill-preempts-record-timeout-and-orphans-goal-locks AC3 ──
+// 激活闸（P6）的 deadline 必须与 `goal gate` 用**同一条** record-aware 优先级：record 的 `timeoutMs`
+// 在 env/default 之上。改动前激活读的是 record-IGNORING 的 `resolveAcceptanceTimeoutMs()`，于是
+// env（或缺省 60s）会盖过 record 自己声明的截止——两条路径的优先级阶梯不一致（硬规则 5b）。
+test("AC3: 激活的 criterion deadline 认 record 的 timeoutMs（record > env）；无 record 字段 ⇒ env 生效并判 not-evaluated", () => {
+  const root = tmpDir("cli-ac3-record-timeout");
+  fs.mkdirSync(path.join(root, ".quay"), { recursive: true });
+  fs.mkdirSync(path.join(root, "goals"), { recursive: true });
+  // 一条 active GOAL（激活闸要求 AC 名下 GOAL 存在；本测试的对象是 AC 的 criterion deadline）。
+  fs.writeFileSync(path.join(root, "goals", "GOAL-001-t.md"),
+    "---\nid: GOAL-001\ntitle: t\nstatus: active\nkind: goal\norigin: o\n---\nbody\n", "utf8");
+  const cli = (cmd, env) => runCli([...cmd, "--root", root], env ? { env: { ...process.env, ...env } } : {});
+
+  // ① record 声明 timeoutMs:5000，criterion 睡 2s，而 QUAY_ACCEPTANCE_TIMEOUT_MS=1000 ⇒ record 赢 ⇒ 放行。
+  fs.writeFileSync(path.join(root, "goals", "AC-001-t.md"),
+    "---\nid: AC-001\ntitle: t\nstatus: draft\nkind: criterion\ngoal: GOAL-001\ncriterion: |\n  sleep 2; exit 0\nexpect: e\norigin: o\ntimeoutMs: 5000\n---\nbody\n", "utf8");
+  const withRecord = cli(["write", "AC-001", "--status", "active"], { QUAY_ACCEPTANCE_TIMEOUT_MS: "1000" });
+  assert.equal(withRecord.status, 0, `record 的 timeoutMs 必须胜出（5s > 2s）⇒ 激活成功；实测 ${withRecord.stdout}${withRecord.stderr}`);
+  assert.equal(JSON.parse(cli(["get", "AC-001"]).stdout).status, "active", "激活已落盘");
+
+  // ② 负控制：同样睡 2s，但【无 record 字段】⇒ env=1000 生效 ⇒ 超时 ⇒ not-evaluated ⇒ 拒。
+  fs.writeFileSync(path.join(root, "goals", "AC-002-t.md"),
+    "---\nid: AC-002\ntitle: t\nstatus: draft\nkind: criterion\ngoal: GOAL-001\ncriterion: |\n  sleep 2; exit 0\nexpect: e\norigin: o\n---\nbody\n", "utf8");
+  const noRecord = cli(["write", "AC-002", "--status", "active"], { QUAY_ACCEPTANCE_TIMEOUT_MS: "1000" });
+  assert.notEqual(noRecord.status, 0, `无 record 字段 ⇒ env=1000 生效 ⇒ 超时拒；实测 ${noRecord.stdout}${noRecord.stderr}`);
+  assert.match(noRecord.stderr, /not-evaluated/, "超时 ⇒ not-evaluated（⛔ 不是 fail）");
+  assert.match(noRecord.stderr, /timed out after 1000ms/, "原因点名实际生效的 deadline（1000ms，env 的）");
+  assert.equal(JSON.parse(cli(["get", "AC-002"]).stdout).status, "draft", "被拒的激活不写状态");
+});
+
 // ── gap-activation-gates-bypassed-on-reopen-path-non-draft-to-active：重开路径（非 draft→active）
 // 也必须过三道激活闸。改动前 `activating` 只认 draft→active ⇒ achieved/needs-human → active 一道闸都
 // 不触发（实测占激活总数 ~19%）。这里逐条在【真实 CLI】上跑（⛔ 非纯 import 单测）。

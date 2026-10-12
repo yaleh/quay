@@ -3,7 +3,7 @@ id: gap-goal-driver-hardcoded-120s-spawn-kill-preempts-record-timeout-and-orphan
 title: "cross-project: goal-driver/meta-driver hard-coded 120s SIGKILL pre-empts
   record timeoutMs on gate + activation (which also ignores record timeoutMs)
   and orphans goals/<id>.lock that blocks fan-in ff — 104 kills in 4 projects"
-status: ready
+status: done
 labels:
   - gap
   - defect
@@ -64,9 +64,11 @@ That is **4 independent host projects, 104 SIGKILLs**.
 - [x] AC3 (activation precedence): record `timeoutMs: 5000`, criterion `sleep 2; exit 0`, `QUAY_ACCEPTANCE_TIMEOUT_MS=1000` ⇒ `goal write <id> --status active` succeeds (record wins). Without the record field it is refused as not-evaluated(timeout). Paste both.
   - `packages/quay/test/goal-store.test.mjs`: `✔ AC3: 激活的 criterion deadline 认 record 的 timeoutMs（record > env）；无 record 字段 ⇒ env 生效并判 not-evaluated (3236.175625ms)`. Positive: AC-001 (`timeoutMs: 5000`, criterion `sleep 2`) activates **exit 0** although the env is only 1000 (the record is the top of the chain). Negative control: AC-002 (same `sleep 2`, NO record field) is refused with `cannot activate AC-002: criterion not-evaluated (acceptance timed out after 1000ms (killed) — …)`, status stays `draft`.
   - ⚠️ This required one deliberate semantic tightening at the P6 site: a TIMEOUT used to be ALLOWED at activation ("a timeout is a definitive fail ⇒ evaluable"). Under the record-aware deadline that reasoning is dead (a timeout is `not-evaluated`, not a fail), and letting it through ACTIVATES a criterion that then re-runs and times out every round forever — the exact pathology of the parent finding. The gate now refuses when `code === null || timedOut`; `--force` still overrides. fail / exit-3 / exit-126 cases are unchanged (they keep their exit codes).
+  - ⚠️ SAME-ROUND CONSEQUENCE (2026-10-13): `packages/quay/test/goal-criterion-timeout-resolution.test.mjs` AC6(c) pinned that old allowance VERBATIM (`a timeout is a definitive verdict ⇒ evaluable ⇒ activation allowed`) and therefore went red on the untouched tree; it is re-anchored to the new semantics and DECLARED in Touches. Its killed arm now reads the refusal — `assert.notEqual(status, 0)` + `cannot activate AC-905: criterion not-evaluated (acceptance timed out after 1000ms …)`, a reading a literal 60 s bound structurally cannot produce — and its elapsed arm moved onto the record rung (`AC-906`, record `timeoutMs: 5000` outranking the 1000 ms env ⇒ `pass`, elapsed ≥1900 ms). Negative control (P6 site reverted to `resolveAcceptanceTimeoutMs()`): `✖ AC6(c) — 激活检查走同一解析来源：解析后的界（而非字面 60s）决定激活是否被接受`, red at the AC-906 arm; restored ⇒ `✔` green, `git status` clean.
 - [x] AC4 (lock): kill a goal-store `write` child while it holds `withFileLock` through the driver's spawn path ⇒ no `goals/<id>.lock` remains. Separately, `ff-merge` `cleanTreeCheck` on a tree whose only untracked file is `goals/AC-001.lock` returns clean. Negative control for each (paste).
   - `plugin/test/goal-driver-s01.test.mjs`: `✔ AC4: 驱动杀掉持锁的 activate 子进程 ⇒ 孤儿 goals/<id>.lock 被按 pid 清除；pid 不匹配不删 (3511.164069ms)`. End-to-end (real spawn path): a draft AC whose criterion is `sleep 5` is activated with a short outer bound ⇒ the child is SIGTERM→SIGKILL'd while holding the lock (the test first asserts it really HELD it — `前置：子进程必须真的持有过 goals/AC-001.lock`), `write spawn error: spawn timeout` is returned, and NO `goals/AC-001.lock` remains. Negative control (pid guard, direct): a lock containing pid `999999` is NOT removed when asked to remove pid `424242`; it IS removed when the pid matches.
   - `packages/quay/test/ff-merge.test.mjs`: `✔ cleanTreeCheck — goals/<id>.lock 是 manifest 运行产物 ⇒ clean；非 manifest 的未跟踪文件仍拒 (54.975037ms)`. Real temp git tree whose ONLY untracked file is `goals/AC-001.lock` (the production shape — `goals/*.md` are tracked, so git lists the lock individually rather than collapsing the dir) ⇒ `ok:true`. Negative control: the same shape at a path NOT in the manifest (`residue.lock`) ⇒ `ok:false` with the path named — so the pass-through comes from the manifest pattern, not a blanket allowance. (Manifest gained `goals/*.lock`, `adr/*.lock`, `docs-managed/*.lock`, `meta/*.lock`; each carries its `@quay-runtime-artifact` marker in `.gitignore`, asserted equal by `gitignore-runtime-coverage-check.test.mjs`.)
+  - ⚠️ SAME-ROUND CONSEQUENCE: the manifest change propagates into the block `quay-init` appends to a consumer `.gitignore`, so `plugin/test/quay-init-characterization.test.mjs`'s fresh-install `.gitignore` hash pin re-anchored `f9e6655a…` → `744f2416…` (the other FIVE files in that pinned surface hash unchanged — the targeted cross-check); it is likewise DECLARED in Touches.
 - [x] AC5 (help): `quay goal gate --help` output contains the record `timeoutMs` and `not-evaluated`. Paste the lines.
   - `node --experimental-strip-types packages/quay/bin/quay.ts goal gate --help` (the gate section):
     `The kill deadline (resolveAcceptanceTimeout) is:`
@@ -97,11 +99,5 @@ That is **4 independent host projects, 104 SIGKILLs**.
 - packages/quay/test/goal-store.test.mjs
 - packages/quay/test/ff-merge.test.mjs
 - plugin/test/goal-driver-s01.test.mjs
-
-## Blocker
-
-**2026-10-12T17:14:52.685Z — worker 未落地（exited-not-landed）**
-
-- 未落地原因：step=suite: AssertionError [ERR_ASSERTION]: a timeout is a definitive verdict ⇒ evaluable ⇒ activation allowed:
-- run_id：wk-prod-anchor
-- session_id：769b3c4c-ccf7-4211-9d0a-204d0ca35e86
+- packages/quay/test/goal-criterion-timeout-resolution.test.mjs
+- plugin/test/quay-init-characterization.test.mjs
