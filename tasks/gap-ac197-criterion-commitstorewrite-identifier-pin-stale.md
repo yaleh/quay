@@ -443,3 +443,200 @@ $ node packages/quay/bin/quay.js goal check --stale-pass --sweep --budget 1
 
 1. **`criterionHash` 不是 `goal gate` 写的。** 实测 `goal gate` 事件（`actor: goal-cli`）的 payload 只有 `reason` / `evaluationRoot` / `treeSha`；`payload.criterionHash` 只由**轮转**路径写（`sweepFrozen`，`packages/quay/src/goal-store.ts:2438/2477`）。所以本条的读数由「一次 `goal gate` + 一次有界 `check --stale-pass --sweep --budget 1`」共同产出 —— 后者正是 DoD2 所指的「`criterionHash` 与修订前不同」的那个写者。⛔ 一条 dry-run 输出**不算**，本次两条都是真跑（`dryRun: false`）。
 2. **worktree 台账不是持久证据。** 轮转的**修订优先**路径要求该 AC 已有一条**带旧 hash** 的轮转事件（`amendedIds`，`goal-store.ts:2334-2360`）；本 worktree 的台账原本是空的，故先把**生产台账里 AC-197 的 381 条真实历史事件逐字**（含 `e8559bfa` 那条旧 hash 轮转事件）落在本 worktree 台账里，再跑上述两步。持久的那份是**生产 checkout** 的台账：重锚版 `goals/AC-197-*.md` 随 fan-in 落进 develop、`syncDevelopToDoc` 进生产 checkout 后，**生产轮转按同一条修订优先路径**机械地把尾事件翻成新 hash 的 pass —— 与同族 `gap-ac289-criterion-cmdline-port-literal-stale` 记录的收敛形态相同（其 AC6 亦按此读法）。
+
+## Evidence
+
+（除注明「生产」者，本轮读数 cwd = 本任务 worktree `/data/home/yale/work/quay-worktrees/gap-ac197-criterion-commitstorewrite-identifier-pin-stale`）
+
+### AC1 —— criterion 已重锚，强度未降（⛔ 经 `quay goal write` 落库，非手工 Edit）
+
+**红基线**（Plan 步骤 1，重锚前同一时刻）：
+
+```
+$ node packages/quay/bin/quay.js goal gate AC-197 --dry-run --json
+"verdict": "fail",
+"payload": { "reason": "acceptance failed (exit 1) — CAUSE=commitStoreWrite-not-in-all-5 — 经 commitStoreWrite 提交的 store 文件数 n=1 ≠ 5（五种 kind：tasks/goals/meta/adr/docs-managed）" }
+
+$ for f in packages/quay/src/goal-store.ts packages/quay/src/meta-store.ts \
+           packages/quay/src/adr-store.ts packages/quay/src/document-store.ts \
+           packages/quay-native/src/store.ts; do printf '%s %s\n' "$f" "$(grep -c commitStoreWrite "$f")"; done
+packages/quay/src/goal-store.ts                0
+packages/quay/src/meta-store.ts                0
+packages/quay/src/adr-store.ts                 0
+packages/quay/src/document-store.ts            0
+packages/quay-native/src/store.ts              4      ← 唯一命中 ⇒ n=1
+```
+
+**identifier 键已消失**：`grep -c 'grep -l commitStoreWrite' goals/AC-197-*.md` ⇒ 重锚前 **1** / 重锚后 **0**。
+
+**落库**（⛔ 非手工 Edit）：`node packages/quay/bin/quay.js goal write AC-197 --criterion "$(cat <新 criterion>)" --expect … --origin …`
+⇒ store-commit `33e76b8a7 goals: AC-197 field:criterion,expect,origin by cli:3180872`
+（`1 file changed, 121 insertions(+), 7 deletions(-)`，单文件 `goals/AC-197-*.md`）。
+读回**逐字节相同**（frontmatter 解析后与源文件全等，`EQUAL: true`）⇒ YAML 折行标量没有损坏脚本 —— 这也是 `goal gate` 能跑通的实质原因。
+
+**变更面**（`git show 33e76b8a7 | grep -E '^[+-][a-zA-Z]+:'`）：仅 `criterion`（`|` 块 → `>-` 折行块）、`expect`、`origin` 三个顶层键。`status: achieved` / `title` / `goal: GOAL-008` 逐字未动。
+
+**新谓词（结构，非标识符）**：① 原语模块 `packages/quay/src/store-commit.ts` 导出四态原语 `commitStoreWrite` 且导出每 kind 包装 `commitKindFile`，且后者在自身函数体内**委托**前者（awk 抽取函数体后 `grep -q 'commitStoreWrite('`）；② 五个 store 文件**各自**「依赖 `store-commit.ts` ∧ 出现一次 `commit(StoreWrite|KindFile|StoreBatch)(` 调用点」。承载体 = `# >>> five-kind-wiring` … `# <<< five-kind-wiring` marker 块，块首注明逐字由 `packages/quay/test/ac197-criterion-five-kind-wiring.test.mjs` 运行。
+
+**过报方向如实写进注释**（⛔ 未靠放宽成立，也未假称精确）：`grep -q 'store-commit\.ts'` 会同时命中注释里提到该模块的行 —— 该已知过度包含面已逐字写入 criterion 的 `⚠️ KNOWN OVER-INCLUSION` 段。
+
+### AC2 —— 判据能取假：四个负控制，成因两两不同形
+
+（全部在 `git init` 过的**临时 root** 上做，root 内是生产文件的真实拷贝；⛔ 未改动任何生产文件）
+
+| # | 突变 | exit | 逐字 stderr |
+|---|---|---|---|
+| ① | `packages/quay/src/meta-store.ts` 去掉调用点、**保留** `import … from "./store-commit.ts"` | **1** | `CAUSE=store-commit-call-site-missing-in-all-5 — 依赖并调用共享原语的 store 文件数 n=4 ≠ 5（五种 kind：tasks/goals/meta/adr/docs-managed）` |
+| ② | 临时副本的 `commitKindFile` 函数体改为 `return "unchanged";`（**第二套并行原语**） | **1** | `CAUSE=second-primitive — commitKindFile 未委托 commitStoreWrite（出现第二套并行原语）` |
+| ③ | 原语模块 `export function commitStoreWrite` → `function commitStoreWrite` | **1** | `CAUSE=primitive-missing — packages/quay/src/store-commit.ts 未导出四态原语 commitStoreWrite` |
+| ④ | 原语模块 `export function commitKindFile` → `function commitKindFile` | **1** | `CAUSE=wrapper-missing — packages/quay/src/store-commit.ts 未导出每 kind 包装 commitKindFile` |
+
+① 的突变只动调用面（`import` 行逐字保留，实测 `39:import { commitKindFile } from "./store-commit.ts";` 与 `199:` 的注释都还在）⇒ 「只 import 不调用」被**调用面那一半合取**抓住，⛔ 不是靠「文件里提到某词」。
+② 的成因与 ① **不同形**：① 说的是**调用点缺**（n=4），② 说的是**原语被分叉**（包装不再委托）—— 夹具断言 ② 的 stderr 不含 ① 的 token（`assert.doesNotMatch`）。
+正控制：未突变 root ⇒ `OK — one shared store-commit primitive (commitStoreWrite + delegating commitKindFile) and 5/5 store kinds wired to it (module dependency + call site each)`，`EXIT=0`。
+
+### AC3 —— 正控制：`quay goal gate AC-197` 在真实树上 exit 0
+
+```
+$ node packages/quay/bin/quay.js goal gate AC-197
+{
+  "id": "AC-197",
+  "verdict": "pass",
+  "cause": null,
+  "reason": "acceptance passed (exit 0)",
+  "timeoutMs": 60000,
+  "timestamp": "2026-10-12T18:09:26.728Z",
+  "dryRun": false,
+  "event": { "actor": "goal-cli", "verdict": "pass",
+             "payload": { "reason": "acceptance passed (exit 0)",
+                          "evaluationRoot": "…/quay-worktrees/gap-ac197-criterion-commitstorewrite-identifier-pin-stale",
+                          "treeSha": "04b97218cfa0e02375c1ce370ba2d2a6c95fd18e" } }
+}
+EXIT=0
+```
+
+### AC4 —— 保证为真的直接量：五 kind 真实写盘往返
+
+**tasks**（本任务自身的 ABI 写入 ⇒ `tasks/*.md` 的 store-commit 形状提交，于主检出 `author`）：
+
+```
+$ git log -1 --format='%h %s' -- tasks/gap-ac197-criterion-commitstorewrite-identifier-pin-stale.md
+32a13d897 tasks: gap-ac197-criterion-commitstorewrite-identifier-pin-stale task_write by cli:3474421
+$ git show author:tasks/gap-ac197-…md | grep -c '^- \[x\]'
+6
+```
+
+**goals**（新 criterion 的落库 ⇒ `goals/*.md` 的 store-commit 形状提交）：
+
+```
+$ git log -1 --format='%h %s' -- goals/AC-197-*.md
+33e76b8a7 goals: AC-197 field:criterion,expect,origin by cli:3180872
+```
+
+**meta / adr / docs-managed** —— 各在**独立 `git init` 过的临时 root** 里驱动一次真实 `write()`（`createMetaStore` / `createAdrStore` / `createDocumentStore`），贴提交与干净工作树读数：
+
+```
+--- meta         root /tmp/ac197-ac4-meta-*     commit 5c82a6f meta: META-001 create by cli:3315476
+                 stat meta/META-001-ac197-five-kind-wiring-probe.md | 8 ++++++++
+                 status --porcelain meta : ""          (空 = 干净)
+--- adr          root /tmp/ac197-ac4-adr-*      commit 8676900 adr: ADR-001 create by cli:3315476
+                 stat adr/ADR-001-ac197-five-kind-wiring-probe.md | 7 +++++++
+                 status --porcelain adr : ""           (空 = 干净)
+--- docs-managed root /tmp/ac197-ac4-doc-*      commit 475e8d6 docs-managed: DOC-001 create by cli:3315476
+                 stat docs-managed/DOC-001-ac197-five-kind-wiring-probe.md | 9 +++++++++
+                 status --porcelain docs-managed : ""  (空 = 干净)
+```
+
+⛔ 未向本仓塞入任何假的 adr / docs-managed 载体 —— 三个 kind 的载体都在私有 mkdtemp root 内创建、跑完即删。「谓词绿」与「保证为真」是两件事：上面三条各是**一次真实 add+commit** 的产物，不是 grep 回声。
+
+### AC5 —— 不回归 + 结构零回退
+
+```
+$ bash scripts/test.sh --for-task gap-ac197-criterion-commitstorewrite-identifier-pin-stale --allow-thin
+SCOPED_GATE_EXIT=0     （夹具 7/7 pass：正控制 2 + 负控制 4 + 不回退守卫 1；9 条 static check 全 PASS）
+```
+
+⚠️ **AC5① 逐字（不带 `--allow-thin`）的读数是 exit 1，如实写出**：
+
+```
+$ bash scripts/test.sh --for-task gap-ac197-criterion-commitstorewrite-identifier-pin-stale
+… （夹具 7/7 pass 照跑）
+scripts/test.sh: --for-task … — test-selection-thin (selector exit 1); re-run with --allow-thin to suppress
+EXIT=1
+
+$ node --no-warnings --experimental-strip-types plugin/scripts/select-tests-for-touches.ts --root <wt> --task gap-ac197-…
+task gap-ac197-…: 1 test file(s)
+  packages/quay/test/ac197-criterion-five-kind-wiring.test.mjs
+unresolved (2):
+  goals/AC-197-kind-tasks-goals-meta-adr-docs-managed-commitstorewrite-5.md — no */test/<goal-basename>.test.mjs found
+  tasks/gap-ac197-criterion-commitstorewrite-identifier-pin-stale.md — no */test/gap-ac197-….test.mjs found
+coverage: 0.33 (1/3 Touches resolved)
+test-selection-thin: … resolved tests for 1/3 Touches entries (0.33) < 0.5; pass --allow-thin to run anyway
+SELECTOR_EXIT=1
+```
+
+⇒ 这是**选择层**的拒绝（Touches 里两条是 goal / task 文件，按 basename 找不到同名测试 ⇒ 覆盖率 0.33 < 0.5 阈值），⛔ **不是测试失败**：同一命令照跑了选出的 7 个用例且全绿。该阈值对**本任务 Touches 的既定形态**（goal 文件 + 任务文件 self-touch）结构性必然触发，与本次改动无关；`--allow-thin` 正是 driver fan-in 自己用的旗标（`scripts/test.sh:1693` 的注释与 fan-in 调用同源）。⇒ AC5① 按字面在本 Touches 下不可满足；本条按 **fan-in 实际执行的那条命令**（`--allow-thin`）判绿，并把逐字读数与成因留在这里，⛔ 不作静默替换。
+
+$ grep -c 'function commitKindFile' packages/quay/src/goal-store.ts packages/quay/src/meta-store.ts \
+        packages/quay/src/adr-store.ts packages/quay/src/document-store.ts
+packages/quay/src/adr-store.ts:0
+packages/quay/src/document-store.ts:0
+packages/quay/src/goal-store.ts:0
+packages/quay/src/meta-store.ts:0          ← 四份 per-kind 拷贝未被恢复
+$ grep -c 'export function commitKindFile' packages/quay/src/store-commit.ts
+1                                          ← 包装仍只有一处
+```
+
+附带（⛔ 不在 AC 内，仅确认未回退 943ef47f6）：`packages/quay/src/store-commit.ts` 里 `do not "restore" a per-kind prefix here` 的禁令注释仍在（`grep -c` = 1）。
+
+### AC6 —— 新指纹落账（`payload.criterionHash`）
+
+修前（**生产** checkout `/data/home/yale/work/quay` 台账，逐字）：
+
+```
+{"id":"e8559bfa-…","item_id":"AC-197","gate":"goal","actor":"goal-sweep","verdict":"fail",
+ "timestamp":"2026-10-12T17:51:11.915Z",
+ "payload":{"reason":"acceptance failed (exit 1) — CAUSE=commitStoreWrite-not-in-all-5 — 经 commitStoreWrite 提交的 store 文件数 n=1 ≠ 5（…）",
+            "criterionHash":"5a7dc1fc29c3b9a3","evaluationRoot":"/data/home/yale/work/quay","treeSha":"4656ab15…"}}
+```
+
+修后（本 worktree 台账尾事件，同一次 `goal gate` + 有界轮转步之后）：
+
+```
+$ node packages/quay/bin/quay.js goal gate AC-197
+$ node packages/quay/bin/quay.js goal check --stale-pass --sweep --budget 1
+{"frozenScope":171,"evaluated":true,"failing":[],"staleUnverified":[],
+ "notEvaluated":[],"verifiedFresh":["AC-197"],"amendedUnverified":[],…}   EXIT=0
+
+{"id":"3fa37ce7-…","item_id":"AC-197","gate":"goal","actor":"goal-amend","verdict":"pass",
+ "timestamp":"2026-10-12T18:10:51.860Z",
+ "payload":{"reason":"acceptance passed (exit 0)","criterionHash":"1e3db4143593300b",
+            "evaluationRoot":"…/quay-worktrees/gap-ac197-criterion-commitstorewrite-identifier-pin-stale",
+            "treeSha":"04b97218cfa0e02375c1ce370ba2d2a6c95fd18e"}}
+```
+
+⇒ 尾事件 `verdict:"pass"` 且 `criterionHash = 1e3db4143593300b` **≠ `5a7dc1fc29c3b9a3`**。
+
+第二次真跑（同一会话末、最终 HEAD 上重取一次，证明它是**可复算的**而非一次性读数）：
+
+```
+$ node packages/quay/bin/quay.js goal gate AC-197
+"verdict": "pass",   "timestamp": "2026-10-12T18:17:59.250Z"
+$ node packages/quay/bin/quay.js goal check --stale-pass --sweep --budget 1
+{"frozenScope":171,"evaluated":true,"failing":[],"staleUnverified":[],"verifiedFresh":["AC-197"],…}   EXIT=0
+
+{"id":"13e3a754-…","item_id":"AC-197","gate":"goal","actor":"goal-amend","verdict":"pass",
+ "timestamp":"2026-10-12T18:17:59.781Z",
+ "payload":{"reason":"acceptance passed (exit 0)","criterionHash":"1e3db4143593300b",
+            "evaluationRoot":"…/quay-worktrees/gap-ac197-criterion-commitstorewrite-identifier-pin-stale",
+            "treeSha":"2d91e4120efc57567e445e9048900ceee4ba48da"}}   ← = 本轮最终 HEAD 的 tree
+```
+
+两次独立真跑给出**同一个新指纹** `1e3db4143593300b`（≠ 旧 `5a7dc1fc29c3b9a3`）。
+
+**⚠️ 三条如实说明（都不影响上述读数为真，但不写就是隐藏）：**
+
+0. **这两行是「取数当时」的读数，本 worktree 台账随后被 `refresh-worktree-quay.sh` 覆盖。** 该脚本由 `scripts/test.sh:283` 调用，把**生产 checkout 的 `.quay/` 整份拷进** worktree（clobber，非 no-clobber）⇒ 本会话随后按 AC5 要求跑 scoped 门时，上面两条事件所在文件被换成了生产台账的拷贝（实测：AC-197 尾事件变回 `2026-10-12T18:15:13.364Z / fail / 旧文本`，`grep -c 3fa37ce7…` = 0）。⇒ 上述两行**逐字留在本任务体内**（本文件才是持久载体），⛔ 且本 worktree 台账此刻**不是**本条的证据面。同族先例与同款处置：`gap-ac289-criterion-cmdline-port-literal-stale`（其台账被快照覆盖过两次，读数同样转存到任务体）。⛔ 复算方式写在这里：把生产台账里 AC-197 的全部事件拷进任一 root 的 `.quay/gate-events.jsonl`，再跑上面两条命令。
+
+1. **`criterionHash` 不是 `goal gate` 写的。** 实测 `goal gate` 事件（`actor: goal-cli`）的 payload 只有 `reason` / `evaluationRoot` / `treeSha`；`payload.criterionHash` 只由**轮转**路径写（`sweepFrozen`，`packages/quay/src/goal-store.ts:2438/2477`）。所以本条的读数由「一次 `goal gate` + 一次有界 `check --stale-pass --sweep --budget 1`」共同产出 —— 后者正是 DoD2 所指的「`criterionHash` 与修订前不同」的那个写者。⛔ 一条 dry-run 输出**不算**，本次两条都是真跑（`dryRun: false`）。
+2. **worktree 台账不是持久证据。** 轮转的**修订优先**路径要求该 AC 已有一条**带旧 hash** 的轮转事件（`amendedIds`，`goal-store.ts:2334-2360`）；本 worktree 的台账原本是空的，故先把**生产台账里 AC-197 的 381 条真实历史事件逐字**（含 `e8559bfa` 那条旧 hash 轮转事件）落在本 worktree 台账里，再跑上述两步。持久的那份是**生产 checkout** 的台账：重锚版 `goals/AC-197-*.md` 随 fan-in 落进 develop、`syncDevelopToDoc` 进生产 checkout 后，**生产轮转按同一条修订优先路径**机械地把尾事件翻成新 hash 的 pass —— 与同族 `gap-ac289-criterion-cmdline-port-literal-stale` 记录的收敛形态相同（其 AC6 亦按此读法）。
