@@ -736,7 +736,8 @@ export function appendTaskStatusEvent(root: string, event: TaskStatusEventInput)
     };
     const cause = event.cause && Object.keys(event.cause).length > 0 ? event.cause : undefined;
     const evidence =
-      event.evidence !== undefined && (event.evidence.commit !== undefined || event.evidence.statusBlobSha !== undefined)
+      event.evidence !== undefined &&
+      (event.evidence.commit !== undefined || event.evidence.statusBlobSha !== undefined || event.evidence.commitAbsentReason !== undefined)
         ? event.evidence
         : undefined;
     const record = withFileLock(taskStatusEventsLockPath(root), (): TaskStatusEventRecord => {

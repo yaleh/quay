@@ -337,9 +337,14 @@ test("(f) a v0 line is read as v0 — not rejected, not upgraded, and the v1 lin
     assert.equal(lines[0], V0_LINE, "the v0 line is untouched on disk");
 
     // An ABSENT carrier is its own answer, distinct from an empty one that was read.
-    const empty = readTaskStatusEventCarrier(fs.mkdtempSync(path.join(os.tmpdir(), "task-status-events-none-")));
-    assert.equal(empty.exists, false);
-    assert.deepEqual(empty.lines, []);
+    const clean = fs.mkdtempSync(path.join(os.tmpdir(), "task-status-events-none-"));
+    try {
+      const empty = readTaskStatusEventCarrier(clean);
+      assert.equal(empty.exists, false);
+      assert.deepEqual(empty.lines, []);
+    } finally {
+      fs.rmSync(clean, { recursive: true, force: true });
+    }
   } finally {
     fs.rmSync(root, { recursive: true, force: true });
   }
