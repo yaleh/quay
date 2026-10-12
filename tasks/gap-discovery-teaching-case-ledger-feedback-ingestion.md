@@ -2,7 +2,7 @@
 id: gap-discovery-teaching-case-ledger-feedback-ingestion
 title: "Discovery Method: unified Experience ledger (user + system sources) with
   auto-ingestion from evidence-store outcomes (Phase 1, generalized)"
-status: todo
+status: ready
 labels:
   - gap
   - architecture-discovery
