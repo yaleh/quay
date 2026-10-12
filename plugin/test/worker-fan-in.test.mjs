@@ -235,3 +235,101 @@ test("② develop target — unchanged path: no doc-face commit, the main checko
     "develop target: the done flip is on develop via the task-branch ff",
   );
 });
+
+// ── ③ the fan-in's status writes leave v1 transition events (AC(d) of
+//    tasks/gap-task-status-events-contract-v1-all-driver-writers) ────────────────────────────────
+//
+// Before that task the fan-in wrote ZERO events: 139 ready→done transitions in the reading window,
+// 0 events — the largest measured coverage hole. What is pinned here is not "a field exists" but
+// "the event's `evidence.commit` RESOLVES on the repo and names the commit whose diff flips that
+// task's status", which is the form the task's AC(d) asks for.
+
+/** The fan-in's transition events, read from the workspace carrier at `fx.repo/.quay/`. */
+function readTransitionEvents(fx) {
+  const file = path.join(fx.repo, ".quay", "task-status-events.jsonl");
+  if (!fs.existsSync(file)) return [];
+  return fs
+    .readFileSync(file, "utf8")
+    .split("\n")
+    .filter((l) => l.trim() !== "")
+    .map((l) => JSON.parse(l));
+}
+
+test("③ develop target — ONE v1 event for the ready→done flip, whose evidence.commit resolves to the flipping commit", async (t) => {
+  const fx = makeFixture("events-develop", { forkFrom: "develop" });
+  t.after(() => cleanup(fx));
+
+  const r = await runMechanicalFanIn(fanInOpts(fx, "fanin-events-develop", "develop"));
+  assert.equal(r.outcome, "landed", `fan-in must land (step=${r.step} reason=${r.reason})`);
+
+  const events = readTransitionEvents(fx);
+  assert.equal(events.length, 1, `one status change on this path ⇒ exactly ONE event; got ${JSON.stringify(events)}`);
+  const ev = events[0];
+  assert.equal(ev.schema, "task-status-event/v1");
+  assert.equal(ev.taskId, TASK);
+  assert.equal(ev.from, "ready");
+  assert.equal(ev.to, "done");
+  assert.equal(ev.kind, "promote");
+  assert.deepEqual(ev.actor, { kind: "fan-in", id: "worker-fan-in flipTaskDone" });
+  assert.equal(ev.cause.runId, "fanin-events-develop", "the cause names the fan-in round that wrote it");
+
+  // The evidence is CHECKABLE, not decorative: the sha exists on develop (the ff carried it there),
+  // and the diff at that commit flips THIS task's status to done with exactly the blob the event names.
+  assert.match(ev.evidence.commit, /^[0-9a-f]{40}$/);
+  assert.equal(
+    gitStatus(fx.repo, ["merge-base", "--is-ancestor", ev.evidence.commit, "develop"]), 0,
+    `evidence.commit ${ev.evidence.commit} must be an ancestor of develop (the flip was ff'd there)`,
+  );
+  assert.match(git(fx.repo, ["show", `${ev.evidence.commit}:tasks/${TASK}.md`]), /^status:\s*done$/m, "the evidencing commit carries status: done");
+  assert.equal(
+    ev.evidence.statusBlobSha,
+    git(fx.repo, ["rev-parse", `${ev.evidence.commit}:tasks/${TASK}.md`]),
+    "statusBlobSha is the blob hash of the task file at that commit",
+  );
+});
+
+test("③ reset shape — the 'done but not landed' rerun emits TWO events (done→ready, then ready→done)", async (t) => {
+  const fx = makeFixture("events-reset", { forkFrom: "develop" });
+  t.after(() => cleanup(fx));
+
+  // Put the worktree into the intermediate state the rerun must converge: done on the task branch,
+  // NOT landed on develop (gap-fan-in-flip-done-already-done-not-landed).
+  const wtTask = path.join(fx.worktree, `tasks/${TASK}.md`);
+  fs.writeFileSync(wtTask, fs.readFileSync(wtTask, "utf8").replace(/^status:\s*ready$/m, "status: done"), "utf8");
+  git(fx.worktree, ["add", "-A"]);
+  git(fx.worktree, ["commit", "-q", "-m", "flip done on the branch only"]);
+
+  const r = await runMechanicalFanIn(fanInOpts(fx, "fanin-events-reset", "develop"));
+  assert.equal(r.outcome, "landed", `fan-in must converge and land (step=${r.step} reason=${r.reason})`);
+
+  const events = readTransitionEvents(fx);
+  assert.deepEqual(
+    events.map((e) => `${e.from}→${e.to}`),
+    ["done→ready", "ready→done"],
+    "the reset and the re-flip are TWO status changes ⇒ two events, in that order",
+  );
+  assert.equal(events[0].kind, "retreat", "done→ready is the retreat edge");
+  assert.equal(events[1].kind, "promote");
+  // Each event carries its OWN commit — the two commits are different.
+  assert.notEqual(events[0].evidence.commit, events[1].evidence.commit);
+  assert.equal(git(fx.repo, ["show", `${events[1].evidence.commit}:tasks/${TASK}.md`]).match(/^status:\s*(\S+)/m)[1], "done");
+});
+
+test("③ goal target — the doc-face done write emits its own event whose commit resolves to a done flip", async (t) => {
+  const fx = makeFixture("events-goal", { forkFrom: GOAL_BRANCH });
+  t.after(() => cleanup(fx));
+
+  const r = await runMechanicalFanIn(fanInOpts(fx, "fanin-events-goal", GOAL_BRANCH));
+  assert.equal(r.outcome, "landed", `fan-in must land (step=${r.step} reason=${r.reason})`);
+
+  const events = readTransitionEvents(fx);
+  const docFace = events.find((e) => e.actor.id === "worker-fan-in syncDoneToDocFace");
+  assert.ok(docFace, `the doc-face write must emit its own event; got ${JSON.stringify(events.map((e) => e.actor.id))}`);
+  assert.equal(docFace.from, "ready");
+  assert.equal(docFace.to, "done");
+  // The doc-face commit is propagated to develop (the state dual-write this fixture exists for), so
+  // its sha resolves there and carries the done flip.
+  assert.match(docFace.evidence.commit, /^[0-9a-f]{40}$/);
+  assert.match(git(fx.repo, ["show", `${docFace.evidence.commit}:tasks/${TASK}.md`]), /^status:\s*done$/m);
+  assert.equal(gitStatus(fx.repo, ["merge-base", "--is-ancestor", docFace.evidence.commit, "develop"]), 0);
+});

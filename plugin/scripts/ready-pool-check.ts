@@ -212,7 +212,7 @@ export { ensureDeliveryCriticalLabel } from "./task-ops.ts";
 // of this file is exactly what GOAL-030's AC-336 criterion measures
 // (`grep -cE 'patchStatusField\(' plugin/scripts/ready-pool-check.ts` must be 0) — a future edit that
 // reintroduces a bare, decision-free write turns that criterion red instead of passing silently.
-import { decideTransition, patchStatusField as applyKernelStatusPatch, appendTaskStatusEvent } from "../../packages/quay/src/kernel/task-transition.ts";
+import { decideTransition, patchStatusField as applyKernelStatusPatch, appendTaskStatusEvent, gitBlobSha } from "../../packages/quay/src/kernel/task-transition.ts";
 // AC152：依赖判定的核复用 driver-filters.ts（depsSatisfied 谓词同一份实现，⛔ 不各写一遍
 // 「逐个查 status !== done」的循环）。gap-superseded-dependency-blocks-dispatch-forever：复用点从
 // 布尔投影 allDepsDone 上移到【三值】judgeDeps —— 本文件必须能区分「依赖全 done」与「依赖已退役」，
@@ -3654,14 +3654,29 @@ export function analyzeTasks({ tasksDir, root, cap = CONCURRENCY_CAP_DEFAULT, fl
 // the judgement+patch and `recordStatusEvent()` for the trace, so there is exactly one decision point
 // and exactly one event shape.
 
-/** The `actor` values stamped on each event: the producing ENTRY POINT (not the function), so a
- *  reading can tell a tick-heartbeat promotion from a manual `--revaluate-apply` run. */
-const PROMOTION_EVENT_ACTOR = "ready-pool-check --apply";
-const REVALUATION_EVENT_ACTOR = "ready-pool-check --revaluate-apply";
+/** The `{kind, id}` actor stamped on each event (contract v1 — `kind` is the writer CLASS, `id` the
+ *  producing ENTRY POINT), so a reading can tell a tick-heartbeat promotion from a manual
+ *  `--revaluate-apply` run WITHOUT parsing a string. This file IS the promotion driver's instrument
+ *  (`promotion-driver.ts` shells `ready-pool-check --apply`; the A22 manual path runs the same verb),
+ *  so the class is `promotion-driver` on both — never guessed, the class is read off the caller. */
+const PROMOTION_EVENT_ACTOR = { kind: "promotion-driver", id: "ready-pool-check --apply" } as const;
+const REVALUATION_EVENT_ACTOR = { kind: "promotion-driver", id: "ready-pool-check --revaluate-apply" } as const;
 /** Fallback actor for direct (non-CLI) calls of the two exported writers — a test harness or the A22
- *  manual path. Still names the module that performed the write, so the record never carries a
- *  fabricated provenance. */
-const DIRECT_EVENT_ACTOR = "ready-pool-check";
+ *  manual path. `kind: "unknown"` is the honest value: from inside this module a direct call is NOT
+ *  distinguishable from a driver-driven one (硬规则 6 — 缺值 = 未查, never a guess). */
+const DIRECT_EVENT_ACTOR = { kind: "unknown", id: "ready-pool-check" } as const;
+
+/** `git rev-parse HEAD` at `root`, or null (repo-less fixture / git failure). Used for
+ *  `evidence.commit` — the sha that carries the status-line change. Best-effort: a null is recorded
+ *  as "no commit", never as a fabricated sha. */
+function revParseHead(root: string): string | null {
+  try {
+    const sha = execFileSync("git", ["-C", root, "rev-parse", "HEAD"], { encoding: "utf8", stdio: ["ignore", "pipe", "ignore"] }).trim();
+    return /^[0-9a-f]{40,64}$/i.test(sha) ? sha : null;
+  } catch {
+    return null;
+  }
+}
 
 /**
  * Decide `from → to` with the KERNEL (`decideTransition`) and patch the frontmatter only when the
@@ -3690,14 +3705,19 @@ function kernelDecideAndPatch(frontmatterRaw, from, to) {
 }
 
 /**
- * Append ONE structured transition event for a flip that has ALREADY landed on disk (called after the
- * write, never before — 硬规则 7). The kernel writer is fail-open-but-visible: it returns
- * `{ok:false, reason}` rather than throwing. That failure is turned into a returned reason so the
- * caller can surface it on its own record (⛔ never swallowed — 硬规则 3b: an unwritten event must not
- * look like a written one). Returns `undefined` on success, so the success record shape is unchanged.
+ * Append ONE structured v1 transition event for a flip that has ALREADY landed on disk (called after
+ * the write, never before — 硬规则 7). The kernel writer is fail-open-but-visible: it returns
+ * `{ok:false, reason}` rather than throwing (and counts + logs the failure). That failure is turned
+ * into a returned reason so the caller can surface it on its own record (⛔ never swallowed —
+ * 硬规则 3b: an unwritten event must not look like a written one). Returns `undefined` on success, so
+ * the success record shape is unchanged.
+ *
+ * `evidence` carries the two checkable readings of the write: the commit sha that carries the
+ * status-line change (null when no commit landed, with the reason) and the git blob hash of the exact
+ * content written.
  */
-function recordStatusEvent(root, id, from, to, kind, actor) {
-  const res = appendTaskStatusEvent(root, { taskId: id, from, to, kind, actor });
+function recordStatusEvent(root, id, from, to, kind, actor, evidence) {
+  const res = appendTaskStatusEvent(root, { taskId: id, from, to, kind, actor, evidence });
   return res.ok ? undefined : res.reason;
 }
 
@@ -3707,13 +3727,17 @@ function recordStatusEvent(root, id, from, to, kind, actor) {
  *  @param {string} root  repo root (tasks/<id>.md lives here)
  *  @param {string} id    task id
  *  @param {string} newStatus  target status (ready)
- *  @param {object} [opts]  { ensureDeliveryCritical: boolean, actor: string } — AC1
+ *  @param {object} [opts]  { ensureDeliveryCritical: boolean, actor: {kind,id}, commit: () => boolean } — AC1
  *      (gap-delivery-critical-label-at-promote-not-after-dispatch): when the promote gate has
  *      DETERMINED this candidate is delivery-critical, the label is written into the frontmatter AT
  *      PROMOTE TIME (标签与 ready 同现) so the dispatch sort key can act on it in the NEXT selection.
  *      GOAL-030 ②: `actor` is stamped on the structured transition event (defaults to
  *      DIRECT_EVENT_ACTOR for non-CLI callers). A refused/not-evaluated edge returns
  *      `{ok:false, verdict, transitionReason}` and writes NOTHING.
+ *      gap-task-status-events-contract-v1: `commit` (optional) is invoked BETWEEN the status write
+ *      and the event append, so the event's `evidence.commit` is the sha the flip actually landed in
+ *      — the ordering the v1 contract requires (the event traces the write AND its commit; an event
+ *      appended before the commit can only say "no commit", which is exactly the gap the task fixes).
  */
 export function setTaskStatus(root, id, newStatus, opts = {}) {
   const file = path.join(root, "tasks", `${id}.md`);
@@ -3745,10 +3769,25 @@ export function setTaskStatus(root, id, newStatus, opts = {}) {
     fm = ensured.fm;
     deliveryCritical = ensured.deliveryCritical;
   }
-  fs.writeFileSync(file, `${split.open}${fm}${split.close}${split.body}`);
+  const written = `${split.open}${fm}${split.close}${split.body}`;
+  fs.writeFileSync(file, written);
+  // The COMMIT (when the caller has one) happens between the write and the event: the event's
+  // `evidence.commit` must name the commit that carries this status line, not "whatever HEAD was
+  // before it". Contract v1's ordering (task body Plan §2).
+  const committed = typeof opts.commit === "function" ? opts.commit() === true : false;
+  const commit = committed ? revParseHead(root) : null;
   // Event AFTER the write (硬规则 7): the file is the product, the event its trace.
-  const eventError = recordStatusEvent(root, id, decided.from, decided.to, decided.kind, opts.actor || DIRECT_EVENT_ACTOR);
-  return { id, ok: true, from: TASK_STATUS.TODO, to: newStatus, deliveryCritical, ...(eventError ? { eventError } : {}) };
+  const eventError = recordStatusEvent(root, id, decided.from, decided.to, decided.kind, opts.actor || DIRECT_EVENT_ACTOR, {
+    commit,
+    statusBlobSha: gitBlobSha(written),
+    ...(commit === null
+      ? { commitAbsentReason: committed ? "git rev-parse HEAD returned no sha" : "no commit performed by this writer path" }
+      : {}),
+  });
+  return {
+    id, ok: true, from: TASK_STATUS.TODO, to: newStatus, deliveryCritical, committed,
+    ...(eventError ? { eventError } : {}),
+  };
 }
 
 /** COMMIT-AFTER-WRITE (gap-apply-promotions-commit-status-writes): a todo→ready status write must be
@@ -3831,16 +3870,24 @@ export function applyPromotions(opts) {
         });
         continue;
       }
-      const out = setTaskStatus(opts.root, p.id, TASK_STATUS.READY, { ensureDeliveryCritical: deliveryCritical, actor: PROMOTION_EVENT_ACTOR });
-      // GOAL-030 ②: a kernel refusal (or a not-evaluated pair) never wrote a byte — record it
-      // explicitly alongside the applied record, which still carries the ok:false outcome.
-      if (out.verdict) transitionRefusals.push({ id: p.id, from: out.from, to: out.to, verdict: out.verdict, reason: out.transitionReason });
       // COMMIT-AFTER-WRITE (gap-apply-promotions-commit-status-writes): a landed status write is
       // committed immediately so the main checkout stays clean (a dirty tree blocks every fan-in at
       // fan-in-ff-merge.sh BEFORE the bypass check runs). `committed` is surfaced on the applied
       // record so the commit (vs a repo-less no-op) is observable, not silent.
-      const committed = out.ok ? commitTaskStatus(opts.root, p.id, out.from, out.to) : false;
-      applied.push({ ...out, deliveryCritical, committed });
+      // gap-task-status-events-contract-v1: the commit is passed INTO setTaskStatus as a callback so
+      // it runs BETWEEN the status write and the event append — the event's `evidence.commit` is then
+      // the sha the flip landed in (Plan §2), and the event still follows the write (硬规则 7).
+      const out = setTaskStatus(opts.root, p.id, TASK_STATUS.READY, {
+        ensureDeliveryCritical: deliveryCritical,
+        actor: PROMOTION_EVENT_ACTOR,
+        commit: () => commitTaskStatus(opts.root, p.id, TASK_STATUS.TODO, TASK_STATUS.READY),
+      });
+      // GOAL-030 ②: a kernel refusal (or a not-evaluated pair) never wrote a byte — record it
+      // explicitly alongside the applied record, which still carries the ok:false outcome.
+      if (out.verdict) transitionRefusals.push({ id: p.id, from: out.from, to: out.to, verdict: out.verdict, reason: out.transitionReason });
+      // A refused / not-evaluated outcome wrote nothing ⇒ `committed` is false, keeping the applied
+      // record's shape byte-identical to the pre-v1 contract for every consumer.
+      applied.push({ ...out, deliveryCritical, ...(out.ok ? {} : { committed: false }) });
     }
   }
   // 分歧检测双向同步（gap-sync-trigger-divergence-detection-bidirectional）：每轮无条件触发——读两 ref
@@ -3858,8 +3905,10 @@ export function applyPromotions(opts) {
  *  product: `grep -n "## Revaluation" tasks/<id>.md` + the reason line), so the retreat is an audit
  *  surface, never a silent status flip. Returns { id, ok, from, to, reasons, record }. A task already
  *  at/after todo (or missing) fails closed with reason, never overwrites.
- *  @param {object} [opts] { actor: string } — both GOAL-030 ② fields: the `actor` stamped on the
- *      structured transition event, defaulting to DIRECT_EVENT_ACTOR for non-CLI callers. */
+ *  @param {object} [opts] { actor: {kind,id}, commit: () => boolean } — both GOAL-030 ② fields: the
+ *      `actor` stamped on the structured transition event, defaulting to DIRECT_EVENT_ACTOR for
+ *      non-CLI callers; and (gap-task-status-events-contract-v1) the optional COMMIT callback, run
+ *      between the status write and the event append exactly as in `setTaskStatus`. */
 export function retreatReadyToTodo(root, id, reasons = [], opts = {}) {
   const file = path.join(root, "tasks", `${id}.md`);
   if (!fs.existsSync(file)) return { id, ok: false, reason: "missing" };
@@ -3876,9 +3925,25 @@ export function retreatReadyToTodo(root, id, reasons = [], opts = {}) {
   const record =
     `\n## Revaluation\n\n**执行 ${new Date().toISOString()} — 静态条件变质，ready.back="todo"**\n\n` +
     `- 去向：ready → todo\n- 阻碍原因：${reasons.join(", ")}\n`;
-  fs.writeFileSync(file, `${split.open}${decided.fm}${split.close}${split.body}${record}`);
-  const eventError = recordStatusEvent(root, id, decided.from, decided.to, decided.kind, opts.actor || DIRECT_EVENT_ACTOR);
-  return { id, ok: true, from: TASK_STATUS.READY, to: TASK_STATUS.TODO, reasons, record, ...(eventError ? { eventError } : {}) };
+  const written = `${split.open}${decided.fm}${split.close}${split.body}${record}`;
+  fs.writeFileSync(file, written);
+  // Same write→commit→event ordering as setTaskStatus (contract v1). ⛔ The commit stays OPTIONAL
+  // here: applyRevaluations is the only live caller and does not commit today, so the pre-existing
+  // behaviour is preserved and the event records `commit:null` WITH its reason rather than inventing
+  // a sha (the retreat's divergence is the caller's to resolve, not this writer's to hide).
+  const committed = typeof opts.commit === "function" ? opts.commit() === true : false;
+  const commit = committed ? revParseHead(root) : null;
+  const eventError = recordStatusEvent(root, id, decided.from, decided.to, decided.kind, opts.actor || DIRECT_EVENT_ACTOR, {
+    commit,
+    statusBlobSha: gitBlobSha(written),
+    ...(commit === null
+      ? { commitAbsentReason: committed ? "git rev-parse HEAD returned no sha" : "no commit performed by this writer path" }
+      : {}),
+  });
+  return {
+    id, ok: true, from: TASK_STATUS.READY, to: TASK_STATUS.TODO, reasons, record, committed,
+    ...(eventError ? { eventError } : {}),
+  };
 }
 
 /** REVALUATION EXECUTOR (AC46 判据3 / AC2 — gap-ac46-pool-criteria-in-gate-plus-revaluation-executor):
