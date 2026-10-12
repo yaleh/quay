@@ -73,19 +73,23 @@ import {
 } from "./frontmatter-store-base.ts";
 import {
   runAcceptance,
-  resolveAcceptanceTimeout,
-  timeoutKnobHint,
   verdictFromAcceptance,
   FAILURE_REASON_MAX_CHARS,
 } from "./gate/acceptance-runner.ts";
+// The record-aware deadline resolver family lives in the kernel leaf, beside `resolveAcceptanceTimeoutMs`
+// — the single home of the whole "acceptance timeout resolution" family (gap-ac353-goal-store-deadline-
+// resolver-not-kernel; it was briefly split into `gate/acceptance-runner.ts`, which broke the structural
+// guard that this file consumes the kernel). ⛔ Not re-exported through the runner.
+import { resolveAcceptanceTimeout, timeoutKnobHint } from "./kernel/gate-run-options.ts";
 // gap-goal-criterion-timeout-hardcoded-60s-ignores-acceptance-timeout: EVERY criterion this file
 // runs takes its kill deadline from the SAME resolved chain — ⛔ not a private literal, and ⛔ not
 // `resolveRunnerOptions` (the latter also resolves a cwd, preferring `QUAY_ACCEPTANCE_CWD`; a goal
 // criterion's cwd is the git root by design, so taking the whole options object would silently
 // relocate every criterion the moment that variable was set).
 //
-// ⛔ `resolveAcceptanceTimeout` (above) is the RECORD-aware resolver EVERY goal criterion path now
-// uses (goal gate, the P6 activation gate, the I5 sweep, the frozen rotation): `resolveAcceptanceTimeoutMs`'s
+// ⛔ `resolveAcceptanceTimeout` (imported above from `./kernel/gate-run-options.ts`, its single home)
+// is the RECORD-aware resolver EVERY goal criterion path now uses (goal gate, the P6 activation gate,
+// the I5 sweep, the frozen rotation): `resolveAcceptanceTimeoutMs`'s
 // env/default chain with the record's own `timeoutMs` in front of it, honoured WITHOUT a second
 // default literal (gap-goal-gate-verdict-single-mapping-not-evaluated AC4;
 // gap-goal-driver-hardcoded-120s-spawn-kill-preempts-record-timeout-and-orphans-goal-locks made the

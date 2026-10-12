@@ -1,6 +1,8 @@
 // gate-run-options.ts — kernel 单一实现：跑一个基于 shell 的 acceptance 检查所需的
 // 通用原语（GateConfig / RunnerOptions 两类型 + shQuote / DEFAULT_ACCEPTANCE_TIMEOUT_MS /
-// resolveAcceptanceTimeoutMs / resolveRunnerOptions 四导出）。
+// resolveAcceptanceTimeoutMs / resolveRunnerOptions 四导出，加上 gap-ac353 从 gate/ 迁回的
+// record-aware deadline 解析族 ACCEPTANCE_TIMEOUT_ENV / AcceptanceTimeout /
+// resolveAcceptanceTimeout / timeoutKnobHint 四个导出——同一「acceptance 超时解析」族，一个 home）。
 //
 // WHY IT LIVES IN THE KERNEL (GOAL-034 第一刀；SPEC §2 P1: 共享原语落点 `packages/quay/src/kernel/`):
 // 这四函数两类型原住 `gate/config/utils.ts`，但它们不是「config 加载」的职责——它们是
@@ -104,4 +106,76 @@ export function resolveRunnerOptions(gateConfig: GateConfig = {}): RunnerOptions
   const timeoutMs = resolveAcceptanceTimeoutMs(gateConfig);
   const envFile = process.env.QUAY_ACCEPTANCE_ENV || undefined;
   return { cwd, timeoutMs, envFile };
+}
+
+// ── the RECORD-aware deadline resolver family ──────────────────────────────────────────────────
+//
+// WHY THESE FOUR SIT HERE, BESIDE `resolveAcceptanceTimeoutMs` (hard rule 5b: one family, one home):
+// `resolveAcceptanceTimeoutMs` (above) resolves env > the gate's own `timeoutMs` > default. The four
+// symbols below add the ONE rung a GOAL RECORD owns — the record's own `timeoutMs` — in front of that
+// exact chain, and nothing else. Splitting them into `gate/acceptance-runner.ts` put half of a single
+// "acceptance timeout resolution" family in `gate/` while its base lived in this kernel leaf; the
+// structural guard (AC-353) then flipped false the moment an unrelated refactor repointed
+// `goal-store.ts` at the `gate/` half — a consumer of the SAME family stopped touching the kernel.
+// Re-uniting them restores `goal-store.ts` as a true kernel consumer. ⛔ This is a MOVE, not a
+// rewrite: the record-aware BEHAVIOUR (its `timeoutMs` rung wins) is byte-for-byte unchanged, and
+// `ACCEPTANCE_TIMEOUT_ENV` has to travel with the two functions — leaving it in `gate/` and importing
+// it back here would create a kernel → gate cycle.
+//
+// KERNEL BOUNDARY: this addition imports nothing (it reads the same-file DEFAULT and its injected
+// `env`), so the file still satisfies import-graph-check's fourth rule.
+
+/** The env knob a caller with no record-level declaration can turn. Named once so the reason text
+ *  and the resolver cannot drift apart. */
+export const ACCEPTANCE_TIMEOUT_ENV = "QUAY_ACCEPTANCE_TIMEOUT_MS";
+
+/** A resolved deadline AND where it came from — the source is what makes the timeout `reason`
+ *  name a knob that actually exists on the caller's path. */
+export interface AcceptanceTimeout {
+  timeoutMs: number;
+  source: "record" | "env" | "default";
+}
+
+/**
+ * Resolve a GOAL criterion's deadline: the record's own `timeoutMs` > `QUAY_ACCEPTANCE_TIMEOUT_MS`
+ * > `DEFAULT_ACCEPTANCE_TIMEOUT_MS`.
+ *
+ * ⛔ The record half is the ONLY thing this function adds: everything below it is the SAME chain
+ * `resolveAcceptanceTimeoutMs` (above) owns (env > the gate's own `timeoutMs` > the ONE default),
+ * and the goal paths pass no gate config. The default is therefore the SAME file-local constant,
+ * not a re-declared `60_000` literal — two copies is exactly the drift the sibling task
+ * (gap-goal-criterion-timeout-hardcoded-60s-ignores-acceptance-timeout) removed.
+ * ⛔ `env` stays injectable rather than delegating outright, because the precedence is only
+ * testable by passing an env the test controls, and `resolveAcceptanceTimeoutMs` reads
+ * `process.env` directly.
+ *
+ * ⛔ A record value that is not a finite positive number is IGNORED, never coerced: `spawnSync`
+ * treats `timeout: NaN` as "no deadline", so a typo in a record would silently DISABLE the guard
+ * rather than fall back to it (hard rule 3b — a value nobody can read must not become a value that
+ * means something else).
+ */
+export function resolveAcceptanceTimeout(
+  recordTimeoutMs?: unknown,
+  env: NodeJS.ProcessEnv = process.env,
+): AcceptanceTimeout {
+  if (typeof recordTimeoutMs === "number" && Number.isFinite(recordTimeoutMs) && recordTimeoutMs > 0) {
+    return { timeoutMs: recordTimeoutMs, source: "record" };
+  }
+  const raw = env[ACCEPTANCE_TIMEOUT_ENV];
+  const n = raw === undefined ? NaN : Number(String(raw).trim());
+  if (Number.isFinite(n) && n > 0) return { timeoutMs: n, source: "env" };
+  return { timeoutMs: DEFAULT_ACCEPTANCE_TIMEOUT_MS, source: "default" };
+}
+
+/** The hint appended to a TIMEOUT reason for a resolved deadline — ⛔ names only knobs THIS path
+ *  reads (see `RunAcceptanceArgs.timeoutKnob`). */
+export function timeoutKnobHint(t: AcceptanceTimeout): string {
+  switch (t.source) {
+    case "record":
+      return "raise this record's `timeoutMs` (the deadline in force)";
+    case "env":
+      return `raise ${ACCEPTANCE_TIMEOUT_ENV}`;
+    default:
+      return `set the record's \`timeoutMs\` or ${ACCEPTANCE_TIMEOUT_ENV}`;
+  }
 }
