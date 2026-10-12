@@ -79,3 +79,11 @@ extra:
 
 - 签名比对用**逐字**（不折易变量）：Proposal 的判据就是「逐字相同」，折数字会把 AC3 的「文本变了」并回「同一个」。代价是：断言文本里嵌了易变量（pid/耗时）的既存红在两棵树间不会匹配 ⇒ 退回硬红 ⇒ **保守方向**（等于现状），⛔ 不会造成误放行。
 - 落地后复验（设计方向 ③）：本实现把「基线树重跑读数」经 `mechanical_fan_in.baselineEquivalence`（含 `baselineWorktree` / `log`）与 `.quay/baseline-red-rounds.jsonl` 双载体留痕，且 ff 闸证书额外带 `baseline_red_exempt=true`（放行轮）——下一个任务的 A/B 因而可直接看到「上一轮对着哪个 develop tip 证明了哪一组既存红」。⛔ 本任务未新起「落地后对 develop HEAD 再跑一次全量 suite」的独立步骤（那是 9-11min/落地 的额外成本，且其读数信息量与基线树重跑重叠）；若后续认为必需，应作为独立任务、先取发生率读数（硬规则 12）。
+
+## Blocker
+
+**2026-10-12T15:24:49.748Z — worker 未落地（exited-not-landed）**
+
+- 未落地原因：step=suite: AssertionError [ERR_ASSERTION]: zero output ⇒ fallback to generic 'suite red'
+- run_id：wk-prod-anchor
+- session_id：7e53dd94-1c8a-4315-a34e-a0c5566e823f
