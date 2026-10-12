@@ -47,7 +47,7 @@ So this task adds exactly one thing: a versioned `DiscoveryMethod` domain contra
 8. No CLI wiring, no routine wiring in this task. This task's only artifact is the module + its tests + a reproduction command.
 
 ## Acceptance Criteria
-- [ ] `node --test plugin/test/discovery-method-registry.test.mjs` exits 0, covering:
+- [x] `node --test plugin/test/discovery-method-registry.test.mjs` exits 0, covering:
   - (a) a well-formed draft method is accepted and appended;
   - (b) empty `provenance_evidence` is refused with a distinct reason code;
   - (c) empty `falsification` is refused;
@@ -56,9 +56,9 @@ So this task adds exactly one thing: a versioned `DiscoveryMethod` domain contra
   - (f) writing version 3 when only version 1 exists (skipping 2) is refused;
   - (g) `readMethodRegistry` returns only the latest version per `method_id` by default, and the full history when asked;
   - (h) `dedupMethods` flags a fixture pair sharing domain_signals and tools, and does NOT flag an unrelated pair.
-- [ ] Real reproduction: register ONE real method record using provenance that already exists in `.quay/architecture-evidence-store.jsonl` — point `provenance_evidence` at the outcome record with `experiment: "E-HYPGEN-AB-1-B"`, `experiment_ref: "E-HYPGEN-AB-1-B cluster 8"` (subject_key names `per-task-suite-record.ts` / `per-task-suite-record-check.ts`; this is the REQUIRED_FIELDS duplication, done task `gap-per-task-suite-record-required-fields-declared-twice`). Verify that record actually exists with `jq` before citing it. Call the method `shared-contract-divergence-v1`. Paste the full record, the validator result (`ok:true`), and the line it appended to `.quay/discovery-method-registry.jsonl`.
-- [ ] Mutation control: temporarily drop the version-monotonicity check and show that writing version 1 twice (silently overwriting) is no longer refused — i.e., prove the check is load-bearing, not decorative. Paste the before/after, then restore the check.
-- [ ] `dedupMethods` run over the registry after the real write above reports 0 pairs (only one method exists) — paste the output. This is a negative control: the detector must not fabricate a pair from one record.
+- [x] Real reproduction: register ONE real method record using provenance that already exists in `.quay/architecture-evidence-store.jsonl` — point `provenance_evidence` at the outcome record with `experiment: "E-HYPGEN-AB-1-B"`, `experiment_ref: "E-HYPGEN-AB-1-B cluster 8"` (subject_key names `per-task-suite-record.ts` / `per-task-suite-record-check.ts`; this is the REQUIRED_FIELDS duplication, done task `gap-per-task-suite-record-required-fields-declared-twice`). Verify that record actually exists with `jq` before citing it. Call the method `shared-contract-divergence-v1`. Paste the full record, the validator result (`ok:true`), and the line it appended to `.quay/discovery-method-registry.jsonl`.
+- [x] Mutation control: temporarily drop the version-monotonicity check and show that writing version 1 twice (silently overwriting) is no longer refused — i.e., prove the check is load-bearing, not decorative. Paste the before/after, then restore the check.
+- [x] `dedupMethods` run over the registry after the real write above reports 0 pairs (only one method exists) — paste the output. This is a negative control: the detector must not fabricate a pair from one record.
 
 ## Definition of Done
 - All AC ticked with command output pasted.
