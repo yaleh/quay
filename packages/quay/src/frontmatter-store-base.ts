@@ -136,6 +136,51 @@ const STALE_LOCK_MS = 5000;
 const LOCK_TIMEOUT_MS = 3000;
 
 /**
+ * The lockfiles THIS process currently holds (absolute paths). Tracked so a signal handler can
+ * release them — a SIGKILL (or a crash) cannot run `withFileLock`'s `finally`, and the leftover
+ * `<dir>/<id>.lock` then blocks the mechanical fan-in's ff forever (it is an untracked file in the
+ * main checkout, and `cleanTreeCheck` refuses on it).
+ *
+ * (tasks/gap-goal-driver-hardcoded-120s-spawn-kill-preempts-record-timeout-and-orphans-goal-locks —
+ * measured on four host projects: a driver-side SIGKILL inside `withFileLock` orphans the lock.)
+ */
+const heldLockPaths = new Set<string>();
+
+/** Remove every lockfile this process holds and forget them. Best-effort (a lock already gone is not
+ *  an error). Exported so the CLI entry can call it from a signal handler. */
+export function releaseHeldLocks() {
+  for (const lockPath of heldLockPaths) {
+    try {
+      fs.rmSync(lockPath, { force: true });
+    } catch {
+      /* best effort — a lock already removed is not an error */
+    }
+  }
+  heldLockPaths.clear();
+}
+
+/**
+ * Install a signal handler that releases this process's held lock(s) then exits. ⛔ Call this ONLY
+ * from a CLI ENTRY point (a short-lived child a driver may SIGTERM), NOT from the shared base's
+ * module scope: installing it in a long-lived process (the MCP server, the web UI) would replace
+ * that process's own SIGTERM shutdown with an immediate lock-release + exit.
+ *
+ * (tasks/gap-goal-driver-hardcoded-120s-spawn-kill-preempts-record-timeout-and-orphans-goal-locks):
+ * the goal driver's earlier hard-coded SIGKILL pre-empted the child's own deadline; with SIGTERM
+ * preferred, a child that is NOT blocked in a synchronous spawn gets to release its lock here.
+ *  A child that IS blocked (the common case — it is running the criterion) defers the handler; the
+ *  driver's SIGTERM→grace→SIGKILL then fires, and the DRIVER removes the lock by pid (see
+ *  goal-driver.ts). This handler is the non-blocked half of that pair, not the guarantee.
+ * @param {"SIGTERM" | "SIGINT"} [signal]
+ */
+export function installLockReleaseOnSignal(signal = "SIGTERM") {
+  process.on(signal, () => {
+    releaseHeldLocks();
+    process.exit(signal === "SIGINT" ? 130 : 143);
+  });
+}
+
+/**
  * Run `fn` while holding an exclusive per-id lockfile inside `dir`
  * (`<dir>/<id>.lock`), recovering a stale lock (older than STALE_LOCK_MS) and
  * always releasing the lock afterward, even if `fn` throws.
@@ -167,9 +212,23 @@ export function withFileLock(dir, id, fn) {
       if (Date.now() > deadline) throw new Error(`timed out acquiring lock for ${id} in ${dir}`);
     }
   }
+  heldLockPaths.add(lockPath);
   try {
     return fn();
   } finally {
+    heldLockPaths.delete(lockPath);
     fs.rmSync(lockPath, { force: true });
+  }
+}
+
+/** Read the pid recorded in a lockfile, or null when the file is absent/unreadable/holds no number.
+ *  The pid is what makes "remove the lock THIS driver child orphaned" a safe operation: a lock now
+ *  held by a DIFFERENT (live) process must never be removed. Exported for the driver-side cleanup. */
+export function readLockPid(lockPath) {
+  try {
+    const n = Number(fs.readFileSync(lockPath, "utf8").trim());
+    return Number.isInteger(n) && n > 0 ? n : null;
+  } catch {
+    return null;
   }
 }

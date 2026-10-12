@@ -3,7 +3,7 @@ id: gap-goal-driver-hardcoded-120s-spawn-kill-preempts-record-timeout-and-orphan
 title: "cross-project: goal-driver/meta-driver hard-coded 120s SIGKILL pre-empts
   record timeoutMs on gate + activation (which also ignores record timeoutMs)
   and orphans goals/<id>.lock that blocks fan-in ff — 104 kills in 4 projects"
-status: ready
+status: done
 labels:
   - gap
   - defect
@@ -101,11 +101,3 @@ That is **4 independent host projects, 104 SIGKILLs**.
 - plugin/test/goal-driver-s01.test.mjs
 - packages/quay/test/goal-criterion-timeout-resolution.test.mjs
 - plugin/test/quay-init-characterization.test.mjs
-
-## Blocker
-
-**2026-10-12T17:14:52.685Z — worker 未落地（exited-not-landed）**
-
-- 未落地原因：step=suite: AssertionError [ERR_ASSERTION]: a timeout is a definitive verdict ⇒ evaluable ⇒ activation allowed:
-- run_id：wk-prod-anchor
-- session_id：769b3c4c-ccf7-4211-9d0a-204d0ca35e86

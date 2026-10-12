@@ -210,7 +210,12 @@ function agentIdGate(args: FfMergeArgs, root: string): FfMergeResult | null {
 // ported from the bash: auto-converge (status-only promotion flip) + benign runtime dirty (untracked
 // .quay/ outside the task's ## Touches) pass-through, then the real clean-tree refusal.
 
-function cleanTreeCheck(args: FfMergeArgs, root: string): { ok: boolean; stderrLines: string[] } {
+// Exported (not module-private) so a direct-import test can exercise the benign-runtime-dirty
+// pass-through on a real temp git tree without running the whole ff — most importantly that an
+// orphaned frontmatter-store lock (`goals/<id>.lock`, a quay runtime artifact per the manifest)
+// does NOT block the ff (tasks/gap-goal-driver-hardcoded-120s-spawn-kill-preempts-record-timeout-and-
+// orphans-goal-locks AC4).
+export function cleanTreeCheck(args: FfMergeArgs, root: string): { ok: boolean; stderrLines: string[] } {
   const stderrLines: string[] = [];
   // ⚠️ `-c core.quotepath=false` — `status --porcelain` C-quotes non-ASCII pathnames exactly like
   // `diff --name-only` does, and the three predicates below (`^tasks/[^/]+\.md$` converge, `^\.quay($|/)`
