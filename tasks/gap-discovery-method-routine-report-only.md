@@ -171,8 +171,8 @@ AC4 says to leave unticked for.
 
 ## Blocker
 
-**2026-10-12T09:15:12.691Z — worker 未落地（exited-not-landed）**
+**2026-10-12T09:26:07.367Z — worker 未落地（exited-not-landed）**
 
-- 未落地原因：step=anti-drift: ANTI-DRIFT HARD FAIL: task gap-discovery-method-routine-report-only — 3 violation(s)
+- 未落地原因：step=suite: AssertionError [ERR_ASSERTION]: the real publish script FAILED (exit 1):
 - run_id：wk-prod-anchor
-- session_id：76d53bd1-9089-40aa-b842-08ec3d05e473
+- session_id：260a7c53-998a-4683-91ea-a29b5641f50f

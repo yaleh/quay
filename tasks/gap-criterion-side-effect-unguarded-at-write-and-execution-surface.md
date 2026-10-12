@@ -47,30 +47,131 @@ extra:
 
 **⛔ 明确不做（避免与既有任务重复）**：不改 `--origin` 必传规则、不改完整性校验分流、不改激活闸/`activatedAt`/`statusLog`（属 `gap-goal-store-write-surface-semantics`）；不改保真性判定器（`criterion-fidelity.ts` 是另一条轴）；不改 `task` 侧 gate（`quay gate <task-id>` 是 task 面，本条是 goal criterion 面）。
 
-## AC
+## Implementation
 
-- [ ] **执行前闸**：criterion 命中"带真实副作用能力"即 **fail-closed 拒绝**，返回**稳定错误码**（调用方 branch on `code`，⛔ 不 branch on message），且**命令未被 spawn**（给出"未 spawn"的机械读数，⛔ 不接受"跑完发现不该跑"）
-- [ ] **判定按能力**：给出能力判定的**具体规则**（端点/写动词/显式声明中的哪一种或哪几种），并在任务体写明**为什么按名字判会漏**（附 Fleet 侧"转发壳"实测反例）
-- [ ] **两个调用点都覆盖**：`goal-store.ts:2033` 与 `:2310` 两条路径**各自**有实测读数（⛔ 只测一条即视为未完成）
-- [ ] **正控（必须是真实历史件）**：把 `quay-fleet` AC-020 的 criterion 原文喂进判定器 ⇒ **必须拒绝**
-- [ ] **正控 B（真实历史件）**：把"指向 `realchecks/` 的显式 `node --test` 路径"那条 criterion 原文喂进判定器 ⇒ **必须拒绝**
-- [ ] **负控**：对现存**只读** criterion（如 Fleet 的 `node -e` 证据文档结构检查）⇒ **必须放行**（证明"拒绝"不是"一律拒绝"的同形）
-- [ ] **旁路可用且可审计**：显式旁路下真实 E2E 仍能执行；旁路的使用**在落痕上可见**（⛔ 与正常判据执行同形）
-- [ ] **不回归**：`goal check --stale-pass --sweep` 在**全只读**的判据集上行为不变（exit 0，逐字与改动前同）
-- [ ] `bash scripts/test.sh` exit 0
+**新增 `packages/quay/src/gate/criterion-capability.ts`** —— 纯判定器（⛔ 自己什么都不 spawn，与 `criterion-fidelity.ts` 同形：纯判定 + 三态）。
 
-## DoD
+**判定轴（⛔ 只有能力，没有拼写）**：
 
-- **用真实事故输入回放**：以 2026-10-12 的形态（criterion = 会真实建/发会话的命令，且 `achieved`）在**真实 goal-store 与 CLI** 上重放 ⇒ 新机制下**必须被拒**，且**命令未被 spawn**；⛔ 非 mock、⛔ 非 fixture 注入
-- **保护是机制不是约定**：实现落地后，一个**完全不知道该机制存在**的调用方写入带副作用的 criterion 时，仍会在**执行前**被拒——在任务体写明这**是怎么被保证的**（哪一段代码、哪一条测试），⛔ 不以"文档写了不要这么写"充当完成
-- **生产 Manager 唤醒不受影响（Fleet 侧约束，作为本条的验收面之一）**：本改动**不得**改变任何**只读** criterion 的行为；给出改动前后同一条只读 criterion 的逐字读数对比
+| 轴 | 规则 | 为什么它不是"按名字判" |
+|---|---|---|
+| 显式声明（产物） | 判据**执行到**的产物在自己头部带 `@real-infra` pragma ⇒ side-effecting | 结论来自**产物自己的字节**，与它叫什么/写在哪无关 |
+| 显式声明（工作区） | `.quay/criterion-capabilities.json` 声明「写能力命令面」正则 / 「真实端点」字面量 ⇒ side-effecting | 是**数据**，Core ⛔ 不装别的项目的 API 表 |
+| 无法评估 | 判据**执行到**的产物在它将要运行的树里不存在 ⇒ not-evaluated（fail-closed） | 结论来自**能否读到产物**，`x/y.mjs`/`./x/y.mjs`/`a/../x/y.mjs` 结论相同 |
+
+**⛔ 为什么「按名字/拼写」判会漏（Fleet 侧实测反例，逐字）**：那把锁第一版按「文件里有没有 `callTool` 方法」判，而**事故文件自己就有一个转发壳**——直通真实客户端的方法，名字上完全看不出来。第二次更彻底：把带副作用的文件**移出 `test/`** 之后，一条把判据改指向**显式路径** `node --test realchecks/wake-real-reachability.mjs` 的提交让风暴 13 分钟后重新上膛——**"文件在哪、叫什么"从来不是能力**。
+
+**三条按拼写判的轴被本仓库自己的 227 条现存判据实测否掉**（这就是"不按拼写"的量化依据）：
+
+- 「写动词」（`create|send|commit|push|post|…` 作为 token）：**87 次命中，全是数据**——`store-writes-raw-commit`、`post_upgrade_task_count`、`commit_sha`、`merge-base`。含写词的字符串不是动作。
+- 「端点字面量」（任意 `scheme://…`、`host:port`）：**21 次命中，全是只读 live probe**（`curl -sf … http://$a$ROUTE`），本仓库有意为之。
+- 「按路径/文件名拼写」：见上，Fleet 两侧实测都漏。
+
+⇒ 判据的文本只被用来**解析可达产物**（一个 quote-aware 的 shell 分词器，含 here-doc 体排除与注释排除——两者都是被实测逼出来的：Python docstring 里的散文一度被读成一条 `/manager` 命令），**⛔ 从不用来下结论**。
+
+**四条调用点全部过闸**（`⛔ 只修一处＝把同一原则重新留给下一个发现者`）：
+
+| 调用点 | 路径 | 旁路 |
+|---|---|---|
+| `goal-store.ts` I5 `checkAchievedFailing` | 无人值守（goal-driver 每轮） | **无** |
+| `goal-store.ts` `sweepFrozen`（冻结轮转） | **无人值守（事故现场）** | **无** |
+| `goal-store.ts` 激活写面（P6） | 写入面，`--force` 也⛔ 不能越过 | **无** |
+| CLI `quay goal gate <id>` | 显式、单条、有人在键盘前 | **`--allow-side-effects`** |
+
+**旁路的两条性质**（AC7）：**按次**（flag 只作用于这一次调用，⛔ 无人值守的两条路径上没有任何参数可传 ⇒ 不可能"设一次、永久生效"）；**落痕不同形**（`payload.capabilityBypass` 记进账本，一次被旁路的执行与一次常规执行在账本上可区分）。
+
+**稳定错误码**（调用方 branch on `code`，⛔ 不解析 message）：`criterion-side-effect`（已声明会写）、`criterion-capability-unevaluable`（读不懂）。两者**必须分开**：硬规则 3b——「已声明危险」与「无法评估」是两个不同的事实。
+
+**保护是机制不是约定**：拒绝发生在 `runAcceptance` **之前**，且它是 `runAcceptance` 在这四条路径上的**唯一入口**（`capabilityRefusal` / `capabilityRefusalAt`）。一个**完全不知道该机制存在**的调用方写入带副作用的 criterion，仍然会在**执行前**被拒——这由 §Evidence 的 ARM B 机械证明（真跑就会写出的痕迹不存在）。
 
 ## Evidence
 
-（待填：两处调用点的改动位置与行号、能力判定规则、正控 A/B 与负控的逐字读数、真实重放的进程级证据"命令未被 spawn"）
+### 真实重放（⛔ 非 mock、⛔ 非 fixture 注入：真 goal store + 真 CLI）
+
+工作区：临时目录内**真实** `.quay/` + `goals/`，用 `packages/quay/src/goal-store.ts` 的**真 CLI** 写入并求值。判据用 **AC-020 的原文**，`status: achieved`。
+
+**ARM A（fresh-workspace 形态：产物不在树里）** — `check --stale-pass --sweep --budget 5`：
+
+```json
+{"evaluated": true, "refused": false, "eligible": 1,
+ "ran": [{"id": "AC-020", "verdict": "not-evaluated", "ms": 0,
+   "reason": "criterion-capability-unevaluable: criterion refused BEFORE execution — it is not a reading. uncertifiable-executed-artifact: bin/quay-fleet.mjs (does not resolve under the criterion's cwd, so its capability cannot be established). …"}],
+ "capabilityRefused": [{"id": "AC-020", "code": "criterion-capability-unevaluable"}],
+ "stoppedBy": "exhausted"}
+```
+
+**ARM B（产物真的在、且**真的会写**；由工作区声明）** — 先造一个**真的会写文件**的 `bin/quay-fleet.mjs`，并在 `.quay/criterion-capabilities.json` 声明 `cloudcli delegate-smoke`：
+
+```
+{"id":"AC-020","verdict":"not-evaluated","capabilityCode":"criterion-side-effect",
+ "reason":"criterion-side-effect: criterion refused BEFORE execution — it is not a reading. declared-write-capable-command: cloudcli-delegate-smoke (src/delegate-smoke.mjs requires createCloudcliClient({readOnly:false}) and reaches session_create/session_send). …"}
+SPAWNED.txt created? NO     ← ⛔ 机械读数：真跑就会写出的痕迹不存在
+```
+
+**ARM B2（同一次调用 + 显式旁路）**：
+
+```
+{"id":"AC-020","verdict":"pass","capabilityBypass":{"code":"criterion-side-effect","rules":["declared-write-capable-command"]}}
+SPAWNED.txt created? YES    ← 旁路下真的执行了（⛔ 不是"换个说法拒绝"）
+```
+
+### 正控 / 负控（⛔ 真实历史件）
+
+| 控制 | 输入 | 判定 |
+|---|---|---|
+| 正控 A | AC-020 criterion **原文**（`node bin/quay-fleet.mjs cloudcli delegate-smoke --json \| node -e …`） | **拒**（`criterion-capability-unevaluable`；产物在场时 `criterion-side-effect`） |
+| 正控 B | 复发那一条 `node --test realchecks/wake-real-reachability.mjs` | **拒**（产物不在树里 ⇒ unevaluable；产物在场且带 `@real-infra` ⇒ side-effecting，**同一方言两个消费者**） |
+| 负控 | Fleet 退化为只读的 `node -e` 证据文档结构检查 | **放行**，且**真的被执行**（记入 `achievedButFailing`，因为证据文档不在临时树里） |
+
+### 不回归（AC8）：改动前后同一只读判据集的逐字读数
+
+用**fork 点的 pristine 检出**跑 BEFORE、本改动跑 AFTER（两个**独立**的只读 store，各转一次）：
+
+```
+before.sweep = {"evaluated": true, "refused": false, "eligible": 1,
+  "ran": [{"id": "AC-900", "verdict": "pass", "reason": "acceptance passed (exit 0)", "ms": 22}], "stoppedBy": "exhausted"}
+after .sweep = {"evaluated": true, "refused": false, "eligible": 1,
+  "ran": [{"id": "AC-900", "verdict": "pass", "reason": "acceptance passed (exit 0)", "ms": 24}], "stoppedBy": "exhausted"}
+```
+
+去掉**新增字段** `capabilityRefused`（= `[]`）后逐字同；两处差异只有 `ms`（该次判据的实测耗时）与 `rotation.lastSweepAt`（墙钟）——**都是"这次运行"的读数，不是行为**。归一化后**两处 IDENTICAL**，`check --stale-pass --sweep` 与 `check --stale-pass` exit 均为 0。
+
+### 生产面零误报（AC8 的 ratchet）
+
+对**本仓库真的 227 条 criterion**（`goals/*.md`）跑同一判定器：**判定为非只读的 = 0**。这条同时是"这把闸不是无差别拒绝"的负控，测试 `能力闸 AC8(生产面)` 会在真 goals 树上重跑它。
+
+### 保护是怎么被保证的（DoD「机制不是约定」）
+
+- **代码**：`packages/quay/src/goal-store.ts` 的 `capabilityRefusal()` / 模块级 `capabilityRefusalAt()` 是四条 `runAcceptance` 调用点**唯一**的入口；拒绝分支 `continue`/`throw`/设 `not-evaluated` 后才可能到达 `runAcceptance`。
+- **测试**：`packages/quay/test/goal-store.test.mjs` 的能力闸段——`AC1`（真跑就会写出的痕迹不存在）、`AC3a`/`AC3b`（两条无人值守路径各自的落痕读数）、`AC7(上限)`（旁路⛔ 不得作为参数流进共用判定）。
+- **旁路⛔ 不在无人值守路径上**：`capabilityRefusal` 的签名里没有 allow 参数，无人值守的两条路径无从传给它；`AC7(上限)` 直接对源码断言这一点。
+
+## AC
+
+- [x] **执行前闸**：criterion 命中"带真实副作用能力"即 **fail-closed 拒绝**，返回**稳定错误码**（调用方 branch on `code`，⛔ 不 branch on message），且**命令未被 spawn**（给出"未 spawn"的机械读数，⛔ 不接受"跑完发现不该跑"）
+- [x] **判定按能力**：给出能力判定的**具体规则**（端点/写动词/显式声明中的哪一种或哪几种），并在任务体写明**为什么按名字判会漏**（附 Fleet 侧"转发壳"实测反例）
+- [x] **两个调用点都覆盖**：`goal-store.ts:2033` 与 `:2310` 两条路径**各自**有实测读数（⛔ 只测一条即视为未完成）
+- [x] **正控（必须是真实历史件）**：把 `quay-fleet` AC-020 的 criterion 原文喂进判定器 ⇒ **必须拒绝**
+- [x] **正控 B（真实历史件）**：把"指向 `realchecks/` 的显式 `node --test` 路径"那条 criterion 原文喂进判定器 ⇒ **必须拒绝**
+- [x] **负控**：对现存**只读** criterion（如 Fleet 的 `node -e` 证据文档结构检查）⇒ **必须放行**（证明"拒绝"不是"一律拒绝"的同形）
+- [x] **旁路可用且可审计**：显式旁路下真实 E2E 仍能执行；旁路的使用**在落痕上可见**（⛔ 与正常判据执行同形）
+- [x] **不回归**：`goal check --stale-pass --sweep` 在**全只读**的判据集上行为不变（exit 0，逐字与改动前同）
+- [x] `bash scripts/test.sh` exit 0
+
+## DoD
+
+- **用真实事故输入回放**：以 2026-10-12 的形态（criterion = 会真实建/发会话的命令，且 `achieved`）在**真实 goal-store 与 CLI** 上重放 ⇒ 新机制下**必须被拒**，且**命令未被 spawn**；⛔ 非 mock、⛔ 非 fixture 注入 → **见 §Evidence「真实重放」ARM A/B/B2**
+- **保护是机制不是约定**：实现落地后，一个**完全不知道该机制存在**的调用方写入带副作用的 criterion 时，仍会在**执行前**被拒——在任务体写明这**是怎么被保证的**（哪一段代码、哪一条测试），⛔ 不以"文档写了不要这么写"充当完成 → **见 §Evidence「保护是怎么被保证的」**
+- **生产 Manager 唤醒不受影响（Fleet 侧约束，作为本条的验收面之一）**：本改动**不得**改变任何**只读** criterion 的行为；给出改动前后同一条只读 criterion 的逐字读数对比 → **见 §Evidence「不回归」**（归一化后逐字 IDENTICAL，exit 0）
+
+### ⛔ 如实披露这笔取舍（残余风险，⛔ 不当成已解决）
+
+1. **「执行不到的产物」是 fail-closed 的后备轴，不是能力轴**。一条判据若执行一个**在树里存在、无 pragma、也无人声明**的产物，本闸会放行。真正关上这个口的是**声明**（产物 pragma / 工作区声明）+ 各工作区**提交期**的静态锁（Fleet 侧 `test/criteria-are-readings.test.mjs`）。本任务交付的是**执行面**这一半。
+2. **绝对路径且无脚本后缀的直接执行**（`/usr/local/bin/x`）是这条后备轴的**已知盲点**——为它放行是有意的：`/manager`、`/architecture` 这类 URL 路由会被读成绝对路径，而"以 `/` 开头"正是被禁止的拼写判定。宁可少一个后备情形，也不凭空造一个。
 
 ## Touches
 
 - `packages/quay/src/goal-store.ts`
+- `packages/quay/src/gate/criterion-capability.ts`
 - `packages/quay/test/goal-store.test.mjs`
 - `tasks/gap-criterion-side-effect-unguarded-at-write-and-execution-surface.md`
