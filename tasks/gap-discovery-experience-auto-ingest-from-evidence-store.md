@@ -225,6 +225,27 @@ detector for it. `ingestFromEvidenceStoreOutcome` likewise survives as the PINNE
 (its `narration` form), deliberately: a caller that must name one specific case still cannot claim a
 role the record's stored `verdict` contradicts. Both boundaries are documented in the module header.
 
+### A carrier this task created is NOT gitignored — measured, reported, not silently fixed
+
+```
+$ for f in .quay/discovery-experience-ledger.jsonl .quay/discovery-ingest-watermark.json .quay/discovery-method-registry.jsonl; do
+    printf '%-48s ' "$f"; git check-ignore -q "$f" && echo IGNORED || echo "NOT ignored"; done
+.quay/discovery-experience-ledger.jsonl          NOT ignored
+.quay/discovery-ingest-watermark.json            NOT ignored
+.quay/discovery-method-registry.jsonl            NOT ignored
+$ wc -lc .quay/discovery-experience-ledger.jsonl .quay/discovery-ingest-watermark.json
+  118  94369 .quay/discovery-experience-ledger.jsonl
+    1     94 .quay/discovery-ingest-watermark.json
+```
+
+The real run left 118 records (94 KB) in the ledger and a new `discovery-ingest-watermark.json` on
+disk, and NEITHER is gitignored — quay's `.gitignore` carries per-file lines and no wildcard over
+`.quay`, exactly what `gap-discovery-carriers-ephemeral-in-worktree` measured for the other four
+Discovery carriers. This task therefore adds a FIFTH unignored runtime file to that family, and says so
+instead of adding a `.gitignore` line: `.gitignore` is outside this task's declared `## Touches`, and a
+delta outside Touches is what the fan-in delta judgment flags. The follow-up is the one the sibling
+task already named — a per-carrier (or one wildcard) `.quay/discovery-*` entry covering all of them.
+
 ### DoD — the scoped gate
 
 ```
