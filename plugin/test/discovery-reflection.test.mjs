@@ -587,3 +587,61 @@ test("static control: the production source contains ZERO occurrences of any see
   // A non-zero control on the SAME predicate: the predicate CAN fire (so a zero is a real zero).
   assert.ok(src.includes("discovery-reflection"), "the predicate finds a token that IS present");
 });
+
+// ── AC1(e) (task gap-discovery-method-record-tool-vs-subject-leak): the assembler STRIPS the subject ─
+//
+// The reflection prompt ASKS for instruments, but a request is not a guarantee: a model that answers
+// "the tool I used was the file the finding is about" has said nothing about HOW TO LOOK. The strip is
+// therefore mechanical, happens BEFORE the registry's validator sees the candidate, and is RECORDED —
+// a candidate that silently lost half its tools would be indistinguishable from one the model never
+// named them in (硬规则 3b).
+
+test("AC1(e): assembleCandidate strips a subject file from `tools` and RECORDS what it stripped", () => {
+  const seed = expFixture({
+    id: "experience-seedcase000000", case_id: "EXP-seed", role: "found-and-fixed",
+    components: ["plugin/scripts/alpha.ts", "plugin/scripts/beta.ts"],
+  });
+  const unit = { signature: experienceSignature(seed), experiences: [seed], representative: seed };
+  const rec = decisionFixture({ operation_tools: ["alpha.ts", "arch-discovery-routine.ts"] });
+  const candidate = assembleCandidate({ rec, unit, registry: [], budget: {}, nowIso: "2026-10-12T00:00:00Z" });
+
+  assert.deepEqual(candidate.operation.tools, ["arch-discovery-routine.ts"], "the subject file is not an instrument");
+  assert.deepEqual(candidate.stripped_subject_tools, ["alpha.ts"], "…and what was removed is RECORDED, not silent");
+  assert.deepEqual(candidate.provenance_evidence, [seed.id], "the strip is scoped by the candidate's own provenance");
+
+  // The FULL path and the bare basename are the same file — both spellings are stripped.
+  const bothWays = assembleCandidate({
+    rec: decisionFixture({ operation_tools: ["plugin/scripts/beta.ts", "alpha.ts", "code-span-strip.ts"] }),
+    unit, registry: [], budget: {}, nowIso: "2026-10-12T00:00:00Z",
+  });
+  assert.deepEqual(bothWays.operation.tools, ["code-span-strip.ts"]);
+  assert.deepEqual(bothWays.stripped_subject_tools, ["plugin/scripts/beta.ts", "alpha.ts"]);
+
+  // Negative control on the SAME predicate: a decision naming only instruments strips NOTHING.
+  const clean = assembleCandidate({ rec: decisionFixture(), unit, registry: [], budget: {}, nowIso: "2026-10-12T00:00:00Z" });
+  assert.deepEqual(clean.stripped_subject_tools, []);
+  assert.deepEqual(clean.operation.tools, ["arch-discovery-routine.ts"]);
+
+  // A unit with no components has no seed set: nothing is stripped (the strip is derived, not a ban list).
+  const empty = assembleCandidate({
+    rec: decisionFixture({ operation_tools: ["alpha.ts"] }),
+    unit: { experiences: [expFixture({ id: "experience-nocomponents00", components: [] })] },
+    registry: [], budget: {}, nowIso: "2026-10-12T00:00:00Z",
+  });
+  assert.deepEqual(empty.stripped_subject_tools, []);
+});
+
+test("AC1(e): the strip reaches the DECISION row — a model that names the subject files is visible, not silently repaired", async () => {
+  const seed = expFixture({ id: "experience-seedcase000000", case_id: "EXP-seed", components: ["plugin/scripts/alpha.ts"] });
+  const r = await reflect({
+    experiences: [seed], registry: [], model: stubModel(decisionFixture({ operation_tools: ["alpha.ts", "arch-discovery-routine.ts"] })),
+    budget: {}, nowIso: Date.parse("2026-10-12T00:00:00Z"),
+  });
+  assert.equal(r.ok, true);
+  assert.equal(r.decisions.length, 1);
+  const d = r.decisions[0];
+  assert.equal(d.ok, true, d.reasons?.join(","));
+  assert.deepEqual(d.stripped_subject_tools, ["alpha.ts"]);
+  assert.deepEqual(d.candidate.operation.tools, ["arch-discovery-routine.ts"]);
+  assert.deepEqual(d.candidate.stripped_subject_tools, ["alpha.ts"]);
+});

@@ -45,6 +45,16 @@
 // catalog reports `TOOL_CATALOG_UNAVAILABLE` (its own value), never a pass: the tool check is part of
 // the contract, so "the listing was unreadable" must not collapse into "every tool is fine".
 //
+// ⛔ TOOL ≠ SUBJECT (found by a read-only audit of the landed Phase 2, 2026-10-12): a name being a real
+// capability-catalog entry is NOT the same claim as "this is an instrument you run to INSPECT code".
+// A method's recorded seed can name its own subject files — real catalog entries, one hop from the
+// finding — and a listing can never carry that distinction. The distinction lives in the record's
+// PROVENANCE, so it is read from there: `provenance_evidence` is resolved to the Experience records it
+// cites, their `components` are the SEED SET, and (a) a tool equal by basename to a seed component is
+// refused `TOOL_IS_SUBJECT`, (b) free text naming a seed component basename or case_id is refused
+// `METHOD_TEXT_NAMES_SEED`. A caller that cannot supply the seed set gets `PROVENANCE_SEEDS_UNAVAILABLE`
+// — the same own-value discipline as the catalog, for the same reason.
+//
 // 硬规则 4c (the量 must survive every intermediate layer): `readMethodRegistry` returns the LATEST
 // version per `method_id`, so a consumer can never read a superseded version as if it were current;
 // the full history is returned only when explicitly REQUESTED (`history: true`) — `null` (not
@@ -73,6 +83,13 @@ import { fileURLToPath } from "node:url";
 // carrier-read that counts unparseable lines) — re-implementing either would be a second definition.
 import { sha256, recordId, readRecords } from "./architecture-evidence-store.mjs";
 import * as evidenceStore from "./architecture-evidence-store.mjs";
+
+// The Experience ledger's OWN deny-list (its whole-token basename matcher) — reused, never re-derived.
+// The seed set is "the components of the Experiences this method cites", and the ledger module already
+// owns exactly that vocabulary; a second tokenizer here would be a second definition to keep in sync.
+import {
+  readExperienceLedger, experienceDenyList, scanExperienceLeak, EXPERIENCE_LEDGER_REL,
+} from "./discovery-experience-ledger.mjs";
 
 /** The one fixed sink (relative to the analysed root) — same convention as the evidence store's. */
 export const METHOD_REGISTRY_REL = ".quay/discovery-method-registry.jsonl";
@@ -148,6 +165,144 @@ export function defaultToolNames(root = REPO_ROOT) {
   return { ok: true, names: [...new Set([...cat.names, ...EVIDENCE_STORE_PRIMITIVES])].sort(), file: cat.file };
 }
 
+// ── the SEED set: what the method was ABOUT, read off its own provenance ─────────────────────────
+//
+// ⛔ The tool check above can only answer "is this name a real instrument?" — a LISTING cannot answer
+// "is this name the thing that was INSPECTED?", because both are catalog entries. That second question
+// is answered here, from the record's own `provenance_evidence` (see the header). Nothing in this
+// section is a hand-kept list of forbidden names: the seed set is DERIVED per record.
+
+export const TOOL_IS_SUBJECT = "TOOL_IS_SUBJECT";
+export const METHOD_TEXT_NAMES_SEED = "METHOD_TEXT_NAMES_SEED";
+export const PROVENANCE_SEEDS_UNAVAILABLE = "PROVENANCE_SEEDS_UNAVAILABLE";
+
+/** The free-text fields a seed name must not appear in (Plan 2). Declared as DATA, in ONE place, so
+ *  the resolver that SCANS and the validator that REPORTS can never disagree about what was scanned. */
+export const SEED_SCANNED_TEXT_FIELDS = Object.freeze([
+  "operation.steps", "expected_invariant", "falsification", "applicability",
+]);
+
+/** `plugin/scripts/x.ts` and `x.ts` are the SAME file — the tool↔subject comparison is by basename
+ *  (the plan's rule), and it is the same normalization the ledger's deny-list patterns already use. */
+export const basenameOf = (s) => String(s ?? "").replace(/\\/g, "/").split("/").pop();
+
+/**
+ * Every `{field, text}` pair the seed scan reads, in a FIXED order. Pure. A field the record does not
+ * carry is simply absent — "nothing to scan" is not "scanned and clean".
+ * @returns {{field:string, text:string}[]}
+ */
+export function seedScannedTexts(rec) {
+  const out = [];
+  const steps = rec?.operation?.steps;
+  if (Array.isArray(steps)) {
+    const text = steps.filter((s) => isStr(s, 1)).join("\n");
+    if (text) out.push({ field: "operation.steps", text });
+  }
+  if (isStr(rec?.expected_invariant, 1)) out.push({ field: "expected_invariant", text: rec.expected_invariant });
+  if (isStr(rec?.falsification, 1)) out.push({ field: "falsification", text: rec.falsification });
+  const ap = rec?.applicability;
+  if (isObj(ap)) {
+    const parts = [
+      ...(Array.isArray(ap.domain_signals) ? ap.domain_signals : []),
+      ...(Array.isArray(ap.preconditions) ? ap.preconditions : []),
+    ].filter((s) => isStr(s, 1));
+    if (parts.length) out.push({ field: "applicability", text: parts.join("\n") });
+  }
+  return out;
+}
+
+/**
+ * The Experiences a record's `provenance_evidence` cites. A ref resolves on the ledger record's `id`
+ * OR its `case_id`: `assembleCandidate` records the content-addressed `id`, while the evidence a
+ * reviewer reads back prints the `case_id` — both name the same Experience, so both must resolve.
+ * An unresolvable ref is NOT an error here (a method may legitimately cite an evidence-store outcome
+ * id, which is not an Experience at all) — it simply contributes no components.
+ */
+export function provenanceExperiences(rec, experiences = []) {
+  const refs = new Set((Array.isArray(rec?.provenance_evidence) ? rec.provenance_evidence : []).filter((r) => isStr(r, 1)));
+  if (refs.size === 0) return [];
+  return (Array.isArray(experiences) ? experiences : []).filter((e) =>
+    isObj(e) && ((isStr(e.id, 1) && refs.has(e.id)) || (isStr(e.case_id, 1) && refs.has(e.case_id))));
+}
+
+/**
+ * The SEED set of one record over a given ledger read: the components (full path AND basename) and the
+ * case_ids of the Experiences its provenance cites. Pure.
+ * @returns {{components:string[], component_basenames:string[], case_ids:string[], experiences:string[]}}
+ */
+export function seedSetForRecord(rec, experiences = []) {
+  const seeds = provenanceExperiences(rec, experiences);
+  const components = [...new Set(seeds.flatMap((e) => (Array.isArray(e.components) ? e.components : []))
+    .filter((c) => isStr(c, 1)))].sort();
+  return {
+    components,
+    component_basenames: [...new Set(components.map(basenameOf))].sort(),
+    case_ids: [...new Set(seeds.map((e) => e.case_id).filter((c) => isStr(c, 1)))].sort(),
+    experiences: seeds.map((e) => e.id ?? e.case_id).filter((x) => isStr(x, 1)),
+  };
+}
+
+/**
+ * Resolve the seed set for ONE record against the Experience ledger at `root`, INCLUDING the ledger's
+ * own deny-list scan of the record's free text. The MATCHER is the ledger module's
+ * (`experienceDenyList` → `scanExperienceLeak`), reused by import; only the DECISION is scoped here,
+ * by keeping the matches whose `value` is one of THIS record's own seeds. Re-deriving the tokenization
+ * would be a second definition of "what a component name looks like".
+ *
+ * Returns plain DATA (no functions), so `validateMethodRecord` stays pure and testable from a literal.
+ * An unreadable ledger is its OWN value (硬规则 3b): a scan that could not run must never look like a
+ * scan that ran and found nothing.
+ *
+ * @returns {{ok:true, components:string[], component_basenames:string[], case_ids:string[],
+ *            text_matches:{field:string,kind:string,value:string}[]}
+ *          | {ok:false, reason:string}}
+ */
+export function provenanceSeeds(root, rec) {
+  const led = readExperienceLedger(root);
+  if (!led.ok) {
+    return {
+      ok: false,
+      reason: `${PROVENANCE_SEEDS_UNAVAILABLE}:${led.malformed_lines}-unparseable-line(s)-in-${EXPERIENCE_LEDGER_REL}-so-the-seed-set-cannot-be-read`,
+    };
+  }
+  const seeds = seedSetForRecord(rec, led.records);
+  const seedValues = new Set([...seeds.components, ...seeds.case_ids]);
+  const text_matches = [];
+  if (seedValues.size > 0) {
+    const denyList = experienceDenyList(root);   // the ledger's own patterns (basename + case_id)
+    for (const { field, text } of seedScannedTexts(rec)) {
+      for (const m of scanExperienceLeak(denyList, text).matches) {
+        if (seedValues.has(m.value)) text_matches.push({ field, kind: m.kind, value: m.value });
+      }
+    }
+  }
+  return { ok: true, ...seeds, text_matches, malformed_lines: led.malformed_lines };
+}
+
+/**
+ * The SEED-code refusals a record draws under a given seed set — the TWO codes this rule introduces,
+ * and nothing else. `validateMethodRecord` appends them last; `readMethodRegistry` uses the same
+ * function to flag records written BEFORE the rule existed (a record is "legacy_unvalidated" exactly
+ * when it draws one of these, not when it draws any other contract fault).
+ */
+export function seedReasons(rec, seeds) {
+  if (!isObj(seeds)) {
+    // ⛔ Not supplied ⇒ its OWN value, never a skipped check (硬规则 3b): a validator that cannot see
+    // the seed set cannot tell "a tool" from "the file being inspected".
+    return [`${PROVENANCE_SEEDS_UNAVAILABLE}:provenance-seeds-not-supplied-so-a-subject-file-cannot-be-told-from-a-tool`];
+  }
+  if (seeds.ok === false) return [String(seeds.reason ?? `${PROVENANCE_SEEDS_UNAVAILABLE}:seed-set-unreadable`)];
+  const reasons = [];
+  const subjects = new Set(Array.isArray(seeds.component_basenames) ? seeds.component_basenames : []);
+  for (const t of Array.isArray(rec?.operation?.tools) ? rec.operation.tools : []) {
+    if (isStr(t, 1) && subjects.has(basenameOf(t))) reasons.push(`${TOOL_IS_SUBJECT}:${t}`);
+  }
+  for (const m of Array.isArray(seeds.text_matches) ? seeds.text_matches : []) {
+    reasons.push(`${METHOD_TEXT_NAMES_SEED}:${m?.field ?? "?"}:${m?.value ?? "?"}`);
+  }
+  return reasons;
+}
+
 // ── validation ──────────────────────────────────────────────────────────────────────────────────
 
 /**
@@ -161,8 +316,11 @@ export function defaultToolNames(root = REPO_ROOT) {
  * @param {object[]} [opts.existing]     the records already in the registry (for version
  *   monotonicity). Default `[]` = "no prior version is known"; the write path always passes what it
  *   READ, and an unreadable registry is refused before this function is reached.
+ * @param {object} [opts.provenanceSeeds] the SEED set of this record (the shape `provenanceSeeds(root,
+ *   rec)` returns). ⛔ Absent ⇒ a distinct `PROVENANCE_SEEDS_UNAVAILABLE` refusal, never a skipped
+ *   check — the same own-value discipline as `toolCatalog`, for the same reason (硬规则 3b).
  */
-export function validateMethodRecord(rec, { toolCatalog, existing = [] } = {}) {
+export function validateMethodRecord(rec, { toolCatalog, existing = [], provenanceSeeds: seeds } = {}) {
   if (!isObj(rec)) return { ok: false, reasons: ["RECORD_NOT_OBJECT"] };
   const reasons = [];
   for (const f of REQUIRED_METHOD_FIELDS) if (!supplied(rec, f)) reasons.push(`SCHEMA_MISSING:${f}`);
@@ -235,6 +393,11 @@ export function validateMethodRecord(rec, { toolCatalog, existing = [] } = {}) {
     }
   }
 
+  // ── the SEED checks, LAST so every field-level refusal above keeps its existing order and code ───
+  // `seedReasons` is the ONE definition of these two codes (the same one `readMethodRegistry` uses to
+  // flag records written before the rule existed).
+  reasons.push(...seedReasons(rec, seeds));
+
   return { ok: reasons.length === 0, reasons };
 }
 
@@ -249,6 +412,9 @@ export const methodRecordId = (rec) => recordId(METHOD_KIND, rec);
  * `history:true` was asked for; otherwise `history` is `null`, deliberately distinct from `[]`.
  * Unparseable lines are DROPPED and COUNTED; `ok` is false when any exist, because the next version
  * cannot be safely determined from a partially-readable carrier.
+ *
+ * Every record in `latest` carries `legacy_unvalidated` / `legacy_reasons`: a record written before the
+ * tool≠subject rule existed is NOT rewritten on disk, it is flagged here when it would now be refused.
  * @returns {{ok:boolean, latest:object[], history:object[]|null, malformed_lines:number, file:string}}
  */
 export function readMethodRegistry(root, { history = false } = {}) {
@@ -260,7 +426,19 @@ export function readMethodRegistry(root, { history = false } = {}) {
     const cur = byId.get(r.method_id);
     if (!cur || (isInt(r.version) && r.version > (isInt(cur.version) ? cur.version : -1))) byId.set(r.method_id, r);
   }
-  const latest = [...byId.values()].sort((a, b) => (a.method_id < b.method_id ? -1 : a.method_id > b.method_id ? 1 : 0));
+  // Records written BEFORE the tool≠subject rule existed were never checked against it. They are left
+  // exactly as they are on disk (append-only, and rewriting history is not this function's job) and
+  // FLAGGED on read-back instead: `legacy_unvalidated` is a boolean on every returned record, so
+  // "re-checked and clean" is a different value from "never checked under this rule" (硬规则 6).
+  const led = readExperienceLedger(root);
+  const flagged = [...byId.values()].map((r) => {
+    const seeds = led.ok
+      ? provenanceSeeds(root, r)
+      : { ok: false, reason: `${PROVENANCE_SEEDS_UNAVAILABLE}:${led.malformed_lines}-unparseable-line(s)-in-${EXPERIENCE_LEDGER_REL}-so-the-seed-set-cannot-be-read` };
+    const legacy_reasons = seedReasons(r, seeds);
+    return { ...r, legacy_unvalidated: legacy_reasons.length > 0, legacy_reasons };
+  });
+  const latest = flagged.sort((a, b) => (a.method_id < b.method_id ? -1 : a.method_id > b.method_id ? 1 : 0));
   return { ok: malformed_lines === 0, latest, history: history ? records : null, malformed_lines, file };
 }
 
@@ -273,7 +451,7 @@ export function readMethodRegistry(root, { history = false } = {}) {
  * The registry is READ first so the version check sees the real prior versions; an unreadable
  * registry is refused with its OWN reason rather than being silently treated as empty (硬规则 3b).
  */
-export function appendMethodRecord(root, rec, { toolCatalog, toolCatalogRoot } = {}) {
+export function appendMethodRecord(root, rec, { toolCatalog, toolCatalogRoot, provenanceSeeds: seeds } = {}) {
   const read = readMethodRegistry(root, { history: true });
   if (!read.ok) {
     return {
@@ -288,7 +466,14 @@ export function appendMethodRecord(root, rec, { toolCatalog, toolCatalogRoot } =
     const def = defaultToolNames(toolCatalogRoot ?? REPO_ROOT);
     catalog = def.ok ? def.names : null;   // an unreadable default catalog ⇒ null ⇒ TOOL_CATALOG_UNAVAILABLE
   }
-  const v = validateMethodRecord(rec, { toolCatalog: Array.isArray(catalog) ? catalog : undefined, existing: read.history });
+  // The REAL seed set by default, resolved from the record's OWN provenance against the ledger at
+  // `root`. An unreadable ledger becomes PROVENANCE_SEEDS_UNAVAILABLE, never a skipped check.
+  const resolvedSeeds = seeds === undefined ? provenanceSeeds(root, rec) : seeds;
+  const v = validateMethodRecord(rec, {
+    toolCatalog: Array.isArray(catalog) ? catalog : undefined,
+    existing: read.history,
+    provenanceSeeds: resolvedSeeds,
+  });
   if (!v.ok) return { ok: false, kind: METHOD_KIND, reasons: v.reasons, appended: false };
   const withId = { id: rec.id ?? methodRecordId(rec), ...rec };
   const file = registryFile(root);
