@@ -38,6 +38,9 @@ import {
   docBranchForkedFromDevelop,
   syncDocDevelopBidirectional,
   discardedCommitsAreDisposable,
+  // gap-task-status-events-contract-v1 AC(d): the second status writer this file owns (the
+  // develop↔doc determinism alignment) is reached through this exported entry.
+  semanticSyncDocToDevelop,
 } from "../scripts/driver-filters.ts";
 import { readTaskStatus as workerReadTaskStatus } from "../scripts/worker-driver.ts";
 // gap-superseded-dependency-blocks-dispatch-forever AC7: the relation-edge judgment that lives in
@@ -448,8 +451,15 @@ test("AC1 — markNeedsHuman commits the flipped task file (⛔ 翻转后 git st
   const res = markNeedsHuman(root, "gap-nh", "reason");
   assert.equal(res.ok, true);
   assert.equal(res.committed, true, "commit landed");
+  // gap-task-status-events-contract-v1: the flip now ALSO appends a structured transition event to
+  // `<root>/.quay/task-status-events.jsonl` — runtime telemetry, never git-tracked (the same family
+  // as `.quay/gate-events.jsonl`, which this repo gitignores). A bare fixture repo has no
+  // `.gitignore`, so the carrier legitimately shows as untracked; the AC here is about TRACKED
+  // residue ("did the commit land?"), so the `.quay/` telemetry is filtered out — the shape
+  // ready-pool-check-s11/s12 already use for exactly this reason.
   const status = git(root, "status", "--porcelain");
-  assert.equal(status.trim(), "", `tree clean after flip: ${JSON.stringify(status)}`);
+  const trackedResidue = status.split("\n").filter((l) => l.trim() && !l.includes(".quay/")).join("\n");
+  assert.equal(trackedResidue, "", `tree clean after flip (tracked residue only): ${JSON.stringify(status)}`);
   assert.match(git(root, "log", "--oneline", "-1"), /needs-human/, "the flip is a commit in the log");
 });
 
@@ -1519,4 +1529,114 @@ test("GOAL-036 AC-359/AC-360：确定性负对照 —— 相同输入两次调�
   assert.deepStrictEqual(running, [{ task: "t1" }, { task: "t2" }], "running 未被改动");
   assert.deepStrictEqual([...coldInflight], ["t3", "t4"], "coldInflight 未被改动");
   assert.deepStrictEqual([...retryState.needsHuman], ["t9"], "retryState.needsHuman 未被改动");
+});
+
+// ── v1 转移事件：本文件两个 status writer 的接线（gap-task-status-events-contract-v1-all-─────
+// driver-writers AC(d)「the second driver-filters site」+ needs-human）────────────────────────────
+//
+// 在此之前，本文件两个 writer 的翻转【零事件】：needs-human 与确定性 status 对齐都是一次真实的
+// status 变更，却没有任何记录。这里钉的不是「字段存在」，而是「evidence.commit 能在 git 上解析，
+// 且它命名的那个提交真的把该任务翻成了该状态」。
+
+/** 读工作区载体里的转移事件（不存在 ⇒ 空表）。 */
+function readTransitionEvents(root) {
+  const file = path.join(root, ".quay", "task-status-events.jsonl");
+  if (!fs.existsSync(file)) return [];
+  return fs
+    .readFileSync(file, "utf8")
+    .split("\n")
+    .filter((l) => l.trim() !== "")
+    .map((l) => JSON.parse(l));
+}
+
+test("AC(d) needs-human: markNeedsHuman emits exactly ONE v1 event whose evidence.commit resolves to the flip", (t) => {
+  const root = makeGitRoot("nh-event");
+  t.after(() => fs.rmSync(root, { recursive: true, force: true }));
+  writeTask(root, "gap-nh", "---\nid: gap-nh\nstatus: ready\n---");
+  git(root, "add", "--", "tasks/gap-nh.md");
+  git(root, "commit", "-q", "-m", "baseline");
+  const headBefore = git(root, "rev-parse", "HEAD").trim();
+
+  const res = markNeedsHuman(root, "gap-nh", "连续 3 次未落地");
+  assert.equal(res.ok, true);
+  assert.equal(res.committed, true);
+
+  const events = readTransitionEvents(root);
+  assert.equal(events.length, 1, `one status change ⇒ exactly ONE event; got ${JSON.stringify(events)}`);
+  const ev = events[0];
+  assert.equal(ev.schema, "task-status-event/v1");
+  assert.equal(ev.taskId, "gap-nh");
+  assert.equal(ev.from, "ready");
+  assert.equal(ev.to, "needs-human");
+  assert.equal(ev.kind, "escalate", "ready→needs-human 的 kind 来自 LIFECYCLE_EDGES");
+  assert.equal(ev.reason, "连续 3 次未落地", "the event carries the park reason");
+  assert.deepEqual(ev.actor, { kind: "unknown", id: "driver-filters markNeedsHuman" }, "本模块读不出触发它的 driver ⇒ 如实记 unknown，⛔ 不猜");
+  assert.match(ev.evidence.commit, /^[0-9a-f]{40}$/);
+  assert.notEqual(ev.evidence.commit, headBefore, "names the NEW commit, not the pre-write HEAD");
+  assert.equal(git(root, "show", `${ev.evidence.commit}:tasks/gap-nh.md`).match(/^status:\s*(\S+)/m)[1], "needs-human");
+  assert.equal(ev.evidence.statusBlobSha, git(root, "rev-parse", `${ev.evidence.commit}:tasks/gap-nh.md`).trim());
+});
+
+test("AC(d) needs-human negative control: a REFUSED flip (non todo/ready) writes no event", (t) => {
+  const root = makeGitRoot("nh-event-refused");
+  t.after(() => fs.rmSync(root, { recursive: true, force: true }));
+  writeTask(root, "gap-done", "---\nid: gap-done\nstatus: done\n---");
+  git(root, "add", "--", "tasks/gap-done.md");
+  git(root, "commit", "-q", "-m", "baseline");
+
+  const res = markNeedsHuman(root, "gap-done", "should refuse");
+  assert.equal(res.ok, false, "done ⇒ 拒写（并发保护）");
+  assert.equal(readTransitionEvents(root).length, 0, "a refused flip is not an event");
+});
+
+test("AC(d) second driver-filters site: the develop↔doc status ALIGNMENT emits exactly one v1 event", (t) => {
+  const root = makeGitRoot("align-event");
+  t.after(() => fs.rmSync(root, { recursive: true, force: true }));
+  // A REAL divergence: base = ready, the doc branch advances to `done` (higher priority), develop
+  // independently advances to `todo`. The semantic merge takes develop (authoritative) on the
+  // conflict, so the file left on disk is `todo`; the deterministic alignment then writes the
+  // doc-side winner `done` back and commits it — that commit is what `evidence.commit` must name.
+  writeTask(root, "gap-align", "---\nid: gap-align\nstatus: ready\n---");
+  git(root, "add", "-A");
+  git(root, "commit", "-q", "-m", "base: ready");
+  git(root, "branch", "-M", "develop");
+  git(root, "checkout", "-q", "-b", DOC_BRANCH);
+  writeTask(root, "gap-align", "---\nid: gap-align\nstatus: done\n---");
+  git(root, "add", "-A");
+  git(root, "commit", "-q", "-m", "author: done");
+  git(root, "checkout", "-q", "develop");
+  writeTask(root, "gap-align", "---\nid: gap-align\nstatus: todo\n---");
+  git(root, "add", "-A");
+  git(root, "commit", "-q", "-m", "develop: todo");
+  git(root, "checkout", "-q", DOC_BRANCH);
+
+  assert.equal(semanticSyncDocToDevelop(root, DOC_BRANCH), true, "the semantic sync succeeds");
+  assert.equal(readTaskStatusAtRef(root, "develop", "gap-align"), "done", "the doc-side winner reached develop");
+
+  const events = readTransitionEvents(root);
+  assert.equal(events.length, 1, `one aligned status change ⇒ exactly ONE event; got ${JSON.stringify(events)}`);
+  const ev = events[0];
+  assert.equal(ev.taskId, "gap-align");
+  assert.equal(ev.from, "todo", "`from` is what the merge left on disk (= develop's side, the authoritative one)");
+  assert.equal(ev.to, "done", "`to` is the deterministic-priority winner (done > todo)");
+  assert.equal(ev.kind, "promote");
+  assert.deepEqual(ev.actor, { kind: "unknown", id: "driver-filters applyStatusAlignments" });
+  assert.equal(git(root, "show", `${ev.evidence.commit}:tasks/gap-align.md`).match(/^status:\s*(\S+)/m)[1], "done");
+  assert.equal(ev.evidence.statusBlobSha, git(root, "rev-parse", `${ev.evidence.commit}:tasks/gap-align.md`).trim());
+});
+
+test("AC(d) alignment negative control: a run with NOTHING to align writes no event", (t) => {
+  const root = makeGitRoot("align-noop");
+  t.after(() => fs.rmSync(root, { recursive: true, force: true }));
+  writeTask(root, "gap-same", "---\nid: gap-same\nstatus: ready\n---");
+  git(root, "add", "-A");
+  git(root, "commit", "-q", "-m", "develop: ready");
+  git(root, "branch", "-M", "develop");
+  git(root, "checkout", "-q", "-b", DOC_BRANCH);
+  writeTask(root, "gap-other", "---\nid: gap-other\nstatus: todo\n---"); // a NEW file, no status divergence
+  git(root, "add", "-A");
+  git(root, "commit", "-q", "-m", "author: new task");
+
+  assert.equal(semanticSyncDocToDevelop(root, DOC_BRANCH), true);
+  assert.equal(readTransitionEvents(root).length, 0, "no aligned status change ⇒ no event (the no-op path)");
 });

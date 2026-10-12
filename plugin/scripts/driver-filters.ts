@@ -26,6 +26,9 @@ import { parseTask, readDependsOn, readTaskStatusAtRef } from "./task-schema.ts"
 // gap-task-ops-consolidate-driver-frontmatter-writers：frontmatter parse/patch + commit 单一真相源
 // 上收到 task-ops.ts（⛔ 本文件不再各写一份 regex+writeFileSync+git 序列）。
 import { splitTaskFile, statusFromFrontmatter, patchStatusField, commitTaskFile, hasPriorCommit } from "./task-ops.ts";
+// gap-task-status-events-contract-v1（本文件的两个 status writer 接线）：kernel 单一事件写入器 +
+// 转移表判 kind + git blob 摘要（`git hash-object` 的纯函数形）。⛔ 不在此重写「写事件」的第二份。
+import { edgeKindFor, appendTaskStatusEvent, gitBlobSha } from "../../packages/quay/src/kernel/task-transition.ts";
 import { parseTouches, checkTouchesPair } from "./touches-orthogonality-check.ts";
 import { expandDeclaredTouches } from "./concurrent-batch-scheduler.ts";
 // gap-develop-sync-reset-hard-destroys-third-party-project-tree：终局解可弃性判定复用【既有的】
@@ -571,7 +574,7 @@ function statusAtRef(root: string, ref: string, rel: string): string | null {
  *  statusFromFrontmatter / patchStatusField，单一 frontmatter parser，⛔ 不再本文件手搓 fence 切分 +
  *  status 行正则）。 */
 function applyStatusAlignments(root: string, alignments: Map<string, string>): boolean {
-  const changed: string[] = [];
+  const changed: Array<{ rel: string; from: string; to: string; written: string }> = [];
   for (const [rel, status] of alignments) {
     const file = path.join(root, rel);
     let raw: string;
@@ -582,26 +585,70 @@ function applyStatusAlignments(root: string, alignments: Map<string, string>): b
     }
     const split = splitTaskFile(raw);
     if (!split) return false;
-    if (statusFromFrontmatter(split.frontmatterRaw) === status) continue; // 已对齐（merge 已保留 doc 侧胜者）
+    const from = statusFromFrontmatter(split.frontmatterRaw);
+    if (from === status) continue; // 已对齐（merge 已保留 doc 侧胜者）
     const patched = patchStatusField(split.frontmatterRaw, status);
     if (!patched.ok) return false;
-    fs.writeFileSync(file, `${split.open}${patched.fm}${split.close}${split.body}`, "utf8");
-    changed.push(rel);
+    const written = `${split.open}${patched.fm}${split.close}${split.body}`;
+    fs.writeFileSync(file, written, "utf8");
+    changed.push({ rel, from: from ?? null, to: status, written });
   }
   if (changed.length === 0) return true;
-  for (const rel of changed) {
+  const paths = changed.map((c) => c.rel);
+  // 事件时点 = status 写盘的时点（全部改写完成、提交之前）；事件本身在提交之后追加（硬规则 7 +
+  // 契约 v1 的「先写 → 再提交 → 再落事件」顺序：evidence.commit 必须是被这次改动承载的那个提交）。
+  const at = new Date().toISOString();
+  for (const rel of paths) {
     try { execFileSync("git", ["-C", root, "add", "--", rel], { stdio: "ignore" }); } catch { return false; }
   }
+  let commitSha: string | null = null;
   try {
     execFileSync(
       "git",
-      ["-C", root, "commit", "--no-verify", "-m", "sync: 确定性 status 对齐（develop 权威 + done>needs-human>ready>todo）", "--", ...changed],
+      ["-C", root, "commit", "--no-verify", "-m", "sync: 确定性 status 对齐（develop 权威 + done>needs-human>ready>todo）", "--", ...paths],
       { stdio: "ignore" },
     );
+    commitSha = revParseHeadOf(root);
   } catch {
     return false;
   }
+  // 每个被改写的任务一行 v1 事件（一个 status 变更 = 一条事件）。actor.kind = "unknown"：本模块是
+  // 两 driver 共用的对齐器，从内部【读不出】是哪个 drive 触发的对齐，也不许按调用栈/消息文本猜
+  // （硬规则 2/6）；`id` 点名的就是这次写入本身的入口。
+  for (const c of changed) {
+    appendTaskStatusEvent(root, {
+      taskId: path.basename(c.rel, ".md"),
+      from: c.from,
+      to: c.to,
+      kind: kindForStatusPair(c.from, c.to),
+      actor: { kind: "unknown", id: "driver-filters applyStatusAlignments" },
+      at,
+      evidence: {
+        commit: commitSha,
+        statusBlobSha: gitBlobSha(c.written),
+        ...(commitSha === null ? { commitAbsentReason: "git rev-parse HEAD returned no sha" } : {}),
+      },
+    });
+  }
   return true;
+}
+
+/** `git rev-parse HEAD` at `root`, or null. Best-effort: null is recorded as "no commit", never a
+ *  fabricated sha. */
+function revParseHeadOf(root: string): string | null {
+  try {
+    const sha = execFileSync("git", ["-C", root, "rev-parse", "HEAD"], { encoding: "utf8", stdio: ["ignore", "pipe", "ignore"] }).trim();
+    return /^[0-9a-f]{40,64}$/i.test(sha) ? sha : null;
+  } catch {
+    return null;
+  }
+}
+
+/** The declared edge's `kind` for a `from → to` pair — the KERNEL lookup (ONE source; ⛔ never a
+ *  guessed role). `allowLegacy` because a status ALIGNMENT replays whatever the authoritative side
+ *  says, including an edge with no live writer. */
+function kindForStatusPair(from: string, to: string): string | null {
+  return edgeKindFor(from, to, { allowLegacy: true });
 }
 
 /** Propagate the doc branch to develop（gap-doc-develop-sync-semantic-conflict-resolution）：主检出在
@@ -947,7 +994,9 @@ export function markNeedsHuman(root: string, id: string, reason: string, kind: N
     (lastAttempt?.sessionId ? `- session_id：${lastAttempt.sessionId}\n` : "") +
     (lastAttempt?.suiteLog ? `- suite 日志：${lastAttempt.suiteLog}\n` : "") +
     (lastAttempt?.fanInLog ? `- fan-in 日志：${lastAttempt.fanInLog}\n` : "");
-  fs.writeFileSync(file, `${split.open}${patched.fm}${split.close}${split.body}${record}`);
+  const written = `${split.open}${patched.fm}${split.close}${split.body}${record}`;
+  fs.writeFileSync(file, written);
+  const at = new Date().toISOString();
   const rel = path.join("tasks", `${id}.md`);
   // FIRST-REGISTRATION JUDGMENT (gap-promotion-commit-message-misleading-on-first-track)：目标文件此前
   // 从未提交（本次提交是其 git 诞生提交，谈不上 todo→needs-human「翻转」）⇒ 如实标「首次登记」，不得
@@ -957,6 +1006,24 @@ export function markNeedsHuman(root: string, id: string, reason: string, kind: N
     ? `tasks: ${id} ${from}→needs-human（${needsHumanCommitLabel(kind)}）`
     : `tasks: ${id} 首次登记（status=needs-human，${kind === "retry-cap" ? "重试上限机械落盘" : "机械停派落盘"}）`;
   const committed = commitTaskFile(root, rel, message);
+  // gap-task-status-events-contract-v1: the SECOND writer this file owns now emits the v1 event too
+  // (the first is applyStatusAlignments). Written AFTER the commit (硬规则 7 + the v1 ordering), so
+  // `evidence.commit` names the commit that carries the flip — this is the transition that had ZERO
+  // events before this task.
+  appendTaskStatusEvent(root, {
+    taskId: id,
+    from,
+    to: TASK_STATUS.NEEDS_HUMAN,
+    kind: kindForStatusPair(from, TASK_STATUS.NEEDS_HUMAN),
+    actor: { kind: "unknown", id: "driver-filters markNeedsHuman" },
+    reason,
+    at,
+    evidence: {
+      commit: committed ? revParseHeadOf(root) : null,
+      statusBlobSha: gitBlobSha(written),
+      ...(committed ? {} : { commitAbsentReason: "commitTaskFile did not land (repo-less workspace or git commit failed)" }),
+    },
+  });
   syncDocDevelopBidirectional(root); // 分歧检测双向同步（⛔ 不依赖 committed 翻转）
   return { id, ok: true, reason, committed };
 }
