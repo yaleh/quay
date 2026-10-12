@@ -30,6 +30,7 @@ import assert from "node:assert/strict";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
+import { createHash } from "node:crypto";
 import { spawnSync } from "node:child_process";
 import { fileURLToPath, pathToFileURL } from "node:url";
 
@@ -44,6 +45,23 @@ import {
   VERIFIER_TOOLS,
   REFUTER_TOOLS,
   VALUE_TOOLS,
+  NOVELTY_TOOLS,
+  NOVELTY_PROMPT_TEMPLATE,
+  NOVELTY_VERDICTS,
+  NOVELTY_DISPOSITIONS,
+  OPEN_DISCOVERY_REF_PREFIX,
+  ROUTINE_FINDINGS_CARRIER_REL,
+  ARCH_DISCOVERY_CARRIER_REL,
+  openDiscoveryRecordId,
+  buildNoveltyPrompt,
+  parseNoveltyVerdict,
+  findMechanicalRepeat,
+  retrieveNoveltyCandidates,
+  ingestRoundClusters,
+  experienceRoleFor,
+  experienceSummaryFor,
+  taskIdFromPath,
+  componentsFromSubjectKey,
   BLIND_INVESTIGATOR_MAX_TURNS,
   DEFAULT_INVESTIGATOR_MAX_TURNS,
   PER_CALL_USD_CEILING,
@@ -64,6 +82,7 @@ import {
   resolveEngineModule,
   loadOpenDiscoveryModules,
   HYPOTHESIS_MODULE_FILE,
+  LEDGER_MODULE_FILE,
   ANALYSIS_DIR_REL,
 } from "../scripts/open-semantic-discovery-routine.ts";
 import { ROUTINE_LAST_RUN_REL, readLastRunMap } from "../scripts/probe-routine.ts";
@@ -74,6 +93,7 @@ import { appendLedgerRecords } from "../scripts/discovery-method-routine.ts";
 // `hardenedArgv` is the production argv constructor, and the stubs only replace the RUNNERS.
 import * as realHyp from "../../docs/analysis/arch-hypothesis-generation.mjs";
 import * as realPortfolio from "../../docs/analysis/discovery-portfolio.mjs";
+import * as realLedger from "../../docs/analysis/discovery-experience-ledger.mjs";
 
 const SCRIPT_DIR = path.dirname(fileURLToPath(import.meta.url));
 const REPO_ROOT = path.resolve(SCRIPT_DIR, "..", "..");
@@ -148,6 +168,35 @@ const ledgerLines = (ws) => (fs.existsSync(ledgerPath(ws))
 const ledgerReserves = (ws) => ledgerLines(ws).filter((l) => l.kind === "reserve");
 const resumeSteps = (ws) => ledgerReserves(ws).map((l) => l.step);
 
+// ── the two ledgers the post-round ingestion writes ──────────────────────────────────────────────────
+const portfolioRecords = (ws) => realPortfolio.readPortfolio(ws).records;
+const experienceRecords = (ws) => realLedger.readExperienceLedger(ws).records;
+
+/** Seed the Portfolio with ONE already-known finding whose component set AND claim match the fixture
+ *  cluster, through the REAL ingest path. `origin_ref` resolves against a `.quay/routine-findings.jsonl`
+ *  record written into the fixture, so the seed is a resolvable chain rather than a hand-written row. */
+function seedKnownFinding(ws, { findingId = "F-seed", runId = "seed-run", findingKey = "seed-finding", claim, components } = {}) {
+  fs.mkdirSync(path.join(ws, ".quay"), { recursive: true });
+  fs.appendFileSync(path.join(ws, ROUTINE_FINDINGS_CARRIER_REL),
+    JSON.stringify({ ts: new Date().toISOString(), kind: "finding", runId, findingId: findingKey, files: components }) + "\n", "utf8");
+  const res = realPortfolio.ingestFinding(ws, {
+    finding_id: findingId, origin: "autonomous-routine", origin_ref: `${runId}#${findingKey}`,
+    evidence_level: "production-open", method_ref: null, claim,
+    components, outcome: "supported", fix_task: null, human_rating: null, domain: null, domain_reason: null,
+  });
+  assert.equal(res.ok, true, `the seed finding must ingest (got ${JSON.stringify(res.reasons)})`);
+  return findingId;
+}
+
+/** The component set + claim the fixture cluster ends up carrying, read from a REAL round rather than
+ *  guessed — the ingestion's duplicate rule is only meaningful against the values the engine produced. */
+async function clusterIdentityOf(ws, engine, spawn) {
+  await runOpenSemanticDiscovery(ws, { ...runOpts(ws, { engine }), spawnFn: spawn, pinFn: pinStub() });
+  const rec = carrierLines(ws).find((l) => l.kind === "cluster");
+  assert.ok(rec, "the probe round wrote a cluster record");
+  return { claim: rec.claim, components: rec.components, record_id: rec.record_id };
+}
+
 // ── the model stream fixture ─────────────────────────────────────────────────────────────────────────
 // A stream the engine's own `parseVerifierStream` reads: an init event carrying the served model, and a
 // result event carrying num_turns / usage / total_cost_usd / the final text.
@@ -161,14 +210,30 @@ const streamText = (resultText) => [
 ].join("\n") + "\n";
 const STREAM = streamText(`${FOCUS_MARKER} fixture focus on the carrier helpers\n[]`);
 
+/** The NOVELTY call's own answer. The default delegate answers it, so the ordinary round fixtures exercise
+ *  the ingestion's happy path; a test that wants another verdict passes its own delegate. The prompt is
+ *  recognised by the template's OWN first line rather than a copy of it, so the two cannot drift. */
+const NOVELTY_FIRST_LINE = NOVELTY_PROMPT_TEMPLATE.split("\n")[0];
+const noveltyStream = (verdict) => streamText(JSON.stringify({
+  verdict, duplicate_of: null,
+  reasoning: `fixture reasoning for a ${verdict} verdict`,
+  summary: `fixture novelty summary for a ${verdict} verdict`,
+}));
+const NOVELTY_STREAM = noveltyStream("novel");
+const isNoveltyPrompt = (opts) => String(opts?.stdinData ?? "").includes(NOVELTY_FIRST_LINE);
+const defaultDelegate = (_argv, opts) => ({
+  status: 0, stdout: isNoveltyPrompt(opts) ? NOVELTY_STREAM : STREAM, stderr: "", error: null,
+});
+
 /** A spawn primitive that COUNTS its calls (the seam every argv/cwd claim is read from). */
 function countingSpawn(delegate) {
   const calls = [];
   const fn = async (argv, opts) => {
     calls.push({ argv, opts });
-    return delegate ? delegate(argv, opts) : { status: 0, stdout: STREAM, stderr: "", error: null };
+    return delegate ? delegate(argv, opts) : defaultDelegate(argv, opts);
   };
   fn.calls = calls;
+  fn.noveltyCalls = () => calls.filter((c) => isNoveltyPrompt(c.opts));
   return fn;
 }
 
@@ -221,7 +286,10 @@ function verifierStub(sink, verdictFor) {
 
 const alwaysSupported = () => "supported";
 
-/** Build the engine seam: the REAL pure functions + argv builder, STUBBED runners. */
+/** Build the engine seam: the REAL pure functions + argv builder, STUBBED runners. The portfolio and the
+ *  experience ledger are the REAL modules (spread whole, with only the gateway fetch replaced) — the
+ *  post-round ingestion is the thing under test, and a hand-written stand-in for it would be testing the
+ *  stand-in. */
 function makeEngine({ hyps = HYPS, verdictFor = alwaysSupported } = {}) {
   const investigatorCalls = [];
   const verifierCalls = [];
@@ -243,10 +311,10 @@ function makeEngine({ hyps = HYPS, verdictFor = alwaysSupported } = {}) {
     runVerifier: verifierStub(verifierCalls, verdictFor),
   };
   const portfolio = {
+    ...realPortfolio,
     loadGatewayRates: () => ({ ok: true, rates: { model_group: FIXTURE_MODEL, input_cost_per_token: 0.000001, output_cost_per_token: 0.000002 } }),
-    deriveCost: realPortfolio.deriveCost,
   };
-  return { modules: { hyp, portfolio }, investigatorCalls, verifierCalls };
+  return { modules: { hyp, portfolio, ledger: realLedger }, investigatorCalls, verifierCalls };
 }
 
 /** A pin seam that makes a directory carrying (or NOT carrying) the inventory scope. `pins` records every
@@ -369,7 +437,7 @@ test("case (c) — sub-360m interval WITHOUT interval_until ⇒ config error; su
 });
 
 // ── (d) reservation before EVERY step ────────────────────────────────────────────────────────────────
-test("case (d) — a reservation precedes EACH of investigator, verifier and refuter", async () => {
+test("case (d) — a reservation precedes EACH of investigator, verifier, refuter, value-assessor and novelty check", async () => {
   const ws = makeWorkspace();
   writeConfig(ws, cfgYaml());
   // ONE hypothesis ⇒ exactly one cluster ⇒ the step order is the whole story, with no repetition to read
@@ -379,7 +447,7 @@ test("case (d) — a reservation precedes EACH of investigator, verifier and ref
   const fact = await runOpenSemanticDiscovery(ws, { ...runOpts(ws, { engine }), spawnFn: spawn, pinFn: pinStub() });
   assert.equal(fact.state, "verified");
   const steps = resumeSteps(ws);
-  assert.deepEqual(steps, ["investigator", "verifier", "refuter", "value-assessment"], `one reservation per step, in order (got ${steps.join(",")})`);
+  assert.deepEqual(steps, ["investigator", "verifier", "refuter", "value-assessment", "novelty-check"], `one reservation per step, in order (got ${steps.join(",")})`);
   assert.equal(spawn.calls.length, resumeSteps(ws).length, "one spawn per reservation — the reservation is BEFORE the spawn");
   // Every reservation's own record names its tools and its turn bound (the counting semantics travel).
   for (const r of ledgerReserves(ws)) {
@@ -565,30 +633,38 @@ test("case (h) — the carrier line names its caller, so a production round is d
 });
 
 // ── (i) report-only, structurally ────────────────────────────────────────────────────────────────────
-test("case (i) — after a full round nothing under tasks/ or goals/ changed, and the source carries no authoring symbol", async () => {
+test("case (i) — after a full round nothing under tasks/ or goals/ changed, and the source carries no authoring symbol and no rating verb", async () => {
   const ws = makeWorkspace();
   writeConfig(ws, cfgYaml());
   const before = (d) => fs.readdirSync(path.join(ws, d)).sort().join(",");
   const t0 = before("tasks");
   const g0 = before("goals");
-  fs.mkdirSync(path.join(ws, ".quay"), { recursive: true });
-  const q0 = fs.existsSync(path.join(ws, ".quay", "discovery-portfolio.jsonl"));
   const engine = makeEngine();
-  await runOpenSemanticDiscovery(ws, { ...runOpts(ws, { engine }), spawnFn: countingSpawn(), pinFn: pinStub() });
-  assert.equal(before("tasks"), t0, "tasks/ is untouched");
-  assert.equal(before("goals"), g0, "goals/ is untouched");
-  assert.equal(fs.existsSync(path.join(ws, ".quay", "discovery-portfolio.jsonl")), q0, "no Portfolio write");
-  assert.equal(fs.existsSync(path.join(ws, ".quay", "discovery-experience-ledger.jsonl")), false, "no Experience write");
+  const spawn = countingSpawn();
+  await runOpenSemanticDiscovery(ws, { ...runOpts(ws, { engine }), spawnFn: spawn, pinFn: pinStub() });
+  assert.equal(before("tasks"), t0, "tasks/ is untouched — the routine files nothing");
+  assert.equal(before("goals"), g0, "goals/ is untouched — the routine writes no Goal");
+  // ⛔ THE INGESTION IS EXPECTED NOW (this task added it): the TWO ledgers ARE written, and saying so here
+  // is what keeps "nothing was written" from silently covering for "the ingestion did not run".
+  const confirmedClusters = carrierLines(ws).filter((l) => l.kind === "cluster" && l.confirmed === true);
+  assert.ok(confirmedClusters.length > 0, "the fixture really produced confirmed clusters");
+  assert.equal(portfolioRecords(ws).length, confirmedClusters.length, "every confirmed, novel cluster produced ONE Portfolio row");
+  assert.equal(experienceRecords(ws).length, confirmedClusters.length, "…and ONE Experience");
 
   // The STATIC control: judged BY POSITION on the real source text (硬规则 2) — the routine names none of
-  // the filing/authoring symbols.
+  // the filing/authoring symbols, and none of the portfolio module's HUMAN-ONLY rating verb.
   const src = fs.readFileSync(ROUTINE_SRC, "utf8");
-  const FORBIDDEN = /selectFilings|fileRoutineTask|driveItems|task_write|goal_write|writeTask|writeGoal|lifecycle_promote|lifecycle_retreat|lifecycle_complete/;
-  assert.doesNotMatch(src, FORBIDDEN, "open-semantic-discovery-routine.ts must import/call no filing or authoring symbol");
+  const FORBIDDEN = /selectFilings|fileRoutineTask|driveItems|task_write|goal_write|writeTask|writeGoal|lifecycle_promote|lifecycle_retreat|lifecycle_complete|rateFinding/;
+  assert.doesNotMatch(src, FORBIDDEN, "open-semantic-discovery-routine.ts must name no filing/authoring symbol and no rating verb");
   // A non-zero control on the SAME predicate: it CAN fire, so the zero above is a real zero.
   assert.match(src, /appendCarrierRecords/, "the predicate finds a token that IS present in this file");
-  const mutated = `${src}\nimport { writeTask } from "./nowhere.ts";\n`;
-  assert.match(mutated, FORBIDDEN, "the mutation must turn the same predicate red — otherwise the control is vacuous");
+  for (const injected of ["writeTask", "rateFinding"]) {
+    const mutated = `${src}\nimport { ${injected} } from "./nowhere.ts";\n`;
+    assert.match(mutated, FORBIDDEN, `the mutation with ${injected} must turn the same predicate red`);
+  }
+  // …and the interface the routine holds the portfolio module to does not even DECLARE the rating verb, so
+  // the absence is a compile-time fact rather than a comment (named here without spelling the symbol).
+  assert.doesNotMatch(src, /^\s{2}rate[A-Z]\w*:/m, "the PortfolioModule interface carries no rating member");
 });
 
 test("case (i) — the engine is resolved at runtime: NO static out-of-artifact import (with mutation control)", () => {
@@ -671,25 +747,43 @@ test("case (k) — the round runs when the PIN IS UNCHANGED since the last round
   const fact2 = await runOpenSemanticDiscovery(ws, { ...runOpts(ws, { engine: makeEngine() }), revFn: () => fixedRev, force: true, spawnFn: spawn2, pinFn: pinStub() });
   assert.equal(spawn1.calls.length > 0, true, "round 1 ran");
   assert.equal(fact2.state, "verified", "round 2 ran too");
-  assert.equal(spawn2.calls.length, spawn1.calls.length, "…with the SAME number of calls: an unchanged pin suppresses nothing");
+  // ⛔ The comparison is over the SEMANTIC steps. Round 2 also carries one FEWER call than round 1, and
+  // the difference is NOT the pin: round 2's cluster is a byte-identical repeat of round 1's own record, so
+  // its novelty call is skipped by the declared mechanical-dedup exception. Asserting the totals would
+  // have made this case red for a reason that has nothing to do with what it tests.
+  const semanticCalls = (s) => s.calls.filter((c) => !isNoveltyPrompt(c.opts)).length;
+  assert.equal(semanticCalls(spawn2), semanticCalls(spawn1), "…with the SAME number of SEMANTIC calls: an unchanged pin suppresses nothing");
+  assert.equal(spawn1.noveltyCalls().length, 2, "round 1 checked both clusters for novelty");
+  assert.equal(spawn2.noveltyCalls().length, 0, "…while round 2's identical clusters were deduped mechanically, not by the pin");
   assert.equal(rounds(ws).length, 2, "two scan-round lines");
   assert.equal(rounds(ws)[0].pin.rev, rounds(ws)[1].pin.rev);
 });
 
-test("case (k) — the round runs when arch-discovery reports ZERO new fingerprints (this routine never reads that carrier)", async () => {
-  const ws = makeWorkspace();
-  writeConfig(ws, cfgYaml());
-  fs.writeFileSync(path.join(ws, ".quay", "arch-discovery-findings.jsonl"),
+test("case (k) — arch-discovery's carrier is READ for novelty RETRIEVAL ONLY and gates nothing", async () => {
+  // The claim is narrower than it used to be, and it is stated as what it now is: the post-round novelty
+  // retrieval does look in that carrier, and its `new: 0` reading STILL suppresses no round.
+  const withCarrier = makeWorkspace();
+  writeConfig(withCarrier, cfgYaml());
+  fs.writeFileSync(path.join(withCarrier, ".quay", "arch-discovery-findings.jsonl"),
     JSON.stringify({ kind: "scan-round", ts: new Date().toISOString(), new: 0, repeated: 7, gone: 0 }) + "\n", "utf8");
   const spawn = countingSpawn();
-  const fact = await runOpenSemanticDiscovery(ws, { ...runOpts(ws, { engine: makeEngine() }), spawnFn: spawn, pinFn: pinStub() });
+  const fact = await runOpenSemanticDiscovery(withCarrier, { ...runOpts(withCarrier, { engine: makeEngine() }), spawnFn: spawn, pinFn: pinStub() });
   assert.equal(fact.state, "verified", "0 new fingerprints from ANOTHER routine suppresses nothing here");
-  assert.ok(spawn.calls.length >= 3);
-  // ⛔ …and the reason is structural, not incidental: this module never even names that routine's carrier.
-  const src = fs.readFileSync(ROUTINE_SRC, "utf8");
-  // Judged by POSITION on the source: a READ of that carrier would have to spell its filename as a string
-  // literal; the bare words appear only in this file's own prose (which is not a read).
-  assert.equal(src.includes('"arch-discovery-findings.jsonl"'), false, "the module never reads that routine's carrier");
+  assert.ok(spawn.calls.length >= 4, "the semantic round really ran");
+  const retrieval = rounds(withCarrier)[0].ingestion.outcomes[0].retrieval;
+  assert.equal(retrieval.totals.arch_discovery, 1, "…and the carrier WAS read — for retrieval, not as a gate");
+  assert.deepEqual(retrieval.errors, [], "no retrieval source failed");
+  // The other half of the same claim, and the one that makes "read" falsifiable: with the carrier ABSENT
+  // the round STILL runs, and the retrieval reports the absence by NAME rather than as zero matches.
+  const withoutCarrier = makeWorkspace();
+  writeConfig(withoutCarrier, cfgYaml());
+  const spawn2 = countingSpawn();
+  const fact2 = await runOpenSemanticDiscovery(withoutCarrier, { ...runOpts(withoutCarrier, { engine: makeEngine() }), spawnFn: spawn2, pinFn: pinStub() });
+  assert.equal(fact2.state, "verified", "an absent carrier suppresses nothing either");
+  const retrieval2 = rounds(withoutCarrier)[0].ingestion.outcomes[0].retrieval;
+  assert.equal(retrieval2.totals.arch_discovery, 0);
+  assert.ok(retrieval2.absent.includes(ARCH_DISCOVERY_CARRIER_REL), `the absence is NAMED, never counted as 0 matches (got ${JSON.stringify(retrieval2.absent)})`);
+  assert.deepEqual(retrieval2.errors, [], "…and an absent carrier is a real zero, not a failure to look");
 });
 
 test("case (k) — the round runs when the INVENTORY is missing (recorded as such, never as a gate)", async () => {
@@ -884,7 +978,381 @@ test("INTEGRATION — the REAL runInvestigator + runVerifier accept this routine
   assert.equal(spawn.calls[1].argv[spawn.calls[1].argv.indexOf("--tools") + 1], VERIFIER_TOOLS);
 });
 
-// ── the two in-scratch-copy NEGATIVE CONTROLS ────────────────────────────────────────────────────────
+// ══════════════════════════════════════════════════════════════════════════════════════════════════════
+// THE POST-ROUND INGESTION (task gap-open-discovery-findings-into-portfolio-experience)
+//   (a) a confirmed cluster duplicating an existing Portfolio finding ⇒ duplicate_of set, not net-new
+//   (b) a novel cluster ⇒ Experience + Portfolio, production-open, a RESOLVABLE origin_ref
+//   (c) a cluster the refuter refuted ⇒ never ingested as supported
+//   (d) the same cluster in two rounds ⇒ ONE Portfolio record
+//   (f) no mechanical candidate ⇒ the semantic novelty call STILL happens, and is not auto-labelled novel
+//   (g) refuted and undetermined clusters ⇒ Experiences with their reasoning, never Portfolio-supported
+// ══════════════════════════════════════════════════════════════════════════════════════════════════════
+
+/** A spawn delegate that answers the NOVELTY call with a chosen verdict and answers everything else with
+ *  the ordinary fixture stream. */
+function noveltyDelegate({ verdict, duplicateOf = null }) {
+  return (argv, opts) => {
+    if (!isNoveltyPrompt(opts)) return defaultDelegate(argv, opts);
+    return {
+      status: 0, stderr: "", error: null,
+      stdout: streamText(JSON.stringify({
+        verdict, duplicate_of: duplicateOf,
+        reasoning: `fixture reasoning: the novelty check returned ${verdict}`,
+        summary: `fixture novelty summary: ${verdict}`,
+      })),
+    };
+  };
+}
+
+/** The cluster identity (claim + components) ONE hypothesis really produces — read off a REAL round in a
+ *  throwaway workspace rather than predicted, so the seed the duplicate rule is judged against is the
+ *  engine's own output. */
+async function clusterIdentity(hyps = [HYPS[0]]) {
+  const ws = makeWorkspace();
+  writeConfig(ws, cfgYaml());
+  return clusterIdentityOf(ws, makeEngine({ hyps }), countingSpawn());
+}
+
+/** Put ONE task on `develop` in the fixture, carrying a `## Touches` list — the shape the novelty
+ *  retrieval's task arm reads (`taskTouchesOnBranch`, via `git show <branch>:tasks/<id>.md`). */
+function addTaskOnDevelop(ws, id, { touches = [] } = {}) {
+  const body = `---\nid: ${id}\ntitle: "fixture task ${id}"\nstatus: done\n---\n## Touches\n${touches.map((t) => `- ${t}`).join("\n")}\n`;
+  fs.writeFileSync(path.join(ws, "tasks", `${id}.md`), body, "utf8");
+  spawnSync("git", ["-C", ws, "add", "-A"], { encoding: "utf8", env: GIT_ENV });
+  spawnSync("git", ["-C", ws, "commit", "-qm", `fixture task ${id}`, "--no-verify"], { encoding: "utf8", env: GIT_ENV });
+  return id;
+}
+
+/** Scenario (a)/(d)-shared: a confirmed cluster that DUPLICATES a Portfolio finding already recorded.
+ *  Returns the observable the case asserts on, so the negative control can run the SAME scenario against
+ *  a mutated module and show the claim goes red. */
+async function scenarioDuplicateAgainstExistingPortfolio(runFn) {
+  const id = await clusterIdentity();
+  const ws = makeWorkspace();
+  writeConfig(ws, cfgYaml());
+  const seeded = seedKnownFinding(ws, { claim: id.claim, components: id.components });
+  const beforeRows = portfolioRecords(ws);
+  const engine = makeEngine({ hyps: [HYPS[0]] });
+  const spawn = countingSpawn(noveltyDelegate({ verdict: "duplicate", duplicateOf: seeded }));
+  const fact = await runFn(ws, { ...runOpts(ws, { engine }), spawnFn: spawn, pinFn: pinStub() });
+  const rows = portfolioRecords(ws);
+  return {
+    ws, fact, seeded, rows, before: realPortfolio.valueMetrics(beforeRows), after: realPortfolio.valueMetrics(rows),
+    ours: rows.filter((r) => r.finding_id !== seeded),
+    cluster: carrierLines(ws).find((l) => l.kind === "cluster"),
+    outcome: rounds(ws)[0].ingestion.outcomes[0],
+    spawn,
+  };
+}
+
+/** Scenario (d)-shared: the SAME cluster observed by two rounds. Round 2 runs at a LATER instant — rounds
+ *  really are minutes apart, and `record_id` is keyed on the round's own `ts`, so a same-millisecond
+ *  second round would be an artefact of the test rather than of the mechanism. */
+async function scenarioSameClusterTwoRounds(runFn) {
+  const ws = makeWorkspace();
+  writeConfig(ws, cfgYaml());
+  const spawn1 = countingSpawn();
+  await runFn(ws, { ...runOpts(ws, { engine: makeEngine({ hyps: [HYPS[0]] }) }), spawnFn: spawn1, pinFn: pinStub() });
+  const later = Date.now() + 600_000;
+  const spawn2 = countingSpawn();
+  await runFn(ws, { ...runOpts(ws, { engine: makeEngine({ hyps: [HYPS[0]] }) }), force: true, now: () => later, spawnFn: spawn2, pinFn: pinStub() });
+  const clusters = carrierLines(ws).filter((l) => l.kind === "cluster");
+  return {
+    ws, rows: portfolioRecords(ws), experiences: experienceRecords(ws),
+    roundsSeen: rounds(ws), spawn2, clusters,
+    second: rounds(ws)[1].ingestion.outcomes[0],
+  };
+}
+
+// ── (a) a duplicate of an existing Portfolio finding ─────────────────────────────────────────────────
+test("ingestion (a) — a confirmed cluster that duplicates an existing Portfolio finding is NOT net-new", async () => {
+  const s = await scenarioDuplicateAgainstExistingPortfolio(runOpenSemanticDiscovery);
+  assert.equal(s.fact.state, "verified", s.fact.reason);
+  assert.equal(s.ours.length, 1, "the round wrote exactly one NEW Portfolio row");
+  assert.equal(s.ours[0].duplicate_of, s.seeded, "…and it names the finding it duplicates");
+  assert.equal(s.ours[0].outcome, "supported", "the claim HELD — what is denied is newness, not truth");
+  const z = s.after.zero_or_negative;
+  assert.ok(z.duplicates.includes(s.ours[0].finding_id), "the row is counted as a DUPLICATE");
+  assert.equal(z.supported_but_not_landed.includes(s.ours[0].finding_id), false, "…and NOT as a fresh supported finding");
+  // ⛔ WHAT THE SEMANTIC CHECK UNIQUELY CONTRIBUTES HERE, stated because it is the part a reader would
+  // otherwise over-credit: `ingestFinding` has its OWN duplicate rule over the Portfolio, so for THIS
+  // shape (a duplicate of a Portfolio row) the `duplicate_of` above survives even with the novelty check
+  // disabled. What does NOT survive is the verdict the carrier records and the role the Experience takes:
+  assert.equal(s.outcome.disposition, "duplicate", "the round RECORDS the semantic verdict it acted on");
+  assert.equal(s.outcome.reasoning, "fixture reasoning: the novelty check returned duplicate");
+  assert.equal(experienceRecords(s.ws)[0].role, "duplicate", "…and the Experience carries the matching role");
+  // ⛔ `net_new_value` does not move. It is stated WITH its reason: `net_new_value` also requires a LANDED
+  // fix, which neither the seed nor a fresh routine row has — so the DISCRIMINATOR here is `duplicate_of`
+  // (above), not the count. The count is asserted anyway because the AC names it.
+  assert.equal(s.after.net_new_value.total, s.before.net_new_value.total, "net_new_value did not grow");
+  assert.equal(s.after.net_new_value.total, 0, "(the fixture lands no fix, so nothing is net-new VALUE either way)");
+  assert.equal(s.after.context.supported, s.before.context.supported + 1, "…while the SUPPORTED count DID grow: the exclusion is the duplicate rule, not the count");
+  // The negative control on the same predicate: forcing `duplicate_of` to null moves the row OUT of
+  // `duplicates` — so the membership above is a real reading, not a tautology.
+  const forced = realPortfolio.valueMetrics(s.rows.map((r) => (r.finding_id === s.ours[0].finding_id ? { ...r, duplicate_of: null } : r)));
+  assert.equal(forced.zero_or_negative.duplicates.includes(s.ours[0].finding_id), false, "the predicate CAN say «not a duplicate»");
+});
+
+test("ingestion (a2) — a duplicate ONLY the semantic check can see (a task Touches overlap) is caught, and its target RESOLVES", async () => {
+  // The Portfolio's mechanical rule cannot see this one: the known record is a TASK on develop, not a
+  // Portfolio row. Plan 1 names exactly this retrieval ("task bodies and Touches on develop"), so the
+  // finding is only deduplicated because the model was shown the task and named it.
+  const id = await clusterIdentity();
+  const ws = makeWorkspace();
+  writeConfig(ws, cfgYaml());
+  const taskId = addTaskOnDevelop(ws, "gap-fixture-known-thing", { touches: id.components });
+  const engine = makeEngine({ hyps: [HYPS[0]] });
+  const spawn = countingSpawn(noveltyDelegate({ verdict: "duplicate", duplicateOf: taskId }));
+  const fact = await runOpenSemanticDiscovery(ws, { ...runOpts(ws, { engine }), spawnFn: spawn, pinFn: pinStub() });
+  assert.equal(fact.state, "verified", fact.reason);
+  const outcome = rounds(ws)[0].ingestion.outcomes[0];
+  // The retrieval really offered the task, and marked it usable as a `duplicate_of` target.
+  const prompt = String(spawn.noveltyCalls()[0].opts.stdinData);
+  assert.match(prompt, new RegExp(taskId), "the task Touches hit is IN the candidate list the model saw");
+  assert.match(prompt, /"basis": "touches-overlap"/);
+  assert.equal(outcome.disposition, "duplicate");
+  assert.equal(outcome.duplicate_of, taskId);
+  const rows = portfolioRecords(ws);
+  assert.equal(rows.length, 1);
+  assert.equal(rows[0].duplicate_of, taskId, "the Portfolio row's duplicate_of names the TASK — and it resolved, or ingest would have refused");
+  assert.equal(rows[0].duplicate_of, taskId, "…");
+  assert.equal(experienceRecords(ws)[0].role, "duplicate");
+});
+
+// ── (b) a novel cluster ──────────────────────────────────────────────────────────────────────────────
+test("ingestion (b) — a novel cluster ⇒ an Experience AND a Portfolio row, production-open, origin_ref resolvable", async () => {
+  const ws = makeWorkspace();
+  writeConfig(ws, cfgYaml());
+  const engine = makeEngine({ hyps: [HYPS[0]] });
+  const spawn = countingSpawn();
+  const fact = await runOpenSemanticDiscovery(ws, { ...runOpts(ws, { engine }), spawnFn: spawn, pinFn: pinStub() });
+  assert.equal(fact.state, "verified", fact.reason);
+
+  const cluster = carrierLines(ws).find((l) => l.kind === "cluster");
+  assert.equal(cluster.confirmed, true);
+  const rows = portfolioRecords(ws);
+  assert.equal(rows.length, 1);
+  const row = rows[0];
+  assert.equal(row.origin, "autonomous-routine");
+  assert.equal(row.evidence_level, "production-open");
+  assert.equal(row.outcome, "supported");
+  assert.equal(row.fix_task, null, "the routine files no fix — that stays the operator's decision");
+  assert.equal(row.human_rating, null, "and it emits no human rating");
+  assert.equal(row.duplicate_of, null);
+  assert.equal(row.origin_ref, cluster.record_id, "the row is keyed on the CARRIER RECORD's own id");
+  assert.equal(row.origin_carrier, CARRIER_REL);
+  // ⛔ THE RESOLVABILITY CLAIM, checked through the portfolio module's OWN resolver — this is also the
+  // anti-drift check for the ref prefix the two modules each declare: if they disagreed, this goes red.
+  const resolved = realPortfolio.resolveOriginRef(ws, { origin: "autonomous-routine", origin_ref: cluster.record_id });
+  assert.equal(resolved.ok, true, `origin_ref must RESOLVE (got ${resolved.reason})`);
+  assert.equal(resolved.carrier, CARRIER_REL);
+  assert.deepEqual(resolved.components, realPortfolio.normalizeComponents(cluster.components));
+
+  const exps = experienceRecords(ws);
+  assert.equal(exps.length, 1);
+  const exp = exps[0];
+  assert.equal(exp.reported_by, "system");
+  assert.equal(exp.role, "found-unresolved", "a supported claim with no fix recorded");
+  assert.equal(exp.evidence_level, "production-open");
+  assert.equal(exp.source_ref, cluster.record_id, "carrier record → Experience, by the record's own id");
+  assert.equal(exp.case_id, `EXP-${cluster.record_id}`);
+  assert.equal(exp.authored_by.actor, "ingester");
+  assert.equal(exp.authored_by.ref, OPEN_SEMANTIC_DISCOVERY_NAME, "the ingesting process names ITSELF");
+  // …and the evidence digest is of the carrier LINE's bytes, so the projection can be re-checked. The line
+  // is located by PARSING (the scan-round line also mentions the id — in its own ingestion block — so a
+  // substring search would hash the wrong bytes and the check would be vacuous).
+  const rawLine = fs.readFileSync(carrierPath(ws), "utf8").split("\n")
+    .find((l) => { try { return JSON.parse(l).record_id === cluster.record_id; } catch { return false; } });
+  assert.ok(rawLine, "the cluster's own line is on the carrier");
+  assert.equal(exp.evidence[0].ref, cluster.record_id);
+  assert.equal(exp.evidence[0].sha256, createHash("sha256").update(rawLine).digest("hex"), "the evidence is content-addressed over the line that is really on disk");
+  // The chain resolves BOTH ways: Portfolio → carrier (above) and carrier → Portfolio/Experience (here).
+  assert.equal(exp.source_ref, row.origin_ref, "Experience and Portfolio address the SAME carrier record");
+  const ing = carrierLines(ws).find((l) => l.kind === "ingestion");
+  assert.equal(ing.writes[0].experience.written, true);
+  assert.equal(ing.writes[0].portfolio.written, true);
+});
+
+// ── (c) a refuted cluster is never ingested as supported ─────────────────────────────────────────────
+test("ingestion (c) — a cluster refuted by the routine's refuter is NEVER ingested as supported", async () => {
+  const ws = makeWorkspace();
+  writeConfig(ws, cfgYaml());
+  const engine = makeEngine({ hyps: [HYPS[0]], verdictFor: (ci, o) => (o.promptTemplate === REFUTATION_PROMPT_TEMPLATE ? "refuted" : "supported") });
+  const spawn = countingSpawn();
+  const fact = await runOpenSemanticDiscovery(ws, { ...runOpts(ws, { engine }), spawnFn: spawn, pinFn: pinStub() });
+  assert.equal(fact.state, "verified", fact.reason);
+  const cluster = carrierLines(ws).find((l) => l.kind === "cluster");
+  assert.equal(cluster.confirmed, false, "the refuter did its job");
+  assert.equal(portfolioRecords(ws).length, 0, "NOTHING reached the Portfolio — there is no supported row to write");
+  assert.equal(spawn.noveltyCalls().length, 0, "…and an unconfirmed cluster is never novelty-checked (no call to spend)");
+  const exps = experienceRecords(ws);
+  assert.equal(exps.length, 1, "the FAILURE is learning material too");
+  assert.equal(exps[0].role, "confirmed-negative", "its own role — the negative IS the finding");
+  assert.match(exps[0].summary, /fixture counterexample/, "…with the refuter's own reasoning on it");
+  const ing = carrierLines(ws).find((l) => l.kind === "ingestion");
+  assert.equal(ing.writes[0].disposition, "not-confirmed");
+  assert.match(String(ing.writes[0].portfolio.skipped), /verdict:refuted-is-never-a-Portfolio-supported-row/);
+});
+
+// ── (d) the same cluster in two rounds ───────────────────────────────────────────────────────────────
+test("ingestion (d) — the same cluster seen in two rounds ⇒ ONE Portfolio record, not two", async () => {
+  const s = await scenarioSameClusterTwoRounds(runOpenSemanticDiscovery);
+  assert.equal(s.clusters.length, 2, "the carrier really holds two cluster records");
+  assert.equal(s.rows.length, 1, "…but only ONE Portfolio record: the repeat wrote nothing");
+  assert.equal(s.experiences.length, 1, "…and only one Experience, for the same reason");
+  assert.equal(s.second.disposition, "mechanical-duplicate");
+  assert.equal(s.second.retrieval.mechanical_duplicate_of, s.clusters[0].record_id, "…naming the EARLIER round's own record");
+  assert.equal(s.spawn2.noveltyCalls().length, 0, "the mechanical exception spends no model call — that is what makes it mechanical");
+});
+
+// ── (f) no mechanical candidate ──────────────────────────────────────────────────────────────────────
+test("ingestion (f) — NO mechanical candidate still gets the semantic novelty call, and is NOT auto-labelled novel", async () => {
+  const ws = makeWorkspace();
+  writeConfig(ws, cfgYaml());
+  // A component nothing in this workspace mentions: no Portfolio, no routine findings, no task Touches.
+  const orphan = [{ ...HYPS[0], components: ["nowhere/zzz-unheard-of.ts"], claim: "nowhere/zzz-unheard-of.ts carries an unreachable branch" }];
+  const engine = makeEngine({ hyps: orphan });
+  const spawn = countingSpawn(noveltyDelegate({ verdict: "restatement" }));
+  const fact = await runOpenSemanticDiscovery(ws, { ...runOpts(ws, { engine }), spawnFn: spawn, pinFn: pinStub() });
+  assert.equal(fact.state, "verified", fact.reason);
+  const outcome = rounds(ws)[0].ingestion.outcomes[0];
+  assert.equal(outcome.retrieved, 0, "the mechanical retrieval really found no candidate");
+  assert.equal(spawn.noveltyCalls().length, 1, "…and the model was STILL asked — «no mechanical match» is not a verdict");
+  // What the model was shown: the wider context is present, and the empty candidate list is explicitly NOT
+  // a verdict. Both assertions are on the REAL prompt the subprocess received.
+  const prompt = String(spawn.noveltyCalls()[0].opts.stdinData);
+  assert.match(prompt, /none retrieved — this does NOT mean the finding is new/, "the empty candidate list is labelled as inconclusive");
+  assert.match(prompt, /WIDER CONTEXT/, "…and the wider context is supplied");
+  assert.equal(outcome.disposition, "restatement", "the label is the MODEL's, not an automatic «novel»");
+  assert.equal(portfolioRecords(ws).length, 0, "so nothing counts as new");
+  assert.equal(experienceRecords(ws).length, 1, "…while the observation itself is still recorded as an Experience");
+  assert.equal(experienceRecords(ws)[0].role, "duplicate");
+});
+
+// ── (g) failures are learning material ───────────────────────────────────────────────────────────────
+test("ingestion (g) — refuted AND undetermined clusters are ingested as Experiences with their reasoning, never Portfolio-supported", async () => {
+  const ws = makeWorkspace();
+  writeConfig(ws, cfgYaml());
+  const engine = makeEngine({
+    hyps: HYPS,
+    verdictFor: (ci, o) => (o.promptTemplate === REFUTATION_PROMPT_TEMPLATE ? "refuted" : (ci === 1 ? "supported" : "undetermined")),
+  });
+  const spawn = countingSpawn();
+  const fact = await runOpenSemanticDiscovery(ws, { ...runOpts(ws, { engine }), spawnFn: spawn, pinFn: pinStub() });
+  assert.equal(fact.state, "verified", fact.reason);
+  assert.equal(rounds(ws)[0].confirmed.count, 0, "neither cluster is confirmed");
+  assert.equal(portfolioRecords(ws).length, 0, "NOTHING reaches the Portfolio: no cluster was supported-and-new");
+  const exps = experienceRecords(ws);
+  assert.equal(exps.length, 2, "both are learning material, each with its own role");
+  const byRole = Object.fromEntries(exps.map((e) => [e.role, e]));
+  assert.deepEqual(Object.keys(byRole).sort(), ["confirmed-negative", "undetermined"]);
+  for (const e of exps) {
+    assert.equal(e.reported_by, "system");
+    assert.equal(e.evidence_level, "production-open");
+    assert.ok(e.summary.trim().length >= 40, `the reasoning travels with the entry (got ${JSON.stringify(e.summary)})`);
+  }
+  assert.match(byRole["confirmed-negative"].summary, /fixture counterexample/, "the refuter's counterexample is ON the entry");
+  assert.match(byRole["undetermined"].summary, /fixture evidence/, "an undetermined cluster carries the evidence it could not settle");
+  // The carrier says what happened to each, so the disposition is not inferable only from other files.
+  const ing = carrierLines(ws).find((l) => l.kind === "ingestion");
+  assert.deepEqual(ing.writes.map((w) => w.verdict).sort(), ["refuted", "undetermined"]);
+  for (const w of ing.writes) assert.match(String(w.portfolio.skipped), /is-never-a-Portfolio-supported-row/);
+});
+
+// ── the ingestion's pure pieces ──────────────────────────────────────────────────────────────────────
+test("ingestion — the record id the routine mints is UNIQUE per round+cluster and resolvable by prefix", () => {
+  const a = openDiscoveryRecordId("2026-10-13T00:00:00.000Z", 1);
+  const b = openDiscoveryRecordId("2026-10-13T00:00:00.000Z", 2);
+  const c = openDiscoveryRecordId("2026-10-13T00:01:00.000Z", 1);
+  assert.equal(new Set([a, b, c]).size, 3, "no two (round, cluster) pairs share an id");
+  assert.ok(a.startsWith(OPEN_DISCOVERY_REF_PREFIX));
+});
+
+test("ingestion — parseNoveltyVerdict: only the declared vocabulary is accepted, and unreadable stays null", () => {
+  assert.equal(parseNoveltyVerdict(null), null);
+  assert.equal(parseNoveltyVerdict({ verdict: "supported" }), null, "the VERIFIER's vocabulary is not the novelty vocabulary");
+  assert.equal(parseNoveltyVerdict({ verdict: "" }), null);
+  const novel = parseNoveltyVerdict({ verdict: "novel", duplicate_of: null, reasoning: "r", summary: "s" });
+  assert.equal(novel.verdict, "novel");
+  assert.equal(novel.duplicate_of, null);
+  const dup = parseNoveltyVerdict({ verdict: "duplicate", duplicate_of: "F01" });
+  assert.equal(dup.duplicate_of, "F01");
+  assert.equal(dup.reasoning, null, "an absent field stays null — never an invented string");
+  // A non-zero control: every declared verdict really is accepted.
+  for (const v of NOVELTY_VERDICTS) assert.equal(parseNoveltyVerdict({ verdict: v }).verdict, v);
+  assert.deepEqual([...NOVELTY_VERDICTS], ["novel", "duplicate", "restatement"]);
+});
+
+test("ingestion — experienceRoleFor: the role follows the cluster's OWN verdict, and the one mechanical case writes nothing", () => {
+  assert.equal(experienceRoleFor({}, "novel", "supported"), "found-unresolved");
+  assert.equal(experienceRoleFor({}, "unjudged", "supported"), "found-unresolved", "unjudged decides NEWNESS, not whether the claim held");
+  assert.equal(experienceRoleFor({}, "duplicate", "supported"), "duplicate");
+  assert.equal(experienceRoleFor({}, "restatement", "supported"), "duplicate");
+  assert.equal(experienceRoleFor({}, "novel", "refuted"), "confirmed-negative", "the verdict wins over the disposition");
+  assert.equal(experienceRoleFor({}, "novel", "undetermined"), "undetermined");
+  assert.equal(experienceRoleFor({}, "mechanical-duplicate", "supported"), null, "the one mechanical case writes NO Experience");
+  assert.equal(experienceRoleFor({}, "novel", null), null, "a record whose verdict cannot be derived gets no role");
+});
+
+test("ingestion — findMechanicalRepeat keys on BOTH the component set and the claim, and never on its own id", () => {
+  const portfolio = realPortfolio;
+  const prior = [{ record_id: "r1", claim: "A claim about the thing", components: ["a.ts", "b.ts"] }];
+  const same = findMechanicalRepeat(prior, { components: ["b.ts", "a.ts"], claim: "a  claim about the thing", recordId: "r2", portfolio });
+  assert.equal(same.record_id, "r1", "order and whitespace/case do not make it a different finding");
+  assert.equal(findMechanicalRepeat(prior, { components: ["a.ts", "b.ts"], claim: "A DIFFERENT claim", recordId: "r2", portfolio }), null, "the claim must match too");
+  assert.equal(findMechanicalRepeat(prior, { components: ["a.ts"], claim: "A claim about the thing", recordId: "r2", portfolio }), null, "so must the component SET");
+  assert.equal(findMechanicalRepeat(prior, { components: ["a.ts", "b.ts"], claim: "A claim about the thing", recordId: "r1", portfolio }), null, "a record never dedups against itself");
+  assert.equal(findMechanicalRepeat([], { components: ["a.ts"], claim: "x", recordId: "r2", portfolio }), null);
+});
+
+test("ingestion — taskIdFromPath / componentsFromSubjectKey are POSITION reads, and their refusals are their own value", () => {
+  assert.equal(taskIdFromPath("develop:tasks/gap-foo.md"), "gap-foo");
+  assert.equal(taskIdFromPath("tasks/gap-foo.md"), "gap-foo");
+  // The `-n` shape (`<rev>:<path>:<line>:<text>`) — the title arm's own input. A parser that only took the
+  // `-l` shape would return null for EVERY title line, which reads exactly like "no task has a title".
+  assert.equal(taskIdFromPath('develop:tasks/gap-foo.md:3:title: "hello"'), "gap-foo");
+  assert.equal(taskIdFromPath("develop:docs/notes.md"), null);
+  assert.equal(taskIdFromPath("develop:tasks/sub/gap-foo.md"), null, "a nested path is not a task id");
+  assert.equal(taskIdFromPath(""), null);
+  assert.deepEqual(componentsFromSubjectKey("enum-surface:driver-kind|plugin/scripts/start-drivers.ts#122"), ["plugin/scripts/start-drivers.ts"]);
+  assert.deepEqual(componentsFromSubjectKey("suite-red-sig#4b117de2"), ["suite-red-sig"]);
+  assert.deepEqual(componentsFromSubjectKey("a:x|p.ts#1|q.ts#2"), ["p.ts", "q.ts"]);
+  assert.deepEqual(componentsFromSubjectKey(""), []);
+});
+
+test("ingestion — buildNoveltyPrompt states the bound and never presents an empty candidate list as a verdict", () => {
+  const empty = buildNoveltyPrompt({ claim: "c", components: ["a.ts"], evidence: [], candidates: [], broad: [], broadTruncated: false });
+  assert.match(empty, /none retrieved — this does NOT mean the finding is new/);
+  assert.doesNotMatch(empty, /\{\{/, "no placeholder is left unsubstituted");
+  const full = buildNoveltyPrompt({
+    claim: "c", components: ["a.ts"], evidence: ["a.ts:1 — x"],
+    candidates: [{ carrier: "x", ref: "F01", claim: "c", components: ["a.ts"], basis: "same-component-set", duplicate_target: true }],
+    broad: [{ carrier: "y", ref: "T1", claim: "t", components: [], basis: "task-title", duplicate_target: false }],
+    broadTruncated: true,
+  });
+  assert.match(full, /"ref": "F01"/);
+  assert.match(full, /TRUNCATED at the declared bound/, "a bounded context SAYS it is bounded");
+  assert.doesNotMatch(full, /\{\{/);
+});
+
+test("ingestion — the novelty check's tool envelope is the read-only one, and its step is on the reservation ledger", async () => {
+  const ws = makeWorkspace();
+  writeConfig(ws, cfgYaml());
+  const spawn = countingSpawn();
+  const pin = pinStub();
+  await runOpenSemanticDiscovery(ws, { ...runOpts(ws, { engine: makeEngine({ hyps: [HYPS[0]] }) }), spawnFn: spawn, pinFn: pin });
+  assert.equal(NOVELTY_TOOLS, "Read,Grep");
+  const call = spawn.noveltyCalls()[0];
+  assert.equal(call.argv[call.argv.indexOf("--tools") + 1], NOVELTY_TOOLS);
+  assert.equal(call.opts.cwd, pin.pins[0], "…rooted at the same stripped pin the round's other calls use");
+  assert.ok(call.argv.includes("--max-turns"), "and bounded explicitly, like every other subprocess");
+  const reserve = ledgerReserves(ws).find((r) => r.step === "novelty-check");
+  assert.ok(reserve, "the novelty call RESERVED before it spawned");
+  assert.equal(reserve.tools, NOVELTY_TOOLS);
+  assert.equal(Number(reserve.max_turns) >= 1, true);
+});
+
+// ── the in-scratch-copy NEGATIVE CONTROLS ────────────────────────────────────────────────────────────
 /** Build a SCRATCH copy of the routine whose relative imports still resolve: the sibling scripts and the
  *  analysis directory are SYMLINKED in, and only the module under test is a real (mutated) file. */
 function scratchModule(mutate) {
@@ -963,6 +1431,60 @@ test("NEGATIVE CONTROL (k) — gate the round on «arch-discovery reported new f
   assert.match(fact.reason, /arch-discovery reported no new fingerprints/);
   assert.equal(spawn.calls.length, 0, "⇒ the mutant SUPPRESSED the semantic round: the (k) claim is FALSIFIED — the control is live");
   process.stdout.write(`    NEGATIVE CONTROL (k): mutant spawned 0 calls when arch-discovery reported 0 new fingerprints (claim was «the round still runs»)\n`);
+});
+
+test("NEGATIVE CONTROL (ingestion) — disable the novelty check in a scratch copy ⇒ the (a) and (d) claims go RED", async () => {
+  // The mutation is EXACTLY "the novelty check is disabled": the one mechanical dedup is neutered and every
+  // confirmed cluster is treated as new, which is what a novelty check that always answers `novel` is. It
+  // changes nothing else — the retrieval, the writes and the ledgers all still run.
+  const MUT_REPEAT = "const repeat = findMechanicalRepeat(priorClusterRecords, { components: comps, claim, recordId, portfolio: modules.portfolio });";
+  const MUT_DISPOSITION = [
+    "      if (parsed === null) disposition = \"unjudged\";",
+    "      else if (parsed.verdict === \"novel\") disposition = \"novel\";",
+    "      else if (parsed.verdict === \"duplicate\") {",
+    "        const target = retrieval.candidates.find((x) => x.ref === parsed.duplicate_of && x.duplicate_target);",
+    "        if (target) { disposition = \"duplicate\"; duplicateOf = target.ref; }",
+    "        else disposition = \"restatement\";",
+    "      } else disposition = \"restatement\";",
+  ].join("\n");
+  const mutantPath = scratchModule((src) => {
+    assert.ok(src.includes(MUT_REPEAT), "the mechanical-dedup anchor is present");
+    assert.ok(src.includes(MUT_DISPOSITION), "the disposition anchor is present");
+    return src
+      .replace(MUT_REPEAT, "const repeat = null; // MUTATION: the one mechanical dedup is disabled")
+      .replace(MUT_DISPOSITION, "      disposition = \"novel\"; // MUTATION: the novelty check is disabled — everything confirmed counts as new");
+  });
+  const mutant = await import(pathToFileURL(mutantPath).href);
+
+  // (a): against the SAME fixture that makes the real module green. ⛔ The assertion chosen is the one the
+  // mutation really falsifies: for a duplicate OF A PORTFOLIO ROW, `ingestFinding`'s own duplicate rule
+  // sets `duplicate_of` even with the novelty check disabled (a second line of defence, not a substitute),
+  // so the claim that goes red is the one about what the SEMANTIC check decided and how the Experience is
+  // roled. `disposition` and the role are asserted on the real module in case (a) above.
+  const a = await scenarioDuplicateAgainstExistingPortfolio(mutant.runOpenSemanticDiscovery);
+  assert.equal(a.ours.length, 1, "the mutant still writes a row…");
+  assert.equal(a.outcome.disposition, "novel", "…calling a known duplicate NOVEL");
+  assert.notEqual(a.outcome.disposition, "duplicate", "⇒ the (a) claim («disposition is duplicate») is FALSIFIED — the control is live");
+  assert.equal(experienceRecords(a.ws)[0].role, "found-unresolved", "…and the Experience is roled as a fresh unresolved finding");
+  assert.notEqual(experienceRecords(a.ws)[0].role, "duplicate", "⇒ the (a) role claim is FALSIFIED too");
+
+  // (a2): the shape where the SEMANTIC check is the ONLY thing that can catch it — here `duplicate_of`
+  // itself goes red, which is the literal AC (a) claim.
+  const id = await clusterIdentity();
+  const a2ws = makeWorkspace();
+  writeConfig(a2ws, cfgYaml());
+  const taskId = addTaskOnDevelop(a2ws, "gap-fixture-known-thing", { touches: id.components });
+  const a2spawn = countingSpawn(noveltyDelegate({ verdict: "duplicate", duplicateOf: taskId }));
+  await mutant.runOpenSemanticDiscovery(a2ws, { ...runOpts(a2ws, { engine: makeEngine({ hyps: [HYPS[0]] }) }), spawnFn: a2spawn, pinFn: pinStub() });
+  const a2rows = portfolioRecords(a2ws);
+  assert.equal(a2rows.length, 1);
+  assert.equal(a2rows[0].duplicate_of, null, "⇒ the (a2) claim («duplicate_of set») is FALSIFIED — nothing catches the task-Touches duplicate once the verdict is forced to novel");
+
+  // (d): likewise.
+  const d = await scenarioSameClusterTwoRounds(mutant.runOpenSemanticDiscovery);
+  assert.equal(d.rows.length, 2, "⇒ the (d) claim («ONE Portfolio record, not two») is FALSIFIED — the control is live");
+
+  process.stdout.write(`    NEGATIVE CONTROL (ingestion): mutant called a Portfolio duplicate disposition=${a.outcome.disposition} (role ${experienceRecords(a.ws)[0].role}), left duplicate_of=${String(a2rows[0].duplicate_of)} for the task-Touches duplicate, and wrote ${d.rows.length} Portfolio rows for one cluster seen twice (claims were «duplicate», «duplicate_of set» and «one row»)\n`);
 });
 
 // ── misc contracts ───────────────────────────────────────────────────────────────────────────────────

@@ -250,7 +250,14 @@ export const EXPERIENCE_KIND = "experience";
  *  bare `verdict` can actually say): a supported outcome with no fix recorded is a finding we have NOT
  *  resolved, and an undetermined outcome is precisely an undetermined finding. Before them, a supported
  *  outcome had no honest role to derive — it would have had to claim `found-and-fixed`, i.e. assert a
- *  fix that the record does not name. */
+ *  fix that the record does not name.
+ *
+ *  ⛔ `duplicate` was ADDED by the open-ended semantic discovery routine's ingestion step
+ *  (gap-open-discovery-findings-into-portfolio-experience): a CONFIRMED cluster whose semantic novelty
+ *  check decided it restates knowledge the repository already records. It is a SUPPORTED claim (the
+ *  evidence held) that is not NEW — so neither `found-unresolved` (which is about unresolvedness) nor
+ *  `confirmed-negative` (which says the claim was refuted) can carry it without lying about which of the
+ *  two facts is true. */
 export const EXPERIENCE_ROLES = Object.freeze([
   "missed-by-tooling",
   "found-and-fixed",
@@ -259,6 +266,7 @@ export const EXPERIENCE_ROLES = Object.freeze([
   "recurred-after-fix",
   "found-unresolved",
   "undetermined",
+  "duplicate",
 ]);
 
 /** Who reported it. A tool-self-reported case is NEVER `"user"` (same discipline as the original
@@ -391,6 +399,9 @@ export const ROLE_VERDICT_COMPAT = Object.freeze({
   // The verifier could not tell. Its OWN role, so an `undetermined` outcome is not forced to claim
   // either a finding or a refutation it does not have.
   "undetermined": Object.freeze(["undetermined"]),
+  // A SUPPORTED claim that the novelty check found to be already known. Compatible with `supported`
+  // because the evidence DID hold — what is denied is newness, not truth.
+  "duplicate": Object.freeze(["supported"]),
 });
 
 /**
@@ -1232,17 +1243,20 @@ export function deriveExperienceFields(rec, { line = null, taskStatus = () => nu
   };
 }
 
-// ── the ONE unified entry: BOTH sources go through it ────────────────────────────────────────────
+// ── the ONE unified entry: EVERY source goes through it ──────────────────────────────────────────
 
 /**
- * Ingest ONE Experience. The single entry point for both sources (Plan item 1):
+ * Ingest ONE Experience. The single entry point for every source (Plan item 1):
  *   • `source:"user"`   — a human-flagged miss; the caller narrates it (`ingestFeedback`).
  *   • `source:"system"` — an evidence-store outcome; the fields are DERIVED unless the caller
  *                          explicitly opts into pinned narration (see below).
+ *   • `source:"discovery-carrier"` — a ROUTINE's own carrier record (`{rec, raw, line}`); the caller
+ *                          narrates the role/summary and the role is CHECKED against the record.
  *
  * @param {string} root
  * @param {object} args
- * @param {"user"|"system"} args.source  — anything else is `SOURCE_NOT_IN_VOCAB`, never a default
+ * @param {"user"|"system"|"discovery-carrier"} args.source  — anything else is `SOURCE_NOT_IN_VOCAB`,
+ *   never a default
  * @param {object} [args.outcome]   `{rec, raw, line}` — a record already resolved by a scanner. When
  *   absent, `source:"system"` resolves it from the store via `experiment` + `experimentRef`.
  * @param {object} [args.context]   `{taskStatus, laterOutcomeWithSubjectKey}` — the two facts a record
@@ -1258,7 +1272,8 @@ export function ingestExperience(root, args = {}) {
   const source = args?.source;
   if (source === "user") return ingestUserSource(root, args);
   if (source === "system") return ingestSystemSource(root, args);
-  return { ok: false, appended: false, kind: EXPERIENCE_KIND, reasons: [`${SOURCE_NOT_IN_VOCAB}:${String(source)}-must-be-user-or-system`] };
+  if (source === "discovery-carrier") return ingestCarrierSource(root, args);
+  return { ok: false, appended: false, kind: EXPERIENCE_KIND, reasons: [`${SOURCE_NOT_IN_VOCAB}:${String(source)}-must-be-user-or-system-or-discovery-carrier`] };
 }
 
 // ── SOURCE 1: the manual path (reported_by:"user") ──────────────────────────────────────────────
@@ -1523,6 +1538,121 @@ function ingestSystemSource(root, args) {
   // caller that cannot see the matched line cannot check that it matched the right one.
   return out.ok
     ? { ...out, derived: narration === null, derived_from: { id: rec.id, line, verdict: rec.verdict, experiment_ref: rec.experiment_ref } }
+    : out;
+}
+
+// ── SOURCE 3: a ROUTINE CARRIER record (reported_by:"system") ───────────────────────────────────
+//
+// The third source, added by gap-open-discovery-findings-into-portfolio-experience. Sources 1 and 2 both
+// project the EVIDENCE STORE's outcome records; this one projects a record from a ROUTINE's own carrier,
+// which is a different shape with a different verdict vocabulary and therefore needs its own arm rather
+// than a coercion into `ingestSystemSource` (a coercion would have to invent a `verdict` field the
+// routine never writes — the exact "the record does not contain it" defect `VERDICT_ROLE` refuses).
+
+/** The ONE record kind this source projects. Named, so a carrier that gains a second kind cannot be read
+ *  as if every line were a finding. */
+export const CARRIER_CLUSTER_KIND = "cluster";
+
+/**
+ * The EFFECTIVE verdict of a routine cluster record — what the carrier's own fields jointly say.
+ *
+ * ⛔ DERIVED here, never taken from the caller, and never from a hand-written `verdict` key: the routine
+ * writes `confirmed` (survived an independent refutation), `verifier_verdict` and `refutation_verdict`,
+ * and THIS function is the one place those three become the word the role check compares against. A
+ * caller that could state the verdict could claim a `confirmed-negative` for a cluster that survived.
+ *
+ * Fail-closed in both directions: only `confirmed === true` yields `supported` (an unrun, undetermined or
+ * refuted refutation is NOT a confirmation), and a record whose fields do not settle it is `undetermined`
+ * — never `supported`.
+ * @returns {"supported"|"refuted"|"undetermined"|null} `null` when the argument is not a record.
+ */
+export function clusterVerdict(rec) {
+  if (!isObj(rec)) return null;
+  if (rec.confirmed === true) return "supported";
+  if (rec.refutation_verdict === "refuted" || rec.verifier_verdict === "refuted") return "refuted";
+  return "undetermined";
+}
+
+/** The `case_id` convention for a carrier-sourced Experience: the carrier record's own id, prefixed. */
+export const clusterCaseId = (recordId) => `EXP-${String(recordId)}`;
+
+/**
+ * Project a ROUTINE CARRIER record (a `kind:"cluster"` line) into an Experience entry.
+ *
+ * ⛔ `source:"discovery-carrier"` — the record is supplied ALREADY RESOLVED as `{rec, raw, line}` (the
+ * scanner's envelope, the same one `ingestFromEvidenceStoreOutcome` accepts), so the `raw` bytes are the
+ * exact line the evidence hash is taken over. A record with no `record_id` is REFUSED rather than given a
+ * derived one: the id is what makes the carrier record re-findable, and minting one here would produce a
+ * back-pointer that resolves to nothing (硬规则 3b).
+ *
+ * The caller NARRATES `role`, `summary`, `components`, `caseId` and `authoredBy` — it is the ingesting
+ * process and it is the one that read the record — and its `role` is CHECKED against the record's derived
+ * `clusterVerdict`, so a role the evidence contradicts is refused here exactly as it is on source 2's
+ * pinned form.
+ *
+ * @param {string} root
+ * @param {object} args
+ * @param {{rec:object, raw:string, line:number}} args.record
+ * @param {string} args.carrier   the carrier the record came from, recorded so the projection is auditable
+ * @param {string} args.role      one of EXPERIENCE_ROLES
+ * @param {string} args.caseId    the entry's id (see `clusterCaseId`)
+ * @param {string} args.summary   >= MIN_SUMMARY_CHARS non-whitespace chars
+ * @param {string[]} [args.components]  defaults to the record's own `components` — never invented
+ * @param {{actor:string, ref:string}} args.authoredBy
+ * @param {string} [args.evidenceLevel]
+ * @returns the `appendExperienceRecord` result, or `{ok:false, appended:false, reasons[]}`.
+ */
+function ingestCarrierSource(root, args) {
+  const env = isObj(args?.record) ? args.record : null;
+  const rec = isObj(env?.rec) ? env.rec : null;
+  if (rec === null) return { ok: false, appended: false, kind: EXPERIENCE_KIND, reasons: ["INGEST_ARG_MISSING:record-{rec,raw,line}"] };
+  if (rec.kind !== CARRIER_CLUSTER_KIND) {
+    return { ok: false, appended: false, kind: EXPERIENCE_KIND, reasons: [`CARRIER_RECORD_KIND_MISMATCH:${String(rec.kind)}-is-not-a-${CARRIER_CLUSTER_KIND}`] };
+  }
+  if (!isStr(rec.record_id, 1)) {
+    return { ok: false, appended: false, kind: EXPERIENCE_KIND, reasons: ["CARRIER_RECORD_ID_MISSING:the-record-carries-no-id-so-no-experience-can-point-back-at-it"] };
+  }
+  if (typeof env.raw !== "string") return { ok: false, appended: false, kind: EXPERIENCE_KIND, reasons: ["INGEST_ARG_MISSING:record.raw"] };
+  if (!isInt(env.line) || env.line < 1) return { ok: false, appended: false, kind: EXPERIENCE_KIND, reasons: ["INGEST_ARG_MISSING:record.line"] };
+  if (!isStr(args.carrier, 1)) return { ok: false, appended: false, kind: EXPERIENCE_KIND, reasons: ["INGEST_ARG_MISSING:carrier"] };
+
+  // The narration guards live HERE, in one place, exactly as source 2's do — and every one of them is a
+  // REFUSAL rather than a default, for the same reason: a defaulted role/summary/author would be
+  // indistinguishable on read-back from one the ingesting process actually wrote.
+  if (!EXPERIENCE_ROLES.includes(args.role)) return { ok: false, appended: false, kind: EXPERIENCE_KIND, reasons: [`ROLE_NOT_IN_VOCAB:${String(args.role)}`] };
+  if (!isStr(args.caseId, 1)) return { ok: false, appended: false, kind: EXPERIENCE_KIND, reasons: ["INGEST_ARG_MISSING:caseId"] };
+  if (!isObj(args.authoredBy) || !AUTHORED_BY_ACTORS.includes(args.authoredBy.actor) || !isStr(args.authoredBy.ref, 1)) {
+    return { ok: false, appended: false, kind: EXPERIENCE_KIND, reasons: ["INGEST_ARG_MISSING:authoredBy-{actor,ref}"] };
+  }
+
+  const verdict = clusterVerdict(rec);
+  const allowed = ROLE_VERDICT_COMPAT[args.role] ?? [];
+  if (!allowed.includes(verdict)) {
+    return {
+      ok: false, appended: false, kind: EXPERIENCE_KIND,
+      reasons: [`ROLE_VERDICT_INCONSISTENT:role=${args.role}-requires-verdict-in-(${allowed.join("|")})-but-${rec.record_id}-derives-${String(verdict)}`],
+    };
+  }
+
+  const evidenceLevel = evidenceLevelOf({ evidence_level: args.evidenceLevel });
+  const out = appendExperienceRecord(root, {
+    case_id: args.caseId,
+    ts: isStr(rec.ts, 4) ? rec.ts : new Date().toISOString(),
+    role: args.role,
+    reported_by: "system",
+    authored_by: args.authoredBy,
+    // The back-pointer AND the content address: `record_id` names the carrier line, and the digest is of
+    // THAT line's bytes, so the projection can be re-checked against the record it claims to be.
+    source_ref: rec.record_id,
+    evidence: [{ ref: rec.record_id, sha256: sha256(env.raw) }],
+    components: Array.isArray(args.components) ? args.components : (Array.isArray(rec.components) ? rec.components : []),
+    summary: args.summary,
+    evaluation_pin: null,
+    evidence_level: evidenceLevel,
+    source_case_id: args.sourceCaseId ?? null,
+  });
+  return out.ok
+    ? { ...out, derived: true, derived_from: { record_id: rec.record_id, line: env.line, carrier: args.carrier, verdict } }
     : out;
 }
 

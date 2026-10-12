@@ -389,6 +389,60 @@ test("an origin_ref that resolves in no carrier is refused; a resolvable one nam
   assert.deepEqual(taskTouchesOnBranch(root, "t-fix-c"), ["src/c.ts"]);
 });
 
+test("an origin_ref naming an open-discovery CLUSTER record resolves against that routine's own carrier", () => {
+  // Task gap-open-discovery-findings-into-portfolio-experience: the open-ended semantic discovery routine
+  // ingests its confirmed clusters with `origin:"autonomous-routine"` and `origin_ref` = the cluster
+  // record's own `record_id`. That id is NOT a `<runId>#<findingId>` pair, so resolving it needs its own
+  // arm — and the arm must be selected by the ref's OWN prefix, not by a search order, because the
+  // routine-findings carrier is tried first and a bare `<ts>#<n>` could in principle collide there.
+  const { root } = mkTmp();
+  writeCarriers(root);
+  const recordId = "open-semantic-discovery@2026-10-13T01:00:00.000Z#1";
+  writeCarrier(root, ".quay/open-semantic-discovery-findings.jsonl", [
+    { kind: "scan-round", routine: "open-semantic-discovery", ts: "2026-10-13T01:00:00.000Z" },
+    { kind: "cluster", routine: "open-semantic-discovery", ts: "2026-10-13T01:00:00.000Z", record_id: recordId,
+      cluster: 1, claim: "two helpers own the same cache", components: ["plugin/scripts/x.ts:88"], confirmed: true },
+  ]);
+  const got = resolveOriginRef(root, { origin: "autonomous-routine", origin_ref: recordId });
+  assert.equal(got.ok, true, got.reason);
+  assert.equal(got.carrier, ".quay/open-semantic-discovery-findings.jsonl", "the carrier is NAMED, not assumed");
+  assert.equal(got.ts, "2026-10-13T01:00:00.000Z");
+  assert.deepEqual(got.components, ["plugin/scripts/x.ts"], "its components are read OFF the record, with the line suffix stripped");
+
+  // The prefix is what decides: the SAME tail under the routine-findings carrier's own ref shape resolves
+  // there instead — so the two arms cannot be confused for one another.
+  const routine = resolveOriginRef(root, { origin: "autonomous-routine", origin_ref: "run-fixture-1#twin-a" });
+  assert.equal(routine.ok, true, routine.reason);
+  assert.equal(routine.carrier, ".quay/routine-findings.jsonl");
+  // …and a prefixed ref that names no record on that carrier is refused WITH the carrier it looked in.
+  const missing = resolveOriginRef(root, { origin: "autonomous-routine", origin_ref: "open-semantic-discovery@2026-10-13T09:09:09.000Z#7" });
+  assert.equal(missing.ok, false);
+  assert.match(missing.reason, /open-semantic-discovery-findings\.jsonl/, "the refusal names WHERE it looked");
+  // A non-zero control on the same predicate: the very record above DOES resolve — so the refusal is about
+  // the missing record, not about the arm being dead.
+  assert.equal(resolveOriginRef(root, { origin: "autonomous-routine", origin_ref: recordId }).ok, true);
+});
+
+test("an open-discovery cluster ingests end-to-end: origin_ref resolves and the row lands with production-open", () => {
+  const { root } = mkTmp();
+  writeCarriers(root);
+  const recordId = "open-semantic-discovery@2026-10-13T01:00:00.000Z#1";
+  writeCarrier(root, ".quay/open-semantic-discovery-findings.jsonl", [
+    { kind: "cluster", record_id: recordId, ts: "2026-10-13T01:00:00.000Z", cluster: 1,
+      claim: "two helpers own the same cache", components: ["plugin/scripts/x.ts"], confirmed: true },
+  ]);
+  const res = ingestFinding(root, input({
+    finding_id: recordId, origin_ref: recordId, claim: "two helpers own the same cache",
+    components: ["plugin/scripts/x.ts"], fix_task: null,
+  }), { rates: RATES });
+  assert.equal(res.ok, true, JSON.stringify(res.reasons));
+  const row = readPortfolio(root).records.find((r) => r.finding_id === recordId);
+  assert.equal(row.origin, "autonomous-routine");
+  assert.equal(row.origin_carrier, ".quay/open-semantic-discovery-findings.jsonl");
+  assert.equal(row.duplicate_of, null);
+  assert.equal(row.fix_task, null, "the routine files no fix task");
+});
+
 test("a re-ingest of the same finding_id is a no-op, not a second record (the carrier is append-only)", () => {
   const { root } = mkTmp();
   writeCarriers(root);

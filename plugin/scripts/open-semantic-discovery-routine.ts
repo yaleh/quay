@@ -40,13 +40,36 @@
 // imported, under THIS routine's own key paths and its own cap (240 is discovery-method's cap and is not
 // shared silently).
 //
-// REPORT-ONLY, STRUCTURALLY: this file imports no filing/authoring function and writes no task and no
-// goal. Its only persistence is (a) append-only lines on ONE carrier,
-// `.quay/open-semantic-discovery-findings.jsonl`, (b) this routine's own reservation ledger, and (c) the
-// existing quality-round fact. The absence of the authoring imports is asserted mechanically by the
-// case-(i) static control in plugin/test/open-semantic-discovery-routine.test.mjs. ⚠️ Consequence for
-// maintainers: do NOT name the forbidden authoring symbols here, not even in a comment (the control reads
-// POSITION, and a comment mention would be a false positive).
+// REPORT-ONLY ON TASKS AND GOALS, STRUCTURALLY: this file imports no filing/authoring function and writes
+// no task and no goal. Its persistence is (a) append-only lines on ONE carrier,
+// `.quay/open-semantic-discovery-findings.jsonl`, (b) this routine's own reservation ledger, (c) the
+// existing quality-round fact, and — since gap-open-discovery-findings-into-portfolio-experience — (d) the
+// Discovery Experience ledger and the Discovery Portfolio, BOTH reached only through the engine modules
+// loaded at runtime below. The absence of the authoring imports is asserted mechanically by the case-(i)
+// static control in plugin/test/open-semantic-discovery-routine.test.mjs. ⚠️ Consequence for maintainers:
+// do NOT name the forbidden authoring symbols here, not even in a comment (the control reads POSITION, and
+// a comment mention would be a false positive). That includes the portfolio module's human-only rating
+// verb, which this routine must never call.
+//
+// ⛔ WHAT THE POST-ROUND INGESTION STEP IS, AND WHAT IT IS NOT. After a round's confirmed clusters are on
+// the carrier, each one goes through a NOVELTY CHECK and then into the two value/learning ledgers:
+//   · MECHANICAL, and only retrieval: `retrieveNoveltyCandidates` gathers candidates with the same or
+//     overlapping components from the Portfolio, `.quay/routine-findings.jsonl`,
+//     `.quay/arch-discovery-findings.jsonl` subject keys and task Touches on develop; it also gathers a
+//     WIDER context (Portfolio claims and task titles) that is ALWAYS supplied. It never labels anything.
+//   · SEMANTIC, and it is the judgment: ONE bounded model call per confirmed cluster reads the claim, the
+//     retrieved candidates and the wider context (and may Read/Grep the source itself) and returns
+//     `novel` / `duplicate` / `restatement`. It reserves budget like every other step.
+//   · "NO MECHANICAL CANDIDATE" IS NOT A VERDICT. A cluster with zero candidates still gets the call —
+//     with the wider context — and is NEVER auto-labelled novel.
+//   · The ONE mechanical exception, recorded as such (`disposition:"mechanical-duplicate"`): a cluster
+//     whose component set AND claim are byte-identical to a PREVIOUS ROUND's own cluster record. Nothing
+//     is written for it at all — neither ledger — so a re-seen cluster cannot inflate either count.
+//   · The novelty verdict is NOT a rating and NOT a value judgment: it is a model's finding about
+//     NEWNESS. Nothing here files a fix task (that stays the operator's decision; the record may carry a
+//     candidate fix outline from the value assessment) and nothing here writes a Goal.
+//   · FAILURES ARE LEARNING MATERIAL TOO (Plan 1b): refuted clusters, novelty duplicates and verifier
+//     `undetermined` results all become Experiences, with their own roles and their own reasoning.
 //
 // KILL SWITCH + OFF BY DEFAULT: declared in `.quay/config.yml` `loop.open_semantic_discovery:`. A
 // workspace with no such section gets `not-evaluated:disabled` and ZERO spawns. `enabled:false` is the
@@ -158,6 +181,9 @@ export const VERIFIER_TOOLS = "Read,Grep";
 export const REFUTER_TOOLS = "Read,Grep";
 /** The VALUE-assessor's tools: it states engineering impact from evidence it may re-read. */
 export const VALUE_TOOLS = "Read,Grep";
+/** The NOVELTY checker's tools: the same read-only envelope. It is a JUDGMENT call like the refuter, not
+ *  an exploration — it may re-read the source to settle whether a claim is new, and nothing more. */
+export const NOVELTY_TOOLS = "Read,Grep";
 
 /** The stated per-call USD ceiling used when a call's realized gateway cost could not be read. Basis: the
  *  2026-10-12 GAIN1 capability-gain run measured ≈$0.05 for an investigator call and ≈$0.5 for a verifier
@@ -178,6 +204,85 @@ export const FOCUS_MARKER = "FOCUS:";
 /** How many previously-explored focuses are handed back to the model. A bound on the prompt, not a policy:
  *  the model is told these were already explored, and nothing stops it from revisiting one. */
 export const FOCUS_HISTORY_MAX = 10;
+
+// ── the post-round ingestion: the novelty check's carriers, bounds and vocabulary ─────────────────────
+
+/** The `record_id` an open-discovery CLUSTER record carries, and the ref the Portfolio resolves it by.
+ *  ⛔ `<round ts>#<cluster index>` is unique BY CONSTRUCTION: one scan-round per round, a round takes
+ *  minutes, and the index is the cluster's position within it. `discovery-portfolio.mjs` repeats this
+ *  prefix as its own constant (it must not import this module — the edge would be a cycle); the routine's
+ *  test asserts the two agree by resolving a minted record_id through the real `resolveOriginRef`. */
+export const OPEN_DISCOVERY_REF_PREFIX = `${OPEN_SEMANTIC_DISCOVERY_NAME}@`;
+export const openDiscoveryRecordId = (roundTs: string, cluster: number): string => `${OPEN_DISCOVERY_REF_PREFIX}${roundTs}#${cluster}`;
+
+/** The other routine carriers the novelty RETRIEVAL looks in. Both are read-only here: this routine owns
+ *  neither and appends to neither. */
+export const ROUTINE_FINDINGS_CARRIER_REL = path.posix.join(".quay", "routine-findings.jsonl");
+export const ARCH_DISCOVERY_CARRIER_REL = path.posix.join(".quay", "arch-discovery-findings.jsonl");
+
+/** The novelty verdict vocabulary. ⛔ THREE values, and `restatement` is not a synonym for `duplicate`:
+ *  `duplicate` names ONE retrievable record that states the same claim (so the Portfolio row can carry a
+ *  `duplicate_of` that RESOLVES), while `restatement` says the finding is already-known knowledge the
+ *  repository records as a decision or a convention rather than as a single row. Collapsing them would
+ *  force either an invented `duplicate_of` or a silent "counts as new". */
+export const NOVELTY_VERDICTS = ["novel", "duplicate", "restatement"] as const;
+export type NoveltyVerdict = (typeof NOVELTY_VERDICTS)[number];
+
+/** The dispositions a cluster's ingestion can end in. Named so "what happened to this cluster" is an
+ *  enumerable value on the carrier rather than something a reader infers from which files changed. */
+export const NOVELTY_DISPOSITIONS = [
+  "mechanical-duplicate", // byte-identical component set + claim to a previous round's own cluster
+  "novel",                // the model judged it new ⇒ Experience + Portfolio
+  "duplicate",            // the model named a resolvable record ⇒ Experience + Portfolio(duplicate_of)
+  "restatement",          // already-known knowledge, no single resolvable row ⇒ Experience only
+  "unjudged",             // the model returned nothing usable ⇒ Experience only, NEVER counted as new
+] as const;
+export type NoveltyDisposition = (typeof NOVELTY_DISPOSITIONS)[number];
+
+/** How many WIDER-context entries (Portfolio claims + task titles) are put in the novelty prompt. A bound
+ *  on the prompt, and it is RECORDED (`truncated`) so a reader can tell a bounded context from a complete
+ *  one — a silently truncated context would read exactly like "there was nothing else to know". */
+export const NOVELTY_BROAD_MAX = 80;
+/** How many task candidates have their `## Touches` read back. Each read is one `git show`; the bound is
+ *  on the RETRIEVAL, which is assistance only — the wider context above is what keeps a bounded retrieval
+ *  from becoming an unstated "nothing matched". */
+export const NOVELTY_TASK_CANDIDATE_MAX = 20;
+
+/** The one `git grep` pattern the wider context uses, to pull task TITLES. It is a RETRIEVAL selector over
+ *  task frontmatter — it classifies no defect, selects no hypothesis and rejects nothing. The routine's
+ *  case-(l) control forbids pattern MACHINERY (constructed regexes, match/test/exec) in this module; this
+ *  is a literal passed to `git`, stated here so a reader can see what it does. */
+export const TASK_TITLE_GREP_PATTERN = "^title:";
+
+/** The prompt for the ONE bounded novelty call. It states what is mechanical (the candidate list may be
+ *  incomplete) and what is not (an empty list is not a verdict), because those are the two ways this call
+ *  could be read as doing less than it does. */
+export const NOVELTY_PROMPT_TEMPLATE = [
+  "You are deciding whether a CONFIRMED finding about this repository is NEW to what is already recorded.",
+  "You may Read/Grep the source to settle it. Do not assume; judge from the claim, the components and the",
+  "records below.",
+  "",
+  "⛔ The CANDIDATE list was retrieved MECHANICALLY (same or overlapping components) and may be incomplete.",
+  "⛔ An EMPTY candidate list does NOT mean the finding is new — the WIDER CONTEXT is always supplied for",
+  "   exactly that reason.",
+  "",
+  "CONFIRMED FINDING:",
+  "{{FINDING}}",
+  "",
+  "RETRIEVED CANDIDATES (same or overlapping components):",
+  "{{CANDIDATES}}",
+  "",
+  "WIDER CONTEXT (already-recorded claims and task titles):",
+  "{{BROAD}}",
+  "",
+  'Return ONE JSON object: {"verdict":"novel|duplicate|restatement","duplicate_of":"<the ref of the ONE',
+  'candidate this duplicates, or null>","reasoning":"why, concretely — what you compared","summary":"one',
+  'sentence stating the finding fresh enough to stand alone"}',
+  'Use "novel" when no listed record states this claim about these components.',
+  'Use "duplicate" ONLY when one listed candidate states the SAME claim about the same components; name it',
+  'in duplicate_of by its ref.',
+  'Use "restatement" when the finding is already-known knowledge with no single listed record to name.',
+].join("\n");
 
 // ── the config section: `.quay/config.yml` `loop.open_semantic_discovery:` ───────────────────────────
 // EVERY key is required on an ENABLED section, and a malformed key is a config error (`failed`, zero
@@ -514,6 +619,7 @@ export function spawnModelCall(
 // ── the engine modules: resolved from DISK at runtime, never statically imported (see the header) ────
 export const HYPOTHESIS_MODULE_FILE = "arch-hypothesis-generation.mjs";
 export const PORTFOLIO_MODULE_FILE = "discovery-portfolio.mjs";
+export const LEDGER_MODULE_FILE = "discovery-experience-ledger.mjs";
 export const ANALYSIS_DIR_REL = path.posix.join("docs", "analysis");
 
 /** The repo this FILE lives in (…/plugin/scripts/<this> → repo root). Used only to BUILD a candidate
@@ -539,14 +645,44 @@ export interface HypothesisModule {
   defaultInvestigatorPrompt: (here?: string) => string;
   TOOL: string;
 }
-/** The narrow interface this file consumes from discovery-portfolio.mjs (the gateway cost path). */
+/** The narrow interface this file consumes from discovery-portfolio.mjs. The first two members are the
+ *  gateway cost path (pre-existing); the rest are the post-round ingestion's RETRIEVAL and WRITE surface.
+ *  ⛔ The portfolio module's HUMAN-ONLY rating verb is deliberately ABSENT from this interface: what this
+ *  routine may reach is a compile-time fact, not a comment, and the case-(i) static control names the
+ *  absent symbol so that mentioning it here — even in prose — would be caught. */
 export interface PortfolioModule {
   loadGatewayRates: (opts: Record<string, unknown>) => { ok: boolean; rates?: Record<string, unknown>; reason?: string };
   deriveCost: (usage: unknown, rates: unknown) => { ok: boolean; cost?: Record<string, unknown>; reason?: string };
+  PORTFOLIO_REL: string;
+  normalizeComponents: (xs: unknown) => string[];
+  sameComponentSet: (a: unknown, b: unknown) => boolean;
+  normalizeClaim: (s: unknown) => string;
+  findDuplicate: (earlier: unknown, q: { components: unknown; claim: unknown }) => Record<string, unknown> | null;
+  readPortfolio: (root: string, opts?: Record<string, unknown>) => {
+    ok: boolean; records: Record<string, unknown>[]; file: string | null; reason?: string;
+  };
+  taskTouchesOnBranch: (root: string, taskId: string, opts?: Record<string, unknown>) => string[];
+  ingestFinding: (root: string, input: Record<string, unknown>, opts?: Record<string, unknown>) => {
+    ok: boolean; id?: string | null; appended?: boolean; reasons?: string[];
+  };
+}
+
+/** The narrow interface this file consumes from discovery-experience-ledger.mjs. `carrierFile` is the
+ *  SHARED-checkout resolver the ledger module owns — reused rather than re-derived (硬规则 5b), so a
+ *  worktree round reads the same carrier the ledgers are written to. */
+export interface LedgerModule {
+  EXPERIENCE_LEDGER_REL: string;
+  carrierFile: (root: string, rel: string) => string | null;
+  clusterVerdict: (rec: unknown) => "supported" | "refuted" | "undetermined" | null;
+  clusterCaseId: (recordId: unknown) => string;
+  ingestExperience: (root: string, args: Record<string, unknown>) => {
+    ok: boolean; id?: string | null; appended?: boolean; reasons?: string[];
+  };
 }
 export interface OpenDiscoveryModules {
   hyp: HypothesisModule;
   portfolio: PortfolioModule;
+  ledger: LedgerModule;
 }
 
 const _engineModuleCache = new Map<string, unknown>();
@@ -564,7 +700,7 @@ export function resolveEngineModule(root: string, file: string): { path: string 
   return { path: null, tried };
 }
 
-/** Load the two engine modules, or THROW a refusal naming every module that could not be resolved and the
+/** Load the engine modules, or THROW a refusal naming every module that could not be resolved and the
  *  candidate paths tried. Throwing (rather than returning a `{ok:false}` a caller might forget to check) is
  *  deliberate: the round converts it into its own `failed` reason. */
 export async function loadOpenDiscoveryModules(root: string): Promise<OpenDiscoveryModules> {
@@ -588,10 +724,11 @@ export async function loadOpenDiscoveryModules(root: string): Promise<OpenDiscov
   };
   const hyp = await load(HYPOTHESIS_MODULE_FILE);
   const portfolio = await load(PORTFOLIO_MODULE_FILE);
-  if (unresolved.length > 0 || hyp === null || portfolio === null) {
+  const ledger = await load(LEDGER_MODULE_FILE);
+  if (unresolved.length > 0 || hyp === null || portfolio === null || ledger === null) {
     throw new Error(`OPEN_DISCOVERY_MODULES_UNRESOLVED — ${unresolved.join("; ") || "one or more engine modules did not load"}`);
   }
-  return { hyp: hyp as HypothesisModule, portfolio: portfolio as PortfolioModule };
+  return { hyp: hyp as HypothesisModule, portfolio: portfolio as PortfolioModule, ledger: ledger as LedgerModule };
 }
 
 // ── prompts (the routine's OWN composition; the frozen engine prompts stay byte-identical) ───────────
@@ -649,8 +786,491 @@ export const VALUE_PROMPT_TEMPLATE = [
   '"summary":"one sentence a maintainer can act on"}',
 ].join("\n");
 
+// ── the post-round ingestion: RETRIEVAL (mechanical) then one JUDGMENT call ───────────────────────────
+//
+// ⛔ WHAT IS MECHANICAL HERE, AND WHAT IS NOT. Everything in `retrieveNoveltyCandidates` RETRIEVES: it
+// gathers records that mention the same or an overlapping component and hands them, plus a wider context,
+// to the model. It labels nothing, ranks nothing and rejects nothing — the one verdict in this file comes
+// back from the model in `runNoveltyCheck`. The single mechanical LABEL is the byte-identical-repeat
+// exception, which is stated as such and is only ever about this routine's own earlier record.
+
+/** One retrieved record the novelty call may compare the cluster against. */
+export interface NoveltyCandidate {
+  /** The carrier it was read from (repo-relative), so the model — and a reviewer — can tell a Portfolio
+   *  row from a task file. */
+  carrier: string;
+  /** Its own id within that carrier. For a Portfolio row this is the `finding_id`, which is what makes it
+   *  usable as a `duplicate_of` target. */
+  ref: string;
+  claim: string | null;
+  components: string[];
+  /** HOW it was retrieved — "same-component-set" / "touches-overlap" / … — so an empty candidate list can
+   *  be decomposed into what was actually looked for (硬规则 3). */
+  basis: string;
+  /** `true` when `ref` resolves as a `duplicate_of` target on the write path (a Portfolio finding id, or a
+   *  task id that exists on the landing branch). A candidate that does NOT resolve may still be context,
+   *  but the model must not be able to make the write path refuse by naming it. */
+  duplicate_target: boolean;
+}
+
+export interface NoveltyRetrieval {
+  /** Candidates sharing at least one component with the cluster. */
+  candidates: NoveltyCandidate[];
+  /** The wider context, ALWAYS supplied (Portfolio claims and task titles). It is what keeps "no
+   *  mechanical candidate" from being read as "no existing knowledge". */
+  broad: NoveltyCandidate[];
+  /** Per-source retrieval counts — an empty list is decomposed rather than reported bare. */
+  totals: Record<string, number>;
+  /** Sources that are simply NOT THERE. A carrier this workspace has never written holds zero records —
+   *  that is a real zero, and it is listed here so it stays distinguishable from a carrier that HAD rows
+   *  and matched none (硬规则 3). */
+  absent: string[];
+  /** A source that could not be READ (unreadable / partial / no shared checkout) is NAMED here. It is
+   *  never quietly counted as zero matches. */
+  errors: string[];
+  /** `true` when the wider context hit its bound, so a reader can tell a bounded list from a complete one. */
+  broad_truncated: boolean;
+}
+
+const jsonlLines = (text: string): { records: Record<string, unknown>[]; malformed: number } => {
+  const records: Record<string, unknown>[] = [];
+  let malformed = 0;
+  for (const line of text.split("\n")) {
+    if (!line.trim()) continue;
+    try {
+      const rec = JSON.parse(line) as unknown;
+      if (rec && typeof rec === "object" && !Array.isArray(rec)) records.push(rec as Record<string, unknown>);
+      else malformed++;
+    } catch { malformed++; }
+  }
+  return { records, malformed };
+};
+
+/** Read one JSONL carrier at the SHARED checkout. `absent` and `reason` are DIFFERENT answers: a carrier
+ *  that is not there holds zero records (a real zero), while one that cannot be read is a failure to look
+ *  and must never be shaped like the first (硬规则 3b). */
+const readCarrierAt = (ledger: LedgerModule, root: string, rel: string): { records: Record<string, unknown>[]; absent: boolean; reason: string | null } => {
+  const file = ledger.carrierFile(root, rel);
+  if (file === null) return { records: [], absent: false, reason: `SHARED_CHECKOUT_UNRESOLVED:${rel}` };
+  if (!fs.existsSync(file)) return { records: [], absent: true, reason: null };
+  try {
+    const parsed = jsonlLines(fs.readFileSync(file, "utf8"));
+    if (parsed.malformed > 0) return { records: parsed.records, absent: false, reason: `CARRIER_PARTIAL:${rel}:${parsed.malformed}-unparseable` };
+    return { records: parsed.records, absent: false, reason: null };
+  } catch (e) {
+    return { records: [], absent: false, reason: `CARRIER_UNREADABLE:${rel}:${(e as Error)?.code ?? (e as Error)?.message}` };
+  }
+};
+
+/** `git grep -l -F -e <p>… <branch> -- <pathspec>` → the matching paths, or `null` when git could not be
+ *  run / the ref does not exist. `null` and `[]` are DIFFERENT answers: a branch that cannot be read is a
+ *  retrieval error, while a branch with no match is a real zero. */
+export function gitGrepPaths(root: string, patterns: readonly string[], ref: string, pathspec: string): string[] | null {
+  if (patterns.length === 0) return [];
+  const args = ["-C", root, "grep", "-l", "-F"];
+  for (const p of patterns) args.push("-e", p);
+  args.push(ref, "--", pathspec);
+  try {
+    const r = execFileSync("git", args, { encoding: "utf8", maxBuffer: 1 << 26 });
+    return String(r).split("\n").map((l) => l.trim()).filter((l) => l !== "");
+  } catch (e) {
+    // exit 1 is git grep's own "no match" — a real zero. Anything else is a failure to look.
+    const status = (e as { status?: number }).status;
+    if (status === 1) return [];
+    return null;
+  }
+}
+
+/** The task id a `git grep` output line names, or `null` when it is not a `tasks/<id>.md` line. Pure.
+ *  ⛔ It accepts BOTH shapes git grep produces — `-l`'s `<rev>:<path>` and `-n`'s `<rev>:<path>:<line>:<text>`
+ *  — by cutting at the `.md` rather than requiring the line to END there. A parser that only accepted the
+ *  first shape would silently return zero task candidates for the title arm, which reads exactly like
+ *  "no task mentions this" (硬规则 3b). */
+export function taskIdFromPath(p: string): string | null {
+  const s = String(p ?? "");
+  const marker = "tasks/";
+  const at = s.indexOf(marker);
+  if (at < 0) return null;
+  const rest = s.slice(at + marker.length);
+  const mdAt = rest.indexOf(".md");
+  if (mdAt <= 0) return null;
+  const id = rest.slice(0, mdAt);
+  return id.includes("/") ? null : id;
+}
+
+/** The components an arch-discovery `subject_key` names. Pure. A key is `<class>:<name>|<path>#<line>`
+ *  (or `<class>#<hash>`); both forms are read by string position, never by a pattern. */
+export function componentsFromSubjectKey(subjectKey: string): string[] {
+  const s = String(subjectKey ?? "");
+  if (s === "") return [];
+  const pipe = s.indexOf("|");
+  const head = pipe >= 0 ? s.slice(pipe + 1) : (s.indexOf(":") >= 0 ? s.slice(s.indexOf(":") + 1) : s);
+  return head.split("|").map((part) => {
+    const hash = part.indexOf("#");
+    return (hash >= 0 ? part.slice(0, hash) : part).trim();
+  }).filter((x) => x !== "");
+}
+
+/**
+ * RETRIEVE the records a confirmed cluster may duplicate. PURE apart from the carriers it reads.
+ *
+ * ⛔ It returns CANDIDATES, never a verdict. A caller must not read an empty `candidates` as "novel" — the
+ * `broad` list exists precisely so that reading is unavailable, and the model call happens either way.
+ */
+export function retrieveNoveltyCandidates(root: string, opts: {
+  components: readonly string[];
+  claim: string;
+  portfolio: PortfolioModule;
+  ledger: LedgerModule;
+  branch?: string;
+  gitGrep?: (patterns: readonly string[], ref: string, pathspec: string) => string[] | null;
+}): NoveltyRetrieval {
+  const p = opts.portfolio;
+  const branch = opts.branch ?? "develop";
+  const components = p.normalizeComponents([...opts.components]);
+  const wanted = new Set(components);
+  const candidates: NoveltyCandidate[] = [];
+  const broad: NoveltyCandidate[] = [];
+  const totals: Record<string, number> = {};
+  const absent: string[] = [];
+  const errors: string[] = [];
+
+  const overlaps = (xs: unknown): boolean => p.normalizeComponents(xs).some((c) => wanted.has(c));
+  const push = (into: NoveltyCandidate[], c: NoveltyCandidate): void => {
+    if (!into.some((x) => x.carrier === c.carrier && x.ref === c.ref)) into.push(c);
+  };
+
+  // (1) the Portfolio — the ONLY source whose refs double as `duplicate_of` targets.
+  const pf = p.readPortfolio(root);
+  totals.portfolio = pf.ok ? pf.records.length : 0;
+  if (!pf.ok || pf.file === null) errors.push(`portfolio:${pf.reason ?? "unreadable"}`);
+  for (const r of pf.records) {
+    const ref = typeof r.finding_id === "string" ? r.finding_id : "";
+    if (ref === "") continue;
+    const entry: NoveltyCandidate = {
+      carrier: p.PORTFOLIO_REL,
+      ref,
+      claim: typeof r.claim === "string" ? r.claim : null,
+      components: p.normalizeComponents(r.components),
+      basis: p.sameComponentSet(r.components, components) ? "same-component-set" : "overlapping-components",
+      duplicate_target: true,
+    };
+    if (overlaps(r.components)) push(candidates, entry);
+    else push(broad, { ...entry, basis: "portfolio-claim" });
+  }
+
+  // (2) `.quay/routine-findings.jsonl` — the routines' own findings carrier.
+  const rf = readCarrierAt(opts.ledger, root, ROUTINE_FINDINGS_CARRIER_REL);
+  totals.routine_findings = rf.records.length;
+  if (rf.absent) absent.push(ROUTINE_FINDINGS_CARRIER_REL);
+  if (rf.reason !== null) errors.push(rf.reason);
+  for (const r of rf.records) {
+    const files = Array.isArray(r.files) ? r.files : (Array.isArray(r.components) ? r.components : []);
+    if (!overlaps(files)) continue;
+    const runId = typeof r.runId === "string" ? r.runId : "";
+    const findingId = typeof r.findingId === "string" ? r.findingId : "";
+    const ref = runId === "" ? "" : (findingId === "" ? runId : `${runId}#${findingId}`);
+    if (ref === "") continue;
+    push(candidates, {
+      carrier: ROUTINE_FINDINGS_CARRIER_REL, ref, claim: null,
+      components: p.normalizeComponents(files), basis: "overlapping-components", duplicate_target: false,
+    });
+  }
+
+  // (3) `.quay/arch-discovery-findings.jsonl` — the mechanical scanner's subject keys.
+  const ad = readCarrierAt(opts.ledger, root, ARCH_DISCOVERY_CARRIER_REL);
+  totals.arch_discovery = ad.records.length;
+  if (ad.absent) absent.push(ARCH_DISCOVERY_CARRIER_REL);
+  if (ad.reason !== null) errors.push(ad.reason);
+  for (const r of ad.records) {
+    if (r.kind !== "finding" || typeof r.subject_key !== "string") continue;
+    const comps = componentsFromSubjectKey(r.subject_key);
+    if (!overlaps(comps)) continue;
+    push(candidates, {
+      carrier: ARCH_DISCOVERY_CARRIER_REL, ref: r.subject_key, claim: null,
+      components: p.normalizeComponents(comps), basis: "subject-key-components", duplicate_target: false,
+    });
+  }
+
+  // (4) task Touches on the landing branch — "a done or open task naming the same components".
+  const grep = opts.gitGrep ?? ((pats: readonly string[], ref: string, pathspec: string) => gitGrepPaths(root, pats, ref, pathspec));
+  const taskPaths = components.length === 0 ? [] : grep(components, branch, "tasks/");
+  if (taskPaths === null) errors.push(`tasks:git-grep-could-not-be-run-for-${branch}`);
+  const taskIds: string[] = [];
+  for (const path of taskPaths ?? []) {
+    const id = taskIdFromPath(path);
+    if (id !== null && !taskIds.includes(id)) taskIds.push(id);
+  }
+  totals.task_paths_matching_components = taskIds.length;
+  const considered = taskIds.slice(0, NOVELTY_TASK_CANDIDATE_MAX);
+  let touches_overlap = 0;
+  for (const id of considered) {
+    const touches = p.taskTouchesOnBranch(root, id, { branch });
+    if (!overlaps(touches)) continue;
+    touches_overlap++;
+    // `duplicate_target: true` is DERIVED, not asserted: a non-empty Touches list means `git show
+    // <branch>:tasks/<id>.md` succeeded, which is exactly what makes the id resolvable on the write path.
+    // (Re-asking would be a second `git` spawn per candidate to learn what this one already proved.)
+    push(candidates, {
+      carrier: `tasks/${id}.md`, ref: id, claim: null,
+      components: p.normalizeComponents(touches), basis: "touches-overlap", duplicate_target: touches.length > 0,
+    });
+  }
+  totals.touches_overlap = touches_overlap;
+  totals.task_candidates_considered = considered.length;
+
+  // (5) the WIDER context: every task title on the landing branch. One `git grep`, bounded on the prompt.
+  //     ⛔ The READ back of each candidate's `## Touches` above is bounded (one `git show` each); this arm
+  //     spawns nothing per row, so the wider context stays complete up to the prompt bound instead of
+  //     becoming a second, silent cap.
+  const titlePaths = grep([TASK_TITLE_GREP_PATTERN], branch, "tasks/");
+  if (titlePaths === null) errors.push(`task-titles:git-grep-could-not-be-run-for-${branch}`);
+  for (const line of titlePaths ?? []) {
+    const id = taskIdFromPath(line);
+    if (id === null) continue;
+    const mdAt = line.indexOf(".md");
+    const colon = line.indexOf(TASK_TITLE_GREP_PATTERN, mdAt < 0 ? 0 : mdAt);
+    const title = colon >= 0 ? line.slice(colon + TASK_TITLE_GREP_PATTERN.length).trim() : "";
+    // Existence is established by the grep itself (it matched a file ON that branch), so no second spawn.
+    push(broad, {
+      carrier: `tasks/${id}.md`, ref: id, claim: title === "" ? null : title, components: [],
+      basis: "task-title", duplicate_target: true,
+    });
+  }
+
+  const broadTruncated = broad.length > NOVELTY_BROAD_MAX;
+  return {
+    candidates, broad: broad.slice(0, NOVELTY_BROAD_MAX), totals, absent,
+    errors, broad_truncated: broadTruncated,
+  };
+}
+
+/** One cluster's novelty outcome — every field is what the record itself decided or the model returned. */
+export interface NoveltyOutcome {
+  cluster: number;
+  record_id: string;
+  disposition: NoveltyDisposition;
+  verdict: NoveltyVerdict | null;
+  duplicate_of: string | null;
+  reasoning: string | null;
+  summary: string | null;
+  retrieved: number;
+  broad: number;
+  retrieval: { totals: Record<string, number>; absent: string[]; errors: string[]; broad_truncated: boolean; mechanical_duplicate_of: string | null };
+  calls: number;
+  cost_usd: number | null;
+}
+
+/** The prompt for the ONE novelty call. PURE. `truncated` is STATED to the model, not hidden. */
+export function buildNoveltyPrompt(payload: {
+  claim: string; components: string[]; evidence: string[];
+  candidates: NoveltyCandidate[]; broad: NoveltyCandidate[]; broadTruncated: boolean;
+}): string {
+  const finding = JSON.stringify({ claim: payload.claim, components: payload.components, evidence: payload.evidence }, null, 2);
+  const candidatesText = payload.candidates.length === 0
+    ? "(none retrieved — this does NOT mean the finding is new; judge against the wider context below)"
+    : JSON.stringify(payload.candidates, null, 2);
+  const broadText = payload.broad.length === 0
+    ? "(no already-recorded claims or task titles were retrieved)"
+    : `${JSON.stringify(payload.broad, null, 2)}${payload.broadTruncated ? "\n(TRUNCATED at the declared bound — there are more, this list is not complete)" : ""}`;
+  return NOVELTY_PROMPT_TEMPLATE
+    .split("{{FINDING}}").join(finding)
+    .split("{{CANDIDATES}}").join(candidatesText)
+    .split("{{BROAD}}").join(broadText);
+}
+
+/** Read the model's novelty JSON out of its final text. `null` when there is nothing usable — and `null`
+ *  is NOT `novel`: an unreadable answer leaves the cluster `unjudged`, which writes no Portfolio row. */
+export function parseNoveltyVerdict(rec: Record<string, unknown> | null): { verdict: NoveltyVerdict; duplicate_of: string | null; reasoning: string | null; summary: string | null } | null {
+  if (!rec || typeof rec !== "object") return null;
+  const raw = typeof rec.verdict === "string" ? rec.verdict.trim() : "";
+  const verdict = (NOVELTY_VERDICTS as readonly string[]).find((v) => v === raw);
+  if (verdict === undefined) return null;
+  const dup = typeof rec.duplicate_of === "string" && rec.duplicate_of.trim() !== "" ? rec.duplicate_of.trim() : null;
+  const reasoning = typeof rec.reasoning === "string" && rec.reasoning.trim() !== "" ? rec.reasoning.trim() : null;
+  const summary = typeof rec.summary === "string" && rec.summary.trim() !== "" ? rec.summary.trim() : null;
+  return { verdict: verdict as NoveltyVerdict, duplicate_of: dup, reasoning, summary };
+}
+
+/** The byte-identical-repeat exception: an EARLIER cluster record on THIS routine's own carrier with the
+ *  same component set AND the same claim. Returns that record, or `null`. ⛔ This is the ONE mechanical
+ *  LABEL in the file, and it is only ever about this routine's own earlier round — never about another
+ *  carrier's content. */
+export function findMechanicalRepeat(
+  priorClusters: readonly Record<string, unknown>[],
+  opts: { components: readonly string[]; claim: string; recordId: string; portfolio: PortfolioModule },
+): Record<string, unknown> | null {
+  for (let i = priorClusters.length - 1; i >= 0; i--) {
+    const r = priorClusters[i];
+    if (typeof r.record_id !== "string" || r.record_id === opts.recordId) continue;
+    if (typeof r.claim !== "string") continue;
+    if (!opts.portfolio.sameComponentSet(r.components, opts.components)) continue;
+    if (opts.portfolio.normalizeClaim(r.claim) !== opts.portfolio.normalizeClaim(opts.claim)) continue;
+    return r;
+  }
+  return null;
+}
+
+// ── the post-round WRITES: carrier record → Experience → Portfolio ────────────────────────────────────
+//
+// ⛔ WHERE THE PROVENANCE CHAIN LIVES, AND WHY IT RESOLVES BOTH WAYS. Every row written here is keyed on
+// the carrier record's own `record_id`:
+//   · the EXPERIENCE's `source_ref` IS that id, and its `evidence[0].sha256` is the digest of the carrier
+//     LINE's bytes ⇒ carrier → Experience, re-checkable;
+//   · the PORTFOLIO's `origin_ref` IS that id and `origin_carrier` is the carrier ⇒ Portfolio → carrier,
+//     through the portfolio module's own `resolveOriginRef`;
+//   · Experience → Portfolio and Portfolio → Experience both go through the same id (the Experience's
+//     `case_id` is `EXP-<record_id>`), so neither direction needs a second index.
+//
+// ⛔ NOTHING HERE IS FILED. No fix task is created, no Goal is written and no human rating is emitted — the
+// Portfolio row carries `fix_task:null` and the value assessment's candidate fix stays an OUTLINE on the
+// carrier record. Filing a fix stays the operator's decision (Plan 4).
+
+/** The role an Experience carries for a cluster, or `null` when the cluster gets no Experience at all
+ *  (the one mechanical-repeat case: it was already ingested by the earlier round). PURE. */
+export function experienceRoleFor(cluster: Record<string, unknown>, disposition: NoveltyDisposition, clusterVerdict: string | null): string | null {
+  if (clusterVerdict === "refuted") return "confirmed-negative";
+  if (clusterVerdict === "undetermined") return "undetermined";
+  if (clusterVerdict !== "supported") return null;
+  if (disposition === "mechanical-duplicate") return null;
+  if (disposition === "duplicate" || disposition === "restatement") return "duplicate";
+  // `novel` AND `unjudged`: the claim HELD (so `found-unresolved` is true of it) — what the novelty check
+  // decided is about NEWNESS, and `unjudged` decided nothing, so it must not be written as anything else.
+  return "found-unresolved";
+}
+
+/** The summary an Experience carries: the cluster's OWN words, composed. PURE. ⛔ Nothing is invented here
+ *  — every piece comes off the carrier record or the model's own returned text, and a composed summary
+ *  that is too thin is REFUSED by the ledger rather than padded (硬规则 3b). */
+export function experienceSummaryFor(cluster: Record<string, unknown>, novelty: NoveltyOutcome | null): string {
+  const claim = typeof cluster.claim === "string" ? cluster.claim : "(no claim recorded)";
+  const parts: string[] = [claim];
+  const va = (cluster.model_value_assessment ?? null) as Record<string, unknown> | null;
+  if (va && typeof va.impact === "string" && va.impact !== "") parts.push(`impact: ${va.impact}`);
+  if (novelty && novelty.reasoning !== null) parts.push(`novelty (${novelty.disposition}): ${novelty.reasoning}`);
+  if (cluster.refutation_verdict === "refuted" && typeof cluster.refutation_counterexample === "string" && cluster.refutation_counterexample !== "") {
+    parts.push(`refuted by: ${cluster.refutation_counterexample}`);
+  }
+  const ev = Array.isArray(cluster.evidence_lines) ? (cluster.evidence_lines as unknown[]).filter((x) => typeof x === "string") : [];
+  if (ev.length > 0) parts.push(`evidence: ${(ev as string[]).join("; ")}`);
+  return parts.join(" — ");
+}
+
+export interface IngestionWrite {
+  cluster: number;
+  record_id: string;
+  /** `supported` / `refuted` / `undetermined` — the cluster's own derived verdict. */
+  verdict: string | null;
+  disposition: NoveltyDisposition | "not-confirmed";
+  experience_role: string | null;
+  experience: { written: boolean; id: string | null; reasons: string[] };
+  portfolio: { written: boolean; finding_id: string | null; duplicate_of: string | null; skipped: string | null; reasons: string[] };
+}
+
+/**
+ * Write the Experience (and, for a novel/duplicate CONFIRMED cluster, the Portfolio row) for every cluster
+ * record of a round that is ALREADY on the carrier.
+ *
+ * ⛔ `carrierPath` is re-read here rather than handed the in-memory records: the Experience's evidence
+ * digest must be of the bytes that are REALLY on disk, and re-reading is what makes that true rather than
+ * assumed. A record whose line cannot be found is REFUSED with its own reason — never ingested with a
+ * digest of something else.
+ */
+export function ingestRoundClusters(root: string, opts: {
+  carrierPath: string;
+  carrierRel: string;
+  clusterRecords: readonly Record<string, unknown>[];
+  noveltyByCluster: ReadonlyMap<number, NoveltyOutcome>;
+  portfolio: PortfolioModule;
+  ledger: LedgerModule;
+  authoredBy: { actor: string; ref: string };
+}): IngestionWrite[] {
+  const p = opts.portfolio;
+  const byRecordId = new Map<string, { raw: string; line: number }>();
+  try {
+    const text = fs.readFileSync(opts.carrierPath, "utf8");
+    const lines = text.split("\n");
+    for (let i = 0; i < lines.length; i++) {
+      const line = lines[i];
+      if (!line.trim()) continue;
+      let rec: unknown;
+      try { rec = JSON.parse(line); } catch { continue; }
+      const id = rec && typeof rec === "object" && !Array.isArray(rec) ? (rec as Record<string, unknown>).record_id : null;
+      if (typeof id === "string" && !byRecordId.has(id)) byRecordId.set(id, { raw: line, line: i + 1 });
+    }
+  } catch { /* an unreadable carrier leaves every lookup empty ⇒ every cluster is refused BY NAME below */ }
+
+  const writes: IngestionWrite[] = [];
+  for (const cluster of opts.clusterRecords) {
+    const idx = Number(cluster.cluster ?? 0);
+    const recordId = typeof cluster.record_id === "string" ? cluster.record_id : "";
+    const verdict = opts.ledger.clusterVerdict(cluster);
+    const novelty = opts.noveltyByCluster.get(idx) ?? null;
+    const disposition: NoveltyDisposition | "not-confirmed" = cluster.confirmed === true ? (novelty?.disposition ?? "unjudged") : "not-confirmed";
+    const role = experienceRoleFor(cluster, disposition === "not-confirmed" ? "unjudged" : disposition, verdict);
+    const write: IngestionWrite = {
+      cluster: idx, record_id: recordId, verdict, disposition, experience_role: role,
+      experience: { written: false, id: null, reasons: [] },
+      portfolio: { written: false, finding_id: null, duplicate_of: null, skipped: null, reasons: [] },
+    };
+    if (role !== null) {
+      const hit = byRecordId.get(recordId);
+      if (hit === undefined) {
+        write.experience.reasons = [`CARRIER_LINE_NOT_FOUND:${recordId}-is-not-on-${opts.carrierRel}`];
+      } else {
+        const res = opts.ledger.ingestExperience(root, {
+          source: "discovery-carrier",
+          record: { rec: cluster, raw: hit.raw, line: hit.line },
+          carrier: opts.carrierRel,
+          role,
+          caseId: opts.ledger.clusterCaseId(recordId),
+          summary: experienceSummaryFor(cluster, novelty),
+          components: Array.isArray(cluster.components) ? cluster.components : [],
+          authoredBy: opts.authoredBy,
+          evidenceLevel: "production-open",
+        });
+        write.experience = { written: res.ok === true, id: res.id ?? null, reasons: Array.isArray(res.reasons) ? res.reasons : [] };
+      }
+    }
+    // The Portfolio row: ONLY for a CONFIRMED cluster the novelty check judged `novel` or named a
+    // resolvable `duplicate`. ⛔ A refuted or undetermined cluster NEVER reaches the Portfolio as
+    // `supported` — the two ledgers answer different questions and this is where that is enforced.
+    if (verdict === "supported" && (disposition === "novel" || disposition === "duplicate")) {
+      const claim = typeof cluster.claim === "string" ? cluster.claim : "";
+      const input: Record<string, unknown> = {
+        finding_id: recordId,
+        origin: "autonomous-routine",
+        origin_ref: recordId,
+        evidence_level: "production-open",
+        method_ref: null,
+        claim,
+        components: Array.isArray(cluster.components) ? cluster.components : [],
+        outcome: "supported",
+        // ⛔ NOT a filed task and NOT a rating: the operator files fixes, and a human rates. Both stay null.
+        fix_task: null,
+        human_rating: null,
+        domain: null,
+        domain_reason: null,
+      };
+      if (disposition === "duplicate" && novelty?.duplicate_of) input.duplicate_of = novelty.duplicate_of;
+      const res = p.ingestFinding(root, input);
+      write.portfolio = {
+        written: res.ok === true, finding_id: res.ok === true ? recordId : null,
+        duplicate_of: disposition === "duplicate" ? (novelty?.duplicate_of ?? null) : null,
+        skipped: null, reasons: Array.isArray(res.reasons) ? res.reasons : [],
+      };
+    } else {
+      write.portfolio.skipped = verdict === "supported"
+        ? (disposition === "mechanical-duplicate" ? "mechanical-duplicate: already on the Portfolio from the earlier round" : `disposition:${disposition}-is-not-a-Portfolio-row`)
+        : `verdict:${String(verdict)}-is-never-a-Portfolio-supported-row`;
+    }
+    writes.push(write);
+  }
+  return writes;
+}
+
 // ── the round ────────────────────────────────────────────────────────────────────────────────────────
-export type ModelStepKind = "investigator" | "verifier" | "refuter" | "value-assessment";
+export type ModelStepKind = "investigator" | "verifier" | "refuter" | "value-assessment" | "novelty-check";
 
 export interface OpenSemanticDiscoveryRunOptions {
   config: OpenSemanticDiscoveryConfig | null;
@@ -1047,6 +1667,9 @@ export async function runOpenSemanticDiscovery(root: string, opts: OpenSemanticD
     //    input is the claim and the components — it never sees the first verifier's reasoning. A cluster is
     //    reported `confirmed` ONLY if it survives.
     const clusterRecords: Record<string, unknown>[] = [];
+    // ONE instant for the round: it is the scan-round's `ts` AND the first half of every cluster's
+    // `record_id`, so a cluster is addressable by `<round>#<index>` without a second identity scheme.
+    const roundTs = new Date(now()).toISOString();
     for (const row of verifiedRows) {
       const idx = Number(row.cluster ?? 0);
       const cluster = clusters[idx - 1] ?? null;
@@ -1056,6 +1679,9 @@ export async function runOpenSemanticDiscovery(root: string, opts: OpenSemanticD
         routine: OPEN_SEMANTIC_DISCOVERY_NAME,
         invoked_by: invokedBy,
         ts: new Date(now()).toISOString(),
+        // The record's OWN id — the ref the Portfolio resolves its `origin_ref` by, and the back-pointer an
+        // Experience's `source_ref` carries. Minted here, once, so both readers agree by construction.
+        record_id: openDiscoveryRecordId(roundTs, idx),
         cluster: idx,
         members: row.members ?? cluster?.members ?? [],
         concept_kind: rep.concept_kind ?? null,
@@ -1131,6 +1757,79 @@ export async function runOpenSemanticDiscovery(root: string, opts: OpenSemanticD
       }
     }
 
+    // ⑨b THE NOVELTY CHECK — the ONE semantic call that decides whether a CONFIRMED cluster is new. It runs
+    //     HERE, before the carrier append, for two reasons: (i) a budget refusal must be handled by the
+    //     round's own refusal path rather than after the round is already on disk, and (ii) the verdicts
+    //     belong ON the scan-round line, where a reviewer reads what the round found and what it decided.
+    //     ⛔ The WRITES happen after the append (step ⑩b) — a Portfolio `origin_ref` must resolve against a
+    //     carrier record that is really there.
+    const priorClusterRecords = carrierRounds.filter((r) => r.kind === "cluster" && r.invoked_by === INVOKED_BY_RESIDENT);
+    const noveltyOutcomes: NoveltyOutcome[] = [];
+    const noveltyByCluster = new Map<number, NoveltyOutcome>();
+    for (const c of clusterRecords) {
+      if (c.confirmed !== true) continue;
+      const idx = Number(c.cluster ?? 0);
+      const recordId = String(c.record_id ?? "");
+      const comps = Array.isArray(c.components) ? (c.components as string[]) : [];
+      const claim = typeof c.claim === "string" ? c.claim : "";
+      // The ONE mechanical LABEL, and it is only ever about this routine's OWN earlier record.
+      const repeat = findMechanicalRepeat(priorClusterRecords, { components: comps, claim, recordId, portfolio: modules.portfolio });
+      if (repeat !== null) {
+        const outcome: NoveltyOutcome = {
+          cluster: idx, record_id: recordId, disposition: "mechanical-duplicate",
+          verdict: null, duplicate_of: String(repeat.record_id), reasoning: "byte-identical component set AND claim to this routine's own earlier cluster record — deduped mechanically, nothing written to either ledger",
+          summary: null, retrieved: 0, broad: 0, calls: 0, cost_usd: null,
+          retrieval: { totals: {}, absent: [], errors: [], broad_truncated: false, mechanical_duplicate_of: String(repeat.record_id) },
+        };
+        noveltyOutcomes.push(outcome);
+        noveltyByCluster.set(idx, outcome);
+        continue;
+      }
+      const retrieval = retrieveNoveltyCandidates(root, {
+        components: comps, claim, portfolio: modules.portfolio, ledger: modules.ledger,
+      });
+      const prompt = buildNoveltyPrompt({
+        claim, components: comps,
+        evidence: Array.isArray(c.evidence_lines) ? (c.evidence_lines as string[]) : [],
+        candidates: retrieval.candidates, broad: retrieval.broad, broadTruncated: retrieval.broad_truncated,
+      });
+      const { res, rec: callRec } = await reservingStep("novelty-check", {
+        prompt, tools: NOVELTY_TOOLS, maxTurns: config.refutationMaxTurns, model: requestedModel,
+      });
+      const parsed = parseNoveltyVerdict(hyp.parseJsonObject(hyp.callText(String(res?.stdout ?? ""))));
+      // A `duplicate` verdict is only usable when the record it names is a candidate that RESOLVES on the
+      // write path. Naming anything else is DOWNGRADED to `restatement` — recorded, never silently
+      // rewritten — because the alternative is either an invented `duplicate_of` or a row that counts as
+      // new (硬规则 3b).
+      let disposition: NoveltyDisposition;
+      let duplicateOf: string | null = null;
+      if (parsed === null) disposition = "unjudged";
+      else if (parsed.verdict === "novel") disposition = "novel";
+      else if (parsed.verdict === "duplicate") {
+        const target = retrieval.candidates.find((x) => x.ref === parsed.duplicate_of && x.duplicate_target);
+        if (target) { disposition = "duplicate"; duplicateOf = target.ref; }
+        else disposition = "restatement";
+      } else disposition = "restatement";
+      const outcome: NoveltyOutcome = {
+        cluster: idx, record_id: recordId, disposition,
+        verdict: parsed?.verdict ?? null,
+        duplicate_of: duplicateOf ?? parsed?.duplicate_of ?? null,
+        reasoning: parsed?.reasoning ?? null,
+        summary: parsed?.summary ?? null,
+        retrieved: retrieval.candidates.length, broad: retrieval.broad.length, calls: 1,
+        cost_usd: typeof callRec.cost_charged_usd === "number" ? (callRec.cost_charged_usd as number) : null,
+        retrieval: {
+          totals: retrieval.totals, absent: retrieval.absent, errors: retrieval.errors,
+          broad_truncated: retrieval.broad_truncated, mechanical_duplicate_of: null,
+        },
+      };
+      noveltyOutcomes.push(outcome);
+      noveltyByCluster.set(idx, outcome);
+      if (breached()) {
+        return fact("failed", { ...base, enabled: true, interval: intervalInfo, due: dueInfo, investigator: investigatorBlock }, `budget breach — wall ${now() - started}ms >= max_wall_ms ${config.maxWallMs} during the novelty check (nothing appended, last-run not advanced)`);
+      }
+    }
+
     // ⑩ the round's ONE scan-round line + its per-cluster records, appended together.
     const wallMs = now() - started;
     const confirmedClusters = clusterRecords.filter((c) => c.confirmed === true);
@@ -1138,7 +1837,7 @@ export async function runOpenSemanticDiscovery(root: string, opts: OpenSemanticD
       kind: "scan-round",
       routine: OPEN_SEMANTIC_DISCOVERY_NAME,
       invoked_by: invokedBy,
-      ts: new Date(now()).toISOString(),
+      ts: roundTs,
       interval: intervalInfo,
       due: dueInfo,
       pin: { rev, dir: asRel(root, pinned) },
@@ -1147,6 +1846,11 @@ export async function runOpenSemanticDiscovery(root: string, opts: OpenSemanticD
       investigator: investigatorBlock,
       clusters: { total: clusters.length, verified: verifiedRows.length, beyond_cap: Math.max(0, clusters.length - verifiedRows.length) },
       confirmed: { count: confirmedClusters.length, claims: confirmedClusters.map((c) => c.claim) },
+      // What the semantic novelty check decided, per confirmed cluster — the verdicts, the retrieval they
+      // were made against and any source that could not be read. `writes` is filled by step ⑩b below and
+      // reported on the Fact (the line itself is already on disk by then; the append-only discipline is
+      // what keeps a round from being rewritten after the fact).
+      ingestion: { checked: noveltyOutcomes.length, outcomes: noveltyOutcomes },
       // ⛔ This block's PRESENCE is what tells the call-budget reader that this line's calls are already
       // counted ONE FOR ONE by the reservation ledger (so the legacy carrier term must skip it).
       reservations: {
@@ -1168,6 +1872,39 @@ export async function runOpenSemanticDiscovery(root: string, opts: OpenSemanticD
       cost_usd: round6(costUsd),
     };
     appendCarrierRecords(carrier, [round, ...clusterRecords]);
+
+    // ⑩b THE WRITES — carrier record → Experience → Portfolio. They run AFTER the append because a
+    //     Portfolio row's `origin_ref` must resolve in a carrier record that is really there, and the
+    //     Experience's evidence digest must be of the bytes really on disk. Each write's outcome is
+    //     appended as its own `kind:"ingestion"` line, so "what happened to this cluster" is on the
+    //     carrier rather than inferable only from which OTHER files changed.
+    const ingestionWrites: IngestionWrite[] = [];
+    let ingestionError: string | null = null;
+    try {
+      ingestionWrites.push(...ingestRoundClusters(root, {
+        carrierPath: carrier, carrierRel: asRel(root, carrier),
+        clusterRecords, noveltyByCluster,
+        portfolio: modules.portfolio, ledger: modules.ledger,
+        // The ingesting process names ITSELF: this routine is the writer, and `ingester` is the ledger's
+        // own actor for a derived/system projection. Nothing is defaulted at the ledger end either.
+        authoredBy: { actor: "ingester", ref: OPEN_SEMANTIC_DISCOVERY_NAME },
+      }));
+    } catch (e) {
+      ingestionError = (e as Error)?.message ?? String(e);
+    }
+    if (ingestionWrites.length > 0 || ingestionError !== null) {
+      appendCarrierRecords(carrier, [{
+        kind: "ingestion",
+        routine: OPEN_SEMANTIC_DISCOVERY_NAME,
+        invoked_by: invokedBy,
+        ts: new Date(now()).toISOString(),
+        round_ts: roundTs,
+        error: ingestionError,
+        writes: ingestionWrites,
+      }]);
+    }
+    round.ingestion = { checked: noveltyOutcomes.length, outcomes: noveltyOutcomes, writes: ingestionWrites, error: ingestionError };
+
     // ⑪ ⛔ THE SPLIT: only a RESIDENT round advances the production window, and only when nothing was cut
     //    short mid-round (a round that ran out of ceiling part-way must not consume the interval).
     if (resident && midRound === null) writeLastRunStamped(lastRunPath, OPEN_SEMANTIC_DISCOVERY_NAME, now(), invokedBy);
@@ -1175,10 +1912,15 @@ export async function runOpenSemanticDiscovery(root: string, opts: OpenSemanticD
     if (midRound !== null) {
       return fact("not-evaluated", round, `budget: the ${midRound.kind} step was refused by the 24h ceiling (${midRound.used} >= cap ${midRound.cap}) — ${budget.grantedCount} call(s) were already made and stay RESERVED; the round persisted what it did but did NOT advance the production last-run${revertedNote}${legacyNote}`);
     }
+    // An ingestion that FAILED is not folded into a success sentence: the round's semantic work is real
+    // and already persisted, but the Fact must say the ledgers did not all get written.
+    const ingestionNote = ingestionError !== null
+      ? `; ⛔ INGESTION FAILED — ${ingestionError} (the scan-round and cluster records ARE persisted; the Experience/Portfolio writes are not)`
+      : `; ingested ${ingestionWrites.length} cluster(s): ${ingestionWrites.filter((w) => w.experience.written).length} Experience(s), ${ingestionWrites.filter((w) => w.portfolio.written).length} Portfolio row(s)`;
     return fact(
       "verified",
       round,
-      `round ran (invoked_by:${invokedBy}, interval ${intervalMinutes}m): investigator read the pin with ${INVESTIGATOR_TOOLS} (focus: ${investigatorBlock.stated_focus ?? "<not stated>"}), ${clusters.length} cluster(s) from ${investigatorBlock.runs_with_hypotheses} run(s), ${verifiedRows.length} verified, ${confirmedClusters.length} CONFIRMED after independent refutation, ${budget.grantedCount} model call(s) costing $${round6(costUsd)}, wall ${wallMs}ms; appended 1 scan-round + ${clusterRecords.length} cluster record(s) to ${asRel(root, carrier)}${resident ? " and advanced the production last-run" : " — MANUAL: the production last-run was NOT advanced"}${revertedNote}${legacyNote}`,
+      `round ran (invoked_by:${invokedBy}, interval ${intervalMinutes}m): investigator read the pin with ${INVESTIGATOR_TOOLS} (focus: ${investigatorBlock.stated_focus ?? "<not stated>"}), ${clusters.length} cluster(s) from ${investigatorBlock.runs_with_hypotheses} run(s), ${verifiedRows.length} verified, ${confirmedClusters.length} CONFIRMED after independent refutation, ${budget.grantedCount} model call(s) costing $${round6(costUsd)}, wall ${wallMs}ms; appended 1 scan-round + ${clusterRecords.length} cluster record(s) to ${asRel(root, carrier)}${resident ? " and advanced the production last-run" : " — MANUAL: the production last-run was NOT advanced"}${ingestionNote}${revertedNote}${legacyNote}`,
     );
   } catch (e) {
     if (isBudgetRefused(e)) {
