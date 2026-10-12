@@ -3,7 +3,7 @@ id: gap-open-semantic-discovery-investigator-exits-before-hypotheses-zero-semant
 title: "open semantic discovery in production: investigator exit 1 (tokens 0;
   turns 13 > max 12), 0 hypotheses, 0 verification — capture subtype, reserve
   answer turns, prove real hypothesis+verification"
-status: todo
+status: ready
 labels:
   - gap
   - defect
