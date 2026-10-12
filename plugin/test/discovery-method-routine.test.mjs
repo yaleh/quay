@@ -43,8 +43,8 @@ import assert from "node:assert/strict";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
-import { execFileSync, spawnSync } from "node:child_process";
-import { fileURLToPath } from "node:url";
+import { execFileSync, spawn, spawnSync } from "node:child_process";
+import { fileURLToPath, pathToFileURL } from "node:url";
 
 import {
   DISCOVERY_METHOD_NAME,
@@ -68,6 +68,25 @@ import {
   runDiscoveryMethod,
   buildDiscoveryMethodRoutine,
   discoveryMethodRoutineFromConfig,
+  // ── the 24h reservation ledger (task gap-discovery-method-24h-budget-hard-reservation) ──
+  BUDGET_LEDGER_REL,
+  BUDGET_LOCK_REL,
+  BUDGET_REFUSAL_CODE,
+  BUDGET_LOCK_STALE_MS,
+  REFLECTION_TOOLS,
+  REFLECTION_MAX_TURNS,
+  VERIFIER_TOOLS,
+  DEFAULT_VERIFIER_MAX_TURNS,
+  inTrailing24hWindow,
+  ledgerReservationsInWindow,
+  budgetUsage,
+  readLedgerRecords,
+  appendLedgerRecords,
+  acquireBudgetLock,
+  pidAlive,
+  openModelBudget,
+  reservingModel,
+  seamParamsFor,
 } from "../scripts/discovery-method-routine.ts";
 import { ROUTINE_LAST_RUN_REL, readLastRunMap } from "../scripts/probe-routine.ts";
 // (g) 的正本对照：另一条例程**自己的** floor / 默认值，⛔ 不是从 discovery-method 借来的常量。
@@ -1016,4 +1035,562 @@ test("the temporary cadence does not require a driver restart to EXPIRE, and the
   assert.equal(after[0].state, "not-evaluated", "past interval_until the routine stops firing on the fast cadence");
   assert.equal(after[0].value.interval.minutes, 360);
   assert.equal(after[0].value.interval.reverted, true);
+});
+
+// ══════════════════════════════════════════════════════════════════════════════════════════════════════
+// THE 24h CEILING AS A HARD, PRE-SPAWN RESERVATION
+// (task gap-discovery-method-24h-budget-hard-reservation)
+//
+// The 60m task left `max_model_calls_per_24h` SOFT: consulted once before the round (⇒ overshoot), read
+// only off `scan-round` lines (⇒ every failure path under-counted), and unlocked (⇒ no cross-process
+// atomicity). These cases pin the replacement: ONE durable record appended UNDER A LOCK before each
+// subprocess spawns, never deleted, with an outcome appended afterwards; a reservation with no outcome
+// counts as SPENT.
+//
+// ⛔ The cases below drive the REAL engine (`runReflectionRound` → `reflect` from
+// docs/analysis/discovery-reflection.mjs) through the REAL ingester over a real fixture evidence store,
+// with only the MODEL SEAM stubbed. A helper that re-implemented the engine's budget loop would prove
+// nothing about the engine.
+// ══════════════════════════════════════════════════════════════════════════════════════════════════════
+
+const ledgerFile = (ws) => path.join(ws, BUDGET_LEDGER_REL);
+const lockFile = (ws) => path.join(ws, BUDGET_LOCK_REL);
+const ledgerLines = (ws) => (fs.existsSync(ledgerFile(ws))
+  ? fs.readFileSync(ledgerFile(ws), "utf8").split("\n").filter(Boolean).map((l) => JSON.parse(l))
+  : []);
+const ledgerReserves = (ws) => ledgerLines(ws).filter((l) => l.kind === "reserve");
+const ledgerOutcomes = (ws) => ledgerLines(ws).filter((l) => l.kind === "outcome");
+
+/** Seed N GRANTED reservations at one instant — "the trailing 24h already spent N". */
+function seedReservations(ws, n, tsMs) {
+  appendLedgerRecords(ledgerFile(ws), Array.from({ length: n }, (_, i) => ({
+    kind: "reserve", id: `seed-${i}`, ts: new Date(tsMs).toISOString(), pid: 1,
+    step: "reflection", tools: REFLECTION_TOOLS, max_turns: REFLECTION_MAX_TURNS,
+  })));
+}
+
+/** SIX outcomes with six DISTINCT subject keys ⇒ six reflection units ⇒ six model calls if unbounded.
+ *  Written through the real evidence-store writer, so the real ingester reads them. */
+const SIX_OUTCOMES = Array.from({ length: 6 }, (_, i) => ({
+  experiment_ref: `E-FIX six ${i + 1}`,
+  verdict: i % 2 === 0 ? "supported" : "refuted",
+  subject_key: `concern|plugin/scripts/six-${i + 1}.ts`,
+}));
+
+/** A model seam that COUNTS its invocations and answers the one decision that mints nothing. */
+function noMethodModel() {
+  const calls = [];
+  const fn = async () => { calls.push(1); return { stdout: JSON.stringify({ decision: "no-method" }) }; };
+  fn.calls = calls;
+  return fn;
+}
+
+const t0 = Date.parse("2026-10-12T13:00:00Z");
+void t0;
+
+// ── AC1 (a): overshoot is gone ───────────────────────────────────────────────────────────────────────
+test("AC1(a) — used=23, cap=24, a round requesting 6 ⇒ exactly 1 call, 5 skipped BUDGET_24H, ledger total 24", async () => {
+  const ws = makeWorkspace();
+  writeConfig(ws, temporaryYaml(FUTURE_UNTIL, 24)); // cap 24, max_model_calls 6
+  writeFixtureStore(ws, SIX_OUTCOMES);
+  const at = Date.parse("2026-10-13T13:00:00Z");
+  seedReservations(ws, 23, at - 60_000); // 23 already spent inside the trailing 24h
+
+  const model = noMethodModel();
+  const fact = await runDiscoveryMethod(ws, runOpts(ws, { model, now: () => at }));
+
+  assert.equal(fact.state, "verified", `the round ran: ${fact.reason}`);
+  assert.equal(model.calls.length, 1, "⛔ EXACTLY ONE call: the round spends cap − used, not the full per-round max_model_calls");
+  assert.equal(fact.value.reservations.granted, 1);
+  assert.equal(fact.value.reservations.refused, 5, "the 5 the ceiling removed from the round's request of 6");
+  assert.equal(fact.value.reservations.refusal_reason, BUDGET_REFUSAL_CODE);
+  assert.equal(fact.value.statements ?? fact.value.reflected.skipped_budget, 5, "the ENGINE's own budget loop reports the same 5 as skipped");
+  assert.equal(fact.value.reservations.effective_max_model_calls, 1, "the per-round request was reduced to what the ceiling left");
+
+  const reserves = ledgerReserves(ws);
+  assert.equal(reserves.length, 24, "ledger total = 23 seeded + 1 granted — it can never exceed the cap");
+  assert.equal(reserves.filter((r) => r.id.startsWith("seed-")).length, 23);
+  assert.equal(ledgerOutcomes(ws).length, 1, "the one call recorded its outcome");
+  assert.equal(ledgerOutcomes(ws)[0].outcome, "completed");
+  assert.equal(reserves[23].tools, REFLECTION_TOOLS, "the reservation carries the launcher params it bounds");
+  assert.equal(reserves[23].max_turns, REFLECTION_MAX_TURNS);
+  // The carrier line carries the reservation block ⇒ `modelCallsInWindow` will NOT re-count this round.
+  assert.equal(rounds(ws).length, 1);
+  assert.equal(rounds(ws)[0].reservations.granted, 1);
+});
+
+// ── AC1 (b): two REAL processes share the ceiling ────────────────────────────────────────────────────
+/** A child script that runs the SAME reservation protocol a second time, in its own process, out of the
+ *  module's EXPORTED primitives: `acquireBudgetLock` → read usage → **sleep (the read-to-write window,
+ *  widened on purpose and only here)** → append. The two children rendezvous on a barrier FIRST, so both
+ *  enter that window at a known instant.
+ *  ⛔ The delay lives in the CHILD, never in the shipped module: `openModelBudget.reserve` does read and
+ *  append under ONE lock, so widening the window from outside would mean a seam in production code. The
+ *  protocol is written out here instead, which is what makes the (b) control deterministic rather than
+ *  scheduler-dependent — drop the lock and both children decide on the same stale `used`. */
+const CONTEND_CHILD = (moduleUrl) => `
+import fs from "node:fs";
+import path from "node:path";
+import {
+  acquireBudgetLock, readLedgerRecords, appendLedgerRecords, budgetUsage,
+  BUDGET_24H_MS, BUDGET_LEDGER_REL, BUDGET_LOCK_REL,
+} from ${JSON.stringify(moduleUrl)};
+const [root, capRaw, delayRaw, barrier, tag] = process.argv.slice(2);
+const cap = Number(capRaw);
+const delayMs = Number(delayRaw);
+const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+const lockPath = path.join(root, BUDGET_LOCK_REL);
+const ledgerPath = path.join(root, BUDGET_LEDGER_REL);
+fs.writeFileSync(path.join(barrier, tag), "");
+while (fs.readdirSync(barrier).length < 2) await sleep(2);
+let granted = 0, refused = 0, error = null;
+try {
+  for (let i = 0; i < 6; i++) {
+    const h = await acquireBudgetLock(lockPath);
+    if (!h.ok) throw new Error(h.code + ": " + h.reason);
+    try {
+      const used = budgetUsage({
+        ledgerRecords: readLedgerRecords(ledgerPath).records,
+        carrierRounds: [], nowMs: Date.now(), windowMs: BUDGET_24H_MS,
+      }).total;
+      await sleep(delayMs);   // the read -> write window: inside the lock it serialises, outside it races
+      if (used >= cap) { refused++; break; }
+      appendLedgerRecords(ledgerPath, [{ kind: "reserve", id: tag + "-" + i, ts: new Date().toISOString(), pid: process.pid, step: "reflection", tools: "", max_turns: 1 }]);
+      granted++;
+    } finally { h.release(); }
+  }
+} catch (e) { error = String(e && e.message || e); }
+process.stdout.write(JSON.stringify({ granted, refused, error }) + "\\n");
+`;
+
+function spawnAsync(cmd, args, opts) {
+  return new Promise((resolve) => {
+    const c = spawn(cmd, args, opts);
+    let out = "", err = "";
+    c.stdout.on("data", (d) => { out += d; });
+    c.stderr.on("data", (d) => { err += d; });
+    c.on("close", (code, signal) => resolve({ code, signal, stdout: out, stderr: err }));
+  });
+}
+
+test("AC1(b) — TWO REAL PROCESSES, 20 used, each requesting 6 ⇒ combined 4 calls, never more", async () => {
+  const ws = makeWorkspace();
+  seedReservations(ws, 20, Date.now() - 60_000);
+  const barrier = tmpDir("dm-barrier-");
+  const script = path.join(tmpDir("dm-contend-"), "contend.mjs");
+  fs.writeFileSync(script, CONTEND_CHILD(pathToFileURL(ROUTINE_SRC).href), "utf8");
+
+  // ⛔ The delays DIFFER on purpose. With the lock, whoever holds it is the only one reading, so the
+  // count can only ever reach the cap. With the lock dropped, the slow child's first read (20) stays
+  // current long enough for the fast child to spend the whole remaining budget — and then the slow one
+  // appends ON TOP of a cap that is already reached. That is the overshoot, and it is deterministic.
+  const [a, b] = await Promise.all([
+    spawnAsync(process.execPath, [script, ws, "24", "30", barrier, "a"], { encoding: "utf8" }),
+    spawnAsync(process.execPath, [script, ws, "24", "600", barrier, "b"], { encoding: "utf8" }),
+  ]);
+  assert.equal(a.code, 0, `child A must exit 0 — stdout ${a.stdout} stderr ${a.stderr}`);
+  assert.equal(b.code, 0, `child B must exit 0 — stdout ${b.stdout} stderr ${b.stderr}`);
+  const ra = JSON.parse(a.stdout);
+  const rb = JSON.parse(b.stdout);
+  assert.equal(ra.error, null);
+  assert.equal(rb.error, null);
+
+  const combined = ra.granted + rb.granted;
+  assert.equal(combined, 4, `20 used, cap 24 ⇒ the ceiling grants exactly 4 more, whatever the interleaving (got A=${ra.granted} B=${rb.granted})`);
+  assert.equal(ledgerReserves(ws).length, 24, "…and the LEDGER never exceeds the cap either");
+  assert.equal(ledgerReserves(ws).length <= 24, true, "never more");
+});
+
+// ── AC1 (c): a crash between the reservation and the outcome ─────────────────────────────────────────
+const CRASH_CHILD = (moduleUrl) => `
+import { openModelBudget, reservingModel } from ${JSON.stringify(moduleUrl)};
+const root = process.argv[2];
+const budget = openModelBudget({ root, cap: 100 });
+const model = reservingModel(async () => { process.kill(process.pid, "SIGKILL"); throw new Error("unreachable"); },
+  budget, { step: "reflection", tools: "", max_turns: 1 });
+await model("prompt").catch(() => {});
+process.exit(0);
+`;
+
+test("AC1(c) — a crash AFTER the reservation and BEFORE the outcome stays SPENT", async () => {
+  const ws = makeWorkspace();
+  const script = path.join(tmpDir("dm-crash-"), "crash.mjs");
+  fs.writeFileSync(script, CRASH_CHILD(pathToFileURL(ROUTINE_SRC).href), "utf8");
+
+  const r = spawnSync(process.execPath, [script, ws], { encoding: "utf8" });
+  assert.equal(r.signal, "SIGKILL", `the child was killed mid-call — stderr ${r.stderr}`);
+
+  assert.equal(ledgerReserves(ws).length, 1, "the reservation EXISTS — it was written before the spawn");
+  assert.equal(ledgerOutcomes(ws).length, 0, "…and no outcome was ever recorded (the process died first)");
+
+  // AFTER RESTART: a fresh reader still counts it.
+  const usage = await openModelBudget({ root: ws, cap: 24 }).usage();
+  assert.equal(usage.total, 1, "⛔ a reservation with NO OUTCOME counts as SPENT — this is the under-count defect");
+  assert.equal(usage.reservations, 1);
+  // …and a round that has no room left is refused BECAUSE of it.
+  writeConfig(ws, temporaryYaml(FUTURE_UNTIL, 1));
+  writeFixtureStore(ws, FIXTURE_OUTCOMES);
+  const fact = await runDiscoveryMethod(ws, runOpts(ws, { model: noMethodModel() }));
+  assert.equal(fact.state, "not-evaluated");
+  assert.match(fact.reason, /^budget-24h:/);
+  assert.equal(fact.value.budget_24h.used, 1, "the crashed call is the reading");
+});
+
+// ── AC1 (d): a call that throws or times out is counted ──────────────────────────────────────────────
+test("AC1(d) — a model call that THROWS or TIMES OUT is counted, with its own outcome class", async () => {
+  for (const [label, err, expected] of [
+    ["throws", new Error("boom"), "failed"],
+    ["times out", Object.assign(new Error("spawn timed out after 300000ms"), { code: "ETIMEDOUT" }), "timeout"],
+  ]) {
+    const ws = makeWorkspace();
+    writeConfig(ws, temporaryYaml(FUTURE_UNTIL, 24));
+    writeFixtureStore(ws, FIXTURE_OUTCOMES);
+    const model = async () => { throw err; };
+
+    const fact = await runDiscoveryMethod(ws, runOpts(ws, { model, now: () => ROUND_AT }));
+    assert.equal(fact.state, "failed", `a call that ${label} fails the round: ${fact.reason}`);
+    assert.match(fact.reason, /reflection threw/);
+
+    const outs = ledgerOutcomes(ws);
+    assert.equal(ledgerReserves(ws).length, 1, `the ${label} call was RESERVED before it was spawned`);
+    assert.equal(outs.length, 1, "…and it recorded an outcome");
+    assert.equal(outs[0].outcome, expected, `a ${label} call is recorded as '${expected}'`);
+    assert.equal(outs[0].turns, null);
+    assert.equal(typeof outs[0].turns_reason, "string");
+
+    // ⛔ THE CLAIM: the spent call is COUNTED by the next reader, whatever happened to it.
+    const usage = await openModelBudget({ root: ws, cap: 24 }).usage();
+    assert.equal(usage.total, 1, `a call that ${label} still counts against the 24h ceiling`);
+  }
+});
+
+// ── AC1 (e): a wall-breach round appends no line, and is still counted ───────────────────────────────
+test("AC1(e) — a wall-breach round appends NO scan-round line, and its calls are STILL counted", async () => {
+  const ws = makeWorkspace();
+  writeConfig(ws, `loop:\n  discovery_method:\n    enabled: true\n    interval: interval:60m\n    interval_until: ${FUTURE_UNTIL}\n    max_model_calls_per_24h: 24\n    max_experiences: 8\n    max_model_calls: 6\n    max_wall_ms: 1000\n`);
+  writeFixtureStore(ws, SIX_OUTCOMES);
+  const at = Date.parse("2026-10-13T13:00:00Z");
+  // The clock only jumps AFTER the first model call, so the round really spends calls before it breaches.
+  let called = false;
+  const now = () => (called ? at + 5_000 : at);
+  const model = async () => { called = true; return { stdout: JSON.stringify({ decision: "no-method" }) }; };
+
+  const fact = await runDiscoveryMethod(ws, runOpts(ws, { model, now }));
+  assert.equal(fact.state, "failed");
+  assert.match(fact.reason, /budget breach/);
+  assert.equal(rounds(ws).length, 0, "⛔ the round appended NOTHING — this is the path that used to be invisible");
+
+  const spent = ledgerReserves(ws).length;
+  assert.equal(spent, SIX_OUTCOMES.length, "the round spent one call per unit before it breached");
+  // The NEXT ROUND's reading — taken with the SAME clock the round ran on (a reservation's ts is written
+  // from the round's own clock, so a reader on a different clock is asking about a different window).
+  const usage = await openModelBudget({ root: ws, cap: 24, now: () => at + 10_000 }).usage();
+  assert.equal(usage.legacy_model_calls, 0, "no scan-round line exists to carry them");
+  assert.equal(usage.total, spent, "⛔ the next round counts them from the LEDGER alone");
+});
+
+// ── AC1 (f): the window boundary ─────────────────────────────────────────────────────────────────────
+test("AC1(f) — the window is HALF-OPEN (now−24h, now]: excluded AT the boundary, included 1ms inside", () => {
+  const at = Date.parse("2026-10-12T13:00:00Z");
+  const res = (ms) => ({ kind: "reserve", id: `r${ms}`, ts: new Date(ms).toISOString() });
+
+  assert.equal(inTrailing24hWindow(at - BUDGET_24H_MS, at, BUDGET_24H_MS), false, "exactly 24h old is OUT");
+  assert.equal(inTrailing24hWindow(at - BUDGET_24H_MS + 1, at, BUDGET_24H_MS), true, "1ms inside is IN");
+  assert.equal(inTrailing24hWindow(at + 1, at, BUDGET_24H_MS), false, "the FUTURE is out too (the window ends at `now`)");
+  assert.equal(inTrailing24hWindow(at, at, BUDGET_24H_MS), true, "`now` itself is IN");
+
+  assert.equal(ledgerReservationsInWindow([res(at - BUDGET_24H_MS)], at, BUDGET_24H_MS).count, 0, "reservation AT the boundary ⇒ excluded");
+  assert.equal(ledgerReservationsInWindow([res(at - BUDGET_24H_MS + 1)], at, BUDGET_24H_MS).count, 1, "reservation 1ms inside ⇒ included");
+
+  // ⛔ The SAME predicate governs the legacy carrier term — one boundary, not two.
+  const line = (ms) => ({ kind: "scan-round", routine: DISCOVERY_METHOD_NAME, ts: new Date(ms).toISOString(), model_calls: 5 });
+  assert.equal(modelCallsInWindow([line(at - BUDGET_24H_MS)], at, BUDGET_24H_MS), 0, "a legacy line AT the boundary ⇒ excluded");
+  assert.equal(modelCallsInWindow([line(at - BUDGET_24H_MS + 1)], at, BUDGET_24H_MS), 5, "…and 1ms inside ⇒ included");
+});
+
+// ── AC1 (g): the three zero-reservation paths ────────────────────────────────────────────────────────
+test("AC1(g) — enabled:false, halted and --no-model ⇒ ZERO reservations", async () => {
+  // (i) the kill switch
+  const disabled = makeWorkspace();
+  writeConfig(disabled, "loop:\n  discovery_method:\n    enabled: false\n");
+  const f1 = await runDiscoveryMethod(disabled, runOpts(disabled, { ingestFn: countingIngest() }));
+  assert.equal(f1.state, "not-evaluated");
+  assert.match(f1.reason, /disabled/);
+  assert.equal(fs.existsSync(ledgerFile(disabled)), false, "enabled:false ⇒ the ledger is not even created");
+
+  // (ii) halted
+  const halted = makeWorkspace();
+  writeConfig(halted, temporaryYaml(FUTURE_UNTIL, 24));
+  const f2 = await runDiscoveryMethod(halted, runOpts(halted, { halted: true, ingestFn: countingIngest() }));
+  assert.equal(f2.state, "not-evaluated");
+  assert.match(f2.reason, /halted/);
+  assert.equal(fs.existsSync(ledgerFile(halted)), false, "halted ⇒ zero reservations");
+
+  // (iii) --no-model, through the REAL CLI. An empty store ⇒ the round completes with no calls;
+  //       a populated store ⇒ it FAILS at the model seam. BOTH must reserve nothing.
+  for (const [label, populate] of [["an empty store", false], ["a populated store", true]]) {
+    const ws = makeWorkspace();
+    writeConfig(ws, temporaryYaml(FUTURE_UNTIL, 24));
+    if (populate) writeFixtureStore(ws, FIXTURE_OUTCOMES);
+    else fs.writeFileSync(path.join(ws, ".quay", "architecture-evidence-store.jsonl"), "", "utf8");
+    const run = spawnSync(process.execPath, [ROUTINE_SRC, "--once", "--root", ws, "--no-model", "--force", "--json"], { encoding: "utf8", env: GIT_ENV });
+    assert.equal(run.status, populate ? 1 : 0, `--no-model against ${label}: ${run.stdout} ${run.stderr}`);
+    assert.equal(ledgerReserves(ws).length, 0, `--no-model reserves NOTHING (${label})`);
+    assert.equal(fs.existsSync(ledgerFile(ws)), false, `--no-model never opens the ledger (${label})`);
+  }
+});
+
+// ── AC1 (h): --force never bypasses the ceiling ──────────────────────────────────────────────────────
+test("AC1(h) — a manual `--force` round at the cap is REFUSED; `--force` bypasses the GATE, not the BUDGET", async () => {
+  const ws = makeWorkspace();
+  writeConfig(ws, temporaryYaml(FUTURE_UNTIL, 24));
+  writeFixtureStore(ws, FIXTURE_OUTCOMES);
+  const at = Date.parse("2026-10-13T13:00:00Z");
+  seedReservations(ws, 24, at - 60_000); // exactly at the cap
+  const before = fs.existsSync(ledgerFile(ws)) ? fs.readFileSync(ledgerFile(ws), "utf8") : "";
+  const ingest = countingIngest();
+
+  const fact = await runDiscoveryMethod(ws, runOpts(ws, { invokedBy: INVOKED_BY_MANUAL, force: true, ingestFn: ingest, now: () => at }));
+  assert.equal(fact.state, "not-evaluated");
+  assert.match(fact.reason, /^budget-24h:/, "the refusal names its own cause, never «idle»");
+  assert.match(fact.reason, /not idle/);
+  assert.equal(fact.value.budget_24h.used, 24);
+  assert.equal(fact.value.budget_24h.cap, 24);
+  assert.equal(ingest.calls.length, 0, "⛔ ZERO spawns — `--force` is a DUE-gate flag and nothing else");
+  assert.equal(fs.readFileSync(ledgerFile(ws), "utf8"), before, "and it granted nothing");
+
+  // NON-VACUITY: the same round with cap 25 RUNS — so the refusal above was the ceiling and not
+  // something else that happens to also produce `not-evaluated`.
+  const ok = makeWorkspace();
+  writeConfig(ok, temporaryYaml(FUTURE_UNTIL, 25));
+  writeFixtureStore(ok, FIXTURE_OUTCOMES);
+  seedReservations(ok, 24, at - 60_000);
+  const ingest2 = countingIngest();
+  const ran = await runDiscoveryMethod(ok, runOpts(ok, { invokedBy: INVOKED_BY_MANUAL, force: true, model: noMethodModel(), ingestFn: ingest2, now: () => at }));
+  assert.equal(ran.state, "verified", `one under the cap ⇒ it runs: ${ran.reason}`);
+  assert.equal(ingest2.calls.length, 1);
+});
+
+// ── AC1 (i): budget refusals never consume the window ────────────────────────────────────────────────
+test("AC1(i) — a MID-ROUND budget refusal persists what was done but does NOT advance the production last-run", async () => {
+  const ws = makeWorkspace();
+  writeConfig(ws, temporaryYaml(FUTURE_UNTIL, 24));
+  writeFixtureStore(ws, SIX_OUTCOMES);
+  const at = Date.parse("2026-10-13T13:00:00Z");
+  seedReservations(ws, 20, at - 60_000); // cap − used = 4, so the round's per-round cap is min(6, 4) = 4
+  writeProductionLastRun(ws, at - 2 * 360 * 60_000); // due, and there IS an entry to prove it is not moved
+  const lastRunBefore = fs.readFileSync(lastRunPath(ws), "utf8");
+  const ledgerBefore = fs.readFileSync(ledgerFile(ws), "utf8");
+
+  // ⛔ A CONCURRENT CONSUMER, forced deterministically: the seam spends the rest of the budget the
+  // instant the round's first call lands. From there every further reservation is refused — which is
+  // exactly the state a second process produces, without depending on a scheduler race.
+  let calls = 0;
+  const model = async () => {
+    calls++;
+    if (calls === 1) seedReservations(ws, 4, at - 1_000);
+    return { stdout: JSON.stringify({ decision: "no-method" }) };
+  };
+
+  const fact = await runDiscoveryMethod(ws, runOpts(ws, { model, now: () => at }));
+  assert.equal(fact.state, "not-evaluated", `the round is cut short by the ceiling: ${fact.reason}`);
+  assert.match(fact.reason, /^budget-24h:/);
+  assert.match(fact.reason, /BUDGET_24H/);
+  assert.equal(fact.value.reservations.mid_round_refusal.step, "reflection");
+  assert.equal(fact.value.reservations.granted, 1, "the first call was granted");
+  assert.equal(calls, 1, "the refused call was NEVER spawned");
+
+  assert.equal(rounds(ws).length, 1, "⛔ the round still PERSISTS what it did");
+  assert.equal(rounds(ws)[0].reservations.mid_round_refusal.step, "reflection");
+  assert.equal(fs.readFileSync(lastRunPath(ws), "utf8"), lastRunBefore, "⛔ and it does NOT advance the production last-run");
+  assert.notEqual(fs.readFileSync(ledgerFile(ws), "utf8"), ledgerBefore, "…while the calls it DID make are on the ledger");
+
+  // The PRE-ROUND refusal behaves the same way (and is already covered by case (f) for the ceiling; here
+  // the claim is only about the CLOCK).
+  const pre = makeWorkspace();
+  writeConfig(pre, temporaryYaml(FUTURE_UNTIL, 24));
+  writeFixtureStore(pre, FIXTURE_OUTCOMES);
+  seedReservations(pre, 24, at - 60_000);
+  writeProductionLastRun(pre, at - 2 * 360 * 60_000);
+  const preBefore = fs.readFileSync(lastRunPath(pre), "utf8");
+  const f2 = await runDiscoveryMethod(pre, runOpts(pre, { ingestFn: countingIngest(), now: () => at }));
+  assert.equal(f2.state, "not-evaluated");
+  assert.equal(fs.readFileSync(lastRunPath(pre), "utf8"), preBefore, "a pre-round budget refusal leaves the clock alone too");
+});
+
+// ── AC1 (j): stale-lock recovery is bounded AND logged ───────────────────────────────────────────────
+test("AC1(j) — a lock held by a DEAD pid is recovered at once; a merely OLD one after the bound; both LOGGED", async () => {
+  const ws = makeWorkspace();
+  fs.mkdirSync(path.join(ws, ".quay"), { recursive: true });
+
+  // A real process that has really exited.
+  const exited = spawnSync(process.execPath, ["-e", ""]);
+  const deadPid = exited.pid;
+  assert.equal(pidAlive(deadPid), false, "the fixture pid is genuinely dead");
+  fs.writeFileSync(lockFile(ws), JSON.stringify({ pid: deadPid, ts: new Date().toISOString(), token: "dead-holder" }), "utf8");
+
+  const t = Date.now();
+  const budget = openModelBudget({ root: ws, cap: 5, waitMs: 5_000 });
+  const r = await budget.reserve({ step: "reflection", tools: REFLECTION_TOOLS, max_turns: REFLECTION_MAX_TURNS });
+  const elapsed = Date.now() - t;
+  assert.equal(r.ok, true, "a DEAD holder must not wedge the budget");
+  assert.ok(elapsed < 2_000, `recovery from a dead holder is immediate, not after the ${BUDGET_LOCK_STALE_MS}ms bound (took ${elapsed}ms)`);
+  assert.equal(fs.existsSync(lockFile(ws)), false, "…and the lock is released again");
+
+  const recov = ledgerLines(ws).filter((l) => l.kind === "lock-recovered");
+  assert.equal(recov.length, 1, "the recovery is LOGGED on the ledger, not only inferred");
+  assert.equal(recov[0].reason, "holder-dead");
+  assert.equal(recov[0].lock.pid, deadPid, "…and names the holder it reclaimed");
+  assert.equal(typeof recov[0].waited_ms, "number");
+
+  // (ii) a LIVE holder that is merely OLD (a recycled pid / a wedged shell / another host): recovered
+  //      once the stated bound has elapsed, and logged with the OTHER reason.
+  const ws2 = makeWorkspace();
+  fs.mkdirSync(path.join(ws2, ".quay"), { recursive: true });
+  fs.writeFileSync(lockFile(ws2), JSON.stringify({ pid: process.pid, ts: new Date(Date.now() - 60_000).toISOString(), token: "live-but-old" }), "utf8");
+  const old = new Date(Date.now() - 5_000);
+  fs.utimesSync(lockFile(ws2), old, old);
+  const r2 = await openModelBudget({ root: ws2, cap: 5, staleMs: 1_000, waitMs: 5_000 }).reserve({ step: "reflection", tools: REFLECTION_TOOLS, max_turns: REFLECTION_MAX_TURNS });
+  assert.equal(r2.ok, true, "an OLD lock is recovered once the bound has elapsed");
+  assert.equal(ledgerLines(ws2).filter((l) => l.kind === "lock-recovered")[0].reason, "holder-stale");
+
+  // (iii) BOUNDED: a LIVE, FRESH holder is NOT reclaimed — the acquisition gives up and says so, with a
+  //       code of its OWN (`BUDGET_LOCK_TIMEOUT`), never shaped like «the budget is exhausted».
+  const ws3 = makeWorkspace();
+  fs.mkdirSync(path.join(ws3, ".quay"), { recursive: true });
+  fs.writeFileSync(lockFile(ws3), JSON.stringify({ pid: process.pid, ts: new Date().toISOString(), token: "live-and-fresh" }), "utf8");
+  const fail = await acquireBudgetLock(lockFile(ws3), { waitMs: 120, staleMs: 60_000, ledgerPath: ledgerFile(ws3) });
+  assert.equal(fail.ok, false);
+  assert.equal(fail.code, "BUDGET_LOCK_TIMEOUT");
+  assert.match(fail.reason, /could not take/);
+  assert.equal(fs.existsSync(lockFile(ws3)), true, "⛔ a live holder is NEVER stolen");
+  await assert.rejects(
+    () => openModelBudget({ root: ws3, cap: 5, waitMs: 120, staleMs: 60_000 }).reserve({ step: "reflection", tools: "", max_turns: 1 }),
+    /BUDGET_LOCK_TIMEOUT/,
+    "a lock we cannot take is its OWN refusal — NOT «you are out of budget»",
+  );
+});
+
+// ── MIGRATION: the window is seeded at cut-over, never reset ─────────────────────────────────────────
+test("MIGRATION — the ledger's trailing-24h total at cut-over EQUALS the carrier's trailing-24h model_calls sum", async () => {
+  const ws = makeWorkspace();
+  const at = Date.parse("2026-10-12T13:00:00Z");
+  // The carrier AS THE PREVIOUS BUILD LEFT IT: plain `scan-round` lines, no `reservations` field.
+  // (The 2026-10-12 14:59:56Z production round's 6 calls are the real instance of this shape.)
+  const legacy = [
+    scanRoundLine({ ts: new Date(at - 200 * 60_000).toISOString(), invokedBy: INVOKED_BY_RESIDENT, modelCalls: 6 }),
+    scanRoundLine({ ts: new Date(at - 61 * 60_000).toISOString(), invokedBy: INVOKED_BY_RESIDENT, modelCalls: 0 }),
+  ];
+  writeCarrier(ws, legacy);
+
+  const carrier = readCarrierRounds(carrierPath(ws)).records;
+  const ledgerRecords = readLedgerRecords(ledgerFile(ws)).records;
+  assert.deepEqual(ledgerRecords, [], "at cut-over the ledger is EMPTY — the whole point is that the window is not");
+
+  const carrierSum = modelCallsInWindow(carrier, at, BUDGET_24H_MS);
+  const usage = budgetUsage({ ledgerRecords, carrierRounds: carrier, nowMs: at, windowMs: BUDGET_24H_MS });
+  assert.equal(carrierSum, 6, "the carrier's trailing-24h model_calls sum");
+  assert.equal(usage.total, carrierSum, "⛔ the LEDGER's trailing-24h total EQUALS it — the cut-over does not reset the window");
+  assert.equal(usage.reservations, 0);
+  assert.equal(usage.legacy_model_calls, 6);
+
+  // …and a round from THIS build is counted ONCE (by its reservations), never twice.
+  const newLine = { kind: "scan-round", routine: DISCOVERY_METHOD_NAME, invoked_by: INVOKED_BY_RESIDENT, ts: new Date(at).toISOString(), model_calls: 2, reservations: { granted: 2 } };
+  const u2 = budgetUsage({
+    ledgerRecords: [
+      { kind: "reserve", id: "new-a", ts: new Date(at - 2_000).toISOString() },
+      { kind: "reserve", id: "new-b", ts: new Date(at - 1_000).toISOString() },
+    ],
+    carrierRounds: [...legacy, newLine],
+    nowMs: at,
+    windowMs: BUDGET_24H_MS,
+  });
+  assert.equal(u2.reservations, 2);
+  assert.equal(u2.legacy_model_calls, 6, "⛔ the ledger-tracked line is SKIPPED by the carrier term — no double count");
+  assert.equal(u2.total, 8);
+});
+
+// ── COUNTING SEMANTICS: what a counted call bounds, and the computable worst case ────────────────────
+test("COUNTING SEMANTICS — one counted call = one subprocess; the turns inside it are bounded per step", () => {
+  const p = seamParamsFor({ verifierMaxTurns: 12 });
+  assert.equal(p.reflection.tools, REFLECTION_TOOLS);
+  assert.equal(p.reflection.tools, "", "the reflection launcher gets NO tools");
+  assert.equal(p.reflection.maxTurns, REFLECTION_MAX_TURNS);
+  assert.equal(p.reflection.maxTurns, 1, "…so one counted call is exactly one turn");
+  assert.equal(p.verification.tools, VERIFIER_TOOLS);
+  assert.equal(p.verification.tools, "Read,Grep", "the verifier gets the bounded-verifier tool set");
+  assert.equal(p.verification.maxTurns, 12, "…and an EXPLICIT turn budget from the config");
+  assert.equal(seamParamsFor(null).verification.maxTurns, DEFAULT_VERIFIER_MAX_TURNS, "the default is stated, not implied");
+
+  assert.equal(parseDiscoveryMethodSection({ enabled: true, interval: "interval:360m" }).config.verifierMaxTurns, DEFAULT_VERIFIER_MAX_TURNS);
+  assert.equal(parseDiscoveryMethodSection({ enabled: true, interval: "interval:360m", verifier_max_turns: 7 }).config.verifierMaxTurns, 7);
+  assert.match(parseDiscoveryMethodSection({ enabled: true, interval: "interval:360m", verifier_max_turns: 0 }).error, /must be an integer >= 1/);
+
+  // The assembled WORST CASE, reported by the production entry (what the driver's assembly line prints).
+  const ws = makeWorkspace();
+  writeConfig(ws, temporaryYaml(FUTURE_UNTIL, 24).replace("max_wall_ms: 900000", "max_wall_ms: 900000\n    verifier_max_turns: 7"));
+  const assembled = discoveryMethodRoutineFromConfig(ws);
+  assert.equal(assembled.verifierMaxTurns, 7);
+  assert.equal(assembled.worstCaseTurns24h, 24 * 7, "cap × max(reflection 1 turn, verifier turns)");
+});
+
+test("COUNTING SEMANTICS — a reservation records the launcher params AND the realized turns, or null WITH a reason", async () => {
+  const ws = makeWorkspace();
+  writeConfig(ws, temporaryYaml(FUTURE_UNTIL, 24));
+  writeFixtureStore(ws, FIXTURE_OUTCOMES);
+  // A stub that speaks the launcher's stream-json shape: `num_turns` is what the outcome line must carry.
+  const model = async () => ({ stdout: `${JSON.stringify({ type: "result", subtype: "success", num_turns: 1, result: JSON.stringify({ decision: "no-method" }) })}\n` });
+  const fact = await runDiscoveryMethod(ws, runOpts(ws, { model, now: () => ROUND_AT }));
+  assert.equal(fact.state, "verified", fact.reason);
+
+  const res = ledgerReserves(ws);
+  const outs = ledgerOutcomes(ws);
+  assert.equal(res.length, outs.length, "one outcome per reservation");
+  assert.equal(res[0].step, "reflection");
+  assert.equal(res[0].tools, REFLECTION_TOOLS);
+  assert.equal(res[0].max_turns, REFLECTION_MAX_TURNS);
+  assert.equal(outs[0].outcome, "completed");
+  assert.equal(outs[0].turns, 1, "the realized turn count came off the stream");
+
+  // ⛔ TWO ways to be unreadable, and they are DIFFERENT reasons — never a silent 0, which would read as
+  // «this call was free» (硬规则 3b):
+  //   (i) a stream that PARSED but carried no `result` event (`num_turns` absent);
+  //   (ii) stdout that is not a stream at all.
+  const ws2 = makeWorkspace();
+  writeConfig(ws2, temporaryYaml(FUTURE_UNTIL, 24));
+  writeFixtureStore(ws2, FIXTURE_OUTCOMES);
+  await runDiscoveryMethod(ws2, runOpts(ws2, { model: noMethodModel(), now: () => ROUND_AT }));
+  const outs2 = ledgerOutcomes(ws2);
+  assert.equal(outs2[0].turns, null);
+  assert.equal(outs2[0].turns_reason, "STREAM_REPORTED_NO_NUM_TURNS", "a plain-JSON answer parses as a stream with no result event");
+
+  const ws3 = makeWorkspace();
+  writeConfig(ws3, temporaryYaml(FUTURE_UNTIL, 24));
+  writeFixtureStore(ws3, FIXTURE_OUTCOMES);
+  await runDiscoveryMethod(ws3, runOpts(ws3, { model: async () => ({ stdout: "no json here at all" }), now: () => ROUND_AT }));
+  const outs3 = ledgerOutcomes(ws3);
+  assert.equal(outs3[0].turns, null);
+  assert.equal(outs3[0].turns_reason, "UNINSTRUMENTED_STREAM", "stdout that is not a stream at all is its OWN reason");
+});
+
+// ── the negative controls, as RUNNABLE code paths (each is applied by hand in a scratch copy) ────────
+test("NEGATIVE-CONTROL SUPPORT — the seams the three controls mutate are reachable, and the (b) race is forced deterministically", async () => {
+  // (b)'s race is not left to the scheduler: the child's critical section sleeps INSIDE the lock, and
+  // the two delays DIFFER, so dropping the lock makes the slow child decide on a stale `used` after the
+  // fast one has already spent the budget. This case proves the seam is real (a budget with an injected
+  // lock uses it, not the real one) — the RED run itself is pasted in the task evidence.
+  const ws = makeWorkspace();
+  let acquired = 0;
+  const stubLock = {
+    acquire: async () => { acquired++; return { ok: true, release: () => {}, waitedMs: 0, recovered: [] }; },
+  };
+  const budget = openModelBudget({ root: ws, cap: 3, lock: stubLock });
+  assert.equal((await budget.reserve({ step: "reflection", tools: "", max_turns: 1 })).ok, true);
+  assert.equal(acquired, 1, "the injected lock is what guarded the critical section");
+  assert.equal(fs.existsSync(lockFile(ws)), false, "…and the REAL lock file was never created");
+
+  // (c)/(e)'s control moves the reservation AFTER the spawn; (a)'s restores the pre-round-only check.
+  // Both are single-site edits, listed in the task evidence with their pasted RED output.
+  assert.equal(ledgerReserves(ws).length, 1, "the reservation is written by `reserve()` — the one call site the control moves");
+  assert.equal(typeof reservingModel, "function", "…and `reservingModel` is the seam whose order the control inverts");
 });

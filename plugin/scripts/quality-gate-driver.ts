@@ -109,7 +109,7 @@ import { archDiscoveryRoutineFromConfig } from "./arch-discovery-routine.ts";
 // watermarked ingest → 一次有界 reflect → 对新候选的 held-out 泛化验证。**只读、只报**：该例程不 import
 // 任何立案/撰写函数，唯一新增持久化是 gitignored 载体 `.quay/discovery-method-findings.jsonl` 的一行
 // scan-round + 既有 Discovery 载体 + 既有的 quality-round Fact。⛔ 与 fan-in/scoped-gate 无关。
-import { discoveryMethodRoutineFromConfig, liveDiscoveryModel } from "./discovery-method-routine.ts";
+import { discoveryMethodRoutineFromConfig, liveDiscoveryModel, readDiscoveryMethodConfig } from "./discovery-method-routine.ts";
 
 // ── 常量（由 DRIVER_KINDS registry 派生，⛔ 不另写一份路径字面量）──────────────────────────
 const QUALITY_SPEC = DRIVER_KINDS.quality;
@@ -1012,6 +1012,41 @@ export function qualityGateRoutines(root: string, opts: QualityGateOptions): Rou
   ];
 }
 
+/** The discovery-method ASSEMBLY LINE, as ONE string.
+ *
+ *  ⛔ WHY THIS IS A FUNCTION AND NOT AN INLINE `console.error` (gap-discovery-method-24h-budget-hard-
+ *  reservation, Plan item 7 — DEPLOYMENT): the anchor's self-refresh watches only the kind's driver file
+ *  plus the shared kernel files (`driver-runtime.ts` `watchedSourceFiles`), NOT routine modules. A delta
+ *  confined to `discovery-method-routine.ts` would therefore land INERT and production would keep running
+ *  the old soft budget indefinitely. Touching THIS file is what makes the anchor reload — and the reload
+ *  is observable exactly here, because this line is what startup prints.
+ *
+ *  It names every constraint the assembly actually CARRIED:
+ *   • `interval` — and whether a temporary `interval_until` window is still in force (a 60m cadence that
+ *     had silently reverted to 360m must not look like a correctly-assembled 60m one, 硬规则 3b/9);
+ *   • `max_model_calls_per_24h` — the ceiling, with its HARD-RESERVATION semantics: it bounds
+ *     RESERVATIONS over the trailing 24h (one taken before EVERY subprocess), not a pre-round snapshot;
+ *   • `verifier_max_turns` + the computed worst case — because `max_model_calls` bounds subprocess
+ *     INVOCATIONS, so the 24h API-turn worst case is `cap × max(reflection 1 turn, verifier turns)`, and
+ *     that product is only knowable here, at assembly time. */
+export function formatDiscoveryMethodAssembly(dm: {
+  enabled: boolean;
+  intervalMinutes: number | null;
+  intervalUntil: number | null;
+  maxModelCallsPer24h: number | null;
+  verifierMaxTurns: number | null;
+  worstCaseTurns24h: number | null;
+}): string {
+  if (!dm.enabled) return "discovery-method 例程已装配（enabled:false — 每轮记 not-evaluated:disabled，零 spawn）";
+  const until = dm.intervalUntil === null ? "" : `, interval_until=${new Date(dm.intervalUntil).toISOString()}`;
+  const cap = dm.maxModelCallsPer24h === null
+    ? ", max_model_calls_per_24h=<none — no cross-round ceiling>"
+    : `, max_model_calls_per_24h=${dm.maxModelCallsPer24h} (HARD: pre-spawn reservation per call, trailing-24h; a reservation with no outcome still counts as spent)`;
+  const turns = dm.verifierMaxTurns === null ? "" : `, verifier_max_turns=${dm.verifierMaxTurns}`;
+  const worst = dm.worstCaseTurns24h === null ? "" : `, worst_case_api_turns_per_24h=${dm.worstCaseTurns24h} (cap × max(reflection 1 turn, verifier turns))`;
+  return `discovery-method 例程已装配（enabled, interval=${dm.intervalMinutes}m${until}${cap}${turns}${worst}）`;
+}
+
 // ── 常驻循环（例程型：每轮评估 due 例程 → 跑 due → 汇集 Facts → 写 round 心跳）────────────────
 
 /** 常驻循环选项（main 装配后传入）。 */
@@ -1312,9 +1347,13 @@ export async function main(argv: string[]): Promise<number> {
   // run 里（`liveDiscoveryModel`），否则每个 driver 启动都要付一次 launcher 解析的代价。
   // ⛔ 模型缝是**惰性**的（`modelFactory`）：`liveDiscoveryModel` 只在轮内 `ingested > 0` 那一刻才被
   // 调用，所以「没东西可反思」的轮（生产常态）零 launcher 成本，driver 启动也不付这笔。
+  // ⛔ `modelFactory` 现在要拿到**已解析的 config**：验证器 seam 的 `--max-turns` 来自
+  // `verifier_max_turns`，而 seam 是在轮内才建的。装配用的那一份 read 直接传进去，
+  // ⛔ 不在 seam 里再读一次盘——第二份 config 读取就是第二份真相（硬规则 5b）。
+  const discoveryMethodRead = readDiscoveryMethodConfig(rootDir);
   const discoveryMethod = discoveryMethodRoutineFromConfig(rootDir, {
-    modelFactory: () => liveDiscoveryModel(rootDir),
-  });
+    modelFactory: () => liveDiscoveryModel(rootDir, discoveryMethodRead.config),
+  }, discoveryMethodRead);
   if (discoveryMethod.error) {
     console.error(`quality-gate-driver: discovery-method 例程配置无效 — ${discoveryMethod.error}`);
   } else if (!discoveryMethod.present) {
@@ -1325,9 +1364,7 @@ export async function main(argv: string[]): Promise<number> {
     // 360m 被装进例程表"这件事，在启动那一刻只有这一行能回答——只写 enabled 的话，配置写错（或临时窗口
     // 已过期）与"装配正确"在启动记录上同形（硬规则 3b/9）。`interval_until` / `max_model_calls_per_24h`
     // 一并打出：它们是这次装配真正携带的约束，⛔ 不是可以从别处推出来的。
-    const until = discoveryMethod.intervalUntil === null ? "" : `, interval_until=${new Date(discoveryMethod.intervalUntil).toISOString()}`;
-    const cap24 = discoveryMethod.maxModelCallsPer24h === null ? "" : `, max_model_calls_per_24h=${discoveryMethod.maxModelCallsPer24h}`;
-    console.error(`quality-gate-driver: discovery-method 例程已装配（${discoveryMethod.enabled ? `enabled, interval=${discoveryMethod.intervalMinutes}m${until}${cap24}` : "enabled:false — 每轮记 not-evaluated:disabled，零 spawn"}）`);
+    console.error(`quality-gate-driver: ${formatDiscoveryMethodAssembly(discoveryMethod)}`);
   }
 
   const routines = qualityGateRoutines(rootDir, {

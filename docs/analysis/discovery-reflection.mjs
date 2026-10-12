@@ -116,6 +116,11 @@ import {
 // The model-identity / cost machinery + the hardened launcher argv, reused by import (硬规则 5b).
 import {
   modelCallFields, callText, parseJsonObject,
+  // ⛔ `parseVerifierStream` is re-exported below (see `export { parseVerifierStream }`): the ROUTINE
+  // that owns the 24h reservation ledger has to read the realized `num_turns` off a finished call, and
+  // the stream parser is the only thing that knows where that number lives. Re-exported rather than
+  // re-implemented — a second stream parser would be a second thing to keep in sync (硬规则 5b).
+  parseVerifierStream,
   importDriverRuntime, hardenedArgv, modelFromArgv,
   PIN_FORBIDDEN_DIRS,
   // The DETERMINISTIC evidence pack (Plan item 2c). Reused by import rather than re-derived: the
@@ -1402,6 +1407,13 @@ export const HELD_OUT_PREVIOUSLY_USED = "HELD_OUT_PREVIOUSLY_USED";
  *  the method registry's quarantine arm reads the same rule and cannot import THIS module (this module
  *  imports the registry), so the ONE definition has to live below both of them. */
 export { MIN_SHARED_CASE_COMPONENTS };
+
+/** ⛔ Re-exported from the hypothesis-generation module for the ROUTINE's reservation ledger: a model
+ *  call's realized `num_turns` exists ONLY inside the launcher's `stream-json` output, and this is the
+ *  parser that knows where. The 24h ceiling counts SUBPROCESS INVOCATIONS; this is what lets each one
+ *  also record what it actually spent underneath (or say `null` with a reason when the stream is not
+ *  instrumented — never a silent 0, which would read as «this call was free»). */
+export { parseVerifierStream };
 
 /** The collision arms, as DATA, so a refusal can say which one fired and a test can enumerate them. */
 export const COLLISION_KINDS = Object.freeze([

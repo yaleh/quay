@@ -92,6 +92,12 @@
       "readers": "unaudited"
     },
     {
+      "name": "discovery-method-model-budget.jsonl",
+      "kind": "jsonl-log",
+      "owner": "plugin/scripts/discovery-method-routine.ts",
+      "readers": "unaudited"
+    },
+    {
       "name": "dispatch-record.jsonl",
       "kind": "jsonl-log",
       "owner": "unowned-yet",
