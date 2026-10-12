@@ -2596,13 +2596,17 @@ export async function runMechanicalFanIn(opts: MechanicalFanInOptions): Promise<
             blocked: [...baselineEquivalence.verdict.added.map((a) => a.file), ...baselineEquivalence.verdict.changed.map((c) => c.file)],
           });
         }
-        const baselineNote = baselineEquivalence === null
-          ? ""
-          : baselineEquivalence.verdict.kind === "not-evaluated"
-            ? ` [baseline A/B not evaluated: ${baselineEquivalence.verdict.reason}]`
-            : baselineEquivalence.verdict.kind === "hard-red"
-              ? ` [baseline A/B: HARD RED (${baselineEquivalence.verdict.reason}) — the task's red set is NOT a subset of the ${mergeTarget} baseline red set: added=${baselineEquivalence.verdict.added.map((a) => a.file).join(",") || "-"} changed=${baselineEquivalence.verdict.changed.map((c) => c.file).join(",") || "-"}]`
-              : "";
+        // ⛔ `not-evaluated` **不得**往 reason 里加任何注记——本机制的不变式是「A/B 读不懂 ⇒ 逐字等于
+        // 改动前的行为」（见本文件上方 runBaselineEquivalence 的非目标与 `worker-fan-in-baseline-red.test.mjs`
+        // 的 fail-closed 夹具），而 `reason` 正是「改动前的行为」里最可见的那一面：一旦给它加尾巴，
+        // 一个「本轮没跑过 A/B」的轮次在 needs-human 注记里就与改动前不可分辨（反而制造了新的同形）。
+        // A/B 的未评估成因**已**由两条结构化载体留痕（`traceSuiteEvent("baseline-red", {reason})` 与
+        // `mechanical_fan_in.baselineEquivalence.verdict.reason`）⇒ 信息不丢，⛔ 不需要污染人读的 reason。
+        // gap-needs-human-note-missing-real-error-line 的既有负控制（s10 AC2：零输出 ⇒ reason 逐字
+        // `suite red`）正是这条的守卫，本注释是它第二次生效。
+        const baselineNote = baselineEquivalence !== null && baselineEquivalence.verdict.kind === "hard-red"
+          ? ` [baseline A/B: HARD RED (${baselineEquivalence.verdict.reason}) — the task's red set is NOT a subset of the ${mergeTarget} baseline red set: added=${baselineEquivalence.verdict.added.map((a) => a.file).join(",") || "-"} changed=${baselineEquivalence.verdict.changed.map((c) => c.file).join(",") || "-"}]`
+          : "";
         return failSuite((firstFailure || `suite ${sr.outcome}${sr.error ? `: ${sr.error}` : ""}`) + baselineNote, sr.exitCode);
         }
         }
