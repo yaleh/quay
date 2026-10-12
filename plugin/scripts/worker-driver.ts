@@ -3653,6 +3653,34 @@ export function suiteAttributionEvidence(exemption: RetryExemptionJudgment): str
   return `${base}${suiteTokenDetail(exemption.suitePseudoStages ?? [], exemption.suiteUnclassified ?? [])}`;
 }
 
+/** 从一条 outcome 记录投影 fan-in 的既存红 A/B 读数（`mechanical_fan_in.baselineEquivalence.verdict`）。
+ *  缺键 / 读不懂 ⇒ null（**缺值 = 未查**，硬规则 6——⛔ 不与「A/B 判过且放行」同形）。 */
+export function baselineEquivalenceFromOutcome(
+  outcome: unknown,
+): { kind: "exempt" | "hard-red" | "not-evaluated"; reason: string | null } | null {
+  const mfi = (outcome && typeof outcome === "object")
+    ? (outcome as { mechanical_fan_in?: unknown }).mechanical_fan_in
+    : undefined;
+  if (!mfi || typeof mfi !== "object") return null;
+  const be = (mfi as { baselineEquivalence?: unknown }).baselineEquivalence;
+  if (!be || typeof be !== "object") return null;
+  const v = (be as { verdict?: unknown }).verdict;
+  if (!v || typeof v !== "object") return null;
+  const kind = (v as { kind?: unknown }).kind;
+  if (kind !== "exempt" && kind !== "hard-red" && kind !== "not-evaluated") return null;
+  const reason = (v as { reason?: unknown }).reason;
+  return { kind, reason: typeof reason === "string" && reason !== "" ? reason : null };
+}
+
+/** stop-terminal 判词里对既存红 A/B 的如实交代（AC4 的第二半：判词不得在「解析器读到了失败文件」时
+ *  说「归因不出」）。A/B 读数缺失 ⇒ 空串（⛔ 不凭空写「未评估」，那是把没查过的说成查过——硬规则 6）。 */
+function baselineEquivalenceNote(be: { kind: "exempt" | "hard-red" | "not-evaluated"; reason: string | null } | null): string {
+  if (be === null) return "";
+  if (be.kind === "not-evaluated") return ` — baseline comparison not evaluated: ${be.reason ?? "(no reason recorded)"}`;
+  if (be.kind === "hard-red") return ` — baseline comparison HARD RED (${be.reason ?? "hard-red"}): this round's red set is not a subset of the baseline's`;
+  return ` — baseline comparison exempt (${be.reason ?? "exempt"})`;
+}
+
 /** 后续动作判定（纯结构性、不写盘、不调 LLM）。输入 = 本轮 judgeRetryExemption 的判定；输出 =
  *  「照常计数重派」还是「立即停 + 标 needs-human」。⛔ 不重写既有重试上限逻辑：`count-and-retry`
  *  的诊断与计数仍由 onWorkerFinished 的 advanceRetryCap 路径负责，本函数只回答【该不该再拿一个
@@ -3701,6 +3729,8 @@ export function decideExitedNotLandedAction(
     ? ((outcome as { mechanical_fan_in?: { step?: unknown } }).mechanical_fan_in?.step)
     : undefined;
   const hasSuiteStep = mfiStep === "suite";
+  // 解析器【读到了】的失败文件（判词的措辞必须由它复算，⛔ 不是写死的「一个也没归因出来」）。
+  const attributed = exemption.failingTestFiles ?? [];
   const currentHash = suiteLogContentHash(root, suiteLogBasenameFromOutcome(outcome));
   const priors = unattributablePriorAttempts(root, taskId, outcome, windowMs, nowMs);
   // ① 相同日志内容 ⇒ 重试不可能改变结果（最硬的那条：内容相等是【可复现】的直接证据，不是启发式）。
@@ -3717,16 +3747,28 @@ export function decideExitedNotLandedAction(
   // ② 归因不出的情形只给【至多一次】重试：第二次仍归因不出 ⇒ 停（⛔ 不再撞到 3 次重试上限，
   //    每多一次都是整整一个 claude 会话，而成功率为零）。
   if (priors.length >= 1) {
+    const beNote = baselineEquivalenceNote(baselineEquivalenceFromOutcome(outcome));
     return {
       kind: "stop-terminal",
       verdict: exemption.verdict,
       suiteLogHash: currentHash,
       // point 2（gap-park-reason-mislabels-ac-precheck-as-suite-red）：没有 mechanical_fan_in ⇒ 根本没
       // 有 suite 跑过 ⇒ 判词不得出现「suite 红」字样（⛔ 不把没发生的相位写成成因）。
+      //
+      // gap-fan-in-baseline-comparison-blind-to-spec-reporter-misparks-develop-wide-red（Plan 第 3 条）：
+      // 判词【不得】在解析器已归因到 ≥1 个失败文件时说「could not be attributed to any failing test
+      // file」——那句话与紧随其后的 `suiteAttributionEvidence` 自相矛盾（实测：判词说「一个也没归因
+      // 出来」，同一句括号里写着 `parser attributed 1 failing file(s)`）。归因【读到了什么】与
+      // 【据此得出了什么结论】是两件事：读到了却没得出一致结论时，如实说「读到了、但没能判为既存红」。
       reason: hasSuiteStep
-        ? `suite red could not be attributed to any failing test file in ${priors.length + 1} consecutive ` +
-          `rounds (bounded to at most one retry) — infra/contract suspected, not an implementable defect ` +
-          `(${suiteAttributionEvidence(exemption)}); stopping instead of spending another worker session`
+        ? (attributed.length > 0
+          ? `suite red was attributed to ${attributed.length} failing file(s) (${attributed.slice(0, 5).join(", ")}` +
+            `${attributed.length > 5 ? ` (+${attributed.length - 5} more)` : ""}) but could not be cleared as ` +
+            `pre-existing red in ${priors.length + 1} consecutive rounds (bounded to at most one retry)` +
+            `${beNote} — stopping instead of spending another worker session`
+          : `suite red could not be attributed to any failing test file in ${priors.length + 1} consecutive ` +
+            `rounds (bounded to at most one retry) — infra/contract suspected, not an implementable defect ` +
+            `(${suiteAttributionEvidence(exemption)}); stopping instead of spending another worker session`)
         : `the exited-not-landed failure could not be attributed in ${priors.length + 1} consecutive rounds ` +
           `(bounded to at most one retry; no mechanical fan-in result on the outcome ⇒ no suite ran) — ` +
           `infra/contract suspected, not an implementable defect ` +
@@ -3741,6 +3783,29 @@ export function decideExitedNotLandedAction(
       ? "first unattributable suite red for this task — one bounded retry allowed (a transient cause is still possible)"
       : "first unattributable exited-not-landed failure for this task (no mechanical fan-in result ⇒ no suite ran) — one bounded retry allowed (a transient cause is still possible)",
   };
+}
+
+/** stop-terminal 落 needs-human 的**完整判词**（`## Needs-Human` 小标题下的那条，⛔ 不是 `## Round` 里的诊断）。
+ *
+ *  gap-fan-in-baseline-comparison-blind-to-spec-reporter-misparks-develop-wide-red（AC4）：旧实现在这里
+ *  写死「失败无法归因」，与同一句末尾 `${decision.reason}` 里 `parser attributed N failing file(s)`
+ *  直接矛盾——**同一句话里**一边说归因不出、一边说读到了 N 个文件。措辞必须由 `failingTestFiles` 的
+ *  条数复算（与 `suiteAttributionEvidence` 同一条纪律：判词只报判定器【读到了什么】）。
+ *  ⛔ 纯函数：出参只由入参决定（Needs-Human 文案是验收面，必须可单测、可贴渲染文本）。 */
+export function exitedNotLandedStopNote(
+  decision: ExitedNotLandedDecision,
+  exemption: RetryExemptionJudgment,
+): string {
+  const attributed = exemption.failingTestFiles ?? [];
+  // 归因到 ≥1 个文件 ⇒ 真态是「读到了，但没能判为既存红 / 没能落地」。⛔ 这一段【逐字不得出现】「无法归因」
+  // ——AC4 的判据是「渲染文本不再包含该词」，连「⛔ 不是『无法归因』」这种否定式引用也算命中（判据按
+  // 字面量查，不按语义查：硬规则 2「按位置判定，不按关键词」在这里反过来用——要证明「不在场」，就不能
+  // 把那个词写进文本里当注脚）。
+  const head = attributed.length >= 1
+    ? `exited-not-landed：suite 红已归因到 ${attributed.length} 个失败文件（${attributed.slice(0, 3).join(", ")}${attributed.length > 3 ? ` 等 ${attributed.length} 个` : ""}）——` +
+      `这些红点没能被判为既存红（基线比较 / 落地未通过）⇒ 停止重派，⛔ 不再拿新会话撞同一堵墙`
+    : `exited-not-landed 失败无法归因（基建/契约疑似，非实现缺陷）——停止重派，⛔ 不再拿新会话撞同一堵墙`;
+  return `${head}：${decision.reason}`;
 }
 
 /** 续做 prompt（AC1/AC2）：复用已有 worktree（⛔ 不 create，create 撞已存在对象 fatal），并携带前一轮
@@ -5486,7 +5551,10 @@ export async function runResidentLoop(opts: ResidentOptions): Promise<number> {
               // gap-park-reason-mislabels-ac-precheck-as-suite-red 点 3：停派种类由调用方传入 markNeedsHuman
               // ⇒ 小标题/提交消息如实写「停派」而不再恒写「重试上限」。理由去掉「suite 红」绝对断言——
               // 这条路径也可能是「没有 mechanical_fan_in（没跑过 suite）」的无法归因（point 2）。
-              reason: `exited-not-landed 失败无法归因（基建/契约疑似，非实现缺陷）——停止重派，⛔ 不再拿新会话撞同一堵墙：${decision.reason}`,
+              // gap-fan-in-baseline-comparison-blind-to-spec-reporter-…：措辞上收到 `exitedNotLandedStopNote`
+              // （纯函数、可单测）——旧实现把「失败无法归因」写死在这里，与同一句末尾点名了 N 个失败文件的
+              // `decision.reason` 在同一行里自相矛盾。
+              reason: exitedNotLandedStopNote(decision, exemption),
               kind: "stop-terminal",
               countsOverride: maxRetries,
             });
