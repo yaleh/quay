@@ -24,7 +24,7 @@ The per-round limits (`max_experiences: 8`, `max_model_calls: 6`, `max_wall_ms: 
 
 Three structural limits need deciding:
 1. **No verification reserve.** Reflection and generalization share ONE per-round counter (`modelCalls >= config.maxModelCalls`). A round whose reflection uses the whole quota and mints a candidate has nothing left to validate it, so a candidate can never be tested in the round that minted it.
-2. **Reflection is text-only.** The live seam is `liveModelFactory({tools:"", maxTurns:null})`. The model sees an Experience's summary and components, but cannot read the code at the pin. Deep semantic reflection that inspects the actual code needs bounded read access. That must not degrade into a mechanical scan, and it must stay inside the hard budget.
+2. **Reflection is text-only** (contrary to SEMANTIC FIRST). The live seam is `liveModelFactory({tools:"", maxTurns:null})`. The model sees an Experience's summary and components, but cannot read the code at the pin. Deep semantic reflection that inspects the actual code needs bounded read access. That must not degrade into a mechanical scan, and it must stay inside the hard budget.
 3. **A wall breach discards the whole round.** "nothing appended, last-run not advanced": a longer, deeper round risks losing all of its spent calls' results, though the hard-budget task makes sure they are still COUNTED.
 
 **Recommendation, to be confirmed by measurement in this task rather than taken as given:**
@@ -42,7 +42,7 @@ Three structural limits need deciding:
 1. Add a `verify_reserve` config key (integer ≥ 0, ≤ `max_model_calls`).
    - Reflection may use at most `max_model_calls − verify_reserve`; generalization may use the remainder plus anything reflection left unused.
    - Both still go through the hard 24h reservation from the dependency task, one reservation per subprocess.
-2. Bounded code access for reflection, behind a config key (`reflection_tools`, default off ⇒ today's behaviour):
+2. Code access for reflection, **ON by default** under SEMANTIC FIRST, MECHANIZE LATER (user ruling 2026-10-12). Reflection that cannot read the code it reflects on is a mechanical summary-shuffler. Config key `reflection_tools`, default `Read,Grep,Glob`; `""` is the explicit fallback and the baseline arm:
    - when on, reflection runs with `--tools Read,Grep` against a pinned, stripped tree (the same pin materialisation the verifier uses) and an explicit `reflection_max_turns`;
    - realized turns are recorded per call;
    - the anti-leak/no-hand-coding rules of `discovery-reflection.mjs` still hold;
@@ -54,8 +54,8 @@ Three structural limits need deciding:
 - [ ] Unit tests (stub model) exit 0, covering:
   - (a) `verify_reserve` holds back calls: reflection stops at `max_model_calls − verify_reserve` and a minted candidate is validated in the same round;
   - (b) `verify_reserve > max_model_calls` is a config error;
-  - (c) `reflection_tools` off ⇒ argv identical to today (`--tools ""`);
-  - (d) `reflection_tools` on ⇒ argv carries `Read,Grep`, the pin dir and `--max-turns <reflection_max_turns>`;
+  - (c) default config ⇒ reflection argv carries `Read,Grep,Glob`, the pin dir and `--max-turns <reflection_max_turns>`;
+  - (d) `reflection_tools: ""` ⇒ argv identical to today (`--tools ""`), kept as fallback/baseline;
   - (e) a wall breach after k calls ⇒ k results persisted with `partial:true`, last-run not advanced, all k calls present in the 24h reservation ledger.
 - [ ] Negative control: set `verify_reserve` to 0 in a scratch copy with a stub that mints a candidate on the last allowed call ⇒ (a) goes red. Paste the output.
 - [ ] Measurement:

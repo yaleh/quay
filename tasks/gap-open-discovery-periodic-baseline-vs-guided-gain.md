@@ -16,6 +16,8 @@ depends_on:
   - gap-open-discovery-method-guidance-active-shadow
 ---
 ## Proposal
+Under SEMANTIC FIRST, MECHANIZE LATER (user ruling 2026-10-12), this paired comparison is the instrument that later decides what may be crystallized into mechanical code. It must also keep running AFTER any crystallization, as the baseline/degradation monitor (semantic arm vs crystallized arm).
+
 Whether method guidance helps must be measured in production rather than asserted, and must not reuse a contaminated holdout as "independent" evidence. The 2026-10-12 capability-gain experiment showed an apparent +1 that did not survive recheck (learned c11 duplicated control c10; c13 was refuted).
 
 ## Plan
