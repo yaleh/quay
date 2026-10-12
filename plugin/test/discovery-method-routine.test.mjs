@@ -75,6 +75,8 @@ import {
   BUDGET_LOCK_STALE_MS,
   REFLECTION_TOOLS,
   REFLECTION_MAX_TURNS,
+  DEFAULT_REFLECTION_TOOLS,
+  DEFAULT_REFLECTION_MAX_TURNS,
   VERIFIER_TOOLS,
   DEFAULT_VERIFIER_MAX_TURNS,
   inTrailing24hWindow,
@@ -96,6 +98,15 @@ import {
   readArchDiscoveryConfig,
 } from "../scripts/arch-discovery-routine.ts";
 import { appendOutcomeRecord } from "../../docs/analysis/architecture-evidence-store.mjs";
+// ⛔ Imported (not re-implemented) for the two argv assertions: the pin-carrier (`reflectionLaunchArgv`)
+// and the prompt it belongs with live in the reflection module, and the BASELINE argv the fallback arm is
+// compared against is built by the PRE-CHANGE helper itself (`hardenedArgv`) — a hand-written literal
+// could drift with the thing it is supposed to pin.
+import { reflectionLaunchArgv, buildReflectionPrompt } from "../../docs/analysis/discovery-reflection.mjs";
+import { hardenedArgv } from "../../docs/analysis/arch-hypothesis-generation.mjs";
+// The driver's own assembly line (the string the reload prints) — asserted from ITS function rather than
+// a copy, so "what the driver reports" is the thing under test.
+import { formatDiscoveryMethodAssembly } from "../scripts/quality-gate-driver.ts";
 
 const SCRIPT_DIR = path.dirname(fileURLToPath(import.meta.url));
 const REPO_ROOT = path.resolve(SCRIPT_DIR, "..", "..");
@@ -1112,8 +1123,10 @@ test("AC1(a) — used=23, cap=24, a round requesting 6 ⇒ exactly 1 call, 5 ski
   assert.equal(reserves.filter((r) => r.id.startsWith("seed-")).length, 23);
   assert.equal(ledgerOutcomes(ws).length, 1, "the one call recorded its outcome");
   assert.equal(ledgerOutcomes(ws)[0].outcome, "completed");
-  assert.equal(reserves[23].tools, REFLECTION_TOOLS, "the reservation carries the launcher params it bounds");
-  assert.equal(reserves[23].max_turns, REFLECTION_MAX_TURNS);
+  // ⛔ The reservation carries the launcher params of the arm the CONFIG selects — the DEFAULT arm now
+  // carries tools (task ..., Plan item 2), and this test declares no `reflection_tools`.
+  assert.equal(reserves[23].tools, DEFAULT_REFLECTION_TOOLS, "the reservation carries the launcher params it bounds");
+  assert.equal(reserves[23].max_turns, DEFAULT_REFLECTION_MAX_TURNS);
   // The carrier line carries the reservation block ⇒ `modelCallsInWindow` will NOT re-count this round.
   assert.equal(rounds(ws).length, 1);
   assert.equal(rounds(ws)[0].reservations.granted, 1);
@@ -1265,7 +1278,7 @@ test("AC1(d) — a model call that THROWS or TIMES OUT is counted, with its own 
 });
 
 // ── AC1 (e): a wall-breach round appends no line, and is still counted ───────────────────────────────
-test("AC1(e) — a wall-breach round appends NO scan-round line, and its calls are STILL counted", async () => {
+test("AC1(e) — a wall-breach round PERSISTS a partial line (its spent calls' results are not thrown away) AND its calls are counted exactly once", async () => {
   const ws = makeWorkspace();
   writeConfig(ws, `loop:\n  discovery_method:\n    enabled: true\n    interval: interval:60m\n    interval_until: ${FUTURE_UNTIL}\n    max_model_calls_per_24h: 24\n    max_experiences: 8\n    max_model_calls: 6\n    max_wall_ms: 1000\n`);
   writeFixtureStore(ws, SIX_OUTCOMES);
@@ -1278,15 +1291,25 @@ test("AC1(e) — a wall-breach round appends NO scan-round line, and its calls a
   const fact = await runDiscoveryMethod(ws, runOpts(ws, { model, now }));
   assert.equal(fact.state, "failed");
   assert.match(fact.reason, /budget breach/);
-  assert.equal(rounds(ws).length, 0, "⛔ the round appended NOTHING — this is the path that used to be invisible");
+  // ⛔ CONTRACT CHANGE (task gap-discovery-method-per-round-quota-verify-reserve-deep-reflection, Plan
+  //   item 3): the round no longer appends NOTHING. Its spent calls produced RESULTS, and throwing them
+  //   away while the calls themselves stayed COUNTED was the loss this task closes — so the line lands,
+  //   marked `partial:true`, and the last-run is still not advanced.
+  const lines = rounds(ws);
+  assert.equal(lines.length, 1, "the partial round is persisted");
+  assert.equal(lines[0].partial, true);
+  assert.equal(lines[0].partial_reason, "BUDGET_MAX_WALL_MS:after-reflection");
+  assert.equal(lines[0].model_calls, SIX_OUTCOMES.length, "…carrying every call it made and every decision it recorded");
+  assert.equal(lines[0].reflected.decisions, SIX_OUTCOMES.length);
+  assert.equal(readLastRunMap(lastRunPath(ws))[DISCOVERY_METHOD_NAME], undefined, "the clock is still NOT consumed");
 
   const spent = ledgerReserves(ws).length;
   assert.equal(spent, SIX_OUTCOMES.length, "the round spent one call per unit before it breached");
   // The NEXT ROUND's reading — taken with the SAME clock the round ran on (a reservation's ts is written
   // from the round's own clock, so a reader on a different clock is asking about a different window).
   const usage = await openModelBudget({ root: ws, cap: 24, now: () => at + 10_000 }).usage();
-  assert.equal(usage.legacy_model_calls, 0, "no scan-round line exists to carry them");
-  assert.equal(usage.total, spent, "⛔ the next round counts them from the LEDGER alone");
+  assert.equal(usage.legacy_model_calls, 0, "the partial line carries `reservations`, so the carrier term SKIPS it — no double count");
+  assert.equal(usage.total, spent, "⛔ the next round counts them OFF THE LEDGER, exactly once");
 });
 
 // ── AC1 (f): the window boundary ─────────────────────────────────────────────────────────────────────
@@ -1513,14 +1536,26 @@ test("MIGRATION — the ledger's trailing-24h total at cut-over EQUALS the carri
 // ── COUNTING SEMANTICS: what a counted call bounds, and the computable worst case ────────────────────
 test("COUNTING SEMANTICS — one counted call = one subprocess; the turns inside it are bounded per step", () => {
   const p = seamParamsFor({ verifierMaxTurns: 12 });
-  assert.equal(p.reflection.tools, REFLECTION_TOOLS);
-  assert.equal(p.reflection.tools, "", "the reflection launcher gets NO tools");
-  assert.equal(p.reflection.maxTurns, REFLECTION_MAX_TURNS);
-  assert.equal(p.reflection.maxTurns, 1, "…so one counted call is exactly one turn");
+  // ⛔ THE DEFAULT ARM NOW CARRIES TOOLS (task gap-discovery-method-per-round-quota-verify-reserve-deep-
+  // reflection, Plan item 2): a reflection that cannot read the code it reflects on is a mechanical
+  // summary-shuffler. The EMPTY-tools arm is still reachable and is asserted right below — it is the
+  // baseline every measurement in that task is read against, and it is what keeps "one counted call = one
+  // turn" true for the arm where that claim was originally made.
+  assert.equal(p.reflection.tools, DEFAULT_REFLECTION_TOOLS);
+  assert.equal(p.reflection.tools, "Read,Grep,Glob", "the reflection launcher reads code by default");
+  assert.equal(p.reflection.maxTurns, DEFAULT_REFLECTION_MAX_TURNS, "…and gets an explicit turn budget for it");
+  const base = seamParamsFor({ verifierMaxTurns: 12, reflectionTools: "" });
+  assert.equal(base.reflection.tools, REFLECTION_TOOLS);
+  assert.equal(base.reflection.tools, "", "the fallback arm gets NO tools");
+  assert.equal(base.reflection.maxTurns, REFLECTION_MAX_TURNS);
+  assert.equal(base.reflection.maxTurns, 1, "…so in THAT arm one counted call is exactly one turn");
   assert.equal(p.verification.tools, VERIFIER_TOOLS);
   assert.equal(p.verification.tools, "Read,Grep", "the verifier gets the bounded-verifier tool set");
   assert.equal(p.verification.maxTurns, 12, "…and an EXPLICIT turn budget from the config");
   assert.equal(seamParamsFor(null).verification.maxTurns, DEFAULT_VERIFIER_MAX_TURNS, "the default is stated, not implied");
+  // ⛔ Turning code access ON must not raise the 24h worst case: the reflection turn default is kept ≤ the
+  // verifier's, which is the whole reason it is stated as a constant rather than left implicit.
+  assert.ok(DEFAULT_REFLECTION_MAX_TURNS <= DEFAULT_VERIFIER_MAX_TURNS);
 
   assert.equal(parseDiscoveryMethodSection({ enabled: true, interval: "interval:360m" }).config.verifierMaxTurns, DEFAULT_VERIFIER_MAX_TURNS);
   assert.equal(parseDiscoveryMethodSection({ enabled: true, interval: "interval:360m", verifier_max_turns: 7 }).config.verifierMaxTurns, 7);
@@ -1531,7 +1566,44 @@ test("COUNTING SEMANTICS — one counted call = one subprocess; the turns inside
   writeConfig(ws, temporaryYaml(FUTURE_UNTIL, 24).replace("max_wall_ms: 900000", "max_wall_ms: 900000\n    verifier_max_turns: 7"));
   const assembled = discoveryMethodRoutineFromConfig(ws);
   assert.equal(assembled.verifierMaxTurns, 7);
-  assert.equal(assembled.worstCaseTurns24h, 24 * 7, "cap × max(reflection 1 turn, verifier turns)");
+  assert.equal(assembled.reflectionMaxTurns, DEFAULT_REFLECTION_MAX_TURNS);
+  // ⛔ The product is cap × max(reflection turns, verifier turns), and with the verifier lowered to 7 the
+  // REFLECTION budget (10) is now the larger term — the reading moves with the config instead of being
+  // pinned to a remembered value. (With the DEFAULT verifier budget of 12 it is unchanged at cap × 12.)
+  assert.equal(assembled.worstCaseTurns24h, 24 * Math.max(DEFAULT_REFLECTION_MAX_TURNS, 7), "cap × max(effective reflection turns, verifier turns)");
+  const wsDef = makeWorkspace();
+  writeConfig(wsDef, temporaryYaml(FUTURE_UNTIL, 24));
+  assert.equal(discoveryMethodRoutineFromConfig(wsDef).worstCaseTurns24h, 24 * DEFAULT_VERIFIER_MAX_TURNS, "…and at the DEFAULT verifier budget the product is the verifier's, i.e. code access did not raise it");
+
+  // ── the per-round values the assembly line must now REPORT (task ..., Plan item 4) ─────────────────
+  const ws2 = makeWorkspace();
+  // The values PRODUCTION carries after this task (`.quay/config.yml discovery_method`), so the assembly
+  // line this case asserts is the one the reload will actually print.
+  writeConfig(ws2, reserveYaml(240, 4)
+    .replace("max_model_calls: 6", "max_model_calls: 16")
+    .replace("max_experiences: 8", "max_experiences: 16")
+    .replace("max_wall_ms: 900000", "max_wall_ms: 1200000"));
+  const a2 = discoveryMethodRoutineFromConfig(ws2);
+  assert.equal(a2.maxExperiences, 16);
+  assert.equal(a2.maxModelCalls, 16);
+  assert.equal(a2.verifyReserve, 4);
+  assert.equal(a2.reflectionMaxModelCalls, 12, "reflection <= 16 − 4");
+  assert.equal(a2.reflectionTools, DEFAULT_REFLECTION_TOOLS);
+  assert.equal(a2.worstCaseTurns24h, 240 * DEFAULT_VERIFIER_MAX_TURNS, "240 is THIS routine's launcher-subprocess ceiling; the worst case is cap × verifier turns");
+
+  // …and the driver's assembly line prints all of it (the reload's observable surface).
+  const line = formatDiscoveryMethodAssembly(a2);
+  assert.match(line, /max_model_calls=16 \(per round\)/);
+  assert.match(line, /verify_reserve=4/);
+  assert.match(line, /reflection <= 12/);
+  assert.match(line, /reflection_tools="Read,Grep,Glob"/);
+  assert.match(line, /reflection_max_turns=10/);
+  assert.match(line, /max_wall_ms=1200000/);
+
+  // A DISABLED section has nothing to report — the line says so and invents no numbers.
+  const off = formatDiscoveryMethodAssembly({ ...a2, enabled: false });
+  assert.match(off, /enabled:false/);
+  assert.ok(!off.includes("verify_reserve"));
 });
 
 test("COUNTING SEMANTICS — a reservation records the launcher params AND the realized turns, or null WITH a reason", async () => {
@@ -1547,10 +1619,12 @@ test("COUNTING SEMANTICS — a reservation records the launcher params AND the r
   const outs = ledgerOutcomes(ws);
   assert.equal(res.length, outs.length, "one outcome per reservation");
   assert.equal(res[0].step, "reflection");
-  assert.equal(res[0].tools, REFLECTION_TOOLS);
-  assert.equal(res[0].max_turns, REFLECTION_MAX_TURNS);
+  assert.equal(res[0].tools, DEFAULT_REFLECTION_TOOLS);
+  assert.equal(res[0].max_turns, DEFAULT_REFLECTION_MAX_TURNS);
   assert.equal(outs[0].outcome, "completed");
-  assert.equal(outs[0].turns, 1, "the realized turn count came off the stream");
+  // ⛔ `max_turns` is the BOUND the launcher was given; the realized count is what the stream reported, and
+  // the two are different quantities — a call that stops early must not be recorded as having used its cap.
+  assert.equal(outs[0].turns, 1, "the realized turn count came off the stream, never substituted by the cap");
 
   // ⛔ TWO ways to be unreadable, and they are DIFFERENT reasons — never a silent 0, which would read as
   // «this call was free» (硬规则 3b):
@@ -1593,4 +1667,227 @@ test("NEGATIVE-CONTROL SUPPORT — the seams the three controls mutate are reach
   // Both are single-site edits, listed in the task evidence with their pasted RED output.
   assert.equal(ledgerReserves(ws).length, 1, "the reservation is written by `reserve()` — the one call site the control moves");
   assert.equal(typeof reservingModel, "function", "…and `reservingModel` is the seam whose order the control inverts");
+});
+
+// ════════════════════════════════════════════════════════════════════════════════════════════════════
+// task gap-discovery-method-per-round-quota-verify-reserve-deep-reflection
+//   AC (a) verify_reserve holds back calls + a minted candidate is validated in the SAME round
+//   AC (b) verify_reserve > max_model_calls is a config error
+//   AC (c) default config ⇒ reflection argv carries Read,Grep,Glob, the pin dir, --max-turns
+//   AC (d) reflection_tools:"" ⇒ argv identical to today (--tools "") — the fallback/baseline arm
+//   AC (e) a wall breach after k calls ⇒ k results persisted with partial:true, last-run not advanced,
+//          all k calls on the 24h reservation ledger
+// ════════════════════════════════════════════════════════════════════════════════════════════════════
+
+/** A config with an explicit reflection/verify-reserve declaration, on the temporary 60m cadence. */
+const reserveYaml = (cap, reserve, extra = "") =>
+  temporaryYaml(FUTURE_UNTIL, cap).replace("max_wall_ms: 900000", `max_wall_ms: 900000\n    verify_reserve: ${reserve}${extra}`);
+
+// ── AC (a), half 1: reflection STOPS at max_model_calls − verify_reserve (the real reflection engine) ─
+test("AC(a) — verify_reserve holds reflection at max_model_calls − verify_reserve (real engine, 24h ledger)", async () => {
+  const ws = makeWorkspace();
+  writeConfig(ws, reserveYaml(240, 2)); // max_model_calls 6, verify_reserve 2 ⇒ reflection <= 4
+  writeFixtureStore(ws, SIX_OUTCOMES);  // six distinct units ⇒ six calls if unbounded
+
+  const model = noMethodModel();
+  const fact = await runDiscoveryMethod(ws, runOpts(ws, { model, now: () => ROUND_AT }));
+  assert.equal(fact.state, "verified", fact.reason);
+
+  assert.equal(model.calls.length, 4, "⛔ reflection stops at 6 − 2 = 4: the reserve is never spent on reflection");
+  const line = rounds(ws)[0];
+  assert.equal(line.reflected.model_calls, 4);
+  assert.equal(line.reflected.skipped_budget, 2, "the engine's own budget loop reports the other 2 as skipped");
+  assert.equal(line.reservations.requested_max_model_calls, 6, "the round's request is still 6 …");
+  assert.equal(line.reservations.reflection_max_model_calls, 4, "… and the REFLECTION share is 6 − verify_reserve");
+  assert.equal(line.reservations.verify_reserve, 2);
+  assert.equal(line.reservations.effective_max_model_calls, 6, "generalization's bound is the WHOLE per-round budget, so it gets the reserve back");
+  // Every counted call is on the ledger — and every one of them is a REFLECTION call (nothing was minted).
+  const reserves = ledgerReserves(ws);
+  assert.equal(reserves.length, 4);
+  assert.ok(reserves.every((r) => r.step === "reflection"), "the reserve was NOT consumed by this round's reflection");
+});
+
+// ── AC (a), half 2: a candidate minted on reflection's last allowed call is VALIDATED in the SAME round ─
+test("AC(a) — a candidate minted on reflection's LAST allowed call is validated in the SAME round", async () => {
+  const ws = makeWorkspace();
+  writeConfig(ws, reserveYaml(240, 2));
+  writeFixtureStore(ws, FIXTURE_OUTCOMES);
+
+  // A reflection round that reports EXACTLY the budget it was handed and mints on its last allowed call —
+  // the shape the real engine produces when the model answers `new` on call #(max_model_calls − reserve).
+  const seen = {};
+  const reflect = async (root, opts) => {
+    seen.reflectionBudget = opts.budget.maxModelCalls;
+    return {
+      ok: true,
+      decisions: [
+        { signature: "sig-1", ok: true, decision: "no-method", candidate: null, model_call: { usage: null, cost_usd: null } },
+        // …and it MINTS on its LAST allowed call (the shape a budget-bound reflection round produces).
+        { signature: "sig-2", ok: true, decision: "new", candidate: { method_id: "m-one", version: 1, status: "draft" }, model_call: { usage: null, cost_usd: null } },
+      ],
+      model_calls: 2,
+      skipped_budget: 0,
+      wall_ms: 1,
+      selection: { units_evaluated: 2, batch_size: 2, skipped_prior: 0, skipped_cap: 0, merged_within_batch: 0 },
+    };
+  };
+  const heldOut = async () => ({ ok: true, cases: [{ case_id: "h1", evaluation_pin: "deadbeef" }], reason: null, malformed_lines: 0 });
+  const seenVerifications = [];
+  const validate = async (a) => {
+    seenVerifications.push(a);
+    return { outcome: "not-applicable", applies: "no", model_call: { usage: null, cost_usd: null } };
+  };
+  const fact = await runDiscoveryMethod(ws, runOpts(ws, {
+    reflectFn: reflect,
+    heldOutFn: heldOut,
+    pinFn: () => ({ ok: true, dir: "/tmp/dm-stub-pin" }),
+    validateFn: validate,
+    appendFn: () => ({ ok: true, reasons: [] }),
+    now: () => ROUND_AT,
+  }));
+
+  assert.equal(fact.state, "verified", fact.reason);
+  assert.equal(seen.reflectionBudget, 4, "reflection is handed 6 − 2, not 6");
+  // ⛔ THE POINT: both calls went to reflection, and the candidate it minted was STILL verified — in the
+  // round that minted it. Before the reserve, a reflection round that spent its whole quota left the
+  // verifier with nothing, so a candidate could never be tested by the round that produced it.
+  assert.equal(seenVerifications.length, 1, "the candidate minted by THIS round was validated IN THIS round");
+  assert.equal(seenVerifications[0].candidate.method_id, "m-one");
+  assert.equal(seenVerifications[0].pinDir, "/tmp/dm-stub-pin");
+  assert.equal(fact.value.verdicts.total, 1);
+});
+
+// ── AC (b): a reserve larger than the round's own request is a CONFIG ERROR (zero spawns) ─────────────
+test("AC(b) — verify_reserve > max_model_calls is a config error, and the round spawns nothing", async () => {
+  const parsed = parseDiscoveryMethodSection({ enabled: true, interval: "interval:360m", max_model_calls: 3, verify_reserve: 4 });
+  assert.equal(parsed.config, null, "a reserve larger than the request is REFUSED, never clamped");
+  assert.match(parsed.error, /'verify_reserve' \(4\) must be <= 'max_model_calls' \(3\)/);
+  // …and the boundary is ACCEPTED (reserve == request ⇒ reflection gets 0, which is a legal declaration).
+  const boundary = parseDiscoveryMethodSection({ enabled: true, interval: "interval:360m", max_model_calls: 3, verify_reserve: 3 });
+  assert.equal(boundary.error, null);
+  assert.equal(boundary.config.verifyReserve, 3);
+  // Shape gates: a negative / non-integer reserve is its own refusal.
+  assert.match(parseDiscoveryMethodSection({ enabled: true, interval: "interval:360m", verify_reserve: -1 }).error, /must be an integer >= 0/);
+  assert.match(parseDiscoveryMethodSection({ enabled: true, interval: "interval:360m", verify_reserve: 1.5 }).error, /must be an integer >= 0/);
+
+  // Through the ROUND: the malformed section is `failed` with ZERO spawns and no carrier line.
+  const ws = makeWorkspace();
+  writeConfig(ws, ENABLED_YAML.replace("max_model_calls: 6", "max_model_calls: 3\n    verify_reserve: 4"));
+  writeFixtureStore(ws, FIXTURE_OUTCOMES);
+  const model = noMethodModel();
+  const fact = await runDiscoveryMethod(ws, runOpts(ws, { model, now: () => ROUND_AT }));
+  assert.equal(fact.state, "failed");
+  assert.match(fact.reason, /verify_reserve.*must be <= 'max_model_calls'/);
+  assert.equal(model.calls.length, 0, "a bad declaration must never be read as a licence to spend");
+  assert.equal(fs.existsSync(carrierPath(ws)), false, "nothing is appended");
+});
+
+// ── AC (c): the DEFAULT config's reflection launcher argv carries the tools, the pin and the turns ────
+test("AC(c) — default config ⇒ reflection argv carries Read,Grep,Glob, the pin dir AND --max-turns <reflection_max_turns>", () => {
+  const cfg = parseDiscoveryMethodSection({ enabled: true, interval: "interval:360m" }).config;
+  assert.equal(cfg.reflectionTools, DEFAULT_REFLECTION_TOOLS);
+  assert.equal(cfg.reflectionTools, "Read,Grep,Glob", "code access is ON by default (SEMANTIC FIRST)");
+  assert.equal(cfg.reflectionMaxTurns, DEFAULT_REFLECTION_MAX_TURNS);
+
+  const seam = seamParamsFor(cfg).reflection;
+  const stubLaunchArgv = (role, prompt, root, opts) => ["claude", "-n", role, ...(opts.promptViaStdin === true ? ["-p"] : ["-p", prompt])];
+  const PIN = "/tmp/dm-reflection-pin-abc123";
+  const argv = reflectionLaunchArgv({ launchArgv: stubLaunchArgv, prompt: "P", root: "/r", tools: seam.tools, maxTurns: seam.maxTurns, pinDir: PIN, outputFormat: "stream-json" });
+
+  const val = (flag) => argv[argv.indexOf(flag) + 1];
+  assert.equal(val("--tools"), "Read,Grep,Glob", "the reflection launcher carries the read set");
+  assert.equal(val("--max-turns"), String(DEFAULT_REFLECTION_MAX_TURNS), "…and an EXPLICIT turn budget");
+  assert.equal(val("--add-dir"), PIN, "…and the pin dir it may read");
+  assert.equal(argv[argv.length - 1], "-p", "the pin is inserted BEFORE the trailing prompt flag");
+  assert.equal(argv.filter((t) => t === "--add-dir").length, 1);
+  // ⛔ The prompt NAMES the tree, or the tools are decorative: the routine renders codeAccess from the
+  // SAME pin. (Asserted here as the prompt-level half of the same wiring.)
+  const prompt = buildReflectionPrompt({ unit: { signature: "s", experiences: [] }, registry: [], toolNames: [], codeAccess: { tools: seam.tools, pinDir: PIN } });
+  assert.ok(prompt.includes(PIN), "the prompt names the pinned tree the launcher was given");
+  assert.match(prompt, /Do NOT turn this into a scan/, "…and it is still a semantic question, never a scan recipe");
+  assert.ok(!buildReflectionPrompt({ unit: { signature: "s", experiences: [] }, registry: [], toolNames: [] }).includes(PIN), "no codeAccess ⇒ no tree in the prompt");
+});
+
+// ── AC (d): reflection_tools:"" ⇒ the launcher argv is IDENTICAL to the pre-change one ───────────────
+test("AC(d) — reflection_tools:\"\" ⇒ argv byte-identical to the pre-change launcher (--tools \"\"), no pin, one turn", () => {
+  const cfg = parseDiscoveryMethodSection({ enabled: true, interval: "interval:360m", reflection_tools: "" }).config;
+  assert.equal(cfg.reflectionTools, "");
+  const seam = seamParamsFor(cfg).reflection;
+  assert.equal(seam.tools, "");
+  assert.equal(seam.maxTurns, REFLECTION_MAX_TURNS, "with no tools there is nothing to iterate on ⇒ ONE turn");
+  assert.equal(seam.maxTurns, 1);
+
+  const stubLaunchArgv = (role, prompt, root, opts) => ["claude", "-n", role, ...(opts.promptViaStdin === true ? ["-p"] : ["-p", prompt])];
+  const argv = reflectionLaunchArgv({ launchArgv: stubLaunchArgv, prompt: "P", root: "/r", tools: seam.tools, maxTurns: seam.maxTurns, pinDir: null, outputFormat: "stream-json" });
+  // The BASELINE is built by the PRE-CHANGE construction itself (hardenedArgv with the old parameters) —
+  // not by a hand-written literal, which could drift with it.
+  const baseline = hardenedArgv(stubLaunchArgv, "P", "/r", { tools: "", maxTurns: 1, outputFormat: "stream-json" });
+  assert.deepEqual(argv, baseline, "the fallback arm's argv is EXACTLY what the launcher ran with before this task");
+  assert.ok(!argv.includes("--add-dir"), "the baseline arm is given no tree at all");
+  // A non-string declaration is refused rather than silently selecting the baseline arm.
+  const bad = parseDiscoveryMethodSection({ enabled: true, interval: "interval:360m", reflection_tools: false });
+  assert.equal(bad.config, null);
+  assert.match(bad.error, /'reflection_tools' must be a string/);
+});
+
+// ── AC (e): a wall breach after k calls PERSISTS k results, marked partial, and advances nothing ─────
+test("AC(e) — a wall breach after k calls persists k results with partial:true, does NOT advance last-run, keeps all k calls on the 24h ledger", async () => {
+  const ws = makeWorkspace();
+  writeConfig(ws, reserveYaml(240, 2));
+  writeFixtureStore(ws, SIX_OUTCOMES);
+
+  // The clock jumps 10 minutes INSIDE each model call, and the round's wall budget is 5 minutes: the
+  // post-INGEST check is clean (nothing has been spent yet), the post-REFLECTION check fires. k = 4
+  // (6 − verify_reserve 2) — deterministic, and it exercises the real wall check rather than a mock.
+  let tNow = ROUND_AT;
+  const model = async () => { tNow += 10 * 60_000; return { stdout: JSON.stringify({ decision: "no-method" }) }; };
+  const fact = await runDiscoveryMethod(ws, runOpts(ws, { model, now: () => tNow }));
+
+  assert.equal(fact.state, "failed");
+  assert.match(fact.reason, /budget breach/);
+  assert.match(fact.reason, /persisted 1 PARTIAL scan-round line/);
+
+  const lines = rounds(ws);
+  assert.equal(lines.length, 1, "the partial round IS persisted — the results of its spent calls are not thrown away");
+  const line = lines[0];
+  assert.equal(line.partial, true);
+  assert.equal(line.partial_reason, "BUDGET_MAX_WALL_MS:after-reflection");
+  assert.equal(line.reflected.model_calls, 4, "k = 4 completed calls");
+  // ⛔ `decisions` is the BATCH the engine walked (one row per unit, skipped ones included) — not the call
+  // count. The two are different quantities and the partial line carries both.
+  assert.equal(line.reflected.decisions, SIX_OUTCOMES.length);
+  assert.equal(line.reflected.skipped_budget, 2);
+  assert.equal(line.model_calls, 4);
+  assert.equal(line.reservations.granted, 4);
+  assert.equal(line.reservations.reflection_max_model_calls, 4);
+
+  assert.equal(readLastRunMap(lastRunPath(ws))[DISCOVERY_METHOD_NAME], undefined, "last-run must NOT advance");
+  assert.equal(latestResidentRoundTs(lines), null, "⛔ the partial line is NOT production's clock — otherwise the retry would never be due");
+
+  const reserves = ledgerReserves(ws);
+  assert.equal(reserves.length, 4, "all k calls are present in the 24h reservation ledger");
+  assert.equal(ledgerOutcomes(ws).length, 4);
+  assert.ok(reserves.every((r) => r.step === "reflection"));
+
+  // …and the NEXT round IS due (the units this one never reached get retried). The watermark advanced, so
+  // round 2 ingests 0 and makes 0 calls — what is asserted is the DUE GATE, which is the whole point of
+  // not advancing the last-run.
+  const r2 = await runDiscoveryMethod(ws, runOpts(ws, { model: noMethodModel(), now: () => ROUND_AT + 90 * 60_000 }));
+  assert.equal(r2.state, "verified", `the round after a partial one must still be DUE: ${r2.reason}`);
+  assert.equal(rounds(ws).length, 2);
+  assert.equal(rounds(ws)[1].ingested.experiences, 0);
+});
+
+// ── the k = 0 boundary: a breach before ANY call still appends nothing (nothing to persist) ─────────
+test("AC(e) boundary — a wall breach with ZERO completed calls appends nothing, exactly as before", async () => {
+  const ws = makeWorkspace();
+  writeConfig(ws, "loop:\n  discovery_method:\n    enabled: true\n    interval: interval:360m\n    max_wall_ms: 1\n");
+  writeFixtureStore(ws, FIXTURE_OUTCOMES);
+  fs.writeFileSync(carrierPath(ws), JSON.stringify({ kind: "scan-round", routine: DISCOVERY_METHOD_NAME, seed: true }) + "\n", "utf8");
+  const before = fs.readFileSync(carrierPath(ws), "utf8");
+  let t = Date.parse("2026-10-12T00:00:00Z");
+  const fact = await runDiscoveryMethod(ws, runOpts(ws, { now: () => { t += 1000; return t; } }));
+  assert.equal(fact.state, "failed");
+  assert.match(fact.reason, /nothing appended/);
+  assert.equal(fs.readFileSync(carrierPath(ws), "utf8"), before, "a breach with nothing produced persists nothing");
 });

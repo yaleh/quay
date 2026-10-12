@@ -40,7 +40,11 @@ import {
   caseIndexSha256, writeCaseIdentityIndex, readCaseIdentityIndex, caseIdentityIndexFile,
   readSealedSet, validateCaseLabelTiming, validateSealedSetBinding, caseLabelSha256, COLLISION_KINDS,
   firstUseOfSealedPath,
+  // task gap-discovery-method-per-round-quota-verify-reserve-deep-reflection: the reflection launcher's
+  // argv carrier + the prompt's code-access block.
+  reflectionLaunchArgv,
 } from "../../docs/analysis/discovery-reflection.mjs";
+import { hardenedArgv } from "../../docs/analysis/arch-hypothesis-generation.mjs";
 import { GENERALIZATION_VERDICTS_REL } from "../../docs/analysis/discovery-experience-ledger.mjs";
 import { subjectKey } from "../../docs/analysis/architecture-evidence-store.mjs";
 
@@ -1415,4 +1419,53 @@ test("AC(d-3): the independent-only metric EXCLUDES teaching/transfer verdicts, 
   assert.equal(indep.value, 0.5);
   assert.equal(indep.excluded, 3, "the exclusion is REPORTED, not silent");
   assert.deepEqual(indep.by_evidence_level, { independent: 2, teaching: 1, transfer: 1, unlabelled: 1 });
+});
+
+// ════════════════════════════════════════════════════════════════════════════════════════════════════
+// task gap-discovery-method-per-round-quota-verify-reserve-deep-reflection, Plan item 2
+//   The reflection launcher may READ CODE, against a pinned stripped tree. Two properties are asserted
+//   here, and BOTH must hold or the feature is decorative / leaks:
+//     • the argv carrier puts the pin on the launcher's argv when (and only when) there is one;
+//     • the prompt NAMES that tree — without it a launcher carrying Read,Grep,Glob is given tools and
+//       told nothing about what they may read;
+//     • and with NO code access the prompt is BYTE-IDENTICAL to the pre-change one, which is what makes
+//       the no-tools arm a real baseline rather than a differently-worded variant.
+// ════════════════════════════════════════════════════════════════════════════════════════════════════
+
+const stubLaunchArgv = (role, prompt, root, opts) => ["claude", "-n", role, ...(opts.promptViaStdin === true ? ["-p"] : ["-p", prompt])];
+const PIN_DIR = "/tmp/dm-reflect-pin-1a2b3c4d";
+
+test("reflectionLaunchArgv — `--add-dir <pin>` exactly when a pin is given; otherwise byte-identical to hardenedArgv", () => {
+  const withPin = reflectionLaunchArgv({ launchArgv: stubLaunchArgv, prompt: "P", root: "/r", tools: "Read,Grep,Glob", maxTurns: 10, pinDir: PIN_DIR, outputFormat: "stream-json" });
+  assert.equal(withPin.filter((t) => t === "--add-dir").length, 1, "exactly one directory is added");
+  assert.equal(withPin[withPin.indexOf("--add-dir") + 1], PIN_DIR, "…and it is the pin");
+  assert.equal(withPin[withPin.length - 1], "-p", "⛔ inserted BEFORE the trailing prompt flag, so the argv shape is unchanged");
+  assert.equal(withPin[withPin.indexOf("--tools") + 1], "Read,Grep,Glob");
+  assert.equal(withPin[withPin.indexOf("--max-turns") + 1], "10");
+
+  // ⛔ `null` / absent / EMPTY are the SAME reading: no tree was given, so no directory is added and the
+  // argv is exactly what `hardenedArgv` produces (the pre-change shape).
+  const expected = hardenedArgv(stubLaunchArgv, "P", "/r", { tools: "Read,Grep,Glob", maxTurns: 10, outputFormat: "stream-json" });
+  for (const pin of [null, undefined, ""]) {
+    const argv = reflectionLaunchArgv({ launchArgv: stubLaunchArgv, prompt: "P", root: "/r", tools: "Read,Grep,Glob", maxTurns: 10, pinDir: pin, outputFormat: "stream-json" });
+    assert.deepEqual(argv, expected, `pinDir=${JSON.stringify(pin)} adds nothing — "no pin" must not be shaped like "a pin"`);
+  }
+});
+
+test("buildReflectionPrompt — code access NAMES the pinned tree, stays a semantic question, and is byte-identical when absent", () => {
+  const unit = { signature: "sig-1", experiences: [{ case_id: "c1", role: "negative", components: ["plugin/scripts/x.ts"], summary: "s" }], representative: { case_id: "c1" } };
+  const withoutAccess = buildReflectionPrompt({ unit, registry: [], toolNames: ["arch-discovery-routine.ts"] });
+  const withAccess = buildReflectionPrompt({ unit, registry: [], toolNames: ["arch-discovery-routine.ts"], codeAccess: { tools: "Read,Grep,Glob", pinDir: PIN_DIR } });
+
+  assert.ok(!withoutAccess.includes(PIN_DIR), "no code access ⇒ no tree is named");
+  assert.ok(withAccess.includes(PIN_DIR), "the tree the tools may read is NAMED — otherwise the tools are decorative");
+  assert.ok(withAccess.includes("Read,Grep,Glob"), "…and the tools it is told it has");
+  assert.match(withAccess, /Do NOT turn this into a scan/, "⛔ still a semantic question — never a scan recipe");
+  assert.match(withAccess, /does THIS finding teach a/, "…the question itself is unchanged");
+  // ⛔ The baseline arm must be a real baseline: the code-access block is ADDITIVE, and removing it gives
+  // back EXACTLY the pre-change prompt (nothing else in the prompt was re-worded by this task).
+  const stripped = withAccess.replace(/\nCODE ACCESS[\s\S]*?\n(?=\nRespond with ONE JSON object)/, "");
+  assert.equal(stripped, withoutAccess, "removing the code-access block returns the pre-change prompt byte for byte");
+  // The registry digest is still shown in both arms — code access must not have displaced prior knowledge.
+  assert.ok(withAccess.includes("CURRENT METHOD REGISTRY"));
 });

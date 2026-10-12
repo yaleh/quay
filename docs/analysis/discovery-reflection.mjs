@@ -346,8 +346,12 @@ export function registryDigest(registry) {
  * @param {object} o.unit          `{signature, experiences, representative}`
  * @param {object|object[]} o.registry
  * @param {string[]} o.toolNames   the allowed `operation.tools` vocabulary (the capability catalog)
+ * @param {object|null} [o.codeAccess] `{tools, pinDir}` when the reflection launcher may READ CODE —
+ *   the stripped tree at the pin it was given. ⛔ Naming the tree is not hand-coding the answer: the tree
+ *   is the code UNDER INSPECTION, the same material the finding is about, and the model is told nothing
+ *   about where to look inside it. `null` (the no-tools arm) renders exactly the pre-change prompt.
  */
-export function buildReflectionPrompt({ unit, registry, toolNames = [] }) {
+export function buildReflectionPrompt({ unit, registry, toolNames = [], codeAccess = null }) {
   // ⛔ `domain_claim` IS THE POINT OF THE JOIN (Plan item 2a). Without it the model is shown the
   //   pipeline's own bookkeeping ("verifier verdict \"supported\" on subject hypgen:ownership|…") and
   //   induces methods ABOUT the bookkeeping — which is exactly what the 2026-10-12 round did. The claim
@@ -394,6 +398,23 @@ export function buildReflectionPrompt({ unit, registry, toolNames = [] }) {
     "",
     "ALLOWED TOOLS (operation.tools vocabulary):",
     JSON.stringify(toolNames),
+    // ⛔ THE CODE-ACCESS BLOCK (task gap-discovery-method-per-round-quota-verify-reserve-deep-reflection,
+    // Plan item 2). Without it a launcher carrying `Read,Grep,Glob` would be given tools and told nothing
+    // about the tree they may read — the tools would then be decorative. ⛔ It names the TREE, never a
+    // SEARCH RECIPE: the question is unchanged (does this finding teach a TRANSFERABLE method?), and the
+    // prompt says so in the same breath, because "go and scan" is the mechanical degradation this task is
+    // supposed to avoid. Absent ⇒ the prompt is byte-identical to the no-tools arm's.
+    ...(isStr(codeAccess?.pinDir, 1)
+      ? [
+          "",
+          "CODE ACCESS — you may READ CODE. A frozen, stripped copy of the repository this finding is about",
+          "is checked out at:",
+          codeAccess.pinDir,
+          `Use your tools (${isStr(codeAccess.tools, 1) ? codeAccess.tools : "Read,Grep,Glob"}) to read files THERE — the live working tree is NOT available to you, and the copy is pinned at the commit the finding was filed at. Read it when the reading changes your judgment about whether the operation TRANSFERS.`,
+          "⛔ Do NOT turn this into a scan of the repository. The question is still: does THIS finding teach a",
+          "reusable, transferable METHOD — or no method at all?",
+        ]
+      : []),
     "",
     "Respond with ONE JSON object and NOTHING ELSE:",
     "{",
@@ -529,9 +550,12 @@ export function assembleCandidate({ rec, unit, registry, budget, nowIso }) {
  * @param {string}   [o.root]        repo root used to resolve the capability-catalog default
  * @param {string}   [o.modelId]     the model the launcher was ASKED for (recorded as `requested_model`)
  * @param {number}   [o.nowMs]
+ * @param {object|null} [o.codeAccess] `{tools, pinDir}` — rendered into every unit's prompt when the
+ *   launcher may read code (see `buildReflectionPrompt`). `null` ⇒ the no-tools prompt, byte-identical
+ *   to the pre-change one.
  * @returns {Promise<object>} `{ok, decisions[], model_calls, skipped_budget, wall_ms, cost}`
  */
-export async function reflect({ experiences, registry = [], model, budget = {}, root = null, modelId = null, nowMs = Date.now() } = {}) {
+export async function reflect({ experiences, registry = [], model, budget = {}, root = null, modelId = null, nowMs = Date.now(), codeAccess = null } = {}) {
   const guard = disabledGuard(budget);
   if (guard) return guard;
   if (typeof model !== "function") return { ok: false, reason: "model-seam-missing", model_calls: 0 };
@@ -561,7 +585,7 @@ export async function reflect({ experiences, registry = [], model, budget = {}, 
       continue;
     }
 
-    const prompt = buildReflectionPrompt({ unit, registry, toolNames });
+    const prompt = buildReflectionPrompt({ unit, registry, toolNames, codeAccess });
     const tCall = Date.now();
     const { stdout } = await modelCall(model, prompt);
     const fields = modelCallFields({ requested: modelId, stdout });
@@ -2006,7 +2030,7 @@ export function learningQuality(verdicts) {
  * only. Candidate PERSISTENCE (into the method registry) is the CALLER's call — this function returns
  * the decisions and lets the caller `appendMethodRecord` what it wants to keep.
  */
-export async function runReflectionRound(root, { model, budget = {}, modelId = null, nowMs = Date.now() } = {}) {
+export async function runReflectionRound(root, { model, budget = {}, modelId = null, nowMs = Date.now(), codeAccess = null } = {}) {
   const guard = disabledGuard(budget);
   if (guard) return guard;
   const b = resolveBudget(budget).budget;
@@ -2015,7 +2039,7 @@ export async function runReflectionRound(root, { model, budget = {}, modelId = n
   const prior = readReflectionAttempts(root);
   const sel = selectExperiencesForReflection(ledger, prior, { budget: b, nowMs });
   if (!sel.ok) return sel;
-  const res = await reflect({ experiences: sel.selected, registry, model, budget: b, root, modelId, nowMs });
+  const res = await reflect({ experiences: sel.selected, registry, model, budget: b, root, modelId, nowMs, codeAccess });
   if (!res.ok) return res;
   for (const d of res.decisions) {
     recordReflectionAttempt(root, {
@@ -2044,16 +2068,34 @@ export async function runReflectionRound(root, { model, budget = {}, modelId = n
  * loaded — a refusal, never a silent no-op. `tools` is `""` for the reflection/reasoning call and
  * `Read,Grep` for the verifier call (the bounded-verifier discipline).
  */
-export async function liveModelFactory({ root, tools = "", maxTurns = null, timeoutMs = 300_000 } = {}) {
+export async function liveModelFactory({ root, tools = "", maxTurns = null, timeoutMs = 300_000, pinDir = null } = {}) {
   const rt = await importDriverRuntime();
   if (!rt.ok) return { ok: false, reason: rt.reason };
   const { launchArgv, runAsync } = rt.mod;
-  const model = modelFromArgv(hardenedArgv(launchArgv, "", root, { tools, maxTurns })) ?? null;
+  const model = modelFromArgv(reflectionLaunchArgv({ launchArgv, prompt: "", root, tools, maxTurns, pinDir })) ?? null;
   const run = async (prompt) => runAsync(
-    hardenedArgv(launchArgv, prompt, root, { tools, maxTurns, outputFormat: "stream-json" }),
+    reflectionLaunchArgv({ launchArgv, prompt, root, tools, maxTurns, pinDir, outputFormat: "stream-json" }),
     { timeoutMs, collectStderr: true, stdinData: prompt },
   );
   return { ok: true, model, run };
+}
+
+/**
+ * The launcher argv ONE reflection/verification call runs with — `hardenedArgv` plus the pinned tree when
+ * the call is allowed to read code. PURE (the launcher resolver is injected), so the argv a call WOULD
+ * run with is assertable without spawning anything — which is what makes "does the reflection launcher
+ * carry `Read,Grep,Glob`, the pin dir and `--max-turns N`?" a reading rather than an assumption.
+ *
+ * ⛔ `--add-dir <pinDir>` and NOT a cwd: the spawn seam (`runAsync`) does not take a cwd, and the
+ * launcher's own tool-access rule is directory-scoped, so the pin is made READABLE as an extra allowed
+ * directory. ⛔ The pin is inserted immediately before the trailing prompt flag, exactly where
+ * `hardenedArgv` inserts its own extra tokens, so the prompt stays the LAST token and a `null` pinDir
+ * leaves the argv byte-identical to the pre-change one.
+ */
+export function reflectionLaunchArgv({ launchArgv, prompt = "", root, tools = "", maxTurns = null, pinDir = null, outputFormat = null } = {}) {
+  const argv = hardenedArgv(launchArgv, prompt, root, { tools, maxTurns, outputFormat });
+  if (isStr(pinDir, 1)) argv.splice(argv.length - 1, 0, "--add-dir", pinDir);
+  return argv;
 }
 
 // ── CLI ───────────────────────────────────────────────────────────────────────────────────────────

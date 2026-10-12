@@ -95,13 +95,45 @@
 // ⛔ WHAT A "MODEL CALL" COUNTS (same task). The config key bounds LAUNCHER SUBPROCESS INVOCATIONS — one
 //   `model(...)` seam call, whatever it costs underneath. Each subprocess's INTERNAL turns are bounded
 //   separately and stated here, so the worst case is computable rather than unknown:
-//     • reflection   — `--tools ""`, `--max-turns 1` (REFLECTION_MAX_TURNS): a single reasoning turn;
+//     • reflection   — `--tools <reflection_tools>`, `--max-turns <effective reflection turns>`. The
+//                      EFFECTIVE turns depend on the arm: `reflection_tools: ""` pins the launcher to
+//                      `REFLECTION_MAX_TURNS` (1) because there is nothing to iterate on, and a non-empty
+//                      tool set uses `reflection_max_turns` (default DEFAULT_REFLECTION_MAX_TURNS);
 //     • verification — `--tools Read,Grep`, `--max-turns <verifier_max_turns>` (default
 //                      DEFAULT_VERIFIER_MAX_TURNS): the bounded-verifier discipline.
-//   ⇒ worst-case API turns per 24h = cap × max(REFLECTION_MAX_TURNS, verifier_max_turns). API REQUESTS
-//     are NOT claimed to be bounded: one turn may issue several, and nothing here measures that.
+//   ⇒ worst-case API turns per 24h = cap × max(effective reflection turns, verifier_max_turns). The
+//     default reflection turn budget is deliberately ≤ DEFAULT_VERIFIER_MAX_TURNS so that turning code
+//     access ON does not raise this product. API REQUESTS are NOT claimed to be bounded: one turn may
+//     issue several, and nothing here measures that.
 //   Each reservation records the realized `num_turns` the launcher's stream reported, or `null` WITH a
 //   reason (`UNINSTRUMENTED_STREAM` / `STREAM_REPORTED_NO_NUM_TURNS`) — never a silent zero (硬规则 3b).
+//
+// ⛔ THREE PER-ROUND LIMITS THAT ONLY MAKE SENSE TOGETHER (task
+//   gap-discovery-method-per-round-quota-verify-reserve-deep-reflection, raised after the user lifted the
+//   24h ceiling from 24 to 240 on 2026-10-12 — 6 calls/round was judged too few for deep reflection):
+//     ① `verify_reserve` — reflection and generalization used to share ONE per-round counter, so a round
+//        whose reflection spent the whole quota and minted a candidate had nothing left to VALIDATE it:
+//        a candidate could never be tested in the round that minted it. Reflection is now capped at
+//        `max_model_calls − verify_reserve`; generalization gets the reserve plus whatever reflection left
+//        unused. A round also refuses to START reflection unless `verify_reserve + 1` calls remain in the
+//        24h ledger, so reflection can never spend the last calls validation needs.
+//     ② REFLECTION READS CODE (`reflection_tools`, default `Read,Grep,Glob`; user ruling 2026-10-12:
+//        SEMANTIC FIRST, MECHANIZE LATER). It runs against a pinned, STRIPPED tree at HEAD (the same
+//        materialisation the verifier uses; the pin is named in the prompt and added to the launcher argv
+//        as `--add-dir`), so a reflection that would otherwise shuffle summaries CAN inspect the code it
+//        reflects on. `reflection_tools: ""` is the explicit fallback and the BASELINE arm. The pin is
+//        materialised ONCE per round and a pin that cannot be built is a REFUSAL — never a silent
+//        degradation to the no-tools arm (a reflection that cannot read the code is exactly the
+//        mechanical summary-shuffler this removes, and discovering that by degrading would be the
+//        failure wearing success's shape). The anti-leak / no-hand-coding rules of
+//        `discovery-reflection.mjs` are untouched: the prompt names the TREE, never a search recipe.
+//     ③ PARTIAL PERSISTENCE ON A WALL BREACH. A breach used to append NOTHING: the spent calls stayed
+//        COUNTED (the 24h ledger counts reservations, not results) but every RESULT of the round was
+//        thrown away. A breach after ≥ 1 completed call now persists the SAME record the completed path
+//        does, marked `partial:true` with the breach as `partial_reason`, and still does NOT advance the
+//        last-run — so the next round retries the units this one never reached. `latestResidentRoundTs`
+//        SKIPS partial lines, or the un-advanced clock would be undone on the due-side. A breach with
+//        ZERO completed calls still appends nothing (nothing was produced to persist).
 //
 // ⛔ THE LEDGER IS SEEDED, NOT RESET, AT CUT-OVER (same task). Until this change landed, the trailing-24h
 //   reading came from the carrier's `scan-round` lines. Those legacy lines carry no `reservations` field,
@@ -124,6 +156,7 @@
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
+import { execFileSync } from "node:child_process";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import YAML from "yaml";
 import { isDue, parseTrigger } from "./routine-scheduler.ts";
@@ -196,18 +229,39 @@ export const BUDGET_LOCK_MAX_RECOVERIES = 8;
  *  SAME token the round reports as its own reason, so the ledger line and the round failure agree. */
 export const BUDGET_REFUSAL_CODE = "BUDGET_24H";
 
-/** The tools the REFLECTION subprocess is launched with: none. It reasons over the prompt alone (the
- *  unit's experiences + the registry digest are both IN the prompt), so there is nothing to iterate on. */
+/** ⛔ THE REFLECTION LAUNCHER'S TOOLS, and why they are no longer empty (task
+ *  gap-discovery-method-per-round-quota-verify-reserve-deep-reflection, Plan item 2). Reflection used to
+ *  run with NO tools: it was shown an Experience's `summary`/`components` and could not read the code at
+ *  the pin. A reflection that cannot read the code it reflects on is a mechanical summary-shuffler, not
+ *  semantic reflection — so the default is now the read set (user ruling 2026-10-12: SEMANTIC FIRST,
+ *  MECHANIZE LATER). ⛔ `reflection_tools: ""` stays reachable as the EXPLICIT fallback and is the
+ *  BASELINE arm every measurement in this task is read against. */
+export const DEFAULT_REFLECTION_TOOLS = "Read,Grep,Glob";
+/** The pre-2026-10-12 reflection tool set (none): the explicit-fallback arm (`reflection_tools: ""`). */
 export const REFLECTION_TOOLS = "";
-/** The reflection subprocess's internal turn budget. The reflection seam is launched with `--tools ""`
- *  (no tools ⇒ nothing to iterate on), so ONE turn is the whole call — documented rather than implied. */
+/** The reflection subprocess's internal turn budget for the EMPTY-tools arm. With no tools there is
+ *  nothing to iterate on, so ONE turn is the whole call — documented rather than implied. It is ALSO what
+ *  makes `reflection_tools: ""` byte-identical to the pre-change launcher argv (baseline arm). */
 export const REFLECTION_MAX_TURNS = 1;
+/** The reflection subprocess's turn budget when it DOES carry tools (`reflection_max_turns` in the
+ *  config overrides it): reading a file costs a turn, so the baseline's one-turn budget cannot apply.
+ *  The default is stated because the 24h worst case (`cap × max(reflection turns, verifier turns)`) is
+ *  only computable if it is — and it is kept ≤ `DEFAULT_VERIFIER_MAX_TURNS` so that turning reflection's
+ *  tools ON does not raise that product. */
+export const DEFAULT_REFLECTION_MAX_TURNS = 10;
 /** The tools the VERIFIER subprocess is launched with (the bounded-verifier discipline: it may read the
  *  pinned tree, and nothing else). */
 export const VERIFIER_TOOLS = "Read,Grep";
 /** The verifier's default internal turn budget. `verifier_max_turns` in the config overrides it; the
  *  default is stated because the 24h worst case (`cap × max_turns`) is only computable if it is. */
 export const DEFAULT_VERIFIER_MAX_TURNS = 12;
+/** How many of a round's per-round `max_model_calls` are HELD BACK from reflection for the
+ *  generalization step (task ..., Plan item 1). Reflection and generalization share ONE per-round
+ *  counter, so a round whose reflection spends the whole quota has nothing left to validate the
+ *  candidate it just minted — the candidate can then never be tested in the round that minted it.
+ *  ⛔ The DEFAULT is `0` — the pre-change, shared-counter behaviour — so a workspace that declares
+ *  nothing keeps exactly what it had; production declares 4. */
+export const DEFAULT_VERIFY_RESERVE = 0;
 
 /** The sibling key a RESIDENT round stamps next to its `routine-last-run.json` entry, so the entry
  *  itself says WHO wrote it. ⛔ Without it, "the resident driver ran" and "a worker acceptance run
@@ -243,6 +297,16 @@ export interface DiscoveryMethodConfig {
   /** The VERIFIER subprocess's internal turn budget (`--max-turns`). Absent ⇒ DEFAULT_VERIFIER_MAX_TURNS.
    *  It bounds the turns INSIDE one counted model call; the 24h ceiling bounds the calls themselves. */
   verifierMaxTurns: number;
+  /** Per-round calls held back from reflection for the generalization step. `0` = one shared counter
+   *  (the pre-change behaviour). Must be ≤ `maxModelCalls` — a reserve larger than the round's own
+   *  request would make reflection unable to start, which is a declaration error, not a budget state. */
+  verifyReserve: number;
+  /** The tools the REFLECTION subprocess is launched with. `DEFAULT_REFLECTION_TOOLS` when undeclared;
+   *  the empty string is the explicit fallback/baseline arm (no tools ⇒ one turn ⇒ pre-change argv). */
+  reflectionTools: string;
+  /** The REFLECTION subprocess's `--max-turns` when `reflectionTools` is non-empty. Ignored in the
+   *  empty-tools arm, where the launcher is pinned to `REFLECTION_MAX_TURNS` (nothing to iterate on). */
+  reflectionMaxTurns: number;
 }
 
 /** `present` = the section exists; `config` = the parsed section (null when malformed); `error` = a
@@ -276,6 +340,9 @@ export function parseDiscoveryMethodSection(raw: unknown): { config: DiscoveryMe
     maxWallMs: DEFAULT_MAX_WALL_MS,
     maxModelCallsPer24h: null,
     verifierMaxTurns: DEFAULT_VERIFIER_MAX_TURNS,
+    verifyReserve: DEFAULT_VERIFY_RESERVE,
+    reflectionTools: DEFAULT_REFLECTION_TOOLS,
+    reflectionMaxTurns: DEFAULT_REFLECTION_MAX_TURNS,
   };
   if (rec.enabled === false) return { config: disabled, error: null };
 
@@ -352,6 +419,30 @@ export function parseDiscoveryMethodSection(raw: unknown): { config: DiscoveryMe
   const verifierMaxTurns = bound("verifier_max_turns", DEFAULT_VERIFIER_MAX_TURNS, 1);
   if (verifierMaxTurns.error) return { config: null, error: verifierMaxTurns.error };
 
+  // ⛔ THE VERIFICATION RESERVE (Plan item 1). `0` is legitimate (the pre-change shared counter), so the
+  // gate is shape, not a floor. ⛔ THE CROSS-FIELD RULE IS ITS OWN CONFIG ERROR: a reserve larger than the
+  // round's own `max_model_calls` would leave reflection with a NEGATIVE quota, i.e. a round that can
+  // never mint the candidate the reserve exists to validate. That is a declaration error — refused here,
+  // never silently clamped (a clamp would make the two keys disagree with no trace).
+  const verifyReserve = bound("verify_reserve", DEFAULT_VERIFY_RESERVE, 0);
+  if (verifyReserve.error) return { config: null, error: verifyReserve.error };
+  if ((verifyReserve.value as number) > (maxModelCalls.value as number)) {
+    return { config: null, error: cfgBad(`'verify_reserve' (${verifyReserve.value}) must be <= 'max_model_calls' (${maxModelCalls.value}) — a reserve larger than the round's own request leaves reflection no calls at all`) };
+  }
+
+  // ⛔ THE REFLECTION'S TOOLS (Plan item 2). Present ⇒ must be a STRING; `""` is the explicit fallback
+  // arm and a non-empty value is passed verbatim to the launcher's `--tools`. A non-string is refused
+  // rather than coerced: `false`/`0`/a list would otherwise silently select the baseline arm.
+  let reflectionTools = DEFAULT_REFLECTION_TOOLS;
+  if (rec.reflection_tools !== undefined && rec.reflection_tools !== null) {
+    if (typeof rec.reflection_tools !== "string") {
+      return { config: null, error: cfgBad(`'reflection_tools' must be a string (got ${JSON.stringify(rec.reflection_tools)} — "" is the explicit no-tools fallback)`) };
+    }
+    reflectionTools = rec.reflection_tools;
+  }
+  const reflectionMaxTurns = bound("reflection_max_turns", DEFAULT_REFLECTION_MAX_TURNS, 1);
+  if (reflectionMaxTurns.error) return { config: null, error: reflectionMaxTurns.error };
+
   return {
     config: {
       enabled: true,
@@ -362,6 +453,9 @@ export function parseDiscoveryMethodSection(raw: unknown): { config: DiscoveryMe
       maxWallMs: maxWallMs.value as number,
       maxModelCallsPer24h: has24hCap ? (per24.value as number) : null,
       verifierMaxTurns: verifierMaxTurns.value as number,
+      verifyReserve: verifyReserve.value as number,
+      reflectionTools,
+      reflectionMaxTurns: reflectionMaxTurns.value as number,
     },
     error: null,
   };
@@ -443,6 +537,12 @@ export function latestResidentRoundTs(records: readonly Record<string, unknown>[
   for (let i = 0; i < records.length; i++) {
     const rec = records[i];
     if (rec.kind !== "scan-round" || rec.invoked_by !== INVOKED_BY_RESIDENT) continue;
+    // ⛔ A `partial:true` round is NOT a completed production run (task ..., Plan item 3): it persists
+    // what it achieved before a WALL BREACH and deliberately does NOT advance the last-run, so the next
+    // round must be free to RETRY the units it never reached. Counting it here would hold production's
+    // clock for a whole interval on the strength of a round that threw its own result away — i.e. the
+    // retry this task promises would silently not happen.
+    if (rec.partial === true) continue;
     const ms = lineTs(rec, i);
     if (latest === null || ms > latest) latest = ms;
   }
@@ -1005,7 +1105,10 @@ export interface DiscoveryReflectionModule {
   validateEvaluationPin: (heldOutCase: Record<string, unknown>) => { ok: boolean; reasons: string[] };
   materializeStrippedPin: PinFn;
   gitIsAncestor: (root: string) => (ancestor: string, descendant: string) => boolean;
-  liveModelFactory: (opts: { root: string; tools?: string; maxTurns?: number | null; timeoutMs?: number }) => Promise<Record<string, unknown>>;
+  /** `pinDir` (Plan item 2): the stripped tree the launcher's tools may read, added to its argv as
+   *  `--add-dir <pinDir>` when present. Absent/null ⇒ the launcher's argv carries no directory, which is
+   *  the empty-tools baseline arm's shape (and the verifier's, whose pin varies per held-out case). */
+  liveModelFactory: (opts: { root: string; tools?: string; maxTurns?: number | null; timeoutMs?: number; pinDir?: string | null }) => Promise<Record<string, unknown>>;
   computeReflectionCost: (calls: readonly Record<string, unknown>[], opts?: { wall_ms?: number | null }) => Record<string, unknown>;
   /** The launcher's `stream-json` parser, re-exported by the reflection module so the ROUTINE can read
    *  the realized `num_turns` off a finished call (the reservation's outcome line). Optional: an engine
@@ -1107,7 +1210,7 @@ export interface DiscoveryMethodRunOptions {
   /** Resolved LAZILY, only when the round actually has something to reflect on — so a workspace whose
    *  ingest yields nothing (or that never enables the section) pays nothing for the launcher. Used when
    *  `model` is absent; a failure is the round's own `failed` reason. */
-  modelFactory?: () => Promise<{ ok: boolean; model?: ModelFn; verifierModel?: ModelFn; modelId?: string | null; reason?: string }>;
+  modelFactory?: () => Promise<{ ok: boolean; model?: ModelFn; verifierModel?: ModelFn; modelId?: string | null; reason?: string; reflectionPin?: { rev: string; dir: string } | null }>;
   /** Reservation-ledger override (tests). Defaults to `<root>/.quay/discovery-method-model-budget.jsonl`. */
   budgetLedgerPath?: string;
   /** Reservation-lock override (tests). Defaults to `<root>/.quay/discovery-method-model-budget.lock`. */
@@ -1296,7 +1399,27 @@ export async function runDiscoveryMethod(root: string, opts: DiscoveryMethodRunO
     }
     remainingAtStart = cap - used;
     effectiveMaxModelCalls = Math.min(config.maxModelCalls, remainingAtStart);
+    // ⛔ THE REMAINING-BUDGET RULE (Plan item 1): a round may START reflection only if at least
+    // `verify_reserve + 1` calls remain in the 24h ledger — so reflection can never consume the last
+    // calls that validation needs, and a candidate minted at the very edge of the day is still
+    // testable. Its OWN `not-evaluated` reason, distinct from «the ceiling is reached»: the ceiling is
+    // not what stopped this round, the reserve is. (When `verify_reserve` is 0 this is unreachable —
+    // `remaining <= 0` was already returned above — so the pre-change behaviour is unchanged.)
+    if (remainingAtStart <= config.verifyReserve) {
+      return fact(
+        "not-evaluated",
+        { ...base, enabled: true, interval: intervalInfo, due: dueInfo, budget_24h: budget24h, verify_reserve: config.verifyReserve },
+        `budget-24h: only ${remainingAtStart} call(s) remain in the trailing 24h, <= verify_reserve ${config.verifyReserve} — a round starts reflection only when at least verify_reserve + 1 calls remain, so reflection cannot spend the calls validation needs; nothing spawned${revertedNote}${legacyNote}`,
+      );
+    }
   }
+  // ⛔ THE PER-ROUND SPLIT (Plan item 1): reflection may use at most `max_model_calls − verify_reserve`;
+  // generalization may use the remainder PLUS whatever reflection left unused (its own loop bound is the
+  // round's whole `effectiveMaxModelCalls`). Without the split, a round whose reflection spends the whole
+  // quota and mints a candidate has nothing left to validate it — the candidate could never be tested in
+  // the round that minted it.
+  const verifyReserve = config.verifyReserve;
+  const reflectionMaxModelCalls = Math.max(0, effectiveMaxModelCalls - verifyReserve);
 
   // The engine modules (docs/analysis/discovery-{experience-ledger,reflection,method-registry}.mjs) are
   // resolved HERE — once, after the three gates that can return without running a step, and before the
@@ -1310,25 +1433,10 @@ export async function runDiscoveryMethod(root: string, opts: DiscoveryMethodRunO
     return engineRefusal(e, "round start");
   }
 
-  // The wall budget is the round's own refusal: a step that runs past `max_wall_ms` stops the round
-  // BEFORE the append, so the carrier stays byte-identical and the last-run is not consumed.
-  const breached = () => now() - started >= config.maxWallMs;
-
-  // ⑤ (a) ingest. A refusal here (WATERMARK_MISMATCH / an unresolved shared checkout / a missing
-  //    evidence store) is the round's own failure with the step's OWN reason code.
-  const ingestFn = opts.ingestFn ?? engine.ledger.ingestNewOutcomes;
-  const ingest = ingestFn(root, { maxPerRun: config.maxExperiences, enabled: true }) as Record<string, unknown>;
-  if (ingest.ok !== true) {
-    const reasons = Array.isArray(ingest.reasons) ? (ingest.reasons as string[]) : [];
-    return fact("failed", { ...base, enabled: true, ingest }, `ingest refused — ${reasons[0] ?? "no reason reported"} (nothing appended, last-run not advanced)`);
-  }
-  const ingested = Number(ingest.ingested ?? 0);
-  if (breached()) {
-    return fact("failed", { ...base, enabled: true, ingest }, `budget breach — wall ${now() - started}ms >= max_wall_ms ${config.maxWallMs} after ingest (nothing appended, last-run not advanced)`);
-  }
-
-  // ⑥ (b) ONE bounded reflection round, and ONLY when the ingest produced something. Zero new
-  //    Experiences ⇒ zero model calls — the property that makes two rounds on identical inputs cheap.
+  // ⛔ THE ROUND'S MUTABLE STATE IS DECLARED HERE, BEFORE THE FIRST STEP THAT CAN BREACH (Plan item 3).
+  //    A wall breach now PERSISTS what the round achieved, so the record builder below reads this state —
+  //    and it therefore has to exist before the FIRST breach check (after ingest), not at the step that
+  //    happens to fill it.
   let reflection: Record<string, unknown> | null = null;
   const candidates: Record<string, unknown>[] = [];
   const persisted: Record<string, unknown>[] = [];
@@ -1351,6 +1459,137 @@ export async function runDiscoveryMethod(root: string, opts: DiscoveryMethodRunO
   // the round's own scope. Declaring it inside ⑥ left ⑦ reading a binding that is not in scope there
   // (a ReferenceError on the one path where a verdict is `evaluated` with a `candidate_after`).
   let appendFn = opts.appendFn ?? engine.registry.appendMethodRecord;
+  // ⑦'s own state, hoisted for the same reason as the rest: a breach after reflection persists the
+  // PARTIAL record, whose `held_out`/`verdicts` blocks read these.
+  const verdicts: Record<string, unknown>[] = [];
+  const promotions: string[] = [];
+  const retirements: string[] = [];
+  let verdictsSkipped = 0;
+  let heldOut: HeldOutRead | null = null;
+  /** What the REFLECTION LAUNCHER was built with — `{tools, max_turns, pin}`, read off the live factory
+   *  that was actually constructed. ⛔ `null` unless a live launcher was built: a caller-injected `model`/
+   *  `reflectFn` never went through one, so a config-derived block here would claim "the launcher ran
+   *  with X" for a launcher that does not exist (硬规则 3b). On the carrier, so "reflection really could
+   *  read the code" is a READING, not an assumption (硬规则 9 — visibility ≠ execution). */
+  let reflectionLauncher: Record<string, unknown> | null = null;
+  /** The SAME tree as an ABSOLUTE path — what the prompt must name (the relative form goes on the
+   *  carrier). `null` when the reflection launcher was given no tree. */
+  let reflectionPinDir: string | null = null;
+
+  // The wall budget is the round's own refusal: a step that runs past `max_wall_ms` stops the round
+  // BEFORE the append, so the carrier stays byte-identical and the last-run is not consumed.
+  const breached = () => now() - started >= config.maxWallMs;
+
+  // ── the round's ONE line, built in ONE place and used by EVERY path that persists it ───────────────
+  // ⛔ WHY A BUILDER AND NOT ONE INLINE OBJECT (Plan item 3, partial persistence on a wall breach): a
+  //    breach used to append NOTHING, so a longer, deeper round could lose every RESULT its spent calls
+  //    had produced. The calls themselves stayed COUNTED (the 24h ledger counts reservations, not
+  //    results) — what was lost was the result. The breach paths now persist the SAME record the
+  //    completed path does, marked `partial:true` with the breach as its reason.
+  // ⛔ `refused` = how many of the round's per-round `max_model_calls` request the 24h ceiling removed.
+  //    Stated explicitly because it is a DEFINITION, not a raw counter: the engine stops at the reduced
+  //    budget, so it never reports the extra calls as "refused" itself. When nothing was capped by the
+  //    ceiling (`effectiveMaxModelCalls === config.maxModelCalls`), the answer is 0 — no call was refused.
+  const buildRoundRecord = (extra: Record<string, unknown>): Record<string, unknown> => {
+    const wallMs = now() - started;
+    const cost = engine.reflection.computeReflectionCost(calls, { wall_ms: wallMs }) as Record<string, unknown>;
+    const grantedThisRound = budget === null ? 0 : budget.grantedCount;
+    const cappedBy24h = budget !== null && effectiveMaxModelCalls < config.maxModelCalls;
+    const reservationsBlock = budget === null
+      ? null
+      : {
+          cap: budget.cap,
+          used_at_start: budget24h ? budget24h.used : null,
+          remaining_at_start: remainingAtStart,
+          requested_max_model_calls: config.maxModelCalls,
+          effective_max_model_calls: effectiveMaxModelCalls,
+          reflection_max_model_calls: reflectionMaxModelCalls,
+          verify_reserve: verifyReserve,
+          granted: grantedThisRound,
+          refused: cappedBy24h ? Math.max(0, config.maxModelCalls - grantedThisRound) : 0,
+          refusal_reason: cappedBy24h ? BUDGET_REFUSAL_CODE : null,
+          mid_round_refusal: budgetRefusal,
+          ledger: asRel(root, opts.budgetLedgerPath ?? path.join(root, BUDGET_LEDGER_REL)),
+        };
+    return {
+      kind: "scan-round",
+      routine: DISCOVERY_METHOD_NAME,
+      // ⛔ The carrier line says WHO ran it, so a reader of `.quay/discovery-method-findings.jsonl` can
+      // tell a production round from a hand-run/test one without cross-referencing anything (硬规则 9 —
+      // the two must be distinguishable on the record itself, not only in the head of whoever ran it).
+      invoked_by: invokedBy,
+      ts: new Date(now()).toISOString(),
+      // ⛔ The cadence that ACTUALLY governed this round, and the reading the window came from, on the
+      // line itself (the SAME two objects every Fact of this round carries — see intervalInfo/dueInfo):
+      // a reader asking "was this a 60m round or a 360m one, and what told us it was due?" gets both
+      // answers without re-reading a config that may since have changed or re-deriving the basis from
+      // the file's order.
+      interval: intervalInfo,
+      due: dueInfo,
+      budget_24h: budget24h,
+      reservations: reservationsBlock,
+      wall_ms: wallMs,
+      ingested: { experiences: ingested, scanned: Number(ingest.scanned ?? 0), duplicates: Number(ingest.duplicates ?? 0), advanced_to: ingest.advanced_to ?? null },
+      // ⛔ WHAT THE REFLECTION LAUNCHER ACTUALLY RAN WITH (Plan item 2). ⛔ `null` — not a fabricated
+      // config-derived block — when NO live launcher was built (a caller injected its own `model`/
+      // `reflectFn`: the tests do). "What the config asks for" and "what the launcher ran with" are
+      // different claims, and reading one as the other is the shape 硬规则 3b forbids.
+      reflection_launcher: reflectionLauncher,
+      reflected: reflection,
+      candidates: { minted: candidates.length, persisted: persisted.filter((p) => p.ok === true).length, records: persisted },
+      held_out: {
+        read: heldOut !== null,
+        cases: heldOut === null || !heldOut.ok ? null : heldOut.cases.length,
+        unreadable: heldOut !== null && !heldOut.ok ? heldOut.reason : null,
+      },
+      verdicts: {
+        total: verdicts.length,
+        evaluated: verdicts.filter((v) => v.outcome === "evaluated").length,
+        correct: verdicts.filter((v) => v.correct === true).length,
+        not_evaluated: verdicts.filter((v) => v.outcome === "not-evaluated").length,
+        skipped_budget: verdictsSkipped,
+        records: verdicts,
+      },
+      promotions,
+      retirements,
+      model_calls: modelCalls,
+      tokens: cost.tokens,
+      cost_usd: cost.cost_usd,
+      ...extra,
+    };
+  };
+
+  /** Persist what the round ACHIEVED before a wall breach, marked `partial:true` with the breach as its
+   *  reason, and return the record (whether or not it was written). ⛔ ONLY when at least ONE counted call
+   *  completed: a breach with nothing done has nothing to persist, and the pre-change contract — "a
+   *  breach before any call appends nothing" — stays exactly as it was. ⛔ The last-run is deliberately
+   *  NOT advanced on this path (see ⑨): the units the round never reached must be RETRIED by the next
+   *  round, which is also why `latestResidentRoundTs` skips partial lines. */
+  const persistPartialOnBreach = (step: string): { record: Record<string, unknown>; persisted: boolean } => {
+    const partialReason = `BUDGET_MAX_WALL_MS:${step}`;
+    const record = buildRoundRecord({ partial: true, partial_reason: partialReason });
+    if (modelCalls === 0) return { record, persisted: false };
+    appendCarrierRecords(carrier, [record]);
+    return { record, persisted: true };
+  };
+
+  // ⑤ (a) ingest. A refusal here (WATERMARK_MISMATCH / an unresolved shared checkout / a missing
+  //    evidence store) is the round's own failure with the step's OWN reason code.
+  const ingestFn = opts.ingestFn ?? engine.ledger.ingestNewOutcomes;
+  const ingest = ingestFn(root, { maxPerRun: config.maxExperiences, enabled: true }) as Record<string, unknown>;
+  if (ingest.ok !== true) {
+    const reasons = Array.isArray(ingest.reasons) ? (ingest.reasons as string[]) : [];
+    return fact("failed", { ...base, enabled: true, ingest }, `ingest refused — ${reasons[0] ?? "no reason reported"} (nothing appended, last-run not advanced)`);
+  }
+  const ingested = Number(ingest.ingested ?? 0);
+  if (breached()) {
+    const wall = now() - started;
+    const p = persistPartialOnBreach("after-ingest");
+    return fact("failed", { ...base, enabled: true, ingest }, `budget breach — wall ${wall}ms >= max_wall_ms ${config.maxWallMs} after ingest (${p.persisted ? "persisted 1 PARTIAL scan-round line" : "nothing appended"}, last-run not advanced)`);
+  }
+
+  // ⑥ (b) ONE bounded reflection round, and ONLY when the ingest produced something. Zero new
+  //    Experiences ⇒ zero model calls — the property that makes two rounds on identical inputs cheap.
   if (ingested > 0) {
     if (typeof model !== "function" && typeof opts.modelFactory === "function") {
       const live = await opts.modelFactory();
@@ -1360,6 +1599,15 @@ export async function runDiscoveryMethod(root: string, opts: DiscoveryMethodRunO
       model = live.model;
       verifierModel = live.verifierModel ?? live.model;
       modelId = live.modelId ?? null;
+      // Read off the launcher that was actually built, never re-derived from the config: `pin: null` here
+      // means "this launcher was given no tree" (the empty-tools arm), which is its own reading.
+      const rp = seamParamsFor(config).reflection;
+      reflectionPinDir = live.reflectionPin ? live.reflectionPin.dir : null;
+      reflectionLauncher = {
+        tools: rp.tools,
+        max_turns: rp.maxTurns,
+        pin: live.reflectionPin ? { rev: live.reflectionPin.rev, dir: asRel(root, live.reflectionPin.dir) } : null,
+      };
     }
     if (verifierModel === null) verifierModel = model;
     // The model requirement belongs to the DEFAULT reflection implementation: a caller that injects its
@@ -1368,14 +1616,18 @@ export async function runDiscoveryMethod(root: string, opts: DiscoveryMethodRunO
       return fact("failed", { ...base, enabled: true, ingest }, "model-seam-missing: the round has new Experiences to reflect on but no model was supplied (nothing appended, last-run not advanced)");
     }
     // ⛔ TWO seams, because one counted CALL bounds different things in each step (see the header): the
-    // reflection launcher has no tools and one turn; the verifier gets `Read,Grep` and an explicit
-    // `verifier_max_turns`. Both go through `reservingModel`, so a reservation is taken BEFORE either
-    // subprocess spawns.
+    // reflection launcher carries `reflection_tools` and its own turn budget; the verifier gets
+    // `Read,Grep` and an explicit `verifier_max_turns`. Both go through `reservingModel`, so a
+    // reservation is taken BEFORE either subprocess spawns. ⛔ The reflection params come from
+    // `seamParamsFor` — the SAME function the live launcher factory (`liveDiscoveryModel`) builds its
+    // argv from, so "what the reservation records it bounded" and "what the launcher was actually run
+    // with" cannot drift (硬规则 5b).
+    const reflectionParams = seamParamsFor(config).reflection;
     const turnReader = typeof engine.reflection.parseVerifierStream === "function"
       ? (s: string) => engine.reflection.parseVerifierStream!(s)
       : undefined;
     reflectionSeam = typeof model === "function" && budget !== null
-      ? reservingModel(model, budget, { step: "reflection", tools: REFLECTION_TOOLS, max_turns: REFLECTION_MAX_TURNS }, turnReader)
+      ? reservingModel(model, budget, { step: "reflection", tools: reflectionParams.tools, max_turns: reflectionParams.maxTurns }, turnReader)
       : model;
     verificationSeam = typeof verifierModel === "function" && budget !== null
       ? reservingModel(verifierModel, budget, { step: "verification", tools: VERIFIER_TOOLS, max_turns: config.verifierMaxTurns }, turnReader)
@@ -1387,12 +1639,18 @@ export async function runDiscoveryMethod(root: string, opts: DiscoveryMethodRunO
         model: reflectionSeam,
         modelId,
         nowMs: now(),
-        // The per-round request is REDUCED to what the 24h ceiling has left. This is what makes AC (a)
-        // read as "requested 6, made 1, 5 skipped": the engine's OWN budget loop stops at the reduced
-        // number and reports the rest as `skipped_budget`. The reduction is an optimization — the
-        // AUTHORITY is the reservation inside `reflectionSeam`, which is what a concurrent process
-        // cannot get past.
-        budget: { enabled: true, maxPerRun: config.maxExperiences, maxModelCalls: effectiveMaxModelCalls, maxWallMs: config.maxWallMs },
+        // The per-round request is REDUCED twice: to what the 24h ceiling has left, and then to what is
+        // left after the VERIFICATION RESERVE is held back (Plan item 1). This is what makes the
+        // existing AC read as "requested 6, made 1, 5 skipped", and what makes the reserve read as
+        // "reflection stops at max_model_calls − verify_reserve": the engine's OWN budget loop stops at
+        // the reduced number and reports the rest as `skipped_budget`. Both reductions are optimizations
+        // — the AUTHORITY is the reservation inside `reflectionSeam`, which a concurrent process cannot
+        // get past.
+        budget: { enabled: true, maxPerRun: config.maxExperiences, maxModelCalls: reflectionMaxModelCalls, maxWallMs: config.maxWallMs },
+        // ⛔ The prompt must NAME the tree the launcher was given, or the tools it carries are decorative
+        // (Plan item 2). Read off the launcher that was actually built — `null` on the empty-tools arm and
+        // whenever a caller injected its own seam, so the prompt then renders exactly as it did before.
+        codeAccess: reflectionPinDir === null ? null : { tools: reflectionParams.tools, pinDir: reflectionPinDir },
       });
     } catch (e) {
       if (isBudgetRefused(e)) budgetRefusal = { step: "reflection", used: e.used, cap: e.cap };
@@ -1423,19 +1681,19 @@ export async function runDiscoveryMethod(root: string, opts: DiscoveryMethodRunO
       }
     }
     if (breached()) {
-      // ⛔ A breach here appends NOTHING — and that is now SAFE: the calls this step already made are on
-      // the ledger as reservations, so the next round counts them even though no `scan-round` line
-      // exists (defect ② — this is exactly the path that used to under-count).
-      return fact("failed", { ...base, enabled: true, ingest, reflection, budget_24h: budget24h }, `budget breach — wall ${now() - started}ms >= max_wall_ms ${config.maxWallMs} after reflection (nothing appended, last-run not advanced${budget === null ? "" : `; the ${budget.grantedCount} call(s) already made stay RESERVED on ${asRel(root, opts.budgetLedgerPath ?? path.join(root, BUDGET_LEDGER_REL))}`})`);
+      // ⛔ A breach here PERSISTS what reflection achieved, marked `partial:true` (Plan item 3). The
+      // calls this step already made are ALSO on the ledger as reservations, so the next round counts
+      // them whether or not a line exists (defect ② — this is exactly the path that used to under-count);
+      // the line is what stops the RESULTS from being thrown away as well.
+      const p = persistPartialOnBreach("after-reflection");
+      return fact("failed", p.record, `budget breach — wall ${p.record.wall_ms}ms >= max_wall_ms ${config.maxWallMs} after reflection (${p.persisted ? `persisted 1 PARTIAL scan-round line with the ${modelCalls} call(s) already made` : "nothing appended (no call completed)"}, last-run not advanced${budget === null ? "" : `; the ${budget.grantedCount} call(s) already made stay RESERVED on ${asRel(root, opts.budgetLedgerPath ?? path.join(root, BUDGET_LEDGER_REL))}`})`);
     }
   }
 
-  // ⑦ (c) generalization against held-out cases that carry an `evaluation_pin`. Bounded by the SAME
-  //    model-call budget as the reflection round, and skipped entirely when nothing new was minted.
-  const verdicts: Record<string, unknown>[] = [];
-  const promotions: string[] = [];
-  const retirements: string[] = [];
-  let verdictsSkipped = 0;
+  // ⑦ (c) generalization against held-out cases that carry an `evaluation_pin`. Bounded by the round's
+  //    WHOLE per-round budget (`effectiveMaxModelCalls`, NOT the reflection share): the reserve plus
+  //    whatever reflection left unused is exactly what this step is allowed to spend. Skipped entirely
+  //    when nothing new was minted.
   /** A verification step that could not be completed (a budget refusal or a lock/engine error) stops
    *  the candidate×case loops without discarding the round. `verdictError` non-null ⇒ the round reports
    *  `failed` AFTER the loops (nothing appended), because "the verifier died" must not read as "no
@@ -1447,8 +1705,9 @@ export async function runDiscoveryMethod(root: string, opts: DiscoveryMethodRunO
   // ⛔ `null` (not `[]`) is the "not read" value: a round that validated nothing must not report the
   // population it never looked at as "0 held-out cases" (硬规则 3b).
   // The default reader is async (it resolves the ledger module); a test seam may stay synchronous, so
-  // the call is awaited either way.
-  const heldOut = candidates.length > 0 ? await (opts.heldOutFn ?? readHeldOutCases)(root) : null;
+  // the call is awaited either way. ⛔ Assigned to the HOISTED binding, not re-declared: the partial
+  // record a wall breach persists reads it.
+  heldOut = candidates.length > 0 ? await (opts.heldOutFn ?? readHeldOutCases)(root) : null;
   if (heldOut !== null && heldOut.ok) {
     const registryRead = engine.registry.readMethodRegistry(root, { history: true });
     const registry = Array.isArray(registryRead.history) ? registryRead.history : [];
@@ -1542,9 +1801,10 @@ export async function runDiscoveryMethod(root: string, opts: DiscoveryMethodRunO
       }
     }
     if (breached()) {
-      // Same as the post-reflection breach: nothing is appended, and the reservations already granted
-      // keep the spent calls visible to the next round (defect ②).
-      return fact("failed", { ...base, enabled: true, ingest, reflection, budget_24h: budget24h }, `budget breach — wall ${now() - started}ms >= max_wall_ms ${config.maxWallMs} during generalization (nothing appended, last-run not advanced)`);
+      // Same as the post-reflection breach: the PARTIAL record is persisted (Plan item 3) and the
+      // reservations already granted keep the spent calls visible to the next round (defect ②).
+      const p = persistPartialOnBreach("during-generalization");
+      return fact("failed", p.record, `budget breach — wall ${p.record.wall_ms}ms >= max_wall_ms ${config.maxWallMs} during generalization (${p.persisted ? `persisted 1 PARTIAL scan-round line with the ${modelCalls} call(s) and ${verdicts.length} verdict(s) already made` : "nothing appended (no call completed)"}, last-run not advanced)`);
     }
     if (verdictError !== null) {
       return fact("failed", { ...base, enabled: true, ingest, reflection, budget_24h: budget24h }, `${verdictError} (nothing appended, last-run not advanced)`);
@@ -1555,72 +1815,10 @@ export async function runDiscoveryMethod(root: string, opts: DiscoveryMethodRunO
     reflection = { ...(reflection ?? {}), held_out_unreadable: heldOut.reason };
   }
 
-  // ⑧ the round's ONE line.
-  const wallMs = now() - started;
-  const cost = engine.reflection.computeReflectionCost(calls, { wall_ms: wallMs }) as Record<string, unknown>;
-  // ⛔ THE ROUND'S RESERVATION BLOCK. Its presence is what tells `modelCallsInWindow` that this line's
-  // calls are already counted ONE FOR ONE by the ledger, so the legacy carrier term must skip it — the
-  // two readings must never both claim the same call (that would be an over-count, which is the
-  // opposite failure of the one this task fixes, and just as wrong).
-  const grantedThisRound = budget === null ? 0 : budget.grantedCount;
-  // ⛔ `refused` = how many of the round's per-round `max_model_calls` request the 24h ceiling removed.
-  // Stated explicitly because it is a DEFINITION, not a raw counter: the engine stops at the reduced
-  // budget, so it never reports the extra calls as "refused" itself. When nothing was capped by the
-  // ceiling (`effectiveMaxModelCalls === config.maxModelCalls`), the answer is 0 — no call was refused.
-  const cappedBy24h = budget !== null && effectiveMaxModelCalls < config.maxModelCalls;
-  const reservationsBlock = budget === null
-    ? null
-    : {
-        cap: budget.cap,
-        used_at_start: budget24h ? budget24h.used : null,
-        remaining_at_start: remainingAtStart,
-        requested_max_model_calls: config.maxModelCalls,
-        effective_max_model_calls: effectiveMaxModelCalls,
-        granted: grantedThisRound,
-        refused: cappedBy24h ? Math.max(0, config.maxModelCalls - grantedThisRound) : 0,
-        refusal_reason: cappedBy24h ? BUDGET_REFUSAL_CODE : null,
-        mid_round_refusal: budgetRefusal,
-        ledger: asRel(root, opts.budgetLedgerPath ?? path.join(root, BUDGET_LEDGER_REL)),
-      };
-  const round: Record<string, unknown> = {
-    kind: "scan-round",
-    routine: DISCOVERY_METHOD_NAME,
-    // ⛔ The carrier line says WHO ran it, so a reader of `.quay/discovery-method-findings.jsonl` can tell
-    // a production round from a hand-run/test one without cross-referencing anything (硬规则 9 — the two
-    // must be distinguishable on the record itself, not only in the head of whoever ran it).
-    invoked_by: invokedBy,
-    ts: new Date(now()).toISOString(),
-    // ⛔ The cadence that ACTUALLY governed this round, and the reading the window came from, on the line
-    // itself (the SAME two objects every Fact of this round carries — see intervalInfo/dueInfo): a reader
-    // asking "was this a 60m round or a 360m one, and what told us it was due?" gets both answers without
-    // re-reading a config that may since have changed or re-deriving the basis from the file's order.
-    interval: intervalInfo,
-    due: dueInfo,
-    budget_24h: budget24h,
-    reservations: reservationsBlock,
-    wall_ms: wallMs,
-    ingested: { experiences: ingested, scanned: Number(ingest.scanned ?? 0), duplicates: Number(ingest.duplicates ?? 0), advanced_to: ingest.advanced_to ?? null },
-    reflected: reflection,
-    candidates: { minted: candidates.length, persisted: persisted.filter((p) => p.ok === true).length, records: persisted },
-    held_out: {
-      read: heldOut !== null,
-      cases: heldOut === null || !heldOut.ok ? null : heldOut.cases.length,
-      unreadable: heldOut !== null && !heldOut.ok ? heldOut.reason : null,
-    },
-    verdicts: {
-      total: verdicts.length,
-      evaluated: verdicts.filter((v) => v.outcome === "evaluated").length,
-      correct: verdicts.filter((v) => v.correct === true).length,
-      not_evaluated: verdicts.filter((v) => v.outcome === "not-evaluated").length,
-      skipped_budget: verdictsSkipped,
-      records: verdicts,
-    },
-    promotions,
-    retirements,
-    model_calls: modelCalls,
-    tokens: cost.tokens,
-    cost_usd: cost.cost_usd,
-  };
+  // ⑧ the round's ONE line. ⛔ Built by the SAME builder every wall-breach path uses (Plan item 3), so a
+  //    completed round and a partial one cannot drift apart in shape — the only difference is the
+  //    `partial`/`partial_reason` pair the breach paths add.
+  const round: Record<string, unknown> = buildRoundRecord({});
   appendCarrierRecords(carrier, [round]);
   // ⑨ ⛔ THE SPLIT: only a RESIDENT round advances the production window. A manual round's line lands on
   //    the carrier exactly like a production one (same data, and its `invoked_by` names the difference),
@@ -1635,6 +1833,13 @@ export async function runDiscoveryMethod(root: string, opts: DiscoveryMethodRunO
   //    of its own. The line still lands (it PERSISTS what was done); only the CLOCK is left alone.
   if (resident && budgetRefusal === null) writeLastRunStamped(lastRunPath, DISCOVERY_METHOD_NAME, now(), invokedBy);
 
+  // The round's own line is the ONE reading of its reservation block / wall time — the two Fact strings
+  // below read them BACK off the record rather than re-deriving them, so "what was persisted" and "what
+  // the Fact says" cannot disagree.
+  const reservationsBlock = round.reservations as Record<string, unknown> | null;
+  const wallMs = round.wall_ms as number;
+  const grantedThisRound = reservationsBlock === null ? 0 : Number(reservationsBlock.granted ?? 0);
+
   if (budgetRefusal !== null) {
     return fact(
       "not-evaluated",
@@ -1646,7 +1851,7 @@ export async function runDiscoveryMethod(root: string, opts: DiscoveryMethodRunO
   return fact(
     "verified",
     round,
-    `round ran (invoked_by:${invokedBy}, interval ${intervalMinutes}m): ingested ${ingested} experience(s), reflected ${reflection ? Number(reflection.decisions ?? 0) : 0} unit(s), minted ${candidates.length} candidate(s), ${verdicts.filter((v) => v.outcome === "evaluated").length} evaluated verdict(s) (${verdicts.filter((v) => v.correct === true).length} correct), ${promotions.length} promotion(s), ${retirements.length} retirement(s), ${modelCalls} model call(s), wall ${wallMs}ms; appended 1 scan-round line to ${asRel(root, carrier)}${resident ? " and advanced the production last-run" : " — MANUAL: the production last-run in .quay/routine-last-run.json was NOT advanced (this round did not move production's clock)"}${reservationsBlock === null ? "" : ` [24h ledger: cap ${reservationsBlock.cap}, used ${reservationsBlock.used_at_start} at round start, ${reservationsBlock.granted} reserved, ${reservationsBlock.refused} refused${reservationsBlock.refusal_reason === null ? "" : ` (${reservationsBlock.refusal_reason})`}]`}${revertedNote}${legacyNote}${forcedPastDue ? " [--force: the due gate was ignored for this round only]" : ""}`,
+    `round ran (invoked_by:${invokedBy}, interval ${intervalMinutes}m): ingested ${ingested} experience(s), reflected ${reflection ? Number(reflection.decisions ?? 0) : 0} unit(s), minted ${candidates.length} candidate(s), ${verdicts.filter((v) => v.outcome === "evaluated").length} evaluated verdict(s) (${verdicts.filter((v) => v.correct === true).length} correct), ${promotions.length} promotion(s), ${retirements.length} retirement(s), ${modelCalls} model call(s), wall ${wallMs}ms; appended 1 scan-round line to ${asRel(root, carrier)}${resident ? " and advanced the production last-run" : " — MANUAL: the production last-run in .quay/routine-last-run.json was NOT advanced (this round did not move production's clock)"}${reservationsBlock === null ? "" : ` [24h ledger: cap ${reservationsBlock.cap}, used ${reservationsBlock.used_at_start} at round start, ${reservationsBlock.granted} reserved (reflection <= ${reservationsBlock.reflection_max_model_calls}, verify_reserve ${reservationsBlock.verify_reserve}), ${reservationsBlock.refused} refused${reservationsBlock.refusal_reason === null ? "" : ` (${reservationsBlock.refusal_reason})`}]`}${revertedNote}${legacyNote}${forcedPastDue ? " [--force: the due gate was ignored for this round only]" : ""}`,
   );
 }
 
@@ -1709,15 +1914,32 @@ export function discoveryMethodRoutineFromConfig(
   intervalMinutes: number | null;
   intervalUntil: number | null;
   maxModelCallsPer24h: number | null;
+  /** The PER-ROUND values that were assembled, so the host driver can print what it actually carries
+   *  instead of leaving "what is the round's quota?" readable only by re-parsing the config by hand.
+   *  `null` when the section is absent/malformed/disabled (nothing was assembled to report). */
+  maxExperiences: number | null;
+  maxModelCalls: number | null;
+  maxWallMs: number | null;
+  /** The calls held back from reflection for generalization (plan item 1), and the per-round reflection
+   *  ceiling that follows from it. */
+  verifyReserve: number | null;
+  reflectionMaxModelCalls: number | null;
+  /** The reflection launcher's tools/turns as ASSEMBLED (declared key, else the stated default). */
+  reflectionTools: string | null;
+  reflectionMaxTurns: number | null;
   /** The verifier's `--max-turns` that WAS assembled (the declared key, else the stated default). */
   verifierMaxTurns: number | null;
-  /** The computable worst case the host driver reports at startup: `cap × max(REFLECTION_MAX_TURNS,
-   *  verifier_max_turns)` API TURNS per 24h. `null` when there is no ceiling, or nothing was assembled. */
+  /** The computable worst case the host driver reports at startup: `cap × max(reflection turns,
+   *  verifier_max_turns)` API TURNS per 24h. ⛔ It uses the reflection launcher's EFFECTIVE turns (1 in
+   *  the empty-tools arm, `reflection_max_turns` when tools are on), so turning code access on cannot
+   *  raise the product without the number here moving with it. `null` when there is no ceiling, or
+   *  nothing was assembled. */
   worstCaseTurns24h: number | null;
 } {
   const read = readIn ?? readDiscoveryMethodConfig(root);
   const cfg = read.config;
   const cap = cfg ? cfg.maxModelCallsPer24h : null;
+  const seam = cfg ? seamParamsFor(cfg).reflection : null;
   return {
     routine: read.present ? buildDiscoveryMethodRoutine(root, read, opts) : null,
     error: read.error,
@@ -1726,8 +1948,15 @@ export function discoveryMethodRoutineFromConfig(
     intervalMinutes: cfg && typeof cfg.trigger.minutes === "number" ? cfg.trigger.minutes : null,
     intervalUntil: cfg ? cfg.intervalUntil : null,
     maxModelCallsPer24h: cap,
+    maxExperiences: cfg ? cfg.maxExperiences : null,
+    maxModelCalls: cfg ? cfg.maxModelCalls : null,
+    maxWallMs: cfg ? cfg.maxWallMs : null,
+    verifyReserve: cfg ? cfg.verifyReserve : null,
+    reflectionMaxModelCalls: cfg ? Math.max(0, cfg.maxModelCalls - cfg.verifyReserve) : null,
+    reflectionTools: seam ? seam.tools : null,
+    reflectionMaxTurns: seam ? seam.maxTurns : null,
     verifierMaxTurns: cfg ? cfg.verifierMaxTurns : null,
-    worstCaseTurns24h: cfg && cap !== null ? cap * Math.max(REFLECTION_MAX_TURNS, cfg.verifierMaxTurns) : null,
+    worstCaseTurns24h: cfg && cap !== null && seam !== null ? cap * Math.max(seam.maxTurns, cfg.verifierMaxTurns) : null,
   };
 }
 
@@ -1736,11 +1965,34 @@ export function discoveryMethodRoutineFromConfig(
  *  (and testable) without spawning anything. `liveDiscoveryModel` is the only thing that turns them into
  *  argv, by handing each pair to `liveModelFactory`. */
 export interface DiscoveryModelSeamParams { tools: string; maxTurns: number; timeoutMs: number }
-export function seamParamsFor(config: { verifierMaxTurns: number } | null): { reflection: DiscoveryModelSeamParams; verification: DiscoveryModelSeamParams } {
+export function seamParamsFor(config: { verifierMaxTurns: number; reflectionTools?: string; reflectionMaxTurns?: number } | null): { reflection: DiscoveryModelSeamParams; verification: DiscoveryModelSeamParams } {
+  // ⛔ ONE function, TWO consumers: `liveDiscoveryModel` builds the launcher argv from this, and
+  // `runDiscoveryMethod` records exactly these `{tools, max_turns}` on each reservation. A second
+  // derivation of "what the reflection call is bounded by" is a second thing to keep in sync (硬规则 5b).
+  // ⛔ An EMPTY tool set pins the turn budget to REFLECTION_MAX_TURNS: with no tools there is nothing to
+  // iterate on, so `reflection_max_turns` (a budget FOR iterations) does not apply — and this is what
+  // makes `reflection_tools: ""` byte-identical to the pre-change launcher argv (the baseline arm).
+  const tools = config && typeof config.reflectionTools === "string" ? config.reflectionTools : DEFAULT_REFLECTION_TOOLS;
+  const maxTurns = tools === ""
+    ? REFLECTION_MAX_TURNS
+    : (config && Number.isInteger(config.reflectionMaxTurns) ? (config.reflectionMaxTurns as number) : DEFAULT_REFLECTION_MAX_TURNS);
   return {
-    reflection: { tools: REFLECTION_TOOLS, maxTurns: REFLECTION_MAX_TURNS, timeoutMs: 300_000 },
+    reflection: { tools, maxTurns, timeoutMs: 300_000 },
     verification: { tools: VERIFIER_TOOLS, maxTurns: config ? config.verifierMaxTurns : DEFAULT_VERIFIER_MAX_TURNS, timeoutMs: 300_000 },
   };
+}
+
+/** The reflection launcher's PIN — the stripped tree the reflection reads when `reflection_tools` is
+ *  non-empty. Materialised at the checkout's HEAD (the code as it is NOW, which is what a candidate
+ *  method is about), and only ONCE per round. The `rev` is READ from git, never defaulted: an
+ *  unresolvable HEAD is a refusal, not "reflect on nothing". */
+export function reflectionPinRev(root: string): { ok: boolean; rev: string | null; reason: string | null } {
+  try {
+    const rev = execFileSync("git", ["-C", root, "rev-parse", "HEAD"], { encoding: "utf8", stdio: ["ignore", "pipe", "ignore"] }).trim();
+    return rev ? { ok: true, rev, reason: null } : { ok: false, rev: null, reason: "HEAD_EMPTY" };
+  } catch (e) {
+    return { ok: false, rev: null, reason: `HEAD_UNRESOLVED:${String((e as Error)?.message ?? e).slice(0, 200)}` };
+  }
 }
 
 /** The production model seams: TWO live launchers, resolved lazily so a workspace that never enables the
@@ -1750,23 +2002,52 @@ export function seamParamsFor(config: { verifierMaxTurns: number } | null): { re
  *  explicit turn budget. One seam for both is what made "what does a counted call bound?" unanswerable. */
 export async function liveDiscoveryModel(
   root: string,
-  config: { verifierMaxTurns: number } | null = null,
-): Promise<{ ok: boolean; model?: ModelFn; verifierModel?: ModelFn; modelId?: string | null; reason?: string }> {
-  let liveModelFactory: DiscoveryReflectionModule["liveModelFactory"];
+  config: { verifierMaxTurns: number; reflectionTools?: string; reflectionMaxTurns?: number } | null = null,
+  opts: { pinTmpRoot?: string } = {},
+): Promise<{ ok: boolean; model?: ModelFn; verifierModel?: ModelFn; modelId?: string | null; reason?: string; reflectionPin?: { rev: string; dir: string } | null }> {
+  let modules: DiscoveryModules;
   try {
-    liveModelFactory = (await loadDiscoveryModules(root)).reflection.liveModelFactory;
+    modules = await loadDiscoveryModules(root);
   } catch (e) {
     return { ok: false, reason: (e as Error).message };
   }
+  const liveModelFactory = modules.reflection.liveModelFactory;
   const params = seamParamsFor(config);
-  const build = async (p: DiscoveryModelSeamParams): Promise<{ ok: boolean; run?: ModelFn; model?: string | null; reason?: string }> =>
-    (await liveModelFactory({ root, tools: p.tools, maxTurns: p.maxTurns, timeoutMs: p.timeoutMs })) as { ok: boolean; run?: ModelFn; model?: string | null; reason?: string };
-  const reflection = await build(params.reflection);
+
+  // ⛔ THE REFLECTION'S PIN (Plan item 2). When reflection carries tools it reads CODE, and the code it
+  // must read is a FIXED tree — never the live checkout, which moves under the round (the same binding
+  // the verifier's stripped pin enforces). Materialised ONCE per round at HEAD, stripped with the SAME
+  // forbidden-directory list the verifier uses (reused by import from the engine module, 硬规则 5b).
+  // ⛔ A pin that cannot be materialised is a REFUSAL, never a silent fallback to the no-tools arm: a
+  // reflection that CANNOT read the code it reflects on is exactly the mechanical summary-shuffler this
+  // task removes, and discovering that by quietly degrading would be the failure wearing success's shape.
+  // ⛔ The empty-tools arm materialises nothing — it is the baseline arm, and it must stay byte-identical.
+  let reflectionPin: { rev: string; dir: string } | null = null;
+  if (params.reflection.tools !== "") {
+    const head = reflectionPinRev(root);
+    if (!head.ok) return { ok: false, reason: `REFLECTION_PIN_REFUSED:${head.reason}` };
+    const pinTmp = opts.pinTmpRoot ?? process.env[PIN_TMP_ENV] ?? os.tmpdir();
+    let dir: string;
+    try {
+      dir = fs.mkdtempSync(path.join(pinTmp, `dm-reflect-pin-${head.rev!.slice(0, 8)}-`));
+    } catch (e) {
+      return { ok: false, reason: `REFLECTION_PIN_REFUSED:PIN_TMP_UNWRITABLE:${String((e as Error)?.message ?? e).slice(0, 200)}` };
+    }
+    const pinned = modules.reflection.materializeStrippedPin({ root, rev: head.rev, dir });
+    if (!pinned.ok) return { ok: false, reason: `REFLECTION_PIN_REFUSED:${String(pinned.reason ?? "PIN_MATERIALIZE_FAILED")}` };
+    reflectionPin = { rev: head.rev as string, dir: (pinned.dir ?? dir) as string };
+  }
+
+  const build = async (p: DiscoveryModelSeamParams, pinDir: string | null): Promise<{ ok: boolean; run?: ModelFn; model?: string | null; reason?: string }> =>
+    (await liveModelFactory({ root, tools: p.tools, maxTurns: p.maxTurns, timeoutMs: p.timeoutMs, pinDir })) as { ok: boolean; run?: ModelFn; model?: string | null; reason?: string };
+  const reflection = await build(params.reflection, reflectionPin === null ? null : reflectionPin.dir);
   if (!reflection.ok || typeof reflection.run !== "function") return { ok: false, reason: String(reflection.reason ?? "MODEL_SEAM_MISSING") };
-  const verification = await build(params.verification);
+  // The verifier's own pin is PER HELD-OUT CASE (its `evaluation_pin`), so its launcher argv is built
+  // without one here — its tree is supplied by the round at call time.
+  const verification = await build(params.verification, null);
   // The verifier seam failing is its OWN refusal, named — it is not silently the reflection launcher.
   if (!verification.ok || typeof verification.run !== "function") return { ok: false, reason: `VERIFIER_MODEL_SEAM_MISSING:${String(verification.reason ?? "MODEL_SEAM_MISSING")}` };
-  return { ok: true, model: reflection.run, verifierModel: verification.run, modelId: reflection.model ?? null };
+  return { ok: true, model: reflection.run, verifierModel: verification.run, modelId: reflection.model ?? null, reflectionPin };
 }
 
 // ── CLI (the one-shot entry AC3 drives) ─────────────────────────────────────────────────────────────
@@ -1792,7 +2073,7 @@ async function main(argv: string[]): Promise<number> {
   let verifierModel: ModelFn | null = null;
   let modelId: string | null = null;
   if (!argv.includes("--no-model")) {
-    const live = await liveDiscoveryModel(root, read.config);
+    const live = await liveDiscoveryModel(root, read.config, pinTmpRoot === undefined ? {} : { pinTmpRoot });
     if (!live.ok) {
       process.stderr.write(`discovery-method-routine: ${live.reason}\n`);
       return 2;
