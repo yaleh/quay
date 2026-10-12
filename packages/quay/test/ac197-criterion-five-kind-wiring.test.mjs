@@ -241,9 +241,10 @@ test("a primitive module that no longer exports commitKindFile is refused as wra
 
 test("the block is structural — it does not re-pin on the commitStoreWrite identifier", () => {
   const block = predicateBlock();
-  // POSITION, not keyword (hard rule 2): the block's own COMMENT quotes the old text verbatim as the
-  // rationale for the re-anchor, so a whole-block substring check would fire on the explanation rather
-  // than on an executable line. Only lines the shell would actually RUN are inspected.
+  // POSITION, not keyword (hard rule 2): the block's own COMMENT *describes* the old identifier-keyed
+  // text as the rationale for the re-anchor — the verbatim predicate lives in the record's `origin`, not
+  // in the criterion — so a whole-block substring check would fire on the explanation rather than on an
+  // executable line. Only lines the shell would actually RUN are inspected.
   const executable = block
     .split("\n")
     .filter((l) => !l.trimStart().startsWith("#"))
