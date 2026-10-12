@@ -2,7 +2,7 @@
 id: gap-discovery-method-per-round-quota-verify-reserve-deep-reflection
 title: "discovery-method per-round quota after 24h=240: verification reserve,
   bounded code-reading reflection, partial persistence on wall breach"
-status: ready
+status: needs-human
 labels:
   - gap
   - discovery-method
@@ -207,3 +207,14 @@ Independently confirmed on the live production round: the manual round's line la
 - 未落地原因：step=suite: __PERFILE__ duration_ms=32924 plugin/test/prod-data-audit.test.mjs passed=false end_ms=1791829065438 cpu_ms=34036.67 mem_peak_kb=1873720
 - run_id：wk-prod-anchor
 - session_id：93355eb5-4eb6-4a83-90dd-85a89407a2b7
+
+## Needs-Human
+
+**执行 2026-10-12T18:21:18.302Z — 停派终止（失败无法归因，⛔ 不再重派）**
+
+- 阻碍原因：exited-not-landed 失败无法归因（基建/契约疑似，非实现缺陷）——停止重派，⛔ 不再拿新会话撞同一堵墙：suite red could not be attributed to any failing test file in 2 consecutive rounds (bounded to at most one retry) — infra/contract suspected, not an implementable defect (parser attributed 1 failing file(s) in this round: plugin/test/prod-data-audit.test.mjs); stopping instead of spending another worker session
+- 失败步/判词：step=suite: __PERFILE__ duration_ms=32924 plugin/test/prod-data-audit.test.mjs passed=false end_ms=1791829065438 cpu_ms=34036.67 mem_peak_kb=1873720
+- run_id：wk-prod-anchor
+- session_id：93355eb5-4eb6-4a83-90dd-85a89407a2b7
+- suite 日志：/data/home/yale/work/quay/.quay/fan-in-suite-gap-discovery-method-per-round-quota-verify-reserve-deep-reflection~wk-prod-anchor~1791828953643-00613d.log
+- fan-in 日志：/data/home/yale/work/quay/.quay/fan-in-gap-discovery-method-per-round-quota-verify-reserve-deep-reflection-wk-prod-anchor.log
