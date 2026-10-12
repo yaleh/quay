@@ -26,7 +26,7 @@ extra:
 4. **电路断路器**：若同一个任务连续 N 轮（N 可配置，建议与现有 `RETRY_CAP_DEFAULT` 对齐）都因**同一个失败签名**（同一组既存红点 id）被挡在 suite 步，且该签名在人工/Manager 介入前没有变化，停止自动重派（现有机制对 `ac-not-checked-shortcircuit` 已有类似的"烧到 RETRY_CAP 转 needs-human"行为，但目前**没有**对"suite 步连续撞同一个签名"做同样的识别与停止——它会继续 count-and-retry，而不会主动提示"这是一个三方循环死锁，需要人决定落地顺序"）。
 5. **明确非目标**：不改变任何既存判据（D1-D5、authority 的拒绝面等）的实质要求；不允许"既存红"这一档被滥用成通用的 suite 豁免；不与现有 `isOuterVerificationItem` 合并或复用（那是 AC-completion 语义的出口，本提案是 suite-gate 本身的出口，两者必须分开，`isBodyLanded` 等读 `isOuterVerificationItem` 的下游逻辑不应意外读到这一档）。
 
-## AC（草拟，由实现者细化为可执行断言）
+## AC
 
 - [ ] 一个正控夹具：两个任务分支各修一个既存红，suite 步能在"既存红点集合逐字不变"时继续推进，不是硬红
 - [ ] 一个负控夹具：任务分支自己新增了一个不在既存红点集合里的失败，不得被豁免
@@ -40,7 +40,7 @@ extra:
 
 ## Touches
 
-（留给实现者按 worker-driver.ts 的真实结构填写——本任务由 quay-fleet 项目的巡检会话代为登记，不熟悉 quay 项目内部实现细节，不代填 Touches）
+- `tasks/gap-fanin-suite-gate-no-baseline-equivalent-exception.md`
 
 ## Origin
 
