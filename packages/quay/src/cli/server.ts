@@ -35,7 +35,6 @@
 
 import fs from "node:fs";
 import path from "node:path";
-import os from "node:os";
 import { spawn } from "node:child_process";
 import { findConfig } from "../config.ts";
 import {
@@ -73,29 +72,17 @@ import { resolveServeEnvelope, scopeLaunchArgv, serveScopeUnavailableReport } fr
 import { serveHostLoadedVersionReading } from "../loaded-version.ts";
 import type { CliCtx } from "./context.ts";
 
-/** In-memory ceiling for the spawned serve host (2026-09-17 global-OOM remediation).
- *
- *  WHY: a `quay serve` host was measured at 0.65–1.7 GB RSS (plus a ~0.33 GB `quay-native mcp`
- *  child). Several of them, on top of the driver fleet and concurrent suites, exhausted this 16 GB
- *  box — a global (CONSTRAINT_NONE) OOM in which the kernel killed dbus-daemon, systemd and an
- *  unrelated chrome batch. Uncapped, one leaked host can grow unbounded and take the machine with it.
- *
- *  ⛔ NOT a literal (硬规则 4 推论二): the ceiling is DERIVED from the host's MemTotal. A literal
- *  that happens to equal a fraction of one machine (e.g. `MemoryMax=6G`, still un-remediated in
- *  full-suite-runner.ts) silently becomes a real limit — or no limit — on another. Floor 512 MB so
- *  a small host still boots; cap 4 GB so a huge host cannot let one instance eat the box.
- *
- *  A host that trips this aborts ITSELF (V8 OOM) instead of dragging the kernel into a global OOM —
- *  a loud, attributable failure instead of an unattributable one. */
-export function serveHeapCapMb(): number {
-  return Math.min(4096, Math.max(512, Math.round(os.totalmem() / (1024 * 1024) / 5)));
-}
-
-/** The `NODE_OPTIONS` value for a spawned serve host: preserve whatever the caller already set
- *  (⛔ never clobber a pre-existing flag) and append the host-derived heap ceiling. */
-export function withServeHeapCap(existing: string | undefined): string {
-  return [existing, `--max-old-space-size=${serveHeapCapMb()}`].filter(Boolean).join(" ");
-}
+// The serve host's in-memory ceiling is SINGLE-SOURCED in the Core leaf `../serve-heap-cap.ts`
+// (`.quay/routine-findings.jsonl` finding `serveheapcapmb-cross-layer-copy`, routine
+// `semantic-dedup-scan`, runId `semantic-dedup-scan-1791821278116`): THIS file's `spawnHost` and
+// `plugin/scripts/start-drivers.ts`'s `startServe` are the two spawn sites of the SAME host, and each
+// used to carry a byte-identical copy of the derivation (`4096`/`512`/`5` are incident-derived
+// policy, not a leaf constant, so the copies could silently retune apart). ⛔ One implementation, not
+// two (硬规则 5b). The names stay exported HERE because that is the surface this module has always
+// had; the kernel imports the LEAF directly (⛔ never this CLI module — the leaf's header records the
+// measured cost of that edge).
+import { serveHeapCapMb, withServeHeapCap } from "../serve-heap-cap.ts";
+export { serveHeapCapMb, withServeHeapCap };
 
 /** The two services stage A2 merges; both must be present and carry the host pid for `running`. */
 const REQUIRED_SERVICES = ["web", "control"] as const;
