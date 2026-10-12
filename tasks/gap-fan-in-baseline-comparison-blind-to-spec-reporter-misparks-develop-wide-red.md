@@ -3,7 +3,7 @@ id: gap-fan-in-baseline-comparison-blind-to-spec-reporter-misparks-develop-wide-
 title: fan-in baseline comparison parses only TAP 'not ok' — spec-reporter ✖ /
   'test at file:line' ⇒ not-evaluated ⇒ develop-wide red misparked as
   unattributable needs-human
-status: todo
+status: ready
 labels:
   - gap
   - defect
