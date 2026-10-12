@@ -89,6 +89,11 @@ import { resolveAcceptanceTimeoutMs } from "./kernel/gate-run-options.ts";
 import { queryGateEvents } from "./gate/gate-event-store.ts";
 import { commitStoreWrite, commitStoreBatch, resolveGitRoot, type CommitOutcome } from "./store-commit.ts";
 import { criterionFidelityVerdict, type FidelityInvokeJudge } from "./criterion-fidelity.ts";
+// The criterion CAPABILITY judge (gap-criterion-side-effect-unguarded-at-write-and-execution-surface):
+// the THIRD activation/execution question, after evaluability (P6) and fidelity. "Can this criterion
+// RUN?" and "can it be FALSE?" do not ask "is it a READING or an ACTION?" — and on the unattended
+// re-run paths (I5, the frozen rotation) an ACTION is an open-ended writer, not a check.
+import { judgeCriterionCapability, capabilityRefusalReason, readCapabilityDeclaration, type CapabilityJudgment } from "./gate/criterion-capability.ts";
 import { resolvePluginRoot } from "./plugin-root.ts";
 import { GOAL_STATUSES } from "./abi.ts";
 import { mergeEnv } from "./kernel/env-merge.ts";
@@ -124,6 +129,20 @@ export type CriterionPhase = "pre-merge" | "post-merge";
 
 const GOAL_ID_RE = /^GOAL-\d{3,}$/;
 const AC_ID_RE = /^AC-\d{3,}$/;
+
+/**
+ * The execution-surface capability gate, as a function of (criterion, the tree it will run in, the
+ * workspace that owns it). Module-level because BOTH the store's four `runAcceptance` sites and the
+ * standalone CLI's `gate` verb need it, and a second copy of the predicate is exactly the drift this
+ * repository keeps removing (hard rule 5b). Returns null when the criterion is a reading.
+ */
+function capabilityRefusalAt(criterion: string, criterionCwd: string, workspaceRoot: string): CapabilityJudgment | null {
+  const j = judgeCriterionCapability(criterion, {
+    root: criterionCwd,
+    declaration: readCapabilityDeclaration(workspaceRoot),
+  });
+  return j.capability === "read-only" ? null : j;
+}
 
 // RE-ENTRANCY GUARD env var (乙, gap-goal-achieved-but-failing-no-handler). While `checkAchievedFailing`
 // is running a criterion, it sets this in process.env; runAcceptance's spawnSync (no `env` override)
@@ -1747,6 +1766,26 @@ export function createGoalStore(
 
   const assertSafeStatus = makeAssertSafeStatus("goal", VALID_GOAL_STATUSES);
 
+  // ── the execution-surface CAPABILITY gate (gap-criterion-side-effect-unguarded-at-write-and-execution-surface) ─
+  // EVERY `runAcceptance` call in this file goes through here first (there are four; the two UNATTENDED
+  // ones — I5 `checkAchievedFailing` and the frozen rotation `sweepFrozen` — are the ones that turn a
+  // side-effecting criterion into a permanent, unwatched writer). The gate is what makes
+  // 「criterion 必须是读数」 a MECHANISM rather than a convention: a caller who has never heard of this
+  // rule still cannot get a writing criterion executed, because the refusal happens BEFORE the spawn.
+  //
+  // ⛔ Failure is fail-closed and ORDERED (declared > uncertifiable): a criterion that is both is
+  // reported as the declared capability, which is the stronger and more actionable statement. Both
+  // refusals carry a stable `code`; callers branch on the code, never on the message.
+  //
+  // The DECLARATION is the workspace's (`<root>/.quay/criterion-capabilities.json`) — read from the
+  // goal store's own parent, ⛔ never from the criterion's cwd, because a branch-mode criterion runs
+  // on a worktree that need not carry the declaration. The ARTIFACTS, by contrast, resolve against
+  // the criterion's cwd, which is the tree the command will actually run in.
+  const workspaceRootForCapability = path.dirname(goalDir);
+  function capabilityRefusal(criterion: string, criterionCwd: string): CapabilityJudgment | null {
+    return capabilityRefusalAt(criterion, criterionCwd, workspaceRootForCapability);
+  }
+
   function toViewModel(
     frontmatter: GoalFrontmatter,
     body: string,
@@ -1987,7 +2026,7 @@ export function createGoalStore(
   // `check --staleness` is pure-read) means the 8 real achieved criteria that call
   // `check --staleness`/`list`/`get` never even reach this path; 乙 is defense-in-depth for a
   // future criterion that calls the criterion-runner itself.
-  function checkAchievedFailing(): { achievedButFailing: string[]; evaluated: boolean; scopeSize: number; inScope: string[] } {
+  function checkAchievedFailing(): { achievedButFailing: string[]; capabilityRefused: Array<{ id: string; code: string; reason: string }>; evaluated: boolean; scopeSize: number; inScope: string[] } {
     // Enumerate the in-scope set FIRST (pure-read — no criterion runs): achieved ACs under ACTIVE
     // goals with a non-empty criterion. `scopeSize` is that count, and it is what makes "empty
     // scope" (0 active goals / 0 achieved ACs under them) field-distinguishable from "ran N criteria
@@ -2016,6 +2055,11 @@ export function createGoalStore(
       return { achievedButFailing: [], evaluated: false, scopeSize, inScope: inScopeIds };
     }
     const achievedButFailing: string[] = [];
+    // The criteria this guard REFUSED to spawn — enumerated, ⛔ never folded into
+    // `achievedButFailing`: "we would not run it" is a different fact from "we ran it and it is
+    // false", and collapsing them would assert something about a criterion nobody executed
+    // (hard rule 3b).
+    const capabilityRefused: Array<{ id: string; code: string; reason: string }> = [];
     // Criterion cwd = the git root (robust rev-parse, ⛔ not path.dirname — hard rule 4 corollary 2),
     // falling back to goalDir's parent only when not inside a git work tree. A BRANCH-MODE goal's ACs
     // run on that goal's criterion worktree instead (§5 B1) — without it every re-verification of a
@@ -2030,6 +2074,13 @@ export function createGoalStore(
         // Resolved deadline (env > gates timeoutMs > default) — ⛔ NOT a private literal, which is
         // what made this entry point immune to every configuration knob (see the constant's tombstone).
         const cwd = criterionCwdFor(root, criterionRoots, ac);
+        // ⛔ BEFORE the spawn, and with no bypass arm: this path is UNATTENDED (the goal driver calls
+        // it every round), so there is no "someone present" whose consent a bypass flag could carry.
+        const refusal = capabilityRefusal(criterion, cwd);
+        if (refusal !== null) {
+          capabilityRefused.push({ id: String(ac.id), code: refusal.code ?? "criterion-capability-unevaluable", reason: capabilityRefusalReason(refusal) });
+          continue;
+        }
         const res = runAcceptance({ command: criterion, cwd, timeoutMs: resolveAcceptanceTimeoutMs() });
         if (!res.ok) achievedButFailing.push(String(ac.id));
       }
@@ -2037,7 +2088,7 @@ export function createGoalStore(
       if (prev === undefined) delete process.env[GOAL_ACCEPTANCE_ACTIVE_ENV];
       else process.env[GOAL_ACCEPTANCE_ACTIVE_ENV] = prev;
     }
-    return { achievedButFailing, evaluated: scopeSize > 0, scopeSize, inScope: inScopeIds };
+    return { achievedButFailing, capabilityRefused, evaluated: scopeSize > 0, scopeSize, inScope: inScopeIds };
   }
 
   // AC1/AC4 reading (gap-closed-goal-acs-leave-reverify-scope-standing-invariants-undeclared): the
@@ -2215,6 +2266,11 @@ export function createGoalStore(
     refused: boolean;
     eligible: number;
     ran: Array<{ id: string; verdict: "pass" | "fail" | "not-evaluated"; reason: string; ms: number }>;
+    /** WHICH of the round's picks were refused by the capability gate, with the stable code. They
+     *  also appear in `ran` (as `not-evaluated` — the round did look at them and could not run
+     *  them); this field names the MECHANISM, so a reader does not have to infer it from a reason
+     *  string (hard rule 3: enumerate; ⛔ never parse the message to find the cause). */
+    capabilityRefused: Array<{ id: string; code: string }>;
     stoppedBy: "exhausted" | "budget" | "wall";
   }> {
     const budget = o.budget ?? DEFAULT_SWEEP_BUDGET;
@@ -2225,7 +2281,7 @@ export function createGoalStore(
     // Re-entrancy guard (same var as I5's): a criterion that itself calls back into a criterion
     // runner must not recurse. Refusing here is a REFUSAL, not an empty result (hard rule 3b).
     if (process.env[GOAL_ACCEPTANCE_ACTIVE_ENV] === "1") {
-      return { evaluated: false, refused: true, eligible: 0, ran: [], stoppedBy: "exhausted" };
+      return { evaluated: false, refused: true, eligible: 0, ran: [], capabilityRefused: [], stoppedBy: "exhausted" };
     }
     const { lastSweep } = gateTails(goalDir);
     const ageOf = (id: string): number => {
@@ -2280,7 +2336,7 @@ export function createGoalStore(
       });
     const picked = eligible.slice(0, budget);
     if (picked.length === 0) {
-      return { evaluated: frozen.length > 0, refused: false, eligible: eligible.length, ran: [], stoppedBy: "exhausted" };
+      return { evaluated: frozen.length > 0, refused: false, eligible: eligible.length, ran: [], capabilityRefused: [], stoppedBy: "exhausted" };
     }
     const { appendGateEvent } = await import("./gate/gate-event-store.ts");
     const logPath = path.join(path.dirname(goalDir), ".quay", "gate-events.jsonl");
@@ -2290,6 +2346,7 @@ export function createGoalStore(
     const criterionRoots = buildCriterionRoots(root, list() as unknown as Array<Record<string, unknown>>);
     const startedAt = Date.now();
     const ran: Array<{ id: string; verdict: "pass" | "fail" | "not-evaluated"; reason: string; ms: number }> = [];
+    const capabilityRefused: Array<{ id: string; code: string }> = [];
     const prev = process.env[GOAL_ACCEPTANCE_ACTIVE_ENV];
     process.env[GOAL_ACCEPTANCE_ACTIVE_ENV] = "1";
     let stoppedBy: "exhausted" | "budget" | "wall" = picked.length < eligible.length ? "budget" : "exhausted";
@@ -2305,6 +2362,42 @@ export function createGoalStore(
         // per-AC cwd choice the gate and I5 entry points make. ⛔ Resolved per PICKED id (≤budget),
         // never per frozen record.
         const cwd = criterionCwdFor(root, criterionRoots, byId.get(id) ?? {});
+        // ⛔ THE gate this whole task exists for. This loop is the INCIDENT's execution surface:
+        // `check --stale-pass --sweep` re-runs the frozen population on a schedule, forever, with
+        // nobody watching — including `achieved` ACs (measured: the incident AC was evaluated in 112
+        // goal rounds). No spawn, no bypass arm: a bypass flag cannot be "someone present" on a path
+        // no person invoked. The verdict is still RECORDED (below) so the refusal is a reading the
+        // judgment can see, not a silent skip (hard rule 3b).
+        const refusal = capabilityRefusal(criterion, cwd);
+        if (refusal !== null) {
+          const reason = capabilityRefusalReason(refusal);
+          ran.push({ id, verdict: "not-evaluated", reason: reason.slice(0, 500), ms: 0 });
+          capabilityRefused.push({ id, code: refusal.code ?? "criterion-capability-unevaluable" });
+          appendGateEvent(logPath, {
+            id: randomUUID(),
+            item_id: id,
+            pipeline_id: id,
+            gate: "goal",
+            // The rotation's own actor: this IS a rotation outcome (the round looked at this AC and
+            // could not run it), so it must age like any other — otherwise the same AC would be
+            // re-picked and re-refused every round, spending the budget the bound exists to protect.
+            actor: amendedIds.has(id) ? AMEND_ACTOR : SWEEP_ACTOR,
+            verdict: "not-evaluated",
+            timestamp: new Date().toISOString(),
+            payload: {
+              reason,
+              // The MECHANISM travels with the recorded reason: a reader of the ledger can tell a
+              // capability refusal from a timeout / spawn failure / exit-126 — and can branch on the
+              // code rather than parse the message.
+              capabilityCode: refusal.code,
+              capability: refusal.capability,
+              refusalRules: refusal.reasons.map((r) => ({ rule: r.rule, detail: r.detail })),
+              criterionHash: criterionFingerprint(criterion),
+              ...evaluationContext(cwd),
+            },
+          });
+          continue;
+        }
         // The DEADLINE is `resolveAcceptanceTimeoutMs()` — the shared config-surface chain, ⛔ not a
         // private literal (gap-goal-criterion-timeout-hardcoded-60s-ignores-acceptance-timeout).
         const res = runAcceptance({ command: criterion, cwd, timeoutMs: resolveAcceptanceTimeoutMs() });
@@ -2346,7 +2439,7 @@ export function createGoalStore(
       if (prev === undefined) delete process.env[GOAL_ACCEPTANCE_ACTIVE_ENV];
       else process.env[GOAL_ACCEPTANCE_ACTIVE_ENV] = prev;
     }
-    return { evaluated: frozen.length > 0, refused: false, eligible: eligible.length, ran, stoppedBy };
+    return { evaluated: frozen.length > 0, refused: false, eligible: eligible.length, ran, capabilityRefused, stoppedBy };
   }
 
   /** The ONE call site of `discardGoalBranch` (SPEC-goal-branch §4.2): delete a discarded goal's
@@ -2770,6 +2863,16 @@ export function createGoalStore(
           throw new Error(`cannot activate ${id}: criterion not-evaluated (no criterion defined) — pass --force to override`);
         }
         const gateRoot = resolveGitRoot(goalDir) ?? path.dirname(goalDir);
+        // ⛔ CAPABILITY, BEFORE evaluability, and ⛔ not overridable by `--force`: `--force` means "I
+        // accept that this criterion cannot be evaluated"; it does NOT mean "I accept that activating
+        // it will perform a real write right now". Without this arm, merely ACTIVATING the incident's
+        // AC executes the writer once — the exact mechanism that re-armed the storm 13 minutes after
+        // the first "fix". The two questions stay separate questions (hard rule 5b: fixing one site
+        // is not fixing the principle).
+        const capabilityHit = capabilityRefusal(criterionCmd, gateRoot);
+        if (capabilityHit !== null) {
+          throw new Error(`cannot activate ${id}: ${capabilityRefusalReason(capabilityHit)}`);
+        }
         const startedMs = Date.now();
         // Resolved deadline (env > gates timeoutMs > default). ⚠️ This matters more than at the other
         // three sites: the verdict here decides whether the write is ACCEPTED, so a criterion that
@@ -3612,7 +3715,31 @@ export async function runGoalStoreCli(argv: string[]): Promise<number> {
         buildCriterionRoots(root, store.list() as unknown as Array<Record<string, unknown>>),
         rec,
       );
-      if (typeof criterion !== "string" || criterion.trim() === "") {
+      // ── the capability gate + THE human-present BYPASS ─────────────────────────────────────────
+      // `--allow-side-effects` is the ONLY bypass in this file, and it exists exactly where a bypass
+      // can be honest: this subcommand is an EXPLICIT, single-record invocation by whoever is at the
+      // keyboard right now (that is how a real one-shot E2E proof gets re-run — Fleet's `realchecks/`
+      // is the same shape). Two properties make it a bypass rather than a hole:
+      //   · it is BOUNDED — it is a flag on THIS invocation, and ⛔ neither unattended path (I5, the
+      //     frozen rotation) reads it, so it can never be set once and forgotten into an eternal loop;
+      //   · it is AUDITABLE — every use is stamped into the ledger event below (`capabilityBypass`),
+      //     so a bypassed run is never shaped like an ordinary one.
+      // ⛔ An empty criterion is answered by the branch below, which is also fail-closed.
+      const allowSideEffects = rest.includes("--allow-side-effects");
+      let capabilityBypass: { code: string; rules: string[] } | null = null;
+      const capabilityHit = typeof criterion === "string" && criterion.trim() !== "" ? capabilityRefusalAt(criterion, gateCwd, root) : null;
+      if (capabilityHit !== null && allowSideEffects) {
+        // The refusal still travels with the run — a bypass is a DECISION, and the ledger keeps it.
+        capabilityBypass = { code: capabilityHit.code ?? "criterion-capability-unevaluable", rules: capabilityHit.reasons.map((r) => r.rule) };
+        console.error(`goal-store: ${id} — BYPASSING the criterion capability gate (--allow-side-effects): ${capabilityRefusalReason(capabilityHit)}`);
+      }
+      if (capabilityHit !== null && !allowSideEffects) {
+        // ⛔ NO spawn. The verdict is `not-evaluated` with the stable code carried in the JSON below —
+        // ⛔ never `fail`, which would assert "this criterion is false" about a command that never ran
+        // (hard rule 3b, and the very conflation this task exists to remove).
+        verdict = "not-evaluated";
+        reason = capabilityRefusalReason(capabilityHit);
+      } else if (typeof criterion !== "string" || criterion.trim() === "") {
         // AC2 — empty criterion FAILS CLOSED (red), never a silent PASS.
         verdict = "fail";
         reason = `${id} has no criterion defined (fail-closed — an unenforceable AC must never silently pass)`;
@@ -3648,7 +3775,16 @@ export async function runGoalStoreCli(argv: string[]): Promise<number> {
         // `evaluationRoot`/`treeSha` name WHICH tree this verdict was obtained on (SPEC §7 辛):
         // `gateCwd` is the criterion cwd passed to `runAcceptance` above, so the two are the same tree
         // (the criterion worktree for a branch-mode goal, the main checkout otherwise).
-        payload: { reason, ...(cause ? { cause } : {}), ...evaluationContext(gateCwd) },
+        payload: {
+          reason,
+          ...(cause ? { cause } : {}),
+          // ⛔ The bypass is RECORDED, so it is never isomorphic to an ordinary run: a reader can
+          // tell "this criterion was run because a person said so, knowing it writes" from "this
+          // criterion ran as a reading". Present only when the bypass was actually used.
+          ...(capabilityBypass ? { capabilityBypass } : {}),
+          ...(capabilityHit ? { capabilityCode: capabilityHit.code, capability: capabilityHit.capability } : {}),
+          ...evaluationContext(gateCwd),
+        },
       };
       // P9 dry-run: run the criterion but do NOT append the gate event (persist nothing).
       if (!dryRun) appendGateEvent(logPath, event);
@@ -3662,7 +3798,20 @@ export async function runGoalStoreCli(argv: string[]): Promise<number> {
       // wait-for-the-failure check a test should never have to make.
       // `cause` travels beside it (non-null exactly when the verdict is `not-evaluated`), so a reader
       // can tell WHICH knob to turn without parsing the reason string.
-      const out = { id, verdict, cause, reason, timeoutMs, timestamp: event.timestamp, dryRun, event };
+      const out = {
+        id,
+        verdict,
+        cause,
+        reason,
+        // The stable refusal code — a caller branches on THIS, never on the message text. `null`
+        // when the capability gate did not fire (either it passed, or the bypass was used).
+        capabilityCode: capabilityBypass === null ? capabilityHit?.code ?? null : null,
+        capabilityBypass,
+        timeoutMs,
+        timestamp: event.timestamp,
+        dryRun,
+        event,
+      };
       process.stdout.write(JSON.stringify(out, null, 2) + "\n");
       // ⛔ `pass` is the ONLY exit 0: not-evaluated is not a pass (the driver reads this code as a
       // verdict), it is merely a different kind of non-pass, distinguishable in the ledger.

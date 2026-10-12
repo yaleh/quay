@@ -1772,3 +1772,301 @@ test("goal branch — retiring a branch-mode goal deletes the branch and leaves 
   assert.ok(entry.reason.includes(tip), `reason must carry the discarded tip ${tip}: ${entry.reason}`);
   assert.match(entry.reason, /\b[0-9a-f]{40}\b/);
 });
+
+// ══════════════════════════════════════════════════════════════════════════════════════════════════
+// gap-criterion-side-effect-unguarded-at-write-and-execution-surface — criterion 必须是【读数】，
+// 不许是【动作】。判据是自由文本 shell，而 `check --stale-pass --sweep` / `check --achieved-failing`
+// 会【无人值守地永久重跑】每一条 criterion（含 achieved）。⇒ 带副作用的判据 = 一台永不停机的写入机。
+// 实测事故：quay-fleet AC-020（achieved）在 112 个 goal round 里被评估过，其判据真的在真实网关上
+// `session_create`/`session_send`。
+//
+// 这些测试钉的是【机制】，不是【约定】：拒发生在 **spawn 之前**（用「真跑就会留下的痕迹」机械证明），
+// 且按【能力】判（显式声明 / 端点），⛔ 不按命令名或路径拼写判。
+// ══════════════════════════════════════════════════════════════════════════════════════════════════
+import { fileURLToPath } from "node:url";
+import { judgeCriterionCapability, executedArtifacts, splitShellCommands } from "../src/gate/criterion-capability.ts";
+
+/** The incident's two criteria, VERBATIM — split so that a literal copy of the incident is not
+ *  byte-indistinguishable from the incident itself inside this scan set (the sibling lock's idiom).
+ *  The RUNTIME value is exactly what was stored. */
+const REAL_AC020_CRITERION = ["node bin/quay-fleet.mjs cloudcli ", "delegate-smoke", " --json"].join("");
+/** The criterion that RE-ARMED the storm 13 minutes after the first "fix" (explicit path). */
+const REAL_REARMED_CRITERION = ["node --test realchecks/", "wake-real-reachability.mjs"].join("");
+/** Fleet's退化后只读判据（负控）：读一份证据文档、断言关键字仍在 —— 零副作用。 */
+const REAL_READ_ONLY_CRITERION = [
+  "node -e \"const fs=require('fs');const p='docs/evidence/2026-10-12-cloudcli-mcp.md';if(!fs.existsSync(p)){process.exit(1)}",
+  "const t=fs.readFileSync(p,'utf8');process.exit(t.includes('delegate-smoke')?0:1)\"",
+].join("");
+
+/** A workspace root with a goals dir + .quay, plus a CLI invoker — the execution-surface fixture. */
+function capabilityFixture(tag) {
+  const root = tmpDir(tag);
+  fs.mkdirSync(path.join(root, "goals"), { recursive: true });
+  fs.mkdirSync(path.join(root, ".quay"), { recursive: true });
+  const cli = new URL("../src/goal-store.ts", import.meta.url).pathname;
+  const n = (cmd) => spawnSync("node", ["--experimental-strip-types", cli, "--root", root, ...cmd], { encoding: "utf8" });
+  return { root, n, cli };
+}
+
+/** A REAL artifact that would perform a real write if it were ever executed, declaring itself in its
+ *  own bytes. ⛔ The marker file is the mechanical "was it spawned?" reading: nothing about it is
+ *  inferred from the ledger, the CLI's own output, or the judge's return value (hard rule 4). */
+function declaredWriterArtifact(root) {
+  fs.mkdirSync(path.join(root, "tools"), { recursive: true });
+  fs.writeFileSync(
+    path.join(root, "tools", "writer.mjs"),
+    "// @real-infra cloudcli-write: really opens sessions on the live gateway\n" +
+      "import fs from 'node:fs';\nfs.writeFileSync('SPAWNED.txt','the criterion ran');\n",
+    "utf8",
+  );
+}
+
+test("能力闸 AC1 — 判据命中副作用 ⇒ 拒，且【命令未被 spawn】（机械读数：真跑就会写出的痕迹不存在）", () => {
+  const { root, n } = capabilityFixture("cap-nospawn");
+  declaredWriterArtifact(root);
+  const w = n(["write", "GOAL-910", "--title", "g", "--status", "achieved", "--origin", "o", "--body", GOAL_BODY]);
+  assert.equal(w.status, 0, "fixture setup: GOAL-910:\n" + w.stderr);
+  const aw = n(["write", "AC-910", "--title", "a", "--status", "achieved", "--goal", "GOAL-910", "--criterion", "node tools/writer.mjs", "--origin", "o", "--expect", EXPECT]);
+  assert.equal(aw.status, 0, "fixture setup: AC-910:\n" + aw.stderr);
+
+  const swept = n(["check", "--stale-pass", "--sweep"]);
+  const js = JSON.parse(swept.stdout);
+  assert.deepEqual(
+    js.sweep.capabilityRefused,
+    [{ id: "AC-910", code: "criterion-side-effect" }],
+    "轮转必须点名被拒的 AC 与稳定错误码（硬规则 3：枚举，⛔ 不只给一个布尔）",
+  );
+  assert.deepEqual(js.sweep.ran, [{ id: "AC-910", verdict: "not-evaluated", reason: js.sweep.ran[0].reason, ms: 0 }], "被拒的那条在 ran 里是 not-evaluated，⛔ 不是 fail（“没跑”不得伪装成“跑了且为假”）");
+  // ⛔ THE mechanical reading: the artifact writes this file the instant it is executed.
+  assert.equal(fs.existsSync(path.join(root, "SPAWNED.txt")), false, "命令必须在 spawn 之前被拒 —— 真跑过的痕迹不得存在");
+});
+
+test("能力闸 AC1 — 稳定错误码：调用方 branch on `code`（两种拒绝各有其码，⛔ 不解析 message）", () => {
+  const { root } = capabilityFixture("cap-codes");
+  declaredWriterArtifact(root);
+  const declared = judgeCriterionCapability("node tools/writer.mjs", { root });
+  assert.equal(declared.capability, "side-effecting");
+  assert.equal(declared.code, "criterion-side-effect");
+  // 同一条判据，把产物拿掉 ⇒ 能力【无法评估】，必须是另一个码（硬规则 3b：读不懂不得与合格/已知同形）
+  const { root: bare } = capabilityFixture("cap-codes-bare");
+  const uncertifiable = judgeCriterionCapability("node tools/writer.mjs", { root: bare });
+  assert.equal(uncertifiable.capability, "not-evaluated");
+  assert.equal(uncertifiable.code, "criterion-capability-unevaluable");
+  assert.notEqual(declared.code, uncertifiable.code, "「已声明会写」与「读不懂」是两个不同的事实");
+  // 只读 ⇒ 无码（空 reasons 与「合格」同一条路径，⛔ 不是第三个可疑值）
+  const ok = judgeCriterionCapability(REAL_READ_ONLY_CRITERION, { root });
+  assert.equal(ok.capability, "read-only");
+  assert.equal(ok.code, null);
+  assert.deepEqual(ok.reasons, []);
+});
+
+test("能力闸 AC3a — 第一条调用点：I5 `check --achieved-failing` 同样在执行前拒（⛔ 不是只修了 sweep）", () => {
+  const { root, n } = capabilityFixture("cap-i5");
+  declaredWriterArtifact(root);
+  // AC-first: a GOAL in {draft, active} must carry at least one AC, and an AC may name a GOAL that
+  // does not exist yet — so this order is the one every fixture in this file uses.
+  const aw0 = n(["write", "AC-911", "--title", "a", "--status", "draft", "--goal", "GOAL-911", "--criterion", "node tools/writer.mjs", "--origin", "o", "--expect", EXPECT]);
+  assert.equal(aw0.status, 0, "fixture setup: AC-911:\n" + aw0.stderr);
+  const w = n(["write", "GOAL-911", "--title", "g", "--status", "active", "--origin", "o", "--body", GOAL_BODY]);
+  assert.equal(w.status, 0, "fixture setup: GOAL-911:\n" + w.stderr);
+  const aw = n(["write", "AC-911", "--status", "achieved", "--origin", "o"]);
+  assert.equal(aw.status, 0, "fixture setup: AC-911 → achieved:\n" + aw.stderr);
+
+  const af = n(["check", "--achieved-failing"]);
+  const r = JSON.parse(af.stdout);
+  assert.equal(r.evaluated, true);
+  assert.ok(r.scopeSize > 0, "AC-911 在 I5 的域内");
+  assert.deepEqual(r.capabilityRefused.map((e) => [e.id, e.code]), [["AC-911", "criterion-side-effect"]]);
+  assert.deepEqual(r.achievedButFailing, [], "⛔ 不得把「拒绝执行」记成「执行了且为假」");
+  assert.equal(fs.existsSync(path.join(root, "SPAWNED.txt")), false, "I5 那条路径上同样必须未 spawn");
+});
+
+test("能力闸 AC3b — 第二条调用点：sweep 的拒绝【落账】，所以轮转不空转（可归因，⛔ 非静默跳过）", () => {
+  const { root, n } = capabilityFixture("cap-ledger");
+  declaredWriterArtifact(root);
+  n(["write", "GOAL-912", "--title", "g", "--status", "achieved", "--origin", "o", "--body", GOAL_BODY]);
+  n(["write", "AC-912", "--title", "a", "--status", "achieved", "--goal", "GOAL-912", "--criterion", "node tools/writer.mjs", "--origin", "o", "--expect", EXPECT]);
+
+  const swept = JSON.parse(n(["check", "--stale-pass", "--sweep"]).stdout);
+  assert.equal(swept.sweep.capabilityRefused.length, 1, "setup: 这一轮必须真的走到了拒绝分支");
+  const events = fs
+    .readFileSync(path.join(root, ".quay", "gate-events.jsonl"), "utf8")
+    .trim()
+    .split("\n")
+    .map((l) => JSON.parse(l))
+    .filter((e) => e.item_id === "AC-912" && e.actor === SWEEP_ACTOR);
+  assert.equal(events.length, 1, "拒绝必须留下轮转事件（否则下轮会被重挑、反复花掉预算，且读者看不见它）");
+  assert.equal(events[0].verdict, "not-evaluated");
+  assert.equal(events[0].payload.capabilityCode, "criterion-side-effect");
+  assert.equal(events[0].payload.capability, "side-effecting");
+  assert.deepEqual(events[0].payload.refusalRules.map((r) => r.rule), ["declared-real-infra-artifact"], "记录的必须是【机制】，不只是一个字符串");
+  // 判据已被记录为看过 ⇒ 判定把它算作 notEvaluated（CLI exit 3 = 无法评估），⛔ 不是 0（假绿）、⛔ 不是 1（谎称为假）
+  const after = n(["check", "--stale-pass"]);
+  assert.equal(after.status, 3, "拒绝后判定是 NOT-EVALUATED（3），⛔ 既不是 0 也不是 1:\n" + after.stdout + after.stderr);
+  assert.deepEqual(JSON.parse(after.stdout).notEvaluated, ["AC-912"]);
+});
+
+test("能力闸 AC4 — 正控 A：quay-fleet AC-020 的 criterion 【原文】必须被拒", () => {
+  const { root, n } = capabilityFixture("cap-pc-a");
+  n(["write", "GOAL-913", "--title", "g", "--status", "achieved", "--origin", "o", "--body", GOAL_BODY]);
+  const aw = n(["write", "AC-913", "--title", "a", "--status", "achieved", "--goal", "GOAL-913", "--criterion", REAL_AC020_CRITERION, "--origin", "o", "--expect", EXPECT]);
+  assert.equal(aw.status, 0, "fixture setup: AC-913:\n" + aw.stderr);
+
+  const r = JSON.parse(n(["check", "--achieved-failing"]).stdout);
+  const gate = n(["gate", "AC-913"]);
+  const gj = JSON.parse(gate.stdout);
+  assert.equal(gj.verdict, "not-evaluated", "CLI 上必须不是 pass、也不是 fail（那条命令一次都没跑过）");
+  assert.equal(gj.capabilityCode, "criterion-capability-unevaluable");
+  assert.match(gj.reason, /BEFORE execution/, "理由必须说清「在执行之前」拒绝");
+});
+
+test("能力闸 AC5 — 正控 B：改指向 realchecks/ 的显式路径（复发的那一条）同样必须被拒", () => {
+  const { root, n } = capabilityFixture("cap-pc-b");
+  n(["write", "GOAL-914", "--title", "g", "--status", "achieved", "--origin", "o", "--body", GOAL_BODY]);
+  n(["write", "AC-914", "--title", "a", "--status", "achieved", "--goal", "GOAL-914", "--criterion", REAL_REARMED_CRITERION, "--origin", "o", "--expect", EXPECT]);
+  const gj = JSON.parse(n(["gate", "AC-914"]).stdout);
+  assert.equal(gj.verdict, "not-evaluated", "显式路径永远真执行 —— 所以它必须在执行之前被拦下");
+  assert.equal(gj.capabilityCode, "criterion-capability-unevaluable");
+
+  // 而在【该文件真的存在并声明了自己】的树里，同一条判据由【产物自己的声明】判红（同一方言，两个消费者）
+  const treeRoot = tmpDir("cap-pc-b-tree");
+  fs.mkdirSync(path.join(treeRoot, "realchecks"), { recursive: true });
+  fs.writeFileSync(path.join(treeRoot, "realchecks", "wake-real-reachability.mjs"), "// @real-infra cloudcli-write: really wakes a live session\n", "utf8");
+  const j = judgeCriterionCapability(REAL_REARMED_CRITERION, { root: treeRoot });
+  assert.equal(j.capability, "side-effecting");
+  assert.equal(j.reasons[0].rule, "declared-real-infra-artifact");
+});
+
+test("能力闸 AC6 — 负控：现存【只读】criterion 必须放行（证明「拒绝」不是「一律拒绝」的同形）", () => {
+  const { root, n } = capabilityFixture("cap-nc");
+  const j = judgeCriterionCapability(REAL_READ_ONLY_CRITERION, { root });
+  assert.equal(j.capability, "read-only", "只读的证据文档结构检查被判红 ⇒ 这把闸就成了无差别拒绝");
+
+  // ⚠️ Same SHAPE as the real read-only Fleet criterion (a `node -e` evidence-document structure
+  // check), with one difference the WRITE SURFACE requires: its failure exit writes its own cause on
+  // the same line, because the attribution gate refuses a bare inherited non-zero. The verbatim text
+  // is asserted at the judge level above; this arm is about the execution surface, and a criterion
+  // the store refuses to WRITE could not exercise it at all.
+  const READ_ONLY_ATTRIBUTED = "node -e \"const fs=require('fs');const p='docs/evidence/2026-10-12-cloudcli-mcp.md';if(!fs.existsSync(p)){console.error('CAUSE=missing-evidence-doc');process.exit(1)}process.exit(0)\"";
+  // AC-first, and under an ACTIVE goal so the AC is in I5's scope.
+  const aw0 = n(["write", "AC-915", "--title", "a", "--status", "draft", "--goal", "GOAL-915", "--criterion", READ_ONLY_ATTRIBUTED, "--origin", "o", "--expect", EXPECT]);
+  assert.equal(aw0.status, 0, "fixture setup: AC-915:\n" + aw0.stderr);
+  const gw = n(["write", "GOAL-915", "--title", "g", "--status", "active", "--origin", "o", "--body", GOAL_BODY]);
+  assert.equal(gw.status, 0, "fixture setup: GOAL-915:\n" + gw.stderr);
+  const aw = n(["write", "AC-915", "--status", "achieved", "--origin", "o"]);
+  assert.equal(aw.status, 0, "fixture setup: AC-915 → achieved:\n" + aw.stderr);
+  const r = JSON.parse(n(["check", "--achieved-failing"]).stdout);
+  assert.deepEqual(r.capabilityRefused, [], "只读判据不得被拒");
+  // 真跑过：它 exit 1（证据文档不在这个临时树里）⇒ 记 in achievedButFailing。⛔ 与「被拒」区分开。
+  assert.deepEqual(r.achievedButFailing, ["AC-915"], "只读判据必须【真的被执行】—— 拒绝它才是缺陷");
+});
+
+test("能力闸 AC7 — 旁路：显式且可审计 —— 真跑得起来，但落痕的形状与常规执行【不同形】", () => {
+  const { root, n } = capabilityFixture("cap-bypass");
+  declaredWriterArtifact(root);
+  n(["write", "GOAL-916", "--title", "g", "--status", "achieved", "--origin", "o", "--body", GOAL_BODY]);
+  n(["write", "AC-916", "--title", "a", "--status", "achieved", "--goal", "GOAL-916", "--criterion", "node tools/writer.mjs", "--origin", "o", "--expect", EXPECT]);
+
+  // 不带旁路 ⇒ 拒，且没跑
+  const blocked = JSON.parse(n(["gate", "AC-916"]).stdout);
+  assert.equal(blocked.verdict, "not-evaluated");
+  assert.equal(fs.existsSync(path.join(root, "SPAWNED.txt")), false);
+
+  // 带旁路 ⇒ 真跑（机械读数：痕迹出现了），且账本把它记为一次【旁路】
+  const ran = JSON.parse(n(["gate", "AC-916", "--allow-side-effects"]).stdout);
+  assert.equal(ran.verdict, "pass", "有人在场的显式旁路下，真实 E2E 仍必须能执行:\n" + ran.reason);
+  assert.equal(fs.existsSync(path.join(root, "SPAWNED.txt")), true, "旁路下命令必须真的跑了（⛔ 不是「换了个说法拒绝」）");
+  assert.equal(ran.capabilityBypass.code, "criterion-side-effect");
+  assert.deepEqual(ran.capabilityBypass.rules, ["declared-real-infra-artifact"]);
+  const ev = JSON.parse(fs.readFileSync(path.join(root, ".quay", "gate-events.jsonl"), "utf8").trim().split("\n").pop());
+  assert.deepEqual(ev.payload.capabilityBypass, ran.capabilityBypass, "旁路必须落账 —— 否则它与一次常规执行同形，审计不出来（硬规则 3b）");
+});
+
+test("能力闸 AC7(上限) — 旁路【不可】用于无人值守路径：sweep / I5 上没有「有人在场」可承担这个决定", () => {
+  const src = fs.readFileSync(new URL("../src/goal-store.ts", import.meta.url), "utf8");
+  // 旁路只从 `rest.includes("--allow-side-effects")` 来（gate 子命令的显式调用）——sweepFrozen /
+  // checkAchievedFailing 的拒绝分支里没有 allow 这个参数可传。⛔ 一次设定、永久生效的旁路就是漏洞。
+  const refusalSites = src.match(/capabilityRefusal\(|capabilityRefusalAt\(/g) ?? [];
+  assert.ok(refusalSites.length >= 4, `四条 runAcceptance 调用点都必须过闸，实测 ${refusalSites.length} 处`);
+  assert.doesNotMatch(
+    src,
+    /capabilityRefusal(?:At)?\([^)]*allow/i,
+    "旁路不得作为参数流进共用判定 —— 它只能属于那一次显式的 gate 调用",
+  );
+  assert.match(src, /capabilityHit !== null && allowSideEffects/, "旁路的分支必须与【拒绝】分支并列且显式");
+});
+
+test("能力闸 AC2/AC8 — 判定按能力不按拼写：同一条判据换写法结论相同（⛔ 名字证明不了任何事）", () => {
+  const { root } = capabilityFixture("cap-spelling");
+  declaredWriterArtifact(root);
+  // 事故的教训：第一版锁按「文件里有没有 callTool 方法」判，而事故文件自己就有一个转发壳。
+  // 所以这条闸只认【产物自己的声明】，与它叫什么、写在哪、怎么写无关。
+  const spellings = ["./tools/writer.mjs", "tools/writer.mjs", path.join(root, "tools/writer.mjs"), "tools/../tools/writer.mjs"];
+  for (const s of spellings) {
+    const j = judgeCriterionCapability(`node ${s}`, { root });
+    assert.equal(j.capability, "side-effecting", `换一种路径写法就放行 ⇒ 这把闸按的是拼写，不是能力: ${s}`);
+  }
+  // 反向：把带副作用的产物【改名】不改变任何结论（能力跟着产物走，不跟着名字走）
+  fs.renameSync(path.join(root, "tools", "writer.mjs"), path.join(root, "tools", "innocent-looking.mjs"));
+  const renamed = judgeCriterionCapability("node tools/innocent-looking.mjs", { root });
+  assert.equal(renamed.capability, "side-effecting", "改名不能洗白能力");
+});
+
+test("能力闸 AC2 — 端点与命令面按【工作区声明】判（⛔ Core 不装别的项目的 API 表）", () => {
+  const { root } = capabilityFixture("cap-declared");
+  fs.writeFileSync(
+    path.join(root, ".quay", "criterion-capabilities.json"),
+    JSON.stringify({
+      writeCapableCommands: [{ id: "cloudcli-delegate-smoke", pattern: "\\bcloudcli\\s+delegate-smoke\\b", proof: "src/delegate-smoke.mjs requires createCloudcliClient({readOnly:false})" }],
+      realEndpoints: ["127.0.0.1:3001"],
+    }),
+    "utf8",
+  );
+  const byCommand = judgeCriterionCapability(REAL_AC020_CRITERION, { root });
+  assert.equal(byCommand.capability, "side-effecting");
+  assert.equal(byCommand.reasons[0].rule, "declared-write-capable-command");
+  const byEndpoint = judgeCriterionCapability("curl -s http://127.0.0.1:3001/health", { root });
+  assert.equal(byEndpoint.reasons[0].rule, "declared-real-endpoint");
+  // ⛔ 「写动词」这一轴被【实测】否掉：它在本仓库自己的 227 条判据上误报 87 次，命中的全是数据
+  // （`store-writes-raw-commit`、`post_upgrade_task_count`、`commit_sha`），不是动作。
+  const verbish = judgeCriterionCapability("grep -c 'store-writes-raw-commit' packages/quay/src/x.ts", { root });
+  assert.equal(verbish.capability, "read-only", "把数据里的写词当动作 ⇒ 这把闸会把读数判成动作");
+});
+
+test("能力闸 AC8 — 不回归：全只读判据集上 sweep 行为不变（逐字：新增字段是空枚举，⛔ 不是新判定）", () => {
+  const { root, n } = capabilityFixture("cap-regress");
+  n(["write", "GOAL-917", "--title", "g", "--status", "achieved", "--origin", "o", "--body", GOAL_BODY]);
+  for (const id of ["AC-917", "AC-918"]) {
+    const w = n(["write", id, "--title", id, "--status", "achieved", "--goal", "GOAL-917", "--criterion", "exit 0", "--origin", "o", "--expect", EXPECT]);
+    assert.equal(w.status, 0, `fixture setup: ${id}:\n` + w.stderr);
+  }
+  const s1 = JSON.parse(n(["check", "--stale-pass", "--sweep", "--budget", "5"]).stdout).sweep;
+  assert.deepEqual(s1.capabilityRefused, [], "全只读 ⇒ 零拒绝");
+  assert.deepEqual(s1.ran.map((r) => r.verdict), ["pass", "pass"], "只读判据照常执行、照常判 pass");
+  assert.equal(s1.stoppedBy, "exhausted");
+  assert.equal(s1.evaluated, true);
+  const after = n(["check", "--stale-pass"]);
+  assert.equal(after.status, 0, "全只读集上判定 exit 0（行为不变）:\n" + after.stdout + after.stderr);
+  assert.deepEqual(JSON.parse(after.stdout).verifiedFresh, ["AC-917", "AC-918"]);
+});
+
+test("能力闸 AC8(生产面) — 本仓库真 goals 树零误报：这把闸不是无差别拒绝", () => {
+  // The live goals/ store of THIS workspace (packages/quay/test/ → the repo root's goals/).
+  const goalsDir = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..", "..", "..", "goals");
+  const files = fs.existsSync(goalsDir) ? fs.readdirSync(goalsDir).filter((f) => f.endsWith(".md")) : [];
+  assert.ok(files.length > 100, `真 goals 树必须在场，这条才有意义（实测 ${files.length} 个文件）`);
+  const flagged = [];
+  for (const file of files) {
+    const lines = fs.readFileSync(path.join(goalsDir, file), "utf8").split("\n");
+    for (let i = 0; i < lines.length; i++) {
+      const m = /^criterion:\s*(.*)$/.exec(lines[i]);
+      if (!m) continue;
+      const parts = [m[1]];
+      for (let j = i + 1; j < lines.length && !/^\S/.test(lines[j]); j++) parts.push(lines[j]);
+      const criterion = parts.join("\n").trim();
+      const j2 = judgeCriterionCapability(criterion, { root: path.dirname(goalsDir) });
+      if (j2.capability !== "read-only") flagged.push(`${file}: ${j2.capability} ${JSON.stringify(j2.reasons)}`);
+    }
+  }
+  assert.deepEqual(flagged, [], `${flagged.length} 条现存判据被误判为非只读 —— 这把闸在生产上会开始拒绝真判据`);
+});
