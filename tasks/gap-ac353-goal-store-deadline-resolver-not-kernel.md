@@ -2,7 +2,7 @@
 id: gap-ac353-goal-store-deadline-resolver-not-kernel
 title: AC-353 判据回归：goal-store.ts 改经 acceptance-runner 取 deadline，破了「直连
   kernel/gate-run-options.ts」护栏——把 record-aware deadline 解析族下沉 kernel 恢复
-status: ready
+status: done
 labels:
   - gap
   - defect
