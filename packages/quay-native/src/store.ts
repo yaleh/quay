@@ -23,7 +23,21 @@ import { parseFrontmatterCompletely } from "../../quay/src/task-parsing.ts";
 // delegates its add/commit to it and keeps only its own branch-aware ff-to-develop propagation —
 // the primitive's "develop" propagate is too coarse for task/ worktree branches (fan-in ff-merge is
 // the sole path into develop from a task worktree).
-import { commitStoreWrite } from "../../quay/src/store-commit.ts";
+import { commitStoreWrite, resolveCommitActor } from "../../quay/src/store-commit.ts";
+// gap-task-status-events-abi-writes-and-creation: the v1 task-status EVENT WRITER. This store has
+// been the single choke point for every Provider-ABI task write since it was written, but it emitted
+// nothing — so `quay task create`, `task edit --status`, MCP `task_write` and the CLI lifecycle verbs
+// changed a task's status with no transition record at all (only the driver layer emitted, via
+// gap-task-status-events-contract-v1-all-driver-writers). Emitting HERE is what makes the record
+// complete for the surfaces a human or an agent session actually acts through.
+//   · The kernel writer is importable from this package: `packages/**` → `packages/quay/src/kernel/**`
+//     adds no reverse edge (`plugin/scripts/import-graph-check.ts` ratchets `packages/**` → `plugin/**`
+//     at 0) and no cycle (the kernel imports only `node:*`), so the Plan's fallback — "emit from the
+//     Core write path instead" — is NOT needed. The kernel is the right home: this store must NOT
+//     carry a second event-record shape (硬规则 5b).
+//   · `edgeKindFor` is the ONE lookup from a (from,to) pair to its declared role — never a guessed
+//     role; a pair the table does not declare yields `null`, which the contract allows.
+import { appendTaskStatusEvent, edgeKindFor, gitBlobSha, type TaskStatusEventActorKind } from "../../quay/src/kernel/task-transition.ts";
 // AC-190 write face (gap-ac190-write-face-rule-unreachable-under-no-verify): the judgment that a NEW
 // `delivery-critical` task must declare a top-level `goal_ac`. It lives in the product layer next to
 // store-commit.ts because the PREVIOUS home — the git `pre-commit` hook (precommit-guard.ts ③) — is
@@ -1312,6 +1326,21 @@ export function createStore(tasksDir: string, opts?: { defaultStatus?: string })
     }
   }
 
+  /** The sha HEAD resolves to in `root`, or null when it cannot be read (no commits yet, git
+   *  failure). Used for a status event's `evidence.commit` — the sha the just-landed write is IN.
+   *  ⛔ null, never a guessed value (硬规则 6): the caller records `commit:null` with a reason. */
+  function headSha(root: string): string | null {
+    try {
+      const out = execFileSync("git", ["-C", root, "rev-parse", "HEAD"], {
+        encoding: "utf8",
+        stdio: ["ignore", "pipe", "ignore"],
+      });
+      return out.trim() || null;
+    } catch {
+      return null;
+    }
+  }
+
   /** ff-push `branch` to develop (fast-forward only, `git push . <branch>:develop`). Non-ff / git
    *  error ⇒ false. The semantic-sync fallback for a forked main checkout is NOT this store's job —
    *  the driver's standing `propagateDocBranchToDevelop` owns that case. */
@@ -1451,15 +1480,15 @@ export function createStore(tasksDir: string, opts?: { defaultStatus?: string })
    *                          not on any branch's history).
    *  Callers log only `failed` — the other non-committed states are expected and must not be
    *  mistaken for a broken commit. */
-  function commitTaskWrite(id: string, verb: "task_write" | "task_delete", changeKind: "self-only" | "must-propagate" = "must-propagate"): { committed: boolean; propagated: boolean; status: "committed" | "not-in-git" | "nothing" | "failed" } {
+  function commitTaskWrite(id: string, verb: "task_write" | "task_delete", changeKind: "self-only" | "must-propagate" = "must-propagate"): { committed: boolean; propagated: boolean; status: "committed" | "not-in-git" | "nothing" | "failed"; commit: string | null } {
     const root = resolveGitRoot();
-    if (root === null) return { committed: false, propagated: false, status: "not-in-git" };
+    if (root === null) return { committed: false, propagated: false, status: "not-in-git", commit: null };
     const rel = path.join("tasks", `${id}.md`);
     // "nothing" guard BEFORE delegating: deleting a never-committed untracked file has no index
     // entry to stage — a DISTINGUISHABLE no-op, never conflated with "failed" (硬规则 3b). The
     // primitive's four states have no "nothing" (SPEC §3), so this edge stays here.
     if (!fs.existsSync(path.join(root, rel)) && !inHead(root, rel)) {
-      return { committed: false, propagated: false, status: "nothing" };
+      return { committed: false, propagated: false, status: "nothing", commit: null };
     }
     const res = commitStoreWrite({
       relPath: rel,
@@ -1469,32 +1498,37 @@ export function createStore(tasksDir: string, opts?: { defaultStatus?: string })
       root,
       propagate: "none", // branch-aware ff below; the primitive's "develop" is too coarse for task/ branches
     });
-    if (res.outcome === "not-in-git") return { committed: false, propagated: false, status: "not-in-git" };
-    if (res.outcome === "unchanged") return { committed: false, propagated: false, status: "nothing" };
-    if (res.outcome === "failed") return { committed: false, propagated: false, status: "failed" };
+    if (res.outcome === "not-in-git") return { committed: false, propagated: false, status: "not-in-git", commit: null };
+    if (res.outcome === "unchanged") return { committed: false, propagated: false, status: "nothing", commit: null };
+    if (res.outcome === "failed") return { committed: false, propagated: false, status: "failed", commit: null };
+    // The sha that carries the write — read AFTER the commit landed, so the status-event's
+    // `evidence.commit` names the commit this write is in (contract v1's ordering; the same reading
+    // ready-pool-check's `revParseHead` performs). Read once, up front: every arm below returns
+    // `committed: true` and the same HEAD.
+    const commit = headSha(root);
     const branch = currentBranch(root);
     if (branch === null || branch === "develop") {
       // detached HEAD, or already on develop — nothing further to propagate.
       const propagated = branch === "develop";
       logPropagationOutcome(root, { id, verb, changeKind, branchClass: "develop", propagated });
-      return { committed: true, propagated, status: "committed" };
+      return { committed: true, propagated, status: "committed", commit };
     }
     if (branch.startsWith("task/")) {
       // Task worktree: commit to the worktree's own branch only; fan-in ff-merge is the sole path
       // into develop (AC2 negative control).
       logPropagationOutcome(root, { id, verb, changeKind, branchClass: "task-branch", propagated: false });
-      return { committed: true, propagated: false, status: "committed" };
+      return { committed: true, propagated: false, status: "committed", commit };
     }
     if (verb === "task_write" && changeKind === "self-only") {
       // Self-only write (AC ticks / Evidence / goal association) on a non-task/* branch: do NOT ff
       // to develop — the task's own fan-in carries it to develop with the worktree branch
       // (gap-store-commit-propagation-field-aware, SPEC §5).
       logPropagationOutcome(root, { id, verb, changeKind, branchClass: "other", propagated: false });
-      return { committed: true, propagated: false, status: "committed" };
+      return { committed: true, propagated: false, status: "committed", commit };
     }
     const propagated = ffPushToDevelop(root, branch);
     logPropagationOutcome(root, { id, verb, changeKind, branchClass: "other", propagated });
-    return { committed: true, propagated, status: "committed" };
+    return { committed: true, propagated, status: "committed", commit };
   }
 
   /**
@@ -1543,7 +1577,12 @@ export function createStore(tasksDir: string, opts?: { defaultStatus?: string })
    * only ordinary last-writer-wins sequencing (identical to every other
    * field this store already handles).
    */
-  function write(id: string, { title, status, labels, parent, children, extra, body, depends_on, goal_ac, expectedStatus }: { title?: string; status?: string; labels?: string[]; parent?: string | null; children?: string[]; extra?: Record<string, unknown>; body?: string; depends_on?: string[]; goal_ac?: string; expectedStatus?: string }, opts?: { commit?: boolean; create?: boolean }): (Task & { updatedAt?: number }) | null {
+  function write(id: string, { title, status, labels, parent, children, extra, body, depends_on, goal_ac, expectedStatus, actorKind, correlationId, sessionId }: { title?: string; status?: string; labels?: string[]; parent?: string | null; children?: string[]; extra?: Record<string, unknown>; body?: string; depends_on?: string[]; goal_ac?: string; expectedStatus?: string; actorKind?: string; correlationId?: string; sessionId?: string }, opts?: { commit?: boolean; create?: boolean }): (Task & { updatedAt?: number }) | null {
+    // gap-task-status-events-abi-writes-and-creation: the three PROVENANCE fields above are NOT task
+    // fields — they never reach `serialize()` (the frontmatter is built from the explicit assignments
+    // below, so an unknown key in the destructured input can only be dropped, never written). They are
+    // what the caller knows about WHO is writing and why, and they ride the ABI call because the
+    // status-event record is emitted here while the front-door identity is only known up there.
     // COMMIT-AFTER-WRITE (gap-abi-missing-commit-delete-dependson-primitives): commit-by-default,
     // opt-out per call via `{ commit: false }` (multi-file batch editors commit once at the end).
     const commit = opts?.commit !== false;
@@ -1573,6 +1612,18 @@ export function createStore(tasksDir: string, opts?: { defaultStatus?: string })
     // state) and any error path keep the current ff-to-develop behavior — the field-level judgment
     // can only downgrade a write to "self-only", never the other way.
     let writeChangeKind: "self-only" | "must-propagate" = "must-propagate";
+    // The transition readings the status event is built from, hoisted OUT of the lock closure: the
+    // event is appended after the commit (硬规则 7 — the file is the product, the event its trace),
+    // and the commit happens after the lock is released. `written` is the exact content the writer
+    // put on disk (the event's `statusBlobSha` — the same value `git show <commit>:tasks/<id>.md`
+    // hashes to). Both stay unset when the closure throws (a CAS refusal, a create guard, a failed
+    // YAML validation): nothing was written, so nothing is traced.
+    // `beforeStatus` is `null` both for a CREATION and before the closure has run; the closure only
+    // ever runs to completion on a path that writes, so an unset pair is unreachable at the emit site
+    // (a throw skips the emit entirely).
+    let beforeStatus: string | null = null;
+    let written: string | null = null;
+    let afterStatus: string | null = null;
     const result = withLocks(lockIds, () => {
       const existingRaw = readRaw(id);
       // gap-quay-native-task-create-duplicate-id-prepends-frontmatter: the create guard.
@@ -1589,11 +1640,18 @@ export function createStore(tasksDir: string, opts?: { defaultStatus?: string })
       let frontmatter: Record<string, unknown> = { id, title, status, labels: labels ?? [], parent: parent ?? null, children: children ?? [] };
       let existingBody = "";
       let beforeFrontmatter: Record<string, unknown> | null = null;
+      // gap-task-status-events-abi-writes-and-creation: the transition this write performs, read from
+      // the SAME frontmatter the writer mutates (⛔ never from a second parse or a re-read).
+      // `beforeStatus` stays `null` for a CREATION (no file ⇒ no prior status, which is exactly the
+      // record's `from:null`), and is read from the file for an update. `afterStatus` is filled after
+      // the assignments below. A write that does not change the status emits NOTHING — a body-only
+      // edit is not a transition and must not manufacture one.
       if (existingRaw !== null) {
         const parsed = parse(existingRaw);
         beforeFrontmatter = parsed.frontmatter;
         frontmatter = { ...parsed.frontmatter };
         existingBody = parsed.body;
+        beforeStatus = frontmatter.status === undefined || frontmatter.status === null ? null : String(frontmatter.status);
         // QN-015: the CAS check MUST happen here, inside the same lock
         // acquisition already used for the read-modify-write below — checking
         // status before acquiring the lock (or in a separate call) would
@@ -1634,6 +1692,8 @@ export function createStore(tasksDir: string, opts?: { defaultStatus?: string })
       }
       const finalBody = body !== undefined ? body : existingBody;
       const raw = serialize(frontmatter, finalBody);
+      written = raw;
+      afterStatus = frontmatter.status === undefined || frontmatter.status === null ? null : String(frontmatter.status);
       // Field-level propagation judgment (SPEC §5) — classify BEFORE the file write so the caller's
       // change set (not a re-read of the just-written file) decides whether to ff to develop.
       if (beforeFrontmatter !== null) {
@@ -1704,8 +1764,10 @@ export function createStore(tasksDir: string, opts?: { defaultStatus?: string })
     });
     // Commit AFTER the lock is released (a git commit is not a file-lock concern; holding the
     // advisory lock across a git subprocess would serialize writers for no data-integrity gain).
+    let committed: { committed: boolean; commit: string | null; status: string } | null = null;
     if (commit && result !== null) {
       const c = commitTaskWrite(id, "task_write", writeChangeKind);
+      committed = { committed: c.committed, commit: c.commit, status: c.status };
       if (c.status === "failed") {
         // The disk write succeeded but the git commit (the dispatch-visibility half) genuinely
         // FAILED — never throw (the caller's write IS on disk), but surface on stderr so the failure
@@ -1716,7 +1778,87 @@ export function createStore(tasksDir: string, opts?: { defaultStatus?: string })
         );
       }
     }
+    // ── the status TRANSITION event (gap-task-status-events-abi-writes-and-creation) ──────────────
+    // Emitted AFTER the write AND after the commit, so `evidence.commit` names the commit the flip is
+    // in — never "whatever HEAD was before it" (contract v1's ordering; the same order
+    // ready-pool-check's setTaskStatus uses). Only a real transition emits: a creation
+    // (`from:null`, `kind:"create"`) or a status change. A `--status todo` on a task already `todo`,
+    // a body-only edit, a label write: no event (⛔ never a manufactured transition).
+    emitAbiStatusEvent({ id, from: beforeStatus, to: afterStatus, written, committed, actorKind, correlationId, sessionId });
     return result;
+  }
+
+  /**
+   * Append the v1 status event for a write() that changed a task's status. Pure observation:
+   *   · it never throws and never fails the status write (the kernel writer is fail-open-but-visible,
+   *     and anything this function computes is guarded here) — the record must not become a new gate;
+   *   · it writes only inside a GIT WORK TREE, because the carrier lives at the workspace root
+   *     (`<root>/.quay/task-status-events.jsonl`) and a repo-less store (unit-test temp dirs) has no
+   *     workspace to record into. ⛔ NOT `path.dirname(tasksDir)`: for a bare temp tasksDir that is
+   *     the system temp dir, and every test run would append to a shared `/tmp/.quay/` carrier.
+   *   · `actor.id` is the SAME identity the commit subject carries (`resolveCommitActor()` →
+   *     `cli:<pid>` / a driver's own `driver:<run-id>`), so the event and the commit it evidences can
+   *     be joined on one string. `actor.kind` is what the front door declared (`cli` from the CLI,
+   *     `mcp` from the Core MCP server); when the caller declares nothing the write is recorded as
+   *     `unknown` — never guessed from a file path or a commit subject (硬规则 6/2).
+   *   · `cause` carries only what the caller actually had: the ABI's `correlationId`/`sessionId`, or
+   *     the session env (`CLAUDE_CODE_SESSION_ID`) when this process was spawned inside one. An
+   *     absent key stays ABSENT — never an empty string dressed as a value.
+   */
+  function emitAbiStatusEvent(args: {
+    id: string;
+    from: string | null;
+    to: string | null;
+    written: string | null;
+    committed: { committed: boolean; commit: string | null; status: string } | null;
+    actorKind?: string;
+    correlationId?: string;
+    sessionId?: string;
+  }): void {
+    try {
+      const { id, from, to, written, committed } = args;
+      if (written === null || to === null) return; // nothing was written, or no status at all
+      const created = from === null;
+      if (!created && from === to) return; // not a transition
+      const root = resolveGitRoot();
+      if (root === null) return; // no workspace to record into (see this function's own note)
+      const sha = committed !== null && committed.committed ? committed.commit : null;
+      const sessionId = args.sessionId ?? process.env.CLAUDE_CODE_SESSION_ID;
+      const cause: { correlationId?: string; sessionId?: string } = {};
+      if (args.correlationId !== undefined && args.correlationId !== "") cause.correlationId = args.correlationId;
+      if (sessionId !== undefined && sessionId !== "") cause.sessionId = sessionId;
+      appendTaskStatusEvent(root, {
+        taskId: id,
+        from,
+        to,
+        kind: created ? "create" : edgeKindFor(from, to),
+        actor: { kind: (args.actorKind ?? "unknown") as TaskStatusEventActorKind, id: resolveCommitActor() },
+        evidence: {
+          commit: sha,
+          statusBlobSha: gitBlobSha(written),
+          ...(sha === null
+            ? {
+                commitAbsentReason:
+                  committed === null
+                    ? "this write ran with commit:false (no commit was attempted)"
+                    : committed.status === "not-in-git"
+                      ? "the store's tasks dir is not inside a git work tree"
+                      : committed.status === "nothing"
+                        ? "the write was byte-identical to HEAD — nothing to commit"
+                        : "the git commit FAILED (see stderr)",
+              }
+            : {}),
+        },
+        ...(Object.keys(cause).length > 0 ? { cause } : {}),
+      });
+    } catch (err) {
+      // Observation must never fail the write it observes (人 2026-08-30: observation-must-not-
+      // block-main-execution). The kernel writer already counts and logs its OWN failures; this
+      // catch only covers the readings around it.
+      console.error(
+        `quay-native store: status-event emit failed for "${args.id}" (${err instanceof Error ? err.message : String(err)}) — the task write is NOT affected`
+      );
+    }
   }
 
   /**

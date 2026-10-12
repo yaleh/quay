@@ -74,6 +74,19 @@ export async function handleTaskEdit({ positional, flags, wantsJson }: CliCtx) {
   if (flags["depends-on"] !== undefined) patch.depends_on = String(flags["depends-on"]).split(",").filter(Boolean);
   if (flags["goal-ac"] !== undefined) patch.goal_ac = flags["goal-ac"];
 
+  // gap-task-status-events-abi-writes-and-creation: the two PROVENANCE terms, kept OUT of `patch`.
+  // `patch` is the "did the caller ask for a write at all?" set (the guard below counts its keys), and
+  // provenance is not a write request — folding it in would make a bare `task edit <id>` look like a
+  // patch and turn a usage error into a silent rewrite. They also must not reach the task frontmatter
+  // (the Provider treats them as event-record terms and persists neither).
+  //   actorKind defaults to `cli`: this IS the CLI surface. The flag exists so a wrapper driving the
+  //   CLI on behalf of another front door can declare itself honestly; it is not a way to claim a
+  //   class the write did not come from — hence a declared default rather than a free choice.
+  const provenance: Record<string, string> = {
+    actorKind: flags["actor-kind"] !== undefined ? String(flags["actor-kind"]) : "cli",
+  };
+  if (flags["correlation-id"] !== undefined) provenance.correlationId = String(flags["correlation-id"]);
+
   if (Object.keys(patch).length === 0 && flags["append-notes"] === undefined
       && flags.acceptance === undefined) {
     console.error(
@@ -131,7 +144,7 @@ export async function handleTaskEdit({ positional, flags, wantsJson }: CliCtx) {
       }
       const noteText = String(flags["append-notes"]);
       const newBody = `${current.body ?? ""}\n\n${noteText}`;
-      const t = await client.taskWrite({ id, ...patch, body: newBody });
+      const t = await client.taskWrite({ id, ...patch, ...provenance, body: newBody });
       if (wantsJson) printJson(t);
       else console.log(`${t.id}: ${t.title} [${t.status}] (note appended)`);
       return;
@@ -179,7 +192,7 @@ export async function handleTaskEdit({ positional, flags, wantsJson }: CliCtx) {
       const current = await client.taskGet(id);
       patch.extra = { ...(current?.extra ?? {}), ...((patch.extra ?? {}) as Record<string, unknown>), acceptance: cmd };
     }
-    const t = await client.taskWrite({ id, ...patch });
+    const t = await client.taskWrite({ id, ...patch, ...provenance });
     if (wantsJson) printJson(t);
     else console.log(`${t.id}: ${t.title} [${t.status}]`);
   }, { providerId: flags.provider, root: flags.root });
