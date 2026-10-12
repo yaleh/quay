@@ -2,7 +2,7 @@
 id: gap-ac221-replay-same-second-post-decision-push
 title: AC-221 判据的 develop 历史态回放【同秒错位】——driver 自己的「记录未落地原因」提交在事件同一秒 push 进
   develop，reflog --date=unix 秒级粒度让回放取到【决策之后】的 ref，把一条真阴性误报为真复发
-status: ready
+status: done
 labels:
   - gap
   - defect
