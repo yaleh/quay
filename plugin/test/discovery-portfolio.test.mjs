@@ -1,7 +1,8 @@
 // @test-group engine
 // Tests for the DISCOVERY PORTFOLIO value ledger (task
-// gap-discovery-portfolio-value-evidence-ledger, AC1 a–g) and for the CAPABILITY COVERAGE MAP built on
-// top of it (task gap-discovery-coverage-map-from-findings, AC1 a–d).
+// gap-discovery-portfolio-value-evidence-ledger, AC1 a–g), for the CAPABILITY COVERAGE MAP built on
+// top of it (task gap-discovery-coverage-map-from-findings, AC1 a–d), and for the APPEND-ONLY
+// CORRECTION kind (task gap-discovery-portfolio-append-only-correction-fold, AC1 a–e).
 //
 // The contract under test is that VALUE IS NOT ASSERTABLE. Three fields decide whether a finding counts
 // as net-new engineering value — the fix's landing, the recurrence, the cost — and none of them may be
@@ -18,6 +19,14 @@
 // ran can never make a domain look autonomously covered: case (a) asserts a teaching-level finding (of
 // AUTONOMOUS origin, with a landed fix — the hardest shape) grades `assisted`, and the AC3 mutation
 // control removes the evidence-level clause and watches (a) go red.
+//
+// The CORRECTION cases test the opposite of a rewrite: a finding's value fields are judgments made at
+// ingest, and a later check can overturn one — but the carrier is append-only and a finding's id is keyed
+// on `finding_id`, so re-ingesting it is a `DUPLICATE_ID` no-op. A correction is therefore its OWN line
+// (`kind:"portfolio_correction"`), folded onto the finding on read. What is asserted is that this stays a
+// correction: the original line is byte-identical afterwards, read-back reports BOTH the effective and
+// the superseded values, the landing of a corrected `fix_task` is re-derived from git rather than
+// supplied, and every refusal cause has its own code.
 
 import { test, after } from "node:test";
 import assert from "node:assert/strict";
@@ -27,9 +36,10 @@ import path from "node:path";
 import { execFileSync } from "node:child_process";
 
 import {
-  PORTFOLIO_REL, PORTFOLIO_KIND, PORTFOLIO_RATING_KIND, PORTFOLIO_DOMAIN_KIND,
+  PORTFOLIO_REL, PORTFOLIO_KIND, PORTFOLIO_RATING_KIND, PORTFOLIO_DOMAIN_KIND, PORTFOLIO_CORRECTION_KIND,
   ORIGINS, EVIDENCE_LEVELS, OUTCOMES, DOMAINS, DOMAIN_LABELS, UNCLASSIFIED, GRADES, ORIGIN_OPERATIONS,
   RATING_VALUES, RATING_ACTORS, REQUIRED_INPUT_FIELDS, REQUIRED_RECORD_FIELDS, DONE_SUBJECT_RE,
+  CORRECTABLE_FIELDS, DERIVED_RECORD_FIELDS, CORRECTION_ACTORS, MIN_CORRECTION_REASON_CHARS,
   REAL_BACKFILL_ROWS_2026_10_12,
   componentOf, normalizeComponents, sameComponentSet, normalizeClaim,
   validateFindingInput, validateFindingRecord, deriveFixLandedCommit, deriveRecurred, deriveCost,
@@ -37,6 +47,7 @@ import {
   findDuplicate, ingestFinding, rateFinding, readPortfolio, valueMetrics, portfolioFile, backfill,
   assignFindingDomain, coverageMap, autonomousEvidenceFor, methodClaimsDomain, methodTrust,
   NON_CONTRIBUTING_METHOD_STATUSES,
+  correctFinding, applyPortfolioCorrections, readPortfolioCorrections, duplicateChain,
 } from "../../docs/analysis/discovery-portfolio.mjs";
 import { METHOD_STATUSES } from "../../docs/analysis/discovery-method-registry.mjs";
 import { carrierFile, resolveCarrierRoot } from "../../docs/analysis/discovery-experience-ledger.mjs";
@@ -747,4 +758,225 @@ test("a domain assignment is an append-only overlay: it fills a finding that sta
   assert.deepEqual(GRADES, ["autonomous", "assisted", "none"]);
   assert.deepEqual(DOMAINS, ["shared-semantics", "config-to-behavior", "writer-checker-contract", "state-transitions", "reuse-refutation", "method-trustworthiness"]);
   assert.equal(DOMAIN_LABELS["config-to-behavior"], "config→behavior");
+});
+
+// ── CORRECTIONS (task gap-discovery-portfolio-append-only-correction-fold, AC1 a–e) ─────────────
+//
+// See the file header. Every case below writes through `correctFinding` and reads back through
+// `readPortfolio`; NOTHING here hand-edits a `- [ ]` in the carrier, because that is the operation this
+// kind exists to replace.
+
+/** One complete, valid correction ARGUMENT set — the baseline every case below varies from. */
+const correction = (over = {}) => ({
+  finding_id: "F-C",
+  patch: { outcome: "refuted" },
+  reason: "operator re-check of the 2026-10-12 gain experiment: this row restated an earlier finding",
+  evidence: ["docs/analysis/discovery-capability-gain-report.md#5"],
+  by: "session-2026-10-12-operator",
+  actor: "task-worker",
+  ...over,
+});
+
+test("(a) correction: `duplicate_of` moves the finding out of net_new_value into zero_or_negative.duplicates", () => {
+  const { root } = mkTmp();
+  writeCarriers(root);
+  seed(root);
+  const before = valueMetrics(readPortfolio(root).records);
+  assert.equal(before.net_new_value.total, 2);
+  assert.deepEqual(before.zero_or_negative.duplicates, ["F-E"]);
+
+  const c = correctFinding(root, correction({ finding_id: "F-B", patch: { duplicate_of: "F-A" } }));
+  assert.equal(c.ok, true, JSON.stringify(c.reasons));
+  assert.equal(c.record.kind, PORTFOLIO_CORRECTION_KIND);
+  assert.equal(c.record.actor, "task-worker");
+
+  const after = valueMetrics(readPortfolio(root).records);
+  assert.equal(after.net_new_value.total, 1, "the corrected row leaves net_new_value");
+  assert.deepEqual(after.net_new_value.finding_ids, ["F-A"]);
+  assert.deepEqual(after.zero_or_negative.duplicates, ["F-B", "F-E"]);
+  assert.equal(after.zero_or_negative.supported_but_not_landed.includes("F-B"), false);
+  // The correction is a JUDGMENT, not a component-set match: the real 2026-10-12 case (LEARN c11) is a
+  // strict SUPERSET of the control finding, so requiring set equality here would refuse the correction
+  // this kind exists for. What IS required is that the named original precedes its duplicate.
+  assert.equal(sameComponentSet(
+    readPortfolio(root).records.find((r) => r.finding_id === "F-A").components,
+    readPortfolio(root).records.find((r) => r.finding_id === "F-B").components), false);
+});
+
+test("(b) correction: `outcome:\"refuted\"` moves the finding out of net_new_value into zero_or_negative.refuted", () => {
+  const { root } = mkTmp();
+  writeCarriers(root);
+  seed(root);
+  assert.equal(valueMetrics(readPortfolio(root).records).net_new_value.total, 2);
+
+  const c = correctFinding(root, correction({ finding_id: "F-A", patch: { outcome: "refuted" } }));
+  assert.equal(c.ok, true, JSON.stringify(c.reasons));
+
+  const after = valueMetrics(readPortfolio(root).records);
+  assert.equal(after.net_new_value.total, 1);
+  assert.deepEqual(after.net_new_value.finding_ids, ["F-B"]);
+  assert.deepEqual(after.zero_or_negative.refuted, ["F-A", "F-D"], "F-A joins F-D — line order");
+  assert.equal(after.zero_or_negative.supported_but_not_landed.includes("F-A"), false);
+  // The refutation is recorded, and it is NOT a rating: `rateFinding` stays human-only (see case (f)),
+  // and the finding is still UNRATED.
+  assert.equal(readPortfolio(root).records.find((r) => r.finding_id === "F-A").human_rating, null);
+  assert.deepEqual(after.ratings, { rated: 0, unrated: 5 });
+});
+
+test("(c) correction: `fix_task` adds the finding to net_new_value with a DERIVED fix_landed_commit", () => {
+  const { root, shas } = mkTmp();
+  writeCarriers(root);
+  seed(root);
+  assert.equal(valueMetrics(readPortfolio(root).records).net_new_value.total, 2);
+  assert.equal(readPortfolio(root).records.find((r) => r.finding_id === "F-C").fix_landed_reason, "NO_FIX_TASK");
+
+  const c = correctFinding(root, correction({ finding_id: "F-C", patch: { fix_task: "t-fix-a" } }));
+  assert.equal(c.ok, true, JSON.stringify(c.reasons));
+  // ⛔ The landing is NOT a field of the correction: the patch names the TASK, and the commit is read
+  // from git — so a correction can never assert a landing that no commit supports.
+  assert.deepEqual(Object.keys(c.record.patch), ["fix_task"]);
+
+  const fc = readPortfolio(root).records.find((r) => r.finding_id === "F-C");
+  assert.equal(fc.fix_landed_commit, shas["t-fix-a"], "the landing is RE-DERIVED from git on read");
+  assert.match(fc.fix_landed_reason, /DONE_SUBJECT_ON_develop/);
+  assert.deepEqual(fc.corrected_from, { fix_task: null, fix_landed_commit: null, fix_landed_reason: "NO_FIX_TASK" });
+
+  const after = valueMetrics(readPortfolio(root).records);
+  assert.equal(after.net_new_value.total, 3);
+  assert.deepEqual(after.net_new_value.finding_ids, ["F-A", "F-B", "F-C"]);
+  assert.deepEqual(after.net_new_value.by_origin["operator"], 1, "the corrected row keeps its own origin");
+  assert.equal(after.zero_or_negative.supported_but_not_landed.includes("F-C"), false);
+
+  // The DERIVATION is the only source: the same correction against a task with no done commit would leave
+  // the landing at `null` (its own value), not at whatever the caller hoped for.
+  assert.equal(deriveFixLandedCommit(root, "t-fix-nope").commit, null);
+});
+
+test("(d) correction refusals: each cause is its OWN code, and nothing is appended", () => {
+  const { root } = mkTmp();
+  writeCarriers(root);
+  seed(root);
+  // A finding that FOLLOWS the fixture's duplicate F-E, so "points at a duplicate" is reachable without
+  // also being "points backwards in the file" (which has its own code).
+  ingestFinding(root, input({ finding_id: "F-F", components: ["src/f.ts"], claim: "a finding recorded after the duplicate F-E" }), { rates: RATES });
+
+  const bad = (over, code) => {
+    const r = correctFinding(root, correction(over));
+    assert.equal(r.ok, false, `${code} was accepted: ${JSON.stringify(r.reasons)}`);
+    assert.equal(r.appended, false);
+    assert.ok(r.reasons.some((x) => x.startsWith(code)), `${code} — got ${JSON.stringify(r.reasons)}`);
+    return r;
+  };
+  bad({ finding_id: "F-NOPE" }, "CORRECTION_TARGET_NOT_FOUND:");
+  bad({ finding_id: "F-C", patch: { duplicate_of: "F-C" } }, "CORRECTION_DUPLICATE_OF_SELF:");
+  bad({ finding_id: "F-A", patch: { duplicate_of: "F-C" } }, "CORRECTION_DUPLICATE_OF_NOT_EARLIER:");
+  bad({ finding_id: "F-F", patch: { duplicate_of: "F-E" } }, "CORRECTION_DUPLICATE_OF_CHAINED:");
+  bad({ finding_id: "F-C", patch: { duplicate_of: "F-NOPE" } }, "CORRECTION_DUPLICATE_OF_UNRESOLVED:");
+  bad({ finding_id: "F-C", patch: { fix_task: "t-fix-nope" } }, "CORRECTION_FIX_TASK_NOT_ON_BRANCH:");
+  bad({ finding_id: "F-C", patch: { fix_task: "t-fix-a", fix_landed_commit: "a".repeat(40) } }, "CORRECTION_DERIVED_FIELD_SUPPLIED:");
+  bad({ finding_id: "F-C", patch: { recurred: true } }, "CORRECTION_DERIVED_FIELD_SUPPLIED:");
+  bad({ finding_id: "F-C", patch: { claim: "a claim the carrier was never allowed to rewrite" } }, "CORRECTION_FIELD_NOT_CORRECTABLE:");
+  bad({ finding_id: "F-C", patch: { outcome: "probably" } }, "CORRECTION_OUTCOME_NOT_IN_VOCAB:");
+  bad({ finding_id: "F-C", patch: {} }, "CORRECTION_PATCH_MISSING:");
+  bad({ reason: "short" }, "CORRECTION_REASON_INSUBSTANTIAL:");
+  bad({ reason: undefined }, "CORRECTION_REASON_INSUBSTANTIAL:");
+  bad({ evidence: [] }, "CORRECTION_EVIDENCE_REQUIRED:");
+  bad({ evidence: undefined }, "CORRECTION_EVIDENCE_REQUIRED:");
+  bad({ actor: undefined }, "CORRECTION_ACTOR_MISSING:");
+  bad({ actor: "some-other-agent" }, "CORRECTION_ACTOR_NOT_IN_VOCAB:");
+  bad({ by: undefined }, "FIELD_INVALID:by-needs-the-namer");
+
+  // Every refusal is enumerated and no refused correction wrote a line — an append-only carrier must not
+  // collect lines that the writer was told were rejected (硬规则 7: the record cannot trail the action).
+  assert.equal(readPortfolio(root).corrections.length, 0);
+  assert.equal(fs.readFileSync(path.join(root, PORTFOLIO_REL), "utf8").split("\n").filter(Boolean).length, 6);
+
+  // ⛔ A LOOP IS ONLY CLOSABLE ON A CARRIER THAT ALREADY HOLDS A FORWARD LINK. Both the ingest path and
+  // this one refuse a forward link, so the fixture has to hand-write it — the same way the coverage case
+  // hand-writes a domain outside the vocabulary. The check still matters: once the loop is closed NEITHER
+  // row of the pair is the original, so the finding that is net-new vanishes from the accounting.
+  const { root: cyc } = mkTmp();
+  writeCarriers(cyc);
+  const handRow = (id, duplicate_of) => ({
+    kind: PORTFOLIO_KIND, id: `portfolio_finding-${id}`, finding_id: id, origin: "operator", origin_ref: "t-fix-a",
+    origin_carrier: "tasks/t-fix-a.md", evidence_level: "teaching", method_ref: null, claim: `finding ${id} claim`,
+    components: [], outcome: "supported", fix_task: null, domain: null, domain_reason: null,
+    fix_landed_commit: null, fix_landed_reason: "NO_FIX_TASK", recurred: null, recurred_reason: "NO_SINCE_TIMESTAMP",
+    human_rating: null, cost: null, cost_reason: "NO_USAGE_RECORDED", duplicate_of, ts: "2020-01-01T00:00:00Z",
+  });
+  writeCarrier(cyc, PORTFOLIO_REL, [handRow("P", "Q"), handRow("Q", null)]);
+  assert.deepEqual(duplicateChain(readPortfolio(cyc).records, "P"), { chain: ["P", "Q"], reached: "Q", cycle: null });
+  const loop = correctFinding(cyc, correction({ finding_id: "Q", patch: { duplicate_of: "P" } }));
+  assert.equal(loop.ok, false, JSON.stringify(loop.reasons));
+  assert.ok(loop.reasons.some((x) => x.startsWith("CORRECTION_DUPLICATE_OF_CYCLE:")), JSON.stringify(loop.reasons));
+  // …and the cycle walk reports a loop that closes on ITSELF too, not only one that reaches the finding.
+  assert.deepEqual(duplicateChain([{ finding_id: "X", duplicate_of: "Y" }, { finding_id: "Y", duplicate_of: "X" }], "X"),
+    { chain: ["X", "Y"], reached: null, cycle: "X" });
+});
+
+test("(e) a correction never rewrites the carrier: the earlier lines stay byte-identical, and read-back reports BOTH values", () => {
+  const { root } = mkTmp();
+  writeCarriers(root);
+  seed(root);
+  const carrier = path.join(root, PORTFOLIO_REL);
+  const beforeLines = fs.readFileSync(carrier, "utf8").split("\n").filter(Boolean);
+  assert.equal(beforeLines.length, 5);
+  assert.deepEqual(beforeLines.map((l) => JSON.parse(l).kind), Array(5).fill(PORTFOLIO_KIND));
+
+  const c = correctFinding(root, correction({ finding_id: "F-E", patch: { outcome: "refuted" } }));
+  assert.equal(c.ok, true, JSON.stringify(c.reasons));
+
+  const afterLines = fs.readFileSync(carrier, "utf8").split("\n").filter(Boolean);
+  assert.equal(afterLines.length, beforeLines.length + 1, "exactly ONE line was appended");
+  assert.deepEqual(afterLines.slice(0, beforeLines.length), beforeLines, "every earlier line is byte-identical");
+  assert.equal(JSON.parse(afterLines[afterLines.length - 1]).kind, PORTFOLIO_CORRECTION_KIND);
+  assert.equal(JSON.parse(afterLines[4]).outcome, "supported", "the finding's OWN line still says what it said");
+
+  const rec = readPortfolio(root).records.find((r) => r.finding_id === "F-E");
+  assert.equal(rec.outcome, "refuted", "the effective value is the corrected one");
+  assert.deepEqual(rec.corrected_from, { outcome: "supported" }, "…and the superseded value is still readable");
+  assert.equal(rec.corrected, true);
+  assert.deepEqual(rec.correction_ids, [c.id]);
+  const audit = readPortfolioCorrections(root);
+  assert.equal(audit.corrections.length, 1);
+  assert.equal(audit.corrections[0].reason, correction().reason);
+  assert.equal(audit.corrections[0].by, correction().by);
+  assert.deepEqual(audit.orphan_targets, []);
+
+  // An UNCORRECTED finding says so in its own value: `corrected_from: null` is "there is no
+  // original-versus-effective distinction here", which is not the same as "the originals were empty"
+  // (硬规则 3b).
+  const untouched = readPortfolio(root).records.find((r) => r.finding_id === "F-A");
+  assert.equal(untouched.corrected, false);
+  assert.deepEqual(untouched.correction_ids, []);
+  assert.equal(untouched.corrected_from, null);
+
+  // Idempotent: the id is content-addressed over what the correction SAYS (and `ts` is excluded), so a
+  // re-run appends nothing rather than stacking a second copy of one judgment.
+  const again = correctFinding(root, correction({ finding_id: "F-E", patch: { outcome: "refuted" } }));
+  assert.equal(again.duplicate, true);
+  assert.equal(fs.readFileSync(carrier, "utf8").split("\n").filter(Boolean).length, beforeLines.length + 1);
+
+  // A correction naming a finding the carrier does not hold is REPORTED, never silently dropped: "this
+  // correction corrected nothing" is not the same finding as "there were no corrections" (硬规则 5).
+  const { root: orphan } = mkTmp();
+  writeCarriers(orphan);
+  writeCarrier(orphan, PORTFOLIO_REL, [{ ...JSON.parse(beforeLines[0]), finding_id: "F-KEPT" }]);
+  writeCarrier(orphan, PORTFOLIO_REL, [{
+    kind: PORTFOLIO_CORRECTION_KIND, id: "portfolio_correction-handmade", finding_id: "F-GONE",
+    patch: { outcome: "refuted" }, reason: "hand-written", evidence: ["x"], by: "f", actor: "task-worker", ts: "2020-01-01T00:00:00Z",
+  }]);
+  assert.deepEqual(readPortfolioCorrections(orphan).orphan_targets, ["F-GONE"]);
+  assert.equal(readPortfolio(orphan).records.find((r) => r.finding_id === "F-KEPT").corrected, false);
+
+  // The vocabulary the write path is keyed on, so the two can never drift apart without a refusal.
+  assert.deepEqual(CORRECTABLE_FIELDS, ["outcome", "duplicate_of", "fix_task"]);
+  assert.equal(DERIVED_RECORD_FIELDS.includes("fix_landed_commit"), true);
+  assert.deepEqual(CORRECTION_ACTORS, ["operator-session", "task-worker"]);
+  assert.equal(CORRECTION_ACTORS.includes(RATING_ACTORS[0]), true, "the operator session is not locked out");
+  assert.equal(MIN_CORRECTION_REASON_CHARS, 8);
+  // A pure arm: the fold is a function of the records, so it can be read without a repo at all.
+  assert.deepEqual(applyPortfolioCorrections([]), {
+    findings: [], corrections: [], patches: new Map(), correction_ids: new Map(), corrected: [], orphan_corrections: [],
+  });
 });

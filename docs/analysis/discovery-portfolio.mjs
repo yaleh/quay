@@ -73,6 +73,44 @@
 //     is reported under `unclassified`. A guess would make the map's grades unfalsifiable.
 // A method contributes nothing while it is `retired` or on the contaminated-verdict ledger (Plan 4).
 //
+// ── CORRECTING A FINDING AFTER IT IS INGESTED (the append-only correction kind, 2026-10-12) ───────
+// A finding is written ONCE and its id is keyed on `finding_id`, so re-ingesting one to fix a field is a
+// `DUPLICATE_ID` no-op by construction (see the domain-assignment note below). But a finding's value
+// fields are JUDGMENTS MADE AT INGEST, and a later check can overturn one: what looked like a new defect
+// turns out to be a duplicate of an earlier one, or its mechanism is refuted, or its fix lands after the
+// fact. Without a way to record that, the carrier keeps asserting the original claim and the value
+// metrics are wrong in BOTH directions at once (the 2026-10-12 gain experiment: one real defect fixed and
+// landed but uncounted because no `fix_task` was ever attached — undercount; and two findings recorded
+// `supported` that the operator re-check called a duplicate and a refutation — overclaim).
+//
+// ⛔ SO A CORRECTION IS ITS OWN APPEND-ONLY LINE (`kind:"portfolio_correction"`), never a rewrite. It
+//    names the finding and a patch drawn from a CLOSED set of correctable fields — `outcome`,
+//    `duplicate_of`, `fix_task`. The original line stays byte-identical; `readPortfolio` folds the
+//    corrections onto it in append order and reports BOTH values (`corrected_from` + `correction_ids`),
+//    so "corrected" can never be mistaken for "was always right".
+// ⛔ THE PATCH SET IS CLOSED ON PURPOSE. A correction able to patch `claim`/`components`/`cost` would be
+//    a supported way to rewrite what the finding says was found, which is exactly what an append-only
+//    carrier forbids. The fields that are DERIVED (`fix_landed_commit`, `recurred`, `cost`, …) are
+//    refused with their OWN code: supplying one is not "a field you may not patch", it is an attempt to
+//    ASSERT a value this module exists to read.
+// ⛔ `fix_task` IS RE-DERIVED, NEVER SUPPLIED. Patching `fix_task` re-runs `deriveFixLandedCommit` on
+//    read, so the landing of a corrected fix is a git reading like every other landing — a correction
+//    written before the fix landed starts counting the moment it lands, and one whose landing is not
+//    derivable contributes NOTHING to `net_new_value` (the derivation's `null`, not the caller's word).
+// ⛔ A DUPLICATE TARGET MUST PRECEDE ITS DUPLICATE and must not itself be a duplicate. That is not
+//    decoration: the ingest path's own duplicate rule searches only EARLIER records and reads
+//    `duplicate_of === null`, so a correction pointing forward or onto another duplicate would produce a
+//    pair whose "which one is the original" answer depends on which reader you ask. A chain that loops
+//    back onto the finding being corrected is refused too (`CORRECTION_DUPLICATE_OF_CYCLE`) — only a
+//    hand-edited carrier can already hold such a link, and closing the loop would leave a pair where
+//    NEITHER row is the original, so the very finding that is net-new disappears from the accounting.
+// ⛔ A CORRECTION IS NOT A RATING. `rateFinding` is human-only (`RATING_ACTORS`), because "worthless" is
+//    a value judgment only a human may make. A correction asserts something CHECKABLE — the landing is in
+//    git, the duplicate is in the carrier — so the writer set is different (`CORRECTION_ACTORS`) and a
+//    task worker that a report or an operator check already established may write one. What is NOT
+//    relaxed is that the writer must NAME ITSELF: `actor` (the process) and `by` (the namer) are both
+//    required, and an absent actor is refused rather than defaulted (that default IS the defect).
+
 // ⛔ THE ONE PLACE THE CARRIER IS APPEND-ONLY AND THE FIELD IS NOT: the 13 production rows were
 //   ingested on 2026-10-12 BEFORE `domain` existed, and the carrier is append-only with an id keyed on
 //   `finding_id`, so a re-ingest is a `DUPLICATE_ID` no-op and cannot add the field. Their domains
@@ -114,6 +152,41 @@ export const PORTFOLIO_RATING_KIND = "portfolio_rating";
  *  the `domain` field existed (see the header). Separate kind so "stated at ingest" and "added later"
  *  can never be confused on read-back. */
 export const PORTFOLIO_DOMAIN_KIND = "portfolio_domain";
+/** The record kind a CORRECTION carries — the same overlay model again, for the fields a later check
+ *  overturns (see the header). A separate kind so a corrected value and a value that was always right
+ *  are never the same reading. */
+export const PORTFOLIO_CORRECTION_KIND = "portfolio_correction";
+
+/**
+ * The ONLY fields a correction may patch — the closed set Plan item 1 names. ⛔ Restricting the set is
+ * the point: `claim` / `components` / `domain` describe WHAT WAS FOUND, and a supported way to rewrite
+ * them would make the carrier's account of its own findings unfalsifiable. These three are the
+ * POST-INGEST JUDGMENTS: the verdict, the duplicate relation, and the fix the finding was assigned.
+ */
+export const CORRECTABLE_FIELDS = Object.freeze(["outcome", "duplicate_of", "fix_task"]);
+
+/**
+ * The fields a correction may NOT patch because they are DERIVED — from git (`fix_landed_commit`,
+ * `fix_landed_reason`), from the evidence store (`recurred`), from recorded usage × the gateway's rates
+ * (`cost`), or from the origin carrier (`origin_carrier`). ⛔ They get their OWN refusal code rather
+ * than falling under `CORRECTION_FIELD_NOT_CORRECTABLE`: supplying one is not "a field outside the
+ * patch set", it is an attempt to ASSERT a value this module exists to read from its source.
+ */
+export const DERIVED_RECORD_FIELDS = Object.freeze([
+  "fix_landed_commit", "fix_landed_reason", "recurred", "recurred_reason", "cost", "cost_reason", "origin_carrier",
+]);
+
+/**
+ * The processes that may write a correction. ⛔ Deliberately NOT `RATING_ACTORS`: a rating is a human's
+ * VALUE judgment (only `operator-session` may make one), while a correction asserts something checkable
+ * against git or the carrier — so a task worker acting on an operator's re-check (the 2026-10-12 gain
+ * experiment is exactly that) may write one. What is NOT relaxed is that the process must name itself.
+ */
+export const CORRECTION_ACTORS = Object.freeze(["operator-session", "task-worker"]);
+
+/** The floor on a correction's `reason` — the same 8 non-whitespace characters the dispatch record and
+ *  the ledger's own correction use: a correction with no reason is an edit with no audit trail. */
+export const MIN_CORRECTION_REASON_CHARS = 8;
 
 /** Where a finding came from. The five values the Plan names — the reconstruction's finer labels
  *  (`operator-led`, `autonomous-blind-experiment`, `operator-production-reading`) map onto these. */
@@ -243,6 +316,7 @@ const isObj = (x) => x !== null && typeof x === "object" && !Array.isArray(x);
 const isBool = (x) => typeof x === "boolean";
 const supplied = (o, k) => Object.prototype.hasOwnProperty.call(o, k) && o[k] !== undefined;
 const strArr = (x) => Array.isArray(x) && x.every((s) => isStr(s, 1));
+const nonWs = (s) => String(s ?? "").replace(/\s+/g, "").length;
 const round6 = (n) => Math.round(n * 1e6) / 1e6;
 
 /** Absolute path of the portfolio carrier under the SHARED checkout (`null` when unresolvable — its OWN
@@ -861,23 +935,239 @@ export function assignFindingDomain(root, { finding_id, domain, reason, by, ts }
   return appendCarrierLine(root, PORTFOLIO_REL, withId, { kind: PORTFOLIO_DOMAIN_KIND });
 }
 
-// ── read (findings with their ratings applied) ──────────────────────────────────────────────────
+// ── corrections (the append-only overlay for the fields a later check overturns) ─────────────────
 
 /**
- * Read the portfolio back, with the append-only RATING lines applied to the findings they name and the
- * append-only DOMAIN ASSIGNMENT lines applied to findings that state none of their own.
+ * Walk a finding's `duplicate_of` chain, starting AT `start_id`. PURE.
+ * @returns {{chain:string[], reached:string|null, cycle:string|null}}
+ *   `chain` is the ids visited in order; `cycle` names the id that closed a loop; `reached` is the id
+ *   that ended the walk (a finding with `duplicate_of === null`, or an id naming no record).
+ */
+export function duplicateChain(records, start_id) {
+  const byId = new Map((Array.isArray(records) ? records : [])
+    .filter((r) => isObj(r) && isStr(r.finding_id, 1)).map((r) => [r.finding_id, r]));
+  const chain = [];
+  const seen = new Set();
+  let cur = isStr(start_id, 1) ? start_id : null;
+  while (cur !== null) {
+    if (seen.has(cur)) return { chain, reached: null, cycle: cur };
+    seen.add(cur);
+    chain.push(cur);
+    const rec = byId.get(cur);
+    cur = rec && isStr(rec.duplicate_of, 1) ? rec.duplicate_of : null;
+  }
+  return { chain, reached: chain.length ? chain[chain.length - 1] : null, cycle: null };
+}
+
+/** The index of a finding in LINE ORDER — the position the "an original precedes its duplicate" rule is
+ *  stated over. `-1` when absent (its own value, never 0, which would silently read as "the first"). */
+const lineIndexOf = (records, finding_id) => records.findIndex((r) => isObj(r) && r.finding_id === finding_id);
+
+/**
+ * Record a CORRECTION to a finding already in the carrier. ⛔ It never edits the line it corrects — a
+ * separate `kind:"portfolio_correction"` line is APPENDED and `readPortfolio` folds it on read (see the
+ * header). The original row stays byte-identical, and read-back reports both values.
+ *
+ * FAIL-CLOSED on every argument, each with its OWN reason code:
+ *   • the finding must resolve (`CORRECTION_TARGET_NOT_FOUND`);
+ *   • the patch must name ≥1 field from `CORRECTABLE_FIELDS`; a DERIVED field is its own refusal
+ *     (`CORRECTION_DERIVED_FIELD_SUPPLIED`) because supplying one asserts a value this module reads;
+ *   • `duplicate_of` must resolve to an EARLIER, non-duplicate finding, and must not close a loop
+ *     (self / later / chained / cycle — four separate codes, because "you pointed at yourself" and "you
+ *     pointed at a later row" need different fixes);
+ *   • `fix_task` must exist on the landing branch (`CORRECTION_FIX_TASK_NOT_ON_BRANCH`). The landing
+ *     ITSELF is never supplied — it is re-derived from `fix_task` on read;
+ *   • `reason`, `evidence` and the writer's identity (`by` + `actor`) are all required.
+ *
+ * @param {string} root
+ * @param {object} args `{finding_id, patch, reason, evidence, by, actor, ts}`
+ * @param {object} [opts] `{branch}` — the branch `fix_task` is resolved on (default `develop`)
+ * @returns {{ok:true, id, file, record, appended:true}|{ok:false, reasons:string[], appended:false,
+ *            duplicate?:true}}
+ */
+export function correctFinding(root, { finding_id, patch, reason, evidence, by, actor, ts } = {}, opts = {}) {
+  const reasons = [];
+  if (!isStr(finding_id, 1)) reasons.push("FIELD_INVALID:finding_id");
+  if (!isObj(patch) || Object.keys(patch).length === 0) {
+    reasons.push("CORRECTION_PATCH_MISSING:patch-must-name-at-least-one-field-from-CORRECTABLE_FIELDS");
+  } else {
+    for (const f of Object.keys(patch)) {
+      if (DERIVED_RECORD_FIELDS.includes(f)) {
+        reasons.push(`CORRECTION_DERIVED_FIELD_SUPPLIED:${f}-is-read-from-its-source-and-may-not-be-supplied`);
+      } else if (!CORRECTABLE_FIELDS.includes(f)) {
+        reasons.push(`CORRECTION_FIELD_NOT_CORRECTABLE:${f}-may-not-be-rewritten-by-a-correction`);
+      }
+    }
+  }
+  const p = isObj(patch) ? patch : {};
+  if (supplied(p, "outcome") && !OUTCOMES.includes(p.outcome)) {
+    reasons.push(`CORRECTION_OUTCOME_NOT_IN_VOCAB:${String(p.outcome)}`);
+  }
+  if (supplied(p, "fix_task") && p.fix_task !== null && !isStr(p.fix_task, 1)) reasons.push("FIELD_INVALID:fix_task");
+  if (supplied(p, "duplicate_of") && p.duplicate_of !== null && !isStr(p.duplicate_of, 1)) reasons.push("FIELD_INVALID:duplicate_of");
+  if (!isStr(reason, 1) || nonWs(reason) < MIN_CORRECTION_REASON_CHARS) {
+    reasons.push(`CORRECTION_REASON_INSUBSTANTIAL:needs->=${MIN_CORRECTION_REASON_CHARS}-non-whitespace-chars-explaining-why`);
+  }
+  if (!strArr(evidence) || evidence.length === 0) {
+    reasons.push("CORRECTION_EVIDENCE_REQUIRED:needs-a-non-empty-list-of-refs-showing-why-the-correction-is-right");
+  }
+  if (!isStr(actor, 1)) {
+    reasons.push("CORRECTION_ACTOR_MISSING:the-process-writing-a-correction-must-identify-itself");
+  } else if (!CORRECTION_ACTORS.includes(actor)) {
+    reasons.push(`CORRECTION_ACTOR_NOT_IN_VOCAB:${actor}`);
+  }
+  if (!isStr(by, 1)) reasons.push("FIELD_INVALID:by-needs-the-namer");
+  if (reasons.length) return { ok: false, kind: PORTFOLIO_CORRECTION_KIND, appended: false, reasons };
+
+  const read = readPortfolio(root);
+  if (read.file === null) return { ok: false, kind: PORTFOLIO_CORRECTION_KIND, appended: false, reasons: [read.reason] };
+  if (!read.ok) {
+    return {
+      ok: false, kind: PORTFOLIO_CORRECTION_KIND, appended: false,
+      reasons: [`PORTFOLIO_UNREADABLE:${read.malformed_lines}-unparseable-line(s)-in-${PORTFOLIO_REL}`],
+    };
+  }
+  if (!read.records.some((r) => r.finding_id === finding_id)) {
+    return {
+      ok: false, kind: PORTFOLIO_CORRECTION_KIND, appended: false,
+      reasons: [`CORRECTION_TARGET_NOT_FOUND:${finding_id}-is-not-a-finding-in-${PORTFOLIO_REL}`],
+    };
+  }
+
+  // ── the duplicate relation. The four refusals are separate codes on purpose: they need different
+  //    fixes, and collapsing them would leave "pointed at yourself" indistinguishable from "pointed at a
+  //    later row" in the record of what went wrong.
+  if (supplied(p, "duplicate_of") && p.duplicate_of !== null) {
+    const target = p.duplicate_of;
+    if (!read.records.some((r) => r.finding_id === target)) {
+      reasons.push(`CORRECTION_DUPLICATE_OF_UNRESOLVED:${target}-is-not-a-finding-in-${PORTFOLIO_REL}`);
+    } else if (target === finding_id) {
+      reasons.push(`CORRECTION_DUPLICATE_OF_SELF:${finding_id}-cannot-be-a-duplicate-of-itself`);
+    } else {
+      // A loop that comes back to the finding being corrected leaves a pair where NEITHER row is the
+      // original. Only a hand-edited carrier can already hold such a link (both the ingest path and this
+      // one refuse a forward link), and the fold must not close it.
+      const walk = duplicateChain(read.records, target);
+      if (walk.cycle !== null || walk.chain.includes(finding_id)) {
+        const loop = walk.cycle !== null ? walk.chain.slice(walk.chain.indexOf(walk.cycle)).concat(walk.cycle).join("→") : `${finding_id}→${walk.chain.join("→")}→${finding_id}`;
+        reasons.push(`CORRECTION_DUPLICATE_OF_CYCLE:${loop}-closes-a-loop-so-neither-row-would-be-the-original`);
+      } else if (lineIndexOf(read.records, target) > lineIndexOf(read.records, finding_id)) {
+        reasons.push(`CORRECTION_DUPLICATE_OF_NOT_EARLIER:${target}-follows-${finding_id}-in-${PORTFOLIO_REL}-and-a-duplicate-must-name-the-original-that-precedes-it`);
+      } else {
+        // `null` and absent are the SAME answer here ("this is not a duplicate") — unlike `valueMetrics`,
+        // where an absent key would be a schema defect. A row written before this field existed is not a
+        // duplicate, and refusing a correction because of it would be failing closed on the wrong thing.
+        const targetDup = read.records.find((r) => r.finding_id === target)?.duplicate_of ?? null;
+        if (targetDup !== null) {
+          reasons.push(`CORRECTION_DUPLICATE_OF_CHAINED:${target}-is-itself-a-duplicate-of-${String(targetDup)}-so-it-is-not-an-original`);
+        }
+      }
+    }
+  }
+
+  // ── the fix. Its LANDING is never supplied: `readPortfolio` re-derives it from this `fix_task` on
+  //    every read, so a correction written before the fix landed starts counting when it lands.
+  if (supplied(p, "fix_task") && p.fix_task !== null) {
+    if (!taskExistsOnBranch(root, p.fix_task, { branch: opts.branch ?? DEFAULT_LANDING_BRANCH })) {
+      reasons.push(`CORRECTION_FIX_TASK_NOT_ON_BRANCH:${p.fix_task}-is-not-a-task-on-${opts.branch ?? DEFAULT_LANDING_BRANCH}`);
+    }
+  }
+  if (reasons.length) return { ok: false, kind: PORTFOLIO_CORRECTION_KIND, appended: false, reasons };
+
+  const body = { finding_id, patch, reason, evidence, by };
+  // Idempotent: the id is content-addressed over what the correction SAYS (finding, patch, reason, the
+  // refs and the namer) and `ts` is deliberately EXCLUDED, so re-running a backfill appends nothing
+  // (`DUPLICATE_ID`, carrier untouched) rather than stacking a second copy of one judgment.
+  return appendCarrierLine(root, PORTFOLIO_REL, {
+    id: recordId(PORTFOLIO_CORRECTION_KIND, body),
+    ...body,
+    actor,
+    ts: ts ?? new Date().toISOString(),
+  }, { kind: PORTFOLIO_CORRECTION_KIND });
+}
+
+/**
+ * Apply the append-only CORRECTIONS to the carrier's raw records. PURE.
+ *
+ * Corrections merge in LINE ORDER and the last write wins **field by field** — the carrier's own order is
+ * the precedence rule, and the only one, because a rule inferred from `ts` could disagree with the file
+ * and there would be no way to tell which was authoritative.
+ *
+ * ⛔ The original finding is RETURNED PATCHED, never removed, and `corrected_from` carries the values it
+ * carried before the patch. A "corrected" carrier that had simply been rewritten would be
+ * indistinguishable from one that was always right — which is the whole reason a correction is a
+ * separate record kind.
+ * @returns {{findings:object[], corrections:object[], patches:Map<string,object>,
+ *            correction_ids:Map<string,string[]>, corrected:string[], orphan_corrections:string[]}}
+ *   `orphan_corrections` names corrections that correct nothing present in the carrier. They are
+ *   REPORTED, never silently dropped (硬规则 5: "this correction corrected nothing" is not the same
+ *   finding as "there were no corrections").
+ */
+export function applyPortfolioCorrections(records) {
+  const findings = [], corrections = [];
+  for (const r of Array.isArray(records) ? records : []) {
+    if (!isObj(r)) continue;
+    if (r.kind === PORTFOLIO_CORRECTION_KIND) corrections.push(r);
+    else if (r.kind === PORTFOLIO_KIND) findings.push(r);
+  }
+  const known = new Set(findings.map((f) => f.finding_id));
+  const patches = new Map();
+  const correctionIds = new Map();
+  const orphanCorrections = [];
+  for (const c of corrections) {
+    if (!isStr(c.finding_id, 1) || !isObj(c.patch)) { orphanCorrections.push(String(c.id ?? "(unnamed-correction)")); continue; }
+    if (!known.has(c.finding_id)) { orphanCorrections.push(c.finding_id); continue; }
+    patches.set(c.finding_id, { ...(patches.get(c.finding_id) ?? {}), ...c.patch });
+    correctionIds.set(c.finding_id, [...(correctionIds.get(c.finding_id) ?? []), c.id]);
+  }
+  const corrected = [];
+  const out = findings.map((f) => {
+    const patch = patches.get(f.finding_id);
+    const ids = (correctionIds.get(f.finding_id) ?? []).filter((x) => isStr(x, 1));
+    if (!patch || Object.keys(patch).length === 0) {
+      // No correction ever named this finding. `corrected_from: null` is its OWN value: there is no
+      // original-versus-effective distinction to report, which is not the same as "the originals were
+      // empty" (硬规则 3b).
+      return { ...f, corrected: false, correction_ids: [], corrected_from: null };
+    }
+    corrected.push(f.finding_id);
+    const from = {};
+    for (const k of Object.keys(patch)) from[k] = supplied(f, k) ? f[k] : null;
+    return { ...f, ...patch, corrected: true, correction_ids: ids, corrected_from: from };
+  });
+  return { findings: out, corrections, patches, correction_ids: correctionIds, corrected, orphan_corrections: orphanCorrections };
+}
+
+/** The CORRECTION lines themselves — the audit trail of what was changed, by whom, and why. */
+export function readPortfolioCorrections(root) {
+  const raw = readCarrier(root, PORTFOLIO_REL, null);
+  const applied = applyPortfolioCorrections(raw.records);
+  return { ...raw, corrections: applied.corrections, orphan_targets: applied.orphan_corrections };
+}
+
+// ── read (findings with their ratings, corrections and domain assignments applied) ───────────────
+
+/**
+ * Read the portfolio back, with the append-only RATING lines applied to the findings they name, the
+ * append-only CORRECTION lines folded onto the fields they patch, and the append-only DOMAIN ASSIGNMENT
+ * lines applied to findings that state none of their own.
  *
  * `domain_source` says WHICH arm supplied the domain — `"record"` (stated at ingest), `"assignment"`
  * (added later, because the record predates the field) or `null` (none, i.e. `unclassified`). The three
  * are different values on purpose: collapsing them would make "classified when it was found" and
  * "classified after the fact" indistinguishable.
- * @returns {{ok:boolean, records:object[], ratings:object[], assignments:object[], file:string|null,
- *            malformed_lines:number}}
+ *
+ * ⛔ A correction that patches `fix_task` re-runs `deriveFixLandedCommit` HERE, on every read, so a
+ * corrected fix's landing is a git reading like every other landing (a correction written before the fix
+ * landed starts counting when it lands). Corrections that do not touch `fix_task` leave the fields the
+ * record already derived at ingest alone. The superseded values stay visible in `corrected_from`.
+ * @returns {{ok:boolean, records:object[], ratings:object[], assignments:object[], corrections:object[],
+ *            file:string|null, malformed_lines:number, orphan_corrections:string[]}}
  */
-export function readPortfolio(root) {
+export function readPortfolio(root, { branch = DEFAULT_LANDING_BRANCH } = {}) {
   const raw = readCarrier(root, PORTFOLIO_REL, null);
   if (raw.file === null) {
-    return { ...raw, records: [], ratings: [], assignments: [], reason: raw.reason };
+    return { ...raw, records: [], ratings: [], assignments: [], corrections: [], orphan_corrections: [], reason: raw.reason };
   }
   const ratings = raw.records.filter((r) => isObj(r) && r.kind === PORTFOLIO_RATING_KIND);
   const byFinding = new Map();
@@ -885,19 +1175,35 @@ export function readPortfolio(root) {
   const assignments = raw.records.filter((r) => isObj(r) && r.kind === PORTFOLIO_DOMAIN_KIND);
   const domainOf = new Map();
   for (const a of assignments) domainOf.set(a.finding_id, a);   // line order is the precedence rule
-  const records = raw.records.filter((r) => isObj(r) && r.kind === PORTFOLIO_KIND).map((r) => {
+  const folded = applyPortfolioCorrections(raw.records);
+  const records = folded.findings.map((r) => {
+    const derived = { ...r };
+    // Only when the correction CHANGED the input to the derivation. Re-deriving an untouched `fix_task`
+    // would be a second reading of a value the record already derived at ingest, with nothing to gain.
+    if (r.corrected && supplied(folded.patches.get(r.finding_id) ?? {}, "fix_task")) {
+      const landed = deriveFixLandedCommit(root, derived.fix_task, { branch });
+      derived.fix_landed_commit = landed.ok ? landed.commit : null;
+      derived.fix_landed_reason = landed.ok ? landed.reason : String(landed.reason);
+      // …and the superseded landing stays readable, so "the fix started counting when it landed" is
+      // auditable rather than an unexplained difference between the line and the folded record.
+      derived.corrected_from = {
+        ...derived.corrected_from,
+        fix_landed_commit: supplied(r, "fix_landed_commit") ? r.fix_landed_commit : null,
+        fix_landed_reason: supplied(r, "fix_landed_reason") ? r.fix_landed_reason : null,
+      };
+    }
     const rating = byFinding.get(r.finding_id);
-    const stated = isStr(r.domain, 1) ? r.domain : null;
+    const stated = isStr(derived.domain, 1) ? derived.domain : null;
     const assigned = stated ? null : domainOf.get(r.finding_id);
     return {
-      ...r,
+      ...derived,
       domain: stated ?? (assigned && isStr(assigned.domain, 1) ? assigned.domain : null),
-      domain_reason: stated ? (r.domain_reason ?? null) : (assigned?.reason ?? null),
+      domain_reason: stated ? (derived.domain_reason ?? null) : (assigned?.reason ?? null),
       domain_source: stated ? "record" : (assigned ? "assignment" : null),
       human_rating: rating ? { value: rating.value, by: rating.by, ts: rating.ts } : null,
     };
   });
-  return { ...raw, records, ratings, assignments };
+  return { ...raw, records, ratings, assignments, corrections: folded.corrections, orphan_corrections: folded.orphan_corrections };
 }
 
 // ── the value metric (Plan 4) ───────────────────────────────────────────────────────────────────
