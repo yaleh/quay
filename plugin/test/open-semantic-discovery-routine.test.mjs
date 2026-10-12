@@ -845,6 +845,45 @@ test("qualityGateRoutines — the open-semantic-discovery routine joins the tabl
   assert.equal(without.map((r) => r.name).includes(OPEN_SEMANTIC_DISCOVERY_NAME), false, "off by default");
 });
 
+// ── the REAL engine end-to-end (only the subprocess spawn is stubbed) ────────────────────────────────
+test("INTEGRATION — the REAL runInvestigator + runVerifier accept this routine's arguments, pin gate and all", async () => {
+  // The unit cases above replace the RUNNERS with stubs; this one replaces only the SPAWN, so the real
+  // `runInvestigator` (pinned cwd policy), the real `clusterHypotheses`, and the real `runVerifier`
+  // (frozen prompt template, `{{HYP}}` substitution, stream parsing) all execute for real. It is the case
+  // that would catch "the routine passes the engine an options object it does not accept".
+  const HYP_JSON = JSON.stringify([{
+    id: "H1", components: ["a.ts", "b.ts"], concept_kind: "duplication", claim: "a.ts and b.ts duplicate one rule",
+    why_suspected: "both name the same concept", evidence_needed: ["read both"], counterexample_requirement: "they differ intentionally",
+    confidence: "high",
+  }]);
+  const VERDICT_JSON = JSON.stringify({ verdict: "supported", intentional_difference_found: "they drift", evidence: ["a.ts:1 — x"], counterexample: "none", summary: "drift" });
+  const spawn = countingSpawn((argv) => {
+    const prompt = argv.includes("--tools") && argv[argv.indexOf("--tools") + 1] === INVESTIGATOR_TOOLS;
+    return { status: 0, stdout: streamText(prompt ? `${FOCUS_MARKER} real-engine smoke focus\n${HYP_JSON}` : VERDICT_JSON), stderr: "", error: null };
+  });
+  const ws = makeWorkspace();
+  writeConfig(ws, cfgYaml());
+  const mods = await loadOpenDiscoveryModules(REPO_ROOT);
+  const pin = pinStub();
+  const fact = await runOpenSemanticDiscovery(ws, {
+    config: readOpenSemanticDiscoveryConfig(ws).config, configPresent: true, configError: null, halted: false,
+    invokedBy: INVOKED_BY_RESIDENT, modules: mods, launchArgvFn: fakeLaunchArgv, spawnFn: spawn, pinFn: pin,
+  });
+  assert.equal(fact.state, "verified", fact.reason);
+  const line = rounds(ws)[0];
+  assert.equal(line.investigator.runs_with_hypotheses, 1, "the REAL parser read the hypothesis array out of the stream");
+  assert.equal(line.clusters.total, 1, "the REAL clusterHypotheses clustered it");
+  assert.equal(line.focus.chosen, "real-engine smoke focus", "the REAL call text carried the stated focus");
+  const rec = carrierLines(ws).find((l) => l.kind === "cluster");
+  assert.equal(rec.verifier_verdict, "supported", "the REAL verifierVerdict parsed the stream's verdict");
+  assert.equal(rec.confirmed, true);
+  assert.equal(rec.refutation_verdict, "supported");
+  // Every spawn really was rooted at the pin and really carried the per-step tool envelope.
+  assert.deepEqual([...new Set(spawn.calls.map((c) => c.opts.cwd))], [pin.pins[0]]);
+  assert.equal(spawn.calls[0].argv[spawn.calls[0].argv.indexOf("--tools") + 1], INVESTIGATOR_TOOLS);
+  assert.equal(spawn.calls[1].argv[spawn.calls[1].argv.indexOf("--tools") + 1], VERIFIER_TOOLS);
+});
+
 // ── the two in-scratch-copy NEGATIVE CONTROLS ────────────────────────────────────────────────────────
 /** Build a SCRATCH copy of the routine whose relative imports still resolve: the sibling scripts and the
  *  analysis directory are SYMLINKED in, and only the module under test is a real (mutated) file. */

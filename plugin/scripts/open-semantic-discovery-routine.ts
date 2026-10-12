@@ -1028,7 +1028,7 @@ export async function runOpenSemanticDiscovery(root: string, opts: OpenSemanticD
     if (clusters.length > 0) {
       const v = await hyp.runVerifier({
         clusters, pinDir: pinned, cwd: pinned, promptTemplate: verifierPromptText,
-        maxClusters: config.maxClustersVerified, concurrency: 1, maxMs: config.maxWallMs,
+        maxClusters: config.maxClustersVerified, concurrency: 1, maxMs: config.maxWallMs, // concurrency-default-fallback: ONE verifier call at a time — the engine can fan out, but concurrent calls reserve from several places at once and the per-step cost ledger stops being readable in call order
         strategy: "default", onlyCluster: null, evidence: null, model: requestedModel,
         runModel: async (p: string) => {
           const { res } = await reservingStep("verifier", { prompt: p, tools: VERIFIER_TOOLS, maxTurns: config.verifierMaxTurns, model: requestedModel });
@@ -1072,7 +1072,7 @@ export async function runOpenSemanticDiscovery(root: string, opts: OpenSemanticD
       if (row.verdict === "supported") {
         const one = await hyp.runVerifier({
           clusters: [cluster], pinDir: pinned, cwd: pinned, promptTemplate: REFUTATION_PROMPT_TEMPLATE,
-          maxClusters: 1, concurrency: 1, maxMs: config.maxWallMs, strategy: "default", onlyCluster: 1,
+          maxClusters: 1, concurrency: 1, maxMs: config.maxWallMs, strategy: "default", onlyCluster: 1, // concurrency-default-fallback: ONE cluster, ONE call
           evidence: null, model: requestedModel,
           runModel: async (p: string) => {
             const { res } = await reservingStep("refuter", { prompt: p, tools: REFUTER_TOOLS, maxTurns: config.refutationMaxTurns, model: requestedModel });
@@ -1100,7 +1100,7 @@ export async function runOpenSemanticDiscovery(root: string, opts: OpenSemanticD
       if (confirmed) {
         const one = await hyp.runVerifier({
           clusters: [cluster], pinDir: pinned, cwd: pinned, promptTemplate: VALUE_PROMPT_TEMPLATE,
-          maxClusters: 1, concurrency: 1, maxMs: config.maxWallMs, strategy: "default", onlyCluster: 1,
+          maxClusters: 1, concurrency: 1, maxMs: config.maxWallMs, strategy: "default", onlyCluster: 1, // concurrency-default-fallback: ONE cluster, ONE call
           evidence: null, model: requestedModel,
           runModel: async (p: string) => {
             const { res } = await reservingStep("value-assessment", { prompt: p, tools: VALUE_TOOLS, maxTurns: config.refutationMaxTurns, model: requestedModel });
