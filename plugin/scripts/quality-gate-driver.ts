@@ -1041,14 +1041,27 @@ export function qualityGateRoutines(root: string, opts: QualityGateOptions): Rou
  *     had silently reverted to 360m must not look like a correctly-assembled 60m one, 硬规则 3b/9);
  *   • `max_model_calls_per_24h` — the ceiling, with its HARD-RESERVATION semantics: it bounds
  *     RESERVATIONS over the trailing 24h (one taken before EVERY subprocess), not a pre-round snapshot;
+ *   • the PER-ROUND values (`max_experiences` / `max_model_calls` / `max_wall_ms`) plus `verify_reserve`
+ *     and the reflection ceiling that follows from it — because "what did this round actually carry?"
+ *     must be answerable from the reload line, not by re-parsing a config that may since have changed
+ *     (task gap-discovery-method-per-round-quota-verify-reserve-deep-reflection, Plan item 4);
+ *   • `reflection_tools` / `reflection_max_turns` — the reflection launcher's own argv parameters, so the
+ *     reload line says whether DEPTH (code access) is on, not only how MANY calls there are;
  *   • `verifier_max_turns` + the computed worst case — because `max_model_calls` bounds subprocess
- *     INVOCATIONS, so the 24h API-turn worst case is `cap × max(reflection 1 turn, verifier turns)`, and
+ *     INVOCATIONS, so the 24h API-turn worst case is `cap × max(reflection turns, verifier turns)`, and
  *     that product is only knowable here, at assembly time. */
 export function formatDiscoveryMethodAssembly(dm: {
   enabled: boolean;
   intervalMinutes: number | null;
   intervalUntil: number | null;
   maxModelCallsPer24h: number | null;
+  maxExperiences: number | null;
+  maxModelCalls: number | null;
+  maxWallMs: number | null;
+  verifyReserve: number | null;
+  reflectionMaxModelCalls: number | null;
+  reflectionTools: string | null;
+  reflectionMaxTurns: number | null;
   verifierMaxTurns: number | null;
   worstCaseTurns24h: number | null;
 }): string {
@@ -1057,9 +1070,15 @@ export function formatDiscoveryMethodAssembly(dm: {
   const cap = dm.maxModelCallsPer24h === null
     ? ", max_model_calls_per_24h=<none — no cross-round ceiling>"
     : `, max_model_calls_per_24h=${dm.maxModelCallsPer24h} (HARD: pre-spawn reservation per call, trailing-24h; a reservation with no outcome still counts as spent)`;
+  const perRound = dm.maxModelCalls === null
+    ? ""
+    : `, max_experiences=${dm.maxExperiences}, max_model_calls=${dm.maxModelCalls} (per round), verify_reserve=${dm.verifyReserve} (held back from reflection ⇒ reflection <= ${dm.reflectionMaxModelCalls}), max_wall_ms=${dm.maxWallMs}`;
+  const refl = dm.reflectionTools === null
+    ? ""
+    : `, reflection_tools=${JSON.stringify(dm.reflectionTools)} (${dm.reflectionTools === "" ? "BASELINE arm: no tools, so reflection cannot read the code at the pin" : "SEMANTIC FIRST: reflection reads a stripped pin at HEAD"}), reflection_max_turns=${dm.reflectionMaxTurns}`;
   const turns = dm.verifierMaxTurns === null ? "" : `, verifier_max_turns=${dm.verifierMaxTurns}`;
-  const worst = dm.worstCaseTurns24h === null ? "" : `, worst_case_api_turns_per_24h=${dm.worstCaseTurns24h} (cap × max(reflection 1 turn, verifier turns))`;
-  return `discovery-method 例程已装配（enabled, interval=${dm.intervalMinutes}m${until}${cap}${turns}${worst}）`;
+  const worst = dm.worstCaseTurns24h === null ? "" : `, worst_case_api_turns_per_24h=${dm.worstCaseTurns24h} (cap × max(effective reflection turns, verifier turns))`;
+  return `discovery-method 例程已装配（enabled, interval=${dm.intervalMinutes}m${until}${cap}${perRound}${refl}${turns}${worst}）`;
 }
 
 /** The OPEN-SEMANTIC-DISCOVERY ASSEMBLY LINE, as ONE string (task gap-open-semantic-discovery-routine-track).

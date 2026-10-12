@@ -2,7 +2,7 @@
 id: gap-discovery-method-per-round-quota-verify-reserve-deep-reflection
 title: "discovery-method per-round quota after 24h=240: verification reserve,
   bounded code-reading reflection, partial persistence on wall breach"
-status: ready
+status: done
 labels:
   - gap
   - discovery-method
@@ -199,14 +199,6 @@ Independently confirmed on the live production round: the manual round's line la
 - plugin/test/discovery-reflection.test.mjs
 - plugin/scripts/capability-catalog-declarations.json
 - .quay/config.yml
-
-## Blocker
-
-**2026-10-12T18:21:17.342Z — worker 未落地（exited-not-landed）**
-
-- 未落地原因：step=suite: __PERFILE__ duration_ms=32924 plugin/test/prod-data-audit.test.mjs passed=false end_ms=1791829065438 cpu_ms=34036.67 mem_peak_kb=1873720
-- run_id：wk-prod-anchor
-- session_id：93355eb5-4eb6-4a83-90dd-85a89407a2b7
 
 ## Needs-Human
 
