@@ -44,6 +44,26 @@
 //   decided there is no method" (that is `decision:"no-method"`, a real judgment) — they are different
 //   `decision`/`reasons` shapes on read-back.
 //
+// ⛔ THE HELD-OUT CASE MUST BE OUTSIDE THE METHOD'S **LINEAGE**, AND THE VERDICT MUST BE READ AT THE
+//   COMMIT WHERE IT IS TRUE (gap-discovery-method-generalization-lineage-and-temporal-binding, 2026-10-12).
+//   A read-only audit of the landed Phase 2 found its only "generalization pass" invalid on two
+//   independent grounds, and both are now refusals rather than silently-graded calls:
+//     • LINEAGE — `shared-contract-divergence` v1 was seeded from evidence-store record
+//       `outcome-bb…`; v3 of the SAME method came from that record's Experience in the same round;
+//       v2 was "validated" against that same Experience and promoted. `checkLineageIsolation` walks
+//       EVERY recorded version of the candidate's `method_id` (plus every method it names via
+//       `method:<id>@<v>`), one hop through the Experiences those versions cite, and refuses
+//       (`HELD_OUT_SHARES_LINEAGE`) on a shared record id/source_ref OR on >= 2 shared components.
+//     • TIME — the verifier read develop `9a329772a`, where the case's fix (`706545794`) had already
+//       landed; read there, the method's own invariant HOLDS, i.e. the correct verdict is the opposite
+//       of the one the case's historical role supplies. `validateEvaluationPin` +
+//       `checkTemporalBinding` require the case to name `evaluation_pin` (and, when positive,
+//       `fix_commit`), require the fix NOT to be an ancestor of the pin, and REQUIRE the verifier to
+//       run in a stripped detached tree at the pin (`materializeStrippedPin` / `verifyStrippedPin`) —
+//       never the live checkout. The evaluated commit is recorded on the verdict.
+//   Every one of those is a REFUSAL: `outcome:"not-evaluated"`, zero model calls, the candidate left
+//   exactly as it was. A refused READING must never be shaped like a failed METHOD (硬规则 3b).
+//
 // BUDGET / KILL SWITCH, enforced IN THIS MODULE (not deferred to the later routine-wiring task):
 //   `enabled`, `maxPerRun`, `maxModelCalls`, `maxWallMs`. `enabled:false` makes EVERY exported entry
 //   point return `{ok:false, reason:"disabled"}` with ZERO model calls — the same contract SHAPE as
@@ -52,6 +72,7 @@
 
 import fs from "node:fs";
 import path from "node:path";
+import { execFileSync } from "node:child_process";
 import { pathToFileURL } from "node:url";
 
 // ── reuse, never re-derive ─────────────────────────────────────────────────────────────────────
@@ -67,6 +88,7 @@ import {
 import {
   modelCallFields, callText, parseJsonObject,
   importDriverRuntime, hardenedArgv, modelFromArgv,
+  PIN_FORBIDDEN_DIRS,
 } from "./arch-hypothesis-generation.mjs";
 
 export const TOOL = "discovery-reflection";
@@ -520,6 +542,220 @@ const narrative = (r) => ({
   counterexample: isStr(r.counterexample, 1) ? r.counterexample : null,
 });
 
+// ── the held-out LINEAGE: a held-out case is outside the BATCH, but the batch is not the method ────
+//
+// ⛔ THE DEFECT THIS CLOSES (found by a read-only audit of the landed Phase 2, 2026-10-12): the first
+//   "generalization pass" refused a held-out case only when its id appeared in the CANDIDATE VERSION's
+//   own `provenance_evidence`. `shared-contract-divergence` v1 was seeded from evidence-store record
+//   `outcome-bb…`; v3 of the SAME method was produced from that record's Experience in the same round;
+//   v2 was then "validated" against that same Experience and promoted to `active`. The method's whole
+//   LINEAGE — not one version of it — is what the held-out case has to be outside of.
+
+/** Canonical in-provenance reference to another version of a method (`method:<id>@<version>`), the form
+ *  a candidate uses to record that it was derived from a PRIOR method rather than from raw evidence. */
+export const METHOD_REF_IN_PROVENANCE_RE = /^method:([^@]+)@(\d+)$/;
+
+/**
+ * Every recorded version that belongs to `candidate`'s lineage: all versions of its `method_id` in the
+ * registry (whatever order they were written in), every method named by a `method:<id>@<v>` reference
+ * in its `provenance_evidence`, and the candidate itself (which may not be in the registry yet).
+ * Pure. The candidate is returned FIRST; the rest is deduplicated by `method_id@version`.
+ */
+export function lineageVersions(candidate, registry = []) {
+  const all = (Array.isArray(registry) ? registry : (registry?.history ?? registry?.latest ?? [])).filter(isObj);
+  const ids = new Set();
+  if (isStr(candidate?.method_id, 1)) ids.add(candidate.method_id);
+  for (const p of Array.isArray(candidate?.provenance_evidence) ? candidate.provenance_evidence : []) {
+    const m = METHOD_REF_IN_PROVENANCE_RE.exec(String(p));
+    if (m) ids.add(m[1]);
+  }
+  const key = (m) => `${m?.method_id ?? ""}@${isInt(m?.version) ? m.version : "?"}`;
+  const out = [];
+  const seen = new Set();
+  const push = (m) => { if (isObj(m) && isStr(m.method_id, 1) && !seen.has(key(m))) { seen.add(key(m)); out.push(m); } };
+  push(candidate);
+  for (const m of all) if (ids.has(m.method_id)) push(m);
+  return out;
+}
+
+/** Two records describing the same defect under different ids share at least this many components. */
+export const LINEAGE_MIN_SHARED_COMPONENTS = 2;
+
+/**
+ * Is `heldOutCase` inside the candidate's LINEAGE (not merely inside the batch that minted it)?
+ * PURE. Returns `{ok:true}` when the held-out case is genuinely outside, or
+ * `{ok:false, reason:"HELD_OUT_SHARES_LINEAGE:…", hits:[…]}` naming EVERY path that fired (硬规则 3 —
+ * a refusal enumerates what matched, it does not return a bare boolean).
+ *
+ * Two independent ways to share a lineage, because they are different defects with the same effect:
+ *   • RECORD identity — the held-out's `id` or `source_ref` appears in any lineage version's
+ *     `provenance_evidence`, or in the `provenance_evidence`/`source_ref` of an Experience those
+ *     entries resolve to (one hop: the ledger record a lineage version cites is itself part of the
+ *     lineage, and it can point back at the held-out's source).
+ *   • DEFECT identity — the held-out's `components` share >= `LINEAGE_MIN_SHARED_COMPONENTS` files with
+ *     a lineage SEED Experience's `components`. The same defect re-filed under a different record id
+ *     is the same case.
+ *
+ * `experiences` is the ledger's record list (`readExperienceLedger(root).records`); an unresolvable
+ * provenance entry is NOT dropped — the raw reference is still compared against the held-out's ids.
+ */
+export function checkLineageIsolation({ candidate, heldOutCase, registry = [], experiences = [] } = {}) {
+  const lineage = lineageVersions(candidate, registry);
+  const expById = new Map();
+  for (const e of Array.isArray(experiences) ? experiences : []) if (isObj(e) && isStr(e.id, 1)) expById.set(e.id, e);
+
+  const heldIds = [heldOutCase?.id, heldOutCase?.source_ref].filter((x) => isStr(x, 1));
+  const heldComponents = Array.isArray(heldOutCase?.components) ? heldOutCase.components.filter((c) => isStr(c, 1)) : [];
+
+  const hits = [];
+  const seeds = [];
+  const where = (v) => `${v?.method_id ?? "?"}@${isInt(v?.version) ? v.version : "?"}`;
+  for (const v of lineage) {
+    for (const p of Array.isArray(v.provenance_evidence) ? v.provenance_evidence : []) {
+      if (!isStr(p, 1)) continue;
+      if (heldIds.includes(p)) hits.push({ kind: "version_provenance", method: where(v), ref: p });
+      const seed = expById.get(p);
+      if (!seed) continue;
+      seeds.push(seed);
+      if (isStr(seed.source_ref, 1) && heldIds.includes(seed.source_ref)) {
+        hits.push({ kind: "referenced_experience_source_ref", method: where(v), ref: seed.source_ref, via: p });
+      }
+      for (const q of Array.isArray(seed.provenance_evidence) ? seed.provenance_evidence : []) {
+        if (isStr(q, 1) && heldIds.includes(q)) hits.push({ kind: "referenced_experience_provenance", method: where(v), ref: q, via: p });
+      }
+    }
+  }
+  for (const seed of seeds) {
+    const shared = heldComponents.filter((c) => (Array.isArray(seed.components) ? seed.components : []).includes(c));
+    if (shared.length >= LINEAGE_MIN_SHARED_COMPONENTS) {
+      hits.push({ kind: "shared_components", ref: seed.id ?? seed.case_id ?? null, shared: shared.sort() });
+    }
+  }
+
+  if (!hits.length) return { ok: true, lineage: lineage.map(where), hits: [] };
+  const first = hits[0];
+  const detail = first.kind === "shared_components"
+    ? `shares-${first.shared.length}-components-(${first.shared.join(",")})-with-lineage-seed-${first.ref}`
+    : `${first.kind}-${first.ref}-via-${first.method}`;
+  return {
+    ok: false,
+    reason: `HELD_OUT_SHARES_LINEAGE:${heldOutCase?.id ?? "held-out"}-${detail}`,
+    hits,
+    lineage: lineage.map(where),
+  };
+}
+
+// ── the EVALUATION PIN: a held-out case is only meaningful at a commit where its verdict is true ───
+//
+// ⛔ THE SECOND DEFECT THIS CLOSES: the Phase 2 verifier read develop `9a329772a`, where the fix for the
+//   held-out case (`706545794`) had ALREADY landed. Read at that commit, the method's own invariant
+//   "holds" — i.e. the correct verdict there is the OPPOSITE of the one the case's historical role
+//   supplies. The verifier answered `supported` and was graded "correct" only because the expected
+//   verdict came from the case's role, not from the code it was actually shown.
+//   ⇒ The expected verdict must be TRUE at the commit that is evaluated. That commit is the case's
+//   `evaluation_pin`, it must predate the fix, and it must be recorded on the verdict.
+
+/** A "positive" case is one whose ground-truth verdict is a REAL finding (`supported`) — the class for
+ *  which "the defect was there and was fixed" is meaningful, and which therefore needs a `fix_commit`. */
+export const isPositiveCase = (role) => roleExpectedVerdicts(role).includes("supported");
+
+/**
+ * The static half of the temporal binding: the held-out case must NAME the two commits. PURE.
+ * 硬规则 3b — a case that cannot say where its verdict is true is refused with its OWN code, never
+ * silently evaluated at whatever the checkout happens to be.
+ */
+export function validateEvaluationPin(heldOutCase) {
+  const reasons = [];
+  if (!isStr(heldOutCase?.evaluation_pin, 1)) reasons.push("NO_EVALUATION_PIN");
+  if (isPositiveCase(heldOutCase?.role) && !isStr(heldOutCase?.fix_commit, 1)) reasons.push("NO_FIX_COMMIT");
+  return { ok: reasons.length === 0, reasons };
+}
+
+/**
+ * The dynamic half: `fix_commit` must NOT be an ancestor of `evaluation_pin` — if it is, the fix was
+ * already in the tree at the pin, so the pin cannot exhibit the defect the case claims.
+ *
+ * `isAncestor(ancestor, descendant)` returns `true` / `false` / `null` for "could not determine".
+ * ⛔ The three-valued shape is load-bearing: a git failure that collapsed into `false` would read as
+ * "the pin is fine" and let a mismatched case through (硬规则 3b).
+ */
+export function checkTemporalBinding({ heldOutCase, isAncestor } = {}) {
+  const pin = heldOutCase?.evaluation_pin;
+  const fix = heldOutCase?.fix_commit;
+  if (!isStr(fix, 1)) return { ok: true, checked: false };   // a non-positive case names no fix
+  if (typeof isAncestor !== "function") return { ok: false, reason: "ANCESTRY_CHECK_UNAVAILABLE:no-isAncestor-seam" };
+  const r = isAncestor(fix, pin);
+  if (r === true) {
+    return { ok: false, checked: true, reason: `TEMPORAL_MISMATCH:fix_commit-${fix}-is-an-ancestor-of-evaluation_pin-${pin}-so-the-fix-had-already-landed-and-the-pin-cannot-exhibit-the-defect` };
+  }
+  if (r === null) return { ok: false, checked: true, reason: `EVALUATION_PIN_UNRESOLVED:could-not-decide-whether-${fix}-is-an-ancestor-of-${pin}` };
+  return { ok: true, checked: true };
+}
+
+/** The real ancestry seam. `null` (not `false`) on any git failure — see `checkTemporalBinding`. */
+export const gitIsAncestor = (root) => (ancestor, descendant) => {
+  try {
+    execFileSync("git", ["-C", root, "merge-base", "--is-ancestor", String(ancestor), String(descendant)], { stdio: "ignore" });
+    return true;
+  } catch (e) {
+    return e?.status === 1 ? false : null;   // git exits 1 for "not an ancestor"; anything else is a failure
+  }
+};
+
+/**
+ * Directories that must be ABSENT from the tree the verifier runs in. The four in the imported
+ * `PIN_FORBIDDEN_DIRS` are the hypothesis-generation stage's contract; `experiments`, `meta` and `adr`
+ * are this stage's ADDITION (the methodology layer reaches further than that stage's inventory scope
+ * needed), so this is a SEPARATE, additive list rather than an edit of the dependency's contract.
+ */
+export const DISCOVERY_PIN_FORBIDDEN_DIRS = Object.freeze([...PIN_FORBIDDEN_DIRS, "experiments", "meta", "adr"]);
+
+/**
+ * Is `pinDir` a usable stripped pin? `null` when it is; otherwise the refusal reason. Same three-valued
+ * discipline as `verifyCwdRefusal` in the hypothesis-generation stage: naming a directory proves nothing
+ * about the tree, so the forbidden directories are enumerated BY POSITION and their presence is its own
+ * refusal (硬规则 2/3). `PIN_IS_LIVE_CHECKOUT` is its own code — "never the live checkout" is the point.
+ */
+export function verifyStrippedPin(pinDir, { existsSync = fs.existsSync, repoRoot = null } = {}) {
+  if (!isStr(pinDir, 1)) return "PIN_DIR_REQUIRED";
+  if (repoRoot && path.resolve(pinDir) === path.resolve(repoRoot)) return "PIN_IS_LIVE_CHECKOUT";
+  if (!existsSync(pinDir)) return `PIN_DIR_MISSING:${pinDir}`;
+  const present = DISCOVERY_PIN_FORBIDDEN_DIRS.filter((d) => { try { return existsSync(path.join(pinDir, d)); } catch { return false; } });
+  if (present.length) return `PIN_NOT_STRIPPED:${present.join(",")}`;
+  return null;
+}
+
+/**
+ * Materialise the WHOLE tree at `rev` into `dir`, then DELETE every forbidden top-level directory —
+ * the materialisation half of the stripped-pin discipline (arch-hypothesis-generation.mjs archives only
+ * its own inventory scope; this verifier reads arbitrary components, so it takes the whole tree).
+ * `removed` reports WHICH directories were actually deleted, so "stripped" is a reading, not an
+ * assumption. Failures are a refusal with git's/tar's own message — never an empty tree read as fine.
+ */
+export function materializeStrippedPin({ root, rev, dir } = {}) {
+  if (!isStr(root, 1)) return { ok: false, reason: "PIN_ROOT_REQUIRED" };
+  if (!isStr(rev, 1)) return { ok: false, reason: "PIN_REV_REQUIRED" };
+  if (!isStr(dir, 1)) return { ok: false, reason: "PIN_DIR_REQUIRED" };
+  try {
+    // stderr is DROPPED rather than inherited: a bad rev is a normal refusal here, and git's "fatal:"
+    // would otherwise be printed into whatever stream the caller is using for its own readings.
+    const tar = execFileSync("git", ["-C", root, "archive", "--format=tar", rev], { maxBuffer: 1 << 30, stdio: ["ignore", "pipe", "ignore"] });
+    fs.mkdirSync(dir, { recursive: true });
+    // stdin MUST stay a pipe here: `input` is written to fd 0, so `"ignore"` would silently feed tar nothing.
+    execFileSync("tar", ["-x", "-C", dir], { input: tar, maxBuffer: 1 << 26, stdio: ["pipe", "ignore", "ignore"] });
+  } catch (e) {
+    return { ok: false, reason: `PIN_MATERIALIZE_FAILED:${String(e?.message ?? e).slice(0, 200)}` };
+  }
+  const removed = [];
+  for (const d of DISCOVERY_PIN_FORBIDDEN_DIRS) {
+    const p = path.join(dir, d);
+    if (!fs.existsSync(p)) continue;
+    fs.rmSync(p, { recursive: true, force: true });
+    removed.push(d);
+  }
+  return { ok: true, dir, rev, removed, stripped: verifyStrippedPin(dir) === null };
+}
+
 // ── validateGeneralization: the cross-case test (the ONLY draft→active gate) ──────────────────────
 
 /** The verdict a role's ground truth corresponds to — REUSES the ledger's own role↔verdict contract
@@ -566,56 +802,103 @@ export function buildGeneralizationPrompt({ candidate, heldOutCase }) {
  * unparseable) leaves it `draft` with `promoted:false` and its own `not_evaluated_reason` — a
  * failed READING is never reported as a failed METHOD (硬规则 3b).
  *
- * @returns {Promise<object>} `{ok, called, predicted_verdict, expected_verdicts, correct, promoted,
- *                              candidate_after, retirement_reason, not_evaluated_reason, model_call}`
+ * ⛔ A REFUSAL IS NOT A VERDICT. Three pre-conditions gate the call, and each is a REFUSAL — the model
+ * is never called, the candidate is NOT retired, and the outcome is recorded as `not-evaluated` with
+ * the refusal's own code:
+ *   • `HELD_OUT_SHARES_LINEAGE`  — the held-out case is inside the candidate's whole lineage;
+ *   • `NO_EVALUATION_PIN` / `NO_FIX_COMMIT` — the case cannot say at which commit its verdict is true;
+ *   • `TEMPORAL_MISMATCH`        — the fix had already landed at the pin the case names;
+ *   • `PIN_DIR_REQUIRED` / `PIN_NOT_STRIPPED` / `PIN_IS_LIVE_CHECKOUT` — the verifier was not given a
+ *     stripped detached tree at the pin. Reading the LIVE checkout is how the Phase 2 pass graded a
+ *     case against a tree in which its defect was already fixed.
+ *
+ * @param {object} o
+ * @param {object} o.heldOutCase  the held-out Experience; carries `evaluation_pin` (and, for a positive
+ *   case, `fix_commit`), the commits at which its expected verdict is TRUE and was made true
+ * @param {string} o.pinDir    the STRIPPED tree at `evaluation_pin` the verifier must run in — built by
+ *   `materializeStrippedPin`; the injected `model` seam must be launched with this as its cwd
+ * @param {object[]} [o.experiences] the ledger records, used to resolve the lineage one hop
+ * @param {(a:string,b:string)=>boolean|null} [o.isAncestor] ancestry seam (default: real git, needs `root`)
+ * @param {string} [o.root]    repo root, for the default ancestry seam and the live-checkout refusal
+ * @returns {Promise<object>} `{ok, called, outcome, evaluated_commit, verifier_cwd, refusal_code,
+ *                              predicted_verdict, expected_verdicts, correct, promoted, candidate_after,
+ *                              retirement_reason, not_evaluated_reason, model_call}`
  */
-export async function validateGeneralization({ candidate, heldOutCase, registry = [], model, budget = {}, modelId = null, nowMs = Date.now() } = {}) {
+export async function validateGeneralization({ candidate, heldOutCase, registry = [], model, budget = {}, modelId = null, nowMs = Date.now(), experiences = [], pinDir = null, isAncestor = null, root = null } = {}) {
   const guard = disabledGuard(budget);
   if (guard) return guard;
   if (typeof model !== "function") return { ok: false, reason: "model-seam-missing", called: false };
   if (!isObj(candidate) || !isStr(candidate.method_id, 1)) return { ok: false, reason: "CANDIDATE_INVALID:needs-a-method_id", called: false };
   if (!isObj(heldOutCase) || !isStr(heldOutCase.role, 1)) return { ok: false, reason: "HELD_OUT_INVALID:needs-an-experience-with-a-role", called: false };
 
+  // EVERY refusal below shares ONE shape: no model call, no promotion, the candidate untouched, and the
+  // outcome spelled `not-evaluated` — a refused READING, never a failed METHOD (硬规则 3b).
+  const refuse = (code, reason) => ({
+    ok: false, called: false, outcome: "not-evaluated", refusal_code: code, reason,
+    not_evaluated_reason: code, predicted_verdict: null, expected_verdicts: roleExpectedVerdicts(heldOutCase.role),
+    correct: null, promoted: false, candidate_after: { ...candidate }, retirement_reason: null,
+    evaluated_commit: null, verifier_cwd: null, model_call: null,
+  });
+
   // The held-out case must be OUTSIDE the batch that produced the candidate: a case the candidate was
   // fitted to proves nothing about transfer.
   const prov = Array.isArray(candidate.provenance_evidence) ? candidate.provenance_evidence : [];
   if (isStr(heldOutCase.id, 1) && prov.includes(heldOutCase.id)) {
-    return { ok: false, called: false, reason: `HELD_OUT_INSIDE_THE_BATCH:${heldOutCase.id}-is-already-a-provenance-member-of-${candidate.method_id}` };
+    return refuse("HELD_OUT_INSIDE_THE_BATCH", `HELD_OUT_INSIDE_THE_BATCH:${heldOutCase.id}-is-already-a-provenance-member-of-${candidate.method_id}`);
   }
   const expected = roleExpectedVerdicts(heldOutCase.role);
-  if (!expected.length) return { ok: false, called: false, reason: `HELD_OUT_ROLE_UNKNOWN:${heldOutCase.role}` };
+  if (!expected.length) return refuse("HELD_OUT_ROLE_UNKNOWN", `HELD_OUT_ROLE_UNKNOWN:${heldOutCase.role}`);
 
+  // …and outside the candidate's whole LINEAGE — a different version of the same method having been
+  // seeded from this very case makes the "hold-out" a re-run of the fitting, not a test of transfer.
+  const lineage = checkLineageIsolation({ candidate, heldOutCase, registry, experiences });
+  if (!lineage.ok) return { ...refuse("HELD_OUT_SHARES_LINEAGE", lineage.reason), lineage: lineage.lineage, lineage_hits: lineage.hits };
+
+  // …and its expected verdict must be TRUE at a NAMED commit, which must predate the fix.
+  const pinFields = validateEvaluationPin(heldOutCase);
+  if (!pinFields.ok) return refuse(pinFields.reasons[0], `${pinFields.reasons[0]}:${heldOutCase.case_id ?? heldOutCase.id ?? "held-out"}-must-name-${pinFields.reasons.join("+")}`);
+  const pinRefusal = verifyStrippedPin(pinDir, { repoRoot: root });
+  if (pinRefusal) return refuse(pinRefusal.split(":")[0], `PIN_REFUSED:${pinRefusal}`);
+  const temporal = checkTemporalBinding({ heldOutCase, isAncestor: isAncestor ?? (root ? gitIsAncestor(root) : null) });
+  if (!temporal.ok) return refuse(temporal.reason.split(":")[0], temporal.reason);
+
+  const evaluatedCommit = String(heldOutCase.evaluation_pin);
   const prompt = buildGeneralizationPrompt({ candidate, heldOutCase });
   const tCall = Date.now();
   const { stdout } = await modelCall(model, prompt);
   const call = { ...modelCallFields({ requested: modelId, stdout }), wall_ms: Date.now() - tCall };
   const parsed = parseJsonObject(callText(stdout));
   const nextV = nextVersion(registry, candidate.method_id);
+  const ran = { evaluated_commit: evaluatedCommit, verifier_cwd: pinDir };
 
   if (!parsed || !isStr(parsed.verdict, 1)) {
     // NOT-EVALUATED (its own value): the reading failed, the METHOD was not refuted. Stays draft.
     return {
-      ok: true, called: true, model_call: call, predicted_verdict: null, expected_verdicts: expected,
-      correct: null, promoted: false, candidate_after: { ...candidate }, retirement_reason: null,
+      ok: true, called: true, outcome: "not-evaluated", model_call: call, predicted_verdict: null,
+      expected_verdicts: expected, correct: null, promoted: false, candidate_after: { ...candidate },
+      retirement_reason: null, refusal_code: null,
       not_evaluated_reason: parsed ? "VERDICT_MISSING_IN_MODEL_OUTPUT" : "UNPARSEABLE_MODEL_OUTPUT",
+      ...ran,
     };
   }
   const predicted = String(parsed.verdict);
   const correct = expected.includes(predicted);
   if (correct) {
     return {
-      ok: true, called: true, model_call: call, predicted_verdict: predicted, expected_verdicts: expected,
-      correct: true, promoted: true,
+      ok: true, called: true, outcome: "evaluated", model_call: call, predicted_verdict: predicted,
+      expected_verdicts: expected, correct: true, promoted: true,
       candidate_after: { ...candidate, version: nextV, status: "active", retirement_reason: null },
-      retirement_reason: null, not_evaluated_reason: null, reasoning: parsed.reasoning ?? null,
+      retirement_reason: null, not_evaluated_reason: null, refusal_code: null, reasoning: parsed.reasoning ?? null,
+      ...ran,
     };
   }
   const retirement_reason = `failed-generalization-on-${heldOutCase.case_id ?? heldOutCase.id ?? "held-out"}: predicted-${predicted}-but-role-${heldOutCase.role}-requires-${expected.join("|")}`;
   return {
-    ok: true, called: true, model_call: call, predicted_verdict: predicted, expected_verdicts: expected,
-    correct: false, promoted: false,
+    ok: true, called: true, outcome: "evaluated", model_call: call, predicted_verdict: predicted,
+    expected_verdicts: expected, correct: false, promoted: false,
     candidate_after: { ...candidate, version: nextV, status: "retired", retirement_reason },
-    retirement_reason, not_evaluated_reason: null, reasoning: parsed.reasoning ?? null,
+    retirement_reason, not_evaluated_reason: null, refusal_code: null, reasoning: parsed.reasoning ?? null,
+    ...ran,
   };
 }
 

@@ -1,10 +1,13 @@
 // @test-group engine
 // Tests for the DISCOVERY REFLECTION module (task gap-discovery-method-reflection-unified-trigger-and-
-// candidate-generation, AC a–e + the no-hand-coding static control). The contract under test: a
-// bounded reflection trigger that turns the Experience ledger into `DiscoveryMethod` CANDIDATES — with
-// a model seam that is injectable (a stub here, the hardened launcher in the real run), a kill switch
-// that makes every entry point a no-op, budget that STOPS and REPORTS rather than silently truncating,
-// and a `draft → active` promotion gate that a wrong cross-case prediction can never slip past.
+// candidate-generation, AC a–e + the no-hand-coding static control — plus the held-out LINEAGE /
+// TEMPORAL-BINDING ACs of gap-discovery-method-generalization-lineage-and-temporal-binding). The
+// contract under test: a bounded reflection trigger that turns the Experience ledger into
+// `DiscoveryMethod` CANDIDATES — with a model seam that is injectable (a stub here, the hardened
+// launcher in the real run), a kill switch that makes every entry point a no-op, budget that STOPS and
+// REPORTS rather than silently truncating, and a `draft → active` promotion gate that a wrong
+// cross-case prediction can never slip past — where the held-out case must sit OUTSIDE the candidate's
+// whole method lineage AND be read at a commit where its expected verdict is actually true.
 //
 // ⛔ The static control at the bottom is the load-bearing one: it PINS the "no hand-coding the answer"
 // requirement as a CHECKED property of the production source, so the property cannot rot back unnoticed.
@@ -14,6 +17,7 @@ import assert from "node:assert/strict";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
+import { execFileSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
 
 import {
@@ -23,15 +27,52 @@ import {
   reflect, validateGeneralization, roleExpectedVerdicts,
   attemptsFile, readReflectionAttempts, recordReflectionAttempt,
   computeReflectionCost, learningQuality, registryDigest, runReflectionRound,
+  lineageVersions, checkLineageIsolation, validateEvaluationPin, checkTemporalBinding,
+  gitIsAncestor, verifyStrippedPin, materializeStrippedPin, DISCOVERY_PIN_FORBIDDEN_DIRS,
+  isPositiveCase, LINEAGE_MIN_SHARED_COMPONENTS,
 } from "../../docs/analysis/discovery-reflection.mjs";
 import { subjectKey } from "../../docs/analysis/architecture-evidence-store.mjs";
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const MODULE_PATH = path.join(HERE, "..", "..", "docs", "analysis", "discovery-reflection.mjs");
+const REPO_ROOT = path.resolve(HERE, "..", "..");
 
 const tmpDirs = [];
 const mkTmp = () => { const d = fs.mkdtempSync(path.join(os.tmpdir(), "discovery-reflection-")); tmpDirs.push(d); return d; };
 after(() => { for (const d of tmpDirs) fs.rmSync(d, { recursive: true, force: true }); });
+
+/** An EMPTY directory satisfies the stripped-pin predicate (nothing forbidden is present) — the cheap
+ *  cwd for the cases that are about the LINEAGE/pin FIELD checks rather than about materialisation. */
+const strippedTmp = () => mkTmp();
+
+/** A minimal REAL git repo: a pre-fix commit that carries the methodology/state directories the strip
+ *  must delete, the fix commit, and a later commit. Real git, real shas — so `git archive`, the
+ *  `merge-base --is-ancestor` seam and the strip removal are exercised for real, not simulated. */
+const mkGitRepo = () => {
+  const dir = mkTmp();
+  const git = (...a) => execFileSync("git", ["-C", dir, ...a], {
+    encoding: "utf8",
+    env: {
+      ...process.env,
+      GIT_AUTHOR_NAME: "t", GIT_AUTHOR_EMAIL: "t@example.com",
+      GIT_COMMITTER_NAME: "t", GIT_COMMITTER_EMAIL: "t@example.com",
+    },
+  });
+  git("init", "-q", "-b", "main");
+  fs.mkdirSync(path.join(dir, "tasks"), { recursive: true });
+  fs.mkdirSync(path.join(dir, ".quay"), { recursive: true });
+  fs.mkdirSync(path.join(dir, "plugin", "scripts"), { recursive: true });
+  fs.writeFileSync(path.join(dir, "tasks", "t.md"), "# t\n");
+  fs.writeFileSync(path.join(dir, ".quay", "config.yml"), "providers: {}\n");
+  fs.writeFileSync(path.join(dir, "plugin", "scripts", "target.ts"), "export const x = 1;\n");
+  git("add", "-A"); git("commit", "-qm", "pre-fix");
+  const preFix = git("rev-parse", "HEAD").trim();
+  fs.writeFileSync(path.join(dir, "plugin", "scripts", "target.ts"), "export const x = 2;\n");
+  git("add", "-A"); git("commit", "-qm", "fix");
+  const fix = git("rev-parse", "HEAD").trim();
+  git("commit", "-q", "--allow-empty", "-m", "later");
+  return { dir, preFix, fix, later: git("rev-parse", "HEAD").trim() };
+};
 
 /** A ledger-shaped Experience fixture. */
 const expFixture = (over = {}) => ({
@@ -175,10 +216,13 @@ test("AC1(c): exceeding maxModelCalls mid-batch STOPS further calls and reports 
 test("AC1(d): a WRONG generalization prediction retires the candidate with a non-null reason (never promotes)", async () => {
   // The candidate was fitted on one experience; the held-out case's role demands "refuted".
   const candidate = assembleCandidate({ rec: decisionFixture(), unit: { experiences: [expFixture({ id: "experience-inbatch000000" })] }, registry: [], budget: {}, nowIso: "2026-10-12T00:00:00Z" });
-  const heldOut = expFixture({ id: "experience-heldout0000000", case_id: "EXP-heldout", role: "confirmed-negative" });
+  // `confirmed-negative` is NOT a positive case, so it binds no `fix_commit`; it still names the pin it
+  // is read at, and the verifier still runs in a (here: empty, therefore stripped) tree rather than live.
+  const heldOut = expFixture({ id: "experience-heldout0000000", case_id: "EXP-heldout", role: "confirmed-negative", source_ref: "outcome-heldout00000000", components: ["plugin/scripts/heldout.ts"], evaluation_pin: "1".repeat(40) });
+  const pin = { pinDir: strippedTmp() };
   assert.deepEqual(roleExpectedVerdicts("confirmed-negative"), ["refuted"]);
 
-  const wrong = await validateGeneralization({ candidate, heldOutCase: heldOut, model: stubModel({ invariant_holds: true, verdict: "supported", reasoning: "it looks fine" }), budget: {} });
+  const wrong = await validateGeneralization({ candidate, heldOutCase: heldOut, model: stubModel({ invariant_holds: true, verdict: "supported", reasoning: "it looks fine" }), budget: {}, ...pin });
   assert.equal(wrong.ok, true);
   assert.equal(wrong.correct, false);
   assert.equal(wrong.promoted, false, "a wrong prediction MUST NOT promote");
@@ -186,14 +230,14 @@ test("AC1(d): a WRONG generalization prediction retires the candidate with a non
   assert.ok(wrong.retirement_reason && wrong.retirement_reason.length > 0, "a retired candidate carries a non-null retirement_reason");
 
   // A CORRECT prediction DOES promote (the positive control for the same gate).
-  const right = await validateGeneralization({ candidate, heldOutCase: heldOut, model: stubModel({ invariant_holds: false, verdict: "refuted", reasoning: "the claim does not hold" }), budget: {} });
+  const right = await validateGeneralization({ candidate, heldOutCase: heldOut, model: stubModel({ invariant_holds: false, verdict: "refuted", reasoning: "the claim does not hold" }), budget: {}, ...pin });
   assert.equal(right.correct, true);
   assert.equal(right.promoted, true);
   assert.equal(right.candidate_after.status, "active");
   assert.equal(right.candidate_after.retirement_reason, null);
 
   // An UNEVALUABLE reading (turn budget / unparseable) is NOT a refutation: stays `draft`, promoted:false.
-  const unparseable = await validateGeneralization({ candidate, heldOutCase: heldOut, model: stubModel("no json here"), budget: {} });
+  const unparseable = await validateGeneralization({ candidate, heldOutCase: heldOut, model: stubModel("no json here"), budget: {}, ...pin });
   assert.equal(unparseable.correct, null);
   assert.equal(unparseable.promoted, false);
   assert.equal(unparseable.candidate_after.status, "draft", "an unmeasured reading leaves the candidate draft, never retired");
@@ -208,6 +252,197 @@ test("AC1(d): a held-out case INSIDE the candidate's own batch is refused (trans
   assert.equal(r.ok, false);
   assert.equal(r.called, false);
   assert.match(r.reason, /^HELD_OUT_INSIDE_THE_BATCH:/);
+});
+
+// ── AC(a–c): the held-out case must be outside the candidate's whole METHOD LINEAGE, not just the batch
+//
+// The defect reproduced here is the audit's finding #1: `shared-contract-divergence` v1 was seeded from
+// evidence-store record `outcome-bb…`; v2 was "validated" against an Experience whose `source_ref` IS
+// that record — i.e. against the same case, reached through a different version of the same method.
+
+test("AC1(a): a held-out case whose source_ref sits in an EARLIER version's provenance ⇒ HELD_OUT_SHARES_LINEAGE (zero model calls)", async () => {
+  const heldOut = expFixture({
+    id: "experience-heldout0000000", case_id: "EXP-heldout", source_ref: "outcome-bb12a6858838e74b",
+    components: ["plugin/scripts/heldout.ts"],
+  });
+  const v1 = methodFixture({ method_id: "shared-contract-divergence", version: 1, provenance_evidence: ["outcome-bb12a6858838e74b"] });
+  const v2 = methodFixture({ method_id: "shared-contract-divergence", version: 2, provenance_evidence: ["experience-faninlock00000"] });
+
+  // v2's OWN provenance does not carry the held-out ⇒ the pre-existing batch check passes, which is
+  // exactly the hole: the leak is one version back, in the SAME method's lineage.
+  const counter = { calls: 0 };
+  const r = await validateGeneralization({ candidate: v2, heldOutCase: heldOut, registry: [v1, v2], model: stubModel({ verdict: "supported" }, counter), budget: {}, pinDir: strippedTmp() });
+  assert.equal(counter.calls, 0, "a refused held-out case spends ZERO model calls");
+  assert.equal(r.ok, false);
+  assert.equal(r.called, false);
+  assert.equal(r.refusal_code, "HELD_OUT_SHARES_LINEAGE");
+  assert.equal(r.outcome, "not-evaluated", "a refusal is recorded as not-evaluated, never as a failed method");
+  assert.equal(r.promoted, false);
+  assert.equal(r.candidate_after.status, "draft", "a refusal NEVER retires the method");
+  assert.deepEqual(r.candidate_after.provenance_evidence, ["experience-faninlock00000"], "the candidate is returned untouched");
+  assert.deepEqual(r.lineage, ["shared-contract-divergence@2", "shared-contract-divergence@1"], "the WHOLE lineage was walked, candidate first");
+  assert.deepEqual(r.lineage_hits.map((h) => h.kind), ["version_provenance"]);
+  assert.equal(r.lineage_hits[0].ref, "outcome-bb12a6858838e74b");
+
+  // POSITIVE CONTROL on the same predicate, inside the same test: drop v1 and the very same held-out
+  // case is refused for its MISSING PIN instead — so the code above is the lineage, not a blanket no.
+  const counter2 = { calls: 0 };
+  const r2 = await validateGeneralization({ candidate: v2, heldOutCase: heldOut, registry: [v2], model: stubModel({ verdict: "supported" }, counter2), budget: {}, pinDir: strippedTmp() });
+  assert.equal(r2.refusal_code, "NO_EVALUATION_PIN");
+  assert.equal(counter2.calls, 0);
+});
+
+test("AC1(b): a held-out case sharing >= 2 components with a lineage SEED (a different record) is refused", async () => {
+  const seed = expFixture({ id: "experience-seed00000000000", case_id: "EXP-seed", source_ref: "outcome-1111111111111111" });
+  const candidate = methodFixture({ method_id: "shared-contract-divergence", version: 2, provenance_evidence: [seed.id] });
+  // A DIFFERENT record (different id, different source_ref) describing the same two files.
+  const sameDefect = expFixture({
+    id: "experience-other0000000000", case_id: "EXP-other", source_ref: "outcome-2222222222222222",
+    components: [...seed.components, "plugin/scripts/gamma.ts"],
+  });
+  const r = await validateGeneralization({ candidate, heldOutCase: sameDefect, registry: [candidate], experiences: [seed], model: stubModel({ verdict: "supported" }), budget: {}, pinDir: strippedTmp() });
+  assert.equal(r.refusal_code, "HELD_OUT_SHARES_LINEAGE");
+  assert.deepEqual(r.lineage_hits, [{ kind: "shared_components", ref: seed.id, shared: [...seed.components].sort() }]);
+
+  // NEGATIVE CONTROL: ONE shared file is below the threshold — the same shape must NOT be refused for
+  // lineage (it gets as far as its missing pin), so the >= 2 is a real discriminator, not a tautology.
+  assert.equal(LINEAGE_MIN_SHARED_COMPONENTS, 2);
+  const oneShared = expFixture({ id: "experience-one00000000000", case_id: "EXP-one", source_ref: "outcome-3333333333333333", components: [seed.components[0], "plugin/scripts/gamma.ts"] });
+  const r2 = await validateGeneralization({ candidate, heldOutCase: oneShared, registry: [candidate], experiences: [seed], model: stubModel({ verdict: "supported" }), budget: {}, pinDir: strippedTmp() });
+  assert.equal(r2.refusal_code, "NO_EVALUATION_PIN");
+
+  // …and the one-hop RECORD path: the lineage version cites an Experience whose SOURCE is the held-out.
+  const backPointer = expFixture({ id: "experience-via00000000000", case_id: "EXP-via", source_ref: sameDefect.source_ref, components: ["plugin/scripts/unrelated.ts"] });
+  const r3 = await validateGeneralization({ candidate: methodFixture({ method_id: "m", version: 1, provenance_evidence: [backPointer.id] }), heldOutCase: sameDefect, registry: [], experiences: [backPointer], model: stubModel({ verdict: "supported" }), budget: {}, pinDir: strippedTmp() });
+  assert.equal(r3.refusal_code, "HELD_OUT_SHARES_LINEAGE");
+  assert.deepEqual(r3.lineage_hits.map((h) => h.kind), ["referenced_experience_source_ref"]);
+});
+
+test("AC1(c): a held-out case from an UNRELATED lineage is ACCEPTED and still promotes on a correct prediction", async () => {
+  const repo = mkGitRepo();
+  const pin = path.join(mkTmp(), "pin");
+  assert.equal(materializeStrippedPin({ root: repo.dir, rev: repo.preFix, dir: pin }).ok, true);
+  const heldOut = expFixture({
+    id: "experience-heldout0000000", case_id: "EXP-heldout", role: "confirmed-negative",
+    source_ref: "outcome-heldout00000000", components: ["plugin/scripts/heldout.ts"], evaluation_pin: repo.preFix,
+  });
+  const candidate = methodFixture({ method_id: "unrelated-method", version: 1, provenance_evidence: ["experience-someone00000000"] });
+  const r = await validateGeneralization({ candidate, heldOutCase: heldOut, registry: [candidate], experiences: [], model: stubModel({ invariant_holds: false, verdict: "refuted" }), budget: {}, pinDir: pin, root: repo.dir });
+  assert.equal(r.outcome, "evaluated");
+  assert.equal(r.refusal_code, null);
+  assert.equal(r.called, true);
+  assert.equal(r.promoted, true);
+  assert.equal(r.candidate_after.status, "active");
+});
+
+// ── AC(d–e): the expected verdict must be TRUE at the commit that is evaluated ─────────────────────
+//
+// The defect reproduced here is the audit's finding #2: the verifier read develop at a commit where the
+// held-out case's fix had ALREADY landed, so the method's invariant holds there — the opposite of the
+// verdict the case's historical role supplies — and the call was still graded "correct".
+
+test("AC1(d): a held-out case with no `evaluation_pin` ⇒ NO_EVALUATION_PIN (its own refusal, zero calls)", async () => {
+  const unpinned = expFixture({ id: "experience-heldout0000000", case_id: "EXP-heldout" });   // role found-and-fixed
+  assert.deepEqual(validateEvaluationPin(unpinned), { ok: false, reasons: ["NO_EVALUATION_PIN", "NO_FIX_COMMIT"] });
+  // A POSITIVE case that names its pin but not its fix is refused for the fix ALONE (enumerated, 硬规则 3).
+  assert.deepEqual(validateEvaluationPin({ role: "found-and-fixed", evaluation_pin: "a".repeat(40) }), { ok: false, reasons: ["NO_FIX_COMMIT"] });
+  // A NEGATIVE case binds no fix — its pin alone completes the binding.
+  assert.deepEqual(validateEvaluationPin({ role: "confirmed-negative", evaluation_pin: "a".repeat(40) }), { ok: true, reasons: [] });
+  assert.equal(isPositiveCase("found-and-fixed"), true);
+  assert.equal(isPositiveCase("confirmed-negative"), false, "a refuted claim was never a defect to fix");
+
+  const counter = { calls: 0 };
+  const r = await validateGeneralization({ candidate: methodFixture(), heldOutCase: unpinned, model: stubModel({ verdict: "supported" }, counter), budget: {}, pinDir: strippedTmp() });
+  assert.equal(r.refusal_code, "NO_EVALUATION_PIN");
+  assert.equal(counter.calls, 0, "a case that cannot say where its verdict is true spends ZERO model calls");
+  assert.equal(r.promoted, false);
+  assert.equal(r.candidate_after.status, "draft");
+});
+
+test("AC1(e): `fix_commit` being an ancestor of `evaluation_pin` ⇒ TEMPORAL_MISMATCH; the reverse order passes", async () => {
+  const repo = mkGitRepo();
+  // The real three-valued ancestry seam — `null` (could not determine) must NOT collapse into `false`.
+  const isAncestor = gitIsAncestor(repo.dir);
+  assert.equal(isAncestor(repo.fix, repo.later), true);
+  assert.equal(isAncestor(repo.later, repo.fix), false);
+  assert.equal(isAncestor("deadbeefdeadbeef", repo.later), null, "an unresolvable commit is NOT 'not an ancestor'");
+
+  // THE AUDIT'S CASE: pin at a commit the fix has already reached.
+  const tooLate = expFixture({ id: "experience-heldout0000000", case_id: "EXP-heldout", role: "found-and-fixed", components: ["plugin/scripts/heldout.ts"], evaluation_pin: repo.later, fix_commit: repo.fix });
+  const t = checkTemporalBinding({ heldOutCase: tooLate, isAncestor });
+  assert.equal(t.ok, false);
+  assert.match(t.reason, /^TEMPORAL_MISMATCH:/);
+  const counter = { calls: 0 };
+  const r = await validateGeneralization({ candidate: methodFixture(), heldOutCase: tooLate, model: stubModel({ verdict: "supported" }, counter), budget: {}, pinDir: strippedTmp(), root: repo.dir, isAncestor });
+  assert.equal(r.refusal_code, "TEMPORAL_MISMATCH");
+  assert.equal(counter.calls, 0);
+  assert.equal(r.outcome, "not-evaluated");
+  assert.equal(r.candidate_after.status, "draft", "a mismatched PIN is not a failed method");
+
+  // POSITIVE CONTROL: the SAME two commits in the other order (pin before the fix) bind correctly.
+  const atFixTime = expFixture({ id: "experience-heldout0000000", case_id: "EXP-heldout", role: "found-and-fixed", components: ["plugin/scripts/heldout.ts"], evaluation_pin: repo.preFix, fix_commit: repo.fix });
+  assert.equal(checkTemporalBinding({ heldOutCase: atFixTime, isAncestor }).ok, true);
+  const ok = await validateGeneralization({ candidate: methodFixture(), heldOutCase: atFixTime, model: stubModel({ verdict: "supported" }), budget: {}, pinDir: strippedTmp(), root: repo.dir, isAncestor });
+  assert.equal(ok.outcome, "evaluated");
+  assert.equal(ok.promoted, true);
+});
+
+// ── AC(f): the verifier runs in a STRIPPED tree AT THE PIN — never the live checkout ───────────────
+
+test("AC1(f): the verifier cwd is a stripped tree at the pin and the verdict records the evaluated commit", async () => {
+  const repo = mkGitRepo();
+  const pin = path.join(mkTmp(), "pin");
+  const built = materializeStrippedPin({ root: repo.dir, rev: repo.preFix, dir: pin });
+  assert.equal(built.ok, true);
+  assert.deepEqual([...built.removed].sort(), [".quay", "tasks"], "the dirs PRESENT at the pin are the ones actually removed");
+  assert.equal(built.stripped, true);
+  assert.ok(!fs.existsSync(path.join(pin, "tasks")), "tasks/ is ABSENT from the pinned tree");
+  assert.ok(!fs.existsSync(path.join(pin, ".quay")), ".quay/ is ABSENT from the pinned tree");
+  assert.ok(fs.existsSync(path.join(pin, "plugin", "scripts", "target.ts")), "…and the CODE is still there");
+  assert.deepEqual(DISCOVERY_PIN_FORBIDDEN_DIRS.filter((d) => fs.existsSync(path.join(REPO_ROOT, d))).sort(),
+    [".quay", "adr", "archive", "docs", "experiments", "goals", "measurements", "meta", "milestones", "orchestration", "tasks"],
+    "the live checkout carries EVERY forbidden dir, so running there is exactly what this refuses");
+
+  // The SAME predicate, negatively: an unstripped directory is refused and NAMES what is present.
+  const unstripped = mkTmp();
+  fs.mkdirSync(path.join(unstripped, "tasks"));
+  assert.equal(verifyStrippedPin(unstripped), "PIN_NOT_STRIPPED:tasks");
+  assert.equal(verifyStrippedPin(pin), null);
+  assert.equal(verifyStrippedPin(repo.dir, { repoRoot: repo.dir }), "PIN_IS_LIVE_CHECKOUT");
+  assert.match(materializeStrippedPin({ root: repo.dir, rev: "deadbeefdeadbeef", dir: path.join(mkTmp(), "x") }).reason, /^PIN_MATERIALIZE_FAILED:/);
+
+  const heldOut = expFixture({ id: "experience-heldout0000000", case_id: "EXP-heldout", role: "confirmed-negative", source_ref: "outcome-heldout00000000", components: ["plugin/scripts/heldout.ts"], evaluation_pin: repo.preFix });
+  const candidate = methodFixture({ method_id: "unrelated-method", version: 1, provenance_evidence: ["experience-someone00000000"] });
+  const r = await validateGeneralization({ candidate, heldOutCase: heldOut, registry: [candidate], model: stubModel({ invariant_holds: false, verdict: "refuted" }), budget: {}, pinDir: pin, root: repo.dir });
+  assert.equal(r.outcome, "evaluated");
+  assert.equal(r.verifier_cwd, pin, "the cwd the verifier was handed IS the pinned tree");
+  assert.equal(r.evaluated_commit, repo.preFix, "the EVALUATED commit is recorded on the verdict");
+  assert.ok(!fs.existsSync(path.join(r.verifier_cwd, "tasks")) && !fs.existsSync(path.join(r.verifier_cwd, ".quay")));
+
+  // Handing it the LIVE checkout is its own refusal, with zero model calls.
+  const counter = { calls: 0 };
+  const live = await validateGeneralization({ candidate, heldOutCase: heldOut, registry: [candidate], model: stubModel({ verdict: "refuted" }, counter), budget: {}, pinDir: REPO_ROOT, root: REPO_ROOT });
+  assert.equal(live.refusal_code, "PIN_IS_LIVE_CHECKOUT");
+  assert.equal(counter.calls, 0);
+  assert.equal(live.promoted, false);
+});
+
+test("lineageVersions walks every version of the method_id plus every `method:<id>@<v>` ref in provenance", () => {
+  const v1 = methodFixture({ method_id: "m-a", version: 1, provenance_evidence: ["outcome-x"] });
+  const v3 = methodFixture({ method_id: "m-a", version: 3, provenance_evidence: ["outcome-y"] });
+  const other = methodFixture({ method_id: "m-b", version: 2, provenance_evidence: ["outcome-z"] });
+  const unrelated = methodFixture({ method_id: "m-c", version: 1, provenance_evidence: ["outcome-v"] });
+  const candidate = methodFixture({ method_id: "m-a", version: 4, provenance_evidence: ["method:m-b@2", "outcome-w"] });
+  const lineage = lineageVersions(candidate, [v1, v3, other, unrelated, candidate]);
+  assert.deepEqual(lineage.map((m) => `${m.method_id}@${m.version}`), ["m-a@4", "m-a@1", "m-a@3", "m-b@2"]);
+  // A registry entry for an UNRELATED method is not dragged in.
+  assert.ok(!lineage.some((m) => m.method_id === "m-c"), "m-c is neither the candidate's method_id nor a method:<id>@<v> ref");
+  // The candidate is first, and never duplicated when it also appears in the registry.
+  assert.equal(lineage[0], candidate);
+  assert.equal(new Set(lineage).size, lineage.length);
+  assert.deepEqual(checkLineageIsolation({ candidate, heldOutCase: expFixture({ id: "experience-nope000000000", source_ref: "outcome-nope" }), registry: [v1, v3, other], experiences: [] }), {
+    ok: true, lineage: ["m-a@4", "m-a@1", "m-a@3", "m-b@2"], hits: [],
+  });
 });
 
 // ── AC(e): `extends`/`composes` must name a method_ref that RESOLVES, or the record is refused ────
