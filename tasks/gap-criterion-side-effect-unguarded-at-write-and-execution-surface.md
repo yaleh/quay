@@ -1,7 +1,7 @@
 ---
 id: gap-criterion-side-effect-unguarded-at-write-and-execution-surface
 title: criterion 可隐式触发真实外部写入：goal-store 两处 runAcceptance 调用点均无执行前能力判断（ADR-004 未硬化）
-status: todo
+status: ready
 labels:
   - gap
   - defect
