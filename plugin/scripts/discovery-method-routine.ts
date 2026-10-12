@@ -43,6 +43,24 @@
 // DISTINCT reason; the round then appends NOTHING to the carrier and does NOT advance the last-run (so
 // a failed round does not consume the window — the next round retries).
 //
+// ⛔ WHO INVOKED THE ROUND — the manual/resident split (gap-discovery-method-routine-manual-run-advances-
+// production-last-run). The durable due gate reads AND advances the PRODUCTION entry in
+// `.quay/routine-last-run.json`, which is a SCHEDULING input — so a round run BY HAND (the `--once` CLI,
+// a test, an acceptance check) must never be what moves production's clock. Observed defect: a `--once`
+// acceptance run against the production root at 09:10:40Z wrote `discovery-method` into that map, and the
+// resident driver's next round then reported «ran 36m ago within the 360m interval». Every round now
+// records `invoked_by` on BOTH the carrier line and its Fact:
+//   `"resident-driver"` — the round came through the driver's routine table (buildDiscoveryMethodRoutine)
+//                         ⇒ it reads the production entry and ADVANCES it on success;
+//   `"manual"`          — every other caller (the `--once` CLI, tests) ⇒ it still READS the production
+//                         entry to answer its OWN due gate (a hand-run inside the window is a no-op
+//                         unless `--force`), never writes to it, and stamps its carrier line so the
+//                         carrier itself says who ran it.
+// The default is `manual`: a caller that forgets to declare itself must not be able to move production's
+// schedule (硬规则 3b — the two states must not be shaped alike). Manual rounds still ingest and reflect
+// into the persistent Discovery carriers: that output is real data. What they must not change is WHEN
+// production runs next.
+//
 // ⛔ NOT a hot-path gate (the `gap-fan-in-remove-archguard-gate` lesson): nothing here is called by
 // fan-in / scoped-gate / any per-task path. The only caller is the quality driver's routine table.
 
@@ -67,6 +85,16 @@ export const DISCOVERY_METHOD_NAME = "discovery-method";
 /** The ONE carrier this routine appends to. Gitignored runtime state, declared in
  *  docs/carrier-registry.json — the same family as quality-round.jsonl / arch-discovery-findings.jsonl. */
 export const CARRIER_REL = path.posix.join(".quay", "discovery-method-findings.jsonl");
+
+/** Who invoked the round. `resident-driver` = the quality-gate driver's routine table (the PRODUCTION
+ *  scheduler); `manual` = the `--once` CLI, a test, an acceptance check. Only a `resident-driver` round
+ *  may advance the production entry in `.quay/routine-last-run.json` (see the header). */
+export type InvokedBy = "resident-driver" | "manual";
+export const INVOKED_BY_RESIDENT: InvokedBy = "resident-driver";
+export const INVOKED_BY_MANUAL: InvokedBy = "manual";
+/** The default: an undeclared caller is MANUAL, so forgetting the declaration cannot move production's
+ *  schedule (the defect this task exists for was a manual run doing exactly that). */
+export const INVOKED_BY_DEFAULT: InvokedBy = INVOKED_BY_MANUAL;
 
 /** The interval floor. A round spends real model calls and materialises stripped pins (a whole-tree
  *  `git archive` each); a cadence shorter than six hours is refused rather than silently rounded up
@@ -388,6 +416,15 @@ export interface DiscoveryMethodRunOptions {
   configError?: string | null;
   /** From the routine ctx: halt gates the spawn, never the routine track. */
   halted: boolean;
+  /** WHO invoked this round (see the header). Defaults to `manual` — an undeclared caller never advances
+   *  the production last-run. `buildDiscoveryMethodRoutine` declares `resident-driver` for the driver's
+   *  routine table; the `--once` CLI declares `manual`. */
+  invokedBy?: InvokedBy;
+  /** Ignore the durable due gate and run anyway (the CLI's `--force`). ⛔ It bypasses the GATE only: it
+   *  never changes what the round may WRITE, so a forced manual round still does not advance the
+   *  production last-run (forcing past the window must not consume the window). The driver never sets
+   *  it — the resident round's cadence is the driver's schedule and nothing else. */
+  force?: boolean;
   /** The model seam. Production supplies the live launcher (`liveModelFactory`); tests inject a stub. */
   model?: ModelFn | null;
   /** The model the launcher was ASKED for (recorded on every call). */
@@ -421,13 +458,17 @@ export interface DiscoveryMethodRunOptions {
 const asRel = (root: string, p: string) => path.relative(root, p) || p;
 
 /** The whole round: config gate → halt gate → durable due gate → ingest → (bounded) reflect →
- *  (bounded) generalize → append ONE `scan-round` line → advance last-run. Never throws (the loop
- *  records a `failed` Fact): every refused/failed path returns BEFORE the append. */
+ *  (bounded) generalize → append ONE `scan-round` line → advance last-run (⛔ RESIDENT ROUNDS ONLY —
+ *  see `invokedBy`). Never throws (the loop records a `failed` Fact): every refused/failed path returns
+ *  BEFORE the append. */
 export async function runDiscoveryMethod(root: string, opts: DiscoveryMethodRunOptions): Promise<Fact> {
   const now = opts.now ?? Date.now;
   const carrier = opts.carrierPath ?? path.join(root, CARRIER_REL);
   const lastRunPath = opts.lastRunPath ?? path.join(root, ROUTINE_LAST_RUN_REL);
-  const base = { routine: DISCOVERY_METHOD_NAME, carrier: asRel(root, carrier), fired: false };
+  const invokedBy: InvokedBy = opts.invokedBy ?? INVOKED_BY_DEFAULT;
+  const resident = invokedBy === INVOKED_BY_RESIDENT;
+  const force = opts.force === true;
+  const base = { routine: DISCOVERY_METHOD_NAME, invoked_by: invokedBy, carrier: asRel(root, carrier), fired: false };
   const fact = (state: Fact["state"], value: Record<string, unknown>, reason: string): Fact => ({ name: DISCOVERY_METHOD_NAME, value, state, reason });
 
   const started = now();
@@ -449,13 +490,19 @@ export async function runDiscoveryMethod(root: string, opts: DiscoveryMethodRunO
   if (opts.halted) return fact("not-evaluated", { ...base, enabled: true }, "halted: discovery-method spawn suppressed (halt gates the spawn, not the routine track) — nothing spawned");
 
   // ③ durable window: the loop's own lastRun is in-memory ⇒ a driver restart would re-fire every round.
+  //    ⛔ The entry consulted is the PRODUCTION one, for BOTH kinds of round — a manual round answers its
+  //    own "is it time?" with the same clock production uses (so a hand-run inside the window is a no-op
+  //    unless `--force`), it just never ADVANCES it. That is the whole split: read is shared, advance is
+  //    the resident round's alone (a manual round that wrote here is the defect this task fixes).
   const last = Number(readLastRunMap(lastRunPath)[DISCOVERY_METHOD_NAME]);
-  if (!isDue(config.trigger, { now: started, lastRun: last })) {
+  const due = isDue(config.trigger, { now: started, lastRun: last });
+  const forcedPastDue = !due && force;
+  if (!due && !forcedPastDue) {
     const agoMin = Number.isFinite(last) && last > 0 ? Math.round((started - last) / 60_000) : null;
     return fact(
       "not-evaluated",
       { ...base, enabled: true, intervalMinutes: config.trigger.minutes, minutesSinceLastRun: agoMin },
-      `not due: ${agoMin === null ? "never ran (should be due — check the clock)" : `ran ${agoMin}m ago`} within the ${config.trigger.minutes}m interval — nothing spawned`,
+      `not due: ${agoMin === null ? "never ran (should be due — check the clock)" : `ran ${agoMin}m ago`} within the ${config.trigger.minutes}m interval — nothing spawned${resident ? "" : " (manual round: `--force` runs one anyway; the interval is production's, and last-run stays put either way)"}`,
     );
   }
 
@@ -663,6 +710,10 @@ export async function runDiscoveryMethod(root: string, opts: DiscoveryMethodRunO
   const round: Record<string, unknown> = {
     kind: "scan-round",
     routine: DISCOVERY_METHOD_NAME,
+    // ⛔ The carrier line says WHO ran it, so a reader of `.quay/discovery-method-findings.jsonl` can tell
+    // a production round from a hand-run/test one without cross-referencing anything (硬规则 9 — the two
+    // must be distinguishable on the record itself, not only in the head of whoever ran it).
+    invoked_by: invokedBy,
     ts: new Date(now()).toISOString(),
     wall_ms: wallMs,
     ingested: { experiences: ingested, scanned: Number(ingest.scanned ?? 0), duplicates: Number(ingest.duplicates ?? 0), advanced_to: ingest.advanced_to ?? null },
@@ -688,17 +739,25 @@ export async function runDiscoveryMethod(root: string, opts: DiscoveryMethodRunO
     cost_usd: cost.cost_usd,
   };
   appendCarrierRecords(carrier, [round]);
-  writeLastRun(lastRunPath, DISCOVERY_METHOD_NAME, now());
+  // ⑨ ⛔ THE SPLIT: only a RESIDENT round advances the production window. A manual round's line lands on
+  //    the carrier exactly like a production one (same data, and its `invoked_by` names the difference),
+  //    but `.quay/routine-last-run.json` is left BYTE-IDENTICAL — a hand-run must never be what decides
+  //    when production runs next. The `if` is the whole mechanism; there is no write-elsewhere path.
+  if (resident) writeLastRun(lastRunPath, DISCOVERY_METHOD_NAME, now());
 
   return fact(
     "verified",
     round,
-    `round ran: ingested ${ingested} experience(s), reflected ${reflection ? Number(reflection.decisions ?? 0) : 0} unit(s), minted ${candidates.length} candidate(s), ${verdicts.filter((v) => v.outcome === "evaluated").length} evaluated verdict(s) (${verdicts.filter((v) => v.correct === true).length} correct), ${promotions.length} promotion(s), ${retirements.length} retirement(s), ${modelCalls} model call(s), wall ${wallMs}ms; appended 1 scan-round line to ${asRel(root, carrier)}`,
+    `round ran (invoked_by:${invokedBy}): ingested ${ingested} experience(s), reflected ${reflection ? Number(reflection.decisions ?? 0) : 0} unit(s), minted ${candidates.length} candidate(s), ${verdicts.filter((v) => v.outcome === "evaluated").length} evaluated verdict(s) (${verdicts.filter((v) => v.correct === true).length} correct), ${promotions.length} promotion(s), ${retirements.length} retirement(s), ${modelCalls} model call(s), wall ${wallMs}ms; appended 1 scan-round line to ${asRel(root, carrier)}${resident ? " and advanced the production last-run" : " — MANUAL: the production last-run in .quay/routine-last-run.json was NOT advanced (this round did not move production's clock)"}${forcedPastDue ? " [--force: the due gate was ignored for this round only]" : ""}`,
   );
 }
 
 // ── RoutineSpec factories ────────────────────────────────────────────────────────────────────────────
-export interface DiscoveryMethodRoutineOptions extends Omit<DiscoveryMethodRunOptions, "config" | "configPresent" | "configError" | "halted"> {}
+/** ⛔ `invokedBy` and `force` are OMITTED, not merely defaulted: this factory IS the driver's routine
+ *  table, so the round it builds is `resident-driver` by construction and cannot be talked out of it
+ *  (a routine spec is exactly the thing that may advance production). A caller that wants a manual round
+ *  calls `runDiscoveryMethod` directly — the two paths must not be reachable by the same switch. */
+export interface DiscoveryMethodRoutineOptions extends Omit<DiscoveryMethodRunOptions, "config" | "configPresent" | "configError" | "halted" | "invokedBy" | "force"> {}
 
 /** Build the Layer-1b routine from an ALREADY-PARSED config read. `schedule` is the section's trigger
  *  when present, else the default interval — a disabled/absent section is still an evaluated routine
@@ -715,6 +774,9 @@ export function buildDiscoveryMethodRoutine(root: string, read: DiscoveryMethodC
         configPresent: read.present,
         configError: read.error,
         halted: ctx?.halted === true,
+        // The driver's routine table ⇒ the PRODUCTION scheduler. Declared here, at the one place that
+        // knows the caller is the driver (see the header: the read is shared, the advance is ours).
+        invokedBy: INVOKED_BY_RESIDENT,
       })],
   };
 }
@@ -756,9 +818,13 @@ export async function liveDiscoveryModel(root: string): Promise<{ ok: boolean; m
 // ── CLI (the one-shot entry AC3 drives) ─────────────────────────────────────────────────────────────
 const USAGE = [
   "discovery-method-routine — the Discovery Method loop as a Layer-1b routine (report-only).",
-  "  --once --root <dir> [--json]      run ONE round against <dir> (the routine entry the driver calls)",
+  "  --once --root <dir> [--json]      run ONE MANUAL round against <dir> (invoked_by:\"manual\")",
+  "  --force                           manual: run even inside the interval (still never advances",
+  "                                    .quay/routine-last-run.json — production's clock is not yours)",
   "  --no-model                        run without the live model seam (ingest-only; zero model calls)",
   "  --pin-tmp <dir>                   temp root for stripped pins",
+  "⛔ This CLI is ALWAYS a manual round: it reads the production interval but never advances it. The",
+  "   resident round (the one that advances it) is assembled by the quality-gate driver's routine table.",
 ].join("\n");
 
 async function main(argv: string[]): Promise<number> {
@@ -782,6 +848,10 @@ async function main(argv: string[]): Promise<number> {
     configPresent: read.present,
     configError: read.error,
     halted: false,
+    // ⛔ The CLI is ALWAYS manual: it is a hand-run by definition. `--force` lets it run inside the
+    // interval, and even then it does not advance the production last-run (see runDiscoveryMethod ⑨).
+    invokedBy: INVOKED_BY_MANUAL,
+    force: argv.includes("--force"),
     model,
     modelId,
     pinTmpRoot,
