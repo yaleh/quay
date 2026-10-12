@@ -289,26 +289,6 @@ export function buildAnswerReservePrompt(basePrompt: string, explored: string): 
   return `${basePrompt}\n\n${ANSWER_RESERVE_INSTRUCTION}\n\n--- YOUR EXPLORATION NOTES (tail) ---\n${explored}\n--- END OF NOTES ---\n`;
 }
 
-/** The hypothesis ARRAY out of a report call's text. ⛔ This repeats the engine's OWN rule
- *  (`parseHypotheses` in arch-hypothesis-generation.mjs: first `[` … last `]`, then `JSON.parse`) rather
- *  than reaching for it, and the reason is mechanical: that function is not on the narrow interface this
- *  routine consumes, and the interface is a compile-time fact — widening it would mean editing a module
- *  outside this task's Touches. Two implementations of one rule is a drift risk, so the test pins BOTH
- *  against the same text rather than only pinning this one. */
-export function parseHypothesisArray(text: unknown): Record<string, unknown>[] | null {
-  const s = typeof text === "string" ? text : "";
-  if (!s.trim()) return null;
-  const a = s.indexOf("[");
-  const b = s.lastIndexOf("]");
-  if (a < 0 || b <= a) return null;
-  try {
-    const parsed = JSON.parse(s.slice(a, b + 1));
-    return Array.isArray(parsed) ? (parsed as Record<string, unknown>[]) : null;
-  } catch {
-    return null;
-  }
-}
-
 /** The stated per-call USD ceiling used when a call's realized gateway cost could not be read. Basis: the
  *  2026-10-12 GAIN1 capability-gain run measured ≈$0.05 for an investigator call and ≈$0.5 for a verifier
  *  cluster at gateway rates; the ceiling is the larger of those rounded up, so an unreadable price is

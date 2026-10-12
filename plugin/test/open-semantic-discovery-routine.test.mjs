@@ -132,7 +132,6 @@ import {
   boundedTail,
   callNotEvaluatedToken,
   firstNotEvaluatedToken,
-  parseHypothesisArray,
   turnReserveDirective,
   buildAnswerReservePrompt,
 } from "../scripts/open-semantic-discovery-routine.ts";
@@ -2692,19 +2691,20 @@ test("case (m) — the turn-reserve directive is in BOTH arms' prompts (the pair
   assert.match(buildAnswerReservePrompt("SCHEMA HERE", "NOTES HERE"), /NOTES HERE\n--- END OF NOTES ---/, "the notes are LAST, where recency is strongest");
 });
 
-test("case (m) — the reserve parses hypotheses with the ENGINE's own rule (pinned against the same text, so the two cannot drift)", () => {
-  const text = `some prose\n${JSON.stringify(HYPS)}\ntrailing prose\n`;
-  const mine = parseHypothesisArray(text);
-  const engine = realHyp.parseHypotheses(realHyp.callText(text));
-  assert.deepEqual(mine, engine.hyps, "the routine and the engine read the SAME text the same way");
-  assert.equal(mine.length, HYPS.length);
-  // ⛔ The negative half: text with no array is NULL, never an empty list — "did not parse" and "parsed
-  // nothing" are different readings (硬规则 3b).
-  assert.equal(parseHypothesisArray("no array here"), null);
-  assert.equal(parseHypothesisArray(""), null);
-  assert.equal(parseHypothesisArray("[not json"), null);
-  assert.equal(parseHypothesisArray('{"not":"an array"}'), null, "an OBJECT is not a hypothesis array");
-  assert.deepEqual(parseHypothesisArray("[]"), [], "an EMPTY array IS a parse — the model really said nothing");
+test("case (m) — the rescue's answer is parsed by the ENGINE's own parser, so there is only ONE hypothesis rule in play", () => {
+  // ⛔ A FIRST DRAFT OF THIS FIX re-implemented the engine's `parseHypotheses` rule locally (the routine
+  // cannot reach it through its narrow engine interface). The unified design removed the need: `runModel`
+  // hands the RESCUE's stream back to the engine, and the engine parses its own answer. So the property
+  // worth pinning is the ABSENCE of a second parser, not the agreement of two.
+  const src = fs.readFileSync(ROUTINE_SRC, "utf8");
+  assert.doesNotMatch(src, /parseHypothesisArray|indexOf\("\["\)/, "the routine carries no second hypothesis parser");
+  assert.match(src, /hyp\.parseVerifierStream|hyp\.callText/, "…it reads the engine's stream/text helpers instead");
+  // …and the engine's own rule is the one rule: the text below parses to the full array, and text without
+  // an array is NULL (never an empty list — "did not parse" ≠ "parsed nothing", 硬规则 3b).
+  const text = `prose\n${JSON.stringify(HYPS)}\ntrailing\n`;
+  assert.deepEqual(realHyp.parseHypotheses(realHyp.callText(text)).hyps, HYPS);
+  assert.equal(realHyp.parseHypotheses(realHyp.callText("no array here")).hyps, null);
+  assert.equal(realHyp.parseHypotheses(realHyp.callText("")).hyps, null);
 });
 
 test("case (m) AC5 — the reserve changes NEITHER the kill switch, NOR the report-only surface, NOR the per-step envelope the paired arms are compared on", async () => {
