@@ -228,3 +228,11 @@ f) **DoD① 的 ② 半（如实记录其状态与承接者）**：`git show dev
    它正是「判据本身在 develop 上重新跑绿」这条 DoD 的天然验收者，⛔ 非人工派发）。
    ⚠️ 前提：`acShortCircuitVerdict` 的 develop∪worktree **并集读**仍存在且未降级（见文件头点名的那条
    前提）；若它被移除，本修法随之失效、判据应回到 fail-closed。
+
+8) **另见本文件头的「未证实观察项」**（⛔ 指针，不复制内容，避免两处漂移）：本判据修法落地后
+   14 次 LIVE 实跑里出现 **1 次**（≈7%）**unclassified 臂**假 FAIL（不是复发臂）——即 criterion 会
+   误报 FAIL 而生产其实无复发。候选机制（**未经对照检验**）：`developTipAt` 完备性自检 ③ 的两次读
+   非原子（`reflog show develop` 取 entries[0] + `rev-parse develop` 取 tip），并发 push 落在两次读
+   之间即误报「reflog 不完整」。⛔ **本案不修**（AC1 冻结三态 fail-closed 行为不变；硬规则 12：一次
+   观测降为观察项）。**需要自己的 AC/裁定**，接线法见文件头——先取发生率读数，再决定是否把两次读
+   做成原子。正本在 `plugin/test/goal011-ac-shortcircuit-false-negative-recurrence.test.mjs` 文件头。
