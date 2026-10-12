@@ -2,7 +2,7 @@
 id: gap-self-report-vocab-audit-check-pattern-tables-diverge
 title: "self-report-vocab audit vs check: same task implemented twice, pattern
   tables + stopped-state fix diverged"
-status: ready
+status: done
 labels:
   - gap
   - discovery-finding
