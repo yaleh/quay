@@ -64,6 +64,24 @@
 //   Every one of those is a REFUSAL: `outcome:"not-evaluated"`, zero model calls, the candidate left
 //   exactly as it was. A refused READING must never be shaped like a failed METHOD (硬规则 3b).
 //
+// ⛔ THE APPLICABILITY GATE AND THE EVIDENCE PACK (gap-discovery-method-generalization-failures-
+//   diagnosis-and-retest, 2026-10-12). An independent regression run produced three trustworthy
+//   generalization failures and ZERO correct generalizations; a read-only diagnosis (recorded in that
+//   task's Diagnosis section) returned SUPPORTED for three hypotheses and REFUTED the fourth, and this
+//   module now carries exactly the three fixes that diagnosis justifies:
+//     • the reflection prompt shows the JOINED `domain_claim` (the claim lives in the evidence store's
+//       hypothesis/counterexample records, not in the outcome) — see the ledger's `joinOutcomeToClaims`;
+//     • `validateGeneralization` asks `applies` FIRST, in the same call. `applies:"no"` yields the
+//       outcome `not-applicable`: neither correct nor wrong, neither promoting nor retiring. Measured:
+//       every held-out in the failing run satisfied 0 of the record fields its method's
+//       `domain_signals` key on, while every one of the candidates' own seeds satisfied them — so
+//       "did not apply" was coming back wearing the shape of "predicted wrong";
+//     • the verifier gets the DETERMINISTIC EVIDENCE PACK (`buildEvidencePack`, reused by import), not a
+//       raised turn cap: one call in that run terminated on the turn budget (error_max_turns at 15
+//       against a configured cap of 14). The pack's absence is its own value (`evidence_pack: null`).
+//   ⛔ The FOURTH hypothesis (inverted label semantics) was REFUTED — all 13 label citations resolve
+//   verbatim at the pin — and therefore carries NO fix here.
+//
 // BUDGET / KILL SWITCH, enforced IN THIS MODULE (not deferred to the later routine-wiring task):
 //   `enabled`, `maxPerRun`, `maxModelCalls`, `maxWallMs`. `enabled:false` makes EVERY exported entry
 //   point return `{ok:false, reason:"disabled"}` with ZERO model calls — the same contract SHAPE as

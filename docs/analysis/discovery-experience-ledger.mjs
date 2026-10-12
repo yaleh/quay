@@ -36,6 +36,19 @@
 // 硬规则 5 (来源完备性): the automatic adapter's source is the evidence store — a miss there is
 // reported as its OWN value (`EVIDENCE_OUTCOME_NOT_FOUND`), never as an empty success.
 //
+// ── THE JOIN: an outcome → the records that state WHY it came out that way ────────────────────────
+// (task gap-discovery-method-generalization-failures-diagnosis-and-retest)
+//
+// An OUTCOME record carries no domain claim: it says `E-DT-1-Hp cluster 8: verifier verdict
+// "supported" on subject hypgen:ownership|plugin/scripts/…`. The claim lives in the `hypothesis` and
+// `counterexample` records the store filed under the SAME `subject_key`. MEASURED on the shipped store:
+// a derived summary carried 0.000 of those records' content tokens, a JOINED one carries 1.000, and the
+// methods that round induced carried 0.034-0.111 — the reflection step was shown the pipeline's own
+// bookkeeping and induced methods about the bookkeeping. So every derived entry now carries
+// `domain_claim` / `claim_refs` / `claim_citations`, and `join_status` — a THREE-VALUED reading
+// (`linked` / `no-linked-claim-record` / `claim-index-unavailable`) so an absent claim and an absent
+// index never share a shape.
+//
 // ── THE AUTOMATIC BATCH INGESTER (task gap-discovery-experience-auto-ingest-from-evidence-store) ──
 //
 // `ingestExperience(root, {source})` is the ONE entry BOTH sources go through: `ingestFeedback`
