@@ -256,11 +256,3 @@ Scoped-gate cache recorded for fan-in:
   never be read back as a failed METHOD (硬规则 3b). The pre-existing `not_evaluated_reason` readings
   (`UNPARSEABLE_MODEL_OUTPUT` / `VERDICT_MISSING_IN_MODEL_OUTPUT`) now also carry
   `outcome:"not-evaluated"`, and the evaluated arms carry `outcome:"evaluated"`.
-
-## Blocker
-
-**2026-10-12T06:53:56.129Z — worker 未落地（exited-not-landed）**
-
-- 未落地原因：AC 未全勾（checked 0/3，剩余未勾 3）——续做只需验证并勾选 AC
-- run_id：wk-prod-anchor
-- session_id：6b5b87d4-3dd0-48c9-9d55-1f09f4c15df2
