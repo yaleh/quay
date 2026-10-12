@@ -11,6 +11,7 @@ import assert from "node:assert/strict";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
+import { execFileSync } from "node:child_process";
 
 import {
   METHOD_REGISTRY_REL, METHOD_KIND, METHOD_STATUSES, REQUIRED_METHOD_FIELDS, MIN_APPLICABILITY_CHARS,
@@ -19,12 +20,39 @@ import {
   readMethodRegistry, appendMethodRecord, dedupMethods, methodRecordId,
   provenanceSeeds, seedReasons, seedSetForRecord, seedScannedTexts, basenameOf,
   TOOL_IS_SUBJECT, METHOD_TEXT_NAMES_SEED, PROVENANCE_SEEDS_UNAVAILABLE, SEED_SCANNED_TEXT_FIELDS,
+  activeMethods, generalizationEvidenceReasons, PROMOTION_WITHOUT_VALID_GENERALIZATION, PROMOTION_REFUSAL_CAUSES,
 } from "../../docs/analysis/discovery-method-registry.mjs";
-import { appendExperienceRecord } from "../../docs/analysis/discovery-experience-ledger.mjs";
+import {
+  appendExperienceRecord, DISCOVERY_CARRIERS, GENERALIZATION_VERDICTS_REL,
+} from "../../docs/analysis/discovery-experience-ledger.mjs";
 
 const tmpDirs = [];
-const mkTmp = () => { const d = fs.mkdtempSync(path.join(os.tmpdir(), "discovery-method-registry-")); tmpDirs.push(d); return d; };
+const plainTmp = () => { const d = fs.mkdtempSync(path.join(os.tmpdir(), "discovery-method-registry-")); tmpDirs.push(d); return d; };
+/** A REAL git repo: the carriers resolve through `git rev-parse --git-common-dir` to the SHARED
+ *  checkout, so a bare directory is no longer a usable fixture root (an unresolvable shared checkout
+ *  is REFUSED by design). */
+const mkTmp = () => { const d = plainTmp(); execFileSync("git", ["init", "-q", d], { stdio: "ignore" }); return d; };
 after(() => { for (const d of tmpDirs) fs.rmSync(d, { recursive: true, force: true }); });
+
+/** Write a RECORDED generalization verdict through the REAL carrier writer (no hand-written JSONL), so
+ *  the promotion rule is exercised against the shape the reflection module actually records. */
+const writeVerdict = (root, over = {}) => {
+  const rec = {
+    id: over.id ?? "generalization_verdict-fixture0000000000",
+    kind: DISCOVERY_CARRIERS["discovery-generalization-verdicts"].kind,
+    ts: "2026-10-12T00:00:00.000Z",
+    method_id: "shared-contract-divergence", version: 2, held_out_case_id: "EXP-heldout",
+    called: true, outcome: "evaluated", refusal_code: null, predicted_verdict: "refuted",
+    expected_verdicts: ["refuted"], correct: true, lineage_ok: true, temporal_ok: true,
+    evaluation_pin: "a".repeat(40), evaluated_commit: "a".repeat(40), promoted: true,
+    retirement_reason: null, not_evaluated_reason: null,
+    ...over,
+  };
+  const file = path.join(root, GENERALIZATION_VERDICTS_REL);
+  fs.mkdirSync(path.dirname(file), { recursive: true });
+  fs.appendFileSync(file, JSON.stringify(rec) + "\n", "utf8");
+  return rec;
+};
 
 const lines = (root) => { const f = registryFile(root); return fs.existsSync(f) ? fs.readFileSync(f, "utf8").split("\n").filter(Boolean).length : 0; };
 
@@ -67,7 +95,13 @@ test("AC1(a): a well-formed draft method is accepted, appended, and reads back",
   const r = appendMethodRecord(root, GOOD, { toolCatalog: CATALOG });
   assert.equal(r.ok, true, `expected acceptance, got ${r.reasons?.join(",")}`);
   assert.match(r.id, /^method-[0-9a-f]{16}$/, "content-addressed id, same scheme as the evidence store");
-  assert.equal(r.appended, undefined, "an ACCEPTED write does not carry the refusal marker");
+  // ⛔ CHANGED by gap-discovery-carriers-ephemeral-in-worktree: `appended` is now present on BOTH arms
+  // (`true` here, `false` on every refusal) instead of only marking refusals — the append path is the
+  // shared locked/atomic one, and "was a line actually written" is the reading that path reports. The
+  // old assertion pinned the ABSENCE of the field, which would have made "appended" unreadable as a
+  // value (硬规则 3b).
+  assert.equal(r.appended, true, "an ACCEPTED write says a line was appended");
+  assert.equal(fs.readFileSync(registryFile(root), "utf8").split("\n").filter(Boolean).length, 1, "…and exactly one line is on disk");
   assert.equal(lines(root), 1);
   const read = readMethodRegistry(root, { history: true });
   assert.equal(read.ok, true);
@@ -581,4 +615,138 @@ test("AC2 (real control): the Phase 2 v2 record is refused with TOOL_IS_SUBJECT 
     `${TOOL_IS_SUBJECT}:fan-in-queueing-model.ts`,
   ]);
   assert.equal(lines(root), 0);
+});
+
+// ══════════════════════════════════════════════════════════════════════════════════════════════════
+// QUARANTINE + THE PROMOTION-EVIDENCE RULE (task gap-discovery-carriers-ephemeral-in-worktree)
+//
+// The audit found the only `active` method ever recorded — `shared-contract-divergence` v2,
+// `method-afe5ac899aa54241` — had been promoted on INVALID evidence (a lineage leak: the held-out case
+// was the v1 seed; and a temporal mismatch: post-fix code graded against a pre-fix label), and that the
+// record then existed nowhere. The rule below is what makes a bare `status:"active"` unmintable, and
+// `activeMethods` is what makes a RETIRED method actually stop being returned.
+// ══════════════════════════════════════════════════════════════════════════════════════════════════
+
+const ACTIVE_OK = Object.freeze({
+  ...GOOD,
+  status: "active",
+  generalization_evidence: Object.freeze({ verdict_ref: "generalization_verdict-fixture0000000000" }),
+});
+
+test("AC2(f): a promotion to `active` with NO generalization_evidence is refused (its OWN cause code)", () => {
+  const root = mkTmp();
+  const noEvidence = { ...GOOD, status: "active" };
+  const direct = validateMethodRecord(noEvidence, { toolCatalog: CATALOG, provenanceSeeds: NO_SEEDS });
+  assert.equal(direct.ok, false);
+  assert.match(direct.reasons.at(-1), new RegExp(`^${PROMOTION_WITHOUT_VALID_GENERALIZATION}:EVIDENCE_MISSING:`));
+
+  const r = appendMethodRecord(root, noEvidence, { toolCatalog: CATALOG, provenanceSeeds: NO_SEEDS });
+  assert.equal(r.ok, false);
+  assert.equal(r.appended, false);
+  assert.equal(lines(root), 0, "nothing is appended and no carrier is created");
+
+  // POSITIVE CONTROL on the same predicate: the SAME record WITH a ref that resolves to a passing
+  // verdict is accepted — so the refusal above is the missing evidence, not `status:"active"`.
+  writeVerdict(root, { method_id: GOOD.method_id });
+  const ok = appendMethodRecord(root, ACTIVE_OK, { toolCatalog: CATALOG, provenanceSeeds: NO_SEEDS });
+  assert.equal(ok.ok, true, `expected acceptance, got ${ok.reasons?.join(",")}`);
+  assert.equal(lines(root), 1);
+});
+
+test("AC2(f): every way a cited verdict can be unusable has its OWN cause, and each is refused", () => {
+  const root = mkTmp();
+  writeVerdict(root, { id: "generalization_verdict-fixture0000000000" });
+  const cite = (ref) => ({ ...GOOD, status: "active", generalization_evidence: { verdict_ref: ref } });
+  const causeOf = (rec, verdicts) => {
+    const r = validateMethodRecord(rec, { toolCatalog: CATALOG, provenanceSeeds: NO_SEEDS, verdicts });
+    const hit = r.reasons.find((x) => x.startsWith(`${PROMOTION_WITHOUT_VALID_GENERALIZATION}:`));
+    return hit ? hit.split(":")[1] : null;
+  };
+  const dv = (v) => [v];
+
+  assert.equal(causeOf(cite("generalization_verdict-nope00000000000"), dv(writeVerdict(root, { id: "x" }))), "VERDICT_NOT_RECORDED");
+  assert.equal(causeOf(cite("generalization_verdict-fixture0000000000"), undefined), "VERDICTS_UNAVAILABLE", "absent verdicts ⇒ its OWN value, exactly like toolCatalog/provenanceSeeds");
+  assert.equal(causeOf(cite("generalization_verdict-fixture0000000000"), dv(writeVerdict(root, { id: "generalization_verdict-fixture0000000000", method_id: "some-other-method" }))), "VERDICT_OTHER_METHOD");
+
+  // A recorded verdict that FAILED a gate, one cause per shape — and the detail NAMES which.
+  const failed = [
+    { outcome: "not-evaluated", correct: null, refusal_code: "HELD_OUT_SHARES_LINEAGE", lineage_ok: false, temporal_ok: null },
+    { outcome: "not-evaluated", correct: null, refusal_code: "TEMPORAL_MISMATCH", lineage_ok: true, temporal_ok: false },
+    { outcome: "evaluated", correct: false, refusal_code: null, lineage_ok: true, temporal_ok: true },
+    { outcome: "not-evaluated", correct: null, refusal_code: null, lineage_ok: true, temporal_ok: true, not_evaluated_reason: "UNPARSEABLE_MODEL_OUTPUT" },
+  ];
+  for (const over of failed) {
+    const v = writeVerdict(root, { id: `generalization_verdict-f${failed.indexOf(over)}00000000000`, ...over });
+    const got = validateMethodRecord(cite(v.id), { toolCatalog: CATALOG, provenanceSeeds: NO_SEEDS, verdicts: dv(v) }).reasons.at(-1);
+    assert.match(got, /^PROMOTION_WITHOUT_VALID_GENERALIZATION:VERDICT_NOT_PASSED:/, `got ${got}`);
+    assert.ok(got.includes(`refusal_code=${String(over.refusal_code)}`), `the refusal NAMES the code, got ${got}`);
+    assert.ok(got.includes(`lineage_ok=${String(over.lineage_ok)}`) && got.includes(`temporal_ok=${String(over.temporal_ok)}`), `…and both gate readings, got ${got}`);
+  }
+
+  // The cause vocabulary is declared as DATA, so a new cause cannot be added silently.
+  assert.deepEqual([...PROMOTION_REFUSAL_CAUSES], ["EVIDENCE_MISSING", "VERDICTS_UNAVAILABLE", "VERDICT_NOT_RECORDED", "VERDICT_OTHER_METHOD", "VERDICT_NOT_PASSED"]);
+  assert.deepEqual(generalizationEvidenceReasons({ ...GOOD, status: "draft" }, undefined), [], "a NON-active record never reads the verdicts");
+});
+
+test("AC3: `activeMethods` returns only methods whose LATEST version is active", () => {
+  const root = mkTmp();
+  assert.deepEqual(activeMethods(root), { ok: true, methods: [], evaluated: 0, malformed_lines: 0, file: registryFile(root) }, "an empty registry, reported as evaluated-0 rather than as a crash");
+
+  writeVerdict(root, { method_id: GOOD.method_id, version: 2 });
+  assert.equal(appendMethodRecord(root, ACTIVE_OK, { toolCatalog: CATALOG, provenanceSeeds: NO_SEEDS }).ok, true);
+  assert.equal(appendMethodRecord(root, { ...GOOD, method_id: "still-draft" }, { toolCatalog: CATALOG, provenanceSeeds: NO_SEEDS }).ok, true);
+  const am = activeMethods(root);
+  assert.equal(am.ok, true);
+  assert.deepEqual(am.methods.map((m) => m.method_id), ["shared-contract-divergence"]);
+  assert.equal(am.evaluated, 2, "the count of methods EXAMINED is reported alongside, so 0 methods + 2 examined ≠ 0 methods + 0 examined");
+
+  // A RETIREMENT of the same method_id supersedes the active version ⇒ it leaves the active set.
+  const retired = appendMethodRecord(root, {
+    ...GOOD, version: 2, status: "retired",
+    retirement_reason: "promoted on invalid evidence: the held-out case was the v1 seed and the graded tree was post-fix",
+  }, { toolCatalog: CATALOG, provenanceSeeds: NO_SEEDS });
+  assert.equal(retired.ok, true, retired.reasons?.join(","));
+  assert.deepEqual(activeMethods(root).methods, [], "the latest version is `retired`, so the method is NOT active");
+  assert.equal(readMethodRegistry(root, { history: true }).history.length, 3, "…and the retirement APPENDED: history is intact");
+});
+
+test("AC3 (the real quarantine): the recorded `shared-contract-divergence` promotion is retired, and its evidence cannot re-promote it", () => {
+  const root = mkTmp();
+  const METHOD_ID = "shared-contract-divergence";
+  // The evidence the ORIGINAL v2 promotion was based on — recorded here as the verdict it actually was:
+  // a refusal on the lineage gate (the held-out case was the v1 seed) and on the temporal gate (the
+  // fix had already landed at the pin, so the graded tree was post-fix while the label was pre-fix).
+  const bad = writeVerdict(root, {
+    id: "generalization_verdict-afe5ac899aa54241", method_id: METHOD_ID, version: 2,
+    held_out_case_id: "experience-bb12a6858838e74b",
+    called: false, outcome: "not-evaluated", refusal_code: "HELD_OUT_SHARES_LINEAGE",
+    predicted_verdict: null, correct: null, lineage_ok: false, temporal_ok: false,
+    promoted: false, retirement_reason: null, not_evaluated_reason: "HELD_OUT_SHARES_LINEAGE",
+  });
+  assert.equal(appendMethodRecord(root, { ...GOOD, method_id: METHOD_ID, version: 1 }, { toolCatalog: CATALOG, provenanceSeeds: NO_SEEDS }).ok, true);
+
+  // 1. The quarantine record: a RETIREMENT that CITES the invalid promotion.
+  const quarantined = appendMethodRecord(root, {
+    ...GOOD, method_id: METHOD_ID, version: 2, status: "retired",
+    retirement_reason: `promoted on INVALID evidence (verdict ${bad.id}): lineage leak — the held-out case WAS the v1 seed; temporal mismatch — post-fix code graded against a pre-fix label. Retired; must not be re-promoted on this evidence.`,
+  }, { toolCatalog: CATALOG, provenanceSeeds: NO_SEEDS });
+  assert.equal(quarantined.ok, true, quarantined.reasons?.join(","));
+  assert.equal(quarantined.appended, true);
+  const onDisk = readMethodRegistry(root, { history: true }).history.at(-1);
+  assert.equal(onDisk.status, "retired");
+  assert.match(onDisk.retirement_reason, /lineage leak/);
+  assert.equal(activeMethods(root).methods.length, 0, "activeMethods() shows it ABSENT");
+
+  // 2. The attempted RE-PROMOTION citing that same evidence is REFUSED — naming the gate that failed.
+  const replay = appendMethodRecord(root, {
+    ...GOOD, method_id: METHOD_ID, version: 3, status: "active",
+    generalization_evidence: { verdict_ref: bad.id },
+  }, { toolCatalog: CATALOG, provenanceSeeds: NO_SEEDS });
+  assert.equal(replay.ok, false);
+  assert.equal(replay.appended, false);
+  const why = replay.reasons.find((x) => x.startsWith(`${PROMOTION_WITHOUT_VALID_GENERALIZATION}:`));
+  assert.match(why, /^PROMOTION_WITHOUT_VALID_GENERALIZATION:VERDICT_NOT_PASSED:/);
+  assert.ok(why.includes("refusal_code=HELD_OUT_SHARES_LINEAGE") && why.includes("lineage_ok=false") && why.includes("temporal_ok=false"), why);
+  assert.equal(lines(root), 2, "the refused re-promotion appended NOTHING (the retirement is still the latest)");
+  assert.deepEqual(activeMethods(root).methods, []);
 });

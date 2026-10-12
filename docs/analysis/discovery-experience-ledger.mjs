@@ -45,14 +45,83 @@
 
 import fs from "node:fs";
 import path from "node:path";
+import { spawnSync } from "node:child_process";
 
 // Reuse the evidence store's primitives directly (content addressing, the carrier-read that counts
 // unparseable lines, and the ONE definition of where the evidence store lives) — re-implementing any
 // of them would be a second definition.
 import { sha256, recordId, readRecords, storeFile, EVIDENCE_STORE_REL } from "./architecture-evidence-store.mjs";
 
-/** The one fixed sink (relative to the analysed root) — same convention as the evidence store's. */
-export const EXPERIENCE_LEDGER_REL = ".quay/discovery-experience-ledger.jsonl";
+// ── WHERE a Discovery Method carrier lives: the SHARED checkout, never the caller's worktree ──────
+//
+// ⛔ THE DEFECT THIS CLOSES (task gap-discovery-carriers-ephemeral-in-worktree, from the 2026-10-12
+//   read-only audit): every Discovery carrier used to resolve relative to the CALLER's root, and
+//   every real run so far happened inside a task worktree. On teardown the whole Discovery Method
+//   runtime state vanished — `ls <main>/.quay/discovery-*` was empty, Phase 2 had to rebuild the
+//   registry because the Phase 0/1 carriers were already gone, and the only `active` method ever
+//   recorded existed nowhere. The absence was ACCIDENTAL, not a decision.
+//
+// The carriers therefore resolve to the SHARED checkout (the main worktree) — the same mechanism
+// `plugin/scripts/per-task-suite-record.ts` uses for its own record: `git rev-parse --git-common-dir`
+// returns `<main-checkout>/.git` from ANY linked worktree, and `dirname` of that IS the main checkout.
+//
+// ⛔ WHY THE RESOLUTION IS SPELLED HERE RATHER THAN IMPORTED FROM `per-task-suite-record.ts`: these
+//   `docs/analysis/*.mjs` modules are loaded by PLAIN `node` (the reproduction commands in the
+//   sibling headers run `node --input-type=module -e 'import … from "<repo>/docs/analysis/…mjs"'`),
+//   and a `.ts` specifier needs type-stripping that plain `node` on this repo's declared floor does
+//   not do. The duplication is therefore ONE `spawnSync("git", …)` call, and it is PINNED against
+//   the canonical resolver by a test that imports BOTH and asserts they agree on the same fixture
+//   (`discovery-experience-ledger.test.mjs`, AC2(a)) — an executable invariant, not a promise.
+//
+// ⛔ An unresolvable shared checkout is REFUSED (`SHARED_CHECKOUT_UNRESOLVED`), never silently
+//   downgraded to the caller's root: a fallback would re-create exactly the vanishing carrier this
+//   task exists to remove, and it would do so invisibly (硬规则 3b).
+
+/** Refusal code: no shared checkout could be named for the caller's root. */
+export const SHARED_CHECKOUT_UNRESOLVED = "SHARED_CHECKOUT_UNRESOLVED";
+/** Refusal code: another appender holds the carrier's exclusive lock past the declared wait. */
+export const CARRIER_LOCKED = "CARRIER_LOCKED";
+/** Refusal code: a record with this `id` is already in the carrier — nothing was appended. */
+export const DUPLICATE_ID = "DUPLICATE_ID";
+/** Refusal code: the carrier is not a torn FINAL line, so truncating would delete whole records. */
+export const CARRIER_NOT_TORN = "CARRIER_NOT_TORN";
+/** Refusal code: removing the torn final line would still leave unparseable lines behind. */
+export const CARRIER_STILL_MALFORMED = "CARRIER_STILL_MALFORMED";
+/** Refusal code: there is no such carrier file (its OWN value — never "clean"). */
+export const CARRIER_MISSING = "CARRIER_MISSING";
+/** Refusal code: the given name is neither a declared carrier nor a carrier-shaped path. */
+export const UNKNOWN_CARRIER = "UNKNOWN_CARRIER";
+/** Refusal code: the carrier exists but could not be read at all. */
+export const CARRIER_UNREADABLE = "CARRIER_UNREADABLE";
+
+/**
+ * The ONE table of Discovery Method carriers: name → `{rel, kind}`. The rel paths of ALL of them are
+ * declared HERE, in one place, so `repairCarrier` can address any of them by name and no sibling
+ * module has to keep a second copy of its own path. A consumer exports its own `*_REL` FROM this
+ * table (see `METHOD_REGISTRY_REL` / `REFLECTION_ATTEMPTS_REL` in the sibling modules).
+ *
+ * ⛔ This is a declaration only — it adds no writer, no scheduler and no `.gitignore` entry. Whether
+ * these carriers are in fact gitignored in quay's own checkout is a MEASURED question, not a premise:
+ * `git check-ignore .quay/discovery-experience-ledger.jsonl …` exits 1 for all four (quay's
+ * `.gitignore` uses per-file lines, i.e. it carries no single wildcard rule covering all of `.quay`),
+ * so the task's Plan claim "carriers stay gitignored" does NOT hold today. `.gitignore` is outside
+ * this task's declared ## Touches, so the lines are reported, not added here.
+ */
+export const DISCOVERY_CARRIERS = Object.freeze({
+  "discovery-experience-ledger": Object.freeze({ rel: ".quay/discovery-experience-ledger.jsonl", kind: "experience" }),
+  "discovery-method-registry": Object.freeze({ rel: ".quay/discovery-method-registry.jsonl", kind: "method" }),
+  "discovery-reflection-attempts": Object.freeze({ rel: ".quay/discovery-reflection-attempts.jsonl", kind: "reflection_attempt" }),
+  "discovery-generalization-verdicts": Object.freeze({ rel: ".quay/discovery-generalization-verdicts.jsonl", kind: "generalization_verdict" }),
+});
+
+/** The one fixed sink (relative to the SHARED checkout) — same convention as the evidence store's. */
+export const EXPERIENCE_LEDGER_REL = DISCOVERY_CARRIERS["discovery-experience-ledger"].rel;
+
+/** The carrier of RECORDED `validateGeneralization` verdicts. Declared here (in the one table) so the
+ *  method registry can resolve a promotion's `generalization_evidence` ref WITHOUT importing the
+ *  reflection module — the registry must not depend on its own consumer. */
+export const GENERALIZATION_VERDICTS_REL = DISCOVERY_CARRIERS["discovery-generalization-verdicts"].rel;
+export const GENERALIZATION_VERDICT_KIND = DISCOVERY_CARRIERS["discovery-generalization-verdicts"].kind;
 
 /** The ONE record kind this carrier holds, so a line is self-describing on read-back. */
 export const EXPERIENCE_KIND = "experience";
@@ -107,8 +176,61 @@ const nonWs = (s) => String(s ?? "").replace(/\s+/g, "").length;
 const supplied = (o, k) => Object.prototype.hasOwnProperty.call(o, k) && o[k] !== undefined;
 const HEX64 = /^[0-9a-f]{64}$/;
 
-/** Absolute path of the one fixed sink for a given root. */
-export const ledgerFile = (root) => path.join(root, EXPERIENCE_LEDGER_REL);
+// ── the SHARED checkout resolver (see the header block above) ────────────────────────────────────
+
+/**
+ * Name the SHARED checkout this caller's carriers belong to. PURE-ish (one `git` call).
+ *
+ * @param {string} root  the caller's root — a worktree, or the main checkout itself
+ * @returns {{ok:true, root:string} | {ok:false, reason:string}}
+ */
+export function resolveCarrierRoot(root) {
+  if (!isStr(root, 1)) return { ok: false, reason: `${SHARED_CHECKOUT_UNRESOLVED}:no-root-was-given` };
+  const r = spawnSync("git", ["-C", root, "rev-parse", "--git-common-dir"], { encoding: "utf8" });
+  if (r.error) {
+    return { ok: false, reason: `${SHARED_CHECKOUT_UNRESOLVED}:git-could-not-be-run-for-${root}:${r.error.code ?? r.error.message}` };
+  }
+  if (r.status !== 0) {
+    return { ok: false, reason: `${SHARED_CHECKOUT_UNRESOLVED}:git-rev-parse---git-common-dir-exited-${r.status}-in-${root}-so-no-shared-checkout-can-be-named` };
+  }
+  let common = String(r.stdout ?? "").trim();
+  if (!common) return { ok: false, reason: `${SHARED_CHECKOUT_UNRESOLVED}:empty-git-common-dir-for-${root}` };
+  if (!path.isAbsolute(common)) common = path.join(root, common);
+  const shared = path.dirname(common);
+  if (!fs.existsSync(shared)) {
+    return { ok: false, reason: `${SHARED_CHECKOUT_UNRESOLVED}:${shared}-named-by-git-common-dir-${common}-does-not-exist` };
+  }
+  return { ok: true, root: shared };
+}
+
+/**
+ * Absolute path of a carrier under the SHARED checkout — `null` when no shared checkout can be named.
+ * The `null` is its OWN value (硬规则 3b): "I cannot say where this carrier lives" must never be
+ * shaped like a path that merely happens to be the caller's worktree.
+ * @param {string} root @param {string} rel
+ * @returns {string|null}
+ */
+export function carrierFile(root, rel) {
+  const rr = resolveCarrierRoot(root);
+  return rr.ok ? path.join(rr.root, String(rel)) : null;
+}
+
+/**
+ * Resolve a carrier NAME (or a carrier-shaped path) to its `{rel}`. A name absent from
+ * `DISCOVERY_CARRIERS` is accepted only when it is explicitly a path (`…/x.jsonl` or a bare
+ * `x.jsonl`) — anything else is `UNKNOWN_CARRIER`, never a guess.
+ * @returns {{rel:string}|null}
+ */
+export function carrierEntry(name) {
+  if (!isStr(name, 1)) return null;
+  const n = String(name);
+  if (Object.prototype.hasOwnProperty.call(DISCOVERY_CARRIERS, n)) return DISCOVERY_CARRIERS[n];
+  if (n.includes("/") || n.endsWith(".jsonl")) return { rel: n };
+  return null;
+}
+
+/** Absolute path of the Experience ledger under the SHARED checkout (null when unresolvable). */
+export const ledgerFile = (root) => carrierFile(root, EXPERIENCE_LEDGER_REL);
 
 /** Deterministic content-addressed id, reusing the evidence store's own primitive. */
 export const experienceRecordId = (rec) => recordId(EXPERIENCE_KIND, rec);
@@ -169,7 +291,101 @@ export function validateExperienceRecord(rec) {
   return { ok: reasons.length === 0, reasons };
 }
 
-// ── append / read ───────────────────────────────────────────────────────────────────────────────
+// ── append / read (the ONE append path every Discovery carrier goes through) ─────────────────────
+//
+// A carrier append is: (1) resolve the SHARED checkout, (2) take the carrier's exclusive lock file,
+// (3) skip when the record's `id` is already present, (4) ONE `O_APPEND` write of the whole line
+// followed by an `fsync`, (5) release. Steps 2/4 are what make two concurrent appenders produce two
+// WHOLE lines rather than one interleaved line: `O_APPEND` makes the offset+write atomic, and the
+// lock makes the read-check-write sequence atomic against a second process.
+
+/** A synchronous sleep — the lock retry loop is synchronous, so it cannot await. */
+function sleepSync(ms) {
+  Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, Math.max(0, ms));
+}
+
+/**
+ * Take `lock` exclusively (`O_CREAT|O_EXCL`). A lock older than the declared wait is treated as
+ * ABANDONED and reclaimed (the reclamation is REPORTED, never silent) — the threshold is the caller's
+ * own declared wait, not an invented constant, and a real append holds the lock for well under 1 ms.
+ * @returns {{ok:true, release:()=>void, reclaimed:boolean} | {ok:false, reason:string}}
+ */
+function acquireCarrierLock(lock, timeoutMs, retryMs) {
+  const started = Date.now();
+  let reclaimed = false;
+  for (;;) {
+    try {
+      fs.closeSync(fs.openSync(lock, "wx"));
+      return { ok: true, reclaimed, release() { try { fs.unlinkSync(lock); } catch { /* already gone */ } } };
+    } catch (e) {
+      if (e?.code !== "EEXIST") return { ok: false, reason: `${CARRIER_LOCKED}:cannot-create-${path.basename(lock)}:${e?.code ?? e?.message}` };
+    }
+    try {
+      if (Date.now() - fs.statSync(lock).mtimeMs > timeoutMs) { fs.unlinkSync(lock); reclaimed = true; continue; }
+    } catch { /* the holder released between the open and the stat — just retry */ }
+    if (Date.now() - started > timeoutMs) {
+      return { ok: false, reason: `${CARRIER_LOCKED}:${path.basename(lock)}-was-still-held-after-${timeoutMs}ms` };
+    }
+    sleepSync(retryMs);
+  }
+}
+
+/**
+ * Append ONE record to a Discovery carrier, atomically and idempotently.
+ *
+ * @param {string} root  the caller's root (a worktree or the main checkout) — the carrier lands in the
+ *   SHARED checkout regardless
+ * @param {string} rel   the carrier's path relative to the shared checkout
+ * @param {object} record  the record; its `id` is the idempotency key
+ * @param {object} [opts] `{kind, lockTimeoutMs=5000, retryMs=5}`
+ * @returns {{ok:true, kind, id, file, record, appended:true, line_bytes:number}
+ *          |{ok:false, kind, reasons:string[], appended:false, file?:string, duplicate?:true}}
+ *   ⛔ On ANY refusal nothing is written and no field is defaulted. A `DUPLICATE_ID` refusal carries
+ *   `duplicate:true` and leaves the file byte-identical — a re-append is a no-op, not an error state.
+ */
+export function appendCarrierLine(root, rel, record, { kind = null, lockTimeoutMs = 5000, retryMs = 5 } = {}) {
+  const rr = resolveCarrierRoot(root);
+  if (!rr.ok) return { ok: false, kind, reasons: [rr.reason], appended: false };
+  const file = path.join(rr.root, String(rel));
+  fs.mkdirSync(path.dirname(file), { recursive: true });
+
+  const lock = `${file}.lock`;
+  const held = acquireCarrierLock(lock, lockTimeoutMs, retryMs);
+  if (!held.ok) return { ok: false, kind, reasons: [held.reason], appended: false, file };
+  try {
+    const { records } = readRecords(file);
+    const id = record?.id;
+    if (isStr(id, 1) && records.some((r) => isObj(r) && r.id === id)) {
+      return {
+        ok: false, kind, id, file, appended: false, duplicate: true, lock_reclaimed: held.reclaimed,
+        reasons: [`${DUPLICATE_ID}:${id}-is-already-in-${rel}-so-nothing-was-appended-and-the-carrier-is-unchanged`],
+      };
+    }
+    const line = JSON.stringify({ kind, ...record }) + "\n";
+    const fd = fs.openSync(file, "a");   // O_APPEND: the offset+write is one atomic step
+    try { fs.writeSync(fd, line); fs.fsyncSync(fd); } finally { fs.closeSync(fd); }
+    return { ok: true, kind, id: id ?? null, file, record: { kind, ...record }, appended: true, line_bytes: Buffer.byteLength(line), lock_reclaimed: held.reclaimed };
+  } finally {
+    held.release();
+  }
+}
+
+/**
+ * Read a Discovery carrier from the SHARED checkout. Unparseable lines are DROPPED and COUNTED (never
+ * silently); `ok` is false when any exist, because a partially-readable carrier must not be read as a
+ * complete one. An UNRESOLVABLE root is its own value: `ok:false` + `file:null` + `reason`.
+ * @returns {{ok:boolean, records:object[], malformed_lines:number, file:string|null, reason?:string}}
+ */
+export function readCarrier(root, rel, kind = null) {
+  const file = carrierFile(root, rel);
+  if (file === null) {
+    const rr = resolveCarrierRoot(root);
+    return { ok: false, records: [], malformed_lines: 0, file: null, reason: rr.reason };
+  }
+  const { records, malformed_lines } = readRecords(file);   // the evidence store's carrier reader
+  const kept = kind === null ? records : records.filter((r) => isObj(r) && r.kind === kind);
+  return { ok: malformed_lines === 0, records: kept, malformed_lines, file };
+}
 
 /**
  * Append ONE validated Experience record. Returns `{ok:true, id, file, record}` or
@@ -179,22 +395,89 @@ export function appendExperienceRecord(root, rec) {
   const v = validateExperienceRecord(rec);
   if (!v.ok) return { ok: false, kind: EXPERIENCE_KIND, reasons: v.reasons, appended: false };
   const withId = { id: rec.id ?? experienceRecordId(rec), ...rec };
-  const file = ledgerFile(root);
-  fs.mkdirSync(path.dirname(file), { recursive: true });
-  fs.appendFileSync(file, JSON.stringify({ kind: EXPERIENCE_KIND, ...withId }) + "\n", "utf8");
-  return { ok: true, kind: EXPERIENCE_KIND, id: withId.id, file, record: withId };
+  return appendCarrierLine(root, EXPERIENCE_LEDGER_REL, withId, { kind: EXPERIENCE_KIND });
 }
 
 /**
  * Read the ledger back. Unparseable lines are DROPPED and COUNTED (never silently); `ok` is false
  * when any exist, because a partially-readable ledger must not be read as a complete one.
- * @returns {{ok:boolean, records:object[], malformed_lines:number, file:string}}
+ * @returns {{ok:boolean, records:object[], malformed_lines:number, file:string|null}}
  */
-export function readExperienceLedger(root) {
-  const file = ledgerFile(root);
-  const { records, malformed_lines } = readRecords(file);   // the evidence store's carrier reader
-  const experiences = records.filter((r) => isObj(r) && r.kind === EXPERIENCE_KIND);
-  return { ok: malformed_lines === 0, records: experiences, malformed_lines, file };
+export const readExperienceLedger = (root) => readCarrier(root, EXPERIENCE_LEDGER_REL, EXPERIENCE_KIND);
+
+// ── recovery: repair a carrier whose FINAL appended line was torn by a crash ──────────────────────
+
+/**
+ * Repair a carrier whose LAST line was torn by an interrupted append.
+ *
+ * ⛔ It truncates ONLY a torn FINAL line — bytes after the last `\n`. A carrier with an unparseable
+ * line in the MIDDLE is REFUSED (`CARRIER_NOT_TORN`) and left untouched: truncation is only safe
+ * where the tail is provably a partial write, and "remove everything after the last good line" would
+ * otherwise silently delete whole records.
+ *
+ * The original file is copied to `<file>.bak-<utc-stamp>` BEFORE anything is written, and everything
+ * removed is reported (`removed_bytes`, `removed_lines`, `removed_sample`).
+ *
+ * @param {string} root  the caller's root
+ * @param {string} name  a `DISCOVERY_CARRIERS` key, or a carrier-shaped path (e.g. `x.jsonl`)
+ * @param {object} [opts] `{now = Date.now()}`
+ * @returns {{ok:true, repaired:boolean, file:string, backup:string|null, removed_bytes:number,
+ *            removed_lines:number, malformed_before:number, malformed_after:number}
+ *          |{ok:false, reasons:string[], repaired:false, file:string|null}}
+ */
+export function repairCarrier(root, name, { now = Date.now() } = {}) {
+  const entry = carrierEntry(name);
+  if (!entry) {
+    return { ok: false, reasons: [`${UNKNOWN_CARRIER}:${String(name)}-is-neither-a-declared-carrier-name-nor-a-carrier-path`], repaired: false, file: null };
+  }
+  const file = carrierFile(root, entry.rel);
+  if (file === null) {
+    const rr = resolveCarrierRoot(root);
+    return { ok: false, reasons: [rr.reason], repaired: false, file: null };
+  }
+  if (!fs.existsSync(file)) {
+    // Its OWN value: "there is no such carrier" is not "the carrier was clean".
+    return { ok: false, reasons: [`${CARRIER_MISSING}:${entry.rel}-does-not-exist-under-the-shared-checkout`], repaired: false, file };
+  }
+  let text;
+  try { text = fs.readFileSync(file, "utf8"); }
+  catch (e) { return { ok: false, reasons: [`${CARRIER_UNREADABLE}:${entry.rel}:${e?.code ?? e?.message}`], repaired: false, file }; }
+
+  const countMalformed = (s) => s.split("\n").filter(Boolean).reduce((n, l) => { try { JSON.parse(l); return n; } catch { return n + 1; } }, 0);
+  const malformedBefore = countMalformed(text);
+  const torn = text.length > 0 && !text.endsWith("\n");
+
+  if (!torn) {
+    if (malformedBefore === 0) {
+      return { ok: true, repaired: false, file, backup: null, removed_bytes: 0, removed_lines: 0, malformed_before: 0, malformed_after: 0 };
+    }
+    return {
+      ok: false, repaired: false, file,
+      reasons: [`${CARRIER_NOT_TORN}:${malformedBefore}-unparseable-line(s)-but-${entry.rel}-ends-with-a-newline-so-no-torn-FINAL-line-can-be-removed-(truncating-would-delete-whole-records)`],
+    };
+  }
+
+  const cut = text.lastIndexOf("\n") + 1;
+  const removed = text.slice(cut);
+  const kept = text.slice(0, cut);
+  const malformedAfter = countMalformed(kept);
+  if (malformedAfter > 0) {
+    return {
+      ok: false, repaired: false, file,
+      reasons: [`${CARRIER_STILL_MALFORMED}:removing-the-torn-final-line-would-still-leave-${malformedAfter}-unparseable-line(s)-so-nothing-was-removed`],
+    };
+  }
+
+  const stamp = new Date(now).toISOString().replace(/[:.]/g, "-");
+  const backup = `${file}.bak-${stamp}`;
+  fs.copyFileSync(file, backup);
+  fs.writeFileSync(file, kept, "utf8");
+  return {
+    ok: true, repaired: true, file, backup,
+    removed_bytes: Buffer.byteLength(removed), removed_lines: 1,
+    removed_sample: removed.slice(0, 200),
+    malformed_before: malformedBefore, malformed_after: malformedAfter,
+  };
 }
 
 // ── SOURCE 1: the manual path (reported_by:"user") ──────────────────────────────────────────────

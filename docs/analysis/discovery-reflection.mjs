@@ -79,8 +79,11 @@ import { pathToFileURL } from "node:url";
 // The ONE signature primitive (`subjectKey`), the content-addressing + carrier reader, the Experience
 // ledger's role vocabulary, and the method registry's OWN validator + carrier — all imported. A second
 // definition of any of them would be a second definition to keep in sync.
-import { subjectKey, recordId, readRecords } from "./architecture-evidence-store.mjs";
-import { ROLE_VERDICT_COMPAT, readExperienceLedger } from "./discovery-experience-ledger.mjs";
+import { subjectKey, recordId } from "./architecture-evidence-store.mjs";
+import {
+  ROLE_VERDICT_COMPAT, readExperienceLedger, DISCOVERY_CARRIERS, GENERALIZATION_VERDICTS_REL,
+  GENERALIZATION_VERDICT_KIND, carrierFile, readCarrier, appendCarrierLine,
+} from "./discovery-experience-ledger.mjs";
 import {
   readMethodRegistry, validateMethodRecord, defaultToolNames,
   seedSetForRecord, basenameOf, provenanceSeeds, REPO_ROOT,
@@ -94,10 +97,11 @@ import {
 
 export const TOOL = "discovery-reflection";
 
-/** The ONE carrier this module appends to: the reflection-attempt log. Gitignored family, same
- *  convention as the evidence store / the ledger (runtime state, never git-tracked). */
-export const REFLECTION_ATTEMPTS_REL = path.posix.join(".quay", "discovery-reflection-attempts.jsonl");
-export const REFLECTION_ATTEMPT_KIND = "reflection_attempt";
+/** The reflection-attempt log — declared in the ledger module's ONE carrier table, and resolved to
+ *  the SHARED checkout so it survives a task worktree being torn down (the ledger module's header
+ *  carries the full defect; the attempt log was one of the three carriers the audit found missing). */
+export const REFLECTION_ATTEMPTS_REL = DISCOVERY_CARRIERS["discovery-reflection-attempts"].rel;
+export const REFLECTION_ATTEMPT_KIND = DISCOVERY_CARRIERS["discovery-reflection-attempts"].kind;
 
 /** The decision vocabulary. `no-method` is a REAL judgment (a model call DID happen and concluded the
  *  finding teaches nothing transferable) — distinct from a refusal, which carries `reasons` instead. */
@@ -849,9 +853,47 @@ export function buildGeneralizationPrompt({ candidate, heldOutCase }) {
  * @param {string} [o.root]    repo root, for the default ancestry seam and the live-checkout refusal
  * @returns {Promise<object>} `{ok, called, outcome, evaluated_commit, verifier_cwd, refusal_code,
  *                              predicted_verdict, expected_verdicts, correct, promoted, candidate_after,
- *                              retirement_reason, not_evaluated_reason, model_call}`
+ *                              retirement_reason, not_evaluated_reason, model_call, lineage_ok,
+ *                              temporal_ok, verdict_ref?}`
+ *   `lineage_ok` / `temporal_ok` are the two gates the REGISTRY's promotion rule reads: `true` = ran
+ *   and passed, `false` = ran and failed, `null` = never reached (硬规则 3b — never one value).
+ *   With a `root`, an EVALUATED verdict is also RECORDED in the verdict carrier and the returned
+ *   object carries its `verdict_ref` — the ref a `draft → active` promotion must cite
+ *   (`PROMOTION_WITHOUT_VALID_GENERALIZATION` otherwise). A refusal is recorded only when the caller
+ *   asks (`recordGeneralizationVerdict`), and then `verdict_recorded:false` says so.
  */
-export async function validateGeneralization({ candidate, heldOutCase, registry = [], model, budget = {}, modelId = null, nowMs = Date.now(), experiences = [], pinDir = null, isAncestor = null, root = null } = {}) {
+export async function validateGeneralization(opts = {}) {
+  const verdict = await runGeneralization(opts);
+  return maybeRecordGeneralizationVerdict(opts, verdict);
+}
+
+/**
+ * RECORD an EVALUATED verdict into the verdict carrier, so a later draft→active promotion can cite it
+ * and the registry can re-read what the verifier returned. Returns the verdict unchanged (plus
+ * `verdict_ref`) when recorded.
+ *
+ * ⛔ Only `outcome:"evaluated"` is recorded AUTOMATICALLY. A REFUSAL is a pre-condition on the reading,
+ *   not a verdict on the method, and a refusal's own record is the CALLER's explicit act
+ *   (`recordGeneralizationVerdict`) — auto-recording it here would write carrier lines from every
+ *   refusal path, including the paths that are refused before a case is even resolvable.
+ * ⛔ No `root` ⇒ nothing is recorded and the verdict is returned untouched: `verdict_recorded:false`.
+ *   A caller that cannot say where the carrier lives must not be told the verdict was persisted.
+ */
+function maybeRecordGeneralizationVerdict({ root, candidate, heldOutCase } = {}, verdict) {
+  if (!isStr(root, 1) || verdict?.outcome !== "evaluated") return verdict;
+  const rec = recordGeneralizationVerdict(root, {
+    ...verdict,
+    method_id: isStr(candidate?.method_id, 1) ? candidate.method_id : null,
+    version: Number.isInteger(verdict?.candidate_after?.version) ? verdict.candidate_after.version : null,
+    held_out_case_id: heldOutCase?.case_id ?? heldOutCase?.id ?? null,
+    evaluation_pin: isStr(heldOutCase?.evaluation_pin, 1) ? heldOutCase.evaluation_pin : null,
+  });
+  return rec.ok
+    ? { ...verdict, verdict_ref: rec.id, verdict_recorded: true }
+    : { ...verdict, verdict_ref: null, verdict_recorded: false, verdict_record_reasons: rec.reasons };
+}
+
+async function runGeneralization({ candidate, heldOutCase, registry = [], model, budget = {}, modelId = null, nowMs = Date.now(), experiences = [], pinDir = null, isAncestor = null, root = null } = {}) {
   const guard = disabledGuard(budget);
   if (guard) return guard;
   if (typeof model !== "function") return { ok: false, reason: "model-seam-missing", called: false };
@@ -860,18 +902,22 @@ export async function validateGeneralization({ candidate, heldOutCase, registry 
 
   // EVERY refusal below shares ONE shape: no model call, no promotion, the candidate untouched, and the
   // outcome spelled `not-evaluated` — a refused READING, never a failed METHOD (硬规则 3b).
-  const refuse = (code, reason) => ({
+  // `gates` carries the two readings the PROMOTION rule names (`lineage_ok` / `temporal_ok`), so a
+  // refusal is not just a code: `false` = the gate ran and failed, `null` = it was never reached.
+  // Collapsing those two into one value is exactly the shape 硬规则 3b forbids.
+  const refuse = (code, reason, gates = {}) => ({
     ok: false, called: false, outcome: "not-evaluated", refusal_code: code, reason,
     not_evaluated_reason: code, predicted_verdict: null, expected_verdicts: roleExpectedVerdicts(heldOutCase.role),
     correct: null, promoted: false, candidate_after: { ...candidate }, retirement_reason: null,
     evaluated_commit: null, verifier_cwd: null, model_call: null,
+    lineage_ok: gates.lineage_ok ?? null, temporal_ok: gates.temporal_ok ?? null,
   });
 
   // The held-out case must be OUTSIDE the batch that produced the candidate: a case the candidate was
   // fitted to proves nothing about transfer.
   const prov = Array.isArray(candidate.provenance_evidence) ? candidate.provenance_evidence : [];
   if (isStr(heldOutCase.id, 1) && prov.includes(heldOutCase.id)) {
-    return refuse("HELD_OUT_INSIDE_THE_BATCH", `HELD_OUT_INSIDE_THE_BATCH:${heldOutCase.id}-is-already-a-provenance-member-of-${candidate.method_id}`);
+    return refuse("HELD_OUT_INSIDE_THE_BATCH", `HELD_OUT_INSIDE_THE_BATCH:${heldOutCase.id}-is-already-a-provenance-member-of-${candidate.method_id}`, { lineage_ok: false });
   }
   const expected = roleExpectedVerdicts(heldOutCase.role);
   if (!expected.length) return refuse("HELD_OUT_ROLE_UNKNOWN", `HELD_OUT_ROLE_UNKNOWN:${heldOutCase.role}`);
@@ -879,15 +925,19 @@ export async function validateGeneralization({ candidate, heldOutCase, registry 
   // …and outside the candidate's whole LINEAGE — a different version of the same method having been
   // seeded from this very case makes the "hold-out" a re-run of the fitting, not a test of transfer.
   const lineage = checkLineageIsolation({ candidate, heldOutCase, registry, experiences });
-  if (!lineage.ok) return { ...refuse("HELD_OUT_SHARES_LINEAGE", lineage.reason), lineage: lineage.lineage, lineage_hits: lineage.hits };
+  if (!lineage.ok) return { ...refuse("HELD_OUT_SHARES_LINEAGE", lineage.reason, { lineage_ok: false }), lineage: lineage.lineage, lineage_hits: lineage.hits };
+  const lineageOk = { lineage_ok: true };
 
   // …and its expected verdict must be TRUE at a NAMED commit, which must predate the fix.
   const pinFields = validateEvaluationPin(heldOutCase);
-  if (!pinFields.ok) return refuse(pinFields.reasons[0], `${pinFields.reasons[0]}:${heldOutCase.case_id ?? heldOutCase.id ?? "held-out"}-must-name-${pinFields.reasons.join("+")}`);
+  if (!pinFields.ok) return refuse(pinFields.reasons[0], `${pinFields.reasons[0]}:${heldOutCase.case_id ?? heldOutCase.id ?? "held-out"}-must-name-${pinFields.reasons.join("+")}`, lineageOk);
   const pinRefusal = verifyStrippedPin(pinDir, { repoRoot: root });
-  if (pinRefusal) return refuse(pinRefusal.split(":")[0], `PIN_REFUSED:${pinRefusal}`);
+  if (pinRefusal) return refuse(pinRefusal.split(":")[0], `PIN_REFUSED:${pinRefusal}`, lineageOk);
   const temporal = checkTemporalBinding({ heldOutCase, isAncestor: isAncestor ?? (root ? gitIsAncestor(root) : null) });
-  if (!temporal.ok) return refuse(temporal.reason.split(":")[0], temporal.reason);
+  if (!temporal.ok) return refuse(temporal.reason.split(":")[0], temporal.reason, { ...lineageOk, temporal_ok: false });
+  // `temporal.checked === false` is the case that binds no fix_commit (a non-positive case): the gate
+  // was NOT evaluated, which is `null`, never `true`.
+  const gatesOk = { ...lineageOk, temporal_ok: temporal.checked === true ? true : null };
 
   const evaluatedCommit = String(heldOutCase.evaluation_pin);
   const prompt = buildGeneralizationPrompt({ candidate, heldOutCase });
@@ -905,7 +955,7 @@ export async function validateGeneralization({ candidate, heldOutCase, registry 
       expected_verdicts: expected, correct: null, promoted: false, candidate_after: { ...candidate },
       retirement_reason: null, refusal_code: null,
       not_evaluated_reason: parsed ? "VERDICT_MISSING_IN_MODEL_OUTPUT" : "UNPARSEABLE_MODEL_OUTPUT",
-      ...ran,
+      ...gatesOk, ...ran,
     };
   }
   const predicted = String(parsed.verdict);
@@ -916,7 +966,7 @@ export async function validateGeneralization({ candidate, heldOutCase, registry 
       expected_verdicts: expected, correct: true, promoted: true,
       candidate_after: { ...candidate, version: nextV, status: "active", retirement_reason: null },
       retirement_reason: null, not_evaluated_reason: null, refusal_code: null, reasoning: parsed.reasoning ?? null,
-      ...ran,
+      ...gatesOk, ...ran,
     };
   }
   const retirement_reason = `failed-generalization-on-${heldOutCase.case_id ?? heldOutCase.id ?? "held-out"}: predicted-${predicted}-but-role-${heldOutCase.role}-requires-${expected.join("|")}`;
@@ -925,20 +975,17 @@ export async function validateGeneralization({ candidate, heldOutCase, registry 
     expected_verdicts: expected, correct: false, promoted: false,
     candidate_after: { ...candidate, version: nextV, status: "retired", retirement_reason },
     retirement_reason, not_evaluated_reason: null, refusal_code: null, reasoning: parsed.reasoning ?? null,
-    ...ran,
+    ...gatesOk, ...ran,
   };
 }
 
 // ── the reflection-attempt carrier (so the next round does not re-spend a call) ────────────────────
 
-export const attemptsFile = (root) => path.join(root, REFLECTION_ATTEMPTS_REL);
+/** Absolute path of the attempt log under the SHARED checkout (null when unresolvable). */
+export const attemptsFile = (root) => carrierFile(root, REFLECTION_ATTEMPTS_REL);
 
 /** Read the reflection-attempt log. Unparseable lines are DROPPED and COUNTED (never silent). */
-export function readReflectionAttempts(root) {
-  const file = attemptsFile(root);
-  const { records, malformed_lines } = readRecords(file);
-  return { ok: malformed_lines === 0, records: records.filter((r) => isObj(r) && r.kind === REFLECTION_ATTEMPT_KIND), malformed_lines, file };
-}
+export const readReflectionAttempts = (root) => readCarrier(root, REFLECTION_ATTEMPTS_REL, REFLECTION_ATTEMPT_KIND);
 
 /** Append ONE reflection-attempt record: WHICH signature was reflected on, and what came of it. This
  *  is the record `selectExperiencesForReflection` dedups against — without it a `no-method` verdict
@@ -946,10 +993,75 @@ export function readReflectionAttempts(root) {
 export function recordReflectionAttempt(root, rec) {
   if (!isObj(rec) || !isStr(rec.signature, 1)) return { ok: false, reasons: ["ATTEMPT_SIGNATURE_REQUIRED"], appended: false };
   const withId = { id: rec.id ?? recordId(REFLECTION_ATTEMPT_KIND, rec), ...rec };
-  const file = attemptsFile(root);
-  fs.mkdirSync(path.dirname(file), { recursive: true });
-  fs.appendFileSync(file, JSON.stringify({ kind: REFLECTION_ATTEMPT_KIND, ...withId }) + "\n", "utf8");
-  return { ok: true, kind: REFLECTION_ATTEMPT_KIND, id: withId.id, file, record: withId };
+  return appendCarrierLine(root, REFLECTION_ATTEMPTS_REL, withId, { kind: REFLECTION_ATTEMPT_KIND });
+}
+
+// ── the generalization-VERDICT carrier (the evidence a draft→active promotion must cite) ──────────
+//
+// ⛔ WHY A CARRIER AT ALL (task gap-discovery-carriers-ephemeral-in-worktree): the registry now REFUSES
+//   a `status:"active"` record that does not cite a recorded `validateGeneralization` verdict
+//   (`PROMOTION_WITHOUT_VALID_GENERALIZATION`). A rule that says "cite a recorded verdict" is only a
+//   real constraint if the verdicts are somewhere a THIRD PARTY can re-read them — otherwise the
+//   promotion would carry an unfalsifiable claim about a call nobody can inspect. This carrier is that
+//   place, and like every other Discovery carrier it resolves to the SHARED checkout.
+
+export const VERDICT_KIND = GENERALIZATION_VERDICT_KIND;
+
+/** Absolute path of the verdict carrier under the SHARED checkout (null when unresolvable). */
+export const verdictsFile = (root) => carrierFile(root, GENERALIZATION_VERDICTS_REL);
+
+/** Read the recorded verdicts. Unparseable lines are DROPPED and COUNTED (never silent). */
+export const readGeneralizationVerdicts = (root) => readCarrier(root, GENERALIZATION_VERDICTS_REL, VERDICT_KIND);
+
+/**
+ * Record ONE `validateGeneralization` outcome as a verdict line, so a later promotion can CITE it and
+ * a third party can re-read what the verifier actually returned.
+ *
+ * The normalized record keeps the fields a promotion is judged on, copied from the verdict itself —
+ * never re-derived here: `method_id` / `version` (whose promotion this could license), `outcome`,
+ * `correct`, `refusal_code`, and the two gate readings `lineage_ok` / `temporal_ok` (`null` = the gate
+ * was never reached, which is a DIFFERENT value from `false`).
+ *
+ * A refusal verdict is recordable on purpose: it is what lets a refusal NAME why the cited evidence is
+ * unusable (`HELD_OUT_SHARES_LINEAGE`, `TEMPORAL_MISMATCH`, …) instead of a bare "no valid evidence".
+ *
+ * @param {string} root
+ * @param {object} verdict  the value `validateGeneralization` returned, plus (`method_id`, `version`)
+ * @param {object} [opts] `{ts = Date.now()}`
+ * @returns the `appendCarrierLine` result.
+ */
+export function recordGeneralizationVerdict(root, verdict, { ts = Date.now() } = {}) {
+  if (!isObj(verdict)) return { ok: false, kind: VERDICT_KIND, reasons: ["VERDICT_NOT_OBJECT"], appended: false };
+  if (!isStr(verdict.method_id, 1)) return { ok: false, kind: VERDICT_KIND, reasons: ["VERDICT_METHOD_ID_REQUIRED"], appended: false };
+  if (!isStr(verdict.held_out_case_id, 1)) return { ok: false, kind: VERDICT_KIND, reasons: ["VERDICT_HELD_OUT_CASE_ID_REQUIRED"], appended: false };
+  const rec = {
+    ts: new Date(ts).toISOString(),
+    method_id: verdict.method_id,
+    version: Number.isInteger(verdict.version) ? verdict.version : null,
+    held_out_case_id: verdict.held_out_case_id,
+    called: verdict.called === true,
+    outcome: isStr(verdict.outcome, 1) ? verdict.outcome : null,
+    refusal_code: isStr(verdict.refusal_code, 1) ? verdict.refusal_code : null,
+    predicted_verdict: isStr(verdict.predicted_verdict, 1) ? verdict.predicted_verdict : null,
+    expected_verdicts: Array.isArray(verdict.expected_verdicts) ? verdict.expected_verdicts : [],
+    correct: verdict.correct === true ? true : (verdict.correct === false ? false : null),
+    // The two gates the promotion rule names. `null` = not reached (a refusal earlier in the chain);
+    // `false` = reached and failed. Never collapsed into one value (硬规则 3b).
+    lineage_ok: verdict.lineage_ok === false ? false : (verdict.lineage_ok === true ? true : null),
+    temporal_ok: verdict.temporal_ok === false ? false : (verdict.temporal_ok === true ? true : null),
+    evaluation_pin: isStr(verdict.evaluation_pin, 1) ? verdict.evaluation_pin : null,
+    evaluated_commit: isStr(verdict.evaluated_commit, 1) ? verdict.evaluated_commit : null,
+    promoted: verdict.promoted === true,
+    retirement_reason: isStr(verdict.retirement_reason, 1) ? verdict.retirement_reason : null,
+    not_evaluated_reason: isStr(verdict.not_evaluated_reason, 1) ? verdict.not_evaluated_reason : null,
+  };
+  // ⛔ The id is content-addressed over the verdict EXCEPT its recording time. A verdict's identity is
+  //   what the verifier concluded; `ts` is when it was copied here. Including `ts` would make a caller
+  //   that re-records the SAME verdict (e.g. re-checking a promotion) mint a fresh line every time,
+  //   which is exactly the append this carrier's DUPLICATE_ID arm exists to make a no-op.
+  const { ts: _ts, ...identity } = rec;
+  const withId = { id: verdict.id ?? recordId(VERDICT_KIND, identity), ...rec };
+  return appendCarrierLine(root, GENERALIZATION_VERDICTS_REL, withId, { kind: VERDICT_KIND });
 }
 
 // ── metrics (recorded, never asserted) ────────────────────────────────────────────────────────────

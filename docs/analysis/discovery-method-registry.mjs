@@ -30,9 +30,14 @@
 //   • `plugin/scripts/quay-runtime-artifacts.txt` is also not the place: its inclusion criterion is
 //     runtime state OUTSIDE `<workspace>/.quay/`, and a consumer's `.gitignore` gets the covering
 //     `.quay/*` rule from quay-init. quay's OWN `.gitignore` uses per-file lines (there is no
-//     `**/.quay/*` wildcard), so wiring this carrier to write into a live checkout needs a
-//     `**/.quay/discovery-method-registry.jsonl` line there. THIS task wires no writer (plan item 8),
-//     so it adds none — and `.gitignore` is outside its declared ## Touches.
+//     `**/.quay/*` wildcard).
+//   ⇒ MEASURED RESULT (task gap-discovery-carriers-ephemeral-in-worktree §Plan 5, which asked for the
+//     check to be run rather than assumed): the registry is NOT the place (corpus above), and the
+//     `.gitignore` arm is now LIVE — this task's carriers resolve to the SHARED checkout, so they are
+//     written into a real checkout. `git check-ignore .quay/discovery-method-registry.jsonl` exits 1
+//     (NOT ignored): the Plan's premise "carriers stay gitignored" does not hold. `.gitignore` is
+//     outside this task's declared ## Touches, so the entry is REPORTED and not silently added —
+//     adding it is the one-step follow-up named in the task's Evidence section.
 //
 // APPEND-ONLY / SHRINK-ONLY (same discipline as the evidence store): editing a method APPENDS a new
 // version — it never rewrites history, and a version number is never reused. A record whose `version`
@@ -89,15 +94,79 @@ import * as evidenceStore from "./architecture-evidence-store.mjs";
 // owns exactly that vocabulary; a second tokenizer here would be a second definition to keep in sync.
 import {
   readExperienceLedger, experienceDenyList, scanExperienceLeak, EXPERIENCE_LEDGER_REL,
+  DISCOVERY_CARRIERS, GENERALIZATION_VERDICTS_REL, GENERALIZATION_VERDICT_KIND,
+  carrierFile, readCarrier, appendCarrierLine, resolveCarrierRoot,
 } from "./discovery-experience-ledger.mjs";
 
-/** The one fixed sink (relative to the analysed root) — same convention as the evidence store's. */
-export const METHOD_REGISTRY_REL = ".quay/discovery-method-registry.jsonl";
+/**
+ * The one fixed sink, declared in the ledger module's `DISCOVERY_CARRIERS` table — the ONE place the
+ * Discovery carriers' locations live. ⛔ It resolves to the SHARED checkout (the main worktree), not
+ * the caller's root, so the registry survives a task worktree being torn down
+ * (task gap-discovery-carriers-ephemeral-in-worktree).
+ */
+export const METHOD_REGISTRY_REL = DISCOVERY_CARRIERS["discovery-method-registry"].rel;
 
 /** The ONE record kind this carrier holds, so a line is self-describing on read-back. */
 export const METHOD_KIND = "method";
 
 export const METHOD_STATUSES = Object.freeze(["draft", "active", "retired"]);
+
+// ── the PROMOTION EVIDENCE rule (draft → active is the ONLY gate that mints reusable knowledge) ───
+//
+// ⛔ THE DEFECT THIS CLOSES (task gap-discovery-carriers-ephemeral-in-worktree, 2026-10-12 audit): the
+//   only `active` method ever recorded (`method-afe5ac899aa54241`, `shared-contract-divergence` v2) was
+//   promoted on INVALID evidence — a lineage leak (its held-out case was the v1 seed) plus a temporal
+//   mismatch (post-fix code graded against a pre-fix label). Nothing in the registry could tell that
+//   promotion apart from a sound one, because a `status:"active"` record needed no evidence at all.
+//   ⇒ A promotion must now CITE a recorded `validateGeneralization` verdict, and THAT verdict must have
+//   passed the lineage and temporal gates. The verifier can then be re-read; a bare `status:"active"`
+//   cannot be minted.
+
+/** The umbrella refusal code for a promotion that cites no valid generalization verdict. */
+export const PROMOTION_WITHOUT_VALID_GENERALIZATION = "PROMOTION_WITHOUT_VALID_GENERALIZATION";
+
+/** The enumerated sub-causes (硬规则 3: a refusal says WHICH way it failed, never one opaque string). */
+export const PROMOTION_REFUSAL_CAUSES = Object.freeze([
+  "EVIDENCE_MISSING",      // status=active but no `generalization_evidence.verdict_ref`
+  "VERDICTS_UNAVAILABLE",  // the recorded verdicts could not be read ⇒ cannot be checked (own value)
+  "VERDICT_NOT_RECORDED",  // the ref names no recorded verdict
+  "VERDICT_OTHER_METHOD",  // the recorded verdict is about a different method_id
+  "VERDICT_NOT_PASSED",    // recorded, but the lineage/temporal gates did not pass
+]);
+
+/**
+ * The promotion-evidence refusals a record draws, given the RECORDED verdicts. PURE. A record that is
+ * not `active` draws none — the rule is about the draft→active transition, not about every record.
+ * @param {object} rec
+ * @param {object[]|undefined} verdicts the recorded verdicts, or `undefined` when they could not be
+ *   read (its OWN value, exactly like `toolCatalog`/`provenanceSeeds` — 硬规则 3b).
+ * @returns {string[]} zero or more `PROMOTION_WITHOUT_VALID_GENERALIZATION:<cause>:<detail>` reasons
+ */
+export function generalizationEvidenceReasons(rec, verdicts) {
+  if (rec?.status !== "active") return [];
+  const kill = (cause, detail) => `${PROMOTION_WITHOUT_VALID_GENERALIZATION}:${cause}:${detail}`;
+  const ge = rec.generalization_evidence;
+  if (!isObj(ge) || !isStr(ge.verdict_ref, 1)) {
+    return [kill("EVIDENCE_MISSING", "status=active-must-carry-generalization_evidence.verdict_ref-naming-a-recorded-validateGeneralization-verdict")];
+  }
+  if (!Array.isArray(verdicts)) {
+    return [kill("VERDICTS_UNAVAILABLE", `${ge.verdict_ref}-cannot-be-resolved-because-${GENERALIZATION_VERDICTS_REL}-could-not-be-read`)];
+  }
+  const v = verdicts.find((x) => isObj(x) && x.id === ge.verdict_ref);
+  if (!v) return [kill("VERDICT_NOT_RECORDED", `${ge.verdict_ref}-names-no-recorded-verdict`)];
+  if (isStr(v.method_id, 1) && isStr(rec.method_id, 1) && v.method_id !== rec.method_id) {
+    return [kill("VERDICT_OTHER_METHOD", `${ge.verdict_ref}-was-recorded-for-${v.method_id}-not-${rec.method_id}`)];
+  }
+  // "Passed" is spelled from the RECORD's own fields, never from the promotion's claim: an evaluated
+  // verdict that was correct, with no refusal and neither the lineage nor the temporal gate failed.
+  const passed = v.outcome === "evaluated" && v.correct === true && v.refusal_code === null &&
+    v.lineage_ok !== false && v.temporal_ok !== false;
+  if (!passed) {
+    return [kill("VERDICT_NOT_PASSED",
+      `${ge.verdict_ref}-recorded-outcome=${String(v.outcome)}-correct=${String(v.correct)}-refusal_code=${String(v.refusal_code)}-lineage_ok=${String(v.lineage_ok)}-temporal_ok=${String(v.temporal_ok)}`)];
+  }
+  return [];
+}
 
 /** `applicability` is free text, but it must have SUBSTANCE — a method whose applicability is
  *  `{applies: true}` says nothing. The check is on the joined non-whitespace length (硬规则 4: the
@@ -135,8 +204,8 @@ const nonWs = (s) => String(s ?? "").replace(/\s+/g, "").length;
 const supplied = (o, k) => Object.prototype.hasOwnProperty.call(o, k) && o[k] !== undefined;
 const strArr = (x, min = 0) => Array.isArray(x) && x.length >= min && x.every((s) => isStr(s, 1));
 
-/** Absolute path of the one fixed sink for a given root. */
-export const registryFile = (root) => path.join(root, METHOD_REGISTRY_REL);
+/** Absolute path of the one fixed sink under the SHARED checkout (null when unresolvable). */
+export const registryFile = (root) => carrierFile(root, METHOD_REGISTRY_REL);
 
 // ── the tool catalog (a LISTING, never an assertion) ────────────────────────────────────────────
 
@@ -319,8 +388,11 @@ export function seedReasons(rec, seeds) {
  * @param {object} [opts.provenanceSeeds] the SEED set of this record (the shape `provenanceSeeds(root,
  *   rec)` returns). ⛔ Absent ⇒ a distinct `PROVENANCE_SEEDS_UNAVAILABLE` refusal, never a skipped
  *   check — the same own-value discipline as `toolCatalog`, for the same reason (硬规则 3b).
+ * @param {object[]} [opts.verdicts] the RECORDED generalization verdicts (the carrier read back).
+ *   ⛔ Absent ⇒ `VERDICTS_UNAVAILABLE` for a `status:"active"` record, never a skipped check — the
+ *   same own-value discipline again. A non-active record never reads it.
  */
-export function validateMethodRecord(rec, { toolCatalog, existing = [], provenanceSeeds: seeds } = {}) {
+export function validateMethodRecord(rec, { toolCatalog, existing = [], provenanceSeeds: seeds, verdicts } = {}) {
   if (!isObj(rec)) return { ok: false, reasons: ["RECORD_NOT_OBJECT"] };
   const reasons = [];
   for (const f of REQUIRED_METHOD_FIELDS) if (!supplied(rec, f)) reasons.push(`SCHEMA_MISSING:${f}`);
@@ -377,6 +449,11 @@ export function validateMethodRecord(rec, { toolCatalog, existing = [], provenan
     reasons.push("RETIREMENT_REASON_REQUIRED:status=retired-needs-a-non-empty-retirement_reason");
   }
   if (rec.retirement_reason !== null && !isStr(rec.retirement_reason, 1)) reasons.push("FIELD_INVALID:retirement_reason");
+  // A `generalization_evidence` of the wrong TYPE is its own field fault regardless of status (a
+  // promotion is not the only record that can carry one); its CONTENT is judged only for `active`.
+  if (supplied(rec, "generalization_evidence") && rec.generalization_evidence !== null && !isObj(rec.generalization_evidence)) {
+    reasons.push("FIELD_INVALID:generalization_evidence");
+  }
   if (rec.supersedes !== null && !isStr(rec.supersedes, 1)) reasons.push("FIELD_INVALID:supersedes");
   if (isStr(rec.supersedes, 1) && rec.supersedes === rec.method_id) {
     reasons.push("FIELD_INVALID:supersedes-cannot-be-the-method_id-itself");
@@ -397,6 +474,9 @@ export function validateMethodRecord(rec, { toolCatalog, existing = [], provenan
   // `seedReasons` is the ONE definition of these two codes (the same one `readMethodRegistry` uses to
   // flag records written before the rule existed).
   reasons.push(...seedReasons(rec, seeds));
+
+  // ── the PROMOTION-EVIDENCE check, after the seed checks for the same "existing order" reason ─────
+  reasons.push(...generalizationEvidenceReasons(rec, verdicts));
 
   return { ok: reasons.length === 0, reasons };
 }
@@ -419,6 +499,11 @@ export const methodRecordId = (rec) => recordId(METHOD_KIND, rec);
  */
 export function readMethodRegistry(root, { history = false } = {}) {
   const file = registryFile(root);
+  if (file === null) {
+    // An unresolvable shared checkout is its OWN value — never "an empty registry" (硬规则 3b).
+    const rr = resolveCarrierRoot(root);
+    return { ok: false, latest: [], history: history ? [] : null, malformed_lines: 0, file: null, reason: rr.reason };
+  }
   const { records, malformed_lines } = readRecords(file);   // the evidence store's carrier reader
   const byId = new Map();
   for (const r of records) {
@@ -442,6 +527,29 @@ export function readMethodRegistry(root, { history = false } = {}) {
   return { ok: malformed_lines === 0, latest, history: history ? records : null, malformed_lines, file };
 }
 
+/**
+ * The methods whose LATEST recorded version is `active` — the only methods a consumer may apply.
+ *
+ * Reads through `readMethodRegistry`, so "latest" is the same judgment everywhere (a superseded v1
+ * can never be returned as current), and a retired latest version is absent. `ok:false` is inherited
+ * from the read (a partially-readable registry, or an unresolvable shared checkout, is never reported
+ * as "no active methods"): `evaluated` is returned alongside so the caller can tell "checked N
+ * methods, none active" from "could not check".
+ * @returns {{ok:boolean, methods:object[], evaluated:number, malformed_lines:number, file:string|null,
+ *            reason?:string}}
+ */
+export function activeMethods(root) {
+  const read = readMethodRegistry(root);
+  return {
+    ok: read.ok,
+    methods: read.latest.filter((m) => isObj(m) && m.status === "active"),
+    evaluated: read.latest.length,
+    malformed_lines: read.malformed_lines,
+    file: read.file,
+    ...(isStr(read.reason, 1) ? { reason: read.reason } : {}),
+  };
+}
+
 // ── append ──────────────────────────────────────────────────────────────────────────────────────
 
 /**
@@ -451,8 +559,13 @@ export function readMethodRegistry(root, { history = false } = {}) {
  * The registry is READ first so the version check sees the real prior versions; an unreadable
  * registry is refused with its OWN reason rather than being silently treated as empty (硬规则 3b).
  */
-export function appendMethodRecord(root, rec, { toolCatalog, toolCatalogRoot, provenanceSeeds: seeds } = {}) {
+export function appendMethodRecord(root, rec, { toolCatalog, toolCatalogRoot, provenanceSeeds: seeds, generalizationVerdicts } = {}) {
   const read = readMethodRegistry(root, { history: true });
+  if (read.file === null) {
+    // No shared checkout ⇒ nothing can be read OR written: the resolver's own refusal, not a
+    // "the registry is empty" that would let the write land in the caller's worktree.
+    return { ok: false, kind: METHOD_KIND, appended: false, reasons: [read.reason] };
+  }
   if (!read.ok) {
     return {
       ok: false, kind: METHOD_KIND, appended: false,
@@ -469,17 +582,23 @@ export function appendMethodRecord(root, rec, { toolCatalog, toolCatalogRoot, pr
   // The REAL seed set by default, resolved from the record's OWN provenance against the ledger at
   // `root`. An unreadable ledger becomes PROVENANCE_SEEDS_UNAVAILABLE, never a skipped check.
   const resolvedSeeds = seeds === undefined ? provenanceSeeds(root, rec) : seeds;
+  // The RECORDED generalization verdicts, read back so a `status:"active"` promotion can be checked
+  // against the verdict it cites. An unreadable verdict carrier becomes the validator's own
+  // VERDICTS_UNAVAILABLE refusal — never a skipped check.
+  let resolvedVerdicts = generalizationVerdicts;
+  if (resolvedVerdicts === undefined) {
+    const vc = readCarrier(root, GENERALIZATION_VERDICTS_REL, GENERALIZATION_VERDICT_KIND);
+    resolvedVerdicts = vc.ok ? vc.records : undefined;
+  }
   const v = validateMethodRecord(rec, {
     toolCatalog: Array.isArray(catalog) ? catalog : undefined,
     existing: read.history,
     provenanceSeeds: resolvedSeeds,
+    verdicts: Array.isArray(resolvedVerdicts) ? resolvedVerdicts : undefined,
   });
   if (!v.ok) return { ok: false, kind: METHOD_KIND, reasons: v.reasons, appended: false };
   const withId = { id: rec.id ?? methodRecordId(rec), ...rec };
-  const file = registryFile(root);
-  fs.mkdirSync(path.dirname(file), { recursive: true });
-  fs.appendFileSync(file, JSON.stringify({ kind: METHOD_KIND, ...withId }) + "\n", "utf8");
-  return { ok: true, kind: METHOD_KIND, id: withId.id, file, record: withId };
+  return appendCarrierLine(root, METHOD_REGISTRY_REL, withId, { kind: METHOD_KIND });
 }
 
 // ── dedup (a REPORT, never an auto-merge) ───────────────────────────────────────────────────────

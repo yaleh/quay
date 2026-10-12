@@ -30,7 +30,9 @@ import {
   lineageVersions, checkLineageIsolation, validateEvaluationPin, checkTemporalBinding,
   gitIsAncestor, verifyStrippedPin, materializeStrippedPin, DISCOVERY_PIN_FORBIDDEN_DIRS,
   isPositiveCase, LINEAGE_MIN_SHARED_COMPONENTS,
+  readGeneralizationVerdicts, recordGeneralizationVerdict, verdictsFile, VERDICT_KIND,
 } from "../../docs/analysis/discovery-reflection.mjs";
+import { GENERALIZATION_VERDICTS_REL } from "../../docs/analysis/discovery-experience-ledger.mjs";
 import { subjectKey } from "../../docs/analysis/architecture-evidence-store.mjs";
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
@@ -38,7 +40,11 @@ const MODULE_PATH = path.join(HERE, "..", "..", "docs", "analysis", "discovery-r
 const REPO_ROOT = path.resolve(HERE, "..", "..");
 
 const tmpDirs = [];
-const mkTmp = () => { const d = fs.mkdtempSync(path.join(os.tmpdir(), "discovery-reflection-")); tmpDirs.push(d); return d; };
+const plainTmp = () => { const d = fs.mkdtempSync(path.join(os.tmpdir(), "discovery-reflection-")); tmpDirs.push(d); return d; };
+/** A REAL git repo: every Discovery carrier resolves through `git rev-parse --git-common-dir` to the
+ *  SHARED checkout, so a bare directory is no longer a usable fixture root (an unresolvable shared
+ *  checkout is REFUSED by design). */
+const mkTmp = () => { const d = plainTmp(); execFileSync("git", ["init", "-q", d], { stdio: "ignore" }); return d; };
 after(() => { for (const d of tmpDirs) fs.rmSync(d, { recursive: true, force: true }); });
 
 /** An EMPTY directory satisfies the stripped-pin predicate (nothing forbidden is present) — the cheap
@@ -644,4 +650,125 @@ test("AC1(e): the strip reaches the DECISION row — a model that names the subj
   assert.deepEqual(d.stripped_subject_tools, ["alpha.ts"]);
   assert.deepEqual(d.candidate.operation.tools, ["arch-discovery-routine.ts"]);
   assert.deepEqual(d.candidate.stripped_subject_tools, ["alpha.ts"]);
+});
+
+// ══════════════════════════════════════════════════════════════════════════════════════════════════
+// PERSISTENCE + THE VERDICT CARRIER (task gap-discovery-carriers-ephemeral-in-worktree)
+//
+// Two things are pinned here: (1) the attempt/verdict carriers resolve to the SHARED checkout, so a
+// reflection round run inside a task worktree leaves state that survives the worktree; and (2) an
+// EVALUATED verdict is RECORDED with a `verdict_ref` a draft→active promotion can cite — the registry's
+// `PROMOTION_WITHOUT_VALID_GENERALIZATION` rule is only checkable because that ref resolves.
+// ══════════════════════════════════════════════════════════════════════════════════════════════════
+
+/** A MAIN checkout plus a LINKED worktree, both real git checkouts under `os.tmpdir()`. */
+const mkWorktreePair = () => {
+  const main = mkTmp();
+  const git = (...a) => execFileSync("git", ["-C", main, ...a], {
+    encoding: "utf8",
+    env: {
+      ...process.env,
+      GIT_AUTHOR_NAME: "t", GIT_AUTHOR_EMAIL: "t@example.com",
+      GIT_COMMITTER_NAME: "t", GIT_COMMITTER_EMAIL: "t@example.com",
+    },
+  });
+  fs.writeFileSync(path.join(main, "seed.txt"), "seed\n");
+  git("add", "-A"); git("commit", "-qm", "seed");
+  const wt = path.join(plainTmp(), "wt");
+  git("worktree", "add", "-q", "-b", "task/fixture", wt);
+  return { main, worktree: wt };
+};
+
+test("AC2(a): the attempt + verdict carriers resolve to the MAIN checkout when written from a worktree", () => {
+  const { main, worktree } = mkWorktreePair();
+  const r = recordReflectionAttempt(worktree, { ts: "2026-10-12T00:00:00Z", signature: "sig-x", decision: "no-method", ok: true });
+  assert.equal(r.ok, true, r.reasons?.join(","));
+  assert.equal(attemptsFile(worktree), path.join(main, REFLECTION_ATTEMPTS_REL), "the attempt carrier is the MAIN checkout's");
+  assert.equal(fs.existsSync(path.join(main, REFLECTION_ATTEMPTS_REL)), true);
+  assert.equal(fs.existsSync(path.join(worktree, REFLECTION_ATTEMPTS_REL)), false, "…and NOT the worktree's");
+  assert.equal(readReflectionAttempts(worktree).records.length, 1, "read back through the worktree root");
+
+  const v = recordGeneralizationVerdict(worktree, { method_id: "m", held_out_case_id: "EXP-x", outcome: "evaluated", correct: true });
+  assert.equal(v.ok, true, v.reasons?.join(","));
+  assert.equal(verdictsFile(worktree), path.join(main, GENERALIZATION_VERDICTS_REL));
+  assert.equal(readGeneralizationVerdicts(main).records.length, 1, "the verdict lands in the SAME shared checkout");
+
+  // An unresolvable shared checkout is REFUSED here too — its own value, never a worktree-local file.
+  const bare = plainTmp();
+  const refused = recordReflectionAttempt(bare, { signature: "sig-y" });
+  assert.equal(refused.ok, false);
+  assert.equal(refused.appended, false);
+  assert.match(refused.reasons[0], /^SHARED_CHECKOUT_UNRESOLVED:/);
+  assert.deepEqual(fs.readdirSync(bare), [], "nothing was created under the unresolvable root");
+});
+
+test("AC2(f): an EVALUATED verdict is RECORDED with a verdict_ref; without a root it says so instead", async () => {
+  const root = mkTmp();
+  const heldOut = expFixture({
+    id: "experience-heldout0000000", case_id: "EXP-heldout", role: "confirmed-negative",
+    source_ref: "outcome-heldout00000000", components: ["plugin/scripts/heldout.ts"], evaluation_pin: "1".repeat(40),
+  });
+  const candidate = assembleCandidate({ rec: decisionFixture(), unit: { experiences: [expFixture({ id: "experience-inbatch000000" })] }, registry: [], budget: {}, nowIso: "2026-10-12T00:00:00Z" });
+  const pass = await validateGeneralization({
+    candidate, heldOutCase: heldOut, model: stubModel({ verdict: "refuted" }), budget: {}, pinDir: strippedTmp(), root,
+  });
+  assert.equal(pass.outcome, "evaluated");
+  assert.equal(pass.correct, true);
+  assert.equal(pass.verdict_recorded, true, "a root was given, so the verdict is on the carrier");
+  assert.match(pass.verdict_ref, /^generalization_verdict-[0-9a-f]{16}$/);
+  assert.equal(pass.lineage_ok, true, "the gate ran and passed");
+  assert.equal(pass.temporal_ok, null, "`confirmed-negative` binds no fix_commit ⇒ the temporal gate was NEVER REACHED — null, not true (硬规则 3b)");
+
+  const read = readGeneralizationVerdicts(root);
+  assert.equal(read.ok, true);
+  assert.equal(read.records.length, 1);
+  const rec = read.records[0];
+  assert.equal(rec.id, pass.verdict_ref, "the ref on the verdict IS the recorded line's id");
+  assert.equal(rec.kind, VERDICT_KIND);
+  assert.equal(rec.method_id, candidate.method_id);
+  assert.equal(rec.held_out_case_id, "EXP-heldout");
+  assert.equal(rec.outcome, "evaluated");
+  assert.equal(rec.correct, true);
+  assert.equal(rec.refusal_code, null);
+  assert.equal(rec.lineage_ok, true);
+  assert.equal(rec.temporal_ok, null);
+  assert.equal(rec.promoted, true);
+  assert.equal(rec.evaluation_pin, "1".repeat(40));
+
+  // NO root ⇒ the verdict is returned untouched and NOTHING claims it was persisted.
+  const noRoot = await validateGeneralization({ candidate, heldOutCase: heldOut, model: stubModel({ verdict: "refuted" }), budget: {}, pinDir: strippedTmp() });
+  assert.equal(noRoot.outcome, "evaluated");
+  assert.equal(noRoot.verdict_recorded, undefined, "no claim of persistence when there is nowhere to persist");
+  assert.equal(readGeneralizationVerdicts(root).records.length, 1, "…and the carrier is unchanged");
+});
+
+test("AC2(f): a REFUSAL is not auto-recorded — the caller records it, and the two gate readings survive", async () => {
+  const root = mkTmp();
+  const heldOut = expFixture({ id: "experience-heldout0000000", case_id: "EXP-heldout", source_ref: "outcome-bb12a6858838e74b", components: ["plugin/scripts/heldout.ts"] });
+  const v1 = methodFixture({ method_id: "shared-contract-divergence", version: 1, provenance_evidence: ["outcome-bb12a6858838e74b"] });
+  const v2 = methodFixture({ method_id: "shared-contract-divergence", version: 2, provenance_evidence: ["experience-faninlock00000"] });
+  const r = await validateGeneralization({ candidate: v2, heldOutCase: heldOut, registry: [v1, v2], model: stubModel({ verdict: "supported" }), budget: {}, pinDir: strippedTmp(), root });
+  assert.equal(r.refusal_code, "HELD_OUT_SHARES_LINEAGE");
+  assert.equal(r.lineage_ok, false, "the gate ran and FAILED");
+  assert.equal(r.temporal_ok, null, "…and the temporal gate was never reached");
+  assert.equal(readGeneralizationVerdicts(root).records.length, 0, "a refusal is a pre-condition on the READING, not a verdict on the method — nothing is recorded automatically");
+
+  const recorded = recordGeneralizationVerdict(root, { ...r, method_id: v2.method_id, version: 2, held_out_case_id: heldOut.case_id });
+  assert.equal(recorded.ok, true, recorded.reasons?.join(","));
+  const rec = readGeneralizationVerdicts(root).records[0];
+  assert.equal(rec.outcome, "not-evaluated");
+  assert.equal(rec.refusal_code, "HELD_OUT_SHARES_LINEAGE");
+  assert.equal(rec.correct, null, "an unevaluated verdict is null — never a fabricated false");
+  assert.equal(rec.lineage_ok, false);
+  assert.equal(rec.temporal_ok, null);
+
+  // The record's required fields are enforced: a verdict with no method_id / no held-out case cannot
+  // be recorded at all (so a promotion can never cite a half-identified verdict).
+  assert.equal(recordGeneralizationVerdict(root, { method_id: "m", outcome: "evaluated" }).reasons[0], "VERDICT_HELD_OUT_CASE_ID_REQUIRED");
+  assert.equal(recordGeneralizationVerdict(root, { held_out_case_id: "EXP-x" }).reasons[0], "VERDICT_METHOD_ID_REQUIRED");
+  assert.equal(recordGeneralizationVerdict(root, null).reasons[0], "VERDICT_NOT_OBJECT");
+  assert.equal(readGeneralizationVerdicts(root).records.length, 1, "none of the three malformed attempts was appended");
+  // Re-recording the same verdict object is a DUPLICATE_ID no-op (content-addressed id).
+  assert.equal(recordGeneralizationVerdict(root, { ...r, method_id: v2.method_id, version: 2, held_out_case_id: heldOut.case_id }).duplicate, true);
+  assert.equal(readGeneralizationVerdicts(root).records.length, 1);
 });

@@ -12,19 +12,56 @@ import assert from "node:assert/strict";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
+import { execFileSync, spawn } from "node:child_process";
 
 import {
   EXPERIENCE_LEDGER_REL, EXPERIENCE_KIND, EXPERIENCE_ROLES, REPORTED_BY_VOCAB, MIN_SUMMARY_CHARS,
-  REQUIRED_EXPERIENCE_FIELDS, ROLE_VERDICT_COMPAT,
+  REQUIRED_EXPERIENCE_FIELDS, ROLE_VERDICT_COMPAT, DISCOVERY_CARRIERS,
+  SHARED_CHECKOUT_UNRESOLVED, DUPLICATE_ID, CARRIER_NOT_TORN,
   ledgerFile, validateExperienceRecord, appendExperienceRecord, readExperienceLedger,
   ingestFeedback, ingestFromEvidenceStoreOutcome, experienceDenyList, scanExperienceLeak,
-  experienceRecordId,
+  experienceRecordId, resolveCarrierRoot, carrierFile, appendCarrierLine, readCarrier, repairCarrier,
 } from "../../docs/analysis/discovery-experience-ledger.mjs";
 import { appendOutcomeRecord, storeFile, sha256 } from "../../docs/analysis/architecture-evidence-store.mjs";
+// The CANONICAL shared-checkout resolver (`plugin/scripts/per-task-suite-record.ts`). The ledger module
+// cannot import it (a `.ts` specifier needs type-stripping that plain `node` does not do for a
+// `docs/analysis/*.mjs` consumer), so the equivalence is asserted HERE — an executable invariant
+// instead of a promise that the two copies agree.
+import { resolveSharedCheckout } from "../../plugin/scripts/per-task-suite-record.ts";
 
 const tmpDirs = [];
-const mkTmp = () => { const d = fs.mkdtempSync(path.join(os.tmpdir(), "discovery-experience-ledger-")); tmpDirs.push(d); return d; };
 after(() => { for (const d of tmpDirs) fs.rmSync(d, { recursive: true, force: true }); });
+
+/** A REAL git repo (git dir under `os.tmpdir()`, never inside the repo root — a test that writes into
+ *  the checked-in tree is judged by `checked-in-write-check`). The Discovery carriers resolve through
+ *  `git rev-parse --git-common-dir`, so a bare directory is no longer a usable fixture root: an
+ *  unresolvable shared checkout is REFUSED by design (AC2(b)). */
+const plainTmp = () => { const d = fs.mkdtempSync(path.join(os.tmpdir(), "discovery-experience-ledger-")); tmpDirs.push(d); return d; };
+const mkTmp = () => {
+  const d = plainTmp();
+  execFileSync("git", ["init", "-q", d], { stdio: "ignore" });
+  return d;
+};
+
+/** A fixture whose MAIN checkout and linked WORKTREE are both real: what "writing from a task worktree"
+ *  actually looks like. `git worktree add` is a CHILD process, so its writes into `<main>/.git/` are
+ *  invisible to the in-tree write judge (and both live under `os.tmpdir()` anyway). */
+const mkWorktreePair = () => {
+  const main = mkTmp();
+  const git = (...a) => execFileSync("git", ["-C", main, ...a], {
+    encoding: "utf8",
+    env: {
+      ...process.env,
+      GIT_AUTHOR_NAME: "t", GIT_AUTHOR_EMAIL: "t@example.com",
+      GIT_COMMITTER_NAME: "t", GIT_COMMITTER_EMAIL: "t@example.com",
+    },
+  });
+  fs.writeFileSync(path.join(main, "seed.txt"), "seed\n");
+  git("add", "-A"); git("commit", "-qm", "seed");
+  const wt = path.join(plainTmp(), "wt");
+  git("worktree", "add", "-q", "-b", "task/fixture", wt);
+  return { main, worktree: wt };
+};
 
 const lines = (root) => { const f = ledgerFile(root); return fs.existsSync(f) ? fs.readFileSync(f, "utf8").split("\n").filter(Boolean).length : 0; };
 const SUMMARY = "the deny-list must not be derivable from anything but the ledger's actual recorded contents";
@@ -285,4 +322,165 @@ test("records are content-addressed: identical content ⇒ one id, a changed fie
   const rec = { case_id: "x", ts: "t", role: "found-and-fixed", reported_by: "user", source_ref: null, evidence: [{ ref: "a", sha256: sha256("a") }], components: [], summary: SUMMARY };
   assert.equal(experienceRecordId(rec), experienceRecordId({ ...rec }));
   assert.notEqual(experienceRecordId(rec), experienceRecordId({ ...rec, case_id: "y" }));
+});
+
+// ══════════════════════════════════════════════════════════════════════════════════════════════════
+// PERSISTENCE (task gap-discovery-carriers-ephemeral-in-worktree): the carriers resolve to the SHARED
+// checkout, the append is atomic + idempotent, and a torn final line is repairable. Before this, every
+// real run happened inside a task worktree and the whole Discovery runtime state died with it.
+// ══════════════════════════════════════════════════════════════════════════════════════════════════
+
+// `ts` is pinned: the id is content-addressed over the WHOLE record, so a defaulted "now" would make
+// two nominally identical calls produce two different ids and the DUPLICATE_ID case untestable.
+const AC_CASE = { caseId: "AC2-worktree-persistence", role: "found-and-fixed", evidenceRefs: ["gap-discovery-carriers-ephemeral-in-worktree"], components: ["docs/analysis/discovery-experience-ledger.mjs"], summary: SUMMARY, ts: "2026-10-12T00:00:00.000Z" };
+
+test("AC2(a): a write from a linked git worktree lands in the fixture's MAIN checkout, not the worktree", () => {
+  const { main, worktree } = mkWorktreePair();
+  // The resolver agrees with the CANONICAL one (`per-task-suite-record.ts`) on the same fixture — the
+  // duplicated git call is pinned to the canonical behaviour by an executable invariant.
+  assert.equal(resolveCarrierRoot(worktree).root, resolveSharedCheckout(worktree));
+  assert.equal(resolveCarrierRoot(main).root, resolveSharedCheckout(main));
+  assert.notEqual(path.resolve(worktree), path.resolve(main), "the fixture really is two checkouts");
+
+  const r = ingestFeedback(worktree, AC_CASE);
+  assert.equal(r.ok, true, r.reasons?.join(","));
+  const inMain = path.join(main, EXPERIENCE_LEDGER_REL);
+  const inWorktree = path.join(worktree, EXPERIENCE_LEDGER_REL);
+  assert.equal(r.file, inMain, "the write names the MAIN checkout's carrier");
+  assert.equal(ledgerFile(worktree), inMain, "…and the path accessor resolves there too, from the worktree");
+  assert.equal(fs.existsSync(inMain), true, "the carrier EXISTS under the main checkout");
+  assert.equal(fs.existsSync(inWorktree), false, "…and does NOT exist under the worktree");
+  assert.equal(readExperienceLedger(worktree).records.length, 1, "read back THROUGH the worktree root");
+  assert.equal(readExperienceLedger(main).records.length, 1, "…and through the main root — one carrier, two views");
+});
+
+test("AC2(b): an unresolvable shared checkout is REFUSED — no carrier file is written anywhere", () => {
+  const bare = plainTmp();                       // a plain directory: not a git repo at all
+  assert.equal(resolveCarrierRoot(bare).ok, false);
+  assert.match(resolveCarrierRoot(bare).reason, new RegExp(`^${SHARED_CHECKOUT_UNRESOLVED}:`));
+  assert.equal(ledgerFile(bare), null, "an unresolvable root yields NO path (its own value, not a worktree path)");
+
+  const r = ingestFeedback(bare, AC_CASE);
+  assert.equal(r.ok, false);
+  assert.equal(r.appended, false);
+  assert.match(r.reasons[0], new RegExp(`^${SHARED_CHECKOUT_UNRESOLVED}:`), "the refusal names the resolver, not the record");
+  assert.deepEqual(fs.readdirSync(bare), [], "NOTHING was created — not even the .quay/ directory");
+
+  // Negative control on the same predicate: the SAME record against a git-repo root IS accepted, so
+  // the refusal above is the resolver and not the record.
+  assert.equal(ingestFeedback(mkTmp(), AC_CASE).ok, true);
+});
+
+test("AC2(c): re-appending the same record is DUPLICATE_ID and leaves the carrier byte-identical", () => {
+  const root = mkTmp();
+  const first = ingestFeedback(root, AC_CASE);
+  assert.equal(first.ok, true, first.reasons?.join(","));
+  const before = fs.readFileSync(ledgerFile(root), "utf8");
+  assert.equal(before.split("\n").filter(Boolean).length, 1);
+
+  const again = ingestFeedback(root, AC_CASE);
+  assert.equal(again.ok, false);
+  assert.equal(again.appended, false);
+  assert.equal(again.duplicate, true, "'already there' is its OWN outcome, not a generic failure");
+  assert.match(again.reasons[0], new RegExp(`^${DUPLICATE_ID}:${first.id}-`));
+  assert.equal(fs.readFileSync(ledgerFile(root), "utf8"), before, "the carrier is BYTE-IDENTICAL");
+  assert.equal(again.id, first.id, "a content-addressed id is what makes the re-append detectable");
+
+  // Negative control: a DIFFERENT record does append, so the skip is the id and not a blanket no.
+  assert.equal(ingestFeedback(root, { ...AC_CASE, caseId: "AC2-worktree-persistence-2" }).ok, true);
+  assert.equal(fs.readFileSync(ledgerFile(root), "utf8").split("\n").filter(Boolean).length, 2);
+
+  // …and the lock file is RELEASED (a lock left behind would wedge the carrier for every later run).
+  assert.equal(fs.existsSync(`${ledgerFile(root)}.lock`), false);
+});
+
+test("AC2(d): a torn FINAL line reads as malformed_lines:1, and repairCarrier restores it with a backup", () => {
+  const root = mkTmp();
+  assert.equal(ingestFeedback(root, AC_CASE).ok, true);
+  const good = fs.readFileSync(ledgerFile(root), "utf8");
+  const tornFragment = '{"kind":"experience","id":"experience-torn0000000000","case_';   // a crash mid-append
+  fs.appendFileSync(ledgerFile(root), tornFragment);
+
+  const read = readExperienceLedger(root);
+  assert.equal(read.malformed_lines, 1, "a torn carrier is never reported as clean OR as empty");
+  assert.equal(read.ok, false);
+  assert.equal(read.records.length, 1, "the whole lines are still returned");
+
+  const fixed = repairCarrier(root, "discovery-experience-ledger", { now: Date.parse("2026-10-12T00:00:00Z") });
+  assert.equal(fixed.ok, true, fixed.reasons?.join(","));
+  assert.equal(fixed.repaired, true);
+  assert.equal(fixed.removed_bytes, Buffer.byteLength(tornFragment), "it reports WHAT it removed (bytes)");
+  assert.equal(fixed.removed_sample, tornFragment);
+  assert.equal(fixed.malformed_before, 1);
+  assert.equal(fixed.malformed_after, 0);
+  assert.equal(fs.readFileSync(ledgerFile(root), "utf8"), good, "the kept prefix is byte-identical to the pre-tear carrier");
+  assert.ok(fixed.backup && fs.existsSync(fixed.backup), "the original is BACKED UP before anything is written");
+  assert.equal(fs.readFileSync(fixed.backup, "utf8"), good + tornFragment, "the backup is the torn carrier, untouched");
+  assert.equal(readExperienceLedger(root).malformed_lines, 0, "…and the carrier is parseable again");
+
+  // IDEMPOTENT: a second repair on the now-clean carrier reports `repaired:false`, not a fake repair.
+  const again = repairCarrier(root, "discovery-experience-ledger", { now: Date.parse("2026-10-12T00:00:00Z") });
+  assert.equal(again.ok, true);
+  assert.equal(again.repaired, false);
+  assert.equal(again.backup, null);
+});
+
+test("AC2(d): repairCarrier refuses a MIDDLE-corruption carrier (truncation there would delete records)", () => {
+  const root = mkTmp();
+  assert.equal(ingestFeedback(root, AC_CASE).ok, true);
+  const file = ledgerFile(root);
+  const whole = fs.readFileSync(file, "utf8");
+  // A torn fragment FOLLOWED by a good append: the unparseable line is no longer the FINAL one, so
+  // "drop everything after the last good line" would silently delete the record below it.
+  fs.writeFileSync(file, `${whole}{"kind":"experience","broken\n${whole}`);
+  const before = fs.readFileSync(file, "utf8");
+
+  const r = repairCarrier(root, "discovery-experience-ledger");
+  assert.equal(r.ok, false);
+  assert.equal(r.repaired, false);
+  assert.match(r.reasons[0], new RegExp(`^${CARRIER_NOT_TORN}:`), "its OWN code — not the same shape as a clean carrier");
+  assert.equal(fs.readFileSync(file, "utf8"), before, "the file is UNTOUCHED");
+  assert.deepEqual(fs.readdirSync(path.dirname(file)).filter((f) => f.includes(".bak-")), [], "and no backup was made");
+
+  // Its OWN value for "there is no such carrier": never the same shape as "repaired".
+  const missing = repairCarrier(root, "discovery-method-registry");
+  assert.equal(missing.ok, false);
+  assert.match(missing.reasons[0], /^CARRIER_MISSING:/);
+});
+
+test("AC2(e): two concurrent appenders produce two WHOLE lines, never one interleaved line", async () => {
+  const root = mkTmp();
+  const file = ledgerFile(root);
+  const moduleUrl = new URL("../../docs/analysis/discovery-experience-ledger.mjs", import.meta.url).href;
+  // Each child appends ONE long record through the production append path. A ~4000-char payload is
+  // long enough that two unsynchronised writers would interleave inside a line, and both children are
+  // started in the same tick so they really contend for the lock.
+  const child = (n) => `import { appendCarrierLine } from ${JSON.stringify(moduleUrl)};
+const r = appendCarrierLine(${JSON.stringify(root)}, ".quay/discovery-experience-ledger.jsonl",
+  { id: "experience-conc${n}", payload: "x".repeat(4000) + "|${n}|" }, { kind: "experience" });
+if (!r.ok) { console.error(JSON.stringify(r.reasons)); process.exit(1); }`;
+  const run = (n) => new Promise((resolve) => {
+    const p = spawn(process.execPath, ["--input-type=module", "-e", child(n)], { stdio: ["ignore", "ignore", "inherit"] });
+    p.on("exit", (code) => resolve(code));
+  });
+  const codes = await Promise.all([run(1), run(2)]);
+  assert.deepEqual(codes, [0, 0], "each appender succeeds — the lock SERIALISES, it does not fail a writer");
+
+  const lines = fs.readFileSync(file, "utf8").split("\n").filter(Boolean);
+  assert.equal(lines.length, 2, "exactly two lines");
+  for (const l of lines) {
+    assert.doesNotThrow(() => JSON.parse(l), `a WHOLE line, not an interleaved fragment: ${l.slice(0, 60)}…`);
+    assert.equal(JSON.parse(l).payload.length, 4003, "…and each line carries its own complete payload");
+  }
+  assert.deepEqual(lines.map((l) => JSON.parse(l).id).sort(), ["experience-conc1", "experience-conc2"], "neither record overwrote the other");
+  assert.equal(fs.existsSync(`${file}.lock`), false, "both locks were released");
+
+  // Negative control on the SAME assertion: a deliberately interleaved carrier IS detected by the
+  // per-line parse, so "two whole lines" above is a real reading rather than a predicate that cannot
+  // fire.
+  const half = '{"id":"experience-x","payload":"' + "y".repeat(50);
+  fs.writeFileSync(path.join(root, "interleaved.jsonl"), `${half}\n${half}\n`);
+  const bad = fs.readFileSync(path.join(root, "interleaved.jsonl"), "utf8").split("\n").filter(Boolean);
+  assert.equal(bad.length, 2);
+  assert.throws(() => JSON.parse(bad[1]), "a half-written line does NOT parse — the predicate can go red");
 });
