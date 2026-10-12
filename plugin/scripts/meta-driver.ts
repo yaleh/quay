@@ -45,7 +45,7 @@ import { createHash } from "node:crypto";
 import { spawn, spawnSync } from "node:child_process";
 // `.quay/config.yml` 的读取复用既有依赖（同 goal-store.ts / goal-driver.ts 的 `yaml`，⛔ 不手搓 parser）。
 import { parse as YAML } from "yaml";
-import { launchArgv, runAsync, ts, aliveness, carrierStats, KNOWN_KINDS, resolveQuayCodeRoot, resolveKernelPluginRoot, type Fact, type RoutineSpec } from "./driver-runtime.ts";
+import { launchArgv, runAsync, ts, aliveness, carrierStats, KNOWN_KINDS, resolveQuayCodeRoot, resolveKernelPluginRoot, goalDriverChildTimeoutMs, GOAL_STORE_SIGTERM_GRACE_MS, type Fact, type RoutineSpec } from "./driver-runtime.ts";
 // quay CLI 入口解析的单一入口（`resolveCliInvocation`）——goal 动词现在经 quay CLI 跑（见
 // goalStoreArgv 的注释），布局知识留在那一个函数里，⛔ 不在本文件第二次拼 `packages/quay/…`。
 import { resolveCliInvocation } from "./start-drivers.ts";
@@ -276,8 +276,20 @@ export async function listGoalRecords(root: string): Promise<Array<Record<string
 
 /** 跑一条 AC 的 criterion。⚠️ 副作用是设计如此：`goal-store gate` 自己写 GateEvent + evidence 回写，
  *  这正是「自动档」允许的那类动作（观测性、可逆、不改变系统行为）。 */
-export async function gateCriterion(root: string, id: string): Promise<{ verdict: "pass" | "fail" | "not-evaluated"; reason: string }> {
-  const r = await runAsync(goalStoreArgv(root, ["gate", id]), { timeoutMs: CRITERION_TIMEOUT_MS, collectStderr: true });
+export async function gateCriterion(
+  root: string,
+  id: string,
+  opts: { recordTimeoutMs?: unknown } = {},
+): Promise<{ verdict: "pass" | "fail" | "not-evaluated"; reason: string }> {
+  // The OUTER bound is DERIVED from the child's own inner deadline (its record's `timeoutMs` >
+  // env > default), ⛔ never the mechanical `CRITERION_TIMEOUT_MS`: a record declaring a deadline
+  // ≥ that literal would be pre-empted by the driver's SIGKILL before `goal gate` could reach its own
+  // verdict (gap-goal-driver-hardcoded-120s-spawn-kill-preempts-record-timeout-and-orphans-goal-locks).
+  const r = await runAsync(goalStoreArgv(root, ["gate", id]), {
+    timeoutMs: goalDriverChildTimeoutMs(opts.recordTimeoutMs, "gate"),
+    collectStderr: true,
+    killGraceMs: GOAL_STORE_SIGTERM_GRACE_MS,
+  });
   if (r.error) return { verdict: "not-evaluated", reason: `gate spawn error: ${r.error.message}` };
   // exit 0 = pass, 1 = fail（含空 criterion 的 fail-closed）, 2 = 用法/记录不存在 ⇒ 无法评估。
   if (r.status === 2) return { verdict: "not-evaluated", reason: `gate usage error: ${(r.stderr || "").trim().slice(0, 200)}` };
@@ -1041,7 +1053,7 @@ export async function collectReadings(root: string, cliFocus: string | null): Pr
   for (const ac of acs) {
     const id = String(ac.id);
     const criterion = ac.criterion == null ? null : String(ac.criterion);
-    const { verdict, reason } = await gateCriterion(root, id);
+    const { verdict, reason } = await gateCriterion(root, id, { recordTimeoutMs: ac.timeoutMs });
     criteria.push({
       id,
       title: ac.title == null ? null : String(ac.title),

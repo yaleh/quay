@@ -63,3 +63,13 @@ orchestration/manager-pending.md
 # store.ts's list() surface. THE case that motivates this file: it lands under tasks/, so the
 # `.quay/*` rule cannot reach it, and merely listing tasks dirties the tree.
 **/.quay-parse-cache.json
+# frontmatter-store lockfiles — `<dir>/<id>.lock`, written by frontmatter-store-base's withFileLock
+# (content = the holding pid) and removed on release. A SIGKILL inside the lock — e.g. a driver's
+# wall-clock deadline firing while a goal-store/ADR/meta child is mid-write — leaves one ORPHANED:
+# stale recovery only fires on that id's NEXT write, so it can sit there indefinitely, and an
+# untracked lock in the main checkout makes `fan-in/ff-merge`'s cleanTreeCheck refuse EVERY task's ff.
+# (tasks/gap-goal-driver-hardcoded-120s-spawn-kill-preempts-record-timeout-and-orphans-goal-locks)
+goals/*.lock
+adr/*.lock
+docs-managed/*.lock
+meta/*.lock

@@ -476,6 +476,15 @@ export { createMetaStore } from "../../packages/quay/src/meta-store.ts";
 // is where the driver-side symbols are surfaced — ⛔ goal-driver never spells a Core source-tree
 // literal itself (AC-262; same reason the two re-exports above exist).
 export { goalCriterionWorktreeDir, realpathOrSelf } from "../../packages/quay/src/goal-store.ts";
+// The OUTER wall-clock bound a driver must impose on a goal-store child, DERIVED from the child's own
+// inner deadline (record `timeoutMs` > env > default) + the activation fidelity-judge bound + a grace —
+// and the grace constant itself, surfaced so the driver never spells a second copy of the derivation
+// (gap-goal-driver-hardcoded-120s-spawn-kill-preempts-record-timeout-and-orphans-goal-locks: a
+// hard-coded 120 s literal pre-empted every declared `timeoutMs` ≥ 120000 and orphaned the store lock).
+// `readLockPid` is surfaced with it: the driver's kill-cleanup removes `goals/<id>.lock` ONLY when its
+// recorded pid equals the child it killed (⛔ never a lock a live process now holds).
+export { goalDriverChildTimeoutMs, GOAL_DRIVER_SPAWN_GRACE_MS, GOAL_STORE_SIGTERM_GRACE_MS } from "../../packages/quay/src/goal-store.ts";
+export { readLockPid } from "../../packages/quay/src/frontmatter-store-base.ts";
 // `ensureGoalBranch` is the ONE creation site for `goal/<id>` (Core `branch-model.ts`) — the store
 // calls it on the transition that leaves a branch-mode goal active. goal-driver now also calls it
 // idempotently to BACK-FILL a missing branch on an already-active branch-mode goal
@@ -2212,14 +2221,23 @@ export async function runEnvironmentSmoke(
 // ── Layer 0 · 异步 spawn 原语（runAsync，SPEC §5.7：循环体用 spawnSync 会冻住协调地板）──────────────
 
 /** 异步 spawn（spawn 而非 spawnSync）：不阻塞事件循环，child exit 本身是一个唤醒源。collectStderr=true
- *  时捕获 stderr；缺省 stderr 丢弃。timeoutMs 到期 ⇒ SIGKILL child 并 resolve error；timeoutMs=Infinity
+ *  时捕获 stderr；缺省 stderr 丢弃。timeoutMs 到期 ⇒ 杀 child 并 resolve error；timeoutMs=Infinity
  *  ⇒ 无超时（unbounded，child exit/error 是唯一唤醒）——正确性锁的排队等待用（死持有者由调用侧的
- *  watchdog 兜底，不靠此处 SIGKILL）。永不 throw。 */
+ *  watchdog 兜底，不靠此处 SIGKILL）。永不 throw。
+ *
+ *  `killGraceMs`（缺省 0 = 既有行为逐字不变）：>0 时超时先发 SIGTERM，宽限到期再 SIGKILL，并等 child
+ *  真正 close 才 settle。给「杀之前还能自己收尾」的子进程用（goal-store 写路径持有 withFileLock，
+ *  硬 SIGKILL 会留下 `goals/<id>.lock` 挡住 fan-in ff——
+ *  gap-goal-driver-hardcoded-120s-spawn-kill-preempts-record-timeout-and-orphans-goal-locks）。
+ *  ⛔ 无论宽限与否，settle 的 error 恒是超时错误（超时不因「SIGTERM 后恰好退出 0」而被读成成功）。
+ *
+ *  返回值带 `pid`（child 进程号，spawn 失败时 null）：调用方据此**只删自己杀掉的那个 child 留下的
+ *  锁**（锁文件内容 = 持锁 pid；凭 pid 相等才删，⛔ 不删别人此刻持有的锁）。 */
 export async function runAsync(
   argv: string[],
-  opts: { timeoutMs: number; collectStderr?: boolean; stdinData?: string } = { timeoutMs: 120_000 },
-): Promise<{ status: number | null; stdout: string; stderr: string; error: Error | null }> {
-  const { timeoutMs, collectStderr = false, stdinData } = opts;
+  opts: { timeoutMs: number; collectStderr?: boolean; stdinData?: string; killGraceMs?: number } = { timeoutMs: 120_000 },
+): Promise<{ status: number | null; stdout: string; stderr: string; error: Error | null; pid: number | null }> {
+  const { timeoutMs, collectStderr = false, stdinData, killGraceMs = 0 } = opts;
   return new Promise((resolve) => {
     let child: ReturnType<typeof spawn>;
     try {
@@ -2230,25 +2248,43 @@ export async function runAsync(
         stdio: [stdinData === undefined ? "ignore" : "pipe", "pipe", collectStderr ? "pipe" : "ignore"],
       });
     } catch (e) {
-      resolve({ status: null, stdout: "", stderr: "", error: e as Error });
+      resolve({ status: null, stdout: "", stderr: "", error: e as Error, pid: null });
       return;
     }
+    const pid = typeof child.pid === "number" ? child.pid : null;
     let stdout = "";
     let stderr = "";
     let settled = false;
+    let timedOut = false;
     let timer: ReturnType<typeof setTimeout> | null = null;
+    let graceTimer: ReturnType<typeof setTimeout> | null = null;
+    const timeoutError = new Error(`spawn timeout after ${timeoutMs}ms (SIGKILL): ${argv[0]}`);
+    const clearTimers = () => {
+      if (timer) clearTimeout(timer);
+      if (graceTimer) clearTimeout(graceTimer);
+    };
     const finish = (status: number | null, error: Error | null) => {
       if (settled) return;
       settled = true;
-      if (timer) clearTimeout(timer);
-      resolve({ status, stdout, stderr, error });
+      clearTimers();
+      resolve({ status, stdout, stderr, error, pid });
     };
     // ⛔ setTimeout(…, Infinity) 会被 Node 压到 1ms ⇒ 立即 SIGKILL（把「无超时」错当「立即超时」）。
     // Infinity 显式 = 不设 timer（unbounded）；有限值仍照旧 SIGKILL。child close/error 是唯一唤醒源。
     if (Number.isFinite(timeoutMs)) {
       timer = setTimeout(() => {
-        try { child.kill("SIGKILL"); } catch { /* already gone */ }
-        finish(null, new Error(`spawn timeout after ${timeoutMs}ms (SIGKILL): ${argv[0]}`));
+        timedOut = true;
+        if (killGraceMs > 0) {
+          // SIGTERM 先行（给「没被阻塞住」的子进程一次自己收尾的机会），宽限到期再 SIGKILL。
+          // settle 由 child 的 close 事件驱动（SIGKILL 后必然 close）——故这里 ⛔ 不立即 finish。
+          try { child.kill("SIGTERM"); } catch { /* already gone */ }
+          graceTimer = setTimeout(() => {
+            try { child.kill("SIGKILL"); } catch { /* already gone */ }
+          }, killGraceMs);
+        } else {
+          try { child.kill("SIGKILL"); } catch { /* already gone */ }
+          finish(null, timeoutError);
+        }
       }, timeoutMs);
     }
     if (stdinData !== undefined && child.stdin) {
@@ -2259,7 +2295,8 @@ export async function runAsync(
     child.stdout?.on("data", (d) => { stdout += d; });
     if (child.stderr) child.stderr.on("data", (d) => { stderr += d; });
     child.on("error", (e) => finish(null, e));
-    child.on("close", (code) => finish(code, null));
+    // timedOut ⇒ 报超时错误（不是「信号杀掉的非零退出」）；否则照实报退出码/信号。
+    child.on("close", (code) => (timedOut ? finish(null, timeoutError) : finish(code, null)));
   });
 }
 
