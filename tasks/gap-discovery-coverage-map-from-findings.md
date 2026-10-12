@@ -2,7 +2,7 @@
 id: gap-discovery-coverage-map-from-findings
 title: Capability Coverage Map over user-named domains, graded only by concrete
   findings + operations (prompt/teaching mentions never count)
-status: todo
+status: ready
 labels:
   - gap
   - architecture-discovery
