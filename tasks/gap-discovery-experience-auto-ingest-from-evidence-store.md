@@ -3,7 +3,7 @@ id: gap-discovery-experience-auto-ingest-from-evidence-store
 title: "Discovery Method: no automatic Experience ingestion; watermarked,
   quota-bounded, killable ingester from evidence-store outcomes via one unified
   entry"
-status: todo
+status: ready
 labels:
   - gap
   - architecture-discovery
