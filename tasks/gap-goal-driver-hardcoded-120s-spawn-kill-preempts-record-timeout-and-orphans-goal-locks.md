@@ -3,7 +3,7 @@ id: gap-goal-driver-hardcoded-120s-spawn-kill-preempts-record-timeout-and-orphan
 title: "cross-project: goal-driver/meta-driver hard-coded 120s SIGKILL pre-empts
   record timeoutMs on gate + activation (which also ignores record timeoutMs)
   and orphans goals/<id>.lock that blocks fan-in ff — 104 kills in 4 projects"
-status: ready
+status: done
 labels:
   - gap
   - defect
