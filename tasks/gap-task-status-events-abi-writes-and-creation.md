@@ -2,7 +2,7 @@
 id: gap-task-status-events-abi-writes-and-creation
 title: "task_trace P1: Provider-ABI status writes and task creation emit v1
   status events (cli/mcp actor, optional correlationId)"
-status: todo
+status: ready
 labels:
   - gap
   - task-trace
