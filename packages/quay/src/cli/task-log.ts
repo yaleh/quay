@@ -366,10 +366,13 @@ export function readTaskLog(root: string, opts: TaskLogOptions = {}): TaskLogRea
   if (since.kind === "cursor") {
     if (since.cursor.carrierEpoch !== epoch) {
       rebase = true;
+      const preEpochNote =
+        since.cursor.carrierEpoch === PRE_EPOCH || epoch === PRE_EPOCH
+          ? ` (a carrier whose epoch is ${JSON.stringify(PRE_EPOCH)} is one with no epoch sidecar and no v1 record — the first v1 append rotates it)`
+          : "";
       rebaseReason =
         `cursor carrierEpoch ${JSON.stringify(since.cursor.carrierEpoch)} does not match the carrier's current epoch ${JSON.stringify(epoch)} — ` +
-        `the cursor cannot be honoured; replaying from the beginning of the current epoch. ` +
-        `${PRE_EPOCH === since.cursor.carrierEpoch || PRE_EPOCH === epoch ? "(A carrier whose epoch is " + JSON.stringify(PRE_EPOCH) + " is one with no epoch sidecar and no v1 record — the first v1 append rotates it.)" : ""}`;
+        `the cursor cannot be honoured; replaying from the beginning of the current epoch.${preEpochNote}`;
     } else {
       fromOrder = since.cursor.seq;
     }
