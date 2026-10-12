@@ -1,7 +1,7 @@
 ---
 id: gap-fanin-suite-gate-no-baseline-equivalent-exception
 title: fan-in 的 suite 步没有"已证明与 develop 基线等价的既存红"豁免档，导致多个独立修复互为落地门槛（三任务循环死锁实例）
-status: todo
+status: ready
 labels:
   - gap
   - infra
