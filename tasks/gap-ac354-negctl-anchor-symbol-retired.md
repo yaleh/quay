@@ -3,7 +3,7 @@ id: gap-ac354-negctl-anchor-symbol-retired
 title: AC-354 判据回归：负对照把「重插旧 import」锚在 goal-store.ts 的
   `resolveAcceptanceTimeoutMs` 上，而该符号已被无关重构 411bb34c7 移除 ⇒ 恒红（exit
   1，CAUSE=negative-control-not-falsifiable）；把负对照重锚为不依赖任何符号、且能双向取假
-status: todo
+status: ready
 labels:
   - gap
   - defect
