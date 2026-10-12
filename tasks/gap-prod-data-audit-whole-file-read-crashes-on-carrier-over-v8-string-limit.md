@@ -3,7 +3,7 @@ id: gap-prod-data-audit-whole-file-read-crashes-on-carrier-over-v8-string-limit
 title: "P0 develop-wide red: prod-data-audit reads whole carriers via
   readFileSync — meta-driver-round.jsonl >0x1fffffe8 ⇒ ERR_STRING_TOO_LONG
   blocks every fan-in; stream + NOT-EVALUATED"
-status: todo
+status: ready
 labels:
   - gap
   - defect
