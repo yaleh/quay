@@ -3,7 +3,7 @@ id: gap-open-discovery-periodic-baseline-vs-guided-gain
 title: "P2: periodic same-budget baseline vs guided open-discovery rounds;
   net-new/duplicate/refuted/cost gain incl. negative; never independent
   evidence"
-status: ready
+status: done
 labels:
   - gap
   - discovery-method
