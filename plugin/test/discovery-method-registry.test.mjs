@@ -25,9 +25,14 @@ import {
   CONTAMINATED_VERDICTS_REL, VERDICT_CONTAMINATED, CONTAMINATED_LIST_UNAVAILABLE,
   contaminatedVerdictsFile, readContaminatedVerdicts, appendContaminatedVerdict, backfillContaminatedVerdicts,
   contaminatedVerdictIds,
+  // the EVIDENCE LEVEL + the quarantine rule (task gap-discovery-evidence-level-teaching-vs-independent)
+  TRIAL_STATUS, QUARANTINE_REASON_PREFIX, EVIDENCE_LEVEL_NOT_INDEPENDENT,
+  QUARANTINED_LINEAGE_NEEDS_INDEPENDENT, QUARANTINED_LINEAGE_CASE_REUSED, QUARANTINE_CASE_SET_UNAVAILABLE,
+  quarantinedLineageOf, quarantinedPromotionCases, quarantineCaseReuse,
 } from "../../docs/analysis/discovery-method-registry.mjs";
 import {
   appendExperienceRecord, DISCOVERY_CARRIERS, GENERALIZATION_VERDICTS_REL,
+  evidenceLevelOf, isIndependentEvidenceLevel, UNLABELLED_EVIDENCE_LEVEL,
 } from "../../docs/analysis/discovery-experience-ledger.mjs";
 import { readGeneralizationVerdicts } from "../../docs/analysis/discovery-reflection.mjs";
 
@@ -51,6 +56,12 @@ const writeVerdict = (root, over = {}) => {
     expected_verdicts: ["refuted"], correct: true, lineage_ok: true, temporal_ok: true,
     evaluation_pin: "a".repeat(40), evaluated_commit: "a".repeat(40), promoted: true,
     retirement_reason: null, not_evaluated_reason: null,
+    // ⛔ `independent` by DEFAULT in this fixture (gap-discovery-evidence-level-teaching-vs-independent):
+    // this helper exists to hand a promotion a verdict that PASSES, so the tests below can be about a
+    // different cause (contamination, an unrecorded ref, a gate that failed). An unlabelled verdict no
+    // longer licenses `active`, so a fixture that omitted the level would make every one of those tests
+    // pass for the WRONG reason. Tests about the level set it explicitly via `over`.
+    evidence_level: "independent",
     ...over,
   };
   const file = path.join(root, GENERALIZATION_VERDICTS_REL);
@@ -340,7 +351,10 @@ test("the refusal vocabulary is enumerable — every required field has its own 
   // version must be a positive integer AND the next one: `0` is a type/range fault, `3` is a skip.
   assert.deepEqual(withSeeds({ ...GOOD, version: 0 }).reasons, ["FIELD_INVALID:version"]);
   assert.equal(withSeeds({ ...GOOD, version: 3 }).reasons.join(), "VERSION_NOT_MONOTONIC:shared-contract-divergence-expects-1-got-3");
-  assert.deepEqual([...METHOD_STATUSES], ["draft", "active", "retired"]);
+  // ⛔ WIDENED (not relaxed) by gap-discovery-evidence-level-teaching-vs-independent: `trial` joined the
+  // vocabulary as the report-only state a `teaching`/`transfer` pass can reach. The pin is updated to
+  // the new complete set rather than deleted, so a FIFTH status appearing silently still reds this test.
+  assert.deepEqual([...METHOD_STATUSES], ["draft", "trial", "active", "retired"]);
   // cost_budget is three integers, never a prose budget.
   for (const bad of [{ max_candidates: 4, max_model_calls: 0 }, { max_candidates: -1, max_model_calls: 0, max_wall_ms: 1 }, "cheap"]) {
     assert.match(withSeeds({ ...GOOD, cost_budget: bad }).reasons.join(), /COST_BUDGET_INVALID/);
@@ -393,6 +407,8 @@ const mkSeedRoot = () => {
       authored_by: { actor: "ingester", ref: "ingestNewOutcomes" },
       source_ref: c.source_ref, evidence: [{ ref: c.source_ref, sha256: "a".repeat(64) }],
       components: [...c.components], summary: c.summary,
+      // An ingester-derived entry states no evidence level; `unlabelled` is the writable "no claim".
+      evidence_level: "unlabelled",
     });
     assert.equal(r.ok, true, `ledger append refused: ${r.reasons?.join(",")}`);
   }
@@ -585,6 +601,7 @@ test("AC2 (real control): the Phase 2 v2 record is refused with TOOL_IS_SUBJECT 
     authored_by: { actor: "ingester", ref: "ingestNewOutcomes" },
     source_ref: PHASE2_SEED.source_ref, evidence: [{ ref: PHASE2_SEED.source_ref, sha256: "b".repeat(64) }],
     components: [...PHASE2_SEED.components], summary: PHASE2_SEED.summary,
+    evidence_level: "unlabelled",
   });
   assert.equal(ledger.ok, true, ledger.reasons?.join(","));
 
@@ -698,7 +715,17 @@ test("AC2(f): every way a cited verdict can be unusable has its OWN cause, and e
   // contamination arm is a cause of its own (`VERDICT_CONTAMINATED`), checked BEFORE the
   // recorded/passed arms — a verdict judged on an already-used hold-out is unusable however well it
   // scored, and reporting it as VERDICT_NOT_PASSED would name the wrong defect.
-  assert.deepEqual([...PROMOTION_REFUSAL_CAUSES], ["EVIDENCE_MISSING", "VERDICTS_UNAVAILABLE", "VERDICT_NOT_RECORDED", "VERDICT_OTHER_METHOD", "VERDICT_NOT_PASSED", "VERDICT_CONTAMINATED"]);
+  // ⛔ WIDENED (not relaxed) by gap-discovery-evidence-level-teaching-vs-independent: the four
+  // evidence-level/quarantine arms are causes of their own. Reported as `VERDICT_NOT_PASSED` they would
+  // name the wrong defect — the verdict DID pass its gates; what it lacked was the level (or the
+  // lineage was withdrawn). The pin keeps every earlier cause AND the new ones, so a silent removal
+  // still reds this test.
+  assert.deepEqual([...PROMOTION_REFUSAL_CAUSES], [
+    "EVIDENCE_MISSING", "VERDICTS_UNAVAILABLE", "VERDICT_NOT_RECORDED", "VERDICT_OTHER_METHOD",
+    "VERDICT_NOT_PASSED", "VERDICT_CONTAMINATED",
+    "EVIDENCE_LEVEL_NOT_INDEPENDENT", "QUARANTINED_LINEAGE_NEEDS_INDEPENDENT",
+    "QUARANTINED_LINEAGE_CASE_REUSED", "QUARANTINE_CASE_SET_UNAVAILABLE",
+  ]);
   assert.deepEqual(generalizationEvidenceReasons({ ...GOOD, status: "draft" }, undefined), [], "a NON-active record never reads the verdicts");
 });
 
@@ -708,7 +735,7 @@ test("AC3: `activeMethods` returns only methods whose LATEST version is active",
   // contamination reading is reported ALWAYS (`excluded_contaminated: []` + the count it was decided
   // against) so "nothing was excluded" is a reading rather than an absent field — the same
   // own-value discipline the rest of this module follows.
-  assert.deepEqual(activeMethods(root), { ok: true, methods: [], evaluated: 0, malformed_lines: 0, file: registryFile(root), excluded_contaminated: [], contaminated_verdicts_evaluated: 0 }, "an empty registry, reported as evaluated-0 rather than as a crash");
+  assert.deepEqual(activeMethods(root), { ok: true, methods: [], trials: [], evaluated: 0, malformed_lines: 0, file: registryFile(root), excluded_contaminated: [], contaminated_verdicts_evaluated: 0 }, "an empty registry, reported as evaluated-0 rather than as a crash");
 
   writeVerdict(root, { method_id: GOOD.method_id, version: 2 });
   assert.equal(appendMethodRecord(root, ACTIVE_OK, { toolCatalog: CATALOG, provenanceSeeds: NO_SEEDS }).ok, true);
@@ -816,7 +843,10 @@ test("AC(f): a promotion citing a VERDICT_CONTAMINATED verdict is refused — by
 
   // NEGATIVE CONTROL on the same predicate: a DIFFERENT verdict ref is not refused for contamination.
   const other = validateMethodRecord({ ...ACTIVE_OK, generalization_evidence: { verdict_ref: "generalization_verdict-somethingelse00" } }, {
-    toolCatalog: CATALOG, provenanceSeeds: NO_SEEDS, verdicts: [{ id: "generalization_verdict-somethingelse00", method_id: GOOD.method_id, outcome: "evaluated", correct: true, refusal_code: null, lineage_ok: true, temporal_ok: true }],
+    // `evidence_level:"independent"` keeps this a control on CONTAMINATION alone: with the level
+    // omitted the record would now be refused for lacking it, and the control would pass for a reason
+    // that has nothing to do with the deny-list it is testing.
+    toolCatalog: CATALOG, provenanceSeeds: NO_SEEDS, verdicts: [{ id: "generalization_verdict-somethingelse00", method_id: GOOD.method_id, outcome: "evaluated", correct: true, refusal_code: null, lineage_ok: true, temporal_ok: true, evidence_level: "independent" }],
     contaminatedVerdictIds: ["generalization_verdict-fixture0000000000"],
   });
   assert.equal(other.ok, true, other.reasons?.join(","));
@@ -901,4 +931,179 @@ test("AC(backfill): the ledger is BACKFILLED from the verdict carrier — every 
 
   // A caller that names no contaminated case at all is refused rather than writing an empty backfill.
   assert.deepEqual(backfillContaminatedVerdicts(root, { contaminatedCases: [], authoredBy: AUTHOR }).reasons, ["INGEST_ARG_MISSING:contaminatedCases"]);
+});
+
+// ══════════════════════════════════════════════════════════════════════════════════════════════════
+// THE EVIDENCE LEVEL (task gap-discovery-evidence-level-teaching-vs-independent)
+//
+// The strategy change of 2026-10-12, point 4. Before this, a verdict read off a TEACHING case (an
+// answer the experimenter already knew) and one read off a SEALED, never-used case were the same shape
+// to this guard — which is how `shared-contract-divergence` v6 and `multi-writer-guard-equivalence` v2
+// were promoted on contaminated holdouts. Only an `independent` verdict may now license `active`;
+// every other level caps at the report-only `trial`; and a lineage the operator QUARANTINEd can only be
+// revived on independent evidence that shares no case with what the withdrawn promotion rested on.
+// ══════════════════════════════════════════════════════════════════════════════════════════════════
+
+/** The promotion record under test: GOOD, at `active`, citing the fixture verdict by ref. */
+const ACTIVE_AT = (over = {}) => ({
+  ...GOOD, version: 1, status: "active",
+  generalization_evidence: { verdict_ref: "generalization_verdict-fixture0000000000" },
+  ...over,
+});
+
+test("AC(a): a teaching-level CORRECT verdict cannot reach `active` — at most `trial`", () => {
+  const root = mkTmp();
+  // A verdict that PASSES every pre-existing gate — correct, evaluated, lineage/temporal true — and is
+  // labelled `teaching`: its answer was known to the experimenter before the run.
+  writeVerdict(root, { evidence_level: "teaching", source_case_id: "EXP-taught-from" });
+  const readBack = readGeneralizationVerdicts(root).records[0];
+  assert.equal(readBack.correct, true, "the verdict itself is a correct one — the LEVEL is the only thing wrong");
+
+  const active = appendMethodRecord(root, ACTIVE_AT(), { toolCatalog: CATALOG, provenanceSeeds: NO_SEEDS });
+  assert.equal(active.ok, false, "a teaching verdict must NOT license `active`");
+  assert.equal(active.appended, false);
+  assert.equal(lines(root), 0, "the refusal wrote nothing");
+  assert.equal(active.reasons.at(-1).split(":")[1], EVIDENCE_LEVEL_NOT_INDEPENDENT, `got ${active.reasons.at(-1)}`);
+
+  // …and the VERY SAME verdict does licence `trial`: the cap is a cap, not a wall — the reading is
+  // real, it is just not a proof.
+  const trial = appendMethodRecord(root, ACTIVE_AT({ status: TRIAL_STATUS }), { toolCatalog: CATALOG, provenanceSeeds: NO_SEEDS });
+  assert.equal(trial.ok, true, `trial must be reachable, got ${trial.reasons?.join(",")}`);
+  assert.equal(trial.record.status, "trial");
+  assert.equal(readMethodRegistry(root).latest[0].status, "trial");
+  assert.equal(trial.record.evidence_level, undefined, "the LEVEL lives on the verdict, not on the method record");
+});
+
+test("AC(b): an UNLABELLED legacy verdict is never `independent` — and never licenses `active`", () => {
+  const root = mkTmp();
+  // A verdict line written BEFORE the level existed: the key is absent from the carrier line itself,
+  // not `null` and not a default. That is what "legacy" means here, so the fixture writes one.
+  writeVerdict(root, { evidence_level: undefined });
+  const legacy = readGeneralizationVerdicts(root).records[0];
+  assert.equal(Object.prototype.hasOwnProperty.call(legacy, "evidence_level"), false, "the fixture really is a level-less line");
+  assert.equal(evidenceLevelOf(legacy), UNLABELLED_EVIDENCE_LEVEL, "an absent level reads as `unlabelled`");
+  assert.equal(isIndependentEvidenceLevel(legacy), false, "…and `unlabelled` is NEVER `independent`");
+
+  const r = appendMethodRecord(root, ACTIVE_AT(), { toolCatalog: CATALOG, provenanceSeeds: NO_SEEDS });
+  assert.equal(r.ok, false, "a legacy verdict must not license `active`");
+  assert.equal(r.reasons.at(-1).split(":")[1], EVIDENCE_LEVEL_NOT_INDEPENDENT);
+  assert.match(r.reasons.at(-1), /evidence_level=unlabelled/, "the refusal NAMES the level it read");
+
+  // The positive control on the same predicate: the same record with an `independent` verdict IS
+  // accepted, so the refusal above is the level, not a record that could never be promoted.
+  const root2 = mkTmp();
+  writeVerdict(root2, { evidence_level: "independent" });
+  const ok = appendMethodRecord(root2, ACTIVE_AT(), { toolCatalog: CATALOG, provenanceSeeds: NO_SEEDS });
+  assert.equal(ok.ok, true, `an independent verdict must license active, got ${ok.reasons?.join(",")}`);
+  assert.deepEqual(activeMethods(root2).methods.map((m) => m.method_id), ["shared-contract-divergence"]);
+});
+
+test("AC(c): `shared-contract-divergence` re-promotion on a QUARANTINEd lineage with a TRANSFER verdict ⇒ QUARANTINED_LINEAGE_NEEDS_INDEPENDENT", () => {
+  const root = mkTmp();
+  // A REAL lineage, built through the real writer: v1 draft, v2 retired with an operator QUARANTINE
+  // reason (exactly the shape the live registry carries for this method), then the attempted v3.
+  assert.equal(appendMethodRecord(root, { ...GOOD, version: 1 }, { toolCatalog: CATALOG, provenanceSeeds: NO_SEEDS }).ok, true);
+  const quarantined = appendMethodRecord(root, {
+    ...GOOD, version: 2, status: "retired",
+    retirement_reason: `${QUARANTINE_REASON_PREFIX} 2026-10-12 (operator, user-authorized): v2 was promoted on contaminated holdout evidence`,
+    generalization_evidence: { verdict_ref: "generalization_verdict-6f30e7c33140a0d3", held_out_case_id: "EXP-quarantined-case" },
+  }, { toolCatalog: CATALOG, provenanceSeeds: NO_SEEDS });
+  assert.equal(quarantined.ok, true, `the quarantine record must be writable, got ${quarantined.reasons?.join(",")}`);
+
+  const q = quarantinedLineageOf(ACTIVE_AT({ version: 3 }), readMethodRegistry(root, { history: true }).history);
+  assert.equal(q.quarantined, true);
+  assert.deepEqual(q.versions, [2], "ONLY the QUARANTINE reason arms the rule");
+  // The cases behind the withdrawn promotion: the held-out case it judged AND the Experiences it cited
+  // as provenance (GOOD cites one) — derived from the records, never a hand-kept list.
+  assert.deepEqual(quarantinedPromotionCases(ACTIVE_AT({ version: 3 }), readMethodRegistry(root, { history: true }).history).case_ids,
+    ["EXP-quarantined-case", ...GOOD.provenance_evidence]);
+
+  writeVerdict(root, { evidence_level: "transfer", source_case_id: "EXP-known-case", held_out_case_id: "EXP-fresh" });
+  const r = appendMethodRecord(root, ACTIVE_AT({ version: 3 }), { toolCatalog: CATALOG, provenanceSeeds: NO_SEEDS });
+  assert.equal(r.ok, false);
+  assert.equal(lines(root), 2, "nothing was appended by the refusal");
+  assert.equal(r.reasons.at(-1).split(":")[1], QUARANTINED_LINEAGE_NEEDS_INDEPENDENT, `got ${r.reasons.at(-1)}`);
+  assert.match(r.reasons.at(-1), /evidence_level=transfer/, "the refusal names the level it read");
+
+  // A QUARANTINE-looking reason that is NOT a prefix must not arm the rule (a substring match would
+  // fire on prose that merely discusses quarantining, e.g. a note saying a method is NOT quarantined).
+  const other = mkTmp();
+  appendMethodRecord(other, { ...GOOD, method_id: "m-other", version: 1, status: "retired", retirement_reason: "not quarantined: the operator reviewed and cleared this promotion" }, { toolCatalog: CATALOG, provenanceSeeds: NO_SEEDS });
+  writeVerdict(other, { method_id: "m-other", evidence_level: "transfer", source_case_id: "EXP-known-case" });
+  const r2 = appendMethodRecord(other, { ...GOOD, method_id: "m-other", version: 2, status: "active", generalization_evidence: { verdict_ref: "generalization_verdict-fixture0000000000" } }, { toolCatalog: CATALOG, provenanceSeeds: NO_SEEDS });
+  assert.equal(r2.ok, false, "…but it is still refused — for the LEVEL, not for a quarantine it does not have");
+  assert.equal(r2.reasons.at(-1).split(":")[1], EVIDENCE_LEVEL_NOT_INDEPENDENT);
+});
+
+test("AC(c-control): a QUARANTINEd lineage IS revivable on an `independent` verdict whose case shares nothing (and refused when it does)", () => {
+  const root = mkTmp();
+  appendMethodRecord(root, { ...GOOD, version: 1 }, { toolCatalog: CATALOG, provenanceSeeds: NO_SEEDS });
+  appendMethodRecord(root, {
+    ...GOOD, version: 2, status: "retired",
+    retirement_reason: `${QUARANTINE_REASON_PREFIX}: promoted on contaminated holdout evidence`,
+    generalization_evidence: { verdict_ref: "generalization_verdict-old", held_out_case_id: "EXP-quarantined-case" },
+  }, { toolCatalog: CATALOG, provenanceSeeds: NO_SEEDS });
+  writeVerdict(root, { evidence_level: "independent", held_out_case_id: "EXP-fresh" });
+  const rec = ACTIVE_AT({ version: 3 });
+
+  // The cases behind the withdrawn promotion whose component sets must be produced to clear it: the
+  // held-out case it judged, plus the Experience it cited as provenance.
+  const BEHIND = ["EXP-quarantined-case", ...GOOD.provenance_evidence];
+
+  // 1. No component sets supplied ⇒ its OWN refusal, never a silent pass (硬规则 3b).
+  const noSets = appendMethodRecord(root, rec, { toolCatalog: CATALOG, provenanceSeeds: NO_SEEDS });
+  assert.equal(noSets.ok, false);
+  assert.equal(noSets.reasons.at(-1).split(":")[1], QUARANTINE_CASE_SET_UNAVAILABLE);
+
+  // 1b. A partial lookup is refused too: an id the lookup never heard of is NOT a disjoint case, so
+  //     "shares nothing with it" cannot be read off its absence (硬规则 3b). The refusal NAMES the id
+  //     it could not resolve, so the caller can tell WHICH set is missing rather than guessing.
+  const partial = quarantineCaseReuse(rec, { held_out_case_id: "EXP-fresh" },
+    { "EXP-fresh": ["a.ts", "b.ts"], "EXP-quarantined-case": ["c.ts", "d.ts"] }, readMethodRegistry(root, { history: true }).history);
+  assert.equal(partial.evaluated, false);
+  assert.match(partial.reason, /QUARANTINE_CASE_SET_UNAVAILABLE/);
+  assert.match(partial.reason, new RegExp(GOOD.provenance_evidence[0]), "the refusal names the unresolved case id");
+
+  // 2. Sets supplied and DISJOINT from the quarantined cases ⇒ the quarantine is cleared: this is the
+  //    one path that revives a withdrawn lineage, so the rule is not "a quarantined method is dead".
+  const sets = { "EXP-fresh": ["a.ts", "b.ts"], ...Object.fromEntries(BEHIND.map((id, i) => [id, [`q${i}-1.ts`, `q${i}-2.ts`]])) };
+  const disjoint = quarantineCaseReuse(rec, { held_out_case_id: "EXP-fresh" }, sets, readMethodRegistry(root, { history: true }).history);
+  assert.equal(disjoint.evaluated, true);
+  assert.deepEqual(disjoint.reused, []);
+  const ok = appendMethodRecord(root, rec, { toolCatalog: CATALOG, provenanceSeeds: NO_SEEDS, caseComponents: sets });
+  assert.equal(ok.ok, true, `an independent, disjoint re-promotion must be accepted, got ${ok.reasons?.join(",")}`);
+  assert.equal(ok.record.status, "active");
+
+  // 3. …and a case that REUSES the quarantined one (>= 2 shared components) is refused, whatever the
+  //    level says. Re-labelling the same case `independent` is exactly how the first promotion happened.
+  const root2 = mkTmp();
+  appendMethodRecord(root2, { ...GOOD, version: 1 }, { toolCatalog: CATALOG, provenanceSeeds: NO_SEEDS });
+  appendMethodRecord(root2, {
+    ...GOOD, version: 2, status: "retired",
+    retirement_reason: `${QUARANTINE_REASON_PREFIX}: promoted on contaminated holdout evidence`,
+    generalization_evidence: { verdict_ref: "generalization_verdict-old", held_out_case_id: "EXP-quarantined-case" },
+  }, { toolCatalog: CATALOG, provenanceSeeds: NO_SEEDS });
+  writeVerdict(root2, { evidence_level: "independent", held_out_case_id: "EXP-fresh" });
+  const reuse = appendMethodRecord(root2, ACTIVE_AT({ version: 3 }), {
+    toolCatalog: CATALOG, provenanceSeeds: NO_SEEDS,
+    // Basenames, so the same two files re-filed under another directory are the SAME case. The
+    // provenance case is supplied too (a partial lookup is refused outright — see 1b above), and it is
+    // disjoint, so the ONLY overlap left is the one under test.
+    caseComponents: { "EXP-fresh": ["plugin/x/a.ts", "plugin/y/b.ts"], "EXP-quarantined-case": ["other/a.ts", "other/b.ts"], [GOOD.provenance_evidence[0]]: ["unrelated-1.ts", "unrelated-2.ts"] },
+  });
+  assert.equal(reuse.ok, false);
+  assert.equal(reuse.reasons.at(-1).split(":")[1], QUARANTINED_LINEAGE_CASE_REUSED, `got ${reuse.reasons.at(-1)}`);
+});
+
+test("AC(e): `activeMethods()` never returns a `trial` method — it is REPORTED separately instead", () => {
+  const root = mkTmp();
+  writeVerdict(root, { evidence_level: "teaching", source_case_id: "EXP-taught-from" });
+  const t = appendMethodRecord(root, ACTIVE_AT({ status: TRIAL_STATUS }), { toolCatalog: CATALOG, provenanceSeeds: NO_SEEDS });
+  assert.equal(t.ok, true, t.reasons?.join(","));
+
+  const a = activeMethods(root);
+  assert.deepEqual(a.methods, [], "a trial method is NEVER handed to a consumer");
+  assert.deepEqual(a.trials.map((x) => x.method_id), ["shared-contract-divergence"], "…but its existence is reported, not silent");
+  assert.equal(a.trials[0].verdict_ref, "generalization_verdict-fixture0000000000", "the trial names the verdict that put it there");
+  assert.equal(a.evaluated, 1, "it IS evaluated — `evaluated` counts the registry, `methods` counts what may be applied");
 });

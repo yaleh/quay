@@ -26,7 +26,7 @@ import {
   buildReflectionPrompt, buildGeneralizationPrompt, validateReflectionDecision, assembleCandidate,
   reflect, validateGeneralization, roleExpectedVerdicts,
   attemptsFile, readReflectionAttempts, recordReflectionAttempt,
-  computeReflectionCost, learningQuality, registryDigest, runReflectionRound,
+  computeReflectionCost, learningQuality, independentLearningQuality, registryDigest, runReflectionRound,
   lineageVersions, checkLineageIsolation, validateEvaluationPin, checkTemporalBinding,
   gitIsAncestor, verifyStrippedPin, materializeStrippedPin, DISCOVERY_PIN_FORBIDDEN_DIRS,
   isPositiveCase, LINEAGE_MIN_SHARED_COMPONENTS,
@@ -245,9 +245,15 @@ test("AC1(d): a WRONG generalization prediction retires the candidate with a non
   assert.ok(wrong.retirement_reason && wrong.retirement_reason.length > 0, "a retired candidate carries a non-null retirement_reason");
 
   // A CORRECT prediction DOES promote (the positive control for the same gate).
-  const right = await validateGeneralization({ candidate, heldOutCase: heldOut, model: stubModel({ invariant_holds: false, verdict: "refuted", reasoning: "the claim does not hold" }), budget: {}, ...pin });
+  // ⛔ CHANGED by gap-discovery-evidence-level-teaching-vs-independent: a correct prediction only
+  // reaches `active` on an `independent` verdict. The level is now DECLARED rather than implied —
+  // a hold-out case sealed before the run and never used is exactly what `independent` names — and the
+  // `promoted_to` reading says which state it reached.
+  const right = await validateGeneralization({ candidate, heldOutCase: heldOut, model: stubModel({ invariant_holds: false, verdict: "refuted", reasoning: "the claim does not hold" }), budget: {}, evidenceLevel: "independent", ...pin });
   assert.equal(right.correct, true);
   assert.equal(right.promoted, true);
+  assert.equal(right.evidence_level, "independent");
+  assert.equal(right.promoted_to, "active");
   assert.equal(right.candidate_after.status, "active");
   assert.equal(right.candidate_after.retirement_reason, null);
 
@@ -342,11 +348,12 @@ test("AC1(c): a held-out case from an UNRELATED lineage is ACCEPTED and still pr
     source_ref: "outcome-heldout00000000", components: ["plugin/scripts/heldout.ts"], evaluation_pin: repo.preFix,
   });
   const candidate = methodFixture({ method_id: "unrelated-method", version: 1, provenance_evidence: ["experience-someone00000000"] });
-  const r = await validateGeneralization({ candidate, heldOutCase: heldOut, registry: [candidate], experiences: [], model: stubModel({ invariant_holds: false, verdict: "refuted" }), budget: {}, pinDir: pin, root: repo.dir });
+  const r = await validateGeneralization({ candidate, heldOutCase: heldOut, registry: [candidate], experiences: [], model: stubModel({ invariant_holds: false, verdict: "refuted" }), budget: {}, pinDir: pin, root: repo.dir, evidenceLevel: "independent" });
   assert.equal(r.outcome, "evaluated");
   assert.equal(r.refusal_code, null);
   assert.equal(r.called, true);
   assert.equal(r.promoted, true);
+  assert.equal(r.promoted_to, "active");
   assert.equal(r.candidate_after.status, "active");
 });
 
@@ -1306,4 +1313,106 @@ test("AC(real): the index over a REAL sealed file is built from that file's data
   const failed = buildCaseIdentityIndex(root, { sealedSetPaths: [broken] });
   assert.equal(failed.ok, false);
   assert.equal(failed.index, null);
+});
+
+// ══════════════════════════════════════════════════════════════════════════════════════════════════
+// THE EVIDENCE LEVEL (task gap-discovery-evidence-level-teaching-vs-independent, Plan items 2 and 4)
+//
+// The strict cross-experiment exclusion is a property of INDEPENDENT generalization experiments. A
+// `teaching`/`transfer` case is allowed to reuse a known case on purpose — that is what those levels
+// NAME — but then it must say which case it reused, and a pass at those levels can never reach
+// `active` (it caps at the report-only `trial`, asserted in the registry suite). `unlabelled` gets no
+// such exemption: "the caller declared nothing" must not open a door the declaration exists to shut.
+// ══════════════════════════════════════════════════════════════════════════════════════════════════
+
+test("AC(d): a TRANSFER verdict reusing a known case is ACCEPTED at transfer level, and NAMES its source", async () => {
+  const root = mkTmp();
+  const built = mkIndex(root, { sealedSets: [{ source: "sealed:/fixtures/earlier/labels-earlier-sealed.json", cases: [sealedCaseFixture()] }] });
+  assert.equal(built.ok, true, built.reason);
+  // The held-out case IS a previously-used one (same two components, same defect) — the very shape the
+  // `independent` path refuses outright.
+  const heldOut = heldOutFixture();
+  assert.deepEqual(caseCollisions(built.index, heldOut).map((h) => h.kind), ["shared_components"], "the case really is a reused one");
+
+  // 1. Without a source case the exemption is refused, with ZERO model calls: "may reuse" is conditional
+  //    on "says what it reused", and a reused case whose source is unnamed reads back as a fresh one.
+  const blocked = { calls: 0 };
+  const noSource = await validateGeneralization({
+    candidate: anyCandidate(), heldOutCase: heldOut, model: stubModel({ verdict: "refuted" }, blocked),
+    budget: {}, pinDir: strippedTmp(), caseIdentityIndex: built.index, evidenceLevel: "transfer",
+  });
+  assert.equal(noSource.refusal_code, "SOURCE_CASE_REQUIRED");
+  assert.equal(blocked.calls, 0, "a refusal spends zero model calls");
+  assert.equal(noSource.previously_used_ok, null, "the exclusion gate was NOT run at this level — null, never false");
+
+  // 2. With the source named, the SAME case IS evaluated: the exemption is real, not a softer refusal.
+  const counter = { calls: 0 };
+  const r = await validateGeneralization({
+    candidate: anyCandidate(), heldOutCase: heldOut, model: stubModel({ verdict: "refuted" }, counter),
+    budget: {}, pinDir: strippedTmp(), caseIdentityIndex: built.index, root,
+    evidenceLevel: "transfer", sourceCaseId: "EXP-known-source",
+  });
+  assert.equal(counter.calls, 1, "the verifier DID run — that is what 'accepted at transfer level' means");
+  assert.equal(r.outcome, "evaluated");
+  assert.equal(r.refusal_code, null);
+  assert.equal(r.evidence_level, "transfer");
+  assert.equal(r.source_case_id, "EXP-known-source");
+  assert.equal(r.previously_used_ok, null, "the exclusion gate is not run at transfer level");
+  assert.equal(r.lineage_ok, true, "…but the LINEAGE gate still runs: transfer is not a licence to self-grade");
+
+  // …and the recorded carrier line carries both readings, so a third party can re-read WHICH level the
+  // verdict was taken at and WHICH case it reused — the two things the promotion guard consults.
+  const rec = readGeneralizationVerdicts(root).records[0];
+  assert.equal(rec.evidence_level, "transfer");
+  assert.equal(rec.source_case_id, "EXP-known-source");
+  assert.equal(rec.correct, true);
+
+  // 3. CONTROL: the SAME reused case with NO level declared is still refused outright — `unlabelled` is
+  //    not a third exempt level, it is the strict arm (硬规则 3b: an absent label must not open a door).
+  const strict = { calls: 0 };
+  const unlabelled = await validateGeneralization({
+    candidate: anyCandidate(), heldOutCase: heldOut, model: stubModel({ verdict: "refuted" }, strict),
+    budget: {}, pinDir: strippedTmp(), caseIdentityIndex: built.index, sourceCaseId: "EXP-known-source",
+  });
+  assert.equal(unlabelled.refusal_code, HELD_OUT_PREVIOUSLY_USED);
+  assert.equal(strict.calls, 0);
+
+  // 4. …and `independent` is the strict arm too: a level that claims no reuse may not reuse a case.
+  const indep = await validateGeneralization({
+    candidate: anyCandidate(), heldOutCase: heldOut, model: stubModel({ verdict: "refuted" }),
+    budget: {}, pinDir: strippedTmp(), caseIdentityIndex: built.index, evidenceLevel: "independent",
+  });
+  assert.equal(indep.refusal_code, HELD_OUT_PREVIOUSLY_USED);
+});
+
+test("AC(d-2): the evidence level is RECORDED on every verdict — a caller that declares none gets `unlabelled`", async () => {
+  const root = mkTmp();
+  const heldOut = expFixture({
+    id: "experience-heldout0000000", case_id: "EXP-heldout", role: "confirmed-negative",
+    source_ref: "outcome-heldout00000000", components: ["plugin/scripts/heldout.ts"], evaluation_pin: "1".repeat(40),
+  });
+  const candidate = assembleCandidate({ rec: decisionFixture(), unit: { experiences: [expFixture({ id: "experience-inbatch000000" })] }, registry: [], budget: {}, nowIso: "2026-10-12T00:00:00Z" });
+  const v = await validateGeneralization({ candidate, heldOutCase: heldOut, model: stubModel({ verdict: "refuted" }), budget: {}, pinDir: strippedTmp(), root });
+  assert.equal(v.evidence_level, "unlabelled", "no declaration ⇒ `unlabelled`, never a guess at a stronger level");
+  assert.equal(readGeneralizationVerdicts(root).records[0].evidence_level, "unlabelled", "…and the recorded line says so explicitly");
+  assert.equal(v.promoted_to, "trial", "a pass at an unlabelled level caps at the report-only `trial`");
+  assert.equal(v.candidate_after.status, "trial");
+});
+
+test("AC(d-3): the independent-only metric EXCLUDES teaching/transfer verdicts, and says how many", () => {
+  const verdicts = [
+    { outcome: "evaluated", correct: true, evidence_level: "independent" },
+    { outcome: "evaluated", correct: false, evidence_level: "independent" },
+    { outcome: "evaluated", correct: true, evidence_level: "teaching", source_case_id: "EXP-taught" },
+    { outcome: "evaluated", correct: true, evidence_level: "transfer", source_case_id: "EXP-known" },
+    { outcome: "evaluated", correct: true },   // legacy: an absent level
+  ];
+  // The RAW reading is unchanged — it answers "how did the predictions do", which is a different
+  // question from "how did the INDEPENDENT predictions do".
+  assert.equal(learningQuality(verdicts).evaluated, 5);
+  const indep = independentLearningQuality(verdicts);
+  assert.equal(indep.evaluated, 2, "only the two independent verdicts are in the denominator");
+  assert.equal(indep.value, 0.5);
+  assert.equal(indep.excluded, 3, "the exclusion is REPORTED, not silent");
+  assert.deepEqual(indep.by_evidence_level, { independent: 2, teaching: 1, transfer: 1, unlabelled: 1 });
 });

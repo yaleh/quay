@@ -102,6 +102,12 @@ import {
   ROLE_VERDICT_COMPAT, readExperienceLedger, DISCOVERY_CARRIERS, GENERALIZATION_VERDICTS_REL,
   GENERALIZATION_VERDICT_KIND, EXPERIENCE_LEDGER_REL, carrierFile, readCarrier, appendCarrierLine,
   resolveCarrierRoot,
+  // The evidence level + the case-identity threshold, both declared ONCE in the base module so the
+  // method registry's promotion guard reads the same values (task
+  // gap-discovery-evidence-level-teaching-vs-independent).
+  EVIDENCE_LEVELS, EVIDENCE_LEVEL_VALUES, UNLABELLED_EVIDENCE_LEVEL, INDEPENDENT_EVIDENCE_LEVEL,
+  CASE_REUSE_EVIDENCE_LEVELS, SOURCE_CASE_REQUIRED, evidenceLevelOf, isIndependentEvidenceLevel,
+  allowsCaseReuse, MIN_SHARED_CASE_COMPONENTS,
 } from "./discovery-experience-ledger.mjs";
 import {
   readMethodRegistry, validateMethodRecord, defaultToolNames,
@@ -988,7 +994,13 @@ function maybeRecordGeneralizationVerdict({ root, candidate, heldOutCase, caseId
  *  the SAME predicate. */
 const appliedOf = (v) => (v?.outcome === OUTCOME_NOT_APPLICABLE ? "no" : (isStr(v?.applies, 1) ? v.applies : null));
 
-async function runGeneralization({ candidate, heldOutCase, registry = [], model, budget = {}, modelId = null, nowMs = Date.now(), experiences = [], pinDir = null, isAncestor = null, root = null, caseIdentityIndex = null } = {}) {
+/** The SOURCE case a `teaching`/`transfer` verdict names — the known case its answer came from. The
+ *  caller's explicit argument wins; otherwise the held-out case's own `source_case_id` is read. `null`
+ *  when neither names one, which is the value the `SOURCE_CASE_REQUIRED` gate refuses on (Plan item 4). */
+const sourceCaseIdOf = (heldOutCase, explicit) =>
+  isStr(explicit, 1) ? String(explicit) : (isStr(heldOutCase?.source_case_id, 1) ? String(heldOutCase.source_case_id) : null);
+
+async function runGeneralization({ candidate, heldOutCase, registry = [], model, budget = {}, modelId = null, nowMs = Date.now(), experiences = [], pinDir = null, isAncestor = null, root = null, caseIdentityIndex = null, evidenceLevel = null, sourceCaseId = null } = {}) {
   const guard = disabledGuard(budget);
   if (guard) return guard;
   if (typeof model !== "function") return { ok: false, reason: "model-seam-missing", called: false };
@@ -1003,7 +1015,21 @@ async function runGeneralization({ candidate, heldOutCase, registry = [], model,
   // The index gate's reading, three-valued like the other two: `true` = an index was supplied and
   // the case is not in it, `false` = supplied and the case IS in it, `null` = no index was supplied,
   // so the gate was never reachable (硬规则 3b — never collapsed into one value).
-  const prevGate = { previously_used_ok: caseIdentityIndex ? true : null };
+  //
+  // ── THE EVIDENCE LEVEL, and what it buys the caller (Plan items 2 and 4, 2026-10-12 strategy) ────
+  // The level is DECLARED by the caller and carried on every refusal and every verdict; it is never
+  // inferred. Two things follow from it, and they are the whole reason it exists:
+  //   • `teaching` / `transfer` may reuse a case the index already knows (the strict cross-experiment
+  //     exclusion runs only for `independent`-and-unlabelled experiments) — at the price of NAMING the
+  //     source case, so a reused case can never be read back as a fresh one;
+  //   • a pass at any level but `independent` caps the candidate at `status:"trial"`, which is
+  //     report-only: it never licenses `active` and is never handed to a consumer by `activeMethods()`.
+  // ⛔ `unlabelled` gets the STRICT treatment, not the permissive one: "the caller declared nothing" is
+  //   not a licence to reuse, and the exclusion gate stays armed (硬规则 3b — an unreadable/absent
+  //   label must not open a door the label exists to keep shut).
+  const level = evidenceLevelOf({ evidence_level: evidenceLevel });
+  const reuseAllowed = allowsCaseReuse(level);
+  const prevGate = { evidence_level: level, previously_used_ok: caseIdentityIndex && !reuseAllowed ? true : null };
   const refuse = (code, reason, gates = {}) => ({
     ok: false, called: false, outcome: "not-evaluated", refusal_code: code, reason,
     not_evaluated_reason: code, predicted_verdict: null, expected_verdicts: roleExpectedVerdicts(heldOutCase.role),
@@ -1011,6 +1037,11 @@ async function runGeneralization({ candidate, heldOutCase, registry = [], model,
     evaluated_commit: null, verifier_cwd: null, model_call: null,
     lineage_ok: gates.lineage_ok ?? null, temporal_ok: gates.temporal_ok ?? null,
     previously_used_ok: gates.previously_used_ok ?? prevGate.previously_used_ok,
+    // The DECLARED level travels on a refusal too (Plan item 1): the recorded refusal is what a later
+    // reader consults to see WHICH level was attempted, and a refusal that dropped the level would
+    // leave "this was refused because it was a teaching case" unreadable from the carrier.
+    evidence_level: level,
+    source_case_id: sourceCaseIdOf(heldOutCase, sourceCaseId),
   });
 
   // The held-out case must be OUTSIDE the batch that produced the candidate: a case the candidate was
@@ -1026,7 +1057,21 @@ async function runGeneralization({ candidate, heldOutCase, registry = [], model,
   // of the sealed-set gate: the set gate refuses a whole registration, this refuses ONE case that
   // reached a verifier by another path. It is also the ONLY check that can see a use recorded in a
   // DIFFERENT carrier (an earlier sealed file, a method's seed set, a publicly-surfaced case).
-  if (caseIdentityIndex) {
+  // ⛔ THE LEVEL GATE ON THE EXCLUSION (Plan item 4): the strict cross-experiment exclusion runs for
+  //   `independent` and for `unlabelled` — NOT for a declared `teaching`/`transfer` case, which is
+  //   allowed to reuse a known case on purpose. A `teaching`/`transfer` case must then NAME its source,
+  //   which is the price of the exemption and the thing that keeps a reused case from reading back as
+  //   a fresh one. Both arms are refusals: no model call, no promotion.
+  if (reuseAllowed) {
+    if (!isStr(sourceCaseIdOf(heldOutCase, sourceCaseId), 1)) {
+      const id = heldOutCase.case_id ?? heldOutCase.id ?? "held-out";
+      // `previously_used_ok` stays `null` on this refusal: the exclusion gate was deliberately NOT run
+      // for this level, and "not run" is its own value (硬规则 3b).
+      return refuse(SOURCE_CASE_REQUIRED,
+        `${SOURCE_CASE_REQUIRED}:${id}-is-judged-at-evidence_level=${level}-which-may-reuse-a-known-case-so-it-must-name-that-case-in-source_case_id`);
+    }
+  }
+  if (caseIdentityIndex && !reuseAllowed) {
     const hits = caseCollisions(caseIdentityIndex, heldOutCase);
     if (hits.length > 0) {
       const id = heldOutCase.case_id ?? heldOutCase.id ?? "held-out";
@@ -1093,9 +1138,10 @@ async function runGeneralization({ candidate, heldOutCase, registry = [], model,
     return {
       ok: true, called: true, outcome: OUTCOME_NOT_APPLICABLE, model_call: call, applies,
       applies_reason: appliesReason, predicted_verdict: null, expected_verdicts: expected,
-      correct: null, promoted: false, candidate_after: { ...candidate, version: nextV },
+      correct: null, promoted: false, promoted_to: null, candidate_after: { ...candidate, version: nextV },
       retirement_reason: null, not_evaluated_reason: null, refusal_code: null,
-      reasoning: parsed?.reasoning ?? null, ...gatesOk, ...ran,
+      reasoning: parsed?.reasoning ?? null,
+      evidence_level: level, source_case_id: sourceCaseIdOf(heldOutCase, sourceCaseId), ...gatesOk, ...ran,
     };
   }
 
@@ -1103,20 +1149,30 @@ async function runGeneralization({ candidate, heldOutCase, registry = [], model,
     // NOT-EVALUATED (its own value): the reading failed, the METHOD was not refuted. Stays draft.
     return {
       ok: true, called: true, outcome: "not-evaluated", model_call: call, applies, applies_reason: appliesReason,
-      predicted_verdict: null, expected_verdicts: expected, correct: null, promoted: false,
+      predicted_verdict: null, expected_verdicts: expected, correct: null, promoted: false, promoted_to: null,
       candidate_after: { ...candidate }, retirement_reason: null, refusal_code: null,
       not_evaluated_reason: parsed ? "VERDICT_MISSING_IN_MODEL_OUTPUT" : "UNPARSEABLE_MODEL_OUTPUT",
+      evidence_level: level, source_case_id: sourceCaseIdOf(heldOutCase, sourceCaseId),
       ...gatesOk, ...ran,
     };
   }
   const predicted = String(parsed.verdict);
   const correct = expected.includes(predicted);
+  // ⛔ THE LEVEL CAP (Plan item 2). A correct prediction promotes the candidate — but only an
+  //   `independent` verdict may promote it to `active`. Every other level (teaching, transfer,
+  //   production-open, unlabelled) caps it at `trial`, a state that is REPORT-ONLY: it is never handed
+  //   to a consumer (`activeMethods()` returns only `status:"active"`) and it is never shown as
+  //   generalization. The candidate still moves (the reading is real) — it just moves to a state that
+  //   cannot be mistaken for a proof.
+  const promotedStatus = isIndependentEvidenceLevel(level) ? "active" : "trial";
   if (correct) {
     return {
       ok: true, called: true, outcome: "evaluated", model_call: call, applies, applies_reason: appliesReason,
       predicted_verdict: predicted, expected_verdicts: expected, correct: true, promoted: true,
-      candidate_after: { ...candidate, version: nextV, status: "active", retirement_reason: null },
+      promoted_to: promotedStatus,
+      candidate_after: { ...candidate, version: nextV, status: promotedStatus, retirement_reason: null },
       retirement_reason: null, not_evaluated_reason: null, refusal_code: null, reasoning: parsed.reasoning ?? null,
+      evidence_level: level, source_case_id: sourceCaseIdOf(heldOutCase, sourceCaseId),
       ...gatesOk, ...ran,
     };
   }
@@ -1124,8 +1180,10 @@ async function runGeneralization({ candidate, heldOutCase, registry = [], model,
   return {
     ok: true, called: true, outcome: "evaluated", model_call: call, applies, applies_reason: appliesReason,
     predicted_verdict: predicted, expected_verdicts: expected, correct: false, promoted: false,
+    promoted_to: null,
     candidate_after: { ...candidate, version: nextV, status: "retired", retirement_reason },
     retirement_reason, not_evaluated_reason: null, refusal_code: null, reasoning: parsed.reasoning ?? null,
+    evidence_level: level, source_case_id: sourceCaseIdOf(heldOutCase, sourceCaseId),
     ...gatesOk, ...ran,
   };
 }
@@ -1251,6 +1309,17 @@ export function recordGeneralizationVerdict(root, verdict, { ts = Date.now() } =
     // case-identity index and not previously used, `false` = checked and previously used, `null` =
     // no index was supplied / never reached. A `false` here can never license a promotion.
     previously_used_ok: verdict.previously_used_ok === false ? false : (verdict.previously_used_ok === true ? true : null),
+    // ── THE EVIDENCE LEVEL (Plan item 1) ────────────────────────────────────────────────────────────
+    // ⛔ Normalised through `evidenceLevelOf`, so EVERY line written from here on carries an explicit
+    //   level — a caller that declares none gets `unlabelled`, never an absent key and never
+    //   `independent`. The promotion guard reads THIS field off the recorded line: a verdict recorded
+    //   before the level existed reads back as `unlabelled` and can therefore never license `active`,
+    //   which is the whole point (硬规则 6: a missing label is an absent claim, not a weak positive).
+    evidence_level: evidenceLevelOf(verdict),
+    // WHICH case a `teaching`/`transfer` verdict reused (Plan item 4). `null` for every other level —
+    // an `independent` case shares nothing with the fitting material, so naming a source there would
+    // be a claim the level itself contradicts.
+    source_case_id: isStr(verdict.source_case_id, 1) ? String(verdict.source_case_id) : null,
     evaluation_pin: isStr(verdict.evaluation_pin, 1) ? verdict.evaluation_pin : null,
     evaluated_commit: isStr(verdict.evaluated_commit, 1) ? verdict.evaluated_commit : null,
     // The label digest and the index digest this verdict was produced against. `null` is its OWN
@@ -1328,8 +1397,11 @@ export const HELD_OUT_PREVIOUSLY_USED = "HELD_OUT_PREVIOUSLY_USED";
 
 /** A case is a DIFFERENT case once fewer than this many of its components are shared. The same
  *  threshold the lineage check states (`LINEAGE_MIN_SHARED_COMPONENTS`) — the two must not disagree
- *  about when two case descriptions are the same defect. */
-export const MIN_SHARED_CASE_COMPONENTS = 2;
+ *  about when two case descriptions are the same defect.
+ *  ⛔ IMPORTED (and re-exported) from the ledger module, where it moved with the evidence-level work:
+ *  the method registry's quarantine arm reads the same rule and cannot import THIS module (this module
+ *  imports the registry), so the ONE definition has to live below both of them. */
+export { MIN_SHARED_CASE_COMPONENTS };
 
 /** The collision arms, as DATA, so a refusal can say which one fired and a test can enumerate them. */
 export const COLLISION_KINDS = Object.freeze([
@@ -1874,6 +1946,29 @@ export function computeReflectionCost(calls, { wall_ms = null } = {}) {
  *   `denominator` is `evaluated` spelled out, because "correct / applicable-evaluated" is the reading
  *   the report owes; `value` is `null` (not 0) when nothing was applied.
  */
+/**
+ * The INDEPENDENT-ONLY learning quality (Plan item 4: "`teaching` and `transfer` … are excluded from
+ * every independent metric"). Same arithmetic as `learningQuality`, over the subset whose recorded
+ * `evidence_level` is exactly `independent` — and it reports how many verdicts it EXCLUDED and at which
+ * levels, so a shrinking denominator cannot hide inside a flattering ratio.
+ *
+ * ⛔ `learningQuality` itself is deliberately left alone: it is the raw per-verdict reading, and
+ *   redefining it as "independent only" would silently turn every existing consumer's denominator into
+ *   a different quantity. The two readings are different QUESTIONS, so they are different functions.
+ * @returns {{value:number|null, correct:number, evaluated:number, denominator:number, not_evaluated:number,
+ *            not_applicable:number, total:number, excluded:number, by_evidence_level:object}}
+ */
+export function independentLearningQuality(verdicts) {
+  const list = (Array.isArray(verdicts) ? verdicts : []).filter(isObj);
+  const byLevel = {};
+  for (const v of list) {
+    const l = evidenceLevelOf(v);
+    byLevel[l] = (byLevel[l] ?? 0) + 1;
+  }
+  const independent = list.filter(isIndependentEvidenceLevel);
+  return { ...learningQuality(independent), excluded: list.length - independent.length, by_evidence_level: byLevel };
+}
+
 export function learningQuality(verdicts) {
   const list = (Array.isArray(verdicts) ? verdicts : []).filter(isObj);
   const notApplicable = list.filter((v) => v.outcome === OUTCOME_NOT_APPLICABLE);
