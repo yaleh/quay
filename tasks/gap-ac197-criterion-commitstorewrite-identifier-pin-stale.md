@@ -360,6 +360,40 @@ $ git show --stat 5a04e28fa | tail -2
 **本轮删除了两份重复的 `## Evidence` 块（落点映射，硬规则 5）**：原文件有 **3** 份 `## Evidence`（起于第 113 / 269 / 447 行），逐块 diff 显示第 3 块是前两块的**严格超集** —— `diff ev1 ev3` 仅 **2** 行删除、`diff ev2 ev3` 仅 **1** 行删除，且这三行**全部被 ev3 的扩展版取代**（`SCOPED_GATE_EXIT=0（…；9 条 static check 全 PASS）`、`两条如实说明` → `三条如实说明`）。⇒ 前两块里的**每一条**读数都在第 3 块里有落点，⛔ 无内容丢失；合并后本文件只剩一份 `## Evidence`。同一次替换也修掉了三块里**逐字重复的同一句假读数**。
 
 **⚠️ develop 在本轮中途前进过 —— scoped 门缓存因此重写过两次。** 第一次写缓存时 develop 是 `1d05f47e…`，而 scoped 门当时跑在**以它为基**的树上；随后 develop 前进到 `fa76ebca…`（5 个提交）。缓存的前提是「worker 对着**这个确切的 develop tip** 验证过绿」，所以旧缓存**不成立**，⛔ 没有拿它凑数：先 `git merge develop`（`d629c20c…`，无冲突），**在新树上重跑** `scripts/test.sh --for-task … --allow-thin`（`SCOPED_GATE_EXIT=0`，7/7，无 `SCOPED-THIN`），**再**用新 tip 写缓存。⇒ 上表所有读数都是**重测值**，缓存里的 `developSha` 与被我验证过的那棵树一致（`rev-list --count HEAD..develop` = 0）。
+
+### 第 4 轮（2026-10-13 02:40 +0800）—— 上一轮的 suite 红是**环境量**，随生产载体轮转消失，⛔ 不修
+
+上一轮 `exited-not-landed` 的成因是 `plugin/test/prod-data-audit.test.mjs` 的 `ERR_STRING_TOO_LONG`（`## Blocker`）。本轮**先定性再动手**，读数：
+
+| 问 | 读数 | 结论 |
+|---|---|---|
+| 失败文件在本任务 delta 内吗 | 本任务 delta 仍是 3 个文件，不含 `plugin/scripts/prod-data-audit.ts` | 不在 |
+| 该夹具读的是哪棵树 | `prod-data-audit.ts:83 resolveProductionRoot` 在 linked worktree 下用 `git rev-parse --git-common-dir` 回到**主检出** | 读的是**主检出**的载体 |
+| 主检出 `…/quay/.quay/meta-driver-round.jsonl` | **95,018,269 B**（02:40，且增速 ~百 B/半分钟）—— 低于 V8 上限 `0x1fffffe8` = 536,870,888 | 立案时的 537,028,872 B 已**轮转掉** |
+| worktree 同名副本 | 538,347,076 B（`refresh-worktree-quay` 从主检出拷入）；`readFileSync` 仍抛 `ERR_STRING_TOO_LONG` | 与判据**无关**（判据读主检出）—— ⛔ 不要拿它当成因 |
+| 直接重跑该夹具（worktree 内） | `node --test plugin/test/prod-data-audit.test.mjs` ⇒ **10/10 pass，exit 0** | 红已消失 |
+
+⇒ 处置 = **不修**：它是 develop-wide 的真实缺口，已有 `status: ready` 的 `gap-prod-data-audit-whole-file-read-crashes-on-carrier-over-v8-string-limit`（P0，其 `## Touches` 指名该文件）在飞。在本分支修它会同时（a）越过本任务 Touches、（b）与 peer 抢同一文件、（c）把「判据读主检出」这条诊断埋掉。
+
+### 第 4 轮重测读数（全部在 `git merge develop` 之后的新树上取）
+
+| 项 | 命令 | 读数 |
+|---|---|---|
+| 合并冲突 | `git merge --no-edit develop` | 仅本任务文件一处冲突（本分支 `## Evidence` ↔ develop 的 `## Blocker`）⇒ 按**逐 hunk 并集**解：两份都留，AC tick 与 Touches 不动；`f6c5979e4`。其后 develop 再前进 1 提交，二次合并干净 |
+| AC5① | `scripts/test.sh --for-task gap-ac197-… --allow-thin` | `SCOPED_GATE_EXIT=0`，夹具 **7/7 pass**（`test-selection-thin 1/3 Touches` 警告属预期，`--allow-thin` 已给） |
+| 1c | `anti-drift-touches-check.ts --task … --worktree <wt> --merge-target develop` | `ANTI-DRIFT OK: … 3 actual file(s), all within declared Touches (3 glob(s))`，`EXIT=0` |
+| AC5② | `grep -c 'function commitKindFile'` 四 store | goal / meta / adr / document = **0 / 0 / 0 / 0**；`grep -c 'export function commitKindFile' packages/quay/src/store-commit.ts` = **1** |
+| AC4（活读，五 kind） | 逐文件核「依赖 `store-commit.ts` ∧ 出现调用」 | goal 1/3、meta 2/1、adr 2/1、document 2/1、native 3/1 ⇒ **5/5** |
+| AC3 | `node packages/quay/bin/quay.js goal gate AC-197` | `"verdict":"pass"`，`GATE_EXIT=0` |
+| AC6 台账（修前 → 修后） | `.quay/gate-events.jsonl` 尾行 | 修前 `2026-10-12T18:35:39.270Z fail`（`CAUSE=commitStoreWrite-not-in-all-5`，root=主检出）；修后 `2026-10-12T18:42:26.357Z pass actor=goal-amend hash=ce927a78256e078f` ⇒ **≠ `5a7dc1fc29c3b9a3`** |
+| AC6 交叉核对（⛔ 非回声） | 用 `goal-store.ts:449 criterionFingerprint` 独立算 worktree goal 文件的 criterion | `ce927a78256e078f` —— 与台账写入值**逐字相同** |
+| AC1 | 同一份 criterion 文本上 `grep -l commitStoreWrite` 逐字匹配 | **0 命中** ⇒ 旧谓词已不在正文（成因描述保留为叙述，不带旧谓词逐字） |
+| scoped 门缓存（1b-iv） | `--write-scoped-gate-cache --develop-sha 81f9dd0e…` | `{"event":"scoped-gate-cache-written",…,"developSha":"81f9dd0e0c5895c73f855750ba5523a416a846ca"}`；写前核过 `merge-base --is-ancestor develop HEAD` **是** ∧ `rev-list --count HEAD..develop` = **0** |
+
+⚠️ **缓存重写过一次**：第一次写入后 develop 立刻前进 1 提交，`81f9dd0e…` 已不再是 HEAD 祖先 ⇒ 按「缓存的前提是对着**这个确切 tip** 验过绿」把它作废，重跑 scoped 门 + 重写（同上一轮记录的形态）。⛔ 没有用 merge-base 凑一个「更旧的、仍然合法」的 tip 去换一次假冗余。
+
+⚠️ **台账仍是 worktree 本地那一份**：`scripts/test.sh` 起点的 `refresh-worktree-quay` 会从主检出拷 `.quay/` 覆盖它。本轮顺序因此是「先 scoped 门（它会覆盖）→ 再 `goal gate` + `goal check --stale-pass --sweep`」，⇒ 退出时尾事件即上表那条 `18:42:26` 的 pass。持久收敛仍走落 develop ⇒ `syncDevelopToDoc` ⇒ 生产轮转的路径。
+
 ## Blocker
 
 **2026-10-12T18:35:28.029Z — worker 未落地（exited-not-landed）**
