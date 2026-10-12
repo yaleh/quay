@@ -181,6 +181,9 @@ import { bundleEntries } from "../../packages/quay/scripts/build-plugin-dist.mjs
 // mechanical fan-in on a third-party-shaped repo, before and after `quay init` establishes the
 // landing baseline.
 import { ensureBranchModel } from "../../packages/quay/src/branch-model.ts";
+// gap-worker-prompt-omits-anti-drift-pre-exit-check…：AC1 的期望 argv 必须与实现【同源】解析
+// （kernelSiblingArgv = fan-in 的 gateArgv 用的同一个函数），⛔ 不测试里手写一份路径。
+import { kernelSiblingArgv } from "../scripts/driver-runtime.ts";
 
 import {
   DRIVER,
@@ -4375,5 +4378,130 @@ test("goal-merge e2e — 失败分类两臂：真实内容冲突写 merge-confli
       assert.equal(execFileSync("git", ["-C", root, "rev-parse", "develop"], { encoding: "utf8" }).trim(), devBefore, "红：develop 不动");
       assert.equal(execFileSync("git", ["-C", root, "rev-parse", "goal/GOAL-901"], { encoding: "utf8" }).trim(), tipBefore, "红：goal 分支不动");
     } finally { gmCleanup(root); }
+  }
+});
+
+// ── gap-worker-prompt-omits-anti-drift-pre-exit-check-costs-a-session-per-touches-miss ─────────────
+// fan-in 把 `anti-drift-touches-check.ts` 当 HARD pre-merge 门跑（worker-fan-in.ts）；worker 此前对
+// 它一无所知 ⇒ 越出 `## Touches` 的写入只在会话【结束之后】才被发现，白花一条 LLM 会话（跨 6 项目
+// 162 次）。修法：把该门的逐字 argv 放进两个 worker prompt 的退出前步骤。下面三测各自独立断言。
+const ANTI_DRIFT_MARKER =
+  "the SAME anti-drift Touches check the driver's fan-in runs as a HARD pre-merge gate";
+// 两个 builder 必须携带【同一份】选项指导文本（fork 检测；实质测量是上面按 builder 的 argv 断言）。
+const ANTI_DRIFT_OPTION_A = "declare the file in `## Touches` **through the task ABI**";
+
+/** 从 prompt 里取出反漂移命令的【逐字】argv（反引号定界，worker 实际会照抄的那串）。 */
+function extractAntiDriftArgv(prompt) {
+  const m = prompt.match(/HARD pre-merge gate:\s*`([^`]+)`/);
+  assert.ok(m, "prompt embeds the anti-drift command inside backticks");
+  return m[1];
+}
+
+test("AC1 (能取假) — buildWorkerPrompt 与 buildContinueWorkerPrompt 都嵌入【同源解析】的 anti-drift argv", () => {
+  const kernelArgv = kernelSiblingArgv("anti-drift-touches-check.ts");
+  assert.ok(kernelArgv, "kernel sibling 解析出 anti-drift-touches-check（源检出 ⇒ raw .ts）");
+
+  const createPrompt = buildWorkerPrompt("gap-x", "/r");
+  const contPrompt = buildContinueWorkerPrompt("gap-x", "/r", {
+    worktreePath: "/wt", branchCommits: 3, branchHeadSubject: "x", acChecked: 0, acTotal: 3, failureReason: "r",
+  });
+
+  const createCmd = extractAntiDriftArgv(createPrompt);
+  const contCmd = extractAntiDriftArgv(contPrompt);
+  // argv = fan-in 的 gateArgv 同一解析（kernelSiblingArgv）+ 与 fan-in 逐字相同的三个 flag。
+  assert.equal(
+    createCmd,
+    `${kernelArgv.join(" ")} --task gap-x --worktree <the worktree path you created in step 1> --merge-target develop`,
+    "create prompt 的 argv：kernel 解析前缀 + --task/--worktree/--merge-target",
+  );
+  assert.equal(
+    contCmd,
+    `${kernelArgv.join(" ")} --task gap-x --worktree /wt --merge-target develop`,
+    "continue prompt 的 argv：同形状，worktree 是【真路径】（AC2 靠它逐字执行）",
+  );
+
+  // 按位置判（硬规则 2）：两句都在 anti-drift 那句【内】，⛔ 不是全文别处的偶然命中。
+  for (const [label, prompt] of [["create", createPrompt], ["continue", contPrompt]]) {
+    const i = prompt.indexOf(ANTI_DRIFT_MARKER);
+    assert.ok(i !== -1, `${label}: 有 anti-drift 步骤句`);
+    assert.ok(prompt.indexOf("--task gap-x", i) > i, `${label}: argv 在 anti-drift 句之后（按位置）`);
+    assert.ok(
+      prompt.indexOf(ANTI_DRIFT_OPTION_A, i) > i,
+      `${label}: (a) 经 ABI 加进 Touches 的指导在同一句内`,
+    );
+  }
+  // 单一真相源（fork 检测）：两个 builder 共用同一段选项字面。
+  assert.ok(createPrompt.includes(ANTI_DRIFT_OPTION_A), "create prompt 带共享选项字面");
+  assert.ok(contPrompt.includes(ANTI_DRIFT_OPTION_A), "continue prompt 带【同一份】选项字面（⛔ 非 fork 副本）");
+});
+
+test("AC2 (能取假) — prompt 内嵌 argv 可逐字执行：越界写入 ⇒ exit 1 点名该文件；加进 Touches ⇒ exit 0", (t) => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "anti-drift-prompt-"));
+  t.after(() => fs.rmSync(root, { recursive: true, force: true }));
+  const task = "gap-x";
+  const git = (...args) =>
+    execFileSync("git", ["-C", root, "-c", "user.email=t@example.com", "-c", "user.name=T", ...args], { encoding: "utf8" });
+  // fixture：master = 默认分支；develop 自 master 分叉且【包含】它 ⇒ classifyBranch(develop) = compatible
+  // （否则 anti-drift 走 BASELINE-MISMATCH 分支，判不到越界写入）。
+  git("init", "-q", "-b", "master");
+  fs.mkdirSync(path.join(root, "tasks"), { recursive: true });
+  fs.mkdirSync(path.join(root, "src"), { recursive: true });
+  const taskPath = path.join(root, "tasks", `${task}.md`);
+  const body = (touches) => `---\nid: ${task}\nstatus: todo\n---\n\n## Touches\n${touches}\n`;
+  const KEPT_TOUCHES = "- tasks/gap-x.md\n- src/kept.ts";
+  fs.writeFileSync(taskPath, body(KEPT_TOUCHES), "utf8");
+  fs.writeFileSync(path.join(root, "src", "kept.ts"), "export const kept = 1;\n", "utf8");
+  git("add", "-A");
+  git("commit", "-qm", "base");
+  git("branch", "develop");
+  git("checkout", "-q", "-b", `task/${task}`);
+  // 一个【已声明】的改动（src/kept.ts）+ 一个【未声明】的越界写入（src/stray.ts）。
+  fs.writeFileSync(path.join(root, "src", "kept.ts"), "export const kept = 2;\n", "utf8");
+  fs.writeFileSync(path.join(root, "src", "stray.ts"), "export const stray = 1;\n", "utf8");
+  git("add", "-A");
+  git("commit", "-qm", "impl");
+
+  const prompt = buildContinueWorkerPrompt(task, root, {
+    worktreePath: root, branchCommits: 1, branchHeadSubject: "impl", acChecked: 0, acTotal: 3, failureReason: "r",
+  });
+  const cmd = extractAntiDriftArgv(prompt);
+  assert.ok(cmd.includes(`--worktree ${root}`), "argv 用真 worktree 路径（可逐字执行）");
+  const argv = cmd.split(" ");
+
+  const red = spawnSync(argv[0], argv.slice(1), { encoding: "utf8" });
+  assert.equal(red.status, 1, `越界写入 ⇒ exit 1（实测 status=${red.status} / ${red.stderr || red.stdout}）`);
+  assert.match(red.stdout, /out-of-declared: task wrote src\/stray\.ts/, "exit 1 点名越界文件");
+  assert.doesNotMatch(red.stdout, /src\/kept\.ts/, "已声明（在 Touches 内）的 src/kept.ts 不报");
+
+  // 选项 (a)：把文件加进 `## Touches` ⇒ 同一 argv 转绿。
+  fs.writeFileSync(taskPath, body(`${KEPT_TOUCHES}\n- src/stray.ts`), "utf8");
+  git("add", "-A");
+  git("commit", "-qm", "declare src/stray.ts in Touches");
+  const green = spawnSync(argv[0], argv.slice(1), { encoding: "utf8" });
+  assert.equal(green.status, 0, `加进 Touches ⇒ exit 0（实测 status=${green.status} / ${green.stderr || green.stdout}）`);
+  assert.match(green.stdout, /ANTI-DRIFT OK: task gap-x/);
+});
+
+test("AC3 (能取假) — argv 在 plugin dist 布局下也解析得出：QUAY_PLUGIN_ROOT 指向 dist 形态树 ⇒ 路径存在", (t) => {
+  const shipped = fs.mkdtempSync(path.join(os.tmpdir(), "anti-drift-dist-"));
+  t.after(() => fs.rmSync(shipped, { recursive: true, force: true }));
+  const dist = path.join(shipped, "scripts", "dist");
+  fs.mkdirSync(dist, { recursive: true });
+  // shipped 形态：只有 bundled .js（无 raw .ts，也无 node_modules 可解析裸 npm import）。
+  const bundled = path.join(dist, "anti-drift-touches-check.js");
+  fs.writeFileSync(bundled, "// bundled\n", "utf8");
+
+  const saved = process.env.QUAY_PLUGIN_ROOT;
+  process.env.QUAY_PLUGIN_ROOT = shipped;
+  try {
+    const prompt = buildWorkerPrompt("gap-x", "/r");
+    const cmd = extractAntiDriftArgv(prompt);
+    assert.ok(cmd.includes(bundled), `dist 布局 ⇒ 解析到 ${bundled}（实测：${cmd}）`);
+    assert.ok(fs.existsSync(bundled), "该路径确实存在（⛔ 非 ENOENT 的『跑过了』）");
+    assert.doesNotMatch(cmd, /--experimental-strip-types/, "bundled .js ⇒ ⛔ 不带 strip-types flag");
+    assert.ok(!cmd.includes("/plugin/scripts/anti-drift-touches-check.ts"), "⛔ 不锚在 workspace root 的 raw .ts");
+  } finally {
+    if (saved === undefined) delete process.env.QUAY_PLUGIN_ROOT;
+    else process.env.QUAY_PLUGIN_ROOT = saved;
   }
 });

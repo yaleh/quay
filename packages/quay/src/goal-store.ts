@@ -69,6 +69,7 @@ import {
   slugify,
   makeAssertSafeStatus,
   makeAssertSafeId,
+  installLockReleaseOnSignal,
 } from "./frontmatter-store-base.ts";
 import {
   runAcceptance,
@@ -78,17 +79,20 @@ import {
   FAILURE_REASON_MAX_CHARS,
 } from "./gate/acceptance-runner.ts";
 // gap-goal-criterion-timeout-hardcoded-60s-ignores-acceptance-timeout: EVERY criterion this file
-// runs takes its kill deadline from here. ⛔ `resolveAcceptanceTimeoutMs`, NOT `resolveRunnerOptions`
-// — the latter also resolves a cwd (preferring `QUAY_ACCEPTANCE_CWD`), and a goal criterion's cwd is
-// the git root by design (see the call sites' own comments); taking the whole options object would
-// silently relocate every criterion the moment that variable was set.
+// runs takes its kill deadline from the SAME resolved chain — ⛔ not a private literal, and ⛔ not
+// `resolveRunnerOptions` (the latter also resolves a cwd, preferring `QUAY_ACCEPTANCE_CWD`; a goal
+// criterion's cwd is the git root by design, so taking the whole options object would silently
+// relocate every criterion the moment that variable was set).
 //
-// ⛔ `resolveAcceptanceTimeout` (above) is the RECORD-aware sibling the `goal gate` verb uses: it is
-// this same chain with the record's own `timeoutMs` in front of it, so a per-record deadline is
-// honoured WITHOUT a second default literal (gap-goal-gate-verdict-single-mapping-not-evaluated AC4).
-import { resolveAcceptanceTimeoutMs } from "./kernel/gate-run-options.ts";
+// ⛔ `resolveAcceptanceTimeout` (above) is the RECORD-aware resolver EVERY goal criterion path now
+// uses (goal gate, the P6 activation gate, the I5 sweep, the frozen rotation): `resolveAcceptanceTimeoutMs`'s
+// env/default chain with the record's own `timeoutMs` in front of it, honoured WITHOUT a second
+// default literal (gap-goal-gate-verdict-single-mapping-not-evaluated AC4;
+// gap-goal-driver-hardcoded-120s-spawn-kill-preempts-record-timeout-and-orphans-goal-locks made the
+// two former `resolveAcceptanceTimeoutMs()` sites — activation + rotation — record-aware too, so the
+// driver path and the CLI path share ONE precedence ladder).
 import { queryGateEvents } from "./gate/gate-event-store.ts";
-import { commitStoreWrite, commitStoreBatch, resolveGitRoot, type CommitOutcome } from "./store-commit.ts";
+import { commitKindFile, commitStoreBatch, resolveGitRoot } from "./store-commit.ts";
 import { criterionFidelityVerdict, type FidelityInvokeJudge } from "./criterion-fidelity.ts";
 // The criterion CAPABILITY judge (gap-criterion-side-effect-unguarded-at-write-and-execution-surface):
 // the THIRD activation/execution question, after evaluability (P6) and fidelity. "Can this criterion
@@ -118,6 +122,58 @@ export const VALID_GOAL_STATUSES: string[] = [...GOAL_STATUSES];
 // Mirrors the task side's MIN_SECTION_CHARS = 40 (ready-pool-check.ts). Exported so the falsifiability
 // test asserts the SAME threshold the store enforces (never a second, divergent literal).
 export const MIN_GOAL_BODY_CHARS = 40;
+
+// ── the OUTER bound a driver must impose on a goal-store CHILD ───────────────────────────────────
+// (tasks/gap-goal-driver-hardcoded-120s-spawn-kill-preempts-record-timeout-and-orphans-goal-locks)
+//
+// The goal/meta drivers spawn `quay goal gate|write` as child processes and put a wall-clock
+// SIGKILL on each. That outer bound MUST exceed the deadline the CHILD itself will honour, or the
+// driver pre-empts the very record `timeoutMs` the store resolves — measured on four host projects
+// (104 SIGKILLs) where every declared `timeoutMs` ≥ 120000 was killed at the driver's hard-coded
+// 120 s literal and recorded as the opaque `gate spawn error: spawn timeout after 120000ms`.
+//
+// The inner deadline is the SAME chain `goal gate` uses (`resolveAcceptanceTimeout`: record
+// `timeoutMs` > QUAY_ACCEPTANCE_TIMEOUT_MS > DEFAULT_ACCEPTANCE_TIMEOUT_MS). The outer bound is
+// `inner + [fidelity judge] + grace` — never a literal that can sit below `inner`.
+
+/** Milliseconds of GRACE a driver adds on top of a goal-store child's own inner deadline. Strictly
+ *  positive ⇒ the driver's bound is strictly greater than the inner one BY CONSTRUCTION (hard rule 4:
+ *  a bound that could silently sit below the thing it wraps is not a bound). It is SLACK FOR A
+ *  CEILING, not a performance threshold: after the child's own deadline fires it must still write its
+ *  verdict to the ledger, release its lock and exit; the driver's watchdog is the last resort and
+ *  being late here costs nothing but the true-hang case. */
+export const GOAL_DRIVER_SPAWN_GRACE_MS = 15_000;
+
+/** Milliseconds a driver waits after SIGTERM (sent to a goal-store child at the OUTER deadline) before
+ *  escalating to SIGKILL. Long enough for a child that is NOT blocked in a synchronous spawn to run its
+ *  `installLockReleaseOnSignal` handler and exit; short enough that the mandatory SIGKILL is not
+ *  meaningfully delayed. ⛔ A child blocked in the criterion's `spawnSync` defers the handler, so this
+ *  grace does not save its lock — the DRIVER's pid-matched removal does (goal-driver.ts). */
+export const GOAL_STORE_SIGTERM_GRACE_MS = 2_000;
+
+/**
+ * The wall-clock bound a DRIVER must impose on a goal-store CHILD process, derived from the child's
+ * OWN inner deadline — never a literal that can sit below it.
+ *
+ * `kind`:
+ *   "gate"       — `goal gate <id>`: the child runs only the criterion. Bound = inner + grace.
+ *   "activation" — `goal write <id> --status active`: the child runs the criterion AND (P6b) the
+ *                  fidelity judge, whose own bound is `FIDELITY_JUDGE_TIMEOUT_MS`. Bound =
+ *                  inner + judge + grace. A timeout in the criterion does NOT skip the judge, so the
+ *                  two add (see write()'s P6/P6b).
+ *
+ * `env` defaults to `process.env` — the driver and its child share an environment, so the chain
+ * resolves to the same inner value on both sides.
+ */
+export function goalDriverChildTimeoutMs(
+  recordTimeoutMs: unknown,
+  kind: "gate" | "activation",
+  env: NodeJS.ProcessEnv = process.env,
+): number {
+  const inner = resolveAcceptanceTimeout(recordTimeoutMs, env);
+  const judgeBound = kind === "activation" ? FIDELITY_JUDGE_TIMEOUT_MS : 0;
+  return inner.timeoutMs + judgeBound + GOAL_DRIVER_SPAWN_GRACE_MS;
+}
 
 // SPEC-goal-branch-2026-10-03 §4.7 (裁定⑭⑮) — an AC's evaluation PHASE, declared by the person/agent
 // who files it (⛔ never inferred from the criterion's text — hard rule 2). `pre-merge` is the default
@@ -1716,29 +1772,6 @@ export function parseAdjudicationTable(text: string): {
 }
 
 /**
- * COMMIT-AFTER-WRITE (gap-meta-commitgoalfile; now unified by SPEC-store-commit-unification §4):
- * commit a goal file to git immediately after writeFileSync, via the shared primitive
- * `commitStoreWrite` — ⛔ no git plumbing here (the five store files' `git commit` has exactly one
- * home: store-commit.ts). The goal store is the SOURCE of goal writes — the CLI `write`,
- * meta-driver's write paths, all funnel through `write()`/`flipGoal()` — so the commit lives HERE,
- * not in each caller. This wrapper declares the goal kind's default (SPEC §4 declaration table):
- * `propagate: "none"` — a goal write rides the branch it lands on (the goal driver runs from the
- * main checkout; a worktree write is carried into develop by that task's fan-in ff). A NEW goal
- * that must be pool-visible now passes propagate "develop" per SPEC §2.2.
- */
-function commitGoalFile(goalDir: string, fileName: string, id: string, action: string): CommitOutcome {
-  const root = resolveGitRoot(goalDir);
-  return commitStoreWrite({
-    relPath: root ? path.relative(root, path.join(goalDir, fileName)) : `goals/${fileName}`,
-    kind: "goals",
-    id,
-    action,
-    root,
-    propagate: "none",
-  }).outcome;
-}
-
-/**
  * @param {string} goalDir absolute path to the goal directory (e.g. `<workspaceRoot>/goals`)
  * @param {{cap?: number, staleMs?: number, fidelityJudge?: FidelityInvokeJudge}} opts I1′/I3 policy
  *   values (default cap=3, stale=7d — readGoalConfig supplies the .quay/config.yml values at the CLI
@@ -2075,8 +2108,11 @@ export function createGoalStore(
     try {
       for (const ac of inScope) {
         const criterion = typeof ac.criterion === "string" ? ac.criterion : "";
-        // Resolved deadline (env > gates timeoutMs > default) — ⛔ NOT a private literal, which is
-        // what made this entry point immune to every configuration knob (see the constant's tombstone).
+        // Resolved deadline: the RECORD's own `timeoutMs` FIRST, then the shared env/default chain
+        // (`resolveAcceptanceTimeout` — the same resolver `goal gate` uses) — ⛔ NOT a private
+        // literal, which is what made this entry point immune to every configuration knob (see the
+        // constant's tombstone). The hint names the knob THIS path actually reads.
+        const t = resolveAcceptanceTimeout((ac as unknown as { timeoutMs?: unknown }).timeoutMs);
         const cwd = criterionCwdFor(root, criterionRoots, ac);
         // ⛔ BEFORE the spawn, and with no bypass arm: this path is UNATTENDED (the goal driver calls
         // it every round), so there is no "someone present" whose consent a bypass flag could carry.
@@ -2085,7 +2121,7 @@ export function createGoalStore(
           capabilityRefused.push({ id: String(ac.id), code: refusal.code ?? "criterion-capability-unevaluable", reason: capabilityRefusalReason(refusal) });
           continue;
         }
-        const res = runAcceptance({ command: criterion, cwd, timeoutMs: resolveAcceptanceTimeoutMs() });
+        const res = runAcceptance({ command: criterion, cwd, timeoutMs: t.timeoutMs, timeoutKnob: timeoutKnobHint(t) });
         if (!res.ok) achievedButFailing.push(String(ac.id));
       }
     } finally {
@@ -2405,9 +2441,12 @@ export function createGoalStore(
           });
           continue;
         }
-        // The DEADLINE is `resolveAcceptanceTimeoutMs()` — the shared config-surface chain, ⛔ not a
-        // private literal (gap-goal-criterion-timeout-hardcoded-60s-ignores-acceptance-timeout).
-        const res = runAcceptance({ command: criterion, cwd, timeoutMs: resolveAcceptanceTimeoutMs() });
+        // The DEADLINE is record-aware `resolveAcceptanceTimeout` — the RECORD's own `timeoutMs`
+        // FIRST, then the shared config-surface chain, ⛔ not a private literal
+        // (gap-goal-criterion-timeout-hardcoded-60s-ignores-acceptance-timeout). The hint names the
+        // knob THIS path actually reads (⛔ not gates.yml, which the goal path never consults).
+        const t = resolveAcceptanceTimeout((byId.get(id) as unknown as { timeoutMs?: unknown } | undefined)?.timeoutMs);
+        const res = runAcceptance({ command: criterion, cwd, timeoutMs: t.timeoutMs, timeoutKnob: timeoutKnobHint(t) });
         // ⛔ Through the ONE mapping (gap-goal-gate-verdict-single-mapping-not-evaluated). Before it,
         // this site recognised only exit 3 and recorded a timeout / spawn failure / exit 126-127 as
         // `fail` — i.e. asserted "this criterion is FALSE" about a criterion that never got to say
@@ -2491,7 +2530,11 @@ export function createGoalStore(
       }
     }
     fs.writeFileSync(p, serializeFrontmatter(fm, body), "utf8");
-    const outcome = commitGoalFile(goalDir, file, oldId, `status ${prevStatus}→${patch.status}`);
+    // COMMIT-AFTER-WRITE (gap-meta-commitgoalfile; now via the shared wrapper `commitKindFile`):
+    // the goal store is the SOURCE of goal writes, so the commit lives HERE. `propagate` defaults
+    // "none" — a goal write rides the branch it lands on (a worktree write is carried into develop by
+    // that task's fan-in ff). A NEW goal that must be pool-visible passes propagate "develop" (SPEC §2.2).
+    const outcome = commitKindFile(goalDir, file, oldId, `status ${prevStatus}→${patch.status}`, "goals");
     if (outcome === "failed") {
       // The disk write succeeded but the git commit genuinely FAILED — never throw (the write IS on
       // disk), but surface on stderr so the failure is observable, not silent (硬规则 3b).
@@ -2881,19 +2924,32 @@ export function createGoalStore(
           throw new Error(`cannot activate ${id}: ${capabilityRefusalReason(capabilityHit)}`);
         }
         const startedMs = Date.now();
-        // Resolved deadline (env > gates timeoutMs > default). ⚠️ This matters more than at the other
-        // three sites: the verdict here decides whether the write is ACCEPTED, so a criterion that
-        // legitimately needs > 60s was being killed and then silently re-read as "ran and failed"
-        // (a timeout IS a definitive fail ⇒ evaluable ⇒ allowed) — the write went through, but the
-        // P10 cost line below reported a `fail` and a ~60s wall for a criterion that had never
-        // actually been evaluated to a verdict.
-        const gateRes = runAcceptance({ command: criterionCmd, cwd: gateRoot, timeoutMs: resolveAcceptanceTimeoutMs() });
+        // Resolved deadline: the RECORD's own `timeoutMs` FIRST, then the shared env/default chain
+        // (`resolveAcceptanceTimeout` — the EXACT resolver `goal gate` uses), so the two paths share
+        // one precedence. ⚠️ This matters more than at the other three sites: the verdict here
+        // decides whether the write is ACCEPTED, so a criterion that legitimately needs > 60s was
+        // being killed and then silently re-read as "ran and failed" (a timeout IS a definitive fail
+        // ⇒ evaluable ⇒ allowed) — the write went through, but the P10 cost line below reported a
+        // `fail` and a ~60s wall for a criterion that had never actually been evaluated to a verdict.
+        // (tasks/gap-goal-driver-hardcoded-120s-spawn-kill-preempts-record-timeout-and-orphans-goal-locks:
+        // before this, activation read the record-IGNORING `resolveAcceptanceTimeoutMs()` while
+        // `goal gate` read the record-aware sibling — a second, divergent precedence ladder.)
+        const t = resolveAcceptanceTimeout(frontmatter.timeoutMs);
+        const gateRes = runAcceptance({ command: criterionCmd, cwd: gateRoot, timeoutMs: t.timeoutMs, timeoutKnob: timeoutKnobHint(t) });
         const wallMs = Date.now() - startedMs;
-        // EVALUABILITY (a question about the criterion's existence, answered by the runner
-        // reaching a process at all) — ⛔ a DIFFERENT question from the verdict vocabulary
-        // (gate/acceptance-runner.ts verdictFromAcceptance, where a timeout is NOT "false"):
-        // "ran and failed" (exit ≠0) and a timeout both prove the command is runnable ⇒ allowed.
-        if (gateRes.code === null && !gateRes.timedOut) {
+        // EVALUABILITY — did the criterion reach a DEFINITIVE verdict at the deadline IN FORCE?
+        // "ran and failed" (exit ≠0) proves it is runnable ⇒ allowed. Two outcomes do NOT:
+        //   · a spawn failure (no process at all) — never allowed, unchanged; and
+        //   · a TIMEOUT — the criterion was STOPPED at the deadline (now the record's own
+        //     `timeoutMs` when declared) before it could say anything. ⛔ Before the record-aware
+        //     deadline this was allowed on the reasoning "a timeout is a definitive fail ⇒ evaluable"
+        //     — but a timeout is NOT a fail any more (`verdictFromAcceptance` maps it to
+        //     `not-evaluated`), and letting it through ACTIVATES a criterion that will then be
+        //     re-run and time out every round forever. The deadline is now a declaration the author
+        //     can raise (the record's `timeoutMs`, named in the reason), so refusing is the honest
+        //     answer: "I cannot evaluate this AT THIS DEADLINE". `--force` overrides deliberately.
+        // (tasks/gap-goal-driver-hardcoded-120s-spawn-kill-preempts-record-timeout-and-orphans-goal-locks AC3)
+        if (gateRes.code === null || gateRes.timedOut) {
           throw new Error(`cannot activate ${id}: criterion not-evaluated (${gateRes.reason}) — pass --force to override`);
         }
         // P10 — make the activation cost visible: the criterion now joins the per-round hot loop.
@@ -3141,7 +3197,7 @@ export function createGoalStore(
           if (body !== undefined) touched.push("body");
           action = touched.length > 0 ? `field:${touched.join(",")}` : "update";
         }
-        const outcome = commitGoalFile(goalDir, fileName, id, action);
+        const outcome = commitKindFile(goalDir, fileName, id, action, "goals");
         if (outcome === "failed") {
           // The disk write succeeded but the git commit genuinely FAILED — surface on stderr so the
           // failure is observable, not silent (硬规则 3b). "unchanged"/"not-in-git" are expected no-ops.
@@ -3416,6 +3472,13 @@ export function resolveFidelityJudgeArgvFromConfig(root: string): string[] | nul
  *  Behaviour is unchanged for the module's own entry: the `isMain` guard at the bottom of this file
  *  still calls it with `process.argv` when the file is invoked directly. */
 export async function runGoalStoreCli(argv: string[]): Promise<number> {
+  // A goal-store CLI invocation is a SHORT-LIVED CHILD a driver may SIGTERM (goal-driver /
+  // meta-driver wrap every spawn in a wall-clock bound). Install the lock-release-on-signal handler
+  // HERE (an entry point), ⛔ never in the shared base's module scope: the same base is used by the
+  // long-lived MCP server / web UI, whose own SIGTERM shutdown must not be replaced by an immediate
+  // release+exit. This is the half of the pair that fires when the child is NOT blocked in a
+  // synchronous spawn; the driver removes the lock by pid when it IS blocked (see frontmatter-store-base).
+  installLockReleaseOnSignal("SIGTERM");
   const args = argv.slice(2);
   const rootFlagIdx = args.indexOf("--root");
   let root: string | null = null;

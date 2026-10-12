@@ -242,6 +242,7 @@ import {
   makeStopCondition,
   registerKindStop,
   resolveKernelSibling,
+  kernelSiblingArgv,
   resolveKernelScriptsDir,
   resolveKernelPluginRoot,
   resolveKernelShellSibling,
@@ -1862,6 +1863,43 @@ function preMergeNote(task: string, root: string, worktree: string): string {
   return lines.join(" ");
 }
 
+/** worker 退出前的 anti-drift Touches 自检（gap-worker-prompt-omits-anti-drift-pre-exit-check-costs-a-
+ *  session-per-touches-miss）。fan-in 把 `anti-drift-touches-check.ts` 当【HARD pre-merge 门】跑
+ *  （worker-fan-in.ts 的 gateArgv → antiDrift 步）：凡任务分支改了 `## Touches` 之外的文件即拒落地。
+ *  worker 此前对它一无所知 —— 越界的写入只在会话【结束之后】才被发现，任务记 `exited-not-landed`，
+ *  一条全新的 LLM 会话被花在「把文件加进 `## Touches`」这种一行修复上（跨 6 项目实测 162 次）。
+ *  本 note 把该门的【逐字 argv】放进 prompt，让 worker 在自己退出前跑一次、在同一会话内修掉。
+ *
+ *  argv 与 fan-in 的 `gateArgv` 【同源】：`kernelSiblingArgv(name)`（源检出 ⇒ raw `.ts` +
+ *  `--experimental-strip-types`；shipped dist ⇒ `dist/<name>.js`）。⛔ 不锚在 `root/plugin/scripts`
+ *  ——第三方项目没有 `plugin/`，硬编码主检出路径会指向不存在的文件，而 spawn 不存在的文件只得到
+ *  ENOENT，被读成「跑过了、没数据」（硬规则 3b；同 resolveKernelSibling 的既有论证）。
+ *  解析不出 sibling ⇒ **如实说明**（「跑不了」不得与「跑了且通过」同形，硬规则 3b），⛔ 不假装跳过。
+ *
+ *  `--merge-target` 用 `resolveTaskMergeTarget`（与 fan-in 的 mergeTarget 单一来源），使 goal 分支
+ *  任务的自检与 fan-in 判同一组文件。创建 prompt 与续做 prompt 共用（worktree 路径由调用方填）。 */
+function antiDriftPreExitNote(task: string, root: string, worktree: string): string {
+  const mergeTarget = resolveTaskMergeTarget(task, root);
+  const argv = kernelSiblingArgv("anti-drift-touches-check.ts");
+  if (argv === null) {
+    return [
+      `ALSO before exiting, run the SAME anti-drift Touches check the driver's fan-in runs as a HARD pre-merge gate —`,
+      `but NOTE: that check cannot be resolved from this kernel installation (no anti-drift-touches-check.ts sibling`,
+      `nor its bundled dist). fan-in fails closed on an unresolvable gate, so make sure EVERY file your branch changed`,
+      `is declared in the task's \`## Touches\`.`,
+    ].join(" ");
+  }
+  return [
+    `ALSO before exiting, run the SAME anti-drift Touches check the driver's fan-in runs as a HARD pre-merge gate:`,
+    `\`${argv.join(" ")} --task ${task} --worktree ${worktree} --merge-target ${mergeTarget}\`.`,
+    `It diffs your worktree against \`${mergeTarget}\` and exits 1 naming every file you changed outside the task's`,
+    `declared \`## Touches\`. If it reports a violation, fix it inside THIS session — do NOT exit and let the retry`,
+    `worker pay a whole new session for it: either (a) declare the file in \`## Touches\` **through the task ABI**`,
+    `(\`task_write\`) when the write is genuinely part of the task — a hand edit does not reach fan-in — or (b) revert`,
+    `the stray write.`,
+  ].join(" ");
+}
+
 // ── goal 分支的 mergeTarget 解析（SPEC-goal-branch-2026-10-03 §4.3，裁定①③⑥）───────────────────
 //
 // 【单一解析函数，三处共用】——worktree 分叉点（`dispatch-worktree-setup.sh --base`）、机械 fan-in 的
@@ -2049,6 +2087,7 @@ export function buildWorkerPrompt(task: string, root: string): string {
     `(node_modules symlink-to-main + config.yml via worktree-include — the mechanism, not agent-remembering);`,
     `(2) implement the task per its Proposal/Plan/AC/DoD, committing your implementation on the task branch; ${acCheckNote()}`,
     `(2b) ${preMergeNote(task, root, "<the worktree path you created in step 1>")}`,
+    `(2c) ${antiDriftPreExitNote(task, root, "<the worktree path you created in step 1>")}`,
     `(3) ${driverFanInNote()}`,
     `⚠️ CRITICAL: for CODE files, every Read/Edit/Write file_path MUST be the absolute path of the worktree you created in step 1 — never the main-checkout path \`${root}\`, never a relative path. Claude Code's file tools use absolute paths and do NOT sense shell \`cd\`; a main-checkout or relative path lands your implementation in the develop shared checkout, not your worktree. ${bashWriteTargetGuardNote(root, "the absolute path of the worktree you created in step 1")} This rule does NOT cover the task file — that is edited only via \`task_write\` (see step 2 above), never Read/Edit/Write.`,
     `You own your worktree fully; apart from the final merge (done by the driver) do not touch develop.`,
@@ -3733,6 +3772,7 @@ export function buildContinueWorkerPrompt(task: string, root: string, state: Con
     `Run the remaining chain in the existing worktree: (1) continue implementing per the task's`,
     `Proposal/Plan/AC/DoD (⛔ do not redo the ${commits} commits already on the branch); ${acCheckNote()}`,
     `(1b) ${preMergeNote(task, root, wt)}`,
+    `(1c) ${antiDriftPreExitNote(task, root, wt)}`,
     `(2) ${driverFanInNote()}.`,
     `⚠️ CRITICAL: for CODE files, every Read/Edit/Write file_path MUST be the worktree absolute path ${wt} — never the main-checkout path \`${root}\`, never a relative path. Claude Code's file tools use absolute paths and do NOT sense shell \`cd\`; a main-checkout or relative path lands your change in develop, not your worktree. ${bashWriteTargetGuardNote(root, `the absolute path of the existing worktree \`${wt}\``)} This rule does NOT cover the task file — that is edited only via \`task_write\` (see above), never Read/Edit/Write.`,
     `You own this worktree fully; apart from the final merge do not touch develop.`,

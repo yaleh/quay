@@ -28,7 +28,7 @@ import {
   makeAssertSafeStatus,
   makeAssertSafeId,
 } from "./frontmatter-store-base.ts";
-import { commitStoreWrite, resolveGitRoot, type CommitOutcome } from "./store-commit.ts";
+import { commitKindFile } from "./store-commit.ts";
 
 export const VALID_DOCUMENT_STATUSES = ["draft", "active", "retired"];
 
@@ -187,28 +187,14 @@ export function createDocumentStore(docDir: string) {
       const action = !existingFile
         ? "create"
         : (prevStatus !== undefined && prevStatus !== frontmatter.status ? `status ${prevStatus}→${frontmatter.status}` : "update");
-      commitDocFile(docDir, fileName, id, action);
+      // COMMIT-AFTER-WRITE (SPEC-store-commit-unification §4, 人 2026-09-08 裁定 2): docs-managed
+      // previously had NO commit path (writes were invisible to git until a session-end sweep). The
+      // shared wrapper `commitKindFile` (store-commit.ts) does the git work — ⛔ no git plumbing
+      // here. `propagate` defaults "none": a docs-managed write rides the branch it lands on.
+      commitKindFile(docDir, fileName, id, action, "docs-managed");
       return get(id);
     });
   }
 
   return { list, listWithMalformed, get, write };
-}
-
-/**
- * COMMIT-AFTER-WRITE (SPEC-store-commit-unification §4, 人 2026-09-08 裁定 2): docs-managed
- * previously had NO commit path (writes were invisible to git until a session-end sweep). Now
- * delegated to the shared primitive `commitStoreWrite` — ⛔ no git plumbing here. Default
- * `propagate: "none"`: a docs-managed write rides the branch it lands on.
- */
-function commitDocFile(docDir: string, fileName: string, id: string, action: string): CommitOutcome {
-  const root = resolveGitRoot(docDir);
-  return commitStoreWrite({
-    relPath: root ? path.relative(root, path.join(docDir, fileName)) : `docs-managed/${fileName}`,
-    kind: "docs-managed",
-    id,
-    action,
-    root,
-    propagate: "none",
-  }).outcome;
 }

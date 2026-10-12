@@ -71,6 +71,12 @@ import { defaultLaneCount, readLoadAvg } from "./full-suite-runner.ts";
 import { SUITE_LOG_NOT_RUN_PREFIX, SUITE_LOG_RUN_START_PREFIX } from "./full-suite-runner.ts";
 import { buildPreVerifiedRoundRecord, appendPreVerifiedRound } from "./pre-verified-round-record.ts";
 import { splitTaskFile, statusFromFrontmatter, patchStatusField, commitTaskFile } from "./task-ops.ts";
+// gap-task-status-events-contract-v1: the fan-in's FOUR status writes (ready→done, the done→ready
+// "未落地" reset, the re-flip after it, and the goal-branch doc-face done) now emit the kernel's v1
+// transition event. Before this task the fan-in wrote ZERO events — the largest measured coverage
+// hole (139 ready→done transitions in the reading window, 0 events). ⛔ The writer is imported, never
+// re-implemented here.
+import { appendTaskStatusEvent, edgeKindFor, gitBlobSha } from "../../packages/quay/src/kernel/task-transition.ts";
 import { fetchTaskStatusAtRef } from "./task-schema.ts";
 // B2 (SPEC-goal-branch-2026-10-03 §5): the doc-face write path — main-checkout commit +
 // propagateDocBranchToDevelop (ff-only + semantic fallback). Importing it (⛔ not re-implementing
@@ -1415,20 +1421,57 @@ export function readPreviousGreenSuiteCommit(stateFile: string, task: string): s
 // (gap-task-status-parsing-reimplemented-13-sites); imported above. The resident loop must stay async
 // (AC4 — never block on execFileSync).
 
-/** 写 worktree 任务文件 + 提交（flip / reset 共用的机械步：写盘 → add → commit --no-verify）。 */
+/** 写 worktree 任务文件 + 提交（flip / reset 共用的机械步：写盘 → add → commit --no-verify）。
+ *  返回 `commit`（本次提交的 sha，`git rev-parse HEAD` 读回；读不回 ⇒ null）与 `at`（写盘时刻 = 该
+ *  status 变更发生的时刻）——二者是 v1 事件 `evidence.commit` / `at` 的直接来源
+ *  （gap-task-status-events-contract-v1：事件在提交【之后】追加，故 sha 可在追加前取到）。 */
 async function commitTaskStatusChange(
   worktree: string,
   task: string,
   file: string,
   nextText: string,
   message: string,
-): Promise<{ ok: boolean; reason: string | null }> {
+): Promise<{ ok: boolean; reason: string | null; commit: string | null; at: string }> {
   fs.writeFileSync(file, nextText, "utf8");
+  const at = new Date().toISOString();
+  const failed = (reason: string) => ({ ok: false, reason, commit: null, at });
   let a = await mechSh(["git", "-C", worktree, "add", `tasks/${task}.md`]);
-  if (!a.ok) return { ok: false, reason: `git add failed: ${combinedOutput(a.stdout, a.stderr) || `exit ${a.status}`}` };
+  if (!a.ok) return failed(`git add failed: ${combinedOutput(a.stdout, a.stderr) || `exit ${a.status}`}`);
   a = await mechSh(["git", "-C", worktree, "commit", "-q", "--no-verify", "-m", message, "--", `tasks/${task}.md`]);
-  if (!a.ok) return { ok: false, reason: `git commit failed: ${combinedOutput(a.stdout, a.stderr) || `exit ${a.status}`}` };
-  return { ok: true, reason: null };
+  if (!a.ok) return failed(`git commit failed: ${combinedOutput(a.stdout, a.stderr) || `exit ${a.status}`}`);
+  const rev = await mechSh(["git", "-C", worktree, "rev-parse", "HEAD"]);
+  const sha = rev.ok ? rev.stdout.trim() : "";
+  return { ok: true, reason: null, commit: /^[0-9a-f]{40,64}$/i.test(sha) ? sha : null, at };
+}
+
+/** The fan-in's v1 transition-event emit (ONE shape for all four sites). Called AFTER the commit —
+ *  never before (硬规则 7): the event traces a status write that is already durable, and names the
+ *  commit that carries it. A failed append never fails the flip (the kernel counts + logs it and the
+ *  reconcile script closes the gap) but IS returned so the caller's step trace can show it. */
+function emitFanInTransitionEvent(
+  ctx: { root: string; cause?: { runId?: string } },
+  task: string,
+  from: string,
+  to: string,
+  at: string,
+  written: string,
+  commit: string | null,
+  writerId: string,
+): void {
+  appendTaskStatusEvent(ctx.root, {
+    taskId: task,
+    from,
+    to,
+    kind: edgeKindFor(from, to, { allowLegacy: true }),
+    actor: { kind: "fan-in", id: writerId },
+    at,
+    ...(ctx.cause && Object.keys(ctx.cause).length > 0 ? { cause: ctx.cause } : {}),
+    evidence: {
+      commit,
+      statusBlobSha: gitBlobSha(written),
+      ...(commit === null ? { commitAbsentReason: "git rev-parse HEAD returned no sha after the commit" } : {}),
+    },
+  });
 }
 
 /** 读 worktree 的任务文件并翻 status ready→done（fail-closed：status 经 task-ops.ts 单一 parser 读出，
@@ -1439,11 +1482,17 @@ async function commitTaskStatusChange(
  *    - 已真落地（mergeTarget 的 tasks/<task>.md status=done）⇒ skip（不 reset、不重翻，返回 ok）；
  *    - 未真落地（mergeTarget 仍是 ready / 读不到）⇒ reset 到 ready 再 flip（两提交，ff 落在新 flip tip）。
  *  正常 `status: ready` 的 flip 行为不变（AC4）。判落地用「mergeTarget 的任务文件 status」直接量
- *  （⛔ 不各写一遍 computeLandingState 的 landing 判定——本函数只判 flip 侧的一致性）。 */
+ *  （⛔ 不各写一遍 computeLandingState 的 landing 判定——本函数只判 flip 侧的一致性）。
+ *
+ *  gap-task-status-events-contract-v1：每次提交成功后 emit 一行 v1 转移事件（reset 与 flip 各一行
+ *  ——它们是两次真实的 status 变更）。`ctx.root` 是工作区根（事件载体 `.quay/task-status-events.jsonl`
+ *  所在），`ctx.cause.runId` 是本轮 fan-in 的过程 id。⛔ 事件 emit 失败不改判 ok（内核 fail-open +
+ *  计数 + stderr；缺口归 reconcile）。 */
 async function flipTaskDone(
   worktree: string,
   task: string,
   mergeTarget: string,
+  ctx: { root: string; cause?: { runId?: string } },
 ): Promise<{ ok: boolean; reason: string | null }> {
   const file = path.join(worktree, "tasks", `${task}.md`);
   let text: string;
@@ -1458,10 +1507,14 @@ async function flipTaskDone(
   if (!split) return { ok: false, reason: "task file has no frontmatter" };
   const from = statusFromFrontmatter(split.frontmatterRaw);
   const rebuild = (fm: string): string => `${split.open}${fm}${split.close}${split.body}`;
+  const flipMessage = `tasks: 翻 ${task} done（driver 机械 fan-in）`;
   if (from === "ready") {
     const flipped = patchStatusField(split.frontmatterRaw, "done");
     if (!flipped.ok) return { ok: false, reason: `flip failed: ${flipped.reason}` };
-    return commitTaskStatusChange(worktree, task, file, rebuild(flipped.fm), `tasks: 翻 ${task} done（driver 机械 fan-in）`);
+    const nextText = rebuild(flipped.fm);
+    const res = await commitTaskStatusChange(worktree, task, file, nextText, flipMessage);
+    if (res.ok) emitFanInTransitionEvent(ctx, task, "ready", "done", res.at, nextText, res.commit, "worker-fan-in flipTaskDone");
+    return res;
   }
   if (from === "done") {
     // done 已存在：判真落地（mergeTarget 的任务文件是否已 done）。已落地 ⇒ skip；未落地 ⇒ reset→flip。
@@ -1469,14 +1522,19 @@ async function flipTaskDone(
     if (landed === "done") return { ok: true, reason: null };
     const reset = patchStatusField(split.frontmatterRaw, "ready");
     if (!reset.ok) return { ok: false, reason: `reset to ready failed: ${reset.reason}` };
+    const resetText = rebuild(reset.fm);
     const resetResult = await commitTaskStatusChange(
-      worktree, task, file, rebuild(reset.fm),
+      worktree, task, file, resetText,
       `tasks: reset ${task} done→ready（fan-in 收敛「done 未落地」中间态）`,
     );
     if (!resetResult.ok) return resetResult;
+    emitFanInTransitionEvent(ctx, task, "done", "ready", resetResult.at, resetText, resetResult.commit, "worker-fan-in flipTaskDone reset");
     const flipped = patchStatusField(reset.fm, "done");
     if (!flipped.ok) return { ok: false, reason: `flip after reset failed: ${flipped.reason}` };
-    return commitTaskStatusChange(worktree, task, file, rebuild(flipped.fm), `tasks: 翻 ${task} done（driver 机械 fan-in）`);
+    const flipText = rebuild(flipped.fm);
+    const flipResult = await commitTaskStatusChange(worktree, task, file, flipText, flipMessage);
+    if (flipResult.ok) emitFanInTransitionEvent(ctx, task, "ready", "done", flipResult.at, flipText, flipResult.commit, "worker-fan-in flipTaskDone");
+    return flipResult;
   }
   return { ok: false, reason: `expected status 'ready' or 'done', got ${from === null ? "none" : JSON.stringify(from)}` };
 }
@@ -1517,9 +1575,17 @@ async function syncDoneToDocFace(root: string, task: string): Promise<{ ok: bool
     if (!flipped.ok) return { ok: false, reason: `doc-face flip failed: ${flipped.reason}` };
     const nextText = `${split.open}${flipped.fm}${split.close}${split.body}`;
     fs.writeFileSync(file, nextText, "utf8");
+    const at = new Date().toISOString();
     if (!commitTaskFile(root, rel, `tasks: 翻 ${task} done（goal 分支落地，状态双写 develop）`)) {
       return { ok: false, reason: "doc-face commit failed" };
     }
+    // gap-task-status-events-contract-v1: the doc-face done is a REAL status change in its own right
+    // (this is the one that reaches develop when the merge target is a goal branch) ⇒ one v1 event,
+    // appended after its commit. The worktree-side flip above emits its own event for its own commit;
+    // only one of the two ever reaches a given ref, so a ref-scoped reconcile counts one, not two.
+    const rev = await mechSh(["git", "-C", root, "rev-parse", "HEAD"]);
+    const sha = rev.ok ? rev.stdout.trim() : "";
+    emitFanInTransitionEvent({ root }, task, "ready", "done", at, nextText, /^[0-9a-f]{40,64}$/i.test(sha) ? sha : null, "worker-fan-in syncDoneToDocFace");
   }
   if (!propagateDocBranchToDevelop(root)) {
     return { ok: false, reason: "propagateDocBranchToDevelop failed (doc→develop ff-only ∧ semantic fallback both failed)" };
@@ -2642,7 +2708,7 @@ export async function runMechanicalFanIn(opts: MechanicalFanInOptions): Promise<
     a = await step("ac-gate", [...acGate, "--task", task, "--worktree", worktree], 60_000);
     if (!a.ok) return fail("ac-gate", a);
     const flipT0 = Date.now();
-    const flip = await flipTaskDone(worktree, task, mergeTarget);
+    const flip = await flipTaskDone(worktree, task, mergeTarget, { root, cause: { runId } });
     trace({ step: "flip-done", exit: flip.ok ? 0 : 1, wall_ms: Date.now() - flipT0, ok: flip.ok, ...(flip.ok ? {} : { reason: flip.reason ?? "flip failed" }) });
     if (!flip.ok) return failClean("flip-done", flip.reason ?? "flip failed");
 

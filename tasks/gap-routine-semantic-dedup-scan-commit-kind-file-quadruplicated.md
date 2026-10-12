@@ -3,7 +3,7 @@ id: gap-routine-semantic-dedup-scan-commit-kind-file-quadruplicated
 title: "semantic-dedup-scan: four copies of one wrapper (resolveGitRoot →
   commitStoreWrite with propagate:'none'); the only semantic difference is the
   kind string ('adr'/'docs-managed'/'me"
-status: ready
+status: done
 labels:
   - gap
   - routine-filed

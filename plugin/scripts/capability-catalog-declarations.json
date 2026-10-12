@@ -252,6 +252,7 @@
     "quay-launch.sh": "What is the exact per-role launch command (manager/outer), materialized verbatim from the checked-in launch settings?",
     "read-probe-spec.ts": "Is the probe spec well-formed and loadable?",
     "discovery-method-routine.ts": "What does the DISCOVERY-METHOD routine answer — does the already-landed self-bootstrapping Discovery Method loop (docs/analysis/discovery-{experience-ledger,reflection,method-registry}.mjs) actually RUN periodically, bounded and killable, instead of only ever being hand-run from a task worktree? Each due round does exactly three things: (a) ingestNewOutcomes — the watermarked batch ingester over the real evidence store, quota-bounded; (b) ONE bounded reflection round over whatever that produced (and ZERO model calls when it produced nothing); (c) validateGeneralization for the candidates THAT ROUND minted, against held-out Experiences carrying an evaluation_pin, each read in a stripped detached tree materialised at the pin. It appends exactly ONE scan-round line (experiences ingested, units reflected, candidates, verdicts, promotions, retirements, model calls, tokens, wall ms, cost) to .quay/discovery-method-findings.jsonl, plus — when a WALL BREACH cuts the round short after at least one completed call — that SAME line marked partial:true with the breach as its partial_reason (results already produced are kept; the last-run is still not advanced, so the next round is due and retries the units it never reached). A workspace with no loop.discovery_method: section gets not-evaluated:disabled and ZERO spawns; a malformed section (or an interval under the 360m floor) gets failed and ZERO spawns; and any step's refusal (WATERMARK_MISMATCH, an unresolved shared checkout, an unavailable model seam) records failed with THAT reason, appends nothing and does not advance the last-run?",
+    "open-semantic-discovery-routine.ts": "What does the OPEN-SEMANTIC-DISCOVERY routine answer — does the ONE path that has actually found real new defects here (open-ended hypothesis generation plus source Read/Grep verification, docs/analysis/arch-hypothesis-generation.mjs, hand-run in the 2026-10-12 capability-gain experiment and never scheduled) actually RUN periodically, bounded and killable? Each due round pins the develop tip into a STRIPPED tree, runs the investigator with Read,Grep,Glob rooted at that pin and an explicit --max-turns so the model reads code itself, merges near-duplicate hypotheses, verifies at most K clusters with Read,Grep, puts every surviving cluster through an INDEPENDENT fresh-context refutation (a cluster counts as confirmed ONLY if it survives), assesses the engineering value of each confirmed cluster, and appends one scan-round line plus one record per cluster to .quay/open-semantic-discovery-findings.jsonl. Two hard trailing-24h ceilings (model calls AND gateway USD) are pre-spawn reservations on this routine's own ledger. A workspace with no loop.open_semantic_discovery: section gets not-evaluated:disabled and ZERO spawns; a malformed section, a missing key, or an interval under the 60m floor gets failed and ZERO spawns; a refused reservation stops the round and reports budget-24h or budget-usd-24h; and an empty, missing or unbuildable inventory, an unchanged pin, or ANOTHER routine's mechanical reading never suppresses the semantic round?",
     "arch-discovery-routine.ts": "What does the arch-DISCOVERY routine answer — do the two verified static instruments (docs/analysis/arch-discovery-{space,time}.mjs) actually RUN periodically, bounded and killable, with every finding deduplicated across rounds, instead of only ever being started by hand? Each due round spawns both instruments' --scan as bounded child node processes, diffs the run-stable finding_fp set against the append-only carrier .quay/arch-discovery-findings.jsonl (new / repeated / gone counts + per-subject_key recurrence + verdict transitions), and appends one scan-round line with per-kind counts plus wall ms and peak RSS; a workspace with no loop.arch_discovery: section gets not-evaluated:disabled and ZERO spawns, and any instrument failure (non-zero exit, timeout, unparseable output, validator refusal, unreadable carrier) records failed and appends nothing?",
     "probe-routine.ts": "Is a DECLARED probe routine (.quay/config.yml loop.routines: entry with a probe: field and an interval:<N>m trigger) actually DRIVEN by a live layer — readProbeSpec -> fresh-context spawn -> FILE-ONLY guard -> structured findings appended to .quay/routine-findings.jsonl, with the interval window persisted by the DRIVER itself rather than by an agent remembering to write it — so a declared-but-never-firing routine is distinguishable from one that runs (tasks/gap-productize-deep-semantic-dedup-scan-routine)?",
     "probe-write-guard.ts": "Did an LLM probe spawn modify any TRACKED file while it ran — a probe's product is stdout JSON only, so any NEW tracked-file change in the spawn window is a violation that must be reported, and an unreadable tree is NOT-EVALUATED never conflated with clean (硬规则 6)?",
@@ -399,7 +400,8 @@
     "shipped-shell-reachability.ts": "发布产物里哪些 .sh 该留、哪些不该留 —— 由「运行时实际会执行」的引用闭包派生,而不是维护文件名清单、也不按散文提及? 根 = plugin/bin/quay + plugin/.mcp.json + plugin/skills 与 plugin/loop 围栏代码块里的命令 + plugin/workflows 发出的命令 + packages/*/src 里 resolvePluginScript* / resolveKernelShellSibling 的字面量 + 已构建的 scripts/dist 与 gate-scripts/dist 入口 + capability-catalog-declarations.json 声明的 instrument(quay instrument 那批检查器是产品功能,不因名字以 -check.sh 结尾就删)。闭包只沿【命令位置】的引用走(注释行、正文提及、示例字符串都不算命中),所以它不重演「文本闭包」的高估(实测 2026-10-07:提及闭包留 85/90,执行闭包留 71/90)。出局的两类:无人引用的(退役的经典管线门 gate-scripts/*.sh、开发期资产同步 sync.sh)与按决定出局的(UNSHIPPED_BY_DECISION:已取消的 npm/tgz 渠道的交付验证工具,逐条带理由)。读数三值:evaluated:false 当某个根面或候选集读不出来(硬规则 3b)。(tasks/gap-shipped-shell-limited-to-runtime-reachable-set-and-delivery-verify-tools-leave-the-artifact;GOAL-029,人 2026-10-07 裁定)?",
     "shipped-set-rules.ts": "发布产物(plugin artifact)里【不该出现的东西】还有没有剩下,以及产物自己有多大 —— 规则声明在 plugin/shipped-set-rules.txt(目录/模式,不是文件名清单:test/、tests/、fixtures/、checker-mutation-cases/、*.test.*/*.spec.*、*-baseline.json/*-exceptions.txt/*-exemptions.*/*-violations.txt/*-violators.txt 及本规则/基线文件自身),本模块是它【唯一】的解析器与匹配器。它对一份已装配的产物给出两类读数:①规则排除、却仍然存在的路径(逐条列举 + 命中的那条规则)及其 files/bytes/.sh 有效行三个量 —— 这就是只降不升棘轮的三个轴,正确发布时应恒为 0;②产物自身的三项总量。同一份规则同时驱动【发布装配】(publish-dist-branch.sh 的 rsync --exclude,经 --print-rsync-excludes)与【发布门禁断言】(verify-plugin-channel-assertions.ts 的 shipped-set-clean),所以「排除什么」与「断言什么」结构上不可能各说各话(tasks/gap-shipped-plugin-tree-excludes-dev-only-content-and-has-a-shrink-only-size-ratchet;GOAL-029「收窄发布集合」,人 2026-10-07 裁定)?",
     "task-granularity-advice.ts": "At filing time, which OPEN tasks already declare the files this draft will touch (merge candidates), and how has each of those files behaved historically (landed tasks / changed lines / worker rounds)? And — across task sizes — what is the real worker cost per unit of landed work (worker-hours per 1000 changed lines), with a re-runnable cost model?",
-    "quay-init-closure-assertion.ts": "Is every relative path of a REAL quay-init laydown a member of the SPEC §6 six-item closed set (∪ tasks/ descendants) with ZERO .claude/{skills,workflows,agents} / plugin/scripts copies (closed-set MEMBERSHIP — distinct from the ratchet's count-only judgment; NOT-EVALUATED when the laydown cannot run) (SPEC AC168 收缩本体, tasks/gap-quay-init-closure-shrink-body)?"
+    "quay-init-closure-assertion.ts": "Is every relative path of a REAL quay-init laydown a member of the SPEC §6 six-item closed set (∪ tasks/ descendants) with ZERO .claude/{skills,workflows,agents} / plugin/scripts copies (closed-set MEMBERSHIP — distinct from the ratchet's count-only judgment; NOT-EVALUATED when the laydown cannot run) (SPEC AC168 收缩本体, tasks/gap-quay-init-closure-shrink-body)?",
+    "task-status-events-reconcile.ts": "本仓库 .quay/task-status-events.jsonl 里【缺了】的 task 状态转移，能不能【只从 git】补齐 —— 即把载体（v0 与 v1 两代一起读，逐行三值分类 v0/v1/corrupt）与 git log --no-merges <ref> -- tasks/ 上真实发生过的 status 行变更（每个非 merge 提交上，任务文件在【该提交】与【其第一父】两处的 frontmatter status 经同一个 parser 读出后不同）逐条配对，报出每条边 from→to 的 git 计数 / 事件计数 / 缺失数，并且只对【有 git 证据而载体没有】的转移（--apply 时）追加 inferred:true 事件：at 只许取那个提交的 committer 时间、evidence.commit 就是那个提交、actor.kind 记 unknown（提交消息是【声称】不是按位置读数，⛔ 不从模板文案猜 writer）；因此「崩溃与接线前窗口留下的空洞」第一次有了一个默认只读、可幂等重跑（第二次 --apply 追加 0）的收敛口，且【没有任何 git 证据的转移永不凭空造事件】（tasks/gap-task-status-events-contract-v1-all-driver-writers Plan §4）？"
   },
   "GUARD_OBJECT": {
     "manager-tick-log-check.sh": "file:orchestration/manager-tick-log.md",
@@ -628,6 +630,7 @@
     "quay-session.ts": "按需",
     "read-probe-spec.ts": "每里程碑",
     "discovery-method-routine.ts": "按需",
+    "open-semantic-discovery-routine.ts": "按需",
     "arch-discovery-routine.ts": "按需",
     "probe-routine.ts": "按需",
     "probe-write-guard.ts": "按需",
@@ -784,7 +787,8 @@
     "shipped-shell-reachability.ts": "按需",
     "shipped-set-rules.ts": "每轮",
     "task-granularity-advice.ts": "按需",
-    "quay-init-closure-assertion.ts": "按需"
+    "quay-init-closure-assertion.ts": "按需",
+    "task-status-events-reconcile.ts": "按需"
   },
   "INVALIDATION": {
     "verify-plugin-channel-assertions.ts": "失效前提：Claude Code plugin 仍是唯一的发布/安装渠道，且 release.yml 的 verify-plugin-channel 仍是发布门禁（门禁若移到别处，断言实现不变但调用点须同步）；断言依赖的直接量仍存在——VERSION、.claude-plugin/plugin.json、bin/quay --version、项目 .quay/plugin 链接、.quay/config.yml 的 providers.native、/proc/<pid>/cgroup、.quay/server.json、.quay/serve.log、installed_plugins.json。任一量改由另一个载体承载（例如版本改从被测对象自报接口取）⇒ 本条口径需同步，否则会把读不懂误判为合格。",
@@ -1004,6 +1008,7 @@
     "quay-session.ts": "无可测前提，靠周期复核",
     "read-probe-spec.ts": "无可测前提，靠周期复核",
     "discovery-method-routine.ts": "失效前提：① .quay/config.yml 的 loop.discovery_method: 不再是本例程的声明处（改由 driver 代码或另一个平面声明）；② 宿主 driver 不再把本例程装进 Layer-1b 例程表（quality driver 被退役/替换）；③ Discovery Method 三模块（docs/analysis/discovery-{experience-ledger,reflection,method-registry}.mjs）的 ingestNewOutcomes / runReflectionRound / validateGeneralization 契约改变（返回形状、refusal 码、evaluation_pin 语义）。任一发生 ⇒ 判据需重写，而不是继续引用本模块。",
+    "open-semantic-discovery-routine.ts": "失效前提：① .quay/config.yml 的 loop.open_semantic_discovery: 不再是本例程的声明处（改由 driver 代码或另一个平面声明）；② 宿主 driver 不再把本例程装进 Layer-1b 例程表（quality driver 被退役/替换）；③ 引擎模块 docs/analysis/arch-hypothesis-generation.mjs 的 runInvestigator / runVerifier / clusterHypotheses / hardenedArgv / verifyCwdRefusal 契约改变（返回形状、pin 语义、refusal 码），或 docs/analysis/discovery-portfolio.mjs 的 loadGatewayRates / deriveCost 契约改变；④ 预留台账（gap-discovery-method-24h-budget-hard-reservation 交付的 openModelBudget 一族）的 reserve/outcome 记录形状改变。任一发生 ⇒ 判据需重写，而不是继续引用本模块。",
     "arch-discovery-routine.ts": "失效前提：① .quay/config.yml 的 loop.arch_discovery: 不再是本例程的声明处（改由 driver 代码或另一个平面声明）；② 宿主 driver 不再把本例程装进 Layer-1b 例程表（quality driver 被退役/替换）；③ 两个仪器（docs/analysis/arch-discovery-{space,time}.mjs）的 --scan 形态或其 finding_fp 契约改变。任一发生 ⇒ 判据需重写，而不是继续引用本模块。",
     "probe-routine.ts": "失效前提：① .quay/config.yml 的 loop.routines: 不再是 probe 轨道的声明处（改由 driver 代码或另一个平面声明）；② 宿主 driver 不再把 probe 例程装进 Layer-1b 例程表（quality driver 被退役/替换）；③ 探针产出契约从「一个 JSON 对象」改成别的形状（plugin/probes/semantic-dedup-scan.md 的输出契约段）。任一发生 ⇒ 判据需重写，而不是继续引用本模块。",
     "probe-write-guard.ts": "失效前提：① git status --porcelain 不再是「tracked 文件被改动」的可靠读数（工作区改为非 git 存储）；② 调用侧改为允许探针直接落盘（FILE-ONLY 契约本身被推翻）。任一发生 ⇒ 守卫的判据从「spawn 期间新出现的改动」改为对应的新形态。",
@@ -1160,7 +1165,8 @@
     "shipped-shell-reachability.ts": "失效前提:①发布装配仍由 plugin/scripts/publish-dist-branch.sh 用 --print-excludes 的输出生成 rsync --exclude —— 排除改由构建器表达时,装配半边须重新对齐;②根面仍如上 —— 新增一类运行时可启动的面(新的入口目录/新的声明表)时须加进根,否则该面的 .sh 会被误判出局;③gate-scripts/ 仍是「文件留树、不铺、不 sync」的退役态;④UNSHIPPED_BY_DECISION 每条仍是「可达但渠道已取消」—— 渠道恢复则移除该条。",
     "shipped-set-rules.ts": "失效前提:①发布装配仍是 plugin/scripts/publish-dist-branch.sh 的 rsync 那一步 —— 渠道换成别的机制、或排除改由构建器而非 rsync 表达时,--print-rsync-excludes 这半边退休(断言半边仍有效,但规则与装配须重新对齐);②发布门禁仍是 plugin/scripts/verify-plugin-channel-assertions.ts(断言若移到别处,调用点须同步);③esbuild 仍把内联模块的路径以【相对】形式写进产物 —— 若改为绝对路径或不写路径,bytes 轴可以重新设门,SIZE_GATED_AXES 只门 files/shLines 的取舍须重估(实测:同一份源码在不同构建树位置下相差 225,828 字节,同一构建重复跑相差 ±3 字节);④产物仍由「源码树 rsync + 删原始 .ts + 打 dist bundle」三步装配 —— 装配形变会改变三个总量的含义。",
     "task-granularity-advice.ts": "失效前提：生产载体 .quay/worker-outcome.jsonl 仍由 worker-driver 按次写记录、任务落地仍以 Merge branch 'develop' into task/<id> 提交为可观测落点（体量取自其 develop 一侧父提交的 numstat）、且 ## Touches 仍是任务的声明面（peers 按解析后的 Touches 判重叠）；若落地不再产生该 merge 提交或改由别的落地路径、或 outcome 记录粒度改为按轮而非按次、或任务粒度不再由 Touches/体量判断，本条无对象，退休",
-    "quay-init-closure-assertion.ts": "失效前提：quay-init.sh 会写入 §6 闭集之外的任何路径（.claude/{skills,workflows,agents}、plugin/scripts、orchestration、docs/analysis、.quay/runtime 副本）；若 AC168 收缩本体落地、写入面收敛到六项闭集，本检查器判定闭集成员（仍有对象，不退休）"
+    "quay-init-closure-assertion.ts": "失效前提：quay-init.sh 会写入 §6 闭集之外的任何路径（.claude/{skills,workflows,agents}、plugin/scripts、orchestration、docs/analysis、.quay/runtime 副本）；若 AC168 收缩本体落地、写入面收敛到六项闭集，本检查器判定闭集成员（仍有对象，不退休）",
+    "task-status-events-reconcile.ts": "失效前提：转移事件载体仍是 .quay/task-status-events.jsonl（v0 行按原样读作 v0、v1 行带 schema=task-status-event/v1 与 evidence.commit），且状态变更仍落在 tasks/*.md 的 frontmatter status: 行上、仍由 git 提交承载。任一改变（例如状态改由另一个载体承载、或 v1 记录的 evidence 字段改名/改语义）⇒ 配对与幂等判据须同步，否则会把「读不懂」伪装成「已覆盖」。"
   },
   "LAST_REAFFIRMED": {
     "verify-plugin-channel-assertions.ts": "2026-10-06",
@@ -1380,6 +1386,7 @@
     "quay-session.ts": "2026-08-10",
     "read-probe-spec.ts": "2026-08-10",
     "discovery-method-routine.ts": "2026-10-12",
+    "open-semantic-discovery-routine.ts": "2026-10-13",
     "arch-discovery-routine.ts": "2026-10-11",
     "probe-routine.ts": "2026-09-13",
     "probe-write-guard.ts": "2026-09-13",
@@ -1536,7 +1543,8 @@
     "shipped-shell-reachability.ts": "2026-10-07",
     "shipped-set-rules.ts": "2026-10-07",
     "task-granularity-advice.ts": "2026-10-07",
-    "quay-init-closure-assertion.ts": "2026-09-08"
+    "quay-init-closure-assertion.ts": "2026-09-08",
+    "task-status-events-reconcile.ts": "2026-10-13"
   },
   "MATCHING": {
     "verify-plugin-channel-assertions.ts": "position",
@@ -1756,6 +1764,7 @@
     "quay-session.ts": "keyword",
     "read-probe-spec.ts": "keyword",
     "discovery-method-routine.ts": "keyword",
+    "open-semantic-discovery-routine.ts": "keyword",
     "arch-discovery-routine.ts": "keyword",
     "probe-routine.ts": "keyword",
     "probe-write-guard.ts": "keyword",
@@ -1912,7 +1921,8 @@
     "shipped-shell-reachability.ts": "position",
     "shipped-set-rules.ts": "position",
     "task-granularity-advice.ts": "position",
-    "quay-init-closure-assertion.ts": "enumerative"
+    "quay-init-closure-assertion.ts": "enumerative",
+    "task-status-events-reconcile.ts": "position"
   },
   "CONSUMER": {
     "verify-plugin-channel-assertions.ts": ".github/workflows/release.yml 的 verify-plugin-channel 步骤（CI 门禁调用点）与发布前本地演练（README「发布前本地演练」）。",
@@ -1997,6 +2007,7 @@
     "perfile-failure-rate.ts": "谁按：fan-in-execute.js 的 FIX_SCOPE_GATE（suite-fix 分诊路径，每红窗）import classifyFailure/readCarrierPerFile 为每条失败附基线并把 never-failed/step-change 路由到升级而非静默 defer-retry；任务实现者验证时也按（node --experimental-strip-types plugin/scripts/perfile-failure-rate.ts --root <主检出>）；条件=要用逐文件历史失败率判定「这次失败是否符合该文件既有行为」",
     "pre-verified-round-record.ts": "谁按：fan-in-execute workflow step 4.5 的 # preverified-round-block 在 full_suite_ran=true 时按（AC1/AC2 共用 writer，preverified 布尔由 suite_preverified 标记决定：1=pre-verified 复用，0=本 fan-in 真跑）；条件=fan-in 的 suite 走了本 workflow 内 detached 直跑或 pre-verified 复用（不经 full-suite-runner）要写 verification-round 记录到共享 checkout",
     "discovery-method-routine.ts": "谁按：quality-gate-driver.ts 的 Layer-1b 常驻例程环 —— 启动时 discoveryMethodRoutineFromConfig(root) 读 .quay/config.yml loop.discovery_method: 装配例程（并把 liveDiscoveryModel 作为**惰性** modelFactory 注入，只有轮内 ingested>0 时才解析 launcher），每轮用 driver-runtime.scheduleIsDue（= routine-scheduler.isDue）对标 interval:<N>m 判 due，due 且非 halted 且持久 .quay/routine-last-run.json 窗口已过期时：ingestNewOutcomes →（有新 Experience 才）runReflectionRound → 对新候选 validateGeneralization（held-out 需带 evaluation_pin，在 pin 的 stripped 树里读）→ 追加一行 scan-round 到 .quay/discovery-method-findings.jsonl。条件=section enabled 且未被 halt 且窗口已过期。⛔ 本模块不立案、不写 tasks/ 或 goals/。",
+    "open-semantic-discovery-routine.ts": "谁按：quality-gate-driver.ts 的 Layer-1b 常驻例程环 —— 启动时 openSemanticDiscoveryRoutineFromConfig(root) 读 .quay/config.yml loop.open_semantic_discovery: 装配例程，每轮用 driver-runtime.scheduleIsDue（= routine-scheduler.isDue）对标 interval:<N>m 判 due，due 且非 halted 且持久 .quay/routine-last-run.json 窗口已过期时：把 develop tip 物化成剥离过的 pin（PIN_FORBIDDEN_DIRS 逐条移除并校验）→ 用 Read,Grep,Glob + --max-turns 在 pin 里跑 investigator → clusterHypotheses 合并近重复 → 至多 K 簇逐个 verifier（Read,Grep）→ 每个 supported 簇一次新上下文 refuter → 每个 confirmed 簇一次价值评估 → 追加一行 scan-round + 每簇一条记录到 .quay/open-semantic-discovery-findings.jsonl。每个子进程（investigator/verifier/refuter/value-assessment）先预留后 spawn，预留写在 .quay/open-semantic-discovery-model-budget.jsonl。条件=section enabled 且未被 halt 且窗口已过期且两个 24h 天花板都未撞顶。本模块不立案、不写 tasks/ 或 goals/。",
     "arch-discovery-routine.ts": "谁按：quality-gate-driver.ts 的 Layer-1b 常驻例程环 —— 启动时 archDiscoveryRoutineFromConfig(root) 读 .quay/config.yml loop.arch_discovery: 装配例程，每轮用 driver-runtime.scheduleIsDue（= routine-scheduler.isDue）对标 interval:<N>m 判 due，due 且非 halted 且持久 last-run 窗口已过期时，串行 spawn 两个仪器的 --scan （node --experimental-strip-types --max-old-space-size=<mb> + 仪器的 --max-ms/--max-records），结果比对后追加到 .quay/arch-discovery-findings.jsonl。条件=section enabled 且未被 halt 且窗口已过期。⛔ 本模块不立案、不写 tasks/ 或 goals/。",
     "probe-routine.ts": "谁按：quality-gate-driver.ts 的 Layer-1b 常驻例程环，每趟 pass 用 driver-runtime.scheduleIsDue（= routine-scheduler.isDue）对 .quay/config.yml loop.routines: 里带 probe: 字段的声明判 due（interval:<N>m），due 即 import 本模块 spawn 一个 fresh-context 探针；条件=某条 probe 例程的【持久】last-run 窗口已过期或从未跑过（last-run 由 driver 自己落盘，不靠 agent 记得写），且 .quay/config.yml 里该声明在场——声明缺席时该轮根本不装配该例程（此为实测过的取假形态）。手动复跑缝同为 node --experimental-strip-types plugin/scripts/probe-routine.ts",
     "probe-write-guard.ts": "谁按：meta-driver.ts（原地 re-export，实现只此一份）与 probe-routine.ts 的 FILE-ONLY 守卫在每次 fresh-context spawn 前后 import 调用；条件=要判一次 LLM 探针 spawn 期间是否有 TRACKED 文件被改动（探针的产品只有 stdout JSON，任何新增 tracked 改动即违规；树读不出时 NOT-EVALUATED，不与 clean 同形）",
@@ -2091,7 +2102,8 @@
     "shipped-shell-reachability.ts": "谁按:①scripts/test.sh 的 plugin/test/shipped-shell-reachability.test.mjs(真产物:每个 .sh 都可达,且 verify-deliver-coldstart.sh 与 develop-deliver-tgz.sh 不在产物中;三向取假:往产物塞无人引用的 orphan-tool.sh 必红、把某 instrument 的 .sh 从 catalog 声明里拿掉必红、把 verify-deliver-coldstart.sh 塞回产物必红);②发布装配 plugin/scripts/publish-dist-branch.sh(经 --print-excludes 生成 rsync --exclude);③发布门禁 plugin/scripts/verify-plugin-channel-assertions.ts 的 shipped-shell-reachable 断言(对已安装树直接走盘,与源码检出的可达集比对)。⛔ 本模块是【源码检出的门】:它的输入(packages/quay/src、plugin/skills、catalog 声明、规则文件)都不随产物发出,所以 publish-dist-branch.sh 里用带引号的路径调用它,使 build-plugin-dist 的 INVOCATION_RE 不把它并进 bundle 入口 —— 它本身不进产物。决定清单 = 本模块的 UNSHIPPED_BY_DECISION;条件=要判『产物里的 .sh 是否只剩运行时可达的集合』—— 这正是 GOAL-029 的取假点",
     "shipped-set-rules.ts": "谁按:①scripts/test.sh 的 plugin/test/shipped-set.test.mjs(双控:真产物必须 0 违规且三轴不超基线、把排除列表从 rsync 行拿掉必须红、往干净产物塞 foo.test.mjs 必须红、棘轮 over/raised/reanchor 三向、零规则必须 NOT-EVALUATED);②.github/workflows/release.yml 的 verify-plugin-channel 两个 scope 步骤经 verify-plugin-channel-assertions.ts 的 shipped-set-clean 断言按(先判规则排除内容为 0,再判 files/shLines 不超记录值);③人按:本文件的 CLI —— --check <artifactDir>(读一份已装配的产物;退出 0/1/2)、--reanchor(从产物【自己的读数】重锚,有规则排除内容在时拒绝)、--print-rsync-excludes(publish-dist-branch.sh 用它生成 rsync --exclude)。⛔ 本模块【不进产物】(与 verify-plugin-channel-assertions.ts 同一条纪律):它的两个输入 —— 规则 plugin/shipped-set-rules.txt 与基线 plugin/shipped-set-baseline.json —— 都被排除规则本身排除了,所以一份打好的 bundle 只可能回答 NOT-EVALUATED;它永远从源码检出运行。数据文件:规则 plugin/shipped-set-rules.txt、基线 plugin/shipped-set-baseline.json(三轴只降不升,且相对 git HEAD 的值也只许降);条件=要判『发布集合是否在重新长回开发期内容、体积是否在回升』—— 这正是 GOAL-029 的取假点",
     "task-granularity-advice.ts": "谁按：立案者 / quay-file-task 第 2b 步（plugin/skills/quay-file-task/SKILL.md）在立案前查合并候选与每文件历史时按（node --experimental-strip-types plugin/scripts/task-granularity-advice.ts --touches <草稿 Touches> --json）；条件=要判「这条草稿是否与已有开放任务在实质源码文件上重叠」，或要复核 docs/analysis/task-granularity-and-throughput-2026-10-07.md 的体量读数时跑 --report",
-    "quay-init-closure-assertion.ts": "谁按：其自有测试 + 周期复核（当前未接进 run_static_checks @static-tier——AC2 只要求可运行+NOT-EVALUATED 可区分）；条件=枚举一次真实 quay-init laydown 的相对路径、断言均 ∈ 六项闭集 ∪ tasks/ 后代且零扩展/脚本副本"
+    "quay-init-closure-assertion.ts": "谁按：其自有测试 + 周期复核（当前未接进 run_static_checks @static-tier——AC2 只要求可运行+NOT-EVALUATED 可区分）；条件=枚举一次真实 quay-init laydown 的相对路径、断言均 ∈ 六项闭集 ∪ tasks/ 后代且零扩展/脚本副本",
+    "task-status-events-reconcile.ts": "谁按：本仓库的人或机制在【源码检出】里判断「任务状态事件的缺口在哪」时按（CLI：--root <repo> / --ref develop / --since <ISO> / --apply / --json，用法见其 --help）；覆盖读数（per-edge coverage 表）也由本命令产出；条件=载体事件数少于 git 实际发生的状态转移数（例如某个 driver writer 尚未接线、或一次写入崩溃），需要从 git 把缺失的转移补回载体而不许凭空造事件。⛔ 本模块【不进产物】：它读的 .quay/task-status-events.jsonl 与 tasks/ 的 git 历史只在本仓库检出里齐备，没有任何运行时面（driver / skill / probes / workflow）会启动它，因此本声明按 catalog 惯例只写机制与条件、不写带解释器前缀的调用形 —— catalog 声明不是 build-plugin-dist 的入口面（INVOCATION_RE：catalogs are NOT entrypoints）。"
   },
   "SUPERSEDED": {
     "send-keys-verified.sh": "REMOVED 2026-08-10 (gap-retired-script-still-callable, human ruling) — superseded by send-keys-reliable.sh under outer ruling F (2026-08-04); its md5 pane-hash criterion is ADR-016-forbidden. Deleted with its test (send-keys-verified.test.mjs) and leak doc (send-keys-verified-test-leaks-tmux-servers.md). Crystallization residue poisons context — the implementation must NOT exist.",

@@ -110,6 +110,12 @@ import { archDiscoveryRoutineFromConfig } from "./arch-discovery-routine.ts";
 // 任何立案/撰写函数，唯一新增持久化是 gitignored 载体 `.quay/discovery-method-findings.jsonl` 的一行
 // scan-round + 既有 Discovery 载体 + 既有的 quality-round Fact。⛔ 与 fan-in/scoped-gate 无关。
 import { discoveryMethodRoutineFromConfig, liveDiscoveryModel, readDiscoveryMethodConfig } from "./discovery-method-routine.ts";
+// OPEN-SEMANTIC-DISCOVERY 轨道（gap-open-semantic-discovery-routine-track）：把**开放式语义架构发现**
+// （docs/analysis/arch-hypothesis-generation.mjs —— 假设生成 + 读源码核实 + 独立反驳 + 价值评估）接上例程环。
+// **只读、只报**：该例程不 import 任何立案/撰写函数，唯一新增持久化是 gitignored 载体
+// `.quay/open-semantic-discovery-findings.jsonl` 的一行 scan-round + 每簇记录，外加它自己那份预留台账。
+// ⛔ 与 fan-in/scoped-gate 无关。
+import { openSemanticDiscoveryRoutineFromConfig } from "./open-semantic-discovery-routine.ts";
 
 // ── 常量（由 DRIVER_KINDS registry 派生，⛔ 不另写一份路径字面量）──────────────────────────
 const QUALITY_SPEC = DRIVER_KINDS.quality;
@@ -954,6 +960,11 @@ export interface QualityGateOptions {
    *  与 arch-discovery 同一套「off by default + 声明即可观测」语义：未声明 ⇒ 例程表不变；声明了但
    *  enabled:false/写坏 ⇒ 仍装配（disabled / failed 必须可观测，硬规则 3b）。 */
   discoveryMethodRoutine?: RoutineSpec | null;
+  /** open-semantic-discovery 例程：同 archDiscoveryRoutine / discoveryMethodRoutine 的注入纪律（main()
+   *  从 `.quay/config.yml` `loop.open_semantic_discovery:` 装配后注入，⛔ 本函数不自己读配置）。
+   *  缺省 null = 未装配（老行为）。未声明 ⇒ 例程表不变；声明了但 enabled:false/写坏 ⇒ 仍装配，
+   *  因为「不跑」必须可观测（disabled / failed 读数）。 */
+  openSemanticDiscoveryRoutine?: RoutineSpec | null;
 }
 
 /** 四条例程（B15 pool-quality-judge + B17 judgment-consumer-check + 架构复核 + packaging-hygiene）。
@@ -1009,6 +1020,10 @@ export function qualityGateRoutines(root: string, opts: QualityGateOptions): Rou
     // `loop.discovery_method:`）。缺席 ⇒ 不加入（老行为）；加入而 section 缺席 ⇒ 记
     // `not-evaluated:disabled` 且零 spawn（kill switch 的可观测面）。
     ...(opts.discoveryMethodRoutine ? [opts.discoveryMethodRoutine] : []),
+    // 第八类：OPEN-SEMANTIC-DISCOVERY 例程（同一「声明式 + 可观测」族：间隔与开关来自
+    // `.quay/config.yml` `loop.open_semantic_discovery:`）。缺席 ⇒ 不加入（老行为）；加入而 section
+    // 缺席 ⇒ 记 `not-evaluated:disabled` 且零 spawn（kill switch 的可观测面）。
+    ...(opts.openSemanticDiscoveryRoutine ? [opts.openSemanticDiscoveryRoutine] : []),
   ];
 }
 
@@ -1064,6 +1079,47 @@ export function formatDiscoveryMethodAssembly(dm: {
   const turns = dm.verifierMaxTurns === null ? "" : `, verifier_max_turns=${dm.verifierMaxTurns}`;
   const worst = dm.worstCaseTurns24h === null ? "" : `, worst_case_api_turns_per_24h=${dm.worstCaseTurns24h} (cap × max(effective reflection turns, verifier turns))`;
   return `discovery-method 例程已装配（enabled, interval=${dm.intervalMinutes}m${until}${cap}${perRound}${refl}${turns}${worst}）`;
+}
+
+/** The OPEN-SEMANTIC-DISCOVERY ASSEMBLY LINE, as ONE string (task gap-open-semantic-discovery-routine-track).
+ *
+ * ⛔ WHY IT IS A FUNCTION PRINTED FROM `main()`. The anchor's self-refresh watches only the kind's driver
+ * file plus the shared kernel files (`driver-runtime.ts` `watchedSourceFiles`) — a routine MODULE is not
+ * watched, so a delta confined to `open-semantic-discovery-routine.ts` would land INERT, with production
+ * running the old assembly indefinitely. Touching this file is what makes the anchor reload it, and this
+ * line is the reload's own evidence.
+ * ⛔ WHAT IT MUST NAME: the cadence that was actually assembled (a declared `interval_until` can already
+ * have expired ⇒ the round reverts to the permanent default), BOTH 24h ceilings (they are per-routine and
+ * are not shared with discovery-method's 240), and the per-step turn bounds — because "which bounds are
+ * production actually running under" is answerable at startup ONLY from this line (硬规则 3b/9: an
+ * assembly that cannot say what it assembled is indistinguishable from one that assembled nothing).
+ * It ALSO names the METHOD-GUIDANCE policy the loaded module carries (task
+ * gap-open-discovery-method-guidance-active-shadow): a routine module is not a watched source file, so
+ * the only visible evidence that the resident driver reloaded a routine whose PROMPT policy changed is a
+ * line in this file. */
+export function formatOpenSemanticDiscoveryAssembly(od: {
+  enabled: boolean;
+  intervalMinutes: number | null;
+  intervalUntil: number | null;
+  maxModelCallsPer24h: number | null;
+  maxUsdPer24h: number | null;
+  investigatorRuns: number | null;
+  maxClustersVerified: number | null;
+  verifierMaxTurns: number | null;
+  refutationMaxTurns: number | null;
+}): string {
+  // The policy the loaded routine module implements, stated as what it IS rather than as config:
+  // `active` ⇒ production guidance, `draft`/`trial` ⇒ an isolated shadow arm, retired/quarantined/
+  // contaminated ⇒ never, none ⇒ baseline. A routine module is NOT in `watchedSourceFiles`, so this
+  // clause is the reload's evidence for a prompt-policy change.
+  const methods = ", methods: active ⇒ 生产轮 guidance / draft|trial ⇒ shadow 臂（shadow:true，不入 Portfolio）/ retired|quarantined|contaminated ⇒ 永不选取 / 无 ⇒ baseline（不抑制轮次）";
+  if (!od.enabled) return "open-semantic-discovery 例程已装配（enabled:false — 每轮记 not-evaluated:disabled，零 spawn）";
+  const until = od.intervalUntil === null ? "" : `, interval_until=${new Date(od.intervalUntil).toISOString()}`;
+  const calls = od.maxModelCallsPer24h === null ? "" : `, max_model_calls_per_24h=${od.maxModelCallsPer24h} (HARD: pre-spawn reservation per subprocess, trailing-24h; a reservation with no outcome still counts as spent)`;
+  const usd = od.maxUsdPer24h === null ? "" : `, max_usd_per_24h=$${od.maxUsdPer24h} (HARD: realized gateway cost from the same ledger; an unknown price counts as the per-call ceiling, never 0)`;
+  const shape = od.investigatorRuns === null ? "" : `, investigator_runs=${od.investigatorRuns}, max_clusters_verified=${od.maxClustersVerified}`;
+  const turns = od.verifierMaxTurns === null ? "" : `, verifier_max_turns=${od.verifierMaxTurns}, refutation_max_turns=${od.refutationMaxTurns}`;
+  return `open-semantic-discovery 例程已装配（enabled, interval=${od.intervalMinutes}m${until}${calls}${usd}${shape}${turns}${methods}, report-only: 不立案、不写 tasks/ 或 goals/）`;
 }
 
 // ── 常驻循环（例程型：每轮评估 due 例程 → 跑 due → 汇集 Facts → 写 round 心跳）────────────────
@@ -1386,6 +1442,18 @@ export async function main(argv: string[]): Promise<number> {
     console.error(`quality-gate-driver: ${formatDiscoveryMethodAssembly(discoveryMethod)}`);
   }
 
+  // open-semantic-discovery 轨道：读 `.quay/config.yml` `loop.open_semantic_discovery:`（同一注入纪律）。
+  // section 缺席/enabled:false ⇒ 例程仍装配，但每轮只记 `not-evaluated:disabled` 且零 spawn；配置坏 ⇒ 记
+  // failed 并在此**可见地**报告（硬规则 3b：读不懂 ≠ 合格）。
+  const openDiscovery = openSemanticDiscoveryRoutineFromConfig(rootDir);
+  if (openDiscovery.error) {
+    console.error(`quality-gate-driver: open-semantic-discovery 例程配置无效 — ${openDiscovery.error}`);
+  } else if (!openDiscovery.present) {
+    console.error("quality-gate-driver: 未声明 loop.open_semantic_discovery — open-semantic-discovery 例程未装配（off by default，零 spawn；例程表与未接此轨时一致）");
+  } else {
+    console.error(`quality-gate-driver: ${formatOpenSemanticDiscoveryAssembly(openDiscovery)}`);
+  }
+
   const routines = qualityGateRoutines(rootDir, {
     planCmd: planCmd ? splitArgs(planCmd) : null,
     judgeArgv: judgeCmd ? splitArgs(judgeCmd) : null,
@@ -1407,6 +1475,7 @@ export async function main(argv: string[]): Promise<number> {
     probeRoutines: probeSelection.routines,
     archDiscoveryRoutine: archDiscovery.routine,
     discoveryMethodRoutine: discoveryMethod.routine,
+    openSemanticDiscoveryRoutine: openDiscovery.routine,
   });
 
   return runResidentQualityGateLoop({ root: rootDir, intervalMs: interval, once, maxRounds, roundLogFile, runId: resolvedRunId, json, pidFile, routines, routineWatchdogMs, kind: "quality" });

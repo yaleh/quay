@@ -624,6 +624,23 @@ const CATALOG_DECLARATIONS_REL = "plugin/scripts/capability-catalog-declarations
 const REPO_ROOT = path.resolve(path.dirname(new URL(import.meta.url).pathname), "..", "..");
 
 /**
+ * The open-ended semantic discovery routine's carrier, and the PREFIX its `record_id`s carry.
+ *
+ * ⛔ The prefix is not decoration: an `autonomous-routine` ref is otherwise resolved against
+ * `.quay/routine-findings.jsonl` alone, and a bare `<ts>#<n>` would be tried there first and could in
+ * principle collide. A ref that names its own carrier is decidable without a search order.
+ *
+ * ⛔ THE TWO LITERALS ARE OWNED ELSEWHERE — `plugin/scripts/open-semantic-discovery-routine.ts` mints
+ * every `record_id` with this prefix, and `docs/carrier-registry.json` declares the carrier. They are
+ * repeated here because this module must not import the routine (the routine already imports THIS one at
+ * runtime, so the reverse edge would be a cycle). The agreement is not left to a comment: the routine's
+ * own test asserts that `resolveOriginRef` resolves the exact `record_id` the routine writes.
+ */
+const OPEN_DISCOVERY_CARRIER_REL = ".quay/open-semantic-discovery-findings.jsonl";
+const OPEN_DISCOVERY_REF_PREFIX = "open-semantic-discovery@";
+const OPEN_DISCOVERY_CLUSTER_KIND = "cluster";
+
+/**
  * Does `tasks/<id>.md` exist on `branch`? A task id resolves an operator/user finding the same way the
  * landing is read — from git, not from the working tree (a worktree may be mid-edit).
  */
@@ -647,6 +664,16 @@ export function resolveOriginRef(root, { origin, origin_ref }) {
   if (!isStr(ref, 1)) return { ok: false, reason: "ORIGIN_REF_EMPTY" };
 
   if (origin === "autonomous-routine") {
+    // The open-ended semantic discovery routine's own carrier, selected by the ref's own prefix so the
+    // resolution does not depend on a search order (see the constants' note). Its cluster records are
+    // addressed by their `record_id`, which IS this ref.
+    if (ref.startsWith(OPEN_DISCOVERY_REF_PREFIX)) {
+      const c = readSharedJsonl(root, OPEN_DISCOVERY_CARRIER_REL);
+      if (!c.ok) return { ok: false, reason: c.reason };
+      const hit = c.records.find((r) => isObj(r) && r.kind === OPEN_DISCOVERY_CLUSTER_KIND && r.record_id === ref);
+      if (!hit) return { ok: false, reason: `ORIGIN_REF_UNRESOLVED:${ref}-names-no-record-in-${OPEN_DISCOVERY_CARRIER_REL}` };
+      return { ok: true, carrier: OPEN_DISCOVERY_CARRIER_REL, ref, ts: isStr(hit.ts, 4) ? hit.ts : null, components: normalizeComponents(hit.components) };
+    }
     const c = readSharedJsonl(root, ROUTINE_FINDINGS_REL);
     if (!c.ok) return { ok: false, reason: c.reason };
     const [runId, findingId] = ref.includes("#") ? ref.split("#") : [ref, null];

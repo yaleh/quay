@@ -596,3 +596,17 @@ orchestration/manager-pending.md
 # machine-local judge state (rebuilt by the next judge), never committed provenance, and must
 # never appear in `git status --porcelain` (the fan-in ff-clean-tree gate depends on that).
 **/.quay/pool-quality-judge-state.json
+
+# frontmatter-store lockfiles (<dir>/<id>.lock). Written by frontmatter-store-base's withFileLock and
+# removed on release — but a SIGKILL inside the lock (a driver's wall-clock deadline firing while a
+# goal-store/ADR/meta child is mid-write) orphans one, and an untracked lock in the main checkout makes
+# the fan-in ff's cleanTreeCheck refuse every task. Same gitignored runtime-state family as
+# gate-events.jsonl / routine-last-run.json.
+# @quay-runtime-artifact — quay-init writes this into a consumer .gitignore (quay-runtime-artifacts.txt)
+goals/*.lock
+# @quay-runtime-artifact — quay-init writes this into a consumer .gitignore (quay-runtime-artifacts.txt)
+adr/*.lock
+# @quay-runtime-artifact — quay-init writes this into a consumer .gitignore (quay-runtime-artifacts.txt)
+docs-managed/*.lock
+# @quay-runtime-artifact — quay-init writes this into a consumer .gitignore (quay-runtime-artifacts.txt)
+meta/*.lock

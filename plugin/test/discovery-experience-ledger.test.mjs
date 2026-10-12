@@ -37,6 +37,8 @@ import {
   EVIDENCE_LEVELS, EVIDENCE_LEVEL_VALUES, UNLABELLED_EVIDENCE_LEVEL, INDEPENDENT_EVIDENCE_LEVEL,
   CASE_REUSE_EVIDENCE_LEVELS, SOURCE_CASE_REQUIRED, SOURCE_CASE_NOT_APPLICABLE_FOR_INDEPENDENT,
   evidenceLevelOf, isIndependentEvidenceLevel, allowsCaseReuse,
+  // The ROUTINE-CARRIER source (task gap-open-discovery-findings-into-portfolio-experience).
+  CARRIER_CLUSTER_KIND, clusterVerdict, clusterCaseId,
 } from "../../docs/analysis/discovery-experience-ledger.mjs";
 
 /** The writable "no claim" level, spelled once so the fixtures below cannot drift from the vocabulary. */
@@ -348,7 +350,7 @@ test("source_ref is a structural invariant in BOTH directions, each with its own
 test("`recurred-after-fix` is IN the vocabulary and is accepted (a future recurrence is not blocked)", () => {
   const root = mkTmp();
   assert.ok(EXPERIENCE_ROLES.includes("recurred-after-fix"));
-  assert.deepEqual([...EXPERIENCE_ROLES], ["missed-by-tooling", "found-and-fixed", "found-undetermined-then-confirmed", "confirmed-negative", "recurred-after-fix", "found-unresolved", "undetermined"]);
+  assert.deepEqual([...EXPERIENCE_ROLES], ["missed-by-tooling", "found-and-fixed", "found-undetermined-then-confirmed", "confirmed-negative", "recurred-after-fix", "found-unresolved", "undetermined", "duplicate"]);
   const r = ingestUser(root, { caseId: "TEACH-recurrence", role: "recurred-after-fix", evidenceRefs: ["x"], summary: SUMMARY });
   assert.equal(r.ok, true, r.reasons?.join(","));
   // …and the automatic path accepts it against a `supported` record, since a recurrence is observed.
@@ -1430,4 +1432,139 @@ test("AC(level): the ledger WRITES a level on every new entry, and reads `unlabe
   assert.equal(allowsCaseReuse(legacy), false, "…and it is not exempt from the exclusion either");
   assert.equal(evidenceLevelOf({ evidence_level: "independent" }), "independent");
   assert.equal(evidenceLevelOf(null), "unlabelled", "an unreadable input reads as the WEAKEST level, never a pass");
+});
+
+// ── SOURCE 3: a ROUTINE CARRIER record (task gap-open-discovery-findings-into-portfolio-experience) ──
+//
+// The open-ended semantic discovery routine's confirmed clusters are `kind:"cluster"` lines on its own
+// carrier, with a verdict vocabulary the evidence store does not have. These cases cover the third
+// ingestion source: the verdict is DERIVED from the record (never taken from the caller), the role is
+// CHECKED against it, the back-pointer AND the content digest are of the record's own line, and a record
+// that carries no id is refused rather than given one.
+
+/** One `kind:"cluster"` line as the routine writes it, with a caller-chosen verdict shape. */
+const clusterRec = (over = {}) => ({
+  kind: CARRIER_CLUSTER_KIND, routine: "open-semantic-discovery",
+  ts: "2026-10-13T01:00:00.000Z", record_id: "open-semantic-discovery@2026-10-13T01:00:00.000Z#1",
+  cluster: 1, claim: "two helpers own the same cache", components: ["plugin/scripts/x.ts"],
+  verifier_verdict: "supported", refutation_verdict: "supported", confirmed: true,
+  ...over,
+});
+
+/** Ingest ONE carrier record through the real entry point, with the caller's narration. Returns the
+ *  result plus the line/envelope, so a case can assert the digest the adapter derived. */
+function ingestCluster(root, rec, over = {}) {
+  const raw = JSON.stringify(rec);
+  return ingestExperience(root, {
+    source: "discovery-carrier",
+    record: { rec, raw, line: 1 },
+    carrier: ".quay/open-semantic-discovery-findings.jsonl",
+    role: "found-unresolved",
+    caseId: clusterCaseId(rec.record_id),
+    summary: "a confirmed cluster whose claim held and for which no fix is recorded yet",
+    components: rec.components,
+    authoredBy: { actor: "ingester", ref: "open-semantic-discovery" },
+    evidenceLevel: "production-open",
+    ...over,
+  });
+}
+
+test("CARRIER(a): clusterVerdict derives the verdict from the record's OWN fields, fail-closed both ways", () => {
+  assert.equal(clusterVerdict(clusterRec()), "supported");
+  assert.equal(clusterVerdict(clusterRec({ confirmed: false })), "undetermined", "an unconfirmed cluster is NOT supported");
+  assert.equal(clusterVerdict(clusterRec({ confirmed: false, refutation_verdict: "refuted" })), "refuted");
+  assert.equal(clusterVerdict(clusterRec({ confirmed: false, verifier_verdict: "refuted", refutation_verdict: "not-run" })), "refuted", "the first verifier's refutation counts too");
+  assert.equal(clusterVerdict(clusterRec({ confirmed: false, refutation_verdict: "undetermined" })), "undetermined");
+  assert.equal(clusterVerdict(clusterRec({ confirmed: true, refutation_verdict: "refuted" })), "supported", "`confirmed` is the carrier's own settled answer");
+  assert.equal(clusterVerdict(null), null, "not a record ⇒ no verdict, never «supported»");
+  // ⛔ A caller's `verdict` key is NOT consulted: the routine never writes one, and honouring it would let
+  // a record claim a confirmation its own evidence does not contain.
+  assert.equal(clusterVerdict(clusterRec({ confirmed: false, refutation_verdict: "refuted", verdict: "supported" })), "refuted");
+});
+
+test("CARRIER(b): a confirmed cluster ingests with source_ref AND a digest of its own carrier LINE", () => {
+  const root = mkTmp();
+  const rec = clusterRec();
+  const raw = JSON.stringify(rec);
+  const r = ingestExperience(root, {
+    source: "discovery-carrier", record: { rec, raw, line: 1 }, carrier: ".quay/open-semantic-discovery-findings.jsonl",
+    role: "found-unresolved", caseId: clusterCaseId(rec.record_id),
+    summary: "a confirmed cluster whose claim held and for which no fix is recorded yet",
+    authoredBy: { actor: "ingester", ref: "open-semantic-discovery" }, evidenceLevel: "production-open",
+  });
+  assert.equal(r.ok, true, r.reasons?.join(","));
+  assert.equal(r.record.source_ref, rec.record_id, "the back-pointer IS the carrier record's own id");
+  assert.equal(r.record.case_id, `EXP-${rec.record_id}`);
+  assert.equal(r.record.reported_by, "system");
+  assert.equal(r.record.evidence_level, "production-open");
+  assert.equal(r.record.evidence[0].ref, rec.record_id);
+  assert.equal(r.record.evidence[0].sha256, sha256(raw), "the evidence is content-addressed over the LINE");
+  assert.deepEqual(r.record.components, rec.components, "the components are the record's own — never invented");
+  assert.equal(r.derived_from.carrier, ".quay/open-semantic-discovery-findings.jsonl");
+  assert.equal(r.derived_from.verdict, "supported");
+  // The read-back carries the same three facts, so the chain is resolvable from the ledger alone.
+  const back = readExperienceLedger(root).records.find((x) => x.source_ref === rec.record_id);
+  assert.ok(back, "carrier record → Experience resolves on read-back");
+  assert.equal(back.case_id, r.record.case_id);
+});
+
+test("CARRIER(c): a role the record's own verdict contradicts is REFUSED, with the derivation printed", () => {
+  const root = mkTmp();
+  const refuted = clusterRec({ confirmed: false, refutation_verdict: "refuted" });
+  const bad = ingestCluster(root, refuted, { role: "found-unresolved" });
+  assert.equal(bad.ok, false);
+  assert.ok(bad.reasons.some((x) => x.startsWith("ROLE_VERDICT_INCONSISTENT:")), JSON.stringify(bad.reasons));
+  assert.match(bad.reasons[0], /derives-refuted/, "the refusal says WHICH verdict it derived, not just that it disagreed");
+  assert.equal(lines(root), 0, "nothing was appended");
+  // The matching role IS accepted — the refusal is about the contradiction, not about the arm being dead.
+  const good = ingestCluster(root, refuted, { role: "confirmed-negative" });
+  assert.equal(good.ok, true, good.reasons?.join(","));
+  assert.equal(lines(root), 1);
+});
+
+test("CARRIER(d): a record with NO id is refused; a caller-declared `duplicate` role is accepted", () => {
+  const root = mkTmp();
+  const noId = clusterRec({ record_id: undefined });
+  const bad = ingestCluster(root, noId);
+  assert.equal(bad.ok, false);
+  assert.deepEqual(bad.reasons, ["CARRIER_RECORD_ID_MISSING:the-record-carries-no-id-so-no-experience-can-point-back-at-it"]);
+  assert.equal(lines(root), 0);
+  // `duplicate` is IN the vocabulary and compatible with `supported`: the claim held, it was just not new.
+  assert.ok(EXPERIENCE_ROLES.includes("duplicate"));
+  assert.deepEqual([...ROLE_VERDICT_COMPAT.duplicate], ["supported"]);
+  const dup = ingestCluster(root, clusterRec(), { role: "duplicate" });
+  assert.equal(dup.ok, true, dup.reasons?.join(","));
+  assert.equal(dup.record.role, "duplicate");
+  // …and it is refused for a cluster whose claim did NOT hold, like every other role.
+  const wrong = ingestCluster(root, clusterRec({ confirmed: false, refutation_verdict: "refuted" }), { role: "duplicate" });
+  assert.equal(wrong.ok, false);
+  assert.ok(wrong.reasons.some((x) => x.startsWith("ROLE_VERDICT_INCONSISTENT:")));
+});
+
+test("CARRIER(e): every narration guard is its OWN refusal — nothing is defaulted", () => {
+  const root = mkTmp();
+  const missingRec = ingestExperience(root, { source: "discovery-carrier", role: "found-unresolved", caseId: "c", summary: SUMMARY, authoredBy: OPERATOR });
+  assert.deepEqual(missingRec.reasons, ["INGEST_ARG_MISSING:record-{rec,raw,line}"]);
+  assert.deepEqual(ingestCluster(root, clusterRec({ kind: "scan-round" })).reasons, [`CARRIER_RECORD_KIND_MISMATCH:scan-round-is-not-a-${CARRIER_CLUSTER_KIND}`]);
+  const rec = clusterRec();
+  const env = { rec, raw: JSON.stringify(rec), line: 1 };
+  const base = { source: "discovery-carrier", record: env, carrier: ".q/x.jsonl", role: "found-unresolved", caseId: "c", summary: SUMMARY, authoredBy: OPERATOR };
+  assert.deepEqual(ingestExperience(root, { ...base, record: { ...env, raw: 7 } }).reasons, ["INGEST_ARG_MISSING:record.raw"]);
+  assert.deepEqual(ingestExperience(root, { ...base, record: { ...env, line: 0 } }).reasons, ["INGEST_ARG_MISSING:record.line"]);
+  assert.deepEqual(ingestExperience(root, { ...base, carrier: "" }).reasons, ["INGEST_ARG_MISSING:carrier"]);
+  assert.deepEqual(ingestExperience(root, { ...base, caseId: "" }).reasons, ["INGEST_ARG_MISSING:caseId"]);
+  assert.deepEqual(ingestExperience(root, { ...base, authoredBy: undefined }).reasons, ["INGEST_ARG_MISSING:authoredBy-{actor,ref}"]);
+  assert.ok(ingestExperience(root, { ...base, role: "no-such-role" }).reasons[0].startsWith("ROLE_NOT_IN_VOCAB:"));
+  // An UNKNOWN source is still its own refusal, and it NAMES the full vocabulary — the third arm did not
+  // silently widen the gate to «anything goes».
+  assert.deepEqual(ingestExperience(root, { source: "discovery-carrier-x" }).reasons, [`${SOURCE_NOT_IN_VOCAB}:discovery-carrier-x-must-be-user-or-system-or-discovery-carrier`]);
+  assert.equal(lines(root), 0, "not one of the refusals appended anything");
+});
+
+test("CARRIER(f): a short summary is REFUSED by the same floor as every other source (no padding path)", () => {
+  const root = mkTmp();
+  const bad = ingestCluster(root, clusterRec(), { summary: "too thin" });
+  assert.equal(bad.ok, false);
+  assert.ok(bad.reasons[0].startsWith("SUMMARY_INSUBSTANTIAL:"), bad.reasons[0]);
+  assert.ok(MIN_SUMMARY_CHARS > "too thin".length, "…and the fixture really is under the floor");
 });

@@ -12,6 +12,11 @@
 
 import { test } from "node:test";
 import { CRITERION_KINDS, GAP_WORKER_TIMEOUT_MS_DEFAULT, GOAL_SPAWN_CAP_DEFAULT, assert, buildGapWorkerPrompt, classifyCriterionKind, computeGoalGaps, fs, goalAchievedFromRecords, goalGapWorkerTimeoutMs, goalSpawnCap, isFilingGapState, isTaskStuck, os, path, productionCarriersOf, readTaskFacts, readsProductionCarrier, repoRoot, runGapSpawnPass, runGoalRound, spawn, writeStandingGoalFile } from "./helpers/goal-driver-harness.mjs";
+// gap-goal-driver-hardcoded-120s-spawn-kill-preempts-record-timeout-and-orphans-goal-locks: the derived
+// OUTER spawn bound (AC1) and the driver's pid-matched lock cleanup (AC4), taken directly from their
+// single implementations (⛔ no harness re-export — the harness is shared by every shard).
+import { goalDriverChildTimeoutMs } from "../scripts/driver-runtime.ts";
+import { writeGoalStatus, removeOrphanedGoalLock } from "../scripts/goal-driver.ts";
 
 test('goalAchievedFromRecords: 零 AC ⇒ false；全 achieved ⇒ true；有未达成 ⇒ false', () => {
   assert.equal(goalAchievedFromRecords([], 'GOAL-001'), false, '零 AC 不可达成（与 goal-store.isGoalAchieved 同源）');
@@ -549,6 +554,85 @@ test('AC2（端到端）: criterion 自陈 exit 3 的 active AC ⇒ 该轮 gaps 
     // spawn 面：该 AC 不进选取面 ⇒ spawned 不因它 +1（本 fixture 里它是唯一候选 ⇒ 恒 0）。
     assert.deepEqual(v.gap_spawns.map((o) => o.ac), [], `gap_spawns 不含该 AC（实测 ${JSON.stringify(v.gap_spawns.map((o) => o.ac))}）`);
     assert.equal(v.spawned, 0, 'spawned=0（⛔ 不因一条自陈无法评估的判据空转一个名额）');
+  } finally {
+    fs.rmSync(tmp, { recursive: true, force: true });
+  }
+});
+
+// ── gap-goal-driver-hardcoded-120s-spawn-kill-preempts-record-timeout-and-orphans-goal-locks ──────
+//
+// 缺陷：driver 给每条 goal-store 子进程套了一个写死的 120s SIGKILL，覆盖了 record 自己声明的
+// `timeoutMs`（4 个项目实测 104 次 `spawn timeout after 120000ms`），并在写路径里把持锁的 child
+// 杀掉、留下 `goals/<id>.lock` 挡住 fan-in ff。修法：外层上限从**内层 deadline 派生**（AC1），
+// 杀掉持锁 child 后**按 pid** 清孤儿锁（AC4）。
+
+test('AC1: goalDriverChildTimeoutMs 对每个 inner 都严格大于 inner（gate 与 activation 两条路径）', () => {
+  for (const inner of [60_000, 150_000, 600_000]) {
+    const gate = goalDriverChildTimeoutMs(inner, 'gate', {});
+    const act = goalDriverChildTimeoutMs(inner, 'activation', {});
+    assert.ok(gate > inner, `gate 外层(${gate}) 必须严格大于 inner(${inner})`);
+    assert.ok(act > inner, `activation 外层(${act}) 必须严格大于 inner(${inner})`);
+    // activation 还要容下 P6b fidelity judge（criterion timeout ⇒ 不跳 judge ⇒ 两者相加）。
+    assert.ok(act > gate, `activation 外层(${act}) 必须大于 gate 外层(${gate})（多一个 judge 预算）`);
+  }
+  // 无 record 字段 ⇒ 走共享 env/default 链，仍是有限正数（⛔ 不回退到 0/NaN）。
+  assert.ok(goalDriverChildTimeoutMs(undefined, 'gate', {}) > 0);
+});
+
+test('AC1 负控制: gate/activation 站点绑定派生值，⛔ 不保留 120s 字面量（改回 ⇒ 本测试红）', () => {
+  const src = fs.readFileSync(path.join(repoRoot, 'plugin/scripts/goal-driver.ts'), 'utf8');
+  const bodyOf = (name) => {
+    const start = src.indexOf(`export async function ${name}(`);
+    assert.notEqual(start, -1, `前置：${name} 必须存在（读成空串也会「0 命中」——同硬规则 3b）`);
+    const end = src.indexOf('\nexport ', start + 1);
+    const body = src.slice(start, end === -1 ? undefined : end);
+    assert.ok(body.length > 0, `前置：${name} 体非空`);
+    return body;
+  };
+  // 零计数半边（硬规则 2）：谓词先对着【已知为真】的旧写法干跑一次，证明它能命中。
+  const knownTrue = 'const r = await runAsync(argv, { timeoutMs: CRITERION_TIMEOUT_MS, collectStderr: true });';
+  assert.match(knownTrue, /timeoutMs:\s*CRITERION_TIMEOUT_MS/, '自检：谓词对旧的 120s 站点必须命中');
+  for (const name of ['gateCriterion', 'writeGoalStatus']) {
+    const body = bodyOf(name);
+    assert.match(body, /goalDriverChildTimeoutMs\(/, `${name} 必须从派生函数取外层上限`);
+    assert.doesNotMatch(body, /timeoutMs:\s*CRITERION_TIMEOUT_MS/, `${name} ⛔ 不得保留 120s 字面量（负控制：把站点改回字面量 ⇒ 本行红）`);
+  }
+});
+
+test('AC4: 驱动杀掉持锁的 activate 子进程 ⇒ 孤儿 goals/<id>.lock 被按 pid 清除；pid 不匹配不删', async () => {
+  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'goal-lock-'));
+  try {
+    fs.mkdirSync(path.join(tmp, 'goals'), { recursive: true });
+    fs.mkdirSync(path.join(tmp, '.quay'), { recursive: true });
+    fs.writeFileSync(path.join(tmp, 'goals', 'GOAL-001-t.md'),
+      '---\nid: GOAL-001\ntitle: t\nstatus: active\nkind: goal\norigin: test\n---\nbody\n', 'utf8');
+    // 一条 draft AC：激活会跑 criterion（睡 5s）并跨过 driver 的 1.5s 外层上限 ⇒ 子进程**持锁**时被杀。
+    fs.writeFileSync(path.join(tmp, 'goals', 'AC-001-t.md'),
+      '---\nid: AC-001\ntitle: t\nstatus: draft\nkind: criterion\ngoal: GOAL-001\ncriterion: |\n  sleep 5; exit 0\nexpect: e\norigin: test\ntimeoutMs: 60000\n---\nbody\n', 'utf8');
+    const lock = path.join(tmp, 'goals', 'AC-001.lock');
+
+    // 负控制①（pid 守卫，直接量）：锁里是【别人的】pid ⇒ 不删；是本 child 的 pid ⇒ 删。
+    fs.writeFileSync(lock, '999999', 'utf8');
+    assert.equal(removeOrphanedGoalLock(tmp, 'AC-001', 424242), false, 'pid 不匹配 ⇒ ⛔ 不得删（可能被别人持有）');
+    assert.equal(fs.existsSync(lock), true, '不匹配时锁必须还在');
+    assert.equal(removeOrphanedGoalLock(tmp, 'AC-001', 999999), true, 'pid 匹配 ⇒ 删');
+    assert.equal(fs.existsSync(lock), false, '匹配时锁被清除');
+
+    // 正向（端到端，走 driver 的 spawn 路径）：短外层上限杀掉持锁 child，锁不得残留。
+    const pending = writeGoalStatus(repoRoot, 'AC-001', 'active', tmp, {
+      spawnTimeoutMs: 1500, recordTimeoutMs: 60000, actor: 'test', reason: 'ac4-lock',
+    });
+    // 空转防线（硬规则 2 的零计数半边）：先证明 child **真的持过锁**，否则「结束无锁」与「从没上锁」同形。
+    let sawLock = false;
+    for (let i = 0; i < 100 && !sawLock; i++) {
+      if (fs.existsSync(lock)) sawLock = true;
+      else await new Promise((r) => setTimeout(r, 50));
+    }
+    const w = await pending;
+    assert.ok(sawLock, '前置：子进程必须真的持有过 goals/AC-001.lock（否则本判据空转）');
+    assert.equal(w.ok, false, `被杀的 write 必须报失败（实测 ${w.reason}）`);
+    assert.match(w.reason, /write spawn error: spawn timeout/, '失败成因是外层超时');
+    assert.equal(fs.existsSync(lock), false, '⛔ 被杀 child 的孤儿锁必须被清除（否则挡住 fan-in ff）');
   } finally {
     fs.rmSync(tmp, { recursive: true, force: true });
   }

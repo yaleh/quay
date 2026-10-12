@@ -27,11 +27,15 @@
 //   (b) the bounded rotation sweep           — the AC6 (b) test below
 //   (c) the P6 activation check              — the AC6 (c) test below
 //   (d) the I5 achieved-but-failing reverify — the AC6 (d) test below
-// (c) and (d) do not SURFACE the runner's reason string (that verb's JSON shape is an id list and
-// a cost line respectively), so they assert the deadline through the observable each one does
+// (c) and (d) surface no JSON, so they assert the deadline through the observable each one does
 // expose — an outcome differential and an elapsed-ms reading. ⛔ Substituting a fourth
 // `resolveAcceptanceTimeoutMs()` unit assertion for those two would be exactly the
 // "four assertions about one function" shape this AC forbids.
+//   ⚠️ For (c) the outcome differential CHANGED SHAPE on 2026-10-13: a timeout is no longer admitted
+//   at activation, so where it used to read "allowed, cost line says not-evaluated", it now reads
+//   "REFUSED, and the refusal names the resolved deadline". The refusal reason carries the resolved
+//   bound too, so (c) gained a reason-string reading as well as keeping an elapsed one (via the
+//   record-level `timeoutMs` rung) — see that test's own RE-ANCHORED note.
 
 import { test } from "node:test";
 import assert from "node:assert/strict";
@@ -130,6 +134,20 @@ function seedGoal(ws, goalId, acSpecs) {
     ], `${acId} (${spec.status})`);
   }
   write(ws, [goalId, "--title", goalId, "--status", "achieved", "--origin", "test fixture", "--body", GOAL_BODY], goalId);
+}
+
+/** Give an already-seeded AC record its OWN `timeoutMs` — the TOP rung of `resolveAcceptanceTimeout`.
+ *  ⛔ The write CLI exposes no `--timeoutMs` flag, so the fixture sets the frontmatter key directly
+ *  (the AC-6(c) case below is the ONLY one that needs the record rung). This is a SETUP write, never a
+ *  reading: every assertion in this file is still taken through the production CLI. */
+function setRecordTimeoutMs(ws, acId, ms) {
+  const goalsDir = path.join(ws, "goals");
+  const file = fs.readdirSync(goalsDir).find((f) => f.startsWith(`${acId}-`) && f.endsWith(".md"));
+  assert.ok(file, `fixture setup: ${acId} must have a record file`);
+  const p = path.join(goalsDir, file);
+  const text = fs.readFileSync(p, "utf8");
+  assert.ok(text.startsWith("---\n"), `fixture setup: ${file} must open with YAML frontmatter`);
+  fs.writeFileSync(p, `---\ntimeoutMs: ${ms}\n${text.slice("---\n".length)}`, "utf8");
 }
 
 // ── (a) `goal gate <id>` — goal-store.ts's own `gate` verb ────────────────────────────────────────
@@ -256,31 +274,56 @@ test("AC6(b) — 轮转扫描走同一解析来源：sweep 的 reason 与 elapse
 
 // ── (c) the P6 activation check — goal-store.ts `write` on a transition INTO active ───────────────
 
-test("AC6(c) — 激活检查走同一解析来源：成本行的 elapsed/verdict 反映解析后的界，而非字面 60s", () => {
+test("AC6(c) — 激活检查走同一解析来源：解析后的界（而非字面 60s）决定激活是否被接受", () => {
   const ws = makeWorkspace("activation");
   // ⚠️ The activation gate fires on a TRANSITION into active (`prevStatus !== undefined`), so the
   // record must be born in a non-active status and then flipped — a create-as-active write never
   // reaches it at all.
   seedGoal(ws, "GOAL-905", [["AC-905", { status: "draft", criterion: SLOW }]]);
 
+  // ⚠️ RE-ANCHORED 2026-10-13 (gap-goal-driver-hardcoded-120s-spawn-kill-preempts-record-timeout-and-
+  // orphans-goal-locks AC3). TWO things changed at this site at once, and the changed READING is the
+  // measurement:
+  //   · the deadline is now the RECORD-AWARE resolver (`resolveAcceptanceTimeout` — record `timeoutMs`
+  //     first), the SAME ladder `goal gate` reads, instead of the record-ignoring sibling; and
+  //   · a TIMEOUT is no longer "a definitive fail ⇒ evaluable ⇒ activation allowed": the ONE verdict
+  //     mapping (gap-goal-gate-verdict-single-mapping-not-evaluated) calls it `not-evaluated`, and
+  //     admitting a criterion that could not be measured AT ITS OWN DECLARED DEADLINE would activate
+  //     something that re-runs and times out every round forever — the parent finding's pathology.
+  // ⇒ At a 1000ms deadline the write is REFUSED. That refusal is what a literal 60s bound structurally
+  //   cannot produce: under a literal the 60s bound governs, `sleep 2` completes, and the write lands.
   const at1000 = goal(ws, ["write", "AC-905", "--status", "active"], { QUAY_ACCEPTANCE_TIMEOUT_MS: "1000" });
-  assert.equal(at1000.status, 0, `a timeout is a definitive verdict ⇒ evaluable ⇒ activation allowed:\n${at1000.stdout}${at1000.stderr}`);
-  // ⛔ The cost line prints the 3-valued verdict now (gap-goal-gate-verdict-single-mapping-not-evaluated),
-  // so the vocabulary is widened — the AC's own claim is the ELAPSED reading asserted below, which is
-  // what proves the 1000ms deadline governed the run rather than a literal 60s.
-  const m1 = /activated AC-905 — criterion ran in (\d+)ms \((pass|fail|not-evaluated)\)/.exec(at1000.stderr);
-  assert.ok(m1, `the P10 cost line must be emitted: ${at1000.stderr}`);
-  assert.equal(m1[2], "not-evaluated", "killed at 1000ms ⇒ the activation check reports a not-evaluated verdict");
-  assert.ok(Number(m1[1]) >= 900 && Number(m1[1]) < 1900, `elapsed must be ~1000ms, got ${m1[1]}ms — a literal 60s would print ~2000ms (pass)`);
+  assert.notEqual(at1000.status, 0, `killed at its deadline ⇒ not-evaluated ⇒ the activation is refused:\n${at1000.stdout}${at1000.stderr}`);
+  assert.match(
+    at1000.stderr,
+    /cannot activate AC-905: criterion not-evaluated \(acceptance timed out after 1000ms/,
+    `the refusal names the RESOLVED deadline (1000ms) — a literal 60s would name 60000ms, or not refuse at all: ${at1000.stderr}`,
+  );
 
-  // The other direction, on a second record so the transition is fresh (⛔ not a re-read of the
-  // now-active AC-905, which would not be activating at all and would measure nothing).
+  // The ELAPSED reading, kept on a PRODUCTION carrier (a reason string alone could in principle come
+  // from a branch that never ran anything): the record's own `timeoutMs` is the TOP of the ladder, so
+  // a 5000ms record OUTRANKS the 1000ms env — `sleep 2` is evaluated to a verdict, the write lands,
+  // and the P10 cost line reports ~2000ms. ⛔ The env stays at 1000 on purpose: a site that read the
+  // env alone (the pre-fix `resolveAcceptanceTimeoutMs()`) would have killed this at ~1000ms, so the
+  // elapsed reading discriminates the two ladders rather than merely agreeing with both.
   seedGoal(ws, "GOAL-906", [["AC-906", { status: "draft", criterion: SLOW }]]);
-  const bare = goal(ws, ["write", "AC-906", "--status", "active"]);
-  const m2 = /activated AC-906 — criterion ran in (\d+)ms \((pass|fail|not-evaluated)\)/.exec(bare.stderr);
-  assert.ok(m2, `the P10 cost line must be emitted: ${bare.stderr}`);
-  assert.equal(m2[2], "pass", "no env ⇒ the criterion runs to completion");
-  assert.ok(Number(m2[1]) >= 1900, `elapsed must be ~2000ms (not a ~1000ms kill), got ${m2[1]}ms`);
+  setRecordTimeoutMs(ws, "AC-906", 5000);
+  const byRecord = goal(ws, ["write", "AC-906", "--status", "active"], { QUAY_ACCEPTANCE_TIMEOUT_MS: "1000" });
+  assert.equal(byRecord.status, 0, `the RECORD's 5000ms outranks the env's 1000ms:\n${byRecord.stdout}${byRecord.stderr}`);
+  const m2 = /activated AC-906 — criterion ran in (\d+)ms \((pass|fail|not-evaluated)\)/.exec(byRecord.stderr);
+  assert.ok(m2, `the P10 cost line must be emitted: ${byRecord.stderr}`);
+  assert.equal(m2[2], "pass", "5000ms on the record > `sleep 2` ⇒ the criterion runs to a verdict");
+  assert.ok(Number(m2[1]) >= 1900, `elapsed must be ~2000ms (⛔ not the ~1000ms the env alone would have killed at), got ${m2[1]}ms`);
+
+  // The third rung, on a third record so the transition is fresh (⛔ not a re-read of a now-active AC,
+  // which would not be activating at all and would measure nothing): with NO record field the shared
+  // env/default chain still governs — the record is FIRST, ⛔ not the ONLY rung.
+  seedGoal(ws, "GOAL-907", [["AC-907", { status: "draft", criterion: SLOW }]]);
+  const bare = goal(ws, ["write", "AC-907", "--status", "active"]);
+  const m3 = /activated AC-907 — criterion ran in (\d+)ms \((pass|fail|not-evaluated)\)/.exec(bare.stderr);
+  assert.ok(m3, `the P10 cost line must be emitted: ${bare.stderr}`);
+  assert.equal(m3[2], "pass", "no env ⇒ the criterion runs to completion");
+  assert.ok(Number(m3[1]) >= 1900, `elapsed must be ~2000ms (not a ~1000ms kill), got ${m3[1]}ms`);
 });
 
 // ── (d) the I5 achieved-but-failing reverify — goal-store.ts `checkAchievedFailing` ───────────────
