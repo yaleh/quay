@@ -5,7 +5,7 @@ title: before/after 边数读数 + 可证伪负对照：root→gate/config 边�
 status: achieved
 kind: criterion
 goal: GOAL-034
-criterion: |-
+criterion: |
   set -u
   root=$(git rev-parse --show-toplevel 2>/dev/null) || { echo "NOT-EVALUATED: not inside a git repository" >&2; exit 3; }
   cd "$root"
