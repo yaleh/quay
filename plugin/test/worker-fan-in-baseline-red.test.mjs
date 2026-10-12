@@ -44,6 +44,11 @@ import {
   baselineRedDeadlockReading,
   BASELINE_RED_ROUNDS_REL,
 } from "../scripts/worker-fan-in.ts";
+import {
+  judgeRetryExemption,
+  decideExitedNotLandedAction,
+  exitedNotLandedStopNote,
+} from "../scripts/worker-driver.ts";
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const REPO = path.resolve(HERE, "..", "..");
@@ -335,4 +340,206 @@ test("fail-closed — an unevaluable A/B is not-evaluated and the suite stays re
   assert.equal(r.outcome, "red");
   assert.equal(r.baselineEquivalence?.verdict?.kind, "not-evaluated");
   assert.ok(!traceSteps(fx, "baselinered-notcl").includes("baseline-red-exempt"));
+});
+
+// ════════════════════════════════════════════════════════════════════════════════════════════════════
+// gap-fan-in-baseline-comparison-blind-to-spec-reporter-misparks-develop-wide-red
+//
+// 缺陷：真实 suite 日志是 node **spec reporter**（`✖ <test name> (<ms>)` + `test at <file>:<line>:<col>`），
+// 一个 `^not ok` 都没有 ⇒ 旧解析器在【基线侧】恒 `no-failure-signature-lines` ⇒ A/B `not-evaluated`
+// ⇒ 一份 develop 本来就红的日志被当「归因不出的基建之谜」，健康的任务被停派（2026-10-13 生产读数）。
+// ════════════════════════════════════════════════════════════════════════════════════════════════════
+
+/** 生产日志（`.quay/fan-in-suite-gap-discovery-…~wk-prod-anchor~1791828953643-00613d.log` 6005-6056 行）
+ *  里 `✖ failing tests:` 块的**逐字**摘录：两条 `test at …prod-data-audit.test.mjs:N:1` + `✖` 配对。
+ *  ⛔ 只把 `:line` 之外的内容原样保留——栈帧里的 worktree 绝对路径与耗时都是【易变量】，正是要证明
+ *  「不靠它们也能在两棵树之间对齐」的那部分。 */
+const PROD_SPEC_BLOCK = [
+  "✖ failing tests:",
+  "",
+  "test at plugin/test/prod-data-audit.test.mjs:227:1",
+  "✖ AC1/AC2/AC3/AC5/AC6 REAL-CARRIER — audit against production reproduces manager re-checks (15439.958259ms)",
+  "  Error: Cannot create a string longer than 0x1fffffe8 characters",
+  "      at Object.readFileSync (node:fs:483:20)",
+  "      at classifyCarrier (file:///data/home/yale/work/quay-worktrees/gap-discovery-method-per-round-quota-verify-reserve-deep-reflection/plugin/scripts/prod-data-audit.ts:426:18)",
+  "      at buildAudit (file:///data/home/yale/work/quay-worktrees/gap-discovery-method-per-round-quota-verify-reserve-deep-reflection/plugin/scripts/prod-data-audit.ts:658:17)",
+  "      at getAudit (file:///data/home/yale/work/quay-worktrees/gap-discovery-method-per-round-quota-verify-reserve-deep-reflection/plugin/test/prod-data-audit.test.mjs:50:35)",
+  "      at TestContext.<anonymous> (file:///data/home/yale/work/quay-worktrees/gap-discovery-method-per-round-quota-verify-reserve-deep-reflection/plugin/test/prod-data-audit.test.mjs:228:17)",
+  "      at Test.runInAsyncScope (node:async_hooks:227:14)",
+  "      at Test.run (node:internal/test_runner/test:1402:25)",
+  "      at Test.processPendingSubtests (node:internal/test_runner/test:974:18)",
+  "      at Test.postRun (node:internal/test_runner/test:1542:19)",
+  "      at Test.run (node:internal/test_runner/test:1467:12) {",
+  "    code: 'ERR_STRING_TOO_LONG'",
+  "  }",
+  "",
+  "test at plugin/test/prod-data-audit.test.mjs:309:1",
+  "✖ AC1 explicit carriers are always reported even at zero position-based refs (17136.819347ms)",
+  "  Error: Cannot create a string longer than 0x1fffffe8 characters",
+  "      at Object.readFileSync (node:fs:483:20)",
+  "      at classifyCarrier (file:///data/home/yale/work/quay-worktrees/gap-discovery-method-per-round-quota-verify-reserve-deep-reflection/plugin/scripts/prod-data-audit.ts:426:18)",
+  "      at buildAudit (file:///data/home/yale/work/quay-worktrees/gap-discovery-method-per-round-quota-verify-reserve-deep-reflection/plugin/scripts/prod-data-audit.ts:658:17)",
+  "      at getAudit (file:///data/home/yale/work/quay-worktrees/gap-discovery-method-per-round-quota-verify-reserve-deep-reflection/plugin/test/prod-data-audit.test.mjs:50:35)",
+  "      at TestContext.<anonymous> (file:///data/home/yale/work/quay-worktrees/gap-discovery-method-per-round-quota-verify-reserve-deep-reflection/plugin/test/prod-data-audit.test.mjs:311:17)",
+  "      at Test.runInAsyncScope (node:async_hooks:227:14)",
+  "      at Test.run (node:internal/test_runner/test:1402:25)",
+  "      at Test.processPendingSubtests (node:internal/test_runner/test:974:18)",
+  "      at Test.postRun (node:internal/test_runner/test:1542:19)",
+  "      at Test.run (node:internal/test_runner/test:1467:12) {",
+  "    code: 'ERR_STRING_TOO_LONG'",
+  "  }",
+  "",
+].join("\n");
+/** 该摘录在【任务树】上的完整形态：整份 suite 日志还带文件级 `__PERFILE__ … passed=false`（基线侧那份
+ *  重跑日志没有——这是**记录粒度差**，不是红点集合差）。 */
+const PROD_TASK_LOG = `__PERFILE__ duration_ms=32924 plugin/test/prod-data-audit.test.mjs passed=false end_ms=1 cpu_ms=1 mem_peak_kb=1\n${PROD_SPEC_BLOCK}__PERFILE__ duration_ms=32924 plugin/test/prod-data-audit.test.mjs passed=false end_ms=2 cpu_ms=1 mem_peak_kb=1\n`;
+
+/** AC1 的正控：生产 spec 块（两对 `test at` + `✖`）⇒ evaluated:true 且【两条】签名；同一摘录在两侧
+ *  ⇒ 判为 develop-wide（逐字相同 ⇒ exempt，⛔ 不是「读不懂」）。 */
+test("AC1 (spec positive control) — the verbatim production spec-reporter block parses to 2 signatures, and the SAME block on both sides reads develop-wide (exempt)", () => {
+  const task = parseFailureSignatures(PROD_SPEC_BLOCK, "/wt/repo");
+  assert.equal(task.evaluated, true, `spec block must be evaluable, got ${JSON.stringify(task)}`);
+  assert.equal(task.signatures.length, 2, `exactly 2 signatures, got ${JSON.stringify(task.signatures)}`);
+  // 身份 = (file, test name)；`:line` 与耗时都【不】入身份（行号跨分支漂移、耗时每次不同）。
+  assert.deepEqual(task.signatures.map((s) => s.file), [
+    "plugin/test/prod-data-audit.test.mjs",
+    "plugin/test/prod-data-audit.test.mjs",
+  ]);
+  assert.match(task.signatures[0].text, /^AC1\/AC2\/AC3\/AC5\/AC6 REAL-CARRIER — audit against production reproduces manager re-checks \[code: ERR_STRING_TOO_LONG\]$/);
+  assert.match(task.signatures[1].text, /^AC1 explicit carriers are always reported even at zero position-based refs \[code: ERR_STRING_TOO_LONG\]$/);
+  assert.doesNotMatch(task.signatures[0].text, /15439/, "the duration must be stripped (it differs run to run)");
+  assert.doesNotMatch(task.signatures[0].text, /:227/, "the :line must not enter the identity (it drifts between branches)");
+
+  // 同一摘录、两侧各自的 root（绝对路径按各自 root 归一）⇒ 逐字相同 ⇒ develop-wide。
+  const base = parseFailureSignatures(PROD_SPEC_BLOCK, "/wt/base");
+  const v = compareFailureSignatures(task.signatures, base.signatures);
+  assert.equal(v.kind, "exempt", `identical on both sides ⇒ develop-wide, got ${JSON.stringify(v)}`);
+  assert.equal(v.unchanged, 2);
+
+  // 真实形态：任务侧是整份 suite 日志（多一条文件级 `__PERFILE__`），基线侧是失败文件重跑（没有它）
+  // ⇒ 文件级标记被 [相同文件的] 测试级签名**吸收**，两棵树仍判据相同（⛔ 记录粒度差不得读成新红）。
+  const realTask = parseFailureSignatures(PROD_TASK_LOG, "/wt/repo");
+  assert.equal(realTask.evaluated, true);
+  assert.deepEqual(realTask.signatures, task.signatures, "the file-level __PERFILE__ marker is subsumed by the file's test-level spec signatures");
+  assert.equal(compareFailureSignatures(realTask.signatures, base.signatures).kind, "exempt");
+});
+
+/** AC2(a)：spec 形态的日志里【没有】**✖** 也没有 `test at` ⇒ 仍然 not-evaluated（⛔ 一个「没有信号」的
+ *  日志绝不能被读成「两侧相同」——那正是本缺陷的反方向：把「没读到」伪装成「一致」）。 */
+test("AC2(a) (negative control) — a spec-shaped log with no ✖ and no `test at` stays not-evaluated (an absent signal is never read as 'identical')", () => {
+  const clean = parseFailureSignatures("ℹ tests 10\nℹ pass 10\nℹ fail 0\nℹ duration_ms 100\n", "/wt/repo");
+  assert.equal(clean.evaluated, false);
+  assert.equal(clean.reason, "no-failure-signature-lines");
+  // 连汇总行 `✖ <name>`（没有 `test at` 配对）也不得被当成失败点——它不带文件身份。
+  const unpaired = parseFailureSignatures("✖ failing tests:\n\n✖ some failing name (12.5ms)\n", "/wt/repo");
+  assert.equal(unpaired.evaluated, false, "an unpaired ✖ line carries no file identity ⇒ not a signature");
+  assert.equal(unpaired.reason, "no-failure-signature-lines");
+});
+
+/** AC2(b)：分支侧独有的一条 spec 失败 ⇒ ⛔ 不得被豁免（豁免只覆盖「不变差」的方向）。 */
+test("AC2(b) (negative control) — a branch-side spec failure the baseline lacks is NOT exempt (task-introduced-red)", () => {
+  const branchOnly = `${PROD_SPEC_BLOCK}test at plugin/test/mine.test.mjs:12:1\n✖ my brand new test fails (3.5ms)\n\n      at x (x.js:1:1) {\n    code: 'ERR_ASSERTION'\n  }\n`;
+  const task = parseFailureSignatures(branchOnly, "/wt/repo");
+  const base = parseFailureSignatures(PROD_SPEC_BLOCK, "/wt/repo");
+  assert.equal(task.evaluated, true);
+  const v = compareFailureSignatures(task.signatures, base.signatures);
+  assert.equal(v.kind, "hard-red");
+  assert.equal(v.reason, "task-introduced-red");
+  assert.deepEqual(v.added.map((a) => a.file), ["plugin/test/mine.test.mjs"]);
+  // 同一 spec id 但错误码变了 ⇒ changed-assertion（⛔ 不折成新 id）。
+  const changedCode = PROD_SPEC_BLOCK.replace(/ERR_STRING_TOO_LONG/g, "ERR_OUT_OF_MEMORY");
+  const vc = compareFailureSignatures(parseFailureSignatures(changedCode, "/wt/repo").signatures, base.signatures);
+  assert.equal(vc.kind, "hard-red");
+  assert.equal(vc.reason, "changed-assertion");
+  assert.deepEqual(vc.changed.map((c) => c.file), ["plugin/test/prod-data-audit.test.mjs", "plugin/test/prod-data-audit.test.mjs"]);
+});
+
+/** AC2(c)：既有 TAP / `__PERFILE__` 夹具的解析结果**逐字不变**（spec 分支只是并列的第三条通路）。
+ *  ⛔ 本用例【不】依赖 spec 分支：把 spec 识别整体删掉，它仍须全绿——这正是「TAP 面没被动过」的判据。 */
+test("AC2(c) (negative control) — the existing TAP/__PERFILE__ fixtures give byte-identical results (independent of the spec branch)", () => {
+  assert.deepEqual(parseFailureSignatures(redLog("/wt/repo/plugin/test/a.test.mjs", "a is broken"), "/wt/repo").signatures,
+    [{ file: "plugin/test/a.test.mjs", text: "a is broken" }]);
+  const tap = "not ok 1 - plugin/test/b.test.mjs: b is broken\nnot ok 2 - plugin/test/c.test.mjs: c is broken\n";
+  assert.deepEqual(parseFailureSignatures(tap, "/wt/repo").signatures, [
+    { file: "plugin/test/b.test.mjs", text: "b is broken" },
+    { file: "plugin/test/c.test.mjs", text: "c is broken" },
+  ]);
+  // 行序不变（`failureSignatureSetKey` 会排序，但 signatures 数组本身是行序——夹具/诊断都读它）。
+  const mixed = redLog("plugin/test/a.test.mjs", "a is broken") + tap;
+  assert.deepEqual(parseFailureSignatures(mixed, "/wt/repo").signatures.map((s) => s.file),
+    ["plugin/test/a.test.mjs", "plugin/test/b.test.mjs", "plugin/test/c.test.mjs"]);
+  // 三态取值也不变。
+  assert.equal(parseFailureSignatures("", "/wt").reason, "empty-suite-log");
+  assert.equal(parseFailureSignatures("all good\n# fail 0\n", "/wt").reason, "no-failure-signature-lines");
+});
+
+/** Plan 第 2 条：混合输出（TAP + spec）取**并集**，按 (file, text) 去重。 */
+test("Plan-2 (mixed output) — a TAP + spec log yields the deduplicated union of both extractors", () => {
+  const tap = "not ok 1 - plugin/test/b.test.mjs: b is broken\nnot ok 2 - plugin/test/c.test.mjs: c is broken\n";
+  const union = parseFailureSignatures(tap + PROD_SPEC_BLOCK, "/wt/repo");
+  assert.equal(union.evaluated, true);
+  assert.deepEqual(union.signatures.map((s) => s.file), [
+    "plugin/test/b.test.mjs", "plugin/test/c.test.mjs",
+    "plugin/test/prod-data-audit.test.mjs", "plugin/test/prod-data-audit.test.mjs",
+  ], "union, in line order");
+  // 逐字重复的一行 ⇒ 不产生第二条签名（去重身份 = (file, text)）。
+  const twice = parseFailureSignatures(PROD_SPEC_BLOCK + PROD_SPEC_BLOCK, "/wt/repo");
+  assert.equal(twice.signatures.length, 2, "the same red point twice is still ONE signature");
+});
+
+/** AC4：判词不得在解析器**已归因到 ≥1 个失败文件**时说「无法归因」。生产读数（2026-10-12T18:21Z 那条
+ *  needs-human）里同一句话一边写「失败无法归因」、一边在括号里写 `parser attributed 1 failing file(s)`
+ *  ——本用例用【同一形状】的夹具把渲染文本取出来，并给出 files 为空的反向控制臂。 */
+test("AC4 — the needs-human/stop wording never says 「无法归因」 while the parser attributed ≥1 failing file", (t) => {
+  const NOW = Date.parse("2026-10-13T02:21:00.000Z");
+  const FILE = "plugin/test/prod-data-audit.test.mjs";
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "fanin-ac4-"));
+  t.after(() => fs.rmSync(root, { recursive: true, force: true }));
+  fs.mkdirSync(path.join(root, ".quay"), { recursive: true });
+  fs.mkdirSync(path.join(root, "plugin", "test"), { recursive: true });
+  fs.writeFileSync(path.join(root, FILE), "", "utf8");
+  // ⛔ 不写 tasks/gap-a.md ⇒ delta 读不懂 ⇒ insufficient-data-fallback（生产形状），但 failingTestFiles 非空。
+  const twoRoundsApart = (ms) => `__PERFILE__ duration_ms=${ms} ${FILE} passed=false end_ms=1\n${PROD_SPEC_BLOCK}`;
+  fs.writeFileSync(path.join(root, ".quay", "fan-in-suite-gap-a-1.log"), twoRoundsApart(32924), "utf8");
+  fs.writeFileSync(path.join(root, ".quay", "fan-in-suite-gap-a-2.log"), twoRoundsApart(32925), "utf8");
+  fs.writeFileSync(path.join(root, ".quay", "worker-outcome.jsonl"),
+    JSON.stringify({
+      ts: new Date(NOW - 3600_000).toISOString(), task: "gap-a", final_state: "exited-not-landed",
+      mechanical_fan_in: { outcome: "red", step: "suite", suiteLog: "fan-in-suite-gap-a-1.log" },
+    }) + "\n", "utf8");
+  // 生产那条 outcome 的逐字读数：基线比较 not-evaluated（本缺陷之前，spec 日志在基线侧恒读不懂）。
+  const outcome = {
+    ts: new Date(NOW).toISOString(), final_state: "exited-not-landed",
+    mechanical_fan_in: {
+      outcome: "red", step: "suite", suiteLog: "fan-in-suite-gap-a-2.log",
+      baselineEquivalence: {
+        verdict: { kind: "not-evaluated", reason: "baseline-side signatures unevaluable: no-failure-signature-lines" },
+        baselineWorktree: null, log: null,
+      },
+    },
+  };
+  const j = judgeRetryExemption(root, "gap-a", outcome, { nowMs: NOW });
+  assert.equal(j.verdict, "insufficient-data-fallback", `夹具必须落在归因不出的路径上：${j.reason}`);
+  assert.deepEqual(j.failingTestFiles, [FILE], "判定器【读到了】失败文件——这正是旧判词说反话的那条路径");
+  const d = decideExitedNotLandedAction(root, "gap-a", outcome, j, { nowMs: NOW });
+  assert.equal(d.kind, "stop-terminal", "两次归因不出 ⇒ 停（动作语义逐字不变）");
+  assert.doesNotMatch(d.reason, /could not be attributed to any failing test file/, "⛔ 判词不得与判定器自己的读数相反");
+  assert.match(d.reason, /baseline comparison not evaluated: baseline-side signatures unevaluable/, "判词必须点名【真态】：基线比较未评估");
+
+  const note = exitedNotLandedStopNote(d, j);
+  assert.doesNotMatch(note, /无法归因/, `归因到 ≥1 个文件时不得说「无法归因」：${note}`);
+  assert.match(note, /suite 红已归因到 1 个失败文件/, "如实报出已归因的条数");
+  assert.match(note, new RegExp(FILE.replace(/[.]/g, "\\.")), "点名那个文件");
+  // 两臂输出必须不同（否则该读数与字段无关 ⇒ 恒真量，硬规则 4）。对照臂给【确实一个也没归因出】的形状：
+  // 判词与判据同源复算，故对照臂自己那条 reason 也取旧措辞（⛔ 不把非空臂的 reason 拼到空臂上）。
+  const noteEmpty = exitedNotLandedStopNote(
+    { ...d, reason: "suite red could not be attributed to any failing test file in 2 consecutive rounds (bounded to at most one retry) — infra/contract suspected, not an implementable defect; stopping instead of spending another worker session" },
+    { ...j, failingTestFiles: [] },
+  );
+  assert.match(noteEmpty, /无法归因/, `files 为空 ⇒ 如实说「无法归因」：${noteEmpty}`);
+  assert.doesNotMatch(noteEmpty, /已归因到/, "对照臂不得凭空报出归因条数");
+  assert.notEqual(note, noteEmpty, "两臂输出必须可区分");
+  // AC4 要求「贴渲染文本」——入测试输出（证据取自真实运行，⛔ 不是手抄）。
+  console.log(`AC4 arm A (failingTestFiles 非空): ${note}`);
+  console.log(`AC4 arm B (failingTestFiles 为空): ${noteEmpty}`);
 });
