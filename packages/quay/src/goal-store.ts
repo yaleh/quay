@@ -88,7 +88,7 @@ import {
 // honoured WITHOUT a second default literal (gap-goal-gate-verdict-single-mapping-not-evaluated AC4).
 import { resolveAcceptanceTimeoutMs } from "./kernel/gate-run-options.ts";
 import { queryGateEvents } from "./gate/gate-event-store.ts";
-import { commitStoreWrite, commitStoreBatch, resolveGitRoot, type CommitOutcome } from "./store-commit.ts";
+import { commitKindFile, commitStoreBatch, resolveGitRoot } from "./store-commit.ts";
 import { criterionFidelityVerdict, type FidelityInvokeJudge } from "./criterion-fidelity.ts";
 // The criterion CAPABILITY judge (gap-criterion-side-effect-unguarded-at-write-and-execution-surface):
 // the THIRD activation/execution question, after evaluability (P6) and fidelity. "Can this criterion
@@ -1716,29 +1716,6 @@ export function parseAdjudicationTable(text: string): {
 }
 
 /**
- * COMMIT-AFTER-WRITE (gap-meta-commitgoalfile; now unified by SPEC-store-commit-unification §4):
- * commit a goal file to git immediately after writeFileSync, via the shared primitive
- * `commitStoreWrite` — ⛔ no git plumbing here (the five store files' `git commit` has exactly one
- * home: store-commit.ts). The goal store is the SOURCE of goal writes — the CLI `write`,
- * meta-driver's write paths, all funnel through `write()`/`flipGoal()` — so the commit lives HERE,
- * not in each caller. This wrapper declares the goal kind's default (SPEC §4 declaration table):
- * `propagate: "none"` — a goal write rides the branch it lands on (the goal driver runs from the
- * main checkout; a worktree write is carried into develop by that task's fan-in ff). A NEW goal
- * that must be pool-visible now passes propagate "develop" per SPEC §2.2.
- */
-function commitGoalFile(goalDir: string, fileName: string, id: string, action: string): CommitOutcome {
-  const root = resolveGitRoot(goalDir);
-  return commitStoreWrite({
-    relPath: root ? path.relative(root, path.join(goalDir, fileName)) : `goals/${fileName}`,
-    kind: "goals",
-    id,
-    action,
-    root,
-    propagate: "none",
-  }).outcome;
-}
-
-/**
  * @param {string} goalDir absolute path to the goal directory (e.g. `<workspaceRoot>/goals`)
  * @param {{cap?: number, staleMs?: number, fidelityJudge?: FidelityInvokeJudge}} opts I1′/I3 policy
  *   values (default cap=3, stale=7d — readGoalConfig supplies the .quay/config.yml values at the CLI
@@ -2491,7 +2468,11 @@ export function createGoalStore(
       }
     }
     fs.writeFileSync(p, serializeFrontmatter(fm, body), "utf8");
-    const outcome = commitGoalFile(goalDir, file, oldId, `status ${prevStatus}→${patch.status}`);
+    // COMMIT-AFTER-WRITE (gap-meta-commitgoalfile; now via the shared wrapper `commitKindFile`):
+    // the goal store is the SOURCE of goal writes, so the commit lives HERE. `propagate` defaults
+    // "none" — a goal write rides the branch it lands on (a worktree write is carried into develop by
+    // that task's fan-in ff). A NEW goal that must be pool-visible passes propagate "develop" (SPEC §2.2).
+    const outcome = commitKindFile(goalDir, file, oldId, `status ${prevStatus}→${patch.status}`, "goals");
     if (outcome === "failed") {
       // The disk write succeeded but the git commit genuinely FAILED — never throw (the write IS on
       // disk), but surface on stderr so the failure is observable, not silent (硬规则 3b).
@@ -3141,7 +3122,7 @@ export function createGoalStore(
           if (body !== undefined) touched.push("body");
           action = touched.length > 0 ? `field:${touched.join(",")}` : "update";
         }
-        const outcome = commitGoalFile(goalDir, fileName, id, action);
+        const outcome = commitKindFile(goalDir, fileName, id, action, "goals");
         if (outcome === "failed") {
           // The disk write succeeded but the git commit genuinely FAILED — surface on stderr so the
           // failure is observable, not silent (硬规则 3b). "unchanged"/"not-in-git" are expected no-ops.

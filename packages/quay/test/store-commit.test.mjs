@@ -15,7 +15,7 @@ import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { execFileSync } from "node:child_process";
-import { commitStoreWrite, commitStoreBatch, storeCommitMessage, resolveCommitActor, resolveGitRoot } from "../src/store-commit.ts";
+import { commitStoreWrite, commitStoreBatch, commitKindFile, storeCommitMessage, resolveCommitActor, resolveGitRoot } from "../src/store-commit.ts";
 import { createGoalStore } from "../src/goal-store.ts";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -115,6 +115,25 @@ test("resolveGitRoot: rev-parse root inside a repo, null outside", () => {
   assert.equal(resolveGitRoot(path.join(dir, "goals")), dir);
   const outside = tmpDir("outside");
   assert.equal(resolveGitRoot(outside), null);
+});
+
+test("commitKindFile: one shared wrapper — kind reaches the subject; null root ⇒ not-in-git (the four copies' dead fallback)", () => {
+  // gap-routine-semantic-dedup-scan-commit-kind-file-quadruplicated: the four deleted wrappers
+  // (commitAdrFile/DocFile/MetaFile/GoalFile) differed ONLY by the kind string, so the positive
+  // control is "the kind passed in reaches the commit subject".
+  const { dir, run } = gitRepo("kindfile");
+  fs.mkdirSync(path.join(dir, "goals"), { recursive: true });
+  fs.writeFileSync(path.join(dir, "goals", "AC-7.md"), "v7\n", "utf8");
+  const r = commitKindFile(path.join(dir, "goals"), "AC-7.md", "AC-7", "create", "goals");
+  assert.equal(r, "committed");
+  assert.match(run("log", "-1", "--format=%s").trim(), /^goals: AC-7 create by /);
+  // NEGATIVE — a non-git dir returns "not-in-git" WITHOUT ever reading relPath. That is exactly the
+  // branch the four copies carried a (dead) `"<kind>/"+fileName` fallback for: prove a caller need
+  // NOT supply a kind-prefixed path when root is null.
+  const outside = tmpDir("kindfile-nogit");
+  fs.mkdirSync(path.join(outside, "goals"), { recursive: true });
+  fs.writeFileSync(path.join(outside, "goals", "AC-8.md"), "v8\n", "utf8");
+  assert.equal(commitKindFile(path.join(outside, "goals"), "AC-8.md", "AC-8", "create", "goals"), "not-in-git");
 });
 
 // ── gap-store-commit-action-and-actor: action semantics + writer + batch + single constructor ────
