@@ -61,6 +61,28 @@
 // into the persistent Discovery carriers: that output is real data. What they must not change is WHEN
 // production runs next.
 //
+// ⛔ A TEMPORARY FASTER CADENCE (gap-discovery-method-routine-interval-60m-temporary) — three rules,
+// each closing a way a "temporary" change could quietly become a standing one:
+//   ① PER-ROUTINE FLOOR. `MIN_INTERVAL_MINUTES = 60` for THIS routine (arch-discovery's own floor is a
+//      separate constant in a separate file and is untouched). `DEFAULT_INTERVAL_MINUTES` stays 360 and
+//      is now also the line below which a declaration must be TEMPORARY.
+//   ② `interval_until: <ISO-8601>` is the expiry. While `now < interval_until` the configured interval
+//      applies; from that instant the round reverts to the 360m default AND SAYS SO in its Fact. A
+//      sub-360m interval declared WITHOUT `interval_until` is a config error (`failed`, zero spawns) —
+//      so "60m became the permanent cadence" is not a state this config can reach by omission.
+//   ③ `max_model_calls_per_24h` is REQUIRED whenever the interval is below 360m, and is enforced across
+//      rounds from the trailing-24h `scan-round` lines; hitting it records `not-evaluated:budget-24h`
+//      with zero spawns. A six-times-faster cadence needs a ceiling that spans rounds, not just the
+//      per-round `max_model_calls`.
+// ⛔ THE DUE BASIS (same task): production's window is read from WHEN PRODUCTION LAST REALLY RAN, not
+//   from whatever happens to be in `.quay/routine-last-run.json`. Preferred source = the newest
+//   `invoked_by:"resident-driver"` `scan-round` line on the carrier; fallback (only when the carrier has
+//   none) = the last-run entry, and only if it carries the sibling stamp this routine now writes
+//   (`"<name>@invoked_by"`). An UNSTAMPED legacy entry — like this workspace's 2026-10-12 09:10:40Z one,
+//   written by a worker acceptance run — is recorded as IGNORED and grants no window; it is never
+//   edited or deleted. Manual rounds still never write last-run (see above), and a manual round between
+//   two resident rounds does not shift the resident due time (it is not read at all).
+//
 // ⛔ NOT a hot-path gate (the `gap-fan-in-remove-archguard-gate` lesson): nothing here is called by
 // fan-in / scoped-gate / any per-task path. The only caller is the quality driver's routine table.
 
@@ -71,7 +93,9 @@ import { fileURLToPath, pathToFileURL } from "node:url";
 import YAML from "yaml";
 import { isDue, parseTrigger } from "./routine-scheduler.ts";
 import { type Fact, type RoutineSpec } from "./driver-runtime.ts";
-import { ROUTINE_LAST_RUN_REL, readLastRunMap, writeLastRun } from "./probe-routine.ts";
+// ⛔ `writeLastRun` is deliberately NOT imported: the resident advance must land the stamp in the SAME
+// write as the timestamp, so this routine uses its own `writeLastRunStamped` (see that function).
+import { ROUTINE_LAST_RUN_REL, readLastRunMap } from "./probe-routine.ts";
 import { isDirectEntry } from "./gate-script-base.ts";
 // ⛔ The Discovery Method loop (docs/analysis/discovery-{experience-ledger,reflection,method-registry}.mjs)
 // is NEVER statically imported here — this file is SHIPPED, and a static `../../docs/analysis/*.mjs`
@@ -97,15 +121,37 @@ export const INVOKED_BY_MANUAL: InvokedBy = "manual";
 export const INVOKED_BY_DEFAULT: InvokedBy = INVOKED_BY_MANUAL;
 
 /** The interval floor. A round spends real model calls and materialises stripped pins (a whole-tree
- *  `git archive` each); a cadence shorter than six hours is refused rather than silently rounded up
- *  (the config error names the value). */
-export const MIN_INTERVAL_MINUTES = 360;
-/** Default interval when the section declares none (only reachable while disabled — an enabled section
- *  must declare `interval`). */
+ *  `git archive` each); a cadence shorter than an hour is refused rather than silently rounded up
+ *  (the config error names the value). ⛔ The floor is PER-ROUTINE: arch-discovery has its own (60m,
+ *  `arch-discovery-routine.ts`), and neither routine's floor moves the other's. */
+export const MIN_INTERVAL_MINUTES = 60;
+/** The PERMANENT interval, and the revert target of a temporary window. It is the default when the
+ *  section declares no interval (only reachable while disabled — an enabled section must declare one)
+ *  AND the cadence below which a declaration must be TEMPORARY (`interval_until`) to be accepted. */
 export const DEFAULT_INTERVAL_MINUTES = 360;
+
+/** The 24h window the cross-round model-call ceiling (`max_model_calls_per_24h`) counts over. The
+ *  window is 24h because the KEY IS NAMED `..._per_24h` — the number is the declaration's own
+ *  semantics, not a host-derived quantity (硬规则 4 推论二 is about literals that silently *replace* a
+ *  host capability; this one defines the unit the operator wrote). */
+export const BUDGET_24H_MS = 24 * 60 * 60 * 1000;
+
 export const DEFAULT_MAX_EXPERIENCES = 8;
 export const DEFAULT_MAX_MODEL_CALLS = 6;
 export const DEFAULT_MAX_WALL_MS = 900_000;
+
+/** The sibling key a RESIDENT round stamps next to its `routine-last-run.json` entry, so the entry
+ *  itself says WHO wrote it. ⛔ Without it, "the resident driver ran" and "a worker acceptance run
+ *  wrote this" are shaped the same (硬规则 3b) — which is exactly the state production was found in on
+ *  2026-10-12 (see the header). The key is per-routine, so every routine can stamp its own entry. */
+export const invokedByStampKey = (name: string): string => `${name}@invoked_by`;
+
+/** Who may have written a `routine-last-run.json` entry, as the stamp records it. `resident-driver`
+ *  is the only value that means "production really ran"; an entry with NO stamp is treated as not
+ *  written by production at all (see `latestResidentRoundTs` / the round's due basis). */
+export function isResidentStamped(map: Record<string, unknown>, name: string): boolean {
+  return map[invokedByStampKey(name)] === INVOKED_BY_RESIDENT;
+}
 
 /** Env override for the temp root the stripped pins are materialised under (tests point it at their own
  *  scratch dir so a run cannot litter the shared `/tmp`; production leaves it unset). */
@@ -115,9 +161,16 @@ export const PIN_TMP_ENV = "QUAY_DISCOVERY_METHOD_PIN_TMP";
 export interface DiscoveryMethodConfig {
   enabled: boolean;
   trigger: { kind: string; minutes?: number };
+  /** Epoch-ms deadline of a TEMPORARY cadence. `null` = none declared, i.e. the configured interval is
+   *  PERMANENT. At/after this instant the round reverts to `DEFAULT_INTERVAL_MINUTES` and says so in its
+   *  Fact — so a faster cadence can only ever be a declared, expiring window (see the parse below). */
+  intervalUntil: number | null;
   maxExperiences: number;
   maxModelCalls: number;
   maxWallMs: number;
+  /** The cross-round ceiling on model calls over the trailing 24h. REQUIRED when `interval` is below
+   *  `DEFAULT_INTERVAL_MINUTES`; `null` when not declared ⇒ the 24h gate does not apply. */
+  maxModelCallsPer24h: number | null;
 }
 
 /** `present` = the section exists; `config` = the parsed section (null when malformed); `error` = a
@@ -145,9 +198,11 @@ export function parseDiscoveryMethodSection(raw: unknown): { config: DiscoveryMe
   const disabled: DiscoveryMethodConfig = {
     enabled: false,
     trigger: { kind: "interval", minutes: DEFAULT_INTERVAL_MINUTES },
+    intervalUntil: null,
     maxExperiences: DEFAULT_MAX_EXPERIENCES,
     maxModelCalls: DEFAULT_MAX_MODEL_CALLS,
     maxWallMs: DEFAULT_MAX_WALL_MS,
+    maxModelCallsPer24h: null,
   };
   if (rec.enabled === false) return { config: disabled, error: null };
 
@@ -165,6 +220,27 @@ export function parseDiscoveryMethodSection(raw: unknown): { config: DiscoveryMe
   }
   if (trigger.minutes < MIN_INTERVAL_MINUTES) {
     return { config: null, error: cfgBad(`interval ${trigger.minutes}m is below the ${MIN_INTERVAL_MINUTES}m floor — a round spends real model calls and materialises stripped pins, so it is refused rather than silently rounded`) };
+  }
+
+  // ⛔ THE TEMPORARY-CADENCE RULE (the whole reason a sub-360m interval is reachable at all): a cadence
+  // below the PERMANENT default may only be declared together with the instant it expires. Without an
+  // `interval_until` the declaration is refused outright, so "a faster cadence became the standing one"
+  // is not a state this config can be left in by accident — the operator has to name the deadline, and
+  // the round re-reads it every round (an expired window reverts to the 360m default and says so).
+  let intervalUntil: number | null = null;
+  if (rec.interval_until !== undefined && rec.interval_until !== null) {
+    if (typeof rec.interval_until !== "string") {
+      return { config: null, error: cfgBad(`'interval_until' must be an ISO-8601 string (got ${JSON.stringify(rec.interval_until)})`) };
+    }
+    const ms = Date.parse(rec.interval_until);
+    if (!Number.isFinite(ms)) {
+      return { config: null, error: cfgBad(`'interval_until' is not a parseable instant (got ${JSON.stringify(rec.interval_until)} — expected ISO-8601, e.g. 2026-10-19T12:00:00Z)`) };
+    }
+    intervalUntil = ms;
+  }
+  const temporary = trigger.minutes < DEFAULT_INTERVAL_MINUTES;
+  if (temporary && intervalUntil === null) {
+    return { config: null, error: cfgBad(`interval ${trigger.minutes}m is below the ${DEFAULT_INTERVAL_MINUTES}m default and no 'interval_until' is declared — a sub-${DEFAULT_INTERVAL_MINUTES}m cadence is TEMPORARY by declaration and must not be able to become permanent silently`) };
   }
 
   // ⛔ `0` is a LEGITIMATE bound for the two quotas (`max_experiences: 0` = ingest nothing this round;
@@ -186,13 +262,26 @@ export function parseDiscoveryMethodSection(raw: unknown): { config: DiscoveryMe
   const maxWallMs = bound("max_wall_ms", DEFAULT_MAX_WALL_MS, 1);
   if (maxWallMs.error) return { config: null, error: maxWallMs.error };
 
+  // ⛔ REQUIRED FOR A TEMPORARY CADENCE, optional otherwise: an interval under the permanent default
+  // buys rounds six times more often, so the per-round `max_model_calls` alone no longer bounds the
+  // day. `0` is a legitimate value here for the same reason it is on the other two quotas (a
+  // mechanical-only fast cadence is a coherent declaration); the gate is shape, not a made-up floor.
+  const per24 = bound("max_model_calls_per_24h", 0, 0);
+  if (per24.error) return { config: null, error: per24.error };
+  const has24hCap = rec.max_model_calls_per_24h !== undefined && rec.max_model_calls_per_24h !== null;
+  if (temporary && !has24hCap) {
+    return { config: null, error: cfgBad(`'max_model_calls_per_24h' is REQUIRED when 'interval' is below the ${DEFAULT_INTERVAL_MINUTES}m default (interval ${trigger.minutes}m) — a faster cadence must declare its cross-round model-call ceiling`) };
+  }
+
   return {
     config: {
       enabled: true,
       trigger,
+      intervalUntil,
       maxExperiences: maxExperiences.value as number,
       maxModelCalls: maxModelCalls.value as number,
       maxWallMs: maxWallMs.value as number,
+      maxModelCallsPer24h: has24hCap ? (per24.value as number) : null,
     },
     error: null,
   };
@@ -250,6 +339,69 @@ export function appendCarrierRecords(carrierPath: string, records: readonly Reco
   fs.mkdirSync(path.dirname(carrierPath), { recursive: true });
   fs.appendFileSync(carrierPath, records.map((r) => JSON.stringify(r) + "\n").join(""), "utf8");
   return records.length;
+}
+
+/** One instant off a carrier line: its `ts` (ISO-8601, the field every round writes). THROWS when a
+ *  line this routine has to READ cannot supply one — a scheduling quantity that cannot be read must
+ *  never be silently treated as "long ago" (硬规则 3b). */
+function lineTs(rec: Record<string, unknown>, index: number): number {
+  const ms = typeof rec.ts === "string" ? Date.parse(rec.ts) : NaN;
+  if (!Number.isFinite(ms)) {
+    throw new Error(`carrier line ${index + 1} (kind:${String(rec.kind ?? "<none>")}) has no parseable 'ts' (got ${JSON.stringify(rec.ts)}) — its instant cannot be read`);
+  }
+  return ms;
+}
+
+/** When PRODUCTION last really ran: the newest `scan-round` line on the carrier whose `invoked_by` is
+ *  `resident-driver`. `null` = production never ran (⇒ due). ⛔ A line with no `invoked_by` at all is a
+ *  LEGACY line — written before the stamp existed — and is deliberately NOT counted: it cannot say who
+ *  ran it, and reading it as production is exactly the defect this basis removes (this workspace's
+ *  legacy entries came from worker acceptance runs). An unreadable `ts` on a resident line THROWS —
+ *  "cannot read when production ran" is not "production never ran". */
+export function latestResidentRoundTs(records: readonly Record<string, unknown>[]): number | null {
+  let latest: number | null = null;
+  for (let i = 0; i < records.length; i++) {
+    const rec = records[i];
+    if (rec.kind !== "scan-round" || rec.invoked_by !== INVOKED_BY_RESIDENT) continue;
+    const ms = lineTs(rec, i);
+    if (latest === null || ms > latest) latest = ms;
+  }
+  return latest;
+}
+
+/** Model calls spent in the trailing window, summed over the carrier's `scan-round` lines. Counts
+ *  EVERY round in the window, manual ones included: the budget bounds MODEL CALLS, and a hand-run
+ *  spends them exactly like a resident one (what a manual round must not do is move production's
+ *  clock — a different thing, enforced separately). An in-window line whose `model_calls` cannot be
+ *  read THROWS rather than counting as 0: a budget computed from a partially-readable history would
+ *  report "under the ceiling" without having established it (硬规则 3b). */
+export function modelCallsInWindow(records: readonly Record<string, unknown>[], nowMs: number, windowMs: number): number {
+  let total = 0;
+  for (let i = 0; i < records.length; i++) {
+    const rec = records[i];
+    if (rec.kind !== "scan-round") continue;
+    const spent = rec.model_calls;
+    const ms = lineTs(rec, i);
+    if (ms < nowMs - windowMs || ms > nowMs) continue; // outside the trailing window ⇒ not this budget's business
+    if (typeof spent !== "number" || !Number.isFinite(spent) || spent < 0) {
+      throw new Error(`carrier line ${i + 1} is a scan-round inside the trailing 24h whose 'model_calls' is not a non-negative number (got ${JSON.stringify(spent)}) — the 24h budget cannot be established from a partially-readable window`);
+    }
+    total += spent;
+  }
+  return total;
+}
+
+/** The merge write for the durable last-run map, WITH the caller stamp. ⛔ Local rather than
+ *  `probe-routine.writeLastRun` because that helper writes exactly one key, and the stamp must land in
+ *  the SAME write as the timestamp (two writes would leave a window in which the entry is fresh but
+ *  unattributed — the unreadable state this stamp exists to remove). The serializer is deliberately
+ *  the same `JSON.stringify(map, null, 1)` so every other routine's entry survives byte-for-byte. */
+export function writeLastRunStamped(lastRunPath: string, name: string, ts: number, invokedBy: InvokedBy): void {
+  const map = readLastRunMap(lastRunPath) as Record<string, unknown>;
+  map[name] = ts;
+  map[invokedByStampKey(name)] = invokedBy;
+  fs.mkdirSync(path.dirname(lastRunPath), { recursive: true });
+  fs.writeFileSync(lastRunPath, JSON.stringify(map, null, 1), "utf8");
 }
 
 // ── held-out cases: the pinned Experiences the verifier may read ────────────────────────────────────
@@ -489,29 +641,113 @@ export async function runDiscoveryMethod(root: string, opts: DiscoveryMethodRunO
   //    track — observation continues.
   if (opts.halted) return fact("not-evaluated", { ...base, enabled: true }, "halted: discovery-method spawn suppressed (halt gates the spawn, not the routine track) — nothing spawned");
 
-  // ③ durable window: the loop's own lastRun is in-memory ⇒ a driver restart would re-fire every round.
-  //    ⛔ The entry consulted is the PRODUCTION one, for BOTH kinds of round — a manual round answers its
-  //    own "is it time?" with the same clock production uses (so a hand-run inside the window is a no-op
-  //    unless `--force`), it just never ADVANCES it. That is the whole split: read is shared, advance is
-  //    the resident round's alone (a manual round that wrote here is the defect this task fixes).
-  const last = Number(readLastRunMap(lastRunPath)[DISCOVERY_METHOD_NAME]);
-  const due = isDue(config.trigger, { now: started, lastRun: last });
+  // ③ the carrier must be readable BEFORE anything runs — the due basis (below) is READ FROM IT, and an
+  //    unreadable carrier is NEVER shaped like "0 previous rounds" (硬规则 3b).
+  let carrierRounds: Record<string, unknown>[];
+  try {
+    carrierRounds = readCarrierRounds(carrier).records;
+  } catch (e) {
+    return fact("failed", { ...base, enabled: true }, `unreadable carrier — ${(e as Error).message} (nothing appended)`);
+  }
+
+  // ③a THE EFFECTIVE INTERVAL. A declared `interval_until` is a TEMPORARY window: while `now` is before
+  //     it the declared (possibly sub-360m) cadence applies, and from that instant on the round falls
+  //     back to the permanent default. The revert is re-derived EVERY round from the parsed config, so
+  //     an expired window cannot keep driving production merely because the driver still holds the old
+  //     RoutineSpec in memory.
+  const declaredMinutes = typeof config.trigger.minutes === "number" ? config.trigger.minutes : DEFAULT_INTERVAL_MINUTES;
+  const intervalReverted = config.intervalUntil !== null && started >= config.intervalUntil;
+  const intervalMinutes = intervalReverted ? DEFAULT_INTERVAL_MINUTES : declaredMinutes;
+  const intervalUntilIso = config.intervalUntil === null ? null : new Date(config.intervalUntil).toISOString();
+  const revertedNote = intervalReverted
+    ? ` (the temporary interval_until ${intervalUntilIso} has passed ⇒ the ${DEFAULT_INTERVAL_MINUTES}m default applies)`
+    : "";
+
+  // ③b THE DUE BASIS — "when did PRODUCTION last really run". Preferred: the newest resident-driver
+  //     `scan-round` line on the carrier. Fallback (only when the carrier has none): the durable entry
+  //     in `.quay/routine-last-run.json`, and ONLY if it carries this routine's resident stamp. ⛔ A
+  //     legacy entry with no stamp is *recorded as ignored* and grants no window: this workspace's
+  //     `discovery-method` entry was written by a worker acceptance run and would otherwise hold
+  //     production's clock for six hours. The entry is never edited or deleted — only not believed.
+  let residentTs: number | null = null;
+  try {
+    residentTs = latestResidentRoundTs(carrierRounds);
+  } catch (e) {
+    return fact("failed", { ...base, enabled: true }, `unreadable due basis — ${(e as Error).message} (nothing appended)`);
+  }
+  const lastRunMap = readLastRunMap(lastRunPath) as Record<string, unknown>;
+  const lastRunRaw = lastRunMap[DISCOVERY_METHOD_NAME];
+  const lastRunValue = Number(lastRunRaw);
+  const lastRunUsable = Number.isFinite(lastRunValue) && lastRunValue > 0;
+  let last: number | null;
+  let dueSource: "carrier" | "last-run-stamped" | "none";
+  let dueBasis: string;
+  let legacyIgnored: number | null = null;
+  if (residentTs !== null) {
+    last = residentTs;
+    dueSource = "carrier";
+    dueBasis = `carrier: latest invoked_by:${INVOKED_BY_RESIDENT} scan-round at ${new Date(residentTs).toISOString()}`;
+  } else if (isResidentStamped(lastRunMap, DISCOVERY_METHOD_NAME) && lastRunUsable) {
+    last = lastRunValue;
+    dueSource = "last-run-stamped";
+    dueBasis = `routine-last-run.json: resident-stamped entry ${lastRunValue}`;
+  } else {
+    last = null;
+    dueSource = "none";
+    if (lastRunUsable) {
+      legacyIgnored = lastRunValue;
+      dueBasis = `routine-last-run.json holds ${lastRunValue}, but it carries no invoked_by:${INVOKED_BY_RESIDENT} stamp on '${invokedByStampKey(DISCOVERY_METHOD_NAME)}' and the carrier has no resident-driver round, so it is a legacy/unattributed entry and is IGNORED for due-computation`;
+    } else {
+      dueBasis = `no invoked_by:${INVOKED_BY_RESIDENT} scan-round on the carrier and no usable routine-last-run.json entry`;
+    }
+  }
+  // ⛔ ONE shape, used by EVERY Fact this round can return (the refusals and the run alike): the cadence
+  // that governed, and the reading the window came from — enumerated (`source`), not only in the prose
+  // (`basis`), so a reader can tell "the carrier said so" from "a stamped entry said so" from "nothing
+  // was believed" without parsing a sentence (硬规则 3).
+  const intervalInfo = { minutes: intervalMinutes, declared_minutes: declaredMinutes, reverted: intervalReverted, until: intervalUntilIso };
+  const dueInfo = { source: dueSource, basis: dueBasis, last_resident_run: residentTs === null ? null : new Date(residentTs).toISOString(), legacy_ignored: legacyIgnored };
+  const legacyNote = legacyIgnored === null
+    ? ""
+    : ` (the legacy .quay/routine-last-run.json entry ${legacyIgnored} was NOT written by the resident driver and is ignored for due-computation)`;
+
+  // ③c the durable window: the loop's own lastRun is in-memory ⇒ a driver restart would re-fire every
+  //     round. ⛔ What is consulted is the PRODUCTION time, for BOTH kinds of round — a manual round
+  //     answers its own "is it time?" with the same reading production uses (so a hand-run inside the
+  //     window is a no-op unless `--force`), it just never ADVANCES it. That is the whole split: read is
+  //     shared, advance is the resident round's alone (a manual round that wrote here is the defect this
+  //     task fixes).
+  const due = isDue({ kind: "interval", minutes: intervalMinutes }, { now: started, lastRun: last === null ? NaN : last });
   const forcedPastDue = !due && force;
   if (!due && !forcedPastDue) {
-    const agoMin = Number.isFinite(last) && last > 0 ? Math.round((started - last) / 60_000) : null;
+    const agoMin = last === null ? null : Math.round((started - last) / 60_000);
     return fact(
       "not-evaluated",
-      { ...base, enabled: true, intervalMinutes: config.trigger.minutes, minutesSinceLastRun: agoMin },
-      `not due: ${agoMin === null ? "never ran (should be due — check the clock)" : `ran ${agoMin}m ago`} within the ${config.trigger.minutes}m interval — nothing spawned${resident ? "" : " (manual round: `--force` runs one anyway; the interval is production's, and last-run stays put either way)"}`,
+      { ...base, enabled: true, interval: intervalInfo, due: dueInfo, minutesSinceLastRun: agoMin },
+      `not due: ${agoMin === null ? "never ran (should be due — check the clock)" : `ran ${agoMin}m ago`} within the ${intervalMinutes}m interval — nothing spawned${revertedNote}${legacyNote}${resident ? "" : " (manual round: `--force` runs one anyway; the interval is production's, and last-run stays put either way)"}`,
     );
   }
 
-  // ④ the carrier must be readable BEFORE anything runs: an unreadable carrier is NEVER shaped like
-  //    "0 previous rounds" (硬规则 3b).
-  try {
-    readCarrierRounds(carrier);
-  } catch (e) {
-    return fact("failed", { ...base, enabled: true }, `unreadable carrier — ${(e as Error).message} (nothing appended)`);
+  // ③d THE 24h CEILING. Only for a declaration that carries one (required whenever the interval is below
+  //     the permanent default). A round that would push the trailing-24h total past the ceiling does not
+  //     run at all — and says so with its own reason, so "the fast cadence is being held back by its
+  //     budget" is never shaped like "the routine is idle" (硬规则 3b).
+  let budget24h: { cap: number; used: number; window_ms: number } | null = null;
+  if (config.maxModelCallsPer24h !== null) {
+    let used: number;
+    try {
+      used = modelCallsInWindow(carrierRounds, started, BUDGET_24H_MS);
+    } catch (e) {
+      return fact("failed", { ...base, enabled: true, interval: intervalInfo, due: dueInfo }, `unreadable 24h budget — ${(e as Error).message} (nothing appended)`);
+    }
+    if (used >= config.maxModelCallsPer24h) {
+      return fact(
+        "not-evaluated",
+        { ...base, enabled: true, interval: intervalInfo, due: dueInfo, budget_24h: { cap: config.maxModelCallsPer24h, used, window_ms: BUDGET_24H_MS } },
+        `budget-24h: ${used} model call(s) in the trailing 24h >= max_model_calls_per_24h ${config.maxModelCallsPer24h} — nothing spawned (the fast cadence is held back by its declared 24h ceiling, not idle)${revertedNote}${legacyNote}`,
+      );
+    }
+    budget24h = { cap: config.maxModelCallsPer24h, used, window_ms: BUDGET_24H_MS };
   }
 
   // The engine modules (docs/analysis/discovery-{experience-ledger,reflection,method-registry}.mjs) are
@@ -715,6 +951,13 @@ export async function runDiscoveryMethod(root: string, opts: DiscoveryMethodRunO
     // must be distinguishable on the record itself, not only in the head of whoever ran it).
     invoked_by: invokedBy,
     ts: new Date(now()).toISOString(),
+    // ⛔ The cadence that ACTUALLY governed this round, and the reading the window came from, on the line
+    // itself (the SAME two objects every Fact of this round carries — see intervalInfo/dueInfo): a reader
+    // asking "was this a 60m round or a 360m one, and what told us it was due?" gets both answers without
+    // re-reading a config that may since have changed or re-deriving the basis from the file's order.
+    interval: intervalInfo,
+    due: dueInfo,
+    budget_24h: budget24h,
     wall_ms: wallMs,
     ingested: { experiences: ingested, scanned: Number(ingest.scanned ?? 0), duplicates: Number(ingest.duplicates ?? 0), advanced_to: ingest.advanced_to ?? null },
     reflected: reflection,
@@ -743,12 +986,15 @@ export async function runDiscoveryMethod(root: string, opts: DiscoveryMethodRunO
   //    the carrier exactly like a production one (same data, and its `invoked_by` names the difference),
   //    but `.quay/routine-last-run.json` is left BYTE-IDENTICAL — a hand-run must never be what decides
   //    when production runs next. The `if` is the whole mechanism; there is no write-elsewhere path.
-  if (resident) writeLastRun(lastRunPath, DISCOVERY_METHOD_NAME, now());
+  //    ⛔ The advance carries the STAMP in the same write: an entry whose writer is unreadable would be
+  //    indistinguishable from one this routine itself wrote (硬规则 3b), which is the state the due basis
+  //    above exists to refuse.
+  if (resident) writeLastRunStamped(lastRunPath, DISCOVERY_METHOD_NAME, now(), invokedBy);
 
   return fact(
     "verified",
     round,
-    `round ran (invoked_by:${invokedBy}): ingested ${ingested} experience(s), reflected ${reflection ? Number(reflection.decisions ?? 0) : 0} unit(s), minted ${candidates.length} candidate(s), ${verdicts.filter((v) => v.outcome === "evaluated").length} evaluated verdict(s) (${verdicts.filter((v) => v.correct === true).length} correct), ${promotions.length} promotion(s), ${retirements.length} retirement(s), ${modelCalls} model call(s), wall ${wallMs}ms; appended 1 scan-round line to ${asRel(root, carrier)}${resident ? " and advanced the production last-run" : " — MANUAL: the production last-run in .quay/routine-last-run.json was NOT advanced (this round did not move production's clock)"}${forcedPastDue ? " [--force: the due gate was ignored for this round only]" : ""}`,
+    `round ran (invoked_by:${invokedBy}, interval ${intervalMinutes}m): ingested ${ingested} experience(s), reflected ${reflection ? Number(reflection.decisions ?? 0) : 0} unit(s), minted ${candidates.length} candidate(s), ${verdicts.filter((v) => v.outcome === "evaluated").length} evaluated verdict(s) (${verdicts.filter((v) => v.correct === true).length} correct), ${promotions.length} promotion(s), ${retirements.length} retirement(s), ${modelCalls} model call(s), wall ${wallMs}ms; appended 1 scan-round line to ${asRel(root, carrier)}${resident ? " and advanced the production last-run" : " — MANUAL: the production last-run in .quay/routine-last-run.json was NOT advanced (this round did not move production's clock)"}${revertedNote}${legacyNote}${forcedPastDue ? " [--force: the due gate was ignored for this round only]" : ""}`,
   );
 }
 
@@ -761,7 +1007,13 @@ export interface DiscoveryMethodRoutineOptions extends Omit<DiscoveryMethodRunOp
 
 /** Build the Layer-1b routine from an ALREADY-PARSED config read. `schedule` is the section's trigger
  *  when present, else the default interval — a disabled/absent section is still an evaluated routine
- *  (it records `not-evaluated:disabled`), it just never spawns. */
+ *  (it records `not-evaluated:disabled`), it just never spawns.
+ *  ⚠️ `schedule` is the DECLARED interval and stays that way for the life of this spec: the driver holds
+ *  it in memory, so after an `interval_until` window expires the driver keeps OFFERING a round every
+ *  `declared` minutes, and the round itself answers `not due` against the reverted 360m default (the due
+ *  basis is re-read from disk on every round). A cheap no-op is the price of not requiring a driver
+ *  restart at the deadline; the alternative — a spec that silently mutates its own schedule — would hide
+ *  the revert from the driver's own routine table. */
 export function buildDiscoveryMethodRoutine(root: string, read: DiscoveryMethodConfigRead, opts: DiscoveryMethodRoutineOptions = {}): RoutineSpec {
   const schedule = read.config?.trigger ?? { kind: "interval", minutes: DEFAULT_INTERVAL_MINUTES };
   return {
@@ -790,13 +1042,28 @@ export function buildDiscoveryMethodRoutine(root: string, read: DiscoveryMethodC
 export function discoveryMethodRoutineFromConfig(
   root: string,
   opts: DiscoveryMethodRoutineOptions = {},
-): { routine: RoutineSpec | null; error: string | null; present: boolean; enabled: boolean } {
+): {
+  routine: RoutineSpec | null;
+  error: string | null;
+  present: boolean;
+  enabled: boolean;
+  /** The ASSEMBLED cadence, so the host driver can REPORT it at startup rather than leaving "what
+   *  interval did we actually assemble?" readable only by re-parsing the config by hand. `null` when the
+   *  section is absent/malformed/disabled (nothing was assembled to report). */
+  intervalMinutes: number | null;
+  intervalUntil: number | null;
+  maxModelCallsPer24h: number | null;
+} {
   const read = readDiscoveryMethodConfig(root);
+  const cfg = read.config;
   return {
     routine: read.present ? buildDiscoveryMethodRoutine(root, read, opts) : null,
     error: read.error,
     present: read.present,
-    enabled: read.config?.enabled === true,
+    enabled: cfg?.enabled === true,
+    intervalMinutes: cfg && typeof cfg.trigger.minutes === "number" ? cfg.trigger.minutes : null,
+    intervalUntil: cfg ? cfg.intervalUntil : null,
+    maxModelCallsPer24h: cfg ? cfg.maxModelCallsPer24h : null,
   };
 }
 

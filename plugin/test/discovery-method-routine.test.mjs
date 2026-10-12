@@ -25,6 +25,17 @@
 //   (e) a manual round in-window is a no-op; `--force` runs one and STILL does not advance last-run
 //   (f) the `--once` CLI is manual by construction (the acceptance-run path that caused the defect)
 //
+// Coverage map (task gap-discovery-method-routine-interval-60m-temporary) — the TEMPORARY faster cadence
+// and the due basis it needs:
+//   (a) `interval:60m` + a future `interval_until` ⇒ accepted, due after 60m
+//   (b) `interval:60m` WITHOUT `interval_until`     ⇒ config error, zero spawns
+//       (+ `max_model_calls_per_24h` required on the same arm)
+//   (c) after `interval_until` passes               ⇒ 360m applies and the Fact says so
+//   (d) a legacy UNSTAMPED last-run entry is ignored for due-computation; a resident-stamped one is honoured
+//   (e) a manual round between two resident rounds does not shift the resident due time
+//   (f) `max_model_calls_per_24h` reached           ⇒ not-evaluated:budget-24h, zero spawns
+//   (g) `arch-discovery` and other routine intervals are unaffected (fixture with both routines)
+//
 // Run: scripts/test.sh plugin/test/discovery-method-routine.test.mjs
 
 import { test, after } from "node:test";
@@ -39,6 +50,11 @@ import {
   DISCOVERY_METHOD_NAME,
   CARRIER_REL,
   MIN_INTERVAL_MINUTES,
+  DEFAULT_INTERVAL_MINUTES,
+  BUDGET_24H_MS,
+  invokedByStampKey,
+  latestResidentRoundTs,
+  modelCallsInWindow,
   LEDGER_MODULE_FILE,
   SCRIPT_REPO_ROOT,
   INVOKED_BY_RESIDENT,
@@ -54,6 +70,12 @@ import {
   discoveryMethodRoutineFromConfig,
 } from "../scripts/discovery-method-routine.ts";
 import { ROUTINE_LAST_RUN_REL, readLastRunMap } from "../scripts/probe-routine.ts";
+// (g) 的正本对照：另一条例程**自己的** floor / 默认值，⛔ 不是从 discovery-method 借来的常量。
+import {
+  MIN_INTERVAL_MINUTES as ARCH_MIN_INTERVAL_MINUTES,
+  parseArchDiscoverySection,
+  readArchDiscoveryConfig,
+} from "../scripts/arch-discovery-routine.ts";
 import { appendOutcomeRecord } from "../../docs/analysis/architecture-evidence-store.mjs";
 
 const SCRIPT_DIR = path.dirname(fileURLToPath(import.meta.url));
@@ -167,10 +189,12 @@ test("case (1)/(2)/(4) — parseDiscoveryMethodSection: disabled section, malfor
   assert.match(parseDiscoveryMethodSection({ enabled: "yes" }).error, /needs a boolean 'enabled'/, "a non-boolean 'enabled' is malformed");
   assert.match(parseDiscoveryMethodSection({ enabled: true }).error, /needs an 'interval' string/, "enabled ⇒ interval is required");
   assert.match(parseDiscoveryMethodSection({ enabled: true, interval: "every(5)" }).error, /must be interval:<N>m/, "a non-interval trigger is refused");
-  assert.match(parseDiscoveryMethodSection({ enabled: true, interval: "interval:5m" }).error, /below the 360m floor/, "an interval under the floor is refused");
+  assert.match(parseDiscoveryMethodSection({ enabled: true, interval: "interval:5m" }).error, new RegExp(`below the ${MIN_INTERVAL_MINUTES}m floor`), "an interval under the floor is refused");
   const ok = parseDiscoveryMethodSection({ enabled: true, interval: "interval:360m" });
   assert.equal(ok.error, null);
-  assert.equal(ok.config.trigger.minutes, MIN_INTERVAL_MINUTES, "exactly the floor is accepted");
+  assert.equal(ok.config.trigger.minutes, DEFAULT_INTERVAL_MINUTES, "the permanent default is accepted as-is");
+  assert.equal(MIN_INTERVAL_MINUTES, 60, "THIS routine's floor is 60m — a cadence the other routines' floors do not govern");
+  assert.equal(DEFAULT_INTERVAL_MINUTES, 360, "…and the PERMANENT default stays 360m: the floor moved, not the default");
   assert.equal(ok.config.maxExperiences, 8, "absent bounds take their documented default");
   // ⛔ `0` is a legitimate bound for the two quotas (a purely mechanical round / ingest nothing), and
   // the refusal is on integrality + non-negativity — not on a made-up positive floor.
@@ -233,11 +257,12 @@ test("case (3) — halted ⇒ not-evaluated:halted and ZERO spawns", async () =>
 test("the durable due gate — not due inside the interval ⇒ ZERO spawns", async () => {
   const ws = makeWorkspace();
   writeConfig(ws, ENABLED_YAML);
-  fs.writeFileSync(lastRunPath(ws), JSON.stringify({ [DISCOVERY_METHOD_NAME]: Date.now() }), "utf8");
+  writeProductionLastRun(ws, Date.now()); // resident-stamped "just ran"
   const ingest = countingIngest();
   const fact = await runDiscoveryMethod(ws, runOpts(ws, { ingestFn: ingest }));
   assert.equal(fact.state, "not-evaluated");
   assert.match(fact.reason, /not due/);
+  assert.equal(fact.value.due.source, "last-run-stamped", "the Fact enumerates WHICH reading produced the window");
   assert.equal(ingest.calls.length, 0, "ZERO spawns");
 });
 
@@ -252,9 +277,27 @@ test("the durable due gate — not due inside the interval ⇒ ZERO spawns", asy
 // literally, not "semantically equal".
 const OTHER_ROUTINE_KEYS = { "self-validation": 1786552318938, "arch-discovery": 1791778563897 };
 /** A production map whose `discovery-method` entry is a day old (⇒ the round IS due) plus two other
- *  routines' entries that must survive every write untouched. */
+ *  routines' entries that must survive every write untouched.
+ *  ⛔ The entry is written WITH the resident stamp, because that is now what "production last ran" means:
+ *  an unstamped entry grants no window at all (see the (d) cases and the round's due basis). */
 function writeProductionLastRun(ws, discoveryMethodTs) {
-  fs.writeFileSync(lastRunPath(ws), JSON.stringify({ [DISCOVERY_METHOD_NAME]: discoveryMethodTs, ...OTHER_ROUTINE_KEYS }, null, 1), "utf8");
+  fs.writeFileSync(
+    lastRunPath(ws),
+    JSON.stringify({ [DISCOVERY_METHOD_NAME]: discoveryMethodTs, [invokedByStampKey(DISCOVERY_METHOD_NAME)]: INVOKED_BY_RESIDENT, ...OTHER_ROUTINE_KEYS }, null, 1),
+    "utf8",
+  );
+}
+/** The declared-temporary YAML: 60m plus the expiry and the 24h ceiling the parse REQUIRES with it. */
+const temporaryYaml = (untilIso, cap = 24) =>
+  `loop:\n  discovery_method:\n    enabled: true\n    interval: interval:60m\n    interval_until: ${untilIso}\n    max_model_calls_per_24h: ${cap}\n    max_experiences: 8\n    max_model_calls: 6\n    max_wall_ms: 900000\n`;
+
+/** A carrier `scan-round` line as the routine itself writes one — used to seed PRODUCTION history. */
+function scanRoundLine({ ts, invokedBy, modelCalls = 0 }) {
+  return { kind: "scan-round", routine: DISCOVERY_METHOD_NAME, ...(invokedBy ? { invoked_by: invokedBy } : {}), ts, model_calls: modelCalls };
+}
+function writeCarrier(ws, lines) {
+  fs.mkdirSync(path.dirname(carrierPath(ws)), { recursive: true });
+  fs.writeFileSync(carrierPath(ws), lines.map((l) => JSON.stringify(l) + "\n").join(""), "utf8");
 }
 const OLD_PRODUCTION_TS = Date.parse("2026-10-11T00:00:00Z");
 const ROUND_AT = Date.parse("2026-10-12T00:00:00Z"); // 24h after OLD_PRODUCTION_TS ⇒ due
@@ -293,8 +336,11 @@ test("case (b) — a RESIDENT-DRIVER round advances only the discovery-method ke
   assert.equal(rounds(ws)[0].invoked_by, INVOKED_BY_RESIDENT);
   const after = readLastRunMap(lastRunPath(ws));
   assert.equal(after[DISCOVERY_METHOD_NAME], ROUND_AT, "the resident round advanced ITS OWN key to the round's clock (it was due)");
+  // ⛔ The advance carries its own ATTRIBUTION in the same write: without it, this fresh entry and the
+  // unstamped legacy one this task found in production would be the same record (硬规则 3b).
+  assert.equal(after[invokedByStampKey(DISCOVERY_METHOD_NAME)], INVOKED_BY_RESIDENT, "the resident round stamps WHO wrote the entry");
   assert.deepEqual(
-    Object.fromEntries(Object.entries(after).filter(([k]) => k !== DISCOVERY_METHOD_NAME)),
+    Object.fromEntries(Object.entries(after).filter(([k]) => k !== DISCOVERY_METHOD_NAME && k !== invokedByStampKey(DISCOVERY_METHOD_NAME))),
     OTHER_ROUTINE_KEYS,
     "every OTHER routine's entry is unchanged",
   );
@@ -654,7 +700,8 @@ test("discoveryMethodRoutineFromConfig — absent ⇒ NO routine assembled (the 
   writeConfig(bad, "loop:\n  discovery_method:\n    enabled: true\n    interval: interval:5m\n");
   const c = discoveryMethodRoutineFromConfig(bad);
   assert.equal(c.routine !== null, true, "a malformed section is still assembled (it must record failed)");
-  assert.match(c.error, /below the 360m floor/);
+  assert.match(c.error, new RegExp(`below the ${MIN_INTERVAL_MINUTES}m floor`));
+  assert.equal(c.intervalMinutes, null, "a malformed section assembled no cadence ⇒ nothing to report as assembled");
 });
 
 // ── the driver's routine table: the new routine is INJECTED, never self-read ────────────────────────
@@ -677,4 +724,296 @@ test("qualityGateRoutines — the discovery-method routine joins the table ONLY 
   const withIt = mod.qualityGateRoutines("/repo", { ...base, discoveryMethodRoutine: spec });
   assert.equal(withIt.some((r) => r.name === DISCOVERY_METHOD_NAME), true, "declared ⇒ the routine joins the table");
   assert.equal(withIt.length, withoutIt.length + 1);
+});
+
+// ── the TEMPORARY faster cadence: 60m + interval_until + a 24h ceiling (AC1 (a)-(g)) ────────────────
+// The user's ask (2026-10-12) was to run ONLY this routine every 60m, temporarily. The three rules under
+// test exist so that "temporarily" cannot quietly become "standing": a sub-360m interval must NAME its
+// expiry, must carry a cross-round model-call ceiling, and must revert on its own when the expiry passes.
+//
+// ⛔ All of the new cases are written against the DUE BASIS this task introduced (resident carrier lines /
+// the resident stamp), because that is what makes the cadence real: with the legacy unstamped entry
+// still in `.quay/routine-last-run.json`, a 60m cadence would still be six hours away from firing.
+const FUTURE_UNTIL = "2026-10-19T12:00:00Z"; // 7 days after the 2026-10-12 landing
+
+test("case (a) — interval:60m WITH a future interval_until ⇒ accepted, and DUE 60m after the last resident run", async () => {
+  const ws = makeWorkspace();
+  writeConfig(ws, temporaryYaml(FUTURE_UNTIL));
+  const read = readDiscoveryMethodConfig(ws);
+  assert.equal(read.error, null, `60m must be accepted when it declares its expiry: ${read.error}`);
+  assert.equal(read.config.trigger.minutes, 60);
+  assert.equal(read.config.intervalUntil, Date.parse(FUTURE_UNTIL), "the expiry is parsed to an instant");
+  assert.equal(read.config.maxModelCallsPer24h, 24, "the required 24h ceiling is read");
+  // …and the ASSEMBLED cadence is handed back by the production entry, which is what the host driver
+  // REPORTS at startup (its stderr line names the interval — see AC3's real reload evidence).
+  const assembled = discoveryMethodRoutineFromConfig(ws);
+  assert.equal(assembled.intervalMinutes, 60, "the assembled cadence is reportable, not only re-parseable");
+  assert.equal(assembled.intervalUntil, Date.parse(FUTURE_UNTIL));
+  assert.equal(assembled.maxModelCallsPer24h, 24);
+
+  const t0 = Date.parse("2026-10-12T13:00:00Z");
+  // A RESIDENT run 60m before the round ⇒ exactly at the boundary (isDue is `>=`).
+  const wsDue = makeWorkspace();
+  writeConfig(wsDue, temporaryYaml(FUTURE_UNTIL));
+  writeCarrier(wsDue, [scanRoundLine({ ts: new Date(t0).toISOString(), invokedBy: INVOKED_BY_RESIDENT })]);
+  const ingest = countingIngest();
+  const due = await runDiscoveryMethod(wsDue, runOpts(wsDue, { ingestFn: ingest, now: () => t0 + 60 * 60_000 }));
+  assert.equal(due.state, "verified", `60m after the last resident run the round must be DUE: ${due.reason}`);
+  assert.equal(ingest.calls.length, 1);
+  assert.equal(due.value.interval.minutes, 60, "the Fact reports the cadence that governed the round");
+  assert.equal(due.value.interval.reverted, false);
+
+  // …and 59m after it, NOT due — the reading the old 360m floor made impossible.
+  const wsNotYet = makeWorkspace();
+  writeConfig(wsNotYet, temporaryYaml(FUTURE_UNTIL));
+  writeCarrier(wsNotYet, [scanRoundLine({ ts: new Date(t0).toISOString(), invokedBy: INVOKED_BY_RESIDENT })]);
+  const ingest2 = countingIngest();
+  const notYet = await runDiscoveryMethod(wsNotYet, runOpts(wsNotYet, { ingestFn: ingest2, now: () => t0 + 59 * 60_000 }));
+  assert.equal(notYet.state, "not-evaluated");
+  assert.match(notYet.reason, /within the 60m interval/, "the refusal names the DECLARED 60m interval");
+  assert.equal(ingest2.calls.length, 0, "ZERO spawns inside the 60m window");
+});
+
+test("case (b) — interval:60m WITHOUT interval_until ⇒ config error, ZERO spawns", async () => {
+  // Pure parse: the missing expiry, and (independently) the missing 24h ceiling.
+  const noUntil = parseDiscoveryMethodSection({ enabled: true, interval: "interval:60m", max_model_calls_per_24h: 24 });
+  assert.equal(noUntil.config, null, "a sub-360m interval with no expiry is refused, not rounded");
+  assert.match(noUntil.error, /no 'interval_until' is declared/);
+  assert.match(noUntil.error, /must not be able to become permanent silently/);
+
+  const noCap = parseDiscoveryMethodSection({ enabled: true, interval: "interval:60m", interval_until: FUTURE_UNTIL });
+  assert.equal(noCap.config, null, "a sub-360m interval must declare its cross-round ceiling");
+  assert.match(noCap.error, /'max_model_calls_per_24h' is REQUIRED/);
+
+  // …and the same two refusals THROUGH the round: failed, zero spawns, nothing written.
+  for (const yaml of [
+    "loop:\n  discovery_method:\n    enabled: true\n    interval: interval:60m\n    max_model_calls_per_24h: 24\n",
+    `loop:\n  discovery_method:\n    enabled: true\n    interval: interval:60m\n    interval_until: ${FUTURE_UNTIL}\n`,
+    `loop:\n  discovery_method:\n    enabled: true\n    interval: interval:60m\n    interval_until: not-a-date\n    max_model_calls_per_24h: 24\n`,
+  ]) {
+    const ws = makeWorkspace();
+    writeConfig(ws, yaml);
+    const ingest = countingIngest();
+    const fact = await runDiscoveryMethod(ws, runOpts(ws, { ingestFn: ingest }));
+    assert.equal(fact.state, "failed", `expected failed for config: ${JSON.stringify(yaml)}`);
+    assert.equal(ingest.calls.length, 0, "ZERO spawns on a bad config");
+    assert.equal(fs.existsSync(carrierPath(ws)), false, "a failed round writes nothing");
+  }
+});
+
+test("case (c) — after interval_until passes ⇒ the 360m default applies and the Fact says so", async () => {
+  const ws = makeWorkspace();
+  writeConfig(ws, temporaryYaml("2026-10-13T00:00:00Z")); // ALREADY expired relative to the round's clock
+  const t0 = Date.parse("2026-10-13T10:00:00Z");
+  writeCarrier(ws, [scanRoundLine({ ts: new Date(t0).toISOString(), invokedBy: INVOKED_BY_RESIDENT })]);
+  const ingest = countingIngest();
+  const fact = await runDiscoveryMethod(ws, runOpts(ws, { ingestFn: ingest, now: () => t0 + 61 * 60_000 }));
+
+  assert.equal(fact.state, "not-evaluated", "61m after the last resident run is INSIDE the reverted 360m window");
+  assert.equal(fact.value.interval.minutes, 360, "the effective interval reverted to the permanent default");
+  assert.equal(fact.value.interval.declared_minutes, 60, "…while the Fact still reports what the config DECLARED");
+  assert.equal(fact.value.interval.reverted, true);
+  assert.match(fact.reason, /interval_until .* has passed ⇒ the 360m default applies/, "the Fact SAYS the temporary window expired");
+  assert.match(fact.reason, /within the 360m interval/);
+  assert.equal(ingest.calls.length, 0, "ZERO spawns");
+
+  // ⛔ The revert is re-derived from the CONFIG on every round, not remembered: the SAME parsed config
+  // read at a clock BEFORE the expiry still yields 60m. (A spec that froze the first answer would make
+  // the driver's in-memory RoutineSpec the authority on a question the config owns.)
+  const early = readDiscoveryMethodConfig(ws);
+  assert.equal(early.config.trigger.minutes, 60, "the declared interval is unchanged — only its EFFECT epoch is");
+});
+
+test("case (d) — an unstamped legacy last-run entry is IGNORED; a resident-stamped one is HONOURED", async () => {
+  // (i) PRODUCTION'S ACTUAL 2026-10-12 STATE: a recent `discovery-method` entry with no stamp, written by
+  //     a worker acceptance run. It must not hold production's clock for six hours.
+  const legacy = makeWorkspace();
+  writeConfig(legacy, ENABLED_YAML);
+  const legacyText = JSON.stringify({ ...OTHER_ROUTINE_KEYS, [DISCOVERY_METHOD_NAME]: ROUND_AT }, null, 1);
+  fs.writeFileSync(lastRunPath(legacy), legacyText, "utf8");
+  const ingest = countingIngest();
+  const ignored = await runDiscoveryMethod(legacy, runOpts(legacy, { invokedBy: INVOKED_BY_MANUAL, ingestFn: ingest, now: () => ROUND_AT + 60_000 }));
+  assert.equal(ignored.state, "verified", "an unattributed entry grants NO window — the round is due");
+  assert.equal(ignored.value.due.source, "none", "the Fact enumerates that NOTHING was believed");
+  assert.equal(ignored.value.due.legacy_ignored, ROUND_AT, "the Fact names the entry it ignored, as a value");
+  assert.match(ignored.value.due.basis, /^routine-last-run\.json holds \d+/, "…and says WHY it was refused");
+  assert.match(ignored.reason, /legacy .*routine-last-run\.json entry .* was NOT written by the resident driver and is ignored/);
+  assert.equal(fs.readFileSync(lastRunPath(legacy), "utf8"), legacyText, "⛔ the legacy entry is left BYTE-IDENTICAL — ignored, never edited or deleted");
+  assert.equal(ingest.calls.length, 1, "…and the round really ran");
+
+  // (ii) The SAME entry, STAMPED as the resident driver's: it IS believed ⇒ not due.
+  const stamped = makeWorkspace();
+  writeConfig(stamped, ENABLED_YAML);
+  writeProductionLastRun(stamped, ROUND_AT);
+  const ingest2 = countingIngest();
+  const honoured = await runDiscoveryMethod(stamped, runOpts(stamped, { ingestFn: ingest2, now: () => ROUND_AT + 60_000 }));
+  assert.equal(honoured.state, "not-evaluated", "a resident-stamped entry IS the production window");
+  assert.match(honoured.reason, /not due/);
+  assert.equal(honoured.value.due.legacy_ignored, null, "a stamped entry is not 'ignored' — nothing to report");
+  assert.equal(honoured.value.due.source, "last-run-stamped");
+  assert.equal(ingest2.calls.length, 0, "ZERO spawns");
+});
+
+test("case (e) — a manual round BETWEEN two resident rounds does not shift the resident due time", async () => {
+  const ws = makeWorkspace();
+  writeConfig(ws, temporaryYaml(FUTURE_UNTIL));
+  const t0 = Date.parse("2026-10-12T13:00:00Z");
+  const ingest = countingIngest();
+
+  // Resident at t0 (no prior entry ⇒ due). This is the reading the resident due time comes from.
+  const r1 = await runDiscoveryMethod(ws, runOpts(ws, { ingestFn: ingest, now: () => t0 }));
+  assert.equal(r1.state, "verified");
+  assert.equal(readLastRunMap(lastRunPath(ws))[DISCOVERY_METHOD_NAME], t0, "the resident round advanced production's clock");
+
+  // A MANUAL round 61m later (due against the same basis) — it appends its line, and moves no clock.
+  const manualAt = t0 + 61 * 60_000;
+  const lastRunBefore = fs.readFileSync(lastRunPath(ws), "utf8");
+  const manual = await runDiscoveryMethod(ws, runOpts(ws, { invokedBy: INVOKED_BY_MANUAL, ingestFn: ingest, now: () => manualAt }));
+  assert.equal(manual.state, "verified", "the manual round ran");
+  assert.equal(rounds(ws).length, 2);
+  assert.equal(rounds(ws)[1].invoked_by, INVOKED_BY_MANUAL);
+  assert.equal(fs.readFileSync(lastRunPath(ws), "utf8"), lastRunBefore, "…and left production's entry byte-identical");
+
+  // ⛔ THE DISCRIMINATING READING: 30m after the MANUAL line — but 91m after the RESIDENT one — a resident
+  //    round must be DUE. Were the manual line the basis, the elapsed time would read as 30m (< 60m) and
+  //    the round would refuse. This is the whole claim, and it is the only instant at which the two
+  //    readings disagree.
+  const residentAt = t0 + 91 * 60_000;
+  const r2 = await runDiscoveryMethod(ws, runOpts(ws, { ingestFn: ingest, now: () => residentAt }));
+  assert.equal(r2.state, "verified", `the resident due time ignores the manual round between: ${r2.reason}`);
+  assert.equal(r2.value.due.last_resident_run, new Date(t0).toISOString(), "the basis is the t0 RESIDENT round, not the t61 MANUAL one");
+  assert.equal(readLastRunMap(lastRunPath(ws))[DISCOVERY_METHOD_NAME], residentAt);
+  assert.equal(rounds(ws).length, 3);
+});
+
+test("case (f) — max_model_calls_per_24h reached ⇒ not-evaluated:budget-24h, ZERO spawns", async () => {
+  const t0 = Date.parse("2026-10-12T13:00:00Z");
+  const fourCalls = [
+    scanRoundLine({ ts: new Date(t0 - 200 * 60_000).toISOString(), invokedBy: INVOKED_BY_RESIDENT, modelCalls: 2 }),
+    scanRoundLine({ ts: new Date(t0 - 61 * 60_000).toISOString(), invokedBy: INVOKED_BY_RESIDENT, modelCalls: 2 }),
+  ];
+
+  // AT the ceiling. The newest resident line is 61m old ⇒ the round IS due, so the refusal can only be
+  // the 24h ceiling (a "not due" refusal would be a different state and would not match `^budget-24h:`).
+  const reachedWs = makeWorkspace();
+  writeConfig(reachedWs, temporaryYaml(FUTURE_UNTIL, 4));
+  writeCarrier(reachedWs, fourCalls);
+  const ingest = countingIngest();
+  const reached = await runDiscoveryMethod(reachedWs, runOpts(reachedWs, { ingestFn: ingest, now: () => t0 }));
+  assert.equal(reached.state, "not-evaluated");
+  assert.match(reached.reason, /^budget-24h:/, "the refusal names its own cause on the first token");
+  assert.equal(reached.value.budget_24h.used, 4);
+  assert.equal(reached.value.budget_24h.cap, 4);
+  assert.equal(reached.value.budget_24h.window_ms, BUDGET_24H_MS);
+  assert.equal(ingest.calls.length, 0, "ZERO spawns once the ceiling is reached");
+  assert.equal(rounds(reachedWs).length, 2, "…and no scan-round line was appended");
+
+  // ONE call UNDER the ceiling, same fixture ⇒ RUNS. Without this the assertion above would also pass if
+  // the round refused for an unrelated reason (a non-zero control on the same predicate — 硬规则 2).
+  const underWs = makeWorkspace();
+  writeConfig(underWs, temporaryYaml(FUTURE_UNTIL, 5));
+  writeCarrier(underWs, fourCalls);
+  const ingest2 = countingIngest();
+  const under = await runDiscoveryMethod(underWs, runOpts(underWs, { ingestFn: ingest2, now: () => t0 }));
+  assert.equal(under.state, "verified", `one call under the ceiling must RUN: ${under.reason}`);
+  assert.equal(ingest2.calls.length, 1);
+
+  // A call OLDER than the trailing 24h is outside the window and does not count.
+  const oldWs = makeWorkspace();
+  writeConfig(oldWs, temporaryYaml(FUTURE_UNTIL, 4));
+  writeCarrier(oldWs, [
+    scanRoundLine({ ts: new Date(t0 - BUDGET_24H_MS - 60_000).toISOString(), invokedBy: INVOKED_BY_RESIDENT, modelCalls: 99 }),
+    scanRoundLine({ ts: new Date(t0 - 61 * 60_000).toISOString(), invokedBy: INVOKED_BY_RESIDENT, modelCalls: 0 }),
+  ]);
+  const ingest3 = countingIngest();
+  const old = await runDiscoveryMethod(oldWs, runOpts(oldWs, { ingestFn: ingest3, now: () => t0 }));
+  assert.equal(old.state, "verified", `calls before the trailing 24h are outside the window: ${old.reason}`);
+  assert.equal(old.value.budget_24h.used, 0, "…so the reading is 0, not 99");
+
+  // MANUAL rounds count too: the ceiling bounds MODEL CALLS, and a hand-run spends them the same way.
+  assert.equal(modelCallsInWindow([scanRoundLine({ ts: new Date(t0 - 60_000).toISOString(), invokedBy: INVOKED_BY_MANUAL, modelCalls: 3 })], t0, BUDGET_24H_MS), 3);
+  // …and a non-resident line with no `model_calls` cannot be read as 0 — the budget is not established
+  // from a partially-readable window (硬规则 3b).
+  assert.throws(() => modelCallsInWindow([{ kind: "scan-round", ts: new Date(t0 - 60_000).toISOString() }], t0, BUDGET_24H_MS), /cannot be established from a partially-readable window/);
+});
+
+test("case (g) — arch-discovery's own interval and floor are UNTOUCHED by this routine's temporary cadence", async () => {
+  const ws = makeWorkspace();
+  writeConfig(ws, `loop:\n  discovery_method:\n    enabled: true\n    interval: interval:60m\n    interval_until: ${FUTURE_UNTIL}\n    max_model_calls_per_24h: 24\n  arch_discovery:\n    enabled: true\n    interval: interval:360m\n    since_days: 7\n    max_ms: 60000\n    max_records: 2000\n    max_old_space_mb: 512\n`);
+
+  const dm = readDiscoveryMethodConfig(ws);
+  assert.equal(dm.error, null, `discovery-method's own parse: ${dm.error}`);
+  assert.equal(dm.config.trigger.minutes, 60, "discovery-method takes the declared 60m");
+
+  const arch = readArchDiscoveryConfig(ws);
+  assert.equal(arch.error, null, `arch-discovery's own parse, from the SAME fixture: ${arch.error}`);
+  assert.equal(arch.config.trigger.minutes, 360, "arch-discovery keeps ITS OWN declared interval");
+  assert.equal("intervalUntil" in arch.config, false, "the temporary-window key is discovery-method's; arch-discovery's config has no such field");
+
+  // The floor each routine enforces is its OWN constant, and this task moved exactly one of them.
+  assert.equal(MIN_INTERVAL_MINUTES, 60, "discovery-method's floor is now 60m");
+  assert.equal(ARCH_MIN_INTERVAL_MINUTES, 60, "arch-discovery's floor is its own 60m (unchanged by this task)");
+  assert.equal(parseArchDiscoverySection({ enabled: true, interval: "interval:5m" }).error === null, false, "…and arch-discovery still refuses below ITS floor");
+  assert.match(parseArchDiscoverySection({ enabled: true, interval: "interval:5m" }).error, /below the 60m floor/);
+
+  // ⛔ The sub-360m-must-declare-an-expiry rule does NOT leak into arch-discovery: 60m with no
+  //    `interval_until` is still a valid arch-discovery declaration (its floor is its only gate).
+  const archShort = parseArchDiscoverySection({ enabled: true, interval: "interval:60m" });
+  assert.equal(archShort.error, null, "the temporary-cadence rule is discovery-method's, not a repo-wide policy");
+  // …nor does discovery-method's 24h ceiling mean anything to it (its parse reads only its own keys).
+  assert.equal(parseArchDiscoverySection({ enabled: true, interval: "interval:60m", max_model_calls_per_24h: 1 }).error, null);
+});
+
+test("latestResidentRoundTs — only invoked_by:\"resident-driver\" lines count, and an unreadable one is a NAMED refusal", () => {
+  const t0 = Date.parse("2026-10-12T13:00:00Z");
+  const iso = (t) => new Date(t).toISOString();
+  // Legacy (unstamped) and manual lines are NOT the resident due time.
+  assert.equal(latestResidentRoundTs([scanRoundLine({ ts: iso(t0) })]), null, "a line with no invoked_by is LEGACY — it cannot say who ran it");
+  assert.equal(latestResidentRoundTs([scanRoundLine({ ts: iso(t0), invokedBy: INVOKED_BY_MANUAL })]), null, "a manual round is not production's clock");
+  assert.equal(latestResidentRoundTs([]), null, "an empty carrier ⇒ never ran");
+  assert.equal(latestResidentRoundTs([{ kind: "finding", invoked_by: INVOKED_BY_RESIDENT, ts: iso(t0) }]), null, "only scan-round lines are rounds");
+  // The NEWEST resident line wins, whatever the file order.
+  assert.equal(latestResidentRoundTs([
+    scanRoundLine({ ts: iso(t0), invokedBy: INVOKED_BY_RESIDENT }),
+    scanRoundLine({ ts: iso(t0 + 61 * 60_000), invokedBy: INVOKED_BY_MANUAL }),
+    scanRoundLine({ ts: iso(t0 - 120 * 60_000), invokedBy: INVOKED_BY_RESIDENT }),
+  ]), t0);
+  // ⛔ "Cannot read when production ran" is NOT "production never ran" (硬规则 3b).
+  assert.throws(() => latestResidentRoundTs([scanRoundLine({ ts: iso(t0), invokedBy: INVOKED_BY_RESIDENT }), { kind: "scan-round", invoked_by: INVOKED_BY_RESIDENT }]), /has no parseable 'ts'/);
+});
+
+test("the temporary cadence does not require a driver restart to EXPIRE, and the stamp survives the advance", async () => {
+  // The driver holds `schedule` in memory; the ROUND re-reads the config each time. So the same spec run
+  // at two clocks — one inside the window, one past it — must reach two different verdicts.
+  const ws = makeWorkspace();
+  writeConfig(ws, temporaryYaml("2026-10-12T14:30:00Z")); // expiry 90m after t0 — inside the 360m window that follows
+  const t0 = Date.parse("2026-10-12T13:00:00Z");
+  writeCarrier(ws, [scanRoundLine({ ts: new Date(t0).toISOString(), invokedBy: INVOKED_BY_RESIDENT })]);
+  // Two OTHER routines' entries, so the "same write" claim below has something to preserve.
+  fs.writeFileSync(lastRunPath(ws), JSON.stringify({ ...OTHER_ROUTINE_KEYS }, null, 1), "utf8");
+  const clock = { t: t0 + 61 * 60_000 };
+  const spec = buildDiscoveryMethodRoutine(ws, readDiscoveryMethodConfig(ws), { ingestFn: countingIngest(), now: () => clock.t });
+
+  // (i) +61m is past the 60m cadence and before the expiry ⇒ DUE, and the round ADVANCES both the
+  //     carrier line and the stamped entry.
+  const inside = await spec.run({ halted: false });
+  assert.equal(inside[0].state, "verified", `inside the window the round runs: ${inside[0].reason}`);
+  const map = JSON.parse(fs.readFileSync(lastRunPath(ws), "utf8"));
+  assert.equal(map[DISCOVERY_METHOD_NAME], t0 + 61 * 60_000, "the advance landed");
+  assert.equal(map[invokedByStampKey(DISCOVERY_METHOD_NAME)], INVOKED_BY_RESIDENT, "…and it landed WITH the stamp, in the same write");
+  for (const [k, v] of Object.entries(OTHER_ROUTINE_KEYS)) {
+    assert.equal(map[k], v, `${k} survives the stamped merge write`);
+  }
+  assert.equal(rounds(ws).length, 2, "the seeded resident line + the round this spec just ran");
+  assert.equal(rounds(ws)[1].interval.minutes, 60, "the carrier line records the cadence that governed the round");
+  assert.equal(rounds(ws)[1].due.source, "carrier");
+  assert.equal(rounds(ws)[1].due.basis.startsWith("carrier: latest invoked_by:resident-driver"), true);
+
+  // (ii) SAME spec, a clock past the expiry: the round reverts to 360m and refuses — no restart needed.
+  // 30m after the run above — well inside the reverted 360m window, and past the expiry.
+  clock.t = Date.parse("2026-10-12T14:31:00Z");
+  const after = await spec.run({ halted: false });
+  assert.equal(after[0].state, "not-evaluated", "past interval_until the routine stops firing on the fast cadence");
+  assert.equal(after[0].value.interval.minutes, 360);
+  assert.equal(after[0].value.interval.reverted, true);
 });

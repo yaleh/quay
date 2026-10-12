@@ -1320,7 +1320,14 @@ export async function main(argv: string[]): Promise<number> {
   } else if (!discoveryMethod.present) {
     console.error("quality-gate-driver: 未声明 loop.discovery_method — discovery-method 例程未装配（off by default，零 spawn；例程表与未接此轨时一致）");
   } else {
-    console.error(`quality-gate-driver: discovery-method 例程已装配（${discoveryMethod.enabled ? "enabled" : "enabled:false — 每轮记 not-evaluated:disabled，零 spawn"}）`);
+    // ⛔ 装配行必须**点名装配出来的 interval**，⛔ 不是只说「enabled」：本轨可以配一个**临时**的快节奏
+    // （`interval_until` 到期后回落到 360m，见 discovery-method-routine.ts 头注释），而"到底是 60m 还是
+    // 360m 被装进例程表"这件事，在启动那一刻只有这一行能回答——只写 enabled 的话，配置写错（或临时窗口
+    // 已过期）与"装配正确"在启动记录上同形（硬规则 3b/9）。`interval_until` / `max_model_calls_per_24h`
+    // 一并打出：它们是这次装配真正携带的约束，⛔ 不是可以从别处推出来的。
+    const until = discoveryMethod.intervalUntil === null ? "" : `, interval_until=${new Date(discoveryMethod.intervalUntil).toISOString()}`;
+    const cap24 = discoveryMethod.maxModelCallsPer24h === null ? "" : `, max_model_calls_per_24h=${discoveryMethod.maxModelCallsPer24h}`;
+    console.error(`quality-gate-driver: discovery-method 例程已装配（${discoveryMethod.enabled ? `enabled, interval=${discoveryMethod.intervalMinutes}m${until}${cap24}` : "enabled:false — 每轮记 not-evaluated:disabled，零 spawn"}）`);
   }
 
   const routines = qualityGateRoutines(rootDir, {
