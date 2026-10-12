@@ -24,12 +24,15 @@ import assert from "node:assert/strict";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
+import { execFileSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
 
 import {
   THREE_STATES,
   DISPOSITIONS,
   CARRIER_KINDS,
+  JS_MAX_STRING_LENGTH,
+  MAX_LINE_CHARS,
   hasCarrierRef,
   extractAcSection,
   parseRecordEpoch,
@@ -37,6 +40,8 @@ import {
   readCarrierKind,
   buildAudit,
   classifyCarrier,
+  scanJsonlCarrier,
+  streamLines,
   EXPLICIT_CARRIERS,
 } from "../scripts/prod-data-audit.ts";
 
@@ -160,19 +165,25 @@ test("AC1/AC2/AC3 fixture — three-state classification is non-booleanized and 
     assert.equal(accum.kind, CARRIER_KINDS.ACCUMULATOR);
     assert.equal(accum.found, true);
     assert.ok(accum.recordCount >= 2);
+    // AC2 parity pin：流式读的**确切**计数（不是 >=）——旧实现（整文件 split(nonblank).length）给的就是 2，
+    // 改写后必须逐字不变。⛔ 不写「≥」：那对本条要防的「多数/少数一条」不敏感。
+    assert.equal(accum.recordCount, 2, "streaming record count must equal the old whole-file count");
 
     const empty = classifyCarrier({ name: "empty.jsonl", ...base });
     assert.equal(empty.threeState, THREE_STATES.ZERO_DATA);
     assert.equal(empty.disposition, DISPOSITIONS.SUSPECT);
+    assert.equal(empty.recordCount, 0);
 
     const state = classifyCarrier({ name: "state.json", ...base });
     assert.equal(state.threeState, THREE_STATES.HAS_DATA);
     assert.equal(state.kind, CARRIER_KINDS.STATE);
+    assert.equal(state.recordCount, 1);
 
     // loop-driver 形态：单 JSON 对象的 .jsonl 按状态文件语义 → 有内容 → HAS_DATA，不误判零数据
     const single = classifyCarrier({ name: "single-json.jsonl", ...base });
     assert.equal(single.threeState, THREE_STATES.HAS_DATA);
     assert.match(single.reason, /state-file-has-content/);
+    assert.equal(single.recordCount, 1);
 
     // 缺失载体（零写入者，因为 temp 无代码目录）→ ③ NOT_EVALUATED + SUSPECT（判据5 a 零写入者真命中形态）
     const missing = classifyCarrier({ name: "missing.jsonl", ...base });
@@ -218,6 +229,182 @@ test("AC5 zero-writer detection reproduces the inner-agent-budget shape (fixture
     assert.equal(missing.disposition, DISPOSITIONS.SUSPECT);
     assert.equal(missing.writers.nonTest + missing.writers.test, 0);
     assert.match(missing.reason, /zero-writers/);
+  } finally {
+    fs.rmSync(ws, { recursive: true, force: true });
+  }
+});
+
+// ── AC1：载体大于 V8 最大字符串长度 ⇒ 流式读，⛔ 不整文件读 ────────────────────────────────────────
+// 缺陷现场（2026-10-13）：`.quay/meta-driver-round.jsonl` 538,347,409 B > 0x1fffffe8 ⇒ `classifyCarrier`
+// 的整文件 `readFileSync(located,"utf8")` 抛 ERR_STRING_TOO_LONG，**整份审计（连同其它载体）一起崩**，
+// 每个 fan-in 都红在同一处。下面这组测试就是那一条红的两半：旧表达式在这个 fixture 上必须真的抛
+// （负控制，否则 fixture 什么也没证明），而 classifyCarrier 必须不抛并给一个**独立取值**。
+
+// 稀疏超大载体：`ftruncate` 造洞（磁盘上只占几 KB），⛔ 不在测试进程里造 512 MB 字符串。
+// 布局：[记录行]\n[洞（无换行符）][记录行]\n —— 洞的部分成为一条超长行（正是「读不动」的形态）。
+// ⛔ `fs.writeSync(fd, string, ...)` 的 5 参数重载不按 (offset,length,position) 解释——尾部必须传 Buffer，
+// 否则那一段会被写到 position 0 覆盖头部（本 fixture 第一版就踩了这个坑）。
+function makeSparseCarrier(dir, name, size = JS_MAX_STRING_LENGTH + 4096) {
+  const p = path.join(dir, name);
+  const head = Buffer.from('{"at":"2026-08-10T00:00:00.000Z","n":1}\n');
+  const tail = Buffer.from('{"at":"2026-08-12T00:00:00.000Z","n":2}\n');
+  const fd = fs.openSync(p, "w");
+  fs.writeSync(fd, head);
+  fs.ftruncateSync(fd, size);
+  fs.writeSync(fd, tail, 0, tail.length, size - tail.length);
+  fs.closeSync(fd);
+  return p;
+}
+
+test("AC1 streamLines reports an over-budget line as unreadable — never a silent drop", () => {
+  const ws = makeTmpWorkspace();
+  try {
+    const p = path.join(ws, "big.jsonl");
+    fs.writeFileSync(p, '{"a":1}\n' + "x".repeat(50) + "\n" + '{"b":2}\n');
+    const seen = [];
+    streamLines(p, (line) => { seen.push(line === null ? null : line.slice(0, 20)); }, { maxLineChars: 10 });
+    // 中间那条超预算 ⇒ `null`（「这一行读不懂」），⛔ 不是空串、⛔ 不是被跳过。
+    assert.deepEqual(seen, ['{"a":1}', null, '{"b":2}']);
+    // 提前停止契约：回调返回 false ⇒ 不再读后面的行。
+    const stopped = [];
+    streamLines(p, (line) => { stopped.push(line); return false; }, { maxLineChars: 10 });
+    assert.deepEqual(stopped, ['{"a":1}']);
+  } finally {
+    fs.rmSync(ws, { recursive: true, force: true });
+  }
+});
+
+test("AC1 streaming read is chunk-boundary safe (multi-byte included)", () => {
+  const ws = makeTmpWorkspace();
+  try {
+    const p = path.join(ws, "mb.jsonl");
+    // 多字节字符（含 4 字节 emoji）——StringDecoder 的存在理由就是它们可能跨 chunk 边界。
+    fs.writeFileSync(p, '{"at":"2026-08-12T00:00:00Z","note":"日本語テキスト"}\n{"at":"2026-08-12T01:00:00Z","note":"émoji 🚀"}\n');
+    const def = scanJsonlCarrier(p);
+    assert.equal(def.count, 2);
+    assert.equal(def.parseable, 2);
+    // chunk 边界压到 1..13 字节 ⇒ 每个多字节字符都被切开过。读数必须逐字不变。
+    for (const chunkSize of [1, 2, 3, 5, 7, 13]) {
+      assert.deepEqual(scanJsonlCarrier(p, { chunkSize }), def, `chunkSize=${chunkSize} must not change the reading`);
+    }
+  } finally {
+    fs.rmSync(ws, { recursive: true, force: true });
+  }
+});
+
+test("AC1 carrier over V8's max string length — negative control throws, classifyCarrier does not", () => {
+  const ws = makeTmpWorkspace();
+  try {
+    const quay = path.join(ws, ".quay");
+    fs.mkdirSync(quay, { recursive: true });
+    const hugeJsonl = makeSparseCarrier(quay, "huge.jsonl");
+    const hugeState = makeSparseCarrier(quay, "huge-state.json");
+    const size = fs.statSync(hugeJsonl).size;
+    assert.ok(size > JS_MAX_STRING_LENGTH, `fixture must exceed V8's max string length, got ${size}`);
+    assert.ok(fs.statSync(hugeState).size > JS_MAX_STRING_LENGTH);
+
+    // ── 负控制 = 被删掉的那一行本身 ────────────────────────────────────────────────────────────────
+    // 它必须在这个 fixture 上抛 ERR_STRING_TOO_LONG；否则本 fixture 什么也没证明（「对真样本干跑」那一半）。
+    for (const p of [hugeJsonl, hugeState]) {
+      assert.throws(
+        () => fs.readFileSync(p, "utf8"),
+        (e) => e.code === "ERR_STRING_TOO_LONG",
+        `negative control: the removed whole-file read must fail on ${path.basename(p)}`,
+      );
+    }
+
+    const base = {
+      doneTasks: [fakeDoneTask("t-huge", "- [x] AC: 写 huge.jsonl")],
+      prodRoot: ws, gitRoot: ws, retiredTexts: [], predicateHit: "huge.jsonl@<present>",
+      refsById: new Map([["huge.jsonl", { acRefs: 1, bodyRefs: 1, citing: ["t-huge"] }]]),
+      landingById: new Map([["t-huge", Date.parse("2026-08-11T00:00:00Z")]]),
+      writersById: new Map([["huge.jsonl", { nonTest: 1, test: 0 }], ["huge-state.json", { nonTest: 1, test: 0 }]]),
+    };
+
+    // 结构性判据（强于「碰巧没抛」）：这条路径上**一次都不许**整文件读载体。
+    // 把旧的 readFileSync 包在 try/catch 里也不合格——那样它仍会读、仍会抛、只是被吞掉。
+    const realReadFileSync = fs.readFileSync;
+    const wholeFileReads = [];
+    fs.readFileSync = function (p, ...rest) {
+      if (String(p) === hugeJsonl || String(p) === hugeState) wholeFileReads.push(String(p));
+      return realReadFileSync.apply(this, [p, ...rest]);
+    };
+    let repJsonl;
+    let repState;
+    try {
+      repJsonl = classifyCarrier({ name: "huge.jsonl", ...base });
+      repState = classifyCarrier({ name: "huge-state.json", ...base });
+    } finally {
+      fs.readFileSync = realReadFileSync;
+    }
+    assert.deepEqual(wholeFileReads, [], "the whole-file read must be GONE from this path, not merely try/caught");
+
+    // .jsonl 累积载体：洞构成一条超预算行 ⇒ ③ 未评估（独立取值）。⛔ 不给一个偏小的记录数冒充「读全了」。
+    assert.equal(repJsonl.threeState, THREE_STATES.NOT_EVALUATED);
+    assert.match(repJsonl.reason, /^carrier-unreadable:line-too-long/);
+    assert.equal(repJsonl.recordCount, null);
+    assert.equal(repJsonl.recordsAfterLanding, null);
+    assert.equal(repJsonl.disposition, DISPOSITIONS.SUSPECT);
+
+    // 状态文件路径仍需要完整文本 ⇒ 先按 size 判上限，超限给独立取值（⛔ 不抛穿）。
+    assert.equal(repState.threeState, THREE_STATES.NOT_EVALUATED);
+    assert.match(repState.reason, /^carrier-unreadable:string-too-long/);
+    assert.equal(repState.recordCount, null);
+  } finally {
+    fs.rmSync(ws, { recursive: true, force: true });
+  }
+});
+
+test("AC1 buildAudit does not abort — the oversized carrier is NOT_EVALUATED, the others still get a verdict", () => {
+  const ws = makeTmpWorkspace();
+  try {
+    const quay = path.join(ws, ".quay");
+    const tasks = path.join(ws, "tasks");
+    fs.mkdirSync(quay, { recursive: true });
+    fs.mkdirSync(tasks, { recursive: true });
+    makeSparseCarrier(quay, "huge.jsonl");
+    fs.writeFileSync(path.join(quay, "small.jsonl"), '{"at":"2026-08-12T00:00:00Z","n":1}\n');
+    fs.writeFileSync(
+      path.join(tasks, "t-both.md"),
+      "---\nid: t-both\nstatus: done\n---\n## Acceptance Criteria\n- [x] AC1: 写 huge.jsonl\n- [x] AC2: 写 small.jsonl\n",
+    );
+    // `resolveProductionRoot` 只在 `.git` 是**文件**（linked worktree）时上溯主检出；这里给一个真 git 仓，
+    // 保证审计读的是本 fixture 而不是生产树。
+    execFileSync("git", ["init", "-q", ws], { stdio: "ignore" });
+
+    const audit = buildAudit(ws, { root: ws });
+    const huge = audit.carriers.find((r) => r.name === "huge.jsonl");
+    assert.ok(huge, "the oversized carrier must still be reported, not dropped by a crash");
+    assert.equal(huge.threeState, THREE_STATES.NOT_EVALUATED);
+    assert.match(huge.reason, /^carrier-unreadable:/);
+    // Plan 2：读不动的载体不阻断其它载体 —— 同一遍审计里 normal 载体照常出判定。
+    const small = audit.carriers.find((r) => r.name === "small.jsonl");
+    assert.ok(small, "the sibling carrier must still be audited");
+    assert.equal(small.threeState, THREE_STATES.HAS_DATA);
+    assert.equal(small.recordCount, 1);
+  } finally {
+    fs.rmSync(ws, { recursive: true, force: true });
+  }
+});
+
+test("AC1 a real carrier the audit cannot frame is NOT_EVALUATED, never a fabricated record count", () => {
+  // 与上一条的区别：这里走**生产预算**（MAX_LINE_CHARS = 16 MiB），证明线上真正的超预算行也走同一条路，
+  // ⛔ 不是只有把预算调小到 10 才成立。
+  const ws = makeTmpWorkspace();
+  try {
+    const quay = path.join(ws, ".quay");
+    fs.mkdirSync(quay, { recursive: true });
+    const p = path.join(quay, "wide.jsonl");
+    fs.writeFileSync(p, '{"at":"2026-08-12T00:00:00Z","n":1}\n' + "x".repeat(MAX_LINE_CHARS + 1) + "\n");
+    const scan = scanJsonlCarrier(p);
+    assert.equal(scan.ok, false);
+    assert.equal(scan.code, "line-too-long");
+    const rep = classifyCarrier({
+      name: "wide.jsonl", doneTasks: [], prodRoot: ws, gitRoot: ws, retiredTexts: [], predicateHit: null,
+      refsById: new Map(), landingById: new Map(), writersById: new Map(),
+    });
+    assert.equal(rep.threeState, THREE_STATES.NOT_EVALUATED);
+    assert.match(rep.reason, /^carrier-unreadable:line-too-long/);
   } finally {
     fs.rmSync(ws, { recursive: true, force: true });
   }
@@ -314,5 +501,46 @@ test("AC1 explicit carriers are always reported even at zero position-based refs
       audit.carriers.some((r) => r.name === name),
       `explicit carrier ${name} must be present in the report`,
     );
+  }
+});
+
+// AC3 的**可复现**半边。原 AC 写的前提是「运行时 `.quay/meta-driver-round.jsonl` > 512 MB」——
+// 那是个**会自行消失**的前提：2026-10-13 02:35 实测 538,347,409 B，02:37:13 被一个与本任务无关的
+// 轮转降到 95,017,936 B（本任务⛔不碰生产载体，DoD 明令）。⇒ 把「超限的真实生产载体」写成一条
+// **条件守卫**：当下没有超限载体时它什么都不验（如实说「无输入」），一旦再现就自动对真实载体生效。
+test("AC3 guard — any real production carrier over V8's limit is read, not crashed on", { timeout: 120_000 }, (t) => {
+  const prodRoot = getAudit().prodRoot;
+  const quay = path.join(prodRoot, ".quay");
+  if (!fs.existsSync(quay)) {
+    t.diagnostic(`NOT-EVALUATED: no production .quay at ${quay}（全新 checkout 的正常形态）`);
+    return;
+  }
+  const oversized = fs.readdirSync(quay, { withFileTypes: true })
+    .filter((e) => e.isFile() && /\.(jsonl|json)$/i.test(e.name))
+    .map((e) => ({ name: e.name, size: fs.statSync(path.join(quay, e.name)).size }))
+    .filter((x) => x.size > JS_MAX_STRING_LENGTH);
+  if (oversized.length === 0) {
+    const biggest = fs.readdirSync(quay, { withFileTypes: true })
+      .filter((e) => e.isFile() && /\.(jsonl|json)$/i.test(e.name))
+      .map((e) => ({ name: e.name, size: fs.statSync(path.join(quay, e.name)).size }))
+      .sort((a, b) => b.size - a.size)[0];
+    t.diagnostic(
+      `NOT-EVALUATED: no production carrier exceeds 0x1fffffe8 right now` +
+      `（最大 = ${biggest ? `${biggest.name} ${biggest.size} B` : "无"}）—— 该前提由外部轮转决定，不在本任务控制内`,
+    );
+    return;
+  }
+  for (const { name, size } of oversized) {
+    const rep = classifyCarrier({
+      name, doneTasks: [], prodRoot, gitRoot: prodRoot, retiredTexts: [], predicateHit: null,
+      refsById: new Map(), landingById: new Map(), writersById: new Map(),
+    });
+    // 不抛（抛了这条测试就红）+ 出一个三态判定（⛔ 不是 null/未定义这种「没判」的形态）。
+    assert.ok(
+      [THREE_STATES.HAS_DATA, THREE_STATES.ZERO_DATA, THREE_STATES.NOT_EVALUATED].includes(rep.threeState),
+      `${name} (${size} B) must yield a real three-state verdict, got ${rep.threeState}`,
+    );
+    assert.ok(rep.reason, `${name} must carry a reason`);
+    t.diagnostic(`${name} (${size} B) → ${rep.threeState}: ${rep.reason}`);
   }
 });

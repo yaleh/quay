@@ -255,6 +255,22 @@ export type TaskStatusEventActorKind =
   | "human"
   | "unknown";
 
+/** The SAME vocabulary as a runtime value, so a SURFACE that must print it (the CLI `--help`
+ *  contract excerpt) DERIVES it instead of re-typing the eight words — the same single-source rule
+ *  help.ts already follows for the driver VERBS/KINDS. Kept immediately beside the type above so the
+ *  two are read together; a runtime check cannot enumerate a TS union, so adjacency + this comment is
+ *  the honest guarantee available here (⛔ not a claim that the two can be mechanically diffed). */
+export const TASK_STATUS_EVENT_ACTOR_KINDS: readonly TaskStatusEventActorKind[] = [
+  "promotion-driver",
+  "worker-driver",
+  "fan-in",
+  "goal-driver",
+  "cli",
+  "mcp",
+  "human",
+  "unknown",
+];
+
 /** Who wrote the event: the CLASS of writer plus the concrete entry point that ran. */
 export interface TaskStatusEventActor {
   kind: TaskStatusEventActorKind;
@@ -779,4 +795,219 @@ export function appendTaskStatusEvent(root: string, event: TaskStatusEventInput)
     );
     return { ok: false, reason };
   }
+}
+
+// ── the WRITER-CLASS REGISTRY (the coverage enumeration — task_trace P1) ─────────────────────────
+//
+// WHY A DECLARED LIST (hard rule 4b): "which writer classes exist" is a fact about the SOURCE TREE,
+// not about the carrier. A class that has written nothing looks byte-identical to a class that was
+// never wired — the carrier cannot read itself, so a coverage number derived from it alone would be
+// a quantity the measured object produces. The list is therefore DECLARED here, and kept honest by
+// `packages/quay/test/task-log.test.mjs`, which enumerates the real `appendTaskStatusEvent` call
+// sites in the tree and requires every one of them to be owned by a declared class (and every
+// `wired: true` class to name an existing call site). Adding a fifth writer without a registry entry
+// turns that test RED — the declaration cannot silently drift from the tree.
+//
+// `wired: false` is a REAL, enumerated answer, never an omission (hard rule 3/3b). A class that
+// flips statuses through the Provider ABI without appending an event makes every page that omits it
+// INCOMPLETE — which is exactly what `complete: false` must mean. The negative control for this
+// reading is the injectable registry seam on the reader (`readTaskLog({ writerClasses })`): a
+// fixture that supplies an all-wired registry can reach `complete: true`, so the meter is
+// falsifiable in BOTH directions rather than structurally stuck at `false`.
+
+export interface TaskStatusEventWriterClass {
+  /** Stable class name (⛔ never reused for a different class — 硬规则 8). */
+  id: string;
+  /** true iff this class appends carrier events today. */
+  wired: boolean;
+  /** true iff the class writes statuses FOR THIS workspace's task store — i.e. an unwired one makes
+   *  a `task log` page incomplete. An out-of-scope class (the GitHub provider, a hand edit) is
+   *  enumerated for honesty but does not by itself make a local page incomplete. */
+  inScope: boolean;
+  /** Repo-relative files whose `appendTaskStatusEvent` call sites this class owns. Empty iff
+   *  `wired: false`. */
+  callSites: readonly string[];
+  /** REQUIRED when `wired: false`: WHY. A bare `wired: false` would leave "nobody wired it yet"
+   *  indistinguishable from "it is structurally impossible" (缺值 = 未查, hard rule 6). */
+  reason?: string;
+}
+
+/** The writer-class declaration — an unwired IN-SCOPE class gates `complete`, an out-of-scope one is
+ *  enumerated for honesty. ⛔ No cardinality is stated here: a count in prose drifts the moment the
+ *  list changes (it already did — this read "five-in-scope/three-out-of-scope" against six and two),
+ *  and nothing checks it. See the block comment above for why this is declared rather than measured,
+ *  and `packages/quay/test/task-log.test.mjs` for the check that keeps it in sync with the actual
+ *  call sites. */
+export const TASK_STATUS_EVENT_WRITER_CLASSES: readonly TaskStatusEventWriterClass[] = [
+  { id: "promotion-driver", wired: true, inScope: true, callSites: ["plugin/scripts/ready-pool-check.ts"] },
+  { id: "driver-filters", wired: true, inScope: true, callSites: ["plugin/scripts/driver-filters.ts"] },
+  { id: "fan-in", wired: true, inScope: true, callSites: ["plugin/scripts/worker-fan-in.ts"] },
+  { id: "reconcile", wired: true, inScope: true, callSites: ["plugin/scripts/task-status-events-reconcile.ts"] },
+  // The Provider ABI's write path. BOTH front doors append through the SAME call site — the native
+  // store's `write()` emits after its commit — so the two ids name one implementation; which door a
+  // given write came through is carried per-event as `actor.kind` ("cli" / "mcp"), not as a separate
+  // writer. They are kept as two entries because the doors can regress independently: an unwired door
+  // makes every page that omits its writes incomplete, and pinning them separately keeps that reading
+  // per-door. Wired by `gap-task-status-events-abi-writes-and-creation` (which landed AFTER this
+  // registry was first written — until then these two were truthfully `wired: false`, "flip
+  // tasks/*.md without appending a carrier event"). The GitHub provider remains out of scope: it
+  // stores tasks as issues, so a remote flip has no local status line to observe (its own entry).
+  { id: "cli", wired: true, inScope: true, callSites: ["packages/quay-native/src/store.ts"] },
+  { id: "mcp", wired: true, inScope: true, callSites: ["packages/quay-native/src/store.ts"] },
+  {
+    id: "github-provider",
+    wired: false,
+    inScope: false,
+    callSites: [],
+    reason:
+      "the GitHub provider stores tasks as issues — a remote status flip has no local status line for a writer to observe, so it is out of scope for a local-carrier page",
+  },
+  {
+    id: "human-hand-edit",
+    wired: false,
+    inScope: false,
+    callSites: [],
+    reason:
+      "a hand edit of tasks/*.md is observed only through git, i.e. by the `reconcile` class (source: git, inferred: true) — it has no writer process of its own",
+  },
+];
+
+// ── the read-side view of the carrier (the surface `quay task log` / `quay task trace` publish) ──
+
+/** One carrier record as the read surface publishes it. The order key is the CARRIER POSITION (the
+ *  0-based line index), which on an append-only carrier equals a v1 record's `seq` — so "ordered by
+ *  seq" and "ordered by the carrier" are the same statement for every v1 record, and a v0 record
+ *  (which has no `seq` at all) still has exactly one well-defined position. */
+export interface TaskStatusTransitionView {
+  /** The carrier position (0-based line index) — the ORDER KEY. */
+  order: number;
+  schema: "v1" | "v0";
+  /** v1 only (null for a v0 line — ⛔ never a fabricated one, hard rule 6). */
+  seq: number | null;
+  /** v1 only. The consumer's dedup key (at-least-once delivery). */
+  eventId: string | null;
+  carrierEpoch: string | null;
+  taskId: string;
+  from: string | null;
+  to: string | null;
+  kind: string | null;
+  /** Time the status write happened (v1 `at`; v0 `ts`). */
+  at: string | null;
+  recordedAt: string | null;
+  actor: TaskStatusEventActor | null;
+  cause?: TaskStatusEventCause;
+  evidence?: TaskStatusEventEvidence;
+  reason?: string;
+  /** `"task-status-events"` for an event a LIVE writer appended; `"git"` for a reconciled, inferred
+   *  one. ⛔ A commit SUBJECT is never a source (a message is a claim, not a positional reading). */
+  source: "task-status-events" | "git";
+  inferred: boolean;
+  /** `evidence.commit` when the record carries one, else null. */
+  commit: string | null;
+}
+
+function asString(v: unknown): string | null {
+  return typeof v === "string" ? v : null;
+}
+
+/** Project ONE classified carrier line into the published view. Never throws and never invents a
+ *  value: a field the record does not carry comes out null / absent (缺值 = 未查). */
+export function taskStatusTransitionView(line: CarrierLine): TaskStatusTransitionView {
+  const common = { order: line.index };
+  if (line.klass === "v1") {
+    const r = line.record as unknown as Record<string, unknown>;
+    const inferred = r.inferred === true;
+    const evidence = (r.evidence ?? undefined) as TaskStatusEventEvidence | undefined;
+    return {
+      ...common,
+      schema: "v1",
+      seq: typeof r.seq === "number" ? r.seq : null,
+      eventId: asString(r.eventId),
+      carrierEpoch: asString(r.carrierEpoch),
+      taskId: asString(r.taskId) ?? "",
+      from: asString(r.from),
+      to: asString(r.to),
+      kind: asString(r.kind),
+      at: asString(r.at),
+      recordedAt: asString(r.recordedAt),
+      actor: (r.actor ?? null) as TaskStatusEventActor | null,
+      ...(r.cause !== undefined ? { cause: r.cause as TaskStatusEventCause } : {}),
+      ...(evidence !== undefined ? { evidence } : {}),
+      ...(typeof r.reason === "string" ? { reason: r.reason } : {}),
+      source: inferred ? "git" : "task-status-events",
+      inferred,
+      commit: evidence !== undefined ? asString(evidence.commit) : null,
+    };
+  }
+  // klass === "v0" — the legacy shape, read as it was written and never upgraded.
+  const r = (line.legacy ?? {}) as Record<string, unknown>;
+  const actor = asString(r.actor);
+  return {
+    ...common,
+    schema: "v0",
+    seq: null,
+    eventId: null,
+    carrierEpoch: null,
+    taskId: asString(r.taskId) ?? "",
+    from: asString(r.from),
+    to: asString(r.to),
+    kind: asString(r.kind),
+    at: asString(r.ts),
+    recordedAt: null,
+    actor: actor === null ? null : { kind: "unknown", id: actor },
+    ...(typeof r.reason === "string" ? { reason: r.reason } : {}),
+    source: "task-status-events",
+    inferred: false,
+    commit: null,
+  };
+}
+
+/** Every carrier record as the published view, in CARRIER ORDER, with the corrupt-line count kept
+ *  separate (a corrupt line is counted and named, never silently dropped — hard rule 3b). */
+export function readTaskStatusTransitions(root: string): {
+  carrier: TaskStatusEventCarrier;
+  transitions: TaskStatusTransitionView[];
+  corrupt: number;
+} {
+  const carrier = readTaskStatusEventCarrier(root);
+  const transitions: TaskStatusTransitionView[] = [];
+  let corrupt = 0;
+  for (const line of carrier.lines) {
+    if (line.klass === "corrupt") {
+      corrupt++;
+      continue;
+    }
+    transitions.push(taskStatusTransitionView(line));
+  }
+  return { carrier, transitions, corrupt };
+}
+
+/** The epoch literal for a carrier that has NO epoch sidecar and NO v1 record — a legacy (v0-only)
+ *  carrier. It is a DECLARED value, not null, so a cursor taken on such a carrier round-trips; the
+ *  first v1 append creates the sidecar and thereby rotates the effective epoch, which is exactly the
+ *  rebase a consumer must be told about (⛔ never a silent skip). */
+export const PRE_EPOCH = "pre-epoch";
+
+/** The carrier's CURRENT effective epoch, READ-ONLY. ⛔ Never `readOrCreateCarrierEpoch`: a read
+ *  verb must not create state (the sidecar is created by the first WRITE, under the write lock).
+ *  Prefers the sidecar; falls back to the newest v1 record's own `carrierEpoch` (the sidecar may be
+ *  unreachable while the records still carry it); `PRE_EPOCH` when neither exists. */
+export function readCarrierEpoch(root: string): string {
+  try {
+    const parsed = JSON.parse(fs.readFileSync(taskStatusEventsEpochPath(root), "utf8"));
+    if (parsed !== null && typeof parsed === "object") {
+      const epoch = (parsed as Record<string, unknown>).epoch;
+      if (typeof epoch === "string" && epoch.length > 0) return epoch;
+    }
+  } catch {
+    /* absent or unreadable ⇒ fall through to the records, then PRE_EPOCH */
+  }
+  const carrier = readTaskStatusEventCarrier(root);
+  for (let i = carrier.lines.length - 1; i >= 0; i--) {
+    const line = carrier.lines[i];
+    if (line.klass !== "v1") continue;
+    const epoch = line.record?.carrierEpoch;
+    if (typeof epoch === "string" && epoch.length > 0) return epoch;
+  }
+  return PRE_EPOCH;
 }

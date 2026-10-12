@@ -29,6 +29,7 @@
 //   --json        打印机器可读 JSON 摘要（三态计数+清单）
 
 import fs from "node:fs";
+import { StringDecoder } from "node:string_decoder";
 import { repoRoot } from "./repo-root.ts";
 import path from "node:path";
 import { execFileSync } from "node:child_process";
@@ -137,19 +138,137 @@ export function parseRecordEpoch(obj) {
   return null;
 }
 
-export function recordEpochsFromFile(filePath) {
-  const text = fs.readFileSync(filePath, "utf8");
-  const lines = text.split(/\r?\n/).filter((l) => l.trim().length > 0);
-  const epochs = [];
-  let parseable = 0;
-  for (const line of lines) {
-    let obj = null;
-    try { obj = JSON.parse(line); } catch { obj = null; }
-    const e = obj === null ? null : parseRecordEpoch(obj);
-    epochs.push(e);
-    if (e !== null) parseable++;
+// ── 流式读取（⛔ 永不把整个载体物化成一个字符串） ─────────────────────────────────────────────────────
+// 缺陷现场（2026-10-13）：`.quay/meta-driver-round.jsonl` 达 538,347,409 字节 > V8 的最大字符串长度
+// 0x1fffffe8 = 536,870,888 ⇒ 本文件里的整文件 `fs.readFileSync(located, "utf8")` 抛 ERR_STRING_TOO_LONG，
+// `classifyCarrier` ← `buildAudit` 一路上抛，**整个审计连同其它正常载体一起崩掉**，每一个 fan-in 都红在
+// 同一处、而这条红不属于任何任务的 delta。两个层面都不合格：
+//   · 硬规则 3b——读不懂输入时必须给「无法评估」一个独立取值，⛔ 既不得抛穿、也不得与「通过」同形；
+//   · 硬规则 4 推论二——「把无界 append-only 载体读成一个字符串」等于把一个**宿主相关**的上限
+//     （0x1fffffe8，换台机器/换个 V8 就变）偷偷设成判据，且静默。
+// 故：`.jsonl` 累积载体一律**逐行流式**读；状态文件仍需要完整文本，但先按 size 判「是否可能超过上限」，
+// 超了给独立取值而不是让它抛。
+export const JS_MAX_STRING_LENGTH = 0x1fffffe8;
+
+/** 读失败的稳定代码（err.code 优先，退回 err.name，再退 "read-error"）。 */
+function readErrorCode(err) {
+  const c = err && (err.code || err.name);
+  return typeof c === "string" && c.length > 0 ? c : "read-error";
+}
+
+// 逐行读取的**内存预算**：单行超过它即以 `null` 回调（「这一行读不懂」），⛔ 不是「悄悄丢掉它、
+// 再报一个偏小的记录数」——后者正是硬规则 3b 禁止的「读不懂却伪装成读过了」。⛔ 它也**不是给测量设的
+// 阈值**（硬规则 4）：它不是判据、不产生任何数值结论，撞上它的唯一后果是调用方给出显式的「未评估」。
+// 量级依据：生产 `.jsonl` 载体的行是 ~9 KB（`.quay/meta-driver-round.jsonl` 实测 57,837 行 / 538 MB），
+// 16 MiB ≈ 该量级的 1700 倍。
+export const MAX_LINE_CHARS = 1 << 24;
+
+// 逐行流式读取，⛔ 从不物化整文件。onLine(line) 每行回调一次（行内不含换行符）；单行长度超过
+// maxLineChars 时该行以 `null` 回调——⛔ 不是「空行」：行内容已被丢弃，但「这一行读不懂」与
+// 「这一行是空的」在回调侧仍分得开（硬规则 3b）。onLine 返回 `false` ⇒ 提前停止读取（调用方已知道
+// 这一遍不可能给出可信读数，不必把剩下几百 MB 读完）。多字节字符跨 chunk 由 StringDecoder 兜住。
+export function streamLines(filePath, onLine, { chunkSize = 1 << 20, maxLineChars = MAX_LINE_CHARS } = {}) {
+  const fd = fs.openSync(filePath, "r");
+  try {
+    const decoder = new StringDecoder("utf8");
+    const buf = Buffer.allocUnsafe(chunkSize);
+    let carry = "";
+    let carryOversized = false;
+    let stopped = false;
+    const appendCarry = (s) => {
+      if (carryOversized || s.length === 0) return;
+      if (carry.length + s.length > maxLineChars) { carry = ""; carryOversized = true; return; }
+      carry += s;
+    };
+    const flush = () => {
+      if (onLine(carryOversized ? null : carry) === false) stopped = true;
+      carry = "";
+      carryOversized = false;
+    };
+    for (;;) {
+      const n = fs.readSync(fd, buf, 0, chunkSize, null);
+      if (n === 0) break;
+      const text = decoder.write(buf.subarray(0, n));
+      let start = 0;
+      let nl = text.indexOf("\n", start);
+      while (nl !== -1) {
+        appendCarry(text.slice(start, nl));
+        flush();
+        if (stopped) break;
+        start = nl + 1;
+        nl = text.indexOf("\n", start);
+      }
+      if (stopped) break;
+      appendCarry(text.slice(start));
+    }
+    if (!stopped) {
+      appendCarry(decoder.end());
+      // 末行无换行符时也要吐出（与 `text.split(/\r?\n/)` 同形态）；恰好以换行结尾则不产生空尾行。
+      if (carry.length > 0 || carryOversized) flush();
+    }
+  } finally {
+    fs.closeSync(fd);
   }
-  return { count: lines.length, parseable, epochs };
+}
+
+// 流式统计一个 `.jsonl` 载体的：非空行数 / 可解析出时间戳的行数 / 落地时刻之后的行数（两个窗口）/
+// 是否「单 JSON 文档」形态。与旧的整文件实现**数值等价**（同一条记录集、同一套 filter 语义），
+// 但峰值内存与文件大小无关。读不动 ⇒ { ok:false, code } —— ⛔ 不抛穿，也不伪装成 0 条。
+export function scanJsonlCarrier(filePath, { landingEpoch = null, latestLandingEpoch = null, chunkSize } = {}) {
+  let count = 0;
+  let parseable = 0;
+  let afterEarliest = landingEpoch === null ? null : 0;
+  let afterLatest = latestLandingEpoch === null ? null : 0;
+  let nonBlank = 0;
+  let soloLine = null; // 首个非空行；出现第二个非空行即作废（⛔ 不留巨型文件的多份拷贝）
+  let lineTooLong = false;
+  try {
+    streamLines(filePath, (line) => {
+      if (line === null) { lineTooLong = true; return false; } // 提前停：这一遍已不可能给出可信读数
+      if (line.trim().length === 0) return undefined;
+      nonBlank++;
+      soloLine = nonBlank === 1 ? line : null;
+      count++;
+      let obj = null;
+      try { obj = JSON.parse(line); } catch { obj = null; }
+      const e = obj === null ? null : parseRecordEpoch(obj);
+      if (e === null) return undefined;
+      parseable++;
+      if (afterEarliest !== null && e >= landingEpoch) afterEarliest++;
+      if (afterLatest !== null && e >= latestLandingEpoch) afterLatest++;
+      return undefined;
+      // chunkSize 只用于把 chunk 边界压到极小值以做边界测试（生产调用不传 ⇒ 1 MiB）。
+    }, chunkSize === undefined ? {} : { chunkSize });
+  } catch (err) {
+    return { ok: false, code: readErrorCode(err) };
+  }
+  // 有行超出读取预算 ⇒ **拒绝给出记录数**（⛔ 不报一个偏小的 count + 由它推出来的三态：那会把
+  // 「没读全」伪装成「读过了，落地后 0 条」，是硬规则 3b 的最坏形态）。独立取值 ⇒ 调用方出 ③ NOT_EVALUATED。
+  if (lineTooLong) return { ok: false, code: "line-too-long" };
+  // 单 JSON 文档形态（loop-driver.jsonl = 一个 cron 配置对象，无时间戳）：整个文件只有一个非空行，
+  // 且它解析出来是个非数组对象。与旧实现的 `raw.split(...).length === 1 && JSON.parse(raw)` 同语义
+  // （旧实现 parse 的是 trim 后的全文；只有一个非空行时两者是同一个字符串）。
+  let singleJsonDoc = false;
+  if (nonBlank === 1 && typeof soloLine === "string") {
+    try {
+      const o = JSON.parse(soloLine.trim());
+      singleJsonDoc = o !== null && typeof o === "object" && !Array.isArray(o);
+    } catch { singleJsonDoc = false; }
+  }
+  return { ok: true, count, parseable, afterEarliest, afterLatest, singleJsonDoc };
+}
+
+// 需要【完整文本】的路径（状态文件，含单 JSON 文档形态的 `.jsonl`）。先按 size 判上限：UTF-8 解码到
+// UTF-16 只减不增，故 `size <= JS_MAX_STRING_LENGTH` ⇒ readFileSync 不会抛 ERR_STRING_TOO_LONG。
+// 超限 ⇒ { ok:false, code:"string-too-long" }（独立取值，⛔ 不抛穿、⛔ 不返回空串冒充「文件是空的」）。
+export function readCarrierText(filePath) {
+  try {
+    const st = fs.statSync(filePath);
+    if (st.size > JS_MAX_STRING_LENGTH) return { ok: false, code: "string-too-long" };
+    return { ok: true, text: fs.readFileSync(filePath, "utf8").trim() };
+  } catch (err) {
+    return { ok: false, code: readErrorCode(err) };
+  }
 }
 
 // 已退役载体：在 retired-clause-check.ts / loop-shipping-exclusion-data.mjs 中按 stem 前缀匹配。
@@ -422,23 +541,35 @@ export function classifyCarrier({
     };
   }
 
-  // 载体存在。
-  const raw = fs.readFileSync(located, "utf8").trim();
+  // 载体存在。⛔ 不整文件 readFileSync（见 streamLines 头注释的缺陷现场）：`.jsonl` 累积载体逐行流式读，
+  // 状态文件按 size 判上限后再读。读不动 ⇒ ③ NOT_EVALUATED + `carrier-unreadable:<code>`，**继续审计其它
+  // 载体**，⛔ 绝不抛穿 buildAudit（旧形态：一个 538MB 载体把整份审计打崩）。
+  const unreadable = (code, what) => ({
+    name: base, kind, refs: acRefs, bodyRefs, citingTasks,
+    found: true, path: located,
+    threeState: THREE_STATES.NOT_EVALUATED,
+    reason: `carrier-unreadable:${code}: ${what}——载体无法评估（硬规则 3b：读不懂输入既不抛穿也不伪装成通过）`,
+    disposition: DISPOSITIONS.SUSPECT,
+    recordCount: null, recordsAfterLanding: null,
+    landingEpoch, latestLandingEpoch, landingVerified, staleVsLatestClaim: false, writers, predicateHit,
+  });
+
   const isJsonl = /\.jsonl$/i.test(base);
-  // 内容形态修正：`.jsonl` 扩展名但实为【单个 JSON 对象】（如 loop-driver.jsonl = 一个 cron 配置对象，
-  // 无时间戳字段）——不是时间型累积载体，走状态文件语义，否则会误判「落地后 0 条」的假零数据。
-  const singleJsonDoc = !isJsonl
-    || raw.split(/\r?\n/).filter((l) => l.trim()).length === 1 && (() => {
-      try {
-        const o = JSON.parse(raw);
-        return o !== null && typeof o === "object" && !Array.isArray(o);
-      } catch { return false; }
-    })();
+  let scan = null;
+  let singleJsonDoc = true; // 非 `.jsonl`（状态文件）恒走状态语义
+  if (isJsonl) {
+    scan = scanJsonlCarrier(located, {
+      landingEpoch: landingVerified ? landingEpoch : null,
+      latestLandingEpoch,
+    });
+    if (!scan.ok) return unreadable(scan.code, `逐行流式读取失败（${base}）`);
+    // 内容形态修正：`.jsonl` 扩展名但实为【单个 JSON 对象】（如 loop-driver.jsonl = 一个 cron 配置对象，
+    // 无时间戳字段）——不是时间型累积载体，走状态文件语义，否则会误判「落地后 0 条」的假零数据。
+    singleJsonDoc = scan.singleJsonDoc;
+  }
 
   if (isJsonl && !singleJsonDoc) {
-    const { count, parseable, epochs } = recordEpochsFromFile(located);
-    const afterEarliest = landingVerified ? epochs.filter((e) => e !== null && e >= landingEpoch).length : null;
-    const afterLatest = latestLandingEpoch !== null ? epochs.filter((e) => e !== null && e >= latestLandingEpoch).length : null;
+    const { count, parseable, afterEarliest, afterLatest } = scan;
     const staleVsLatestClaim = latestLandingEpoch !== null && afterLatest === 0;
     let threeState;
     let reason;
@@ -466,7 +597,10 @@ export function classifyCarrier({
     };
   }
 
-  // 状态文件（含单 JSON 对象形态的 `.jsonl`）。
+  // 状态文件（含单 JSON 对象形态的 `.jsonl`）——需要完整文本；超 V8 上限 ⇒ ③ 无法评估。
+  const textRes = readCarrierText(located);
+  if (!textRes.ok) return unreadable(textRes.code, `完整文本读取失败（${base}）`);
+  const raw = textRes.text;
   let obj = null;
   try { obj = JSON.parse(raw); } catch { obj = null; }
   const meaningful = obj !== null && typeof obj === "object" && Object.keys(obj).length > 0;
