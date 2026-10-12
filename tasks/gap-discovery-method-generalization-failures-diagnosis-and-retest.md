@@ -2,7 +2,7 @@
 id: gap-discovery-method-generalization-failures-diagnosis-and-retest
 title: "Discovery Method: diagnose the three trustworthy generalization
   failures, fix the failing step generically, retest on a new sealed holdout"
-status: ready
+status: done
 labels:
   - gap
   - architecture-discovery
