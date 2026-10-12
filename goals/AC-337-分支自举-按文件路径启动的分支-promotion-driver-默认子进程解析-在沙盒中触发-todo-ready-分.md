@@ -19,7 +19,9 @@ criterion: |
   printf '%s' "$out" | node -e '(()=>{const fs=require("fs");const [rroot,rmain]=process.argv.slice(1);let s="";process.stdin.on("data",d=>s+=d).on("end",()=>{let J;try{J=JSON.parse(s)}catch(e){console.error("NOT-EVALUATED: probe output is not JSON");process.exit(3)}
   const rp=(p)=>{try{return fs.realpathSync(p)}catch{return p}};const inTree=(p)=>typeof p==="string"&&rp(p).startsWith(rroot+"/");
   if(rp(J.root||"")!==rroot){console.error("CAUSE=probe-root-mismatch — probe reports root "+J.root+", criterion runs in "+rroot);process.exit(1)}
-  const evs=Array.isArray(J.events)?J.events:[];const bad=evs.filter(e=>!inTree(e.writerModule)||!inTree(e.entry));
+  /* status-event contract version dispatch, on the `schema` tag: v0 keeps the provenance triple at the top level, v1 nests it under producer. Read BOTH shapes - a v1 line read with v0 field paths yields undefined, so an in-tree write would be reported as loaded-main-checkout-code (an unreadable provenance must not share a spelling with one that is outside the tree). An unreadable record still answers false, so it keeps FAILING. */
+  const provOf=(e)=>{if(!e||typeof e!=="object")return{writerModule:undefined,entry:undefined};if(typeof e.schema!=="string")return{writerModule:e.writerModule,entry:e.entry};const p=e.producer&&typeof e.producer==="object"?e.producer:{};return{writerModule:p.writerModule,entry:p.entry}};
+  const evs=Array.isArray(J.events)?J.events:[];const bad=evs.filter(e=>{const p=provOf(e);return !inTree(p.writerModule)||!inTree(p.entry)});
   if(bad.length){console.error("CAUSE=loaded-main-checkout-code — "+bad.length+" event(s) written by code outside "+rroot+": "+JSON.stringify(bad[0]).slice(0,300));process.exit(1)}
   const prom=evs.filter(e=>e.from==="todo"&&e.to==="ready"&&e.kind==="promote"),retr=evs.filter(e=>e.from==="ready"&&e.to==="todo"&&e.kind==="retreat");
   const pf=J.promotion&&J.promotion.flips,rf=J.revaluation&&J.revaluation.flips;

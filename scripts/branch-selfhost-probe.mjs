@@ -129,10 +129,33 @@ function mainCheckoutOf(startDir) {
 // write) and `entry` (the process entry) realpath INSIDE the tree under evaluation. This mirrors
 // AC-337's own re-check verbatim — the criterion re-derives the same `inTree` predicate; this is
 // only the probe's self-check, never the authority.
+//
+// ── WHICH field path carries the provenance is CONTRACT-VERSIONED ────────────────────────────────
+// The status-event contract moved v0 → v1 (`packages/quay/src/kernel/task-transition.ts`: it "moves
+// the provenance triple under `producer`"). v0 kept `writerModule`/`entry` at the TOP LEVEL; v1
+// nests them. A reader that knows only one shape reads `undefined` on the other — and because
+// `inTree(undefined) === false`, a genuinely in-tree write gets reported as `loaded-main-checkout-code`.
+// "Unreadable provenance" and "the main checkout wrote it" must NOT share a spelling (硬规则 3b), so
+// the version dispatch is POSITIONAL on the `schema` tag — the same rule the kernel's own
+// `readTaskStatusEventCarrier` uses to classify a line — with the top-level field as the v0 fallback
+// for record shapes that predate the tag. An unreadable record still yields `undefined`s, so
+// `inTree` keeps answering false: "cannot read it" keeps FAILING rather than silently passing.
+export function provenanceOf(e) {
+  if (!e || typeof e !== "object") return { writerModule: undefined, entry: undefined };
+  if (typeof e.schema === "string") {
+    const p = e.producer && typeof e.producer === "object" ? e.producer : {};
+    return { writerModule: p.writerModule, entry: p.entry };
+  }
+  return { writerModule: e.writerModule, entry: e.entry };
+}
+
 export function classifyEventIdentities(events, treeRoot) {
   const rroot = realpathOr(treeRoot);
   const inTree = (p) => typeof p === "string" && p.length > 0 && realpathOr(p).startsWith(rroot + "/");
-  const bad = (Array.isArray(events) ? events : []).filter((e) => !inTree(e && e.writerModule) || !inTree(e && e.entry));
+  const bad = (Array.isArray(events) ? events : []).filter((e) => {
+    const p = provenanceOf(e);
+    return !inTree(p.writerModule) || !inTree(p.entry);
+  });
   return { ok: bad.length === 0, bad, treeRoot: rroot };
 }
 
@@ -499,9 +522,13 @@ function runProbe(opts) {
   const markers = [realpathOr(tmpParent), sandbox.dir, opts.runId, ...SANDBOX_TASK_IDS];
   const production = diffProduction(prodBefore, snapshotProduction(mainRoot), mainRoot, markers);
 
+  // ⛔ The SAME v0/v1 dispatch applies here: reading `.entry` straight off the record is exactly the
+  // drift `provenanceOf` exists to prevent (silently null on every v1 line), so the entry is read
+  // through it too rather than by a second, un-migrated field path.
+  const promoteEvent = events.find((e) => e && e.kind === "promote") ?? null;
   out.promotion = {
     childResolution: "default", // ⛔ `--ready-pool-cmd` was not passed: the driver resolved its own child
-    childEntry: events.find((e) => e && e.kind === "promote")?.entry ?? null,
+    childEntry: promoteEvent ? (provenanceOf(promoteEvent).entry ?? null) : null,
     driverExit: promRun.status,
     flips: promotionFlips,
     seedStatuses: sandbox.seedStatuses,
@@ -601,58 +628,75 @@ export function selftest() {
   const root = gitToplevel(probeDir()) || realpathOr(path.resolve(probeDir(), ".."));
   const main = mainCheckoutOf(probeDir()) || root;
   const failures = [];
-
-  // (a) an event whose writerModule lives OUTSIDE `root` must be judged loaded-main-checkout-code.
-  // ⛔ The injected root must be one that is genuinely distinct from `root` ON EVERY HOST. This
-  // arm used to inject the real main checkout, which holds on a developer's linked-worktree
-  // checkout but NOT in CI: there the checkout IS its own main checkout (measured
-  // `root=/_work/quay/quay main=/_work/quay/quay`), so `mainCheckoutOf()` collapsed to `root`,
-  // the injected path became an IN-TREE path, and the arm failed on every CI run (`--selftest`
-  // exit 1 ⇒ the probe's own `--selftest exits 0` test red). A mkdtemp root is distinct from
-  // `root` by construction, so the comparator is genuinely exercised on every host instead of
-  // silently degrading to a self-comparison.
-  const foreign = realpathOr(fs.mkdtempSync(path.join(os.tmpdir(), "bsp-selftest-foreign-")));
-  const foreignEvent = {
-    writerModule: path.join(foreign, "packages", "quay", "src", "kernel", "task-transition.ts"),
-    entry: path.join(foreign, "plugin", "scripts", "ready-pool-check.ts"),
-    from: "todo",
-    to: "ready",
-    kind: "promote",
+  // Per-arm readings, so `--selftest --json` reports WHICH arm answered what. A bare "0 failures"
+  // would be indistinguishable from an arm that never ran (or silently degraded to a self-comparison)
+  // — 硬规则 9: a rule you cannot see being kept is a rule kept on willpower alone.
+  const arms = {};
+  const arm = (name, ok, detail) => {
+    arms[name] = ok ? { ok: true } : { ok: false, detail };
+    if (!ok) failures.push(`${name}: ${detail}`);
   };
-  const a = classifyEventIdentities([foreignEvent], root);
-  fs.rmSync(foreign, { recursive: true, force: true });
-  if (a.ok !== false || a.bad.length !== 1) {
-    failures.push(`out-of-tree event was NOT flagged (ok=${a.ok}, bad=${a.bad.length})`);
-  }
 
-  // (b) every event inside ROOT must pass.
-  const rootEvents = [
-    {
-      writerModule: path.join(root, "packages", "quay", "src", "kernel", "task-transition.ts"),
-      entry: path.join(root, "plugin", "scripts", "ready-pool-check.ts"),
+  // The injected root must be one that is genuinely distinct from `root` ON EVERY HOST. This arm used
+  // to inject the real main checkout, which holds on a developer's linked-worktree checkout but NOT in
+  // CI: there the checkout IS its own main checkout (measured `root=/_work/quay/quay
+  // main=/_work/quay/quay`), so `mainCheckoutOf()` collapsed to `root`, the injected path became an
+  // IN-TREE path, and the arm failed on every CI run (`--selftest` exit 1 ⇒ the probe's own
+  // `--selftest exits 0` test red). A mkdtemp root is distinct from `root` by construction, so the
+  // comparator is genuinely exercised on every host instead of silently degrading to a self-comparison.
+  const foreign = realpathOr(fs.mkdtempSync(path.join(os.tmpdir(), "bsp-selftest-foreign-")));
+  try {
+    const inside = (r, rel) => path.join(r, rel);
+    const KERNEL = ["packages", "quay", "src", "kernel", "task-transition.ts"];
+    const ENTRY = ["plugin", "scripts", "ready-pool-check.ts"];
+
+    // ── v0 shape (writerModule / entry at the TOP LEVEL — the pre-v1 contract) ───────────────────
+    const v0Event = (writerModule, entry) => ({ writerModule, entry, from: "todo", to: "ready", kind: "promote" });
+
+    // (a) an event whose writerModule lives OUTSIDE `root` must be judged loaded-main-checkout-code.
+    const a = classifyEventIdentities([v0Event(inside(foreign, ...KERNEL), inside(foreign, ...ENTRY))], root);
+    arm("v0-foreign", a.ok === false && a.bad.length === 1, `out-of-tree v0 event was NOT flagged (ok=${a.ok}, bad=${a.bad.length})`);
+
+    // (b) every event inside ROOT must pass.
+    const b = classifyEventIdentities(
+      [v0Event(inside(root, ...KERNEL), inside(root, ...ENTRY)), { ...v0Event(inside(root, ...KERNEL), inside(root, ...ENTRY)), from: "ready", to: "todo", kind: "retreat" }],
+      root,
+    );
+    arm("v0-in-tree", b.ok === true, `in-tree v0 events were flagged: ${JSON.stringify(b.bad).slice(0, 200)}`);
+
+    // (c) a null/absent entry must NOT be silently accepted (硬规则 3b — an unreadable provenance is
+    //     not a passing one).
+    const c = classifyEventIdentities([{ writerModule: path.join(root, "x.ts"), entry: null }], root);
+    arm("v0-null-entry", c.ok === false, "a v0 null entry was accepted as in-tree");
+
+    // ── v1 shape (the provenance triple nested under `producer` — what the carrier holds today) ──
+    // ⛔ These are the arms that lock out the drift this probe was repaired for: a comparator that only
+    // knew v0 reads `undefined` on a v1 line and reports an IN-TREE write as loaded-main-checkout-code.
+    const v1Event = (writerModule, entry) => ({
+      schema: "task-status-event/v1",
+      taskId: "x",
       from: "todo",
       to: "ready",
       kind: "promote",
-    },
-    {
-      writerModule: path.join(root, "packages", "quay", "src", "kernel", "task-transition.ts"),
-      entry: path.join(root, "plugin", "scripts", "ready-pool-check.ts"),
-      from: "ready",
-      to: "todo",
-      kind: "retreat",
-    },
-  ];
-  const b = classifyEventIdentities(rootEvents, root);
-  if (b.ok !== true) {
-    failures.push(`in-tree events were flagged: ${JSON.stringify(b.bad).slice(0, 200)}`);
+      producer: { writerModule, entry },
+    });
+    const d = classifyEventIdentities([v1Event(inside(root, ...KERNEL), inside(root, ...ENTRY))], root);
+    arm("v1-in-tree", d.ok === true, `v1 (producer) in-tree event was flagged: ${JSON.stringify(d.bad).slice(0, 200)}`);
+
+    const eForeign = classifyEventIdentities([v1Event(inside(foreign, ...KERNEL), inside(foreign, ...ENTRY))], root);
+    arm("v1-foreign", eForeign.ok === false && eForeign.bad.length === 1, `v1 (producer) out-of-tree event was NOT flagged (ok=${eForeign.ok}, bad=${eForeign.bad.length})`);
+
+    // (e) 硬规则 3b for the v1 branch too: a v1 line whose provenance cannot be read (no `producer` at
+    //     all, or a null `entry`) must stay RED — it must not degrade to "in tree".
+    const eNoProducer = classifyEventIdentities([{ schema: "task-status-event/v1", from: "todo", to: "ready", kind: "promote" }], root);
+    arm("v1-no-producer", eNoProducer.ok === false, "a v1 record with no producer was accepted as in-tree");
+    const eNullEntry = classifyEventIdentities([v1Event(path.join(root, "x.ts"), null)], root);
+    arm("v1-null-entry", eNullEntry.ok === false, "a v1 null entry was accepted as in-tree");
+  } finally {
+    fs.rmSync(foreign, { recursive: true, force: true });
   }
 
-  // (c) a null/absent entry must NOT be silently accepted (硬规则 3b — an unreadable provenance is
-  //     not a passing one).
-  const c = classifyEventIdentities([{ writerModule: path.join(root, "x.ts"), entry: null }], root);
-  if (c.ok !== false) failures.push("a null entry was accepted as in-tree");
-
-  return { ok: failures.length === 0, failures, root, main };
+  return { ok: failures.length === 0, failures, arms, root, main };
 }
 
 // ── CLI ─────────────────────────────────────────────────────────────────────────────────────────
