@@ -1713,22 +1713,27 @@ test("AC(a) — a candidate minted on reflection's LAST allowed call is validate
   writeConfig(ws, reserveYaml(240, 2));
   writeFixtureStore(ws, FIXTURE_OUTCOMES);
 
-  // A reflection round that reports EXACTLY the budget it was handed and mints on its last allowed call —
-  // the shape the real engine produces when the model answers `new` on call #(max_model_calls − reserve).
+  // ⛔ A reflection round that SPENDS ITS WHOLE HANDED BUDGET and mints a candidate on its last allowed
+  // call — the shape the real engine produces when the model answers `new` on the final call it is
+  // permitted. Spending the whole budget is what makes this case REFUTABLE: with `verify_reserve: 0` the
+  // round's shared counter is already at its per-round bound when generalization starts, so the candidate
+  // is never tested (the negative control in the task evidence runs exactly this, twice).
   const seen = {};
   const reflect = async (root, opts) => {
     seen.reflectionBudget = opts.budget.maxModelCalls;
+    const n = seen.reflectionBudget;
     return {
       ok: true,
-      decisions: [
-        { signature: "sig-1", ok: true, decision: "no-method", candidate: null, model_call: { usage: null, cost_usd: null } },
-        // …and it MINTS on its LAST allowed call (the shape a budget-bound reflection round produces).
-        { signature: "sig-2", ok: true, decision: "new", candidate: { method_id: "m-one", version: 1, status: "draft" }, model_call: { usage: null, cost_usd: null } },
-      ],
-      model_calls: 2,
+      decisions: Array.from({ length: n }, (_, i) => ({
+        signature: `sig-${i}`, ok: true,
+        decision: i === n - 1 ? "new" : "no-method",
+        candidate: i === n - 1 ? { method_id: "m-one", version: 1, status: "draft" } : null,
+        model_call: { usage: null, cost_usd: null },
+      })),
+      model_calls: n,
       skipped_budget: 0,
       wall_ms: 1,
-      selection: { units_evaluated: 2, batch_size: 2, skipped_prior: 0, skipped_cap: 0, merged_within_batch: 0 },
+      selection: { units_evaluated: n, batch_size: n, skipped_prior: 0, skipped_cap: 0, merged_within_batch: 0 },
     };
   };
   const heldOut = async () => ({ ok: true, cases: [{ case_id: "h1", evaluation_pin: "deadbeef" }], reason: null, malformed_lines: 0 });
@@ -1747,11 +1752,14 @@ test("AC(a) — a candidate minted on reflection's LAST allowed call is validate
   }));
 
   assert.equal(fact.state, "verified", fact.reason);
-  assert.equal(seen.reflectionBudget, 4, "reflection is handed 6 − 2, not 6");
-  // ⛔ THE POINT: both calls went to reflection, and the candidate it minted was STILL verified — in the
-  // round that minted it. Before the reserve, a reflection round that spent its whole quota left the
-  // verifier with nothing, so a candidate could never be tested by the round that produced it.
+  // ⛔ THE POINT, ASSERTED FIRST: reflection spent its WHOLE share (4 of the round's 6), and the candidate
+  // it minted was STILL verified — in the round that minted it. Before the reserve, a reflection round
+  // that spent its whole quota left the verifier with nothing, so a candidate could never be tested by the
+  // round that produced it. (Setting `verify_reserve: 0` in this fixture is the task's negative control:
+  // reflection is handed 6, spends 6, and THIS assertion is the one that goes red.)
   assert.equal(seenVerifications.length, 1, "the candidate minted by THIS round was validated IN THIS round");
+  assert.equal(seen.reflectionBudget, 4, "reflection is handed 6 − 2, not 6");
+  assert.equal(fact.value.model_calls, 5, "4 reflection + 1 verification — the reserve is what paid for the fifth");
   assert.equal(seenVerifications[0].candidate.method_id, "m-one");
   assert.equal(seenVerifications[0].pinDir, "/tmp/dm-stub-pin");
   assert.equal(fact.value.verdicts.total, 1);
@@ -1890,4 +1898,66 @@ test("AC(e) boundary — a wall breach with ZERO completed calls appends nothing
   assert.equal(fact.state, "failed");
   assert.match(fact.reason, /nothing appended/);
   assert.equal(fs.readFileSync(carrierPath(ws), "utf8"), before, "a breach with nothing produced persists nothing");
+});
+
+// ── the factory seam is the ONE place that knows the reflection pin (found by a live round) ──────────
+test("a round that gets its seams from `modelFactory` NAMES the reflection pin in the prompt and records it on the carrier", async () => {
+  // ⛔ THE DEFECT THIS PINS (observed on a real 2026-10-12 round): the `--once` CLI built its two
+  // launchers ITSELF instead of going through `modelFactory`, so the round never saw the reflection pin
+  // — the carrier said `reflection_launcher: null`, and the prompt named no tree while the launcher had
+  // been given `Read,Grep,Glob`. Tools the model is not told about are decorative, and its cwd is the
+  // LIVE checkout, so "read code" would have read the moving tree rather than the pin. The pin below is
+  // a real directory so the assertion is about the value the prompt receives, not a placeholder.
+  const ws = makeWorkspace();
+  writeConfig(ws, temporaryYaml(FUTURE_UNTIL, 240).replace("max_model_calls: 6", "max_model_calls: 6\n    verify_reserve: 2"));
+  writeFixtureStore(ws, FIXTURE_OUTCOMES);
+
+  const PIN_DIR = tmpDir("dm-reflect-pin-test-");
+  const seen = [];
+  const reflectFn = async (root, opts) => {
+    seen.push(opts.codeAccess);
+    return {
+      ok: true,
+      decisions: [{ signature: "sig-1", ok: true, decision: "no-method", candidate: null, model_call: { usage: null, cost_usd: null } }],
+      model_calls: 1, skipped_budget: 0, wall_ms: 1,
+      selection: { units_evaluated: 1, batch_size: 1, skipped_prior: 0, skipped_cap: 0, merged_within_batch: 0 },
+    };
+  };
+  const fact = await runDiscoveryMethod(ws, runOpts(ws, {
+    reflectFn,
+    modelFactory: async () => ({
+      ok: true,
+      model: async () => ({ stdout: "{}" }),
+      verifierModel: async () => ({ stdout: "{}" }),
+      modelId: "stub-model",
+      reflectionPin: { rev: "deadbeefdeadbeefdeadbeefdeadbeefdeadbeef", dir: PIN_DIR },
+    }),
+    now: () => ROUND_AT,
+  }));
+  assert.equal(fact.state, "verified", fact.reason);
+
+  // (1) the PROMPT was told which tree the tools may read — the absolute path, not the carrier's relative one.
+  assert.deepEqual(seen.length, 1, "the reflection step ran once");
+  assert.equal(seen[0].pinDir, PIN_DIR, "⛔ the prompt NAMES the pinned tree the launcher was given");
+  assert.equal(seen[0].tools, DEFAULT_REFLECTION_TOOLS);
+  const prompt = buildReflectionPrompt({ unit: { signature: "s", experiences: [] }, registry: [], toolNames: [], codeAccess: seen[0] });
+  assert.ok(prompt.includes(PIN_DIR));
+
+  // (2) the carrier records what the launcher ran with, so "reflection could read the code" is a READING.
+  const line = rounds(ws)[0];
+  assert.equal(line.reflection_launcher.tools, DEFAULT_REFLECTION_TOOLS);
+  assert.equal(line.reflection_launcher.max_turns, DEFAULT_REFLECTION_MAX_TURNS);
+  assert.equal(line.reflection_launcher.pin.rev, "deadbeefdeadbeefdeadbeefdeadbeefdeadbeef");
+  assert.equal(line.reflection_launcher.pin.dir, path.relative(ws, PIN_DIR), "the carrier path is repo-relative; the prompt's is absolute");
+  assert.equal(line.model_id, "stub-model");
+
+  // ⛔ The INJECTED-seam case is its own reading: no launcher was built, so the carrier says `null` rather
+  // than printing the config's INTENT as if it were a measurement.
+  const ws2 = makeWorkspace();
+  writeConfig(ws2, temporaryYaml(FUTURE_UNTIL, 240));
+  writeFixtureStore(ws2, FIXTURE_OUTCOMES);
+  const f2 = await runDiscoveryMethod(ws2, runOpts(ws2, { reflectFn: reflectStub(), now: () => ROUND_AT }));
+  assert.equal(f2.state, "verified", f2.reason);
+  assert.equal(rounds(ws2)[0].reflection_launcher, null, "an injected seam never went through a launcher ⇒ the block is null, not a config echo");
+  assert.equal(rounds(ws2)[0].model_id, null);
 });

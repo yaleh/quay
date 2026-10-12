@@ -1553,6 +1553,9 @@ export async function runDiscoveryMethod(root: string, opts: DiscoveryMethodRunO
       promotions,
       retirements,
       model_calls: modelCalls,
+      // Which model actually ran — `null` when no live launcher was built (an injected seam, or a round
+      // that never needed one). On the line, so the carrier can answer it without a second lookup.
+      model_id: modelId,
       tokens: cost.tokens,
       cost_usd: cost.cost_usd,
       ...extra,
@@ -2069,19 +2072,15 @@ async function main(argv: string[]): Promise<number> {
   // ⛔ The config is read BEFORE the seam so `verifier_max_turns` reaches the verifier launcher: the
   // turn budget is declared, not baked into whichever launcher happened to be built first.
   const read = readDiscoveryMethodConfig(root);
-  let model: ModelFn | null = null;
-  let verifierModel: ModelFn | null = null;
-  let modelId: string | null = null;
-  if (!argv.includes("--no-model")) {
-    const live = await liveDiscoveryModel(root, read.config, pinTmpRoot === undefined ? {} : { pinTmpRoot });
-    if (!live.ok) {
-      process.stderr.write(`discovery-method-routine: ${live.reason}\n`);
-      return 2;
-    }
-    model = live.model as ModelFn;
-    verifierModel = (live.verifierModel as ModelFn | undefined) ?? (live.model as ModelFn);
-    modelId = live.modelId ?? null;
-  }
+  // ⛔ THE CLI GOES THROUGH THE SAME `modelFactory` SEAM THE DRIVER USES — it does NOT build the two
+  // launchers itself. That duplication was a real defect, caught by a live round on 2026-10-12: the
+  // factory is the ONLY place that knows the reflection launcher's pin, and a hand-built seam set left
+  // `reflection_launcher` null on the carrier AND the reflection prompt naming no tree — i.e. the model
+  // was given `Read,Grep,Glob` and told nothing about what it could read, while its cwd was the LIVE
+  // checkout. Two places building the same seams is a second thing to keep in sync (硬规则 5b), and this
+  // one had already drifted. Lazy now, too: the launchers (and the pin) are built only when the round
+  // actually has new Experiences to reflect on, and a launcher failure becomes the round's own
+  // `failed` fact with the launcher's reason instead of a bare exit code.
   const fact = await runDiscoveryMethod(root, {
     config: read.config,
     configPresent: read.present,
@@ -2091,11 +2090,10 @@ async function main(argv: string[]): Promise<number> {
     // interval, and even then it does not advance the production last-run (see runDiscoveryMethod ⑨).
     invokedBy: INVOKED_BY_MANUAL,
     force: argv.includes("--force"),
-    model,
-    verifierModel,
-    modelId,
+    ...(argv.includes("--no-model") ? {} : { modelFactory: () => liveDiscoveryModel(root, read.config, pinTmpRoot === undefined ? {} : { pinTmpRoot }) }),
     pinTmpRoot,
   });
+  const modelId = (fact.value as Record<string, unknown> | null)?.model_id ?? null;
   process.stdout.write(json ? `${JSON.stringify({ root, model: modelId, fact }, null, 1)}\n` : `${fact.state}: ${fact.reason}\n`);
   return fact.state === "failed" ? 1 : 0;
 }
