@@ -4,7 +4,7 @@ title: AC-197 判据把谓词键在字面量 `commitStoreWrite` 上，而已落�
   拷贝折叠成单一共享包装 `commitKindFile` ⇒ 判据在真实树上结构性失效（n=1≠5）；五 kind 保证仍在（四个 Core store 经
   commitKindFile→commitStoreWrite、native store 直调）—— 把判据重锚到「共享原语模块依赖 +
   调用面」这一结构，并给五 kind 真实写盘往返读数
-status: todo
+status: ready
 labels:
   - gap
   - defect
