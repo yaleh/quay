@@ -71,8 +71,24 @@
 //   · FAILURES ARE LEARNING MATERIAL TOO (Plan 1b): refuted clusters, novelty duplicates and verifier
 //     `undetermined` results all become Experiences, with their own roles and their own reasoning.
 //
-// KILL SWITCH + OFF BY DEFAULT: declared in `.quay/config.yml` `loop.open_semantic_discovery:`. A
-// workspace with no such section gets `not-evaluated:disabled` and ZERO spawns. `enabled:false` is the
+// ⛔ METHODS GUIDE, THEY DO NOT GATE (task gap-open-discovery-method-guidance-active-shadow). A Discovery
+// Method (`.quay/discovery-method-registry.jsonl`) may steer an exploration round as OPTIONAL guidance
+// text appended to the investigator prompt — it is never compiled into a rule, never a classifier, and
+// never a boundary on what the model may inspect. `selectMethodsForRound` decides ONE thing: which arm a
+// method may steer. `active` ⇒ the PRODUCTION round (its guidance is prepended to the prompt);
+// `draft`/`trial` ⇒ an ISOLATED SHADOW arm only (one extra investigator pass on the same pin, records
+// marked `shadow:true`, ingested into NEITHER ledger); `retired`, a QUARANTINE lineage, or a verdict on
+// `.quay/discovery-contaminated-verdicts.jsonl` ⇒ NEVER selected, even when it is the only record. A
+// method whose guidance text names a registered seed component or case id is excluded with that value
+// named. "No eligible method" ⇒ BASELINE (unguided), never "no round": an unreadable registry, a
+// partially-readable one, or an unreadable deny-list are each their OWN reported value, and the round
+// still runs. Each round's record lists the ids included and excluded with reasons, whether it ran
+// baseline or guided, what the shadow arm did, and each guided method's outcome (net-new / duplicate /
+// refuted / nothing found) — the Experience written for a guided cluster names `method_id@vN`, and the
+// Portfolio row carries it as `method_ref`, so reflection can evolve or retire a method from production
+// evidence (Plan 2b).
+//
+// KILL SWITCH + OFF BY DEFAULT: declared in `.quay/config.yml` `loop.open_semantic_discovery:`. A// workspace with no such section gets `not-evaluated:disabled` and ZERO spawns. `enabled:false` is the
 // same. A malformed section — or a missing key, since EVERY key is required — records `failed` and spawns
 // nothing: a bad declaration must never be read as "no findings" (硬规则 3b).
 //
@@ -620,6 +636,9 @@ export function spawnModelCall(
 export const HYPOTHESIS_MODULE_FILE = "arch-hypothesis-generation.mjs";
 export const PORTFOLIO_MODULE_FILE = "discovery-portfolio.mjs";
 export const LEDGER_MODULE_FILE = "discovery-experience-ledger.mjs";
+/** The Discovery Method registry — the reader a round consults to decide whether a METHOD may guide it
+ *  (task gap-open-discovery-method-guidance-active-shadow). Loaded from disk like its siblings. */
+export const REGISTRY_MODULE_FILE = "discovery-method-registry.mjs";
 export const ANALYSIS_DIR_REL = path.posix.join("docs", "analysis");
 
 /** The repo this FILE lives in (…/plugin/scripts/<this> → repo root). Used only to BUILD a candidate
@@ -665,6 +684,30 @@ export interface PortfolioModule {
   ingestFinding: (root: string, input: Record<string, unknown>, opts?: Record<string, unknown>) => {
     ok: boolean; id?: string | null; appended?: boolean; reasons?: string[];
   };
+  /** The portfolio module's own TRUST judgment for a method record (status vocabulary + the
+   *  contaminated-verdict ledger). Reused, never re-derived — a second classifier here would be a second
+   *  definition of "may this method be applied" to keep in step (硬规则 5b). */
+  methodTrust: (rec: Record<string, unknown>, opts?: { contaminatedVerdictIds?: string[] | null }) => {
+    method_id: string | null;
+    version: number | null;
+    status: string | null;
+    verdict_ref: string | null;
+    contaminated: boolean;
+    contributes: boolean;
+    why: string;
+  };
+}
+
+/** The ledger's own deny-list value (`experienceDenyList`). Declared structurally so this file does not
+ *  reach through a type-position import of an out-of-artifact path. */
+export interface ExperienceDenyList {
+  ok: boolean;
+  evaluated: number;
+  components: string[];
+  case_ids: string[];
+  malformed_lines: number;
+  file: string | null;
+  reason?: string;
 }
 
 /** The narrow interface this file consumes from discovery-experience-ledger.mjs. `carrierFile` is the
@@ -678,11 +721,38 @@ export interface LedgerModule {
   ingestExperience: (root: string, args: Record<string, unknown>) => {
     ok: boolean; id?: string | null; appended?: boolean; reasons?: string[];
   };
+  /** The UNION deny-list over every registered Experience case (components' basenames + case_ids) — the
+   *  ledger module's own matcher, consumed here rather than re-implemented (硬规则 5b). The guidance text
+   *  a round would hand the model is scanned with it BEFORE the method is selected. */
+  experienceDenyList: (root: string, opts?: { scanText?: string }) => ExperienceDenyList;
+  scanExperienceLeak: (denyList: unknown, text: string) => { flagged: boolean; matches: { kind: string; value: string | null }[] };
+}
+
+/** The narrow interface this file consumes from discovery-method-registry.mjs. The registry owns the
+ *  version semantics (latest-per-`method_id`), the quarantine lineage walk and the guidance text; this
+ *  routine only applies the selection POLICY (which statuses may guide which arm). */
+export interface RegistryModule {
+  readMethodRegistry: (root: string, opts?: { history?: boolean }) => {
+    ok: boolean; latest: Record<string, unknown>[]; history: Record<string, unknown>[] | null;
+    malformed_lines: number; file: string | null; reason?: string;
+  };
+  activeMethods: (root: string) => {
+    ok: boolean; methods: Record<string, unknown>[]; trials: Record<string, unknown>[];
+    evaluated: number; malformed_lines: number; file: string | null;
+    excluded_contaminated: { method_id: string; version: number | null; verdict_ref: string | null; reason: string }[] | null;
+    contaminated_verdicts_evaluated: number | null; reason?: string;
+  };
+  quarantinedLineageOf: (rec: Record<string, unknown>, existing?: readonly Record<string, unknown>[]) => {
+    quarantined: boolean; versions: (number | null)[]; reasons: string[];
+  };
+  contaminatedVerdictIds: (root: string) => { ok: boolean; ids: string[]; reason?: string; file?: string | null };
+  methodGuidanceText: (rec: Record<string, unknown>) => string;
 }
 export interface OpenDiscoveryModules {
   hyp: HypothesisModule;
   portfolio: PortfolioModule;
   ledger: LedgerModule;
+  registry: RegistryModule;
 }
 
 const _engineModuleCache = new Map<string, unknown>();
@@ -725,10 +795,16 @@ export async function loadOpenDiscoveryModules(root: string): Promise<OpenDiscov
   const hyp = await load(HYPOTHESIS_MODULE_FILE);
   const portfolio = await load(PORTFOLIO_MODULE_FILE);
   const ledger = await load(LEDGER_MODULE_FILE);
-  if (unresolved.length > 0 || hyp === null || portfolio === null || ledger === null) {
+  const registry = await load(REGISTRY_MODULE_FILE);
+  if (unresolved.length > 0 || hyp === null || portfolio === null || ledger === null || registry === null) {
     throw new Error(`OPEN_DISCOVERY_MODULES_UNRESOLVED — ${unresolved.join("; ") || "one or more engine modules did not load"}`);
   }
-  return { hyp: hyp as HypothesisModule, portfolio: portfolio as PortfolioModule, ledger: ledger as LedgerModule };
+  return {
+    hyp: hyp as HypothesisModule,
+    portfolio: portfolio as PortfolioModule,
+    ledger: ledger as LedgerModule,
+    registry: registry as RegistryModule,
+  };
 }
 
 // ── prompts (the routine's OWN composition; the frozen engine prompts stay byte-identical) ───────────
@@ -751,6 +827,32 @@ export function focusDirective(priorFocuses: readonly string[]): string {
     "---",
     "",
   ].join("\n");
+}
+
+/** The OPTIONAL-GUIDANCE block a round appends when at least one Discovery Method is selected for that
+ *  arm. ⛔ The wording is load-bearing: a method is guidance for the MODEL, never a rule compiled into
+ *  the code, and never a boundary on what may be inspected (Plan: "a method is guidance text for the
+ *  model, never compiled into a rule"). It returns `""` when nothing was selected, so a baseline round's
+ *  prompt is byte-for-byte the prompt this routine produced before methods existed. */
+export function methodDirective(picks: readonly MethodIncluded[], texts: readonly string[]): string {
+  if (picks.length === 0) return "";
+  const blocks = picks.map((m, i) => `--- guidance ${i + 1}: ${methodLabel(m)} ---\n${texts[i] ?? ""}`);
+  return [
+    "OPTIONAL GUIDANCE — a Discovery Method recorded by an earlier round is quoted below. It is a way of",
+    "looking that you MAY use. It is NOT a rule, NOT a checklist, and NOT a boundary on what you may",
+    "inspect: you are free to explore anything in this tree and to disregard this guidance entirely.",
+    "",
+    ...blocks,
+    "",
+    "---",
+    "",
+  ].join("\n");
+}
+
+/** `method_id@vN` — the ONE spelling of a method reference, used by the prompt header, the carrier
+ *  record and the Experience attribution so the three can be compared by eye. */
+export function methodLabel(m: { method_id: string; version: number | null }): string {
+  return `${m.method_id}@${m.version === null ? "v?" : `v${m.version}`}`;
 }
 
 /** The REFUTATION prompt. Its ONLY input is the cluster's claim and components — it never sees the first
@@ -1141,7 +1243,13 @@ export function experienceRoleFor(cluster: Record<string, unknown>, disposition:
 
 /** The summary an Experience carries: the cluster's OWN words, composed. PURE. ⛔ Nothing is invented here
  *  — every piece comes off the carrier record or the model's own returned text, and a composed summary
- *  that is too thin is REFUSED by the ledger rather than padded (硬规则 3b). */
+ *  that is too thin is REFUSED by the ledger rather than padded (硬规则 3b).
+ *
+ *  ⛔ WHEN A DISCOVERY METHOD GUIDED THE ROUND, THE EXPERIENCE NAMES IT (Plan item 2b — closing the
+ *  loop): the last clause carries `guided by method <id>@v<n>`, read off the cluster record's own
+ *  `method_guidance`. That is what lets Discovery Method reflection attribute an outcome (net-new /
+ *  duplicate / refuted / nothing found) back to the method that steered the exploration, instead of the
+ *  method being an unaccountable hint. A baseline round's summary is unchanged, clause for clause. */
 export function experienceSummaryFor(cluster: Record<string, unknown>, novelty: NoveltyOutcome | null): string {
   const claim = typeof cluster.claim === "string" ? cluster.claim : "(no claim recorded)";
   const parts: string[] = [claim];
@@ -1153,6 +1261,8 @@ export function experienceSummaryFor(cluster: Record<string, unknown>, novelty: 
   }
   const ev = Array.isArray(cluster.evidence_lines) ? (cluster.evidence_lines as unknown[]).filter((x) => typeof x === "string") : [];
   if (ev.length > 0) parts.push(`evidence: ${(ev as string[]).join("; ")}`);
+  const guided = methodLabelsOf(cluster);
+  if (guided.length > 0) parts.push(`guided by method ${guided.join(",")}`);
   return parts.join(" — ");
 }
 
@@ -1237,12 +1347,17 @@ export function ingestRoundClusters(root: string, opts: {
     // `supported` — the two ledgers answer different questions and this is where that is enforced.
     if (verdict === "supported" && (disposition === "novel" || disposition === "duplicate")) {
       const claim = typeof cluster.claim === "string" ? cluster.claim : "";
+      // ⛔ The `method_ref` column the Portfolio already carries is what this closes: a finding produced
+      // by a GUIDED round names the method that guided it, so the coverage map's "which methods are
+      // actually producing findings" is answered by the data rather than by a comment. A baseline round
+      // still writes `null` — an unguided finding has no method to name, and `null` is not "unknown".
+      const guided = methodLabelsOf(cluster);
       const input: Record<string, unknown> = {
         finding_id: recordId,
         origin: "autonomous-routine",
         origin_ref: recordId,
         evidence_level: "production-open",
-        method_ref: null,
+        method_ref: guided.length > 0 ? guided.join(",") : null,
         claim,
         components: Array.isArray(cluster.components) ? cluster.components : [],
         outcome: "supported",
@@ -1269,8 +1384,223 @@ export function ingestRoundClusters(root: string, opts: {
   return writes;
 }
 
+// ── METHOD SELECTION: may a Discovery Method guide this round, and which arm ─────────────────────────
+//
+// (task gap-open-discovery-method-guidance-active-shadow, Plan items 1–3.)
+//
+// ⛔ A method NEVER gates whether the model may look and NEVER suppresses a round. Selection decides one
+//   thing only: WHICH model prompt an exploration gets, and whether its records are production or an
+//   isolated SHADOW arm. "No eligible method" ⇒ the round runs BASELINE (unguided), never "no round".
+//
+// The trust judgment is NOT re-derived here: `readMethodRegistry` owns "latest version per method_id",
+// `methodTrust` (the portfolio module) owns the status vocabulary + the contaminated-verdict ledger, and
+// `quarantinedLineageOf` (the registry) owns the QUARANTINE lineage walk. This function applies the
+// POLICY — active ⇒ production, draft/trial ⇒ shadow only, retired/quarantined/contaminated ⇒ never.
+
+export const METHOD_ARM_PRODUCTION = "production" as const;
+export const METHOD_ARM_SHADOW = "shadow" as const;
+export type MethodArm = "production" | "shadow";
+
+export interface MethodIncluded {
+  method_id: string;
+  version: number | null;
+  status: string;
+  arm: MethodArm;
+  /** The non-whitespace length of the guidance text handed over — the record reports the SIZE of what
+   *  was appended rather than the text itself (the carrier is not a prompt archive). */
+  guidance_chars: number;
+}
+export interface MethodExcluded {
+  method_id: string;
+  version: number | null;
+  status: string | null;
+  reasons: string[];
+}
+export interface MethodSelection {
+  /** ⛔ `false` is its OWN value: "the registry could not be read" is never shaped like "no method is
+   *  recorded" (硬规则 3b). The round still runs — baseline — and says why. */
+  ok: boolean;
+  mode: "guided" | "baseline";
+  baseline_reason: string | null;
+  included: MethodIncluded[];
+  excluded: MethodExcluded[];
+  evaluated: number;
+  unavailable_reason: string | null;
+  registry: {
+    file: string | null;
+    malformed_lines: number;
+    active_ids: string[];
+    active_evaluated: number | null;
+    excluded_contaminated: string[] | null;
+    contaminated_verdicts_evaluated: number | null;
+  };
+  production: MethodIncluded[];
+  shadow: MethodIncluded[];
+  /** The guidance blocks for the two arms (`""` when the arm is unguided). */
+  production_text: string;
+  shadow_text: string;
+}
+
+const asMethodId = (m: Record<string, unknown>): string => String(m.method_id ?? "<unnamed>");
+const asVersion = (m: Record<string, unknown>): number | null => (Number.isInteger(m.version) ? (m.version as number) : null);
+
+/** The registry's own reading, recorded alongside the decision so a reviewer can tell "the selection
+ *  refused this method" from "the registry's `activeMethods` never returned it". */
+function registryReadingBlock(
+  read: { file: string | null; malformed_lines: number },
+  active: ReturnType<RegistryModule["activeMethods"]>,
+): MethodSelection["registry"] {
+  return {
+    file: read.file,
+    malformed_lines: read.malformed_lines,
+    active_ids: active.ok ? active.methods.map(asMethodId).sort() : [],
+    active_evaluated: active.ok ? active.evaluated : null,
+    excluded_contaminated: active.ok && Array.isArray(active.excluded_contaminated)
+      ? active.excluded_contaminated.map((x) => String(x.method_id))
+      : null,
+    contaminated_verdicts_evaluated: active.ok ? active.contaminated_verdicts_evaluated : null,
+  };
+}
+
+/**
+ * Select this round's methods. PURE over the injected engine modules (one `git`/fs read each). Never
+ * throws: an unreadable registry, deny-list or contaminated-verdict list is its own reported value and
+ * the caller proceeds baseline — a mechanical read must never decide whether the model may look.
+ */
+export function selectMethodsForRound(root: string, modules: OpenDiscoveryModules): MethodSelection {
+  const read = modules.registry.readMethodRegistry(root, { history: true });
+  const active = modules.registry.activeMethods(root);
+  const registry = registryReadingBlock(read, active);
+  const unavailable = (reason: string): MethodSelection => ({
+    ok: false, mode: "baseline", baseline_reason: reason, included: [], excluded: [],
+    evaluated: read.latest.length, unavailable_reason: reason, registry,
+    production: [], shadow: [], production_text: "", shadow_text: "",
+  });
+  if (read.file === null) {
+    return unavailable(String(read.reason ?? "REGISTRY_UNRESOLVABLE:the-registry-file-could-not-be-resolved-so-no-method-can-be-read"));
+  }
+  // A partially-readable registry could hide a QUARANTINE line, so a readable subset is NOT selected
+  // from: the round runs baseline and RECORDS that the registry could not be trusted (硬规则 3b).
+  if (!read.ok) {
+    return unavailable(`REGISTRY_UNREADABLE:${read.malformed_lines}-unparseable-line(s)-in-${read.file}-so-no-method-is-selected-this-round`);
+  }
+  const history = Array.isArray(read.history) ? read.history : [];
+  const cont = modules.registry.contaminatedVerdictIds(root);
+  const contaminatedIds = cont.ok ? cont.ids : null;
+  const denied = modules.ledger.experienceDenyList(root);
+  const activeIds = new Set(registry.active_ids);
+
+  const included: MethodIncluded[] = [];
+  const excluded: MethodExcluded[] = [];
+  const texts = new Map<string, string>();
+
+  for (const rec of read.latest) {
+    const id = asMethodId(rec);
+    const version = asVersion(rec);
+    const status = typeof rec.status === "string" ? rec.status : null;
+    const reasons: string[] = [];
+    const trust = modules.portfolio.methodTrust(rec, { contaminatedVerdictIds: contaminatedIds });
+    if (!cont.ok) {
+      // The contaminated-verdict ledger is UNREADABLE ⇒ nothing can be cleared, so nothing is selected.
+      reasons.push(`CONTAMINATED_LIST_UNAVAILABLE:${String(cont.reason ?? "the-contaminated-verdict-ledger-could-not-be-read")}`);
+    } else {
+      // ⛔ THE QUARANTINE WALK RUNS FIRST, so a quarantined lineage is REPORTED even when the record is
+      // ALSO retired: the two refusals are independent facts and a reviewer must be able to see the
+      // quarantine rather than a bare "retired" that hides which of the two rules caught it. It also
+      // catches a draft/trial SUCCESSOR of a quarantined version, which no status check would.
+      const q = modules.registry.quarantinedLineageOf(rec, history);
+      if (q.quarantined) reasons.push(`QUARANTINED_LINEAGE:${id}-carries-a-QUARANTINE-retirement-reason-on-v${q.versions.join(",v")}`);
+      if (trust.contaminated) reasons.push(`CONTAMINATED_PROMOTION:${String(trust.verdict_ref)}-is-on-the-contaminated-verdict-ledger`);
+      if (trust.status === null) reasons.push(`STATUS_NOT_IN_VOCAB:${String(rec.status)}`);
+      else if (trust.why === "RETIRED") reasons.push(`RETIRED:${methodLabel({ method_id: id, version })}-is-retired-so-it-never-guides-a-round`);
+    }
+    let text = "";
+    if (reasons.length === 0) {
+      // Plan item 3: the text that WOULD be handed to the model is scanned with the ledger's own
+      // deny-list, so a method whose guidance names a registered seed component or case id is excluded
+      // (and says which value leaked) rather than steering the round.
+      text = modules.registry.methodGuidanceText(rec);
+      if (!denied.ok) {
+        reasons.push(`DENY_LIST_UNAVAILABLE:${denied.malformed_lines}-unparseable-line(s)-in-the-experience-ledger-so-the-guidance-text-cannot-be-scanned`);
+      } else {
+        const leak = modules.ledger.scanExperienceLeak(denied, text);
+        if (leak.flagged) reasons.push(`GUIDANCE_TEXT_NAMES_SEED:${leak.matches.map((m) => `${m.kind}:${String(m.value)}`).join(",")}`);
+      }
+    }
+    if (reasons.length === 0 && status !== null && status === "active" && !activeIds.has(id)) {
+      // Defence in depth: the status says "active" but the registry's own `activeMethods` reader did not
+      // return it. The two readers must agree before a method may steer PRODUCTION.
+      reasons.push(`ACTIVE_READER_DIVERGENCE:${id}-is-active-but-activeMethods()-did-not-return-it`);
+    }
+    if (reasons.length === 0 && status !== "active" && status !== "draft" && status !== "trial") {
+      reasons.push(`STATUS_NOT_SELECTABLE:${String(status)}`);
+    }
+    if (reasons.length > 0) {
+      excluded.push({ method_id: id, version, status, reasons });
+      continue;
+    }
+    const arm: MethodArm = status === "active" ? METHOD_ARM_PRODUCTION : METHOD_ARM_SHADOW;
+    included.push({ method_id: id, version, status: String(status), arm, guidance_chars: text.length });
+    texts.set(id, text);
+  }
+
+  const production = included.filter((m) => m.arm === METHOD_ARM_PRODUCTION);
+  const shadow = included.filter((m) => m.arm === METHOD_ARM_SHADOW);
+  const mode: MethodSelection["mode"] = production.length > 0 ? "guided" : "baseline";
+  const baseline_reason = mode === "guided"
+    ? null
+    : read.latest.length === 0
+      ? "no-method-recorded:the-registry-holds-0-record(s)-so-the-production-arm-runs-baseline"
+      : shadow.length > 0
+        ? `no-active-method:0-of-${read.latest.length}-record(s)-is-active(only ${shadow.length} draft/trial ⇒ shadow arm only),${excluded.length} excluded-so-the-production-arm-runs-baseline`
+        : `no-eligible-method:0-of-${read.latest.length}-record(s)-selected,${excluded.length} excluded-so-the-production-arm-runs-baseline`;
+  return {
+    ok: true, mode, baseline_reason, included, excluded, evaluated: read.latest.length,
+    unavailable_reason: null, registry, production, shadow,
+    production_text: methodDirective(production, production.map((m) => texts.get(m.method_id) ?? "")),
+    shadow_text: methodDirective(shadow, shadow.map((m) => texts.get(m.method_id) ?? "")),
+  };
+}
+
+/** The `method_guidance` block a cluster record carries: which arm produced it and which methods guided
+ *  it. `null` for a baseline production cluster — never an empty list, which would read as "guided by
+ *  nothing" (硬规则 3b). */
+export function methodGuidanceBlock(
+  picks: readonly MethodIncluded[],
+  arm: MethodArm,
+): { arm: MethodArm; methods: { method_id: string; version: number | null }[] } | null {
+  if (picks.length === 0) return null;
+  return { arm, methods: picks.map((m) => ({ method_id: m.method_id, version: m.version })) };
+}
+
+/** The `id@vN` labels of the methods a carrier cluster record names as its guidance. `[]` when the
+ *  record carries none — a baseline round, a shadow cluster, or a record written before methods existed.
+ *  Reading is deliberately STRUCTURAL (a field read, not a pattern). */
+export function methodLabelsOf(cluster: Record<string, unknown>): string[] {
+  const block = (cluster as Record<string, unknown>)?.method_guidance;
+  if (block === null || block === undefined || typeof block !== "object" || Array.isArray(block)) return [];
+  const methods = (block as Record<string, unknown>).methods;
+  if (!Array.isArray(methods)) return [];
+  const out: string[] = [];
+  for (const m of methods) {
+    if (m === null || typeof m !== "object" || Array.isArray(m)) continue;
+    const id = (m as Record<string, unknown>).method_id;
+    if (typeof id !== "string" || id === "") continue;
+    const v = (m as Record<string, unknown>).version;
+    out.push(methodLabel({ method_id: id, version: Number.isInteger(v) ? (v as number) : null }));
+  }
+  return out;
+}
+
+/** The record id of a SHADOW cluster: the round timestamp, a `shadow` segment and the index. The segment
+ *  is what keeps a shadow record from colliding with the production cluster of the same index — and what
+ *  makes "did anything from the shadow arm reach the Portfolio?" answerable by reading an id. */
+export function openShadowDiscoveryRecordId(roundTs: string, cluster: number): string {
+  return `${OPEN_DISCOVERY_REF_PREFIX}${roundTs}#shadow#${cluster}`;
+}
+
 // ── the round ────────────────────────────────────────────────────────────────────────────────────────
-export type ModelStepKind = "investigator" | "verifier" | "refuter" | "value-assessment" | "novelty-check";
+export type ModelStepKind = "investigator" | "verifier" | "refuter" | "value-assessment" | "novelty-check" | "shadow-investigator";
 
 export interface OpenSemanticDiscoveryRunOptions {
   config: OpenSemanticDiscoveryConfig | null;
@@ -1473,6 +1803,21 @@ export async function runOpenSemanticDiscovery(root: string, opts: OpenSemanticD
     hyp.hardenedArgv(launch, prompt, r, o as Record<string, unknown>);
   const breached = () => now() - started >= config.maxWallMs;
 
+  // ④b METHOD SELECTION — which Discovery Methods may guide this round, and in which arm. ⛔ This is a
+  //     READ plus a POLICY: it never decides whether the round runs (a selection failure is reported and
+  //     the round proceeds BASELINE), and no mechanical change here can suppress a semantic round.
+  const selection = selectMethodsForRound(root, modules);
+  const selectionBlock = {
+    mode: selection.mode,
+    baseline_reason: selection.baseline_reason,
+    ok: selection.ok,
+    unavailable_reason: selection.unavailable_reason,
+    evaluated: selection.evaluated,
+    included: selection.included,
+    excluded: selection.excluded,
+    registry: selection.registry,
+  };
+
   // ⑤ (a) pin the current develop tip into a STRIPPED tree, then build the inventory over the declared
   //    scope. BOTH are recorded; NEITHER is a gate. See step ⑥ for why.
   const rev = (opts.revFn ?? developTip)(root);
@@ -1602,9 +1947,11 @@ export async function runOpenSemanticDiscovery(root: string, opts: OpenSemanticD
       return fact("failed", { ...base, enabled: true, interval: intervalInfo, due: dueInfo }, `verifier prompt unreadable — ${(e as Error).message} (nothing appended, last-run not advanced)`);
     }
     // The FROZEN investigator prompt (the hypothesis-generation instruction). Its own file stays
-    // byte-identical — this routine PREPENDS a focus directive to it rather than editing it.
+    // byte-identical — this routine PREPENDS a focus directive to it rather than editing it. When a
+    // method was selected, its guidance block is prepended BETWEEN the focus directive and the frozen
+    // instruction: guidance first, instruction second, and the instruction never modified.
     const basePrompt = fs.readFileSync(hyp.defaultInvestigatorPrompt(), "utf8");
-    const prompt = `${focusDirective(focuses)}\n${basePrompt}\n\n${inventory.ok === true ? String(inventory.text ?? "") : ""}`;
+    const prompt = `${focusDirective(focuses)}\n${selection.production_text}${basePrompt}\n\n${inventory.ok === true ? String(inventory.text ?? "") : ""}`;
     const inv = await hyp.runInvestigator({
       prompt,
       // `neutralDir` is unused on the pinned path (the cwd gate switches to `verifyCwdRefusal`); it is
@@ -1635,6 +1982,7 @@ export async function runOpenSemanticDiscovery(root: string, opts: OpenSemanticD
       ran: true, runs: config.investigatorRuns, runs_with_hypotheses: Number(inv.parsed ?? 0),
       tools: INVESTIGATOR_TOOLS, max_turns: config.investigatorMaxTurns, cwd: asRel(root, pinned),
       stated_focus: statedFocus, prior_focuses: focuses,
+      guided_by: selection.production.map((m) => methodLabel(m)),
     };
     // (b, cont.) `clusterHypotheses` merges near-duplicates ACROSS the runs by component-set overlap. It
     // is dedup ASSISTANCE ONLY — nothing here discards a cluster by shape, and the cap below is a COUNT.
@@ -1693,6 +2041,10 @@ export async function runOpenSemanticDiscovery(root: string, opts: OpenSemanticD
         actual_model: row.actual_model ?? null,
         turns: row.turns_used ?? null,
         cost_usd: row.cost_usd ?? null,
+        // WHICH METHOD GUIDED THIS CLUSTER (null for a baseline round). It is the link the post-round
+        // ingestion turns into the Experience's own attribution, so "which method produced this outcome"
+        // is answerable from the record rather than reconstructed from the round's mode.
+        method_guidance: methodGuidanceBlock(selection.production, METHOD_ARM_PRODUCTION),
       };
       let refutation: Record<string, unknown> | null = null;
       if (row.verdict === "supported") {
@@ -1763,7 +2115,10 @@ export async function runOpenSemanticDiscovery(root: string, opts: OpenSemanticD
     //     belong ON the scan-round line, where a reviewer reads what the round found and what it decided.
     //     ⛔ The WRITES happen after the append (step ⑩b) — a Portfolio `origin_ref` must resolve against a
     //     carrier record that is really there.
-    const priorClusterRecords = carrierRounds.filter((r) => r.kind === "cluster" && r.invoked_by === INVOKED_BY_RESIDENT);
+    // A SHADOW cluster is never a prior production cluster: the mechanical dedup below compares against
+    // this routine's own earlier PRODUCTION records, and a draft method's unverified hypothesis must not
+    // make a production finding look like a repeat of something already seen.
+    const priorClusterRecords = carrierRounds.filter((r) => r.kind === "cluster" && r.invoked_by === INVOKED_BY_RESIDENT && r.shadow !== true);
     const noveltyOutcomes: NoveltyOutcome[] = [];
     const noveltyByCluster = new Map<number, NoveltyOutcome>();
     for (const c of clusterRecords) {
@@ -1830,6 +2185,87 @@ export async function runOpenSemanticDiscovery(root: string, opts: OpenSemanticD
       }
     }
 
+    // ⑨c THE SHADOW ARM (Plan item 1). A `draft`/`trial` method may NOT steer production, and it is not
+    //     silently dropped either: it guides ONE extra, ISOLATED exploration pass on the same pin, whose
+    //     records carry `shadow:true` and whose findings reach NEITHER the Portfolio NOR the Experience
+    //     ledger. It is an arm, not a gate: its own refusal is recorded and the production round keeps
+    //     what it did. ⛔ It reserves through the SAME `budget` object, so its calls count against the
+    //     same trailing-24h ledger as every other step (there is no second budget to hide in).
+    let shadowBlock: Record<string, unknown> = selection.shadow.length === 0
+      ? {
+        shadow: true, ran: false, methods: [], calls: 0, clusters: { total: 0, claims: [] },
+        reason: selection.ok === false
+          ? `not-run: the method registry could not be read (${selection.unavailable_reason})`
+          : "not-run: no draft/trial method is eligible",
+      }
+      : { shadow: true, ran: true, methods: selection.shadow, calls: 0, clusters: { total: 0, claims: [] }, reason: null };
+    let shadowClusters: Array<Record<string, unknown>> = [];
+    let shadowClusterRecords: Record<string, unknown>[] = [];
+    if (selection.shadow.length > 0) {
+      const shadowPrompt = `${focusDirective(focuses)}\n${selection.shadow_text}${basePrompt}\n\n${inventory.ok === true ? String(inventory.text ?? "") : ""}`;
+      let shadowCalls = 0;
+      const shadowInv = await hyp.runInvestigator({
+        prompt: shadowPrompt,
+        neutralDir: pinned,
+        cwd: pinned,
+        pinDir: pinned,
+        runs: config.investigatorRuns,
+        // A separate runs directory: the shadow pass must not overwrite the production pass's run files.
+        outDir: path.join(pinned, ".open-semantic-discovery-runs", "shadow"),
+        writeFile: (f: string, t: string) => { fs.mkdirSync(path.dirname(f), { recursive: true }); fs.writeFileSync(f, t, "utf8"); },
+        budget: { maxRuns: config.investigatorRuns, maxMs: config.maxWallMs },
+        model: requestedModel ?? "not-evaluated:model-unverified",
+        tools: INVESTIGATOR_TOOLS,
+        maxTurns: config.investigatorMaxTurns,
+        runModel: async (p: string) => {
+          const { res } = await reservingStep("shadow-investigator", { prompt: p, tools: INVESTIGATOR_TOOLS, maxTurns: config.investigatorMaxTurns, model: requestedModel });
+          shadowCalls++;
+          return res;
+        },
+      });
+      if (shadowInv.ok !== true) {
+        // RECORDED, not swallowed, and NOT fatal: an extra arm that could not run must not destroy the
+        // production round's semantic work (硬规则 3b is about not faking a pass — this reports a
+        // refusal in its own field, which is the opposite of faking one).
+        const reasons = Array.isArray(shadowInv.reasons) ? (shadowInv.reasons as string[]) : [];
+        shadowBlock = { ...shadowBlock, ran: false, calls: shadowCalls, reason: `refused:${reasons[0] ?? "no reason reported"}` };
+      } else {
+        const shadowRecords = Array.isArray(shadowInv.records) ? (shadowInv.records as Record<string, unknown>[]) : [];
+        shadowClusters = hyp.clusterHypotheses(shadowRecords, {});
+        shadowClusterRecords = shadowClusters.map((c, i) => {
+          const rep = (c.rep ?? {}) as Record<string, unknown>;
+          return {
+            kind: "cluster",
+            shadow: true,
+            routine: OPEN_SEMANTIC_DISCOVERY_NAME,
+            invoked_by: invokedBy,
+            ts: new Date(now()).toISOString(),
+            record_id: openShadowDiscoveryRecordId(roundTs, i + 1),
+            cluster: i + 1,
+            members: c.members ?? [],
+            concept_kind: rep.concept_kind ?? null,
+            claim: rep.claim ?? null,
+            components: Array.isArray(rep.components) ? rep.components : [],
+            // ⛔ NO verdict fields are invented: the shadow arm runs ONE investigator pass and never
+            // verifies, so `confirmed` is `false` by construction and the verdicts are `null`/`not-run`.
+            // A shadow cluster is a HYPOTHESIS the shadow method elicited — nothing more.
+            verifier_verdict: null,
+            refutation_verdict: "not-run",
+            confirmed: false,
+            shadow_arm: true,
+            method_guidance: methodGuidanceBlock(selection.shadow, METHOD_ARM_SHADOW),
+          };
+        });
+        shadowBlock = {
+          ...shadowBlock, calls: shadowCalls,
+          clusters: { total: shadowClusters.length, claims: shadowClusters.map((c) => (c.rep as Record<string, unknown>)?.claim ?? null) },
+        };
+      }
+    }
+    if (breached()) {
+      return fact("failed", { ...base, enabled: true, interval: intervalInfo, due: dueInfo, investigator: investigatorBlock }, `budget breach — wall ${now() - started}ms >= max_wall_ms ${config.maxWallMs} during the shadow arm (nothing appended, last-run not advanced)`);
+    }
+
     // ⑩ the round's ONE scan-round line + its per-cluster records, appended together.
     const wallMs = now() - started;
     const confirmedClusters = clusterRecords.filter((c) => c.confirmed === true);
@@ -1851,6 +2287,24 @@ export async function runOpenSemanticDiscovery(root: string, opts: OpenSemanticD
       // reported on the Fact (the line itself is already on disk by then; the append-only discipline is
       // what keeps a round from being rewritten after the fact).
       ingestion: { checked: noveltyOutcomes.length, outcomes: noveltyOutcomes },
+      // ── METHODS (Plan item 2): which methods were INCLUDED, which were EXCLUDED and why, whether the
+      // production arm ran baseline or guided, what the shadow arm did, and each guided method's outcome.
+      // ⛔ The guidance TEXT is not copied here: `guidance_chars` records its size, and the text itself
+      // lives in the prompt (the carrier is not a prompt archive).
+      methods: {
+        ...selectionBlock,
+        outcome: selection.production.map((m) => ({
+          method_id: m.method_id, version: m.version, arm: m.arm,
+          clusters: clusterRecords.length,
+          confirmed: confirmedClusters.length,
+          novel: noveltyOutcomes.filter((o) => o.disposition === "novel").length,
+          duplicate: noveltyOutcomes.filter((o) => o.disposition === "duplicate" || o.disposition === "restatement").length,
+          refuted: clusterRecords.filter((c) => c.verifier_verdict === "refuted" || c.refutation_verdict === "refuted").length,
+          undetermined: clusterRecords.filter((c) => c.verifier_verdict === "undetermined").length,
+          nothing_found: confirmedClusters.length === 0,
+        })),
+        shadow: shadowBlock,
+      },
       // ⛔ This block's PRESENCE is what tells the call-budget reader that this line's calls are already
       // counted ONE FOR ONE by the reservation ledger (so the legacy carrier term must skip it).
       reservations: {
@@ -1871,7 +2325,10 @@ export async function runOpenSemanticDiscovery(root: string, opts: OpenSemanticD
       tokens: { input: tokensIn, output: tokensOut },
       cost_usd: round6(costUsd),
     };
-    appendCarrierRecords(carrier, [round, ...clusterRecords]);
+    // The shadow arm's cluster records ride the SAME append as the production ones, each marked
+    // `shadow:true` — they are on the carrier (so a reviewer can read what the draft method elicited)
+    // and structurally OUTSIDE the ingestion below, which is fed `clusterRecords` alone.
+    appendCarrierRecords(carrier, [round, ...clusterRecords, ...shadowClusterRecords]);
 
     // ⑩b THE WRITES — carrier record → Experience → Portfolio. They run AFTER the append because a
     //     Portfolio row's `origin_ref` must resolve in a carrier record that is really there, and the
@@ -1904,6 +2361,16 @@ export async function runOpenSemanticDiscovery(root: string, opts: OpenSemanticD
       }]);
     }
     round.ingestion = { checked: noveltyOutcomes.length, outcomes: noveltyOutcomes, writes: ingestionWrites, error: ingestionError };
+    // Plan 2b — CLOSING THE LOOP: the per-method OUTCOME is filled here, after the writes, so each
+    // guided method's record names what its round actually produced (Experiences and Portfolio rows).
+    const methodOutcome = Array.isArray((round.methods as Record<string, unknown>)?.outcome)
+      ? ((round.methods as Record<string, unknown>).outcome as Record<string, unknown>[])
+      : [];
+    (round.methods as Record<string, unknown>).outcome = methodOutcome.map((o) => ({
+      ...o,
+      experiences: ingestionWrites.filter((w) => w.experience.written).length,
+      portfolio_rows: ingestionWrites.filter((w) => w.portfolio.written).length,
+    }));
 
     // ⑪ ⛔ THE SPLIT: only a RESIDENT round advances the production window, and only when nothing was cut
     //    short mid-round (a round that ran out of ceiling part-way must not consume the interval).
@@ -1917,10 +2384,16 @@ export async function runOpenSemanticDiscovery(root: string, opts: OpenSemanticD
     const ingestionNote = ingestionError !== null
       ? `; ⛔ INGESTION FAILED — ${ingestionError} (the scan-round and cluster records ARE persisted; the Experience/Portfolio writes are not)`
       : `; ingested ${ingestionWrites.length} cluster(s): ${ingestionWrites.filter((w) => w.experience.written).length} Experience(s), ${ingestionWrites.filter((w) => w.portfolio.written).length} Portfolio row(s)`;
+    const methodNote = selection.mode === "guided"
+      ? `; methods GUIDED by ${selection.production.map((m) => methodLabel(m)).join(",")}`
+      : `; methods BASELINE (${selection.baseline_reason})`;
+    const shadowNote = selection.shadow.length === 0
+      ? ""
+      : `; shadow arm ${shadowBlock.ran === true ? `ran ${Number(shadowBlock.calls ?? 0)} call(s) under ${selection.shadow.map((m) => methodLabel(m)).join(",")} (${shadowClusters.length} hypothesis cluster(s), NEVER ingested)` : `did not run (${String(shadowBlock.reason ?? "")})`}`;
     return fact(
       "verified",
       round,
-      `round ran (invoked_by:${invokedBy}, interval ${intervalMinutes}m): investigator read the pin with ${INVESTIGATOR_TOOLS} (focus: ${investigatorBlock.stated_focus ?? "<not stated>"}), ${clusters.length} cluster(s) from ${investigatorBlock.runs_with_hypotheses} run(s), ${verifiedRows.length} verified, ${confirmedClusters.length} CONFIRMED after independent refutation, ${budget.grantedCount} model call(s) costing $${round6(costUsd)}, wall ${wallMs}ms; appended 1 scan-round + ${clusterRecords.length} cluster record(s) to ${asRel(root, carrier)}${resident ? " and advanced the production last-run" : " — MANUAL: the production last-run was NOT advanced"}${ingestionNote}${revertedNote}${legacyNote}`,
+      `round ran (invoked_by:${invokedBy}, interval ${intervalMinutes}m): investigator read the pin with ${INVESTIGATOR_TOOLS} (focus: ${investigatorBlock.stated_focus ?? "<not stated>"}), ${clusters.length} cluster(s) from ${investigatorBlock.runs_with_hypotheses} run(s), ${verifiedRows.length} verified, ${confirmedClusters.length} CONFIRMED after independent refutation, ${budget.grantedCount} model call(s) costing $${round6(costUsd)}, wall ${wallMs}ms; appended 1 scan-round + ${clusterRecords.length} cluster record(s) to ${asRel(root, carrier)}${resident ? " and advanced the production last-run" : " — MANUAL: the production last-run was NOT advanced"}${ingestionNote}${methodNote}${shadowNote}${revertedNote}${legacyNote}`,
     );
   } catch (e) {
     if (isBudgetRefused(e)) {
@@ -1931,6 +2404,7 @@ export async function runOpenSemanticDiscovery(root: string, opts: OpenSemanticD
         kind: "scan-round", routine: OPEN_SEMANTIC_DISCOVERY_NAME, invoked_by: invokedBy, ts: new Date(now()).toISOString(),
         interval: intervalInfo, due: dueInfo, pin: { rev, dir: asRel(root, pinned) }, inventory: { ok: inventory.ok, entries: inventory.entries, unavailable: inventory.unavailable },
         investigator: investigatorBlock, reservations: { cap: config.maxModelCallsPer24h, used_at_start: callsUsage.total, granted: budget.grantedCount, refused: budget.refusedCount, mid_round_refusal: midRound, ledger: asRel(root, ledgerPath) },
+        methods: selectionBlock,
         budget_24h: countBudgetBlock, budget_usd_24h: usdBudgetBlock, wall_ms: now() - started, model_calls: budget.grantedCount, calls: callRecords,
         tokens: { input: tokensIn, output: tokensOut }, cost_usd: round6(costUsd),
       };
