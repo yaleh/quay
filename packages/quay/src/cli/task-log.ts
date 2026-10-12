@@ -479,7 +479,10 @@ function renderLogTable(doc: TaskLogDocument): string {
 export async function handleTaskLog(ctx: CliCtx): Promise<void> {
   const { flags, wantsJson } = ctx;
   const limit = resolveTaskLogLimit(flags.limit);
-  if (!limit.ok) {
+  // `ok === false` (NOT `!limit.ok`): the root tsconfig is strict:false, under which the negative
+  // branch of a boolean-discriminant union is NOT narrowed — a truthiness guard would leave `limit`
+  // as the full union and make `limit.reason` a TS2339 in the fan-in ts-typecheck gate.
+  if (limit.ok === false) {
     process.stderr.write(`quay task log: ${limit.reason}\n`);
     process.exitCode = 1;
     return;
@@ -494,7 +497,8 @@ export async function handleTaskLog(ctx: CliCtx): Promise<void> {
     until: stringFlag(flags.until),
     limit: limit.limit,
   });
-  if (!reading.ok) {
+  // `ok === false`, same strict:false reason as the `limit` guard above.
+  if (reading.ok === false) {
     process.stderr.write(`${reading.reason}\n`);
     process.exitCode = 1;
     return;

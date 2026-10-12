@@ -17,9 +17,12 @@
 //       BOTH rotations this repo can produce: a legacy v0-only carrier whose epoch is PRE_EPOCH and
 //       is rotated by the first v1 append, and a full carrier replaced under a new epoch.
 //   (c) COVERAGE IS ENUMERATED — `complete:false` names WHY. Three arms: a declared in-scope writer
-//       class that is not wired (the real registry today: cli + mcp), a lagging reconcile watermark,
-//       and — the falsifiability control — an all-wired registry over a current carrier, where
-//       `complete` DOES become true. Without that third arm `complete:false` would be a constant.
+//       class that is not wired — driven through the injectable `writerClasses` seam rather than the
+//       real registry, so the arm does not evaporate the moment the last in-scope gap closes (it
+//       did: gap-task-status-events-abi-writes-and-creation wired cli + mcp, leaving the real
+//       registry's `unwiredInScope` empty — see the real-registry arm below), a lagging reconcile
+//       watermark, and — the falsifiability control — an all-wired registry over a current carrier,
+//       where `complete` DOES become true. Without that arm `complete:false` would be a constant.
 //   (d) TRACE over a MIXED carrier — v0 + v1 + inferred for one task, ordered by carrier position
 //       (which equals `seq` order for v1 records) with `source` labelled per record.
 //   (e) UNKNOWN TASK — a DISTINCT not-found exit (3), never an empty success. Driven through the real
@@ -186,15 +189,39 @@ test("(b) a legacy v0-only carrier's PRE_EPOCH cursor rebases once the first v1 
 test("(c) complete:false names the UNWIRED in-scope writer classes and the carrier census", () => {
   const root = makeCarrierRoot("c1");
   writeV1(root, { taskId: "C-1", at: "2026-10-01T00:00:00.000Z" });
-  const doc = readOk(root, {});
-  assert.equal(doc.complete, false, "the real registry has in-scope classes that are not wired");
-  assert.deepEqual(doc.coverage.unwiredInScope.sort(), ["cli", "mcp"], "the unwired in-scope set is ENUMERATED, not a boolean");
+
+  // Arm 1 — an in-scope class left unwired is NAMED: its id in `unwiredInScope` AND its id + reason
+  // in `reasons`, never collapsed into a bare `complete:false`. Driven through the injectable seam
+  // (the registry is DATA — `readTaskLog({ writerClasses })`), so this arm tests the READER rather
+  // than whichever gaps happen to be open in the tree today. It must be the seam and not the real
+  // registry: the real registry's last in-scope gap CLOSED (cli + mcp, wired by
+  // gap-task-status-events-abi-writes-and-creation), and an arm pinned to it would have gone silent
+  // at exactly the moment it stopped being true — the failure mode it exists to prevent.
+  const withUnwired = TASK_STATUS_EVENT_WRITER_CLASSES.map((c) =>
+    c.id === "cli"
+      ? { ...c, wired: false, callSites: [], reason: "fixture: the cli door is left unwired for the naming arm" }
+      : c,
+  );
+  const doc = readOk(root, { writerClasses: withUnwired });
+  assert.equal(doc.complete, false, "an unwired in-scope class makes the page incomplete");
+  assert.deepEqual(doc.coverage.unwiredInScope, ["cli"], "the unwired in-scope set is ENUMERATED, not a boolean");
   assert.ok(
     doc.coverage.reasons.some((r) => r.includes('"cli"') && r.includes("IN SCOPE but not wired")),
     `the reason must NAME the class: ${JSON.stringify(doc.coverage.reasons)}`,
   );
   assert.equal(doc.coverage.carrier.v1, 1);
   assert.equal(doc.coverage.carrier.corrupt, 0);
+
+  // Arm 2 — the REAL registry over the same fixture. Every in-scope class is wired today, so
+  // `unwiredInScope` is [] as a READING of the declaration (not an omission — the declaration being
+  // honest about the tree is (h)'s check), and `complete:false` is driven by reconcile alone.
+  const real = readOk(root, {});
+  assert.deepEqual(real.coverage.unwiredInScope, [], "no in-scope writer class is unwired today");
+  assert.equal(real.complete, false, "still false — no reconcile pass has run against this fixture");
+  assert.ok(
+    real.coverage.reasons.some((r) => r.includes("reconcile is not current (not-run)")),
+    JSON.stringify(real.coverage.reasons),
+  );
 });
 
 test("(c) complete:false when reconcile LAGS, complete:true when every in-scope class is wired AND reconcile is current", () => {

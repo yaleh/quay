@@ -832,29 +832,28 @@ export interface TaskStatusEventWriterClass {
   reason?: string;
 }
 
-/** The five-in-scope/three-out-of-scope writer-class declaration — see the block comment above for
- *  why this is declared rather than measured, and `packages/quay/test/task-log.test.mjs` for the
- *  check that keeps it in sync with the actual call sites. */
+/** The writer-class declaration — an unwired IN-SCOPE class gates `complete`, an out-of-scope one is
+ *  enumerated for honesty. ⛔ No cardinality is stated here: a count in prose drifts the moment the
+ *  list changes (it already did — this read "five-in-scope/three-out-of-scope" against six and two),
+ *  and nothing checks it. See the block comment above for why this is declared rather than measured,
+ *  and `packages/quay/test/task-log.test.mjs` for the check that keeps it in sync with the actual
+ *  call sites. */
 export const TASK_STATUS_EVENT_WRITER_CLASSES: readonly TaskStatusEventWriterClass[] = [
   { id: "promotion-driver", wired: true, inScope: true, callSites: ["plugin/scripts/ready-pool-check.ts"] },
   { id: "driver-filters", wired: true, inScope: true, callSites: ["plugin/scripts/driver-filters.ts"] },
   { id: "fan-in", wired: true, inScope: true, callSites: ["plugin/scripts/worker-fan-in.ts"] },
   { id: "reconcile", wired: true, inScope: true, callSites: ["plugin/scripts/task-status-events-reconcile.ts"] },
-  {
-    id: "cli",
-    wired: false,
-    inScope: true,
-    callSites: [],
-    reason:
-      "the Core CLI's status writes (Provider ABI task_write / `task edit --status`) flip tasks/*.md without appending a carrier event",
-  },
-  {
-    id: "mcp",
-    wired: false,
-    inScope: true,
-    callSites: [],
-    reason: "the Core MCP server's task_write path does not append a carrier event",
-  },
+  // The Provider ABI's write path. BOTH front doors append through the SAME call site — the native
+  // store's `write()` emits after its commit — so the two ids name one implementation; which door a
+  // given write came through is carried per-event as `actor.kind` ("cli" / "mcp"), not as a separate
+  // writer. They are kept as two entries because the doors can regress independently: an unwired door
+  // makes every page that omits its writes incomplete, and pinning them separately keeps that reading
+  // per-door. Wired by `gap-task-status-events-abi-writes-and-creation` (which landed AFTER this
+  // registry was first written — until then these two were truthfully `wired: false`, "flip
+  // tasks/*.md without appending a carrier event"). The GitHub provider remains out of scope: it
+  // stores tasks as issues, so a remote flip has no local status line to observe (its own entry).
+  { id: "cli", wired: true, inScope: true, callSites: ["packages/quay-native/src/store.ts"] },
+  { id: "mcp", wired: true, inScope: true, callSites: ["packages/quay-native/src/store.ts"] },
   {
     id: "github-provider",
     wired: false,
