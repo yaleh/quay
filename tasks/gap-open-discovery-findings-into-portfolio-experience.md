@@ -2,7 +2,7 @@
 id: gap-open-discovery-findings-into-portfolio-experience
 title: "P1: open-discovery confirmed findings → novelty check → Experience +
   Portfolio (production-open), corrections via append-only fold"
-status: todo
+status: ready
 labels:
   - gap
   - discovery-method
