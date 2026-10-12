@@ -3,7 +3,7 @@ id: gap-discovery-carriers-ephemeral-in-worktree
 title: "Discovery Method: ledger/registry/attempt carriers die with the
   worktree; persist to shared checkout atomically, quarantine the invalidly
   promoted method"
-status: ready
+status: done
 labels:
   - gap
   - architecture-discovery
