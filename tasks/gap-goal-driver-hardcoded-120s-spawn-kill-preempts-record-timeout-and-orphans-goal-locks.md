@@ -97,3 +97,11 @@ That is **4 independent host projects, 104 SIGKILLs**.
 - packages/quay/test/goal-store.test.mjs
 - packages/quay/test/ff-merge.test.mjs
 - plugin/test/goal-driver-s01.test.mjs
+
+## Blocker
+
+**2026-10-12T17:14:52.685Z — worker 未落地（exited-not-landed）**
+
+- 未落地原因：step=suite: AssertionError [ERR_ASSERTION]: a timeout is a definitive verdict ⇒ evaluable ⇒ activation allowed:
+- run_id：wk-prod-anchor
+- session_id：769b3c4c-ccf7-4211-9d0a-204d0ca35e86
