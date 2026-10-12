@@ -3,7 +3,7 @@ id: gap-discovery-method-24h-budget-hard-reservation
 title: "discovery-method 24h model-call ceiling is soft: overshoot, failure
   under-count, no cross-process atomicity — make it a hard pre-spawn
   reservation"
-status: ready
+status: done
 labels:
   - gap
   - discovery-method
