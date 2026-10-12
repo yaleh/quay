@@ -34,7 +34,7 @@ import { expandDeclaredTouches } from "./concurrent-batch-scheduler.ts";
 // gap-develop-sync-reset-hard-destroys-third-party-project-tree：终局解可弃性判定复用【既有的】
 // 任务板/文档面清单（⛔ 不重写第二份——driver-filters.ts 自己的头注释即「不重写、只复用」）。
 import { DOC_SURFACES } from "./select-static-checks-for-touches.ts";
-import { TASK_STATUS } from "./task-status.ts";
+import { TASK_STATUS, TASK_STATUSES, isTaskStatus } from "./task-status.ts";
 
 // ── 谓词上下文 ───────────────────────────────────────────────────────────────────────────────────────
 
@@ -313,9 +313,51 @@ export function reconcileNeedsHumanWithDisk(state: RetryState, root: string): st
  *  失败落痕：机械 ff-only 失败 / 语义兜底结果都写到这里，让「同步失败」在记录上可区分（⛔ 静默）。 */
 export const DOC_DEVELOP_SYNC_EVENT_REL = ".quay/doc-develop-sync.jsonl";
 
-/** 任务状态确定性优先级（develop 权威 wins 的机械表达）：done > needs-human > ready > todo。
- *  分叉消解取更「前进」的一侧，永不交 LLM（AC2）。 */
-export const STATUS_PRIORITY: readonly string[] = ["todo", "ready", "needs-human", "done"];
+/** 终态（不可再前进一步的状态）：`done`（已落地，携带证据）/ `superseded`（被人裁定退役）。
+ *  ⚠️ 分区（live vs terminal）目前没有规范模块可复用——规范表 `TASK_STATUSES`（task-status.ts）
+ *  只给词汇表，不给分区。这里显式列出并登记进 AC3 的 sibling 审计（硬规则 5b），⛔ 不是又一份
+ *  随手抄的第四份词汇表：词取自 `TASK_STATUS`，且下面的 `assertStatusPriorityCoversVocabulary()`
+ *  会在分区漏词时【当场抛出】。 */
+export const TERMINAL_TASK_STATUSES: readonly string[] = [TASK_STATUS.DONE, TASK_STATUS.SUPERSEDED];
+
+/** 一个状态是否终态。`unknown:*` / null / 任意未知取值 ⇒ false（读不懂 ⇒ 不是终态，fail-closed）。 */
+export function isTerminalTaskStatus(status: string | null | undefined): boolean {
+  return typeof status === "string" && TERMINAL_TASK_STATUSES.includes(status);
+}
+
+/** 任务状态确定性优先级（develop 权威 wins 的机械表达）：live 序 `todo < ready < needs-human`，
+ *  其上是**终态**——`superseded` 高于一切 live 状态（终态永不输给 live：否则一次同步会把已退役
+ *  的任务【复活】成可派发），`done` 又高于 `superseded`（携带落地证据；终态×终态的 tie 由
+ *  `collectStatusAlignments` 显式落 event，⛔ 不静默）。
+ *  ⚠️ 词取自规范表 `TASK_STATUS`（task-status.ts），⛔ 不再是第四份字面量清单——这正是本任务
+ *  （gap-status-sync-priority-drops-superseded-…）修的缺陷：旧表只有 4 个词，`superseded` 被
+ *  `includes` 静默丢弃 ⇒ develop=superseded / doc=ready 消解成 ready。 */
+export const STATUS_PRIORITY: readonly string[] = [
+  TASK_STATUS.TODO,
+  TASK_STATUS.READY,
+  TASK_STATUS.NEEDS_HUMAN,
+  TASK_STATUS.SUPERSEDED,
+  TASK_STATUS.DONE,
+];
+
+/** 自检（模块加载即执行）：`STATUS_PRIORITY` 必须**恰好**覆盖规范词汇表 `TASK_STATUSES`。
+ *  为什么必须有它（硬规则 3b）：优先级表漏掉一个词时，`includes()` 会把该状态判成「读不懂」
+ *  而被静默旁路——「漏一个词」与「表完整」在旧实现里同形。规范表将来加第六个状态时，这里
+ *  当场抛出，而不是继续静默丢弃。 */
+export function assertStatusPriorityCoversVocabulary(): void {
+  const missing = TASK_STATUSES.filter((s) => !STATUS_PRIORITY.includes(s));
+  const extra = STATUS_PRIORITY.filter((s) => !(TASK_STATUSES as readonly string[]).includes(s));
+  if (missing.length > 0 || extra.length > 0) {
+    throw new Error(
+      `STATUS_PRIORITY drifted from TASK_STATUSES: missing=[${missing.join(",")}] extra=[${extra.join(",")}]`,
+    );
+  }
+}
+assertStatusPriorityCoversVocabulary();
+
+/** 「无法评估」的独立取值前缀（硬规则 3b）。与任何合法状态都不同形 ⇒ 消费方可区分
+ *  「已消解出胜者」与「输入读不懂」。 */
+export const UNKNOWN_STATUS_PREFIX = "unknown:";
 
 /** 追加一条 doc↔develop 同步事件（create dir/file as needed）。纯 I/O。 */
 export function writeDocDevelopSyncEvent(root: string, record: Record<string, unknown>): string {
@@ -325,12 +367,19 @@ export function writeDocDevelopSyncEvent(root: string, record: Record<string, un
   return file;
 }
 
-/** 确定性状态消解（AC2）：两状态分叉取优先级更高者（done>needs-human>ready>todo）。任一读不懂
- *  （非四态）⇒ 用另一侧；都读不懂 ⇒ null。纯函数，无 LLM、无 I/O。 */
+/** 确定性状态消解（AC2）：两状态分叉取优先级更高者（见 `STATUS_PRIORITY`）。纯函数，无 LLM、无 I/O。
+ *
+ *  三种结果，取值【不同形】（硬规则 3b —— 旧实现把「读不懂」也伪装成另一侧胜出）：
+ *    · 一个合法状态字符串       — 已消解出的胜者。
+ *    · `unknown:<value>[,<value>]` — 输入里有**不在词汇表里的字面量**（读不懂）⇒ 无法评估，
+ *      调用方必须跳过对齐并落痕，⛔ 不得让另一侧悄悄胜出（否则 "garbage vs ready" ⇒ ready）。
+ *    · `null`                   — 两侧都没有可读的状态（缺失 / 都是 null）：真「未查」。
+ *  一侧缺失、另一侧合法 ⇒ 返回合法侧（缺失不是一条与之冲突的主张，硬规则 6：缺值 = 未查）。 */
 export function resolveStatusPriority(a: string | null | undefined, b: string | null | undefined): string | null {
-  const candidates = [a, b].filter(
-    (s): s is string => typeof s === "string" && STATUS_PRIORITY.includes(s),
-  );
+  const values: Array<string | null | undefined> = [a, b];
+  const unreadable = values.filter((s): s is string => typeof s === "string" && !isTaskStatus(s));
+  if (unreadable.length > 0) return `${UNKNOWN_STATUS_PREFIX}${unreadable.join(",")}`;
+  const candidates = values.filter((s): s is string => typeof s === "string" && isTaskStatus(s));
   if (candidates.length === 0) return null;
   const byPriority = (x: string, y: string) => STATUS_PRIORITY.indexOf(y) - STATUS_PRIORITY.indexOf(x);
   return [...candidates].sort(byPriority)[0];
@@ -498,7 +547,22 @@ export function semanticSyncDocToDevelop(root: string, cur: string): boolean {
 
   // ② 分叉任务状态确定性对齐（AC2）：merge -X theirs 把冲突侧统一取 develop，可能丢掉 doc 侧更
   // 「前进」的状态（doc=done vs develop=ready）⇒ 合并前先记录优先级胜出者，合并后按它回写。
-  const alignments = collectStatusAlignments(root, cur);
+  const scan = collectStatusAlignments(root, cur);
+  // 两类不可静默的分叉（硬规则 3b）：终态×终态的 tie（done vs superseded 的显式取舍）与
+  // 「输入读不懂」的未评估项。都在合并【之前】落痕，让「跳过」与「已对齐」在载体上不同形。
+  for (const tie of scan.ties) {
+    writeDocDevelopSyncEvent(root, {
+      event: "doc-develop-sync-status-tie", phase: "pre-merge", branch: cur, rel: tie.rel,
+      develop: tie.develop, doc: tie.doc, resolved: tie.resolved, resolution: "prefer-done-landed-evidence",
+    });
+  }
+  for (const un of scan.notEvaluated) {
+    writeDocDevelopSyncEvent(root, {
+      event: "doc-develop-sync-status-not-evaluated", phase: "pre-merge", branch: cur, rel: un.rel,
+      develop: un.develop, doc: un.doc, resolved: un.resolved,
+      resolution: "skipped-unreadable-status",
+    });
+  }
 
   // ① merge develop（-X theirs = 冲突取 develop 侧，develop 权威 wins；⛔ 非静默 merge-fallback——
   // 这里不是「push 失败就吞掉」，而是显式升级语义兜底 + 落痕）。
@@ -517,7 +581,7 @@ export function semanticSyncDocToDevelop(root: string, cur: string): boolean {
   }
 
   // 回写优先级胜出的任务状态（仅当 doc 侧更前进时；否则 -X theirs 的 develop 侧已是正确值）。
-  if (!applyStatusAlignments(root, alignments)) {
+  if (!applyStatusAlignments(root, scan.alignments)) {
     writeDocDevelopSyncEvent(root, { event: "doc-develop-sync-semantic-align-failed", phase: "align", branch: cur });
     return false;
   }
@@ -532,19 +596,40 @@ export function semanticSyncDocToDevelop(root: string, cur: string): boolean {
   return true;
 }
 
+/** 分叉状态扫描的三类结果（⛔ 不同形，硬规则 3b：消费方能区分「已消解」/「终态 tie」/「读不懂」）。 */
+export interface StatusAlignmentScan {
+  /** 只在【doc 侧胜出】时记 { rel → winner }（合并后回写用）；develop 侧胜出由 -X theirs 已保证。 */
+  alignments: Map<string, string>;
+  /** 终态×终态且不同的分叉（`done` vs `superseded`）：按 `STATUS_PRIORITY` 取 `done`，但**记录**。 */
+  ties: Array<{ rel: string; develop: string; doc: string; resolved: string }>;
+  /** 至少一侧是**词汇表外**的字面量 ⇒ 无法评估：跳过对齐，⛔ 不让另一侧胜出（落痕由调用方）。 */
+  notEvaluated: Array<{ rel: string; develop: string | null; doc: string | null; resolved: string }>;
+}
+
 /** 收集分叉任务状态对齐：对每个 tasks/*.md，读 develop 与 cur 的 status，若分叉且优先级胜者是 doc 侧
- *  （即 cur 侧比 develop 更前进）⇒ 记录 { rel → 胜者 status }（合并后回写用）。纯读取，无 LLM。 */
-function collectStatusAlignments(root: string, cur: string): Map<string, string> {
-  const out = new Map<string, string>();
+ *  （即 cur 侧比 develop 更前进）⇒ 记录 { rel → 胜者 status }（合并后回写用）。纯读取，无 LLM、无 I/O。
+ *  直接导出以便单测（AC2）——CLAUDE.md：要紧的分支密集决策函数都有直接 import 单测。 */
+export function collectStatusAlignments(root: string, cur: string): StatusAlignmentScan {
+  const scan: StatusAlignmentScan = { alignments: new Map<string, string>(), ties: [], notEvaluated: [] };
   for (const rel of listTaskFiles(root, cur)) {
     const developStatus = statusAtRef(root, "develop", rel);
     const curStatus = statusAtRef(root, cur, rel);
     if (developStatus === curStatus) continue;
     const resolved = resolveStatusPriority(developStatus, curStatus);
+    // 读不懂（词汇表外字面量 / 两侧皆缺）⇒ 未评估：⛔ 旧实现会在此让另一侧胜出（"garbage" vs "ready"
+    // ⇒ ready），把「无法评估」伪装成「已消解」——硬规则 3b。
+    if (resolved === null || resolved.startsWith(UNKNOWN_STATUS_PREFIX)) {
+      scan.notEvaluated.push({ rel, develop: developStatus, doc: curStatus, resolved: resolved ?? "<none-readable>" });
+      continue;
+    }
+    // 终态×终态（done vs superseded）：显式取舍（done 携带落地证据）⇒ 记录下来，⛔ 不静默。
+    if (isTerminalTaskStatus(developStatus) && isTerminalTaskStatus(curStatus)) {
+      scan.ties.push({ rel, develop: developStatus, doc: curStatus, resolved });
+    }
     // 只回写「doc 侧更前进」的情形（resolved ≠ develop 侧）；develop 侧更前进由 -X theirs 已保证。
-    if (resolved !== null && resolved !== developStatus) out.set(rel, resolved);
+    if (resolved !== developStatus) scan.alignments.set(rel, resolved);
   }
-  return out;
+  return scan;
 }
 
 /** 列出 cur 分支 tasks/ 下的任务文件相对路径（`git ls-tree`）。读失败 ⇒ 空表（fail-open：对齐是

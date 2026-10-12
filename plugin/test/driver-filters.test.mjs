@@ -41,7 +41,15 @@ import {
   // gap-task-status-events-contract-v1 AC(d): the second status writer this file owns (the
   // develop↔doc determinism alignment) is reached through this exported entry.
   semanticSyncDocToDevelop,
+  // gap-status-sync-priority-drops-superseded-resurrects-or-loses-retired-tasks: the status-divergence
+  // scanner + its three distinguishable result kinds (aligned / terminal-tie / not-evaluated).
+  collectStatusAlignments,
+  UNKNOWN_STATUS_PREFIX,
+  TERMINAL_TASK_STATUSES,
+  isTerminalTaskStatus,
+  assertStatusPriorityCoversVocabulary,
 } from "../scripts/driver-filters.ts";
+import { TASK_STATUSES } from "../scripts/task-status.ts";
 import { readTaskStatus as workerReadTaskStatus } from "../scripts/worker-driver.ts";
 // gap-superseded-dependency-blocks-dispatch-forever AC7: the relation-edge judgment that lives in
 // ready-pool-check (parent edge + depends_on edge share ONE reading) — imported here so the NOVEL
@@ -633,20 +641,152 @@ test("AC2 (负控制) — 无 exited-not-landed 记录 ⇒ 不追加「失败步
 
 // ── doc↔develop 同步（gap-doc-develop-sync-semantic-conflict-resolution）──────────────────────────
 
-test("AC2 — resolveStatusPriority: 分叉状态取确定性优先级 done>needs-human>ready>todo（无 LLM）", () => {
+test("AC2 — resolveStatusPriority: 分叉状态取确定性优先级，live 序 todo<ready<needs-human（无 LLM）", () => {
   assert.equal(resolveStatusPriority("done", "todo"), "done", "develop done / doc todo → done");
   assert.equal(resolveStatusPriority("todo", "done"), "done", "doc done / develop todo → done（对称，取更前进）");
   assert.equal(resolveStatusPriority("ready", "needs-human"), "needs-human", "needs-human > ready");
   assert.equal(resolveStatusPriority("todo", "ready"), "ready", "ready > todo");
   assert.equal(resolveStatusPriority("done", "needs-human"), "done", "done > needs-human");
-  assert.equal(resolveStatusPriority(null, "done"), "done", "一侧读不懂 ⇒ 用另一侧");
-  assert.equal(resolveStatusPriority("garbage", "todo"), "todo", "非四态 ⇒ 忽略");
-  assert.equal(resolveStatusPriority(null, "garbage"), null, "都读不懂 ⇒ null");
+  assert.equal(resolveStatusPriority(null, "done"), "done", "一侧缺失 ⇒ 用另一侧（缺失不是冲突主张）");
+  assert.equal(resolveStatusPriority(null, null), null, "两侧皆缺 ⇒ 真「未查」");
 });
 
-test("AC2 — resolveStatusPriority 是确定性纯函数 + STATUS_PRIORITY 序固定", () => {
-  assert.equal(STATUS_PRIORITY.join(","), "todo,ready,needs-human,done", "优先级序固定（done 最高）");
-  assert.equal(resolveStatusPriority("ready", "todo"), resolveStatusPriority("ready", "todo"), "deterministic");
+// ── gap-status-sync-priority-drops-superseded-resurrects-or-loses-retired-tasks ────────────────────
+// 缺陷：STATUS_PRIORITY 只有 4 个词，`superseded` 不在其中 ⇒ resolveStatusPriority 用 includes 把
+// 它当「读不懂」【静默丢弃】⇒ (superseded, ready) => ready：develop 已退役的任务被复活成可派发。
+
+test("AC1 — superseded（终态）永不输给任一 live 状态；done vs superseded 取 done", () => {
+  for (const live of ["todo", "ready", "needs-human"]) {
+    assert.equal(resolveStatusPriority("superseded", live), "superseded", `(superseded, ${live}) → superseded`);
+    assert.equal(resolveStatusPriority(live, "superseded"), "superseded", `(${live}, superseded) → superseded`);
+  }
+  assert.equal(resolveStatusPriority("superseded", "done"), "done", "AC1: (superseded, done) ⇒ 文档化选择 done");
+  assert.equal(resolveStatusPriority("done", "superseded"), "done", "AC1: (done, superseded) ⇒ done（对称）");
+  assert.equal(resolveStatusPriority("superseded", null), "superseded", "AC1: 一侧缺失不影响终态胜出");
+  assert.equal(resolveStatusPriority(undefined, "superseded"), "superseded", "AC1: undefined（Map 缺失形态）同理");
+});
+
+test("AC1 — 词汇表外字面量 ⇒ unknown/not-evaluated，⛔ 不伪装成另一侧胜出（硬规则 3b）", () => {
+  const bogus = resolveStatusPriority("bogus", "ready");
+  assert.notEqual(bogus, "ready", "AC1: 读不懂的字面量不得让另一侧胜出（旧实现 ⇒ ready，即本缺陷）");
+  assert.equal(bogus, `${UNKNOWN_STATUS_PREFIX}bogus`, "AC1: 该值可区分（unknown:<value> 前缀）");
+  assert.equal(resolveStatusPriority("ready", "bogus"), `${UNKNOWN_STATUS_PREFIX}bogus`, "AC1: 对称");
+  assert.equal(resolveStatusPriority("bogus", null), `${UNKNOWN_STATUS_PREFIX}bogus`, "AC1: 一侧缺失一侧读不懂 ⇒ 读不懂");
+  assert.ok(
+    !STATUS_PRIORITY.includes(bogus.slice(UNKNOWN_STATUS_PREFIX.length)),
+    "AC1: unknown 值不是任何合法状态（与「已消解」不同形）",
+  );
+  assert.equal(
+    resolveStatusPriority("a", "b"),
+    `${UNKNOWN_STATUS_PREFIX}a,b`,
+    "AC1: 两侧都读不懂时两个值都进读数（可归因，⛔ 不二选一静默）",
+  );
+});
+
+test("AC1 (负控制) — 恢复旧的四元素表 ⇒ superseded 被静默丢弃 ⇒ 红", () => {
+  // 复刻旧实现的判定核（STATUS_PRIORITY 不含 superseded），断言缺陷确实存在 ⇒ 证明上面的绿
+  // 是由「表包含 superseded」挣来的，而不是恒真。
+  const OLD = ["todo", "ready", "needs-human", "done"];
+  const oldResolve = (a, b) => {
+    const c = [a, b].filter((s) => typeof s === "string" && OLD.includes(s));
+    if (c.length === 0) return null;
+    const byP = (x, y) => OLD.indexOf(y) - OLD.indexOf(x);
+    return [...c].sort(byP)[0];
+  };
+  assert.equal(oldResolve("superseded", "ready"), "ready", "AC1 负控制: 旧 4 元素表 ⇒ ready（复活）");
+  assert.equal(oldResolve("superseded", null), null, "AC1 负控制: 旧表下 (superseded, null) ⇒ null（丢失）");
+  assert.notEqual(resolveStatusPriority("superseded", "ready"), "ready", "AC1: 新表修复了负控制里的复活");
+});
+
+test("AC1/AC3 — STATUS_PRIORITY 的词取自规范表 TASK_STATUSES（⛔ 第四份字面量清单）+ 完整性自检", () => {
+  assert.deepEqual(
+    [...STATUS_PRIORITY].sort(),
+    [...TASK_STATUSES].sort(),
+    "AC3: 优先级表恰好覆盖规范词汇表（漏一词 ⇒ 该状态被静默丢弃，正是本缺陷）",
+  );
+  assert.equal(STATUS_PRIORITY.join(","), "todo,ready,needs-human,superseded,done", "AC1: 序固定（live 序 + 终态 superseded < done）");
+  assert.deepEqual([...TERMINAL_TASK_STATUSES].sort(), ["done", "superseded"], "AC1: 终态分区 = done/superseded");
+  assert.equal(isTerminalTaskStatus("done"), true);
+  assert.equal(isTerminalTaskStatus("superseded"), true);
+  assert.equal(isTerminalTaskStatus("ready"), false);
+  assert.equal(isTerminalTaskStatus(`${UNKNOWN_STATUS_PREFIX}x`), false, "AC1: 读不懂的值不是终态（fail-closed）");
+  // 自检是【可抛出的判据】而非注释：它必须在表完整时静默返回。
+  assert.doesNotThrow(() => assertStatusPriorityCoversVocabulary(), "AC3: 完整表 ⇒ 自检静默通过");
+});
+
+/** 建一个「develop 有 statusD / author 有 statusA」的分叉仓库（两分支对同一 task 文件写下不同 status）。 */
+function makeStatusDivergenceRoot(tag, statusDevelop, statusAuthor) {
+  const root = makeGitRoot(tag);
+  writeTask(root, "gap-x", "---\nid: gap-x\nstatus: todo\n---");
+  git(root, "add", "--", "tasks/gap-x.md");
+  git(root, "commit", "-q", "-m", "baseline");
+  git(root, "branch", "develop");
+  git(root, "checkout", "-q", "-b", DOC_BRANCH);
+  git(root, "checkout", "-q", "develop");
+  writeTask(root, "gap-x", `---\nid: gap-x\nstatus: ${statusDevelop}\n---`);
+  git(root, "add", "--", "tasks/gap-x.md");
+  git(root, "commit", "-q", "-m", `develop: gap-x ${statusDevelop}`);
+  git(root, "checkout", "-q", DOC_BRANCH);
+  writeTask(root, "gap-x", `---\nid: gap-x\nstatus: ${statusAuthor}\n---`);
+  git(root, "add", "--", "tasks/gap-x.md");
+  git(root, "commit", "-q", "-m", `doc: gap-x ${statusAuthor}`);
+  return root;
+}
+
+test("AC2 — develop=superseded / author=ready ⇒ 无对齐写 ready（⛔ 不得复活已退役任务）", (t) => {
+  const root = makeStatusDivergenceRoot("scan-super-win", "superseded", "ready");
+  t.after(() => fs.rmSync(root, { recursive: true, force: true }));
+  const scan = collectStatusAlignments(root, DOC_BRANCH);
+  assert.equal(scan.alignments.has("tasks/gap-x.md"), false, "AC2: 不得产生把 develop 的 superseded 改成 ready 的对齐");
+  assert.equal(scan.alignments.get("tasks/gap-x.md"), undefined, "AC2: 无 winner=ready");
+  assert.equal(scan.notEvaluated.length, 0, "AC2: superseded 是合法状态 ⇒ 非「未评估」");
+});
+
+test("AC2 — develop=ready / author=superseded ⇒ 对齐写 superseded（⛔ 不得丢失退役）", (t) => {
+  const root = makeStatusDivergenceRoot("scan-super-lose", "ready", "superseded");
+  t.after(() => fs.rmSync(root, { recursive: true, force: true }));
+  const scan = collectStatusAlignments(root, DOC_BRANCH);
+  assert.equal(scan.alignments.get("tasks/gap-x.md"), "superseded", "AC2: doc 侧退役胜出并被回写");
+});
+
+test("AC2 — 终态 tie（done vs superseded）被记录（⛔ 不静默），且 develop=superseded/author=done 取 done", (t) => {
+  const root = makeStatusDivergenceRoot("scan-tie", "superseded", "done");
+  t.after(() => fs.rmSync(root, { recursive: true, force: true }));
+  const scan = collectStatusAlignments(root, DOC_BRANCH);
+  assert.equal(scan.ties.length, 1, "AC2: 终态×终态 ⇒ 一条 tie 记录");
+  assert.deepEqual(
+    { rel: scan.ties[0].rel, develop: scan.ties[0].develop, doc: scan.ties[0].doc, resolved: scan.ties[0].resolved },
+    { rel: "tasks/gap-x.md", develop: "superseded", doc: "done", resolved: "done" },
+    "AC2: tie 显式取 done（携带落地证据）",
+  );
+  // 端到端：tie 落进 doc-develop-sync 事件载体（语义同步路径）。
+  const ok = semanticSyncDocToDevelop(root, DOC_BRANCH);
+  assert.equal(ok, true, "AC2: 语义同步成功");
+  const events = fs.readFileSync(path.join(root, DOC_DEVELOP_SYNC_EVENT_REL), "utf8")
+    .trim().split("\n").map((l) => JSON.parse(l));
+  assert.ok(
+    events.some((e) => e.event === "doc-develop-sync-status-tie" && e.resolved === "done"),
+    "AC2: tie 在 sync 事件里可见（⛔ 静默）",
+  );
+  assert.match(git(root, "show", `develop:tasks/gap-x.md`), /^status: done$/m, "AC2: 同步后 develop 看到 done");
+});
+
+test("AC2 — 读不懂的状态 ⇒ notEvaluated（跳过对齐 + 落痕），⛔ 不让另一侧胜出", (t) => {
+  const root = makeStatusDivergenceRoot("scan-unknown", "bogus", "ready");
+  t.after(() => fs.rmSync(root, { recursive: true, force: true }));
+  const scan = collectStatusAlignments(root, DOC_BRANCH);
+  assert.equal(scan.alignments.size, 0, "AC2: 无法评估 ⇒ 不产生对齐（旧实现会写 ready）");
+  assert.equal(scan.notEvaluated.length, 1, "AC2: 未评估项被枚举（零计数可区分）");
+  assert.equal(scan.notEvaluated[0].resolved, `${UNKNOWN_STATUS_PREFIX}bogus`, "AC2: 未评估读数带 unknown:<value>");
+  const ok = semanticSyncDocToDevelop(root, DOC_BRANCH);
+  assert.equal(ok, true, "AC2: 未评估不阻塞同步本身");
+  const events = fs.readFileSync(path.join(root, DOC_DEVELOP_SYNC_EVENT_REL), "utf8")
+    .trim().split("\n").map((l) => JSON.parse(l));
+  assert.ok(
+    events.some((e) => e.event === "doc-develop-sync-status-not-evaluated"),
+    "AC2: 未评估项落痕（⛔ 与「已对齐」不同形）",
+  );
+  assert.doesNotMatch(git(root, "show", `develop:tasks/gap-x.md`), /^status: ready$/m, "AC2: develop 未被改成 ready");
 });
 
 test("AC1 — propagateDocBranchToDevelop 返回 boolean（ff-only 成功 ⇒ true，⛔ 非 void）", (t) => {
