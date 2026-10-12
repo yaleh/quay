@@ -460,6 +460,12 @@ export interface MechanicalFanInOptions {
   rerunCommand?: string[];
   /** 重跑子进程的墙钟上限（测试缝）；缺省 RERUN_TIMEOUT_MS。⛔ 被中止 ⇒ rerun-not-evaluated（不放行）。 */
   rerunTimeoutMs?: number;
+  /** 既存红 A/B 的基线树临时 worktree 路径（测试缝）；缺省 = `<dirname(worktree)>/.baseline-red-<task>-<runId>`。 */
+  baselineWorktree?: string;
+  /** 基线树 provisioning 命令（测试缝）。`undefined` ⇒ 缺省（`bash <kernel>/dispatch-worktree-setup.sh <baselineDir> --root <root>`）；
+   *  `null` ⇒ **跳过**（hermetic 夹具的基线树自带 `scripts/test.sh`，不需 node_modules symlink/config 拷贝）；
+   *  显式数组 ⇒ 用它。⛔ best-effort：provisioning 失败不致命（随后的重跑跑不起来 ⇒ 未评估 ⇒ 维持硬红）。 */
+  baselineProvisionCommand?: string[] | null;
 }
 
 /** 机械 fan-in 单步失败的【结构化 verdict】（D6）：⛔ 不再是 `(stderr||stdout).trim()` 裸流。
@@ -541,6 +547,20 @@ export interface MechanicalFanInResult {
   failedTestFiles: FailedTestFilesReading | null;
   /** 本轮内重跑读数；`null` = suite 从未红（不适用）。suite 红 ⇒ 恒非 null（三态必有其一）。 */
   rerun: RerunReading | null;
+  /** 既存红等价 A/B 读数（gap-fanin-suite-gate-no-baseline-equivalent-exception）。`null` = 本轮没有
+   *  进 A/B（suite 绿 / 重跑转绿 / 在 A/B 之前就返回了）——**不适用**，⛔ 不是「未评估」（未评估在
+   *  `verdict.kind === "not-evaluated"` 上）。 */
+  baselineEquivalence?: BaselineEquivalenceReading | null;
+}
+
+/** 既存红 A/B 的读数（落进 `mechanical_fan_in.baselineEquivalence`）。 */
+export interface BaselineEquivalenceReading {
+  /** 等价判定（三态）。 */
+  verdict: BaselineEquivalenceVerdict;
+  /** 基线树（detached worktree @ mergeTarget）路径；未起 / 已清理 ⇒ null。 */
+  baselineWorktree: string | null;
+  /** 基线重跑输出落盘 basename（`.quay/` 下）；未跑 / 写失败 ⇒ null。 */
+  log: string | null;
 }
 
 /** runAsync 的结果收窄为「成/败 + 输出」，机械 fan-in 各步骤的共用判定（⛔ 不各写一遍 status!==0）。 */
@@ -914,6 +934,280 @@ export function readFailedTestFiles(logText: string, root?: string | null): Fail
     evaluated: false,
     reason: parsed.failingLines === 0 ? "no-failing-lines-in-suite-log" : "failing-lines-unattributable-to-files",
   };
+}
+
+// ── 既存红等价豁免（gap-fanin-suite-gate-no-baseline-equivalent-exception）───────────────────────────
+//
+// 病根（quay-fleet 三任务循环死锁，2026-10-12 登记）：fan-in 的 suite 步只有两种结局——全绿 / 红。
+// 没有第三档「这个红点集合与 develop 基线逐字相同 ⇒ 既存红、不是本次引入、允许继续」。三个任务各自
+// 完整修好三个既存红之一、各自独立验证零回归，却都因为另外两个红仍在而全量退出码非 0 ⇒ 互为落地门槛：
+// 谁先合都被另外两个挡住（把多个任务的分支合进同一工作树去「一次做完」会被 anti-drift 判成
+// out-of-declared，且把未验收的工作不透明地送进 develop）。
+//
+// 本机制（只加一档出口，不改任何既存判据）：suite 红时，起一棵 **detached worktree @ mergeTarget**，
+// 对它重跑**同一批失败测试文件**（既有 `loop.rerun_command` 模板，`{worktree}` 换成基线树），把两边
+// 的【失败签名集合】逐字比对：
+//   task 红点集合 ⊆ baseline 红点集合（逐字）  ⇒ 既存红等价 ⇒ 放行（继续 typecheck/ff 等后续步骤）；
+//   任何 task 独有 / 断言文本变化的红点          ⇒ 硬红（⛔ 不打折：对【新增】红的容忍度一字不改）。
+//
+// ⛔ 硬边界（三点都与 Proposal 的「明确非目标」一致）：
+//   ① 「不变差」不是「打折」——豁免只允许本次 fan-in 在既存红集合不变的前提下继续推进；它不清空、
+//      不减少对新增红的任何容忍度。
+//   ② 读不懂 / A/B 自身失败 / 基线跑不起来 ⇒ **not-evaluated**，维持改动前的硬红（fail-closed）。
+//      ⇒ 本机制最坏情况逐字等于改动前的行为，不存在「误放行」通道。
+//   ③ ⛔ 不复用 `isOuterVerificationItem` / `isBodyLanded`（那是 AC-completion 语义的出口）——本档是
+//      suite-gate 本身的出口，两者必须分开，读 `isOuterVerificationItem` 的下游逻辑不得读到它。
+
+/** 一条失败签名：`file`（失败测试文件的 repo-relative 身份）+ `text`（该红点**逐字**的断言文本）。
+ *  ⛔ 两棵树（task 合并树 / develop 基线树）都用本解析器 ⇒ 「逐字相同」是可判定的：绝对路径按各自
+ *  root 归一成 repo-relative，断言文本原样（⛔ 不折易变量——Proposal 的判据就是「逐字」；折了会把
+ *  「文本变了」这一负控情形并回「同一个」，正是 AC3 要拦的）。 */
+export interface FailureSignature {
+  file: string;
+  text: string;
+}
+
+/** 失败签名解析三态（硬规则 3b）：`evaluated:false` = 未评估，成因在 reason 里，⛔ 不与「评估过且
+ *  没有失败签名」同形（后者是 evaluated:true + 空数组，只在语义上不可能于红 suite 出现）。 */
+export type FailureSignatureParse =
+  | { evaluated: true; signatures: FailureSignature[] }
+  | { evaluated: false; reason: string };
+
+const SIG_PERFILE_RE = /^__PERFILE__\s+duration_ms=[0-9.]+\s+(\S+)\s+passed=false\b/;
+const SIG_NOT_OK_RE = /^not ok\b(?:\s+\d+)?\s*-\s*(.*)$/i;
+const SIG_ASSERTION_RE = /AssertionError(?:\s*\[[^\]]*\])?:\s*(.+)$/;
+/** 断言文本的有界前瞻行数（`__PERFILE__ passed=false` 之后紧跟 TAP 明细块）。 */
+const SIG_ASSERTION_LOOKAHEAD = 8;
+
+/** 绝对路径 → repo-relative；不在 root 下 / 无 root ⇒ null（**读不懂的独立取值**，⛔ 不削成「看着像
+ *  repo-relative」的假路径——那会把两棵树上不同的文件判成同一个）。相对路径原样归一。 */
+function signatureRelPath(token: string, root: string | null): string | null {
+  const raw = String(token ?? "").replace(/\\/g, "/").trim();
+  if (!raw) return null;
+  if (!raw.startsWith("/")) return normalizeRel(raw) || null;
+  const rootAbs = root ? `/${normalizeRel(root)}` : "";
+  if (!rootAbs || rootAbs === "/") return null;
+  if (raw === rootAbs) return null;
+  if (raw.startsWith(`${rootAbs}/`)) return normalizeRel(raw.slice(rootAbs.length)) || null;
+  return null;
+}
+
+/** suite 日志 → 失败签名集合（三态）。识别两类失败行（本仓库与第三方 TAP 的共同形态）：
+ *  ① `__PERFILE__ duration_ms=… <path> passed=false` —— 文件级失败标记；断言文本取紧随其后的第一条
+ *     `AssertionError: …`（有界前瞻），读不到 ⇒ ""（⛔ 不伪造文本）。
+ *  ② `^not ok [N] - <head>: <detail>` —— TAP 行；`<head>` 是测试/文件身份，`<detail>` 是断言文本。
+ *  两类都按 `root` 归一文件身份。一条签名也没解析出、但**确实见到了**失败行 ⇒ `evaluated:false`
+ *  （成因 `failure-lines-without-resolvable-identity`，⛔ 不与「日志里没有失败行」同形）。 */
+export function parseFailureSignatures(logText: string, root?: string | null): FailureSignatureParse {
+  const text = String(logText ?? "");
+  if (text.trim() === "") return { evaluated: false, reason: "empty-suite-log" };
+  const lines = text.split("\n");
+  const signatures: FailureSignature[] = [];
+  const unresolvable: string[] = [];
+  const push = (file: string, sig: string): void => {
+    const f = file.trim();
+    if (!f) return;
+    if (!signatures.some((s) => s.file === f && s.text === sig)) signatures.push({ file: f, text: sig });
+  };
+  // ⛔ 身份定位不出的失败行**不得**用原样 token 兜底（那会把「两棵树上各自不同的绝对路径」判成两个身份，
+  // 或者反过来把同一个绝对路径判成「同一个」）——硬规则 3b：读不懂 = 未评估，⛔ 不落成一个签名。
+  const noteUnresolvable = (token: string): void => { if (token && !unresolvable.includes(token)) unresolvable.push(token); };
+  let sawFailureLine = false;
+  for (let i = 0; i < lines.length; i += 1) {
+    const line = lines[i].trim();
+    const pf = SIG_PERFILE_RE.exec(line);
+    if (pf) {
+      sawFailureLine = true;
+      const rel = signatureRelPath(pf[1], root ?? null);
+      if (rel === null) { noteUnresolvable(pf[1]); continue; }
+      let sig = "";
+      for (let j = i + 1; j < Math.min(lines.length, i + 1 + SIG_ASSERTION_LOOKAHEAD); j += 1) {
+        const m = SIG_ASSERTION_RE.exec(lines[j].trim());
+        if (m) { sig = m[1].trim(); break; }
+      }
+      push(rel, sig);
+      continue;
+    }
+    const no = SIG_NOT_OK_RE.exec(line);
+    if (no) {
+      sawFailureLine = true;
+      const rest = no[1].trim();
+      const ci = rest.indexOf(":");
+      const head = (ci < 0 ? rest : rest.slice(0, ci)).trim();
+      const detail = (ci < 0 ? "" : rest.slice(ci + 1)).trim();
+      const rel = signatureRelPath(head, root ?? null);
+      if (rel === null) { noteUnresolvable(head); continue; }
+      push(rel, detail);
+      continue;
+    }
+  }
+  // 有失败行但**任何一条**身份定位不出 ⇒ 整个解析未评估（fail-closed：部分解析出的集合与另一棵树的
+  // 集合比较会漏掉那些定位不出的红点 ⇒ 假豁免）。⛔ 不与「日志里没有失败行」同形（reason 不同）。
+  if (unresolvable.length > 0) {
+    return {
+      evaluated: false,
+      reason: `failure-line identity unresolvable for ${unresolvable.length} token(s): ${unresolvable.slice(0, 3).join(", ")}${unresolvable.length > 3 ? " …" : ""}`,
+    };
+  }
+  if (signatures.length > 0) return { evaluated: true, signatures };
+  return {
+    evaluated: false,
+    reason: sawFailureLine ? "failure-lines-without-resolvable-identity" : "no-failure-signature-lines",
+  };
+}
+
+/** 一条「同 id 但断言文本变了」的红点（AC3 的负控证据面，⛔ 不与「新增 id」同形）。 */
+export interface ChangedSignature {
+  file: string;
+  baselineText: string;
+  taskText: string;
+}
+
+/** 等价判定（纯函数）。三态取值互不同形（硬规则 3b）：
+ *  - `exempt`        —— task 红点集合 ⊆ baseline 红点集合（逐字）⇒ 既存红等价，放行继续；
+ *  - `hard-red`      —— 有 task 独有红点（`task-introduced-red`）或同 id 断言文本变化
+ *                       （`changed-assertion`）⇒ 拦截；
+ *  - `not-evaluated` —— 输入不完整（成因在 reason 里）⇒ 调用方维持改动前的硬红。
+ *  ⛔ baseline 比 task **多**不算差（本任务修掉的红点下一轮就不在 task 集合里了）——只拦「变差」方向。 */
+export type BaselineEquivalenceVerdict =
+  | { kind: "exempt"; unchanged: number; signature: string }
+  | { kind: "hard-red"; reason: "task-introduced-red" | "changed-assertion"; added: FailureSignature[]; changed: ChangedSignature[]; signature: string }
+  | { kind: "not-evaluated"; reason: string };
+
+function signatureKey(s: FailureSignature): string {
+  return `${s.file}\u0000${s.text}`;
+}
+
+/** 失败签名集合的**规范串**（排序后拼接）——电路断路器用它做「同一个签名」的身份。 */
+export function failureSignatureSetKey(sigs: FailureSignature[]): string {
+  return sigs.map(signatureKey).sort().join("\n");
+}
+
+/** 比较 task 树与 baseline 树的失败签名集合（见 BaselineEquivalenceVerdict）。 */
+export function compareFailureSignatures(
+  task: FailureSignature[],
+  baseline: FailureSignature[],
+): BaselineEquivalenceVerdict {
+  const baseKeys = new Set(baseline.map(signatureKey));
+  const baseById = new Map<string, string[]>();
+  for (const b of baseline) {
+    const l = baseById.get(b.file);
+    if (l === undefined) baseById.set(b.file, [b.text]);
+    else l.push(b.text);
+  }
+  const added: FailureSignature[] = [];
+  const changed: ChangedSignature[] = [];
+  for (const t of task) {
+    if (baseKeys.has(signatureKey(t))) continue;
+    const baseTexts = baseById.get(t.file);
+    if (baseTexts !== undefined && !baseTexts.includes(t.text)) {
+      changed.push({ file: t.file, baselineText: baseTexts.join(" | "), taskText: t.text });
+    } else {
+      added.push(t);
+    }
+  }
+  const signature = failureSignatureSetKey(task);
+  if (changed.length > 0) return { kind: "hard-red", reason: "changed-assertion", added, changed, signature };
+  if (added.length > 0) return { kind: "hard-red", reason: "task-introduced-red", added, changed, signature };
+  return { kind: "exempt", unchanged: task.length, signature };
+}
+
+// ── 电路断路器（AC4）：同一任务连续 N 轮撞【同一签名】⇒ 停止自动重派 + 可读的循环死锁诊断 ────────────
+
+/** 一轮「被既存红集合挡住」的读数（耐久载体 `.quay/baseline-red-rounds.jsonl` 的一行）。 */
+export interface BaselineRedRound {
+  task: string;
+  /** 该轮 task 树失败签名集合的规范串（`failureSignatureSetKey`）。 */
+  signature: string;
+  ts: number;
+  /** 被挡住的失败测试文件（诊断里点名）。 */
+  blocked: string[];
+}
+
+export const BASELINE_RED_ROUNDS_REL = ".quay/baseline-red-rounds.jsonl";
+
+export type CircuitBreakerVerdict =
+  | { kind: "continue"; consecutive: number }
+  | { kind: "stop-terminal"; consecutive: number; signature: string; peers: string[]; diagnostic: string };
+
+/** 读耐久载体（坏行跳过；文件缺失 ⇒ []——⛔ 不伪造历史）。 */
+export function readBaselineRedRounds(root: string): BaselineRedRound[] {
+  let text: string;
+  try {
+    text = fs.readFileSync(path.join(root, BASELINE_RED_ROUNDS_REL), "utf8");
+  } catch {
+    return [];
+  }
+  const out: BaselineRedRound[] = [];
+  for (const line of text.split("\n")) {
+    const t = line.trim();
+    if (!t) continue;
+    try {
+      const rec = JSON.parse(t) as Partial<BaselineRedRound>;
+      if (typeof rec.task !== "string" || typeof rec.signature !== "string" || typeof rec.ts !== "number") continue;
+      out.push({ task: rec.task, signature: rec.signature, ts: rec.ts, blocked: Array.isArray(rec.blocked) ? rec.blocked.filter((b): b is string => typeof b === "string") : [] });
+    } catch { /* 坏行跳过 */ }
+  }
+  return out;
+}
+
+/** 追加一条读数（best-effort；⛔ 不参与控制流——写失败不改变本轮的 suite 判定）。 */
+export function appendBaselineRedRound(root: string, round: BaselineRedRound): void {
+  try {
+    fs.mkdirSync(path.join(root, ".quay"), { recursive: true });
+    fs.appendFileSync(path.join(root, BASELINE_RED_ROUNDS_REL), `${JSON.stringify(round)}\n`, "utf8");
+  } catch { /* best-effort */ }
+}
+
+/** 电路断路器判定（纯函数）：同一任务**连续** `cap` 轮（含本轮）撞同一签名 ⇒ stop-terminal。
+ *  `cap` 建议与 `RETRY_CAP_DEFAULT` 对齐（调用方传 `maxRetries`）。`allRounds` 供诊断点名**同签名的
+ *  其它任务**（三方死锁的「哪几个任务」半边）——缺省只报本任务。⛔ 只判「签名不变」；签名一变即重置
+ *  连续计数（那说明是另一堵墙，交给既有重试上限路径）。 */
+export function decideBaselineRedCircuitBreaker(
+  prior: BaselineRedRound[],
+  current: BaselineRedRound,
+  cap: number,
+  allRounds: BaselineRedRound[] = [],
+): CircuitBreakerVerdict {
+  const same = prior
+    .filter((r) => r.task === current.task && r.ts <= current.ts)
+    .sort((a, b) => a.ts - b.ts);
+  let consecutive = 1;
+  for (let i = same.length - 1; i >= 0; i -= 1) {
+    if (same[i].signature !== current.signature) break;
+    consecutive += 1;
+  }
+  if (!(cap >= 1) || consecutive < cap) return { kind: "continue", consecutive };
+  const peers = [...new Set(
+    allRounds
+      .filter((r) => r.task !== current.task && r.signature === current.signature)
+      .map((r) => r.task),
+  )].sort();
+  const blocked = [...new Set([...current.blocked, ...same.slice(-(consecutive - 1)).flatMap((r) => r.blocked)])].sort();
+  const diagnostic = [
+    `LOOP DEADLOCK: task ${current.task} has been blocked by the SAME pre-existing red set for ${consecutive} consecutive fan-in rounds`,
+    `(signature unchanged across rounds). Blocked red points: ${blocked.length > 0 ? blocked.join(", ") : "(none attributed)"}.`,
+    peers.length > 0
+      ? `Other tasks blocked by the identical red set: ${peers.join(", ")} — each of these tasks fixes a red point OUTSIDE the blocked set, so they are mutually landing gates (none can produce a green full suite while the others' reds remain).`
+      : `No other task in the carrier shares this signature yet — if more arrive, they are mutually landing gates.`,
+    `Suggested resolution: land ANY ONE of them first (each one's own fix is outside the blocked set, so the red set does not grow); the others' blocked sets then shrink by that red point and they land in turn. If a landing still makes it worse, a human must decide the order.`,
+    `⛔ The gates were NOT relaxed: every new/changed red point still hard-fails this task (baseline-equivalence exemption never covers a red the task introduced).`,
+  ].join(" ");
+  return { kind: "stop-terminal", consecutive, signature: current.signature, peers, diagnostic };
+}
+
+/** 驱动侧入口：本任务当前的「既存红死锁」读数（供 worker-driver 决定是否停派）。
+ *  无记录 / 未达上限 ⇒ `{ kind:"continue", consecutive }`。 */
+export function baselineRedDeadlockReading(
+  root: string,
+  taskId: string,
+  cap: number,
+  nowMs: number = Date.now(),
+): CircuitBreakerVerdict {
+  const rounds = readBaselineRedRounds(root).filter((r) => r.task === taskId);
+  if (rounds.length === 0) return { kind: "continue", consecutive: 0 };
+  const current = rounds.reduce((a, b) => (b.ts >= a.ts ? b : a));
+  return decideBaselineRedCircuitBreaker(rounds, current, cap, readBaselineRedRounds(root).filter((r) => r.task !== taskId));
 }
 
 /** 读 fan-in 锁事件里本任务+runId 的持有时长（AC1/AC2 判据输入，纯文件读）。`lock` = 本次 acquire
@@ -1827,6 +2121,8 @@ export async function runMechanicalFanIn(opts: MechanicalFanInOptions): Promise<
   let developSha: string | null = null;
   let failedTestFiles: FailedTestFilesReading | null = null;
   let rerun: RerunReading | null = null;
+  // 既存红等价 A/B 读数（null = 本轮没进 A/B；见 BaselineEquivalenceReading 的注释——那是**不适用**）。
+  let baselineEquivalence: BaselineEquivalenceReading | null = null;
 
   const failSuite = (summary: string, exitCode: number | null): MechanicalFanInResult => {
     const r = {
@@ -1837,6 +2133,7 @@ export async function runMechanicalFanIn(opts: MechanicalFanInOptions): Promise<
       suiteLog: path.basename(suiteLogFile),
       fanInLog: path.basename(fanInLog),
       mergeTreeSha, developSha, failedTestFiles, rerun,
+      baselineEquivalence,
     } as unknown as MechanicalFanInResult; // 锁字段在 finally release 后填（见 pendingRed）
     pendingRed = r;
     return r;
@@ -1883,6 +2180,83 @@ export async function runMechanicalFanIn(opts: MechanicalFanInOptions): Promise<
       state, namedFiles: failed.files.length, ...(reason === null ? {} : { reason }),
     });
     return { state, reason, files: failed.files, exitCode: r.status, finishedEpoch, log: path.basename(logFile) };
+  };
+
+  // ── 既存红等价 A/B（gap-fanin-suite-gate-no-baseline-equivalent-exception）─────────────────────────
+  // 见文件顶部本节的长注释。**机器执行的 A/B，不是 prose 声明**：起一棵 detached worktree @ mergeTarget,
+  // 对它重跑同一批失败文件，逐字比对失败签名集合。⛔ 任何一步读不懂 ⇒ not-evaluated（调用方维持硬红）。
+  const runBaselineEquivalence = async (
+    taskLogText: string,
+    failed: FailedTestFilesReading,
+  ): Promise<BaselineEquivalenceReading> => {
+    const t0 = Date.now();
+    const traceVerdict = (verdict: BaselineEquivalenceVerdict, extra: Record<string, unknown> = {}): void => {
+      traceSuiteEvent("baseline-red", {
+        exit: 0, wall_ms: Date.now() - t0, ok: verdict.kind === "exempt",
+        verdict: verdict.kind,
+        ...(verdict.kind === "hard-red" ? { hardReason: verdict.reason, added: verdict.added.length, changed: verdict.changed.length } : {}),
+        ...(verdict.kind === "not-evaluated" ? { reason: verdict.reason } : {}),
+        ...extra,
+      });
+    };
+    const notEvaluated = (reason: string): BaselineEquivalenceReading => {
+      const v: BaselineEquivalenceVerdict = { kind: "not-evaluated", reason };
+      traceVerdict(v);
+      return { verdict: v, baselineWorktree: null, log: null };
+    };
+    if (!failed.evaluated) return notEvaluated(`no runnable failing-file set: ${failed.reason}`);
+    const taskParse = parseFailureSignatures(taskLogText, worktree);
+    if (!taskParse.evaluated) return notEvaluated(`task-side signatures unevaluable: ${taskParse.reason}`);
+    const baseDir = opts.baselineWorktree
+      ?? path.join(path.dirname(worktree), `.baseline-red-${task}-${runIdSafe}`);
+    let baselineLog: string | null = null;
+    try {
+      // 陈旧残留（上一轮被中断）⇒ 先清；git worktree add 对已存在路径报错。
+      try { fs.rmSync(baseDir, { recursive: true, force: true }); } catch { /* best-effort */ }
+      const add = await mechSh(["git", "-C", worktree, "worktree", "add", "--detach", baseDir, mergeTarget], 120_000);
+      if (!add.ok) return notEvaluated(`baseline worktree add failed: ${(add.stderr || add.stdout || "").trim() || `exit ${add.status}`}`);
+      // 基线树要能跑 [rerun_command]（本仓库是 `bash {worktree}/scripts/test.sh`）⇒ node_modules + config.yml。
+      // best-effort：失败只记 trace，随后重跑若跑不起来会落 not-evaluated（⛔ 不把 provisioning 失败当成
+      // 「等价」）。`null` = 夹具明确声明不需要 provisioning。
+      if (opts.baselineProvisionCommand !== null) {
+        const provision = opts.baselineProvisionCommand
+          ?? (() => {
+            const sib = resolveKernelShellSibling("dispatch-worktree-setup.sh");
+            return sib ? ["bash", sib, baseDir, "--root", root] : null;
+          })();
+        if (provision !== null) {
+          const pv = await mechSh(provision, 300_000);
+          if (!pv.ok) {
+            trace({ step: "baseline-provision", exit: pv.status, wall_ms: 0, ok: false, reason: "best-effort (non-fatal)" });
+          }
+        }
+      }
+      const resolved = opts.rerunCommand !== undefined
+        ? { kind: "run" as const, argv: opts.rerunCommand }
+        : resolveRerunCommand(worktree, baseDir, failed.files);
+      if (resolved.kind !== "run") return notEvaluated(`no baseline rerun command: ${resolved.reason}`);
+      const logFile = path.join(root, ".quay", suiteLogFileName(task, runId, `baseline-${newSuiteLogAttemptSuffix()}`));
+      const rr = await mechSh(resolved.argv, opts.rerunTimeoutMs ?? RERUN_TIMEOUT_MS);
+      // 与 runInRoundRerun 同族命名（落地时被 pruneTaskSuiteLogs 一并轮转，⛔ 不新增孤儿日志族）。
+      try {
+        fs.mkdirSync(path.dirname(logFile), { recursive: true });
+        fs.writeFileSync(logFile, combinedOutput(rr.stdout, rr.stderr), "utf8");
+        baselineLog = path.basename(logFile);
+      } catch { /* 日志 best-effort */ }
+      // status===null ⇒ mechSh 墙钟到点组 kill ⇒ **未评估**（⛔ 被中止的基线重跑不得当成「基线无该红」）。
+      if (rr.status === null) return notEvaluated("baseline rerun aborted");
+      const baseParse = parseFailureSignatures(combinedOutput(rr.stdout, rr.stderr), baseDir);
+      if (!baseParse.evaluated) return notEvaluated(`baseline-side signatures unevaluable: ${baseParse.reason}`);
+      const verdict = compareFailureSignatures(taskParse.signatures, baseParse.signatures);
+      traceVerdict(verdict, { baselineFiles: baseParse.signatures.length, taskFiles: taskParse.signatures.length });
+      return { verdict, baselineWorktree: baseDir, log: baselineLog };
+    } catch (e) {
+      return notEvaluated(`baseline A/B error: ${(e as Error)?.message ?? String(e)}`);
+    } finally {
+      // 基线树是临时的：无论成败都清掉（best-effort）。
+      try { fs.rmSync(baseDir, { recursive: true, force: true }); } catch { /* best-effort */ }
+      await mechSh(["git", "-C", worktree, "worktree", "prune"], 60_000).catch(() => undefined);
+    }
   };
 
   try {
@@ -2184,6 +2558,22 @@ export async function runMechanicalFanIn(opts: MechanicalFanInOptions): Promise<
             reason: `in-round rerun green on ${rerun.files.length} named file(s) — landing as green`,
           });
         } else {
+        // gap-fanin-suite-gate-no-baseline-equivalent-exception —— 既存红等价 A/B 是**第三档出口**：
+        // suite 真跑过且真红、且本轮内重跑仍红时，与 develop 基线树逐字比对失败签名集合；等价 ⇒ 放行
+        // （落到下面的绿块，继续 typecheck/ff），不等价/读不懂 ⇒ 维持硬红。
+        // ⛔ 两个「本轮无结论」形态（看门狗 SIGKILL 整组 / suite 从未起来）**不进 A/B**——它们的日志不是
+        // 一轮完整 suite 的失败集合，拿它当「签名集合」去比对是本机制自己的 3b 违规（读不懂伪装成评估过）。
+        const inconclusive = sr.hungByWatchdog || sr.spawnFailed === true;
+        if (!inconclusive) {
+          baselineEquivalence = await runBaselineEquivalence(suiteLogText, failedTestFiles);
+        }
+        if (baselineEquivalence !== null && baselineEquivalence.verdict.kind === "exempt") {
+          traceSuiteEvent("baseline-red-exempt", {
+            exit: 0, wall_ms: 0, ok: true,
+            reason: `task red set is verbatim-equal to the ${mergeTarget} baseline red set (${baselineEquivalence.verdict.unchanged} red point(s)) — landing as green (no gate relaxed: a new/changed red would have hard-failed)`,
+          });
+          // 落到下面的绿块（同 rerun-green 的形状：本轮终态是「可继续」，⛔ 不双写红色轮次记录）。
+        } else {
         // gap-verification-round-bound-to-quay-shaped-suite-entry：第三方路径的红轮同样入账
         // （「跑了且红」必须与「没跑过」可分，硬规则 3b；与 full-suite-runner 的红绿皆入账契约一致）。
         // gap-watchdog-killed-round-writes-no-verification-round-record — `hung`（看门狗 SIGKILL 整组）
@@ -2198,12 +2588,36 @@ export async function runMechanicalFanIn(opts: MechanicalFanInOptions): Promise<
           sr.hungByWatchdog ? { force: true, notEvaluated: "watchdog-killed" }
             : sr.spawnFailed === true ? { force: true, notEvaluated: "spawn-failed" }
               : undefined);
-        return failSuite(firstFailure || `suite ${sr.outcome}${sr.error ? `: ${sr.error}` : ""}`, sr.exitCode);
+        // 既存红死锁的耐久载体（电路断路器 AC4 的输入）：**只有**在 A/B 判出「task 独有/文本变化」这类
+        // 真被挡住的轮次才记——放行轮次不记（它落地了，不存在死锁）。best-effort，⛔ 不影响本轮判定。
+        if (baselineEquivalence !== null && baselineEquivalence.verdict.kind === "hard-red") {
+          appendBaselineRedRound(root, {
+            task, signature: baselineEquivalence.verdict.signature, ts: Date.now(),
+            blocked: [...baselineEquivalence.verdict.added.map((a) => a.file), ...baselineEquivalence.verdict.changed.map((c) => c.file)],
+          });
+        }
+        // ⛔ `not-evaluated` **不得**往 reason 里加任何注记——本机制的不变式是「A/B 读不懂 ⇒ 逐字等于
+        // 改动前的行为」（见本文件上方 runBaselineEquivalence 的非目标与 `worker-fan-in-baseline-red.test.mjs`
+        // 的 fail-closed 夹具），而 `reason` 正是「改动前的行为」里最可见的那一面：一旦给它加尾巴，
+        // 一个「本轮没跑过 A/B」的轮次在 needs-human 注记里就与改动前不可分辨（反而制造了新的同形）。
+        // A/B 的未评估成因**已**由两条结构化载体留痕（`traceSuiteEvent("baseline-red", {reason})` 与
+        // `mechanical_fan_in.baselineEquivalence.verdict.reason`）⇒ 信息不丢，⛔ 不需要污染人读的 reason。
+        // gap-needs-human-note-missing-real-error-line 的既有负控制（s10 AC2：零输出 ⇒ reason 逐字
+        // `suite red`）正是这条的守卫，本注释是它第二次生效。
+        const baselineNote = baselineEquivalence !== null && baselineEquivalence.verdict.kind === "hard-red"
+          ? ` [baseline A/B: HARD RED (${baselineEquivalence.verdict.reason}) — the task's red set is NOT a subset of the ${mergeTarget} baseline red set: added=${baselineEquivalence.verdict.added.map((a) => a.file).join(",") || "-"} changed=${baselineEquivalence.verdict.changed.map((c) => c.file).join(",") || "-"}]`
+          : "";
+        return failSuite((firstFailure || `suite ${sr.outcome}${sr.error ? `: ${sr.error}` : ""}`) + baselineNote, sr.exitCode);
+        }
         }
       }
+      // ⚠️ `suite_exit: "0"` 在这里的语义与 rerun-green 相同：「本轮已获准落地」，⛔ 不是「全量套件绿」。
+      //   两处（rerun-green / baseline-red-exempt）都如此——本轮的**真读数**在 outcome 的 rerun /
+      //   baselineEquivalence 字段里。既存红放行额外落一个可审计标记（ff 闸的读者据此可区分）。
       writeSuiteCapture(suiteCapture, {
         full_suite_ran: "true", skip_reason: "", suite_exit: "0",
         suite_head: suiteHead, start_iso: sr.startedAt, end_iso: sr.finishedAt,
+        ...(baselineEquivalence !== null && baselineEquivalence.verdict.kind === "exempt" ? { baseline_red_exempt: "true" } : {}),
       });
       // gap-verification-round-bound-to-quay-shaped-suite-entry：第三方路径的绿轮入账（红轮在 suite
       // 退出分支，见 recordDelegatedRound 定义处的说明）。
@@ -2324,6 +2738,8 @@ export async function runMechanicalFanIn(opts: MechanicalFanInOptions): Promise<
     // rerun-green 落地时四个取证读数随成功结果一起写（AC：这些字段在 suite 红【与】rerun-green 落地
     // 两种情形下都写）；普通绿落地 ⇒ failedTestFiles/rerun 保持 null（不适用，⛔ 不是「未评估」）。
     mergeTreeSha, developSha, failedTestFiles, rerun,
+    // 既存红等价放行（baseline-red-exempt）落地时也带上 A/B 读数；其余落地路径为 null（不适用）。
+    baselineEquivalence,
     suiteLog: null,
     fanInLog: path.basename(fanInLog),
     instruments,
