@@ -47,6 +47,7 @@ Production acceptance check, 2026-10-12, of `.quay/discovery-experience-ledger.j
 - The **`READ_FAILED` seam** is `opts.readLine`, and its status is stated plainly in the module: on the production path the store has been read whole before the scan, so a per-line read cannot fail there. The seam exists so the retry contract is exercisable, and the AC that requires it says "simulated". It is **not** claimed as a production measurement — AC2 and AC3 below are, and they read the real carriers.
 - `backfillIngestSkips` reports a third answer, `unexplained`, for an **ingestible outcome with no entry**: that is a finding that was LOST, and filing it as a skip would shape "we lost this" exactly like "we chose not to take it". `ingested + skipped + unexplained == scanned` therefore holds by construction, with all three terms as lists of named records.
 - A correction may patch **only** `CORRECTABLE_FIELDS` (`reported_by`, `authored_by`). One able to patch `summary`/`evidence` would be a supported way to rewrite what was found — the thing "never rewrite the original lines" forbids.
+- **Why `plugin/test/discovery-method-registry.test.mjs` is in `## Touches`（第 4 个文件，非本任务原始范围）**: requiring `authored_by` on every Experience is a change to a SHARED ABI, so the sibling test file that builds fixtures through the same `appendExperienceRecord` breaks the moment the rule lands. That is not incidental — it is the rule working. Negative control (2026-10-12): putting develop's copy of that file back and running it gives `ℹ pass 23  ℹ fail 7`, every failure being `ledger append refused: SCHEMA_MISSING:authored_by`; restored, `ℹ tests 30  ℹ pass 30  ℹ fail 0`. Declaring it beats leaving it as an undeclared write — which is exactly what the previous round's `ANTI-DRIFT HARD FAIL ... 1 violation(s)` was.
 
 ## Acceptance Criteria
 - [x] `node --test plugin/test/discovery-experience-ledger.test.mjs` exits 0, with new cases:
@@ -233,6 +234,7 @@ Production acceptance check, 2026-10-12, of `.quay/discovery-experience-ledger.j
 - tasks/gap-discovery-experience-ledger-provenance-and-skip-audit.md
 - docs/analysis/discovery-experience-ledger.mjs
 - plugin/test/discovery-experience-ledger.test.mjs
+- plugin/test/discovery-method-registry.test.mjs
 
 ## Blocker
 
