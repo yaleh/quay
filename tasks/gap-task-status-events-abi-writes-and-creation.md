@@ -54,3 +54,35 @@ These are also where a human or an agent session acts, which is exactly the "who
 - packages/quay/src/cli/task-create.ts
 - packages/quay/src/cli/lifecycle.ts
 - packages/quay/test/task-transition.test.mjs
+- packages/quay/src/kernel/task-transition.ts
+- packages/quay/src/gate/lifecycle.ts
+- packages/quay-native/src/mcp-server.ts
+- packages/quay-native/bin/quay-native.ts
+- packages/quay/test/cli-write-surface-parity.test.mjs
+- packages/quay/test/task-status-events-abi.test.mjs
+
+### Why these five ADDED paths (the Plan named the first eight)
+Emitting at the store means the caller's provenance has to CROSS THE PROVIDER ABI, and the
+Mechanism decides where it must be declared:
+
+- `packages/quay-native/src/mcp-server.ts` — the Provider's `task_write` zod inputSchema. The MCP
+  SDK validates `arguments` against it and STRIPS undeclared keys before the handler runs (measured:
+  a probe key never reached `store.write`), so `actorKind`/`correlationId` are unreachable without a
+  declaration here. (The GitHub provider is out of scope and the Plan says so; its absence is
+  declared, not implied.)
+- `packages/quay-native/bin/quay-native.ts` — the native CLI's `task edit` gains the same two flags.
+  NOT optional: `packages/quay/test/cli-write-surface-parity.test.mjs` machine-reads that zod schema
+  and requires every writable field to be flag-wired in BOTH CLIs, so a schema field with no native
+  flag is a RED parity test. Wiring the flags keeps that invariant real instead of carving an
+  exception list into it.
+- `packages/quay/test/cli-write-surface-parity.test.mjs` — the two new zod fields' `FIELD_TO_ACCESS`
+  entries (the table the check requires; without them the check reports "no mapping").
+- `packages/quay/src/kernel/task-transition.ts` — `from` widens from `string` to `string | null`.
+  A creation has NO prior status, and `from:null` must be PRESENT-and-null in the record, not an
+  absent key (JSON drops `undefined`; an absent key reads as "not recorded" — 硬规则 3b). Without
+  this the create path can only lie or cast.
+- `packages/quay/src/gate/lifecycle.ts` — the CLI lifecycle verbs' actual `client.taskWrite` calls
+  live here (AC(f)); `cli/lifecycle.ts` cannot stamp provenance the runner never forwards.
+- `packages/quay/test/task-status-events-abi.test.mjs` — the surface-level ACs (a)–(f). The other
+  two test files pin the store's choke point and the kernel contract; neither can see whether a Core
+  CLI handler, a lifecycle verb or the Provider's schema actually carries the provenance to it.
