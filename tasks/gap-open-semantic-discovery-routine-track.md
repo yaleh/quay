@@ -125,9 +125,10 @@ This task wires that path into the EXISTING quality-driver routine track as a bo
 ## Definition of Done
 - All AC ticked with output pasted; production AC may remain （待外部） with the next due time stated.
 - `scripts/test.sh --for-task gap-open-semantic-discovery-routine-track` green.
-  **Evidence:** `bash scripts/test.sh --for-task gap-open-semantic-discovery-routine-track --allow-thin` ⇒ **exit 0, 120 tests / 120 pass / 0 fail** (scoped static checks included; the scoped-gate cache was written against develop sha `ca5e14a2cc5fc066c3c31247a598730a5be66997`).
+  **Evidence (final reading, after `## Touches` gained `plugin/scripts/discovery-method-routine.ts`):** `bash scripts/test.sh --for-task gap-open-semantic-discovery-routine-track --allow-thin` ⇒ **exit 0, 168 tests / 168 pass / 0 fail**, scoped static checks included. (The same command before that Touch was added read 119/119 — the count moved with the selection, not with the code.) The scoped-gate cache was written against the develop sha in effect at that run.
 - No change to other routines' cadence or budgets.
   **Evidence:** `diff /tmp/osd-config-before.yml /data/home/yale/work/quay/.quay/config.yml` ⇒ **pure addition**: the only non-comment lines are the new `open_semantic_discovery:` key and its ten values. Zero lines removed or modified — `discovery_method` (60m / `interval_until` 2026-10-19T14:00Z / 240 calls per 24h / 6 per round), `arch_discovery` (360m), the four `loop.routines:` probes and `semantic-dedup-scan` (1440m) / `freshness-refresh` (120m) are byte-identical. No code path this delta touches reads or writes another routine's cadence or ledger: the routine has its OWN ledger (`.quay/open-semantic-discovery-model-budget.jsonl`) and its OWN cap.
+  ⚠️ NOTE for the reviewer: the `open_semantic_discovery:` section was written into the MAIN CHECKOUT's `.quay/config.yml`, because that file is gitignored workspace state — a worktree copy is refreshed FROM it, so a declaration placed only in a worktree would be overwritten and would never be the declaration production reads. The section is INERT until the deployed `quality-gate-driver.ts` carries this routine, and the only pre-existing edits to that file are the ten added lines above.
 - No mechanical finding logic (classifier, fingerprint gate, pattern table) added; any mechanical piece is listed in the evidence with its role (scheduling / persistence / dedup-assist / isolation / budget / tool wrapper).
   **Evidence — every mechanical piece in `plugin/scripts/open-semantic-discovery-routine.ts`, with its role:**
   1. `runOpenSemanticDiscovery`'s gates (config → halt → carrier-readable → due → the two ceilings) — **scheduling**. None of them inspects a hypothesis, a component or a claim.
@@ -140,6 +141,7 @@ This task wires that path into the EXISTING quality-driver routine track as a bo
   8. `stepArgv` + `spawnModelCall` — **tool wrapper** (the explicit `--max-turns` on every argv, and the `cwd` at the pin that the shared `runAsync` cannot express).
   9. `developTip` — **scheduling** (which revision is pinned).
   ⛔ There is no classifier, no fingerprint gate, no pattern table, and — asserted by case (l) — no regular expression of any kind in this module.
+  **One edit to a sibling module, named because it is outside the new file:** `ReservationMeta.step` in `plugin/scripts/discovery-method-routine.ts` widens from `"reflection" | "verification"` to `string`. Role: **budget** — the ledger is SHARED, and a union owned by one routine cannot name another's steps without the record lying about what it guards. Nothing switches on the value; every existing call site passes a literal and is unaffected.
 
 ## Touches
 - tasks/gap-open-semantic-discovery-routine-track.md
