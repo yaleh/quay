@@ -145,3 +145,5 @@ AC3 要求的「指向树外 ⇒ 报 `CAUSE=loaded-main-checkout-code`」**直�
 
 根因可复现：`packages/quay/src/store-commit.ts` 的 `commitKindFile` 用
 `path.relative(resolveGitRoot(dir), path.join(dir, fileName))` 算 relPath，而 `git rev-parse --show-toplevel` 会 **realpath**（本机 `/home/yale` → `/data/home/yale`），`--root` 侧的别名路径没被 realpath ⇒ relPath 变成 `../link/goals/<f>.md` ⇒ `git add` 退出 128 ⇒ `commitStoreWrite` 返回 `"failed"`。最小复现（/tmp 内真目录 + 符号链接）实测：`path.relative(<git toplevel>, <linkdir>/goals/x.md)` = `../link/goals/x.md`，`git -C <root> add -- <rel>` ⇒ `exit 128`。改用 realpath 路径（或不传 `--root`）后同一写入正常自提交。
+
+**补记（同轮，收尾之后）**：上一条「`Already up to date.`」只描述**那一刻**的读数 —— 随后 develop 前移了：本任务的 `task_write` 提交 `90618c9a9` 被常驻 driver 的 author→develop 同步带走（`self-only` 也会在几分钟后被 `propagateDocBranchToDevelop` 带上 develop，见 `.quay/store-commit-propagation.jsonl`），另有一个其它任务的写入 `9b9f7993d`。worktree 因此**再**做一次 `git merge --no-edit develop` ⇒ 合并提交 `9ed444347`，develop 成为 HEAD 的祖先；合并后重跑 scoped 门 ⇒ **`RC=0`**，anti-drift ⇒ **OK（3 file(s)，全在 Touches 内）**，且 `tasks/<id>.md` 在 worktree 与 `develop` 两侧字节一致、各 7 个 `- [x]`（fan-in 的 ac-precheck 读两者的并集，两侧都已就位）。
