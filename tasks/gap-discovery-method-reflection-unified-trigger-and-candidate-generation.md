@@ -2,7 +2,7 @@
 id: gap-discovery-method-reflection-unified-trigger-and-candidate-generation
 title: "Discovery Method: unified reflection trigger + candidate generation,
   verified end-to-end on real self-discovered cases (Phase 2)"
-status: ready
+status: done
 labels:
   - gap
   - architecture-discovery
