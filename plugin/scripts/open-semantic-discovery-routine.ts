@@ -795,6 +795,27 @@ export function firstNotEvaluatedToken(calls: readonly Record<string, unknown>[]
   return null;
 }
 
+/** The reading of ONE step's answer-reserve calls, taken off the call records themselves. A step "was
+ *  attempted" once per `*-report` call it left on the record, and "was rescued" when that call itself
+ *  answered. PURE — the round's summary is a VIEW of its own ledger rather than a parallel counter that
+ *  could disagree with it (硬规则 5b). */
+export function summarizeReserve(calls: readonly Record<string, unknown>[]): {
+  turns_reserved: number;
+  attempted: number;
+  rescued: number;
+  not_evaluated: string[];
+  steps: string[];
+} {
+  const reportCalls = calls.filter((c) => String(c.step).endsWith("-report"));
+  return {
+    turns_reserved: ANSWER_RESERVE_PROMPT_TURNS,
+    attempted: reportCalls.length,
+    rescued: reportCalls.filter((c) => callNotEvaluatedToken(c) === null).length,
+    not_evaluated: reportCalls.filter((c) => typeof c.not_evaluated === "string").map((c) => String(c.not_evaluated)),
+    steps: reportCalls.map((c) => String(c.step)),
+  };
+}
+
 // ── the engine modules: resolved from DISK at runtime, never statically imported (see the header) ────
 export const HYPOTHESIS_MODULE_FILE = "arch-hypothesis-generation.mjs";
 export const PORTFOLIO_MODULE_FILE = "discovery-portfolio.mjs";
@@ -2143,14 +2164,16 @@ export function pairedRoundDecision(opts: {
 // ── the round ────────────────────────────────────────────────────────────────────────────────────────
 export type ModelStepKind =
   | "investigator" | "verifier" | "refuter" | "value-assessment" | "novelty-check" | "shadow-investigator"
-  // The ANSWER RESERVE's own call (Plan item 2): ONE tool-less call granted to a run that was cut off at
-  // the turn cap. ⛔ Its OWN step name — the reservation ledger must say WHY the call was spent, or a
+  // The ANSWER RESERVE's own calls (Plan item 2): ONE tool-less call granted to a step that was cut off
+  // at the turn cap. ⛔ Its OWN step name — the reservation ledger must say WHY the call was spent, or a
   // rescue would read as a second exploration and the round's call count would stop being explicable.
-  | "investigator-report" | "shadow-investigator-report"
-  // The PAIRED round's UNGUIDED arm runs the same four steps under their own kinds, so "which arm spent
-  // this call" is readable straight off the reservation ledger instead of inferred from call order.
+  | "investigator-report" | "verifier-report" | "refuter-report" | "value-assessment-report" | "novelty-check-report"
+  | "shadow-investigator-report"
+  // The PAIRED round's UNGUIDED arm runs the same steps under their own kinds, so "which arm spent this
+  // call" is readable straight off the reservation ledger instead of inferred from call order.
   | "baseline-investigator" | "baseline-verifier" | "baseline-refuter" | "baseline-value-assessment" | "baseline-novelty-check"
-  | "baseline-investigator-report";
+  | "baseline-investigator-report" | "baseline-verifier-report" | "baseline-refuter-report"
+  | "baseline-value-assessment-report" | "baseline-novelty-check-report";
 
 export interface OpenSemanticDiscoveryRunOptions {
   config: OpenSemanticDiscoveryConfig | null;
@@ -2510,55 +2533,40 @@ export async function runOpenSemanticDiscovery(root: string, opts: OpenSemanticD
   }
 
   // ── THE ANSWER RESERVE (Plan item 2) ────────────────────────────────────────────────────────────────
-  // ONE tool-less call per run that was CUT OFF at the turn cap. It goes through `reservingStep` like
-  // every other call, so it is reserved on the SAME trailing-24h ledger and a refusal at the ceiling
-  // throws the round's ordinary `BudgetRefusedError` rather than spending a call nobody granted.
+  // ONE tool-less call for ANY step whose call was CUT OFF at the turn cap. It goes through
+  // `reservingStep` like every other call, so it is reserved on the SAME trailing-24h ledger and a refusal
+  // at the ceiling throws the round's ordinary `BudgetRefusedError` rather than spending a call nobody
+  // granted.
+  //
+  // ⛔ WHY IT IS NOT INVESTIGATOR-ONLY (硬规则 5b — fixing one instance is not fixing the class): the AC2
+  // production round of 2026-10-12 measured the SAME defect one step downstream. Of its six calls, three
+  // were `error_max_turns` — two verifiers (`verifier_cause:"turn-budget"` on 2 of 3 clusters) and the
+  // refuter — so `confirmed.count` was 0 on a round that had just produced 12 real, evidenced hypotheses.
+  // A turn cap that kills a verifier before it reports is the identical failure: "not evaluated" reading
+  // as "nothing found". Every single-answer step gets the same one-shot second chance.
+  //
   // ⛔ It fires for `error_max_turns` ONLY. An auth, gateway or spawn failure has no exploration notes to
   // report from, so a second call would only reproduce the failure and burn a reservation doing it.
-  async function runAnswerReserve(opts: {
-    records: Record<string, unknown>[];
-    callOfRun: Map<number, Record<string, unknown>>;
-    step: ModelStepKind;
-    basePrompt: string;
-    writeRunFile: (index: number, rec: Record<string, unknown>) => void;
-  }): Promise<{ turns_reserved: number; attempted: number; rescued: number; hypotheses: number; not_evaluated: string[] }> {
-    let attempted = 0;
-    let rescued = 0;
-    let hypotheses = 0;
-    const notEvaluated: string[] = [];
-    for (let i = 0; i < opts.records.length; i++) {
-      const run = opts.records[i];
-      const call = opts.callOfRun.get(i) ?? null;
-      if (call === null) continue;
-      if (callNotEvaluatedToken(call) !== "not-evaluated:error_max_turns") continue;
-      if (run.hyps) continue; // the run answered anyway — nothing to rescue
-      attempted++;
-      const explored = typeof call.assistant_text_tail === "string" ? (call.assistant_text_tail as string) : "";
-      const { res, rec } = await reservingStep(opts.step, {
-        prompt: buildAnswerReservePrompt(opts.basePrompt, explored),
-        tools: ANSWER_RESERVE_TOOLS,
-        maxTurns: BLIND_INVESTIGATOR_MAX_TURNS,
-        model: requestedModel,
-      });
-      const hyps = parseHypothesisArray(hyp.callText(String(res?.stdout ?? "")));
-      const token = callNotEvaluatedToken(rec);
-      if (token !== null) notEvaluated.push(token);
-      if (hyps !== null) {
-        // The run's own record is UPDATED, so the round's `runs_with_hypotheses`, its clusters and the run
-        // file on the pin all agree with the rescues that produced them — a rescue recorded only in a
-        // side field would leave the run file claiming zero.
-        run.hyps = hyps;
-        run.n_hyps = hyps.length;
-        run.parse_error = null;
-        run.answer_reserve = { attempted: true, rescued: true, from: "error_max_turns", step: rec.step, hypotheses: hyps.length };
-        rescued++;
-        hypotheses += hyps.length;
-      } else {
-        run.answer_reserve = { attempted: true, rescued: false, from: "error_max_turns", step: rec.step, hypotheses: 0, not_evaluated: token };
-      }
-      opts.writeRunFile(i, run);
-    }
-    return { turns_reserved: ANSWER_RESERVE_PROMPT_TURNS, attempted, rescued, hypotheses, not_evaluated: notEvaluated };
+  //
+  // The engine parses whatever stream `runModel` RETURNS, so the rescue's stream is what must be handed
+  // back: that is what makes the rescue an ANSWER rather than a side note. The cut-off call itself stays
+  // on the round's call list under its own `not-evaluated:error_max_turns` token, so the round still says
+  // a call was lost and does not launder it into a clean one.
+  async function reportIfCutOff(
+    prompt: string,
+    res: { status: number | null; stdout: string; stderr: string; error: Error | null },
+    rec: Record<string, unknown>,
+    reportStep: ModelStepKind,
+  ): Promise<{ res: { status: number | null; stdout: string; stderr: string; error: Error | null }; rec: Record<string, unknown>; rescued: boolean }> {
+    if (callNotEvaluatedToken(rec) !== "not-evaluated:error_max_turns") return { res, rec, rescued: false };
+    const explored = typeof rec.assistant_text_tail === "string" ? (rec.assistant_text_tail as string) : "";
+    const rescue = await reservingStep(reportStep, {
+      prompt: buildAnswerReservePrompt(prompt, explored),
+      tools: ANSWER_RESERVE_TOOLS,
+      maxTurns: BLIND_INVESTIGATOR_MAX_TURNS,
+      model: requestedModel,
+    });
+    return { res: rescue.res, rec: rescue.rec, rescued: callNotEvaluatedToken(rescue.rec) === null };
   }
 
   // ⑥ (b) SEMANTIC EXPLORATION ON REAL SOURCE. The investigator runs with Read/Grep/Glob rooted at the
@@ -2645,7 +2653,10 @@ export async function runOpenSemanticDiscovery(root: string, opts: OpenSemanticD
     }): Promise<ArmRun> => {
       const unguided = spec.arm === PAIRED_ARM_BASELINE;
       const armPrefix = unguided ? "baseline arm: " : "";
-      const stepKind = (kind: "investigator" | "verifier" | "refuter" | "value-assessment" | "novelty-check"): ModelStepKind =>
+      /** This arm's step name for one of its five model steps (或 that step's answer-reserve call). */
+      const STEP_NAMES = ["investigator", "verifier", "refuter", "value-assessment", "novelty-check"] as const;
+      type StepName = (typeof STEP_NAMES)[number];
+      const stepKind = (kind: StepName | `${StepName}-report`): ModelStepKind =>
         (unguided ? `baseline-${kind}` : kind) as ModelStepKind;
       const armStamp: Record<string, unknown> = spec.markPaired ? { paired: true, paired_arm: spec.arm } : {};
       const prompt = armPrompts[unguided ? PAIRED_ARM_BASELINE : PAIRED_ARM_GUIDED];
@@ -2653,11 +2664,8 @@ export async function runOpenSemanticDiscovery(root: string, opts: OpenSemanticD
       const armOutDir = unguided
         ? path.join(pinned, ".open-semantic-discovery-runs", PAIRED_ARM_BASELINE)
         : path.join(pinned, ".open-semantic-discovery-runs");
-      // Every call this ARM made, in call order, plus the run index each investigator call belonged to.
-      // The answer reserve below needs the latter to know WHICH run it is rescuing; `callRecords` alone
-      // would only say that some call in the round was cut off.
+      // Every call this ARM made, in call order.
       const armCallRecords: Record<string, unknown>[] = [];
-      const callOfRun = new Map<number, Record<string, unknown>>();
       const inv = await hyp.runInvestigator({
         prompt,
         // `neutralDir` is unused on the pinned path (the cwd gate switches to `verifyCwdRefusal`); it is
@@ -2677,9 +2685,12 @@ export async function runOpenSemanticDiscovery(root: string, opts: OpenSemanticD
           if (spec.markPaired && firstPairedCallMs === null) firstPairedCallMs = now();
           const { res, rec } = await reservingStep(stepKind("investigator"), { prompt: p, tools: INVESTIGATOR_TOOLS, maxTurns: config.investigatorMaxTurns, model: requestedModel });
           armCallRecords.push(rec);
-          callOfRun.set(i, rec);
-          armTexts.push(hyp.callText(String(res?.stdout ?? "")));
-          return res;
+          // A run cut off at the cap is rescued BEFORE the engine parses it, so the engine's `hyps` (and
+          // therefore the run file it writes, and `inv.parsed`) are the RESCUE's answer rather than zero.
+          const out = await reportIfCutOff(p, res, rec, stepKind("investigator-report"));
+          armCallRecords.push(out.rec);
+          armTexts.push(hyp.callText(String(out.res?.stdout ?? "")));
+          return out.res;
         },
       });
       if (inv.ok !== true) {
@@ -2687,30 +2698,13 @@ export async function runOpenSemanticDiscovery(root: string, opts: OpenSemanticD
         return { ok: false, reason: `${armPrefix}investigator refused — ${reasons[0] ?? "no reason reported"} (nothing appended, last-run not advanced)` };
       }
       const records = Array.isArray(inv.records) ? (inv.records as Record<string, unknown>[]) : [];
-      // ── THE ANSWER RESERVE (Plan item 2) — ONE tool-less call per run cut off at the turn cap ──────
-      // It runs BEFORE `clusterHypotheses`, so a rescued run's hypotheses are clustered, verified and
-      // refuted exactly as if the exploration had printed them itself.
-      const reserve = await runAnswerReserve({
-        records,
-        callOfRun,
-        step: stepKind("investigator-report") as ModelStepKind,
-        basePrompt: prompt,
-        writeRunFile: (i: number, rec: Record<string, unknown>) => {
-          // The engine already wrote this run's file; a rescue changes what the run FOUND, so the file is
-          // rewritten rather than left claiming zero. Best-effort: the run file is a view, the round's own
-          // record is the carrier.
-          try {
-            fs.mkdirSync(armOutDir, { recursive: true });
-            fs.writeFileSync(path.join(armOutDir, `run-${i + 1}.json`), JSON.stringify(rec, null, 1), "utf8");
-          } catch { /* the pin is scratch; a view that could not be rewritten is not a round failure */ }
-        },
-      });
       const statedFocus = armTexts.map((t) => focusFromText(t)).find((f) => typeof f === "string" && f !== "") ?? null;
       const investigator = {
         ran: true, runs: config.investigatorRuns,
-        // Recomputed AFTER the reserve: `inv.parsed` was taken before it, and a rescue that produced
-        // hypotheses but left this reading zero would make the round's own summary contradict its clusters.
-        runs_with_hypotheses: records.filter((r) => r.hyps).length,
+        // Read from the engine's OWN records, which already reflect any rescue (the rescue's stream is what
+        // `runModel` returned, so the engine parsed it). A run rescued into hypotheses therefore counts as
+        // a run WITH hypotheses — the summary cannot contradict the clusters it produced.
+        runs_with_hypotheses: Number(inv.parsed ?? 0),
         tools: INVESTIGATOR_TOOLS, max_turns: config.investigatorMaxTurns, cwd: asRel(root, pinned),
         stated_focus: statedFocus, prior_focuses: focuses,
         guided_by: spec.methodPicks.map((m) => methodLabel(m)),
@@ -2726,7 +2720,11 @@ export async function runOpenSemanticDiscovery(root: string, opts: OpenSemanticD
           not_evaluated: c.not_evaluated,
         })),
         not_evaluated: firstNotEvaluatedToken(armCallRecords),
-        answer_reserve: reserve,
+        // ── THE ANSWER RESERVE, as the ARM saw it ─────────────────────────────────────────────────────
+        // Read back off the arm's OWN call records rather than from a counter kept in a side variable: a
+        // rescue IS a reservation with its own step name, so the ledger and this reading are the same fact
+        // rather than two that can drift (硬规则 5b).
+        answer_reserve: summarizeReserve(armCallRecords.filter((c) => String(c.step).includes("investigator"))),
       };
       // (b, cont.) `clusterHypotheses` merges near-duplicates ACROSS the runs by component-set overlap. It
       // is dedup ASSISTANCE ONLY — nothing here discards a cluster by shape, and the cap below is a COUNT.
@@ -2743,8 +2741,14 @@ export async function runOpenSemanticDiscovery(root: string, opts: OpenSemanticD
         maxClusters: config.maxClustersVerified, concurrency: 1, maxMs: config.maxWallMs, // concurrency-default-fallback: ONE verifier call at a time — the engine can fan out, but concurrent calls reserve from several places at once and the per-step cost ledger stops being readable in call order
         strategy: "default", onlyCluster: null, evidence: null, model: requestedModel,
         runModel: async (p: string) => {
-          const { res } = await reservingStep(stepKind("verifier"), { prompt: p, tools: VERIFIER_TOOLS, maxTurns: config.verifierMaxTurns, model: requestedModel });
-          return res;
+          const { res, rec } = await reservingStep(stepKind("verifier"), { prompt: p, tools: VERIFIER_TOOLS, maxTurns: config.verifierMaxTurns, model: requestedModel });
+          armCallRecords.push(rec);
+          // A verifier cut off at its OWN cap is the same failure as an investigator cut off at its own:
+          // its `undetermined`/`turn-budget` verdict refutes and supports nothing, and the round would read
+          // as "verified 3, confirmed 0" for a reason that never appears on the record.
+          const out = await reportIfCutOff(p, res, rec, stepKind("verifier-report"));
+          armCallRecords.push(out.rec);
+          return out.res;
         },
       });
       if (v.ok !== true) {
@@ -2797,8 +2801,11 @@ export async function runOpenSemanticDiscovery(root: string, opts: OpenSemanticD
           maxClusters: 1, concurrency: 1, maxMs: config.maxWallMs, strategy: "default", onlyCluster: 1, // concurrency-default-fallback: ONE cluster, ONE call
           evidence: null, model: requestedModel,
           runModel: async (p: string) => {
-            const { res } = await reservingStep(stepKind("refuter"), { prompt: p, tools: REFUTER_TOOLS, maxTurns: config.refutationMaxTurns, model: requestedModel });
-            return res;
+            const { res, rec } = await reservingStep(stepKind("refuter"), { prompt: p, tools: REFUTER_TOOLS, maxTurns: config.refutationMaxTurns, model: requestedModel });
+            armCallRecords.push(rec);
+            const out = await reportIfCutOff(p, res, rec, stepKind("refuter-report"));
+            armCallRecords.push(out.rec);
+            return out.res;
           },
         });
         if (one.ok !== true) {
@@ -2825,8 +2832,11 @@ export async function runOpenSemanticDiscovery(root: string, opts: OpenSemanticD
           maxClusters: 1, concurrency: 1, maxMs: config.maxWallMs, strategy: "default", onlyCluster: 1, // concurrency-default-fallback: ONE cluster, ONE call
           evidence: null, model: requestedModel,
           runModel: async (p: string) => {
-            const { res } = await reservingStep(stepKind("value-assessment"), { prompt: p, tools: VALUE_TOOLS, maxTurns: config.refutationMaxTurns, model: requestedModel });
-            return res;
+            const { res, rec } = await reservingStep(stepKind("value-assessment"), { prompt: p, tools: VALUE_TOOLS, maxTurns: config.refutationMaxTurns, model: requestedModel });
+            armCallRecords.push(rec);
+            const out = await reportIfCutOff(p, res, rec, stepKind("value-assessment-report"));
+            armCallRecords.push(out.rec);
+            return out.res;
           },
         });
         if (one.ok !== true) {
@@ -2896,9 +2906,13 @@ export async function runOpenSemanticDiscovery(root: string, opts: OpenSemanticD
         evidence: Array.isArray(c.evidence_lines) ? (c.evidence_lines as string[]) : [],
         candidates: retrieval.candidates, broad: retrieval.broad, broadTruncated: retrieval.broad_truncated,
       });
-      const { res, rec: callRec } = await reservingStep(stepKind("novelty-check"), {
+      const { res: noveltyRes, rec: callRec } = await reservingStep(stepKind("novelty-check"), {
         prompt, tools: NOVELTY_TOOLS, maxTurns: config.refutationMaxTurns, model: requestedModel,
       });
+      armCallRecords.push(callRec);
+      const noveltyOut = await reportIfCutOff(prompt, noveltyRes, callRec, stepKind("novelty-check-report"));
+      armCallRecords.push(noveltyOut.rec);
+      const res = noveltyOut.res;
       const parsed = parseNoveltyVerdict(hyp.parseJsonObject(hyp.callText(String(res?.stdout ?? ""))));
       // A `duplicate` verdict is only usable when the record it names is a candidate that RESOLVES on the
       // write path. Naming anything else is DOWNGRADED to `restatement` — recorded, never silently
@@ -2919,8 +2933,13 @@ export async function runOpenSemanticDiscovery(root: string, opts: OpenSemanticD
         duplicate_of: duplicateOf ?? parsed?.duplicate_of ?? null,
         reasoning: parsed?.reasoning ?? null,
         summary: parsed?.summary ?? null,
-        retrieved: retrieval.candidates.length, broad: retrieval.broad.length, calls: 1,
-        cost_usd: typeof callRec.cost_charged_usd === "number" ? (callRec.cost_charged_usd as number) : null,
+        retrieved: retrieval.candidates.length, broad: retrieval.broad.length,
+        // BOTH calls when the check was rescued: the novelty check's cost is what the round actually spent
+        // on it, and charging only the cut-off call would under-report the ledger's own reading.
+        calls: noveltyOut.rec === callRec ? 1 : 2,
+        cost_usd: typeof callRec.cost_charged_usd === "number" || typeof noveltyOut.rec.cost_charged_usd === "number"
+          ? round6(Number(callRec.cost_charged_usd ?? 0) + (noveltyOut.rec === callRec ? 0 : Number(noveltyOut.rec.cost_charged_usd ?? 0)))
+          : null,
         retrieval: {
           totals: retrieval.totals, absent: retrieval.absent, errors: retrieval.errors,
           broad_truncated: retrieval.broad_truncated, mechanical_duplicate_of: null,
@@ -3098,7 +3117,6 @@ export async function runOpenSemanticDiscovery(root: string, opts: OpenSemanticD
       const shadowOutDir = path.join(pinned, ".open-semantic-discovery-runs", "shadow");
       const shadowPrompt = `${focusDirective(focuses)}\n${reserveDirective}\n${selection.shadow_text}${basePrompt}\n\n${inventory.ok === true ? String(inventory.text ?? "") : ""}`;
       let shadowCalls = 0;
-      const shadowCallOfRun = new Map<number, Record<string, unknown>>();
       const shadowCallRecords: Record<string, unknown>[] = [];
       const shadowInv = await hyp.runInvestigator({
         prompt: shadowPrompt,
@@ -3117,8 +3135,11 @@ export async function runOpenSemanticDiscovery(root: string, opts: OpenSemanticD
           const { res, rec } = await reservingStep("shadow-investigator", { prompt: p, tools: INVESTIGATOR_TOOLS, maxTurns: config.investigatorMaxTurns, model: requestedModel });
           shadowCalls++;
           shadowCallRecords.push(rec);
-          shadowCallOfRun.set(i, rec);
-          return res;
+          // The shadow pass gets the SAME one-shot reserve: it is an isolated measurement, but a shadow run
+          // cut off at the cap measures nothing, and its calls already count against the same ledger.
+          const out = await reportIfCutOff(p, res, rec, "shadow-investigator-report");
+          shadowCallRecords.push(out.rec);
+          return out.res;
         },
       });
       if (shadowInv.ok !== true) {
@@ -3129,20 +3150,6 @@ export async function runOpenSemanticDiscovery(root: string, opts: OpenSemanticD
         shadowBlock = { ...shadowBlock, ran: false, calls: shadowCalls, reason: `refused:${reasons[0] ?? "no reason reported"}` };
       } else {
         const shadowRecords = Array.isArray(shadowInv.records) ? (shadowInv.records as Record<string, unknown>[]) : [];
-        // The shadow arm gets the SAME answer reserve: it is an isolated measurement, but a shadow pass
-        // cut off at the cap measures nothing, and its calls already count against the same ledger.
-        await runAnswerReserve({
-          records: shadowRecords,
-          callOfRun: shadowCallOfRun,
-          step: "shadow-investigator-report",
-          basePrompt: shadowPrompt,
-          writeRunFile: (i: number, rec: Record<string, unknown>) => {
-            try {
-              fs.mkdirSync(shadowOutDir, { recursive: true });
-              fs.writeFileSync(path.join(shadowOutDir, `run-${i + 1}.json`), JSON.stringify(rec, null, 1), "utf8");
-            } catch { /* the pin is scratch */ }
-          },
-        });
         shadowClusters = hyp.clusterHypotheses(shadowRecords, {});
         shadowClusterRecords = shadowClusters.map((c, i) => {
           const rep = (c.rep ?? {}) as Record<string, unknown>;
@@ -3174,6 +3181,7 @@ export async function runOpenSemanticDiscovery(root: string, opts: OpenSemanticD
           // The shadow arm's failure is its OWN reading, never the production round's: an extra arm that
           // was cut off must not make a production round that DID explore read as not-evaluated.
           not_evaluated: firstNotEvaluatedToken(shadowCallRecords),
+          answer_reserve: summarizeReserve(shadowCallRecords),
         };
       }
     }
@@ -3260,6 +3268,11 @@ export async function runOpenSemanticDiscovery(root: string, opts: OpenSemanticD
       budget_usd_24h: usdBudgetBlock,
       wall_ms: wallMs,
       model_calls: budget.grantedCount,
+      // ── THE ANSWER RESERVE, round-wide (Plan item 2) ──────────────────────────────────────────────
+      // Every step's rescue calls, read off the round's own call records: how many were granted, how many
+      // answered, and which are still not evaluated. A `rescued: N` with `attempted: N` says the turn cap
+      // cost the round calls that had to be paid for twice; `attempted: 0` says no step was cut off.
+      answer_reserve: summarizeReserve(callRecords),
       calls: callRecords,
       tokens: { input: tokensIn, output: tokensOut },
       cost_usd: round6(costUsd),

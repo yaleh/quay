@@ -2450,8 +2450,9 @@ function answerReserveDelegate({ hypsOnReport = HYPS } = {}) {
 
 /** An investigator stub whose runs carry what the MODEL really returned: it parses the call it made
  *  (`parseHypotheses(callText(stdout))`) instead of being handed a fixed list. The answer reserve's whole
- *  mechanism is "a run that produced nothing gets a second call", so a stub that always reported `hyps`
- *  would make that mechanism untestable — the run would already look answered. */
+ *  mechanism is "a call cut off at the cap gets one more call whose stream is the ANSWER", so a stub that
+ *  always reported `hyps` would make that mechanism untestable — and one that did not write the run file
+ *  would hide the second half of it (the engine's record must reflect the rescue, not the cutoff). */
 function streamReadingInvestigator() {
   const sink = [];
   const fn = async (o) => {
@@ -2461,7 +2462,11 @@ function streamReadingInvestigator() {
       const stdout = String(r?.stdout ?? "");
       const { hyps, parse_error } = realHyp.parseHypotheses(realHyp.callText(stdout));
       sink.push({ tools: o.tools, maxTurns: o.maxTurns, prompt: o.prompt });
-      records.push({ run: i + 1, hyps, parse_error, stdout, exit: r?.status ?? null, n_hyps: hyps ? hyps.length : null });
+      const rec = { run: i + 1, hyps, parse_error, stdout, exit: r?.status ?? null, n_hyps: hyps ? hyps.length : null };
+      // The engine writes each run's own file; the stub does the same, because the run file is what the
+      // test reads to prove the RESCUE's answer (not the cutoff's zero) is what the run recorded.
+      o.writeFile(path.join(o.outDir, `run-${i + 1}.json`), JSON.stringify(rec, null, 1));
+      records.push(rec);
     }
     return { ok: true, records, parsed: records.filter((r) => r.hyps).length, total: o.runs };
   };
@@ -2589,7 +2594,9 @@ test("case (m) AC1(c) — the answer reserve produces parsed hypotheses from a s
 
   assert.equal(round.investigator.answer_reserve.attempted, 1);
   assert.equal(round.investigator.answer_reserve.rescued, 1);
-  assert.equal(round.investigator.answer_reserve.hypotheses, HYPS.length);
+  assert.deepEqual(round.investigator.answer_reserve.steps, ["investigator-report"]);
+  assert.equal(round.answer_reserve.attempted, 1, "the round's own reserve reading agrees with the arm's");
+  assert.equal(round.answer_reserve.rescued, 1);
   assert.equal(round.investigator.runs_with_hypotheses, 1, "the RESCUED run counts as a run with hypotheses");
   assert.equal(round.clusters.total, HYPS.length, "…and its hypotheses are clustered like any others");
   assert.equal(round.confirmed.count > 0, true, "a rescued hypothesis is verified and refuted like any other");
@@ -2605,11 +2612,61 @@ test("case (m) AC1(c) — the answer reserve produces parsed hypotheses from a s
   assert.equal(resumeSteps(ws).includes("investigator-report"), true, "the rescue reserved under its own step name");
   assert.equal(resumeSteps(ws).length, spawn.calls.length, "one reservation per spawn, the rescue included");
   assert.equal(round.calls.find((c) => c.step === "investigator-report").exit, 0);
-  // The run file on the pin is REWRITTEN: a run that was rescued must not leave a file claiming zero.
+  // The run's OWN file carries the rescue's answer, because the rescue's stream is what `runModel`
+  // returned and therefore what the engine parsed: a run file still claiming zero would be the round's
+  // own record contradicting its clusters.
   const runFile = pinRunFile(pin);
   assert.equal(runFile.hyps.length, HYPS.length, "the pinned run file carries the RESCUED hypotheses");
   assert.equal(runFile.n_hyps, HYPS.length);
-  assert.equal(runFile.answer_reserve.rescued, true);
+  assert.equal(runFile.exit, 0, "…and the exit of the call whose answer was read, not the cutoff's");
+});
+
+test("case (m) 硬规则 5b — the SAME reserve covers every single-answer STEP, not just the investigator", async () => {
+  // ⛔ WHY THIS TEST EXISTS. The task's own AC2 production round measured the defect one step downstream:
+  // 3 of its 6 calls were `error_max_turns` — TWO VERIFIERS and the REFUTER — so `confirmed.count` was 0
+  // on a round that had just produced 12 evidenced hypotheses, and 2 of 3 clusters carried
+  // `verifier_cause:"turn-budget"`. Fixing the investigator alone would have been fixing the instance, not
+  // the class. Here EVERY `Read,Grep` step (verifier, refuter, value-assessment) is cut off at its own cap
+  // and answered only by its tool-less rescue.
+  const SUPPORTED = JSON.stringify({
+    verdict: "supported", intentional_difference_found: "fixture impact",
+    evidence: [{ file: "plugin/scripts/a.ts", line: 1, quote: "export const a = 1;" }],
+    counterexample: "fixture counterexample", summary: "fixture summary",
+  });
+  const delegate = (argv, opts) => {
+    if (isNoveltyPrompt(opts)) return { status: 0, stdout: NOVELTY_STREAM, stderr: "", error: null };
+    if (isToolLess(argv)) return { status: 0, stdout: streamText(SUPPORTED), stderr: "", error: null };
+    if (toolsOf(argv) === INVESTIGATOR_TOOLS) return { status: 0, stdout: streamText(`${FOCUS_MARKER} f\n${JSON.stringify(HYPS)}`), stderr: "", error: null };
+    return { status: 1, stdout: MAX_TURNS_STREAM, stderr: "Reached maximum number of turns (8)\n", error: null };
+  };
+  const { ws, spawn, opts } = answerReserveFixture({ delegate });
+  const fact = await runOpenSemanticDiscovery(ws, opts);
+  const round = rounds(ws)[0];
+
+  // The investigator answered (no reserve for it); every judgment step did not and was rescued.
+  assert.equal(round.investigator.answer_reserve.attempted, 0, "the investigator was NOT cut off");
+  assert.equal(round.clusters.total, HYPS.length);
+  const steps = round.answer_reserve.steps;
+  assert.ok(steps.includes("verifier-report"), `a cut-off VERIFIER is rescued (steps: ${steps.join(",")})`);
+  assert.ok(steps.includes("refuter-report"), "…and so is a cut-off REFUTER");
+  assert.ok(steps.includes("value-assessment-report"), "…and a cut-off value assessment");
+  assert.equal(round.answer_reserve.attempted, round.answer_reserve.rescued, "every rescue answered");
+  // The verdicts ARE the rescues' verdicts: without the reserve these rows would all be
+  // `undetermined`/`turn-budget` and `confirmed` would be 0 — the production reading this closes.
+  assert.equal(round.confirmed.count, HYPS.length, "both clusters survive verifier + refuter, THROUGH the rescues");
+  const cluster = carrierLines(ws).find((l) => l.kind === "cluster" && l.cluster === 1);
+  assert.equal(cluster.verifier_verdict, "supported");
+  assert.equal(cluster.refutation_verdict, "supported");
+  assert.equal(cluster.evidence_lines.length > 0, true, "the rescue's evidence lines reach the record");
+  // The cut-off calls are STILL on the round, still naming their own failure: the rescue is an addition,
+  // never a laundering (硬规则 3b).
+  assert.equal(round.calls.filter((c) => c.not_evaluated === "not-evaluated:error_max_turns").length, round.answer_reserve.attempted);
+  assert.match(fact.reason, /call\(s\) were NOT EVALUATED/);
+  // Every rescue is its OWN reservation on the same ledger.
+  for (const s of ["verifier-report", "refuter-report", "value-assessment-report"]) {
+    assert.equal(resumeSteps(ws).includes(s), true, `${s} reserved on the same ledger`);
+  }
+  assert.equal(resumeSteps(ws).length, spawn.calls.length, "one reservation per spawn, the rescues included");
 });
 
 test("case (m) — the turn-reserve directive is in BOTH arms' prompts (the paired instrument's only difference stays the guidance block)", async () => {
