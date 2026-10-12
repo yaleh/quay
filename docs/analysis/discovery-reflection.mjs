@@ -93,6 +93,10 @@ import {
   modelCallFields, callText, parseJsonObject,
   importDriverRuntime, hardenedArgv, modelFromArgv,
   PIN_FORBIDDEN_DIRS,
+  // The DETERMINISTIC evidence pack (Plan item 2c). Reused by import rather than re-derived: the
+  // hypothesis-generation stage already assembles definition/import lines from a component set, and a
+  // second implementation of "which lines are evidence" would be a second thing to keep in sync.
+  buildEvidencePack,
 } from "./arch-hypothesis-generation.mjs";
 
 export const TOOL = "discovery-reflection";
@@ -314,9 +318,16 @@ export function registryDigest(registry) {
  * @param {string[]} o.toolNames   the allowed `operation.tools` vocabulary (the capability catalog)
  */
 export function buildReflectionPrompt({ unit, registry, toolNames = [] }) {
+  // ⛔ `domain_claim` IS THE POINT OF THE JOIN (Plan item 2a). Without it the model is shown the
+  //   pipeline's own bookkeeping ("verifier verdict \"supported\" on subject hypgen:ownership|…") and
+  //   induces methods ABOUT the bookkeeping — which is exactly what the 2026-10-12 round did. The claim
+  //   is carried VERBATIM from the linked claim records; `join_status` says whether one was found, so a
+  //   missing claim is visible to the model rather than silently absent (硬规则 3b).
   const experiences = (unit?.experiences ?? []).map((e) => ({
     case_id: e.case_id, role: e.role, reported_by: e.reported_by,
     components: e.components ?? [], summary: e.summary, evidence: (e.evidence ?? []).map((x) => x.ref),
+    domain_claim: isStr(e.domain_claim, 1) ? e.domain_claim : null,
+    join_status: isStr(e.join_status, 1) ? e.join_status : null,
   }));
   const digest = registryDigest(registry);
   return [
@@ -335,6 +346,11 @@ export function buildReflectionPrompt({ unit, registry, toolNames = [] }) {
     "   (name it in `method_ref`); otherwise \"new\". If the registry is empty, only \"new\"/\"no-method\".",
     "4. Ground every candidate in the finding's OWN evidence. Do not propose a method that only makes sense",
     "   because you were told where the answer is.",
+    "4b. `domain_claim` is what the finding CLAIMS about the system; `summary` is only the pipeline's own",
+    "   bookkeeping about the record. Ground the method in `domain_claim`, never in the bookkeeping — a",
+    "   method whose whole content is 'this record is hard to classify' is about the recording pipeline,",
+    "   not about the architecture, and does not transfer. When `join_status` is not \"linked\" there IS no",
+    "   recorded claim for this finding: answer \"no-method\" rather than inventing one from the bookkeeping.",
     "5. `operation.tools` MUST be chosen ONLY from the ALLOWED TOOLS list below (1-4 entries), and each",
     "   one MUST be an INSTRUMENT you would RUN to INSPECT code. The files a finding is ABOUT — the subject",
     "   being inspected, including any file named in the EXPERIENCE above — are NOT tools: naming one there",
@@ -793,9 +809,38 @@ export function materializeStrippedPin({ root, rev, dir } = {}) {
  *  rather than re-declaring the mapping here (a second copy would drift). */
 export const roleExpectedVerdicts = (role) => ROLE_VERDICT_COMPAT[role] ?? [];
 
-/** The verifier prompt: PREDICT the outcome of applying `candidate` to the held-out case's files,
- *  WITHOUT being told that case's ground-truth role (a blind prediction, not a self-graded answer). */
-export function buildGeneralizationPrompt({ candidate, heldOutCase }) {
+/** The `applies` vocabulary of the applicability gate. `undetermined` is a REAL answer and is not the
+ *  same as `no`: "this method does not cover the target" and "I could not tell whether it does" lead
+ *  to opposite dispositions, and collapsing them would retire methods on the verifier's uncertainty
+ *  (硬规则 3b). */
+export const APPLIES_VOCAB = Object.freeze(["yes", "no", "undetermined"]);
+
+/** The third outcome value, alongside `evaluated` / `not-evaluated`: the method was never applied
+ *  because it does not cover the case. It is NOT a failed reading and NOT a failed method. */
+export const OUTCOME_NOT_APPLICABLE = "not-applicable";
+
+/**
+ * The verifier prompt. It asks for the APPLICABILITY decision FIRST, then — only if the method covers
+ * the target — the blind prediction, WITHOUT telling the verifier that case's ground-truth role.
+ *
+ * ⛔ WHY THE GATE IS IN THE SAME CALL (gap-discovery-method-generalization-failures-diagnosis-and-retest,
+ *   Plan item 2b). Measured on the 2026-10-12 regression run: of 4 candidate × held-out pairings, the
+ *   methods' own `applicability` matched 0 of the required record fields on EVERY held-out, while the
+ *   same predicate was satisfied by every one of their own seeds. With no gate, the verifier forced a
+ *   verdict on cases outside the method's declared domain, and "did not apply" came back wearing the
+ *   shape of "predicted wrong" — so all three were scored as failures and the candidates retired.
+ *   Asking in the SAME call rather than a second one is deliberate: the gate must not cost a call, or
+ *   it becomes the thing a budget-bound run drops first.
+ *
+ * @param {object} o
+ * @param {object} o.candidate
+ * @param {object} o.heldOutCase
+ * @param {object|null} [o.evidencePack] the deterministic evidence pack (see `evidencePackForPin`),
+ *   rendered verbatim when present. It is the SAME kind of pack the hypothesis-generation verifier
+ *   already gets (`buildEvidencePack`), reused by import — a resource-bound reading failure is fixed by
+ *   handing the verifier the definition and import lines, NOT by raising its turn cap.
+ */
+export function buildGeneralizationPrompt({ candidate, heldOutCase, evidencePack = null }) {
   return [
     "You are a VERIFIER. Apply ONE architecture-discovery method to a target file set and PREDICT the",
     "outcome. You are NOT told the expected answer: judge from the files themselves.",
@@ -804,19 +849,32 @@ export function buildGeneralizationPrompt({ candidate, heldOutCase }) {
     JSON.stringify({
       method_id: candidate.method_id,
       steps: candidate.operation?.steps ?? [],
+      applicability: candidate.applicability ?? null,
       expected_invariant: candidate.expected_invariant ?? null,
       falsification: candidate.falsification ?? null,
     }, null, 1),
     "",
     "TARGET FILE SET (read them with your tools):",
     JSON.stringify(heldOutCase?.components ?? []),
+    ...(evidencePack && isStr(evidencePack.text, 1)
+      ? ["", "DETERMINISTIC EVIDENCE PACK (assembled before this call — read it before the files):", evidencePack.text]
+      : []),
     "",
-    "Apply the method's steps to that file set. Decide whether the method's `expected_invariant` HOLDS",
-    "or is VIOLATED there.",
+    "STEP 1 — APPLICABILITY. Decide FIRST whether this method's `applicability` covers the target file",
+    "set AT ALL. A method that keys on a class of artifact the target does not contain does NOT apply,",
+    "however interesting the target is. If it does not apply, answer applies:\"no\" and STOP — do NOT",
+    "force a verdict on a case outside the method's declared domain, because a verdict produced that way",
+    "is a wrong prediction wearing a correct prediction's shape. Answer applies:\"undetermined\" only when",
+    "you genuinely cannot tell whether it applies.",
+    "",
+    "STEP 2 — only when applies is \"yes\" or \"undetermined\": apply the method's steps to the file set and",
+    "decide whether the method's `expected_invariant` HOLDS or is VIOLATED there.",
     "Respond with ONE JSON object and NOTHING ELSE:",
     "{",
-    '  "invariant_holds": true | false,',
-    '  "verdict": "supported" | "refuted" | "undetermined",  // supported = invariant VIOLATED (a real finding); refuted = invariant holds (claim was false); undetermined = could not tell',
+    '  "applies": "yes" | "no" | "undetermined",',
+    '  "applies_reason": <string>,        // why the method does, or does not, cover THIS file set',
+    '  "invariant_holds": true | false,   // omit (or null) when applies is "no"',
+    '  "verdict": "supported" | "refuted" | "undetermined",  // supported = invariant VIOLATED (a real finding); refuted = invariant holds (claim was false); undetermined = could not tell. Omit when applies is "no"',
     '  "reasoning": <string>',
     "}",
   ].join("\n");
@@ -880,7 +938,11 @@ export async function validateGeneralization(opts = {}) {
  *   A caller that cannot say where the carrier lives must not be told the verdict was persisted.
  */
 function maybeRecordGeneralizationVerdict({ root, candidate, heldOutCase } = {}, verdict) {
-  if (!isStr(root, 1) || verdict?.outcome !== "evaluated") return verdict;
+  // `evaluated` and `not-applicable` are both RECORDED: both are readings a third party must be able to
+  // re-read (how often the gate diverted is otherwise invisible), and neither can license a promotion —
+  // the registry's rule requires `outcome:"evaluated" && correct:true`. A `not-evaluated` READING is
+  // still the caller's explicit act: it says nothing about the method.
+  if (!isStr(root, 1) || (verdict?.outcome !== "evaluated" && verdict?.outcome !== OUTCOME_NOT_APPLICABLE)) return verdict;
   const rec = recordGeneralizationVerdict(root, {
     ...verdict,
     method_id: isStr(candidate?.method_id, 1) ? candidate.method_id : null,
@@ -892,6 +954,11 @@ function maybeRecordGeneralizationVerdict({ root, candidate, heldOutCase } = {},
     ? { ...verdict, verdict_ref: rec.id, verdict_recorded: true }
     : { ...verdict, verdict_ref: null, verdict_recorded: false, verdict_record_reasons: rec.reasons };
 }
+
+/** Was the method APPLIED at all? `applies` is on every verdict this module returns; a verdict that
+ *  never reached the model (a refusal) carries `null`. Placed here so the carrier and the metrics read
+ *  the SAME predicate. */
+const appliedOf = (v) => (v?.outcome === OUTCOME_NOT_APPLICABLE ? "no" : (isStr(v?.applies, 1) ? v.applies : null));
 
 async function runGeneralization({ candidate, heldOutCase, registry = [], model, budget = {}, modelId = null, nowMs = Date.now(), experiences = [], pinDir = null, isAncestor = null, root = null } = {}) {
   const guard = disabledGuard(budget);
@@ -940,20 +1007,44 @@ async function runGeneralization({ candidate, heldOutCase, registry = [], model,
   const gatesOk = { ...lineageOk, temporal_ok: temporal.checked === true ? true : null };
 
   const evaluatedCommit = String(heldOutCase.evaluation_pin);
-  const prompt = buildGeneralizationPrompt({ candidate, heldOutCase });
+  // The deterministic evidence pack (Plan item 2c), built from the SAME stripped pin the verifier runs
+  // in. `null` when it cannot be assembled — the prompt then renders exactly as it did before the pack
+  // existed, and `evidence_pack: null` on the verdict says so rather than claiming a pack was supplied.
+  const pack = evidencePackForPin({ pinDir, components: heldOutCase.components, claim: candidateClaim(candidate) });
+  const prompt = buildGeneralizationPrompt({ candidate, heldOutCase, evidencePack: pack });
   const tCall = Date.now();
   const { stdout } = await modelCall(model, prompt);
   const call = { ...modelCallFields({ requested: modelId, stdout }), wall_ms: Date.now() - tCall };
   const parsed = parseJsonObject(callText(stdout));
   const nextV = nextVersion(registry, candidate.method_id);
-  const ran = { evaluated_commit: evaluatedCommit, verifier_cwd: pinDir };
+  const ran = { evaluated_commit: evaluatedCommit, verifier_cwd: pinDir, evidence_pack: pack ? { lines: pack.lines.length, capped: pack.capped, counts: pack.counts } : null };
+
+  // ── STEP 1, the applicability gate ──────────────────────────────────────────────────────────────
+  // ⛔ `"no"` is the ONE value that diverts: the method does not cover the case, so there is nothing to
+  //   predict. It is recorded as `not-applicable` — a THIRD outcome value, distinct from `evaluated`
+  //   (a graded prediction) and from `not-evaluated` (a failed reading). It counts neither as correct
+  //   nor as wrong and it neither promotes nor retires (硬规则 3b: "did not apply" must never share a
+  //   shape with "predicted wrong" — that collapse is what retired three sound methods on 2026-10-12).
+  //   A missing or out-of-vocabulary `applies` is `undetermined`, which PROCEEDS: "I could not tell
+  //   whether it applies" is not a licence to skip the test.
+  const applies = APPLIES_VOCAB.includes(parsed?.applies) ? String(parsed.applies) : "undetermined";
+  const appliesReason = isStr(parsed?.applies_reason, 1) ? String(parsed.applies_reason) : null;
+  if (applies === "no") {
+    return {
+      ok: true, called: true, outcome: OUTCOME_NOT_APPLICABLE, model_call: call, applies,
+      applies_reason: appliesReason, predicted_verdict: null, expected_verdicts: expected,
+      correct: null, promoted: false, candidate_after: { ...candidate, version: nextV },
+      retirement_reason: null, not_evaluated_reason: null, refusal_code: null,
+      reasoning: parsed?.reasoning ?? null, ...gatesOk, ...ran,
+    };
+  }
 
   if (!parsed || !isStr(parsed.verdict, 1)) {
     // NOT-EVALUATED (its own value): the reading failed, the METHOD was not refuted. Stays draft.
     return {
-      ok: true, called: true, outcome: "not-evaluated", model_call: call, predicted_verdict: null,
-      expected_verdicts: expected, correct: null, promoted: false, candidate_after: { ...candidate },
-      retirement_reason: null, refusal_code: null,
+      ok: true, called: true, outcome: "not-evaluated", model_call: call, applies, applies_reason: appliesReason,
+      predicted_verdict: null, expected_verdicts: expected, correct: null, promoted: false,
+      candidate_after: { ...candidate }, retirement_reason: null, refusal_code: null,
       not_evaluated_reason: parsed ? "VERDICT_MISSING_IN_MODEL_OUTPUT" : "UNPARSEABLE_MODEL_OUTPUT",
       ...gatesOk, ...ran,
     };
@@ -962,8 +1053,8 @@ async function runGeneralization({ candidate, heldOutCase, registry = [], model,
   const correct = expected.includes(predicted);
   if (correct) {
     return {
-      ok: true, called: true, outcome: "evaluated", model_call: call, predicted_verdict: predicted,
-      expected_verdicts: expected, correct: true, promoted: true,
+      ok: true, called: true, outcome: "evaluated", model_call: call, applies, applies_reason: appliesReason,
+      predicted_verdict: predicted, expected_verdicts: expected, correct: true, promoted: true,
       candidate_after: { ...candidate, version: nextV, status: "active", retirement_reason: null },
       retirement_reason: null, not_evaluated_reason: null, refusal_code: null, reasoning: parsed.reasoning ?? null,
       ...gatesOk, ...ran,
@@ -971,12 +1062,55 @@ async function runGeneralization({ candidate, heldOutCase, registry = [], model,
   }
   const retirement_reason = `failed-generalization-on-${heldOutCase.case_id ?? heldOutCase.id ?? "held-out"}: predicted-${predicted}-but-role-${heldOutCase.role}-requires-${expected.join("|")}`;
   return {
-    ok: true, called: true, outcome: "evaluated", model_call: call, predicted_verdict: predicted,
-    expected_verdicts: expected, correct: false, promoted: false,
+    ok: true, called: true, outcome: "evaluated", model_call: call, applies, applies_reason: appliesReason,
+    predicted_verdict: predicted, expected_verdicts: expected, correct: false, promoted: false,
     candidate_after: { ...candidate, version: nextV, status: "retired", retirement_reason },
     retirement_reason, not_evaluated_reason: null, refusal_code: null, reasoning: parsed.reasoning ?? null,
     ...gatesOk, ...ran,
   };
+}
+
+/** The claim text the evidence pack cites symbols from: the method's steps plus its invariant. */
+function candidateClaim(candidate) {
+  return [candidate?.operation?.steps ?? [], candidate?.expected_invariant ?? "", candidate?.applicability?.domain_signals ?? []].flat().join("\n");
+}
+
+/**
+ * Assemble the DETERMINISTIC evidence pack for the held-out file set from the stripped pin, reusing the
+ * hypothesis-generation stage's own pack builder (硬规则 5b — a second implementation of the same pack
+ * is a second implementation to keep in sync).
+ *
+ * Returns `null` when the pack cannot be assembled (no pin dir, no component readable there, a builder
+ * refusal). `null` is its OWN value: the caller records `evidence_pack: null`, which says "the verifier
+ * read the files itself" rather than "a pack was supplied and was empty".
+ *
+ * @param {object} o
+ * @param {string} o.pinDir      the STRIPPED tree at the pin the verifier runs in
+ * @param {string[]} [o.components] the held-out case's repo-relative components
+ * @param {string} [o.claim]     the text whose cited symbols the pack resolves
+ */
+export function evidencePackForPin({ pinDir, components = [], claim = "" } = {}) {
+  if (!isStr(pinDir, 1) || !Array.isArray(components) || components.length === 0) return null;
+  const sources = {};
+  let read = 0;
+  for (const c of components) {
+    if (!isStr(c, 1)) continue;
+    const rel = String(c).replace(/^\.\//, "");
+    for (const candidatePath of [rel, path.posix.basename(rel)]) {
+      const p = path.join(pinDir, candidatePath);
+      try {
+        if (!fs.statSync(p).isFile()) continue;
+        sources[rel] = fs.readFileSync(p, "utf8");
+        read++;
+        break;
+      } catch { /* not there under this spelling — try the other, then give up on this component */ }
+    }
+  }
+  // A pack with no source at all would render as a header over an empty body — a "pack" that carries
+  // nothing, which is exactly what 硬规则 3b forbids. Say `null` instead.
+  if (read === 0) return null;
+  const pack = buildEvidencePack({ components: components.map((c) => String(c)), claim, sources });
+  return pack.lines.length > 0 ? pack : null;
 }
 
 // ── the reflection-attempt carrier (so the next round does not re-spend a call) ────────────────────
@@ -1041,6 +1175,10 @@ export function recordGeneralizationVerdict(root, verdict, { ts = Date.now() } =
     held_out_case_id: verdict.held_out_case_id,
     called: verdict.called === true,
     outcome: isStr(verdict.outcome, 1) ? verdict.outcome : null,
+    // The APPLICABILITY gate's answer, recorded on the carrier so the diversion rate is a reading a
+    // third party can recount — `null` when the verdict predates the gate or never reached the model.
+    applies: appliedOf(verdict),
+    applies_reason: isStr(verdict.applies_reason, 1) ? verdict.applies_reason : null,
     refusal_code: isStr(verdict.refusal_code, 1) ? verdict.refusal_code : null,
     predicted_verdict: isStr(verdict.predicted_verdict, 1) ? verdict.predicted_verdict : null,
     expected_verdicts: Array.isArray(verdict.expected_verdicts) ? verdict.expected_verdicts : [],
@@ -1094,21 +1232,38 @@ export function computeReflectionCost(calls, { wall_ms = null } = {}) {
 }
 
 /**
- * `learning_quality` — of the candidates that REACHED a `validateGeneralization` call, the fraction
- * that correctly predicted the held-out case's role. Returns a REAL number when at least one
- * generalization call was made, `null` when none was (so the caller reports `not-evaluated`, never a
- * fabricated 0 — 硬规则 3b). A call that could not be evaluated (`correct === null`) is excluded from
- * BOTH numerator and denominator and counted in `not_evaluated`.
+ * `learning_quality` — of the candidates that were actually APPLIED, the fraction that correctly
+ * predicted the held-out case's role. Returns a REAL number when at least one generalization call was
+ * made, `null` when none was (so the caller reports `not-evaluated`, never a fabricated 0 — 硬规则 3b).
+ * A call that could not be evaluated (`correct === null`) is excluded from BOTH numerator and
+ * denominator and counted in `not_evaluated`.
+ *
+ * ⛔ NOT-APPLICABLE IS NOT A FAILURE (Plan item 2b, gap-discovery-method-generalization-failures-
+ *   diagnosis-and-retest). A verdict whose `outcome` is `not-applicable` says the method does not
+ *   cover that case: it is excluded from the denominator, and its count is REPORTED as its own field
+ *   so "the methods were never applicable" cannot hide inside a flattering ratio. On the 2026-10-12
+ *   regression run the three failures were all of this shape and every one of them was scored as a
+ *   wrong prediction.
+ *
+ * @returns {{value:number|null, correct:number, evaluated:number, denominator:number,
+ *            not_evaluated:number, not_applicable:number, total:number}}
+ *   `denominator` is `evaluated` spelled out, because "correct / applicable-evaluated" is the reading
+ *   the report owes; `value` is `null` (not 0) when nothing was applied.
  */
 export function learningQuality(verdicts) {
   const list = (Array.isArray(verdicts) ? verdicts : []).filter(isObj);
-  const evaluated = list.filter((v) => v.correct === true || v.correct === false);
+  const notApplicable = list.filter((v) => v.outcome === OUTCOME_NOT_APPLICABLE);
+  const rest = list.filter((v) => v.outcome !== OUTCOME_NOT_APPLICABLE);
+  const evaluated = rest.filter((v) => v.correct === true || v.correct === false);
   const correct = evaluated.filter((v) => v.correct === true).length;
   return {
     value: evaluated.length ? correct / evaluated.length : null,
-    evaluated: evaluated.length,
     correct,
-    not_evaluated: list.length - evaluated.length,
+    evaluated: evaluated.length,
+    denominator: evaluated.length,
+    not_evaluated: rest.length - evaluated.length,
+    not_applicable: notApplicable.length,
+    total: list.length,
   };
 }
 

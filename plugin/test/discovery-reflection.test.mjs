@@ -31,6 +31,7 @@ import {
   gitIsAncestor, verifyStrippedPin, materializeStrippedPin, DISCOVERY_PIN_FORBIDDEN_DIRS,
   isPositiveCase, LINEAGE_MIN_SHARED_COMPONENTS,
   readGeneralizationVerdicts, recordGeneralizationVerdict, verdictsFile, VERDICT_KIND,
+  APPLIES_VOCAB, OUTCOME_NOT_APPLICABLE, evidencePackForPin,
 } from "../../docs/analysis/discovery-reflection.mjs";
 import { GENERALIZATION_VERDICTS_REL } from "../../docs/analysis/discovery-experience-ledger.mjs";
 import { subjectKey } from "../../docs/analysis/architecture-evidence-store.mjs";
@@ -566,8 +567,9 @@ test("metrics: reflection_cost sums present usage only; learning_quality is null
   assert.equal(computeReflectionCost([{ usage: null, cost_usd: null }]).cost_usd, null);
   assert.equal(computeReflectionCost([{ usage: null }]).tokens.input, null);
 
-  assert.deepEqual(learningQuality([]), { value: null, evaluated: 0, correct: 0, not_evaluated: 0 });
-  assert.deepEqual(learningQuality([{ correct: true }, { correct: false }, { correct: null }]), { value: 0.5, evaluated: 2, correct: 1, not_evaluated: 1 });
+  assert.deepEqual(learningQuality([]), { value: null, correct: 0, evaluated: 0, denominator: 0, not_evaluated: 0, not_applicable: 0, total: 0 });
+  assert.deepEqual(learningQuality([{ correct: true }, { correct: false }, { correct: null }]),
+    { value: 0.5, correct: 1, evaluated: 2, denominator: 2, not_evaluated: 1, not_applicable: 0, total: 3 });
   assert.equal(NET_NEW_DISCOVERY_VALUE, "not-yet-measured", "never 0 — 0 would read as 'measured and found nothing'");
 });
 
@@ -771,4 +773,176 @@ test("AC2(f): a REFUSAL is not auto-recorded — the caller records it, and the 
   // Re-recording the same verdict object is a DUPLICATE_ID no-op (content-addressed id).
   assert.equal(recordGeneralizationVerdict(root, { ...r, method_id: v2.method_id, version: 2, held_out_case_id: heldOut.case_id }).duplicate, true);
   assert.equal(readGeneralizationVerdicts(root).records.length, 1);
+});
+
+// ══════════════════════════════════════════════════════════════════════════════════════════════════
+// THE THREE FIXES of gap-discovery-method-generalization-failures-diagnosis-and-retest, each with the
+// diagnosis reading that justified it.
+//
+//   (a) the reflection prompt shows the joined `domain_claim`, and the subject-strip still bars the
+//       seed's own files from `operation.tools`;
+//   (b) `applies:"no"` ⇒ `not-applicable` — neither correct nor retired;
+//   (c) learning quality excludes not-applicable from its denominator and reports its count.
+//   …plus the evidence pack that fixes the measured turn-budget exhaustion.
+// ══════════════════════════════════════════════════════════════════════════════════════════════════
+
+test("FIX(a): the reflection prompt carries the joined `domain_claim`, and says so when there is none", () => {
+  const claimed = expFixture({ domain_claim: "the writer and the checker declare the same field set independently", join_status: "linked" });
+  const p1 = buildReflectionPrompt({ unit: { experiences: [claimed] }, registry: [], toolNames: [] });
+  assert.ok(p1.includes("the writer and the checker declare the same field set independently"), "the claim reaches the model");
+  assert.ok(p1.includes('"join_status": "linked"'));
+
+  // A finding with NO recorded claim is VISIBLE as such — the model must not be able to read an absent
+  // claim as an absent clause and invent one from the bookkeeping (硬规则 3b).
+  const unjoined = expFixture({ domain_claim: null, join_status: "no-linked-claim-record" });
+  const p2 = buildReflectionPrompt({ unit: { experiences: [unjoined] }, registry: [], toolNames: [] });
+  assert.ok(p2.includes('"domain_claim": null'));
+  assert.ok(p2.includes('"join_status": "no-linked-claim-record"'));
+  assert.ok(p2.includes('answer \\"no-method\\"') || p2.includes('answer "no-method"'), "the rule that a claim-less finding yields no method is in the prompt");
+  // Non-zero control on the SAME predicate: the two prompts really do differ.
+  assert.notEqual(p1, p2);
+});
+
+test("FIX(a): the joined claim does NOT unbar the seed's files — the strip still runs on the same subject set", () => {
+  const seed = expFixture({
+    id: "experience-joinedseed0000", case_id: "EXP-joined",
+    components: ["plugin/scripts/alpha.ts", "plugin/scripts/beta.ts"],
+    // The claim text NAMES the subject files, exactly as a real joined claim does.
+    domain_claim: "alpha.ts:40 and beta.ts:12 disagree about whether the second declaration is deliberate",
+    join_status: "linked",
+  });
+  const unit = { signature: experienceSignature(seed), experiences: [seed], representative: seed };
+  const candidate = assembleCandidate({
+    rec: decisionFixture({ operation_tools: ["alpha.ts", "code-span-strip.ts", "plugin/scripts/beta.ts"] }),
+    unit, registry: [], budget: {}, nowIso: "2026-10-12T00:00:00Z",
+  });
+  assert.deepEqual(candidate.operation.tools, ["code-span-strip.ts"], "naming the subject files in the CLAIM does not make them instruments");
+  assert.deepEqual(candidate.stripped_subject_tools, ["alpha.ts", "plugin/scripts/beta.ts"]);
+  assert.deepEqual(candidate.provenance_evidence, [seed.id], "and the strip is still scoped by the seed's own provenance");
+});
+
+test("FIX(b): `applies:\"no\"` ⇒ `not-applicable` — neither correct, nor promoted, nor retired", async () => {
+  const candidate = assembleCandidate({ rec: decisionFixture(), unit: { experiences: [expFixture({ id: "experience-inbatch000000" })] }, registry: [], budget: {}, nowIso: "2026-10-12T00:00:00Z" });
+  const heldOut = expFixture({ id: "experience-heldout0000000", case_id: "EXP-heldout", role: "found-and-fixed", source_ref: "outcome-heldout00000000", components: ["plugin/scripts/heldout.ts"], evaluation_pin: "1".repeat(40), fix_commit: "2".repeat(40) });
+  const pin = { pinDir: strippedTmp(), isAncestor: () => false };
+  assert.deepEqual(roleExpectedVerdicts("found-and-fixed"), ["supported"]);
+
+  // The gate FIRES: the method's declared domain does not cover this case.
+  const na = await validateGeneralization({
+    candidate, heldOutCase: heldOut, budget: {}, ...pin,
+    model: stubModel({ applies: "no", applies_reason: "the method keys on a verdict record; the target is source code with no record", verdict: "refuted" }),
+  });
+  assert.equal(na.ok, true);
+  assert.equal(na.called, true, "the gate costs no extra call — it is answered inside the same one");
+  assert.equal(na.outcome, OUTCOME_NOT_APPLICABLE);
+  assert.equal(na.applies, "no");
+  assert.equal(na.correct, null, "not-applicable is neither correct nor wrong");
+  assert.equal(na.promoted, false);
+  assert.equal(na.candidate_after.status, "draft", "the method is NOT retired — the whole point of the gate");
+  assert.equal(na.retirement_reason, null);
+  assert.equal(na.not_evaluated_reason, null, "it is not a failed reading either — a THIRD value");
+
+  // CONTROL 1 — the gate does not swallow real failures. `applies:"yes"` with a wrong verdict retires.
+  const wrong = await validateGeneralization({
+    candidate, heldOutCase: heldOut, budget: {}, ...pin,
+    model: stubModel({ applies: "yes", applies_reason: "it covers it", verdict: "refuted" }),
+  });
+  assert.equal(wrong.outcome, "evaluated");
+  assert.equal(wrong.correct, false);
+  assert.equal(wrong.candidate_after.status, "retired");
+  assert.ok(wrong.retirement_reason.length > 0);
+
+  // CONTROL 2 — a missing or out-of-vocabulary `applies` is `undetermined`, which PROCEEDS: "I could
+  // not tell whether it applies" is not a licence to skip the test.
+  const silent = await validateGeneralization({ candidate, heldOutCase: heldOut, budget: {}, ...pin, model: stubModel({ verdict: "refuted" }) });
+  assert.equal(silent.applies, "undetermined");
+  assert.equal(silent.outcome, "evaluated");
+  const bogus = await validateGeneralization({ candidate, heldOutCase: heldOut, budget: {}, ...pin, model: stubModel({ applies: "maybe", verdict: "refuted" }) });
+  assert.equal(bogus.applies, "undetermined");
+  assert.equal(bogus.outcome, "evaluated");
+  assert.deepEqual(APPLIES_VOCAB, ["yes", "no", "undetermined"]);
+});
+
+test("FIX(b): a `not-applicable` verdict is RECORDED (the diversion is countable) and cannot license a promotion", async () => {
+  const root = mkTmp();
+  const candidate = assembleCandidate({ rec: decisionFixture(), unit: { experiences: [expFixture({ id: "experience-inbatch000000" })] }, registry: [], budget: {}, nowIso: "2026-10-12T00:00:00Z" });
+  const heldOut = expFixture({ id: "experience-heldout0000000", case_id: "EXP-heldout", role: "found-and-fixed", source_ref: "outcome-heldout00000000", components: ["plugin/scripts/heldout.ts"], evaluation_pin: "1".repeat(40), fix_commit: "2".repeat(40) });
+  const na = await validateGeneralization({
+    candidate, heldOutCase: heldOut, root, budget: {}, pinDir: strippedTmp(), isAncestor: () => false,
+    model: stubModel({ applies: "no", applies_reason: "outside the declared domain" }),
+  });
+  assert.equal(na.verdict_recorded, true, "the diversion is recorded, so a third party can recount it");
+  const recorded = readGeneralizationVerdicts(root).records;
+  assert.equal(recorded.length, 1);
+  assert.equal(recorded[0].outcome, OUTCOME_NOT_APPLICABLE);
+  assert.equal(recorded[0].applies, "no");
+  assert.equal(recorded[0].correct, null);
+  // The promotion rule's own predicate, applied to this recorded verdict: it does NOT pass.
+  assert.equal(recorded[0].outcome === "evaluated" && recorded[0].correct === true, false, "a not-applicable line can never satisfy the promotion's `outcome:evaluated && correct:true`");
+});
+
+test("FIX(c): learning quality excludes not-applicable from the denominator and REPORTS its count", () => {
+  const q = learningQuality([
+    { outcome: "evaluated", correct: true },
+    { outcome: "evaluated", correct: false },
+    { outcome: OUTCOME_NOT_APPLICABLE, correct: null },
+    { outcome: "not-evaluated", correct: null },
+  ]);
+  assert.equal(q.value, 0.5, "1 of the 2 APPLIED candidates was correct");
+  assert.equal(q.denominator, 2, "correct / applicable-evaluated");
+  assert.equal(q.correct, 1);
+  assert.equal(q.not_applicable, 1, "the diversion is its own reported count, never folded into a ratio");
+  assert.equal(q.not_evaluated, 1, "a failed READING is still counted separately from a non-applicable case");
+  assert.equal(q.total, 4, "…and the four terms add up to what was fed in");
+
+  // CONTROL on the same predicate: drop the not-applicable row and NOTHING else moves — so the
+  // exclusion is the not-applicable arm and not a general amnesty.
+  const without = learningQuality([{ outcome: "evaluated", correct: true }, { outcome: "evaluated", correct: false }, { outcome: "not-evaluated", correct: null }]);
+  assert.deepEqual({ ...without, not_applicable: 1, total: 4 }, q);
+
+  // Everything diverted ⇒ `null`, never a fabricated 0 (硬规则 3b).
+  const allDiverted = learningQuality([{ outcome: OUTCOME_NOT_APPLICABLE }, { outcome: OUTCOME_NOT_APPLICABLE }]);
+  assert.equal(allDiverted.value, null);
+  assert.equal(allDiverted.denominator, 0);
+  assert.equal(allDiverted.not_applicable, 2);
+});
+
+test("FIX(c-evidence-pack): the verifier prompt carries the deterministic pack, and `null` when it cannot be built", () => {
+  // A real pin tree: two components whose shared symbol is declared in both.
+  const pinDir = strippedTmp();
+  fs.mkdirSync(path.join(pinDir, "plugin", "scripts"), { recursive: true });
+  fs.writeFileSync(path.join(pinDir, "plugin", "scripts", "alpha.ts"), "export const SHARED_FIELD_SET = 1;\nimport { b } from \"./beta.ts\";\n");
+  fs.writeFileSync(path.join(pinDir, "plugin", "scripts", "beta.ts"), "export const SHARED_FIELD_SET = 2;\n");
+
+  const pack = evidencePackForPin({ pinDir, components: ["plugin/scripts/alpha.ts", "plugin/scripts/beta.ts"], claim: "SHARED_FIELD_SET is declared in more than one module" });
+  assert.ok(pack, "a pack IS built from a readable pin tree");
+  assert.ok(pack.text.includes("DEF plugin/scripts/alpha.ts:"), "the definition line of the cited symbol is handed over");
+  assert.ok(pack.text.includes("SHARED_FIELD_SET"));
+
+  const prompt = buildGeneralizationPrompt({ candidate: methodFixture(), heldOutCase: expFixture(), evidencePack: pack });
+  assert.ok(prompt.includes("DETERMINISTIC EVIDENCE PACK"), "…and it reaches the verifier prompt");
+  assert.ok(prompt.includes("DEF plugin/scripts/beta.ts:"), "the SECOND declaration of the same symbol is shown — one line from one file cannot answer 'declared twice'");
+
+  // The pack is deterministic: the same inputs render byte-identically.
+  assert.equal(evidencePackForPin({ pinDir, components: ["plugin/scripts/alpha.ts", "plugin/scripts/beta.ts"], claim: "SHARED_FIELD_SET is declared in more than one module" }).text, pack.text);
+
+  // `null` is its OWN value — an unbuildable pack must not render as a header over an empty body.
+  assert.equal(evidencePackForPin({ pinDir, components: [], claim: "x" }), null);
+  assert.equal(evidencePackForPin({ pinDir, components: ["plugin/scripts/does-not-exist.ts"], claim: "x" }), null);
+  assert.equal(evidencePackForPin({ pinDir: null, components: ["plugin/scripts/alpha.ts"], claim: "x" }), null);
+  const noPack = buildGeneralizationPrompt({ candidate: methodFixture(), heldOutCase: expFixture(), evidencePack: null });
+  assert.ok(!noPack.includes("DETERMINISTIC EVIDENCE PACK"), "with no pack the prompt renders exactly as before");
+  // Non-zero control on the same predicate: the prompt WITH a pack differs from the one without.
+  assert.notEqual(prompt, noPack);
+});
+
+test("FIX(c-evidence-pack): the APPLICABILITY step is asked FIRST, and the prompt says not to force a verdict", () => {
+  const p = buildGeneralizationPrompt({ candidate: methodFixture({ applicability: { domain_signals: ["a verdict record with an opaque evidence pointer"], preconditions: ["not where the store cannot resolve pointers"] } }), heldOutCase: expFixture({ components: ["plugin/scripts/alpha.ts"] }) });
+  assert.ok(p.includes("STEP 1 — APPLICABILITY"), "the gate is step 1");
+  assert.ok(p.indexOf("STEP 1 — APPLICABILITY") < p.indexOf("STEP 2"), "…and it comes before the prediction");
+  assert.ok(p.includes('"applies": "yes" | "no" | "undetermined"'));
+  assert.ok(p.includes("do NOT"), "the prompt forbids forcing a verdict outside the domain");
+  // The method's OWN applicability is shown — the gate is answered against the method's declared domain,
+  // not against the verifier's opinion of the files.
+  assert.ok(p.includes("a verdict record with an opaque evidence pointer"));
 });

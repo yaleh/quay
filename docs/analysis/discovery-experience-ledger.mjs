@@ -921,6 +921,101 @@ export function componentsFromSubjectKey(subjectKey) {
   return body.split(",").map((t) => t.trim()).filter((t) => t.length > 0);
 }
 
+// ── the JOIN: an outcome record to the records that state WHY it came out that way ────────────────
+//
+// ⛔ THE DEFECT THIS CLOSES (gap-discovery-method-generalization-failures-diagnosis-and-retest,
+//   2026-10-12). The summary below is a projection of the OUTCOME record's own fields, and an outcome
+//   record carries NO domain claim: it says, in full,
+//   `E-DT-1-Hp cluster 8: verifier verdict "supported" on subject hypgen:ownership|plugin/scripts/…`.
+//   The claim lives in the records the evidence store filed under the SAME `subject_key` — the
+//   `hypothesis` and the `counterexample`. MEASURED over the shipped store: the derived summary
+//   carries 0.000 of the linked claim records' content tokens (after subtracting the subject's own
+//   file tokens), a JOINED representation carries 1.000, and the methods that round induced carry
+//   0.034-0.111. The reflection step was shown the pipeline's own bookkeeping, so it induced methods
+//   about the bookkeeping.
+//   ⇒ `subject_key` is the join key because it is the ONE key the store puts on EVERY claim-bearing
+//   kind, and it is already the identity the anti-cheat isolation uses.
+
+/** The record kinds that STATE a domain claim about a subject. `evidence` records LOCATE a reading but
+ *  assert nothing, so they are carried as citations, never as a claim. */
+export const CLAIM_BEARING_KINDS = Object.freeze(["hypothesis", "counterexample"]);
+
+/**
+ * The join outcome, THREE-VALUED (硬规则 3b): "here is the claim", "I looked and the store files no
+ * claim for this subject", and "I could not look at all" are three different facts, and collapsing any
+ * two of them would make an absent index read exactly like an absent claim.
+ */
+export const JOIN_LINKED = "linked";
+export const JOIN_NO_CLAIM_RECORD = "no-linked-claim-record";
+export const JOIN_INDEX_UNAVAILABLE = "claim-index-unavailable";
+
+/**
+ * Index evidence-store records by `subject_key`. PURE. Records without a `subject_key` are indexed
+ * under nothing (an absent key is not the empty key). Returns a `Map`, so a caller can hand the SAME
+ * index to every record in a batch instead of re-scanning the store per record.
+ * @param {object[]} records
+ * @returns {Map<string,{claims:object[], evidence:object[]}>}
+ */
+export function claimIndex(records) {
+  const idx = new Map();
+  for (const r of Array.isArray(records) ? records : []) {
+    if (!isObj(r) || !isStr(r.subject_key, 1)) continue;
+    const k = String(r.subject_key);
+    if (!idx.has(k)) idx.set(k, { claims: [], evidence: [] });
+    const bucket = idx.get(k);
+    if (CLAIM_BEARING_KINDS.includes(r.kind)) bucket.claims.push(r);
+    else if (r.kind === "evidence") bucket.evidence.push(r);
+  }
+  return idx;
+}
+
+/**
+ * Join ONE outcome record to its claim records. PURE.
+ *
+ * `domain_claim` is the text the reflection step needs and the outcome cannot supply: each linked
+ * claim's own `statement`, prefixed by the hypothesis a `counterexample` names (that field holds the
+ * hypothesis verbatim, so a run that persisted only its counterexamples still hands over the claim).
+ * `citations` are the file:line references both kinds carry — the evidence a reviewer can re-read.
+ *
+ * @param {object} outcome
+ * @param {Map|null} index  from `claimIndex`; `null` means the index could not be built at all
+ * @returns {{status:string, domain_claim:string|null, claims:object[], citations:string[],
+ *            hypothesis_refs:string[], counterexample_refs:string[]}}
+ */
+export function joinOutcomeToClaims(outcome, index) {
+  const none = { status: JOIN_INDEX_UNAVAILABLE, domain_claim: null, claims: [], citations: [], hypothesis_refs: [], counterexample_refs: [] };
+  if (index === null || index === undefined) return none;
+  if (!isObj(outcome) || !isStr(outcome.subject_key, 1)) {
+    return { ...none, status: JOIN_NO_CLAIM_RECORD };
+  }
+  const bucket = index.get(String(outcome.subject_key));
+  const claims = Array.isArray(bucket?.claims) ? bucket.claims : [];
+  const evidence = Array.isArray(bucket?.evidence) ? bucket.evidence : [];
+  if (claims.length === 0) return { ...none, status: JOIN_NO_CLAIM_RECORD };
+  const parts = [];
+  for (const c of claims) {
+    if (c.kind === "counterexample") {
+      const of = isStr(c.counterexample_of, 1) ? `${String(c.counterexample_of)} ` : "";
+      parts.push(`${of}${String(c.statement ?? "")}`.trim());
+    } else {
+      parts.push(String(c.statement ?? ""));
+    }
+  }
+  const claimText = parts.filter((p) => p.length > 0).join(" ");
+  const citations = [...new Set([
+    ...claims.flatMap((c) => (Array.isArray(c.source_evidence) ? c.source_evidence : [])),
+    ...evidence.map((e) => e.ref),
+  ].filter((x) => isStr(x, 1)))];
+  return {
+    status: JOIN_LINKED,
+    domain_claim: claimText.length > 0 ? claimText : null,
+    claims: claims.map((c) => ({ id: c.id ?? null, kind: c.kind, statement: c.statement ?? null, counterexample_of: c.counterexample_of ?? null })),
+    citations,
+    hypothesis_refs: claims.filter((c) => c.kind === "hypothesis").map((c) => c.id).filter((x) => isStr(x, 1)),
+    counterexample_refs: claims.filter((c) => c.kind === "counterexample").map((c) => c.id).filter((x) => isStr(x, 1)),
+  };
+}
+
 /**
  * A PROJECTION of the record's own text — never an interpretation of it.
  *
@@ -928,14 +1023,22 @@ export function componentsFromSubjectKey(subjectKey) {
  * keys"), which then went verbatim into the reflection prompt. A derived summary therefore composes
  * only what the record already says: its `experiment_ref` (or, failing that, its own id), its stored
  * `verdict`, its `subject_key`, and its `verdict_reason` when one is recorded.
+ *
+ * ⛔ …AND, when the caller supplies a JOIN (`join`), the linked claim records' own text — see
+ * `joinOutcomeToClaims`. The claim is APPENDED, never paraphrased, and the outcome-derived prefix is
+ * kept so a reader can still see which record this summary came from.
+ *
+ * @param {object} rec @param {object} [o] `{join}` — the `joinOutcomeToClaims` result, or `null`
+ * @returns {string} at most `MAX_SUMMARY_CHARS` characters
  */
-export function deriveExperienceSummary(rec) {
+export function deriveExperienceSummary(rec, { join = null } = {}) {
   const base = isStr(rec?.experiment_ref, 1) ? String(rec.experiment_ref)
     : isStr(rec?.experiment, 1) ? String(rec.experiment)
     : String(rec?.id ?? "outcome");
   const subject = isStr(rec?.subject_key, 1) ? String(rec.subject_key) : "(no subject_key recorded)";
   let s = `${base}: verifier verdict "${String(rec?.verdict)}" on subject ${subject}`;
   if (isStr(rec?.verdict_reason, 1)) s += ` [reason: ${rec.verdict_reason}]`;
+  if (isStr(join?.domain_claim, 1)) s += ` — ${join.domain_claim}`;
   return s.slice(0, MAX_SUMMARY_CHARS);
 }
 
@@ -983,14 +1086,19 @@ export function taskStatusOnDevelop(root, taskId) {
 }
 
 /**
- * Derive EVERY Experience field of an outcome record. PURE: the two facts a record cannot carry about
- * its own surroundings are INJECTED — `taskStatus(taskId)` (what develop says) and
- * `laterOutcomeWithSubjectKey(subjectKey, line)` (does a later outcome exist on the same subject).
- * Injecting them is what keeps this function a measurement of the record rather than a second scanner.
+ * Derive EVERY Experience field of an outcome record. PURE: the facts a record cannot carry about its
+ * own surroundings are INJECTED — `taskStatus(taskId)` (what develop says),
+ * `laterOutcomeWithSubjectKey(subjectKey, line)` (does a later outcome exist on the same subject), and
+ * `claimIndex` (which records the store filed under the same `subject_key`). Injecting them is what
+ * keeps this function a measurement of the record rather than a second scanner.
  *
- * @returns {{ok:true, fields:{role,components,summary,evaluation_pin}}|{ok:false, reasons:string[]}}
+ * @param {object} [deps]
+ * @param {Map|null} [deps.claimIndex] from `claimIndex`; `null` = the index could not be built, which
+ *   is its OWN value on the record (`join_status: "claim-index-unavailable"`), never the same shape as
+ *   "the store files no claim for this subject".
+ * @returns {{ok:true, fields:{role,components,summary,evaluation_pin,domain_claim,join_status,claim_refs,claim_citations}}|{ok:false, reasons:string[]}}
  */
-export function deriveExperienceFields(rec, { line = null, taskStatus = () => null, laterOutcomeWithSubjectKey = () => false, verdictRole = VERDICT_ROLE } = {}) {
+export function deriveExperienceFields(rec, { line = null, taskStatus = () => null, laterOutcomeWithSubjectKey = () => false, verdictRole = VERDICT_ROLE, claimIndex: claimIdx = null } = {}) {
   if (!isObj(rec)) return { ok: false, reasons: ["RECORD_NOT_OBJECT"] };
   let role = verdictRole[rec.verdict] ?? null;
   if (role === null) {
@@ -1002,13 +1110,21 @@ export function deriveExperienceFields(rec, { line = null, taskStatus = () => nu
   if (role === "found-unresolved" && isStr(rec.task_id, 1) && taskStatus(rec.task_id) === "done") {
     role = laterOutcomeWithSubjectKey(rec.subject_key, line) ? "recurred-after-fix" : "found-and-fixed";
   }
+  const join = joinOutcomeToClaims(rec, claimIdx);
   return {
     ok: true,
     fields: {
       role,
       components: componentsFromSubjectKey(rec.subject_key),
-      summary: deriveExperienceSummary(rec),
+      summary: deriveExperienceSummary(rec, { join }),
       evaluation_pin: evaluationPinOf(rec).pin,
+      // The claim the outcome cannot state, plus its provenance. Kept as SEPARATE fields rather than
+      // only folded into the 400-char `summary`: a long claim must not be truncated away by a bound
+      // that exists for a different projection.
+      domain_claim: join.domain_claim,
+      join_status: join.status,
+      claim_refs: [...join.hypothesis_refs, ...join.counterexample_refs],
+      claim_citations: join.citations,
     },
   };
 }
@@ -1189,6 +1305,15 @@ function systemRecord(rec, raw, fields, { caseId, ts, authoredBy }) {
     components: fields.components,
     summary: fields.summary,
     evaluation_pin: fields.evaluation_pin ?? null,
+    // The JOIN (see `joinOutcomeToClaims`): the domain claim the outcome record cannot state, the
+    // records it came from, and the READING of whether a claim was found at all. All three are written
+    // even when the claim is absent — `join_status` is what keeps "no claim filed" from reading like
+    // "a claim exists but is empty". The pinned-narration path leaves them `null`/absent: a caller who
+    // narrated the entry supplied its text directly and there is no outcome to join.
+    domain_claim: fields.domain_claim ?? null,
+    join_status: fields.join_status ?? null,
+    claim_refs: Array.isArray(fields.claim_refs) ? fields.claim_refs : [],
+    claim_citations: Array.isArray(fields.claim_citations) ? fields.claim_citations : [],
   };
 }
 
@@ -1260,6 +1385,9 @@ function ingestSystemSource(root, args) {
       taskStatus: typeof ctx.taskStatus === "function" ? ctx.taskStatus : (id) => taskStatusOnDevelop(root, id),
       laterOutcomeWithSubjectKey: typeof ctx.laterOutcomeWithSubjectKey === "function" ? ctx.laterOutcomeWithSubjectKey : () => false,
       verdictRole: isObj(ctx.verdictRole) ? ctx.verdictRole : VERDICT_ROLE,
+      // `undefined` (no context supplied) becomes `null`, which is the join's own "could not look"
+      // value — an ABSENT index must never be silently shaped like "the store files no claim".
+      claimIndex: ctx.claimIndex === undefined ? null : ctx.claimIndex,
     });
     if (!d.ok) return { ok: false, appended: false, kind: EXPERIENCE_KIND, reasons: d.reasons };
     fields = d.fields;
@@ -1446,15 +1574,19 @@ export function ingestNewOutcomes(root, {
 
   // Every outcome line, parsed ONCE: this is what lets a record be judged against a LATER outcome on
   // the same subject (the recurrence half of the role derivation) without a second pass over the store.
+  // …and every CLAIM-BEARING line, indexed ONCE by `subject_key`, so each derived Experience can be
+  // joined to the records that state why its outcome came out that way (the `claimIndex` below).
   const outcomes = [];
+  const storeRecords = [];
   lines.forEach((line, i) => {
     if (!line.trim()) return;
     let rec; try { rec = JSON.parse(line); } catch { return; }
+    storeRecords.push(rec);
     if (isObj(rec) && rec.kind === "outcome") outcomes.push({ rec, line: i + 1, raw: line });
   });
   const laterOutcomeWithSubjectKey = (subjectKey, line) =>
     isStr(subjectKey, 1) && isInt(line) && outcomes.some((o) => o.line > line && o.rec.subject_key === subjectKey);
-  const context = { taskStatus: (id) => taskStatusOnDevelop(root, id), laterOutcomeWithSubjectKey, verdictRole };
+  const context = { taskStatus: (id) => taskStatusOnDevelop(root, id), laterOutcomeWithSubjectKey, verdictRole, claimIndex: claimIndex(storeRecords) };
 
   const entries = [];
   const ids = [];
@@ -1463,6 +1595,10 @@ export function ingestNewOutcomes(root, {
   let scanned = 0, ingested = 0, duplicates = 0, skipped = 0, blank = 0, malformed = 0, readFailed = 0;
   let stoppedAtMalformed = null;
   let stoppedAtReadFailed = null;
+  // The JOIN READING. Counted per INGESTED entry, so the run reports how much of what it wrote carries
+  // a domain claim — a number no test fixture can satisfy, because it is taken from the real store.
+  let joinedClaims = 0;
+  let noLinkedClaim = 0;
 
   // Skips are COLLECTED and flushed on EVERY exit path (including a mid-loop refusal): a skip already
   // earned by a line this run really did examine stays true whether or not a LATER line aborted it.
@@ -1541,11 +1677,13 @@ export function ingestNewOutcomes(root, {
     const r = ingestExperience(root, { source: "system", outcome: { rec, raw: line, line: lineNo }, context });
     if (r.ok) {
       ingested++; ids.push(r.id); have.add(rec.id); advancedTo = lineNo;
+      if (r.record.join_status === JOIN_LINKED) joinedClaims++; else noLinkedClaim++;
       entries.push({
         case_id: r.record.case_id, source_ref: r.record.source_ref, role: r.record.role,
         components: r.record.components, summary: r.record.summary,
         evaluation_pin: r.record.evaluation_pin, line: lineNo,
         experiment_ref: rec.experiment_ref, verdict: rec.verdict,
+        join_status: r.record.join_status ?? null, claim_refs: r.record.claim_refs ?? [],
       });
       continue;
     }
@@ -1575,6 +1713,7 @@ export function ingestNewOutcomes(root, {
     remainder, advanced_to: advancedTo, watermark, entries, ids,
     skips_recorded: recorded.length, skips_already_present: skipsAlready, skipped_records: recorded,
     rewound_for_mapping: rewoundForMapping,
+    claim_join: { linked: joinedClaims, no_linked_claim: noLinkedClaim, claim_records_indexed: storeRecords.filter((r) => isObj(r) && CLAIM_BEARING_KINDS.includes(r.kind)).length },
   };
 }
 

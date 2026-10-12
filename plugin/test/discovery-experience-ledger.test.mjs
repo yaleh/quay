@@ -31,8 +31,10 @@ import {
   SKIP_READ_FAILED, SKIP_MALFORMED, VERDICT_ROLE_MAPPING_VERSION, verdictRoleMappingVersion,
   skipDedupKey, ingestSkipId, ingestSkipsFile, readIngestSkips, appendIngestSkip,
   appendExperienceCorrection, readExperienceCorrections, applyExperienceCorrections, backfillIngestSkips,
+  CLAIM_BEARING_KINDS, claimIndex, joinOutcomeToClaims,
+  JOIN_LINKED, JOIN_NO_CLAIM_RECORD, JOIN_INDEX_UNAVAILABLE,
 } from "../../docs/analysis/discovery-experience-ledger.mjs";
-import { appendOutcomeRecord, storeFile, sha256 } from "../../docs/analysis/architecture-evidence-store.mjs";
+import { appendOutcomeRecord, appendHypothesisRecord, appendCounterexampleRecord, readRecords, storeFile, sha256 } from "../../docs/analysis/architecture-evidence-store.mjs";
 // The CANONICAL shared-checkout resolver (`plugin/scripts/per-task-suite-record.ts`). The ledger module
 // cannot import it (a `.ts` specifier needs type-stripping that plain `node` does not do for a
 // `docs/analysis/*.mjs` consumer), so the equivalence is asserted HERE — an executable invariant
@@ -1266,4 +1268,109 @@ test("readExperienceLedger keeps corrections OUT of `records`, and reports a cor
   assert.deepEqual(readExperienceCorrections(root).orphan_targets, ["experience-absent"], "it is REPORTED, not silently dropped (硬规则 5)");
   assert.equal(readExperienceLedger(root).records[0].reported_by, "user", "the entry is untouched by an orphan correction");
   assert.deepEqual([...applyExperienceCorrections([{ kind: EXPERIENCE_KIND, id: "a" }, { kind: EXPERIENCE_CORRECTION_KIND, corrects: "a", patch: { reported_by: "system" } }]).corrected], ["a"]);
+});
+
+// ══════════════════════════════════════════════════════════════════════════════════════════════════
+// THE JOIN: an outcome → the claim records the store filed under the same `subject_key`
+// (task gap-discovery-method-generalization-failures-diagnosis-and-retest, Plan item 2a)
+//
+// The measured defect: `deriveExperienceSummary` is a projection of the OUTCOME record alone, and an
+// outcome carries no domain claim. Over the shipped store the derived summary carried 0.000 of its
+// linked claim records' content tokens, a joined one carries 1.000, and the methods that round induced
+// carried 0.034-0.111 — the reflection step was shown the pipeline's own bookkeeping and induced
+// methods about the bookkeeping. These tests pin the join, and pin that it stays THREE-VALUED.
+// ══════════════════════════════════════════════════════════════════════════════════════════════════
+
+const SK_FIX = "hypgen:invariant|plugin/scripts/alpha.ts,plugin/scripts/beta.ts";
+const HYP_STATEMENT = "the writer and the checker declare the same field set independently, so they drift apart silently";
+const CE_STATEMENT = "alpha.ts:40 documents that the second declaration is deliberately separate, so the drift may be intended design";
+
+/** A FIXTURE evidence store: one outcome plus the claim records the store files under its subject. */
+const writeFixtureStoreWithClaim = (root, subjectKey, { withHypothesis = true, withCounterexample = true } = {}) => {
+  const o = appendOutcomeRecord(root, { ts: "2026-10-12T00:00:00Z", experiment: "E-JOIN", experiment_ref: "E-JOIN cluster 1", verdict: "supported", subject_key: subjectKey });
+  assert.equal(o.ok, true, `fixture outcome refused: ${o.reasons?.join(",")}`);
+  if (withHypothesis) {
+    const h = appendHypothesisRecord(root, { ts: "2026-10-12T00:00:00Z", statement: HYP_STATEMENT, source_evidence: ["plugin/scripts/alpha.ts:12"], subject_key: subjectKey, experiment: "E-JOIN" });
+    assert.equal(h.ok, true, `fixture hypothesis refused: ${h.reasons?.join(",")}`);
+  }
+  if (withCounterexample) {
+    const c = appendCounterexampleRecord(root, { ts: "2026-10-12T00:00:00Z", counterexample_of: HYP_STATEMENT, statement: CE_STATEMENT, source_evidence: ["plugin/scripts/beta.ts:44"], subject_key: subjectKey, experiment: "E-JOIN" });
+    assert.equal(c.ok, true, `fixture counterexample refused: ${c.reasons?.join(",")}`);
+  }
+  return o;
+};
+const storeRecordsOf = (root) => readRecords(storeFile(root)).records;
+
+test("JOIN(a): the derived Experience carries the linked claim records' OWN text, not just the bookkeeping", () => {
+  const root = mkTmp();
+  writeFixtureStoreWithClaim(root, SK_FIX);
+  const r = ingestNewOutcomes(root);
+  assert.equal(r.ok, true, r.reasons?.join(","));
+  assert.equal(r.ingested, 1);
+  const rec = readExperienceLedger(root).records[0];
+
+  // The bookkeeping half is still there — a reader can still see which record this came from…
+  assert.match(rec.summary, /E-JOIN cluster 1: verifier verdict "supported" on subject hypgen:invariant\|/);
+  // …and the CLAIM is now carried, VERBATIM from the records that state it.
+  assert.equal(rec.join_status, JOIN_LINKED);
+  assert.ok(rec.domain_claim.includes(HYP_STATEMENT), "the linked hypothesis's own statement is carried");
+  assert.ok(rec.domain_claim.includes(CE_STATEMENT), "…and so is the counterexample's");
+  assert.ok(rec.domain_claim.startsWith(`${HYP_STATEMENT} `), "a counterexample is prefixed by the hypothesis it refutes, so a run that persisted ONLY counterexamples still hands over the claim");
+  assert.deepEqual(rec.claim_refs.map((x) => x.slice(0, 10)).sort(), ["counterexa", "hypothesis"], "the refs name WHICH records the claim came from");
+  assert.deepEqual(rec.claim_citations, ["plugin/scripts/alpha.ts:12", "plugin/scripts/beta.ts:44"], "the file:line citations both kinds carry, so a reviewer can re-read the evidence");
+
+  // The summary projection carries the claim too (bounded by MAX_SUMMARY_CHARS, which is why the claim
+  // is ALSO its own untruncated field).
+  const projected = deriveExperienceSummary(
+    { experiment_ref: "E-JOIN cluster 1", verdict: "supported", subject_key: SK_FIX },
+    { join: joinOutcomeToClaims({ subject_key: SK_FIX }, claimIndex(storeRecordsOf(root))) },
+  );
+  assert.ok(projected.includes(HYP_STATEMENT), "the summary the reflection prompt shows carries the claim");
+  assert.ok(projected.length <= MAX_SUMMARY_CHARS);
+});
+
+test("JOIN(b): the join is THREE-VALUED — no claim record, no index at all, and a real claim are different shapes", () => {
+  const SK = "hypgen:invariant|plugin/scripts/alpha.ts";
+  // (1) The store FILES NO CLAIM for this subject.
+  const bare = mkTmp();
+  appendOutcomeRecord(bare, { ts: "2026-10-12T00:00:00Z", experiment: "E-JOIN", experiment_ref: "E-JOIN cluster 9", verdict: "supported", subject_key: SK });
+  assert.equal(ingestNewOutcomes(bare).ok, true);
+  assert.equal(readExperienceLedger(bare).records[0].join_status, JOIN_NO_CLAIM_RECORD);
+  assert.equal(readExperienceLedger(bare).records[0].domain_claim, null);
+
+  // (2) The index could not be built AT ALL — its own value, never shaped like "no claim exists".
+  const noIndex = deriveExperienceFields({ id: "outcome-x", verdict: "supported", subject_key: SK, experiment_ref: "E-JOIN cluster 9" }, { claimIndex: null });
+  assert.equal(noIndex.fields.join_status, JOIN_INDEX_UNAVAILABLE);
+  assert.equal(noIndex.fields.domain_claim, null);
+  assert.notEqual(JOIN_INDEX_UNAVAILABLE, JOIN_NO_CLAIM_RECORD, "the two absences carry DIFFERENT values (硬规则 3b)");
+
+  // (3) POSITIVE CONTROL on the same predicate: the same call that returned `null` twice above returns
+  //     TEXT here, so the two `null`s are real and not a predicate that can never fire.
+  const withClaim = mkTmp();
+  writeFixtureStoreWithClaim(withClaim, SK);
+  const direct = joinOutcomeToClaims({ subject_key: SK }, claimIndex(storeRecordsOf(withClaim)));
+  assert.equal(direct.status, JOIN_LINKED);
+  assert.ok(direct.domain_claim.length > 20);
+});
+
+test("JOIN(c): the production run REPORTS its join coverage — a reading, not a promise", () => {
+  const root = mkTmp();
+  writeFixtureStoreWithClaim(root, SK_FIX);
+  appendOutcomeRecord(root, { ts: "2026-10-12T00:00:00Z", experiment: "E-JOIN", experiment_ref: "E-JOIN cluster 9", verdict: "supported", subject_key: "hypgen:identity|plugin/scripts/gamma.ts" });
+  const r = ingestNewOutcomes(root);
+  assert.equal(r.ok, true);
+  assert.equal(r.ingested, 2);
+  assert.deepEqual(r.claim_join, { linked: 1, no_linked_claim: 1, claim_records_indexed: 2 }, "one entry joined, one did not, and the index saw both claim records");
+  assert.deepEqual(r.entries.map((e) => e.join_status), [JOIN_LINKED, JOIN_NO_CLAIM_RECORD], "per-entry, not just a total");
+});
+
+test("JOIN(d): the join keys on `subject_key` EXACTLY — a look-alike subject is not a link", () => {
+  const root = mkTmp();
+  writeFixtureStoreWithClaim(root, SK_FIX);
+  // The same subject with ONE extra component: the defect re-filed under a different file set is a
+  // different record, and crediting it would hand the reflection step a claim about other code.
+  appendOutcomeRecord(root, { ts: "2026-10-12T00:00:00Z", experiment: "E-JOIN", experiment_ref: "E-JOIN cluster 2", verdict: "supported", subject_key: `${SK_FIX},plugin/scripts/gamma.ts` });
+  const r = ingestNewOutcomes(root);
+  assert.equal(r.ok, true);
+  assert.deepEqual(r.entries.map((e) => e.join_status), [JOIN_LINKED, JOIN_NO_CLAIM_RECORD]);
 });
