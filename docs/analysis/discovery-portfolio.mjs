@@ -1053,8 +1053,14 @@ export function correctFinding(root, { finding_id, patch, reason, evidence, by, 
         reasons.push(`CORRECTION_DUPLICATE_OF_CYCLE:${loop}-closes-a-loop-so-neither-row-would-be-the-original`);
       } else if (lineIndexOf(read.records, target) > lineIndexOf(read.records, finding_id)) {
         reasons.push(`CORRECTION_DUPLICATE_OF_NOT_EARLIER:${target}-follows-${finding_id}-in-${PORTFOLIO_REL}-and-a-duplicate-must-name-the-original-that-precedes-it`);
-      } else if (read.records.find((r) => r.finding_id === target)?.duplicate_of !== null) {
-        reasons.push(`CORRECTION_DUPLICATE_OF_CHAINED:${target}-is-itself-a-duplicate-of-${String(read.records.find((r) => r.finding_id === target)?.duplicate_of)}-so-it-is-not-an-original`);
+      } else {
+        // `null` and absent are the SAME answer here ("this is not a duplicate") — unlike `valueMetrics`,
+        // where an absent key would be a schema defect. A row written before this field existed is not a
+        // duplicate, and refusing a correction because of it would be failing closed on the wrong thing.
+        const targetDup = read.records.find((r) => r.finding_id === target)?.duplicate_of ?? null;
+        if (targetDup !== null) {
+          reasons.push(`CORRECTION_DUPLICATE_OF_CHAINED:${target}-is-itself-a-duplicate-of-${String(targetDup)}-so-it-is-not-an-original`);
+        }
       }
     }
   }
