@@ -82,8 +82,10 @@ extra:
 
 ## Blocker
 
-**2026-10-12T15:24:49.748Z — worker 未落地（exited-not-landed）**
+**2026-10-12T15:33:24.247Z — worker 未落地（exited-not-landed）**
 
-- 未落地原因：step=suite: AssertionError [ERR_ASSERTION]: zero output ⇒ fallback to generic 'suite red'
+- 未落地原因：step=ff: fan-in-ff-merge: suite 证书 — suite_head..tip 恰为本任务的单个 flip-done 提交（身份判定：仅 M tasks/gap-fanin-suite-gate-no-baseline-equivalent-exception.md）⇒ 判惰性，⛔ 未调分类器
+fan-in-ff-merge: FF FAILED — To .; not a fast-forward. Retry record written (attempt 1). Return to 无锁段 step 1 (merge develop again — 必须 merge 不得 rebase, AC75), re-judge the delta (step 2) and re-run.
+fan-in-ff-merge: measure ff_only_locked=false
 - run_id：wk-prod-anchor
-- session_id：7e53dd94-1c8a-4315-a34e-a0c5566e823f
+- session_id：ac5d5dd4-040f-4c51-b070-01a33a9ab628
