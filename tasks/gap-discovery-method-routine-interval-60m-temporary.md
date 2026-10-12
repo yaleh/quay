@@ -59,5 +59,6 @@ Facts, read on production at 2026-10-12T12:50Z:
 ## Touches
 - tasks/gap-discovery-method-routine-interval-60m-temporary.md
 - plugin/scripts/discovery-method-routine.ts
+- plugin/scripts/quality-gate-driver.ts
 - plugin/test/discovery-method-routine.test.mjs
 - .quay/config.yml
