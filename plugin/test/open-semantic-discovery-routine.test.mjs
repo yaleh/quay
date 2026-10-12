@@ -2309,7 +2309,7 @@ test("WIRING — a due paired round runs BOTH arms on one pin and files only the
   assert.equal(summaries[0].paired_rounds, 1);
   // …and the round's OWN fact says which arm produced what, without inventing a gain.
   assert.match(fact.reason, /PAIRED round 1: baseline 2 net-new/);
-  process.stdout.write(`    wiring: ${fact.reason.split("; ").find((s) => s.startsWith("PAIRED"))}\n`);
+  process.stdout.write(`    wiring: ${fact.reason.slice(fact.reason.indexOf("PAIRED round"))}\n`);
 });
 
 test("AC (e) — a paired-round record is NOT independent evidence: the promotion path caps it at trial", async () => {
