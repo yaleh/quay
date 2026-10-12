@@ -56,6 +56,18 @@ The governing principle stands (SEMANTIC FIRST): the fix must make the model act
 - `scripts/test.sh --for-task <this task>` green; AC2 pasted from a real model run (not a stub).
 - No task, Goal, Portfolio or Experience write is added to the routine; the routine stays report-only.
 
+## Evidence
+**Pre-dispatch diagnosis, 2026-10-12T18:4xZ, from the coordinator session.** These were diagnostic calls outside the routine ledger, built with the routine's own argv builder (`hardenedArgv(launchArgv, …, {tools:"Read,Grep,Glob", outputFormat:"stream-json"})` ⇒ `claude-fjdac … --model v4.1flash-anthropic --tools Read,Grep,Glob --no-session-persistence --strict-mcp-config --max-turns N --output-format stream-json --verbose -p`, cwd = a scratch pin).
+- **H1 CONFIRMED:**
+  - `--max-turns 2` with a read-heavy prompt ⇒ exit 1, stream `result.subtype:"error_max_turns"`, `is_error:true`, `num_turns:3`, `result:""`, `errors:["Reached maximum number of turns (2)"]`.
+  - So `turns = max_turns + 1` ⇒ exit 1 with EMPTY result text. That is exactly the production 18:07Z shape (turns 13 under max 12, exit 1, 0 hypotheses): the investigator was cut off before writing its answer.
+  - The call record does not keep `subtype`, so the round looked like "explored, found nothing".
+- **H3 REFUTED as a cause:**
+  - a trivial prompt with the same argv ⇒ exit 0, `subtype:"success"`, `num_turns:1`, result "OK";
+  - stderr carries the same `[claude-code:unrecognized_model] {"model":"v4.1flash-anthropic"}` line ⇒ the warning is benign and the gateway model id works. The exit-1 calls are not caused by it.
+- **H2 (17:04Z, tokens 0, turns null, exit 1) still OPEN.** It did not reproduce now, and nothing is on record because neither stderr nor the subtype is kept. AC3 stands.
+- The config key `loop.open_semantic_discovery.investigator_max_turns` (optional, default 12) already exists. A manual measurement round with an in-memory override (40, production config untouched, same hard ledger) was started at ~18:45Z to measure turns-to-first-hypothesis; its result is to be pasted here by the coordinator.
+
 ## Touches
 - tasks/gap-open-semantic-discovery-investigator-exits-before-hypotheses-zero-semantic-output.md
 - plugin/scripts/open-semantic-discovery-routine.ts
