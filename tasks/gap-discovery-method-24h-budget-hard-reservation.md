@@ -51,6 +51,9 @@ Also unclear today: what a "model call" counts.
    - a budget refusal is a `not-evaluated:budget-24h` Fact, never shaped like idle;
    - manual rounds still never advance `.quay/routine-last-run.json`;
    - `interval_until` expiry behaviour is unchanged.
+7. **Deployment.** The anchor's self-refresh watches only the kind's driver file plus the shared kernel files, NOT routine modules (`driver-runtime.ts` `watchedSourceFiles`). A delta confined to `discovery-method-routine.ts` / `discovery-reflection.mjs` would land inert, with production running the old soft check indefinitely.
+   ⇒ The delta must also touch `plugin/scripts/quality-gate-driver.ts`. A real change is preferred, e.g. its discovery-method assembly line printing the hard-budget settings, which is the line the real-execution AC reads.
+   Never restart via `pkill -f`.
 6. **Migration.** The trailing-24h usage at cut-over is seeded from the existing `scan-round` lines (the 2026-10-12 14:59:56Z round's 6 calls), so the window is not reset to zero by the change.
 
 ## Acceptance Criteria
@@ -84,6 +87,7 @@ Also unclear today: what a "model call" counts.
 ## Touches
 - tasks/gap-discovery-method-24h-budget-hard-reservation.md
 - plugin/scripts/discovery-method-routine.ts
+- plugin/scripts/quality-gate-driver.ts
 - plugin/test/discovery-method-routine.test.mjs
 - docs/analysis/discovery-reflection.mjs
 - plugin/test/discovery-reflection.test.mjs
