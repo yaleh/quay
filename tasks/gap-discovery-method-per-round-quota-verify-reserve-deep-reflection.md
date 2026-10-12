@@ -78,4 +78,5 @@ Three structural limits need deciding:
 - plugin/test/discovery-method-routine.test.mjs
 - docs/analysis/discovery-reflection.mjs
 - plugin/test/discovery-reflection.test.mjs
+- plugin/scripts/capability-catalog-declarations.json
 - .quay/config.yml
