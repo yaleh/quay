@@ -3,7 +3,7 @@ id: gap-driver-round-carriers-unbounded-growth-retention-design
 title: "driver *-round.jsonl carriers grow unbounded (meta 513M, goal 186M,
   verification 172M): consumer census + tested append-safe archival/retention,
   default disabled, no production carrier change"
-status: todo
+status: ready
 labels:
   - gap
   - design
