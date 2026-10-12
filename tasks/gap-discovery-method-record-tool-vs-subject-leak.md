@@ -294,14 +294,3 @@ other's `wrapper-delegate` edge — a kind that `computeKept` deliberately does 
 snapshot is committed, and the gate can only stay green while the snapshot predates them. This task
 does not touch that checker (not in ## Touches); it is recorded so the next §12f work starts from the
 measured reading rather than from a retry.
-
-## Blocker
-
-**2026-10-12T07:15:02.690Z — worker 未落地（exited-not-landed）**
-
-- 未落地原因：step=suite: # fail 84
-- run_id：wk-prod-anchor
-- session_id：522653ec-f72d-418b-aa3b-82ce73971f0f
-
-（真因与修法见 Evidence §"Why the previous round did not land"：`# tests 0` ⇒ 套件在静态闸中止，
-唯一真因是被 AC2 fixture 逐字携带的 `dual-source-check.ts` 裸文件名命中 §12f 死集闸。）
