@@ -70,5 +70,5 @@ Only ONE case has no single outcome record of its own and still needs the manual
 
 ## Touches
 - tasks/gap-discovery-teaching-case-ledger-feedback-ingestion.md
-- docs/analysis/discovery-experience-ledger.mjs (new; replaces the originally-planned discovery-teaching-ledger.mjs filename)
-- plugin/test/discovery-experience-ledger.test.mjs (new; replaces discovery-teaching-ledger.test.mjs)
+- docs/analysis/discovery-experience-ledger.mjs (new)
+- plugin/test/discovery-experience-ledger.test.mjs (new)
