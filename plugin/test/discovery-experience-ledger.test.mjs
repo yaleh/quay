@@ -24,6 +24,13 @@ import {
   experienceRecordId, resolveCarrierRoot, repairCarrier,
   ingestExperience, ingestNewOutcomes, deriveExperienceFields, deriveExperienceSummary,
   componentsFromSubjectKey, evaluationPinOf, readIngestWatermark, sharedStoreFile,
+  AUTHORED_BY_ACTORS, USER_PROVENANCE_KINDS, MIN_USER_QUOTE_CHARS, DERIVED_INGEST_AUTHOR,
+  USER_PROVENANCE_MISSING, USER_SOURCE_FROM_WORKER, EXPERIENCE_CORRECTION_KIND, CORRECTABLE_FIELDS,
+  CORRECTION_TARGET_NOT_FOUND, CORRECTION_FIELD_NOT_CORRECTABLE, MIN_CORRECTION_REASON_CHARS,
+  INGEST_SKIPS_REL, INGEST_SKIP_KIND, SKIP_VERDICT_NOT_INGESTIBLE, SKIP_DUPLICATE_SOURCE_REF,
+  SKIP_READ_FAILED, SKIP_MALFORMED, VERDICT_ROLE_MAPPING_VERSION, verdictRoleMappingVersion,
+  skipDedupKey, ingestSkipId, ingestSkipsFile, readIngestSkips, appendIngestSkip,
+  appendExperienceCorrection, readExperienceCorrections, applyExperienceCorrections, backfillIngestSkips,
 } from "../../docs/analysis/discovery-experience-ledger.mjs";
 import { appendOutcomeRecord, storeFile, sha256 } from "../../docs/analysis/architecture-evidence-store.mjs";
 // The CANONICAL shared-checkout resolver (`plugin/scripts/per-task-suite-record.ts`). The ledger module
@@ -69,6 +76,26 @@ const mkWorktreePair = () => {
 const lines = (root) => { const f = ledgerFile(root); return fs.existsSync(f) ? fs.readFileSync(f, "utf8").split("\n").filter(Boolean).length : 0; };
 const SUMMARY = "the deny-list must not be derivable from anything but the ledger's actual recorded contents";
 
+/**
+ * The two provenance fields EVERY new entry needs. ⛔ These are TEST constants, not adapter defaults:
+ * the production adapters default NEITHER (`authoredBy` is in `REQUIRED_EXPERIENCE_FIELDS`, and
+ * `user_provenance` is required whenever `reported_by` is `"user"`), because a default is precisely how
+ * the 2026-10-12 defect happened — a worker's own finding ended up stored as a human report.
+ */
+const OPERATOR = Object.freeze({ actor: "operator-session", ref: "session-e6db01fa" });
+const WORKER = Object.freeze({ actor: "task-worker", ref: "gap-fixture-worker" });
+const QUOTE = "the user pointed out that probe and meta are coupled in a way no tool had surfaced";
+const USER_PROV = Object.freeze({ kind: "conversation", ref: "session-e6db01fa", quote: QUOTE });
+
+/** `ingestFeedback` with the two provenance fields filled in. It exists so the ~20 tests that are NOT
+ *  about provenance stay readable; every one of them would otherwise be a refusal, which is the point
+ *  of the fields. Tests that ARE about provenance call `ingestFeedback` directly. */
+const ingestUser = (root, args) => ingestFeedback(root, { authoredBy: OPERATOR, userProvenance: USER_PROV, ...args });
+
+/** `ingestFromEvidenceStoreOutcome` — the PINNED system adapter. It requires an author too: the pinned
+ *  caller narrates the entry, so the pinned caller is the one that has to say who it is. */
+const ingestPinned = (root, args) => ingestFromEvidenceStoreOutcome(root, { authoredBy: OPERATOR, ...args });
+
 /** A FIXTURE evidence store: one outcome record written through the REAL evidence-store writer. */
 const writeFixtureStore = (root, recs) => {
   const out = recs.map((r) => appendOutcomeRecord(root, { ts: "2026-10-12T00:00:00Z", experiment: "E-FIX", ...r }));
@@ -82,7 +109,7 @@ const lineSha = (file, n) => sha256(fs.readFileSync(file, "utf8").split("\n")[n 
 
 test("AC1(a): a well-formed manual (reported_by:\"user\") case is accepted with source_ref null", () => {
   const root = mkTmp();
-  const r = ingestFeedback(root, {
+  const r = ingestUser(root, {
     caseId: "TEACH-probe-meta-coupling",
     role: "missed-by-tooling",
     reportedBy: "user",
@@ -106,7 +133,7 @@ test("AC1(a): a well-formed manual (reported_by:\"user\") case is accepted with 
 
 test("AC1(a): a refused manual case appends NOTHING and does not even create the carrier", () => {
   const root = mkTmp();
-  const r = ingestFeedback(root, { caseId: "x", role: "found-and-fixed", evidenceRefs: [], summary: SUMMARY });
+  const r = ingestUser(root, { caseId: "x", role: "found-and-fixed", evidenceRefs: [], summary: SUMMARY });
   assert.equal(r.ok, false);
   assert.equal(r.appended, false);
   assert.equal(lines(root), 0);
@@ -118,11 +145,11 @@ test("AC1(a): a refused manual case appends NOTHING and does not even create the
 test("AC1(b): a case with zero evidence refs is refused, with a code distinct from the absent-field one", () => {
   const root = mkTmp();
   for (const empty of [[], "not-an-array"]) {
-    const r = ingestFeedback(root, { caseId: "x", role: "found-and-fixed", evidenceRefs: empty, summary: SUMMARY });
+    const r = ingestUser(root, { caseId: "x", role: "found-and-fixed", evidenceRefs: empty, summary: SUMMARY });
     assert.equal(r.ok, false, `evidenceRefs=${JSON.stringify(empty)} must be refused`);
     assert.ok(r.reasons.some((x) => x.startsWith("EVIDENCE_UNGROUNDED:")), `distinct code, got ${r.reasons.join(",")}`);
   }
-  const rec = { case_id: "x", ts: "2026-10-12T00:00:00Z", role: "found-and-fixed", reported_by: "user", source_ref: null, components: [], summary: SUMMARY };
+  const rec = { case_id: "x", ts: "2026-10-12T00:00:00Z", role: "found-and-fixed", reported_by: "user", authored_by: OPERATOR, user_provenance: USER_PROV, source_ref: null, components: [], summary: SUMMARY };
   delete rec.evidence;
   assert.deepEqual(validateExperienceRecord(rec).reasons, ["SCHEMA_MISSING:evidence"], "absent is a DIFFERENT cause from present-but-empty");
   assert.equal(lines(root), 0);
@@ -133,7 +160,7 @@ test("AC1(b): a case with zero evidence refs is refused, with a code distinct fr
 test("AC1(c): reported_by outside the two-value vocab is refused, naming the value", () => {
   const root = mkTmp();
   for (const bad of ["operator", "", null, 1]) {
-    const r = ingestFeedback(root, { caseId: "x", role: "found-and-fixed", reportedBy: bad, evidenceRefs: ["a"], summary: SUMMARY });
+    const r = ingestUser(root, { caseId: "x", role: "found-and-fixed", reportedBy: bad, evidenceRefs: ["a"], summary: SUMMARY });
     assert.equal(r.ok, false, `reported_by=${JSON.stringify(bad)} must be refused`);
     assert.ok(r.reasons.some((x) => x.startsWith("REPORTED_BY_NOT_IN_VOCAB:")), r.reasons.join(","));
   }
@@ -147,13 +174,13 @@ test("AC1(d): a summary under 40 non-whitespace chars is refused; whitespace doe
   const root = mkTmp();
   const short = "too short to teach anything at all";
   assert.ok(short.replace(/\s+/g, "").length < MIN_SUMMARY_CHARS);
-  const r = ingestFeedback(root, { caseId: "x", role: "found-and-fixed", evidenceRefs: ["a"], summary: short });
+  const r = ingestUser(root, { caseId: "x", role: "found-and-fixed", evidenceRefs: ["a"], summary: short });
   assert.equal(r.ok, false);
   assert.ok(r.reasons.some((x) => x.startsWith("SUMMARY_INSUBSTANTIAL:")), r.reasons.join(","));
   // Padding with whitespace does not clear the gate — the measure is non-whitespace chars.
   const padded = `${"a b c ".repeat(20)}`.trim();
   assert.ok(padded.replace(/\s+/g, "").length >= MIN_SUMMARY_CHARS);
-  assert.equal(ingestFeedback(root, { caseId: "x", role: "found-and-fixed", evidenceRefs: ["a"], summary: "  ".repeat(80) }).ok, false, "whitespace alone is not substance");
+  assert.equal(ingestUser(root, { caseId: "x", role: "found-and-fixed", evidenceRefs: ["a"], summary: "  ".repeat(80) }).ok, false, "whitespace alone is not substance");
   assert.equal(lines(root), 0);
 });
 
@@ -162,7 +189,7 @@ test("AC1(d): a summary under 40 non-whitespace chars is refused; whitespace doe
 test("AC1(e): ingestFromEvidenceStoreOutcome derives reported_by:\"system\", source_ref and a line-hash", () => {
   const root = mkTmp();
   const [written] = writeFixtureStore(root, [{ experiment_ref: "E-FIX cluster 5", verdict: "supported" }]);
-  const r = ingestFromEvidenceStoreOutcome(root, {
+  const r = ingestPinned(root, {
     experiment: "E-FIX", experimentRef: "E-FIX cluster 5", role: "found-and-fixed", caseId: "EXP-fix-5",
     components: ["plugin/scripts/fixture-check.ts"], summary: SUMMARY,
   });
@@ -176,31 +203,31 @@ test("AC1(e): ingestFromEvidenceStoreOutcome derives reported_by:\"system\", sou
   assert.equal(r.derived_from.verdict, "supported");
   assert.equal(r.derived_from.line, 1);
   // A substring ref resolves too (the task body names clusters as "E-DT-1-Hp cluster 11").
-  const sub = ingestFromEvidenceStoreOutcome(root, { experiment: "E-FIX", experimentRef: "cluster 5", role: "found-and-fixed", caseId: "c2", summary: SUMMARY });
+  const sub = ingestPinned(root, { experiment: "E-FIX", experimentRef: "cluster 5", role: "found-and-fixed", caseId: "c2", summary: SUMMARY });
   assert.equal(sub.ok, true, sub.reasons?.join(","));
 });
 
 test("AC1(e): a named outcome record that does not exist is REFUSED, and nothing is appended", () => {
   const root = mkTmp();
   writeFixtureStore(root, [{ experiment_ref: "E-FIX cluster 5", verdict: "supported" }]);
-  const missing = ingestFromEvidenceStoreOutcome(root, { experiment: "E-FIX", experimentRef: "E-FIX cluster 99", role: "found-and-fixed", caseId: "c-missing", summary: SUMMARY });
+  const missing = ingestPinned(root, { experiment: "E-FIX", experimentRef: "E-FIX cluster 99", role: "found-and-fixed", caseId: "c-missing", summary: SUMMARY });
   assert.equal(missing.ok, false);
   assert.deepEqual(missing.reasons, ["EVIDENCE_OUTCOME_NOT_FOUND:E-FIX#E-FIX cluster 99"]);
   // A store that is entirely absent is its OWN value, never "nothing matched, so it is fine".
-  const bare = ingestFromEvidenceStoreOutcome(mkTmp(), { experiment: "E-FIX", experimentRef: "x", role: "found-and-fixed", caseId: "c-bare", summary: SUMMARY });
+  const bare = ingestPinned(mkTmp(), { experiment: "E-FIX", experimentRef: "x", role: "found-and-fixed", caseId: "c-bare", summary: SUMMARY });
   assert.equal(bare.ok, false);
   assert.ok(bare.reasons.some((x) => x.startsWith("EVIDENCE_STORE_MISSING:")), bare.reasons.join(","));
   // The three LOOKUP args and the caller-chosen identity each have their own absent-arg code.
-  assert.deepEqual(ingestFromEvidenceStoreOutcome(root, { experimentRef: "x", role: "found-and-fixed", caseId: "c", summary: SUMMARY }).reasons, ["INGEST_ARG_MISSING:experiment"]);
-  assert.deepEqual(ingestFromEvidenceStoreOutcome(root, { experiment: "E-FIX", role: "found-and-fixed", caseId: "c", summary: SUMMARY }).reasons, ["INGEST_ARG_MISSING:experimentRef"]);
-  assert.deepEqual(ingestFromEvidenceStoreOutcome(root, { experiment: "E-FIX", experimentRef: "x", role: "found-and-fixed", summary: SUMMARY }).reasons, ["INGEST_ARG_MISSING:caseId"]);
+  assert.deepEqual(ingestPinned(root, { experimentRef: "x", role: "found-and-fixed", caseId: "c", summary: SUMMARY }).reasons, ["INGEST_ARG_MISSING:experiment"]);
+  assert.deepEqual(ingestPinned(root, { experiment: "E-FIX", role: "found-and-fixed", caseId: "c", summary: SUMMARY }).reasons, ["INGEST_ARG_MISSING:experimentRef"]);
+  assert.deepEqual(ingestPinned(root, { experiment: "E-FIX", experimentRef: "x", role: "found-and-fixed", summary: SUMMARY }).reasons, ["INGEST_ARG_MISSING:caseId"]);
   assert.equal(lines(root), 0);
 });
 
 test("AC1(e): an AMBIGUOUS ref is reported with its candidates, never resolved arbitrarily (枚举, not boolean)", () => {
   const root = mkTmp();
   writeFixtureStore(root, [{ experiment_ref: "E-FIX cluster 1", verdict: "supported" }, { experiment_ref: "E-FIX cluster 11", verdict: "supported" }]);
-  const amb = ingestFromEvidenceStoreOutcome(root, { experiment: "E-FIX", experimentRef: "cluster 1", role: "found-and-fixed", caseId: "c-amb", summary: SUMMARY });
+  const amb = ingestPinned(root, { experiment: "E-FIX", experimentRef: "cluster 1", role: "found-and-fixed", caseId: "c-amb", summary: SUMMARY });
   assert.equal(amb.ok, false);
   assert.ok(amb.reasons.some((x) => x.startsWith("EVIDENCE_OUTCOME_AMBIGUOUS:")), amb.reasons.join(","));
   assert.equal(amb.matches.length, 2, "the candidates are named, so the caller can disambiguate");
@@ -212,15 +239,15 @@ test("AC1(e): an AMBIGUOUS ref is reported with its candidates, never resolved a
 test("AC1(f): a claimed role contradicting the record's stored verdict is refused with its own code", () => {
   const root = mkTmp();
   writeFixtureStore(root, [{ experiment_ref: "E-FIX ok", verdict: "supported" }, { experiment_ref: "E-FIX neg", verdict: "refuted" }]);
-  const bad = ingestFromEvidenceStoreOutcome(root, { experiment: "E-FIX", experimentRef: "E-FIX ok", role: "confirmed-negative", caseId: "c-bad", summary: SUMMARY });
+  const bad = ingestPinned(root, { experiment: "E-FIX", experimentRef: "E-FIX ok", role: "confirmed-negative", caseId: "c-bad", summary: SUMMARY });
   assert.equal(bad.ok, false);
   assert.ok(bad.reasons.some((x) => x.startsWith("ROLE_VERDICT_INCONSISTENT:")), bad.reasons.join(","));
   assert.ok(bad.reasons.some((x) => x.includes("stored-supported")), "the refusal names the verdict it actually found");
   // The compatible role on the same record is accepted — the refusal is caused by the ROLE, not the record.
-  assert.equal(ingestFromEvidenceStoreOutcome(root, { experiment: "E-FIX", experimentRef: "E-FIX ok", role: "found-and-fixed", caseId: "c-ok", summary: SUMMARY }).ok, true);
+  assert.equal(ingestPinned(root, { experiment: "E-FIX", experimentRef: "E-FIX ok", role: "found-and-fixed", caseId: "c-ok", summary: SUMMARY }).ok, true);
   // And the mirror: a refuted record accepts confirmed-negative but NOT found-and-fixed.
-  assert.equal(ingestFromEvidenceStoreOutcome(root, { experiment: "E-FIX", experimentRef: "E-FIX neg", role: "found-and-fixed", caseId: "c2", summary: SUMMARY }).ok, false);
-  assert.equal(ingestFromEvidenceStoreOutcome(root, { experiment: "E-FIX", experimentRef: "E-FIX neg", role: "confirmed-negative", caseId: "c3", summary: SUMMARY }).ok, true);
+  assert.equal(ingestPinned(root, { experiment: "E-FIX", experimentRef: "E-FIX neg", role: "found-and-fixed", caseId: "c2", summary: SUMMARY }).ok, false);
+  assert.equal(ingestPinned(root, { experiment: "E-FIX", experimentRef: "E-FIX neg", role: "confirmed-negative", caseId: "c3", summary: SUMMARY }).ok, true);
   assert.equal(lines(root), 2, "only the two accepted entries were appended");
 });
 
@@ -228,8 +255,8 @@ test("AC1(f): a claimed role contradicting the record's stored verdict is refuse
 
 test("AC1(g): experienceDenyList flags an inventory line naming a registered component, and not an unrelated one", () => {
   const root = mkTmp();
-  ingestFeedback(root, { caseId: "TEACH-probe-meta-coupling", role: "missed-by-tooling", evidenceRefs: ["x"], components: ["plugin/scripts/probe-routine.ts", "plugin/scripts/meta-driver.ts"], summary: SUMMARY });
-  ingestFeedback(root, { caseId: "TEACH-other", role: "found-and-fixed", evidenceRefs: ["y"], components: ["plugin/scripts/other-check.ts"], summary: SUMMARY });
+  ingestUser(root, { caseId: "TEACH-probe-meta-coupling", role: "missed-by-tooling", evidenceRefs: ["x"], components: ["plugin/scripts/probe-routine.ts", "plugin/scripts/meta-driver.ts"], summary: SUMMARY });
+  ingestUser(root, { caseId: "TEACH-other", role: "found-and-fixed", evidenceRefs: ["y"], components: ["plugin/scripts/other-check.ts"], summary: SUMMARY });
   const dl = experienceDenyList(root);
   assert.equal(dl.ok, true);
   assert.equal(dl.evaluated, 2);
@@ -250,7 +277,7 @@ test("AC1(g): experienceDenyList flags an inventory line naming a registered com
 
 test("the deny-list emits patterns only where a pattern can FIRE (summary text is data, not a pattern)", () => {
   const root = mkTmp();
-  ingestFeedback(root, { caseId: "TEACH-x", role: "confirmed-negative", evidenceRefs: ["x"], components: ["plugin/scripts/touches-parser.ts"], summary: SUMMARY });
+  ingestUser(root, { caseId: "TEACH-x", role: "confirmed-negative", evidenceRefs: ["x"], components: ["plugin/scripts/touches-parser.ts"], summary: SUMMARY });
   const dl = experienceDenyList(root);
   assert.equal(dl.summaries.length, 1, "the summary is still returned as data");
   // Only component + case_id patterns exist: 1 component + 1 case_id. A whole-sentence summary regex
@@ -276,7 +303,7 @@ test("AC1(h): experienceDenyList on an empty (and on an absent) ledger runs with
 
 test("a PARTIALLY readable ledger is reported as not-ok, never read as a complete deny-list", () => {
   const root = mkTmp();
-  ingestFeedback(root, { caseId: "TEACH-x", role: "confirmed-negative", evidenceRefs: ["x"], components: ["plugin/scripts/touches-parser.ts"], summary: SUMMARY });
+  ingestUser(root, { caseId: "TEACH-x", role: "confirmed-negative", evidenceRefs: ["x"], components: ["plugin/scripts/touches-parser.ts"], summary: SUMMARY });
   fs.appendFileSync(ledgerFile(root), "{not json\n", "utf8");
   const dl = experienceDenyList(root);
   assert.equal(dl.ok, false, "a deny-list that cannot read part of the ledger must not read as complete");
@@ -288,7 +315,7 @@ test("a PARTIALLY readable ledger is reported as not-ok, never read as a complet
 
 test("the refusal vocabulary is enumerable — every required field has its own absent-key code", () => {
   const root = mkTmp();
-  const GOOD = { case_id: "x", ts: "2026-10-12T00:00:00Z", role: "found-and-fixed", reported_by: "user", source_ref: null, evidence: [{ ref: "a", sha256: sha256("a") }], components: [], summary: SUMMARY };
+  const GOOD = { case_id: "x", ts: "2026-10-12T00:00:00Z", role: "found-and-fixed", reported_by: "user", authored_by: OPERATOR, user_provenance: USER_PROV, source_ref: null, evidence: [{ ref: "a", sha256: sha256("a") }], components: [], summary: SUMMARY };
   assert.deepEqual(validateExperienceRecord(null).reasons, ["RECORD_NOT_OBJECT"]);
   for (const f of REQUIRED_EXPERIENCE_FIELDS) {
     const rec = { ...GOOD }; delete rec[f];
@@ -302,9 +329,9 @@ test("the refusal vocabulary is enumerable — every required field has its own 
 
 test("source_ref is a structural invariant in BOTH directions, each with its own code", () => {
   const root = mkTmp();
-  const base = { case_id: "x", ts: "2026-10-12T00:00:00Z", role: "found-and-fixed", evidence: [{ ref: "a", sha256: sha256("a") }], components: [], summary: SUMMARY };
+  const base = { case_id: "x", ts: "2026-10-12T00:00:00Z", role: "found-and-fixed", authored_by: OPERATOR, evidence: [{ ref: "a", sha256: sha256("a") }], components: [], summary: SUMMARY };
   assert.deepEqual(validateExperienceRecord({ ...base, reported_by: "system", source_ref: null }).reasons, ["SOURCE_REF_REQUIRED_FOR_SYSTEM:reported_by=system-must-name-the-evidence-store-record-it-was-derived-from"]);
-  assert.deepEqual(validateExperienceRecord({ ...base, reported_by: "user", source_ref: "outcome-deadbeef" }).reasons, ["SOURCE_REF_MUST_BE_NULL_FOR_USER:reported_by=user-was-not-derived-from-any-record"]);
+  assert.deepEqual(validateExperienceRecord({ ...base, reported_by: "user", user_provenance: USER_PROV, source_ref: "outcome-deadbeef" }).reasons, ["SOURCE_REF_MUST_BE_NULL_FOR_USER:reported_by=user-was-not-derived-from-any-record"]);
   assert.equal(validateExperienceRecord({ ...base, reported_by: "system", source_ref: "outcome-deadbeef" }).ok, true);
   assert.equal(lines(root), 0);
 });
@@ -313,11 +340,11 @@ test("`recurred-after-fix` is IN the vocabulary and is accepted (a future recurr
   const root = mkTmp();
   assert.ok(EXPERIENCE_ROLES.includes("recurred-after-fix"));
   assert.deepEqual([...EXPERIENCE_ROLES], ["missed-by-tooling", "found-and-fixed", "found-undetermined-then-confirmed", "confirmed-negative", "recurred-after-fix", "found-unresolved", "undetermined"]);
-  const r = ingestFeedback(root, { caseId: "TEACH-recurrence", role: "recurred-after-fix", evidenceRefs: ["x"], summary: SUMMARY });
+  const r = ingestUser(root, { caseId: "TEACH-recurrence", role: "recurred-after-fix", evidenceRefs: ["x"], summary: SUMMARY });
   assert.equal(r.ok, true, r.reasons?.join(","));
   // …and the automatic path accepts it against a `supported` record, since a recurrence is observed.
   writeFixtureStore(root, [{ experiment_ref: "E-FIX back", verdict: "supported" }]);
-  assert.equal(ingestFromEvidenceStoreOutcome(root, { experiment: "E-FIX", experimentRef: "E-FIX back", role: "recurred-after-fix", caseId: "c-recur", summary: SUMMARY }).ok, true);
+  assert.equal(ingestPinned(root, { experiment: "E-FIX", experimentRef: "E-FIX back", role: "recurred-after-fix", caseId: "c-recur", summary: SUMMARY }).ok, true);
   assert.deepEqual([...ROLE_VERDICT_COMPAT["found-undetermined-then-confirmed"]], ["undetermined"]);
 });
 
@@ -345,7 +372,7 @@ test("AC2(a): a write from a linked git worktree lands in the fixture's MAIN che
   assert.equal(resolveCarrierRoot(main).root, resolveSharedCheckout(main));
   assert.notEqual(path.resolve(worktree), path.resolve(main), "the fixture really is two checkouts");
 
-  const r = ingestFeedback(worktree, AC_CASE);
+  const r = ingestUser(worktree, AC_CASE);
   assert.equal(r.ok, true, r.reasons?.join(","));
   const inMain = path.join(main, EXPERIENCE_LEDGER_REL);
   const inWorktree = path.join(worktree, EXPERIENCE_LEDGER_REL);
@@ -363,7 +390,7 @@ test("AC2(b): an unresolvable shared checkout is REFUSED — no carrier file is 
   assert.match(resolveCarrierRoot(bare).reason, new RegExp(`^${SHARED_CHECKOUT_UNRESOLVED}:`));
   assert.equal(ledgerFile(bare), null, "an unresolvable root yields NO path (its own value, not a worktree path)");
 
-  const r = ingestFeedback(bare, AC_CASE);
+  const r = ingestUser(bare, AC_CASE);
   assert.equal(r.ok, false);
   assert.equal(r.appended, false);
   assert.match(r.reasons[0], new RegExp(`^${SHARED_CHECKOUT_UNRESOLVED}:`), "the refusal names the resolver, not the record");
@@ -371,17 +398,17 @@ test("AC2(b): an unresolvable shared checkout is REFUSED — no carrier file is 
 
   // Negative control on the same predicate: the SAME record against a git-repo root IS accepted, so
   // the refusal above is the resolver and not the record.
-  assert.equal(ingestFeedback(mkTmp(), AC_CASE).ok, true);
+  assert.equal(ingestUser(mkTmp(), AC_CASE).ok, true);
 });
 
 test("AC2(c): re-appending the same record is DUPLICATE_ID and leaves the carrier byte-identical", () => {
   const root = mkTmp();
-  const first = ingestFeedback(root, AC_CASE);
+  const first = ingestUser(root, AC_CASE);
   assert.equal(first.ok, true, first.reasons?.join(","));
   const before = fs.readFileSync(ledgerFile(root), "utf8");
   assert.equal(before.split("\n").filter(Boolean).length, 1);
 
-  const again = ingestFeedback(root, AC_CASE);
+  const again = ingestUser(root, AC_CASE);
   assert.equal(again.ok, false);
   assert.equal(again.appended, false);
   assert.equal(again.duplicate, true, "'already there' is its OWN outcome, not a generic failure");
@@ -390,7 +417,7 @@ test("AC2(c): re-appending the same record is DUPLICATE_ID and leaves the carrie
   assert.equal(again.id, first.id, "a content-addressed id is what makes the re-append detectable");
 
   // Negative control: a DIFFERENT record does append, so the skip is the id and not a blanket no.
-  assert.equal(ingestFeedback(root, { ...AC_CASE, caseId: "AC2-worktree-persistence-2" }).ok, true);
+  assert.equal(ingestUser(root, { ...AC_CASE, caseId: "AC2-worktree-persistence-2" }).ok, true);
   assert.equal(fs.readFileSync(ledgerFile(root), "utf8").split("\n").filter(Boolean).length, 2);
 
   // …and the lock file is RELEASED (a lock left behind would wedge the carrier for every later run).
@@ -399,7 +426,7 @@ test("AC2(c): re-appending the same record is DUPLICATE_ID and leaves the carrie
 
 test("AC2(d): a torn FINAL line reads as malformed_lines:1, and repairCarrier restores it with a backup", () => {
   const root = mkTmp();
-  assert.equal(ingestFeedback(root, AC_CASE).ok, true);
+  assert.equal(ingestUser(root, AC_CASE).ok, true);
   const good = fs.readFileSync(ledgerFile(root), "utf8");
   const tornFragment = '{"kind":"experience","id":"experience-torn0000000000","case_';   // a crash mid-append
   fs.appendFileSync(ledgerFile(root), tornFragment);
@@ -430,7 +457,7 @@ test("AC2(d): a torn FINAL line reads as malformed_lines:1, and repairCarrier re
 
 test("AC2(d): repairCarrier refuses a MIDDLE-corruption carrier (truncation there would delete records)", () => {
   const root = mkTmp();
-  assert.equal(ingestFeedback(root, AC_CASE).ok, true);
+  assert.equal(ingestUser(root, AC_CASE).ok, true);
   const file = ledgerFile(root);
   const whole = fs.readFileSync(file, "utf8");
   // A torn fragment FOLLOWED by a good append: the unparseable line is no longer the FINAL one, so
@@ -759,6 +786,7 @@ test("INGEST(g): a user-sourced Experience goes through the same ingestExperienc
     source: "user", caseId: "TEACH-via-unified-entry", role: "missed-by-tooling",
     evidenceRefs: ["gap-discovery-experience-auto-ingest-from-evidence-store"],
     components: ["plugin/scripts/x.ts"], summary: SUMMARY,
+    authoredBy: OPERATOR, userProvenance: USER_PROV,
   });
   assert.equal(r.ok, true, r.reasons?.join(","));
   assert.equal(r.record.reported_by, "user");
@@ -766,7 +794,7 @@ test("INGEST(g): a user-sourced Experience goes through the same ingestExperienc
   assert.equal(r.file, ledgerFile(root), "ONE carrier for both sources");
   // …and `ingestFeedback` is the SAME entry, not a parallel one: byte-identical records collapse to
   // one id (the content-addressed dedup), which can only happen if both paths build the same record.
-  const viaAdapter = ingestFeedback(root, {
+  const viaAdapter = ingestUser(root, {
     caseId: "TEACH-via-unified-entry", role: "missed-by-tooling",
     evidenceRefs: ["gap-discovery-experience-auto-ingest-from-evidence-store"],
     components: ["plugin/scripts/x.ts"], summary: SUMMARY, ts: r.record.ts,
@@ -887,4 +915,355 @@ test("the ingester reads the store at the SHARED checkout — a worktree root st
   assert.equal(fs.existsSync(path.join(worktree, EXPERIENCE_LEDGER_REL)), false, "…and not in the worktree");
   assert.equal(fs.existsSync(watermarkPath(main)), true);
   assert.equal(fs.existsSync(path.join(worktree, INGEST_WATERMARK_REL)), false);
+});
+
+// ══════════════════════════════════════════════════════════════════════════════════════════════════
+// PROVENANCE & THE PER-RECORD SKIP LEDGER (task gap-discovery-experience-ledger-provenance-and-skip-audit)
+//
+// A production acceptance check of this module's own carriers found (1) two entries stored as
+// `reported_by:"user"` that a task WORKER wrote about its own finding, (2) 5 outcomes that never became
+// Experiences leaving no per-record trace at all, and (3) no author on any entry. AC1(a)–(g) below are
+// the mechanism; AC2/AC3 are the same thing read off the REAL carriers (see the task body).
+// ══════════════════════════════════════════════════════════════════════════════════════════════════
+
+const AC1 = Object.freeze({
+  caseId: "AC1-provenance", role: "missed-by-tooling", evidenceRefs: ["gap-fixture"],
+  components: ["plugin/scripts/x.ts"], summary: SUMMARY, ts: "2026-10-12T00:00:00.000Z",
+});
+
+// ── AC1(a): a new Experience without `authored_by` is refused ────────────────────────────────────
+
+test("AC1(a): an entry with no `authored_by` is refused, and NO adapter invents one", () => {
+  const root = mkTmp();
+  const r = ingestFeedback(root, { ...AC1, userProvenance: USER_PROV });   // ⛔ no authoredBy
+  assert.equal(r.ok, false);
+  assert.ok(r.reasons.includes("SCHEMA_MISSING:authored_by"), r.reasons.join(","));
+  assert.equal(lines(root), 0, "a refusal appends nothing");
+  assert.ok(REQUIRED_EXPERIENCE_FIELDS.includes("authored_by"), "…because it is a REQUIRED field, not a convention");
+  assert.deepEqual([...AUTHORED_BY_ACTORS], ["ingester", "task-worker", "operator-session"]);
+
+  // Every actor outside the vocabulary is refused, naming the value it actually saw.
+  for (const actor of ["", null, "worker", "claude"]) {
+    const bad = ingestFeedback(root, { ...AC1, authoredBy: { actor, ref: "x" }, userProvenance: USER_PROV });
+    assert.equal(bad.ok, false, `actor=${JSON.stringify(actor)} must be refused`);
+    assert.ok(bad.reasons.some((x) => x.startsWith("AUTHORED_BY_ACTOR_NOT_IN_VOCAB:")), bad.reasons.join(","));
+  }
+  // …and an actor with no ref is not an author either: "who" needs a name, not only a category.
+  assert.equal(ingestFeedback(root, { ...AC1, authoredBy: { actor: "operator-session" }, userProvenance: USER_PROV }).reasons.join(), "FIELD_INVALID:authored_by.ref");
+
+  // The PINNED system adapter requires one too, and its absence is its OWN arg code — never a default.
+  writeFixtureStore(root, [{ experiment_ref: "E-FIX cluster 1", verdict: "supported" }]);
+  assert.deepEqual(
+    ingestFromEvidenceStoreOutcome(root, { experiment: "E-FIX", experimentRef: "cluster 1", role: "found-and-fixed", caseId: "c", summary: SUMMARY }).reasons,
+    ["INGEST_ARG_MISSING:authoredBy-{actor,ref}"],
+  );
+  // …while the DERIVED form refuses a caller's author rather than ignoring it: nobody narrates it, so
+  // nobody is there to be its author.
+  assert.deepEqual(
+    ingestExperience(root, { source: "system", outcome: outcomeEnvelope(root, 1), authoredBy: OPERATOR }).reasons,
+    [`${SYSTEM_FIELD_NOT_CALLER_WRITABLE}:authoredBy-is-derived-from-the-record-when-source=system`],
+  );
+  // The derived form still writes an author — the machine's own, chosen by nobody.
+  const derived = ingestExperience(root, { source: "system", outcome: outcomeEnvelope(root, 1) });
+  assert.equal(derived.ok, true, derived.reasons?.join(","));
+  assert.deepEqual(derived.record.authored_by, DERIVED_INGEST_AUTHOR);
+  assert.equal(lines(root), 1, "every refusal above appended nothing");
+});
+
+// ── AC1(b): `reported_by:"user"` without `user_provenance` ⇒ USER_PROVENANCE_MISSING ─────────────
+
+test("AC1(b): a claim of human provenance that cannot quote the human is refused", () => {
+  const root = mkTmp();
+  const r = ingestFeedback(root, { ...AC1, authoredBy: OPERATOR });   // ⛔ no userProvenance
+  assert.equal(r.ok, false);
+  assert.deepEqual(r.reasons, [`${USER_PROVENANCE_MISSING}:reported_by=user-needs-user_provenance-{kind,ref,quote}`]);
+  assert.equal(lines(root), 0);
+
+  // Present-but-thin is a DIFFERENT code from absent (硬规则 3b) — and the measure is non-whitespace
+  // chars, the same one `summary` uses, so padding does not clear it.
+  const thin = (quote) => ingestFeedback(root, { ...AC1, authoredBy: OPERATOR, userProvenance: { kind: "conversation", ref: "s", quote } });
+  assert.ok(thin("too short").reasons.some((x) => x.startsWith("USER_PROVENANCE_QUOTE_INSUBSTANTIAL:")), thin("too short").reasons.join(","));
+  assert.ok(thin(`${"a"}${" ".repeat(60)}`).reasons.some((x) => x.startsWith("USER_PROVENANCE_QUOTE_INSUBSTANTIAL:")), "padding with whitespace does not clear it — the measure is non-whitespace chars");
+  // …and a quote that is ONLY whitespace is not a thin quote, it is not a string at all — a DIFFERENT
+  // code, because "you gave me nothing" and "you gave me too little" are different failures.
+  assert.equal(thin(" ".repeat(60)).reasons.join(), "FIELD_INVALID:user_provenance.quote");
+  assert.ok(MIN_USER_QUOTE_CHARS >= 20, "the Plan's floor is >= 20 chars");
+  assert.ok(thin(QUOTE).ok, "…and a real quote clears it");
+
+  // The kind is a vocabulary, and an outside value names itself rather than defaulting.
+  assert.deepEqual([...USER_PROVENANCE_KINDS], ["conversation", "task-body"]);
+  const badKind = ingestFeedback(root, { ...AC1, authoredBy: OPERATOR, userProvenance: { kind: "guess", ref: "s", quote: QUOTE } });
+  assert.ok(badKind.reasons.some((x) => x.startsWith("USER_PROVENANCE_KIND_NOT_IN_VOCAB:guess")), badKind.reasons.join(","));
+
+  // The mirror: a DERIVED entry carrying a human quote would claim provenance it never had.
+  const sys = {
+    case_id: "x", ts: "2026-10-12T00:00:00Z", role: "found-and-fixed", reported_by: "system",
+    authored_by: OPERATOR, source_ref: "outcome-x", evidence: [{ ref: "o", sha256: sha256("o") }],
+    components: [], summary: SUMMARY, user_provenance: USER_PROV,
+  };
+  assert.deepEqual(validateExperienceRecord(sys).reasons, ["USER_PROVENANCE_NOT_APPLICABLE_FOR_SYSTEM:reported_by=system-was-not-derived-from-a-human-message"]);
+  assert.equal(lines(root), 1, "only the one accepted manual entry was appended");
+});
+
+// ── AC1(c): a task worker can never store its own finding as `reported_by:"user"` ────────────────
+
+test("AC1(c): `reported_by:\"user\"` with `authored_by.actor:\"task-worker\"` ⇒ USER_SOURCE_FROM_WORKER", () => {
+  const root = mkTmp();
+  // Every OTHER field is in order — a real quote, a real role, real evidence. The COMBINATION is the
+  // 2026-10-12 defect, so the combination is what is refused.
+  const r = ingestFeedback(root, { ...AC1, authoredBy: WORKER, userProvenance: USER_PROV });
+  assert.equal(r.ok, false);
+  assert.ok(r.reasons.some((x) => x.startsWith(`${USER_SOURCE_FROM_WORKER}:`)), r.reasons.join(","));
+  assert.equal(lines(root), 0, "the worker's claim is refused, not stored");
+
+  // …and the SAME worker recording the SAME finding as what it is — a SYSTEM finding, with itself
+  // named as the author — is accepted. The rule forbids the mislabelling, not the worker.
+  writeFixtureStore(root, [{ experiment_ref: "E-FIX cluster 1", verdict: "supported" }]);
+  const asSystem = ingestFromEvidenceStoreOutcome(root, {
+    experiment: "E-FIX", experimentRef: "cluster 1", role: "found-and-fixed", caseId: "EXP-worker-own",
+    summary: SUMMARY, authoredBy: WORKER,
+  });
+  assert.equal(asSystem.ok, true, asSystem.reasons?.join(","));
+  assert.equal(asSystem.record.reported_by, "system");
+  assert.deepEqual(asSystem.record.authored_by, WORKER, "the worker is NAMED — the entry is not anonymous");
+  assert.equal(readExperienceLedger(root).records.filter((e) => e.reported_by === "user").length, 0);
+});
+
+// ── AC1(d): corrections are append-only and change what READERS report ───────────────────────────
+
+test("AC1(d): a correction restates an entry for readers while the original line stays byte-identical", () => {
+  const root = mkTmp();
+  const entry = ingestUser(root, { ...AC1, caseId: "EXP-corrected" });
+  assert.equal(entry.ok, true, entry.reasons?.join(","));
+  const originalLine = fs.readFileSync(ledgerFile(root), "utf8");
+  assert.equal(readExperienceLedger(root).records[0].reported_by, "user");
+  assert.equal(readExperienceLedger(root).records[0].authored_by.actor, "operator-session");
+
+  const c = appendExperienceCorrection(root, {
+    corrects: entry.id,
+    patch: { reported_by: "system", authored_by: WORKER },
+    reason: "a task worker wrote this about a defect it found; no human reported it",
+    authoredBy: OPERATOR,
+  });
+  assert.equal(c.ok, true, c.reasons?.join(","));
+
+  // The READER sees the corrected view…
+  const read = readExperienceLedger(root);
+  assert.deepEqual(read.corrected_ids, [entry.id]);
+  assert.equal(read.records[0].reported_by, "system");
+  assert.deepEqual(read.records[0].authored_by, WORKER);
+  assert.equal(read.records.filter((x) => x.reported_by === "user").length, 0, "user-entry count after the correction");
+  // …on the SAME entry (the id is unchanged — a correction restates, it does not mint a new record).
+  assert.equal(read.records[0].id, entry.id);
+  assert.equal(read.records[0].case_id, "EXP-corrected");
+
+  // …and the ORIGINAL line is still on disk, byte for byte, as a PREFIX of the carrier.
+  const after = fs.readFileSync(ledgerFile(root), "utf8");
+  assert.equal(after.startsWith(originalLine), true, "the original line is a PREFIX — untouched, not rewritten");
+  assert.equal(after.split("\n").filter(Boolean).length, 2, "one entry + one correction, and nothing else");
+  assert.equal(JSON.parse(after.slice(originalLine.length)).kind, EXPERIENCE_CORRECTION_KIND);
+
+  // The correction is not an entry: the ledger's own readers count ONE Experience, not two.
+  assert.equal(experienceDenyList(root).evaluated, 1);
+  assert.equal(readExperienceCorrections(root).records.length, 1);
+  assert.deepEqual(readExperienceCorrections(root).orphan_targets, []);
+
+  // IDEMPOTENT: re-running the same correction corrects nothing twice.
+  const again = appendExperienceCorrection(root, {
+    corrects: entry.id, patch: { reported_by: "system", authored_by: WORKER },
+    reason: "a task worker wrote this about a defect it found; no human reported it", authoredBy: OPERATOR,
+  });
+  assert.equal(again.ok, false);
+  assert.equal(again.duplicate, true);
+  assert.equal(fs.readFileSync(ledgerFile(root), "utf8"), after, "the carrier is unchanged by the re-run");
+});
+
+test("a correction that corrects nothing, or rewrites the finding itself, is REFUSED", () => {
+  const root = mkTmp();
+  const entry = ingestUser(root, AC_CASE);
+  assert.equal(entry.ok, true, entry.reasons?.join(","));
+  const GOODC = { corrects: entry.id, patch: { reported_by: "system" }, reason: "the author was mislabelled when this was written", authoredBy: OPERATOR };
+
+  assert.ok(appendExperienceCorrection(root, { ...GOODC, corrects: "experience-doesnotexist" }).reasons[0].startsWith(`${CORRECTION_TARGET_NOT_FOUND}:`), "a correction pointing at nothing is not a silent no-op");
+  assert.ok(appendExperienceCorrection(root, { ...GOODC, patch: { summary: "a rewritten finding" } }).reasons.some((x) => x.startsWith(`${CORRECTION_FIELD_NOT_CORRECTABLE}:summary`)), "…and it cannot rewrite what was found — only who reported it");
+  assert.deepEqual(CORRECTABLE_FIELDS, ["reported_by", "authored_by"]);
+  assert.ok(appendExperienceCorrection(root, { ...GOODC, patch: {} }).reasons.includes("INGEST_ARG_MISSING:patch"));
+  assert.ok(appendExperienceCorrection(root, { ...GOODC, reason: "nope" }).reasons.some((x) => x.startsWith("CORRECTION_REASON_INSUBSTANTIAL:")), `floor is ${MIN_CORRECTION_REASON_CHARS} non-whitespace chars`);
+  assert.ok(appendExperienceCorrection(root, { ...GOODC, authoredBy: undefined }).reasons.includes("INGEST_ARG_MISSING:authoredBy-{actor,ref}"));
+  assert.equal(lines(root), 1, "no refusal appended anything");
+
+  // Negative control on the SAME predicate: the well-formed correction DOES append, so the refusals
+  // above are the rules firing and not a writer that could never succeed.
+  assert.equal(appendExperienceCorrection(root, GOODC).ok, true);
+  assert.equal(lines(root), 2);
+  assert.equal(readExperienceLedger(root).records[0].reported_by, "system");
+});
+
+// ── AC1(e): a non-ingestible outcome leaves ONE deduped skip record ──────────────────────────────
+
+test("AC1(e): a `proposed` outcome yields ONE skip record, and a second round adds none", () => {
+  const root = mkTmp();
+  const [w] = writeFixtureStore(root, [
+    { experiment_ref: "E-FIX own-1", verdict: "proposed" },
+    { experiment_ref: "E-FIX cluster 1", verdict: "supported" },
+  ]);
+  const first = ingestNewOutcomes(root);
+  assert.equal(first.ok, true, first.reasons?.join(","));
+  assert.equal(first.scanned, 2);
+  assert.equal(first.ingested, 1);
+  assert.equal(first.skipped_not_ingestible, 1);
+  assert.equal(first.skips_recorded, 1, "ONE skip record for the ONE outcome that did not become an entry");
+  assert.equal(first.watermark.line, 2, "a readable non-finding is still passed — it is definitively not an outcome we lost");
+
+  const skips = readIngestSkips(root);
+  assert.equal(skips.ok, true);
+  assert.equal(skips.records.length, 1);
+  assert.equal(skips.file, ingestSkipsFile(root));
+  assert.equal(INGEST_SKIPS_REL, ".quay/discovery-ingest-skips.jsonl");
+  assert.equal(skips.records[0].kind, INGEST_SKIP_KIND);
+  assert.deepEqual(
+    { store_line: skips.records[0].store_line, outcome_id: skips.records[0].outcome_id, verdict: skips.records[0].verdict, reason_code: skips.records[0].reason_code, mapping_version: skips.records[0].mapping_version },
+    { store_line: 1, outcome_id: w.id, verdict: "proposed", reason_code: `${SKIP_VERDICT_NOT_INGESTIBLE}:proposed`, mapping_version: VERDICT_ROLE_MAPPING_VERSION },
+    "every field the audit could not recover — which line, which outcome, which reason, under which mapping",
+  );
+  // The dedup key is the triple the Plan names, and the id is its content address (so a re-file is a
+  // DUPLICATE_ID rather than a second line).
+  assert.equal(skipDedupKey(skips.records[0]), `${w.id}|${SKIP_VERDICT_NOT_INGESTIBLE}:proposed|${VERDICT_ROLE_MAPPING_VERSION}`);
+  assert.match(ingestSkipId(skips.records[0]), /^ingest-skip-[0-9a-f]{16}$/);
+
+  // Round 2 is a no-op on the skip carrier — byte-identical, and it never even re-examines the line.
+  const before = fs.readFileSync(ingestSkipsFile(root), "utf8");
+  const second = ingestNewOutcomes(root);
+  assert.equal(second.skips_recorded, 0);
+  assert.equal(second.scanned, 0, "the watermark is past it");
+  assert.equal(fs.readFileSync(ingestSkipsFile(root), "utf8"), before);
+
+  // …and an explicit re-file of the same skip is DUPLICATE_ID, so "record it again" cannot grow the
+  // carrier either (the dedup is the id AND the triple — two independent reasons it cannot double).
+  const dupe = appendIngestSkip(root, { store_line: 1, outcome_id: w.id, verdict: "proposed", reason_code: `${SKIP_VERDICT_NOT_INGESTIBLE}:proposed` });
+  assert.equal(dupe.ok, false);
+  assert.equal(dupe.duplicate, true);
+  assert.equal(fs.readFileSync(ingestSkipsFile(root), "utf8"), before);
+});
+
+// ── AC1(f): a READ_FAILED holds the watermark and is retried on the next round ───────────────────
+
+test("AC1(f): a READ_FAILED holds the watermark, and the next round retries and ingests the line", () => {
+  const root = mkTmp();
+  writeFixtureStore(root, [
+    { experiment_ref: "E-FIX cluster 1", verdict: "supported" },
+    { experiment_ref: "E-FIX cluster 2", verdict: "supported" },
+  ]);
+  // The transient failure is INJECTED — the AC names it "simulated", and it is: on the production path
+  // the store was read whole before the scan, so a per-line read cannot fail there. What is being
+  // established is the RETRY CONTRACT, not a production reading (that is AC2/AC3 on the real carriers).
+  const first = ingestNewOutcomes(root, { readLine: (n) => (n === 2 ? { ok: false, reason: "EAGAIN" } : { ok: true }) });
+  assert.equal(first.ok, true, first.reasons?.join(","));
+  assert.equal(first.read_failed, 1);
+  assert.equal(first.stopped_at_read_failed_line, 2);
+  assert.equal(first.ingested, 1, "line 1 was ingested");
+  assert.equal(first.skipped_not_ingestible, 0, "…and line 2 was NOT reclassified as a non-finding");
+  assert.equal(first.watermark.line, 1, "the watermark did NOT advance past the line it could not read");
+
+  const skips = readIngestSkips(root);
+  assert.equal(skips.records.length, 1);
+  assert.equal(skips.records[0].store_line, 2);
+  assert.equal(skips.records[0].outcome_id, null, "the line never parsed, so there is no id to name — that is its own value, not a fabricated one");
+  assert.equal(skips.records[0].reason_code, SKIP_READ_FAILED);
+  assert.equal(skipDedupKey(skips.records[0]), `line-2|${SKIP_READ_FAILED}|${VERDICT_ROLE_MAPPING_VERSION}`, "…and the dedup key falls back to the LINE, which is what is stable for a line that has no id");
+
+  // Round 2: the read succeeds, the line is ingested, and the entry exists.
+  const second = ingestNewOutcomes(root);
+  assert.equal(second.ok, true, second.reasons?.join(","));
+  assert.equal(second.read_failed, 0);
+  assert.equal(second.ingested, 1);
+  assert.equal(second.watermark.line, 2);
+  assert.equal(readExperienceLedger(root).records.length, 2, "the outcome that was unreadable is now an Experience");
+  assert.equal(fs.readFileSync(ingestSkipsFile(root), "utf8").split("\n").filter(Boolean).length, 1, "the READ_FAILED trace STAYS — it records a round, it is not a to-do list");
+});
+
+// ── AC1(g): a mapping_version bump re-opens the earlier VERDICT_NOT_INGESTIBLE skips ─────────────
+
+test("AC1(g): bumping mapping_version re-evaluates the earlier VERDICT_NOT_INGESTIBLE skips", () => {
+  const root = mkTmp();
+  const [w] = writeFixtureStore(root, [{ experiment_ref: "E-FIX own-1", verdict: "proposed" }]);
+  assert.equal(ingestNewOutcomes(root).skipped_not_ingestible, 1);
+  assert.equal(readIngestSkips(root).records[0].reason_code, `${SKIP_VERDICT_NOT_INGESTIBLE}:proposed`);
+  assert.equal(readIngestWatermark(root).value.line, 1, "normally the watermark is PAST the line, so nothing would ever look again");
+
+  // (i) The same version does not re-open it: the skip is durable, not re-filed every round.
+  const same = ingestNewOutcomes(root);
+  assert.equal(same.scanned, 0, "the watermark still holds — no rewind without a version change");
+  assert.equal(same.skips_recorded, 0);
+
+  // (ii) The MAP changes so `proposed` HAS a role. The version is the map's own digest, so it moves
+  //      with the map — nobody has to remember to bump it — and the scan re-opens the stale line.
+  const widened = { ...VERDICT_ROLE, proposed: "found-unresolved" };
+  const bumped = ingestNewOutcomes(root, { verdictRole: widened });
+  assert.equal(bumped.mapping_version, verdictRoleMappingVersion(widened));
+  assert.notEqual(bumped.mapping_version, VERDICT_ROLE_MAPPING_VERSION, "the version is the MAP's digest, not a literal");
+  assert.equal(bumped.rewound_for_mapping, 1, "the scan re-opened exactly the one stale skip line");
+  assert.equal(bumped.ingested, 1, "the previously-skipped outcome is now an ENTRY — that is what re-evaluation means");
+  assert.equal(readExperienceLedger(root).records[0].source_ref, w.id);
+  assert.equal(readIngestSkips(root).records.length, 1, "the OLD skip is NOT erased — it records what the old map did");
+  assert.equal(readIngestSkips(root).records[0].mapping_version, VERDICT_ROLE_MAPPING_VERSION);
+
+  // (iii) Negative control on the same predicate: an EXPLICIT version bump with the map UNCHANGED still
+  //       re-opens the skip (the rule reads the version) and re-files it under the new version — so the
+  //       rewind above is driven by the version, not by the record having become ingestible.
+  const other = mkTmp();
+  writeFixtureStore(other, [{ experiment_ref: "E-FIX own-1", verdict: "proposed" }]);
+  assert.equal(ingestNewOutcomes(other).skipped_not_ingestible, 1);
+  const forced = ingestNewOutcomes(other, { mappingVersion: "vr-forced-next" });
+  assert.equal(forced.rewound_for_mapping, 1);
+  assert.equal(forced.ingested, 0, "the map did not change, so the outcome is still not a finding");
+  assert.equal(forced.skips_recorded, 1, "…and it is re-filed under the NEW version, so the change is visible");
+  assert.deepEqual(readIngestSkips(other).records.map((s) => s.mapping_version).sort(), ["vr-forced-next", VERDICT_ROLE_MAPPING_VERSION].sort());
+  assert.deepEqual(readExperienceLedger(other).records, [], "no entry was manufactured by the re-evaluation");
+});
+
+// ── the one-time reconciliation: ingested + skipped + unexplained == scanned ──────────────────────
+
+test("backfill: the arithmetic holds, and a LOST finding is reported — never filed as a skip", () => {
+  const root = mkTmp();
+  const [, , c] = writeFixtureStore(root, [
+    { experiment_ref: "E-FIX cluster 1", verdict: "supported" },
+    { experiment_ref: "E-FIX own-1", verdict: "proposed" },
+    { experiment_ref: "E-FIX cluster 2", verdict: "refuted" },
+  ]);
+  // Only ONE of the three outcomes has an entry — the state a real ledger is in after a partial run.
+  assert.equal(ingestNewOutcomes(root, { maxPerRun: 1 }).ingested, 1);
+
+  const bf = backfillIngestSkips(root);
+  assert.equal(bf.ok, true, bf.reasons?.join(","));
+  assert.equal(bf.scanned, 3);
+  assert.equal(bf.ingested, 1);
+  assert.equal(bf.skipped, 1);
+  assert.deepEqual(bf.unexplained, [{ store_line: 3, outcome_id: c.id, verdict: "refuted" }],
+    "an INGESTIBLE outcome with no entry is a finding we LOST — reported, never filed as a skip");
+  assert.equal(bf.ingested + bf.skipped + bf.unexplained.length, bf.scanned, "…and the three terms are LISTS, so the arithmetic names every record");
+  assert.deepEqual(bf.skipped_records.map((s) => ({ line: s.store_line, code: s.reason_code })), [{ line: 2, code: `${SKIP_VERDICT_NOT_INGESTIBLE}:proposed` }]);
+
+  // Idempotent: a second backfill records nothing new, and still reconciles.
+  const again = backfillIngestSkips(root);
+  assert.equal(again.skips_recorded, 0);
+  assert.equal(again.skips_already_present, 1);
+  assert.equal(again.ingested + again.skipped + again.unexplained.length, again.scanned);
+  assert.deepEqual(again.unexplained, bf.unexplained);
+});
+
+test("readExperienceLedger keeps corrections OUT of `records`, and reports a correction with no target", () => {
+  const root = mkTmp();
+  const entry = ingestUser(root, AC_CASE);
+  assert.equal(entry.ok, true, entry.reasons?.join(","));
+  // A correction aimed at an id that is not in the carrier: written straight through the append path so
+  // the ORPHAN case is reachable (the writer itself refuses to create one).
+  fs.appendFileSync(ledgerFile(root), JSON.stringify({ kind: EXPERIENCE_CORRECTION_KIND, id: "experience-correction-orphan", corrects: "experience-absent", patch: { reported_by: "system" } }) + "\n");
+  const read = readExperienceLedger(root);
+  assert.equal(read.ok, true);
+  assert.equal(read.records.length, 1, "a correction is never counted as an Experience");
+  assert.deepEqual(read.corrected_ids, [], "…and a correction with no target corrects nothing");
+  assert.deepEqual(readExperienceCorrections(root).orphan_targets, ["experience-absent"], "it is REPORTED, not silently dropped (硬规则 5)");
+  assert.equal(readExperienceLedger(root).records[0].reported_by, "user", "the entry is untouched by an orphan correction");
+  assert.deepEqual([...applyExperienceCorrections([{ kind: EXPERIENCE_KIND, id: "a" }, { kind: EXPERIENCE_CORRECTION_KIND, corrects: "a", patch: { reported_by: "system" } }]).corrected], ["a"]);
 });

@@ -382,6 +382,10 @@ const mkSeedRoot = () => {
   for (const c of [SEED_CASE, OTHER_CASE]) {
     const r = appendExperienceRecord(root, {
       case_id: c.case_id, ts: "2026-10-12T00:00:00Z", role: c.role, reported_by: "system",
+      // `authored_by` is REQUIRED on every entry since gap-discovery-experience-ledger-provenance-and-
+      // skip-audit. These are derived from a record by nobody in particular, so they are `ingester` —
+      // the same author the batch ingester stamps on its own output.
+      authored_by: { actor: "ingester", ref: "ingestNewOutcomes" },
       source_ref: c.source_ref, evidence: [{ ref: c.source_ref, sha256: "a".repeat(64) }],
       components: [...c.components], summary: c.summary,
     });
@@ -573,6 +577,7 @@ test("AC2 (real control): the Phase 2 v2 record is refused with TOOL_IS_SUBJECT 
   const root = mkTmp();
   const ledger = appendExperienceRecord(root, {
     case_id: PHASE2_SEED.case_id, ts: "2026-10-12T00:00:00Z", role: PHASE2_SEED.role, reported_by: "system",
+    authored_by: { actor: "ingester", ref: "ingestNewOutcomes" },
     source_ref: PHASE2_SEED.source_ref, evidence: [{ ref: PHASE2_SEED.source_ref, sha256: "b".repeat(64) }],
     components: [...PHASE2_SEED.components], summary: PHASE2_SEED.summary,
   });

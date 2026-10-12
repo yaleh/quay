@@ -78,6 +78,50 @@
 // a whole-sentence regex is structurally incapable of matching an inventory line, so emitting it would
 // add a pattern that can never be true while looking exactly like one that can. The summaries are
 // still returned as data for a consumer that wants them.
+//
+// ── PROVENANCE & THE PER-RECORD SKIP LEDGER (task gap-discovery-experience-ledger-provenance-and-skip-audit) ─
+//
+// A production acceptance check of this module's OWN carriers (2026-10-12) found three defects in what
+// it had written. All three are the same shape — a claim that was never checked, and a gap that was
+// counted but never named — so all three are closed by making the claim structural.
+//
+//   ⛔ FALSE PROVENANCE. Two entries were stored as `reported_by:"user"` although a task WORKER wrote
+//      them, about a defect the worker itself had found; the one genuinely user-reported case was
+//      absent from the production ledger entirely. `reported_by` was a free-text claim, so "a human
+//      flagged this" and "a machine decided to say a human flagged this" were the same bytes. THREE
+//      rules now close it, and NONE of them can be defaulted:
+//        • `authored_by {actor, ref}` is REQUIRED on every entry — `ingester` (the batch ingester: a
+//          machine, no narration), `task-worker`, or `operator-session`. Absent ⇒ refused.
+//        • `reported_by:"user"` additionally requires `user_provenance {kind, ref, quote}`, where
+//          `quote` is the human's OWN words (>= MIN_USER_QUOTE_CHARS non-whitespace chars). A claim of
+//          human provenance that cannot quote the human is refused (`USER_PROVENANCE_MISSING`).
+//        • `reported_by:"user"` with `authored_by.actor:"task-worker"` is ALWAYS refused
+//          (`USER_SOURCE_FROM_WORKER`) — the exact defect, refused by construction: a worker cannot
+//          label its own finding a human report, however it fills the remaining fields.
+//      ⛔ No adapter here DEFAULTS an author. A default would re-create the defect invisibly: a worker
+//      calling the manual adapter would be relabelled `operator-session`, and the result would be
+//      indistinguishable from a real operator report — which is precisely the failure being fixed.
+//      The caller declares the author or the record is refused (硬规则 3b).
+//
+//   ⛔ UNAUDITABLE GAP. `ingestNewOutcomes` counted non-ingested outcomes in ONE integer
+//      (`skipped_not_ingestible`), so an outcome that never became an Experience left no per-record
+//      trace: not which store line, not which reason, and no way to re-examine it later.
+//      `.quay/discovery-ingest-skips.jsonl` now holds ONE line per outcome not ingested —
+//      `{store_line, outcome_id, verdict, reason_code, mapping_version, ts}` — under the four reason
+//      codes `VERDICT_NOT_INGESTIBLE:<verdict>` / `DUPLICATE_SOURCE_REF` / `READ_FAILED` / `MALFORMED`,
+//      deduped on `(outcome_id, reason_code, mapping_version)`.
+//
+//      `mapping_version` is DERIVED from `VERDICT_ROLE` itself (a digest of the map), never a literal
+//      someone must remember to bump — so "re-evaluate the skips when the mapping changes" is a
+//      property of the DATA rather than of anyone's memory. `READ_FAILED` is the transient code: its
+//      record is retried on the next round and the watermark never advances past its line.
+//
+//   ⛔ CORRECTIONS ARE APPEND-ONLY. The two false-provenance entries are corrected by APPENDING a
+//      `kind:"experience-correction"` line that names the entry it corrects; readers apply the patch.
+//      The original line is never rewritten or deleted — a ledger whose history can be edited cannot be
+//      audited, and "corrected" would be indistinguishable from "was always right". A correction may
+//      patch ONLY `CORRECTABLE_FIELDS` (`reported_by`, `authored_by`): one that could rewrite
+//      `summary`/`evidence` would be a back door to rewriting the finding itself.
 
 import fs from "node:fs";
 import path from "node:path";
@@ -139,6 +183,14 @@ export const SOURCE_NOT_IN_VOCAB = "SOURCE_NOT_IN_VOCAB";
 export const SYSTEM_FIELD_NOT_CALLER_WRITABLE = "SYSTEM_FIELD_NOT_CALLER_WRITABLE";
 /** Refusal code: the watermark file exists but is not a readable `{line, line_sha256}` record. */
 export const WATERMARK_UNREADABLE = "WATERMARK_UNREADABLE";
+/** Refusal code: `reported_by:"user"` with no `user_provenance` naming the human's own words. */
+export const USER_PROVENANCE_MISSING = "USER_PROVENANCE_MISSING";
+/** Refusal code: `reported_by:"user"` authored by a task worker — the defect this task exists for. */
+export const USER_SOURCE_FROM_WORKER = "USER_SOURCE_FROM_WORKER";
+/** Refusal code: a correction names an entry id that is not in the ledger (never a silent no-op). */
+export const CORRECTION_TARGET_NOT_FOUND = "CORRECTION_TARGET_NOT_FOUND";
+/** Refusal code: a correction patches a field outside `CORRECTABLE_FIELDS`. */
+export const CORRECTION_FIELD_NOT_CORRECTABLE = "CORRECTION_FIELD_NOT_CORRECTABLE";
 
 /**
  * The ONE table of Discovery Method carriers: name → `{rel, kind}`. The rel paths of ALL of them are
@@ -195,13 +247,41 @@ export const EXPERIENCE_ROLES = Object.freeze([
  *  draft's `user` | `operator` split, folded into the two-source model). */
 export const REPORTED_BY_VOCAB = Object.freeze(["user", "system"]);
 
+/**
+ * WHO WROTE the record — the field that makes `reported_by` checkable instead of merely claimed.
+ *
+ * ⛔ `reported_by:"user"` alone is a CLAIM any process can make (that is the 2026-10-12 defect: a task
+ * worker's own finding stored as a human report). `authored_by.actor` is a DIFFERENT axis — the
+ * process that wrote the line — and the only value that can legitimately pair with `"user"` is
+ * `operator-session`; `task-worker` is refused outright (`USER_SOURCE_FROM_WORKER`).
+ *
+ *   • `ingester`          — the batch ingester (`ingestNewOutcomes`): a machine deriving fields from an
+ *                           outcome record. It narrates nothing, so it can never claim `"user"`.
+ *   • `task-worker`       — a task worker process. Its own findings are `"system"`; it can never
+ *                           relabel them `"user"`.
+ *   • `operator-session`  — a human-driven session, the only actor that may speak for a human.
+ */
+export const AUTHORED_BY_ACTORS = Object.freeze(["ingester", "task-worker", "operator-session"]);
+
+/** Where the human's own words came from, when `reported_by:"user"` (Plan item 2). */
+export const USER_PROVENANCE_KINDS = Object.freeze(["conversation", "task-body"]);
+
 /** A summary with fewer than this many non-whitespace chars says nothing — the ONLY numeric gate
  *  here, and it is on a MEASURED quantity (硬规则 4: no made-up thresholds on unmeasured things). */
 export const MIN_SUMMARY_CHARS = 40;
 
+/** The floor on `user_provenance.quote`, in NON-WHITESPACE chars — the same measure `MIN_SUMMARY_CHARS`
+ *  uses, so "a quote" cannot be cleared by padding, and it is on a quantity a human can check by
+ *  looking at the string (硬规则 4: not an invented threshold on an unmeasured thing). */
+export const MIN_USER_QUOTE_CHARS = 20;
+
+/** The floor on a correction's `reason` — why this correction exists, in the same spirit as the
+ *  dispatch-record reason floor: a correction with no reason is an edit with no audit trail. */
+export const MIN_CORRECTION_REASON_CHARS = 8;
+
 /** Per-record required fields — declared as DATA so the refusal reasons are enumerable and testable. */
 export const REQUIRED_EXPERIENCE_FIELDS = Object.freeze([
-  "case_id", "ts", "role", "reported_by", "source_ref", "evidence", "components", "summary",
+  "case_id", "ts", "role", "reported_by", "authored_by", "source_ref", "evidence", "components", "summary",
 ]);
 
 /**
@@ -244,6 +324,50 @@ export const VERDICT_ROLE = Object.freeze({
   refuted: "confirmed-negative",
   undetermined: "undetermined",
 });
+
+/**
+ * The identity of a verdict→role map — `mapping_version` in every skip record.
+ *
+ * ⛔ DERIVED from the map, never a literal someone must remember to bump. Plan item 4 says a
+ * `VERDICT_NOT_INGESTIBLE` skip must be re-evaluated "when the verdict→role mapping version changes";
+ * a hand-maintained version string turns that into a memory obligation whose failure mode is silent
+ * (the map changes, the version does not, and five findings stay invisible forever while every check
+ * reports green). Deriving it makes the re-evaluation a property of the DATA (硬规则 4: a quantity
+ * nobody can forget to update). Key order cannot leak into it — the entries are sorted first — so the
+ * version moves only when the MAPPING moves.
+ */
+export function verdictRoleMappingVersion(verdictRole = VERDICT_ROLE) {
+  const canonical = Object.keys(verdictRole).sort().map((k) => [k, verdictRole[k]]);
+  return `vr-${sha256(JSON.stringify(canonical)).slice(0, 12)}`;
+}
+
+/** The version of the SHIPPED `VERDICT_ROLE` — what a run files its skips under by default. */
+export const VERDICT_ROLE_MAPPING_VERSION = verdictRoleMappingVersion();
+
+/** The four reason codes a skip record may carry. `VERDICT_NOT_INGESTIBLE` is the only one that takes
+ *  a suffix (the verdict that had no role), so "which verdict" is in the record rather than implied. */
+export const SKIP_VERDICT_NOT_INGESTIBLE = "VERDICT_NOT_INGESTIBLE";
+export const SKIP_DUPLICATE_SOURCE_REF = "DUPLICATE_SOURCE_REF";
+export const SKIP_READ_FAILED = "READ_FAILED";
+export const SKIP_MALFORMED = "MALFORMED";
+
+/** Where the per-record skip ledger lives, relative to the SHARED checkout. Same convention as the
+ *  watermark (a carrier of its own, addressed by its own constant). */
+export const INGEST_SKIPS_REL = ".quay/discovery-ingest-skips.jsonl";
+
+/** The ONE record kind the skip carrier holds, so a line is self-describing on read-back. */
+export const INGEST_SKIP_KIND = "experience-ingest-skip";
+
+/** The ONE record kind a CORRECTION carries — a line in the SAME ledger, never a rewrite of one. */
+export const EXPERIENCE_CORRECTION_KIND = "experience-correction";
+
+/**
+ * The ONLY fields a correction may patch. ⛔ Restricting the set is the point, not a convenience: a
+ * correction able to patch `summary`/`evidence`/`role` would be a supported way to rewrite what the
+ * ledger says was found, which is exactly what "append-only, never rewrite the original line" forbids.
+ * These two are the provenance fields — the ones the 2026-10-12 check found to be wrong.
+ */
+export const CORRECTABLE_FIELDS = Object.freeze(["reported_by", "authored_by"]);
 
 /** Where the batch ingester's watermark lives, relative to the SHARED checkout.
  *  ⛔ NOT declared in `DISCOVERY_CARRIERS`: that table is the append-only LINE carriers
@@ -382,6 +506,48 @@ export function validateExperienceRecord(rec) {
     reasons.push("SOURCE_REF_MUST_BE_NULL_FOR_USER:reported_by=user-was-not-derived-from-any-record");
   }
 
+  // ── PROVENANCE (Plan items 1–2): WHO wrote it, and — for a human report — the human's own words ──
+  // `authored_by` is in REQUIRED_EXPERIENCE_FIELDS, so an entry lacking it never reaches this block
+  // (it is refused above with `SCHEMA_MISSING:authored_by`). What is checked HERE is its shape: an
+  // actor from the vocabulary, and a ref naming WHICH ingester/worker/session wrote the line.
+  if (!isObj(rec.authored_by)) {
+    reasons.push("FIELD_INVALID:authored_by-needs-{actor,ref}");
+  } else {
+    if (!AUTHORED_BY_ACTORS.includes(rec.authored_by.actor)) {
+      reasons.push(`AUTHORED_BY_ACTOR_NOT_IN_VOCAB:${String(rec.authored_by.actor)}`);
+    }
+    if (!isStr(rec.authored_by.ref, 1)) reasons.push("FIELD_INVALID:authored_by.ref");
+  }
+
+  if (rec.reported_by === "user") {
+    // ⛔ THE DEFECT, refused by construction. A task worker's own finding is a SYSTEM finding; letting
+    // it wear `reported_by:"user"` is the 2026-10-12 production defect, so the combination is refused
+    // on its own terms — no amount of well-filled prose elsewhere makes this shape acceptable.
+    if (isObj(rec.authored_by) && rec.authored_by.actor === "task-worker") {
+      reasons.push(`${USER_SOURCE_FROM_WORKER}:authored_by.actor=task-worker-cannot-store-its-own-finding-as-reported_by=user`);
+    }
+    // A human report must quote the human. "No provenance supplied" and "the quote is too thin to be
+    // evidence" are DIFFERENT failures and get different codes (硬规则 3b), so a caller can tell which
+    // one it hit without reading prose.
+    if (!isObj(rec.user_provenance)) {
+      reasons.push(`${USER_PROVENANCE_MISSING}:reported_by=user-needs-user_provenance-{kind,ref,quote}`);
+    } else {
+      if (!USER_PROVENANCE_KINDS.includes(rec.user_provenance.kind)) {
+        reasons.push(`USER_PROVENANCE_KIND_NOT_IN_VOCAB:${String(rec.user_provenance.kind)}`);
+      }
+      if (!isStr(rec.user_provenance.ref, 1)) reasons.push("FIELD_INVALID:user_provenance.ref");
+      if (!isStr(rec.user_provenance.quote, 1)) {
+        reasons.push("FIELD_INVALID:user_provenance.quote");
+      } else if (nonWs(rec.user_provenance.quote) < MIN_USER_QUOTE_CHARS) {
+        reasons.push(`USER_PROVENANCE_QUOTE_INSUBSTANTIAL:needs->=${MIN_USER_QUOTE_CHARS}-non-whitespace-chars-got-${nonWs(rec.user_provenance.quote)}`);
+      }
+    }
+  } else if (supplied(rec, "user_provenance") && rec.user_provenance !== null) {
+    // The mirror of `SOURCE_REF_MUST_BE_NULL_FOR_USER`: a derived entry carrying a human quote would
+    // claim provenance it never had, and would read back as a human report.
+    reasons.push("USER_PROVENANCE_NOT_APPLICABLE_FOR_SYSTEM:reported_by=system-was-not-derived-from-a-human-message");
+  }
+
   return { ok: reasons.length === 0, reasons };
 }
 
@@ -493,11 +659,159 @@ export function appendExperienceRecord(root, rec) {
 }
 
 /**
- * Read the ledger back. Unparseable lines are DROPPED and COUNTED (never silently); `ok` is false
- * when any exist, because a partially-readable ledger must not be read as a complete one.
- * @returns {{ok:boolean, records:object[], malformed_lines:number, file:string|null}}
+ * Read the ledger back, WITH the append-only corrections applied.
+ *
+ * ⛔ The carrier holds TWO kinds now (entries and corrections), so this reads every kind and filters
+ * afterwards — reading `kind:"experience"` alone would make the corrections invisible and the ledger
+ * would report the very provenance the 2026-10-12 check found to be false.
+ *
+ * Unparseable lines are DROPPED and COUNTED (never silently); `ok` is false when any exist, because a
+ * partially-readable ledger must not be read as a complete one.
+ * @returns {{ok:boolean, records:object[], corrections:Map<string,object>, corrected_ids:string[],
+ *            malformed_lines:number, file:string|null}}
  */
-export const readExperienceLedger = (root) => readCarrier(root, EXPERIENCE_LEDGER_REL, EXPERIENCE_KIND);
+export function readExperienceLedger(root) {
+  const raw = readCarrier(root, EXPERIENCE_LEDGER_REL, null);
+  const applied = applyExperienceCorrections(raw.records);
+  return {
+    ...raw,
+    records: applied.entries.filter((r) => isObj(r) && r.kind === EXPERIENCE_KIND),
+    corrections: applied.patches,
+    corrected_ids: applied.corrected,
+  };
+}
+
+/** The CORRECTION lines themselves — the audit trail of what was changed, by whom, and why. */
+export function readExperienceCorrections(root) {
+  const raw = readCarrier(root, EXPERIENCE_LEDGER_REL, EXPERIENCE_CORRECTION_KIND);
+  const applied = applyExperienceCorrections(readCarrier(root, EXPERIENCE_LEDGER_REL, null).records);
+  return { ...raw, orphan_targets: applied.orphan_corrections };
+}
+
+/**
+ * Apply the append-only CORRECTIONS to a carrier's records. PURE.
+ *
+ * A correction line names the entry it corrects (`corrects`) and carries a `patch` drawn from
+ * `CORRECTABLE_FIELDS`. Corrections merge in LINE ORDER and the last write wins **field by field** —
+ * the ledger's own order is the precedence rule, and the only one, because a rule inferred from `ts`
+ * could disagree with the file and there would be no way to tell which was authoritative.
+ *
+ * ⛔ The original entry is RETURNED PATCHED, never removed: a reader sees the corrected view while the
+ * carrier still holds every line ever written. That is what makes the correction auditable — a
+ * "corrected" ledger that had simply been rewritten would be indistinguishable from one that was
+ * always right, which is the whole reason this is a separate record kind.
+ *
+ * @returns {{entries:object[], patches:Map<string,object>, corrected:string[], orphan_corrections:string[]}}
+ *   `orphan_corrections` names corrections that correct nothing present in the carrier. They are
+ *   REPORTED, never silently dropped (硬规则 5: "this correction corrected nothing" is not the same
+ *   finding as "there were no corrections").
+ */
+export function applyExperienceCorrections(records) {
+  const patches = new Map();
+  const orphanCorrections = [];
+  const entries = [];
+  const ids = new Set(records.filter((r) => isObj(r) && isStr(r.id, 1)).map((r) => r.id));
+  for (const r of records) {
+    if (!isObj(r)) continue;
+    if (r.kind !== EXPERIENCE_CORRECTION_KIND) { entries.push(r); continue; }
+    if (!isStr(r.corrects, 1) || !isObj(r.patch)) {
+      orphanCorrections.push(isStr(r.corrects, 1) ? r.corrects : String(r.id ?? "(unnamed-correction)"));
+      continue;
+    }
+    if (!ids.has(r.corrects)) { orphanCorrections.push(r.corrects); continue; }
+    patches.set(r.corrects, { ...(patches.get(r.corrects) ?? {}), ...r.patch });
+  }
+  const corrected = [];
+  const out = entries.map((e) => {
+    const patch = patches.get(e.id);
+    if (!patch) return e;
+    corrected.push(e.id);
+    return { ...e, ...patch };
+  });
+  return { entries: out, patches, corrected, orphan_corrections: orphanCorrections };
+}
+
+/**
+ * Append ONE correction. ⛔ It never edits the line it corrects — see the header.
+ *
+ * FAIL-CLOSED on every argument: a correction that names no entry, patches nothing (or patches a field
+ * outside `CORRECTABLE_FIELDS`), or gives no reason is REFUSED and appends nothing. In particular the
+ * target must ALREADY BE in the ledger: a correction pointing at an absent id would sit in the carrier
+ * looking exactly like one that corrected something (硬规则 3b).
+ *
+ * @returns {{ok:true, id, file, record, appended:true}|{ok:false, reasons:string[], appended:false}}
+ */
+export function appendExperienceCorrection(root, { corrects, patch, reason, authoredBy, ts } = {}) {
+  const reasons = [];
+  if (!isStr(corrects, 1)) reasons.push("INGEST_ARG_MISSING:corrects");
+  if (!isObj(patch) || Object.keys(patch).length === 0) {
+    reasons.push("INGEST_ARG_MISSING:patch");
+  } else {
+    for (const f of Object.keys(patch)) {
+      if (!CORRECTABLE_FIELDS.includes(f)) {
+        reasons.push(`${CORRECTION_FIELD_NOT_CORRECTABLE}:${f}-may-not-be-rewritten-by-a-correction`);
+      }
+    }
+  }
+  if (!isStr(reason, 1) || nonWs(reason) < MIN_CORRECTION_REASON_CHARS) {
+    reasons.push(`CORRECTION_REASON_INSUBSTANTIAL:needs->=${MIN_CORRECTION_REASON_CHARS}-non-whitespace-chars-explaining-why`);
+  }
+  if (!isObj(authoredBy) || !AUTHORED_BY_ACTORS.includes(authoredBy.actor) || !isStr(authoredBy.ref, 1)) {
+    reasons.push("INGEST_ARG_MISSING:authoredBy-{actor,ref}");
+  }
+  if (reasons.length) return { ok: false, appended: false, kind: EXPERIENCE_CORRECTION_KIND, reasons };
+
+  const read = readExperienceLedger(root);
+  if (!read.records.some((r) => r.id === corrects)) {
+    return {
+      ok: false, appended: false, kind: EXPERIENCE_CORRECTION_KIND,
+      reasons: [`${CORRECTION_TARGET_NOT_FOUND}:${corrects}-is-not-an-entry-in-${EXPERIENCE_LEDGER_REL}`],
+    };
+  }
+  // Idempotent: the id is content-addressed over `(corrects, patch, reason)` and `ts` is deliberately
+  // EXCLUDED, so re-running a backfill corrects nothing twice (`DUPLICATE_ID`, carrier untouched).
+  const body = { corrects, patch, reason };
+  return appendCarrierLine(root, EXPERIENCE_LEDGER_REL, {
+    id: recordId(EXPERIENCE_CORRECTION_KIND, body),
+    ...body,
+    ts: ts ?? new Date().toISOString(),
+    authored_by: authoredBy,
+  }, { kind: EXPERIENCE_CORRECTION_KIND });
+}
+
+// ── the per-record SKIP ledger (Plan item 4) ─────────────────────────────────────────────────────
+
+/** Absolute path of the skip ledger under the SHARED checkout (null when unresolvable). */
+export const ingestSkipsFile = (root) => carrierFile(root, INGEST_SKIPS_REL);
+
+/** Read the per-record skip ledger. Same fail-closed shape as every other carrier read: a partially
+ *  readable carrier must never be read as a complete dedup set. */
+export const readIngestSkips = (root) => readCarrier(root, INGEST_SKIPS_REL, INGEST_SKIP_KIND);
+
+/**
+ * The dedup key of a skip record — `(outcome_id, reason_code, mapping_version)`, exactly as the Plan
+ * states it. A malformed line has no `outcome_id` (it never parsed), so it keys on its store LINE
+ * instead; the two can never collide because an id is never shaped like `line-<n>`.
+ */
+export const skipDedupKey = (s) =>
+  `${isStr(s?.outcome_id, 1) ? s.outcome_id : `line-${s?.store_line}`}|${s?.reason_code}|${s?.mapping_version}`;
+
+/** The skip record's id: the content address of the DEDUP KEY only. `ts` and `verdict` are deliberately
+ *  outside it, so a re-run of the same skip collapses onto the existing line (`DUPLICATE_ID`) instead of
+ *  growing the carrier — while a NEW mapping version mints a new id, which is what makes a
+ *  re-evaluation visible rather than an overwrite. */
+export const ingestSkipId = (s) => `ingest-skip-${sha256(skipDedupKey(s)).slice(0, 16)}`;
+
+/**
+ * Record ONE skip. Idempotent by id — see `ingestSkipId`.
+ * @returns the `appendCarrierLine` result (`duplicate:true` when the same skip is already recorded)
+ */
+export function appendIngestSkip(root, { store_line = null, outcome_id = null, verdict = null, reason_code, mapping_version = VERDICT_ROLE_MAPPING_VERSION, ts } = {}) {
+  const rec = { store_line, outcome_id, verdict, reason_code, mapping_version };
+  return appendCarrierLine(root, INGEST_SKIPS_REL, {
+    id: ingestSkipId(rec), ...rec, ts: ts ?? new Date().toISOString(),
+  }, { kind: INGEST_SKIP_KIND });
+}
 
 // ── recovery: repair a carrier whose FINAL appended line was torn by a crash ──────────────────────
 
@@ -676,9 +990,9 @@ export function taskStatusOnDevelop(root, taskId) {
  *
  * @returns {{ok:true, fields:{role,components,summary,evaluation_pin}}|{ok:false, reasons:string[]}}
  */
-export function deriveExperienceFields(rec, { line = null, taskStatus = () => null, laterOutcomeWithSubjectKey = () => false } = {}) {
+export function deriveExperienceFields(rec, { line = null, taskStatus = () => null, laterOutcomeWithSubjectKey = () => false, verdictRole = VERDICT_ROLE } = {}) {
   if (!isObj(rec)) return { ok: false, reasons: ["RECORD_NOT_OBJECT"] };
-  let role = VERDICT_ROLE[rec.verdict] ?? null;
+  let role = verdictRole[rec.verdict] ?? null;
   if (role === null) {
     return { ok: false, reasons: [`VERDICT_NOT_INGESTIBLE:${String(rec.verdict)}-is-not-a-discovery-finding-verdict`] };
   }
@@ -747,12 +1061,17 @@ export function ingestExperience(root, args = {}) {
  * @param {string[]} [args.components] repo-relative files (used ONLY by the anti-leak deny-list)
  * @param {string} args.summary        >= MIN_SUMMARY_CHARS non-whitespace chars
  * @param {string} [args.ts]           ISO-8601; defaults to now
+ * @param {{actor:string, ref:string}} args.authoredBy  WHO wrote this entry. ⛔ REQUIRED, and NOT
+ *   defaulted: a default would relabel a worker's own finding as an operator report, which is the
+ *   exact defect this field exists to make impossible (see the header).
+ * @param {{kind:string, ref:string, quote:string}} [args.userProvenance]  the human's own words.
+ *   Required whenever `reportedBy` is `"user"`, and refused on a derived (`"system"`) entry.
  */
-export function ingestFeedback(root, { caseId, role, reportedBy = "user", evidenceRefs, components = [], summary, ts } = {}) {
-  return ingestExperience(root, { source: "user", caseId, role, reportedBy, evidenceRefs, components, summary, ts });
+export function ingestFeedback(root, { caseId, role, reportedBy = "user", evidenceRefs, components = [], summary, ts, authoredBy, userProvenance } = {}) {
+  return ingestExperience(root, { source: "user", caseId, role, reportedBy, evidenceRefs, components, summary, ts, authoredBy, userProvenance });
 }
 
-function ingestUserSource(root, { caseId, role, reportedBy = "user", evidenceRefs, components = [], summary, ts } = {}) {
+function ingestUserSource(root, { caseId, role, reportedBy = "user", evidenceRefs, components = [], summary, ts, authoredBy, userProvenance } = {}) {
   const evidence = (Array.isArray(evidenceRefs) ? evidenceRefs : []).map((e) =>
     isObj(e) ? { ref: e.ref, sha256: e.sha256 } : { ref: e, sha256: sha256(String(e)) });
   return appendExperienceRecord(root, {
@@ -760,13 +1079,22 @@ function ingestUserSource(root, { caseId, role, reportedBy = "user", evidenceRef
     ts: ts ?? new Date().toISOString(),
     role,
     reported_by: reportedBy,
+    // ⛔ Both of these are PASSED THROUGH and never defaulted — see `ingestFeedback`. An absent
+    // `authoredBy` reaches the validator as `SCHEMA_MISSING:authored_by` and the record is refused, so
+    // the honest answer to "who wrote this?" is never replaced by a plausible-looking guess.
+    authored_by: authoredBy,
     source_ref: null,             // forced — the manual path has no single source record
     evidence,
     components,
     summary,
     evaluation_pin: null,         // a human report has no pre-registration to be pinned to
+    user_provenance: userProvenance,
   });
 }
+
+/** The author a DERIVED (narrated-by-nobody) system entry carries. A constant, not a parameter: the
+ *  whole point of the derived form is that no caller picks anything, including who wrote it. */
+export const DERIVED_INGEST_AUTHOR = Object.freeze({ actor: "ingester", ref: "ingestNewOutcomes" });
 
 // ── SOURCE 2: the automatic path (reported_by:"system") — the load-bearing new piece ────────────
 
@@ -790,12 +1118,13 @@ function ingestUserSource(root, { caseId, role, reportedBy = "user", evidenceRef
  * `[{ref: <id>, sha256: sha256(<the record's raw carrier line>)}]`; `ts` = the record's own `ts`;
  * `evaluation_pin` = the record's pre-registration `pin`, or `null`.
  */
-export function ingestFromEvidenceStoreOutcome(root, { experiment, experimentRef, role, components = [], summary, caseId, ts } = {}) {
+export function ingestFromEvidenceStoreOutcome(root, { experiment, experimentRef, role, components = [], summary, caseId, ts, authoredBy } = {}) {
   return ingestExperience(root, {
     source: "system",
     experiment,
     experimentRef,
     narration: { role, caseId, components, summary, ts },
+    authoredBy,
   });
 }
 
@@ -848,12 +1177,13 @@ function resolveOutcomeForIngest(root, args) {
 }
 
 /** The record an ingestion appends, from the resolved outcome + the fields (derived or narrated). */
-function systemRecord(rec, raw, fields, { caseId, ts }) {
+function systemRecord(rec, raw, fields, { caseId, ts, authoredBy }) {
   return {
     case_id: caseId,
     ts: ts ?? (isStr(rec.ts, 4) ? rec.ts : new Date().toISOString()),
     role: fields.role,
     reported_by: "system",
+    authored_by: authoredBy,
     source_ref: rec.id,
     evidence: [{ ref: rec.id, sha256: sha256(raw) }],
     components: fields.components,
@@ -872,7 +1202,10 @@ function ingestSystemSource(root, args) {
     // The deriving form. Any field that must be derived is REFUSED rather than ignored: silently
     // dropping a caller's summary would make "I wrote what I saw" indistinguishable from "it was
     // derived" (硬规则 3b) — and the audit's defect was exactly a hand-written summary.
-    const forbidden = ["role", "components", "summary", "caseId", "case_id"].filter((f) => supplied(args, f));
+    // `authoredBy` is on that list for the same reason and one more: the derived form has NO caller
+    // narrating, so it has no caller to be the author. Accepting one would let a worker stamp
+    // `operator-session` on an entry it did not narrate.
+    const forbidden = ["role", "components", "summary", "caseId", "case_id", "authoredBy"].filter((f) => supplied(args, f));
     if (forbidden.length) {
       return {
         ok: false, appended: false, kind: EXPERIENCE_KIND,
@@ -890,6 +1223,11 @@ function ingestSystemSource(root, args) {
     // derivation. (The DERIVED form does mint one — `derivedCaseId` — because nobody is there to pick.)
     if (!isStr(narration.caseId, 1)) return { ok: false, appended: false, kind: EXPERIENCE_KIND, reasons: ["INGEST_ARG_MISSING:caseId"] };
     if (!EXPERIENCE_ROLES.includes(narration.role)) return { ok: false, appended: false, kind: EXPERIENCE_KIND, reasons: [`ROLE_NOT_IN_VOCAB:${String(narration.role)}`] };
+    // …and so is the AUTHOR, for exactly the same reason: the pinned caller narrates this entry, so the
+    // pinned caller is the one that has to say who it is. No default.
+    if (!isObj(args.authoredBy) || !AUTHORED_BY_ACTORS.includes(args.authoredBy.actor) || !isStr(args.authoredBy.ref, 1)) {
+      return { ok: false, appended: false, kind: EXPERIENCE_KIND, reasons: ["INGEST_ARG_MISSING:authoredBy-{actor,ref}"] };
+    }
   }
 
   const res = resolveOutcomeForIngest(root, args);
@@ -921,13 +1259,17 @@ function ingestSystemSource(root, args) {
       line,
       taskStatus: typeof ctx.taskStatus === "function" ? ctx.taskStatus : (id) => taskStatusOnDevelop(root, id),
       laterOutcomeWithSubjectKey: typeof ctx.laterOutcomeWithSubjectKey === "function" ? ctx.laterOutcomeWithSubjectKey : () => false,
+      verdictRole: isObj(ctx.verdictRole) ? ctx.verdictRole : VERDICT_ROLE,
     });
     if (!d.ok) return { ok: false, appended: false, kind: EXPERIENCE_KIND, reasons: d.reasons };
     fields = d.fields;
     caseId = derivedCaseId(rec);
   }
 
-  const out = appendExperienceRecord(root, systemRecord(rec, raw, fields, { caseId, ts: args.ts }));
+  // The author is fixed on the derived form and caller-declared on the pinned form (see the guards
+  // above); neither is defaulted here, so this line cannot reintroduce the defect the guards close.
+  const authoredBy = narration === null ? DERIVED_INGEST_AUTHOR : args.authoredBy;
+  const out = appendExperienceRecord(root, systemRecord(rec, raw, fields, { caseId, ts: args.ts, authoredBy }));
   // Surface WHERE it came from on acceptance — the derivation is the point of this adapter, and a
   // caller that cannot see the matched line cannot check that it matched the right one.
   return out.ok
@@ -1008,16 +1350,34 @@ function watermarkMismatch(wm, lines) {
  *   expressed by not applying one (Infinity), never by a large literal that would silently become the
  *   real limit on some other host (硬规则 4 推论二).
  * @param {boolean} [opts.enabled=true]  `false` ⇒ ZERO reads and ZERO writes, checked first.
- * @returns {{ok, enabled, store, watermark_file, scanned, ingested, duplicates,
- *            skipped_not_ingestible, skipped_blank_lines, malformed_lines,
- *            stopped_at_malformed_line, remainder, advanced_to, watermark, entries, ids, reasons?}}
+ * @param {object} [opts.verdictRole=VERDICT_ROLE]  the verdict→role map this run derives from. Changing
+ *   it changes `mappingVersion` with it, which is what re-opens the earlier `VERDICT_NOT_INGESTIBLE`
+ *   skips for re-examination — so "the mapping changed" and "the skips are revisited" cannot drift.
+ * @param {string} [opts.mappingVersion]  the version to FILE this run's skips under. Defaults to the
+ *   digest of `verdictRole`; overridable so a caller that re-ships the same map can still force a
+ *   re-examination (and so the re-evaluation itself is testable without editing the map).
+ * @param {(lineNo:number)=>({ok:true}|{ok:false,reason:string})} [opts.readLine]  the TRANSIENT-READ
+ *   seam. ⛔ Documented plainly: on the production path the store has already been read whole, so the
+ *   line is in memory and this cannot fail — the seam exists so the `READ_FAILED` RETRY PATH is
+ *   exercisable at all. The AC that requires it says "simulated" in as many words, and the production
+ *   readings this task owes are AC2/AC3 (the real carriers), not this. It is NOT claimed as a
+ *   measurement of production.
+ * @returns {{ok, enabled, store, watermark_file, skips_file, mapping_version, scanned, ingested,
+ *            duplicates, skipped_not_ingestible, skipped_blank_lines, malformed_lines, read_failed,
+ *            stopped_at_malformed_line, stopped_at_read_failed_line, remainder, advanced_to, watermark,
+ *            entries, ids, skips_recorded, skips_already_present, skipped_records,
+ *            rewound_for_mapping, reasons?}}
  */
-export function ingestNewOutcomes(root, { maxPerRun = Infinity, enabled = true } = {}) {
+export function ingestNewOutcomes(root, {
+  maxPerRun = Infinity, enabled = true, verdictRole = VERDICT_ROLE,
+  mappingVersion = verdictRoleMappingVersion(verdictRole), readLine = null,
+} = {}) {
   const base = {
-    ok: true, enabled, store: null, watermark_file: null,
+    ok: true, enabled, store: null, watermark_file: null, skips_file: null, mapping_version: mappingVersion,
     scanned: 0, ingested: 0, duplicates: 0, skipped_not_ingestible: 0, skipped_blank_lines: 0,
-    malformed_lines: 0, stopped_at_malformed_line: null,
+    malformed_lines: 0, read_failed: 0, stopped_at_malformed_line: null, stopped_at_read_failed_line: null,
     remainder: 0, advanced_to: null, watermark: null, entries: [], ids: [],
+    skips_recorded: 0, skips_already_present: 0, skipped_records: [], rewound_for_mapping: 0,
   };
   // ⛔ THE KILL SWITCH IS ANSWERED FIRST. Nothing below this line runs when it is off — not the store
   // read, not the watermark read, not the ledger read — so "zero reads and zero writes" is a property
@@ -1027,27 +1387,28 @@ export function ingestNewOutcomes(root, { maxPerRun = Infinity, enabled = true }
   const rr = resolveCarrierRoot(root);
   if (!rr.ok) return { ...base, ok: false, reasons: [rr.reason] };
   const store = path.join(rr.root, EVIDENCE_STORE_REL);
+  const skipsFile = carrierFile(root, INGEST_SKIPS_REL);
 
   const wm = readIngestWatermark(root);
-  if (!wm.ok) return { ...base, ok: false, store, watermark_file: wm.file, reasons: [wm.reason] };
+  if (!wm.ok) return { ...base, ok: false, store, skips_file: skipsFile, watermark_file: wm.file, reasons: [wm.reason] };
 
   if (!fs.existsSync(store)) {
-    return { ...base, ok: false, store, watermark_file: wm.file, reasons: [`EVIDENCE_STORE_MISSING:${EVIDENCE_STORE_REL}-not-present-under-${rr.root}`] };
+    return { ...base, ok: false, store, skips_file: skipsFile, watermark_file: wm.file, reasons: [`EVIDENCE_STORE_MISSING:${EVIDENCE_STORE_REL}-not-present-under-${rr.root}`] };
   }
   let text;
   try { text = fs.readFileSync(store, "utf8"); }
   catch (e) {
-    return { ...base, ok: false, store, watermark_file: wm.file, reasons: [`${EVIDENCE_STORE_UNREADABLE}:${EVIDENCE_STORE_REL}:${e?.code ?? e?.message}`] };
+    return { ...base, ok: false, store, skips_file: skipsFile, watermark_file: wm.file, reasons: [`${EVIDENCE_STORE_UNREADABLE}:${EVIDENCE_STORE_REL}:${e?.code ?? e?.message}`] };
   }
   const lines = splitStoreLines(text);
 
   // FAIL-CLOSED: the watermark names a line and a digest; BOTH must still hold. A rewritten or
   // truncated store is refused with its own code and NOTHING is written — never a silent restart at 0.
-  const from = wm.value ? wm.value.line : 0;
+  const from0 = wm.value ? wm.value.line : 0;
   if (wm.value) {
     const mismatch = watermarkMismatch(wm.value, lines);
     if (mismatch) {
-      return { ...base, ok: false, store, watermark_file: wm.file, watermark: wm.value, advanced_to: from, reasons: [`${WATERMARK_MISMATCH}:${mismatch}`] };
+      return { ...base, ok: false, store, skips_file: skipsFile, watermark_file: wm.file, watermark: wm.value, advanced_to: from0, reasons: [`${WATERMARK_MISMATCH}:${mismatch}`] };
     }
   }
 
@@ -1055,10 +1416,33 @@ export function ingestNewOutcomes(root, { maxPerRun = Infinity, enabled = true }
   // silently re-append an outcome that is already present, and it would look exactly like a new find.
   const ledger = readExperienceLedger(root);
   if (!ledger.ok) {
-    return { ...base, ok: false, store, watermark_file: wm.file, reasons: [`${CARRIER_UNREADABLE}:${EXPERIENCE_LEDGER_REL}-has-${ledger.malformed_lines}-unparseable-line(s)-so-the-source_ref-dedup-set-cannot-be-read-as-complete`] };
+    return { ...base, ok: false, store, skips_file: skipsFile, watermark_file: wm.file, reasons: [`${CARRIER_UNREADABLE}:${EXPERIENCE_LEDGER_REL}-has-${ledger.malformed_lines}-unparseable-line(s)-so-the-source_ref-dedup-set-cannot-be-read-as-complete`] };
   }
   const have = new Set();
   for (const r of ledger.records) if (isStr(r.source_ref, 1)) have.add(r.source_ref);
+
+  // The SKIP ledger — same fail-closed shape as the entry ledger, and for the same reason: an
+  // incomplete dedup set would re-append a skip that is already recorded, so the carrier would grow a
+  // duplicate that reads exactly like a second finding of the same thing.
+  const skips = readIngestSkips(root);
+  if (!skips.ok) {
+    return { ...base, ok: false, store, skips_file: skipsFile, watermark_file: wm.file, reasons: [`${CARRIER_UNREADABLE}:${INGEST_SKIPS_REL}-has-${skips.malformed_lines}-unparseable-line(s)-so-the-skip-dedup-set-cannot-be-read-as-complete`] };
+  }
+  const haveSkip = new Set(skips.records.filter((r) => isObj(r)).map(skipDedupKey));
+
+  // ⛔ THE REWIND (Plan item 4's third recording rule). A skip filed under a DIFFERENT mapping version
+  // is re-examined; so is any `READ_FAILED` line. Without this the version would be decorative: the
+  // watermark sits past those lines, so they would never be looked at again and "re-evaluated" would
+  // mean nothing. A `READ_FAILED` line is included even though the loop already refuses to advance past
+  // it — the two mechanisms then agree by construction rather than by coincidence.
+  const rewindTo = [];
+  for (const s of skips.records) {
+    if (!isObj(s) || !isInt(s.store_line)) continue;
+    if (String(s.reason_code ?? "").startsWith(SKIP_VERDICT_NOT_INGESTIBLE) && s.mapping_version !== mappingVersion) rewindTo.push(s.store_line);
+    else if (s.reason_code === SKIP_READ_FAILED) rewindTo.push(s.store_line);
+  }
+  const from = rewindTo.length ? Math.min(from0, Math.min(...rewindTo) - 1) : from0;
+  const rewoundForMapping = from < from0 ? from0 - from : 0;
 
   // Every outcome line, parsed ONCE: this is what lets a record be judged against a LATER outcome on
   // the same subject (the recurrence half of the role derivation) without a second pass over the store.
@@ -1070,33 +1454,90 @@ export function ingestNewOutcomes(root, { maxPerRun = Infinity, enabled = true }
   });
   const laterOutcomeWithSubjectKey = (subjectKey, line) =>
     isStr(subjectKey, 1) && isInt(line) && outcomes.some((o) => o.line > line && o.rec.subject_key === subjectKey);
-  const context = { taskStatus: (id) => taskStatusOnDevelop(root, id), laterOutcomeWithSubjectKey };
+  const context = { taskStatus: (id) => taskStatusOnDevelop(root, id), laterOutcomeWithSubjectKey, verdictRole };
 
   const entries = [];
   const ids = [];
   let advancedTo = from;
   let attempted = 0;
-  let scanned = 0, ingested = 0, duplicates = 0, skipped = 0, blank = 0, malformed = 0;
+  let scanned = 0, ingested = 0, duplicates = 0, skipped = 0, blank = 0, malformed = 0, readFailed = 0;
   let stoppedAtMalformed = null;
+  let stoppedAtReadFailed = null;
+
+  // Skips are COLLECTED and flushed on EVERY exit path (including a mid-loop refusal): a skip already
+  // earned by a line this run really did examine stays true whether or not a LATER line aborted it.
+  const pending = [];
+  let skipsAlready = 0;
+  const recordSkip = (storeLine, outcomeId, verdict, reasonCode) => {
+    const rec = { store_line: storeLine, outcome_id: outcomeId, verdict, reason_code: reasonCode, mapping_version: mappingVersion };
+    const key = skipDedupKey(rec);
+    if (haveSkip.has(key)) { skipsAlready++; return false; }
+    haveSkip.add(key);
+    pending.push(rec);
+    return true;
+  };
+  const flushSkips = () => {
+    const written = [];
+    for (const rec of pending) {
+      const w = appendIngestSkip(root, rec);
+      if (w.ok) written.push({ ...rec, id: w.id });
+      else if (w.duplicate) written.push({ ...rec, id: w.id, already_recorded: true });
+    }
+    return written;
+  };
 
   for (let i = from; i < lines.length; i++) {
     const lineNo = i + 1;
     const line = lines[i];
     if (!line.trim()) { blank++; advancedTo = lineNo; continue; }
+    // The transient-read seam — see `readLine` in the JSDoc. Answered BEFORE the parse, because "the
+    // read failed" and "the bytes are not JSON" are different findings with different codes.
+    const rd = readLine ? readLine(lineNo) : { ok: true };
+    if (!isObj(rd) || rd.ok !== true) {
+      // ⛔ TRANSIENT: recorded, and the scan STOPS here so the watermark cannot advance past the line —
+      // a later round retries it from the same place. Advancing would turn "I could not read it this
+      // time" into "there was nothing there", permanently (硬规则 3b).
+      readFailed++; stoppedAtReadFailed = lineNo;
+      recordSkip(lineNo, null, null, SKIP_READ_FAILED);
+      break;
+    }
     let rec;
     try { rec = JSON.parse(line); }
     catch {
       // COUNTED, and the watermark does NOT advance past it: an unparseable line might have been an
       // outcome, so stepping over it would lose the finding forever while claiming it was read.
       malformed++; stoppedAtMalformed = lineNo;
+      recordSkip(lineNo, null, null, SKIP_MALFORMED);
       break;
     }
     if (!isObj(rec) || rec.kind !== "outcome") { advancedTo = lineNo; continue; }   // readable, and definitively not an outcome
     if (attempted >= maxPerRun) break;                                              // quota: stop BEFORE this one
     attempted++; scanned++;
     const d = deriveExperienceFields(rec, { line: lineNo, ...context });
-    if (!d.ok) { skipped++; advancedTo = lineNo; continue; }                        // e.g. an ownership-loop verdict
-    if (have.has(rec.id)) { duplicates++; advancedTo = lineNo; continue; }           // dedup by source_ref
+    if (!d.ok) {
+      // e.g. an ownership-loop verdict. The per-record trace the audit found MISSING: which line, which
+      // outcome, which verdict, under which mapping — instead of one integer that named none of them.
+      // The code is rebuilt from the VERDICT rather than sliced out of the refusal sentence, so the
+      // recorded value is a value and not a substring of an explanation.
+      const notIngestible = d.reasons.some((x) => x.startsWith(`${SKIP_VERDICT_NOT_INGESTIBLE}:`));
+      if (!notIngestible) {
+        // Any OTHER derivation failure is not a skip and must not be filed as one (硬规则 3b): a shape
+        // the deriver cannot handle is a defect to report, not an outcome we declined.
+        const recorded = flushSkips();
+        return { ...base, ok: false, store, skips_file: skipsFile, watermark_file: wm.file, scanned, ingested, duplicates, skipped_not_ingestible: skipped, skipped_blank_lines: blank, malformed_lines: malformed, read_failed: readFailed, stopped_at_malformed_line: stoppedAtMalformed, stopped_at_read_failed_line: stoppedAtReadFailed, advanced_to: advancedTo, watermark: watermarkValue(lines, advancedTo), ids, entries, skips_recorded: recorded.length, skips_already_present: skipsAlready, skipped_records: recorded, rewound_for_mapping: rewoundForMapping, reasons: d.reasons };
+      }
+      skipped++; advancedTo = lineNo;
+      recordSkip(lineNo, isStr(rec.id, 1) ? rec.id : null, rec.verdict ?? null, `${SKIP_VERDICT_NOT_INGESTIBLE}:${String(rec.verdict)}`);
+      continue;
+    }
+    if (have.has(rec.id)) {
+      duplicates++; advancedTo = lineNo;
+      // ⛔ Recorded ONLY above the watermark this run started from. Below it, this run is there because
+      // of a rewind, the ledger already accounts for those lines, and re-reporting them would bury the
+      // real skips under noise — a duplicate is an outcome that WAS ingested, so it is not a gap.
+      if (lineNo > from0) recordSkip(lineNo, rec.id, rec.verdict ?? null, SKIP_DUPLICATE_SOURCE_REF);
+      continue;
+    }
     const r = ingestExperience(root, { source: "system", outcome: { rec, raw: line, line: lineNo }, context });
     if (r.ok) {
       ingested++; ids.push(r.id); have.add(rec.id); advancedTo = lineNo;
@@ -1108,23 +1549,109 @@ export function ingestNewOutcomes(root, { maxPerRun = Infinity, enabled = true }
       });
       continue;
     }
-    if (r.duplicate) { duplicates++; advancedTo = lineNo; continue; }
+    if (r.duplicate) {
+      duplicates++; advancedTo = lineNo;
+      if (lineNo > from0) recordSkip(lineNo, rec.id, rec.verdict ?? null, SKIP_DUPLICATE_SOURCE_REF);
+      continue;
+    }
     // A REFUSAL is neither skipped nor advanced past: the record could not become an Experience, and
     // reporting it is the only behaviour that keeps the watermark honest about what was read.
-    return { ...base, ok: false, store, watermark_file: wm.file, scanned, ingested, duplicates, skipped_not_ingestible: skipped, skipped_blank_lines: blank, malformed_lines: malformed, stopped_at_malformed_line: stoppedAtMalformed, advanced_to: advancedTo, watermark: watermarkValue(lines, advancedTo), ids, entries, reasons: r.reasons };
+    const recorded = flushSkips();
+    return { ...base, ok: false, store, skips_file: skipsFile, watermark_file: wm.file, scanned, ingested, duplicates, skipped_not_ingestible: skipped, skipped_blank_lines: blank, malformed_lines: malformed, read_failed: readFailed, stopped_at_malformed_line: stoppedAtMalformed, stopped_at_read_failed_line: stoppedAtReadFailed, advanced_to: advancedTo, watermark: watermarkValue(lines, advancedTo), ids, entries, skips_recorded: recorded.length, skips_already_present: skipsAlready, skipped_records: recorded, rewound_for_mapping: rewoundForMapping, reasons: r.reasons };
   }
 
   const watermark = watermarkValue(lines, advancedTo);
   if (advancedTo > from && watermark) writeIngestWatermark(wm.file, watermark);
   // The remainder is COUNTED off the text already read, not inferred: an ingestible outcome on a line
   // past where this run stopped. `stopped_at_malformed_line` says separately when a run was cut short.
-  const remainder = outcomes.filter((o) => o.line > advancedTo && VERDICT_ROLE[o.rec.verdict] !== undefined).length;
+  const remainder = outcomes.filter((o) => o.line > advancedTo && verdictRole[o.rec.verdict] !== undefined).length;
+  const recorded = flushSkips();
 
   return {
-    ...base, ok: true, store, watermark_file: wm.file,
+    ...base, ok: true, store, skips_file: skipsFile, watermark_file: wm.file,
     scanned, ingested, duplicates, skipped_not_ingestible: skipped, skipped_blank_lines: blank,
-    malformed_lines: malformed, stopped_at_malformed_line: stoppedAtMalformed,
+    malformed_lines: malformed, read_failed: readFailed,
+    stopped_at_malformed_line: stoppedAtMalformed, stopped_at_read_failed_line: stoppedAtReadFailed,
     remainder, advanced_to: advancedTo, watermark, entries, ids,
+    skips_recorded: recorded.length, skips_already_present: skipsAlready, skipped_records: recorded,
+    rewound_for_mapping: rewoundForMapping,
+  };
+}
+
+/**
+ * The ONE-TIME RECONCILIATION (Plan item 5) — record a skip for every outcome that is NOT an entry.
+ *
+ * ⛔ This is deliberately NOT a variant of `ingestNewOutcomes`: that one is watermarked and ingests,
+ * this one re-reads the WHOLE store, ingests nothing, and answers the single question the audit could
+ * not — "for each outcome, is it an entry, a named skip, or UNACCOUNTED?" The third answer is the
+ * point. An ingestible outcome that is neither in the ledger nor skipped is a finding that was LOST,
+ * and it is REPORTED as `unexplained` rather than filed as a skip: filing it would shape "we lost this"
+ * exactly like "we chose not to take it", which is the failure 硬规则 3b names.
+ *
+ * So `ingested + skipped + unexplained == outcomes scanned` holds BY CONSTRUCTION, and every term in
+ * it is a list of named records rather than a number.
+ *
+ * @returns {{ok, store, skips_file, mapping_version, scanned, ingested, skipped, unexplained,
+ *            skips_recorded, skips_already_present, skipped_records}}
+ */
+export function backfillIngestSkips(root, { verdictRole = VERDICT_ROLE, mappingVersion = verdictRoleMappingVersion(verdictRole) } = {}) {
+  const base = { ok: true, store: null, skips_file: null, mapping_version: mappingVersion, scanned: 0, ingested: 0, skipped: 0, unexplained: [], skips_recorded: 0, skips_already_present: 0, skipped_records: [] };
+  const rr = resolveCarrierRoot(root);
+  if (!rr.ok) return { ...base, ok: false, reasons: [rr.reason] };
+  const store = path.join(rr.root, EVIDENCE_STORE_REL);
+  if (!fs.existsSync(store)) return { ...base, ok: false, store, reasons: [`EVIDENCE_STORE_MISSING:${EVIDENCE_STORE_REL}-not-present-under-${rr.root}`] };
+
+  const ledger = readExperienceLedger(root);
+  if (!ledger.ok) return { ...base, ok: false, store, reasons: [`${CARRIER_UNREADABLE}:${EXPERIENCE_LEDGER_REL}-has-${ledger.malformed_lines}-unparseable-line(s)-so-the-ingested-set-cannot-be-read-as-complete`] };
+  const have = new Set();
+  for (const r of ledger.records) if (isStr(r.source_ref, 1)) have.add(r.source_ref);
+
+  const skips = readIngestSkips(root);
+  if (!skips.ok) return { ...base, ok: false, store, reasons: [`${CARRIER_UNREADABLE}:${INGEST_SKIPS_REL}-has-${skips.malformed_lines}-unparseable-line(s)-so-the-skip-dedup-set-cannot-be-read-as-complete`] };
+  const haveSkip = new Set(skips.records.filter((r) => isObj(r)).map(skipDedupKey));
+
+  const lines = splitStoreLines(fs.readFileSync(store, "utf8"));
+  const pending = [];
+  const ingestedIds = new Set();
+  const skippedIds = new Set();          // an id with a skip record — pre-existing OR recorded now
+  const unexplained = [];
+  let scanned = 0, skippedAlready = 0;
+
+  lines.forEach((line, i) => {
+    if (!line.trim()) return;
+    let rec; try { rec = JSON.parse(line); } catch { return; }
+    if (!isObj(rec) || rec.kind !== "outcome") return;
+    const lineNo = i + 1;
+    scanned++;
+    const key = isStr(rec.id, 1) ? rec.id : `line-${lineNo}`;
+    const first = !ingestedIds.has(key) && !skippedIds.has(key);
+    if (have.has(rec.id) && first) { ingestedIds.add(key); return; }   // an entry exists for this outcome
+    const reason = have.has(rec.id) ? SKIP_DUPLICATE_SOURCE_REF
+      : verdictRole[rec.verdict] === undefined ? `${SKIP_VERDICT_NOT_INGESTIBLE}:${String(rec.verdict)}`
+      : null;
+    // ⛔ `reason === null` is the third answer, and it is NOT filed as a skip: an ingestible outcome with
+    // no entry is a finding that was LOST. Filing it would shape "we lost this" exactly like "we chose
+    // not to take it" (硬规则 3b) — so it is collected here and reported as `unexplained`.
+    if (reason === null) { unexplained.push({ store_line: lineNo, outcome_id: rec.id ?? null, verdict: rec.verdict ?? null }); return; }
+    const r = { store_line: lineNo, outcome_id: isStr(rec.id, 1) ? rec.id : null, verdict: rec.verdict ?? null, reason_code: reason, mapping_version: mappingVersion };
+    skippedIds.add(key);
+    if (haveSkip.has(skipDedupKey(r))) { skippedAlready++; return; }
+    haveSkip.add(skipDedupKey(r));
+    pending.push(r);
+  });
+
+  const written = [];
+  for (const rec of pending) {
+    const w = appendIngestSkip(root, rec);
+    if (w.ok) written.push({ ...rec, id: w.id });
+    else if (w.duplicate) written.push({ ...rec, id: w.id, already_recorded: true });
+  }
+
+  return {
+    ...base, ok: true, store, skips_file: carrierFile(root, INGEST_SKIPS_REL),
+    scanned, ingested: ingestedIds.size, skipped: skippedIds.size, unexplained,
+    skips_recorded: written.filter((w) => !w.already_recorded).length,
+    skips_already_present: skippedAlready, skipped_records: written,
   };
 }
 
