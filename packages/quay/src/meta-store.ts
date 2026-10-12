@@ -36,7 +36,7 @@ import {
   makeAssertSafeStatus,
   makeAssertSafeId,
 } from "./frontmatter-store-base.ts";
-import { commitStoreWrite, resolveGitRoot, type CommitOutcome } from "./store-commit.ts";
+import { commitKindFile } from "./store-commit.ts";
 
 export const VALID_META_STATUSES = ["proposed", "answered"];
 
@@ -66,29 +66,6 @@ interface MetaViewModel {
   reply: unknown;
   body: string;
   updatedAt?: number;
-}
-
-/**
- * COMMIT-AFTER-WRITE: commit a meta file to git immediately after writeFileSync, via the shared
- * primitive `commitStoreWrite` — ⛔ no git plumbing here (the five store files' `git commit` has
- * exactly one home: store-commit.ts). A write whose content is BYTE-IDENTICAL to HEAD (the
- * meta-driver re-answering a record with the same reply) is restored to HEAD and returns
- * "unchanged" WITHOUT committing — that is the commit-flood guard (AC6): unchanged content across
- * N rounds produces ZERO commits, and a real content change produces exactly one. Repo-less roots
- * (unit-test temp dirs) are a no-op ("not-in-git", not a throw). This wrapper declares the meta
- * kind's default (SPEC §4 declaration table): `propagate: "none"` — a meta write rides the branch
- * it lands on.
- */
-function commitMetaFile(metaDir: string, fileName: string, id: string, action: string): CommitOutcome {
-  const root = resolveGitRoot(metaDir);
-  return commitStoreWrite({
-    relPath: root ? path.relative(root, path.join(metaDir, fileName)) : `meta/${fileName}`,
-    kind: "meta",
-    id,
-    action,
-    root,
-    propagate: "none",
-  }).outcome;
 }
 
 /**
@@ -219,7 +196,14 @@ export function createMetaStore(metaDir: string) {
       const action = !existingFile
         ? "create"
         : (prevStatus !== undefined && prevStatus !== frontmatter.status ? `status ${prevStatus}→${frontmatter.status}` : "update");
-      const outcome = commitMetaFile(metaDir, fileName, id, action);
+      // COMMIT-AFTER-WRITE via the shared wrapper `commitKindFile` (store-commit.ts) — ⛔ no git
+      // plumbing here. A write whose content is BYTE-IDENTICAL to HEAD (the meta-driver re-answering
+      // a record with the same reply) is restored to HEAD and returns "unchanged" WITHOUT committing
+      // — the commit-flood guard (AC6): unchanged content across N rounds produces ZERO commits, and
+      // a real content change produces exactly one. Repo-less roots (unit-test temp dirs) are a no-op
+      // ("not-in-git", not a throw). `propagate` defaults "none" — a meta write rides the branch it
+      // lands on (SPEC §4 declaration table).
+      const outcome = commitKindFile(metaDir, fileName, id, action, "meta");
       if (outcome === "failed") {
         // The disk write succeeded but the git commit genuinely FAILED — surface on stderr so the
         // failure is observable, not silent (硬规则 3b). "unchanged"/"not-in-git" are expected no-ops.

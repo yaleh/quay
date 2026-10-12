@@ -31,7 +31,7 @@ import {
   makeAssertSafeStatus,
   makeAssertSafeId,
 } from "./frontmatter-store-base.ts";
-import { commitStoreWrite, resolveGitRoot, type CommitOutcome } from "./store-commit.ts";
+import { commitKindFile } from "./store-commit.ts";
 
 export const VALID_ADR_STATUSES = ["proposed", "accepted", "superseded", "deprecated", "rejected"];
 
@@ -255,28 +255,14 @@ export function createAdrStore(adrDir: string) {
       const action = !existingFile
         ? "create"
         : (prevStatus !== undefined && prevStatus !== frontmatter.status ? `status ${prevStatus}→${frontmatter.status}` : "update");
-      commitAdrFile(adrDir, fileName, id, action);
+      // COMMIT-AFTER-WRITE (SPEC-store-commit-unification §4, 人 2026-09-08 裁定 2): ADRs previously
+      // had NO commit path (writes were invisible to git until a session-end sweep). The shared
+      // wrapper `commitKindFile` (store-commit.ts) does the git work — ⛔ no git plumbing here.
+      // `propagate` defaults "none": an ADR write rides the branch it lands on.
+      commitKindFile(adrDir, fileName, id, action, "adr");
       return get(id);
     });
   }
 
   return { list, listWithMalformed, get, write };
-}
-
-/**
- * COMMIT-AFTER-WRITE (SPEC-store-commit-unification §4, 人 2026-09-08 裁定 2): ADRs previously had
- * NO commit path (writes were invisible to git until a session-end sweep). Now delegated to the
- * shared primitive `commitStoreWrite` — ⛔ no git plumbing here. Default `propagate: "none"`: an
- * ADR write rides the branch it lands on.
- */
-function commitAdrFile(adrDir: string, fileName: string, id: string, action: string): CommitOutcome {
-  const root = resolveGitRoot(adrDir);
-  return commitStoreWrite({
-    relPath: root ? path.relative(root, path.join(adrDir, fileName)) : `adr/${fileName}`,
-    kind: "adr",
-    id,
-    action,
-    root,
-    propagate: "none",
-  }).outcome;
 }

@@ -65,7 +65,6 @@
 
 import fs from "node:fs";
 import path from "node:path";
-import os from "node:os";
 import http from "node:http";
 import { fileURLToPath } from "node:url";
 import { spawn, spawnSync } from "node:child_process";
@@ -93,31 +92,21 @@ import { resolveServeEnvelope, scopeLaunchArgv, serveScopeUnavailableReport } fr
 // The alternative — keep a private generic flag loop forever — is the duplication this task exists
 // to remove (semantic-dedup-scan `parseargs-handrolled-residuals`).
 import { parseArgs as baseParseArgs } from "./gate-script-base.ts";
-
-/** In-memory ceiling for the serve host this skill starts (2026-09-17 global-OOM remediation).
- *
- *  WHY: a `quay serve` host was measured at 0.65–1.7 GB RSS (plus a ~0.33 GB `quay-native mcp`
- *  child); several of them on this 16 GB box exhausted RAM and the kernel went global-OOM, killing
- *  dbus-daemon/systemd and an unrelated chrome batch. Uncapped, one leaked host grows unbounded.
- *
- *  ⛔ NOT a literal (硬规则 4 推论二): DERIVED from the host's MemTotal, so it stays a real ceiling
- *  (or a real absence of one) on a different machine instead of silently meaning something else.
- *  Floor 512 MB, cap 4 GB. A host that trips it aborts ITSELF (V8 OOM) rather than dragging the
- *  kernel into an unattributable global OOM.
- *
- *  ⚠️ Deliberately duplicated with `packages/quay/src/cli/server.ts:serveHeapCapMb` — a leaf,
- *  judgment-free two-line derivation the kernel keeps local (GOAL-012 kernel↔target boundary: the
- *  kernel does not reach into Core for a constant). ⛔ NOT a template for MECHANISM: where two
- *  copies would drift — the serve-log routing, above — the single source IS imported from Core. The
- *  distinction is the point: a constant duplicated twice is a rounding error, a spawn convention
- *  duplicated twice is how one entry logs and the other discards its host's dying words. */
-function serveHeapCapMb(): number {
-  return Math.min(4096, Math.max(512, Math.round(os.totalmem() / (1024 * 1024) / 5)));
-}
-
-function withServeHeapCap(existing: string | undefined): string {
-  return [existing, `--max-old-space-size=${serveHeapCapMb()}`].filter(Boolean).join(" ");
-}
+// The serve host's in-memory ceiling (`NODE_OPTIONS=--max-old-space-size=…`) is SINGLE-SOURCED in the
+// Core leaf `packages/quay/src/serve-heap-cap.ts` — the SAME implementation this host's other spawn
+// site (`packages/quay/src/cli/server.ts:spawnHost`) uses
+// (`.quay/routine-findings.jsonl` finding `serveheapcapmb-cross-layer-copy`, routine
+// `semantic-dedup-scan`, runId `semantic-dedup-scan-1791821278116`). This file used to keep a
+// byte-identical local copy, justified as "the kernel does not reach into Core for a constant" — a
+// justification this very file had already falsified sixteen lines above (serve-log.ts +
+// systemd-scope.ts), and `4096`/`512`/`5` are incident-derived POLICY, not a leaf constant: two
+// copies can retune apart while each still looks correct (硬规则 5b).
+//
+// ⛔ NOT `packages/quay/src/cli/server.ts` (the finding's suggested target): that module statically
+// reaches the whole serve host, and esbuild (bundle:true) would INLINE it here — measured 2026-10-13,
+// `dist/start-drivers.js` 32,143 B → 784,043 B (24×). The LEAF is the established shape for a helper
+// both spawn sites need (serve-log.ts / systemd-scope.ts), and it carries node builtins only.
+import { withServeHeapCap } from "../../packages/quay/src/serve-heap-cap.ts";
 
 const DRIVER_KINDS = ["promotion", "worker", "outer", "goal"] as const;
 // ⛔ This file declares NO web bind default — not the host, not the port
@@ -1014,10 +1003,12 @@ async function main(argv: string[]): Promise<number> {
   return 0;
 }
 
-// Direct-entry guard (gate-script-base convention, INLINED rather than imported: that keeps this
-//  file free of ESM SIBLING imports, so it lays down via rule (a). Its one cross-tree import — the
-//  serve-log helper from packages/quay/src — is a plugin→packages forward edge esbuild inlines into
-//  the shipped bundle, which is a different thing from a sibling dependency.)
+// Direct-entry guard (gate-script-base convention, INLINED rather than imported: the guard is what
+//  decides whether this file RUNS, so it takes no dependency of its own). The cross-tree imports
+//  above — the serve-log / systemd-scope / serve-heap-cap helpers from packages/quay/src — are
+//  plugin→packages forward edges esbuild inlines into the shipped bundle; that is a different thing
+//  from the file's ONE sibling import (`gate-script-base.ts`, the shared parser, justified at its own
+//  import site by its membership in the derived laydown set).
 const _entryBase = path.basename(process.argv[1] ?? "").replace(/\.(js|ts|mjs)$/, "");
 if (_entryBase === "start-drivers") {
   // The WHOLE argv: flag parsing is the shared parser's job now, and IT does the `slice(2)` (the

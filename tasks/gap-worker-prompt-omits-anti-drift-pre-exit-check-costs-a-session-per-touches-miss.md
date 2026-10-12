@@ -3,7 +3,7 @@ id: gap-worker-prompt-omits-anti-drift-pre-exit-check-costs-a-session-per-touche
 title: "cross-project: worker prompts never run the anti-drift Touches check
   before exit ⇒ every out-of-Touches write costs a whole extra worker session
   (162 bounces in 6 projects)"
-status: ready
+status: done
 labels:
   - gap
   - defect
@@ -51,15 +51,63 @@ That is 162 bounces across 6 projects. An independent read of the host subset es
 3. Factor the step into one shared helper used by both prompt builders, so the two prompts cannot drift apart.
 
 ## Acceptance Criteria
-- [ ] AC1: a unit test shows `buildWorkerPrompt` and `buildContinueWorkerPrompt` output both contain the resolved anti-drift argv for the given task and worktree. Negative control: remove the helper call from one builder ⇒ red. Paste both runs.
-- [ ] AC2: the argv embedded in the prompt is executable. Run it verbatim on a fixture worktree with one out-of-Touches write ⇒ exit 1 naming the file. After adding it to Touches ⇒ exit 0. Paste both.
-- [ ] AC3: the argv resolves under a plugin `dist` layout too. A fixture with `QUAY_PLUGIN_ROOT` pointing at a dist-shaped tree yields a path that exists. Paste it.
+- [x] AC1: a unit test shows `buildWorkerPrompt` and `buildContinueWorkerPrompt` output both contain the resolved anti-drift argv for the given task and worktree. Negative control: remove the helper call from one builder ⇒ red. Paste both runs.
+- [x] AC2: the argv embedded in the prompt is executable. Run it verbatim on a fixture worktree with one out-of-Touches write ⇒ exit 1 naming the file. After adding it to Touches ⇒ exit 0. Paste both.
+- [x] AC3: the argv resolves under a plugin `dist` layout too. A fixture with `QUAY_PLUGIN_ROOT` pointing at a dist-shaped tree yields a path that exists. Paste it.
 - [ ] AC4 production reading on quay's own `.quay/worker-outcome.jsonl`: among outcomes of tasks first dispatched after the landing commit, over ≥ 40 outcomes, the share with `"step":"anti-drift"` is below 1% (baseline 70/3064 ≈ 2.3%; paste numerator and denominator)（待外部）
 
 ## Definition of Done
 - `scripts/test.sh --for-task <this task>` green; `tsc` clean on touched `.ts`.
 - AC1–AC3 checked with pasted readings; AC4 stays `（待外部）` until its window fills.
 - The anti-drift gate behaviour in fan-in is unchanged (no new exemption, no softening).
+
+## Evidence
+
+**Implementation.** `plugin/scripts/worker-driver.ts` gains one shared helper
+`antiDriftPreExitNote(task, root, worktree)`, called directly by both prompt builders (创建 prompt 步
+`(2c)`、续做 prompt 步 `(1c)`). The helper resolves the kernel sibling with `kernelSiblingArgv("anti-drift-touches-check.ts")`
+—— the same resolver behind `worker-fan-in.ts`'s `gateArgv` —— and embeds the argv fan-in runs verbatim
+(`--task <id> --worktree <dir> --merge-target <ref>`, the ref from the shared `resolveTaskMergeTarget`).
+Unresolvable sibling ⇒ an explicit "cannot be resolved" note, never a silent skip (硬规则 3b).
+
+**AC1** (`plugin/test/worker-driver.test.mjs`, 3 new tests). Both builders:
+```
+✔ AC1 (能取假) — buildWorkerPrompt 与 buildContinueWorkerPrompt 都嵌入【同源解析】的 anti-drift argv
+```
+Negative control — delete the `(1c)` helper call from `buildContinueWorkerPrompt` and re-run:
+```
+✖ AC1 (能取假) — … 都嵌入【同源解析】的 anti-drift argv
+  AssertionError [ERR_ASSERTION]: prompt embeds the anti-drift command inside backticks
+      at extractAntiDriftArgv (worker-driver.test.mjs:4396)
+  ℹ fail 1
+```
+Restored (the control red, not a vacuous pass): `✖` → `✔`, `ℹ fail 0`.
+
+**AC2** — the argv extracted from the prompt, run verbatim on a fixture worktree (default branch
+`master`, `develop` forked from it, task branch with `src/kept.ts` declared and `src/stray.ts` not):
+```
+$ node --no-warnings --experimental-strip-types <kernel>/anti-drift-touches-check.ts --task gap-x --worktree /tmp/tmp.6KJ9IXcr2E --merge-target develop
+ANTI-DRIFT HARD FAIL: task gap-x — 1 violation(s)
+  out-of-declared: task wrote src/stray.ts (matches no declared Touches glob)
+exit=1
+# src/stray.ts added to ## Touches, same argv re-run:
+ANTI-DRIFT OK: task gap-x — 3 actual file(s), all within declared Touches (3 glob(s))
+exit=0
+```
+The same run is asserted in-process by the AC2 test (named-file match + green after declaring).
+
+**AC3** — `QUAY_PLUGIN_ROOT` pointed at a dist-shaped tree (only `scripts/dist/anti-drift-touches-check.js`,
+no raw `.ts`):
+```
+dist-shaped kernel tree: /tmp/tmp.FqiXUqD6iD
+resolved argv: node --no-warnings /tmp/tmp.FqiXUqD6iD/scripts/dist/anti-drift-touches-check.js --task gap-x --worktree <…> --merge-target develop
+existsSync(script): true
+has --experimental-strip-types: false
+```
+Argument ABI surface unchanged; fan-in's anti-drift gate untouched (no new exemption, no softening).
+
+**AC4** stays `（待外部）` — its window (≥40 outcomes of tasks first dispatched after this landing) has
+not filled yet.
 
 ## Touches
 - tasks/gap-worker-prompt-omits-anti-drift-pre-exit-check-costs-a-session-per-touches-miss.md

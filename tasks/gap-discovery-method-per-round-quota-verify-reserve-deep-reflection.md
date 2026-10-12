@@ -51,25 +51,144 @@ Three structural limits need deciding:
 4. **Apply the recommended values** only after (1)–(3) land, and record the before/after config diff. If the measurements in AC contradict the recommendation, apply the measured values instead and say why.
 
 ## Acceptance Criteria
-- [ ] Unit tests (stub model) exit 0, covering:
+- [x] Unit tests (stub model) exit 0, covering:
   - (a) `verify_reserve` holds back calls: reflection stops at `max_model_calls − verify_reserve` and a minted candidate is validated in the same round;
   - (b) `verify_reserve > max_model_calls` is a config error;
   - (c) default config ⇒ reflection argv carries `Read,Grep,Glob`, the pin dir and `--max-turns <reflection_max_turns>`;
   - (d) `reflection_tools: ""` ⇒ argv identical to today (`--tools ""`), kept as fallback/baseline;
   - (e) a wall breach after k calls ⇒ k results persisted with `partial:true`, last-run not advanced, all k calls present in the 24h reservation ledger.
-- [ ] Negative control: set `verify_reserve` to 0 in a scratch copy with a stub that mints a candidate on the last allowed call ⇒ (a) goes red. Paste the output.
-- [ ] Measurement:
+- [x] Negative control: set `verify_reserve` to 0 in a scratch copy with a stub that mints a candidate on the last allowed call ⇒ (a) goes red. Paste the output.
+- [x] Measurement:
   - one real round (resident-driver after landing, or a manual `--force` round that does NOT advance last-run and counts against the same 24h ledger) with the applied per-round values;
   - paste units selected, calls made (reflection versus verification), realized turns per call, wall ms and gateway cost;
   - state whether the 1800000 ms wall is sufficient given the measured per-call time.
-- [ ] Config: paste the `.quay/config.yml` `discovery_method` diff, and the driver assembly line after the reload showing the per-round values and `verify_reserve`.
+- [x] Config: paste the `.quay/config.yml` `discovery_method` diff, and the driver assembly line after the reload showing the per-round values and `verify_reserve`.
   - The reload must actually fire: a delta touching only routine modules does not trigger the anchor self-refresh, so touch `quality-gate-driver.ts` or reload with `quay driver restart --kind quality`; never `pkill -f`.
-- [ ] Report-only, kill switch (`enabled:false` ⇒ zero spawns), manual-never-advances-last-run and other routines' cadence: existing tests still green; paste them.
+- [x] Report-only, kill switch (`enabled:false` ⇒ zero spawns), manual-never-advances-last-run and other routines' cadence: existing tests still green; paste them.
 
 ## Definition of Done
 - All AC ticked with output pasted.
 - `scripts/test.sh --for-task gap-discovery-method-per-round-quota-verify-reserve-deep-reflection` green.
 - 240 is documented in code/config comments as THIS routine's launcher-subprocess ceiling, not a Quay-wide session or API budget.
+
+## Evidence
+
+### AC1 — unit tests (stub model), exit 0
+```
+$ node --test --experimental-strip-types plugin/test/discovery-method-routine.test.mjs
+ℹ tests 56   ℹ pass 56   ℹ fail 0
+$ node --test --experimental-strip-types plugin/test/discovery-reflection.test.mjs
+ℹ tests 52   ℹ pass 52   ℹ fail 0
+```
+New cases, routine test: `AC(a) verify_reserve holds reflection at max_model_calls − verify_reserve (real engine, 24h ledger)` · `AC(a) a candidate minted on reflection's LAST allowed call is validated in the SAME round` · `AC(b) verify_reserve > max_model_calls is a config error, and the round spawns nothing` · `AC(c) default config ⇒ reflection argv carries Read,Grep,Glob, the pin dir AND --max-turns <reflection_max_turns>` · `AC(d) reflection_tools:"" ⇒ argv byte-identical to the pre-change launcher (--tools ""), no pin, one turn` · `AC(e) a wall breach after k calls persists k results with partial:true …` · `AC(e) boundary — a wall breach with ZERO completed calls appends nothing, exactly as before` · `a round that gets its seams from modelFactory NAMES the reflection pin in the prompt and records it on the carrier`.
+New cases, reflection test: `reflectionLaunchArgv — --add-dir <pin> exactly when a pin is given; otherwise byte-identical to hardenedArgv` · `buildReflectionPrompt — code access NAMES the pinned tree, stays a semantic question, and is byte-identical when absent`.
+The two pre-change cases whose CONTRACT this task changes were updated, not deleted: `AC1(e) — a wall-breach round PERSISTS a partial line … AND its calls are counted exactly once` and `COUNTING SEMANTICS — …` (the default arm now carries tools; the empty-tools arm is asserted alongside it).
+
+### AC2 — negative control output
+`/tmp/dm-negctl/negctl.mjs` (one variable: `verify_reserve` 2 → 0; same round, same stub, which spends the whole reflection budget it is handed and mints on its last allowed call):
+```
+verify_reserve=2  → reflection handed 4 calls; candidates minted 1 ; VERIFICATIONS IN THIS ROUND: 1
+verify_reserve=0  → reflection handed 6 calls; candidates minted 1 ; VERIFICATIONS IN THIS ROUND: 0
+AC(a) is REFUTABLE: with verify_reserve=0 the minted candidate is NEVER validated in the round that minted it (control RED as required).
+```
+And the same mutation applied to the suite test itself (`reserveYaml(240, 2)` → `0` in that one case, run from a scratch copy of the test with the relative specifiers rewritten absolute):
+```
+✖ AC(a) — a candidate minted on reflection's LAST allowed call is validated in the SAME round
+  AssertionError [ERR_ASSERTION]: the candidate minted by THIS round was validated IN THIS round
+  0 !== 1
+ℹ tests 1   ℹ pass 0   ℹ fail 1
+```
+
+### AC3 — measurement (one real round, per-round values applied)
+Round 1 — **production root, manual `--force`** (counts against the production 24h ledger; last-run NOT advanced — verified: `.quay/routine-last-run.json` still holds `discovery-method: 1791822142523` + `discovery-method@invoked_by: resident-driver`, i.e. the 16:22:22Z RESIDENT round, while the carrier's newest line is `invoked_by: manual`):
+```
+command: node --experimental-strip-types <worktree>/plugin/scripts/discovery-method-routine.ts \
+           --once --root /data/home/yale/work/quay --force --json --pin-tmp /tmp/dm-measure-pins
+state=verified  wall_ms=63357  model_calls=12  cost_usd=1.711225
+tokens={input:302125, output:8024, cache_read:0, cache_creation:0}
+ingested={experiences:12, scanned:14, duplicates:2, advanced_to:300}
+reflected={decisions:16, skipped_budget:4, model_calls:12,
+           selection:{units_evaluated:138, batch_size:16, skipped_prior:16, skipped_cap:106, merged_within_batch:10}}
+reservations={cap:240, used_at_start:12, remaining_at_start:228, requested_max_model_calls:16,
+              effective_max_model_calls:16, reflection_max_model_calls:12, verify_reserve:4,
+              granted:12, refused:0}
+candidates={minted:0}  verdicts={total:0}      → 12 reflection calls, 0 verification calls
+realized turns per call (ledger outcomes, all 12): 1,1,1,1,1,1,1,1,1,1,1,1
+```
+⛔ **THIS ROUND EXPOSED A DEFECT AND ITS NUMBERS ARE THE PRE-FIX ONES.** `reflection_launcher` came back `null` and the prompt named no tree: the `--once` CLI built its two launchers ITSELF instead of going through `modelFactory`, so the round never saw the pin the launcher's argv had been given (`--add-dir /tmp/dm-measure-pins/dm-reflect-pin-515e6baa-yYksU1` WAS created). Every call answered in ONE turn — tools the model is not told about are decorative, and its cwd is the live checkout. Fixed in the second commit (`main()` now passes `modelFactory`, lazily, as the driver does) and pinned by a test.
+
+Round 2 — **isolated live root** (a shallow clone of this repo at `ef904edc`, the production evidence store copied in, the production `discovery_method` values; run by the worktree's code with `--root <clone>`, so the pin is real code and the carriers are the clone's own):
+```
+state=verified  wall_ms=257572  model_calls=11  cost_usd=3.402399
+tokens={input:404201, output:41378, cache_read:693888, cache_creation:0}
+model_id=v4.1flash-anthropic
+reflection_launcher={"tools":"Read,Grep,Glob","max_turns":10,
+                     "pin":{"rev":"ef904edca038f0345a2376a347cb8fb913268179",
+                            "dir":"../../../../tmp/dm-measure-pins/dm-reflect-pin-ef904edc-ZECqz1"}}
+ingested={experiences:11, scanned:16, duplicates:0, advanced_to:109}
+reflected={decisions:11, skipped_budget:0, model_calls:11,
+           selection:{units_evaluated:11, batch_size:11, skipped_prior:0, skipped_cap:0, merged_within_batch:0}}
+candidates={minted:6, persisted:6}
+verdicts={total:0}                              → 11 reflection calls, 0 verification calls
+
+per call (reserve → outcome, seconds; turns from the launcher's stream):
+#  1  22.5s turns=5      #  5  28.3s turns=6      #  9  36.9s turns=9
+#  2  19.9s turns=5      #  6  34.8s turns=8      # 10  13.2s turns=2
+#  3  10.6s turns=1      #  7  20.5s turns=5      # 11  19.2s turns=3
+#  4  24.2s turns=8      #  8  26.0s turns=3
+calls=11  sum=256.2s  mean=23.3s  max=36.9s   (projected for max_model_calls=16 at this mean: 373s)
+```
+The fix is confirmed on the live path by three independent readings: the carrier records the launcher + pin; realized turns per call went from a flat `1` (round 1, pre-fix) to 1–9 (mean 5.0); and the round MINTED 6 candidates where every text-only production round minted 0 — the code-reading arm is not just the same pipeline with a bigger quota.
+
+**Is the 1800000 ms wall sufficient?** Sufficient, but NOT APPLICABLE — and it is the one recommended value this task changes. `1800000` EQUALS the caller-side routine watchdog `ROUTINE_WATCHDOG_MS_DEFAULT` (`quality-gate-driver.ts:158`, 30 min). A wall budget that is not strictly BELOW the watchdog is never the thing that fires: the round would be abandoned by the watchdog, so the `partial` persistence and the not-advancing last-run this task adds would never execute. Applied instead: **`max_wall_ms: 1200000` (20 min, 2/3 of the watchdog)**. Against the measured per-call time that is ~3.2× headroom over the projected 16-call round (373s) and ~2.0× over the pessimistic 16 × 36.9s = 590s. Measured caveat: `max_wall_ms` is checked BETWEEN steps, never inside a call, so a single call can still overshoot by up to the 300s per-call launcher timeout — 20 min of wall slack absorbs that; a wall equal to the watchdog would not.
+`verify_reserve` was NOT exercised in either live round — round 2 minted 6 candidates but the clone has no held-out pool, so `verdicts.total = 0` and no verification call was made. It is covered by the unit cases and the negative control above, and it binds in production exactly when a candidate is minted AND a held-out case exists.
+
+### AC4 — config diff + assembly line
+Production `/data/home/yale/work/quay/.quay/config.yml` (`discovery_method`; the file is gitignored, so fan-in cannot carry it — applied directly, and INERT until the driver reload because the routine spec closes over the parsed config at driver startup):
+```diff
+--- .quay/config.yml (before)
++++ .quay/config.yml (after)
+     max_experiences: 8        →      max_experiences: 16
+     max_model_calls: 6        →      max_model_calls: 16
+                                      verify_reserve: 4
+                                      reflection_tools: Read,Grep,Glob
+                                      reflection_max_turns: 10
+     max_wall_ms: 900000       →      max_wall_ms: 1200000
+```
+Live read-back of the section (values verbatim):
+```
+  discovery_method:
+    enabled: true
+    interval: interval:60m
+    interval_until: 2026-10-19T14:00:00Z
+    max_model_calls_per_24h: 240
+    max_experiences: 16
+    max_model_calls: 16
+    verify_reserve: 4
+    reflection_tools: Read,Grep,Glob
+    reflection_max_turns: 10
+    max_wall_ms: 1200000
+```
+The driver's assembly line, rendered by the driver's OWN `discoveryMethodRoutineFromConfig` + `formatDiscoveryMethodAssembly` against the production root (the same string `main()` prints at startup):
+```
+quality-gate-driver: discovery-method 例程已装配（enabled, interval=60m, interval_until=2026-10-19T14:00:00.000Z, max_model_calls_per_24h=240 (HARD: pre-spawn reservation per call, trailing-24h; a reservation with no outcome still counts as spent), max_experiences=16, max_model_calls=16 (per round), verify_reserve=4 (held back from reflection ⇒ reflection <= 12), max_wall_ms=1200000, reflection_tools="Read,Grep,Glob" (SEMANTIC FIRST: reflection reads a stripped pin at HEAD), reflection_max_turns=10, verifier_max_turns=12, worst_case_api_turns_per_24h=2880 (cap × max(effective reflection turns, verifier turns))）
+```
+**The reload fires on landing, by construction**: the self-refresh watches `DRIVER_KINDS[kind].driver` + the shared kernel files (`driver-runtime.ts:2534` `watchedSourceFiles`), and this delta touches `plugin/scripts/quality-gate-driver.ts` — exactly the trigger the AC names. `quay driver restart --kind quality` was NOT run by this worker (the reload happens on its own when the delta lands; restarting a resident production driver is the manager's standing action, and restarting before the code is in the main checkout would have reloaded the OLD code and printed a line without `verify_reserve`). No `pkill -f` was used.
+
+### AC5 — report-only / kill switch / manual / other cadences
+```
+$ bash scripts/test.sh --for-task gap-discovery-method-per-round-quota-verify-reserve-deep-reflection --allow-thin
+EXIT=0      ℹ tests 141   ℹ pass 141   ℹ fail 0
+```
+Contains the cases that assert these properties: case (2) `enabled:false ⇒ not-evaluated:disabled and ZERO spawns`, case (3) `halted ⇒ … and ZERO spawns`, case (8) `after a full round nothing under tasks/ or goals/ changed, and the source is filing-free`, case (a) `a MANUAL round leaves routine-last-run.json BYTE-IDENTICAL (and really ran)`, case (g) `arch-discovery's own interval and floor are UNTOUCHED by this routine's temporary cadence`, plus AC1(g) `enabled:false, halted and --no-model ⇒ ZERO reservations`.
+Independently confirmed on the live production round: the manual round's line landed with `invoked_by: manual` and `.quay/routine-last-run.json` still holds the resident round's `1791822142523` / `resident-driver` stamp.
+
+### Deviations, and what a reviewer should look at
+1. `max_wall_ms` **1200000**, not the recommended 1800000 — reasoned above (it equals the watchdog). This is the one recommended value changed.
+2. The measurement round found a real defect (the CLI's duplicate seam builder) and it was fixed IN this task; the first round's numbers are therefore the pre-fix floor and the second round is the post-fix one. The first round's data is kept above rather than replaced, because deleting it would hide how the defect was found.
+3. `plugin/scripts/capability-catalog-declarations.json` was touched: its `discovery-method-routine.ts` declaration said a budget breach "appends nothing", which partial persistence makes false.
+4. The pin the reflection reads is materialised per round and, like the verifier's per-case pins, is NOT removed by the round — it follows the existing discipline (`PIN_TMP_ENV` / `--pin-tmp` point it at a managed root); it is 37MB for this repo and takes 0.8s to build.
+5. `latestResidentRoundTs` now SKIPS `partial:true` lines. Without that the un-advanced last-run would be undone on the due-side and the promised retry would silently not happen.
 
 ## Touches
 - tasks/gap-discovery-method-per-round-quota-verify-reserve-deep-reflection.md
@@ -78,4 +197,5 @@ Three structural limits need deciding:
 - plugin/test/discovery-method-routine.test.mjs
 - docs/analysis/discovery-reflection.mjs
 - plugin/test/discovery-reflection.test.mjs
+- plugin/scripts/capability-catalog-declarations.json
 - .quay/config.yml

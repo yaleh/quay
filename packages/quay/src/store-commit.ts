@@ -191,6 +191,42 @@ export function commitStoreWrite(opts: CommitStoreWriteOptions): CommitStoreWrit
 }
 
 /**
+ * The SINGLE per-kind `<kind>Dir → commitStoreWrite` wrapper
+ * (gap-routine-semantic-dedup-scan-commit-kind-file-quadruplicated). The adr / docs-managed / meta /
+ * goals stores each used to carry a byte-identical LOCAL copy of this wrapper whose only difference
+ * was the `kind` string AND an unreachable `"<kind>/"+fileName` relPath fallback — so the copy count
+ * tracked the number of store kinds, not any real per-kind behavior. Each store now passes its kind
+ * (and dir) here; the shared primitive does the git work.
+ *
+ * The fallback was DEAD CODE, not a per-kind difference: `commitStoreWrite` returns `not-in-git` at
+ * `if (!root)` BEFORE `relPath` is ever read, so when `root` is null the `relPath` value is never
+ * consulted. This wrapper therefore passes a plain `fileName` placeholder in that branch (⛔ the
+ * throw-away value is unreachable — do not "restore" a per-kind prefix here).
+ *
+ * `root` comes from `resolveGitRoot(dir)` (⛔ not path.dirname — hard rule 4 corollary 2: a worktree
+ * or nested workspace must resolve to the real toplevel). `propagate` is the kind's declared
+ * strategy (SPEC §4 declaration table); it defaults to "none" (commit to the current branch only).
+ */
+export function commitKindFile(
+  dir: string,
+  fileName: string,
+  id: string,
+  action: string,
+  kind: string,
+  propagate: "none" | "develop" = "none",
+): CommitOutcome {
+  const root = resolveGitRoot(dir);
+  return commitStoreWrite({
+    relPath: root ? path.relative(root, path.join(dir, fileName)) : fileName,
+    kind,
+    id,
+    action,
+    root,
+    propagate,
+  }).outcome;
+}
+
+/**
  * COMMIT-AFTER-BATCH (gap-store-commit-action-and-actor AC3): stage MANY written files and commit
  * them in ONE commit — the `--batch` primitive. One logical action that writes N records must not
  * produce N commits (the 16-commits-per-logical-action defect). `relPaths` are staged together
