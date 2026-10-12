@@ -36,6 +36,42 @@
 // 硬规则 5 (来源完备性): the automatic adapter's source is the evidence store — a miss there is
 // reported as its OWN value (`EVIDENCE_OUTCOME_NOT_FOUND`), never as an empty success.
 //
+// ── THE AUTOMATIC BATCH INGESTER (task gap-discovery-experience-auto-ingest-from-evidence-store) ──
+//
+// `ingestExperience(root, {source})` is the ONE entry BOTH sources go through: `ingestFeedback`
+// (`source:"user"`) and the evidence-store adapters (`source:"system"`) are thin callers of it — one
+// validator, one dedup, one carrier. That is the requirement, stated as code rather than as intent:
+// "every system-produced Finding enters through the SAME controlled entry as user feedback".
+//
+// `ingestNewOutcomes(root, {maxPerRun, enabled})` is the load-bearing half. The read-only audit found
+// that NOTHING was ever ingested automatically: `ingestFromEvidenceStoreOutcome` had no caller outside
+// its test, and in the only real run a worker hand-picked the 5 system entries and HAND-WROTE their
+// role/components/summary — summaries that stated the answer ("paired with two divergent keys"), which
+// then went verbatim into the reflection prompt. So the batch ingester DERIVES every field from the
+// record: no human picks the record and no human describes it.
+//
+//   • role       ← the record's own `verdict`: supported→`found-unresolved`,
+//                  refuted→`confirmed-negative`, undetermined→`undetermined`; elevated to
+//                  `found-and-fixed` / `recurred-after-fix` only when the record names a task id whose
+//                  DEVELOP status is `done`.
+//   • components ← the record's `subject_key` (the part after the `|` separator, split on `,`).
+//   • summary    ← a PROJECTION of the record's own text (`experiment_ref`, the verdict, the subject),
+//                  truncated. Never an interpretation: a summary that states the answer is exactly the
+//                  defect this task exists to remove (硬规则 2 — judged by position/structure).
+//   • evaluation_pin ← the record's `prereg` file's `pin` when that resolves; otherwise `null`, which
+//                  is its OWN value — `validateGeneralization` refuses to use an unpinned Experience
+//                  as a held-out, so "I could not pin it" never reads as "it is pinned".
+//
+// ⛔ ZERO reads and zero writes when `enabled:false`: the kill switch is answered BEFORE the store, the
+// watermark or the ledger is touched, not in the middle of a scan.
+//
+// ⛔ FAIL-CLOSED watermark: `{line, line_sha256}` under the SHARED checkout, written atomically
+// (tmp + rename). When the line it names no longer exists or no longer hashes to the recorded digest,
+// the store was rewritten or truncated and the run REFUSES with `WATERMARK_MISMATCH` and writes
+// NOTHING — it never silently restarts from line 0 (硬规则 3b: "I cannot tell what I have already read"
+// must never be shaped like "I have read nothing"). A malformed line is COUNTED and the watermark does
+// not advance past it, so an unparseable record can never be silently skipped over forever.
+//
 // 硬规则 4 (a量 that cannot take a false value is not a measurement): the deny-list emits a pattern
 // ONLY where a pattern can actually fire. `components` (a path token that appears in an investigator
 // inventory) and `case_id` (a short stable label) become patterns; the free-text `summary` does NOT —
@@ -50,7 +86,7 @@ import { spawnSync } from "node:child_process";
 // Reuse the evidence store's primitives directly (content addressing, the carrier-read that counts
 // unparseable lines, and the ONE definition of where the evidence store lives) — re-implementing any
 // of them would be a second definition.
-import { sha256, recordId, readRecords, storeFile, EVIDENCE_STORE_REL } from "./architecture-evidence-store.mjs";
+import { sha256, recordId, readRecords, EVIDENCE_STORE_REL } from "./architecture-evidence-store.mjs";
 
 // ── WHERE a Discovery Method carrier lives: the SHARED checkout, never the caller's worktree ──────
 //
@@ -93,6 +129,16 @@ export const CARRIER_MISSING = "CARRIER_MISSING";
 export const UNKNOWN_CARRIER = "UNKNOWN_CARRIER";
 /** Refusal code: the carrier exists but could not be read at all. */
 export const CARRIER_UNREADABLE = "CARRIER_UNREADABLE";
+/** Refusal code: the watermark names a line that is gone or no longer hashes to the recorded digest. */
+export const WATERMARK_MISMATCH = "WATERMARK_MISMATCH";
+/** Refusal code: the evidence store exists but could not be read at all (its OWN value, never "empty"). */
+export const EVIDENCE_STORE_UNREADABLE = "EVIDENCE_STORE_UNREADABLE";
+/** Refusal code: `source` is neither `"user"` nor `"system"`. */
+export const SOURCE_NOT_IN_VOCAB = "SOURCE_NOT_IN_VOCAB";
+/** Refusal code: `source:"system"` was handed a field that must be DERIVED from the record. */
+export const SYSTEM_FIELD_NOT_CALLER_WRITABLE = "SYSTEM_FIELD_NOT_CALLER_WRITABLE";
+/** Refusal code: the watermark file exists but is not a readable `{line, line_sha256}` record. */
+export const WATERMARK_UNREADABLE = "WATERMARK_UNREADABLE";
 
 /**
  * The ONE table of Discovery Method carriers: name → `{rel, kind}`. The rel paths of ALL of them are
@@ -128,13 +174,21 @@ export const EXPERIENCE_KIND = "experience";
 
 /** The role vocabulary. `recurred-after-fix` (a fix that landed and was later observed to regress)
  *  has no real case yet — the validator ACCEPTS it so a future recurrence is not blocked by an
- *  unknown-value refusal (硬规则 12: do not require a mechanism before it has happened). */
+ *  unknown-value refusal (硬规则 12: do not require a mechanism before it has happened).
+ *
+ *  ⛔ `found-unresolved` and `undetermined` were ADDED by the automatic batch ingester (they are what a
+ *  bare `verdict` can actually say): a supported outcome with no fix recorded is a finding we have NOT
+ *  resolved, and an undetermined outcome is precisely an undetermined finding. Before them, a supported
+ *  outcome had no honest role to derive — it would have had to claim `found-and-fixed`, i.e. assert a
+ *  fix that the record does not name. */
 export const EXPERIENCE_ROLES = Object.freeze([
   "missed-by-tooling",
   "found-and-fixed",
   "found-undetermined-then-confirmed",
   "confirmed-negative",
   "recurred-after-fix",
+  "found-unresolved",
+  "undetermined",
 ]);
 
 /** Who reported it. A tool-self-reported case is NEVER `"user"` (same discipline as the original
@@ -168,7 +222,39 @@ export const ROLE_VERDICT_COMPAT = Object.freeze({
   "confirmed-negative": Object.freeze(["refuted"]),
   // A recurrence is an observed (supported) return of a defect that had been fixed.
   "recurred-after-fix": Object.freeze(["supported"]),
+  // A supported finding for which NO fix is recorded — the claim held and nothing names a fix.
+  "found-unresolved": Object.freeze(["supported"]),
+  // The verifier could not tell. Its OWN role, so an `undetermined` outcome is not forced to claim
+  // either a finding or a refutation it does not have.
+  "undetermined": Object.freeze(["undetermined"]),
 });
+
+/**
+ * The verdict→role map the BATCH ingester derives from — declared as DATA so the derivation is
+ * enumerable and testable, exactly like `ROLE_VERDICT_COMPAT` above.
+ *
+ * ⛔ A verdict absent from this map (`proposed`, `abstained`, `investigated`, `not-evaluated`,
+ * `exempted`) is NOT a discovery finding: those are the ownership-active loop's outcome vocabulary.
+ * They are SKIPPED with their own reported count (`VERDICT_NOT_INGESTIBLE`) rather than coerced into a
+ * finding role — coercing `abstained` into `found-unresolved` would put a finding in the ledger that
+ * the record does not contain, and it would be indistinguishable from a real one on read-back.
+ */
+export const VERDICT_ROLE = Object.freeze({
+  supported: "found-unresolved",
+  refuted: "confirmed-negative",
+  undetermined: "undetermined",
+});
+
+/** Where the batch ingester's watermark lives, relative to the SHARED checkout.
+ *  ⛔ NOT declared in `DISCOVERY_CARRIERS`: that table is the append-only LINE carriers
+ *  (`repairCarrier`'s "truncate a torn FINAL line" model addresses `.jsonl` appends), and this is a
+ *  single-object state file rewritten atomically — a name that `repairCarrier` could be handed while
+ *  its line-truncation model silently does not apply. The path still has exactly ONE definition. */
+export const INGEST_WATERMARK_REL = ".quay/discovery-ingest-watermark.json";
+
+/** The truncation bound for a DERIVED summary — the same 400 the evidence store uses for a projected
+ *  hypothesis statement, so the two projections of the same text do not disagree. */
+export const MAX_SUMMARY_CHARS = 400;
 
 const isStr = (x, n = 1) => typeof x === "string" && x.trim().length >= n;
 const isObj = (x) => x !== null && typeof x === "object" && !Array.isArray(x);
@@ -276,6 +362,14 @@ export function validateExperienceRecord(rec) {
     reasons.push("FIELD_INVALID:summary");
   } else if (nonWs(rec.summary) < MIN_SUMMARY_CHARS) {
     reasons.push(`SUMMARY_INSUBSTANTIAL:needs->=${MIN_SUMMARY_CHARS}-non-whitespace-chars-got-${nonWs(rec.summary)}`);
+  }
+
+  // `evaluation_pin` is OPTIONAL (the manual path has none, and an outcome whose pre-registration does
+  // not resolve to a pin has none). Supplied-but-not-null-and-not-a-string is its OWN code: a `null` is
+  // the honest "no pin", while `""`/`0`/`undefined`-adjacent values would read as pinned on a loose
+  // check. It is NOT in REQUIRED_EXPERIENCE_FIELDS — requiring it would refuse every manual case.
+  if (supplied(rec, "evaluation_pin") && rec.evaluation_pin !== null && !isStr(rec.evaluation_pin, 1)) {
+    reasons.push("FIELD_INVALID:evaluation_pin-needs-a-non-empty-string-or-null");
   }
 
   // `source_ref` is a STRUCTURAL invariant, not a convention: a system-sourced entry without a
@@ -480,6 +574,160 @@ export function repairCarrier(root, name, { now = Date.now() } = {}) {
   };
 }
 
+// ── WHERE the evidence store lives: the SHARED checkout, like every other Discovery carrier ──────
+//
+// The evidence store is read through the SAME shared-checkout resolution as the ledger and the
+// watermark. A batch ingester that read the CALLER's store would ingest nothing whenever it ran from a
+// task worktree (where `.quay/architecture-evidence-store.jsonl` does not exist) and would silently
+// look like "no new outcomes" — the exact 硬规则 3b shape this task's dependency removed for the
+// carriers. When the caller IS the main checkout the two are the same path, so nothing changes there.
+
+/** Absolute path of the evidence store under the SHARED checkout — `null` when unresolvable. */
+export function sharedStoreFile(root) {
+  const rr = resolveCarrierRoot(root);
+  return rr.ok ? path.join(rr.root, EVIDENCE_STORE_REL) : null;
+}
+
+// ── derivation: outcome record → Experience fields (PURE — no fs, no git, no model) ─────────────
+
+const isInt = (x) => Number.isInteger(x);
+
+/**
+ * The component tokens of a record's `subject_key`. The key's own shape is
+ * `<concern-kind>|<comma-separated tokens>`; a key without the separator is treated as one token list.
+ * Empty tokens are dropped (a trailing comma is not a component named "") and an absent key yields
+ * `[]` — the validator accepts an empty list (a case that names no file is legitimate).
+ * @returns {string[]}
+ */
+export function componentsFromSubjectKey(subjectKey) {
+  if (!isStr(subjectKey, 1)) return [];
+  const key = String(subjectKey);
+  const bar = key.indexOf("|");
+  const body = bar === -1 ? key : key.slice(bar + 1);
+  return body.split(",").map((t) => t.trim()).filter((t) => t.length > 0);
+}
+
+/**
+ * A PROJECTION of the record's own text — never an interpretation of it.
+ *
+ * ⛔ The audit's defect was a HAND-WRITTEN summary that stated the answer ("paired with two divergent
+ * keys"), which then went verbatim into the reflection prompt. A derived summary therefore composes
+ * only what the record already says: its `experiment_ref` (or, failing that, its own id), its stored
+ * `verdict`, its `subject_key`, and its `verdict_reason` when one is recorded.
+ */
+export function deriveExperienceSummary(rec) {
+  const base = isStr(rec?.experiment_ref, 1) ? String(rec.experiment_ref)
+    : isStr(rec?.experiment, 1) ? String(rec.experiment)
+    : String(rec?.id ?? "outcome");
+  const subject = isStr(rec?.subject_key, 1) ? String(rec.subject_key) : "(no subject_key recorded)";
+  let s = `${base}: verifier verdict "${String(rec?.verdict)}" on subject ${subject}`;
+  if (isStr(rec?.verdict_reason, 1)) s += ` [reason: ${rec.verdict_reason}]`;
+  return s.slice(0, MAX_SUMMARY_CHARS);
+}
+
+/**
+ * The pre-registration pin of a record: `rec.prereg` names a JSON file whose `pin` is the commit the
+ * expectation was registered against. `null` is its OWN value (硬规则 3b) — "there is no pin I could
+ * resolve" must never be shaped like a pin, because a pin is what makes an Experience usable as a
+ * held-out case (`validateGeneralization` refuses `NO_EVALUATION_PIN` without one).
+ *
+ * A missing path, an unreadable file, malformed JSON, or a missing/non-string `pin` all yield `null`;
+ * the reasons are returned for a caller that wants to report WHY (the batch ingester records them).
+ * @param {object} rec @param {object} [deps] `{readFile}` — injected so this stays testable without fs
+ * @returns {{pin:string|null, prereg:string|null, reason:string|null}}
+ */
+export function evaluationPinOf(rec, { readFile = (p) => fs.readFileSync(p, "utf8") } = {}) {
+  const prereg = isStr(rec?.prereg, 1) ? String(rec.prereg) : null;
+  if (prereg === null) return { pin: null, prereg: null, reason: "NO_PREREG_RECORDED" };
+  let text;
+  try { text = readFile(prereg); }
+  catch (e) { return { pin: null, prereg, reason: `PREREG_UNREADABLE:${e?.code ?? e?.message}` }; }
+  let doc;
+  try { doc = JSON.parse(String(text)); }
+  catch { return { pin: null, prereg, reason: "PREREG_UNPARSEABLE" }; }
+  if (!isObj(doc) || !isStr(doc.pin, 1)) return { pin: null, prereg, reason: "PREREG_HAS_NO_PIN" };
+  return { pin: String(doc.pin), prereg, reason: null };
+}
+
+/** A task id is a bare path SEGMENT — anything else is refused before it can reach a git invocation. */
+const TASK_ID_RE = /^[A-Za-z0-9][A-Za-z0-9._-]*$/;
+
+/**
+ * `tasks/<id>.md`'s `status:` on the DEVELOP branch of the shared checkout — `null` when it cannot be
+ * read (no such task, no develop branch, no git). ⛔ `null` never means "not done": an UNREADABLE
+ * status must not be reported as a status, or "I could not check" would silently become "yes, fixed"
+ * (硬规则 3b — and that is the direction that puts a false `found-and-fixed` in the ledger).
+ */
+export function taskStatusOnDevelop(root, taskId) {
+  if (!isStr(taskId, 1) || !TASK_ID_RE.test(String(taskId))) return null;
+  const rr = resolveCarrierRoot(root);
+  if (!rr.ok) return null;
+  const r = spawnSync("git", ["-C", rr.root, "show", `develop:tasks/${taskId}.md`], { encoding: "utf8" });
+  if (r.error || r.status !== 0 || typeof r.stdout !== "string") return null;
+  const m = /^status:[ \t]*(\S+)[ \t]*$/m.exec(r.stdout);
+  return m ? m[1].replace(/^["']|["']$/g, "") : null;
+}
+
+/**
+ * Derive EVERY Experience field of an outcome record. PURE: the two facts a record cannot carry about
+ * its own surroundings are INJECTED — `taskStatus(taskId)` (what develop says) and
+ * `laterOutcomeWithSubjectKey(subjectKey, line)` (does a later outcome exist on the same subject).
+ * Injecting them is what keeps this function a measurement of the record rather than a second scanner.
+ *
+ * @returns {{ok:true, fields:{role,components,summary,evaluation_pin}}|{ok:false, reasons:string[]}}
+ */
+export function deriveExperienceFields(rec, { line = null, taskStatus = () => null, laterOutcomeWithSubjectKey = () => false } = {}) {
+  if (!isObj(rec)) return { ok: false, reasons: ["RECORD_NOT_OBJECT"] };
+  let role = VERDICT_ROLE[rec.verdict] ?? null;
+  if (role === null) {
+    return { ok: false, reasons: [`VERDICT_NOT_INGESTIBLE:${String(rec.verdict)}-is-not-a-discovery-finding-verdict`] };
+  }
+  // The elevation is only reachable from a SUPPORTED finding: `found-and-fixed` and
+  // `recurred-after-fix` both require a `supported` verdict in ROLE_VERDICT_COMPAT, so elevating a
+  // refuted/undetermined outcome would manufacture a role the evidence cannot support.
+  if (role === "found-unresolved" && isStr(rec.task_id, 1) && taskStatus(rec.task_id) === "done") {
+    role = laterOutcomeWithSubjectKey(rec.subject_key, line) ? "recurred-after-fix" : "found-and-fixed";
+  }
+  return {
+    ok: true,
+    fields: {
+      role,
+      components: componentsFromSubjectKey(rec.subject_key),
+      summary: deriveExperienceSummary(rec),
+      evaluation_pin: evaluationPinOf(rec).pin,
+    },
+  };
+}
+
+// ── the ONE unified entry: BOTH sources go through it ────────────────────────────────────────────
+
+/**
+ * Ingest ONE Experience. The single entry point for both sources (Plan item 1):
+ *   • `source:"user"`   — a human-flagged miss; the caller narrates it (`ingestFeedback`).
+ *   • `source:"system"` — an evidence-store outcome; the fields are DERIVED unless the caller
+ *                          explicitly opts into pinned narration (see below).
+ *
+ * @param {string} root
+ * @param {object} args
+ * @param {"user"|"system"} args.source  — anything else is `SOURCE_NOT_IN_VOCAB`, never a default
+ * @param {object} [args.outcome]   `{rec, raw, line}` — a record already resolved by a scanner. When
+ *   absent, `source:"system"` resolves it from the store via `experiment` + `experimentRef`.
+ * @param {object} [args.context]   `{taskStatus, laterOutcomeWithSubjectKey}` — the two facts a record
+ *   cannot carry about its surroundings (see `deriveExperienceFields`).
+ * @param {object} [args.narration] `{role, caseId, components, summary, ts}` — the PINNED form. Its
+ *   presence means the caller is asserting the narration, which is then CHECKED against the record's
+ *   verdict; without it, `role`/`components`/`summary`/`caseId` supplied at the top level are REFUSED
+ *   (`SYSTEM_FIELD_NOT_CALLER_WRITABLE`) because the whole point of the automatic source is that no
+ *   human picks the record or describes it.
+ * @returns the `appendExperienceRecord` result, or `{ok:false, appended:false, reasons[]}`.
+ */
+export function ingestExperience(root, args = {}) {
+  const source = args?.source;
+  if (source === "user") return ingestUserSource(root, args);
+  if (source === "system") return ingestSystemSource(root, args);
+  return { ok: false, appended: false, kind: EXPERIENCE_KIND, reasons: [`${SOURCE_NOT_IN_VOCAB}:${String(source)}-must-be-user-or-system`] };
+}
+
 // ── SOURCE 1: the manual path (reported_by:"user") ──────────────────────────────────────────────
 
 /**
@@ -501,6 +749,10 @@ export function repairCarrier(root, name, { now = Date.now() } = {}) {
  * @param {string} [args.ts]           ISO-8601; defaults to now
  */
 export function ingestFeedback(root, { caseId, role, reportedBy = "user", evidenceRefs, components = [], summary, ts } = {}) {
+  return ingestExperience(root, { source: "user", caseId, role, reportedBy, evidenceRefs, components, summary, ts });
+}
+
+function ingestUserSource(root, { caseId, role, reportedBy = "user", evidenceRefs, components = [], summary, ts } = {}) {
   const evidence = (Array.isArray(evidenceRefs) ? evidenceRefs : []).map((e) =>
     isObj(e) ? { ref: e.ref, sha256: e.sha256 } : { ref: e, sha256: sha256(String(e)) });
   return appendExperienceRecord(root, {
@@ -512,86 +764,368 @@ export function ingestFeedback(root, { caseId, role, reportedBy = "user", eviden
     evidence,
     components,
     summary,
+    evaluation_pin: null,         // a human report has no pre-registration to be pinned to
   });
 }
 
 // ── SOURCE 2: the automatic path (reported_by:"system") — the load-bearing new piece ────────────
 
 /**
- * Convert an EXISTING `architecture-evidence-store.jsonl` OUTCOME record into an Experience entry,
- * with no hand-narration. The record is located by `experiment` + a match on `experiment_ref`
- * (exact, or the ref as a substring of the record's own — e.g. `"cluster 11"` matches
- * `"E-DT-1-Hp cluster 11"`). The caller supplies `role`/`caseId`/`components`/`summary`; ingestion
- * REFUSES when the named record does not exist (never fabricates one), when the match is AMBIGUOUS
- * (枚举, not boolean — an ambiguous ref is reported with the candidates, never resolved arbitrarily),
- * and when the claimed `role` contradicts the record's stored `verdict`.
+ * Convert an EXISTING `architecture-evidence-store.jsonl` OUTCOME record into an Experience entry.
  *
- * Derivation (⛔ never hand-written): `source_ref` = the matched record's `id`; `evidence` =
- * `[{ref: <id>, sha256: sha256(<the record's raw carrier line>)}]`; `ts` = the matched record's own
- * `ts` unless the caller overrides it.
+ * ⛔ TWO FORMS, and the difference is the whole task. Called with NO narration (`args.narration`
+ * absent) the fields are DERIVED from the record — that is the form `ingestNewOutcomes` uses, and the
+ * form in which a caller-supplied `role`/`components`/`summary`/`caseId` is REFUSED. Called WITH
+ * `narration`, the caller asserts those fields and they are CHECKED against the record's stored
+ * verdict (this is the pre-existing, pinned adapter's contract — a caller that has a specific case in
+ * mind but must not be able to claim a role the evidence contradicts).
  *
- * @returns the `appendExperienceRecord` result, or `{ok:false, appended:false, reasons[]}`.
+ * The record is located either by an already-resolved `outcome:{rec, raw, line}` (a scanner's result)
+ * or by `experiment` + a match on `experiment_ref` (exact, or the ref as a substring of the record's
+ * own — e.g. `"cluster 11"` matches `"E-DT-1-Hp cluster 11"`). Ingestion REFUSES when the named record
+ * does not exist (never fabricates one) and when the match is AMBIGUOUS (枚举, not boolean — an
+ * ambiguous ref is reported with the candidates, never resolved arbitrarily).
+ *
+ * Derivation (⛔ never hand-written): `source_ref` = the record's `id`; `evidence` =
+ * `[{ref: <id>, sha256: sha256(<the record's raw carrier line>)}]`; `ts` = the record's own `ts`;
+ * `evaluation_pin` = the record's pre-registration `pin`, or `null`.
  */
 export function ingestFromEvidenceStoreOutcome(root, { experiment, experimentRef, role, components = [], summary, caseId, ts } = {}) {
-  if (!isStr(experiment, 1)) return { ok: false, appended: false, kind: EXPERIENCE_KIND, reasons: ["INGEST_ARG_MISSING:experiment"] };
-  if (!isStr(experimentRef, 1)) return { ok: false, appended: false, kind: EXPERIENCE_KIND, reasons: ["INGEST_ARG_MISSING:experimentRef"] };
-  // `caseId` is the entry's identity and is the CALLER's to choose — a default derived from the
-  // matched record would silently mint an id the caller never picked (and one that changes if the
-  // record's id scheme ever does), so its absence is its own refusal, never a derivation.
-  if (!isStr(caseId, 1)) return { ok: false, appended: false, kind: EXPERIENCE_KIND, reasons: ["INGEST_ARG_MISSING:caseId"] };
-  if (!EXPERIENCE_ROLES.includes(role)) return { ok: false, appended: false, kind: EXPERIENCE_KIND, reasons: [`ROLE_NOT_IN_VOCAB:${String(role)}`] };
+  return ingestExperience(root, {
+    source: "system",
+    experiment,
+    experimentRef,
+    narration: { role, caseId, components, summary, ts },
+  });
+}
 
-  const file = storeFile(root);
-  if (!fs.existsSync(file)) {
-    return { ok: false, appended: false, kind: EXPERIENCE_KIND, reasons: [`EVIDENCE_STORE_MISSING:${EVIDENCE_STORE_REL}-not-present-under-${root}`] };
+/** Resolve the outcome record an ingestion projects — from a scanner's envelope, or from the store. */
+function resolveOutcomeForIngest(root, args) {
+  const o = args?.outcome;
+  if (isObj(o) && isObj(o.rec)) {
+    if (o.rec.kind !== "outcome") return { ok: false, reasons: [`OUTCOME_RECORD_KIND_MISMATCH:${String(o.rec.kind)}-is-not-an-outcome`] };
+    if (!isStr(o.rec.id, 1)) return { ok: false, reasons: ["INGEST_ARG_MISSING:outcome.id"] };
+    if (typeof o.raw !== "string") return { ok: false, reasons: ["INGEST_ARG_MISSING:outcome.raw"] };
+    if (!isInt(o.line) || o.line < 1) return { ok: false, reasons: ["INGEST_ARG_MISSING:outcome.line"] };
+    return { ok: true, rec: o.rec, raw: o.raw, line: o.line };
   }
+
+  const file = sharedStoreFile(root);
+  if (file === null) {
+    const rr = resolveCarrierRoot(root);
+    return { ok: false, reasons: [rr.reason] };
+  }
+  if (!fs.existsSync(file)) {
+    return { ok: false, reasons: [`EVIDENCE_STORE_MISSING:${EVIDENCE_STORE_REL}-not-present-under-${path.dirname(path.dirname(file))}`] };
+  }
+  let text;
+  try { text = fs.readFileSync(file, "utf8"); }
+  catch (e) { return { ok: false, reasons: [`${EVIDENCE_STORE_UNREADABLE}:${EVIDENCE_STORE_REL}:${e?.code ?? e?.message}`] }; }
 
   // Read the carrier RAW so each candidate keeps its 1-based line number and its exact line text —
   // the sha256 the evidence entry carries is the hash OF THAT LINE, so it must be the same bytes.
   const candidates = [];
-  fs.readFileSync(file, "utf8").split("\n").forEach((line, i) => {
-    if (!line.trim()) return;
+  splitStoreLines(text).forEach((line, i) => {
     let rec; try { rec = JSON.parse(line); } catch { return; }
     if (!isObj(rec) || rec.kind !== "outcome") return;
-    if (rec.experiment !== experiment) return;
-    if (!(typeof rec.experiment_ref === "string" && rec.experiment_ref.includes(experimentRef))) return;
+    if (rec.experiment !== args.experiment) return;
+    if (!(typeof rec.experiment_ref === "string" && rec.experiment_ref.includes(args.experimentRef))) return;
     candidates.push({ rec, lineNo: i + 1, raw: line });
   });
 
   if (candidates.length === 0) {
-    return { ok: false, appended: false, kind: EXPERIENCE_KIND, reasons: [`EVIDENCE_OUTCOME_NOT_FOUND:${experiment}#${experimentRef}`] };
+    return { ok: false, reasons: [`EVIDENCE_OUTCOME_NOT_FOUND:${args.experiment}#${args.experimentRef}`] };
   }
   if (candidates.length > 1) {
     return {
-      ok: false, appended: false, kind: EXPERIENCE_KIND,
-      reasons: [`EVIDENCE_OUTCOME_AMBIGUOUS:${experiment}#${experimentRef}-matches-${candidates.length}-records`],
+      ok: false,
+      reasons: [`EVIDENCE_OUTCOME_AMBIGUOUS:${args.experiment}#${args.experimentRef}-matches-${candidates.length}-records`],
       matches: candidates.map((c) => ({ id: c.rec.id, experiment_ref: c.rec.experiment_ref, line: c.lineNo })),
     };
   }
-
   const m = candidates[0];
-  const allowed = ROLE_VERDICT_COMPAT[role] ?? [];
-  if (!allowed.includes(m.rec.verdict)) {
-    return {
-      ok: false, appended: false, kind: EXPERIENCE_KIND,
-      reasons: [`ROLE_VERDICT_INCONSISTENT:role=${role}-requires-verdict-in-(${allowed.join("|")})-but-${m.rec.id}-stored-${String(m.rec.verdict)}`],
-    };
+  return { ok: true, rec: m.rec, raw: m.raw, line: m.lineNo };
+}
+
+/** The record an ingestion appends, from the resolved outcome + the fields (derived or narrated). */
+function systemRecord(rec, raw, fields, { caseId, ts }) {
+  return {
+    case_id: caseId,
+    ts: ts ?? (isStr(rec.ts, 4) ? rec.ts : new Date().toISOString()),
+    role: fields.role,
+    reported_by: "system",
+    source_ref: rec.id,
+    evidence: [{ ref: rec.id, sha256: sha256(raw) }],
+    components: fields.components,
+    summary: fields.summary,
+    evaluation_pin: fields.evaluation_pin ?? null,
+  };
+}
+
+/** The `case_id` of a DERIVED entry: deterministic, unique per source record, chosen by nobody. */
+const derivedCaseId = (rec) => `EXP-${String(rec.id).replace(/^outcome-/, "")}`;
+
+function ingestSystemSource(root, args) {
+  const narration = isObj(args?.narration) ? args.narration : null;
+
+  if (narration === null) {
+    // The deriving form. Any field that must be derived is REFUSED rather than ignored: silently
+    // dropping a caller's summary would make "I wrote what I saw" indistinguishable from "it was
+    // derived" (硬规则 3b) — and the audit's defect was exactly a hand-written summary.
+    const forbidden = ["role", "components", "summary", "caseId", "case_id"].filter((f) => supplied(args, f));
+    if (forbidden.length) {
+      return {
+        ok: false, appended: false, kind: EXPERIENCE_KIND,
+        reasons: forbidden.map((f) => `${SYSTEM_FIELD_NOT_CALLER_WRITABLE}:${f}-is-derived-from-the-record-when-source=system`),
+      };
+    }
+  } else {
+    // The pinned form. The arg guards live HERE (one definition, one order) so the pinned adapter is a
+    // pure forwarder and cannot drift from the codes its callers were written against.
+    if (!isStr(args.experiment, 1)) return { ok: false, appended: false, kind: EXPERIENCE_KIND, reasons: ["INGEST_ARG_MISSING:experiment"] };
+    if (!isStr(args.experimentRef, 1)) return { ok: false, appended: false, kind: EXPERIENCE_KIND, reasons: ["INGEST_ARG_MISSING:experimentRef"] };
+    // `caseId` is the entry's identity and is the CALLER's to choose in the PINNED form — a default
+    // derived from the matched record would silently mint an id the caller never picked (and one that
+    // changes if the record's id scheme ever does), so its absence is its own refusal, never a
+    // derivation. (The DERIVED form does mint one — `derivedCaseId` — because nobody is there to pick.)
+    if (!isStr(narration.caseId, 1)) return { ok: false, appended: false, kind: EXPERIENCE_KIND, reasons: ["INGEST_ARG_MISSING:caseId"] };
+    if (!EXPERIENCE_ROLES.includes(narration.role)) return { ok: false, appended: false, kind: EXPERIENCE_KIND, reasons: [`ROLE_NOT_IN_VOCAB:${String(narration.role)}`] };
   }
 
-  const record = {
-    case_id: caseId,
-    ts: ts ?? (isStr(m.rec.ts, 4) ? m.rec.ts : new Date().toISOString()),
-    role,
-    reported_by: "system",
-    source_ref: m.rec.id,
-    evidence: [{ ref: m.rec.id, sha256: sha256(m.raw) }],
-    components,
-    summary,
-  };
-  const res = appendExperienceRecord(root, record);
+  const res = resolveOutcomeForIngest(root, args);
+  if (!res.ok) {
+    return { ok: false, appended: false, kind: EXPERIENCE_KIND, reasons: res.reasons, ...(res.matches ? { matches: res.matches } : {}) };
+  }
+  const { rec, raw, line } = res;
+
+  let fields;
+  let caseId;
+  if (narration !== null) {
+    const allowed = ROLE_VERDICT_COMPAT[narration.role] ?? [];
+    if (!allowed.includes(rec.verdict)) {
+      return {
+        ok: false, appended: false, kind: EXPERIENCE_KIND,
+        reasons: [`ROLE_VERDICT_INCONSISTENT:role=${narration.role}-requires-verdict-in-(${allowed.join("|")})-but-${rec.id}-stored-${String(rec.verdict)}`],
+      };
+    }
+    fields = {
+      role: narration.role,
+      components: Array.isArray(narration.components) ? narration.components : [],
+      summary: narration.summary,
+      evaluation_pin: evaluationPinOf(rec).pin,
+    };
+    caseId = narration.caseId;
+  } else {
+    const ctx = isObj(args.context) ? args.context : {};
+    const d = deriveExperienceFields(rec, {
+      line,
+      taskStatus: typeof ctx.taskStatus === "function" ? ctx.taskStatus : (id) => taskStatusOnDevelop(root, id),
+      laterOutcomeWithSubjectKey: typeof ctx.laterOutcomeWithSubjectKey === "function" ? ctx.laterOutcomeWithSubjectKey : () => false,
+    });
+    if (!d.ok) return { ok: false, appended: false, kind: EXPERIENCE_KIND, reasons: d.reasons };
+    fields = d.fields;
+    caseId = derivedCaseId(rec);
+  }
+
+  const out = appendExperienceRecord(root, systemRecord(rec, raw, fields, { caseId, ts: args.ts }));
   // Surface WHERE it came from on acceptance — the derivation is the point of this adapter, and a
   // caller that cannot see the matched line cannot check that it matched the right one.
-  return res.ok ? { ...res, derived_from: { id: m.rec.id, line: m.lineNo, verdict: m.rec.verdict, experiment_ref: m.rec.experiment_ref } } : res;
+  return out.ok
+    ? { ...out, derived: narration === null, derived_from: { id: rec.id, line, verdict: rec.verdict, experiment_ref: rec.experiment_ref } }
+    : out;
+}
+
+// ── the AUTOMATIC BATCH INGESTER (Plan items 2–5): outcome records → Experiences, no human in the loop ─
+
+/** Split a store's text into lines, dropping ONLY the empty piece a trailing newline creates. */
+function splitStoreLines(text) {
+  const raw = String(text).split("\n");
+  if (raw.length > 0 && raw[raw.length - 1] === "") raw.pop();
+  return raw;
+}
+
+/** The watermark's value for "the last line processed": `{line, line_sha256}` or `null` for none. */
+function watermarkValue(lines, advancedTo) {
+  if (!isInt(advancedTo) || advancedTo < 1) return null;
+  const line = lines[advancedTo - 1];
+  if (typeof line !== "string") return null;
+  return { line: advancedTo, line_sha256: sha256(line) };
+}
+
+/**
+ * Read the batch ingester's watermark. A genuinely ABSENT watermark is `{ok:true, value:null}` — the
+ * first run has nothing to be consistent with. Anything else that cannot be read as `{line, line_sha256}`
+ * is REFUSED: a corrupt watermark must never be treated as "no watermark", because that would restart
+ * the whole store from line 0 and re-derive every finding as if it were new (硬规则 3b).
+ */
+export function readIngestWatermark(root) {
+  const file = carrierFile(root, INGEST_WATERMARK_REL);
+  if (file === null) {
+    const rr = resolveCarrierRoot(root);
+    return { ok: false, file: null, value: null, reason: rr.reason };
+  }
+  if (!fs.existsSync(file)) return { ok: true, file, value: null, reason: null };
+  let text;
+  try { text = fs.readFileSync(file, "utf8"); }
+  catch (e) { return { ok: false, file, value: null, reason: `${WATERMARK_UNREADABLE}:${INGEST_WATERMARK_REL}:${e?.code ?? e?.message}` }; }
+  let doc;
+  try { doc = JSON.parse(text); }
+  catch { return { ok: false, file, value: null, reason: `${WATERMARK_UNREADABLE}:${INGEST_WATERMARK_REL}-is-not-json` }; }
+  if (!isObj(doc) || !isInt(doc.line) || doc.line < 1 || !HEX64.test(String(doc.line_sha256))) {
+    return { ok: false, file, value: null, reason: `${WATERMARK_UNREADABLE}:${INGEST_WATERMARK_REL}-needs-{line:integer>=1,line_sha256:64-hex}` };
+  }
+  return { ok: true, file, value: { line: doc.line, line_sha256: doc.line_sha256 }, reason: null };
+}
+
+/** Write the watermark atomically: a tmp file fsynced, then renamed over the target. */
+function writeIngestWatermark(file, value) {
+  fs.mkdirSync(path.dirname(file), { recursive: true });
+  const tmp = `${file}.tmp-${process.pid}`;
+  const fd = fs.openSync(tmp, "w");
+  try { fs.writeSync(fd, JSON.stringify(value) + "\n"); fs.fsyncSync(fd); } finally { fs.closeSync(fd); }
+  fs.renameSync(tmp, file);   // atomic: a reader sees the old file or the new one, never a partial write
+}
+
+/** `null` when the watermark's line is still there and still hashes to what was recorded. */
+function watermarkMismatch(wm, lines) {
+  if (wm.line > lines.length) {
+    return `${INGEST_WATERMARK_REL}-names-line-${wm.line}-but-the-store-now-has-only-${lines.length}-line(s)-so-it-was-truncated`;
+  }
+  const actual = sha256(lines[wm.line - 1]);
+  if (actual !== wm.line_sha256) {
+    return `line-${wm.line}-now-hashes-to-${actual}-but-the-watermark-recorded-${wm.line_sha256}`;
+  }
+  return null;
+}
+
+/**
+ * Ingest every evidence-store `kind:"outcome"` record past the persisted watermark, deriving all
+ * fields from each record. No model call of any kind.
+ *
+ * @param {string} root
+ * @param {object} [opts]
+ * @param {number} [opts.maxPerRun=Infinity]  quota on outcome records PROCESSED this run. No cap is
+ *   expressed by not applying one (Infinity), never by a large literal that would silently become the
+ *   real limit on some other host (硬规则 4 推论二).
+ * @param {boolean} [opts.enabled=true]  `false` ⇒ ZERO reads and ZERO writes, checked first.
+ * @returns {{ok, enabled, store, watermark_file, scanned, ingested, duplicates,
+ *            skipped_not_ingestible, skipped_blank_lines, malformed_lines,
+ *            stopped_at_malformed_line, remainder, advanced_to, watermark, entries, ids, reasons?}}
+ */
+export function ingestNewOutcomes(root, { maxPerRun = Infinity, enabled = true } = {}) {
+  const base = {
+    ok: true, enabled, store: null, watermark_file: null,
+    scanned: 0, ingested: 0, duplicates: 0, skipped_not_ingestible: 0, skipped_blank_lines: 0,
+    malformed_lines: 0, stopped_at_malformed_line: null,
+    remainder: 0, advanced_to: null, watermark: null, entries: [], ids: [],
+  };
+  // ⛔ THE KILL SWITCH IS ANSWERED FIRST. Nothing below this line runs when it is off — not the store
+  // read, not the watermark read, not the ledger read — so "zero reads and zero writes" is a property
+  // of the control flow rather than a promise about what the later code happens to do.
+  if (enabled === false) return base;
+
+  const rr = resolveCarrierRoot(root);
+  if (!rr.ok) return { ...base, ok: false, reasons: [rr.reason] };
+  const store = path.join(rr.root, EVIDENCE_STORE_REL);
+
+  const wm = readIngestWatermark(root);
+  if (!wm.ok) return { ...base, ok: false, store, watermark_file: wm.file, reasons: [wm.reason] };
+
+  if (!fs.existsSync(store)) {
+    return { ...base, ok: false, store, watermark_file: wm.file, reasons: [`EVIDENCE_STORE_MISSING:${EVIDENCE_STORE_REL}-not-present-under-${rr.root}`] };
+  }
+  let text;
+  try { text = fs.readFileSync(store, "utf8"); }
+  catch (e) {
+    return { ...base, ok: false, store, watermark_file: wm.file, reasons: [`${EVIDENCE_STORE_UNREADABLE}:${EVIDENCE_STORE_REL}:${e?.code ?? e?.message}`] };
+  }
+  const lines = splitStoreLines(text);
+
+  // FAIL-CLOSED: the watermark names a line and a digest; BOTH must still hold. A rewritten or
+  // truncated store is refused with its own code and NOTHING is written — never a silent restart at 0.
+  const from = wm.value ? wm.value.line : 0;
+  if (wm.value) {
+    const mismatch = watermarkMismatch(wm.value, lines);
+    if (mismatch) {
+      return { ...base, ok: false, store, watermark_file: wm.file, watermark: wm.value, advanced_to: from, reasons: [`${WATERMARK_MISMATCH}:${mismatch}`] };
+    }
+  }
+
+  // The `source_ref` dedup set. A partially readable LEDGER refuses the run: an incomplete set would
+  // silently re-append an outcome that is already present, and it would look exactly like a new find.
+  const ledger = readExperienceLedger(root);
+  if (!ledger.ok) {
+    return { ...base, ok: false, store, watermark_file: wm.file, reasons: [`${CARRIER_UNREADABLE}:${EXPERIENCE_LEDGER_REL}-has-${ledger.malformed_lines}-unparseable-line(s)-so-the-source_ref-dedup-set-cannot-be-read-as-complete`] };
+  }
+  const have = new Set();
+  for (const r of ledger.records) if (isStr(r.source_ref, 1)) have.add(r.source_ref);
+
+  // Every outcome line, parsed ONCE: this is what lets a record be judged against a LATER outcome on
+  // the same subject (the recurrence half of the role derivation) without a second pass over the store.
+  const outcomes = [];
+  lines.forEach((line, i) => {
+    if (!line.trim()) return;
+    let rec; try { rec = JSON.parse(line); } catch { return; }
+    if (isObj(rec) && rec.kind === "outcome") outcomes.push({ rec, line: i + 1, raw: line });
+  });
+  const laterOutcomeWithSubjectKey = (subjectKey, line) =>
+    isStr(subjectKey, 1) && isInt(line) && outcomes.some((o) => o.line > line && o.rec.subject_key === subjectKey);
+  const context = { taskStatus: (id) => taskStatusOnDevelop(root, id), laterOutcomeWithSubjectKey };
+
+  const entries = [];
+  const ids = [];
+  let advancedTo = from;
+  let attempted = 0;
+  let scanned = 0, ingested = 0, duplicates = 0, skipped = 0, blank = 0, malformed = 0;
+  let stoppedAtMalformed = null;
+
+  for (let i = from; i < lines.length; i++) {
+    const lineNo = i + 1;
+    const line = lines[i];
+    if (!line.trim()) { blank++; advancedTo = lineNo; continue; }
+    let rec;
+    try { rec = JSON.parse(line); }
+    catch {
+      // COUNTED, and the watermark does NOT advance past it: an unparseable line might have been an
+      // outcome, so stepping over it would lose the finding forever while claiming it was read.
+      malformed++; stoppedAtMalformed = lineNo;
+      break;
+    }
+    if (!isObj(rec) || rec.kind !== "outcome") { advancedTo = lineNo; continue; }   // readable, and definitively not an outcome
+    if (attempted >= maxPerRun) break;                                              // quota: stop BEFORE this one
+    attempted++; scanned++;
+    const d = deriveExperienceFields(rec, { line: lineNo, ...context });
+    if (!d.ok) { skipped++; advancedTo = lineNo; continue; }                        // e.g. an ownership-loop verdict
+    if (have.has(rec.id)) { duplicates++; advancedTo = lineNo; continue; }           // dedup by source_ref
+    const r = ingestExperience(root, { source: "system", outcome: { rec, raw: line, line: lineNo }, context });
+    if (r.ok) {
+      ingested++; ids.push(r.id); have.add(rec.id); advancedTo = lineNo;
+      entries.push({
+        case_id: r.record.case_id, source_ref: r.record.source_ref, role: r.record.role,
+        components: r.record.components, summary: r.record.summary,
+        evaluation_pin: r.record.evaluation_pin, line: lineNo,
+        experiment_ref: rec.experiment_ref, verdict: rec.verdict,
+      });
+      continue;
+    }
+    if (r.duplicate) { duplicates++; advancedTo = lineNo; continue; }
+    // A REFUSAL is neither skipped nor advanced past: the record could not become an Experience, and
+    // reporting it is the only behaviour that keeps the watermark honest about what was read.
+    return { ...base, ok: false, store, watermark_file: wm.file, scanned, ingested, duplicates, skipped_not_ingestible: skipped, skipped_blank_lines: blank, malformed_lines: malformed, stopped_at_malformed_line: stoppedAtMalformed, advanced_to: advancedTo, watermark: watermarkValue(lines, advancedTo), ids, entries, reasons: r.reasons };
+  }
+
+  const watermark = watermarkValue(lines, advancedTo);
+  if (advancedTo > from && watermark) writeIngestWatermark(wm.file, watermark);
+  // The remainder is COUNTED off the text already read, not inferred: an ingestible outcome on a line
+  // past where this run stopped. `stopped_at_malformed_line` says separately when a run was cut short.
+  const remainder = outcomes.filter((o) => o.line > advancedTo && VERDICT_ROLE[o.rec.verdict] !== undefined).length;
+
+  return {
+    ...base, ok: true, store, watermark_file: wm.file,
+    scanned, ingested, duplicates, skipped_not_ingestible: skipped, skipped_blank_lines: blank,
+    malformed_lines: malformed, stopped_at_malformed_line: stoppedAtMalformed,
+    remainder, advanced_to: advancedTo, watermark, entries, ids,
+  };
 }
 
 // ── the anti-leak deny-list ─────────────────────────────────────────────────────────────────────

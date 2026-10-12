@@ -16,11 +16,14 @@ import { execFileSync, spawn } from "node:child_process";
 
 import {
   EXPERIENCE_LEDGER_REL, EXPERIENCE_KIND, EXPERIENCE_ROLES, REPORTED_BY_VOCAB, MIN_SUMMARY_CHARS,
-  REQUIRED_EXPERIENCE_FIELDS, ROLE_VERDICT_COMPAT,
+  REQUIRED_EXPERIENCE_FIELDS, ROLE_VERDICT_COMPAT, VERDICT_ROLE, MAX_SUMMARY_CHARS,
   SHARED_CHECKOUT_UNRESOLVED, DUPLICATE_ID, CARRIER_NOT_TORN,
+  WATERMARK_MISMATCH, SYSTEM_FIELD_NOT_CALLER_WRITABLE, SOURCE_NOT_IN_VOCAB, INGEST_WATERMARK_REL,
   ledgerFile, validateExperienceRecord, appendExperienceRecord, readExperienceLedger,
   ingestFeedback, ingestFromEvidenceStoreOutcome, experienceDenyList, scanExperienceLeak,
   experienceRecordId, resolveCarrierRoot, repairCarrier,
+  ingestExperience, ingestNewOutcomes, deriveExperienceFields, deriveExperienceSummary,
+  componentsFromSubjectKey, evaluationPinOf, readIngestWatermark, sharedStoreFile,
 } from "../../docs/analysis/discovery-experience-ledger.mjs";
 import { appendOutcomeRecord, storeFile, sha256 } from "../../docs/analysis/architecture-evidence-store.mjs";
 // The CANONICAL shared-checkout resolver (`plugin/scripts/per-task-suite-record.ts`). The ledger module
@@ -309,7 +312,7 @@ test("source_ref is a structural invariant in BOTH directions, each with its own
 test("`recurred-after-fix` is IN the vocabulary and is accepted (a future recurrence is not blocked)", () => {
   const root = mkTmp();
   assert.ok(EXPERIENCE_ROLES.includes("recurred-after-fix"));
-  assert.deepEqual([...EXPERIENCE_ROLES], ["missed-by-tooling", "found-and-fixed", "found-undetermined-then-confirmed", "confirmed-negative", "recurred-after-fix"]);
+  assert.deepEqual([...EXPERIENCE_ROLES], ["missed-by-tooling", "found-and-fixed", "found-undetermined-then-confirmed", "confirmed-negative", "recurred-after-fix", "found-unresolved", "undetermined"]);
   const r = ingestFeedback(root, { caseId: "TEACH-recurrence", role: "recurred-after-fix", evidenceRefs: ["x"], summary: SUMMARY });
   assert.equal(r.ok, true, r.reasons?.join(","));
   // …and the automatic path accepts it against a `supported` record, since a recurrence is observed.
@@ -483,4 +486,405 @@ if (!r.ok) { console.error(JSON.stringify(r.reasons)); process.exit(1); }`;
   const bad = fs.readFileSync(path.join(root, "interleaved.jsonl"), "utf8").split("\n").filter(Boolean);
   assert.equal(bad.length, 2);
   assert.throws(() => JSON.parse(bad[1]), "a half-written line does NOT parse — the predicate can go red");
+});
+
+// ══════════════════════════════════════════════════════════════════════════════════════════════════
+// AUTOMATIC INGESTION (task gap-discovery-experience-auto-ingest-from-evidence-store): ONE unified
+// entry fed by two sources, and a batch ingester that DERIVES every field of a system Experience from
+// the outcome record — no human picks the record and no human describes it.
+// ══════════════════════════════════════════════════════════════════════════════════════════════════
+
+/** The `{rec, raw, line}` envelope a scanner produces, taken from the store the ingester reads. */
+const outcomeEnvelope = (root, n = 1) => {
+  const line = fs.readFileSync(storeFile(root), "utf8").split("\n")[n - 1];
+  return { rec: JSON.parse(line), raw: line, line: n };
+};
+const rolesIn = (root) => readExperienceLedger(root).records.map((r) => r.role).sort();
+const watermarkPath = (root) => path.join(root, INGEST_WATERMARK_REL);
+const THREE = [
+  { experiment_ref: "E-FIX cluster 1", verdict: "supported", subject_key: "hypgen:invariant|plugin/scripts/a.ts,plugin/scripts/b.ts" },
+  { experiment_ref: "E-FIX cluster 2", verdict: "refuted", subject_key: "hypgen:identity|plugin/scripts/c.ts" },
+  { experiment_ref: "E-FIX cluster 3", verdict: "undetermined", subject_key: "hypgen:identity|plugin/scripts/d.ts" },
+];
+
+/** A REAL git repo with a `develop` branch carrying `tasks/<id>.md` at a given status — what the
+ *  task-done half of the role derivation actually reads. */
+const mkDevelopRepo = (taskId, status) => {
+  const d = mkTmp();
+  const git = (...a) => execFileSync("git", ["-C", d, ...a], {
+    encoding: "utf8",
+    env: { ...process.env, GIT_AUTHOR_NAME: "t", GIT_AUTHOR_EMAIL: "t@example.com", GIT_COMMITTER_NAME: "t", GIT_COMMITTER_EMAIL: "t@example.com" },
+  });
+  fs.mkdirSync(path.join(d, "tasks"), { recursive: true });
+  fs.writeFileSync(path.join(d, "tasks", `${taskId}.md`), `---\nid: ${taskId}\nstatus: ${status}\n---\n\n## Proposal\nbody\n`);
+  git("add", "-A");
+  git("commit", "-qm", "seed");
+  git("branch", "-M", "develop");
+  return d;
+};
+
+// ── AC1(a): three outcomes ⇒ three Experiences, the watermark on the last line ───────────────────
+
+test("AC1(a): a store with 3 outcomes ⇒ 3 Experiences with derived roles, watermark at the last line", () => {
+  const root = mkTmp();
+  writeFixtureStore(root, THREE);
+  const r = ingestNewOutcomes(root);
+  assert.equal(r.ok, true, r.reasons?.join(","));
+  assert.equal(r.store, path.join(root, ".quay", "architecture-evidence-store.jsonl"));
+  assert.equal(r.scanned, 3);
+  assert.equal(r.ingested, 3);
+  assert.equal(r.duplicates, 0);
+  assert.equal(r.skipped_not_ingestible, 0);
+  assert.equal(r.remainder, 0);
+  assert.equal(r.watermark.line, 3, "the watermark is at the LAST line");
+  assert.equal(r.watermark.line_sha256, lineSha(storeFile(root), 3));
+  assert.equal(lines(root), 3, "one Experience per outcome");
+  // The roles are the VERDICT's, not a caller's — and `found-and-fixed` is NOT among them, because
+  // no record names a task that develop says is done.
+  assert.deepEqual(rolesIn(root), ["confirmed-negative", "found-unresolved", "undetermined"]);
+  assert.equal(VERDICT_ROLE.supported, "found-unresolved");
+  assert.equal(VERDICT_ROLE.refuted, "confirmed-negative");
+  assert.equal(VERDICT_ROLE.undetermined, "undetermined");
+  // The watermark is PERSISTED (atomically) under the shared checkout, and reads back identically.
+  assert.equal(fs.existsSync(watermarkPath(root)), true);
+  assert.deepEqual(readIngestWatermark(root).value, r.watermark);
+  assert.deepEqual(JSON.parse(fs.readFileSync(watermarkPath(root), "utf8")), r.watermark, "and it holds exactly {line, line_sha256}");
+});
+
+// ── AC1(b): a second run ingests nothing ─────────────────────────────────────────────────────────
+
+test("AC1(b): a second run ingests 0 and leaves the carriers byte-identical", () => {
+  const root = mkTmp();
+  writeFixtureStore(root, THREE);
+  const first = ingestNewOutcomes(root);
+  const ledgerBefore = fs.readFileSync(ledgerFile(root), "utf8");
+  const wmBefore = fs.readFileSync(watermarkPath(root), "utf8");
+
+  const again = ingestNewOutcomes(root);
+  assert.equal(again.ok, true, again.reasons?.join(","));
+  assert.equal(again.scanned, 0, "nothing past the watermark was even looked at");
+  assert.equal(again.ingested, 0);
+  assert.equal(again.remainder, 0);
+  assert.deepEqual(again.watermark, first.watermark, "the watermark did not move");
+  assert.equal(fs.readFileSync(ledgerFile(root), "utf8"), ledgerBefore);
+  assert.equal(fs.readFileSync(watermarkPath(root), "utf8"), wmBefore);
+});
+
+// ── AC1(c): the quota, and the remainder it reports ──────────────────────────────────────────────
+
+test("AC1(c): maxPerRun:2 ⇒ 2 ingested with the remainder reported; the next run ingests the rest", () => {
+  const root = mkTmp();
+  writeFixtureStore(root, THREE);
+  const first = ingestNewOutcomes(root, { maxPerRun: 2 });
+  assert.equal(first.ok, true, first.reasons?.join(","));
+  assert.equal(first.scanned, 2);
+  assert.equal(first.ingested, 2);
+  assert.equal(first.remainder, 1, "the quota REPORTS what it did not do, it does not hide it");
+  assert.equal(first.watermark.line, 2);
+  assert.equal(lines(root), 2);
+
+  const second = ingestNewOutcomes(root, { maxPerRun: 2 });
+  assert.equal(second.ok, true, second.reasons?.join(","));
+  assert.equal(second.scanned, 1);
+  assert.equal(second.ingested, 1, "…and the next run picks up exactly the remainder");
+  assert.equal(second.remainder, 0);
+  assert.equal(second.watermark.line, 3);
+  assert.equal(lines(root), 3);
+
+  // …and the third run is a no-op, so the quota converged rather than looping.
+  const third = ingestNewOutcomes(root, { maxPerRun: 2 });
+  assert.equal(third.ingested, 0);
+  assert.equal(third.watermark.line, 3);
+});
+
+// ── AC1(d): the kill switch ──────────────────────────────────────────────────────────────────────
+
+test("AC1(d): enabled:false ⇒ zero reads and zero writes — the switch is answered before any I/O", () => {
+  const root = mkTmp();
+  writeFixtureStore(root, THREE);
+  const storeBefore = fs.readFileSync(storeFile(root), "utf8");
+
+  const off = ingestNewOutcomes(root, { enabled: false });
+  assert.deepEqual(
+    { ok: off.ok, enabled: off.enabled, store: off.store, scanned: off.scanned, ingested: off.ingested, watermark: off.watermark },
+    { ok: true, enabled: false, store: null, scanned: 0, ingested: 0, watermark: null },
+    "not even the store path is resolved — a kill switch that reads is not a kill switch",
+  );
+  assert.equal(fs.existsSync(ledgerFile(root)), false, "no ledger was created");
+  assert.equal(fs.existsSync(watermarkPath(root)), false, "no watermark was written");
+  assert.equal(fs.readFileSync(storeFile(root), "utf8"), storeBefore, "the store is byte-identical");
+  assert.deepEqual(fs.readdirSync(path.join(root, ".quay")), ["architecture-evidence-store.jsonl"], "nothing else appeared under .quay/");
+
+  // Negative control on the SAME predicate: enabled:true on the same root DOES write, so the zeros
+  // above are the kill switch and not a fixture that could never produce a non-zero.
+  const on = ingestNewOutcomes(root, { enabled: true });
+  assert.equal(on.ingested, 3);
+  assert.equal(fs.existsSync(watermarkPath(root)), true);
+});
+
+// ── AC1(e): the fail-closed watermark ────────────────────────────────────────────────────────────
+
+test("AC1(e): a rewritten store ⇒ WATERMARK_MISMATCH, and NOTHING is written", () => {
+  const root = mkTmp();
+  writeFixtureStore(root, THREE);
+  const first = ingestNewOutcomes(root);
+  assert.equal(first.ok, true);
+  const ledgerBefore = fs.readFileSync(ledgerFile(root), "utf8");
+
+  // (i) TRUNCATED: drop the first line, so every recorded line number now names a different line.
+  const whole = fs.readFileSync(storeFile(root), "utf8").split("\n").filter(Boolean);
+  fs.writeFileSync(storeFile(root), whole.slice(1).join("\n") + "\n", "utf8");
+  const truncated = ingestNewOutcomes(root);
+  assert.equal(truncated.ok, false);
+  assert.match(truncated.reasons[0], new RegExp(`^${WATERMARK_MISMATCH}:`), truncated.reasons.join(","));
+  assert.equal(truncated.ingested, 0);
+  assert.equal(fs.readFileSync(ledgerFile(root), "utf8"), ledgerBefore, "the ledger is UNTOUCHED");
+  assert.deepEqual(readIngestWatermark(root).value, first.watermark, "…and the watermark did not move");
+
+  // (ii) REWRITTEN IN PLACE: same line count, different bytes on the watermarked line. The digest is
+  // what catches this — a line NUMBER alone cannot (this is why the watermark carries both).
+  const shifted = whole.slice(1).concat([JSON.stringify({ ...JSON.parse(whole[2]), verdict: "refuted" })]);
+  fs.writeFileSync(storeFile(root), shifted.join("\n") + "\n", "utf8");
+  const rewritten = ingestNewOutcomes(root);
+  assert.equal(rewritten.ok, false);
+  assert.match(rewritten.reasons[0], new RegExp(`^${WATERMARK_MISMATCH}:`), rewritten.reasons.join(","));
+  assert.equal(fs.readFileSync(ledgerFile(root), "utf8"), ledgerBefore, "still UNTOUCHED");
+
+  // (iii) A CORRUPT watermark is its OWN refusal — never read as "no watermark", which would silently
+  // restart the whole store at line 0 and re-derive everything as new.
+  fs.writeFileSync(watermarkPath(root), "{not json\n", "utf8");
+  const corrupt = ingestNewOutcomes(root);
+  assert.equal(corrupt.ok, false);
+  assert.match(corrupt.reasons[0], /^WATERMARK_UNREADABLE:/, corrupt.reasons.join(","));
+  assert.equal(fs.readFileSync(ledgerFile(root), "utf8"), ledgerBefore);
+});
+
+// ── AC1(f): the derived fields, and the refusal of caller narration ──────────────────────────────
+
+test("AC1(f): summary/components equal the values DERIVED from the record; a caller-supplied summary is refused", () => {
+  const root = mkTmp();
+  writeFixtureStore(root, [THREE[0]]);
+  const env = outcomeEnvelope(root, 1);
+
+  const derived = deriveExperienceFields(env.rec, { line: 1 });
+  assert.equal(derived.ok, true, derived.reasons?.join(","));
+  assert.equal(derived.fields.role, "found-unresolved");
+  assert.deepEqual(derived.fields.components, ["plugin/scripts/a.ts", "plugin/scripts/b.ts"]);
+  assert.equal(derived.fields.summary, deriveExperienceSummary(env.rec));
+  assert.equal(derived.fields.evaluation_pin, null, "no prerereg ⇒ null, which is its OWN value");
+  // The summary is a PROJECTION of the record's own text — it does not state the answer, it states
+  // what the record says. (The audit's defect was a hand-written summary that stated the answer.)
+  assert.match(derived.fields.summary, /E-FIX cluster 1/);
+  assert.match(derived.fields.summary, /"supported"/);
+  assert.match(derived.fields.summary, /hypgen:invariant\|plugin\/scripts\/a\.ts/);
+  assert.ok(derived.fields.summary.replace(/\s+/g, "").length >= MIN_SUMMARY_CHARS);
+  assert.ok(derived.fields.summary.length <= MAX_SUMMARY_CHARS);
+  assert.deepEqual(componentsFromSubjectKey("hypgen:invariant|a.ts, b.ts ,"), ["a.ts", "b.ts"], "whitespace is trimmed and an empty token is not a component");
+  assert.deepEqual(componentsFromSubjectKey("unknown|x.ts"), ["x.ts"]);
+  assert.deepEqual(componentsFromSubjectKey("no-separator-listed"), ["no-separator-listed"], "a key without the bar is one token list");
+  assert.deepEqual(componentsFromSubjectKey(undefined), [], "an absent key is NO components, not a fabricated one");
+
+  // The ingester stores EXACTLY the derived values — not a caller's copy of them.
+  const r = ingestExperience(root, { source: "system", outcome: env });
+  assert.equal(r.ok, true, r.reasons?.join(","));
+  assert.equal(r.derived, true, "acceptance says the fields were derived, not narrated");
+  assert.equal(r.record.summary, derived.fields.summary);
+  assert.deepEqual(r.record.components, derived.fields.components);
+  assert.equal(r.record.evaluation_pin, null);
+  assert.equal(r.record.reported_by, "system");
+
+  // …and a caller-supplied summary is REFUSED, not silently ignored. This is the audit's defect
+  // turned into a refusal.
+  const bad = ingestExperience(root, { source: "system", outcome: env, summary: "hand-written narration that states the answer" });
+  assert.equal(bad.ok, false);
+  assert.deepEqual(bad.reasons, [`${SYSTEM_FIELD_NOT_CALLER_WRITABLE}:summary-is-derived-from-the-record-when-source=system`]);
+  for (const [field, value] of [["role", "found-and-fixed"], ["components", ["plugin/scripts/x.ts"]], ["caseId", "EXP-mine"]]) {
+    const f = ingestExperience(root, { source: "system", outcome: env, [field]: value });
+    assert.equal(f.ok, false, `${field} must be refused for source:"system"`);
+    assert.match(f.reasons[0], new RegExp(`^${SYSTEM_FIELD_NOT_CALLER_WRITABLE}:${field}-`));
+  }
+  assert.equal(lines(root), 1, "every refusal appended nothing");
+});
+
+test("AC1(f): the case_id of a derived entry is deterministic and chosen by nobody", () => {
+  const root = mkTmp();
+  const [w] = writeFixtureStore(root, [THREE[0]]);
+  const r = ingestNewOutcomes(root);
+  assert.equal(r.entries[0].case_id, `EXP-${w.id.replace(/^outcome-/, "")}`);
+  // …and a DIFFERENT outcome lands under a DIFFERENT case_id (the id is not a constant).
+  writeFixtureStore(root, [{ experiment_ref: "E-FIX cluster 9", verdict: "supported" }]);
+  const second = ingestNewOutcomes(root);
+  assert.equal(second.ingested, 1);
+  assert.notEqual(second.entries[0].case_id, r.entries[0].case_id);
+});
+
+test("the pin: `evaluation_pin` is the prereg's `pin` when it resolves, and null (never a guess) otherwise", () => {
+  const root = mkTmp();
+  const pre = path.join(root, "prereg.json");
+  fs.writeFileSync(pre, JSON.stringify({ experiment: "E-FIX", pin: "f".repeat(40) }), "utf8");
+  assert.deepEqual(evaluationPinOf({ prereg: pre }), { pin: "f".repeat(40), prereg: pre, reason: null });
+  assert.equal(evaluationPinOf({ prereg: pre }).pin, "f".repeat(40));
+  // Each failure has its OWN reason, and every one of them yields `null` — the value
+  // `validateGeneralization` refuses as a held-out (NO_EVALUATION_PIN), never a false pin.
+  assert.deepEqual(evaluationPinOf({}), { pin: null, prereg: null, reason: "NO_PREREG_RECORDED" });
+  assert.equal(evaluationPinOf({ prereg: path.join(root, "nope.json") }).reason.startsWith("PREREG_UNREADABLE:"), true);
+  fs.writeFileSync(pre, "{not json", "utf8");
+  assert.equal(evaluationPinOf({ prereg: pre }).reason, "PREREG_UNPARSEABLE");
+  fs.writeFileSync(pre, JSON.stringify({ experiment: "E-FIX" }), "utf8");
+  assert.equal(evaluationPinOf({ prereg: pre }).reason, "PREREG_HAS_NO_PIN");
+  fs.writeFileSync(pre, JSON.stringify({ pin: 42 }), "utf8");
+  assert.equal(evaluationPinOf({ prereg: pre }).pin, null, "a non-string pin is not a pin");
+  // The pin reaches the RECORD end to end. (A SECOND root: rewriting the first root's store under a
+  // live watermark is the WATERMARK_MISMATCH case, tested on its own.)
+  writeFixtureStore(root, [{ experiment_ref: "E-FIX cluster 5", verdict: "supported", prereg: pre }]);
+  const r = ingestNewOutcomes(root);
+  assert.equal(r.ok, true, r.reasons?.join(","));
+  assert.equal(r.entries[0].evaluation_pin, null, "`pin: 42` is not a pin");
+
+  const pinned = mkTmp();
+  const pre2 = path.join(pinned, "prereg.json");
+  fs.writeFileSync(pre2, JSON.stringify({ pin: "a".repeat(40) }), "utf8");
+  writeFixtureStore(pinned, [{ experiment_ref: "E-FIX cluster 6", verdict: "supported", prereg: pre2 }]);
+  const r2 = ingestNewOutcomes(pinned);
+  assert.equal(r2.ok, true, r2.reasons?.join(","));
+  assert.equal(r2.entries[0].evaluation_pin, "a".repeat(40), "the resolved pin is carried onto the Experience");
+  assert.equal(readExperienceLedger(pinned).records[0].evaluation_pin, "a".repeat(40), "…and it is ON DISK, not just in the return value");
+});
+
+// ── AC1(g): both sources through ONE entry, ONE carrier ──────────────────────────────────────────
+
+test("AC1(g): a user-sourced Experience goes through the same ingestExperience and lands in the same carrier", () => {
+  const root = mkTmp();
+  const r = ingestExperience(root, {
+    source: "user", caseId: "TEACH-via-unified-entry", role: "missed-by-tooling",
+    evidenceRefs: ["gap-discovery-experience-auto-ingest-from-evidence-store"],
+    components: ["plugin/scripts/x.ts"], summary: SUMMARY,
+  });
+  assert.equal(r.ok, true, r.reasons?.join(","));
+  assert.equal(r.record.reported_by, "user");
+  assert.equal(r.record.source_ref, null, "the manual half is not derived from any record");
+  assert.equal(r.file, ledgerFile(root), "ONE carrier for both sources");
+  // …and `ingestFeedback` is the SAME entry, not a parallel one: byte-identical records collapse to
+  // one id (the content-addressed dedup), which can only happen if both paths build the same record.
+  const viaAdapter = ingestFeedback(root, {
+    caseId: "TEACH-via-unified-entry", role: "missed-by-tooling",
+    evidenceRefs: ["gap-discovery-experience-auto-ingest-from-evidence-store"],
+    components: ["plugin/scripts/x.ts"], summary: SUMMARY, ts: r.record.ts,
+  });
+  assert.equal(viaAdapter.ok, false);
+  assert.equal(viaAdapter.duplicate, true, "the adapter built the identical record the unified entry did");
+  assert.equal(viaAdapter.id, r.id);
+
+  // A source outside the two-value vocabulary is REFUSED — never defaulted to one of them.
+  const bad = ingestExperience(root, { source: "operator", caseId: "x", role: "missed-by-tooling", evidenceRefs: ["y"], summary: SUMMARY });
+  assert.equal(bad.ok, false);
+  assert.match(bad.reasons[0], new RegExp(`^${SOURCE_NOT_IN_VOCAB}:`));
+  assert.deepEqual([...REPORTED_BY_VOCAB], ["user", "system"]);
+  assert.equal(lines(root), 1);
+
+  // Both halves are visible in ONE read of the ONE carrier.
+  writeFixtureStore(root, [THREE[0]]);
+  assert.equal(ingestNewOutcomes(root).ingested, 1);
+  assert.deepEqual(readExperienceLedger(root).records.map((x) => x.reported_by).sort(), ["system", "user"]);
+});
+
+// ── the ingester's remaining controls ───────────────────────────────────────────────────────────
+
+test("an ownership-loop verdict is SKIPPED and REPORTED — never coerced into a finding role", () => {
+  const root = mkTmp();
+  writeFixtureStore(root, [{ experiment_ref: "own-1", verdict: "abstained" }, { experiment_ref: "own-2", verdict: "supported" }]);
+  const r = ingestNewOutcomes(root);
+  assert.equal(r.ok, true, r.reasons?.join(","));
+  assert.equal(r.scanned, 2);
+  assert.equal(r.skipped_not_ingestible, 1);
+  assert.equal(r.ingested, 1);
+  assert.equal(r.watermark.line, 2, "a readable non-finding is passed — it is definitively not an outcome we lost");
+  assert.deepEqual(rolesIn(root), ["found-unresolved"], "`abstained` did NOT become a finding");
+  assert.deepEqual(deriveExperienceFields({ verdict: "abstained" }).reasons, ["VERDICT_NOT_INGESTIBLE:abstained-is-not-a-discovery-finding-verdict"]);
+  // The vocabulary is data, so this is enumerable rather than a promise: every verdict that has no
+  // role is one of the ownership loop's, and none of them can produce a finding.
+  for (const v of ["proposed", "abstained", "investigated", "not-evaluated", "exempted"]) assert.equal(VERDICT_ROLE[v], undefined, v);
+});
+
+test("a malformed line is COUNTED, and the watermark does not advance past it", () => {
+  const root = mkTmp();
+  writeFixtureStore(root, [{ experiment_ref: "E-FIX cluster 1", verdict: "supported" }]);
+  fs.appendFileSync(storeFile(root), "{not json\n", "utf8");
+  writeFixtureStore(root, [{ experiment_ref: "E-FIX cluster 2", verdict: "supported" }]);   // line 3, AFTER the bad line
+
+  const r = ingestNewOutcomes(root);
+  assert.equal(r.ok, true, r.reasons?.join(","));
+  assert.equal(r.malformed_lines, 1);
+  assert.equal(r.stopped_at_malformed_line, 2);
+  assert.equal(r.ingested, 1, "only the line BEFORE the unparseable one was ingested");
+  assert.equal(r.watermark.line, 1, "the watermark stops BEFORE the line it could not read");
+  assert.equal(r.remainder, 1, "the outcome AFTER the bad line is reported as outstanding, not silently lost");
+  assert.equal(lines(root), 1);
+});
+
+test("dedup by source_ref: losing the watermark does not duplicate the ledger", () => {
+  const root = mkTmp();
+  writeFixtureStore(root, THREE);
+  assert.equal(ingestNewOutcomes(root).ingested, 3);
+  const ledgerBefore = fs.readFileSync(ledgerFile(root), "utf8");
+  fs.rmSync(watermarkPath(root));                     // the watermark is lost ⇒ the scan starts at line 0
+  const again = ingestNewOutcomes(root);
+  assert.equal(again.ok, true, again.reasons?.join(","));
+  assert.equal(again.scanned, 3, "all three were re-examined…");
+  assert.equal(again.ingested, 0);
+  assert.equal(again.duplicates, 3, "…and all three were recognised as already ingested");
+  assert.equal(fs.readFileSync(ledgerFile(root), "utf8"), ledgerBefore, "the ledger is byte-identical");
+});
+
+test("the role elevation reads DEVELOP's task status, and only a `done` task makes a finding 'fixed'", () => {
+  // (i) done ⇒ found-and-fixed (the finding is real AND a task that fixed it has landed)
+  const done = mkDevelopRepo("gap-fixture-done", "done");
+  writeFixtureStore(done, [{ experiment_ref: "E-FIX cluster 1", verdict: "supported", subject_key: "hypgen:invariant|plugin/scripts/a.ts", task_id: "gap-fixture-done" }]);
+  const r1 = ingestNewOutcomes(done);
+  assert.equal(r1.ok, true, r1.reasons?.join(","));
+  assert.equal(r1.entries[0].role, "found-and-fixed");
+
+  // (ii) a task that exists but is NOT done ⇒ the role stays the verdict's own
+  const todo = mkDevelopRepo("gap-fixture-todo", "todo");
+  writeFixtureStore(todo, [{ experiment_ref: "E-FIX cluster 1", verdict: "supported", subject_key: "hypgen:invariant|plugin/scripts/a.ts", task_id: "gap-fixture-todo" }]);
+  assert.equal(ingestNewOutcomes(todo).entries[0].role, "found-unresolved");
+
+  // (iii) a task id develop cannot resolve ⇒ NOT elevated. "I could not check" must never become
+  // "it is fixed" — that is the direction that manufactures a false found-and-fixed.
+  const absent = mkDevelopRepo("gap-fixture-other", "done");
+  writeFixtureStore(absent, [{ experiment_ref: "E-FIX cluster 1", verdict: "supported", subject_key: "hypgen:invariant|plugin/scripts/a.ts", task_id: "gap-fixture-does-not-exist" }]);
+  assert.equal(ingestNewOutcomes(absent).entries[0].role, "found-unresolved");
+
+  // (iv) a LATER outcome on the same subject_key turns a fixed finding into a recurrence
+  const back = mkDevelopRepo("gap-fixture-done", "done");
+  writeFixtureStore(back, [
+    { experiment_ref: "E-FIX cluster 1", verdict: "supported", subject_key: "hypgen:invariant|plugin/scripts/a.ts", task_id: "gap-fixture-done" },
+    { experiment_ref: "E-FIX cluster 2", verdict: "supported", subject_key: "hypgen:invariant|plugin/scripts/a.ts" },
+  ]);
+  const r4 = ingestNewOutcomes(back);
+  assert.equal(r4.ok, true, r4.reasons?.join(","));
+  assert.deepEqual(r4.entries.map((e) => e.role), ["recurred-after-fix", "found-unresolved"]);
+
+  // (v) …and WITHOUT the task-done half there is no elevation at all (the negative control on the
+  // same predicate: a later outcome alone is not a recurrence).
+  const noTask = mkDevelopRepo("gap-fixture-unrelated", "done");
+  writeFixtureStore(noTask, [
+    { experiment_ref: "E-FIX cluster 1", verdict: "supported", subject_key: "hypgen:invariant|plugin/scripts/a.ts" },
+    { experiment_ref: "E-FIX cluster 2", verdict: "supported", subject_key: "hypgen:invariant|plugin/scripts/a.ts" },
+  ]);
+  assert.deepEqual(ingestNewOutcomes(noTask).entries.map((e) => e.role), ["found-unresolved", "found-unresolved"]);
+});
+
+test("the ingester reads the store at the SHARED checkout — a worktree root still sees the main store", () => {
+  const { main, worktree } = mkWorktreePair();
+  writeFixtureStore(main, [THREE[0]]);
+  assert.equal(sharedStoreFile(worktree), path.join(main, ".quay", "architecture-evidence-store.jsonl"));
+  const r = ingestNewOutcomes(worktree);
+  assert.equal(r.ok, true, r.reasons?.join(","));
+  assert.equal(r.ingested, 1);
+  assert.equal(r.store, path.join(main, ".quay", "architecture-evidence-store.jsonl"));
+  assert.equal(fs.existsSync(ledgerFile(main)), true, "the Experience landed in the MAIN checkout");
+  assert.equal(fs.existsSync(path.join(worktree, EXPERIENCE_LEDGER_REL)), false, "…and not in the worktree");
+  assert.equal(fs.existsSync(watermarkPath(main)), true);
+  assert.equal(fs.existsSync(path.join(worktree, INGEST_WATERMARK_REL)), false);
 });
