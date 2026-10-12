@@ -94,7 +94,7 @@ import * as evidenceStore from "./architecture-evidence-store.mjs";
 // owns exactly that vocabulary; a second tokenizer here would be a second definition to keep in sync.
 import {
   readExperienceLedger, experienceDenyList, scanExperienceLeak, EXPERIENCE_LEDGER_REL,
-  DISCOVERY_CARRIERS, GENERALIZATION_VERDICTS_REL, GENERALIZATION_VERDICT_KIND,
+  DISCOVERY_CARRIERS, GENERALIZATION_VERDICTS_REL, GENERALIZATION_VERDICT_KIND, AUTHORED_BY_ACTORS,
   carrierFile, readCarrier, appendCarrierLine, resolveCarrierRoot,
 } from "./discovery-experience-ledger.mjs";
 
@@ -132,7 +132,137 @@ export const PROMOTION_REFUSAL_CAUSES = Object.freeze([
   "VERDICT_NOT_RECORDED",  // the ref names no recorded verdict
   "VERDICT_OTHER_METHOD",  // the recorded verdict is about a different method_id
   "VERDICT_NOT_PASSED",    // recorded, but the lineage/temporal gates did not pass
+  "VERDICT_CONTAMINATED",  // the ref is on the contaminated-verdict ledger: judged on a used hold-out
 ]);
+
+// ── THE CONTAMINATED-VERDICT LEDGER (a promotion must not cite a judgment made on a used case) ───
+//
+// ⛔ THE DEFECT THIS CLOSES (gap-discovery-holdout-cross-experiment-leak-and-contaminated-promotion,
+//   2026-10-12). Two methods were promoted on verdicts whose held-out cases had ALL been used before
+//   (eight of the nine cases in the set that produced them). Every one of those verdicts records
+//   `outcome:"evaluated", correct:true` and passes the lineage/temporal gates as they are computed
+//   PER CASE — the contamination is not a property of the case's own lineage, it is a property of the
+//   CASE HAVING BEEN USED, which the per-case path cannot see. So the promotion rule needs a list it
+//   can consult, and the list has to be a carrier a third party can re-read — otherwise "this verdict
+//   is contaminated" would be an unfalsifiable claim about a judgment nobody can inspect.
+//
+// APPEND-ONLY, and the entries are DERIVED: `backfillContaminatedVerdicts` selects every verdict
+// whose held-out case is in a named set of contaminated cases — computed from the verdict carrier,
+// never hand-picked. Each entry records `{verdict_id, reason, collisions, authored_by}`.
+//
+// ⛔ The rel is declared HERE rather than in the ledger module's `DISCOVERY_CARRIERS` table for the
+//   same structural reason `INGEST_SKIPS_REL` is: this module is the one that reads it, and the path
+//   has exactly ONE definition. `repairCarrier` still addresses it — a carrier-shaped path
+//   (`…jsonl`) is accepted by name, so nothing is lost by the declaration living here.
+
+/** Where the contaminated-verdict ledger lives, relative to the SHARED checkout. */
+export const CONTAMINATED_VERDICTS_REL = ".quay/discovery-contaminated-verdicts.jsonl";
+
+/** The ONE record kind this carrier holds, so a line is self-describing on read-back. */
+export const CONTAMINATED_VERDICT_KIND = "contaminated_verdict";
+
+/** Refusal code: the promotion cites a verdict that is on the contaminated-verdict ledger. */
+export const VERDICT_CONTAMINATED = "VERDICT_CONTAMINATED";
+
+/** Refusal code: the contaminated-verdict ledger itself could not be read — its OWN value, never a
+ *  silent "nothing is contaminated" (硬规则 3b: an unreadable deny-list must not pass everything). */
+export const CONTAMINATED_LIST_UNAVAILABLE = "CONTAMINATED_LIST_UNAVAILABLE";
+
+/** Absolute path of the contaminated-verdict ledger under the SHARED checkout (null if unresolvable). */
+export const contaminatedVerdictsFile = (root) => carrierFile(root, CONTAMINATED_VERDICTS_REL);
+
+/** Read the contaminated-verdict ledger. Same fail-closed shape as every other carrier read. */
+export const readContaminatedVerdicts = (root) => readCarrier(root, CONTAMINATED_VERDICTS_REL, CONTAMINATED_VERDICT_KIND);
+
+/** The contamination set a promotion check consults: the `verdict_id`s on the ledger. `null` when the
+ *  ledger could not be read — the caller's OWN value, never `[]` that would pass everything. */
+export function contaminatedVerdictIds(root) {
+  const read = readContaminatedVerdicts(root);
+  if (!read.ok) {
+    // ⛔ `ok:false` has TWO shapes and both must be refused: an unresolvable root / unreadable file
+    //   (`reason`) and a carrier with unparseable lines (a partially-readable DENY-LIST must not be
+    //   read as a complete one — the same rule every other carrier read applies).
+    const why = read.reason ?? `${read.malformed_lines}-unparseable-line(s)-in-${CONTAMINATED_VERDICTS_REL}`;
+    return { ok: false, ids: null, reason: `${CONTAMINATED_LIST_UNAVAILABLE}:${why}`, read };
+  }
+  return { ok: true, ids: read.records.map((r) => r.verdict_id).filter((x) => isStr(x, 1)), read };
+}
+
+/**
+ * Append ONE contaminated-verdict record.
+ *
+ * ⛔ The id is content-addressed over the `verdict_id` ALONE — the ledger is a DENY-LIST, and "this
+ *   verdict is banned" is one fact about one verdict. Keying it on the reason or the collision list
+ *   instead (both of which a re-run recomputes, and a re-run may compute differently when the index
+ *   has grown) would let the same verdict be listed twice under two spellings, and a reader would
+ *   have no way to tell a genuine second finding from a recomputed one. So a re-run appends nothing
+ *   (`DUPLICATE_ID`), exactly as the skip ledger's dedup does for its own key.
+ *
+ * @returns {{ok:true, ...}|{ok:false, reasons:string[], appended:false}}
+ */
+export function appendContaminatedVerdict(root, { verdict_id, reason, collisions = [], authored_by, ts } = {}) {
+  const reasons = [];
+  if (!isStr(verdict_id, 1)) reasons.push("INGEST_ARG_MISSING:verdict_id");
+  if (!isStr(reason, 1)) reasons.push(`INGEST_ARG_MISSING:reason`);
+  // WHO listed it, from the ledger's OWN actor vocabulary (reused, never re-declared): a listing is a
+  // claim about a judgment, so "who made it" is part of the record, exactly as it is for a correction.
+  if (!isObj(authored_by) || !isStr(authored_by.ref, 1)) {
+    reasons.push("INGEST_ARG_MISSING:authored_by-{actor,ref}");
+  } else if (!AUTHORED_BY_ACTORS.includes(authored_by.actor)) {
+    reasons.push(`AUTHORED_BY_ACTOR_NOT_IN_VOCAB:${String(authored_by.actor)}`);
+  }
+  if (reasons.length) return { ok: false, kind: CONTAMINATED_VERDICT_KIND, reasons, appended: false };
+  const body = { verdict_id, reason, collisions: Array.isArray(collisions) ? collisions : [] };
+  const id = `contaminated_verdict-${sha256(String(verdict_id)).slice(0, 16)}`;
+  return appendCarrierLine(root, CONTAMINATED_VERDICTS_REL, {
+    id, ...body, authored_by, ts: ts ?? new Date().toISOString(),
+  }, { kind: CONTAMINATED_VERDICT_KIND });
+}
+
+/**
+ * BACKFILL the ledger from the verdict carrier. ⛔ Nothing here is hand-picked: the caller names the
+ * contaminated CASES (each with the collisions that condemned it), and every recorded verdict whose
+ * `held_out_case_id` is one of them is appended — selected by reading the carrier, not by a list of
+ * verdict ids somebody typed.
+ *
+ * @param {string} root
+ * @param {object} o
+ * @param {{case_id:string, collisions?:object[]}[]} o.contaminatedCases
+ * @param {object|null} [o.verdicts]  a `readGeneralizationVerdicts(root)` value; read here by default
+ * @param {{actor:string, ref:string}} o.authoredBy
+ * @param {(c)=>string} [o.reasonFor]  the reason text per case (defaults to a derived sentence)
+ * @returns {{ok, evaluated, selected, appended, duplicates, verdict_ids, records, reasons}}
+ */
+export function backfillContaminatedVerdicts(root, { contaminatedCases = [], verdicts = null, authoredBy, reasonFor = null, ts } = {}) {
+  const cases = (Array.isArray(contaminatedCases) ? contaminatedCases : []).filter((c) => isObj(c) && isStr(c.case_id, 1));
+  if (cases.length === 0) return { ok: false, reasons: ["INGEST_ARG_MISSING:contaminatedCases"], appended: false, records: [] };
+  const byId = new Map(cases.map((c) => [c.case_id, c]));
+  let ver = verdicts;
+  if (ver === null || ver === undefined) {
+    // The verdict carrier's own path, declared once in the ledger module — imported, not re-spelled.
+    ver = readCarrier(root, GENERALIZATION_VERDICTS_REL, GENERALIZATION_VERDICT_KIND);
+  }
+  if (!ver.ok && ver.reason) return { ok: false, reasons: [`${CONTAMINATED_LIST_UNAVAILABLE}:${ver.reason}`], appended: false, records: [] };
+  const selected = (ver.records ?? []).filter((v) => isObj(v) && isStr(v.held_out_case_id, 1) && byId.has(v.held_out_case_id));
+  const records = [];
+  let appended = 0;
+  let duplicates = 0;
+  const failures = [];
+  for (const v of selected) {
+    const c = byId.get(v.held_out_case_id);
+    const reason = typeof reasonFor === "function"
+      ? reasonFor(c)
+      : `${VERDICT_CONTAMINATED}:verdict-${v.id}-was-judged-on-${v.held_out_case_id}-which-the-case-identity-index-shows-was-used-before`;
+    const r = appendContaminatedVerdict(root, { verdict_id: v.id, reason, collisions: c.collisions ?? [], authored_by: authoredBy, ts });
+    if (r.ok) { appended++; records.push(r.record); }
+    else if (r.duplicate) { duplicates++; records.push({ id: r.id ?? null, verdict_id: v.id, reason, duplicate: true }); }
+    else failures.push(...(r.reasons ?? ["APPEND_FAILED"]));
+  }
+  return {
+    ok: failures.length === 0, evaluated: (ver.records ?? []).length, selected: selected.length,
+    appended, duplicates, verdict_ids: selected.map((v) => v.id), records, reasons: failures,
+  };
+}
 
 /**
  * The promotion-evidence refusals a record draws, given the RECORDED verdicts. PURE. A record that is
@@ -140,14 +270,25 @@ export const PROMOTION_REFUSAL_CAUSES = Object.freeze([
  * @param {object} rec
  * @param {object[]|undefined} verdicts the recorded verdicts, or `undefined` when they could not be
  *   read (its OWN value, exactly like `toolCatalog`/`provenanceSeeds` — 硬规则 3b).
+ * @param {string[]|null} [opts.contaminatedVerdictIds]  the `verdict_id`s on the contaminated-verdict
+ *   ledger. ⛔ `null`/absent means "not supplied": this PURE validator then checks what it was handed
+ *   (the WRITE path — `appendMethodRecord` — always resolves the real list and REFUSES the write when
+ *   it cannot be read, so an unreadable deny-list never passes a promotion in production).
  * @returns {string[]} zero or more `PROMOTION_WITHOUT_VALID_GENERALIZATION:<cause>:<detail>` reasons
  */
-export function generalizationEvidenceReasons(rec, verdicts) {
+export function generalizationEvidenceReasons(rec, verdicts, { contaminatedVerdictIds = null } = {}) {
   if (rec?.status !== "active") return [];
   const kill = (cause, detail) => `${PROMOTION_WITHOUT_VALID_GENERALIZATION}:${cause}:${detail}`;
   const ge = rec.generalization_evidence;
   if (!isObj(ge) || !isStr(ge.verdict_ref, 1)) {
     return [kill("EVIDENCE_MISSING", "status=active-must-carry-generalization_evidence.verdict_ref-naming-a-recorded-validateGeneralization-verdict")];
+  }
+  // ⛔ The contaminated check runs BEFORE the "was it recorded / did it pass" checks: a verdict that
+  //   was judged on a hold-out already in use cannot license a promotion however well it scored, and
+  //   reporting it as `VERDICT_NOT_PASSED` would name the wrong defect.
+  if (Array.isArray(contaminatedVerdictIds) && contaminatedVerdictIds.includes(ge.verdict_ref)) {
+    return [kill("VERDICT_CONTAMINATED",
+      `${ge.verdict_ref}-is-listed-in-${CONTAMINATED_VERDICTS_REL}-as-judged-on-a-hold-out-that-had-already-been-used-so-it-cannot-license-a-promotion`)];
   }
   if (!Array.isArray(verdicts)) {
     return [kill("VERDICTS_UNAVAILABLE", `${ge.verdict_ref}-cannot-be-resolved-because-${GENERALIZATION_VERDICTS_REL}-could-not-be-read`)];
@@ -159,8 +300,13 @@ export function generalizationEvidenceReasons(rec, verdicts) {
   }
   // "Passed" is spelled from the RECORD's own fields, never from the promotion's claim: an evaluated
   // verdict that was correct, with no refusal and neither the lineage nor the temporal gate failed.
+  // ⛔ `previously_used_ok !== false` is the THIRD gate, added by gap-discovery-holdout-cross-
+  //   experiment-leak-and-contaminated-promotion: a verdict whose held-out case the case-identity
+  //   index already knew is not usable evidence, however correct the prediction was. `null` (no index
+  //   was consulted) does NOT fail — that would retroactively invalidate every verdict recorded
+  //   before the index existed — while `false` (checked and previously used) always does.
   const passed = v.outcome === "evaluated" && v.correct === true && v.refusal_code === null &&
-    v.lineage_ok !== false && v.temporal_ok !== false;
+    v.lineage_ok !== false && v.temporal_ok !== false && v.previously_used_ok !== false;
   if (!passed) {
     return [kill("VERDICT_NOT_PASSED",
       `${ge.verdict_ref}-recorded-outcome=${String(v.outcome)}-correct=${String(v.correct)}-refusal_code=${String(v.refusal_code)}-lineage_ok=${String(v.lineage_ok)}-temporal_ok=${String(v.temporal_ok)}`)];
@@ -391,8 +537,10 @@ export function seedReasons(rec, seeds) {
  * @param {object[]} [opts.verdicts] the RECORDED generalization verdicts (the carrier read back).
  *   ⛔ Absent ⇒ `VERDICTS_UNAVAILABLE` for a `status:"active"` record, never a skipped check — the
  *   same own-value discipline again. A non-active record never reads it.
+ * @param {string[]|null} [opts.contaminatedVerdictIds] the ids on the contaminated-verdict ledger.
+ *   `null`/absent = not supplied (see `generalizationEvidenceReasons`); the write path always supplies.
  */
-export function validateMethodRecord(rec, { toolCatalog, existing = [], provenanceSeeds: seeds, verdicts } = {}) {
+export function validateMethodRecord(rec, { toolCatalog, existing = [], provenanceSeeds: seeds, verdicts, contaminatedVerdictIds = null } = {}) {
   if (!isObj(rec)) return { ok: false, reasons: ["RECORD_NOT_OBJECT"] };
   const reasons = [];
   for (const f of REQUIRED_METHOD_FIELDS) if (!supplied(rec, f)) reasons.push(`SCHEMA_MISSING:${f}`);
@@ -476,7 +624,7 @@ export function validateMethodRecord(rec, { toolCatalog, existing = [], provenan
   reasons.push(...seedReasons(rec, seeds));
 
   // ── the PROMOTION-EVIDENCE check, after the seed checks for the same "existing order" reason ─────
-  reasons.push(...generalizationEvidenceReasons(rec, verdicts));
+  reasons.push(...generalizationEvidenceReasons(rec, verdicts, { contaminatedVerdictIds }));
 
   return { ok: reasons.length === 0, reasons };
 }
@@ -540,12 +688,37 @@ export function readMethodRegistry(root, { history = false } = {}) {
  */
 export function activeMethods(root) {
   const read = readMethodRegistry(root);
+  // Defence in depth: a method whose promoting verdict is on the contaminated-verdict ledger is
+  // reported as `excluded_contaminated` rather than being handed to a consumer. The ledger is READ
+  // (never assumed): an unreadable list makes `excluded_contaminated` `null` with a
+  // `contamination_reason`, because "I could not read the deny-list" must not read as "nothing is
+  // excluded" (硬规则 3b).
+  const cont = contaminatedVerdictIds(root);
+  const contaminated = cont.ok ? new Set(cont.ids) : new Set();
+  const methods = [];
+  const excluded = [];
+  for (const m of read.latest.filter((x) => isObj(x) && x.status === "active")) {
+    const ref = m.generalization_evidence?.verdict_ref;
+    if (cont.ok && isStr(ref, 1) && contaminated.has(ref)) {
+      excluded.push({
+        method_id: m.method_id,
+        version: isInt(m.version) ? m.version : null,
+        verdict_ref: ref,
+        reason: `${VERDICT_CONTAMINATED}:${ref}-is-on-${CONTAMINATED_VERDICTS_REL}-so-this-method-rests-on-a-judgment-made-on-an-already-used-hold-out`,
+      });
+      continue;
+    }
+    methods.push(m);
+  }
   return {
     ok: read.ok,
-    methods: read.latest.filter((m) => isObj(m) && m.status === "active"),
+    methods,
     evaluated: read.latest.length,
     malformed_lines: read.malformed_lines,
     file: read.file,
+    excluded_contaminated: cont.ok ? excluded : null,
+    contaminated_verdicts_evaluated: cont.ok ? contaminated.size : null,
+    ...(cont.ok ? {} : { contamination_reason: cont.reason }),
     ...(isStr(read.reason, 1) ? { reason: read.reason } : {}),
   };
 }
@@ -559,7 +732,7 @@ export function activeMethods(root) {
  * The registry is READ first so the version check sees the real prior versions; an unreadable
  * registry is refused with its OWN reason rather than being silently treated as empty (硬规则 3b).
  */
-export function appendMethodRecord(root, rec, { toolCatalog, toolCatalogRoot, provenanceSeeds: seeds, generalizationVerdicts } = {}) {
+export function appendMethodRecord(root, rec, { toolCatalog, toolCatalogRoot, provenanceSeeds: seeds, generalizationVerdicts, contaminatedVerdictIds: contaminatedIn } = {}) {
   const read = readMethodRegistry(root, { history: true });
   if (read.file === null) {
     // No shared checkout ⇒ nothing can be read OR written: the resolver's own refusal, not a
@@ -590,11 +763,23 @@ export function appendMethodRecord(root, rec, { toolCatalog, toolCatalogRoot, pr
     const vc = readCarrier(root, GENERALIZATION_VERDICTS_REL, GENERALIZATION_VERDICT_KIND);
     resolvedVerdicts = vc.ok ? vc.records : undefined;
   }
+  // The CONTAMINATED-VERDICT ledger, resolved the same way. ⛔ A list that cannot be read REFUSES the
+  // write here rather than being passed down as `null` (= "not supplied"): on the WRITE path the check
+  // is mandatory, so "I could not tell whether this verdict is contaminated" must never be shaped like
+  // "I checked and it is clean" (硬规则 3b). An ABSENT carrier file is a real empty list — the ledger
+  // is append-only and additive, so "no lines" genuinely means "nothing listed".
+  let contaminated = contaminatedIn;
+  if (contaminated === undefined) {
+    const cc = contaminatedVerdictIds(root);
+    if (!cc.ok) return { ok: false, kind: METHOD_KIND, appended: false, reasons: [cc.reason] };
+    contaminated = cc.ids;
+  }
   const v = validateMethodRecord(rec, {
     toolCatalog: Array.isArray(catalog) ? catalog : undefined,
     existing: read.history,
     provenanceSeeds: resolvedSeeds,
     verdicts: Array.isArray(resolvedVerdicts) ? resolvedVerdicts : undefined,
+    contaminatedVerdictIds: Array.isArray(contaminated) ? contaminated : null,
   });
   if (!v.ok) return { ok: false, kind: METHOD_KIND, reasons: v.reasons, appended: false };
   const withId = { id: rec.id ?? methodRecordId(rec), ...rec };

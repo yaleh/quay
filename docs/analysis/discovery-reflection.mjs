@@ -97,14 +97,15 @@ import { pathToFileURL } from "node:url";
 // The ONE signature primitive (`subjectKey`), the content-addressing + carrier reader, the Experience
 // ledger's role vocabulary, and the method registry's OWN validator + carrier — all imported. A second
 // definition of any of them would be a second definition to keep in sync.
-import { subjectKey, recordId } from "./architecture-evidence-store.mjs";
+import { subjectKey, recordId, sha256 } from "./architecture-evidence-store.mjs";
 import {
   ROLE_VERDICT_COMPAT, readExperienceLedger, DISCOVERY_CARRIERS, GENERALIZATION_VERDICTS_REL,
-  GENERALIZATION_VERDICT_KIND, carrierFile, readCarrier, appendCarrierLine,
+  GENERALIZATION_VERDICT_KIND, EXPERIENCE_LEDGER_REL, carrierFile, readCarrier, appendCarrierLine,
+  resolveCarrierRoot,
 } from "./discovery-experience-ledger.mjs";
 import {
   readMethodRegistry, validateMethodRecord, defaultToolNames,
-  seedSetForRecord, basenameOf, provenanceSeeds, REPO_ROOT,
+  seedSetForRecord, basenameOf, provenanceSeeds, provenanceExperiences, REPO_ROOT,
 } from "./discovery-method-registry.mjs";
 // The model-identity / cost machinery + the hardened launcher argv, reused by import (硬规则 5b).
 import {
@@ -912,6 +913,10 @@ export function buildGeneralizationPrompt({ candidate, heldOutCase, evidencePack
  * ⛔ A REFUSAL IS NOT A VERDICT. Three pre-conditions gate the call, and each is a REFUSAL — the model
  * is never called, the candidate is NOT retired, and the outcome is recorded as `not-evaluated` with
  * the refusal's own code:
+ *   • `HELD_OUT_PREVIOUSLY_USED` — the case is in the GLOBAL case-identity index (a use recorded in
+ *     ANY carrier: an earlier sealed file, a method's seed set, a publicly-surfaced case). Runs only
+ *     when the caller supplies a `caseIdentityIndex`; the verdict then carries
+ *     `previously_used_ok: true|false|null` (`null` = no index supplied ⇒ the gate was NOT run);
  *   • `HELD_OUT_SHARES_LINEAGE`  — the held-out case is inside the candidate's whole lineage;
  *   • `NO_EVALUATION_PIN` / `NO_FIX_COMMIT` — the case cannot say at which commit its verdict is true;
  *   • `TEMPORAL_MISMATCH`        — the fix had already landed at the pin the case names;
@@ -955,7 +960,7 @@ export async function validateGeneralization(opts = {}) {
  * ⛔ No `root` ⇒ nothing is recorded and the verdict is returned untouched: `verdict_recorded:false`.
  *   A caller that cannot say where the carrier lives must not be told the verdict was persisted.
  */
-function maybeRecordGeneralizationVerdict({ root, candidate, heldOutCase } = {}, verdict) {
+function maybeRecordGeneralizationVerdict({ root, candidate, heldOutCase, caseIdentityIndex = null } = {}, verdict) {
   // `evaluated` and `not-applicable` are both RECORDED: both are readings a third party must be able to
   // re-read (how often the gate diverted is otherwise invisible), and neither can license a promotion —
   // the registry's rule requires `outcome:"evaluated" && correct:true`. A `not-evaluated` READING is
@@ -967,6 +972,11 @@ function maybeRecordGeneralizationVerdict({ root, candidate, heldOutCase } = {},
     version: Number.isInteger(verdict?.candidate_after?.version) ? verdict.candidate_after.version : null,
     held_out_case_id: heldOutCase?.case_id ?? heldOutCase?.id ?? null,
     evaluation_pin: isStr(heldOutCase?.evaluation_pin, 1) ? heldOutCase.evaluation_pin : null,
+    // WHICH label was judged, and WHICH index it was checked against (Plan item 4: "the verdict
+    // records the pin, the label sha and the index sha it was checked against"). Both are recorded so
+    // a third party can re-read the exact inputs of the judgment instead of trusting its summary.
+    label_sha256: heldOutCase ? caseLabelSha256(heldOutCase) : null,
+    index_sha256: caseIdentityIndex?.sha256 ?? null,
   });
   return rec.ok
     ? { ...verdict, verdict_ref: rec.id, verdict_recorded: true }
@@ -978,7 +988,7 @@ function maybeRecordGeneralizationVerdict({ root, candidate, heldOutCase } = {},
  *  the SAME predicate. */
 const appliedOf = (v) => (v?.outcome === OUTCOME_NOT_APPLICABLE ? "no" : (isStr(v?.applies, 1) ? v.applies : null));
 
-async function runGeneralization({ candidate, heldOutCase, registry = [], model, budget = {}, modelId = null, nowMs = Date.now(), experiences = [], pinDir = null, isAncestor = null, root = null } = {}) {
+async function runGeneralization({ candidate, heldOutCase, registry = [], model, budget = {}, modelId = null, nowMs = Date.now(), experiences = [], pinDir = null, isAncestor = null, root = null, caseIdentityIndex = null } = {}) {
   const guard = disabledGuard(budget);
   if (guard) return guard;
   if (typeof model !== "function") return { ok: false, reason: "model-seam-missing", called: false };
@@ -990,12 +1000,17 @@ async function runGeneralization({ candidate, heldOutCase, registry = [], model,
   // `gates` carries the two readings the PROMOTION rule names (`lineage_ok` / `temporal_ok`), so a
   // refusal is not just a code: `false` = the gate ran and failed, `null` = it was never reached.
   // Collapsing those two into one value is exactly the shape 硬规则 3b forbids.
+  // The index gate's reading, three-valued like the other two: `true` = an index was supplied and
+  // the case is not in it, `false` = supplied and the case IS in it, `null` = no index was supplied,
+  // so the gate was never reachable (硬规则 3b — never collapsed into one value).
+  const prevGate = { previously_used_ok: caseIdentityIndex ? true : null };
   const refuse = (code, reason, gates = {}) => ({
     ok: false, called: false, outcome: "not-evaluated", refusal_code: code, reason,
     not_evaluated_reason: code, predicted_verdict: null, expected_verdicts: roleExpectedVerdicts(heldOutCase.role),
     correct: null, promoted: false, candidate_after: { ...candidate }, retirement_reason: null,
     evaluated_commit: null, verifier_cwd: null, model_call: null,
     lineage_ok: gates.lineage_ok ?? null, temporal_ok: gates.temporal_ok ?? null,
+    previously_used_ok: gates.previously_used_ok ?? prevGate.previously_used_ok,
   });
 
   // The held-out case must be OUTSIDE the batch that produced the candidate: a case the candidate was
@@ -1007,11 +1022,38 @@ async function runGeneralization({ candidate, heldOutCase, registry = [], model,
   const expected = roleExpectedVerdicts(heldOutCase.role);
   if (!expected.length) return refuse("HELD_OUT_ROLE_UNKNOWN", `HELD_OUT_ROLE_UNKNOWN:${heldOutCase.role}`);
 
+  // …and not USED BEFORE anywhere the GLOBAL case-identity index can see. This is the per-case half
+  // of the sealed-set gate: the set gate refuses a whole registration, this refuses ONE case that
+  // reached a verifier by another path. It is also the ONLY check that can see a use recorded in a
+  // DIFFERENT carrier (an earlier sealed file, a method's seed set, a publicly-surfaced case).
+  if (caseIdentityIndex) {
+    const hits = caseCollisions(caseIdentityIndex, heldOutCase);
+    if (hits.length > 0) {
+      const id = heldOutCase.case_id ?? heldOutCase.id ?? "held-out";
+      return {
+        ...refuse(HELD_OUT_PREVIOUSLY_USED,
+          `HELD_OUT_PREVIOUSLY_USED:${id}-is-known-to-the-case-identity-index:${hits.map(collisionLabel).join("+")}`,
+          { previously_used_ok: false }),
+        previously_used_hits: hits, index_sha256: caseIdentityIndex.sha256 ?? null,
+      };
+    }
+  }
+
+  // The label↔pre-registration↔first-call ORDERING (Plan item 4), when the case declares itself a
+  // LABELLED new case. A case carrying none of the labelling fields is a legacy/derived Experience
+  // and is not asked for them — the REQUIREMENT for a whole new sealed set lives in
+  // `validateSealedSetBinding`; this gate is what stops a self-declared labelled case from being one
+  // whose label was written after the answer was known.
+  if (supplied(heldOutCase, "labeled_at") || supplied(heldOutCase, "labeled_by") || supplied(heldOutCase, "prereg_mtime")) {
+    const timing = validateCaseLabelTiming(heldOutCase, { nowMs });
+    if (!timing.ok) return refuse(timing.reasons[0], `CASE_LABEL_TIMING:${timing.reasons.join("+")}`, prevGate);
+  }
+
   // …and outside the candidate's whole LINEAGE — a different version of the same method having been
   // seeded from this very case makes the "hold-out" a re-run of the fitting, not a test of transfer.
   const lineage = checkLineageIsolation({ candidate, heldOutCase, registry, experiences });
   if (!lineage.ok) return { ...refuse("HELD_OUT_SHARES_LINEAGE", lineage.reason, { lineage_ok: false }), lineage: lineage.lineage, lineage_hits: lineage.hits };
-  const lineageOk = { lineage_ok: true };
+  const lineageOk = { lineage_ok: true, ...prevGate };
 
   // …and its expected verdict must be TRUE at a NAMED commit, which must predate the fix.
   const pinFields = validateEvaluationPin(heldOutCase);
@@ -1205,8 +1247,17 @@ export function recordGeneralizationVerdict(root, verdict, { ts = Date.now() } =
     // `false` = reached and failed. Never collapsed into one value (硬规则 3b).
     lineage_ok: verdict.lineage_ok === false ? false : (verdict.lineage_ok === true ? true : null),
     temporal_ok: verdict.temporal_ok === false ? false : (verdict.temporal_ok === true ? true : null),
+    // The THIRD gate reading, on the same three-valued discipline: `true` = checked against a
+    // case-identity index and not previously used, `false` = checked and previously used, `null` =
+    // no index was supplied / never reached. A `false` here can never license a promotion.
+    previously_used_ok: verdict.previously_used_ok === false ? false : (verdict.previously_used_ok === true ? true : null),
     evaluation_pin: isStr(verdict.evaluation_pin, 1) ? verdict.evaluation_pin : null,
     evaluated_commit: isStr(verdict.evaluated_commit, 1) ? verdict.evaluated_commit : null,
+    // The label digest and the index digest this verdict was produced against. `null` is its OWN
+    // value: a verdict recorded before either existed, or by a caller that named neither, says so
+    // rather than carrying a digest of nothing (硬规则 3b).
+    label_sha256: isStr(verdict.label_sha256, 1) ? verdict.label_sha256 : null,
+    index_sha256: isStr(verdict.index_sha256, 1) ? verdict.index_sha256 : null,
     promoted: verdict.promoted === true,
     retirement_reason: isStr(verdict.retirement_reason, 1) ? verdict.retirement_reason : null,
     not_evaluated_reason: isStr(verdict.not_evaluated_reason, 1) ? verdict.not_evaluated_reason : null,
@@ -1218,6 +1269,561 @@ export function recordGeneralizationVerdict(root, verdict, { ts = Date.now() } =
   const { ts: _ts, ...identity } = rec;
   const withId = { id: verdict.id ?? recordId(VERDICT_KIND, identity), ...rec };
   return appendCarrierLine(root, GENERALIZATION_VERDICTS_REL, withId, { kind: VERDICT_KIND });
+}
+
+// ── the GLOBAL CASE-IDENTITY INDEX (built BEFORE any pre-registration) ────────────────────────────
+//
+// ⛔ THE DEFECT THIS CLOSES (gap-discovery-holdout-cross-experiment-leak-and-contaminated-promotion,
+//   2026-10-12). Two methods were promoted on the SAME sealed holdout set
+//   (`labels-dt2-sealed.json`), and EIGHT of that set's nine cases had been used before: two were
+//   teaching/seed cases (one of them the seed `shared-contract-divergence` v1 was built from), four
+//   were earlier `E-HYPGEN-AB-1` holdouts, one was derived from a publicly-surfaced diagnostic, and
+//   one was a Probe/Meta case mislabelled negative. The exclusion set the round actually consulted
+//   held only ONE earlier file's cases plus the candidate's own seed provenance, and its lineage
+//   matcher compared Experience **ids**. So a case that was the same DEFECT under a different id, in
+//   a different file, or publicly discussed, was invisible.
+//
+// The fix is an INDEX OF CASE IDENTITY built from every carrier that can name a case, BEFORE any
+// pre-registration, so "was this case used before?" is answered from data rather than from whichever
+// file the round happened to remember:
+//   • every sealed label file (the caller passes the paths — the glob is never hard-coded per case);
+//   • every Experience used as a SEED by any method, at any version, across every method and its
+//     `method:<id>@<v>` lineage (the seed set is the registry's OWN derivation, reused);
+//   • every Experience in the ledger, including teaching and user cases;
+//   • every case a sealed file marks `diagnostic-public` (the publicly-surfaced cases are an
+//     INDEPENDENT leak channel — being discussed in the open is not a component identity);
+//   • every held-out case named in the generalization-verdict carrier.
+//
+// Each entry records: the case id, its component set (BASENAMES — the same defect filed from another
+// directory is the same case), its fix commit(s), the carrier it was read from and the line within
+// it, its first-use experiment, and whether it is a diagnostic-public case.
+//
+// ⛔ AN IDENTITY, NOT A PRESENCE CHECK (硬规则 3b). A case that could not be read is its OWN value
+// (`ok:false` + reason), never an empty index that reads exactly like "nothing has ever been used".
+// Dually, a collision is ENUMERATED (`{kind, source, ref, shared}` per hit) so a refusal names WHICH
+// carrier condemned the case and by which arm — never a bare boolean.
+//
+// ⛔ WHAT IS *NOT* A COLLISION CHANNEL. A verdict line that merely RECORDS a use of a case IN THE SET
+//   UNDER TEST was written by that set's own run: at pre-registration time it cannot exist, so it is
+//   not pre-existing knowledge. `caseCollisions` therefore skips the verdict entries naming the
+//   candidate set's own ids (`ownUseCaseIds`) — otherwise a set would be condemned by its own
+//   history, and the component/fix arms (the ones that catch the real leak) would never be the
+//   reason.
+
+/** Where the index lives, relative to the SHARED checkout. ⛔ NOT declared in the ledger's
+ *  `DISCOVERY_CARRIERS`: that table is the append-only LINE carriers (`repairCarrier`'s "truncate a
+ *  torn FINAL line" model addresses `.jsonl` appends), and this is a single JSON object rewritten
+ *  atomically under a lock — the same reason `INGEST_WATERMARK_REL` is declared outside that table.
+ *  The path still has exactly ONE definition. */
+export const CASE_IDENTITY_INDEX_REL = ".quay/discovery-case-identity-index.json";
+
+/** The one record kind the index object carries, so the file is self-describing on read-back. */
+export const CASE_IDENTITY_INDEX_KIND = "case-identity-index";
+
+/** Refusal code: the sealed set contains at least one case the index has already seen. */
+export const SEALED_SET_CONTAMINATED = "SEALED_SET_CONTAMINATED";
+
+/** Refusal code: a single held-out case is already in the index (defence in depth, per case). */
+export const HELD_OUT_PREVIOUSLY_USED = "HELD_OUT_PREVIOUSLY_USED";
+
+/** A case is a DIFFERENT case once fewer than this many of its components are shared. The same
+ *  threshold the lineage check states (`LINEAGE_MIN_SHARED_COMPONENTS`) — the two must not disagree
+ *  about when two case descriptions are the same defect. */
+export const MIN_SHARED_CASE_COMPONENTS = 2;
+
+/** The collision arms, as DATA, so a refusal can say which one fired and a test can enumerate them. */
+export const COLLISION_KINDS = Object.freeze([
+  "reused_case_id",              // the same case id, recorded by some other carrier
+  "shared_fix_commit",           // the same fix commit — the same patch, whatever the id
+  "shared_components",           // >= MIN_SHARED_CASE_COMPONENTS shared component basenames
+  "shared_diagnostic_component", // ONE shared component with a publicly-surfaced (diagnostic) case
+]);
+
+/** Where an index entry came from — the "which channel" half of every collision record. */
+export const CASE_SOURCE_KINDS = Object.freeze(["sealed", "ledger", "registry-seed", "verdict"]);
+
+/** The keys a sealed case may spell its component list under. A file that names no component under
+ *  any of them contributes NO components (a case about an unnamed thing is legal) — it is never
+ *  silently filled with something. */
+export const CASE_COMPONENT_KEYS = Object.freeze(["files", "a", "b", "components"]);
+
+const isDiagnosticRole = (role) => isStr(role, 1) && String(role).startsWith("diagnostic-public");
+
+/**
+ * The COMPONENT set of one case, NORMALISED to basenames. PURE.
+ *
+ * ⛔ Basenames, not paths, and that is the whole point of arm (ii) of the counterexample set: the same
+ * two files re-filed under a different directory are the same case, so a path-keyed index would pass
+ * a copy that only moved house.
+ * @returns {string[]} sorted, de-duplicated basenames
+ */
+export function caseComponentsOf(sealedCase) {
+  const out = new Set();
+  for (const k of CASE_COMPONENT_KEYS) {
+    const v = sealedCase?.[k];
+    if (!Array.isArray(v)) continue;
+    for (const x of v) if (isStr(x, 1)) out.add(basenameOf(x));
+  }
+  return [...out].sort();
+}
+
+/** The raw paths a case names (kept alongside the basenames for the record, never matched on). */
+export function caseComponentPathsOf(sealedCase) {
+  const out = [];
+  for (const k of CASE_COMPONENT_KEYS) {
+    const v = sealedCase?.[k];
+    if (!Array.isArray(v)) continue;
+    for (const x of v) if (isStr(x, 1) && !out.includes(x)) out.push(x);
+  }
+  return out;
+}
+
+/**
+ * The fix commit(s) a case records. PURE. ⛔ Only the MACHINE-READABLE form counts: `provenance` as an
+ * object carrying `fix_commit` / `fix_commits`. A case whose provenance is free TEXT names its fix in
+ * prose, and a regex over prose would be a guess wearing a reading's clothes (硬规则 4b) — so it
+ * contributes no commit and its record says so by omission rather than by a fabricated value.
+ */
+export function fixCommitsOf(sealedCase) {
+  const p = sealedCase?.provenance;
+  const out = [];
+  if (isObj(p)) {
+    if (isStr(p.fix_commit, 1)) out.push(String(p.fix_commit));
+    if (Array.isArray(p.fix_commits)) for (const c of p.fix_commits) if (isStr(c, 1)) out.push(String(c));
+  }
+  if (isStr(sealedCase?.fix_commit, 1)) out.push(String(sealedCase.fix_commit));
+  return [...new Set(out)];
+}
+
+/** The 1-based line a record's `id` occupies in a `.jsonl` carrier — `null` when it is not found or
+ *  the file cannot be read. A line number that cannot be read is `null`, never a fabricated `0`. */
+export function lineOfRecord(file, id) {
+  if (!isStr(file, 1) || !isStr(id, 1)) return null;
+  let text;
+  try { text = fs.readFileSync(file, "utf8"); } catch { return null; }
+  const lines = text.split("\n");
+  for (let i = 0; i < lines.length; i++) {
+    if (!lines[i].trim()) continue;
+    try { if (JSON.parse(lines[i])?.id === id) return i + 1; } catch { /* unparseable lines are counted elsewhere */ }
+  }
+  return null;
+}
+
+/** The experiment label of a sealed file: its parent directory (the run that owns it) — derived from
+ *  the path, never a literal, so no run's name is hand-coded into the production logic. */
+export const firstUseOfSealedPath = (p) => path.basename(path.dirname(String(p)));
+
+/**
+ * Read ONE sealed label file. Fail-closed: an unreadable / unparseable / wrongly-shaped file is its
+ * OWN value, never an empty case list (硬规则 3b).
+ * @returns {{ok:true, cases:object[], pin:string|null, note:string|null, file:string, mtime_ms:number|null}
+ *          |{ok:false, reason:string, cases:[], file:string}}
+ */
+export function readSealedSet(file) {
+  let text;
+  try { text = fs.readFileSync(file, "utf8"); }
+  catch (e) { return { ok: false, reason: `SEALED_SET_UNREADABLE:${file}:${e?.code ?? e?.message}`, cases: [], file }; }
+  let doc;
+  try { doc = JSON.parse(text); }
+  catch { return { ok: false, reason: `SEALED_SET_UNPARSEABLE:${file}`, cases: [], file }; }
+  if (!isObj(doc) || !Array.isArray(doc.cases)) {
+    return { ok: false, reason: `SEALED_SET_SHAPE:${file}-needs-{cases:[...]}`, cases: [], file };
+  }
+  let mtime_ms = null;
+  try { mtime_ms = fs.statSync(file).mtimeMs; } catch { mtime_ms = null; }
+  return { ok: true, cases: doc.cases.filter(isObj), pin: isStr(doc.pin, 1) ? doc.pin : null,
+    note: isStr(doc._note, 1) ? doc._note : null, file, mtime_ms };
+}
+
+/** One index ENTRY per case per source. The shape is fixed (same key order everywhere) so the index's
+ *  sha256 is content-addressed over the KNOWLEDGE rather than over object key order. PURE. */
+const identityEntry = ({ case_id, components = [], component_paths = [], fix_commits = [], source, source_kind, source_line = null, first_use = null, diagnostic_public = false }) => ({
+  case_id: isStr(case_id, 1) ? String(case_id) : null,
+  components: [...new Set(components)].sort(),
+  component_paths: [...new Set(component_paths)].sort(),
+  fix_commits: [...new Set(fix_commits)].sort(),
+  source,
+  source_kind,
+  source_line,
+  first_use,
+  diagnostic_public: diagnostic_public === true,
+});
+
+/** The index entry for ONE sealed case. PURE. */
+export function sealedCaseEntry(sealedCase, { source, source_kind = "sealed", source_line = null, first_use = null, source_file = null } = {}) {
+  const file = source_file ?? source;
+  return identityEntry({
+    case_id: sealedCase?.id ?? sealedCase?.case_id ?? null,
+    components: caseComponentsOf(sealedCase),
+    component_paths: caseComponentPathsOf(sealedCase),
+    fix_commits: fixCommitsOf(sealedCase),
+    source, source_kind, source_line, first_use,
+    diagnostic_public: isDiagnosticRole(sealedCase?.role),
+  });
+}
+
+/** The index entry for ONE Experience (the ledger's own shape). PURE. */
+export function experienceCaseEntry(experience, { source, source_kind = "ledger", source_line = null, first_use = null } = {}) {
+  return identityEntry({
+    case_id: experience?.case_id ?? experience?.id ?? null,
+    components: (Array.isArray(experience?.components) ? experience.components : []).filter((c) => isStr(c, 1)).map(basenameOf),
+    component_paths: (Array.isArray(experience?.components) ? experience.components : []).filter((c) => isStr(c, 1)),
+    fix_commits: [],
+    source, source_kind, source_line, first_use,
+    diagnostic_public: false,
+  });
+}
+
+/**
+ * Build the GLOBAL CASE-IDENTITY INDEX. Reads the five sources named in the header and returns
+ * `{ok, index, entries, sha256}`; ANY unreadable source is a refusal with its own reason, never a
+ * shorter index (硬规则 3b — an index missing a source answers "was this used?" with "no").
+ *
+ * Every source can be INJECTED (`sealedSets`, `ledger`, `registry`, `verdicts`) so the builder is
+ * testable without a filesystem, while the default reads the real carriers.
+ *
+ * @param {string} root  the caller's root; the carriers resolve to the SHARED checkout
+ * @param {object} [o]
+ * @param {string[]} [o.sealedSetPaths]  sealed label files to read from disk (the glob is the
+ *   CALLER's — the builder never guesses a directory)
+ * @param {{source:string, cases:object[], first_use?:string, file?:string}[]} [o.sealedSets]
+ *   already-read sealed sets (injected; the shapes `readSealedSet` returns)
+ * @param {object} [o.ledger]     a `readExperienceLedger(root)` value
+ * @param {object} [o.registry]   a `readMethodRegistry(root, {history:true})` value
+ * @param {object} [o.verdicts]   a `readGeneralizationVerdicts(root)` value
+ * @param {number} [o.nowMs]
+ */
+export function buildCaseIdentityIndex(root, { sealedSetPaths = [], sealedSets = [], ledger = undefined, registry = undefined, verdicts = undefined, nowMs = Date.now() } = {}) {
+  const entries = [];
+  const sources = [];
+
+  for (const p of sealedSetPaths) {
+    const read = readSealedSet(p);
+    if (!read.ok) return { ok: false, reason: read.reason, entries: [], index: null, sha256: null };
+    sources.push(read.file);
+    const rel = path.isAbsolute(String(p)) ? String(p) : String(p);
+    read.cases.forEach((c, i) => entries.push(sealedCaseEntry(c, {
+      source: `sealed:${rel}`, source_line: i + 1, first_use: firstUseOfSealedPath(read.file), source_file: read.file,
+    })));
+  }
+
+  for (const s of sealedSets) {
+    if (!isStr(s?.source, 1)) return { ok: false, reason: "SEALED_SET_SOURCE_REQUIRED", entries: [], index: null, sha256: null };
+    sources.push(s.source);
+    const cases = Array.isArray(s.cases) ? s.cases.filter(isObj) : [];
+    cases.forEach((c, i) => entries.push(sealedCaseEntry(c, {
+      source: s.source, source_line: i + 1, first_use: isStr(s.first_use, 1) ? s.first_use : s.source, source_file: s.file ?? null,
+    })));
+  }
+
+  const led = ledger === undefined ? readExperienceLedger(root) : ledger;
+  if (!led.ok) {
+    return { ok: false, reason: `CASE_INDEX_LEDGER_UNREADABLE:${led.malformed_lines}-unparseable-line(s)-in-${EXPERIENCE_LEDGER_REL}`, entries: [], index: null, sha256: null };
+  }
+  sources.push(`ledger:${EXPERIENCE_LEDGER_REL}`);
+  const ledgerPath = carrierFile(root, EXPERIENCE_LEDGER_REL);
+  for (const e of led.records) {
+    entries.push(experienceCaseEntry(e, {
+      source: `ledger:${EXPERIENCE_LEDGER_REL}`, source_line: lineOfRecord(ledgerPath, e.id), first_use: "ledger",
+    }));
+  }
+
+  const reg = registry === undefined ? readMethodRegistry(root, { history: true }) : registry;
+  if (!reg.ok) {
+    return { ok: false, reason: `CASE_INDEX_REGISTRY_UNREADABLE:${reg.malformed_lines}-unparseable-line(s)-in-${DISCOVERY_CARRIERS["discovery-method-registry"].rel}`, entries: [], index: null, sha256: null };
+  }
+  // ⛔ A registry read WITHOUT `history` returns `history: null` — reading that as "no seeds" would
+  //   drop the whole seed source while the index still reported `ok` (硬规则 3b: a caller that asked
+  //   the wrong question must be told, not quietly served a shorter answer).
+  if (!Array.isArray(reg.history)) {
+    return { ok: false, reason: "CASE_INDEX_REGISTRY_HISTORY_REQUIRED:read-the-registry-with-{history:true}-so-every-version's-seeds-are-in-the-index", entries: [], index: null, sha256: null };
+  }
+  const history = reg.history;
+  const seedSources = new Set();
+  for (const rec of history) {
+    if (!isObj(rec)) continue;
+    // The SEED set is the registry module's OWN derivation (`provenanceExperiences` resolves a
+    // provenance entry on the record's `id` OR its `case_id`), reused rather than re-derived.
+    for (const e of provenanceExperiences(rec, led.records)) {
+      const src = `registry-seed:${rec.method_id}@${rec.version}`;
+      seedSources.add(src);
+      entries.push(experienceCaseEntry(e, { source: src, source_kind: "registry-seed", first_use: `${rec.method_id}@${rec.version}` }));
+    }
+  }
+  for (const s of seedSources) sources.push(s);
+
+  const ver = verdicts === undefined ? readGeneralizationVerdicts(root) : verdicts;
+  // A partially-readable verdict carrier (`ok:false` with `reason` OR with unparseable lines) refuses
+  // the build: the held-out cases it names are one of the five sources, and an index missing them
+  // would answer "was this used?" with "no" (硬规则 3b).
+  if (!ver.ok) {
+    return { ok: false, reason: `CASE_INDEX_VERDICTS_UNREADABLE:${ver.reason ?? `${ver.malformed_lines}-unparseable-line(s)-in-${GENERALIZATION_VERDICTS_REL}`}`, entries: [], index: null, sha256: null };
+  }
+  sources.push(`verdict:${GENERALIZATION_VERDICTS_REL}`);
+  const verdictPath = verdictsFile(root);
+  for (const v of ver.records ?? []) {
+    if (!isObj(v) || !isStr(v.held_out_case_id, 1)) continue;
+    entries.push(identityEntry({
+      case_id: v.held_out_case_id, components: [], component_paths: [], fix_commits: [],
+      source: `verdict:${GENERALIZATION_VERDICTS_REL}`, source_kind: "verdict",
+      source_line: lineOfRecord(verdictPath, v.id), first_use: "verdict", diagnostic_public: false,
+    }));
+  }
+
+  // Deterministic order ⇒ a stable sha256 over the KNOWLEDGE (the same discipline the verdict id
+  // uses: what is hashed is the content, never the moment it was read).
+  const sorted = entries.slice().sort((a, b) =>
+    (a.source < b.source ? -1 : a.source > b.source ? 1 : 0) ||
+    (String(a.case_id) < String(b.case_id) ? -1 : String(a.case_id) > String(b.case_id) ? 1 : 0));
+  const index = {
+    kind: CASE_IDENTITY_INDEX_KIND,
+    sources: [...new Set(sources)].sort(),
+    counts: {
+      entries: sorted.length,
+      cases: new Set(sorted.map((e) => e.case_id).filter((c) => isStr(c, 1))).size,
+      diagnostic_public: sorted.filter((e) => e.diagnostic_public).length,
+      components: new Set(sorted.flatMap((e) => e.components)).size,
+    },
+    entries: sorted,
+  };
+  index.sha256 = caseIndexSha256(index);
+  return { ok: true, index, entries: sorted, sha256: index.sha256 };
+}
+
+/** The index's content address: its sources + entries, NEVER `built_at` or the sha itself — so two
+ *  builds over the same knowledge agree, and a changed entry moves it. */
+export const caseIndexSha256 = (index) => sha256(JSON.stringify({ sources: index?.sources ?? [], entries: index?.entries ?? [] }));
+
+/** Absolute path of the index under the SHARED checkout (null when unresolvable). */
+export const caseIdentityIndexFile = (root) => carrierFile(root, CASE_IDENTITY_INDEX_REL);
+
+/** Read the persisted index back. An absent file is its OWN value (硬规则 3b): "no index has been
+ *  built" must not read as "an index that knows nothing". */
+export function readCaseIdentityIndex(root) {
+  const file = caseIdentityIndexFile(root);
+  if (file === null) { const rr = resolveCarrierRoot(root); return { ok: false, reason: rr.reason, index: null, file: null }; }
+  let text;
+  try { text = fs.readFileSync(file, "utf8"); }
+  catch (e) { return { ok: false, reason: `CASE_INDEX_MISSING:${CASE_IDENTITY_INDEX_REL}:${e?.code ?? e?.message}`, index: null, file }; }
+  let doc;
+  try { doc = JSON.parse(text); }
+  catch { return { ok: false, reason: `CASE_INDEX_UNPARSEABLE:${CASE_IDENTITY_INDEX_REL}`, index: null, file }; }
+  if (!isObj(doc) || !Array.isArray(doc.entries)) return { ok: false, reason: `CASE_INDEX_SHAPE:${CASE_IDENTITY_INDEX_REL}`, index: null, file };
+  const expected = caseIndexSha256(doc);
+  // A recorded sha that disagrees with the content is REPORTED, not silently trusted: the index is
+  // what a refusal cites, so "the file was edited after it was written" must be visible.
+  return { ok: true, index: doc, file, sha256: doc.sha256 ?? null, sha256_matches: doc.sha256 === expected };
+}
+
+/**
+ * Persist the index under the SHARED checkout, atomically (tmp + rename).
+ *
+ * ⛔ No lock, deliberately, and the reason is structural rather than convenient: the index is a
+ *   DERIVED SNAPSHOT of the carriers, not an append-only log. `rename` is atomic, so two concurrent
+ *   builders each land a WHOLE file (last writer wins) and a reader can never see a half-written
+ *   index. A lost update therefore costs one redundant rebuild, which the next pre-registration
+ *   performs anyway — whereas a lock that is not the carrier table's own would be a second locking
+ *   discipline to keep in sync (硬规则 5b). The append-only line carriers keep their lock.
+ */
+export function writeCaseIdentityIndex(root, index, { now = Date.now() } = {}) {
+  const file = caseIdentityIndexFile(root);
+  if (file === null) { const rr = resolveCarrierRoot(root); return { ok: false, reason: rr.reason, file: null }; }
+  if (!isObj(index) || !Array.isArray(index.entries)) return { ok: false, reason: "CASE_INDEX_SHAPE:needs-{entries:[...]}", file };
+  const doc = { ...index, sha256: caseIndexSha256(index), written_at: new Date(now).toISOString() };
+  try {
+    fs.mkdirSync(path.dirname(file), { recursive: true });
+    const tmp = `${file}.tmp-${process.pid}`;
+    fs.writeFileSync(tmp, JSON.stringify(doc, null, 1) + "\n", "utf8");
+    fs.renameSync(tmp, file);
+  } catch (e) {
+    return { ok: false, reason: `CASE_INDEX_WRITE_FAILED:${e?.code ?? e?.message}`, file };
+  }
+  return { ok: true, file, sha256: doc.sha256, index: doc };
+}
+
+/**
+ * The collisions between ONE candidate case and the index. PURE. Returns EVERY hit (硬规则 3 — a
+ * refusal enumerates what matched), each `{kind, source, source_kind, ref, shared?, first_use?}`.
+ *
+ * @param {object} index
+ * @param {object} candidate  a sealed case (`files`/`a`/`b` + id + provenance) or an Experience
+ * @param {object} [opts]
+ * @param {string[]} [opts.ownUseCaseIds]  case ids belonging to the set UNDER TEST. A VERDICT entry
+ *   that merely records a use of one of them was written by the candidate set's own run and is not
+ *   pre-existing knowledge (see the header) — those entries are skipped. Ledger / sealed /
+ *   registry-seed entries are NEVER skipped: those record the case being used as material, which is
+ *   exactly the leak the index exists to catch.
+ */
+export function caseCollisions(index, candidate, { ownUseCaseIds = [] } = {}) {
+  const own = new Set((Array.isArray(ownUseCaseIds) ? ownUseCaseIds : []).filter((x) => isStr(x, 1)));
+  const caseId = candidate?.id ?? candidate?.case_id ?? null;
+  const components = caseComponentsOf(candidate);
+  const fixCommits = fixCommitsOf(candidate);
+  const hits = [];
+  for (const e of (Array.isArray(index?.entries) ? index.entries : [])) {
+    if (!isObj(e)) continue;
+    if (e.source_kind === "verdict" && isStr(e.case_id, 1) && own.has(e.case_id)) continue;
+    const shared = components.filter((c) => e.components.includes(c));
+    if (isStr(caseId, 1) && e.case_id === caseId) {
+      hits.push({ kind: "reused_case_id", source: e.source, source_kind: e.source_kind, ref: e.case_id, first_use: e.first_use });
+    }
+    const sharedCommits = fixCommits.filter((f) => e.fix_commits.includes(f));
+    if (sharedCommits.length > 0) {
+      hits.push({ kind: "shared_fix_commit", source: e.source, source_kind: e.source_kind, ref: e.case_id, shared: sharedCommits, first_use: e.first_use });
+    }
+    if (shared.length >= MIN_SHARED_CASE_COMPONENTS) {
+      hits.push({ kind: "shared_components", source: e.source, source_kind: e.source_kind, ref: e.case_id, shared, first_use: e.first_use });
+    } else if (e.diagnostic_public && shared.length >= 1) {
+      // ⛔ The threshold is ONE here, deliberately and only for the publicly-surfaced cases. The
+      //   >= 2 arm assumes the collision channel is COMPONENT identity; a case that was discussed in
+      //   the open reached the labeller through a channel no component set can represent, so ANY
+      //   shared component means the new case may have been read off it.
+      hits.push({ kind: "shared_diagnostic_component", source: e.source, source_kind: e.source_kind, ref: e.case_id, shared, first_use: e.first_use });
+    }
+  }
+  return hits;
+}
+
+/** One collision, rendered for a refusal message: `kind:ref@source`. */
+export const collisionLabel = (h) => `${h.kind}:${h.ref ?? "?"}@${h.source}${h.shared?.length ? `(${h.shared.join(",")})` : ""}`;
+
+/**
+ * The PRE-REGISTRATION gate. PURE over its inputs, ZERO model calls — a sealed set is refused before
+ * any call is made, so a contaminated set can never buy a single verifier turn.
+ *
+ * @returns {{ok:boolean, refusal_code:string|null, reason:string|null, evaluated:number,
+ *            colliding_cases:number, collisions:object[], model_calls:0, index_sha256:string|null}}
+ */
+export function checkSealedSetContamination(index, { sealedSet = null, cases = null, source = null } = {}) {
+  const list = Array.isArray(cases) ? cases.filter(isObj) : (Array.isArray(sealedSet?.cases) ? sealedSet.cases.filter(isObj) : null);
+  if (list === null) {
+    return { ok: false, refusal_code: "SEALED_SET_INPUT_MISSING", reason: "SEALED_SET_INPUT_MISSING:needs-cases-or-a-sealed-set", evaluated: 0, colliding_cases: 0, collisions: [], model_calls: 0, index_sha256: index?.sha256 ?? null };
+  }
+  if (index === null || index === undefined || !Array.isArray(index?.entries)) {
+    // ⛔ A missing index is its OWN refusal, never a pass: "I could not check" must not be shaped
+    //   like "checked and clean" (硬规则 3b).
+    return { ok: false, refusal_code: "CASE_INDEX_UNAVAILABLE", reason: "CASE_INDEX_UNAVAILABLE:no-index-was-supplied-so-contamination-cannot-be-decided", evaluated: list.length, colliding_cases: 0, collisions: [], model_calls: 0, index_sha256: null };
+  }
+  const ownUseCaseIds = list.map((c) => c.id ?? c.case_id).filter((x) => isStr(x, 1));
+  const table = [];
+  const collisions = [];
+  for (const c of list) {
+    const hits = caseCollisions(index, c, { ownUseCaseIds });
+    if (hits.length === 0) continue;
+    const caseId = c.id ?? c.case_id ?? "(unnamed-case)";
+    table.push({ case_id: caseId, source, collisions: hits });
+    for (const h of hits) collisions.push({ case_id: caseId, ...h });
+  }
+  if (collisions.length === 0) {
+    return { ok: true, refusal_code: null, reason: null, evaluated: list.length, colliding_cases: 0, collisions: [], model_calls: 0, index_sha256: index.sha256 ?? null };
+  }
+  const detail = table.map((t) => `${t.case_id}[${t.collisions.map(collisionLabel).join("+")}]`).join(",");
+  return {
+    ok: false, refusal_code: SEALED_SET_CONTAMINATED,
+    reason: `${SEALED_SET_CONTAMINATED}:${table.length}-of-${list.length}-case(s)-have-been-used-before:${detail}`,
+    evaluated: list.length, colliding_cases: table.length, collisions, table,
+    model_calls: 0, index_sha256: index.sha256 ?? null,
+  };
+}
+
+// ── binding a NEW case to its label, its pin, and its result ─────────────────────────────────────
+//
+// Plan item 4. A sealed case is only evidence about a METHOD if three things are pinned: WHERE its
+// expected verdict is true (`evaluation_pin` / `fix_commit`), WHO labelled it independently
+// (`labeled_by`), and WHEN — the label must PRECEDE the pre-registration, which must precede the
+// first model call. Without the ordering the sequence is unfalsifiable: a verdict can be written
+// after seeing the method's answer and still look identical on read-back.
+
+/**
+ * The content address of a held-out case's LABEL — the exact claim the verdict was judged against:
+ * which case, over which components, pinned at which commit, labelled by whom and when. The ORDERING
+ * proves the label predates the run; this digest proves WHICH label the run read, so a case whose
+ * components or pin were edited afterwards no longer matches the verdict that cites it.
+ */
+export const caseLabelSha256 = (heldOutCase) => sha256(JSON.stringify({
+  case_id: heldOutCase?.case_id ?? heldOutCase?.id ?? null,
+  components: caseComponentsOf(heldOutCase),
+  evaluation_pin: heldOutCase?.evaluation_pin ?? null,
+  fix_commit: heldOutCase?.fix_commit ?? null,
+  labeled_by: heldOutCase?.labeled_by ?? null,
+  labeled_at: heldOutCase?.labeled_at ?? null,
+}));
+
+export const NO_LABELED_BY = "NO_LABELED_BY";
+export const NO_LABELED_AT = "NO_LABELED_AT";
+export const NO_PREREG_MTIME = "NO_PREREG_MTIME";
+export const LABEL_AFTER_PREREG = "LABEL_AFTER_PREREG";
+export const PREREG_AFTER_FIRST_CALL = "PREREG_AFTER_FIRST_CALL";
+
+/** Parse an ISO-8601 string / epoch-ms number to ms; `null` when it cannot be read. ⛔ An UNREADABLE
+ *  timestamp is `null`, never `0` or `NaN` — `0` would compare as "long ago" and quietly pass. */
+export function msOf(v) {
+  if (typeof v === "number" && Number.isFinite(v)) return v;
+  if (isStr(v, 4)) { const t = Date.parse(String(v)); return Number.isFinite(t) ? t : null; }
+  return null;
+}
+
+/**
+ * The label-timing gate for ONE case. PURE. Distinct code per failure (硬规则 3): a missing labeller,
+ * a missing label time, a label written after the pre-registration, and a pre-registration written
+ * after the first model call are four different defects.
+ *
+ * @param {object} heldOutCase  must carry `labeled_by` (an independent labeller id) and `labeled_at`
+ *   when it is a NEW sealed case; `prereg_mtime` is the pre-registration time of its sealed set.
+ * @param {object} [o]
+ * @param {number} [o.preregMtimeMs]  set-level override for `prereg_mtime`
+ * @param {number} [o.nowMs]          the FIRST MODEL CALL's time
+ */
+export function validateCaseLabelTiming(heldOutCase, { preregMtimeMs = null, nowMs = Date.now() } = {}) {
+  const reasons = [];
+  const labeledAt = msOf(heldOutCase?.labeled_at);
+  const preregAt = Number.isFinite(preregMtimeMs) ? preregMtimeMs : msOf(heldOutCase?.prereg_mtime ?? heldOutCase?.preregistered_at);
+  const labeledBy = heldOutCase?.labeled_by;
+  if (!isStr(labeledBy, 1)) reasons.push(NO_LABELED_BY);
+  if (labeledAt === null) reasons.push(NO_LABELED_AT);
+  if (preregAt === null) reasons.push(NO_PREREG_MTIME);
+  if (reasons.length) return { ok: false, reasons, labeled_at: labeledAt, prereg_mtime: preregAt };
+  if (labeledAt > preregAt) reasons.push(LABEL_AFTER_PREREG);
+  if (preregAt > nowMs) reasons.push(PREREG_AFTER_FIRST_CALL);
+  return { ok: reasons.length === 0, reasons, labeled_at: labeledAt, prereg_mtime: preregAt };
+}
+
+/**
+ * The per-case BINDING gate for a whole sealed set: each case must name its labeller and label time,
+ * its `evaluation_pin`, and (for a POSITIVE case) its `fix_commit`, and its `labeled_at` must
+ * precede the set's pre-registration mtime, which must precede the first model call. ZERO model
+ * calls. PURE over its inputs.
+ *
+ * @param {object[]} cases
+ * @param {object} [o]
+ * @param {number} [o.preregMtimeMs]  the sealed set's pre-registration time (its file mtime)
+ * @param {number} [o.nowMs]          the first model call's time
+ * @param {(a:string,b:string)=>boolean|null} [o.isAncestor]  when supplied, a POSITIVE case's
+ *   `fix_commit` must DESCEND from its `evaluation_pin` (the temporal binding, checked here so a
+ *   mis-pinned case is refused before registration rather than at verification time).
+ */
+export function validateSealedSetBinding(cases, { preregMtimeMs = null, nowMs = Date.now(), isAncestor = null } = {}) {
+  const list = (Array.isArray(cases) ? cases : []).filter(isObj);
+  const reasons = [];
+  const table = [];
+  for (const c of list) {
+    const caseId = c.id ?? c.case_id ?? "(unnamed-case)";
+    const rs = [];
+    const timing = validateCaseLabelTiming(c, { preregMtimeMs, nowMs });
+    rs.push(...timing.reasons);
+    if (!isStr(c.evaluation_pin, 1)) rs.push("SEALED_CASE_NO_EVALUATION_PIN");
+    const positive = isPositiveCase(c.role);
+    if (positive && !isStr(c.fix_commit, 1) && fixCommitsOf(c).length === 0) rs.push("SEALED_CASE_NO_FIX_COMMIT");
+    const fix = isStr(c.fix_commit, 1) ? c.fix_commit : fixCommitsOf(c)[0] ?? null;
+    if (typeof isAncestor === "function" && isStr(fix, 1) && isStr(c.evaluation_pin, 1)) {
+      const r = isAncestor(fix, c.evaluation_pin);
+      if (r === true) rs.push("SEALED_CASE_FIX_NOT_DESCENDANT_OF_PIN");
+      else if (r === null) rs.push("SEALED_CASE_PIN_UNRESOLVED");
+    }
+    table.push({ case_id: caseId, ok: rs.length === 0, reasons: rs });
+    for (const r of rs) reasons.push(`${r}:${caseId}`);
+  }
+  return { ok: reasons.length === 0, reasons, table, evaluated: list.length, model_calls: 0 };
 }
 
 // ── metrics (recorded, never asserted) ────────────────────────────────────────────────────────────

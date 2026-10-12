@@ -32,6 +32,14 @@ import {
   isPositiveCase, LINEAGE_MIN_SHARED_COMPONENTS,
   readGeneralizationVerdicts, recordGeneralizationVerdict, verdictsFile, VERDICT_KIND,
   APPLIES_VOCAB, OUTCOME_NOT_APPLICABLE, evidencePackForPin,
+  // the GLOBAL CASE-IDENTITY INDEX (task gap-discovery-holdout-cross-experiment-leak-and-
+  // contaminated-promotion): one identity per case, built from every carrier that can name one.
+  CASE_IDENTITY_INDEX_REL, SEALED_SET_CONTAMINATED, HELD_OUT_PREVIOUSLY_USED,
+  MIN_SHARED_CASE_COMPONENTS, LABEL_AFTER_PREREG, PREREG_AFTER_FIRST_CALL,
+  caseComponentsOf, caseCollisions, checkSealedSetContamination, buildCaseIdentityIndex,
+  caseIndexSha256, writeCaseIdentityIndex, readCaseIdentityIndex, caseIdentityIndexFile,
+  readSealedSet, validateCaseLabelTiming, validateSealedSetBinding, caseLabelSha256, COLLISION_KINDS,
+  firstUseOfSealedPath,
 } from "../../docs/analysis/discovery-reflection.mjs";
 import { GENERALIZATION_VERDICTS_REL } from "../../docs/analysis/discovery-experience-ledger.mjs";
 import { subjectKey } from "../../docs/analysis/architecture-evidence-store.mjs";
@@ -945,4 +953,357 @@ test("FIX(c-evidence-pack): the APPLICABILITY step is asked FIRST, and the promp
   // The method's OWN applicability is shown — the gate is answered against the method's declared domain,
   // not against the verifier's opinion of the files.
   assert.ok(p.includes("a verdict record with an opaque evidence pointer"));
+});
+
+// ══════════════════════════════════════════════════════════════════════════════════════════════════
+// THE GLOBAL CASE-IDENTITY INDEX (task gap-discovery-holdout-cross-experiment-leak-and-contaminated-
+// promotion). Two methods were promoted on a sealed set in which eight of nine cases had been used
+// before, and nothing in the pipeline could see it: the exclusion set held one earlier file plus the
+// candidate's own seed provenance, and lineage matched on Experience *ids*. These cases pin the two
+// halves of the fix — ONE identity per case built BEFORE pre-registration, and a per-case refusal as
+// defence in depth. Every case below makes ZERO model calls.
+// ══════════════════════════════════════════════════════════════════════════════════════════════════
+
+/** A synthetic sealed case. ⛔ Never a real run's case: the index is exercised over DATA, and no test
+ *  needs a real id or a real component basename to do it (the production source must name neither). */
+const sealedCaseFixture = (over = {}) => ({
+  id: "CASE-fixture-alpha",
+  role: "holdout-H",
+  files: ["fixture-alpha.ts", "fixture-beta.ts"],
+  provenance: { fix_commit: "f".repeat(40) },
+  ...over,
+});
+
+/** An index over exactly the entries a test hands it — `buildCaseIdentityIndex` over injected,
+ *  empty carriers, so nothing of the real repo leaks into the fixture. */
+const mkIndex = (root, { sealedSets = [], ledgerRecords = [], registryHistory = [], verdictRecords = [] } = {}) =>
+  buildCaseIdentityIndex(root, {
+    sealedSets,
+    ledger: { ok: true, records: ledgerRecords, malformed_lines: 0 },
+    registry: { ok: true, history: registryHistory, latest: [], malformed_lines: 0 },
+    verdicts: { ok: true, records: verdictRecords, malformed_lines: 0 },
+  });
+
+/** A candidate method (any method — the index check does not read the candidate). */
+const anyCandidate = () => methodFixture({ method_id: "fixture-method", version: 1, provenance_evidence: ["experience-inbatch000000"] });
+
+/** A held-out Experience the caller can shape freely; `evaluation_pin` is present so the refusal under
+ *  test is never masked by the pin gate. */
+const heldOutFixture = (over = {}) => expFixture({
+  id: "experience-heldout0000000", case_id: "EXP-heldout", role: "confirmed-negative",
+  source_ref: "outcome-heldout00000000", components: ["plugin/scripts/fixture-alpha.ts", "plugin/scripts/fixture-beta.ts"],
+  evaluation_pin: "1".repeat(40), ...over,
+});
+
+test("AC(a): a case sharing >= REQUIRED components with a case in a DIFFERENT sealed file ⇒ HELD_OUT_PREVIOUSLY_USED", async () => {
+  const root = mkTmp();
+  const otherSource = "sealed:/fixtures/earlier/labels-earlier-sealed.json";
+  const built = mkIndex(root, { sealedSets: [{ source: otherSource, first_use: "earlier", cases: [sealedCaseFixture()] }] });
+  assert.equal(built.ok, true, built.reason);
+  assert.equal(MIN_SHARED_CASE_COMPONENTS, 2, "the threshold is stated, not assumed");
+
+  const heldOut = heldOutFixture();     // a DIFFERENT case id, the SAME two components
+  const hits = caseCollisions(built.index, heldOut);
+  assert.deepEqual(hits.map((h) => h.kind), ["shared_components"]);
+  assert.equal(hits[0].source, otherSource, "the refusal names WHICH carrier condemned the case");
+  assert.deepEqual(hits[0].shared, ["fixture-alpha.ts", "fixture-beta.ts"]);
+
+  const counter = { calls: 0 };
+  const r = await validateGeneralization({
+    candidate: anyCandidate(), heldOutCase: heldOut, model: stubModel({ verdict: "refuted" }, counter),
+    budget: {}, pinDir: strippedTmp(), caseIdentityIndex: built.index,
+  });
+  assert.equal(counter.calls, 0, "a previously-used case spends ZERO model calls");
+  assert.equal(r.ok, false);
+  assert.equal(r.refusal_code, HELD_OUT_PREVIOUSLY_USED);
+  assert.equal(r.outcome, "not-evaluated");
+  assert.equal(r.promoted, false);
+  assert.equal(r.candidate_after.status, "draft", "a refusal NEVER retires the method");
+  assert.equal(r.previously_used_ok, false, "the gate ran and FAILED");
+  assert.equal(r.lineage_ok, null, "…and the lineage gate was never reached (null, never false)");
+
+  // NEGATIVE CONTROL on the SAME predicate: ONE shared component is below the threshold, so the same
+  // shape is NOT refused for prior use — it gets as far as the verifier.
+  const oneShared = heldOutFixture({ components: ["plugin/scripts/fixture-alpha.ts", "plugin/scripts/fixture-novel.ts"] });
+  assert.deepEqual(caseCollisions(built.index, oneShared), []);
+  const ok = await validateGeneralization({
+    candidate: anyCandidate(), heldOutCase: oneShared, model: stubModel({ verdict: "refuted" }), budget: {},
+    pinDir: strippedTmp(), caseIdentityIndex: built.index,
+  });
+  assert.equal(ok.outcome, "evaluated");
+  assert.equal(ok.refusal_code, null);
+});
+
+test("AC(b): a case sharing ONLY a fix commit with an indexed case ⇒ refused", async () => {
+  const root = mkTmp();
+  const built = mkIndex(root, { sealedSets: [{ source: "sealed:/fixtures/earlier/labels-earlier-sealed.json", cases: [
+    sealedCaseFixture({ id: "CASE-other-fix", files: ["fixture-unrelated.ts"], provenance: { fix_commit: "a".repeat(40) } }),
+  ] }] });
+  // A different id AND a disjoint component set — the fix commit is the only thing that ties them.
+  const heldOut = heldOutFixture({ case_id: "EXP-heldout-fix", components: ["plugin/scripts/fixture-novel.ts"], fix_commit: "a".repeat(40) });
+  const hits = caseCollisions(built.index, heldOut);
+  assert.deepEqual(hits.map((h) => h.kind), ["shared_fix_commit"]);
+  assert.deepEqual(hits[0].shared, ["a".repeat(40)]);
+
+  const counter = { calls: 0 };
+  const r = await validateGeneralization({
+    candidate: anyCandidate(), heldOutCase: heldOut, model: stubModel({ verdict: "refuted" }, counter),
+    budget: {}, pinDir: strippedTmp(), caseIdentityIndex: built.index,
+  });
+  assert.equal(r.refusal_code, HELD_OUT_PREVIOUSLY_USED);
+  assert.equal(counter.calls, 0);
+});
+
+test("AC(c): a case matching an EARLIER version's seed of a DIFFERENT method's lineage ⇒ refused", async () => {
+  const root = mkTmp();
+  const seed = expFixture({ id: "experience-seed00000000001", case_id: "EXP-seed-c",
+    components: ["plugin/scripts/fixture-alpha.ts", "plugin/scripts/fixture-gamma.ts"] });
+  const built = mkIndex(root, {
+    ledgerRecords: [seed],
+    // A method the candidate has nothing to do with; v1 was seeded from `seed`.
+    registryHistory: [{ method_id: "unrelated-method", version: 1, provenance_evidence: [seed.id] }],
+  });
+  const heldOut = heldOutFixture({ case_id: "EXP-heldout-c", components: ["plugin/scripts/fixture-alpha.ts", "plugin/scripts/fixture-gamma.ts"] });
+  const hits = caseCollisions(built.index, heldOut);
+  // ⛔ The SEED arm is what makes this a lineage leak rather than "it is in the ledger": the source
+  //    names the method version whose fitting material this case was.
+  const seedHit = hits.find((h) => h.source === "registry-seed:unrelated-method@1");
+  assert.ok(seedHit, `expected a registry-seed hit, got ${JSON.stringify(hits)}`);
+  assert.equal(seedHit.source_kind, "registry-seed");
+  assert.equal(seedHit.first_use, "unrelated-method@1");
+
+  const counter = { calls: 0 };
+  const r = await validateGeneralization({
+    candidate: anyCandidate(), heldOutCase: heldOut, model: stubModel({ verdict: "refuted" }, counter),
+    budget: {}, pinDir: strippedTmp(), caseIdentityIndex: built.index,
+  });
+  assert.equal(r.refusal_code, HELD_OUT_PREVIOUSLY_USED);
+  assert.equal(counter.calls, 0);
+});
+
+test("AC(d): a sealed set with ONE colliding case ⇒ SEALED_SET_CONTAMINATED naming it (zero model calls)", () => {
+  const root = mkTmp();
+  const built = mkIndex(root, { sealedSets: [{ source: "sealed:/fixtures/earlier/labels-earlier-sealed.json", cases: [sealedCaseFixture()] }] });
+  const clean = sealedCaseFixture({ id: "CASE-fresh-1", files: ["fixture-novel.ts", "fixture-novel-2.ts"], provenance: { fix_commit: "b".repeat(40) } });
+  const dirty = sealedCaseFixture({ id: "CASE-fresh-2" });   // collides on the two components
+
+  const refused = checkSealedSetContamination(built.index, { sealedSet: { cases: [clean, dirty] } });
+  assert.equal(refused.ok, false);
+  assert.equal(refused.refusal_code, SEALED_SET_CONTAMINATED);
+  assert.equal(refused.evaluated, 2, "the count of cases EXAMINED is reported");
+  assert.equal(refused.colliding_cases, 1, "…and how many of them collided");
+  assert.equal(refused.model_calls, 0, "pre-registration refusal is free");
+  assert.equal(refused.index_sha256, built.index.sha256);
+  assert.deepEqual(refused.table.map((t) => t.case_id), ["CASE-fresh-2"], "only the colliding case is listed");
+  assert.match(refused.reason, /^SEALED_SET_CONTAMINATED:/);
+  assert.ok(refused.reason.includes("CASE-fresh-2"));
+  assert.ok(refused.reason.includes("shared_components"));
+  assert.ok(!refused.reason.includes("CASE-fresh-1"), "the clean case is not named");
+
+  // An index that was never supplied is its OWN refusal, never a pass (硬规则 3b).
+  const noIndex = checkSealedSetContamination(null, { sealedSet: { cases: [dirty] } });
+  assert.equal(noIndex.ok, false);
+  assert.equal(noIndex.refusal_code, "CASE_INDEX_UNAVAILABLE");
+});
+
+test("AC(e): a genuinely unseen case is ACCEPTED — the rule is not 'refuse everything'", () => {
+  const root = mkTmp();
+  const built = mkIndex(root, { sealedSets: [{ source: "sealed:/fixtures/earlier/labels-earlier-sealed.json", cases: [sealedCaseFixture()] }] });
+  const fresh = sealedCaseFixture({ id: "CASE-fresh", files: ["fixture-novel.ts", "fixture-novel-2.ts"], provenance: { fix_commit: "c".repeat(40) } });
+  assert.deepEqual(caseCollisions(built.index, fresh), []);
+  const res = checkSealedSetContamination(built.index, { sealedSet: { cases: [fresh] } });
+  assert.equal(res.ok, true);
+  assert.equal(res.refusal_code, null);
+  assert.equal(res.colliding_cases, 0);
+  assert.equal(res.evaluated, 1);
+  // …and the same through the per-case gate: the verifier RUNS.
+  return validateGeneralization({
+    candidate: anyCandidate(), heldOutCase: heldOutFixture({ case_id: "EXP-fresh", components: ["plugin/scripts/fixture-novel.ts"] }),
+    model: stubModel({ verdict: "refuted" }), budget: {}, pinDir: strippedTmp(), caseIdentityIndex: built.index,
+  }).then((r) => {
+    assert.equal(r.outcome, "evaluated");
+    assert.equal(r.previously_used_ok, true, "the gate ran and PASSED — the value can take both");
+  });
+});
+
+test("AC(a-labels): a diagnostic-public case collides on ONE shared component — the public channel is not a component identity", async () => {
+  const root = mkTmp();
+  const built = mkIndex(root, { sealedSets: [{ source: "sealed:/fixtures/earlier/labels-earlier-sealed.json", cases: [
+    sealedCaseFixture({ id: "DIAG-fixture", role: "diagnostic-public:positive", files: ["fixture-alpha.ts", "fixture-delta.ts", "fixture-epsilon.ts"] }),
+  ] }] });
+  // ONE shared component (fixture-alpha.ts) — below the >= 2 arm, and refused all the same.
+  const heldOut = heldOutFixture({ components: ["plugin/scripts/fixture-alpha.ts", "plugin/scripts/fixture-novel.ts"] });
+  const hits = caseCollisions(built.index, heldOut);
+  assert.deepEqual(hits.map((h) => h.kind), ["shared_diagnostic_component"]);
+  assert.deepEqual(hits[0].shared, ["fixture-alpha.ts"]);
+  const counter = { calls: 0 };
+  const r = await validateGeneralization({
+    candidate: anyCandidate(), heldOutCase: heldOut, model: stubModel({ verdict: "refuted" }, counter),
+    budget: {}, pinDir: strippedTmp(), caseIdentityIndex: built.index,
+  });
+  assert.equal(r.refusal_code, HELD_OUT_PREVIOUSLY_USED);
+  assert.equal(counter.calls, 0);
+
+  // The enumerable arm list, so a new arm cannot be added silently.
+  assert.deepEqual([...COLLISION_KINDS], ["reused_case_id", "shared_fix_commit", "shared_components", "shared_diagnostic_component"]);
+});
+
+test("the index normalises components to BASENAMES and records the canonical identity of each case", () => {
+  assert.deepEqual(caseComponentsOf({ files: ["plugin/scripts/a.ts", "plugin/scripts/a.ts", "./plugin/scripts/b.ts"] }), ["a.ts", "b.ts"]);
+  // The `a`/`b` spelling some sealed files use is the same set as `files`.
+  assert.deepEqual(caseComponentsOf({ a: ["x.ts"], b: ["y.ts", "z.ts"] }), ["x.ts", "y.ts", "z.ts"]);
+  assert.deepEqual(caseComponentsOf({}), [], "a case naming no component has an EMPTY set — never a fabricated one");
+  // A free-text provenance names its fix in prose; reading a commit out of prose would be a guess.
+  assert.deepEqual(caseComponentsOf({ files: [], provenance: "fixed in commit deadbeef after the pin" }), []);
+});
+
+test("the index is a persisted artifact with its own sha256, and its sha is content-addressed over the KNOWLEDGE", () => {
+  const root = mkTmp();
+  const set = { source: "sealed:/fixtures/x/labels-x-sealed.json", cases: [sealedCaseFixture()] };
+  const a = mkIndex(root, { sealedSets: [set] });
+  const b = mkIndex(root, { sealedSets: [set] });
+  assert.equal(a.sha256, b.sha256, "the same knowledge ⇒ the same sha (nothing about the build moment is hashed)");
+
+  const w = writeCaseIdentityIndex(root, a.index);
+  assert.equal(w.ok, true, w.reason);
+  assert.equal(caseIdentityIndexFile(root), path.join(root, CASE_IDENTITY_INDEX_REL));
+  const back = readCaseIdentityIndex(root);
+  assert.equal(back.ok, true, back.reason);
+  assert.equal(back.sha256_matches, true, "the recorded sha still describes the file's content");
+  assert.equal(back.index.entries.length, 1);
+
+  // ONE added case moves the sha — it is a real reading of the content, not a constant.
+  const moved = mkIndex(root, { sealedSets: [set, { source: "sealed:/fixtures/y/labels-y-sealed.json", cases: [sealedCaseFixture({ id: "CASE-fixture-beta" })] }] });
+  assert.notEqual(moved.sha256, a.sha256);
+
+  // ⛔ An index built from a registry read WITHOUT `history` would silently drop every method seed —
+  // refused rather than served as a shorter answer (硬规则 3b). Same for an unreadable source.
+  const noHistory = buildCaseIdentityIndex(root, {
+    ledger: { ok: true, records: [], malformed_lines: 0 },
+    registry: { ok: true, history: null, latest: [], malformed_lines: 0 },
+    verdicts: { ok: true, records: [], malformed_lines: 0 },
+  });
+  assert.equal(noHistory.ok, false);
+  assert.match(noHistory.reason, /^CASE_INDEX_REGISTRY_HISTORY_REQUIRED:/);
+  const badVerdicts = buildCaseIdentityIndex(root, {
+    ledger: { ok: true, records: [], malformed_lines: 0 },
+    registry: { ok: true, history: [], latest: [], malformed_lines: 0 },
+    verdicts: { ok: false, records: [], malformed_lines: 1 },
+  });
+  assert.equal(badVerdicts.ok, false);
+  assert.match(badVerdicts.reason, /^CASE_INDEX_VERDICTS_UNREADABLE:/);
+  assert.equal(badVerdicts.index, null);
+
+  // An absent index is its OWN value, never an empty one (硬规则 3b).
+  const missing = readCaseIdentityIndex(mkTmp());
+  assert.equal(missing.ok, false);
+  assert.match(missing.reason, /^CASE_INDEX_MISSING:/);
+  assert.equal(missing.index, null);
+});
+
+test("AC(h): a new case whose `labeled_at` FOLLOWS the pre-registration mtime ⇒ refused with zero model calls", async () => {
+  const base = heldOutFixture({ case_id: "EXP-labelled" });
+  const good = { ...base, labeled_by: "independent-labeller-1", labeled_at: "2026-10-12T00:30:00Z", prereg_mtime: "2026-10-12T01:00:00Z" };
+  const now = Date.parse("2026-10-12T02:00:00Z");
+  assert.deepEqual(validateCaseLabelTiming(good, { nowMs: now }), { ok: true, reasons: [], labeled_at: Date.parse("2026-10-12T00:30:00Z"), prereg_mtime: Date.parse("2026-10-12T01:00:00Z") });
+
+  // ⛔ Distinct code per defect (硬规则 3): a missing labeller, a missing label time, a label written
+  //    AFTER the pre-registration, and a pre-registration written after the first model call are four
+  //    different failures and must not collapse into one.
+  assert.deepEqual(validateCaseLabelTiming({ ...good, labeled_by: null }, { nowMs: now }).reasons, ["NO_LABELED_BY"]);
+  assert.deepEqual(validateCaseLabelTiming({ ...good, labeled_at: "not-a-date" }, { nowMs: now }).reasons, ["NO_LABELED_AT"]);
+  assert.deepEqual(validateCaseLabelTiming({ ...good, prereg_mtime: null }, { nowMs: now }).reasons, ["NO_PREREG_MTIME"]);
+  assert.deepEqual(validateCaseLabelTiming({ ...good, labeled_at: "2026-10-12T01:30:00Z" }, { nowMs: now }).reasons, [LABEL_AFTER_PREREG]);
+  assert.deepEqual(validateCaseLabelTiming(good, { nowMs: Date.parse("2026-10-12T00:45:00Z") }).reasons, [PREREG_AFTER_FIRST_CALL]);
+
+  // Through the verifier: the self-declared labelled case is refused BEFORE any call.
+  const late = { ...base, labeled_by: "independent-labeller-1", labeled_at: "2026-10-12T01:30:00Z", prereg_mtime: "2026-10-12T01:00:00Z" };
+  const counter = { calls: 0 };
+  const r = await validateGeneralization({
+    candidate: anyCandidate(), heldOutCase: late, model: stubModel({ verdict: "refuted" }, counter),
+    budget: {}, pinDir: strippedTmp(), nowMs: Date.parse("2026-10-12T02:00:00Z"),
+  });
+  assert.equal(counter.calls, 0);
+  assert.equal(r.refusal_code, LABEL_AFTER_PREREG);
+  assert.equal(r.outcome, "not-evaluated");
+  assert.equal(r.promoted, false);
+  // A case carrying NO labelling field is a legacy/derived Experience and is not asked for them.
+  const legacy = await validateGeneralization({
+    candidate: anyCandidate(), heldOutCase: base, model: stubModel({ verdict: "refuted" }), budget: {}, pinDir: strippedTmp(),
+  });
+  assert.equal(legacy.outcome, "evaluated");
+});
+
+test("AC(binding): the sealed-set binding gate requires the pin, the labeller, the label time, and the order", () => {
+  const ok = { id: "CASE-bound", role: "holdout-negative", files: ["fixture-alpha.ts"], labeled_by: "labeller-1",
+    labeled_at: "2026-10-12T00:30:00Z", evaluation_pin: "p".repeat(40) };
+  const set = validateSealedSetBinding([ok], { preregMtimeMs: Date.parse("2026-10-12T01:00:00Z"), nowMs: Date.parse("2026-10-12T02:00:00Z") });
+  assert.equal(set.ok, true, set.reasons.join(","));
+
+  const positive = { ...ok, id: "CASE-pos", role: "found-and-fixed" };
+  const noFix = validateSealedSetBinding([positive], { preregMtimeMs: Date.parse("2026-10-12T01:00:00Z"), nowMs: Date.parse("2026-10-12T02:00:00Z") });
+  assert.deepEqual(noFix.reasons, ["SEALED_CASE_NO_FIX_COMMIT:CASE-pos"]);
+  const withFix = validateSealedSetBinding([{ ...positive, fix_commit: "q".repeat(40) }], { preregMtimeMs: Date.parse("2026-10-12T01:00:00Z"), nowMs: Date.parse("2026-10-12T02:00:00Z") });
+  assert.equal(withFix.ok, true, withFix.reasons.join(","));
+  // …and the fix must DESCEND from the pin: a fix already in the tree at the pin cannot exhibit the defect.
+  const mispinned = validateSealedSetBinding([{ ...positive, fix_commit: "q".repeat(40) }], {
+    preregMtimeMs: Date.parse("2026-10-12T01:00:00Z"), nowMs: Date.parse("2026-10-12T02:00:00Z"), isAncestor: () => true,
+  });
+  assert.deepEqual(mispinned.reasons, ["SEALED_CASE_FIX_NOT_DESCENDANT_OF_PIN:CASE-pos"]);
+
+  // The label digest ties a verdict to the EXACT claim it judged — editing the components or the pin
+  // afterwards no longer matches.
+  assert.equal(caseLabelSha256(ok), caseLabelSha256({ ...ok }));
+  assert.notEqual(caseLabelSha256(ok), caseLabelSha256({ ...ok, evaluation_pin: "z".repeat(40) }));
+});
+
+test("AC(labels-recorded): an evaluated verdict records the label sha and the index sha it was checked against", async () => {
+  const root = mkTmp();
+  const built = mkIndex(root, { sealedSets: [{ source: "sealed:/fixtures/earlier/labels-earlier-sealed.json", cases: [sealedCaseFixture()] }] });
+  const heldOut = heldOutFixture({ case_id: "EXP-labelled-2", components: ["plugin/scripts/fixture-novel.ts"],
+    labeled_by: "labeller-1", labeled_at: "2026-10-12T00:30:00Z", prereg_mtime: "2026-10-12T01:00:00Z" });
+  const r = await validateGeneralization({
+    candidate: anyCandidate(), heldOutCase: heldOut, model: stubModel({ verdict: "refuted" }), budget: {},
+    pinDir: strippedTmp(), root, nowMs: Date.parse("2026-10-12T02:00:00Z"), caseIdentityIndex: built.index,
+  });
+  assert.equal(r.outcome, "evaluated");
+  assert.equal(r.verdict_recorded, true);
+  const rec = readGeneralizationVerdicts(root).records[0];
+  assert.equal(rec.verdict_id ?? rec.id, r.verdict_ref);
+  assert.equal(rec.label_sha256, caseLabelSha256(heldOut), "WHICH label was judged is on the verdict");
+  assert.equal(rec.index_sha256, built.index.sha256, "…and WHICH index it was checked against");
+  assert.equal(rec.previously_used_ok, true);
+});
+
+test("AC(real): the index over a REAL sealed file is built from that file's data, and its components are basenames", () => {
+  const file = path.join(plainTmp(), "labels-real-sealed.json");
+  fs.writeFileSync(file, JSON.stringify({ _note: "fixture", pin: "p".repeat(40), cases: [sealedCaseFixture()] }), "utf8");
+  const read = readSealedSet(file);
+  assert.equal(read.ok, true, read.reason);
+  assert.equal(read.cases.length, 1);
+  assert.equal(read.pin, "p".repeat(40));
+
+  const root = mkTmp();
+  const built = buildCaseIdentityIndex(root, {
+    sealedSetPaths: [file],
+    ledger: { ok: true, records: [], malformed_lines: 0 },
+    registry: { ok: true, history: [], latest: [], malformed_lines: 0 },
+    verdicts: { ok: true, records: [], malformed_lines: 0 },
+  });
+  assert.equal(built.ok, true, built.reason);
+  assert.equal(built.entries.length, 1);
+  assert.deepEqual(built.entries[0].components, ["fixture-alpha.ts", "fixture-beta.ts"]);
+  assert.equal(built.entries[0].source_kind, "sealed");
+  assert.equal(built.entries[0].source_line, 1);
+  assert.equal(built.entries[0].first_use, firstUseOfSealedPath(file));
+
+  // A file that cannot be read is its OWN value, never an empty case list.
+  const broken = path.join(plainTmp(), "labels-broken-sealed.json");
+  fs.writeFileSync(broken, "{ not json", "utf8");
+  assert.match(readSealedSet(broken).reason, /^SEALED_SET_UNPARSEABLE:/);
+  assert.deepEqual(readSealedSet(path.join(plainTmp(), "nope.json")).reason.startsWith("SEALED_SET_UNREADABLE:"), true);
+  // A truly unreadable SOURCE inside a build refuses the whole build rather than shortening the index.
+  const failed = buildCaseIdentityIndex(root, { sealedSetPaths: [broken] });
+  assert.equal(failed.ok, false);
+  assert.equal(failed.index, null);
 });
