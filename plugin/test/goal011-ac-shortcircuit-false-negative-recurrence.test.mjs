@@ -29,12 +29,66 @@
 // tip）⇒ 6/6「已全勾」被误报为真复发，实为 0/6 真阴性。现改为 **reflog 忠实重建 ref**（见
 // developTipAt：取时间戳 ≤ 事件 ts 的最新一条 reflog 条目 + 完备性自检 + 三态 fail-closed）。
 //
+// ⚠️ 回放方法再修（2026-10-12，gap-ac221-replay-same-second-post-decision-push）：reflog 忠实重建
+// ref 之后仍剩一层**同秒错位**——`--date=unix` 是**秒级**粒度，而旧规则的 `entry.unix * 1000 <= t`
+// 会把**事件同一秒内**发生的 ref 移动也当成「事件之前」。实测（生产载体读数，逐条可复跑）：
+//   事件 `ts` = 2026-10-12T06:53:56.129Z（= .quay/worker-outcome.jsonl 该 task 的 exited-not-landed
+//   行：failure_reason「AC 未全勾（checked 0/3，剩余未勾 3）」）。develop reflog 跨越它的两条：
+//     4dcc37584 develop@{1791788036}  = 14:53:56+0800 = **与事件同一秒**（其下一条为 2a040c197）
+//     2a040c197 develop@{1791787433}  = 14:43:53+0800 ← 事件当刻 develop 的真实 tip
+//   `git show 4dcc37584:tasks/<id>.md | grep -c '^- \[x\]'` = **3**（被 `<=` 误选中的那条）
+//   `git show 2a040c197:tasks/<id>.md | grep -c '^- \[x\]'` = **0**（事件当刻的真值）
+// ⇒ 回放取到的是**决策之后**的状态。`4dcc37584` 正是 driver 自己那条「记录未落地原因（worker
+// exited-not-landed）」提交，其父提交 `419f7697f` 是 worker 14:53:08 在 **author** 上写的 AC 勾选
+// 提交——即回放读到的 3/3 是「worker 的勾选 + driver 的记账」一并进 develop 的那一次 push，与
+// 「事件当刻 develop 已全勾」不是一回事。修法见 developTipAt / REPLAY_STRICT：只接受**严格早于事件
+// 秒**的 ref 移动（`unix < floor(t/1000)`）。
+//
+// **为何「严格早于事件秒」不会掩盖真复发（本修法的取假能力论证；⛔ 前提见条目）**：
+// 真复发的定义是「develop 在事件时刻已全勾却被短路」。事件 `ts` = worker 退出时刻（本文件读
+// `ended_at`）；而生产的短路判定 `acShortCircuitVerdict`（worker-driver.ts，AC-218）在 `finishAsync`
+// 里、**worker 退出之后**才跑，判的是 develop ref ∪ worktree 副本的**并集读**，任一源全勾即不短路。
+// 若某一秒内的 ref 移动真的把 develop 变成全勾态、且该移动发生在并集读**之前**，则并集读必然看到
+// 全勾 ⇒ `shortCircuit:false` ⇒ **不会产生本判据正在读的这条短路事件**，与「本次确实短路了」矛盾。
+// ⇒ 任何「同秒移动到全勾态」的 ref 移动，都按构造发生在并集读**之后**，恰是被本修法排除掉的那一类；
+// 排除它**不会漏掉任何真复发**（develop 只前进不后退 ⇒ 真复发蕴含「并集读时刻仍全勾」，与短路的
+// 既成事实矛盾）。下面的「同秒错位（双向对照）」测试把这条论证变成**可执行**的正/负两臂。
+// **⚠️ 该论证的前提是【并集读存在且未降级】**：`acShortCircuitVerdict` 必须仍是 develop ∪ worktree
+// 的并集读。若将来该并集读被移除/降级为单一来源（例如只剩 worktree 侧），本条论证即失效，判据应
+// **随之回到 fail-closed**（⛔ 不得在没有这条前提时沿用本修法）。
+//
+// ⛔ 本次事件的**代价是真实的、且不在本判据覆盖范围内**：worker 14:53:08 经 ABI 勾满 AC（`419f7697f`
+// 落 **author**），而并集读只读 develop ref ∪ worktree 副本，**两者都不含 author** ⇒ 48 秒后仍被判
+// 「checked 0/3」短路，烧掉一个 worker 轮次（14:55:01 重派，15:01:04 才落地）。这是上面已如实记录的
+// 「勾选已提交、但尚未到达 develop」的**传播竞态**残留（另见 2026-09-18 那段：83 秒传播延迟）。
+// 按人 2026-09-09 的裁定它**不得**塞进本判据（那会重新引入已拆掉的 confound）——本案只修**回放方法
+// 的正确性**，⛔ 不动生产侧的并集读。
+//
+// ⚠️ 同轮实测到的**未证实观察项**（⛔ 机制未定、不属本次修法、**需要自己的 AC/裁定**）：修法落地后
+// 同一命令 14 次实跑里 **1 次 FAIL**（≈7%），且失败**不在复发臂而在 unclassified 臂**——
+//   `1 条事件回放不出历史态,无法消歧：gap-e2e-verify-pushes-dev-host-profile-model-to-target-host@2026-09-25T14:01:08.144Z(develop 在 … 之前无可读提交)`
+// 其余 13 次 `pass 8 / fail 0`；事后对**同一条**事件按同一份 reflog/tip 逐条读，能正常回放到
+// `d5cbc06c2`（其 unix 1790344733 < 事件秒 1790344868）⇒ 不是该事件本身回放不出来。
+// **候选机制（未经对照检验，故只作假说，⛔ 不当作结论）**：`developTipAt` 的完备性自检 ③ 是**两次
+// 非原子读**（先 `reflog show develop` 取 entries[0]，再 `rev-parse develop` 取 tip）；生产
+// worker-driver 常驻、每隔数分钟 push 一次 develop，若某次 push 恰落在两次读之间，则 entries[0]
+// （旧 tip）≠ tip（新 tip）⇒ 自检误报「reflog 被剪枝/不完整」⇒ 该事件落入 unclassified ⇒ fail-closed
+// ⇒ **criterion 报 FAIL 而生产其实无复发**。与本文件已修的两条同族（都是「回放读数不可信」），但换了
+// 一层：不是回放**取错** ref，而是**读数竞争**。⚠️ 支持度有限：按两次读的窗口（~20ms）与 push 频率
+// （数分钟一次）粗算，该假说预测的单次运行命中率远低于实测 7%；而观测时点恰逢 1 分钟内两次 push
+// （`10a157990`@08:27:23、`5f1b09fd9`@08:28:25），窗口密度异常高 ⇒ 不能排除、也**不足以确证**。
+// ⛔ 未在本案修的理由：本任务 AC1 明确冻结「三态 fail-closed 行为不变」，且硬规则 12（一次观测 ⇒
+// 降为观察项，⛔ 不凭空立前置/造机制）。**接线法**：先给出「自检③因并发 push 误报」的**发生率读数**
+// （把 ③ 的两次读前后各取一次 tip、命中不等时留痕，跑够轮次），再决定是否把两次读做成原子（例如读
+// 前读后各取一次 tip 并要求相等，不等则重试）——⛔ 不得仅凭本条注释就改判据本体。
+//
 // ⚠️ 本判据的 develop 侧口径**不覆盖**「AC 勾选已提交、但尚未到达 develop」的**传播竞态**
 // （同上事件：勾选写在 11:11:34 提交，直到 11:12:57 才到达 develop——**83 秒传播延迟**，而 worker
 // 在 11:12:40 被短路 ⇒ 烧掉一个 worker 轮次）。按本判据写下的口径（develop 侧）它**不算**复发；
 // 但它与 2026-09-07 事故**共享代价形状**（勾完了却被短路）。⛔ 这是**如实记录的残留，不是已解决项**，
 // 也**不得**塞进本判据（那会重新引入 AC-221 于 2026-09-09 由人明确要求拆掉的 confound）——
-// 它需要自己的一条 AC/裁定。
+// 它需要自己的一条 AC/裁定。（该段所述口径当时用 `<=` 选取 reflog 条目——2026-10-12 已改为
+// 「严格早于事件秒」，见下一段。）
 //
 // ⚠️ 事故记录 + 修法（2026-09-09T15:xx，本文件落地约 1h 后发现）：本文件在 plugin/test/*.test.mjs
 // glob 下会被 scripts/test.sh 的全量 suite 无条件扫到；落地 1h 后生产真出现短路事件，判据据实 FAIL，
@@ -149,6 +203,25 @@ function currentDevelopTip(root) {
 }
 
 /**
+ * 回放规则（gap-ac221-replay-same-second-post-decision-push）：
+ *   "strict"    —— **生产默认**。只接受**严格早于事件秒**的 ref 移动（`unix < floor(t/1000)`）。
+ *                  reflog `--date=unix` 是**秒级**粒度 ⇒ 与事件**同一秒**的条目无法与事件排序，
+ *                  它可能发生在事件之后（本次实测：driver 的记账提交恰在事件同一秒被 push 进
+ *                  develop——见文件头）。取严格早于事件秒 ⇒ 选中的条目整秒都早于事件，无歧义。
+ *   "inclusive" —— 已退役的旧规则（`unix * 1000 <= t`）。**仅供下面的「同秒错位（双向对照）」测试
+ *                  调用**，⛔ 生产路径不得使用。保留它，是为了让「本修法确实改变了判定」成为一条
+ *                  **可执行**断言而不是注释里的说法（硬规则 4：把取假能力钉进判据本体）——若有人
+ *                  把默认改回 `<=`，strict 臂立刻变红；对照臂则钉住旧规则本会判成什么。
+ */
+const REPLAY_STRICT = "strict";
+const REPLAY_INCLUSIVE = "inclusive";
+
+/** 某条 reflog 条目在该回放规则下是否「可用作事件时刻的 ref 值」。 */
+function isReplayEligible(unix, t, mode) {
+  return mode === REPLAY_INCLUSIVE ? unix * 1000 <= t : unix < Math.floor(t / 1000);
+}
+
+/**
  * develop 分支在时间戳 ts 当刻的 tip commit sha——**忠实重建 ref 的历史值**，读不出返回 null。
  *
  * ⛔ 不用 `git log develop --until=<ts>`：那是对【当前 DAG】按【提交日期】做的过滤，**不是**
@@ -162,17 +235,19 @@ function currentDevelopTip(root) {
  * 三态 fail-closed（AC-221 原文「回放不出历史态时 fail-closed(判不出≠没复发)」）——任一条不成立
  * 即返回 null，调用方据此走 unclassified 分支判 FAIL：
  *   ① reflog 不可读 / 有条目读不懂（格式漂移）
- *   ② 没有任何条目时间戳 ≤ ts（最早条目晚于事件时刻 ⇒ 该时刻回放不出来）
+ *   ② 没有任何【该规则下可用】的条目（最早条目晚于事件时刻 ⇒ 该时刻回放不出来）
  *   ③ reflog 最新一条 ≠ 当前 develop tip（reflog 被剪枝/不完整 ⇒ 回放不可信）
+ *
+ * mode 见上（REPLAY_STRICT 为生产默认；REPLAY_INCLUSIVE 仅供双向对照测试）。
  */
-function developTipAt(root, ts) {
+function developTipAt(root, ts, mode = REPLAY_STRICT) {
   const t = Date.parse(ts);
   if (!Number.isFinite(t)) return null;
   const entries = readDevelopReflog(root);
   if (entries === null || entries.length === 0) return null; // ①
   const tip = currentDevelopTip(root);
   if (tip === null || entries[0].sha !== tip) return null; // ③（完备性自检，⛔ 不静默）
-  const hit = entries.find((e) => e.unix * 1000 <= t); // reflog 新→旧 ⇒ 首命中即「≤ts 的最新一条」
+  const hit = entries.find((e) => isReplayEligible(e.unix, t, mode)); // reflog 新→旧 ⇒ 首命中即「可用的最新一条」
   return hit ? hit.sha : null; // ②
 }
 
@@ -190,9 +265,10 @@ function taskBodyAtCommit(root, sha, taskId) {
 
 /** 自动消歧一条历史短路事件：develop 在事件时刻的历史态是否其实已经全勾（真复发）。
  *  返回 { classified: true, recurrence: boolean, detail } 或 { classified: false, detail }
- *  （回放不出来——develop 分支/该 commit/该文件路径任一环节读不到，判定不出，⛔ 不当作"没复发"）。 */
-function classifyEvent(root, rec) {
-  const sha = developTipAt(root, rec.ts);
+ *  （回放不出来——develop 分支/该 commit/该文件路径任一环节读不到，判定不出，⛔ 不当作"没复发"）。
+ *  mode 透传给 developTipAt（生产默认 REPLAY_STRICT；REPLAY_INCLUSIVE 仅供双向对照测试）。 */
+function classifyEvent(root, rec, mode = REPLAY_STRICT) {
+  const sha = developTipAt(root, rec.ts, mode);
   if (!sha) return { classified: false, detail: `develop 在 ${rec.ts} 之前无可读提交` };
   const body = taskBodyAtCommit(root, sha, rec.task);
   if (body === null) return { classified: false, detail: `${sha}:tasks/${rec.task}.md 读不到` };
@@ -313,8 +389,10 @@ test("AC3-①：reflog 不可读（非 git 目录）⇒ developTipAt 返回 null
 
 test("AC3-②：reflog 最早条目晚于事件 ts ⇒ developTipAt 返回 null（fail-closed）", (t) => {
   const { dir, second } = makeTempRepoWithDevelopReflog(t);
-  const now = new Date().toISOString();
-  assert.equal(developTipAt(dir, now), second, "构造前的正控制：完备 reflog 应能解析出 tip");
+  // 「事件在全部提交之后」必须表达为**严格晚于最新提交的那一秒**——本修法（REPLAY_STRICT）下，
+  // 与最新提交**同秒**的 ref 移动不算「早于事件」。（用 now+2s 而不是 now：后者跨秒时会飘。）
+  const afterAll = new Date(Date.now() + 2000).toISOString();
+  assert.equal(developTipAt(dir, afterAll), second, "构造前的正控制：完备 reflog 应能解析出 tip");
   // 2000 年早于该仓库最早一条 reflog 条目 ⇒ 该时刻回放不出来。
   assert.equal(
     developTipAt(dir, "2000-01-01T00:00:00.000Z"),
@@ -325,16 +403,115 @@ test("AC3-②：reflog 最早条目晚于事件 ts ⇒ developTipAt 返回 null�
 
 test("AC3-③：reflog 最新条目 ≠ 当前 develop tip（不完整）⇒ developTipAt 返回 null（fail-closed）", (t) => {
   const { dir, first, second, git } = makeTempRepoWithDevelopReflog(t);
-  const now = new Date().toISOString();
-  assert.equal(developTipAt(dir, now), second, "构造前的正控制：完备 reflog 应能解析出 tip");
+  // 同 AC3-②：严格晚于最新提交的那一秒（REPLAY_STRICT 下同秒的 ref 移动不算「早于事件」）。
+  const afterAll = new Date(Date.now() + 2000).toISOString();
+  assert.equal(developTipAt(dir, afterAll), second, "构造前的正控制：完备 reflog 应能解析出 tip");
   // 绕开 git 的 ref API 直接改写 loose ref ⇒ ref 移动了但 reflog 没有对应条目
   // （模拟 reflog 被 gc 剪枝 / 不完整——此时「最新条目」不再等于 ref 的真值，回放不可信）。
   fs.writeFileSync(path.join(dir, ".git", "refs", "heads", "develop"), first + "\n");
   assert.equal(git("rev-parse", "develop"), first, "负控制：ref 确实已被改写");
   assert.equal(
-    developTipAt(dir, now),
+    developTipAt(dir, afterAll),
     null,
     "reflog 最新条目与当前 develop tip 不一致时必须 fail-closed"
+  );
+});
+
+// ── AC1/AC2：同秒错位（双向对照，⛔ 把它改回旧规则就必须变红）─────────────────────────────
+// 硬规则 4：只留「复发数 = 0」这条断言时，任何**恒判非复发**的实现都能让判据变绿。所以这里构造一条
+// 「ref 在事件**同一秒**移动到全勾态」的历史，对**同一个断言**做双向对照、两臂都实跑：
+//   生产臂（REPLAY_STRICT，默认）⇒ 该事件判**非复发**（同秒移动不算「早于事件」）
+//   对照臂（REPLAY_INCLUSIVE，已退役旧规则）⇒ 同一构造判**复发**
+// 两臂结论相反 ⇒ 这条 fixture 确实在测修法本体，而不是恒真空转。（构造用 GIT_COMMITTER_DATE 把
+// reflog 条目的 unix 秒钉死在事件同一秒，见 makeTempRepoWithTimedDevelop。）
+
+/** 建一个 reflog 时间戳可精确控制的临时仓库：每个 sample 一个提交，committer date 由 sample.iso
+ *  给定（GIT_COMMITTER_DATE 决定 reflog 条目的 unix 时间戳 ⇒ 可造出「事件同秒」的 ref 移动）。 */
+function makeTempRepoWithTimedDevelop(t, samples) {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "ac221-samesec-"));
+  t.after(() => fs.rmSync(dir, { recursive: true, force: true }));
+  const git = (...args) => execFileSync("git", ["-C", dir, ...args], { encoding: "utf8", env: GIT_ENV }).trim();
+  git("init", "-q", "-b", "develop");
+  // 同 makeTempRepoWithDevelopReflog：钉死身份/签名/钩子，避免宿主全局 git 配置改掉临时仓库行为。
+  git("config", "user.email", "ac221@example.invalid");
+  git("config", "user.name", "ac221");
+  git("config", "commit.gpgsign", "false");
+  git("config", "core.hooksPath", path.join(dir, ".git", "hooks"));
+  const shas = [];
+  for (const s of samples) {
+    fs.mkdirSync(path.join(dir, "tasks"), { recursive: true });
+    fs.writeFileSync(path.join(dir, "tasks", `${s.taskId}.md`), s.body);
+    git("add", "-A");
+    execFileSync("git", ["-C", dir, "commit", "-q", "-m", s.msg], {
+      encoding: "utf8",
+      env: { ...GIT_ENV, GIT_COMMITTER_DATE: s.iso, GIT_AUTHOR_DATE: s.iso },
+    });
+    shas.push(git("rev-parse", "HEAD"));
+  }
+  return { dir, shas, git };
+}
+
+test("AC1/AC2 同秒错位（双向对照）：ref 在事件同一秒移动到全勾态 ⇒ 判【非复发】；旧规则 ⇒ 判【复发】", (t) => {
+  const TASK = "ac221-samesec-demo";
+  const EVENT_TS = "2026-10-12T06:53:56.129Z"; // 事件秒 = 1791788036（真实事故的那一秒）
+  // 任务体必须是 flipAcGateVerdict 认得的形状：AC **与** DoD 两段都在（countCompletionCheckboxes 的
+  // sectionFound = ac.sectionFound && dod.sectionFound，缺一段即 not-evaluated ⇒ ok:false）。
+  const body = (checked) =>
+    [
+      "## Acceptance Criteria",
+      "",
+      `- [${checked ? "x" : " "}] 甲`,
+      `- [${checked ? "x" : " "}] 乙`,
+      "",
+      "## Definition of Done",
+      "",
+      `- [${checked ? "x" : " "}] 丙`,
+      "",
+    ].join("\n");
+  const { dir, shas } = makeTempRepoWithTimedDevelop(t, [
+    // 事件前 10 分钟：AC 一条没勾。
+    { taskId: TASK, iso: "2026-10-12T06:43:53Z", msg: "pre", body: body(false) },
+    // ⚠️ 与事件**同一秒**：AC 全勾——就是生产里 driver 那条「记录未落地原因」提交的形状。
+    { taskId: TASK, iso: "2026-10-12T06:53:56Z", msg: "same-second", body: body(true) },
+  ]);
+  const [pre, sameSec] = shas;
+
+  // 构造自检（硬规则②：先证明构造出来的确实是「同秒 + 全勾」，否则这条 fixture 什么也没测到）：
+  assert.notEqual(pre, sameSec);
+  const sameSecEntry = readDevelopReflog(dir).find((e) => e.sha === sameSec);
+  assert.equal(
+    sameSecEntry.unix,
+    Math.floor(Date.parse(EVENT_TS) / 1000),
+    "构造自检：该 ref 移动的 reflog 秒必须**等于**事件的秒（否则测的不是同秒错位）"
+  );
+  assert.equal(
+    flipAcGateVerdict(taskBodyAtCommit(dir, sameSec, TASK)).ok,
+    true,
+    "构造自检：同秒那条 commit 上确实是 AC 全勾态（否则即使选中也不会判复发，对照臂会假绿）"
+  );
+  assert.equal(
+    flipAcGateVerdict(taskBodyAtCommit(dir, pre, TASK)).ok,
+    false,
+    "构造自检：事件前那条 commit 上不是全勾态"
+  );
+
+  // 生产臂（默认 REPLAY_STRICT）：回放到同秒移动**之前**的那条 ⇒ 非复发。
+  assert.equal(developTipAt(dir, EVENT_TS), pre, "严格规则下应回放到【同秒移动之前】的那一条");
+  const strict = classifyEvent(dir, { ts: EVENT_TS, task: TASK });
+  assert.ok(strict.classified, `生产臂应能分类,实际: ${strict.detail}`);
+  assert.equal(
+    strict.recurrence,
+    false,
+    `生产臂：事件同秒的 ref 移动被误计入真复发 ⇒ 本修法失效: ${strict.detail}`
+  );
+
+  // 对照臂（已退役的旧规则 REPLAY_INCLUSIVE）：必须判复发——证明上面那臂不是恒真空转。
+  const inclusive = classifyEvent(dir, { ts: EVENT_TS, task: TASK }, REPLAY_INCLUSIVE);
+  assert.ok(inclusive.classified, `对照臂应能分类,实际: ${inclusive.detail}`);
+  assert.equal(
+    inclusive.recurrence,
+    true,
+    `对照臂：旧规则本应把这条事件判为真复发（说明 fixture 有效、修法确实改变了判定），实际: ${inclusive.detail}`
   );
 });
 
