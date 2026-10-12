@@ -59,12 +59,12 @@ AC-355（GOAL-034 post-merge 生产验证）的判据本轮**直接重跑**为�
 
 ## AC
 
-- [ ] **AC1（判据在 develop 尖端转真）**：`quay goal gate AC-355 --dry-run --json --root /data/home/yale/work/quay` ⇒ **exit 0**，stdout 原文进 `## Evidence`；且 `git merge-base develop HEAD` == `git rev-parse develop`。—— 一条命令 + 退出码。
-- [ ] **AC2（七个测试文件双向实测，含 driver 求值环境）**：干净 shell 与 `QUAY_GOAL_ACCEPTANCE_ACTIVE=1` 下各跑七个文件，**两次都 `fail 0`**，逐字贴两次的 `ℹ tests / pass / fail` 三行。—— 两条命令 + 退出码。
-- [ ] **AC3（负对照双向，硬规则 2 / 4 / 4c）**：① 前置该 import（scratch）⇒ 该臂 OK；② 该 import 被注释（scratch）⇒ 该臂 MISS；③ 该 import 从树上消失 ⇒ 判据 exit 1 且 `CAUSE=post-merge-regression -- goal-store.ts no longer imports kernel/gate-run-options.ts on develop`。三次均贴命令 + 逐字读数。
-- [ ] **AC4（台账留痕）**：`.quay/gate-events.jsonl` 新增 `item_id=AC-355` / `verdict=pass` 事件，贴 `timestamp` + `payload.criterionHash`；`quay goal show AC-355 --json` 的 `evidence.verdict` = `pass`。—— 命令 + 读数。
-- [ ] **AC5（结构读数）**：`packages/quay/src/kernel/gate-run-options.ts` 存在；`packages/quay/src/gate/config/utils.ts`、`packages/quay/src/gate/factories/loader.ts` 不存在；`need` 八元组本轮实测 **8/8 OK**（逐条列出命中）。—— `ls` / `grep` + 读数。
-- [ ] **AC6（不越界，且判据文本零改动）**：`git diff --name-only develop...HEAD -- packages/quay/src packages/quay/test plugin goals` 输出为空。—— 命令 + 空输出。
+- [x] **AC1（判据在 develop 尖端转真）**：`quay goal gate AC-355 --dry-run --json --root /data/home/yale/work/quay` ⇒ **exit 0**，stdout 原文进 `## Evidence`；且 `git merge-base develop HEAD` == `git rev-parse develop`。—— 一条命令 + 退出码。
+- [x] **AC2（七个测试文件双向实测，含 driver 求值环境）**：干净 shell 与 `QUAY_GOAL_ACCEPTANCE_ACTIVE=1` 下各跑七个文件，**两次都 `fail 0`**，逐字贴两次的 `ℹ tests / pass / fail` 三行。—— 两条命令 + 退出码。
+- [x] **AC3（负对照双向，硬规则 2 / 4 / 4c）**：① 前置该 import（scratch）⇒ 该臂 OK；② 该 import 被注释（scratch）⇒ 该臂 MISS；③ 该 import 从树上消失 ⇒ 判据 exit 1 且 `CAUSE=post-merge-regression -- goal-store.ts no longer imports kernel/gate-run-options.ts on develop`。三次均贴命令 + 逐字读数。
+- [x] **AC4（台账留痕）**：`.quay/gate-events.jsonl` 新增 `item_id=AC-355` / `verdict=pass` 事件，贴 `timestamp` + `payload.criterionHash`；`quay goal show AC-355 --json` 的 `evidence.verdict` = `pass`。—— 命令 + 读数。
+- [x] **AC5（结构读数）**：`packages/quay/src/kernel/gate-run-options.ts` 存在；`packages/quay/src/gate/config/utils.ts`、`packages/quay/src/gate/factories/loader.ts` 不存在；`need` 八元组本轮实测 **8/8 OK**（逐条列出命中）。—— `ls` / `grep` + 读数。
+- [x] **AC6（不越界，且判据文本零改动）**：`git diff --name-only develop...HEAD -- packages/quay/src packages/quay/test plugin goals` 输出为空。—— 命令 + 空输出。
 
 ## DoD
 
@@ -134,3 +134,129 @@ as-is（该 import 不在）                : MISS   <- 与判据今天的 CAUSE
 ```
 
 **7. 与在飞任务的臂等价性** —— AC-353 判据的 `need` 第一条是**同一个文件 + 同一个正则**（`["goal-store.ts", /from\s*["']\.\/kernel\/gate-run-options\.ts["']/]`）；其立案轮读数同为 `CAUSE=consumer-not-converged -- goal-store.ts does not import kernel/gate-run-options.ts`。⇒ 两条 AC 由**同一次结构转假**共同转假，恢复它的源码改动在 AC-353 那条任务上。
+
+### 复验轮读数（worker，2026-10-13；本节即本任务的交付物，零源码改动）
+
+**R1. 前置确认（Plan 1）—— peer 落地已在 develop 尖端；主检出一度 lag，随后由 driver 追上**
+
+```
+$ git show develop:packages/quay/src/goal-store.ts | grep -nE 'from "\./kernel/gate-run-options\.ts"'
+83:import { resolveAcceptanceTimeout, timeoutKnobHint } from "./kernel/gate-run-options.ts";   ⇒ HIT
+$ git show develop:tasks/gap-ac353-goal-store-deadline-resolver-not-kernel.md | head -3   ⇒ status: done
+```
+
+复核起点（21:43Z）主检出滞后：`author=8e7cd49ef  develop=2cbc7f52a`，`git rev-list --count develop..HEAD = 10`
+⇒ 该时刻主检出上 `merge-base(develop,HEAD)=8e7cd49ef ≠ develop`，同一判据命令给 **exit 3 `not-evaluated`**。
+⇒ 这是 **branch lag，不是「没落地」**（硬规则 4b；已知形态 `production-carrier-static-red-can-be-branch-lag`）：
+落地本身 HIT（上一行），`git merge-base --is-ancestor 8e7cd49ef develop` = YES。
+21:45Z 起 driver 把 `author` 快进到 develop（`author == develop`，lag=0），此后主检出即 develop 尖端，AC1 的**字面命令**可直接 exit 0（见 R2）。
+（⛔ 本任务未自行 sync 主检出、未重启任何 driver —— 快进是 promotion-driver 自己做的。）
+
+**R2. AC1：判据原文在 develop 尖端 exit 0（字面命令，`--root /data/home/yale/work/quay`）**
+
+```
+$ node packages/quay/bin/quay.ts goal gate AC-355 --dry-run --json --root /data/home/yale/work/quay
+EXIT=0
+verdict = "pass"   cause = null   reason = "acceptance passed (exit 0)"
+event.payload.evaluationRoot = "/data/home/yale/work/quay"
+event.payload.treeSha        = "0630e11b70fe20392d396292c7440a10dcc4761d"
+
+不变式: git merge-base develop HEAD            = 5bd3c9f772f1b0867d7ce2aae1eca5ded8969e51
+        git rev-parse develop                  = 5bd3c9f772f1b0867d7ce2aae1eca5ded8969e51   ⇒ 相等
+        git rev-parse HEAD^{tree}              = 0630e11b70fe20392d396292c7440a10dcc4761d   ⇒ 即上面 treeSha（求值树 = develop 尖端）
+```
+
+同一命令在**任务 worktree**（`git merge develop` 后 == develop 尖端）上另跑一次，读数一致：
+
+```
+$ node <main>/packages/quay/bin/quay.ts goal gate AC-355 --dry-run --json --root <worktree>   # worktree HEAD == 2cbc7f52a == develop
+EXIT=0  verdict="pass"  evaluationRoot=<worktree>  treeSha=26de88ce0ecfc234dd0b51f26bbca4be9e9034b6
+$ git -C <worktree> rev-list --count develop..HEAD  ⇒ 0
+```
+
+**滞后期的诚实读数（同一命令、同一时刻、lag 未消时的主检出根）** —— 保留于此，因为它正是本任务要区分的形态：
+
+```
+verdict = "not-evaluated"  cause = "declared"
+reason  = "... exit 3 — NOT-EVALUATED: GOAL-034 has not merged into develop yet
+           (branch=author, merge-base=8e7cd49efe79c6fc723cfba0d3f11aee1b69b55f, develop=2cbc7f52a09364abf0d23da7a1c5b44a7f170d60)"
+```
+
+⇒ 判据把「主检出 lag」呈现为 `exit 3`、把「真回归」呈现为 `exit 1 + CAUSE=`，是**两个不同的取值**，没把「无法评估」伪装成「通过」（硬规则 3b）。
+
+**R3. AC2：七个测试文件 × 两个环境（develop 尖端 `2cbc7f52a`）**
+
+```
+干净 shell (env -u QUAY_GOAL_ACCEPTANCE_ACTIVE)  : EXIT=0  ℹ tests 219  ℹ pass 219  ℹ fail 0
+QUAY_GOAL_ACCEPTANCE_ACTIVE=1                    : EXIT=0  ℹ tests 219  ℹ pass 219  ℹ fail 0
+```
+
+（另：R2 两次求值中，判据自带的末段 `node --test <七个文件>` 亦随两个端点各跑一次，均 exit 0。）
+
+**R4. AC3：可证伪三态 —— scratch 副本，四状态各跑判据原文**
+
+scratch = `git worktree add --detach <scratch> develop`（+ `dispatch-worktree-setup.sh` 供 node_modules），逐态改 `packages/quay/src/goal-store.ts` 后
+`node <main>/packages/quay/bin/quay.ts goal gate AC-355 --dry-run --json --root <scratch>`；每次改前 `git checkout --` 还原：
+
+| 状态 | `goal-store.ts` 里那一行 | 命令 exit | 逐字读数 |
+|---|---|---|---|
+| S0 as-is | `import { resolveAcceptanceTimeout, timeoutKnobHint } from "./kernel/gate-run-options.ts";`（line 83） | **0** | `verdict=pass  reason="acceptance passed (exit 0)"` |
+| S1 负控A（注释） | `// import { resolveAcceptanceTimeout, timeoutKnobHint } from "./kernel/gate-run-options.ts";` | **1** | `verdict=fail  reason="acceptance failed (exit 1) — CAUSE=post-merge-regression -- goal-store.ts no longer imports kernel/gate-run-options.ts on develop CAUSE=post-merge-structural-scan-red -- the scan above printed the specific CAUSE"` |
+| S2 负控B（移除） | （该行不存在） | **1** | 同上，逐字相同 |
+| S3 正控（前置到 line 1） | 该行插在文件第一行 | **0** | `verdict=pass  reason="acceptance passed (exit 0)"` |
+
+- S1 与 S2 **同读数** ⇒ 该臂按位置判定，**注释不算命中**（硬规则 2）。
+- S3 在「S2 已移除」的副本上把该行前置回树即转 OK ⇒ 该臂**不是恒假**（硬规则 4）。
+- 四态 `evaluationRoot` 均为 `<scratch>`；四态 `treeSha` 均为 `26de88ce0ecfc234dd0b51f26bbca4be9e9034b6`
+  —— `treeSha` 取的是 `HEAD^{tree}`（**已提交**树），不随工作树变异移动 ⇒ 四态的红绿差异确由**工作树内容**造成，不是 treeSha 变化造成的（这条是负控制本身的自检）。
+
+**R5. AC4：台账留痕** —— `.quay/gate-events.jsonl` 中 `AC-355` filing 之后的新事件：
+
+```
+2026-10-12T21:39:51.205Z  goal-cli  pass  treeSha=97352f8b6ea1714a02dde68e0048e9e9f50c6c6b  payload.criterionHash=(absent)
+2026-10-12T21:47:14.683Z  goal-cli  pass  treeSha=26de88ce0ecfc234dd0b51f26bbca4be9e9034b6  payload.criterionHash=(absent)
+```
+
+`quay goal show AC-355 --json` ⇒ `evidence = {"at":"2026-10-12T21:47:14.683Z","verdict":"pass","reading":"acceptance passed (exit 0)","firstAt":"2026-10-10T06:05:25.459Z"}`
+⇒ 由 `fail` **转 `pass`**。
+
+`criterionHash` 只挂在 goal-**sweep** 形状的事件上（goal-cli 形状不带该字段 —— 已知形态 `goal-gate-event-carries-no-criterion-hash`）；带 hash 的末三条为：
+
+```
+2026-10-12T13:58:20.668Z  goal-sweep  pass  criterionHash=5d784080cca767d4
+2026-10-12T17:26:18.369Z  goal-sweep  pass  criterionHash=5d784080cca767d4
+2026-10-12T21:08:43.720Z  goal-sweep  fail  criterionHash=5d784080cca767d4   ← 转假那一次
+```
+
+⇒ pass 与 fail 两侧 **同 hash** ⇒ 判据文本未改，变的是它所读的树。
+
+**R6. AC5：结构读数（develop 尖端）** —— `need` 八元组逐条（剔注释行后按位置判；正则原文取自判据本体，未手抄）：
+
+```
+OK   goal-store.ts              -> /from\s*["']\.\/kernel\/gate-run-options\.ts["']/
+OK   cli/gate.ts                -> /from\s*["']\.\.\/kernel\/gate-run-options\.ts["']/
+OK   gate/acceptance-runner.ts  -> 同上
+OK   gate/registry.ts           -> 同上
+OK   gate/config/loader.ts      -> /from\s*["']\.\.\/\.\.\/kernel\/gate-run-options\.ts["']/
+OK   gate/config/index.ts       -> 同上
+OK   gate/factories/utils.ts    -> 同上
+OK   gate/factories/goal.ts     -> 同上
+⇒ 8/8 OK, 0 MISS
+```
+
+文件存在性：`packages/quay/src/kernel/gate-run-options.ts` **EXISTS**；`packages/quay/src/gate/config/utils.ts` **ABSENT**；`packages/quay/src/gate/factories/loader.ts` **ABSENT**。
+`git show develop:packages/quay/src/goal-store.ts | sed -n '83p'` ⇒ `import { resolveAcceptanceTimeout, timeoutKnobHint } from "./kernel/gate-run-options.ts";`
+
+**R7. AC6：不越界 + 判据文本零改动**
+
+```
+$ git diff --name-only develop...HEAD -- packages/quay/src packages/quay/test plugin goals   ⇒ (空，0 行)
+$ git diff --name-only develop      -- packages/quay/src packages/quay/test plugin goals   ⇒ (空，0 行)   # 含未提交改动
+$ git status --porcelain -- <同四路径>                                                      ⇒ (空)
+AC-355 criterion 文本 sha256[:16] = bfa1eb72656b2448（与 filing 轮一致；⛔ 未调用 goal write 改 criterion）
+未重启任何 driver / serve（promotion-driver / worker-driver 全程 running=1，pid 4127584 未变）
+```
+
+**R8. 复验轮与立案轮的前提差异（必须记，否则读数会被误读）** —— 立案轮的前提是「peer 落地尚未进 develop、`goal-store.ts` 在该尖端仍 MISS」；复验时该前提**已反转**：peer `gap-ac353-goal-store-deadline-resolver-not-kernel` 已 `done` 且其修复已进 develop（`goal-store.ts:83` 命中）。
+⇒ 本任务由「等落地」变为「在**已落地**的尖端复验」，Plan 第 3/4 步的红绿形态随之从「as-is MISS → 前置 OK」翻为
+「as-is **OK** →（注释）MISS →（移除）exit 1 →（前置）OK」（见 R4）——这正是「在**转真之后**重做，才证明这次是测量」的落点。
