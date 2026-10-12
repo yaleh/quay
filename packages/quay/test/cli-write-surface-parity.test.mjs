@@ -50,6 +50,13 @@ const FIELD_TO_ACCESS = {
   body: "flags.body",
   extra: "flags.extra",
   expectedStatus: 'flags["expect-status"]',
+  // gap-task-status-events-abi-writes-and-creation: the two PROVENANCE fields (never persisted —
+  // they reach the Provider's status-event record, not the task frontmatter). They are declared on
+  // BOTH write surfaces like every other field, so this table stays a real invariant instead of
+  // growing an exception list: `--actor-kind`/`--correlation-id` are wired in the Core CLI
+  // (src/cli/task-edit.ts) and the native CLI (bin/quay-native.ts) exactly as the other flags are.
+  actorKind: 'flags["actor-kind"]',
+  correlationId: 'flags["correlation-id"]',
 };
 
 const CLI_SURFACES = {
