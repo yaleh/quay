@@ -82,7 +82,11 @@ function git(dir, ...args) {
 }
 
 function makeRepo(name) {
-  const dir = fs.mkdtempSync(path.join(SCRATCH_ROOT, `${name}-`));
+  // A plain mkdir under the single mkdtemp'd SCRATCH_ROOT (removed in after()), not a second
+  // mkdtempSync — the test-isolation contract pairs every mkdtemp with a visible cleanup, and the
+  // per-arm names below are unique.
+  const dir = path.join(SCRATCH_ROOT, name);
+  fs.mkdirSync(dir, { recursive: true });
   git(dir, "init", "-q", "-b", "develop");
   git(dir, "config", "user.email", "fixture@example.com");
   git(dir, "config", "user.name", "fixture");
