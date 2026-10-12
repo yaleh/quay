@@ -2,7 +2,7 @@
 id: gap-open-discovery-consumes-task-status-events-optional-context
 title: open semantic discovery reads task_log since its cursor as OPTIONAL
   context (never gates/triggers a round)
-status: todo
+status: ready
 labels:
   - gap
   - task-trace
