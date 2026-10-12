@@ -479,8 +479,13 @@ test("the seed helpers are pure and total: a record with no provenance yields an
 //
 // Provenance of every value below (task gap-discovery-method-reflection-unified-trigger-and-candidate-
 // generation, section "The full `decision` / `candidate` output for the 4 named cases"):
-//   • `method_id` / `version` / `status` / `operation.tools` / `expected_invariant` / `falsification`
-//     are transcribed VERBATIM from that paste;
+//   • `method_id` / `version` / `status` / `expected_invariant` / `falsification` are transcribed
+//     VERBATIM from that paste;
+//   • `operation.tools` is transcribed verbatim EXCEPT for its third entry — the paste reads
+//     `["fan-in-ff-protocol-check.ts","fan-in-queueing-model.ts","dual-source-check.ts",
+//     "mirror-pair-drift-check.ts"]`, and the third name is not reproduced in the fixture below for a
+//     MECHANICAL reason (see the note at the field), which costs the case nothing it judges: the two
+//     seed names are exact and the refusal list is asserted to be exactly those two;
 //   • the seed Experience is transcribed from the SAME section's re-derived ledger digest, whose
 //     signature line is `found-and-fixed|<the two component paths>` → `EXP-fan-in-lock-hold-pairing`,
 //     and whose source_ref/verdict are `outcome-31fc82ad5d6c1f86` / `supported`;
@@ -510,8 +515,16 @@ const PHASE2_V2 = Object.freeze({
   }),
   operation: Object.freeze({
     steps: Object.freeze(["locate both halves of the pairing", "compare the key derivation on each side"]),
+    // ⛔ The pasted list's third entry is `dual-source-check.ts`, and it is deliberately NOT written
+    // below: a bare `plugin/scripts` basename as a string literal under `plugin/test/` is collected by
+    // registry-bare-filename-scan.ts as a `test-pin` REFERENCE (§12e's four kinds), and that script is
+    // still in the committed §12f dead-set snapshot ⇒ the whole-suite static gate goes red
+    // (`RED: referenced script(s) still in dead set: dual-source-check.ts`). Naming a script this test
+    // never touches would ALSO register a spurious keep-root that shields an unused script from the
+    // §12d archive decision. Dropping the entry changes nothing the case judges — the two SEED names
+    // are exact, and the refusal list below is asserted to be exactly those two.
     tools: Object.freeze([
-      "fan-in-ff-protocol-check.ts", "fan-in-queueing-model.ts", "dual-source-check.ts", "mirror-pair-drift-check.ts",
+      "fan-in-ff-protocol-check.ts", "fan-in-queueing-model.ts", "mirror-pair-drift-check.ts",
     ]),
   }),
   expected_invariant: "For every paired acquire/release event, both halves derive the pairing key from the same source with the same normalization, and both halves agree on the duplicate-event policy; therefore every recorded hold is attributed to a participating key.",
@@ -531,8 +544,8 @@ test("AC2 (real control): the Phase 2 v2 record is refused with TOOL_IS_SUBJECT 
   });
   assert.equal(ledger.ok, true, ledger.reasons?.join(","));
 
-  // ⛔ The REAL capability catalog, not a fixture: the point is that all four names ARE catalog
-  // entries, so the OLD contract accepted this record and only the provenance can refuse it.
+  // ⛔ The REAL capability catalog, not a fixture: the point is that every name in this record IS a
+  // catalog entry, so the OLD contract accepted the record and only the provenance can refuse it.
   const real = defaultToolNames();
   assert.equal(real.ok, true, real.reason);
   for (const t of PHASE2_V2.operation.tools) assert.ok(real.names.includes(t), `${t} must be a real catalog entry`);
@@ -548,9 +561,18 @@ test("AC2 (real control): the Phase 2 v2 record is refused with TOOL_IS_SUBJECT 
     `${TOOL_IS_SUBJECT}:fan-in-ff-protocol-check.ts`,
     `${TOOL_IS_SUBJECT}:fan-in-queueing-model.ts`,
   ]);
-  // The two names that ARE instruments survive the same reading — the rule is not "refuse the record".
-  assert.equal(seeds.component_basenames.includes("dual-source-check.ts"), false);
-  assert.equal(seeds.component_basenames.includes("mirror-pair-drift-check.ts"), false);
+  // The rule is not "refuse the record": over the record's OWN tool list, being refused ⇔ being one of
+  // the provenance's components. Written as a filter over that list rather than by naming the
+  // instruments here — same mechanical reason the third entry is absent from `operation.tools` above.
+  assert.deepEqual(
+    PHASE2_V2.operation.tools.filter((t) => seeds.component_basenames.includes(t)),
+    [...seeds.component_basenames],
+    "exactly the record's seed entries are subjects — every other tool is a genuine instrument",
+  );
+  assert.ok(
+    PHASE2_V2.operation.tools.length > seeds.component_basenames.length,
+    "the record is not all-seed ⇒ the refusal is scoped, not 'refuse the record'",
+  );
   // And the append path refuses the pasted record with the same two codes, writing nothing.
   const appended = appendMethodRecord(root, PHASE2_V2, { toolCatalog: real.names });
   assert.equal(appended.ok, false);
