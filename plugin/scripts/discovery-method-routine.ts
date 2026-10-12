@@ -18,7 +18,9 @@
 //   `.quay/quality-control.json` (`ctx.halted`); the quality-round fact is the Fact this routine
 //   returns — the loop writes the heartbeat and we add NO writer of our own there. The ingest, the
 //   reflection round, the candidate validator, the pin materialiser and the ancestry seam are all
-//   IMPORTED from the modules that own them. This file adds orchestration + a carrier line, nothing else.
+//   IMPORTED from the modules that own them (loaded at RUNTIME — see `loadDiscoveryModules`; a static
+//   specifier here would escape the shipped artifact and inline their entry guards into the drivers).
+//   This file adds orchestration + a carrier line, nothing else.
 //
 // REPORT-ONLY, STRUCTURALLY: this file imports no filing/authoring function and writes no task and no
 // goal. Its only persistence is (a) append-only lines on ONE carrier,
@@ -47,30 +49,16 @@
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
+import { fileURLToPath, pathToFileURL } from "node:url";
 import YAML from "yaml";
 import { isDue, parseTrigger } from "./routine-scheduler.ts";
 import { type Fact, type RoutineSpec } from "./driver-runtime.ts";
 import { ROUTINE_LAST_RUN_REL, readLastRunMap, writeLastRun } from "./probe-routine.ts";
 import { isDirectEntry } from "./gate-script-base.ts";
-// The Discovery Method loop — imported, never re-derived. The `.mjs` specifiers are the plain-node
-// modules the whole Phase 0/1/2 stack already runs under (the same form the regression run used).
-import {
-  ingestNewOutcomes,
-  readExperienceLedger,
-} from "../../docs/analysis/discovery-experience-ledger.mjs";
-import {
-  runReflectionRound,
-  validateGeneralization,
-  validateEvaluationPin,
-  materializeStrippedPin,
-  gitIsAncestor,
-  liveModelFactory,
-  computeReflectionCost,
-} from "../../docs/analysis/discovery-reflection.mjs";
-import {
-  appendMethodRecord,
-  readMethodRegistry,
-} from "../../docs/analysis/discovery-method-registry.mjs";
+// ⛔ The Discovery Method loop (docs/analysis/discovery-{experience-ledger,reflection,method-registry}.mjs)
+// is NEVER statically imported here — this file is SHIPPED, and a static `../../docs/analysis/*.mjs`
+// specifier both escapes the built artifact and inlines those modules' own entry guards into the driver
+// bundles. They are resolved from disk at runtime instead: see `loadDiscoveryModules` below.
 
 /** The routine's name — one key in `.quay/routine-last-run.json` (shared with the probe/arch-discovery
  *  tracks; ⛔ names do not collide and the map is a per-name merge write). */
@@ -241,15 +229,18 @@ export function appendCarrierRecords(carrierPath: string, records: readonly Reco
  *  Experience usable as a held-out case (`validateGeneralization` refuses `NO_EVALUATION_PIN` without
  *  one), so the filter is the engine's own precondition — not a second policy invented here. An
  *  unreadable ledger is its OWN value (`ok:false`), never "no held-out cases" (硬规则 3b). */
-export function readHeldOutCases(root: string): { ok: boolean; cases: Record<string, unknown>[]; reason: string | null; malformed_lines: number } {
-  const ledger = readExperienceLedger(root);
+export async function readHeldOutCases(root: string, ledgerFn?: LedgerReadFn): Promise<HeldOutRead> {
+  // The ledger reader is a SEAM: the round resolves it once from the engine modules it already loaded,
+  // so a round that needs the pool never pays for a second resolution.
+  const readLedger = ledgerFn ?? (await loadDiscoveryModules(root)).ledger.readExperienceLedger;
+  const ledger = readLedger(root);
   if (!ledger.ok) {
     return {
       ok: false,
       cases: [],
       malformed_lines: ledger.malformed_lines,
       reason: ledger.file === null
-        ? `LEDGER_UNRESOLVED:${String((ledger as { reason?: string }).reason ?? "no-shared-checkout")}`
+        ? `LEDGER_UNRESOLVED:${String(ledger.reason ?? "no-shared-checkout")}`
         : `LEDGER_UNREADABLE:${ledger.malformed_lines}-unparseable-line(s)-so-the-held-out-pool-cannot-be-read-as-complete`,
     };
   }
@@ -263,8 +254,130 @@ export type IngestFn = (root: string, opts: { maxPerRun: number; enabled: boolea
 export type ReflectFn = (root: string, opts: Record<string, unknown>) => Promise<Record<string, unknown>>;
 export type ValidateFn = (opts: Record<string, unknown>) => Promise<Record<string, unknown>>;
 export type AppendFn = (root: string, rec: Record<string, unknown>) => Record<string, unknown>;
-export type HeldOutFn = (root: string) => { ok: boolean; cases: Record<string, unknown>[]; reason: string | null; malformed_lines: number };
+/** The held-out pool reader. `HeldOutRead` on its own, or a promise — the DEFAULT is async (it resolves
+ *  the ledger module first), and a test seam may stay synchronous. */
+export type HeldOutFn = (root: string) => HeldOutRead | Promise<HeldOutRead>;
 export type PinFn = (opts: { root: string; rev: string; dir: string }) => { ok: boolean; dir?: string; reason?: string };
+
+// ── the engine modules: resolved from DISK at runtime, never statically imported ─────────────────────
+// WHY (the defect this block exists for): this file is SHIPPED — publish-dist-branch stages `plugin/`
+// as the artifact root and bundles `scripts/*.ts` with esbuild. A static `../../docs/analysis/*.mjs`
+// specifier is resolved against THAT staged root, so it escapes the artifact and the build dies with
+// `Could not resolve "../../docs/analysis/…"`. And even were it resolvable, esbuild would INLINE those
+// modules — each carries its own `import.meta.url === pathToFileURL(process.argv[1])` entry guard, and
+// an inlined guard HIJACKS the driver bundle's own main (packages/quay/test/build-plugin-dist.test.mjs
+// AC1 covers exactly that). A specifier the bundler cannot see is the fix: resolve a path from disk,
+// then `import()` its file URL.
+//
+// WHERE THEY ARE RESOLVED FROM: first the repo this FILE lives in (…/plugin/scripts → repo root), then
+// the workspace `root`. Code belongs with the code — the engine lives in this repo's `docs/analysis`,
+// not in the workspace being observed — and the workspace candidate is what lets a checkout whose
+// script is somewhere else (a worktree running against the main checkout) or a workspace vendoring its
+// own copy still run. Both candidates absent ⇒ the round is `failed` with a reason naming BOTH paths:
+// "could not resolve the engine" must never be read as "no findings" (硬规则 3b).
+export const DISCOVERY_MODULE_DIR_REL = path.posix.join("docs", "analysis");
+export const LEDGER_MODULE_FILE = "discovery-experience-ledger.mjs";
+export const REFLECTION_MODULE_FILE = "discovery-reflection.mjs";
+export const REGISTRY_MODULE_FILE = "discovery-method-registry.mjs";
+
+/** The repo this FILE lives in (…/plugin/scripts/<this> → repo root). Used only to BUILD a candidate
+ *  path — nothing is resolved through it until the runtime `import()` above. */
+export const SCRIPT_REPO_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..", "..");
+
+/** A carrier read, as the ledger module returns it (narrowed to the fields this file reads). */
+export interface LedgerRead {
+  ok: boolean;
+  file: string | null;
+  records: Record<string, unknown>[];
+  malformed_lines: number;
+  reason?: string;
+}
+export type LedgerReadFn = (root: string) => LedgerRead;
+
+/** The held-out pool reading. `cases` is the pool; `ok:false` is "could not be read", which is its OWN
+ *  value and never "the pool is empty" (硬规则 3b). */
+export interface HeldOutRead { ok: boolean; cases: Record<string, unknown>[]; reason: string | null; malformed_lines: number }
+
+/** The shapes this routine CALLS, declared here rather than reached through a type-position import of
+ *  an out-of-artifact path (the same reason the whole block exists). The modules are the source of
+ *  truth; this is the narrow interface this file consumes. */
+export interface DiscoveryLedgerModule {
+  ingestNewOutcomes: IngestFn;
+  readExperienceLedger: LedgerReadFn;
+}
+export interface DiscoveryReflectionModule {
+  runReflectionRound: ReflectFn;
+  validateGeneralization: ValidateFn;
+  validateEvaluationPin: (heldOutCase: Record<string, unknown>) => { ok: boolean; reasons: string[] };
+  materializeStrippedPin: PinFn;
+  gitIsAncestor: (root: string) => (ancestor: string, descendant: string) => boolean;
+  liveModelFactory: (opts: { root: string; tools?: string; maxTurns?: number | null; timeoutMs?: number }) => Promise<Record<string, unknown>>;
+  computeReflectionCost: (calls: readonly Record<string, unknown>[], opts?: { wall_ms?: number | null }) => Record<string, unknown>;
+}
+export interface DiscoveryRegistryModule {
+  appendMethodRecord: (root: string, rec: Record<string, unknown>) => Record<string, unknown>;
+  readMethodRegistry: (root: string, opts?: { history?: boolean }) => { history?: unknown[]; records?: unknown[]; malformed_lines?: number };
+}
+export interface DiscoveryModules {
+  ledger: DiscoveryLedgerModule;
+  reflection: DiscoveryReflectionModule;
+  registry: DiscoveryRegistryModule;
+}
+
+/** One process-wide cache keyed by the RESOLVED path — two rounds (and two tests) that resolve the same
+ *  file load it once. Node's own module cache would do this anyway; the map is what lets the resolver
+ *  stay synchronous and cheap while the import stays lazy. */
+const _engineModuleCache = new Map<string, unknown>();
+
+/** Resolve one engine module to an absolute path. Returns the candidates it TRIED so the refusal can
+ *  name them (an unresolvable engine is a `failed` round, not a silent zero). */
+export function resolveEngineModule(root: string, file: string): { path: string | null; tried: string[] } {
+  const tried = [
+    path.join(SCRIPT_REPO_ROOT, DISCOVERY_MODULE_DIR_REL, file),
+    path.join(root, DISCOVERY_MODULE_DIR_REL, file),
+  ];
+  for (const candidate of tried) {
+    if (fs.existsSync(candidate)) return { path: candidate, tried };
+  }
+  return { path: null, tried };
+}
+
+/** Load the three engine modules, or THROW a refusal naming every module that could not be resolved and
+ *  the candidate paths tried. Throwing (rather than returning a `{ok:false}` shape a caller might
+ *  forget to check) is deliberate: every caller is a `??`-default inside the round, and the round
+ *  converts the throw into its own `failed` reason. */
+export async function loadDiscoveryModules(root: string): Promise<DiscoveryModules> {
+  const unresolved: string[] = [];
+  const load = async (file: string): Promise<unknown> => {
+    const r = resolveEngineModule(root, file);
+    if (r.path === null) {
+      unresolved.push(`${file} — not found at ${r.tried.join(" or ")}`);
+      return null;
+    }
+    const cached = _engineModuleCache.get(r.path);
+    if (cached !== undefined) return cached;
+    try {
+      const mod = (await import(/* @vite-ignore */ pathToFileURL(r.path).href)) as unknown;
+      _engineModuleCache.set(r.path, mod);
+      return mod;
+    } catch (e) {
+      unresolved.push(`${file} — import failed: ${(e as Error).message}`);
+      return null;
+    }
+  };
+  const ledger = await load(LEDGER_MODULE_FILE);
+  const reflection = await load(REFLECTION_MODULE_FILE);
+  const registry = await load(REGISTRY_MODULE_FILE);
+  if (unresolved.length > 0 || ledger === null || reflection === null || registry === null) {
+    throw new Error(`DISCOVERY_MODULES_UNRESOLVED — ${unresolved.join("; ") || "one or more engine modules did not load"}`);
+  }
+  return {
+    ledger: ledger as DiscoveryLedgerModule,
+    reflection: reflection as DiscoveryReflectionModule,
+    registry: registry as DiscoveryRegistryModule,
+  };
+}
+
 
 export interface DiscoveryMethodRunOptions {
   /** Parsed section (see readDiscoveryMethodConfig). */
@@ -319,6 +432,11 @@ export async function runDiscoveryMethod(root: string, opts: DiscoveryMethodRunO
 
   const started = now();
 
+  /** The engine modules could not be resolved/loaded — the round's OWN `failed` reason, naming the
+   *  step and the candidate paths. Never a silent zero (硬规则 3b). */
+  const engineRefusal = (e: unknown, step: string): Fact =>
+    fact("failed", { ...base, enabled: true }, `engine modules unresolved at ${step} — ${(e as Error).message} (nothing appended, last-run not advanced)`);
+
   // ① config: a bad section is `failed` (fail-closed), an absent/disabled one is `not-evaluated`.
   if (opts.configError) return fact("failed", base, `config invalid — ${opts.configError} (nothing spawned)`);
   if (!opts.configPresent || !opts.config || opts.config.enabled === false) {
@@ -349,13 +467,25 @@ export async function runDiscoveryMethod(root: string, opts: DiscoveryMethodRunO
     return fact("failed", { ...base, enabled: true }, `unreadable carrier — ${(e as Error).message} (nothing appended)`);
   }
 
+  // The engine modules (docs/analysis/discovery-{experience-ledger,reflection,method-registry}.mjs) are
+  // resolved HERE — once, after the three gates that can return without running a step, and before the
+  // first step that falls back to one of them. Loading them from DISK (never a static import: see
+  // loadDiscoveryModules) is what keeps this SHIPPED file out of the bundler's resolution graph; a
+  // resolution failure is this round's `failed`, named, not a silent zero.
+  let engine: DiscoveryModules;
+  try {
+    engine = await loadDiscoveryModules(root);
+  } catch (e) {
+    return engineRefusal(e, "round start");
+  }
+
   // The wall budget is the round's own refusal: a step that runs past `max_wall_ms` stops the round
   // BEFORE the append, so the carrier stays byte-identical and the last-run is not consumed.
   const breached = () => now() - started >= config.maxWallMs;
 
   // ⑤ (a) ingest. A refusal here (WATERMARK_MISMATCH / an unresolved shared checkout / a missing
   //    evidence store) is the round's own failure with the step's OWN reason code.
-  const ingestFn = opts.ingestFn ?? (ingestNewOutcomes as unknown as IngestFn);
+  const ingestFn = opts.ingestFn ?? engine.ledger.ingestNewOutcomes;
   const ingest = ingestFn(root, { maxPerRun: config.maxExperiences, enabled: true }) as Record<string, unknown>;
   if (ingest.ok !== true) {
     const reasons = Array.isArray(ingest.reasons) ? (ingest.reasons as string[]) : [];
@@ -375,6 +505,11 @@ export async function runDiscoveryMethod(root: string, opts: DiscoveryMethodRunO
   const calls: Record<string, unknown>[] = [];
   let model = opts.model ?? null;
   let modelId = opts.modelId ?? null;
+  // Candidate persistence is used by BOTH ⑥ (the round's own candidates) and ⑦ (the next version an
+  // evaluated verdict mints), and ⑦ runs OUTSIDE the `ingested > 0` block below — so the seam lives at
+  // the round's own scope. Declaring it inside ⑥ left ⑦ reading a binding that is not in scope there
+  // (a ReferenceError on the one path where a verdict is `evaluated` with a `candidate_after`).
+  let appendFn = opts.appendFn ?? engine.registry.appendMethodRecord;
   if (ingested > 0) {
     if (typeof model !== "function" && typeof opts.modelFactory === "function") {
       const live = await opts.modelFactory();
@@ -389,7 +524,7 @@ export async function runDiscoveryMethod(root: string, opts: DiscoveryMethodRunO
     if (typeof model !== "function" && opts.reflectFn === undefined) {
       return fact("failed", { ...base, enabled: true, ingest }, "model-seam-missing: the round has new Experiences to reflect on but no model was supplied (nothing appended, last-run not advanced)");
     }
-    const reflectFn = opts.reflectFn ?? (runReflectionRound as unknown as ReflectFn);
+    let reflectFn = opts.reflectFn ?? engine.reflection.runReflectionRound;
     const r = await reflectFn(root, {
       model,
       modelId,
@@ -413,7 +548,6 @@ export async function runDiscoveryMethod(root: string, opts: DiscoveryMethodRunO
     // The candidates this round minted are persisted BEFORE validation, so the generalization step sees
     // a registry in which the candidate's own version already exists (the version monotonicity gate and
     // the lineage walk both read the RECORDED versions).
-    const appendFn = opts.appendFn ?? (appendMethodRecord as unknown as AppendFn);
     for (const c of candidates) {
       const a = appendFn(root, c);
       persisted.push({ method_id: c.method_id, version: c.version, ok: a.ok === true, reasons: a.reasons ?? [] });
@@ -433,14 +567,17 @@ export async function runDiscoveryMethod(root: string, opts: DiscoveryMethodRunO
   // must not even open the ledger (and must not turn an unreadable ledger into a round failure).
   // ⛔ `null` (not `[]`) is the "not read" value: a round that validated nothing must not report the
   // population it never looked at as "0 held-out cases" (硬规则 3b).
-  const heldOut = candidates.length > 0 ? (opts.heldOutFn ?? readHeldOutCases)(root) : null;
+  // The default reader is async (it resolves the ledger module); a test seam may stay synchronous, so
+  // the call is awaited either way.
+  const heldOut = candidates.length > 0 ? await (opts.heldOutFn ?? readHeldOutCases)(root) : null;
   if (heldOut !== null && heldOut.ok) {
-    const registryRead = readMethodRegistry(root, { history: true });
+    const registryRead = engine.registry.readMethodRegistry(root, { history: true });
     const registry = Array.isArray(registryRead.history) ? registryRead.history : [];
-    const isAncestor = gitIsAncestor(root);
+    const isAncestor = engine.reflection.gitIsAncestor(root);
     const pinTmp = opts.pinTmpRoot ?? process.env[PIN_TMP_ENV] ?? os.tmpdir();
-    const pinFn = opts.pinFn ?? (materializeStrippedPin as unknown as PinFn);
-    const validateFn = opts.validateFn ?? (validateGeneralization as unknown as ValidateFn);
+    const pinFn = opts.pinFn ?? engine.reflection.materializeStrippedPin;
+    const validateFn = opts.validateFn ?? engine.reflection.validateGeneralization;
+    const validateEvaluationPin = engine.reflection.validateEvaluationPin;
     const pinDirs = new Map<string, { ok: boolean; dir: string | null; reason: string | null }>();
     const pinDirFor = (rev: string): { ok: boolean; dir: string | null; reason: string | null } => {
       if (pinDirs.has(rev)) return pinDirs.get(rev) as { ok: boolean; dir: string | null; reason: string | null };
@@ -522,7 +659,7 @@ export async function runDiscoveryMethod(root: string, opts: DiscoveryMethodRunO
 
   // ⑧ the round's ONE line.
   const wallMs = now() - started;
-  const cost = computeReflectionCost(calls, { wall_ms: wallMs }) as Record<string, unknown>;
+  const cost = engine.reflection.computeReflectionCost(calls, { wall_ms: wallMs }) as Record<string, unknown>;
   const round: Record<string, unknown> = {
     kind: "scan-round",
     routine: DISCOVERY_METHOD_NAME,
@@ -602,9 +739,15 @@ export function discoveryMethodRoutineFromConfig(
 }
 
 /** The production model seam: the live launcher, resolved lazily so a workspace that never enables the
- *  section never pays for it. Returns `{ok:false, reason}` when the driver runtime cannot be loaded —
- *  a refusal, never a silent no-op (the round then records `failed`). */
+ *  section never pays for it. Returns `{ok:false, reason}` when the engine modules or the driver
+ *  runtime cannot be loaded — a refusal, never a silent no-op (the round then records `failed`). */
 export async function liveDiscoveryModel(root: string): Promise<{ ok: boolean; model?: ModelFn; modelId?: string | null; reason?: string }> {
+  let liveModelFactory: DiscoveryReflectionModule["liveModelFactory"];
+  try {
+    liveModelFactory = (await loadDiscoveryModules(root)).reflection.liveModelFactory;
+  } catch (e) {
+    return { ok: false, reason: (e as Error).message };
+  }
   const live = await liveModelFactory({ root, tools: "", timeoutMs: 300_000 }) as { ok: boolean; model?: ModelFn; run?: ModelFn; reason?: string };
   if (!live.ok || typeof live.run !== "function") return { ok: false, reason: String(live.reason ?? "MODEL_SEAM_MISSING") };
   return { ok: true, model: live.run, modelId: live.model ?? null };

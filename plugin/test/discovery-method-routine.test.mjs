@@ -29,10 +29,14 @@ import {
   DISCOVERY_METHOD_NAME,
   CARRIER_REL,
   MIN_INTERVAL_MINUTES,
+  LEDGER_MODULE_FILE,
+  SCRIPT_REPO_ROOT,
   parseDiscoveryMethodSection,
   readDiscoveryMethodConfig,
   readCarrierRounds,
   readHeldOutCases,
+  resolveEngineModule,
+  loadDiscoveryModules,
   runDiscoveryMethod,
   buildDiscoveryMethodRoutine,
   discoveryMethodRoutineFromConfig,
@@ -349,10 +353,70 @@ test("case (8) — after a full round nothing under tasks/ or goals/ changed, an
   assert.notEqual(mutated, src, "the mutation control must actually change the source");
 });
 
-// ── the held-out pool: only pinned Experiences are usable, and an unreadable ledger is its OWN value ─
-test("readHeldOutCases — only Experiences carrying an evaluation_pin, and an unreadable ledger is not 'no cases'", () => {
+// ── the engine modules are resolved from DISK, never statically imported ─────────────────────────────
+// WHY THIS IS A TEST AND NOT A COMMENT: a static `../../docs/analysis/*.mjs` specifier in THIS file is a
+// build-breaking defect, not a style choice. `publish-dist-branch` stages `plugin/` as the artifact root
+// and bundles `scripts/*.ts` — so the specifier escapes the artifact (`Could not resolve
+// "../../docs/analysis/…"`, which reds npm-pack-e2e / shipped-shell-reachability / build-plugin-dist),
+// AND esbuild inlines those modules, whose own entry guards then HIJACK the driver bundles' mains. Both
+// halves were observed on this task before this control existed; the predicate below is what keeps the
+// third one from being written.
+test("the engine modules are resolved at runtime — NO static out-of-artifact import (with mutation control)", () => {
+  const src = fs.readFileSync(ROUTINE_SRC, "utf8");
+  // Judged BY POSITION on the real source text (硬规则 2): a static import/export-from specifier that
+  // walks OUT of the shipped artifact into docs/analysis.
+  const STATIC_ENGINE_IMPORT = /(?:^|\n)\s*(?:import|export)[^;\n]*from\s*["'][^"']*docs\/analysis\/[^"']*["']/;
+  assert.doesNotMatch(src, STATIC_ENGINE_IMPORT, "no static import may reach docs/analysis from this shipped file");
+  // Non-zero control on the SAME predicate: it CAN fire. `src` must not be silently un-matchable.
+  const mutated = `${src}\nimport { reflect } from "../../docs/analysis/discovery-reflection.mjs";\n`;
+  assert.match(mutated, STATIC_ENGINE_IMPORT, "the mutation must turn the same predicate red — otherwise the control is vacuous");
+  assert.notEqual(mutated, src, "the mutation control must actually change the source");
+  // …and the runtime resolution it is replaced by is really there.
+  assert.match(src, /await import\(\/\* @vite-ignore \*\/ pathToFileURL\(/, "the loader must import a RESOLVED path, so the bundler cannot see a specifier to inline");
+});
+
+test("resolveEngineModule — resolves from the script's own repo, and a missing module is a NAMED refusal", () => {
   const ws = makeWorkspace();
-  const pinned = readHeldOutCases(ws);
+  // A real module: resolved, and from the SCRIPT's repo (candidate 1), not from the workspace root.
+  const real = resolveEngineModule(ws, LEDGER_MODULE_FILE);
+  assert.notEqual(real.path, null, "a real engine module resolves even for a bare workspace");
+  assert.equal(real.path, path.join(SCRIPT_REPO_ROOT, "docs", "analysis", LEDGER_MODULE_FILE), "code resolves with the code, not with the observed workspace");
+  assert.equal(real.tried.length, 2, "both candidate roots are tried and BOTH are named on refusal");
+  // TAKE-FALSE: a module that is not there is null — and it says WHERE it looked, so the round's
+  // `failed` reason can name the paths rather than reporting a bare "unresolved" (硬规则 3b).
+  const missing = resolveEngineModule(ws, "discovery-no-such-module.mjs");
+  assert.equal(missing.path, null, "an absent module must be null, never a fallback to some other file");
+  assert.equal(missing.tried.length, 2);
+  assert.ok(missing.tried.every((p) => p.endsWith("discovery-no-such-module.mjs")), "the refusal names the file it looked for at each root");
+});
+
+test("loadDiscoveryModules — the three engine modules load with callable seams, and are cached", async () => {
+  const ws = makeWorkspace();
+  const mods = await loadDiscoveryModules(ws);
+  for (const [name, fn] of [
+    ["ledger.ingestNewOutcomes", mods.ledger.ingestNewOutcomes],
+    ["ledger.readExperienceLedger", mods.ledger.readExperienceLedger],
+    ["reflection.runReflectionRound", mods.reflection.runReflectionRound],
+    ["reflection.validateGeneralization", mods.reflection.validateGeneralization],
+    ["reflection.liveModelFactory", mods.reflection.liveModelFactory],
+    ["registry.appendMethodRecord", mods.registry.appendMethodRecord],
+    ["registry.readMethodRegistry", mods.registry.readMethodRegistry],
+  ]) {
+    assert.equal(typeof fn, "function", `${name} must be callable — a shape mismatch must not pass as a load`);
+  }
+  // Cached by RESOLVED path: a second resolution hands back the SAME module instances rather than
+  // re-importing them. (The wrapper object is rebuilt — it is the module graph that is shared, and that
+  // is the claim that matters: a re-import would re-initialise the engine's own module-level state.)
+  const again = await loadDiscoveryModules(ws);
+  assert.equal(again.ledger, mods.ledger, "the ledger module is the same instance — cached, not re-imported");
+  assert.equal(again.reflection, mods.reflection, "the reflection module is the same instance");
+  assert.equal(again.registry, mods.registry, "the registry module is the same instance");
+});
+
+// ── the held-out pool: only pinned Experiences are usable, and an unreadable ledger is its OWN value ─
+test("readHeldOutCases — only Experiences carrying an evaluation_pin, and an unreadable ledger is not 'no cases'", async () => {
+  const ws = makeWorkspace();
+  const pinned = await readHeldOutCases(ws);
   assert.equal(pinned.ok, true, "an absent ledger is a real empty pool");
   assert.deepEqual(pinned.cases, []);
 
@@ -366,14 +430,14 @@ test("readHeldOutCases — only Experiences carrying an evaluation_pin, and an u
     ].join("\n") + "\n",
     "utf8",
   );
-  const read = readHeldOutCases(unpinnedRoot);
+  const read = await readHeldOutCases(unpinnedRoot);
   assert.equal(read.ok, true);
   assert.equal(read.cases.length, 1, "an Experience with a null pin is NOT a held-out case");
   assert.equal(read.cases[0].case_id, "E-1");
 
   // A torn ledger line must NOT read as "the pool is smaller than it is" (硬规则 3b).
   fs.appendFileSync(path.join(unpinnedRoot, ".quay", "discovery-experience-ledger.jsonl"), "{ not json\n", "utf8");
-  const torn = readHeldOutCases(unpinnedRoot);
+  const torn = await readHeldOutCases(unpinnedRoot);
   assert.equal(torn.ok, false);
   assert.match(torn.reason, /LEDGER_UNREADABLE/);
 });
