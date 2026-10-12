@@ -3,7 +3,7 @@ id: gap-routine-freshness-refresh-stale-goal-009-ac-201-e398b211
 title: "freshness-refresh: AC-201's newest carrier evidence (ts
   2026-10-09T13:18:40Z, 80.45h old, d=163) leaves margin/K=0.1850 at or below
   the 0.2223 fire threshold = the commits the tip "
-status: ready
+status: done
 labels:
   - gap
   - routine-filed
