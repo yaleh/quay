@@ -394,11 +394,3 @@ $ git show --stat 5a04e28fa | tail -2
 ⚠️ **缓存被反复重写**：本仓 fan-in 的缓存只按 `(task, developTip)` 键（`worker-fan-in.ts:2433`「锁内 merge 到的 develop tip 与 worker 记录的 developSha 完全一致时跳过」），而 develop 在本轮的每次 scoped 门跑动期间都会前进若干提交 ⇒ 每次按「缓存的前提是对着**这个确切 tip** 验过绿」作废重来（实测 `81f9dd0e…` → `f65848f4a…` → 退出树上的再次写入）。⛔ 没有用 merge-base 凑一个「更旧的、仍然合法」的 tip 去换一次假冗余；⛔ 也不把具体 sha 写成「最终值」（它是 move 的）——可复核的是上表那条不变量。缓存失配的代价只是 fan-in 重跑一次 scoped 门，**不是**假绿。
 
 ⚠️ **台账仍是 worktree 本地那一份**：`scripts/test.sh` 起点的 `refresh-worktree-quay` 会从主检出拷 `.quay/` 覆盖它。本轮顺序因此是「先 scoped 门（它会覆盖）→ 再 `goal gate` + `goal check --stale-pass --sweep`」，⇒ 退出时尾事件即上表那条 `18:46:15` 的 pass。持久收敛仍走落 develop ⇒ `syncDevelopToDoc` ⇒ 生产轮转的路径。
-
-## Blocker
-
-**2026-10-12T18:35:28.029Z — worker 未落地（exited-not-landed）**
-
-- 未落地原因：step=suite: __PERFILE__ duration_ms=31274 /data/home/yale/work/quay-worktrees/gap-ac197-criterion-commitstorewrite-identifier-pin-stale/plugin/test/prod-data-audit.test.mjs passed=false end_ms=1791829892568 cpu_ms=31960.598 mem_peak_kb=1910120
-- run_id：wk-prod-anchor
-- session_id：bbba55c6-a9dc-49b5-b485-9b5315fe30d8
