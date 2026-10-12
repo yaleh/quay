@@ -20,6 +20,15 @@
 //       when the inventory is empty or missing — none of these suppresses the semantic round
 //   (l) no problem-class pattern table or regex used to select/reject hypotheses (static control naming
 //       what it scans for); the dedup ASSISTANCE is allowed and named
+//   (m) the ANSWER RESERVE and the failure legibility of a killed call (task
+//       gap-open-semantic-discovery-investigator-exits-before-hypotheses-zero-semantic-output):
+//         AC1(a) an `error_max_turns` stream ⇒ the call record carries the subtype and the round reports
+//                `not-evaluated:error_max_turns`, NOT "0 hypotheses" (+ the negative control)
+//         AC1(b) a zero-token exit-1 with stderr ⇒ the stderr TAIL is recorded and its truncation is a
+//                recorded reading, not a silent slice
+//         AC1(c) the answer reserve turns a cut-off run into parsed hypotheses — a stub that answers ONLY
+//                when told to stop exploring
+//       plus the report-only / budget / kill-switch invariants the AC5 reading rests on
 // Plus: the two in-scratch-copy NEGATIVE CONTROLS the task names ((g) and (k)), and the
 // off-by-default / routine-table wiring contracts.
 //
@@ -116,6 +125,16 @@ import {
   pairedRoundDecision,
   openBaselineDiscoveryRecordId,
   callsOfArm,
+  // ── the ANSWER RESERVE + failure legibility (case (m)) ────────────────────────────────────────────
+  ANSWER_RESERVE_PROMPT_TURNS,
+  ANSWER_RESERVE_TOOLS,
+  STDERR_TAIL_MAX,
+  boundedTail,
+  callNotEvaluatedToken,
+  firstNotEvaluatedToken,
+  parseHypothesisArray,
+  turnReserveDirective,
+  buildAnswerReservePrompt,
 } from "../scripts/open-semantic-discovery-routine.ts";
 import { ROUTINE_LAST_RUN_REL, readLastRunMap } from "../scripts/probe-routine.ts";
 import { qualityGateRoutines } from "../scripts/quality-gate-driver.ts";
@@ -466,7 +485,7 @@ test("case (a) — section absent ⇒ not-evaluated:disabled and ZERO spawns", a
   const engine = makeEngine();
   const spawn = countingSpawn();
   const fact = await runOpenSemanticDiscovery(ws, { ...runOpts(ws, { engine }), spawnFn: spawn, pinFn: pinStub() });
-  assert.equal(fact.state, "not-evaluated");
+  assert.equal(fact.state, "not-evaluated", `got ${fact.state}: ${fact.reason}`);
   assert.match(fact.reason, /disabled/);
   assert.equal(spawn.calls.length, 0, "ZERO spawns");
   assert.equal(engine.investigatorCalls.length, 0, "ZERO investigator calls");
@@ -479,7 +498,7 @@ test("case (a) — enabled:false ⇒ not-evaluated:disabled and ZERO spawns", as
   const engine = makeEngine();
   const spawn = countingSpawn();
   const fact = await runOpenSemanticDiscovery(ws, { ...runOpts(ws, { engine }), spawnFn: spawn, pinFn: pinStub() });
-  assert.equal(fact.state, "not-evaluated");
+  assert.equal(fact.state, "not-evaluated", `got ${fact.state}: ${fact.reason}`);
   assert.match(fact.reason, /disabled/);
   assert.equal(spawn.calls.length, 0, "ZERO spawns");
 });
@@ -490,7 +509,7 @@ test("case (a) — halted ⇒ not-evaluated and ZERO spawns", async () => {
   const engine = makeEngine();
   const spawn = countingSpawn();
   const fact = await runOpenSemanticDiscovery(ws, { ...runOpts(ws, { engine }), halted: true, spawnFn: spawn, pinFn: pinStub() });
-  assert.equal(fact.state, "not-evaluated");
+  assert.equal(fact.state, "not-evaluated", `got ${fact.state}: ${fact.reason}`);
   assert.match(fact.reason, /halted/);
   assert.equal(spawn.calls.length, 0, "ZERO spawns");
   assert.equal(fs.existsSync(ledgerPath(ws)), false, "ZERO reservations");
@@ -571,7 +590,7 @@ test("case (d) — a call REFUSED at the cap stops the round and reports it", as
   const engine = makeEngine();
   const spawn = countingSpawn();
   const fact = await runOpenSemanticDiscovery(ws, { ...runOpts(ws, { engine }), spawnFn: spawn, pinFn: pinStub() });
-  assert.equal(fact.state, "not-evaluated");
+  assert.equal(fact.state, "not-evaluated", `got ${fact.state}: ${fact.reason}`);
   assert.match(fact.reason, /budget-24h/);
   assert.deepEqual(resumeSteps(ws), ["investigator", "verifier"], "exactly the granted calls were reserved");
   assert.equal(spawn.calls.length, 2, "the refused call was NOT spawned");
@@ -586,7 +605,7 @@ test("case (d) — a round that is refused BEFORE any call does not even reserve
   const engine = makeEngine();
   const spawn = countingSpawn();
   const fact = await runOpenSemanticDiscovery(ws, { ...runOpts(ws, { engine }), spawnFn: spawn, pinFn: pinStub() });
-  assert.equal(fact.state, "not-evaluated");
+  assert.equal(fact.state, "not-evaluated", `got ${fact.state}: ${fact.reason}`);
   assert.match(fact.reason, /budget-24h/);
   assert.equal(spawn.calls.length, 0);
   assert.equal(fs.existsSync(ledgerPath(ws)), false, "ZERO reservations");
@@ -605,7 +624,7 @@ test("case (e) — the USD cap ⇒ not-evaluated:budget-usd-24h and ZERO spawns"
   const engine = makeEngine();
   const spawn = countingSpawn();
   const fact = await runOpenSemanticDiscovery(ws, { ...runOpts(ws, { engine }), spawnFn: spawn, pinFn: pinStub() });
-  assert.equal(fact.state, "not-evaluated");
+  assert.equal(fact.state, "not-evaluated", `got ${fact.state}: ${fact.reason}`);
   assert.match(fact.reason, /budget-usd-24h/);
   assert.equal(spawn.calls.length, 0, "ZERO spawns");
   assert.equal(fact.value.budget_usd_24h.used, 40);
@@ -1877,7 +1896,7 @@ test("NEGATIVE CONTROL (k) — gate the round on «arch-discovery reported new f
     configPresent: true, configError: null, halted: false, invokedBy: INVOKED_BY_RESIDENT,
     modules: makeEngine().modules, launchArgvFn: fakeLaunchArgv, spawnFn: spawn, pinFn: pinStub(),
   });
-  assert.equal(fact.state, "not-evaluated");
+  assert.equal(fact.state, "not-evaluated", `got ${fact.state}: ${fact.reason}`);
   assert.match(fact.reason, /arch-discovery reported no new fingerprints/);
   assert.equal(spawn.calls.length, 0, "⇒ the mutant SUPPRESSED the semantic round: the (k) claim is FALSIFIED — the control is live");
   process.stdout.write(`    NEGATIVE CONTROL (k): mutant spawned 0 calls when arch-discovery reported 0 new fingerprints (claim was «the round still runs»)\n`);
@@ -2379,4 +2398,286 @@ test("focusDirective — carries the history and keeps the CHOICE with the model
   assert.match(some, /alpha/);
   assert.match(some, /beta/);
   assert.match(some, /ELSEWHERE/, "going elsewhere is offered, not required");
+});
+
+// ── (m) THE ANSWER RESERVE + failure legibility ──────────────────────────────────────────────────────
+// Task gap-open-semantic-discovery-investigator-exits-before-hypotheses-zero-semantic-output. Production
+// ran the routine twice and got `exit 1`, `turns: 13` under `--max-turns 12`, `0 hypotheses` both times —
+// and the call record kept neither the stream's structural `subtype` nor any stderr, so "the model was
+// killed before it could answer" and "the model explored and found nothing" were the SAME record.
+//
+// The fixtures below are the production shape: `result.subtype:"error_max_turns"`, `is_error:true`,
+// `num_turns = cap + 1`, an EMPTY `result` text, and the assistant's own narration on the turns that did
+// run (which is what the reserve call is handed back).
+const maxTurnsStream = (narration) => [
+  JSON.stringify({ type: "system", subtype: "init", model: FIXTURE_MODEL }),
+  JSON.stringify({ type: "assistant", message: { content: [{ type: "text", text: narration }] } }),
+  JSON.stringify({
+    type: "result", subtype: "error_max_turns", num_turns: 13, is_error: true, result: "",
+    usage: { input_tokens: 184654, output_tokens: 7435 }, total_cost_usd: 0.435,
+  }),
+].join("\n") + "\n";
+const NARRATION = "I have read plugin/scripts/quality-gate-driver.ts and had not yet written the block.";
+const MAX_TURNS_STREAM = maxTurnsStream(NARRATION);
+
+/** Is this argv the ANSWER RESERVE's tool-less call? Read by POSITION off the argv the routine really
+ *  builds (`--tools` <value>), never by scraping the prompt — a prompt-reading stub would make the test
+ *  agree with itself. A tool-less call is the ONE structural thing that distinguishes the rescue from the
+ *  exploration, and it is the thing production's launcher would see too. */
+const toolsOf = (argv) => {
+  const i = argv.indexOf("--tools");
+  return i >= 0 ? String(argv[i + 1]) : null;
+};
+const isToolLess = (argv) => toolsOf(argv) === "";
+
+/** The stub delegate these cases run against. ONLY the EXPLORATION call is cut off at the turn cap; the
+ *  TOOL-LESS reserve call answers either with hypotheses (`hypsOnReport`) or with the same cutoff — which
+ *  is what makes (a) and (c) two readings of ONE mechanism rather than two fixtures. The investigator's
+ *  envelope (`Read,Grep,Glob`) is the one thing that separates it from the verifier's (`Read,Grep`), so
+ *  the cutoff is keyed on THAT rather than on call order — a stub that keyed on order would agree with
+ *  the routine's sequencing instead of with what was actually asked. */
+function answerReserveDelegate({ hypsOnReport = HYPS } = {}) {
+  return (argv, opts) => {
+    if (isToolLess(argv)) {
+      if (hypsOnReport === null) return { status: 1, stdout: MAX_TURNS_STREAM, stderr: "Reached maximum number of turns (1)\n", error: null };
+      return { status: 0, stdout: streamText(`${FOCUS_MARKER} fixture focus\n${JSON.stringify(hypsOnReport)}`), stderr: "", error: null };
+    }
+    if (isNoveltyPrompt(opts)) return { status: 0, stdout: NOVELTY_STREAM, stderr: "", error: null };
+    if (toolsOf(argv) === INVESTIGATOR_TOOLS) return { status: 1, stdout: MAX_TURNS_STREAM, stderr: "Reached maximum number of turns (12)\n", error: null };
+    return { status: 0, stdout: STREAM, stderr: "", error: null };
+  };
+}
+
+/** An investigator stub whose runs carry what the MODEL really returned: it parses the call it made
+ *  (`parseHypotheses(callText(stdout))`) instead of being handed a fixed list. The answer reserve's whole
+ *  mechanism is "a run that produced nothing gets a second call", so a stub that always reported `hyps`
+ *  would make that mechanism untestable — the run would already look answered. */
+function streamReadingInvestigator() {
+  const sink = [];
+  const fn = async (o) => {
+    const records = [];
+    for (let i = 0; i < o.runs; i++) {
+      const r = await o.runModel(o.prompt, i);
+      const stdout = String(r?.stdout ?? "");
+      const { hyps, parse_error } = realHyp.parseHypotheses(realHyp.callText(stdout));
+      sink.push({ tools: o.tools, maxTurns: o.maxTurns, prompt: o.prompt });
+      records.push({ run: i + 1, hyps, parse_error, stdout, exit: r?.status ?? null, n_hyps: hyps ? hyps.length : null });
+    }
+    return { ok: true, records, parsed: records.filter((r) => r.hyps).length, total: o.runs };
+  };
+  fn.calls = sink;
+  return fn;
+}
+
+/** A workspace + engine wired for the (m) cases, with the pin kept under the test's OWN tmp root so a run
+ *  cannot litter the shared one. Returns the seams the assertions read. */
+function answerReserveFixture({ delegate }) {
+  const ws = makeWorkspace();
+  writeConfig(ws, cfgYaml());
+  const engine = makeEngine();
+  engine.modules.hyp.runInvestigator = streamReadingInvestigator();
+  const spawn = countingSpawn(delegate);
+  const pin = pinStub();
+  return { ws, engine, spawn, pin, opts: { ...runOpts(ws, { engine }), spawnFn: spawn, pinFn: pin, pinTmpRoot: tmpDir("osd-reserve-pinroot-") } };
+}
+const pinRunFile = (pin, name = "run-1.json") =>
+  JSON.parse(fs.readFileSync(path.join(pin.pins[0], ".open-semantic-discovery-runs", name), "utf8"));
+
+test("case (m) AC1(a) — an error_max_turns stream ⇒ the call record carries the subtype and the round reports not-evaluated:error_max_turns, NOT \"0 hypotheses\"", async () => {
+  // BOTH the exploration and its rescue are cut off: the production shape, where a rescue is not owed.
+  const { ws, spawn, opts } = answerReserveFixture({ delegate: answerReserveDelegate({ hypsOnReport: null }) });
+  const fact = await runOpenSemanticDiscovery(ws, opts);
+  const round = rounds(ws)[0];
+
+  const call = round.calls.find((c) => c.step === "investigator");
+  assert.ok(call, "the investigator call is on the round record");
+  assert.equal(call.exit, 1);
+  assert.equal(call.subtype, "error_max_turns", "the call record carries the stream's STRUCTURAL subtype");
+  assert.equal(call.is_error, true);
+  assert.equal(call.num_turns, 13, "…and the stream's own num_turns, alongside the realized turn count");
+  assert.equal(call.stream_ok, true, "the stream DID parse — this is not an uninstrumented call");
+  assert.equal(call.turns, 13, "the realized turns are the stream's, not the cap's");
+  assert.equal(call.tokens.input, 184654, "a cut-off call still reports what it spent");
+  assert.equal(call.not_evaluated, "not-evaluated:error_max_turns");
+  assert.equal(call.stderr_tail, "Reached maximum number of turns (12)\n", "the launcher's own cause rides the record");
+  assert.equal(round.investigator.not_evaluated, "not-evaluated:error_max_turns");
+  assert.equal(round.investigator.answer_reserve.attempted, 1, "the reserve was TRIED");
+  assert.equal(round.investigator.answer_reserve.rescued, 0, "…and did not succeed");
+  assert.deepEqual(round.investigator.answer_reserve.not_evaluated, ["not-evaluated:error_max_turns"]);
+  assert.equal(round.clusters.total, 0);
+
+  // ⛔ THE ASSERTION THE TASK EXISTS FOR: the two states are different sentences now.
+  assert.equal(fact.state, "not-evaluated", `a round whose calls never answered is NOT a verified round (got ${fact.state}: ${fact.reason})`);
+  assert.match(fact.reason, /not-evaluated:error_max_turns/, "the Fact NAMES the cause");
+  assert.doesNotMatch(fact.reason, /cluster\(s\) from 1 run\(s\)/, "…and never reports it as an exploration that found nothing");
+});
+
+test("case (m) AC1(a) NEGATIVE CONTROL — remove the subtype capture and the SAME predicate stops naming the cause", () => {
+  const withSubtype = { exit: 1, spawn_error: null, subtype: "error_max_turns", stream_ok: true };
+  assert.equal(callNotEvaluatedToken(withSubtype), "not-evaluated:error_max_turns", "the predicate CAN name the cause");
+  // ⛔ THE MUTATION: the very record the round builds, with the subtype capture removed. The same function
+  // the round calls must stop producing the token — that is what makes the assertion above a reading of
+  // the capture rather than of the exit code alone (硬规则 4 推论四: a control that would differ, run).
+  const mutated = { ...withSubtype, subtype: null };
+  assert.equal(callNotEvaluatedToken(mutated), "not-evaluated:uninstrumented-exit-1");
+  assert.notEqual(callNotEvaluatedToken(mutated), "not-evaluated:error_max_turns", "without the capture, (a) is red");
+  // …and the round really does build the record WITH the capture — otherwise the mutation would be of a
+  // value the routine never produces, and the control would prove nothing.
+  const src = fs.readFileSync(ROUTINE_SRC, "utf8");
+  assert.match(src, /subtype: stream\.ok \? \(stream\.subtype \?\? null\) : null/, "the call record carries the stream's subtype");
+  // The other half of the predicate, so the zero above is not the artifact of a function that always fires.
+  assert.equal(callNotEvaluatedToken({ ...withSubtype, exit: 0 }), null, "a call that RAN is not not-evaluated");
+  assert.equal(firstNotEvaluatedToken([{ exit: 0 }, withSubtype]), "not-evaluated:error_max_turns", "the FIRST failure is the cause");
+  assert.equal(firstNotEvaluatedToken([{ exit: 0 }, { exit: 0 }]), null, "no failure ⇒ no token");
+});
+
+test("case (m) AC1(b) — a zero-token exit-1 with stderr ⇒ the stderr tail is recorded", async () => {
+  const STDERR = "Error: launch failed: authentication_error (the gateway refused the request)\n";
+  // NO stream at all: the round-1 shape (tokens 0, turns null, exit 1), whose cause production kept
+  // nowhere. Anything the launcher printed is the only evidence there is.
+  const delegate = (argv, opts) => {
+    if (isToolLess(argv)) return { status: 1, stdout: "", stderr: STDERR, error: null };
+    if (isNoveltyPrompt(opts)) return { status: 0, stdout: NOVELTY_STREAM, stderr: "", error: null };
+    return { status: 1, stdout: "", stderr: STDERR, error: null };
+  };
+  const { ws, opts } = answerReserveFixture({ delegate });
+  const fact = await runOpenSemanticDiscovery(ws, opts);
+  const call = rounds(ws)[0].calls.find((c) => c.step === "investigator");
+
+  assert.equal(call.exit, 1);
+  assert.equal(call.stream_ok, false, "no stream parsed — NOT the same reading as a stream that said nothing");
+  assert.equal(call.subtype, null, "'not read' keeps its own value and is never defaulted to a success");
+  assert.equal(call.turns, null);
+  assert.deepEqual(call.tokens, { input: 0, output: 0 });
+  assert.equal(call.not_evaluated, "not-evaluated:uninstrumented-exit-1");
+  assert.equal(call.stderr_tail, STDERR, "the launcher's own cause is ON the record");
+  assert.equal(call.stderr_chars, STDERR.length);
+  assert.equal(call.stderr_tail_truncated, false);
+  assert.equal(fact.state, "not-evaluated", `got ${fact.state}: ${fact.reason}`);
+  assert.match(fact.reason, /not-evaluated:uninstrumented-exit-1/);
+
+  // The tail is a TAIL, and its truncation is a RECORDED reading rather than a silent slice (硬规则 3b):
+  // without `truncated`, a bounded tail and a complete one would look the same.
+  const long = boundedTail(`${"x".repeat(STDERR_TAIL_MAX)}TAIL`, STDERR_TAIL_MAX);
+  assert.equal(long.tail.length, STDERR_TAIL_MAX);
+  assert.equal(long.tail.endsWith("TAIL"), true, "the TAIL is what is kept — that is where a cause is");
+  assert.equal(long.truncated, true);
+  assert.equal(long.chars, STDERR_TAIL_MAX + 4);
+  const short = boundedTail("done\n", STDERR_TAIL_MAX);
+  assert.deepEqual(short, { tail: "done\n", truncated: false, chars: 5 });
+  assert.deepEqual(boundedTail(undefined, 10), { tail: "", truncated: false, chars: 0 }, "a missing stream is empty, not a crash");
+});
+
+test("case (m) AC1(c) — the answer reserve produces parsed hypotheses from a stub that answers ONLY when told to stop exploring", async () => {
+  const { ws, spawn, pin, opts } = answerReserveFixture({ delegate: answerReserveDelegate({ hypsOnReport: HYPS }) });
+  const fact = await runOpenSemanticDiscovery(ws, opts);
+  const round = rounds(ws)[0];
+
+  // The stub answers on the TOOL-LESS call and on nothing else — the exploration call it was handed is a
+  // cutoff stream, so every hypothesis in this round came from the rescue.
+  const reserveCalls = spawn.calls.filter((c) => isToolLess(c.argv));
+  assert.equal(reserveCalls.length, 1, "exactly ONE tool-less rescue call");
+  const argvOf = (c, flag) => c.argv[c.argv.indexOf(flag) + 1];
+  assert.equal(argvOf(reserveCalls[0], "--max-turns"), "1", "the rescue is ONE turn");
+  assert.equal(argvOf(reserveCalls[0], "--tools"), ANSWER_RESERVE_TOOLS);
+  // ⛔ The rescue carries the run's OWN narration back — read from the field the call record kept, so the
+  // two halves (capture and handback) are one mechanism rather than two that happen to agree.
+  assert.match(reserveCalls[0].opts.stdinData, /YOUR TURN BUDGET IS EXHAUSTED/);
+  assert.match(reserveCalls[0].opts.stdinData, /EXPLORATION NOTES/, "the notes the rescue reports FROM are in the prompt");
+  assert.ok(reserveCalls[0].opts.stdinData.includes(NARRATION), "…and they are the run's OWN words");
+  assert.equal(reserveCalls[0].opts.cwd, pin.pins[0], "the rescue is rooted at the SAME pin");
+
+  assert.equal(round.investigator.answer_reserve.attempted, 1);
+  assert.equal(round.investigator.answer_reserve.rescued, 1);
+  assert.equal(round.investigator.answer_reserve.hypotheses, HYPS.length);
+  assert.equal(round.investigator.runs_with_hypotheses, 1, "the RESCUED run counts as a run with hypotheses");
+  assert.equal(round.clusters.total, HYPS.length, "…and its hypotheses are clustered like any others");
+  assert.equal(round.confirmed.count > 0, true, "a rescued hypothesis is verified and refuted like any other");
+  assert.equal(fact.state, "verified");
+  // ⛔ The rescue SUCCEEDED, so the round is not "not-evaluated" — but the exploration call WAS cut off,
+  // and the Fact still says so rather than quietly folding a rescued run into a clean one. Both readings
+  // are on the same sentence, which is the whole point: the counts are over the calls that answered.
+  assert.match(fact.reason, /1 of \d+ call\(s\) were NOT EVALUATED \(not-evaluated:error_max_turns\)/);
+  assert.doesNotMatch(fact.reason, /produced NO parsed hypothesis cluster/);
+
+  // The rescue is a RESERVATION on the SAME ledger, under its OWN step name: a call that was spent must be
+  // explicable from the ledger alone, and every spawn must be one reservation.
+  assert.equal(resumeSteps(ws).includes("investigator-report"), true, "the rescue reserved under its own step name");
+  assert.equal(resumeSteps(ws).length, spawn.calls.length, "one reservation per spawn, the rescue included");
+  assert.equal(round.calls.find((c) => c.step === "investigator-report").exit, 0);
+  // The run file on the pin is REWRITTEN: a run that was rescued must not leave a file claiming zero.
+  const runFile = pinRunFile(pin);
+  assert.equal(runFile.hyps.length, HYPS.length, "the pinned run file carries the RESCUED hypotheses");
+  assert.equal(runFile.n_hyps, HYPS.length);
+  assert.equal(runFile.answer_reserve.rescued, true);
+});
+
+test("case (m) — the turn-reserve directive is in BOTH arms' prompts (the paired instrument's only difference stays the guidance block)", async () => {
+  const { ws, spawn, opts } = answerReserveFixture({ delegate: () => ({ status: 0, stdout: STREAM, stderr: "", error: null }) });
+  opts.config = { ...opts.config, investigatorMaxTurns: 12 };
+  await runOpenSemanticDiscovery(ws, opts);
+  const explorationPrompts = spawn.calls.filter((c) => !isToolLess(c.argv)).map((c) => String(c.opts.stdinData));
+  assert.ok(explorationPrompts.length > 0);
+  for (const p of explorationPrompts) {
+    assert.match(p, /TURN BUDGET — READ THIS BEFORE YOU START/);
+    assert.match(p, /capped at 12 assistant turns/);
+    assert.match(p, new RegExp(`STOP calling tools by turn ${12 - ANSWER_RESERVE_PROMPT_TURNS}`));
+    assert.match(p, /reports ZERO hypotheses/);
+  }
+  // The directive is PURE over the cap: a different cap moves the stated stop-by turn with it, and a
+  // one-turn cap can never reserve more turns than the call has (硬规则 4 推论二: no literal that only
+  // holds on one host/cap).
+  assert.match(turnReserveDirective(40), /STOP calling tools by turn 38/);
+  assert.match(turnReserveDirective(3), /Reserve the last 2 turn\(s\)/);
+  assert.match(turnReserveDirective(1), /Reserve the last 1 turn\(s\)/, "a 1-turn call reserves its own turn, never 2");
+  assert.match(turnReserveDirective(1), /STOP calling tools by turn 1/);
+  assert.match(buildAnswerReservePrompt("SCHEMA HERE", "NOTES HERE"), /SCHEMA HERE\n\n/);
+  assert.match(buildAnswerReservePrompt("SCHEMA HERE", "NOTES HERE"), /NOTES HERE\n--- END OF NOTES ---/, "the notes are LAST, where recency is strongest");
+});
+
+test("case (m) — the reserve parses hypotheses with the ENGINE's own rule (pinned against the same text, so the two cannot drift)", () => {
+  const text = `some prose\n${JSON.stringify(HYPS)}\ntrailing prose\n`;
+  const mine = parseHypothesisArray(text);
+  const engine = realHyp.parseHypotheses(realHyp.callText(text));
+  assert.deepEqual(mine, engine.hyps, "the routine and the engine read the SAME text the same way");
+  assert.equal(mine.length, HYPS.length);
+  // ⛔ The negative half: text with no array is NULL, never an empty list — "did not parse" and "parsed
+  // nothing" are different readings (硬规则 3b).
+  assert.equal(parseHypothesisArray("no array here"), null);
+  assert.equal(parseHypothesisArray(""), null);
+  assert.equal(parseHypothesisArray("[not json"), null);
+  assert.equal(parseHypothesisArray('{"not":"an array"}'), null, "an OBJECT is not a hypothesis array");
+  assert.deepEqual(parseHypothesisArray("[]"), [], "an EMPTY array IS a parse — the model really said nothing");
+});
+
+test("case (m) AC5 — the reserve changes NEITHER the kill switch, NOR the report-only surface, NOR the per-step envelope the paired arms are compared on", async () => {
+  // (i) The kill switch still short-circuits BEFORE any seam: with `enabled:false` there is not even a
+  // spawn, so the reserve cannot be reached.
+  const offWs = makeWorkspace();
+  writeConfig(offWs, cfgYaml({ enabled: "false" }));
+  const offSpawn = countingSpawn(answerReserveDelegate({ hypsOnReport: HYPS }));
+  const offFact = await runOpenSemanticDiscovery(offWs, { ...runOpts(offWs, { engine: makeEngine() }), spawnFn: offSpawn, pinFn: pinStub() });
+  assert.equal(offFact.state, "not-evaluated");
+  assert.equal(offSpawn.calls.length, 0, "kill switch: ZERO spawns, the reserve included");
+
+  // (ii) A run that was rescued still writes NOTHING to tasks/ or goals/ — the routine stays report-only.
+  const { ws, opts } = answerReserveFixture({ delegate: answerReserveDelegate({ hypsOnReport: HYPS }) });
+  const before = ["tasks", "goals"].map((d) => fs.readdirSync(path.join(ws, d)).sort().join(","));
+  await runOpenSemanticDiscovery(ws, opts);
+  const after = ["tasks", "goals"].map((d) => fs.readdirSync(path.join(ws, d)).sort().join(","));
+  assert.deepEqual(after, before, "the routine still writes no task and no goal");
+
+  // (iii) The paired ENVELOPE the two arms are compared on is untouched: the reserve is a call INSIDE an
+  // arm, not a knob on it — raising `investigator_max_turns` is the only thing that moves this reading.
+  const envelope = pairedArmBudget(readOpenSemanticDiscoveryConfig(ws).config);
+  assert.deepEqual(envelope, {
+    investigator_runs: 1,
+    max_clusters_verified: 3,
+    investigator_max_turns: DEFAULT_INVESTIGATOR_MAX_TURNS,
+    verifier_max_turns: 8,
+    refutation_max_turns: 6,
+  });
+  assert.equal(envelope.investigator_max_turns, 12, "the production turn cap is UNCHANGED by this task");
+  assert.equal(envelope.investigator_max_turns, DEFAULT_INVESTIGATOR_MAX_TURNS);
+  assert.equal(Object.values(envelope).includes("investigator-report"), false, "the rescue is not a budget knob");
 });

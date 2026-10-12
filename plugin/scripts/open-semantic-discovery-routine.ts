@@ -226,6 +226,89 @@ export const VALUE_TOOLS = "Read,Grep";
  *  an exploration — it may re-read the source to settle whether a claim is new, and nothing more. */
 export const NOVELTY_TOOLS = "Read,Grep";
 
+// ── the ANSWER RESERVE (task gap-open-semantic-discovery-investigator-exits-before-hypotheses-zero-semantic-output) ──
+// THE DEFECT THIS CLOSES. In production the first two resident rounds each recorded `exit 1`, `turns: 13`
+// under `--max-turns 12`, `0 hypotheses`, `confirmed.count 0` — and the call record kept NEITHER the
+// stream's `result.subtype` NOR any stderr, so "the model was killed mid-exploration before it could
+// answer" and "the model explored and found nothing" were THE SAME RECORD (硬规则 3b). Two independent
+// things are needed and neither replaces the other: (i) the failure must be LEGIBLE (§failure legibility
+// below), and (ii) the answer must be BUDGETED FOR, because a hard turn cap with no reservation kills the
+// run at exactly the moment it was about to report.
+//
+// ⛔ SEMANTIC FIRST. The reserve is a SECOND MODEL CALL, not a mechanical substitute for exploration: it
+// hands the run its own exploration notes back and asks it to report. Nothing here decides what a
+// hypothesis may say.
+/** How many of the investigator's turns are RESERVED for printing the answer. Two is stated rather than
+ *  measured-with-nothing: the protocol needs one turn to write the block, and one turn of slack absorbs a
+ *  model that closes an exploration it had already finished thinking about. It is a PROMPT-side
+ *  reservation — the `--max-turns` cap itself is NOT raised by it. */
+export const ANSWER_RESERVE_PROMPT_TURNS = 2;
+/** The answer reserve's own call is TOOL-LESS: one turn, no further reading. `stepArgv` already forces
+ *  one turn for a tool-less step, so there is no second budget to keep in sync. */
+export const ANSWER_RESERVE_TOOLS = "";
+/** How much of the model's OWN prose is carried back into the reserve call. A BOUND, not a policy: the
+ *  tail is where a narration that was about to conclude sits, and an unbounded carry would make one
+ *  rescue call as expensive as the exploration it is rescuing. */
+export const ASSISTANT_TAIL_MAX = 4000;
+/** How much of a failed call's stderr is kept. The tail is where a launcher's cause usually is ("Reached
+ *  maximum number of turns", an auth refusal, a gateway 500); the head is progress output. */
+export const STDERR_TAIL_MAX = 400;
+
+/** The TURN RESERVE directive, prepended to BOTH arms' investigator prompts — and it must be prepended to
+ *  BOTH, because the paired instrument's whole claim is that the two arms differ by the GUIDANCE BLOCK and
+ *  nothing else. It states the cap, the reservation and the consequence, in the model's own terms. */
+export function turnReserveDirective(maxTurns: number): string {
+  const reserve = Math.max(1, Math.min(ANSWER_RESERVE_PROMPT_TURNS, Math.max(1, maxTurns - 1)));
+  const stopBy = Math.max(1, maxTurns - reserve);
+  return [
+    "TURN BUDGET — READ THIS BEFORE YOU START.",
+    `This call is capped at ${maxTurns} assistant turns and the cap is HARD: when it is reached the run is`,
+    "killed immediately and NOTHING you have written is used, because no final answer is ever emitted.",
+    `Reserve the last ${reserve} turn(s) for the answer. Concretely: STOP calling tools by turn ${stopBy}, and`,
+    "spend your remaining turn(s) printing the hypothesis JSON block as your final message.",
+    "An incomplete exploration WITH a printed block is worth strictly more than a complete exploration",
+    "without one: a run cut off at the cap reports ZERO hypotheses and is discarded.",
+  ].join("\n");
+}
+
+/** The instruction the reserve call carries. It is deliberately explicit that NO TOOLS are available, so a
+ *  model that would keep exploring is told there is nothing left to explore with. */
+export const ANSWER_RESERVE_INSTRUCTION = [
+  "YOUR TURN BUDGET IS EXHAUSTED. You were cut off at the hard cap before printing your hypothesis block,",
+  "which is why the run produced ZERO hypotheses. THIS call has NO TOOLS — you cannot read anything more.",
+  "Report NOW, from the exploration notes appended below. Print ONLY the hypothesis JSON array your",
+  "instructions require, with nothing else around it. If the notes do not settle a required field, state",
+  "your best reading of it there rather than dropping the hypothesis; if they support no hypothesis at all,",
+  "print [].",
+].join("\n");
+
+/** The reserve call's prompt: the run's OWN prompt (so the required JSON schema, the focus directive and
+ *  the inventory are all still in front of the model), then the stop-exploring instruction, then the tail
+ *  of the run's own narration — last, where recency is strongest. */
+export function buildAnswerReservePrompt(basePrompt: string, explored: string): string {
+  return `${basePrompt}\n\n${ANSWER_RESERVE_INSTRUCTION}\n\n--- YOUR EXPLORATION NOTES (tail) ---\n${explored}\n--- END OF NOTES ---\n`;
+}
+
+/** The hypothesis ARRAY out of a report call's text. ⛔ This repeats the engine's OWN rule
+ *  (`parseHypotheses` in arch-hypothesis-generation.mjs: first `[` … last `]`, then `JSON.parse`) rather
+ *  than reaching for it, and the reason is mechanical: that function is not on the narrow interface this
+ *  routine consumes, and the interface is a compile-time fact — widening it would mean editing a module
+ *  outside this task's Touches. Two implementations of one rule is a drift risk, so the test pins BOTH
+ *  against the same text rather than only pinning this one. */
+export function parseHypothesisArray(text: unknown): Record<string, unknown>[] | null {
+  const s = typeof text === "string" ? text : "";
+  if (!s.trim()) return null;
+  const a = s.indexOf("[");
+  const b = s.lastIndexOf("]");
+  if (a < 0 || b <= a) return null;
+  try {
+    const parsed = JSON.parse(s.slice(a, b + 1));
+    return Array.isArray(parsed) ? (parsed as Record<string, unknown>[]) : null;
+  } catch {
+    return null;
+  }
+}
+
 /** The stated per-call USD ceiling used when a call's realized gateway cost could not be read. Basis: the
  *  2026-10-12 GAIN1 capability-gain run measured ≈$0.05 for an investigator call and ≈$0.5 for a verifier
  *  cluster at gateway rates; the ceiling is the larger of those rounded up, so an unreadable price is
@@ -671,6 +754,45 @@ export function spawnModelCall(
     child.on("error", (e) => finish(null, e));
     child.on("close", (code) => finish(code, null));
   });
+}
+
+// ── failure legibility: what a finished call says about HOW it ended (Plan item 1) ────────────────────
+/** A bounded TAIL of a text stream, with the truncation itself RECORDED rather than implied. Truncating
+ *  silently would make a short tail and a complete one read identically (硬规则 3b), so a reader gets
+ *  `truncated` alongside the tail and never has to infer whether the cause was cut off. */
+export function boundedTail(s: unknown, max: number): { tail: string; truncated: boolean; chars: number } {
+  const text = typeof s === "string" ? s : "";
+  return text.length <= max
+    ? { tail: text, truncated: false, chars: text.length }
+    : { tail: text.slice(text.length - max), truncated: true, chars: text.length };
+}
+
+/** The `not-evaluated:<…>` token a FINISHED call must be reported as, or `null` when the call really ran.
+ *  ⛔ 硬规则 3b, and this helper exists because the production record violated it: `exit 1` with `turns: 13`
+ *  under a 12-turn cap and nothing else, so a call CUT OFF before it could answer was shaped exactly like
+ *  a call that explored and found nothing ("0 hypotheses"). The stream's own `result.subtype` is the
+ *  structural cause (`error_max_turns` / `error_during_execution`); a stream that did not parse has no
+ *  subtype at all, and THAT is `uninstrumented` — never a silent success. `exit: 0` is the ONLY exit that
+ *  reads as "the call ran". */
+export function callNotEvaluatedToken(rec: Record<string, unknown> | null | undefined): string | null {
+  if (rec === null || rec === undefined || typeof rec !== "object") return "not-evaluated:no-call-record";
+  if (typeof rec.spawn_error === "string" && rec.spawn_error !== "") return "not-evaluated:spawn-error";
+  const exit = rec.exit;
+  if (exit === null || exit === undefined) return "not-evaluated:no-exit-status";
+  if (exit === 0) return null;
+  const subtype = typeof rec.subtype === "string" && rec.subtype !== "" ? rec.subtype : null;
+  return subtype === null ? `not-evaluated:uninstrumented-exit-${String(exit)}` : `not-evaluated:${subtype}`;
+}
+
+/** The FIRST `not-evaluated:<…>` token across a round's call records, or `null` when every call ran. The
+ *  FIRST is the CAUSE: a round whose investigator was cut off and whose later steps then had nothing to
+ *  read is ONE failure, and naming the last step would name a symptom of it. */
+export function firstNotEvaluatedToken(calls: readonly Record<string, unknown>[]): string | null {
+  for (const c of calls) {
+    const t = callNotEvaluatedToken(c);
+    if (t !== null) return t;
+  }
+  return null;
 }
 
 // ── the engine modules: resolved from DISK at runtime, never statically imported (see the header) ────
@@ -1828,7 +1950,10 @@ export const armNoveltyRows = (outcomes: readonly NoveltyOutcome[]): { cluster: 
 export function callsOfArm(calls: readonly Record<string, unknown>[], arm: PairedArm): Record<string, unknown>[] {
   const baselinePrefix = `${PAIRED_ARM_BASELINE}-`;
   if (arm === PAIRED_ARM_BASELINE) return calls.filter((c) => String(c.step).startsWith(baselinePrefix));
-  return calls.filter((c) => String(c.step) !== "shadow-investigator" && !String(c.step).startsWith(baselinePrefix));
+  // `shadow-*` covers the shadow pass AND its answer-reserve call: both belong to the third arm, and a
+  // prefix match (rather than two literal names) is what keeps a future shadow step from being charged to
+  // the guided arm by omission.
+  return calls.filter((c) => !String(c.step).startsWith("shadow-") && !String(c.step).startsWith(baselinePrefix));
 }
 
 /**
@@ -2018,9 +2143,14 @@ export function pairedRoundDecision(opts: {
 // ── the round ────────────────────────────────────────────────────────────────────────────────────────
 export type ModelStepKind =
   | "investigator" | "verifier" | "refuter" | "value-assessment" | "novelty-check" | "shadow-investigator"
+  // The ANSWER RESERVE's own call (Plan item 2): ONE tool-less call granted to a run that was cut off at
+  // the turn cap. ⛔ Its OWN step name — the reservation ledger must say WHY the call was spent, or a
+  // rescue would read as a second exploration and the round's call count would stop being explicable.
+  | "investigator-report" | "shadow-investigator-report"
   // The PAIRED round's UNGUIDED arm runs the same four steps under their own kinds, so "which arm spent
   // this call" is readable straight off the reservation ledger instead of inferred from call order.
-  | "baseline-investigator" | "baseline-verifier" | "baseline-refuter" | "baseline-value-assessment" | "baseline-novelty-check";
+  | "baseline-investigator" | "baseline-verifier" | "baseline-refuter" | "baseline-value-assessment" | "baseline-novelty-check"
+  | "baseline-investigator-report";
 
 export interface OpenSemanticDiscoveryRunOptions {
   config: OpenSemanticDiscoveryConfig | null;
@@ -2311,6 +2441,9 @@ export async function runOpenSemanticDiscovery(root: string, opts: OpenSemanticD
       throw e;
     }
     const { turns } = readRealizedTurns(res?.stdout, (s: string) => hyp.parseVerifierStream(s));
+    // The launcher's stderr, bounded and kept. Production kept NONE of it, so a round-1-style zero-token
+    // exit could not be diagnosed at all (Plan item 3) — the cause existed only inside the child process.
+    const stderrTail = boundedTail(res?.stderr, STDERR_TAIL_MAX);
     budget.outcome(r.id, res.error ? classifyModelFailure(res.error) : "completed", turns, res.error ? "SPAWN_ERROR" : null);
     // The realized price: the gateway rate applied to the stream's own usage when BOTH are readable, else
     // NULL — and NULL counts as the per-call ceiling in `usdBudgetUsage`, never as free.
@@ -2341,15 +2474,91 @@ export async function runOpenSemanticDiscovery(root: string, opts: OpenSemanticD
     costUsd += charged;
     tokensIn += Number(usage?.input_tokens ?? 0);
     tokensOut += Number(usage?.output_tokens ?? 0);
-    const rec = {
+    const rec: Record<string, unknown> = {
       step: kind, tools, max_turns: maxTurns, argv_tools_index: argv.indexOf("--tools"), cwd: asRel(root, pinned),
       exit: res?.status ?? null, spawn_error: res?.error ? String(res.error.message ?? res.error).slice(0, 200) : null,
       turns, actual_model: servedModel ?? "not-evaluated:model-unverified",
       tokens: { input: Number(usage?.input_tokens ?? 0), output: Number(usage?.output_tokens ?? 0) },
       cost_usd: realized, cost_source: costSource, cost_charged_usd: charged,
+      // ── HOW THE CALL ENDED (Plan item 1) ─────────────────────────────────────────────────────────────
+      // The stream's OWN structural `result` fields, carried onto the record. ⛔ Before this, an `exit 1`
+      // was all the round kept, so a call killed at the turn cap and a call that explored and found
+      // nothing produced the SAME record — the defect this task exists to close (硬规则 3b). `subtype` is
+      // `null` when the stream did not parse: "not read" keeps its own value, it is never defaulted to a
+      // success, and `stream_ok`/`stdout_bytes` let a reader tell "no stream" from "stream said nothing".
+      stream_ok: stream.ok === true,
+      subtype: stream.ok ? (stream.subtype ?? null) : null,
+      num_turns: stream.ok && Number.isFinite(stream.num_turns) ? (stream.num_turns as number) : null,
+      is_error: stream.ok && typeof stream.is_error === "boolean" ? (stream.is_error as boolean) : null,
+      stdout_bytes: Buffer.byteLength(String(res?.stdout ?? ""), "utf8"),
+      stderr_chars: stderrTail.chars,
+      stderr_tail: stderrTail.tail,
+      stderr_tail_truncated: stderrTail.truncated,
+      not_evaluated: null as string | null,
     };
+    rec.not_evaluated = callNotEvaluatedToken(rec);
+    // The model's OWN prose, kept ONLY for a call that did not run. It is the material the answer reserve
+    // hands back (Plan item 2), and on a call that DID run there is a parsed answer instead — so this is
+    // not a second transcript on the happy path, it is the salvage on the unhappy one.
+    if (rec.not_evaluated !== null) {
+      const narration = boundedTail(hyp.callText(String(res?.stdout ?? "")), ASSISTANT_TAIL_MAX);
+      rec.assistant_text_tail = narration.tail;
+      rec.assistant_text_tail_truncated = narration.truncated;
+    }
     callRecords.push(rec);
     return { res, stream, argv, rec };
+  }
+
+  // ── THE ANSWER RESERVE (Plan item 2) ────────────────────────────────────────────────────────────────
+  // ONE tool-less call per run that was CUT OFF at the turn cap. It goes through `reservingStep` like
+  // every other call, so it is reserved on the SAME trailing-24h ledger and a refusal at the ceiling
+  // throws the round's ordinary `BudgetRefusedError` rather than spending a call nobody granted.
+  // ⛔ It fires for `error_max_turns` ONLY. An auth, gateway or spawn failure has no exploration notes to
+  // report from, so a second call would only reproduce the failure and burn a reservation doing it.
+  async function runAnswerReserve(opts: {
+    records: Record<string, unknown>[];
+    callOfRun: Map<number, Record<string, unknown>>;
+    step: ModelStepKind;
+    basePrompt: string;
+    writeRunFile: (index: number, rec: Record<string, unknown>) => void;
+  }): Promise<{ turns_reserved: number; attempted: number; rescued: number; hypotheses: number; not_evaluated: string[] }> {
+    let attempted = 0;
+    let rescued = 0;
+    let hypotheses = 0;
+    const notEvaluated: string[] = [];
+    for (let i = 0; i < opts.records.length; i++) {
+      const run = opts.records[i];
+      const call = opts.callOfRun.get(i) ?? null;
+      if (call === null) continue;
+      if (callNotEvaluatedToken(call) !== "not-evaluated:error_max_turns") continue;
+      if (run.hyps) continue; // the run answered anyway — nothing to rescue
+      attempted++;
+      const explored = typeof call.assistant_text_tail === "string" ? (call.assistant_text_tail as string) : "";
+      const { res, rec } = await reservingStep(opts.step, {
+        prompt: buildAnswerReservePrompt(opts.basePrompt, explored),
+        tools: ANSWER_RESERVE_TOOLS,
+        maxTurns: BLIND_INVESTIGATOR_MAX_TURNS,
+        model: requestedModel,
+      });
+      const hyps = parseHypothesisArray(hyp.callText(String(res?.stdout ?? "")));
+      const token = callNotEvaluatedToken(rec);
+      if (token !== null) notEvaluated.push(token);
+      if (hyps !== null) {
+        // The run's own record is UPDATED, so the round's `runs_with_hypotheses`, its clusters and the run
+        // file on the pin all agree with the rescues that produced them — a rescue recorded only in a
+        // side field would leave the run file claiming zero.
+        run.hyps = hyps;
+        run.n_hyps = hyps.length;
+        run.parse_error = null;
+        run.answer_reserve = { attempted: true, rescued: true, from: "error_max_turns", step: rec.step, hypotheses: hyps.length };
+        rescued++;
+        hypotheses += hyps.length;
+      } else {
+        run.answer_reserve = { attempted: true, rescued: false, from: "error_max_turns", step: rec.step, hypotheses: 0, not_evaluated: token };
+      }
+      opts.writeRunFile(i, run);
+    }
+    return { turns_reserved: ANSWER_RESERVE_PROMPT_TURNS, attempted, rescued, hypotheses, not_evaluated: notEvaluated };
   }
 
   // ⑥ (b) SEMANTIC EXPLORATION ON REAL SOURCE. The investigator runs with Read/Grep/Glob rooted at the
@@ -2391,9 +2600,13 @@ export async function runOpenSemanticDiscovery(root: string, opts: OpenSemanticD
 
     // The two arms' prompts, built ONCE and shared with the pre-registration below, so the bytes that
     // are hashed are the bytes that are handed to the model rather than a recomputation of them.
+    // ⛔ The TURN RESERVE directive (Plan item 2) goes into BOTH arms, and into the same position in both:
+    // the cap it describes is part of the shared envelope, so putting it in only one arm would make the
+    // paired instrument's two prompts differ by something other than the guidance block.
+    const reserveDirective = turnReserveDirective(config.investigatorMaxTurns);
     const armPrompts: Record<PairedArm | "guided", string> = {
-      [PAIRED_ARM_GUIDED]: `${focusDirective(focuses)}\n${selection.production_text}${basePrompt}\n\n${inventoryText}`,
-      [PAIRED_ARM_BASELINE]: `${focusDirective(focuses)}\n${basePrompt}\n\n${inventoryText}`,
+      [PAIRED_ARM_GUIDED]: `${focusDirective(focuses)}\n${reserveDirective}\n${selection.production_text}${basePrompt}\n\n${inventoryText}`,
+      [PAIRED_ARM_BASELINE]: `${focusDirective(focuses)}\n${reserveDirective}\n${basePrompt}\n\n${inventoryText}`,
     };
     // The instant the PAIRED round's FIRST call began. The pre-registration below is judged against it:
     // a pre-registration that is not strictly older than the first call it scores is a post-hoc
@@ -2437,6 +2650,14 @@ export async function runOpenSemanticDiscovery(root: string, opts: OpenSemanticD
       const armStamp: Record<string, unknown> = spec.markPaired ? { paired: true, paired_arm: spec.arm } : {};
       const prompt = armPrompts[unguided ? PAIRED_ARM_BASELINE : PAIRED_ARM_GUIDED];
       const armTexts: string[] = [];
+      const armOutDir = unguided
+        ? path.join(pinned, ".open-semantic-discovery-runs", PAIRED_ARM_BASELINE)
+        : path.join(pinned, ".open-semantic-discovery-runs");
+      // Every call this ARM made, in call order, plus the run index each investigator call belonged to.
+      // The answer reserve below needs the latter to know WHICH run it is rescuing; `callRecords` alone
+      // would only say that some call in the round was cut off.
+      const armCallRecords: Record<string, unknown>[] = [];
+      const callOfRun = new Map<number, Record<string, unknown>>();
       const inv = await hyp.runInvestigator({
         prompt,
         // `neutralDir` is unused on the pinned path (the cwd gate switches to `verifyCwdRefusal`); it is
@@ -2446,17 +2667,17 @@ export async function runOpenSemanticDiscovery(root: string, opts: OpenSemanticD
         pinDir: pinned,
         runs: config.investigatorRuns,
         // A separate runs directory per arm: the unguided pass must not overwrite the guided pass's runs.
-        outDir: unguided
-          ? path.join(pinned, ".open-semantic-discovery-runs", PAIRED_ARM_BASELINE)
-          : path.join(pinned, ".open-semantic-discovery-runs"),
+        outDir: armOutDir,
         writeFile: (f: string, t: string) => { fs.mkdirSync(path.dirname(f), { recursive: true }); fs.writeFileSync(f, t, "utf8"); },
         budget: { maxRuns: config.investigatorRuns, maxMs: config.maxWallMs },
         model: requestedModel ?? "not-evaluated:model-unverified",
         tools: INVESTIGATOR_TOOLS,
         maxTurns: config.investigatorMaxTurns,
-        runModel: async (p: string) => {
+        runModel: async (p: string, i: number) => {
           if (spec.markPaired && firstPairedCallMs === null) firstPairedCallMs = now();
-          const { res } = await reservingStep(stepKind("investigator"), { prompt: p, tools: INVESTIGATOR_TOOLS, maxTurns: config.investigatorMaxTurns, model: requestedModel });
+          const { res, rec } = await reservingStep(stepKind("investigator"), { prompt: p, tools: INVESTIGATOR_TOOLS, maxTurns: config.investigatorMaxTurns, model: requestedModel });
+          armCallRecords.push(rec);
+          callOfRun.set(i, rec);
           armTexts.push(hyp.callText(String(res?.stdout ?? "")));
           return res;
         },
@@ -2466,12 +2687,46 @@ export async function runOpenSemanticDiscovery(root: string, opts: OpenSemanticD
         return { ok: false, reason: `${armPrefix}investigator refused — ${reasons[0] ?? "no reason reported"} (nothing appended, last-run not advanced)` };
       }
       const records = Array.isArray(inv.records) ? (inv.records as Record<string, unknown>[]) : [];
+      // ── THE ANSWER RESERVE (Plan item 2) — ONE tool-less call per run cut off at the turn cap ──────
+      // It runs BEFORE `clusterHypotheses`, so a rescued run's hypotheses are clustered, verified and
+      // refuted exactly as if the exploration had printed them itself.
+      const reserve = await runAnswerReserve({
+        records,
+        callOfRun,
+        step: stepKind("investigator-report") as ModelStepKind,
+        basePrompt: prompt,
+        writeRunFile: (i: number, rec: Record<string, unknown>) => {
+          // The engine already wrote this run's file; a rescue changes what the run FOUND, so the file is
+          // rewritten rather than left claiming zero. Best-effort: the run file is a view, the round's own
+          // record is the carrier.
+          try {
+            fs.mkdirSync(armOutDir, { recursive: true });
+            fs.writeFileSync(path.join(armOutDir, `run-${i + 1}.json`), JSON.stringify(rec, null, 1), "utf8");
+          } catch { /* the pin is scratch; a view that could not be rewritten is not a round failure */ }
+        },
+      });
       const statedFocus = armTexts.map((t) => focusFromText(t)).find((f) => typeof f === "string" && f !== "") ?? null;
       const investigator = {
-        ran: true, runs: config.investigatorRuns, runs_with_hypotheses: Number(inv.parsed ?? 0),
+        ran: true, runs: config.investigatorRuns,
+        // Recomputed AFTER the reserve: `inv.parsed` was taken before it, and a rescue that produced
+        // hypotheses but left this reading zero would make the round's own summary contradict its clusters.
+        runs_with_hypotheses: records.filter((r) => r.hyps).length,
         tools: INVESTIGATOR_TOOLS, max_turns: config.investigatorMaxTurns, cwd: asRel(root, pinned),
         stated_focus: statedFocus, prior_focuses: focuses,
         guided_by: spec.methodPicks.map((m) => methodLabel(m)),
+        // ── HOW EACH CALL ENDED (Plan item 1) ─────────────────────────────────────────────────────────
+        // The per-call reading a reviewer needs to tell "explored, found nothing" from "was killed before
+        // it could answer". `subtype` is the stream's own structural result, `stderr_tail` the launcher's
+        // own cause, and `not_evaluated` the ONE token that combines them.
+        calls: armCallRecords.map((c) => ({
+          step: c.step, exit: c.exit, spawn_error: c.spawn_error,
+          stream_ok: c.stream_ok, subtype: c.subtype, num_turns: c.num_turns, is_error: c.is_error,
+          turns: c.turns, tokens: c.tokens, cost_charged_usd: c.cost_charged_usd,
+          stderr_chars: c.stderr_chars, stderr_tail: c.stderr_tail, stderr_tail_truncated: c.stderr_tail_truncated,
+          not_evaluated: c.not_evaluated,
+        })),
+        not_evaluated: firstNotEvaluatedToken(armCallRecords),
+        answer_reserve: reserve,
       };
       // (b, cont.) `clusterHypotheses` merges near-duplicates ACROSS the runs by component-set overlap. It
       // is dedup ASSISTANCE ONLY — nothing here discards a cluster by shape, and the cap below is a COUNT.
@@ -2840,8 +3095,11 @@ export async function runOpenSemanticDiscovery(root: string, opts: OpenSemanticD
     let shadowClusters: Array<Record<string, unknown>> = [];
     let shadowClusterRecords: Record<string, unknown>[] = [];
     if (selection.shadow.length > 0) {
-      const shadowPrompt = `${focusDirective(focuses)}\n${selection.shadow_text}${basePrompt}\n\n${inventory.ok === true ? String(inventory.text ?? "") : ""}`;
+      const shadowOutDir = path.join(pinned, ".open-semantic-discovery-runs", "shadow");
+      const shadowPrompt = `${focusDirective(focuses)}\n${reserveDirective}\n${selection.shadow_text}${basePrompt}\n\n${inventory.ok === true ? String(inventory.text ?? "") : ""}`;
       let shadowCalls = 0;
+      const shadowCallOfRun = new Map<number, Record<string, unknown>>();
+      const shadowCallRecords: Record<string, unknown>[] = [];
       const shadowInv = await hyp.runInvestigator({
         prompt: shadowPrompt,
         neutralDir: pinned,
@@ -2849,15 +3107,17 @@ export async function runOpenSemanticDiscovery(root: string, opts: OpenSemanticD
         pinDir: pinned,
         runs: config.investigatorRuns,
         // A separate runs directory: the shadow pass must not overwrite the production pass's run files.
-        outDir: path.join(pinned, ".open-semantic-discovery-runs", "shadow"),
+        outDir: shadowOutDir,
         writeFile: (f: string, t: string) => { fs.mkdirSync(path.dirname(f), { recursive: true }); fs.writeFileSync(f, t, "utf8"); },
         budget: { maxRuns: config.investigatorRuns, maxMs: config.maxWallMs },
         model: requestedModel ?? "not-evaluated:model-unverified",
         tools: INVESTIGATOR_TOOLS,
         maxTurns: config.investigatorMaxTurns,
-        runModel: async (p: string) => {
-          const { res } = await reservingStep("shadow-investigator", { prompt: p, tools: INVESTIGATOR_TOOLS, maxTurns: config.investigatorMaxTurns, model: requestedModel });
+        runModel: async (p: string, i: number) => {
+          const { res, rec } = await reservingStep("shadow-investigator", { prompt: p, tools: INVESTIGATOR_TOOLS, maxTurns: config.investigatorMaxTurns, model: requestedModel });
           shadowCalls++;
+          shadowCallRecords.push(rec);
+          shadowCallOfRun.set(i, rec);
           return res;
         },
       });
@@ -2869,6 +3129,20 @@ export async function runOpenSemanticDiscovery(root: string, opts: OpenSemanticD
         shadowBlock = { ...shadowBlock, ran: false, calls: shadowCalls, reason: `refused:${reasons[0] ?? "no reason reported"}` };
       } else {
         const shadowRecords = Array.isArray(shadowInv.records) ? (shadowInv.records as Record<string, unknown>[]) : [];
+        // The shadow arm gets the SAME answer reserve: it is an isolated measurement, but a shadow pass
+        // cut off at the cap measures nothing, and its calls already count against the same ledger.
+        await runAnswerReserve({
+          records: shadowRecords,
+          callOfRun: shadowCallOfRun,
+          step: "shadow-investigator-report",
+          basePrompt: shadowPrompt,
+          writeRunFile: (i: number, rec: Record<string, unknown>) => {
+            try {
+              fs.mkdirSync(shadowOutDir, { recursive: true });
+              fs.writeFileSync(path.join(shadowOutDir, `run-${i + 1}.json`), JSON.stringify(rec, null, 1), "utf8");
+            } catch { /* the pin is scratch */ }
+          },
+        });
         shadowClusters = hyp.clusterHypotheses(shadowRecords, {});
         shadowClusterRecords = shadowClusters.map((c, i) => {
           const rep = (c.rep ?? {}) as Record<string, unknown>;
@@ -2897,6 +3171,9 @@ export async function runOpenSemanticDiscovery(root: string, opts: OpenSemanticD
         shadowBlock = {
           ...shadowBlock, calls: shadowCalls,
           clusters: { total: shadowClusters.length, claims: shadowClusters.map((c) => (c.rep as Record<string, unknown>)?.claim ?? null) },
+          // The shadow arm's failure is its OWN reading, never the production round's: an extra arm that
+          // was cut off must not make a production round that DID explore read as not-evaluated.
+          not_evaluated: firstNotEvaluatedToken(shadowCallRecords),
         };
       }
     }
@@ -3050,6 +3327,26 @@ export async function runOpenSemanticDiscovery(root: string, opts: OpenSemanticD
     if (midRound !== null) {
       return fact("not-evaluated", round, `budget: the ${midRound.kind} step was refused by the 24h ceiling (${midRound.used} >= cap ${midRound.cap}) — ${budget.grantedCount} call(s) were already made and stay RESERVED; the round persisted what it did but did NOT advance the production last-run${revertedNote}${legacyNote}`);
     }
+    // ── "NOT EVALUATED" IS NOT "FOUND NOTHING" (Plan item 1, 硬规则 3b) ───────────────────────────────
+    // The defect this task closes: production recorded `exit 1`, `turns 13` under `--max-turns 12`, zero
+    // hypotheses — and the Fact said the round ran. A round whose calls did NOT answer is reported by the
+    // token that says WHY, so the two states can never be read for one another again.
+    // The shadow arm's own reading is computed FIRST, so this sentence can name it too: a round whose
+    // production calls did not answer but whose draft-method arm ran is a different statement from one
+    // where nothing ran at all.
+    const shadowNote = selection.shadow.length === 0
+      ? ""
+      : `; shadow arm ${shadowBlock.ran === true ? `ran ${Number(shadowBlock.calls ?? 0)} call(s) under ${selection.shadow.map((m) => methodLabel(m)).join(",")} (${shadowClusters.length} hypothesis cluster(s), NEVER ingested)` : `did not run (${String(shadowBlock.reason ?? "")})`}`;
+    const failedCalls = callRecords.filter((c) => typeof c.not_evaluated === "string");
+    const firstFailed = failedCalls.length === 0 ? null : String(failedCalls[0].not_evaluated);
+    const failedTokens = [...new Set(failedCalls.map((c) => String(c.not_evaluated)))];
+    if (firstFailed !== null && clusters.length === 0 && confirmedClusters.length === 0) {
+      return fact(
+        "not-evaluated",
+        round,
+        `${firstFailed}: the investigator produced NO parsed hypothesis cluster — ${budget.grantedCount} model call(s), ${failedCalls.length} of them NOT EVALUATED (${failedTokens.join(",")}), costing $${round6(costUsd)}, wall ${wallMs}ms. The scan-round line IS persisted, so the round's own record says what happened; ⛔ do NOT read this as "explored and found nothing" — the model never got to answer${resident ? " (the production last-run WAS advanced)" : " (MANUAL: the production last-run was NOT advanced)"}${shadowNote}${revertedNote}${legacyNote}`,
+      );
+    }
     // An ingestion that FAILED is not folded into a success sentence: the round's semantic work is real
     // and already persisted, but the Fact must say the ledgers did not all get written.
     const ingestionNote = ingestionError !== null
@@ -3058,9 +3355,11 @@ export async function runOpenSemanticDiscovery(root: string, opts: OpenSemanticD
     const methodNote = selection.mode === "guided"
       ? `; methods GUIDED by ${selection.production.map((m) => methodLabel(m)).join(",")}`
       : `; methods BASELINE (${selection.baseline_reason})`;
-    const shadowNote = selection.shadow.length === 0
+    // A round that produced work AND had calls that did not answer says BOTH: the counts above are counts
+    // over the calls that replied, and a reader who is not told that would take them for the whole round.
+    const failedNote = failedCalls.length === 0
       ? ""
-      : `; shadow arm ${shadowBlock.ran === true ? `ran ${Number(shadowBlock.calls ?? 0)} call(s) under ${selection.shadow.map((m) => methodLabel(m)).join(",")} (${shadowClusters.length} hypothesis cluster(s), NEVER ingested)` : `did not run (${String(shadowBlock.reason ?? "")})`}`;
+      : `; ⛔ ${failedCalls.length} of ${callRecords.length} call(s) were NOT EVALUATED (${failedTokens.join(",")}) — the counts above are over the calls that answered, not over the exploration that was asked for`;
     // ⛔ The paired note NEVER reports a gain in place of "not measured", and never reports 0 where the
     // instrument could not run: the two states are different sentences (Plan item 5).
     const pairedNote = !pairedDecision.due
@@ -3073,7 +3372,7 @@ export async function runOpenSemanticDiscovery(root: string, opts: OpenSemanticD
     return fact(
       "verified",
       round,
-      `round ran (invoked_by:${invokedBy}, interval ${intervalMinutes}m): investigator read the pin with ${INVESTIGATOR_TOOLS} (focus: ${investigatorBlock.stated_focus ?? "<not stated>"}), ${clusters.length} cluster(s) from ${investigatorBlock.runs_with_hypotheses} run(s), ${verifiedRows.length} verified, ${confirmedClusters.length} CONFIRMED after independent refutation, ${budget.grantedCount} model call(s) costing $${round6(costUsd)}, wall ${wallMs}ms; appended 1 scan-round + ${clusterRecords.length} cluster record(s) to ${asRel(root, carrier)}${resident ? " and advanced the production last-run" : " — MANUAL: the production last-run was NOT advanced"}${ingestionNote}${methodNote}${shadowNote}${pairedNote}${revertedNote}${legacyNote}`,
+      `round ran (invoked_by:${invokedBy}, interval ${intervalMinutes}m): investigator read the pin with ${INVESTIGATOR_TOOLS} (focus: ${investigatorBlock.stated_focus ?? "<not stated>"}), ${clusters.length} cluster(s) from ${investigatorBlock.runs_with_hypotheses} run(s), ${verifiedRows.length} verified, ${confirmedClusters.length} CONFIRMED after independent refutation, ${budget.grantedCount} model call(s) costing $${round6(costUsd)}, wall ${wallMs}ms; appended 1 scan-round + ${clusterRecords.length} cluster record(s) to ${asRel(root, carrier)}${resident ? " and advanced the production last-run" : " — MANUAL: the production last-run was NOT advanced"}${ingestionNote}${methodNote}${shadowNote}${pairedNote}${failedNote}${revertedNote}${legacyNote}`,
     );
   } catch (e) {
     if (isBudgetRefused(e)) {
