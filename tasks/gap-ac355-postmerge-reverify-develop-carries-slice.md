@@ -3,7 +3,7 @@ id: gap-ac355-postmerge-reverify-develop-carries-slice
 title: AC-355 post-merge 判据转假：goal-store.ts 因 411bb34c7 的合法重构不再直连
   kernel/gate-run-options.ts —— 承接 AC-353 在飞修复，在 develop 尖端复验结构臂 +
   七个测试文件（含可证伪负对照）
-status: ready
+status: done
 labels:
   - gap
   - defect
