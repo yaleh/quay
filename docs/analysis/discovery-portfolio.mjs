@@ -52,6 +52,34 @@
 // Experience ledger uses for `reported_by:"user"`. `ingestFinding` refuses a non-null `human_rating`
 // altogether: a rating is a separate append-only line, never a field of the finding it rates.
 //
+// ── THE CAPABILITY COVERAGE MAP (Plan (B), the 2026-10-12 strategy change) ───────────────────────
+// `coverageMap(root)` grades each of the six domains the USER named — shared semantics; config→behavior;
+// writer/checker contract; state transitions; reuse refutation; method trustworthiness — and it is
+// DERIVED, never stored: it reads the carrier and the method registry on every call.
+//
+// ⛔ COVERAGE IS NOT VALUE, and keeping them apart is the point. A landed fix is value
+// (`valueMetrics`); a CORRECT REFUTATION is capability WITHOUT value (N01 sits in
+// `zero_or_negative.refuted` and grades its domain `autonomous` here). A domain covered only by
+// operator teaching is capability-with-assistance. The map reports the two arms separately
+// (`via: "landed-fix"` / `via: "refutation"`) so no row can be read as more than it is.
+//
+// THE TWO THINGS THIS MAP REFUSES, both anti-inflation:
+//   • a TEACHING-level case never grades `autonomous` (Plan 3) — the answer was known before any tool
+//     ran, so it demonstrates transcription, not discovery. `transfer` is refused for the same reason
+//     (learned on one case, applied to a second, is not a blind find). This is the clause the AC3
+//     mutation control flips, and case (a) is the assertion that turns red when it is removed.
+//   • the domain is never GUESSED — not from the claim text, not from the components. It is an explicit
+//     `domain` field stated at ingest together with a `domain_reason`, and a finding that carries none
+//     is reported under `unclassified`. A guess would make the map's grades unfalsifiable.
+// A method contributes nothing while it is `retired` or on the contaminated-verdict ledger (Plan 4).
+//
+// ⛔ THE ONE PLACE THE CARRIER IS APPEND-ONLY AND THE FIELD IS NOT: the 13 production rows were
+//   ingested on 2026-10-12 BEFORE `domain` existed, and the carrier is append-only with an id keyed on
+//   `finding_id`, so a re-ingest is a `DUPLICATE_ID` no-op and cannot add the field. Their domains
+//   therefore arrive as their own `portfolio_domain` lines (the same overlay model the RATINGS use),
+//   appended by `backfill` on a re-run. `readPortfolio` merges them and reports which arm the value
+//   came from (`domain_source`), so "stated at ingest" and "added later" are different values.
+//
 // CARRIER: `.quay/discovery-portfolio.jsonl`, resolved through the ledger module's shared-checkout
 // resolver (`carrierFile` / `appendCarrierLine` / `readCarrier`) — a task worktree being torn down must
 // not take the portfolio with it (task gap-discovery-carriers-ephemeral-in-worktree). ⛔ The path is NOT
@@ -71,6 +99,10 @@ import { recordId, readRecords, EVIDENCE_STORE_REL } from "./architecture-eviden
 import {
   carrierFile, readCarrier, appendCarrierLine, resolveCarrierRoot,
 } from "./discovery-experience-ledger.mjs";
+// The coverage map's METHOD half reads the registry (a method that claims a domain is evidence of
+// capability, and a `retired`/contaminated one is not). Reused, never re-implemented: "which version of
+// a method is current" and "which verdicts are contaminated" are the registry's own judgments.
+import { readMethodRegistry, contaminatedVerdictIds, CONTAMINATED_VERDICTS_REL, METHOD_STATUSES } from "./discovery-method-registry.mjs";
 
 /** The one fixed sink, relative to the SHARED checkout. */
 export const PORTFOLIO_REL = ".quay/discovery-portfolio.jsonl";
@@ -78,6 +110,10 @@ export const PORTFOLIO_REL = ".quay/discovery-portfolio.jsonl";
 export const PORTFOLIO_KIND = "portfolio_finding";
 /** The record kind a human RATING carries — a separate append-only line, applied on read. */
 export const PORTFOLIO_RATING_KIND = "portfolio_rating";
+/** The record kind a DOMAIN ASSIGNMENT carries — the same overlay model, for findings ingested before
+ *  the `domain` field existed (see the header). Separate kind so "stated at ingest" and "added later"
+ *  can never be confused on read-back. */
+export const PORTFOLIO_DOMAIN_KIND = "portfolio_domain";
 
 /** Where a finding came from. The five values the Plan names — the reconstruction's finer labels
  *  (`operator-led`, `autonomous-blind-experiment`, `operator-production-reading`) map onto these. */
@@ -99,6 +135,67 @@ export const EVIDENCE_LEVELS = Object.freeze(["teaching", "transfer", "independe
  *  verdict are the same claim; a second enum would drift). */
 export const OUTCOMES = Object.freeze(["supported", "refuted", "undetermined"]);
 
+// ── the SIX domains the user named (Plan (B)) and the coverage grades over them ───────────────────
+
+/** The domains the coverage map grades, in the order the user named them. A slug set, not a free string:
+ *  a domain outside this list is refused at ingest (`DOMAIN_NOT_IN_VOCAB`), because a typo'd domain
+ *  would silently create a seventh bucket that no report ever reads. */
+export const DOMAINS = Object.freeze([
+  "shared-semantics", "config-to-behavior", "writer-checker-contract",
+  "state-transitions", "reuse-refutation", "method-trustworthiness",
+]);
+
+/** The human label per slug — the spelling the user and the operator baseline use. */
+export const DOMAIN_LABELS = Object.freeze({
+  "shared-semantics": "shared semantics",
+  "config-to-behavior": "config→behavior",
+  "writer-checker-contract": "writer/checker contract",
+  "state-transitions": "state transitions",
+  "reuse-refutation": "reuse refutation",
+  "method-trustworthiness": "method trustworthiness",
+});
+
+/** What a METHOD's `applicability` text must literally say to claim a domain. The registry's
+ *  `domain_signals` are free prose, so the only non-guessing rule is a NAME match: a method claims a
+ *  domain by naming it (any of these spellings, case-insensitive). ⛔ Deliberately narrow — a keyword
+ *  heuristic over prose would invent claims the method never made, which is the same defect as guessing
+ *  a finding's domain from its claim. */
+export const DOMAIN_NAME_ALIASES = Object.freeze({
+  "shared-semantics": ["shared semantics", "shared-semantics"],
+  "config-to-behavior": ["config→behavior", "config->behavior", "config-to-behavior", "config to behavior"],
+  "writer-checker-contract": ["writer/checker contract", "writer/checker", "writer-checker-contract"],
+  "state-transitions": ["state transitions", "state-transitions", "state transition"],
+  "reuse-refutation": ["reuse refutation", "reuse-refutation"],
+  "method-trustworthiness": ["method trustworthiness", "method-trustworthiness"],
+});
+
+/** The bucket a finding with NO `domain` field lands in. Its OWN value — never folded into a domain,
+ *  and never `none` (which would read as "this domain has no coverage" rather than "this finding was
+ *  never classified"). */
+export const UNCLASSIFIED = "unclassified";
+
+/** The three coverage grades, strongest first. */
+export const GRADES = Object.freeze(["autonomous", "assisted", "none"]);
+
+/** The origins that make a finding AUTONOMOUS work — the system found it with no human in the loop. */
+export const AUTONOMOUS_ORIGINS = Object.freeze(["autonomous-routine", "autonomous-experiment"]);
+
+/** The evidence levels that make an autonomous finding DISCOVERY rather than transcription. `teaching`
+ *  (the answer was known) and `transfer` (learned on one case, applied to a second) are both excluded —
+ *  ⛔ THIS is the map's anti-inflation line, and the AC3 mutation control removes exactly this clause. */
+export const AUTONOMOUS_EVIDENCE_LEVELS = Object.freeze(["independent", "production-open"]);
+
+/** The operation that PRODUCED a finding, per origin — the Plan's "verifier call, routine probe,
+ *  instrument". Derived from the origin, which is itself a validated ingest field; the concrete
+ *  operation a row names is its `origin_ref` (a runId#findingId, an E-… cluster, a tool name, a task). */
+export const ORIGIN_OPERATIONS = Object.freeze({
+  "autonomous-routine": "routine-probe",
+  "autonomous-experiment": "verifier-call",
+  "mechanical-instrument": "instrument",
+  operator: "operator-work",
+  user: "user-report",
+});
+
 /** Human rating vocabulary. `noise` is the value that SUBTRACTS from value — it is why a rating can
  *  never be inferred: only a human can say "this was real, but worthless". */
 export const RATING_VALUES = Object.freeze(["high", "medium", "low", "noise"]);
@@ -106,11 +203,12 @@ export const RATING_VALUES = Object.freeze(["high", "medium", "low", "noise"]);
 /** The ONLY actor that may write a human rating. `task-worker` is refused (see the header). */
 export const RATING_ACTORS = Object.freeze(["operator-session"]);
 
-/** Per-input required fields. `method_ref` / `fix_task` / `human_rating` are required to be PRESENT but
- *  may be `null` — "no method", "no fix filed" and "unrated" are values, not missing keys (硬规则 6). */
+/** Per-input required fields. `method_ref` / `fix_task` / `human_rating` / `domain` are required to be
+ *  PRESENT but may be `null` — "no method", "no fix filed", "unrated" and "never classified" are VALUES,
+ *  not missing keys (硬规则 6). `domain_reason` travels with a non-null `domain` (see `validateFindingInput`). */
 export const REQUIRED_INPUT_FIELDS = Object.freeze([
   "finding_id", "origin", "origin_ref", "evidence_level", "method_ref", "claim", "outcome",
-  "fix_task", "human_rating",
+  "fix_task", "human_rating", "domain", "domain_reason",
 ]);
 
 /** Every field of a STORED record. The derived ones (`fix_landed_commit`, `recurred`, `cost`,
@@ -202,6 +300,16 @@ export function validateFindingInput(rec) {
   if (!OUTCOMES.includes(rec.outcome)) reasons.push(`OUTCOME_NOT_IN_VOCAB:${String(rec.outcome)}`);
   if (rec.method_ref !== null && !isStr(rec.method_ref, 1)) reasons.push("FIELD_INVALID:method_ref");
   if (rec.fix_task !== null && !isStr(rec.fix_task, 1)) reasons.push("FIELD_INVALID:fix_task");
+  // ⛔ The domain is STATED, never inferred (Plan 2): a value outside the six the user named is refused
+  // (a seventh bucket nothing reads), and a stated domain must carry its reason — a bare label is an
+  // assertion, while a label with a reason is a judgment a reader can re-examine (硬规则 4).
+  if (rec.domain !== null && !DOMAINS.includes(rec.domain)) reasons.push(`DOMAIN_NOT_IN_VOCAB:${String(rec.domain)}`);
+  if (rec.domain !== null && !isStr(rec.domain_reason, 1)) {
+    reasons.push("DOMAIN_REASON_REQUIRED:a-stated-domain-must-carry-the-reason-it-was-classed-that-way");
+  }
+  if (rec.domain === null && rec.domain_reason !== null) {
+    reasons.push("DOMAIN_REASON_WITHOUT_DOMAIN:a-reason-for-not-classifying-is-not-a-classification");
+  }
   if (rec.components !== undefined && !strArr(rec.components)) {
     reasons.push("FIELD_INVALID:components-needs-[non-empty-string]");
   }
@@ -647,6 +755,8 @@ export function ingestFinding(root, input, opts = {}) {
     components,
     outcome: input.outcome,
     fix_task: input.fix_task ?? null,
+    domain: input.domain ?? null,
+    domain_reason: input.domain_reason ?? null,
     fix_landed_commit: fixLandedCommit,
     fix_landed_reason: fixLandedReason,
     recurred: rec.recurred,
@@ -703,26 +813,91 @@ export function rateFinding(root, { finding_id, value, by, actor, ts } = {}) {
   return appendCarrierLine(root, PORTFOLIO_REL, { id: withId, ...record }, { kind: PORTFOLIO_RATING_KIND });
 }
 
+// ── domain assignments (the append-only overlay for findings ingested before `domain` existed) ─────
+
+/**
+ * Assign a domain to a finding that carries NONE, as its own append-only line.
+ *
+ * ⛔ WHY THIS EXISTS AT ALL (not a convenience): the carrier is append-only and a finding's id is keyed
+ * on `finding_id`, so re-ingesting a row to add a field is a `DUPLICATE_ID` no-op by construction. The 13
+ * real rows were ingested before `domain` existed; without this overlay their domains could only be
+ * "recovered" by DELETING and regenerating the production carrier, or by guessing at read time. Both are
+ * worse. The ratings solve the identical problem the identical way.
+ *
+ * ⛔ It REFUSES a finding that already states a domain in its own record (`DOMAIN_ALREADY_STATED`) rather
+ * than appending a line the read path would shadow — a dead line in an append-only carrier is a
+ * permanent, invisible inconsistency. The id is keyed on `finding_id` ALONE, so a re-run appends nothing
+ * (`DUPLICATE_ID`) instead of stacking a second classification of the same finding.
+ * @returns {{ok:true, id, file, record} | {ok:false, reasons:string[], appended:false}}
+ */
+export function assignFindingDomain(root, { finding_id, domain, reason, by, ts } = {}) {
+  const reasons = [];
+  if (!isStr(finding_id, 1)) reasons.push("FIELD_INVALID:finding_id");
+  if (!DOMAINS.includes(domain)) reasons.push(`DOMAIN_NOT_IN_VOCAB:${String(domain)}`);
+  if (!isStr(reason, 1)) reasons.push("FIELD_INVALID:reason-a-domain-assignment-states-why");
+  if (!isStr(by, 1)) reasons.push("FIELD_INVALID:by-needs-the-namer");
+  if (reasons.length) return { ok: false, kind: PORTFOLIO_DOMAIN_KIND, appended: false, reasons };
+
+  const read = readPortfolio(root);
+  if (read.file === null) return { ok: false, kind: PORTFOLIO_DOMAIN_KIND, appended: false, reasons: [read.reason] };
+  if (!read.ok) {
+    return {
+      ok: false, kind: PORTFOLIO_DOMAIN_KIND, appended: false,
+      reasons: [`PORTFOLIO_UNREADABLE:${read.malformed_lines}-unparseable-line(s)-in-${PORTFOLIO_REL}`],
+    };
+  }
+  const target = read.records.find((r) => r.finding_id === finding_id);
+  if (!target) {
+    return { ok: false, kind: PORTFOLIO_DOMAIN_KIND, appended: false, reasons: [`DOMAIN_TARGET_NOT_FOUND:${finding_id}`] };
+  }
+  if (target.domain_source === "record") {
+    return {
+      ok: false, kind: PORTFOLIO_DOMAIN_KIND, appended: false,
+      reasons: [`DOMAIN_ALREADY_STATED:${finding_id}-carries-domain=${target.domain}-in-its-own-record-so-an-assignment-line-would-never-be-read`],
+    };
+  }
+  const record = { finding_id, domain, reason, by, ts: ts ?? new Date().toISOString() };
+  const withId = { id: recordId(PORTFOLIO_DOMAIN_KIND, { finding_id }), ...record };
+  return appendCarrierLine(root, PORTFOLIO_REL, withId, { kind: PORTFOLIO_DOMAIN_KIND });
+}
+
 // ── read (findings with their ratings applied) ──────────────────────────────────────────────────
 
 /**
- * Read the portfolio back, with the append-only RATING lines applied to the findings they name.
- * @returns {{ok:boolean, records:object[], ratings:object[], file:string|null, malformed_lines:number}}
+ * Read the portfolio back, with the append-only RATING lines applied to the findings they name and the
+ * append-only DOMAIN ASSIGNMENT lines applied to findings that state none of their own.
+ *
+ * `domain_source` says WHICH arm supplied the domain — `"record"` (stated at ingest), `"assignment"`
+ * (added later, because the record predates the field) or `null` (none, i.e. `unclassified`). The three
+ * are different values on purpose: collapsing them would make "classified when it was found" and
+ * "classified after the fact" indistinguishable.
+ * @returns {{ok:boolean, records:object[], ratings:object[], assignments:object[], file:string|null,
+ *            malformed_lines:number}}
  */
 export function readPortfolio(root) {
   const raw = readCarrier(root, PORTFOLIO_REL, null);
-  if (raw.file === null) return { ...raw, records: [], ratings: [], reason: raw.reason };
+  if (raw.file === null) {
+    return { ...raw, records: [], ratings: [], assignments: [], reason: raw.reason };
+  }
   const ratings = raw.records.filter((r) => isObj(r) && r.kind === PORTFOLIO_RATING_KIND);
   const byFinding = new Map();
   for (const r of ratings) byFinding.set(r.finding_id, r);   // line order is the precedence rule
+  const assignments = raw.records.filter((r) => isObj(r) && r.kind === PORTFOLIO_DOMAIN_KIND);
+  const domainOf = new Map();
+  for (const a of assignments) domainOf.set(a.finding_id, a);   // line order is the precedence rule
   const records = raw.records.filter((r) => isObj(r) && r.kind === PORTFOLIO_KIND).map((r) => {
     const rating = byFinding.get(r.finding_id);
+    const stated = isStr(r.domain, 1) ? r.domain : null;
+    const assigned = stated ? null : domainOf.get(r.finding_id);
     return {
       ...r,
+      domain: stated ?? (assigned && isStr(assigned.domain, 1) ? assigned.domain : null),
+      domain_reason: stated ? (r.domain_reason ?? null) : (assigned?.reason ?? null),
+      domain_source: stated ? "record" : (assigned ? "assignment" : null),
       human_rating: rating ? { value: rating.value, by: rating.by, ts: rating.ts } : null,
     };
   });
-  return { ...raw, records, ratings };
+  return { ...raw, records, ratings, assignments };
 }
 
 // ── the value metric (Plan 4) ───────────────────────────────────────────────────────────────────
@@ -792,6 +967,234 @@ export function valueMetrics(records) {
   };
 }
 
+// ── the capability coverage map (Plan (B)) ──────────────────────────────────────────────────────
+
+/**
+ * Does a METHOD's `applicability` text claim `domain`? PURE. Returns the matched spelling or `null`.
+ *
+ * The rule is a literal NAME match over `domain_signals` + `preconditions` — the only non-guessing rule
+ * available, because those fields are free prose. A method claims a domain by naming it; nothing is
+ * inferred from the rest of the sentence.
+ */
+export function methodClaimsDomain(rec, domain) {
+  const aliases = DOMAIN_NAME_ALIASES[domain] ?? [];
+  const text = [rec?.applicability?.domain_signals, rec?.applicability?.preconditions]
+    .flatMap((x) => (Array.isArray(x) ? x : [])).join("\n").toLowerCase();
+  return aliases.find((a) => text.includes(a.toLowerCase())) ?? null;
+}
+
+/**
+ * A method's TRUST state for coverage purposes. PURE. A method contributes coverage only while it is
+ * neither `retired` nor on the contaminated-verdict ledger (Plan 4) — a retired method is one the
+ * registry itself says to stop applying, and a contaminated one rests on a judgment made on a hold-out
+ * that had already been used. `contaminated` is `false` only when a deny-list was SUPPLIED and the
+ * method's promoting verdict was not on it; with no list (`null`/absent ids) that is its own value.
+ */
+export function methodTrust(rec, { contaminatedVerdictIds: ids = null } = {}) {
+  const status = METHOD_STATUSES.includes(rec?.status) ? rec.status : null;
+  const verdictRef = isStr(rec?.generalization_evidence?.verdict_ref, 1) ? rec.generalization_evidence.verdict_ref : null;
+  const onContaminatedList = Array.isArray(ids) && verdictRef !== null && ids.includes(verdictRef);
+  return {
+    method_id: isStr(rec?.method_id, 1) ? rec.method_id : null,
+    version: Number.isInteger(rec?.version) ? rec.version : null,
+    status,
+    verdict_ref: verdictRef,
+    contaminated: onContaminatedList,
+    contributes: status !== null && status !== "retired" && !onContaminatedList,
+    why: status === null ? "STATUS_NOT_IN_VOCAB"
+      : status === "retired" ? "RETIRED"
+        : onContaminatedList ? "CONTAMINATED_PROMOTION"
+          : `CONTRIBUTES:${status}`,
+  };
+}
+
+/**
+ * Does ONE finding count as AUTONOMOUS coverage of its domain? PURE.
+ *
+ * Two arms, reported apart so neither can be read as the other:
+ *   • `landed-fix` — a supported autonomous finding whose fix landed: capability AND value;
+ *   • `refutation` — an autonomous REFUTATION: capability WITHOUT value. It is counted here and in
+ *     `valueMetrics.zero_or_negative.refuted` at the same time, on purpose: "the system autonomously
+ *     killed a false claim" is a real capability, and it is not a landed fix. A domain whose point IS
+ *     refutation (reuse refutation) would be structurally uncoverable if this arm did not exist.
+ *
+ * ⛔ A DUPLICATE is refused: it is not a new finding at all, it is the same finding recorded twice, so it
+ * demonstrates nothing the original does not already demonstrate (and the original is counted where it
+ * belongs). ⛔ A `noise` RATING is NOT refused, and that asymmetry is deliberate: "worthless" is a VALUE
+ * judgment a human makes about a real finding, and value lives in `valueMetrics` — where a noise rating
+ * does subtract. Refusing it here as well would silently turn a value axis into a capability axis and
+ * lose the information that the system did, autonomously, find a real thing.
+ * ⛔ THE ANTI-INFLATION CLAUSE: `teaching` and `transfer` are refused for this grade, so a case whose
+ * answer was known before any tool ran can never make a domain look autonomously covered.
+ * @returns {{autonomous:boolean, via:string|null, reason:string}}
+ */
+export function autonomousEvidenceFor(rec) {
+  if (!isObj(rec)) return { autonomous: false, via: null, reason: "RECORD_NOT_OBJECT" };
+  if (!AUTONOMOUS_ORIGINS.includes(rec.origin)) return { autonomous: false, via: null, reason: `ORIGIN_NOT_AUTONOMOUS:${String(rec.origin)}` };
+  if (!AUTONOMOUS_EVIDENCE_LEVELS.includes(rec.evidence_level)) {
+    return { autonomous: false, via: null, reason: `EVIDENCE_LEVEL_NOT_AUTONOMOUS:${String(rec.evidence_level)}` };
+  }
+  if (rec.duplicate_of !== null && rec.duplicate_of !== undefined) {
+    return { autonomous: false, via: null, reason: `DUPLICATE_OF:${String(rec.duplicate_of)}` };
+  }
+  if (rec.outcome === "supported" && isStr(rec.fix_landed_commit, 1)) {
+    return { autonomous: true, via: "landed-fix", reason: `SUPPORTED_AND_LANDED_ON_${String(rec.fix_landed_commit)}` };
+  }
+  if (rec.outcome === "refuted") return { autonomous: true, via: "refutation", reason: "AUTONOMOUS_CORRECT_REFUTATION" };
+  if (rec.outcome === "supported") return { autonomous: false, via: null, reason: "SUPPORTED_WITHOUT_LANDED_FIX" };
+  return { autonomous: false, via: null, reason: `OUTCOME_NOT_AUTONOMOUS:${String(rec.outcome)}` };
+}
+
+const countBy = (xs, key) => xs.reduce((acc, x) => {
+  const k = isStr(x?.[key], 1) ? x[key] : "unknown";
+  acc[k] = (acc[k] ?? 0) + 1;
+  return acc;
+}, {});
+
+/** One domain's row. PURE. */
+function coverageRowFor(domain, findings, methods, { methodsEvaluated }) {
+  const evidence = findings.map((f) => ({ finding_id: f.finding_id, ...autonomousEvidenceFor(f) }));
+  const autonomous = evidence.filter((e) => e.autonomous);
+  // A DUPLICATE is not a new finding, so it is reported but grades nothing — including for `assisted`,
+  // where counting it would let a re-stated finding cover a second domain.
+  const duplicates = findings.filter((f) => f.duplicate_of !== null && f.duplicate_of !== undefined);
+  const fresh = findings.filter((f) => f.duplicate_of === null || f.duplicate_of === undefined);
+  const claiming = methods.filter((m) => m.claims.includes(domain));
+  const contributing = claiming.filter((m) => m.contributes);
+  // `autonomous` needs a qualifying FINDING. A method is reusable capability, not demonstrated coverage:
+  // it can lift a row to `assisted`, never to `autonomous`.
+  const grade = autonomous.length > 0 ? "autonomous"
+    : fresh.length > 0 || contributing.length > 0 ? "assisted" : "none";
+  const blockers = evidence.filter((e) => !e.autonomous).map((e) => `${e.finding_id}=${e.reason}`);
+  return {
+    domain,
+    label: DOMAIN_LABELS[domain] ?? domain,
+    grade,
+    grade_reason: autonomous.length > 0
+      ? autonomous.map((e) => `${e.finding_id}(${e.via})`).join(",")
+      : [
+        fresh.length === 0 ? "NO_NEW_FINDING_CLASSED_TO_THIS_DOMAIN" : `NO_AUTONOMOUS_FINDING:${blockers.filter((b) => !b.includes("=DUPLICATE_OF:")).join(";")}`,
+        duplicates.length > 0 ? `${duplicates.length}-DUPLICATE(S)-ADD-NOTHING` : null,
+        contributing.length > 0 ? `${contributing.length}-CONTRIBUTING-METHOD(S)-ONLY` : null,
+        methodsEvaluated ? null : "METHOD_HALF_NOT_EVALUATED",
+      ].filter(Boolean).join("+"),
+    findings: {
+      total: findings.length,
+      by_origin: countBy(findings, "origin"),
+      by_evidence_level: countBy(findings, "evidence_level"),
+      ids: findings.map((f) => f.finding_id).filter((x) => isStr(x, 1)),
+      autonomous_ids: autonomous.map((e) => e.finding_id),
+      duplicates: duplicates.map((f) => f.finding_id).filter((x) => isStr(x, 1)),
+      not_autonomous: evidence.filter((e) => !e.autonomous).map((e) => ({ finding_id: e.finding_id, reason: e.reason })),
+    },
+    // "the operations that produced them": the concretely named origin_ref (a runId#findingId, an
+    // E-… cluster, a tool name, a task id) under the operation class its origin implies.
+    operations: findings.map((f) => ({
+      finding_id: f.finding_id,
+      operation: ORIGIN_OPERATIONS[f.origin] ?? "unknown",
+      origin: f.origin,
+      origin_ref: f.origin_ref ?? null,
+      origin_carrier: f.origin_carrier ?? null,
+    })),
+    methods: {
+      claiming: claiming.map((m) => ({
+        method_id: m.method_id, version: m.version, status: m.status,
+        contaminated: m.contaminated, contributes: m.contributes, why: m.why,
+      })),
+      contributing_count: contributing.length,
+    },
+  };
+}
+
+/**
+ * THE capability coverage map (Plan (B)). DERIVED on every call from `.quay/discovery-portfolio.jsonl`
+ * and the method registry — nothing is stored, so no grade can be stale with respect to its records.
+ *
+ * ⛔ EVERY "could not look" IS ITS OWN VALUE (硬规则 3b, and the reason this function is not a one-liner):
+ *   • an unresolvable shared checkout / a carrier with unparseable lines ⇒ `ok:false`, `evaluated:false`
+ *     and NO domains. A grade computed from a partially-read ledger is a fabrication, not a partial
+ *     answer.
+ *   • an unreadable method registry or an unreadable contaminated-verdict deny-list ⇒ the FINDING half
+ *     still stands (`ok:true`) but `methods.evaluated:false` and every row carries
+ *     `METHOD_HALF_NOT_EVALUATED`. An unreadable deny-list must never read as "nothing is contaminated",
+ *     and an unreadable registry must never read as "no method claims this domain".
+ *   • a finding that states no domain ⇒ the `unclassified` bucket, with the domains it actually carried
+ *     when it carried an unknown one. Never guessed, never folded into a domain, never `none`.
+ *
+ * @param {string} root
+ * @param {object} [opts]
+ * @param {object} [opts.registry]      a `readMethodRegistry(root)` value (read here by default)
+ * @param {object} [opts.contaminated]  a `contaminatedVerdictIds(root)` value (read here by default)
+ * @returns {{ok:boolean, evaluated:boolean, file:string|null, malformed_lines:number, reason:string|null,
+ *            domains:object[], unclassified:object|null, gap:string[]|null, methods:object, context:object}}
+ */
+export function coverageMap(root, { registry = null, contaminated = null } = {}) {
+  const empty = { domains: [], unclassified: null, gap: null };
+  const read = readPortfolio(root);
+  if (read.file === null) {
+    return { ok: false, evaluated: false, file: null, malformed_lines: 0, reason: read.reason, ...empty };
+  }
+  if (!read.ok) {
+    return {
+      ok: false, evaluated: false, file: read.file, malformed_lines: read.malformed_lines,
+      reason: `PORTFOLIO_UNREADABLE:${read.malformed_lines}-unparseable-line(s)-in-${PORTFOLIO_REL}`, ...empty,
+    };
+  }
+
+  const reg = registry ?? readMethodRegistry(root);
+  const cont = contaminated ?? contaminatedVerdictIds(root);
+  const contaminatedIds = cont.ok ? cont.ids : null;
+  const methodsEvaluated = reg.ok === true && cont.ok === true;
+  const methodsReason = methodsEvaluated ? null
+    : !reg.ok
+      ? `METHOD_REGISTRY_UNREADABLE:${reg.malformed_lines ?? 0}-unparseable-line(s)-so-which-methods-are-retired-or-contaminated-cannot-be-determined`
+      : cont.reason;
+  const methods = (reg.ok ? reg.latest : []).map((m) => ({
+    ...methodTrust(m, { contaminatedVerdictIds: contaminatedIds }),
+    claims: DOMAINS.filter((d) => methodClaimsDomain(m, d) !== null),
+  }));
+
+  const domains = DOMAINS.map((d) =>
+    coverageRowFor(d, read.records.filter((r) => r.domain === d), methods, { methodsEvaluated }));
+
+  const unclassifiedRecords = read.records.filter((r) => !DOMAINS.includes(r.domain));
+  const unclassified = {
+    grade: UNCLASSIFIED,
+    total: unclassifiedRecords.length,
+    by_origin: countBy(unclassifiedRecords, "origin"),
+    by_evidence_level: countBy(unclassifiedRecords, "evidence_level"),
+    ids: unclassifiedRecords.map((r) => r.finding_id).filter((x) => isStr(x, 1)),
+    // A row with NO domain and a row carrying a domain outside the vocabulary are different causes
+    // (硬规则 3b: "never classified" must not absorb "carries something this reader cannot read").
+    carried_domain: unclassifiedRecords.filter((r) => r.domain !== null).map((r) => ({ finding_id: r.finding_id, domain: r.domain })),
+  };
+
+  return {
+    ok: true,
+    evaluated: methodsEvaluated,
+    file: read.file,
+    malformed_lines: read.malformed_lines,
+    reason: methodsReason,
+    domains,
+    unclassified,
+    // The gap list is the NAMED domains that are not autonomously covered. `unclassified` is deliberately
+    // not in it: it is a data-quality signal about the ledger, not a capability gap of the system.
+    gap: domains.filter((r) => r.grade !== "autonomous").map((r) => r.domain),
+    methods: {
+      evaluated: methodsEvaluated,
+      reason: methodsReason,
+      evaluated_count: methods.length,
+      contaminated_verdicts_evaluated: cont.ok ? contaminatedIds.length : null,
+      ledger: CONTAMINATED_VERDICTS_REL,
+    },
+    context: {
+      findings: read.records.length,
+      classified: read.records.length - unclassifiedRecords.length,
+      assignments: read.assignments.length,
+    },
+  };
+}
+
 // ── the 2026-10-12 backfill (Plan 5) ────────────────────────────────────────────────────────────
 //
 // The 13 REAL rows of the operator reconstruction at
@@ -813,24 +1216,30 @@ export function valueMetrics(records) {
 // investigator's finding is `independent`; a routine/instrument reading of the open production surface
 // is `production-open`. These are the reconstruction's classifications mapped to the enum — they are
 // JUDGMENTS, and they are not used by `net_new_value`, so they cannot move the value number.
+//
+// DOMAINS: the reconstruction's own `dimension` column (REPORT.md), one per row, carried here with the
+// reason it was classed that way. ⛔ The column is TRANSCRIBED, not re-derived: the operator made these
+// judgments on 2026-10-12 and they are the only source for them. This column is what makes the coverage
+// map possible at all — a finding whose domain is guessed from its claim is exactly what Plan 2 forbids.
+// Each row's `domain_reason` cites the row's own evidence so a reader can re-examine the call.
 export const REAL_BACKFILL_ROWS_2026_10_12 = Object.freeze([
-  { finding_id: "F01", origin: "autonomous-routine", origin_ref: "semantic-dedup-scan-1791733865369#doc-check-cache-vs-scoped-gate-cache", evidence_level: "production-open", method_ref: null, claim: "duplicated cache read/write authority (doc-check-cache vs scoped-gate cache in worker-fan-in)", outcome: "supported", fix_task: "gap-routine-semantic-dedup-scan-doc-check-cache-vs-scoped-gate-cache", human_rating: null },
-  { finding_id: "F02", origin: "autonomous-routine", origin_ref: "semantic-dedup-scan-1791733865369#isDirectInvocation-pair", evidence_level: "production-open", method_ref: null, claim: "byte-identical isDirectInvocation copies in config-wiring-check and drivable-workspace-check", outcome: "supported", fix_task: "gap-routine-semantic-dedup-scan-isdirectinvocation-pair", human_rating: null },
-  { finding_id: "F03", origin: "autonomous-routine", origin_ref: "semantic-dedup-scan-1791733865369#splitArgs-isNonNegInt-trio", evidence_level: "production-open", method_ref: null, claim: "splitArgs/isNonNegInt trio duplicated across three drivers", outcome: "supported", fix_task: "gap-routine-semantic-dedup-scan-splitargs-isnonnegint-trio", human_rating: null },
-  { finding_id: "F04", origin: "autonomous-experiment", origin_ref: "E-DT-1-Hp cluster 11", evidence_level: "independent", method_ref: null, claim: "two lock-hold pairers with different keys and a double-acquire policy", outcome: "supported", fix_task: "gap-fan-in-lock-hold-pairing-two-divergent-keys", human_rating: null },
-  { finding_id: "F05", origin: "autonomous-experiment", origin_ref: "E-HYPGEN-AB-1-B cluster 8", evidence_level: "independent", method_ref: null, claim: "REQUIRED_FIELDS declared separately in the per-task suite-record writer and its checker", outcome: "supported", fix_task: "gap-per-task-suite-record-required-fields-declared-twice", human_rating: null },
-  { finding_id: "F06", origin: "autonomous-experiment", origin_ref: "E-HYPGEN-ACCEPT-1 cluster 5", evidence_level: "independent", method_ref: null, claim: "NOT-EVALUATED exit 2/3 split; a malformed ac69 record passes the static gate", outcome: "supported", fix_task: "gap-ac69-malformed-record-exits-3-and-passes-the-static-gate", human_rating: null },
-  { finding_id: "F07", origin: "operator", origin_ref: "gap-routine-quota-window-ms-parsed-but-inert", evidence_level: "teaching", method_ref: null, claim: "routine_quota.window_ms is parsed but never consumed", outcome: "supported", fix_task: "gap-routine-quota-window-ms-parsed-but-inert", human_rating: null },
-  { finding_id: "F08", origin: "operator", origin_ref: "gap-errorsignature-merges-different-exit-codes", evidence_level: "teaching", method_ref: null, claim: "errorSignature merges exit codes 137/124/1 into one signature", outcome: "supported", fix_task: "gap-errorsignature-merges-different-exit-codes", human_rating: null },
-  { finding_id: "F09", origin: "operator", origin_ref: "EXP-99aa24ac34d53b6a", evidence_level: "teaching", method_ref: null, claim: "the meta-driver owner search caps before filtering by status, and admits null evidence", outcome: "supported", fix_task: "gap-meta-driver-admission-gates-pass-when-they-cannot-know", human_rating: null },
-  { finding_id: "F10", origin: "mechanical-instrument", origin_ref: "enum-surface-parity-check.ts", evidence_level: "production-open", method_ref: null, claim: "goal needs-human is missing from three goal surfaces (pre-existing KNOWN_DRIFT)", outcome: "supported", fix_task: "gap-goal-needs-human-missing-from-three-goal-surfaces", human_rating: null,
+  { finding_id: "F01", origin: "autonomous-routine", origin_ref: "semantic-dedup-scan-1791733865369#doc-check-cache-vs-scoped-gate-cache", evidence_level: "production-open", method_ref: null, claim: "duplicated cache read/write authority (doc-check-cache vs scoped-gate cache in worker-fan-in)", outcome: "supported", fix_task: "gap-routine-semantic-dedup-scan-doc-check-cache-vs-scoped-gate-cache", human_rating: null, domain: "writer-checker-contract", domain_reason: "baseline dimension 'writer/checker contract': the same cache has a writer (doc-check-cache) and a different checker (the scoped-gate cache), i.e. two de-facto owners of one contract" },
+  { finding_id: "F02", origin: "autonomous-routine", origin_ref: "semantic-dedup-scan-1791733865369#isDirectInvocation-pair", evidence_level: "production-open", method_ref: null, claim: "byte-identical isDirectInvocation copies in config-wiring-check and drivable-workspace-check", outcome: "supported", fix_task: "gap-routine-semantic-dedup-scan-isdirectinvocation-pair", human_rating: null, domain: "shared-semantics", domain_reason: "baseline dimension 'shared semantics': one semantic (isDirectInvocation) declared twice byte-identically, with no single owner" },
+  { finding_id: "F03", origin: "autonomous-routine", origin_ref: "semantic-dedup-scan-1791733865369#splitArgs-isNonNegInt-trio", evidence_level: "production-open", method_ref: null, claim: "splitArgs/isNonNegInt trio duplicated across three drivers", outcome: "supported", fix_task: "gap-routine-semantic-dedup-scan-splitargs-isnonnegint-trio", human_rating: null, domain: "shared-semantics", domain_reason: "baseline dimension 'shared semantics': the same two helpers declared in three drivers rather than shared" },
+  { finding_id: "F04", origin: "autonomous-experiment", origin_ref: "E-DT-1-Hp cluster 11", evidence_level: "independent", method_ref: null, claim: "two lock-hold pairers with different keys and a double-acquire policy", outcome: "supported", fix_task: "gap-fan-in-lock-hold-pairing-two-divergent-keys", human_rating: null, domain: "shared-semantics", domain_reason: "baseline dimension 'shared semantics': two implementations of one pairing semantic whose keys disagree" },
+  { finding_id: "F05", origin: "autonomous-experiment", origin_ref: "E-HYPGEN-AB-1-B cluster 8", evidence_level: "independent", method_ref: null, claim: "REQUIRED_FIELDS declared separately in the per-task suite-record writer and its checker", outcome: "supported", fix_task: "gap-per-task-suite-record-required-fields-declared-twice", human_rating: null, domain: "writer-checker-contract", domain_reason: "baseline dimension 'writer/checker contract': the writer and its checker each declare the record's required fields, so the two can drift" },
+  { finding_id: "F06", origin: "autonomous-experiment", origin_ref: "E-HYPGEN-ACCEPT-1 cluster 5", evidence_level: "independent", method_ref: null, claim: "NOT-EVALUATED exit 2/3 split; a malformed ac69 record passes the static gate", outcome: "supported", fix_task: "gap-ac69-malformed-record-exits-3-and-passes-the-static-gate", human_rating: null, domain: "shared-semantics", domain_reason: "baseline dimension 'shared semantics': NOT-EVALUATED is spelled as exit 2 in one place and 3 in another, so a malformed record satisfies the static gate" },
+  { finding_id: "F07", origin: "operator", origin_ref: "gap-routine-quota-window-ms-parsed-but-inert", evidence_level: "teaching", method_ref: null, claim: "routine_quota.window_ms is parsed but never consumed", outcome: "supported", fix_task: "gap-routine-quota-window-ms-parsed-but-inert", human_rating: null, domain: "config-to-behavior", domain_reason: "baseline dimension 'config→behavior': a config key is parsed and stored but nothing reads it, so the config does not change behaviour" },
+  { finding_id: "F08", origin: "operator", origin_ref: "gap-errorsignature-merges-different-exit-codes", evidence_level: "teaching", method_ref: null, claim: "errorSignature merges exit codes 137/124/1 into one signature", outcome: "supported", fix_task: "gap-errorsignature-merges-different-exit-codes", human_rating: null, domain: "shared-semantics", domain_reason: "baseline dimension 'shared semantics': one signature function is the single shared meaning of three distinct exit codes" },
+  { finding_id: "F09", origin: "operator", origin_ref: "EXP-99aa24ac34d53b6a", evidence_level: "teaching", method_ref: null, claim: "the meta-driver owner search caps before filtering by status, and admits null evidence", outcome: "supported", fix_task: "gap-meta-driver-admission-gates-pass-when-they-cannot-know", human_rating: null, domain: "state-transitions", domain_reason: "baseline dimension 'state/admission': the defect is in an admission gate that lets a record through when it cannot know the record's state, i.e. a state transition that should not have been allowed" },
+  { finding_id: "F10", origin: "mechanical-instrument", origin_ref: "enum-surface-parity-check.ts", evidence_level: "production-open", method_ref: null, claim: "goal needs-human is missing from three goal surfaces (pre-existing KNOWN_DRIFT)", outcome: "supported", fix_task: "gap-goal-needs-human-missing-from-three-goal-surfaces", human_rating: null, domain: "shared-semantics", domain_reason: "baseline dimension 'shared semantics': one needs-human state is declared across three surfaces and one of them lacks it, so the surfaces disagree on what the state is",
     // The catalog entry resolves the INSTRUMENT, not the subject: a "which surfaces" finding carries no
     // subject files in the catalog, so the three surfaces the instrument flagged are named here — read
     // off the fix task's own `## Touches`, not invented.
     components: ["packages/quay/src/serve-goal.ts", "packages/quay/src/mcp-handlers.ts", "packages/quay-native/src/mcp-server.ts"] },
-  { finding_id: "F11", origin: "operator", origin_ref: "gap-in-round-suite-rerun-never-executed-in-production", evidence_level: "production-open", method_ref: null, claim: "the in-round suite rerun command is never declared, so the mechanism never ran in production", outcome: "supported", fix_task: "gap-in-round-suite-rerun-never-executed-in-production", human_rating: null },
-  { finding_id: "F12", origin: "user", origin_ref: "EXP-99aa24ac34d53b6a", evidence_level: "teaching", method_ref: null, claim: "probe-routine and the meta-driver duplicate identity, dedup and quota; missed by nine blind runs", outcome: "supported", fix_task: null, human_rating: null },
-  { finding_id: "N01", origin: "autonomous-experiment", origin_ref: "E-HYPGEN-ACCEPT-1 cluster 7", evidence_level: "independent", method_ref: null, claim: "claimed independent Touches parsers refuted: all of them import touches-parser.ts", outcome: "refuted", fix_task: null, human_rating: null },
+  { finding_id: "F11", origin: "operator", origin_ref: "gap-in-round-suite-rerun-never-executed-in-production", evidence_level: "production-open", method_ref: null, claim: "the in-round suite rerun command is never declared, so the mechanism never ran in production", outcome: "supported", fix_task: "gap-in-round-suite-rerun-never-executed-in-production", human_rating: null, domain: "config-to-behavior", domain_reason: "baseline dimension 'config→behavior': the mechanism depends on a declaration that no config supplies, so the declared behaviour was never produced" },
+  { finding_id: "F12", origin: "user", origin_ref: "EXP-99aa24ac34d53b6a", evidence_level: "teaching", method_ref: null, claim: "probe-routine and the meta-driver duplicate identity, dedup and quota; missed by nine blind runs", outcome: "supported", fix_task: null, human_rating: null, domain: "shared-semantics", domain_reason: "baseline dimension 'shared semantics': identity, dedup and quota are implemented once in each of two routines instead of one shared implementation" },
+  { finding_id: "N01", origin: "autonomous-experiment", origin_ref: "E-HYPGEN-ACCEPT-1 cluster 7", evidence_level: "independent", method_ref: null, claim: "claimed independent Touches parsers refuted: all of them import touches-parser.ts", outcome: "refuted", fix_task: null, human_rating: null, domain: "reuse-refutation", domain_reason: "baseline dimension 'reuse refutation': the finding IS the refutation of a claimed independent-reimplementation — the parsers all import the shared module, so the reuse claim was false" },
 ]);
 
 /**
@@ -838,11 +1247,17 @@ export const REAL_BACKFILL_ROWS_2026_10_12 = Object.freeze([
  * the first — a partially-ingested baseline must be VISIBLE as one. The duplicate rule runs for real
  * (no bypass): the 13 rows must show up as 13 distinct findings, and that is a property of the data, not
  * of a flag passed here.
- * @returns {{ok:boolean, ingested:string[], already_present:string[],
- *            refused:{finding_id:string, reasons:string[]}[], result:object}}
+ *
+ * ⛔ The DOMAIN is ensured separately from the ingest, and that separation is forced by the carrier:
+ *   the 13 rows were ingested before `domain` existed, a finding's id is keyed on `finding_id`, so
+ *   re-ingesting one to add the field is a `DUPLICATE_ID` no-op. The domain therefore arrives as its
+ *   own append-only line (`assignFindingDomain`), which a re-run appends at most once per finding. A row
+ *   that DOES state a domain in its own record needs no line — the native field wins.
+ * @returns {{ok:boolean, ingested:string[], already_present:string[], refused:{finding_id,reasons:string[]}[],
+ *            domains_assigned:string[], result:object}}
  */
 export function backfill(root, rows = REAL_BACKFILL_ROWS_2026_10_12, opts = {}) {
-  const ingested = [], already_present = [], refused = [];
+  const ingested = [], already_present = [], refused = [], domains_assigned = [];
   for (const row of rows) {
     const r = ingestFinding(root, row, opts);
     // A `DUPLICATE_ID` refusal is the append-only carrier saying "this finding is already recorded":
@@ -852,5 +1267,20 @@ export function backfill(root, rows = REAL_BACKFILL_ROWS_2026_10_12, opts = {}) 
     else if (r.duplicate === true) already_present.push(row.finding_id);
     else refused.push({ finding_id: row.finding_id, reasons: r.reasons });
   }
-  return { ok: refused.length === 0, ingested, already_present, refused, result: valueMetrics(readPortfolio(root).records) };
+  const stored = new Map(readPortfolio(root).records.map((r) => [r.finding_id, r]));
+  for (const row of rows) {
+    if (!DOMAINS.includes(row.domain)) continue;
+    const rec = stored.get(row.finding_id);
+    if (!rec || isStr(rec.domain, 1)) continue;   // absent (refused) or already classed
+    const a = assignFindingDomain(root, {
+      finding_id: row.finding_id, domain: row.domain, reason: row.domain_reason,
+      by: opts.domainBy ?? "backfill:REAL_BACKFILL_ROWS_2026_10_12",
+    });
+    if (a.ok || a.duplicate === true) domains_assigned.push(row.finding_id);
+    else refused.push({ finding_id: row.finding_id, reasons: a.reasons });
+  }
+  return {
+    ok: refused.length === 0, ingested, already_present, domains_assigned, refused,
+    result: valueMetrics(readPortfolio(root).records),
+  };
 }
