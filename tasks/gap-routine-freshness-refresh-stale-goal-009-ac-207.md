@@ -3,7 +3,7 @@ id: gap-routine-freshness-refresh-stale-goal-009-ac-207
 title: "freshness-refresh: AC-207's newest evidence (ts 2026-10-09T12:32:43Z,
   81.22h old, d=165) leaves margin/K=0.1750 below the 0.2223 threshold; the
   coldstart-face producer is its only "
-status: todo
+status: ready
 labels:
   - gap
   - routine-filed
