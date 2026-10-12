@@ -2,7 +2,7 @@
 id: gap-quay-task-log-trace-read-surface
 title: "task_trace P1: read-only 'quay task log --since <cursor>' and 'quay task
   trace <id>' with enumerated coverage, epoch rebase, at-least-once"
-status: todo
+status: ready
 labels:
   - gap
   - task-trace
