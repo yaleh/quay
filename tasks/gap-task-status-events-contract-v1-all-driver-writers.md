@@ -3,7 +3,7 @@ id: gap-task-status-events-contract-v1-all-driver-writers
 title: "task_trace P0: task-status-events contract v1
   (eventId/seq/epoch/cause/evidence.commit, locked append) + wire ALL driver
   status writers + git-evidenced reconcile"
-status: ready
+status: done
 labels:
   - gap
   - task-trace
