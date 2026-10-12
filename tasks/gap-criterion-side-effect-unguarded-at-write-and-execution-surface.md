@@ -57,7 +57,7 @@ extra:
 |---|---|---|
 | 显式声明（产物） | 判据**执行到**的产物在自己头部带 `@real-infra` pragma ⇒ side-effecting | 结论来自**产物自己的字节**，与它叫什么/写在哪无关 |
 | 显式声明（工作区） | `.quay/criterion-capabilities.json` 声明「写能力命令面」正则 / 「真实端点」字面量 ⇒ side-effecting | 是**数据**，Core ⛔ 不装别的项目的 API 表 |
-| 无法评估 | 判据**执行到**的产物在它将要运行的树里不存在 ⇒ not-evaluated（fail-closed） | 结论来自**能否读到产物**，`x/y.mjs`/`./x/y.mjs`/`a/../x/y.mjs` 结论相同 |
+| 无法评估（**仅解释器那一臂**） | `node <path>` / `python3 <path>` / `--test <path>` 里那个 path 在它将要运行的树里不存在 ⇒ not-evaluated（fail-closed） | 结论来自**能否读到产物**，`x/y.mjs`/`./x/y.mjs`/`a/../x/y.mjs` 结论相同 |
 
 **⛔ 为什么「按名字/拼写」判会漏（Fleet 侧实测反例，逐字）**：那把锁第一版按「文件里有没有 `callTool` 方法」判，而**事故文件自己就有一个转发壳**——直通真实客户端的方法，名字上完全看不出来。第二次更彻底：把带副作用的文件**移出 `test/`** 之后，一条把判据改指向**显式路径** `node --test realchecks/wake-real-reachability.mjs` 的提交让风暴 13 分钟后重新上膛——**"文件在哪、叫什么"从来不是能力**。
 
@@ -68,6 +68,18 @@ extra:
 - 「按路径/文件名拼写」：见上，Fleet 两侧实测都漏。
 
 ⇒ 判据的文本只被用来**解析可达产物**（一个 quote-aware 的 shell 分词器，含 here-doc 体排除与注释排除——两者都是被实测逼出来的：Python docstring 里的散文一度被读成一条 `/manager` 命令），**⛔ 从不用来下结论**。
+
+**第三条轴为什么只覆盖「解释器那一臂」（这条区分是被既有测试逼出来的，不是我事后挑的）**：一条判据执行一个**不存在的**程序时，两条臂的后果**不对称**——
+
+- **直接执行**（`./scripts/gone.sh`）：**shell 自己**以 126/127 退出，而 `verdictFromAcceptance` **已经把 126/127 映射成 `not-evaluated (not-runnable)`** ——一个精确、既有的判决。抢先拒它，只会把一个**更精确**的判决换成更含糊的，而**保护不到任何东西**（那个文件根本不在，跑不起来）。实测：抢先之后 `packages/quay/test/goal-gate-verdict-mapping.test.mjs` 自己的 127 用例由 `not-runnable` 变成 `capability` —— 这就是"过度收口"的形状，已据此收窄。
+- **解释器**（`node gone/module.mjs`）：解释器以**普通 exit 1**（"Cannot find module"）退出，而运行器把它映射成 **`fail`** ——即**断言"这条判据为假"，而那个命令一次都没跑过**。这与本任务要消灭的缺陷**同一类**（硬规则 3b：没跑 ≠ 跑了且为假）。
+
+⇒ 只对第二臂提前拒绝。实测改动前后同一条判据（`node gone/module.mjs`）：
+
+```
+BEFORE（fork 点 pristine 检出）  verdict=fail           cause=None
+AFTER （本改动）                 verdict=not-evaluated  cause=capability
+```
 
 **四条调用点全部过闸**（`⛔ 只修一处＝把同一原则重新留给下一个发现者`）：
 
@@ -80,7 +92,7 @@ extra:
 
 **旁路的两条性质**（AC7）：**按次**（flag 只作用于这一次调用，⛔ 无人值守的两条路径上没有任何参数可传 ⇒ 不可能"设一次、永久生效"）；**落痕不同形**（`payload.capabilityBypass` 记进账本，一次被旁路的执行与一次常规执行在账本上可区分）。
 
-**稳定错误码**（调用方 branch on `code`，⛔ 不解析 message）：`criterion-side-effect`（已声明会写）、`criterion-capability-unevaluable`（读不懂）。两者**必须分开**：硬规则 3b——「已声明危险」与「无法评估」是两个不同的事实。
+**稳定错误码**（调用方 branch on `code`，⛔ 不解析 message）：`criterion-side-effect`（已声明会写）、`criterion-capability-unevaluable`（读不懂）。两者**必须分开**：硬规则 3b——「已声明危险」与「无法评估」是两个不同的事实。判决词表侧复用既有单一实现：`NotEvaluatedCause` 新增 `"capability"`（⛔ 不复用 `not-runnable`，那条的含义是"命令被到达了却起不来"），理由前缀与 `verdictFromAcceptance` 的 `not-evaluated (${cause}): …` 逐字同形。
 
 **保护是机制不是约定**：拒绝发生在 `runAcceptance` **之前**，且它是 `runAcceptance` 在这四条路径上的**唯一入口**（`capabilityRefusal` / `capabilityRefusalAt`）。一个**完全不知道该机制存在**的调用方写入带副作用的 criterion，仍然会在**执行前**被拒——这由 §Evidence 的 ARM B 机械证明（真跑就会写出的痕迹不存在）。
 
@@ -95,7 +107,7 @@ extra:
 ```json
 {"evaluated": true, "refused": false, "eligible": 1,
  "ran": [{"id": "AC-020", "verdict": "not-evaluated", "ms": 0,
-   "reason": "criterion-capability-unevaluable: criterion refused BEFORE execution — it is not a reading. uncertifiable-executed-artifact: bin/quay-fleet.mjs (does not resolve under the criterion's cwd, so its capability cannot be established). …"}],
+   "reason": "not-evaluated (capability): criterion-capability-unevaluable: criterion refused BEFORE execution — it is not a reading. uncertifiable-executed-artifact: bin/quay-fleet.mjs (…) …"}],
  "capabilityRefused": [{"id": "AC-020", "code": "criterion-capability-unevaluable"}],
  "stoppedBy": "exhausted"}
 ```
@@ -103,7 +115,7 @@ extra:
 **ARM B（产物真的在、且**真的会写**；由工作区声明）** — 先造一个**真的会写文件**的 `bin/quay-fleet.mjs`，并在 `.quay/criterion-capabilities.json` 声明 `cloudcli delegate-smoke`：
 
 ```
-{"id":"AC-020","verdict":"not-evaluated","capabilityCode":"criterion-side-effect",
+{"id":"AC-020","verdict":"not-evaluated","cause":"capability","capabilityCode":"criterion-side-effect",
  "reason":"criterion-side-effect: criterion refused BEFORE execution — it is not a reading. declared-write-capable-command: cloudcli-delegate-smoke (src/delegate-smoke.mjs requires createCloudcliClient({readOnly:false}) and reaches session_create/session_send). …"}
 SPAWNED.txt created? NO     ← ⛔ 机械读数：真跑就会写出的痕迹不存在
 ```
@@ -119,7 +131,7 @@ SPAWNED.txt created? YES    ← 旁路下真的执行了（⛔ 不是"换个说�
 
 | 控制 | 输入 | 判定 |
 |---|---|---|
-| 正控 A | AC-020 criterion **原文**（`node bin/quay-fleet.mjs cloudcli delegate-smoke --json \| node -e …`） | **拒**（`criterion-capability-unevaluable`；产物在场时 `criterion-side-effect`） |
+| 正控 A | AC-020 criterion **原文**（`node bin/quay-fleet.mjs cloudcli delegate-smoke --json \| node -e …`） | **拒**（`criterion-capability-unevaluable`；产物在场并被声明时 `criterion-side-effect`） |
 | 正控 B | 复发那一条 `node --test realchecks/wake-real-reachability.mjs` | **拒**（产物不在树里 ⇒ unevaluable；产物在场且带 `@real-infra` ⇒ side-effecting，**同一方言两个消费者**） |
 | 负控 | Fleet 退化为只读的 `node -e` 证据文档结构检查 | **放行**，且**真的被执行**（记入 `achievedButFailing`，因为证据文档不在临时树里） |
 
@@ -146,6 +158,10 @@ after .sweep = {"evaluated": true, "refused": false, "eligible": 1,
 - **测试**：`packages/quay/test/goal-store.test.mjs` 的能力闸段——`AC1`（真跑就会写出的痕迹不存在）、`AC3a`/`AC3b`（两条无人值守路径各自的落痕读数）、`AC7(上限)`（旁路⛔ 不得作为参数流进共用判定）。
 - **旁路⛔ 不在无人值守路径上**：`capabilityRefusal` 的签名里没有 allow 参数，无人值守的两条路径无从传给它；`AC7(上限)` 直接对源码断言这一点。
 
+### AC9 的验证位置（如实说明）
+
+本 worker 的作业规程明确**不跑全量 suite**（由 driver 的 fan-in 机械跑 `bash scripts/test.sh`）。此处实际跑过并全绿的是：**scoped gate**（`scripts/test.sh --for-task … --allow-thin`，187 tests / 0 fail，含本任务的 13 条能力闸测试）+ **全部 goal 相关测试**（`plugin/test/goal-*.test.mjs` 与 `packages/quay/test/goal-*.test.mjs` 共 399 tests / 0 fail）。AC9 的最终读数以 fan-in 的 suite 为准。
+
 ## AC
 
 - [x] **执行前闸**：criterion 命中"带真实副作用能力"即 **fail-closed 拒绝**，返回**稳定错误码**（调用方 branch on `code`，⛔ 不 branch on message），且**命令未被 spawn**（给出"未 spawn"的机械读数，⛔ 不接受"跑完发现不该跑"）
@@ -166,12 +182,14 @@ after .sweep = {"evaluated": true, "refused": false, "eligible": 1,
 
 ### ⛔ 如实披露这笔取舍（残余风险，⛔ 不当成已解决）
 
-1. **「执行不到的产物」是 fail-closed 的后备轴，不是能力轴**。一条判据若执行一个**在树里存在、无 pragma、也无人声明**的产物，本闸会放行。真正关上这个口的是**声明**（产物 pragma / 工作区声明）+ 各工作区**提交期**的静态锁（Fleet 侧 `test/criteria-are-readings.test.mjs`）。本任务交付的是**执行面**这一半。
-2. **绝对路径且无脚本后缀的直接执行**（`/usr/local/bin/x`）是这条后备轴的**已知盲点**——为它放行是有意的：`/manager`、`/architecture` 这类 URL 路由会被读成绝对路径，而"以 `/` 开头"正是被禁止的拼写判定。宁可少一个后备情形，也不凭空造一个。
+1. **「解释器指向的产物读不到」是 fail-closed 的后备轴，不是能力轴**。一条判据若执行一个**在树里存在、无 pragma、也无人声明**的产物，本闸会放行。真正关上这个口的是**声明**（产物 pragma / 工作区声明）+ 各工作区**提交期**的静态锁（Fleet 侧 `test/criteria-are-readings.test.mjs`）。本任务交付的是**执行面**这一半。
+2. **工作区的声明载体是本任务新定的**（`.quay/criterion-capabilities.json` + `@real-infra` pragma）。Fleet 侧现有的 `WRITE_CAPABLE_COMMANDS` 活在它自己的 `.mjs` 模块里，**尚未接到这个载体上**——⛔ Core 不会去 import 工作区代码（无人值守路径上执行工作区代码是另一个决定）。**接上它是 Fleet 那一半的工作**；在那之前，本条对"产物存在且无人声明"的真实事故形态只能靠 pragma 或提交期静态锁兜住。
+3. **绝对路径且无脚本后缀的直接执行**（`/usr/local/bin/x`）是后备轴的**已知盲点**——为它放行是有意的：`/manager`、`/architecture` 这类 URL 路由会被读成绝对路径，而"以 `/` 开头"正是被禁止的拼写判定。宁可少一个后备情形，也不凭空造一个。
 
 ## Touches
 
 - `packages/quay/src/goal-store.ts`
 - `packages/quay/src/gate/criterion-capability.ts`
+- `packages/quay/src/gate/acceptance-runner.ts`
 - `packages/quay/test/goal-store.test.mjs`
 - `tasks/gap-criterion-side-effect-unguarded-at-write-and-execution-surface.md`
