@@ -204,6 +204,11 @@ export const USER_SOURCE_FROM_WORKER = "USER_SOURCE_FROM_WORKER";
 export const CORRECTION_TARGET_NOT_FOUND = "CORRECTION_TARGET_NOT_FOUND";
 /** Refusal code: a correction patches a field outside `CORRECTABLE_FIELDS`. */
 export const CORRECTION_FIELD_NOT_CORRECTABLE = "CORRECTION_FIELD_NOT_CORRECTABLE";
+/** Refusal code: a `teaching`/`transfer` record reuses a known case without naming it (Plan item 4). */
+export const SOURCE_CASE_REQUIRED = "SOURCE_CASE_REQUIRED";
+/** Refusal code: a record claims `independent` while naming a source case it reused — a contradiction:
+ *  an independently-generalized case shares no case with the fitting material. */
+export const SOURCE_CASE_NOT_APPLICABLE_FOR_INDEPENDENT = "SOURCE_CASE_NOT_APPLICABLE_FOR_INDEPENDENT";
 
 /**
  * The ONE table of Discovery Method carriers: name → `{rel, kind}`. The rel paths of ALL of them are
@@ -279,6 +284,67 @@ export const AUTHORED_BY_ACTORS = Object.freeze(["ingester", "task-worker", "ope
 /** Where the human's own words came from, when `reported_by:"user"` (Plan item 2). */
 export const USER_PROVENANCE_KINDS = Object.freeze(["conversation", "task-body"]);
 
+// ── THE EVIDENCE LEVEL (task gap-discovery-evidence-level-teaching-vs-independent, Plan item 1) ────
+//
+// ⛔ THE DEFECT THIS CLOSES (user strategy change, 2026-10-12, point 4). The Experience ledger, the
+//   generalization verdicts and the method registry carried no evidence level, so a verdict read off a
+//   TEACHING case (an answer the experimenter already knew) and a verdict read off a SEALED,
+//   never-before-used case were the SAME SHAPE to the promotion guard. That is how the two methods
+//   retired as v7 `method-f22f31cfe3029259` / v3 `method-c93d704b1a124ed2` were promoted: not by a
+//   falsified prediction, but by a judgment whose evidence level was never stated.
+//
+// The level is DECLARED, never inferred from a role or a component set: only the experimenter knows
+// whether the answer was known in advance. `unlabelled` is what a record that predates this field — or
+// a caller that declares nothing — reads as, and it is never `independent` (硬规则 6: a missing label
+// is not a weak positive, it is an absent claim).
+
+/** The four DECLARED evidence levels, strongest last. Only `independent` licenses `status:"active"`. */
+export const EVIDENCE_LEVELS = Object.freeze(["teaching", "transfer", "independent", "production-open"]);
+
+/** The level a record reads as when it declares none. ⛔ Its OWN value, deliberately OUTSIDE
+ *  `EVIDENCE_LEVELS`: "no claim was made" must never be written as, or read as, a weak positive. */
+export const UNLABELLED_EVIDENCE_LEVEL = "unlabelled";
+
+/** The writable vocabulary: the four declared levels plus the explicit "no claim" value. */
+export const EVIDENCE_LEVEL_VALUES = Object.freeze([...EVIDENCE_LEVELS, UNLABELLED_EVIDENCE_LEVEL]);
+
+/** The ONLY level that licenses a `status:"active"` promotion (Plan item 2). */
+export const INDEPENDENT_EVIDENCE_LEVEL = "independent";
+
+/** The levels whose cases may reuse a known case (Plan item 4) — at the price of naming the source
+ *  case and of being excluded from every independent metric. */
+export const CASE_REUSE_EVIDENCE_LEVELS = Object.freeze(["teaching", "transfer"]);
+
+/**
+ * The evidence level of a record (or of a raw level value). PURE. Anything that is not one of the
+ * writable values — an absent field, `null`, a typo, a number — reads as `unlabelled`, which is the
+ * FAIL-CLOSED direction: an unreadable label can never be mistaken for `independent` (硬规则 3b).
+ * @param {object|string|null|undefined} x  a record carrying `evidence_level`, or the level itself
+ * @returns {string} one of `EVIDENCE_LEVEL_VALUES`
+ */
+export function evidenceLevelOf(x) {
+  const level = isStr(x, 1) ? String(x) : (isObj(x) ? x.evidence_level : null);
+  return EVIDENCE_LEVEL_VALUES.includes(level) ? level : UNLABELLED_EVIDENCE_LEVEL;
+}
+
+/** `true` only for a record that DECLARES `independent`. An unlabelled record is never independent. */
+export const isIndependentEvidenceLevel = (x) => evidenceLevelOf(x) === INDEPENDENT_EVIDENCE_LEVEL;
+
+/** `true` for the levels allowed to reuse a known case (`teaching` / `transfer`). */
+export const allowsCaseReuse = (x) => CASE_REUSE_EVIDENCE_LEVELS.includes(evidenceLevelOf(x));
+
+/**
+ * The number of shared component basenames at which two case descriptions are the SAME defect.
+ *
+ * ⛔ IT LIVES HERE, in the base module, because TWO readers that never see each other must agree on it:
+ *   the reflection module's lineage/case-identity arms and the method registry's quarantine arm. The
+ *   registry cannot import the reflection module (the reflection module imports the registry — a cycle),
+ *   so a copy in either one would be a second definition with nothing keeping the two in step, and a
+ *   disagreement between them is exactly the failure mode ("the same defect judged differently by two
+ *   guards") that this constant exists to prevent (硬规则 5b).
+ */
+export const MIN_SHARED_CASE_COMPONENTS = 2;
+
 /** A summary with fewer than this many non-whitespace chars says nothing — the ONLY numeric gate
  *  here, and it is on a MEASURED quantity (硬规则 4: no made-up thresholds on unmeasured things). */
 export const MIN_SUMMARY_CHARS = 40;
@@ -292,9 +358,14 @@ export const MIN_USER_QUOTE_CHARS = 20;
  *  dispatch-record reason floor: a correction with no reason is an edit with no audit trail. */
 export const MIN_CORRECTION_REASON_CHARS = 8;
 
-/** Per-record required fields — declared as DATA so the refusal reasons are enumerable and testable. */
+/** Per-record required fields — declared as DATA so the refusal reasons are enumerable and testable.
+ *  ⛔ `evidence_level` joined this list with gap-discovery-evidence-level-teaching-vs-independent: a
+ *  NEW record must say what its evidence is worth. Records already on disk are NOT rewritten — they
+ *  read back as `unlabelled` through `evidenceLevelOf`, which is why the READ path never refuses for
+ *  the field's absence while the WRITE path does. */
 export const REQUIRED_EXPERIENCE_FIELDS = Object.freeze([
   "case_id", "ts", "role", "reported_by", "authored_by", "source_ref", "evidence", "components", "summary",
+  "evidence_level",
 ]);
 
 /**
@@ -473,6 +544,25 @@ export function validateExperienceRecord(rec) {
 
   if (!isStr(rec.case_id, 1)) reasons.push("FIELD_INVALID:case_id");
   if (!isStr(rec.ts, 4)) reasons.push("FIELD_INVALID:ts");
+
+  // ── THE EVIDENCE LEVEL (Plan item 1) ────────────────────────────────────────────────────────────
+  // The field is `SCHEMA_MISSING` above when absent, so this block judges only the VALUE: a level
+  // outside the vocabulary is its OWN code, never silently downgraded to `unlabelled` on the WRITE
+  // path (a typo must not become a weaker-but-legal claim). Reading is the other half: `evidenceLevelOf`
+  // maps an absent/unknown value to `unlabelled`, the fail-closed direction, and never to `independent`.
+  if (!EVIDENCE_LEVEL_VALUES.includes(rec.evidence_level)) {
+    reasons.push(`EVIDENCE_LEVEL_NOT_IN_VOCAB:${String(rec.evidence_level)}`);
+  } else if (CASE_REUSE_EVIDENCE_LEVELS.includes(rec.evidence_level) && !isStr(rec.source_case_id, 1)) {
+    // Plan item 4: a `teaching`/`transfer` record MAY reuse a known case, and it MUST name it — a
+    // reused case whose source is unnamed is indistinguishable on read-back from a fresh one, which is
+    // exactly the "repeated training case presented as an independent proof" the strategy forbids.
+    reasons.push(`${SOURCE_CASE_REQUIRED}:evidence_level=${rec.evidence_level}-must-name-the-known-case-it-reuses-in-source_case_id`);
+  } else if (rec.evidence_level === INDEPENDENT_EVIDENCE_LEVEL && supplied(rec, "source_case_id") && rec.source_case_id !== null) {
+    // The mirror of the rule above: naming a reused case while claiming `independent` is a claim the
+    // level itself contradicts. It is refused on its own terms rather than ignored, because ignoring it
+    // would let a record read back as independent while carrying the very reuse the level denies.
+    reasons.push(`${SOURCE_CASE_NOT_APPLICABLE_FOR_INDEPENDENT}:evidence_level=independent-was-not-derived-from-a-previously-used-case`);
+  }
 
   if (!EXPERIENCE_ROLES.includes(rec.role)) reasons.push(`ROLE_NOT_IN_VOCAB:${String(rec.role)}`);
   if (!REPORTED_BY_VOCAB.includes(rec.reported_by)) reasons.push(`REPORTED_BY_NOT_IN_VOCAB:${String(rec.reported_by)}`);
@@ -1196,11 +1286,11 @@ export function ingestExperience(root, args = {}) {
  * @param {{kind:string, ref:string, quote:string}} [args.userProvenance]  the human's own words.
  *   Required whenever `reportedBy` is `"user"`, and refused on a derived (`"system"`) entry.
  */
-export function ingestFeedback(root, { caseId, role, reportedBy = "user", evidenceRefs, components = [], summary, ts, authoredBy, userProvenance } = {}) {
-  return ingestExperience(root, { source: "user", caseId, role, reportedBy, evidenceRefs, components, summary, ts, authoredBy, userProvenance });
+export function ingestFeedback(root, { caseId, role, reportedBy = "user", evidenceRefs, components = [], summary, ts, authoredBy, userProvenance, evidenceLevel, sourceCaseId } = {}) {
+  return ingestExperience(root, { source: "user", caseId, role, reportedBy, evidenceRefs, components, summary, ts, authoredBy, userProvenance, evidenceLevel, sourceCaseId });
 }
 
-function ingestUserSource(root, { caseId, role, reportedBy = "user", evidenceRefs, components = [], summary, ts, authoredBy, userProvenance } = {}) {
+function ingestUserSource(root, { caseId, role, reportedBy = "user", evidenceRefs, components = [], summary, ts, authoredBy, userProvenance, evidenceLevel, sourceCaseId } = {}) {
   const evidence = (Array.isArray(evidenceRefs) ? evidenceRefs : []).map((e) =>
     isObj(e) ? { ref: e.ref, sha256: e.sha256 } : { ref: e, sha256: sha256(String(e)) });
   return appendExperienceRecord(root, {
@@ -1218,6 +1308,14 @@ function ingestUserSource(root, { caseId, role, reportedBy = "user", evidenceRef
     summary,
     evaluation_pin: null,         // a human report has no pre-registration to be pinned to
     user_provenance: userProvenance,
+    // ⛔ The level is DECLARED or it is `unlabelled` — never inferred from the role, the components or
+    // the reporter. A caller that does not say what its evidence is worth gets `unlabelled`, which can
+    // never license a promotion; defaulting to a LEVEL would be inventing the one fact only the
+    // experimenter knows (硬规则 3b/6).
+    evidence_level: evidenceLevelOf({ evidence_level: evidenceLevel }),
+    // `null` is the honest "no case was reused" — and for a `teaching`/`transfer` entry the validator
+    // REFUSES it, so the requirement bites at the one place that can still tell the two apart.
+    source_case_id: sourceCaseId ?? null,
   });
 }
 
@@ -1247,13 +1345,15 @@ export const DERIVED_INGEST_AUTHOR = Object.freeze({ actor: "ingester", ref: "in
  * `[{ref: <id>, sha256: sha256(<the record's raw carrier line>)}]`; `ts` = the record's own `ts`;
  * `evaluation_pin` = the record's pre-registration `pin`, or `null`.
  */
-export function ingestFromEvidenceStoreOutcome(root, { experiment, experimentRef, role, components = [], summary, caseId, ts, authoredBy } = {}) {
+export function ingestFromEvidenceStoreOutcome(root, { experiment, experimentRef, role, components = [], summary, caseId, ts, authoredBy, evidenceLevel, sourceCaseId } = {}) {
   return ingestExperience(root, {
     source: "system",
     experiment,
     experimentRef,
     narration: { role, caseId, components, summary, ts },
     authoredBy,
+    evidenceLevel,
+    sourceCaseId,
   });
 }
 
@@ -1306,7 +1406,7 @@ function resolveOutcomeForIngest(root, args) {
 }
 
 /** The record an ingestion appends, from the resolved outcome + the fields (derived or narrated). */
-function systemRecord(rec, raw, fields, { caseId, ts, authoredBy }) {
+function systemRecord(rec, raw, fields, { caseId, ts, authoredBy, evidenceLevel, sourceCaseId }) {
   return {
     case_id: caseId,
     ts: ts ?? (isStr(rec.ts, 4) ? rec.ts : new Date().toISOString()),
@@ -1327,6 +1427,12 @@ function systemRecord(rec, raw, fields, { caseId, ts, authoredBy }) {
     join_status: fields.join_status ?? null,
     claim_refs: Array.isArray(fields.claim_refs) ? fields.claim_refs : [],
     claim_citations: Array.isArray(fields.claim_citations) ? fields.claim_citations : [],
+    // The DERIVED form's evidence level is ALWAYS `unlabelled`: an outcome record projected out of the
+    // evidence store carries no statement about whether its case was known in advance, and the ingester
+    // narrates nothing (that is its whole contract). The PINNED form passes the caller's declaration
+    // through, because there the caller is asserting the case's provenance by hand.
+    evidence_level: evidenceLevelOf({ evidence_level: evidenceLevel }),
+    source_case_id: sourceCaseId ?? null,
   };
 }
 
@@ -1410,7 +1516,9 @@ function ingestSystemSource(root, args) {
   // The author is fixed on the derived form and caller-declared on the pinned form (see the guards
   // above); neither is defaulted here, so this line cannot reintroduce the defect the guards close.
   const authoredBy = narration === null ? DERIVED_INGEST_AUTHOR : args.authoredBy;
-  const out = appendExperienceRecord(root, systemRecord(rec, raw, fields, { caseId, ts: args.ts, authoredBy }));
+  const out = appendExperienceRecord(root, systemRecord(rec, raw, fields, {
+    caseId, ts: args.ts, authoredBy, evidenceLevel: args.evidenceLevel, sourceCaseId: args.sourceCaseId,
+  }));
   // Surface WHERE it came from on acceptance — the derivation is the point of this adapter, and a
   // caller that cannot see the matched line cannot check that it matched the right one.
   return out.ok

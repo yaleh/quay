@@ -96,6 +96,10 @@ import {
   readExperienceLedger, experienceDenyList, scanExperienceLeak, EXPERIENCE_LEDGER_REL,
   DISCOVERY_CARRIERS, GENERALIZATION_VERDICTS_REL, GENERALIZATION_VERDICT_KIND, AUTHORED_BY_ACTORS,
   carrierFile, readCarrier, appendCarrierLine, resolveCarrierRoot,
+  // The evidence level + the case-identity threshold. Declared in the BASE module precisely so this
+  // registry can read them without importing the reflection module (which imports THIS one — a cycle).
+  evidenceLevelOf, isIndependentEvidenceLevel, INDEPENDENT_EVIDENCE_LEVEL, UNLABELLED_EVIDENCE_LEVEL,
+  MIN_SHARED_CASE_COMPONENTS,
 } from "./discovery-experience-ledger.mjs";
 
 /**
@@ -109,7 +113,34 @@ export const METHOD_REGISTRY_REL = DISCOVERY_CARRIERS["discovery-method-registry
 /** The ONE record kind this carrier holds, so a line is self-describing on read-back. */
 export const METHOD_KIND = "method";
 
-export const METHOD_STATUSES = Object.freeze(["draft", "active", "retired"]);
+/** The lifecycle states. `trial` (added by gap-discovery-evidence-level-teaching-vs-independent) is
+ *  REPORT-ONLY: a method that a `teaching`/`transfer` verdict moved past `draft` but which no
+ *  `independent` verdict has licensed. It is never handed to a consumer — `activeMethods()` returns
+ *  `status:"active"` alone — and it is never presented as a generalization. */
+export const METHOD_STATUSES = Object.freeze(["draft", "trial", "active", "retired"]);
+
+/** The report-only state a non-independent pass can reach. Spelled once, so no reader has to remember
+ *  the literal. */
+export const TRIAL_STATUS = "trial";
+
+/** A retirement reason that begins with this word QUARANTINES the whole method lineage (Plan item 3):
+ *  the promotion behind it was withdrawn, so the lineage may only be revived on independent evidence
+ *  that shares no case with what the quarantined promotion rested on. */
+export const QUARANTINE_REASON_PREFIX = "QUARANTINE";
+
+/** Refusal cause: the record asks for a status its evidence level cannot license (Plan item 2). */
+export const EVIDENCE_LEVEL_NOT_INDEPENDENT = "EVIDENCE_LEVEL_NOT_INDEPENDENT";
+
+/** Refusal cause: the method's lineage is QUARANTINEd and the cited verdict is not `independent`. */
+export const QUARANTINED_LINEAGE_NEEDS_INDEPENDENT = "QUARANTINED_LINEAGE_NEEDS_INDEPENDENT";
+
+/** Refusal cause: the lineage is QUARANTINEd, the verdict IS independent, but its held-out case reuses
+ *  a component set of a case behind the quarantined promotion. */
+export const QUARANTINED_LINEAGE_CASE_REUSED = "QUARANTINED_LINEAGE_CASE_REUSED";
+
+/** Refusal cause: the lineage is QUARANTINEd and the component sets the re-promotion must be cleared
+ *  against were not supplied — "I could not compare" is its OWN value, never a pass (硬规则 3b). */
+export const QUARANTINE_CASE_SET_UNAVAILABLE = "QUARANTINE_CASE_SET_UNAVAILABLE";
 
 // ── the PROMOTION EVIDENCE rule (draft → active is the ONLY gate that mints reusable knowledge) ───
 //
@@ -133,6 +164,10 @@ export const PROMOTION_REFUSAL_CAUSES = Object.freeze([
   "VERDICT_OTHER_METHOD",  // the recorded verdict is about a different method_id
   "VERDICT_NOT_PASSED",    // recorded, but the lineage/temporal gates did not pass
   "VERDICT_CONTAMINATED",  // the ref is on the contaminated-verdict ledger: judged on a used hold-out
+  "EVIDENCE_LEVEL_NOT_INDEPENDENT",      // recorded and passed, but its level cannot license `active`
+  "QUARANTINED_LINEAGE_NEEDS_INDEPENDENT", // the lineage is quarantined and the verdict is a lower level
+  "QUARANTINED_LINEAGE_CASE_REUSED",     // quarantined, independent, but the case overlaps the old one
+  "QUARANTINE_CASE_SET_UNAVAILABLE",     // quarantined, and the sets to clear it against were not supplied
 ]);
 
 // ── THE CONTAMINATED-VERDICT LEDGER (a promotion must not cite a judgment made on a used case) ───
@@ -276,12 +311,15 @@ export function backfillContaminatedVerdicts(root, { contaminatedCases = [], ver
  *   it cannot be read, so an unreadable deny-list never passes a promotion in production).
  * @returns {string[]} zero or more `PROMOTION_WITHOUT_VALID_GENERALIZATION:<cause>:<detail>` reasons
  */
-export function generalizationEvidenceReasons(rec, verdicts, { contaminatedVerdictIds = null } = {}) {
-  if (rec?.status !== "active") return [];
+export function generalizationEvidenceReasons(rec, verdicts, { contaminatedVerdictIds = null, existing = [], caseComponents = null } = {}) {
+  // ⛔ `trial` is a PROMOTION TOO (task gap-discovery-evidence-level-teaching-vs-independent): it moves a
+  //   method past `draft` and it is published in the registry, so it must cite its evidence for exactly
+  //   the same reason `active` must. The difference is only WHICH level can license it.
+  if (rec?.status !== "active" && rec?.status !== TRIAL_STATUS) return [];
   const kill = (cause, detail) => `${PROMOTION_WITHOUT_VALID_GENERALIZATION}:${cause}:${detail}`;
   const ge = rec.generalization_evidence;
   if (!isObj(ge) || !isStr(ge.verdict_ref, 1)) {
-    return [kill("EVIDENCE_MISSING", "status=active-must-carry-generalization_evidence.verdict_ref-naming-a-recorded-validateGeneralization-verdict")];
+    return [kill("EVIDENCE_MISSING", `status=${rec.status}-must-carry-generalization_evidence.verdict_ref-naming-a-recorded-validateGeneralization-verdict`)];
   }
   // ⛔ The contaminated check runs BEFORE the "was it recorded / did it pass" checks: a verdict that
   //   was judged on a hold-out already in use cannot license a promotion however well it scored, and
@@ -311,7 +349,139 @@ export function generalizationEvidenceReasons(rec, verdicts, { contaminatedVerdi
     return [kill("VERDICT_NOT_PASSED",
       `${ge.verdict_ref}-recorded-outcome=${String(v.outcome)}-correct=${String(v.correct)}-refusal_code=${String(v.refusal_code)}-lineage_ok=${String(v.lineage_ok)}-temporal_ok=${String(v.temporal_ok)}`)];
   }
+
+  // ── THE EVIDENCE LEVEL, and the QUARANTINE LINEAGE (Plan items 2 and 3) ─────────────────────────────
+  // ⛔ THE DEFECT THIS CLOSES (2026-10-12 strategy, point 4). Everything above judges the verdict's OWN
+  //   quality (did it pass its gates). None of it asks WHAT THE VERDICT IS WORTH: a verdict read off a
+  //   teaching case — an answer the experimenter already knew — passes every gate above and used to
+  //   license `active` exactly like a sealed, never-used one. The level is read off the RECORDED verdict
+  //   through `evidenceLevelOf`, so a verdict written before the level existed reads as `unlabelled` and
+  //   can never be independent, while a caller cannot retro-declare a level on a stored line.
+  const level = evidenceLevelOf(v);
+
+  // The QUARANTINE arm runs FIRST so the refusal names the real defect: for a withdrawn lineage the
+  // answer to "why can this not be active?" is "the lineage was quarantined", not "the level was wrong".
+  const quarantined = quarantinedLineageOf(rec, existing);
+  if (quarantined.quarantined) {
+    if (level !== INDEPENDENT_EVIDENCE_LEVEL) {
+      return [kill(QUARANTINED_LINEAGE_NEEDS_INDEPENDENT,
+        `${rec.method_id}-has-a-QUARANTINEd-lineage-(${quarantined.versions.map((x) => `v${x}`).join(",")})-and-${ge.verdict_ref}-carries-evidence_level=${level}-so-it-can-neither-be-active-nor-trial`)];
+    }
+    // …and an `independent` verdict is not enough on its own: its held-out case must share no component
+    // set with ANY case behind the quarantined promotion. Otherwise "independent" would just mean
+    // "re-labelled the same case", which is precisely how these two methods were promoted the first time.
+    const reuse = quarantineCaseReuse(rec, v, caseComponents, existing);
+    if (!reuse.evaluated) {
+      return [kill(QUARANTINE_CASE_SET_UNAVAILABLE,
+        reuse.reason)];
+    }
+    if (reuse.reused.length > 0) {
+      return [kill(QUARANTINED_LINEAGE_CASE_REUSED,
+        `${ge.verdict_ref}-is-independent-but-its-held-out-case-${String(v.held_out_case_id)}-reuses->=${MIN_SHARED_CASE_COMPONENTS}-component(s)-of-${reuse.reused.map((h) => `${h.case_id}(${h.shared.join(",")})`).join("+")}`)];
+    }
+  }
+
+  if (rec.status === "active" && level !== INDEPENDENT_EVIDENCE_LEVEL) {
+    return [kill(EVIDENCE_LEVEL_NOT_INDEPENDENT,
+      `${ge.verdict_ref}-carries-evidence_level=${level}-and-only-an-${INDEPENDENT_EVIDENCE_LEVEL}-verdict-may-license-status=active`)];
+  }
   return [];
+}
+
+/**
+ * Is the method's LINEAGE quarantined? PURE. The lineage is every record this registry holds for the
+ * same `method_id` — versions ARE the lineage — plus the chain of records reachable through
+ * `supersedes`, so a method that took a predecessor's place inherits its quarantine.
+ *
+ * A retirement reason beginning `QUARANTINE` withdraws the promotion behind that version: the operator
+ * found the evidence unsound, so the knowledge may not be re-published on the strength of a lower-level
+ * judgement. Prefix match, not substring: a reason that merely MENTIONS quarantining (e.g. "not
+ * quarantined:") must not arm the rule.
+ * @returns {{quarantined:boolean, versions:number[], reasons:string[]}}
+ */
+export function quarantinedLineageOf(rec, existing = []) {
+  const list = (Array.isArray(existing) ? existing : []).filter((r) => isObj(r) && isStr(r.method_id, 1));
+  const sameMethod = list.filter((r) => r.method_id === rec?.method_id);
+  // The `supersedes` chain: `rec` may name a predecessor whose own lineage is quarantined. Walk it
+  // transitively with a seen-set, because a malformed registry could point two records at each other.
+  const seen = new Set(isStr(rec?.method_id, 1) ? [rec.method_id] : []);
+  const queue = [rec?.supersedes, rec?.method_id].filter((x) => isStr(x, 1));
+  while (queue.length) {
+    const id = queue.shift();
+    if (seen.has(id)) continue;
+    seen.add(id);
+    for (const r of list) {
+      if (r.method_id === id) {
+        sameMethod.push(r);
+        if (isStr(r.supersedes, 1)) queue.push(r.supersedes);
+      }
+    }
+  }
+  const hit = sameMethod.filter((r) => isStr(r.retirement_reason, 1) && String(r.retirement_reason).startsWith(QUARANTINE_REASON_PREFIX));
+  return {
+    quarantined: hit.length > 0,
+    versions: [...new Set(hit.map((r) => (Number.isInteger(r.version) ? r.version : null)))].sort((a, b) => a - b),
+    reasons: hit.map((r) => String(r.retirement_reason)),
+  };
+}
+
+/**
+ * The cases a quarantined promotion rested on: the held-out case each quarantined version judged, plus
+ * the Experiences it cited as provenance. Derived from the records, never hand-listed.
+ */
+export function quarantinedPromotionCases(rec, existing = []) {
+  const q = quarantinedLineageOf(rec, existing);
+  const list = (Array.isArray(existing) ? existing : []).filter((r) => isObj(r) && r.method_id === rec?.method_id);
+  const ids = [];
+  for (const r of list) {
+    if (!isStr(r.retirement_reason, 1) || !String(r.retirement_reason).startsWith(QUARANTINE_REASON_PREFIX)) continue;
+    if (isStr(r.generalization_evidence?.held_out_case_id, 1)) ids.push(r.generalization_evidence.held_out_case_id);
+    for (const p of (Array.isArray(r.provenance_evidence) ? r.provenance_evidence : [])) if (isStr(p, 1)) ids.push(p);
+  }
+  return { quarantined: q.quarantined, versions: q.versions, case_ids: [...new Set(ids)] };
+}
+
+/**
+ * Does the cited `independent` verdict's held-out case share a component set with a case behind the
+ * quarantined promotion? PURE over the SUPPLIED lookup — the registry cannot read the case-identity
+ * index itself (that lives in the reflection module, which imports this one).
+ *
+ * @param {Map<string,string[]>|Record<string,string[]>|null} caseComponents  components per case id
+ * @param {object[]} [existing]  the registry records, so the quarantined promotion's cases can be derived
+ * @returns {{evaluated:boolean, reused:{case_id,shared}[], reason:string|null}}
+ */
+export function quarantineCaseReuse(rec, verdict, caseComponents, existing = []) {
+  const behind = quarantinedPromotionCases(rec, existing);
+  const lookup = caseComponents instanceof Map
+    ? caseComponents
+    : (isObj(caseComponents) ? new Map(Object.entries(caseComponents)) : null);
+  if (lookup === null) {
+    return { evaluated: false, reused: [], reason: `${QUARANTINE_CASE_SET_UNAVAILABLE}:${rec.method_id}-has-a-quarantined-lineage-and-the-component-sets-to-clear-a-re-promotion-against-were-not-supplied` };
+  }
+  const norm = (xs) => [...new Set((Array.isArray(xs) ? xs : []).filter((x) => isStr(x, 1)).map((x) => basenameOf(x)))].sort();
+  // ⛔ AN ID THE LOOKUP CANNOT RESOLVE IS NOT A DISJOINT CASE (硬规则 3b). If a case's component set is
+  //   unknown, "shares nothing with it" is not a reading — it is the absence of one, and letting it pass
+  //   would mean a re-promotion is cleared precisely when it could not be checked. `lookup.has` (not a
+  //   length test) is what keeps a case that legitimately names NO component distinguishable from a case
+  //   the lookup never heard of.
+  const heldOutId = isStr(verdict?.held_out_case_id, 1) ? verdict.held_out_case_id : null;
+  const unresolved = [];
+  if (heldOutId === null || !lookup.has(heldOutId)) unresolved.push(String(heldOutId ?? "<the-verdict-names-no-held_out_case_id>"));
+  const behindSets = [];
+  for (const id of behind.case_ids) {
+    if (!lookup.has(id)) { unresolved.push(id); continue; }
+    behindSets.push({ case_id: id, comps: norm(lookup.get(id)) });
+  }
+  if (unresolved.length) {
+    return { evaluated: false, reused: [], reason: `${QUARANTINE_CASE_SET_UNAVAILABLE}:${rec.method_id}-has-a-quarantined-lineage-and-no-component-set-could-be-resolved-for-${unresolved.join(",")}-so-whether-the-re-promotion-reuses-a-quarantined-case-cannot-be-decided` };
+  }
+  const heldOut = norm(lookup.get(heldOutId));
+  const reused = [];
+  for (const { case_id, comps } of behindSets) {
+    const shared = heldOut.filter((c) => comps.includes(c));
+    if (shared.length >= MIN_SHARED_CASE_COMPONENTS) reused.push({ case_id, shared });
+  }
+  return { evaluated: true, reused, reason: null };
 }
 
 /** `applicability` is free text, but it must have SUBSTANCE — a method whose applicability is
@@ -540,7 +710,7 @@ export function seedReasons(rec, seeds) {
  * @param {string[]|null} [opts.contaminatedVerdictIds] the ids on the contaminated-verdict ledger.
  *   `null`/absent = not supplied (see `generalizationEvidenceReasons`); the write path always supplies.
  */
-export function validateMethodRecord(rec, { toolCatalog, existing = [], provenanceSeeds: seeds, verdicts, contaminatedVerdictIds = null } = {}) {
+export function validateMethodRecord(rec, { toolCatalog, existing = [], provenanceSeeds: seeds, verdicts, contaminatedVerdictIds = null, caseComponents = null } = {}) {
   if (!isObj(rec)) return { ok: false, reasons: ["RECORD_NOT_OBJECT"] };
   const reasons = [];
   for (const f of REQUIRED_METHOD_FIELDS) if (!supplied(rec, f)) reasons.push(`SCHEMA_MISSING:${f}`);
@@ -624,7 +794,7 @@ export function validateMethodRecord(rec, { toolCatalog, existing = [], provenan
   reasons.push(...seedReasons(rec, seeds));
 
   // ── the PROMOTION-EVIDENCE check, after the seed checks for the same "existing order" reason ─────
-  reasons.push(...generalizationEvidenceReasons(rec, verdicts, { contaminatedVerdictIds }));
+  reasons.push(...generalizationEvidenceReasons(rec, verdicts, { contaminatedVerdictIds, existing, caseComponents }));
 
   return { ok: reasons.length === 0, reasons };
 }
@@ -710,9 +880,19 @@ export function activeMethods(root) {
     }
     methods.push(m);
   }
+  // ⛔ `trial` methods are REPORTED but never returned in `methods` (Plan item 2: "`trial` is
+  //   report-only, never executed as active, and never shown as generalization"). The filter above is
+  //   `status === "active"`, so a trial can only leave this function through the field below — which is
+  //   what makes "activeMethods() never returns a trial method" a property of the filter rather than a
+  //   promise about future edits. Reporting them keeps "a method is on trial" visible instead of
+  //   silent, which is the difference between a state and a disappearance.
+  const trials = read.latest
+    .filter((x) => isObj(x) && x.status === TRIAL_STATUS)
+    .map((x) => ({ method_id: x.method_id, version: isInt(x.version) ? x.version : null, verdict_ref: x.generalization_evidence?.verdict_ref ?? null }));
   return {
     ok: read.ok,
     methods,
+    trials,
     evaluated: read.latest.length,
     malformed_lines: read.malformed_lines,
     file: read.file,
@@ -732,7 +912,7 @@ export function activeMethods(root) {
  * The registry is READ first so the version check sees the real prior versions; an unreadable
  * registry is refused with its OWN reason rather than being silently treated as empty (硬规则 3b).
  */
-export function appendMethodRecord(root, rec, { toolCatalog, toolCatalogRoot, provenanceSeeds: seeds, generalizationVerdicts, contaminatedVerdictIds: contaminatedIn } = {}) {
+export function appendMethodRecord(root, rec, { toolCatalog, toolCatalogRoot, provenanceSeeds: seeds, generalizationVerdicts, contaminatedVerdictIds: contaminatedIn, caseComponents = null } = {}) {
   const read = readMethodRegistry(root, { history: true });
   if (read.file === null) {
     // No shared checkout ⇒ nothing can be read OR written: the resolver's own refusal, not a
@@ -776,10 +956,13 @@ export function appendMethodRecord(root, rec, { toolCatalog, toolCatalogRoot, pr
   }
   const v = validateMethodRecord(rec, {
     toolCatalog: Array.isArray(catalog) ? catalog : undefined,
+    // The FULL history, so the quarantine rule can see every version of this method's lineage instead
+    // of only the latest one.
     existing: read.history,
     provenanceSeeds: resolvedSeeds,
     verdicts: Array.isArray(resolvedVerdicts) ? resolvedVerdicts : undefined,
     contaminatedVerdictIds: Array.isArray(contaminated) ? contaminated : null,
+    caseComponents,
   });
   if (!v.ok) return { ok: false, kind: METHOD_KIND, reasons: v.reasons, appended: false };
   const withId = { id: rec.id ?? methodRecordId(rec), ...rec };
