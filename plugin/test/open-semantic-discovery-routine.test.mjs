@@ -134,8 +134,22 @@ import {
   firstNotEvaluatedToken,
   turnReserveDirective,
   buildAnswerReservePrompt,
+  // ── the OPTIONAL task-status context (task gap-open-discovery-consumes-task-status-events-…) ───────
+  DEFAULT_TASK_LOG_CONTEXT_LIMIT,
+  FOCUS_CITATION_MAX,
+  asTaskLogCursor,
+  taskLogDedupKey,
+  priorTaskLogContext,
+  readTaskLogContext,
+  taskLogContextDirective,
+  citeOfferedEvents,
 } from "../scripts/open-semantic-discovery-routine.ts";
 import { ROUTINE_LAST_RUN_REL, readLastRunMap } from "../scripts/probe-routine.ts";
+// The CARRIER the context is read from is written by the KERNEL's own writer and read by the SURFACE's own
+// reader — the fixture never hand-writes a carrier line and never parses the file, because either would
+// make this test agree with itself instead of with the contract the routine actually consumes.
+import { appendTaskStatusEvent } from "../../packages/quay/src/kernel/task-transition.ts";
+import { readTaskLog, MAX_TASK_LOG_LIMIT } from "../../packages/quay/src/cli/task-log.ts";
 import { qualityGateRoutines } from "../scripts/quality-gate-driver.ts";
 import { INVOKED_BY_MANUAL, INVOKED_BY_RESIDENT } from "../scripts/discovery-method-routine.ts";
 import { appendLedgerRecords } from "../scripts/discovery-method-routine.ts";
@@ -1829,6 +1843,10 @@ function scratchModule(mutate) {
   fs.mkdirSync(scripts, { recursive: true });
   fs.mkdirSync(path.join(dir, "docs"), { recursive: true });
   fs.symlinkSync(path.join(REPO_ROOT, "docs", "analysis"), path.join(dir, "docs", "analysis"));
+  // The Core read surface the routine imports (`../../packages/quay/src/cli/task-log.ts`) is a REAL
+  // relative import from the mutated file, so the scratch root needs `packages/` reachable too. Its own
+  // imports then resolve against the symlink's realpath, so nothing deeper has to be mirrored.
+  fs.symlinkSync(path.join(REPO_ROOT, "packages"), path.join(dir, "packages"));
   // A bare specifier (`yaml`) resolves by walking UP from the importing file, so the scratch root needs
   // the workspace's own dependency tree reachable — a symlink, so nothing is copied.
   fs.symlinkSync(path.join(REPO_ROOT, "node_modules"), path.join(dir, "node_modules"));
@@ -2744,4 +2762,349 @@ test("case (m) AC5 — the reserve changes NEITHER the kill switch, NOR the repo
   assert.equal(envelope.investigator_max_turns, 12, "the production turn cap is UNCHANGED by this task");
   assert.equal(envelope.investigator_max_turns, DEFAULT_INVESTIGATOR_MAX_TURNS);
   assert.equal(Object.values(envelope).includes("investigator-report"), false, "the rescue is not a budget knob");
+});
+
+// ═════════════════════════════════════════════════════════════════════════════════════════════════════
+// THE OPTIONAL TASK-STATUS CONTEXT
+// (tasks/gap-open-discovery-consumes-task-status-events-optional-context)
+//
+// Under SEMANTIC FIRST, MECHANIZE LATER the routine fetches "what changed since my last round" through
+// the SUPPORTED read surface (`readTaskLog` — the same reader `quay task log` publishes) and hands it to
+// the model as OPTIONAL context. The claims under test are exactly the task's: (a) 0 events ⇒ the round
+// still runs; (b) more events than `n` ⇒ capped, remainder picked up next round; (c) a crash before the
+// append ⇒ the same events are re-offered, deduped by `eventId`; (d) `rebase`/`complete:false` reach the
+// prompt VERBATIM; (e) no code path skips or schedules a round on the events. Plus the (a) negative
+// control the task names, and the config knob.
+// ═════════════════════════════════════════════════════════════════════════════════════════════════════
+
+/** Append REAL transitions through the KERNEL's own writer, so the fixture is a carrier the read surface
+ *  really pages — a hand-written line would make this test agree with itself. Each call gets its own task
+ *  id and its own `at`: the eventId is derived from `(taskId, from, to, commit, at, writer)`, so two events
+ *  sharing all of those would be ONE event and the paging assertions below would be vacuous. */
+function seedTransitions(ws, specs) {
+  const base = Date.parse("2026-10-13T00:00:00.000Z");
+  specs.forEach((s, i) => {
+    const at = s.at ?? new Date(base + i * 60_000).toISOString();
+    const res = appendTaskStatusEvent(ws, {
+      taskId: s.taskId,
+      from: s.from ?? "todo",
+      to: s.to ?? "ready",
+      kind: s.kind ?? null,
+      actor: { kind: "promotion-driver", id: "osd-task-log.test" },
+      at,
+      recordedAt: at,
+      ...(s.commit !== undefined ? { evidence: { commit: s.commit } } : {}),
+    });
+    assert.equal(res.ok, true, `the fixture transition must append (got ${JSON.stringify(res)})`);
+  });
+}
+
+/** The bytes of the INVESTIGATOR prompt, found by its tool envelope (the one thing that separates it from
+ *  the verifier's / the novelty check's), never by call order or by scraping the prompt. */
+function investigatorPrompt(spawn) {
+  const i = spawn.calls.findIndex((c) => toolsOf(c.argv) === INVESTIGATOR_TOOLS);
+  assert.ok(i >= 0, "the round made an investigator call");
+  return String(spawn.calls[i].opts.stdinData ?? "");
+}
+
+/** The task ids the prompt OFFERED, read by POSITION off the directive's own line format
+ *  (`  - <task-id> <from>→<to> …`) — the reading the model would make, not a copy of a record field. */
+function offeredTaskIdsInPrompt(prompt) {
+  return String(prompt).split("\n").filter((l) => l.startsWith("  - ")).map((l) => l.slice(4).split(" ")[0]);
+}
+
+/** Run one full round against `ws` with fresh seams, so a test can compare rounds without sharing state. */
+async function runRound(ws, extra = {}) {
+  const spawn = countingSpawn();
+  const fact = await runOpenSemanticDiscovery(ws, { ...runOpts(ws, { engine: extra.engine ?? makeEngine() }), ...extra, spawnFn: spawn, pinFn: pinStub() });
+  return { spawn, fact };
+}
+
+// ── AC (a) ───────────────────────────────────────────────────────────────────────────────────────────
+test("AC (a) — 0 events ⇒ the round runs normally, with the feed reported as read-and-empty", async () => {
+  const ws = makeWorkspace();
+  writeConfig(ws, cfgYaml());
+  // A PRESENT but EMPTY carrier: "0 events", not an absent file (which is its own, different reading).
+  fs.writeFileSync(path.join(ws, ".quay", "task-status-events.jsonl"), "", "utf8");
+  const { spawn, fact } = await runRound(ws);
+  assert.equal(fact.state, "verified", `0 events still RUNS the round (${fact.reason})`);
+  assert.ok(spawn.calls.length > 0, "…and it spawns: 'no events' is never 'no round'");
+  const rec = rounds(ws)[0];
+  assert.equal(rec.task_log.read.ok, true, "an EMPTY carrier was read — not an unreadable one");
+  assert.equal(rec.task_log.offered_count, 0);
+  assert.deepEqual(rec.task_log.offered, []);
+  assert.equal(rec.task_log.cursor_after, null, "no event ⇒ no cursor to remember");
+  const prompt = investigatorPrompt(spawn);
+  assert.match(prompt, /TASK-STATUS CHANGES — context you MAY consider/);
+  assert.match(prompt, /No task-status transition is new since your last round\./);
+  assert.match(prompt, /never gates or triggers this round/, "the directive says, in the model's terms, that it decides nothing");
+  console.log(`    AC (a): 0 events ⇒ state=${fact.state}, ${spawn.calls.length} spawn(s), offered=0`);
+});
+
+// ── AC (b) ───────────────────────────────────────────────────────────────────────────────────────────
+test("AC (b) — more events than the limit ⇒ capped, and the remainder is picked up next round", async () => {
+  const ws = makeWorkspace();
+  writeConfig(ws, cfgYaml({ task_log_context_limit: "3" }));
+  seedTransitions(ws, Array.from({ length: 7 }, (_, i) => ({ taskId: `T-${i}` })));
+  const r1 = await runRound(ws);
+  assert.equal(r1.fact.state, "verified", r1.fact.reason);
+  const round1 = rounds(ws)[0];
+  assert.equal(round1.task_log.limit, 3, "the configured limit really reached the read");
+  assert.equal(round1.task_log.offered_count, 3, "the page is CAPPED at the configured limit");
+  assert.equal(round1.task_log.truncated, true);
+  assert.deepEqual(round1.task_log.offered.map((e) => e.task_id), ["T-0", "T-1", "T-2"]);
+  assert.deepEqual(offeredTaskIdsInPrompt(investigatorPrompt(r1.spawn)), ["T-0", "T-1", "T-2"], "…and the PROMPT carries exactly those");
+
+  const r2 = await runRound(ws, { force: true });
+  const round2 = rounds(ws)[1];
+  // The cursor is read INCLUSIVE of the event it names, so T-2 comes back — and is DEDUPED by eventId,
+  // which is what makes the remainder start exactly where the last round stopped.
+  assert.equal(round2.task_log.deduped_by_event_id, 1, "the boundary event was re-delivered and deduped");
+  assert.deepEqual(round2.task_log.offered.map((e) => e.task_id), ["T-3", "T-4"], "the remainder is picked up; one slot pays the at-least-once boundary");
+
+  const r3 = await runRound(ws, { force: true });
+  const round3 = rounds(ws)[2];
+  assert.deepEqual(round3.task_log.offered.map((e) => e.task_id), ["T-5", "T-6"]);
+
+  // At-least-once + dedupe by eventId ⇒ every event offered EXACTLY once across the three rounds.
+  const all = [round1, round2, round3].flatMap((r) => r.task_log.offered);
+  assert.deepEqual(all.map((e) => e.task_id), ["T-0", "T-1", "T-2", "T-3", "T-4", "T-5", "T-6"]);
+  assert.equal(new Set(all.map((e) => e.event_id)).size, 7, "seven DISTINCT eventIds were offered — none lost, none doubled");
+  console.log(`    AC (b): limit=3 over 7 events ⇒ rounds offered 3+2+2, union = all 7, 0 lost`);
+});
+
+// ── AC (c) ───────────────────────────────────────────────────────────────────────────────────────────
+test("AC (c) — a crash before the append ⇒ the next round re-offers the SAME events (at-least-once)", async () => {
+  const ws = makeWorkspace();
+  writeConfig(ws, cfgYaml());
+  seedTransitions(ws, [{ taskId: "T-0" }, { taskId: "T-1" }, { taskId: "T-2" }]);
+  // The ids the read surface delivers for the whole window — computed INDEPENDENTLY, so "the same events"
+  // below is a comparison against the contract rather than against the round's own record.
+  const expectedIds = readTaskLog(ws, { limit: DEFAULT_TASK_LOG_CONTEXT_LIMIT }).document.transitions.map((t) => t.eventId);
+  assert.equal(expectedIds.length, 3);
+  // Round 1 dies at the model seam, BEFORE the round's append: the ledger keeps the reservation, the
+  // carrier keeps NOTHING — which is exactly the crash the cursor discipline has to survive.
+  const crashSpawn = countingSpawn(() => { throw new Error("fixture: the round died before the append"); });
+  const crashed = await runOpenSemanticDiscovery(ws, { ...runOpts(ws, { engine: makeEngine() }), spawnFn: crashSpawn, pinFn: pinStub() });
+  assert.equal(crashed.state, "failed", `the crash is the round's own failed (${crashed.reason})`);
+  assert.equal(fs.existsSync(carrierPath(ws)), false, "NOTHING was appended ⇒ NO cursor was stored");
+  const crashedOffered = offeredTaskIdsInPrompt(investigatorPrompt(crashSpawn));
+  assert.deepEqual(crashedOffered, ["T-0", "T-1", "T-2"], "the crashing round DID offer the events");
+
+  // Round 2: with no stored cursor it reads the SAME window and re-offers the SAME events, id for id.
+  const r2 = await runRound(ws, { force: true });
+  const round2 = rounds(ws)[0];
+  assert.deepEqual(round2.task_log.offered.map((e) => e.task_id), ["T-0", "T-1", "T-2"], "the crash cost nothing — the events come back");
+  assert.deepEqual(round2.task_log.offered.map((e) => e.event_id), expectedIds, "…the SAME eventIds the surface delivers, in the same order");
+  assert.deepEqual(offeredTaskIdsInPrompt(investigatorPrompt(r2.spawn)), ["T-0", "T-1", "T-2"]);
+
+  // Round 3: NOW a cursor exists, so the boundary event returns and is dropped BY ITS eventId.
+  const r3 = await runRound(ws, { force: true });
+  const round3 = rounds(ws)[1];
+  assert.equal(round3.task_log.offered_count, 0, "nothing new ⇒ nothing offered");
+  assert.equal(round3.task_log.deduped_by_event_id, 1, "…by the eventId of the boundary event the cursor named");
+  assert.match(investigatorPrompt(r3.spawn), /No task-status transition is new since your last round\./);
+  console.log(`    AC (c): crashed round offered 3; next round re-offered the SAME 3; round 3 deduped the boundary by eventId`);
+});
+
+// ── AC (d) ───────────────────────────────────────────────────────────────────────────────────────────
+test("AC (d) — `complete:false` reaches the prompt VERBATIM (the surface's own reason text)", async () => {
+  const ws = makeWorkspace();
+  writeConfig(ws, cfgYaml());
+  seedTransitions(ws, [{ taskId: "T-0", commit: "0123456789abcdef0123456789abcdef01234567" }]);
+  const reading = readTaskLog(ws, { limit: DEFAULT_TASK_LOG_CONTEXT_LIMIT });
+  assert.equal(reading.ok, true);
+  assert.equal(reading.document.complete, false, "the fixture really is an INCOMPLETE page");
+  assert.ok(reading.document.coverage.reasons.length > 0);
+  const { spawn } = await runRound(ws);
+  const prompt = investigatorPrompt(spawn);
+  for (const reason of reading.document.coverage.reasons) {
+    assert.ok(prompt.includes(reason), `the coverage reason must reach the prompt VERBATIM: ${reason}`);
+  }
+  assert.match(prompt, /this list may be incomplete:/);
+  assert.equal(rounds(ws)[0].task_log.complete, false);
+  assert.ok(rounds(ws)[0].task_log.incomplete_reasons.length > 0);
+  console.log(`    AC (d): ${reading.document.coverage.reasons.length} coverage reason(s) reached the prompt verbatim`);
+});
+
+test("AC (d) — `rebase:true` reaches the prompt VERBATIM (a cursor the carrier cannot honour)", async () => {
+  const ws = makeWorkspace();
+  writeConfig(ws, cfgYaml());
+  seedTransitions(ws, [{ taskId: "T-0" }]);
+  // Seed the PREVIOUS round's line with a cursor whose carrierEpoch the carrier cannot honour, which is
+  // the one thing a consumer must never be able to mistake for "nothing happened".
+  const staleCursor = { v: 1, carrierEpoch: "an-epoch-that-no-longer-exists", seq: 0 };
+  // (`model_calls:0` because the budget reader must be able to read a carrier line that falls in the
+  // trailing 24h window — a stale-but-well-formed previous round, not a half-written one.)
+  fs.appendFileSync(carrierPath(ws), `${JSON.stringify({
+    kind: "scan-round", routine: OPEN_SEMANTIC_DISCOVERY_NAME, invoked_by: INVOKED_BY_RESIDENT,
+    ts: new Date().toISOString(), model_calls: 0,
+    task_log: { cursor_after: staleCursor, offered: [] },
+  })}\n`, "utf8");
+  const reading = readTaskLog(ws, { since: JSON.stringify(staleCursor), limit: DEFAULT_TASK_LOG_CONTEXT_LIMIT });
+  assert.equal(reading.ok, true);
+  assert.equal(reading.document.rebase, true, "the seeded cursor really is un-honourable");
+  const reason = reading.document.rebaseReason;
+  assert.ok(typeof reason === "string" && reason.length > 0);
+
+  // `force`: the seeded line is a RESIDENT scan-round stamped NOW, so the interval would (correctly) make
+  // this round not-due — the subject under test is the prompt, not the scheduler.
+  const { spawn } = await runRound(ws, { force: true });
+  const prompt = investigatorPrompt(spawn);
+  assert.ok(prompt.includes(reason), `the rebase reason must reach the prompt VERBATIM:\n${reason}`);
+  assert.match(prompt, /this list may be incomplete:/);
+  const rec = rounds(ws).at(-1);
+  assert.equal(rec.task_log.rebase, true);
+  assert.equal(rec.task_log.rebase_reason, reason);
+  console.log(`    AC (d): rebase reason reached the prompt verbatim (${reason.length} chars)`);
+});
+
+// ── AC (e) ───────────────────────────────────────────────────────────────────────────────────────────
+test("AC (e) — no code path skips or schedules a round on the events (static control + its live mutation)", () => {
+  const src = fs.readFileSync(ROUTINE_SRC, "utf8");
+  // (1) ONE call to the read surface, and it goes through the function that owns the whole mechanic.
+  assert.equal(src.split("readTaskLog(").length - 1, 1, "exactly ONE read of the transition carrier");
+  const ownerFn = src.indexOf("export function readTaskLogContext(");
+  const callSite = src.indexOf("const taskLogContext = readTaskLogContext(");
+  assert.ok(ownerFn > 0, "the reader-owner function is present");
+  assert.ok(callSite > ownerFn, "the round CALLS it rather than inlining a second reader");
+  // (2) The owner touches no Fact, no schedule and no spawn — it is mechanics, and it returns no verdict.
+  const ownerBody = src.slice(ownerFn, src.indexOf("export function taskLogContextDirective("));
+  for (const forbidden of ["return fact(", "isDue", "halted", "spawn"]) {
+    assert.equal(ownerBody.includes(forbidden), false, `readTaskLogContext must not reference ${forbidden}`);
+  }
+  // (3) Nowhere is a Fact returned on the strength of the fetched events.
+  const GATE_ON_EVENTS = /if\s*\([^\n]*taskLog[^\n]*\)[^\n]*return fact\(/;
+  assert.doesNotMatch(src, GATE_ON_EVENTS, "no `if (<the context> …) return fact(` path exists anywhere in the module");
+  // ⛔ POSITIVE CONTROL ON THE SAME PREDICATE: the mutation the negative control injects DOES match it,
+  // so the zero above is a measurement rather than a regex that cannot fire (硬规则 2).
+  assert.match(
+    '  if (taskLogContext.offered_count === 0) return fact("not-evaluated", {}, "no events");',
+    GATE_ON_EVENTS,
+    "the predicate CAN fire — the injected gate turns the same predicate red",
+  );
+  // (4) The carrier is not read directly: the paging/cursor/coverage contract lives in ONE place.
+  assert.doesNotMatch(src, /task-status-events\.jsonl/, "the routine never names the raw carrier file");
+});
+
+test("AC (e) — the events change NEITHER whether the round runs NOR its model-call envelope", async () => {
+  const empty = makeWorkspace();
+  writeConfig(empty, cfgYaml());
+  fs.writeFileSync(path.join(empty, ".quay", "task-status-events.jsonl"), "", "utf8");
+  const many = makeWorkspace();
+  writeConfig(many, cfgYaml());
+  seedTransitions(many, Array.from({ length: 12 }, (_, i) => ({ taskId: `T-${i}` })));
+  const a = await runRound(empty);
+  const b = await runRound(many);
+  assert.equal(a.fact.state, "verified", a.fact.reason);
+  assert.equal(b.fact.state, "verified", b.fact.reason);
+  assert.equal(b.fact.value.model_calls, a.fact.value.model_calls, "many events ⇒ still ONE bounded round, same call count");
+  assert.equal(b.spawn.calls.length, a.spawn.calls.length, "…and the same number of spawned subprocesses");
+  assert.deepEqual(b.fact.value.answer_reserve, a.fact.value.answer_reserve);
+  assert.equal(rounds(many)[0].task_log.offered_count, 12, "the events WERE fetched (the envelope is unchanged, not the fetch skipped)");
+});
+
+// ── the config knob ──────────────────────────────────────────────────────────────────────────────────
+test("config — `task_log_context_limit` is OPTIONAL (absent ⇒ 50) and bounded by the read surface's page maximum", () => {
+  const absent = parseOpenSemanticDiscoverySection(rawSection());
+  assert.equal(absent.error, null);
+  assert.equal(absent.config.taskLogContextLimit, DEFAULT_TASK_LOG_CONTEXT_LIMIT, "a section written before the context existed still parses");
+  assert.equal(DEFAULT_TASK_LOG_CONTEXT_LIMIT, 50, "the task states the default as 50");
+  const declared = parseOpenSemanticDiscoverySection(rawSection({ task_log_context_limit: 7 }));
+  assert.equal(declared.error, null);
+  assert.equal(declared.config.taskLogContextLimit, 7);
+  const viaYaml = makeWorkspace();
+  writeConfig(viaYaml, cfgYaml({ task_log_context_limit: "7" }));
+  assert.equal(readOpenSemanticDiscoveryConfig(viaYaml).config.taskLogContextLimit, 7, "…and it is read off `.quay/config.yml`");
+  assert.equal(parseOpenSemanticDiscoverySection(rawSection({ task_log_context_limit: MAX_TASK_LOG_LIMIT })).config.taskLogContextLimit, MAX_TASK_LOG_LIMIT);
+  for (const bad of [0, -1, MAX_TASK_LOG_LIMIT + 1, "3", 1.5]) {
+    const r = parseOpenSemanticDiscoverySection(rawSection({ task_log_context_limit: bad }));
+    assert.equal(r.config, null, `'${bad}' must be REFUSED`);
+    assert.match(r.error, /task_log_context_limit/, `the refusal NAMES the key (got ${r.error})`);
+  }
+});
+
+// ── the mechanics, unit-level ────────────────────────────────────────────────────────────────────────
+test("priorTaskLogContext / asTaskLogCursor — an UNREADABLE stored cursor is its own state, never 'no cursor' (硬规则 3b)", () => {
+  assert.deepEqual(asTaskLogCursor({ v: 1, carrierEpoch: "e", seq: 4 }), { v: 1, carrierEpoch: "e", seq: 4 });
+  for (const bad of [null, 1, [], { v: 2, carrierEpoch: "e", seq: 0 }, { v: 1, carrierEpoch: "", seq: 0 }, { v: 1, carrierEpoch: "e", seq: -1 }, { v: 1, carrierEpoch: "e", seq: 1.5 }]) {
+    assert.equal(asTaskLogCursor(bad), null, `${JSON.stringify(bad)} is not a cursor`);
+  }
+  const withBlock = (b) => [{ kind: "scan-round", task_log: b }];
+  assert.deepEqual(
+    priorTaskLogContext([{ kind: "scan-round", task_log: { cursor_after: null, offered: [] } }]),
+    { cursor: null, cursorUnreadable: false, offeredKeys: [] },
+    "an ABSENT cursor is not an unreadable one",
+  );
+  const bad = priorTaskLogContext(withBlock({ cursor_after: { v: 9, seq: 0 }, offered: [] }));
+  assert.equal(bad.cursor, null);
+  assert.equal(bad.cursorUnreadable, true, "a PRESENT-but-unreadable cursor is REPORTED, never folded into 'there was none'");
+  const carried = priorTaskLogContext(withBlock({ cursor_after: { v: 1, carrierEpoch: "e", seq: 9 }, offered: [{ key: "eventId:x" }, { key: "order:9" }, { nope: 1 }] }));
+  assert.deepEqual(carried, { cursor: { v: 1, carrierEpoch: "e", seq: 9 }, cursorUnreadable: false, offeredKeys: ["eventId:x", "order:9"] });
+  // The LATEST scan-round carrying a block wins; rounds from before the feature contribute nothing.
+  const hist = [{ kind: "scan-round" }, { kind: "scan-round", task_log: { cursor_after: { v: 1, carrierEpoch: "old", seq: 1 }, offered: [] } }, { kind: "cluster" }, { kind: "scan-round", task_log: { cursor_after: { v: 1, carrierEpoch: "new", seq: 5 }, offered: [] } }];
+  assert.equal(priorTaskLogContext(hist).cursor.carrierEpoch, "new");
+});
+
+test("taskLogDedupKey / citeOfferedEvents / taskLogContextDirective — pure, and 'nothing to cite' is null, not false", () => {
+  assert.equal(taskLogDedupKey({ eventId: "e1", order: 3 }), "eventId:e1");
+  assert.equal(taskLogDedupKey({ eventId: null, order: 3 }), "order:3", "a v0 record has no eventId and one is NEVER fabricated");
+
+  const offered = [
+    { key: "eventId:e0", event_id: "e0", order: 0, task_id: "gap-alpha", from: "todo", to: "ready", at: "2026-10-13T00:00:00.000Z", commit: null, inferred: false, source: "task-status-events" },
+    { key: "eventId:e1", event_id: "e1", order: 1, task_id: "gap-beta", from: "ready", to: "done", at: "2026-10-13T00:01:00.000Z", commit: "abc", inferred: false, source: "task-status-events" },
+  ];
+  // Vacuous questions are NOT EVALUATED, never `false` (硬规则 3b).
+  assert.equal(citeOfferedEvents("gap-alpha looks interesting", []).evaluated, false);
+  assert.equal(citeOfferedEvents("gap-alpha looks interesting", []).cited, null);
+  assert.equal(citeOfferedEvents(null, offered).evaluated, false);
+  assert.equal(citeOfferedEvents("   ", offered).evaluated, false);
+  // A stated focus with no offered id in it is a REAL reading (evaluated, not cited).
+  assert.deepEqual(citeOfferedEvents("FOCUS: the pin helper", offered), { evaluated: true, cited: false, matched: [], basis: citeOfferedEvents("x", offered).basis });
+  const cited = citeOfferedEvents("FOCUS: gap-beta reset after a failed landing made me look at the fan-in", offered);
+  assert.equal(cited.evaluated, true);
+  assert.equal(cited.cited, true);
+  assert.deepEqual(cited.matched, ["gap-beta"]);
+  assert.match(cited.basis, /never that the event caused the focus/, "the reading says what it is NOT");
+  assert.ok(FOCUS_CITATION_MAX >= 1);
+
+  // The directive: 0 events, an unreadable feed, and a rebase each say their own thing.
+  const blank = {
+    read: { ok: true, reason: null }, limit: 50, cursor_before: null, cursor_before_unreadable: false,
+    cursor_after: null, rebase: false, rebase_reason: null, complete: true, incomplete_reasons: [],
+    offered: [], offered_count: 0, deduped_by_event_id: 0, truncated: false,
+  };
+  assert.match(taskLogContextDirective(blank), /No task-status transition is new since your last round\./);
+  assert.doesNotMatch(taskLogContextDirective(blank), /may be incomplete/, "a COMPLETE, empty page needs no caveat");
+  assert.match(taskLogContextDirective({ ...blank, read: { ok: false, reason: "the carrier is unreadable" } }), /could not be read: the carrier is unreadable/);
+  const incomplete = taskLogContextDirective({ ...blank, complete: false, incomplete_reasons: ["the page was truncated by --limit 3: 4 more transition(s) matched."] });
+  assert.match(incomplete, /this list may be incomplete:/);
+  assert.ok(incomplete.includes("the page was truncated by --limit 3: 4 more transition(s) matched."), "the surface's own sentence is carried VERBATIM");
+  assert.match(taskLogContextDirective({ ...blank, rebase: true, rebase_reason: "cursor carrierEpoch \"x\" does not match" }), /cursor carrierEpoch "x" does not match/);
+});
+
+// ── NEGATIVE CONTROL (a) — the one the task names ────────────────────────────────────────────────────
+test("NEGATIVE CONTROL (a) — make the round SKIP when there are 0 events in a scratch copy ⇒ (a) goes RED", async () => {
+  const mutantPath = scratchModule((src) => {
+    const anchor = "  const taskLogContextText = taskLogContextDirective(taskLogContext);";
+    assert.ok(src.includes(anchor), "the mutation anchor is present");
+    return src.replace(
+      anchor,
+      `${anchor}\n  // MUTATION: let the fetched context GATE the round.\n  if (taskLogContext.offered_count === 0) return fact("not-evaluated", { ...base, enabled: true }, "no task-status events — nothing spawned");`,
+    );
+  });
+  const mutant = await import(pathToFileURL(mutantPath).href);
+  const ws = makeWorkspace();
+  writeConfig(ws, cfgYaml());
+  fs.writeFileSync(path.join(ws, ".quay", "task-status-events.jsonl"), "", "utf8");
+  const spawn = countingSpawn();
+  const fact = await mutant.runOpenSemanticDiscovery(ws, {
+    config: readOpenSemanticDiscoveryConfig(ws).config,
+    configPresent: true, configError: null, halted: false, invokedBy: INVOKED_BY_RESIDENT,
+    modules: makeEngine().modules, launchArgvFn: fakeLaunchArgv, spawnFn: spawn, pinFn: pinStub(),
+  });
+  assert.equal(fact.state, "not-evaluated", `got ${fact.state}: ${fact.reason}`);
+  assert.match(fact.reason, /no task-status events/);
+  assert.equal(spawn.calls.length, 0, "⇒ the mutant SUPPRESSED the semantic round: the (a) claim «0 events ⇒ the round runs» is FALSIFIED — the control is live");
+  process.stdout.write("    NEGATIVE CONTROL (a): mutant spawned 0 calls with 0 events (claim was «the round still runs»)\n");
 });

@@ -127,6 +127,19 @@ import { isDue, parseTrigger } from "./routine-scheduler.ts";
 import { launchArgv, type Fact, type RoutineSpec } from "./driver-runtime.ts";
 import { ROUTINE_LAST_RUN_REL, readLastRunMap } from "./probe-routine.ts";
 import { isDirectEntry } from "./gate-script-base.ts";
+// The task-status transition READ SURFACE (the same reader `quay task log` publishes). ⛔ NEVER a direct
+// parse of the transition carrier FILE: its paging/cursor/epoch/coverage contract lives in the Core
+// module, and a second reader would be a second contract (case (e) pins the absence of that parse).
+// Measured 2026-10-13 before adopting the
+// static import (plugin-core-import-inlines-whole-module-into-shipped-bundle): the ONE bundle that
+// inlines this routine (quality-gate-driver.js) grows by ~17 KB, because the kernel closure the surface
+// stands on is already inlined there through ready-pool-check.ts — not the 24x blow-up that memory warns of.
+import {
+  readTaskLog,
+  MAX_TASK_LOG_LIMIT,
+  type TaskLogCursor,
+  type TaskLogDocument,
+} from "../../packages/quay/src/cli/task-log.ts";
 // The reservation ledger + the carrier/last-run helpers are the machine discovery-method's budget task
 // built and tested. Imported, never re-derived — this routine only supplies its OWN key paths and caps.
 import {
@@ -202,6 +215,13 @@ export const DEFAULT_INTERVAL_MINUTES = 360;
  *  doubles the round's model calls, so it must be rare enough that production is not dominated by
  *  measurement — and rare enough that the two arms' pins differ by the width of the interval. */
 export const DEFAULT_GAIN_EVERY_ROUNDS = 6;
+
+/** How many task-status transitions the round OFFERS the model as optional context when the section does
+ *  not declare `task_log_context_limit`. A bound on the PROMPT, never a policy: the events gate nothing
+ *  and schedule nothing (see the task-status-context section below). Stated rather than measured-with-
+ *  nothing, and matched to the 60m cadence: an hour of this repo's board rarely moves more than a few
+ *  dozen tasks, so 50 is "everything since the last round" for the overwhelmingly common case. */
+export const DEFAULT_TASK_LOG_CONTEXT_LIMIT = 50;
 
 // ── the model steps' tool and turn envelopes (see the header) ────────────────────────────────────────
 /** The INVESTIGATOR's tools. It reads code and context ITSELF, rooted at the pinned tree, instead of
@@ -413,6 +433,10 @@ export interface OpenSemanticDiscoveryConfig {
    *  extra key (like `investigator_max_turns`), NOT one of the ten declared keys: a section written
    *  before the paired instrument existed must keep parsing to the stated cadence rather than failing. */
   gainEveryRounds: number;
+  /** How many task-status transitions the round offers the model as OPTIONAL context. An OPTIONAL extra
+   *  key like `investigator_max_turns` / `gain_every_rounds`: a section written before the task-status
+   *  context existed must keep parsing rather than failing. */
+  taskLogContextLimit: number;
 }
 
 /** `present` = the section exists; `config` = the parsed section (null when malformed); `error` = a
@@ -438,6 +462,7 @@ const DISABLED_DEFAULTS: OpenSemanticDiscoveryConfig = {
   maxModelCallsPer24h: 120,
   maxUsdPer24h: 30,
   gainEveryRounds: DEFAULT_GAIN_EVERY_ROUNDS,
+  taskLogContextLimit: DEFAULT_TASK_LOG_CONTEXT_LIMIT,
 };
 
 /** Pure parse of ONE `loop.open_semantic_discovery` value. `enabled` is required and boolean; a disabled
@@ -527,6 +552,25 @@ export function parseOpenSemanticDiscoverySection(raw: unknown): { config: OpenS
     ? { value: DEFAULT_GAIN_EVERY_ROUNDS, error: null }
     : intKey("gain_every_rounds", 1);
   if (gainEvery.error) return { config: null, error: gainEvery.error };
+  // `task_log_context_limit` is the THIRD optional extra bound (same rationale). Absent ⇒ the stated
+  // default; present ⇒ a well-formed integer in [1, the read surface's own page maximum]. The UPPER bound
+  // is refused HERE rather than left to the read: `readTaskLog` treats a limit above its maximum as a
+  // usage error, so a section declaring 1000 would make every round read `ok:false` — a config typo would
+  // then be indistinguishable from a broken read (硬规则 3b). The floor is 1, not 0: a `0` would offer
+  // nothing while looking like a declared context, and "the context was switched off" already has a
+  // spelling (omit the key ⇒ the default, or declare the whole section disabled).
+  const taskLogLimit = rec.task_log_context_limit === undefined || rec.task_log_context_limit === null
+    ? { value: DEFAULT_TASK_LOG_CONTEXT_LIMIT, error: null }
+    : intKey("task_log_context_limit", 1);
+  if (taskLogLimit.error) return { config: null, error: taskLogLimit.error };
+  if ((taskLogLimit.value as number) > MAX_TASK_LOG_LIMIT) {
+    return {
+      config: null,
+      error: cfgBad(
+        `'task_log_context_limit' must be <= ${MAX_TASK_LOG_LIMIT} (the read surface's page maximum) — got ${taskLogLimit.value}`,
+      ),
+    };
+  }
   // ⛔ `0` is a legitimate value for `max_model_calls_per_24h` (a mechanical-only declaration is coherent)
   // — the gate is integrality and non-negativity, not a made-up positive floor. The USD ceiling is the one
   // bound where 0 would be incoherent (a round that may spend nothing is a round that may never run), so it
@@ -553,6 +597,7 @@ export function parseOpenSemanticDiscoverySection(raw: unknown): { config: OpenS
       maxModelCallsPer24h: parsed.max_model_calls_per_24h,
       maxUsdPer24h: usd,
       gainEveryRounds: gainEvery.value as number,
+      taskLogContextLimit: taskLogLimit.value as number,
     },
     error: null,
   };
@@ -2212,6 +2257,289 @@ export function priorFocuses(records: readonly Record<string, unknown>[], max: n
   return out.reverse();
 }
 
+// ── THE TASK-STATUS CONTEXT (optional; it never gates and never schedules) ────────────────────────────
+// WHY (tasks/gap-open-discovery-consumes-task-status-events-optional-context): reliable "what changed since
+// my last round" context helps the model choose where to look — tasks that just landed, tasks reset after a
+// failed landing, tasks escalated to needs-human. That context is read as real transition EVENTS through
+// the SUPPORTED read surface (`readTaskLog` — the same reader `quay task log` publishes), never by parsing
+// the carrier file (a second reader would be a second contract) and never from commit subjects (a message
+// is a claim, not a positional reading — the read surface's own guarantee 4).
+//
+// ⛔ THE CONTEXT IS OPTIONAL. Events NEVER gate and NEVER schedule a round: no events ⇒ the round still
+// runs; many events ⇒ still ONE bounded round. Mechanics only fetch and persist a cursor; what to do with
+// the context is the MODEL's call. To make that a structural property rather than a promise, the whole
+// read lives in `readTaskLogContext` below, which touches no Fact, no `isDue`, no `halted` and no spawn —
+// `case (e)` pins the shape, and the injected-gate negative control in the test file is its live control.
+
+type TaskLogTransition = TaskLogDocument["transitions"][number];
+
+/**
+ * The dedup key of ONE delivered transition. The read surface's contract is AT-LEAST-ONCE: a resumed
+ * cursor is read INCLUSIVE of the event it names, so every resume re-delivers exactly that boundary event.
+ * The surface's own identity (`eventId`) is therefore the key wherever the record carries one; a v0 record
+ * has none and one is NEVER fabricated (硬规则 6) — its carrier position, which is precisely the order the
+ * cursor pages by, is its key instead.
+ */
+export function taskLogDedupKey(t: { eventId: string | null; order: number }): string {
+  return t.eventId !== null ? `eventId:${t.eventId}` : `order:${t.order}`;
+}
+
+/** One transition as the round OFFERS it: only what the model needs to decide whether to look, plus the
+ *  dedup key the next round carries forward. The carrier is NOT copied wholesale into the prompt. */
+export interface TaskLogOfferedEvent {
+  key: string;
+  event_id: string | null;
+  order: number;
+  task_id: string;
+  from: string | null;
+  to: string | null;
+  at: string | null;
+  commit: string | null;
+  inferred: boolean;
+  source: string;
+}
+
+/** What the round FETCHED — the whole mechanical half of the feature. `read.ok:false` is a REPORTED
+ *  outcome (with its reason), never a round-level failure and never a silent empty list. */
+export interface TaskLogContextBlock {
+  read: { ok: boolean; reason: string | null };
+  limit: number;
+  cursor_before: TaskLogCursor | null;
+  /** true when the previous round's stored `cursor_after` was PRESENT but unreadable — reported rather
+   *  than quietly indistinguishable from "there was no cursor" (硬规则 3b). */
+  cursor_before_unreadable: boolean;
+  cursor_after: TaskLogCursor | null;
+  rebase: boolean;
+  rebase_reason: string | null;
+  complete: boolean;
+  incomplete_reasons: string[];
+  offered: TaskLogOfferedEvent[];
+  offered_count: number;
+  deduped_by_event_id: number;
+  truncated: boolean;
+}
+
+/** Validate a stored cursor. ⛔ A malformed one returns `null` — the CALLER reports that separately rather
+ *  than reading it as absent (see `cursor_before_unreadable`). */
+export function asTaskLogCursor(v: unknown): TaskLogCursor | null {
+  if (v === null || typeof v !== "object" || Array.isArray(v)) return null;
+  const o = v as Record<string, unknown>;
+  if (o.v !== 1) return null;
+  if (typeof o.carrierEpoch !== "string" || o.carrierEpoch.length === 0) return null;
+  if (typeof o.seq !== "number" || !Number.isInteger(o.seq) || o.seq < 0) return null;
+  return { v: 1, carrierEpoch: o.carrierEpoch, seq: o.seq };
+}
+
+/** The cursor (and the offered keys) the PREVIOUS round left ON THE CARRIER — the carrier IS the store, no
+ *  second cursor file is invented, exactly like `priorFocuses`. The LATEST scan-round carrying a `task_log`
+ *  block wins: a round that predates this feature contributes nothing, and neither does the mid-round
+ *  budget-refusal line. `at-least-once` falls out of the storage discipline — the block is written on the
+ *  SAME append as the round it describes, so a round that crashed before appending leaves no cursor and the
+ *  next round re-reads from where the last SUCCESSFUL round stopped. */
+export function priorTaskLogContext(records: readonly Record<string, unknown>[]): {
+  cursor: TaskLogCursor | null;
+  cursorUnreadable: boolean;
+  offeredKeys: string[];
+} {
+  for (let i = records.length - 1; i >= 0; i--) {
+    const rec = records[i];
+    if (rec.kind !== "scan-round") continue;
+    const raw = rec.task_log;
+    if (raw === null || raw === undefined || typeof raw !== "object" || Array.isArray(raw)) continue;
+    const block = raw as Record<string, unknown>;
+    const cursorRaw = block.cursor_after;
+    const cursor = asTaskLogCursor(cursorRaw);
+    const offeredRaw = Array.isArray(block.offered) ? (block.offered as unknown[]) : [];
+    const offeredKeys = offeredRaw
+      .map((o) => (o !== null && typeof o === "object" && !Array.isArray(o) ? (o as Record<string, unknown>).key : null))
+      .filter((k): k is string => typeof k === "string" && k.length > 0);
+    return { cursor, cursorUnreadable: cursor === null && cursorRaw !== null && cursorRaw !== undefined, offeredKeys };
+  }
+  return { cursor: null, cursorUnreadable: false, offeredKeys: [] };
+}
+
+/**
+ * FETCH the optional context. Reads ONE page of the transition carrier through the supported surface and
+ * compacts it into the offered list.
+ *
+ * ⛔ PURE MECHANICS, AND THAT IS THE POINT: this function returns a description of what was read. It never
+ * throws, never spawns, never consults the clock for a decision and — most importantly — never influences
+ * whether the round runs. A read that fails comes back as `read.ok:false` with its reason, so "the feed
+ * could not be read" is its own state rather than an empty list (硬规则 3b).
+ */
+export function readTaskLogContext(
+  root: string,
+  limit: number,
+  records: readonly Record<string, unknown>[],
+  opts: { nowMs?: number } = {},
+): TaskLogContextBlock {
+  const prior = priorTaskLogContext(records);
+  const base: TaskLogContextBlock = {
+    read: { ok: false, reason: null },
+    limit,
+    cursor_before: prior.cursor,
+    cursor_before_unreadable: prior.cursorUnreadable,
+    cursor_after: null,
+    rebase: false,
+    rebase_reason: null,
+    complete: false,
+    incomplete_reasons: [],
+    offered: [],
+    offered_count: 0,
+    deduped_by_event_id: 0,
+    truncated: false,
+  };
+  if (limit < 1 || limit > MAX_TASK_LOG_LIMIT) {
+    return { ...base, read: { ok: false, reason: `the configured page limit ${limit} is outside 1..${MAX_TASK_LOG_LIMIT}` } };
+  }
+  let reading: ReturnType<typeof readTaskLog>;
+  try {
+    reading = readTaskLog(root, {
+      since: prior.cursor === null ? null : JSON.stringify(prior.cursor),
+      limit,
+      ...(opts.nowMs !== undefined ? { nowMs: opts.nowMs } : {}),
+    });
+  } catch (e) {
+    return { ...base, read: { ok: false, reason: `the read surface threw: ${(e as Error)?.message ?? String(e)}` } };
+  }
+  if (reading.ok === false) return { ...base, read: { ok: false, reason: reading.reason } };
+  const doc = reading.document;
+
+  // The at-least-once compensation: the boundary event the cursor named comes back, and any eventId the
+  // PREVIOUS round already offered is dropped. Net effect over a healthy sequence: exactly-once delivery.
+  const seen = new Set(prior.offeredKeys);
+  const offered: TaskLogOfferedEvent[] = [];
+  let deduped = 0;
+  for (const t of doc.transitions) {
+    const key = taskLogDedupKey(t);
+    if (seen.has(key)) {
+      deduped++;
+      continue;
+    }
+    seen.add(key);
+    offered.push({
+      key,
+      event_id: t.eventId,
+      order: t.order,
+      task_id: t.taskId,
+      from: t.from,
+      to: t.to,
+      at: t.at,
+      commit: t.commit,
+      inferred: t.inferred,
+      source: t.source,
+    });
+  }
+  const incomplete = doc.complete ? [] : [...doc.coverage.reasons];
+  return {
+    ...base,
+    read: { ok: true, reason: null },
+    cursor_after: doc.nextCursor,
+    rebase: doc.rebase,
+    rebase_reason: doc.rebaseReason,
+    complete: doc.complete,
+    incomplete_reasons: incomplete,
+    offered,
+    offered_count: offered.length,
+    deduped_by_event_id: deduped,
+    // The surface names its own truncation in `coverage.reasons`; the flag is a convenience VIEW of that
+    // documented sentence, and the sentence itself is carried VERBATIM in `incomplete_reasons`.
+    truncated: incomplete.some((r) => r.includes("truncated by --limit")),
+  };
+}
+
+/**
+ * The directive PREPENDED to the investigator prompt. ⛔ Its whole job is to hand the model the context
+ * WITHOUT making it a rule: it states, in the model's own terms, that the list is optional, that it decides
+ * nothing, and that the choice of focus stays the model's. When the feed could not be read, or when it is
+ * incomplete (`rebase:true` / `complete:false`), the fact is passed on AS-IS — verbatim, with the surface's
+ * own reason text — so the model can weigh a partial list instead of being handed a summary that looks
+ * complete.
+ */
+export function taskLogContextDirective(block: TaskLogContextBlock): string {
+  const lines: string[] = [
+    "TASK-STATUS CHANGES — context you MAY consider. This is OPTIONAL: it never decides your focus, it",
+    "never gates or triggers this round, and you are free to ignore it entirely. With or without it you",
+    "explore exactly as you otherwise would.",
+    "",
+  ];
+  if (block.read.ok === false) {
+    lines.push(
+      `(the transition feed could not be read: ${block.read.reason ?? "(no reason given)"})`,
+      "Nothing is offered here, and this does not affect the round.",
+      "",
+    );
+  } else if (block.offered_count === 0) {
+    lines.push("No task-status transition is new since your last round.", "");
+  } else {
+    lines.push(`${block.offered_count} task-status transition(s) since your last round:`);
+    for (const e of block.offered) {
+      const arrow = `${e.from === null ? "?" : e.from}→${e.to === null ? "?" : e.to}`;
+      const when = e.at === null ? "at unknown" : `at ${e.at}`;
+      const commit = e.commit === null ? "" : ` commit ${e.commit}`;
+      const inferred = e.inferred ? " (inferred from git, not observed by a live writer)" : "";
+      lines.push(`  - ${e.task_id === "" ? "<unknown task>" : e.task_id} ${arrow} ${when}${commit}${inferred}`);
+    }
+    lines.push(
+      "",
+      "These are pointers, not instructions: you may read the affected files yourself with your own tools,",
+      "and you may just as well pursue a focus none of them mentions.",
+      "",
+    );
+  }
+  if (block.cursor_before_unreadable) {
+    lines.push(
+      "this list may be incomplete: the cursor the previous round stored could not be read, so this page",
+      "restarts from the beginning of the current carrier epoch.",
+      "",
+    );
+  }
+  if (block.rebase) {
+    lines.push(`this list may be incomplete: ${block.rebase_reason ?? "(the read surface reported a rebase with no reason)"}`, "");
+  }
+  if (!block.complete && block.incomplete_reasons.length > 0) {
+    // ⛔ The reasons are indented ONE level deeper than the offered events, so the two kinds of bullet are
+    // distinguishable by position rather than by reading them (the offered lines are the only `  - `).
+    lines.push("this list may be incomplete:");
+    for (const r of block.incomplete_reasons) lines.push(`    - ${r}`);
+    lines.push("");
+  }
+  lines.push("---", "");
+  return lines.join("\n");
+}
+
+/** ONE fix cap on how many matches the citation reading collects — a bound on the ROUND RECORD, not a
+ *  judgment. Twelve distinct task ids is already far more than a one-sentence focus can name. */
+export const FOCUS_CITATION_MAX = 12;
+
+/**
+ * Whether the model's OWN stated focus NAMED any of the offered events. ⛔ This is a READING OF THE
+ * MODEL'S STATEMENT, never an attribution of use: a substring match says the focus mentioned a task id,
+ * and says nothing about whether the event caused the focus. `cited` is `null` (NOT `false`) when the
+ * question is vacuous — nothing was offered, or the model stated no focus — so "no citation" and "nothing
+ * to cite" cannot be read for one another (硬规则 3b).
+ */
+export function citeOfferedEvents(
+  statedFocus: unknown,
+  offered: readonly TaskLogOfferedEvent[],
+): { evaluated: boolean; cited: boolean | null; matched: string[]; basis: string } {
+  const basis =
+    "a substring reading of the model's OWN stated focus text (it reports whether the focus NAMED an offered task id, never that the event caused the focus)";
+  if (offered.length === 0) return { evaluated: false, cited: null, matched: [], basis };
+  if (typeof statedFocus !== "string" || statedFocus.trim() === "") {
+    return { evaluated: false, cited: null, matched: [], basis };
+  }
+  const matched: string[] = [];
+  for (const e of offered) {
+    if (e.task_id === "" || e.task_id === undefined) continue;
+    if (!statedFocus.includes(e.task_id)) continue;
+    if (matched.includes(e.task_id)) continue;
+    if (matched.length >= FOCUS_CITATION_MAX) break;
+    matched.push(e.task_id);
+  }
+  return { evaluated: true, cited: matched.length > 0, matched, basis };
+}
+
 /** The develop tip, resolved from the workspace. A `rev-parse` failure is the round's own `failed`. */
 export function developTip(root: string): string {
   return execFileSync("git", ["-C", root, "rev-parse", "develop"], { encoding: "utf8" }).trim();
@@ -2553,6 +2881,14 @@ export async function runOpenSemanticDiscovery(root: string, opts: OpenSemanticD
   //    pinned tree and an explicit `--max-turns`, so it reads code and context itself. The inventory is
   //    passed as an optional map — appended to the prompt, never used to select or reject anything.
   const focuses = priorFocuses(carrierRounds);
+  // ⑥ (b) i THE OPTIONAL TASK-STATUS CONTEXT. ONE unconditional fetch of the transition feed through the
+  //        supported read surface, compacted for the prompt. ⛔ It is a single call, outside every gate and
+  //        consulted by none of them: the round's due/halt/budget decisions were ALL made above, and nothing
+  //        below reads `taskLogContext` except the prompt composition and the round record. That is what
+  //        makes «no code path skips or schedules a round on the events» structural (case (e)) rather than
+  //        a promise — see `readTaskLogContext`, which owns the whole mechanic and returns no Fact.
+  const taskLogContext = readTaskLogContext(root, config.taskLogContextLimit, carrierRounds);
+  const taskLogContextText = taskLogContextDirective(taskLogContext);
   // The model the LAUNCHER was asked for, read off a throwaway argv built the same way a real call's is —
   // `launchArgv` bakes the resolved `--model` in, so this is the requested identity rather than a guess
   // copied from the stream (which is the ACTUAL one and is read per call).
@@ -2591,10 +2927,12 @@ export async function runOpenSemanticDiscovery(root: string, opts: OpenSemanticD
     // ⛔ The TURN RESERVE directive (Plan item 2) goes into BOTH arms, and into the same position in both:
     // the cap it describes is part of the shared envelope, so putting it in only one arm would make the
     // paired instrument's two prompts differ by something other than the guidance block.
+    // ⛔ The TASK-STATUS CONTEXT goes in the SAME position in BOTH arms for the SAME reason — it is part of
+    // the shared envelope the two arms are compared on, so it must not become a second difference.
     const reserveDirective = turnReserveDirective(config.investigatorMaxTurns);
     const armPrompts: Record<PairedArm | "guided", string> = {
-      [PAIRED_ARM_GUIDED]: `${focusDirective(focuses)}\n${reserveDirective}\n${selection.production_text}${basePrompt}\n\n${inventoryText}`,
-      [PAIRED_ARM_BASELINE]: `${focusDirective(focuses)}\n${reserveDirective}\n${basePrompt}\n\n${inventoryText}`,
+      [PAIRED_ARM_GUIDED]: `${focusDirective(focuses)}\n${reserveDirective}\n${taskLogContextText}${selection.production_text}${basePrompt}\n\n${inventoryText}`,
+      [PAIRED_ARM_BASELINE]: `${focusDirective(focuses)}\n${reserveDirective}\n${taskLogContextText}${basePrompt}\n\n${inventoryText}`,
     };
     // The instant the PAIRED round's FIRST call began. The pre-registration below is judged against it:
     // a pre-registration that is not strictly older than the first call it scores is a post-hoc
@@ -3102,7 +3440,7 @@ export async function runOpenSemanticDiscovery(root: string, opts: OpenSemanticD
     let shadowClusterRecords: Record<string, unknown>[] = [];
     if (selection.shadow.length > 0) {
       const shadowOutDir = path.join(pinned, ".open-semantic-discovery-runs", "shadow");
-      const shadowPrompt = `${focusDirective(focuses)}\n${reserveDirective}\n${selection.shadow_text}${basePrompt}\n\n${inventory.ok === true ? String(inventory.text ?? "") : ""}`;
+      const shadowPrompt = `${focusDirective(focuses)}\n${reserveDirective}\n${taskLogContextText}${selection.shadow_text}${basePrompt}\n\n${inventory.ok === true ? String(inventory.text ?? "") : ""}`;
       let shadowCalls = 0;
       const shadowCallRecords: Record<string, unknown>[] = [];
       const shadowInv = await hyp.runInvestigator({
@@ -3192,6 +3530,15 @@ export async function runOpenSemanticDiscovery(root: string, opts: OpenSemanticD
       pin: { rev, dir: asRel(root, pinned) },
       inventory: { ok: inventory.ok, entries: inventory.entries, unavailable: inventory.unavailable, scope: INVENTORY_SCOPE_REL },
       focus: { chosen: investigatorBlock.stated_focus ?? null, prior_focuses: focuses },
+      // ── THE OPTIONAL TASK-STATUS CONTEXT (Plan items 1-3) ────────────────────────────────────────
+      // What was FETCHED (cursor before/after, the events offered, and why the list may be incomplete),
+      // and whether the model's OWN stated focus named any of them. ⛔ The cursor lives HERE, on the line
+      // that is appended with the round: a round that crashed before this append left no cursor, so the
+      // next round re-reads the same window (at-least-once, deduped by `eventId`).
+      task_log: {
+        ...taskLogContext,
+        focus_citation: citeOfferedEvents(investigatorBlock.stated_focus, taskLogContext.offered),
+      },
       investigator: investigatorBlock,
       clusters: { total: clusters.length, verified: verifiedRows.length, beyond_cap: Math.max(0, clusters.length - verifiedRows.length) },
       confirmed: { count: confirmedClusters.length, claims: confirmedClusters.map((c) => c.claim) },
@@ -3386,6 +3733,10 @@ export async function runOpenSemanticDiscovery(root: string, opts: OpenSemanticD
         kind: "scan-round", routine: OPEN_SEMANTIC_DISCOVERY_NAME, invoked_by: invokedBy, ts: new Date(now()).toISOString(),
         interval: intervalInfo, due: dueInfo, pin: { rev, dir: asRel(root, pinned) }, inventory: { ok: inventory.ok, entries: inventory.entries, unavailable: inventory.unavailable },
         investigator: investigatorBlock, reservations: { cap: config.maxModelCallsPer24h, used_at_start: callsUsage.total, granted: budget.grantedCount, refused: budget.refusedCount, mid_round_refusal: midRound, ledger: asRel(root, ledgerPath) },
+        // The context this round fetched, so a refusal line is as readable as a completed one about what
+        // the model was (or was not) offered. ⛔ No `focus_citation` here: this round was cut off before the
+        // model answered, and a citation reading over a half-round would be a reading of nothing.
+        task_log: taskLogContext,
         methods: selectionBlock,
         budget_24h: countBudgetBlock, budget_usd_24h: usdBudgetBlock, wall_ms: now() - started, model_calls: budget.grantedCount, calls: callRecords,
         tokens: { input: tokensIn, output: tokensOut }, cost_usd: round6(costUsd),
