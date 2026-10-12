@@ -2053,7 +2053,10 @@ export function createGoalStore(
     const scopeSize = inScope.length;
     const inScopeIds = inScope.map((ac) => String(ac.id));
     if (process.env[GOAL_ACCEPTANCE_ACTIVE_ENV] === "1") {
-      return { achievedButFailing: [], evaluated: false, scopeSize, inScope: inScopeIds };
+      // `evaluated: false` is the refusal — ⛔ and `capabilityRefused: []` here means "nothing was
+      // judged", NOT "nothing was refused": the two readings are separated by `evaluated`, which is
+      // exactly why the guard reports it rather than returning an empty-shaped result (hard rule 3b).
+      return { achievedButFailing: [], capabilityRefused: [], evaluated: false, scopeSize, inScope: inScopeIds };
     }
     const achievedButFailing: string[] = [];
     // The criteria this guard REFUSED to spawn — enumerated, ⛔ never folded into
