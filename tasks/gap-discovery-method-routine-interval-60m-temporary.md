@@ -10,6 +10,8 @@ labels:
 parent: null
 children: []
 extra: {}
+depends_on:
+  - gap-discovery-holdout-cross-experiment-leak-and-contaminated-promotion
 ---
 ## Proposal
 The user explicitly asked (2026-10-12) to temporarily run ONLY the `discovery-method` routine every 60 minutes instead of 360, to support development validation. Every other routine's cadence stays as is, and no global scheduling change is made.
