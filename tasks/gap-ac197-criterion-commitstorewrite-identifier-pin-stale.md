@@ -388,10 +388,10 @@ $ git show --stat 5a04e28fa | tail -2
 | AC6 台账（修前 → 修后） | `.quay/gate-events.jsonl` 尾行 | 修前 `2026-10-12T18:35:39.270Z fail`（`CAUSE=commitStoreWrite-not-in-all-5`，root=主检出）；修后（退出树上重取）`2026-10-12T18:46:15.308Z pass actor=goal-amend hash=ce927a78256e078f` ⇒ **≠ `5a7dc1fc29c3b9a3`** |
 | AC6 交叉核对（⛔ 非回声） | 用 `goal-store.ts:449 criterionFingerprint` 独立算 worktree goal 文件的 criterion | `ce927a78256e078f` —— 与台账写入值**逐字相同** |
 | AC1 | 同一份 criterion 文本上 `grep -l commitStoreWrite` 逐字匹配 | **0 命中** ⇒ 旧谓词已不在正文（成因描述保留为叙述，不带旧谓词逐字） |
-| scoped 门缓存（1b-iv） | `--write-scoped-gate-cache --develop-sha f65848f4a…`（退出树，最终值） | `{"event":"scoped-gate-cache-written",…,"developSha":"f65848f4a123f6adbb27db04516f717bbdd39621"}`；写前核过 `merge-base --is-ancestor develop HEAD` **是** ∧ `rev-list --count HEAD..develop` = **0** |
+| scoped 门缓存（1b-iv） | `--write-scoped-gate-cache --develop-sha <本轮 tip>` | 本轮首次写入值 `f65848f4a123f6adbb27db04516f717bbdd39621`（其后 develop 每前进一次就作废重写一次，见下）。稳定不变量（⛔ 不追具体 sha——它在 develop 前进时必然变）：`merge-base --is-ancestor develop HEAD` = **是** ∧ `rev-list --count HEAD..develop` = **0** |
 | 退出树重取（闭环） | 改动 Evidence 会再次改到任务文件 ⇒ 按「验证过的树 == 退出的树」重跑：`git merge develop`（+8 提交，干净）→ `scripts/test.sh --for-task … --allow-thin` ⇒ `SCOPED_GATE_EXIT=0`，7/7，`✖`/`STATIC_CHECK_FAILED` 命中 **0** → 重写缓存 → `goal gate` + `--stale-pass --sweep` 重取台账 | 上表末三行即该轮的**最终**读数 |
 
-⚠️ **缓存重写过两次**：第一次写入后 develop 立刻前进 1 提交（`81f9dd0e…` 不再是 HEAD 祖先），第二次写入后退出树又被 Evidence 改动 ⇒ 每次按「缓存的前提是对着**这个确切 tip** 验过绿」作废重来，最终值为 `f65848f4a…`（上表）。⛔ 没有用 merge-base 凑一个「更旧的、仍然合法」的 tip 去换一次假冗余。
+⚠️ **缓存被反复重写**：本仓 fan-in 的缓存只按 `(task, developTip)` 键（`worker-fan-in.ts:2433`「锁内 merge 到的 develop tip 与 worker 记录的 developSha 完全一致时跳过」），而 develop 在本轮的每次 scoped 门跑动期间都会前进若干提交 ⇒ 每次按「缓存的前提是对着**这个确切 tip** 验过绿」作废重来（实测 `81f9dd0e…` → `f65848f4a…` → 退出树上的再次写入）。⛔ 没有用 merge-base 凑一个「更旧的、仍然合法」的 tip 去换一次假冗余；⛔ 也不把具体 sha 写成「最终值」（它是 move 的）——可复核的是上表那条不变量。缓存失配的代价只是 fan-in 重跑一次 scoped 门，**不是**假绿。
 
 ⚠️ **台账仍是 worktree 本地那一份**：`scripts/test.sh` 起点的 `refresh-worktree-quay` 会从主检出拷 `.quay/` 覆盖它。本轮顺序因此是「先 scoped 门（它会覆盖）→ 再 `goal gate` + `goal check --stale-pass --sweep`」，⇒ 退出时尾事件即上表那条 `18:46:15` 的 pass。持久收敛仍走落 develop ⇒ `syncDevelopToDoc` ⇒ 生产轮转的路径。
 
