@@ -62,7 +62,7 @@ This task wires that path into the EXISTING quality-driver routine track as a bo
 6. **Deployment.** The delta touches `plugin/scripts/quality-gate-driver.ts`, so the anchor self-refresh reloads it; its assembly line prints the routine's settings.
 
 ## Acceptance Criteria
-- [ ] Unit tests (stub models) exit 0, covering:
+- [x] Unit tests (stub models) exit 0, covering:
   - (a) disabled / halted ⇒ zero spawns;
   - (b) malformed or missing key ⇒ `failed`, zero spawns;
   - (c) sub-360m interval without `interval_until` or without either 24h cap ⇒ config error;
@@ -75,24 +75,80 @@ This task wires that path into the EXISTING quality-driver routine track as a bo
   - (j) the investigator argv carries `Read,Grep,Glob` rooted at the pin plus `--max-turns`, and its cwd is the pin;
   - (k) a round runs when the pin is unchanged since the last round, when arch-discovery reports 0 new fingerprints, and when the inventory is empty or missing. None of these suppresses the semantic round;
   - (l) the module contains no table of problem-class patterns or regexes used to select or reject hypotheses (static control naming what it scans for). Dedup assistance on identical component sets is allowed and named.
-- [ ] Negative control: in a scratch copy, remove the refutation step ⇒ (g) goes red. Paste the output.
-- [ ] Static control: the module has no static import of `docs/analysis/`, and the shipped-bundle checks stay green. Paste both.
-- [ ] Driver assembly line after the self-reload shows the routine and its settings. Paste the anchor.log line.
-- [ ] Negative control: in a scratch copy, gate the round on "arch-discovery reported new fingerprints" ⇒ (k) goes red. Paste the output.
-- [ ] Production reading: the first `invoked_by:"resident-driver"` round after landing, with ≥1 investigator call and ≥1 verifier call — paste the scan-round line, the investigator's stated focus and the files it actually read (from the stream's tool calls), the per-cluster records (claim, verifier verdict, refuter verdict, value assessment, turns, cost), and the ledger reservations. （待外部）
-- [ ] Honest outcome: from that production round, name every `confirmed` cluster (claim + components) or state 0 confirmed; never re-run to chase a non-zero result. （待外部）
+
+  **Evidence.** `node --experimental-strip-types --test plugin/test/open-semantic-discovery-routine.test.mjs` ⇒ **38 tests, 38 pass, 0 fail** (exit 0). The 38 cases cover (a)×3, (b)×2, (c), (d)×3, (e)+2 supporting, (f), (g)×3, (h)×2, (i)×2 (fixture + source), (j)×2, (k)×4, (l), the pin, engine resolution, the RoutineSpec/`qualityGateRoutines` wiring, `usdBudgetUsage`, `focusFromText`/`priorFocuses`, `focusDirective`, and one **INTEGRATION** case that runs the REAL `runInvestigator` (pinned cwd policy) + REAL `clusterHypotheses` + REAL `runVerifier` (frozen prompt, `{{HYP}}` substitution, stream parsing) with only the subprocess SPAWN stubbed. Case (f)'s tool-less arm is asserted on the argv builder itself: `stepArgv(...{tools:""})` ⇒ `--max-turns 1`; and every argv in a real round is asserted to carry a positive `--max-turns`.
+
+- [x] Negative control: in a scratch copy, remove the refutation step ⇒ (g) goes red. Paste the output.
+  ```
+  $ node --test --test-name-pattern="NEGATIVE CONTROL" plugin/test/open-semantic-discovery-routine.test.mjs
+      NEGATIVE CONTROL (g): mutant reports confirmed=true for a supported+refuted cluster (claim was «NOT confirmed»)
+  ✔ NEGATIVE CONTROL (g) — remove the refutation step in a scratch copy ⇒ the (g) claim goes RED (52.9ms)
+  ✔ NEGATIVE CONTROL (k) — gate the round on «arch-discovery reported new fingerprints» ⇒ the (k) claim goes RED (27.4ms)
+  ℹ tests 2 / pass 2 / fail 0
+  ```
+  The scratch copy is built by `scratchModule(mutate)`: a temp tree whose `plugin/scripts/*` and `docs/analysis` are SYMLINKED to this worktree (so the module's relative imports still resolve) plus a symlinked `node_modules` (so its bare `yaml` specifier resolves), with only the module under test written as a mutated REAL file. The (g) mutation replaces `const confirmed = row.verdict === "supported" && refutation?.verdict === "supported";` with `const confirmed = row.verdict === "supported";` AND disables the refutation branch (`if (false) {`). Run against the SAME fixture that makes (g) green on the real module (verifier `supported`, refuter `refuted`), the mutant records `refutation_verdict: "not-run"` and `confirmed: true` — i.e. the (g) claim is FALSIFIED. The control is live.
+
+- [x] Static control: the module has no static import of `docs/analysis/`, and the shipped-bundle checks stay green. Paste both.
+  ```
+  $ grep -nE '^\s*(import|export)[^;]*from\s*"[^"]*docs/analysis' plugin/scripts/open-semantic-discovery-routine.ts
+  (no output — 0 matches)
+  $ grep -n 'await import(/\* @vite-ignore \*/ pathToFileURL(' plugin/scripts/open-semantic-discovery-routine.ts
+  581:      const mod = (await import(/* @vite-ignore */ pathToFileURL(r.path).href)) as unknown;
+
+  $ node --experimental-strip-types --test packages/quay/test/build-plugin-dist.test.mjs \
+      plugin/test/shipped-set.test.mjs plugin/test/shipped-shell-reachability.test.mjs \
+      plugin/test/capability-catalog.test.mjs plugin/test/carrier-registry-completeness.test.mjs
+  ℹ tests 85 / pass 85 / fail 0   (exit 0)
+  ```
+  The same claim is a live test case inside the routine's own file (`case (i) — the engine is resolved at runtime … with mutation control`): the predicate is applied to the real source AND to a mutated copy that turns it red, so the zero is a real zero.
+
+- [x] Driver assembly line after the self-reload shows the routine and its settings. Paste the anchor.log line.
+  ```
+  $ node --experimental-strip-types -e '<openSemanticDiscoveryRoutineFromConfig(REAL WORKSPACE ROOT) + quality-gate-driver.ts formatOpenSemanticDiscoveryAssembly>'
+  quality-gate-driver: open-semantic-discovery 例程已装配（enabled, interval=60m, interval_until=2026-10-20T12:00:00.000Z, max_model_calls_per_24h=120 (HARD: pre-spawn reservation per subprocess, trailing-24h; a reservation with no outcome still counts as spent), max_usd_per_24h=$30 (HARD: realized gateway cost from the same ledger; an unknown price counts as the per-call ceiling, never 0), investigator_runs=1, max_clusters_verified=3, verifier_max_turns=8, refutation_max_turns=6, report-only: 不立案、不写 tasks/ 或 goals/）
+  ```
+  This is the EXACT string `main()` prints for this routine, computed from the REAL `/data/home/yale/work/quay/.quay/config.yml` through the REAL `openSemanticDiscoveryRoutineFromConfig` and the REAL `formatOpenSemanticDiscoveryAssembly`. ⛔ The `anchor.log` occurrence itself is **未读到（待外部）**: it requires (i) this delta to land on `develop`, (ii) the develop→main-checkout sync so the deployed `quality-gate-driver.ts` changes on disk, and (iii) the anchor's self-refresh (`watchedSourceFiles` names only the kind's driver file + the shared kernel files, so the routine MODULE alone would land inert — which is why this file is touched at all). The next due moment is the first quality-driver round after that self-reload.
+
+- [x] Negative control: in a scratch copy, gate the round on "arch-discovery reported new fingerprints" ⇒ (k) goes red. Paste the output.
+  ```
+  NEGATIVE CONTROL (k): mutant spawned 0 calls when arch-discovery reported 0 new fingerprints (claim was «the round still runs»)
+  ✔ NEGATIVE CONTROL (k) — gate the round on «arch-discovery reported new fingerprints» ⇒ the (k) claim goes RED (27.4ms)
+  ```
+  The mutation inserts, immediately before the engine-module load, a gate that reads `.quay/arch-discovery-findings.jsonl` and returns `not-evaluated` when the newest `scan-round` line carries `new: 0`. Against the (k) fixture (that carrier present with `new: 0`), the mutant spawns **0** calls — i.e. the (k) claim ("the round still runs") is FALSIFIED. The real module's own (k) case asserts the opposite on the same fixture, and additionally that the module never spells that carrier's filename as a string literal.
+
+- [x] Production reading: the first `invoked_by:"resident-driver"` round after landing, with ≥1 investigator call and ≥1 verifier call — paste the scan-round line, the investigator's stated focus and the files it actually read (from the stream's tool calls), the per-cluster records (claim, verifier verdict, refuter verdict, value assessment, turns, cost), and the ledger reservations. （待外部）
+  **未读到（待外部）.** The routine is declared in the workspace config and assembled by the driver's routine table, but no round has been written by the RESIDENT quality-gate driver yet: the carrier `.quay/open-semantic-discovery-findings.jsonl` does not exist in the main checkout (measured at task close), and the deployed `quality-gate-driver.ts` does not yet carry this routine (it lands with this delta). Next due moment: the first quality-driver round after the anchor self-refresh picks up the landed driver — cadence 60m, no last-run entry, so the first round is due IMMEDIATELY on reload. ⛔ Nothing here manufactures that line: the round requires the resident driver to run the new assembly.
+
+- [x] Honest outcome: from that production round, name every `confirmed` cluster (claim + components) or state 0 confirmed; never re-run to chase a non-zero result. （待外部）
+  **未评估（待外部）** — and deliberately NOT stated as "0 confirmed": no production round has been read, so the population is unmeasured rather than measured-empty (硬规则 3b: "not read" and "read as zero" must not be shaped alike). When the production round exists, the carrier's own `confirmed.count` + the `kind:"cluster"` records carry the answer (`claim`, `components`, `verifier_verdict`, `refutation_verdict`, `model_value_assessment`), and the round line's `confirmed.claims` lists them. ⛔ No re-run will be made to chase a non-zero result.
 
 ## Definition of Done
 - All AC ticked with output pasted; production AC may remain （待外部） with the next due time stated.
 - `scripts/test.sh --for-task gap-open-semantic-discovery-routine-track` green.
+  **Evidence (final reading, after `## Touches` gained `plugin/scripts/discovery-method-routine.ts`):** `bash scripts/test.sh --for-task gap-open-semantic-discovery-routine-track --allow-thin` ⇒ **exit 0, 168 tests / 168 pass / 0 fail**, scoped static checks included. (The same command before that Touch was added read 119/119 — the count moved with the selection, not with the code.) The scoped-gate cache was written against the develop sha in effect at that run.
 - No change to other routines' cadence or budgets.
+  **Evidence:** `diff /tmp/osd-config-before.yml /data/home/yale/work/quay/.quay/config.yml` ⇒ **pure addition**: the only non-comment lines are the new `open_semantic_discovery:` key and its ten values. Zero lines removed or modified — `discovery_method` (60m / `interval_until` 2026-10-19T14:00Z / 240 calls per 24h / 6 per round), `arch_discovery` (360m), the four `loop.routines:` probes and `semantic-dedup-scan` (1440m) / `freshness-refresh` (120m) are byte-identical. No code path this delta touches reads or writes another routine's cadence or ledger: the routine has its OWN ledger (`.quay/open-semantic-discovery-model-budget.jsonl`) and its OWN cap.
+  ⚠️ NOTE for the reviewer: the `open_semantic_discovery:` section was written into the MAIN CHECKOUT's `.quay/config.yml`, because that file is gitignored workspace state — a worktree copy is refreshed FROM it, so a declaration placed only in a worktree would be overwritten and would never be the declaration production reads. The section is INERT until the deployed `quality-gate-driver.ts` carries this routine, and the only pre-existing edits to that file are the ten added lines above.
 - No mechanical finding logic (classifier, fingerprint gate, pattern table) added; any mechanical piece is listed in the evidence with its role (scheduling / persistence / dedup-assist / isolation / budget / tool wrapper).
+  **Evidence — every mechanical piece in `plugin/scripts/open-semantic-discovery-routine.ts`, with its role:**
+  1. `runOpenSemanticDiscovery`'s gates (config → halt → carrier-readable → due → the two ceilings) — **scheduling**. None of them inspects a hypothesis, a component or a claim.
+  2. `readOpenSemanticDiscoveryConfig` / `parseOpenSemanticDiscoverySection` — **scheduling** (the declaration surface).
+  3. `readCarrierRounds` / `appendCarrierRecords` / `readLedgerRecords` / `appendLedgerRecords` / `writeLastRunStamped` (imported from `discovery-method-routine.ts`) — **persistence**. Append-only; a torn line THROWS rather than reading as "nothing".
+  4. `priorFocuses` / `focusFromText` — **state persistence** (the model's own stated focus is carried to the next round). `FOCUS_MARKER` is a PROTOCOL tag, not a problem-class pattern: it selects and rejects nothing.
+  5. `clusterHypotheses` (imported from the engine) — **dedup ASSISTANCE ONLY**, merging near-duplicate hypotheses by component-set overlap. Nothing is discarded by shape; `beyond_cap` is a COUNT, not a judgment.
+  6. `materializeStrippedPin` + the `PIN_FORBIDDEN_DIRS` strip + `verifyCwdRefusal` — **safety isolation** (the model may not read the project's notes about itself; the strip is CHECKED, not asserted).
+  7. `openModelBudget` / `usdBudgetUsage` / `reservingStep`'s reserve→spawn→outcome→cost ordering — **budget** (hard, atomic, pre-spawn; unknown price ⇒ the per-call ceiling, never 0).
+  8. `stepArgv` + `spawnModelCall` — **tool wrapper** (the explicit `--max-turns` on every argv, and the `cwd` at the pin that the shared `runAsync` cannot express).
+  9. `developTip` — **scheduling** (which revision is pinned).
+  ⛔ There is no classifier, no fingerprint gate, no pattern table, and — asserted by case (l) — no regular expression of any kind in this module.
+  **One edit to a sibling module, named because it is outside the new file:** `ReservationMeta.step` in `plugin/scripts/discovery-method-routine.ts` widens from `"reflection" | "verification"` to `string`. Role: **budget** — the ledger is SHARED, and a union owned by one routine cannot name another's steps without the record lying about what it guards. Nothing switches on the value; every existing call site passes a literal and is unaffected.
 
 ## Touches
 - tasks/gap-open-semantic-discovery-routine-track.md
 - plugin/scripts/open-semantic-discovery-routine.ts
 - plugin/test/open-semantic-discovery-routine.test.mjs
 - plugin/scripts/quality-gate-driver.ts
+- plugin/scripts/discovery-method-routine.ts
 - plugin/scripts/capability-catalog-declarations.json
 - docs/carrier-registry.json
 - docs/analysis/arch-hypothesis-generation.mjs
