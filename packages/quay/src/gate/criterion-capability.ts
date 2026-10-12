@@ -323,17 +323,33 @@ function isLiteralPathToken(text: string, quoted: boolean): boolean {
   return text.includes("/") || SCRIPT_EXT.test(text);
 }
 
+/** One program a criterion executes, and HOW the shell reaches it — the distinction decides whether
+ *  a missing file is `not-runnable` (the shell says so, precisely) or a lie (the interpreter says
+ *  "false" about a command that never ran). See `executedArtifacts`. */
+export interface ExecutedArtifact {
+  path: string;
+  via: "interpreter" | "direct";
+}
+
 /**
  * The artifacts a criterion EXECUTES (as opposed to merely reads). ⛔ Deliberately narrow: only a
  * program POSITION counts — `node <path>`, `python3 <path>`, `bash <path>`, `--test <path>`, or a
- * directly-executed `./x` / `/x`. A path mentioned inside an inline program (`node -e "…import(
+ * directly-executed `./x` / `x.sh`. A path mentioned inside an inline program (`node -e "…import(
  * './x.ts')…"`), inside a grep pattern, or as a data file argument is NOT an execution.
  *
  * ⛔ This function produces CANDIDATES for the `uncertifiable` axis only. It never decides
  * "dangerous" — a name is not a capability.
+ *
+ * `via` is not bookkeeping. A MISSING directly-executed program (`./scripts/gone.sh`) makes the
+ * SHELL exit 126/127, which `verdictFromAcceptance` already maps to `not-evaluated (not-runnable)`
+ * — a precise, existing answer. A missing INTERPRETER argument (`node gone/x.mjs`) makes the
+ * interpreter exit 1 ("Cannot find module"), which the runner maps to **`fail`** — it asserts "this
+ * criterion is FALSE" about a command that never ran. Same class of defect as the one this module
+ * exists for, so only the second arm is worth pre-empting (measured: taking both arms pre-empted
+ * `goal-gate-verdict-mapping.test.mjs`'s own 127 case and made a precise verdict vaguer).
  */
-export function executedArtifacts(criterion: string): string[] {
-  const out: string[] = [];
+export function executedArtifacts(criterion: string): ExecutedArtifact[] {
+  const out: ExecutedArtifact[] = [];
   for (const cmd of splitShellCommands(String(criterion))) {
     const words = splitWords(cmd).filter((w) => w.text !== "");
     let i = 0;
@@ -352,7 +368,7 @@ export function executedArtifacts(criterion: string): string[] {
       // to a compiler-less executable without a script extension is a MISS for the uncertifiable
       // axis — the axis is a backstop, and losing a backstop case is preferable to inventing one.
       if (head.startsWith("./") || (SCRIPT_EXT.test(head) && head.includes("/"))) {
-        if (isLiteralPathToken(head, words[i].quoted)) out.push(head);
+        if (isLiteralPathToken(head, words[i].quoted)) out.push({ path: head, via: "direct" });
       }
       continue;
     }
@@ -370,7 +386,7 @@ export function executedArtifacts(criterion: string): string[] {
         if (INLINE_PROGRAM_FLAGS.has(flag) && !w.text.includes("=")) skipNext = true;
         continue;
       }
-      if (isLiteralPathToken(w.text, w.quoted)) out.push(w.text);
+      if (isLiteralPathToken(w.text, w.quoted)) out.push({ path: w.text, via: "interpreter" });
       break;
     }
   }
@@ -422,14 +438,20 @@ export function judgeCriterionCapability(
   // axis 1 + axis 3 — the artifacts the criterion executes
   const uncertifiable: CapabilityReason[] = [];
   for (const artifact of executedArtifacts(source)) {
-    const abs = path.isAbsolute(artifact) ? artifact : path.join(opts.root, artifact);
-    const readable = fs.existsSync(abs);
-    if (!readable) {
-      uncertifiable.push({ rule: "uncertifiable-executed-artifact", detail: artifact, proof: "does not resolve under the criterion's cwd, so its capability cannot be established" });
+    const abs = path.isAbsolute(artifact.path) ? artifact.path : path.join(opts.root, artifact.path);
+    if (!fs.existsSync(abs)) {
+      // ⛔ ONLY the interpreter arm — see `ExecutedArtifacts`' own note: a missing direct-exec makes
+      // the shell say 126/127 (already `not-runnable`, precise), while a missing interpreter argument
+      // would be reported as a plain `fail`, i.e. as "this criterion is false". Pre-empting the first
+      // would trade a precise verdict for a vaguer one and protect nothing (the file is not there to
+      // run); pre-empting the second replaces a lie with the truth.
+      if (artifact.via === "interpreter") {
+        uncertifiable.push({ rule: "uncertifiable-executed-artifact", detail: artifact.path, proof: "does not resolve under the criterion's cwd, so its capability cannot be established (and the interpreter would report its absence as a plain failure, ⛔ not as not-evaluated)" });
+      }
       continue;
     }
     if (artifactDeclaresRealInfra(abs)) {
-      sideEffecting.push({ rule: "declared-real-infra-artifact", detail: artifact, proof: `${path.basename(abs)} carries ${REAL_INFRA_PRAGMA} in its own head` });
+      sideEffecting.push({ rule: "declared-real-infra-artifact", detail: artifact.path, proof: `${path.basename(abs)} carries ${REAL_INFRA_PRAGMA} in its own head` });
     }
   }
 

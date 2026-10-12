@@ -72,7 +72,15 @@ export type NotEvaluatedCause =
   /** the runner could not spawn a shell at all */
   | "spawn"
   /** exit 126 / 127 — the criterion's own command could not be run (not found / not executable) */
-  | "not-runnable";
+  | "not-runnable"
+  /**
+   * REFUSED BEFORE EXECUTION by the criterion capability gate: the criterion is an ACTION, not a
+   * reading, so no verdict about it can be obtained by running it (and re-running it forever is not
+   * free). ⛔ Distinct from `not-runnable` — that one means the command WAS reached and could not
+   * start; this one means it was never spawned, on purpose, by a decision recorded in `reason`.
+   * `tasks/gap-criterion-side-effect-unguarded-at-write-and-execution-surface`.
+   */
+  | "capability";
 
 /** exit 126 (found, not executable) / 127 (not found): the criterion never got to state anything. */
 const NOT_RUNNABLE_EXIT_CODES = new Set([126, 127]);

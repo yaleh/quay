@@ -75,6 +75,7 @@ import {
   resolveAcceptanceTimeout,
   timeoutKnobHint,
   verdictFromAcceptance,
+  FAILURE_REASON_MAX_CHARS,
 } from "./gate/acceptance-runner.ts";
 // gap-goal-criterion-timeout-hardcoded-60s-ignores-acceptance-timeout: EVERY criterion this file
 // runs takes its kill deadline from here. ⛔ `resolveAcceptanceTimeoutMs`, NOT `resolveRunnerOptions`
@@ -2370,8 +2371,11 @@ export function createGoalStore(
         // judgment can see, not a silent skip (hard rule 3b).
         const refusal = capabilityRefusal(criterion, cwd);
         if (refusal !== null) {
-          const reason = capabilityRefusalReason(refusal);
-          ran.push({ id, verdict: "not-evaluated", reason: reason.slice(0, 500), ms: 0 });
+          // The SAME prefix every other not-evaluated verdict carries (`verdictFromAcceptance`'s
+          // `not-evaluated (${cause}): …`), so a reader greps ONE token for "we could not measure
+          // this" regardless of which mechanism produced it — ⛔ not a second vocabulary.
+          const reason = `not-evaluated (capability): ${capabilityRefusalReason(refusal)}`.slice(0, FAILURE_REASON_MAX_CHARS);
+          ran.push({ id, verdict: "not-evaluated", reason, ms: 0 });
           capabilityRefused.push({ id, code: refusal.code ?? "criterion-capability-unevaluable" });
           appendGateEvent(logPath, {
             id: randomUUID(),
@@ -3738,6 +3742,9 @@ export async function runGoalStoreCli(argv: string[]): Promise<number> {
         // ⛔ never `fail`, which would assert "this criterion is false" about a command that never ran
         // (hard rule 3b, and the very conflation this task exists to remove).
         verdict = "not-evaluated";
+        // ⛔ `cause` is non-null exactly when the verdict is `not-evaluated` (the invariant the JSON
+        // below documents) — a refusal is a not-evaluated WITH a nameable cause, not a bare one.
+        cause = "capability";
         reason = capabilityRefusalReason(capabilityHit);
       } else if (typeof criterion !== "string" || criterion.trim() === "") {
         // AC2 — empty criterion FAILS CLOSED (red), never a silent PASS.
