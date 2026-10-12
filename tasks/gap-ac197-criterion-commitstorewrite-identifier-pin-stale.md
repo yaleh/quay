@@ -83,12 +83,12 @@ exit 0
 
 ## AC
 
-- [ ] **AC1（承载体已重锚且不减强度）**：`goals/AC-197-*.md` 的 criterion 不再要求五个 store 文件出现字面量 `commitStoreWrite`，改为结构谓词（① 原语模块 `store-commit.ts` 同时导出 `commitStoreWrite` 与委托它的 `commitKindFile`；② 五个 store 文件各自依赖 `store-commit.ts` 且出现一次对共享原语的调用）。读数：重锚前 criterion 正文里 `grep -l commitStoreWrite` 命中 1 处，重锚后 0 处；贴 `git diff`，只有谓词块与「为什么改」变化。⛔ 除非经 `quay goal write` 落库否则不算。
-- [ ] **AC2（判据能取假 —— 两个负控制，成因不同形）**：① 五个 store 文件之一去掉调用、只留 import ⇒ `quay goal gate AC-197` 非 0 且以具名 `CAUSE=` 可区分；② 临时副本上 `commitKindFile` 改为不委托 `commitStoreWrite` ⇒ 非 0 且成因与 ① **不同形**。两条均贴退出码与逐字 stderr。⛔ 不得靠放宽谓词（把「调用」降成「提到」）凑绿。
-- [ ] **AC3（正控制）**：`node packages/quay/bin/quay.js goal gate AC-197` ⇒ **exit 0**，逐字贴出。
-- [ ] **AC4（保证为真的直接量 —— 五 kind 真实写盘往返）**：tasks 与 goals 用本仓真实写入各取一条提交 —— 本任务的 `task_write` 与新 criterion 的 `goal write` 各自产生一条 `tasks/*.md` / `goals/*.md` 的 store-commit 形状提交（贴 `git log -1 --format='%h %s'`）；meta / adr / docs-managed 在 `git init` 过的临时 root 里各驱动一次真实写入，贴各自提交 sha + 消息，并核对 `git status --porcelain <dir>` 为空。⛔ 「谓词绿」与「保证为真」是两件事，本条只认后者；⛔ 不得向本仓塞入假的 adr / docs-managed 载体。
-- [ ] **AC5（不回归 + 结构零回退）**：① `bash scripts/test.sh --for-task gap-ac197-criterion-commitstorewrite-identifier-pin-stale` 退出码 0；② `grep -c 'function commitKindFile' packages/quay/src/goal-store.ts packages/quay/src/meta-store.ts packages/quay/src/adr-store.ts packages/quay/src/document-store.ts` 全为 0，且 `grep -c 'export function commitKindFile' packages/quay/src/store-commit.ts` = 1（四份拷贝未被恢复、包装仍只有一处）。
-- [ ] **AC6（新指纹落账）**：台账 `.quay/gate-events.jsonl` 中 `item_id=AC-197` 的末条为 `verdict:"pass"`，且其 `payload.criterionHash` ≠ `5a7dc1fc29c3b9a3`（贴修前 / 修后两行）。
+- [x] **AC1（承载体已重锚且不减强度）**：`goals/AC-197-*.md` 的 criterion 不再要求五个 store 文件出现字面量 `commitStoreWrite`，改为结构谓词（① 原语模块 `store-commit.ts` 同时导出 `commitStoreWrite` 与委托它的 `commitKindFile`；② 五个 store 文件各自依赖 `store-commit.ts` 且出现一次对共享原语的调用）。读数：重锚前 criterion 正文里 `grep -l commitStoreWrite` 命中 1 处，重锚后 0 处；贴 `git diff`，只有谓词块与「为什么改」变化。⛔ 除非经 `quay goal write` 落库否则不算。
+- [x] **AC2（判据能取假 —— 两个负控制，成因不同形）**：① 五个 store 文件之一去掉调用、只留 import ⇒ `quay goal gate AC-197` 非 0 且以具名 `CAUSE=` 可区分；② 临时副本上 `commitKindFile` 改为不委托 `commitStoreWrite` ⇒ 非 0 且成因与 ① **不同形**。两条均贴退出码与逐字 stderr。⛔ 不得靠放宽谓词（把「调用」降成「提到」）凑绿。
+- [x] **AC3（正控制）**：`node packages/quay/bin/quay.js goal gate AC-197` ⇒ **exit 0**，逐字贴出。
+- [x] **AC4（保证为真的直接量 —— 五 kind 真实写盘往返）**：tasks 与 goals 用本仓真实写入各取一条提交 —— 本任务的 `task_write` 与新 criterion 的 `goal write` 各自产生一条 `tasks/*.md` / `goals/*.md` 的 store-commit 形状提交（贴 `git log -1 --format='%h %s'`）；meta / adr / docs-managed 在 `git init` 过的临时 root 里各驱动一次真实写入，贴各自提交 sha + 消息，并核对 `git status --porcelain <dir>` 为空。⛔ 「谓词绿」与「保证为真」是两件事，本条只认后者；⛔ 不得向本仓塞入假的 adr / docs-managed 载体。
+- [x] **AC5（不回归 + 结构零回退）**：① `bash scripts/test.sh --for-task gap-ac197-criterion-commitstorewrite-identifier-pin-stale` 退出码 0；② `grep -c 'function commitKindFile' packages/quay/src/goal-store.ts packages/quay/src/meta-store.ts packages/quay/src/adr-store.ts packages/quay/src/document-store.ts` 全为 0，且 `grep -c 'export function commitKindFile' packages/quay/src/store-commit.ts` = 1（四份拷贝未被恢复、包装仍只有一处）。
+- [x] **AC6（新指纹落账）**：台账 `.quay/gate-events.jsonl` 中 `item_id=AC-197` 的末条为 `verdict:"pass"`，且其 `payload.criterionHash` ≠ `5a7dc1fc29c3b9a3`（贴修前 / 修后两行）。
 
 ## DoD
 
