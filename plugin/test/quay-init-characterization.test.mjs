@@ -204,7 +204,15 @@ const PINNED = {
       // check whether it is the launch carrier that moved; that invariant is the reason it did not.
       ".quay/config.yml  3eaaf7aa1fc453cb7b5df0ae6f525384e225ff542d9603d567a95d2c48aa67ff",
       ".quay/profiles.yml  0f781fbcc8140fd1b4732d877f8484f2c6f14856e2419167281976678b748bb0",
-      ".gitignore  f9e6655aa4762432b178420cf9c9d773fc88a67822c6e44fcbdf5f51a8e6ec7a",
+      // RE-ANCHORED 2026-10-13 (gap-goal-driver-hardcoded-120s-spawn-kill-preempts-record-timeout-and-
+      // orphans-goal-locks Plan item 3c): the single-source runtime-artifact manifest gained FOUR
+      // frontmatter-store lockfile patterns (`goals/*.lock`, `adr/*.lock`, `docs-managed/*.lock`,
+      // `meta/*.lock`) so a leftover lock can never block the fan-in ff's cleanTreeCheck. The writer
+      // READS that manifest (`packages/quay/src/runtime-artifacts.ts`), so the block `quay-init`
+      // appends to a consumer's `.gitignore` gained the same four lines — the pin moving is the
+      // manifest change propagating, ⛔ not hand-edited generated content. The other FIVE files hash
+      // UNCHANGED (the same targeted cross-check as the re-anchors above).
+      ".gitignore  744f24161e05ded3a0a61e9ba852d5c607f464d5acb00241af52816cd8bad290",
       ".claude/launch.settings.json  25e4ace2586d593da41a0b0f7380c2d77aed03d404b7a0f3414329f6df30baec",
       ".claude/settings.json  98ec2eef468478b3f6bf878a3629e9b51bb5a9e8a7317bab4871cc8eee10eb93",
       "tasks/  DIR",
