@@ -15,6 +15,16 @@
 //                                     carries none of the authoring symbols (static control + the
 //                                     mutation that turns the SAME predicate red)
 //
+// Coverage map (task gap-discovery-method-routine-manual-run-advances-production-last-run) — WHO invoked
+// the round, and therefore whether the PRODUCTION window may be advanced:
+//   (a) a manual round              ⇒ `.quay/routine-last-run.json` stays BYTE-IDENTICAL
+//   (b) a resident-driver round     ⇒ advances ONLY the `discovery-method` key; the other keys untouched
+//   (c) manual then resident, same window ⇒ the resident round is STILL DUE (it reads the last PRODUCTION
+//                                     time, not the manual one)
+//   (d) the carrier line's `invoked_by` ⇒ "manual" vs "resident-driver", on the record itself
+//   (e) a manual round in-window is a no-op; `--force` runs one and STILL does not advance last-run
+//   (f) the `--once` CLI is manual by construction (the acceptance-run path that caused the defect)
+//
 // Run: scripts/test.sh plugin/test/discovery-method-routine.test.mjs
 
 import { test, after } from "node:test";
@@ -31,6 +41,8 @@ import {
   MIN_INTERVAL_MINUTES,
   LEDGER_MODULE_FILE,
   SCRIPT_REPO_ROOT,
+  INVOKED_BY_RESIDENT,
+  INVOKED_BY_MANUAL,
   parseDiscoveryMethodSection,
   readDiscoveryMethodConfig,
   readCarrierRounds,
@@ -122,7 +134,11 @@ function countingIngest(result = { ok: true, ingested: 0, scanned: 0, duplicates
   return fn;
 }
 
-/** Build the run options from a workspace's real config read. */
+/** Build the run options from a workspace's real config read.
+ *  ⛔ `invokedBy` defaults to `resident-driver` HERE (the cases above were written before the manual /
+ *  resident split and assert facts only a RESIDENT round can produce — last-run advancing, and NOT
+ *  advancing on a failure). A case that is about the manual path says `invokedBy: "manual"` explicitly,
+ *  so neither kind is ever tested by accident. */
 function runOpts(ws, extra = {}) {
   const read = extra.configRead ?? readDiscoveryMethodConfig(ws);
   return {
@@ -130,6 +146,7 @@ function runOpts(ws, extra = {}) {
     configPresent: read.present,
     configError: read.error,
     halted: false,
+    invokedBy: INVOKED_BY_RESIDENT,
     ...extra,
   };
 }
@@ -222,6 +239,148 @@ test("the durable due gate — not due inside the interval ⇒ ZERO spawns", asy
   assert.equal(fact.state, "not-evaluated");
   assert.match(fact.reason, /not due/);
   assert.equal(ingest.calls.length, 0, "ZERO spawns");
+});
+
+// ── WHO INVOKED THE ROUND: manual vs resident-driver (AC1 (a)-(d)) ───────────────────────────────────
+// The defect these cases pin: a `--once` acceptance run against the PRODUCTION root wrote
+// `.quay/routine-last-run.json`, so the resident driver reported «ran 36m ago» and skipped its round.
+// Invariant under test: the durable due gate's READ is shared by both kinds of round, its ADVANCE is the
+// resident round's alone.
+//
+// The fixture map for (a)/(b) is written with the SAME serializer `writeLastRun` uses (JSON.stringify
+// with a 1-space indent), so a formatting-only rewrite is a diff too — "byte-identical" below is meant
+// literally, not "semantically equal".
+const OTHER_ROUTINE_KEYS = { "self-validation": 1786552318938, "arch-discovery": 1791778563897 };
+/** A production map whose `discovery-method` entry is a day old (⇒ the round IS due) plus two other
+ *  routines' entries that must survive every write untouched. */
+function writeProductionLastRun(ws, discoveryMethodTs) {
+  fs.writeFileSync(lastRunPath(ws), JSON.stringify({ [DISCOVERY_METHOD_NAME]: discoveryMethodTs, ...OTHER_ROUTINE_KEYS }, null, 1), "utf8");
+}
+const OLD_PRODUCTION_TS = Date.parse("2026-10-11T00:00:00Z");
+const ROUND_AT = Date.parse("2026-10-12T00:00:00Z"); // 24h after OLD_PRODUCTION_TS ⇒ due
+
+test("case (a) — a MANUAL round leaves routine-last-run.json BYTE-IDENTICAL (and really ran)", async () => {
+  const ws = makeWorkspace();
+  writeConfig(ws, ENABLED_YAML);
+  writeFixtureStore(ws, FIXTURE_OUTCOMES);
+  writeProductionLastRun(ws, OLD_PRODUCTION_TS);
+  const before = fs.readFileSync(lastRunPath(ws), "utf8");
+
+  const fact = await runDiscoveryMethod(ws, runOpts(ws, { invokedBy: INVOKED_BY_MANUAL, reflectFn: reflectStub(), now: () => ROUND_AT }));
+
+  // ⛔ NON-VACUITY: the manual round must have RUN (it ingested the fixture batch and appended its line).
+  // A "not due ⇒ nothing happened" no-op would also leave the file byte-identical, and would prove
+  // nothing — so the assertions that it ran come FIRST.
+  assert.equal(fact.state, "verified", "the manual round ran (the entry is a day old ⇒ due)");
+  assert.equal(rounds(ws).length, 1, "…and appended its own scan-round line");
+  assert.equal(fact.value.invoked_by, INVOKED_BY_MANUAL, "the Fact carries who invoked the round");
+  assert.equal(rounds(ws)[0].invoked_by, INVOKED_BY_MANUAL, "…and so does the carrier line");
+
+  assert.equal(fs.readFileSync(lastRunPath(ws), "utf8"), before, "a MANUAL round must not touch the production last-run map at all");
+  assert.equal(readLastRunMap(lastRunPath(ws))[DISCOVERY_METHOD_NAME], OLD_PRODUCTION_TS, "the discovery-method entry still holds the PRODUCTION time");
+});
+
+test("case (b) — a RESIDENT-DRIVER round advances only the discovery-method key; the others are untouched", async () => {
+  const ws = makeWorkspace();
+  writeConfig(ws, ENABLED_YAML);
+  writeFixtureStore(ws, FIXTURE_OUTCOMES);
+  writeProductionLastRun(ws, OLD_PRODUCTION_TS);
+
+  const fact = await runDiscoveryMethod(ws, runOpts(ws, { reflectFn: reflectStub(), now: () => ROUND_AT }));
+
+  assert.equal(fact.state, "verified");
+  assert.equal(fact.value.invoked_by, INVOKED_BY_RESIDENT);
+  assert.equal(rounds(ws)[0].invoked_by, INVOKED_BY_RESIDENT);
+  const after = readLastRunMap(lastRunPath(ws));
+  assert.equal(after[DISCOVERY_METHOD_NAME], ROUND_AT, "the resident round advanced ITS OWN key to the round's clock (it was due)");
+  assert.deepEqual(
+    Object.fromEntries(Object.entries(after).filter(([k]) => k !== DISCOVERY_METHOD_NAME)),
+    OTHER_ROUTINE_KEYS,
+    "every OTHER routine's entry is unchanged",
+  );
+  // …and unchanged as TEXT, not merely as parsed values: the merge write must not reformat or reorder them.
+  const text = fs.readFileSync(lastRunPath(ws), "utf8");
+  for (const [k, v] of Object.entries(OTHER_ROUTINE_KEYS)) {
+    assert.ok(text.includes(`"${k}": ${v}`), `${k} must survive the merge write verbatim`);
+  }
+});
+
+test("case (c) — manual then resident INSIDE the same interval: the resident round is still DUE", async () => {
+  const ws = makeWorkspace();
+  writeConfig(ws, ENABLED_YAML);
+  // NO production entry at all: "never ran ⇒ due" is the fixture's lever for the manual round.
+  const ingest = countingIngest();
+  const clock = { t: ROUND_AT };
+
+  const manual = await runDiscoveryMethod(ws, runOpts(ws, { invokedBy: INVOKED_BY_MANUAL, ingestFn: ingest, now: () => clock.t }));
+  assert.equal(manual.state, "verified", "the manual round ran (never ran in production ⇒ due)");
+  assert.equal(readLastRunMap(lastRunPath(ws))[DISCOVERY_METHOD_NAME], undefined, "…and left NO production entry behind");
+
+  clock.t += 60_000; // ONE MINUTE later — 359 minutes inside the interval
+  const resident = await runDiscoveryMethod(ws, runOpts(ws, { ingestFn: ingest, now: () => clock.t }));
+
+  // ⛔ THE CLAIM: the resident round is still due because it reads the last PRODUCTION time (absent/old),
+  // NOT the manual round's. Were the manual round to have advanced it (the mutation AC3 applies), the
+  // resident round would be `not-evaluated: not due` one minute later and this goes red.
+  assert.equal(resident.state, "verified", "the resident round is STILL DUE — a manual round does not consume the window");
+  assert.equal(ingest.calls.length, 2, "BOTH rounds reached the ingest step (neither returned early at the due gate)");
+  assert.equal(readLastRunMap(lastRunPath(ws))[DISCOVERY_METHOD_NAME], clock.t, "the resident round is what advanced the production entry");
+});
+
+test("case (d) — the carrier line names its caller: manual vs resident-driver, side by side", async () => {
+  const ws = makeWorkspace();
+  writeConfig(ws, ENABLED_YAML);
+  const clock = { t: ROUND_AT };
+  await runDiscoveryMethod(ws, runOpts(ws, { invokedBy: INVOKED_BY_MANUAL, ingestFn: countingIngest(), now: () => clock.t }));
+  clock.t += 2 * 360 * 60_000; // past the interval, so the resident round is due whatever the manual one did
+  await runDiscoveryMethod(ws, runOpts(ws, { ingestFn: countingIngest(), now: () => clock.t }));
+
+  const [first, second] = rounds(ws);
+  assert.equal(first.invoked_by, "manual", "a round invoked by hand says so on the carrier");
+  assert.equal(second.invoked_by, "resident-driver", "…and a round from the driver's routine table says that");
+  // The stamp is the LITERAL string on the line (the carrier is read by tools that never see this file),
+  // not an enum that happens to compare equal.
+  assert.equal(JSON.parse(fs.readFileSync(carrierPath(ws), "utf8").split("\n").filter(Boolean)[0]).invoked_by, "manual");
+});
+
+test("the due gate for a MANUAL round: an in-window run is a no-op, `--force` runs one and STILL does not advance last-run", async () => {
+  const ws = makeWorkspace();
+  writeConfig(ws, ENABLED_YAML);
+  writeProductionLastRun(ws, ROUND_AT); // production ran "now" ⇒ NOT due
+  const before = fs.readFileSync(lastRunPath(ws), "utf8");
+  const ingest = countingIngest();
+  const at = () => ROUND_AT + 60_000;
+
+  const plain = await runDiscoveryMethod(ws, runOpts(ws, { invokedBy: INVOKED_BY_MANUAL, ingestFn: ingest, now: at }));
+  assert.equal(plain.state, "not-evaluated", "a manual round still answers its own due gate");
+  assert.match(plain.reason, /not due/);
+  assert.match(plain.reason, /--force/, "…and the refusal says how to run one anyway");
+  assert.equal(plain.value.invoked_by, INVOKED_BY_MANUAL, "the Fact names the caller even when nothing spawned");
+
+  const forced = await runDiscoveryMethod(ws, runOpts(ws, { invokedBy: INVOKED_BY_MANUAL, force: true, ingestFn: ingest, now: at }));
+  assert.equal(forced.state, "verified", "--force runs the round inside the interval");
+  assert.match(forced.reason, /--force/, "…and the Fact says the gate was bypassed for this round");
+  assert.equal(fs.readFileSync(lastRunPath(ws), "utf8"), before, "⛔ forcing past the window must not CONSUME the window — last-run is still byte-identical");
+  assert.equal(ingest.calls.length, 1, "only the forced round spawned");
+});
+
+test("the `--once` CLI is a MANUAL round: it appends its line and never advances the production last-run", () => {
+  const ws = makeWorkspace();
+  writeConfig(ws, ENABLED_YAML);
+  // An EMPTY evidence store: the real ingester finds nothing, so the round needs no model seam and the
+  // CLI can run with `--no-model` (the acceptance-run shape this task exists for).
+  fs.writeFileSync(path.join(ws, ".quay", "architecture-evidence-store.jsonl"), "", "utf8");
+  writeProductionLastRun(ws, ROUND_AT); // recent ⇒ the round is only reached via `--force`
+  const before = fs.readFileSync(lastRunPath(ws), "utf8");
+
+  const run = spawnSync(process.execPath, [ROUTINE_SRC, "--once", "--root", ws, "--no-model", "--force", "--json"], { encoding: "utf8", env: GIT_ENV });
+  assert.equal(run.status, 0, `the CLI must exit 0 — stdout: ${run.stdout} stderr: ${run.stderr}`);
+  const out = JSON.parse(run.stdout);
+  assert.equal(out.fact.state, "verified");
+  assert.equal(out.fact.value.invoked_by, "manual", "the CLI declares itself manual");
+  assert.equal(rounds(ws).length, 1);
+  assert.equal(rounds(ws)[0].invoked_by, "manual");
+  assert.equal(fs.readFileSync(lastRunPath(ws), "utf8"), before, "⛔ the CLI — the very path that caused the defect — must not move production's clock");
 });
 
 // ── (5) the budget breach ───────────────────────────────────────────────────────────────────────────
