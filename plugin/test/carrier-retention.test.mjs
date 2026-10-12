@@ -13,7 +13,7 @@
 // Every temp tree lives under os.tmpdir() and is removed in a finally block (test-isolation contract:
 // a test must own what it touches).
 
-import { test } from "node:test";
+import { test, after } from "node:test";
 import assert from "node:assert/strict";
 import { spawn } from "node:child_process";
 import fs from "node:fs";
@@ -48,14 +48,19 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const RETENTION_CLI = path.join(__dirname, "..", "scripts", "carrier-retention.ts");
 
 // ── fixtures ────────────────────────────────────────────────────────────────────────────────────
-const tmps = [];
+// The carrier-array + `after()` pattern tmp-leak-pairing-check recognises: the mkdtemp result is
+// pushed into `_roots`, and `_roots` is the thing the cleanup region names.
+const _roots = [];
+after(() => {
+  for (const d of _roots) fs.rmSync(d, { recursive: true, force: true });
+});
+
 function mkroot() {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), "carrier-retention-"));
-  tmps.push(dir);
+  _roots.push(dir);
   fs.mkdirSync(path.join(dir, ".quay"), { recursive: true });
   return dir;
 }
-process.on("exit", () => { for (const d of tmps) { try { fs.rmSync(d, { recursive: true, force: true }); } catch {} } });
 
 const POLICY = (over = {}) => ({ enabled: true, liveMaxBytes: null, liveMaxDays: null, gzip: false, ...over });
 
