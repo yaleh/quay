@@ -1,6 +1,7 @@
 // @test-group engine
 // Tests for the DISCOVERY PORTFOLIO value ledger (task
-// gap-discovery-portfolio-value-evidence-ledger, AC1 a–g).
+// gap-discovery-portfolio-value-evidence-ledger, AC1 a–g) and for the CAPABILITY COVERAGE MAP built on
+// top of it (task gap-discovery-coverage-map-from-findings, AC1 a–d).
 //
 // The contract under test is that VALUE IS NOT ASSERTABLE. Three fields decide whether a finding counts
 // as net-new engineering value — the fix's landing, the recurrence, the cost — and none of them may be
@@ -12,6 +13,11 @@
 // adding refuted records cannot move `net_new_value` (AC g), and the assertion in (g) is on the ABSOLUTE
 // value — which is what makes the mutation control ("count supported findings instead of landed fixes")
 // go red there rather than staying quietly green.
+//
+// The COVERAGE MAP's own anti-inflation property is that a case whose answer was known before any tool
+// ran can never make a domain look autonomously covered: case (a) asserts a teaching-level finding (of
+// AUTONOMOUS origin, with a landed fix — the hardest shape) grades `assisted`, and the AC3 mutation
+// control removes the evidence-level clause and watches (a) go red.
 
 import { test, after } from "node:test";
 import assert from "node:assert/strict";
@@ -21,14 +27,18 @@ import path from "node:path";
 import { execFileSync } from "node:child_process";
 
 import {
-  PORTFOLIO_REL, PORTFOLIO_KIND, PORTFOLIO_RATING_KIND, ORIGINS, EVIDENCE_LEVELS, OUTCOMES,
+  PORTFOLIO_REL, PORTFOLIO_KIND, PORTFOLIO_RATING_KIND, PORTFOLIO_DOMAIN_KIND,
+  ORIGINS, EVIDENCE_LEVELS, OUTCOMES, DOMAINS, DOMAIN_LABELS, UNCLASSIFIED, GRADES, ORIGIN_OPERATIONS,
   RATING_VALUES, RATING_ACTORS, REQUIRED_INPUT_FIELDS, REQUIRED_RECORD_FIELDS, DONE_SUBJECT_RE,
   REAL_BACKFILL_ROWS_2026_10_12,
   componentOf, normalizeComponents, sameComponentSet, normalizeClaim,
   validateFindingInput, validateFindingRecord, deriveFixLandedCommit, deriveRecurred, deriveCost,
   gatewayRatesFromResponse, readGatewayKey, resolveOriginRef, taskExistsOnBranch, taskTouchesOnBranch,
   findDuplicate, ingestFinding, rateFinding, readPortfolio, valueMetrics, portfolioFile, backfill,
+  assignFindingDomain, coverageMap, autonomousEvidenceFor, methodClaimsDomain, methodTrust,
+  NON_CONTRIBUTING_METHOD_STATUSES,
 } from "../../docs/analysis/discovery-portfolio.mjs";
+import { METHOD_STATUSES } from "../../docs/analysis/discovery-method-registry.mjs";
 import { carrierFile, resolveCarrierRoot } from "../../docs/analysis/discovery-experience-ledger.mjs";
 
 const tmpDirs = [];
@@ -104,7 +114,9 @@ function writeCarriers(root) {
 const RATES = Object.freeze({ model_group: "v4.1flash-anthropic", input_cost_per_token: 3e-7, output_cost_per_token: 1.2e-6 });
 
 /** One complete, valid finding INPUT — the baseline every variant below is derived from. `origin` and
- *  `origin_ref` are supplied per call so each variant resolves in the carrier it means to. */
+ *  `origin_ref` are supplied per call so each variant resolves in the carrier it means to. `domain` is
+ *  `null` by default: an unclassified finding is a legitimate value, and the coverage-map cases below
+ *  opt in to a domain explicitly (a guessed domain is exactly what the map refuses). */
 const input = (over = {}) => ({
   finding_id: "F-A",
   origin: "autonomous-routine",
@@ -115,6 +127,8 @@ const input = (over = {}) => ({
   outcome: "supported",
   fix_task: null,
   human_rating: null,
+  domain: null,
+  domain_reason: null,
   ...over,
 });
 
@@ -134,6 +148,34 @@ function seed(root, { rates = RATES } = {}) {
 }
 
 const mkTmp = () => mkRepo({ tasks: { "t-fix-a": ["src/a.ts"], "t-fix-b": ["src/b.ts"], "t-fix-c": ["src/c.ts"] } });
+
+/** The coverage-map row for one domain slug — the map returns an ORDERED array (the order the user
+ *  named the domains in), so every assertion below goes through this lookup. */
+const domainRow = (map, slug) => map.domains.find((r) => r.domain === slug);
+
+/** One fixture METHOD record. The registry validates nothing on READ (`readMethodRegistry` flags rather
+ *  than refuses), so a fixture may be minimal — but it is written to the carrier as the registry's own
+ *  kind so the coverage map reads it through the real path. */
+const methodFixture = (over = {}) => ({
+  kind: "method",
+  id: `method-${over.method_id ?? "m-fixture"}-v${over.version ?? 1}`,
+  method_id: "m-fixture",
+  version: 1,
+  ts: "2020-01-01T00:00:00Z",
+  provenance_evidence: ["outcome-fixture0000000000"],
+  // ⛔ The domain is claimed by NAMING it: the registry's applicability fields are free prose, so a
+  // literal-name match is the only rule that cannot invent a claim the method never made.
+  applicability: { domain_signals: ["state transitions: a carrier written by two writers"], preconditions: ["a shared carrier exists"] },
+  operation: { steps: ["read the carrier"], tools: ["readRecords"] },
+  expected_invariant: "one writer stays authoritative at every instant",
+  falsification: "two writers both land a line for the same generation",
+  cost_budget: { max_candidates: 1, max_model_calls: 0, max_wall_ms: 1000 },
+  status: "draft",
+  retirement_reason: null,
+  supersedes: null,
+  generalization_evidence: null,
+  ...over,
+});
 
 test("(a) fix_landed_commit is READ FROM GIT, never taken from the caller", () => {
   const { root, shas } = mkTmp();
@@ -389,6 +431,23 @@ test("the frozen backfill table is well-formed and every row's origin_ref is a r
   assert.equal(REAL_BACKFILL_ROWS_2026_10_12.filter((r) => r.fix_task === null).length, 2);
   assert.equal(REAL_BACKFILL_ROWS_2026_10_12.find((r) => r.finding_id === "N01").outcome, "refuted");
 
+  // The DOMAIN column (Plan 2) — transcribed from the operator baseline's `dimension`, never re-derived.
+  // Every row carries one, each in the vocabulary, each with the reason it was classed that way.
+  for (const row of REAL_BACKFILL_ROWS_2026_10_12) {
+    assert.ok(DOMAINS.includes(row.domain), `${row.finding_id}: ${String(row.domain)}`);
+    assert.ok(typeof row.domain_reason === "string" && row.domain_reason.trim().length >= 8, row.finding_id);
+  }
+  assert.deepEqual(REAL_BACKFILL_ROWS_2026_10_12.filter((r) => r.domain === "shared-semantics").map((r) => r.finding_id),
+    ["F02", "F03", "F04", "F06", "F08", "F10", "F12"]);
+  assert.deepEqual(REAL_BACKFILL_ROWS_2026_10_12.filter((r) => r.domain === "writer-checker-contract").map((r) => r.finding_id), ["F01", "F05"]);
+  assert.deepEqual(REAL_BACKFILL_ROWS_2026_10_12.filter((r) => r.domain === "config-to-behavior").map((r) => r.finding_id), ["F07", "F11"]);
+  assert.deepEqual(REAL_BACKFILL_ROWS_2026_10_12.filter((r) => r.domain === "state-transitions").map((r) => r.finding_id), ["F09"]);
+  assert.deepEqual(REAL_BACKFILL_ROWS_2026_10_12.filter((r) => r.domain === "reuse-refutation").map((r) => r.finding_id), ["N01"]);
+  // method-trustworthiness has NO row: it is the domain the baseline says only operator audits touch, and
+  // none of those audits is a portfolio finding. The map must show that as `none`, not invent a row.
+  assert.equal(REAL_BACKFILL_ROWS_2026_10_12.filter((r) => r.domain === "method-trustworthiness").length, 0);
+  assert.equal(new Set(REAL_BACKFILL_ROWS_2026_10_12.map((r) => r.domain)).size, 5);
+
   // Vocabulary + schema declarations the rest of the module is keyed on.
   assert.deepEqual(RATING_ACTORS, ["operator-session"]);
   assert.deepEqual(RATING_VALUES, ["high", "medium", "low", "noise"]);
@@ -408,4 +467,284 @@ test("the frozen backfill table is well-formed and every row's origin_ref is a r
   assert.ok(validateFindingRecord({ ...input({}), ts: "t" }).reasons.length > 0);
   assert.equal(PORTFOLIO_KIND, "portfolio_finding");
   assert.equal(backfill instanceof Function, true);
+});
+
+// ── the CAPABILITY COVERAGE MAP (task gap-discovery-coverage-map-from-findings, AC1 a–d) ─────────
+//
+// Coverage is NOT value: a correct refutation is capability without value, and a domain covered only by
+// teaching is capability without discovery. Each case below fixes one of those boundaries.
+
+test("(a) coverage: a TEACHING-level finding yields `assisted`, never `autonomous`", () => {
+  const { root } = mkTmp();
+  writeCarriers(root);
+  // ⛔ The hardest shape for the clause, and the one the AC3 mutation control flips: an AUTONOMOUS origin
+  // (routine), supported, with a fix that LANDED — everything the `autonomous` grade wants except the
+  // evidence level. Only `teaching` stands between it and an autonomous grade, so this assertion is the
+  // one that goes red when the evidence-level clause is removed.
+  const r = ingestFinding(root, input({
+    finding_id: "C-TEACHING", evidence_level: "teaching", fix_task: "t-fix-a",
+    domain: "shared-semantics", domain_reason: "two byte-identical copies of one semantic",
+  }), { rates: RATES });
+  assert.equal(r.ok, true, JSON.stringify(r.reasons));
+
+  const map = coverageMap(root);
+  const row = domainRow(map, "shared-semantics");
+  assert.equal(row.grade, "assisted", "the answer was known before any tool ran — that is transcription, not discovery");
+  assert.deepEqual(row.findings.autonomous_ids, []);
+  assert.deepEqual(row.findings.not_autonomous, [{ finding_id: "C-TEACHING", reason: "EVIDENCE_LEVEL_NOT_AUTONOMOUS:teaching" }]);
+  assert.deepEqual(map.gap, DOMAINS, "nothing in this fixture is autonomously covered");
+  assert.equal(row.findings.by_evidence_level.teaching, 1);
+
+  // …and the neighbouring level is refused for the same reason: learned on one case, applied to a second,
+  // is not a blind find either. A pure arm, so the refusal is shown to be a rule and not a `teaching`-only
+  // patch. `fix_landed_commit` is the DERIVED field (never an ingest input), and all three arms below carry
+  // it, so the ONLY value that differs between them is the evidence level.
+  const landed = { ...input({}), fix_landed_commit: "a".repeat(40) };
+  assert.equal(autonomousEvidenceFor({ ...landed, evidence_level: "transfer" }).autonomous, false);
+  assert.equal(autonomousEvidenceFor({ ...landed, evidence_level: "transfer" }).reason, "EVIDENCE_LEVEL_NOT_AUTONOMOUS:transfer");
+  assert.equal(autonomousEvidenceFor({ ...landed, evidence_level: "independent" }).autonomous, true);
+  assert.equal(autonomousEvidenceFor({ ...landed, evidence_level: "independent" }).via, "landed-fix");
+});
+
+test("(b) coverage: a retired or contaminated method adds nothing; a live one does", () => {
+  const { root } = mkTmp();
+  writeCarriers(root);
+  // `state-transitions` has NO finding here, so a method is the only evidence that could grade it — which
+  // makes the difference between a contributing and a non-contributing method the ONLY variable.
+  const sig = { domain_signals: ["state transitions: a carrier written by two writers"], preconditions: ["a shared carrier exists"] };
+  writeCarrier(root, ".quay/discovery-method-registry.jsonl", [
+    methodFixture({ method_id: "m-draft", applicability: sig }),
+    methodFixture({ method_id: "m-retired", applicability: sig, status: "retired", retirement_reason: "superseded by m-draft" }),
+    methodFixture({
+      method_id: "m-active-contaminated", applicability: sig, status: "active",
+      generalization_evidence: { verdict_ref: "contaminated_verdict-fixture" },
+    }),
+  ]);
+  // The method that was PROMOTED on a judgment made on an already-used hold-out — the registry's own
+  // deny-list, which the map consults rather than re-deriving.
+  writeCarrier(root, ".quay/discovery-contaminated-verdicts.jsonl", [
+    {
+      kind: "contaminated_verdict", id: "contaminated_verdict-fixture", verdict_id: "contaminated_verdict-fixture",
+      reason: "VERDICT_CONTAMINATED: judged on a hold-out the case-identity index shows was used before",
+      collisions: [], authored_by: { actor: "operator-session", ref: "fixture" }, ts: "2020-01-01T00:00:00Z",
+    },
+  ]);
+
+  const map = coverageMap(root);
+  const row = domainRow(map, "state-transitions");
+  assert.equal(row.findings.total, 0, "no finding claims this domain, so the grade can only come from a method");
+  assert.deepEqual(row.methods.claiming.map((m) => [m.method_id, m.status, m.contaminated, m.contributes]), [
+    ["m-active-contaminated", "active", true, false],
+    ["m-draft", "draft", false, true],
+    ["m-retired", "retired", false, false],
+  ]);
+  assert.equal(row.methods.contributing_count, 1);
+  assert.equal(row.grade, "assisted", "the draft method is the only contributor — the retired and the contaminated one add nothing");
+  assert.equal(row.grade_reason.includes("1-CONTRIBUTING-METHOD(S)-ONLY"), true);
+  assert.equal(map.methods.contaminated_verdicts_evaluated, 1);
+  assert.equal(map.methods.evaluated, true);
+  // A method CANNOT reach `autonomous` on its own: reusable capability is not demonstrated coverage.
+  assert.equal(row.grade, "assisted");
+  // The literal-name claim rule: a domain is claimed by naming it, and an unrelated signal claims nothing.
+  assert.equal(methodClaimsDomain({ applicability: { domain_signals: ["a shared mutable artifact"], preconditions: ["x"] } }, "state-transitions"), null);
+  assert.equal(methodClaimsDomain({ applicability: sig }, "state-transitions"), "state transitions");
+  assert.equal(methodTrust({ status: "retired" }, { contaminatedVerdictIds: [] }).why, "RETIRED");
+  // The contribution rule is an inspectable list, not an inline comparison: `retired` is the only
+  // NON-contributing status, so a status the registry declares but has not promoted (`draft`, and `trial`
+  // since gap-discovery-evidence-level-teaching-vs-independent landed it) is a method still in play and
+  // lifts a domain to `assisted` rather than silently dropping out. An UNRECOGNISED status is refused,
+  // not counted — that is the half that must fail closed (硬规则 3b).
+  assert.deepEqual(NON_CONTRIBUTING_METHOD_STATUSES, ["retired"]);
+  assert.deepEqual(["draft", "trial", "active"].map((s) => methodTrust({ status: s }, { contaminatedVerdictIds: [] }).contributes), [true, true, true]);
+  assert.equal(methodTrust({ status: "retired" }, { contaminatedVerdictIds: [] }).contributes, false);
+  assert.deepEqual(methodTrust({ status: "not-a-status" }), {
+    method_id: null, version: null, status: null, verdict_ref: null,
+    contaminated: false, contributes: false, why: "STATUS_NOT_IN_VOCAB",
+  });
+  // A status the registry gains later must not silently flip to "contributes": the module's own
+  // vocabulary is the list this reads, so the two can never drift apart without a refusal.
+  assert.ok(METHOD_STATUSES.includes("retired") && METHOD_STATUSES.includes("active"));
+
+  // With only the retired and contaminated methods present, the same domain grades `none` — the 1-versus-2
+  // arm proves the two refusals above are checks and not a blanket refusal of every method.
+  const { root: root2 } = mkTmp();
+  writeCarriers(root2);
+  writeCarrier(root2, ".quay/discovery-method-registry.jsonl", [methodFixture({ method_id: "m-retired", applicability: sig, status: "retired", retirement_reason: "no longer applied" })]);
+  assert.equal(domainRow(coverageMap(root2), "state-transitions").grade, "none");
+});
+
+test("(c) coverage: an unclassified finding is reported `unclassified`, never guessed into a domain", () => {
+  const { root } = mkTmp();
+  writeCarriers(root);
+  ingestFinding(root, input({ finding_id: "C-NODOMAIN", fix_task: "t-fix-a" }), { rates: RATES });
+  // A DIFFERENT claim over the same components: same component set + same claim would make this a
+  // duplicate of the row above, and a duplicate grades nothing.
+  ingestFinding(root, input({
+    finding_id: "C-CLASSED", fix_task: "t-fix-a", claim: "a second, unrelated claim about the same components",
+    domain: "shared-semantics", domain_reason: "one semantic declared twice",
+  }), { rates: RATES });
+
+  const map = coverageMap(root);
+  assert.equal(map.unclassified.grade, UNCLASSIFIED);
+  assert.deepEqual(map.unclassified.ids, ["C-NODOMAIN"]);
+  assert.deepEqual(map.unclassified.by_origin, { "autonomous-routine": 1 });
+  assert.deepEqual(map.unclassified.carried_domain, [], "no domain was carried at all — this is 'never classified'");
+  assert.equal(domainRow(map, "shared-semantics").grade, "autonomous", "the unclassified row does not lift or lower any domain");
+  assert.equal(domainRow(map, "shared-semantics").findings.total, 1);
+  assert.equal(map.gap.includes(UNCLASSIFIED), false, "unclassified is a ledger-quality signal, not a capability gap");
+  assert.equal(map.context.classified, 1);
+
+  // ⛔ The MIRROR cause is a different value: a carrier line carrying a domain OUTSIDE the vocabulary is
+  // "the reader cannot read this classification", which must not be absorbed into "never classified"
+  // (硬规则 3b). Only a hand-edited carrier can produce one, since ingest refuses the value.
+  writeCarrier(root, PORTFOLIO_REL, [{
+    kind: PORTFOLIO_KIND, id: "portfolio_finding-handmade", finding_id: "C-BOGUS", origin: "operator",
+    evidence_level: "teaching", outcome: "supported", domain: "no-such-domain", domain_reason: "hand-edited",
+    duplicate_of: null, components: [], fix_landed_commit: null,
+  }]);
+  const map2 = coverageMap(root);
+  assert.deepEqual(map2.unclassified.ids, ["C-NODOMAIN", "C-BOGUS"]);
+  assert.deepEqual(map2.unclassified.carried_domain, [{ finding_id: "C-BOGUS", domain: "no-such-domain" }]);
+  assert.equal(map2.unclassified.total, 2);
+
+  // Ingest refuses a domain outside the vocabulary, and a stated domain without its reason — so no
+  // seventh bucket and no bare label can enter the carrier through the front door.
+  const bad = ingestFinding(root, input({ finding_id: "C-BADDOMAIN", domain: "not-a-domain", domain_reason: "x" }), { rates: RATES });
+  assert.equal(bad.ok, false);
+  assert.ok(bad.reasons.includes("DOMAIN_NOT_IN_VOCAB:not-a-domain"), JSON.stringify(bad.reasons));
+  const noReason = ingestFinding(root, input({ finding_id: "C-NOREASON", domain: "shared-semantics" }), { rates: RATES });
+  assert.equal(noReason.ok, false);
+  assert.ok(noReason.reasons.some((x) => x.startsWith("DOMAIN_REASON_REQUIRED:")), JSON.stringify(noReason.reasons));
+  assert.equal(readPortfolio(root).records.some((r) => r.finding_id === "C-NOREASON"), false, "a refused domain writes nothing");
+});
+
+test("(d) coverage: one autonomous production-open supported finding with a landed fix yields `autonomous`", () => {
+  const { root } = mkTmp();
+  writeCarriers(root);
+  const r = ingestFinding(root, input({
+    finding_id: "C-AUTO", evidence_level: "production-open", fix_task: "t-fix-a",
+    domain: "shared-semantics", domain_reason: "byte-identical copies of one helper in two checkers",
+  }), { rates: RATES });
+  assert.equal(r.ok, true, JSON.stringify(r.reasons));
+
+  const map = coverageMap(root);
+  const row = domainRow(map, "shared-semantics");
+  assert.equal(row.grade, "autonomous");
+  assert.deepEqual(row.findings.autonomous_ids, ["C-AUTO"]);
+  assert.deepEqual(row.findings.not_autonomous, []);
+  assert.equal(row.grade_reason, "C-AUTO(landed-fix)");
+  assert.equal(map.gap.includes("shared-semantics"), false);
+  // The operation that produced it is named, not implied: a routine probe, with the runId#findingId it
+  // came from — the Plan's "operations that produced them".
+  assert.deepEqual(row.operations, [{
+    finding_id: "C-AUTO", operation: "routine-probe", origin: "autonomous-routine",
+    origin_ref: "run-fixture-1", origin_carrier: ".quay/routine-findings.jsonl",
+  }]);
+  assert.equal(ORIGIN_OPERATIONS["autonomous-experiment"], "verifier-call");
+  assert.equal(ORIGIN_OPERATIONS["mechanical-instrument"], "instrument");
+
+  // The REFUTATION arm: autonomous capability without a landed fix. It grades its domain `autonomous`
+  // while `valueMetrics` keeps it at zero value — the two axes are reported apart on purpose.
+  const n = ingestFinding(root, input({
+    finding_id: "C-REFUTED", origin: "autonomous-experiment", origin_ref: "E-FIX cluster 1",
+    evidence_level: "independent", outcome: "refuted", claim: "claimed independent parser refuted: it imports the shared module",
+    domain: "reuse-refutation", domain_reason: "the finding IS the refutation of a claimed reimplementation",
+  }), { rates: RATES });
+  assert.equal(n.ok, true, JSON.stringify(n.reasons));
+  const map2 = coverageMap(root);
+  const ref = domainRow(map2, "reuse-refutation");
+  assert.equal(ref.grade, "autonomous");
+  assert.equal(ref.grade_reason, "C-REFUTED(refutation)");
+  assert.deepEqual(valueMetrics(readPortfolio(root).records).zero_or_negative.refuted, ["C-REFUTED"], "capability, not value");
+
+  // A DUPLICATE grades nothing — it is the same finding recorded twice, so it demonstrates nothing the
+  // original did not. `config-to-behavior` holds only the duplicate, so it is `none`, and the row says why.
+  const dup = ingestFinding(root, input({
+    finding_id: "C-DUP", evidence_level: "production-open", fix_task: "t-fix-a", claim: "alpha finding claim",
+    domain: "config-to-behavior", domain_reason: "a repeat of an earlier claim about the same components",
+  }), { rates: RATES });
+  assert.equal(dup.ok, true, JSON.stringify(dup.reasons));
+  assert.equal(readPortfolio(root).records.find((x) => x.finding_id === "C-DUP").duplicate_of, "C-AUTO");
+  const cfg = domainRow(coverageMap(root), "config-to-behavior");
+  assert.equal(cfg.grade, "none", "a duplicate is not new coverage");
+  assert.deepEqual(cfg.findings.duplicates, ["C-DUP"]);
+  assert.match(cfg.grade_reason, /1-DUPLICATE\(S\)-ADD-NOTHING/);
+
+  // ⛔ …while a `noise` RATING does NOT move a grade. "Worthless" is a human's VALUE judgment about a
+  // finding that is real, and value is `valueMetrics`' axis — the two are asserted apart here so neither
+  // can be read as the other: the coverage stays `autonomous`, the value drops.
+  const before = valueMetrics(readPortfolio(root).records).net_new_value.total;
+  assert.equal(rateFinding(root, { finding_id: "C-AUTO", value: "noise", by: "session-2026-10-12-operator", actor: "operator-session" }).ok, true);
+  assert.equal(domainRow(coverageMap(root), "shared-semantics").grade, "autonomous", "a value judgment is not a capability judgment");
+  assert.equal(valueMetrics(readPortfolio(root).records).net_new_value.total, before - 1, "the same rating DOES subtract value");
+});
+
+test("coverage: `evaluated:false` when the method half cannot be read, and every domain still names its own causes", () => {
+  const { root } = mkTmp();
+  writeCarriers(root);
+  ingestFinding(root, input({ finding_id: "C-AUTO", fix_task: "t-fix-a", domain: "shared-semantics", domain_reason: "one semantic declared twice in two places" }), { rates: RATES });
+
+  // An unreadable registry is its OWN value (硬规则 3b): it must not read as "no method claims this
+  // domain", which is what an empty `claiming` list would say.
+  fs.appendFileSync(path.join(root, ".quay/discovery-method-registry.jsonl"), "{not json\n", "utf8");
+  const map = coverageMap(root);
+  assert.equal(map.ok, true, "the FINDING half was read, and that half is real");
+  assert.equal(map.evaluated, false);
+  assert.equal(map.methods.evaluated, false);
+  assert.match(map.methods.reason, /METHOD_REGISTRY_UNREADABLE/);
+  const row = domainRow(map, "state-transitions");
+  assert.equal(row.grade, "none");
+  assert.match(row.grade_reason, /NO_NEW_FINDING_CLASSED_TO_THIS_DOMAIN\+METHOD_HALF_NOT_EVALUATED/);
+  // …and the half that WAS readable is untouched: `shared-semantics` still grades autonomous.
+  assert.equal(domainRow(map, "shared-semantics").grade, "autonomous");
+
+  // An unresolvable shared checkout refuses the whole map rather than reporting every domain `none`.
+  const notARepo = fs.mkdtempSync(path.join(os.tmpdir(), "discovery-portfolio-norepo-"));
+  tmpDirs.push(notARepo);
+  const refused = coverageMap(notARepo);
+  assert.equal(refused.ok, false);
+  assert.equal(refused.evaluated, false);
+  assert.deepEqual(refused.domains, []);
+  assert.match(refused.reason, /SHARED_CHECKOUT_UNRESOLVED/);
+});
+
+test("a domain assignment is an append-only overlay: it fills a finding that states none, and refuses one that states its own", () => {
+  const { root } = mkTmp();
+  writeCarriers(root);
+  ingestFinding(root, input({ finding_id: "C-NONE" }), { rates: RATES });
+  ingestFinding(root, input({ finding_id: "C-STATED", domain: "shared-semantics", domain_reason: "stated at ingest" }), { rates: RATES });
+  assert.equal(readPortfolio(root).records.find((r) => r.finding_id === "C-NONE").domain, null);
+  assert.equal(readPortfolio(root).records.find((r) => r.finding_id === "C-NONE").domain_source, null);
+
+  const a = assignFindingDomain(root, { finding_id: "C-NONE", domain: "state-transitions", reason: "clause 2 state/admission: an admission gate let a record through", by: "fixture" });
+  assert.equal(a.ok, true, JSON.stringify(a.reasons));
+  assert.equal(a.record.kind, PORTFOLIO_DOMAIN_KIND);
+  const rec = readPortfolio(root).records.find((r) => r.finding_id === "C-NONE");
+  assert.equal(rec.domain, "state-transitions");
+  assert.equal(rec.domain_source, "assignment", "added later is a DIFFERENT value from stated at ingest");
+  assert.equal(rec.domain_reason, "clause 2 state/admission: an admission gate let a record through");
+  assert.equal(domainRow(coverageMap(root), "state-transitions").grade, "assisted");
+
+  // Idempotent: the id keys on the FINDING alone, so a re-run appends nothing instead of stacking a
+  // second classification of the same finding.
+  const again = assignFindingDomain(root, { finding_id: "C-NONE", domain: "state-transitions", reason: "the same call, again", by: "fixture" });
+  assert.equal(again.duplicate, true);
+  assert.equal(readPortfolio(root).assignments.length, 1);
+
+  // A finding that STATES its own domain is REFUSED: an assignment line the read path would shadow is a
+  // permanent, invisible inconsistency in an append-only carrier.
+  const shadowed = assignFindingDomain(root, { finding_id: "C-STATED", domain: "state-transitions", reason: "x", by: "fixture" });
+  assert.equal(shadowed.ok, false);
+  assert.ok(shadowed.reasons.some((x) => x.startsWith("DOMAIN_ALREADY_STATED:")), JSON.stringify(shadowed.reasons));
+  assert.equal(readPortfolio(root).records.find((r) => r.finding_id === "C-STATED").domain, "shared-semantics");
+
+  // Every refusal is enumerated, and an unknown target is its own cause (never a silent no-op).
+  assert.deepEqual(assignFindingDomain(root, { finding_id: "C-MISSING", domain: "shared-semantics", reason: "x", by: "f" }).reasons, ["DOMAIN_TARGET_NOT_FOUND:C-MISSING"]);
+  assert.equal(assignFindingDomain(root, { finding_id: "C-NONE", domain: "nope", reason: "x", by: "f" }).ok, false);
+  assert.equal(assignFindingDomain(root, { finding_id: "C-NONE", domain: "shared-semantics", reason: "", by: "f" }).ok, false);
+  assert.equal(assignFindingDomain(root, { finding_id: "C-NONE", domain: "shared-semantics", reason: "x" }).ok, false);
+  assert.equal(readPortfolio(root).assignments.length, 1, "no refused assignment wrote a line");
+  assert.deepEqual(GRADES, ["autonomous", "assisted", "none"]);
+  assert.deepEqual(DOMAINS, ["shared-semantics", "config-to-behavior", "writer-checker-contract", "state-transitions", "reuse-refutation", "method-trustworthiness"]);
+  assert.equal(DOMAIN_LABELS["config-to-behavior"], "config→behavior");
 });

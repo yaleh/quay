@@ -2,7 +2,7 @@
 id: gap-discovery-capability-gain-same-budget-open-exploration
 title: "Capability Gain: same-budget control vs learned-methods arm in real open
   exploration; net-new findings into the portfolio, negative gain reported"
-status: todo
+status: ready
 labels:
   - gap
   - architecture-discovery
