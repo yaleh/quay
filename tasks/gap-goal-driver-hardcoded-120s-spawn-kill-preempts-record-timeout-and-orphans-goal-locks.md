@@ -71,11 +71,13 @@ That is **4 independent host projects, 104 SIGKILLs**.
 - tasks/gap-goal-driver-hardcoded-120s-spawn-kill-preempts-record-timeout-and-orphans-goal-locks.md
 - plugin/scripts/goal-driver.ts
 - plugin/scripts/meta-driver.ts
+- plugin/scripts/driver-runtime.ts
 - packages/quay/src/goal-store.ts
 - packages/quay/src/frontmatter-store-base.ts
 - packages/quay/src/gate/acceptance-runner.ts
 - packages/quay/src/cli/help.ts
 - plugin/scripts/quay-runtime-artifacts.txt
+- .gitignore
 - packages/quay/src/fan-in/ff-merge.ts
 - packages/quay/test/goal-store.test.mjs
 - packages/quay/test/ff-merge.test.mjs
