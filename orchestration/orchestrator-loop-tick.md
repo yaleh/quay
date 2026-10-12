@@ -938,6 +938,10 @@ drift，管理者实测 + 裁定）：inner 的 Cron 调用数 = 0、整晚 59 �
    无 batch 式自述 = 收敛）与 `converged`。「Batch of N fully merged」式门控汇报 = 漂移（被审计标记）；
    verification-round-N / 滚动派发语义 = 合规。**每个 tick 必报**本轮 `inner_self_report_vocab` 与
    收敛状态。
+   **两个入口点共用一份判定**：`plugin/scripts/self-report-vocab-check.ts` 不自带模式表、不自带停止态规则、
+   也不自带收敛计数 —— 它 import 上表同一份 `BATCH_FLAG_PATTERNS` / `STOPPED_MARKERS` / `auditSelfReports`，
+   两条命令对同一段自述的判定逐字相同（**单一来源**，2026-10-12 收敛；
+   `gap-self-report-vocab-audit-check-pattern-tables-diverge`）。
 
 **为什么「空闲才转发」**：重锚是「给 inner 一个周期读出厂文档的机会」，不是催活。inner 忙时
 （在飞 agent / 有 bracket）读文档的机会会打断工作；空闲时转发才是在它回合结束时给下一次行为对齐

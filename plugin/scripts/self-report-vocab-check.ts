@@ -9,19 +9,36 @@
 // wording (commit / fan-in notes) must use the factory semantics (rolling dispatch /
 // verification-round), and batch-style reports are FLAGGED.
 //
+// ── THIS FILE IS AN I/O ADAPTER, NOT A SECOND IMPLEMENTATION (2026-10-12) ─────────────────────────
+// It carried its OWN pattern table (`BATCH_SELF_REPORT_PATTERNS`), its OWN convergence counter
+// (`nextConvergenceState` + the persisted `roundsClean`) and ZERO stopped-state handling, while
+// `self-report-vocab-audit.ts` carried the same task's table + convergence judgment + the
+// stopped-state fix — the same task implemented twice, and the two copies disagreed
+// (gap-self-report-vocab-audit-check-pattern-tables-diverge; hard rule 5b: the stopped-state fix
+// landed in one copy only). The divergence was measured on `batch4a` (audit flagged, check's
+// trailing-letter lookahead did not), `Batch of` without a digit (audit flagged, check required
+// \d+) and a stopped window (audit waived the window-full requirement, check had no such arm).
+//
+// The single source is now `self-report-vocab-audit.ts`: the batch pattern table
+// (`BATCH_FLAG_PATTERNS`), the stopped-state rule (`STOPPED_MARKERS` + the window waiver) and the
+// convergence judgment (`auditSelfReports`) are all IMPORTED from it. This file owns only the
+// differences that are genuinely its own — which git records it feeds in and how it prints them.
+// `plugin/test/self-report-vocab-check.test.mjs` pins the parity between the two entry points.
+//
 // The re-anchor mechanism's effectiveness is measured by SEMANTIC CONVERGENCE (AC2), not by
-// "re-anchor happened": N consecutive audit rounds with zero batch-style inner self-reports
-// => converged. `converged: true` is the invariant reanchor_effectiveness_is_convergence.
+// "re-anchor happened": the newest `window` inner self-reports all clean => converged.
+// `converged: true` is the invariant reanchor_effectiveness_is_convergence.
 //
 // A DETECTOR, not a gate: reads the inner's recent self-report surface (git commit messages whose
 // subject is an inner fan-in note `inner: ...` or an inner merge commit `merge task/...`) and
-// reports batch-style vocabulary. Writes a tiny convergence state file
-// (default .quay/self-report-vocab-state.json, gitignored runtime state) so the consecutive-clean
-// round counter persists across ticks. Never writes tasks/**.
+// reports batch-style vocabulary. Persists the LAST READING to a small state file
+// (default .quay/self-report-vocab-state.json, gitignored runtime state) so a tick can be diffed
+// against the previous one; the judgment itself is stateless (derived from the report window).
+// Never writes tasks/**.
 //
 // Run:
 //   node --experimental-strip-types plugin/scripts/self-report-vocab-check.ts [--root <repo>] [--json]
-//       [--count <N>] [--convergence-rounds <N>] [--state <path>] [--no-state]
+//       [--count <N>] [--convergence-rounds <N>|--window <N>] [--state <path>] [--no-state]
 //       [--text <string>]   # audit arbitrary text (tests / control fixture)
 //       [--stdin]           # audit text from stdin
 
@@ -29,39 +46,22 @@ import fs from "node:fs";
 import path from "node:path";
 import { execFileSync } from "node:child_process";
 import { helpExit, isDirectEntry, parseArgs as baseParseArgs } from "./gate-script-base.ts";
+import {
+  BATCH_FLAG_PATTERNS,
+  DEFAULT_WINDOW,
+  auditSelfReports,
+} from "./self-report-vocab-audit.ts";
 
-// ── Flag patterns (batch-style SELF-REPORT vocabulary) ──────────────────────────────────────────────
-//
-// These flag the INNER REPORTING activity organized by batch. They are deliberately narrow so the
-// whitelist falls out naturally (task ids, mechanism true-names, historical names never match):
-//   * "gap-split-batch-vocabulary-..." / "concurrent-batch-scheduler.ts" / "{ batch, deferred }"
-//       have no digit after "batch"         → batch-count / batch-id don't match, batch-of no.
-//   * "batch2-queue-state.md" / "batch4a"    → the trailing [-_a-zA-Z] lookahead excludes them.
-export const BATCH_SELF_REPORT_PATTERNS = [
-  {
-    id: "batch-of",
-    label: "「Batch of N」批量式自述（应报 verification-round-N / 滚动派发语义）",
-    re: /\bBatch\s+of\s+\d+\b/i,
-  },
-  {
-    id: "batch-count",
-    label: "「batch N/M」按批计数自述",
-    re: /\bbatch\s*\d+\s*\/\s*\d+\b/i,
-  },
-  {
-    id: "batch-id",
-    label: "「batch-N」批次编号自述",
-    re: /\bbatch[-_ ]?(\d+)(?![-_a-zA-Z])/i,
-  },
-  {
-    id: "by-batch",
-    label: "「按批」按批组织自述",
-    re: /按批/,
-  },
-];
+// ── Flag patterns ───────────────────────────────────────────────────────────────────────────────
+// There is deliberately NO pattern table in this file. The batch-style self-report vocabulary is
+// `BATCH_FLAG_PATTERNS` in `self-report-vocab-audit.ts` — imported above, so an edit to the
+// vocabulary cannot land in one entry point and miss the other (the exact defect this file's
+// header records). The whitelist (task ids / mechanism true-names / historical batch names such as
+// `concurrent-batch-scheduler.ts`, `gap-split-batch-vocabulary-...`, `batch4a`) falls out of that
+// one table; its reconciliation table names each divergent input and the intended verdict.
 
 /**
- * Flag batch-style self-report vocabulary in a text blob.
+ * Flag batch-style self-report vocabulary in a text blob, using the SHARED table.
  * Returns an array of hits: [{ line, text, pattern, match }]. Empty array = clean.
  * Pure function (no I/O) — unit-testable directly.
  */
@@ -70,7 +70,7 @@ export function flagBatchVocab(text) {
   const lines = String(text).split("\n");
   for (let i = 0; i < lines.length; i++) {
     const line = lines[i];
-    for (const p of BATCH_SELF_REPORT_PATTERNS) {
+    for (const p of BATCH_FLAG_PATTERNS) {
       p.re.lastIndex = 0;
       const m = p.re.exec(line);
       if (m) {
@@ -84,22 +84,6 @@ export function flagBatchVocab(text) {
     }
   }
   return hits;
-}
-
-/**
- * Convergence state transition (AC2). count === 0 (a clean round) increments roundsClean;
- * a flagged round resets it to 0. converged = roundsClean >= convergenceRounds.
- * Pure function — unit-testable directly.
- */
-export function nextConvergenceState(prev, count, convergenceRounds) {
-  const prevRounds = prev && Number.isFinite(prev.roundsClean) ? prev.roundsClean : 0;
-  const roundsClean = count === 0 ? prevRounds + 1 : 0;
-  return {
-    roundsClean,
-    converged: roundsClean >= convergenceRounds,
-    lastCount: count,
-    lastAuditAt: new Date().toISOString(),
-  };
 }
 
 /** Load the most recent `count` commit records from the repo at `root`. */
@@ -148,17 +132,22 @@ export function isInnerSelfReport(subject) {
 // `""`; `flagStr`/`flagNum` fold that to the command's default. `--text`/`--state` are read as
 // SUPPLIED whenever the key is present, so an explicit `--text ""` stays a (empty) text fixture
 // rather than silently falling through to the git-log source.
+//
+// `--convergence-rounds` and `--window` are ALIASES for the same knob (the shared
+// `auditSelfReports` window); `--window` is accepted so a caller can use the single-source module's
+// own flag name at either entry point.
 function parseArgs(argv) {
   const { flags, help } = baseParseArgs(["node", "self-report-vocab-check.ts", ...argv], {
     minArgs: 0,
     usage:
-      "[--root <dir>] [--count <n>] [--convergence-rounds <n>] [--state <file>] [--no-state] " +
-      "[--json] [--text <s>] [--stdin] [--help]",
+      "[--root <dir>] [--count <n>] [--convergence-rounds <n>|--window <n>] [--state <file>] " +
+      "[--no-state] [--json] [--text <s>] [--stdin] [--help]",
     help: "return",
     flags: {
       root: { type: "string" },
       count: { type: "string" },
       "convergence-rounds": { type: "string" },
+      window: { type: "string" },
       state: { type: "string" },
       "no-state": { type: "boolean" },
       json: { type: "boolean" },
@@ -174,7 +163,10 @@ function parseArgs(argv) {
   return {
     root: flagStr(flags.root, process.cwd()),
     count: flagNum(flags.count, 40),
-    convergenceRounds: flagNum(flags["convergence-rounds"], 3),
+    convergenceRounds: flagNum(
+      flagStr(flags.window, ""),
+      flagNum(flags["convergence-rounds"], DEFAULT_WINDOW),
+    ),
     json: flags.json === true,
     state: typeof flags.state === "string" ? flags.state : null,
     noState: flags["no-state"] === true,
@@ -186,7 +178,7 @@ function parseArgs(argv) {
 
 export function main(argv) {
   const args = parseArgs(argv);
-  if (args.help) helpExit("usage: node self-report-vocab-check.ts [--root <dir>] [--count <n>] [--convergence-rounds <n>] [--state <file>] [--no-state] [--json] [--text <s>] [--stdin]");
+  if (args.help) helpExit("usage: node self-report-vocab-check.ts [--root <dir>] [--count <n>] [--convergence-rounds <n>|--window <n>] [--state <file>] [--no-state] [--json] [--text <s>] [--stdin]");
 
   let textSource;
   let records;
@@ -207,6 +199,7 @@ export function main(argv) {
     textSource === "git-log" ? records.filter((r) => isInnerSelfReport(r.subject)) : records;
 
   const flagged = [];
+  const reports = [];
   for (const r of selfReports) {
     for (const h of flagBatchVocab(r.text)) {
       flagged.push({
@@ -218,33 +211,49 @@ export function main(argv) {
         text: h.text,
       });
     }
+    // The convergence window is the SHARED report window: one report per non-empty line, exactly
+    // as `self-report-vocab-audit.ts` reads a file — so the same input text yields the same verdict
+    // at either entry point (parity, pinned by self-report-vocab-check.test.mjs).
+    for (const raw of String(r.text).split("\n")) {
+      const t = raw.trim();
+      if (t) reports.push(t);
+    }
   }
   const count = flagged.length;
+
+  // The convergence judgment — INCLUDING the stopped-state exemption and the window-full
+  // requirement — is the single-source `auditSelfReports`. This file computes none of it.
+  const audit = auditSelfReports(reports, args.convergenceRounds);
 
   const statePath = args.noState
     ? null
     : args.state || path.join(args.root, ".quay", "self-report-vocab-state.json");
-  let prev = null;
-  if (statePath && fs.existsSync(statePath)) {
-    try {
-      prev = JSON.parse(fs.readFileSync(statePath, "utf8"));
-    } catch {
-      prev = null;
-    }
-  }
-  const conv = nextConvergenceState(prev, count, args.convergenceRounds);
   if (statePath) {
+    // The state file records the LAST READING (a diffable tick-over-tick carrier). It is not a
+    // counter: `roundsClean` is the shared window judgment's `recent_clean`, recomputed from the
+    // report window every run, never incremented locally.
+    const reading = {
+      roundsClean: audit.recent_clean,
+      converged: audit.converged,
+      count,
+      window: audit.window,
+      reportsTotal: audit.reports_total,
+      stoppedInWindow: audit.stopped_in_window,
+      lastAuditAt: new Date().toISOString(),
+    };
     fs.mkdirSync(path.dirname(statePath), { recursive: true });
-    fs.writeFileSync(statePath, JSON.stringify(conv, null, 2) + "\n");
+    fs.writeFileSync(statePath, JSON.stringify(reading, null, 2) + "\n");
   }
 
   const result = {
     count,
     flagged,
-    roundsClean: conv.roundsClean,
-    convergenceRounds: args.convergenceRounds,
-    converged: conv.converged,
+    roundsClean: audit.recent_clean,
+    convergenceRounds: audit.window,
+    converged: audit.converged,
     windowCount: selfReports.length,
+    reportsTotal: audit.reports_total,
+    stoppedInWindow: audit.stopped_in_window,
     textSource,
     stateFile: statePath,
   };
@@ -253,7 +262,7 @@ export function main(argv) {
     process.stdout.write(`${JSON.stringify(result, null, 2)}\n`);
   } else if (count === 0) {
     process.stdout.write(
-      `OK — no batch-style inner self-report (count=0, roundsClean=${conv.roundsClean}/${args.convergenceRounds}, converged=${conv.converged})\n`,
+      `OK — no batch-style inner self-report (count=0, roundsClean=${audit.recent_clean}/${audit.window}, converged=${audit.converged}, stoppedInWindow=${audit.stopped_in_window})\n`,
     );
   } else {
     process.stdout.write(`FLAG — ${count} batch-style inner self-report(s):\n`);

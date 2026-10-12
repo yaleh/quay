@@ -199,6 +199,31 @@ test("false-alarm discipline — mechanism real names / task ids / 'batch-free' 
   assert.equal(r.flagged.length, 0);
 });
 
+// ── AC1 (gap-self-report-vocab-audit-check-pattern-tables-diverge): the reconciled table ──────────
+// The two entry points disagreed on these input classes; the single-source table now records one
+// intended verdict each, by name (see BATCH_FLAG_PATTERNS' reconciliation comment).
+
+test("AC1 reconciliation — a digit followed by a letter is a HISTORICAL artifact name, not drift", () => {
+  const r = auditSelfReports([
+    "docs/analysis/batch2-queue-state.md",
+    "replayed batch4a / batch4b / batch4c",
+  ]);
+  assert.equal(
+    r.inner_self_report_vocab,
+    0,
+    "batch4a / batch2-queue-state.md must stay clean (the pre-unification check agreed; the old audit did not)",
+  );
+});
+
+test("AC1 reconciliation — bare `Batch of` without a digit IS flagged (the phrase is the signature)", () => {
+  const r = auditSelfReports(["inner: Batch of work landed this round"]);
+  assert.equal(r.inner_self_report_vocab, 1);
+  assert.ok(
+    r.flagged[0].flags.includes("batch-of"),
+    "the pre-unification check required \\d+ and let this through",
+  );
+});
+
 test("AC5 — flag/compliant vocabulary is exported and non-empty", () => {
   assert.ok(Array.isArray(BATCH_FLAG_PATTERNS) && BATCH_FLAG_PATTERNS.length >= 3);
   assert.ok(Array.isArray(CONVERGED_MARKERS) && CONVERGED_MARKERS.length >= 2);

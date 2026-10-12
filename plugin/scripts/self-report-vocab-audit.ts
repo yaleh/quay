@@ -54,6 +54,13 @@
 //   --root <dir>         repo root for --git-log (default: auto-detect)
 //
 // The pure audit function is exported and unit-tested; `main()` is a thin CLI over it.
+//
+// SINGLE SOURCE for the whole vocabulary judgment (2026-10-12, gap-self-report-vocab-audit-check-
+// pattern-tables-diverge): the batch pattern table (`BATCH_FLAG_PATTERNS`), the stopped-state rule
+// (`STOPPED_MARKERS` + the window waiver inside `auditSelfReports`) and the convergence judgment
+// (`auditSelfReports` itself) live HERE only. `self-report-vocab-check.ts` — the sibling entry
+// point wired into `plugin/loop/orchestrator-loop-tick.md` — imports all three; it carries no
+// pattern table, no stopped-state rule and no convergence counter of its own.
 
 import fs from "node:fs";
 import { repoRoot } from "./repo-root.ts";
@@ -69,13 +76,32 @@ export interface FlagPattern {
   desc: string;
 }
 
-/** Batch-style self-report signatures (the Contract `invoke` set, made precise). A report that
- *  matches any of these is FLAGGED as gate-semantics drift. `batch-num` requires a DIGIT after the
- *  separator so mechanism real names / task ids (`concurrent-batch-scheduler.ts`,
- *  `gap-closure-sync-is-the-true-batch-boundary`) are never flagged. */
+/** ── THE SINGLE SOURCE of the batch-vocabulary pattern table ─────────────────────────────────────
+ *  `plugin/scripts/self-report-vocab-check.ts` IMPORTS this table (it declares none of its own), so
+ *  the two entry points cannot drift apart. Before 2026-10-12 they each carried their own table and
+ *  disagreed on three input classes (gap-self-report-vocab-audit-check-pattern-tables-diverge);
+ *  the reconciliation below records the intended verdict per class, naming the input:
+ *
+ *    input                                    verdict  why
+ *    ───────────────────────────────────────  ───────  ─────────────────────────────────────────
+ *    `batch4a` / `batch2-queue-state.md`      CLEAN    digit followed by [-_a-zA-Z] = a HISTORICAL
+ *                                                      artifact name (a path/branch), which the
+ *                                                      vocabulary rule allows as a reference —
+ *                                                      see tick-vocabulary.test.mjs SAFE_SUBSTRINGS
+ *                                                      (batch4a/4b/4c, batch2-queue-state).
+ *    `batch-2` / `batch_3` / `batch/4`        FLAG     batch-num — numbered batch vocabulary.
+ *    `batch 2/3`                              FLAG     batch-num (matches the `batch 2` head).
+ *    `Batch of 3` AND bare `Batch of`         FLAG     batch-of — the gate-semantics signature is
+ *                                                      the PHRASE; the number is incidental, so a
+ *                                                      missing digit must not launder it clean
+ *                                                      (the pre-unification check required \d+).
+ *    `按批收尾`                                FLAG     an-pi.
+ *    `concurrent-batch-scheduler.ts`          CLEAN    no digit at all — mechanism real name.
+ *
+ *  A report that matches any pattern is FLAGGED as gate-semantics drift. */
 export const BATCH_FLAG_PATTERNS: FlagPattern[] = [
-  { id: "batch-of", re: /\bBatch\s+of\b/i, desc: "「Batch of N fully merged」式门控汇报" },
-  { id: "batch-num", re: /\bbatch\s*[-_/]?\s*\d/i, desc: "batch-N 编号（batch-2/3/4 等历史批名）" },
+  { id: "batch-of", re: /\bBatch\s+of\b/i, desc: "「Batch of N fully merged」式门控汇报（数字可有可无，「Batch of」短语本身即门控词汇）" },
+  { id: "batch-num", re: /\bbatch\s*[-_/]?\s*(\d+)(?![-_a-zA-Z])/i, desc: "batch-N 编号（batch-2/3/4 等历史批名）；数字后紧跟字母 = 历史产物名，不标记" },
   { id: "an-pi", re: /按批/, desc: "按批组织（收尾/汇报按批）" },
 ];
 
