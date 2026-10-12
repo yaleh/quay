@@ -133,60 +133,13 @@ export function verdictFromGateCheck(r: { ok: boolean; kind?: GateVerdictKind })
   return r.ok ? "pass" : "fail";
 }
 
-/** The env knob a caller with no record-level declaration can turn. Named once so the reason text
- *  and the resolver cannot drift apart. */
-export const ACCEPTANCE_TIMEOUT_ENV = "QUAY_ACCEPTANCE_TIMEOUT_MS";
-
-/** A resolved deadline AND where it came from — the source is what makes the timeout `reason`
- *  name a knob that actually exists on the caller's path. */
-export interface AcceptanceTimeout {
-  timeoutMs: number;
-  source: "record" | "env" | "default";
-}
-
-/**
- * Resolve a GOAL criterion's deadline: the record's own `timeoutMs` > `QUAY_ACCEPTANCE_TIMEOUT_MS`
- * > `DEFAULT_ACCEPTANCE_TIMEOUT_MS`.
- *
- * ⛔ The record half is the ONLY thing this function adds: everything below it is the SAME chain
- * `kernel/gate-run-options.ts:resolveAcceptanceTimeoutMs` owns (env > the gate's own `timeoutMs` > the ONE
- * default), and the goal paths pass no gate config. The default is therefore IMPORTED, not
- * re-declared — two `60_000` literals is exactly the drift the sibling task
- * (gap-goal-criterion-timeout-hardcoded-60s-ignores-acceptance-timeout) removed.
- * ⛔ `env` stays injectable rather than delegating outright, because the precedence is only
- * testable by passing an env the test controls, and `resolveAcceptanceTimeoutMs` reads
- * `process.env` directly.
- *
- * ⛔ A record value that is not a finite positive number is IGNORED, never coerced: `spawnSync`
- * treats `timeout: NaN` as "no deadline", so a typo in a record would silently DISABLE the guard
- * rather than fall back to it (hard rule 3b — a value nobody can read must not become a value that
- * means something else).
- */
-export function resolveAcceptanceTimeout(
-  recordTimeoutMs?: unknown,
-  env: NodeJS.ProcessEnv = process.env,
-): AcceptanceTimeout {
-  if (typeof recordTimeoutMs === "number" && Number.isFinite(recordTimeoutMs) && recordTimeoutMs > 0) {
-    return { timeoutMs: recordTimeoutMs, source: "record" };
-  }
-  const raw = env[ACCEPTANCE_TIMEOUT_ENV];
-  const n = raw === undefined ? NaN : Number(String(raw).trim());
-  if (Number.isFinite(n) && n > 0) return { timeoutMs: n, source: "env" };
-  return { timeoutMs: DEFAULT_ACCEPTANCE_TIMEOUT_MS, source: "default" };
-}
-
-/** The hint appended to a TIMEOUT reason for a resolved deadline — ⛔ names only knobs THIS path
- *  reads (see `RunAcceptanceArgs.timeoutKnob`). */
-export function timeoutKnobHint(t: AcceptanceTimeout): string {
-  switch (t.source) {
-    case "record":
-      return "raise this record's `timeoutMs` (the deadline in force)";
-    case "env":
-      return `raise ${ACCEPTANCE_TIMEOUT_ENV}`;
-    default:
-      return `set the record's \`timeoutMs\` or ${ACCEPTANCE_TIMEOUT_ENV}`;
-  }
-}
+// ── the RECORD-aware deadline resolver family MOVED to the kernel leaf ─────────────────────────
+// gap-ac353-goal-store-deadline-resolver-not-kernel: `ACCEPTANCE_TIMEOUT_ENV` / `AcceptanceTimeout` /
+// `resolveAcceptanceTimeout` / `timeoutKnobHint` now live in `../kernel/gate-run-options.ts`, beside
+// `resolveAcceptanceTimeoutMs` — the single home of the whole "acceptance timeout resolution" family.
+// ⛔ Deliberately NOT re-exported from here: a re-export at the old path would keep the very
+// `gate/`-split this slice removes (方法论第 2 节反搬壳原则: `gate/config/utils.ts` was deleted, not
+// shimmed). Import them from the kernel directly.
 
 // ── gate cost ledger (gap-no-criterion-records-its-own-cost-checker-cost-jsonl AC1) ───────────────────
 // The GATE execution path of the checker-cost mechanism. `runAcceptance` is the single choke point
