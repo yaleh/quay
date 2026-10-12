@@ -104,6 +104,12 @@ import { PROBE_ROLE_DEFAULT, probeRoutinesFromConfig } from "./probe-routine.ts"
 // 该例程不 import 任何立案/撰写函数，唯一持久化是 gitignored 载体 + 既有的 quality-round Fact。
 // ⛔ 与 fan-in/scoped-gate 无关（同上：深扫更不能上每任务必经的热路径）。
 import { archDiscoveryRoutineFromConfig } from "./arch-discovery-routine.ts";
+// DISCOVERY-METHOD 轨道（gap-discovery-method-routine-report-only）：把已落地的 Discovery Method loop
+// （docs/analysis/discovery-{experience-ledger,reflection,method-registry}.mjs）接上轮子——每轮
+// watermarked ingest → 一次有界 reflect → 对新候选的 held-out 泛化验证。**只读、只报**：该例程不 import
+// 任何立案/撰写函数，唯一新增持久化是 gitignored 载体 `.quay/discovery-method-findings.jsonl` 的一行
+// scan-round + 既有 Discovery 载体 + 既有的 quality-round Fact。⛔ 与 fan-in/scoped-gate 无关。
+import { discoveryMethodRoutineFromConfig, liveDiscoveryModel } from "./discovery-method-routine.ts";
 
 // ── 常量（由 DRIVER_KINDS registry 派生，⛔ 不另写一份路径字面量）──────────────────────────
 const QUALITY_SPEC = DRIVER_KINDS.quality;
@@ -943,6 +949,11 @@ export interface QualityGateOptions {
    *  缺省 null = 未装配（老行为）。**只有 section 已声明时才装配**（off by default：未声明的工作区例程表
    *  不变）——声明了但 enabled:false/写坏 ⇒ 仍装配，因为「不跑」必须可观测（disabled / failed 读数）。 */
   archDiscoveryRoutine?: RoutineSpec | null;
+  /** discovery-method 例程：同 archDiscoveryRoutine 的注入纪律（main() 从 `.quay/config.yml`
+   *  `loop.discovery_method:` 装配后注入，⛔ 本函数不自己读配置）。缺省 null = 未装配（老行为）。
+   *  与 arch-discovery 同一套「off by default + 声明即可观测」语义：未声明 ⇒ 例程表不变；声明了但
+   *  enabled:false/写坏 ⇒ 仍装配（disabled / failed 必须可观测，硬规则 3b）。 */
+  discoveryMethodRoutine?: RoutineSpec | null;
 }
 
 /** 四条例程（B15 pool-quality-judge + B17 judgment-consumer-check + 架构复核 + packaging-hygiene）。
@@ -994,6 +1005,10 @@ export function qualityGateRoutines(root: string, opts: QualityGateOptions): Rou
     // `loop.arch_discovery:`，但它的 run 体是写在本文件 import 的模块里的）。缺席 ⇒ 不加入（老行为）；
     // 加入而 section 缺席 ⇒ 该例程记 `not-evaluated:disabled` 且零 spawn（kill switch 的可观测面）。
     ...(opts.archDiscoveryRoutine ? [opts.archDiscoveryRoutine] : []),
+    // 第七类：DISCOVERY-METHOD 例程（同一「声明式 + 可观测」族：间隔与开关来自 `.quay/config.yml`
+    // `loop.discovery_method:`）。缺席 ⇒ 不加入（老行为）；加入而 section 缺席 ⇒ 记
+    // `not-evaluated:disabled` 且零 spawn（kill switch 的可观测面）。
+    ...(opts.discoveryMethodRoutine ? [opts.discoveryMethodRoutine] : []),
   ];
 }
 
@@ -1290,6 +1305,24 @@ export async function main(argv: string[]): Promise<number> {
     console.error(`quality-gate-driver: arch-discovery 例程已装配（${archDiscovery.enabled ? "enabled" : "enabled:false — 每轮记 not-evaluated:disabled，零 spawn"}）`);
   }
 
+  // discovery-method 轨道：读 `.quay/config.yml` `loop.discovery_method:`（同一注入纪律）。
+  // section 缺席/enabled:false ⇒ 例程仍装配，但每轮只记 `not-evaluated:disabled` 且零 spawn；配置坏 ⇒ 记
+  // failed 并在此**可见地**报告（硬规则 3b：读不懂 ≠ 合格）。
+  // ⛔ 模型缝在这里**不**装配：liveModelFactory 只在轮内（ingested > 0 时）才需要，把它的加载推迟到
+  // run 里（`liveDiscoveryModel`），否则每个 driver 启动都要付一次 launcher 解析的代价。
+  // ⛔ 模型缝是**惰性**的（`modelFactory`）：`liveDiscoveryModel` 只在轮内 `ingested > 0` 那一刻才被
+  // 调用，所以「没东西可反思」的轮（生产常态）零 launcher 成本，driver 启动也不付这笔。
+  const discoveryMethod = discoveryMethodRoutineFromConfig(rootDir, {
+    modelFactory: () => liveDiscoveryModel(rootDir),
+  });
+  if (discoveryMethod.error) {
+    console.error(`quality-gate-driver: discovery-method 例程配置无效 — ${discoveryMethod.error}`);
+  } else if (!discoveryMethod.present) {
+    console.error("quality-gate-driver: 未声明 loop.discovery_method — discovery-method 例程未装配（off by default，零 spawn；例程表与未接此轨时一致）");
+  } else {
+    console.error(`quality-gate-driver: discovery-method 例程已装配（${discoveryMethod.enabled ? "enabled" : "enabled:false — 每轮记 not-evaluated:disabled，零 spawn"}）`);
+  }
+
   const routines = qualityGateRoutines(rootDir, {
     planCmd: planCmd ? splitArgs(planCmd) : null,
     judgeArgv: judgeCmd ? splitArgs(judgeCmd) : null,
@@ -1310,6 +1343,7 @@ export async function main(argv: string[]): Promise<number> {
     archGapWorkerTimeoutMs,
     probeRoutines: probeSelection.routines,
     archDiscoveryRoutine: archDiscovery.routine,
+    discoveryMethodRoutine: discoveryMethod.routine,
   });
 
   return runResidentQualityGateLoop({ root: rootDir, intervalMs: interval, once, maxRounds, roundLogFile, runId: resolvedRunId, json, pidFile, routines, routineWatchdogMs, kind: "quality" });
