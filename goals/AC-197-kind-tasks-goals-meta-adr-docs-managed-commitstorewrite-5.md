@@ -31,8 +31,8 @@ criterion: >-
   # ⛔ WHY IT IS NOT KEYED ON THE IDENTIFIER ANY MORE. The previous text counted
   files containing the
 
-  # literal `commitStoreWrite` (`grep -l commitStoreWrite … | wc -l` == 5). That
-  measured "does this
+  # literal `commitStoreWrite` (a `grep -l` for that one name over the five
+  store files, piped to `wc -l`, == 5). That measured "does this
 
   # function name appear in these five files", not "are the five kinds wired" —
   and 943ef47f6
