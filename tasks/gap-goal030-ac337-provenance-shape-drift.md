@@ -2,7 +2,7 @@
 id: gap-goal030-ac337-provenance-shape-drift
 title: GOAL-030 ③ 读数漂移：状态事件 v0→v1 把 writerModule/entry 移入 producer，AC-337 判据与
   branch-selfhost-probe 仍读顶层字段 ⇒ 3/3 事件被误判 loaded-main-checkout-code
-status: todo
+status: ready
 labels:
   - gap
   - defect
