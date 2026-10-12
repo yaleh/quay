@@ -317,10 +317,20 @@ export function registerTaskHandlers(
         extra: z.record(z.string(), z.any()).optional().describe("Extra frontmatter fields as a key/value map."),
         expectedStatus: z.string().optional().describe("Optimistic-locking guard: if task's current status differs from this value, the write is refused with isError:true (no mutation). Omit to skip the check."),
         completeReason: z.string().optional().describe("The out-of-band completion channel, required when status='done': why this task reaches done without a gate verdict (≥8 non-whitespace chars). Written as the `complete` GateEvent's `verifiedBy` evidence. Never forwarded to the Provider — it is a Core-side lifecycle instruction, not a task field."),
+        // gap-task-status-events-abi-writes-and-creation: the CALLER's own id for this operation,
+        // carried into the Provider's status-event record (`cause.correlationId`). It is the one
+        // provenance term this surface cannot supply itself — an agent session driving several
+        // writes it means to read as one operation is the only party that knows the grouping.
+        //   The `actor.kind` term is NOT a parameter: this handler IS the MCP surface, so it stamps
+        // `mcp` itself (a caller must not be able to label its own write a `cli` one).
+        correlationId: z.string().optional().describe("Optional caller-supplied id for this operation, recorded on the Provider's task-status event as `cause.correlationId` (lets several writes be read as one operation). Omitted => the key is absent from the event, never an empty value."),
       },
     },
-    async ({ provider, id, completeReason, ...patch }) => {
+    async ({ provider, id, completeReason, correlationId, ...patch }) => {
       const { client } = await getClient(provider);
+      // Stamped on EVERY arm below (the status write, the out-of-band completion, and the
+      // status=done refusal path's own re-read), so one MCP session's writes are one actor class.
+      const provenance = { actorKind: "mcp", ...(correlationId !== undefined ? { correlationId } : {}) };
       try {
         if ((patch as { status?: string }).status === TASK_STATUS.DONE) {
           if (typeof completeReason !== "string" || completeReason.trim() === "") {
@@ -351,6 +361,7 @@ export function registerTaskHandlers(
             workspaceRoot: cfg.workspaceRoot,
             reason: completeReason,
             expectedStatus: (patch as { expectedStatus?: string }).expectedStatus,
+            ...provenance,
           });
           process.exitCode = 0; // MCP is long-running: never leak the lifecycle helper's exitCode
           if (!result.ok) {
@@ -364,7 +375,7 @@ export function registerTaskHandlers(
             structuredContent: { task: completed, complete: result },
           };
         }
-        const task = await client.taskWrite({ id, ...patch });
+        const task = await client.taskWrite({ id, ...patch, ...provenance });
         return {
           content: [{ type: "text" as const, text: JSON.stringify(task, null, 2) }],
           structuredContent: { task },
@@ -702,7 +713,9 @@ export function registerLifecycleHandlers(
         const { client } = await getClient(provider);
         const logPath = resolveGateLogPath(cfg.workspaceRoot, { file });
         process.env.QUAY_ACCEPTANCE_CWD = cfg.workspaceRoot;
-        const result = await runComplete({ client: client as unknown as Parameters<typeof runComplete>[0]['client'], id, logPath, workspaceRoot: cfg.workspaceRoot });
+        // actorKind:"mcp" — same reason as task_write's own stamp: this handler IS the MCP surface
+        // (gap-task-status-events-abi-writes-and-creation).
+        const result = await runComplete({ client: client as unknown as Parameters<typeof runComplete>[0]['client'], id, logPath, workspaceRoot: cfg.workspaceRoot, actorKind: "mcp" });
         process.exitCode = 0; // DIR-086: reset stale exitCode from lifecycle function (MCP is long-running)
         return {
           content: [{ type: "text" as const, text: JSON.stringify(result, null, 2) }],
@@ -769,7 +782,7 @@ export function registerLifecycleHandlers(
         const { client } = await getClient(provider);
         const logPath = resolveGateLogPath(cfg.workspaceRoot, { file });
         process.env.QUAY_ACCEPTANCE_CWD = cfg.workspaceRoot;
-        const result = await runPromote({ client: client as unknown as Parameters<typeof runPromote>[0]['client'], id, logPath, workspaceRoot: cfg.workspaceRoot });
+        const result = await runPromote({ client: client as unknown as Parameters<typeof runPromote>[0]['client'], id, logPath, workspaceRoot: cfg.workspaceRoot, actorKind: "mcp" });
         process.exitCode = 0; // DIR-086: reset stale exitCode from lifecycle function (MCP is long-running)
         return {
           content: [{ type: "text" as const, text: JSON.stringify(result, null, 2) }],
@@ -806,7 +819,7 @@ export function registerLifecycleHandlers(
       try {
         const { client } = await getClient(provider);
         const logPath = resolveGateLogPath(cfg.workspaceRoot, { file });
-        const result = await runRetreat({ client: client as unknown as Parameters<typeof runRetreat>[0]['client'], id, reason, logPath });
+        const result = await runRetreat({ client: client as unknown as Parameters<typeof runRetreat>[0]['client'], id, reason, logPath, actorKind: "mcp" });
         process.exitCode = 0; // DIR-086: reset stale exitCode from lifecycle function (MCP is long-running)
         return {
           content: [{ type: "text" as const, text: JSON.stringify(result, null, 2) }],

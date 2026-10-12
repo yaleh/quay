@@ -44,6 +44,10 @@ import { fileURLToPath } from "node:url";
 import { execFileSync } from "node:child_process";
 import YAML from "yaml";
 import { createStore } from "../src/store.ts";
+// The carrier READER is the kernel's single classifier (v1 / v0 / corrupt) — the same one every
+// consumer uses, so a test that read the JSONL by hand could agree with itself while disagreeing
+// with production (gap-task-status-events-contract-v1-all-driver-writers).
+import { readTaskStatusEventCarrier } from "../../quay/src/kernel/task-transition.ts";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const REPO_ROOT = path.resolve(__dirname, "..", "..", "..");
@@ -505,5 +509,138 @@ test("AC9 (propagation log negative control): mixed write logs changeKind=must-p
     assert.equal(last.propagated, true, "mixed write must log propagated:true — negative control, ⛔ the log itself must not fabricate a uniform false");
   } finally {
     fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
+// ── gap-task-status-events-abi-writes-and-creation: the Provider-ABI status-event record ─────────
+// The store is the single choke point for every ABI task write, so it is where the v1 status event
+// for `task create` / `task edit --status` / MCP `task_write` / the CLI lifecycle verbs must be
+// emitted. These tests pin the choke point itself; the surface-by-surface wiring is pinned by
+// packages/quay/test/task-status-events-abi.test.mjs.
+//
+// The distinction that matters most here is TRANSITION vs WRITE: a body-only edit, a label write, a
+// `--status` that names the status the task already has, and a REFUSED CAS all write something (or
+// nothing) without changing a status — emitting for any of them would make the carrier a write log
+// instead of a transition log, and every consumer would have to re-derive "did anything change".
+
+/** The v1 records on the carrier rooted at `root` (the store's git root). */
+function statusEvents(root) {
+  return readTaskStatusEventCarrier(root).lines.filter((l) => l.klass === "v1").map((l) => l.record);
+}
+
+test("AC(a) create: exactly ONE `create` event, from:null, with evidence resolving to the creating commit", () => {
+  const { store, root } = makeGitStore();
+  try {
+    store.write("EV1", { title: "event", status: "todo", body: "## Proposal\n\nx\n", actorKind: "cli" }, { create: true });
+    const events = statusEvents(root);
+    assert.equal(events.length, 1, `a creation must emit exactly one event; got ${events.length}`);
+    const e = events[0];
+    assert.equal(e.schema, "task-status-event/v1");
+    assert.equal(e.from, null, "a creation has NO prior status — `from:null`, not an empty string");
+    assert.equal(e.to, "todo");
+    assert.equal(e.kind, "create");
+    assert.deepEqual(e.actor.kind, "cli");
+    // evidence: the commit carries THIS write (the file it names already reads `status: todo`).
+    assert.match(String(e.evidence.commit), /^[0-9a-f]{40}$/);
+    const content = execFileSync("git", ["-C", root, "show", `${e.evidence.commit}:tasks/EV1.md`], { encoding: "utf8" });
+    assert.match(content, /^status: todo$/m, "evidence.commit must resolve to a commit whose tasks/EV1.md IS this write");
+    assert.equal(
+      e.evidence.statusBlobSha,
+      execFileSync("git", ["-C", root, "rev-parse", `${e.evidence.commit}:tasks/EV1.md`], { encoding: "utf8" }).trim(),
+      "evidence.statusBlobSha must be the git blob hash of the exact content written",
+    );
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("AC(b) CAS write: one event on the flip; a REFUSED CAS emits ZERO (a refusal is not a transition)", () => {
+  const { store, root } = makeGitStore();
+  try {
+    store.write("EV2", { title: "event", status: "todo" }, { create: true });
+    assert.equal(statusEvents(root).length, 1, "precondition: the creation emitted its own event");
+
+    store.write("EV2", { status: "ready", expectedStatus: "todo" });
+    const after = statusEvents(root);
+    assert.equal(after.length, 2, "the CAS write must emit exactly one further event");
+    assert.deepEqual([after[1].from, after[1].to, after[1].kind], ["todo", "ready", "promote"]);
+    assert.equal(after[1].evidence.commit, execFileSync("git", ["-C", root, "rev-parse", "HEAD"], { encoding: "utf8" }).trim());
+
+    assert.throws(() => store.write("EV2", { status: "done", expectedStatus: "todo" }), /CAS conflict/);
+    assert.equal(statusEvents(root).length, 2, "a refused CAS wrote nothing, so it must emit nothing");
+    assert.equal(store.get("EV2").status, "ready", "precondition held: the refused write did not land either");
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("AC(d) a body-only (and a same-status) write emits ZERO — a write is not a transition", () => {
+  const { store, root } = makeGitStore();
+  try {
+    store.write("EV3", { title: "event", status: "todo" }, { create: true });
+    store.write("EV3", { body: "## Plan\n\nprose\n" });
+    assert.equal(statusEvents(root).length, 1, "a body-only edit changed no status and must emit nothing");
+    store.write("EV3", { status: "todo" });
+    assert.equal(statusEvents(root).length, 1, "`--status todo` on a task already todo changed no status and must emit nothing");
+    store.write("EV3", { status: "needs-human", labels: ["gap"] });
+    assert.equal(statusEvents(root).length, 2, "…while a real flip in the same call DOES emit (the control for the two above)");
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("AC(e) cause: correlationId is carried when given and ABSENT (not empty) when not; sessionId comes from the env", () => {
+  const { store, root } = makeGitStore();
+  const prevSession = process.env.CLAUDE_CODE_SESSION_ID;
+  try {
+    delete process.env.CLAUDE_CODE_SESSION_ID;
+    store.write("EV4", { title: "event", status: "todo" }, { create: true });
+    assert.equal("cause" in statusEvents(root)[0], false, "no correlation id and no session ⇒ NO cause key at all");
+
+    store.write("EV4", { status: "ready", correlationId: "op-42" });
+    assert.deepEqual(statusEvents(root)[1].cause, { correlationId: "op-42" });
+
+    process.env.CLAUDE_CODE_SESSION_ID = "sess-abc";
+    store.write("EV4", { status: "needs-human" });
+    assert.deepEqual(
+      statusEvents(root)[2].cause,
+      { sessionId: "sess-abc" },
+      "the session env is read (inherited from the front door's shell) and paired with the caller's correlation id, never replacing it",
+    );
+  } finally {
+    if (prevSession === undefined) delete process.env.CLAUDE_CODE_SESSION_ID;
+    else process.env.CLAUDE_CODE_SESSION_ID = prevSession;
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("actor.kind: the class the front door declares is recorded; an undeclared class is `unknown`, never guessed", () => {
+  const { store, root } = makeGitStore();
+  try {
+    store.write("EV5", { title: "event", status: "todo", actorKind: "mcp" }, { create: true });
+    store.write("EV5", { status: "ready" });
+    const events = statusEvents(root);
+    assert.equal(events[0].actor.kind, "mcp", "the declared class (the Core MCP server stamps `mcp`) is recorded as-is");
+    assert.equal(events[1].actor.kind, "unknown", "an undeclared class is `unknown` — a real answer, not a guess from the file path");
+    // actor.id is the identity the commit subject carries, so event and commit join on one string.
+    const subject = execFileSync("git", ["-C", root, "log", "-1", "--format=%s"], { encoding: "utf8" }).trim();
+    assert.match(subject, new RegExp(` by ${events[1].actor.id.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}$`));
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("scope: a store OUTSIDE any git work tree emits nothing (the carrier lives at the workspace root)", () => {
+  const { store, tasksDir } = makeStore();
+  try {
+    store.write("EV6", { title: "event", status: "todo" }, { create: true });
+    assert.equal(
+      fs.existsSync(path.join(path.dirname(tasksDir), ".quay", "task-status-events.jsonl")),
+      false,
+      "a repo-less store must not append to a carrier at `<tasksDir>/../.quay` — that is the system temp dir for a bare mkdtemp store",
+    );
+    assert.equal(store.get("EV6").status, "todo", "…and the status write itself is unaffected (the event is observation, not a gate)");
+  } finally {
+    fs.rmSync(tasksDir, { recursive: true, force: true });
   }
 });
