@@ -4,7 +4,7 @@ title: "P0 Discovery Method: global case-identity anti-leak index before
   pre-registration; refuse reused holdouts across
   experiments/methods/teaching/diagnostics; contaminated verdicts never license
   promotion"
-status: ready
+status: done
 labels:
   - gap
   - architecture-discovery
