@@ -83,6 +83,7 @@ import { subjectKey, recordId, readRecords } from "./architecture-evidence-store
 import { ROLE_VERDICT_COMPAT, readExperienceLedger } from "./discovery-experience-ledger.mjs";
 import {
   readMethodRegistry, validateMethodRecord, defaultToolNames,
+  seedSetForRecord, basenameOf, provenanceSeeds, REPO_ROOT,
 } from "./discovery-method-registry.mjs";
 // The model-identity / cost machinery + the hardened launcher argv, reused by import (硬规则 5b).
 import {
@@ -330,7 +331,10 @@ export function buildReflectionPrompt({ unit, registry, toolNames = [] }) {
     "   (name it in `method_ref`); otherwise \"new\". If the registry is empty, only \"new\"/\"no-method\".",
     "4. Ground every candidate in the finding's OWN evidence. Do not propose a method that only makes sense",
     "   because you were told where the answer is.",
-    "5. `operation.tools` MUST be chosen ONLY from the ALLOWED TOOLS list below (1-4 entries).",
+    "5. `operation.tools` MUST be chosen ONLY from the ALLOWED TOOLS list below (1-4 entries), and each",
+    "   one MUST be an INSTRUMENT you would RUN to INSPECT code. The files a finding is ABOUT — the subject",
+    "   being inspected, including any file named in the EXPERIENCE above — are NOT tools: naming one there",
+    "   says only that you were told where to look, and the pipeline strips it before the record is made.",
     "",
     "EXPERIENCE (this unit):",
     JSON.stringify(experiences, null, 1),
@@ -402,12 +406,29 @@ export function validateReflectionDecision(rec, { registry = [] } = {}) {
  * (version, ts, provenance, cost_budget, status, retirement_reason, supersedes) are filled HERE from
  * real data — the model is never asked to invent a version or a provenance id. `status` is ALWAYS
  * `"draft"`: this pipeline never mints an `active` method (that is `validateGeneralization`'s call).
+ *
+ * ⛔ TOOL ≠ SUBJECT (the other half of the registry's new refusal): a model that answers "the tool I
+ * used was the file the finding is about" has said nothing about HOW TO LOOK, so the subject files are
+ * STRIPPED from `operation.tools` here, BEFORE the registry's validator sees them. Stripping is
+ * RECORDED (`stripped_subject_tools`), never silent: a candidate that quietly lost half its tools is
+ * indistinguishable from one the model never named them in — and the prompted instruction is a request,
+ * not a guarantee. The set the strip uses is the unit's OWN experiences, which ARE the candidate's
+ * provenance (`provenance_evidence` below), so the pre-filter and the validator agree by construction.
  */
 export function assembleCandidate({ rec, unit, registry, budget, nowIso }) {
   const b = resolveBudget(budget).budget;
   const isNew = rec.decision === "new";
   const method_id = isNew ? slug(rec.method_id) : String(rec.method_ref);
-  const provenance = (unit?.experiences ?? []).map((e) => e.id).filter(isStr);
+  // ⛔ Scoped to the experiences that actually CONTRIBUTE a provenance ref: an entry with no `id`
+  // cannot appear in `provenance_evidence`, so it is not part of the seed set either — the pre-filter
+  // and the validator's rule must agree exactly, or the assembler would strip more than the contract.
+  const provenance_experiences = (unit?.experiences ?? []).filter((e) => isObj(e) && isStr(e.id, 1));
+  const provenance = provenance_experiences.map((e) => e.id);
+  // The subject basenames of THIS unit's own findings — the same derivation the registry performs from
+  // the record's provenance, called with the experiences in hand rather than re-read from the ledger.
+  const subjects = new Set(seedSetForRecord({ provenance_evidence: provenance }, provenance_experiences).component_basenames);
+  const requestedTools = Array.isArray(rec.operation_tools) ? rec.operation_tools.filter((t) => isStr(t, 1)) : [];
+  const stripped_subject_tools = requestedTools.filter((t) => subjects.has(basenameOf(t)));
   return {
     method_id,
     version: nextVersion(registry, method_id),
@@ -419,8 +440,11 @@ export function assembleCandidate({ rec, unit, registry, budget, nowIso }) {
     },
     operation: {
       steps: [rec.transferable_operation].filter(isStr),
-      tools: Array.isArray(rec.operation_tools) ? rec.operation_tools.filter((t) => isStr(t, 1)) : [],
+      tools: requestedTools.filter((t) => !subjects.has(basenameOf(t))),
     },
+    // What was removed and why — on the RECORD, so the refusal is visible to a reviewer rather than
+    // living only in this call's return value.
+    stripped_subject_tools,
     expected_invariant: isStr(rec.expected_invariant, 10) ? rec.expected_invariant : "",
     falsification: isStr(rec.falsification, 1) ? rec.falsification : "",
     cost_budget: { max_candidates: b.maxPerRun, max_model_calls: b.maxModelCalls, max_wall_ms: b.maxWallMs },
@@ -514,12 +538,15 @@ export async function reflect({ experiences, registry = [], model, budget = {}, 
     const candidate = assembleCandidate({ rec: parsed, unit, registry, budget: b, nowIso });
     // The candidate is checked with the REGISTRY'S OWN validator (reused, never re-implemented): a
     // candidate that cannot be a legal registry record is refused here rather than persisted broken.
-    const cv = validateMethodRecord(candidate, { toolCatalog: toolNames, existing: latestMethods(registry) });
+    // The seed set is resolved from the SAME ledger the unit came from (`root`), so the validator's
+    // tool≠subject rule sees exactly the provenance `assembleCandidate` filtered against.
+    const seeds = provenanceSeeds(root ?? REPO_ROOT, candidate);
+    const cv = validateMethodRecord(candidate, { toolCatalog: toolNames, existing: latestMethods(registry), provenanceSeeds: seeds });
     if (!cv.ok) {
-      decisions.push({ ...base, ok: false, decision: parsed.decision, reasons: cv.reasons });
+      decisions.push({ ...base, ok: false, decision: parsed.decision, reasons: cv.reasons, stripped_subject_tools: candidate.stripped_subject_tools });
       continue;
     }
-    decisions.push({ ...base, ok: true, decision: parsed.decision, candidate, reflection: narrative(parsed) });
+    decisions.push({ ...base, ok: true, decision: parsed.decision, candidate, reflection: narrative(parsed), stripped_subject_tools: candidate.stripped_subject_tools });
   }
 
   return {
