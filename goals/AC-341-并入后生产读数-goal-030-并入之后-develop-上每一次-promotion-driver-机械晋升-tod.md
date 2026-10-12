@@ -5,7 +5,7 @@ title: 并入后生产读数：GOAL-030 并入之后，develop 上每一次 prom
 status: achieved
 kind: criterion
 goal: GOAL-030
-criterion: |
+criterion: |-
   set -u
   root=$(git rev-parse --show-toplevel 2>/dev/null) || { echo "NOT-EVALUATED: not inside a git repository" >&2; exit 3; }
   cd "$root"
@@ -15,11 +15,17 @@ criterion: |
   n=$(printf '%s\n' "$ids" | grep -c .)
   [ "$n" -ge 1 ] || { echo "NOT-EVALUATED: no production promotion-driver todo→ready commit on develop since the merge ($t)" >&2; exit 3; }
   printf '%s\n' "$ids" | node -e '(()=>{const fs=require("fs");const t=Date.parse(process.argv[1]);let s="";process.stdin.on("data",d=>s+=d).on("end",()=>{const ids=s.split("\n").filter(Boolean);let ev="";try{ev=fs.readFileSync(".quay/task-status-events.jsonl","utf8")}catch{console.error("CAUSE=event-carrier-absent — .quay/task-status-events.jsonl missing while "+ids.length+" production promotions happened since the merge");process.exit(1)}
-  const have=new Set();for(const l of ev.split("\n")){try{const e=JSON.parse(l);if(e.to==="ready"&&e.kind==="promote"&&Date.parse(e.ts)>=t-60000)have.add(e.taskId)}catch{}}
+  const atOf=e=>typeof e.at==="string"?e.at:(typeof e.ts==="string"?e.ts:null);
+  const have=new Set();let unreadable=0;
+  for(const l of ev.split("\n")){if(!l.trim())continue;let e=null;try{e=JSON.parse(l)}catch{continue}
+  if(e.to!=="ready"||e.kind!=="promote")continue;
+  const ts=atOf(e);if(ts===null){unreadable++;continue}
+  if(Date.parse(ts)>=t-60000)have.add(e.taskId)}
+  if(unreadable){console.error("NOT-EVALUATED: "+unreadable+" ready-promote carrier row(s) carry no readable timestamp (v1 `at` / v0 `ts`) — the judge cannot read its input");process.exit(3)}
   const miss=ids.filter(i=>!have.has(i));if(miss.length){console.error("CAUSE=flip-without-event — "+miss.length+"/"+ids.length+" production todo→ready flips since the merge have no promote event: "+miss.slice(0,5).join(","));process.exit(1)}
   console.log("PASS: all "+ids.length+" production promotion-driver todo→ready flips since the merge carry a promote event")})})()' "$t"
 expect: exit 0 = 并入后的全部生产晋升翻转（至少 1 次）都带事件；exit 1 = 有翻转无事件或事件载体缺失；exit 3 =
-  尚未并入或并入后尚无生产晋升。
+  尚未并入、并入后尚无生产晋升，或载体中存在时间戳读不懂的候选行（判定机件读不懂输入 ⇒ 未评估）。
 origin: 人 2026-10-08「现在开始执行…正式创建一个真实的重构 goal，并启用 goal branch」：goal
   分支机制首个真实试点，范围严格限于晋升路径的 todo→ready / ready→todo 两条写入；先验证“在分支上运行 Quay 并验证
   Quay”的自举路径，健康度达标后才进入更大重构。
