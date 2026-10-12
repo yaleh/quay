@@ -525,7 +525,7 @@ const mkDevelopRepo = (taskId, status) => {
 
 // ── AC1(a): three outcomes ⇒ three Experiences, the watermark on the last line ───────────────────
 
-test("AC1(a): a store with 3 outcomes ⇒ 3 Experiences with derived roles, watermark at the last line", () => {
+test("INGEST(a): a store with 3 outcomes ⇒ 3 Experiences with derived roles, watermark at the last line", () => {
   const root = mkTmp();
   writeFixtureStore(root, THREE);
   const r = ingestNewOutcomes(root);
@@ -553,7 +553,7 @@ test("AC1(a): a store with 3 outcomes ⇒ 3 Experiences with derived roles, wate
 
 // ── AC1(b): a second run ingests nothing ─────────────────────────────────────────────────────────
 
-test("AC1(b): a second run ingests 0 and leaves the carriers byte-identical", () => {
+test("INGEST(b): a second run ingests 0 and leaves the carriers byte-identical", () => {
   const root = mkTmp();
   writeFixtureStore(root, THREE);
   const first = ingestNewOutcomes(root);
@@ -572,7 +572,7 @@ test("AC1(b): a second run ingests 0 and leaves the carriers byte-identical", ()
 
 // ── AC1(c): the quota, and the remainder it reports ──────────────────────────────────────────────
 
-test("AC1(c): maxPerRun:2 ⇒ 2 ingested with the remainder reported; the next run ingests the rest", () => {
+test("INGEST(c): maxPerRun:2 ⇒ 2 ingested with the remainder reported; the next run ingests the rest", () => {
   const root = mkTmp();
   writeFixtureStore(root, THREE);
   const first = ingestNewOutcomes(root, { maxPerRun: 2 });
@@ -599,7 +599,7 @@ test("AC1(c): maxPerRun:2 ⇒ 2 ingested with the remainder reported; the next r
 
 // ── AC1(d): the kill switch ──────────────────────────────────────────────────────────────────────
 
-test("AC1(d): enabled:false ⇒ zero reads and zero writes — the switch is answered before any I/O", () => {
+test("INGEST(d): enabled:false ⇒ zero reads and zero writes — the switch is answered before any I/O", () => {
   const root = mkTmp();
   writeFixtureStore(root, THREE);
   const storeBefore = fs.readFileSync(storeFile(root), "utf8");
@@ -624,7 +624,7 @@ test("AC1(d): enabled:false ⇒ zero reads and zero writes — the switch is ans
 
 // ── AC1(e): the fail-closed watermark ────────────────────────────────────────────────────────────
 
-test("AC1(e): a rewritten store ⇒ WATERMARK_MISMATCH, and NOTHING is written", () => {
+test("INGEST(e): a rewritten store ⇒ WATERMARK_MISMATCH, and NOTHING is written", () => {
   const root = mkTmp();
   writeFixtureStore(root, THREE);
   const first = ingestNewOutcomes(root);
@@ -661,7 +661,7 @@ test("AC1(e): a rewritten store ⇒ WATERMARK_MISMATCH, and NOTHING is written",
 
 // ── AC1(f): the derived fields, and the refusal of caller narration ──────────────────────────────
 
-test("AC1(f): summary/components equal the values DERIVED from the record; a caller-supplied summary is refused", () => {
+test("INGEST(f): summary/components equal the values DERIVED from the record; a caller-supplied summary is refused", () => {
   const root = mkTmp();
   writeFixtureStore(root, [THREE[0]]);
   const env = outcomeEnvelope(root, 1);
@@ -706,7 +706,7 @@ test("AC1(f): summary/components equal the values DERIVED from the record; a cal
   assert.equal(lines(root), 1, "every refusal appended nothing");
 });
 
-test("AC1(f): the case_id of a derived entry is deterministic and chosen by nobody", () => {
+test("INGEST(f): the case_id of a derived entry is deterministic and chosen by nobody", () => {
   const root = mkTmp();
   const [w] = writeFixtureStore(root, [THREE[0]]);
   const r = ingestNewOutcomes(root);
@@ -753,7 +753,7 @@ test("the pin: `evaluation_pin` is the prereg's `pin` when it resolves, and null
 
 // ── AC1(g): both sources through ONE entry, ONE carrier ──────────────────────────────────────────
 
-test("AC1(g): a user-sourced Experience goes through the same ingestExperience and lands in the same carrier", () => {
+test("INGEST(g): a user-sourced Experience goes through the same ingestExperience and lands in the same carrier", () => {
   const root = mkTmp();
   const r = ingestExperience(root, {
     source: "user", caseId: "TEACH-via-unified-entry", role: "missed-by-tooling",
