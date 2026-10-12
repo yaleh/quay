@@ -3,7 +3,7 @@ id: gap-status-sync-priority-drops-superseded-resurrects-or-loses-retired-tasks
 title: status sync priority list omits 'superseded' ⇒ doc↔develop semantic sync
   resurrects (develop superseded→ready) or loses (author superseded) retired
   tasks — first independently-verified open-discovery finding
-status: ready
+status: done
 labels:
   - gap
   - defect
