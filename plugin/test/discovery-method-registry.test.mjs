@@ -21,10 +21,15 @@ import {
   provenanceSeeds, seedReasons, seedSetForRecord, seedScannedTexts, basenameOf,
   TOOL_IS_SUBJECT, METHOD_TEXT_NAMES_SEED, PROVENANCE_SEEDS_UNAVAILABLE, SEED_SCANNED_TEXT_FIELDS,
   activeMethods, generalizationEvidenceReasons, PROMOTION_WITHOUT_VALID_GENERALIZATION, PROMOTION_REFUSAL_CAUSES,
+  // the CONTAMINATED-VERDICT ledger (task gap-discovery-holdout-cross-experiment-leak-and-contaminated-promotion)
+  CONTAMINATED_VERDICTS_REL, VERDICT_CONTAMINATED, CONTAMINATED_LIST_UNAVAILABLE,
+  contaminatedVerdictsFile, readContaminatedVerdicts, appendContaminatedVerdict, backfillContaminatedVerdicts,
+  contaminatedVerdictIds,
 } from "../../docs/analysis/discovery-method-registry.mjs";
 import {
   appendExperienceRecord, DISCOVERY_CARRIERS, GENERALIZATION_VERDICTS_REL,
 } from "../../docs/analysis/discovery-experience-ledger.mjs";
+import { readGeneralizationVerdicts } from "../../docs/analysis/discovery-reflection.mjs";
 
 const tmpDirs = [];
 const plainTmp = () => { const d = fs.mkdtempSync(path.join(os.tmpdir(), "discovery-method-registry-")); tmpDirs.push(d); return d; };
@@ -689,13 +694,21 @@ test("AC2(f): every way a cited verdict can be unusable has its OWN cause, and e
   }
 
   // The cause vocabulary is declared as DATA, so a new cause cannot be added silently.
-  assert.deepEqual([...PROMOTION_REFUSAL_CAUSES], ["EVIDENCE_MISSING", "VERDICTS_UNAVAILABLE", "VERDICT_NOT_RECORDED", "VERDICT_OTHER_METHOD", "VERDICT_NOT_PASSED"]);
+  // ⛔ WIDENED by gap-discovery-holdout-cross-experiment-leak-and-contaminated-promotion: the
+  // contamination arm is a cause of its own (`VERDICT_CONTAMINATED`), checked BEFORE the
+  // recorded/passed arms — a verdict judged on an already-used hold-out is unusable however well it
+  // scored, and reporting it as VERDICT_NOT_PASSED would name the wrong defect.
+  assert.deepEqual([...PROMOTION_REFUSAL_CAUSES], ["EVIDENCE_MISSING", "VERDICTS_UNAVAILABLE", "VERDICT_NOT_RECORDED", "VERDICT_OTHER_METHOD", "VERDICT_NOT_PASSED", "VERDICT_CONTAMINATED"]);
   assert.deepEqual(generalizationEvidenceReasons({ ...GOOD, status: "draft" }, undefined), [], "a NON-active record never reads the verdicts");
 });
 
 test("AC3: `activeMethods` returns only methods whose LATEST version is active", () => {
   const root = mkTmp();
-  assert.deepEqual(activeMethods(root), { ok: true, methods: [], evaluated: 0, malformed_lines: 0, file: registryFile(root) }, "an empty registry, reported as evaluated-0 rather than as a crash");
+  // ⛔ EXTENDED by gap-discovery-holdout-cross-experiment-leak-and-contaminated-promotion: the
+  // contamination reading is reported ALWAYS (`excluded_contaminated: []` + the count it was decided
+  // against) so "nothing was excluded" is a reading rather than an absent field — the same
+  // own-value discipline the rest of this module follows.
+  assert.deepEqual(activeMethods(root), { ok: true, methods: [], evaluated: 0, malformed_lines: 0, file: registryFile(root), excluded_contaminated: [], contaminated_verdicts_evaluated: 0 }, "an empty registry, reported as evaluated-0 rather than as a crash");
 
   writeVerdict(root, { method_id: GOOD.method_id, version: 2 });
   assert.equal(appendMethodRecord(root, ACTIVE_OK, { toolCatalog: CATALOG, provenanceSeeds: NO_SEEDS }).ok, true);
@@ -754,4 +767,138 @@ test("AC3 (the real quarantine): the recorded `shared-contract-divergence` promo
   assert.ok(why.includes("refusal_code=HELD_OUT_SHARES_LINEAGE") && why.includes("lineage_ok=false") && why.includes("temporal_ok=false"), why);
   assert.equal(lines(root), 2, "the refused re-promotion appended NOTHING (the retirement is still the latest)");
   assert.deepEqual(activeMethods(root).methods, []);
+});
+
+// ══════════════════════════════════════════════════════════════════════════════════════════════════
+// THE CONTAMINATED-VERDICT LEDGER (task gap-discovery-holdout-cross-experiment-leak-and-contaminated-
+// promotion). Two methods were promoted on verdicts whose held-out cases had all been used before, and
+// every one of those verdicts records `outcome:"evaluated", correct:true` and passes the per-case
+// lineage/temporal gates — the contamination is a property of the CASE HAVING BEEN USED, which no
+// per-case reading can see. The ledger is the list a promotion can consult, the backfill DERIVES it
+// from the verdict carrier rather than picking ids by hand, and `activeMethods` excludes a method
+// whose promoting verdict is on it.
+// ══════════════════════════════════════════════════════════════════════════════════════════════════
+
+const AUTHOR = Object.freeze({ actor: "task-worker", ref: "fixture-worker" });
+
+test("AC(f): a promotion citing a VERDICT_CONTAMINATED verdict is refused — by the list AND by the carrier", () => {
+  const root = mkTmp();
+  writeVerdict(root, { id: "generalization_verdict-fixture0000000000", method_id: GOOD.method_id, version: 2 });
+  // The verdict is recorded and would PASS every per-case gate — which is exactly the defect.
+  const clean = validateMethodRecord(ACTIVE_OK, { toolCatalog: CATALOG, provenanceSeeds: NO_SEEDS, verdicts: readGeneralizationVerdicts(root).records });
+  assert.equal(clean.ok, true, `the baseline must promote BEFORE the ledger lists it: ${clean.reasons?.join(",")}`);
+
+  const listed = appendContaminatedVerdict(root, {
+    verdict_id: "generalization_verdict-fixture0000000000",
+    reason: `${VERDICT_CONTAMINATED}:judged-on-a-held-out-case-the-index-shows-was-used-before`,
+    collisions: [{ kind: "shared_components", source: "sealed:/fixtures/earlier/labels-earlier-sealed.json", ref: "CASE-earlier" }],
+    authored_by: AUTHOR,
+  });
+  assert.equal(listed.ok, true, listed.reasons?.join(","));
+  assert.equal(contaminatedVerdictsFile(root), path.join(root, CONTAMINATED_VERDICTS_REL));
+  assert.deepEqual(readContaminatedVerdicts(root).records.map((r) => r.verdict_id), ["generalization_verdict-fixture0000000000"]);
+
+  // 1. The pure validator, with the list supplied.
+  const direct = validateMethodRecord(ACTIVE_OK, {
+    toolCatalog: CATALOG, provenanceSeeds: NO_SEEDS, verdicts: readGeneralizationVerdicts(root).records,
+    contaminatedVerdictIds: ["generalization_verdict-fixture0000000000"],
+  });
+  assert.equal(direct.ok, false);
+  assert.match(direct.reasons.at(-1), new RegExp(`^${PROMOTION_WITHOUT_VALID_GENERALIZATION}:VERDICT_CONTAMINATED:`));
+
+  // 2. The WRITE path reads the ledger itself, and the SAME record that passed a moment ago is now
+  //    refused — the refusal is caused by the listing, not by the record.
+  const write = appendMethodRecord(root, ACTIVE_OK, { toolCatalog: CATALOG, provenanceSeeds: NO_SEEDS });
+  assert.equal(write.ok, false);
+  assert.equal(write.appended, false);
+  assert.match(write.reasons.at(-1), new RegExp(`^${PROMOTION_WITHOUT_VALID_GENERALIZATION}:VERDICT_CONTAMINATED:`));
+  assert.equal(lines(root), 0, "nothing was appended");
+
+  // NEGATIVE CONTROL on the same predicate: a DIFFERENT verdict ref is not refused for contamination.
+  const other = validateMethodRecord({ ...ACTIVE_OK, generalization_evidence: { verdict_ref: "generalization_verdict-somethingelse00" } }, {
+    toolCatalog: CATALOG, provenanceSeeds: NO_SEEDS, verdicts: [{ id: "generalization_verdict-somethingelse00", method_id: GOOD.method_id, outcome: "evaluated", correct: true, refusal_code: null, lineage_ok: true, temporal_ok: true }],
+    contaminatedVerdictIds: ["generalization_verdict-fixture0000000000"],
+  });
+  assert.equal(other.ok, true, other.reasons?.join(","));
+});
+
+test("AC(f): an UNREADABLE contaminated ledger refuses the write — its own value, never a silent pass", () => {
+  const root = mkTmp();
+  writeVerdict(root, { method_id: GOOD.method_id });
+  fs.mkdirSync(path.dirname(path.join(root, CONTAMINATED_VERDICTS_REL)), { recursive: true });
+  fs.appendFileSync(path.join(root, CONTAMINATED_VERDICTS_REL), "{not json\n", "utf8");
+  const r = appendMethodRecord(root, ACTIVE_OK, { toolCatalog: CATALOG, provenanceSeeds: NO_SEEDS });
+  assert.equal(r.ok, false);
+  assert.match(r.reasons[0], new RegExp(`^${CONTAMINATED_LIST_UNAVAILABLE}:`));
+  assert.equal(lines(root), 0);
+  // …and `activeMethods` reports the same unreadability as its OWN value rather than "nothing excluded".
+  const am = activeMethods(root);
+  assert.equal(am.excluded_contaminated, null);
+  assert.match(am.contamination_reason, new RegExp(`^${CONTAMINATED_LIST_UNAVAILABLE}:`));
+});
+
+test("AC(g): `activeMethods` EXCLUDES a method whose promoting verdict is listed, and reports why", () => {
+  const root = mkTmp();
+  const poisoned = writeVerdict(root, { id: "generalization_verdict-fixture0000000000", method_id: GOOD.method_id, version: 2 });
+  assert.equal(appendMethodRecord(root, ACTIVE_OK, { toolCatalog: CATALOG, provenanceSeeds: NO_SEEDS }).ok, true, "the promotion lands first — the contamination is discovered afterwards");
+  // A second, clean method so the exclusion is shown to be SCOPED rather than a blanket empty list.
+  writeVerdict(root, { id: "generalization_verdict-clean000000000000", method_id: "clean-method", version: 1 });
+  assert.equal(appendMethodRecord(root, { ...GOOD, method_id: "clean-method", status: "active", generalization_evidence: { verdict_ref: "generalization_verdict-clean000000000000" } }, { toolCatalog: CATALOG, provenanceSeeds: NO_SEEDS }).ok, true);
+  assert.deepEqual(activeMethods(root).methods.map((m) => m.method_id).sort(), ["clean-method", GOOD.method_id]);
+
+  const listed = appendContaminatedVerdict(root, { verdict_id: poisoned.id, reason: `${VERDICT_CONTAMINATED}:judged-on-a-used-hold-out`, authored_by: AUTHOR });
+  assert.equal(listed.ok, true, listed.reasons?.join(","));
+  const am = activeMethods(root);
+  assert.deepEqual(am.methods.map((m) => m.method_id), ["clean-method"], "the poisoned method is GONE from the active set");
+  assert.equal(am.excluded_contaminated.length, 1);
+  assert.equal(am.excluded_contaminated[0].method_id, GOOD.method_id);
+  assert.equal(am.excluded_contaminated[0].verdict_ref, poisoned.id);
+  assert.match(am.excluded_contaminated[0].reason, new RegExp(`^${VERDICT_CONTAMINATED}:`));
+  assert.equal(am.contaminated_verdicts_evaluated, 1, "the size of the deny-list it decided against is reported");
+  assert.equal(am.evaluated, 2, "…and both methods were examined");
+});
+
+test("AC(backfill): the ledger is BACKFILLED from the verdict carrier — every verdict on a listed case, none hand-picked", () => {
+  const root = mkTmp();
+  writeVerdict(root, { id: "generalization_verdict-bf0000000000001", held_out_case_id: "CASE-bf-1", method_id: "m-one", version: 2 });
+  writeVerdict(root, { id: "generalization_verdict-bf0000000000002", held_out_case_id: "CASE-bf-2", method_id: "m-two", version: 2 });
+  writeVerdict(root, { id: "generalization_verdict-bf0000000000003", held_out_case_id: "CASE-unrelated", method_id: "m-three", version: 2 });
+
+  const bf = backfillContaminatedVerdicts(root, {
+    contaminatedCases: [
+      { case_id: "CASE-bf-1", collisions: [{ kind: "shared_components", source: "sealed:/fixtures/earlier/labels-earlier-sealed.json", ref: "CASE-earlier-1" }] },
+      { case_id: "CASE-bf-2", collisions: [{ kind: "reused_case_id", source: "sealed:/fixtures/earlier/labels-earlier-sealed.json", ref: "CASE-bf-2" }] },
+    ],
+    authoredBy: AUTHOR,
+  });
+  assert.equal(bf.ok, true, bf.reasons?.join(","));
+  assert.equal(bf.evaluated, 3, "every recorded verdict was examined");
+  assert.equal(bf.selected, 2, "the two whose held-out case is listed");
+  assert.equal(bf.appended, 2);
+  assert.deepEqual(bf.verdict_ids.sort(), ["generalization_verdict-bf0000000000001", "generalization_verdict-bf0000000000002"]);
+  const listed = readContaminatedVerdicts(root).records;
+  assert.deepEqual(listed.map((r) => r.verdict_id).sort(), ["generalization_verdict-bf0000000000001", "generalization_verdict-bf0000000000002"]);
+  assert.ok(!listed.some((r) => r.verdict_id === "generalization_verdict-bf0000000000003"), "an unrelated case's verdict is NOT listed");
+  assert.equal(listed[0].collisions.length >= 1, true, "the collision that condemned the case travels with the record");
+  assert.deepEqual(listed[0].authored_by, AUTHOR);
+
+  // Idempotent: re-running the backfill appends nothing twice (the id covers the verdict + reason).
+  const again = backfillContaminatedVerdicts(root, {
+    contaminatedCases: [{ case_id: "CASE-bf-1" }, { case_id: "CASE-bf-2" }], authoredBy: AUTHOR,
+  });
+  assert.equal(again.appended, 0);
+  assert.equal(again.duplicates, 2);
+  assert.equal(readContaminatedVerdicts(root).records.length, 2);
+
+  // …and the promotion that rests on one of the BACKFILLED verdicts is refused by the write path.
+  const replay = appendMethodRecord(root, {
+    ...GOOD, method_id: "m-one", version: 3, status: "active",
+    generalization_evidence: { verdict_ref: "generalization_verdict-bf0000000000001" },
+  }, { toolCatalog: CATALOG, provenanceSeeds: NO_SEEDS });
+  assert.equal(replay.ok, false);
+  assert.equal(replay.appended, false);
+  assert.match(replay.reasons.at(-1), new RegExp(`^${PROMOTION_WITHOUT_VALID_GENERALIZATION}:VERDICT_CONTAMINATED:`));
+
+  // A caller that names no contaminated case at all is refused rather than writing an empty backfill.
+  assert.deepEqual(backfillContaminatedVerdicts(root, { contaminatedCases: [], authoredBy: AUTHOR }).reasons, ["INGEST_ARG_MISSING:contaminatedCases"]);
 });

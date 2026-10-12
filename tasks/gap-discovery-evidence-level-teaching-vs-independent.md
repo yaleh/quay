@@ -3,7 +3,7 @@ id: gap-discovery-evidence-level-teaching-vs-independent
 title: "Evidence levels (teaching/transfer/independent/production-open): only
   independent verdicts promote; quarantined lineages cannot be revived by lower
   levels"
-status: todo
+status: ready
 labels:
   - gap
   - architecture-discovery
