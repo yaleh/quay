@@ -3,7 +3,7 @@ id: gap-discovery-portfolio-append-only-correction-fold
 title: "Discovery portfolio: append-only correction records
   (duplicate/refuted/fix_task) folded into value metrics and coverage; apply
   GAIN1 c10/c11/c13"
-status: todo
+status: ready
 labels:
   - gap
   - discovery-method
