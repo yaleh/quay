@@ -2660,6 +2660,13 @@ test("case (m) 硬规则 5b — the SAME reserve covers every single-answer STEP
   // The cut-off calls are STILL on the round, still naming their own failure: the rescue is an addition,
   // never a laundering (硬规则 3b).
   assert.equal(round.calls.filter((c) => c.not_evaluated === "not-evaluated:error_max_turns").length, round.answer_reserve.attempted);
+  // ⛔ ONE ENTRY PER CALL. `reportIfCutOff` returns the SAME record when it did not fire, so an
+  // unconditional push would list a call that was made once as two — a count that lies. Measured on the
+  // ARM list (`investigator.calls`), which is where that mistake showed up in a live round.
+  const armCalls = round.investigator.calls;
+  assert.equal(new Set(armCalls).size, armCalls.length, "no call is listed twice on the arm");
+  assert.equal(armCalls.filter((c) => c.step === "investigator").length, 1, "exactly ONE investigation call");
+  assert.equal(armCalls.length, new Set(armCalls.map((c) => c.step)).size, "one investigator call ⇒ one entry");
   assert.match(fact.reason, /call\(s\) were NOT EVALUATED/);
   // Every rescue is its OWN reservation on the same ledger.
   for (const s of ["verifier-report", "refuter-report", "value-assessment-report"]) {

@@ -2646,6 +2646,13 @@ export async function runOpenSemanticDiscovery(root: string, opts: OpenSemanticD
         : path.join(pinned, ".open-semantic-discovery-runs");
       // Every call this ARM made, in call order.
       const armCallRecords: Record<string, unknown>[] = [];
+      /** Put a call on the arm's list, ONCE. ⛔ `reportIfCutOff` hands the SAME record back when it did not
+       *  fire, so pushing unconditionally would list one call twice — and the arm's `calls` reading (and
+       *  anything derived from it) would claim two calls where one was made. A COUNT that lies is the same
+       *  family of defect as a boolean that lies (硬规则 3b). */
+      const noteArmCall = (r: Record<string, unknown>): void => {
+        if (!armCallRecords.includes(r)) armCallRecords.push(r);
+      };
       const inv = await hyp.runInvestigator({
         prompt,
         // `neutralDir` is unused on the pinned path (the cwd gate switches to `verifyCwdRefusal`); it is
@@ -2664,11 +2671,11 @@ export async function runOpenSemanticDiscovery(root: string, opts: OpenSemanticD
         runModel: async (p: string, i: number) => {
           if (spec.markPaired && firstPairedCallMs === null) firstPairedCallMs = now();
           const { res, rec } = await reservingStep(stepKind("investigator"), { prompt: p, tools: INVESTIGATOR_TOOLS, maxTurns: config.investigatorMaxTurns, model: requestedModel });
-          armCallRecords.push(rec);
+          noteArmCall(rec);
           // A run cut off at the cap is rescued BEFORE the engine parses it, so the engine's `hyps` (and
           // therefore the run file it writes, and `inv.parsed`) are the RESCUE's answer rather than zero.
           const out = await reportIfCutOff(p, res, rec, stepKind("investigator-report"));
-          armCallRecords.push(out.rec);
+          noteArmCall(out.rec);
           armTexts.push(hyp.callText(String(out.res?.stdout ?? "")));
           return out.res;
         },
@@ -2722,12 +2729,12 @@ export async function runOpenSemanticDiscovery(root: string, opts: OpenSemanticD
         strategy: "default", onlyCluster: null, evidence: null, model: requestedModel,
         runModel: async (p: string) => {
           const { res, rec } = await reservingStep(stepKind("verifier"), { prompt: p, tools: VERIFIER_TOOLS, maxTurns: config.verifierMaxTurns, model: requestedModel });
-          armCallRecords.push(rec);
+          noteArmCall(rec);
           // A verifier cut off at its OWN cap is the same failure as an investigator cut off at its own:
           // its `undetermined`/`turn-budget` verdict refutes and supports nothing, and the round would read
           // as "verified 3, confirmed 0" for a reason that never appears on the record.
           const out = await reportIfCutOff(p, res, rec, stepKind("verifier-report"));
-          armCallRecords.push(out.rec);
+          noteArmCall(out.rec);
           return out.res;
         },
       });
@@ -2782,9 +2789,9 @@ export async function runOpenSemanticDiscovery(root: string, opts: OpenSemanticD
           evidence: null, model: requestedModel,
           runModel: async (p: string) => {
             const { res, rec } = await reservingStep(stepKind("refuter"), { prompt: p, tools: REFUTER_TOOLS, maxTurns: config.refutationMaxTurns, model: requestedModel });
-            armCallRecords.push(rec);
+            noteArmCall(rec);
             const out = await reportIfCutOff(p, res, rec, stepKind("refuter-report"));
-            armCallRecords.push(out.rec);
+            noteArmCall(out.rec);
             return out.res;
           },
         });
@@ -2813,9 +2820,9 @@ export async function runOpenSemanticDiscovery(root: string, opts: OpenSemanticD
           evidence: null, model: requestedModel,
           runModel: async (p: string) => {
             const { res, rec } = await reservingStep(stepKind("value-assessment"), { prompt: p, tools: VALUE_TOOLS, maxTurns: config.refutationMaxTurns, model: requestedModel });
-            armCallRecords.push(rec);
+            noteArmCall(rec);
             const out = await reportIfCutOff(p, res, rec, stepKind("value-assessment-report"));
-            armCallRecords.push(out.rec);
+            noteArmCall(out.rec);
             return out.res;
           },
         });
@@ -2889,9 +2896,9 @@ export async function runOpenSemanticDiscovery(root: string, opts: OpenSemanticD
       const { res: noveltyRes, rec: callRec } = await reservingStep(stepKind("novelty-check"), {
         prompt, tools: NOVELTY_TOOLS, maxTurns: config.refutationMaxTurns, model: requestedModel,
       });
-      armCallRecords.push(callRec);
+      noteArmCall(callRec);
       const noveltyOut = await reportIfCutOff(prompt, noveltyRes, callRec, stepKind("novelty-check-report"));
-      armCallRecords.push(noveltyOut.rec);
+      noteArmCall(noveltyOut.rec);
       const res = noveltyOut.res;
       const parsed = parseNoveltyVerdict(hyp.parseJsonObject(hyp.callText(String(res?.stdout ?? ""))));
       // A `duplicate` verdict is only usable when the record it names is a candidate that RESOLVES on the
@@ -3114,11 +3121,14 @@ export async function runOpenSemanticDiscovery(root: string, opts: OpenSemanticD
         runModel: async (p: string, i: number) => {
           const { res, rec } = await reservingStep("shadow-investigator", { prompt: p, tools: INVESTIGATOR_TOOLS, maxTurns: config.investigatorMaxTurns, model: requestedModel });
           shadowCalls++;
-          shadowCallRecords.push(rec);
+          // Same one-entry-per-call discipline as the production arms: `reportIfCutOff` returns the SAME
+          // record when it did not fire.
+          if (!shadowCallRecords.includes(rec)) shadowCallRecords.push(rec);
           // The shadow pass gets the SAME one-shot reserve: it is an isolated measurement, but a shadow run
           // cut off at the cap measures nothing, and its calls already count against the same ledger.
           const out = await reportIfCutOff(p, res, rec, "shadow-investigator-report");
-          shadowCallRecords.push(out.rec);
+          if (!shadowCallRecords.includes(out.rec)) shadowCallRecords.push(out.rec);
+          if (out.rec !== rec) shadowCalls++;
           return out.res;
         },
       });
