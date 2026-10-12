@@ -2,7 +2,7 @@
 id: gap-discovery-method-registry-and-versioned-contract
 title: "Discovery Method: versioned domain contract + append-only registry
   (Phase 0 of the self-bootstrapping discovery loop)"
-status: ready
+status: done
 labels:
   - gap
   - architecture-discovery
