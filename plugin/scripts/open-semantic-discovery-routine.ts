@@ -921,17 +921,27 @@ export function callNotEvaluatedToken(rec: Record<string, unknown> | null | unde
   const exit = rec.exit;
   if (exit === null || exit === undefined) return "not-evaluated:no-exit-status";
   const subtype = typeof rec.subtype === "string" && rec.subtype !== "" ? rec.subtype : null;
+  // ⛔ ① AN API-TRANSPORT ERROR IS ITS OWN READING, whatever the exit code or subtype says. MEASURED
+  // (task AC5, 2026-10-13): the gateway answers an unknown model with `exit 1`, `subtype:"success"`,
+  // `is_error:true`, `has_result:true`, 0 tokens — so the subtype is NOT a usable name there, and reading
+  // it verbatim produced the self-contradictory token `not-evaluated:success`. The structural predicate is
+  // the stream reader's own `api_error_event` (which excludes the turn-cap kill, a budget fact, not an API
+  // one), not `is_error` alone — `is_error` is true for `error_max_turns` too.
+  if (rec.api_error_event === true) return "not-evaluated:api-error-event";
+  const hasResult = rec.has_result === true;
   if (exit === 0) {
     // ⛔ THE FIX: exit 0 alone is not "it ran". The stream's OWN `result` event is the direct reading, and
     // `has_result !== true` covers both "no result event" and "the field was never captured" — 缺值 = 未查
     // (硬规则 6), so an uncaptured field must not be read as a success either.
-    if (rec.has_result !== true) return subtype === null ? "not-evaluated:no-result-event" : `not-evaluated:${subtype}`;
-    // A `result` event that says the run ERRORED is not a success just because the process exited 0 — the
-    // API-transport refusals (rate limit / overload / auth) arrive exactly this way.
+    if (!hasResult) return subtype === null ? "not-evaluated:no-result-event" : `not-evaluated:${subtype}`;
+    // A `result` event that says the run ERRORED is not a success just because the process exited 0.
     if (rec.is_error === true) return subtype === null ? "not-evaluated:uninstrumented-result-error" : `not-evaluated:${subtype}`;
     return null;
   }
-  return subtype === null ? `not-evaluated:uninstrumented-exit-${String(exit)}` : `not-evaluated:${subtype}`;
+  // ⛔ `success` is not a CAUSE: a non-zero exit whose subtype says `success` (the ① shape above, with the
+  // capture missing) must fall through to the exit reading rather than mint `not-evaluated:success`.
+  if (subtype !== null && subtype !== "success") return `not-evaluated:${subtype}`;
+  return `not-evaluated:uninstrumented-exit-${String(exit)}`;
 }
 
 /** The FIRST `not-evaluated:<…>` token across a round's call records, or `null` when every call ran. The
@@ -3003,11 +3013,14 @@ export async function runOpenSemanticDiscovery(root: string, opts: OpenSemanticD
         subtype: stream.ok ? (stream.subtype ?? null) : null,
         num_turns: stream.ok && Number.isFinite(stream.num_turns) ? (stream.num_turns as number) : null,
         is_error: stream.ok && typeof stream.is_error === "boolean" ? (stream.is_error as boolean) : null,
-        stdout_bytes: diag.bytes === 0 ? Buffer.byteLength(stdout, "utf8") : diag.bytes,
+        stdout_bytes: diag.bytes,
         stdout_lines: diag.lines ?? null,
         stdout_events_by_type: diag.events_by_type ?? {},
         stdout_unparsed_json_lines: diag.unparsed_json_lines ?? null,
         has_result: hasResult,
+        // The stream reader's OWN transport-error predicate — the token and the class must key on the SAME
+        // structural reading, or the two readings of one call could disagree.
+        api_error_event: diag.api_error_event === true,
         stderr_chars: stderrTail.chars,
         stderr_tail: stderrTail.tail,
         stderr_tail_truncated: stderrTail.truncated,
