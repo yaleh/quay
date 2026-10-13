@@ -153,11 +153,3 @@ Their preemptible fixtures now use the surviving fire arm (a MISSING task file �
 fail-closed-toward-fire fallback already pinned by inner-blocked-signal.test.mjs) and their
 non-preemptible fixtures use legal statuses. Without this, correcting the literal reds 8 tests that
 encode the defect.
-
-## Blocker
-
-**2026-10-13T04:11:58.243Z — worker 未落地（exited-not-landed）**
-
-- 未落地原因：step=suite: # fail 84
-- run_id：wk-prod-anchor
-- session_id：58bdc32d-33d9-46ea-988a-5e2f0763a2e4
