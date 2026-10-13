@@ -3,7 +3,7 @@ id: gap-routine-semantic-dedup-scan-parse-args-adoption-split
 title: "semantic-dedup-scan: Split adoption of one canonical: eight sites thinly
   wrap gate-script-base.ts parseArgs while six hand-roll their own token loops
   with genuinely divergent error"
-status: todo
+status: ready
 labels:
   - gap
   - routine-filed
