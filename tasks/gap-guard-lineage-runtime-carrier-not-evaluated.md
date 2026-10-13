@@ -2,7 +2,7 @@
 id: gap-guard-lineage-runtime-carrier-not-evaluated
 title: "守卫谱系把 gitignored 运行时载体的快照缺席读成「对象已删」：file: 声明须有 runtime: 类并报
   NOT-EVALUATED（P4-missing-guard-object 假阳性）"
-status: todo
+status: ready
 labels:
   - gap
   - defect
