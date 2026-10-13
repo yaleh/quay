@@ -2,7 +2,7 @@
 id: gap-architecture-review-wrong-root-detector-argv-and-no-config-driven-host-entry
 title: architecture-review 无 config.yml host 入口 + 三检测器 argv 解析到目标仓根（非
   kernel）两处结构性不可部署缺陷
-status: ready
+status: done
 labels:
   - gap
 parent: null
