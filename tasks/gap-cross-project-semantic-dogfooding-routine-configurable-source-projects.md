@@ -7,7 +7,7 @@ title: new periodic, report-only, autonomous routine that semantically dogfoods
   from Quay-generic defects, reuses OSD's verifier/refuter/budget/Portfolio
   machinery, not gated on task_trace or source diff, no pre-written mechanical
   detectors
-status: todo
+status: ready
 labels:
   - gap
   - discovery-method
