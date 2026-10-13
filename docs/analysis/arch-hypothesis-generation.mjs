@@ -752,6 +752,39 @@ export function parseVerifierStream(stdout) {
   return out;
 }
 
+/** How many argument heads a per-call TOOL-USE reading keeps. A BOUND, not a policy: the heads are there
+ *  to show WHICH files/patterns a call opened, and an unbounded carry would make the reading as bulky as
+ *  the stream it summarises. */
+export const TOOL_USE_PATHS_MAX = 8;
+
+/**
+ * The TOOL-USE reading of ONE instrumented call, read off the SAME per-turn records `parseVerifierStream`
+ * already produced (硬规则 5b: one reader, never a second that could drift from it):
+ *   • `by_tool`  — how many calls were made to each tool (`{Read:3, Grep:1}`);
+ *   • `paths`    — the first `maxPaths` argument heads, i.e. the files/patterns actually opened.
+ *
+ * WHY IT EXISTS (task gap-open-discovery-refutation-chain-undetermined-is-unattributable-and-budget-
+ * truncated, Plan item 1): a verdict is only ATTRIBUTABLE if the record shows the call READ the tree
+ * rather than answered from its prompt. `Read/Grep counts > 0` is the direct reading of "this refutation
+ * was produced by looking at the code", and it is what makes «survived» worth anything.
+ * ⛔ A call whose stream did not parse yields `null` at the CALL SITE (`stream.ok === false`), never a
+ * zero-count object: "made no tool calls" and "no turns were captured" are different facts (硬规则 3b).
+ * @param {object[]|null|undefined} turns the `parseVerifierStream(...).turns` list
+ * @returns {{total:number, by_tool:Object<string,number>, paths:object[], paths_truncated:boolean}}
+ */
+export function toolUseSummary(turns, { maxPaths = TOOL_USE_PATHS_MAX } = {}) {
+  const list = Array.isArray(turns) ? turns : [];
+  const byTool = {};
+  const paths = [];
+  for (const t of list) {
+    const name = typeof t?.tool === "string" && t.tool !== "" ? t.tool : "(unnamed)";
+    byTool[name] = (byTool[name] ?? 0) + 1;
+    const head = typeof t?.args_head === "string" ? t.args_head : "";
+    if (paths.length < maxPaths && head !== "") paths.push({ tool: name, args_head: head });
+  }
+  return { total: list.length, by_tool: byTool, paths, paths_truncated: list.length > paths.length };
+}
+
 /**
  * The STRUCTURAL reading of a launcher's stdout — the layer BELOW `parseVerifierStream`'s semantics.
  *
@@ -1213,6 +1246,13 @@ export async function runVerifier({
       intentional: j?.intentional_difference_found ?? null,
       evidence: Array.isArray(j?.evidence) ? j.evidence : [],
       counterexample: j?.counterexample ?? null,
+      // ⛔ THE POSITIONS A CALL CHECKED (`checked`), present only when the answer carried them — the same
+      // conditional-key discipline as `mechanical_evidence` below, so a row whose answer omits the field
+      // stays byte-identical key-for-key. WHY: a «survived» verdict is only attributable if the call says
+      // WHICH positions it examined and found nothing at (task gap-open-discovery-refutation-chain-
+      // undetermined-is-unattributable-and-budget-truncated, Plan item 3). Absent is absent — never an
+      // empty array standing in for "it named none" (硬规则 3b).
+      ...(Array.isArray(j?.checked) ? { checked: j.checked } : {}),
       // The mechanical finding, ATTACHED as evidence. The key is present only when there IS one, so a
       // `--provenance`-free row stays byte-identical to the pre-2026-10-12 rendering (where the field did
       // not exist) and a provenance-free run's artifact is unchanged.

@@ -113,6 +113,32 @@
 // kept for the controlled experiments of the P2 task — NOT the production default) is ONE turn, because
 // with no tools there is nothing to iterate on.
 //
+// ⛔ A REFUTATION VERDICT IS ATTRIBUTABLE, AND «undetermined» NAMES ITS CAUSE (task
+// gap-open-discovery-refutation-chain-undetermined-is-unattributable-and-budget-truncated). Two defects
+// this closes, both measured on the production carrier: every refutation the routine had ever recorded was
+// `undetermined`, a word that could not tell a turn-cap kill from a genuine absence of counter-evidence
+// from a call that never answered; and the per-cluster `refutation_*` fields were read off the ENGINE ROW
+// (the parser's tool-call count, in a unit `--max-turns` is not expressed in, and — when a truncated call
+// was rescued — the tool-less rescue's row rather than the refuter's). Now:
+//   · EVERY refuter call this cluster consumed is on the cluster record (`refutation_call.calls`), each
+//     with its OWN `num_turns` (CLI unit), `subtype`, exit, `not_evaluated` and `tool_use` counts;
+//   · the verdict is read from the call that ANSWERED (a fresh-context retry SUPERSEDES the call it
+//     repeats), so two clusters never share one call's numbers;
+//   · `refutation_undetermined_cause` ∈ {`budget-truncated`, `no-counter-evidence`, `call-failed`,
+//     `unparseable`} — one value per FACT, with «budget-truncated» the only one a retry can cure;
+//   · a TRUNCATED refuter gets ONE fresh-context retry at `refutation_retry_max_turns` (a MEASURED
+//     default — see `DEFAULT_REFUTATION_RETRY_MAX_TURNS`), reserved on the same 24h ledger so it is
+//     counted and capped like any other call. It REPLACES the tool-less answer reserve for this step: a
+//     refuter's value is its independent reading, and an answer distilled from its own cut-off narration
+//     would be the same attempt continued;
+//   · the first verifier's CITED LINES ride along as STARTING POINTS (`refutationPromptFor`) — a shortcut
+//     to the files, explicitly NOT a case to agree with, and the template is byte-identical when it cited
+//     nothing. The refuter must name a counterexample OR the positions it checked, so a «survived» verdict
+//     carries something a reader can audit.
+// ⛔ WHAT DID NOT CHANGE: what counts as CONFIRMED (a determinate «survived», and nothing else — an
+// `undetermined` is never a confirmation, now also structurally: a verdict read off a call that did not
+// answer can never spell one), the report-only surface, and the kill switch.
+//
 // ⛔ NOT a hot-path gate (the `gap-fan-in-remove-archguard-gate` lesson): nothing here is called by
 // fan-in / scoped-gate / any per-task path. The only caller is the quality driver's routine table.
 
@@ -245,6 +271,30 @@ export const VALUE_TOOLS = "Read,Grep";
 /** The NOVELTY checker's tools: the same read-only envelope. It is a JUDGMENT call like the refuter, not
  *  an exploration — it may re-read the source to settle whether a claim is new, and nothing more. */
 export const NOVELTY_TOOLS = "Read,Grep";
+
+// ── THE REFUTER'S RETRY BUDGET, SET FROM A MEASURED DISTRIBUTION ──────────────────────────────────────
+// THE DEFECT THIS CLOSES (task gap-open-discovery-refutation-chain-undetermined-is-unattributable-and-
+// budget-truncated, Plan item 2). The refuter carried the SMALLEST turn budget in the chain (6) although
+// refuting needs at least as much reading as verifying — and production measured the consequence: of the
+// three refuter calls ever made, `num_turns` = [7, 9, unmeasured], and NOT ONE reached a determinate
+// verdict. A truncated refuter therefore produced `undetermined`, which is indistinguishable on the record
+// from «read the code and found no counter-evidence» — the exact conflation this task exists to end.
+//
+// ⛔ THE NUMBER IS MEASURED, NOT GUESSED. The persisted distribution of ANSWERED (`not_evaluated:null`)
+// calls that READ the tree with tools, i.e. the only population whose turn count shows what a completed
+// tool-reading call costs (`num_turns` per step, CLI unit, over every `kind:"scan-round"` line in the
+// production carrier at 2026-10-13):
+//     investigator         n=5   [26, 20, 16, 23, 23]
+//     shadow-investigator  n=6   [13, 18, 13, 23, 22, 17]
+//     verifier             n=3   [17, 14, 14]
+//     refuter              n=1   [9]        ← fewer than 10 ⇒ AC3's own escape clause
+// Pooled tool-reading population n = 11, whose p100 (the stated percentile) is 26. That is the retry's
+// budget: ONE fresh-context retry that fits EVERY measured completed tool-reading call on this pin.
+// ⛔ It is a RETRY budget, not the step's: the first refuter call keeps `refutation_max_turns` (6), because
+// the refuter's OWN answered sample count (1) is below the ten AC3 requires before a per-step budget may
+// be moved off its current value. Lowering or raising the FIRST budget on one sample would be the guess
+// AC3 forbids; spending ONE extra counted call instead is a measurement-backed choice.
+export const DEFAULT_REFUTATION_RETRY_MAX_TURNS = 26;
 
 // ── the ANSWER RESERVE (task gap-open-semantic-discovery-investigator-exits-before-hypotheses-zero-semantic-output) ──
 // THE DEFECT THIS CLOSES. In production the first two resident rounds each recorded `exit 1`, `turns: 13`
@@ -446,6 +496,10 @@ export interface OpenSemanticDiscoveryConfig {
   investigatorMaxTurns: number;
   verifierMaxTurns: number;
   refutationMaxTurns: number;
+  /** The budget of the ONE fresh-context retry a truncated refuter gets. An OPTIONAL extra key (like
+   *  `investigator_max_turns`), NOT one of the declared ten: a section written before the retry existed
+   *  must keep parsing. Absent ⇒ `DEFAULT_REFUTATION_RETRY_MAX_TURNS` (the measured p100, see above). */
+  refutationRetryMaxTurns: number;
   maxWallMs: number;
   maxModelCallsPer24h: number;
   maxUsdPer24h: number;
@@ -479,6 +533,7 @@ const DISABLED_DEFAULTS: OpenSemanticDiscoveryConfig = {
   investigatorMaxTurns: DEFAULT_INVESTIGATOR_MAX_TURNS,
   verifierMaxTurns: 8,
   refutationMaxTurns: 6,
+  refutationRetryMaxTurns: DEFAULT_REFUTATION_RETRY_MAX_TURNS,
   maxWallMs: 1_200_000,
   maxModelCallsPer24h: 120,
   maxUsdPer24h: 30,
@@ -573,6 +628,25 @@ export function parseOpenSemanticDiscoverySection(raw: unknown): { config: OpenS
     ? { value: DEFAULT_GAIN_EVERY_ROUNDS, error: null }
     : intKey("gain_every_rounds", 1);
   if (gainEvery.error) return { config: null, error: gainEvery.error };
+  // ── `refutation_retry_max_turns`: THE FOURTH OPTIONAL EXTRA BOUND (the refuter's fresh-context retry).
+  // ⛔ WHY ITS DEFAULT IS `max(<measured p100>, refutation_max_turns + 1)` RATHER THAN THE BARE CONSTANT:
+  // the Plan's retry is «ONE retry with a LARGER budget», so a default that was not larger than the first
+  // call's would silently make the retry a repeat of the same truncation. An operator who raises
+  // `refutation_max_turns` past the measured p100 must not thereby turn the retry into a no-op — the
+  // default follows the declared first budget, and a DECLARED retry budget must be strictly larger
+  // (checked below) so «larger» is an invariant of this config rather than of its default.
+  const retryTurns = rec.refutation_retry_max_turns === undefined || rec.refutation_retry_max_turns === null
+    ? { value: Math.max(DEFAULT_REFUTATION_RETRY_MAX_TURNS, parsed.refutation_max_turns + 1), error: null }
+    : intKey("refutation_retry_max_turns", 1);
+  if (retryTurns.error) return { config: null, error: retryTurns.error };
+  if ((retryTurns.value as number) <= parsed.refutation_max_turns) {
+    return {
+      config: null,
+      error: cfgBad(
+        `'refutation_retry_max_turns' must be > 'refutation_max_turns' (${retryTurns.value} <= ${parsed.refutation_max_turns}) — the retry is defined as ONE fresh-context call with a LARGER budget, and a retry that was not larger would repeat the truncation it exists to get past`,
+      ),
+    };
+  }
   // `task_log_context_limit` is the THIRD optional extra bound (same rationale). Absent ⇒ the stated
   // default; present ⇒ a well-formed integer in [1, the read surface's own page maximum]. The UPPER bound
   // is refused HERE rather than left to the read: `readTaskLog` treats a limit above its maximum as a
@@ -614,6 +688,7 @@ export function parseOpenSemanticDiscoverySection(raw: unknown): { config: OpenS
       investigatorMaxTurns: invTurns.value as number,
       verifierMaxTurns: parsed.verifier_max_turns,
       refutationMaxTurns: parsed.refutation_max_turns,
+      refutationRetryMaxTurns: retryTurns.value as number,
       maxWallMs: parsed.max_wall_ms,
       maxModelCallsPer24h: parsed.max_model_calls_per_24h,
       maxUsdPer24h: usd,
@@ -978,6 +1053,160 @@ export function summarizeReserve(calls: readonly Record<string, unknown>[]): {
   };
 }
 
+// ── THE CLUSTER ↔ CALL JOIN, AND THE «WHY WAS IT UNDETERMINED» READING ────────────────────────────────
+// THE DEFECT THIS CLOSES (task gap-open-discovery-refutation-chain-undetermined-is-unattributable-and-
+// budget-truncated, Plan item 1). Production read `undetermined` on EVERY refutation it ever recorded, and
+// the record could not tell three different situations apart:
+//     (i)  the refuter was KILLED at its turn cap before it could answer (a BUDGET fact);
+//     (ii) it read the code and genuinely found no counter-evidence (a SEMANTIC fact);
+//     (iii) the call never answered at all — a broken/gateway call (an INFRASTRUCTURE fact).
+// Worse, the two fields that were supposed to carry this were not the refuter's own: `refutation_turns`
+// was read off the engine ROW, which is (a) in the engine's own `stream.turns.length` unit (tool calls),
+// NOT the CLI's `num_turns` the cap is expressed in, and (b) — when a truncated call was rescued — the
+// RESCUE's row rather than the refuter's. Measured 2026-10-12: cluster 20:40#3 recorded
+// `refutation_turns:0` while its refuter call had run 7 turns (the 0 was the tool-less rescue's), and
+// cluster 21:47#3 recorded `refutation_turns:9` for a call that emitted no result at all.
+//
+// ⛔ THE PREDICATE IS THE CALL RECORD'S OWN, never a second derivation: `callNotEvaluatedToken` already
+// answers «did this call run?» from the captured bytes (硬规则 5b), so the cause is a MAPPING of that
+// token plus the engine's own coarse `verdict_cause` — not a third reading of the stream.
+export const REFUTATION_UNDETERMINED_CAUSES = ["budget-truncated", "no-counter-evidence", "call-failed", "unparseable"] as const;
+export type RefutationUndeterminedCause = (typeof REFUTATION_UNDETERMINED_CAUSES)[number];
+
+/** WHY a refutation ended `undetermined`, or `null` when it is DETERMINATE. The four values are the Plan's
+ *  own vocabulary, and each is a different FACT about the round:
+ *    • `budget-truncated`   — the call was killed at the turn cap (`error_max_turns`). A BUDGET fact: the
+ *      refuter never finished reading, so «no counterexample» was never established. This is the ONE cause
+ *      the retry exists for;
+ *    • `call-failed`        — the call did not answer at all (a non-zero exit with no result, a spawn
+ *      error, a timeout, an API/gateway refusal). An INFRASTRUCTURE fact, and a retry with more turns
+ *      would only reproduce it — which is why the retry keys on `budget-truncated` ALONE;
+ *    • `unparseable`        — the call ANSWERED, but its text was not a readable verdict (no JSON object,
+ *      or a `verdict` outside the declared vocabulary). The model spoke; what it said could not be read;
+ *    • `no-counter-evidence`— the call ANSWERED with `verdict:"undetermined"`: it read the code and the
+ *      code did not settle the claim. This is the ONLY one of the four that is a statement about the
+ *      repository rather than about the round, and it is still NOT a confirmation (the governing rule is
+ *      unchanged: undetermined is never confirmed).
+ *  ⛔ `token` is checked FIRST: a call that never answered has no verdict to read, whatever a parser made
+ *  of the bytes it left behind — reading the verdict first is exactly how a killed call was laundered into
+ *  «found nothing» (硬规则 3b). */
+export function refutationUndeterminedCause(input: {
+  token: string | null;
+  verdict: string | null;
+  verdictCause: string | null;
+}): RefutationUndeterminedCause | null {
+  if (input.token !== null) return input.token === "not-evaluated:error_max_turns" ? "budget-truncated" : "call-failed";
+  // A determinate verdict, from a call that ran: the ONE shape that may reach `confirmed`.
+  if (input.verdict === "supported" || input.verdict === "refuted") return null;
+  if (input.verdictCause === "unparseable" || input.verdictCause === "verdict-not-in-vocab") return "unparseable";
+  if (input.verdict === "undetermined") return "no-counter-evidence";
+  // Everything else — a row with no verdict and no cause the vocabulary names — is an answer that could
+  // not be read. Fail-closed toward «we do not know», never toward «nothing found».
+  return "unparseable";
+}
+
+/** ONE refuter call, as the cluster record carries it. Every field is read from the CALL RECORD that
+ *  produced the answer — never from the engine row, whose units and whose identity (the rescue vs the
+ *  call) are precisely what the old join got wrong. */
+export interface RefutationCallSummary {
+  /** Which call this was, in the retry chain: `first` / `retry` / a tool-less `rescue`. */
+  role: string;
+  step: string | null;
+  reservation_id: string | null;
+  /** The CLI's OWN turn unit (`result.num_turns`) — the unit `--max-turns` is expressed in. `null` when
+   *  the stream never reported one: absent is absent, never 0 (硬规则 3b). */
+  num_turns: number | null;
+  /** The realized tool-call count (`stream.turns.length`) — a DIFFERENT unit from `num_turns`, kept
+   *  beside it so the two can never be confused again. */
+  tool_turns: number | null;
+  /** The stream's structural subtype (`error_max_turns` / `success` / …), `null` when it did not parse. */
+  subtype: string | null;
+  exit: number | null;
+  not_evaluated: string | null;
+  cost_usd: number | null;
+  /** `{Read:2, Grep:1}` — the DIRECT evidence that this call read the tree. */
+  tool_use: { total: number; by_tool: Record<string, number>; paths: unknown[]; paths_truncated: boolean } | null;
+}
+export interface RefutationReading {
+  /** `supported` = SURVIVED (determinate), `refuted` (determinate), `undetermined`, `not-run`. */
+  verdict: string;
+  counterexample: unknown;
+  /** The positions the refuter says it checked — present only when its answer named any. */
+  checked: unknown[] | null;
+  /** `null` ⇒ the verdict is DETERMINATE (the only case that may reach `confirmed`). */
+  undetermined_cause: RefutationUndeterminedCause | null;
+  /** The calls this cluster's refutation consumed, in call order. */
+  calls: RefutationCallSummary[];
+  /** The call whose answer the verdict was read from — the LAST one that ran. `null` when none did. */
+  answered_by: string | null;
+  /** The CLI's own `num_turns` of the ANSWERING call. */
+  turns: number | null;
+  subtype: string | null;
+  cost_usd: number | null;
+  /** The answering call's tool-use reading — what makes «survived» attributable. */
+  tool_use: RefutationCallSummary["tool_use"];
+  /** How many evidence lines the refuter's own answer cited. */
+  evidence_cited: number;
+  reservation_ids: string[];
+  retried: boolean;
+}
+
+/** THE JOIN ITSELF. `calls` is the list of refuter calls THIS cluster consumed, captured at the call site
+ *  (so a second cluster's calls can never appear in a first cluster's reading — the Plan's «two clusters
+ *  whose refuter calls differ ⇒ each cluster's fields equal its OWN call's»). `result` is the engine row
+ *  the ANSWERING stream produced, or `null` when no refuter ran.
+ *  ⛔ The answering call is the LAST one in the list: a fresh-context retry SUPERSEDES the truncated call
+ *  it repeats, so the verdict is read from the retry's stream (which is also the stream the engine's
+ *  `runModel` returned — the two agree by construction rather than by a second lookup). */
+export function refutationReading(input: {
+  calls: readonly Record<string, unknown>[];
+  result: Record<string, unknown> | null;
+}): RefutationReading {
+  const summarize = (c: Record<string, unknown>, role: string): RefutationCallSummary => ({
+    role,
+    step: typeof c.step === "string" ? c.step : null,
+    reservation_id: typeof c.reservation_id === "string" ? c.reservation_id : null,
+    num_turns: typeof c.num_turns === "number" && Number.isFinite(c.num_turns) ? c.num_turns : null,
+    tool_turns: typeof c.turns === "number" && Number.isFinite(c.turns) ? c.turns : null,
+    subtype: typeof c.subtype === "string" && c.subtype !== "" ? c.subtype : null,
+    exit: typeof c.exit === "number" ? c.exit : null,
+    not_evaluated: typeof c.not_evaluated === "string" ? c.not_evaluated : null,
+    cost_usd: typeof c.cost_charged_usd === "number" ? c.cost_charged_usd : null,
+    tool_use: (c.tool_use ?? null) as RefutationCallSummary["tool_use"],
+  });
+  // The role of a call in the chain: the FIRST is the refuter's own attempt; anything after it is either
+  // the budget retry (marked with its own cause) or a tool-less answer reserve.
+  const roleOf = (c: Record<string, unknown>): string => (c.budget_retry === true ? "retry" : "rescue");
+  const calls = input.calls.map((c, i) => summarize(c, i === 0 ? "first" : roleOf(c)));
+  const answering = input.calls.length > 0 ? input.calls[input.calls.length - 1] : null;
+  const answered = answering === null ? null : calls[calls.length - 1];
+  const token = answering === null ? null : callNotEvaluatedToken(answering);
+  const verdict = input.result === null ? "not-run" : (typeof input.result.verdict === "string" ? input.result.verdict : "undetermined");
+  const cause = input.result === null
+    ? null
+    : refutationUndeterminedCause({
+      token,
+      verdict: typeof input.result.verdict === "string" ? input.result.verdict : null,
+      verdictCause: typeof input.result.verdict_cause === "string" ? input.result.verdict_cause : null,
+    });
+  return {
+    verdict,
+    counterexample: input.result === null ? null : (input.result.counterexample ?? null),
+    checked: input.result !== null && Array.isArray(input.result.checked) ? (input.result.checked as unknown[]) : null,
+    undetermined_cause: cause,
+    calls,
+    answered_by: answered === null ? null : answered.role,
+    // ⛔ THE FIX: the CLI unit, from the CALL, not the engine row's tool-call count.
+    turns: answered === null ? null : answered.num_turns,
+    subtype: answered === null ? null : answered.subtype,
+    cost_usd: answered === null ? null : answered.cost_usd,
+    tool_use: answered === null ? null : answered.tool_use,
+    evidence_cited: input.result !== null && Array.isArray(input.result.evidence) ? (input.result.evidence as unknown[]).length : 0,
+    reservation_ids: calls.map((c) => c.reservation_id).filter((x): x is string => x !== null),
+    retried: calls.some((c) => c.role === "retry"),
+  };
+}
+
 // ── the engine modules: resolved from DISK at runtime, never statically imported (see the header) ────
 export const HYPOTHESIS_MODULE_FILE = "arch-hypothesis-generation.mjs";
 export const PORTFOLIO_MODULE_FILE = "discovery-portfolio.mjs";
@@ -1020,6 +1249,13 @@ export interface HypothesisModule {
     truncated_json?: unknown; has_result?: unknown; events_by_type?: unknown; api_error_event?: unknown;
   };
   callText: (stdout: string) => string;
+  /** The TOOL-USE reading of one instrumented call (counts by tool + the first N argument heads), read
+   *  off the per-turn records `parseVerifierStream` already produced. Consumed rather than re-derived
+   *  (硬规则 5b) so the ONE reader of the parsed turn shape is the engine's; it is what makes a refutation
+   *  verdict ATTRIBUTABLE («this call read the tree» vs «it answered from its prompt»). */
+  toolUseSummary: (turns: unknown, opts?: { maxPaths?: number }) => {
+    total?: unknown; by_tool?: unknown; paths?: unknown; paths_truncated?: unknown;
+  };
   defaultVerifierPrompt: (here?: string) => string;
   defaultInvestigatorPrompt: (here?: string) => string;
   TOOL: string;
@@ -1215,8 +1451,9 @@ export function methodLabel(m: { method_id: string; version: number | null }): s
   return `${m.method_id}@${m.version === null ? "v?" : `v${m.version}`}`;
 }
 
-/** The REFUTATION prompt. Its ONLY input is the cluster's claim and components — it never sees the first
- *  verifier's reasoning, which is the whole point of a fresh-context independent refutation. */
+/** The REFUTATION prompt. Its input is the cluster's claim and components plus — since this task — the
+ *  positions the first verifier says it read, handed over as STARTING POINTS to attack. It never sees the
+ *  first verifier's REASONING, which is the whole point of a fresh-context independent refutation. */
 export const REFUTATION_PROMPT_TEMPLATE = [
   "You are an INDEPENDENT REFUTER. Another agent claimed the following about this repository.",
   "Your ONLY job is to REFUTE it from the code. Read the source with Read/Grep before answering.",
@@ -1227,10 +1464,64 @@ export const REFUTATION_PROMPT_TEMPLATE = [
   "",
   'Return ONE JSON object: {"verdict":"supported|refuted|undetermined","intentional_difference_found":"',
   'the specific counterexample you found, or null","evidence":["file:line — what it shows"],',
-  '"counterexample":"what would have to be true for the claim to hold","summary":"one sentence"}',
+  '"counterexample":"what would have to be true for the claim to hold","checked":["file:line — a position',
+  'you examined and found nothing at"],"summary":"one sentence"}',
   'Use "refuted" when you FOUND a concrete counterexample in the code; "supported" ONLY when you tried and',
   'could not; "undetermined" when the code does not settle it.',
 ].join("\n");
+
+/** How many of the first verifier's cited lines are handed to the refuter as STARTING POINTS. A BOUND, not
+ *  a policy: the block exists to save the refuter the search for the relevant files, and an unbounded
+ *  carry would turn the refuter's prompt into a copy of the verifier's case. */
+export const REFUTER_STARTING_POINTS_MAX = 8;
+
+/** THE STARTING-POINTS BLOCK (Plan item 3: «context aid, not a verdict shortcut»). The refuter is told
+ *  where the first verifier looked so that it does not have to re-find the files — and is told, in the
+ *  same breath, that those lines are NOT a case to agree with. The wording is load-bearing in two ways:
+ *    • agreeing without its OWN reading is explicitly NOT an outcome it may return, so the aid cannot
+ *      become the verdict;
+ *    • it must either name a counterexample OR state the positions it checked, so «supported» carries
+ *      something a reader can audit rather than a bare assent.
+ *  ⛔ WHY THE AID IS SAFE FOR INDEPENDENCE: a cited line is a POSITION IN THE TREE, not the verifier's
+ *  reasoning about it. The refuter still has to open the file and read it, and it is the refuter's OWN
+ *  `tool_use` counts — not this list — that the record uses to show it did. */
+export function refuterStartingPoints(evidence: unknown): string {
+  const lines = (Array.isArray(evidence) ? evidence : [])
+    .map((e) => {
+      if (typeof e === "string") return e.trim();
+      if (e !== null && typeof e === "object") {
+        const r = e as Record<string, unknown>;
+        const file = typeof r.file === "string" ? r.file : "";
+        const line = typeof r.line === "number" || typeof r.line === "string" ? String(r.line) : "";
+        const quote = typeof r.quote === "string" ? r.quote : "";
+        const at = file === "" ? "" : line === "" || line === "0" ? file : `${file}:${line}`;
+        return [at, quote].filter((s) => s !== "").join(" — ");
+      }
+      return "";
+    })
+    .filter((s) => s !== "")
+    .slice(0, REFUTER_STARTING_POINTS_MAX);
+  if (lines.length === 0) return "";
+  return [
+    "",
+    "STARTING POINTS — the first verifier says it read these positions. They are a SHORTCUT TO THE FILES,",
+    "NOT a case to agree with, and NOT evidence for the claim. Re-read them yourself and form your own",
+    "view; they may be incomplete, or simply the wrong place to look.",
+    ...lines.map((l) => `  · ${l}`),
+    "",
+    "⛔ Agreeing with the claim WITHOUT your own reading is NOT a refutation outcome and must not be",
+    "returned. If you find no counterexample, say so AND name the positions you checked (the `checked`",
+    "field), so a reader can see where you looked.",
+  ].join("\n");
+}
+
+/** The refuter's prompt template for ONE cluster: the frozen template, plus the starting-points block when
+ *  the first verifier cited anything. ⛔ The template is IDENTICAL when there is nothing to hand over, so a
+ *  round whose verifier cited nothing produces byte-for-byte the prompt this routine produced before. */
+export function refutationPromptFor(evidence: unknown): string {
+  const block = refuterStartingPoints(evidence);
+  return block === "" ? REFUTATION_PROMPT_TEMPLATE : `${REFUTATION_PROMPT_TEMPLATE}\n${block}`;
+}
 
 /** The VALUE-ASSESSMENT prompt. Bounded: it states engineering impact, the evidence, and a candidate fix
  *  outline — and it is recorded as the MODEL's assessment, never as a human rating. The JSON keys are the
@@ -2051,7 +2342,11 @@ export interface PairedArmBudget {
 }
 
 /** The envelope BOTH arms are run under, read once from the round's config so the two arms cannot
- *  disagree by construction. */
+ *  disagree by construction. ⛔ `refutation_retry_max_turns` is deliberately NOT a member: the envelope is
+ *  what the two arms are COMPARED on, and the retry is a call INSIDE an arm that both arms take through
+ *  the same code path off the same config read — so it cannot make one arm differ from the other, and
+ *  listing it would suggest an arm-level knob where there is none (the same reason `answer_reserve`
+ *  is not a member). */
 export function pairedArmBudget(cfg: OpenSemanticDiscoveryConfig): PairedArmBudget {
   return {
     investigator_runs: cfg.investigatorRuns,
@@ -2337,12 +2632,16 @@ export type ModelStepKind =
   // The ANSWER RESERVE's own calls (Plan item 2): ONE tool-less call granted to a step that was cut off
   // at the turn cap. ⛔ Its OWN step name — the reservation ledger must say WHY the call was spent, or a
   // rescue would read as a second exploration and the round's call count would stop being explicable.
-  | "investigator-report" | "verifier-report" | "refuter-report" | "value-assessment-report" | "novelty-check-report"
+  // ⛔ THE REFUTER HAS NO `*-report` MEMBER (this task): a truncated refuter gets a FRESH-CONTEXT RETRY with
+  // a larger budget instead of a tool-less answer distilled from its own cut-off narration, so no call site
+  // can emit `refuter-report` any more — and a value nothing can emit must not stay in the vocabulary,
+  // where it would read as a state that can still occur (硬规则 3b).
+  | "investigator-report" | "verifier-report" | "value-assessment-report" | "novelty-check-report"
   | "shadow-investigator-report"
   // The PAIRED round's UNGUIDED arm runs the same steps under their own kinds, so "which arm spent this
   // call" is readable straight off the reservation ledger instead of inferred from call order.
   | "baseline-investigator" | "baseline-verifier" | "baseline-refuter" | "baseline-value-assessment" | "baseline-novelty-check"
-  | "baseline-investigator-report" | "baseline-verifier-report" | "baseline-refuter-report"
+  | "baseline-investigator-report" | "baseline-verifier-report"
   | "baseline-value-assessment-report" | "baseline-novelty-check-report";
 
 export interface OpenSemanticDiscoveryRunOptions {
@@ -3013,6 +3312,13 @@ export async function runOpenSemanticDiscovery(root: string, opts: OpenSemanticD
         subtype: stream.ok ? (stream.subtype ?? null) : null,
         num_turns: stream.ok && Number.isFinite(stream.num_turns) ? (stream.num_turns as number) : null,
         is_error: stream.ok && typeof stream.is_error === "boolean" ? (stream.is_error as boolean) : null,
+        // ── WHAT THE CALL ACTUALLY OPENED (Plan item 1) ─────────────────────────────────────────────────
+        // Counts by tool + the first argument heads, read off the per-turn records the engine's parser
+        // already extracted (硬规则 5b). `null` when the stream did not parse — «made no tool calls» and
+        // «no turns were captured» are different facts and must not share a shape (硬规则 3b). It is what
+        // makes a verdict ATTRIBUTABLE: `Read/Grep counts > 0` is the direct reading of «this refutation
+        // came from looking at the code».
+        tool_use: stream.ok ? hyp.toolUseSummary(stream.turns) : null,
         stdout_bytes: diag.bytes,
         stdout_lines: diag.lines ?? null,
         stdout_events_by_type: diag.events_by_type ?? {},
@@ -3351,17 +3657,46 @@ export async function runOpenSemanticDiscovery(root: string, opts: OpenSemanticD
         ...armStamp,
       };
       let refutation: Record<string, unknown> | null = null;
+      // ⛔ THE PER-CLUSTER CALL LIST (硬规则 5b, Plan item 1): the calls THIS cluster's refutation consumed,
+      // captured AT THE CALL SITE. The cluster record's refutation fields are read from this list — never
+      // from the engine row, and never from a round-level list two clusters share. That is what makes «two
+      // clusters whose refuter calls differ ⇒ each cluster's fields equal its OWN call's» a property of the
+      // join rather than a hope about call ordering.
+      const refuterCallList: Record<string, unknown>[] = [];
       if (row.verdict === "supported") {
         const one = await hyp.runVerifier({
-          clusters: [cluster], pinDir: pinned, cwd: pinned, promptTemplate: REFUTATION_PROMPT_TEMPLATE,
+          // Plan item 3: the first verifier's cited lines ride along as STARTING POINTS (a shortcut to the
+          // files, never a case to agree with). The template is byte-identical when it cited nothing.
+          clusters: [cluster], pinDir: pinned, cwd: pinned, promptTemplate: refutationPromptFor(row.evidence),
           maxClusters: 1, concurrency: 1, maxMs: config.maxWallMs, strategy: "default", onlyCluster: 1, // concurrency-default-fallback: ONE cluster, ONE call
           evidence: null, model: requestedModel,
           runModel: async (p: string) => {
             const { res, rec } = await reservingStep(stepKind("refuter"), { prompt: p, tools: REFUTER_TOOLS, maxTurns: config.refutationMaxTurns, model: requestedModel });
             noteArmCall(rec);
-            const out = await reportIfCutOff(p, res, rec, stepKind("refuter-report"));
-            noteArmCall(out.rec);
-            return out.res;
+            refuterCallList.push(rec);
+            // ── THE TRUNCATED REFUTER GETS ONE FRESH-CONTEXT RETRY WITH A LARGER BUDGET (Plan item 2) ───
+            // ⛔ WHY THE TOOL-LESS ANSWER RESERVE IS *REPLACED* HERE RATHER THAN FOLLOWED. `reportIfCutOff`
+            // hands the model its OWN exploration narration back and asks it to report — which is exactly
+            // the wrong second chance for a refuter: the refuter's value IS its fresh, independent reading,
+            // and an answer distilled from its own truncated attempt is the same attempt continued. The
+            // retry is therefore a FRESH call, with the ORIGINAL prompt, on a LARGER budget, reserved on the
+            // SAME trailing-24h ledger as everything else (so it is counted and capped like any other call;
+            // a refusal at its reservation throws the round's ordinary BudgetRefusedError).
+            // ⛔ `budget-truncated` ONLY: a call that failed for another reason has no reasoning that more
+            // turns would recover, and retrying it would burn a counted call reproducing the failure.
+            let last = { res, rec };
+            if (callNotEvaluatedToken(rec) === "not-evaluated:error_max_turns") {
+              const retry = await reservingStep(stepKind("refuter"), { prompt: p, tools: REFUTER_TOOLS, maxTurns: config.refutationRetryMaxTurns, model: requestedModel });
+              // ⛔ A MARKER OF ITS OWN (`budget_retry`), never `retry_cause`: `retry_cause`/`retry_of` are
+              // the TRANSPORT-retry contract `reservingStep` already owns and its tests pin, and writing
+              // this cause into them would either overwrite a transport cause or be overwritten by one.
+              retry.rec.budget_retry = true;
+              retry.rec.budget_retry_cause = "budget-truncated";
+              noteArmCall(retry.rec);
+              refuterCallList.push(retry.rec);
+              last = retry;
+            }
+            return last.res;
           },
         });
         if (one.ok !== true) {
@@ -3369,16 +3704,34 @@ export async function runOpenSemanticDiscovery(root: string, opts: OpenSemanticD
           return { ok: false, reason: `${armPrefix}refuter refused — ${reasons[0] ?? "no reason reported"} (nothing appended, last-run not advanced)` };
         }
         refutation = (Array.isArray(one.results) ? one.results[0] : null) as Record<string, unknown> | null;
-        entry.refutation_verdict = refutation?.verdict ?? null;
-        entry.refutation_counterexample = refutation?.counterexample ?? null;
-        entry.refutation_turns = refutation?.turns_used ?? null;
-        entry.refutation_cost_usd = refutation?.cost_usd ?? null;
-      } else {
-        entry.refutation_verdict = "not-run";
       }
-      // `confirmed` REQUIRES surviving the refuter: an unrun, undetermined or refuted refutation is NOT a
-      // confirmation (fail-closed — "we could not refute it" is not "it is true").
-      const confirmed = row.verdict === "supported" && refutation?.verdict === "supported";
+      // ── THE JOIN + THE CAUSE, IN ONE PLACE (Plan item 1) ────────────────────────────────────────────
+      // Everything below is read from the cluster's OWN calls: the CLI's `num_turns` (not the row's
+      // tool-call count), the stream's subtype, the tool-use counts, and the ONE token that says WHY an
+      // `undetermined` was undetermined. `not-run` keeps its own spelling for a cluster whose verifier did
+      // not support it — an unrun refutation is not a verdict.
+      const refutationRead = refutationReading({ calls: refuterCallList, result: refutation });
+      if (row.verdict !== "supported") {
+        entry.refutation_verdict = "not-run";
+      } else {
+        entry.refutation_verdict = refutationRead.verdict;
+        entry.refutation_counterexample = refutationRead.counterexample;
+        entry.refutation_turns = refutationRead.turns;
+        entry.refutation_cost_usd = refutationRead.cost_usd;
+        entry.refutation_subtype = refutationRead.subtype;
+        // ⛔ THE FOUR-WAY CAUSE. `undetermined` alone taught nothing; this says whether the round was cut
+        // off by its own budget, never called back, could not be read, or read the code and found nothing.
+        entry.refutation_undetermined_cause = refutationRead.undetermined_cause;
+        entry.refutation_checked = refutationRead.checked;
+        entry.refutation_evidence_cited = refutationRead.evidence_cited;
+        entry.refutation_call = refutationRead;
+      }
+      // `confirmed` REQUIRES surviving the refuter — AND the survival being DETERMINATE. An unrun,
+      // undetermined or refuted refutation is NOT a confirmation (fail-closed: "we could not refute it" is
+      // not "it is true"), and neither is a `supported` read off a call that never answered or whose answer
+      // could not be parsed (Plan 4: what counts as confirmed is UNCHANGED — this only refuses to let a
+      // non-reading spell one).
+      const confirmed = row.verdict === "supported" && refutationRead.verdict === "supported" && refutationRead.undetermined_cause === null;
       entry.confirmed = confirmed;
       // ⑨ (d2) SEMANTIC VALUE ASSESSMENT — bounded, for confirmed clusters only, recorded as the MODEL's
       //    assessment and never as a human rating.
@@ -4032,6 +4385,7 @@ export function openSemanticDiscoveryRoutineFromConfig(
   maxClustersVerified: number | null;
   verifierMaxTurns: number | null;
   refutationMaxTurns: number | null;
+  refutationRetryMaxTurns: number | null;
 } {
   const read = readIn ?? readOpenSemanticDiscoveryConfig(root);
   const cfg = read.config;
@@ -4048,6 +4402,7 @@ export function openSemanticDiscoveryRoutineFromConfig(
     maxClustersVerified: cfg ? cfg.maxClustersVerified : null,
     verifierMaxTurns: cfg ? cfg.verifierMaxTurns : null,
     refutationMaxTurns: cfg ? cfg.refutationMaxTurns : null,
+    refutationRetryMaxTurns: cfg ? cfg.refutationRetryMaxTurns : null,
   };
 }
 

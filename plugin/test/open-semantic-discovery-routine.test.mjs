@@ -29,8 +29,15 @@
 //         AC1(c) the answer reserve turns a cut-off run into parsed hypotheses — a stub that answers ONLY
 //                when told to stop exploring
 //       plus the report-only / budget / kill-switch invariants the AC5 reading rests on
-// Plus: the two in-scratch-copy NEGATIVE CONTROLS the task names ((g) and (k)), and the
-// off-by-default / routine-table wiring contracts.
+//   AC1…AC3 of task gap-open-discovery-refutation-chain-undetermined-is-unattributable-and-budget-truncated:
+//         AC1 an ATTRIBUTABLE refutation: `error_max_turns` ⇒ `budget-truncated` + exactly one counted
+//             retry reservation; no counter-evidence ⇒ `no-counter-evidence`; a 0-token exit ⇒
+//             `call-failed`; a verdict that is not a determinate «survived» is NEVER `confirmed`
+//         AC2 the cluster↔call join: two clusters with different refuter calls each carry their OWN
+//             call's `num_turns`/subtype/tool counts (both with an in-scratch-copy negative control)
+//         AC3 the retry budget: a MEASURED default, optional, and required to be strictly larger
+// Plus: the two in-scratch-copy NEGATIVE CONTROLS the task names ((g) and (k)), the AC1(d)/AC2 negative
+// controls, and the off-by-default / routine-table wiring contracts.
 //
 // Run: scripts/test.sh plugin/test/open-semantic-discovery-routine.test.mjs
 
@@ -42,6 +49,9 @@ import path from "node:path";
 import { createHash } from "node:crypto";
 import { spawnSync } from "node:child_process";
 import { fileURLToPath, pathToFileURL } from "node:url";
+// The same YAML reader the routine parses `.quay/config.yml` with, so an AC3 assertion about a config
+// SECTION is made against the real parse rather than against a hand-built object.
+import YAML from "yaml";
 
 import {
   OPEN_SEMANTIC_DISCOVERY_NAME,
@@ -53,6 +63,8 @@ import {
   INVESTIGATOR_TOOLS,
   VERIFIER_TOOLS,
   REFUTER_TOOLS,
+  REFUTER_STARTING_POINTS_MAX,
+  DEFAULT_REFUTATION_RETRY_MAX_TURNS,
   VALUE_TOOLS,
   NOVELTY_TOOLS,
   NOVELTY_PROMPT_TEMPLATE,
@@ -76,6 +88,11 @@ import {
   PER_CALL_USD_CEILING,
   FOCUS_MARKER,
   REFUTATION_PROMPT_TEMPLATE,
+  REFUTATION_UNDETERMINED_CAUSES,
+  refutationPromptFor,
+  refutationReading,
+  refuterStartingPoints,
+  refutationUndeterminedCause,
   VALUE_PROMPT_TEMPLATE,
   focusDirective,
   focusFromText,
@@ -305,6 +322,13 @@ const noveltyStream = (verdict) => streamText(JSON.stringify({
 }));
 const NOVELTY_STREAM = noveltyStream("novel");
 const isNoveltyPrompt = (opts) => String(opts?.stdinData ?? "").includes(NOVELTY_FIRST_LINE);
+/** Is this call the REFUTER's? Recognised by the template's OWN first line. ⛔ NOT by identity with
+ *  `REFUTATION_PROMPT_TEMPLATE`: since this task the refuter's template carries a STARTING-POINTS block
+ *  appended when the first verifier cited any line, so the string handed to the model is the frozen
+ *  template PLUS that block. Matching the first line keeps the stub pinned to what the refuter IS rather
+ *  than to one of the two shapes its prompt can take. */
+const REFUTATION_FIRST_LINE = REFUTATION_PROMPT_TEMPLATE.split("\n")[0];
+const isRefuterPrompt = (o) => String(o?.promptTemplate ?? "").startsWith(REFUTATION_FIRST_LINE);
 const defaultDelegate = (_argv, opts) => ({
   status: 0, stdout: isNoveltyPrompt(opts) ? NOVELTY_STREAM : STREAM, stderr: "", error: null,
 });
@@ -355,11 +379,20 @@ function verifierStub(sink, verdictFor) {
       const prompt = String(o.promptTemplate).replace("{{HYP}}", JSON.stringify({ claim: rep.claim, components: rep.components }));
       const r = await o.runModel(prompt, { cluster: ci });
       sink.push({ cluster: ci, template: o.promptTemplate, prompt });
+      // ⛔ The stub FORCES the verdict (that is what `verdictFor` is for), but the row's COARSE CAUSE and
+      // its `checked` list are read off the stream the call really returned, through the REAL parser — so
+      // a fixture that distinguishes «it answered, unreadably» from «it read and found nothing» is reading
+      // the same facts the engine reads rather than a second vocabulary invented here.
+      const stdout = String(r?.stdout ?? "");
+      const m = realHyp.verifierVerdict({ stdout, status: r?.status ?? 0, stream: realHyp.parseVerifierStream(stdout) });
+      const j = realHyp.parseJsonObject(realHyp.callText(stdout));
       results.push({
-        cluster: ci, members: clusters[ci - 1].members, verdict: verdictFor(ci, o),
+        cluster: ci, members: clusters[ci - 1].members, verdict: verdictFor(ci, o), verdict_cause: m.cause ?? null,
         evidence: [`${rep.comps[0]}:1 — fixture evidence`], turns_used: 2, cost_usd: 0.02,
         actual_model: FIXTURE_MODEL, counterexample: "fixture counterexample", intentional: "fixture impact",
         summary: "fixture summary", stdout: r?.stdout ?? "",
+        // Present only when the answer named positions — the same conditional-key discipline the engine uses.
+        ...(Array.isArray(j?.checked) ? { checked: j.checked } : {}),
       });
     }
     return { ok: true, clusters_total: clusters.length, verified: idxs.length, beyond_cap: 0, results };
@@ -388,6 +421,7 @@ function makeEngine({ hyps = HYPS, verdictFor = alwaysSupported } = {}) {
     parseJsonObject: realHyp.parseJsonObject,
     parseVerifierStream: realHyp.parseVerifierStream,
     streamDiagnostics: realHyp.streamDiagnostics,
+    toolUseSummary: realHyp.toolUseSummary,
     callText: realHyp.callText,
     defaultVerifierPrompt: realHyp.defaultVerifierPrompt,
     defaultInvestigatorPrompt: realHyp.defaultInvestigatorPrompt,
@@ -713,7 +747,7 @@ test("case (f) — every spawned argv carries --max-turns, and a TOOL-LESS step 
 test("case (g) — a cluster the verifier SUPPORTS and the refuter REFUTES is NOT confirmed", async () => {
   const ws = makeWorkspace();
   writeConfig(ws, cfgYaml());
-  const engine = makeEngine({ verdictFor: (ci, o) => (o.promptTemplate === REFUTATION_PROMPT_TEMPLATE ? "refuted" : "supported") });
+  const engine = makeEngine({ verdictFor: (ci, o) => (isRefuterPrompt(o) ? "refuted" : "supported") });
   const spawn = countingSpawn();
   const fact = await runOpenSemanticDiscovery(ws, { ...runOpts(ws, { engine }), spawnFn: spawn, pinFn: pinStub() });
   assert.equal(fact.state, "verified");
@@ -744,7 +778,7 @@ test("case (g) — the positive control: supported + survived ⇒ confirmed, wit
 test("case (g) — an UNDETERMINED refutation is NOT a confirmation (fail-closed)", async () => {
   const ws = makeWorkspace();
   writeConfig(ws, cfgYaml());
-  const engine = makeEngine({ verdictFor: (ci, o) => (o.promptTemplate === REFUTATION_PROMPT_TEMPLATE ? "undetermined" : "supported") });
+  const engine = makeEngine({ verdictFor: (ci, o) => (isRefuterPrompt(o) ? "undetermined" : "supported") });
   const spawn = countingSpawn();
   await runOpenSemanticDiscovery(ws, { ...runOpts(ws, { engine }), spawnFn: spawn, pinFn: pinStub() });
   const clusterRecs = carrierLines(ws).filter((l) => l.kind === "cluster");
@@ -1326,7 +1360,7 @@ test("ingestion (b) — a novel cluster ⇒ an Experience AND a Portfolio row, p
 test("ingestion (c) — a cluster refuted by the routine's refuter is NEVER ingested as supported", async () => {
   const ws = makeWorkspace();
   writeConfig(ws, cfgYaml());
-  const engine = makeEngine({ hyps: [HYPS[0]], verdictFor: (ci, o) => (o.promptTemplate === REFUTATION_PROMPT_TEMPLATE ? "refuted" : "supported") });
+  const engine = makeEngine({ hyps: [HYPS[0]], verdictFor: (ci, o) => (isRefuterPrompt(o) ? "refuted" : "supported") });
   const spawn = countingSpawn();
   const fact = await runOpenSemanticDiscovery(ws, { ...runOpts(ws, { engine }), spawnFn: spawn, pinFn: pinStub() });
   assert.equal(fact.state, "verified", fact.reason);
@@ -1384,7 +1418,7 @@ test("ingestion (g) — refuted AND undetermined clusters are ingested as Experi
   writeConfig(ws, cfgYaml());
   const engine = makeEngine({
     hyps: HYPS,
-    verdictFor: (ci, o) => (o.promptTemplate === REFUTATION_PROMPT_TEMPLATE ? "refuted" : (ci === 1 ? "supported" : "undetermined")),
+    verdictFor: (ci, o) => (isRefuterPrompt(o) ? "refuted" : (ci === 1 ? "supported" : "undetermined")),
   });
   const spawn = countingSpawn();
   const fact = await runOpenSemanticDiscovery(ws, { ...runOpts(ws, { engine }), spawnFn: spawn, pinFn: pinStub() });
@@ -1873,14 +1907,14 @@ function scratchModule(mutate) {
 
 test("NEGATIVE CONTROL (g) — remove the refutation step in a scratch copy ⇒ the (g) claim goes RED", async () => {
   const mutantPath = scratchModule((src) => src
-    .replace("const confirmed = row.verdict === \"supported\" && refutation?.verdict === \"supported\";",
-      "const confirmed = row.verdict === \"supported\";")
+    .replace("      const confirmed = row.verdict === \"supported\" && refutationRead.verdict === \"supported\" && refutationRead.undetermined_cause === null;",
+      "      const confirmed = row.verdict === \"supported\";")
     .replace("      if (row.verdict === \"supported\") {", "      if (false) {"));
   const mutant = await import(pathToFileURL(mutantPath).href);
   const ws = makeWorkspace();
   writeConfig(ws, cfgYaml());
   // The SAME fixture that makes (g) green on the real module: verifier supports, refuter refutes.
-  const engine = makeEngine({ verdictFor: (ci, o) => (o.promptTemplate === REFUTATION_PROMPT_TEMPLATE ? "refuted" : "supported") });
+  const engine = makeEngine({ verdictFor: (ci, o) => (isRefuterPrompt(o) ? "refuted" : "supported") });
   const fact = await mutant.runOpenSemanticDiscovery(ws, {
     config: readOpenSemanticDiscoveryConfig(ws).config,
     configPresent: true, configError: null, halted: false, invokedBy: INVOKED_BY_RESIDENT,
@@ -2656,41 +2690,62 @@ test("case (m) 硬规则 5b — the SAME reserve covers every single-answer STEP
   // 3 of its 6 calls were `error_max_turns` — TWO VERIFIERS and the REFUTER — so `confirmed.count` was 0
   // on a round that had just produced 12 evidenced hypotheses, and 2 of 3 clusters carried
   // `verifier_cause:"turn-budget"`. Fixing the investigator alone would have been fixing the instance, not
-  // the class. Here EVERY `Read,Grep` step (verifier, refuter, value-assessment) is cut off at its own cap
-  // and answered only by its tool-less rescue.
+  // the class. Here EVERY `Read,Grep` step (verifier, refuter, value-assessment) is cut off at its own cap.
+  // ⛔ THE REFUTER'S SECOND CHANCE IS NOT THE TOOL-LESS RESERVE (task gap-open-discovery-refutation-chain-
+  // undetermined-is-unattributable-and-budget-truncated, Plan item 2): a refuter truncated at `--max-turns
+  // 6` gets ONE FRESH-CONTEXT retry at the MEASURED larger budget (26). The delegate below keys on that
+  // budget, exactly as a launcher would see it, so the fixture exercises the real argv rather than a
+  // counter the test keeps.
   const SUPPORTED = JSON.stringify({
     verdict: "supported", intentional_difference_found: "fixture impact",
     evidence: [{ file: "plugin/scripts/a.ts", line: 1, quote: "export const a = 1;" }],
     counterexample: "fixture counterexample", summary: "fixture summary",
   });
+  const maxTurnsOf = (argv) => {
+    const i = argv.indexOf("--max-turns");
+    return i >= 0 ? Number(argv[i + 1]) : null;
+  };
   const delegate = (argv, opts) => {
     if (isNoveltyPrompt(opts)) return { status: 0, stdout: NOVELTY_STREAM, stderr: "", error: null };
     if (isToolLess(argv)) return { status: 0, stdout: streamText(SUPPORTED), stderr: "", error: null };
     if (toolsOf(argv) === INVESTIGATOR_TOOLS) return { status: 0, stdout: streamText(`${FOCUS_MARKER} f\n${JSON.stringify(HYPS)}`), stderr: "", error: null };
+    // The RETRY's larger budget is the one call that finishes — the whole point of granting it.
+    if (maxTurnsOf(argv) === DEFAULT_REFUTATION_RETRY_MAX_TURNS) return { status: 0, stdout: streamText(SUPPORTED), stderr: "", error: null };
     return { status: 1, stdout: MAX_TURNS_STREAM, stderr: "Reached maximum number of turns (8)\n", error: null };
   };
   const { ws, spawn, opts } = answerReserveFixture({ delegate });
   const fact = await runOpenSemanticDiscovery(ws, opts);
   const round = rounds(ws)[0];
 
-  // The investigator answered (no reserve for it); every judgment step did not and was rescued.
+  // The investigator answered (no reserve for it); every OTHER judgment step did not.
   assert.equal(round.investigator.answer_reserve.attempted, 0, "the investigator was NOT cut off");
   assert.equal(round.clusters.total, HYPS.length);
   const steps = round.answer_reserve.steps;
   assert.ok(steps.includes("verifier-report"), `a cut-off VERIFIER is rescued (steps: ${steps.join(",")})`);
-  assert.ok(steps.includes("refuter-report"), "…and so is a cut-off REFUTER");
   assert.ok(steps.includes("value-assessment-report"), "…and a cut-off value assessment");
-  assert.equal(round.answer_reserve.attempted, round.answer_reserve.rescued, "every rescue answered");
-  // The verdicts ARE the rescues' verdicts: without the reserve these rows would all be
+  // ⛔ The refuter is NOT on the reserve's step list: its second chance is a `refuter` call, not a
+  // `refuter-report` one. An entry here would mean the tool-less reserve had been used for a step whose
+  // whole value is an independent READING.
+  assert.equal(steps.includes("refuter-report"), false, "the refuter's second chance is NOT a tool-less reserve");
+  const refuterCalls = round.calls.filter((c) => c.step === "refuter");
+  assert.equal(refuterCalls.length, HYPS.length * 2, "TWO refuter calls per supported cluster: the truncated attempt and its ONE retry");
+  assert.equal(refuterCalls.filter((c) => c.budget_retry === true).length, HYPS.length, "exactly ONE retry per truncated refuter");
+  assert.deepEqual(
+    refuterCalls.filter((c) => c.budget_retry === true).map((c) => c.max_turns),
+    HYPS.map(() => DEFAULT_REFUTATION_RETRY_MAX_TURNS),
+    "…and the retry really went out with the LARGER budget (read off the argv the call was spawned with)",
+  );
+  assert.equal(round.answer_reserve.attempted, round.answer_reserve.rescued, "every tool-less rescue answered");
+  // The verdicts ARE the second chances' verdicts: without them these rows would all be
   // `undetermined`/`turn-budget` and `confirmed` would be 0 — the production reading this closes.
-  assert.equal(round.confirmed.count, HYPS.length, "both clusters survive verifier + refuter, THROUGH the rescues");
+  assert.equal(round.confirmed.count, HYPS.length, "both clusters survive verifier + refuter, THROUGH their second chances");
   const cluster = carrierLines(ws).find((l) => l.kind === "cluster" && l.cluster === 1);
   assert.equal(cluster.verifier_verdict, "supported");
   assert.equal(cluster.refutation_verdict, "supported");
   assert.equal(cluster.evidence_lines.length > 0, true, "the rescue's evidence lines reach the record");
-  // The cut-off calls are STILL on the round, still naming their own failure: the rescue is an addition,
-  // never a laundering (硬规则 3b).
-  assert.equal(round.calls.filter((c) => c.not_evaluated === "not-evaluated:error_max_turns").length, round.answer_reserve.attempted);
+  // The cut-off calls are STILL on the round, still naming their own failure: a second chance is an
+  // addition, never a laundering (硬规则 3b).
+  assert.equal(round.calls.filter((c) => c.not_evaluated === "not-evaluated:error_max_turns").length, round.answer_reserve.attempted + HYPS.length);
   // ⛔ ONE ENTRY PER CALL. `reportIfCutOff` returns the SAME record when it did not fire, so an
   // unconditional push would list a call that was made once as two — a count that lies. Measured on the
   // ARM list (`investigator.calls`), which is where that mistake showed up in a live round.
@@ -2699,11 +2754,16 @@ test("case (m) 硬规则 5b — the SAME reserve covers every single-answer STEP
   assert.equal(armCalls.filter((c) => c.step === "investigator").length, 1, "exactly ONE investigation call");
   assert.equal(armCalls.length, new Set(armCalls.map((c) => c.step)).size, "one investigator call ⇒ one entry");
   assert.match(fact.reason, /call\(s\) were NOT EVALUATED/);
-  // Every rescue is its OWN reservation on the same ledger.
-  for (const s of ["verifier-report", "refuter-report", "value-assessment-report"]) {
+  // Every second chance is its OWN reservation on the same ledger, under its own step name.
+  for (const s of ["verifier-report", "value-assessment-report", "refuter"]) {
     assert.equal(resumeSteps(ws).includes(s), true, `${s} reserved on the same ledger`);
   }
-  assert.equal(resumeSteps(ws).length, spawn.calls.length, "one reservation per spawn, the rescues included");
+  // ⛔ THE RETRY IS COUNTED AND CAPPED LIKE ANY OTHER CALL: two refuter reservations per supported cluster,
+  // and the ledger line of the retry NAMES the larger budget it was granted.
+  const refuterReserves = ledgerReserves(ws).filter((l) => String(l.step).endsWith("refuter"));
+  assert.equal(refuterReserves.length, HYPS.length * 2, "the retry is a REAL reservation, not a free second call");
+  assert.equal(refuterReserves.filter((l) => l.max_turns === DEFAULT_REFUTATION_RETRY_MAX_TURNS).length, HYPS.length, "exactly ONE retry reservation per truncated refuter — counted, and capped by the same 24h ledger");
+  assert.equal(resumeSteps(ws).length, spawn.calls.length, "one reservation per spawn, the second chances included");
 });
 
 test("case (m) — the turn-reserve directive is in BOTH arms' prompts (the paired instrument's only difference stays the guidance block)", async () => {
@@ -3399,4 +3459,308 @@ test("(n) AC2 — NO retry when the ledger refuses: the round's ceiling is not s
   assert.equal(round.calls[0].call_failure, "no-stdout", "…and the lost call is still CLASSIFIED, not hidden by the refusal");
   assert.equal(fact.state, "not-evaluated");
   assert.match(fact.reason, /budget-24h/);
+});
+
+// ═════════════════════════════════════════════════════════════════════════════════════════════════════
+// gap-open-discovery-refutation-chain-undetermined-is-unattributable-and-budget-truncated — AC1…AC3
+//
+// WHAT THE THREE READINGS ARE. Before this task every refutation the routine ever recorded said
+// `undetermined`, and the record could not tell apart (i) a refuter KILLED at its turn cap, (ii) one that
+// read the code and found no counter-evidence, and (iii) a call that never answered. The fixture below
+// makes each of the three happen on its own, so `refutation_undetermined_cause` is a READING of what the
+// call did rather than a label pasted on the word `undetermined`.
+// ═════════════════════════════════════════════════════════════════════════════════════════════════════
+
+/** The refuter's answer, as the model would write it: a verdict plus the positions it checked. */
+const REFUTER_ANSWER = (verdict, extra = {}) => JSON.stringify({
+  verdict, intentional_difference_found: verdict === "refuted" ? "fixture counterexample" : null,
+  evidence: [{ file: "plugin/scripts/a.ts", line: 1, quote: "export const a = 1;" }],
+  counterexample: "what would have to be true", checked: ["plugin/scripts/a.ts:1", "plugin/scripts/b.ts:9"],
+  summary: "fixture summary", ...extra,
+});
+
+/** Is THIS launcher call the refuter's? The three `Read,Grep` judgment steps share one tool envelope, so
+ *  the argv cannot tell them apart — the PROMPT is the discriminator, and it is the routine's OWN decision
+ *  read at the launcher rather than a counter the test keeps (which would agree with the routine's call
+ *  ORDER instead of with what was actually asked). */
+const isRefuterCall = (opts) => String(opts?.stdinData ?? "").startsWith(REFUTATION_FIRST_LINE);
+
+/** A `stream-json` stream with `reads` REAL tool-use turns — the direct evidence that the call READ the
+ *  tree — and a `result` event carrying the CLI's own `num_turns`/subtype/usage. */
+const refuterStream = ({ numTurns, reads = 0, text = REFUTER_ANSWER("supported"), subtype = "success", isError = false }) => [
+  JSON.stringify({ type: "system", subtype: "init", model: FIXTURE_MODEL }),
+  ...Array.from({ length: reads }, (_, i) => JSON.stringify({
+    type: "assistant",
+    message: { content: [{ type: "tool_use", id: `t${i}`, name: i % 2 === 0 ? "Read" : "Grep", input: { file_path: `plugin/scripts/f${i}.ts`, pattern: "fixture" } }] },
+  })),
+  JSON.stringify({
+    type: "result", subtype, num_turns: numTurns, is_error: isError, result: text,
+    usage: { input_tokens: 1000, output_tokens: 100 }, total_cost_usd: 0.03,
+  }),
+].join("\n") + "\n";
+
+/** The REFUTER KILLED AT ITS TURN CAP — the production shape: `num_turns` up to the cap, a `result` event
+ *  whose `subtype` is `error_max_turns`, exit 1, and a partial (empty) answer. */
+const truncatedRefuterStream = (numTurns, reads) => refuterStream({ numTurns, reads, subtype: "error_max_turns", isError: true, text: "" });
+
+/** A round with the fixture's clusters, in which EVERY step answers except the REFUTER, whose calls are
+ *  produced one-by-one by `refuterStreams(n)` (n = 0-based refuter call index). Everything else about the
+ *  round is held fixed, so the only thing that varies between the AC1 cases is what the refuter returned. */
+function refuterChainFixture({ hyps = [HYPS[0]], refuterVerdict = "supported", refuterStreams }) {
+  const ws = makeWorkspace();
+  writeConfig(ws, cfgYaml());
+  const engine = makeEngine({ hyps, verdictFor: (ci, o) => (isRefuterPrompt(o) ? refuterVerdict : "supported") });
+  engine.modules.hyp.runInvestigator = streamReadingInvestigator();
+  let n = 0;
+  const delegate = (argv, opts) => {
+    if (isNoveltyPrompt(opts)) return { status: 0, stdout: NOVELTY_STREAM, stderr: "", error: null };
+    if (toolsOf(argv) === INVESTIGATOR_TOOLS) return { status: 0, stdout: streamText(`${FOCUS_MARKER} f\n${JSON.stringify(hyps)}`), stderr: "", error: null };
+    if (isRefuterCall(opts)) {
+      // A case may hand back a bare stream (the common shape) or an explicit `{status, stdout}` — a
+      // turn-cap kill and a transport failure need their own exit code, so the fixture takes either.
+      const s = refuterStreams(n++);
+      return typeof s === "string"
+        ? { status: 0, stdout: s, stderr: "", error: null }
+        : { status: s.status ?? 0, stdout: s.stdout, stderr: s.stderr ?? "", error: null };
+    }
+    // The remaining steps' VERDICTS are the stub's; this only supplies a stream that PARSED, i.e. a call
+    // that really ran (an unparsed stream would be `not-evaluated` and change what is under test).
+    return { status: 0, stdout: streamText(REFUTER_ANSWER("supported")), stderr: "", error: null };
+  };
+  const spawn = countingSpawn(delegate);
+  const opts = {
+    ...runOpts(ws, { engine }), spawnFn: spawn, pinFn: pinStub(),
+    pinTmpRoot: tmpDir("osd-refuter-pinroot-"), retryBackoffMs: 0, sleepFn: async () => {},
+  };
+  return { ws, engine, spawn, opts };
+}
+const clusterOf = (ws, i = 1) => carrierLines(ws).find((l) => l.kind === "cluster" && l.cluster === i);
+
+test("AC1(a) — a refuter stream ending `error_max_turns` ⇒ `budget-truncated`, and EXACTLY ONE retry reservation on the ledger", async () => {
+  // BOTH the refuter and its retry are cut off — the production shape, where the larger budget still is
+  // not enough. The cause must stay `budget-truncated` (the retry is not a way to launder the first).
+  const { ws, opts } = refuterChainFixture({ refuterVerdict: "undetermined", refuterStreams: () => ({ status: 1, stdout: truncatedRefuterStream(7, 6) }) });
+  const fact = await runOpenSemanticDiscovery(ws, opts);
+  const cluster = clusterOf(ws);
+
+  assert.equal(cluster.refutation_verdict, "undetermined");
+  assert.equal(cluster.refutation_undetermined_cause, "budget-truncated", "a call killed at the turn cap NAMES the budget as its cause");
+  assert.deepEqual(cluster.refutation_call.calls.map((c) => c.role), ["first", "retry"], "the truncated attempt AND its one retry are both on the record");
+  assert.deepEqual(cluster.refutation_call.calls.map((c) => c.subtype), ["error_max_turns", "error_max_turns"]);
+  assert.equal(cluster.refutation_call.calls[0].num_turns, 7, "the CLI's own turn unit, off the CALL");
+  assert.equal(cluster.refutation_call.retried, true);
+  assert.equal(cluster.confirmed, false, "a truncated refutation confirms NOTHING");
+
+  // ⛔ THE COUNTED RETRY: `reservingStep`'s transport retry does NOT fire here (a turn-cap kill carries a
+  // `result` event, so it is not a retryable transport class), so the ledger is the budget retry alone.
+  const refuterReserves = ledgerReserves(ws).filter((l) => String(l.step).endsWith("refuter"));
+  assert.equal(refuterReserves.length, 2, "exactly TWO refuter reservations: the attempt and its ONE retry");
+  assert.equal(refuterReserves.filter((l) => l.max_turns === DEFAULT_REFUTATION_RETRY_MAX_TURNS).length, 1, "exactly ONE retry reservation — and it NAMES the larger budget it was granted");
+  assert.equal(refuterReserves.filter((l) => l.max_turns === 6).length, 1, "the first attempt keeps the measured-unchanged step budget");
+  assert.equal(rounds(ws)[0].model_calls, rounds(ws)[0].calls.length, "every spawn is one reservation, the retry included");
+  assert.equal(fact.state, "verified", `the round still completes (got ${fact.state}: ${fact.reason})`);
+});
+
+test("AC1(b) — a refuter that READ the tree and names no counterexample ⇒ `no-counter-evidence` (and NOT a confirmation)", async () => {
+  // The call ANSWERED (`exit 0`, a `result` event, 5 tool turns); the model's own verdict is `undetermined`
+  // — «the code does not settle it». That is a statement about the REPOSITORY, so it gets its own cause.
+  const { ws, opts } = refuterChainFixture({
+    refuterVerdict: "undetermined",
+    refuterStreams: (n) => (n === 0
+      ? refuterStream({ numTurns: 12, reads: 5, text: REFUTER_ANSWER("undetermined") })
+      : refuterStream({ numTurns: 2, reads: 0, text: REFUTER_ANSWER("supported") })),
+  });
+  await runOpenSemanticDiscovery(ws, opts);
+  const cluster = clusterOf(ws);
+
+  assert.equal(cluster.refutation_undetermined_cause, "no-counter-evidence");
+  assert.equal(cluster.refutation_turns, 12, "the CLI unit, off the answering call");
+  assert.equal(cluster.refutation_subtype, "success", "the call RAN — this is not a failure");
+  assert.equal(cluster.refutation_call.tool_use.by_tool.Read + cluster.refutation_call.tool_use.by_tool.Grep, 5, "the reading is ATTRIBUTABLE: the refuter opened files");
+  assert.deepEqual(cluster.refutation_checked, ["plugin/scripts/a.ts:1", "plugin/scripts/b.ts:9"], "a «found nothing» verdict carries the positions it checked");
+  assert.equal(cluster.refutation_call.retried, false, "nothing was truncated ⇒ no retry reservation was spent");
+  assert.equal(cluster.confirmed, false, "⛔ «we could not refute it» is still NOT «it is true»");
+});
+
+test("AC1(c) — a 0-token exit with no result ⇒ `call-failed`, which is NOT the budget's fault", async () => {
+  // The MEASURED production shape: the refuter spent its wall clock and left no result event, so its usage
+  // is unreadable (0 tokens) — an INFRASTRUCTURE fact. A retry with more turns would reproduce it, which is
+  // why the budget retry keys on `error_max_turns` ALONE: no second refuter call may be spent here.
+  const { ws, opts } = refuterChainFixture({
+    refuterVerdict: "undetermined",
+    refuterStreams: () => ({ status: 1, stdout: "the gateway returned no result\n", stderr: "" }),
+  });
+  await runOpenSemanticDiscovery(ws, opts);
+  const cluster = clusterOf(ws);
+
+  assert.equal(cluster.refutation_undetermined_cause, "call-failed");
+  assert.equal(cluster.refutation_call.calls.length, 1, "no retry: more turns would not have helped a call that never answered");
+  assert.equal(ledgerReserves(ws).filter((l) => String(l.step).endsWith("refuter")).length, 1);
+  assert.equal(cluster.refutation_call.calls[0].not_evaluated, "not-evaluated:uninstrumented-exit-1");
+  assert.equal(cluster.refutation_call.tool_use, null, "a call whose stream did not parse reports NO tool-use reading — never a zero-count one (硬规则 3b)");
+  assert.equal(cluster.confirmed, false);
+});
+
+test("AC1(d) — `confirmed` is TRUE only for a DETERMINATE «survived», never for an undetermined one", async () => {
+  // The positive arm: the refuter answered with a determinate `supported` (survived), read the tree, and
+  // cited evidence — the ONE shape that may reach `confirmed`.
+  const survived = refuterChainFixture({
+    refuterVerdict: "supported",
+    refuterStreams: () => refuterStream({ numTurns: 11, reads: 4, text: REFUTER_ANSWER("supported") }),
+  });
+  await runOpenSemanticDiscovery(survived.ws, survived.opts);
+  const ok = clusterOf(survived.ws);
+  assert.equal(ok.refutation_verdict, "supported");
+  assert.equal(ok.refutation_undetermined_cause, null, "a determinate verdict has NO undetermined cause");
+  assert.equal(ok.confirmed, true, "supported verifier + determinate survived + cited evidence ⇒ confirmed");
+
+  // The three UNDETERMINED arms: each names its own cause, and NONE of them is confirmed.
+  const arms = [
+    ["budget-truncated", "undetermined", () => ({ status: 1, stdout: truncatedRefuterStream(7, 6) })],
+    ["no-counter-evidence", "undetermined", () => refuterStream({ numTurns: 12, reads: 5, text: REFUTER_ANSWER("undetermined") })],
+    ["call-failed", "undetermined", () => ({ status: 1, stdout: "no result\n", stderr: "" })],
+    ["unparseable", "undetermined", () => refuterStream({ numTurns: 9, reads: 3, text: "I looked and I am not sure." })],
+  ];
+  for (const [cause, verdict, stream] of arms) {
+    const f = refuterChainFixture({ refuterVerdict: verdict, refuterStreams: stream });
+    await runOpenSemanticDiscovery(f.ws, f.opts);
+    const c = clusterOf(f.ws);
+    assert.equal(c.refutation_undetermined_cause, cause, `${cause}: the cause is named`);
+    assert.equal(c.confirmed, false, `${cause}: NOT a confirmation`);
+    assert.equal(rounds(f.ws)[0].confirmed.count, 0, `${cause}: the round reports 0 confirmed`);
+  }
+});
+
+test("AC1(d) NEGATIVE CONTROL — let `undetermined` count as survived ⇒ the (d) claims go RED", async () => {
+  // ⛔ THE MUTATION IS EXACTLY «undetermined counts as survived»: `confirmed` becomes «the verifier
+  // supported it and the refuter did not refute it», which is the conflation this task exists to end.
+  const mutantPath = scratchModule((src) => src.replace(
+    "      const confirmed = row.verdict === \"supported\" && refutationRead.verdict === \"supported\" && refutationRead.undetermined_cause === null;",
+    "      const confirmed = row.verdict === \"supported\" && refutationRead.verdict !== \"refuted\"; // MUTATION: undetermined counts as survived",
+  ));
+  const mutant = await import(pathToFileURL(mutantPath).href);
+  const ws = makeWorkspace();
+  writeConfig(ws, cfgYaml());
+  const engine = makeEngine({ hyps: [HYPS[0]], verdictFor: (ci, o) => (isRefuterPrompt(o) ? "undetermined" : "supported") });
+  engine.modules.hyp.runInvestigator = streamReadingInvestigator();
+  const spawn = countingSpawn((argv, opts) => {
+    if (isNoveltyPrompt(opts)) return { status: 0, stdout: NOVELTY_STREAM, stderr: "", error: null };
+    if (toolsOf(argv) === INVESTIGATOR_TOOLS) return { status: 0, stdout: streamText(`${FOCUS_MARKER} f\n${JSON.stringify([HYPS[0]])}`), stderr: "", error: null };
+    if (isRefuterCall(opts)) return { status: 1, stdout: truncatedRefuterStream(7, 6), stderr: "", error: null };
+    return { status: 0, stdout: streamText(REFUTER_ANSWER("supported")), stderr: "", error: null };
+  });
+  const fact = await mutant.runOpenSemanticDiscovery(ws, {
+    config: readOpenSemanticDiscoveryConfig(ws).config, configPresent: true, configError: null, halted: false,
+    invokedBy: INVOKED_BY_RESIDENT, modules: engine.modules, launchArgvFn: fakeLaunchArgv,
+    spawnFn: spawn, pinFn: pinStub(), pinTmpRoot: tmpDir("osd-ac1d-mutant-"), retryBackoffMs: 0, sleepFn: async () => {},
+  });
+  assert.equal(fact.state, "verified");
+  const rec = carrierLines(ws).find((l) => l.kind === "cluster");
+  assert.equal(rec.refutation_undetermined_cause, "budget-truncated", "the mutant still NAMES the cause the real module names");
+  assert.equal(rec.confirmed, true, "⇒ the (d) claim («NOT confirmed») is FALSIFIED — the control is live");
+  process.stdout.write(`    NEGATIVE CONTROL AC1(d): mutant reports confirmed=true for a BUDGET-TRUNCATED refutation (claim was «confirmed only for a determinate survived»)\n`);
+});
+
+test("AC2 — each cluster's refutation fields come from ITS OWN call, off the CLI's own turn unit", async () => {
+  // Two clusters, two DIFFERENT refuter calls: cluster 1's answers with 11 CLI turns; cluster 2's is
+  // truncated at 7 and answered by its retry at 19. Under the old join both rows read the ENGINE ROW's
+  // `turns_used` (the parser's TOOL-CALL count, and — when a rescue fired — the tool-less rescue's row),
+  // so a cluster's `refutation_turns` was neither its own call's nor in the cap's unit.
+  const { ws, opts } = refuterChainFixture({
+    hyps: HYPS,
+    refuterVerdict: "supported",
+    refuterStreams: (n) => (n === 1
+      ? { status: 1, stdout: truncatedRefuterStream(7, 5) }
+      : refuterStream({ numTurns: n === 0 ? 11 : 19, reads: n === 0 ? 4 : 6, text: REFUTER_ANSWER("supported") })),
+  });
+  const fact = await runOpenSemanticDiscovery(ws, opts);
+  assert.equal(fact.state, "verified");
+
+  const c1 = clusterOf(ws, 1);
+  const c2 = clusterOf(ws, 2);
+  assert.equal(c1.refutation_turns, 11, "cluster 1's OWN call");
+  assert.equal(c1.refutation_subtype, "success");
+  assert.deepEqual(c1.refutation_call.calls.map((c) => c.role), ["first"], "cluster 1 was not truncated");
+  assert.equal(c2.refutation_turns, 19, "cluster 2's OWN ANSWERING call — the retry, not the truncated attempt");
+  assert.equal(c2.refutation_subtype, "success");
+  assert.deepEqual(c2.refutation_call.calls.map((c) => [c.role, c.num_turns, c.subtype]), [
+    ["first", 7, "error_max_turns"],
+    ["retry", 19, "success"],
+  ], "cluster 2 carries BOTH of its calls, each with its own CLI turns and subtype");
+  assert.notEqual(c1.refutation_turns, c2.refutation_turns, "the two clusters' readings DIFFER — so the fixture can tell a join from a constant");
+  // The calling cluster's tool counts are its OWN call's, which is what makes the verdict attributable.
+  assert.deepEqual(c1.refutation_call.tool_use.by_tool, { Read: 2, Grep: 2 });
+  assert.deepEqual(c2.refutation_call.tool_use.by_tool, { Read: 3, Grep: 3 });
+  assert.equal(c1.refutation_call.tool_use.total, 4, "cluster 1's OWN reads");
+  assert.equal(c2.refutation_call.tool_use.total, 6, "cluster 2's retry's OWN reads");
+  // Each cluster's refutation is addressable to its own reservations.
+  const ids = new Set(rounds(ws)[0].calls.map((c) => c.reservation_id));
+  for (const id of [...c1.refutation_call.reservation_ids, ...c2.refutation_call.reservation_ids]) {
+    assert.ok(ids.has(id), `reservation ${id} resolves on the round`);
+  }
+  assert.equal(new Set([...c1.refutation_call.reservation_ids, ...c2.refutation_call.reservation_ids]).size, 3, "three refuter reservations across the two clusters");
+});
+
+test("AC2 NEGATIVE CONTROL — restore the OLD join (the engine row's units) ⇒ the AC2 claims go RED", async () => {
+  // ⛔ THE MUTATION IS THE OLD JOIN, VERBATIM: `refutation_turns`/`cost_usd` read off the engine ROW and
+  // `subtype` not read at all. Same fixture, same round — only the source of the three fields changes.
+  const mutantPath = scratchModule((src) => src.replace(
+    "        entry.refutation_turns = refutationRead.turns;\n        entry.refutation_cost_usd = refutationRead.cost_usd;\n        entry.refutation_subtype = refutationRead.subtype;",
+    "        entry.refutation_turns = (refutation?.turns_used) ?? null; // MUTATION: the old join\n        entry.refutation_cost_usd = refutation?.cost_usd ?? null;\n        entry.refutation_subtype = null; // MUTATION: the old join read no subtype",
+  ));
+  const mutant = await import(pathToFileURL(mutantPath).href);
+  const ws = makeWorkspace();
+  writeConfig(ws, cfgYaml());
+  const engine = makeEngine({ hyps: HYPS, verdictFor: (ci, o) => (isRefuterPrompt(o) ? "supported" : "supported") });
+  engine.modules.hyp.runInvestigator = streamReadingInvestigator();
+  let n = 0;
+  const plan = [
+    refuterStream({ numTurns: 11, reads: 4, text: REFUTER_ANSWER("supported") }),
+    truncatedRefuterStream(7, 5),
+    refuterStream({ numTurns: 19, reads: 6, text: REFUTER_ANSWER("supported") }),
+  ];
+  const spawn = countingSpawn((argv, opts) => {
+    if (isNoveltyPrompt(opts)) return { status: 0, stdout: NOVELTY_STREAM, stderr: "", error: null };
+    if (toolsOf(argv) === INVESTIGATOR_TOOLS) return { status: 0, stdout: streamText(`${FOCUS_MARKER} f\n${JSON.stringify(HYPS)}`), stderr: "", error: null };
+    if (isRefuterCall(opts)) return { status: 0, stdout: plan[n++], stderr: "", error: null };
+    return { status: 0, stdout: streamText(REFUTER_ANSWER("supported")), stderr: "", error: null };
+  });
+  const fact = await mutant.runOpenSemanticDiscovery(ws, {
+    config: readOpenSemanticDiscoveryConfig(ws).config, configPresent: true, configError: null, halted: false,
+    invokedBy: INVOKED_BY_RESIDENT, modules: engine.modules, launchArgvFn: fakeLaunchArgv,
+    spawnFn: spawn, pinFn: pinStub(), pinTmpRoot: tmpDir("osd-ac2-mutant-"), retryBackoffMs: 0, sleepFn: async () => {},
+  });
+  assert.equal(fact.state, "verified");
+  const c1 = carrierLines(ws).find((l) => l.kind === "cluster" && l.cluster === 1);
+  const c2 = carrierLines(ws).find((l) => l.kind === "cluster" && l.cluster === 2);
+  // The stub's rows carry a CONSTANT `turns_used: 2` for every cluster, so the old join reports the same
+  // number twice — it cannot tell the two clusters' calls apart, which is exactly the defect.
+  assert.equal(c1.refutation_turns, 2, "the mutant reads the ENGINE ROW's tool-call count, not the call's CLI turns");
+  assert.equal(c2.refutation_turns, 2, "…and the same constant for the second cluster");
+  assert.equal(c2.refutation_subtype, null, "…and the mutant has no subtype to read at all");
+  assert.notEqual(c1.refutation_turns, 11, "⇒ the AC2 claim («cluster 1's own call») is FALSIFIED — the control is live");
+  assert.notEqual(c2.refutation_turns, 19, "⇒ the AC2 claim («cluster 2's OWN answering call») is FALSIFIED");
+  process.stdout.write(`    NEGATIVE CONTROL AC2: old join reports refutation_turns=${c1.refutation_turns}/${c2.refutation_turns} for calls of 11 and 19 CLI turns (claim was «each cluster's own call»)\n`);
+});
+
+test("AC3 — the retry budget is a MEASURED default, OPTIONAL, and REQUIRED to be strictly larger than the step's", () => {
+  const base = cfgYaml();
+  const absent = parseOpenSemanticDiscoverySection(YAML.parse(base).loop.open_semantic_discovery);
+  assert.equal(absent.error, null);
+  assert.equal(absent.config.refutationMaxTurns, 6, "the step's OWN budget is UNCHANGED: 1 answered refuter sample < the 10 AC3 requires");
+  assert.equal(absent.config.refutationRetryMaxTurns, DEFAULT_REFUTATION_RETRY_MAX_TURNS, "absent ⇒ the measured p100 of the answered tool-reading calls");
+
+  // The default FOLLOWS a raised first budget rather than silently becoming a no-op retry.
+  const raised = parseOpenSemanticDiscoverySection(YAML.parse(cfgYaml({ refutation_max_turns: 40 })).loop.open_semantic_discovery);
+  assert.equal(raised.error, null);
+  assert.equal(raised.config.refutationRetryMaxTurns, 41, "a first budget above the measured p100 still leaves the retry LARGER");
+
+  // A DECLARED retry budget must be larger, or the config is refused: «ONE retry with a larger budget» is
+  // an invariant of the section, not a property of its default.
+  const smaller = parseOpenSemanticDiscoverySection(YAML.parse(cfgYaml({ refutation_retry_max_turns: 6 })).loop.open_semantic_discovery);
+  assert.equal(smaller.config, null);
+  assert.match(smaller.error, /refutation_retry_max_turns.*must be > 'refutation_max_turns'/);
+  const declared = parseOpenSemanticDiscoverySection(YAML.parse(cfgYaml({ refutation_retry_max_turns: 33 })).loop.open_semantic_discovery);
+  assert.equal(declared.error, null);
+  assert.equal(declared.config.refutationRetryMaxTurns, 33, "a declared retry budget is used verbatim");
 });

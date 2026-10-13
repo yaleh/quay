@@ -28,6 +28,7 @@ import {
   DEFAULT_EVIDENCE_MAX_LINES, UNINSTRUMENTED, citedSymbols, isDefinitionLine,
   MODEL_UNVERIFIED, modelCallFields, callText, modelPreregRefusal, applyModel,
   definitionLinesFor, importLinesFor, buildEvidencePack, parseVerifierStream,
+  TOOL_USE_PATHS_MAX, toolUseSummary,
   neutralCwdRefusal, verifyCwdRefusal, parseJsonObject, parseHypotheses, runInvestigator,
   clusterHypotheses, verifierVerdict, runVerifier,
   sharedImplementation, mechanicalEvidenceLines, mechanicalSummaryField, provenanceIndex,
@@ -1587,4 +1588,49 @@ test("AC-fp(e-cli): `match --arm <id>` scores a fingerprint run with no --invent
   const missing = await captureCli(["match", "--runs", empty, "--labels", f.labels, "--prereg", f.prereg, "--arm", "exact", "--out-dir", tmp()]);
   assert.equal(missing.code, EXIT.usage);
   assert.ok(missing.errs.some((l) => l.includes("INVENTORY_REQUIRED")), missing.errs.join("\n"));
+});
+
+// ── the per-call TOOL-USE reading + the `checked` positions (task gap-open-discovery-refutation-chain-
+//    undetermined-is-unattributable-and-budget-truncated, Plan items 1 and 3) ──────────────────────────
+test("toolUseSummary — counts by tool and the first argument heads, off the parser's OWN turn records", () => {
+  const stream = [
+    JSON.stringify({ type: "system", subtype: "init", model: "m" }),
+    JSON.stringify({ type: "assistant", message: { content: [{ type: "tool_use", id: "a", name: "Read", input: { file_path: "plugin/scripts/a.ts" } }] } }),
+    JSON.stringify({ type: "assistant", message: { content: [{ type: "tool_use", id: "b", name: "Grep", input: { pattern: "refut", path: "plugin/scripts" } }] } }),
+    JSON.stringify({ type: "assistant", message: { content: [{ type: "tool_use", id: "c", name: "Read", input: { file_path: "plugin/scripts/b.ts" } }] } }),
+    JSON.stringify({ type: "result", subtype: "success", num_turns: 3, is_error: false, result: "{}", usage: { input_tokens: 1, output_tokens: 1 }, total_cost_usd: 0 }),
+  ].join("\n") + "\n";
+  const s = parseVerifierStream(stream);
+  const t = toolUseSummary(s.turns);
+  assert.deepEqual(t.by_tool, { Read: 2, Grep: 1 }, "counts by tool, read off the SAME turns the parser produced");
+  assert.equal(t.total, 3);
+  assert.equal(t.paths_truncated, false);
+  assert.deepEqual(t.paths.map((p) => p.tool), ["Read", "Grep", "Read"], "the argument heads name WHICH files/patterns were opened");
+  assert.match(t.paths[0].args_head, /plugin\/scripts\/a\.ts/);
+
+  // The BOUND is a stated bound: more heads than `maxPaths` ⇒ the list is cut AND says so (硬规则 3b — a
+  // truncated list must not look like a short one).
+  const many = toolUseSummary(Array.from({ length: TOOL_USE_PATHS_MAX + 3 }, (_, i) => ({ tool: "Read", args_head: `f${i}.ts`, result_bytes: 1 })));
+  assert.equal(many.total, TOOL_USE_PATHS_MAX + 3, "the TOTAL is a reading, not the bound");
+  assert.equal(many.paths.length, TOOL_USE_PATHS_MAX);
+  assert.equal(many.paths_truncated, true);
+
+  // ⛔ An ABSENT turns list is `total: 0` with no paths — and the CALL SITE is what turns «the stream did
+  // not parse» into `null` rather than into this object (a zero-count reading and «not read» differ).
+  assert.deepEqual(toolUseSummary(null), { total: 0, by_tool: {}, paths: [], paths_truncated: false });
+});
+
+test("runVerifier — a row carries `checked` ONLY when the answer named positions (the conditional key)", async () => {
+  const dir = tmp();
+  const clusters = clusterHypotheses([{ run: 1, hyps: [{ id: "H1", components: ["a.ts", "b.ts"], concept_kind: "policy", claim: "c", confidence: "high" }] }]);
+  const withChecked = await runVerifier({
+    clusters, pinDir: dir, cwd: dir, promptTemplate: "{{HYP}}",
+    runModel: async () => ({ stdout: JSON.stringify({ verdict: "supported", checked: ["alpha.ts:3 — looked here"], evidence: ["alpha.ts:3"] }), status: 0 }),
+  });
+  assert.deepEqual(withChecked.results[0].checked, ["alpha.ts:3 — looked here"], "the positions the call says it examined reach the row");
+  const without = await runVerifier({
+    clusters, pinDir: dir, cwd: dir, promptTemplate: "{{HYP}}",
+    runModel: async () => ({ stdout: JSON.stringify({ verdict: "supported" }), status: 0 }),
+  });
+  assert.equal(Object.prototype.hasOwnProperty.call(without.results[0], "checked"), false, "an answer that named none adds NO key — absent is not an empty list");
 });
