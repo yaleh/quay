@@ -5,7 +5,7 @@ title: "quay driver stop/restart --kind worker cannot confirm while resident
   worker) — error message doesn't name drain or the takeoverPid handoff recipe;
   declaration=stopped-explicitly itself is NOT a bug (two correctly-decoupled
   axes, confirmed)"
-status: ready
+status: done
 labels:
   - gap
   - docs
