@@ -3,7 +3,7 @@ id: gap-routine-semantic-dedup-scan-loadavg-readers
 title: "semantic-dedup-scan: Identical /proc/loadavg field-0 reader with
   Number.isFinite guard and catch-to-0; acceptance-runner's comment says it is
   the same reading."
-status: ready
+status: done
 labels:
   - gap
   - routine-filed

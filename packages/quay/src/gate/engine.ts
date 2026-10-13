@@ -11,6 +11,10 @@ import fs from "node:fs";
 import path from "node:path";
 import { resolveGate } from "./registry.ts";
 import { verdictFromGateCheck } from "./acceptance-runner.ts";
+// The `/proc/loadavg` field-0 reader — the ONE implementation shared by this cost row, the gate cost
+// ledger (`acceptance-runner.ts`) and the mechanism layer (`plugin/scripts/full-suite-runner.ts`).
+// Kernel-leaf direction, same as `gate/lifecycle.ts` → `../kernel/task-transition.ts`.
+import { readLoadAvg1 } from "../kernel/load-avg.ts";
 import type { GateVerdictKind } from "./types.ts";
 import { appendGateEvent, type GateEvent } from "./gate-event-store.ts";
 import type { Task } from "../abi.ts";
@@ -23,23 +27,23 @@ import type { Task } from "../abi.ts";
 // plugin/scripts/checker-cost.ts — the SHAPE is pinned by plugin/test/checker-cost.test.mjs. `load` =
 // /proc/loadavg 1-min (splits "the gate got slower" into "n got bigger" vs "the machine got busier").
 // `verdict` is the gate's pass/fail outcome (gap-checker-cost-jsonl-add-verdict-field — the axis
-// P4 guard-lineage needs). Inlined here (not imported from plugin/scripts) so the published Core
-// package stays dependency-free.
-function load1(): number {
-  try {
-    const v = Number(fs.readFileSync("/proc/loadavg", "utf8").trim().split(/\s+/)[0]);
-    return Number.isFinite(v) ? v : 0;
-  } catch {
-    return 0;
-  }
-}
+// P4 guard-lineage needs).
+//
+// The `/proc/loadavg` reader is NOT declared here any more. This file used to carry a private
+// `load1()` — the same reading as `acceptance-runner.ts`'s `gateLoadAvg` and
+// `plugin/scripts/full-suite-runner.ts`'s `readLoadAvg`, differing only by a redundant `String(…)`
+// wrapper around an already-`string` read — and justified the copy with "Inlined here (not imported
+// from plugin/scripts) so the published Core package stays dependency-free". That reason forbids
+// importing the MECHANISM layer; it never applied to an in-package kernel leaf, which is where the
+// ONE implementation now lives (`../kernel/load-avg.ts`, routine `semantic-dedup-scan` finding
+// `loadavg-readers`). The stale rationale is deleted with the copy rather than left standing.
 // `verdict` is the gate's THREE-state outcome — the same vocabulary the ledger's own writer
 // declares (`plugin/scripts/checker-cost.ts`'s `CheckerVerdict`), so a gate that could not
 // evaluate its criterion is not recorded as a cost row claiming a `fail`
 // (gap-goal-gate-verdict-single-mapping-not-evaluated).
 function recordGateCost(opts: { root: string; name: string; ms: number; verdict: GateVerdictKind }): void {
   const file = path.join(opts.root, ".quay", "checker-cost.jsonl");
-  const rec = { name: opts.name, ms: opts.ms, n: 1, load: load1(), at: new Date().toISOString(), verdict: opts.verdict };
+  const rec = { name: opts.name, ms: opts.ms, n: 1, load: readLoadAvg1(), at: new Date().toISOString(), verdict: opts.verdict };
   try {
     fs.mkdirSync(path.dirname(file), { recursive: true });
     fs.appendFileSync(file, `${JSON.stringify(rec)}\n`, "utf8");
