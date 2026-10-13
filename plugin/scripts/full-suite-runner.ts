@@ -157,10 +157,12 @@ import { landMeasureHistory, compareLastTwoRounds, parsePerFileLines } from "./m
 import type { PerFileRecord } from "./measure-trend-check.ts";
 // gap-suite-concurrency-ff-gate-and-slot-ssot — the CANONICAL suite-slot implementation (single
 // definition point for "the suite lock slots": suiteLockSlotCount = 旋钮② QUAY_MAX_CONCURRENT_SUITES,
-// suiteLockSlotPaths = base.0..S-1, suiteLockBase = env override → git-common-dir). suiteLockPaths /
+// suiteLockSlotPaths = base.0..S-1, suiteLockBase = env override → git-common-dir). yieldedSuiteSlotCount /
 // countHeldSuiteLocks read it so concurrentSuitesRunning follows S (S=3 ⇒ .0/.1/.2 probed, never a
-// fixed two-slot destructure).
-import { suiteLockSlotPaths, suiteLockBase } from "./suite-lock-slots.ts";
+// fixed two-slot destructure). countHeldSuiteLocks (and its probeLockHeld primitive) now live in that
+// module rather than here: this file's private copies were byte-identical to pre-verified-round-record's
+// (routine `semantic-dedup-scan` finding `probe-lock-held`) ⇒ two homes, free to drift.
+import { suiteLockSlotPaths, suiteLockBase, countHeldSuiteLocks } from "./suite-lock-slots.ts";
 import { readSuiteParams, suiteParamsToEnv } from "./suite-params.ts";
 
 // ── gap-ac128-hub-split-harness-concerns — harness-critical families extracted to focused files ──
@@ -642,49 +644,15 @@ export function yieldedSuiteSlotCount(): number {
 // ── gap-lanes-nproc-concurrent-suites-accounting: nproc + concurrent-suite accounting ────────────────
 
 /**
- * Resolve the S single-flight lock files from the CANONICAL slot implementation
- * (plugin/scripts/suite-lock-slots.ts — the SINGLE definition point for "the suite lock slots",
- * gap-suite-concurrency-ff-gate-and-slot-ssot): `${FULL_SUITE_LOCK_FILE}` env override →
- * `git rev-parse --git-common-dir` (the SHARED lock dir ALL worktrees of this repo contend on — a
- * per-checkout lock would NOT serialize across worktrees, the 2026-08-07 two-worktree incident) →
- * fall back to `<root>/.git`. Returns the S slot paths [base.0 .. base.S-1] where S =
- * QUAY_MAX_CONCURRENT_SUITES. `root` is the tested checkout the probe runs against (git-common-dir is
- * resolved from it, matching test.sh's cwd — a relative git-common-dir is resolved against root,
- * absolute paths pass through).
- */
-function suiteLockPaths(root: string): string[] {
-  return suiteLockSlotPaths(suiteLockBase(root));
-}
-
-/** Non-blocking probe of ONE slot: false = FREE, true = HELD (another suite is mid-run). A missing
- *  parent dir (no suite has ever locked here — a non-git hermetic test root) reads as FREE: flock(1)
- *  cannot probe a nonexistent path (exits 66/ENOENT), and creating stray lock files must not fabricate
- *  a "held" slot. The probe holds the slot for the lifetime of `true` (µs) and releases — it is a
- *  READ, not an acquisition (the suite's own slot is acquired later, inside test.sh). */
-function probeLockHeld(lockFile: string): boolean {
-  if (!fs.existsSync(path.dirname(lockFile))) return false;
-  try {
-    execFileSync("flock", ["-n", lockFile, "true"], { stdio: "ignore" });
-    return false;
-  } catch {
-    return true;
-  }
-}
-
-/**
  * gap-lanes-nproc-concurrent-suites-accounting AC1 — the number of single-flight lock slots CURRENTLY
  * held by OTHER suites at probe time (0..S, S = concurrentSuiteSlots()). Best-effort: any resolution /
  * probe error degrades to 0 (fail-open — accounting never blocks or fails a run; a lone round records
- * concurrentSuitesRunning=1 regardless). The probe is a READ (see probeLockHeld) — it never contends
- * with the suite's own lock acquisition, which happens AFTER this probe in the spawned test.sh.
+ * concurrentSuitesRunning=1 regardless). The probe is a READ (see suite-lock-slots.probeLockHeld) — it
+ * never contends with the suite's own lock acquisition, which happens AFTER this probe in the spawned
+ * test.sh. Re-exported (not re-declared) so its importers keep one binding — the implementation lives
+ * in the canonical slot module alongside suiteLockSlotPaths/suiteLockBase.
  */
-export function countHeldSuiteLocks(root: string): number {
-  try {
-    return suiteLockPaths(root).reduce((held, slot) => held + (probeLockHeld(slot) ? 1 : 0), 0);
-  } catch {
-    return 0;
-  }
-}
+export { countHeldSuiteLocks };
 
 /**
  * gap-verification-round-observability-holes AC3 — the ACTUAL number of full-suite runner processes

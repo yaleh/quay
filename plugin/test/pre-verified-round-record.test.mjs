@@ -801,6 +801,75 @@ test("SSOT — effectiveParallelism has exactly ONE definition point (suite-acco
   }
 });
 
+// gap-routine-semantic-dedup-scan-probe-lock-held — the SSOT ratchet for the flock slot probe.
+// THE DEFECT (.quay/routine-findings.jsonl, routine `semantic-dedup-scan`, runId
+// semantic-dedup-scan-1791908616513, finding `probe-lock-held`, kind byte-identical-body): this module
+// carried a PRIVATE `probeLockHeld` whose own comment named full-suite-runner.probeLockHeld as its
+// source ⇒ two byte-identical fail-open probes, free to drift on any slot/seam change; this module's
+// copy additionally destructured exactly two slots, so a configured `.2` was invisible HERE while the
+// runner counted it (one expression, two answers). The fix lifts the ONE probe — and the
+// countHeldSuiteLocks that reduces over it — to suite-lock-slots.ts (the canonical slot module both
+// consumers already import) and makes both re-export that binding; this test makes "exactly one home"
+// executable. Same shape as the hostParallelism / effectiveParallelism ratchets above, with ONE
+// deliberate difference in the scanner: 按位置判定 (硬规则 2) matches module-level
+// `function <name>(` DECLARATIONS at line start WITH OR WITHOUT `export`, because the private copy this
+// task removed was a bare `function probeLockHeld(` — an export-only scanner would have been blind to
+// the exact shape it exists to catch (硬规则 4c: the measure must survive the layer it measures).
+function scanFunctionDecls(dir, name) {
+  const hits = [];
+  for (const f of fs.readdirSync(dir)) {
+    if (!f.endsWith(".ts")) continue;
+    const src = fs.readFileSync(path.join(dir, f), "utf8");
+    for (const m of src.matchAll(new RegExp(`^(?:export\\s+)?function ${name}\\s*\\(`, "gm"))) {
+      hits.push({ file: f, line: src.slice(0, m.index).split("\n").length });
+    }
+  }
+  return hits;
+}
+
+test("SSOT — probeLockHeld has exactly ONE definition point (suite-lock-slots.ts) and BOTH countHeldSuiteLocks consumers re-export that module's binding", async () => {
+  const scriptDir = path.join(REPO_ROOT, "plugin", "scripts");
+
+  // 硬规则 2: print what was matched (via the assertion message) before trusting the count.
+  const probeDecls = scanFunctionDecls(scriptDir, "probeLockHeld");
+  assert.deepEqual(probeDecls.map((d) => d.file), ["suite-lock-slots.ts"],
+    `probeLockHeld must be DECLARED in exactly one place — actual declarations: ${JSON.stringify(probeDecls)}`);
+
+  // The count that reduces over the probe has one home too (both consumers re-export, never re-declare).
+  const countDecls = scanFunctionDecls(scriptDir, "countHeldSuiteLocks");
+  assert.deepEqual(countDecls.map((d) => d.file), ["suite-lock-slots.ts"],
+    `countHeldSuiteLocks must be DECLARED in exactly one place — actual declarations: ${JSON.stringify(countDecls)}`);
+
+  // Consumers must reach the SAME binding (function object), not a copy — a local re-declaration is a
+  // different object and takes this RED.
+  const slots = await import("../scripts/suite-lock-slots.ts");
+  const runner = await import("../scripts/full-suite-runner.ts");
+  assert.strictEqual(typeof slots.probeLockHeld, "function", "the canonical probe is exported by suite-lock-slots.ts");
+  assert.strictEqual(countHeldSuiteLocks, slots.countHeldSuiteLocks,
+    "pre-verified-round-record.countHeldSuiteLocks must BE suite-lock-slots.countHeldSuiteLocks (re-export), never a re-declaration");
+  assert.strictEqual(runner.countHeldSuiteLocks, slots.countHeldSuiteLocks,
+    "full-suite-runner.countHeldSuiteLocks must BE suite-lock-slots.countHeldSuiteLocks (re-export) — its public API must not fork the probe");
+
+  // The documented fail-open is a real, takeable read (not a tautology): a probe whose parent dir does
+  // not exist is FREE — flock(1) cannot probe a nonexistent path and creating stray lock files must not
+  // fabricate a held slot.
+  const missing = path.join(os.tmpdir(), `pvr-ssot-missing-${process.pid}-${Date.now()}`, "full-suite.lock.0");
+  assert.equal(slots.probeLockHeld(missing), false, "a missing parent dir reads as FREE (fail-open)");
+
+  // Negative control for the SCANNER (the "exactly one" arm must be able to take false): synthetic
+  // second declarations ARE detected in BOTH shapes — bare and exported — otherwise the invariant would
+  // be vacuous AND blind to the very shape this task removed (硬规则 4 推论三 / 4c).
+  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "pvr-ssot-scan-probe-"));
+  try {
+    fs.writeFileSync(path.join(tmp, "fake-copy.ts"), "function probeLockHeld(lockFile) {\n  return false;\n}\n", "utf8");
+    fs.writeFileSync(path.join(tmp, "fake-export.ts"), "export function probeLockHeld(lockFile) {\n  return false;\n}\n", "utf8");
+    assert.equal(scanFunctionDecls(tmp, "probeLockHeld").length, 2,
+      "scanner negative control: BOTH a bare and an exported second declaration are seen");
+  } finally {
+    fs.rmSync(tmp, { recursive: true, force: true });
+  }
+});
+
 test("AC1 — concurrentSuitesRunning=2 when another suite holds a slot [negative control, FULL_SUITE_LOCK_FILE seam]", async () => {
   const lockDir = fs.mkdtempSync(path.join(os.tmpdir(), "pvr-held-"));
   _tmpDirs.push(lockDir);
