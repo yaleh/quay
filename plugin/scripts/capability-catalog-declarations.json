@@ -1084,7 +1084,7 @@
     "supervisor-deliver.sh": "失效前提：跨会话投递仍走单条硬化实现；若投递面迁移出 bash（全 API 化），本条退休",
     "supervisor-health.sh": "无可测前提，靠周期复核",
     "supervisor-observe.sh": "无可测前提，靠周期复核",
-    "supervisor-preempt-candidates.ts": "失效前提（已触发 2026-10-13，AC0）：本判据声称「每轮」被 manager 层调用，但无任何在跑的机制调用它——无 systemd unit/timer、无 crontab、无 orchestration/manager-tick 文档步骤、无会话调用记录、无 `.quay/supervisor-preempt-ledger.jsonl`。且其 no-progress 判据 taskStatusAllowsOver90m 的 mid-flight 集合对合法生命周期词表为空，故真实任务永远不进候选。CADENCE 已由「每轮」改为「按需」；代码保留（preempt ACTION 仍发布且有测试），退役的是「生产会触发」这一声明",
+    "supervisor-preempt-candidates.ts": "失效前提（已触发 2026-10-13，AC0）：本判据声称「每轮」被 manager 层调用，但无任何在跑的机制调用它——无 systemd unit/timer、无 crontab、无 orchestration/manager-tick 文档步骤、无会话调用记录、无 .quay/supervisor-preempt-ledger.jsonl。且其 no-progress 判据 taskStatusAllowsOver90m 的 mid-flight 集合对合法生命周期词表为空，故真实任务永远不进候选。CADENCE 已由「每轮」改为「按需」；代码保留（preempt ACTION 仍发布且有测试），退役的是「生产会触发」这一声明",
     "supervisor-preempt.sh": "失效前提（已触发 2026-10-13，AC0）：同 supervisor-preempt-candidates.ts——本脚本声称「每轮」，但无任何在跑的机制调用它（无 systemd unit/timer、无 crontab、无 tick 文档步骤、无会话调用记录）；唯一入口是 quay-deliver 分组入口，按需。CADENCE 已由「每轮」改为「按需」",
     "sync-lag-check.sh": "无可测前提，靠周期复核",
     "sync-vendor.sh": "无可测前提，靠周期复核",
