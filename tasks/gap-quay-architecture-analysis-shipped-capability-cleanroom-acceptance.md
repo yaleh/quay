@@ -2,7 +2,7 @@
 id: gap-quay-architecture-analysis-shipped-capability-cleanroom-acceptance
 title: Quay架构分析作为已交付能力：OSD+architecture-review+arch-discovery+Method/Portfolio/Experience
   清洁隔离正负验收 + ClaudeCodeUI真实验证
-status: ready
+status: needs-human
 labels:
   - gap
 parent: null
@@ -253,3 +253,11 @@ within this project, and ClaudeCodeUI is a separate project repo.
 `/data/home/yale/work/claudecodeui` kernel, taken in a quiet window on that host. Until then AC3 cannot be
 ticked and this task will keep exiting-not-landed — this is an authorisation/authoring gap, not a
 verification gap, and no further worker round can close it.
+## Needs-Human
+
+**执行 2026-10-13T18:47:45.473Z — 连续修满重试上限仍不合格（标 needs-human）**
+
+- 阻碍原因：worker-driver 连续 3 次 exited-not-landed 未落地（重试上限）
+- 失败步/判词：AC 未全勾（checked 5/6，剩余未勾 1）——续做只需验证并勾选 AC
+- run_id：wk-prod-anchor
+- session_id：3b387e04-d95a-40c6-a313-299f2c08e4b1
