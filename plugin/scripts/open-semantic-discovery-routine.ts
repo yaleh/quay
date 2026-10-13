@@ -1567,6 +1567,20 @@ export const LEDGER_MODULE_FILE = "discovery-experience-ledger.mjs";
 export const REGISTRY_MODULE_FILE = "discovery-method-registry.mjs";
 export const ANALYSIS_DIR_REL = path.posix.join("docs", "analysis");
 
+/** ⛔ THE PACKAGING SINGLE SOURCE. Every engine module file this routine resolves out of `docs/analysis/`
+ *  at runtime, named ONCE here so `packages/quay/scripts/build-plugin-dist.mjs` derives what the shipped
+ *  artifact must carry from THIS list — never from a hand-maintained list on the build side (the same
+ *  discipline as `driver-runtime.ts`'s DRIVER_KINDS table and Core's SIBLING_SCRIPTS manifest: the table
+ *  the code itself reads is the table the build reads). A file named here and absent from the artifact is
+ *  the exact defect this constant exists to close — `loadOpenDiscoveryModules` already refuses with a
+ *  NAMED reason rather than a silent zero (硬规则 3b). */
+export const OPEN_DISCOVERY_ENGINE_MODULES = [
+  HYPOTHESIS_MODULE_FILE,
+  PORTFOLIO_MODULE_FILE,
+  LEDGER_MODULE_FILE,
+  REGISTRY_MODULE_FILE,
+] as const;
+
 /** The repo this FILE lives in (…/plugin/scripts/<this> → repo root). Used only to BUILD a candidate
  *  path — nothing is resolved through it until the runtime `import()`. */
 export const SCRIPT_REPO_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..", "..");
@@ -3523,12 +3537,40 @@ export async function runOpenSemanticDiscovery(root: string, opts: OpenSemanticD
 
   // ⑤ (a) pin the current develop tip into a STRIPPED tree, then build the inventory over the declared
   //    scope. BOTH are recorded; NEITHER is a gate. See step ⑥ for why.
-  const rev = (opts.revFn ?? developTip)(root);
+  //
+  // ⛔ THE PIN STEP IS WRAPPED (task gap-discovery-toolchain-depends-on-unshipped-docs-analysis-and-ts-
+  //    sources-never-works-off-quay-repo, AC4): `developTip` shells `git -C <root> rev-parse develop` and
+  //    `materializeStrippedPin` shells git too — neither catches. A root that is not a git repo, has no
+  //    `develop` ref, or is genuinely EMPTY of the project's own code therefore used to THROW out of this
+  //    function, past every `failed` Fact, and the CLI's promise rejected: the operator got a stack trace
+  //    instead of a reading. That is the worst shape under 硬规则 3b — «the round could not be evaluated»
+  //    arriving as a crash is indistinguishable, to any reader downstream, from a harness defect. A round
+  //    that cannot pin now returns its OWN `failed` Fact carrying an explicit `not-evaluated:` token, so
+  //    "nothing could be evaluated" keeps a value of its own and is never shaped like "evaluated, found 0".
+  let rev: string;
+  try {
+    rev = (opts.revFn ?? developTip)(root);
+  } catch (e) {
+    return fact("not-evaluated", { ...base, enabled: true, interval: intervalInfo, due: dueInfo },
+      `pin basis unavailable — \`git -C ${root} rev-parse develop\` failed: ${(e as Error).message} (nothing spawned, nothing appended, last-run not advanced; not-evaluated:no-develop-ref)`);
+  }
   const pinTmp = opts.pinTmpRoot ?? process.env[PIN_TMP_ENV] ?? os.tmpdir();
-  const pinDir = fs.mkdtempSync(path.join(pinTmp, `osd-pin-${rev.slice(0, 8)}-`));
+  let pinDir: string;
+  try {
+    pinDir = fs.mkdtempSync(path.join(pinTmp, `osd-pin-${rev.slice(0, 8)}-`));
+  } catch (e) {
+    return fact("not-evaluated", { ...base, enabled: true, interval: intervalInfo, due: dueInfo },
+      `pin directory unavailable under ${pinTmp}: ${(e as Error).message} (nothing spawned, nothing appended; not-evaluated:no-pin-dir)`);
+  }
   const pinFn = opts.pinFn ?? ((o: { root: string; rev: string; dir: string }): PinResult =>
     materializeStrippedPin({ ...o, forbiddenDirs: hyp.PIN_FORBIDDEN_DIRS, stripCheck: (d) => hyp.verifyCwdRefusal(d, d) }));
-  const pin = pinFn({ root, rev, dir: pinDir });
+  let pin: PinResult;
+  try {
+    pin = pinFn({ root, rev, dir: pinDir });
+  } catch (e) {
+    return fact("not-evaluated", { ...base, enabled: true, interval: intervalInfo, due: dueInfo },
+      `pin materialisation threw — ${(e as Error).message} (nothing spawned, nothing appended, last-run not advanced; not-evaluated:pin-threw)`);
+  }
   if (!pin.ok) {
     return fact("failed", { ...base, enabled: true, interval: intervalInfo, due: dueInfo }, `pin refused — ${pin.reason} (nothing appended, last-run not advanced)`);
   }

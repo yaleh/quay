@@ -1079,6 +1079,16 @@ export const LEDGER_MODULE_FILE = "discovery-experience-ledger.mjs";
 export const REFLECTION_MODULE_FILE = "discovery-reflection.mjs";
 export const REGISTRY_MODULE_FILE = "discovery-method-registry.mjs";
 
+/** ⛔ THE PACKAGING SINGLE SOURCE — see `OPEN_DISCOVERY_ENGINE_MODULES` in
+ *  open-semantic-discovery-routine.ts for the full rationale. Every engine module file this routine
+ *  resolves out of `docs/analysis/` at runtime, named ONCE so `build-plugin-dist.mjs` derives the
+ *  artifact's engine closure from THIS list rather than a hand-maintained build-side list. */
+export const DISCOVERY_METHOD_ENGINE_MODULES = [
+  LEDGER_MODULE_FILE,
+  REFLECTION_MODULE_FILE,
+  REGISTRY_MODULE_FILE,
+] as const;
+
 /** The repo this FILE lives in (…/plugin/scripts/<this> → repo root). Used only to BUILD a candidate
  *  path — nothing is resolved through it until the runtime `import()` above. */
 export const SCRIPT_REPO_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..", "..");
