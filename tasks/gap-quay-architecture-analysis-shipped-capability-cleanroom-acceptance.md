@@ -11,6 +11,7 @@ extra: {}
 depends_on:
   - gap-architecture-review-wrong-root-detector-argv-and-no-config-driven-host-entry
   - gap-architecture-review-judge-call-shares-no-diagnostics-or-retry-with-osd
+  - gap-architecture-review-detectors-not-runnable-off-quay-repo
 ---
 ## Proposal
 **The consolidation/acceptance leg of the approved "Quay architecture analysis as a shipped capability" initiative (2026-10-13).** Depends on both newly-filed deployability fixes for `architecture-review` (`gap-architecture-review-wrong-root-detector-argv-and-no-config-driven-host-entry`, `gap-architecture-review-judge-call-shares-no-diagnostics-or-retry-with-osd`) and reuses, without re-doing, the already-landed `gap-discovery-toolchain-depends-on-unshipped-docs-analysis-and-ts-sources-never-works-off-quay-repo` (Task D, `b9ca7a9e2`) — which already staged the shared engine (`docs/analysis/*.mjs`, 8 files + 5 data files, including `discovery-method-registry.mjs`/`discovery-portfolio.mjs`/`discovery-experience-ledger.mjs`/`discovery-reflection.mjs` — i.e. Method/Portfolio/Experience's own engine modules) into the official plugin artifact and was already independently verified this session in a clean scratch project (no quay source checkout) for OSD specifically.
@@ -55,6 +56,19 @@ Both prereqs ARE landed (`status: done`), so the DoD's block clause does not fir
 
 The clean-room acceptance **FAILS at its core**. The bundle is only half-shipped: `open_semantic_discovery` and `arch_discovery` do run real rounds on a bare host; `architecture_review` cannot produce a single result in ANY install form; `discovery_method` is blocked by a host artifact. Cause filed as **`gap-architecture-review-detectors-not-runnable-off-quay-repo`**.
 
+## Blocked — dependency declared (2026-10-14, continuation round)
+
+`depends_on` now also carries `gap-architecture-review-detectors-not-runnable-off-quay-repo`, added **through the ABI** (`task_write`) in this round. Verified mechanically, not asserted: `depsReadinessFor` on this task returns `ready:false, blockingDeps:['gap-architecture-review-detectors-not-runnable-off-quay-repo'], doneDeps:[the two landed prereqs]`, and `slot-refill.ts:1084` defers on that predicate (`defer(id, "deps-not-ready")`) — so this task is out of the dispatch pool until that gap lands. This is the DoD's own block clause being invoked, not a manual patch.
+
+The prior round's finding was re-verified this round against current develop (it is not a stale tail):
+- `plugin/scripts/quality-gate-driver.ts` `kernelDetectorArgv` still builds `path.join(resolveKernelScriptsDir(), "<name>.ts")`, and its own doc-comment still records the residual verbatim — a dist-only install (no raw `.ts`) still ENOENTs, and it names `driver-runtime.kernelSiblingArgv()` as the thing "那是另一件事…不在本任务范围内".
+- `identity-replication-check.ts:1301` still hard-refuses any root lacking `<root>/plugin/scripts` (`exit 2`) — true of every non-quay host, in **every** install form, which is why the two landed prerequisites cannot make AC1 pass.
+- In the FIXED artifact: `identity-replication-check` ships only as `scripts/dist/identity-replication-check.js`; `guard-lineage-check` and `deletion-closure-check` ship in no form at all.
+
+**Residue for a human (not something this task can discharge by running longer):**
+1. AC1's premise — that `architecture_review` *should* run against a non-quay root — is a scoping question; the fix task now owns it (its AC3 requires the detectors to return a real report on a root with no `plugin/scripts`).
+2. AC3 additionally needs someone to authorise swapping another project's **live** anchor (ClaudeCodeUI pid 675243, still on the PRE-fix kernel), which this round again did **not** do: that build does not deliver the capability it would be deployed under, and the swap is outward-facing.
+
 ## AC1 — FAILS (positive control, FIXED build)
 
 ```
@@ -95,7 +109,7 @@ Same host content, PRE-fix build, side-by-side with AC1:
 
 ## AC3 — NOT DONE
 
-The fixed official build was **not** deployed to ClaudeCodeUI. Its live anchor (pid 675243, up 2h16m, `__anchor --root /data/home/yale/work/claudecodeui --takeover 2943131`) still runs the PRE-fix kernel `/data/home/yale/work/quay-scratch/official-dist-020-dev/scripts/dist/driver-anchor.js` (`grep -c readArchitectureReviewConfig` = 0 on that tree). I did not perform an anchor takeover: given AC1, that build does not deliver the architecture_review capability it would be deployed under, and swapping the kernel of another project's live production driver is an outward-facing, hard-to-reverse action that should carry a human's explicit go-ahead rather than being done to satisfy a sub-clause of an acceptance whose core already fails. What that host does produce is pasted under AC5.
+The fixed official build was **not** deployed to ClaudeCodeUI. Its live anchor (pid 675243, `__anchor --root /data/home/yale/work/claudecodeui --takeover 2943131`) still runs the PRE-fix kernel `/data/home/yale/work/quay-scratch/official-dist-020-dev/scripts/dist/driver-anchor.js` (`grep -c readArchitectureReviewConfig` = 0 on that tree). I did not perform an anchor takeover: given AC1, that build does not deliver the architecture_review capability it would be deployed under, and swapping the kernel of another project's live production driver is an outward-facing, hard-to-reverse action that should carry a human's explicit go-ahead rather than being done to satisfy a sub-clause of an acceptance whose core already fails. What that host does produce is pasted under AC5.
 
 ## AC4 — PASS
 

@@ -157,12 +157,14 @@
 
 import fs from "node:fs";
 import path from "node:path";
-import { execFileSync } from "node:child_process";
 // getArgValue now lives in gate-script-base.ts as `flagValue` (it was one of the byte-identical
 // copies of the indexOf+next-arg idiom in plugin/scripts; .quay/routine-findings.jsonl finding
 // `arg-parsing-helper-family`, routine `semantic-dedup-scan`).
 import { isDirectEntry, flagValue } from "./gate-script-base.ts";
-import { suiteLockSlotCount } from "./suite-lock-slots.ts";
+// countHeldSuiteLocks (with the probeLockHeld primitive it reduces over) comes from the canonical slot
+// module too — the local suiteLockPaths/probeLockHeld pair that used to shadow it here is gone
+// (finding `probe-lock-held`, routine `semantic-dedup-scan`).
+import { suiteLockSlotCount, countHeldSuiteLocks } from "./suite-lock-slots.ts";
 import { resolveSharedCheckout, toIsoTimestamp } from "./per-task-suite-record.ts";
 import { parsePerFileLines } from "./measure-trend-check.ts";
 // gap-verification-round-static-fail-no-record — the shared test-failure matcher (the SAME
@@ -210,8 +212,11 @@ const NOT_EVALUATED_TOKEN_RE = /^[a-z][a-z0-9-]*$/;
 //                          full-suite-runner re-exports from) — no longer a local replica.
 //   concurrentSuiteSlots → delegates to suiteLockSlotCount() (suite-lock-slots.ts), the same delegation
 //                          runner-concurrency.concurrentSuiteSlots makes.
-//   countHeldSuiteLocks  → still a thin local replica of full-suite-runner.ts:669 (its only home is the
-//                          heavy module); byte-identical so the record stays 同口径.
+//   countHeldSuiteLocks  → IMPORTED from suite-lock-slots.ts (the canonical slot module) — no longer a
+//                          local replica (finding `probe-lock-held`, routine `semantic-dedup-scan`): the
+//                          private copy was byte-identical to full-suite-runner's AND still destructured
+//                          exactly two slots, so its `.2` was invisible under S>2 while the runner counted
+//                          it — one expression, two answers. Same fix shape as hostParallelism above.
 
 const PHASE_OVERHEAD_RE = /^__OVERHEAD__\s+([A-Za-z0-9_]+)_ms=(\d+)(?:\s+partial=1)?$/;
 
@@ -551,49 +556,12 @@ export function concurrentSuiteSlots() {
   return suiteLockSlotCount();
 }
 
-/** Resolve the single-flight 2-slot lock files the SAME way full-suite-runner.suiteLockPaths does:
- *  `${FULL_SUITE_LOCK_FILE}` env override → `git rev-parse --git-common-dir` from `root` (the SHARED
- *  lock dir all worktrees contend on) → fall back to `<root>/.git`. */
-function suiteLockPaths(root) {
-  const envOverride = process.env.FULL_SUITE_LOCK_FILE;
-  let base;
-  if (envOverride) {
-    base = envOverride;
-  } else {
-    let commonDir = null;
-    try {
-      commonDir = execFileSync("git", ["rev-parse", "--git-common-dir"], { cwd: root, encoding: "utf8" }).trim();
-    } catch {
-      commonDir = null;
-    }
-    if (!commonDir) commonDir = ".git";
-    base = path.join(path.resolve(root, commonDir), "full-suite.lock");
-  }
-  return [`${base}.0`, `${base}.1`];
-}
-
-/** Non-blocking probe of ONE slot: false = FREE, true = HELD. Missing parent dir reads as FREE (the
- *  same fail-open as full-suite-runner.probeLockHeld). */
-function probeLockHeld(lockFile) {
-  if (!fs.existsSync(path.dirname(lockFile))) return false;
-  try {
-    execFileSync("flock", ["-n", lockFile, "true"], { stdio: "ignore" });
-    return false;
-  } catch {
-    return true;
-  }
-}
-
 /** Number of single-flight lock slots CURRENTLY held by OTHER suites at probe time (0..S, S =
- *  concurrentSuiteSlots()). Best-effort: any error degrades to 0 (accounting never blocks a run). */
-export function countHeldSuiteLocks(root) {
-  try {
-    const [l0, l1] = suiteLockPaths(root);
-    return (probeLockHeld(l0) ? 1 : 0) + (probeLockHeld(l1) ? 1 : 0);
-  } catch {
-    return 0;
-  }
-}
+ *  concurrentSuiteSlots()). Best-effort: any error degrades to 0 (accounting never blocks a run).
+ *  Re-exported (not re-declared) from the canonical slot module — its suiteLockPaths/probeLockHeld
+ *  locals were a second definition point for the suite lock slots (finding `probe-lock-held`, routine
+ *  `semantic-dedup-scan`), and the 2-slot destructure it carried could not see a configured `.2`. */
+export { countHeldSuiteLocks };
 
 /** Build the pre-verified round record. Returns {record} or {error} (fail-closed). */
 export function buildPreVerifiedRoundRecord(o) {

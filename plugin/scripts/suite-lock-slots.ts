@@ -21,8 +21,12 @@
 //                          base (`${base}.concurrency`) so it uses the SAME path resolution.
 //
 // Every consumer reads THIS module (by import) instead of re-deriving the slots:
-//   plugin/scripts/full-suite-runner.ts     (suiteLockPaths / countHeldSuiteLocks)
+//   plugin/scripts/full-suite-runner.ts       (countHeldSuiteLocks / yieldedSuiteSlotCount)
+//   plugin/scripts/pre-verified-round-record.ts (countHeldSuiteLocks)
 //   plugin/scripts/worktree-process-reaper.ts (fullSuiteLockFiles)
+// probeLockHeld / countHeldSuiteLocks live HERE too (gap-routine-semantic-dedup-scan-probe-lock-held):
+// the probe is a property of the slot, so its single definition point is this module — both
+// countHeldSuiteLocks consumers import it rather than each carrying a private copy.
 // The bash side has its own canonical (plugin/scripts/suite-slot-lib.sh, sourced by scripts/test.sh);
 // the behavioral invariant (plugin/scripts/suite-slot-ssot-check.ts + plugin/test) verifies the two
 // agree (槽文件数 == concurrentSuiteSlots()) so they cannot silently drift.
@@ -138,6 +142,46 @@ export function suiteLockBase(root: string): string {
   }
   if (!commonDir) commonDir = ".git";
   return path.join(path.resolve(root, commonDir), "full-suite.lock");
+}
+
+/** Non-blocking probe of ONE slot: false = FREE, true = HELD (another suite is mid-run). A missing
+ *  parent dir (no suite has ever locked here — a non-git hermetic test root) reads as FREE: flock(1)
+ *  cannot probe a nonexistent path (exits 66/ENOENT), and creating stray lock files must not fabricate
+ *  a "held" slot. The probe holds the slot for the lifetime of `true` (µs) and releases — it is a
+ *  READ, not an acquisition (the suite's own slot is acquired later, inside test.sh).
+ *
+ *  SINGLE definition point (gap-routine-semantic-dedup-scan-probe-lock-held, routine
+ *  `semantic-dedup-scan` finding `probe-lock-held`, evidence byte-identical-body): this body lived
+ *  twice — privately in full-suite-runner.ts and in pre-verified-round-record.ts, whose own comment
+ *  named full-suite-runner as its source. Two homes for one fail-open probe are free to drift on any
+ *  slot/seam change, so both consumers now import THIS one (the lightweight module — node builtins +
+ *  gate-script-base only — every slot consumer already reaches; neither needs the heavy hub). */
+export function probeLockHeld(lockFile: string): boolean {
+  if (!fs.existsSync(path.dirname(lockFile))) return false;
+  try {
+    execFileSync("flock", ["-n", lockFile, "true"], { stdio: "ignore" });
+    return false;
+  } catch {
+    return true;
+  }
+}
+
+/** The number of single-flight lock slots CURRENTLY held by OTHER suites at probe time (0..S, S =
+ *  suiteLockSlotCount()). Best-effort: any resolution / probe error degrades to 0 (fail-open —
+ *  accounting never blocks or fails a run; a lone round records concurrentSuitesRunning=1 regardless).
+ *  The probe is a READ (see probeLockHeld) — it never contends with the suite's own lock acquisition,
+ *  which happens AFTER this probe in the spawned test.sh. `root` is the tested checkout the probe runs
+ *  against (resolved through suiteLockBase, the SAME base the slot paths use, so the S probed and the
+ *  paths probed can never disagree). SECOND definition point closed here
+ *  (gap-routine-semantic-dedup-scan-probe-lock-held): pre-verified-round-record's copy still destructured
+ *  exactly two slots, so an S>2 configuration's `.2` slot was invisible to the round record while
+ *  full-suite-runner counted it — one expression, two answers. */
+export function countHeldSuiteLocks(root: string): number {
+  try {
+    return suiteLockSlotPaths(suiteLockBase(root)).reduce((held, slot) => held + (probeLockHeld(slot) ? 1 : 0), 0);
+  } catch {
+    return 0;
+  }
 }
 
 // ── CLI convenience (measure / debugging): print the S slot paths for a base or a root ──────────────
