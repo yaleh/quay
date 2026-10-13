@@ -870,6 +870,18 @@ export async function runCrossProjectDogfood(root: string, opts: CrossProjectDog
       const reasons = Array.isArray(inv.reasons) ? (inv.reasons as string[]) : [];
       return fact("failed", { ...base, ...projectsView, ...modelCalls(callRecords) }, `investigator refused — ${reasons[0] ?? "no reason reported"} (nothing appended, last-run not advanced)`);
     }
+    // ⛔ A CALL THAT FAILED IS NOT A MODEL THAT FOUND NOTHING (硬规则 3b). The engine reports `ok:true`
+    // for a run whose subprocess died — the run file carries the failure, the round does not — so the
+    // call's OWN record is what has to decide. Measured 2026-10-13: a caller that trusted `ok:true`
+    // recorded a round as `verified` with zero hypotheses on an `exit 1` call, which reads on the
+    // carrier exactly like "the model looked and found nothing".
+    const invCall = callRecords.find((c) => c.step === "cross-project-investigator");
+    if (invCall !== undefined && invCall.not_evaluated !== null) {
+      return fact("failed", { ...base, ...projectsView, ...modelCalls(callRecords) }, `investigator call ${invCall.not_evaluated} (nothing appended, last-run not advanced)`);
+    }
+    if (inv.parsed === 0) {
+      return fact("failed", { ...base, ...projectsView, ...modelCalls(callRecords) }, "investigator produced no parseable hypothesis list (an empty JSON array parses — this is unparseable output, not a finding of nothing); nothing appended, last-run not advanced");
+    }
     hypotheses = Array.isArray(inv.records)
       ? (inv.records as Record<string, unknown>[]).flatMap((r) => (Array.isArray(r.hyps) ? (r.hyps as Record<string, unknown>[]) : []))
       : [];
@@ -894,7 +906,7 @@ export async function runCrossProjectDogfood(root: string, opts: CrossProjectDog
   try {
     verifierOut = await hyp.runVerifier({
       clusters: selected, pinDir: scratch, cwd: scratch, promptTemplate: CROSS_PROJECT_VERIFIER_TEMPLATE,
-      maxClusters: cfg.maxClustersVerified, concurrency: 1, maxMs: cfg.maxWallMs,
+      maxClusters: cfg.maxClustersVerified, concurrency: 1, maxMs: cfg.maxWallMs, // concurrency-default-fallback: ONE verifier call at a time — concurrent calls reserve from several places at once and the per-step cost ledger stops being readable in call order
       strategy: "default", onlyCluster: null, evidence: null, model: requestedModel,
       runModel: async (p: string) => (await reservingStep("cross-project-verifier", { prompt: p, tools: VERIFIER_TOOLS, maxTurns: cfg.verifierMaxTurns })) as unknown as { stdout: string },
     });
@@ -938,7 +950,7 @@ export async function runCrossProjectDogfood(root: string, opts: CrossProjectDog
       try {
         const ref = await hyp.runVerifier({
           clusters: [cluster], pinDir: scratch, cwd: scratch, promptTemplate: CROSS_PROJECT_REFUTER_TEMPLATE,
-          maxClusters: 1, concurrency: 1, maxMs: cfg.maxWallMs,
+          maxClusters: 1, concurrency: 1, maxMs: cfg.maxWallMs, // concurrency-default-fallback: ONE refuter call at a time — the independent refuter is a single fresh-context call by definition, and a second concurrent reservation would make the round's cost ledger unreadable in call order
           strategy: "default", onlyCluster: 1, evidence: null, model: requestedModel,
           runModel: async (p: string) => (await reservingStep("cross-project-refuter", { prompt: p, tools: REFUTER_TOOLS, maxTurns: cfg.refutationMaxTurns })) as unknown as { stdout: string },
         });

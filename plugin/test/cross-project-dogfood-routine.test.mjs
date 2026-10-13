@@ -9,7 +9,7 @@
 // against real artifacts are pasted as evidence in the task body, not asserted here (a fixture can prove
 // "it can produce a reading", never "production produced one" — 硬规则 4 推论三).
 
-import { test } from "node:test";
+import { test, after } from "node:test";
 import assert from "node:assert/strict";
 import fs from "node:fs";
 import os from "node:os";
@@ -46,8 +46,18 @@ import { INVOKED_BY_MANUAL, INVOKED_BY_RESIDENT } from "../scripts/discovery-met
 const ROUTINE_SRC = new URL("../scripts/cross-project-dogfood-routine.ts", import.meta.url);
 
 // ── fixtures ────────────────────────────────────────────────────────────────────────────────────────
-function tmpdir(prefix = "cpd-test-") {
-  return fs.mkdtempSync(path.join(os.tmpdir(), prefix));
+// Every temp tree this file makes is registered here and removed once, at the end: an unpaired
+// mkdtemp leaks a directory per run, and this suite runs hundreds of times a day.
+const _tmpDirs = [];
+after(() => {
+  for (const d of _tmpDirs) {
+    try { fs.rmSync(d, { recursive: true, force: true }); } catch { /* best-effort */ }
+  }
+});
+function tmpDir(prefix = "cpd-test-") {
+  const d = fs.mkdtempSync(path.join(os.tmpdir(), prefix));
+  _tmpDirs.push(d);
+  return d;
 }
 
 function writeJsonl(file, records) {
@@ -173,7 +183,7 @@ test("AC1(a) STATIC — this file reaches no fs mutator outside writeOwnedFile (
 
 test("AC1(b) RUNTIME — writeOwnedFile refuses any target inside a declared source project, and allows its own", () => {
   clearSourceRoots();
-  const src = makeSourceProject(path.join(tmpdir(), "src"));
+  const src = makeSourceProject(path.join(tmpDir(), "src"));
   declareSourceRoot(src, "alpha");
   try {
     assert.throws(() => writeOwnedFile(path.join(src, "sneak.txt"), "x"), /CROSS_PROJECT_SOURCE_WRITE_REFUSED .*"alpha"/, "a write into the source project must be refused BY NAME");
@@ -182,7 +192,7 @@ test("AC1(b) RUNTIME — writeOwnedFile refuses any target inside a declared sou
     // A sibling directory whose name merely STARTS with the root's is NOT inside it (position, not prefix
     // string — 硬规则 2).
     assert.equal(sourceRootOwning(`${src}-sibling`), null);
-    const mine = path.join(tmpdir(), "own");
+    const mine = path.join(tmpDir(), "own");
     writeOwnedFile(path.join(mine, "ok.txt"), "hello");
     assert.equal(fs.readFileSync(path.join(mine, "ok.txt"), "utf8"), "hello");
     // The spawn-cwd check is the same check.
@@ -193,7 +203,7 @@ test("AC1(b) RUNTIME — writeOwnedFile refuses any target inside a declared sou
 });
 
 test("AC1(c) REAL RUN against a permission-restricted copy — the source tree is byte-identical afterwards", async () => {
-  const base = tmpdir();
+  const base = tmpDir();
   const src = makeSourceProject(path.join(base, "readonly-alpha"), { outcomes: [{ kind: "worker", final_state: "exited-not-landed", exit_code: 0 }] });
   const before = hashTree(src);
   // A permission-restricted copy: no write bit anywhere in the tree. A write would fail loudly rather
@@ -208,7 +218,7 @@ test("AC1(c) REAL RUN against a permission-restricted copy — the source tree i
   };
   chmodAll(src);
   try {
-    const root = tmpdir();
+    const root = tmpDir();
     const { module } = makeHyp();
     const { seen, spawn } = makeSpawn();
     const fact = await runCrossProjectDogfood(root, {
@@ -217,7 +227,7 @@ test("AC1(c) REAL RUN against a permission-restricted copy — the source tree i
       hypModule: module,
       portfolioModule: null,
       spawnFn: spawn,
-      scratchRoot: tmpdir(),
+      scratchRoot: tmpDir(),
       now: () => 1_800_000_000_000,
     });
     assert.equal(fact.state, "verified", `round must complete: ${fact.reason}`);
@@ -246,10 +256,10 @@ test("AC2(a) enabled:false is a kill switch — the disabled shape needs no othe
   assert.equal(read.error, null);
   assert.equal(read.config.enabled, false);
   assert.equal(read.config.sourceProjects.length, 0, "a kill switch must not be blocked by the config it kills");
-  const root = tmpdir();
+  const root = tmpDir();
   const { module } = makeHyp();
   const { seen, spawn } = makeSpawn();
-  const fact = await runCrossProjectDogfood(root, { config: read.config, configPresent: true, hypModule: module, spawnFn: spawn, scratchRoot: tmpdir() });
+  const fact = await runCrossProjectDogfood(root, { config: read.config, configPresent: true, hypModule: module, spawnFn: spawn, scratchRoot: tmpDir() });
   assert.equal(fact.state, "not-evaluated");
   assert.match(fact.reason, /not-evaluated:disabled/);
   assert.equal(seen.length, 0, "a disabled round must spawn nothing");
@@ -257,7 +267,7 @@ test("AC2(a) enabled:false is a kill switch — the disabled shape needs no othe
 });
 
 test("AC2(b) the 24h call cap is a HARD pre-spawn reservation, and hitting it refuses the round with zero calls", async () => {
-  const base = tmpdir();
+  const base = tmpDir();
   const root = path.join(base, "ws");
   const ledger = path.join(root, BUDGET_LEDGER_REL);
   writeJsonl(ledger, [{ kind: "reserve", id: "pre-1", ts: new Date(1_800_000_000_000 - 60_000).toISOString(), step: "cross-project-investigator", used_before: 0 }]);
@@ -268,7 +278,7 @@ test("AC2(b) the 24h call cap is a HARD pre-spawn reservation, and hitting it re
     configPresent: true,
     hypModule: module,
     spawnFn: spawn,
-    scratchRoot: tmpdir(),
+    scratchRoot: tmpDir(),
     now: () => 1_800_000_000_000,
   });
   assert.equal(fact.state, "not-evaluated");
@@ -278,7 +288,7 @@ test("AC2(b) the 24h call cap is a HARD pre-spawn reservation, and hitting it re
 });
 
 test("AC2(c) a round that runs really writes reserve lines, and a mid-round refusal stops it with the cause named", async () => {
-  const base = tmpdir();
+  const base = tmpDir();
   const root = path.join(base, "ws");
   const src = makeSourceProject(path.join(base, "alpha"), { outcomes: [{ kind: "worker", final_state: "exited-not-landed", exit_code: 0 }] });
   const { module } = makeHyp();
@@ -288,7 +298,7 @@ test("AC2(c) a round that runs really writes reserve lines, and a mid-round refu
     configPresent: true,
     hypModule: module,
     spawnFn: spawn,
-    scratchRoot: tmpdir(),
+    scratchRoot: tmpDir(),
     now: () => 1_800_000_000_000,
   });
   assert.equal(fact.state, "verified", fact.reason);
@@ -308,7 +318,7 @@ test("AC2(c) a round that runs really writes reserve lines, and a mid-round refu
     configPresent: true,
     hypModule: m2,
     spawnFn: s2,
-    scratchRoot: tmpdir(),
+    scratchRoot: tmpDir(),
     now: () => 1_800_000_000_000,
   });
   assert.equal(refused.state, "failed", "a refused reservation must not be reported as a completed round");
@@ -351,7 +361,7 @@ test("AC3(a) the schema accepts ≥2 source projects and refuses the malformed s
 });
 
 test("AC3(b) a THIRD, deliberately-unreadable root reads not-evaluated:root-unreadable for THAT project and the round still runs", async () => {
-  const base = tmpdir();
+  const base = tmpDir();
   const root = path.join(base, "ws");
   const alpha = makeSourceProject(path.join(base, "alpha"), { outcomes: [{ kind: "worker", final_state: "exited-not-landed", exit_code: 0 }] });
   const gamma = makeSourceProject(path.join(base, "gamma"), { outcomes: [{ kind: "worker", final_state: "completed", exit_code: 0 }] });
@@ -363,7 +373,7 @@ test("AC3(b) a THIRD, deliberately-unreadable root reads not-evaluated:root-unre
     configPresent: true,
     hypModule: module,
     spawnFn: spawn,
-    scratchRoot: tmpdir(),
+    scratchRoot: tmpDir(),
     now: () => 1_800_000_000_000,
   });
   assert.equal(fact.state, "verified", `the unreadable third root must NOT fail the round: ${fact.reason}`);
@@ -378,7 +388,7 @@ test("AC3(b) a THIRD, deliberately-unreadable root reads not-evaluated:root-unre
 });
 
 test("AC3(c) every enabled project unreadable ⇒ its own not-evaluated token, and nothing is spawned", async () => {
-  const base = tmpdir();
+  const base = tmpDir();
   const root = path.join(base, "ws");
   const { module } = makeHyp();
   const { seen, spawn } = makeSpawn();
@@ -387,7 +397,7 @@ test("AC3(c) every enabled project unreadable ⇒ its own not-evaluated token, a
     configPresent: true,
     hypModule: module,
     spawnFn: spawn,
-    scratchRoot: tmpdir(),
+    scratchRoot: tmpDir(),
     now: () => 1_800_000_000_000,
   });
   assert.equal(fact.state, "not-evaluated");
@@ -397,13 +407,13 @@ test("AC3(c) every enabled project unreadable ⇒ its own not-evaluated token, a
 
 // ── due / last-run / invoked_by ─────────────────────────────────────────────────────────────────────
 test("not-due is its own reading, and a completed round advances the last-run stamp WITH its invoked_by", async () => {
-  const base = tmpdir();
+  const base = tmpDir();
   const root = path.join(base, "ws");
   const lastRun = path.join(root, ".quay", "routine-last-run.json");
   const src = makeSourceProject(path.join(base, "alpha"), { outcomes: [{ kind: "worker", final_state: "completed", exit_code: 0 }] });
   const { module } = makeHyp();
   const { spawn } = makeSpawn();
-  const common = { config: cfg({ sourceProjects: [project("alpha", src)] }), configPresent: true, hypModule: module, spawnFn: spawn, scratchRoot: tmpdir(), lastRunPath: lastRun };
+  const common = { config: cfg({ sourceProjects: [project("alpha", src)] }), configPresent: true, hypModule: module, spawnFn: spawn, scratchRoot: tmpDir(), lastRunPath: lastRun };
 
   const t0 = 1_800_000_000_000;
   const first = await runCrossProjectDogfood(root, { ...common, now: () => t0, invokedBy: INVOKED_BY_RESIDENT });
@@ -437,6 +447,38 @@ test("the routine spec is stamped resident-driver by construction, and null only
   assert.equal(declared.enabled, false);
 });
 
+test("an investigator subprocess that EXITS NONZERO fails the round and does not advance the last-run stamp", async () => {
+  const base = tmpDir();
+  const root = path.join(base, "ws");
+  const lastRun = path.join(root, ".quay", "routine-last-run.json");
+  const src = makeSourceProject(path.join(base, "alpha"), { outcomes: [{ kind: "worker", final_state: "completed", exit_code: 0 }] });
+  const { module } = makeHyp();
+  const failingSpawn = async () => ({ status: 1, signal: null, stdout: "", stderr: "boom", error: null });
+  const fact = await runCrossProjectDogfood(root, {
+    config: cfg({ sourceProjects: [project("alpha", src)] }),
+    configPresent: true, hypModule: module, spawnFn: failingSpawn, scratchRoot: tmpDir(), lastRunPath: lastRun,
+    now: () => 1_800_000_000_000,
+  });
+  assert.equal(fact.state, "failed", "a dead subprocess is not a round that found nothing (硬规则 3b)");
+  assert.match(fact.reason, /not-evaluated:exit-1/);
+  assert.equal(fs.existsSync(lastRun), false, "a failed round must not advance the last-run stamp");
+  assert.equal(readCarrier(root).filter((r) => r.kind === "dogfood-round").length, 0, "a failed round writes no round line");
+
+  // Negative control: the SAME fixture with a clean exit and an EMPTY hypothesis array is a real
+  // "looked and found nothing" — verified, stamped, and recorded as 0 hypotheses.
+  const clean = makeHyp({ hypotheses: [] });
+  const root2 = path.join(base, "ws2");
+  const lastRun2 = path.join(root2, ".quay", "routine-last-run.json");
+  const ok = await runCrossProjectDogfood(root2, {
+    config: cfg({ sourceProjects: [project("alpha", src)] }),
+    configPresent: true, hypModule: clean.module, spawnFn: makeSpawn().spawn, scratchRoot: tmpDir(), lastRunPath: lastRun2,
+    now: () => 1_800_000_000_000,
+  });
+  assert.equal(ok.state, "verified", ok.reason);
+  assert.equal(ok.value.hypotheses, 0);
+  assert.equal(JSON.parse(fs.readFileSync(lastRun2, "utf8"))[CROSS_PROJECT_DOGFOOD_NAME], 1_800_000_000_000, "a real empty round DOES advance the stamp");
+});
+
 // ── AC4: dedup against the existing Portfolio ───────────────────────────────────────────────────────
 function makePortfolio({ existing = [], failIngest = false } = {}) {
   const ingestCalls = [];
@@ -463,7 +505,7 @@ function makePortfolio({ existing = [], failIngest = false } = {}) {
 }
 
 async function runWithPortfolio(portfolio, { cfgOver = {}, hypotheses } = {}) {
-  const base = tmpdir();
+  const base = tmpDir();
   const root = path.join(base, "ws");
   const src = makeSourceProject(path.join(base, "alpha"), { outcomes: [{ kind: "worker", final_state: "exited-not-landed", exit_code: 0 }] });
   const { module } = makeHyp(hypotheses ? { hypotheses } : {});
@@ -474,7 +516,7 @@ async function runWithPortfolio(portfolio, { cfgOver = {}, hypotheses } = {}) {
     hypModule: module,
     portfolioModule: portfolio.module,
     spawnFn: spawn,
-    scratchRoot: tmpdir(),
+    scratchRoot: tmpDir(),
     now: () => 1_800_000_000_000,
   });
   return { fact, root, clusters: readCarrier(root).filter((r) => r.kind === "dogfood-cluster"), rounds: readCarrier(root).filter((r) => r.kind === "dogfood-round") };
@@ -543,14 +585,14 @@ test("the confirmation bar needs BOTH the verifier and an independent refuter, a
 
 test("a refuted cluster is recorded with the refuter's counterexample and writes nothing", async () => {
   const portfolio = makePortfolio();
-  const base = tmpdir();
+  const base = tmpDir();
   const root = path.join(base, "ws");
   const src = makeSourceProject(path.join(base, "alpha"), { outcomes: [{ kind: "worker", final_state: "exited-not-landed", exit_code: 0 }] });
   const { module } = makeHyp({ verdicts: ["supported", "refuted"] });
   const { spawn } = makeSpawn();
   const fact = await runCrossProjectDogfood(root, {
     config: cfg({ sourceProjects: [project("alpha", src)] }),
-    configPresent: true, hypModule: module, portfolioModule: portfolio.module, spawnFn: spawn, scratchRoot: tmpdir(),
+    configPresent: true, hypModule: module, portfolioModule: portfolio.module, spawnFn: spawn, scratchRoot: tmpDir(),
     now: () => 1_800_000_000_000,
   });
   assert.equal(fact.state, "verified", fact.reason);
@@ -564,7 +606,7 @@ test("a refuted cluster is recorded with the refuter's counterexample and writes
 
 // ── the digest (counts + excerpts, never a verdict) ─────────────────────────────────────────────────
 test("the artifact digest reports reading/line-provenance and never invents a line number for a tail read", () => {
-  const base = tmpdir();
+  const base = tmpDir();
   const root = makeSourceProject(path.join(base, "alpha"), {
     outcomes: [{ kind: "worker", final_state: "completed", exit_code: 0 }, { kind: "worker", final_state: "exited-not-landed", exit_code: 0 }, { kind: "fan-in", final_state: "landed" }],
   });
@@ -589,7 +631,7 @@ test("the artifact digest reports reading/line-provenance and never invents a li
 });
 
 test("the project scan marks a task count taken over a PREFIX as not-a-census", () => {
-  const base = tmpdir();
+  const base = tmpDir();
   const tasks = {};
   for (let i = 0; i < 5; i++) tasks[`t-${i}`] = "done";
   const root = makeSourceProject(path.join(base, "alpha"), { outcomes: [{ kind: "w" }], tasks });
@@ -603,7 +645,7 @@ test("the project scan marks a task count taken over a PREFIX as not-a-census", 
 });
 
 test("a root that is a FILE, not a directory, is root-unreadable rather than an empty project", () => {
-  const base = tmpdir();
+  const base = tmpDir();
   const asFile = path.join(base, "not-a-dir");
   fs.writeFileSync(asFile, "x");
   const scan = scanSourceProject(project("alpha", asFile), { maxRecords: 3, maxFileBytes: 1_000, maxBytes: 1_000 });
