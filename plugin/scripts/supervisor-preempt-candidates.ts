@@ -1,6 +1,23 @@
 // supervisor-preempt-candidates.ts — the supervisor base layer's PREEMPTION CRITERION
 // (tasks/gap-supervisor-step-4-preemption, 落地次序 step ④; SPEC-integration-architecture §4.4 #4).
 //
+// ⛔ RETIRED (AC0, 2026-10-13 — gap-over90-task-gate-taskstatus-literal-unreachable-for-any-real-
+// status-fix-or-retire). This chain's no-progress criterion is `taskStatusAllowsOver90m`, whose
+// mid-flight status set is EMPTY over the single-source lifecycle vocabulary — so for every real task
+// file this criterion excludes the task, and `listPreemptible` can only ever return the absent-file
+// arm. That was already true in production (the criterion compared against `in-progress`, a word no
+// writer stores), and AC0 found NO currently-running mechanism invoking either this module's candidate
+// check or supervisor-preempt.sh: no systemd unit/timer names preempt, `crontab -l` is empty, no
+// orchestration/manager-tick doc step calls it, no recorded session invocation exists, and the
+// preemption ledger (`.quay/supervisor-preempt-ledger.jsonl`) is absent. It was reachable only
+// through the `quay-deliver` grouped entry point, on demand. The capability catalog's "每轮" claim
+// was false and has been corrected to "按需" (plugin/scripts/capability-catalog-declarations.json).
+//
+// The module is KEPT (not deleted): its preemption ACTION (process-group-scoped kill + bracket close
+// + ledger) is shipped and its tests exercise it, and a future architecture that gives a legal task
+// status the meaning "executing" revives the criterion with no change here. What is retired is the
+// claim that this path fires in production, not the code.
+//
 // This module turns the supervisor's preemption criterion into a QUERYABLE-FACTS predicate, and
 // the preemption ACTION into a deterministic composition of ALREADY-VALIDATED capabilities
 // (AC5 — zero new invention):

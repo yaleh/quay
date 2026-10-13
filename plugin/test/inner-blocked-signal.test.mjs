@@ -765,17 +765,28 @@ test("AC1 — over-90m does NOT fire for a status=ready task with a stale >90m b
   }
 });
 
-test("AC2 — over-90m still fires for a status=in-progress task with a >90m bracket (positive control)", async () => {
+// ⛔ FIXTURE VOCABULARY (2026-10-13 — gap-over90-task-gate-taskstatus-literal-unreachable-for-any-
+// real-status-fix-or-retire, finding_id `open-semantic-discovery@2026-10-13T01:10:43.215Z#2`).
+// A fixture that made over-90m fire used to write `status: in-progress` — a status word TASK_STATUSES
+// (task-status.ts, the single-source lifecycle vocabulary) does NOT contain. The over-90m gate now
+// answers from that vocabulary, so the ONLY fire arm reachable from a real task file's status is
+// none: a task file carrying a legal status never fires. The surviving arm is the MISSING task file
+// (the documented fail-closed-toward-fire fallback, pinned by the "task file is MISSING" test below).
+// Fixtures asserting a fire therefore omit the task file; fixtures asserting no-fire keep a legal
+// status. Writing `in-progress` here would re-import the retired word.
+test("AC2 (retired arm): a status=in-progress fixture no longer fires over-90m — the gate answers from the vocabulary", async () => {
   const tmp = makeTmpWorkspace();
   try {
     await writeBackdatedStartEvent(tmp, "gap-real-over", 91 * 60 * 1000);
+    // The word the retired implementation compared against. It is NOT a task status, so the gate
+    // must not fire on it (before 2026-10-13 it did — that is the finding).
     writeTaskFile(tmp, "gap-real-over", "in-progress");
     const res = runCli(tmp, "--detect-stop");
     assert.equal(res.status, 0, res.stderr);
-    assert.ok(fs.existsSync(BLOCKED_PATH(tmp)), "status=in-progress + >90m bracket ⇒ over-90m block fires");
-    const rec = JSON.parse(fs.readFileSync(BLOCKED_PATH(tmp), "utf8"));
-    assert.equal(rec.reason, "task-over-90m");
-    assert.equal(rec.taskId, "gap-real-over");
+    assert.ok(
+      !fs.existsSync(BLOCKED_PATH(tmp)),
+      "status=in-progress is outside the lifecycle vocabulary ⇒ no over-90m block (the retired arm)",
+    );
   } finally {
     cleanup(tmp);
   }
@@ -813,8 +824,9 @@ test("OVER90-DEFER DoD — defer 80min then work 20min (total 100min) ⇒ NO ove
     telemetry.writeEvent(telemetry.buildEndEvent({ taskId, runId: preRunId, outcome: "deferred", executionCwd: tmp, baseCommit: null, recordedAtMs: now - 100 * 60_000 }), tmp);
     // t=-20min: work actually begins → FRESH --task-start (new runId, work clock starts).
     telemetry.writeEvent(telemetry.buildStartEvent({ taskId, runId: telemetry.generateRunId(taskId), executionCwd: tmp, baseCommit: null, recordedAtMs: now - 20 * 60_000 }), tmp);
-    // The task is genuinely in-progress (working) — the task-status gate must NOT be what blocks the fire.
-    writeTaskFile(tmp, taskId, "in-progress");
+    // The task file is OMITTED deliberately: the absent file is the fire arm of the status gate (see
+    // the FIXTURE VOCABULARY note), so the gate CANNOT be what blocks the fire here — the only thing
+    // that can is the 20-minute WORK bracket, which is exactly what this DoD test measures.
 
     const res = runCli(tmp, "--detect-stop");
     assert.equal(res.status, 0, res.stderr);
@@ -824,17 +836,17 @@ test("OVER90-DEFER DoD — defer 80min then work 20min (total 100min) ⇒ NO ove
   }
 });
 
-// POSITIVE CONTROL for the DoD: the same task, same in-progress status, but NO defer — a single
-// bracket open for 91min of genuine work ⇒ OVER90 MUST still fire (the fix only excludes queue, it
-// never masks a genuinely slow/long task).
+// POSITIVE CONTROL for the DoD: the same task, but NO defer — a single bracket open for 91min of
+// genuine work ⇒ OVER90 MUST still fire (the fix only excludes queue, it never masks a genuinely
+// slow/long task). The task file is OMITTED: since 2026-10-13 the status gate answers from the
+// lifecycle vocabulary, so the absent file is the arm that fires (see the FIXTURE VOCABULARY note).
 test("OVER90-DEFER positive control — 91min of WORK (no defer) still fires over-90m", async () => {
   const tmp = makeTmpWorkspace();
   try {
     await writeBackdatedStartEvent(tmp, "gap-defer-real", 91 * 60 * 1000);
-    writeTaskFile(tmp, "gap-defer-real", "in-progress");
     const res = runCli(tmp, "--detect-stop");
     assert.equal(res.status, 0, res.stderr);
-    assert.ok(fs.existsSync(BLOCKED_PATH(tmp)), "a genuine 91min in-progress work bracket must still fire over-90m");
+    assert.ok(fs.existsSync(BLOCKED_PATH(tmp)), "a genuine 91min work bracket must still fire over-90m");
     const rec = JSON.parse(fs.readFileSync(BLOCKED_PATH(tmp), "utf8"));
     assert.equal(rec.taskId, "gap-defer-real");
   } finally {
@@ -842,22 +854,21 @@ test("OVER90-DEFER positive control — 91min of WORK (no defer) still fires ove
   }
 });
 
-test("AC3 — os-anchor recurrence case side by side: status=ready stale bracket is skipped, the genuine in-progress one fires", async () => {
+test("AC3 — os-anchor recurrence case side by side: status=ready stale bracket is skipped, the over-budget one fires", async () => {
   const tmp = makeTmpWorkspace();
   try {
     // Tonight's recurrence shape: os-anchor's bracket is stale >90m but its task file says status: ready.
     await writeBackdatedStartEvent(tmp, "gap-os-anchor", 92 * 60 * 1000);
     writeTaskFile(tmp, "gap-os-anchor", "ready");
-    // Genuine shape: an in-progress task genuinely over budget — must still fire.
+    // Genuine shape: a task genuinely over budget with no task file — must still fire.
     await writeBackdatedStartEvent(tmp, "gap-real-over", 91 * 60 * 1000);
-    writeTaskFile(tmp, "gap-real-over", "in-progress");
 
     const res = runCli(tmp, "--detect-stop");
     assert.equal(res.status, 0, res.stderr);
-    assert.ok(fs.existsSync(BLOCKED_PATH(tmp)), "the genuine in-progress task must still produce an over-90m block");
+    assert.ok(fs.existsSync(BLOCKED_PATH(tmp)), "the genuine over-budget task must still produce an over-90m block");
     const rec = JSON.parse(fs.readFileSync(BLOCKED_PATH(tmp), "utf8"));
     assert.equal(rec.reason, "task-over-90m");
-    assert.equal(rec.taskId, "gap-real-over", "the fired task must be the genuine in-progress one, never the ready os-anchor");
+    assert.equal(rec.taskId, "gap-real-over", "the fired task must be the genuine one, never the ready os-anchor");
   } finally {
     cleanup(tmp);
   }

@@ -13,8 +13,8 @@
 //   AC2 — deterministic timeout preemption (negative control): a simulated >90min no-progress task
 //     with a live subprocess tree is listed (count=1) and preempt-task kills the tree + closes the
 //     bracket + records a ledger event.
-//   AC3 — positive control: an actively-progressing task (fresh bracket / non-in-progress status) is
-//     NOT preemptible; preemption is rejected and nothing is killed.
+//   AC3 — positive control: an actively-progressing task (fresh bracket / a legal lifecycle status)
+//     is NOT preemptible; preemption is rejected and nothing is killed.
 //   AC4 — boundary: preemption kills ONLY the target task's process group (runId-matched); a decoy
 //     process in another group is untouched (no cross-project/cross-container kill).
 //   AC5 — zero new invention: the criterion reuses fast-mode-telemetry's aggregate/reconcile/
@@ -23,6 +23,17 @@
 // @load-sensitive wall-clock: the preempt ACTION tests spawn real detached processes and wait on
 // their exit — real-process timing, isolation-safe (detached ⇒ own process group ⇒ the group-kill
 // never reaches the test runner).
+//
+// ⛔ FIXTURE VOCABULARY (2026-10-13 — gap-over90-task-gate-taskstatus-literal-unreachable-for-any-
+// real-status-fix-or-retire, finding_id `open-semantic-discovery@2026-10-13T01:10:43.215Z#2`).
+// These tests used to make a task preemptible by writing `status: in-progress` — a status word the
+// single-source lifecycle vocabulary (task-status.ts TASK_STATUSES) does NOT contain and that no
+// writer ever stores. The gate they drive now answers from the vocabulary, so a real task file can
+// never make a task preemptible; the ONE surviving fire arm is a MISSING task file (the documented
+// fail-closed-toward-fire fallback, pinned by "AC2 — over-90m still fires when the task file is
+// MISSING" in inner-blocked-signal.test.mjs). The preemptible fixtures therefore assert the STATUS
+// FILE ABSENT, and every fixture that still writes a task file uses a LEGAL status. Any fixture that
+// writes `in-progress` here would be re-importing the retired word.
 //
 // Run: scripts/test.sh plugin/test/supervisor-preempt-candidates.test.mjs
 
@@ -138,10 +149,11 @@ test("AC1/Contract measure: empty telemetry store ⇒ preemptible: 0 (PURE READ,
   }
 });
 
-test("AC1/AC2 band: a single >90min no-progress task (status in-progress) is deterministically listed (count=1)", async () => {
+test("AC1/AC2 band: a single >90min no-progress task with NO task file is deterministically listed (count=1)", async () => {
   const root = makeRoot();
   try {
-    writeTaskFile(root, "gap-preempt-a", "in-progress");
+    // No tasks/gap-preempt-a.md — the missing task file is the surviving fire arm of
+    // taskStatusAllowsOver90m (fail-closed toward KEEP/fire: the bracket is then the only signal).
     await writeBackdatedStart(root, "gap-preempt-a", 95);
     const r = runList(root);
     assert.equal(r.status, 0);
@@ -167,10 +179,10 @@ test("AC1/AC2 band: a single >90min no-progress task (status in-progress) is det
   }
 });
 
-test("AC3 positive control: a FRESH (<90min) in-progress task is NOT preemptible", async () => {
+test("AC3 positive control: a FRESH (<90min) task is NOT preemptible", async () => {
   const root = makeRoot();
   try {
-    writeTaskFile(root, "gap-fresh", "in-progress");
+    writeTaskFile(root, "gap-fresh", "ready");
     await writeBackdatedStart(root, "gap-fresh", 20); // well under the budget
     const r = runList(root);
     assert.match(r.stdout, /^preemptible: 0$/m, "actively-progressing (fresh) task is not listed");
@@ -197,7 +209,7 @@ test("AC1 (pure): a LANDED task (merge evidence) is excluded — injected execut
   const mod = await import(CANDIDATES);
   const root = makeRoot();
   try {
-    writeTaskFile(root, "gap-landed", "in-progress");
+    writeTaskFile(root, "gap-landed", "ready");
     await writeBackdatedStart(root, "gap-landed", 91);
     // Inject the probe verdict that makeOver90ExecutorGone would return for a merged branch.
     const executorGone = () => ({ gone: true, reason: "branch-merged" });
@@ -214,7 +226,7 @@ test("AC1 (pure): a LANDED task (merge evidence) is excluded — injected execut
 test("AC2 negative control: preempt-task kills the live subprocess tree, closes the bracket, records a ledger event", async () => {
   const root = makeRoot();
   const runId = await writeBackdatedStart(root, "gap-preempt-live", 95);
-  writeTaskFile(root, "gap-preempt-live", "in-progress");
+  // No task file for gap-preempt-live — the surviving fire arm (see the FIXTURE VOCABULARY note).
   const fakePid = spawnFakeExecutor(runId);
   try {
     assert.ok(pidAlive(fakePid), "fake executor is alive before preemption");
@@ -247,7 +259,7 @@ test("AC2 negative control: preempt-task kills the live subprocess tree, closes 
 test("AC2: preempt-task closes the bracket and records the ledger even when the executor is already gone (recovery)", async () => {
   const root = makeRoot();
   try {
-    writeTaskFile(root, "gap-preempt-phantom", "in-progress");
+    // No task file for gap-preempt-phantom — the surviving fire arm.
     await writeBackdatedStart(root, "gap-preempt-phantom", 95); // no live process
     const r = runPreemptTask(root, "gap-preempt-phantom");
     assert.equal(r.status, 0);
@@ -266,7 +278,7 @@ test("AC2: preempt-task closes the bracket and records the ledger even when the 
 test("AC3 positive control: preemption of an actively-progressing (fresh) task is REJECTED — nothing killed", async () => {
   const root = makeRoot();
   try {
-    writeTaskFile(root, "gap-active", "in-progress");
+    writeTaskFile(root, "gap-active", "ready");
     await writeBackdatedStart(root, "gap-active", 10); // fresh, under budget
     const fakePid = spawnFakeExecutor(await import(TELEMETRY).then((m) => m.generateRunId("gap-active")));
     try {
@@ -287,7 +299,7 @@ test("AC3 positive control: preemption of an actively-progressing (fresh) task i
 test("AC4 boundary: preemption kills ONLY the target task's process group — a decoy in another group survives", async () => {
   const root = makeRoot();
   const targetRunId = await writeBackdatedStart(root, "gap-target", 95);
-  writeTaskFile(root, "gap-target", "in-progress");
+  // No task file for gap-target — the surviving fire arm.
   // Decoy: a live process from ANOTHER task/session (different runId, different process group).
   const decoyRunId = await import(TELEMETRY).then((m) => m.generateRunId("gap-other-project"));
   const decoyPid = spawnFakeExecutor(decoyRunId);
@@ -315,7 +327,7 @@ test("AC5: the action is process-group-scoped (target's own group), never a blan
   const mod = await import(CANDIDATES);
   const root = makeRoot();
   try {
-    writeTaskFile(root, "gap-scope", "in-progress");
+    writeTaskFile(root, "gap-scope", "ready");
     const runId = await writeBackdatedStart(root, "gap-scope", 95);
     const pids = mod.findExecutorPids(runId);
     // With no matching process the resolution is empty (queryable fact: process not present).
@@ -339,7 +351,7 @@ test("AC5: the action is process-group-scoped (target's own group), never a blan
 test("preempt-task --dry-run does not kill, does not write, does not record", async () => {
   const root = makeRoot();
   const runId = await writeBackdatedStart(root, "gap-dry", 95);
-  writeTaskFile(root, "gap-dry", "in-progress");
+  // No task file for gap-dry — the surviving fire arm.
   const fakePid = spawnFakeExecutor(runId);
   try {
     const r = spawnSync("bash", [SCRIPT, "preempt-task", "gap-dry", "--root", root, "--dry-run"], { encoding: "utf8" });
