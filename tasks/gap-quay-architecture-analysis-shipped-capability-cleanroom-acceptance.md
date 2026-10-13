@@ -11,6 +11,7 @@ extra: {}
 depends_on:
   - gap-architecture-review-wrong-root-detector-argv-and-no-config-driven-host-entry
   - gap-architecture-review-judge-call-shares-no-diagnostics-or-retry-with-osd
+  - gap-architecture-review-detectors-not-runnable-off-quay-repo
 ---
 ## Proposal
 **The consolidation/acceptance leg of the approved "Quay architecture analysis as a shipped capability" initiative (2026-10-13).** Depends on both newly-filed deployability fixes for `architecture-review` (`gap-architecture-review-wrong-root-detector-argv-and-no-config-driven-host-entry`, `gap-architecture-review-judge-call-shares-no-diagnostics-or-retry-with-osd`) and reuses, without re-doing, the already-landed `gap-discovery-toolchain-depends-on-unshipped-docs-analysis-and-ts-sources-never-works-off-quay-repo` (Task D, `b9ca7a9e2`) — which already staged the shared engine (`docs/analysis/*.mjs`, 8 files + 5 data files, including `discovery-method-registry.mjs`/`discovery-portfolio.mjs`/`discovery-experience-ledger.mjs`/`discovery-reflection.mjs` — i.e. Method/Portfolio/Experience's own engine modules) into the official plugin artifact and was already independently verified this session in a clean scratch project (no quay source checkout) for OSD specifically.
