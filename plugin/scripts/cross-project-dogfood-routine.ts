@@ -1035,11 +1035,18 @@ export async function runCrossProjectDogfood(root: string, opts: CrossProjectDog
   return fact("verified", { ...base, ...projectsView, ...modelCalls(callRecords), hypotheses: hypotheses.length, clusters: clusters.length, confirmed: confirmedRows.length, duplicates: clusterRecords.filter((c) => ((c.portfolio as { duplicate_of?: unknown } | null)?.duplicate_of ?? null) !== null).length, filed: filings.map((f) => f.id ?? null) }, null);
 }
 
-/** The task body for a confirmed cross-project finding. The task carries its OWN provenance: which round,
- *  which source project, and the exact artifact positions the claim rests on, so the fixer never has to
- *  re-derive why the task exists. */
-export function renderFiledTaskBody(entry: Record<string, unknown>, evidence: readonly EvidenceRow[]): string {
+/** The task body for a confirmed cross-project finding. It carries its OWN provenance — which round,
+ *  which source project, and the exact artifact positions the claim rests on — so the fixer never has to
+ *  re-derive why the task exists.
+ *
+ *  ⛔ SHAPE MATTERS: a filed task that the author→ready gate cannot recognize is a task that can never be
+ *  promoted, so the whole point of filing it (a real fix landing on Quay's tree) would be lost. This body
+ *  therefore carries the `plan` shape's artifacts (`## Proposal` + `## Plan` + AC + DoD) AND `## Touches`,
+ *  because a task whose Touches cannot be read is silently undispatchable. The Touches are the Quay-side
+ *  components the claim named — a FIRST CUT the fixer is expected to correct, and the body says so. */
+export function renderFiledTaskBody(entry: Record<string, unknown>, evidence: readonly EvidenceRow[], taskId = filedTaskId(entry)): string {
   const inline = Array.isArray(entry.evidence) ? (entry.evidence as Record<string, unknown>[]) : [];
+  const components = Array.isArray(entry.components) ? (entry.components as string[]) : [];
   const cite = (inline.length > 0 ? inline : evidence.filter((e) => e.source_project === entry.source_project).slice(0, 20))
     .map((e) => `- \`${String(e.file ?? "?")}:${e.line === null || e.line === undefined ? "?" : String(e.line)}\` — ${String(e.excerpt ?? "").slice(0, 300)}`)
     .join("\n");
@@ -1048,7 +1055,7 @@ Cross-project Quay dogfooding round \`${String(entry.round_id)}\` read the real 
 
 **Claim**: ${String(entry.claim)}
 
-**Quay-side components**: ${(Array.isArray(entry.components) ? (entry.components as string[]) : []).map((c) => `\`${c}\``).join(", ")}
+**Quay-side components**: ${components.map((c) => `\`${c}\``).join(", ") || "(the round named none — the fixer must locate the surface)"}
 
 **Why this is Quay-generic, not host-local**: the claim names Quay's own mechanism, not the source project's product; the source project is only where the failure became visible.
 
@@ -1059,13 +1066,29 @@ ${cite || "- (the round recorded no inline excerpt; see the cluster record on .q
 - source project: \`${String(entry.source_project)}\`
 - verifier verdict: \`${String(entry.verifier_verdict)}\`; refuter verdict: \`${String(entry.refutation_verdict)}\`
 
+## Plan
+1. Reproduce the claim from the cited positions above (the artifact that exposed it), then read the named Quay-side surface.
+2. Either fix the mechanism, or record why the claim does not hold for Quay's own code — the round's refuter was satisfied, so "it is only that host" needs its own evidence.
+3. Correct \`## Touches\` to the files the fix actually changes before editing them.
+
 ## Acceptance Criteria
 - [ ] the Quay-side mechanism named in the claim behaves as the claim says (reproduce it from the cited positions)
 - [ ] the fix is verified on Quay's own tree, not only on the source project that exposed it
 
 ## Definition of Done
 - the defect is fixed or shown not to exist, and the round's claim is answered in the task body.
+
+## Touches
+${components.map((c) => `- \`${c}\``).join("\n") || "- ⛔ the round named no Quay-side component — the filer must locate one before this task can be dispatched"}
+- \`tasks/${taskId}.md\`
 `;
+}
+
+/** The id a confirmed cluster is filed under. Deterministic from the round, the source project and the
+ *  cluster, so a re-run of the same round addresses the SAME id (and the store's create then refuses
+ *  rather than silently minting a second task). */
+export function filedTaskId(entry: Record<string, unknown>): string {
+  return `gap-cross-project-dogfood-${String(entry.source_project).replace(/[^a-z0-9]+/gi, "-").toLowerCase()}-c${String(entry.cluster)}-${String(entry.round_id).slice(-6)}`;
 }
 
 /** File the task through the Provider ABI. ⛔ The constructor is `meta-driver.ts`'s `createTask` — the
@@ -1073,8 +1096,8 @@ ${cite || "- (the round recorded no inline excerpt; see the cluster record on .q
  *  module does not add a static `quality-gate-driver → cross-project → meta-driver → quality-gate-driver`
  *  cycle to the import graph. A failure to file is RECORDED, never swallowed. */
 export async function fileConfirmedTask(root: string, opts: CrossProjectDogfoodRunOptions, entry: Record<string, unknown>, evidence: readonly EvidenceRow[]): Promise<Record<string, unknown>> {
-  const id = `gap-cross-project-dogfood-${String(entry.source_project).replace(/[^a-z0-9]+/gi, "-").toLowerCase()}-c${String(entry.cluster)}-${String(entry.round_id).slice(-6)}`;
-  const body = renderFiledTaskBody(entry, evidence);
+  const id = filedTaskId(entry);
+  const body = renderFiledTaskBody(entry, evidence, id);
   const title = `[cross-project dogfood] ${String(entry.claim).slice(0, 120)}`;
   try {
     if (opts.fileTaskFn) return { id, ...(await opts.fileTaskFn(root, { id, title, body, labels: ["gap", "cross-project-dogfood"] })) };

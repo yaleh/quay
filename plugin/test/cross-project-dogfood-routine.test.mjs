@@ -38,6 +38,7 @@ import {
   scanTasksDir,
   sourceRootOwning,
   verdictOf,
+  filedTaskId,
   writeOwnedFile,
 } from "../scripts/cross-project-dogfood-routine.ts";
 import { INVOKED_BY_MANUAL, INVOKED_BY_RESIDENT } from "../scripts/discovery-method-routine.ts";
@@ -626,4 +627,17 @@ test("the filed task body carries the round, the source project, the cited posit
   assert.match(body, /verifier verdict: `supported`; refuter verdict: `supported`/);
   assert.match(body, /## Acceptance Criteria/);
   assert.match(body, /## Definition of Done/);
+  // The SHAPE is load-bearing: without `## Plan` the author→ready gate's plan-shape recognizer would not
+  // see four artifacts, and without `## Touches` the task could never be dispatched.
+  assert.match(body, /## Plan\n/);
+  assert.match(body, /## Touches\n/);
+  assert.match(body, /- `plugin\/scripts\/worker-driver\.ts`/);
+  assert.ok(body.includes(`\`tasks/${filedTaskId(entry)}.md\``), "the task must declare its OWN file in Touches");
+});
+
+test("the filed task id is deterministic, so re-running the same round addresses the same task", () => {
+  const entry = { source_project: "Claude Code UI", cluster: 2, round_id: "cpd-1-2-abcdef" };
+  assert.equal(filedTaskId(entry), "gap-cross-project-dogfood-claude-code-ui-c2-abcdef");
+  assert.equal(filedTaskId(entry), filedTaskId({ ...entry }), "the same cluster must always resolve to the same id");
+  assert.notEqual(filedTaskId(entry), filedTaskId({ ...entry, cluster: 3 }));
 });
