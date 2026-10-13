@@ -3657,13 +3657,18 @@ export async function runOpenSemanticDiscovery(root: string, opts: OpenSemanticD
         ...armStamp,
       };
       let refutation: Record<string, unknown> | null = null;
-      // ⛔ THE PER-CLUSTER CALL LIST (硬规则 5b, Plan item 1): the calls THIS cluster's refutation consumed,
+      // ⛔ THE PER-CLUSTER CALL LIST (硬规则 5b, Plan item 1): EVERY refuter call THIS cluster consumed,
       // captured AT THE CALL SITE. The cluster record's refutation fields are read from this list — never
       // from the engine row, and never from a round-level list two clusters share. That is what makes «two
       // clusters whose refuter calls differ ⇒ each cluster's fields equal its OWN call's» a property of the
       // join rather than a hope about call ordering.
-      const refuterCallList: Record<string, unknown>[] = [];
+      // ⛔ It is filled by SLICING the round's own `callRecords` rather than by pushing at the call site: a
+      // TRANSPORT retry inside `reservingStep` leaves TWO records (the lost attempt and the retry) and
+      // returns only the second, so a push would report one call where two were spent — a count that lies
+      // (硬规则 3b). The slice is exact because the refuter is the ONLY step this block runs.
+      let refuterCallList: Record<string, unknown>[] = [];
       if (row.verdict === "supported") {
+        const refuterCallMark = callRecords.length;
         const one = await hyp.runVerifier({
           // Plan item 3: the first verifier's cited lines ride along as STARTING POINTS (a shortcut to the
           // files, never a case to agree with). The template is byte-identical when it cited nothing.
@@ -3673,7 +3678,6 @@ export async function runOpenSemanticDiscovery(root: string, opts: OpenSemanticD
           runModel: async (p: string) => {
             const { res, rec } = await reservingStep(stepKind("refuter"), { prompt: p, tools: REFUTER_TOOLS, maxTurns: config.refutationMaxTurns, model: requestedModel });
             noteArmCall(rec);
-            refuterCallList.push(rec);
             // ── THE TRUNCATED REFUTER GETS ONE FRESH-CONTEXT RETRY WITH A LARGER BUDGET (Plan item 2) ───
             // ⛔ WHY THE TOOL-LESS ANSWER RESERVE IS *REPLACED* HERE RATHER THAN FOLLOWED. `reportIfCutOff`
             // hands the model its OWN exploration narration back and asks it to report — which is exactly
@@ -3693,7 +3697,6 @@ export async function runOpenSemanticDiscovery(root: string, opts: OpenSemanticD
               retry.rec.budget_retry = true;
               retry.rec.budget_retry_cause = "budget-truncated";
               noteArmCall(retry.rec);
-              refuterCallList.push(retry.rec);
               last = retry;
             }
             return last.res;
@@ -3704,6 +3707,9 @@ export async function runOpenSemanticDiscovery(root: string, opts: OpenSemanticD
           return { ok: false, reason: `${armPrefix}refuter refused — ${reasons[0] ?? "no reason reported"} (nothing appended, last-run not advanced)` };
         }
         refutation = (Array.isArray(one.results) ? one.results[0] : null) as Record<string, unknown> | null;
+        // The slice: every refuter-step record from the mark to NOW, in call order — the lost attempt of a
+        // transport retry included.
+        refuterCallList = callRecords.slice(refuterCallMark).filter((c) => String(c.step).endsWith("refuter"));
       }
       // ── THE JOIN + THE CAUSE, IN ONE PLACE (Plan item 1) ────────────────────────────────────────────
       // Everything below is read from the cluster's OWN calls: the CLI's `num_turns` (not the row's
