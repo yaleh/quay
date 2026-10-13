@@ -46,6 +46,28 @@ test("AC129 pure — parseSelectorOutput: valid pick, invalid-pick fallback, emp
 });
 
 
+// cross-project dogfood cpd-943549-1791888744490-fuepz9 (c3): 首行散文曾使解析器静默回退 candidates[0]。
+test("cross-project dogfood c3 — parseSelectorOutput 逐行扫：散文首行不得吞掉后续行里的真实选择", () => {
+  const candidates = ["gap-a", "gap-b"];
+  // 实测形态：首行在评论 `orchestration/dispatch-preference.md` 是否存在，选择在第 2 行。
+  const proseFirst =
+    "No `orchestration/dispatch-preference.md` exists in this repo root (only the quay plugins).\n" +
+    "gap-b because it unblocks the suite\n";
+  const picked = parseSelectorOutput(proseFirst, candidates, 0);
+  assert.equal(picked.task, "gap-b", "散文首行不得把选择吞成 candidates[0] 回退");
+  assert.equal(picked.reason, "because it unblocks the suite");
+
+  // ⛔ 负控制：一行都不以候选 id 开头时，仍必须 fail-closed 回退首个候选（不是「总能捞到一个」）。
+  const noPick = parseSelectorOutput("I could not decide between\nany of the candidates.\n", candidates, 0);
+  assert.equal(noPick.task, "gap-a");
+  assert.match(noPick.reason, /fallback to first shuffled candidate/);
+
+  // ⛔ 负控制：只在**首 token** 命中候选才算命中——「gap-zzz」这类别的 id 出现在前缀不得误配。
+  const wrongId = parseSelectorOutput("gap-zzz then gap-b\n", candidates, 0);
+  assert.equal(wrongId.task, "gap-a", "首 token 非候选 ⇒ 不得把行内出现的 gap-b 当作选择");
+});
+
+
 test("AC142 AC1 — selector spawn captures stderr; fallback reason carries it (spawn 失败不再零诊断)", async () => {
   const candidates = ["gap-a", "gap-b"];
   // parseSelectorOutput: stderr 可选传入，兜底 reason 带 stderr 截断。
