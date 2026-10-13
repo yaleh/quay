@@ -41,6 +41,7 @@ import {
   verdictOf,
   verifierLookupPreamble,
   filedTaskId,
+  truncateOnWord,
   crossProjectRecordId,
   writeOwnedFile,
 } from "../scripts/cross-project-dogfood-routine.ts";
@@ -743,4 +744,14 @@ test("the filed task id is deterministic, so re-running the same round addresses
   assert.equal(filedTaskId(entry), "gap-cross-project-dogfood-claude-code-ui-c2-abcdef");
   assert.equal(filedTaskId(entry), filedTaskId({ ...entry }), "the same cluster must always resolve to the same id");
   assert.notEqual(filedTaskId(entry), filedTaskId({ ...entry, cluster: 3 }));
+});
+
+test("a filed task title is shortened on a word boundary and marked as shortened", () => {
+  const long = "When the pool-quality-judge or architecture-review LLM judge prints non-JSON stdout, Quay records the whole round state=failed with zero verdicts";
+  const out = truncateOnWord(long, 120);
+  assert.ok(out.length <= 121, `title must fit the bound (got ${out.length})`);
+  assert.ok(out.endsWith("…"), "a shortened title must say so");
+  assert.doesNotMatch(out, /state=$/, "it must not cut mid-token");
+  assert.ok(long.startsWith(out.slice(0, -1).trim()), "the kept text must be a prefix of the claim");
+  assert.equal(truncateOnWord("short claim", 120), "short claim", "a claim that fits is returned unchanged");
 });

@@ -586,7 +586,7 @@ Return ONLY a JSON array (no prose outside it). Each element:
   "evidence_needed": "<what would have to be true in the Quay source for this to hold>",
   "counterexample_requirement": "<what a refuter should look for that would kill this claim>"
 }
-Emit \`project_local\` items too — they are how the round demonstrates it can tell the two apart — but a \`project_local\` item is never filed and never ingested.`;
+⛔ ALSO REQUIRED — 1 to 2 \`project_local\` items. These are the strongest observations in the SAME artifacts that are the source project's own product, configuration or file defect, with no Quay mechanism implicated (a doubled UI string, a test that fails on that project's own code, a local config that is simply wrong). They are the round's negative control against over-claiming: a report that contains none has not shown that the line between the two was drawn, it has only shown that no line was needed. They are never filed and never ingested — their whole job is to be correctly left alone. State in the claim which project file or behaviour it is, so a reader can check that it really is local.`;
 
 /** WHERE TO LOOK. ⛔ Without this the verifier and refuter cannot examine anything: their cwd is this
  *  round's scratch directory, so a repo-relative `plugin/scripts/foo.ts` names nothing they can open, and
@@ -1160,6 +1160,16 @@ ${components.map((c) => `- \`${c}\``).join("\n") || "- ⛔ the round named no Qu
 /** The id a confirmed cluster is filed under. Deterministic from the round, the source project and the
  *  cluster, so a re-run of the same round addresses the SAME id (and the store's create then refuses
  *  rather than silently minting a second task). */
+/** Shorten on a word boundary, marking that it WAS shortened. A title cut mid-token reads as a corrupt
+ *  record rather than as a shortened one. */
+export function truncateOnWord(s: string, max: number): string {
+  const t = String(s ?? "").trim();
+  if (t.length <= max) return t;
+  const cut = t.slice(0, max);
+  const at = cut.lastIndexOf(" ");
+  return `${(at > max * 0.5 ? cut.slice(0, at) : cut).trimEnd()}…`;
+}
+
 export function filedTaskId(entry: Record<string, unknown>): string {
   return `gap-cross-project-dogfood-${String(entry.source_project).replace(/[^a-z0-9]+/gi, "-").toLowerCase()}-c${String(entry.cluster)}-${String(entry.round_id).slice(-6)}`;
 }
@@ -1171,7 +1181,9 @@ export function filedTaskId(entry: Record<string, unknown>): string {
 export async function fileConfirmedTask(root: string, opts: CrossProjectDogfoodRunOptions, entry: Record<string, unknown>, evidence: readonly EvidenceRow[]): Promise<Record<string, unknown>> {
   const id = filedTaskId(entry);
   const body = renderFiledTaskBody(entry, evidence, id);
-  const title = `[cross-project dogfood] ${String(entry.claim).slice(0, 120)}`;
+  // Truncate on a WORD boundary: a title cut mid-token ("…round state=") reads as a corrupt record
+  // rather than as a shortened one. Measured on the first filed task, 2026-10-13.
+  const title = `[cross-project dogfood] ${truncateOnWord(String(entry.claim), 120)}`;
   try {
     if (opts.fileTaskFn) return { id, ...(await opts.fileTaskFn(root, { id, title, body, labels: ["gap", "cross-project-dogfood"] })) };
     const mod = (await import(/* @vite-ignore */ "./meta-driver.ts")) as unknown as {
