@@ -120,6 +120,30 @@
         "shLines": 7345
       },
       "why": "gap-architecture-review-detectors-not-runnable-off-quay-repo: the dist-gated entry derivation now covers the kernelSiblingArgv/resolveKernelSibling spawn shapes, so guard-lineage-check + deletion-closure-check (the two detectors that shipped in NO form) and two more siblings of the same class (judgment-consumer-check, suite-load-sampler) now ship as scripts/dist/*.js — +4 bundles, 281 → 284 files"
+    },
+    {
+      "when": "2026-10-13T17:50:42.265Z",
+      "from": {
+        "files": 0,
+        "bytes": 0,
+        "shLines": 0,
+        "shipped": {
+          "files": 284,
+          "bytes": 60971493,
+          "shLines": 7345
+        }
+      },
+      "to": {
+        "files": 0,
+        "bytes": 0,
+        "shLines": 0
+      },
+      "shipped": {
+        "files": 285,
+        "bytes": 61116610,
+        "shLines": 7345
+      },
+      "why": "gap-architecture-review-detectors-not-runnable-off-quay-repo: the dist-gated entry derivation now covers the kernelSiblingArgv/resolveKernelSibling spawn shapes so 4 more siblings ship as scripts/dist/*.js (guard-lineage-check, deletion-closure-check, judgment-consumer-check, suite-load-sampler). files 281 -> 285 (exactly +4). The prior entry in this log recorded 284, which was off by one (its own why text already said +4 bundles from 281, and 281+4=285) — this entry replaces that number with the artifact's own reading, re-measured 2026-10-14 in a throwaway stub repo from this branch's plugin/ tree. shLines unchanged; the three ratchet axes stay 0."
     }
   ],
   "_axes": {
@@ -133,8 +157,8 @@
   "bytes": 0,
   "shLines": 0,
   "shipped": {
-    "files": 284,
-    "bytes": 60971493,
+    "files": 285,
+    "bytes": 61116610,
     "shLines": 7345
   }
 }
