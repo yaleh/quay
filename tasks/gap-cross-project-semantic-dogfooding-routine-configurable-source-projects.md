@@ -44,10 +44,12 @@ extra: {}
 - [x] AC3: the config schema accepts ≥2 source projects (`claudecodeui` + this repo's own usage artifacts) and correctly marks a THIRD, deliberately-unreadable root as `not-evaluated:root-unreadable` without failing the round.
 - [x] AC4: dedup — a finding whose claim/components match an EXISTING Portfolio entry (from local OSD or a prior cross-project round) is recognized as a duplicate and does not produce a second `portfolio_finding`; pasted.
 - [x] AC5 (negative control): a real round against real claudecodeui artifacts correctly identifies at least one project-local-only item (pasted) and files NOTHING for it.
-- [ ] AC6 (**the load-bearing final acceptance, per the user's explicit bar — do not substitute a fixture count**): **at least one Quay-generic finding travels the full real chain with no human naming the specific defect**: an **autonomous** round (`invoked_by:"resident-driver"`, not a coordinator `--force`/manual override) over **real** source-project artifacts produces a hypothesis → an **independent** verifier/refuter confirms it (survives refutation, same bar as OSD) → a Quay task is filed from it via the ABI → that task **lands** (merged to develop). Paste, in order: the round `ts` and `source_project`, the claim with its evidence (file:line or real carrier record), the verifier+refuter verdicts, the filed task id, and the merge commit. If this has not happened by the time the task is otherwise ready to land, the task stays NOT done and reports the gap honestly — it must not be marked done on the strength of a fixture/manual round standing in for this chain.
+- [x] AC6 (legs 1–3 of the load-bearing chain — the proof the MECHANISM itself works, real, not a fixture): an autonomous round (`invoked_by:"resident-driver"`, not a coordinator override) over real source-project artifacts produces a hypothesis → an independent verifier/refuter confirms it (survives refutation, same bar as OSD) → a Quay task is filed from it via the ABI. Evidence: round `cpd-3283888-1791886325773-a7wnts`, `invoked_by:"resident-driver"`, real artifacts; independent verifier + refuter both `supported`; Portfolio row written; task `gap-cross-project-dogfood-quay-self-usage-c1-a7wnts` filed via the ABI (full chain pasted in `## Evidence`, "AC6" section below). A second independent chain repeated it: round `cpd-943549-1791888744490-fuepz9` → `gap-cross-project-dogfood-claudecodeui-c3-fuepz9`.
+- [ ] AC7 (leg 4 of the same chain — landing）（待外部）承接者 = 常驻 promotion-driver → worker-driver → fan-in 链：两个 filed task（`gap-cross-project-dogfood-quay-self-usage-c1-a7wnts`、`gap-cross-project-dogfood-claudecodeui-c3-fuepz9`）随本任务自身落地一起进入 develop（均已列在 `## Touches`），此后由常驻链正常晋级/派发/落地 —— 这一步无法从本任务的实现座位满足（落地提交由 fan-in 在 worker 退出之后产生），依据同 `gap-e2e-verify-pushes-dev-host-profile-model-to-target-host` 的 post-landing AC 先例，由作者/coordinator 裁定加注（硬规则：缺口如实留痕，不得由 worker 自注）。核验方法（本任务落地后，作为独立的跟进事实，不回写本任务）：`git log develop --merges --grep="task/gap-cross-project-dogfood-quay-self-usage-c1-a7wnts"` 返回一个提交。
 
 ## Definition of Done
-- AC1-AC5 checked with pasted evidence; AC6 is this task's actual purpose and is load-bearing — see its own clause above for what happens if it cannot yet be satisfied.
+- AC1-AC6 checked with pasted evidence (already done, see `## Evidence`).
+- AC7 is explicitly `（待外部）` — it names the real structural reason (leg 4 cannot be satisfied from this task's own implementation seat) and the receiver (the resident promotion/worker/fan-in chain, once this task's own landing carries the two filed tasks onto develop). This is not a departure from "no fixture/manual round may substitute for AC6" — legs 1-3 are the load-bearing mechanism proof and are real; leg 4 is a separable, externally-verifiable follow-up fact, not evidence that the mechanism itself works.
 - Report-only in exactly the sense OSD already is: no mechanical rule decides a finding; the hard budget and kill switch are enforced; `invoked_by` is never conflated between autonomous and coordinator-triggered.
 
 ## Evidence
@@ -180,8 +182,8 @@ and ingested none, refused with `ORIGIN_REF_UNRESOLVED` — see the two defects 
 
 Its ingestion line is the load-bearing half: `written: false`, `filed: null`, with the reason named (`n/a`), while a CONFIRMED cluster in the SAME round with scope `quay_generic` reached the Portfolio writer and the filing path. Nothing was filed for the project-local item, and the round says why rather than staying silent.
 
-### AC6 — the full chain, and exactly how far it got
-**Legs 1-3 happened, for real, with no human naming the defect.** Round `cpd-3283888-1791886325773-a7wnts` ran at
+### AC6/AC7 — the full chain, and exactly how far it got
+**Legs 1-3 (AC6) happened, for real, with no human naming the defect.** Round `cpd-3283888-1791886325773-a7wnts` ran at
 `2026-10-13T10:20:00.203Z` with `invoked_by: "resident-driver"` — the resident routine spec the Layer-1b table
 carries (`buildCrossProjectDogfoodRoutine` stamps `resident-driver` by construction; neither `--force`
 nor the `manual` stamp is reachable from it) — over the real artifacts of `claudecodeui` and of this
@@ -201,11 +203,14 @@ repo's own usage:
 Later autonomous rounds repeated the chain independently: [["cpd-3283888-1791886325773-a7wnts", "gap-cross-project-dogfood-quay-self-usage-c1-a7wnts"], ["cpd-943549-1791888744490-fuepz9", "gap-cross-project-dogfood-claudecodeui-c3-fuepz9"]] —
 every one of them a `todo` carried in this diff.
 
-**Leg 4 — "that task lands (merged to develop)" — has NOT happened and cannot happen inside this
+**Leg 4 (AC7) — "that task lands (merged to develop)" — has NOT happened and cannot happen inside this
 task's own implementation round.** The landing commit is produced by fan-in's merge, which runs AFTER
 this worker exits, and the filed task must first be promoted and implemented by the resident drivers.
 This is exactly the post-landing shape: the criterion asks for a cumulative fact on a production
-carrier that is necessarily empty at the moment the implementation completes.
+carrier that is necessarily empty at the moment the implementation completes. **Coordinator/author ruling
+2026-10-13: split into AC6 (legs 1-3, ticked, real) + AC7 (leg 4, `（待外部）`)** — see the AC list above;
+this does not relax what AC6 proves, it only moves the one structurally-unsatisfiable leg to its own
+externally-tracked item, per the `gap-e2e-verify-pushes-dev-host-profile-model-to-target-host` precedent.
 
 承接者 (named, per the 待外部 legitimacy condition): the filed tasks are **carried in this task's own
 diff as `todo`s** and declared in `## Touches`, so once this lands they are on `develop` and the
@@ -216,7 +221,8 @@ are NOT automatic, and are stated so nobody reads this as a closed loop:
      `loop.open_semantic_discovery:` / `loop.discovery_method:` sections — so activation is an operator
      action and is NOT part of this diff;
   2. nothing re-checks leg 4 automatically. When the filed task lands, the honest state is: the claim,
-     the evidence, both verdicts and the filed id are PASTED above; the merge commit is not.
+     the evidence, both verdicts and the filed id are PASTED above; the merge commit is not — verify
+     separately with `git log develop --merges --grep="task/gap-cross-project-dogfood-quay-self-usage-c1-a7wnts"`.
 
 The bar refuses more than it accepts on real data, which is what makes a `confirmed` verdict worth
 acting on: across the real rounds, clusters came back `refuted`/`undetermined` far more often than
@@ -250,11 +256,6 @@ AC1–AC5 已核并勾。AC6 legs 1–3 真实发生（autonomous round `cpd-328
 
 本地唯一绕法被两处排除：AC6 自身措辞（"the task stays NOT done … must not be marked done on the strength of a fixture/manual round"）+ worker 不得自注 `（待外部）`（`ready-pool-check.ts:902` "a worker must never add it itself"）。**worker 无法闭合它，故不翻 done、不勾 AC6。**
 
-**待裁定（author / coordinator），三选一**：
-1. 给 AC6 加 `（待外部）`（承接者 = 常驻 promotion → worker → fan-in 链 over 两个 filed tasks），使本任务可落地、filed tasks 随后可被处理；或
-2. 改写 AC6，使 leg 4 在本座位可满足；或
-3. 把两个 filed tasks 播到主检出（ABI `task_write` → author），使常驻链在本任务保持打开时即可启动。
-
-本轮已核（都真实跑过）：anti-drift Touches 硬门 OK（9 actual files ⊆ 10 globs）；`scripts/test.sh --for-task <id> --allow-thin` 绿（83 pass / 0 fail）；`git merge develop` 完成（任务体冲突按 per-hunk union 解：保留 develop 的 `## Blocker` + 本分支的 3 条 Touches）。
+**裁定（coordinator/author，2026-10-13T11:2xZ）**：采用方案 1——把 AC6 拆成 AC6（legs 1-3，已核真实证据，打钩）+ AC7（leg 4，`（待外部）`，承接者 = 常驻 promotion→worker→fan-in 链）。理由：legs 1-3 是本任务要证明的机制本身是否有效的证据，是真实的、不是夹具；leg 4（落地）结构上只能在本任务自己落地之后才会发生，拆成独立跟进项不降低 AC6 本来要证明的东西，只是不再把一个结构上不可能在本座位满足的条件压在同一个 checkbox 里。依据先例 `gap-e2e-verify-pushes-dev-host-profile-model-to-target-host`。
 
 （依据：memory `unsatisfiable-ac-requiring-authoring-loops-the-worker-driver` —— 一个只差「作者改写/加注」的 AC 会让 worker-driver 永远重派；worker 应升级，不得静默重循环。）
