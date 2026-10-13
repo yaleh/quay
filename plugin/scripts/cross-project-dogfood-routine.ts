@@ -588,6 +588,22 @@ Return ONLY a JSON array (no prose outside it). Each element:
 }
 Emit \`project_local\` items too — they are how the round demonstrates it can tell the two apart — but a \`project_local\` item is never filed and never ingested.`;
 
+/** WHERE TO LOOK. ⛔ Without this the verifier and refuter cannot examine anything: their cwd is this
+ *  round's scratch directory, so a repo-relative `plugin/scripts/foo.ts` names nothing they can open, and
+ *  every verdict would come back `undetermined` — a whole round spent proving the prompt was incomplete.
+ *  The preamble is per-round because the roots and the cited positions are per-round. */
+export function verifierLookupPreamble(scans: readonly ProjectScan[], evidence: readonly EvidenceRow[], repoRoot: string): string {
+  const roots = scans.filter((s) => s.reading === "ok").map((s) => `- source project "${s.name}" → ${s.root}`);
+  const cite = evidence.slice(0, 60).map((e) => `- ${e.source_project}: \`${e.file}:${e.line ?? "?"}\` — ${e.excerpt.slice(0, 200)}`);
+  return `WHERE TO LOOK (read-only; there is no shell):
+- the Quay repository this round judges → ${repoRoot}
+${roots.join("\n")}
+A repo-relative component path is relative to the Quay repository above. A source-project carrier path is
+relative to that project's root above. Positions the round already cited:
+${cite.join("\n") || "- (the round cited none inline; the claim text names what to look for)"}
+`;
+}
+
 export const CROSS_PROJECT_VERIFIER_TEMPLATE = `You are verifying ONE hypothesis about Quay's own mechanism, formed by reading another project's usage artifacts.
 
 HYPOTHESIS:
@@ -843,6 +859,11 @@ export async function runCrossProjectDogfood(root: string, opts: CrossProjectDog
 
   const evidencePack = renderEvidencePack(readable);
   const evidenceIndex: EvidenceRow[] = readable.flatMap((s) => [...s.task_lines, ...s.artifacts.flatMap((a) => a.samples)]);
+  // The verifier/refuter prompts carry WHERE TO LOOK (see verifierLookupPreamble): a verifier whose cwd
+  // is this round's scratch dir can only open the positions it is TOLD about.
+  const lookup = verifierLookupPreamble(readable, evidenceIndex, root);
+  const verifierTemplate = `${lookup}\n${CROSS_PROJECT_VERIFIER_TEMPLATE}`;
+  const refuterTemplate = `${lookup}\n${CROSS_PROJECT_REFUTER_TEMPLATE}`;
 
   // ── ② INVESTIGATE ────────────────────────────────────────────────────────────────────────────────
   const prompt = `${CROSS_PROJECT_INVESTIGATOR_PROMPT}\n\n# DETERMINISTIC DIGEST OF REAL USAGE ARTIFACTS\n\n${evidencePack}`;
@@ -905,7 +926,7 @@ export async function runCrossProjectDogfood(root: string, opts: CrossProjectDog
   let verifierOut: Record<string, unknown>;
   try {
     verifierOut = await hyp.runVerifier({
-      clusters: selected, pinDir: scratch, cwd: scratch, promptTemplate: CROSS_PROJECT_VERIFIER_TEMPLATE,
+      clusters: selected, pinDir: scratch, cwd: scratch, promptTemplate: verifierTemplate,
       maxClusters: cfg.maxClustersVerified, concurrency: 1, maxMs: cfg.maxWallMs, // concurrency-default-fallback: ONE verifier call at a time — concurrent calls reserve from several places at once and the per-step cost ledger stops being readable in call order
       strategy: "default", onlyCluster: null, evidence: null, model: requestedModel,
       runModel: async (p: string) => (await reservingStep("cross-project-verifier", { prompt: p, tools: VERIFIER_TOOLS, maxTurns: cfg.verifierMaxTurns })) as unknown as { stdout: string },
@@ -949,7 +970,7 @@ export async function runCrossProjectDogfood(root: string, opts: CrossProjectDog
       let refCause: unknown = null;
       try {
         const ref = await hyp.runVerifier({
-          clusters: [cluster], pinDir: scratch, cwd: scratch, promptTemplate: CROSS_PROJECT_REFUTER_TEMPLATE,
+          clusters: [cluster], pinDir: scratch, cwd: scratch, promptTemplate: refuterTemplate,
           maxClusters: 1, concurrency: 1, maxMs: cfg.maxWallMs, // concurrency-default-fallback: ONE refuter call at a time — the independent refuter is a single fresh-context call by definition, and a second concurrent reservation would make the round's cost ledger unreadable in call order
           strategy: "default", onlyCluster: 1, evidence: null, model: requestedModel,
           runModel: async (p: string) => (await reservingStep("cross-project-refuter", { prompt: p, tools: REFUTER_TOOLS, maxTurns: cfg.refutationMaxTurns })) as unknown as { stdout: string },

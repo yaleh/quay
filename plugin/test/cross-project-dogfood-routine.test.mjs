@@ -38,6 +38,7 @@ import {
   scanTasksDir,
   sourceRootOwning,
   verdictOf,
+  verifierLookupPreamble,
   filedTaskId,
   writeOwnedFile,
 } from "../scripts/cross-project-dogfood-routine.ts";
@@ -675,6 +676,18 @@ test("the filed task body carries the round, the source project, the cited posit
   assert.match(body, /## Touches\n/);
   assert.match(body, /- `plugin\/scripts\/worker-driver\.ts`/);
   assert.ok(body.includes(`\`tasks/${filedTaskId(entry)}.md\``), "the task must declare its OWN file in Touches");
+});
+
+test("the verifier/refuter preamble names the repo root, each readable project root and the cited positions", () => {
+  // Without this, a verifier rooted in the round's scratch dir cannot open a single repo-relative path
+  // and every verdict comes back undetermined — a whole round spent proving the prompt was incomplete.
+  const scan = { name: "alpha", root: "/tmp/alpha", reading: "ok", reason: null, artifacts: [], task_counts: {}, task_lines: [], task_files_scanned: 0, task_files_total: 0, task_counts_censused: false, bytes_read: 0 };
+  const unreadable = { ...scan, name: "third", root: "/tmp/nope", reading: "root-unreadable", reason: "ENOENT" };
+  const preamble = verifierLookupPreamble([scan, unreadable], [{ source_project: "alpha", file: ".quay/worker-outcome.jsonl", line: 12, kind: "worker", excerpt: "final_state=exited-not-landed" }], "/repo");
+  assert.match(preamble, /the Quay repository this round judges → \/repo/);
+  assert.match(preamble, /source project "alpha" → \/tmp\/alpha/);
+  assert.doesNotMatch(preamble, /\/tmp\/nope/, "an unreadable project's root must not be offered as a place to read");
+  assert.match(preamble, /alpha: `\.quay\/worker-outcome\.jsonl:12`/);
 });
 
 test("the filed task id is deterministic, so re-running the same round addresses the same task", () => {
