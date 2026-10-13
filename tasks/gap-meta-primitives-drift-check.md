@@ -2,7 +2,7 @@
 id: gap-meta-primitives-drift-check
 title: Re-pin the quay-fleet primitives provenance so primitives-drift-check can
   evaluate again
-status: todo
+status: ready
 labels:
   - meta-driver
   - driver-candidate
