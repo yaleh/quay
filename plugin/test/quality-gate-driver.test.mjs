@@ -29,8 +29,16 @@ import { fileURLToPath } from "node:url";
 import {
   ROUND_LOG_REL,
   QUALITY_CONTROL_STATE_REL,
+  ARCH_REVIEW_MIN_INTERVAL_MINUTES,
   defaultJudgmentConsumerArgv,
   defaultPoolQualityPlanArgv,
+  defaultIdentityReplicationArgv,
+  defaultGuardLineageArgv,
+  defaultDeletionClosureArgv,
+  readArchitectureReviewConfig,
+  parseArchitectureReviewSection,
+  archReviewGateFact,
+  formatArchitectureReviewAssembly,
   parseJudgmentConsumerReport,
   parsePoolQualityPlan,
   runJudgmentConsumerCheck,
@@ -43,6 +51,8 @@ import {
   runResidentQualityGateLoop,
   diagnosticExcerpt,
 } from "../scripts/quality-gate-driver.ts";
+// 同族读函数的**形态对照**（Gap1 的判据：本轨的读函数与兄弟逐键同形）。
+import { readDiscoveryMethodConfig } from "../scripts/discovery-method-routine.ts";
 import { qualityRoundPath } from "../scripts/pool-quality-judge.ts";
 import { archReviewRoundPath, submissionLedgerPath } from "../scripts/architecture-review-cluster.ts";
 // gap-drain-on-routine-driver-empties-round-and-respawn-loops AC2 判据以 goal 为对象：goal 的例程
@@ -140,17 +150,25 @@ function fakeIdentityBoundaryScript(tmp) {
   );
 }
 
-/** deletion 缝：在 `root` 下装一个假的 `plugin/scripts/deletion-closure-check.ts`，让它把收到的构件
- *  清单 append 到 logPath 再回一个合法报告（⛔ 不真跑检测器）。
+/** deletion 缝：装一个假的 `deletion-closure-check.ts`，让它把收到的构件清单 append 到 logPath 再回
+ *  一个合法报告（⛔ 不真跑检测器），并**只在 fn() 期间**把它所在目录设成 kernel 解析基准。
  *
  *  ⚠️ **为什么不用 `deletionCmd` 注入缝**：`deletionCmd` 是**整条 argv 的替代**（driver 里
  *  `deletionCmd ?? defaultDeletionClosureArgv(root, components)`），注入它就把 driver 推导出的构件
- *  **一并绕掉**了——缝里永远看到空参数，断言恒真（硬规则 4）。装在 root 下则走 **`defaultDeletionClosureArgv`
- * 这条生产路径**：driver 推导构件 → 拼进缺省 argv → spawn，构件在缝里真实可见。 */
-function fakeDeletionStubUnderRoot(tmp, logPath) {
-  const dir = path.join(tmp, "plugin", "scripts");
+ *  **一并绕掉**了——缝里永远看到空参数，断言恒真（硬规则 4）。让缺省 builder 自己解析到 stub，才走
+ *  **`defaultDeletionClosureArgv` 这条生产路径**：driver 推导构件 → 拼进缺省 argv → spawn。
+ *
+ *  ⚠️ **为什么缝从 `<root>/plugin/scripts/` 挪到了 `QUAY_PLUGIN_ROOT`**（本任务 Gap 2）：缺省 builder
+ *  现在经 `resolveKernelScriptsDir()` 解析到**本 kernel 自己**的 scripts 目录，⛔ 不再是目标 root 下的
+ *  `plugin/scripts/`。把 stub 继续装在 root 下已经接不住它（那只会让**真**检测器去扫 root，而 root 是
+ *  这个 tmp ⇒ 本用例会静默变成「真跑了一次检测器」）。`QUAY_PLUGIN_ROOT` 正是
+ *  `resolveKernelScriptsDir()` 认的 hermetic 缝（driver-runtime 的注释；同 conformance-target-fixture
+ *  等既有测试的手法）。 */
+function withFakeDeletionStubUnderKernel(tmp, logPath, fn) {
+  const kernelRoot = path.join(tmp, "fake-kernel");
+  const dir = path.join(kernelRoot, "scripts");
   fs.mkdirSync(dir, { recursive: true });
-  return writeFixture(
+  writeFixture(
     dir,
     "deletion-closure-check.ts",
     `const fs=require("node:fs");
@@ -160,6 +178,14 @@ const components=i<0?argv:argv.slice(0,i);
 fs.appendFileSync(${JSON.stringify(logPath)}, JSON.stringify(components)+"\\n");
 process.stdout.write(JSON.stringify({components,dc:["plugin/scripts/a.ts"],counts:{dcTotal:1,callGraphTotal:1,ratio:1}}));`,
   );
+  const prev = process.env.QUAY_PLUGIN_ROOT;
+  process.env.QUAY_PLUGIN_ROOT = kernelRoot;
+  return Promise.resolve()
+    .then(() => fn())
+    .finally(() => {
+      if (prev === undefined) delete process.env.QUAY_PLUGIN_ROOT;
+      else process.env.QUAY_PLUGIN_ROOT = prev;
+    });
 }
 
 /** 读 driver 边界缝的日志：每条 = 一次 deletion spawn 收到的构件数组。 */
@@ -627,12 +653,12 @@ test("AC4(b) — driver 边界：below-threshold 行不作为 P1 构件传给 de
   const logPath = path.join(tmp, "deletion-components.jsonl");
   const identityCmd = ["node", fakeIdentityBoundaryScript(tmp)];
   const lineageCmd = ["node", fakeLineageScript(tmp, false)];
-  fakeDeletionStubUnderRoot(tmp, logPath);
-  // deletionCmd=null ⇒ 走 defaultDeletionClosureArgv(root, components)（生产路径），假 stub 装在
-  // root/plugin/scripts/deletion-closure-check.ts 接住它。judgeArgv=null 且 halted=true ⇒ 步骤 5
-  // 提前返回：⛔ 不 spawn 真 claude -p，也不落判词载体；但步骤 1-3（identity spawn → 推导构件 →
-  // deletion spawn）已全部跑完——那正是本条的观测面。
-  await runArchitectureReview(tmp, identityCmd, lineageCmd, null, null, null, false, Infinity, true);
+  // deletionCmd=null ⇒ 走 defaultDeletionClosureArgv(root, components)（生产路径）；它现在解析到
+  // **kernel** 的 scripts 目录 ⇒ stub 经 QUAY_PLUGIN_ROOT 接住它。judgeArgv=null 且 halted=true ⇒
+  // 步骤 5 提前返回：⛔ 不 spawn 真 claude -p，也不落判词载体；但步骤 1-3（identity spawn → 推导构件
+  // → deletion spawn）已全部跑完——那正是本条的观测面。
+  await withFakeDeletionStubUnderKernel(tmp, logPath, () =>
+    runArchitectureReview(tmp, identityCmd, lineageCmd, null, null, null, false, Infinity, true));
 
   const calls = readDeletionComponentLog(logPath);
   assert.equal(calls.length, 1, "有候选构件 ⇒ deletion 脚本被 spawn 恰一次");
@@ -860,4 +886,182 @@ test("AC2 — 同族失败面（硬规则 5b）：--plan 非 JSON stdout ⇒ not
   assert.equal(fact.state, "not-evaluated", "读不懂 --plan ⇒ not-evaluated（⛔ 非 verified）");
   assert.match(fact.reason, /unparseable --plan output/);
   assert.ok(fact.reason.includes(MARKER), "同一载体里的兄弟失败点也携带原始输出");
+});
+
+// ══ gap-architecture-review-wrong-root-detector-argv-and-no-config-driven-host-entry ═════════════
+// 两个结构性不可部署缺陷的判定面：
+//   Gap 1 —— architecture-review 此前**只能**由 CLI flag 驱动（`loop.architecture_review:` 键无人认领）；
+//   Gap 2 —— 三个检测器的 spawn 路径锚在【被分析的目标 root】而不是本 kernel 的 scripts 目录。
+
+function writeConfig(tmp, body) {
+  const dir = path.join(tmp, ".quay");
+  fs.mkdirSync(dir, { recursive: true });
+  fs.writeFileSync(path.join(dir, "config.yml"), body, "utf8");
+}
+
+test("Gap1 — readArchitectureReviewConfig：缺席/启用/关停/写坏四态（fail-closed，硬规则 3b）", (t) => {
+  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "qg-arcfg-"));
+  t.after(() => fs.rmSync(tmp, { recursive: true, force: true }));
+
+  // 缺席（无 config.yml / 有 config 但无 loop / 有 loop 但无本段）⇒ present:false，⛔ 不是「关停」
+  assert.deepEqual(readArchitectureReviewConfig(tmp), { present: false, config: null, error: null });
+  writeConfig(tmp, "loop: {}\n");
+  assert.equal(readArchitectureReviewConfig(tmp).present, false, "无本段 ⇒ present:false（老行为 = 默认开）");
+
+  // 启用 + 合法 interval
+  writeConfig(tmp, 'loop:\n  architecture_review:\n    enabled: true\n    interval: "interval:120m"\n');
+  assert.deepEqual(readArchitectureReviewConfig(tmp), {
+    present: true, config: { enabled: true, intervalMinutes: 120 }, error: null,
+  });
+
+  // 关停（kill switch）：enabled:false 立即返回，⛔ 不要求 interval
+  writeConfig(tmp, "loop:\n  architecture_review:\n    enabled: false\n");
+  assert.deepEqual(readArchitectureReviewConfig(tmp), {
+    present: true, config: { enabled: false, intervalMinutes: null }, error: null,
+  });
+
+  // 写坏：enabled 缺失 / 非法 interval / 低于下限 —— 一律 error 置位（⛔ 不得被读成 present+config）
+  for (const [body, re] of [
+    ['loop:\n  architecture_review:\n    interval: "interval:60m"\n', /needs a boolean 'enabled'/],
+    ['loop:\n  architecture_review:\n    enabled: true\n', /needs an 'interval' string/],
+    ['loop:\n  architecture_review:\n    enabled: true\n    interval: "every(3)"\n', /must be interval:<N>m/],
+    ['loop:\n  architecture_review:\n    enabled: true\n    interval: "interval:5m"\n', /below the 60m floor/],
+  ]) {
+    writeConfig(tmp, body);
+    const read = readArchitectureReviewConfig(tmp);
+    assert.equal(read.present, true);
+    assert.equal(read.config, null, `${JSON.stringify(body)} ⇒ config 必须是 null`);
+    assert.match(read.error, re);
+  }
+  assert.equal(ARCH_REVIEW_MIN_INTERVAL_MINUTES, 60, "下限与同族（arch_discovery/cross_project_dogfood）一致");
+});
+
+test("Gap1 — 返回形态与同族 read<Name>Config 逐键相同（{present,config,error}）", (t) => {
+  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "qg-arcfg-shape-"));
+  t.after(() => fs.rmSync(tmp, { recursive: true, force: true }));
+  writeConfig(tmp, 'loop:\n  architecture_review:\n    enabled: true\n    interval: "interval:60m"\n  discovery_method:\n    enabled: false\n');
+  const ours = readArchitectureReviewConfig(tmp);
+  const sibling = readDiscoveryMethodConfig(tmp);
+  assert.deepEqual(
+    Object.keys(ours).sort(),
+    Object.keys(sibling).sort(),
+    "同族读函数返回同一组键（装配点可以一视同仁地消费两者）",
+  );
+  assert.equal(ours.present, true);
+});
+
+test("Gap1 — 门态 ≠ enabled ⇒ 例程只回一条 Fact 且【零 spawn】（正负对照）", async (t) => {
+  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "qg-argate-"));
+  t.after(() => fs.rmSync(tmp, { recursive: true, force: true }));
+  const spawnLog = path.join(tmp, "spawns.log");
+  // 会被 spawn 才能写下的痕迹：identity 命令 append 一行。装在**命令缝**上，于是「有没有 spawn」
+  // 是一个可断言的文件事实，⛔ 不是从 Fact 形态倒推出来的。
+  const markerCmd = ["node", writeFixture(tmp, "marker.js",
+    `const fs=require("node:fs");fs.appendFileSync(${JSON.stringify(spawnLog)},"spawned\\n");process.stdout.write(JSON.stringify({table:[],judgmentRewrites:[],pathConstants:[],byteIdentical:{count:0,pairs:[]}}));`)];
+  const lineageCmd = ["node", fakeLineageScript(tmp, false)];
+  const baseOpts = {
+    planCmd: null, judgeArgv: null, judgmentCmd: null, resourceGateArgv: null,
+    identityCmd: markerCmd, lineageCmd, deletionCmd: null, archJudgeArgv: null,
+    poolJudgeIntervalMinutes: 10, judgmentIntervalMinutes: 30, archReviewIntervalMinutes: 60,
+    packagingCheckCmd: null, packagingGapWorkerCmd: null, packagingGapWorkerTimeoutMs: 900_000,
+    packagingHygieneIntervalMinutes: 60, archGapWorkerCmd: null, archGapWorkerTimeoutMs: 900_000,
+  };
+  const arch = (gate) => qualityGateRoutines(tmp, gate ? { ...baseOpts, archReviewGate: gate } : baseOpts)
+    .find((r) => r.name === "architecture-review");
+
+  // 正控制：门态 enabled ⇒ 检测器真的被 spawn（否则下面的「零 spawn」断言恒真）
+  const ok = await arch({ state: "enabled" }).run({ halted: true });
+  assert.equal(ok.length, 1);
+  assert.equal(ok[0].value.fired, false);
+  assert.equal(fs.readFileSync(spawnLog, "utf8").trim(), "spawned", "enabled ⇒ spawn 恰一次");
+
+  // 负控制 1：config 关停 ⇒ not-evaluated + 零 spawn
+  fs.rmSync(spawnLog);
+  const off = await arch({ state: "not-evaluated", reason: "not-evaluated:disabled — kill switch" }).run({ halted: false });
+  assert.equal(off.length, 1);
+  assert.equal(off[0].state, "not-evaluated");
+  assert.match(off[0].reason, /disabled/);
+  assert.equal(fs.existsSync(spawnLog), false, "关停 ⇒ 连机械检测器都不 spawn（kill switch 必须是整条关掉）");
+
+  // 负控制 2：段写坏 ⇒ failed（⛔ 与 disabled 不同形，硬规则 3）
+  const bad = await arch({ state: "failed", reason: "loop.architecture_review needs a boolean 'enabled'" }).run({ halted: false });
+  assert.equal(bad[0].state, "failed");
+  assert.equal(fs.existsSync(spawnLog), false, "写坏 ⇒ 零 spawn（⛔ 不回退到缺省节奏照跑）");
+});
+
+test("Gap2 — 三个缺省检测器 argv 解析到【本 kernel】的 scripts 目录，⛔ 不是目标 root", (t) => {
+  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "qg-arkernel-"));
+  t.after(() => fs.rmSync(tmp, { recursive: true, force: true }));
+  const kernelRoot = path.join(tmp, "kernel");
+  fs.mkdirSync(path.join(kernelRoot, "scripts"), { recursive: true });
+  const TARGET = "/some/other/project";  // 一个**没有** plugin/scripts 的宿主项目 root
+  const prev = process.env.QUAY_PLUGIN_ROOT;
+  process.env.QUAY_PLUGIN_ROOT = kernelRoot;
+  try {
+    const cases = [
+      ["identity-replication-check.ts", defaultIdentityReplicationArgv(TARGET)],
+      ["guard-lineage-check.ts", defaultGuardLineageArgv(TARGET)],
+      ["deletion-closure-check.ts", defaultDeletionClosureArgv(TARGET, ["a.sh"])],
+    ];
+    for (const [name, argv] of cases) {
+      assert.equal(argv[2], path.join(kernelRoot, "scripts", name), `${name} 从 kernel 解析`);
+      assert.equal(argv.includes(path.join(TARGET, "plugin", "scripts", name)), false,
+        `${name} ⛔ 不得锚在目标 root（这正是修复前的缺陷形）`);
+      assert.equal(argv[argv.indexOf("--root") + 1], TARGET,
+        `${name} 的 --root 仍是被分析的 TARGET（解析基准与 --root 是两件事）`);
+      assert.equal(argv.includes("--json"), true);
+    }
+    // 构件顺序：deletion 的构件必须夹在脚本与 --root 之间（修复前的位置不变）
+    assert.deepEqual(defaultDeletionClosureArgv(TARGET, ["a.sh", "b.ts"]).slice(2, 5),
+      [path.join(kernelRoot, "scripts", "deletion-closure-check.ts"), "a.sh", "b.ts"]);
+  } finally {
+    if (prev === undefined) delete process.env.QUAY_PLUGIN_ROOT;
+    else process.env.QUAY_PLUGIN_ROOT = prev;
+  }
+});
+
+test("Gap1 — main()：config 段决定节奏与开关，显式 CLI flag 覆盖 config（装配行点名来源）", (t) => {
+  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "qg-armain-"));
+  t.after(() => fs.rmSync(tmp, { recursive: true, force: true }));
+  const planCmd = writeFixture(tmp, "p.js", `process.stdout.write(JSON.stringify({triggers:{fired:false,reasons:[],poolCount:0,oldestUnreviewedAgeMs:0,roundsSinceLastJudge:0},pool:[],tasks:[],lastJudgeState:{status:"ok"}}));`);
+  const judgmentCmd = writeFixture(tmp, "j.js", `process.stdout.write(JSON.stringify({mode:"judgment-consumer-audit",judgments_total:1,wired:1,unfinished:[],drift:false}));`);
+  const packagingCmd = writeFixture(tmp, "k.js", `process.stdout.write(JSON.stringify({mode:"packaging-hygiene-audit",configKeys:{keysTotal:0,noConsumerToWire:[],state:"verified"},shippedEntries:{state:"verified",violations:[],reason:null},drift:[]}));`);
+  const runDriver = (label, extraArgs) => {
+    const roundLog = path.join(tmp, `round-${label}.jsonl`);
+    const r = spawnSync(process.execPath, ["--experimental-strip-types",
+      path.join(REPO_ROOT, "plugin", "scripts", "quality-gate-driver.ts"),
+      "--root", tmp, "--once", "--round-log", roundLog,
+      "--plan-cmd", `node ${planCmd}`, "--judgment-cmd", `node ${judgmentCmd}`,
+      "--packaging-check-cmd", `node ${packagingCmd}`,
+      "--identity-cmd", `node ${fakeIdentityScript(tmp, false)}`,
+      "--lineage-cmd", `node ${fakeLineageScript(tmp, false)}`,
+      ...extraArgs], { encoding: "utf8", timeout: 120_000 });
+    assert.equal(r.status, 0, `driver --once exit 0 (stderr: ${r.stderr})`);
+    const rec = JSON.parse(fs.readFileSync(roundLog, "utf8").split("\n").filter((l) => l.trim())[0]);
+    return { fact: rec.facts.find((f) => f.name === "architecture-review"), stderr: r.stderr };
+  };
+
+  // (a) 段缺席 ⇒ 老行为：缺省节奏 + 例程照跑（本内建例程默认开，⛔ 不是同族 declarative 的 off-by-default）
+  writeConfig(tmp, "loop: {}\n");
+  const a = runDriver("absent", []);
+  assert.equal(a.fact.state, "verified");
+  assert.match(a.stderr, /architecture-review 例程已装配（enabled, interval=60m \[来源: default\]/);
+
+  // (b) 段 enabled:true + interval:120m ⇒ 节奏取自 config，且**零 spawn 也照跑**（这里用假检测器缝）
+  writeConfig(tmp, 'loop:\n  architecture_review:\n    enabled: true\n    interval: "interval:120m"\n');
+  const b = runDriver("cfg", []);
+  assert.equal(b.fact.state, "verified");
+  assert.match(b.stderr, /architecture-review 例程已装配（enabled, interval=120m \[来源: config\]/);
+
+  // (c) 显式 CLI flag 覆盖 config（同一份 config，flag 传 90）
+  const c = runDriver("cli", ["--arch-review-interval", "90"]);
+  assert.equal(c.fact.state, "verified");
+  assert.match(c.stderr, /architecture-review 例程已装配（enabled, interval=90m \[来源: cli\]/);
+
+  // (d) 段 enabled:false ⇒ 零 spawn 的关停读数（kill switch 在**启动行与 Fact 上**都可见）
+  writeConfig(tmp, "loop:\n  architecture_review:\n    enabled: false\n");
+  const d = runDriver("off", []);
+  assert.equal(d.fact.state, "not-evaluated");
+  assert.match(d.fact.reason, /disabled/);
+  assert.match(d.stderr, /architecture-review 例程已装配（enabled:false/);
 });
