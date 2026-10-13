@@ -747,6 +747,28 @@ export function verdictOf(row: Record<string, unknown> | null | undefined): "sup
   return v === "supported" || v === "refuted" || v === "undetermined" ? v : "undetermined";
 }
 
+/** Which clusters get a verifier call. ⛔ A PLAIN `slice(0, cap)` IS NOT ENOUGH, and that is measured, not
+ *  argued: the engine orders clusters by confidence, so on 2026-10-13 four autonomous rounds had their
+ *  whole verification budget taken by `quay_generic` clusters while the `project_local` control items the
+ *  investigator HAD produced sat past the cap — they were never verified, never became carrier records,
+ *  and the round's `scope_split` therefore read "project_local: 0" even though the model had classified
+ *  two. The negative control the round claims to run was silently skipped.
+ *  So: when a `project_local` cluster exists and there is room for it, ONE slot is reserved for it. A cap
+ *  of 1 has no room (the round's primary product is the Quay-side claim), and the round record says so
+ *  rather than hiding it.
+ */
+export function selectClustersForVerification(clusters: readonly Record<string, unknown>[], cap: number): Array<Record<string, unknown>> {
+  if (clusters.length <= cap) return [...clusters];
+  const isLocal = (c: Record<string, unknown>): boolean => ((c as { rep?: { scope?: unknown } }).rep?.scope) === "project_local";
+  const local = clusters.filter(isLocal);
+  const rest = clusters.filter((c) => !isLocal(c));
+  if (local.length === 0 || cap < 2) return clusters.slice(0, cap);
+  const keepRest = rest.slice(0, cap - 1);
+  const keepLocal = local.slice(0, cap - keepRest.length);
+  // Original order is preserved so a cluster's number still addresses its position in the round.
+  return clusters.filter((c) => keepRest.includes(c) || keepLocal.includes(c));
+}
+
 /** THE CONFIRMATION BAR — OSD's, not a second one: the verifier AND an independently-contexted refuter
  *  must BOTH return `supported`, and the refuter must not have been undetermined for any reason. An
  *  `undetermined` refuter confirms nothing. */
@@ -981,7 +1003,7 @@ export async function runCrossProjectDogfood(root: string, opts: CrossProjectDog
   // Clustering is dedup ASSISTANCE ONLY (the local routine's rule): nothing is discarded by shape here,
   // and the cap below is a COUNT, not a filter.
   const clusters = hyp.clusterHypotheses([{ hyps: hypotheses }], {});
-  const selected = clusters.slice(0, cfg.maxClustersVerified);
+  const selected = selectClustersForVerification(clusters, cfg.maxClustersVerified);
 
   // ── ③ VERIFY, then ④ REFUTE independently ────────────────────────────────────────────────────────
   const repOf = (c: unknown): Record<string, unknown> => ((c as { rep?: Record<string, unknown> })?.rep ?? {});
@@ -1138,6 +1160,13 @@ export async function runCrossProjectDogfood(root: string, opts: CrossProjectDog
       scope_split: {
         quay_generic: clusterRecords.filter((c) => c.scope === "quay_generic").length,
         project_local: clusterRecords.filter((c) => c.scope === "project_local").length,
+      },
+      // How many `project_local` clusters the investigator produced vs how many got a verifier slot. Two
+      // separate numbers so "the model classified nothing local" and "we never checked" stay distinct.
+      control_arm: {
+        project_local_clusters: clusters.filter((c) => (c as { rep?: { scope?: unknown } }).rep?.scope === "project_local").length,
+        project_local_verified: clusterRecords.filter((c) => c.scope === "project_local").length,
+        reserved_slot: cfg.maxClustersVerified >= 2,
       },
       wall_ms: now() - started,
     },

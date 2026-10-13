@@ -43,6 +43,7 @@ import {
   filedTaskId,
   truncateOnWord,
   crossProjectRecordId,
+  selectClustersForVerification,
   writeOwnedFile,
 } from "../scripts/cross-project-dogfood-routine.ts";
 import { INVOKED_BY_MANUAL, INVOKED_BY_RESIDENT } from "../scripts/discovery-method-routine.ts";
@@ -768,4 +769,21 @@ test("the digest carries the project's OWN task titles as local material (the ha
   const pack = renderEvidencePack([scan]);
   assert.match(pack, /### local material — the project's OWN task titles/);
   assert.match(pack, /the host's own voice feature/);
+});
+
+test("the verification budget reserves a slot for the project_local control arm", () => {
+  // Measured 2026-10-13 across four real rounds: the engine orders clusters by confidence, so a plain
+  // slice(0, cap) spent the whole budget on quay_generic clusters while the project_local items the
+  // investigator HAD produced sat past the cap — never verified, never recorded, and scope_split read
+  // "project_local: 0" although the model had classified two.
+  const g = (n) => ({ rep: { scope: "quay_generic", claim: `q${n}`, components: [`f${n}.ts`] } });
+  const l = (n) => ({ rep: { scope: "project_local", claim: `p${n}`, components: [`h${n}.ts`] } });
+  const got = selectClustersForVerification([g(1), g(2), g(3), l(1), l(2)], 3);
+  assert.deepEqual(got.map((c) => c.rep.claim), ["q1", "q2", "p1"], "two Quay-side clusters and the control, in round order");
+  assert.equal(got.length, 3, "the cap is respected — the control is RESERVED a slot, not added on top");
+  // Below the cap nothing is dropped, and no slot is taken from the primary product when there is no room.
+  assert.equal(selectClustersForVerification([g(1), l(1)], 3).length, 2);
+  assert.deepEqual(selectClustersForVerification([g(1), g(2), l(1)], 1).map((c) => c.rep.claim), ["q1"], "a cap of 1 goes to the round's primary product");
+  assert.deepEqual(selectClustersForVerification([g(1), l(1), l(2)], 3).map((c) => c.rep.claim), ["q1", "p1", "l2".replace("l2", "p2")], "spare slots stay filled");
+  assert.deepEqual(selectClustersForVerification([g(1), g(2), g(3)], 2).map((c) => c.rep.claim), ["q1", "q2"], "no control ⇒ an ordinary prefix");
 });
