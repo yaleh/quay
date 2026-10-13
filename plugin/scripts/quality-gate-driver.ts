@@ -116,6 +116,13 @@ import { discoveryMethodRoutineFromConfig, liveDiscoveryModel, readDiscoveryMeth
 // `.quay/open-semantic-discovery-findings.jsonl` 的一行 scan-round + 每簇记录，外加它自己那份预留台账。
 // ⛔ 与 fan-in/scoped-gate 无关。
 import { openSemanticDiscoveryRoutineFromConfig } from "./open-semantic-discovery-routine.ts";
+// CROSS-PROJECT-DOGFOOD 轨道（gap-cross-project-semantic-dogfooding-routine-configurable-source-projects）：
+// 同族的第五条语义例程，**主语不同**——它的输入不是本仓库的源码，而是**别的 Quay 宿主项目真实使用载体**
+// （tasks/、worker-outcome、fan-in 升级/重试、needs-human 原因）的一段有界近期切片。**只读、只报**：源项目
+// 一律只读打开（无任何 fs 写到达已声明源根；模型子进程 cwd 是本轮 scratch，⛔ 不是源项目，工具面只有
+// Read/Grep/Glob），唯一新增持久化是 gitignored 载体 `.quay/cross-project-dogfood-findings.jsonl` + 它自己
+// 那份预留台账；confirmed 的发现才写 Portfolio / 经 ABI 立一条 todo。⛔ 与 fan-in/scoped-gate 无关。
+import { crossProjectDogfoodRoutineFromConfig } from "./cross-project-dogfood-routine.ts";
 
 // ── 常量（由 DRIVER_KINDS registry 派生，⛔ 不另写一份路径字面量）──────────────────────────
 const QUALITY_SPEC = DRIVER_KINDS.quality;
@@ -965,6 +972,11 @@ export interface QualityGateOptions {
    *  缺省 null = 未装配（老行为）。未声明 ⇒ 例程表不变；声明了但 enabled:false/写坏 ⇒ 仍装配，
    *  因为「不跑」必须可观测（disabled / failed 读数）。 */
   openSemanticDiscoveryRoutine?: RoutineSpec | null;
+  /** cross-project-dogfood 例程：同前四条的注入纪律（main() 从 `.quay/config.yml`
+   *  `loop.cross_project_dogfood:` 装配后注入，⛔ 本函数不自己读配置）。缺省 null = 未装配（老行为）。
+   *  未声明 ⇒ 例程表不变；声明了但 enabled:false/写坏 ⇒ 仍装配，因为「不跑」必须可观测（disabled /
+   *  failed 读数，硬规则 3b）。 */
+  crossProjectDogfoodRoutine?: RoutineSpec | null;
 }
 
 /** 四条例程（B15 pool-quality-judge + B17 judgment-consumer-check + 架构复核 + packaging-hygiene）。
@@ -1024,6 +1036,11 @@ export function qualityGateRoutines(root: string, opts: QualityGateOptions): Rou
     // `.quay/config.yml` `loop.open_semantic_discovery:`）。缺席 ⇒ 不加入（老行为）；加入而 section
     // 缺席 ⇒ 记 `not-evaluated:disabled` 且零 spawn（kill switch 的可观测面）。
     ...(opts.openSemanticDiscoveryRoutine ? [opts.openSemanticDiscoveryRoutine] : []),
+    // 第九类：CROSS-PROJECT-DOGFOOD 例程（同一「声明式 + 可观测」族：间隔与开关来自 `.quay/config.yml`
+    // `loop.cross_project_dogfood:`）。缺席 ⇒ 不加入（老行为）；加入而 section 缺席 ⇒ 记
+    // `not-evaluated:disabled` 且零 spawn（kill switch 的可观测面）。**与上面四条的区别是主语**：它的
+    // 输入是别的 Quay 宿主项目的真实使用载体，⛔ 不是本仓库的源码。
+    ...(opts.crossProjectDogfoodRoutine ? [opts.crossProjectDogfoodRoutine] : []),
   ];
 }
 
@@ -1120,6 +1137,14 @@ export function formatOpenSemanticDiscoveryAssembly(od: {
   const shape = od.investigatorRuns === null ? "" : `, investigator_runs=${od.investigatorRuns}, max_clusters_verified=${od.maxClustersVerified}`;
   const turns = od.verifierMaxTurns === null ? "" : `, verifier_max_turns=${od.verifierMaxTurns}, refutation_max_turns=${od.refutationMaxTurns}`;
   return `open-semantic-discovery 例程已装配（enabled, interval=${od.intervalMinutes}m${until}${calls}${usd}${shape}${turns}${methods}, report-only: 不立案、不写 tasks/ 或 goals/）`;
+}
+
+/** The CROSS-PROJECT-DOGFOOD assembly line, as ONE string. It names what makes this routine different
+ *  from the four above — its SUBJECT is the configured source projects' usage artifacts, opened
+ *  read-only — because that difference is exactly what an operator reads this line to confirm. */
+export function formatCrossProjectDogfoodAssembly(cpd: { enabled: boolean; present: boolean }): string {
+  if (!cpd.enabled) return "cross-project-dogfood 例程已装配（enabled:false — 每轮记 not-evaluated:disabled，零 spawn）";
+  return "cross-project-dogfood 例程已装配（enabled, 源项目清单与间隔取自 .quay/config.yml loop.cross_project_dogfood:, 源项目一律只读打开、模型子进程 cwd 是本轮 scratch ⛔ 不是源项目、两个 24h 天花板是 spawn 前硬预留；undetermined/refuted 一律不立案、不写 Portfolio，只有 confirmed 才写 Portfolio / 经 ABI 立一条 todo）";
 }
 
 // ── 常驻循环（例程型：每轮评估 due 例程 → 跑 due → 汇集 Facts → 写 round 心跳）────────────────
@@ -1454,6 +1479,18 @@ export async function main(argv: string[]): Promise<number> {
     console.error(`quality-gate-driver: ${formatOpenSemanticDiscoveryAssembly(openDiscovery)}`);
   }
 
+  // cross-project-dogfood 轨道：读 `.quay/config.yml` `loop.cross_project_dogfood:`（同一注入纪律）。
+  // section 缺席/enabled:false ⇒ 例程仍装配，但每轮只记 `not-evaluated:disabled` 且零 spawn；配置坏 ⇒ 记
+  // failed 并在此**可见地**报告（硬规则 3b：读不懂 ≠ 合格）。
+  const crossProject = crossProjectDogfoodRoutineFromConfig(rootDir);
+  if (crossProject.error) {
+    console.error(`quality-gate-driver: cross-project-dogfood 例程配置无效 — ${crossProject.error}`);
+  } else if (!crossProject.present) {
+    console.error("quality-gate-driver: 未声明 loop.cross_project_dogfood — cross-project-dogfood 例程未装配（off by default，零 spawn；例程表与未接此轨时一致）");
+  } else {
+    console.error(`quality-gate-driver: ${formatCrossProjectDogfoodAssembly(crossProject)}`);
+  }
+
   const routines = qualityGateRoutines(rootDir, {
     planCmd: planCmd ? splitArgs(planCmd) : null,
     judgeArgv: judgeCmd ? splitArgs(judgeCmd) : null,
@@ -1476,6 +1513,7 @@ export async function main(argv: string[]): Promise<number> {
     archDiscoveryRoutine: archDiscovery.routine,
     discoveryMethodRoutine: discoveryMethod.routine,
     openSemanticDiscoveryRoutine: openDiscovery.routine,
+    crossProjectDogfoodRoutine: crossProject.routine,
   });
 
   return runResidentQualityGateLoop({ root: rootDir, intervalMs: interval, once, maxRounds, roundLogFile, runId: resolvedRunId, json, pidFile, routines, routineWatchdogMs, kind: "quality" });
