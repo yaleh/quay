@@ -43,13 +43,49 @@ The CLI's general `--help` text does say, for the `stop` verb generically: "For 
 - **Revisit if the incidence grows:** if a third live-swap need appears, the recipe has then been hand-run ≥3 times and the verb earns itself — file it then, with that count.
 
 ## Acceptance Criteria
-- [ ] AC1: a fixture anchor with a `worker`-kind resident loop that always finds ready work; `stop --kind worker` against it produces an error message naming the real cause and `drain` as the alternative. Negative control: the current message (checked in before the fix) does not name `drain`.
-- [ ] AC2: the documentation addition (help text or code comment) is pasted, naming the `takeoverPid` handoff recipe this task's own investigation used.
-- [ ] AC3: `scripts/test.sh --for-task <this task>` green.
+- [x] AC1: a fixture anchor with a `worker`-kind resident loop that always finds ready work; `stop --kind worker` against it produces an error message naming the real cause and `drain` as the alternative. Negative control: the current message (checked in before the fix) does not name `drain`.
+- [x] AC2: the documentation addition (help text or code comment) is pasted, naming the `takeoverPid` handoff recipe this task's own investigation used.
+- [x] AC3: `scripts/test.sh --for-task <this task>` green.
 
 ## Definition of Done
 - AC1-AC3 checked with pasted evidence.
 - No change to the actual stop/drain/takeover MECHANISMS themselves — this task is message/documentation only.
+
+## Evidence
+**AC1 — fixture + live message + negative control** (`node --no-warnings --experimental-strip-types --test plugin/test/driver-runtime-s10.test.mjs`, 5/5 pass):
+```
+✔ AC1 — kind=worker 的 stop-failed / restart-aborted 必须点名真实成因（常驻循环，重试结构上无效）与 `drain` 替代（负控制：改前消息两个词都没有） (2522.717629ms)
+ℹ tests 5 / ℹ pass 5 / ℹ fail 0
+```
+The emitted worker message (captured off `process.stderr`, which is where `stopKindViaAnchor` writes — ⛔ not the `out` callback):
+```
+stop-failed: kind=worker — 该 kind 的循环在 800ms 内未收尾（anchor pid=3778051）。⛔ 本条**不报成 not-running**：循环仍在 ⇒ 接着 start 会得到两份 loop（双派发）。⚠️ kind=worker 是**常驻循环**：循环体自己就是那个 loop，只要还有 ready 工作就不会把控制权交回 anchor 的停机检查点 ⇒ 只要还有 ready 活，重跑这条命令**结构上不可能**得到不同结果（⛔ 不是超时太短）。
+   可行替代：`quay driver drain --kind worker`（停新派发、在飞跑完，⛔ 不杀在飞）——清空在飞后再 stop。
+   ...
+```
+Negative control (the pre-fix message, `git show develop:plugin/scripts/driver-runtime.ts | sed -n '4051,4058p' | grep -c drain` ⇒ **0**; it also contains no `常驻`). The test pins that pre-fix literal and asserts the two halves — so the assertion is not vacuous (硬规则 4). Non-worker kinds stay byte-identical to before (the shared helper returns `""` for them).
+
+**AC2 — the `takeoverPid` handoff recipe, pasted** (driver-runtime.ts, on `spawnAnchor`; mirrored at the `--takeover` parse site in driver-anchor.ts and in both CLI help surfaces):
+```
+ *  ── `takeoverPid`：**不停机交换内核**的手工配方（⛔ 无 CLI verb，是内部原语）────
+ *  这是唯一一条在 anchor 存活时完成内核交接的路径；`drain` 与 `stop` 都到不了这里。配方三步：
+ *    ① 记下旧 anchor 的 pid：`<root>/.quay/anchor.pid`（或 `quay driver status`）；
+ *    ② 起接管者，把旧 pid 交给它：`spawnAnchor(root, { takeoverPid: <旧 pid> })`
+ *       —— 等价于手写 `node --experimental-strip-types driver-anchor.ts __anchor --root <root> --takeover <旧 pid>`；
+ *    ③ 对旧 anchor 直接发 SIGTERM：`kill -TERM <旧 pid>`。
+ *  等待语义由**接管者**负责，⛔ 不是「旧进程必须立刻死」：接管者会一直等到 `takeoverPid` 退出才真正
+ *  起循环（旧进程还活时**绝不**起第二份 loop），超预算只把这次交接标成异常并**继续等**（D3）。
+```
+`quay driver --help` now prints the same guidance under `stop` / `restart` (and the shared note names `takeoverPid` on every worker stop-failure).
+
+**AC3 — scoped gate green:**
+```
+bash scripts/test.sh --for-task gap-driver-stop-kind-worker-message-does-not-name-drain-or-takeover-handoff --allow-thin
+ℹ tests 99 / ℹ pass 99 / ℹ fail 0 / duration_ms 22657   ⇒ EXIT=0
+```
+Anti-drift pre-merge gate: `ANTI-DRIFT OK: … 5 actual file(s), all within declared Touches (6 glob(s))`, EXIT=0. Also run in this worktree: `tsc --noEmit` ⇒ 0; `enum-surface-parity-check.ts` ⇒ `PASS: all 27 registered surfaces consistent`; `packages/quay/test/cli.test.mjs` ⇒ PASS (the driver-help vocab invariants).
+
+**DoD — mechanisms untouched:** the diff contains only (a) string literals on the two failure paths, (b) comments/help prose, (c) one new test. No change to `stopKind`/`stopKindViaAnchor` control flow, `drainKind`, `spawnAnchor`, or the takeover wait.
 
 ## Touches
 - tasks/gap-driver-stop-kind-worker-message-does-not-name-drain-or-takeover-handoff.md
