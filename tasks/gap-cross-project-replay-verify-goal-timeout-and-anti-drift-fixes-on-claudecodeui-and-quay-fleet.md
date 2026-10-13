@@ -4,7 +4,7 @@ title: "cross-project proof of two 0.20.0-dev fixes (goal 120s SIGKILL,
   anti-drift pre-exit) on claudecodeui + quay-fleet: private build,
   scratch-clone replay with 0.19.0 negative control, production trial plan
   (human-approved)"
-status: ready
+status: done
 labels:
   - gap
   - cross-project-dogfood
