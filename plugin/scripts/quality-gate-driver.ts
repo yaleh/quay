@@ -54,7 +54,7 @@ import {
   registerKindStop,
   residentLoopStop,
   resourceGateCheck,
-  resolveKernelScriptsDir,
+  kernelSiblingArgv,
   splitArgs,
   isNonNegInt,
   type DriverKind,
@@ -645,36 +645,47 @@ export async function runPoolQualityJudge(
  *  `gap-drivers-resolve-quay-scripts-under-project-root-not-plugin-root`（2026-09-13 第三方项目实测）
  *  是同一类缺陷，`resolveKernelScriptsDir()`（⛔ 不是 opts.root，AC-203）是该类缺陷的既定单一入口。
  *  `--root` 仍传 TARGET root（那部分本来就对：它是【被分析的东西】，⛔ 不是检测器代码住哪）。
- *  解析基准可用 `QUAY_PLUGIN_ROOT` 覆盖（hermetic 测试缝，同 Core plugin-root.ts 的手法）。
  *
- *  ⛔ 本函数取 `.ts` 直跑形态（同 `defaultReadyPoolArgv` / promotion-driver 的 ready-pool-check 接法）
- *  ——本 driver 的部署形态就是【带 raw 脚本的树】（源检出 / marketplace cache，publish-dist-branch.sh
- *  rsync 整个 plugin/ ⇒ raw 与 dist 并存）。**已知残差**：只有 dist（`scripts/dist/*.js`、无 raw）的
- *  安装形态下这条仍会 ENOENT——那需要换成 `driver-runtime.kernelSiblingArgv()`（它做 .ts→dist 回退并
- *  在都缺席时返回 null）。⛔ 那是**另一件事**（会改三个 builder 的返回类型与调用方的 fail-closed 面），
- *  不在本任务范围内，此处记下以免读者以为它已被覆盖。 */
-export function kernelDetectorArgv(name: string, root: string, extra: readonly string[] = []): string[] {
-  return [
-    "node", "--experimental-strip-types",
-    path.join(resolveKernelScriptsDir(), name),
-    ...extra, "--root", root, "--json",
-  ];
-}
+ *  ⛔ 但「用对了目录解析器」不等于「解析得到产物」——**那条 `.ts` 直跑形态在只有 dist 的出厂安装里
+ *  结构性 ENOENT**（2026-10-14 实测，`gap-architecture-review-detectors-not-runnable-off-quay-repo`）：
+ *  官方 dist-plugin 产物里 `<plugin>/scripts/identity-replication-check.ts` 不存在、
+ *  `<plugin>/scripts/dist/identity-replication-check.js` 存在 ⇒ `node --experimental-strip-types
+ *  <不存在的 .ts>` exit 1、stdout 空 ⇒ 每轮 `unparseable identity-replication output (exit 1)`（真实宿主
+ *  ClaudeCodeUI 上 164 次全此形）。**同类机件的既定单一入口是 `driver-runtime.kernelSiblingArgv()`**
+ *  （它做 `.ts`→`scripts/dist/<name>.js` 回退、按形态选解释器、都缺席时返回 null）——旧注释把「换过去」
+ *  记作「另一件事」，实际它才是**同一件事的另一半**（硬规则 5b：修好一个实例 ≠ 修好一类）。
+ *
+ *  ⛔ 同时，**每个 builder 里的脚本名是出厂产物的入口派生源**：`build-plugin-dist.mjs` 的
+ *  `scanPluginSiblingReferences` 按 `kernelSiblingArgv` + 字面 `<name>.ts` 这个 SHAPE 派生 bundle
+ *  入口 ⇒ 在 builder 里写一个字面脚本名 = 该脚本随产物出厂，不需要改构建脚本（单一真相源；旧形态
+ *  `path.join(<dir>, "<name>.ts")` 正是那条扫描覆盖不到、于是两个检测器在产物里**整份消失**的形状）。
+ *  ⛔ 不要再插入一层把名字变成参数的包装：那样名字退化成变量，派生面重新变瞎（本任务实测）。 */
 
 /** 缺省 identity-replication-check --json 命令（P2 身份复制）。 */
-export function defaultIdentityReplicationArgv(root: string): string[] {
-  return kernelDetectorArgv("identity-replication-check.ts", root);
+export function defaultIdentityReplicationArgv(root: string): string[] | null {
+  return kernelSiblingArgv("identity-replication-check.ts", ["--root", root, "--json"]);
 }
 
 /** 缺省 guard-lineage-check --json 命令（P4 守卫谱系）。 */
-export function defaultGuardLineageArgv(root: string): string[] {
-  return kernelDetectorArgv("guard-lineage-check.ts", root);
+export function defaultGuardLineageArgv(root: string): string[] | null {
+  return kernelSiblingArgv("guard-lineage-check.ts", ["--root", root, "--json"]);
 }
 
 /** 缺省 deletion-closure-check --json 命令（P1 删除闭包）。components 由 identity 报告推导（硬编码
- *  实体）；无候选构件时不 spawn 本检测器。 */
-export function defaultDeletionClosureArgv(root: string, components: string[]): string[] {
-  return kernelDetectorArgv("deletion-closure-check.ts", root, components);
+ *  实体）；无候选构件时不 spawn 本检测器。构件必须在脚本与 --root 之间（既有位置语义不变）。 */
+export function defaultDeletionClosureArgv(root: string, components: string[]): string[] | null {
+  return kernelSiblingArgv("deletion-closure-check.ts", [...components, "--root", root, "--json"]);
+}
+
+/** 检测器脚本体解析不出的统一 fail-closed 读数（硬规则 3b：不是 spawn error、不是「跑过了」，
+ *  而是一个**具名的、可区分的**未评估态；token 点名是哪一个检测器）。 */
+export function detectorUnresolvedFact(name: string): Fact<null> {
+  return {
+    name: "architecture-review",
+    value: null,
+    state: "not-evaluated",
+    reason: `not-evaluated:detector-script-unresolved:${name} (kernel install carries neither the raw .ts nor scripts/dist/<name>.js — see resolveKernelSibling)`,
+  };
 }
 
 /** 解析一个检测器的 --json 输出为最小结构视图。读不懂/非对象 ⇒ null（调用方记 not-evaluated，⛔ 不伪装合格）。 */
@@ -851,6 +862,8 @@ export async function runArchitectureReview(
 ): Promise<Fact<ArchReviewFactValue | null>> {
   // 1. P2 身份复制（必需——既产 P2 簇又推导 P1 候选构件）。
   const identityArgv = identityCmd ?? defaultIdentityReplicationArgv(root);
+  // ⛔ 解析不到脚本体 ⇒ not-evaluated（硬规则 3b：不得 spawn 一个不存在的路径再把它读成「跑过且无数据」）。
+  if (identityArgv === null) return detectorUnresolvedFact("identity-replication-check.ts");
   const identityR = await runAsync(identityArgv, { timeoutMs: ROUTINE_TIMEOUT_MS });
   if (identityR.error) {
     return { name: "architecture-review", value: null, state: "not-evaluated", reason: `identity-replication spawn error: ${identityR.error.message}` };
@@ -862,6 +875,7 @@ export async function runArchitectureReview(
 
   // 2. P4 守卫谱系（必需）。
   const lineageArgv = lineageCmd ?? defaultGuardLineageArgv(root);
+  if (lineageArgv === null) return detectorUnresolvedFact("guard-lineage-check.ts");
   const lineageR = await runAsync(lineageArgv, { timeoutMs: ROUTINE_TIMEOUT_MS });
   if (lineageR.error) {
     return { name: "architecture-review", value: null, state: "not-evaluated", reason: `guard-lineage spawn error: ${lineageR.error.message}` };
@@ -876,6 +890,7 @@ export async function runArchitectureReview(
   let deletion: DeletionReportView = { components: [], dc: [], counts: { dcTotal: 0, callGraphTotal: 0, ratio: null } };
   if (components.length > 0) {
     const deletionArgv = deletionCmd ?? defaultDeletionClosureArgv(root, components);
+    if (deletionArgv === null) return detectorUnresolvedFact("deletion-closure-check.ts");
     const deletionR = await runAsync(deletionArgv, { timeoutMs: ROUTINE_TIMEOUT_MS });
     if (deletionR.error) {
       return { name: "architecture-review", value: null, state: "not-evaluated", reason: `deletion-closure spawn error: ${deletionR.error.message}` };
@@ -1231,7 +1246,7 @@ export function formatArchitectureReviewAssembly(a: {
     return "architecture-review 例程已装配（enabled:false — 每轮记 not-evaluated:disabled，零 spawn）";
   }
   const declared = a.present ? "" : "（未声明 loop.architecture_review — 用 CLI/缺省节奏；本内建例程默认开启）";
-  return `architecture-review 例程已装配（enabled, interval=${a.intervalMinutes}m [来源: ${a.intervalSource}]，检测器脚本经 resolveKernelScriptsDir() 解析到本 kernel 的 plugin/scripts，⛔ 不是目标 root 的；--root 仍传目标工作区${declared}）`;
+  return `architecture-review 例程已装配（enabled, interval=${a.intervalMinutes}m [来源: ${a.intervalSource}]，检测器脚本经 kernelSiblingArgv() 解析到本 kernel 自己的安装位置（raw .ts 或 scripts/dist/<name>.js，都缺席 ⇒ not-evaluated:detector-script-unresolved:<name>，⛔ 不 spawn 不存在的路径），⛔ 不是目标 root 的；--root 仍传目标工作区${declared}）`;
 }
 
 // ── 例程表（Layer 1b：routines = [{name, schedule, run() → Facts}]）──────────────────────────

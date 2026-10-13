@@ -382,6 +382,31 @@ const PLUGIN_SIBLING_JOIN_JS_RE = new RegExp(
   "g"
 );
 
+// ── the RESOLVER-API reference form (8th instance of "the closure scan is blind to a reference
+//    SHAPE") ──────────────────────────────────────────────────────────────────────────────────────
+// gap-architecture-review-detectors-not-runnable-off-quay-repo. driver-runtime.ts exposes TWO
+// helpers that turn a sibling NAME into a runnable script — `resolveKernelSibling("X.ts")` (the
+// `.ts`→`scripts/dist/X.js` fallback, AC-203's single入口) and `kernelSiblingArgv("X.ts", extra)`
+// (the same resolution, wrapped into a spawnable argv with the right interpreter/flags). They are
+// the CORRECT way to spawn a sibling, and every scan above is blind to them: each keys on a LITERAL
+// PATH (`"plugin"`/`"scripts"` segments, `dist/<name>.js`, `path.join(<dirExpr>, "X.ts")`), while
+// these calls carry a BARE FILENAME and build the path inside the helper.
+//
+// Measured 2026-10-14 on the official dist-plugin artifact (`gap-quay-architecture-analysis-shipped-
+// capability-cleanroom-acceptance`): `quality-gate-driver.ts` spawned its three architecture-review
+// detectors as `path.join(resolveKernelScriptsDir(), "<name>.ts")` — a shape no scan covered — so
+// `guard-lineage-check.ts` and `deletion-closure-check.ts` were never entries, their bundles were
+// never produced, and the strip step deleted their raw `.ts`: both shipped in NO FORM AT ALL. The
+// architecture-review routine therefore died at its first detector on every host, in every install
+// layout. Two more live siblings of the same class were found by this scan on the same tree
+// (`judgment-consumer-check.ts`, `suite-load-sampler.ts` — spawned through `kernelSiblingArgv` /
+// `resolveKernelSibling` by shipped drivers and likewise absent from the artifact), which is why the
+// repair is the SHAPE and not those three filenames (硬规则 5b).
+//
+// The caller intersects the result with existing plugin `.ts`, exactly like the other scans.
+const PLUGIN_SIBLING_ARGV_RE = /kernelSiblingArgv\(\s*"([A-Za-z0-9_.-]+)\.ts"/g;
+const PLUGIN_SIBLING_RESOLVE_CALL_RE = /resolveKernelSibling\(\s*"([A-Za-z0-9_.-]+)\.ts"\s*\)/g;
+
 // quay-init.sh's EXPLICIT mechanism additions (plugin/scripts/quay-init.sh `derive_loop_scripts`
 // step (c)) name .ts files by BARE basename with no invocation prefix. These must ship as
 // executable bundles so quay-init's lay-down set resolves after the raw .ts are removed. The list
@@ -467,6 +492,9 @@ export function scanPluginSelfReferences(pluginRoot) {
  * has no such collision: measured, it matches exactly driver-anchor.ts + fast-mode-telemetry.ts
  * across the whole surface.
  *
+ * It also covers the RESOLVER-API shapes (`kernelSiblingArgv("X.ts", …)` / `resolveKernelSibling(
+ * "X.ts")`) — see the PLUGIN_SIBLING_ARGV_RE comment for the measured defect those two closed.
+ *
  * The caller intersects the result with existing plugin `.ts` (a `.js`-only probe with no matching
  * `.ts` source, or a name that names nothing, is ignored).
  * @param {string} pluginRoot
@@ -486,6 +514,8 @@ export function scanPluginSiblingReferences(pluginRoot) {
       for (const m of text.matchAll(PLUGIN_SIBLING_JOIN_JS_RE)) {
         if (m[1]) basenames.add(`${m[1].replace(/\.js$/, "")}.ts`);
       }
+      for (const m of text.matchAll(PLUGIN_SIBLING_ARGV_RE)) if (m[1]) basenames.add(`${m[1]}.ts`);
+      for (const m of text.matchAll(PLUGIN_SIBLING_RESOLVE_CALL_RE)) if (m[1]) basenames.add(`${m[1]}.ts`);
     }
   }
   return basenames;

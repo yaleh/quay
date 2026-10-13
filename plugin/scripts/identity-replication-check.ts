@@ -1128,6 +1128,54 @@ export interface Report {
   literalReplication: { sessionLiveness: LiteralReplication; gateScriptBase: LiteralReplication };
   sharedModuleControl: SharedModuleControl;
   table: LiteralReplication[];
+  /** 本次 `--root` 上【quay 专属读数面】的在否 —— 见 RootSurface。 */
+  rootSurface: RootSurface;
+}
+
+/** 检测器在 `--root` 上需要的那部分【quay 专属读数面】。
+ *
+ *  WHY THIS EXISTS (gap-architecture-review-detectors-not-runnable-off-quay-repo, 2026-10-14):
+ *  本检测器的三处子度量只能在【一个 quay 检出】上取到非空读数 —— 字面量复制度走
+ *  `walkCodeFiles` 的 `plugin/ packages/ experiments/ scripts/` 四根、字节相同对走
+ *  `plugin/scripts` ↔ `experiments/<x>/scripts`、全量表走 `plugin/scripts` 的 basename 枚举。
+ *  一份第三方项目（quay-init 后的宿主、ClaudeCodeUI 这类）**没有**这些目录，于是每一处都合法地
+ *  为空。旧 CLII 的 `<root>/plugin/scripts` 存在性闸把这件事判成 `exit 2 usage error` —— 于是
+ *  `architecture-review` 在任何非 quay 宿主上**一次都跑不出结果**（真实宿主实测 164 次全失败）。
+ *  闸已撤（`--root` 本来就该能指任何仓库），代价是必须能区分两件在输出上同形的事 (硬规则 3b)：
+ *    (a) 面在，扫过，零命中  ⟺ kind === "full"
+ *    (b) 面不在，那些子读数**结构上取不到** ⟺ kind === "absent"
+ *  于是「目标仓不是 quay」不再伪装成「目标仓是 quay 且复制度为零」。⛔ 这不是 fail-closed 的替代：
+ *  `--root` 本身不存在仍是 exit 2（那是环境错误，不是合法目标），只有「目标合法、但面不在」走三态。 */
+export interface RootSurface {
+  kind: "full" | "absent";
+  pluginScripts: boolean;
+  /** `experiments/<x>/scripts` 目录数（字节相同对的右侧）。 */
+  experimentScriptsDirs: number;
+  note: string | null;
+}
+
+export function rootSurfaceOf(root: string): RootSurface {
+  const pluginScripts = fs.existsSync(path.join(root, "plugin", "scripts"));
+  let experimentScriptsDirs = 0;
+  try {
+    const expRoot = path.join(root, "experiments");
+    for (const e of fs.readdirSync(expRoot, { withFileTypes: true })) {
+      if (e.isDirectory() && fs.existsSync(path.join(expRoot, e.name, "scripts"))) experimentScriptsDirs++;
+    }
+  } catch {
+    experimentScriptsDirs = 0;
+  }
+  return pluginScripts
+    ? { kind: "full", pluginScripts, experimentScriptsDirs, note: null }
+    : {
+        kind: "absent",
+        pluginScripts,
+        experimentScriptsDirs,
+        note:
+          "root has no plugin/scripts — the quay-specific readings (path-literal constants + byte-identical " +
+          "mirror pairs + the plugin/scripts replication table) are structurally empty here, NOT measured-and-zero " +
+          "(硬规则 3b). The root-independent readings below are still produced.",
+      };
 }
 
 export function run(
@@ -1185,6 +1233,7 @@ export function run(
     literalReplication: { sessionLiveness, gateScriptBase },
     sharedModuleControl: sharedModule,
     table,
+    rootSurface: rootSurfaceOf(root),
   };
 }
 
@@ -1230,6 +1279,12 @@ function collectDisabledCarveOuts(args: string[]): RewriteCarveOutKind[] {
 function printHuman(report: Report): void {
   console.log("identity-replication-check — P2 身份复制检测器 (docs/proposals/archguard-generation-era-primitives.md §3)");
   console.log("root:", report.root);
+  // 降级面必须每次打印 (硬规则 3b)：否则「目标仓没有 quay 读数面」与「扫过且零命中」在输出上同形。
+  if (report.rootSurface.kind === "absent") {
+    console.log(`⚠️  root surface ABSENT — ${report.rootSurface.note}`);
+  } else {
+    console.log(`root surface: plugin/scripts PRESENT, experiments/*/scripts 目录 ${report.rootSurface.experimentScriptsDirs} 个`);
+  }
 
   console.log(`\n== 路径字面量常量 (AC1) — ${report.pathConstants.length} 个 *_REL 常量硬编码 plugin 脚本相对路径 ==`);
   for (const c of report.pathConstants) {
@@ -1303,8 +1358,10 @@ export function main(argv: string[]): number {
     process.exit(2);
   }
   const root = rootArg ? path.resolve(rootArg) : repoRoot();
-  if (!fs.existsSync(path.join(root, "plugin", "scripts"))) {
-    console.error(`ERROR: plugin/scripts not found under ${root} — is --root correct?`);
+  // ⛔ 只判「`--root` 本身在不在」——那是环境错误（拼错路径）⇒ exit 2，与「目标合法但没有 quay
+  //   读数面」是两件事。后者不再是错误：报告照出，降级事实记在 `rootSurface`（硬规则 3b）。
+  if (!fs.existsSync(root)) {
+    console.error(`ERROR: --root ${root} does not exist — is --root correct?`);
     process.exit(2);
   }
   const report = run(root, limit, { disabledCarveOuts: collectDisabledCarveOuts(args) });

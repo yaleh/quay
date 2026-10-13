@@ -27,22 +27,27 @@
 //
 // Usage:
 //   node --experimental-strip-types guard-lineage-check.ts [--root <dir>] [--catalog <file>] [--cost-file <file>] [--json]
-//   --root <dir>       repo 根: 守卫枚举 + 对象存在性 + mutation case + 默认 catalog/cost-file 都相对它
+//   --root <dir>       【被分析的】repo 根: 守卫枚举 + 对象存在性 + mutation case + cost-file 都相对它
 //                      (默认 repo-root.ts 推导)。生产/现场读运行时态 (gitignored tick log / checker-cost)
 //                      时应指向主检出 — verify worktree 无这些运行时态 (同 instrument-decay-check 的
-//                      --root main_root 约定)。
-//   --catalog <file>   capability-catalog declarations 文件 (读 GUARD_OBJECT 表; 默认 <root>/plugin/scripts/capability-catalog-declarations.json)
+//                      --root main_root 约定)。⛔ 它**不必**是 quay 检出（可以没有 plugin/）。
+//   --catalog <file>   capability-catalog declarations 文件 (读 GUARD_OBJECT 表)。缺省 = **本 kernel 自己
+//                      安装位置**的那一份（随 kernel 出厂；`resolveKernelShellSibling` 按布局上跳到
+//                      pluginRoot，源树与 dist 安装都对）；kernel 侧找不到时回退到 <root>/plugin/scripts/
+//                      capability-catalog-declarations.json（脱离 kernel 独立跑本检测器的场合）。
 //                      ⛔ 不再是 capability-catalog.sh：声明表已搬出 bash 成为数据 (gap-arch-catalog-declarations-leave-bash)
 //   --cost-file <file> checker-cost.jsonl 路径 (读 verdict 流; 默认 <root>/.quay/checker-cost.jsonl)
 //   --json             机器可读 JSON
 //   --help             用法, exit 0
 // Exit: 0 = report produced (observer, 非 pass/fail gate — 同 identity-replication-check/deletion-closure-check);
-//       2 = usage/environment error (root 无 plugin/scripts)。
+//       2 = usage/environment error (--root 本身不存在 / 非法参数)。⛔ 「目标仓没有守卫目录」不再是
+//       错误: 报告照出, 降级事实记在 `rootSurface.kind === "absent"` (硬规则 3b)。
 
 import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { repoRoot } from "./repo-root.ts";
+import { resolveKernelShellSibling } from "./driver-runtime.ts";
 import { parseArgs as baseParseArgs } from "./gate-script-base.ts";
 
 const SCRIPT_DIR = path.dirname(fileURLToPath(import.meta.url));
@@ -265,11 +270,48 @@ export interface LineageReport {
   };
   suspicious: DispositionEntry[]; // AC4 反向: never-fired ∧ ¬mutation-verified (只判已声明)
   preventive: DispositionEntry[]; // AC4 反向: never-fired ∧ mutation-verified (预防性, 非可疑)
+  /** 本次 `--root` 上【守卫枚举面】的在否 —— 见 rootSurfaceOf (硬规则 3b)。 */
+  rootSurface: RootSurface;
+}
+
+/** 检测器在 `--root` 上需要的【quay 专属读数面】。
+ *
+ *  WHY THIS EXISTS (gap-architecture-review-detectors-not-runnable-off-quay-repo, 2026-10-14):
+ *  守卫枚举面是 GUARD_DIRS（`plugin/scripts` / `experiments/<x>/scripts` / `plugin/gate-scripts`）——只有
+ *  一个 quay 检出才有。旧 CLI 的 `<root>/plugin/scripts` 存在性闸把「目标不是 quay」判成
+ *  `exit 2 usage error`，于是 architecture-review 的 P4 半边在任何非 quay 宿主上**一次都跑不出来**。
+ *  闸已撤，但「面不在 ⇒ 0 守卫」与「面在、扫过 ⇒ 0 守卫」必须在输出上可区分 (硬规则 3b)：前者是
+ *  `kind === "absent"`（枚举面结构上取不到），后者是 `kind === "full"` 且 totalGuards 真的是 0。
+ *  ⛔ `--root` 本身不存在仍是 exit 2 —— 那是环境错误，不是合法目标。 */
+export interface RootSurface {
+  kind: "full" | "absent";
+  presentGuardDirs: string[];
+  absentGuardDirs: string[];
+  /** 声明表从哪读：kernel 自己的安装位置（出厂形态）/ TARGET 的 repo-local（独立跑）/ 显式 --catalog。 */
+  catalogSource: "kernel-install" | "target";
+  note: string | null;
+}
+
+export function rootSurfaceOf(root: string, catalogFromKernel: boolean): RootSurface {
+  const present = GUARD_DIRS.filter((rel) => fs.existsSync(path.join(root, rel)));
+  const absent = GUARD_DIRS.filter((rel) => !present.includes(rel));
+  const catalogSource: RootSurface["catalogSource"] = catalogFromKernel ? "kernel-install" : "target";
+  return present.length === 0
+    ? {
+        kind: "absent",
+        presentGuardDirs: [],
+        absentGuardDirs: [...absent],
+        catalogSource,
+        note:
+          `no guard directory (${GUARD_DIRS.join(", ")}) exists under this --root — the guard enumeration is ` +
+          `structurally empty here, NOT measured-and-zero (硬规则 3b).`,
+      }
+    : { kind: "full", presentGuardDirs: [...present], absentGuardDirs: [...absent], catalogSource, note: null };
 }
 
 export function analyze(
   root: string,
-  opts: { catalogFile: string; costFile: string },
+  opts: { catalogFile: string; costFile: string; catalogFromKernel?: boolean },
 ): LineageReport {
   const guards = enumerateGuards(root);
   const totalGuards = guards.length;
@@ -333,6 +375,7 @@ export function analyze(
     },
     suspicious,
     preventive,
+    rootSurface: rootSurfaceOf(root, opts.catalogFromKernel ?? false),
   };
 }
 
@@ -344,6 +387,15 @@ function pct(x: number): string {
 function printHuman(report: LineageReport): void {
   console.log("guard-lineage-check — P4 守卫谱系检测器 (docs/proposals/archguard-generation-era-primitives.md §3)");
   console.log("root:", report.root);
+  // 枚举面的在否必须每次打印 (硬规则 3b)：否则「目标仓没有守卫目录」与「扫过且零守卫」在输出上同形。
+  if (report.rootSurface.kind === "absent") {
+    console.log(`⚠️  root surface ABSENT — ${report.rootSurface.note}`);
+  } else if (report.rootSurface.absentGuardDirs.length > 0) {
+    console.log(`root surface PARTIAL — 在场 ${report.rootSurface.presentGuardDirs.join(", ")}；缺席 ${report.rootSurface.absentGuardDirs.join(", ")}`);
+  } else {
+    console.log(`root surface: 全部 ${report.rootSurface.presentGuardDirs.length} 个守卫目录在场`);
+  }
+  console.log(`声明表来源: ${report.rootSurface.catalogSource === "kernel-install" ? "本 kernel 的安装位置（出厂形态）" : "TARGET 的 repo-local 路径（--catalog / 独立跑）"}`);
 
   console.log(`\n== AC1 已声明守卫对象 — ${report.declaredCount}/${report.totalGuards} = ${pct(report.declaredRatio)} ==`);
   console.log(`  total guards enumerated (三目录去重): ${report.totalGuards}`);
@@ -434,13 +486,28 @@ export function main(argv: string[]): number {
     return 0;
   }
   const root = opts.root ? path.resolve(opts.root) : repoRoot(SCRIPT_DIR);
-  if (!fs.existsSync(path.join(root, "plugin", "scripts"))) {
-    console.error(`guard-lineage-check: plugin/scripts not found under ${root} — is --root correct?`);
+  // ⛔ 只判「`--root` 本身在不在」——拼错路径是环境错误 ⇒ exit 2。目标合法但没有 quay 读数面
+  //    不再是错误（2026-10-14：旧闸把任何非 quay 宿主判成 usage error ⇒ architecture-review 一次都
+  //    跑不出来）。降级事实记在 rootSurface（硬规则 3b），报告照出。
+  if (!fs.existsSync(root)) {
+    console.error(`guard-lineage-check: --root ${root} does not exist — is --root correct?`);
     return 2;
   }
-  const catalogFile = opts.catalog ? path.resolve(opts.catalog) : path.join(root, "plugin", "scripts", "capability-catalog-declarations.json");  // kernel-sibling-dev-tree-only: dev-tree-only — repo-local plugin/scripts use, not third-party sibling resolution.
+  // ⛔ 声明表是【本 kernel 自己的】输入，⛔ 不是被分析仓库的：它随 kernel 出厂（出厂产物里是
+  //    `<pluginRoot>/scripts/capability-catalog-declarations.json`）。旧默认 `path.join(root,
+  //    "plugin", "scripts", …)` 只在「root 恰好是 quay 检出」时对上，因此带着
+  //    `kernel-sibling-dev-tree-only` 豁免标记躺在 kernel-sibling-resolution-check 的豁免面里
+  //    （gap-architecture-review-detectors-not-runnable-off-quay-repo Plan 3）。
+
+  // `resolveKernelShellSibling` 是「kernel 自己 loose 资源」的单一入口（它按布局上跳到 pluginRoot，
+  // 源树与 dist 安装两种形态都对）。缺 ⇒ null。此后回退到 TARGET 的 repo-local 声明表（旧行为，
+  // 供脱离 kernel 独立跑本检测器的场合）。
+  const kernelCatalog = resolveKernelShellSibling("capability-catalog-declarations.json");
+  const catalogFile = opts.catalog
+    ? path.resolve(opts.catalog)
+    : kernelCatalog ?? path.join(root, "plugin", "scripts", "capability-catalog-declarations.json");
   const costFile = opts.costFile ? path.resolve(opts.costFile) : path.join(root, ".quay", "checker-cost.jsonl");
-  const report = analyze(root, { catalogFile, costFile });
+  const report = analyze(root, { catalogFile, costFile, catalogFromKernel: opts.catalog ? false : kernelCatalog !== null });
   if (opts.json) printJson(report);
   else printHuman(report);
   return 0;

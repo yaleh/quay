@@ -16,7 +16,8 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 
-import { execFileSync } from "node:child_process";
+import { execFileSync, spawnSync } from "node:child_process";
+import { fileURLToPath } from "node:url";
 
 import {
   aliasesOf,
@@ -29,6 +30,9 @@ import {
 import { gitVisiblePaths, visibleDirPrefixes } from "../scripts/fs-walk.ts";
 
 const _createdDirs = [];
+
+/** 本检测器的 CLI 入口（AC3 的 exit-code 断言跑真进程）。 */
+const CLI = path.join(path.dirname(fileURLToPath(import.meta.url)), "..", "scripts", "deletion-closure-check.ts");
 
 function mktmp(contents) {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), "dcc-test-"));
@@ -232,6 +236,34 @@ test("deletionClosure — gitignored 树里的【代码】引用同样排除 (�
   assert.equal(r.callGraph.includes("mirror/copy.sh"), false, "gitignored 代码不进 CallGraph");
   assert.equal(r.callGraph.includes("plugin/scripts/live.sh"), true);
   assert.equal(r.counts.callGraphTotal, 1);
+});
+
+// ── gap-architecture-review-detectors-not-runnable-off-quay-repo: --root 不必是 quay 检出 ────────────
+// 旧 CLI 在 `<root>/plugin/scripts` 缺席时 exit 2 ⇒ architecture-review 的 P1 半边在任何第三方宿主上
+// 一次都跑不出来。闸已撤；「代码根缺一部分 ⇒ 闭包只覆盖在场的那部分」与「全扫过、零引用」必须可区分
+// (硬规则 3b) ⇒ rootSurface。
+test("AC3 — a root with no quay code roots yields a REAL report (exit 0), not `plugin/scripts not found` (exit 2)", () => {
+  const dir = mktmp({ "README.md": "# third-party\n", "src/a.ts": "export const a = 1;\n" });
+  const r = spawnSync(process.execPath, ["--no-warnings", "--experimental-strip-types", CLI, "ghost.sh", "--root", dir, "--json"], { encoding: "utf8" });
+  assert.equal(r.status, 0, `stderr: ${r.stderr}`);
+  const report = JSON.parse(r.stdout);
+  assert.equal(report.rootSurface.kind, "partial");
+  assert.deepEqual(report.rootSurface.presentRoots, []);
+  assert.equal(report.rootSurface.absentRoots.length, 5);
+  assert.ok(report.rootSurface.note, "降级事实必须随报告一起给出");
+  assert.equal(report.counts.dcTotal, 0);
+  assert.equal(report.counts.ratio, null);
+  // ⛔ 与「全扫过、零引用」不同形：补出一个代码根后 kind 仍是 partial 但在场根非空 —— 只有全部在场才是 full。
+  fs.mkdirSync(path.join(dir, "scripts"), { recursive: true });
+  const r2 = spawnSync(process.execPath, ["--no-warnings", "--experimental-strip-types", CLI, "ghost.sh", "--root", dir, "--json"], { encoding: "utf8" });
+  assert.deepEqual(JSON.parse(r2.stdout).rootSurface.presentRoots, ["scripts"]);
+});
+
+test("AC3 负控制 — 拼错的 --root 仍是 exit 2（环境错误 ≠ 合法目标）", () => {
+  const dir = mktmp({ "README.md": "x\n" });
+  const r = spawnSync(process.execPath, ["--no-warnings", "--experimental-strip-types", CLI, "ghost.sh", "--root", path.join(dir, "nope"), "--json"], { encoding: "utf8" });
+  assert.equal(r.status, 2);
+  assert.match(r.stderr, /does not exist/);
 });
 
 after(() => {

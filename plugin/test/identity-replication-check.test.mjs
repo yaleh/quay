@@ -20,6 +20,8 @@ import assert from "node:assert/strict";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
+import { fileURLToPath } from "node:url";
+import { spawnSync } from "node:child_process";
 
 import {
   tsCommentMask,
@@ -42,6 +44,9 @@ import {
 } from "../scripts/identity-replication-check.ts";
 /** Temp dirs created this run — removed in the top-level `after` hook below (test-isolation R6). */
 const _createdDirs = [];
+
+/** 本检测器的 CLI 入口（AC3 的 exit-code 断言跑真进程，⛔ 不靠 in-process main 的返回值）。 */
+const CLI = path.join(path.dirname(fileURLToPath(import.meta.url)), "..", "scripts", "identity-replication-check.ts");
 
 /** Build a temp dir from a {relPath: content} map. Registered for cleanup in the `after` hook. */
 function mktmp(contents) {
@@ -621,6 +626,32 @@ test("run — 产出完整 report (各 section 在场)", () => {
   assert.ok(report.literalReplication.sessionLiveness);
   assert.ok(report.sharedModuleControl);
   assert.ok(Array.isArray(report.table));
+});
+
+// ── gap-architecture-review-detectors-not-runnable-off-quay-repo: --root 不必是 quay 检出 ────────────
+// 旧 CLI 在 `<root>/plugin/scripts` 缺席时 exit 2 ⇒ architecture-review 在任何第三方宿主上**一次都
+// 跑不出结果**（2026-10-14 官方 dist 产物实测）。闸已撤，但「面不在 ⇒ 子读数结构上为空」必须与
+// 「面在、扫过、零命中」在输出上可区分 (硬规则 3b) ⇒ rootSurface。
+test("AC3 — a root with no plugin/scripts yields a REAL report (exit 0), not `plugin/scripts not found` (exit 2)", () => {
+  const dir = mktmp({ "README.md": "# third-party\n", "src/a.ts": "export const a = 1;\n" });
+  const r = spawnSync(process.execPath, ["--no-warnings", "--experimental-strip-types", CLI, "--root", dir, "--json"], { encoding: "utf8" });
+  assert.equal(r.status, 0, `stderr: ${r.stderr}`);
+  const report = JSON.parse(r.stdout);
+  assert.equal(report.root, dir);
+  assert.equal(report.rootSurface.kind, "absent");
+  assert.equal(report.rootSurface.pluginScripts, false);
+  assert.ok(report.rootSurface.note, "降级事实必须随报告一起给出");
+  // ⛔ 与「面在、扫过、零命中」不同形：同一根上补出 plugin/scripts 后 kind 变 full。
+  fs.mkdirSync(path.join(dir, "plugin", "scripts"), { recursive: true });
+  const r2 = spawnSync(process.execPath, ["--no-warnings", "--experimental-strip-types", CLI, "--root", dir, "--json"], { encoding: "utf8" });
+  assert.equal(JSON.parse(r2.stdout).rootSurface.kind, "full");
+});
+
+test("AC3 负控制 — 拼错的 --root 仍是 exit 2（环境错误 ≠ 合法目标）", () => {
+  const dir = mktmp({ "README.md": "x\n" });
+  const r = spawnSync(process.execPath, ["--no-warnings", "--experimental-strip-types", CLI, "--root", path.join(dir, "does-not-exist"), "--json"], { encoding: "utf8" });
+  assert.equal(r.status, 2);
+  assert.match(r.stderr, /does not exist/);
 });
 
 after(() => {

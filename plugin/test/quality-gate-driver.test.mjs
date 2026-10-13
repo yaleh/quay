@@ -993,23 +993,37 @@ test("Gap1 — 门态 ≠ enabled ⇒ 例程只回一条 Fact 且【零 spawn】
   assert.equal(fs.existsSync(spawnLog), false, "写坏 ⇒ 零 spawn（⛔ 不回退到缺省节奏照跑）");
 });
 
-test("Gap2 — 三个缺省检测器 argv 解析到【本 kernel】的 scripts 目录，⛔ 不是目标 root", (t) => {
+test("Gap2/AC1 — 三个缺省检测器经 kernelSiblingArgv 解析到【本 kernel】的安装位置；都缺席 ⇒ null（⛔ 不回退 target root）", (t) => {
   const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "qg-arkernel-"));
   t.after(() => fs.rmSync(tmp, { recursive: true, force: true }));
   const kernelRoot = path.join(tmp, "kernel");
   fs.mkdirSync(path.join(kernelRoot, "scripts"), { recursive: true });
   const TARGET = "/some/other/project";  // 一个**没有** plugin/scripts 的宿主项目 root
+  const DETECTORS = ["identity-replication-check", "guard-lineage-check", "deletion-closure-check"];
   const prev = process.env.QUAY_PLUGIN_ROOT;
   process.env.QUAY_PLUGIN_ROOT = kernelRoot;
   try {
+    // (a) kernel 侧两种形态都缺席 ⇒ **null**（调用方记 not-evaluated:detector-script-unresolved:<name>）。
+    //     修复前的形态是拼一条 `path.join(kernelScriptsDir, "<name>.ts")`——一个必然 ENOENT 的路径，
+    //     其 spawn 结果（exit 1 + 空 stdout）与「跑过了、没数据」同形 (硬规则 3b)。
+    assert.equal(defaultIdentityReplicationArgv(TARGET), null);
+    assert.equal(defaultGuardLineageArgv(TARGET), null);
+    assert.equal(defaultDeletionClosureArgv(TARGET, ["a.sh"]), null);
+
+    // (b) 只有 dist bundle（出厂安装形态：raw .ts 被 publish 的 strip 步删掉）⇒ 解析到 scripts/dist/*.js，
+    //     ⛔ 不带 --experimental-strip-types。这正是真实宿主上 164 次失败的成因 1。
+    fs.mkdirSync(path.join(kernelRoot, "scripts", "dist"), { recursive: true });
+    for (const n of DETECTORS) fs.writeFileSync(path.join(kernelRoot, "scripts", "dist", `${n}.js`), "");
     const cases = [
-      ["identity-replication-check.ts", defaultIdentityReplicationArgv(TARGET)],
-      ["guard-lineage-check.ts", defaultGuardLineageArgv(TARGET)],
-      ["deletion-closure-check.ts", defaultDeletionClosureArgv(TARGET, ["a.sh"])],
+      ["identity-replication-check", defaultIdentityReplicationArgv(TARGET)],
+      ["guard-lineage-check", defaultGuardLineageArgv(TARGET)],
+      ["deletion-closure-check", defaultDeletionClosureArgv(TARGET, ["a.sh"])],
     ];
     for (const [name, argv] of cases) {
-      assert.equal(argv[2], path.join(kernelRoot, "scripts", name), `${name} 从 kernel 解析`);
-      assert.equal(argv.includes(path.join(TARGET, "plugin", "scripts", name)), false,
+      assert.notEqual(argv, null, `${name} 在 dist-only 安装形态下必须解析得到`);
+      assert.equal(argv[2], path.join(kernelRoot, "scripts", "dist", `${name}.js`), `${name} 解析到 dist bundle`);
+      assert.equal(argv.includes("--experimental-strip-types"), false, `${name}: dist bundle 不带 strip-types flag`);
+      assert.equal(argv.includes(path.join(TARGET, "plugin", "scripts", `${name}.ts`)), false,
         `${name} ⛔ 不得锚在目标 root（这正是修复前的缺陷形）`);
       assert.equal(argv[argv.indexOf("--root") + 1], TARGET,
         `${name} 的 --root 仍是被分析的 TARGET（解析基准与 --root 是两件事）`);
@@ -1017,7 +1031,46 @@ test("Gap2 — 三个缺省检测器 argv 解析到【本 kernel】的 scripts �
     }
     // 构件顺序：deletion 的构件必须夹在脚本与 --root 之间（修复前的位置不变）
     assert.deepEqual(defaultDeletionClosureArgv(TARGET, ["a.sh", "b.ts"]).slice(2, 5),
-      [path.join(kernelRoot, "scripts", "deletion-closure-check.ts"), "a.sh", "b.ts"]);
+      [path.join(kernelRoot, "scripts", "dist", "deletion-closure-check.js"), "a.sh", "b.ts"]);
+
+    // (c) **源检出**形态（raw .ts 在场 + 同级的 packages/quay/src 在）⇒ raw 胜出（编辑即生效）。
+    fs.rmSync(path.join(kernelRoot, "scripts", "dist"), { recursive: true, force: true });
+    fs.mkdirSync(path.join(tmp, "packages", "quay", "src"), { recursive: true });
+    for (const n of DETECTORS) fs.writeFileSync(path.join(kernelRoot, "scripts", `${n}.ts`), "");
+    const srcArgv = defaultIdentityReplicationArgv(TARGET);
+    assert.equal(srcArgv[3], path.join(kernelRoot, "scripts", "identity-replication-check.ts"), "源检出 ⇒ raw .ts 胜出");
+    assert.equal(srcArgv.includes("--experimental-strip-types"), true);
+  } finally {
+    if (prev === undefined) delete process.env.QUAY_PLUGIN_ROOT;
+    else process.env.QUAY_PLUGIN_ROOT = prev;
+  }
+});
+
+test("Gap3/AC1 — 检测器脚本体解析不出 ⇒ architecture-review 记 not-evaluated:detector-script-unresolved:<name>（⛔ 不 spawn 不存在的路径）", async (t) => {
+  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "qg-arunresolved-"));
+  t.after(() => fs.rmSync(tmp, { recursive: true, force: true }));
+  // QUAY_PLUGIN_ROOT 指向一个**空**的 kernel（raw .ts 与 dist/*.js 都不在）
+  const emptyKernel = path.join(tmp, "kernel");
+  fs.mkdirSync(path.join(emptyKernel, "scripts"), { recursive: true });
+  const target = path.join(tmp, "target");
+  fs.mkdirSync(target, { recursive: true });
+  const prev = process.env.QUAY_PLUGIN_ROOT;
+  process.env.QUAY_PLUGIN_ROOT = emptyKernel;
+  try {
+    const fact = await runArchitectureReview(target, null, null, null, null, null, false);
+    assert.equal(fact.state, "not-evaluated");
+    assert.match(fact.reason, /detector-script-unresolved:identity-replication-check\.ts/);
+    assert.equal(fact.value, null);
+    // 负控制：同一 root 上把三个 bundle 放进 kernel ⇒ 不再报 unresolved（证明上面那条是解析面造成的，
+    // 不是「这个 root 让例程恒不评估」）。
+    fs.mkdirSync(path.join(emptyKernel, "scripts", "dist"), { recursive: true });
+    for (const n of ["identity-replication-check", "guard-lineage-check", "deletion-closure-check"]) {
+      fs.writeFileSync(path.join(emptyKernel, "scripts", "dist", `${n}.js`),
+        "process.stdout.write(JSON.stringify({}));\n");
+    }
+    const ok = await runArchitectureReview(target, null, null, null, null, null, false);
+    assert.notEqual(ok.state, "not-evaluated", `不该再是 unresolved（reason=${ok.reason}）`);
+    assert.doesNotMatch(ok.reason, /detector-script-unresolved/);
   } finally {
     if (prev === undefined) delete process.env.QUAY_PLUGIN_ROOT;
     else process.env.QUAY_PLUGIN_ROOT = prev;

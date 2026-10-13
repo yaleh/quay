@@ -1103,3 +1103,39 @@ test("AC1 — product surface: each driver bundle runs its OWN main (routine kin
     fs.rmSync(dir, { recursive: true, force: true });
   }
 });
+
+test("gap-architecture-review-detectors: the sibling-HELPER API shapes (kernelSiblingArgv / resolveKernelSibling) derive entries", () => {
+  const dir = tmp();
+  try {
+    fs.mkdirSync(path.join(dir, "scripts"), { recursive: true });
+    fs.writeFileSync(path.join(dir, "scripts", "caller.ts"),
+      'import { kernelSiblingArgv, resolveKernelSibling } from "./driver-runtime.ts";\n' +
+      'export const a = kernelSiblingArgv("alpha-check.ts", []);\n' +
+      'export const b = resolveKernelSibling("beta-check.ts");\n', "utf8");
+    for (const n of ["alpha-check.ts", "beta-check.ts"]) {
+      fs.writeFileSync(path.join(dir, "scripts", n), "export const x = 1;\n", "utf8");
+    }
+    const names = scanPluginSiblingReferences(dir);
+    assert.deepEqual([...names].sort(), ["alpha-check.ts", "beta-check.ts"],
+      "both helper shapes must be derived from the bare filename (the defect's shape carried no literal path segment)");
+    const { scripts } = deriveEntries(dir);
+    assert.ok(scripts.includes("scripts/alpha-check.ts"), "kernelSiblingArgv(\"X.ts\") ⇒ X.ts ships");
+    assert.ok(scripts.includes("scripts/beta-check.ts"), "resolveKernelSibling(\"X.ts\") ⇒ X.ts ships");
+
+    // NEGATIVE CONTROL (the scan is load-bearing): the PRE-FIX defect shape — a helper whose script
+    // name is a VARIABLE, joined onto the kernel scripts dir — carries no literal path segment the
+    // other scans can key on, so it derives NOTHING. That is exactly why guard-lineage-check.ts and
+    // deletion-closure-check.ts shipped in no form at all (no .ts, no scripts/dist/*.js).
+    fs.rmSync(path.join(dir, "scripts", "alpha-check.ts"));
+    fs.rmSync(path.join(dir, "scripts", "beta-check.ts"));
+    fs.writeFileSync(path.join(dir, "scripts", "caller.ts"),
+      'import path from "node:path";\n' +
+      'import { resolveKernelScriptsDir } from "./driver-runtime.ts";\n' +
+      'export function argv(name) { return path.join(resolveKernelScriptsDir(), name); }\n' +
+      'export const a = argv("alpha-check.ts");\n', "utf8");
+    assert.deepEqual([...scanPluginSiblingReferences(dir)], [],
+      "the pre-fix shape must derive NOTHING — this is the blindness the API-shape scan exists to close");
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});

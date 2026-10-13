@@ -164,6 +164,68 @@ test("RED: the SAME cross-package anchor WITHOUT the marker is a violation (豁�
   assert.equal(v[0].script, "goal-store.ts");
 });
 
+// ── P5: raw-kernel-dir-join（gap-architecture-review-detectors-not-runnable-off-quay-repo） ───────
+// 这一类**用的是对的目录解析器**，所以 P1–P4 全绿，而产物里每个检测器都跑不起来（raw .ts 被 strip、
+// dist bundle 又没派生出来）。判据：文件里拼接 kernel 脚本目录、**且该文件从未**把 sibling 名字交给
+// resolveKernelSibling/kernelSiblingArgv。
+test("RED (P5): path.join(resolveKernelScriptsDir(), <name>) in a file with NO resolver call is a violation", () => {
+  const src =
+    'import path from "node:path";\n' +
+    'import { resolveKernelScriptsDir } from "./driver-runtime.ts";\n' +
+    'export function argv(name, root) {\n' +
+    '  return ["node", "--experimental-strip-types", path.join(resolveKernelScriptsDir(), name), "--root", root];\n' +
+    '}\n';
+  const v = scanText(src);
+  assert.equal(v.length, 1, JSON.stringify(v));
+  assert.equal(v[0].form, "raw-kernel-dir-join");
+  assert.equal(v[0].line, 4);
+});
+
+test("RED (P5): the SAME join with a LITERAL .ts name is a violation too", () => {
+  const src = 'export const gate = path.join(resolveKernelScriptsDir(), "identity-replication-check.ts");\n';
+  const v = scanText(src);
+  assert.equal(v.length, 1, JSON.stringify(v));
+  assert.equal(v[0].form, "raw-kernel-dir-join");
+});
+
+test("GREEN (P5): the file ALSO routes a sibling through the resolver ⇒ the raw join is the fail-closed fallback arm (not a violation)", () => {
+  // 这正是 promotion-driver / driver-runtime 既有的形态：resolver 返回 null 时故意 spawn 一条必然
+  // 失败的 raw 路径（⛔ 不伪装成「无候选」），所以它必须保持绿。
+  const src =
+    'import path from "node:path";\n' +
+    'import { resolveKernelSibling, resolveKernelScriptsDir } from "./driver-runtime.ts";\n' +
+    'export function argv(root) {\n' +
+    '  const sibling = resolveKernelSibling("ready-pool-check.ts");\n' +
+    '  const script = sibling ? [sibling.path] : [path.join(resolveKernelScriptsDir(), "ready-pool-check.ts")];\n' +
+    '  return ["node", ...script, "--root", root];\n' +
+    '}\n';
+  assert.deepEqual(scanText(src), [], JSON.stringify(scanText(src)));
+});
+
+test("GREEN (P5): a COMMENT that mentions kernelSiblingArgv( does NOT exempt a file that never calls it (按位置不按关键词)", () => {
+  // 实测形态：develop 的 quality-gate-driver.ts 在**注释里**写着「那需要换成 kernelSiblingArgv()」——
+  // 若存在性检查跑在原始源上，唯一要抓的那个文件会恒绿。
+  const src =
+    '// 已知残差：安装形态下这条仍会 ENOENT —— 那需要换成 driver-runtime.kernelSiblingArgv()\n' +
+    'export function argv(name) { return path.join(resolveKernelScriptsDir(), name); }\n';
+  const v = scanText(src);
+  assert.equal(v.length, 1, JSON.stringify(v));
+  assert.equal(v[0].form, "raw-kernel-dir-join");
+});
+
+test("GREEN (P5): resolveKernelPluginRoot() joins onto LOOSE shipped resources are NOT violations (no dist fallback exists for .sh/vendor)", () => {
+  const src = 'export const assertClean = path.join(resolveKernelPluginRoot(), "scripts", "assert-clean-tree.sh");\n';
+  assert.deepEqual(scanText(src), [], JSON.stringify(scanText(src)));
+});
+
+test("GREEN (P5): a dev-tree-only-marked file is exempted like the other forms (豁免带理由)", () => {
+  const src =
+    'import { resolveKernelScriptsDir } from "./driver-runtime.ts";\n' +
+    '// kernel-sibling-dev-tree-only: 本仓库自检工具读自己的 plugin/ 树做检查，锚 kernel 脚本目录是正确行为。\n' +
+    'export const gate = path.join(resolveKernelScriptsDir(), "x.ts");\n';
+  assert.deepEqual(scanText(src), [], JSON.stringify(scanText(src)));
+});
+
 // ── 扫描面（AC1：shipped kernel 面显式枚举 plugin/scripts + packages/quay/src） ────────────────────
 test("scanSurface covers the shipped kernel surface (plugin/scripts + packages/quay/src)", () => {
   const surface = scanSurface(REPO_ROOT);

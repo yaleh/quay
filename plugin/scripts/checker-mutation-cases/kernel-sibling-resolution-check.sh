@@ -25,6 +25,11 @@
 #   restore       clean → GREEN (0)
 #   inject (exempt)  naive anchor + `kernel-sibling-dev-tree-only:` marker → GREEN (0) — 豁免可复核
 #   inject (P4 exempt)  cross-package anchor + `kernel-sibling-dev-tree-only:` marker → GREEN (0)
+#   inject (P5)   `path.join(resolveKernelScriptsDir(), <name>)` w/o any resolver call → RED (1)
+#   restore       clean → GREEN (0)
+#   inject (P5 fallback)  same join NEXT TO resolveKernelSibling() → GREEN (0) (回退臂不是缺陷形)
+#   inject (P5 comment)   helper name only in a COMMENT → RED (1) (按位置不按关键词)
+#   restore       clean → GREEN (0)
 set -u
 name="kernel-sibling-resolution-check"
 workdir="${1:?usage: $name.sh <workdir>}"
@@ -291,11 +296,70 @@ if checker_cmd; then
   exit 3
 fi
 
-# RESTORE: clean again → GREEN (final).
+# RESTORE: clean again → GREEN.
 rm -f plugin/scripts/driver-runtime.ts
 write_driver_clean
 if checker_cmd; then :; else
   echo "ALWAYS-RED — restoring the clean driver file after the single-entry boundary inject still reddens the checker" >&2
+  exit 4
+fi
+
+# INJECT (P5 — raw kernel-dir join, NO resolver call anywhere in the file): a sibling script resolved by
+# joining a name onto the kernel's own scripts dir → MUST go RED. This is the shape that shipped in the
+# official artifact while every P1–P4 predicate read green (gap-architecture-review-detectors-not-runnable-
+# off-quay-repo): the directory resolver is CORRECT, the missing half is the .ts→scripts/dist fallback.
+cat > plugin/scripts/fixture.ts <<'EOF'
+import path from "node:path";
+import { resolveKernelScriptsDir } from "./driver-runtime.ts";
+export function argv(name: string, root: string) {
+  return ["node", "--experimental-strip-types", path.join(resolveKernelScriptsDir(), name), "--root", root];
+}
+EOF
+if checker_cmd; then
+  echo "STAYED-GREEN — path.join(resolveKernelScriptsDir(), <name>) in a file with no resolver call did not redden the checker (P5 raw kernel-dir join slips through)" >&2
+  exit 3
+fi
+
+# RESTORE: clean again → GREEN.
+write_clean
+if checker_cmd; then :; else
+  echo "ALWAYS-RED — restoring the clean file after the P5 inject still reddens the checker" >&2
+  exit 4
+fi
+
+# P5 NEGATIVE CONTROL (the file-level exemption is load-bearing, not a blanket waiver): the SAME join
+# next to a resolveKernelSibling() call is the documented fail-closed fallback arm → must stay GREEN.
+cat > plugin/scripts/fixture.ts <<'EOF'
+import path from "node:path";
+import { resolveKernelSibling, resolveKernelScriptsDir } from "./driver-runtime.ts";
+export function argv(root: string) {
+  const sibling = resolveKernelSibling("ready-pool-check.ts");
+  const script = sibling ? [sibling.path] : [path.join(resolveKernelScriptsDir(), "ready-pool-check.ts")];
+  return ["node", ...script, "--root", root];
+}
+EOF
+if checker_cmd; then :; else
+  echo "FALSE-RED — the resolver fallback arm reddened the checker (文件级豁免不是白名单)" >&2
+  exit 4
+fi
+
+# P5 NEGATIVE CONTROL 2 (按位置不按关键词): a COMMENT that merely spells the helper name must NOT exempt
+# a file that never calls it — develop's quality-gate-driver.ts carried exactly such a comment.
+cat > plugin/scripts/fixture.ts <<'EOF'
+// 已知残差：安装形态下这条仍会 ENOENT —— 那需要换成 driver-runtime.kernelSiblingArgv()
+export function argv(name: string) {
+  return path.join(resolveKernelScriptsDir(), name);
+}
+EOF
+if checker_cmd; then
+  echo "STAYED-GREEN — a comment mentioning kernelSiblingArgv( exempted a file that never calls it (存在性检查跑在注释上)" >&2
+  exit 3
+fi
+
+# RESTORE: clean again → GREEN (final).
+write_clean
+if checker_cmd; then :; else
+  echo "ALWAYS-RED — restoring the clean file after the P5 comment negative control still reddens the checker" >&2
   exit 4
 fi
 

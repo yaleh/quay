@@ -154,7 +154,7 @@ export function ignoreSourceOf(root: string, visible: VisibleSet | null): Ignore
 }
 
 export function walkDcCodeFiles(root: string, visible: VisibleSet | null = scanVisible(root)): string[] {
-  const roots = ["plugin", "packages", "experiments", "scripts", ".claude/workflows"].map((d) => path.join(root, d));
+  const roots = DC_CODE_ROOT_RELS.map((d) => path.join(root, d));
   const out = roots.flatMap((r) =>
     walkFiles(r, {
       absolute: true,
@@ -174,6 +174,42 @@ export function walkDocFiles(root: string, visible: VisibleSet | null = scanVisi
     prune: (name) => SKIP_DIRS.has(name),
     include: (name, ext) => MD_EXTS.has(ext),
   });
+}
+
+// ── quay 专属读数面 (gap-architecture-review-detectors-not-runnable-off-quay-repo, 2026-10-14) ────
+// 闭包遍历的两组根：代码根（下表）与 .md 文档根（整个 `--root`）。
+//
+// WHY THIS EXISTS：旧 CLI 把 `<root>/plugin/scripts` 的存在性当作 `--root` 正确性的前置，不存在
+// 即 `ERROR: plugin/scripts not found … exit 2`。于是一份第三方项目（quay-init 后的宿主、
+// ClaudeCodeUI 这类没有 `plugin/` 的仓库）**结构上永远拿不到报告** —— `architecture-review` 的
+// P1 半边在非 quay 宿主上一次都跑不出来（2026-10-14 官方 dist 产物实测）。闸已撤：`--root` 本来就
+// 该能指任何仓库，闭包就在它上面测。代价是必须能区分两件在输出上同形的事 (硬规则 3b)：
+//   (a) 代码根都在，扫过，闭包就是结果       ⟺ kind === "full"
+//   (b) 代码根缺一部分，闭包**只覆盖了在场的那部分** ⟺ kind === "partial"
+// 于是「目标仓不是 quay」不再伪装成「目标仓是 quay 且引用面为零」。⛔ 不是 fail-closed 的替代：
+// `--root` 本身不存在仍是 exit 2（环境错误），只有「目标合法、但根不全」走三态。
+export const DC_CODE_ROOT_RELS = ["plugin", "packages", "experiments", "scripts", ".claude/workflows"] as const;
+
+export interface RootSurface {
+  kind: "full" | "partial";
+  presentRoots: string[];
+  absentRoots: string[];
+  note: string | null;
+}
+
+export function rootSurfaceOf(root: string): RootSurface {
+  const present = DC_CODE_ROOT_RELS.filter((rel) => fs.existsSync(path.join(root, rel)));
+  const absent = DC_CODE_ROOT_RELS.filter((rel) => !present.includes(rel));
+  return present.length === DC_CODE_ROOT_RELS.length
+    ? { kind: "full", presentRoots: [...present], absentRoots: [], note: null }
+    : {
+        kind: "partial",
+        presentRoots: [...present],
+        absentRoots: [...absent],
+        note:
+          `code root(s) ${absent.join(", ")} absent under this --root — the closure is measured over the ` +
+          `present roots only, so a reference living under an absent root is NOT "no reference" (硬规则 3b).`,
+      };
 }
 
 // lineOf 上收到 source-text-lib.ts (semantic-dedup-scan `lineof-lineat`); 本地 `relOf` 包装
@@ -321,6 +357,8 @@ export interface Report {
   component: string; // 首构件 (向后兼容)
   aliases: Aliases[];
   ignoreSource: IgnoreSource;
+  /** 本次 `--root` 上【quay 专属读数面】的在否 —— 见 rootSurfaceOf。 */
+  rootSurface: RootSurface;
   callGraph: string[];
   dc: string[];
   refs: FileRef[];
@@ -406,7 +444,7 @@ export function deletionClosure(root: string, components: string[], visible: Vis
     ratio: callGraph.length > 0 ? dc.length / callGraph.length : null,
   };
 
-  return { root, components, component: components[0], aliases, ignoreSource: ignoreSourceOf(root, visible), callGraph, dc, refs, counts };
+  return { root, components, component: components[0], aliases, ignoreSource: ignoreSourceOf(root, visible), rootSurface: rootSurfaceOf(root), callGraph, dc, refs, counts };
 }
 
 // ── CLI ─────────────────────────────────────────────────────────────────────────────────────
@@ -432,6 +470,12 @@ function printHuman(r: Report): void {
     console.log(`skip 面: gitignore 驱动 — ${r.ignoreSource.detail} ∪ SKIP_DIRS(${SKIP_DIRS.size} 条策略名)`);
   } else {
     console.log(`⚠️  skip 面: 仅 SKIP_DIRS — ${r.ignoreSource.detail}`);
+  }
+  // quay 读数面的在否必须每次打印 (硬规则 3b)：否则「代码根缺一半」与「全扫过且零命中」同形。
+  if (r.rootSurface.kind === "partial") {
+    console.log(`⚠️  root surface PARTIAL — ${r.rootSurface.note}`);
+  } else {
+    console.log(`root surface: 全部 ${r.rootSurface.presentRoots.length} 个代码根在场`);
   }
   console.log(`CallGraph (真调用) = ${r.counts.callGraphTotal} 文件`);
   console.log(`DC (删除闭包, code∪comment∪doc) = ${r.counts.dcTotal} 文件`);
@@ -473,8 +517,10 @@ export function main(argv: string[]): number {
     usage();
   }
   const root = rootArg ? path.resolve(rootArg) : repoRoot();
-  if (!fs.existsSync(path.join(root, "plugin", "scripts"))) {
-    console.error(`ERROR: plugin/scripts not found under ${root} — is --root correct?`);
+  // ⛔ 只判「`--root` 本身在不在」——拼错路径是环境错误 ⇒ exit 2。目标合法但没有 quay 读数面
+  //    不再是错误：报告照出，降级事实记在 `rootSurface`（硬规则 3b）。
+  if (!fs.existsSync(root)) {
+    console.error(`ERROR: --root ${root} does not exist — is --root correct?`);
     process.exit(2);
   }
   const report = deletionClosure(root, components);

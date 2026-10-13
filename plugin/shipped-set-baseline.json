@@ -96,6 +96,30 @@
         "shLines": 7345
       },
       "why": "gap-discovery-toolchain-depends-on-unshipped-docs-analysis-and-ts-sources-never-works-off-quay-repo: the artifact now ships the discovery engine VERBATIM (docs/analysis/ = 8 .mjs + 5 prompt data files; the three routines resolve it off-repo) plus the 2 dist bundles the engine's own source names (scripts/dist/import-graph-check.js, enum-surface-parity-check.js). files 266 -> 281 (exactly +15 = 13 engine files + 2 bundles); shLines unchanged (the engine is .mjs, no .sh) so the ratchet's three axes stay 0. Reading taken from a real publish-dist-branch.sh artifact assembled in a throwaway stub repo from this branch's plugin/ tree, never hand-fitted."
+    },
+    {
+      "when": "2026-10-13T17:28:41.336Z",
+      "from": {
+        "files": 0,
+        "bytes": 0,
+        "shLines": 0,
+        "shipped": {
+          "files": 281,
+          "bytes": 58847285,
+          "shLines": 7345
+        }
+      },
+      "to": {
+        "files": 0,
+        "bytes": 0,
+        "shLines": 0
+      },
+      "shipped": {
+        "files": 284,
+        "bytes": 60971493,
+        "shLines": 7345
+      },
+      "why": "gap-architecture-review-detectors-not-runnable-off-quay-repo: the dist-gated entry derivation now covers the kernelSiblingArgv/resolveKernelSibling spawn shapes, so guard-lineage-check + deletion-closure-check (the two detectors that shipped in NO form) and two more siblings of the same class (judgment-consumer-check, suite-load-sampler) now ship as scripts/dist/*.js — +4 bundles, 281 → 284 files"
     }
   ],
   "_axes": {
@@ -109,8 +133,8 @@
   "bytes": 0,
   "shLines": 0,
   "shipped": {
-    "files": 281,
-    "bytes": 58847285,
+    "files": 284,
+    "bytes": 60971493,
     "shLines": 7345
   }
 }

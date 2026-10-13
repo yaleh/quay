@@ -21,6 +21,8 @@ import assert from "node:assert/strict";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
+import { fileURLToPath } from "node:url";
+import { spawnSync } from "node:child_process";
 
 import {
   enumerateGuards,
@@ -34,6 +36,9 @@ import {
 
 /** Temp dirs created this run — removed in the top-level `after` hook below (test-isolation R6). */
 const _createdDirs = [];
+
+/** 本检测器的 CLI 入口（AC3 的 exit-code 断言跑真进程，⛔ 不靠 in-process main 的返回值）。 */
+const CLI = path.join(path.dirname(fileURLToPath(import.meta.url)), "..", "scripts", "guard-lineage-check.ts");
 
 /** Build a temp dir from a {relPath: content} map. Registered for cleanup in the `after` hook. */
 function mktmp(contents) {
@@ -197,6 +202,42 @@ test("analyze — AC1/AC2 比例 + AC3 对象存在 + AC4 preventive/suspicious 
   );
   // manager-tick-log-check 无 mutation case → suspicious (诚实的判别力: 不把两者混为一谈)
   assert.ok(report.suspicious.some((s) => s.basename === "manager-tick-log-check.sh"));
+});
+
+// ── gap-architecture-review-detectors-not-runnable-off-quay-repo: --root 不必是 quay 检出 ────────────
+// 旧 CLI 在 `<root>/plugin/scripts` 缺席时 exit 2 ⇒ architecture-review 的 P4 半边在任何第三方宿主上
+// 一次都跑不出来。闸已撤；「守卫目录不在 ⇒ 枚举面结构上为空」与「面在、扫过、零守卫」必须同形可区分
+// (硬规则 3b) ⇒ rootSurface。
+test("AC3 — a root with no guard dir yields a REAL report (exit 0), not `plugin/scripts not found` (exit 2)", () => {
+  const dir = mktmp({ "README.md": "# third-party\n" });
+  const r = spawnSync(process.execPath, ["--no-warnings", "--experimental-strip-types", CLI, "--root", dir, "--json"], { encoding: "utf8" });
+  assert.equal(r.status, 0, `stderr: ${r.stderr}`);
+  const report = JSON.parse(r.stdout);
+  assert.equal(report.totalGuards, 0);
+  assert.equal(report.rootSurface.kind, "absent");
+  assert.deepEqual(report.rootSurface.absentGuardDirs, ["plugin/scripts", "experiments/quay-perpetual-stream/scripts", "plugin/gate-scripts"]);
+  assert.ok(report.rootSurface.note, "降级事实必须随报告一起给出");
+  // 声明表来自 **kernel 自己的安装位置**（出厂形态），⛔ 不是这个目标仓的 repo-local 路径。
+  assert.equal(report.rootSurface.catalogSource, "kernel-install");
+  // ⛔ 与「面在、扫过、零守卫」不同形：补出守卫目录后 kind 变 full。
+  fs.mkdirSync(path.join(dir, "plugin", "gate-scripts"), { recursive: true });
+  const r2 = spawnSync(process.execPath, ["--no-warnings", "--experimental-strip-types", CLI, "--root", dir, "--json"], { encoding: "utf8" });
+  assert.equal(JSON.parse(r2.stdout).rootSurface.kind, "full");
+});
+
+test("AC3 负控制 — 拼错的 --root 仍是 exit 2（环境错误 ≠ 合法目标）", () => {
+  const dir = mktmp({ "README.md": "x\n" });
+  const r = spawnSync(process.execPath, ["--no-warnings", "--experimental-strip-types", CLI, "--root", path.join(dir, "nope"), "--json"], { encoding: "utf8" });
+  assert.equal(r.status, 2);
+  assert.match(r.stderr, /does not exist/);
+});
+
+// 显式 --catalog ⇒ 声明表来源回到 TARGET（脱离 kernel 独立跑的场合），且报告如实标注。
+test("AC3 — explicit --catalog keeps the target-side source (catalogSource=target)", () => {
+  const dir = mktmp({ "README.md": "x\n", "plugin/scripts/a-check.ts": "" });
+  const r = spawnSync(process.execPath, ["--no-warnings", "--experimental-strip-types", CLI, "--root", dir, "--catalog", path.join(dir, "missing.json"), "--json"], { encoding: "utf8" });
+  assert.equal(r.status, 0, `stderr: ${r.stderr}`);
+  assert.equal(JSON.parse(r.stdout).rootSurface.catalogSource, "target");
 });
 
 after(() => {

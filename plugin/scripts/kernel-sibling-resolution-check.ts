@@ -35,6 +35,14 @@
 //     调用形（`repoRoot()`）。⛔ 不匹配相对 import（`import("../../packages/quay/src/…")`——那经
 //     esbuild bundle 在构建期解析，非运行时 root 拼接）；⛔ 不匹配 `packages/<pkg>/bin/…`（bin 是
 //     另一布局锚点类别，不在本条 src 面内）。
+//   P5 raw-kernel-dir-join — `path.(join|resolve)(<kernel 脚本目录表达式>, …)`，`<kernel 脚本目录
+//     表达式>` ∈ {`resolveKernelScriptsDir()`, `path.dirname(kernelSelfPath())`}，**且该文件从未**把
+//     sibling 名字交给 `resolveKernelSibling`/`kernelSiblingArgv`。P1–P4 判的是「naive 锚点」，这一类
+//     恰恰**用对了目录解析器**——所以它对每一条旧谓词都是绿的，而产物里每个检测器都跑不起来（raw
+//     `.ts` 被 strip、dist bundle 又没派生出来；2026-10-14 官方 dist-plugin 产物实测：
+//     `path.join(resolveKernelScriptsDir(), name)`）。判据与豁免的完整理由见
+//     P5_RAW_KERNEL_DIR_JOIN_RE 的注释（文件级豁免 = 「resolver 回退臂」形态；存在性检查跑在去注释的
+//     源上，因为缺陷文件当时在注释里写着该换 resolver）。
 //
 // ⛔ 为什么不屏蔽字符串（对 P1/P2）：`buildNonCodeMask` 的线性状态机在嵌套模板字面量
 // （`` `${foo(`inner`)}` ``）处会把一大段真代码误当字符串，从而漏报 full-suite-runner.ts 里 4 处
@@ -123,6 +131,50 @@ export const P4_TEMPLATE_CROSS_PACKAGE_RE = new RegExp(
 /** DEV-TREE-ONLY 豁免标记（命中行或紧邻注释块携带即豁免，⛔ 带理由）。 */
 export const DEV_TREE_ONLY_MARKER = "kernel-sibling-dev-tree-only";
 
+// ── P5 raw-kernel-dir-join（gap-architecture-review-detectors-not-runnable-off-quay-repo, 2026-10-14）──
+// 为什么 P1–P4 覆盖不到这一类：P1–P4 判的是「naive 锚点」——`__dirname` / target root /
+// `packages/<pkg>/src`。而 2026-10-14 在官方 dist-plugin 产物上实测的缺陷用的是**正确的目录解析器**
+// ——`path.join(resolveKernelScriptsDir(), <name>)`——所以它对 P1–P4 的每一条谓词都是绿的，本检查器
+// 报 `status: pass`，而同一份代码在产物里**每个检测器都跑不起来**（raw `.ts` 被 strip、dist bundle
+// 又没派生出来）。
+//
+// 差别不在「目录从哪来」，在**名字怎么落到可运行形态**：`resolveKernelScriptsDir()` 只回答「kernel
+// 的脚本住哪」，它不给 `.ts`→`scripts/dist/<name>.js` 的回退，也不在两者都缺席时失败——于是一个
+// 只有 dist 的安装形态下，`node --experimental-strip-types <不存在的 .ts>` 得到 exit 1 + 空 stdout，
+// 被例程读成「跑过了、没数据」（硬规则 3b 的形态）。既定入口是 `resolveKernelSibling(name)` /
+// `kernelSiblingArgv(name, extra)`：两者都做回退、都在都缺席时返回 null（调用方据此记 not-evaluated）。
+//
+// 判据（能取假）：文件里出现 `path.(join|resolve)(<kernel 脚本目录表达式>, …)`，**且该文件从未**把
+// sibling 名字交给 `resolveKernelSibling`/`kernelSiblingArgv` ⇒ 违规。
+//   ⛔ 目录表达式的集合**只有两个**：`resolveKernelScriptsDir()` 与 `path.dirname(kernelSelfPath())`
+//   ——它们答的是「kernel 的**脚本**住哪」。⛔ **不含 `resolveKernelPluginRoot()`**：plugin root 的拼接
+//   目标多是**以 loose 形态出厂的非脚本资源**（`scripts/assert-clean-tree.sh`、`vendor/quay/dist/
+//   quay.js`），they ship verbatim in `scripts/` 或 `vendor/`，**没有 dist bundle 可言**，所以那里根本没有
+//   「回退」这回事（把 plugin root 收进来会把 meta-driver/runner-concurrency/runner-tree-state 三处
+//   正当拼接一起打红——实测 2026-10-14，第一版就是这么写的）。
+//   ⛔ 文件级豁免是**判据的一部分**，不是一个白名单：`resolveKernelSibling(name)` 后紧跟的
+//   `… : path.join(resolveKernelScriptsDir(), name)` 回退臂是**已知的 fail-closed 形态**（两者都缺席
+//   时故意 spawn 一个必然失败的路径，⛔ 不伪装成「无候选」）；它所在的文件同时**有** resolver 调用，
+//   所以按本判据合格。缺陷形恰好相反：整个文件只有目录拼接、没有任何 resolver 调用。
+//   ⛔ 该存在性检查必须跑在**去注释**的源上（`codeOnly`）：缺陷文件当时在**注释里**写着
+//   「那需要换成 driver-runtime.kernelSiblingArgv()」——把一个读者提示读成「已经这么做了」会让本判据
+//   对**唯一**要抓的那个文件恒绿（硬规则 2：按位置判定，注释里提到不算）。
+const KERNEL_SCRIPTS_DIR_EXPR = String.raw`(?:resolveKernelScriptsDir\(\)|path\.dirname\(\s*kernelSelfPath\(\)\s*\))`;
+export const P5_RAW_KERNEL_DIR_JOIN_RE = new RegExp(
+  String.raw`path\.(?:join|resolve)\(\s*${KERNEL_SCRIPTS_DIR_EXPR}\s*,`,
+  "g",
+);
+/** 该文件是否把 sibling 名字交给既定解析器（P5 的文件级豁免，见上）。 */
+export const RESOLVER_CALL_RE = /(?:resolveKernelSibling|kernelSiblingArgv)\s*\(/;
+
+/** 去注释的源（注释字符替换成空格，保持长度与行号）。P5 的存在性检查用它。 */
+export function codeOnly(src: string): string {
+  const comment = maskComments(src);
+  let out = "";
+  for (let i = 0; i < src.length; i++) out += comment[i] === 1 ? (src[i] === "\n" ? "\n" : " ") : src[i];
+  return out;
+}
+
 // ── DRIVER-SCOPE 规则（gap-drivers-resolve-quay-scripts-under-project-root-not-plugin-root）─────────
 // 为什么需要【第二条】规则，而不是把上面 P1–P4 的豁免收紧：P1–P4 判的是「naive sibling 解析」，
 // 而 2026-09-13 在真实第三方项目 /home/yale/work/quay-fleet 上暴露的缺陷，是 driver 运行时把
@@ -191,9 +243,10 @@ export function enclosingFunctionName(src: string, index: number): string | null
 }
 
 export interface SiblingViolation {
-  /** 拼接形态：naive-__dirname / target-root / template-string / cross-package / driver-root-anchor。 */
-  form: "naive-__dirname" | "target-root" | "template-string" | "cross-package" | "driver-root-anchor";
-  /** 命中的脚本文件名。 */
+  /** 拼接形态：naive-__dirname / target-root / template-string / cross-package / driver-root-anchor /
+   *  raw-kernel-dir-join。 */
+  form: "naive-__dirname" | "target-root" | "template-string" | "cross-package" | "driver-root-anchor" | "raw-kernel-dir-join";
+  /** 命中的脚本文件名（raw-kernel-dir-join 形态下名字可能在变量里 ⇒ 记 `"(kernel install dir)"`）。 */
   script: string;
   /** 1-based 行号。 */
   line: number;
@@ -377,6 +430,19 @@ export function scanText(src: string): SiblingViolation[] {
     if (pm) {
       const seg = pm[1].split("/");
       push("cross-package", seg[seg.length - 1], start);
+    }
+  }
+
+  // P5 — raw kernel-dir join（见 P5_RAW_KERNEL_DIR_JOIN_RE 的注释）：**文件级**判定 —— 只有当这个
+  //  文件压根没有把 sibling 名字交给 resolver 时，目录拼接才是缺陷形（有 resolver 的文件里那条
+  //  `… : path.join(resolveKernelScriptsDir(), name)` 是既定 fail-closed 回退臂）。
+  if (!RESOLVER_CALL_RE.test(codeOnly(src))) {
+    P5_RAW_KERNEL_DIR_JOIN_RE.lastIndex = 0;
+    while ((m = P5_RAW_KERNEL_DIR_JOIN_RE.exec(src)) !== null) {
+      if (comment[m.index] === 1) continue;
+      const lineIdx = lineOf(src, m.index) - 1;
+      if (isExempt(lineIdx)) continue;
+      violations.push({ form: "raw-kernel-dir-join", script: "(kernel install dir)", line: lineIdx + 1, snippet: snippetOf(src, m.index) });
     }
   }
 
