@@ -4,7 +4,7 @@ title: "anchor --takeover cold-start reads mutable anchor-desired.json as its
   initial kinds set with no cross-check against the old anchor's actually-hosted
   kinds — real incident: a 93min-stale desired state silently dropped worker
   from the taker, no warning logged"
-status: ready
+status: done
 labels:
   - gap
   - defect
