@@ -2,7 +2,7 @@
 id: gap-architecture-review-detectors-not-runnable-off-quay-repo
 title: architecture-review 的三项检测器在任何出厂安装形态下都跑不起来：raw-.ts-only 解析 + 两项根本不随插件发布 +
   检测器自身要求目标仓有 plugin/scripts
-status: todo
+status: ready
 labels:
   - gap
 parent: null
