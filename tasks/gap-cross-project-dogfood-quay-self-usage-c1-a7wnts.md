@@ -3,7 +3,7 @@ id: gap-cross-project-dogfood-quay-self-usage-c1-a7wnts
 title: "[cross-project dogfood] When the pool-quality-judge or
   architecture-review LLM judge prints non-JSON stdout, Quay records the whole
   round state="
-status: ready
+status: done
 labels:
   - gap
   - cross-project-dogfood
