@@ -144,3 +144,11 @@ No routine reached `closed-loop-confirmed` on either host within this window; no
 - tasks/gap-architecture-review-detectors-not-runnable-off-quay-repo.md
 - .quay/config.yml
 - plugin/scripts/publish-dist-branch.sh
+
+## Blocker
+
+**2026-10-13T17:13:21.673Z — worker 未落地（exited-not-landed）**
+
+- 未落地原因：AC 未全勾（checked 3/6，剩余未勾 3）——续做只需验证并勾选 AC
+- run_id：wk-prod-anchor
+- session_id：17800cd4-cc20-4982-9f20-cfc95e82e163
