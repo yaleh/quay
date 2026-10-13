@@ -697,10 +697,11 @@ const argsHead = (input) => {
  * ⛔ Non-stream stdout (the pre-instrumentation path, and the unit fixtures) yields `ok:false` and an
  * EMPTY turn list; the caller must report that as `not-evaluated:uninstrumented`, never as "zero turns".
  * @returns {{ok:boolean, turns:object[], finalText:string, subtype:string|null, num_turns:number|null,
- *            is_error:boolean|null, model:string|null, usage:object|null, cost_usd:number|null}}
+ *            is_error:boolean|null, model:string|null, usage:object|null, cost_usd:number|null,
+ *            hasResult:boolean}}
  */
 export function parseVerifierStream(stdout) {
-  const out = { ok: false, turns: [], finalText: "", subtype: null, num_turns: null, is_error: null, model: null, usage: null, cost_usd: null };
+  const out = { ok: false, turns: [], finalText: "", subtype: null, num_turns: null, is_error: null, model: null, usage: null, cost_usd: null, hasResult: false };
   if (typeof stdout !== "string" || !stdout.trim()) return out;
   let parsedLines = 0;
   const pending = new Map();               // tool_use id → the record awaiting its result's bytes
@@ -735,6 +736,7 @@ export function parseVerifierStream(stdout) {
       }
     }
     if (ev.type === "result") {
+      out.hasResult = true;
       out.subtype = ev.subtype == null ? null : String(ev.subtype);
       out.num_turns = Number.isFinite(ev.num_turns) ? ev.num_turns : null;
       out.is_error = typeof ev.is_error === "boolean" ? ev.is_error : null;
@@ -747,6 +749,73 @@ export function parseVerifierStream(stdout) {
   }
   out.ok = parsedLines > 0;
   if (!out.finalText) out.finalText = textParts.join("\n");
+  return out;
+}
+
+/**
+ * The STRUCTURAL reading of a launcher's stdout — the layer BELOW `parseVerifierStream`'s semantics.
+ *
+ * WHY IT EXISTS (task gap-open-discovery-model-calls-exit-without-result-are-unattributed-zero-token):
+ * production recorded model calls that spent MINUTES of wall and left nothing parseable as `exit:0` with
+ * `not_evaluated:null` — byte-for-byte the shape of an ordinary success. The cause could not be named
+ * because the record kept no reading of the STREAM ITSELF. This function produces that reading:
+ *   • `bytes` / `lines`      — how much came back at all (0 bytes is its own state, not "nothing to say");
+ *   • `json_lines`           — how many lines parsed as a JSON object (the stream's own event count);
+ *   • `events_by_type`       — the same lines tallied by their own `type` field;
+ *   • `has_result`           — whether a `result` event was EVER emitted. ⛔ A `stream-json` run that
+ *                              never emits `result` did not finish; that is the direct reading of "ran but
+ *                              produced no result", and it is what `exit:0` was silently standing in for;
+ *   • `truncated_json`       — the LAST non-empty line begins with `{` and does not parse: the stream was
+ *                              cut MID-WRITE, which is a different fact from "the model said nothing";
+ *   • `api_error_event`      — the stream carried an API-transport error: an `error`-typed event, a
+ *                              `system`/`error` event, or a `result` event with `is_error:true` whose
+ *                              subtype is not the turn-cap kill (`error_max_turns` — that one is a budget
+ *                              fact, not an API fact, and is named by its own token elsewhere).
+ *
+ * ⛔ It reads NON-JSON output as "not an event" rather than as a parse failure: the pre-`stream-json` path
+ * (and the unit fixtures) hand this function plain text, and calling that a truncated stream would make
+ * two very different producers look the same. Nothing here is semantic — no field is interpreted beyond
+ * `type`/`subtype`/`is_error`, which are the launcher's OWN envelope fields.
+ * @returns {{bytes:number, lines:number, json_lines:number, non_json_lines:number, unparsed_json_lines:number,
+ *            truncated_json:boolean, has_result:boolean, events_by_type:Object, api_error_event:boolean}}
+ */
+export function streamDiagnostics(stdout) {
+  const out = {
+    bytes: 0, lines: 0, json_lines: 0, non_json_lines: 0, unparsed_json_lines: 0,
+    truncated_json: false, has_result: false, events_by_type: {}, api_error_event: false,
+  };
+  const text = typeof stdout === "string" ? stdout : "";
+  out.bytes = Buffer.byteLength(text, "utf8");
+  if (!text) return out;
+  const raw = text.split("\n");
+  // A trailing newline yields a final "" — that is the terminator of the previous line, not a line.
+  const lines = raw.length > 0 && raw[raw.length - 1] === "" ? raw.slice(0, -1) : raw;
+  out.lines = lines.length;
+  let lastNonEmpty = -1;
+  for (let i = 0; i < lines.length; i++) if (lines[i].trim() !== "") lastNonEmpty = i;
+  for (let i = 0; i < lines.length; i++) {
+    const line = lines[i].trim();
+    if (!line) continue;
+    if (line[0] !== "{") { out.non_json_lines++; continue; }
+    let ev = null;
+    try { ev = JSON.parse(line); } catch { ev = null; }
+    if (ev === null || typeof ev !== "object" || Array.isArray(ev)) {
+      out.unparsed_json_lines++;
+      // Only the FINAL line can have been cut mid-write; an unparseable line in the middle is a producer
+      // that wrote something this reader does not understand, which is NOT the same fact.
+      if (i === lastNonEmpty) out.truncated_json = true;
+      continue;
+    }
+    out.json_lines++;
+    const t = typeof ev.type === "string" && ev.type ? ev.type : "(no-type)";
+    out.events_by_type[t] = (out.events_by_type[t] ?? 0) + 1;
+    if (ev.type === "result") {
+      out.has_result = true;
+      if (ev.is_error === true && ev.subtype !== "error_max_turns") out.api_error_event = true;
+    }
+    if (ev.type === "error") out.api_error_event = true;
+    if (ev.type === "system" && ev.subtype === "error") out.api_error_event = true;
+  }
   return out;
 }
 

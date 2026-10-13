@@ -129,7 +129,15 @@ import {
   ANSWER_RESERVE_PROMPT_TURNS,
   ANSWER_RESERVE_TOOLS,
   STDERR_TAIL_MAX,
+  STDOUT_HEAD_MAX,
+  STDOUT_TAIL_MAX,
+  CALL_CAPTURE_DIR_REL,
+  RETRY_BACKOFF_MS,
+  RETRYABLE_CALL_FAILURES,
   boundedTail,
+  boundedHead,
+  callFailureClass,
+  writeCallCapture,
   callNotEvaluatedToken,
   firstNotEvaluatedToken,
   turnReserveDirective,
@@ -379,6 +387,7 @@ function makeEngine({ hyps = HYPS, verdictFor = alwaysSupported } = {}) {
     buildInventory: realHyp.buildInventory,
     parseJsonObject: realHyp.parseJsonObject,
     parseVerifierStream: realHyp.parseVerifierStream,
+    streamDiagnostics: realHyp.streamDiagnostics,
     callText: realHyp.callText,
     defaultVerifierPrompt: realHyp.defaultVerifierPrompt,
     defaultInvestigatorPrompt: realHyp.defaultInvestigatorPrompt,
@@ -2500,7 +2509,9 @@ function answerReserveFixture({ delegate }) {
   engine.modules.hyp.runInvestigator = streamReadingInvestigator();
   const spawn = countingSpawn(delegate);
   const pin = pinStub();
-  return { ws, engine, spawn, pin, opts: { ...runOpts(ws, { engine }), spawnFn: spawn, pinFn: pin, pinTmpRoot: tmpDir("osd-reserve-pinroot-") } };
+  // ⛔ `retryBackoffMs: 0` + a no-op sleep: since this task a result-less call is RETRIED once (Plan item
+  // 3), and no suite may wait on wall clock. The retry POLICY is exercised directly in the AC2 cases.
+  return { ws, engine, spawn, pin, opts: { ...runOpts(ws, { engine }), spawnFn: spawn, pinFn: pin, pinTmpRoot: tmpDir("osd-reserve-pinroot-"), retryBackoffMs: 0, sleepFn: async () => {} } };
 }
 const pinRunFile = (pin, name = "run-1.json") =>
   JSON.parse(fs.readFileSync(path.join(pin.pins[0], ".open-semantic-discovery-runs", name), "utf8"));
@@ -2548,9 +2559,11 @@ test("case (m) AC1(a) NEGATIVE CONTROL — remove the subtype capture and the SA
   const src = fs.readFileSync(ROUTINE_SRC, "utf8");
   assert.match(src, /subtype: stream\.ok \? \(stream\.subtype \?\? null\) : null/, "the call record carries the stream's subtype");
   // The other half of the predicate, so the zero above is not the artifact of a function that always fires.
-  assert.equal(callNotEvaluatedToken({ ...withSubtype, exit: 0 }), null, "a call that RAN is not not-evaluated");
-  assert.equal(firstNotEvaluatedToken([{ exit: 0 }, withSubtype]), "not-evaluated:error_max_turns", "the FIRST failure is the cause");
-  assert.equal(firstNotEvaluatedToken([{ exit: 0 }, { exit: 0 }]), null, "no failure ⇒ no token");
+  // ⛔ `has_result:true` is part of "a call that RAN": since this task, exit 0 is no longer SUFFICIENT —
+  // the record the round builds carries the stream's own `result` reading, and a call that ran emitted one.
+  assert.equal(callNotEvaluatedToken({ ...withSubtype, exit: 0, has_result: true }), null, "a call that RAN is not not-evaluated");
+  assert.equal(firstNotEvaluatedToken([{ exit: 0, has_result: true }, withSubtype]), "not-evaluated:error_max_turns", "the FIRST failure is the cause");
+  assert.equal(firstNotEvaluatedToken([{ exit: 0, has_result: true }, { exit: 0, has_result: true }]), null, "no failure ⇒ no token");
 });
 
 test("case (m) AC1(b) — a zero-token exit-1 with stderr ⇒ the stderr tail is recorded", async () => {
@@ -3107,4 +3120,262 @@ test("NEGATIVE CONTROL (a) — make the round SKIP when there are 0 events in a 
   assert.match(fact.reason, /no task-status events/);
   assert.equal(spawn.calls.length, 0, "⇒ the mutant SUPPRESSED the semantic round: the (a) claim «0 events ⇒ the round runs» is FALSIFIED — the control is live");
   process.stdout.write("    NEGATIVE CONTROL (a): mutant spawned 0 calls with 0 events (claim was «the round still runs»)\n");
+});
+
+// ══ (n) ATTRIBUTABLE MODEL-CALL DIAGNOSTICS, ENUMERATED FAILURE, ONE COUNTED RETRY ═══════════════════
+// Task gap-open-discovery-model-calls-exit-without-result-are-unattributed-zero-token. Production
+// recorded model calls that spent MINUTES of wall, emitted NO `result` event and reported 0 tokens, and
+// the round wrote them with `not_evaluated:null` — the same bytes as an ordinary success (硬规则 3b). The
+// cause could not be named because the record kept no reading of the stream itself. The cases below pin:
+//   ① the per-call diagnostics (wall, exit+signal, stdout lines/bytes, event counts by `type`, has_result);
+//   ② the ENUMERATED `call_failure` class, derived from those bytes and never collapsed into success;
+//   ③ ONE counted retry for the three retryable classes, through a FRESH reservation on the same ledger.
+
+/** The diagnostic object the routine feeds `callFailureClass`, built from the ENGINE's own reader — so the
+ *  unit cases exercise the same recipe the round uses rather than a test-local re-implementation. */
+const classInputOf = (stdout, { timedOut = false } = {}) => {
+  const d = realHyp.streamDiagnostics(stdout);
+  return {
+    timed_out: timedOut, stdout_bytes: d.bytes, json_lines: d.json_lines,
+    truncated_json: d.truncated_json, api_error_event: d.api_error_event, has_result: d.has_result,
+  };
+};
+
+const INIT_EVENT = JSON.stringify({ type: "system", subtype: "init", model: FIXTURE_MODEL });
+const ASSISTANT_EVENT = JSON.stringify({ type: "assistant", message: { content: [{ type: "text", text: "still exploring" }] } });
+/** The production shape: the stream opened, the process exited 0, and NO `result` event was ever emitted. */
+const NO_RESULT_STREAM = [INIT_EVENT, ASSISTANT_EVENT].join("\n") + "\n";
+/** An API-transport refusal carried IN the stream: a `result` event with `is_error:true`. */
+const API_ERROR_STREAM = [INIT_EVENT, JSON.stringify({
+  type: "result", subtype: "error_during_execution", num_turns: 1, is_error: true,
+  result: "", usage: { input_tokens: 0, output_tokens: 0 },
+})].join("\n") + "\n";
+
+test("(n) AC1 — streamDiagnostics reads the STREAM structurally: bytes, lines, events by type, has_result, truncation", () => {
+  const ok = realHyp.streamDiagnostics(STREAM);
+  assert.equal(ok.json_lines, 2, "the fixture stream carries two JSON events");
+  assert.deepEqual(ok.events_by_type, { system: 1, result: 1 });
+  assert.equal(ok.has_result, true);
+  assert.equal(ok.truncated_json, false);
+  assert.equal(ok.api_error_event, false);
+  assert.equal(ok.bytes, Buffer.byteLength(STREAM, "utf8"));
+
+  const noResult = realHyp.streamDiagnostics(NO_RESULT_STREAM);
+  assert.equal(noResult.has_result, false, "no `result` event was emitted");
+  assert.equal(noResult.json_lines, 2, "…but the stream DID parse — 'no stream' and 'stream without result' differ");
+  assert.equal(noResult.truncated_json, false);
+
+  const empty = realHyp.streamDiagnostics("");
+  assert.equal(empty.bytes, 0);
+  assert.equal(empty.lines, 0);
+  assert.equal(empty.has_result, false);
+  assert.equal(empty.events_by_type !== null && typeof empty.events_by_type === "object", true);
+
+  // ⛔ Non-JSON stdout is NOT a truncated stream: the pre-`stream-json` path and the unit fixtures hand
+  // this reader plain text, and calling that a cut stream would make two very different producers the same.
+  const plain = realHyp.streamDiagnostics("just a sentence\n");
+  assert.equal(plain.non_json_lines, 1);
+  assert.equal(plain.unparsed_json_lines, 0);
+  assert.equal(plain.truncated_json, false);
+
+  // …and a stream that really was CUT mid-write is its own reading.
+  const cut = realHyp.streamDiagnostics(STREAM + '{"type":"assis');
+  assert.equal(cut.truncated_json, true, "the LAST line did not parse ⇒ the writer was interrupted");
+  assert.equal(cut.unparsed_json_lines, 1);
+  // …while an unparseable line in the MIDDLE is not "truncated" — the producer wrote something else.
+  const mid = realHyp.streamDiagnostics('{"broken\n' + STREAM);
+  assert.equal(mid.unparsed_json_lines, 1);
+  assert.equal(mid.truncated_json, false);
+});
+
+test("(n) AC1 — one fixture per call_failure class, classified from the captured BYTES (not from the exit code)", () => {
+  const cases = [
+    ["no-stdout", "", {}],
+    ["stream-without-result", NO_RESULT_STREAM, {}],
+    ["truncated-json", STREAM + '{"type":"assis', {}],
+    ["api-error-event", API_ERROR_STREAM, {}],
+    ["killed-by-timeout", "half a stream", { timedOut: true }],
+    ["unclassified", "not a stream at all\n", {}],
+  ];
+  for (const [expected, stdout, extra] of cases) {
+    assert.equal(callFailureClass(classInputOf(stdout, extra)), expected, `${expected} (input ${JSON.stringify(classInputOf(stdout, extra))})`);
+  }
+  // A call that emitted a `result` and did not error has NO class — it is described by its own subtype.
+  assert.equal(callFailureClass(classInputOf(STREAM)), null, "a clean stream is not a failure");
+  // ⛔ …and the turn-cap kill has no class EITHER (it carries a `result`), yet it is certainly not a
+  // success: the class table answers «why did this call produce no result», not «did this call answer».
+  assert.equal(callFailureClass(classInputOf(MAX_TURNS_STREAM)), null);
+  assert.equal(callNotEvaluatedToken({ exit: 1, subtype: "error_max_turns", has_result: true, spawn_error: null }), "not-evaluated:error_max_turns");
+  // The retry policy is stated as data, so it cannot drift from what the round reads.
+  assert.deepEqual([...RETRYABLE_CALL_FAILURES].sort(), ["api-error-event", "no-stdout", "stream-without-result"]);
+  assert.equal(RETRYABLE_CALL_FAILURES.includes("killed-by-timeout"), false, "a timeout is NOT retried (Plan item 3)");
+  assert.equal(RETRYABLE_CALL_FAILURES.includes("truncated-json"), false, "a cut stream is NOT retried (Plan item 3)");
+});
+
+test("(n) AC1 — exit 0 with NO result event ⇒ not-evaluated:no-result-event, NEVER null (the production defect)", () => {
+  const productionShape = { exit: 0, spawn_error: null, subtype: null, has_result: false, is_error: null };
+  assert.equal(callNotEvaluatedToken(productionShape), "not-evaluated:no-result-event");
+  assert.notEqual(callNotEvaluatedToken(productionShape), null, "⛔ the production shape must NOT read as a success");
+  // A call that exited 0 AND emitted a result is the ONE shape that reads as «it ran».
+  assert.equal(callNotEvaluatedToken({ ...productionShape, has_result: true }), null);
+  // A `result` that says the run ERRORED is not a success just because the process exited 0.
+  assert.equal(
+    callNotEvaluatedToken({ exit: 0, spawn_error: null, subtype: "error_during_execution", has_result: true, is_error: true }),
+    "not-evaluated:error_during_execution",
+  );
+  // ⛔ An UNCAPTURED `has_result` is «not queried», not «ran» (硬规则 6) — the same direction as the fix.
+  assert.equal(callNotEvaluatedToken({ exit: 0, spawn_error: null, subtype: null }), "not-evaluated:no-result-event");
+  // A timeout names ITSELF, before the generic spawn-error reading, because the retry policy keys on it.
+  assert.equal(callNotEvaluatedToken({ exit: null, spawn_error: "spawn timeout after 1000ms (SIGKILL)", timed_out: true }), "not-evaluated:killed-by-timeout");
+  assert.equal(callNotEvaluatedToken({ exit: null, spawn_error: "boom", timed_out: false }), "not-evaluated:spawn-error");
+});
+
+test("(n) AC1 NEGATIVE CONTROL — restore the pre-fix rule (exit 0 ⇒ success) and the production shape goes RED", () => {
+  const productionShape = { exit: 0, spawn_error: null, subtype: null, has_result: false, is_error: null };
+  assert.equal(callNotEvaluatedToken(productionShape), "not-evaluated:no-result-event", "the CURRENT rule names it");
+  // ⛔ THE MUTATION: the exact pre-fix body of the predicate (`exit === 0 ⇒ null`).
+  const preFix = (rec) => (rec.exit === 0 ? null : `not-evaluated:uninstrumented-exit-${rec.exit}`);
+  assert.equal(preFix(productionShape), null, "the pre-fix rule reads minutes-of-wall, zero-token, result-less calls as SUCCESS — this IS the defect");
+  assert.notEqual(preFix(productionShape), callNotEvaluatedToken(productionShape), "…so the fixture is RED under the mutation");
+  // The classifier half: drop the API-error capture and the SAME bytes read as a CLEAN call.
+  assert.equal(callFailureClass(classInputOf(API_ERROR_STREAM)), "api-error-event", "the capture names it");
+  const dropped = { ...classInputOf(API_ERROR_STREAM), api_error_event: false };
+  assert.equal(callFailureClass(dropped), null, "without the error capture the very same stream reads as a success");
+  assert.notEqual(callFailureClass(dropped), callFailureClass(classInputOf(API_ERROR_STREAM)), "⇒ the (n) class claim is live, not an echo");
+  // …and the round really DOES feed the capture into the classifier — otherwise the mutation is of a value
+  // the routine never produces, and the control proves nothing (硬规则 4 推论四).
+  const src = fs.readFileSync(ROUTINE_SRC, "utf8");
+  assert.match(src, /api_error_event: diag\.api_error_event/, "the class is read from the captured bytes");
+  assert.match(src, /has_result: hasResult,/, "the record carries whether a result event was emitted");
+  assert.match(src, /rec\.call_failure = callFailureClass\(/, "the round derives the class from those bytes");
+  assert.equal(CALL_CAPTURE_DIR_REL, path.join(".quay", "open-semantic-discovery-call-captures"));
+  assert.ok(STDOUT_HEAD_MAX > 0 && STDOUT_TAIL_MAX > 0 && RETRY_BACKOFF_MS > 0, "the bounds and the backoff are declared, not incidental");
+});
+
+test("(n) AC1 — a result-less exit-0 call is recorded as no-result-event WITH its bounded capture on the round", async () => {
+  const STDERR = "connectors notice\n[claude-code:unrecognized_model] {\"model\":\"v4.1flash-anthropic\"}\n";
+  const delegate = (argv, opts) => {
+    if (isNoveltyPrompt(opts)) return { status: 0, stdout: NOVELTY_STREAM, stderr: "", error: null };
+    return { status: 0, stdout: NO_RESULT_STREAM, stderr: STDERR, error: null };
+  };
+  const { ws, opts } = answerReserveFixture({ delegate });
+  const fact = await runOpenSemanticDiscovery(ws, opts);
+  const round = rounds(ws)[0];
+  const call = round.calls.find((c) => c.step === "investigator" && c.retry_of === undefined);
+
+  assert.equal(call.exit, 0, "the process exited ZERO — and that is exactly why this was invisible before");
+  assert.equal(call.has_result, false, "the stream carried no `result` event");
+  assert.equal(call.stream_ok, true, "…yet it parsed: «no stream» and «stream without result» are DIFFERENT readings");
+  assert.equal(call.not_evaluated, "not-evaluated:no-result-event");
+  assert.equal(call.call_failure, "stream-without-result");
+  assert.equal(call.signal, null);
+  assert.equal(typeof call.wall_ms, "number");
+  assert.ok(call.wall_ms >= 0);
+  assert.equal(typeof call.stdout_lines, "number");
+  assert.equal(call.stdout_events_by_type.system, 1, "the init event is counted by its own `type`");
+  assert.equal(call.stdout_events_by_type.assistant, 1);
+  assert.equal(call.stdout_events_by_type.result, undefined, "…and the ABSENT result shows as an absent key, not a zero");
+  assert.equal(typeof call.reservation_id, "string");
+  assert.equal(call.round_id, round.round_id, "the record is attributable to its round");
+
+  // The bounded head/tail really landed in a side file under `.quay/`, with the launcher's own stderr.
+  assert.equal(typeof call.stdout_capture?.path, "string", `a capture path is on the record (got ${JSON.stringify(call.stdout_capture)})`);
+  assert.ok(call.stdout_capture.path.startsWith(CALL_CAPTURE_DIR_REL), "the capture lives under .quay/");
+  const captured = fs.readFileSync(path.join(ws, call.stdout_capture.path), "utf8");
+  assert.ok(captured.includes("# stdout head"), "the capture carries the head");
+  assert.ok(captured.includes("# stdout tail"), "…and the tail");
+  assert.ok(captured.includes("unrecognized_model"), "…and the launcher's stderr tail, byte for byte");
+  assert.equal(call.stdout_capture.stdout_bytes, Buffer.byteLength(NO_RESULT_STREAM, "utf8"));
+  assert.equal(call.stdout_capture.stdout_head_truncated, false, "the fixture is short of the bound");
+
+  // ⛔ THE ASSERTION THE TASK EXISTS FOR: the Fact NAMES the cause instead of reporting a clean round.
+  assert.equal(fact.state, "not-evaluated", `got ${fact.state}: ${fact.reason}`);
+  assert.match(fact.reason, /not-evaluated:no-result-event/);
+  assert.doesNotMatch(fact.reason, /CONFIRMED/);
+});
+
+test("(n) AC1 — the capture is BOUNDED and says so: a huge stream is truncated, and the record says which end", () => {
+  const root = tmpDir("osd-capture-selftest-");
+  // A stream whose MIDDLE is identifiable: if the capture really keeps head+tail, the middle is gone.
+  const head = `HEADMARK-${"h".repeat(STDOUT_HEAD_MAX)}`;
+  const middle = `MIDDLEMARK-${"m".repeat(5000)}`;
+  const tail = `${"t".repeat(STDOUT_TAIL_MAX)}TAILMARK-`;
+  const huge = head + middle + tail;
+  const cap = writeCallCapture(root, path.join(root, CALL_CAPTURE_DIR_REL, "selftest.txt"), { stdout: huge, stderr: "e".repeat(STDERR_TAIL_MAX + 5) });
+  assert.equal(cap.stdout_head_truncated, true);
+  assert.equal(cap.stdout_tail_truncated, true);
+  assert.equal(cap.stderr_tail_truncated, true);
+  assert.equal(cap.stdout_bytes, Buffer.byteLength(huge, "utf8"), "the RECORD carries the TRUE size, not the kept size");
+  const onDisk = fs.readFileSync(path.join(root, cap.path), "utf8");
+  assert.ok(onDisk.includes("HEADMARK-"), "the HEAD is kept");
+  assert.ok(onDisk.includes("TAILMARK-"), "…and the TAIL is kept");
+  assert.equal(onDisk.includes("MIDDLEMARK-"), false, "…and the middle is DROPPED — the capture is bounded, not a transcript");
+  assert.equal(boundedHead("short", 100).truncated, false);
+  assert.equal(boundedHead("abcdef", 3).head, "abc", "the head is a HEAD");
+  assert.equal(boundedTail("abcdef", 3).tail, "def", "the tail is a TAIL");
+});
+
+test("(n) AC2 — a retryable call is retried EXACTLY ONCE, and the retry has its OWN reservation id in the ledger", async () => {
+  const good = streamText(`${FOCUS_MARKER} fixture focus\n${JSON.stringify(HYPS)}`);
+  let n = 0;
+  const delegate = (argv, opts) => {
+    if (isNoveltyPrompt(opts)) return { status: 0, stdout: NOVELTY_STREAM, stderr: "", error: null };
+    n++;
+    // The FIRST non-novelty call leaves nothing (the production shape); every later call answers.
+    return n === 1
+      ? { status: 0, stdout: "", stderr: "gateway returned an empty body\n", error: null }
+      : { status: 0, stdout: good, stderr: "", error: null };
+  };
+  const { ws, opts } = answerReserveFixture({ delegate });
+  const fact = await runOpenSemanticDiscovery(ws, opts);
+  const round = rounds(ws)[0];
+  const inv = round.calls.filter((c) => c.step === "investigator");
+
+  assert.equal(inv.length, 2, "exactly two records: the LOST call and its ONE retry");
+  assert.equal(inv[0].call_failure, "no-stdout");
+  assert.equal(inv[0].not_evaluated, "not-evaluated:no-result-event");
+  assert.equal(inv[0].retry_of, undefined, "the first call is not itself a retry");
+  assert.equal(inv[1].retry_of, inv[0].reservation_id, "the retry NAMES the call it repeats");
+  assert.equal(inv[1].retry_cause, "no-stdout", "…and WHY it was retried");
+  assert.notEqual(inv[1].reservation_id, inv[0].reservation_id, "a FRESH reservation — never a reuse of the lost one");
+  assert.equal(inv[1].not_evaluated, null, "the retry answered");
+  assert.equal(fact.state, "verified", `the retry's answer is what the round read (got ${fact.state}: ${fact.reason})`);
+
+  // ⛔ AC2/AC4: the ledger carries BOTH reservations, each with its OWN id, and the round's `model_calls`
+  // is exactly the count of reservations attributed to this round by `round_id`.
+  const reserves = ledgerReserves(ws).filter((l) => l.round === round.round_id);
+  assert.equal(reserves.length, round.model_calls, `ledger reservations (${reserves.length}) must equal model_calls (${round.model_calls})`);
+  assert.deepEqual(reserves.map((l) => l.id).sort(), round.calls.map((c) => c.reservation_id).sort(), "every record's reservation_id resolves in the ledger");
+  // AC4: the per-call charged USD sums to the round's cost_usd — the arithmetic the verifier repeats.
+  const sum = round.calls.reduce((a, c) => a + Number(c.cost_charged_usd ?? 0), 0);
+  assert.equal(Math.round(sum * 1e6) / 1e6, round.cost_usd, "sum(cost_charged_usd) == round.cost_usd");
+});
+
+test("(n) AC2 — NO retry when the ledger refuses: the round's ceiling is not spent twice on one lost call", async () => {
+  let n = 0;
+  const delegate = (argv, opts) => {
+    if (isNoveltyPrompt(opts)) return { status: 0, stdout: NOVELTY_STREAM, stderr: "", error: null };
+    n++;
+    return { status: 0, stdout: "", stderr: "empty\n", error: null };
+  };
+  const ws = makeWorkspace();
+  // A cap of ONE: the first (any) call is granted; the retry's reservation is REFUSED.
+  writeConfig(ws, cfgYaml({ max_model_calls_per_24h: 1 }));
+  const engine = makeEngine();
+  engine.modules.hyp.runInvestigator = streamReadingInvestigator();
+  const spawn = countingSpawn(delegate);
+  const fact = await runOpenSemanticDiscovery(ws, {
+    ...runOpts(ws, { engine }), spawnFn: spawn, pinFn: pinStub(),
+    pinTmpRoot: tmpDir("osd-retry-refuse-"), retryBackoffMs: 0, sleepFn: async () => {},
+  });
+
+  assert.equal(n, 1, "exactly ONE spawn: the refusal stopped the retry BEFORE a second subprocess");
+  const reserves = ledgerReserves(ws);
+  assert.equal(reserves.length, 1, "and exactly ONE reservation was granted — the retry left no ledger line");
+  const round = rounds(ws)[0];
+  assert.equal(round.model_calls, 1);
+  assert.equal(round.calls.length, 1, "only the lost call is on the round: no phantom retry record");
+  assert.equal(round.calls[0].call_failure, "no-stdout", "…and the lost call is still CLASSIFIED, not hidden by the refusal");
+  assert.equal(fact.state, "not-evaluated");
+  assert.match(fact.reason, /budget-24h/);
 });

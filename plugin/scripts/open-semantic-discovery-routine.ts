@@ -271,8 +271,29 @@ export const ANSWER_RESERVE_TOOLS = "";
  *  rescue call as expensive as the exploration it is rescuing. */
 export const ASSISTANT_TAIL_MAX = 4000;
 /** How much of a failed call's stderr is kept. The tail is where a launcher's cause usually is ("Reached
- *  maximum number of turns", an auth refusal, a gateway 500); the head is progress output. */
-export const STDERR_TAIL_MAX = 400;
+ *  maximum number of turns", an auth refusal, a gateway 500); the head is progress output. ⛔ 4 KB: the
+ *  pre-2026-10-13 value (400) was sized for a turn-cap notice, but a gateway refusal arrives as a JSON
+ *  error body and 400 chars cut it mid-object — the very reading this task exists to keep. */
+export const STDERR_TAIL_MAX = 4096;
+/** How much of a failed/no-result call's STDOUT is kept, as a head and a tail, in a bounded side file
+ *  under `.quay/` (Plan item 1). ⛔ Not on the carrier line: a stream is kilobytes and the carrier is a
+ *  per-round ledger, so the head/tail go to their own file and the call record carries the PATH plus the
+ *  sizes, so a reader can tell "the capture is short because the stream was short" from "…because it was
+ *  truncated" (硬规则 3b). */
+export const STDOUT_HEAD_MAX = 2048;
+export const STDOUT_TAIL_MAX = 2048;
+/** Where those captures live. Runtime state under `.quay/` (gitignored), one bounded text file per
+ *  failed or result-less call — the same family as the carrier and the ledger. */
+export const CALL_CAPTURE_DIR_REL = path.posix.join(".quay", "open-semantic-discovery-call-captures");
+/** How long the round yields the clock before RETRYING a call whose bytes say it never got an answer
+ *  (Plan item 3). It is a delay, not a policy: the retry is what matters, and the backoff only keeps a
+ *  gateway that is refusing everything from being hit twice in the same millisecond. A test passes its
+ *  own `sleepFn`/`retryBackoffMs` so no suite ever waits on it. */
+export const RETRY_BACKOFF_MS = 2000;
+/** The `call_failure` classes a call is retried for, ONCE. ⛔ `truncated-json` is deliberately ABSENT:
+ *  a stream cut mid-write usually means the ceiling was reached, and re-spending a reservation will cut
+ *  it in the same place. `killed-by-timeout` is absent for the same reason (Plan item 3). */
+export const RETRYABLE_CALL_FAILURES: readonly string[] = ["no-stdout", "stream-without-result", "api-error-event"];
 
 /** The TURN RESERVE directive, prepended to BOTH arms' investigator prompts — and it must be prepended to
  *  BOTH, because the paired instrument's whole claim is that the two arms differ by the GUIDANCE BLOCK and
@@ -742,7 +763,7 @@ export function stepArgv(
 export function spawnModelCall(
   argv: string[],
   opts: { cwd: string; timeoutMs: number; stdinData?: string },
-): Promise<{ status: number | null; stdout: string; stderr: string; error: Error | null }> {
+): Promise<{ status: number | null; signal: string | null; stdout: string; stderr: string; error: Error | null }> {
   return new Promise((resolve) => {
     let child: ReturnType<typeof spawn>;
     try {
@@ -751,23 +772,23 @@ export function spawnModelCall(
         stdio: [opts.stdinData === undefined ? "ignore" : "pipe", "pipe", "pipe"],
       });
     } catch (e) {
-      resolve({ status: null, stdout: "", stderr: "", error: e as Error });
+      resolve({ status: null, signal: null, stdout: "", stderr: "", error: e as Error });
       return;
     }
     let stdout = "";
     let stderr = "";
     let settled = false;
     let timer: ReturnType<typeof setTimeout> | null = null;
-    const finish = (status: number | null, error: Error | null) => {
+    const finish = (status: number | null, signal: string | null, error: Error | null) => {
       if (settled) return;
       settled = true;
       if (timer) clearTimeout(timer);
-      resolve({ status, stdout, stderr, error });
+      resolve({ status, signal, stdout, stderr, error });
     };
     if (Number.isFinite(opts.timeoutMs)) {
       timer = setTimeout(() => {
         try { child.kill("SIGKILL"); } catch { /* already gone */ }
-        finish(null, new Error(`spawn timeout after ${opts.timeoutMs}ms (SIGKILL): ${argv[0]}`));
+        finish(null, "SIGKILL", new Error(`spawn timeout after ${opts.timeoutMs}ms (SIGKILL): ${argv[0]}`));
       }, opts.timeoutMs);
     }
     if (opts.stdinData !== undefined && child.stdin) {
@@ -776,8 +797,11 @@ export function spawnModelCall(
     }
     child.stdout?.on("data", (d) => { stdout += d; });
     child.stderr?.on("data", (d) => { stderr += d; });
-    child.on("error", (e) => finish(null, e));
-    child.on("close", (code) => finish(code, null));
+    child.on("error", (e) => finish(null, null, e));
+    // The SIGNAL is kept alongside the code: a call killed by a signal has `code:null`, and without the
+    // signal the record could not say WHICH signal ended it (硬规则 3b — "killed" and "exited 0" must not
+    // be the same reading).
+    child.on("close", (code, signal) => finish(code, signal ?? null, null));
   });
 }
 
@@ -792,20 +816,121 @@ export function boundedTail(s: unknown, max: number): { tail: string; truncated:
     : { tail: text.slice(text.length - max), truncated: true, chars: text.length };
 }
 
+/** The HEAD half of `boundedTail`, with the same recorded truncation. A stream's head is where the
+ *  launcher's startup framing lives (the init event, the connectors notice); the tail is where a cause
+ *  that arrived late lives. ⛔ Both are kept because a reader cannot know in advance which end holds the
+ *  answer, and the pair is what makes "the stream started and then stopped" legible. */
+export function boundedHead(s: unknown, max: number): { head: string; truncated: boolean; chars: number } {
+  const text = typeof s === "string" ? s : "";
+  return text.length <= max
+    ? { head: text, truncated: false, chars: text.length }
+    : { head: text.slice(0, max), truncated: true, chars: text.length };
+}
+
+/** The ENUMERATED class of a call that did not produce a usable answer, from the captured bytes alone
+ *  (Plan item 2). Returns `null` when a `result` event WAS emitted — such a call is described by its own
+ *  subtype, not by this table. ⛔ `unclassified` is a REAL value and is never folded into success: it
+ *  names "the bytes do not match any known shape", which is a reading, not an absence of one.
+ *
+ *  Precedence is stated rather than incidental, because MORE THAN ONE can be true of the same bytes:
+ *    1. `killed-by-timeout` — the timeout reaper ended it; whatever bytes exist are a fragment;
+ *    2. `no-stdout`         — nothing came back at all (0 bytes);
+ *    3. `truncated-json`    — the LAST line was cut mid-write;
+ *    4. `api-error-event`   — the stream carried an API-transport error;
+ *    5. `stream-without-result` — JSON events parsed, but no `result` was ever emitted;
+ *    6. `unclassified`      — bytes that match none of the above (e.g. non-JSON output, no result).
+ *  ⛔ String comparisons only — this file carries no regular expression (case (l)). */
+export function callFailureClass(d: {
+  timed_out?: unknown;
+  stdout_bytes?: unknown;
+  json_lines?: unknown;
+  truncated_json?: unknown;
+  api_error_event?: unknown;
+  has_result?: unknown;
+}): string | null {
+  if (d.timed_out === true) return "killed-by-timeout";
+  if (!(typeof d.stdout_bytes === "number" && d.stdout_bytes > 0)) return "no-stdout";
+  if (d.truncated_json === true) return "truncated-json";
+  if (d.api_error_event === true) return "api-error-event";
+  if (d.has_result === true) return null;
+  return typeof d.json_lines === "number" && d.json_lines > 0 ? "stream-without-result" : "unclassified";
+}
+
+/** Write the bounded head/tail capture of a failed or result-less call under `.quay/` and return the
+ *  BOUNDED DESCRIPTION that goes on the call record. ⛔ The record carries the path AND both sizes AND
+ *  both truncation flags, so "the capture is short because the stream was short" and "…because the bound
+ *  cut it" are different readings (硬规则 3b). The file is overwritten per call id, never appended to. */
+export function writeCallCapture(
+  root: string,
+  file: string,
+  parts: { stdout: unknown; stderr: unknown },
+): { path: string; bytes: number; stdout_bytes: number; stdout_head_chars: number; stdout_head_truncated: boolean; stdout_tail_chars: number; stdout_tail_truncated: boolean; stderr_chars: number; stderr_tail_truncated: boolean } {
+  const stdout = typeof parts.stdout === "string" ? parts.stdout : "";
+  const stderr = typeof parts.stderr === "string" ? parts.stderr : "";
+  const head = boundedHead(stdout, STDOUT_HEAD_MAX);
+  const tail = boundedTail(stdout, STDOUT_TAIL_MAX);
+  const errTail = boundedTail(stderr, STDERR_TAIL_MAX);
+  const body = [
+    `# stdout head (first ${STDOUT_HEAD_MAX} chars${head.truncated ? ", TRUNCATED" : ""})`,
+    head.head,
+    `# stdout tail (last ${STDOUT_TAIL_MAX} chars${tail.truncated ? ", TRUNCATED" : ""})`,
+    tail.tail,
+    `# stderr tail (last ${STDERR_TAIL_MAX} chars${errTail.truncated ? ", TRUNCATED" : ""})`,
+    errTail.tail,
+    "",
+  ].join("\n");
+  fs.mkdirSync(path.dirname(file), { recursive: true });
+  fs.writeFileSync(file, body, "utf8");
+  return {
+    path: asRel(root, file),
+    bytes: Buffer.byteLength(body, "utf8"),
+    stdout_bytes: Buffer.byteLength(stdout, "utf8"),
+    stdout_head_chars: head.chars,
+    stdout_head_truncated: head.truncated,
+    stdout_tail_chars: tail.chars,
+    stdout_tail_truncated: tail.truncated,
+    stderr_chars: errTail.chars,
+    stderr_tail_truncated: errTail.truncated,
+  };
+}
+
 /** The `not-evaluated:<…>` token a FINISHED call must be reported as, or `null` when the call really ran.
  *  ⛔ 硬规则 3b, and this helper exists because the production record violated it: `exit 1` with `turns: 13`
  *  under a 12-turn cap and nothing else, so a call CUT OFF before it could answer was shaped exactly like
  *  a call that explored and found nothing ("0 hypotheses"). The stream's own `result.subtype` is the
  *  structural cause (`error_max_turns` / `error_during_execution`); a stream that did not parse has no
- *  subtype at all, and THAT is `uninstrumented` — never a silent success. `exit: 0` is the ONLY exit that
- *  reads as "the call ran". */
+ *  subtype at all, and THAT is `uninstrumented` — never a silent success.
+ *
+ *  ⛔ `exit: 0` IS NO LONGER SUFFICIENT (task gap-open-discovery-model-calls-exit-without-result-…):
+ *  production recorded calls that spent minutes of wall, emitted NO `result` event and reported 0 tokens,
+ *  and this function returned `null` for them — the SAME bytes as an ordinary success, which is precisely
+ *  the 硬规则 3b violation the task exists to close. A call exited 0 AND its stream carried a `result`
+ *  event (`has_result:true`) AND that result was not an error (`is_error !== true`) is the one shape that
+ *  reads as "the call ran"; exit 0 WITHOUT a result is `not-evaluated:no-result-event`. An exit that is
+ *  not 0 keeps its existing reading (subtype, else `uninstrumented-exit-<n>`), so a call that DID fail
+ *  loudly is not laundered into the new token.
+ *  ⛔ `tied to `callFailureClass``: the two never contradict — where the class is non-null, this token is
+ *  non-null too. (The converse does not hold and must not: a turn-cap kill carries a `result` event, so
+ *  it has NO `call_failure` class, yet it most certainly did not answer.) */
 export function callNotEvaluatedToken(rec: Record<string, unknown> | null | undefined): string | null {
   if (rec === null || rec === undefined || typeof rec !== "object") return "not-evaluated:no-call-record";
+  // A timeout is its OWN ending, and it is checked before `spawn_error` so a killed call is not reported
+  // as a generic spawn failure: `killed-by-timeout` is the class the retry policy keys on (Plan item 3).
+  if (rec.timed_out === true) return "not-evaluated:killed-by-timeout";
   if (typeof rec.spawn_error === "string" && rec.spawn_error !== "") return "not-evaluated:spawn-error";
   const exit = rec.exit;
   if (exit === null || exit === undefined) return "not-evaluated:no-exit-status";
-  if (exit === 0) return null;
   const subtype = typeof rec.subtype === "string" && rec.subtype !== "" ? rec.subtype : null;
+  if (exit === 0) {
+    // ⛔ THE FIX: exit 0 alone is not "it ran". The stream's OWN `result` event is the direct reading, and
+    // `has_result !== true` covers both "no result event" and "the field was never captured" — 缺值 = 未查
+    // (硬规则 6), so an uncaptured field must not be read as a success either.
+    if (rec.has_result !== true) return subtype === null ? "not-evaluated:no-result-event" : `not-evaluated:${subtype}`;
+    // A `result` event that says the run ERRORED is not a success just because the process exited 0 — the
+    // API-transport refusals (rate limit / overload / auth) arrive exactly this way.
+    if (rec.is_error === true) return subtype === null ? "not-evaluated:uninstrumented-result-error" : `not-evaluated:${subtype}`;
+    return null;
+  }
   return subtype === null ? `not-evaluated:uninstrumented-exit-${String(exit)}` : `not-evaluated:${subtype}`;
 }
 
@@ -823,7 +948,9 @@ export function firstNotEvaluatedToken(calls: readonly Record<string, unknown>[]
 /** The reading of ONE step's answer-reserve calls, taken off the call records themselves. A step "was
  *  attempted" once per `*-report` call it left on the record, and "was rescued" when that call itself
  *  answered. PURE — the round's summary is a VIEW of its own ledger rather than a parallel counter that
- *  could disagree with it (硬规则 5b). */
+ *  could disagree with it (硬规则 5b).
+ *  ⛔ A RETRY record (`retry_of` set) is not a second attempt: it is the same attempt made again, so it is
+ *  excluded here — otherwise a rescued step would report `attempted:2` for one reserve the round granted. */
 export function summarizeReserve(calls: readonly Record<string, unknown>[]): {
   turns_reserved: number;
   attempted: number;
@@ -831,7 +958,7 @@ export function summarizeReserve(calls: readonly Record<string, unknown>[]): {
   not_evaluated: string[];
   steps: string[];
 } {
-  const reportCalls = calls.filter((c) => String(c.step).endsWith("-report"));
+  const reportCalls = calls.filter((c) => String(c.step).endsWith("-report") && c.retry_of === undefined);
   return {
     turns_reserved: ANSWER_RESERVE_PROMPT_TURNS,
     attempted: reportCalls.length,
@@ -873,7 +1000,15 @@ export interface HypothesisModule {
     prereg: Record<string, unknown> | null; expected: Record<string, string>;
     preregMtimeMs: number | null; runMtimesMs: number[];
   }) => { code: number; reasons: string[] } | null;
-  parseVerifierStream: (stdout: string) => { ok?: boolean; num_turns?: unknown; model?: unknown; usage?: unknown; cost_usd?: unknown };
+  parseVerifierStream: (stdout: string) => { ok?: boolean; num_turns?: unknown; model?: unknown; usage?: unknown; cost_usd?: unknown; hasResult?: unknown };
+  /** The STRUCTURAL reading of the launcher's stdout — event counts by `type`, whether a `result` was
+   *  emitted, whether the last line was cut mid-write. Consumed here rather than re-derived, so the ONE
+   *  stream reader is the engine's (硬规则 5b); it is the direct reading that turns an `exit:0` with no
+   *  result into a named failure instead of a silent success. */
+  streamDiagnostics: (stdout: string) => {
+    bytes?: unknown; lines?: unknown; json_lines?: unknown; non_json_lines?: unknown; unparsed_json_lines?: unknown;
+    truncated_json?: unknown; has_result?: unknown; events_by_type?: unknown; api_error_event?: unknown;
+  };
   callText: (stdout: string) => string;
   defaultVerifierPrompt: (here?: string) => string;
   defaultInvestigatorPrompt: (here?: string) => string;
@@ -2211,8 +2346,9 @@ export interface OpenSemanticDiscoveryRunOptions {
   modules?: OpenDiscoveryModules | null;
   /** The base launcher argv builder. Defaults to driver-runtime's `launchArgv`. */
   launchArgvFn?: ((role: string, prompt: string, root: string, opts?: Record<string, unknown>) => string[]) | null;
-  /** The spawn seam. Defaults to `spawnModelCall` (which roots the child at the pin). */
-  spawnFn?: ((argv: string[], opts: { cwd: string; timeoutMs: number; stdinData?: string }) => Promise<{ status: number | null; stdout: string; stderr: string; error: Error | null }>) | null;
+  /** The spawn seam. Defaults to `spawnModelCall` (which roots the child at the pin). `signal` is
+   *  OPTIONAL on the returned shape so a stub that predates the signal capture stays assignable. */
+  spawnFn?: ((argv: string[], opts: { cwd: string; timeoutMs: number; stdinData?: string }) => Promise<{ status: number | null; signal?: string | null; stdout: string; stderr: string; error: Error | null }>) | null;
   /** Test seam: materialise the pin. Defaults to `materializeStrippedPin`. */
   pinFn?: ((opts: { root: string; rev: string; dir: string }) => PinResult) | null;
   /** Test seam: resolve the revision to pin. Defaults to the develop tip. */
@@ -2223,6 +2359,11 @@ export interface OpenSemanticDiscoveryRunOptions {
   lastRunPath?: string;
   pinTmpRoot?: string;
   now?: () => number;
+  /** Test seam: the backoff the RETRY path waits (Plan item 3). A suite passes a no-op so no test ever
+   *  waits on wall clock; production uses the real `setTimeout`. */
+  sleepFn?: ((ms: number) => Promise<void>) | null;
+  /** How long that backoff is. Defaults to `RETRY_BACKOFF_MS`; a test sets `0` for determinism. */
+  retryBackoffMs?: number;
 }
 
 const asRel = (root: string, p: string) => path.relative(root, p) || p;
@@ -2646,6 +2787,14 @@ export async function runOpenSemanticDiscovery(root: string, opts: OpenSemanticD
   //     taken inside `reservingStep` before each spawn, which is what a concurrent second process cannot
   //     get past. Both ceilings are consulted here so a workspace at EITHER ceiling refuses before work.
   const budget: ModelBudget = openModelBudget({ root, cap: config.maxModelCallsPer24h, ledgerPath, lockPath, carrierPath: carrier, now });
+  // ── THE ROUND ID (Plan item 4) ────────────────────────────────────────────────────────────────────
+  // Stamped on EVERY reservation this round takes AND on the scan-round line it appends. ⛔ It is what
+  // makes "the ledger reservation count equals the round's `model_calls`" a CHECKABLE reading rather than
+  // an arithmetic coincidence: the ledger lines are attributable to a round by a value the round itself
+  // published, so a reader can count them (`kind:"reserve"` with this `round`) and compare.
+  const roundId = `osd-${process.pid}-${started}-${Math.random().toString(36).slice(2, 8)}`;
+  const sleepFor = opts.sleepFn ?? ((ms: number) => new Promise<void>((r) => setTimeout(r, ms)));
+  const retryBackoffMs = opts.retryBackoffMs ?? RETRY_BACKOFF_MS;
   let callsUsage: BudgetUsage;
   let usdUsage: ReturnType<typeof usdBudgetUsage>;
   try {
@@ -2762,84 +2911,151 @@ export async function runOpenSemanticDiscovery(root: string, opts: OpenSemanticD
   let costUsd = 0;
 
   async function reservingStep(kind: ModelStepKind, payload: { prompt: string; tools: string; maxTurns: number; model: string | null }): Promise<Record<string, unknown>> {
-    const r = await budget.reserve({ step: kind, tools: payload.tools, max_turns: payload.maxTurns });
-    if (!r.ok) throw new BudgetRefusedError(r.used, r.cap, kind);
-    grantedIds.push(r.id);
-    const { argv, maxTurns, tools } = stepArgv(buildArgv, payload.prompt, root, { tools: payload.tools, maxTurns: payload.maxTurns, model: payload.model });
-    let res: { status: number | null; stdout: string; stderr: string; error: Error | null };
-    try {
-      res = await spawn(argv, { cwd: pinned, timeoutMs: Math.max(1_000, config.maxWallMs), stdinData: payload.prompt });
-    } catch (e) {
-      budget.outcome(r.id, classifyModelFailure(e), null, `CALL_THREW:${(e as Error)?.name ?? "Error"}`);
-      throw e;
-    }
-    const { turns } = readRealizedTurns(res?.stdout, (s: string) => hyp.parseVerifierStream(s));
-    // The launcher's stderr, bounded and kept. Production kept NONE of it, so a round-1-style zero-token
-    // exit could not be diagnosed at all (Plan item 3) — the cause existed only inside the child process.
-    const stderrTail = boundedTail(res?.stderr, STDERR_TAIL_MAX);
-    budget.outcome(r.id, res.error ? classifyModelFailure(res.error) : "completed", turns, res.error ? "SPAWN_ERROR" : null);
-    // The realized price: the gateway rate applied to the stream's own usage when BOTH are readable, else
-    // NULL — and NULL counts as the per-call ceiling in `usdBudgetUsage`, never as free.
-    const stream = hyp.parseVerifierStream(String(res?.stdout ?? ""));
-    const usage = stream.ok && stream.usage && typeof stream.usage === "object" ? (stream.usage as Record<string, unknown>) : null;
-    const servedModel = stream.ok && typeof stream.model === "string" && stream.model !== "" ? stream.model : null;
-    let realized: number | null = null;
-    let costSource = "per-call-ceiling";
-    if (usage !== null && servedModel !== null) {
-      const rates = modules.portfolio.loadGatewayRates({ modelGroup: servedModel });
-      if (rates.ok) {
-        const derived = modules.portfolio.deriveCost({
-          model_group: servedModel,
-          model_calls: 1,
-          input_tokens: Number(usage.input_tokens ?? 0),
-          output_tokens: Number(usage.output_tokens ?? 0),
-          cache_read_tokens: Number(usage.cache_read_input_tokens ?? 0),
-          cache_creation_tokens: Number(usage.cache_creation_input_tokens ?? 0),
-        }, rates.rates);
-        if (derived.ok && derived.cost && typeof derived.cost.usd_gateway === "number") {
-          realized = derived.cost.usd_gateway as number;
-          costSource = "gateway-rates";
+    // ── ONE ATTEMPT: reserve → build argv → spawn → record. ⛔ Factored OUT of `reservingStep` so the
+    //    RETRY below is literally the same call made again, with a FRESH reservation and its own record —
+    //    not a second code path that could drift from the first (硬规则 5b). ────────────────────────────
+    async function attemptCall(retryOf: string | null): Promise<{
+      res: { status: number | null; signal?: string | null; stdout: string; stderr: string; error: Error | null };
+      stream: ReturnType<HypothesisModule["parseVerifierStream"]>;
+      argv: string[];
+      rec: Record<string, unknown>;
+    }> {
+      // ⛔ The round id travels on the reservation (Plan item 4), so every ledger line this round writes is
+      // attributable to it by a value the round ITSELF published on its scan-round line.
+      const r = await budget.reserve({ step: kind, tools: payload.tools, max_turns: payload.maxTurns, round: roundId });
+      if (!r.ok) throw new BudgetRefusedError(r.used, r.cap, kind);
+      grantedIds.push(r.id);
+      const { argv, maxTurns, tools } = stepArgv(buildArgv, payload.prompt, root, { tools: payload.tools, maxTurns: payload.maxTurns, model: payload.model });
+      let res: { status: number | null; signal?: string | null; stdout: string; stderr: string; error: Error | null };
+      const callStarted = now();
+      try {
+        res = await spawn(argv, { cwd: pinned, timeoutMs: Math.max(1_000, config.maxWallMs), stdinData: payload.prompt });
+      } catch (e) {
+        budget.outcome(r.id, classifyModelFailure(e), null, `CALL_THREW:${(e as Error)?.name ?? "Error"}`);
+        throw e;
+      }
+      // ── THE WALL CLOCK OF ONE CALL (Plan item 1) ───────────────────────────────────────────────────
+      // Production recorded minutes of wall for calls that left no result, and the record could not say
+      // HOW LONG. It is the reading that separates "an instant launch failure" from "the process ran".
+      const wallMs = Math.max(0, now() - callStarted);
+      const stdout = String(res?.stdout ?? "");
+      const { turns } = readRealizedTurns(res?.stdout, (s: string) => hyp.parseVerifierStream(s));
+      // The launcher's stderr, bounded and kept. Production kept NONE of it, so a round-1-style zero-token
+      // exit could not be diagnosed at all (Plan item 3) — the cause existed only inside the child process.
+      const stderrTail = boundedTail(res?.stderr, STDERR_TAIL_MAX);
+      budget.outcome(r.id, res.error ? classifyModelFailure(res.error) : "completed", turns, res.error ? "SPAWN_ERROR" : null);
+      // The realized price: the gateway rate applied to the stream's own usage when BOTH are readable, else
+      // NULL — and NULL counts as the per-call ceiling in `usdBudgetUsage`, never as free.
+      const stream = hyp.parseVerifierStream(stdout);
+      // ── THE STRUCTURAL READING OF THE STREAM (Plan items 1-2) ───────────────────────────────────────
+      // The ENGINE's own reader, consumed rather than re-derived (硬规则 5b): event counts by `type`,
+      // whether a `result` event was emitted, and whether the last line was cut mid-write.
+      const diag = hyp.streamDiagnostics(stdout);
+      const hasResult = diag.has_result === true;
+      const usage = stream.ok && stream.usage && typeof stream.usage === "object" ? (stream.usage as Record<string, unknown>) : null;
+      const servedModel = stream.ok && typeof stream.model === "string" && stream.model !== "" ? stream.model : null;
+      let realized: number | null = null;
+      let costSource = "per-call-ceiling";
+      if (usage !== null && servedModel !== null) {
+        const rates = modules.portfolio.loadGatewayRates({ modelGroup: servedModel });
+        if (rates.ok) {
+          const derived = modules.portfolio.deriveCost({
+            model_group: servedModel,
+            model_calls: 1,
+            input_tokens: Number(usage.input_tokens ?? 0),
+            output_tokens: Number(usage.output_tokens ?? 0),
+            cache_read_tokens: Number(usage.cache_read_input_tokens ?? 0),
+            cache_creation_tokens: Number(usage.cache_creation_input_tokens ?? 0),
+          }, rates.rates);
+          if (derived.ok && derived.cost && typeof derived.cost.usd_gateway === "number") {
+            realized = derived.cost.usd_gateway as number;
+            costSource = "gateway-rates";
+          }
         }
       }
+      appendLedgerRecords(ledgerPath, [{ kind: "cost", id: r.id, ts: new Date(now()).toISOString(), pid: process.pid, step: kind, cost_usd: realized, cost_source: costSource, model: servedModel }]);
+      const charged = realized === null ? PER_CALL_USD_CEILING : realized;
+      costUsd += charged;
+      tokensIn += Number(usage?.input_tokens ?? 0);
+      tokensOut += Number(usage?.output_tokens ?? 0);
+      // ⛔ A call killed by the timeout reaper is `killed-by-timeout`, and the only in-band signal for it
+      // is the spawn wrapper's own timeout message — there is no exit code (the child was SIGKILLed).
+      const spawnErrMsg = res?.error ? String(res.error.message ?? res.error).slice(0, 200) : null;
+      const timedOut = res?.error ? classifyModelFailure(res.error) === "timeout" : false;
+      const rec: Record<string, unknown> = {
+        step: kind, tools, max_turns: maxTurns, argv_tools_index: argv.indexOf("--tools"), cwd: asRel(root, pinned),
+        // ⛔ The reservation id and the round id tie this record to its OWN ledger lines, which is what
+        // makes the cost reconciliation (AC4) a reading rather than an arithmetic hope.
+        reservation_id: r.id, round_id: roundId,
+        exit: res?.status ?? null, signal: res?.signal ?? null, timed_out: timedOut,
+        spawn_error: spawnErrMsg, wall_ms: wallMs,
+        turns, actual_model: servedModel ?? "not-evaluated:model-unverified",
+        tokens: { input: Number(usage?.input_tokens ?? 0), output: Number(usage?.output_tokens ?? 0) },
+        cost_usd: realized, cost_source: costSource, cost_charged_usd: charged,
+        // ── HOW THE CALL ENDED (Plan item 1) ─────────────────────────────────────────────────────────────
+        // The stream's OWN structural `result` fields, carried onto the record. ⛔ Before this, an `exit 1`
+        // was all the round kept, so a call killed at the turn cap and a call that explored and found
+        // nothing produced the SAME record — the defect this task exists to close (硬规则 3b). `subtype` is
+        // `null` when the stream did not parse: "not read" keeps its own value, it is never defaulted to a
+        // success, and `stream_ok`/`stdout_lines`/`events_by_type` let a reader tell "no stream" from
+        // "stream said nothing" from "stream ran but never emitted a result".
+        stream_ok: stream.ok === true,
+        subtype: stream.ok ? (stream.subtype ?? null) : null,
+        num_turns: stream.ok && Number.isFinite(stream.num_turns) ? (stream.num_turns as number) : null,
+        is_error: stream.ok && typeof stream.is_error === "boolean" ? (stream.is_error as boolean) : null,
+        stdout_bytes: diag.bytes === 0 ? Buffer.byteLength(stdout, "utf8") : diag.bytes,
+        stdout_lines: diag.lines ?? null,
+        stdout_events_by_type: diag.events_by_type ?? {},
+        stdout_unparsed_json_lines: diag.unparsed_json_lines ?? null,
+        has_result: hasResult,
+        stderr_chars: stderrTail.chars,
+        stderr_tail: stderrTail.tail,
+        stderr_tail_truncated: stderrTail.truncated,
+        not_evaluated: null as string | null,
+        call_failure: null as string | null,
+      };
+      if (retryOf !== null) rec.retry_of = retryOf;
+      // The CLASS is derived from the captured bytes, and the token is derived from the class + the exit
+      // reading — so the two can never disagree about the same call (Plan item 2).
+      rec.call_failure = callFailureClass({
+        timed_out: timedOut, stdout_bytes: rec.stdout_bytes,
+        json_lines: diag.json_lines, truncated_json: diag.truncated_json,
+        api_error_event: diag.api_error_event, has_result: hasResult,
+      });
+      rec.not_evaluated = callNotEvaluatedToken(rec);
+      // ── THE BOUNDED HEAD/TAIL CAPTURE (Plan item 1) ─────────────────────────────────────────────────
+      // ONLY for a call that did not answer: on a clean call the parsed answer is on the record and a
+      // second copy of the stream would be a transcript, not a diagnosis.
+      if (rec.not_evaluated !== null) {
+        const narration = boundedTail(hyp.callText(stdout), ASSISTANT_TAIL_MAX);
+        rec.assistant_text_tail = narration.tail;
+        rec.assistant_text_tail_truncated = narration.truncated;
+        try {
+          rec.stdout_capture = writeCallCapture(root, path.join(root, CALL_CAPTURE_DIR_REL, `${roundId}-${kind}-${r.id}.txt`), { stdout, stderr: res?.stderr });
+        } catch (e) {
+          // ⛔ A capture that could not be written is REPORTED on the record, never silently absent — the
+          // whole point of the field is that "no bytes to show" and "no capture file" differ (硬规则 3b).
+          rec.stdout_capture = { path: null, error: String((e as Error)?.message ?? e).slice(0, 200) };
+        }
+      }
+      callRecords.push(rec);
+      return { res, stream, argv, rec };
     }
-    appendLedgerRecords(ledgerPath, [{ kind: "cost", id: r.id, ts: new Date(now()).toISOString(), pid: process.pid, step: kind, cost_usd: realized, cost_source: costSource, model: servedModel }]);
-    const charged = realized === null ? PER_CALL_USD_CEILING : realized;
-    costUsd += charged;
-    tokensIn += Number(usage?.input_tokens ?? 0);
-    tokensOut += Number(usage?.output_tokens ?? 0);
-    const rec: Record<string, unknown> = {
-      step: kind, tools, max_turns: maxTurns, argv_tools_index: argv.indexOf("--tools"), cwd: asRel(root, pinned),
-      exit: res?.status ?? null, spawn_error: res?.error ? String(res.error.message ?? res.error).slice(0, 200) : null,
-      turns, actual_model: servedModel ?? "not-evaluated:model-unverified",
-      tokens: { input: Number(usage?.input_tokens ?? 0), output: Number(usage?.output_tokens ?? 0) },
-      cost_usd: realized, cost_source: costSource, cost_charged_usd: charged,
-      // ── HOW THE CALL ENDED (Plan item 1) ─────────────────────────────────────────────────────────────
-      // The stream's OWN structural `result` fields, carried onto the record. ⛔ Before this, an `exit 1`
-      // was all the round kept, so a call killed at the turn cap and a call that explored and found
-      // nothing produced the SAME record — the defect this task exists to close (硬规则 3b). `subtype` is
-      // `null` when the stream did not parse: "not read" keeps its own value, it is never defaulted to a
-      // success, and `stream_ok`/`stdout_bytes` let a reader tell "no stream" from "stream said nothing".
-      stream_ok: stream.ok === true,
-      subtype: stream.ok ? (stream.subtype ?? null) : null,
-      num_turns: stream.ok && Number.isFinite(stream.num_turns) ? (stream.num_turns as number) : null,
-      is_error: stream.ok && typeof stream.is_error === "boolean" ? (stream.is_error as boolean) : null,
-      stdout_bytes: Buffer.byteLength(String(res?.stdout ?? ""), "utf8"),
-      stderr_chars: stderrTail.chars,
-      stderr_tail: stderrTail.tail,
-      stderr_tail_truncated: stderrTail.truncated,
-      not_evaluated: null as string | null,
-    };
-    rec.not_evaluated = callNotEvaluatedToken(rec);
-    // The model's OWN prose, kept ONLY for a call that did not run. It is the material the answer reserve
-    // hands back (Plan item 2), and on a call that DID run there is a parsed answer instead — so this is
-    // not a second transcript on the happy path, it is the salvage on the unhappy one.
-    if (rec.not_evaluated !== null) {
-      const narration = boundedTail(hyp.callText(String(res?.stdout ?? "")), ASSISTANT_TAIL_MAX);
-      rec.assistant_text_tail = narration.tail;
-      rec.assistant_text_tail_truncated = narration.truncated;
-    }
-    callRecords.push(rec);
-    return { res, stream, argv, rec };
+
+    const first = await attemptCall(null);
+    // ── THE ONE COUNTED RETRY (Plan item 3) ─────────────────────────────────────────────────────────
+    // A call whose captured bytes put it in a RETRYABLE class is tried ONCE more after a backoff, through
+    // a FRESH reservation on the SAME 24h ledger — so the retry is COUNTED and CAPPED like any other call.
+    // ⛔ The FIRST call's record stays on the round: the retry is not a way to launder a lost call into a
+    // clean one. A refusal at the retry's own reservation THROWS the round's ordinary BudgetRefusedError,
+    // which is exactly "no retry when the ledger refuses".
+    const failure = typeof first.rec.call_failure === "string" ? first.rec.call_failure : null;
+    if (failure === null || !RETRYABLE_CALL_FAILURES.includes(failure)) return first;
+    if (retryBackoffMs > 0) await sleepFor(retryBackoffMs);
+    const second = await attemptCall(String(first.rec.reservation_id ?? ""));
+    second.rec.retry_of_kind = kind;
+    second.rec.retry_cause = failure;
+    return second;
   }
 
   // ── THE ANSWER RESERVE (Plan item 2) ────────────────────────────────────────────────────────────────
@@ -3606,6 +3822,9 @@ export async function runOpenSemanticDiscovery(root: string, opts: OpenSemanticD
       budget_24h: countBudgetBlock,
       budget_usd_24h: usdBudgetBlock,
       wall_ms: wallMs,
+      // ⛔ The round's OWN id, the one every reservation of this round carries in the ledger: it is what
+      // makes AC4's "ledger reservation count == model_calls" a reading a verifier can reproduce.
+      round_id: roundId,
       model_calls: budget.grantedCount,
       // ── THE ANSWER RESERVE, round-wide (Plan item 2) ──────────────────────────────────────────────
       // Every step's rescue calls, read off the round's own call records: how many were granted, how many
@@ -3740,7 +3959,7 @@ export async function runOpenSemanticDiscovery(root: string, opts: OpenSemanticD
         // model answered, and a citation reading over a half-round would be a reading of nothing.
         task_log: taskLogContext,
         methods: selectionBlock,
-        budget_24h: countBudgetBlock, budget_usd_24h: usdBudgetBlock, wall_ms: now() - started, model_calls: budget.grantedCount, calls: callRecords,
+        budget_24h: countBudgetBlock, budget_usd_24h: usdBudgetBlock, wall_ms: now() - started, round_id: roundId, model_calls: budget.grantedCount, calls: callRecords,
         tokens: { input: tokensIn, output: tokensOut }, cost_usd: round6(costUsd),
       };
       appendCarrierRecords(carrier, [round]);
