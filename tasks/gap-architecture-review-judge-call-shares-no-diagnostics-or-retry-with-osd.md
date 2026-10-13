@@ -1,7 +1,7 @@
 ---
 id: gap-architecture-review-judge-call-shares-no-diagnostics-or-retry-with-osd
 title: architecture-review 的 claude -p judge 调用是第三套独立实现——与 OSD 零共享失败归因/重试
-status: ready
+status: done
 labels:
   - gap
 parent: null
