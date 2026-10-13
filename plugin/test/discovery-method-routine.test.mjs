@@ -1272,7 +1272,12 @@ test("AC1(d) — a model call that THROWS or TIMES OUT is counted, with its own 
     assert.equal(typeof outs[0].turns_reason, "string");
 
     // ⛔ THE CLAIM: the spent call is COUNTED by the next reader, whatever happened to it.
-    const usage = await openModelBudget({ root: ws, cap: 24 }).usage();
+    // ⛔ THE READER MUST USE THE SAME CLOCK THE ROUND DID. This fixture dates its round at `ROUND_AT`
+    // (2026-10-12T00:00Z), so reading with the WALL clock drops the just-written line out of the trailing
+    // 24h window the moment real time passes ROUND_AT + 24h — the assertion then fails on a date, with
+    // nothing about the code having changed (measured: green on 2026-10-12, red from 2026-10-13T00:00Z).
+    // The injection is the convention this very file already uses two tests below.
+    const usage = await openModelBudget({ root: ws, cap: 24, now: () => ROUND_AT }).usage();
     assert.equal(usage.total, 1, `a call that ${label} still counts against the 24h ceiling`);
   }
 });
