@@ -3150,6 +3150,14 @@ const API_ERROR_STREAM = [INIT_EVENT, JSON.stringify({
   type: "result", subtype: "error_during_execution", num_turns: 1, is_error: true,
   result: "", usage: { input_tokens: 0, output_tokens: 0 },
 })].join("\n") + "\n";
+/** ⛔ The MEASURED gateway-refusal shape (AC5 probe, 2026-10-13): an id the gateway does not serve comes
+ *  back as `exit 1` with subtype `success`, `is_error:true` and ZERO usage. The subtype is NOT a cause
+ *  here, which is exactly why the token must key on the transport-error reading instead. */
+const API_400_STREAM = [INIT_EVENT, JSON.stringify({
+  type: "result", subtype: "success", num_turns: 1, is_error: true,
+  result: "API Error: 400 anthropic_messages: Invalid model name passed in model=x.",
+  usage: { input_tokens: 0, output_tokens: 0 },
+})].join("\n") + "\n";
 
 test("(n) AC1 — streamDiagnostics reads the STREAM structurally: bytes, lines, events by type, has_result, truncation", () => {
   const ok = realHyp.streamDiagnostics(STREAM);
@@ -3194,6 +3202,7 @@ test("(n) AC1 — one fixture per call_failure class, classified from the captur
     ["stream-without-result", NO_RESULT_STREAM, {}],
     ["truncated-json", STREAM + '{"type":"assis', {}],
     ["api-error-event", API_ERROR_STREAM, {}],
+    ["api-error-event", API_400_STREAM, {}],
     ["killed-by-timeout", "half a stream", { timedOut: true }],
     ["unclassified", "not a stream at all\n", {}],
   ];
@@ -3223,6 +3232,18 @@ test("(n) AC1 — exit 0 with NO result event ⇒ not-evaluated:no-result-event,
     callNotEvaluatedToken({ exit: 0, spawn_error: null, subtype: "error_during_execution", has_result: true, is_error: true }),
     "not-evaluated:error_during_execution",
   );
+  // ⛔ The MEASURED gateway-refusal shape (AC5 probe): subtype `success` is NOT a cause — the transport
+  // error is, and without the capture the exit code carries it. `not-evaluated:success` is unproducible.
+  assert.equal(
+    callNotEvaluatedToken({ exit: 1, spawn_error: null, subtype: "success", has_result: true, is_error: true, api_error_event: true }),
+    "not-evaluated:api-error-event",
+  );
+  assert.equal(
+    callNotEvaluatedToken({ exit: 1, spawn_error: null, subtype: "success", has_result: true, is_error: true }),
+    "not-evaluated:uninstrumented-exit-1",
+    "…and with the capture missing, `success` is never minted as a cause",
+  );
+  assert.notEqual(callNotEvaluatedToken({ exit: 1, spawn_error: null, subtype: "success", has_result: true }), "not-evaluated:success");
   // ⛔ An UNCAPTURED `has_result` is «not queried», not «ran» (硬规则 6) — the same direction as the fix.
   assert.equal(callNotEvaluatedToken({ exit: 0, spawn_error: null, subtype: null }), "not-evaluated:no-result-event");
   // A timeout names ITSELF, before the generic spawn-error reading, because the retry policy keys on it.
