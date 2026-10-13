@@ -68,13 +68,19 @@ throw（discovery / guard / instrument）· `process.exit(2)`（accounting-emit�
 本树实测：301 个 plugin/scripts 源里 125 个仍带 `--` 字面量比较，六个载体为 0。
 六个载体各自的端到端 CLI 行为由它们**原有的测试文件**继续钉住（本迁移后全部原样通过）。
 
+验证读数（本任务 worktree，scoped gate `scripts/test.sh --for-task … --allow-thin`）：`tests 323 / pass 315 /
+fail 0 / skipped 8 / exit 0`；六个载体的自测（accounting-emit / discovery-path-classify / guard-lineage-check /
+instrument-decay-check / outer-cron-registry / phase-declare）与新钉 `gate-script-base-adoption.test.mjs`
+均在选中集内实跑。
+`anti-drift-touches-check --merge-target develop`：`7 actual file(s), all within declared Touches (17 glob(s))`，exit 0。
+
 ## AC
-- [ ] `.quay/routine-findings.jsonl` 中 finding `parse-args-adoption-split`（routine `semantic-dedup-scan`，runId `semantic-dedup-scan-1791908616513`）所描述的问题被复核并处置
-- [ ] 处置结论可核：要么修掉，要么写明「已有机制在管、失败在哪一步」，⛔ 不以「已注意到」结案
+- [x] `.quay/routine-findings.jsonl` 中 finding `parse-args-adoption-split`（routine `semantic-dedup-scan`，runId `semantic-dedup-scan-1791908616513`）所描述的问题被复核并处置
+- [x] 处置结论可核：要么修掉，要么写明「已有机制在管、失败在哪一步」，⛔ 不以「已注意到」结案
 
 ## DoD
-- [ ] 上面的判据实跑通过
-- [ ] ⛔ 探针只立案不执行：本任务若需要跑产出者/修复，由派发链执行，⛔ 不由例程代跑
+- [x] 上面的判据实跑通过
+- [x] ⛔ 探针只立案不执行：本任务若需要跑产出者/修复，由派发链执行，⛔ 不由例程代跑
 
 ## Touches
 - `plugin/scripts/gate-script-base.ts`
