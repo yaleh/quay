@@ -4,7 +4,7 @@ title: "OSD: resident-driver reached confirmed=0 in all 13 autonomous rounds
   over 24h (both real confirms needed a manual budget override) — fresh
   turn-distribution measurement, call-failed retry policy, per-cluster
   attribution join, and an explicit unmodified-resident-round DoD"
-status: ready
+status: done
 labels:
   - gap
   - defect
