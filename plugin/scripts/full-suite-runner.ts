@@ -459,15 +459,15 @@ function toEpochSeconds(iso: string): number {
 // more is distinguishable as machine-busy rather than n-growth). Best-effort: a ledger write must
 // never fail the run (mirrors checker-cost.sh's fail-open).
 
-/** /proc/loadavg 1min load, or 0 if unreadable (best-effort). */
-export function readLoadAvg(): number {
-  try {
-    const v = Number(String(fs.readFileSync("/proc/loadavg", "utf8")).trim().split(/\s+/)[0]);
-    return Number.isFinite(v) ? v : 0;
-  } catch {
-    return 0;
-  }
-}
+// `/proc/loadavg` 1min reader — ⛔ NOT declared here any more: the body was byte-identical to
+// `packages/quay/src/gate/acceptance-runner.ts`'s `gateLoadAvg` (and, modulo a redundant `String(…)`
+// wrapper, to `packages/quay/src/gate/engine.ts`'s `load1`) — routine `semantic-dedup-scan` finding
+// `loadavg-readers`, task gap-routine-semantic-dedup-scan-loadavg-readers. The ONE implementation now
+// lives in the kernel leaf (the only placement both layers reach: `packages/**` → `plugin/**` is the
+// forbidden reverse edge), and it is re-exported under the ORIGINAL name so this module's public
+// surface — and both live importers (`worker-driver.ts`, `worker-fan-in.ts`; the archived
+// plugin/test/checker-cost.test.mjs lives under archive/ now) — is unchanged. 硬规则 5b: 转出，不复制第二份.
+export { readLoadAvg1 as readLoadAvg } from "../../packages/quay/src/kernel/load-avg.ts";
 
 // ── gap-suite-hub-file-responsibility-strip — accounting family extracted to suite-accounting.ts ──
 // The cgroup/systemd accounting family (per-phase cpu/psi differential reads + the systemd `Consumed`

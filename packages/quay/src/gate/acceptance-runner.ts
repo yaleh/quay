@@ -21,6 +21,11 @@ import path from "node:path";
 // the reverse (defining it here and importing it into the kernel) would create one, since the
 // kernel module is upstream of this file.
 import { shQuote, DEFAULT_ACCEPTANCE_TIMEOUT_MS } from "../kernel/gate-run-options.ts";
+// The `/proc/loadavg` field-0 reader — the ONE implementation shared with the mechanism layer
+// (`plugin/scripts/full-suite-runner.ts` re-exports it as `readLoadAvg`) and with the sibling
+// `gate/engine.ts` cost row. Same kernel-leaf direction as the import above (routine
+// `semantic-dedup-scan` finding `loadavg-readers`).
+import { readLoadAvg1 } from "../kernel/load-avg.ts";
 import type { GateVerdictKind } from "./types.ts";
 
 export interface AcceptanceResult {
@@ -158,15 +163,14 @@ export function gateCostName(command: string, fallback = "acceptance"): string {
   return m ? m[0] : fallback;
 }
 
-/** /proc/loadavg 1min load, or 0 if unreadable (best-effort; same reading as checker-cost.sh). */
-export function gateLoadAvg(): number {
-  try {
-    const v = Number(String(fs.readFileSync("/proc/loadavg", "utf8")).trim().split(/\s+/)[0]);
-    return Number.isFinite(v) ? v : 0;
-  } catch {
-    return 0;
-  }
-}
+// The `/proc/loadavg` 1min reader this file used to declare as `gateLoadAvg` now lives in
+// `../kernel/load-avg.ts` — its body was BYTE-IDENTICAL to `plugin/scripts/full-suite-runner.ts`'s
+// `readLoadAvg` (and the same reading again, modulo a redundant `String(…)`, as
+// `packages/quay/src/gate/engine.ts`'s `load1`) — routine `semantic-dedup-scan` finding
+// `loadavg-readers`, task gap-routine-semantic-dedup-scan-loadavg-readers. The local copy (and its
+// now-stale "same reading as checker-cost.sh" comment) is DELETED rather than kept as a shim: it had
+// no consumer outside this file, and a wrapper here would be a standing invitation to re-inline the
+// body. 硬规则 5b — 转出/删除，不复制第二份.
 
 /** Append one {name, ms, n, load, exit, ts} line to <cwd>/.quay/checker-cost.jsonl (QUAY_COST_LEDGER=1 only). */
 export function recordGateCost(cwd: string, name: string, ms: number, exit: number | null): void {
@@ -178,7 +182,7 @@ export function recordGateCost(cwd: string, name: string, ms: number, exit: numb
       name,
       ms,
       n: 0,
-      load: gateLoadAvg(),
+      load: readLoadAvg1(),
       exit: exit ?? -1,
       ts: new Date().toISOString(),
     };
