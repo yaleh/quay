@@ -43,6 +43,7 @@ import {
   writeOwnedFile,
 } from "../scripts/cross-project-dogfood-routine.ts";
 import { INVOKED_BY_MANUAL, INVOKED_BY_RESIDENT } from "../scripts/discovery-method-routine.ts";
+import { artifactsComplete, detectShape } from "../../packages/quay/src/kernel/task-shape-artifacts.ts";
 
 const ROUTINE_SRC = new URL("../scripts/cross-project-dogfood-routine.ts", import.meta.url);
 
@@ -676,6 +677,11 @@ test("the filed task body carries the round, the source project, the cited posit
   assert.match(body, /## Touches\n/);
   assert.match(body, /- `plugin\/scripts\/worker-driver\.ts`/);
   assert.ok(body.includes(`\`tasks/${filedTaskId(entry)}.md\``), "the task must declare its OWN file in Touches");
+  // ⛔ The filed task must be PROMOTABLE. A body the author→ready gate cannot recognize would make the
+  // whole point of filing it (a real fix landing on Quay's tree) unreachable, and nothing else in this
+  // file would notice — so the SAME shape judge the pool uses is run against the rendered body.
+  assert.equal(detectShape(body), "plan");
+  assert.deepEqual(artifactsComplete(body), { shape: "plan", complete: true, artifacts: { proposal: true, plan: true, ac: true, dod: true }, missing: [] });
 });
 
 test("the verifier/refuter preamble names the repo root, each readable project root and the cited positions", () => {
