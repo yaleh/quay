@@ -28,6 +28,7 @@
 
 import { test } from "node:test";
 import assert from "node:assert/strict";
+import { createHash } from "node:crypto";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
@@ -36,20 +37,30 @@ import {
   DEFAULT_RATE,
   FILING_WINDOW_MS,
   boardKeys,
+  collisionEscapeId,
   countRecentFilings,
   dedupReading,
+  escalationKey,
+  escalationMarkerByKey,
+  escalationMarkerLine,
   findingKey,
   findingSubjectKey,
   gateEscalation,
   gateFinding,
   isActionable,
+  isThrottleRejection,
   proseKey,
   readTaskStatus,
   recurrenceByKey,
   recurrenceOrder,
   renderRoutineTaskBody,
+  repeatRejectionDecision,
+  repeatRejectionMarkerLine,
+  REPEAT_REJECTION_ROUNDS,
   routineFindingCandidateText,
   routineQuotaDecision,
+  routineTaskId,
+  throttleRejectionStreakByKey,
 } from "../scripts/routine-file-gate.ts";
 
 // ── the production fixtures (verbatim from the carrier) ──────────────────────────────────────────
@@ -618,4 +629,278 @@ test("routineQuotaDecision (AC4) — 三组对照：accept / `rate:` 拒绝 / `g
   // 全局满优先于 per-routine 满（全局是更外层的硬顶）：两者都满 ⇒ 读作 global-rate。
   const d = routineQuotaDecision({ perRoutine: 9, global: 99 }, cfg);
   assert.match(d.reason, /^global-rate:/, "两者都满 ⇒ 报更外层的 global-rate");
+});
+
+// ── ⑱–㉓ THE ELEVENTH CROSSING (gap-ac214-eleventh-crossing-repeat-remedy-rejected-by-…) ─────────
+//
+// THE DEFECT, read off the routine's own carrier (`.quay/routine-findings.jsonl`, routine
+// `freshness-refresh`): the upgrade face's finding for AC-238/239 was re-produced every round and
+// refused every round — once `collision:` (2026-10-12T21:38:59Z) and then SIX consecutive `rate:`
+// rounds on 2026-10-13 (`03:41:42Z` … `16:03:42Z`) — and NOTHING consumed those refusals. Two
+// independent causes, one shape:
+//
+//   (a) THE FILE-NAME SPACE RAN OUT. The base slug
+//       `gap-routine-freshness-refresh-stale-goal-009-ac-238` AND its deterministic
+//       `-<sha1(findingKey)[0:8]>` suffix `-79f43e79` were BOTH already on disk. The hash is a pure
+//       function of the finding key, and the key is a pure function of the prose the probe
+//       regenerates from the subject id — so the same finding produces the same two names forever,
+//       and `reject("collision")` SEALED the subject. The old code read 「这条 remedy 以前立过案」 as
+//       「以后不必再立」, while the STATE it names (evidence going stale as develop advances) comes back
+//       by construction.
+//   (b) THE THROTTLE REFUSED AND FORGOT. Six consecutive rounds recorded `rejected: [{…}]` for the
+//       same subject while its remedy was `executable`; `rejected` is an array nobody reads, so
+//       「the work was refused six times running」 and 「the round found nothing」 are the SAME SHAPE on
+//       the carrier (硬规则 3b / 4b).
+//
+// Both are 「一旦转绿即永久绿」 in the FILING-GATE space — the parent AC's own theme, one layer below
+// the criterion the ninth/tenth crossings fixed. What follows makes each fix TAKEABLE-FALSE.
+//
+// ⛔ NOT under test here: the throttle POLICY (K, the window width, who owns the budget). That is a
+// human question (人 2026-09-20 裁定) and nothing below changes it.
+
+const CROSSING_NOW = Date.parse("2026-10-13T16:03:42.469Z");
+const AC238_SUBJECT = "GOAL-009-AC-238";
+const AC238_FINDING = {
+  id: "stale-goal-009-ac-238",
+  kind: "stale-subject",
+  subject: AC238_SUBJECT,
+  symbols: [AC238_SUBJECT, "upgrade-face"],
+  files: [".quay/goal-freshness-margin.json", "plugin/freshness-producers.json"],
+  verdict: "act-now",
+  rationale: "only 7 of the 200-commit window remain and the upgrade face has not produced a record since 2026-10-09",
+  suggestedAction: "re-run upgrade-face on host B",
+  producer: "upgrade-face",
+  margin: 7,
+};
+
+/** One carrier `finding` record + one `filing-round` record, in the PRODUCTION shape (the records
+ *  the probe-routine actually appends), so the reader is exercised against its real input. */
+function crossingRound({ ts, runId, findingId, subject = AC238_SUBJECT, rejected = [], accepted = false }) {
+  return [
+    {
+      ts: new Date(ts).toISOString(), kind: "finding", routine: "freshness-refresh", probe: "freshness-refresh",
+      runId, findingId, dupKind: "stale-subject", subject, symbols: [subject, "upgrade-face"],
+      files: [".quay/goal-freshness-margin.json"], verdict: "act-now",
+      rationale: `${subject} is out of window`, suggestedAction: "re-run upgrade-face on host B", margin: 7,
+    },
+    {
+      ts: new Date(ts).toISOString(), kind: "filing-round", routine: "freshness-refresh", probe: "freshness-refresh",
+      runId, evaluated: true, candidates: 1, filed: accepted ? [`gap-routine-freshness-refresh-x`] : [],
+      escalated: [], remedy_availability: "executable",
+      rejected: rejected.map((r) => ({ findingId, gate: r.gate, reason: r.reason })),
+      dedup_state: [{ findingId, taskId: null, accepted, state: "novel", matchedKey: null }],
+      errors: [],
+    },
+  ];
+}
+
+function writeCrossingCarrier(records) {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "gate-crossing-"));
+  const p = path.join(dir, "routine-findings.jsonl");
+  fs.writeFileSync(p, records.map((r) => JSON.stringify(r)).join("\n") + "\n", "utf8");
+  return p;
+}
+
+test("⑱ isThrottleRejection — ONLY the two bookkeeping axes, read BY POSITION (⛔ not by keyword)", () => {
+  // the throttle axes: the finding was good work the BOOKKEEPING could not place
+  assert.equal(isThrottleRejection("quality-dedup-rate", "rate: 3 routine-filed tasks this window ≥ cap 3 (subject recurrence: 31 round(s))"), true);
+  assert.equal(isThrottleRejection("quality-dedup-rate", "global-rate: 9 total routine-filed tasks this window ≥ global ceiling 8"), true);
+  assert.equal(isThrottleRejection("collision", "collision: tasks/x.md already exists and is not this finding ⇒ not overwriting"), true);
+
+  // the axes that JUDGE the finding itself — repetition says nothing new about them
+  assert.equal(isThrottleRejection("quality-dedup-rate", "quality: no actionable `## Finding` with reproduction evidence"), false);
+  assert.equal(isThrottleRejection("quality-dedup-rate", "dedup: an equivalent finding is already OPEN on the board (matched key: symbols:…, holder: x.md [status: ready])"), false);
+  assert.equal(isThrottleRejection("action", "action: finding declares no requested action (suggestedAction=\"leave\")"), false);
+  assert.equal(isThrottleRejection("producer", "producer: 'ghost-face' is not registered"), false);
+
+  // 硬规则 2 — a MENTION is not a match: this line names the rate gate but is a `dedup:` rejection.
+  assert.equal(isThrottleRejection("quality-dedup-rate", "dedup: matched key 'rate: 3 routine-filed tasks'"), false);
+});
+
+test("⑲ collisionEscapeId — a FREE name or `null`; it can never hand back a name that exists", () => {
+  const base = "gap-routine-freshness-refresh-stale-goal-009-ac-238-79f43e79";
+  const taken = new Set([base]);
+  const exists = (x) => taken.has(x);
+
+  const first = collisionEscapeId(base, CROSSING_NOW, exists);
+  assert.equal(first, `${base}-r20261013T160342Z`, "the round's own UTC stamp is the one component that is NOT a function of the finding");
+  assert.equal(exists(first), false, "⛔ it must never return a taken name — that is what 「绝不覆盖既有任务体」 reduces to here");
+
+  // deterministic given the clock ⇒ a second filing in the SAME round walks to `-2` (not random)
+  taken.add(first);
+  assert.equal(collisionEscapeId(base, CROSSING_NOW, exists), `${base}-r20261013T160342Z-2`);
+
+  // a LATER round gets a DIFFERENT name — the property the old (pure-function-of-the-finding) suffix
+  // could never have, and the whole reason the subject was sealed.
+  const later = collisionEscapeId(base, CROSSING_NOW + 7_200_000, exists);
+  assert.equal(later, `${base}-r20261013T180342Z`);
+  assert.notEqual(later, first);
+
+  // exhaustion is a NAMED outcome (the caller reports it), ⛔ never a name that could overwrite
+  assert.equal(collisionEscapeId(base, CROSSING_NOW, () => true), null);
+});
+
+test("⑳ throttleRejectionStreakByKey — counts CONSECUTIVE rounds, keyed by SUBJECT across regenerated findingIds", () => {
+  // The production findingIds really did differ across the six rounds (the probe regenerates the slug):
+  // `stale-goal-009-ac-238`, `stale-goal-009-ac-238-upgrade-face`, `freshness-stale-goal-009-ac-238`.
+  // Keying on the findingId would read one 6-round run as three 1-round ones ⇒ the subject key is what
+  // the reader must count by.
+  const rate = { gate: "quality-dedup-rate", reason: "rate: 3 routine-filed tasks this window ≥ cap 3 (subject recurrence: 31 round(s))" };
+  const rounds = [
+    ...crossingRound({ ts: CROSSING_NOW - 1_500_000, runId: "r-a", findingId: "stale-goal-009-ac-238-upgrade-face", rejected: [rate] }),
+    ...crossingRound({ ts: CROSSING_NOW - 1_200_000, runId: "r-b", findingId: "freshness-stale-goal-009-ac-238", rejected: [rate] }),
+    ...crossingRound({ ts: CROSSING_NOW - 900_000, runId: "r-c", findingId: "stale-goal-009-ac-238", rejected: [rate] }),
+  ];
+  const p = writeCrossingCarrier(rounds);
+  const map = throttleRejectionStreakByKey(p, "freshness-refresh", CROSSING_NOW);
+  assert.ok(map instanceof Map, "a readable carrier is a Map (⛔ not null)");
+  assert.equal(map.get(`subject:${AC238_SUBJECT}`).rounds, 3, "three consecutive throttle refusals, counted by SUBJECT");
+  assert.deepEqual(map.get(`subject:${AC238_SUBJECT}`).gates, ["rate:", "rate:", "rate:"], "newest-first, one per round — ⛔ a bare count would collapse `rate:`/`collision:` refusals into one number");
+
+  // ① a round that does NOT mention the subject BREAKS the run — 「连续」 means consecutive, and a
+  //    silence (the finding was inside its window that round) is not a refusal. The middle round here
+  //    RAN and filed a `filing-round`; it simply carried a different subject.
+  const broken = writeCrossingCarrier([
+    ...crossingRound({ ts: CROSSING_NOW - 1_500_000, runId: "r-a", findingId: "f1", rejected: [rate] }),
+    ...crossingRound({ ts: CROSSING_NOW - 1_200_000, runId: "r-b", findingId: "f2", subject: "GOAL-009-AC-999", rejected: [] }),
+    ...crossingRound({ ts: CROSSING_NOW - 900_000, runId: "r-c", findingId: "f3", rejected: [rate] }),
+  ]);
+  assert.equal(throttleRejectionStreakByKey(broken, "freshness-refresh", CROSSING_NOW).get(`subject:${AC238_SUBJECT}`).rounds, 1,
+    "a silent round ends the run (⛔ silence is not continuation)");
+
+  // ② a round in which the subject was ACCEPTED also ends it
+  const acceptedMid = writeCrossingCarrier([
+    ...crossingRound({ ts: CROSSING_NOW - 1_500_000, runId: "r-a", findingId: "f1", rejected: [rate] }),
+    ...crossingRound({ ts: CROSSING_NOW - 1_200_000, runId: "r-b", findingId: "f2", accepted: true }),
+    ...crossingRound({ ts: CROSSING_NOW - 900_000, runId: "r-c", findingId: "f3", rejected: [rate] }),
+  ]);
+  assert.equal(throttleRejectionStreakByKey(acceptedMid, "freshness-refresh", CROSSING_NOW).get(`subject:${AC238_SUBJECT}`).rounds, 1,
+    "a filing ends the run — the subject was placed, so the refusals are no longer consecutive");
+
+  // ③ a NON-throttle refusal ends it too (the axes must not be merged)
+  const dedupRefused = writeCrossingCarrier([
+    ...crossingRound({ ts: CROSSING_NOW - 1_500_000, runId: "r-a", findingId: "f1", rejected: [{ gate: "quality-dedup-rate", reason: "dedup: an equivalent finding is already OPEN on the board (matched key: symbols:x)" }] }),
+    ...crossingRound({ ts: CROSSING_NOW - 900_000, runId: "r-c", findingId: "f3", rejected: [rate] }),
+  ]);
+  assert.equal(throttleRejectionStreakByKey(dedupRefused, "freshness-refresh", CROSSING_NOW).get(`subject:${AC238_SUBJECT}`).rounds, 1,
+    "a `dedup:` refusal is a judgment about the finding ⇒ it is not part of the throttle run");
+
+  // ④ another routine's rounds are not this routine's history
+  assert.equal(throttleRejectionStreakByKey(p, "semantic-dedup-scan", CROSSING_NOW).size, 0);
+
+  // ⑤ THREE-VALUED (硬规则 3b): an absent carrier and an unreadable one are NOT 「0 rounds」.
+  assert.equal(throttleRejectionStreakByKey(path.join(os.tmpdir(), "does-not-exist-9f3a.jsonl"), "freshness-refresh", CROSSING_NOW), null);
+  const garbage = writeCrossingCarrier([]);
+  fs.writeFileSync(garbage, "not json at all\nstill not json\n", "utf8");
+  assert.equal(throttleRejectionStreakByKey(garbage, "freshness-refresh", CROSSING_NOW), null,
+    "readable-but-unintelligible ⇒ null, ⛔ never a Map that reads as 「没有连续拒绝」");
+  fs.writeFileSync(garbage, "", "utf8");
+  assert.equal(throttleRejectionStreakByKey(garbage, "freshness-refresh", CROSSING_NOW).size, 0, "an EMPTY carrier is a legitimate reading (nothing was ever refused)");
+  fs.rmSync(path.dirname(p), { recursive: true, force: true });
+  fs.rmSync(path.dirname(broken), { recursive: true, force: true });
+  fs.rmSync(path.dirname(acceptedMid), { recursive: true, force: true });
+  fs.rmSync(path.dirname(dedupRefused), { recursive: true, force: true });
+  fs.rmSync(path.dirname(garbage), { recursive: true, force: true });
+});
+
+test("㉑ repeatRejectionDecision — four premises, EACH able to take false, and 未评估 kept apart from 不该升级", () => {
+  const rate = "rate: 3 routine-filed tasks this window ≥ cap 3 (subject recurrence: 31 round(s))";
+  const all = { gate: "quality-dedup-rate", reason: rate, priorRounds: 1, margin: -1, remedyStatus: "executable" };
+
+  const yes = repeatRejectionDecision(all);
+  assert.equal(yes.escalate, true, "negative margin + executable remedy + 2nd consecutive throttle refusal ⇒ human channel");
+  assert.equal(yes.evaluated, true);
+  assert.match(yes.reason, /rejection #2 in a row/);
+
+  // ① 轴：a non-throttle refusal is not this question
+  assert.equal(repeatRejectionDecision({ ...all, reason: "dedup: already OPEN on the board" }).escalate, false);
+  assert.equal(repeatRejectionDecision({ ...all, reason: "dedup: already OPEN on the board" }).evaluated, true);
+  // ② remedy：ONLY 'executable' — 'blocked' has its own channel, and the other two are readings we did
+  //    not take (routing them here would print a cause the round did not observe).
+  for (const st of ["blocked", "not-evaluated", "not-declared"]) {
+    const r = repeatRejectionDecision({ ...all, remedyStatus: st });
+    assert.equal(r.escalate, false, `remedy '${st}' must not reach this channel`);
+    assert.equal(r.evaluated, true, `remedy '${st}' is a READING, not a missing premise`);
+  }
+  // ③ margin：the finding's OWN declared margin. `null` (the probe did not report it) is
+  //    NOT-EVALUATED — ⛔ 缺值 ≠ 负值 (硬规则 6/3b).
+  const noMargin = repeatRejectionDecision({ ...all, margin: null });
+  assert.equal(noMargin.escalate, false);
+  assert.equal(noMargin.evaluated, false, "「探针没报 margin」 ⇒ 未评估，⛔ 不得写成「不该升级」的形态");
+  assert.match(noMargin.reason, /NOT-EVALUATED/);
+  // and a non-negative margin is a READING that says the policy is working as designed
+  const healthy = repeatRejectionDecision({ ...all, margin: 7 });
+  assert.equal(healthy.escalate, false);
+  assert.equal(healthy.evaluated, true, "margin +7 is evaluated — it is a reading, NOT a missing premise");
+  // ④ 连续：one refusal is a normal throttle event; the SECOND in a row is the stuck state.
+  const once = repeatRejectionDecision({ ...all, priorRounds: 0 });
+  assert.equal(once.escalate, false);
+  assert.equal(once.evaluated, true);
+  assert.match(once.reason, /not yet — this is rejection #1/);
+  assert.equal(REPEAT_REJECTION_ROUNDS, 2, "the declared threshold is what the message above says");
+  // a carrier we could not read ⇒ 「连续几轮」 UNKNOWN ⇒ ⛔ escalate nothing, and say so
+  const unreadable = repeatRejectionDecision({ ...all, priorRounds: null });
+  assert.equal(unreadable.escalate, false);
+  assert.equal(unreadable.evaluated, false);
+  assert.match(unreadable.reason, /NOT-EVALUATED/);
+});
+
+test("㉒ the repeat-rejection escalation body: its OWN marker on the channel, and a prose key ⛔ different from the dispatchable one", () => {
+  const body = renderRoutineTaskBody({ ...AC238_FINDING }, {
+    routine: "freshness-refresh", probe: "freshness-refresh", runId: "r1",
+    carrier: ".quay/routine-findings.jsonl", ts: "2026-10-13T16:03:42.469Z",
+    taskId: "gap-routine-freshness-refresh-stale-goal-009-ac-238-r20261013T160342Z",
+  }, { repeatRejection: { priorRounds: 5, gates: ["rate:"], currentReason: "rate: 3 routine-filed tasks this window ≥ cap 3", margin: -1 } });
+
+  // the marker IS the first line of `## Finding` (that is what keeps the two prose keys structurally
+  // different — a marker placed after a >200-char rationale would collide, and the escalation would
+  // then eat the dispatchable filing of the same subject forever, silently).
+  const firstLine = body.split("\n")[1];
+  assert.match(firstLine, /^- repeat-rejection：`6` consecutive filing-round\(s\) rejected this subject on the throttle gate · subject：`GOAL-009-AC-238` · remedy-availability：`executable`$/);
+  assert.notEqual(proseKey(body), proseKey(routineFindingCandidateText(AC238_FINDING)),
+    "⛔ 升级体与可派发体的 prose key 必须不同，否则升级体会永久吃掉该主体的派发立案");
+
+  // ⛔ the escalation body carries NO `- 观测符号：` bullet (the symbol key is the DISPATCH space)
+  assert.doesNotMatch(body, /观测符号/);
+  assert.match(body, /- subject：`GOAL-009-AC-238`/);
+  // ⛔ and it does not claim the REMEDY is unperformable — that is the OTHER form's cause
+  assert.doesNotMatch(body, /不可执行/);
+  assert.match(body, /连续 6 轮/);
+  assert.match(body, /不裁定限流策略/);
+  assert.match(body, /## AC/);
+  assert.match(body, /## DoD/);
+
+  // ONE grammar, two forms: BOTH round-trip through the board reader (硬规则 5b — a second regex
+  // would let reader and renderer drift apart silently), and the two keys stay distinguishable.
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "gate-marker-"));
+  fs.writeFileSync(path.join(dir, "repeat.md"), body, "utf8");
+  fs.writeFileSync(path.join(dir, "blocked.md"),
+    `---\nid: blocked\n---\n## Finding\n${escalationMarkerLine("GOAL-009-AC-999", "host-b-ssh")}\n`, "utf8");
+  const map = escalationMarkerByKey(dir);
+  assert.deepEqual([...map.keys()].sort(), ["subject:GOAL-009-AC-238", "subject:GOAL-009-AC-999"],
+    "the reader recognizes BOTH forms (a repeat-rejection escalation must be re-readable from the board)");
+  assert.equal(map.get("subject:GOAL-009-AC-238"), "repeat.md");
+  // escalationKey is the same identity the streak is keyed by — one subject, one escalation
+  assert.equal(escalationKey(AC238_FINDING), `subject:${AC238_SUBJECT}`);
+  // a plain dispatchable task is NOT an escalation (the reverse control)
+  fs.writeFileSync(path.join(dir, "plain.md"), `---\nid: plain\n---\n## Finding\nordinary body\n`, "utf8");
+  assert.equal(escalationMarkerByKey(dir).has("subject:plain"), false);
+  fs.rmSync(dir, { recursive: true, force: true });
+});
+
+test("㉓ routineTaskId + collisionEscapeId compose into the OLD two names the live carrier actually held", () => {
+  // The 2026-10-12T21:38:59Z record names them verbatim:
+  //   collision: tasks/gap-routine-freshness-refresh-stale-goal-009-ac-238-79f43e79.md already exists
+  // so both the base and the hash-suffixed name are reconstructible — this pins that the escape is a
+  // THIRD name, not a re-derivation of either.
+  const base = routineTaskId("freshness-refresh", "stale-goal-009-ac-238");
+  assert.equal(base, "gap-routine-freshness-refresh-stale-goal-009-ac-238");
+  const hash8 = createHash("sha1").update(findingKey(routineFindingCandidateText(AC238_FINDING))).digest("hex").slice(0, 8);
+  const hashed = `${base}-${hash8}`;
+  const taken = new Set([base, hashed]);
+  const escaped = collisionEscapeId(hashed, CROSSING_NOW, (x) => taken.has(x));
+  assert.equal(escaped, `${hashed}-r20261013T160342Z`);
+  assert.notEqual(escaped, base);
+  assert.notEqual(escaped, hashed);
+  assert.equal(taken.has(escaped), false, "the third name is free ⇒ the subject is no longer sealed in name space");
 });

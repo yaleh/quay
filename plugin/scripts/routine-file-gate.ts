@@ -238,6 +238,191 @@ export function recurrenceOrder(
   return [...ranked].sort((a, b) => (b.recurrence as number) - (a.recurrence as number) || a.index - b.index);
 }
 
+// ── the THROTTLE gates' consecutive-rejection streak (a reading, ⛔ not a gate) ───────────────────
+//
+// WHY THIS EXISTS (measured 2026-10-13, `gap-ac214-eleventh-crossing-repeat-remedy-rejected-by-…`).
+// `.quay/routine-findings.jsonl`, routine `freshness-refresh`: six consecutive `filing-round`
+// records on 2026-10-13 (`03:41:42Z` … `16:03:42Z`) each carrying the SAME two subjects in
+// `rejected` — `rate: 3 routine-filed tasks this window ≥ cap 3 (subject recurrence: 26 → 31
+// round(s))` — and one more (`2026-10-12T21:38:59Z`) rejecting them `collision:`. The subjects are
+// AC-238/239, whose owner producer had not run since `2026-10-09T13:18:40Z`. Every one of those
+// rejections was HONESTLY RECORDED and none of them had a consumer: `rejected` is an array nobody
+// reads, so "the work was refused six times in a row" and "the round found nothing" are shaped
+// identically on the carrier (硬规则 3b / 4b). This function is the reading that makes the
+// difference TAKEABLE — the raw material of the escalation below.
+//
+// ⛔ IT IS NOT A GATE. It never accepts or rejects anything; it counts. The decision that consumes it
+// is `repeatRejectionDecision`, and the throttle POLICY itself (how many filings a window allows) is
+// deliberately NOT touched by any of this.
+
+/** Does this disposition belong to the THROTTLE axis rather than to a judgment about the finding
+ *  itself? `rate:`/`global-rate:` (the quota policy) and `collision` (the file-name space) are both
+ *  cases where the finding was GOOD WORK the bookkeeping could not place — as opposed to `action:`
+ *  (not work at all), `quality:`/`dedup:` (the finding itself is judged wrong or duplicate) and
+ *  `producer:` (the probe invented a subject). Only the throttle axis is a candidate for "the work is
+ *  right, the bookkeeping is stuck" ⇒ only it escalates on repetition. */
+export function isThrottleRejection(gate: string, reason: string): boolean {
+  if (gate === "collision") return true;
+  return /^(rate|global-rate):/.test(String(reason ?? ""));
+}
+
+/** How many consecutive throttle rejections a subject must accumulate before the NEXT one is routed
+ *  to the human-visible channel instead of being recorded and forgotten. 「连续 ≥2 轮」 — one
+ *  rejection is a normal throttle event; two in a row on the same subject is a stuck state. */
+export const REPEAT_REJECTION_ROUNDS = 2;
+
+/** What the streak walk found for one subject key. `rounds` counts the CONSECUTIVE most-recent
+ *  `filing-round` records of this routine in which the subject was rejected on the throttle axis,
+ *  walking backwards from the newest. `gates` keeps WHICH gate (`rate:` / `global-rate:` /
+ *  `collision:`) each of those rounds reported, in newest-first order — ⛔ not collapsed into the
+ *  count, so a reader can tell "six rate rejections" from "one rate and one collision". */
+export interface ThrottleStreak {
+  rounds: number;
+  gates: string[];
+  /** The verbatim reason of the most recent one (`null` when there were none). */
+  lastReason: string | null;
+}
+
+/** Subject key → its consecutive throttle-rejection streak.
+ *
+ *  THREE-VALUED, like every other carrier reader here (硬规则 3b):
+ *    `Map`  = read it; a subject absent from it has NO consecutive throttle rejections (a complete
+ *             reading makes absence informative);
+ *    `null` = the carrier is unreadable, or readable-but-unintelligible ⇒ the streak is UNKNOWN and
+ *             callers must NOT escalate on it (「读不出」⛔ 不得伪装成「连续 0 轮」or as 「已连续多轮」).
+ *
+ *  KEYED BY `escalationKey` (the SUBJECT, `subject:GOAL-009-AC-NNN`), not by the probe's `findingId`:
+ *  measured over the six rounds above, the SAME subject arrived under three different findingIds
+ *  (`stale-goal-009-ac-238`, `stale-goal-009-ac-238-upgrade-face`, `freshness-stale-goal-009-ac-238`)
+ *  because the probe regenerates the slug every round. Keying on it would read a 6-round streak as
+ *  three 1-round ones. The `filing-round` records carry only findingIds, so the link is the `finding`
+ *  records of the SAME `runId` — which is exactly how the escalation's own dedup key is derived.
+ *
+ *  A round that does not MENTION the subject (the probe filed nothing for it that round — e.g. the
+ *  evidence was inside its window) BREAKS the run: 「连续」 means consecutive, and treating silence as
+ *  continuation would let a rejection from weeks ago add itself to one from today. */
+export function throttleRejectionStreakByKey(
+  carrierPath: string, routine: string, nowMs: number, windowMs: number = FILING_WINDOW_MS,
+): Map<string, ThrottleStreak> | null {
+  let text: string;
+  try { text = fs.readFileSync(carrierPath, "utf8"); } catch { return null; }
+  const roundFor = new Map<string, string>(); // `${runId}|${findingId}` → escalation key
+  const rounds: Record<string, unknown>[] = [];
+  let nonBlank = 0;
+  let parsed = 0;
+  for (const line of text.split("\n")) {
+    if (!line.trim()) continue;
+    nonBlank += 1;
+    let rec: unknown;
+    try { rec = JSON.parse(line); } catch { continue; }
+    if (!rec || typeof rec !== "object" || Array.isArray(rec)) continue;
+    parsed += 1;
+    const r = rec as Record<string, unknown>;
+    if (r.kind === "finding") {
+      const run = typeof r.runId === "string" ? r.runId.trim() : "";
+      const id = typeof r.findingId === "string" ? r.findingId.trim() : "";
+      const key = escalationKey(carrierFinding(r));
+      if (run && id && key) roundFor.set(`${run}|${id}`, key);
+      continue;
+    }
+    if (r.kind !== "filing-round") continue;
+    if (String(r.routine ?? "").trim() !== String(routine ?? "").trim()) continue;
+    const at = Date.parse(String(r.ts ?? ""));
+    // Same window contract as `countRecentFilings`: an unparseable/out-of-window ts is skipped (it
+    // cannot be attributed to a round the throttle actually saw).
+    if (!Number.isFinite(at) || nowMs - at > windowMs || at > nowMs) continue;
+    rounds.push(r);
+  }
+  if (nonBlank > 0 && parsed === 0) return null;
+  rounds.sort((a, b) => String(a.ts ?? "").localeCompare(String(b.ts ?? "")));
+  const keys = new Set<string>(roundFor.values());
+  const out = new Map<string, ThrottleStreak>();
+  for (const key of keys) {
+    let n = 0;
+    const gates: string[] = [];
+    let lastReason: string | null = null;
+    for (let i = rounds.length - 1; i >= 0; i--) {
+      const rec = rounds[i];
+      const run = typeof rec.runId === "string" ? rec.runId.trim() : "";
+      const link = (id: unknown): boolean => roundFor.get(`${run}|${String(id ?? "").trim()}`) === key;
+      const accepted = (Array.isArray(rec.dedup_state) ? rec.dedup_state : [])
+        .some((d) => d && typeof d === "object" && (d as Record<string, unknown>).accepted === true && link((d as Record<string, unknown>).findingId));
+      if (accepted) break; // it got through that round ⇒ the run is over
+      const entry = (Array.isArray(rec.rejected) ? rec.rejected : [])
+        .find((x) => x && typeof x === "object" && link((x as Record<string, unknown>).findingId)) as Record<string, unknown> | undefined;
+      if (!entry) break; // not mentioned ⇒ no information about this subject ⇒ 连续 ends here
+      if (!isThrottleRejection(String(entry.gate ?? ""), String(entry.reason ?? ""))) break;
+      n += 1;
+      gates.push(String(entry.reason ?? "").split(" ")[0].replace(/:$/, ":"));
+      if (n === 1) lastReason = String(entry.reason ?? "");
+    }
+    if (n > 0) out.set(key, { rounds: n, gates, lastReason });
+  }
+  return out;
+}
+
+/** The repeating rejection's disposition. Separate from the streak READING because the decision has
+ *  three independent inputs, each of which can independently make the escalation UNEVALUABLE — and
+ *  「未评估」 must not be written in the shape of 「不该升级」 (硬规则 3b). */
+export interface RepeatRejectionReading {
+  escalate: boolean;
+  /** `false` = the question could not be answered (a premise was missing/unreadable) ⇒ the caller
+   *  must fall back to the pre-existing behaviour (a plain rejection) and SAY SO in the reason. */
+  evaluated: boolean;
+  /** The audit line — always names WHY, verbatim facts only. */
+  reason: string;
+}
+
+/** Should THIS round's throttle rejection be routed to the human-visible channel instead of being
+ *  recorded and forgotten? Every input is a reading the caller already has; this function does no I/O.
+ *
+ *  The four premises, each independently able to take false:
+ *   ① the rejection is on the THROTTLE axis (`isThrottleRejection`) — a `quality:`/`dedup:` rejection
+ *      is about the finding itself and repetition says nothing new about it;
+ *   ② the subject's margin is NEGATIVE (the finding's own declared `margin`, the same field the probe
+ *      contract requires). ⛔ `null` (the probe did not report it) is NOT "0" and NOT "negative": it
+ *      is not-evaluated;
+ *   ③ the round's remedy availability is `executable` — ⛔ ONLY this value. `blocked` already has its
+ *      own channel (`remedyGatesProducer`) and `not-declared`/`not-evaluated` are premises we could
+ *      not read; routing them here would print a cause the round did not observe;
+ *   ④ `priorRounds + 1 >= REPEAT_REJECTION_ROUNDS`: this rejection is the Nth consecutive one.
+ *
+ *  ⛔ It does NOT decide the throttle policy. Whether the cap should be higher, the window narrower,
+ *  or the budget owned differently is a HUMAN question (人 2026-09-20 裁定); all this function
+ *  guarantees is that a policy refusal is not SILENT. */
+export function repeatRejectionDecision(o: {
+  gate: string;
+  reason: string;
+  priorRounds: number | null;
+  margin: number | null;
+  remedyStatus: string;
+}): RepeatRejectionReading {
+  if (!isThrottleRejection(o.gate, o.reason)) {
+    return { escalate: false, evaluated: true, reason: `repeat-rejection: not applicable — the ${o.gate} gate is a judgment about the finding, ⛔ not a throttle refusal` };
+  }
+  if (o.remedyStatus !== "executable") {
+    return { escalate: false, evaluated: true, reason: `repeat-rejection: not applicable — remedy availability is '${o.remedyStatus}', so the refusal is not 「workable remedy starved by the bookkeeping」` };
+  }
+  if (o.margin === null) {
+    return { escalate: false, evaluated: false, reason: "repeat-rejection: NOT-EVALUATED — the finding declares no `margin`, so 「主体已越界」 cannot be read (⛔ 缺值 ≠ 负值)" };
+  }
+  if (!(o.margin < 0)) {
+    return { escalate: false, evaluated: true, reason: `repeat-rejection: not applicable — the subject's margin is ${o.margin} (⛔ not negative), so a throttle refusal is the policy working as designed` };
+  }
+  if (o.priorRounds === null) {
+    return { escalate: false, evaluated: false, reason: "repeat-rejection: NOT-EVALUATED — the carrier's rejection history could not be read, so 「连续几轮」 is unknown (⛔ not 0)" };
+  }
+  const total = o.priorRounds + 1;
+  if (total < REPEAT_REJECTION_ROUNDS) {
+    return { escalate: false, evaluated: true, reason: `repeat-rejection: not yet — this is rejection #${total} of a run, threshold is ${REPEAT_REJECTION_ROUNDS}` };
+  }
+  return {
+    escalate: true,
+    evaluated: true,
+    reason: `repeat-rejection: rejection #${total} in a row on the throttle gate (subject margin ${o.margin} < 0, remedy availability 'executable') — this round's refusal is ${JSON.stringify(o.reason)} ⇒ routed to the HUMAN-VISIBLE channel, ⛔ not recorded as one more silent 'rejected' entry`,
+  };
+}
+
 // ── quality ──────────────────────────────────────────────────────────────────────────────────────
 // A finding is actionable iff it has a non-trivial `## Finding` AND cites reproduction evidence (a
 // command, a path, a diff/commit ref, a test name) — not a vague concern.
@@ -606,6 +791,43 @@ export function routineTaskId(routine: string, findingId: string | null): string
   return `${ROUTINE_TASK_PREFIX}${a}-${b}`.slice(0, 100).replace(/-$/, "");
 }
 
+/** How many escape candidates `collisionEscapeId` will try before it gives up. A BOUND exists because
+ *  an unbounded loop over a name space is not a mechanism, it is a hang; the bound is declared here so
+ *  the failure direction ("no id available") is a named outcome rather than a timeout. */
+export const COLLISION_ESCAPE_MAX = 100;
+
+/** The THIRD id in the derivation chain: base slug → `base-<sha1(findingKey)[0:8]>` → this.
+ *
+ *  WHY IT EXISTS (measured 2026-10-12T21:38:59Z, `.quay/routine-findings.jsonl`): the finding
+ *  `stale-goal-009-ac-238` derived the base name `gap-routine-freshness-refresh-stale-goal-009-ac-238`
+ *  AND the hash suffix `…-79f43e79`, and BOTH were already on disk — the hash is a pure function of
+ *  the finding key, and the key is a pure function of the rationale the probe regenerates from the
+ *  subject id, so the SAME finding produces the SAME two names forever. The old code therefore
+ *  `reject("collision")`ed and the subject was sealed in the file-name space: 「这条 remedy 以前立过
+ *  案」 was read as 「以后不必再立」, while the STATE it names (evidence going stale as develop advances)
+ *  comes back by construction. Nine consecutive rounds could not file it (硬规则 3b: a truthful
+ *  refusal with no consumer).
+ *
+ *  The escape appends the ROUND's own UTC stamp — the one component of the name that is NOT a pure
+ *  function of the finding — so the Nth filing of one subject gets its own name. `exists` is injected
+ *  (the caller owns the directory read, and a pure function of `(id, exists)` is directly testable);
+ *  ⛔ it NEVER returns a name that `exists` reports as taken, which is what 「绝不覆盖既有任务体」
+ *  reduces to at this layer. Returns `null` when the escape space is exhausted (⛔ never a name that
+ *  could overwrite, and ⛔ never an unconditional refusal either — the caller reports the exhaustion).
+ *
+ *  Two calls inside the SAME millisecond for the same subject therefore agree (`-2`, `-3`, …) — the
+ *  suffix is deterministic given the clock, not random, so a test can pin it exactly. */
+export function collisionEscapeId(base: string, nowMs: number, exists: (id: string) => boolean): string | null {
+  const stamp = new Date(nowMs).toISOString().replace(/[-:]/g, "").replace(/\.\d+Z$/, "Z"); // 20261013T160342Z
+  const tagged = `${base}-r${stamp}`;
+  if (!exists(tagged)) return tagged;
+  for (let n = 2; n <= COLLISION_ESCAPE_MAX; n += 1) {
+    const candidate = `${tagged}-${n}`;
+    if (!exists(candidate)) return candidate;
+  }
+  return null;
+}
+
 /** One read of the mapping file, two extractions (`producers` ids + the `execution_probe`
  *  declaration). ONE read on purpose: two readers of the same file can drift, and the drift would be
  *  invisible (硬规则 5b). `null` from either field is the THREE-valued "could not read it" (硬规则 3b)
@@ -873,19 +1095,44 @@ export function escalationKey(f: FileableFinding): string {
  *  human-visible escalation, not a dispatchable finding task", and it is what makes the
  *  "do not re-file the same subject while the reading is unchanged" rule re-readable from the BOARD
  *  (⛔ not from a hand-kept counter). Both the `blocked` state and the subject are in it, so a reader
- *  can tell it from the `executable`/`not-evaluated` shapes and from another subject's escalation. */
+ *  can tell it from the `executable`/`not-evaluated` shapes and from another subject's escalation.
+ *
+ *  ⚠️ A SECOND FORM EXISTS (2026-10-13, `gap-ac214-eleventh-crossing-repeat-remedy-rejected-by-…`):
+ *  a subject the THROTTLE gates rejected round after round while its own remedy availability is
+ *  `executable`. It reaches the same human-visible channel, but its cause is the OPPOSITE one — it is
+ *  not "the remedy cannot be performed from here", it is "the remedy is performable and every round
+ *  spends its budget elsewhere". Reusing the `blocked` line for it would print a cause the round did
+ *  not observe. It therefore gets its OWN line (`repeat-rejection`), and the READER is generalized to
+ *  recognize both — one channel, two structurally different causes on it. */
 export function escalationMarkerLine(subject: string, probeId: string | null): string {
   return `- remedy-availability：\`blocked\` · subject：\`${subject}\` · host-execution-probe：\`${probeId ?? "<none>"}\``;
 }
 
-const ESCALATION_MARKER_RE = /^[ \t]*[-*][ \t]*remedy-availability[ \t]*[:：][ \t]*`blocked`[ \t]*·[ \t]*subject[ \t]*[:：][ \t]*`([^`]+)`/im;
+/** The marker of the SECOND human-visible form: the subject kept being rejected by the THROTTLE
+ *  gates (`rate:`/`global-rate:`/`collision`) across consecutive rounds while its remedy was
+ *  `executable`. The round count is IN the line (an enumerated reading, ⛔ not a boolean) so a reader
+ *  can tell "rejected once" from "rejected and escalating" from the board alone. */
+export function repeatRejectionMarkerLine(subject: string, rounds: number): string {
+  return `- repeat-rejection：\`${rounds}\` consecutive filing-round(s) rejected this subject on the throttle gate · subject：\`${subject}\` · remedy-availability：\`executable\``;
+}
+
+/** ⛔ ONE grammar for both forms (`m[1]` = blocked form's subject, `m[2]` = repeat form's). Keeping
+ *  two regexes would let the reader and the renderer drift apart silently (硬规则 5b). */
+const ESCALATION_MARKER_RE = new RegExp(
+  "^[ \\t]*[-*][ \\t]*(?:"
+  + "remedy-availability[ \\t]*[:：][ \\t]*`blocked`[ \\t]*·[ \\t]*subject[ \\t]*[:：][ \\t]*`([^`]+)`"
+  + "|repeat-rejection[ \\t]*[:：][ \\t]*`\\d+`[^·]*·[ \\t]*subject[ \\t]*[:：][ \\t]*`([^`]+)`"
+  + ")",
+  "im",
+);
 
 /** Subject (the full escalation key, ⛔ not the bare subject) → the task file that already carries
- *  it, for every `tasks/*.md` on the board that is a blocked escalation. An unreadable board
- *  returns an EMPTY map — which is the same value a clean board gives. That is acceptable here and
- *  only here: the failure direction is "we might re-file a subject we already escalated", which is
- *  visible on the board (two files, same marker) rather than silent. ⛔ Never used to decide that
- *  something is NOT blocked. */
+ *  it, for every `tasks/*.md` on the board that is a human-visible escalation (EITHER form — the
+ *  throttle is by identity, and a subject already on the channel must not be put there twice). An
+ *  unreadable board returns an EMPTY map — which is the same value a clean board gives. That is
+ *  acceptable here and only here: the failure direction is "we might re-file a subject we already
+ *  escalated", which is visible on the board (two files, same marker) rather than silent. ⛔ Never
+ *  used to decide that something is NOT blocked. */
 export function escalationMarkerByKey(boardDir: string): Map<string, string> {
   const out = new Map<string, string>();
   let files: string[];
@@ -894,7 +1141,8 @@ export function escalationMarkerByKey(boardDir: string): Map<string, string> {
     let text: string;
     try { text = fs.readFileSync(path.join(boardDir, f), "utf8"); } catch { continue; }
     const m = text.match(ESCALATION_MARKER_RE);
-    if (m) out.set(`subject:${m[1].trim()}`, f);
+    const subject = (m?.[1] ?? m?.[2] ?? "").trim();
+    if (subject) out.set(`subject:${subject}`, f);
   }
   return out;
 }
@@ -992,6 +1240,40 @@ function blockedRemedyBlock(f: FileableFinding, b: BlockedRemedyContext): string
   return lines;
 }
 
+/** The SECOND human-visible form's context: the subject sat in the throttle gates' `rejected` array
+ *  for consecutive rounds while its own margin was already negative. Every field is a reading the
+ *  caller already took (⛔ nothing is re-derived here), so the body and the carrier cannot disagree. */
+export interface RepeatRejectionContext {
+  /** How many consecutive PRIOR rounds rejected this subject on the throttle axis. */
+  priorRounds: number;
+  /** Which throttle gate each of those rounds reported (`rate:` / `global-rate:` / `collision:`). */
+  gates: string[];
+  /** The current round's own rejection reason, VERBATIM (it is what the escalation replaces). */
+  currentReason: string;
+  /** The subject's margin as the finding declared it (negative — the predicate guarantees it). */
+  margin: number;
+}
+
+/** The repeat-rejection escalation's `## Requested action` preamble. Unlike the `blocked` variant
+ *  there is NO authorization blocker to name: the remedy IS performable here, it simply never got a
+ *  slot. So the preamble names the two things a reader must decide between — the throttle policy
+ *  (a human question the routine does not settle) and the remedy run itself. */
+function repeatRejectionBlock(f: FileableFinding, b: RepeatRejectionContext): string[] {
+  return [
+    "⛔ **本条不是「补救做不了」，而是「补救每轮都被限流闸拒掉、且这件事没有消费者」** —— 该主体的 margin",
+    `已经是 **${b.margin}**（负），remedy availability 是 \`executable\`，而立案闸已经**连续 ${b.priorRounds + 1} 轮**`,
+    "把同一主体挡在 `rejected` 里。⇒ 本任务改走**人可见通道**（`status: needs-human`，⛔ 不进派发候选），",
+    "⛔ 不是派发链自己就能解开的事。",
+    "",
+    `- 累计拒绝轮次：\`${b.priorRounds + 1}\`（本轮为最新一次）`,
+    `- 这些轮次报的闸：\`${b.gates.join(", ") || "<none recorded>"}\``,
+    `- 本轮拒绝理由（逐字）：${JSON.stringify(b.currentReason)}`,
+    "- ⛔ 本立案**不裁定限流策略**（K / 窗口宽度 / 预算归属仍是人的选择，人 2026-09-20 裁定）；它只保证",
+    "  「策略拒绝 ≠ 静默」。",
+    `- ⛔ 同一主体在板上已有升级时**不重复立案**：\`${String(f.subject ?? "").trim() || "<none>"}\` ⇒ 不再升级第二次。`,
+  ];
+}
+
 /** The task body. Shape = `finding`-shape (`## Finding` + AC + DoD), which is the shape
  *  `ready-pool-check.ts`'s SHAPE_REGISTRY recognizes for a defect report — so a filed task is
  *  author→ready-eligible rather than pool noise. The finding's own evidence is quoted VERBATIM in
@@ -999,10 +1281,14 @@ function blockedRemedyBlock(f: FileableFinding, b: BlockedRemedyContext): string
 export function renderRoutineTaskBody(
   f: FileableFinding,
   ctx: { routine: string; probe: string; runId: string; carrier: string; ts: string; taskId: string },
-  opts?: { blocked?: BlockedRemedyContext },
+  opts?: { blocked?: BlockedRemedyContext; repeatRejection?: RepeatRejectionContext },
 ): string {
   const files = f.files.map((x) => `- \`${x}\``);
   const blocked = opts?.blocked ?? null;
+  const repeat = blocked ? null : opts?.repeatRejection ?? null;
+  // 一个开关、两种形态：下面每一处都读「这具身子是不是在人可见通道上」。⛔ 两个独立布尔会让两种
+  // 形态各自漂移（硬规则 5b），而「带了升级标记行、正文却沿用可派发措辞」的体会自相矛盾。
+  const human = blocked ? "blocked" : repeat ? "repeat-rejection" : null;
   return [
     "## Finding",
     // ⛔ 升级形态的标记行是 `## Finding` 的**第一行**（**唯一**的「这是人可见升级、不是可派发 finding
@@ -1012,7 +1298,8 @@ export function renderRoutineTaskBody(
     //   会**逐字相同** —— 于是一个升级体会把读数恢复 executable 之后该主语的派发立案**永久吃掉**，
     //   而那是静默的（硬规则 5b：修一处 ≠ 只此一处）。
     ...(blocked ? [escalationMarkerLine(String(f.subject ?? "").trim(), blocked.probeId)] : []),
-    ...(blocked ? [""] : []),
+    ...(repeat ? [repeatRejectionMarkerLine(String(f.subject ?? "").trim(), repeat.priorRounds + 1)] : []),
+    ...(human ? [""] : []),
     String(f.rationale ?? "").trim(),
     "",
     `载体记录（逐字来源）：\`${ctx.carrier}\` · routine \`${ctx.routine}\` · probe \`${ctx.probe}\` · runId \`${ctx.runId}\` · ts \`${ctx.ts}\`。`,
@@ -1026,15 +1313,21 @@ export function renderRoutineTaskBody(
         "quality / dedup 两道闸机械立案，并按 `remedy-availability` = `blocked` 改走**人可见通道**",
         "（`status: needs-human`，⛔ 不进派发候选）—— ⛔ 不是由人转抄，也不是由探针自行执行。",
       ]
-      : [
-        "该 finding 由例程的机械通道产出，本任务由**同一条通道**依赖 `plugin/scripts/routine-file-gate.ts` 的三道闸",
-        "（quality / dedup / rate）机械立案 —— ⛔ 不是由人转抄，也不是由探针自行执行。",
-      ]),
+      : repeat
+        ? [
+          "该 finding 由例程的机械通道产出。它本轮**本来会被 `rate:`/`collision:` 拒掉**（见上面的累计轮次），",
+          "本任务由**同一条通道**依赖 `plugin/scripts/routine-file-gate.ts` 的 `repeatRejectionDecision` 改走",
+          "**人可见通道**（`status: needs-human`，⛔ 不进派发候选）—— ⛔ 不是由人转抄，也不是由探针自行执行。",
+        ]
+        : [
+          "该 finding 由例程的机械通道产出，本任务由**同一条通道**依赖 `plugin/scripts/routine-file-gate.ts` 的三道闸",
+          "（quality / dedup / rate）机械立案 —— ⛔ 不是由人转抄，也不是由探针自行执行。",
+        ]),
     "",
     // ⛔ 升级形态**不带** `- 观测符号：` 行：符号键是「可派发立案」的 dedup 空间，一个升级体若带符号，
     //   会在读数恢复 executable 之后把同一产出者的**全部**主语永久挡在派发通道之外（那正是本条要
     //   关掉的「越修越堵」形态）。主体由上面的标记行承载，⛔ 信息没有丢失。
-    ...(blocked
+    ...(human
       ? [`- subject：\`${String(f.subject ?? "").trim() || "<none>"}\``]
       : [`- 观测符号：${f.symbols.map((s) => `\`${s}\``).join("、") || "<none>"}`]),
     ...(files.length ? ["- 涉及文件：", ...files] : []),
@@ -1046,7 +1339,8 @@ export function renderRoutineTaskBody(
     // suggestedAction —— 派遣链上的读者看到的是「这件事本机做不了 + 谁能做」，⛔ 不是一条假装
     // 本机可执行的指令。见 escalationMarkerLine 的注释（标记行在上面的 ## Finding 里）。
     ...(opts?.blocked ? blockedRemedyBlock(f, opts.blocked) : []),
-    ...(opts?.blocked ? ["", "（finding 自己的 suggestedAction，逐字：）"] : []),
+    ...(repeat ? repeatRejectionBlock(f, repeat) : []),
+    ...(human ? ["", "（finding 自己的 suggestedAction，逐字：）"] : []),
     String(f.suggestedAction ?? "").trim() || "（finding 未给出 suggestedAction —— 立案时按 rationale 判定处置）",
     "",
     // ⛔ 平标题，**不加 `（draft）` 后缀**：`SHAPE_SECTIONS` 两种都认，但 **checkbox 闸只认平标题** ——
@@ -1060,6 +1354,11 @@ export function renderRoutineTaskBody(
         `- [ ] 上面那台机上那条补救被执行（或本机授权被开通），且 \`${ctx.carrier}\` 里 \`${String(f.subject ?? "").trim() || "<none>"}\` 的证据记录 \`ts\` 晚于本次升级`,
         "- [ ] 处置结论可核：要么真的重跑了产出者并把新记录落进载体，要么写明是哪一侧的授权/磁盘前置仍不满足，⛔ 不以「已注意到」结案",
       ]
+      : repeat
+        ? [
+          `- [ ] \`${ctx.carrier}\` 里 \`${String(f.subject ?? "").trim() || "<none>"}\` 的证据记录 \`ts\` 晚于本次升级（产出者真的重跑了一次）`,
+          "- [ ] 处置结论可核：要么写明限流策略的裁决（K / 窗口 / 预算归属 —— 人裁定），要么写明这次为什么仍不该跑产出者，⛔ 不以「已注意到」结案",
+        ]
       : [
         `- [ ] \`${ctx.carrier}\` 中 finding \`${f.id ?? "<no-id>"}\`（routine \`${ctx.routine}\`，runId \`${ctx.runId}\`）所描述的问题被复核并处置`,
         "- [ ] 处置结论可核：要么修掉，要么写明「已有机制在管、失败在哪一步」，⛔ 不以「已注意到」结案",
@@ -1069,7 +1368,9 @@ export function renderRoutineTaskBody(
     "- [ ] 上面的判据实跑通过",
     ...(blocked
       ? ["- [ ] ⛔ 本任务**不是**派发任务：补救在**另一台机**上、或需要目标侧 `authorized_keys` 变更（人授权）；⛔ 例程不代跑，⛔ 也没有「可机械再入队」的路径（人 2026-09-20 裁定）"]
-      : ["- [ ] ⛔ 探针只立案不执行：本任务若需要跑产出者/修复，由派发链执行，⛔ 不由例程代跑"]),
+      : repeat
+        ? ["- [ ] ⛔ 本任务**不是**派发任务：它登记的是「限流闸把一个已越界的主体连续拒下」这件事本身；⛔ 例程不代跑产出者，⛔ 也没有「可机械再入队」的路径（人 2026-09-20 裁定）"]
+        : ["- [ ] ⛔ 探针只立案不执行：本任务若需要跑产出者/修复，由派发链执行，⛔ 不由例程代跑"]),
     "",
     "## Touches",
     // The finding's own files (path only — a `path:line` is not a writable surface) plus the task's

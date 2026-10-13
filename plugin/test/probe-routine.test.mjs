@@ -28,6 +28,7 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { spawnSync } from "node:child_process";
+import { createHash } from "node:crypto";
 import { fileURLToPath, pathToFileURL } from "node:url";
 
 import {
@@ -42,7 +43,7 @@ import {
   selectFilings,
   selectProbeRoutines,
 } from "../scripts/probe-routine.ts";
-import { findingKey, recurrenceByKey, renderRoutineTaskBody, routineFindingCandidateText, countRecentFilings, FILING_WINDOW_MS } from "../scripts/routine-file-gate.ts";
+import { findingKey, recurrenceByKey, renderRoutineTaskBody, routineFindingCandidateText, routineTaskId, countRecentFilings, FILING_WINDOW_MS } from "../scripts/routine-file-gate.ts";
 import { routineK, routineGlobalCeiling, routineWindowMs } from "../scripts/driver-config.ts";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -1030,4 +1031,230 @@ test("FILING — the filed task must be SHAPE-USABLE: plain `## AC`/`## DoD` and
   assert.doesNotMatch(touches, /\.quay\//, "⛔ runtime-state paths must not be declared as write surfaces");
   assert.match(touches, /`plugin\/freshness-producers\.json`/, "but a real source path the finding points at IS a Touches entry");
   assert.match(body.split(/^## Requested action$/m)[0], /`\.quay\/productization-verification\.jsonl:\d+`/, "and it is still quoted verbatim as evidence in the Finding");
+});
+
+// ── (g) THE ELEVENTH CROSSING (gap-ac214-eleventh-crossing-repeat-remedy-rejected-by-…) ─────────
+//
+// Measured on the routine's own carrier: the upgrade face's finding for AC-238/239 was re-produced
+// every round and refused every round — once `collision:` (2026-10-12T21:38:59Z), then SIX
+// consecutive `rate:` rounds on 2026-10-13 — and nothing consumed the refusals. Two independent
+// causes produce the same silence:
+//   (a) the FILE-NAME space ran out (base slug AND its deterministic sha1 suffix both on disk), so
+//       `reject("collision")` sealed the subject permanently — 「以前立过案」 read as 「以后不必再立」;
+//   (b) the throttle refused the same subject for six rounds while its remedy was `executable`.
+// These two cases make each fix TAKEABLE-FALSE, and each has its own reverse control.
+//
+// ⛔ NOT under test: the throttle POLICY. K / the window width / who owns the budget are a human
+// question; what is pinned here is only that a policy refusal is no longer SILENT.
+
+const CROSSING_AT = Date.parse("2026-10-13T16:03:42.469Z");
+const CROSSING_FINDING = { ...FRESHNESS_FINDING, id: "stale-goal-009-ac-207", subject: "GOAL-009-AC-207" };
+const CROSSING_PRODUCER_CMD = "bash plugin/scripts/develop-deliver-tgz.sh --verify-upgrade --hosts B";
+
+/** Seed the carrier with (i) a rate window that is ALREADY SPENT and (ii) N consecutive prior rounds
+ *  in which the same SUBJECT was refused on the throttle gate — the two readings the escalation
+ *  consumes, in the production record shape (a `finding` record links runId+findingId → subject). */
+function seedCrossingCarrier(root, { spentFilings, priorRateRejections, subject = "GOAL-009-AC-207" }) {
+  const p = path.join(root, ".quay", path.basename(ROUTINE_FINDINGS_REL));
+  fs.mkdirSync(path.dirname(p), { recursive: true });
+  const recs = [];
+  const rateReason = "rate: 3 routine-filed tasks this window ≥ cap 3 (subject recurrence: 31 round(s))";
+  if (spentFilings > 0) {
+    recs.push({
+      ts: new Date(CROSSING_AT - 3_600_000).toISOString(), kind: "filing-round", routine: "freshness-refresh",
+      probe: "freshness-refresh", runId: "crossing-spend", evaluated: true, candidates: spentFilings,
+      filed: Array.from({ length: spentFilings }, (_, i) => `gap-routine-freshness-refresh-spent-${i}`),
+      escalated: [], remedy_availability: "executable", rejected: [], dedup_state: [], errors: [],
+    });
+  }
+  for (let i = 0; i < priorRateRejections; i += 1) {
+    const runId = `crossing-refused-${i}`;
+    const ts = new Date(CROSSING_AT - (priorRateRejections - i) * 600_000).toISOString();
+    recs.push({
+      ts, kind: "finding", routine: "freshness-refresh", probe: "freshness-refresh", runId,
+      findingId: "stale-goal-009-ac-207", dupKind: "stale-subject", subject, symbols: [subject, "coldstart-face"],
+      files: ["plugin/freshness-producers.json"], verdict: "act-now", rationale: `${subject} is out of window`,
+      suggestedAction: "re-run coldstart-face", margin: -1,
+    });
+    recs.push({
+      ts, kind: "filing-round", routine: "freshness-refresh", probe: "freshness-refresh", runId,
+      evaluated: true, candidates: 1, filed: [], escalated: [], remedy_availability: "executable",
+      rejected: [{ findingId: "stale-goal-009-ac-207", gate: "quality-dedup-rate", reason: rateReason }],
+      dedup_state: [{ findingId: "stale-goal-009-ac-207", taskId: null, accepted: false, state: "novel", matchedKey: null }],
+      errors: [],
+    });
+  }
+  fs.writeFileSync(p, recs.map((r) => JSON.stringify(r)).join("\n") + "\n", "utf8");
+  return p;
+}
+
+/** A workspace whose declared execution probe reads `executable` (rc=0 ⇒ the producers it gates ARE
+ *  runnable from this host), so the `blocked` channel demonstrably does NOT apply to these findings. */
+function makeCrossingWorkspace() {
+  const root = makeFilingWorkspace({ registeredProducers: ["coldstart-face"] });
+  fs.writeFileSync(path.join(root, "plugin", "freshness-producers.json"), JSON.stringify({
+    producers: [{ id: "coldstart-face", command: CROSSING_PRODUCER_CMD, subjects: ["GOAL-009-AC-207"] }],
+    execution_probe: {
+      id: "host-b-ssh",
+      command: ["ssh", "-o", "BatchMode=yes", "yale@orangevps.wan.hwang.men", "true"],
+      timeout_ms: 20_000,
+      blocked_pattern: "Permission denied",
+      producers: ["coldstart-face"],
+      remedy: { host: "yale@orangevps.wan.hwang.men", action: "把本机公钥追加到目标侧 authorized_keys（需人授权）", alternative: "或在已被 B 授权的主机上跑" },
+    },
+  }), "utf8");
+  return root;
+}
+
+/** Run the routine once over a crossing workspace; capture the task writes INCLUDING their status. */
+async function runCrossingRoutine(root, finding, { at = CROSSING_AT, ...extra } = {}) {
+  const written = [];
+  const routine = llmProbeRoutine(
+    { name: "freshness-refresh", trigger: "interval:120m", probe: "freshness-refresh", dispatch: null },
+    {
+      // ⚠️ the clock is a PARAMETER: the routine has a durable last-run window, so a second round at
+      //    the SAME instant would be (correctly) skipped and every assertion below would read an empty
+      //    carrier — a green-looking fixture that never ran the thing under test.
+      root, pluginRoot: path.join(root, "plugin"), probeTimeoutMs: 30_000, now: () => at,
+      probeArgv: () => fakeProbeArgv({ findings: [finding], shards: 1 }),
+      // the execution probe reads `executable` WITHOUT spawning anything (⛔ no ssh from a unit test)
+      runExecutionProbe: () => ({ status: 0, stdout: "PROBE-OK", stderr: "" }),
+      fileTaskFn: async (taskId, title, body, status) => {
+        written.push({ taskId, title, body, status });
+        fs.writeFileSync(path.join(root, "tasks", `${taskId}.md`),
+          `---\nid: ${taskId}\ntitle: ${JSON.stringify(title)}\nstatus: ${status ?? "todo"}\n---\n${body}\n`, "utf8");
+        return { ok: true, reason: `filed as ${taskId}` };
+      },
+      ...extra,
+    },
+  );
+  const facts = await routine.run({ halted: false });
+  return { facts, written };
+}
+
+test("FILING ⑪a — the FILE-NAME SPACE is not a seal: base + hash suffix both taken ⇒ a THIRD, free id (⛔ never an overwrite)", async () => {
+  // Reproduce the live collision EXACTLY: the two names the 2026-10-12 record named are reconstructed
+  // from the same two pure functions the producer uses, and BOTH are put on the board as `done`.
+  const root = makeCrossingWorkspace();
+  const candidate = routineFindingCandidateText(CROSSING_FINDING);
+  const base = routineTaskId("freshness-refresh", CROSSING_FINDING.id);
+  const hashed = `${base}-${createHash("sha1").update(findingKey(candidate)).digest("hex").slice(0, 8)}`;
+  const priorBody = "---\nid: earlier-round\nstatus: done\n---\n## Finding\n(a task filed in an earlier round)\n";
+  fs.writeFileSync(path.join(root, "tasks", `${base}.md`), priorBody, "utf8");
+  fs.writeFileSync(path.join(root, "tasks", `${hashed}.md`), priorBody, "utf8");
+  seedCrossingCarrier(root, { spentFilings: 0, priorRateRejections: 0 });
+
+  const { facts, written } = await runCrossingRoutine(root, CROSSING_FINDING);
+  assert.equal(facts[0].state, "verified", facts[0].reason);
+  assert.equal(written.length, 1, "⛔ the finding MUST be filed — sealing the subject here IS the defect");
+  const newId = written[0].taskId;
+  assert.notEqual(newId, base);
+  assert.notEqual(newId, hashed);
+  assert.equal(newId, `${hashed}-r20261013T160342Z`, "the escape appends the ROUND's stamp — the one component that is not a function of the finding");
+
+  // ⛔ 绝不覆盖既有任务体: both pre-existing bodies are byte-identical after the run.
+  assert.equal(fs.readFileSync(path.join(root, "tasks", `${base}.md`), "utf8"), priorBody);
+  assert.equal(fs.readFileSync(path.join(root, "tasks", `${hashed}.md`), "utf8"), priorBody);
+
+  // and the derivation is on the carrier as an AUDITABLE trace (the new id + its rule), not as a
+  // silent rename a reader has to reverse-engineer.
+  const round = readCarrier(root).find((r) => r.kind === "filing-round");
+  assert.equal(round.filed.length, 1);
+  assert.equal(round.id_derivation.length, 1, "a non-trivial derivation must leave a trace");
+  assert.equal(round.id_derivation[0].taskId, newId);
+  assert.equal(round.id_derivation[0].rule, "collision-escape");
+  assert.equal(round.id_derivation[0].escapedFrom, hashed);
+  assert.match(round.id_derivation[0].note, /never overwritten/);
+});
+
+test("FILING ⑪a reverse control — with only the BASE name taken the derivation stays the OLD hash suffix (⛔ the escape did not replace the existing rule)", async () => {
+  const root = makeCrossingWorkspace();
+  const candidate = routineFindingCandidateText(CROSSING_FINDING);
+  const base = routineTaskId("freshness-refresh", CROSSING_FINDING.id);
+  const hashed = `${base}-${createHash("sha1").update(findingKey(candidate)).digest("hex").slice(0, 8)}`;
+  fs.writeFileSync(path.join(root, "tasks", `${base}.md`), "---\nid: earlier\nstatus: done\n---\n## Finding\nolder\n", "utf8");
+  seedCrossingCarrier(root, { spentFilings: 0, priorRateRejections: 0 });
+  const { written } = await runCrossingRoutine(root, CROSSING_FINDING);
+  assert.equal(written[0].taskId, hashed, "the second level is unchanged — the escape is a THIRD level, not a replacement");
+  const round = readCarrier(root).find((r) => r.kind === "filing-round");
+  assert.equal(round.id_derivation[0].rule, "hash-suffix");
+});
+
+test("FILING ⑪b — a REPEATING throttle refusal reaches the human-visible channel (and a first refusal, or a healthy margin, does NOT)", async () => {
+  const arm = async ({ priorRateRejections, margin }) => {
+    const root = makeCrossingWorkspace();
+    seedCrossingCarrier(root, { spentFilings: 3, priorRateRejections });
+    const finding = { ...CROSSING_FINDING, margin };
+    const { facts, written } = await runCrossingRoutine(root, finding);
+    // the LAST filing-round is THIS run's (the seeded rounds come first in the carrier)
+    const round = readCarrier(root).filter((r) => r.kind === "filing-round").at(-1);
+    const reject = round.rejected.find((x) => x.findingId === finding.id) ?? null;
+    return { facts, written, round, reject, root };
+  };
+
+  // ① THE FIX: margin is negative, the remedy is executable HERE, and the throttle has already
+  //    refused this subject once ⇒ this is refusal #2 in a row ⇒ human channel, NOT a third silent
+  //    `rejected` entry.
+  const a = await arm({ priorRateRejections: 1, margin: -1 });
+  assert.equal(a.facts[0].state, "verified", a.facts[0].reason);
+  assert.equal(a.written.length, 1, "the escalation must actually be filed as a task");
+  assert.equal(a.written[0].status, "needs-human", "⛔ 人可见通道 = 本项目现成的 needs-human 通道（⛔ 不新造成因枚举）");
+  assert.match(a.written[0].title, /\[repeat-rejected\] /, "the board must show WHICH escalation form this is");
+  assert.match(a.written[0].body, /^- repeat-rejection：`2` consecutive filing-round\(s\) rejected this subject/m, "the marker is the FIRST line of ## Finding");
+  assert.equal(a.written[0].body.split("\n")[1].startsWith("- repeat-rejection："), true, "⛔ 位置是判据的一部分：marker 在第一行 ⇒ 升级体的 prose key 结构上不可能等于可派发体");
+  assert.match(a.written[0].body, /不裁定限流策略/, "⛔ the escalation does not decide the throttle policy");
+  assert.doesNotMatch(a.written[0].body, /观测符号/, "⛔ an escalation body must not carry the DISPATCH dedup key");
+  assert.deepEqual(a.round.escalated, [a.written[0].taskId]);
+  assert.equal(a.round.escalated_repeat_rejection.length, 1, "the repeat form is its OWN carrier class (⛔ not merged with the blocked form)");
+  assert.equal(a.round.rejected.length, 0, "⛔ the refusal is NOT ALSO recorded as one more silent `rejected` entry");
+  assert.equal(a.reject, null);
+  assert.equal(a.written[0].body.includes(CROSSING_PRODUCER_CMD), false, "the repeat form has no remedy command to quote — the remedy is performable here");
+
+  // ② REVERSE CONTROL — the FIRST refusal is a normal throttle event, not a stuck state. Same
+  //    workspace, same margin, only the history differs.
+  const b = await arm({ priorRateRejections: 0, margin: -1 });
+  assert.equal(b.written.length, 0, "one refusal must stay a refusal");
+  assert.equal(b.round.rejected.length, 1);
+  assert.match(b.reject.reason, /^rate:/);
+  assert.equal(b.reject.gate, "quality-dedup-rate");
+
+  // ③ REVERSE CONTROL — a HEALTHY margin means the policy is working as designed, however many times
+  //    it has refused. This is the arm that keeps the escalation from becoming a general-purpose
+  //    throttle-bypass.
+  const c = await arm({ priorRateRejections: 1, margin: 7 });
+  assert.equal(c.written.length, 0, "a non-negative margin must NOT escalate");
+  assert.equal(c.round.rejected.length, 1);
+  assert.match(c.reject.reason, /^rate:/);
+  // …and the streak is still VISIBLE on the carrier: 「第 N 次连续拒绝」 and 「偶发一次」 must not be the
+  // same shape (硬规则 3) — the consumer the six silent rounds never had.
+  assert.match(c.reject.reason, /throttle-rejection #2 in a row \(subject margin 7\)/);
+  assert.doesNotMatch(b.reject.reason, /throttle-rejection #/, "⛔ the FIRST refusal stays byte-identical to the pre-fix reason (no blanket churn)");
+});
+
+test("FILING ⑪b — the escalation channel keeps its own throttle: once the escalation is OPEN, the rebuilt run does not file a second one", async () => {
+  const root = makeCrossingWorkspace();
+  seedCrossingCarrier(root, { spentFilings: 3, priorRateRejections: 1 });
+
+  // round 1 — refusal #2 in a row ⇒ the escalation is filed, and that FILING ends the refusal run
+  const first = await runCrossingRoutine(root, { ...CROSSING_FINDING, margin: -1 }, { at: CROSSING_AT });
+  assert.equal(first.written.length, 1, "the escalation must actually be filed as a task");
+  assert.equal(first.written[0].status, "needs-human");
+  const escalatedFile = `${first.written[0].taskId}.md`;
+
+  // round 2 — the throttle still refuses; the escalation being OPEN is the only difference. The run
+  // has restarted (a filing ends a consecutive run), so this is refusal #1 again ⇒ a plain refusal.
+  const second = await runCrossingRoutine(root, { ...CROSSING_FINDING, margin: -1 }, { at: CROSSING_AT + 4 * 3_600_000 });
+  assert.equal(second.written.length, 0, "a fresh run of refusals does not re-escalate at #1");
+  assert.equal(readCarrier(root).at(-1).rejected[0].gate, "quality-dedup-rate");
+
+  // round 3 — refusal #2 of the rebuilt run ⇒ the predicate holds again, and NOW the channel's own
+  // throttle fires: the subject is already on the human-visible channel, so no second escalation.
+  const third = await runCrossingRoutine(root, { ...CROSSING_FINDING, margin: -1 }, { at: CROSSING_AT + 8 * 3_600_000 });
+  assert.equal(third.written.length, 0, "⛔ one open escalation per subject — the channel has its own bound");
+  const last = readCarrier(root).at(-1);
+  assert.equal(last.rejected.length, 1);
+  assert.equal(last.rejected[0].gate, "blocked-repeat", "「已升级过、不再重复立案」 与 rate 限流不同形");
+  assert.match(last.rejected[0].reason, new RegExp(escalatedFile.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")),
+    "the reason must NAME the escalation that already carries this subject (re-readable from the board, ⛔ not a counter)");
+  assert.deepEqual(last.escalated, [], "⛔ and no second escalation is recorded");
 });

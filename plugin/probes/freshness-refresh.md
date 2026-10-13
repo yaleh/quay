@@ -160,6 +160,15 @@ top-level value and, when it is `blocked`, files the finding through the human-v
 lives only in `notes` has no consumer, which is the defect this declaration closes.
 ⛔ Do NOT run a producer to answer this — see the FILE-ONLY boundary at the top of this spec.
 
+**`margin` (per finding) has a consumer too.** It is read, per finding, by the routine's filing
+chain: when the filing gates have refused the SAME subject on the throttle (`rate:`/`global-rate:`/
+`collision`) for two consecutive rounds while its `margin` is negative and the round's
+`remedyAvailability` is `executable`, the round is routed to that same human-visible channel instead
+of recording one more `rejected` entry nobody reads. ⇒ **Always emit `margin`** (an integer; ⛔ `null`
+only if you genuinely could not read it — the reader treats `null` as 「未评估」, not as 「未越界」).
+⛔ The threshold above (when to file) and this one (when a refusal must become visible) are different
+questions; the routine does not decide the throttle policy, only that a refusal is not silent.
+
 Every finding MUST carry `files`-equivalent concreteness — here: the subject id, the producer id and
 its command — plus the `arithmetic` string. A finding missing its arithmetic is DROPPED by the
 parser and counted malformed.

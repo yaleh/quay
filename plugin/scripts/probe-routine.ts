@@ -69,8 +69,12 @@ import {
   routineFindingCandidateText,
   routineQuotaDecision,
   routineTaskId,
+  collisionEscapeId,
+  COLLISION_ESCAPE_MAX,
+  repeatRejectionDecision,
+  throttleRejectionStreakByKey,
 } from "./routine-file-gate.ts";
-import type { BoardKeys, DedupReading, ExecutionProbeDecl, RemedyAvailability } from "./routine-file-gate.ts";
+import type { BoardKeys, DedupReading, ExecutionProbeDecl, RemedyAvailability, RepeatRejectionReading, ThrottleStreak } from "./routine-file-gate.ts";
 // routine 配额配置面（gap-routine-quota-canonical-config-and-policy-gate 新增）：本例程的真实立案
 // K / 全局天花板从 drivers.yml 的 `routine_quota` 段读出，⛔ 不再用 routine-file-gate 的孤儿字面量
 // DEFAULT_RATE 兜底（gap-routine-quota-consumer-convergence 的 consumer convergence）。
@@ -200,6 +204,11 @@ export interface ProbeFinding {
   /** 探针点名的**跟踪主体**（`GOAL-009-AC-NNN`）。与 `producer` 分开：一个产出者可拥有多个主体，
    *  而升级面的去重键是**主体**（「不重复立案同一主体」）。⛔ `null` = 探针没报，不是某个默认值。 */
   subject: string | null;
+  /** 主体此刻的新鲜度余量（`K - d`），**探针契约里本来就有的字段**（`plugin/probes/freshness-refresh.md`
+   *  的 finding 输出含 `margin`/`k`/`fraction`/`threshold`；本仓此前只解析 id/kind/symbols/…，把它**丢掉**了）。
+   *  ⛔ `null` = 探针没报这个字段，与「报了 0」「报了负数」都不同形（硬规则 3b）：`repeatRejectionDecision`
+   *  的第二个前提读的就是它，而 `null` 让那条判定落 `evaluated:false`，⛔ 不退化成「不越界」。 */
+  margin: number | null;
 }
 
 export interface ParsedProbeOutput {
@@ -295,6 +304,9 @@ export function parseProbeFindings(stdout: string): ParsedProbeOutput | null {
       suggestedAction: typeof r.suggestedAction === "string" && r.suggestedAction.trim() ? r.suggestedAction.trim() : null,
       producer: typeof r.producer === "string" && r.producer.trim() ? r.producer.trim() : null,
       subject: typeof r.subject === "string" && r.subject.trim() ? r.subject.trim() : null,
+      // ⛔ 非有限数 / 非数 ⇒ null（「没报」），⛔ 不 `Number(...)` 兜成 0：0 是一个**合法读数**
+      //    （正好在窗口边界上），把它与「探针漏了这个字段」合并会让越界判定静默反转（硬规则 3b）。
+      margin: typeof r.margin === "number" && Number.isFinite(r.margin) ? r.margin : null,
     });
   }
   const inv = obj.inventory && typeof obj.inventory === "object" && !Array.isArray(obj.inventory)
@@ -337,6 +349,19 @@ export interface FilingDisposition {
   /** 本条落哪条通道。`false` = 派发链（⛔ 与修复前逐字节同形）；`true` = 人可见通道
    *  （`needs-human` 升级，携带逐字补救）。被拒时恒为 false。 */
   escalate: boolean;
+  /** 走人可见通道时，是**哪一种**升级（⛔ 两种不同形，硬规则 3）：
+   *  `blocked` = 补救在本机不可执行（`remedyGatesProducer`）；`repeat-rejection` = 补救可执行、但
+   *  主体 margin 为负而被限流闸连续拒下（`repeatRejectionDecision`）。非升级时 `null`。 */
+  escalationForm?: "blocked" | "repeat-rejection" | null;
+  /** ④ 的 id 派生规则。`null`/缺省 = 基名本身就是空的（寻常路径，⛔ 不落痕）；`hash-suffix` =
+   *  基名被占、追加了 sha1(findingKey) 前 8 位；`collision-escape` = **连哈希后缀也被占**，按轮次
+   *  时间戳派生了一个不会覆盖既有文件的新 id。落进载体的 `filing-round.id_derivation`（可审计的痕）。 */
+  idRule?: "hash-suffix" | "collision-escape" | null;
+  /** `collision-escape` 时被让开的那个（已存在的）id。 */
+  escapedFrom?: string | null;
+  /** 「连续被拒 ⇒ 人可见通道」那一次判定的**读数**（`escalationForm === "repeat-rejection"` 时才有）：
+   *  逐字来自判定本身，⛔ 调用方不重新推导（硬规则 5b —— 重新解析字符串是第二份真相源）。 */
+  repeatReading?: { priorRounds: number; gates: string[]; currentReason: string; margin: number } | null;
   /** 本条与**板上去重空间**的关系（`routine-file-gate.ts` 的 `DedupReading`：`novel` /
    *  `done-only` / `live` / `unknown` + 该判定的逐字理由）。**枚举，⛔ 不布尔** —— 它让载体区分
    *  「板上根本没这个键」「只有已关闭任务供给」「被一条未关闭任务供给」「拥有者状态读不出」四种形态；
@@ -388,6 +413,12 @@ export interface FilingOptions {
   remedyProbe?: ExecutionProbeDecl | null;
   /** 板上【已升级为 needs-human】的主体键 → 立案文件名。缺省从 tasksDir 机械读（⛔ 不另立计数器）。 */
   escalatedKeys?: Map<string, string>;
+  /** 限流闸连续拒绝读数的注入缝。**三值**（同 `recurrence`）：`undefined` = 从载体读（生产路径）；
+   *  `null` = 明确「读不出」⇒ 「连续几轮」未知，⛔ 不退化成 0；`Map` = 用这个读数。 */
+  rejectionStreak?: Map<string, ThrottleStreak> | null;
+  /** 「连续被拒 ⇒ 人可见通道」判定的注入缝。缺省 `undefined` = 由 `repeatRejectionDecision` 用本轮
+   *  的真实读数算（生产路径）。测试缝只为把同一个判定对着**受控语料**跑。 */
+  repeatRejection?: RepeatRejectionReading;
 }
 
 /** 逐条处置 finding（⛔ 不只回一个布尔，硬规则 3）。**纯函数**：不写盘、不 spawn——落盘在调用方，
@@ -414,6 +445,10 @@ export function selectFilings(findings: readonly ProbeFinding[], o: FilingOption
   const windowMs = o.windowMs ?? DEFAULT_ROUTINE_QUOTA_WINDOW_MS;
   // ⓪b 升级面（remedy availability = blocked 时才读；⛔ 读数不是 blocked 时一次盘都不碰）。
   let escalated: Map<string, string> | null = null;
+  // ⓪e 限流闸的**连续拒绝**读数（`gap-ac214-eleventh-crossing-repeat-remedy-rejected-by-…`）：本轮的
+  //     第二个 consumer 面。与 `recurrence` 同为惰性读——本轮一个候选都没走到限流闸时一次盘都不碰。
+  //     三值：`Map` = 读到了；`null` = 读不出（「连续几轮」未知，⛔ 不退化成 0）。
+  let streak: Map<string, ThrottleStreak> | null | undefined = o.rejectionStreak;
   for (const rank of order) {
     const f = findings[rank.index];
     const id = f.id;
@@ -436,7 +471,9 @@ export function selectFilings(findings: readonly ProbeFinding[], o: FilingOption
     //     ⇒ ⛔ 不得产出与「可在本处执行」同形的可派发任务；改走人可见通道，且同一主体
     //     在该读数不变时不重复升级。判据在 routine-file-gate.ts（单一实现，⛔ 不在此处重写）。
     const escalate = remedyGatesProducer(o.remedy, o.remedyProbe ?? null, f.producer);
-    const escKey = escalate ? escalationKey(f) : "";
+    // ⚠️ 主体键**无条件**算（修复前只在 `escalate` 时算）：第 ③c 步的「连续被拒」面按**同一主体身份**
+    //    读，与 blocked 面共用同一个键（见 escalationKey），⛔ 两套键会让「已升级」在两处各判一次。
+    const escKey = escalationKey(f);
     if (escalate) {
       if (escalated === null) escalated = o.escalatedKeys ?? escalationMarkerByKey(o.tasksDir);
       const already = escKey ? escalated.get(escKey) : undefined;
@@ -449,25 +486,81 @@ export function selectFilings(findings: readonly ProbeFinding[], o: FilingOption
     //    ⚠️ 升级形态走的是**人可见通道**，它不进食派发池 ⇒ 不受派发侧的 rate 窗口约束（它的闸是
     //    「同一主体在该读数不变时只升级一次」，见 gateEscalation 的注释）。质量/去重两道**照旧**。
     const candidate = routineFindingCandidateText(f);
-    const g = escalate
-      ? gateEscalation(candidate, { existingKeys: keys })
-      : (() => {
-        // ⚠️ 传 `o.routine`：rate 预算按**本例程自己的**尾窗计（gap-routine-filing-rate-global-window-
-        //    starves-freshness-refresh）。⛔ 不传 ⇒ 退回跨 routine 全局窗，正是本任务要关掉的形态。
-        if (recentBase === null) recentBase = countRecentFilings(o.carrierPath, o.nowMs, windowMs, o.routine);
-        // 全局窗口合计（⛔ 不传 routine ⇒ 跨 routine 汇总；同一次惰性读，与 per-routine 读数同源）。
-        if (globalBase === null) globalBase = countRecentFilings(o.carrierPath, o.nowMs, windowMs, null);
-        // 准入判据由**独立纯 Policy 函数**执行（人裁定②）：{perRoutine, global} 一并喂进去，天花板用
-        // **配置读出的有限值**（缺省 Infinity ⇒ 旧调用方逐字不变）。本轮已接受的条数同时计入两个窗口
-        // （本轮的 filing-round 记录要等本函数返回后才 append ⇒ 不 +acceptedThisRound 就漏算本轮）。
-        const quota = routineQuotaDecision(
-          { perRoutine: recentBase + acceptedThisRound, global: globalBase + acceptedThisRound },
-          { k: o.k, globalCeiling: o.globalCeiling ?? Infinity },
-        );
-        // ⛔ quality → dedup → rate/global-rate 的顺序由 gateFinding 保持：把配额**结果**交给它，
-        //    ⛔ 不在这里另排一次闸序（否则「重复」与「超额」会互换，见该函数注释）。
-        return gateFinding(candidate, { existingKeys: keys, quota });
-      })();
+
+    /** ③c 人可见通道的立案步 —— **单一实现**（`blocked` 升级面与「连续被拒」面共用；⛔ 不写第二份
+     *  id 派生/去重/接受记录逻辑，硬规则 5b）。恒返回 `true`：它总要把这一条落成某个处置。 */
+    const fileOnHumanChannel = (
+      form: "blocked" | "repeat-rejection",
+      ge: { accept: boolean; reason: string; dedup: DedupReading | null },
+      reason: string,
+      repeatReading?: { priorRounds: number; gates: string[]; currentReason: string; margin: number },
+    ): boolean => {
+      // 通道自身的闸（**先于**质量/去重）：**同一主体**在板上已有升级 ⇒ 不重复立案（按身份，⛔ 不按 rate）。
+      if (escalated === null) escalated = o.escalatedKeys ?? escalationMarkerByKey(o.tasksDir);
+      const already = escKey ? escalated.get(escKey) : undefined;
+      if (already) {
+        reject("blocked-repeat",
+          `blocked-repeat: ${escKey} is already escalated to the human-visible channel (tasks/${already})${form === "blocked" ? ` and remedy availability is still 'blocked' (probe '${o.remedy?.probeId ?? "<none>"}')` : " and the throttle refusal is still repeating"} ⇒ not re-filing a second escalation`);
+        return true;
+      }
+      // 质量 / 去重两道**照旧**（⛔ 人可见通道不是「绕过闸」的地方）。
+      if (!ge.accept) { reject("quality-dedup-rate", ge.reason, ge.dedup); return true; }
+      const d = deriveFilingTaskId(o, f, candidate);
+      if (d.exhausted) {
+        reject("collision", `collision: tasks/${d.escapedFrom}.md is taken, its hash suffix is taken, and every collision-escape candidate is taken (COLLISION_ESCAPE_MAX=${COLLISION_ESCAPE_MAX} exhausted) ⇒ no id can be derived without overwriting an existing task body`);
+        return true;
+      }
+      keys.add(findingKey(candidate));
+      // 同一轮内第二个同主体的 finding 也按「已升级」处理（板上还没有它 ⇒ 只靠 board 读挡不住）。
+      if (escKey !== "") escalated.set(escKey, `${d.taskId}.md`);
+      acceptedThisRound += 1;
+      byIndex[rank.index] = {
+        findingId: id, taskId: d.taskId, accepted: true, escalate: true, escalationForm: form,
+        gate: "filed", reason, dedup: ge.dedup,
+        ...(repeatReading ? { repeatReading } : {}),
+        ...(d.rule ? { idRule: d.rule, escapedFrom: d.escapedFrom } : {}),
+      };
+      return true;
+    };
+
+    // ②b 后半：`blocked` 读数命中的 finding 走人可见通道（⛔ 不产出与「可在本处执行」同形的可派发任务）。
+    if (escalate) {
+      const ge = gateEscalation(candidate, { existingKeys: keys });
+      fileOnHumanChannel("blocked", ge, `${ge.reason} · remedy availability 'blocked' ⇒ the requested action is not performable from this host`);
+      continue;
+    }
+
+    // ③ 既有三道闸（质量 / 去重 / 限流）——⛔ 复用单一实现，不在这里另写一份判据。
+    //    ⚠️ 升级形态走的是**人可见通道**，它不进食派发池 ⇒ 不受派发侧的 rate 窗口约束（它的闸是
+    //    「同一主体在该读数不变时只升级一次」，见 gateEscalation 的注释）。质量/去重两道**照旧**。
+    const g = (() => {
+      // ⚠️ 传 `o.routine`：rate 预算按**本例程自己的**尾窗计（gap-routine-filing-rate-global-window-
+      //    starves-freshness-refresh）。⛔ 不传 ⇒ 退回跨 routine 全局窗，正是本任务要关掉的形态。
+      if (recentBase === null) recentBase = countRecentFilings(o.carrierPath, o.nowMs, windowMs, o.routine);
+      // 全局窗口合计（⛔ 不传 routine ⇒ 跨 routine 汇总；同一次惰性读，与 per-routine 读数同源）。
+      if (globalBase === null) globalBase = countRecentFilings(o.carrierPath, o.nowMs, windowMs, null);
+      // 准入判据由**独立纯 Policy 函数**执行（人裁定②）：{perRoutine, global} 一并喂进去，天花板用
+      // **配置读出的有限值**（缺省 Infinity ⇒ 旧调用方逐字不变）。本轮已接受的条数同时计入两个窗口
+      // （本轮的 filing-round 记录要等本函数返回后才 append ⇒ 不 +acceptedThisRound 就漏算本轮）。
+      const quota = routineQuotaDecision(
+        { perRoutine: recentBase + acceptedThisRound, global: globalBase + acceptedThisRound },
+        { k: o.k, globalCeiling: o.globalCeiling ?? Infinity },
+      );
+      // ⛔ quality → dedup → rate/global-rate 的顺序由 gateFinding 保持：把配额**结果**交给它，
+      //    ⛔ 不在这里另排一次闸序（否则「重复」与「超额」会互换，见该函数注释）。
+      return gateFinding(candidate, { existingKeys: keys, quota });
+    })();
+
+    /** 本主体的「限流闸连续拒绝」读数。**三值**：`number` = 已连续 N 轮；`null` = 读不出（⛔ 不是
+     *  0，也不退化成「没越界」）。惰性读：一个候选都没走到限流闸时一次盘都不碰。 */
+    const priorThrottleRounds = (): number | null => {
+      if (o.rejectionStreak !== undefined) {
+        return o.rejectionStreak === null ? null : (o.rejectionStreak.get(escKey)?.rounds ?? 0);
+      }
+      if (streak === undefined) streak = throttleRejectionStreakByKey(o.carrierPath, o.routine, o.nowMs, windowMs);
+      return streak === null ? null : (streak.get(escKey)?.rounds ?? 0);
+    };
+
     if (!g.accept) {
       // rate 拒绝把**复现读数**一并落痕：残余饥饿（复现很高却仍被限流）必须可审，⛔ 否则
       // 「限流正确」与「优先级没生效」在载体记录里同形（硬规则 3）。null = 没读到，写明。
@@ -476,31 +569,63 @@ export function selectFilings(findings: readonly ProbeFinding[], o: FilingOption
       const reason = g.reason.startsWith("rate:") || g.reason.startsWith("global-rate:")
         ? `${g.reason} (subject recurrence: ${rank.recurrence === null ? "unknown — carrier unreadable" : `${rank.recurrence} round(s)`})`
         : g.reason;
-      reject("quality-dedup-rate", reason, g.dedup);
+      // ③c 「策略拒绝 ≠ 静默」（`gap-ac214-eleventh-crossing-repeat-remedy-rejected-by-…`）：本条已经
+      //     被同一道限流闸连续拒下、且主体 margin 为负、remedy 可执行 ⇒ 改走**人可见通道**（⛔ 不新造
+      //     成因枚举、⛔ 不裁定限流策略本身 —— 人 2026-09-20 裁定）。判据在 routine-file-gate.ts。
+      const prior = priorThrottleRounds();
+      const rr = o.repeatRejection ?? repeatRejectionDecision({
+        gate: "quality-dedup-rate", reason, priorRounds: prior,
+        margin: f.margin, remedyStatus: o.remedy?.status ?? "not-declared",
+      });
+      if (rr.escalate) {
+        const rawStreak = o.rejectionStreak !== undefined ? o.rejectionStreak : streak;
+        fileOnHumanChannel("repeat-rejection", gateEscalation(candidate, { existingKeys: keys }), rr.reason, {
+          priorRounds: prior ?? 0,
+          gates: prior !== null && prior > 0 ? (rawStreak?.get(escKey)?.gates ?? []) : [],
+          currentReason: reason,
+          margin: f.margin as number,
+        });
+        continue;
+      }
+      // 落痕：`连续 ≥2 轮` 才追加限流轮次读数 —— ⛔ 首次拒绝与修复前逐字节相同（不制造载体里的普遍漂移），
+      // 而**一旦达到会升级的量级**，载体上就能读出「这是第 N 次连续拒绝」，与「偶发一次」不同形（硬规则 3）。
+      const streakNote = prior !== null && prior > 0 ? ` · throttle-rejection #${prior + 1} in a row (subject margin ${f.margin === null ? "unreported" : f.margin})` : "";
+      reject("quality-dedup-rate", `${reason}${streakNote}`, g.dedup);
       continue;
     }
 
-    // ④ id 派生 + 撞车处置：同 slug 但**不同** finding ⇒ 加确定性后缀（⛔ 不覆盖既有任务体）。
-    let taskId = routineTaskId(o.routine, f.id);
-    if (fs.existsSync(path.join(o.tasksDir, `${taskId}.md`))) {
-      taskId = `${taskId}-${createHash("sha1").update(findingKey(candidate)).digest("hex").slice(0, 8)}`;
-    }
-    if (fs.existsSync(path.join(o.tasksDir, `${taskId}.md`))) {
-      reject("collision", `collision: tasks/${taskId}.md already exists and is not this finding ⇒ not overwriting`);
+    // ④ id 派生 + 撞车处置：**单一实现** `deriveFilingTaskId`（三级：基名 → 哈希后缀 → 轮次逃逸），
+    //    ⛔ 任何一级都只在**不存在**时才取用 ⇒ 绝不覆盖既有任务体。
+    const d = deriveFilingTaskId(o, f, candidate);
+    if (d.exhausted) {
+      // 逃逸空间耗尽才走到这里。collision 同样在**限流轴**上（`isThrottleRejection`），所以「连续被拒」
+      // 的消费者对它一样适用（⛔ 两条轴不各写一份判定）。
+      const cr = `collision: tasks/${d.escapedFrom}.md is taken, its hash suffix is taken, and every collision-escape candidate is taken (COLLISION_ESCAPE_MAX=${COLLISION_ESCAPE_MAX} exhausted) ⇒ no id can be derived without overwriting an existing task body`;
+      const prior = priorThrottleRounds();
+      const rr = o.repeatRejection ?? repeatRejectionDecision({
+        gate: "collision", reason: cr, priorRounds: prior,
+        margin: f.margin, remedyStatus: o.remedy?.status ?? "not-declared",
+      });
+      if (rr.escalate) {
+        const rawStreak = o.rejectionStreak !== undefined ? o.rejectionStreak : streak;
+        fileOnHumanChannel("repeat-rejection", gateEscalation(candidate, { existingKeys: keys }), rr.reason, {
+          priorRounds: prior ?? 0,
+          gates: prior !== null && prior > 0 ? (rawStreak?.get(escKey)?.gates ?? []) : [],
+          currentReason: cr,
+          margin: f.margin as number,
+        });
+        continue;
+      }
+      reject("collision", cr);
       continue;
     }
     keys.add(findingKey(candidate));
-    // 同一轮内第二个同主体的 finding 也按「已升级」处理（板上还没有它 ⇒ 只靠 board 读挡不住）。
-    if (escalate && escKey !== "") escalated?.set(escKey, `${taskId}.md`);
     acceptedThisRound += 1;
     byIndex[rank.index] = {
-      findingId: id, taskId, accepted: true, escalate,
+      findingId: id, taskId: d.taskId, accepted: true, escalate: false, escalationForm: null,
       gate: "filed",
-      // 接受理由**逐字来自那一道判据**（⛔ 不在这里另写一句）：升级形态的接受理由必须自己说出
-      // 「走的是人可见通道」，否则载体上「升级」与「派发立案」两条通道的接受记录会同形（硬规则 3）。
-      reason: escalate
-        ? `${g.reason} · remedy availability 'blocked' ⇒ the requested action is not performable from this host`
-        : g.reason,
+      reason: g.reason,
+      ...(d.rule ? { idRule: d.rule, escapedFrom: d.escapedFrom } : {}),
       // 接受面的**去重读数**一并带出（理由里已有逐字事实，这里带上机读取值）：⛔ 在此之前，一条
       // 「板上只有 done ⇒ 照旧立案」的接受在载体上与「板上根本没这个键」同形，而接受的 reason
       // 从未落盘（`filed` 只记 task id）—— 正是本任务要关掉的「honest reading with no consumer」。
@@ -512,6 +637,30 @@ export function selectFilings(findings: readonly ProbeFinding[], o: FilingOption
     if (!byIndex[i]) throw new Error(`selectFilings: finding #${i} (${findings[i].id ?? "<no-id>"}) got no disposition — the priority order dropped it`);
   }
   return byIndex as FilingDisposition[];
+}
+
+/** ④ 的 id 派生 —— **单一实现**（`blocked` 升级面、`repeat-rejection` 升级面与寻常派发面共用；
+ *  ⛔ 不各写一份，硬规则 5b）。三级，**每一级都只在名字不存在时才取用** ⇒ 「绝不覆盖既有任务体」
+ *  在这一层就是字面事实，而不是一句承诺：
+ *
+ *    ① `routineTaskId(routine, findingId)`                     —— 寻常路径，⛔ 不动既有名字空间；
+ *    ② `①-<sha1(findingKey)[0:8]>`                             —— 同名 slug 但不同 finding 时（既有行为）；
+ *    ③ `collisionEscapeId(②, 轮次时刻, exists)`                —— **连 ② 也被占**时按轮次时间戳派生一个新
+ *                                                                 id（`gap-ac214-eleventh-crossing-…`）。
+ *
+ *  `exhausted: true` = 连逃逸空间也用尽（`COLLISION_ESCAPE_MAX`）⇒ 调用方必须落 `collision` 拒绝，
+ *  ⛔ 绝不退化成「随便取个名字写上去」。 */
+function deriveFilingTaskId(
+  o: FilingOptions, f: ProbeFinding, candidate: string,
+): { taskId: string; rule: "hash-suffix" | "collision-escape" | null; escapedFrom: string | null; exhausted: boolean } {
+  const exists = (id: string): boolean => fs.existsSync(path.join(o.tasksDir, `${id}.md`));
+  const base = routineTaskId(o.routine, f.id);
+  if (!exists(base)) return { taskId: base, rule: null, escapedFrom: null, exhausted: false };
+  const hashed = `${base}-${createHash("sha1").update(findingKey(candidate)).digest("hex").slice(0, 8)}`;
+  if (!exists(hashed)) return { taskId: hashed, rule: "hash-suffix", escapedFrom: null, exhausted: false };
+  const escaped = collisionEscapeId(hashed, o.nowMs, exists);
+  if (escaped) return { taskId: escaped, rule: "collision-escape", escapedFrom: hashed, exhausted: false };
+  return { taskId: hashed, rule: null, escapedFrom: hashed, exhausted: true };
 }
 
 /** 一条执行探针的运行结果（`spawnSync` 的形状里只取判定要用的四个字段）。 */
@@ -960,6 +1109,10 @@ export function llmProbeRoutine(decl: RoutineDecl, opts: ProbeRoutineOptions): R
         verdict: f.verdict,
         rationale: f.rationale,
         suggestedAction: f.suggestedAction,
+        // 主体的新鲜度余量（探针契约里本来就声明、此前被解析器丢掉的那个字段）：落进载体，这样
+        // `repeatRejectionDecision` 的第二个前提（margin < 0）在载体上是**可复核的输入**，而不是
+        // 只活在当轮进程内存里（硬规则 3b：一个没有消费者的诚实读数与「没看过」同形）。
+        margin: f.margin,
       }))];
       let recorded = 0;
       try {
@@ -999,12 +1152,20 @@ export function llmProbeRoutine(decl: RoutineDecl, opts: ProbeRoutineOptions): R
           const f = parsed.findings.find((x) => x.id === d.findingId);
           if (!f) continue;
           // 单行标题：rationale 里的换行会让 `task create --title` 写出 YAML 折行块（实测），难看且易漂。
-          // 升级形态在标题前加一个可见前缀，使板上「人可见通道」的立案与可派发立案在标题面即可区分。
-          const title = `${decl.name}${d.escalate ? " [remedy-blocked] " : ": "}${String(f.rationale).replace(/\s+/g, " ").trim()}`.slice(0, 180);
+          // 升级形态在标题前加一个可见前缀，使板上「人可见通道」的立案与可派发立案在标题面即可区分；
+          // ⛔ **两种升级各用各的前缀**——把它们都写成 `[remedy-blocked]` 会让板上「补救做不了」与
+          // 「补救每次都被限流闸拒」这两种**成因相反**的升级在标题面同形（硬规则 3）。
+          const prefix = d.escalationForm === "repeat-rejection" ? " [repeat-rejected] " : d.escalate ? " [remedy-blocked] " : ": ";
+          const title = `${decl.name}${prefix}${String(f.rationale).replace(/\s+/g, " ").trim()}`.slice(0, 180);
+          // ⚠️ `repeatRejectionDecision` 的输入（margin / 连续轮次 / 闸名）**逐字来自本轮的处置**
+          //    （`d.repeatReading`，由那条判据产出），⛔ 不在这里重新解析 `d.reason` 或重新推导 ——
+          //    重新解析字符串就是造第二份真相源（硬规则 5b）。
           const body = renderRoutineTaskBody({ ...f }, {
             routine: decl.name, probe: decl.probe as string, runId, carrier: path.relative(opts.root, findingsPath),
             ts: new Date(started).toISOString(), taskId: d.taskId,
-          }, d.escalate ? {
+          }, d.escalationForm === "repeat-rejection" && d.repeatReading ? {
+            repeatRejection: d.repeatReading,
+          } : d.escalate ? {
             blocked: {
               probeId: remedy.probeId,
               observed: remedy.observed,
@@ -1045,8 +1206,22 @@ export function llmProbeRoutine(decl: RoutineDecl, opts: ProbeRoutineOptions): R
           // 升级面单独一类（⛔ 不与 `filed` 合并）：这两条通道的产物**形状不同、消费者不同**，
           // 合并会让「本轮走了人可见通道」与「本轮照常派发」在载体里同形（硬规则 3）。
           escalated,
+          // 升级的**形态**（⛔ 两种成因相反的升级不得同形，硬规则 3）：`blocked` = 补救在本机不可执行；
+          // `repeat-rejection` = 补救可执行、却被限流闸连续拒下。这条是本任务新增的那一种。
+          escalated_repeat_rejection: dispositions.filter((d) => d.escalationForm === "repeat-rejection" && d.accepted)
+            .map((d) => ({ findingId: d.findingId, taskId: d.taskId, reason: d.reason })),
           remedy_availability: remedy.status,
           rejected: dispositions.filter((d) => !d.accepted).map((d) => ({ findingId: d.findingId, gate: d.gate, reason: d.reason })),
+          // **id 派生的可审计痕**（`gap-ac214-eleventh-crossing-…` 的 Requested action §2）：只记非平凡
+          // 的那几级（基名可用时不留痕，⛔ 不制造普遍漂移）。`collision-escape` 那一级是本任务新增的 ——
+          // 它让「基名 + 哈希后缀都被占」不再等于「该主体被永久封印」，而新 id 与它的派生规则在这里可核。
+          // ⛔ 只记**接受**的条目：被拒的候选没有产 id，把它的名字写进来会让痕指向一个不存在的文件。
+          id_derivation: dispositions.filter((d) => d.accepted && d.idRule).map((d) => ({
+            findingId: d.findingId, taskId: d.taskId, rule: d.idRule, escapedFrom: d.escapedFrom ?? null,
+            note: d.idRule === "collision-escape"
+              ? `base slug taken AND its sha1(findingKey)[0:8] suffix taken ⇒ the round's own UTC stamp was appended (⛔ existing task bodies are never overwritten; COLLISION_ESCAPE_MAX=${COLLISION_ESCAPE_MAX})`
+              : "base slug taken ⇒ sha1(findingKey)[0:8] appended",
+          })),
           // 去重读数的**独立落痕**（枚举，⛔ 不布尔）：本条任务之前，被接受的立案只留一个 task id，
           // 于是「板上只有 done / 拥有者状态读不出」这两条判据在载体上**没有消费者**（硬规则 3b 的
           // 形态：一个诚实的读数，若无消费者就与「没看过」同形）。这里按候选逐条记 `state` 与
