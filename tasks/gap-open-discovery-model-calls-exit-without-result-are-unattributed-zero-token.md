@@ -4,7 +4,7 @@ title: "open discovery: model calls that run minutes but leave no result event
   (exit 0/1, 0 tokens, subtype null) are unattributed and recorded like success
   — minimal attributable diagnostics, enumerated call_failure, one counted
   retry, cost proof, unrecognized_model paired test"
-status: ready
+status: done
 labels:
   - gap
   - defect
