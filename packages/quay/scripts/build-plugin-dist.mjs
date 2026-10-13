@@ -33,6 +33,7 @@
 
 import * as esbuild from "esbuild";
 import path from "node:path";
+import os from "node:os";
 import fs from "node:fs";
 import { execFileSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
@@ -655,30 +656,85 @@ function coreSrcAliasPlugin() {
 }
 
 /**
+ * How many `bundleEntries` builds may be in flight at once.
+ *
+ * WHY THIS IS NOT A SERIAL LOOP (tasks/gap-shipped-set-test-exceeds-55s-budget-sequential-bundling):
+ * the entry count grows with the shipped surface (115 entries on 2026-10-13) and EACH `build()` call
+ * carries a per-call cost that is a property of the BUILD TREE'S FILESYSTEM, not of the entry's size
+ * — measured 2026-10-13 on this host, ten bundles of a one-line `export const x = 1;`:
+ *   in /tmp (ext4, /dev/vda2, ~180k entries in the tmp root)   116 ms each
+ *   in /data (xfs, /dev/vdb)                                    14 ms each
+ * The published artifact's own assembly happens in a throwaway tree under the RESOLVED tmp root, so
+ * every real publish paid the slow side of that: 115 × ~127 ms ≈ 15 s PER PUBLISH, and
+ * `plugin/test/shipped-set.test.mjs` assembles three times ⇒ ~44 s of its 55 s AC-334 budget was
+ * the same unmodified source being re-bundled through this loop.
+ *
+ * ⛔ A host-read, never a literal (CLAUDE.md 硬规则 4 推论二): a hardcoded width is a host-dependent
+ * constant that silently becomes a real, wrong limit on a different machine. The pool is
+ * I/O-bound — the per-call cost above is file-system latency, not CPU — so width tracks the host's
+ * parallelism and is capped only by the amount of work. MEASURED peak RSS is FLAT across width
+ * (113 MB at width 1, 112 MB at width 115 on the 126-entry tree): a wide pool costs no more memory
+ * than a serial loop, so there is nothing to trade off here.
+ */
+function entryBundleWidth(entryCount) {
+  const host = typeof os.availableParallelism === "function" ? os.availableParallelism() : os.cpus().length;
+  return Math.max(1, Math.min(entryCount, host));
+}
+
+/**
  * Bundle a set of entry .ts files into sibling `dist/<name>.js` files.
+ *
+ * The bundles are independent by construction (each `build()` carries its own single `entryPoints`
+ * and its own `outfile`, and never reads another's output), so the pool below changes only WHEN the
+ * builds run, never what they produce — the returned `outfiles` keep the input order (see the
+ * `concurrency` param for the width, and the task's AC4 for the byte-identity evidence).
+ *
  * @param {string} pluginRoot
  * @param {string[]} entries relative paths under pluginRoot (e.g. "scripts/foo.ts")
+ * @param {{concurrency?: number}} [opts] `concurrency` pins the pool width (default: host-derived,
+ *   see entryBundleWidth); it exists so a test can exercise the pool deterministically on a host
+ *   whose parallelism it does not control.
+ * @returns {Promise<string[]>} the written outfiles, in `entries` order, entries whose source is
+ *   absent omitted (the pre-existing contract).
  */
-export async function bundleEntries(pluginRoot, entries) {
-  const outfiles = [];
+export async function bundleEntries(pluginRoot, entries, opts = {}) {
+  const jobs = [];
   for (const rel of entries) {
     const entryAbs = path.resolve(pluginRoot, rel);
     if (!fs.existsSync(entryAbs)) continue;
     const outfile = path.join(path.dirname(entryAbs), "dist", path.basename(rel).replace(/\.ts$/, ".js"));
+    // Create the output dirs BEFORE the pool starts: two concurrent workers must never race the same
+    // mkdir, and the serial loop's "dir exists by the time build() runs" invariant is preserved.
     fs.mkdirSync(path.dirname(outfile), { recursive: true });
-    await esbuild.build({
-      entryPoints: [entryAbs],
-      bundle: true,
-      platform: "node",
-      format: "esm",
-      outfile,
-      loader: { ".json": "json" },
-      banner: { js: REQUIRE_BANNER },
-      plugins: [coreSrcAliasPlugin()],
-      logLevel: "silent",
-    });
-    outfiles.push(outfile);
+    jobs.push({ entryAbs, outfile });
   }
+  const outfiles = new Array(jobs.length);
+  const requested = opts.concurrency ?? entryBundleWidth(jobs.length);
+  const width = Math.max(1, Math.min(requested, jobs.length));
+  let cursor = 0;
+  await Promise.all(
+    Array.from({ length: width }, async () => {
+      // The claim is a synchronous read-and-increment on a single-threaded runtime, so two workers
+      // can never take the same index; `await` only ever happens with the index already owned.
+      while (true) {
+        const i = cursor++;
+        if (i >= jobs.length) return;
+        const { entryAbs, outfile } = jobs[i];
+        await esbuild.build({
+          entryPoints: [entryAbs],
+          bundle: true,
+          platform: "node",
+          format: "esm",
+          outfile,
+          loader: { ".json": "json" },
+          banner: { js: REQUIRE_BANNER },
+          plugins: [coreSrcAliasPlugin()],
+          logLevel: "silent",
+        });
+        outfiles[i] = outfile;
+      }
+    }),
+  );
   return outfiles;
 }
 
