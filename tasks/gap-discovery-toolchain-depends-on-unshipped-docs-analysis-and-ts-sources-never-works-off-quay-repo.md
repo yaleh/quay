@@ -163,3 +163,11 @@ Also recorded so it is not re-discovered: the two instruments' entry guards are 
 - plugin/scripts/arch-discovery-routine.ts
 - docs/analysis/arch-hypothesis-generation.mjs
 - docs/analysis/arch-discovery-space.mjs
+
+## Blocker
+
+**2026-10-13T09:52:01.166Z — worker 未落地（exited-not-landed）**
+
+- 未落地原因：step=suite: AssertionError [ERR_ASSERTION]: the real publish script FAILED (exit 1):
+- run_id：wk-prod-anchor
+- session_id：3a06cfcc-88ee-4976-ac78-0bb64a9702b4
