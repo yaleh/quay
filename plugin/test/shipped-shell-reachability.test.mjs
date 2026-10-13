@@ -79,7 +79,12 @@ function makePublishRepo(tag) {
   const root = makeTmpDir(tag);
   fs.symlinkSync(NODE_MODULES, path.join(root, "node_modules"), "dir");
   fs.mkdirSync(path.join(root, "packages", "quay"), { recursive: true });
-  for (const rel of ["packages/quay/scripts", "packages/quay/src", "scripts"]) {
+  // `docs/analysis` is a REAL build input, not a dev tree: build-plugin-dist.mjs stages the discovery
+  // engine closure out of it into the artifact and REFUSES (fail-closed) to ship the three discovery
+  // routines without it, so a copy that mirrors only <root>/plugin makes the REAL publish script fail
+  // closed — the copy, not the script, is incomplete (task
+  // gap-discovery-toolchain-depends-on-unshipped-docs-analysis-and-ts-sources-never-works-off-quay-repo).
+  for (const rel of ["packages/quay/scripts", "packages/quay/src", "scripts", "docs/analysis"]) {
     cpRecursive(path.join(repoRoot, rel), path.join(root, rel));
   }
   fs.copyFileSync(path.join(repoRoot, "packages", "quay", "package.json"), path.join(root, "packages", "quay", "package.json"));

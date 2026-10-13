@@ -72,6 +72,30 @@
         "shLines": 7345
       },
       "why": "gap-dashboard-kernel-not-packaged-in-plugin-artifact: the artifact now carries the published quay/dashboard-kernel bundle (vendor/quay/dist/dashboard-kernel.js) and its contract vector (vendor/quay/dist/dashboard-kernel-vectors.json), mirrored by plugin/scripts/sync-vendor.sh. files 264 -> 266 (exactly +2: the two new shipped files; shLines 8286 -> the artifact's OWN current reading, which is LOWER, so the .sh axis did not grow). Read from a real publish-dist-branch.sh artifact assembled in a throwaway stub repo from this branch's plugin/ tree (266 files / 56261340 bytes). Recorded from the artifact's own reading, never hand-fitted."
+    },
+    {
+      "when": "2026-10-13T09:57:18.780Z",
+      "from": {
+        "files": 0,
+        "bytes": 0,
+        "shLines": 0,
+        "shipped": {
+          "files": 266,
+          "bytes": 56445117,
+          "shLines": 7345
+        }
+      },
+      "to": {
+        "files": 0,
+        "bytes": 0,
+        "shLines": 0
+      },
+      "shipped": {
+        "files": 281,
+        "bytes": 58847285,
+        "shLines": 7345
+      },
+      "why": "gap-discovery-toolchain-depends-on-unshipped-docs-analysis-and-ts-sources-never-works-off-quay-repo: the artifact now ships the discovery engine VERBATIM (docs/analysis/ = 8 .mjs + 5 prompt data files; the three routines resolve it off-repo) plus the 2 dist bundles the engine's own source names (scripts/dist/import-graph-check.js, enum-surface-parity-check.js). files 266 -> 281 (exactly +15 = 13 engine files + 2 bundles); shLines unchanged (the engine is .mjs, no .sh) so the ratchet's three axes stay 0. Reading taken from a real publish-dist-branch.sh artifact assembled in a throwaway stub repo from this branch's plugin/ tree, never hand-fitted."
     }
   ],
   "_axes": {
@@ -85,8 +109,8 @@
   "bytes": 0,
   "shLines": 0,
   "shipped": {
-    "files": 266,
-    "bytes": 56445117,
+    "files": 281,
+    "bytes": 58847285,
     "shLines": 7345
   }
 }
