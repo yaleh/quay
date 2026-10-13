@@ -45,3 +45,19 @@ Three independent, each-sufficient causes — all dev-tree-only assumptions of e
 - AC1-AC5 checked with pasted real evidence.
 - No detector semantics, trigger computation, or judge-call change; scope is resolution + shipping + root-gating only.
 - The sibling checker `kernel-sibling-resolution-check.ts` is extended (or a new control added) so this class is mechanically detectable, not just fixed.
+
+## Touches
+
+- tasks/gap-architecture-review-detectors-not-runnable-off-quay-repo.md
+- plugin/scripts/quality-gate-driver.ts
+- plugin/scripts/driver-runtime.ts
+- plugin/scripts/identity-replication-check.ts
+- plugin/scripts/guard-lineage-check.ts
+- plugin/scripts/deletion-closure-check.ts
+- plugin/scripts/kernel-sibling-resolution-check.ts
+- plugin/scripts/publish-dist-branch.sh
+- plugin/test/quality-gate-driver.test.mjs
+- plugin/test/identity-replication-check.test.mjs
+- plugin/test/guard-lineage-check.test.mjs
+- plugin/test/deletion-closure-check.test.mjs
+- plugin/test/kernel-sibling-resolution-check.test.mjs
