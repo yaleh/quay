@@ -2475,28 +2475,40 @@ export function defaultSelectorArgv(candidateIds: string[], root: string): strin
     `Candidate task ids (ready pool, in-flight subtracted, order shuffled): ${candidateIds.join(", ")}.`,
     `Before choosing, read orchestration/dispatch-preference.md — its 覆盖段 carries the current priority (manager-maintained). Honor it unless a candidate is structurally ineligible (Touches conflict / unmet deps). If no candidate matches the override priority, fall back to your own semantic judgment.`,
     `Pick exactly ONE task to dispatch next and reply with a single line: <task-id> <one-line reason>`,
-    `and nothing else. Repo root: ${root}.`,
+    `and nothing else. ⛔ No preamble, no commentary about the files you read (e.g. whether orchestration/dispatch-preference.md exists) — your FIRST line must begin with the chosen <task-id>, because that is the line the driver parses. Repo root: ${root}.`,
   ].join(" ");
   return launchArgv("selector", prompt, root);
 }
 
-/** 解析 selector worker 输出（Layer 1a · select）。无效输出 ⇒ fail-closed 回退打散后首个候选。 */
+/** 解析 selector worker 输出（Layer 1a · select）。无效输出 ⇒ fail-closed 回退打散后首个候选。
+ *
+ *  ⛔ 逐行扫，**不是只看首行**——模型常在给出选择前先写一段散文（cross-project dogfood round
+ *  cpd-943549-1791888744490-fuepz9 实测：首行是在说 `orchestration/dispatch-preference.md` 不存在，
+ *  真正的选择在后续行）。旧实现取 `split("\n")[0]`，散文首行的首 token（如 "No"）不是候选 id ⇒
+ *  **静默回退 candidates[0]**，丢掉模型已经给出的正确选择，且失败与「模型没选出来」同形（硬规则 3b）。
+ *  约定仍是「一行 `<task-id> <reason>`」，故取**首个首 token 命中候选的行**；一行都没有才回退。 */
 export function parseSelectorOutput(
   stdout: string,
   candidates: string[],
   exitCode: number | null,
   stderr: string | null = null,
 ): { task: string; reason: string } | null {
-  const line = String(stdout ?? "").trim().split("\n")[0]?.trim() ?? "";
-  const m = line.match(/^\s*(\S+)(?:\s+(.*))?$/);
-  const task = m ? m[1] : null;
-  const reason = m && m[2] ? m[2].trim() : "";
-  if (task && candidates.includes(task)) {
-    return { task, reason: reason || `selector picked ${task}` };
+  const lines = String(stdout ?? "")
+    .split("\n")
+    .map((l) => l.trim())
+    .filter((l) => l.length > 0);
+  for (const line of lines) {
+    const m = line.match(/^\s*(\S+)(?:\s+(.*))?$/);
+    const task = m ? m[1] : null;
+    if (task && candidates.includes(task)) {
+      const reason = m && m[2] ? m[2].trim() : "";
+      return { task, reason: reason || `selector picked ${task}` };
+    }
   }
   const fallback = candidates[0];
   if (!fallback) return null;
-  const got = line ? `, got "${line.slice(0, 80)}"` : "";
+  const first = lines[0] ?? "";
+  const got = first ? `, got "${first.slice(0, 80)}"` : "";
   const errFrag = stderr ? `, stderr="${stderr.slice(0, 200)}"` : "";
   return {
     task: fallback,
