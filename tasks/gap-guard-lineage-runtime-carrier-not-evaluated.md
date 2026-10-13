@@ -2,7 +2,7 @@
 id: gap-guard-lineage-runtime-carrier-not-evaluated
 title: "守卫谱系把 gitignored 运行时载体的快照缺席读成「对象已删」：file: 声明须有 runtime: 类并报
   NOT-EVALUATED（P4-missing-guard-object 假阳性）"
-status: ready
+status: done
 labels:
   - gap
   - defect
@@ -71,28 +71,28 @@ extra:
 
 ## AC
 
-- [ ] AC1（复现·现状读数，生产载体）：在一个**必然不含那两个 gitignored 载体**的根上（新 `git worktree add`
+- [x] AC1（复现·现状读数，生产载体）：在一个**必然不含那两个 gitignored 载体**的根上（新 `git worktree add`
       本仓，或等价 export；被 ignore ⇒ 不进 checkout），跑现状检测器
       `node --experimental-strip-types <main>/plugin/scripts/guard-lineage-check.ts --root <该根> --json`，
       贴出 `declared[]` 里那两条 `"present": false` / `"note": "object MISSING"` 的逐字行；并贴出把该 `--json`
       喂给 `clusterLineageReport()` 得到的 `P4-missing-guard-object` 簇（`files` / `rawCount` / `label`）。
       【⛔ 这一条要在动手改之前取读数；若已改，用基线 commit 或临时 `--catalog` 缝复现之】
-- [ ] AC2（修后·生产读数，NOT-EVALUATED 与 MISSING 取值可区分）：在**同一个**无载体根上，修后重跑同一条命令，
+- [x] AC2（修后·生产读数，NOT-EVALUATED 与 MISSING 取值可区分）：在**同一个**无载体根上，修后重跑同一条命令，
       `declared[]` 里那两条对象的取值**不再是 `present:false`**：`kind` 与 `"file"`/`"invariant"` 可区分，
       note 说明是运行时载体、快照存在性不可判（⛔ 不是 "object MISSING"）。贴出两行逐字。
-- [ ] AC3（负控制·修法不得一刀切）：一个**真正缺失**的 `file:` 声明对象仍报 `present:false` / MISSING，
+- [x] AC3（负控制·修法不得一刀切）：一个**真正缺失**的 `file:` 声明对象仍报 `present:false` / MISSING，
       且簇仍产出 `P4-missing-guard-object`。用一个真实 `file:` 声明指向一个不存在路径来造这个样本
       （临时 `--catalog` 文件，或测试里的裸 fixture 根）。贴出两条输出（检测器行 + 簇），与 AC2 形成对照。
       【硬规则 2 两半：非零查「命中的是不是我要的」，零查「谓词对真样本命不命中」】
-- [ ] AC4（聚类回归钉住双向）：`plugin/test/architecture-review-cluster.test.mjs` 新增/更新用例，同时钉住
+- [x] AC4（聚类回归钉住双向）：`plugin/test/architecture-review-cluster.test.mjs` 新增/更新用例，同时钉住
       ①runtime 载体 ⇒ **不**产出 `P4-missing-guard-object`；②真缺 `file:` 对象 ⇒ **仍**产出该簇。
       `node --experimental-strip-types plugin/test/architecture-review-cluster.test.mjs` exit 0，贴出运行输出。
-- [ ] AC5（声明约定 + 不合并两个 checker）：`capability-catalog-declarations.json` 的 `GUARD_OBJECT` 里那两条
+- [x] AC5（声明约定 + 不合并两个 checker）：`capability-catalog-declarations.json` 的 `GUARD_OBJECT` 里那两条
       tick-log 守卫改为新形态（贴出改后的两条 `GUARD_OBJECT` 行）；新前缀写进 `guard-lineage-check.ts` 头部
       声明约定注释（贴出该注释行）；且 `ls plugin/scripts/manager-tick-log-check.sh
       plugin/scripts/outer-tick-log-check.sh` 两个文件**都在**、各自仍是**独立的** `GUARD_OBJECT` 键（贴出两行）
       ——⛔ 未合并成一个 checker。
-- [ ] AC6（回归）：`node --experimental-strip-types plugin/test/guard-lineage-check.test.mjs` exit 0
+- [x] AC6（回归）：`node --experimental-strip-types plugin/test/guard-lineage-check.test.mjs` exit 0
       （含新增的 runtime-kind 用例）；`bash scripts/test.sh --for-task gap-guard-lineage-runtime-carrier-not-evaluated`
       绿（或等价 scoped 静态门）。贴出两条输出。
 

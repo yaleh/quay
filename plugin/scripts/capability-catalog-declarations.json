@@ -406,9 +406,9 @@
     "carrier-retention.ts": "每个 *.jsonl 轮载体（meta-driver / goal / verification / outer / worker / promotion-round）【能不能在不悄悄改写任何读取者读数的前提下被有界化】 —— 具体说：每个载体的每个非测试读取者落在哪个位置（硬规则 2 按位置不按关键词）、它真正需要的历史窗口是【全量 / 最近 N / 某纪元之后】哪一档、以及把整行前缀搬进 <carrier>/archive/<carrier>/<carrier>.<YYYY-MM-DD>[-N].jsonl[.gz] 之后，同一读取者读出的值是否逐字不变（archive 是【搬移】不是删除：分段按序 + live 尾的字节拼接与原文件逐字节相等，并发 appender 一个字节不丢不重，中途失败时 live 载体逐字节不变，读取者经 materializeAllRecords 拿到与归档前同形的全量历史）。默认【关闭】：.quay/config.yml 无 retention: 段 ⇒ 一次写入都不做；--dry-run 只报计划不落盘。tasks/gap-driver-round-carriers-unbounded-growth-retention-design"
   },
   "GUARD_OBJECT": {
-    "manager-tick-log-check.sh": "file:orchestration/manager-tick-log.md",
+    "manager-tick-log-check.sh": "runtime:orchestration/manager-tick-log.md",
     "release-master-advance-needs-check.ts": "invariant:advance-master.needs in .github/workflows/release.yml covers every other job key of that same file — the only thing keeping master from advancing onto a partially green release",
-    "outer-tick-log-check.sh": "file:orchestration/tick-log.md",
+    "outer-tick-log-check.sh": "runtime:orchestration/tick-log.md",
     "checker-mutation-check.sh": "invariant:every registered checker can be mutation-reddened (preventive — the L_S instrument's own object is the checkers' ability to fail)",
     "instrument-decay-check.ts": "invariant:telemetry carriers under .quay/ keep writing (companion contrast, not absolute rate)",
     "checker-mechanical-spine-check.ts": "invariant:every shipped checker conforms to the mechanical-spine contract (exit-code vocabulary within {0,1,2,3} + a --json claim that actually emits JSON)",

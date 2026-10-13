@@ -3,8 +3,14 @@
 // 每个检测器机器可读地声明四元组 ⟨guards, wired-into, last-run, last-fired⟩; 本工具核验/记录其中
 // 本任务承担的两半 (tasks/gap-archguard-p4-guard-lineage-declaration-and-registry):
 //   ① 守卫头部声明块 — 复用 capability-catalog 的登记位, GUARD_OBJECT 表声明该守卫
-//     "守的是什么对象/不变式" (guards)。对象两种形态: `file:<relpath>` (可核验存在性) /
-//     `invariant:<描述>` (约定, 无文件可指 — 文档 §3 P4 原文: "多数守卫守的是一条约定…没有可指对象")。
+//     "守的是什么对象/不变式" (guards)。对象三种形态 (**声明约定** — 新声明者按此择一):
+//       `file:<relpath>`     — 随仓入库的对象, 可核验存在性。缺失 ⇒ 真删除, 报 MISSING (簇照出)。
+//       `invariant:<描述>`   — 一条约定, 无文件可指 (文档 §3 P4 原文: "多数守卫守的是一条约定…没有可指对象")。
+//       `runtime:<relpath>`  — **gitignored 运行时载体** (活检出里由轮次写出, 不进 checkout)。
+//                              任何 export / 快照 / 新 `git worktree` / clone 里**结构上必然不存在**
+//                              ⇒ 那里的缺席是构造性事实, ⛔ 不得读成「对象已删」。本检测器对它报
+//                              NOT-EVALUATED (present:null ∧ kind:"runtime"), 与 `file:` 的 MISSING
+//                              取值可区分 (硬规则 3b: 读不懂不得与一次真实检查结果同形)。
 //   ② verdict 记录流 — 读 checker-cost.jsonl 的 verdict 字段 (gap-checker-cost-jsonl-add-verdict-field
 //     落地的三态 pass/fail/not-evaluated), 算每个守卫的 last-run / last-fired 与「窗口内曾变红比例」。
 //
@@ -14,8 +20,11 @@
 //       gitignored 镜像 — 后者本就不在这三目录内), declared / total。文档记 165 / 0%, 现场以跑出的为准。
 //   AC2 窗口内曾变红的比例 — distinct 有 verdict:"fail" 的守卫名 / total。verdict 字段缺失 (历史行无
 //       verdict, 或 cost file 不存在) 时标 NOT-EVALUATED, 不伪造非零值 (硬规则 3b)。
-//   AC3 逐个回答"该守卫的对象是否仍存在" — file 对象查 fs.existsSync(root/<relpath>); invariant 对象
-//       如实报 "not mechanically checkable" (不把「无法评估」伪装成「存在」)。
+//   AC3 逐个回答"该守卫的对象是否仍存在" — file 对象查 fs.existsSync(root/<relpath>), 缺席 ⇒
+//       present:false/「object MISSING」; invariant 对象如实报 "not mechanically checkable"; runtime
+//       对象报 NOT-EVALUATED (present:null ∧ kind:"runtime", note 说明是 gitignored 运行时载体)。
+//       ⛔ 三态互不同形 (硬规则 3b): 「快照里没有」绝不与「对象已删」共用输出, 也绝不与 invariant 的
+//       「无文件可指」共用取值 —— 真 file 对象缺失必须**仍然**报 MISSING。
 //   AC4 反向判据 — 不得把 checker-mutation-check 这类【预防性】守卫因「从未变红」报为可疑: 判定同时
 //       采信 last-fired 与 mutation-verified 两项证据。mutation-verified = 有 mutation case
 //       (plugin/scripts/checker-mutation-cases/<stem>.sh — checker-mutation-check 的 L_S 变异验证)。
@@ -86,15 +95,25 @@ export function enumerateGuards(root: string): GuardRef[] {
 }
 
 // ── 声明块解析 (从 capability-catalog 的声明数据读 GUARD_OBJECT 表) ────────────────────────────
+/** 守卫对象的三种声明形态 (硬规则 3b 的三态词表: 一个判定的输出里必须有「未评估」)。
+ *  `file` = 随仓入库、可核验存在性; `invariant` = 无文件可指的约定; `runtime` = gitignored
+ *  运行时载体 (快照存在性不可判)。⛔ 三者互不同形, 见文件头部「声明约定」。 */
+export type DeclarationKind = "file" | "invariant" | "runtime";
+
 export interface GuardDeclaration {
-  object: string;          // 原始声明值 (file:<path> / invariant:<desc> / 无前缀按 invariant)
-  kind: "file" | "invariant";
-  filePath?: string;       // kind=file 时的 repo 相对路径
+  object: string;          // 原始声明值 (file:<path> / runtime:<path> / invariant:<desc> / 无前缀按 invariant)
+  kind: DeclarationKind;
+  filePath?: string;       // kind=file / runtime 时的 repo 相对路径
 }
 
 export function classifyDeclaration(value: string): GuardDeclaration {
   if (value.startsWith("file:")) {
     return { object: value, kind: "file", filePath: value.slice("file:".length) };
+  }
+  // runtime: gitignored 运行时载体 —— 活检出里存在, 任何 export/快照/worktree/clone 里结构上不存在。
+  // ⛔ 不给它一个独立 kind 的话, 下游只能拿 fs.existsSync 的 false 去与「真删除」共用输出 (硬规则 3b)。
+  if (value.startsWith("runtime:")) {
+    return { object: value, kind: "runtime", filePath: value.slice("runtime:".length) };
   }
   return { object: value, kind: "invariant" };
 }
@@ -130,9 +149,9 @@ export function parseGuardObjects(declarationsText: string): Map<string, GuardDe
 // ── 对象存在性 (AC3: 逐个回答"该守卫的对象是否仍存在") ────────────────────────────────────────
 export interface ObjectPresence {
   declared: boolean;
-  kind: "file" | "invariant" | null;
+  kind: DeclarationKind | null;
   object: string | null;
-  present: boolean | null; // file: existsSync 结果; invariant/undeclared: null (不可机械核验)
+  present: boolean | null; // file: existsSync 结果; runtime/invariant/undeclared: null (不可机械核验)
   note: string;
 }
 
@@ -145,6 +164,15 @@ export function checkObjectPresent(root: string, dec: GuardDeclaration | undefin
     return {
       declared: true, kind: "file", object: dec.object, present: exists,
       note: exists ? "object present" : "object MISSING",
+    };
+  }
+  // runtime: **NOT-EVALUATED**, ⛔ 不是 MISSING —— 该对象被 .gitignore 忽略, 本根 (快照/export/worktree/
+  // clone) 里构造上不该有它, `fs.existsSync` 的 false 在这里量的是「本根不含 gitignored 文件」而不是
+  // 「对象被删」。present 保持 null (非 false) ∧ kind:"runtime" (与 invariant 可区分) ∧ note 说明原因。
+  if (dec.kind === "runtime") {
+    return {
+      declared: true, kind: "runtime", object: dec.object, present: null,
+      note: "runtime carrier (gitignored) — NOT-EVALUATED: absent from any snapshot/export/worktree by construction, so its existence is not mechanically checkable here (≠ object deleted)",
     };
   }
   return {
@@ -239,7 +267,7 @@ export function isMutationVerified(root: string, stem: string): boolean {
 export interface DeclaredEntry {
   basename: string;
   dir: string;
-  kind: "file" | "invariant";
+  kind: DeclarationKind;
   object: string;
   present: boolean | null;
   note: string;
@@ -418,7 +446,12 @@ function printHuman(report: LineageReport): void {
 
   console.log(`\n== AC3 已声明守卫的对象存在性 — ${report.declared.length} declared ==`);
   for (const d of report.declared) {
-    const mark = d.present === null ? "—" : d.present ? "PRESENT" : "MISSING";
+    // 三态各自的词 (硬规则 3b): MISSING 只留给真 file 对象缺席; runtime 恒为 NOT-EVALUATED,
+    // ⛔ 不因 present:null 就退化成与 invariant 同形的「—」。
+    const mark = d.present === false ? "MISSING"
+      : d.present === true ? "PRESENT"
+      : d.kind === "runtime" ? "NOT-EVALUATED"
+      : "—";
     console.log(`  ${d.basename}  [${d.kind}]  ${mark}  ${d.object}`);
   }
 

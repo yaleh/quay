@@ -73,7 +73,10 @@ export interface IdentityReportView {
 /** guard-lineage-check.ts --json（P4）里聚类消费的面。 */
 export interface LineageReportView {
   suspicious?: Array<{ basename?: string; dir?: string }>;
-  declared?: Array<{ basename?: string; dir?: string; present?: boolean | null }>;
+  /** `kind` 是本模块**必须看见**的那个字段（gap-guard-lineage-runtime-carrier-not-evaluated）：
+   *  `file` = 随仓入库、缺失即真删除；`invariant` = 无文件可指；`runtime` = gitignored 运行时载体
+   *  （快照存在性不可判）。⛔ 只看 `present` 分不出「真缺」与「读不懂」——那正是本缺陷的成因形态。 */
+  declared?: Array<{ basename?: string; dir?: string; kind?: string; present?: boolean | null }>;
 }
 
 /** deletion-closure-check.ts --json（P1）里聚类消费的面。 */
@@ -207,7 +210,15 @@ export function clusterLineageReport(r: LineageReportView): Cluster[] {
     });
   }
 
-  const missing = (r.declared ?? []).filter((d) => d.present === false);
+  // 缺失对象 = 判定**为 file 对象**且 present === false 的那些。gap-guard-lineage-runtime-carrier-
+  //  not-evaluated：一个 gitignored 运行时载体（`runtime:` 声明）在任何快照根上结构性地不在，它的
+  // 「快照里没有」不是删除 —— 检测器对它报 present:null ∧ kind:"runtime"。
+  // ⛔ 这里**显式**按 kind 排除 runtime，而不是依赖「present:null 恰好 !== false」这种隐式巧合:
+  //   ① 假若某个 runtime 声明因故报 present:false（检测器退化/旧版本输出），隐式判据会立刻把它
+  //      误报成「已删」；显式判据在整个 runtime 类上取假，与本缺陷的成因形态解耦。
+  //   ② 判据方向保持 fail-closed 的另一半: 真 `file:` 对象缺失（present:false ∧ kind ≠ runtime，
+  //      含 kind 未知的输出）**仍然**成簇 —— 不得靠放宽阈值或吞掉缺失来消掉本缺陷。
+  const missing = (r.declared ?? []).filter((d) => d.present === false && d.kind !== "runtime");
   if (missing.length > 0) {
     out.push({
       clusterId: "P4-missing-guard-object",
