@@ -755,3 +755,17 @@ test("a filed task title is shortened on a word boundary and marked as shortened
   assert.ok(long.startsWith(out.slice(0, -1).trim()), "the kept text must be a prefix of the claim");
   assert.equal(truncateOnWord("short claim", 120), "short claim", "a claim that fits is returned unchanged");
 });
+
+test("the digest carries the project's OWN task titles as local material (the half the scope judgment needs)", () => {
+  // Three real rounds returned ZERO project_local items because nothing in the digest said what the host
+  // was working on; this block is that missing half, and it must reach the pack with provenance.
+  const base = tmpDir();
+  const root = makeSourceProject(path.join(base, "alpha"), { outcomes: [{ kind: "w" }], tasks: { "t-1": "done", "t-2": "needs-human" } });
+  fs.writeFileSync(path.join(root, "tasks", "t-1.md"), "---\nid: t-1\nstatus: done\ntitle: the host's own voice feature\n---\n\n# t-1\n", "utf8");
+  const scan = scanSourceProject(project("alpha", root), { maxRecords: 5, maxFileBytes: 1_000_000, maxBytes: 1_000_000 });
+  assert.equal(scan.task_titles.length, 2);
+  assert.ok(scan.task_titles.every((t) => t.source_project === "alpha" && t.file.startsWith("tasks/")), "each title keeps its provenance");
+  const pack = renderEvidencePack([scan]);
+  assert.match(pack, /### local material — the project's OWN task titles/);
+  assert.match(pack, /the host's own voice feature/);
+});

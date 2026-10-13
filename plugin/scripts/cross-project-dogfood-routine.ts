@@ -123,6 +123,10 @@ export const DIGEST_KEYS = Object.freeze([
  *  truncated census is recorded as such — a COUNT over a prefix must not read as a COUNT over the tree. */
 export const MAX_TASK_FILES = 2000;
 
+/** How many of a project's OWN task titles the digest carries. Bounded: this is context for the scope
+ *  judgment, not a dump. */
+export const LOCAL_MATERIAL_MAX = 25;
+
 /** How many sample records per artifact are handed to the model (with provenance), and how long each
  *  excerpt may be. Bounded so a 20 MB log cannot crowd the prompt. */
 export const SAMPLE_RECORDS_PER_FILE = 40;
@@ -397,6 +401,9 @@ export interface ProjectScan {
   artifacts: ArtifactScan[];
   task_counts: Record<string, number>;
   task_lines: EvidenceRow[];
+  /** A bounded sample of the project's OWN task titles — the half of the picture that says what this
+   *  host's own work is about. Without it the model had nothing to classify as `project_local`. */
+  task_titles: EvidenceRow[];
   /** How many task files were opened vs how many exist — a count over a PREFIX must not read as a
    *  census of the tree. `task_counts_censused` is false when the two differ. */
   task_files_scanned: number;
@@ -470,13 +477,20 @@ export function scanJsonlArtifact(project: string, root: string, rel: string, op
 
 /** Scan `tasks/*.md`: STATUS COUNTS plus, for `needs-human` tasks, the first body line that looks like the
  *  human-authored reason. Read-only, bounded by file count and by a per-file head read. */
-export function scanTasksDir(project: string, root: string, opts: { maxFiles: number; headBytes: number }): { counts: Record<string, number>; rows: EvidenceRow[]; scanned: number; total: number; error: string | null } {
+export function scanTasksDir(project: string, root: string, opts: { maxFiles: number; headBytes: number }): { counts: Record<string, number>; rows: EvidenceRow[]; titles: EvidenceRow[]; scanned: number; total: number; error: string | null } {
   const dir = path.join(root, "tasks");
   let names: string[];
   try { names = fs.readdirSync(dir).filter((n) => n.endsWith(".md")).sort(); }
-  catch (e) { return { counts: {}, rows: [], scanned: 0, total: 0, error: (e as NodeJS.ErrnoException).code === "ENOENT" ? "no tasks/ directory" : `readdirSync failed: ${(e as Error).message}` }; }
+  catch (e) { return { counts: {}, rows: [], titles: [], scanned: 0, total: 0, error: (e as NodeJS.ErrnoException).code === "ENOENT" ? "no tasks/ directory" : `readdirSync failed: ${(e as Error).message}` }; }
   const counts: Record<string, number> = {};
   const rows: EvidenceRow[] = [];
+  const doneTitles: EvidenceRow[] = [];
+  // ⛔ LOCAL MATERIAL, surfaced deliberately. The routine's whole job is to separate a host's OWN
+  // defect from a Quay-generic one, but three real rounds in a row returned ZERO `project_local` items:
+  // nothing in the digest said what this project's own work is even ABOUT, so the model had only
+  // Quay-side material to classify. The task titles are exactly that missing half, with provenance. They
+  // are raw material for a judgment, never a verdict.
+  const titles: EvidenceRow[] = [];
   const scanned = Math.min(names.length, opts.maxFiles);
   for (const name of names.slice(0, scanned)) {
     const abs = path.join(dir, name);
@@ -492,6 +506,15 @@ export function scanTasksDir(project: string, root: string, opts: { maxFiles: nu
     const m = head.match(/^status:\s*([\w-]+)\s*$/m);
     const status = m ? m[1] : "unreadable";
     counts[status] = (counts[status] ?? 0) + 1;
+    const tl = head.match(/^title:\s*(.+)$/m) ?? head.match(/^#\s+(.+)$/m);
+    if (tl) {
+      const row: EvidenceRow = { source_project: project, file: `tasks/${name}`, line: 1, kind: status, excerpt: excerptOf(tl[1].trim()) };
+      // ⛔ NOT a plain head-of-list sample: an alphabetical prefix is ALL `gap-ac-*` on both projects
+      // here, i.e. the same slice every round. The OPEN items are what a host's own concern would be in,
+      // so they are taken first and the closed ones only fill the remainder.
+      if (status === "done" || status === "superseded") { if (doneTitles.length < LOCAL_MATERIAL_MAX) doneTitles.push(row); }
+      else if (titles.length < LOCAL_MATERIAL_MAX) titles.push(row);
+    }
     if (status !== "needs-human") continue;
     const lines = head.split("\n");
     const bodyIdx = lines.findIndex((l, i) => i > 0 && l.trim() !== "" && l !== "---" && !/^\w[\w-]*:/.test(l) && !l.startsWith("##"));
@@ -500,14 +523,15 @@ export function scanTasksDir(project: string, root: string, opts: { maxFiles: nu
     const chosen = reasonIdx >= 0 ? lines[reasonIdx] : first;
     rows.push({ source_project: project, file: `tasks/${name}`, line: (reasonIdx >= 0 ? reasonIdx : bodyIdx) + 1, kind: "needs-human", excerpt: excerptOf(chosen.trim()) });
   }
-  return { counts, rows: rows.slice(0, 100), scanned, total: names.length, error: null };
+  const sampled = [...titles, ...doneTitles].slice(0, LOCAL_MATERIAL_MAX);
+  return { counts, rows: rows.slice(0, 100), titles: sampled, scanned, total: names.length, error: null };
 }
 
 /** Scan one source project READ-ONLY. An unreadable root is its OWN reading (`root-unreadable`) with a
  *  named reason — the round never fails because of it, and "could not open it" never looks like "opened
  *  it and found nothing". */
 export function scanSourceProject(project: SourceProject, opts: { maxRecords: number; maxFileBytes: number; maxBytes: number }): ProjectScan {
-  const base: ProjectScan = { name: project.name, root: project.root, enabled: project.enabled, reading: "ok", reason: null, artifacts: [], task_counts: {}, task_lines: [], task_files_scanned: 0, task_files_total: 0, task_counts_censused: false, bytes_read: 0 };
+  const base: ProjectScan = { name: project.name, root: project.root, enabled: project.enabled, reading: "ok", reason: null, artifacts: [], task_counts: {}, task_lines: [], task_titles: [], task_files_scanned: 0, task_files_total: 0, task_counts_censused: false, bytes_read: 0 };
   let st: fs.Stats;
   try { st = fs.statSync(project.root); }
   catch (e) { return { ...base, reading: "root-unreadable", reason: `statSync(${project.root}) — ${(e as Error).message}` }; }
@@ -525,7 +549,7 @@ export function scanSourceProject(project: SourceProject, opts: { maxRecords: nu
   }
   const tasks = scanTasksDir(project.name, project.root, { maxFiles: MAX_TASK_FILES, headBytes: 4096 });
   return {
-    ...base, artifacts, task_counts: tasks.counts, task_lines: tasks.rows,
+    ...base, artifacts, task_counts: tasks.counts, task_lines: tasks.rows, task_titles: tasks.titles,
     task_files_scanned: tasks.scanned, task_files_total: tasks.total,
     task_counts_censused: tasks.total === 0 || tasks.scanned === tasks.total,
     bytes_read: used,
@@ -545,6 +569,9 @@ export function renderEvidencePack(scans: readonly ProjectScan[]): string {
     if (s.reading !== "ok") { out.push(""); continue; }
     out.push(`tasks/: ${Object.entries(s.task_counts).map(([k, v]) => `${k}=${v}`).join(" ") || "(no task files read)"} (${s.task_files_scanned}/${s.task_files_total} files read${s.task_counts_censused ? "" : " — a PREFIX, not a census"})`);
     for (const r of s.task_lines.slice(0, 20)) out.push(`- needs-human [${r.file}:${r.line ?? "?"}] ${r.excerpt}`);
+    out.push("");
+    out.push(`### local material — the project's OWN task titles (${s.task_titles.length} sampled). These are what THIS host's autonomous loop is working on: a defect among them is the host's, not Quay's.`);
+    for (const r of s.task_titles) out.push(`  - [${r.file}] (${r.kind}) ${r.excerpt}`);
     for (const a of s.artifacts) {
       out.push("");
       out.push(`### ${a.file} — ${a.reading}${a.reason ? ` (${a.reason})` : ""}${a.lines === null ? "" : `, ${a.lines} lines`}, ${a.malformed_lines} malformed`);
@@ -569,13 +596,15 @@ You are given a DETERMINISTIC DIGEST of a bounded, recent slice of each source p
 You may read the digest, and you may Read/Grep the source projects' trees listed above for corroboration (read-only; there is no shell). Prefer reading a project's real file over reasoning about the digest alone.
 
 ⛔ MANDATORY OUTPUT SHAPE — read this before anything else. The array you return MUST contain at least
-ONE element whose \`"scope"\` is \`"project_local"\`, AND at least one whose \`"scope"\` is
-\`"quay_generic"\` whenever the artifacts contain a Quay-side mechanism worth claiming. A report with
-only \`quay_generic\` items is INCOMPLETE and will be read as a failure to separate the two, not as a
-clean project: those projects' artifacts always contain something that is THEIR OWN product or config
-defect (their own UI strings, their own tests, their own local settings, a \`needs-human\` reason that
-is about their code). Find one, cite it, and classify it \`project_local\` — it is the control arm that
-shows the classification was actually made.
+ONE element whose \`"scope"\` is \`"project_local"\`, drawn from the DIGEST's "local material" section
+(the project's own task titles) or from its \`needs-human\` line, cited to that position. It MUST also
+contain the \`quay_generic\` items, when the artifacts contain a Quay-side mechanism worth claiming.
+
+A report with only \`quay_generic\` items is INCOMPLETE and will be read as a failure to separate the
+two, not as a clean project — three earlier rounds came back that way and the discrimination could not
+be checked at all. The "local material" section is there precisely so you have that half of the picture:
+those titles are the host's OWN backlog, and something in them is that host's product or configuration
+concern rather than a defect in Quay's mechanism. Classify one, cite it, and leave it alone.
 
 WHAT IS IN SCOPE — this is the whole judgment you are here to make:
 - IN SCOPE: a defect in QUAY'S OWN MECHANISM that this project's usage exposed — the same failure will hit every other Quay-host project. Name the Quay-side surface it lives in (a repo-relative path under plugin/ or packages/ when you can tell) and say why it is not specific to this host.
@@ -891,7 +920,7 @@ export async function runCrossProjectDogfood(root: string, opts: CrossProjectDog
   }
 
   const evidencePack = renderEvidencePack(readable);
-  const evidenceIndex: EvidenceRow[] = readable.flatMap((s) => [...s.task_lines, ...s.artifacts.flatMap((a) => a.samples)]);
+  const evidenceIndex: EvidenceRow[] = readable.flatMap((s) => [...s.task_lines, ...s.task_titles, ...s.artifacts.flatMap((a) => a.samples)]);
   // The verifier/refuter prompts carry WHERE TO LOOK (see verifierLookupPreamble): a verifier whose cwd
   // is this round's scratch dir can only open the positions it is TOLD about.
   const lookup = verifierLookupPreamble(readable, evidenceIndex, root);
