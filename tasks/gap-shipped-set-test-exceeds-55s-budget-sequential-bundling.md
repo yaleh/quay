@@ -2,7 +2,7 @@
 id: gap-shipped-set-test-exceeds-55s-budget-sequential-bundling
 title: AC-334 的常驻判据自身零余量：shipped-set.test.mjs 实测 54.96s 对 55s 上限（余量 0.04s /
   0.07%），因测试三次装配真实产物、而每次装配 86% 的时间花在 bundleEntries 对 115 个入口的串行 esbuild 调用上
-status: ready
+status: done
 labels:
   - gap
   - defect
