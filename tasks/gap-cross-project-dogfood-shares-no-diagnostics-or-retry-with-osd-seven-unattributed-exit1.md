@@ -6,7 +6,7 @@ title: cross-project-dogfood-routine.ts imports NOTHING of OSD's
   — all 7 historical exit:1 calls (5 verifier+2 refuter) are permanently
   unattributed, zero retry; OSD's own path on the same host resolves the
   identical exit:1 to a real cause with a retained capture
-status: ready
+status: done
 labels:
   - gap
   - defect

@@ -68,9 +68,28 @@ import {
   appendCarrierRecords,
   writeLastRunStamped,
   readLedgerRecords,
+  classifyModelFailure,
   type InvokedBy,
 } from "./discovery-method-routine.ts";
-import { spawnModelCall, stepArgv, usdBudgetUsage } from "./open-semantic-discovery-routine.ts";
+import {
+  spawnModelCall,
+  stepArgv,
+  usdBudgetUsage,
+  // ── THE ATTRIBUTION + RETRY MACHINERY, REUSED FROM OSD (硬规则 5b) ─────────────────────────────────
+  // ⛔ These are the SAME functions the local routine's own call path uses — not a parallel
+  // reimplementation of them. Before this import existed, this routine's seven production `exit:1` calls
+  // (5 verifier + 2 refuter, rounds cpd-3283888 / cpd-3716725 / cpd-943549 / cpd-1241325, 2026-10-13)
+  // were permanently unattributable: its `CallRecord` kept `{step, reservation_id, ok, not_evaluated,
+  // turns, exit}` and nothing else, so a crashed CLI, a non-JSON reply, a gateway error and an
+  // environment fault all read as the identical string `not-evaluated:exit-1` — and none was retried.
+  callFailureClass,
+  callNotEvaluatedToken,
+  writeCallCapture,
+  boundedTail,
+  RETRYABLE_CALL_FAILURES,
+  RETRY_BACKOFF_MS,
+  STDERR_TAIL_MAX,
+} from "./open-semantic-discovery-routine.ts";
 import { launchArgv, type Fact, type RoutineSpec } from "./driver-runtime.ts";
 import { ROUTINE_LAST_RUN_REL, readLastRunMap } from "./probe-routine.ts";
 
@@ -79,6 +98,12 @@ export const CROSS_PROJECT_DOGFOOD_NAME = "cross-project-dogfood";
 export const CARRIER_REL = path.posix.join(".quay", "cross-project-dogfood-findings.jsonl");
 export const BUDGET_LEDGER_REL = path.posix.join(".quay", "cross-project-dogfood-model-budget.jsonl");
 export const BUDGET_LOCK_REL = path.posix.join(".quay", "cross-project-dogfood-model-budget.lock");
+/** Where a failed or result-less call's bounded head/tail capture goes (Plan item 2). A SIBLING of OSD's
+ *  own capture directory, never the same one: a reader looking at THIS routine's carrier must find THIS
+ *  routine's captures next to it, and the two routines' rounds must not collide on a filename.
+ *  ⛔ Runtime state under `.quay/`, the same family as the carrier and the ledger — resolved through the
+ *  shared-checkout resolver (`at`), so a round run from a linked worktree writes where its carrier is. */
+export const CALL_CAPTURE_DIR_REL = path.posix.join(".quay", "cross-project-dogfood-call-captures");
 /** Scratch space for the per-round evidence pack + the neutral cwd every model call is rooted at. Under
  *  os.tmpdir(), NOT under the workspace: a scratch tree inside the repo would be a second write surface
  *  the isolation invariant would have to reason about. */
@@ -689,6 +714,32 @@ export interface HypothesisModuleLike {
   runInvestigator: (opts: Record<string, unknown>) => Promise<Record<string, unknown>>;
   runVerifier: (opts: Record<string, unknown>) => Promise<Record<string, unknown>>;
   parseJsonObject: (stdout: string) => Record<string, unknown> | null;
+  /** ⛔ THE STRUCTURAL STREAM READER, and it is REQUIRED rather than optional on purpose: a module that
+   *  cannot say what the bytes were would silently degrade every call's `call_failure` to `null`, which
+   *  is exactly the "an unreadable reading must not look like a clean one" failure (硬规则 3b). OSD
+   *  consumes the SAME function off the same module (`osd:3655`), so this is one reader, not two.
+   *  Returns the event counts by `type`, whether a `result` event was emitted, whether the last line was
+   *  cut mid-write, and whether the stream carried an API-transport error. */
+  streamDiagnostics: (stdout: string) => {
+    bytes: number;
+    lines: number;
+    json_lines: number;
+    truncated_json: boolean;
+    has_result: boolean;
+    events_by_type: Record<string, number>;
+    api_error_event: boolean;
+  };
+  /** The stream's own `result`-event fields (`subtype`, `is_error`, `num_turns`, `model`, `usage`). The
+   *  model identity and token accounting come from HERE, never from the model the launcher ASKED for:
+   *  copying the requested model into `actual_model` is the proxy-for-direct-reading defect (硬规则 4b). */
+  parseVerifierStream: (stdout: string) => {
+    ok: boolean;
+    subtype: string | null;
+    num_turns: number | null;
+    is_error: boolean | null;
+    model: string | null;
+    usage: Record<string, unknown> | null;
+  };
 }
 
 export const HYPOTHESIS_MODULE_FILE = "arch-hypothesis-generation.mjs";
@@ -776,12 +827,60 @@ export function isConfirmed(verifierVerdict: unknown, refuterVerdict: unknown, r
   return verifierVerdict === "supported" && refuterVerdict === "supported" && (refuterCause === null || refuterCause === undefined);
 }
 
-interface CallRecord { step: string; reservation_id: string | null; ok: boolean; not_evaluated: string | null; turns: number | null; exit: number | null }
+/** ONE model call, as the round records it. ⛔ The fields below `exit` are the attribution layer, and
+ *  they exist because the seven historical `exit:1` calls carried NONE of them: every one of them read,
+ *  in full, as `{step, reservation_id, ok:false, not_evaluated:"not-evaluated:exit-1", turns:null,
+ *  exit:1}` — no stdout, no stderr, no wall time, no signal, no timeout flag, no model. A crashed CLI, a
+ *  non-JSON reply, a provider API error and an environment fault were the SAME record, and none was
+ *  retried. `call_failure` is the enumerated class read off the captured bytes; `stdout_capture` names
+ *  the bounded head/tail file the bytes were written to. */
+export interface CallRecord {
+  step: string;
+  reservation_id: string | null;
+  ok: boolean;
+  not_evaluated: string | null;
+  turns: number | null;
+  exit: number | null;
+  signal: string | null;
+  timed_out: boolean;
+  spawn_error: string | null;
+  wall_ms: number;
+  /** The stream's own structural readings (the engine's `streamDiagnostics`, reused — never re-derived). */
+  stdout_bytes: number;
+  stdout_lines: number | null;
+  stdout_events_by_type: Record<string, number>;
+  has_result: boolean;
+  api_error_event: boolean;
+  /** The stream's own `result`-event fields. `subtype`/`is_error` are `null` when the stream did not
+   *  parse — "not read" keeps its own value and is never defaulted to a success (硬规则 3b). */
+  subtype: string | null;
+  is_error: boolean | null;
+  /** The enumerated class of "this call produced no usable answer", or `null` when a `result` event WAS
+   *  emitted. `null` here means "the bytes account for themselves", not "nothing to report". */
+  call_failure: string | null;
+  /** The bounded head/tail capture, or `{path:null,error}` when writing it failed — "no bytes to show"
+   *  and "no capture file" must stay different readings (硬规则 3b). `null` on a call that answered. */
+  stdout_capture: Record<string, unknown> | null;
+  stderr_chars: number;
+  stderr_tail: string;
+  stderr_tail_truncated: boolean;
+  tokens: { input: number; output: number };
+  /** The model the STREAM reports was served, or OSD's own `not-evaluated:model-unverified` token — the
+   *  requested model is a proxy and is never copied in here (硬规则 4b). */
+  actual_model: string;
+  /** Set on a RETRY record only. ⛔ A retry is not a second attempt at a NEW fact — it is the same
+   *  attempt made again — so `retry_of` names the reservation it repeats and the round keeps BOTH. */
+  retry_of?: string;
+  retry_of_kind?: string;
+  retry_cause?: string;
+}
 
 export function summarizeCalls(calls: readonly CallRecord[]): Record<string, unknown> {
   return {
     model_calls: calls.length,
-    calls: calls.map((c) => ({ step: c.step, reservation_id: c.reservation_id, ok: c.ok, not_evaluated: c.not_evaluated, turns: c.turns, exit: c.exit })),
+    // ⛔ The WHOLE record travels to the carrier, not a narrow projection of it: the projection is what
+    // made the historical seven unattributable after the fact, when the bytes were already gone.
+    calls: calls.map((c) => ({ ...c })),
     not_evaluated: calls.find((c) => c.not_evaluated !== null)?.not_evaluated ?? null,
   };
 }
@@ -805,6 +904,11 @@ export interface CrossProjectDogfoodRunOptions {
   carrierPath?: string;
   lastRunPath?: string;
   scratchRoot?: string;
+  /** How long to yield the clock before the ONE counted retry. Defaults to OSD's own `RETRY_BACKOFF_MS`
+   *  so production backs off exactly as the local routine does; it is a DELAY, not a policy — the retry
+   *  is what matters, and the backoff only keeps a gateway that is refusing everything from being hit
+   *  twice in the same millisecond. A test passes 0 so no suite ever waits on it. */
+  retryBackoffMs?: number;
   now?: () => number;
 }
 export interface FiledTask { id: string; title: string; body: string; labels: string[] }
@@ -895,24 +999,117 @@ export async function runCrossProjectDogfood(root: string, opts: CrossProjectDog
   })();
 
   const callRecords: CallRecord[] = [];
-  /** Reserve → spawn → record. ⛔ A reservation is taken BEFORE the subprocess exists, and a refusal
-   *  THROWS: a call that was never made must not appear as one that failed. */
-  const reservingStep = async (step: string, payload: { prompt: string; tools: string; maxTurns: number }): Promise<{ stdout: string; status: number | null; stderr: string; record: CallRecord }> => {
+  const captureDir = at(CALL_CAPTURE_DIR_REL);
+  const retryBackoffMs = opts.retryBackoffMs ?? RETRY_BACKOFF_MS;
+
+  /** ONE ATTEMPT: reserve → spawn → read the bytes → record. ⛔ Factored OUT of `reservingStep` so the
+   *  RETRY below is literally the same call made again, with a FRESH reservation and its own record —
+   *  not a second code path that could drift from the first (硬规则 5b, OSD's own shape at `osd:3619`).
+   *  A reservation is taken BEFORE the subprocess exists, and a refusal THROWS: a call that was never
+   *  made must not appear as one that failed. */
+  async function attemptCall(step: string, payload: { prompt: string; tools: string; maxTurns: number }, retryOf: string | null): Promise<{ stdout: string; status: number | null; stderr: string; record: CallRecord }> {
     const r = await budget.reserve({ step, tools: payload.tools, max_turns: payload.maxTurns, round });
     if (!r.ok) throw new Error(`BUDGET_REFUSED:${r.code}:used=${r.used}:cap=${r.cap}`);
     const argv = stepArgv(buildArgv, payload.prompt, root, { tools: payload.tools, maxTurns: payload.maxTurns, model: requestedModel }).argv;
     // ⛔ The spawn cwd is a directory THIS round owns, and it is checked against the declared source
     // roots — a subprocess rooted in a source project is refused HERE, not by convention.
     assertNotSourceRoot(scratch, `spawn cwd for step ${step}`);
+    const callStarted = now();
     const res = await spawn(argv, { cwd: scratch, timeoutMs: cfg.maxWallMs, stdinData: payload.prompt });
-    const parsed = hyp.parseJsonObject(String(res.stdout ?? ""));
-    const turns = parsed && typeof parsed.num_turns === "number" ? parsed.num_turns : null;
-    const outcome = res.error ? "timeout" : res.status === 0 ? "completed" : "failed";
-    budget.outcome(r.id, outcome as "completed" | "failed" | "timeout", turns, res.error ? `SPAWN:${res.error.message.slice(0, 120)}` : null);
-    const notEvaluated = res.error ? `not-evaluated:spawn-${outcome}` : res.status !== 0 ? `not-evaluated:exit-${res.status}` : null;
-    const record: CallRecord = { step, reservation_id: r.id, ok: notEvaluated === null, not_evaluated: notEvaluated, turns, exit: res.status };
+    const wallMs = Math.max(0, now() - callStarted);
+    const stdout = String(res.stdout ?? "");
+    // ── THE STRUCTURAL READING OF THE BYTES (Plan items 1-2) ─────────────────────────────────────────
+    // The ENGINE's own readers, consumed rather than re-derived (硬规则 5b): event counts by `type`,
+    // whether a `result` event was ever emitted, whether the last line was cut mid-write, the `result`
+    // event's own `subtype`/`is_error`, the served model and the token usage. ⛔ Before this, the two
+    // raw strings `res.stdout`/`res.stderr` were in hand and thrown away, so the diagnosis existed for
+    // exactly one call and then was lost forever.
+    const diag = hyp.streamDiagnostics(stdout);
+    const stream = hyp.parseVerifierStream(stdout);
+    const parsed = hyp.parseJsonObject(stdout);
+    const turns = stream.ok && Number.isFinite(stream.num_turns)
+      ? (stream.num_turns as number)
+      : (parsed && typeof parsed.num_turns === "number" ? parsed.num_turns : null);
+    const hasResult = diag.has_result === true;
+    const spawnErrMsg = res.error ? String((res.error as Error).message ?? res.error).slice(0, 200) : null;
+    // ⛔ A call the timeout reaper killed has no exit code (the child was SIGKILLed); the spawn wrapper's
+    // own timeout message is the only in-band signal for it, and `killed-by-timeout` is the class the
+    // retry policy keys on. `classifyModelFailure` is discovery-method's own reader — the SAME one OSD
+    // uses at this exact decision (`osd:3686`).
+    const timedOut = res.error ? classifyModelFailure(res.error) === "timeout" : false;
+    const usage = stream.ok && stream.usage && typeof stream.usage === "object" ? stream.usage : null;
+    const servedModel = stream.ok && typeof stream.model === "string" && stream.model !== "" ? stream.model : null;
+    const errTail = boundedTail(res.stderr, STDERR_TAIL_MAX);
+    const outcome = res.error ? classifyModelFailure(res.error) : res.status === 0 ? "completed" : "failed";
+    budget.outcome(r.id, outcome as "completed" | "failed" | "timeout", turns, res.error ? `SPAWN:${(res.error as Error).message.slice(0, 120)}` : null);
+    const record: CallRecord = {
+      step, reservation_id: r.id, exit: res.status ?? null, signal: res.signal ?? null,
+      timed_out: timedOut, spawn_error: spawnErrMsg, wall_ms: wallMs, turns,
+      actual_model: servedModel ?? "not-evaluated:model-unverified",
+      tokens: { input: Number(usage?.input_tokens ?? 0), output: Number(usage?.output_tokens ?? 0) },
+      stdout_bytes: diag.bytes,
+      stdout_lines: typeof diag.lines === "number" ? diag.lines : null,
+      stdout_events_by_type: diag.events_by_type ?? {},
+      has_result: hasResult,
+      // The stream reader's OWN transport-error predicate — the class and the `not_evaluated` token must
+      // key on the SAME structural reading, or two readings of one call could disagree.
+      api_error_event: diag.api_error_event === true,
+      stderr_chars: errTail.chars,
+      stderr_tail: errTail.tail,
+      stderr_tail_truncated: errTail.truncated,
+      subtype: stream.ok ? (stream.subtype ?? null) : null,
+      is_error: stream.ok && typeof stream.is_error === "boolean" ? stream.is_error : null,
+      call_failure: null,
+      stdout_capture: null,
+      ok: false,
+      not_evaluated: null,
+    };
+    if (retryOf !== null) record.retry_of = retryOf;
+    // The CLASS is derived from the captured bytes and the TOKEN from the class + the exit reading, so
+    // the two can never contradict each other about the same call (Plan item 2).
+    record.call_failure = callFailureClass({
+      timed_out: timedOut, stdout_bytes: record.stdout_bytes,
+      json_lines: diag.json_lines, truncated_json: diag.truncated_json,
+      api_error_event: diag.api_error_event, has_result: hasResult,
+    });
+    record.not_evaluated = callNotEvaluatedToken(record as unknown as Record<string, unknown>);
+    record.ok = record.not_evaluated === null;
+    // ── THE BOUNDED HEAD/TAIL CAPTURE (Plan item 1) ──────────────────────────────────────────────────
+    // ONLY for a call that did not answer: on a clean call the parsed answer is on the record and a
+    // second copy of the stream would be a transcript, not a diagnosis.
+    // ⛔ It does NOT go through `writeOwnedFile`: that helper refuses any path inside a DECLARED SOURCE
+    // ROOT, and this workspace's own config declares `/data/home/yale/work/quay` — the round's own root —
+    // as the `quay-self-usage` source project. The carrier and the ledger live under that same `.quay/`
+    // for the same reason, and the model never reads this tree live (it reads a stripped pin), so the
+    // READ-ONLY invariant the guard protects is untouched.
+    if (record.not_evaluated !== null) {
+      try {
+        record.stdout_capture = writeCallCapture(root, path.join(captureDir, `${round}-${step}-${r.id}.txt`), { stdout, stderr: res?.stderr });
+      } catch (e) {
+        // ⛔ A capture that could not be written is REPORTED on the record, never silently absent — the
+        // whole point of the field is that "no bytes to show" and "no capture file" differ (硬规则 3b).
+        record.stdout_capture = { path: null, error: String((e as Error)?.message ?? e).slice(0, 200) };
+      }
+    }
     callRecords.push(record);
-    return { stdout: String(res.stdout ?? ""), status: res.status, stderr: String(res.stderr ?? ""), record };
+    return { stdout, status: res.status ?? null, stderr: String(res.stderr ?? ""), record };
+  }
+
+  /** Reserve → spawn → record, with AT MOST ONE counted retry. ⛔ A call whose captured bytes put it in
+   *  a RETRYABLE class is tried ONCE more after a backoff, through a FRESH reservation on the SAME 24h
+   *  ledger — so the retry is COUNTED and CAPPED like any other call, and the hard ceilings are
+   *  unchanged. ⛔ The FIRST call's record STAYS on the round: the retry is never a way to launder a lost
+   *  call into a clean one. A refusal at the retry's own reservation THROWS the ordinary
+   *  `BUDGET_REFUSED` path — "no retry when the ledger refuses". */
+  const reservingStep = async (step: string, payload: { prompt: string; tools: string; maxTurns: number }): Promise<{ stdout: string; status: number | null; stderr: string; record: CallRecord }> => {
+    const first = await attemptCall(step, payload, null);
+    const failure = typeof first.record.call_failure === "string" ? first.record.call_failure : null;
+    if (failure === null || !RETRYABLE_CALL_FAILURES.includes(failure)) return first;
+    if (retryBackoffMs > 0) await new Promise((resolve) => setTimeout(resolve, retryBackoffMs));
+    const second = await attemptCall(step, payload, String(first.record.reservation_id ?? ""));
+    second.record.retry_of_kind = step;
+    second.record.retry_cause = failure;
+    return second;
   };
   const modelCalls = (calls: readonly CallRecord[]) => ({ ...budgetView, ...summarizeCalls(calls) });
 
