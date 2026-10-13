@@ -150,7 +150,7 @@ import { execFileSync, spawn } from "node:child_process";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import YAML from "yaml";
 import { isDue, parseTrigger } from "./routine-scheduler.ts";
-import { launchArgv, type Fact, type RoutineSpec } from "./driver-runtime.ts";
+import { launchArgv, readAnchorStart, type AnchorStartReading, type Fact, type RoutineSpec } from "./driver-runtime.ts";
 import { ROUTINE_LAST_RUN_REL, readLastRunMap } from "./probe-routine.ts";
 import { isDirectEntry } from "./gate-script-base.ts";
 // The task-status transition READ SURFACE (the same reader `quay task log` publishes). ⛔ NEVER a direct
@@ -370,6 +370,96 @@ export const RETRY_BACKOFF_MS = 2000;
  *  a stream cut mid-write usually means the ceiling was reached, and re-spending a reservation will cut
  *  it in the same place. `killed-by-timeout` is absent for the same reason (Plan item 3). */
 export const RETRYABLE_CALL_FAILURES: readonly string[] = ["no-stdout", "stream-without-result", "api-error-event"];
+
+// ── THE ANCHOR-HANDOFF CORRELATION (task gap-osd-stream-without-result-recurs-past-the-one-counted-…)
+//
+// WHY THIS EXISTS. Real production (2026-10-13) recorded the SAME retryable class recurring ON its own one
+// counted retry: of the 5 `stream-without-result` calls the class retried, 3 came back the identical class
+// and NONE produced a usable answer. The hypothesis was that these calls land in the tail of an ANCHOR
+// HANDOFF — a window where the outgoing anchor's orphaned children and the incoming anchor's loops overlap.
+// That claim needed a counterfactual before it could be called a cause (hard rule 4 corollary 4), and the
+// counterfactual needs a signal that is recorded PER CALL rather than reconstructed by hand from
+// `anchor.log` after the fact (Plan item 1).
+//
+// ⛔ WHAT THIS IS NOT. It changes NO retry policy. The decision, taken on the measured counterfactual (the
+// counts are on the task's `## Evidence`), is that the one counted retry stays ONE: the 5 retries the class
+// actually triggered produced 0 usable answers, so a second retry would spend a reservation on a class with
+// a measured 0/5 immediate-success rate. Escalating on a correlation this thin would be inventing a fix
+// (hard rule 12). What is added is the DIAGNOSIS — so the next recurrence is self-diagnosing instead of
+// requiring a fresh manual capture-file read.
+//
+// ⛔ THE WINDOW IS A POLICY, NOT A MEASUREMENT, AND THE RECORD SAYS SO. `age_ms` is carried raw on every
+// call record; `adjacent` is derived from it, and a reader who disagrees with the window can re-derive the
+// flag from the same record (硬规则 4: a threshold is not a reading).
+//   · WHERE 15 MINUTES COMES FROM (the measured separation, not a round number): every transport-loss call
+//     observed sat 157…653 s (2.6–10.9 min) after its anchor's start, and every round in steady state sat
+//     ≥ 17 274 s (4.8 h) after one. 15 min covers the first with 38 % margin and excludes the second with
+//     19× margin.
+//   · ⚠️ IT SEPARATES **ROUNDS**, NOT CALLS. Inside an adjacent round the losses (157–653 s) and the clean
+//     calls (23 s, 200 s, 240 s) OVERLAP in time, so «this call was near a handoff» is NOT what the flag
+//     measures — «this call belongs to a round that began near one» is. That is why `age_ms` rides every
+//     record: a future reader can stratify calls by their own age instead of trusting the round's.
+export const HANDOFF_ADJACENCY_WINDOW_MS = 15 * 60 * 1000;
+
+/** Where this host's own 1-minute load average is read from. A file path, not a constant to be believed:
+ *  the reading is `null` with a reason when it cannot be read (硬规则 3b), and the round says which. */
+export const HOST_LOADAVG_PATH = "/proc/loadavg";
+
+/** What an anchor's own published start implies for one instant (a round start, or one call's start).
+ *  ⛔ THREE-WAY, and the third value is the point: `evaluated:false` says «the anchor's start could not be
+ *  read at all», which is NOT «no handoff nearby» (硬规则 3b — the silent-read-as-steady-state failure). */
+export type HandoffBlock =
+  | { evaluated: true; anchor_pid: number | null; anchor_started_at: string; age_ms: number; adjacent: boolean }
+  | { evaluated: false; reason: string };
+
+/** Derive the block for ONE instant from the round's single `readAnchorStart` reading. Pure, and it takes
+ *  `atMs` rather than reading the clock so a call's block describes the instant the CALL began (a round
+ *  can run for minutes, and a call at minute 12 is not described by the round's own start).
+ *
+ *  ⛔ `age_ms` is SIGNED and a NEGATIVE age is NOT `adjacent`: an `anchor.json` whose `startedAt` is in the
+ *  future is a clock-skew / hand-written-surface reading, and folding it to 0 would make it indistinguishable
+ *  from «the anchor started this very second» — the exact shape of the claim being tested. */
+export function handoffBlock(reading: AnchorStartReading, atMs: number, windowMs: number = HANDOFF_ADJACENCY_WINDOW_MS): HandoffBlock {
+  if (!reading.evaluated) return { evaluated: false, reason: reading.reason };
+  const ageMs = atMs - reading.started_at_ms;
+  return {
+    evaluated: true,
+    anchor_pid: reading.pid,
+    anchor_started_at: new Date(reading.started_at_ms).toISOString(),
+    age_ms: ageMs,
+    adjacent: ageMs >= 0 && ageMs <= windowMs,
+  };
+}
+
+/** The host's own load reading, recorded alongside each call so a future recurrence can be compared
+ *  against «the host was busy» as well as «an anchor handoff was in flight» — the alternative explanation
+ *  the proposal states has NOT been ruled out, and this is the instrument that rules it in or out.
+ *  ⛔ `load_per_cpu` is derived from `os.cpus().length` (a HOST reading), never a literal core count
+ *  (硬规则 4 corollary 2: a literal that happens to mean «unlimited» here is a host-dependent constant).
+ *  ⛔ Unreadable ⇒ `ok:false` + the errno, never a 0 load: «could not read» and «idle host» are different
+ *  facts and a 0 here would be read as evidence FOR the handoff hypothesis. */
+export type HostLoadBlock =
+  | { ok: true; load1: number; cpus: number; load_per_cpu: number }
+  | { ok: false; reason: string };
+
+export function readHostLoad(opts: { loadavgPath?: string; cpuCount?: number } = {}): HostLoadBlock {
+  const file = typeof opts.loadavgPath === "string" ? opts.loadavgPath : HOST_LOADAVG_PATH;
+  let raw: string;
+  try {
+    raw = fs.readFileSync(file, "utf8");
+  } catch (e) {
+    return { ok: false, reason: `loadavg-unreadable:${(e as NodeJS.ErrnoException)?.code ?? String((e as Error)?.message ?? e)}` };
+  }
+  // ⛔ String operations only (case (l): this file carries no pattern machinery — not even a literal).
+  const first = raw.trim().split(" ").filter((s) => s !== "")[0] ?? "";
+  const load1 = first === "" ? Number.NaN : Number(first);
+  if (!Number.isFinite(load1)) return { ok: false, reason: `loadavg-unparseable:${first.slice(0, 32)}` };
+  const cpus = typeof opts.cpuCount === "number" && Number.isFinite(opts.cpuCount) && opts.cpuCount > 0
+    ? opts.cpuCount
+    : os.cpus().length;
+  if (!(cpus > 0)) return { ok: false, reason: "cpu-count-unknown" };
+  return { ok: true, load1, cpus, load_per_cpu: Math.round((load1 / cpus) * 1e4) / 1e4 };
+}
 
 /** The TURN RESERVE directive, prepended to BOTH arms' investigator prompts — and it must be prepended to
  *  BOTH, because the paired instrument's whole claim is that the two arms differ by the GUIDANCE BLOCK and
@@ -3602,6 +3692,15 @@ export async function runOpenSemanticDiscovery(root: string, opts: OpenSemanticD
     return fact("failed", { ...base, enabled: true, interval: intervalInfo, due: dueInfo }, `budget breach — wall ${now() - started}ms >= max_wall_ms ${config.maxWallMs} after the pin (nothing appended, last-run not advanced)`);
   }
 
+  // ── THE ANCHOR-HANDOFF READING, TAKEN ONCE PER ROUND (task gap-osd-stream-without-result-recurs-…) ───
+  // ONE read of the anchor's own published start, taken here — after every gate that can return early and
+  // before the first reservation, so a round that never spawns never pays for it, and a round that DOES
+  // spawn describes its calls against a single reading rather than re-reading per call. It is a READ: it
+  // gates nothing, changes no retry policy and (硬规则 4b) is the anchor's own direct量, not a heartbeat
+  // this routine maintains about the anchor. `readAnchorStart` carries the three-state reason vocabulary;
+  // `handoffBlock` turns it into the per-instant description recorded on the round and on every call.
+  const anchorStartRead: AnchorStartReading = readAnchorStart(root);
+
   // ── the reserving step seam ────────────────────────────────────────────────────────────────────────
   // Every subprocess goes: reserve (durable, atomic, BEFORE the spawn) → build argv → spawn → record the
   // outcome and the realized price. A refusal THROWS, so a step cannot spend a call the ledger did not
@@ -3723,6 +3822,15 @@ export async function runOpenSemanticDiscovery(root: string, opts: OpenSemanticD
         stderr_chars: stderrTail.chars,
         stderr_tail: stderrTail.tail,
         stderr_tail_truncated: stderrTail.truncated,
+        // ── WHERE THIS CALL SAT RELATIVE TO THE ANCHOR'S OWN START (task gap-osd-stream-without-result-…) ─
+        // The counterfactual instrument (Plan item 1). ⛔ It is a READING and gates NOTHING: no retry, no
+        // cap, no verdict below consults it. `handoff` is derived from the round's ONE `readAnchorStart`
+        // against THIS call's own start instant (`callStarted`) rather than the round's, because a round
+        // runs for minutes and a call at minute 12 is not described by the round's own start — and it is
+        // the per-CALL reading the correlation is about. `host_load` rides alongside it so a future
+        // recurrence can be compared against «the host was busy» as well as «a handoff was in flight».
+        handoff: handoffBlock(anchorStartRead, callStarted),
+        host_load: readHostLoad(),
         not_evaluated: null as string | null,
         call_failure: null as string | null,
       };
@@ -4521,6 +4629,12 @@ export async function runOpenSemanticDiscovery(root: string, opts: OpenSemanticD
       interval: intervalInfo,
       due: dueInfo,
       pin: { rev, dir: asRel(root, pinned) },
+      // ── THE ROUND-LEVEL ANCHOR-HANDOFF READING (task gap-osd-stream-without-result-recurs-…) ────────
+      // The SAME reading every call record carries, evaluated at the round's own start instant. It is on
+      // the round line as well so a reader can stratify rounds without unfolding every call — and so a
+      // round whose calls never got as far as being recorded still says whether it ran in the tail of a
+      // handoff. ⛔ `adjacent` is derived from `age_ms` here too: the window lives in ONE constant.
+      handoff: handoffBlock(anchorStartRead, started),
       inventory: { ok: inventory.ok, entries: inventory.entries, unavailable: inventory.unavailable, scope: INVENTORY_SCOPE_REL },
       focus: { chosen: investigatorBlock.stated_focus ?? null, prior_focuses: focuses },
       // ── THE OPTIONAL TASK-STATUS CONTEXT (Plan items 1-3) ────────────────────────────────────────

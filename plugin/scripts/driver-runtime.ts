@@ -907,6 +907,55 @@ export function readAnchorState(root: string): { pid: number | null; kinds: Driv
   return r.ok ? { pid: r.pid, kinds: r.kinds } : null;
 }
 
+// ── Layer 0 · 「本 anchor 是什么时候起来的」（task gap-osd-stream-without-result-recurs-…）──────────
+//
+// WHY THIS EXISTS：一个**例程**（第一个消费者是 open-semantic-discovery）要回答「我这通调用是不是
+// 落在一次 anchor 交接的尾巴上」。这个问题只有 `.quay/anchor.json` 能答，而且只有它一个字段能答：
+// `startedAt`。它在 `writeState()` 里由**在任 anchor 自己**发布，取值时刻在**接管等待之后**
+// （`driver-anchor.ts` 的 `hostStartedAt` 在 `--takeover` 的 while 等待之后才取）⇒ 它就是「新 anchor
+// 真正开始跑循环」的那一刻，⛔ 不是「这个进程被 exec 的时刻」。
+//
+// ⛔ 为什么读结构化回读面而不是 `anchor.log` 的文本行：`anchor.json` 是**原子替换**写的（tmp+rename），
+// 而日志是**逐行追加**的文本；从日志里认「最后一次接管发生在几点」要么整文件扫、要么自带一份行格式的
+// 第二副本（硬规则 5b：与写者的语法各存一份 ⇒ 必然漂移）。这里与 `readAnchorStateDetailed` 读**同一个
+// 文件、同一套三态理由词表**，是本仓库里那条「一个载体只有一个读法」的纪律。
+//
+// ⛔ 三态，⛔ 不与「steady state」同形（硬规则 3b）：文件不存在（还没写过回读面）、读不成（EACCES/…）、
+// 读得成但没有可解析的 `startedAt`（别人写坏了 / 陈旧格式）各自具名。**「读不到」必须能与「读完发现
+// anchor 刚起来」区分**——否则一次读失败会被下游读成「与交接无关」，正是它要排除的那种静默。
+//
+// ⚠️ 本函数**只返回读数，不返回判定**：`age_ms` 与「离得多近才算近」的窗口是**两个**决定，窗口是
+// 消费者的策略（第一个消费者的窗口见 `HANDOFF_ADJACENCY_WINDOW_MS`）。把窗口烤进这里会让下一个人
+// 以为那是测得的值；`age_ms` 是**带符号**的（将来的时刻 ⇒ 负数），由消费者决定负数算不算「近」。
+export type AnchorStartReading =
+  | { evaluated: true; started_at_ms: number; pid: number | null }
+  | { evaluated: false; reason: "missing" | "unreadable" | "malformed" | "no-started-at" };
+
+export function readAnchorStart(root: string): AnchorStartReading {
+  let raw: string;
+  try {
+    raw = fs.readFileSync(anchorPaths(root).stateFile, "utf8");
+  } catch (e) {
+    return { evaluated: false, reason: (e as NodeJS.ErrnoException)?.code === "ENOENT" ? "missing" : "unreadable" };
+  }
+  let j: { pid?: unknown; startedAt?: unknown };
+  try {
+    j = JSON.parse(raw) as { pid?: unknown; startedAt?: unknown };
+  } catch {
+    return { evaluated: false, reason: "malformed" };
+  }
+  // ⛔ `typeof === "string"` + `Date.parse` 有限性检查，缺一不可：`startedAt` 缺失（陈旧格式的回读面）
+  // 与 `startedAt: "not-a-date"` 都是「这个字段读不出一个时刻」，各自落 `no-started-at`——⛔ 不落 0
+  // （那是 1970 年，会让任何窗口判定都算「不近」，与真实原因无关）。
+  const startedAtMs = typeof j.startedAt === "string" ? Date.parse(j.startedAt) : Number.NaN;
+  if (!Number.isFinite(startedAtMs)) return { evaluated: false, reason: "no-started-at" };
+  return {
+    evaluated: true,
+    started_at_ms: startedAtMs,
+    pid: typeof j.pid === "number" && Number.isFinite(j.pid) ? j.pid : null,
+  };
+}
+
 /** `.quay/anchor.json` 里 anchor 自报的**内核 bundle 同步读数**（每个 reconcile pass 重写）。
  *
  *  为什么它是一个**独立字段**而不是一行日志（硬规则 3b）：日志行只有人读得到，而「本内核比源树旧」

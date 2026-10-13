@@ -161,6 +161,11 @@ import {
   CALL_CAPTURE_DIR_REL,
   RETRY_BACKOFF_MS,
   RETRYABLE_CALL_FAILURES,
+  // ── the anchor-handoff correlation (task gap-osd-stream-without-result-recurs-…) ───────────────────
+  HANDOFF_ADJACENCY_WINDOW_MS,
+  HOST_LOADAVG_PATH,
+  handoffBlock,
+  readHostLoad,
   boundedTail,
   boundedHead,
   callFailureClass,
@@ -180,6 +185,9 @@ import {
   citeOfferedEvents,
 } from "../scripts/open-semantic-discovery-routine.ts";
 import { ROUTINE_LAST_RUN_REL, readLastRunMap } from "../scripts/probe-routine.ts";
+// The anchor's OWN published start, read through the SAME reader the routine consumes — a re-implementation
+// of `.quay/anchor.json` parsing here would let the fixture agree with itself instead of with the carrier.
+import { readAnchorStart } from "../scripts/driver-runtime.ts";
 // The CARRIER the context is read from is written by the KERNEL's own writer and read by the SURFACE's own
 // reader — the fixture never hand-writes a carrier line and never parses the file, because either would
 // make this test agree with itself instead of with the contract the routine actually consumes.
@@ -4011,4 +4019,203 @@ test("attribution — buildDiscoveryReport joins each round to ITS OWN clusters,
   const jsonHealth = buildDiscoveryReport(lines, { window: 5 }).health;
   assert.equal(jsonHealth.determinate_rate, report.health.determinate_rate);
   assert.match(text, new RegExp(`healthy=${String(jsonHealth.healthy)}`));
+});
+
+// ═════════════════════════════════════════════════════════════════════════════════════════════════════
+// gap-osd-stream-without-result-recurs-past-the-one-counted-retry-needs-correlated-signal
+//
+// The ANCHOR-HANDOFF CORRELATION, recorded per call so a recurrence is self-diagnosing instead of needing
+// a fresh manual capture-file read (Plan item 1). The counterfactual that decided the retry policy is in
+// the task's `## Evidence`; what is asserted HERE is the part the ACs make mechanical:
+//   ① a round whose anchor start is RECENT is labelled adjacent (the positive control);
+//   ② NEGATIVE CONTROL — a round whose anchor start is OLD is NOT (a field that could only ever read
+//      `true` is not a measurement, 硬规则 4);
+//   ③ NEGATIVE CONTROL — an UNREADABLE anchor start says so, and is NOT shaped like «no handoff nearby»
+//      (硬规则 3b: the silent-read-as-steady-state failure is the whole reason this field exists);
+//   ④ NEGATIVE CONTROL — a handoff-ADJACENT round with a retryable first failure still makes EXACTLY ONE
+//      retry, i.e. the correlation widened NO policy (the decision the measured counterfactual produced).
+// ═════════════════════════════════════════════════════════════════════════════════════════════════════
+
+/** Write the anchor's own published read surface into the fixture, in the shape `driver-anchor.writeState`
+ *  publishes. ⛔ The fixture writes the CARRIER; the reading under test goes through the production reader
+ *  (`readAnchorStart`), so the two cannot agree with each other by construction. */
+function writeAnchorState(ws, body) {
+  fs.mkdirSync(path.join(ws, ".quay"), { recursive: true });
+  fs.writeFileSync(path.join(ws, ".quay", "anchor.json"), JSON.stringify(body) + "\n", "utf8");
+}
+
+// ── the reader itself: three states, none of which is «steady state» ─────────────────────────────────
+test("readAnchorStart — a RECENT start reads evaluated, an OLD one reads evaluated, and the three unreadable shapes are NAMED (硬规则 3b)", () => {
+  const ws = makeWorkspace();
+  const stateFile = path.join(ws, ".quay", "anchor.json");
+
+  // ⛔ NOTHING WRITTEN YET is `missing` — its own value, never «no handoff» (that is a different claim).
+  assert.deepEqual(readAnchorStart(ws), { evaluated: false, reason: "missing" });
+
+  writeAnchorState(ws, { pid: 4242, startedAt: "2026-10-13T14:17:09.198Z" });
+  const r = readAnchorStart(ws);
+  assert.equal(r.evaluated, true);
+  assert.equal(r.pid, 4242);
+  assert.equal(r.started_at_ms, Date.parse("2026-10-13T14:17:09.198Z"), "the reading is the anchor's OWN published instant");
+
+  // A file that is there but is not JSON — «someone wrote it badly», ⛔ not «it is not there».
+  fs.writeFileSync(stateFile, "{not json\n", "utf8");
+  assert.deepEqual(readAnchorStart(ws), { evaluated: false, reason: "malformed" });
+
+  // JSON, but no usable `startedAt` (an older surface / a hand-written one) ⇒ its OWN reason.
+  fs.writeFileSync(stateFile, JSON.stringify({ pid: 1 }) + "\n", "utf8");
+  assert.deepEqual(readAnchorStart(ws), { evaluated: false, reason: "no-started-at" });
+  fs.writeFileSync(stateFile, JSON.stringify({ pid: 1, startedAt: "not-a-date" }) + "\n", "utf8");
+  assert.deepEqual(readAnchorStart(ws), { evaluated: false, reason: "no-started-at" }, "an unparseable date is not the epoch");
+});
+
+test("handoffBlock — an OLD anchor start is NOT adjacent (negative control), a RECENT one is, and a FUTURE one is not adjacent either", () => {
+  const T = Date.parse("2026-10-13T14:20:00.000Z");
+  const old = handoffBlock({ evaluated: true, started_at_ms: T - 4 * 3600_000, pid: 7 }, T);
+  assert.equal(old.adjacent, false, "four hours after the anchor started is steady state");
+  assert.equal(old.age_ms, 4 * 3600_000, "…and the RAW age is carried, so a reader can re-derive any window");
+  assert.equal(old.anchor_pid, 7);
+
+  const fresh = handoffBlock({ evaluated: true, started_at_ms: T - 23_000, pid: 7 }, T);
+  assert.equal(fresh.adjacent, true, "23 seconds after the anchor start is the tail of a handoff");
+  assert.equal(fresh.age_ms, 23_000);
+  assert.equal(fresh.anchor_started_at, "2026-10-13T14:19:37.000Z");
+
+  // The boundary is INCLUSIVE and the window is ONE constant — the same one the round record names.
+  assert.equal(handoffBlock({ evaluated: true, started_at_ms: T - HANDOFF_ADJACENCY_WINDOW_MS, pid: 7 }, T).adjacent, true);
+  assert.equal(handoffBlock({ evaluated: true, started_at_ms: T - HANDOFF_ADJACENCY_WINDOW_MS - 1, pid: 7 }, T).adjacent, false);
+  assert.equal(handoffBlock({ evaluated: true, started_at_ms: T - 1000, pid: 7 }, T, 0).adjacent, false, "the window is a POLICY argument, not a baked-in number");
+
+  // ⛔ A start in the FUTURE (clock skew / a hand-written surface) is NOT «the anchor just started»: the
+  // signed age says so, and folding it to 0 would make it indistinguishable from the claim under test.
+  const future = handoffBlock({ evaluated: true, started_at_ms: T + 60_000, pid: 7 }, T);
+  assert.equal(future.age_ms, -60_000);
+  assert.equal(future.adjacent, false);
+
+  // An unreadable start keeps its REASON — it is never reported as a location in time.
+  assert.deepEqual(handoffBlock({ evaluated: false, reason: "missing" }, T), { evaluated: false, reason: "missing" });
+});
+
+test("readHostLoad — the load rides the record, and an UNREADABLE loadavg is `ok:false` with its errno, never a 0", () => {
+  const dir = tmpDir("osd-loadavg-");
+  const file = path.join(dir, "loadavg");
+  // The REAL shape of /proc/loadavg: three averages, then runnable/total, then the last pid.
+  fs.writeFileSync(file, "2.50 1.00 0.75 3/1234 5678\n", "utf8");
+  const r = readHostLoad({ loadavgPath: file, cpuCount: 5 });
+  assert.deepEqual(r, { ok: true, load1: 2.5, cpus: 5, load_per_cpu: 0.5 });
+
+  // ⛔ NEGATIVE CONTROL: a loadavg that cannot be read is NOT «the host was idle». A 0 here would read as
+  // evidence FOR the handoff hypothesis, which is exactly the confusion this instrument exists to prevent.
+  const missing = readHostLoad({ loadavgPath: path.join(dir, "nope"), cpuCount: 5 });
+  assert.equal(missing.ok, false);
+  assert.match(missing.reason, /ENOENT/, "the errno is named");
+  assert.notEqual(missing.load1, 0, "…and no load value is invented");
+
+  // A file that exists but carries no parseable first field is its OWN failure, not 0 and not NaN.
+  fs.writeFileSync(file, "not-a-number 1 1\n", "utf8");
+  assert.deepEqual(readHostLoad({ loadavgPath: file, cpuCount: 5 }), { ok: false, reason: "loadavg-unparseable:not-a-number" });
+
+  // And on THIS host the real reading is a genuine number (the positive control on the same predicate).
+  const real = readHostLoad();
+  assert.equal(HOST_LOADAVG_PATH, "/proc/loadavg");
+  assert.equal(real.ok, true, `the host's own loadavg must be readable (got ${JSON.stringify(real)})`);
+  assert.equal(Number.isFinite(real.load1), true);
+  assert.equal(real.cpus > 0, true);
+});
+
+// ── the round records it: positive, and the two negative controls ────────────────────────────────────
+test("(o) AC2 — a round close behind an anchor start records `adjacent:true` on the ROUND and on EVERY call, with the raw age", async () => {
+  const { ws, opts } = answerReserveFixture({ delegate: () => ({ status: 0, stdout: STREAM, stderr: "", error: null }) });
+  const T = Date.now();
+  // 23 seconds behind the anchor's published start — the production shape of the round this task is about.
+  writeAnchorState(ws, { pid: 675243, startedAt: new Date(T - 23_000).toISOString() });
+  const fact = await runOpenSemanticDiscovery(ws, { ...opts, now: () => T });
+
+  assert.equal(fact.state, "verified", `the round still runs normally (got ${fact.state}: ${fact.reason})`);
+  const round = rounds(ws)[0];
+  assert.equal(round.handoff.evaluated, true);
+  assert.equal(round.handoff.adjacent, true, "the ROUND line says it ran in the tail of a handoff");
+  assert.equal(round.handoff.anchor_pid, 675243, "…and names WHICH anchor, so the claim is checkable");
+  assert.equal(round.handoff.age_ms, 23_000);
+  assert.equal(round.handoff.anchor_started_at, new Date(T - 23_000).toISOString());
+
+  assert.equal(round.calls.length > 0, true, "the round made real calls");
+  for (const c of round.calls) {
+    assert.equal(c.handoff.evaluated, true, "every call carries the same reading");
+    assert.equal(c.handoff.adjacent, true);
+    // ⛔ The per-CALL instant, not the round's: a call that starts later is farther from the handoff, and
+    // the record must say by how much rather than repeat the round's own age.
+    assert.equal(c.handoff.age_ms >= 23_000, true, `call age ${c.handoff.age_ms} is measured at ITS OWN start`);
+    assert.equal(c.host_load.ok, true, `the load reading rides the call (got ${JSON.stringify(c.host_load)})`);
+    assert.equal(Number.isFinite(c.host_load.load1), true);
+  }
+});
+
+test("(o) AC2 NEGATIVE CONTROL — an OLD anchor start does NOT trigger the new behaviour, and the correlation is what differs (not the round)", async () => {
+  const delegate = () => ({ status: 0, stdout: STREAM, stderr: "", error: null });
+  const T = Date.now();
+
+  // ⛔ THE IDENTICAL ROUND, differing ONLY in when the anchor started. That is the control: if the flag
+  // were a constant (or keyed on anything else about the round) the two would read the same.
+  const freshFx = answerReserveFixture({ delegate });
+  writeAnchorState(freshFx.ws, { pid: 11, startedAt: new Date(T - 60_000).toISOString() });
+  await runOpenSemanticDiscovery(freshFx.ws, { ...freshFx.opts, now: () => T });
+  const staleFx = answerReserveFixture({ delegate });
+  writeAnchorState(staleFx.ws, { pid: 11, startedAt: new Date(T - 6 * 3600_000).toISOString() });
+  await runOpenSemanticDiscovery(staleFx.ws, { ...staleFx.opts, now: () => T });
+
+  const fresh = rounds(freshFx.ws)[0];
+  const stale = rounds(staleFx.ws)[0];
+  assert.equal(fresh.handoff.adjacent, true, "one minute behind an anchor start is inside the window");
+  assert.equal(stale.handoff.adjacent, false, "six hours behind is NOT — the flag takes BOTH values");
+  assert.equal(stale.handoff.evaluated, true, "…and it is a REAL reading, not an unreadable one");
+  assert.equal(stale.handoff.age_ms, 6 * 3600_000);
+  assert.equal(stale.calls.every((c) => c.handoff.adjacent === false), true, "no call is labelled adjacent");
+  assert.equal(fresh.calls.every((c) => c.handoff.adjacent === true), true);
+  // Both rounds did the same work — the flag did not change what ran.
+  assert.equal(stale.calls.length, fresh.calls.length, "the correlation describes the round, it does not steer it");
+});
+
+test("(o) AC2 NEGATIVE CONTROL — NO readable anchor start is `evaluated:false` with its reason, ⛔ never `adjacent:false`", async () => {
+  const { ws, opts } = answerReserveFixture({ delegate: () => ({ status: 0, stdout: STREAM, stderr: "", error: null }) });
+  // The workspace has NO `.quay/anchor.json` at all: a routine driven outside an anchor, or an anchor that
+  // has not published yet. «Could not read» must not be shaped like «read, and no handoff nearby».
+  const fact = await runOpenSemanticDiscovery(ws, opts);
+  assert.equal(fact.state, "verified");
+  const round = rounds(ws)[0];
+  assert.deepEqual(round.handoff, { evaluated: false, reason: "missing" });
+  assert.equal("adjacent" in round.handoff, false, "an unreadable reading carries NO adjacency claim at all");
+  for (const c of round.calls) assert.deepEqual(c.handoff, { evaluated: false, reason: "missing" });
+
+  // A malformed surface is its OWN reason — still not «no handoff».
+  const fx2 = answerReserveFixture({ delegate: () => ({ status: 0, stdout: STREAM, stderr: "", error: null }) });
+  fs.writeFileSync(path.join(fx2.ws, ".quay", "anchor.json"), "{torn\n", "utf8");
+  await runOpenSemanticDiscovery(fx2.ws, fx2.opts);
+  assert.deepEqual(rounds(fx2.ws)[0].handoff, { evaluated: false, reason: "malformed" });
+});
+
+test("(o) AC2 NEGATIVE CONTROL — a handoff-ADJACENT round with a retryable failure still makes EXACTLY ONE retry (no policy was widened)", async () => {
+  const good = streamText(`${FOCUS_MARKER} fixture focus\n${JSON.stringify(HYPS)}`);
+  let n = 0;
+  const delegate = (argv, opts) => {
+    if (isNoveltyPrompt(opts)) return { status: 0, stdout: NOVELTY_STREAM, stderr: "", error: null };
+    n++;
+    // The production shape: the FIRST non-novelty call's stream is cut off with no `result` event at all.
+    return n === 1
+      ? { status: 0, stdout: "", stderr: "gateway returned an empty body\n", error: null }
+      : { status: 0, stdout: good, stderr: "", error: null };
+  };
+  const { ws, opts } = answerReserveFixture({ delegate });
+  const T = Date.now();
+  writeAnchorState(ws, { pid: 99, startedAt: new Date(T - 5_000).toISOString() });
+  await runOpenSemanticDiscovery(ws, { ...opts, now: () => T });
+
+  const round = rounds(ws)[0];
+  assert.equal(round.handoff.adjacent, true, "the round IS handoff-adjacent — so this control is not vacuous");
+  const inv = round.calls.filter((c) => c.step === "investigator");
+  assert.equal(inv.length, 2, "the lost call and ONE retry — ⛔ not two, which is what a naive «escalate on the correlation» would have produced");
+  assert.equal(inv[1].retry_cause, "no-stdout");
+  assert.equal(inv.filter((c) => c.retry_of !== undefined).length, 1, "exactly ONE record is a retry");
+  // The retryable set itself is untouched: this task added a DIAGNOSIS, not a class.
+  assert.deepEqual([...RETRYABLE_CALL_FAILURES], ["no-stdout", "stream-without-result", "api-error-event"]);
 });
