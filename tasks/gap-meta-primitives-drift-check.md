@@ -27,3 +27,13 @@ This round's inertCheckers carries primitives-drift-check: the cross-repo byte-i
 - `plugin/scripts/primitives-drift-manifest.json`
 - `packages/quay/src/primitives/PROVENANCE.md`
 - `tasks/gap-meta-primitives-drift-check.md`
+
+## Blocker
+
+**2026-10-13T17:28:52.707Z — worker 未落地（exited-not-landed）**
+
+- 未落地原因：step=ff: fan-in-ff-merge: suite 证书 — suite_head..tip 恰为本任务的单个 flip-done 提交（身份判定：仅 M tasks/gap-meta-primitives-drift-check.md）⇒ 判惰性，⛔ 未调分类器
+fan-in-ff-merge: FF FAILED — To .; not a fast-forward. Retry record written (attempt 1). Return to 无锁段 step 1 (merge develop again — 必须 merge 不得 rebase, AC75), re-judge the delta (step 2) and re-run.
+fan-in-ff-merge: measure ff_only_locked=false
+- run_id：wk-prod-anchor
+- session_id：73a50246-57c4-49d8-9d72-988820b7cac7
