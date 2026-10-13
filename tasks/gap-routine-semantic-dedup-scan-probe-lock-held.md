@@ -2,7 +2,7 @@
 id: gap-routine-semantic-dedup-scan-probe-lock-held
 title: "semantic-dedup-scan: Identical flock -n fail-open lock probe; the second
   site's own comment names the first as its source."
-status: todo
+status: ready
 labels:
   - gap
   - routine-filed
