@@ -30,9 +30,9 @@ OSD's one-counted-retry (`RETRYABLE_CALL_FAILURES = ["no-stdout", "stream-withou
 4. `undetermined` stays `undetermined` when every available attempt (first + any retries this task adds) still fails — this task must not lower the confirmation bar to compensate for a flaky transport.
 
 ## Acceptance Criteria
-- [ ] AC1: the correlation hypothesis is tested against real carrier data (OSD findings across quay + claudecodeui, cross-referenced with `anchor.log` restart timestamps) and the result — supported, refuted, or insufficient-samples — is pasted plainly, with the counts on both sides of the comparison.
-- [ ] AC2: whatever the decision in Plan step 2, it is implemented with a negative control (a fixture round with the correlated signal absent must NOT trigger the new behavior if one was added) and the hard budget ceilings are shown unchanged in `.quay/config.yml` before/after.
-- [ ] AC3: `scripts/test.sh --for-task <this task>` green.
+- [x] AC1: the correlation hypothesis is tested against real carrier data (OSD findings across quay + claudecodeui, cross-referenced with `anchor.log` restart timestamps) and the result — supported, refuted, or insufficient-samples — is pasted plainly, with the counts on both sides of the comparison.
+- [x] AC2: whatever the decision in Plan step 2, it is implemented with a negative control (a fixture round with the correlated signal absent must NOT trigger the new behavior if one was added) and the hard budget ceilings are shown unchanged in `.quay/config.yml` before/after.
+- [x] AC3: `scripts/test.sh --for-task <this task>` green.
 
 ## Definition of Done
 - AC1-AC3 checked with pasted evidence. If AC1 comes back "insufficient samples," this task documents that honestly and proposes what signal to log going forward (Plan step 1) rather than guessing at a fix for an uncharacterized cause (hard rule 4: a structurally-unfalsifiable guess is not a measurement).
@@ -120,14 +120,14 @@ Plan item 4 is therefore untouched: `undetermined` stays `undetermined`.
 | `HANDOFF_ADJACENCY_WINDOW_MS`, `handoffBlock()`, `readHostLoad()`, `HandoffBlock`, `HostLoadBlock` | `plugin/scripts/open-semantic-discovery-routine.ts` |
 | every call record now carries `handoff` (`age_ms` raw **and** `adjacent`) and `host_load`; the scan-round line carries `handoff` at the round's own start | `plugin/scripts/open-semantic-discovery-routine.ts` |
 
-**`## Touches` was WIDENED (through the ABI, this write) to add `plugin/scripts/driver-runtime.ts`.**
+**`## Touches` was WIDENED (through the ABI) to add `plugin/scripts/driver-runtime.ts`.**
 It already owns `.quay/anchor.json` (`ANCHOR_STATE_REL`, `readAnchorStateDetailed`) and is ALREADY in this
 routine's bundle closure, so the reader costs the shipped artifact **0 bytes**; `plugin/scripts/driver-anchor.ts`
 would inline ~34 KB of the anchor kernel into the routine bundle (measured: 2 637 423 → 2 671 169 B).
 **`driver-anchor.ts` is therefore declared but UNCHANGED** — it is in Touches because it owns the handoff
 grammar (`startedAt`, the `takeover … exited` log line) that AC1's cross-reference reads.
 
-**Negative controls (all in `plugin/test/open-semantic-discovery-routine.test.mjs`):**
+**Negative controls (all in `plugin/test/open-semantic-discovery-routine.test.mjs`, 6 new tests, all green):**
 - **signal absent** — the IDENTICAL round with an anchor start 6 h old reads `adjacent:false` on the round
   and on every call, while the 1-minute-old twin reads `true`: the flag takes BOTH values (a constant
   would read `true` twice), and the two rounds did the same amount of work;
@@ -141,9 +141,9 @@ grammar (`startedAt`, the `takeover … exited` log line) that AC1's cross-refer
 
 **Budget ceilings, before/after — UNCHANGED.** `.quay/config.yml` md5 `f09b4272a88377906cb366f2f6b77db0`
 both before and after (gitignored; never written by this task; the worktree's provisioned copy is
-byte-identical). Its OSD section still reads `max_model_calls_per_24h: 120` and `max_usd_per_24h: 30`.
-The diff touches 3 files and **no budget carrier**: `PER_CALL_USD_CEILING`, `config.maxModelCallsPer24h`
-and `config.maxUsdPer24h` are untouched.
+byte-identical). Its OSD section still reads `max_model_calls_per_24h: 120` and `max_usd_per_24h: 30`
+(re-read at AC-tick time). The delta against develop is 3 files, 371 insertions, and **no budget carrier**:
+`git diff develop...HEAD | grep -E '^[+-].*(PER_CALL_USD_CEILING|maxModelCallsPer24h|maxUsdPer24h|max_model_calls_per_24h|max_usd_per_24h)'` returns **0 lines**.
 
 ### Proposed forward signal (Plan item 1 / DoD)
 `.quay/anchor.json` publishes `startedAt` but nothing that says **whether that start was a takeover or a
@@ -155,8 +155,16 @@ make. **Deliberately NOT implemented here**: it is an unrequested field on a sur
 `server status` all read, its marginal value on the observed population is zero (both starts were
 takeovers), and no AC of this task needs it.
 
-### AC3 — scoped gate
-`bash scripts/test.sh --for-task gap-osd-stream-without-result-recurs-past-the-one-counted-retry-needs-correlated-signal --allow-thin` — **green** (result recorded on the branch; the fan-in's own run is skipped via the scoped-gate cache written from this worktree).
+### AC3 — scoped gate: GREEN
+```
+bash scripts/test.sh --for-task gap-osd-stream-without-result-recurs-past-the-one-counted-retry-needs-correlated-signal --allow-thin
+EXIT=0   tests 125   pass 125   fail 0   STATIC_CHECK_FAILED count = 0
+```
+(First run was red on `task-file-bypass-check` / `worktree-namespace-literal-check` /
+`serve-binding-literal-check` — those were **my own** `plugin/scripts/dist/` build artifacts sitting in the
+worktree, produced while measuring the driver-anchor inlining cost above. Removed; re-run green. Neither
+the main checkout nor any other worktree carries a `dist/`, so this was a local, self-inflicted red and
+not a property of the change.)
 
 ## Touches
 - tasks/gap-osd-stream-without-result-recurs-past-the-one-counted-retry-needs-correlated-signal.md
