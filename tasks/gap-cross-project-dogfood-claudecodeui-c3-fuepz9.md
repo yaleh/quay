@@ -2,7 +2,7 @@
 id: gap-cross-project-dogfood-claudecodeui-c3-fuepz9
 title: "[cross-project dogfood] The resident selector parses only the first line
   of the model reply, so any prose first line (e.g. about a missing…"
-status: todo
+status: ready
 labels:
   - gap
   - cross-project-dogfood
