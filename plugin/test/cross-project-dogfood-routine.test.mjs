@@ -15,6 +15,7 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import crypto from "node:crypto";
+import { spawnSync } from "node:child_process";
 
 import {
   CROSS_PROJECT_DOGFOOD_NAME,
@@ -40,6 +41,7 @@ import {
   verdictOf,
   verifierLookupPreamble,
   filedTaskId,
+  crossProjectRecordId,
   writeOwnedFile,
 } from "../scripts/cross-project-dogfood-routine.ts";
 import { INVOKED_BY_MANUAL, INVOKED_BY_RESIDENT } from "../scripts/discovery-method-routine.ts";
@@ -682,6 +684,34 @@ test("the filed task body carries the round, the source project, the cited posit
   // file would notice — so the SAME shape judge the pool uses is run against the rendered body.
   assert.equal(detectShape(body), "plan");
   assert.deepEqual(artifactsComplete(body), { shape: "plan", complete: true, artifacts: { proposal: true, plan: true, ac: true, dod: true }, missing: [] });
+});
+
+test("the Portfolio's OWN resolveOriginRef resolves the exact record_id this routine writes (the carrier agreement)", async () => {
+  // ⛔ This is the pin the OSD module's doc comment describes for ITS carrier, applied to this one, and it
+  // is not decoration: measured 2026-10-13, a round whose record_id lacked the carrier prefix had EVERY
+  // confirmed finding refused at ingestion with `ORIGIN_REF_UNRESOLVED:…-names-no-record-in-
+  // .quay/routine-findings.jsonl` — the failure named the wrong carrier, so it read like a data problem
+  // rather than a missing branch. The ref prefix is what selects the carrier, and only this assertion
+  // keeps the two literals in step.
+  const repo = path.join(tmpDir(), "portfolio-root");
+  fs.mkdirSync(repo, { recursive: true });
+  const git = (args) => spawnSync("git", ["-C", repo, ...args], { encoding: "utf8" });
+  git(["init", "-q"]);
+  git(["config", "user.email", "t@example.com"]);
+  git(["config", "user.name", "t"]);
+  const recordId = crossProjectRecordId("cpd-1-2-abcdef", "c1");
+  writeJsonl(path.join(repo, ".quay", "cross-project-dogfood-findings.jsonl"), [{
+    kind: "dogfood-cluster", round_id: "cpd-1-2-abcdef", record_id: recordId, ts: "2026-10-13T09:47:51.000Z",
+    components: ["plugin/scripts/driver-runtime.ts"], claim: "a claim",
+  }]);
+  const { resolveOriginRef } = await import("../../docs/analysis/discovery-portfolio.mjs");
+  const resolved = resolveOriginRef(repo, { origin: "autonomous-routine", origin_ref: recordId });
+  assert.equal(resolved.ok, true, `the Portfolio must resolve this routine's ref: ${resolved.reason}`);
+  assert.equal(resolved.carrier, ".quay/cross-project-dogfood-findings.jsonl");
+  assert.deepEqual(resolved.components, ["plugin/scripts/driver-runtime.ts"], "the components must be read off the carrier record");
+  // Negative control: a bare `<round>::c1` (the pre-fix shape) must NOT resolve — otherwise this test
+  // would pass for any ref at all.
+  assert.equal(resolveOriginRef(repo, { origin: "autonomous-routine", origin_ref: "cpd-1-2-abcdef::c1" }).ok, false);
 });
 
 test("the verifier/refuter preamble names the repo root, each readable project root and the cited positions", () => {

@@ -98,6 +98,18 @@
       "readers": "unaudited"
     },
     {
+      "name": "cross-project-dogfood-findings.jsonl",
+      "kind": "jsonl-log",
+      "owner": "plugin/scripts/cross-project-dogfood-routine.ts",
+      "readers": "unaudited"
+    },
+    {
+      "name": "cross-project-dogfood-model-budget.jsonl",
+      "kind": "jsonl-log",
+      "owner": "plugin/scripts/cross-project-dogfood-routine.ts",
+      "readers": "unaudited"
+    },
+    {
       "name": "open-semantic-discovery-model-budget.jsonl",
       "kind": "jsonl-log",
       "owner": "plugin/scripts/open-semantic-discovery-routine.ts",

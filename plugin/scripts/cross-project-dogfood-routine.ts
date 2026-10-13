@@ -686,8 +686,20 @@ export interface PortfolioLike {
 export const loadPortfolioModule = async (root: string): Promise<PortfolioLike> =>
   (await loadEngineModule(root, PORTFOLIO_MODULE_FILE)) as PortfolioLike;
 
+/** The ledger module's SHARED-checkout resolver. Reused rather than re-derived (硬规则 5b): it is the
+ *  ONE place that answers "where does this workspace's runtime carrier really live". */
+export interface LedgerModuleLike { carrierFile: (root: string, rel: string) => string | null }
+export const loadLedgerModule = async (root: string): Promise<LedgerModuleLike> =>
+  (await loadEngineModule(root, LEDGER_MODULE_FILE)) as LedgerModuleLike;
+export const LEDGER_MODULE_FILE = "discovery-experience-ledger.mjs";
+
 // ── round helpers (pure) ────────────────────────────────────────────────────────────────────────────
-export const crossProjectRecordId = (round: string, suffix: string): string => `${round}::${suffix}`;
+/** ⛔ The `cross-project-dogfood@` prefix is NOT decoration: `discovery-portfolio.mjs`'s
+ *  `resolveOriginRef` picks the origin CARRIER by the ref's own prefix, so a bare `<round>::c1` would be
+ *  looked up in `.quay/routine-findings.jsonl` and every ingestion would be refused with
+ *  `ORIGIN_REF_UNRESOLVED`. Measured 2026-10-13. The matcher on the other side is
+ *  `ref.startsWith(CROSS_PROJECT_REF_PREFIX)` + `kind === "dogfood-cluster"`. */
+export const crossProjectRecordId = (round: string, suffix: string): string => `${CROSS_PROJECT_DOGFOOD_NAME}@${round}::${suffix}`;
 const roundId = (pid: number, started: number): string => `cpd-${pid}-${started}-${Math.random().toString(36).slice(2, 8)}`;
 
 /** Read a verdict off an engine row. Anything not in the engine's vocabulary is `undetermined` — never
@@ -741,9 +753,21 @@ export async function runCrossProjectDogfood(root: string, opts: CrossProjectDog
   const now = opts.now ?? Date.now;
   const started = now();
   const cfg = opts.config;
-  const lastRunPath = opts.lastRunPath ?? path.join(root, ROUTINE_LAST_RUN_REL);
-  const carrierPath = opts.carrierPath ?? path.join(root, CARRIER_REL);
-  const ledgerPath = opts.budgetLedgerPath ?? path.join(root, BUDGET_LEDGER_REL);
+  // ── WHERE THIS ROUND'S OWN CARRIERS LIVE ─────────────────────────────────────────────────────────
+  // ⛔ The SHARED checkout, not necessarily `root`. `ingestFinding` writes the Portfolio to the shared
+  // checkout, and `resolveOriginRef` RESOLVES this routine's `origin_ref` by reading THIS carrier from
+  // that same shared root — so a round rooted in a linked worktree that wrote its carrier under its own
+  // root could never ingest anything: every confirmed finding would be refused (measured 2026-10-13,
+  // `ORIGIN_REF_UNRESOLVED`). The cap must be global for the same reason: a per-worktree ledger is not a
+  // 24h ceiling. `carrierFile` is the ledger module's own resolver — reused, never re-derived (硬规则
+  // 5b) — and a root it cannot resolve to a shared checkout (no git, as in the unit tests) falls back to
+  // the root itself, which is also the production shape when the round already runs in the shared
+  // checkout.
+  const shared = await loadLedgerModule(root).catch(() => null);
+  const at = (rel: string): string => shared?.carrierFile(root, rel) ?? path.join(root, rel);
+  const lastRunPath = opts.lastRunPath ?? at(ROUTINE_LAST_RUN_REL);
+  const carrierPath = opts.carrierPath ?? at(CARRIER_REL);
+  const ledgerPath = opts.budgetLedgerPath ?? at(BUDGET_LEDGER_REL);
   const invokedBy: InvokedBy = opts.invokedBy ?? INVOKED_BY_DEFAULT;
   const resident = invokedBy === INVOKED_BY_RESIDENT;
   const round = roundId(process.pid, started);
@@ -780,7 +804,7 @@ export async function runCrossProjectDogfood(root: string, opts: CrossProjectDog
     root,
     cap: cfg.maxModelCallsPer24h,
     ledgerPath,
-    lockPath: opts.budgetLockPath ?? path.join(root, BUDGET_LOCK_REL),
+    lockPath: opts.budgetLockPath ?? at(BUDGET_LOCK_REL),
     carrierPath,
     now,
   });

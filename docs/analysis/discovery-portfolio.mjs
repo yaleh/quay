@@ -641,6 +641,26 @@ const OPEN_DISCOVERY_REF_PREFIX = "open-semantic-discovery@";
 const OPEN_DISCOVERY_CLUSTER_KIND = "cluster";
 
 /**
+ * The cross-project dogfood routine's carrier and ref prefix — the SECOND `autonomous-routine` origin
+ * that is not `.quay/routine-findings.jsonl`.
+ *
+ * Same rule as above, one carrier over: a ref that names its own carrier is decidable without a search
+ * order. ⛔ Measured 2026-10-13: without this arm, EVERY confirmed cross-project finding was refused at
+ * ingestion with `ORIGIN_REF_UNRESOLVED:…-names-no-record-in-.quay/routine-findings.jsonl` — a routine
+ * whose whole product is a Portfolio row could not write one, and the failure named the WRONG carrier,
+ * so it read like a data problem rather than a missing branch here.
+ *
+ * ⛔ The two literals are OWNED by `plugin/scripts/cross-project-dogfood-routine.ts` (it mints every
+ * `record_id`, and `docs/carrier-registry.json` declares the carrier). They are repeated here because
+ * this module must not import the routine — the routine imports THIS one at runtime, so the reverse edge
+ * would be a cycle. The agreement is not left to a comment: the routine's own test asserts that
+ * `resolveOriginRef` resolves the exact `record_id` the routine writes.
+ */
+const CROSS_PROJECT_CARRIER_REL = ".quay/cross-project-dogfood-findings.jsonl";
+const CROSS_PROJECT_REF_PREFIX = "cross-project-dogfood@";
+const CROSS_PROJECT_CLUSTER_KIND = "dogfood-cluster";
+
+/**
  * Does `tasks/<id>.md` exist on `branch`? A task id resolves an operator/user finding the same way the
  * landing is read — from git, not from the working tree (a worktree may be mid-edit).
  */
@@ -673,6 +693,14 @@ export function resolveOriginRef(root, { origin, origin_ref }) {
       const hit = c.records.find((r) => isObj(r) && r.kind === OPEN_DISCOVERY_CLUSTER_KIND && r.record_id === ref);
       if (!hit) return { ok: false, reason: `ORIGIN_REF_UNRESOLVED:${ref}-names-no-record-in-${OPEN_DISCOVERY_CARRIER_REL}` };
       return { ok: true, carrier: OPEN_DISCOVERY_CARRIER_REL, ref, ts: isStr(hit.ts, 4) ? hit.ts : null, components: normalizeComponents(hit.components) };
+    }
+    // The cross-project dogfood routine's own carrier, selected the same way (by the ref's own prefix).
+    if (ref.startsWith(CROSS_PROJECT_REF_PREFIX)) {
+      const c = readSharedJsonl(root, CROSS_PROJECT_CARRIER_REL);
+      if (!c.ok) return { ok: false, reason: c.reason };
+      const hit = c.records.find((r) => isObj(r) && r.kind === CROSS_PROJECT_CLUSTER_KIND && r.record_id === ref);
+      if (!hit) return { ok: false, reason: `ORIGIN_REF_UNRESOLVED:${ref}-names-no-record-in-${CROSS_PROJECT_CARRIER_REL}` };
+      return { ok: true, carrier: CROSS_PROJECT_CARRIER_REL, ref, ts: isStr(hit.ts, 4) ? hit.ts : null, components: normalizeComponents(hit.components) };
     }
     const c = readSharedJsonl(root, ROUTINE_FINDINGS_REL);
     if (!c.ok) return { ok: false, reason: c.reason };
