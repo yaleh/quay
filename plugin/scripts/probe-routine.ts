@@ -482,9 +482,8 @@ export function selectFilings(findings: readonly ProbeFinding[], o: FilingOption
         continue;
       }
     }
-    // ③ 既有三道闸（质量 / 去重 / 限流）——⛔ 复用单一实现，不在这里另写一份判据。
-    //    ⚠️ 升级形态走的是**人可见通道**，它不进食派发池 ⇒ 不受派发侧的 rate 窗口约束（它的闸是
-    //    「同一主体在该读数不变时只升级一次」，见 gateEscalation 的注释）。质量/去重两道**照旧**。
+    // ③ 既有三道闸（质量 / 去重 / 限流）的候选文本 —— 三处判据（blocked 升级面、连续被拒面、寻常派发面）
+    //    必须先渲染出**同一份**文本，否则它们会对同一条 finding 各判一次不同的键（硬规则 5b）。
     const candidate = routineFindingCandidateText(f);
 
     /** ③c 人可见通道的立案步 —— **单一实现**（`blocked` 升级面与「连续被拒」面共用；⛔ 不写第二份
