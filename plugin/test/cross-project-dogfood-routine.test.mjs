@@ -4,10 +4,15 @@
 // its kill switch, the root-unreadable reading, due/last-run stamping, the OSD confirmation bar, the
 // Portfolio dedup path, and the scope guard that keeps a project-local item out of the Portfolio.
 //
-// The engine (`docs/analysis/arch-hypothesis-generation.mjs`) is NOT imported here: every round in this
-// file runs against an injected `hypModule`, which is exactly the seam the module exposes. Real rounds
-// against real artifacts are pasted as evidence in the task body, not asserted here (a fixture can prove
-// "it can produce a reading", never "production produced one" — 硬规则 4 推论三).
+// The engine (`docs/analysis/arch-hypothesis-generation.mjs`) is reached ONLY through the module's own
+// seams: every round in this file runs against an injected `hypModule`, which is exactly the seam the
+// module exposes. Its two STRUCTURAL READERS (`streamDiagnostics`, `parseVerifierStream`) and its pure
+// verdict mapper (`verifierVerdict`) ARE imported — deliberately, and only those three — because the task
+// this file pins requires the routine to consume the ENGINE's readers rather than a second copy of them
+// (硬规则 5b): stubbing them here would make the classification assertions prove nothing about what
+// production reads. Real rounds against real artifacts are pasted as evidence in the task body, not
+// asserted here (a fixture can prove "it can produce a reading", never "production produced one" —
+// 硬规则 4 推论三).
 
 import { test, after } from "node:test";
 import assert from "node:assert/strict";
@@ -45,8 +50,17 @@ import {
   crossProjectRecordId,
   selectClustersForVerification,
   writeOwnedFile,
+  CALL_CAPTURE_DIR_REL,
 } from "../scripts/cross-project-dogfood-routine.ts";
 import { INVOKED_BY_MANUAL, INVOKED_BY_RESIDENT } from "../scripts/discovery-method-routine.ts";
+import {
+  RETRYABLE_CALL_FAILURES,
+  callFailureClass,
+} from "../scripts/open-semantic-discovery-routine.ts";
+// ⛔ The ENGINE's OWN readers, imported so the injected `hypModule` below delegates to them instead of
+// re-implementing them. That is the whole point of AC1: if this file carried its own `streamDiagnostics`,
+// the assertion "the call is classified from the stream" would be a tautology about the fixture.
+import { streamDiagnostics, parseVerifierStream, verifierVerdict, runVerifier as realRunVerifier } from "../../docs/analysis/arch-hypothesis-generation.mjs";
 import { artifactsComplete, detectShape } from "../../packages/quay/src/kernel/task-shape-artifacts.ts";
 
 const ROUTINE_SRC = new URL("../scripts/cross-project-dogfood-routine.ts", import.meta.url);
@@ -130,6 +144,9 @@ function makeHyp({ hypotheses = [HYPOTHESIS], verdicts = ["supported", "supporte
       hardenedArgv: () => ["stub-launcher"],
       clusterHypotheses: (runs) => (runs[0]?.hyps ?? []).map((h, i) => ({ rep: h, members: [h], comps: h.components, cluster: i + 1 })),
       parseJsonObject: () => null,
+      // The engine's OWN readers, not a second copy — see the import block above.
+      streamDiagnostics,
+      parseVerifierStream,
       runInvestigator: async (opts) => {
         calls.investigator++;
         await opts.runModel("investigator prompt", 0); // drives the reserve→spawn seam for real
@@ -145,11 +162,33 @@ function makeHyp({ hypotheses = [HYPOTHESIS], verdicts = ["supported", "supporte
   };
 }
 
-function makeSpawn() {
+/** The `stream-json` a REAL successful call leaves behind: an `init` event naming the served model, then
+ *  the `result` event. ⛔ An empty stdout is NOT a representative success — since this task a call is only
+ *  "it ran" when its stream carries a `result` event, so a fixture returning `""` would be describing a
+ *  result-less call while pretending to be a clean one (硬规则 3b). */
+const OK_STREAM = [
+  JSON.stringify({ type: "system", subtype: "init", model: "claude-fixture-1" }),
+  JSON.stringify({ type: "assistant", message: { content: [{ type: "text", text: "{}" }] } }),
+  JSON.stringify({ type: "result", subtype: "success", is_error: false, num_turns: 3, result: "{}", usage: { input_tokens: 11, output_tokens: 7 } }),
+].join("\n") + "\n";
+
+function makeSpawn({ stdout = OK_STREAM, stderr = "", status = 0, error = null } = {}) {
   const seen = [];
   const spawn = async (argv, opts) => {
     seen.push({ argv, cwd: opts.cwd, timeoutMs: opts.timeoutMs, viaStdin: typeof opts.stdinData === "string" });
-    return { status: 0, signal: null, stdout: "", stderr: "", error: null };
+    return { status, signal: null, stdout, stderr, error };
+  };
+  return { seen, spawn };
+}
+
+/** A spawn that answers each call from a QUEUE, the last entry repeating forever. Used to pin a call
+ *  SEQUENCE (investigator ok → verifier <fixture> → retry <fixture>), which a constant spawn cannot. */
+function makeQueuedSpawn(responses) {
+  const seen = [];
+  const spawn = async (argv, opts) => {
+    const r = responses.length > 1 ? responses.shift() : responses[0];
+    seen.push({ argv, cwd: opts.cwd, timeoutMs: opts.timeoutMs, viaStdin: typeof opts.stdinData === "string" });
+    return { status: 0, signal: null, stderr: "", error: null, ...r };
   };
   return { seen, spawn };
 }
@@ -459,14 +498,27 @@ test("an investigator subprocess that EXITS NONZERO fails the round and does not
   const lastRun = path.join(root, ".quay", "routine-last-run.json");
   const src = makeSourceProject(path.join(base, "alpha"), { outcomes: [{ kind: "worker", final_state: "completed", exit_code: 0 }] });
   const { module } = makeHyp();
-  const failingSpawn = async () => ({ status: 1, signal: null, stdout: "", stderr: "boom", error: null });
+  const failCalls = [];
+  const failingSpawn = async () => {
+    failCalls.push(1);
+    return { status: 1, signal: null, stdout: "", stderr: "boom", error: null };
+  };
   const fact = await runCrossProjectDogfood(root, {
     config: cfg({ sourceProjects: [project("alpha", src)] }),
     configPresent: true, hypModule: module, spawnFn: failingSpawn, scratchRoot: tmpDir(), lastRunPath: lastRun,
-    now: () => 1_800_000_000_000,
+    now: () => 1_800_000_000_000, retryBackoffMs: 0,
   });
   assert.equal(fact.state, "failed", "a dead subprocess is not a round that found nothing (硬规则 3b)");
-  assert.match(fact.reason, /not-evaluated:exit-1/);
+  // ⛔ The token CHANGED with this task, and the change is the point: `exit-1` was the whole record before
+  // (7 production calls read exactly that and nothing else). Now the exit reading is `uninstrumented-…`
+  // — the stream was never even readable — while the CLASS (`no-stdout`) says what the bytes were.
+  assert.match(fact.reason, /not-evaluated:uninstrumented-exit-1/);
+  assert.equal(failCalls.length, 2, "a `no-stdout` call is RETRYABLE: exactly one retry must have fired");
+  assert.equal(fact.value.calls.length, 2);
+  assert.equal(fact.value.calls[0].call_failure, "no-stdout");
+  assert.equal(fact.value.calls[1].retry_of, fact.value.calls[0].reservation_id, "the retry must name the reservation it repeats");
+  assert.equal(fact.value.calls[1].retry_cause, "no-stdout");
+  assert.equal(fact.value.calls[1].ok, false, "a retry that failed again must NOT be laundered into a clean pass");
   assert.equal(fs.existsSync(lastRun), false, "a failed round must not advance the last-run stamp");
   assert.equal(readCarrier(root).filter((r) => r.kind === "dogfood-round").length, 0, "a failed round writes no round line");
 
@@ -786,4 +838,266 @@ test("the verification budget reserves a slot for the project_local control arm"
   assert.deepEqual(selectClustersForVerification([g(1), g(2), l(1)], 1).map((c) => c.rep.claim), ["q1"], "a cap of 1 goes to the round's primary product");
   assert.deepEqual(selectClustersForVerification([g(1), l(1), l(2)], 3).map((c) => c.rep.claim), ["q1", "p1", "l2".replace("l2", "p2")], "spare slots stay filled");
   assert.deepEqual(selectClustersForVerification([g(1), g(2), g(3)], 2).map((c) => c.rep.claim), ["q1", "q2"], "no control ⇒ an ordinary prefix");
+});
+
+// ── the ATTRIBUTION + RETRY layer ───────────────────────────────────────────────────────────────────
+// WHAT THIS BLOCK PINS (task gap-cross-project-dogfood-shares-no-diagnostics-or-retry-with-osd-seven-
+// unattributed-exit1): the routine's call path now consumes OSD's OWN attribution machinery, so a call
+// that produced no answer is ATTRIBUTABLE — an enumerated class, the stream's structural readings, the
+// bounded bytes on disk — and a RETRYABLE one gets exactly ONE counted retry.
+//
+// The seven historical production calls (5 verifier + 2 refuter across rounds cpd-3283888 / cpd-3716725 /
+// cpd-943549 / cpd-1241325) each read, in full:
+//   {"step":"cross-project-verifier","reservation_id":"dmr-3716725-1-165jinxk","ok":false,
+//    "not_evaluated":"not-evaluated:exit-1","turns":null,"exit":1}
+// — no stdout, no stderr, no wall time, no signal, no timeout flag, no model. A crashed CLI, a non-JSON
+// reply, a provider API error and an environment fault were the SAME record, and none was retried.
+
+const SYS_EVENT = JSON.stringify({ type: "system", subtype: "init", model: "claude-fixture-1" });
+const ASSIST_EVENT = JSON.stringify({ type: "assistant", message: { content: [{ type: "text", text: "reasoning…" }] } });
+
+/** The SEVEN historical shapes as the launcher's own bytes. Six are spawn outcomes; the seventh (a budget
+ *  refusal) is not a spawn at all — it is the ordinary `BUDGET_REFUSED` throw, pinned separately below. */
+const SHAPES = [
+  {
+    name: "no-stdout", status: 1, stdout: "", stderr: "",
+    class: "no-stdout", has_result: false, not_evaluated: "not-evaluated:uninstrumented-exit-1", retryable: true,
+  },
+  {
+    name: "stream-without-result", status: 1, stdout: `${SYS_EVENT}\n${ASSIST_EVENT}\n`, stderr: "",
+    class: "stream-without-result", has_result: false, not_evaluated: "not-evaluated:uninstrumented-exit-1", retryable: true,
+  },
+  {
+    // The gateway answering an unknown model: `subtype:"success"` and `is_error:true` on the SAME result
+    // event — the shape whose subtype is NOT a usable name, which is why the class keys on the stream
+    // reader's own `api_error_event` predicate instead.
+    name: "api-error-event", status: 1, stderr: "",
+    stdout: `${JSON.stringify({ type: "system", subtype: "error", error: "model_not_found" })}\n${JSON.stringify({ type: "result", subtype: "success", is_error: true, num_turns: 0 })}\n`,
+    class: "api-error-event", has_result: true, not_evaluated: "not-evaluated:api-error-event", retryable: true,
+  },
+  {
+    // Cut MID-WRITE: the last non-empty line begins with `{` and never parses. Deliberately NOT retryable
+    // — a stream cut short usually means the ceiling was reached, and re-spending a reservation cuts it
+    // in the same place.
+    name: "truncated-json", status: 1, stderr: "",
+    stdout: `${SYS_EVENT}\n{"type":"assistant","message":{"content":[{"type":"te`,
+    class: "truncated-json", has_result: false, not_evaluated: "not-evaluated:uninstrumented-exit-1", retryable: false,
+  },
+  {
+    // A clean exit 1 whose own stream names the REAL error, with stderr corroborating it: the CLI exited
+    // 1 after running, and the cap it hit is a budget fact the stream states itself. There is no
+    // `call_failure` class to key a retry on — re-spending a reservation would only hit the same cap.
+    name: "clean-named-failure", status: 1, stderr: "Error: Reached max turns (12)\n",
+    stdout: `${SYS_EVENT}\n${JSON.stringify({ type: "result", subtype: "error_max_turns", is_error: true, num_turns: 12 })}\n`,
+    class: null, has_result: true, not_evaluated: "not-evaluated:error_max_turns", retryable: false,
+  },
+  {
+    // ALSO a clean exit 1 with real stderr naming the error, but the stream is NOT the launcher's own
+    // envelope at all (plain text on stdout). ⛔ The honest reading is `unclassified` — "the bytes match
+    // no known shape" — which is a READING, not an absence of one; it is deliberately not on OSD's retry
+    // list, and this arm is what keeps the retry bounded to the three classes it is meant for.
+    name: "unclassified-plain-text", status: 1, stderr: "Error: unable to resolve project root '/nope'\n",
+    stdout: "fatal: could not read configuration\n",
+    class: "unclassified", has_result: false, not_evaluated: "not-evaluated:uninstrumented-exit-1", retryable: false,
+  },
+  {
+    // The timeout reaper: no exit code at all (the child was SIGKILLed), so the spawn wrapper's own
+    // message is the only in-band signal. NOT retryable — the ceiling was reached.
+    name: "killed-by-timeout", status: null, stdout: "", stderr: "", error: new Error("spawn timeout after 1000ms (SIGKILL): stub-launcher"),
+    class: "killed-by-timeout", has_result: false, not_evaluated: "not-evaluated:killed-by-timeout", retryable: false,
+  },
+];
+
+/** ⛔ THE NEGATIVE CONTROL — the pre-task reading, quoted verbatim from the two lines this task replaced
+ *  inside `reservingStep`:
+ *      const outcome = res.error ? "timeout" : res.status === 0 ? "completed" : "failed";
+ *      const notEvaluated = res.error ? `not-evaluated:spawn-${outcome}`
+ *                                     : res.status !== 0 ? `not-evaluated:exit-${res.status}` : null;
+ *  It reads NOTHING of the bytes, so on these fixtures it must collapse every spawn shape to one string —
+ *  which is exactly what the production carrier shows for all seven historical calls. A fixture set that
+ *  the OLD reading already distinguished would prove nothing about the fix. */
+function preFixNotEvaluated(status, error) {
+  const outcome = error ? "timeout" : status === 0 ? "completed" : "failed";
+  return error ? `not-evaluated:spawn-${outcome}` : status !== 0 ? `not-evaluated:exit-${status}` : null;
+}
+
+/** Run ONE real round in which the investigator succeeds and every later call returns `shape`'s bytes —
+ *  so a retry, if one fires, repeats the SAME fixture. Returns the persisted round line, which is where
+ *  the reading has to survive (the fact value alone would not prove it reached the carrier). */
+async function roundWithVerifierShape(shape, { retryBackoffMs = 0, cfgOver = {}, realVerifier = false } = {}) {
+  const base = tmpDir();
+  const root = path.join(base, "ws");
+  const src = makeSourceProject(path.join(base, "alpha"), { outcomes: [{ kind: "worker", final_state: "exited-not-landed", exit_code: 0 }] });
+  // `undetermined` for the verifier keeps the refuter out of the call sequence, so the byte index of
+  // every assertion below is stable.
+  const { module: stub } = makeHyp({ verdicts: ["undetermined"] });
+  // ⛔ `realVerifier` swaps in the ENGINE's own `runVerifier`, so the persisted verdict is a reading of
+  // the returned bytes rather than a value a fixture queued. It is the only way to assert "the cluster
+  // stays undetermined" without that assertion being about the stub.
+  const module = realVerifier ? { ...stub, runVerifier: realRunVerifier } : stub;
+  const { spawn, seen } = makeQueuedSpawn([{ stdout: OK_STREAM }, shape]);
+  const fact = await runCrossProjectDogfood(root, {
+    config: cfg({ sourceProjects: [project("alpha", src)], ...cfgOver }),
+    configPresent: true, hypModule: module, spawnFn: spawn, scratchRoot: tmpDir(),
+    now: () => 1_800_000_000_000, retryBackoffMs,
+  });
+  const carrier = readCarrier(root);
+  return { fact, root, seen, roundLine: carrier.find((r) => r.kind === "dogfood-round"), clusters: carrier.filter((r) => r.kind === "dogfood-cluster") };
+}
+
+test("AC1: each historical shape is classified by the REUSED callFailureClass/streamDiagnostics, and the pre-fix reading collapses them all", async () => {
+  const oldReadings = new Set();
+  const newClasses = new Set();
+  const newTokens = new Set();
+
+  for (const shape of SHAPES) {
+    const { fact, root, roundLine } = await roundWithVerifierShape(shape);
+    const where = `shape=${shape.name}`;
+    assert.equal(fact.state, "verified", `${where}: the round itself completes — a failed VERIFIER call is not a failed round (${fact.reason})`);
+    assert.ok(roundLine, `${where}: the round line must exist`);
+    // calls[0] = investigator (clean), calls[1] = the verifier call under test, calls[2] = its retry.
+    const n = shape.retryable ? 3 : 2;
+    assert.equal(roundLine.calls.length, n, `${where}: expected investigator + verifier${shape.retryable ? " + ONE retry" : " and NO retry"}`);
+    const rec = roundLine.calls[1];
+    assert.equal(rec.step, "cross-project-verifier", where);
+
+    // ── THE CLASS, read by the ENGINE's own function off the ENGINE's own diagnostics of these bytes ──
+    const diag = streamDiagnostics(shape.stdout);
+    const expected = callFailureClass({
+      timed_out: Boolean(shape.error), stdout_bytes: diag.bytes, json_lines: diag.json_lines,
+      truncated_json: diag.truncated_json, api_error_event: diag.api_error_event, has_result: diag.has_result,
+    });
+    assert.equal(rec.call_failure, expected, `${where}: the record's class must be the reused classifier's answer on the same bytes`);
+    assert.equal(rec.call_failure, shape.class, `${where}: class`);
+    assert.equal(rec.has_result, shape.has_result, `${where}: has_result`);
+    assert.equal(rec.not_evaluated, shape.not_evaluated, `${where}: the token`);
+    assert.equal(rec.ok, false, `${where}: a call that produced no answer is never ok`);
+    assert.equal(rec.stdout_bytes, Buffer.byteLength(shape.stdout, "utf8"), `${where}: the byte count is the stream's, not a guess`);
+
+    // ── THE RETAINED BYTES ─────────────────────────────────────────────────────────────────────────
+    // ⛔ The direct reading of AC1: the capture file must EXIST on disk and carry the stream, because the
+    // whole defect was that the bytes were in hand and then lost. "no bytes to show" and "no capture
+    // file" must stay different readings (硬规则 3b), so the path is asserted non-null AND stat-ed.
+    assert.ok(rec.stdout_capture && typeof rec.stdout_capture.path === "string", `${where}: a result-less call must carry a capture path`);
+    assert.ok(rec.stdout_capture.path.startsWith(`${CALL_CAPTURE_DIR_REL}/`), `${where}: the capture lives in THIS routine's own directory, not OSD's (${rec.stdout_capture.path})`);
+    const capAbs = path.join(root, rec.stdout_capture.path);
+    assert.ok(fs.existsSync(capAbs), `${where}: the capture file must exist at ${capAbs}`);
+    assert.match(fs.readFileSync(capAbs, "utf8"), /# stdout head/, `${where}: the capture must be the bounded head/tail rendering`);
+
+    oldReadings.add(preFixNotEvaluated(shape.status, shape.error));
+    newClasses.add(String(rec.call_failure));
+    newTokens.add(String(rec.not_evaluated));
+  }
+
+  // ── THE NEGATIVE CONTROL, both halves ────────────────────────────────────────────────────────────
+  // Half one: the PRE-FIX reading is DEGENERATE on exactly the shapes production recorded. Every one of
+  // the seven historical calls was a `exit:1` spawn with no `error`, so the old expression — which never
+  // looked at the bytes — produced the ONE string `not-evaluated:exit-1` for all of them, whatever the
+  // stream said. (It did split a spawn ERROR off as `spawn-timeout`; that is the whole of its resolving
+  // power, and it is not what any of the seven were.) A fixture set the old reading already
+  // distinguished would prove nothing about the fix, so this half is what makes the fix falsifiable.
+  const exitOneShapes = SHAPES.filter((s) => !s.error);
+  assert.equal(exitOneShapes.length, 6, "six of the shapes are `exit 1` spawns — the historical shape");
+  assert.deepEqual([...new Set(exitOneShapes.map((s) => preFixNotEvaluated(s.status, s.error)))], ["not-evaluated:exit-1"], "the PRE-FIX reading must collapse all six `exit 1` shapes to the single token the production carrier shows for all seven historical calls");
+  assert.deepEqual([...new Set(SHAPES.map((s) => preFixNotEvaluated(s.status, s.error)))].sort(), ["not-evaluated:exit-1", "not-evaluated:spawn-timeout"], "…and that single split is its ENTIRE resolving power");
+  // Half two: the fix must actually distinguish them.
+  assert.ok(newClasses.size >= 5, `the fix must actually distinguish them (got ${newClasses.size} distinct classes: ${[...newClasses].join(", ")})`);
+  assert.ok(newTokens.size >= 4, `...and the tokens too (got ${newTokens.size}: ${[...newTokens].join(", ")})`);
+});
+
+test("AC1(b): the capture directory is this routine's OWN sibling of OSD's, never the same one", () => {
+  assert.equal(CALL_CAPTURE_DIR_REL, ".quay/cross-project-dogfood-call-captures");
+  assert.notEqual(CALL_CAPTURE_DIR_REL, ".quay/open-semantic-discovery-call-captures", "the two routines' rounds must not collide on a capture filename");
+});
+
+test("AC2: exactly one retry per RETRYABLE class, through a fresh reservation on the SAME ledger; a retry that fails again stays undetermined", async () => {
+  // ── (i) one retry, and it is a FRESH reservation on the same ledger ──────────────────────────────
+  const shape = SHAPES.find((s) => s.name === "stream-without-result");
+  const { root, seen, roundLine, clusters } = await roundWithVerifierShape(shape, { realVerifier: true });
+  assert.equal(seen.length, 3, "investigator + verifier + exactly ONE retry — never two");
+  assert.equal(roundLine.calls.length, 3);
+  const [inv, first, retry] = roundLine.calls;
+  assert.equal(inv.step, "cross-project-investigator");
+  assert.equal(first.step, "cross-project-verifier");
+  assert.equal(retry.step, "cross-project-verifier");
+  assert.notEqual(retry.reservation_id, first.reservation_id, "the retry must take a FRESH reservation");
+  assert.equal(retry.retry_of, first.reservation_id, "and name the reservation it repeats");
+  assert.equal(retry.retry_cause, "stream-without-result");
+  assert.equal(retry.retry_of_kind, "cross-project-verifier");
+
+  // The ledger is the SAME one, and every reservation — the retry's included — is counted and closed.
+  const ledger = fs.readFileSync(path.join(root, BUDGET_LEDGER_REL), "utf8").split("\n").filter((l) => l.trim() !== "").map((l) => JSON.parse(l));
+  const reserves = ledger.filter((l) => l.kind === "reserve");
+  const outcomes = ledger.filter((l) => l.kind === "outcome");
+  assert.equal(reserves.length, 3, "the retry is COUNTED: three reservations, not two");
+  assert.equal(outcomes.length, reserves.length, "every reservation — the retry's included — must be closed by an outcome");
+  assert.ok(reserves.some((r) => r.id === retry.reservation_id), "the retry's own reservation must be on the shared ledger");
+  assert.equal(new Set(reserves.map((r) => r.round)).size, 1, "all three reservations belong to the SAME round");
+
+  // ── (ii) the retry that ALSO failed is recorded as such and the cluster stays undetermined ────────
+  // ⛔ The verdict is the ENGINE's own (`verifierVerdict` on the very bytes the routine handed back), so
+  // "undetermined" is a reading of this failure, not a fixture's opinion.
+  assert.equal(retry.ok, false, "a retry that failed again must NOT be laundered into a clean pass");
+  assert.equal(retry.not_evaluated, "not-evaluated:uninstrumented-exit-1");
+  assert.equal(roundLine.not_evaluated, "not-evaluated:uninstrumented-exit-1", "the round's own summary must carry the loss, not hide it");
+  const real = verifierVerdict({ stdout: shape.stdout, stderr: "", status: shape.status });
+  assert.equal(real.verdict, "undetermined", "the engine maps these bytes to undetermined");
+  assert.equal(clusters.length, 1);
+  assert.equal(clusters[0].verifier_verdict, "undetermined", "the persisted cluster must read undetermined");
+  assert.equal(clusters[0].confirmed, false, "and it must NOT be confirmed");
+});
+
+test("AC2(b): the retryable classes are exactly OSD's, and a refusal at the RETRY's own reservation is not retried", async () => {
+  assert.deepEqual([...RETRYABLE_CALL_FAILURES], ["no-stdout", "stream-without-result", "api-error-event"]);
+  for (const s of SHAPES) {
+    assert.equal(RETRYABLE_CALL_FAILURES.includes(s.class), s.retryable, `${s.name}: retryability is the list's, not a second predicate`);
+  }
+
+  // ── the ledger refuses the retry: the ordinary BUDGET_REFUSED path, no third spawn ────────────────
+  // Cap 2: the investigator takes one and the verifier's FIRST attempt takes the other; the RETRY's own
+  // reservation is then refused, which must surface as the round's ordinary budget failure — never as a
+  // silent second call nobody granted.
+  const shape = SHAPES.find((s) => s.name === "no-stdout");
+  const { fact, seen, roundLine } = await roundWithVerifierShape(shape, { cfgOver: { maxModelCallsPer24h: 2 } });
+  assert.equal(fact.state, "failed", "a refused reservation must not be reported as a completed round");
+  assert.match(fact.reason, /BUDGET_REFUSED:BUDGET_24H/, "the refusal cause must be named, not inferred");
+  assert.equal(seen.length, 2, "the refused retry must NOT have spawned a subprocess");
+  assert.equal(roundLine, undefined, "a round that never reached an outcome writes no round line");
+});
+
+test("AC3: a non-retryable class is NOT retried — the retry is bounded to the classes it is meant for", async () => {
+  for (const name of ["truncated-json", "clean-named-failure", "unclassified-plain-text", "killed-by-timeout"]) {
+    const shape = SHAPES.find((s) => s.name === name);
+    const { fact, seen, roundLine } = await roundWithVerifierShape(shape);
+    assert.equal(fact.state, "verified", `${name}: the round completes (${fact.reason})`);
+    assert.equal(seen.length, 2, `${name}: investigator + verifier ONLY — a retry here would spend a reservation on a call that already accounted for itself`);
+    assert.equal(roundLine.calls.length, 2, name);
+    assert.equal(roundLine.calls[1].call_failure, shape.class, name);
+    assert.equal(roundLine.calls[1].not_evaluated, shape.not_evaluated, name);
+    assert.equal(roundLine.calls[1].retry_of, undefined, `${name}: no retry record may exist`);
+  }
+});
+
+test("AC2(c): the round reads its caps from the config it is handed, and this task changed no budget value", () => {
+  // The caps are READ, not hardcoded (硬规则 4 推论二: a literal that means "unlimited on this host" is a
+  // host-dependent constant). Pinning the shape here keeps a future hardcode from passing silently.
+  // ⛔ The numbers below are THIS workspace's `.quay/config.yml` `cross_project_dogfood:` section, pasted
+  // in the task body byte-identical to before the task. If a future change to this routine's retry path
+  // moved a ceiling, this pin is where it would show up.
+  const section = (calls, usd) => ({
+    enabled: true, interval: "interval:360m",
+    source_projects: [{ name: "quay-self-usage", root: "/data/home/yale/work/quay", enabled: true }],
+    max_projects_per_round: 2, max_records_per_file: 60, max_file_bytes: 4194304, max_artifact_bytes_per_project: 8388608,
+    investigator_max_turns: 30, verifier_max_turns: 12, refutation_max_turns: 10, max_clusters_verified: 3,
+    max_wall_ms: 1800000, max_model_calls_per_24h: calls, max_usd_per_24h: usd, file_confirmed: true,
+  });
+  const read = parseCrossProjectDogfoodSection(section(60, 15));
+  assert.equal(read.error, null);
+  assert.equal(read.config.maxModelCallsPer24h, 60);
+  assert.equal(read.config.maxUsdPer24h, 15);
+
+  // Negative control: the value must TRACK the section, so a different number is a different reading.
+  const other = parseCrossProjectDogfoodSection(section(7, 3));
+  assert.equal(other.config.maxModelCallsPer24h, 7);
+  assert.equal(other.config.maxUsdPer24h, 3);
 });
