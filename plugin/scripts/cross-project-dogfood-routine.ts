@@ -1015,6 +1015,18 @@ export async function runCrossProjectDogfood(root: string, opts: CrossProjectDog
   }
 
   // ── ⑤ DEDUP against the EXISTING Portfolio, then INGEST / FILE ───────────────────────────────────
+  // ⛔ ORDER MATTERS: the cluster lines go on the carrier BEFORE the Portfolio is asked to resolve
+  // their `record_id`s. `ingestFinding` resolves `origin_ref` by READING the record out of this carrier,
+  // so ingesting first asks the Portfolio to confirm a finding that does not exist yet — the same shape
+  // OSD's own round avoids by appending its clusters before calling `ingestRoundClusters`. Measured
+  // 2026-10-13: every confirmed cluster was refused with
+  // `ORIGIN_REF_UNRESOLVED:<id>-names-no-record-in-.quay/cross-project-dogfood-findings.jsonl`.
+  if (clusterRecords.length > 0) appendCarrierRecords(carrierPath, clusterRecords);
+  // ⛔ The cluster lines are now IMMUTABLE origin records (they had to be on the carrier first), so what
+  // happened to each one — duplicate / skipped scope / ingested — is recorded on the round line's
+  // `ingestion` array, the way OSD records its own ingestion outcomes. Writing the outcome back onto a
+  // line that is already on disk would silently do nothing.
+  const ingestion: Record<string, unknown>[] = [];
   const filings: Record<string, unknown>[] = [];
   let dedupView: Record<string, unknown> = { checked: false };
   if (confirmedRows.length > 0) {
@@ -1036,6 +1048,7 @@ export async function runCrossProjectDogfood(root: string, opts: CrossProjectDog
         // saw it".
         if (entry.scope !== "quay_generic") {
           entry.portfolio = { written: false, duplicate_of: null, skipped: `scope:${String(entry.scope)}-is-never-a-Quay-Portfolio-row` };
+          ingestion.push({ cluster: entry.cluster, record_id: entry.record_id, source_project: entry.source_project, confirmed: true, written: false, duplicate_of: null, skipped: entry.portfolio.skipped, filed: null });
           continue;
         }
         // ⛔ The dedup decision is the Portfolio module's OWN `findDuplicate` — a second matcher here would
@@ -1044,6 +1057,7 @@ export async function runCrossProjectDogfood(root: string, opts: CrossProjectDog
         const dup = read.ok === true ? portfolio.findDuplicate(existing, { components, claim }) : null;
         if (dup !== null) {
           entry.portfolio = { written: false, duplicate_of: dup.id ?? dup.finding_id ?? null, reason: "duplicate" };
+          ingestion.push({ cluster: entry.cluster, record_id: entry.record_id, source_project: entry.source_project, confirmed: true, written: false, duplicate_of: entry.portfolio.duplicate_of, skipped: null, filed: null });
           continue;
         }
         const ingest = portfolio.ingestFinding(root, {
@@ -1061,25 +1075,27 @@ export async function runCrossProjectDogfood(root: string, opts: CrossProjectDog
           domain_reason: null,
         });
         entry.portfolio = { written: ingest.ok === true, finding_id: ingest.ok === true ? String(entry.record_id) : null, duplicate_of: null, reasons: Array.isArray(ingest.reasons) ? ingest.reasons : [] };
+        let filed: Record<string, unknown> | null = null;
         if (cfg.fileConfirmed && ingest.ok === true) {
-          const filed = await fileConfirmedTask(root, opts, entry, evidenceIndex);
+          filed = await fileConfirmedTask(root, opts, entry, evidenceIndex);
           entry.filed_task = filed;
           filings.push({ cluster: entry.cluster, record_id: entry.record_id, ...filed });
         }
+        ingestion.push({ cluster: entry.cluster, record_id: entry.record_id, source_project: entry.source_project, confirmed: true, written: ingest.ok === true, duplicate_of: null, skipped: null, reasons: entry.portfolio.reasons, filed: filed === null ? null : { id: filed.id, ok: filed.ok, reason: filed.reason } });
       }
     }
   }
 
   appendCarrierRecords(carrierPath, [
-    ...clusterRecords,
     {
       kind: "dogfood-round", round_id: round, invoked_by: invokedBy, ts: new Date(now()).toISOString(),
       ...base, ...projectsView, ...modelCalls(callRecords),
       hypotheses: hypotheses.length, clusters: clusters.length, verified: selected.length,
       confirmed: confirmedRows.length,
       refuted: clusterRecords.filter((c) => c.refutation_verdict === "refuted").length,
-      duplicates: clusterRecords.filter((c) => ((c.portfolio as { duplicate_of?: unknown } | null)?.duplicate_of ?? null) !== null).length,
+      duplicates: ingestion.filter((r) => r.duplicate_of !== null && r.duplicate_of !== undefined).length,
       dedup: dedupView,
+      ingestion,
       filed: filings,
       scope_split: {
         quay_generic: clusterRecords.filter((c) => c.scope === "quay_generic").length,
@@ -1089,7 +1105,7 @@ export async function runCrossProjectDogfood(root: string, opts: CrossProjectDog
     },
   ]);
   writeLastRunStamped(lastRunPath, CROSS_PROJECT_DOGFOOD_NAME, now(), invokedBy);
-  return fact("verified", { ...base, ...projectsView, ...modelCalls(callRecords), hypotheses: hypotheses.length, clusters: clusters.length, confirmed: confirmedRows.length, duplicates: clusterRecords.filter((c) => ((c.portfolio as { duplicate_of?: unknown } | null)?.duplicate_of ?? null) !== null).length, filed: filings.map((f) => f.id ?? null) }, null);
+  return fact("verified", { ...base, ...projectsView, ...modelCalls(callRecords), hypotheses: hypotheses.length, clusters: clusters.length, confirmed: confirmedRows.length, duplicates: ingestion.filter((r) => r.duplicate_of !== null && r.duplicate_of !== undefined).length, filed: filings.map((f) => f.id ?? null) }, null);
 }
 
 /** The task body for a confirmed cross-project finding. It carries its OWN provenance — which round,

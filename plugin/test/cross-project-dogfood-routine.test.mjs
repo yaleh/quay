@@ -501,6 +501,13 @@ function makePortfolio({ existing = [], failIngest = false } = {}) {
         return r.duplicate_of === null && setEq(r.components, q.components) && norm(r.claim) === norm(q.claim);
       }) ?? null,
       ingestFinding: (root, input) => {
+        // ⛔ ORDERING CONTRACT, enforced rather than assumed: the REAL module resolves `origin_ref` by
+        // reading the record out of the round's carrier, so an ingest that arrives before its cluster
+        // line is on that carrier is refused with ORIGIN_REF_UNRESOLVED — measured 2026-10-13. A stub
+        // that only recorded the call would not notice the two being swapped.
+        const carrier = path.join(root, CARRIER_REL);
+        const present = fs.existsSync(carrier) && fs.readFileSync(carrier, "utf8").includes(`"record_id":"${input.finding_id}"`);
+        if (!present) return { ok: false, reasons: [`ORIGIN_REF_UNRESOLVED:${input.finding_id}-names-no-record-in-${CARRIER_REL}`] };
         ingestCalls.push(input);
         return failIngest ? { ok: false, reasons: ["REFUSED_BY_FIXTURE"] } : { ok: true, id: input.finding_id };
       },
@@ -523,7 +530,10 @@ async function runWithPortfolio(portfolio, { cfgOver = {}, hypotheses } = {}) {
     scratchRoot: tmpDir(),
     now: () => 1_800_000_000_000,
   });
-  return { fact, root, clusters: readCarrier(root).filter((r) => r.kind === "dogfood-cluster"), rounds: readCarrier(root).filter((r) => r.kind === "dogfood-round") };
+  const rounds = readCarrier(root).filter((r) => r.kind === "dogfood-round");
+  // The cluster lines are IMMUTABLE origin records (they must be on the carrier before the Portfolio is
+  // asked to resolve their record_ids), so what happened to each one lives on the round's `ingestion`.
+  return { fact, root, clusters: readCarrier(root).filter((r) => r.kind === "dogfood-cluster"), rounds, ingestion: rounds.at(-1)?.ingestion ?? [] };
 }
 
 test("AC4(a) a claim+components set already on the Portfolio is recognised as a duplicate and writes NO second row", async () => {
@@ -534,13 +544,13 @@ test("AC4(a) a claim+components set already on the Portfolio is recognised as a 
     outcome: "supported",
   }];
   const portfolio = makePortfolio({ existing });
-  const { fact, clusters, rounds } = await runWithPortfolio(portfolio, { hypotheses: [HYPOTHESIS] });
+  const { fact, clusters, rounds, ingestion } = await runWithPortfolio(portfolio, { hypotheses: [HYPOTHESIS] });
   assert.equal(fact.state, "verified", fact.reason);
   assert.equal(clusters.length, 1);
   assert.equal(clusters[0].confirmed, true, "the confirmation bar must have been met for this arm to test dedup at all");
   assert.equal(portfolio.ingestCalls.length, 0, "a duplicate must NOT reach the Portfolio writer");
-  assert.equal(clusters[0].portfolio.written, false);
-  assert.equal(clusters[0].portfolio.duplicate_of, "pf-existing-1", "the existing row must be NAMED");
+  assert.equal(ingestion[0].written, false);
+  assert.equal(ingestion[0].duplicate_of, "pf-existing-1", "the existing row must be NAMED");
   assert.equal(rounds.at(-1).duplicates, 1);
 
   // Negative control: the SAME run with a claim that differs by one word is NOT a duplicate ⇒ the writer
@@ -548,13 +558,13 @@ test("AC4(a) a claim+components set already on the Portfolio is recognised as a 
   const other = makePortfolio({ existing: [{ ...existing[0], claim: "a completely different claim about something else entirely" }] });
   const ctrl = await runWithPortfolio(other, { hypotheses: [HYPOTHESIS] });
   assert.equal(other.ingestCalls.length, 1, "a non-matching claim must reach the writer — otherwise the duplicate arm proves nothing");
-  assert.equal(ctrl.clusters[0].portfolio.written, true);
+  assert.equal(ctrl.ingestion[0].written, true);
 });
 
 test("AC4(b) a project_local claim is neither ingested nor filed, even when it is confirmed", async () => {
   const localHyp = { ...HYPOTHESIS, scope: "project_local", claim: "the project's own UI copy doubles a button label in its settings sheet", components: ["src/components/Settings.tsx"] };
   const portfolio = makePortfolio();
-  const { clusters, rounds } = await runWithPortfolio(portfolio, {
+  const { clusters, rounds, ingestion } = await runWithPortfolio(portfolio, {
     hypotheses: [localHyp],
     cfgOver: { fileConfirmed: true },
   });
@@ -562,7 +572,8 @@ test("AC4(b) a project_local claim is neither ingested nor filed, even when it i
   assert.equal(clusters[0].confirmed, true, "the scope guard, not the confirmation bar, is what this arm tests");
   assert.equal(clusters[0].scope, "project_local");
   assert.equal(portfolio.ingestCalls.length, 0, "a project-local item must never reach the Portfolio");
-  assert.equal(clusters[0].portfolio.written, false);
+  assert.equal(ingestion[0].written, false);
+  assert.match(String(ingestion[0].skipped), /^scope:project_local/);
   assert.equal(rounds.at(-1).filed.length, 0, "a project-local item must file NOTHING");
   assert.deepEqual(rounds.at(-1).scope_split, { quay_generic: 0, project_local: 1 });
 
@@ -571,6 +582,7 @@ test("AC4(b) a project_local claim is neither ingested nor filed, even when it i
   const p2 = makePortfolio();
   const r2 = await runWithPortfolio(p2, { hypotheses: [unstated] });
   assert.equal(r2.clusters[0].scope, "unstated");
+  assert.equal(r2.ingestion[0].written, false);
   assert.equal(p2.ingestCalls.length, 0, "an unreadable scope must not be treated as quay_generic (硬规则 3b)");
 });
 
