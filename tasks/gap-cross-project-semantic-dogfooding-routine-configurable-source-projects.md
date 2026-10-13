@@ -48,7 +48,7 @@ extra: {}
 - [ ] AC7 (leg 4 — landing): 承接者 = 常驻 promotion→worker→fan-in 链：一旦本任务自己落地把两个 filed sub-task 带上 develop，它们就能被正常晋级/派发/落地。Verification once it lands: `git log develop --merges --grep="task/gap-cross-project-dogfood-quay-self-usage-c1-a7wnts"` returns a commit — paste it there as a follow-up, not blocking this task.（待外部）
 
 ## Definition of Done
-- AC1-AC5 checked with pasted evidence; AC6 is this task's actual purpose and is load-bearing — see its own clause above for what happens if it cannot yet be satisfied.
+- AC1-AC6 checked with pasted evidence; AC7 (leg 4 — landing) is the load-bearing `（待外部）` follow-up, carried by the resident promotion→worker→fan-in chain once this task lands — AC7's own text names the verification command and its 承接者.
 - Report-only in exactly the sense OSD already is: no mechanical rule decides a finding; the hard budget and kill switch are enforced; `invoked_by` is never conflated between autonomous and coordinator-triggered.
 
 ## Evidence
@@ -181,7 +181,7 @@ and ingested none, refused with `ORIGIN_REF_UNRESOLVED` — see the two defects 
 
 Its ingestion line is the load-bearing half: `written: false`, `filed: null`, with the reason named (`n/a`), while a CONFIRMED cluster in the SAME round with scope `quay_generic` reached the Portfolio writer and the filing path. Nothing was filed for the project-local item, and the round says why rather than staying silent.
 
-### AC6 — the full chain, and exactly how far it got
+### AC6/AC7 — the full chain, and exactly how far it got
 **Legs 1-3 happened, for real, with no human naming the defect.** Round `cpd-3283888-1791886325773-a7wnts` ran at
 `2026-10-13T10:20:00.203Z` with `invoked_by: "resident-driver"` — the resident routine spec the Layer-1b table
 carries (`buildCrossProjectDogfoodRoutine` stamps `resident-driver` by construction; neither `--force`
