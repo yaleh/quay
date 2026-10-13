@@ -27,6 +27,7 @@ import path from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { isDirectEntry } from "./gate-script-base.ts";
 import {
+  ANCHOR_DESIRED_REL,
   DRIVER_KINDS,
   KNOWN_KINDS,
   anchorPaths,
@@ -38,6 +39,7 @@ import {
   kindDeclarationMap,
   readAnchorEnvelope,
   readAnchorPid,
+  readAnchorStateDetailed,
   readDeclarationSnapshot,
   readDesired,
   readKindStops,
@@ -282,6 +284,84 @@ export function readTakeoverRecord(root: string): TakeoverRecord | null {
   } catch { return null; }
 }
 
+// ── 接管时对「启动集合」的交叉核对（gap-anchor-takeover-silently-narrows-hosted-kinds-against-stale-desired-state）──
+//
+// 现场（2026-10-13，本 coordinator 自己的生产动作，逐字见任务体）：`--takeover <pid>` 是**唯一**一条
+// anchor 存活时换内核的路径，它不传 `--kinds` ⇒ 落到 `readDesired(root)?.kinds` —— 一个**可变**文件：
+// 任何更早的 `stop`/`drain`/`start` 都写过它，没有过期时刻，也没有任何东西拿它与「旧 anchor 此刻
+// **实际**在托管什么」核对。实测：`anchor-desired.json` 在 **93 分钟前**被一次未完成的诊断
+// `stop --kind worker` 写掉了 worker；接管那一刻，旧 anchor（pid 2919772）正在托管全部四个 kind。
+// 新 anchor 的启动行 `kinds=[promotion,outer,goal]` —— **worker 静默缺席**、零告警；直到操作者自己看见
+// 那行、手工 `quay driver start --kind worker` 为止（约 36s）。盯得不那么紧的交接里，这条缺口**完全
+// 没有报警**（`driver status` 的 `declaration=not-declared` 是一个**诚实**的读数，但它只是回读，不会
+// 主动说出「kind 集合相对一行日志之前**收窄**了」）。
+//
+// 修法（Plan 步 1）：接管时用 `--takeover <pid>` 读旧 anchor **最后发布的** `.quay/anchor.json.kinds`
+// —— 那是「此刻实际在跑什么」的**直接量**（硬规则 4b），与可变的期望态相互独立。比对，不同则具名告警。
+// ⚠️ 必须在等待旧 pid 退出**之前**取：旧 anchor 正常收尾会删掉 `.quay/anchor.json`（本文件末尾），
+//    等完再读只剩「没有这份快照」。
+//
+// ⛔ **只告警、不自动补拉**（Plan 步 2 的裁定）：`declaration=stopped-explicitly` 是一个**正确**的取值
+//    —— 操作员可能**就是要**停掉那个 kind（那正是 `updateDesired` 落停机记录的那条路）。自动补拉会把
+//    一次「有意停机」翻成「又跑起来了」，那是比这条缺口更坏的默认。⇒ warn-only；名字里的
+//    `dropped` 就是**静默收窄**的那一批，告警必须点名它们。
+
+/** 旧 anchor 最后发布的实际托管集合的**三态**读数（硬规则 3b：⛔ 「没核对成」不得与「核对过、一致」同形）。
+ *  `read` 的两个前提缺一不可：文件可读可解析**且**其 `pid` 就是 `--takeover` 点的那个 pid —— 否则那份
+ *  快照不是「旧 anchor 托管了什么」，而只是某个别人的陈旧回读面（拿它比对会**捏造**一条告警）。 */
+export type TakeoverHostedSnapshot =
+  | { state: "read"; kinds: DriverKind[] }
+  | { state: "not-evaluated"; reason: "missing" | "unreadable" | "malformed" | "pid-mismatch" };
+
+export function readTakeoverHostedSnapshot(root: string, takeoverPid: number): TakeoverHostedSnapshot {
+  const r = readAnchorStateDetailed(root);
+  if (!r.ok) return { state: "not-evaluated", reason: r.reason };
+  if (r.pid !== takeoverPid) return { state: "not-evaluated", reason: "pid-mismatch" };
+  return { state: "read", kinds: r.kinds };
+}
+
+/** 「旧 anchor 实际托管集合」与「接管者将要启动的集合」的差集。
+ *  `dropped` = 旧 anchor 在跑、接管后**不再起**的 kind —— **静默收窄**的就是这一批，告警必须点名。
+ *  `added`   = 接管者将起、旧 anchor 当时没在跑的 kind（相对先前是新增，也如实报出）。
+ *  ⛔ 顺序按 `KNOWN_KINDS`（⛔ 不按字典序）：日志行的可读性由声明的 kind 顺序定，⛔ 别让它随实现漂移。 */
+export function takeoverKindDivergence(
+  prevHosted: readonly DriverKind[],
+  nextInitial: readonly DriverKind[],
+): { dropped: DriverKind[]; added: DriverKind[] } {
+  const prev = new Set(prevHosted);
+  const next = new Set(nextInitial);
+  const order = (a: DriverKind, b: DriverKind): number => KNOWN_KINDS.indexOf(a) - KNOWN_KINDS.indexOf(b);
+  return {
+    dropped: [...prev].filter((k) => !next.has(k)).sort(order),
+    added: [...next].filter((k) => !prev.has(k)).sort(order),
+  };
+}
+
+/** 接管时的告警行；⛔ 没差异 ⇒ `null`（不加噪）。**warn-only**：本函数只产出这一行，⛔ 不启动任何 kind。 */
+export function takeoverKindsWarning(
+  prevHosted: readonly DriverKind[],
+  nextInitial: readonly DriverKind[],
+  takeoverPid: number,
+): string | null {
+  const { dropped, added } = takeoverKindDivergence(prevHosted, nextInitial);
+  if (dropped.length === 0 && added.length === 0) return null;
+  const parts: string[] = [];
+  if (dropped.length > 0) {
+    parts.push(
+      `${dropped.join(",")} NOT started — the takeover kind set (from ${ANCHOR_DESIRED_REL}, a MUTABLE file ` +
+      `written by any earlier start/stop/drain, with no expiry) is narrower than what pid=${takeoverPid} was actually hosting`,
+    );
+  }
+  if (added.length > 0) parts.push(`${added.join(",")} newly started (pid=${takeoverPid} was not hosting them)`);
+  return (
+    `WARNING takeover kind set differs from the old anchor's hosted set — starting=[${nextInitial.join(",")}] ` +
+    `hosted=[${prevHosted.join(",")}]: ${parts.join("; ")}. ` +
+    `No kind was auto-started (warn-only): an intentional stop (declaration=stopped-explicitly) is a CORRECT state ` +
+    `and auto-starting would silently undo it — re-add deliberately with \`quay driver start --kind <k>\`, ` +
+    `or pass --kinds to override the desired state`
+  );
+}
+
 /** 常驻 anchor 主体：托管若干 kind 的循环，reconcile 期望态，直到收到停机请求。 */
 export async function runAnchor(opts: AnchorOptions): Promise<number> {
   const logFile = opts.logFile ?? anchorPaths(opts.root).logFile;
@@ -304,6 +384,14 @@ export async function runAnchor(opts: AnchorOptions): Promise<number> {
   // anchor 随后退出 = 零 anchor。现在：预算按真实最坏退出派生（D2），且超预算**不等于**放弃接管——
   // 它降级为「继续等旧 pid 退出，一死就接管」（D3）。「放弃」只在观察窗内旧 pid 始终不退时发生，
   // 且必然留一条机器可读记录。
+  //
+  // ⚠️ **「旧 anchor 此刻实际托管什么」的直接量，必须在等待之前取**（本任务）：旧 anchor 正常收尾会
+  // 删掉自己的那份发布面（本函数末尾的收尾段）——时机与落点在这里是**耦合**的，等旧进程退出之后再去拿，
+  // 只剩下「没有这份快照」。
+  // ⛔ 它不是 `opts.kinds` / 期望态的回显：那是旧进程自己发布、与期望态**独立**的读数（硬规则 4b）。
+  const prevHosted: TakeoverHostedSnapshot | null = opts.takeoverPid
+    ? readTakeoverHostedSnapshot(opts.root, opts.takeoverPid)
+    : null;
   if (opts.takeoverPid) {
     const budgetMs = takeoverBudgetMs(shutdownGraceMs, opts.reconcileMs ?? 500);
     const waitT0 = Date.now();
@@ -420,6 +508,24 @@ export async function runAnchor(opts: AnchorOptions): Promise<number> {
   const initial = opts.kinds ?? readDesired(opts.root)?.kinds ?? [...KNOWN_KINDS];
   // 盘上没有期望态而我们给了初始集合 ⇒ 落盘，使后续 `start/stop --kind X` 有一个可读改的基底。
   if (readDesired(opts.root) === null) writeDesired(opts.root, initial, "driver-anchor:cold-start");
+
+  // ── 接管：启动集合不许**静默**窄于旧 anchor 实际托管的东西（见上面本任务的那段头注释）─────────────
+  // warn-only：⛔ 不因这条读数改 `initial`、⛔ 不补拉任何 kind（Plan 步 2）。上面 `prevHosted` 已在
+  // **等待之前**取好（旧 anchor 一退出就会删掉那份快照）。
+  if (opts.takeoverPid && prevHosted) {
+    if (prevHosted.state === "read") {
+      const warn = takeoverKindsWarning(prevHosted.kinds, initial, opts.takeoverPid);
+      if (warn) log(`${ts()} anchor: ${warn}`);
+    } else {
+      // 硬规则 3b：「没能交叉核对」是一个**独立取值**，⛔ 不与「核对过、一致」同形（后者走上面那条
+      // 静默路径）——否则「这次接管无从判断」就被伪装成「这次接管没问题」。⛔ 也不报成告警：它只是
+      // 「没有可以拿来比对的直接量」（旧锚没留下快照 / 那份快照不是它写的）。
+      log(
+        `${ts()} anchor: takeover kind set NOT cross-checked against the old anchor's hosted set (${prevHosted.reason}) — ` +
+        `starting=[${initial.join(",")}]; cannot tell whether that narrowed what pid=${opts.takeoverPid} was running`,
+      );
+    }
+  }
 
   // ── 内存包络读数（gap-driver-anchor-runs-without-host-derived-memory-envelope，Plan 步 2）─────────────
   // ⛔ 进程的 cgroup 归属在生命周期内不变 ⇒ 每趟 reconcile **不重读**（那会是 500ms 两次文件读的白烧）；

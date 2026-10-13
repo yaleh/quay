@@ -36,6 +36,7 @@ import { spawn } from "node:child_process";
 import { fileURLToPath } from "node:url";
 import {
   DRIVER_KINDS,
+  KNOWN_KINDS,
 } from "../scripts/driver-runtime.ts";
 import {
   oldAnchorWorstExitMs,
@@ -56,9 +57,11 @@ const HEARTBEAT_KIND = "outer";
 /** fake driver：导出的 `main(argv)` 是 anchor 经**既有入口**在进程内调用的那一个（与真 kind 同一条码路）。
  *  自写 `--pid-file`（pidSelf 语义：写者是驱动自己）并按 interval 追写 round 心跳，直到 anchor 请求停机。
  *  `FAKE_IGNORE_STOP=1` ⇒ 不响应停机（模拟「在飞 worker 无超时」那种无界收尾）⇒ 旧 anchor 会**drain 到
- *  有界宽限的边界**才退出——这正是 AC3 要的那个旧 anchor 形态。 */
-function fakeDriverSource() {
-  const spec = DRIVER_KINDS[HEARTBEAT_KIND];
+ *  有界宽限的边界**才退出——这正是 AC3 要的那个旧 anchor 形态。
+ *  `kind` 可覆盖（缺省 = 本文件既有用例用的 HEARTBEAT_KIND）：本任务的接管用例需要**两个** kind 才能
+ *  造出「旧 anchor 托管两个、期望态只剩一个」的收窄形态。 */
+function fakeDriverSource(kind = HEARTBEAT_KIND) {
+  const spec = DRIVER_KINDS[kind];
   const carrier = spec.carriers.find((c) => c.endsWith("-round.jsonl")) ?? spec.carriers[0];
   return `import fs from "node:fs";
 import path from "node:path";
@@ -71,7 +74,7 @@ export async function main(argv) {
   const pidFile = get("--pid-file");
   const interval = Number(get("--interval") ?? 150);
   if (pidFile) fs.writeFileSync(pidFile, String(process.pid) + "\\n", "utf8");
-  const ctl = registerKindStop(${JSON.stringify(HEARTBEAT_KIND)});
+  const ctl = registerKindStop(${JSON.stringify(kind)});
   const file = path.join(root, ".quay", ${JSON.stringify(carrier)});
   const ignoreStop = process.env.FAKE_IGNORE_STOP === "1";
   let round = 0;
@@ -85,21 +88,24 @@ export async function main(argv) {
 `;
 }
 
-function makeFixture(tag) {
+function makeFixture(tag, kinds = KINDS) {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), `anchor-takeover-${tag}-`));
   const scripts = path.join(root, "plugin", "scripts");
   fs.mkdirSync(scripts, { recursive: true });
   fs.mkdirSync(path.join(root, ".quay"), { recursive: true });
-  for (const kind of KINDS) fs.writeFileSync(path.join(scripts, DRIVER_KINDS[kind].driver), fakeDriverSource(), "utf8");
+  for (const kind of kinds) fs.writeFileSync(path.join(scripts, DRIVER_KINDS[kind].driver), fakeDriverSource(kind), "utf8");
   return root;
 }
 
-/** 起一个**真** anchor 进程（worktree 那份 driver-anchor.ts，⛔ 不经 `quay driver start` 的内核优选）。 */
-function spawnAnchor(root, extraArgs = [], extraEnv = {}) {
+/** 起一个**真** anchor 进程（worktree 那份 driver-anchor.ts，⛔ 不经 `quay driver start` 的内核优选）。
+ *  `kindsArg` 传空串 ⇒ **不生成 `--kinds`**：接管路径的缺陷只在「落到盘上期望态」时才存在（见本文件末尾
+ *  的那组用例），故那条路必须真的不传 `--kinds`。 */
+function spawnAnchor(root, extraArgs = [], extraEnv = {}, kindsArg = KINDS.join(",")) {
+  const kindArgs = kindsArg ? ["--kinds", kindsArg] : [];
   const child = spawn(
     process.execPath,
     ["--no-warnings", "--experimental-strip-types", ANCHOR_SCRIPT, "__anchor", "--root", root,
-      "--kinds", KINDS.join(","), "--reconcile-ms", "100", ...extraArgs],
+      ...kindArgs, "--reconcile-ms", "100", ...extraArgs],
     {
       stdio: ["ignore", "ignore", "pipe"],
       env: {
@@ -288,4 +294,135 @@ test("AC4 (D3) — 接管被放弃之后旧 pid 才退出 ⇒ 替换进程**接�
   await waitFor(() => fs.existsSync(hb), 20_000, "the taken-over anchor's heartbeat carrier");
   const m1 = fs.statSync(hb).mtimeMs;
   await waitFor(() => fs.statSync(hb).mtimeMs > m1, 20_000, "the taken-over anchor's loop to keep beating");
+});
+
+// ── 接管时「启动集合**静默窄于**旧 anchor 实际托管的集合」的交叉核对 ─────────────────────────────────
+//      gap-anchor-takeover-silently-narrows-hosted-kinds-against-stale-desired-state
+//
+// 现场（2026-10-13，本 coordinator 自己的生产动作）：`--takeover <pid>` 是**唯一**一条 anchor 存活时换
+// 内核的路径，它不传 `--kinds` ⇒ 落到 `.quay/anchor-desired.json`——一个**可变**文件，93 分钟前被一次
+// 未完成的诊断 `stop --kind worker` 写过。接管那一刻旧 anchor 正在托管全部四个 kind；新 anchor 的启动行
+// 是 `kinds=[promotion,outer,goal]`：**worker 静默缺席、零告警**，直到操作者自己看见那行。
+//
+// 判据（逐条可取假）：
+//   AC1/AC2  两侧不同 ⇒ `anchor.log` 上一条具名 WARNING（点名被丢的 kind + 两侧集合），且 **warn-only**
+//            ——被丢的 kind **真的没有被拉起**（直接量：它的 round 载体不存在；回读面 `kinds` 也不含它）。
+//            ⚠️ 改前这条路上**一行都不打**（那正是事故）⇒ 本用例是 RED→GREEN 的承重测试。
+//   AC3      两侧一致 ⇒ ⛔ 无 WARNING、⛔ 也无「未核对」行；两个 kind 都照常起（对照：收窄用例只起一个）。
+//   AC3(3b)  「没能交叉核对」是一个**独立取值**：快照缺失 / pid 对不上 ⇒ 打的是「未核对」那行，
+//            ⛔ 不与「核对过、一致」同形（后者**不打任何行**）。直接 import 单测，⛔ 不起进程。
+
+/** 旧 anchor 的**发布面**夹具：一份 `.quay/anchor.json`（旧 anchor 每趟 reconcile 重写过无数次之后的
+ *  最后一份，`pid` = 旧 anchor）+ 一份陈旧的 `.quay/anchor-desired.json` + 那份陈旧期望态**为什么**少了
+ *  一个 kind 的停机记录。⛔ 这不是「再造一个 anchor」：本任务要的那条读数就是**旧进程自己的发布面**，
+ *  与接管者无关（硬规则 4b 的直接量）。
+ *
+ *  ⚠️ `stoppedKinds` 是**忠实性**的一半，⛔ 不是装饰：真实事故里那次 `stop --kind worker` **落了**一条
+ *  显式停机记录，于是既有的「脱离期望态且**没有**停机记录」那条日志对它**保持沉默** ⇒ 整场交接**一行
+ *  报警都没有**（这正是本任务要补的那个缺口）。夹具若省掉这条记录，改前的 anchor 会打那行『silently
+ *  dropped』日志 ⇒ AC1 的「改前静默」就变成了「改前有别的提示」，判据会失真。 */
+function seedHandoff(root, { desiredKinds, hostedKinds, oldPid, stoppedKinds = [], desiredAgeMin = 93 }) {
+  const at = new Date(Date.now() - desiredAgeMin * 60_000).toISOString();
+  fs.writeFileSync(
+    path.join(root, ".quay", "anchor-desired.json"),
+    JSON.stringify({ kinds: desiredKinds, opts: {}, updatedBy: "quay-driver-stop", updatedAt: at }, null, 2) + "\n",
+    "utf8",
+  );
+  fs.writeFileSync(
+    path.join(root, ".quay", "anchor.json"),
+    JSON.stringify({
+      pid: oldPid, startedAt: at, kinds: hostedKinds, host: "anchor",
+      bundle: null, takeover: null, declaration: {},
+    }) + "\n",
+    "utf8",
+  );
+  if (stoppedKinds.length > 0) {
+    const stops = {};
+    for (const k of stoppedKinds) stops[k] = { at, by: "quay-driver-stop" };
+    fs.writeFileSync(path.join(root, ".quay", "anchor-kind-stops.json"), JSON.stringify(stops, null, 2) + "\n", "utf8");
+  }
+}
+
+const roundCarrier = (kind) => {
+  const spec = DRIVER_KINDS[kind];
+  return spec.carriers.find((c) => c.endsWith("-round.jsonl")) ?? spec.carriers[0];
+};
+
+test("AC1/AC2 — 接管时启动集合**窄于**旧 anchor 实际托管的集合 ⇒ 具名 WARNING，且被丢的 kind 不被拉起（warn-only）", async (t) => {
+  const DROPPED = "worker";
+  const root = makeFixture("narrow", KNOWN_KINDS);
+  // 一个**真**进程充当「旧 anchor 的 pid」：新 anchor 要等它退出才起循环（双派发硬闸，⛔ 不绕过）。
+  const old = spawn("sleep", ["1"], { stdio: "ignore" });
+  // 事故形状（见 seedHandoff 的注释）：旧 anchor 实际托管**全部六个**；而 93 分钟前那次
+  // `stop --kind worker` 留下的期望态少了 worker，并**落了**一条停机记录 ⇒ 既有那条「脱离期望态且
+  // 没有停机记录」的通用日志对它保持沉默 —— 整场交接**一行报警都没有**。
+  const desired = KNOWN_KINDS.filter((k) => k !== DROPPED);
+  seedHandoff(root, { desiredKinds: desired, hostedKinds: KNOWN_KINDS, oldPid: old.pid, stoppedKinds: [DROPPED] });
+  // ⛔ 不传 `--kinds`：缺陷只在「落到盘上期望态」时存在，故这条用例必须真的走那条路。
+  const b = spawnAnchor(root, ["--takeover", String(old.pid)], {}, "");
+  t.after(() => { try { old.kill("SIGKILL"); } catch { /* gone */ } killAll(root, [b.pid]); fs.rmSync(root, { recursive: true, force: true }); });
+
+  await waitForLoopRunning(root, "outer");
+  await waitFor(() => /WARNING takeover kind set differs/.test(logOf(root)), 20_000, "the narrowing warning to be logged");
+
+  const log = logOf(root);
+  assert.match(log, new RegExp(`${DROPPED} NOT started`), `AC2：必须点名被**静默丢掉**的 kind（stderr: ${b.stderrText}）:\n${log.slice(-2000)}`);
+  assert.match(log, /hosted=\[promotion,worker,outer,quality,meta,goal\]/, "并给出旧 anchor **实际**托管的集合（那正是直接量）");
+  assert.match(log, new RegExp(`starting=\\[${desired.join(",")}\\]`), "以及本次将要启动的集合（两侧都在 ⇒ 差异可判，⛔ 不是一个笼统的「不一样」）");
+  assert.match(log, /warn-only/, "并说明**没有**自动补拉及其理由（有意停机是一个正确状态）");
+  // 忠实性控制：既有那条通用日志对 worker 必须**沉默**（它有显式停机记录）⇒ 修复前这里是零报警。
+  // ⛔ 断言它缺席，正是为了证明本用例的红不是「原来就有别的提示」造成的（硬规则 4：可取的假）。
+  assert.ok(!/absent from the desired set/.test(log), `既有那条通用日志对 worker 必须沉默（它有停机记录）:\n${log.slice(-2000)}`);
+
+  // warn-only 的**直接量**（⛔ 不是「日志说没起」）：被丢的 kind 的 round 载体从未出现，回读面也不含它。
+  assert.equal(fs.existsSync(path.join(root, ".quay", roundCarrier(DROPPED))), false, "被丢的 kind ⛔ 不得被自动补拉");
+  await waitFor(() => Array.isArray(anchorJson(root)?.kinds), 20_000, "the replacement's anchor.json");
+  assert.deepEqual(anchorJson(root).kinds, desired, "回读面 `kinds` 与日志一致（⛔ 不是两处各说一套）");
+});
+
+test("AC3 — 接管时启动集合与旧 anchor 实际托管的一致 ⇒ ⛔ 无 WARNING、⛔ 无「未核对」行，六个 kind 都起（对照）", async (t) => {
+  const root = makeFixture("agree", KNOWN_KINDS);
+  const old = spawn("sleep", ["1"], { stdio: "ignore" });
+  seedHandoff(root, { desiredKinds: KNOWN_KINDS, hostedKinds: KNOWN_KINDS, oldPid: old.pid });
+  const b = spawnAnchor(root, ["--takeover", String(old.pid)], {}, "");
+  t.after(() => { try { old.kill("SIGKILL"); } catch { /* gone */ } killAll(root, [b.pid]); fs.rmSync(root, { recursive: true, force: true }); });
+
+  await waitForLoopRunning(root, "outer");
+  await waitForLoopRunning(root, "worker");
+  const log = logOf(root);
+  assert.ok(!/WARNING takeover/.test(log), `AC3：一致 ⇒ ⛔ 不得告警（假阳性）:\n${log.slice(-2000)}`);
+  assert.ok(!/NOT cross-checked/.test(log), "AC3：快照可读且 pid 对得上 ⇒ ⛔ 也不得走「未核对」那条独立取值（二者不同形）");
+  // 对照：收窄用例丢了一个 kind，这里六个都起 ⇒ 「告警的有无」确实随集合差异变，⛔ 不是恒不打/恒打的空转。
+  assert.equal(fs.existsSync(path.join(root, ".quay", roundCarrier("worker"))), true, "一致路径上 worker 照常被拉起");
+});
+
+test("AC3(3b) — 「没能交叉核对」是**独立取值**：快照缺失 / pid 对不上 / 读不懂，⛔ 不与「核对过、一致」共用输出", async (t) => {
+  // ⚠️ 动态 import：本文件在**改前**必须仍可加载（否则整文件 import 失败会把 RED 混进其它用例，RED 就
+  //    不再可归因于「静默丢弃」这件事），故新符号只在运行时取。
+  const { readTakeoverHostedSnapshot, takeoverKindDivergence, takeoverKindsWarning } = await import("../scripts/driver-anchor.ts");
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "anchor-takeover-xcheck-"));
+  t.after(() => fs.rmSync(root, { recursive: true, force: true }));
+  fs.mkdirSync(path.join(root, ".quay"), { recursive: true });
+
+  // ① 没有快照 ⇒ not-evaluated/missing（⛔ 不是「read + 空集合」——那会与「旧 anchor 什么都没托管」同形）。
+  assert.deepEqual(readTakeoverHostedSnapshot(root, 1234), { state: "not-evaluated", reason: "missing" });
+  // ② 快照在、但 pid 对不上 ⇒ not-evaluated/pid-mismatch（⛔ 拿别人的陈旧回读面比对会**捏造**一条告警）。
+  fs.writeFileSync(path.join(root, ".quay", "anchor.json"), JSON.stringify({ pid: 999, kinds: ["outer", "goal"] }), "utf8");
+  assert.deepEqual(readTakeoverHostedSnapshot(root, 1234), { state: "not-evaluated", reason: "pid-mismatch" });
+  // ③ 快照在且 pid 对得上 ⇒ read，且拿到的就是旧 anchor 的集合。
+  assert.deepEqual(readTakeoverHostedSnapshot(root, 999), { state: "read", kinds: ["outer", "goal"] });
+  // ④ 不可解析 ⇒ malformed（⛔ 不与 missing 同形）。
+  fs.writeFileSync(path.join(root, ".quay", "anchor.json"), "{not json", "utf8");
+  assert.deepEqual(readTakeoverHostedSnapshot(root, 999), { state: "not-evaluated", reason: "malformed" });
+
+  // ⑤ 差集的两半 + 顺序按 KNOWN_KINDS（promotion,worker,outer,quality,meta,goal；⛔ 不按字典序）+ 一致 ⇒ null。
+  assert.deepEqual(
+    takeoverKindDivergence(["goal", "outer"], ["promotion"]),
+    { dropped: ["outer", "goal"], added: ["promotion"] },
+    "两侧都有差：dropped 按 KNOWN_KINDS 顺序（outer 在 goal 之前），added 是被新起的那个",
+  );
+  assert.deepEqual(takeoverKindDivergence(["outer"], ["outer", "goal"]), { dropped: [], added: ["goal"] });
+  assert.deepEqual(takeoverKindDivergence(["outer", "goal"], ["outer", "goal"]), { dropped: [], added: [] });
+  assert.equal(takeoverKindsWarning(["outer", "goal"], ["outer", "goal"], 42), null, "一致 ⇒ null（⛔ 不加噪）");
+  assert.match(takeoverKindsWarning(["outer", "goal"], ["outer"], 42) ?? "", /goal NOT started/, "差异 ⇒ 点名被丢的 kind");
 });
