@@ -41,6 +41,7 @@ import {
   qualityGateRoutines,
   computeRoundRecord,
   runResidentQualityGateLoop,
+  diagnosticExcerpt,
 } from "../scripts/quality-gate-driver.ts";
 import { qualityRoundPath } from "../scripts/pool-quality-judge.ts";
 import { archReviewRoundPath, submissionLedgerPath } from "../scripts/architecture-review-cluster.ts";
@@ -797,4 +798,66 @@ test("AC3 — 立案路径经 quay-file-task 的机制查重；节流不读任�
   console.log(`AC3 grep — 节流模块里的任务库读取命中 ${dedupish.length} 行（期望 0）`);
   assert.equal(dedupish.length, 0, "⛔ 节流模块不得读任务库 ⇒ 结构上不可能是第二套查重");
   assert.ok(cluster.includes("SUBMISSION_LEDGER_REL"), "节流状态只在自己的提交台账里");
+});
+
+// ── gap-cross-project-dogfood-quay-self-usage-c1-a7wnts：失败面必须携带原始仪器输出 ───────────────
+// 轮的 claim：judge 打印非 JSON stdout 时，round 记 state=failed / 零判词，却只写一条【固定】reason，
+// 原始 stdout 被丢弃 ⇒ 失败不可诊断。修法：失败 reason 并入【单行、有界】的原始输出
+// （diagnosticExcerpt；与同函数 judge-exit 分支已把 stderr slice(0,200) 并入 reason 同形）。
+// ⛔ 三态语义不变（failed 仍 failed / not-evaluated 仍 not-evaluated）——只让失败【可诊断】。
+
+test("AC1 — diagnosticExcerpt：单行化 / 空输出显式标注 / 超长截断带计数", () => {
+  assert.equal(diagnosticExcerpt(""), "(empty output)", "空输出显式标注（空 ≠ 有内容）");
+  assert.equal(diagnosticExcerpt("   \n\t "), "(empty output)", "纯空白 = 空输出");
+  assert.equal(diagnosticExcerpt("a\nb\tc  d"), "a b c d", "多行/制表压成单行（⛔ 不撕开载体行）");
+  const long = "x".repeat(600);
+  const cut = diagnosticExcerpt(long);
+  assert.ok(cut.startsWith("x".repeat(500)), "截到缺省 max（500）");
+  assert.match(cut, /\+100 chars, truncated\)$/, "截断带剩余计数（输出其实很大不被误读成很小）");
+  assert.equal(diagnosticExcerpt(long, 0), "…(+600 chars, truncated)", "max 可注入（测试缝，判据能取假）");
+});
+
+test("AC1 — pool-quality-judge：judge 非 JSON stdout ⇒ failed/零判词 + 载体保留原始输出", async (t) => {
+  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "qg-repro-pool-"));
+  t.after(() => fs.rmSync(tmp, { recursive: true, force: true }));
+  const planCmd = ["node", fakePlanScript(tmp, true)];
+  const gateArgv = ["node", fakeGateGoScript(tmp)];
+  const MARKER = "I cannot produce a JSON array for this request.";
+  const badJudge = writeFixture(tmp, "fake-bad-judge.js", `process.stdout.write(${JSON.stringify(MARKER)});`);
+  const fact = await runPoolQualityJudge(tmp, planCmd, ["node", badJudge], gateArgv);
+  // claim 的形状部分仍成立（本任务不改三态）：state=failed、零判词。
+  assert.equal(fact.state, "failed", "读不懂 judge 输出 ⇒ failed（⛔ 非 verified）");
+  const rec = JSON.parse(fs.readFileSync(qualityRoundPath(tmp), "utf8").split("\n").filter((l) => l.trim()).pop());
+  assert.equal(rec.state, "failed");
+  assert.equal(rec.verdicts.length, 0, "零判词（与 claim 一致）");
+  // 缺陷已修：原始 stdout 随失败记录一起落盘（此前只有固定串，故本条在修复前必红）。
+  assert.match(rec.reason, /not a JSON array/, "保留既有前缀（下游 grep 不回归）");
+  assert.ok(rec.reason.includes(MARKER), "载体 reason 携带 judge 原始 stdout");
+  assert.ok(fact.reason.includes(MARKER), "返回的 Fact.reason 同形携带原始输出");
+});
+
+test("AC2 — architecture-review：judge 非 JSON stdout ⇒ failed + 载体保留原始输出", async (t) => {
+  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "qg-repro-arch-"));
+  t.after(() => fs.rmSync(tmp, { recursive: true, force: true }));
+  const { identityCmd, lineageCmd, deletionCmd, gateArgv, gapWorkerCmd } = archReviewCmd(tmp);
+  const MARKER = "<html>502 Bad Gateway</html>";
+  const badJudge = writeFixture(tmp, "fake-bad-arch-judge.js", `process.stdout.write(${JSON.stringify(MARKER)});`);
+  const fact = await runArchitectureReview(tmp, identityCmd, lineageCmd, deletionCmd, ["node", badJudge], gateArgv, true, Infinity, false, gapWorkerCmd);
+  assert.equal(fact.state, "failed");
+  const rec = JSON.parse(fs.readFileSync(archReviewRoundPath(tmp), "utf8").split("\n").filter((l) => l.trim()).pop());
+  assert.equal(rec.state, "failed");
+  assert.equal(rec.clusters.length, 0, "零判词（与 claim 一致）");
+  assert.match(rec.reason, /not a JSON array/);
+  assert.ok(rec.reason.includes(MARKER), "载体 reason 携带 judge 原始 stdout（修复前必红）");
+});
+
+test("AC2 — 同族失败面（硬规则 5b）：--plan 非 JSON stdout ⇒ not-evaluated 且携带原始输出", async (t) => {
+  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "qg-repro-plan-"));
+  t.after(() => fs.rmSync(tmp, { recursive: true, force: true }));
+  const MARKER = "plan: internal error, no JSON emitted";
+  const badPlan = writeFixture(tmp, "fake-bad-plan.js", `process.stdout.write(${JSON.stringify(MARKER)});`);
+  const fact = await runPoolQualityJudge(tmp, ["node", badPlan], null, null);
+  assert.equal(fact.state, "not-evaluated", "读不懂 --plan ⇒ not-evaluated（⛔ 非 verified）");
+  assert.match(fact.reason, /unparseable --plan output/);
+  assert.ok(fact.reason.includes(MARKER), "同一载体里的兄弟失败点也携带原始输出");
 });

@@ -170,6 +170,24 @@ export const ROUTINE_TIMEOUT_MS = 180_000;
  *  覆盖；测试经 env QUAY_TEST_QUALITY_GATE_DRIVER_ROUTINE_WATCHDOG_MS 或 --routine-watchdog 传小值。 */
 export const ROUTINE_WATCHDOG_MS_DEFAULT = Number(process.env.QUAY_TEST_QUALITY_GATE_DRIVER_ROUTINE_WATCHDOG_MS ?? 30 * 60_000);
 
+// ── 失败面诊断片段（gap-cross-project-dogfood-quay-self-usage-c1-a7wnts）───────────────────────
+
+/** 把仪器 / LLM judge 的原始 stdout 压成【单行、有界】的诊断片段，供失败 reason 携带。
+ *
+ *  why：读不懂输出的失败路径此前只写一条【固定】reason 串（如 `judge output not a JSON array`），
+ *  原始输出被丢弃 ⇒ operator 分不清失败到底是 markdown 围栏、prose 前言、空输出、还是「对象而非
+ *  数组」——`.quay/quality-round.jsonl` 里 33 条 failed 正是这条（同族证据：`unparseable --plan
+ *  output (exit 1)`）。**失败必须可诊断**：judge-exit 分支本就把 stderr slice(0,200) 并入 reason，
+ *  本 helper 让「读不懂」分支同形。
+ *  有界：先压单行（⛔ 防多行输出把载体行撕开），再截到 ≤max 字符（防一条巨型输出撑爆载体行）；
+ *  空输出显式标注（空 ≠ 有内容）；截断带 `+N chars`，使「输出其实很大」不被误读成「输出就这么点」。
+ *  ⛔ 不改变 state（failed 仍是 failed，not-evaluated 仍是 not-evaluated）——只让失败可诊断。 */
+export function diagnosticExcerpt(raw: unknown, max = 500): string {
+  const oneLine = String(raw ?? "").replace(/\s+/g, " ").trim();
+  if (oneLine === "") return "(empty output)";
+  return oneLine.length > max ? `${oneLine.slice(0, max)}…(+${oneLine.length - max} chars, truncated)` : oneLine;
+}
+
 // ── B17 · 判据消费纪律（纯机械审计）────────────────────────────────────────────────────────
 
 /** 缺省 judgment-consumer-check 命令（--json 机器面）。输出 = audit report JSON。 */
@@ -219,7 +237,7 @@ export async function runJudgmentConsumerCheck(root: string, cmd: string[] | nul
   }
   const value = parseJudgmentConsumerReport(r.stdout ?? "");
   if (value === null) {
-    return { name: "judgment-consumer-check", value: null, state: "not-evaluated", reason: `unparseable output (exit ${r.status})` };
+    return { name: "judgment-consumer-check", value: null, state: "not-evaluated", reason: `unparseable output (exit ${r.status}): ${diagnosticExcerpt(r.stdout)}` };
   }
   if (r.status === 1 || value.drift) {
     return { name: "judgment-consumer-check", value, state: "failed", reason: `drift: ${value.unfinished.length} judgment(s) without a wired consumer` };
@@ -340,7 +358,7 @@ export async function runPackagingHygiene(
   }
   const report = parsePackagingHygieneReport(r.stdout ?? "");
   if (report === null) {
-    return { name: "packaging-hygiene", value: null, state: "not-evaluated", reason: `unparseable output (exit ${r.status})` };
+    return { name: "packaging-hygiene", value: null, state: "not-evaluated", reason: `unparseable output (exit ${r.status}): ${diagnosticExcerpt(r.stdout)}` };
   }
   const value: PackagingHygieneFactValue = {
     mode: report.mode,
@@ -522,7 +540,7 @@ export async function runPoolQualityJudge(
   }
   const plan = parsePoolQualityPlan(planR.stdout ?? "");
   if (plan === null) {
-    return { name: "pool-quality-judge", value: null, state: "not-evaluated", reason: `unparseable --plan output (exit ${planR.status})` };
+    return { name: "pool-quality-judge", value: null, state: "not-evaluated", reason: `unparseable --plan output (exit ${planR.status}): ${diagnosticExcerpt(planR.stdout)}` };
   }
   const base: PoolQualityFactValue = {
     fired: plan.triggers.fired,
@@ -562,8 +580,9 @@ export async function runPoolQualityJudge(
     const parsed = JSON.parse(String(judgeR.stdout ?? "").trim());
     verdicts = Array.isArray(parsed) ? parsed : [];
   } catch {
-    writeRecord(failedQualityRoundRecord(root, plan.triggers.reasons, "judge output not a JSON array"));
-    return { name: "pool-quality-judge", value: base, state: "failed", reason: "judge output not a JSON array" };
+    const reason = `judge output not a JSON array: ${diagnosticExcerpt(judgeR.stdout)}`;
+    writeRecord(failedQualityRoundRecord(root, plan.triggers.reasons, reason));
+    return { name: "pool-quality-judge", value: base, state: "failed", reason };
   }
   // JS 聚合（单一实现 aggregateVerdicts——should-remove → remove-or-rescope 路由）。
   const agg = aggregateVerdicts(verdicts);
@@ -752,7 +771,7 @@ export async function runArchitectureReview(
   }
   const identity = parseDetectorJson<IdentityReportView>(identityR.stdout ?? "");
   if (identity === null) {
-    return { name: "architecture-review", value: null, state: "not-evaluated", reason: `unparseable identity-replication output (exit ${identityR.status})` };
+    return { name: "architecture-review", value: null, state: "not-evaluated", reason: `unparseable identity-replication output (exit ${identityR.status}): ${diagnosticExcerpt(identityR.stdout)}` };
   }
 
   // 2. P4 守卫谱系（必需）。
@@ -763,7 +782,7 @@ export async function runArchitectureReview(
   }
   const lineage = parseDetectorJson<LineageReportView>(lineageR.stdout ?? "");
   if (lineage === null) {
-    return { name: "architecture-review", value: null, state: "not-evaluated", reason: `unparseable guard-lineage output (exit ${lineageR.status})` };
+    return { name: "architecture-review", value: null, state: "not-evaluated", reason: `unparseable guard-lineage output (exit ${lineageR.status}): ${diagnosticExcerpt(lineageR.stdout)}` };
   }
 
   // 3. P1 删除闭包（候选构件由 identity 报告推导；无候选 ⇒ 空报告，跳过 spawn）。
@@ -777,7 +796,7 @@ export async function runArchitectureReview(
     }
     const parsed = parseDetectorJson<DeletionReportView>(deletionR.stdout ?? "");
     if (parsed === null) {
-      return { name: "architecture-review", value: null, state: "not-evaluated", reason: `unparseable deletion-closure output (exit ${deletionR.status})` };
+      return { name: "architecture-review", value: null, state: "not-evaluated", reason: `unparseable deletion-closure output (exit ${deletionR.status}): ${diagnosticExcerpt(deletionR.stdout)}` };
     }
     deletion = parsed;
   }
@@ -845,7 +864,7 @@ export async function runArchitectureReview(
     const parsed = JSON.parse(String(judgeR.stdout ?? "").trim());
     verdicts = Array.isArray(parsed) ? parsed : [];
   } catch {
-    const reason = "judge output not a JSON array";
+    const reason = `judge output not a JSON array: ${diagnosticExcerpt(judgeR.stdout)}`;
     writeRecord(buildArchReviewRoundRecord({
       round: readCurrentRound(root),
       judgedAt: new Date().toISOString(),
@@ -862,7 +881,7 @@ export async function runArchitectureReview(
   const round = readCurrentRound(root);
   const merged: ArchReviewClusterVerdict[] = mergeClusterVerdicts(clusters, verdicts, judgedAt, round);
   if (merged.length === 0) {
-    const reason = "judge produced no valid cluster verdicts";
+    const reason = `judge produced no valid cluster verdicts: ${diagnosticExcerpt(judgeR.stdout)}`;
     writeRecord(buildArchReviewRoundRecord({
       round, judgedAt, state: "failed", triggerReasons: trigger.reasons, clusters: [], reason,
     }));
