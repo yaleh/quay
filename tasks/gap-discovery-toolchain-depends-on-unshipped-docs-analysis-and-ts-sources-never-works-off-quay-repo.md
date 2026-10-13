@@ -155,6 +155,23 @@ What landed:
 
 Also recorded so it is not re-discovered: the two instruments' entry guards are URL-equality (`import.meta.url === pathToFileURL(process.argv[1]).href`), which is (i) why the engine may not be esbuild-bundled and (ii) itself crashes under `node -e` (argv[1] undefined). They ship verbatim, so this does not bite the artifact; it is noted rather than changed, since these files are outside this task's declared Touches.
 
+### Packaging-fixture fallout of the fail-closed engine guard (worker round 2, 2026-10-13)
+
+The first round exited-not-landed on the FAN-IN SUITE (not on any of the ACs above): 15 reds, all in the three tests that assemble the artifact from a THROWAWAY STUB REPO — `packages/quay/test/npm-pack-e2e.test.mjs` (11), `plugin/test/shipped-shell-reachability.test.mjs` (4), `plugin/test/shipped-set.test.mjs` (skipped, its `requireArtifact` skips on a build error). All 15 shared one cause:
+
+```
+build-plugin-dist failed: build-plugin-dist: 3 discovery routine manifest(s) found but
+  /tmp/<stub>/docs/analysis is missing — the engine's bundled deps cannot be derived
+```
+
+The stubs mirror "the real plugin/ tree plus the real build inputs" (their own words) but copied only `packages/quay/{scripts,src}`, `scripts`, `plugin/` — never `docs/analysis`, which was NOT a build input when they were written. `plugin/` carries the three routines, so `scanDiscoveryEngineManifests` now finds 3 manifests and the new fail-closed guard fires. **The copy, not the guard, was incomplete** — the guard is what makes the packaging single-source and must not be weakened to accommodate a stale fixture.
+
+Fix (all four files added to `## Touches`):
+- the three stubs now also copy `docs/analysis` (`makePublishRepo` ×2, `makeTempPackageCopy` ×1) — same shape as the existing `copyVersionGateInputs` in `npm-pack-e2e.test.mjs`;
+- `plugin/shipped-set-baseline.json` **re-anchored** from a real artifact's own reading (`shipped-set-rules.ts --reanchor ... --why "…"`, never hand-fitted): the artifact now carries the engine (8 `.mjs` + 5 prompt data files) plus the 2 dist bundles the engine names, so `shipped.files` 266 → 281 (exactly +15); `shills` unchanged (7345 — the engine is `.mjs`, no `.sh`), so the ratchet's three axes stay 0.
+
+Verified this round (worktree, all three files green): `npm-pack-e2e` 11/11, `shipped-shell-reachability` 8/8, `shipped-set` 10/10.
+
 ## Touches
 - tasks/gap-discovery-toolchain-depends-on-unshipped-docs-analysis-and-ts-sources-never-works-off-quay-repo.md
 - packages/quay/scripts/build-plugin-dist.mjs
@@ -163,6 +180,10 @@ Also recorded so it is not re-discovered: the two instruments' entry guards are 
 - plugin/scripts/arch-discovery-routine.ts
 - docs/analysis/arch-hypothesis-generation.mjs
 - docs/analysis/arch-discovery-space.mjs
+- packages/quay/test/npm-pack-e2e.test.mjs
+- plugin/test/shipped-set.test.mjs
+- plugin/test/shipped-shell-reachability.test.mjs
+- plugin/shipped-set-baseline.json
 
 ## Blocker
 
