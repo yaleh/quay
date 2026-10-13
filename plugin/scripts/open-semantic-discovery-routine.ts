@@ -256,8 +256,24 @@ export const DEFAULT_TASK_LOG_CONTEXT_LIMIT = 50;
 export const INVESTIGATOR_TOOLS = "Read,Grep,Glob";
 /** The investigator's internal turn budget when it HAS tools. It is a stated module constant rather than a
  *  config key because the config's declared keys are the operator's budget surface; this bounds what
- *  happens INSIDE one already-counted call. `investigator_max_turns` in the config overrides it. */
-export const DEFAULT_INVESTIGATOR_MAX_TURNS = 12;
+ *  happens INSIDE one already-counted call. `investigator_max_turns` in the config overrides it.
+ *
+ *  ⛔ RE-DERIVED FROM THE FRESH CORPUS (task gap-osd-resident-round-never-autonomously-confirms-fix-
+ *  attribution-and-call-failed-retry, Plan item 1) — the value was 12 on the 10-sample corpus of
+ *  2026-10-13T00:25Z, which is BELOW every completed investigator call since. Persisted distribution of
+ *  ANSWERED (`not_evaluated:null`) tool-reading calls over every `kind:"scan-round"` line in
+ *  `.quay/open-semantic-discovery-findings.jsonl` at 2026-10-13T15:30Z (`num_turns`, the CLI's own unit):
+ *      investigator         n=10  [16, 17, 20, 23, 23, 23, 23, 24, 26, 29]   p100 = 29
+ *      shadow-investigator  n=13  [11, 13, 13, 16, 17, 18, 19, 19, 22, 23, 24, 24, 25]   p100 = 25
+ *      verifier             n=8   [13, 13, 14, 14, 14, 16, 17, 21]          ← n<10 ⇒ KEPT (see below)
+ *      refuter              n=4   [9, 24, 35, 44]                            ← n<10 ⇒ KEPT
+ *  This ONE constant bounds BOTH investigator-family arms, so its value is the p100 of the pooled
+ *  investigator-family population (n=23) — which is the investigator's own 29.
+ *  ⛔ WHY A CAP THE CALLS ALREADY EXCEED IS STILL WORTH FIXING: the cap is not currently the binding
+ *  constraint (calls complete at 16-29 turns under a nominal 12), but the cap is STATED TO THE MODEL —
+ *  `turnReserveDirective` tells it «the cap is HARD … stop calling tools by turn 10» — so a 12 against a
+ *  measured p100 of 29 makes the prompt lie about the budget it is actually running under. */
+export const DEFAULT_INVESTIGATOR_MAX_TURNS = 29;
 /** The blind investigator's turn budget: `--tools ""` ⇒ nothing to iterate on ⇒ ONE turn, exactly as the
  *  discovery-method reflection seam documents its own. Kept because the controlled experiments of the P2
  *  task still want the tool-less mode — as an opt-in, never as this routine's production default. */
@@ -294,7 +310,17 @@ export const NOVELTY_TOOLS = "Read,Grep";
 // the refuter's OWN answered sample count (1) is below the ten AC3 requires before a per-step budget may
 // be moved off its current value. Lowering or raising the FIRST budget on one sample would be the guess
 // AC3 forbids; spending ONE extra counted call instead is a measurement-backed choice.
-export const DEFAULT_REFUTATION_RETRY_MAX_TURNS = 26;
+//
+// ⛔ RE-DERIVED ON THE FRESH CORPUS (task gap-osd-resident-round-never-autonomously-confirms-fix-
+// attribution-and-call-failed-retry, Plan item 1). The n=11 population above was 26, and the value was
+// read straight off it. The SAME population, re-measured at 2026-10-13T15:30Z, is n=35 and its p100 is 44
+// — i.e. the retry budget of 26 no longer «fits EVERY measured completed tool-reading call on this pin»:
+//     investigator [16,17,20,23,23,23,23,24,26,29]  shadow-investigator [11,13,13,16,17,18,19,19,22,23,24,24,25]
+//     verifier [13,13,14,14,14,16,17,21]             refuter [9, 24, 35, 44]
+// The refuter's OWN three retry-budget calls (cap 26 — the retry is visible on the record as
+// `budget_retry:true`) needed 24, 35 and 44 turns, so TWO OF THE THREE exceeded the retry budget itself.
+// 44 is the pooled p100 (the same stated percentile as before), pooled n=35.
+export const DEFAULT_REFUTATION_RETRY_MAX_TURNS = 44;
 
 // ── the ANSWER RESERVE (task gap-open-semantic-discovery-investigator-exits-before-hypotheses-zero-semantic-output) ──
 // THE DEFECT THIS CLOSES. In production the first two resident rounds each recorded `exit 1`, `turns: 13`
@@ -1103,6 +1129,331 @@ export function refutationUndeterminedCause(input: {
   // Everything else — a row with no verdict and no cause the vocabulary names — is an answer that could
   // not be read. Fail-closed toward «we do not know», never toward «nothing found».
   return "unparseable";
+}
+
+// ── THE PER-CLUSTER ATTRIBUTION JOIN + THE RESIDENT-ROUND DoD ─────────────────────────────────────────
+// THE DEFECT THIS CLOSES (task gap-osd-resident-round-never-autonomously-confirms-fix-attribution-and-
+// call-failed-retry, Plan items 3-4). A round's `confirmed:0` was a ROUND-level fact with no per-cluster
+// explanation: the refutation fields say why the REFUTER did not settle a cluster, but for a cluster the
+// VERIFIER never supported the refuter's `not-run` is a *consequence*, not a cause — and nothing on the
+// record named the verifier's own failure as the thing that BLOCKED the cluster. So "the mechanism worked
+// and correctly found nothing confirmable this round" and "the mechanism failed to judge" were isomorphic
+// on the carrier (硬规则 3b) — which is exactly the reading a coordinator auditing `confirmed:0` needs.
+//
+// ⛔ ONE PLACE, TWO READERS (硬规则 5b). `clusterAttribution` is the ONLY producer of the per-cluster
+// reading; the round's `attribution` block and the `--report` surface are pure VIEWS of the blocks it
+// wrote, so a cluster-level verdict and a round-level rate can never disagree about the same cluster.
+// ⛔ THE GOVERNING CONSTRAINT IS UNCHANGED: `undetermined` is never confirmed. Nothing here can raise
+// `confirmed` — it only NAMES why a cluster that was not confirmed was not.
+export const CLUSTER_BLOCKING_STEPS = ["none", "verifier", "refuter"] as const;
+export type ClusterBlockingStep = (typeof CLUSTER_BLOCKING_STEPS)[number];
+
+export interface ClusterAttribution {
+  /** The cluster reached a judgement the mechanism can defend: confirmed, refuted, or undetermined because
+   *  the refuter READ the code and the code did not settle the claim. A budget kill, an infrastructure
+   *  failure or an unreadable answer is NOT determinate — «we could not judge» is not «we judged». */
+  determinate: boolean;
+  /** WHICH STEP BLOCKED the cluster — `none` when nothing did. A cluster whose VERIFIER did not support it
+   *  is blocked at the verifier; its refuter's `not-run` is a CONSEQUENCE, never the cause. */
+  blocking_step: ClusterBlockingStep;
+  /** THAT STEP'S OWN CAUSE, in the vocabulary the step already speaks: a refuter cause
+   *  (`budget-truncated` / `call-failed` / `unparseable` / `no-counter-evidence`), or the verifier row's
+   *  own `verdict_cause` (`exit-1` / `turn-budget` / …). `null` exactly when `blocking_step` is `none`. */
+  blocking_cause: string | null;
+}
+
+/** THE JOIN. Pure: every input is a value the cluster record already carries, so this is a READ of the
+ *  round rather than a third derivation of it. See `ClusterAttribution` for the vocabulary. */
+export function clusterAttribution(input: {
+  verifierVerdict: string | null;
+  verifierCause: string | null;
+  /** `not-run` when the verifier did not support the cluster — the refuter was never called. */
+  refutationVerdict: string | null;
+  refutationUndeterminedCause: string | null;
+}): ClusterAttribution {
+  const determinate = { determinate: true, blocking_step: "none" as const, blocking_cause: null };
+  if (input.verifierVerdict === "supported") {
+    // The refuter is the only step that can still block a supported cluster.
+    if (input.refutationVerdict === "supported" || input.refutationVerdict === "refuted") return determinate;
+    if (input.refutationVerdict !== null && input.refutationUndeterminedCause === "no-counter-evidence") {
+      // The refuter ANSWERED — it read the code and the code did not settle the claim. That is a statement
+      // about the REPOSITORY, not about the round, so the cluster IS judged, and judged «not confirmable».
+      return determinate;
+    }
+    return {
+      determinate: false,
+      blocking_step: "refuter",
+      // `null` here means the cluster carried no cause at all (an older record, or a path that never
+      // reached the join) — which is its OWN reading, never silently defaulted to a named cause.
+      blocking_cause: input.refutationUndeterminedCause ?? "unattributed",
+    };
+  }
+  if (input.verifierVerdict === "refuted") {
+    // A verifier that REFUTED the hypothesis has judged it — a determinate NEGATIVE finding. It is not a
+    // confirmation (the governing constraint is unchanged), and it is not a failure either.
+    return determinate;
+  }
+  return {
+    determinate: false,
+    blocking_step: "verifier",
+    blocking_cause: input.verifierCause ?? (input.verifierVerdict === null ? "unattributed" : input.verifierVerdict),
+  };
+}
+
+/** THE SAME JOIN, READ OFF A CLUSTER LINE'S OWN FIELDS. `clusterAttribution` needs four values and a
+ *  cluster record already carries all four — so a line written BEFORE this block existed is still
+ *  joinable, and the whole corpus can be read with one definition rather than a second one written for
+ *  old records (硬规则 5b).
+ *  ⛔ THE PROVENANCE IS NOT THE SAME AND MUST NOT BE SHARED: a block the round WROTE and a block derived
+ *  afterwards from the same line are two different readings, and `derivedFromClusterRecord` says which
+ *  one a caller has. A derivation cannot be a measurement of itself (硬规则 4 推论三) — that is why the
+ *  ROUND still writes its own block, and this helper is for reading records that have none. */
+export function clusterAttributionFromRecord(cluster: Record<string, unknown> | null | undefined): {
+  attribution: ClusterAttribution;
+  derivedFromClusterRecord: boolean;
+} {
+  const c = cluster ?? {};
+  return {
+    attribution: clusterAttribution({
+      verifierVerdict: typeof c.verifier_verdict === "string" ? c.verifier_verdict : null,
+      verifierCause: typeof c.verifier_cause === "string" ? c.verifier_cause : null,
+      refutationVerdict: typeof c.refutation_verdict === "string" ? c.refutation_verdict : null,
+      refutationUndeterminedCause: typeof c.refutation_undetermined_cause === "string" ? c.refutation_undetermined_cause : null,
+    }),
+    derivedFromClusterRecord: true,
+  };
+}
+
+/** The causes a HEALTHY resident round may still carry. A cluster blocked by one of these was judged (or
+ *  judged «not confirmable») rather than lost to the mechanism's own budget — which is the ONLY thing the
+ *  resident-round DoD is about. ⛔ `budget-truncated` and a bare `unattributed` are deliberately ABSENT:
+ *  both mean the step never got to speak, which is precisely the state this task exists to make visible
+ *  and then remove. */
+export const HEALTHY_BLOCKING_CAUSES: readonly string[] = ["no-counter-evidence", "unparseable", "call-failed"];
+
+/** THE ROUND-LEVEL VIEW OF THE JOIN, computed from the cluster records' OWN `attribution` blocks — never
+ *  re-derived from the raw verdicts, so the two levels cannot disagree (硬规则 5b).
+ *  ⛔ `determinate_rate` is `null` when the round verified NOTHING: «no cluster was judged» and «every
+ *  cluster was judged» must not share a shape (硬规则 3b). */
+export interface RoundAttribution {
+  verified: number;
+  confirmed: number;
+  determinate: number;
+  determinate_rate: number | null;
+  blocked: { verifier: number; refuter: number };
+  /** `"<blocking_step>:<blocking_cause>"` ⇒ how many clusters were blocked that way. */
+  causes: Record<string, number>;
+  /** The resident-round DoD: every VERIFIED cluster was judged or honestly named. `null` when the round
+   *  verified nothing (nothing was asked of it). */
+  healthy: boolean | null;
+  basis: string;
+}
+
+export function roundAttribution(clusters: readonly Record<string, unknown>[]): RoundAttribution {
+  const blocks = clusters.map((c) => (c.attribution ?? null) as ClusterAttribution | null);
+  const verified = clusters.length;
+  const confirmed = clusters.filter((c) => c.confirmed === true).length;
+  const determinate = blocks.filter((b) => b !== null && b.determinate === true).length;
+  const blocked = {
+    verifier: blocks.filter((b) => b !== null && b.blocking_step === "verifier").length,
+    refuter: blocks.filter((b) => b !== null && b.blocking_step === "refuter").length,
+  };
+  const causes: Record<string, number> = {};
+  for (const b of blocks) {
+    if (b === null || b.blocking_step === "none") continue;
+    const key = `${b.blocking_step}:${String(b.blocking_cause)}`;
+    causes[key] = (causes[key] ?? 0) + 1;
+  }
+  const unhealthy = blocks.filter(
+    (b) => b !== null && b.blocking_step !== "none" && !HEALTHY_BLOCKING_CAUSES.includes(String(b.blocking_cause)),
+  ).length;
+  const unattributed = blocks.filter((b) => b === null).length;
+  return {
+    verified,
+    confirmed,
+    determinate,
+    determinate_rate: verified === 0 ? null : determinate / verified,
+    blocked,
+    causes,
+    healthy: verified === 0 ? null : unhealthy === 0 && unattributed === 0,
+    basis:
+      verified === 0
+        ? "no cluster was verified — the round was asked to judge nothing, so it is neither healthy nor unhealthy"
+        : `${determinate}/${verified} verified clusters judged; ${unhealthy} lost to a non-naming cause, ${unattributed} carrying no attribution block at all`,
+  };
+}
+
+/** THE ROLLING READING — the DoD as a RATE over the last `window` RESIDENT rounds, not a per-round
+ *  boolean. Plan item 4's stated DoD: «of N verified clusters, every one reaches a determinate outcome
+ *  (confirmed, refuted, or a named, non-budget cause)». A single round that verified nothing neither
+ *  raises nor lowers it. ⛔ RESIDENT ONLY: a `manual` round is not production, and counting one here is
+ *  how a coordinator-triggered round would silently stand in for autonomy. */
+export function residentRoundHealth(
+  records: readonly Record<string, unknown>[],
+  opts: { window?: number; invokedBy?: string } = {},
+): {
+  window: number;
+  rounds: number;
+  /** How many of the window's rounds actually CARRY an attribution block. A round written before this
+   *  reading existed has none, and is excluded from every count below — see `healthy`. */
+  attributed_rounds: number;
+  verified: number;
+  determinate: number;
+  determinate_rate: number | null;
+  unhealthy_rounds: number;
+  causes: Record<string, number>;
+  healthy: boolean | null;
+  basis: string;
+} {
+  const window = opts.window ?? RESIDENT_HEALTH_WINDOW_ROUNDS;
+  const invokedBy = opts.invokedBy ?? INVOKED_BY_RESIDENT;
+  const resident = records.filter((r) => r.kind === "scan-round" && r.invoked_by === invokedBy);
+  const slice = resident.slice(Math.max(0, resident.length - window));
+  let attributed = 0;
+  let verified = 0;
+  let determinate = 0;
+  let unhealthyRounds = 0;
+  const causes: Record<string, number> = {};
+  for (const r of slice) {
+    const a = (r.attribution ?? null) as RoundAttribution | null;
+    // ⛔ A round with NO attribution block is NOT a healthy round: it is an UNEVALUATED one. Counting it
+    // as healthy is exactly the 硬规则 3b shape — «nothing was read» must never share an output with
+    // «everything was read and was fine».
+    if (a === null || typeof a !== "object") continue;
+    attributed++;
+    verified += Number(a.verified ?? 0);
+    determinate += Number(a.determinate ?? 0);
+    if (a.healthy === false) unhealthyRounds++;
+    for (const [k, v] of Object.entries((a.causes ?? {}) as Record<string, number>)) causes[k] = (causes[k] ?? 0) + Number(v);
+  }
+  const unevaluated = slice.length - attributed;
+  return {
+    window,
+    rounds: slice.length,
+    attributed_rounds: attributed,
+    verified,
+    determinate,
+    determinate_rate: verified === 0 ? null : determinate / verified,
+    unhealthy_rounds: unhealthyRounds,
+    causes,
+    // `null` unless at least one round of the window carried the reading: a window that attributed
+    // NOTHING has no verdict, it does not have a good one.
+    healthy: attributed === 0 ? null : unhealthyRounds === 0,
+    basis:
+      slice.length === 0
+        ? `no ${invokedBy} round on the carrier — nothing to rate (NOT «all healthy»)`
+        : attributed === 0
+          ? `none of the last ${slice.length} ${invokedBy} round(s) carry an attribution block — nothing was rated (NOT «all healthy»)`
+          : `${unhealthyRounds}/${attributed} attributed ${invokedBy} round(s) of the last ${window} lost a verified cluster to a non-naming cause; ${determinate}/${verified} verified clusters judged` +
+            (unevaluated === 0 ? "" : `; ${unevaluated} round(s) predate the attribution block and are excluded`),
+  };
+}
+
+/** How many resident rounds the rolling DoD reads. Five is a STATED window, not a measured one: it is the
+ *  smallest count that survives one unlucky round without hiding a run of them, and it is reported
+ *  alongside every reading so a consumer never has to guess which window produced the rate. */
+export const RESIDENT_HEALTH_WINDOW_ROUNDS = 5;
+
+// ── THE «call-failed» FURTHER CLASSIFICATION, AND THE RETRY DECISION IT SUPPORTS ──────────────────────
+// Plan item 2 asks for a decision about whether the `call-failed` class should be retried, with a
+// PRODUCTION-MEASURED basis, and — when it should not — for the class to be classified FURTHER instead.
+//
+// ⛔ THE DECISION: DO NOT EXTEND THE RETRY. It is NOT a guess; it is the measured retry-then-succeeds rate
+// of the class on the production carrier at 2026-10-13T15:30Z. `reservingStep` already retries the
+// TRANSPORT classes ONCE (the 2026-10-13 round alone produced three: verifier `…-3`→`…-4`, refuter
+// `…-5`→`…-6`, refuter `…-7`→`…-8`), and NOT ONE of the three retries answered — `…-4` and `…-8` came
+// back in the SAME class as the call they repeated, `…-6` came back `error_max_turns`. Across the whole
+// corpus the ONLY retry that ever answered was a retry of an `error_max_turns` call (`…-9`→`…-10`, which
+// returned `success` at 24 turns) — i.e. the budget retry already works where the data says it should,
+// and the call-failed retry has a measured success rate of 0. Extending it further would spend counted
+// reservations reproducing a failure the corpus has already shown it does not cure.
+//
+// ⛔ THE FURTHER CLASSIFICATION: the class is NOT step-neutral, and the split below is the reading that
+// says so. What follows is a ROW PER STEP ENVELOPE, computed from the corpus — NOT a causal claim. The
+// grouping is deliberately (step, tools, max_turns) together because those three covary on this pin
+// (the two `Read,Grep`-only steps also carry the two SMALLEST caps), so a bare «empty Glob correlates
+// with failure» reading would be exactly the kind of explanation 硬规则 4 推论四 forbids: it names a
+// candidate cause without a control that would have gone the other way. The rate is REPORTED with its
+// confound, and the confound is named, so the next task can design the control rather than inherit a
+// conclusion this one did not earn.
+export interface CallFailureSplitRow {
+  step: string;
+  tools: string;
+  max_turns: number | null;
+  /** FIRST attempts only: a transport retry is the same attempt made again, and counting it here would
+   *  double every lost call's weight (the retry has its OWN row in `CallFailureSplit.retries`). */
+  calls: number;
+  answered: number;
+  failed: number;
+  failed_rate: number | null;
+  /** `not-evaluated:<…>` token ⇒ how many FIRST attempts ended that way. */
+  causes: Record<string, number>;
+}
+
+export interface RetryReading {
+  attempts: number;
+  answered: number;
+  answered_rate: number | null;
+  /** The retry class, read off the retried call's own `retry_cause` / `budget_retry_cause`. */
+  by_cause: Record<string, { attempts: number; answered: number }>;
+}
+
+/** THE CLASSIFICATION, AS A PURE READING OF THE CARRIER. `records` is every line of the findings carrier;
+ *  the scan-round lines' `calls` are what it reads. Idempotent, spawns nothing, and is the same function
+ *  the `--report` surface prints — so the pasted evidence and the shipped report cannot diverge. */
+export function callFailureSplit(records: readonly Record<string, unknown>[]): {
+  rows: CallFailureSplitRow[];
+  retries: RetryReading;
+} {
+  const byKey = new Map<string, CallFailureSplitRow>();
+  const retryByCause = new Map<string, { attempts: number; answered: number }>();
+  let retryAttempts = 0;
+  let retryAnswered = 0;
+  for (const r of records) {
+    if (r.kind !== "scan-round") continue;
+    const calls = Array.isArray(r.calls) ? (r.calls as Record<string, unknown>[]) : [];
+    for (const c of calls) {
+      const token = callNotEvaluatedToken(c);
+      const answered = token === null;
+      // ── A RETRY IS A SEPARATE POPULATION (Plan item 2's own measurement) ────────────────────────────
+      const isRetry = c.retry_of !== undefined || c.budget_retry === true;
+      if (isRetry) {
+        retryAttempts++;
+        if (answered) retryAnswered++;
+        const cause = typeof c.retry_cause === "string" ? c.retry_cause
+          : typeof c.budget_retry_cause === "string" ? c.budget_retry_cause
+            : "unclassified";
+        const row = retryByCause.get(cause) ?? { attempts: 0, answered: 0 };
+        row.attempts++;
+        if (answered) row.answered++;
+        retryByCause.set(cause, row);
+        continue;
+      }
+      const step = typeof c.step === "string" ? c.step : "(no-step)";
+      const tools = typeof c.tools === "string" ? c.tools : "(no-tools)";
+      const maxTurns = typeof c.max_turns === "number" && Number.isFinite(c.max_turns) ? c.max_turns : null;
+      const key = `${step}\u0000${tools}\u0000${String(maxTurns)}`;
+      const row = byKey.get(key) ?? { step, tools, max_turns: maxTurns, calls: 0, answered: 0, failed: 0, failed_rate: null, causes: {} };
+      row.calls++;
+      if (answered) row.answered++;
+      else {
+        row.failed++;
+        row.causes[String(token)] = (row.causes[String(token)] ?? 0) + 1;
+      }
+      byKey.set(key, row);
+    }
+  }
+  const rows = [...byKey.values()].map((row) => ({ ...row, failed_rate: row.calls === 0 ? null : row.failed / row.calls }));
+  rows.sort((a, b) => b.failed_rate! - a.failed_rate! || a.step.localeCompare(b.step) || a.tools.localeCompare(b.tools));
+  return {
+    rows,
+    retries: {
+      attempts: retryAttempts,
+      answered: retryAnswered,
+      answered_rate: retryAttempts === 0 ? null : retryAnswered / retryAttempts,
+      by_cause: Object.fromEntries([...retryByCause.entries()].sort((a, b) => a[0].localeCompare(b[0]))),
+    },
+  };
 }
 
 /** ONE refuter call, as the cluster record carries it. Every field is read from the CALL RECORD that
@@ -3739,6 +4090,16 @@ export async function runOpenSemanticDiscovery(root: string, opts: OpenSemanticD
       // non-reading spell one).
       const confirmed = row.verdict === "supported" && refutationRead.verdict === "supported" && refutationRead.undetermined_cause === null;
       entry.confirmed = confirmed;
+      // ── WHICH STEP BLOCKED THIS CLUSTER, AND THAT STEP'S OWN CAUSE (Plan item 3) ────────────────────
+      // Read from the fields written ABOVE (never re-derived from the raw verdicts), so the per-cluster
+      // block and the refutation fields it summarises cannot disagree (硬规则 5b). A cluster the verifier
+      // did not support is blocked AT THE VERIFIER: its `refutation_verdict:"not-run"` is a consequence.
+      entry.attribution = clusterAttribution({
+        verifierVerdict: typeof row.verdict === "string" ? row.verdict : null,
+        verifierCause: typeof row.verdict_cause === "string" ? row.verdict_cause : null,
+        refutationVerdict: typeof entry.refutation_verdict === "string" ? entry.refutation_verdict : null,
+        refutationUndeterminedCause: typeof entry.refutation_undetermined_cause === "string" ? entry.refutation_undetermined_cause : null,
+      });
       // ⑨ (d2) SEMANTIC VALUE ASSESSMENT — bounded, for confirmed clusters only, recorded as the MODEL's
       //    assessment and never as a human rating.
       if (confirmed) {
@@ -4132,6 +4493,13 @@ export async function runOpenSemanticDiscovery(root: string, opts: OpenSemanticD
       investigator: investigatorBlock,
       clusters: { total: clusters.length, verified: verifiedRows.length, beyond_cap: Math.max(0, clusters.length - verifiedRows.length) },
       confirmed: { count: confirmedClusters.length, claims: confirmedClusters.map((c) => c.claim) },
+      // ── THE ROUND-LEVEL VIEW OF THE PER-CLUSTER JOIN (Plan items 3-4) ──────────────────────────────
+      // So a round reading `confirmed:0` is EXPLAINABLE without a second pass over its cluster lines:
+      // `blocked`/`causes` say which step lost which cluster and why, and `healthy` is the stated
+      // resident-round DoD (every verified cluster was judged, or lost to a NAMED, non-budget cause).
+      // ⛔ `determinate_rate`/`healthy` are `null` when the round verified nothing — «judged nothing» is
+      // not «judged everything correctly» (硬规则 3b).
+      attribution: roundAttribution(clusterRecords),
       // What the semantic novelty check decided, per confirmed cluster — the verdicts, the retrieval they
       // were made against and any source that could not be read. `writes` is filled by step ⑩b below and
       // reported on the Fact (the line itself is already on disk by then; the append-only discipline is
@@ -4412,6 +4780,125 @@ export function openSemanticDiscoveryRoutineFromConfig(
   };
 }
 
+// ── THE REPORT SURFACE (Plan items 3-4) ───────────────────────────────────────────────────────────────
+// ⛔ READ-ONLY AND SPAWN-FREE. It exists because a per-round boolean is not an instrument: Plan item 4
+// asks for the resident-round DoD to be «a reportable rate», and Plan item 3 asks for a round's
+// `confirmed:0` to be explainable PER CLUSTER. Both are readings of the carrier this routine already
+// writes, so the report is a VIEW of the same lines a human audits — never a parallel accounting that
+// could disagree with them (硬规则 5b).
+export interface DiscoveryAttributionReport {
+  /** The last `window` scan-rounds, newest last, each with its own clusters' joined attribution. */
+  rounds: Array<{
+    ts: string | null;
+    invoked_by: string | null;
+    confirmed: number;
+    attribution: RoundAttribution | null;
+    /** The PRODUCTION chain's clusters for this round, in record-id order. */
+    clusters: Array<{
+      cluster: unknown;
+      claim: unknown;
+      blocking_step: string;
+      blocking_cause: string | null;
+      determinate: boolean | null;
+      /** `stored` = the block the ROUND wrote. `derived` = the same join computed afterwards from the
+       *  cluster line's own verdict fields, for records written before the block existed. ⛔ The two are
+       *  never merged into one reading — a derivation is not a measurement of itself. */
+      provenance: "stored" | "derived";
+    }>;
+    /** Cluster lines of the same round belonging to an INSTRUMENT arm (`#shadow#` / `#baseline#`).
+     *  ⛔ Counted, never merged and never silently dropped: those arms verify nothing by construction, so
+     *  listing them beside production clusters as «unattributed» would read as the mechanism failing to
+     *  attribute rather than as an arm that was never asked to judge (硬规则 3b). */
+    instrument_arm_clusters_skipped: number;
+  }>;
+  health: ReturnType<typeof residentRoundHealth>;
+  call_failures: ReturnType<typeof callFailureSplit>;
+}
+
+export function buildDiscoveryReport(
+  records: readonly Record<string, unknown>[],
+  opts: { window?: number; invokedBy?: string } = {},
+): DiscoveryAttributionReport {
+  const window = opts.window ?? RESIDENT_HEALTH_WINDOW_ROUNDS;
+  const allRounds = records.filter((r) => r.kind === "scan-round");
+  const slice = allRounds.slice(Math.max(0, allRounds.length - window));
+  const rounds = slice.map((r) => {
+    const ts = typeof r.ts === "string" ? r.ts : null;
+    const prefix = ts === null ? null : `${OPEN_DISCOVERY_REF_PREFIX}${ts}#`;
+    const sameRound = prefix === null ? [] : records.filter((c) => c.kind === "cluster" && typeof c.record_id === "string" && String(c.record_id).startsWith(prefix));
+    // The PRODUCTION chain is the segment that is a bare integer. `#shadow#3` / `#baseline#3` are the
+    // instrument arms: they are separated here rather than filtered silently.
+    // ⛔ A CHARACTER WALK, NOT A PATTERN. Case (l) of this file's contract asserts mechanically that the
+    // module carries no pattern machinery at all, and that control reads by POSITION: a pattern that
+    // selects nothing here would still trip it. (Naming the forbidden forms in this comment would trip it
+    // too — see the maintainer warning in the file header.)
+    const isProduction = (c: Record<string, unknown>): boolean => {
+      const seg = String(c.record_id).slice(prefix!.length);
+      return seg.length > 0 && [...seg].every((ch) => ch >= "0" && ch <= "9");
+    };
+    const mine = sameRound.filter(isProduction);
+    const instrumentArm = sameRound.length - mine.length;
+    return {
+      ts,
+      invoked_by: typeof r.invoked_by === "string" ? r.invoked_by : null,
+      confirmed: Number((r.confirmed as { count?: unknown } | undefined)?.count ?? 0),
+      attribution: (r.attribution ?? null) as RoundAttribution | null,
+      instrument_arm_clusters_skipped: instrumentArm,
+      clusters: mine.map((c) => {
+        // A stored block is used VERBATIM when the round wrote one. Only when it did not is the same join
+        // computed from the line's own verdict fields — and the difference is carried on the entry, so a
+        // reader can always tell which of the two readings they are looking at.
+        const stored = (c.attribution ?? null) as ClusterAttribution | null;
+        const a = stored ?? clusterAttributionFromRecord(c).attribution;
+        return {
+          cluster: c.cluster ?? null,
+          claim: c.claim ?? null,
+          blocking_step: a.blocking_step,
+          blocking_cause: a.blocking_cause,
+          determinate: a.determinate,
+          provenance: stored === null ? "derived" as const : "stored" as const,
+        };
+      }),
+    };
+  });
+  return {
+    rounds,
+    health: residentRoundHealth(records, { window, invokedBy: opts.invokedBy }),
+    call_failures: callFailureSplit(records),
+  };
+}
+
+/** The TEXT rendering of `buildDiscoveryReport` — same values, no second computation, so a pasted
+ *  transcript and `--json` cannot disagree. */
+export function renderDiscoveryReport(report: DiscoveryAttributionReport): string {
+  const out: string[] = [];
+  out.push(`per-round per-cluster attribution (last ${report.rounds.length} rounds):`);
+  for (const r of report.rounds) {
+    const a = r.attribution;
+    out.push(
+      `  ${r.ts ?? "(no-ts)"}  ${r.invoked_by ?? "(no-caller)"}  confirmed=${r.confirmed}` +
+      `  judged=${a === null ? "unattributed" : `${a.determinate}/${a.verified}`}` +
+      `  healthy=${a === null ? "unattributed" : String(a.healthy)}`,
+    );
+    if (a !== null && Object.keys(a.causes).length > 0) out.push(`    causes: ${JSON.stringify(a.causes)}`);
+    if (r.instrument_arm_clusters_skipped > 0) out.push(`    (${r.instrument_arm_clusters_skipped} instrument-arm cluster line(s) of this round are not part of the production chain and are not listed)`);
+    for (const c of r.clusters) {
+      out.push(`    cluster ${String(c.cluster)}: blocked_by=${c.blocking_step}${c.blocking_cause === null ? "" : `:${c.blocking_cause}`} determinate=${String(c.determinate)} [${c.provenance}] — ${String(c.claim ?? "").slice(0, 160)}`);
+    }
+  }
+  out.push("");
+  out.push(`resident-round DoD (rolling, window=${report.health.window}, attributed=${report.health.attributed_rounds}/${report.health.rounds}): healthy=${String(report.health.healthy)} rate=${report.health.determinate_rate === null ? "null" : report.health.determinate_rate.toFixed(3)}`);
+  out.push(`  ${report.health.basis}`);
+  out.push("");
+  out.push("call-failure split by step envelope (FIRST attempts only) + the retry population:");
+  for (const row of report.call_failures.rows) {
+    out.push(`  ${row.step} tools=${JSON.stringify(row.tools)} max_turns=${String(row.max_turns)} calls=${row.calls} failed=${row.failed} rate=${row.failed_rate === null ? "null" : row.failed_rate.toFixed(3)} ${JSON.stringify(row.causes)}`);
+  }
+  const rt = report.call_failures.retries;
+  out.push(`  RETRIES: attempts=${rt.attempts} answered=${rt.answered} answered_rate=${rt.answered_rate === null ? "null" : rt.answered_rate.toFixed(3)} ${JSON.stringify(rt.by_cause)}`);
+  return out.join("\n");
+}
+
 // ── CLI (a one-shot MANUAL round) ────────────────────────────────────────────────────────────────────
 const USAGE = [
   "open-semantic-discovery-routine — open-ended semantic architecture discovery as a Layer-1b routine (report-only).",
@@ -4419,6 +4906,11 @@ const USAGE = [
   "  --force                           manual: run even inside the interval (still never advances",
   "                                    .quay/routine-last-run.json — production's clock is not yours)",
   "  --pin-tmp <dir>                   temp root for the stripped pins",
+  "  --report --root <dir> [--json] [--window N]",
+  "                                    READ-ONLY, ZERO SPAWNS: print the per-cluster attribution join of",
+  "                                    the last N rounds, the rolling resident-round DoD rate, and the",
+  "                                    call-failure split by step envelope. This is the instrument Plan",
+  "                                    items 3-4 rest on; it writes nothing and spawns nothing.",
   "⛔ This CLI is ALWAYS a manual round: it reads the production interval but never advances it. The",
   "   resident round (the one that advances it) is assembled by the quality-gate driver's routine table.",
 ].join("\n");
@@ -4427,6 +4919,28 @@ async function main(argv: string[]): Promise<number> {
   const root = (() => { const i = argv.indexOf("--root"); return path.resolve(i >= 0 && argv[i + 1] ? argv[i + 1] : process.cwd()); })();
   const json = argv.includes("--json");
   const pinTmpRoot = (() => { const i = argv.indexOf("--pin-tmp"); return i >= 0 && argv[i + 1] ? path.resolve(argv[i + 1]) : undefined; })();
+  // ── THE REPORT MODE: read the carrier and print the readings. ZERO spawns, ZERO writes. ─────────────
+  // ⛔ An UNREADABLE carrier is a `failed` (exit 1), never an empty report: «the carrier could not be
+  // read» and «the carrier holds no rounds» are different facts (硬规则 3b, and the same rule the round
+  // itself applies at ③).
+  if (argv.includes("--report")) {
+    const wIdx = argv.indexOf("--window");
+    const window = wIdx >= 0 && argv[wIdx + 1] ? Number(argv[wIdx + 1]) : RESIDENT_HEALTH_WINDOW_ROUNDS;
+    if (!Number.isInteger(window) || window < 1) {
+      process.stderr.write(`--window must be an integer >= 1 (got ${JSON.stringify(argv[wIdx + 1] ?? null)})\n`);
+      return 1;
+    }
+    let records: Record<string, unknown>[];
+    try {
+      records = readCarrierRounds(path.join(root, CARRIER_REL)).records;
+    } catch (e) {
+      process.stderr.write(`unreadable carrier — ${(e as Error).message}\n`);
+      return 1;
+    }
+    const report = buildDiscoveryReport(records, { window });
+    process.stdout.write(json ? `${JSON.stringify({ root, carrier: CARRIER_REL, report }, null, 1)}\n` : renderDiscoveryReport(report) + "\n");
+    return 0;
+  }
   const read = readOpenSemanticDiscoveryConfig(root);
   const fact = await runOpenSemanticDiscovery(root, {
     config: read.config,

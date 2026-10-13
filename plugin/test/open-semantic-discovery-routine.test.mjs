@@ -142,6 +142,16 @@ import {
   pairedRoundDecision,
   openBaselineDiscoveryRecordId,
   callsOfArm,
+  // ── the per-cluster attribution join, the resident-round DoD, and the call-failure split ───────────
+  CLUSTER_BLOCKING_STEPS,
+  HEALTHY_BLOCKING_CAUSES,
+  RESIDENT_HEALTH_WINDOW_ROUNDS,
+  clusterAttribution,
+  roundAttribution,
+  residentRoundHealth,
+  callFailureSplit,
+  buildDiscoveryReport,
+  renderDiscoveryReport,
   // ── the ANSWER RESERVE + failure legibility (case (m)) ────────────────────────────────────────────
   ANSWER_RESERVE_PROMPT_TURNS,
   ANSWER_RESERVE_TOOLS,
@@ -2824,6 +2834,11 @@ test("case (m) AC5 — the reserve changes NEITHER the kill switch, NOR the repo
 
   // (iii) The paired ENVELOPE the two arms are compared on is untouched: the reserve is a call INSIDE an
   // arm, not a knob on it — raising `investigator_max_turns` is the only thing that moves this reading.
+  // ⛔ The literal below was 12 when the reserve task wrote this. It is now 29 because a LATER task
+  // (gap-osd-resident-round-never-autonomously-confirms-fix-attribution-and-call-failed-retry, Plan item 1)
+  // re-derived the constant from a fresh 23-sample corpus — the reserve still moves NOTHING here, which is
+  // what this assertion is about; the invariant it pins is «the envelope equals the MODULE CONSTANT»,
+  // asserted on the next line, not «the constant equals 12».
   const envelope = pairedArmBudget(readOpenSemanticDiscoveryConfig(ws).config);
   assert.deepEqual(envelope, {
     investigator_runs: 1,
@@ -2832,7 +2847,7 @@ test("case (m) AC5 — the reserve changes NEITHER the kill switch, NOR the repo
     verifier_max_turns: 8,
     refutation_max_turns: 6,
   });
-  assert.equal(envelope.investigator_max_turns, 12, "the production turn cap is UNCHANGED by this task");
+  assert.equal(envelope.investigator_max_turns, 29, "the re-derived p100 of the investigator-family tool-reading calls, NOT the reserve's doing");
   assert.equal(envelope.investigator_max_turns, DEFAULT_INVESTIGATOR_MAX_TURNS);
   assert.equal(Object.values(envelope).includes("investigator-report"), false, "the rescue is not a budget knob");
 });
@@ -3750,10 +3765,12 @@ test("AC3 — the retry budget is a MEASURED default, OPTIONAL, and REQUIRED to 
   assert.equal(absent.config.refutationMaxTurns, 6, "the step's OWN budget is UNCHANGED: 1 answered refuter sample < the 10 AC3 requires");
   assert.equal(absent.config.refutationRetryMaxTurns, DEFAULT_REFUTATION_RETRY_MAX_TURNS, "absent ⇒ the measured p100 of the answered tool-reading calls");
 
-  // The default FOLLOWS a raised first budget rather than silently becoming a no-op retry.
-  const raised = parseOpenSemanticDiscoverySection(YAML.parse(cfgYaml({ refutation_max_turns: 40 })).loop.open_semantic_discovery);
+  // The default FOLLOWS a raised first budget rather than silently becoming a no-op retry. ⛔ The first
+  // budget below must stay ABOVE `DEFAULT_REFUTATION_RETRY_MAX_TURNS` for this to exercise the FOLLOW
+  // branch at all — it was 40 against a default of 26, and is 50 against the re-derived 44.
+  const raised = parseOpenSemanticDiscoverySection(YAML.parse(cfgYaml({ refutation_max_turns: 50 })).loop.open_semantic_discovery);
   assert.equal(raised.error, null);
-  assert.equal(raised.config.refutationRetryMaxTurns, 41, "a first budget above the measured p100 still leaves the retry LARGER");
+  assert.equal(raised.config.refutationRetryMaxTurns, 51, "a first budget above the measured p100 still leaves the retry LARGER");
 
   // A DECLARED retry budget must be larger, or the config is refused: «ONE retry with a larger budget» is
   // an invariant of the section, not a property of its default.
@@ -3763,4 +3780,235 @@ test("AC3 — the retry budget is a MEASURED default, OPTIONAL, and REQUIRED to 
   const declared = parseOpenSemanticDiscoverySection(YAML.parse(cfgYaml({ refutation_retry_max_turns: 33 })).loop.open_semantic_discovery);
   assert.equal(declared.error, null);
   assert.equal(declared.config.refutationRetryMaxTurns, 33, "a declared retry budget is used verbatim");
+});
+
+// ═════════════════════════════════════════════════════════════════════════════════════════════════════
+// THE PER-CLUSTER ATTRIBUTION JOIN + THE RESIDENT-ROUND DoD + THE call-failed SPLIT
+// (tasks/gap-osd-resident-round-never-autonomously-confirms-fix-attribution-and-call-failed-retry,
+//  Plan items 2-4)
+//
+// Plan item 3's defect: a round's `confirmed:0` had no per-cluster explanation — for a cluster the
+// VERIFIER never supported, the refuter's `not-run` is a CONSEQUENCE, and nothing on the record named the
+// verifier's own failure as the thing that blocked the cluster. Plan item 4's: the DoD had to be a
+// reportable RATE, not a per-round boolean. Plan item 2's: the `call-failed` class had to be classified
+// further, with the retry decision resting on a measured retry-then-succeeds rate.
+// ═════════════════════════════════════════════════════════════════════════════════════════════════════
+
+test("attribution AC3 — the join names WHICH step blocked a cluster, and THAT step's own cause", () => {
+  const none = { determinate: true, blocking_step: "none", blocking_cause: null };
+  // The verifier did not support the cluster ⇒ blocked AT THE VERIFIER, with the verifier row's own cause.
+  // ⛔ The refuter's `not-run` is deliberately NOT the answer here, even though it is what the record's
+  // refutation fields say: a consequence must not be reported as the cause.
+  assert.deepEqual(
+    clusterAttribution({ verifierVerdict: "undetermined", verifierCause: "exit-1", refutationVerdict: "not-run", refutationUndeterminedCause: null }),
+    { determinate: false, blocking_step: "verifier", blocking_cause: "exit-1" },
+  );
+  assert.deepEqual(
+    clusterAttribution({ verifierVerdict: "undetermined", verifierCause: "turn-budget", refutationVerdict: "not-run", refutationUndeterminedCause: null }),
+    { determinate: false, blocking_step: "verifier", blocking_cause: "turn-budget" },
+    "a turn-cap kill and an infrastructure kill are DIFFERENT causes, on the record",
+  );
+  // supported + survived ⇒ the only confirmation shape.
+  assert.deepEqual(clusterAttribution({ verifierVerdict: "supported", verifierCause: null, refutationVerdict: "supported", refutationUndeterminedCause: null }), none);
+  // supported + REFUTED ⇒ determinate (a real negative finding), and still not a confirmation.
+  assert.deepEqual(clusterAttribution({ verifierVerdict: "supported", verifierCause: null, refutationVerdict: "refuted", refutationUndeterminedCause: null }), none);
+  // supported + the refuter was KILLED at its cap ⇒ blocked at the refuter, and NOT determinate.
+  assert.deepEqual(
+    clusterAttribution({ verifierVerdict: "supported", verifierCause: null, refutationVerdict: "undetermined", refutationUndeterminedCause: "budget-truncated" }),
+    { determinate: false, blocking_step: "refuter", blocking_cause: "budget-truncated" },
+  );
+  // supported + the refuter READ the code and it did not settle the claim ⇒ a statement about the
+  // REPOSITORY, so the cluster was judged. Still never confirmed — this function cannot raise `confirmed`.
+  assert.deepEqual(
+    clusterAttribution({ verifierVerdict: "supported", verifierCause: null, refutationVerdict: "undetermined", refutationUndeterminedCause: "no-counter-evidence" }),
+    none,
+  );
+  // ⛔ FAIL-CLOSED, NOT DEFAULTED. A `supported` verifier with NO refutation verdict at all, and a row
+  // with no verdict, are both UNEXPLAINED states: each gets its own `unattributed` reading rather than a
+  // plausible-looking step (硬规则 3b).
+  assert.deepEqual(
+    clusterAttribution({ verifierVerdict: "supported", verifierCause: null, refutationVerdict: null, refutationUndeterminedCause: null }),
+    { determinate: false, blocking_step: "refuter", blocking_cause: "unattributed" },
+  );
+  assert.deepEqual(
+    clusterAttribution({ verifierVerdict: null, verifierCause: null, refutationVerdict: "not-run", refutationUndeterminedCause: null }),
+    { determinate: false, blocking_step: "verifier", blocking_cause: "unattributed" },
+  );
+  // The vocabulary is closed — every returned step is a declared member.
+  for (const v of ["supported", "refuted", "undetermined", null]) {
+    for (const r of ["supported", "refuted", "undetermined", "not-run", null]) {
+      const a = clusterAttribution({ verifierVerdict: v, verifierCause: "exit-1", refutationVerdict: r, refutationUndeterminedCause: "call-failed" });
+      assert.ok(CLUSTER_BLOCKING_STEPS.includes(a.blocking_step), `${v}/${r} ⇒ a declared step`);
+      assert.equal(a.blocking_step === "none", a.blocking_cause === null, `${v}/${r} ⇒ cause is null exactly when the step is`);
+    }
+  }
+});
+
+test("attribution AC3 NEGATIVE CONTROL — count a BUDGET-TRUNCATED refutation as determinate ⇒ the join flips", () => {
+  // The mutation is the one the governing constraint forbids: «we could not judge» read as «we judged».
+  const mutant = { determinate: true, blocking_step: "none", blocking_cause: null };
+  const real = clusterAttribution({ verifierVerdict: "supported", verifierCause: null, refutationVerdict: "undetermined", refutationUndeterminedCause: "budget-truncated" });
+  assert.deepEqual(real, { determinate: false, blocking_step: "refuter", blocking_cause: "budget-truncated" });
+  assert.notDeepEqual(real, mutant, "the mutant reading is FALSIFIED — the control is live");
+  process.stdout.write("    NEGATIVE CONTROL attribution AC3: treating a budget-truncated refutation as determinate would have flipped the join\n");
+});
+
+test("attribution AC3 (wiring) — a REAL round's cluster AND its scan-round line carry the join", async () => {
+  // The refuter is truncated TWICE (the production shape): the cluster is blocked at the REFUTER, with the
+  // budget as its named cause — and the round-level block must agree with the cluster's own block.
+  const { ws, opts } = refuterChainFixture({ refuterVerdict: "undetermined", refuterStreams: () => ({ status: 1, stdout: truncatedRefuterStream(7, 6) }) });
+  const fact = await runOpenSemanticDiscovery(ws, opts);
+  assert.equal(fact.state, "verified");
+
+  const cluster = clusterOf(ws);
+  assert.deepEqual(cluster.attribution, { determinate: false, blocking_step: "refuter", blocking_cause: "budget-truncated" });
+
+  const round = rounds(ws)[0];
+  assert.ok(round.attribution, "the scan-round line carries the per-round view");
+  assert.deepEqual(round.attribution, {
+    verified: 1, confirmed: 0, determinate: 0, determinate_rate: 0,
+    blocked: { verifier: 0, refuter: 1 }, causes: { "refuter:budget-truncated": 1 },
+    healthy: false,
+    basis: "0/1 verified clusters judged; 1 lost to a non-naming cause, 0 carrying no attribution block at all",
+  }, "the round block is a VIEW of the cluster's own block, not a second derivation");
+  assert.equal(round.attribution.healthy, false, "a cluster lost to the mechanism's OWN budget is exactly the unhealthy shape the DoD names");
+});
+
+test("attribution AC3 (wiring) — a cluster the VERIFIER could not settle is blocked at the VERIFIER, not the refuter", async () => {
+  const ws = makeWorkspace();
+  writeConfig(ws, cfgYaml());
+  const engine = makeEngine({ hyps: [HYPS[0]], verdictFor: (ci, o) => (isRefuterPrompt(o) ? "supported" : "undetermined") });
+  engine.modules.hyp.runInvestigator = streamReadingInvestigator();
+  const delegate = (argv, opts) => {
+    if (isNoveltyPrompt(opts)) return { status: 0, stdout: NOVELTY_STREAM, stderr: "", error: null };
+    if (toolsOf(argv) === INVESTIGATOR_TOOLS) return { status: 0, stdout: streamText(`${FOCUS_MARKER} f\n${JSON.stringify([HYPS[0]])}`), stderr: "", error: null };
+    // The verifier dies with NO result event: the engine's own reader names that `exit-1`.
+    if (toolsOf(argv) === VERIFIER_TOOLS) return { status: 1, stdout: '{"type":"assistant","message":{"content":[{"type":"text","text":"cut off"}]}}\n', stderr: "" };
+    return { status: 0, stdout: streamText(REFUTER_ANSWER("supported")), stderr: "", error: null };
+  };
+  const fact = await runOpenSemanticDiscovery(ws, {
+    ...runOpts(ws, { engine }), spawnFn: countingSpawn(delegate), pinFn: pinStub(),
+    pinTmpRoot: tmpDir("osd-attr-verifier-"), retryBackoffMs: 0, sleepFn: async () => {},
+  });
+  assert.equal(fact.state, "verified");
+
+  const cluster = clusterOf(ws);
+  assert.equal(cluster.verifier_verdict, "undetermined");
+  assert.equal(cluster.refutation_verdict, "not-run", "the refuter was never called — that is the CONSEQUENCE the old record reported as if it were the cause");
+  assert.deepEqual(cluster.attribution, { determinate: false, blocking_step: "verifier", blocking_cause: cluster.verifier_cause });
+  assert.equal(cluster.attribution.blocking_step, "verifier", "NOT `refuter` — the step that actually blocked it");
+  assert.equal(rounds(ws)[0].attribution.blocked.verifier, 1);
+  assert.equal(rounds(ws)[0].attribution.causes[`verifier:${cluster.verifier_cause}`], 1);
+});
+
+test("attribution AC4 — the rolling DoD is a RATE, and a window holding NO attribution block rates NOTHING", async () => {
+  // A round carrying the block: blocked at the refuter by the mechanism's own budget.
+  const { ws, opts } = refuterChainFixture({ refuterVerdict: "undetermined", refuterStreams: () => ({ status: 1, stdout: truncatedRefuterStream(7, 6) }) });
+  await runOpenSemanticDiscovery(ws, opts);
+  const real = carrierLines(ws);
+
+  const h = residentRoundHealth(real);
+  assert.equal(h.rounds, 1);
+  assert.equal(h.attributed_rounds, 1);
+  assert.equal(h.verified, 1);
+  assert.equal(h.determinate, 0);
+  assert.equal(h.determinate_rate, 0);
+  assert.equal(h.unhealthy_rounds, 1);
+  assert.equal(h.healthy, false);
+
+  // ⛔ THE 硬规则 3b CASE THIS READING EXISTS FOR: the same carrier with the attribution block STRIPPED —
+  // i.e. exactly what a pre-change round looks like — must rate `null`, NEVER `healthy:true`. «Nothing was
+  // read» and «everything was read and was fine» must not share an output.
+  const stripped = real.map((l) => (l.kind === "scan-round" ? { ...l, attribution: undefined } : l));
+  const h2 = residentRoundHealth(stripped);
+  assert.equal(h2.attributed_rounds, 0);
+  assert.equal(h2.healthy, null, "an unattributed window has NO verdict — it does not have a good one");
+  assert.equal(h2.determinate_rate, null);
+  assert.match(h2.basis, /nothing was rated \(NOT «all healthy»\)/);
+
+  // ⛔ RESIDENT ONLY: a MANUAL round is not production. Its (unhealthy) outcome must not enter the rate.
+  const manual = real.map((l) => (l.kind === "scan-round" ? { ...l, invoked_by: "manual" } : l));
+  const h3 = residentRoundHealth(manual);
+  assert.equal(h3.rounds, 0, "a manual round is not a resident round");
+  assert.equal(h3.healthy, null);
+  assert.match(h3.basis, /no resident-driver round on the carrier — nothing to rate \(NOT «all healthy»\)/);
+  assert.equal(RESIDENT_HEALTH_WINDOW_ROUNDS, 5, "the stated window, reported alongside every rate");
+});
+
+test("attribution AC2 — the call-failure split reports the retry-then-succeeds rate SEPARATELY from first attempts", async () => {
+  // One real round whose refuter is truncated and then answered by its ONE budget retry. The retry is the
+  // SAME attempt made again, so it must NOT be double-counted among the first attempts whose failure rate
+  // is being read — that is the whole measurement Plan item 2 rests on.
+  const { ws, opts } = refuterChainFixture({
+    refuterVerdict: "supported",
+    refuterStreams: (n) => (n === 0 ? { status: 1, stdout: truncatedRefuterStream(7, 6) } : refuterStream({ numTurns: 19, reads: 6, text: REFUTER_ANSWER("supported") })),
+  });
+  const fact = await runOpenSemanticDiscovery(ws, opts);
+  assert.equal(fact.state, "verified");
+
+  const split = callFailureSplit(carrierLines(ws));
+  const refuterRows = split.rows.filter((r) => r.step === "refuter");
+  assert.equal(refuterRows.length, 1);
+  assert.equal(refuterRows[0].calls, 1, "FIRST attempts only: the retry is not a second first attempt");
+  assert.equal(refuterRows[0].failed, 1);
+  assert.deepEqual(refuterRows[0].causes, { "not-evaluated:error_max_turns": 1 });
+  assert.equal(split.retries.attempts, 1);
+  assert.equal(split.retries.answered, 1);
+  assert.equal(split.retries.answered_rate, 1, "a BUDGET retry answered — the one class the corpus shows the retry cures");
+  assert.deepEqual(split.retries.by_cause["budget-truncated"], { attempts: 1, answered: 1 });
+  // Every other step of the same round ran cleanly, so their rates are 0 and their cause maps empty.
+  for (const row of split.rows.filter((r) => r.step !== "refuter")) {
+    assert.equal(row.failed, 0, `${row.step} answered`);
+    assert.deepEqual(row.causes, {});
+  }
+});
+
+test("attribution — buildDiscoveryReport joins each round to ITS OWN clusters, and marks a pre-change line `derived`", async () => {
+  const { ws, opts } = refuterChainFixture({ refuterVerdict: "undetermined", refuterStreams: () => ({ status: 1, stdout: truncatedRefuterStream(7, 6) }) });
+  await runOpenSemanticDiscovery(ws, opts);
+  const lines = carrierLines(ws);
+  const report = buildDiscoveryReport(lines, { window: 5 });
+
+  assert.equal(report.rounds.length, 1);
+  assert.equal(report.rounds[0].clusters.length, 1, "the round's OWN cluster line, joined by record_id");
+  assert.equal(report.rounds[0].clusters[0].blocking_step, "refuter");
+  assert.equal(report.rounds[0].clusters[0].blocking_cause, "budget-truncated");
+  assert.equal(report.rounds[0].clusters[0].determinate, false);
+  assert.equal(report.rounds[0].clusters[0].provenance, "stored", "the ROUND wrote this block");
+
+  // ⛔ A cluster line written BEFORE this change carries no attribution block. The report still joins it —
+  // from the line's OWN verdict fields — but it must say the reading was DERIVED, never present it as the
+  // round's own conclusion (硬规则 3b): a derivation is not a measurement of itself.
+  const old = lines.map((l) => (l.kind === "cluster" ? { ...l, attribution: undefined } : l));
+  const reportOld = buildDiscoveryReport(old, { window: 5 });
+  assert.equal(reportOld.rounds[0].clusters[0].blocking_step, "refuter");
+  assert.equal(reportOld.rounds[0].clusters[0].blocking_cause, "budget-truncated", "the SAME join, from the fields the old line already carried");
+  assert.equal(reportOld.rounds[0].clusters[0].provenance, "derived");
+  // ⛔ THE ROUND-LEVEL BLOCK IS THE ROUND'S OWN CLAIM. It is read off the scan-round line and NEVER
+  // synthesised from the clusters: an old scan-round line (no block) stays `null`, even though every one
+  // of its clusters is still joinable — a derivation must not be back-filled into the round's own claim.
+  const oldRound = old.map((l) => (l.kind === "scan-round" ? { ...l, attribution: undefined } : l));
+  assert.equal(buildDiscoveryReport(oldRound, { window: 5 }).rounds[0].attribution, null);
+  assert.notEqual(reportOld.rounds[0].clusters[0].provenance, "stored", "the cluster join still happened, at its own provenance");
+  // A line carrying NO verdict fields at all derives its own «unattributed» rather than a plausible step.
+  const empty = lines.map((l) => (l.kind === "cluster" ? { ...l, attribution: undefined, verifier_verdict: null, verifier_cause: null, refutation_verdict: null, refutation_undetermined_cause: null } : l));
+  assert.deepEqual(
+    buildDiscoveryReport(empty, { window: 5 }).rounds[0].clusters[0],
+    { cluster: 1, claim: report.rounds[0].clusters[0].claim, blocking_step: "verifier", blocking_cause: "unattributed", determinate: false, provenance: "derived" },
+  );
+
+  // The TEXT surface is the same values, not a second computation.
+  const text = renderDiscoveryReport(report);
+  assert.match(text, /blocked_by=refuter:budget-truncated/);
+  // The round's refuter was truncated TWICE, so its ONE budget retry is on the ledger and ALSO failed:
+  // the retry population must show one attempt, zero answered — and it must not be folded into the
+  // first-attempt row above.
+  assert.match(text, /RETRIES: attempts=1 answered=0 answered_rate=0\.000 \{"budget-truncated":\{"attempts":1,"answered":0\}\}/);
+  // ⛔ And the report SPAWNS NOTHING and writes NOTHING: it is a pure read of the carrier.
+  assert.equal(fs.readFileSync(carrierPath(ws), "utf8"), lines.map((l) => JSON.stringify(l)).join("\n") + "\n", "the carrier is untouched byte for byte");
+
+  // CONTROL: the two surfaces agree on the numbers they share.
+  const jsonHealth = buildDiscoveryReport(lines, { window: 5 }).health;
+  assert.equal(jsonHealth.determinate_rate, report.health.determinate_rate);
+  assert.match(text, new RegExp(`healthy=${String(jsonHealth.healthy)}`));
 });
