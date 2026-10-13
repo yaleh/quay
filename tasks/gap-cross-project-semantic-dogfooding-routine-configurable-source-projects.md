@@ -241,3 +241,20 @@ acting on: across the real rounds, clusters came back `refuted`/`undetermined` f
 - 未落地原因：AC 未全勾（checked 5/6，剩余未勾 1）——续做只需验证并勾选 AC
 - run_id：wk-prod-anchor
 - session_id：1f5d473a-39dd-43f6-93e9-de801b54a6d5
+
+**2026-10-13（本轮续做 worker）—— AC6 的 leg 4 是 CIRCULAR 的 post-landing 门；从 worker 座位结构上不可满足，且按 AC6 自身文本（= 用户明确判据）本任务不得翻 done。**
+
+AC1–AC5 已核并勾。AC6 legs 1–3 真实发生（autonomous round `cpd-3283888-1791886325773-a7wnts`、`invoked_by:"resident-driver"`、真实 artifacts；独立 verifier + refuter 均 `supported`；Portfolio 行已写；`gap-cross-project-dogfood-quay-self-usage-c1-a7wnts` 经 ABI 立案）。leg 4（"that task lands / merged to develop"）**未发生**。
+
+**为何本座位做不到（本轮实测）**：两个 filed task 只存在于本任务分支 —— `develop` 与主检出都没有（`git show develop:tasks/gap-cross-project-dogfood-quay-self-usage-c1-a7wnts.md` ⇒ absent；主检出 `ls tasks/gap-cross-project-dogfood-*.md` ⇒ 无）。常驻 promotion/worker driver 读主检出 / develop ⇒ 本任务落地前它们无法被晋级/派发；而本任务在 AC6 满足前无法落地。**循环。**
+
+本地唯一绕法被两处排除：AC6 自身措辞（"the task stays NOT done … must not be marked done on the strength of a fixture/manual round"）+ worker 不得自注 `（待外部）`（`ready-pool-check.ts:902` "a worker must never add it itself"）。**worker 无法闭合它，故不翻 done、不勾 AC6。**
+
+**待裁定（author / coordinator），三选一**：
+1. 给 AC6 加 `（待外部）`（承接者 = 常驻 promotion → worker → fan-in 链 over 两个 filed tasks），使本任务可落地、filed tasks 随后可被处理；或
+2. 改写 AC6，使 leg 4 在本座位可满足；或
+3. 把两个 filed tasks 播到主检出（ABI `task_write` → author），使常驻链在本任务保持打开时即可启动。
+
+本轮已核（都真实跑过）：anti-drift Touches 硬门 OK（9 actual files ⊆ 10 globs）；`scripts/test.sh --for-task <id> --allow-thin` 绿（83 pass / 0 fail）；`git merge develop` 完成（任务体冲突按 per-hunk union 解：保留 develop 的 `## Blocker` + 本分支的 3 条 Touches）。
+
+（依据：memory `unsatisfiable-ac-requiring-authoring-loops-the-worker-driver` —— 一个只差「作者改写/加注」的 AC 会让 worker-driver 永远重派；worker 应升级，不得静默重循环。）
