@@ -87,7 +87,7 @@ import fs from "node:fs";
 import path from "node:path";
 import { execFileSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
-import { isDirectEntry } from "./gate-script-base.ts";
+import { isDirectEntry, parseArgs as baseParseArgs } from "./gate-script-base.ts";
 
 /** The carrier, repo-relative. AC1: a machine-readable JSON file, parseable without prose search. */
 export const STATE_FILE_REL = ".quay/two-phase-state.json";
@@ -267,22 +267,47 @@ interface ParsedArgs {
   error?: string;
 }
 
+// Thin adapter over the ONE canonical parser (gate-script-base.ts `parseArgs`) — this file carried one
+// of the six hand-rolled token loops filed by a `semantic-dedup-scan` pass as
+// `parse-args-adoption-split` (routine `semantic-dedup-scan`, runId `semantic-dedup-scan-1791908616513`,
+// verdict `divergent-implementation`). It keeps this command's flag set and its ERROR-RETURN model
+// (`error` is a field on the returned object, read by `main`) — errors are handed back by the shared
+// parser (`errors: "return"`) rather than exiting, and `--help` becomes the sentinel `error: "help"`
+// that `main` prints USAGE for. `argv` is the SLICED tail, so the two leading slots the shared parser
+// skips are re-attached here.
 export function parseArgs(argv: string[]): ParsedArgs {
-  const out: ParsedArgs = { json: false };
-  for (let i = 0; i < argv.length; i++) {
-    const a = argv[i];
-    const need = (): string | undefined => argv[++i];
-    if (a === "--to") out.to = need();
-    else if (a === "--reason") out.reason = need();
-    else if (a === "--root") out.root = need();
-    else if (a === "--window") {
-      const v = need();
-      const n = Number(v);
-      if (!Number.isInteger(n) || n <= 0) return { ...out, error: `--window expects a positive integer, got ${JSON.stringify(v)}` };
-      out.window = n;
-    } else if (a === "--json") out.json = true;
-    else if (a === "--help" || a === "-h") out.error = "help";
-    else return { ...out, error: `unknown argument: ${a}` };
+  const parsed = baseParseArgs(["node", "phase-declare", ...argv], {
+    minArgs: 0,
+    usage: '--to <expansion|convergence> --reason "<one sentence>" [--root <repo>] [--window <n>] [--json]',
+    help: "return",
+    errors: "return",
+    unknown: "reject",
+    flags: {
+      to: { type: "string" },
+      reason: { type: "string" },
+      root: { type: "string" },
+      window: { type: "string" },
+      json: { type: "boolean" },
+    },
+  });
+  const str = (v: string | boolean | undefined): string | undefined => (typeof v === "string" ? v : undefined);
+  const out: ParsedArgs = {
+    to: str(parsed.flags.to),
+    reason: str(parsed.flags.reason),
+    root: str(parsed.flags.root),
+    json: parsed.flags.json === true,
+  };
+  if (parsed.help) return { ...out, error: "help" };
+  if (parsed.error) return { ...out, error: parsed.error };
+  if (parsed.args.length > 0) return { ...out, error: `unknown argument: ${parsed.args[0]}` };
+  if (parsed.flags.window !== undefined) {
+    // "" is the shared parser's spelling for a flag that carried NO value; the retired `need()` read
+    // `argv[++i]` past the end as undefined, and the message below interpolated that as `undefined`.
+    const raw = parsed.flags.window;
+    const v = raw === "" ? undefined : String(raw);
+    const n = Number(v);
+    if (!Number.isInteger(n) || n <= 0) return { ...out, error: `--window expects a positive integer, got ${JSON.stringify(v)}` };
+    out.window = n;
   }
   return out;
 }

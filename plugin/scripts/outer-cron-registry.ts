@@ -88,6 +88,7 @@ import crypto from "node:crypto";
 import { execFileSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
 import { extractCanonical, LAYERS } from "./outer-anchor-check.ts";
+import { parseArgs as baseParseArgs } from "./gate-script-base.ts";
 
 export const EXIT_OK = 0;
 export const EXIT_VIOLATED = 1;
@@ -655,39 +656,58 @@ interface CliArgs {
   help: boolean;
 }
 
+// Thin adapter over the ONE canonical parser (gate-script-base.ts `parseArgs`) — this file carried one
+// of the six hand-rolled token loops filed by a `semantic-dedup-scan` pass as
+// `parse-args-adoption-split` (routine `semantic-dedup-scan`, runId `semantic-dedup-scan-1791908616513`,
+// verdict `divergent-implementation`). It keeps this command's flag set and its SILENT-ACCEPT model:
+// the retired loop had no `else` arm, so an unrecognized `--flag` (and any bare positional) was
+// dropped WITHOUT consuming the token after it. `unknown: "skip"` is exactly that reading — the base
+// default `"accept"` would instead eat the next token, so `--bogus --verify` would have swallowed
+// `--verify`. `argv` is the SLICED tail, so the two leading slots are re-attached here.
 export function parseArgs(argv: string[]): CliArgs {
-  const out: CliArgs = {
-    verify: false,
-    show: false,
-    record: false,
-    layer: "",
-    cronId: null,
-    cronExpr: null,
-    cronList: null,
-    canonicalFile: null,
-    registryBase: null,
-    root: process.cwd(),
-    staleSeconds: 7 * 24 * 60 * 60,
-    json: false,
-    help: false,
+  const parsed = baseParseArgs(["node", "outer-cron-registry", ...argv], {
+    minArgs: 0,
+    usage:
+      "[--verify | --show | --record] [--layer <inner|outer>] [--cron-id <id>] [--cron-expr <expr>] " +
+      "[--cron-list <json>] [--canonical-file <file>] [--registry-base <dir>] [--root <dir>] " +
+      "[--stale-seconds <n>] [--json] [--help]",
+    help: "return",
+    unknown: "skip",
+    flags: {
+      verify: { type: "boolean" },
+      show: { type: "boolean" },
+      record: { type: "boolean" },
+      layer: { type: "string" },
+      "cron-id": { type: "string" },
+      "cron-expr": { type: "string" },
+      "cron-list": { type: "string" },
+      "canonical-file": { type: "string" },
+      "registry-base": { type: "string" },
+      root: { type: "string" },
+      "stale-seconds": { type: "string" },
+      json: { type: "boolean" },
+    },
+  });
+  const str = (v: string | boolean | undefined): string | undefined => (typeof v === "string" ? v : undefined);
+  /** The retired loop's `argv[++i] ?? null`: a valueless flag ("" from the shared parser) reads as
+   *  "not supplied" — the same reading, since `argv[++i]` past the end was undefined. */
+  const opt = (v: string | boolean | undefined): string | null => str(v) ?? null;
+  const staleRaw = str(parsed.flags["stale-seconds"]);
+  return {
+    verify: parsed.flags.verify === true,
+    show: parsed.flags.show === true,
+    record: parsed.flags.record === true,
+    layer: str(parsed.flags.layer) ?? "",
+    cronId: opt(parsed.flags["cron-id"]),
+    cronExpr: opt(parsed.flags["cron-expr"]),
+    cronList: opt(parsed.flags["cron-list"]),
+    canonicalFile: opt(parsed.flags["canonical-file"]),
+    registryBase: opt(parsed.flags["registry-base"]),
+    root: str(parsed.flags.root) ?? process.cwd(),
+    staleSeconds: staleRaw === undefined ? 7 * 24 * 60 * 60 : Number(staleRaw),
+    json: parsed.flags.json === true,
+    help: parsed.help === true,
   };
-  for (let i = 0; i < argv.length; i++) {
-    const a = argv[i];
-    if (a === "--verify") out.verify = true;
-    else if (a === "--show") out.show = true;
-    else if (a === "--record") out.record = true;
-    else if (a === "--layer") out.layer = argv[++i] ?? "";
-    else if (a === "--cron-id") out.cronId = argv[++i] ?? null;
-    else if (a === "--cron-expr") out.cronExpr = argv[++i] ?? null;
-    else if (a === "--cron-list") out.cronList = argv[++i] ?? null;
-    else if (a === "--canonical-file") out.canonicalFile = argv[++i] ?? null;
-    else if (a === "--registry-base") out.registryBase = argv[++i] ?? null;
-    else if (a === "--root") out.root = argv[++i] ?? out.root;
-    else if (a === "--stale-seconds") out.staleSeconds = Number(argv[++i] ?? 604800);
-    else if (a === "--json") out.json = true;
-    else if (a === "--help" || a === "-h") out.help = true;
-  }
-  return out;
 }
 
 export function formatShow(registry: Registry | null, layer?: string): string {
