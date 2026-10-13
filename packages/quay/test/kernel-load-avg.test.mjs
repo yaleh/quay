@@ -27,6 +27,9 @@
 //      re-implementation in either layer is a different object, which is what ② alone would miss.
 //   ④ BEHAVIOR — the reading equals the host's REAL /proc/loadavg field 0 (host-dependent: a constant,
 //      a wrong field, or a wrong file all fail it), plus the guard pin below.
+//   ⑤ RUNTIME — the runner PROCESS starts and lands the reading in its production carrier
+//      (`.quay/verification-round.jsonl`'s `load`). See the long note above ⑤ for why ③ alone cannot
+//      see the failure mode this arm exists for.
 //
 // ⛔ WHAT ④ DOES **NOT** MEASURE, stated rather than implied (硬规则 3b: 「没查成」must not be shaped
 // like 「查过且合格」): the catch-to-0 branch is NOT exercised. `readLoadAvg1` reads the absolute path
@@ -34,9 +37,11 @@
 // first adding an injection seam to a telemetry reader — scope this finding did not ask for and which
 // would itself be a second contract to keep. The branch is therefore pinned at SOURCE level (the last
 // assertion) and the negative control below shows why the guard's exact form matters.
-import { test } from "node:test";
+import { test, after } from "node:test";
 import assert from "node:assert/strict";
+import { spawnSync } from "node:child_process";
 import fs from "node:fs";
+import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -46,6 +51,19 @@ import * as fullSuiteNs from "../../../plugin/scripts/full-suite-runner.ts";
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const REPO_ROOT = path.resolve(HERE, "..", "..", "..");
+
+/** The mechanism-layer consumer, spawned as a REAL process by ⑤ (the import in ③ cannot see a
+ *  module-scope `ReferenceError` — see the note above ⑤). */
+const RUNNER = path.join(REPO_ROOT, "plugin", "scripts", "full-suite-runner.ts");
+
+/** Temp roots ⑤ creates, removed once after the file (a spawn that fails mid-arm would otherwise
+ *  leak a `kernel-load-avg-spawn-*` dir on every red run). */
+const SPAWN_ROOTS = [];
+after(() => {
+  for (const dir of SPAWN_ROOTS) {
+    try { fs.rmSync(dir, { recursive: true, force: true }); } catch { /* best-effort cleanup */ }
+  }
+});
 
 /** The byte-identical body the finding keyed on, written as a template literal with escaped `\s` so
  *  the regex source inside the needle survives verbatim. It is the EXACT text of the former
@@ -223,5 +241,78 @@ test("④ behavior: the reading equals the host's REAL /proc/loadavg field 0", (
   assert.ok(
     src.includes("return Number.isFinite(v) ? v : 0;"),
     "the guard must stay `Number.isFinite(v) ? v : 0` — a truthiness/NaN-only guard changes which readings survive",
+  );
+});
+
+// ── ⑤ THE SPAWN ARM — why the other four cannot replace it ────────────────────────────────────────
+// ①–④ are all measured INSIDE this process (source text, or an `import` of the module). Every one of
+// them was GREEN on this branch's first round — and the runner was UNRUNNABLE at the same time.
+//
+// The re-export was spelled `export { readLoadAvg1 as readLoadAvg } from "…"`, which binds ONLY the
+// export table and creates NO module-scope binding. Importing the name (③) resolves through the
+// export table and works; CALLING it from the module's own body (the two production call sites,
+// `run()`'s round-end `load` capture and the crash-path row) was `ReferenceError: readLoadAvg is not
+// defined` — the module could not start at all. This is the measured shape of task
+// gap-routine-semantic-dedup-scan-concurrency-parse-divergence, and of 硬规则 4 推论三: "the alias can
+// be imported" was proven and "the module can call it" was silently assumed. A criterion satisfied by
+// the old arrangement measures nothing about the change.
+//
+// So this arm SPAWNS the consumer as a real process and reads its production carrier. Note the
+// asymmetry that makes it load-bearing: it goes red on the export-table-only spelling, while ③ — the
+// arm that CLAIMS to pin the identity — stays green. (Negative control, run 2026-10-14: restoring the
+// `export { … } from` form left ①②③④ green and turned ⑤ red with exit=1 + the ReferenceError.)
+test("⑤ the runner PROCESS starts and lands the reading in its production carrier", () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "kernel-load-avg-spawn-"));
+  SPAWN_ROOTS.push(root);
+
+  // A fake green suite: the runner needs a command that exits 0 with a green TAP tally. It must NOT be
+  // the real test.sh — this arm measures the runner's own round-end `load` write, not suite scheduling.
+  const suite = path.join(root, "fake-suite.sh");
+  fs.writeFileSync(suite, '#!/usr/bin/env bash\necho "# tests 5"\necho "# pass 5"\necho "# fail 0"\necho "# cancelled 0"\nexit 0\n', { mode: 0o755 });
+
+  // Hermeticity: the same seams the full-suite-runner shards drop — resource gate + systemd-run scope
+  // are real-host side effects a temp root must not pay, and the inherited concurrency knobs are
+  // cleared so the round is a plain default one.
+  const env = { ...process.env, QUAY_TEST_SKIP_RESOURCE_GATE: "1", QUAY_TEST_SKIP_SYSTEMD_RUN: "1" };
+  for (const k of ["QUAY_SERIAL_CONCURRENCY", "QUAY_LOWCONC_CONCURRENCY", "QUAY_TEST_SYSTEMD_RUN_LIMITS"]) delete env[k];
+
+  // Bracket the reading for the same reason ④ does (the kernel re-derives /proc/loadavg on its own
+  // ~2.5–5 s tick, so a bare equality would be a real flake under suite load).
+  const parse = () => Number(fs.readFileSync("/proc/loadavg", "utf8").trim().split(/\s+/)[0]);
+  const before = parse();
+
+  const res = spawnSync(
+    process.execPath,
+    ["--no-warnings", "--experimental-strip-types", RUNNER, "--root", root, "--command", `bash ${suite}`, "--lane-count", "8"],
+    { env, encoding: "utf8", timeout: 120_000 },
+  );
+  const after = parse();
+
+  // THE ARM. On the export-table-only spelling this is `status=1` with the ReferenceError on stderr,
+  // and no round record is ever written — which is exactly what the prior round's suite red looked
+  // like (every test that spawns this runner failed with `runner exits 0 on green, got 1`).
+  assert.equal(
+    res.status,
+    0,
+    `the runner must START and exit 0 on a green fake suite — status=${res.status} signal=${res.signal}\nstderr:\n${(res.stderr || "").slice(-2000)}`,
+  );
+
+  const carrier = path.join(root, ".quay", "verification-round.jsonl");
+  assert.ok(fs.existsSync(carrier), `${carrier} must exist — the round-end record is the runner's production carrier for this reading`);
+  const rows = fs.readFileSync(carrier, "utf8").trim().split("\n").filter(Boolean).map((l) => JSON.parse(l));
+  const round = rows.find((r) => r.state === "green") ?? rows[rows.length - 1];
+  assert.ok(round, "the carrier must carry a round row");
+
+  // The reading reached the LEDGER from the runner's own body — i.e. through the module-scope call
+  // site, the only path an import-based assertion cannot exercise.
+  assert.equal(typeof round.load, "number", `the round row's \`load\` must be a number; got ${JSON.stringify(round.load)}`);
+  assert.ok(Number.isFinite(round.load) && round.load >= 0, `the reading must be finite and non-negative; got ${round.load}`);
+  assert.ok(
+    Number.isFinite(before) && Number.isFinite(after),
+    "this host's /proc/loadavg field 0 must be numeric for this arm to mean anything",
+  );
+  assert.ok(
+    round.load === before || round.load === after,
+    `the runner must have landed /proc/loadavg field 0 verbatim — carrier has ${round.load}, bracketed by ${before} and ${after}`,
   );
 });

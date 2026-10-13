@@ -467,7 +467,16 @@ function toEpochSeconds(iso: string): number {
 // forbidden reverse edge), and it is re-exported under the ORIGINAL name so this module's public
 // surface — and both live importers (`worker-driver.ts`, `worker-fan-in.ts`; the archived
 // plugin/test/checker-cost.test.mjs lives under archive/ now) — is unchanged. 硬规则 5b: 转出，不复制第二份.
-export { readLoadAvg1 as readLoadAvg } from "../../packages/quay/src/kernel/load-avg.ts";
+//
+// ⛔ It must be `import … as readLoadAvg` + `export { readLoadAvg }`, NOT
+// `export { readLoadAvg1 as readLoadAvg } from …`: a bare re-export binds ONLY the export table and
+// leaves NO local name, so the two module-scope calls below (`run()`'s round-end `load` capture and
+// the per-file cost row) were `ReferenceError: readLoadAvg is not defined` — the runner could not
+// start at all, while every import-based assertion stayed green. The `import … as` form binds a real
+// local of the SAME function object, so the export table, the local calls, and the kernel-identity
+// assertion all resolve to one implementation.
+import { readLoadAvg1 as readLoadAvg } from "../../packages/quay/src/kernel/load-avg.ts";
+export { readLoadAvg };
 
 // ── gap-suite-hub-file-responsibility-strip — accounting family extracted to suite-accounting.ts ──
 // The cgroup/systemd accounting family (per-phase cpu/psi differential reads + the systemd `Consumed`
