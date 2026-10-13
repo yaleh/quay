@@ -58,3 +58,11 @@ extra: {}
 - plugin/scripts/capability-catalog-declarations.json
 - docs/analysis/discovery-portfolio.mjs
 - .quay/config.yml
+
+## Blocker
+
+**2026-10-13T11:12:36.854Z — worker 未落地（exited-not-landed）**
+
+- 未落地原因：AC 未全勾（checked 5/6，剩余未勾 1）——续做只需验证并勾选 AC
+- run_id：wk-prod-anchor
+- session_id：1f5d473a-39dd-43f6-93e9-de801b54a6d5
