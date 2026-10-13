@@ -6,7 +6,7 @@ title: "all 3 discovery routines
   transitively imports plugin/scripts/*.ts SOURCE files — confirmed on 0.19.0
   cache and a fresh develop build: no host project other than quay's own live
   checkout has ever produced a discovery round"
-status: todo
+status: ready
 labels:
   - gap
   - defect
