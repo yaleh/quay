@@ -43,4 +43,4 @@ extra: {}
 ## Touches
 - tasks/gap-anchor-takeover-silently-narrows-hosted-kinds-against-stale-desired-state.md
 - plugin/scripts/driver-anchor.ts
-- plugin/test/driver-anchor.test.mjs
+- plugin/test/driver-anchor-takeover.test.mjs
