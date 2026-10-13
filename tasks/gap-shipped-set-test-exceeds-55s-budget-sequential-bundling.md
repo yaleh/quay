@@ -67,12 +67,12 @@ dist-closure 校验、git commit）。
 不得改动 AC 记录里的 `criterion` 文本（那是 AC 记录变更，不在本任务范围）。
 
 ## AC
-- [ ] AC-334 的判据实跑退出 0 且**不为 124**，完成记录贴出原始输出：`timeout 55 node --experimental-strip-types --test plugin/test/shipped-set.test.mjs`（等价于 AC 记录里那条 criterion）。
-- [ ] 余量做成读数：同一宿主上 `time` 实测该测试墙钟 **≤ 30s**（余量 ≥1.8×），完成记录贴出 `real` 行。
-- [ ] 两向控制未被削弱：`grep -c 'AC2 control' plugin/test/shipped-set.test.mjs` ≥ 2；完成记录贴出【把 `publish-dist-branch.sh` 的 rsync 排除表恢复成全量后该测试转红】的实跑输出（`rc≠0`，失败信息指名 `test` / `fixtures` / `scripts/checker-mutation-cases` 之一）。
-- [ ] 产物未因提速而改变：改动前后各装配一次，`plugin/shipped-set-baseline.json` 的 `shipped`（`files` 与 `shLines`）仍与产物自身读数一致；若 `files` 变化必须给出逐项差异并说明原因（默认期望不变、**不 reanchor**）。
-- [ ] 同一条 `bundleEntries` 路径的其它消费者未被改红：`node --experimental-strip-types --test packages/quay/test/npm-pack-e2e.test.mjs plugin/test/shipped-shell-reachability.test.mjs` 退出 0。
-- [ ] `bash scripts/test.sh --for-task gap-shipped-set-test-exceeds-55s-budget-sequential-bundling` 退出 0 且执行 ≥1 个测试文件。
+- [x] AC-334 的判据实跑退出 0 且**不为 124**，完成记录贴出原始输出：`timeout 55 node --experimental-strip-types --test plugin/test/shipped-set.test.mjs`（等价于 AC 记录里那条 criterion）。
+- [x] 余量做成读数：同一宿主上 `time` 实测该测试墙钟 **≤ 30s**（余量 ≥1.8×），完成记录贴出 `real` 行。
+- [x] 两向控制未被削弱：`grep -c 'AC2 control' plugin/test/shipped-set.test.mjs` ≥ 2；完成记录贴出【把 `publish-dist-branch.sh` 的 rsync 排除表恢复成全量后该测试转红】的实跑输出（`rc≠0`，失败信息指名 `test` / `fixtures` / `scripts/checker-mutation-cases` 之一）。
+- [x] 产物未因提速而改变：改动前后各装配一次，`plugin/shipped-set-baseline.json` 的 `shipped`（`files` 与 `shLines`）仍与产物自身读数一致；若 `files` 变化必须给出逐项差异并说明原因（默认期望不变、**不 reanchor**）。
+- [x] 同一条 `bundleEntries` 路径的其它消费者未被改红：`node --experimental-strip-types --test packages/quay/test/npm-pack-e2e.test.mjs plugin/test/shipped-shell-reachability.test.mjs` 退出 0。
+- [x] `bash scripts/test.sh --for-task gap-shipped-set-test-exceeds-55s-budget-sequential-bundling` 退出 0 且执行 ≥1 个测试文件。
 
 ## DoD
 真实落地：AC-334 的判据在本机**实跑**变绿，且**余量有原始读数支撑**（不是"测试存在"、也不是"fixture 绿"）。
@@ -80,6 +80,86 @@ dist-closure 校验、git commit）。
 ④两条 RED 控制的实跑输出。`bundleEntries` 若改成并发，须另贴**峰值 RSS** 读数（本仓库有 suite 内存包络）
 与"并发产物 vs 串行产物一致"的比较结果（对同一 WORK 树两次装配后 `diff -r`，或两次产物的 tar 哈希相等）。
 仅把 55s 上限调高、或把控制削成 fixture、或只让本测试变快却使同路径的 npm-pack-e2e / shipped-shell-reachability 转红，均不算完成。
+
+## 完成记录
+
+修法 = **(B)**：`bundleEntries` 里逐个 `await esbuild.build()` 的串行循环改成**宿主推导宽度的有界并发池**
+（`packages/quay/scripts/build-plugin-dist.mjs`，本任务唯一改动的产品文件；宽度 = `os.availableParallelism()`，只被入口数封顶，
+⛔ 不写并发字面量 —— CLAUDE.md 硬规则 4 推论二）。**未做 (A)/(C)**：单 (B) 已把判据从 57.7s 压到 14.9s，
+不需要再削减两条 RED 控制各自独立的那次真实装配（保留两次独立装配，控制面更强）。
+
+**根因的一处实测更正（与 Proposal 的推断不同，按读数写）**：每个 `build()` 的那 ~110ms **不是"入口多/包大"**，
+而是**装配树所在文件系统**的每次调用常数。同一台机、同一个 esbuild，对**单行模块** `export const x = 1;` 连打十次：
+
+| 位置 | 每次 |
+|---|---|
+| `/tmp`（ext4, /dev/vda2；tmp root 目录下约 18 万条目） | **116ms** |
+| `/data`（xfs, /dev/vdb） | **14ms** |
+
+真实 publish 在 `resolveTmpRoot()` 选出的 `/tmp` 下的 throwaway 树里装配，所以每次 publish 都吃慢的那一侧
+（115 × ~127ms ≈ 15s/次）。这也解释了为什么"把循环改成并发"能线性收敛：那部分是 I/O 等待，不是 CPU。
+
+### ① 判据退出码（AC 记录 `criterion` 原样脚本实跑）
+
+```
+AC-334 criterion: PASS (rc=0, not 124)
+```
+内层 `timeout 55 node --experimental-strip-types --test plugin/test/shipped-set.test.mjs` → `rc=0`，`ℹ tests 10 / pass 10 / fail 0`。
+
+### ② 余量读数（同一宿主的 `real` 行）
+
+```
+real	0m14.943s
+```
+同宿主、同命令、改动前：`real 0m57.670s`。⇒ 对 55s 预算余量 **3.68×**；对 AC 的 30s 线 **2.01×**（AC 要求 ≥1.8×）。
+
+### ③ 产物对照（同一 stub 树；PRE = develop 版 `build-plugin-dist.mjs`，POST = 本改动）
+
+| 装配 | files | shLines | bytes |
+|---|---|---|---|
+| PRE（串行，develop 版） | 280 | 7345 | 59,270,830 |
+| POST（并发池） | 280 | 7345 | 59,270,836 |
+| 当前工作树产物（vendor 补齐后） | 281 | 7345 | 59,415,269 |
+| `plugin/shipped-set-baseline.json` 的 `shipped` | 281 | 7345 | 58,847,285 |
+
+⇒ **`files` 未因改动变化（280 = 280）、`shLines` 未变（7345 = 7345）**；vendor 补齐后的产物读数 281 / 7345
+与 `baseline.shipped` 的 281 / 7345 **逐位相同**，`judgeShippedSize` 的 `over` 为空。**未 reanchor。**
+PRE/POST 那两跑读到 280 而非 281，原因不在改动：`.worktreeinclude` 只声明 `/plugin/vendor/*/dist/*.js`，
+`dashboard-kernel-vectors.json` 是后来由 vendor 刷新带入工作树的（补齐后即 281）。
+`bytes` 未被门禁（esbuild 的 per-module 路径注释让字节总数随装配树位置变，见 `SIZE_GATED_AXES`），差 6 字节即该注释。
+逐文件 sha256：PRE/POST 集合 **0 增 0 删**，仅两类 1 行差异 —— esbuild 的随机 throwaway 目录名注释，
+以及**改动前就已存在**的 `__toESM(require_dist(), 1)` / `__toESM(require_dist())` 元数抖动：
+用 develop 版串行循环连跑两次同样复现（3 个文件各差这 1 行），与并发无关。
+
+### ④ 两条 RED 控制
+
+- 文件内控制未被削弱：`grep -c 'AC2 control' plugin/test/shipped-set.test.mjs` = **2**。
+- 源码级控制（把 `publish-dist-branch.sh` 的 rsync 排除表恢复成全量后实跑该测试）→ **rc=1**，失败信息指名三个禁项：
+
+```
+✖ AC2: the published artifact carries no dev-only content, and its totals are within the recorded clean build
+  AssertionError: the artifact must carry no rule-excluded path (619 found)
+  + 'fixtures <- fixtures/'
+  + 'test <- test/'
+  + 'scripts/checker-mutation-cases <- checker-mutation-cases/'
+```
+（变异用 `cp` 备份还原，还原后 md5 `a8ba5d821c04d238be10119176f77357` 与备份一致。）
+
+### ⑤ 并发 ⇒ 峰值 RSS + 并发/串行逐字节对照
+
+- 峰值 RSS（`/proc/self/status` `VmHWM`，同一 126 入口树，同一进程内逐宽度实测）：
+  width=1 **113MB** · 4 → 113MB · 8 → 114MB · 16 → 113MB · 32 → 113MB · 115 → **112MB** ⇒ **宽池不比串行多占内存**。
+- 整次 publish 的 maxRSS（`/usr/bin/time -v`）：串行 **107MB** → 并发池 **106MB**。
+- 同一棵 WORK 树、同一入口集：`bundleEntries(concurrency=1)` 与 `bundleEntries(concurrency=<host>)` 各装配一次，
+  126 个产物的 sha256 集合 **0 增 0 删**，返回的 outfiles 数组逐项相同（保持输入序）。
+- 整次 publish 耗时：串行 **17,486ms** → 并发池 **3,952ms**。
+
+### ⑥⑦ 同路径其它消费者与 scoped 门
+
+- `node --experimental-strip-types --test packages/quay/test/npm-pack-e2e.test.mjs plugin/test/shipped-shell-reachability.test.mjs` → **rc=0**（19 pass / 0 fail）。
+- `bash scripts/test.sh --for-task gap-shipped-set-test-exceeds-55s-budget-sequential-bundling` → **rc=0**（73 pass / 0 fail），
+  实跑了 `plugin/test/shipped-set.test.mjs` 与 `plugin/test/shipped-shell-reachability.test.mjs` 两个测试文件（≥1）。
+- 反漂移 Touches 检查：`ANTI-DRIFT OK — 1 actual file(s), all within declared Touches`。
 
 ## Touches
 - `plugin/test/shipped-set.test.mjs`
