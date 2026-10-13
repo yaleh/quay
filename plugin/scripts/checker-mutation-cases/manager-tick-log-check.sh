@@ -2,7 +2,9 @@
 # Mutation case for manager-tick-log-check (gap-manager-tick-log-check-mutation-case).
 #
 # WHY THIS FILE EXISTS: manager-tick-log-check.sh 在 P4 守卫谱系里是【已声明】守卫
-# (capability-catalog GUARD_OBJECT: `manager-tick-log-check.sh → file:orchestration/manager-tick-log.md`)
+# (capability-catalog GUARD_OBJECT: `manager-tick-log-check.sh → runtime:orchestration/manager-tick-log.md`
+#  —— 用 `runtime:` 而非 `file:`：该 tick log 被 .gitignore 忽略，是本机运行时遥测、不进任何
+#  checkout/快照；`file:` 会让 guard-lineage-check 在快照根上把它的构造性缺席读成「对象已删」)
 # 且在外层 tick doc 里每轮被真实调用（quay-init 把它落到 consumer 的 orchestration/ 布局）——
 # 但它的判定窗口内 `fired` 为空，
 # 又【没有 mutation case】⇒ guard-lineage-check.ts 把它归入 suspicious（「never-fired and not

@@ -71,11 +71,17 @@ test("enumerateGuards — 三目录按后缀 -check|-guard|-audit 枚举, 非守
   assert.equal(foo.stem, "foo-check");
 });
 
-test("classifyDeclaration — file: 前缀 = file 对象, 其余 = invariant", () => {
+test("classifyDeclaration — file: / runtime: 两种前缀, 其余 = invariant", () => {
   assert.equal(classifyDeclaration("file:orchestration/x.md").kind, "file");
   assert.equal(classifyDeclaration("file:orchestration/x.md").filePath, "orchestration/x.md");
+  // runtime: gitignored 运行时载体 —— 独立 kind（gap-guard-lineage-runtime-carrier-not-evaluated）,
+  // ⛔ 不得与 `file` 或 `invariant` 同形。
+  assert.equal(classifyDeclaration("runtime:orchestration/tick-log.md").kind, "runtime");
+  assert.equal(classifyDeclaration("runtime:orchestration/tick-log.md").filePath, "orchestration/tick-log.md");
   assert.equal(classifyDeclaration("invariant:some contract").kind, "invariant");
   assert.equal(classifyDeclaration("no prefix").kind, "invariant");
+  // 前缀必须是**精确**的: `runtimeX:` / `files:` 不是新形态, 仍按 invariant。
+  assert.equal(classifyDeclaration("runtimeX:y").kind, "invariant");
 });
 
 test("parseGuardObjects — 只读 GUARD_OBJECT 表, 不读进 QUESTION/CADENCE/CONSUMER 等表", () => {
@@ -104,11 +110,25 @@ test("parseGuardObjects — 读不懂的声明数据 ⇒ 空表 (不是伪造的
   }
 });
 
-test("checkObjectPresent — file 存在/缺失, invariant 不可机械核验, 未声明", () => {
+test("checkObjectPresent — file 存在/缺失, runtime NOT-EVALUATED, invariant 不可机械核验, 未声明", () => {
   const dir = mktmp({ "a/b.md": "x" });
   assert.equal(checkObjectPresent(dir, classifyDeclaration("file:a/b.md")).present, true);
   assert.equal(checkObjectPresent(dir, classifyDeclaration("file:a/missing.md")).present, false);
   assert.equal(checkObjectPresent(dir, classifyDeclaration("invariant:some rule")).present, null);
+
+  // runtime: 即使该路径**物理上不存在**（快照/worktree 的常态），也必须报 NOT-EVALUATED ——
+  // present 非 false、kind 可区分、note 说明原因（⛔ 不是 "object MISSING"）。
+  const rtAbsent = checkObjectPresent(dir, classifyDeclaration("runtime:a/manager-tick-log.md"));
+  assert.notEqual(rtAbsent.present, false, "runtime carrier absence must NOT read as present:false (would be a fabricated deletion)");
+  assert.equal(rtAbsent.present, null);
+  assert.equal(rtAbsent.kind, "runtime");
+  assert.match(rtAbsent.note, /runtime carrier/);
+  assert.doesNotMatch(rtAbsent.note, /MISSING/);
+  assert.notEqual(rtAbsent.note, checkObjectPresent(dir, classifyDeclaration("invariant:x")).note,
+    "runtime and invariant must not share a note (硬规则 3b: 两种「不可判」各有各的原因)");
+  // 差分对照: 同一路径换回 `file:` 前缀 ⇒ present:false (证明分的是**声明种类**, 不是路径存不存在)。
+  assert.equal(checkObjectPresent(dir, classifyDeclaration("file:a/manager-tick-log.md")).present, false);
+
   const und = checkObjectPresent(dir, undefined);
   assert.equal(und.declared, false);
   assert.equal(und.present, null);
@@ -202,6 +222,40 @@ test("analyze — AC1/AC2 比例 + AC3 对象存在 + AC4 preventive/suspicious 
   );
   // manager-tick-log-check 无 mutation case → suspicious (诚实的判别力: 不把两者混为一谈)
   assert.ok(report.suspicious.some((s) => s.basename === "manager-tick-log-check.sh"));
+});
+
+// ── gap-guard-lineage-runtime-carrier-not-evaluated: runtime: 声明在快照根上报 NOT-EVALUATED ──────
+// 缺陷: `file:` 声明一条 gitignored 运行时载体 ⇒ fs.existsSync 的 false 同时代表「对象真被删了」与
+// 「该对象是运行时载体、本根构造上就没有它」⇒ 一次从未发生的删除被报成已发生的删除 (硬规则 3b)。
+// 本用例在**同一份 fixture 里**同时放 runtime（载体缺失）与 file（真删除缺失）两条，钉住两者取值不同形。
+test("analyze — runtime: 声明报 NOT-EVALUATED, 同 fixture 的真缺 file: 对象仍报 MISSING", () => {
+  const dir = mktmp({
+    "plugin/scripts/manager-tick-log-check.sh": "#!/usr/bin/env bash\n",
+    "plugin/scripts/gone-check.ts": "export const x=1;\n",
+    // ⛔ 故意【不】创建 orchestration/manager-tick-log.md —— 这正是快照/worktree 的形态。
+    "catalog.json": JSON.stringify({
+      GUARD_OBJECT: {
+        "manager-tick-log-check.sh": "runtime:orchestration/manager-tick-log.md",
+        "gone-check.ts": "file:orchestration/absent.md",
+      },
+    }),
+    "cost.jsonl": '{"name":"manager-tick-log-check","ms":1,"n":1,"load":1,"at":"2026-10-01T00:00:00Z","verdict":"pass"}\n',
+  });
+  const report = analyze(dir, { catalogFile: path.join(dir, "catalog.json"), costFile: path.join(dir, "cost.jsonl") });
+
+  const rt = report.declared.find((d) => d.basename === "manager-tick-log-check.sh");
+  assert.equal(rt.kind, "runtime", "kind 必须可区分 (⛔ 不是 file/invariant)");
+  assert.notEqual(rt.present, false, "runtime 载体在快照上的缺席不是 present:false");
+  assert.equal(rt.present, null);
+  assert.match(rt.note, /runtime carrier|NOT-EVALUATED/);
+  assert.doesNotMatch(rt.note, /object MISSING/);
+
+  // 负控制 (硬规则 2 的另一半): 真 file: 对象缺失必须**仍然**报 present:false / MISSING ——
+  // 修法不得一刀切。
+  const gone = report.declared.find((d) => d.basename === "gone-check.ts");
+  assert.equal(gone.kind, "file");
+  assert.equal(gone.present, false);
+  assert.equal(gone.note, "object MISSING");
 });
 
 // ── gap-architecture-review-detectors-not-runnable-off-quay-repo: --root 不必是 quay 检出 ────────────

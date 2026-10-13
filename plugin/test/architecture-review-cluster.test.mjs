@@ -61,8 +61,12 @@ const LINEAGE = {
     { basename: "guard-b.ts", dir: "plugin/gate-scripts" },
   ],
   declared: [
-    { basename: "guard-a.ts", dir: "plugin/scripts", present: false },
-    { basename: "guard-c.ts", dir: "plugin/scripts", present: true },
+    { basename: "guard-a.ts", dir: "plugin/scripts", kind: "file", present: false },
+    { basename: "guard-c.ts", dir: "plugin/scripts", kind: "file", present: true },
+    // gitignored 运行时载体 (gap-guard-lineage-runtime-carrier-not-evaluated): 在任何快照根上
+    // present:null ∧ kind:"runtime" ⇒ ⛔ 不是「缺失对象」, 不得成簇。加进共享 fixture 让**每一条**
+    // 既有聚类断言都在带 runtime 行的输入上跑（本行不改变任何簇的 id / rawCount / files）。
+    { basename: "tick-log-guard.sh", dir: "plugin/scripts", kind: "runtime", present: null },
   ],
 };
 
@@ -112,11 +116,42 @@ test("AC1 — per-source clustering maps each detector's shape to clusters", () 
 
   const lineage = clusterLineageReport(LINEAGE);
   assert.deepEqual(lineage.map((c) => c.clusterId), ["P4-suspicious-guards", "P4-missing-guard-object"]);
+  // runtime 载体 (tick-log-guard.sh) 不在缺失簇的 files 里 (硬规则 3b: 快照缺席 ≠ 已删)。
+  const missing = lineage.find((c) => c.clusterId === "P4-missing-guard-object");
+  assert.deepEqual(missing.files, ["plugin/scripts/guard-a.ts"], "只收真 file 对象的缺失");
+  assert.equal(missing.rawCount, 1);
 
   const deletion = clusterDeletionReport(DELETION);
   assert.deepEqual(deletion.map((c) => c.clusterId), ["P1-deletion-closure"]);
   assert.equal(deletion[0].rawCount, 2);
   assert.match(deletion[0].label, /R=2\.00/);
+});
+
+// ── gap-guard-lineage-runtime-carrier-not-evaluated · AC4 ────────────────────────────────────────
+// 两个方向都钉住（硬规则 2 两半）:
+//   ① gitignored 运行时载体 ⇒ **不**产出 P4-missing-guard-object;
+//   ② 真缺的 `file:` 对象  ⇒ **仍**产出该簇。
+// 且判据必须是**按 kind 显式**的差分（不是靠 present:null 恰好 ≠ false 的隐式巧合）—— 下面第三条
+// 对照把同一个 basename 的 kind 从 file 翻到 runtime 而 present 固定为 false：成簇与否必须跟着翻转。
+test("AC4 — runtime 载体不成缺失簇; 真缺 file 对象仍成簇; 判据按 kind 而非 present 的巧合", () => {
+  const rt = clusterLineageReport({
+    declared: [{ basename: "manager-tick-log-check.sh", dir: "plugin/scripts", kind: "runtime", present: null }],
+  });
+  assert.deepEqual(rt.map((c) => c.clusterId), [], "runtime 载体 ⇒ 不产出 P4-missing-guard-object");
+
+  const fileGone = clusterLineageReport({
+    declared: [{ basename: "gone-check.ts", dir: "plugin/scripts", kind: "file", present: false }],
+  });
+  assert.deepEqual(fileGone.map((c) => c.clusterId), ["P4-missing-guard-object"], "真 file 对象缺失 ⇒ 簇照出");
+  assert.equal(fileGone[0].rawCount, 1);
+  assert.deepEqual(fileGone[0].files, ["plugin/scripts/gone-check.ts"]);
+
+  // 差分对照: 同一 basename, present 固定 false, 只把 kind 从 file 翻到 runtime ⇒ 簇必须有/无翻转。
+  // 若判据退回隐式的 `present === false`（不再看 kind），第二条断言立刻变红 —— 这就是「显式」的证据。
+  const asFile = clusterLineageReport({ declared: [{ basename: "x-check.ts", dir: "plugin/scripts", kind: "file", present: false }] });
+  const asRuntime = clusterLineageReport({ declared: [{ basename: "x-check.ts", dir: "plugin/scripts", kind: "runtime", present: false }] });
+  assert.deepEqual(asFile.map((c) => c.clusterId), ["P4-missing-guard-object"]);
+  assert.deepEqual(asRuntime.map((c) => c.clusterId), [], "整个 runtime 类永不成为缺失对象（即便它报 present:false）");
 });
 
 // ── 阈值谓词：cluster 阶段消费检测器自己的判定（gap-arch-review-cluster-ignores-detector-flag-predicate
