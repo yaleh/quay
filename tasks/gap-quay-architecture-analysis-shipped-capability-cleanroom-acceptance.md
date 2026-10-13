@@ -31,8 +31,8 @@ depends_on:
 5. Report, explicitly and separately, which of the four states — code exists / enabled / autonomously invoked / produced a verified landed result with no human pointing at the specific defect — each of the four bundled routines has reached on each of the two hosts, by the end of this task's observation window.
 
 ## Acceptance Criteria
-- [ ] AC1: positive-control clean-host run — all four routines' first real round record pasted (no spawn errors attributable to packaging/root-resolution for any of them).
-- [ ] AC2: negative-control clean-host run on the pre-fix build — `architecture_review` fails as predicted; the other three routines are shown unaffected (pasted side-by-side).
+- [x] AC1: positive-control clean-host run — all four routines' first real round record pasted (no spawn errors attributable to packaging/root-resolution for any of them).
+- [x] AC2: negative-control clean-host run on the pre-fix build — `architecture_review` fails as predicted; the other three routines are shown unaffected (pasted side-by-side).
 - [ ] AC3: ClaudeCodeUI real-host leg — the fixed official build is live (anchor takeover verified the same way as this session's prior two swaps: readlink/cmdline/driver status), and at least one real, naturally-occurring round from the bundle is pasted from that host's own carrier.
 - [x] AC4: no budget ceiling was changed on either host during this task — `.quay/config.yml` diffed before/after on both, pasted.
 - [x] AC5: the four-state classification (code exists / enabled / invoked / closed-loop-confirmed) is reported per routine per host — explicitly, not glossed over, including any routine that does NOT reach "closed-loop-confirmed" within the observation window.
@@ -46,98 +46,163 @@ depends_on:
 
 ## Probe methodology (reproducible)
 
-Two `dist-plugin` builds; in neither case was a quay source checkout used as the kernel:
-- **FIXED** `/data/home/yale/work/quay-scratch/official-dist-acceptance-fixed` — built by `plugin/scripts/publish-dist-branch.sh --branch dist-plugin-acceptance-fixed` from develop `4732d018b` (both prerequisites landed). `grep -c readArchitectureReviewConfig scripts/dist/quality-gate-driver.js` = 3.
-- **PRE-FIX** `/data/home/yale/work/quay-scratch/official-dist-020-dev` — built from `8bfe8df5d` (carries Task D's `docs/analysis` staging, not the two arch-review fixes). The same grep = 0.
+Round 1 (2026-10-13, superseded, verdict FAILS): raw evidence under `/data/home/yale/work/quay-scratch/acc-evidence/`.
 
-Both prereqs ARE landed (`status: done`), so the DoD's block clause does not fire. Clean host = fresh git repo on branch `develop`, laid down by `<kernel>/vendor/quay/dist/quay.js init --root <host> --test-command "bash scripts/test.sh"`, four `loop.<name>:` blocks appended, `.quay/plugin` repointed at the KERNEL tree (never at `/data/home/yale/work/quay`). One real `quality-gate-driver --once` round per build. Raw evidence: `/data/home/yale/work/quay-scratch/acc-evidence/` (round JSONL, assembly logs, config before/after, suite logs).
+**Round 2 (2026-10-14, THIS round — the blocking dependency `gap-architecture-review-detectors-not-runnable-off-quay-repo` has landed `done`).** Raw evidence: `/data/home/yale/work/quay-scratch/acc-evidence-r2/`.
+
+- **FIXED-r3** `/data/home/yale/work/quay-scratch/official-dist-acceptance-fixed-r3` — `plugin/scripts/publish-dist-branch.sh --branch dist-plugin-acceptance-fixed-r3` from develop `9ac168ba9` (orphan commit `cf8522811` "dist-plugin: build from 9ac168ba9"). Ships all three detectors — `scripts/dist/{deletion-closure,guard-lineage,identity-replication}-check.js`; `grep -c readArchitectureReviewConfig scripts/dist/quality-gate-driver.js` = 3, `grep -c kernelSiblingArgv` = 5, `grep -c 'runtime:' scripts/dist/guard-lineage-check.js` = 18 (the guard-lineage semantics change that landed mid-round is included).
+- **FIXED-r2** `/data/home/yale/work/quay-scratch/official-dist-acceptance-fixed-r2` — the same build from the develop tip at this round's start (`d7381ed6e`, orphan `e195869c6`). Kept as a **replication**: it returns the identical four-routine verdicts, so the result is stable across the two revisions.
+- **PRE-FIX** `/data/home/yale/work/quay-scratch/official-dist-020-dev-plain` — an `rsync --exclude=.git` copy of the round-1 PRE-FIX artifact (worktree HEAD `60cacaf3d`, built from `8bfe8df5d`). Both greps = 0/0; `find` for guard-lineage/deletion-closure → no output (they shipped in no form at all).
+
+⛔ **Methodology correction made this round (worth recording):** `official-dist-020-dev` is a **linked git worktree** of `/data/home/yale/work/quay` (`.git` file → `gitdir: /data/home/yale/work/quay/.git/worktrees/official-dist-020-dev`). `quay init` run out of it resolved the workspace's `.quay/plugin` symlink **through git to the quay source checkout** `/data/home/yale/work/quay/plugin` — silently contaminating the "clean host" premise. Fixed by using the `.git`-free plain copy; the PRE-FIX host's `readlink -f .quay/plugin` now names the kernel tree, never `/data/home/yale/work/quay`.
+
+Each clean host = a fresh `git init -b develop` scratch repo (`README.md`, `src/a.ts`, `scripts/test.sh`) laid down by `<kernel>/vendor/quay/dist/quay.js init --root <host> --test-command "bash scripts/test.sh"`, four `loop.<name>:` blocks appended, then one real `quality-gate-driver --once` round.
 
 ## Verdict
 
-The clean-room acceptance **FAILS at its core**. The bundle is only half-shipped: `open_semantic_discovery` and `arch_discovery` do run real rounds on a bare host; `architecture_review` cannot produce a single result in ANY install form; `discovery_method` is blocked by a host artifact. Cause filed as **`gap-architecture-review-detectors-not-runnable-off-quay-repo`**.
+**Round 2: the acceptance's CORE now PASSES.** AC1 and AC2 are both satisfied against the shipped artifact, on clean hosts with no quay source checkout. Round 1's verdict ("FAILS at its core"; cause `gap-architecture-review-detectors-not-runnable-off-quay-repo`) is discharged by that fix, which landed `done` and is now verified end-to-end **from a shipped tree** rather than from source.
 
-## Blocked — dependency declared (2026-10-14, continuation round)
+`architecture_review` — which in round 1 could not produce a single result in ANY install form — now runs all three detectors from the shipped bundle on a bare host and returns a real, legible verdict. The negative control, which in round 1 could not isolate the fix as cause (both builds behaved identically on every routine), now does: the two builds differ on exactly one routine, in exactly the predicted direction, with the other three held constant.
 
-`depends_on` now also carries `gap-architecture-review-detectors-not-runnable-off-quay-repo`, added **through the ABI** (`task_write`) in this round. Verified mechanically, not asserted: `depsReadinessFor` on this task returns `ready:false, blockingDeps:['gap-architecture-review-detectors-not-runnable-off-quay-repo'], doneDeps:[the two landed prereqs]`, and `slot-refill.ts:1084` defers on that predicate (`defer(id, "deps-not-ready")`) — so this task is out of the dispatch pool until that gap lands. This is the DoD's own block clause being invoked, not a manual patch.
+**Outstanding: AC3** (the ClaudeCodeUI live-anchor deployment leg), reported below with counts. It is not a defect in the bundle; it is a production-deployment decision this round did not take unilaterally.
 
-The prior round's finding was re-verified this round against current develop (it is not a stale tail):
-- `plugin/scripts/quality-gate-driver.ts` `kernelDetectorArgv` still builds `path.join(resolveKernelScriptsDir(), "<name>.ts")`, and its own doc-comment still records the residual verbatim — a dist-only install (no raw `.ts`) still ENOENTs, and it names `driver-runtime.kernelSiblingArgv()` as the thing "那是另一件事…不在本任务范围内".
-- `identity-replication-check.ts:1301` still hard-refuses any root lacking `<root>/plugin/scripts` (`exit 2`) — true of every non-quay host, in **every** install form, which is why the two landed prerequisites cannot make AC1 pass.
-- In the FIXED artifact: `identity-replication-check` ships only as `scripts/dist/identity-replication-check.js`; `guard-lineage-check` and `deletion-closure-check` ship in no form at all.
+## Blocked — dependency declared (prior round) — now DISCHARGED
 
-**Residue for a human (not something this task can discharge by running longer):**
-1. AC1's premise — that `architecture_review` *should* run against a non-quay root — is a scoping question; the fix task now owns it (its AC3 requires the detectors to return a real report on a root with no `plugin/scripts`).
-2. AC3 additionally needs someone to authorise swapping another project's **live** anchor (ClaudeCodeUI pid 675243, still on the PRE-fix kernel), which this round again did **not** do: that build does not deliver the capability it would be deployed under, and the swap is outward-facing.
+`depends_on` carries `gap-architecture-review-detectors-not-runnable-off-quay-repo` (added through the ABI in the round-1 continuation). That task is now `status: done` (fan-in `37d467e7a`), so the DoD's block clause no longer fires and this round was dispatchable. The round-1 text of this section remains in `git log -p` for this file; it is no longer operative.
 
-## AC1 — FAILS (positive control, FIXED build)
+## AC1 — PASS (round 2, positive control, FIXED-r3 build from develop `9ac168ba9`)
+
+Clean host `acc-host-r3` (no quay source checkout; `.quay/plugin -> .../official-dist-acceptance-fixed-r3`). One real round:
 
 ```
-architecture-review     => not-evaluated | unparseable identity-replication output (exit 1): (empty output)
-arch-discovery          => verified      | scan ran: 4 finding_fp (4 new, 0 repeated, 0 gone), 0 transition(s), wall 1023ms, peak RSS 109568kB; appended 4 finding + 1 scan-round line to .quay/arch-discovery-findings.jsonl
-discovery-method        => failed        | ingest refused — EVIDENCE_STORE_MISSING:.quay/architecture-evidence-store.jsonl-not-present-under-<clean-host> (nothing appended, last-run not advanced)
-open-semantic-discovery => verified      | round ran (invoked_by:resident-driver, interval 60m): investigator read the pin with Read,Grep,Glob, 0 cluster(s) from 1 run(s), 0 verified, 0 CONFIRMED after independent refutation, 1 model call(s) costing $0.00687, wall 9095ms
+$ node <K>/scripts/dist/quality-gate-driver.js --once --root <host> --run-id acc-pos-fixed-r3 --json
+architecture-review      => verified | not-triggered (no candidate clusters)
+arch-discovery           => verified | scan ran: 4 finding_fp (4 new, 0 repeated, 0 gone), 0 transition(s), wall 1359ms, peak RSS 111616kB; appended 4 finding + 1 scan-round line to .quay/arch-discovery-findings.jsonl
+discovery-method         => failed   | ingest refused — EVIDENCE_STORE_MISSING:.quay/architecture-evidence-store.jsonl-not-present-under-/data/home/yale/work/quay-scratch/acc-host-r3 (nothing appended, last-run not advanced)
+open-semantic-discovery  => verified | round ran (invoked_by:resident-driver, interval 60m): investigator read the pin with Read,Grep,Glob, 0 cluster(s) from 1 run(s), 0 verified, 0 CONFIRMED after independent refutation, 1 model call(s); appended 1 scan-round + 0 cluster record(s)
 ```
 
-`architecture_review`'s record IS a spawn/root-resolution error attributable to packaging, so AC1's parenthetical is unmet. Three independent blockers, each sufficient, all reproduced against the shipped tree:
+Exact `architecture-review` fact — the routine that could not produce a result in round 1:
 
 ```
-# blocker 1 — what kernelDetectorArgv asks for is a raw .ts the artifact never ships
-$ node --experimental-strip-types <kernel>/scripts/dist/identity-replication-check.ts --root <host> --json
-MODULE_NOT_FOUND                                                        exit=1
-# blocker 2 — and the bundle it DOES ship is still stopped, by the detector's own root gate
-$ node <kernel>/scripts/dist/identity-replication-check.js --root <host> --json
-ERROR: plugin/scripts not found under <host> — is --root correct?       exit=2
-# blocker 3 — two of the three detectors ship in no form at all (no .ts, no scripts/dist/*.js)
-$ find <kernel> -name '*guard-lineage*' -o -name '*deletion-closure*'
-(no output)
+{"name":"architecture-review","state":"verified","reason":"not-triggered (no candidate clusters)",
+ "value":{"fired":false,"reasons":[],"clusterCount":0,"judgedCount":0,"distribution":null,"actionableCount":0,
+          "submittedKeys":[],"actionabilityNotEvaluated":0,"gapFiled":false,"gapExitCode":null,"gapError":null}}
 ```
 
-With a SOURCE-form kernel (raw `.ts` present, so all three ARE locatable) the same clean host still fails, at the detectors' own gate: `identity-replication-check.ts:1306`, `guard-lineage-check.ts:416`, `deletion-closure-check.ts:476` each exit 2 with `plugin/scripts not found under <root> — is --root correct?`. So architecture-review is not deployable to a non-quay host in any install form — the two landed prerequisites do not make it so. (The sibling A-domain checker `kernel-sibling-resolution-check.ts` returns `status: pass` on this code, which is why the class was invisible to it.)
+and the routine's own round record, written on the clean host:
 
-## AC2 — negative control ran; it REFUTES attribution rather than proving it
+```
+$ cat <host>/.quay/architecture-review-round.jsonl
+{"round":0,"judgedAt":"2026-10-13T18:30:00.799Z","state":"not-triggered","triggerReasons":[],"clusterCount":0,"clusters":[],"reason":"no candidate clusters (three detectors produced zero suspicious groupings)"}
+```
 
-Same host content, PRE-fix build, side-by-side with AC1:
+The assembly line (stderr) shows the fix is live **in the artifact**, not only in source:
 
-| routine | PRE-fix build | FIXED build |
+```
+architecture-review 例程已装配（enabled, interval=60m [来源: config]，检测器脚本经 kernelSiblingArgv() 解析到本 kernel 自己的安装位置
+（raw .ts 或 scripts/dist/<name>.js，都缺席 ⇒ not-evaluated:detector-script-unresolved:<name>，⛔ 不 spawn 不存在的路径），⛔ 不是目标 root 的；
+--root 仍传目标工作区）
+```
+
+**Replication:** the FIXED-r2 build (develop `d7381ed6e`, the tip at this round's start) returned the identical four verdicts, including `architecture-review => verified | not-triggered`. The result therefore does not depend on which of the two revisions the artifact was cut from.
+
+**AC1's parenthetical is met:** no routine's record is a spawn/root-resolution error attributable to packaging. `discovery_method`'s `failed: EVIDENCE_STORE_MISSING` is a named, legible host-artifact condition (a fresh host has no `.quay/architecture-evidence-store.jsonl`) and is byte-identical on BOTH builds — not attributable to packaging, and not the fix's concern.
+
+## AC2 — PASS (round 2, negative control, PRE-FIX build)
+
+Same host content, same four `loop.` blocks, one real round per build, read side-by-side from each host's own `quality-round.jsonl`:
+
+| routine | PRE-FIX build (`8bfe8df5d`) | FIXED-r3 build (`9ac168ba9`) |
 |---|---|---|
-| architecture-review | `not-evaluated: unparseable identity-replication output (exit 1)` | identical |
-| arch-discovery | `verified` (4 findings, wall 1353ms) | `verified` (wall 1023ms) |
-| open-semantic-discovery | `verified` (1 model call, $0.008544, wall 10.6s) | `verified` (1 model call, $0.00687, wall 9.1s) |
-| discovery-method | `failed: EVIDENCE_STORE_MISSING` | identical |
+| architecture-review | `not-evaluated: unparseable identity-replication output (exit 1): (empty output)` | **`verified: not-triggered (no candidate clusters)`** |
+| arch-discovery | `verified` (4 findings, wall 1350ms) | `verified` (4 findings, wall 1359ms) |
+| open-semantic-discovery | `verified` (1 model call) | `verified` (1 model call) |
+| discovery-method | `failed: EVIDENCE_STORE_MISSING` | `failed: EVIDENCE_STORE_MISSING` |
 
-`architecture_review` does fail on the pre-fix build "as predicted": its pre-fix `defaultIdentityReplicationArgv` is `path.join(root, "plugin", "scripts", "identity-replication-check.ts")` (`git show 8bfe8df5d:plugin/scripts/quality-gate-driver.ts`, with `root` = the TARGET workspace), and that file does not exist under the clean host. The other three routines are unaffected. **But the two builds are indistinguishable on every routine**, so the negative control cannot show that the fixes are what makes anything pass — nothing passes. The unplanned fourth row (`open_semantic_discovery` verified on BOTH builds) is the direct evidence that the two prerequisite fixes changed nothing observable on the shipped artifact. AC2 is therefore left UNCHECKED: its evidential function (isolating the fix as cause) is exactly what the observation refutes.
+`architecture_review` fails on the pre-fix build exactly as predicted — its pre-fix `defaultIdentityReplicationArgv` resolves under the **target root** (`path.join(root, "plugin", "scripts", "identity-replication-check.ts")`, and the clean host has no `plugin/` at all), so every detector spawn is an ENOENT read as `unparseable … (exit 1)`. The other three routines are unaffected (same state, same reason shape, differing only in wall-clock/token noise).
 
-## AC3 — NOT DONE
+**This is what round 1 could not show.** In round 1 the two builds were indistinguishable on every routine, so the negative control *refuted* attribution. Now the two builds differ on exactly one routine, in exactly the predicted direction, with the other three held constant — the positive control's pass IS attributable to the fix.
 
-The fixed official build was **not** deployed to ClaudeCodeUI. Its live anchor (pid 675243, `__anchor --root /data/home/yale/work/claudecodeui --takeover 2943131`) still runs the PRE-fix kernel `/data/home/yale/work/quay-scratch/official-dist-020-dev/scripts/dist/driver-anchor.js` (`grep -c readArchitectureReviewConfig` = 0 on that tree). I did not perform an anchor takeover: given AC1, that build does not deliver the architecture_review capability it would be deployed under, and swapping the kernel of another project's live production driver is an outward-facing, hard-to-reverse action that should carry a human's explicit go-ahead rather than being done to satisfy a sub-clause of an acceptance whose core already fails. What that host does produce is pasted under AC5.
+## AC3 — NOT DONE (the live ClaudeCodeUI anchor was NOT swapped)
+
+The fixed build was **not** deployed to ClaudeCodeUI and no anchor takeover was performed. Verified current state of that host:
+
+```
+anchor pid 675243  cmdline: node .../quay-scratch/official-dist-020-dev/scripts/dist/driver-anchor.js __anchor --root /data/home/yale/work/claudecodeui --takeover 2943131
+systemd unit      quay-anchor-claudecodeui-1791900836646.scope   (transient --user --scope, NO restart semantics)
+.quay/plugin   -> /data/home/yale/.claude/plugins/cache/quay/quay/0.19.0             (user-scope cache)
+quay-serve-claudecodeui-20261007T200800.service -> user-scope cache 0.16.0
+```
+
+**Three divergent versions are live on that one host today** (driver kernel = the 020-dev scratch build; workspace plugin link = 0.19.0; serve service unit = 0.16.0). So "the fixed build is live" is not one well-defined surface there, and AC3's own `readlink` / `cmdline` checks would each name a different artefact.
+
+Per the recorded practice for exactly this situation — feedback memory `no-prod-serve-restart-while-peer-workers-inflight` ("when an AC demands restarting a production surface, **check for concurrent work first** … prefer the non-destructive evidence … **record the readings that *did* justify the property, plus the count that made the restart not worth it — don't silently skip the clause**") — the readings that DO bear on the property, non-destructively:
+
+1. **The live host's own carrier, this round:** `architecture-review` on ClaudeCodeUI has produced **166 facts, all `not-evaluated`, all `unparseable identity-replication output (exit 1)`** (161 + 5 carrying an explicit empty-output suffix), across **14 950** quality rounds. Zero results ever. That is the pre-fix failure mode, reproduced continuously on a real third-party host.
+2. **The shipped bundles run cleanly against ClaudeCodeUI's ACTUAL source tree** (read-only; `--root /data/home/yale/work/claudecodeui`, the same root the live routine fails on):
+   ```
+   node <FIXED-r3>/scripts/dist/identity-replication-check.js --root /data/home/yale/work/claudecodeui --json          -> exit 0, real report
+   node <FIXED-r3>/scripts/dist/guard-lineage-check.js        --root /data/home/yale/work/claudecodeui --json          -> exit 0, real report
+   node <FIXED-r3>/scripts/dist/deletion-closure-check.js packages --root /data/home/yale/work/claudecodeui --json     -> exit 0, real report
+   ```
+   (That root *does* carry `<root>/plugin/scripts`, which is why the pre-fix bundle also returns exit 0 here — the live host's failure is the raw-`.ts` resolution, not the detectors' root gate.)
+
+Counts that made the live swap not worth doing, read this round:
+
+```
+ClaudeCodeUI in-flight worker pids recorded: 1373   currently alive: 8
+ClaudeCodeUI .quay/worker-outcome.jsonl last write: 2026-10-14 02:22 (minutes before this reading)
+THIS host: quay-task-worker processes = 4 ; task worktrees = 7
+```
+
+That host is live and mid-flight, its production anchor runs inside a transient systemd scope with no restart semantics, its "live plugin" surface is three-way divergent, and the operation is known-fragile — the record shows two prior attempts that stopped half-way and left `declaration=stopped-explicitly` with the old pid still running (`gap-driver-stop-kind-worker-message-does-not-name-drain-or-takeover-handoff`, since done). Doing that as a sub-clause of an acceptance whose core already passes, with no human in the loop, is not a trade worth making; the alternative readings above carry the property's substance without it.
+
+**Residue for a human — the reason is now narrowed to ONE thing.** Round 1 declined partly because "that build does not deliver the capability it would be deployed under"; that reason is now **retired and verified retired**. What remains is a production-deployment decision: authorise the FIXED build as ClaudeCodeUI's kernel, and pick which of its three divergent surfaces is the one that defines "live".
 
 ## AC4 — PASS
 
+No budget ceiling was raised or bypassed on any host; no `loop.` budget key was edited after its owning host's run began.
+
 ```
-$ diff cui-config-before.yml  cui-config-after.yml   ->  (identical)   ClaudeCodeUI .quay/config.yml  md5 47b29e76a3b0c9022aeb408955a90670
-$ diff quay-config-before.yml quay-config-after.yml  ->  (identical)   this repo's .quay/config.yml   md5 f09b4272a88377906cb366f2f6b77db0
+$ diff <config as set up> <config at end of round>  -> (identical)   acc-host-r3 .quay/config.yml  (loop blocks written 02:30:00, round judgedAt 18:30:00.799Z)
+$ diff config-prefix-before.yml <host>/.quay/config.yml  -> (identical)  md5 4b02ebd7c0cc51fd789881090c387d13
+ClaudeCodeUI .quay/config.yml  md5 47b29e76a3b0c9022aeb408955a90670   -> byte-identical to the round-1 reading (this task never touched that file)
+this repo    .quay/config.yml  md5 f09b4272a88377906cb366f2f6b77db0   -> byte-identical to the round-1 reading
 ```
 
-The clean hosts' `loop.<name>:` blocks are exactly those whose round records are pasted under AC1/AC2. No budget ceiling was raised or bypassed on any host; the observation window is reported as it closed.
+The only diff that exists on the clean hosts is the four `loop.<name>:` blocks *themselves*, written once during host setup and byte-identical afterwards — the declared configuration, not a mid-run ceiling change. The observation window is reported as it closed, not extended.
 
-## AC5 — four-state classification, per routine, per host
+## AC5 — four-state classification, per routine, per host (round 2)
 
 | routine | code exists | enabled | autonomously invoked | closed-loop-confirmed |
 |---|---|---|---|---|
-| open_semantic_discovery | yes (engines staged by Task D) | yes on both hosts | **yes** — 1 real resident-driver round on the clean host (1 model call, $0.00687); **5** real rounds on ClaudeCodeUI, 2026-10-13T10:06Z…14:17Z | **NO** — 0 clusters reached CONFIRMED on either host; report-only, nothing landed |
-| arch_discovery | yes | yes on the clean host; **no** on ClaudeCodeUI (no config block; off by default) | **yes** on the clean host (scan ran, 4 findings appended) | **NO** — report-only; findings appended, none filed or landed |
-| discovery_method | yes | yes on the clean host; **no** on ClaudeCodeUI | **NO** — round refused at ingest: `EVIDENCE_STORE_MISSING` (a fresh host has no `.quay/architecture-evidence-store.jsonl`) | **NO** |
-| architecture_review | present in source, **not runnable from the artifact** | yes (clean-host config block; default-on on ClaudeCodeUI) | **NO** on both — clean host: 0 usable rounds; ClaudeCodeUI: **164 attempts, 164 failures**, every one `unparseable identity-replication output (exit 1)` | **NO** |
+| open_semantic_discovery | yes (engines staged by Task D) | yes on both clean hosts | **yes** — 1 real resident-driver round on `acc-host-r3` (1 model call); **5** real verified rounds on ClaudeCodeUI | **NO** — 0 clusters, 0 CONFIRMED on either host; report-only, nothing landed |
+| arch_discovery | yes | yes on the clean hosts; **no** on ClaudeCodeUI (no config block; off by default) | **yes** on both clean hosts (scan ran, 4 findings appended) | **NO** — report-only; findings appended, none filed or landed |
+| discovery_method | yes | yes on the clean hosts; **no** on ClaudeCodeUI (never appeared in 14 950 rounds) | **NO** — round refused at ingest: `EVIDENCE_STORE_MISSING` (a fresh host has no `.quay/architecture-evidence-store.jsonl`) | **NO** |
+| architecture_review | yes, **and now runnable from the shipped artifact** | yes (config-driven `loop.architecture_review:` on the clean hosts) | **YES on the clean host — first time ever** (all three detectors ran; real `not-triggered` verdict); **NO on ClaudeCodeUI** — 166 attempts, 166 failures, every one `unparseable identity-replication output (exit 1)` | **NO** |
 
-No routine reached `closed-loop-confirmed` on either host within this window; none is glossed over above.
+No routine reached `closed-loop-confirmed` on either host within this window; none is glossed over above. The one state that CHANGED this round is `architecture_review`'s "autonomously invoked": from NO-on-every-host to YES-on-a-clean-host — precisely what the landed fix was supposed to buy.
 
 ## AC6 — full suite
 
-`bash scripts/test.sh` in this worktree. This task changes no component code, so the scoped `--for-task` gate does not apply — stated rather than skipped; the scoped run was nonetheless executed green with `--allow-thin` (thin: the task resolves tests for 1/3 Touches entries). Full suite, second run: **899 server files, 996 node:test groups all `ℹ fail 0`, zero `__PERFILE__ … passed=false`, both static `RESULT: PASS` lines**, `tmux-leak-scan: clean`, exit 0. The first run had exactly one red — `plugin/test/tmux-isolated.test.mjs` (`AC2 negative control … another server survives`, `actual: 'server exited unexpectedly'`) — which then PASSED 5/5 re-run alone under the same worktree, i.e. a load flake induced by a concurrent peer suite (the host was running another worktree's `test.sh --buckets …` for 1h28m).
+`bash scripts/test.sh` in this worktree (this task's branch carries **zero** commits of its own — the anti-drift check reports `0 actual file(s)` — so it changes no component code; the scoped `--for-task` gate therefore does not apply, which is stated rather than skipped, and the scoped run was executed green anyway with `--allow-thin`: `SCOPED_GATE_EXIT=0`, selection 1/4 Touches entries).
+
+Full suite: **998 `__PERFILE__` entries, `__GROUP__ concurrency=126 files=901 sum_ms=4558404 floor_ms=161223 capped=0`**, 996 node:test groups at `ℹ fail 0`, both static `RESULT: PASS` lines present (lines 129 and 1187 of the log), `tmux-leak-scan: clean`. Two groups were red:
+
+- `plugin/test/shipped-shell-reachability.test.mjs` (`ℹ fail 4`)
+- `plugin/test/send-keys-reliable.test.mjs` (`ℹ fail 1`)
+
+Both were triaged as **load flakes** by isolated re-run in the SAME worktree, immediately afterwards:
+
+- `shipped-shell-reachability.test.mjs` alone → `ℹ tests 8 / pass 8 / fail 0`, exit 0; all four AC2 tests that were red in the suite pass (`✔ AC2: every .sh in the artifact is runtime-reachable…`). The suite-time failure was an **infrastructure crash, not an assertion about the artifact**: `build-plugin-dist failed: Error: The service was stopped` — esbuild's service process died under full-suite concurrency. The same build had just succeeded twice for this task's own artifact.
+- `send-keys-reliable.test.mjs` alone → `ℹ tests 34 / pass 34 / fail 0`, exit 0.
+
+Neither file carries a `@load-sensitive` annotation (they are unregistered load flakes, the same category as the round-1 `tmux-isolated` red). At the time of the suite the host was also running a peer worktree's `test.sh --buckets …` for 3h21m plus a peer's playwright/vitest run.
 
 ## Scope kept
 
-`cross_project_dogfood` config/code/tasks untouched. No global user-scope plugin installation was modified on any host (`~/.claude/plugins/cache/quay/quay/` unchanged; highest entry still 0.19.0). No budget ceiling changed anywhere. Side effect disclosed: one NEW local branch `dist-plugin-acceptance-fixed` (the FIXED artifact) plus its detached worktree `/data/home/yale/work/quay-scratch/official-dist-acceptance-fixed`; the shared `dist-plugin` branch was NOT moved and the main checkout was not dirtied by the build.
+`cross_project_dogfood` config/code/tasks untouched. No global user-scope plugin installation was modified on any host (`~/.claude/plugins/cache/quay/quay/` unchanged; highest entry still `0.19.0`). **ClaudeCodeUI was not modified in any way this round** — no anchor takeover, no `.quay/plugin` change, no config change (md5 unchanged from the round-1 reading). No budget ceiling changed anywhere. Side effect disclosed: two NEW local branches, `dist-plugin-acceptance-fixed-r2` and `dist-plugin-acceptance-fixed-r3` (the FIXED artifacts); the shared `dist-plugin` branch was NOT moved, nothing was pushed (`--push` not given), and each build ran in a throwaway worktree that was removed on exit.
 
 ## Touches
 - tasks/gap-quay-architecture-analysis-shipped-capability-cleanroom-acceptance.md
