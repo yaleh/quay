@@ -56,8 +56,11 @@ Three independent, each-sufficient causes — all dev-tree-only assumptions of e
 - plugin/scripts/deletion-closure-check.ts
 - plugin/scripts/kernel-sibling-resolution-check.ts
 - plugin/scripts/publish-dist-branch.sh
+- packages/quay/scripts/build-plugin-dist.mjs
+- plugin/shipped-set-baseline.json
 - plugin/test/quality-gate-driver.test.mjs
 - plugin/test/identity-replication-check.test.mjs
 - plugin/test/guard-lineage-check.test.mjs
 - plugin/test/deletion-closure-check.test.mjs
 - plugin/test/kernel-sibling-resolution-check.test.mjs
+- packages/quay/test/build-plugin-dist.test.mjs
