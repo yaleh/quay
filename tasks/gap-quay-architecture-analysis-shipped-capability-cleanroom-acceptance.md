@@ -217,3 +217,39 @@ Neither file carries a `@load-sensitive` annotation (they are unregistered load 
 - 未落地原因：AC 未全勾（checked 5/6，剩余未勾 1）——续做只需验证并勾选 AC
 - run_id：wk-prod-anchor
 - session_id：c13e795c-3709-460a-8982-07c470a38dd7
+
+
+## Round-3 re-check of AC3 (2026-10-14, this worker round)
+
+AC3 is still NOT satisfied and was again NOT forced. The readings below are freshly taken this round
+(~02:45 +0800, about 10 minutes after the round-2 reading AC3 already records), and they sharpen the reason.
+
+**The host is mid-flight now, not merely recently.** A peer task worker on it
+(`claudecodeui-task-worker`, pid 2551171, started 02:37) is executing
+`gap-voice-uplink-vad-real-ab-and-e2e-verification` and has a live Playwright worker (pid 3142680) running
+`e2e/voice-realtime-segmented-replay-20261012.spec.ts`; the host own `quality-round.jsonl` last wrote at
+02:43:29 (14974 rounds). Round 2 read the same host mid-flight at 02:22; this round reads it mid-flight at
+02:43, so "wait for a quiet window" is not an available strategy on this host.
+
+**Live-kernel reading:** `.quay/anchor.json` — pid 675243, kinds [promotion,outer,goal,worker,quality],
+kernel `/data/home/yale/work/quay-scratch/official-dist-020-dev/scripts/dist/driver-anchor.js` (builtAt
+2026-10-13T14:12:37Z) — i.e. the PRE-FIX build, unchanged. `.quay/anchor-takeover.json` is ABSENT, so the
+last handoff was clean (no anomaly record); that retires one round-2 worry, it is not a licence to repeat it.
+
+**New this round — why the swap is heavier than round 2 recorded.** `--takeover <pid>` does not terminate the
+incumbent, it only waits for it to exit (`driver-anchor.ts:395-402`), and the incumbent exits only when its
+own kernel file is refreshed. So "make the fixed build live" on this host means rebuilding the kernel in
+place under `/data/home/yale/work/quay-scratch/official-dist-020-dev/` — the same shared artifact this host
+live worker is bound to (`--mcp-config ... official-dist-020-dev/vendor/quay/dist/quay.js`). That is an
+in-place mutation of a live shared artifact, not a side-by-side deployment.
+
+**Decision (unchanged, now on sharper grounds): not performed.** Deploying a scratch build as another
+project live kernel, by rebuilding in place the artifact its running workers are bound to, while that project
+has an e2e worker in flight, and with no human authorization, is outward-facing and hard to reverse. This
+worker holds no standing authority for it: the CLAUDE.md driver-lifecycle authority is the manager own,
+within this project, and ClaudeCodeUI is a separate project repo.
+
+**What would unblock it:** a human decision to authorise the fixed build as the
+`/data/home/yale/work/claudecodeui` kernel, taken in a quiet window on that host. Until then AC3 cannot be
+ticked and this task will keep exiting-not-landed — this is an authorisation/authoring gap, not a
+verification gap, and no further worker round can close it.
