@@ -5,7 +5,7 @@ title: "OSD's call_failure=stream-without-result can recur on its own
   again) — raw capture shows the CLI stream cut off mid-thinking with no
   result/error event; test the anchor-handoff-timing correlation before deciding
   whether to add a correlated second retry"
-status: todo
+status: ready
 labels:
   - gap
   - discovery-method
