@@ -40,6 +40,7 @@ import fs from "node:fs";
 import path from "node:path";
 import { repoRoot } from "./repo-root.ts";
 import { fileURLToPath } from "node:url";
+import { parseArgs as baseParseArgs } from "./gate-script-base.ts";
 
 const SCRIPT_DIR = path.dirname(fileURLToPath(import.meta.url));
 
@@ -321,26 +322,50 @@ function printJson(outcome: AnalyzeOutcome): void {
   }));
 }
 
+// Thin adapter over the ONE canonical parser (gate-script-base.ts `parseArgs`) — this file carried one
+// of the six hand-rolled token loops filed by a `semantic-dedup-scan` pass as
+// `parse-args-adoption-split` (routine `semantic-dedup-scan`, runId `semantic-dedup-scan-1791908616513`,
+// verdict `divergent-implementation`). It keeps this command's flag set and its THROW-based usage
+// model (`main` catches and prefixes the message). `argv` is the WHOLE `process.argv` (the retired
+// loop started at index 2 precisely because of that) — the shared parser does the `slice(2)`.
 function parseArgs(argv: string[]): {
   root?: string; staleSeconds: number; carrier?: string; noBlock: boolean; json: boolean; help: boolean;
 } {
-  const out = { staleSeconds: DEFAULT_STALE_SECONDS, noBlock: false, json: false, help: false, root: undefined as string | undefined, carrier: undefined as string | undefined };
-  for (let i = 2; i < argv.length; i++) {
-    const a = argv[i];
-    if (a === "--json") { out.json = true; continue; }
-    if (a === "--no-block") { out.noBlock = true; continue; }
-    if (a === "--help" || a === "-h") { out.help = true; return out; }
-    if (a === "--root") { out.root = argv[++i]; continue; }
-    if (a === "--carrier") { out.carrier = argv[++i]; continue; }
-    if (a === "--stale-seconds") {
-      const v = Number(argv[++i]);
-      if (!Number.isFinite(v) || v < 0) throw new Error("--stale-seconds must be a non-negative integer (seconds)");
-      out.staleSeconds = v;
-      continue;
-    }
-    throw new Error(`unknown argument: ${a}`);
+  const parsed = baseParseArgs(argv, {
+    minArgs: 0,
+    usage: "[--root <dir>] [--stale-seconds <n>] [--carrier <file>] [--no-block] [--json]",
+    help: "return",
+    errors: "return",
+    unknown: "reject",
+    flags: {
+      root: { type: "string" },
+      "stale-seconds": { type: "string" },
+      carrier: { type: "string" },
+      "no-block": { type: "boolean" },
+      json: { type: "boolean" },
+    },
+  });
+  if (parsed.error) throw new Error(parsed.error);
+  if (parsed.args.length > 0) throw new Error(`unknown argument: ${parsed.args[0]}`);
+  const str = (v: string | boolean | undefined): string | undefined => (typeof v === "string" ? v : undefined);
+  let staleSeconds = DEFAULT_STALE_SECONDS;
+  if (parsed.flags["stale-seconds"] !== undefined) {
+    const raw = parsed.flags["stale-seconds"];
+    // "" is the shared parser's spelling for a flag that carried NO value; the retired loop's
+    // `Number(argv[++i])` read that as NaN and threw. Kept — laundering it into 0 would be a ceiling
+    // the user never named (硬规则 3b).
+    const v = raw === "" ? NaN : Number(raw);
+    if (!Number.isFinite(v) || v < 0) throw new Error("--stale-seconds must be a non-negative integer (seconds)");
+    staleSeconds = v;
   }
-  return out;
+  return {
+    root: str(parsed.flags.root),
+    staleSeconds,
+    carrier: str(parsed.flags.carrier),
+    noBlock: parsed.flags["no-block"] === true,
+    json: parsed.flags.json === true,
+    help: parsed.help === true,
+  };
 }
 
 export function main(argv: string[]): number {

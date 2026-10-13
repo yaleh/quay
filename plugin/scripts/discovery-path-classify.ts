@@ -65,7 +65,7 @@ import fs from "node:fs";
 import path from "node:path";
 import { spawnSync } from "node:child_process";
 import { repoRoot } from "./repo-root.ts";
-import { isDirectEntry, seededRng } from "./gate-script-base.ts";
+import { isDirectEntry, seededRng, parseArgs as baseParseArgs } from "./gate-script-base.ts";
 
 export const EXIT_OK = 0;
 export const EXIT_USAGE = 2;
@@ -543,34 +543,56 @@ interface Args {
   help: boolean;
 }
 
+// Thin adapter over the ONE canonical parser (gate-script-base.ts `parseArgs`) — this file carried one
+// of the six hand-rolled token loops filed by a `semantic-dedup-scan` pass as
+// `parse-args-adoption-split` (routine `semantic-dedup-scan`, runId `semantic-dedup-scan-1791908616513`,
+// verdict `divergent-implementation`). It keeps THIS command's flag set and its exported SLICED-argv
+// contract; the two leading slots the shared parser skips are re-attached here (the same adapter shape
+// as workflow-invariant-ownership.mjs / self-report-vocab-check.ts). `--flag=value` is now accepted
+// (the shared spelling); a valueless trailing string flag reads as "" and is folded to the flag's own
+// default by `str()` — the pre-fold loop read `argv[++i]` as undefined and applied the same default.
 export function parseArgs(argv: string[]): Args {
-  const a: Args = {
-    emitJson: false,
-    emitJsonDetailed: false,
-    counts: false,
-    trend: false,
-    sample: 0,
-    seed: 20260915,
-    root: repoRoot(),
-    glob: "gap-*.md",
-    noGit: false,
-    help: false,
+  const parsed = baseParseArgs(["node", "discovery-path-classify", ...argv], {
+    minArgs: 0,
+    usage:
+      "[--emit-json] [--emit-json-detailed] [--counts] [--trend] [--sample <n>] [--seed <s>] " +
+      "[--root <dir>] [--glob <pat>] [--no-git] [--help]",
+    help: "return",
+    errors: "return",
+    unknown: "reject",
+    flags: {
+      "emit-json": { type: "boolean" },
+      "emit-json-detailed": { type: "boolean" },
+      counts: { type: "boolean" },
+      trend: { type: "boolean" },
+      sample: { type: "string" },
+      seed: { type: "string" },
+      root: { type: "string" },
+      glob: { type: "string" },
+      "no-git": { type: "boolean" },
+    },
+  });
+  // The retired loop threw for an unknown flag AND for a bare positional, and `main` reports the
+  // thrown message and returns EXIT_USAGE — the throw is kept, so that door is byte-for-byte.
+  if (parsed.error) throw new Error(parsed.error);
+  if (parsed.args.length > 0) throw new Error(`未知参数：${parsed.args[0]}`);
+  const f = parsed.flags;
+  const str = (v: string | boolean | undefined): string | undefined => (typeof v === "string" ? v : undefined);
+  /** A present flag reads as its token (`--sample`) or "" (valueless); absent reads undefined. The
+   *  retired loop's `Number(argv[++i] ?? "0")` gave 0 for valueless, so "" and "0" agree here. */
+  const num = (v: string | boolean | undefined, dflt: number): number => (v === undefined ? dflt : Number(v));
+  return {
+    emitJson: f["emit-json"] === true,
+    emitJsonDetailed: f["emit-json-detailed"] === true,
+    counts: f.counts === true,
+    trend: f.trend === true,
+    sample: num(f.sample, 0),
+    seed: num(f.seed, 20260915),
+    root: str(f.root) ?? repoRoot(),
+    glob: str(f.glob) ?? "gap-*.md",
+    noGit: f["no-git"] === true,
+    help: parsed.help === true,
   };
-  for (let i = 0; i < argv.length; i++) {
-    const v = argv[i];
-    if (v === "--emit-json") a.emitJson = true;
-    else if (v === "--emit-json-detailed") a.emitJsonDetailed = true;
-    else if (v === "--counts") a.counts = true;
-    else if (v === "--trend") a.trend = true;
-    else if (v === "--sample") a.sample = Number(argv[++i] ?? "0");
-    else if (v === "--seed") a.seed = Number(argv[++i] ?? "0");
-    else if (v === "--root") a.root = argv[++i] ?? a.root;
-    else if (v === "--glob") a.glob = argv[++i] ?? a.glob;
-    else if (v === "--no-git") a.noGit = true;
-    else if (v === "--help" || v === "-h") a.help = true;
-    else throw new Error(`未知参数：${v}`);
-  }
-  return a;
 }
 
 const HELP = `用法: node --experimental-strip-types plugin/scripts/discovery-path-classify.ts [选项]

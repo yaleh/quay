@@ -43,6 +43,7 @@ import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { repoRoot } from "./repo-root.ts";
+import { parseArgs as baseParseArgs } from "./gate-script-base.ts";
 
 const SCRIPT_DIR = path.dirname(fileURLToPath(import.meta.url));
 
@@ -380,20 +381,40 @@ function printJson(report: LineageReport): void {
   console.log(JSON.stringify(report, null, 2));
 }
 
+// Thin adapter over the ONE canonical parser (gate-script-base.ts `parseArgs`) — this file carried one
+// of the six hand-rolled token loops filed by a `semantic-dedup-scan` pass as
+// `parse-args-adoption-split` (routine `semantic-dedup-scan`, runId `semantic-dedup-scan-1791908616513`,
+// verdict `divergent-implementation`). It keeps this command's flag set and its THROW-based usage
+// model (`main` catches and prefixes the message); `argv` is the SLICED tail, so the two leading
+// slots the shared parser skips are re-attached here. A valueless `--root`/`--catalog`/`--cost-file`
+// reads as "" and folds to undefined — the retired loop read `argv[++i]` as undefined, and `main`
+// treats both as "not given".
 function parseArgs(argv: string[]): {
   root?: string; catalog?: string; costFile?: string; json: boolean; help: boolean;
 } {
-  const out = { root: undefined as string | undefined, catalog: undefined as string | undefined, costFile: undefined as string | undefined, json: false, help: false };
-  for (let i = 0; i < argv.length; i++) {
-    const a = argv[i];
-    if (a === "--json") { out.json = true; continue; }
-    if (a === "--help" || a === "-h") { out.help = true; return out; }
-    if (a === "--root") { out.root = argv[++i]; continue; }
-    if (a === "--catalog") { out.catalog = argv[++i]; continue; }
-    if (a === "--cost-file") { out.costFile = argv[++i]; continue; }
-    throw new Error(`unknown argument: ${a}`);
-  }
-  return out;
+  const parsed = baseParseArgs(["node", "guard-lineage-check", ...argv], {
+    minArgs: 0,
+    usage: "[--root <dir>] [--catalog <file>] [--cost-file <file>] [--json]",
+    help: "return",
+    errors: "return",
+    unknown: "reject",
+    flags: {
+      root: { type: "string" },
+      catalog: { type: "string" },
+      "cost-file": { type: "string" },
+      json: { type: "boolean" },
+    },
+  });
+  if (parsed.error) throw new Error(parsed.error);
+  if (parsed.args.length > 0) throw new Error(`unknown argument: ${parsed.args[0]}`);
+  const str = (v: string | boolean | undefined): string | undefined => (typeof v === "string" ? v : undefined);
+  return {
+    root: str(parsed.flags.root),
+    catalog: str(parsed.flags.catalog),
+    costFile: str(parsed.flags["cost-file"]),
+    json: parsed.flags.json === true,
+    help: parsed.help === true,
+  };
 }
 
 export function main(argv: string[]): number {

@@ -67,6 +67,7 @@ import { fileURLToPath } from "node:url";
 import { spawnSync } from "node:child_process";
 import { layerMechanisms, LAYER_MECHANISMS } from "./accounting-emit-layer-map.ts";
 import { repoRoot } from "./repo-root.ts";
+import { parseArgs as baseParseArgs } from "./gate-script-base.ts";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const SCRIPT_DIR = __dirname;
@@ -268,6 +269,15 @@ function usage(): string {
 }
 
 // ── arg parsing ──────────────────────────────────────────────────────────────────────────────────────
+// Thin adapter over the ONE canonical parser (gate-script-base.ts `parseArgs`). This file was the last
+// of the six hand-rolled token loops filed by a `semantic-dedup-scan` pass as
+// `parse-args-adoption-split` (routine `semantic-dedup-scan`, runId `semantic-dedup-scan-1791908616513`,
+// verdict `divergent-implementation`): eight sites already wrapped the shared parser while six each
+// re-implemented `--flag value` scanning with their own error model. What stays HERE is only what is
+// genuinely this command's — the flag SET, the LAYER / JUDGEMENTS / non-negative-integer validation,
+// and the multi-line `usage()`. Adopting the shared parser widens the input language in exactly one
+// way: `--flag=value` is now accepted (it is the shared spelling). A valueless flag still exits 2,
+// through `required()` below rather than the retired `next()` closure.
 function parseArgs(argv: string[]): {
   layer: string | null;
   root: string;
@@ -279,103 +289,95 @@ function parseArgs(argv: string[]): {
   mechanisms: { name: string; epoch: number | null; judgement: string | null }[];
   noRegistry: boolean;
 } {
+  const parsed = baseParseArgs(argv, {
+    minArgs: 0,
+    usage:
+      "[--layer <outer|inner|manager>] [--root <dir>] [--json] [--in-flight <n>] [--cap <n>] " +
+      "[--write-target <line>] [--ledger-line <line>] [--no-registry] " +
+      "[--mechanism <name[:epoch|never[:judgement]]> ...]",
+    help: "return",
+    errors: "return",
+    unknown: "reject",
+    flags: {
+      layer: { type: "string" },
+      root: { type: "string" },
+      json: { type: "boolean" },
+      "in-flight": { type: "string" },
+      cap: { type: "string" },
+      "write-target": { type: "string" },
+      "ledger-line": { type: "string" },
+      "no-registry": { type: "boolean" },
+      mechanism: { type: "string[]" },
+    },
+  });
+  if (parsed.help) {
+    console.log(usage());
+    process.exit(0);
+  }
+  /** The pre-fold usage door: script prefix + the multi-line usage, exit 2. */
+  const usageError = (message: string): never => {
+    console.error(`accounting-emit: ${message}`);
+    console.error(usage());
+    process.exit(2);
+  };
+  if (parsed.error) usageError(parsed.error);
+  // A bare positional was the old `default:` arm — same message, same exit.
+  if (parsed.args.length > 0) usageError(`unknown argument: ${parsed.args[0]}`);
+  const f = parsed.flags;
+  /** The shared parser reads a valueless flag as ""; the old `next()` exited 2 instead — kept: "" is
+   *  a value the user never supplied, and laundering it into `path.resolve("")` (cwd) is exactly the
+   *  硬规则 3b substitution this rejects. */
+  const required = (name: string): string => {
+    const v = f[name];
+    if (typeof v !== "string" || v === "") usageError(`--${name} requires a value`);
+    return v;
+  };
+  const intFlag = (name: string): number => {
+    const v = required(name);
+    if (!/^[0-9]+$/.test(v)) usageError(`--${name} must be a non-negative integer: ${v}`);
+    return Number(v);
+  };
+
   const out = {
     layer: null as string | null,
-    root: repoRoot(),
-    json: false,
-    inFlight: null as number | null,
-    cap: null as number | null,
-    writeTarget: null as string | null,
-    ledgerLine: null as string | null,
+    root: f.root === undefined ? repoRoot() : path.resolve(required("root")),
+    json: f.json === true,
+    inFlight: f["in-flight"] === undefined ? (null as number | null) : intFlag("in-flight"),
+    cap: f.cap === undefined ? (null as number | null) : intFlag("cap"),
+    writeTarget: f["write-target"] === undefined ? (null as string | null) : required("write-target"),
+    ledgerLine: f["ledger-line"] === undefined ? (null as string | null) : required("ledger-line"),
     mechanisms: [] as { name: string; epoch: number | null; judgement: string | null }[],
-    noRegistry: false,
+    noRegistry: f["no-registry"] === true,
   };
-  let i = 0;
-  const next = (flag: string): string => {
-    i += 1;
-    if (i >= argv.length) {
-      console.error(`accounting-emit: ${flag} requires a value`);
-      process.exit(2);
+  if (f.layer !== undefined) {
+    const v = required("layer");
+    if (!LAYERS.includes(v)) usageError(`unknown layer '${v}' (expected ${LAYERS.join("|")})`);
+    out.layer = v;
+  }
+  for (const v of parsed.lists?.mechanism ?? []) {
+    const parts = v.split(":");
+    const name = parts[0];
+    if (!name) usageError("--mechanism requires a name (name[:epoch|never[:judgement]])");
+    let epoch: number | null = null;
+    let judgement: string | null = null;
+    if (parts.length >= 2 && parts[1] !== "") {
+      if (parts[1] === "never") {
+        epoch = null;
+      } else {
+        const e = toEpochSeconds(parts[1]);
+        if (e === null) {
+          usageError(`--mechanism ${name} epoch must be epoch-seconds, an ISO timestamp, or 'never': ${parts[1]}`);
+        }
+        epoch = e;
+      }
     }
-    return argv[i];
-  };
-  while (i < argv.length) {
-    const a = argv[i];
-    switch (a) {
-      case "--layer": {
-        const v = next(a);
-        if (!LAYERS.includes(v)) {
-          console.error(`accounting-emit: unknown layer '${v}' (expected ${LAYERS.join("|")})`);
-          process.exit(2);
-        }
-        out.layer = v;
-        break;
+    if (parts.length >= 3 && parts[2] !== "") {
+      if (!JUDGEMENTS.includes(parts[2])) {
+        usageError(`--mechanism ${name} judgement must be one of ${JUDGEMENTS.join("/")}: ${parts[2]}`);
       }
-      case "--root": out.root = path.resolve(next(a)); break;
-      case "--json": out.json = true; break;
-      case "--in-flight": {
-        const v = next(a);
-        if (!/^[0-9]+$/.test(v)) {
-          console.error(`accounting-emit: --in-flight must be a non-negative integer: ${v}`);
-          process.exit(2);
-        }
-        out.inFlight = Number(v);
-        break;
-      }
-      case "--cap": {
-        const v = next(a);
-        if (!/^[0-9]+$/.test(v)) {
-          console.error(`accounting-emit: --cap must be a non-negative integer: ${v}`);
-          process.exit(2);
-        }
-        out.cap = Number(v);
-        break;
-      }
-      case "--write-target": out.writeTarget = next(a); break;
-      case "--ledger-line": out.ledgerLine = next(a); break;
-      case "--no-registry": out.noRegistry = true; break;
-      case "--mechanism": {
-        const v = next(a);
-        const parts = v.split(":");
-        const name = parts[0];
-        if (!name) {
-          console.error(`accounting-emit: --mechanism requires a name (name[:epoch|never[:judgement]])`);
-          process.exit(2);
-        }
-        let epoch: number | null = null;
-        let judgement: string | null = null;
-        if (parts.length >= 2 && parts[1] !== "") {
-          if (parts[1] === "never") {
-            epoch = null;
-          } else {
-            const e = toEpochSeconds(parts[1]);
-            if (e === null) {
-              console.error(`accounting-emit: --mechanism ${name} epoch must be epoch-seconds, an ISO timestamp, or 'never': ${parts[1]}`);
-              process.exit(2);
-            }
-            epoch = e;
-          }
-        }
-        if (parts.length >= 3 && parts[2] !== "") {
-          if (!JUDGEMENTS.includes(parts[2])) {
-            console.error(`accounting-emit: --mechanism ${name} judgement must be one of ${JUDGEMENTS.join("/")}: ${parts[2]}`);
-            process.exit(2);
-          }
-          judgement = parts[2];
-        }
-        out.mechanisms.push({ name, epoch, judgement });
-        break;
-      }
-      case "--help":
-      case "-h":
-        console.log(usage());
-        process.exit(0);
-      default:
-        console.error(`accounting-emit: unknown argument: ${a}`);
-        console.error(usage());
-        process.exit(2);
+      judgement = parts[2];
     }
-    i += 1;
+    out.mechanisms.push({ name, epoch, judgement });
   }
   if (!out.layer) {
     console.error("accounting-emit: --layer <outer|inner|manager> is required");
@@ -442,7 +444,9 @@ function assembleMechanism(
 
 // ── main ──────────────────────────────────────────────────────────────────────────────────────────────
 function main() {
-  const args = parseArgs(process.argv.slice(2));
+  // Whole `process.argv` — the shared parser does the `slice(2)` (the convention every base caller
+  // follows; `gate-script-base.ts` parseArgs reads `argv.slice(2)`).
+  const args = parseArgs(process.argv);
   const layer = args.layer!;
   const root = args.root;
 
