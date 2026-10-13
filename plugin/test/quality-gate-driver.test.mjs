@@ -50,7 +50,11 @@ import {
   computeRoundRecord,
   runResidentQualityGateLoop,
   diagnosticExcerpt,
+  ARCH_REVIEW_CALL_CAPTURE_DIR_REL,
 } from "../scripts/quality-gate-driver.ts";
+// judge 调用的失败归因/重试是【从 OSD 复用】的（硬规则 5b）——测试直接断言那**同一个**清单与分类器，
+// ⛔ 不是断言本文件里另写的一份。
+import { RETRYABLE_CALL_FAILURES, callFailureClass } from "../scripts/open-semantic-discovery-routine.ts";
 // 同族读函数的**形态对照**（Gap1 的判据：本轨的读函数与兄弟逐键同形）。
 import { readDiscoveryMethodConfig } from "../scripts/discovery-method-routine.ts";
 import { qualityRoundPath } from "../scripts/pool-quality-judge.ts";
@@ -1064,4 +1068,221 @@ test("Gap1 — main()：config 段决定节奏与开关，显式 CLI flag 覆盖
   assert.equal(d.fact.state, "not-evaluated");
   assert.match(d.fact.reason, /disabled/);
   assert.match(d.stderr, /architecture-review 例程已装配（enabled:false/);
+});
+
+// ═══════════════════════════════════════════════════════════════════════════════════════════════════
+// gap-architecture-review-judge-call-shares-no-diagnostics-or-retry-with-osd
+// judge 调用的失败归因 + 有界重试 = 【复用 OSD 的机件】（硬规则 5b：修好一个实例 ≠ 修好一类）。
+// 判定面：a) 失败形状由 callFailureClass/streamDiagnostics 分类（不是第二份读法）；b) 可重试类恰一次
+// 重试、重试再失败仍落 failed（⛔ 不洗成 judged）、捕获文件在盘上；c) 不可重试类零重试；d) 三个机械
+// 检测器的 spawn 面**逐字未动**（仍然 terminal-on-error、零重试）。
+// ═══════════════════════════════════════════════════════════════════════════════════════════════════
+
+/** 一个会【记 spawn 次数】的 judge stub：每次被 spawn 先追加一行日志，再产出给定字节/退出码。 */
+function judgeStub(tmp, name, { stdout = "", stderr = "", exit = 0, hang = false } = {}) {
+  const log = path.join(tmp, `${name}-spawns.log`);
+  const body = [
+    `const fs=require("node:fs");fs.appendFileSync(${JSON.stringify(log)},"spawned\\n");`,
+    hang
+      ? `setTimeout(()=>process.exit(0),60000);`
+      : `process.stdout.write(${JSON.stringify(stdout)});process.stderr.write(${JSON.stringify(stderr)});process.exit(${exit});`,
+  ].join("\n");
+  return { argv: ["node", writeFixture(tmp, `judge-${name}.js`, body)], log };
+}
+
+/** 一个会【记 spawn 次数】的检测器命令：先追加日志、再 require 原 fixture（原样产出）。 */
+function loggingCmd(tmp, name, originalPath, logPath) {
+  return ["node", writeFixture(tmp, name, `require("node:fs").appendFileSync(${JSON.stringify(logPath)},"hit\\n");require(${JSON.stringify(originalPath)});`)];
+}
+
+const spawnCount = (log) => (fs.existsSync(log) ? fs.readFileSync(log, "utf8").split("\n").filter((l) => l.trim()).length : 0);
+const archCaptureDir = (tmp) => path.join(tmp, ARCH_REVIEW_CALL_CAPTURE_DIR_REL);
+const captureCount = (tmp) => (fs.existsSync(archCaptureDir(tmp)) ? fs.readdirSync(archCaptureDir(tmp)).length : 0);
+const lastArchRecord = (tmp) => JSON.parse(fs.readFileSync(archReviewRoundPath(tmp), "utf8").split("\n").filter((l) => l.trim()).pop());
+
+/** 修复前 judge 分支的失败串——【逐字取自本任务前的那两行】（`judge exited …` / `judge output not a
+ *  JSON array: …`）。它没有分类、没有捕获、没有重试：这就是负控制要证明「确实变了」的那个旧读数。 */
+function preFixReason(status, stderr, errorMsg = null) {
+  return `judge exited ${status ?? "null"}: ${errorMsg ?? String(stderr ?? "").slice(0, 200)}`;
+}
+
+/** OSD 已知的失败形状（字节面）。`expect`/`retry` 是**复用的**分类器与**复用的**清单应当给出的读数。 */
+const ARCH_JUDGE_SHAPES = [
+  { name: "no-stdout", stdout: "", stderr: "", exit: 1, expect: "no-stdout", retry: true, hasResult: false },
+  { name: "stream-without-result", exit: 1, retry: true, hasResult: false, expect: "stream-without-result",
+    stdout: '{"type":"system","subtype":"init"}\n{"type":"assistant","message":{"content":[]}}\n', stderr: "" },
+  { name: "api-error-event", exit: 1, retry: true, hasResult: true, expect: "api-error-event",
+    stdout: '{"type":"system","subtype":"init"}\n{"type":"result","subtype":"error_during_execution","is_error":true}\n', stderr: "" },
+  { name: "truncated-json", exit: 1, retry: false, hasResult: false, expect: "truncated-json",
+    stdout: '{"type":"system","subtype":"init"', stderr: "" },
+  { name: "unclassified-plain-text", exit: 1, retry: false, hasResult: false, expect: "unclassified",
+    stdout: "Error: unable to resolve project root '/nope'", stderr: "Error: unable to resolve project root '/nope'" },
+];
+
+test("AC1 — 每个 judge 失败形状由【复用的】callFailureClass/streamDiagnostics 分类（负控制：修复前全塌成一个串）", async (t) => {
+  assert.deepEqual(
+    [...RETRYABLE_CALL_FAILURES],
+    ["no-stdout", "stream-without-result", "api-error-event"],
+    "可重试清单就是 OSD 的那一份（⛔ 不是第二个谓词）",
+  );
+
+  const fixedClasses = [];
+  for (const s of ARCH_JUDGE_SHAPES) {
+    const tmp = fs.mkdtempSync(path.join(os.tmpdir(), `qg-archi-${s.name}-`));
+    t.after(() => fs.rmSync(tmp, { recursive: true, force: true }));
+    const { identityCmd, lineageCmd, deletionCmd, gateArgv } = archReviewCmd(tmp);
+    const judge = judgeStub(tmp, s.name, s);
+    const fact = await runArchitectureReview(tmp, identityCmd, lineageCmd, deletionCmd, judge.argv, gateArgv,
+      true, Infinity, false, null, 900_000, 0);
+    assert.equal(fact.state, "failed", `${s.name} ⇒ failed（⛔ 非 verified）`);
+    const rec = lastArchRecord(tmp);
+    assert.equal(rec.state, "failed");
+    assert.equal(rec.call_failure, s.expect, `${s.name} 的类由复用的 callFailureClass 读出`);
+    assert.equal(rec.has_result, s.hasResult, `${s.name} 的 has_result 与流读取器一致`);
+    assert.equal(rec.stdout_bytes, Buffer.byteLength(s.stdout, "utf8"), `${s.name} 记下 stdout 字节数`);
+    // 重试边界由【复用的清单】决定，⛔ 不由本文件再写一条谓词。
+    const wantedRetry = RETRYABLE_CALL_FAILURES.includes(s.expect);
+    assert.equal(rec.retry_attempted === true, wantedRetry, `${s.name}: 重试与否 = RETRYABLE_CALL_FAILURES 的判定`);
+    assert.equal(spawnCount(judge.log), wantedRetry ? 2 : 1, `${s.name}: spawn 次数 = ${wantedRetry ? 2 : 1}`);
+    assert.equal(captureCount(tmp), spawnCount(judge.log), `${s.name}: 每个未产出判词的调用都留下捕获文件`);
+    fixedClasses.push(rec.call_failure);
+  }
+  assert.equal(new Set(fixedClasses).size, ARCH_JUDGE_SHAPES.length, "修复后：每个形状一个不同的类");
+
+  // ── 负控制（能取假）：把同样的形状喂给【修复前的两行】⇒ 区分力塌掉、零分类、零重试面 ──
+  const preFixExit1 = ARCH_JUDGE_SHAPES.map((s) => preFixReason(s.exit, s.stderr));
+  const retryableShapes = ARCH_JUDGE_SHAPES.filter((s) => s.retry).map((s) => preFixReason(s.exit, s.stderr));
+  assert.equal(new Set(retryableShapes).size, 1, "修复前：三个**字节截然不同**的可重试形状塌成同一个串（零区分力）");
+  assert.equal(retryableShapes[0], "judge exited 1: ", "且就是生产载体里那条不含任何归因的串");
+  assert.equal(new Set(preFixExit1).size, 2, "修复前全部 5 个形状只解出 2 个值（stderr 空 / 非空），修复后是 5");
+  assert.equal(new Set(fixedClasses).size, 5, "修复后：每个形状各自一个类");
+  assert.ok(!preFixExit1.some((r) => fixedClasses.some((c) => r.includes(c))), "修复前的串里没有任何 call_failure 类");
+});
+
+test("AC1(b) — 超时是【自己的】收尾：killed-by-timeout 且零重试（优先级由复用的分类器给）", async (t) => {
+  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "qg-archi-timeout-"));
+  t.after(() => fs.rmSync(tmp, { recursive: true, force: true }));
+  const { identityCmd, lineageCmd, deletionCmd, gateArgv } = archReviewCmd(tmp);
+  const judge = judgeStub(tmp, "hang", { hang: true });
+  const fact = await runArchitectureReview(tmp, identityCmd, lineageCmd, deletionCmd, judge.argv, gateArgv,
+    true, 150, false, null, 900_000, 0);
+  assert.equal(fact.state, "failed");
+  const rec = lastArchRecord(tmp);
+  assert.equal(rec.call_failure, "killed-by-timeout");
+  assert.equal(rec.retry_attempted === true, false, "killed-by-timeout ⛔ 不在可重试清单里");
+  assert.equal(spawnCount(judge.log), 1, "超时形状零重试");
+});
+
+test("AC2 — 可重试类恰一次重试；重试再失败仍落 failed（⛔ 不洗成 judged）+ 捕获文件在盘上", async (t) => {
+  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "qg-archi-retry-"));
+  t.after(() => fs.rmSync(tmp, { recursive: true, force: true }));
+  const { identityCmd, lineageCmd, deletionCmd, gateArgv } = archReviewCmd(tmp);
+  const s = ARCH_JUDGE_SHAPES.find((x) => x.name === "stream-without-result");
+  const judge = judgeStub(tmp, "retry", s);
+  const fact = await runArchitectureReview(tmp, identityCmd, lineageCmd, deletionCmd, judge.argv, gateArgv,
+    true, Infinity, false, null, 900_000, 0);
+
+  assert.equal(fact.state, "failed", "重试也失败 ⇒ failed（⛔ 不是 verified/judged）");
+  assert.equal(spawnCount(judge.log), 2, "恰一次重试（第一次调用 + 一次重发），⛔ 不是两次");
+  const rec = lastArchRecord(tmp);
+  assert.equal(rec.state, "failed");
+  assert.equal(rec.retry_attempted, true);
+  assert.equal(rec.retry_refused, null);
+  assert.equal(rec.call_failure, "stream-without-result", "重试后记录的仍是同一可重试类（⛔ 不洗成干净）");
+  assert.match(rec.reason, /stream-without-result/, "reason 携带分类读数");
+  assert.match(rec.reason, /retried once \(first=stream-without-result\)/, "reason 记下「重试过一次」");
+
+  // 捕获文件：两次调用各留一份（「无字节可看」与「没有捕获文件」不同形，硬规则 3b）。
+  const capDir = archCaptureDir(tmp);
+  assert.ok(fs.existsSync(capDir), "捕获目录存在");
+  const caps = fs.readdirSync(capDir);
+  assert.equal(caps.length, 2, "两次未产出判词的调用 ⇒ 两份捕获");
+  for (const f of caps) {
+    const body = fs.readFileSync(path.join(capDir, f), "utf8");
+    assert.match(body, /# stdout head/, "捕获内容是有界 head/tail 描述");
+    assert.match(body, /# stderr tail/, "捕获内容含 stderr 尾部");
+  }
+  // 载体里只有这一条 failed 记录（⛔ 不写第二条 judged）
+  const lines = fs.readFileSync(archReviewRoundPath(tmp), "utf8").split("\n").filter((l) => l.trim());
+  assert.equal(lines.length, 1, "只有一条失败记录");
+  assert.equal(JSON.parse(lines[0]).state, "failed");
+  assert.equal(rec.stdout_capture.path !== null, true, "捕获路径写在记录上（可被 operator 打开）");
+  assert.equal(fs.existsSync(path.join(tmp, rec.stdout_capture.path)), true, "记录里的路径真的指向盘上的文件");
+});
+
+test("AC2(b) — 预算/资源门拒绝时【不重试】（本 routine 的支出闸 = resourceGateCheck，⛔ 无第二条台账）", async (t) => {
+  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "qg-archi-gate-"));
+  t.after(() => fs.rmSync(tmp, { recursive: true, force: true }));
+  const { identityCmd, lineageCmd, deletionCmd } = archReviewCmd(tmp);
+  // 有状态的资源门：第 1 次（judge 前）GO，第 2 次（重试前）WAIT ⇒ 重试被拒。
+  const hitLog = path.join(tmp, "gate-hits.log");
+  const statefulGate = ["node", writeFixture(tmp, "gate-stateful.js", [
+    `const fs=require("node:fs");`,
+    `const n=fs.existsSync(${JSON.stringify(hitLog)})?fs.readFileSync(${JSON.stringify(hitLog)},"utf8").split("\\n").filter(Boolean).length:0;`,
+    `fs.appendFileSync(${JSON.stringify(hitLog)},"hit\\n");`,
+    `process.stdout.write(JSON.stringify(n<1?{verdict:"GO",reason:"first"}:{verdict:"WAIT",reason:"busy-on-retry"}));`,
+  ].join("\n"))];
+  const s = ARCH_JUDGE_SHAPES.find((x) => x.name === "no-stdout");
+  const judge = judgeStub(tmp, "gate-refused", s);
+  const fact = await runArchitectureReview(tmp, identityCmd, lineageCmd, deletionCmd, judge.argv, statefulGate,
+    true, Infinity, false, null, 900_000, 0);
+
+  assert.equal(fact.state, "failed", "闸拒绝重试 ⇒ 保留第一次失败的读数");
+  assert.equal(spawnCount(judge.log), 1, "重试被拒 ⇒ 没有第二次 subprocess");
+  assert.equal(spawnCount(hitLog), 2, "资源门被读了两次（judge 前 + 重试前）");
+  const rec = lastArchRecord(tmp);
+  assert.equal(rec.retry_attempted, false);
+  assert.match(String(rec.retry_refused), /busy-on-retry/, "拒绝原因落进记录");
+  assert.match(rec.reason, /retry refused by resource gate/, "reason 说明重试为何没发生");
+});
+
+test("AC3 — 不可重试类零重试（clean exit-1 + 真 stderr / 非 JSON stdout / truncated-json）", async (t) => {
+  for (const name of ["truncated-json", "unclassified-plain-text"]) {
+    const tmp = fs.mkdtempSync(path.join(os.tmpdir(), `qg-archi-norety-${name}-`));
+    t.after(() => fs.rmSync(tmp, { recursive: true, force: true }));
+    const { identityCmd, lineageCmd, deletionCmd, gateArgv } = archReviewCmd(tmp);
+    const s = ARCH_JUDGE_SHAPES.find((x) => x.name === name);
+    const judge = judgeStub(tmp, name, s);
+    const fact = await runArchitectureReview(tmp, identityCmd, lineageCmd, deletionCmd, judge.argv, gateArgv,
+      true, Infinity, false, null, 900_000, 0);
+    assert.equal(fact.state, "failed");
+    assert.equal(spawnCount(judge.log), 1, `${name}: 恰好一次 spawn（⛔ 无重试）`);
+    const rec = lastArchRecord(tmp);
+    assert.equal(rec.retry_attempted, false, `${name}: 无重试记录`);
+    assert.equal(rec.retry_refused, null, `${name}: 也不是被闸拒绝——是根本没到重试那一步`);
+    assert.equal(RETRYABLE_CALL_FAILURES.includes(rec.call_failure), false, `${name} 的类不在可重试清单里`);
+    assert.equal(captureCount(tmp), 1, `${name}: 那次失败调用仍留捕获`);
+  }
+});
+
+test("AC4 — 三个机械检测器的 spawn 面【逐字未动】：失败仍 terminal、且 judge 重试不重跑检测器", async (t) => {
+  // (a) 检测器 spawn 失败 ⇒ 立即 not-evaluated，judge 从未被 spawn（⛔ 不落入新的归因/重试面）
+  {
+    const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "qg-archi-detfail-"));
+    t.after(() => fs.rmSync(tmp, { recursive: true, force: true }));
+    const { lineageCmd, deletionCmd, gateArgv } = archReviewCmd(tmp);
+    const judge = judgeStub(tmp, "never", { stdout: "[]", exit: 0 });
+    // 一个【spawn 不出来】的命令（不是「能跑但输出读不懂」）⇒ 命中既有 spawn-error 分支。
+    const fact = await runArchitectureReview(tmp, [path.join(tmp, "no-such-detector-binary")], lineageCmd, deletionCmd,
+      judge.argv, gateArgv, true, Infinity, false, null, 900_000, 0);
+    assert.equal(fact.state, "not-evaluated");
+    assert.match(fact.reason, /identity-replication spawn error/);
+    assert.equal(spawnCount(judge.log), 0, "检测器失败 ⇒ judge 零 spawn");
+    assert.equal(captureCount(tmp), 0, "零 spawn ⇒ 零捕获");
+  }
+  // (b) judge 重试发生在检测器【之后】：identity 检测器恰被 spawn 一次（⛔ 重试不重跑机械聚类）
+  {
+    const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "qg-archi-detonce-"));
+    t.after(() => fs.rmSync(tmp, { recursive: true, force: true }));
+    const detLog = path.join(tmp, "identity-hits.log");
+    const identityCmd = loggingCmd(tmp, "log-identity.js", fakeIdentityScript(tmp, true), detLog);
+    const { lineageCmd, deletionCmd, gateArgv } = archReviewCmd(tmp);
+    const s = ARCH_JUDGE_SHAPES.find((x) => x.name === "no-stdout");
+    const judge = judgeStub(tmp, "detonce", s);
+    const fact = await runArchitectureReview(tmp, identityCmd, lineageCmd, deletionCmd, judge.argv, gateArgv,
+      true, Infinity, false, null, 900_000, 0);
+    assert.equal(fact.state, "failed");
+    assert.equal(spawnCount(detLog), 1, "identity 检测器恰一次（judge 重试不重跑机械聚类）");
+    assert.equal(spawnCount(judge.log), 2, "judge 侧仍恰一次重试");
+  }
 });

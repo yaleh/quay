@@ -1858,6 +1858,32 @@ export async function loadOpenDiscoveryModules(root: string): Promise<OpenDiscov
   };
 }
 
+/** THE ENGINE'S STREAM READER, EXPORTED FOR THE SIBLING ROUTINE THAT DRIVES A `claude -p` CALL WITHOUT
+ *  the open-discovery module set (quality-gate-driver's architecture-review judge —
+ *  gap-architecture-review-judge-call-shares-no-diagnostics-or-retry-with-osd).
+ *
+ *  WHY THIS IS A LOADER AND NOT A RE-EXPORT: `streamDiagnostics` lives in `docs/analysis/
+ *  arch-hypothesis-generation.mjs`, which no shipped `plugin/scripts/*.ts` may statically import (the
+ *  same case-(i) invariant that makes `loadOpenDiscoveryModules` go through a runtime `import()`).
+ *  ⛔ ONE READER AND ONE RESOLUTION RULE (硬规则 5b): this resolves through the SAME `resolveEngineModule`
+ *  and caches in the SAME `_engineModuleCache` OSD itself uses, so the driver's `call_failure` classes are
+ *  read by the very function OSD reads them with — a second stream reader in the driver would be exactly
+ *  the drift this task exists to prevent. It THROWS on an unresolvable module (naming the candidates it
+ *  tried) rather than returning a silent no-op reader: "I could not read the stream" must never be shaped
+ *  like "the stream was clean" (硬规则 3b). */
+export async function loadStreamDiagnostics(root: string): Promise<HypothesisModule["streamDiagnostics"]> {
+  const r = resolveEngineModule(root, HYPOTHESIS_MODULE_FILE);
+  if (r.path === null) throw new Error(`ARCH_HYPOTHESIS_UNRESOLVED — ${HYPOTHESIS_MODULE_FILE} not found at ${r.tried.join(" or ")}`);
+  let mod = _engineModuleCache.get(r.path);
+  if (mod === undefined) {
+    mod = await import(/* @vite-ignore */ pathToFileURL(r.path).href);
+    _engineModuleCache.set(r.path, mod);
+  }
+  const fn = (mod as HypothesisModule).streamDiagnostics;
+  if (typeof fn !== "function") throw new Error(`ARCH_HYPOTHESIS_UNRESOLVED — ${r.path} exports no streamDiagnostics`);
+  return fn;
+}
+
 // ── prompts (the routine's OWN composition; the frozen engine prompts stay byte-identical) ───────────
 /** The directive PREPENDED to the frozen investigator prompt. It is what turns the blind investigator into
  *  a source-reading one, and what carries the focus history back to the model. */

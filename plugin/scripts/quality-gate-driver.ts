@@ -114,13 +114,26 @@ import { archDiscoveryRoutineFromConfig } from "./arch-discovery-routine.ts";
 // watermarked ingest → 一次有界 reflect → 对新候选的 held-out 泛化验证。**只读、只报**：该例程不 import
 // 任何立案/撰写函数，唯一新增持久化是 gitignored 载体 `.quay/discovery-method-findings.jsonl` 的一行
 // scan-round + 既有 Discovery 载体 + 既有的 quality-round Fact。⛔ 与 fan-in/scoped-gate 无关。
-import { discoveryMethodRoutineFromConfig, liveDiscoveryModel, readDiscoveryMethodConfig } from "./discovery-method-routine.ts";
+import { classifyModelFailure, discoveryMethodRoutineFromConfig, liveDiscoveryModel, readDiscoveryMethodConfig } from "./discovery-method-routine.ts";
 // OPEN-SEMANTIC-DISCOVERY 轨道（gap-open-semantic-discovery-routine-track）：把**开放式语义架构发现**
 // （docs/analysis/arch-hypothesis-generation.mjs —— 假设生成 + 读源码核实 + 独立反驳 + 价值评估）接上例程环。
 // **只读、只报**：该例程不 import 任何立案/撰写函数，唯一新增持久化是 gitignored 载体
 // `.quay/open-semantic-discovery-findings.jsonl` 的一行 scan-round + 每簇记录，外加它自己那份预留台账。
 // ⛔ 与 fan-in/scoped-gate 无关。
-import { openSemanticDiscoveryRoutineFromConfig } from "./open-semantic-discovery-routine.ts";
+// 架构复核 judge 调用的**失败归因 + 有界重试**也从 OSD 来（gap-architecture-review-judge-call-shares-
+// no-diagnostics-or-retry-with-osd，硬规则 5b：修好一个实例 ≠ 修好一类）。⛔ 不复刻第二套分类器/
+// 流读取器/捕获写端——`callFailureClass`（枚举类）、`RETRYABLE_CALL_FAILURES`（可重试类清单）、
+// `writeCallCapture`（有界 head/tail 捕获取证）、`loadStreamDiagnostics`（【同一个】engine 流读取器）
+// 全部是 OSD 已有的单一实现。**范围**：只接在 judge（真 LLM 调用）上——三个机械检测器是本地脚本
+// spawn，`callFailureClass` 的 `claude -p` 流分类表对它们不适用（它们的既有 terminal-on-error 行为不动）。
+import {
+  openSemanticDiscoveryRoutineFromConfig,
+  RETRYABLE_CALL_FAILURES,
+  RETRY_BACKOFF_MS,
+  callFailureClass,
+  writeCallCapture,
+  loadStreamDiagnostics,
+} from "./open-semantic-discovery-routine.ts";
 // CROSS-PROJECT-DOGFOOD 轨道（gap-cross-project-semantic-dogfooding-routine-configurable-source-projects）：
 // 同族的第五条语义例程，**主语不同**——它的输入不是本仓库的源码，而是**别的 Quay 宿主项目真实使用载体**
 // （tasks/、worker-outcome、fan-in 升级/重试、needs-human 原因）的一段有界近期切片。**只读、只报**：源项目
@@ -764,12 +777,64 @@ function appendArchReviewRoundSafe(root: string, record: ArchReviewRoundRecord):
   try { appendArchReviewRound(root, record); } catch { /* 载体写失败不致命 */ }
 }
 
+// ── judge 调用的失败归因 + 有界重试（gap-architecture-review-judge-call-shares-no-diagnostics-or-retry-with-osd）──
+
+/** judge 调用的有界 head/tail 捕获目录。⛔ 与 OSD 的 `.quay/open-semantic-discovery-call-captures` 同形
+ *  的**兄弟**目录而非共用同一个：两条例程的调用 id 空间不同，混住会让「这行是哪条例程写的」不可读；
+ *  而「同形」正是要保住的那一点——两处的捕获都是 `writeCallCapture` 的同一实现写的。 */
+export const ARCH_REVIEW_CALL_CAPTURE_DIR_REL = path.posix.join(".quay", "architecture-review-call-captures");
+
+/** 本 routine 给【失败】的 judge 轮记录追加的诊断字段（与 OSD 调用记录同名同义）。
+ *  ⛔ `ArchReviewRoundRecord` 本体住在 `architecture-review-cluster.ts`（不在本任务 Touches）⇒ 由本
+ *  driver 在写载体前按**同一 JSON 形状**附加，⛔ 不改兄弟模块的公开接口（硬规则 5：既有的 `reason`
+ *  字段【保留】——下游读 `.quay/architecture-review-round.jsonl` 的消费者靠它）。 */
+export interface ArchReviewJudgeDiagnostics {
+  /** 复用的 `callFailureClass` 读出的枚举类；`null` = 字节自带 `result` 事件（「读不懂」与「没东西可报」
+   *  不同形，硬规则 3b）。 */
+  call_failure?: string | null;
+  stdout_bytes?: number;
+  has_result?: boolean;
+  api_error_event?: boolean;
+  /** `writeCallCapture` 的有界描述（含 path/bytes/截断标志）；写失败时 `{path:null,error}`。 */
+  stdout_capture?: Record<string, unknown> | null;
+  /** 本次失败调用**之后**是否还发过一次重试（可重试类才可能为 true）。 */
+  retry_attempted?: boolean;
+  /** 重试被【资源门】拒绝的原因（本 routine 的支出闸；⛔ 不是第二个预算台账）。null = 未发生拒绝。 */
+  retry_refused?: string | null;
+}
+
+/** 一次 judge 调用（含其字节读数与分类）的读数。三处失败分支与重试判定都只读这一个对象，⛔ 不各自
+ *  重解析一遍 stdout（第二套解析必然是第二套真相）。 */
+interface ArchReviewJudgeAttempt {
+  r: { status: number | null; stdout: string; stderr: string; error: Error | null };
+  /** judge 输出的逐簇判词；`null` = stdout 不是 JSON 数组（⛔ 与「判过但为空」不同形，硬规则 3b）。 */
+  verdicts: JudgeClusterVerdict[] | null;
+  /** 复用的 `callFailureClass` 读数。 */
+  failure: string | null;
+  apiErrorEvent: boolean;
+  hasResult: boolean;
+  stdoutBytes: number;
+  diagnostic: string;
+  capture: Record<string, unknown> | null;
+}
+
+/** 一次 judge 调用是否【产出了可用判词】。⛔ `false` 同时覆盖「进程失败」与「进程成功但输出读不出
+ *  判词」——两者都不是「判过」。PURE。 */
+function judgeAttemptAnswered(a: ArchReviewJudgeAttempt): boolean {
+  return a.r.error === null && a.r.status === 0 && a.verdicts !== null && a.verdicts.length > 0;
+}
+
 /** 架构复核例程：机械聚类（三个检测器 --json）→ 命中则 LLM judge → JS 合并 → 判词载体
  *  （.quay/architecture-review-round.jsonl）。读不懂任一检测器输出 ⇒ not-evaluated（硬规则 3b）；
  *  judge 失败/判词为空 ⇒ failed（落 failed 载体记录）；候选簇为空 ⇒ not-triggered（fired=false 是
  *  真实测量，非「读不懂装合格」）。
  *  ⛔ 循环体异步化（同 B15 的 runAsync 修法）；judge（真实 claude -p）不设固定字面量上限（缺省
- *  unbounded）；judgeTimeoutMs 是负控制缝（测试注入「明显不够的值」），生产缺省 Infinity。 */
+ *  unbounded）；judgeTimeoutMs 是负控制缝（测试注入「明显不够的值」），生产缺省 Infinity。
+ *
+ *  judge 调用的失败归因与**恰一次**重试（gap-architecture-review-judge-call-shares-no-diagnostics-
+ *  or-retry-with-osd）：可重试类（`RETRYABLE_CALL_FAILURES`）失败后经退避重发一次，重发**前**重读
+ *  资源门（本 routine 的支出闸——⛔ 不新开预算台账、⛔ 不改任何 config 上限）。`judgeRetryBackoffMs`
+ *  是退避缝（测试传 0 ⇒ 不 sleep），生产缺省 = OSD 的 `RETRY_BACKOFF_MS`。 */
 export async function runArchitectureReview(
   root: string,
   identityCmd: string[] | null,
@@ -782,6 +847,7 @@ export async function runArchitectureReview(
   halted: boolean = false,
   gapWorkerCmd: string | null = null,
   gapWorkerTimeoutMs: number = ARCH_GAP_WORKER_TIMEOUT_MS_DEFAULT,
+  judgeRetryBackoffMs: number = RETRY_BACKOFF_MS,
 ): Promise<Fact<ArchReviewFactValue | null>> {
   // 1. P2 身份复制（必需——既产 P2 簇又推导 P1 候选构件）。
   const identityArgv = identityCmd ?? defaultIdentityReplicationArgv(root);
@@ -864,54 +930,124 @@ export async function runArchitectureReview(
     return { name: "architecture-review", value: base, state: "not-evaluated", reason: `resource-gate-wait: ${gate.reason} (judge deferred)` };
   }
 
-  // 7. LLM judge（真实 claude -p，单批）。
+  // 7. LLM judge（真实 claude -p，单批）。失败归因/有界重试【复用 OSD 机件】（硬规则 5b）。
   const argv = judgeArgv ?? defaultArchReviewJudgeArgv(clusters, root);
-  const judgeR = await runAsync(argv, { timeoutMs: judgeTimeoutMs, collectStderr: true });
-  if (judgeR.error || judgeR.status !== 0) {
-    const reason = `judge exited ${judgeR.status ?? "null"}: ${judgeR.error?.message ?? String(judgeR.stderr ?? "").slice(0, 200)}`;
-    writeRecord(buildArchReviewRoundRecord({
-      round: readCurrentRound(root),
-      judgedAt: new Date().toISOString(),
-      state: "failed",
-      triggerReasons: trigger.reasons,
-      clusters: [],
-      reason,
-    }));
+  // ⛔ 取不到流读取器 ⇒ 分类与重试边界都无从谈起 ⇒ fail-closed 成 not-evaluated（硬规则 3b）。
+  //    ⛔ 也不是 failed：failed 需要一个分类读数，而正是它读不出——「读不懂」不得伪装成任一合格态。
+  let streamDiagnostics: Awaited<ReturnType<typeof loadStreamDiagnostics>>;
+  try {
+    streamDiagnostics = await loadStreamDiagnostics(root);
+  } catch (e) {
+    return { name: "architecture-review", value: base, state: "not-evaluated", reason: `judge stream reader unresolved: ${(e as Error).message}` };
+  }
+
+  const captureDir = path.join(root, ARCH_REVIEW_CALL_CAPTURE_DIR_REL);
+  /** ONE ATTEMPT：spawn → 读字节 → 分类 → 记捕获。⛔ 从调用点提出【同一个函数】，重试就是同一次调用
+   *  再做一遍——不是第二条会漂移的代码路径（硬规则 5b，同 OSD `attemptCall` 的形状）。 */
+  const attemptJudge = async (attemptNo: number): Promise<ArchReviewJudgeAttempt> => {
+    const r = await runAsync(argv, { timeoutMs: judgeTimeoutMs, collectStderr: true });
+    const stdout = String(r.stdout ?? "");
+    const stderr = String(r.stderr ?? "");
+    const diag = streamDiagnostics(stdout);
+    // ⛔ 超时是【自己的】一种收尾（子进程被 SIGKILL、无 exit code），复用 discovery-method 的分类器
+    //    ——`killed-by-timeout` 正是重试策略不该命中的那一类（它不在 RETRYABLE_CALL_FAILURES 里）。
+    const timedOut = r.error ? classifyModelFailure(r.error) === "timeout" : false;
+    const stdoutBytes = typeof diag.bytes === "number" ? diag.bytes : Buffer.byteLength(stdout, "utf8");
+    const hasResult = diag.has_result === true;
+    const apiErrorEvent = diag.api_error_event === true;
+    const failure = callFailureClass({
+      timed_out: timedOut, stdout_bytes: stdoutBytes,
+      json_lines: diag.json_lines, truncated_json: diag.truncated_json,
+      api_error_event: apiErrorEvent, has_result: hasResult,
+    });
+    let verdicts: JudgeClusterVerdict[] | null = null;
+    try {
+      const parsed = JSON.parse(stdout.trim());
+      if (Array.isArray(parsed)) verdicts = parsed;
+    } catch { /* 非 JSON ⇒ verdicts 保持 null（⛔ 不伪装成「判过但为空」） */ }
+    // 捕获：只在**没有产出可用判词**的调用上留痕（与 OSD 同形——成功调用的判词已逐簇落在载体上，
+    // 再存一份流就是 transcript 而不是诊断）。写失败【报在记录上】，⛔ 不是静默缺失（硬规则 3b：
+    // 「无字节可看」与「没有捕获文件」必须不同形）。
+    let capture: Record<string, unknown> | null = null;
+    const attempt: ArchReviewJudgeAttempt = { r, verdicts, failure, apiErrorEvent, hasResult, stdoutBytes, diagnostic: diagnosticExcerpt(stdout), capture: null };
+    if (!judgeAttemptAnswered(attempt)) {
+      try {
+        capture = writeCallCapture(root, path.join(captureDir, `arch-judge-${process.pid}-${attemptNo}-${Date.now()}.txt`), { stdout, stderr });
+      } catch (e) {
+        capture = { path: null, error: String((e as Error).message ?? e).slice(0, 200) };
+      }
+      attempt.capture = capture;
+    }
+    return attempt;
+  };
+
+  // ── 恰一次重试（仅 RETRYABLE 类）────────────────────────────────────────────────────────────────
+  const first = await attemptJudge(0);
+  const firstFailure = first.failure;
+  let attempt = first;
+  let retryAttempted = false;
+  let retryRefused: string | null = null;
+  if (!judgeAttemptAnswered(first) && firstFailure !== null && RETRYABLE_CALL_FAILURES.includes(firstFailure)) {
+    if (judgeRetryBackoffMs > 0) await new Promise((resolve) => setTimeout(resolve, judgeRetryBackoffMs));
+    // 重试前重读【资源门】——本 routine 的支出闸就是它（⛔ 没有第二条预算台账，⛔ 不改任何 config
+    // 上限）：重试的支出记在同一条闸上，不加并行额度。WAIT ⇒ 重试被拒，保留第一次调用的读数并落
+    // failed（「闸拒绝时就不重试」，同 OSD「台账拒绝时不重试」）。
+    const regate = resourceGateCheck(root, resourceGateArgv);
+    if (!regate.go) {
+      retryRefused = regate.reason;
+    } else {
+      attempt = await attemptJudge(1);
+      retryAttempted = true;
+    }
+  }
+
+  // 失败面：三态 reason 前缀【逐字保留】（下游 grep 不回归），后缀附上复用分类器的读数与重试结果。
+  const retryNote = retryAttempted
+    ? `; retried once (first=${firstFailure})`
+    : retryRefused !== null
+      ? `; retry refused by resource gate: ${retryRefused}`
+      : "";
+  const diagSuffix = ` [call_failure=${attempt.failure ?? "null"}${retryNote}]`;
+  const failedRecord = (reason: string): ArchReviewRoundRecord & ArchReviewJudgeDiagnostics => ({
+    ...buildArchReviewRoundRecord({
+      round: readCurrentRound(root), judgedAt: new Date().toISOString(), state: "failed",
+      triggerReasons: trigger.reasons, clusters: [], reason,
+    }),
+    call_failure: attempt.failure,
+    stdout_bytes: attempt.stdoutBytes,
+    has_result: attempt.hasResult,
+    api_error_event: attempt.apiErrorEvent,
+    stdout_capture: attempt.capture,
+    retry_attempted: retryAttempted,
+    retry_refused: retryRefused,
+  });
+
+  if (attempt.r.error || attempt.r.status !== 0) {
+    const reason = `judge exited ${attempt.r.status ?? "null"}: ${attempt.r.error?.message ?? String(attempt.r.stderr ?? "").slice(0, 200)}${diagSuffix}`;
+    writeRecord(failedRecord(reason));
     return { name: "architecture-review", value: base, state: "failed", reason };
   }
-  let verdicts: JudgeClusterVerdict[];
-  try {
-    const parsed = JSON.parse(String(judgeR.stdout ?? "").trim());
-    verdicts = Array.isArray(parsed) ? parsed : [];
-  } catch {
-    const reason = `judge output not a JSON array: ${diagnosticExcerpt(judgeR.stdout)}`;
-    writeRecord(buildArchReviewRoundRecord({
-      round: readCurrentRound(root),
-      judgedAt: new Date().toISOString(),
-      state: "failed",
-      triggerReasons: trigger.reasons,
-      clusters: [],
-      reason,
-    }));
+  if (attempt.verdicts === null) {
+    const reason = `judge output not a JSON array: ${attempt.diagnostic}${diagSuffix}`;
+    writeRecord(failedRecord(reason));
     return { name: "architecture-review", value: base, state: "failed", reason };
   }
 
-  // 7. JS 合并（判词 → 逐簇载体记录）。判词为空 ⇒ failed（⛔ 不写空 judged 记录）。
+  // 8. JS 合并（判词 → 逐簇载体记录）。判词为空 ⇒ failed（⛔ 不写空 judged 记录）。
+  const verdicts: JudgeClusterVerdict[] = attempt.verdicts;
   const judgedAt = new Date().toISOString();
   const round = readCurrentRound(root);
   const merged: ArchReviewClusterVerdict[] = mergeClusterVerdicts(clusters, verdicts, judgedAt, round);
   if (merged.length === 0) {
-    const reason = `judge produced no valid cluster verdicts: ${diagnosticExcerpt(judgeR.stdout)}`;
-    writeRecord(buildArchReviewRoundRecord({
-      round, judgedAt, state: "failed", triggerReasons: trigger.reasons, clusters: [], reason,
-    }));
+    const reason = `judge produced no valid cluster verdicts: ${attempt.diagnostic}${diagSuffix}`;
+    writeRecord(failedRecord(reason));
     return { name: "architecture-review", value: base, state: "failed", reason };
   }
   const distribution: Record<string, number> = {};
   for (const m of merged) distribution[m.verdict] = (distribution[m.verdict] ?? 0) + 1;
   writeRecord(buildArchReviewRoundRecord({ round, judgedAt, state: "judged", triggerReasons: trigger.reasons, clusters: merged }));
 
-  // 8. 语义结论 → 既有立案通道（gap-arch-review-judge-verdicts-never-reach-the-existing-gap-filing-
+  // 9. 语义结论 → 既有立案通道（gap-arch-review-judge-verdicts-never-reach-the-existing-gap-filing-
   //    channel）。**接法选择 = 单开一条同构路径，⛔ 不并入 packaging 的 `report.drift`**，理由：
   //    ① `report.drift` 是另一条例程（packaging-hygiene-check.ts）自己的机械检测输出，且 Layer 1b
   //       的契约是「一条例程 → 一批 Facts」，routine 之间无共享可变状态——把语义结论倒进别人的
