@@ -168,7 +168,7 @@ The stubs mirror "the real plugin/ tree plus the real build inputs" (their own w
 
 Fix (all four files added to `## Touches`):
 - the three stubs now also copy `docs/analysis` (`makePublishRepo` ×2, `makeTempPackageCopy` ×1) — same shape as the existing `copyVersionGateInputs` in `npm-pack-e2e.test.mjs`;
-- `plugin/shipped-set-baseline.json` **re-anchored** from a real artifact's own reading (`shipped-set-rules.ts --reanchor ... --why "…"`, never hand-fitted): the artifact now carries the engine (8 `.mjs` + 5 prompt data files) plus the 2 dist bundles the engine names, so `shipped.files` 266 → 281 (exactly +15); `shills` unchanged (7345 — the engine is `.mjs`, no `.sh`), so the ratchet's three axes stay 0.
+- `plugin/shipped-set-baseline.json` **re-anchored** from a real artifact's own reading (`shipped-set-rules.ts --reanchor ... --why "…"`, never hand-fitted): the artifact now carries the engine (8 `.mjs` + 5 prompt data files) plus the 2 dist bundles the engine names, so `shipped.files` 266 → 281 (exactly +15); `shLines` unchanged (7345 — the engine is `.mjs`, no `.sh`), so the ratchet's three axes stay 0.
 
 Verified this round (worktree, all three files green): `npm-pack-e2e` 11/11, `shipped-shell-reachability` 8/8, `shipped-set` 10/10.
 
