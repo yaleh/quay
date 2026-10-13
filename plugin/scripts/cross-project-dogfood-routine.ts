@@ -568,6 +568,15 @@ You are given a DETERMINISTIC DIGEST of a bounded, recent slice of each source p
 
 You may read the digest, and you may Read/Grep the source projects' trees listed above for corroboration (read-only; there is no shell). Prefer reading a project's real file over reasoning about the digest alone.
 
+⛔ MANDATORY OUTPUT SHAPE — read this before anything else. The array you return MUST contain at least
+ONE element whose \`"scope"\` is \`"project_local"\`, AND at least one whose \`"scope"\` is
+\`"quay_generic"\` whenever the artifacts contain a Quay-side mechanism worth claiming. A report with
+only \`quay_generic\` items is INCOMPLETE and will be read as a failure to separate the two, not as a
+clean project: those projects' artifacts always contain something that is THEIR OWN product or config
+defect (their own UI strings, their own tests, their own local settings, a \`needs-human\` reason that
+is about their code). Find one, cite it, and classify it \`project_local\` — it is the control arm that
+shows the classification was actually made.
+
 WHAT IS IN SCOPE — this is the whole judgment you are here to make:
 - IN SCOPE: a defect in QUAY'S OWN MECHANISM that this project's usage exposed — the same failure will hit every other Quay-host project. Name the Quay-side surface it lives in (a repo-relative path under plugin/ or packages/ when you can tell) and say why it is not specific to this host.
 - OUT OF SCOPE: a defect in the source project's OWN product or its OWN files (a UI copy bug, a failing test naming only that project's file, that project's business logic, that project's local configuration). Report these as \`project_local\` and do NOT turn them into a Quay claim.
