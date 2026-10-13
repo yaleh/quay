@@ -115,6 +115,13 @@ function makeTempPackageCopy() {
   // (plugin/vendor/*/dist, built by the root `npm install` postinstall →
   // sync-vendor.sh), so package.sh's fail-closed guard does not fire.
   fs.cpSync(path.join(repoRoot, "plugin"), path.join(base, "plugin"), { recursive: true });
+  // `docs/analysis` is a REAL build input (same shape as copyVersionGateInputs above):
+  // build-plugin-dist.mjs stages the discovery engine closure out of <base>/docs/analysis into the
+  // plugin artifact and REFUSES (fail-closed) to ship the three discovery routines without it. A
+  // copy that mirrors only <base>/plugin made the REAL package.sh fail closed — the copy, not the
+  // script, was incomplete (task
+  // gap-discovery-toolchain-depends-on-unshipped-docs-analysis-and-ts-sources-never-works-off-quay-repo).
+  fs.cpSync(path.join(repoRoot, "docs", "analysis"), path.join(base, "docs", "analysis"), { recursive: true });
   fs.symlinkSync(path.join(repoRoot, "node_modules"), path.join(root, "node_modules"), "dir");
   copyVersionGateInputs(base);
   // package.sh stamps the staged plugin's marketplace name from the repo-root marketplace

@@ -138,7 +138,47 @@ import { Sink } from "./arch-discovery-space.mjs";
 // the specifier + LINE with the code-position discipline (a mention inside a comment or a string is not
 // an edge). This module adds only the imported NAMES, which that parser does not return and which the
 // provenance form exists to expose; `resolveSpecifier` maps a relative specifier onto an in-scope node.
-import { extractImports, resolveSpecifier } from "../../plugin/scripts/import-graph-check.ts";
+//
+// ⛔ RESOLVED AT RUNTIME, NEVER BY A STATIC `../../plugin/scripts/import-graph-check.ts` SPECIFIER
+// (task gap-discovery-toolchain-depends-on-unshipped-docs-analysis-and-ts-sources-never-works-off-quay-repo).
+// A `.ts` specifier is a DIRECTORY-LAYOUT assumption: it resolves in quay's own source checkout, where
+// `plugin/scripts/*.ts` sits beside `docs/analysis/`, and NOWHERE ELSE. The shipped plugin artifact keeps
+// `plugin/docs/analysis/*.mjs` but ships `plugin/scripts/dist/<name>.js` — the raw `.ts` are deleted at
+// pack time (packages/quay/scripts/package.sh) because the artifact must run on a bare Node >=20 with NO
+// `--experimental-strip-types`. A static `.ts` import here therefore made this WHOLE engine — and with it
+// all three discovery routines — unresolved in every install layout except quay's own repo. The two
+// candidates below are the two layouts, in the order "source first, artifact second"; a miss is a NAMED
+// refusal (硬规则 3b: "the parser could not be loaded" must never read as "there are no import edges").
+const SELF_DIR = path.dirname(fileURLToPath(import.meta.url));
+/** Where the parser lives in a SOURCE checkout, relative to this file's grandparent (the repo root). */
+export const IMPORT_PARSER_SRC_REL = "plugin/scripts/import-graph-check.ts";
+/** Where the parser lives in the SHIPPED ARTIFACT, relative to the same grandparent (the plugin root).
+ *  ⛔ SPELLED AS ONE `scripts/dist/<name>.js` LITERAL ON PURPOSE: `build-plugin-dist.mjs` derives the
+ *  bundles the engine closure needs by scanning its own shipped `.mjs` for exactly that shape (the SAME
+ *  `dist/<name>.js` reverse-lookup the consumer surface already uses) — so naming the bundle here is what
+ *  puts `scripts/dist/import-graph-check.js` INTO the artifact. A `path.join(…, "dist", "<name>.js")`
+ *  spelling would carry no `dist/<name>.js` substring and the bundle would silently not ship (硬规则 3b). */
+export const IMPORT_PARSER_DIST_REL = "scripts/dist/import-graph-check.js";
+/** The relative locations the import parser is looked for in, in order. Both are built from SELF_DIR, so
+ *  the SAME pair covers both layouts: a source checkout (`<repo>/docs/analysis/` → `<repo>/plugin/
+ *  scripts/import-graph-check.ts`) and the shipped artifact (`<pluginRoot>/docs/analysis/` →
+ *  `<pluginRoot>/scripts/dist/import-graph-check.js`). Source first: a dev checkout must keep running the
+ *  parser it is editing, not a stale bundle. */
+export const IMPORT_PARSER_CANDIDATES = Object.freeze([
+  path.join(SELF_DIR, "..", "..", IMPORT_PARSER_SRC_REL),
+  path.join(SELF_DIR, "..", "..", IMPORT_PARSER_DIST_REL),
+]);
+const { extractImports, resolveSpecifier } = await (async () => {
+  const tried = [];
+  for (const candidate of IMPORT_PARSER_CANDIDATES) {
+    tried.push(candidate);
+    if (!fs.existsSync(candidate)) continue;
+    const mod = await import(/* @vite-ignore */ pathToFileURL(candidate).href);
+    if (typeof mod.extractImports === "function" && typeof mod.resolveSpecifier === "function") return mod;
+    throw new Error(`IMPORT_PARSER_UNUSABLE — ${candidate} loaded but exports no extractImports/resolveSpecifier`);
+  }
+  throw new Error(`IMPORT_PARSER_UNRESOLVED — not found at ${tried.join(" or ")}`);
+})();
 // The ONE digest helper, re-exported so a caller (and the tests) hash bytes exactly the way the
 // pre-registration gate does — never a second, subtly different convention.
 export { sha256 };
@@ -2102,8 +2142,26 @@ export function hardenedArgv(launchArgv, prompt, root, { tools = "", maxTurns = 
  * is the shape 硬规则 3b forbids: a cause-free refusal reads like a policy decision rather than an
  * environment fault. (The acceptance run's real cause was `ERR_MODULE_NOT_FOUND: yaml`, in a worktree with
  * no `node_modules`.) `load` is injectable so the failure path is testable without a broken checkout.
+ *
+ * ⛔ THE DEFAULT `load` RESOLVES FROM DISK, never a static source-tree specifier — the
+ * same layout assumption as the import parser above and for the same reason: a raw `.ts` under
+ * `plugin/scripts/` exists only in quay's own source checkout, while the shipped artifact carries
+ * `scripts/dist/driver-runtime.js` and deletes the raw `.ts`. Source first (a dev checkout must exercise
+ * the launcher it is editing), the shipped bundle second.
  */
-export async function importDriverRuntime(load = () => import("../../plugin/scripts/driver-runtime.ts")) {
+export const DRIVER_RUNTIME_SRC_REL = "plugin/scripts/driver-runtime.ts";
+export const DRIVER_RUNTIME_DIST_REL = "scripts/dist/driver-runtime.js";
+export async function loadDriverRuntimeDefault() {
+  const tried = [];
+  for (const rel of [DRIVER_RUNTIME_SRC_REL, DRIVER_RUNTIME_DIST_REL]) {
+    const candidate = path.join(SELF_DIR, "..", "..", rel);
+    tried.push(candidate);
+    if (fs.existsSync(candidate)) return import(/* @vite-ignore */ pathToFileURL(candidate).href);
+  }
+  throw new Error(`DRIVER_RUNTIME_UNRESOLVED — not found at ${tried.join(" or ")}`);
+}
+
+export async function importDriverRuntime(load = loadDriverRuntimeDefault) {
   let mod;
   try { mod = await load(); }
   catch (err) {

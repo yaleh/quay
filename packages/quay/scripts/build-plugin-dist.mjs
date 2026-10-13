@@ -130,6 +130,190 @@ const CORE_SIBLING_MANIFEST_ROW_RE =
 // Reverse-looked-up to the same-named `.ts` (if it exists) so the entry ships as `dist/<name>.js`.
 const DIST_JS_RE = /dist\/([A-Za-z0-9_.-]+)\.js/g;
 
+// ── THE DISCOVERY ENGINE (task gap-discovery-toolchain-depends-on-unshipped-docs-analysis-and-ts-sources-
+//    never-works-off-quay-repo) ─────────────────────────────────────────────────────────────────────────
+// The three discovery routines resolve their ENGINE out of `<repo|plugin>/docs/analysis/*.mjs` at runtime
+// (`resolveEngineModule` / `resolveInstrument`) and the engine in turn needs a few bundled `scripts/dist/
+// <name>.js`. `docs/analysis/` was NEVER part of this build, so the three routines could be enabled in any
+// host project's `.quay/config.yml` and then fail `engine modules unresolved` every round, in every
+// install layout but quay's own checkout.
+//
+// ⛔ THE ENGINE SET IS DERIVED FROM THE ROUTINES' OWN MANIFESTS, never a hand list here: each routine
+// exports `<SOMETHING>_ENGINE_MODULES`, an array of the module filenames it resolves, and the array's
+// ELEMENTS are the very string constants the loader uses — so a new engine module reaches the artifact by
+// being named in the routine, with no edit in this file (the DRIVER_KINDS / SIBLING_SCRIPTS discipline).
+// FAIL-CLOSED when a routine is present but its manifest does not parse (硬规则 3b): an empty set would
+// silently ship an artifact whose routines can never resolve, and report OK.
+const ENGINE_MANIFEST_SOURCES = [
+  "open-semantic-discovery-routine.ts",
+  "discovery-method-routine.ts",
+  "arch-discovery-routine.ts",
+];
+const ENGINE_MANIFEST_ARRAY_RE = /export\s+const\s+([A-Za-z0-9_]+ENGINE_MODULES)\s*=\s*\[([\s\S]*?)\]\s*as\s+const\s*;/g;
+const ENGINE_STRING_CONST_RE = /export\s+const\s+([A-Za-z0-9_]+)\s*=\s*"([^"]*)"\s*;/g;
+/** The engine's own source directory in THIS repo (the build always runs from the repo, where
+ *  `packages/quay/scripts/` is three levels below the root) — never under the staged plugin root, which
+ *  does not carry `docs/` until this function puts it there. */
+const ENGINE_SRC_DIR = path.resolve(__dirname, "..", "..", "..", "docs", "analysis");
+/** The runtime data files the engine reads from its OWN directory (not module imports — a resource read).
+ *  A closure that ships the `.mjs` and drops these ships an engine whose investigator prompt is missing. */
+const ENGINE_DATA_RELS = ["arch-hypothesis-generation-prompts"];
+const ENGINE_COPY_DIR_REL = path.join("docs", "analysis");
+/** A `./x` / `../x` specifier of ANY (or no) extension — the fail-closed net under STATIC_IMPORT_RE. */
+const RELATIVE_SPEC_RE = /(?:\bfrom\s*|\bimport\s*\(\s*)["'](\.\.?\/[^"']*)["']/g;
+
+/** Resolve every `<X>_ENGINE_MODULES` manifest in the three routine sources to concrete `.mjs` filenames.
+ *  @param {string} pluginRoot
+ *  @returns {{source: string, manifest: string, files: string[]}[]}
+ *  @throws {Error} when a routine source is present but no manifest could be parsed out of it.
+ */
+export function scanDiscoveryEngineManifests(pluginRoot) {
+  const found = [];
+  const scriptsDir = path.join(pluginRoot, "scripts");
+  for (const name of ENGINE_MANIFEST_SOURCES) {
+    const abs = path.join(scriptsDir, name);
+    if (!fs.existsSync(abs)) continue;
+    const text = fs.readFileSync(abs, "utf8");
+    const consts = new Map();
+    for (const m of text.matchAll(ENGINE_STRING_CONST_RE)) consts.set(m[1], m[2]);
+    const manifests = [...text.matchAll(ENGINE_MANIFEST_ARRAY_RE)];
+    if (manifests.length === 0) {
+      throw new Error(
+        `build-plugin-dist: ${name} is present but exports no \`<X>_ENGINE_MODULES\` manifest — refusing ` +
+          `to derive an engine closure from nothing (that artifact's discovery routines could never resolve ` +
+          `their engine, and the build would still report OK)`
+      );
+    }
+    for (const m of manifests) {
+      const files = m[2]
+        .split(",")
+        .map((s) => s.trim())
+        .filter(Boolean)
+        .map((ref) => {
+          if (consts.has(ref)) return consts.get(ref);
+          const lit = /^"([^"]*)"$/.exec(ref);
+          if (lit) return lit[1];
+          throw new Error(
+            `build-plugin-dist: ${name}'s ${m[1]} names \`${ref}\`, which is neither a string literal nor ` +
+              `an exported string constant in that file — refusing to guess which engine module ships`
+          );
+        });
+      for (const f of files) {
+        if (!f.endsWith(".mjs")) {
+          throw new Error(
+            `build-plugin-dist: ${name}'s ${m[1]} names \`${f}\`, which is not a .mjs — the engine ships ` +
+              `VERBATIM into the artifact, where the raw .ts are deleted and a bare Node >=20 has no type ` +
+              `stripping; a .ts here can never resolve`
+          );
+        }
+      }
+      found.push({ source: name, manifest: m[1], files });
+    }
+  }
+  return found;
+}
+
+/** The TRANSITIVE `.mjs` closure of the engine entry files, resolved over the engine directory's own
+ *  import graph. Reuses `staticImportClosure`'s regex discipline but keys on `.mjs` specifiers, and
+ *  REFUSES a non-`.mjs` relative specifier: the artifact ships the engine verbatim, so a relative `.ts`
+ *  import would be a dependency the artifact structurally cannot satisfy.
+ *  @param {string} srcDir absolute path of `docs/analysis`
+ *  @param {string[]} entries `.mjs` basenames
+ *  @returns {string[]} `.mjs` basenames, deterministic order
+ *  @throws {Error} when a specifier goes outside the engine directory or is not a `.mjs`
+ */
+export function discoveryEngineClosure(srcDir, entries) {
+  const seen = new Set();
+  const order = [];
+  const walk = (file) => {
+    if (seen.has(file)) return;
+    seen.add(file);
+    order.push(file);
+    const abs = path.join(srcDir, file);
+    let text;
+    try {
+      text = fs.readFileSync(abs, "utf8");
+    } catch (e) {
+      throw new Error(`build-plugin-dist: engine module ${file} is unreadable (${e.code ?? e.message}) — refusing to ship a partial engine`);
+    }
+    for (const m of text.matchAll(STATIC_IMPORT_RE)) {
+      const spec = m[1];
+      if (!spec.startsWith(".")) continue; // a bare specifier is an npm/builtin import — out of scope
+      const rel = path.posix.normalize(path.posix.join(path.posix.dirname(file), spec));
+      if (rel.startsWith("..")) {
+        throw new Error(
+          `build-plugin-dist: engine module ${file} imports \`${spec}\` — OUTSIDE docs/analysis. The engine ` +
+            `ships verbatim, so it may only depend on its own directory (+ the bundled ` +
+            `\`scripts/dist/<name>.js\` its resolution helpers name); a source-tree-relative import is ` +
+            `exactly the layout assumption this build exists to remove`
+        );
+      }
+      if (!rel.endsWith(".mjs")) {
+        throw new Error(`build-plugin-dist: engine module ${file} imports \`${spec}\` — not a .mjs (the artifact ships no raw .ts)`);
+      }
+      walk(rel);
+    }
+    // STATIC_IMPORT_RE only matches specifiers carrying a `.ts|.mjs|.js` suffix, so a RELATIVE import with
+    // any other (or no) extension would be walked past in silence — the closure would ship without the
+    // module it names and the failure would surface only in a consumer's round. Refused here instead.
+    for (const m of text.matchAll(RELATIVE_SPEC_RE)) {
+      if (!m[1].endsWith(".mjs")) {
+        throw new Error(`build-plugin-dist: engine module ${file} imports \`${m[1]}\` — a relative specifier that is not a .mjs; the engine ships verbatim and can resolve nothing else`);
+      }
+    }
+  };
+  for (const e of entries) walk(e);
+  return order;
+}
+
+/** The `dist/<name>.js` bundles the engine closure names in its own source — reverse-looked-up to the
+ *  same-named plugin `.ts` so the entry set bundles them (the SAME shape the consumer surface scan uses).
+ *  @param {string[]} closureRel `.mjs` files relative to the engine dir
+ *  @returns {Set<string>} `.ts` basenames
+ */
+export function scanEngineBundleRefs(srcDir, closureRel) {
+  const names = new Set();
+  for (const rel of closureRel) {
+    const text = fs.readFileSync(path.join(srcDir, rel), "utf8");
+    for (const m of text.matchAll(DIST_JS_RE)) names.add(`${m[1]}.js`);
+  }
+  return names;
+}
+
+/** Copy the engine closure (+ its runtime data files) into `<pluginRoot>/docs/analysis/`, so the shipped
+ *  routines resolve it off-repo. A no-op for a plugin root that carries none of the three routines (the
+ *  synthetic roots the tests build); FAIL-CLOSED when they are present and the engine source is not.
+ *  @param {string} pluginRoot
+ *  @returns {{files: number, data: number} | null} null = this root does not carry the discovery surface
+ */
+export function stageDiscoveryEngine(pluginRoot) {
+  const manifests = scanDiscoveryEngineManifests(pluginRoot);
+  if (manifests.length === 0) return null;
+  if (!fs.existsSync(ENGINE_SRC_DIR)) {
+    throw new Error(
+      `build-plugin-dist: ${manifests.length} discovery routine manifest(s) found in ${pluginRoot}, but the ` +
+        `engine source ${ENGINE_SRC_DIR} does not exist — refusing to ship routines whose engine is absent ` +
+        `(every round would fail \`engine modules unresolved\`)`
+    );
+  }
+  const closure = discoveryEngineClosure(ENGINE_SRC_DIR, [...new Set(manifests.flatMap((m) => m.files))].sort());
+  const destDir = path.join(pluginRoot, ENGINE_COPY_DIR_REL);
+  fs.mkdirSync(destDir, { recursive: true });
+  for (const rel of closure) fs.copyFileSync(path.join(ENGINE_SRC_DIR, rel), path.join(destDir, rel));
+  let data = 0;
+  for (const rel of ENGINE_DATA_RELS) {
+    const from = path.join(ENGINE_SRC_DIR, rel);
+    if (!fs.existsSync(from)) {
+      throw new Error(`build-plugin-dist: engine data ${from} is named by the engine but does not exist — refusing to ship an engine whose prompt files are missing`);
+    }
+    const to = path.join(destDir, rel);
+    fs.rmSync(to, { recursive: true, force: true });
+    fs.cpSync(from, to, { recursive: true });
+    data += walk(to).length;
+  }
+  return { files: closure.length, data };
+}
+
 // Plugin source spawns ITSELF in literal forms that none of the other scans cover — they are
 // not in Core source (so scanCoreReferences misses them) and carry no `node ` invocation prefix
 // (so INVOCATION_RE misses them). All live in driver-runtime.ts, and a third-party
@@ -400,6 +584,20 @@ export function deriveEntries(pluginRoot) {
   for (const explicit of QUAY_INIT_EXPLICIT) {
     const rel = existing.get(explicit);
     if (rel) referenced.add(rel);
+  }
+  // The discovery engine's own bundled deps — the `scripts/dist/<name>.js` its resolution helpers name
+  // (see scanDiscoveryEngineManifests / scanEngineBundleRefs). Derived from the routines' manifests, so
+  // the engine can never name a bundle this build does not ship.
+  const manifests = scanDiscoveryEngineManifests(pluginRoot);
+  if (manifests.length > 0) {
+    if (!fs.existsSync(ENGINE_SRC_DIR)) {
+      throw new Error(`build-plugin-dist: ${manifests.length} discovery routine manifest(s) found but ${ENGINE_SRC_DIR} is missing — the engine's bundled deps cannot be derived`);
+    }
+    const closure = discoveryEngineClosure(ENGINE_SRC_DIR, [...new Set(manifests.flatMap((m) => m.files))].sort());
+    for (const bundle of scanEngineBundleRefs(ENGINE_SRC_DIR, closure)) {
+      const rel = existing.get(bundle.replace(/\.js$/, ".ts"));
+      if (rel) referenced.add(rel);
+    }
   }
 
   const scripts = [...referenced].filter((r) => r.startsWith("scripts"));
@@ -1218,6 +1416,16 @@ export async function buildPluginDist(pluginRoot = DEFAULT_PLUGIN_ROOT) {
   console.log(
     `build-plugin-dist: ${built.length} bundled entrypoints → ${path.join(pluginRoot, "scripts", "dist")} (+ gate-scripts/dist)`
   );
+  // The discovery engine ships VERBATIM (it is pure `.mjs` by construction — discoveryEngineClosure
+  // refuses anything else): the routines resolve it from `<pluginRoot>/docs/analysis/` at runtime, so
+  // without this the three discovery routines are shipped but can never resolve off quay's own checkout.
+  const engine = stageDiscoveryEngine(pluginRoot);
+  if (engine !== null) {
+    console.log(
+      `build-plugin-dist: discovery engine staged → ${path.join(pluginRoot, ENGINE_COPY_DIR_REL)} ` +
+        `(${engine.files} .mjs + ${engine.data} data file(s), verbatim)`
+    );
+  }
   return built.length;
 }
 

@@ -38,6 +38,7 @@
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
+import { fileURLToPath } from "node:url";
 import YAML from "yaml";
 import { isDue, parseTrigger } from "./routine-scheduler.ts";
 import { runAsync, type Fact, type RoutineSpec } from "./driver-runtime.ts";
@@ -51,11 +52,40 @@ export const ARCH_DISCOVERY_NAME = "arch-discovery";
  *  docs/carrier-registry.json — a runtime-state carrier, the same family as quality-round.jsonl. */
 export const CARRIER_REL = path.posix.join(".quay", "arch-discovery-findings.jsonl");
 
-/** The two instruments, resolved from the WORKSPACE root (they live in this repo's docs/analysis). A
- *  workspace that enables the section without them at those paths gets a `failed` round naming the
- *  spawn error — never a silent "no findings". */
-export const SPACE_INSTRUMENT_REL = path.posix.join("docs", "analysis", "arch-discovery-space.mjs");
-export const TIME_INSTRUMENT_REL = path.posix.join("docs", "analysis", "arch-discovery-time.mjs");
+/** The two instruments' FILE names — the basenames the engine modules are shipped under, spelled once. */
+export const SPACE_INSTRUMENT_FILE = "arch-discovery-space.mjs";
+export const TIME_INSTRUMENT_FILE = "arch-discovery-time.mjs";
+export const SPACE_INSTRUMENT_REL = path.posix.join("docs", "analysis", SPACE_INSTRUMENT_FILE);
+export const TIME_INSTRUMENT_REL = path.posix.join("docs", "analysis", TIME_INSTRUMENT_FILE);
+
+/** ⛔ THE PACKAGING SINGLE SOURCE — see `OPEN_DISCOVERY_ENGINE_MODULES` in
+ *  open-semantic-discovery-routine.ts for the full rationale. `build-plugin-dist.mjs` derives the
+ *  artifact's engine closure from THIS list, never from a build-side hand list. */
+export const ARCH_DISCOVERY_ENGINE_MODULES = [SPACE_INSTRUMENT_FILE, TIME_INSTRUMENT_FILE] as const;
+
+/** The plugin root this FILE lives in (…/plugin/scripts/<this> → …/plugin). Used only to BUILD the first
+ *  candidate path of `resolveInstrument`. */
+export const SCRIPT_PLUGIN_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..", "..");
+
+/** Resolve one instrument to an absolute path, returning the candidates it TRIED so a refusal can name
+ *  them (an unresolvable instrument is a `failed` round, not a silent zero — 硬规则 3b).
+ *
+ *  ⛔ ORDER IS THE FIX for gap-discovery-toolchain-depends-on-unshipped-docs-analysis-and-ts-sources-never-
+ *  works-off-quay-repo: the instrument was resolved from the WORKSPACE root ONLY, so a host project that
+ *  enabled `loop.arch_discovery` without a copy of `docs/analysis/` could never run a round — the
+ *  instrument argv pointed at a file that does not exist there. The instrument ships with the plugin
+ *  (it is this file's own sibling engine), so the PLUGIN root is the primary candidate; the workspace root
+ *  stays as the second candidate for a workspace that vendors its own copy (the pre-existing behaviour). */
+export function resolveInstrument(root: string, file: string): { path: string | null; tried: string[] } {
+  const tried = [
+    path.join(SCRIPT_PLUGIN_ROOT, "docs", "analysis", file),
+    path.join(root, "docs", "analysis", file),
+  ];
+  for (const candidate of tried) {
+    if (fs.existsSync(candidate)) return { path: candidate, tried };
+  }
+  return { path: null, tried };
+}
 
 /** The interval floor. A round spawns two node processes that stream large carriers; a cadence shorter
  *  than an hour is refused rather than silently rounded up (the config error names the value). */
@@ -352,9 +382,27 @@ export async function runArchDiscovery(root: string, opts: ArchDiscoveryRunOptio
   // ⑤ spawn both instruments, SEQUENTIALLY (a serial run keeps the peak RSS bounded to one instrument
   //    and makes the peak reading attributable — see the emitted per-instrument facts).
   const spawnFn = opts.spawnFn ?? (runAsync as unknown as ArchDiscoverySpawnFn);
+  // The instruments are resolved from DISK before the spawn (plugin root first, workspace root second —
+  // see resolveInstrument), and an unresolvable one is refused HERE, naming both candidates, rather than
+  // being handed to `node` as a path that does not exist (硬规则 3b: a spawn ENOENT and a real instrument
+  // failure must not arrive as the same reading).
+  const resolvedInstruments = opts.argvPrefix !== undefined ? null : {
+    space: resolveInstrument(root, SPACE_INSTRUMENT_FILE),
+    time: resolveInstrument(root, TIME_INSTRUMENT_FILE),
+  };
+  if (resolvedInstruments !== null) {
+    const missing = (["space", "time"] as const).filter((w) => resolvedInstruments[w].path === null);
+    if (missing.length > 0) {
+      return fact(
+        "failed",
+        { ...base, enabled: true },
+        `instrument(s) unresolved — ${missing.map((w) => `${w}: not found at ${resolvedInstruments[w].tried.join(" or ")}`).join("; ")} (nothing spawned, nothing appended; not-evaluated:no-instrument)`,
+      );
+    }
+  }
   const prefixes = opts.argvPrefix ?? {
-    space: ["node", "--experimental-strip-types", `--max-old-space-size=${config.maxOldSpaceMb}`, path.join(root, SPACE_INSTRUMENT_REL)],
-    time: ["node", "--experimental-strip-types", `--max-old-space-size=${config.maxOldSpaceMb}`, path.join(root, TIME_INSTRUMENT_REL)],
+    space: ["node", "--experimental-strip-types", `--max-old-space-size=${config.maxOldSpaceMb}`, resolvedInstruments!.space.path as string],
+    time: ["node", "--experimental-strip-types", `--max-old-space-size=${config.maxOldSpaceMb}`, resolvedInstruments!.time.path as string],
   };
   const sinceIso = new Date(started - config.sinceDays * 86_400_000).toISOString();
   const untilIso = new Date(started).toISOString();

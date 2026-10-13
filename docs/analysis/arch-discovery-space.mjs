@@ -56,6 +56,47 @@ import { sha256, subjectKey, validateRecord } from "./architecture-evidence-stor
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 export const TOOL = "arch-discovery-space";
 
+// ── the enum-surface checker, resolved at RUNTIME (task gap-discovery-toolchain-depends-on-unshipped-
+//    docs-analysis-and-ts-sources-never-works-off-quay-repo) ─────────────────────────────────────────
+// ⛔ The scan used to `import(path.join(HERE, "..", "..", "plugin/scripts/enum-surface-parity-check.ts"))`
+// — a RAW `.ts` under `plugin/scripts/`, which exists only in quay's own SOURCE checkout. The shipped
+// plugin artifact deletes the raw `.ts` and ships `plugin/scripts/dist/<name>.js` instead
+// (packages/quay/scripts/package.sh), so the SCAN mode of this instrument could not run anywhere else.
+// The same two-layout pair `arch-hypothesis-generation.mjs` uses: source checkout first, shipped bundle
+// second; a miss is a NAMED refusal, never an empty candidate set (硬规则 3b — "the checker could not be
+// loaded" and "the checker found nothing" must not share a shape; the empty-registry guard just below
+// already refuses the second).
+export const CHECKER_SRC_REL = "plugin/scripts/enum-surface-parity-check.ts";
+/** ⛔ One `scripts/dist/<name>.js` LITERAL, for the same reason as arch-hypothesis-generation.mjs's
+ *  IMPORT_PARSER_DIST_REL: `build-plugin-dist.mjs` reverse-looks-up this shape to decide what to bundle. */
+export const CHECKER_DIST_REL = "scripts/dist/enum-surface-parity-check.js";
+export const CHECKER_CANDIDATES = Object.freeze([
+  path.join(HERE, "..", "..", CHECKER_SRC_REL),
+  path.join(HERE, "..", "..", CHECKER_DIST_REL),
+]);
+async function loadChecker() {
+  const tried = [];
+  for (const candidate of CHECKER_CANDIDATES) {
+    tried.push(candidate);
+    if (!fs.existsSync(candidate)) continue;
+    const mod = await import(/* @vite-ignore */ pathToFileURL(candidate).href);
+    if (typeof mod.runCheck === "function" && mod.DEFAULT_REGISTRY) return mod;
+    throw new Error(`CHECKER_UNUSABLE — ${candidate} loaded but exports no runCheck/DEFAULT_REGISTRY`);
+  }
+  throw new Error(`CHECKER_UNRESOLVED — not found at ${tried.join(" or ")}`);
+}
+
+/** The checker AS OF a pinned tree — the `--pre`/`--post` experiment mode's own read (the candidate SET
+ *  and the registry must be the PRE ones, so this one is deliberately NOT resolved from the plugin).
+ *  A tree that does not carry it is a NAMED refusal, never an opaque ERR_MODULE_NOT_FOUND (硬规则 3b). */
+async function loadTreeChecker(treeDir) {
+  for (const rel of [CHECKER_SRC_REL, CHECKER_DIST_REL]) {
+    const candidate = path.join(treeDir, rel);
+    if (fs.existsSync(candidate)) return import(/* @vite-ignore */ pathToFileURL(candidate).href);
+  }
+  throw new Error(`CHECKER_UNRESOLVED_IN_TREE — neither ${path.join(treeDir, CHECKER_SRC_REL)} nor ${path.join(treeDir, CHECKER_DIST_REL)} exists`);
+}
+
 /** The task this instrument's record FORMAT depends on (it supplied the discovery verdicts,
  *  the `counterexample` kind, and the runtime-carrier provenance form used below). Every emitted
  *  record names it, and the run emits one evidence record whose `carrier` is a line of its task file —
@@ -491,8 +532,8 @@ export async function runSpace(opts) {
   materialize(Object.assign(git, { root }), preSha, preDir);
   materialize(Object.assign(git, { root }), postSha, postDir);
   // The checker is imported from the PRE tree: the candidate SET and the registry are the PRE ones.
-  const preChk = await import(pathToFileURL(path.join(preDir, "plugin/scripts/enum-surface-parity-check.ts")).href);
-  const postChk = await import(pathToFileURL(path.join(postDir, "plugin/scripts/enum-surface-parity-check.ts")).href);
+  const preChk = await loadTreeChecker(preDir);
+  const postChk = await loadTreeChecker(postDir);
   const preRes = preChk.runCheck({ root: preDir, registry: preChk.DEFAULT_REGISTRY });
   const postRes = postChk.runCheck({ root: postDir, registry: postChk.DEFAULT_REGISTRY });
   const authVals = Object.fromEntries(preRes.authorities.map((a) => [a.id, a.values]));
@@ -538,7 +579,7 @@ export async function runSpaceScan(opts) {
   const rev = git(["rev-parse", opts.rev || "HEAD"]).trim();
   const t0 = Date.now();
 
-  const chk = await import(pathToFileURL(path.join(HERE, "..", "..", "plugin/scripts/enum-surface-parity-check.ts")).href);
+  const chk = await loadChecker();
   const registry = opts.registry ? JSON.parse(fs.readFileSync(opts.registry, "utf8")) : chk.DEFAULT_REGISTRY;
   // ⛔ An empty registry is NOT a pass — it means nothing was evaluated (硬规则 3b).
   if (!Array.isArray(registry.authorities) || registry.authorities.length === 0) throw new Error("registry has no authorities — nothing would be evaluated");
