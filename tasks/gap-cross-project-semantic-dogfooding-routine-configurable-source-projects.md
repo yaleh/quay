@@ -233,3 +233,11 @@ acting on: across the real rounds, clusters came back `refuted`/`undetermined` f
 - docs/carrier-registry.json
 - tasks/gap-cross-project-dogfood-claudecodeui-c3-fuepz9.md
 - tasks/gap-cross-project-dogfood-quay-self-usage-c1-a7wnts.md
+
+## Blocker
+
+**2026-10-13T11:12:36.854Z — worker 未落地（exited-not-landed）**
+
+- 未落地原因：AC 未全勾（checked 5/6，剩余未勾 1）——续做只需验证并勾选 AC
+- run_id：wk-prod-anchor
+- session_id：1f5d473a-39dd-43f6-93e9-de801b54a6d5
