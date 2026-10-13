@@ -3,7 +3,7 @@ id: gap-ac214-eleventh-crossing-repeat-remedy-rejected-by-filing-gate
 title: "AC-214 第十一次转红（AC-238/239 = 201/200，margin −1）：升级面的补救 finding 自
   2026-10-09 起被立案闸【每一轮都拒】（rate 6 轮 / collision 1 轮）⇒ 产出者零次重跑；`verdict: act-now`
   + `remedyAvailability: executable` 的 finding 没有消费者"
-status: todo
+status: ready
 labels:
   - gap
   - defect
