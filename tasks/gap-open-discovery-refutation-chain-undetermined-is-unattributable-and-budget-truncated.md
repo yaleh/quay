@@ -4,7 +4,7 @@ title: "open discovery: supported hypotheses never reach a determinate
   refutation (refuter budget 6 truncates, undetermined cause unrecorded,
   cluster↔call join wrong) — attributable verdicts, measured budgets, one
   counted fresh-context retry; undetermined never confirmed"
-status: todo
+status: ready
 labels:
   - gap
   - defect
