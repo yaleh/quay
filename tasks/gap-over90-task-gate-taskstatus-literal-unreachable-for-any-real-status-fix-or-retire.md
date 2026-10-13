@@ -4,7 +4,7 @@ title: over90-task-gate.ts taskStatusAllowsOver90m(status==='in-progress') is
   unreachable for ANY real task — TASK_STATUSES has no such value; AC0 settles
   fix-vs-retire by liveness evidence (open-discovery finding
   open-semantic-discovery@2026-10-13T01:10:43.215Z#2, independently re-verified)
-status: todo
+status: ready
 labels:
   - gap
   - defect
