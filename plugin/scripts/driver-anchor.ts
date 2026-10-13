@@ -801,6 +801,11 @@ export async function main(argv: string[]): Promise<number> {
     const a = args[i];
     if (a === "--root") root = args[++i];
     else if (a === "--kinds") kinds = String(args[++i]).split(",").filter((k): k is DriverKind => KNOWN_KINDS.includes(k as DriverKind));
+    // `--takeover <pid>`：**唯一**一条 anchor 存活时换内核的路径（drain/stop 都到不了——见
+    // driver-runtime.ts 的 `workerStopUnreachableNote` 与 `spawnAnchor` 上的三步配方）。
+    // 语义：本进程先等 <pid> 退出才起任何循环（⛔ 旧进程活着时绝不起第二份 loop）；超预算只把这次
+    // 交接标成异常并**继续等**（D3）。⛔ 它不是 `stop` 的替代品、也不停任何东西——操作者仍需对旧
+    // anchor 发 SIGTERM 才能让这条等待结束；未暴露为任何 CLI verb。
     else if (a === "--takeover") takeoverPid = Number(args[++i]);
     else if (a === "--restart-delay") restartDelaySecs = Number(args[++i]);
     else if (a === "--reconcile-ms") reconcileMs = Number(args[++i]);

@@ -208,3 +208,73 @@ test("5b 同族②（start 路径的孤儿清理）— 无活 supervisor 而旧 
   assert.equal(pidAlive(orphan), false, "孤儿 driver 必须**真的**退出（⛔ 不是「发了信号就当它死了」——旧实现在这里只等 1s 就直接删载体）");
   assert.ok(readPid(root, "promotion-driver-supervisor.pid") !== "", "新 supervisor 起来了（对照：清理没有把正常启动也挡掉）");
 });
+
+// ── gap-driver-stop-kind-worker-message-does-not-name-drain-or-takeover-handoff ────────────────────
+//
+// 现场（2026-10-13，本机，逐字见任务体）：`stop --kind worker` / `restart --kind worker` 两次各等满
+// 60s 才拒绝，`anchor-desired.json` 已排除 worker 之后循环仍续跑 90+ 分钟。成因不是超时太短：worker 的
+// `invoke()` 自己就是常驻派发环，只要有 ready 活就**不会**返回给 anchor 的停机检查点（promotion/outer/
+// goal 的 `invoke()` 是短机械周期、所以 ~1s 内生效）。⇒ 对 worker 而言「核对 pid 后重跑」是一个
+// **结构上永不成立**的建议；这条判据守的就是消息必须点名真实成因 + 可执行的 `drain` 替代。
+
+/** 负控制（AC1）：**改前**那条 `stop-failed` 消息的原文（逐字抄自
+ *  `git show develop:plugin/scripts/driver-runtime.ts` 第 4053 行的字面量；kind/anchor pid 取本用例的
+ *  实际取值）。⛔ 不含 `drain`、⛔ 不含 `常驻` —— 缺口就是它。断言「新消息含这些词 ∧ 旧原文不含」，
+ *  两半都在 ⇒ 断言不是空转（硬规则 4：一个结构上不可能取假的量不是测量）。 */
+const PRE_FIX_WORKER_STOP_FAILED =
+  "stop-failed: kind=worker — 该 kind 的循环在 60000ms 内未收尾（anchor pid=none）。" +
+  "⛔ 本条**不报成 not-running**：循环仍在 ⇒ 接着 start 会得到两份 loop（双派发）。锚日志尾:";
+
+test("AC1 — kind=worker 的 stop-failed / restart-aborted 必须点名真实成因（常驻循环，重试结构上无效）与 `drain` 替代（负控制：改前消息两个词都没有）", async (t) => {
+  // 夹具 anchor 声称托管 worker，而该 kind 的「循环」是一个不跑循环的常驻 idle 进程 ⇒ 永远不收尾。
+  // 这正是「resident loop 总有 ready 活」的形状（循环不把控制权交回），也是生产里那条 60s 拒绝的形态。
+  const f = migrationFixture("worker-stop-msg", { supervisorCarrier: false, anchorNamesWorker: true });
+  const f2 = migrationFixture("worker-restart-msg", { supervisorCarrier: false, anchorNamesWorker: true });
+  t.after(() => {
+    killProcs([f.supPid, f.drvPid, f.anchorPid, f.inFlightPid, f2.supPid, f2.drvPid, f2.anchorPid, f2.inFlightPid]);
+    rmRoots([f.root, f2.root]);
+  });
+
+  // 负控制的前半：改前的原文确实两个词都没有（否则下面的断言可能是空转）。
+  assert.equal(PRE_FIX_WORKER_STOP_FAILED.includes("drain"), false, "负控制：改前消息不含 `drain`");
+  assert.equal(PRE_FIX_WORKER_STOP_FAILED.includes("常驻"), false, "负控制：改前消息不含 `常驻`（成因也没被点名）");
+
+  // ① `stop --kind worker`：超时窗口压到 800ms（测试缝，⛔ 不改生产节奏），判别的是**消息**。
+  //    ⚠️ `stopKindViaAnchor` 把 `stop-failed` 直接写 `process.stderr`（⛔ 不走 out 回调）⇒ 必须就地
+  //    捕获 stderr；这正是本用例要判的那条输出，⛔ 不能用「命令自己的报告」替代。
+  const out = [], err = [];
+  const origErrWrite = process.stderr.write;
+  process.stderr.write = (c) => { err.push(String(c)); return true; };
+  let rc;
+  try {
+    rc = await stopKind(f.root, "worker", (s) => out.push(s.trim()), { stopTimeoutMs: 800, anchorExitMs: 300 });
+  } finally {
+    process.stderr.write = origErrWrite;
+  }
+  assert.equal(rc, 1, `循环不收尾 ⇒ stop 必须报失败（⛔ 不得报成 stopped）：${out.join("|")} ${err.join("|")}`);
+  const stopMsg = err.join("\n");
+  assert.ok(stopMsg.includes("stop-failed: kind=worker"), `stop-failed 行本身必须还在（⛔ 不是换掉旧判据）：${stopMsg}`);
+  assert.ok(stopMsg.includes("常驻循环"), `AC1：必须点名真实成因（worker 是常驻循环，不是超时太短）：${stopMsg}`);
+  assert.ok(stopMsg.includes("结构上不可能"), `AC1：必须说明重试对 worker 结构上无效：${stopMsg}`);
+  assert.ok(stopMsg.includes("quay driver drain --kind worker"), `AC1：必须点名可执行的替代 \`drain\`：${stopMsg}`);
+  assert.ok(stopMsg.includes("takeoverPid"), `AC2 联动：不停机换内核的配方入口也必须在这里可见：${stopMsg}`);
+
+  // ② `restart --kind worker`：同样的成因 + 替代（共用同一份 note，⛔ 不各写一份）。
+  const rOut = [], rErr = [];
+  const rrc = await restartKind(
+    f2.root,
+    "worker",
+    { restartDelaySecs: 1, confirmTimeoutSecs: 1, legacyGraceMs: 500, legacyKillWaitMs: 200, stopTimeoutMs: 800, anchorExitMs: 300 },
+    (s) => rOut.push(s.trim()),
+    (s) => rErr.push(s.trim()),
+  );
+  assert.equal(rrc, 1, `stop 未确认干净 ⇒ restart 必须中止（⛔ 不起第二份 loop）：${rOut.join("|")} ${rErr.join("|")}`);
+  const restartMsg = rErr.join("\n");
+  assert.ok(restartMsg.includes("restart-aborted: kind=worker"), `restart-aborted 行本身必须还在：${restartMsg}`);
+  assert.ok(restartMsg.includes("常驻循环") && restartMsg.includes("quay driver drain --kind worker"), `AC1：restart 路径也必须点名成因 + \`drain\`：${restartMsg}`);
+  assert.equal(readDesired(f2.root).kinds.includes("worker"), false, "对照：restart 中止后 kind 未进期望态（⛔ 没有起第二份 loop）");
+
+  // 反向对照（证明上面的失败不是空转）：在飞子进程活过整条路径。
+  assert.equal(pidAlive(f.inFlightPid), true, "AC5 对照：在飞子进程未被信号");
+  assert.equal(pidAlive(f2.inFlightPid), true, "AC5 对照：在飞子进程未被信号");
+});

@@ -617,6 +617,15 @@ Usage:
              ⛔ Refuses (exit non-zero) if the driver is halted — clear the halt with \`resume\` first.
   stop       Hard stop: terminate the supervisor + driver. For worker, in-flight workers are NOT
              killed (they orphan and finish) — use drain for a graceful stop.
+             ⚠️ For worker specifically this stop CANNOT confirm while ready work exists: the
+             resident loop IS the thing being waited on, so it never returns to the anchor's
+             stop-checkpoint and the wait always expires (measured 2026-10-13: two 60s attempts
+             refused, then the loop kept dispatching for 90+ minutes). Retrying is structurally
+             no-op — use \`quay driver drain --kind worker\` (halts new dispatch; in-flight finishes).
+             To swap the anchor PROCESS itself without downtime, neither stop nor drain reaches it;
+             use the takeoverPid recipe (⛔ not a CLI verb): start a taker with
+             spawnAnchor(root, {takeoverPid: <old anchor pid>}) and SIGTERM the old anchor — the
+             taker waits for the old pid to exit before it loops (⛔ never two loops at once).
   drain      Halt new dispatch WITHOUT killing in-flight workers (control-state halted=true).
              worker → worker-control.json; promotion → promotion-control.json (AC150).
   resume     drain's inverse: clear the halt (control-state halted=false) so new dispatch resumes.
@@ -624,7 +633,8 @@ Usage:
   status     Report {kind, supervisor_pid, driver_pid, alive, carrier_path, carrier_records,
              last_record_ts} — last_record_ts is the carrier's last-record timestamp (not just a
              record count, which cannot distinguish "growing" from "stalled").
-  restart    stop then start.
+  restart    stop then start. ⚠️ Inherits the worker caveat above: while ready work exists it
+             aborts WITHOUT starting (exit 1) rather than risk two loops on one kind.
   log        READ-ONLY: print the driver's recorded per-attempt log (the RAW failure text of each
              attempt — never classified, never interpreted), through observation.readFanInAttempts
              (the same single reader the web /needs-human page uses). ⛔ Does NOT spawn the kernel.

@@ -1847,7 +1847,24 @@ export function sharedHostEnvelopeFraction(
  *
  *  自 2026-09-25 起：可用时**包在 `systemd-run --user --scope` 里**起（见上面那段长注释；实测原地 exec
  *  ⇒ pid 语义不变）。systemd-run 不可用 ⇒ **回退为原行为**，但把独立取值 `envelope: "none"` + 具名原因
- *  写进 anchor 日志（硬规则 3b：⛔ 不静默地假装有包络）。 */
+ *  写进 anchor 日志（硬规则 3b：⛔ 不静默地假装有包络）。
+ *
+ *  ── `takeoverPid`：**不停机交换内核**的手工配方（⛔ 无 CLI verb，是内部原语）────────────────────
+ *  (gap-driver-stop-kind-worker-message-does-not-name-drain-or-takeover-handoff；
+ *   2026-10-13 现场：要换掉一个**活着**的 anchor 进程，而 `stop`/`restart --kind worker` 到不了——
+ *   常驻 worker 环只要有 ready 活就永远不把控制权交回停机检查点，见 `workerStopUnreachableNote`)。
+ *
+ *  这是唯一一条在 anchor 存活时完成内核交接的路径；`drain` 与 `stop` 都到不了这里（前者只挡新派发，
+ *  后者要求循环先收尾）。配方三步：
+ *    ① 记下旧 anchor 的 pid：`<root>/.quay/anchor.pid`（或 `quay driver status`）；
+ *    ② 起接管者，把旧 pid 交给它：`spawnAnchor(root, { takeoverPid: <旧 pid> })`
+ *       —— 等价于手写 `node --experimental-strip-types driver-anchor.ts __anchor --root <root> --takeover <旧 pid>`；
+ *    ③ 对旧 anchor 直接发 SIGTERM：`kill -TERM <旧 pid>`。
+ *
+ *  等待语义由**接管者**负责，⛔ 不是「旧进程必须立刻死」：接管者会一直等到 `takeoverPid` 退出才真正
+ *  起循环（driver-anchor.ts 的 takeover 分支；旧进程还活时**绝不**起第二份 loop），超预算只把这次交接
+ *  标成异常（`takeover-abandoned` / `.quay/anchor-takeover.json`）并**继续等**（D3：放弃不是终态）。
+ *  ⇒ ②③ 之间没有必须抢占的窗口，⛔ 不是竞态配方。 */
 export function spawnAnchor(
   root: string,
   opts: { logFile?: string; takeoverPid?: number | null } = {},
@@ -3978,6 +3995,36 @@ function rmCarrierUnlessForeignLive(file: string, ownPid: number | null): void {
   try { fs.rmSync(file, { force: true }); } catch { /* ignore */ }
 }
 
+/** kind=worker 的「stop/restart 到不了」成因 + 可执行替代，给两条失败消息（`stop-failed` /
+ *  `restart-aborted`）**共用同一份**（⛔ 不各写一份——那正是「一个实体 N 个命名点」的漂移形态）。
+ *
+ *  为什么 worker 独有（`startKindTask` 的逐 kind wrapper，driver-anchor.ts:125-191 逐字）：wrapper 只在
+ *  `invoke()` **返回之后**才重读 `readDesired(root).kinds` 看要不要收尾。promotion/outer/quality/meta/goal
+ *  的 `invoke()` 是一段**短机械周期**、很快返回 ⇒ 停机检查 ~1s 内生效。worker 的 `invoke()` **本身**就是
+ *  常驻派发环（自己的轮次节奏，有 ready 活就一直派），只要还有 ready 工作就**不会**把控制权交回 wrapper
+ *  ⇒ 那个检查点永远轮不到 —— 与超时长短无关。
+ *
+ *  ⛔ 这不是「多等一会儿/多试几次就好」：实测（2026-10-13，本机）两次 60s 超时均 `stop-failed`，
+ *  `anchor-desired.json` 已排除 worker 之后循环仍续跑 ~90+ 分钟（`worker-round.jsonl` rounds 769→819+）
+ *  ⇒ 重试**结构上不可能**得到不同结果。故这条必须点名真实成因与可执行替代，⛔ 不能只教「核对 pid 后重跑」
+ *  （那是一个对 worker **永不成立**的建议）。
+ *
+ *  返回 `""` ⇒ 该 kind 无此形状，调用者沿用原有指引（对非 worker 保持**逐字节**不变）。
+ *
+ *  交接配方（`takeoverPid`）见 `spawnAnchor` 与 driver-anchor.ts 的 `--takeover` 解析处。 */
+function workerStopUnreachableNote(kind: DriverKind): string {
+  if (kind !== "worker") return "";
+  return (
+    `⚠️ kind=worker 是**常驻循环**：循环体自己就是那个 loop，只要还有 ready 工作就不会把控制权交回 anchor\n` +
+    `   的停机检查点 ⇒ 只要还有 ready 活，重跑这条命令**结构上不可能**得到不同结果（⛔ 不是超时太短）。\n` +
+    `   可行替代：\`quay driver drain --kind worker\`（停新派发、在飞跑完，⛔ 不杀在飞）——清空在飞后再 stop。\n` +
+    `   若要**不停机交换内核**（换 anchor 进程本身），drain/stop 都到不了：起一个接管者\n` +
+    `   （\`spawnAnchor(root, { takeoverPid: <旧 anchor pid> })\`，见 driver-anchor.ts 的 --takeover）\n` +
+    `   并对旧 anchor 直接发 SIGTERM —— ⛔ \`--takeover\` 未暴露为任何 CLI verb，是内部原语。\n` +
+    `   旧进程活着时接管者会**一直等**它退出（⛔ 不起第二份 loop；D3：超预算只标异常、继续等）。\n`
+  );
+}
+
 /** 阶段 C 的 stop 路径（anchor 承载）：从期望态里摘掉该 kind ⇒ anchor 只停**那一个**循环。
  *
  *  ⛔ 关键语义（§6.9 不变式 2/3，AC6）：停 `worker` 时其余五个 kind 的循环**不受影响**（它们住在同一个
@@ -4052,6 +4099,7 @@ async function stopKindViaAnchor(
     process.stderr.write(
       `stop-failed: kind=${kind} — 该 kind 的循环在 ${stopTimeoutMs}ms 内未收尾（anchor pid=${anchorPid ?? "none"}）。` +
       `⛔ 本条**不报成 not-running**：循环仍在 ⇒ 接着 start 会得到两份 loop（双派发）。` +
+      workerStopUnreachableNote(kind) +
       `锚日志尾:\n`,
     );
     process.stderr.write(`${fileTailLines(anchorPaths(root).logFile) || "(anchor 日志为空/读不到 —— ⛔ 这不等于「无死因」)"}\n`);
@@ -4146,7 +4194,8 @@ export async function restartKind(
   if (stopRc !== 0) {
     err(
       `restart-aborted: kind=${kind} — stop 未确认旧进程树已退出（exit=${stopRc}）；⛔ 不起新循环（否则与旧 loop 双派发）。` +
-      `按上面的 stop-failed 行核对 pid；确认旧进程消亡后重跑 \`quay driver restart --kind ${kind}\`。\n`,
+      `按上面的 stop-failed 行核对 pid；确认旧进程消亡后重跑 \`quay driver restart --kind ${kind}\`。\n` +
+      workerStopUnreachableNote(kind),
     );
     return 1;
   }
