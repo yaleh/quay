@@ -33,6 +33,15 @@ The CLI's general `--help` text does say, for the `stop` verb generically: "For 
 1. `stop-failed`/`restart-aborted` for `kind=worker` specifically names the actual cause (ready work exists; the resident loop will not return control until it has none) and names `drain` as the alternative, rather than only suggesting "retry after confirming the old pid died."
 2. Document (in the CLI help and/or a comment at `spawnAnchor`) that a live, in-place kernel handoff while the anchor is alive is NOT reachable via any `--kind` verb; it requires starting a new anchor with the `takeoverPid` option and sending the old anchor process SIGTERM directly. Decide, with evidence from this task's own investigation, whether to also expose this as an explicit CLI verb (e.g. `quay driver handoff`) or keep it as an internal primitive with a documented manual recipe — the decision belongs to this task, not asserted here.
 
+## Decision (Plan step 2 — resolved here, with this task's own evidence)
+**Keep `takeoverPid` an internal primitive with a documented manual recipe. ⛔ Do NOT add a `quay driver handoff` verb.**
+
+- **Incidence (硬规则 12):** this is the FIRST recorded need for a live anchor swap — one occurrence, in this very session. A new CLI verb is a new mechanism; one occurrence does not justify one (a verb must be maintained, tested, and versioned forever). The recipe itself is three shell steps, run at most a few times per host generation.
+- **It would be a SECOND way to start an anchor.** `quay driver start` already owns "bring the anchor up", including the takeover-wait budget (`takeoverBudgetMs`), the reconcile loop, and the `takeover-abandoned*` carriers. A `handoff` verb would have to either duplicate that machinery or bypass it — and bypassing it is exactly how the 2026-09-18 zero-anchor-for-27-minutes incident (driver-anchor.ts's D1/D2/D3 comment) happened.
+- **The failure mode is the one the code most works to prevent.** Two anchors on one root = double dispatch. Every existing guard (the `stopping` latch, the post-budget "keep waiting" D3 arm, `anchorOwns`) exists to make that structurally impossible; a new operator-facing entry point widens that surface for a benefit measured at one use.
+- **What was actually missing is discoverability, not a verb** — the gap this task closes is that the PER-ATTEMPT error never named either alternative. With `stop-failed`/`restart-aborted` now naming the recipe (AC1), and the recipe documented at `spawnAnchor` + the `--takeover` parse site + both CLI help surfaces (AC2), the operator reaches it without reading raw source.
+- **Revisit if the incidence grows:** if a third live-swap need appears, the recipe has then been hand-run ≥3 times and the verb earns itself — file it then, with that count.
+
 ## Acceptance Criteria
 - [ ] AC1: a fixture anchor with a `worker`-kind resident loop that always finds ready work; `stop --kind worker` against it produces an error message naming the real cause and `drain` as the alternative. Negative control: the current message (checked in before the fix) does not name `drain`.
 - [ ] AC2: the documentation addition (help text or code comment) is pasted, naming the `takeoverPid` handoff recipe this task's own investigation used.
@@ -47,3 +56,5 @@ The CLI's general `--help` text does say, for the `stop` verb generically: "For 
 - plugin/scripts/driver-runtime.ts
 - plugin/scripts/driver-anchor.ts
 - packages/quay/src/cli/driver.ts
+- packages/quay/src/cli/help.ts
+- plugin/test/driver-runtime-s10.test.mjs
