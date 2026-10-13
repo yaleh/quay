@@ -16,9 +16,10 @@ goal_ac: AC-334
 ## Proposal
 
 AC-334（GOAL-029，人 2026-10-07 裁定）的判据要求在 **55 秒内**跑通 `plugin/test/shipped-set.test.mjs`。
-本轮**直接实跑**该判据：测试**通过**，但墙钟 **54.7s** —— 占预算 **99.5%**；driver 本轮观测到
-`rc=124`（`CAUSE=shipped-set-test-too-slow`）。即：**"发布产物不含测试/夹具/突变用例"这个保证本身仍然成立**，
-不成立的是这条【常驻判据】自己的"便宜" —— 它没有余量，是一枚硬币。
+本轮**直接实跑**该判据（AC 记录里那条命令，`timeout 55 node --experimental-strip-types --test plugin/test/shipped-set.test.mjs`）：
+`rc=0`、10 pass / 0 fail、墙钟 **54.96s** —— 占预算 **99.93%**，余量 **0.04 秒**；同一轮 driver 观测到 `rc=124`
+（`CAUSE=shipped-set-test-too-slow`）。即：**"发布产物不含测试/夹具/突变用例"这个保证本身仍然成立**，
+不成立的是这条【常驻判据】自己的"便宜" —— 0.04s 的余量不是余量，是一枚硬币。
 
 ### 根因（实测，非推断）
 
@@ -46,7 +47,7 @@ dist-closure 校验、git commit）。
 `gap-shipped-plugin-tree-excludes-dev-only-content-and-has-a-shrink-only-size-ratchet`（**done**，同样挂 `goal_ac: AC-334`）
 在 2026-10-07 authored 了这个测试与这条 55s 预算，但它把预算写在**未经测量的余量**上：测试诞生时就约 54s 对 55s 上限，
 当轮"通过"靠的是 <1s 的间隙。此后产物只增不减（2026-10-09 +2 文件；2026-10-13 +15 文件，discovery engine 随产物发出），
-每次 publish 的打包量随之上升，"通过"于是变成抛硬币。⇒ 本次不再把预算当作可依赖的常量，
+每次 publish 的打包量随之上升，"通过"于是变成抛硬币（本轮实测余量已降到 **0.04s**）。⇒ 本次不再把预算当作可依赖的常量，
 而是**把余量本身做成可核对的读数**。
 
 同形先例（机制不同，仅作判据口径参考）：`gap-select-preflight-json-real-store-too-slow`（done）——
@@ -56,6 +57,7 @@ dist-closure 校验、git commit）。
 
 - **(A) 去掉重复装配**：上表第 2、3 行是**逐字相同**的活 —— 同一个 stub、同一处 `'"${RSYNC_EXCLUDES[@]}" '` 变异、
   同样 `--no-build`，产出同一份 full-tree 产物。3 次 → 2 次，直接省 ~17s（→ ~37s）。第 3 行已 memoize，第 2 行是独立的第二次。
+  ⚠️ 单靠 (A) 到不了 AC 的 30s 线，需与 (B) 或 (C) 并用。
 - **(B) 把 `bundleEntries` 的串行 `await` 循环改成有界并发**（esbuild 的 JS API 支持并发 `build()`；
   每个入口的 options 不变，产物应逐字节不变）。单此一项即可把每次 publish 的 14.7s 压到 2.3–4.3s。
   ⚠️ 必须实测**峰值内存**（本仓库有 suite 内存包络）与**产物逐字节一致**（见 AC4）。
