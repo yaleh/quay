@@ -6,7 +6,7 @@
 //   ② **右删失是一等输出**：有尝试、无终态 ⇒ `terminal:false` + 年龄，⛔ 不靠「记录缺席」让读者去猜；
 //   ③ **归属键是尝试窗口**：旧 (task,runId) 口径的对照读数随记录落盘、可在报告里计数（负控制）。
 // 全部用合成 root（纯 fs 读，不需要 .quay/config.yml —— 本模块不碰 provider）。
-import { test } from "node:test";
+import { test, after } from "node:test";
 import assert from "node:assert/strict";
 import fs from "node:fs";
 import os from "node:os";
@@ -26,8 +26,22 @@ import {
   parseWindow,
 } from "../scripts/duration-report.ts";
 
+// 每个临时 root 登记在案，模块收尾统一删——`tmp-leak-pairing-check` 要求每个 mkdtemp 结果都有配对清理
+// （2026-08-12 审计实测 3389 个遗留目录 / 1.1GB）。这里用 top-level `after()` 载体而不是逐测试 finally：
+// 断言失败在测试中途抛出时，finally 只覆盖单个用例，after() 覆盖本文件全部。
+const TMP_ROOTS = [];
+after(() => {
+  for (const root of TMP_ROOTS) {
+    try {
+      fs.rmSync(root, { recursive: true, force: true });
+    } catch {
+      /* best-effort：清理失败不该把一次绿的测试变红 */
+    }
+  }
+});
 function mkRoot() {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), "dur-rep-"));
+  TMP_ROOTS.push(root);
   fs.mkdirSync(path.join(root, ".quay"), { recursive: true });
   fs.mkdirSync(path.join(root, "tasks"), { recursive: true });
   return root;
