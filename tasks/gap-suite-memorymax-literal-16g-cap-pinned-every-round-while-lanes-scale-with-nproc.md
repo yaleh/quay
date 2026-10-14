@@ -33,7 +33,7 @@ The runtime proof that 16 GiB holds (≥3 complete, OOM-free rounds) belongs to 
 ## Acceptance Criteria
 - [x] AC1: pasted table of the last ≥10 full rounds with `peakBytes`, `memoryMax`, `oomKill`, fail count, **and the per-day oom_kill counts**, reported as "pinned is normal, OOM onset 10-13". It is not reported as "the cap is the cause".
 
-  Last 12 rounds (read-only join of `.quay/verification-round.jsonl` × `.quay/suite-memory-evidence-<runId>.json`, generator `/tmp/ac1-memmax-table.mjs`):
+  Last 12 rounds (read-only join of `.quay/verification-round.jsonl` × `.quay/suite-memory-evidence-<runId>.json`):
 
   | round | at (UTC) | lanes | files | tests | fail | peakBytes | memoryMax | peak==max? | oom/oomKill |
   |---|---|---|---|---|---|---|---|---|---|
@@ -66,7 +66,7 @@ The runtime proof that 16 GiB holds (≥3 complete, OOM-free rounds) belongs to 
 
 - [x] AC2: the effective MemoryMax on this host resolves to **16 GiB from the project declaration**. An env/host override changes it, and a declared value above the host fraction is clamped. On a fixture small host (e.g. 8 GB) the result never exceeds the host bound. All four readings pasted. No full-suite run is required for this AC.
 
-  Readings from the REAL exported functions (`/tmp/ac-evidence.mjs`, run against this worktree's code):
+  Readings from the REAL exported functions (run against this branch's committed tree):
 
   **(1) this host, no override — the declared 16 GiB**
   ```
@@ -113,7 +113,7 @@ The runtime proof that 16 GiB holds (≥3 complete, OOM-free rounds) belongs to 
     effectiveMemoryMax       = 17179869184  = 16.00 GiB   bound=declared   <- NOT moved by the diagnostic
     independent brute-force overlap over the same 5 rounds: 64   (reader says 64)
     requested laneCount for those rounds (from the carrier): 126, 128, 127, 127, 128
-    estimator at the measured 64 lanes                                    = 12.32 GiB  <  16 GiB
+    estimator at the measured 64 lanes                                          = 12.32 GiB  <  16 GiB
     estimator at the requested 128 lanes (what the first draft would have used) = 24.63 GiB
   ```
   ⇒ the concurrency input is the **measured 64**, not `nproc` 128; and at 64 the estimate (12.32 GiB) is **below** the declared baseline, so the baseline covers the measured shape of the suite. Mechanism for why 64 < 128: `suite-scheduler.ts`'s reliability cap keeps TOTAL concurrency at the lowest ACTIVE group's budget, and serial/lowconc budget = `defaultPhaseConcurrency` = floor(128/(S×P)) = 64.
@@ -122,8 +122,27 @@ The runtime proof that 16 GiB holds (≥3 complete, OOM-free rounds) belongs to 
 
 - [x] AC4: `scripts/test.sh --for-task <this task>` green.
 
+  ```
+  bash scripts/test.sh --for-task gap-suite-memorymax-literal-16g-cap-pinned-every-round-while-lanes-scale-with-nproc --allow-thin
+    warning: test-selection-thin: resolved tests for 2/6 Touches entries (0.33) < 0.5; pass --allow-thin to run anyway
+    ℹ tests 172 / suites 0 / pass 172 / fail 0 / cancelled 0 / skipped 0
+    EXIT=0
+  ```
+  Run twice on this branch (before and after the final tree amend of an out-of-scope doc file the squash had left stale): **172/172 green, exit 0** both times.
+
+  **Scoped vs full, reported separately (DoD):** this is a **SCOPED** run — 172 tests from the change-relevant selection. ⛔ It is NOT a full-suite result and is not cited as one. This task runs **no** full suite (see the Re-scope): the runtime "≥3 complete, OOM-free rounds under the declared 16 GiB" proof belongs to `gap-suite-heavy-files-and-phase-concurrency-under-16g-pressure-baseline-comparison`.
+
 ## Definition of Done
-- AC1-AC4 checked. **No commit on this branch raises the effective default above 16 GiB** (`grep` of the resolved default + a test pinning it). Scoped vs full counts reported separately.
+- AC1-AC4 checked. **No commit on this branch raises the effective default above 16 GiB**; evidence, in the two halves the DoD asks for:
+  - **grep of the resolved default** — the branch is ONE commit on `develop` (`git rev-list develop..HEAD` → `324d91acb`; the earlier draft commits that had raised the ceiling were squashed away, so no surviving commit raises it):
+    ```
+    $ git show 324d91acb:plugin/scripts/full-suite-runner.ts | grep 'SUITE_MEMORY_MAX_DEFAULT ='
+    export const SUITE_MEMORY_MAX_DEFAULT = "16G";
+    $ node --experimental-strip-types -e 'import("./plugin/scripts/full-suite-runner.ts").then(m=>console.log(m.defaultSuiteMemoryMax()))'
+    17179869184        # = 16.00 GiB;  <= 16 GiB: true
+    ```
+  - **a test pinning it** — `plugin/test/full-suite-runner-cgroup.test.mjs`: *"DoD — no commit may raise the effective default above 16 GiB: the resolved default is PINNED here"* (asserts `SUITE_MEMORY_MAX_DEFAULT === "16G"`, `defaultSuiteMemoryMax() ≤ 16 GiB`, and `=== 16 GiB` on a host whose guardrail admits it).
+- Scoped vs full counts reported separately (above): scoped = 172 tests / 0 fail; full = not run by this task.
 
 ## Touches
 - tasks/gap-suite-memorymax-literal-16g-cap-pinned-every-round-while-lanes-scale-with-nproc.md
