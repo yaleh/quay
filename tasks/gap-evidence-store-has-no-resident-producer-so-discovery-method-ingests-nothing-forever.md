@@ -2,7 +2,7 @@
 id: gap-evidence-store-has-no-resident-producer-so-discovery-method-ingests-nothing-forever
 title: evidence store 只被空引导、仍无任何常驻 routine 写入 → discovery_method 永远
   verified/ingested 0（与「本轮无新增」同形）
-status: ready
+status: done
 labels:
   - gap
   - architecture-discovery
