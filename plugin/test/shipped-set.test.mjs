@@ -21,6 +21,20 @@
 //
 // Run: scripts/test.sh plugin/test/shipped-set.test.mjs  (and AC-334's own criterion:
 //      `timeout 55 node --experimental-strip-types --test plugin/test/shipped-set.test.mjs`)
+//
+// ⛔ WHAT THIS FILE DELIBERATELY DOES *NOT* GATE PER RUN: the artifact's OWN totals (files / bytes /
+// `.sh` lines). It REPORTS them (printed below, so a green run carries the real numbers) and judges
+// only the `forbidden` reading — the rule-excluded content that is exactly zero by policy and
+// therefore stable at every cadence. A per-run exact ceiling over the artifact's own totals is the
+// defect this file was corrected for (tasks/gap-shipped-set-per-run-criterion-gates-churn-prone-
+// artifact-totals, AC-334): the artifact is dominated by regenerated `dist/*.js` bundles, so those
+// totals move whenever ANY bundled source changes — including a legitimate new shipped entry — and a
+// ceiling that fires on unrelated/legitimate edits is re-anchored blindly until it means nothing
+// (plugin/scripts/shipped-set-rules.ts, the ⛔ WHY THE RATCHET'S AXES ARE THE FORBIDDEN READING
+// section; measured 6 re-anchors in 6 days, one of them a hand-copy error).
+// The totals guarantee is NOT dropped — it moved one cadence up, to the RELEASE gate
+// (verify-plugin-channel-assertions.ts's `shipped-set-clean`, where a human is in the loop), and
+// plugin/test/verify-plugin-channel-assertions.test.mjs pins it two-way there.
 
 import { test, before } from "node:test";
 import assert from "node:assert/strict";
@@ -35,7 +49,6 @@ import {
   RULES_FILE_REL,
   check,
   judge,
-  judgeShippedSize,
   measuredOf,
   overBaselineMessage,
   parseRules,
@@ -174,7 +187,7 @@ function requireArtifact(t) {
 
 // ── AC2: the artifact carries none of it ─────────────────────────────────────────────────────────
 
-test("AC2: the published artifact carries no dev-only content, and its totals are within the recorded clean build", (t) => {
+test("AC2: the published artifact carries no dev-only content (its OWN totals are reported, not judged — AC-334)", (t) => {
   if (!requireArtifact(t)) return;
   const rules = parseRules(fs.readFileSync(RULES_ABS, "utf8"));
   const reading = readShippedSet(artifact, rules);
@@ -191,13 +204,16 @@ test("AC2: the published artifact carries no dev-only content, and its totals ar
   assert.notEqual(baseline, null, "the committed baseline must parse");
   const verdict = judge(measuredOf(reading), baseline, baseline, null);
   assert.deepEqual(verdict.over, [], "the ratchet must not be over its baseline");
-  // The SIZE ceiling: the artifact's own totals against the recorded clean build.
-  assert.ok(baseline.shipped, "the baseline must record the clean build's totals");
-  const size = judgeShippedSize(shippedOf(reading), baseline.shipped);
-  assert.deepEqual(size.over, [], `the artifact's totals must be ≤ the recorded clean build: measured ${JSON.stringify(size.measured)} vs ${JSON.stringify(size.ceiling)}`);
+  // ⛔ The artifact's OWN totals are a READING here, never a per-run verdict — see the header note.
+  // The recorded clean build is still PRINTED (so a stale recording is visible), but a mismatch no
+  // longer makes the criterion red: that is the release gate's `shipped-set-clean` half.
+  assert.ok(baseline.shipped, "the baseline must record the clean build's totals (the release gate reads them)");
   // Printed so the file's own log carries the real numbers (a green run is evidence, not a claim).
   console.log(
     `shipped-set: artifact ${reading.totals.files} files / ${reading.totals.bytes} bytes / ${reading.totals.shLines} .sh lines, ${rules.length} rule(s) in force, 0 forbidden`,
+  );
+  console.log(
+    `shipped-set: artifact totals are REPORTED, not judged per run (recorded clean build ${JSON.stringify(baseline.shipped)}) — the ceiling is the release gate's shipped-set-clean`,
   );
 });
 
@@ -286,9 +302,16 @@ test("AC2 control: a `foo.test.mjs` dropped into a clean artifact turns it RED",
   assert.deepEqual({ files: reading.forbidden.files, shLines: reading.forbidden.shLines }, { files: 1, shLines: 0 });
   assert.equal(judgeShippedSetClean(reading, readBaselineFile(BASELINE_ABS), dirty).state, "FAIL");
   // ⛔ …and the CLEAN artifact is still PASS: the control must not be satisfiable by a checker that
-  // simply always fails.
+  // simply always fails. The PASS arm judges the FORBIDDEN half only (a `shipped`-free baseline):
+  // passing the committed baseline would make this assertion depend on `baseline.shipped` — the
+  // churn-prone hand-recorded total this file no longer gates per run (header note). The release
+  // gate's size half, WITH the committed baseline, is controlled in
+  // plugin/test/verify-plugin-channel-assertions.test.mjs.
   const clean = readShippedSet(artifact, rules);
-  assert.equal(judgeShippedSetClean(clean, readBaselineFile(BASELINE_ABS), artifact).state, "PASS");
+  const committed = readBaselineFile(BASELINE_ABS);
+  assert.notEqual(committed, null, "the committed baseline must parse");
+  const forbiddenOnly = { files: committed.files, bytes: committed.bytes, shLines: committed.shLines };
+  assert.equal(judgeShippedSetClean(clean, forbiddenOnly, artifact).state, "PASS");
 });
 
 // ── AC3: the ratchet is shrink-only, reanchorable, and its failure names the axis ───────────────
@@ -381,19 +404,43 @@ test("硬规则 3b: zero rules ⇒ NOT-EVALUATED, never a PASS (nothing forbidde
 test("the CLI gates the real artifact green and the unfiltered one red — the same predicate both ways", (t) => {
   if (!requireArtifact(t)) return;
   const rulesAbs = RULES_ABS;
-  const ok = check(artifact, rulesAbs, BASELINE_ABS, null, { sizeCeiling: true });
-  assert.equal(ok.code, 0, `the clean artifact must pass with the size ceiling on: ${JSON.stringify(ok.reading.totals)}`);
-  assert.equal(ok.size.ok, true);
+  // ⛔ No `--size-ceiling` on the clean arm: the per-run predicate judges `forbidden`, never the
+  // artifact's own totals (header note; shipped-set-rules.ts's ⛔ section). The totals are still READ
+  // and reported on `ok.size` — they are simply not a per-run verdict.
+  const ok = check(artifact, rulesAbs, BASELINE_ABS, null, {});
+  assert.equal(ok.code, 0, `the clean artifact must pass: ${JSON.stringify(ok.reading.totals)}`);
   const full = extractArtifactUnfiltered(t);
   const red = check(full, rulesAbs, BASELINE_ABS, null, {});
   assert.equal(red.code, 1);
   assert.ok(red.reading.violations.length > 0);
-  // The SIZE ceiling alone would also catch it: the pre-exclusion artifact carries 1062 files /
-  // 22,859 .sh lines against the recorded 283 / 17,545. `bytes` is REPORTED, never gated —
-  // esbuild's module-path comments make the byte total depend on the build tree's location, so a
-  // byte-exact ceiling would be a host-dependent constant (see SIZE_GATED_AXES).
-  const redSize = check(full, rulesAbs, BASELINE_ABS, null, { sizeCeiling: true });
-  assert.equal(redSize.size.ok, false);
-  assert.ok(redSize.size.over.includes("files"));
-  assert.ok(redSize.size.bytesDelta > 0, "the byte delta is still reported");
+});
+
+// ── the size ceiling's cadence (AC-334: the guarantee moved to the release gate, it was not dropped)
+//
+// Synthetic values on purpose: this control must NOT read the artifact's own totals, because a
+// dependency on them is exactly what made the per-run criterion churn. It pins the two properties the
+// relocation had to preserve — (a) `check` gates the totals only when ASKED (`--size-ceiling`, the
+// release gate's call), and (b) `bytes` is reported but never gated (SIZE_GATED_AXES: esbuild writes
+// each inlined module's path RELATIVE to the output dir, so the byte total is a host-dependent
+// constant — 硬规则 4 推论二).
+test("the size ceiling gates only when asked, and `bytes` is reported, never gated", () => {
+  const dir = makeTmpDir("shipped-set-sizeceiling-");
+  writeFile(path.join(dir, "a.md"), "1\n");
+  writeFile(path.join(dir, "b.md"), "22\n");
+  const meta = makeTmpDir("shipped-set-sizeceiling-meta-");
+  const rulesAbs = path.join(meta, "rules.txt");
+  writeFile(rulesAbs, "*.test.mjs\n");
+  const baselineAbs = path.join(meta, "baseline.json");
+  writeFile(baselineAbs, JSON.stringify({ files: 0, bytes: 0, shLines: 0, shipped: { files: 1, bytes: 0, shLines: 0 } }));
+
+  const off = check(dir, rulesAbs, baselineAbs, null);
+  assert.equal(off.code, 0, "without --size-ceiling the totals are REPORTED, not gated");
+  assert.deepEqual(off.size.over, ["files"], "…and the reading still names the gated axis it is over");
+  const on = check(dir, rulesAbs, baselineAbs, null, { sizeCeiling: true });
+  assert.equal(on.code, 1, "with --size-ceiling (the release gate's call) the ceiling bites");
+
+  writeFile(baselineAbs, JSON.stringify({ files: 0, bytes: 0, shLines: 0, shipped: { files: 2, bytes: 1, shLines: 0 } }));
+  const bytesOnly = check(dir, rulesAbs, baselineAbs, null, { sizeCeiling: true });
+  assert.equal(bytesOnly.code, 0, "a bytes-only excess must NOT gate");
+  assert.ok(bytesOnly.size.bytesDelta > 0, "the byte delta is still reported");
 });

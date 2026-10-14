@@ -3,7 +3,7 @@ id: gap-shipped-set-per-run-criterion-gates-churn-prone-artifact-totals
 title: AC-334 的常驻判据每轮门禁产物【自身总量】——该量按 shipped-set-rules.ts
   头注释的设计只归发布门禁（有人在场），per-run 门禁会因无关改动误报并被盲目 re-anchor 直到失去意义（实测 6 天内 5
   次抬升、其中一次手抄错，本轮因一次合法新增 experiment-manifest.js 再红）
-status: ready
+status: done
 labels:
   - gap
   - defect
@@ -224,11 +224,3 @@ EXIT 0
 ### ⚠️ 前两轮 exited-not-landed 的成因（与本任务改动无关，记录以免下一轮重走）
 
 suite 步的红是**宿主负载**造成的：本机 `nproc=128`，那一刻 `/proc/loadavg` = `39.93 142.02 147.36`（15 分钟均值 142 > 128），suite 以 `concurrency=128` 跑 583 个文件，36 条红里绝大多数是 60s / 80s / 127s 的**超时形**（`@load-sensitive`：`full-suite-runner-{s07,s10,s12,cgroup,phases}` 等）。唯一一条快失败（31ms）的 `plugin/test/shipped-shell-reachability.test.mjs` 在本 worktree **单独实跑 8/8 全过**（`✔ AC2: every .sh in the artifact is runtime-reachable…`），故同样归因于负载下的装配失败，不是代码缺陷。本任务自己的 `plugin/test/shipped-set.test.mjs` 在那一轮 suite 日志里就是 `passed=true`。
-
-## Blocker
-
-**2026-10-14T16:31:50.233Z — worker 未落地（exited-not-landed）**
-
-- 未落地原因：step=suite: AssertionError [ERR_ASSERTION]: 成因点名是解析问题 [baseline A/B: HARD RED (changed-assertion) — the task's red set is NOT a subset of the develop baseline red set: added=plugin/test/goal-driver-s04.test.mjs,plugin/test/worker-fan-in.test.mjs,packages/quay/test/npm-pack-e2e.test.mjs,packages/quay/test/npm-pack-e2e.test.mjs,packages/quay/test/npm-pack-e2e.test.mjs,packages/quay/test/npm-pack-e2e.test.mjs,packages/quay/test/npm-pack-e2e.test.mjs,packages/quay/test/npm-pack-e2e.test.mjs,packages/quay/test/npm-pack-e2e.test.mjs,packages/quay/test/npm-pack-e2e.test.mjs,packages/quay/test/npm-pack-e2e.test.mjs,packages/quay/test/npm-pack-e2e.test.mjs,packages/quay/test/npm-pack-e2e.test.mjs,packages/quay/test/build-plugin-dist.test.mjs,packages/quay/test/build-plugin-dist.test.mjs,packages/quay/test/build-plugin-dist.test.mjs,plugin/test/full-suite-runner-s07.test.mjs,plugin/test/full-suite-runner-s07.test.mjs,plugin/test/full-suite-runner-s07.test.mjs,plugin/test/full-suite-runner-s07.test.mjs,packages/quay/test/serve-ac95-views.test.mjs,packages/quay/test/serve-board.test.mjs,plugin/test/full-suite-runner-s10.test.mjs,plugin/test/full-suite-runner-s10.test.mjs,plugin/test/full-suite-runner-s10.test.mjs,plugin/test/supervisor-observe.test.mjs,plugin/test/supervisor-observe.test.mjs,plugin/test/supervisor-observe.test.mjs,plugin/test/supervisor-observe.test.mjs,plugin/test/driver-anchor-takeover.test.mjs,plugin/test/full-suite-runner-s12.test.mjs,plugin/test/full-suite-runner-s12.test.mjs,plugin/test/worker-driver.test.mjs,plugin/test/worker-driver.test.mjs,plugin/test/live-web-address.test.mjs,plugin/test/live-web-address.test.mjs,plugin/test/full-suite-runner-phases.test.mjs,plugin/test/full-suite-runner-phases.test.mjs,plugin/test/full-suite-runner-phases.test.mjs,plugin/test/shipped-shell-reachability.test.mjs,plugin/test/shipped-shell-reachability.test.mjs,plugin/test/shipped-shell-reachability.test.mjs,plugin/test/shipped-shell-reachability.test.mjs changed=plugin/test/full-suite-runner-cgroup.test.mjs,plugin/test/full-suite-runner-cgroup.test.mjs,plugin/test/full-suite-runner-cgroup.test.mjs]
-- run_id：wk-prod-anchor
-- session_id：552e2e5b-7fe9-4e5b-a830-674129e7420a
