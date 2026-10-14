@@ -145,11 +145,46 @@ with `SUITE-INCOMPLETE reason=oom-killed`. Both causes were read out of the arte
    **Consequence (硬规则 3b):** `suite-recovery-blocked` then reports
    `recovery exhausted at floor concurrency 32 — no declared rung produced a complete verdict (64,48,32); needs a
    code/config fix, see plugin/scripts/full-suite-runner.ts`. That message asserts a VERDICT was reached and found
-   incomplete; no verdict was ever READ. 「降档后仍不完备」 and 「读不懂」 are flattened into one reading, and its trailing
+   incomplete; no verdict was EVER read. 「降档后仍不完备」 and 「读不懂」 are flattened into one reading, and its trailing
    pointer names a file that is not where the defect lives (the defect is in `worker-fan-in.ts` / `suite-driver.ts`).
    ⛔ Not fixed here: both files are outside this task's declared `## Touches`, and Plan item 5 explicitly assigns the
    OOM/completeness gate to a separate module this task does not own. Recorded by this entry instead of silently
    widened into this task's diff.
+
+**Round 2026-10-15 (re-measured; the two entries above stand, and two further readings were added).**
+3. **The refusal fires on a round that is COMPLETE + RED, and lowering concurrency does NOT remove it.**
+   The floor rung's own marker line (`.quay/fan-in-suite-…~1791999543171-bb55b9.log`, the ONLY `SUITE-RUN-START` in that
+   file is `ts=2026-10-14T18:01:50Z` = the `laneCount=32` rung):
+   `SUITE-PLAN planned=1003 terminal=1003 missing=0 … oomKill=1 telemetry=ok laneCount=32` /
+   `SUITE-INCOMPLETE reason=oom-killed planned=1003 terminal=1003 missing=0 oomKill=1`.
+   `missing=0` ⇒ `incomplete = completeness.evaluated && missing.length > 0` is **false** (`full-suite-runner.ts:3908`);
+   the marker is emitted by the `oomKilled` disjunct (`:4168`). So the stated cause is the OOM counter, not missing files —
+   and this rung was at the LADDER FLOOR, i.e. 128 lanes and 32 lanes both report `oomKill ≥ 1`
+   (`fan-in-step-trace.jsonl`: `suite-incomplete … reason "oom-killed (2)"` for the 128-lane round).
+   The same rung was also **red by content**: `# tests 11691 / # pass 11641 / # fail 50`, with the failures concentrated in
+   live-web/e2e files (30 s / 60 s timeout-shaped readings, e.g. `serve-live-body-i18n`, `serve-system-body-i18n`,
+   `full-suite-runner-s07` e2e seams). `.quay/baseline-red-rounds.jsonl` records 35–46 blocked signatures for other tasks,
+   so most of that red set is develop-wide, not this branch's — but the round would need a baseline-subset red set AS WELL
+   as `oomKill == 0` to land.
+
+4. **The "config fix" that the exhausted-message points at is MEASURABLY unavailable on this workspace.**
+   Two-arm probe of `plugin/test/full-suite-runner-cgroup.test.mjs:987` (`AC2 — the effective MemoryMax comes from the
+   DECLARED value`), run in this worktree:
+   - arm A (no env): `✔ … ` — 1/1 pass.
+   - arm B (`QUAY_SUITE_MEMORY_MAX=24G`, which is exactly what `.quay/config.yml` `suite: memory_max: "24G"` becomes:
+     `scripts/test.sh:645` runs `suite-params.ts --shell --root <repo_root>` and evals it into the suite env):
+     `✖ AssertionError: the human-ruled baseline is the declared default — '24G' !== '16G'` (`:991`).
+   ⇒ **Every route that moves the suite's ceiling (config knob OR env) also moves the ambient env that this test asserts
+   the DEFAULT from.** `resolveSuiteMemoryMax` reads `process.env` only (`full-suite-runner.ts:1340` → `:1218`), so there is
+   no config-only path that escapes the promotion. That test file is OUTSIDE this task's `## Touches`.
+   ⛔ And the ceiling must not be moved anyway — human direction 2026-10-14, recorded in
+   `gap-suite-memorymax-literal-16g-cap-pinned-every-round-while-lanes-scale-with-nproc` (status `done`, its Re-scope
+   section): 「the 16 GiB suite MemoryMax is a deliberate pressure constraint meant to drive test optimization. It must
+   not be "fixed" just by raising it to 24/26 GiB.」 That task also measured the OOM onset as a REGRESSION
+   (0 OOM-killed rounds 10-10..10-12, 3/25 on 10-13, 5/8 on 10-14) correlated with newly-heavy test files ≥ 1.7 GB.
+   ⇒ The remedy is the already-filed `gap-suite-heavy-files-and-phase-concurrency-under-16g-pressure-baseline-comparison`
+   (status `todo`, and it `depends_on:` THIS task), not a cap raise. So the landing path for this task is an `oomKill == 0`
+   round (3 of 8 rounds on 10-14 had none); nothing in this change's diff can create or prevent one.
 
 ## Touches
 - tasks/gap-suite-resource-measurement-needs-a-host-adapter-not-inline-cgroup-calls.md
