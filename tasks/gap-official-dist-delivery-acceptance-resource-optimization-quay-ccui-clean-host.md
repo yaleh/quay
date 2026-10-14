@@ -8,6 +8,12 @@ labels:
 parent: null
 children: []
 extra: {}
+depends_on:
+  - gap-quality-gate-driver-loop-watchdog-test-hangs-since-e18ec4b04
+  - gap-suite-heavy-files-and-phase-concurrency-under-16g-pressure-baseline-comparison
+  - gap-resumable-long-experiments-via-driver-adopt-restart-not-separate-scheduler
+  - gap-quality-continuous-resource-diagnostic-routine-mechanical-filter-then-semantic
+  - gap-suite-resource-measurement-needs-a-host-adapter-not-inline-cgroup-calls
 ---
 ## Proposal
 **Final integration gate for the whole "check resource optimization" initiative, requested 2026-10-14: the official shipped dist artifact (not source-tree self-tests) must be verified on Quay's own host, on ClaudeCodeUI, and on an independent clean single-project host at a different path — covering completeness negative cases, OOM, timeouts, interrupt/resume, no leftover processes, and a same-commit same-full-scope before/after resource and failure-rate comparison.**
