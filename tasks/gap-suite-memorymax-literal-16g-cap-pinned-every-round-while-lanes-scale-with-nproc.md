@@ -128,20 +128,24 @@ The runtime proof that 16 GiB holds (≥3 complete, OOM-free rounds) belongs to 
     ℹ tests 172 / suites 0 / pass 172 / fail 0 / cancelled 0 / skipped 0
     EXIT=0
   ```
-  Run twice on this branch (before and after the final tree amend of an out-of-scope doc file the squash had left stale): **172/172 green, exit 0** both times.
+  Run on the FINAL tree (single commit `69e65e45f`): **172/172 green, exit 0**.
 
   **Scoped vs full, reported separately (DoD):** this is a **SCOPED** run — 172 tests from the change-relevant selection. ⛔ It is NOT a full-suite result and is not cited as one. This task runs **no** full suite (see the Re-scope): the runtime "≥3 complete, OOM-free rounds under the declared 16 GiB" proof belongs to `gap-suite-heavy-files-and-phase-concurrency-under-16g-pressure-baseline-comparison`.
 
+  - ⚠️ **Landing hazard for the FAN-IN suite step — unrelated to this delta; do not read its verdict as a full-suite result (flagged by the coordinator 2026-10-14):** since `e18ec4b04` (quality loop honours stop mid-round, 07:56Z) `plugin/test/quality-gate-driver-loop-watchdog.test.mjs` hangs. Every full suite since either recorded green on **65 of 579 files** (rounds 2660, 2661) or was killed by the silence watchdog at ≈19 min and then washed green by `rerun`. This task's scoped gate does not select that file (172/172 above), but the fan-in's own suite step will probably hit it — a 65-file or rerun-green landing must **not** be presented as a full-suite result.
+
 ## Definition of Done
 - AC1-AC4 checked. **No commit on this branch raises the effective default above 16 GiB**; evidence, in the two halves the DoD asks for:
-  - **grep of the resolved default** — the branch is ONE commit on `develop` (`git rev-list develop..HEAD` → `324d91acb`; the earlier draft commits that had raised the ceiling were squashed away, so no surviving commit raises it):
+  - **grep of the resolved default** — the branch is ONE commit on `develop` (`git rev-list develop..HEAD` → `69e65e45f`; the draft commits that had raised the ceiling were squashed away, so no surviving commit raises it):
     ```
-    $ git show 324d91acb:plugin/scripts/full-suite-runner.ts | grep 'SUITE_MEMORY_MAX_DEFAULT ='
+    $ git show 69e65e45f:plugin/scripts/full-suite-runner.ts | grep 'SUITE_MEMORY_MAX_DEFAULT ='
     export const SUITE_MEMORY_MAX_DEFAULT = "16G";
     $ node --experimental-strip-types -e 'import("./plugin/scripts/full-suite-runner.ts").then(m=>console.log(m.defaultSuiteMemoryMax()))'
     17179869184        # = 16.00 GiB;  <= 16 GiB: true
     ```
   - **a test pinning it** — `plugin/test/full-suite-runner-cgroup.test.mjs`: *"DoD — no commit may raise the effective default above 16 GiB: the resolved default is PINNED here"* (asserts `SUITE_MEMORY_MAX_DEFAULT === "16G"`, `defaultSuiteMemoryMax() ≤ 16 GiB`, and `=== 16 GiB` on a host whose guardrail admits it).
+  - **history note (2026-10-14, coordinator):** the pre-re-scope draft commits this branch carried (`42433a92c` … `7407c3e88` — the ones that DID raise the ceiling) were squashed into the single landed commit so the "no commit raises the default" property holds over the whole branch. They are preserved, not deleted:
+    `refs/backup/gap-suite-memorymax-literal-16g-cap-pinned-every-round-while-lanes-scale-with-nproc/pre-squash-7407c3e88`.
 - Scoped vs full counts reported separately (above): scoped = 172 tests / 0 fail; full = not run by this task.
 
 ## Touches
