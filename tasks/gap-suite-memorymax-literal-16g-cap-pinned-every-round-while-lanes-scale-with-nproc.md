@@ -32,5 +32,7 @@ extra: {}
 ## Touches
 - tasks/gap-suite-memorymax-literal-16g-cap-pinned-every-round-while-lanes-scale-with-nproc.md
 - plugin/scripts/full-suite-runner.ts
+- plugin/scripts/full-suite-runner-types.ts
 - packages/quay/src/systemd-scope.ts
+- plugin/scripts/effective-capacity-probe.ts
 - plugin/test/full-suite-runner-cgroup.test.mjs
