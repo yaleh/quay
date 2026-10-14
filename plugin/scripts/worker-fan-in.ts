@@ -68,7 +68,7 @@ import { computeDocCheckFaceKey, readDocCheckCache, writeDocCheckCache, readGree
 import type { GreenCacheEntry } from "./doc-check-cache.ts";
 import { buildMirrorState, writeMirrorState, shouldSkipMirrorWrite, readCurrentState } from "./mirror-full-suite-state.ts";
 import { defaultLaneCount, readLoadAvg } from "./full-suite-runner.ts";
-import { SUITE_LOG_NOT_RUN_PREFIX, SUITE_LOG_RUN_START_PREFIX } from "./full-suite-runner.ts";
+import { SUITE_LOG_NOT_RUN_PREFIX, SUITE_LOG_RUN_START_PREFIX, SUITE_LOG_INCOMPLETE_PREFIX, SUITE_LOG_PLAN_PREFIX } from "./full-suite-runner.ts";
 import { buildPreVerifiedRoundRecord, appendPreVerifiedRound } from "./pre-verified-round-record.ts";
 import { splitTaskFile, statusFromFrontmatter, patchStatusField, commitTaskFile } from "./task-ops.ts";
 // gap-task-status-events-contract-v1: the fan-in's FOUR status writes (ready→done, the done→ready
@@ -696,7 +696,12 @@ function isNoiseLine(l: string): boolean {
     // 「本轮跑没跑」的结构性事实（AC3）。⛔ 不得被 extractFirstFailureLine 当失败摘要（那会让一条
     // SUITE-RUN-START 变成 reason），refused 轮由 extractSuiteNotRunLine 显式取证。
     l.includes(SUITE_LOG_NOT_RUN_PREFIX) ||
-    l.includes(SUITE_LOG_RUN_START_PREFIX)
+    l.includes(SUITE_LOG_RUN_START_PREFIX) ||
+    // gap-suite-verdict-green-on-oom-killed-incomplete-run-lands-on-11-percent-of-files — 同一族的第三
+    // 个标记：SUITE-INCOMPLETE / SUITE-PLAN 也是**溯源标记**（「本轮跑全没有 / OOM 杀过几次」），⛔ 不是
+    // 一条测试失败。漏掉这一条，`planned=0 missing=0` 会被 extractFirstFailureLine 当成失败摘要。
+    l.includes(SUITE_LOG_INCOMPLETE_PREFIX) ||
+    l.includes(SUITE_LOG_PLAN_PREFIX)
   );
 }
 
@@ -709,6 +714,56 @@ export function extractSuiteNotRunLine(combined: string): string | null {
     .map((l) => l.trim())
     .find((l) => l.startsWith(SUITE_LOG_NOT_RUN_PREFIX));
   return hit ?? null;
+}
+
+/**
+ * gap-suite-verdict-green-on-oom-killed-incomplete-run-lands-on-11-percent-of-files AC2/AC3/AC8 — 读
+ * runner 写的**完整性 / OOM 标记行**（前缀与 full-suite-runner.ts 同源，⛔ 不各写一份前缀 = 漂移）。
+ *
+ * 病（实测轮 2660）：全量套件被 OOM 杀掉主阶段的一大半（579 个计划文件里 514 个一行没产出），runner
+ * 仍写 green，fan-in 照常 `suite-end exit 0` → flip-done → ff 落地。判词只数 TAP 输出 ⇒「跑不成」与
+ * 「跑过且全绿」同形（硬规则 3b）。本函数把「本轮**没跑全**」变成日志里的结构化事实。
+ *
+ * 三态（硬规则 3b）：**读到标记** ⇒ 返回读数；**没读到** ⇒ null（调用方保持既有真失败摘要路径，
+ * ⛔ 不伪造）。`oomKill` 沿用 runner 的三态（`"unknown"` = telemetry 读不到，⛔ 不是 0）。
+ */
+export interface SuiteIncompleteReading {
+  reason: "incomplete" | "oom-killed";
+  planned: number | null;
+  terminal: number;
+  missing: number;
+  oomKill: number | "unknown";
+  files: string[];
+}
+
+export function extractSuiteIncompleteMarker(combined: string): SuiteIncompleteReading | null {
+  const line = String(combined ?? "")
+    .split("\n")
+    .map((l) => l.trim())
+    .find((l) => l.startsWith(SUITE_LOG_INCOMPLETE_PREFIX));
+  if (!line) return null;
+  const field = (k: string): string | null => {
+    const m = new RegExp(`(?:^|\\s)${k}=(\\S*)`).exec(line);
+    return m ? m[1] : null;
+  };
+  const num = (k: string): number | null => {
+    const v = field(k);
+    return v !== null && /^\d+$/.test(v) ? Number(v) : null;
+  };
+  const reasonRaw = field("reason");
+  const oomRaw = field("oomKill");
+  const files = (field("files") ?? "")
+    .split(",")
+    .map((f) => f.trim())
+    .filter((f) => f && !f.startsWith("..."));
+  return {
+    reason: reasonRaw === "oom-killed" ? "oom-killed" : "incomplete",
+    planned: num("planned"),
+    terminal: num("terminal") ?? 0,
+    missing: num("missing") ?? 0,
+    oomKill: oomRaw !== null && /^\d+$/.test(oomRaw) ? Number(oomRaw) : "unknown",
+    files,
+  };
 }
 
 /** 失败信号行（node:test 的 not ok / ✖ / # fail、断言 expected/actual、anti-drift HARD FAIL、esbuild 的
@@ -2313,7 +2368,11 @@ export async function runMechanicalFanIn(opts: MechanicalFanInOptions): Promise<
     const reason = state === "rerun-not-evaluated" ? "rerun-aborted" : null;
     traceSuiteEvent("rerun", {
       exit: r.status, wall_ms: Date.now() - t0, ok: state === "rerun-green",
-      state, namedFiles: failed.files.length, ...(reason === null ? {} : { reason }),
+      state, namedFiles: failed.files.length,
+      // AC6 — 点名的文件本身也留痕（不只是计数）：attempt 日志会被落地清理轮转掉，共享 step trace
+      // （`.quay/fan-in-step-trace.jsonl`）不会 ⇒ 「本轮重跑了哪些文件」必须落在后者上。
+      files: failed.files.slice(0, 200),
+      ...(reason === null ? {} : { reason }),
     });
     return { state, reason, files: failed.files, exitCode: r.status, finishedEpoch, log: path.basename(logFile) };
   };
@@ -2676,6 +2735,46 @@ export async function runMechanicalFanIn(opts: MechanicalFanInOptions): Promise<
           return failSuite(`suite NOT run (refused) — ${refusalLine}`, sr.exitCode);
         }
         const firstFailure = extractFirstFailureLine(suiteLogText);
+        // ── AC2/AC3/AC8：完整性 / OOM 标记（runner 写、本层读；前缀同源）【必须先于重跑通道】──────
+        // 病（轮 2660 实测）：suite 只跑了 11% 的文件、被 OOM 杀掉 4 个进程，日志/状态却是 green，
+        // fan-in 照常 `suite-end exit 0` → flip-done → ff。修法：runner 把「没跑全」写成结构化标记行，
+        // 本层见到就**整条重跑/A-B 链都不进**——rerun-green 的语义是「日志点名的失败文件在隔离重跑下
+        // 全绿」，而 incomplete 轮的问题恰恰是【有一些文件根本没有结论】：重跑既没有对象（日志没点名
+        // 它们），也不能证明任何事（隔离重跑移除了造成 OOM 的并发本身，AC8 的判词）。reason 用**自己的
+        // 成因 token**（`incomplete suite (N/M files)` / `oom-killed (n)`），⛔ 不是裸 `suite red`。
+        // ⛔ 不补写 round 记录：quay 形态下 runner 是 verification-round 的唯一 writer，且它刚刚活着写下
+        //    了这条标记（平行补写 = 同一轮两条记录、round 号虚增）。
+        const incompleteMarker = extractSuiteIncompleteMarker(suiteLogText);
+        if (incompleteMarker !== null) {
+          const oomNote =
+            typeof incompleteMarker.oomKill === "number" && incompleteMarker.oomKill > 0
+              ? ` oomKill=${incompleteMarker.oomKill}`
+              : "";
+          const reason =
+            incompleteMarker.reason === "incomplete"
+              ? `incomplete suite (${incompleteMarker.missing}/${incompleteMarker.planned ?? "?"} files)${oomNote}`
+              : `oom-killed (${incompleteMarker.oomKill})`;
+          traceSuiteEvent("suite-incomplete", {
+            exit: sr.exitCode, wall_ms: 0, ok: false, reason,
+            planned: incompleteMarker.planned, terminal: incompleteMarker.terminal,
+            missing: incompleteMarker.missing, oomKill: incompleteMarker.oomKill,
+            files: incompleteMarker.files.slice(0, 40),
+          });
+          return failSuite(reason, sr.exitCode);
+        }
+        // ── 本轮**无结论**（看门狗 SIGKILL 整组 / suite 从未起来）⇒ ⛔ 不进重跑、⛔ 不进 A/B ──────
+        // gap-watchdog-killed-round-writes-no-verification-round-record + 本任务 AC6：被静默看门狗杀死的
+        // 一轮**没有任何结论**（实测 2026-10-14 08:43 那轮：suite 从未跑完，wall 1156s），而旧控制流把
+        // 「重跑 3 个点名文件全绿」当成结论、直接落到绿块落地——把一个从未跑完的套件洗成 green，正是本条
+        // 要消灭的同形。判据的一半是**顺序**：`inconclusive` 必须在重跑**之前**算出（旧代码在重跑之后的
+        // else 里算，所以永远轮不到它生效）。它们同样不进 A/B（日志不是一轮完整 suite 的失败集合）。
+        const inconclusive = sr.hungByWatchdog || sr.spawnFailed === true;
+        if (inconclusive) {
+          recordDelegatedRound("red", sr.startedAt, sr.durationMs,
+            sr.hungByWatchdog ? { force: true, notEvaluated: "watchdog-killed" }
+              : { force: true, notEvaluated: "spawn-failed" });
+          return failSuite(firstFailure || `suite ${sr.outcome}${sr.error ? `: ${sr.error}` : ""}`, sr.exitCode);
+        }
         // ── 本轮内重跑（gap-fan-in-suite-red-no-in-round-rerun-of-red-files）──────────────────────────
         // 【先解析「日志点名了哪些失败测试文件」，再决定有没有重跑对象】——三态读数（evaluated:false =
         // 未评估，⛔ 不是一个空清单）。重跑在【同一把 fan-in 锁内、同一棵合并树上】跑（仍在 try 内 ⇒
@@ -2692,17 +2791,19 @@ export async function runMechanicalFanIn(opts: MechanicalFanInOptions): Promise<
           traceSuiteEvent("suite-rerun-green", {
             exit: 0, wall_ms: 0, ok: true,
             reason: `in-round rerun green on ${rerun.files.length} named file(s) — landing as green`,
+            // AC6 — **点名的文件**必须落在**落地清理后仍存活**的载体上（proposal 的实测：attempt 日志被
+            // pruneTaskSuiteLogs 删掉，只有计数进了 step trace，具体 3 个文件名事后不可恢复）。共享
+            // `.quay/fan-in-step-trace.jsonl` 不在轮转范围内（轮转只删 `fan-in-suite-*.log`）⇒ 名字随
+            // 这条事件永久留痕。runInRoundRerun 的 "rerun" 事件同样带上（两处同源，⛔ 不只改一边）。
+            files: rerun.files.slice(0, 200),
           });
         } else {
         // gap-fanin-suite-gate-no-baseline-equivalent-exception —— 既存红等价 A/B 是**第三档出口**：
         // suite 真跑过且真红、且本轮内重跑仍红时，与 develop 基线树逐字比对失败签名集合；等价 ⇒ 放行
         // （落到下面的绿块，继续 typecheck/ff），不等价/读不懂 ⇒ 维持硬红。
-        // ⛔ 两个「本轮无结论」形态（看门狗 SIGKILL 整组 / suite 从未起来）**不进 A/B**——它们的日志不是
-        // 一轮完整 suite 的失败集合，拿它当「签名集合」去比对是本机制自己的 3b 违规（读不懂伪装成评估过）。
-        const inconclusive = sr.hungByWatchdog || sr.spawnFailed === true;
-        if (!inconclusive) {
-          baselineEquivalence = await runBaselineEquivalence(suiteLogText, failedTestFiles);
-        }
+        // ⛔ 「本轮无结论」形态已在上面 return（看门狗 SIGKILL 整组 / suite 从未起来）——它们**不进 A/B**
+        //    （日志不是一轮完整 suite 的失败集合，拿它当「签名集合」去比对是本机制自己的 3b 违规）。
+        baselineEquivalence = await runBaselineEquivalence(suiteLogText, failedTestFiles);
         if (baselineEquivalence !== null && baselineEquivalence.verdict.kind === "exempt") {
           traceSuiteEvent("baseline-red-exempt", {
             exit: 0, wall_ms: 0, ok: true,
@@ -2715,15 +2816,12 @@ export async function runMechanicalFanIn(opts: MechanicalFanInOptions): Promise<
         // gap-watchdog-killed-round-writes-no-verification-round-record — `hung`（看门狗 SIGKILL 整组）
         // 与 `red`（跑了且红）【不是同一件事】，入账形态也不同：被看门狗杀的这一轮没有任何结论 ⇒ 走
         // NOT-EVALUATED 形状（evaluated:false + reason=watchdog-killed），且必须 force 写——预定的 writer
-        // （full-suite-runner）就在被杀的那个进程组里，它写不成。⛔ 控制流逐字不变（两者都返回 failSuite），
-        // 本改动只增加一条记录（AC5：不得让 exited-not-landed 比例上升）。
-        // 硬规则 5b：同一行上还有【第二个】同根形态——`spawnFailed`（suite 从未起来）同样使预定的 writer
-        // 不在路径上（runner 根本没被 spawn）。一起覆盖，⛔ 不留给下一个人再发现一次（本族前两次就是
-        // 一个一个被发现的）。两者的共同点是「本轮无结论」，故共用 NOT-EVALUATED 形状，只有 reason token 不同。
-        recordDelegatedRound("red", sr.startedAt, sr.durationMs,
-          sr.hungByWatchdog ? { force: true, notEvaluated: "watchdog-killed" }
-            : sr.spawnFailed === true ? { force: true, notEvaluated: "spawn-failed" }
-              : undefined);
+        // （full-suite-runner）就在被杀的那个进程组里，它写不成。
+        // gap-suite-verdict-green-on-oom-killed-incomplete-run-lands-on-11-percent-of-files AC6 — 那两个
+        // 「本轮无结论」形态现已在**上游**（重跑之前）单独 return，⛔ 到不了这里。保留这里的无参调用即
+        // 改动前对**余下**那类红轮（真跑过、真红、A/B 判不出等价）的行为：[force=false] 时 runner 活着
+        // 且已入账 ⇒ recordDelegatedRound 对 quay 形态直接早返回（⛔ 不双写 round）。
+        recordDelegatedRound("red", sr.startedAt, sr.durationMs);
         // 既存红死锁的耐久载体（电路断路器 AC4 的输入）：**只有**在 A/B 判出「task 独有/文本变化」这类
         // 真被挡住的轮次才记——放行轮次不记（它落地了，不存在死锁）。best-effort，⛔ 不影响本轮判定。
         if (baselineEquivalence !== null && baselineEquivalence.verdict.kind === "hard-red") {
