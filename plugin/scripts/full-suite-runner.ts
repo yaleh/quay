@@ -2827,7 +2827,9 @@ export async function run(argv: string[]): Promise<number> {
     root,
     count: plannedFiles?.length ?? 0,
     files: (plannedFiles ?? []).map((file) => ({ file })),
-    error: plannedResolution.error,
+    // ⛔ 计划不可得时 `count:0`/`files:[]` 会与「计划被读到且为空」同形（硬规则 3b）——`error` 是那个
+    // 把两者分开的取值：非 null ⇒ 这一维**没评成**（读者不得把它读成「没有缺失」）。
+    error: plannedResolution.error ?? (plannedFiles === null ? `plan unavailable (${plannedResolution.source})` : null),
   });
   let child: import("node:child_process").ChildProcess;
   // gap-verification-round-in-one-shot-worktree config C — the one-shot worktree REUSES the main

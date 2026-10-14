@@ -714,6 +714,15 @@ test("AC2/AC3 — fan-in does NOT land an incomplete round (reason names `incomp
   }));
   assert.equal(rCtl.outcome, "landed", `negative control: the rerun channel must be live (step=${rCtl.step} reason=${rCtl.reason})`);
   assert.equal(rCtl.rerun.state, "rerun-green", "…and it certifies via rerun-green");
+  // AC6 — the **names** of the re-run files must land on a carrier that survives landing cleanup. The
+  // landing path prunes `fan-in-suite-*.log` (so the count-only record in the pruned attempt log is
+  // unrecoverable — the measured 2026-10-14 proposal); the shared `.quay/fan-in-step-trace.jsonl` is
+  // NOT rotated, and the `suite-rerun-green` event now carries `files`.
+  const ctlShared = fs.readFileSync(path.join(mCtl.repo, ".quay", "fan-in-step-trace.jsonl"), "utf8")
+    .split("\n").filter(Boolean).map((l) => JSON.parse(l));
+  const rerunGreenEv = ctlShared.find((e) => e.step === "suite-rerun-green" && e.runId === "mfi-inc-ctl");
+  assert.ok(rerunGreenEv, "the landing certification is traced durably");
+  assert.deepEqual(rerunGreenEv.files, [named], "…including the NAMES of the re-run files, not just their count");
 
   // ② 修法后：同一份日志 + 标记 ⇒ 不落地，reason 具名。
   const m = makeMechRepo("inc");
