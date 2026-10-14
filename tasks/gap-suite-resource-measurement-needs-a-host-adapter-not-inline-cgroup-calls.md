@@ -79,3 +79,11 @@ Over the ADDED lines only (`git diff develop -- <the 8 changed files> | grep '^+
 - packages/quay/src/systemd-scope.ts
 - plugin/test/host-resource-adapter.test.mjs
 - plugin/test/full-suite-runner-oom-policy.test.mjs
+
+## Blocker
+
+**2026-10-14T14:40:01.689Z — worker 未落地（exited-not-landed）**
+
+- 未落地原因：step=suite: AssertionError [ERR_ASSERTION]: the rebuild must be INTERLEAVED, not one long block (worst stall 6119 ms vs build wall 11977 ms over 580 turns; idle floor 13 ms) [baseline A/B: HARD RED (task-introduced-red) — the task's red set is NOT a subset of the develop baseline red set: added=packages/quay/test/gap-ac179-criterion-cold-miss-dashboard-snapshot.test.mjs,packages/quay/test/serve-system-body-i18n.test.mjs,packages/quay/test/serve-live-body-i18n.test.mjs,packages/quay/test/serve-live-body-i18n.test.mjs changed=-]
+- run_id：wk-prod-anchor
+- session_id：484bdc18-a960-47f3-b0e2-ac2f4e0de437

@@ -153,7 +153,7 @@ import { sweepRunNamespaces, sweepRunNamespace, killRegisteredServers } from "./
 // develop→integration convergence 2026-08-09): land the suite's per-file __PERFILE__ duration
 // history + compare against the last round (the trend dimension — per-file durations WATCHED round
 // over round; see integration's version of this file for the original placement).
-import { landMeasureHistory, compareLastTwoRounds, parsePerFileLines } from "./measure-trend-check.ts";
+import { landMeasureHistory, compareLastTwoRounds, parsePerFileLines, normalizePerFileKey } from "./measure-trend-check.ts";
 import type { PerFileRecord } from "./measure-trend-check.ts";
 // gap-suite-concurrency-ff-gate-and-slot-ssot — the CANONICAL suite-slot implementation (single
 // definition point for "the suite lock slots": suiteLockSlotCount = 旋钮② QUAY_MAX_CONCURRENT_SUITES,
@@ -492,19 +492,18 @@ import type { PhaseDiffRecord, ScopeConsumedLoadRead } from "./suite-accounting.
 // pure function (⛔ not a second copy — 硬规则 5b). `packages/quay/src/systemd-scope.ts` is a
 // node-builtin-only leaf (the same shared module `driver-runtime.ts` imports for the anchor/serve
 // envelopes), so this `plugin/` → `packages/` edge adds no cycle.
-// gap-full-suite-scope-oom-policy-stops-whole-suite-unattributable — the ALWAYS-present scope
-// properties + the availability probe are reused from the SAME shared module (⛔ not a 2nd literal,
-// 硬规则 5b): SCOPE_PROPERTY_ARGS carries `MemoryAccounting=yes` + `OOMPolicy=continue`, and
-// scopeProbeArgv() is the probe that exercises exactly those properties. `buildSystemdRunArgv` and
-// `systemdRunAvailable` both consume them ⇒ 「探测绿」structurally implies the real suite scope accepts
-// the same properties (a host whose systemd rejects OOMPolicy=continue ⇒ probe unavailable ⇒ the
-// suite runs un-enveloped AND the OOM test reports an explicit not-evaluated skip, never a silent pass).
+// gap-full-suite-scope-oom-policy-stops-whole-suite-unattributable — the scope properties and the
+// availability probe are NOT spelled here any more: since
+// `gap-suite-resource-measurement-needs-a-host-adapter-not-inline-cgroup-calls` BOTH the real argv and
+// the probe are built by ONE function (`boundedScopeArgv`, Core `systemd-scope.ts`, which this module
+// no longer calls directly — the host adapter does). 「探测绿」therefore implies 「the real call
+// accepts these properties」 STRUCTURALLY, not by two hand-kept lists (a host whose systemd rejects
+// OOMPolicy=continue ⇒ probe unavailable ⇒ the suite runs un-enveloped AND the OOM test reports an
+// explicit not-evaluated skip, never a silent pass).
 import {
   laneScaledScopeMemoryMax,
   pageAlignScopeBytes,
-  scopeProbeArgv,
   SCOPE_ENVELOPE_HOST_FRACTION,
-  SCOPE_PROPERTY_ARGS,
 } from "../../packages/quay/src/systemd-scope.ts";
 // gap-suite-resource-measurement-needs-a-host-adapter-not-inline-cgroup-calls — the HOST ADAPTER: the
 // ONE seam through which this runner measures a scope, launches a bounded child, and reads the OOM /
@@ -516,7 +515,6 @@ import {
   resolveHostResourceAdapter,
   spawnBounded,
   unavailable,
-  LINUX_CGROUP_V2_KIND,
 } from "./host-resource-adapter.ts";
 import type {
   AdapterReading,
@@ -1576,10 +1574,31 @@ export function readCgroupMemoryPeak(cgroupDir: string): number | null {
   return readMemoryThroughAdapter(cgroupDir).value?.peakBytes ?? null;
 }
 
+/**
+ * gap-suite-verdict-green-on-oom-killed-incomplete-run-lands-on-11-percent-of-files AC9 — the evidence
+ * the sampler WRITES is a SUPERSET of the historical `SuiteMemoryEvidence`: the two counters become
+ * three-valued (`"unknown"` when no sample ever read them — cgroup gone / no permission / no scope), so
+ * an unreadable cgroup can never land as the integer `0` that means 「read it: no OOM」 (硬规则 3b/6).
+ *
+ * ⛔ Why a LOCAL widening rather than an edit to `full-suite-runner-types.ts`: that module is outside
+ * this task's declared Touches. The READ side (`worker-driver.ts`'s `readSuiteMemoryEvidence`) already
+ * treats a non-number `oomKill` as 「读不到」 and returns null (fall-through, unchanged) — so widening
+ * the write-only shape is backward compatible without touching a second file.
+ */
+export type SuiteMemoryEvidenceWritten =
+  Omit<SuiteMemoryEvidence, "peakBytes" | "oom" | "oomKill"> & {
+    peakBytes: number | "unknown";
+    oom: number | "unknown";
+    oomKill: number | "unknown";
+    /** 「这一维评估过没有」的独立取值（AC9）：`ok` = 至少一次采样读到了 memory.events + memory.peak；
+     *  `unknown` = 一次都没读到。⛔ 不与「读到且为 0」共用输出。 */
+    telemetry: "ok" | "unknown";
+  };
+
 /** Write the per-run OOM evidence to `<stateDir>/suite-memory-evidence-<runId>.json`. Best-effort —
  *  evidence capture must never fail the run (mirrors recordSystemdRunEvidence). The runId in the NAME is
  *  what makes two consecutive runs land in two files (⛔ a single-slot file would overwrite). */
-export function writeSuiteMemoryEvidence(stateDir: string, evidence: SuiteMemoryEvidence): void {
+export function writeSuiteMemoryEvidence(stateDir: string, evidence: SuiteMemoryEvidenceWritten): void {
   try {
     fs.mkdirSync(stateDir, { recursive: true });
     fs.writeFileSync(
@@ -1594,25 +1613,20 @@ export function writeSuiteMemoryEvidence(stateDir: string, evidence: SuiteMemory
 
 /** A live per-run cgroup memory/OOM sampler. `stop()` takes one final reading and lands the evidence. */
 export interface SuiteMemorySampler {
-  stop(): SuiteMemoryEvidence;
+  stop(): SuiteMemoryEvidenceWritten;
 }
 
 /**
  * Start sampling the suite scope through the HOST ADAPTER every `intervalMs` (default 2s) and once
- * more on `stop()`.
- * `scopeProvider` is resolved lazily each sample: at round start the transient scope unit may not
- * exist yet, so a one-shot resolve would make the whole evidence inert.
+ * more on `stop()`. `scopeProvider` is resolved lazily each sample: at round start the transient scope
+ * unit may not exist yet, so a one-shot resolve would make the whole evidence inert.
  * `phaseProvider` reads the CURRENT suite phase (the runner's PhaseDifferentialAccounting) so the OOM
  * can be reported against the phase it happened in (`oomPhase` = the phase at the first sample whose
  * `oom_kill` was positive; else the last phase seen). The timer is `unref`'d so a missed stop() can
- * never hold the event loop.
- *
- * ⚠️ 硬规则 6 / 3b — `oom` and `oomKill` are `number | null`, NOT `number`: they stay `null` until the
- * adapter actually produces a reading. The pre-change sampler initialised them to `0`, so a host whose
- * scope was never readable (or a host with no cgroup at all) wrote `"oomKill": 0` — a FABRICATED
- * MEASUREMENT that reads exactly like 「measured: no OOM occurred」. `0` now means 「the adapter read a
- * zero」; 「not read」 is `null`, and `adapter.reason` says why. Same for `samples: 0`, which remains
- * the 「no sample was ever readable」 marker.
+ * never hold the event loop. Hermetic + host-independent: when `scopeProvider()` returns
+ * `{value: null, reason}` the sampler still runs (phaseProvider advances) and lands `samples: 0` with
+ * every counter `"unknown"` + the adapter's named reason — a genuinely inert reading, ⛔ never a
+ * fabricated 0 (硬规则 3b/6).
  */
 export function startSuiteMemorySampler(opts: {
   /** The host adapter to read through. Default: the process's resolved adapter. */
@@ -1632,13 +1646,22 @@ export function startSuiteMemorySampler(opts: {
   const intervalMs = opts.intervalMs ?? 2000;
   const adapter = opts.adapter ?? hostResourceAdapter();
   let memory: MemoryReading | null = null;
-  let oom: number | null = null;
-  let oomKill: number | null = null;
+  let peakBytes: number | null = null;
+  let oom = 0;
+  let oomKill = 0;
   let lastPhase = "";
   let oomPhase: string | null = null;
   let samples = 0;
-  /** The LAST reason the adapter gave for not producing a reading — the round's evidence must say WHY
-   *  the counters are unknown, not merely that they are (硬规则 3b). */
+  // gap-suite-verdict-green-on-oom-killed-incomplete-run-lands-on-11-percent-of-files AC9 — 硬规则 3b:
+  // 「读不到 memory.events」不得与「读到且 oom_kill=0」同形。这两个布尔是【评估过没有】这一维的
+  // 独立取值：它们为 false 时 oomKill/peakBytes 落 "unknown"（⛔ 不是 0 / null——0 会被读成「无 OOM」，
+  // null 会被读成「没读到但这个桶不重要」）。
+  let eventsRead = false;
+  let peakRead = false;
+  // gap-suite-resource-measurement-needs-a-host-adapter-not-inline-cgroup-calls — the LAST reason the
+  // ADAPTER gave for not producing a reading. The round's evidence must say WHY the counters are
+  // `unknown`, not merely that they are (硬规则 3b): `unknown` + a named reason is actionable, a bare
+  // `unknown` is not.
   let lastUnavailableReason: string | null = null;
   let processTreePids: number[] | null = null;
 
@@ -1656,22 +1679,23 @@ export function startSuiteMemorySampler(opts: {
       // already carries the kernel's own high-water mark, so the max is belt-and-braces across the
       // legacy `memory.current` fallback.
       if (mem.value.peakBytes !== null) {
-        memory = memory === null || memory.peakBytes === null ? mem.value : { ...mem.value, peakBytes: Math.max(memory.peakBytes, mem.value.peakBytes) };
-      } else {
-        memory = mem.value;
+        peakRead = true;
+        peakBytes = peakBytes === null ? mem.value.peakBytes : Math.max(peakBytes, mem.value.peakBytes);
       }
+      memory = memory === null || memory.peakBytes === null || mem.value.peakBytes === null
+        ? mem.value
+        : { ...mem.value, peakBytes: Math.max(memory.peakBytes, mem.value.peakBytes) };
     } else {
       lastUnavailableReason = mem.reason ?? "memory reading unavailable (no reason recorded)";
     }
     const ev = adapter.readMemoryEvents(handle);
     if (ev.value !== null) {
-      const evOom = ev.value.oom;
-      const evKill = ev.value.oomKill;
+      eventsRead = true;
       // The phase at the moment oom_kill FIRST became positive is where the OOM happened. Only latch
       // it on the 0→>0 transition so a later sample in another phase cannot overwrite it.
-      if (evKill > 0 && (oomKill === null || oomKill === 0)) oomPhase = lastPhase;
-      oom = oom === null ? evOom : Math.max(oom, evOom);
-      oomKill = oomKill === null ? evKill : Math.max(oomKill, evKill);
+      if (ev.value.oomKill > 0 && oomKill === 0) oomPhase = lastPhase;
+      oom = Math.max(oom, ev.value.oom);
+      oomKill = Math.max(oomKill, ev.value.oomKill);
     } else {
       lastUnavailableReason = ev.reason ?? "memory-event reading unavailable (no reason recorded)";
     }
@@ -1689,13 +1713,14 @@ export function startSuiteMemorySampler(opts: {
       clearInterval(timer);
       // The scope is destroyed the moment the suite child closes ⇒ this is the last readable sample.
       sample();
-      const evidence: SuiteMemoryEvidence = {
+      const evidence: SuiteMemoryEvidenceWritten = {
         runId: opts.runId,
-        peakBytes: memory?.peakBytes ?? null,
+        peakBytes: peakRead ? peakBytes : "unknown",
         memoryMaxBytes: opts.memoryMaxBytes,
         ...(opts.memoryMaxPolicy ? { memoryMaxPolicy: opts.memoryMaxPolicy } : {}),
-        oom,
-        oomKill,
+        oom: eventsRead ? oom : "unknown",
+        oomKill: eventsRead ? oomKill : "unknown",
+        telemetry: eventsRead && peakRead ? "ok" : "unknown",
         phase: oomPhase ?? lastPhase,
         scopeUnit: opts.scopeUnit ?? null,
         samples,
@@ -1710,7 +1735,7 @@ export function startSuiteMemorySampler(opts: {
           // scope) routinely fails its FINAL sample — the transient scope is destroyed the moment the
           // suite child exits — and reporting that expected teardown failure here would read as 「this
           // round was blind」 while `samples > 0` says otherwise (硬规则 3b: 一个读数不得同时表示两件事).
-          reason: memory === null && oom === null ? lastUnavailableReason : null,
+          reason: memory === null && !eventsRead ? lastUnavailableReason : null,
         },
         ...(memory ? { memory } : {}),
         ...(processTreePids ? { processTreePids } : {}),
@@ -1719,6 +1744,345 @@ export function startSuiteMemorySampler(opts: {
       return evidence;
     },
   };
+}
+
+// ── 计划清单完整性（gap-suite-verdict-green-on-oom-killed-incomplete-run-lands-on-11-percent-of-files）
+//
+// 病（2026-10-14 实测，轮 2660）：全量套件被 OOM 杀掉主阶段的一大半——579 个计划文件里 514 个从未
+// 产出任何 TAP / __PERFILE__ 行——而 verdict **仍然写 green**（pass:466 fail:0），fan-in 照常落地
+// （`suite-end exit 0` → ac-gate → flip-done → ff）。判词只数 TAP 输出，被杀得没来得及产出 TAP 的文件
+// 不是失败、只是**消失**。OOM 证据（`suite-memory-evidence-*.json`，oomKill=4）写在旁路文件里，
+// **从未被 verdict 消费**。⇒ 「跑不成」与「跑过且全绿」同形（硬规则 3b）。
+//
+// 修法：runner 在执行前把**计划集**落到盘上（`<stateDir>/suite-planned-manifest-<runId>.json`），执行后
+// 要求**每一个计划文件**都有 per-file 终态记录；缺任何一个 ⇒ `not-evaluated: incomplete`（列出缺的），
+// ⛔ 永不 green。OOM（`oom_kill` 上升）与「读不到 telemetry」也各走自己的取值，⛔ 不与 green 同形。
+//
+// 判据是【结构量】：`planned` 与 `terminal` 两个集合都来自各自的生产者（`test.sh --list-files` /
+// `suite-bucket-select.ts --paths-only` 是 test.sh 自己调的那两个同一个生产者；`__PERFILE__` 行来自
+// measure-suite-reporter），⛔ 不是启发式阈值（「文件数 < 中位数一半」这类判据在套件规模随时间变化的
+// 历史上噪声过大，这正是本任务要一个 expected-set 判据的理由）。
+
+/**
+ * 计划清单的落盘载体路径（`<stateDir>/suite-planned-manifest-<runId>.log`）。
+ *
+ * ⚠️ `.log` 后缀是**有意的、且是本仓唯一可用的选择**：`.quay/` 的运行时产物是**逐个**进 `.gitignore`
+ * 的（每个载体一行），而 `.gitignore` 不在本任务的 Touches 内 ⇒ 一个 `.json` 名会在 tested worktree 里
+ * 落成**未忽略的未跟踪文件**（实测 `git status` 里 `?? .quay/suite-planned-manifest-*.json`）。`*.log` 是
+ * 仓库既有的**全局**忽略规则，而「`.log` 后缀装 JSON 行」在本仓已是既有形态（`fan-in-<task>-<runId>.log`
+ * 就是 JSON 行日志，`appendFanInTrace` 写的就是它）⇒ 载体名沿用同一族，⛔ 不新造一类需要改 .gitignore 的
+ * 产物。
+ */
+export function plannedManifestPath(stateDir: string, runId: string): string {
+  return path.join(stateDir, `suite-planned-manifest-${runId}.log`);
+}
+
+/** 一个计划文件的登记项。`file` 是 **tested-root 相对路径**（与终态集同一个口径——见 relTestPath）。 */
+export interface PlannedFileEntry {
+  file: string;
+}
+
+export interface SuitePlannedManifest {
+  runId: string;
+  capturedAt: string;
+  /** 计划集从哪来：`explicit`（--planned-files / --planned-files-file / QUAY_TEST_PLANNED_FILES）或
+   *  探针的具名出处。⛔ 是可区分取值——「没计划」与「有计划且为空」不得同形。 */
+  source: string;
+  /** 计划集探测的**受测根**（口径对齐用；终态路径按它转相对路径）。 */
+  root: string;
+  count: number;
+  files: PlannedFileEntry[];
+  /** 计划**不可得**时的成因（非 null ⇒ `files` 为空且本轮的完整性维度 = 未评估）。 */
+  error: string | null;
+}
+
+/** 落盘计划清单（best-effort：观测面写失败不得改变被观测行为，同 writeSuiteMemoryEvidence）。 */
+export function writePlannedManifest(stateDir: string, manifest: SuitePlannedManifest): void {
+  try {
+    fs.mkdirSync(stateDir, { recursive: true });
+    fs.writeFileSync(plannedManifestPath(stateDir, manifest.runId), `${JSON.stringify(manifest, null, 2)}\n`, "utf8");
+  } catch {
+    /* best-effort */
+  }
+}
+
+/** 读回某轮的落盘计划清单（无文件 / 读不懂 ⇒ null，缺值 ≠ 空计划）。 */
+export function readPlannedManifest(stateDir: string, runId: string): SuitePlannedManifest | null {
+  try {
+    const raw = JSON.parse(fs.readFileSync(plannedManifestPath(stateDir, runId), "utf8"));
+    if (!raw || typeof raw !== "object" || !Array.isArray((raw as SuitePlannedManifest).files)) return null;
+    return raw as SuitePlannedManifest;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * 把一条文件路径归一到 **tested-root 相对**口径——计划侧与终态侧必须用**同一个**归一（否则完整性
+ * 判据会在两套口径之间产生假缺失）。
+ *   ① 先走共享的 `normalizePerFileKey`（剥掉 `<worktree 命名空间>/<名字>/` 前缀，见 measure-trend-check）；
+ *   ② 仍是绝对路径且落在 root 之下 ⇒ `path.relative(root, …)`（主检出跑 / 探针在主检出上取计划时的形态）。
+ */
+export function relTestPath(raw: string, root: string): string {
+  if (!raw) return raw;
+  const stripped = normalizePerFileKey(raw, null);
+  if (!path.isAbsolute(stripped)) return stripped;
+  const rel = path.relative(root, stripped);
+  if (rel && !rel.startsWith("..") && !path.isAbsolute(rel)) return rel;
+  const relRaw = path.relative(root, raw);
+  if (relRaw && !relRaw.startsWith("..") && !path.isAbsolute(relRaw)) return relRaw;
+  return stripped;
+}
+
+/**
+ * 解析探针输出为计划集，并**逐条校验它真的是一份文件清单**——这是本机制唯一的防伪步骤，也是它
+ * 安全的失败方向：任何一条不像路径（含空白）或**在盘上不存在**的行 ⇒ 抛错 ⇒ 调用方落成「计划不可得」
+ * ⇒ 完整性维度取 `not-evaluated`（= 修法前的行为），⛔ 绝不落成一个假的「缺文件」而误判红。
+ *
+ * 为什么需要它：探针跑的是**命令**，不是「保证按约定输出的东西」。实测反例：一个把参数忽略掉的
+ * test.sh 会把 `--list-files` 当成普通运行、把 `__BUCKETS__ …`/`# pass 4` 原样打出来——不校验就会把
+ * 这些当「计划文件」，于是 5 个计划 / 0 个终态 ⇒ 假 incomplete（本轮修法绝不能引入这种红）。
+ */
+function parsePlanListOrThrow(stdout: string, root: string, source: string): string[] {
+  const out: string[] = [];
+  for (const line of String(stdout ?? "").split("\n")) {
+    const t = line.trim();
+    if (!t) continue;
+    if (/\s/.test(t)) {
+      throw new Error(`plan probe (${source}) emitted a line that is not a path: ${JSON.stringify(t.slice(0, 120))}`);
+    }
+    const rel = relTestPath(t, root);
+    const abs = path.isAbsolute(rel) ? rel : path.join(root, rel);
+    if (!fs.existsSync(abs)) {
+      throw new Error(`plan probe (${source}) named a file that does not exist under the tested root: ${rel}`);
+    }
+    out.push(rel);
+  }
+  return out;
+}
+
+/** 显式计划集：`--planned-files <csv|nl>` / `--planned-files-file <path>` / `QUAY_TEST_PLANNED_FILES`。 */
+function explicitPlannedFiles(
+  argv: string[],
+  env: NodeJS.ProcessEnv,
+  root: string,
+): { files: string[]; source: string } | null {
+  const fromFile = flagValue(argv, "--planned-files-file");
+  if (fromFile) {
+    try {
+      const text = fs.readFileSync(fromFile, "utf8");
+      let files: string[] = [];
+      try {
+        const parsed = JSON.parse(text);
+        if (Array.isArray(parsed)) files = parsed.map((x) => String(x));
+      } catch {
+        /* not JSON — fall through to the line/comma form */
+      }
+      if (files.length === 0) files = text.split(/[\n,]/);
+      return { files: files.map((f) => f.trim()).filter(Boolean).map((f) => relTestPath(f, root)), source: `explicit:file(${path.basename(fromFile)})` };
+    } catch (e) {
+      // 显式指定了却读不出来 ⇒ 这不是「没计划」，是一个**说不出话的**计划：返回空集 + 具名 source，
+      // 由调用方落成 error（硬规则 3b——读不懂不得伪装成空计划）。
+      return { files: [], source: `explicit:file-unreadable(${(e as Error)?.message ?? "?"})` };
+    }
+  }
+  const fromFlag = flagValue(argv, "--planned-files");
+  const fromEnv = env.QUAY_TEST_PLANNED_FILES;
+  const raw = fromFlag ?? fromEnv;
+  if (raw === undefined) return null;
+  const source = fromFlag !== undefined ? "explicit:flag" : "explicit:env";
+  return {
+    files: String(raw).split(/[\n,]/).map((f) => f.trim()).filter(Boolean).map((f) => relTestPath(f, root)),
+    source,
+  };
+}
+
+/**
+ * 探针：向**同一个生产者**要本轮的**计划集**（⛔ 不在 runner 里重算选桶/选组逻辑——那正是硬规则 5b 的
+ * 两套口径形态）。
+ *   - `--buckets <task>` ⇒ test.sh 自己调的两个 `suite-bucket-select.ts` 子命令（`--summary` 判 full，
+ *     `--paths-only` 取子集）；full=1 或读不懂 ⇒ 回落到 `test.sh --list-files`（与 test.sh 的
+ *     `run_selected "$(effective_groups)"` 同一条全量路径）。
+ *   - 其余 ⇒ `bash <root>/scripts/test.sh --list-files`。
+ */
+export function probePlannedFiles(root: string, argv: string[]): { files: string[]; source: string } {
+  const testSh = path.join(root, "scripts", "test.sh");
+  if (!fs.existsSync(testSh)) {
+    // ⛔ 说不出话的探针必须是**错误**，不是空计划：空计划是一个**断言**（「本轮没有任何计划文件」），
+    // 而这里的真相是「这个根根本没有 test.sh，我读不到计划」（硬规则 3b：读不懂 ≠ 空）。
+    throw new Error(`plan probe: no scripts/test.sh under ${root} — the scheduled set is unreadable`);
+  }
+  const listAll = (): { files: string[]; source: string } => {
+    const files = parsePlanListOrThrow(
+      execFileSyncBounded("bash", [testSh, "--list-files"], root),
+      root,
+      "test.sh --list-files",
+    );
+    return { files, source: "probe:test.sh --list-files" };
+  };
+  const bucketsTask = flagValue(argv, "--buckets");
+  if (bucketsTask) {
+    // ⛔ kernel sibling 必须走 resolveKernelSibling（GOAL-012 A 域 / kernel-sibling-resolution-check 的
+    // P2 target-root 规则：`path.join(<root>, "plugin", "scripts", …)` 是 naive 锚点）。语义上也更对：
+    // 这个 runner 进程就是从**受测检出**加载的（fan-in spawn `<worktree>/plugin/scripts/full-suite-runner.ts`），
+    // 所以「kernel 自己的 scripts 目录」**就是**受测树的那个。
+    const sel = resolveKernelSibling("suite-bucket-select.ts");
+    if (sel === null) {
+      throw new Error("plan probe: --buckets requested but suite-bucket-select.ts is unresolvable — the bucket plan is unreadable");
+    }
+    const selectorArgs = [...(sel.stripTypes ? ["--experimental-strip-types"] : []), sel.path];
+    const nodeBin = process.execPath;
+    const summary = execFileSyncBounded(
+      nodeBin,
+      ["--no-warnings", ...selectorArgs, "--root", root, "--task", bucketsTask, "--summary"],
+      root,
+    );
+    const full = /full=1\b/.test(summary);
+    if (full) return listAll();
+    const subset = parsePlanListOrThrow(
+      execFileSyncBounded(
+        nodeBin,
+        ["--no-warnings", ...selectorArgs, "--root", root, "--task", bucketsTask, "--paths-only"],
+        root,
+      ),
+      root,
+      `suite-bucket-select --paths-only (${bucketsTask})`,
+    );
+    // test.sh 自己的同一处兜底（`if [ -z "${bucket_sel_out}" ] ⇒ run_selected "$(effective_groups)"`）：
+    // 选桶给出 0 个文件时**真正跑的是全量**，⛔ 计划侧不得说「计划是空的」（那样会把全量的终态全判成
+    // unexpected，并把「读不懂」伪装成一个空计划）。同一条判据只写一处（硬规则 5b）。
+    if (subset.length === 0) return listAll();
+    return { files: subset, source: `probe:bucket(${bucketsTask})` };
+  }
+  return listAll();
+}
+
+/** 有界的同步 spawn（⛔ 无界同步调用会拖住 runner；探针失败必须**可区分**地退回 `error`）。 */
+function execFileSyncBounded(bin: string, args: string[], cwd: string, timeoutMs = 120_000): string {
+  try {
+    return String(execFileSync(bin, args, { cwd, timeout: timeoutMs, maxBuffer: 32 * 1024 * 1024, stdio: ["ignore", "pipe", "pipe"] }));
+  } catch (e) {
+    // stdout 可能已经有半份输出（超时被杀时）——⛔ 不返回半份（半个计划集会伪造成「缺文件」）；
+    // 抛给调用方落成 error（硬规则 3b：读不懂 ≠ 空计划）。
+    throw new Error(`plan probe failed (${bin} ${args.join(" ")}): ${(e as Error)?.message ?? "?"}`);
+  }
+}
+
+/**
+ * 解析本轮的**计划集**。三态（硬规则 3b）：
+ *   - `{files, source, error:null}`   ⇒ 有计划（可能是空集——空集也是一个被读到的计划）
+ *   - `{files:null, source, error}`   ⇒ **计划不可得** ⇒ 完整性维度 = 未评估（⛔ 不得读成「没有缺失」）
+ */
+export function resolvePlannedFiles(opts: {
+  argv: string[];
+  env: NodeJS.ProcessEnv;
+  root: string;
+  /** 显式 `--command`：调用方在用【任意命令】当套件（第三方 / 夹具）⇒ 探针的 `test.sh` 计划与它无关，
+   *  ⛔ 不得拿它去判完整性（那是拿 A 的清单去校验 B 的执行）。此时计划只来自显式来源。 */
+  explicitCommand?: string | null;
+}): { files: string[] | null; source: string; error: string | null } {
+  const explicit = explicitPlannedFiles(opts.argv, opts.env, opts.root);
+  if (explicit !== null) {
+    if (explicit.source.startsWith("explicit:file-unreadable")) {
+      return { files: null, source: explicit.source, error: explicit.source };
+    }
+    return { files: explicit.files, source: explicit.source, error: null };
+  }
+  if (opts.explicitCommand) {
+    // 计划**不可得**（这一维未评估），⛔ 不是「完整」——一个任意命令的计划集没有任何生产者。
+    return { files: null, source: "explicit-command(no-plan)", error: null };
+  }
+  try {
+    const probed = probePlannedFiles(opts.root, opts.argv);
+    if (probed.files.length === 0) {
+      // 探针跑通了却一个文件都没给出 ⇒ 它说不出计划（硬规则 3b：⛔ 不得把「读不懂」落成空计划）。
+      return { files: null, source: probed.source, error: `plan probe returned an empty file list (${probed.source})` };
+    }
+    return { files: probed.files, source: probed.source, error: null };
+  } catch (e) {
+    return { files: null, source: "probe-failed", error: (e as Error)?.message ?? String(e) };
+  }
+}
+
+/**
+ * 终态集：从裸 `__PERFILE__` 行里取路径（⛔ 不走 parsePerFileLines——它按 `duration>0` 过滤，而被 OOM/
+ * 信号杀死的文件可能**根本没产出**行，我们这里要的是**有没有行**这件事本身）。
+ */
+export function terminalFileSet(perFileLines: Iterable<string>, root: string): Set<string> {
+  const out = new Set<string>();
+  for (const line of perFileLines) {
+    const m = /^__PERFILE__ duration_ms=([0-9.]+) (\S+) passed=(true|false)/.exec(String(line).trim());
+    if (m) out.add(relTestPath(m[2], root));
+  }
+  return out;
+}
+
+/**
+ * 「**跑过且通过**」集：与 {@link terminalFileSet} 同一份行格式（⛔ 不各写一份正则 = 漂移），只收
+ * `passed=true` 的文件。
+ *
+ * gap-suite-verdict-green-on-oom-killed-incomplete-run-lands-on-11-percent-of-files AC13 — 这是判「一个
+ * 恢复轮里出现的失败，是否算【更低并发下新冒出来的回归】」的**分母**。判据只在有读数的文件上成立：
+ * 原轮**根本没产出终态行**的文件不在集合里（它们是「缺值」，硬规则 6 —— ⛔ 不得当作「通过」，否则一个
+ * 被 OOM 杀掉、降档后才第一次跑起来的文件会被误判成「新回归」，把每一次真实恢复都挡死）。
+ */
+export function passedFileSet(perFileLines: Iterable<string>, root: string): Set<string> {
+  const out = new Set<string>();
+  for (const line of perFileLines) {
+    const m = /^__PERFILE__ duration_ms=([0-9.]+) (\S+) passed=(true|false)/.exec(String(line).trim());
+    if (m && m[3] === "true") out.add(relTestPath(m[2], root));
+  }
+  return out;
+}
+
+/** 完整性读数（纯函数）。`evaluated:false` ⇒ 计划不可得 ⇒ 这一维**未评估**（⛔ 不是「完整」）。 */
+export interface PlannedCompleteness {
+  evaluated: boolean;
+  plannedCount: number | null;
+  terminalCount: number;
+  /** 有计划的文件里，没有任何终态记录的那些（排序后，便于比对与落盘）。 */
+  missing: string[];
+  /** 计划之外、却产出了终态记录的文件（观测项：说明计划探针与执行口径有偏差）。 */
+  unexpected: string[];
+}
+
+export function computePlannedCompleteness(
+  planned: string[] | null,
+  terminal: Iterable<string>,
+): PlannedCompleteness {
+  const term = new Set(terminal);
+  if (planned === null) {
+    return { evaluated: false, plannedCount: null, terminalCount: term.size, missing: [], unexpected: [] };
+  }
+  const plan = new Set(planned);
+  const missing = [...plan].filter((f) => !term.has(f)).sort();
+  const unexpected = [...term].filter((f) => !plan.has(f)).sort();
+  return { evaluated: true, plannedCount: plan.size, terminalCount: term.size, missing, unexpected };
+}
+
+/** 计划清单 + OOM 的**日志标记行**（runner 写、fan-in 读，前缀同源——同 SUITE-NOT-RUN 的既有做法）。
+ *  ⛔ 措辞不得含 `not ok`/`AssertionError` 等失败信号词：它是溯源标记，不是一条测试失败。 */
+export const SUITE_LOG_INCOMPLETE_PREFIX = "[full-suite-runner] SUITE-INCOMPLETE";
+/** 恒定的完整性读数行前缀（绿轮也写）：`planned=<N|unknown> terminal=<T> missing=<k> …`。与
+ *  SUITE-INCOMPLETE 同族，⛔ 都不是失败信号行（见 worker-fan-in.ts 的噪声过滤）。 */
+export const SUITE_LOG_PLAN_PREFIX = "[full-suite-runner] SUITE-PLAN";
+
+export interface SuiteIncompleteMarker {
+  reason: "incomplete" | "oom-killed";
+  planned: number | null;
+  terminal: number;
+  missing: number;
+  oomKill: number | "unknown";
+  files: string[];
+}
+
+/** 组装标记行（有界：文件清单最多 40 条，与 recordSuiteNotRun 的 300 字同一条纪律）。 */
+export function formatSuiteIncompleteMarker(m: SuiteIncompleteMarker): string {
+  const files = m.files.slice(0, 40).join(",");
+  return (
+    `${SUITE_LOG_INCOMPLETE_PREFIX} reason=${m.reason} planned=${m.planned ?? "unknown"} terminal=${m.terminal}` +
+    ` missing=${m.missing} oomKill=${m.oomKill} files=${files}${m.files.length > 40 ? `,...(+${m.files.length - 40})` : ""}`
+  );
 }
 
 // ── suite log 溯源标记（gap-fan-in-suite-refusal-reports-as-suite-red AC1/AC3）──────────────────────
@@ -2532,6 +2896,26 @@ export async function run(argv: string[]): Promise<number> {
   // the shadow-copy-drift shape). Set by the fire-and-forget below on the real full-suite path, or by
   // the QUAY_TEST_SCOPE_UNIT hermetic seam when a test injects one.
   let roundScopeUnit: string | null = null;
+  // gap-suite-verdict-green-on-oom-killed-incomplete-run-lands-on-11-percent-of-files AC4/AC7 —
+  // **执行前**把本轮的**计划集**落到盘上（`<stateDir>/suite-planned-manifest-<runId>.json`）。之后
+  // verdict 要求每一个计划文件都有终态记录；缺任何一个 ⇒ `not-evaluated: incomplete`，⛔ 永不 green。
+  // 计划集向**同一个生产者**要（`test.sh --list-files` / `suite-bucket-select.ts`，见 probePlannedFiles）；
+  // 显式来源（`--planned-files` / `--planned-files-file` / `QUAY_TEST_PLANNED_FILES`）优先，供夹具与
+  // 第三方命令使用。**计划不可得**（探针失败 / 非 test.sh 命令）⇒ 完整性维度记 `not-evaluated`，
+  // ⛔ 不得读成「没有缺失」（硬规则 3b：缺值 ≠ 为假）。
+  const plannedResolution = resolvePlannedFiles({ argv, env: process.env, root, explicitCommand });
+  const plannedFiles = plannedResolution.files;
+  writePlannedManifest(stateDir, {
+    runId,
+    capturedAt: new Date().toISOString(),
+    source: plannedResolution.source,
+    root,
+    count: plannedFiles?.length ?? 0,
+    files: (plannedFiles ?? []).map((file) => ({ file })),
+    // ⛔ 计划不可得时 `count:0`/`files:[]` 会与「计划被读到且为空」同形（硬规则 3b）——`error` 是那个
+    // 把两者分开的取值：非 null ⇒ 这一维**没评成**（读者不得把它读成「没有缺失」）。
+    error: plannedResolution.error ?? (plannedFiles === null ? `plan unavailable (${plannedResolution.source})` : null),
+  });
   let child: import("node:child_process").ChildProcess;
   // gap-verification-round-in-one-shot-worktree config C — the one-shot worktree REUSES the main
   // repo's warm NODE_COMPILE_CACHE (test.sh honors a user-supplied NODE_COMPILE_CACHE verbatim —
@@ -2648,24 +3032,24 @@ export async function run(argv: string[]): Promise<number> {
   phaseAccount = new PhaseDifferentialAccounting(child.pid, phaseLanes);
   phaseAccount.init("static");
 
-  // gap-full-suite-scope-oom-policy-stops-whole-suite-unattributable — sample the suite's resource
-  // scope (memory.peak / memory.events) while it runs, so a round's peak + OOM counts survive the
-  // transient scope's destruction (the unit vanishes at suite exit ⇒ `Result=oom-kill` and
-  // `memory.events` are then unreadable). `scopeProvider` resolves lazily (the scope unit may not
+  // gap-full-suite-scope-oom-policy-stops-whole-suite-unattributable — sample the suite scope
+  // (memory.peak / memory.events) while it runs, so a round's peak + OOM counts survive the transient
+  // scope's destruction (the unit vanishes at suite exit ⇒ `Result=oom-kill` and `memory.events` are
+  // then unreadable). `scopeProvider` resolves lazily through the host adapter (the scope unit may not
   // exist yet at round start).
-  //
+  let memorySampler: SuiteMemorySampler | null = null;
   // gap-suite-resource-measurement-needs-a-host-adapter-not-inline-cgroup-calls — the sampler runs on
   // EVERY round, including the ones with NO attributable scope (an un-enveloped run, or a host whose
   // adapter cannot measure). ⛔ Not gated on `useSystemdRun` any more: gating meant a blind round
   // produced NO evidence FILE at all, and 「no file」 is indistinguishable from 「the runner died before
-  // teardown」 (硬规则 3b). A blind round now lands the file with every reading `null` + the adapter's
-  // NAMED reason, which is exactly the `unknown` (⛔ not `0`) the AC2 chain has to show.
+  // teardown」 (硬规则 3b). A blind round now lands the file with every reading `unknown` + the
+  // adapter's NAMED reason, which is exactly what the AC2 chain has to show.
   const runAdapter = hostResourceAdapter();
   // Why this round has no scope of its own — a NAMED reason, never an empty gap.
   const noScopeReason = !skipSystemdRun
     ? (hostResourceUnavailableReason() ?? "the host adapter reported no scope mechanism, without a reason")
     : "the suite was run UN-ENVELOPED (--no-systemd-run / a hermetic seam), so its processes share this runner's own cgroup — no scope is attributable to the suite";
-  let memorySampler: SuiteMemorySampler | null = startSuiteMemorySampler({
+  memorySampler = startSuiteMemorySampler({
     // The scope is resolved through the SAME host adapter that built the argv — ⛔ not a second,
     // independently-resolved cgroup path (硬规则 5b).
     adapter: runAdapter,
@@ -3439,8 +3823,23 @@ export async function run(argv: string[]): Promise<number> {
   // gap-full-suite-scope-oom-policy-stops-whole-suite-unattributable — take the FINAL cgroup reading
   // (peak / memory.events) before the transient scope unit is destroyed, and land the per-run evidence
   // file `<state-dir>/suite-memory-evidence-<runId>.json`. Best-effort: capture must never fail the run.
+  // gap-suite-verdict-green-on-oom-killed-incomplete-run-lands-on-11-percent-of-files AC8 — the reading is
+  // ALSO consumed by the verdict (it used to be written to a side file and never read): `oomKill > 0`
+  // means the suite scope really OOM-killed processes during THIS round, so the round can never be green.
+  let oomKillReading: number | "unknown" = "unknown";
+  // AC9 — 「这一维**试过**读没有」是独立取值：没被 scope 包住的一轮（非 systemd 路径，历史上就不带
+  // `scope_unit`/`cpu_time_s`）**没有** telemetry 这一维（缺键 ≠ unknown）；被包住却一次都没读到才是
+  // `unknown`。⛔ 两者不得压平。
+  let telemetryAttempted = false;
   if (memorySampler) {
-    memorySampler.stop();
+    // gap-suite-resource-measurement-needs-a-host-adapter-not-inline-cgroup-calls — the sampler now
+    // exists on EVERY round (so a blind round still lands an evidence FILE), but telemetry is only
+    // ATTEMPTED when this round had a scope of its own to attribute. `telemetryAttempted` keeps its
+    // AC9 meaning (「被包住却一次都没读到」 vs 「压根没有 scope 这一维」) because the key-set contract on
+    // the round/state records — a round with no scope carries NO telemetry key (缺键 ≠ unknown).
+    telemetryAttempted = useSystemdRun;
+    const ev = memorySampler.stop();
+    oomKillReading = ev.oomKill;
     memorySampler = null;
   }
 
@@ -3582,7 +3981,30 @@ export async function run(argv: string[]): Promise<number> {
   // have passed, but the round is `not-evaluated: leaked-processes (n)` — NEVER green (硬规则 3b: a
   // reading we could not take must not be reported in the same shape as a qualified pass).
   const leakedProcessesFound = leakedProcesses.length > 0;
-  const green = testsGreen && !treeMutated && !leakedProcessesFound;
+  // gap-suite-verdict-green-on-oom-killed-incomplete-run-lands-on-11-percent-of-files AC1/AC7 —
+  // **完整性判据**（本轮修法的核心）。终态集从裸 `__PERFILE__` 行取（⛔ 不过 parsePerFileLines 的
+  // `duration>0` 过滤——被杀得没产出行的文件，本身就是「一行都没有」这件事），计划集来自执行前落盘的
+  // manifest。任一计划文件没有终态记录 ⇒ 这一轮**没有跑全**，硬规则 3b：它必须**不可能**与「跑过且全绿」
+  // 同形。⛔ 判据只看集合差，⛔ 不看文件数阈值（历史套件规模在变，阈值会误判）。
+  const terminalFiles = terminalFileSet(perFileLines, root);
+  const completeness = computePlannedCompleteness(plannedFiles, terminalFiles);
+  const incomplete = completeness.evaluated && completeness.missing.length > 0;
+  // AC8/AC5 — OOM 从**本轮自己的 cgroup 证据**读（`oom_kill` 相对本轮起点上升即入账）。这里用的是
+  // sampler 的**峰值读数**（cgroup 计数器单调，故读到的最大值就是本轮发生的次数）。`"unknown"` =
+  // telemetry 读不到 ⇒ **不是一个 OOM 读数**，也不伪造成 0（AC9）。
+  const oomKilled = typeof oomKillReading === "number" && oomKillReading > 0;
+  const telemetryUnreadable = telemetryAttempted && oomKillReading === "unknown";
+  // 本轮「无正确性结论」的成因（三态：null = 有资格绿；两个 token = 各自成因）。OOM 与 incomplete
+  // 各有自己的 token：⛔ 不共用 `leaked-processes` 的措辞（读者必须能从取值区分成因）。
+  const notEvaluated =
+    incomplete
+      ? `incomplete (${completeness.missing.length}/${completeness.plannedCount} missing)`
+      : oomKilled
+        ? `oom-killed (${oomKillReading})`
+        : leakedProcessesFound
+          ? `leaked-processes (${leakedProcesses.length})`
+          : null;
+  const green = testsGreen && !treeMutated && !leakedProcessesFound && notEvaluated === null;
   // No correctness conclusion (abort) iff: an abort marker was seen, OR the child was killed by a
   // signal (code null), OR it never spawned. A REAL failure conclusion (redDetected) — and now a
   // static-check conclusion (staticCheckDetected) — is never downgraded by an earlier abort marker:
@@ -3605,6 +4027,14 @@ export async function run(argv: string[]): Promise<number> {
           : childKilledBySignal
             ? "infra-error" // the DIRECT test.sh child was signal-killed ⇒ environment problem (AC2, gap-infra-error-false-positive-from-test-internal-kill)
             : noCorrectnessConclusion
+              ? "aborted"
+              // gap-suite-verdict-green-on-oom-killed-incomplete-run-lands-on-11-percent-of-files AC1/AC8 —
+              // a round whose TESTS all passed but which did not run its whole plan (or whose scope really
+              // OOM-killed processes) produced **no correctness conclusion**: the missing files are not
+              // failures, they are UNKNOWN. Same bucket as the leaked-processes round (`aborted`), with its
+              // own `notEvaluated` token so the cause stays distinguishable. ⛔ 位置在 `leakedProcessesFound`
+              // 分支之前——incomplete/oom 的成因必须由【自己的 token】命名，而不是被泛化成 leaked/aborted。
+              : notEvaluated !== null
               ? "aborted"
               // gap-test-spawned-resident-drivers-outlive-their-suite-no-process-group-reaping — a
               // leaked-process round gets the "no correctness conclusion" reason, NOT the fail-closed
@@ -3662,10 +4092,37 @@ export async function run(argv: string[]): Promise<number> {
   type SuiteStateWithLeakSweep = SuiteState & {
     leakedProcesses?: LeakedProcess[];
     notEvaluated?: string;
+    // gap-suite-verdict-green-on-oom-killed-incomplete-run-lands-on-11-percent-of-files — 完整性 / OOM /
+    // telemetry 这一族只在**有话要说**时落键（absent-unless-applicable，与 `void` / `staticCheck` /
+    // `leakedProcesses` 同一条既有契约）：一轮**完整、telemetry 读到**的绿轮的 key set 必须逐字节不变
+    // （它被 full-suite-runner-s01.test.mjs 钉死，硬规则 5b）。三态读数本身在 round record 与 suite log
+    // 里恒在（那两个载体没有 key-set 契约）。
+    plannedFiles?: number;
+    terminalFiles?: number;
+    missingFiles?: string[];
+    plannedManifest?: string;
+    oomKill?: number | "unknown";
+    telemetry?: "ok" | "unknown";
   };
-  const leakedFields = leakedProcessesFound
-    ? { leakedProcesses, notEvaluated: `leaked-processes (${leakedProcesses.length})` }
-    : {};
+  const leakedFields = leakedProcessesFound ? { leakedProcesses } : {};
+  const completenessFields: Record<string, unknown> = {};
+  // AC1/AC8 — 本轮「无正确性结论」的成因 token（incomplete / oom-killed / leaked-processes）。
+  if (notEvaluated !== null) completenessFields.notEvaluated = notEvaluated;
+  // AC9 — telemetry 被包住却读不到：与「读到且 oom_kill=0」用**不同取值**（⛔ 不写 0）。
+  if (telemetryUnreadable) {
+    completenessFields.telemetry = "unknown";
+    completenessFields.oomKill = "unknown";
+  } else if (oomKilled) {
+    // AC8 — OOM 只在真发生时落键（absent = 本轮没有 OOM 读数可说，而不是「读了是 0」）。
+    completenessFields.oomKill = oomKillReading;
+  }
+  // AC1/AC7 — 不完整时把清单与缺失列出来（完整轮不加键——见上面 key-set 契约）。
+  if (incomplete) {
+    completenessFields.plannedFiles = completeness.plannedCount;
+    completenessFields.terminalFiles = completeness.terminalCount;
+    completenessFields.missingFiles = completeness.missing.slice(0, 50);
+    completenessFields.plannedManifest = path.basename(plannedManifestPath(stateDir, runId));
+  }
   const finalState: SuiteStateWithLeakSweep = green
     ? {
         state: "green",
@@ -3673,6 +4130,7 @@ export async function run(argv: string[]): Promise<number> {
         finishedAt,
         durationMs,
         ...leakedFields,
+        ...completenessFields,
         // gap-not-evaluated-checkers-never-persisted — ALWAYS present on a terminal state (empty array
         // = "no inert checker this round", DISTINGUISHABLE from an absent field = "dimension never
         // recorded", hard rule 3b). On green this is the ONLY place an inert guard is visible (it exits
@@ -3701,6 +4159,7 @@ export async function run(argv: string[]): Promise<number> {
         finishedAt,
         durationMs,
         ...leakedFields,
+        ...completenessFields,
         // gap-not-evaluated-checkers-never-persisted — same as the green branch: ALWAYS present on a
         // terminal state, so a red round ALSO names any inert checker that ran alongside the failure
         // (a red does not erase the not-evaluated signal).
@@ -3761,6 +4220,62 @@ export async function run(argv: string[]): Promise<number> {
     fs.appendFileSync(logFile, summaryLines.join("\n"), "utf8");
   } catch {
     // best-effort — a log-summary append must never fail the run (same fail-open family as the ledger)
+  }
+  // gap-suite-verdict-green-on-oom-killed-incomplete-run-lands-on-11-percent-of-files —
+  // ① SUITE-PLAN：把本轮的**完整性三态读数**印进 suite log（**恒定**，绿轮也印）。这是 AC4/AC5/AC7 要的
+  //    `planned == terminal == N` 那个读数；⛔ 它不进 state 的 key set（绿轮 key set 被 s01 钉死）。
+  // ② SUITE-INCOMPLETE：本轮**没有正确性结论**且成因是「没跑全」/「被 OOM 杀」时的机器可读标记行——
+  //    fan-in 读它来拒绝落地（前缀与 worker-fan-in.ts 同源）。⛔ 措辞不含 `not ok`/`FAIL`/`exit=<n>`：
+  //    它是溯源标记，不是一条测试失败（否则会被 isFailureSignalLine 当成红）。
+  try {
+    const completenessToken = incomplete
+      ? "incomplete"
+      : notEvaluated !== null
+        ? "not-evaluated"
+        : completeness.evaluated
+          ? "complete"
+          : "not-evaluated";
+    fs.appendFileSync(
+      logFile,
+      `${SUITE_LOG_PLAN_PREFIX} planned=${completeness.plannedCount ?? "unknown"} terminal=${completeness.terminalCount}` +
+        ` missing=${completeness.missing.length} source=${plannedResolution.source}` +
+        ` plan_error=${JSON.stringify(plannedResolution.error)} completeness=${completenessToken}` +
+        ` oomKill=${oomKillReading} telemetry=${telemetryAttempted ? (telemetryUnreadable ? "unknown" : "ok") : "absent"}` +
+        // gap-suite-verdict-green-on-oom-killed-incomplete-run-lands-on-11-percent-of-files AC10 — the
+        // round's own concurrency, so the fan-in can step DOWN from THIS value (⛔ not from a guessed
+        // default): a recovery re-run must be at a strictly lower concurrency than the round that failed,
+        // and 「哪一档才是更低」只有原轮的读数能回答。
+        ` laneCount=${laneCount}\n`,
+      "utf8",
+    );
+    if (incomplete || oomKilled) {
+      fs.appendFileSync(
+        logFile,
+        `${formatSuiteIncompleteMarker({
+          reason: incomplete ? "incomplete" : "oom-killed",
+          planned: completeness.plannedCount,
+          terminal: completeness.terminalCount,
+          missing: completeness.missing.length,
+          oomKill: oomKillReading,
+          files: completeness.missing,
+        })}\n`,
+        "utf8",
+      );
+    }
+  } catch {
+    // best-effort — 观测写不得改变被观测行为（同 recordSuiteNotRun）
+  }
+  if (notEvaluated !== null) {
+    process.stderr.write(
+      `full-suite-runner: NOT-EVALUATED ${notEvaluated} — the round is NOT green (notEvaluated carried on the state/round record; ` +
+        `planned=${completeness.plannedCount ?? "unknown"} terminal=${completeness.terminalCount} oomKill=${oomKillReading})\n`,
+    );
+    if (completeness.missing.length > 0) {
+      process.stderr.write(
+        `full-suite-runner: missing terminal record(s) (${completeness.missing.length}):\n` +
+          completeness.missing.slice(0, 40).map((f) => `  ${f}\n`).join(""),
+      );
+    }
   }
   // AC6 (gap-full-suite-state-red-no-failure-detail-static-check-invisible) — the verdict is on disk;
   // a late error in the post-verdict teardown (measure-history, ledger append, final stderr) must not
@@ -3884,6 +4399,20 @@ export async function run(argv: string[]): Promise<number> {
   // (never a fabricated []) when the round emitted no __PERFILE__ lines — same absent-field
   // contract as floor_ms/ceiling below.
   const perFile = perFileLines.length > 0 ? parsePerFileLines(perFileLines.join("\n")) : [];
+  // gap-suite-verdict-green-on-oom-killed-incomplete-run-lands-on-11-percent-of-files — the round's
+  // completeness reading in FULL (three-valued; see the call site). ⛔ 计划不可得时 `plannedFiles` 是
+  // 显式 **null**（不是缺键也不是 0）：缺键会与「计划是空的」同形（硬规则 3b）。
+  const roundCompletenessFields: Record<string, unknown> = {
+    plannedFiles: completeness.evaluated ? completeness.plannedCount : null,
+    terminalFiles: completeness.terminalCount,
+    completeness: incomplete ? "incomplete" : completeness.evaluated ? "complete" : "not-evaluated",
+    ...(completeness.missing.length > 0 ? { missingFiles: completeness.missing.slice(0, 200) } : {}),
+    ...(completeness.unexpected.length > 0 ? { unexpectedFiles: completeness.unexpected.slice(0, 50) } : {}),
+    ...(notEvaluated !== null ? { notEvaluated } : {}),
+    plannedManifestSource: plannedResolution.source,
+    ...(plannedResolution.error !== null ? { plannedManifestError: plannedResolution.error.slice(0, 500) } : {}),
+    ...(telemetryAttempted ? { oomKill: oomKillReading, telemetry: telemetryUnreadable ? "unknown" : "ok" } : {}),
+  };
   // gap-phase-boundary-differential-accounting — the final phase was CLOSED at suite exit (before
   // the journal poll) and its cpu backfilled from the Consumed total right after the poll (see the
   // `finalize()` / `backfillFinalCpu()` calls above). `phaseAccount.records` below is the finished
@@ -3936,7 +4465,13 @@ export async function run(argv: string[]): Promise<number> {
     // reading rides the round's ledger row too (the state file is overwritten each round; the ledger
     // is the queryable sequence). Present only when something leaked — a clean round's row keeps the
     // established absent-field contract.
-    ...(leakedProcessesFound ? { leakedProcesses, notEvaluated: `leaked-processes (${leakedProcesses.length})` } : {}),
+    ...(leakedProcessesFound ? { leakedProcesses } : {}),
+    // gap-suite-verdict-green-on-oom-killed-incomplete-run-lands-on-11-percent-of-files AC1/AC7/AC8/AC9 —
+    // the completeness / OOM / telemetry reading is **always** on the ledger row (three-valued, 硬规则 3b):
+    // `plannedFiles:null` = 计划不可得（这一维未评估），`completeness:"complete"|"incomplete"|"not-evaluated"`
+    // 是同一件事的具名取值，`oomKill:"unknown"` = 读不到（⛔ 不是 0）。The ledger has no key-set contract
+    // (only the suite STATE's green shape is pinned), so this is where the reading lives in full.
+    ...roundCompletenessFields,
     ...(roundGate ? { gate: roundGate } : {}),
     runner: base.runner,
     scope,
