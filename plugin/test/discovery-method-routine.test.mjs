@@ -539,6 +539,33 @@ test("case (7) — two rounds on identical inputs ⇒ round 2 ingests 0 and make
   assert.deepEqual(rounds(ws)[1].retirements, []);
 });
 
+// ── the FRESH-HOST round (task gap-discovery-method-evidence-store-never-autonomously-populated) ────
+// ⛔ THE DEFECT THIS PINS, end to end through the REAL round: NOTHING RESIDENT writes the evidence store,
+// so on a host whose store was never seeded by hand this step refused EVERY round with
+// `EVIDENCE_STORE_MISSING` — the round's own failure, with a prerequisite the round can never produce.
+// The round must now be `verified` with 0 to ingest, and the store it creates must be EMPTY (a
+// bootstrap, never a fabricated record).
+test("BOOTSTRAP — a round on a host with NO evidence store is `verified`, not `failed: EVIDENCE_STORE_MISSING`", async () => {
+  const ws = makeWorkspace();
+  writeConfig(ws, ENABLED_YAML);
+  // ⛔ Deliberately NO `writeFixtureStore`: the fresh-host state is the fixture. `makeWorkspace` creates
+  // `.quay/` and nothing else, which is exactly what `quay init` leaves behind on a new deployment.
+  const storeFile = path.join(ws, ".quay", "architecture-evidence-store.jsonl");
+  assert.equal(fs.existsSync(storeFile), false, "the fixture really starts with no evidence store");
+
+  const f = await runDiscoveryMethod(ws, runOpts(ws, { now: () => Date.parse("2026-10-12T00:00:00Z") }));
+  assert.equal(f.state, "verified", f.reason);
+  assert.doesNotMatch(f.reason, /EVIDENCE_STORE_MISSING/, "the permanent dead end is gone");
+
+  assert.equal(fs.existsSync(storeFile), true, "the round CREATED the store");
+  assert.equal(fs.readFileSync(storeFile, "utf8"), "", "…EMPTY — the fix fabricates no evidence record");
+
+  assert.equal(rounds(ws).length, 1, "the round appended its one scan-round line");
+  assert.equal(rounds(ws)[0].ingested.experiences, 0);
+  assert.equal(rounds(ws)[0].ingested.store_bootstrapped, true, "and the line says THIS round created the store");
+  assert.equal(rounds(ws)[0].reflected, null, "0 to ingest ⇒ the reflection step never ran, so no model seam was needed");
+});
+
 test("a round with new Experiences and NO model seam ⇒ failed (never a silent no-op)", async () => {
   const ws = makeWorkspace();
   writeConfig(ws, ENABLED_YAML);

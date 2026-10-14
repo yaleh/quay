@@ -1016,6 +1016,54 @@ export function sharedStoreFile(root) {
   return rr.ok ? path.join(rr.root, EVIDENCE_STORE_REL) : null;
 }
 
+/**
+ * Ensure the shared checkout's evidence store EXISTS, creating it EMPTY when it is genuinely ABSENT.
+ *
+ * ⛔ WHAT THIS REPLACES, AND WHY THE REPAIR IS THE SEMANTICS RATHER THAN A NEW PRODUCER. The batch
+ *   ingester used to refuse an absent store with `EVIDENCE_STORE_MISSING`, and NOTHING RESIDENT EVER
+ *   WRITES THE STORE: the only writers are `arch-hypothesis-generation.mjs`'s manual `--write-store`
+ *   subcommands and the manual `ownership-active-loop.mjs` run. So on any host whose store was never
+ *   seeded by hand, `discovery_method`'s ingest step refused EVERY round, forever, on a prerequisite
+ *   its own pipeline is structurally unable to produce — a gate whose only exit was a human typing a
+ *   research command. "missing ⇒ refuse" becomes "missing ⇒ create an EMPTY carrier, then proceed and
+ *   honestly report 0 records to ingest".
+ *
+ * ⛔ WHY AN EMPTY FILE IS HONEST AND IS NOT A FABRICATION. A zero-line JSONL carrier IS a valid carrier
+ *   holding zero records — every line vacuously satisfies the schema, and `readRecords` reads it back
+ *   as `{records: [], malformed_lines: 0}`. It asserts "no evidence has been recorded here", which is
+ *   TRUE of a host where none has. The alternative — synthesizing a plausible-looking `evidence` or
+ *   `outcome` record to "seed" the file — would assert a reading nobody ever took. This function
+ *   cannot do that: the only bytes it is able to write are none.
+ *
+ * ⛔ NARROW ON PURPOSE — ONLY A GENUINELY ABSENT STORE BOOTSTRAPS (硬规则 3b). "Not there" and "there
+ *   but broken" are two different findings and they stay distinguishable: a store that EXISTS and
+ *   cannot be read (a directory in its place, EACCES, a vanished mount) still fails closed with its own
+ *   `EVIDENCE_STORE_UNREADABLE`, never collapsed into the absent case. The `wx` flag extends the same
+ *   discipline to the create itself: a store that appeared between the check and the write is ADOPTED
+ *   (its bytes are not ours to touch), never truncated — and a create that fails for any other reason
+ *   reports the same "not usable" code rather than pretending the store is now there.
+ *
+ * @param {string} root
+ * @returns {{ok:true, store:string, bootstrapped:boolean}|{ok:false, store:string|null, bootstrapped:false, reasons:string[]}}
+ *   `bootstrapped:true` means THIS call created the file (its own reading — an already-present but
+ *   empty store is `bootstrapped:false`, so "we made it exist" and "it was always empty" never merge).
+ */
+export function ensureEvidenceStore(root) {
+  const rr = resolveCarrierRoot(root);
+  if (!rr.ok) return { ok: false, store: null, bootstrapped: false, reasons: [rr.reason] };
+  const store = path.join(rr.root, EVIDENCE_STORE_REL);
+  if (fs.existsSync(store)) return { ok: true, store, bootstrapped: false };
+  try {
+    fs.mkdirSync(path.dirname(store), { recursive: true });
+    fs.writeFileSync(store, "", { encoding: "utf8", flag: "wx" });
+  } catch (e) {
+    // `EEXIST` = a concurrent round created it first. That IS the state we wanted; adopt it untouched.
+    if (e?.code === "EEXIST") return { ok: true, store, bootstrapped: false };
+    return { ok: false, store, bootstrapped: false, reasons: [`${EVIDENCE_STORE_UNREADABLE}:${EVIDENCE_STORE_REL}:${e?.code ?? e?.message}`] };
+  }
+  return { ok: true, store, bootstrapped: true };
+}
+
 // ── derivation: outcome record → Experience fields (PURE — no fs, no git, no model) ─────────────
 
 const isInt = (x) => Number.isInteger(x);
@@ -1388,6 +1436,15 @@ function resolveOutcomeForIngest(root, args) {
     const rr = resolveCarrierRoot(root);
     return { ok: false, reasons: [rr.reason] };
   }
+  // ⛔ THIS LOOKUP KEEPS `EVIDENCE_STORE_MISSING` — deliberately, and it is not the defect the batch
+  //    ingester had (see `ensureEvidenceStore`). The two callers differ in what "absent" MEANS to them:
+  //    the batch ingester's job is "ingest whatever is there", so "nothing is there" is a legitimate
+  //    zero-work ANSWER and bootstrapping converges it; this one was handed the NAME of a specific
+  //    outcome record, and an absent store cannot be repaired into containing it — creating an empty
+  //    carrier would only downgrade a precise finding ("there is no store at all") into a vaguer one
+  //    ("no record matched"), on a read path that would then have a write side effect. Absent is the
+  //    honest, more informative reading here, and no resident routine reaches this function (its only
+  //    callers are tests), so it is not a gate anything is stuck behind.
   if (!fs.existsSync(file)) {
     return { ok: false, reasons: [`EVIDENCE_STORE_MISSING:${EVIDENCE_STORE_REL}-not-present-under-${path.dirname(path.dirname(file))}`] };
   }
@@ -1745,7 +1802,10 @@ function watermarkMismatch(wm, lines) {
  *            duplicates, skipped_not_ingestible, skipped_blank_lines, malformed_lines, read_failed,
  *            stopped_at_malformed_line, stopped_at_read_failed_line, remainder, advanced_to, watermark,
  *            entries, ids, skips_recorded, skips_already_present, skipped_records,
- *            rewound_for_mapping, reasons?}}
+ *            rewound_for_mapping, store_bootstrapped, reasons?}}
+ *   `store_bootstrapped` is `true` only on the run that CREATED an absent store, `false` when the store
+ *   was already present, and `null` when its existence was never established (disabled, an unresolvable
+ *   shared checkout, a refusal that happened first). An absent store is NOT a refusal any more.
  */
 export function ingestNewOutcomes(root, {
   maxPerRun = Infinity, enabled = true, verdictRole = VERDICT_ROLE,
@@ -1757,6 +1817,12 @@ export function ingestNewOutcomes(root, {
     malformed_lines: 0, read_failed: 0, stopped_at_malformed_line: null, stopped_at_read_failed_line: null,
     remainder: 0, advanced_to: null, watermark: null, entries: [], ids: [],
     skips_recorded: 0, skips_already_present: 0, skipped_records: [], rewound_for_mapping: 0,
+    // ⛔ THREE VALUES, not a boolean (硬规则 3b): `null` = the store's existence was never established
+    // (a disabled round, an unresolvable shared checkout, a refusal that happened first), `true` = THIS
+    // run created the empty carrier, `false` = the store was already there. A reader must be able to
+    // tell "we made it exist" from "it was already empty"; collapsing those into one boolean would make
+    // the bootstrap invisible on exactly the round that performed it.
+    store_bootstrapped: null,
   };
   // ⛔ THE KILL SWITCH IS ANSWERED FIRST. Nothing below this line runs when it is off — not the store
   // read, not the watermark read, not the ledger read — so "zero reads and zero writes" is a property
@@ -1771,14 +1837,23 @@ export function ingestNewOutcomes(root, {
   const wm = readIngestWatermark(root);
   if (!wm.ok) return { ...base, ok: false, store, skips_file: skipsFile, watermark_file: wm.file, reasons: [wm.reason] };
 
-  if (!fs.existsSync(store)) {
-    return { ...base, ok: false, store, skips_file: skipsFile, watermark_file: wm.file, reasons: [`EVIDENCE_STORE_MISSING:${EVIDENCE_STORE_REL}-not-present-under-${rr.root}`] };
+  // ⑤(a-0) THE BOOTSTRAP. A store that is genuinely ABSENT is created empty and the round proceeds with
+  //    zero records to ingest — it is NOT the round's failure. See `ensureEvidenceStore` for why that is
+  //    the honest repair and not a fabrication, and for why ONLY absence takes this path: a store that is
+  //    present but unreadable still falls through to the read below and fails closed with its own code.
+  const ensured = ensureEvidenceStore(root);
+  if (!ensured.ok) {
+    return { ...base, ok: false, store, skips_file: skipsFile, watermark_file: wm.file, reasons: ensured.reasons };
   }
   let text;
   try { text = fs.readFileSync(store, "utf8"); }
   catch (e) {
-    return { ...base, ok: false, store, skips_file: skipsFile, watermark_file: wm.file, reasons: [`${EVIDENCE_STORE_UNREADABLE}:${EVIDENCE_STORE_REL}:${e?.code ?? e?.message}`] };
+    return { ...base, ok: false, store: ensured.store, skips_file: skipsFile, watermark_file: wm.file, reasons: [`${EVIDENCE_STORE_UNREADABLE}:${EVIDENCE_STORE_REL}:${e?.code ?? e?.message}`] };
   }
+  // Set only AFTER the read succeeded, so a store that could not be read never reports a bootstrap
+  // reading it did not reach (`ensureEvidenceStore` may have created it and the read still failed —
+  // e.g. a dangling symlink appeared in between).
+  const storeBootstrapped = ensured.bootstrapped;
   const lines = splitStoreLines(text);
 
   // FAIL-CLOSED: the watermark names a line and a digest; BOTH must still hold. A rewritten or
@@ -1911,7 +1986,7 @@ export function ingestNewOutcomes(root, {
         // Any OTHER derivation failure is not a skip and must not be filed as one (硬规则 3b): a shape
         // the deriver cannot handle is a defect to report, not an outcome we declined.
         const recorded = flushSkips();
-        return { ...base, ok: false, store, skips_file: skipsFile, watermark_file: wm.file, scanned, ingested, duplicates, skipped_not_ingestible: skipped, skipped_blank_lines: blank, malformed_lines: malformed, read_failed: readFailed, stopped_at_malformed_line: stoppedAtMalformed, stopped_at_read_failed_line: stoppedAtReadFailed, advanced_to: advancedTo, watermark: watermarkValue(lines, advancedTo), ids, entries, skips_recorded: recorded.length, skips_already_present: skipsAlready, skipped_records: recorded, rewound_for_mapping: rewoundForMapping, reasons: d.reasons };
+        return { ...base, ok: false, store, skips_file: skipsFile, watermark_file: wm.file, scanned, ingested, duplicates, skipped_not_ingestible: skipped, skipped_blank_lines: blank, malformed_lines: malformed, read_failed: readFailed, stopped_at_malformed_line: stoppedAtMalformed, stopped_at_read_failed_line: stoppedAtReadFailed, advanced_to: advancedTo, watermark: watermarkValue(lines, advancedTo), ids, entries, skips_recorded: recorded.length, skips_already_present: skipsAlready, skipped_records: recorded, rewound_for_mapping: rewoundForMapping, store_bootstrapped: storeBootstrapped, reasons: d.reasons };
       }
       skipped++; advancedTo = lineNo;
       recordSkip(lineNo, isStr(rec.id, 1) ? rec.id : null, rec.verdict ?? null, `${SKIP_VERDICT_NOT_INGESTIBLE}:${String(rec.verdict)}`);
@@ -1946,7 +2021,7 @@ export function ingestNewOutcomes(root, {
     // A REFUSAL is neither skipped nor advanced past: the record could not become an Experience, and
     // reporting it is the only behaviour that keeps the watermark honest about what was read.
     const recorded = flushSkips();
-    return { ...base, ok: false, store, skips_file: skipsFile, watermark_file: wm.file, scanned, ingested, duplicates, skipped_not_ingestible: skipped, skipped_blank_lines: blank, malformed_lines: malformed, read_failed: readFailed, stopped_at_malformed_line: stoppedAtMalformed, stopped_at_read_failed_line: stoppedAtReadFailed, advanced_to: advancedTo, watermark: watermarkValue(lines, advancedTo), ids, entries, skips_recorded: recorded.length, skips_already_present: skipsAlready, skipped_records: recorded, rewound_for_mapping: rewoundForMapping, reasons: r.reasons };
+    return { ...base, ok: false, store, skips_file: skipsFile, watermark_file: wm.file, scanned, ingested, duplicates, skipped_not_ingestible: skipped, skipped_blank_lines: blank, malformed_lines: malformed, read_failed: readFailed, stopped_at_malformed_line: stoppedAtMalformed, stopped_at_read_failed_line: stoppedAtReadFailed, advanced_to: advancedTo, watermark: watermarkValue(lines, advancedTo), ids, entries, skips_recorded: recorded.length, skips_already_present: skipsAlready, skipped_records: recorded, rewound_for_mapping: rewoundForMapping, store_bootstrapped: storeBootstrapped, reasons: r.reasons };
   }
 
   const watermark = watermarkValue(lines, advancedTo);
@@ -1964,6 +2039,7 @@ export function ingestNewOutcomes(root, {
     remainder, advanced_to: advancedTo, watermark, entries, ids,
     skips_recorded: recorded.length, skips_already_present: skipsAlready, skipped_records: recorded,
     rewound_for_mapping: rewoundForMapping,
+    store_bootstrapped: storeBootstrapped,
     claim_join: { linked: joinedClaims, no_linked_claim: noLinkedClaim, claim_records_indexed: storeRecords.filter((r) => isObj(r) && CLAIM_BEARING_KINDS.includes(r.kind)).length },
   };
 }
@@ -1989,6 +2065,11 @@ export function backfillIngestSkips(root, { verdictRole = VERDICT_ROLE, mappingV
   const rr = resolveCarrierRoot(root);
   if (!rr.ok) return { ...base, ok: false, reasons: [rr.reason] };
   const store = path.join(rr.root, EVIDENCE_STORE_REL);
+  // ⛔ SAME READING AS THE NAMED-RECORD LOOKUP ABOVE, and for the same reason — this one is a
+  //    RECONCILIATION of records that are already there ("is each outcome an entry, a named skip, or
+  //    UNACCOUNTED?"), so an absent store means there is nothing to reconcile and NO caller is stuck:
+  //    it has no production caller at all (tests only). The bootstrap belongs to the batch ingester,
+  //    which is the one a resident routine actually runs every round.
   if (!fs.existsSync(store)) return { ...base, ok: false, store, reasons: [`EVIDENCE_STORE_MISSING:${EVIDENCE_STORE_REL}-not-present-under-${rr.root}`] };
 
   const ledger = readExperienceLedger(root);

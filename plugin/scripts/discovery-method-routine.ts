@@ -1544,7 +1544,13 @@ export async function runDiscoveryMethod(root: string, opts: DiscoveryMethodRunO
       budget_24h: budget24h,
       reservations: reservationsBlock,
       wall_ms: wallMs,
-      ingested: { experiences: ingested, scanned: Number(ingest.scanned ?? 0), duplicates: Number(ingest.duplicates ?? 0), advanced_to: ingest.advanced_to ?? null },
+      // ⛔ `store_bootstrapped` RIDES THE LINE, because it is the ONE fact that tells a reader of this
+      //    carrier whether the round that reported "ingested 0" was reading a store that already existed
+      //    or CREATED it on the spot (硬规则 9: a distinction that only lives in the head of whoever ran
+      //    the round is not a distinction). Passed through as the ingester reported it — `null` when the
+      //    reading was never established — rather than coerced to a boolean, so "not evaluated" never
+      //    reaches the carrier wearing the same shape as "was already there" (硬规则 3b).
+      ingested: { experiences: ingested, scanned: Number(ingest.scanned ?? 0), duplicates: Number(ingest.duplicates ?? 0), advanced_to: ingest.advanced_to ?? null, store_bootstrapped: typeof ingest.store_bootstrapped === "boolean" ? ingest.store_bootstrapped : null },
       // ⛔ WHAT THE REFLECTION LAUNCHER ACTUALLY RAN WITH (Plan item 2). ⛔ `null` — not a fabricated
       // config-derived block — when NO live launcher was built (a caller injected its own `model`/
       // `reflectFn`: the tests do). "What the config asks for" and "what the launcher ran with" are

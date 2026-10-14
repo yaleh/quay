@@ -23,7 +23,7 @@ import {
   ingestFeedback, ingestFromEvidenceStoreOutcome, experienceDenyList, scanExperienceLeak,
   experienceRecordId, resolveCarrierRoot, repairCarrier,
   ingestExperience, ingestNewOutcomes, deriveExperienceFields, deriveExperienceSummary,
-  componentsFromSubjectKey, evaluationPinOf, readIngestWatermark, sharedStoreFile,
+  componentsFromSubjectKey, evaluationPinOf, readIngestWatermark, sharedStoreFile, ensureEvidenceStore,
   AUTHORED_BY_ACTORS, USER_PROVENANCE_KINDS, MIN_USER_QUOTE_CHARS, DERIVED_INGEST_AUTHOR,
   USER_PROVENANCE_MISSING, USER_SOURCE_FROM_WORKER, EXPERIENCE_CORRECTION_KIND, CORRECTABLE_FIELDS,
   CORRECTION_TARGET_NOT_FOUND, CORRECTION_FIELD_NOT_CORRECTABLE, MIN_CORRECTION_REASON_CHARS,
@@ -1567,4 +1567,87 @@ test("CARRIER(f): a short summary is REFUSED by the same floor as every other so
   assert.equal(bad.ok, false);
   assert.ok(bad.reasons[0].startsWith("SUMMARY_INSUBSTANTIAL:"), bad.reasons[0]);
   assert.ok(MIN_SUMMARY_CHARS > "too thin".length, "…and the fixture really is under the floor");
+});
+
+// ══════════════════════════════════════════════════════════════════════════════════════════════════
+// THE STORE'S OWN BOOTSTRAP (task gap-discovery-method-evidence-store-never-autonomously-populated)
+//
+// The defect: NOTHING RESIDENT writes `.quay/architecture-evidence-store.jsonl` (the only writers are
+// the manual `--write-store` subcommands of `arch-hypothesis-generation.mjs` and the manual
+// `ownership-active-loop.mjs`), so on a fresh host `discovery_method`'s ingest step refused EVERY round
+// with `EVIDENCE_STORE_MISSING` — a gate whose only exit was a human typing a research command.
+//
+// ⛔ THE FOUR READINGS THESE TESTS SEPARATE, and why each needs its own (硬规则 3b): (1) the store was
+// absent ⇒ it is CREATED EMPTY and the round proceeds with 0 to ingest; (2) the store was already there
+// ⇒ same outcome, DIFFERENT reading (`store_bootstrapped:false`); (3) the store's existence was never
+// established (a disabled round) ⇒ `null`, not `false`; (4) the store is THERE BUT UNREADABLE ⇒ still
+// FAILS CLOSED with its own code. Collapsing any two of these is the failure this block exists to pin.
+// ══════════════════════════════════════════════════════════════════════════════════════════════════
+
+test("BOOTSTRAP: an ABSENT store is created EMPTY and the round proceeds — 0 to ingest, never a refusal", () => {
+  const root = mkTmp();
+  const file = storeFile(root);
+  assert.equal(fs.existsSync(file), false, "the fixture really starts with no store");
+
+  const r = ingestNewOutcomes(root);
+  assert.equal(r.ok, true, r.reasons?.join(","));
+  assert.equal(r.store_bootstrapped, true, "…and the run SAYS it created the store");
+  assert.equal(r.ingested, 0);
+  assert.equal(r.scanned, 0, "there was nothing to scan — which is a reading, not a failure");
+  assert.equal(r.remainder, 0);
+
+  // ⛔ NOT A FABRICATION: the created carrier holds ZERO records. An empty JSONL carrier is a VALID
+  // carrier with no records (every line vacuously satisfies the schema); a synthetic `evidence`/
+  // `outcome` record asserting a reading nobody took would NOT be.
+  assert.equal(fs.existsSync(file), true, "the store now exists");
+  assert.equal(fs.readFileSync(file, "utf8"), "", "…and its bytes are none");
+  assert.deepEqual(readRecords(file), { records: [], malformed_lines: 0 });
+  assert.equal(lines(root), 0, "not one Experience was written either");
+
+  // The SECOND run reads the same empty store and reports the OTHER reading: it did not create it.
+  const again = ingestNewOutcomes(root);
+  assert.equal(again.ok, true);
+  assert.equal(again.store_bootstrapped, false, "«we made it exist» and «it was already empty» never merge");
+  assert.equal(again.ingested, 0);
+});
+
+test("BOOTSTRAP: a run that never established the store's existence reports `null`, not `false`", () => {
+  const root = mkTmp();
+  const off = ingestNewOutcomes(root, { enabled: false });
+  assert.equal(off.store_bootstrapped, null, "the kill switch means the store was never looked at");
+  assert.equal(fs.existsSync(storeFile(root)), false, "…so a disabled round creates NOTHING");
+});
+
+test("BOOTSTRAP: `ensureEvidenceStore` is idempotent and names the run that created the file", () => {
+  const root = mkTmp();
+  const first = ensureEvidenceStore(root);
+  assert.equal(first.ok, true);
+  assert.equal(first.bootstrapped, true);
+  assert.equal(first.store, storeFile(root));
+  const second = ensureEvidenceStore(root);
+  assert.equal(second.ok, true);
+  assert.equal(second.bootstrapped, false);
+  assert.equal(fs.readFileSync(first.store, "utf8"), "", "the second call did not touch the bytes");
+});
+
+test("BOOTSTRAP negative control: a store that is THERE BUT UNREADABLE still fails closed, distinctly", () => {
+  const root = mkTmp();
+  // A directory in the store's place: `existsSync` is true, so the bootstrap must NOT fire — "not there"
+  // and "there but broken" are two different findings and stay distinguishable.
+  fs.mkdirSync(storeFile(root), { recursive: true });
+  const r = ingestNewOutcomes(root);
+  assert.equal(r.ok, false, "an unreadable store is NOT a zero-work round");
+  assert.equal(r.store_bootstrapped, null, "…and it is not reported as bootstrapped either");
+  assert.ok(r.reasons.some((x) => x.startsWith("EVIDENCE_STORE_UNREADABLE:")), r.reasons.join(","));
+  assert.equal(r.reasons.some((x) => x.startsWith("EVIDENCE_STORE_MISSING:")), false, "the absent-file code must NOT cover a present-but-broken store");
+});
+
+test("BOOTSTRAP: the bootstrap does not revive the NAMED-record lookup's absent-store refusal", () => {
+  // The two callers differ in what «absent» MEANS to them, and the fix is deliberately narrow: a lookup
+  // handed the NAME of a record cannot bootstrap its way to containing it (see `ensureEvidenceStore`).
+  const root = mkTmp();
+  const r = ingestPinned(root, { experiment: "E-FIX", experimentRef: "x", role: "found-and-fixed", caseId: "c", summary: SUMMARY });
+  assert.equal(r.ok, false);
+  assert.ok(r.reasons.some((x) => x.startsWith("EVIDENCE_STORE_MISSING:")), r.reasons.join(","));
+  assert.equal(fs.existsSync(storeFile(root)), false, "…and a failed lookup leaves no store behind");
 });
