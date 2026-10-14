@@ -106,6 +106,51 @@ landed meaning (「this round was ENVELOPED and we tried to read」) even though
 non-scope round still carries NO telemetry key on the state/round records (缺键 ≠ unknown), it merely lands an all-`unknown`
 evidence FILE.
 
+**Recurring exit-not-landed (2026-10-14/15) — root cause verified this session; ⛔ neither defect is in this change's diff.**
+AC1-AC4 are green (readings above, re-measured 2026-10-15 on the merged tree:
+`ℹ tests 271 / pass 271 / fail 0`, `tsc` exit 0, `ANTI-DRIFT OK … 8 actual file(s)`, `task_check` ⇒
+`gate=execute->done ok=true acTotal=4 acChecked=4`), yet two consecutive fan-in rounds exited-not-landed at `step=suite`
+with `SUITE-INCOMPLETE reason=oom-killed`. Both causes were read out of the artefacts rather than inferred, and both are
+**deterministic** — so a third identical round will fail identically.
+
+1. **The suite runs pinned against its own declared ceiling, below what its own estimator requires.**
+   `suite-memory-evidence-mfi-…-1791997319044-50ef83.json`: `peakBytes 17180139520` vs `memoryMaxBytes 17179869184`
+   (16 GiB) — the scope sat AT its cap for the whole round (`oom 15412`, `oomKill 2`, `phase "main"`, `samples 155`).
+   The runner's OWN lane-scaled estimator, over the SAME record, says the lane count it actually ran needs more than the
+   cap allows: `actualConcurrency 128`, `perFileHighWaterBytes 133136384` ⇒ `laneScaledEstimateBytes 21301821440`
+   (≈19.8 GiB), while `laneScaledExceedsHostGuard false` against `hostGuardBytes 27917287424` (27.9 GB) — i.e. the HOST
+   could afford it. The binding cap is `bound: "declared"`, `declared: "16G"`, `declaredSource: "default"` (no config
+   declares it; it is the code default). **So the cap is below the estimator's requirement for the lane count in use
+   while the host has headroom ⇒ an OOM at this lane count is predicted, not incidental.**
+   ⛔ Not fixed here: this task's DoD pins the declared value and its resolution logic as unchanged, and
+   `gap-suite-memorymax-literal-16g-cap-pinned-every-round-while-lanes-scale-with-nproc` — the task whose title names
+   exactly this mismatch — is already `done`.
+
+2. **The recovery ladder is STRUCTURALLY unreadable: it can never certify a rung, whatever the rung did.**
+   `worker-fan-in.ts:879` `recoverySuiteCommand` appends ONLY `--lane-count <n>` to the ORIGINAL suite command. That
+   command already carries `--log-file <suiteLogFile>` (`worker-fan-in.ts:1958`), and it is **not re-pointed** — so every
+   recovery rung's runner keeps teeing into the ORIGINAL log file. Meanwhile `spawnSuiteAndWait` (`suite-driver.ts:204-206`)
+   writes only the child's **stdout** into the `logFile` it is handed, and `worker-fan-in.ts:2930-2932` passes `recLogFile`
+   there and nowhere else; the runner writes its diagnostics to **stderr** and never to stdout.
+   ⇒ `recLogFile` is empty **by construction** ⇒ `classifyRecoveryRound` (`worker-fan-in.ts:833`) returns
+   `no-conclusion(reason="log-unreadable")` for EVERY rung.
+   **Measured (not inferred):** all three recovery logs are 0 bytes with mtime == their own start instant
+   (`recovery-64-…-8c87d9.log` 0 B @ 17:09:01; `recovery-48-…-1cb154.log` 0 B @ 17:14:37; `recovery-32-…-955562.log`
+   0 B @ 17:23:31) while those rungs ran 335 s / 533 s / 323 s (`fan-in-step-trace.jsonl`:
+   `suite-recovery … "reason":"recovery round had no conclusion (log-unreadable)"` at concurrency 64, 48, 32) — the rungs
+   demonstrably RAN. And the log named for the ORIGINAL attempt (`…1791997319049-f8682e.log`, 1.99 MB, mtime ==
+   recovery-32's END 17:28:47) contains exactly **ONE** `SUITE-RUN-START`, `log=…1791997319049-f8682e.log`,
+   `ts=2026-10-14T17:23:37Z` = recovery-32's start + 6 s — i.e. the rungs overwrote one another's output into the
+   original file, while their own files stayed empty.
+   **Consequence (硬规则 3b):** `suite-recovery-blocked` then reports
+   `recovery exhausted at floor concurrency 32 — no declared rung produced a complete verdict (64,48,32); needs a
+   code/config fix, see plugin/scripts/full-suite-runner.ts`. That message asserts a VERDICT was reached and found
+   incomplete; no verdict was ever READ. 「降档后仍不完备」 and 「读不懂」 are flattened into one reading, and its trailing
+   pointer names a file that is not where the defect lives (the defect is in `worker-fan-in.ts` / `suite-driver.ts`).
+   ⛔ Not fixed here: both files are outside this task's declared `## Touches`, and Plan item 5 explicitly assigns the
+   OOM/completeness gate to a separate module this task does not own. Recorded by this entry instead of silently
+   widened into this task's diff.
+
 ## Touches
 - tasks/gap-suite-resource-measurement-needs-a-host-adapter-not-inline-cgroup-calls.md
 - plugin/scripts/host-resource-adapter.ts
