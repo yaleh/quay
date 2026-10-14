@@ -1707,9 +1707,18 @@ export function startSuiteMemorySampler(opts: {
 // measure-suite-reporter），⛔ 不是启发式阈值（「文件数 < 中位数一半」这类判据在套件规模随时间变化的
 // 历史上噪声过大，这正是本任务要一个 expected-set 判据的理由）。
 
-/** 计划清单的落盘载体前缀（`<stateDir>/suite-planned-manifest-<runId>.json`）。 */
+/**
+ * 计划清单的落盘载体路径（`<stateDir>/suite-planned-manifest-<runId>.log`）。
+ *
+ * ⚠️ `.log` 后缀是**有意的、且是本仓唯一可用的选择**：`.quay/` 的运行时产物是**逐个**进 `.gitignore`
+ * 的（每个载体一行），而 `.gitignore` 不在本任务的 Touches 内 ⇒ 一个 `.json` 名会在 tested worktree 里
+ * 落成**未忽略的未跟踪文件**（实测 `git status` 里 `?? .quay/suite-planned-manifest-*.json`）。`*.log` 是
+ * 仓库既有的**全局**忽略规则，而「`.log` 后缀装 JSON 行」在本仓已是既有形态（`fan-in-<task>-<runId>.log`
+ * 就是 JSON 行日志，`appendFanInTrace` 写的就是它）⇒ 载体名沿用同一族，⛔ 不新造一类需要改 .gitignore 的
+ * 产物。
+ */
 export function plannedManifestPath(stateDir: string, runId: string): string {
-  return path.join(stateDir, `suite-planned-manifest-${runId}.json`);
+  return path.join(stateDir, `suite-planned-manifest-${runId}.log`);
 }
 
 /** 一个计划文件的登记项。`file` 是 **tested-root 相对路径**（与终态集同一个口径——见 relTestPath）。 */
