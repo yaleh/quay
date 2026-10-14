@@ -809,6 +809,40 @@ export function extractSuitePlanMarker(combined: string): SuitePlanReading | nul
   };
 }
 
+/**
+ * AC11/AC12 — 一次**恢复轮**的可分读数。关键在**形状**：只有 `complete-red` 携带 `failures`（唯一能被喂
+ * 给签名比较器的形状）；`incomplete`（被 OOM 杀 / 有文件没产出终态）**根本没有这个字段**。⇒ 一条
+ * OOM / `unknown` / missing-file 记录**结构上**进不了 `runBaselineEquivalence` 的比较器 —— AC12 的
+ * 「enforced by type/shape, ⛔ not by convention」在这里是一条**类型声明**，而不是一句约定。
+ */
+export type RecoveryRoundReading =
+  | { kind: "certified"; run: SuiteRunResult; plan: SuitePlanReading | null; concurrency: number }
+  | { kind: "incomplete"; run: SuiteRunResult; marker: SuiteIncompleteReading; plan: SuitePlanReading | null; concurrency: number }
+  | { kind: "complete-red"; run: SuiteRunResult; plan: SuitePlanReading | null; failures: FailedTestFilesReading; concurrency: number }
+  | { kind: "no-conclusion"; run: SuiteRunResult; reason: string; concurrency: number };
+
+/** 把一轮恢复的结果判成上面四分形态。判据只看两处：run 的进程级三态位，与日志里的**结构化标记**。
+ *  ⚠️ 判「没结论」**不是** `outcome !== "done"`：非零退出码是一轮**有**结论的真红，把它当「没结论」会把
+ *  每一次真红都退化成「再降一档」，永远走不到 AC12 的 A/B（硬规则 3b 的镜像）。 */
+export function classifyRecoveryRound(
+  run: SuiteRunResult,
+  logText: string,
+  concurrency: number,
+  root?: string | null,
+): RecoveryRoundReading {
+  if (run.hungByWatchdog || run.spawnFailed === true || String(logText ?? "") === "") {
+    return {
+      kind: "no-conclusion", run, concurrency,
+      reason: run.hungByWatchdog ? "watchdog-killed" : run.spawnFailed === true ? "spawn-failed" : "log-unreadable",
+    };
+  }
+  const plan = extractSuitePlanMarker(logText);
+  const marker = extractSuiteIncompleteMarker(logText);
+  if (marker !== null) return { kind: "incomplete", run, marker, plan, concurrency };
+  if (run.exitCode === 0) return { kind: "certified", run, plan, concurrency };
+  return { kind: "complete-red", run, plan, failures: readFailedTestFiles(logText, root ?? null), concurrency };
+}
+
 /** AC10/AC13 — 恢复轮**声明式**的并发降档梯。降序；**最后一个是地板**（AC13 的「floor concurrency N」
  *  就是它）。⛔ 声明式而非开放式：序列被这张表**有界**（AC13 的「不得无限重复同一组参数」）。 */
 export const SUITE_RECOVERY_CONCURRENCY_LADDER: readonly number[] = [64, 48, 32];
@@ -2898,48 +2932,47 @@ export async function runMechanicalFanIn(opts: MechanicalFanInOptions): Promise<
             const rec = await spawnSuiteAndWait({ slotBase, slotLib, suiteCommand: recArgv, logFile: recLogFile, silenceMs: opts.silenceMs });
             let recLog = "";
             try { recLog = fs.readFileSync(recLogFile, "utf8"); } catch { /* 日志读不出 ⇒ 下面判「无结论」 */ }
-            const recPlan = extractSuitePlanMarker(recLog);
-            const recMarker = extractSuiteIncompleteMarker(recLog);
             const recWall = Date.now() - recT0;
+            // AC12 的**形状**闸：四分形态里只有 `complete-red` 带 `failures`；一条 OOM / missing 记录落进
+            // `incomplete` 变体，**结构上就没有签名字段**（⛔ 不靠一句「约定」），所以下面那台比较器根本
+            // 拿不到它。
+            const reading = classifyRecoveryRound(rec, recLog, n, worktree);
 
-            if (rec.hungByWatchdog || rec.spawnFailed === true || recLog === "") {
+            if (reading.kind === "no-conclusion") {
               // 恢复轮**自己也没有结论**（看门狗 SIGKILL 整组 / 没起来 / 日志 0 字节）⇒ ⛔ 不认证
               //（硬规则 3b：读不懂 ≠ 合格）。仍在有界梯子内 ⇒ 降到下一档（AC13）。
-              // ⚠️ 判据**不是** `outcome !== "done"`：非零退出码是一轮**有**结论的真红（`outcome==="red"`），
-              //    把它当「没结论」会把每一次真红都退化成「再降一档」，永远走不到 AC12 的 A/B（3b 镜像）。
               traceSuiteEvent("suite-recovery", {
-                exit: rec.exitCode, wall_ms: recWall, ok: false, concurrency: n, outcome: rec.outcome,
-                reason: `recovery round had no conclusion (${rec.hungByWatchdog ? "watchdog-killed" : rec.spawnFailed ? "spawn-failed" : "log-unreadable"}) — stepping down`,
+                exit: reading.run.exitCode, wall_ms: recWall, ok: false, concurrency: n, outcome: reading.run.outcome,
+                reason: `recovery round had no conclusion (${reading.reason}) — stepping down`,
               });
               continue;
             }
-            if (recMarker !== null) {
+            if (reading.kind === "incomplete") {
               // 降档后**还是**没跑全 / 又被 OOM 杀 ⇒ 继续降到下一档（AC11：要么继续降、要么耗尽边界）。
-              // ⛔ 不进 A/B：这条记录没有签名可比；这个 `continue` 就是 AC12 的**结构**闸——下面的
-              // baseline 分支只有 `recMarker === null` 的路径落得下来。
+              const m = reading.marker;
               traceSuiteEvent("suite-recovery", {
-                exit: rec.exitCode, wall_ms: recWall, ok: false, concurrency: n,
-                reason: recMarker.reason, planned: recMarker.planned, terminal: recMarker.terminal,
-                missing: recMarker.missing, oomKill: recMarker.oomKill, files: recMarker.files.slice(0, 40),
+                exit: reading.run.exitCode, wall_ms: recWall, ok: false, concurrency: n,
+                reason: m.reason, planned: m.planned, terminal: m.terminal,
+                missing: m.missing, oomKill: m.oomKill, files: m.files.slice(0, 40),
               });
               continue;
             }
-            if (rec.exitCode === 0) {
+            if (reading.kind === "certified") {
               // AC11 — 干净的一轮：无 incomplete 标记（missing==0）、独立退出 0 ⇒ **认证**；记的是它
               // **自己的** planned/terminal/oomKill 读数（⛔ 不是原轮的）。
-              certifiedRun = rec;
-              certifiedPlan = recPlan;
+              certifiedRun = reading.run;
+              certifiedPlan = reading.plan;
               traceSuiteEvent("suite-recovery-certified", {
                 exit: 0, wall_ms: recWall, ok: true, concurrency: n,
                 reason: `recovery round complete at concurrency ${n} (${steps.indexOf(n) + 1}/${steps.length}) — landing on ITS OWN verdict`,
-                planned: recPlan?.planned ?? null, terminal: recPlan?.terminal ?? null,
-                missing: recPlan?.missing ?? null, oomKill: recPlan?.oomKill ?? null,
-                completeness: recPlan?.completeness ?? null,
+                planned: reading.plan?.planned ?? null, terminal: reading.plan?.terminal ?? null,
+                missing: reading.plan?.missing ?? null, oomKill: reading.plan?.oomKill ?? null,
+                completeness: reading.plan?.completeness ?? null,
               });
               break;
             }
             // ── 恢复轮**完整跑完、但真红**（不是 OOM、不是 missing）⇒ AC13(b) / AC12 两条出口 ────────
-            const recFailed = readFailedTestFiles(recLog, worktree);
+            const recFailed = reading.failures;
             const recRedFiles = recFailed.evaluated ? recFailed.files : [];
             const newRegressions = recRedFiles.filter((f) => originalPassed.has(f) && !originalRedFiles.has(f));
             if (newRegressions.length > 0) {
@@ -2977,8 +3010,8 @@ export async function runMechanicalFanIn(opts: MechanicalFanInOptions): Promise<
                 taskFiles: recRedFiles.length, baselineFiles: be.verdict.unchanged, touchesDetail,
               });
               if (touchesClean) {
-                certifiedRun = rec;
-                certifiedPlan = recPlan;
+                certifiedRun = reading.run;
+                certifiedPlan = reading.plan;
                 exemptReading = be;
               } else {
                 blockedNextStep = `recovery baseline-equivalent but the candidate's own Touches-relevant tests are not clean (${touchesDetail}) — needs a code fix`;

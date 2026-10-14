@@ -819,6 +819,7 @@ test("AC6 — a watchdog-killed suite followed by an in-round rerun of the named
 import { SUITE_LOG_PLAN_PREFIX } from "../scripts/full-suite-runner.ts";
 import {
   SUITE_RECOVERY_CONCURRENCY_LADDER,
+  classifyRecoveryRound,
   recoveryConcurrencySteps,
   recoverySuiteCommand,
   suiteRecoveryFloor,
@@ -898,6 +899,34 @@ test("unit — the recovery ladder is DECLARED and bounded; the step-down is com
   );
   // 非 runner 形态没有已知的并发旋钮 ⇒ null（调用方记独立 token，⛔ 不伪造「已降档」）。
   assert.equal(recoverySuiteCommand(["bash", "-c", "true"], 48), null);
+});
+
+test("AC12 unit — the recovery reading is a FOUR-WAY SHAPE: only `complete-red` carries a failure set, so an OOM/missing record is STRUCTURALLY unable to reach the signature comparator (a mixed log keeps only the real failure)", () => {
+  const run = (exitCode) => ({ outcome: exitCode === 0 ? "done" : "red", exitCode, signalCode: null, hungByWatchdog: false, startedAt: "t", finishedAt: "t", durationMs: 0, error: null, pid: null });
+  const real = "__PERFILE__ duration_ms=10 plugin/test/existing-red.test.mjs passed=false end_ms=20";
+  const oomMarker = formatSuiteIncompleteMarker({ reason: "oom-killed", planned: 579, terminal: 579, missing: 0, oomKill: 3, files: [] });
+
+  // 完整 + 退出 0 ⇒ certified，带**它自己的**完整性读数。
+  const c = classifyRecoveryRound(run(0), planLine({ planned: 579, terminal: 579, missing: 0, oomKill: 0, laneCount: 48 }), 48, null);
+  assert.equal(c.kind, "certified");
+  assert.equal(c.plan.laneCount, 48);
+
+  // 完整 + 真红 ⇒ **唯一**带 failures 的形状。
+  const r = classifyRecoveryRound(run(1), `${planLine({ planned: 579, terminal: 579, missing: 0, oomKill: 0, laneCount: 48 })}\n${real}\n`, 48, null);
+  assert.equal(r.kind, "complete-red");
+  assert.ok("failures" in r, "only this variant carries a failure set (the comparator's input type)");
+
+  // 同一条**真签名** + 一条 **OOM 标记** ⇒ 落进 `incomplete`：**没有** failures 字段。
+  const mixed = classifyRecoveryRound(
+    run(1),
+    `${planLine({ planned: 579, terminal: 579, missing: 0, oomKill: 3, laneCount: 48, completeness: "not-evaluated" })}\n${real}\n${oomMarker}\n`,
+    48, null,
+  );
+  assert.equal(mixed.kind, "incomplete", "the marker wins: an OOM round is never a comparable red set");
+  assert.ok(!("failures" in mixed), "⛔ the incomplete variant has NO failure field — the signature comparator is unreachable from here (by shape, ⛔ not by convention)");
+
+  // 被看门狗杀 ⇒ no-conclusion（⛔ 与「跑了且红」不同形）。
+  assert.equal(classifyRecoveryRound({ ...run(null), hungByWatchdog: true }, "x", 48, null).kind, "no-conclusion");
 });
 
 test("AC10/AC11 — an incomplete round triggers EXACTLY ONE independent, full, lower-concurrency recovery re-run on the SAME tree; a clean recovery is certified on ITS OWN counts (negative control: a recovery that is itself incomplete is NOT landed)", async (t) => {
