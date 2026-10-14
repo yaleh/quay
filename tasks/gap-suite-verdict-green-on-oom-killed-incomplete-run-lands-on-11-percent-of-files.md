@@ -115,3 +115,10 @@ rerun; watchdog / never-spawned gated **before** the rerun; re-run file NAMES on
 - plugin/scripts/full-suite-runner.ts
 - plugin/scripts/worker-fan-in.ts
 - plugin/test/full-suite-runner-oom-policy.test.mjs
+
+## Blocker
+
+**2026-10-14T14:07:18.293Z — worker 未落地（exited-not-landed）**
+
+- 未落地原因：step=suite: AssertionError [ERR_ASSERTION]: the dispatch record is cleared once the outcome is written [baseline A/B: HARD RED (task-introduced-red) — the task's red set is NOT a subset of the develop baseline red set: added=plugin/test/driver-restart-busy-e2e.test.mjs,packages/quay/test/serve-live-body-i18n.test.mjs,packages/quay/test/serve-live-body-i18n.test.mjs changed=-]
+- run_id：wk-prod-anchor
