@@ -2,7 +2,7 @@
 id: gap-attempt-task-phase-timing-fields-incomplete-lock-wait-field-broken
 title: attempt/task 分阶段计时字段不全、锁等待字段已证实错误（P90 264min > 全程中位 18min）：补齐
   dispatch/worker-exit/lock/suite/fan-in 各阶段时间戳
-status: ready
+status: done
 labels:
   - gap
   - defect
