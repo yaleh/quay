@@ -2,7 +2,7 @@
 id: gap-quay-architecture-analysis-shipped-capability-cleanroom-acceptance
 title: Quay架构分析作为已交付能力：OSD+architecture-review+arch-discovery+Method/Portfolio/Experience
   清洁隔离正负验收 + ClaudeCodeUI真实验证
-status: ready
+status: done
 labels:
   - gap
 parent: null
