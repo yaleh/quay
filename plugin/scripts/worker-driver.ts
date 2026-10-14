@@ -322,6 +322,19 @@ export {
 // value SCC（import-graph-check 是 shrink-only 棘轮，基线 valueSccs=0 ⇒ 直接红）。
 import { matchEnvironmentFatalSignature } from "./driver-runtime.ts";
 export { ENVIRONMENT_FATAL_SIGNATURES, type EnvFatalSignature } from "./driver-runtime.ts";
+// 可恢复长实验的簿记（manifest / checkpoint / 身份指纹 / resume 计划）住在 experiment-manifest.ts；
+// 本文件只 import 它的纯函数来把「哪些 stage 已付过钱」写进派发 prompt（见 experimentResumeClause）。
+// ⛔ 反向 import 会造新的 value SCC（import-graph-check shrink-only 棘轮，基线 valueSccs=0 ⇒ 直接红）。
+import {
+  experimentStateDir,
+  invalidationsFile,
+  readManifest,
+  readCheckpoints,
+  planResume,
+  computeIdentity,
+  resolveCommit,
+  resolveHost,
+} from "./experiment-manifest.ts";
 import { computeDocCheckFaceKey, readDocCheckCache, writeDocCheckCache } from "./doc-check-cache.ts";
 import { runPushLagCheck, resolvePushLagThresholdMs, type PushLagOutcome } from "./fan-in-push-lag-check.ts";
 import { parse as parseYaml } from "yaml";
@@ -2085,6 +2098,82 @@ function antiDriftPreExitNote(task: string, root: string, worktree: string): str
   ].join(" ");
 }
 
+// ── 可恢复长实验：把 manifest 接进【既有】 adopt/restart 派发路径 ───────────────────────────────
+//
+// gap-resumable-long-experiments-via-driver-adopt-restart-not-separate-scheduler：一个长测量实验
+// （32/48/64 lane × ≥3 round 之类）必须能跨 driver 重启 / worker 重派续做，而【不】另造调度器。
+// 分工严格：
+//   · experiment-manifest.ts 持全部【簿记】（manifest 形状 / checkpoint 载体 / 身份指纹 / resume 计划）。
+//   · 本驱动【只做一件事】：重派时若发现该任务有一个**未跑完的实验 manifest**，就把这件事写进 prompt，
+//     让 worker 在自己的回合里按计划续做（跳已完成 + 身份相符的 stage，只跑剩下的）。⛔ 驱动不起第二个
+//     进程、不轮询、不 cron——那正是本任务 DoD 禁止的形态；实验跑在 worker 自己的回合里，因而天然出现在
+//     既有的 worker-round 观测面、并可被既有的 per-kind/per-worker stop 路径停掉。
+//
+// ⛔ 状态目录在**主检出**（`<root>/.quay/experiments/<task>/`），⛔ 不在 worktree：worktree 会被重建/清理，
+// 而「worktree 没了但 checkpoint 还在」正是本能力要覆盖的那一刻。`.quay/` 下的未跟踪运行时状态是 fan-in
+// ff 的 benign-runtime-dirty（`?? .quay/…` 直通），故不新增 gitignore/registry 条目。
+
+/** 一个任务的可恢复实验状态目录（与 experiment-manifest.ts 的 layout 单一来源——⛔ 不在此重拼）。 */
+export function experimentStateDirFor(root: string, task: string): string {
+  return experimentStateDir(root, task);
+}
+
+/**
+ * 派发/续做 prompt 的「可恢复长实验」子句；**null = 该任务没有未跑完的实验**（opt-in：无 manifest 的任务
+ * 其 prompt 与今天逐字相同）。
+ *
+ * 为什么是 prompt 子句而不是驱动自己起循环：见本段头注释——驱动的职责是让**重派出来的 worker** 知道
+ * 「哪些 stage 已经付过钱、⛔ 不许重算」，计划本身由 experiment-manifest.ts 从盘上的 manifest+checkpoints
+ * 机械算出。三类返回：
+ *   · 无 manifest            ⇒ null（今天的行为）
+ *   · manifest 读不懂        ⇒ 【不得当成「没有实验」】——明说读不懂，让 worker 先去查（硬规则 3b）
+ *   · 有 manifest 且有欠账   ⇒ 计划摘要（skip 哪些、欠哪些、哪些被身份/输入变更判废）+ CLI 调用形
+ *
+ * `measureRootExpr` = 身份 commit 该从哪棵树读：**被测的那棵树**（worker 的 worktree / 任务分支），
+ * ⛔ 不是主检出。主检出的 HEAD 每一轮都可能被别的任务 ff 推进 ⇒ 绑定它会让一条长实验在每一轮都被判
+ * 「身份已变」而永远跑不完（硬规则 12 的「永远差最后一步」形态）。worktree 未知（创建 prompt 那一刻）
+ * ⇒ 传占位符文本，与本文件其余子句同一约定（见 preMergeNote / antiDriftPreExitNote）。 */
+export function experimentResumeClause(root: string, task: string, measureRootExpr: string | null): string | null {
+  const stateDir = experimentStateDir(root, task);
+  const read = readManifest(stateDir);
+  if (!read.exists) return null;
+  if (!read.readable || read.manifest === null) {
+    return [
+      `RESUMABLE LONG EXPERIMENT: ${task} has a manifest at ${stateDir} but it is NOT READABLE (${read.error ?? "unknown"}).`,
+      `⛔ Do NOT treat that as "no experiment": the state dir holds checkpoints for stages that were already paid for.`,
+      `Fix or restore the manifest before running anything, so stages are not silently recomputed.`,
+    ].join(" ");
+  }
+  const manifest = read.manifest;
+  // The plan shown here must be the plan the worker's CLI will compute — so the identity commit is read
+  // from the SAME tree: the retained worktree when the driver knows its path, else the workspace root.
+  // The fallback is not arbitrary: a FRESH worktree is created off the workspace root's HEAD, so the
+  // root's commit IS the commit the new worktree will start at (and `measureRootExpr` is then the same
+  // placeholder the CLI invocation in the clause carries).
+  const measureRoot = measureRootExpr && !measureRootExpr.startsWith("<") ? measureRootExpr : root;
+  const identity = computeIdentity({ commit: resolveCommit(measureRoot), host: resolveHost(), config: manifest.config });
+  const plan = planResume({ manifest, checkpoints: readCheckpoints(stateDir), identity });
+  if (plan.run.length === 0 && plan.invalidated.length === 0) return null; // 实验已完成：无话可说
+  const argv = kernelSiblingArgv("experiment-manifest.ts") ?? [`node`, `--experimental-strip-types`, path.join(resolveKernelPluginRoot(), "scripts", "experiment-manifest.ts")];
+  const measureArg = `--measure-root ${measureRootExpr ?? "<the worktree path you created in step 1>"}`;
+  const skipped = plan.skip.length > 0 ? `ALREADY PAID FOR (${plan.skip.length}) — ⛔ MUST NOT be recomputed: ${plan.skip.join(", ")}.` : "";
+  const refused = plan.invalidated.length > 0
+    ? `REFUSED by identity/inputs change (${plan.invalidated.length}) — these re-run ON PURPOSE, and each refusal is recorded in ${invalidationsFile(stateDir)}: ${plan.invalidated.map((i) => `${i.stageId} [${i.reason}]`).join("; ")}.`
+    : "";
+  return [
+    `RESUMABLE LONG EXPERIMENT (state written by the ${manifest.stages.length}-stage manifest at ${stateDir}; the identity commit is read from the TREE UNDER TEST, i.e. ${measureArg}):`,
+    `${stateDir} is OUTSIDE your worktree — it holds the checkpoints and ⛔ must never be deleted.`,
+    skipped,
+    refused,
+    `It still owes ${plan.run.length} stage(s): ${plan.run.join(", ")}.`,
+    `Read the plan first (\`${argv.join(" ")} --plan --task ${task} --root ${root} ${measureArg}\`) and run the remainder with`,
+    `\`${argv.join(" ")} --run --task ${task} --root ${root} ${measureArg}\` — it is SYNCHRONOUS and runs in YOUR turn, one stage at a time,`,
+    `checkpointing after each. ⛔ Do NOT start a background loop / cron / second dispatcher for the experiment:`,
+    `resumability is this dispatch path re-entering the plan, and the experiment stays visible/stoppable exactly`,
+    `because it runs inside your own worker turn.`,
+  ].filter(Boolean).join(" ");
+}
+
 // ── goal 分支的 mergeTarget 解析（SPEC-goal-branch-2026-10-03 §4.3，裁定①③⑥）───────────────────
 //
 // 【单一解析函数，三处共用】——worktree 分叉点（`dispatch-worktree-setup.sh --base`）、机械 fan-in 的
@@ -2273,6 +2362,7 @@ export function buildWorkerPrompt(task: string, root: string): string {
     `(2) implement the task per its Proposal/Plan/AC/DoD, committing your implementation on the task branch; ${acCheckNote()}`,
     `(2b) ${preMergeNote(task, root, "<the worktree path you created in step 1>")}`,
     `(2c) ${antiDriftPreExitNote(task, root, "<the worktree path you created in step 1>")}`,
+    `${experimentResumeClause(root, task, null) ?? ""}`,
     `(3) ${driverFanInNote()}`,
     `⚠️ CRITICAL: for CODE files, every Read/Edit/Write file_path MUST be the absolute path of the worktree you created in step 1 — never the main-checkout path \`${root}\`, never a relative path. Claude Code's file tools use absolute paths and do NOT sense shell \`cd\`; a main-checkout or relative path lands your implementation in the develop shared checkout, not your worktree. ${bashWriteTargetGuardNote(root, "the absolute path of the worktree you created in step 1")} This rule does NOT cover the task file — that is edited only via \`task_write\` (see step 2 above), never Read/Edit/Write.`,
     `You own your worktree fully; apart from the final merge (done by the driver) do not touch develop.`,
@@ -4023,6 +4113,7 @@ export function buildContinueWorkerPrompt(task: string, root: string, state: Con
     `Proposal/Plan/AC/DoD (⛔ do not redo the ${commits} commits already on the branch); ${acCheckNote()}`,
     `(1b) ${preMergeNote(task, root, wt)}`,
     `(1c) ${antiDriftPreExitNote(task, root, wt)}`,
+    `${experimentResumeClause(root, task, state.worktreePath) ?? ""}`,
     `(2) ${driverFanInNote()}.`,
     `⚠️ CRITICAL: for CODE files, every Read/Edit/Write file_path MUST be the worktree absolute path ${wt} — never the main-checkout path \`${root}\`, never a relative path. Claude Code's file tools use absolute paths and do NOT sense shell \`cd\`; a main-checkout or relative path lands your change in develop, not your worktree. ${bashWriteTargetGuardNote(root, `the absolute path of the existing worktree \`${wt}\``)} This rule does NOT cover the task file — that is edited only via \`task_write\` (see above), never Read/Edit/Write.`,
     `You own this worktree fully; apart from the final merge do not touch develop.`,
