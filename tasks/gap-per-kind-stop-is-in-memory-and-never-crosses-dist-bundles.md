@@ -2,7 +2,7 @@
 id: gap-per-kind-stop-is-in-memory-and-never-crosses-dist-bundles
 title: shipped 内核上 per-kind stop/restart 永不生效：KIND_STOP 是进程内 Map，每个 dist bundle
   各有一份，anchor 的 requestKindStop 恒 false 且被丢弃
-status: ready
+status: done
 labels:
   - gap
   - defect
