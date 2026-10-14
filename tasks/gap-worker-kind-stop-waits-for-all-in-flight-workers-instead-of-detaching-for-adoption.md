@@ -2,7 +2,7 @@
 id: gap-worker-kind-stop-waits-for-all-in-flight-workers-instead-of-detaching-for-adoption
 title: worker kind 的 restart 在有在飞 worker 时必然 stop-failed（循环只在 running==0
   时退出）；应脱钩在飞、交给下一循环 adopt+fan-in
-status: ready
+status: done
 labels:
   - gap
   - defect
