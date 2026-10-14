@@ -1866,17 +1866,19 @@ export function probePlannedFiles(root: string, argv: string[]): { files: string
   };
   const bucketsTask = flagValue(argv, "--buckets");
   if (bucketsTask) {
-    const selector = path.join(root, "plugin", "scripts", "suite-bucket-select.ts");
-    // `--buckets` 的计划**只能**来自选桶器：没有它就说明这个根不是能跑 `--buckets` 的那棵树
-    // （test.sh 的 bucket 分支会 `exit 2`）⇒ 说不出计划，⛔ 不回落成「全量清单」（那会拿 A 的清单
-    // 校验一个根本没跑起来的 B）。
-    if (!fs.existsSync(selector)) {
-      throw new Error(`plan probe: --buckets requested but ${selector} is absent — the bucket plan is unreadable`);
+    // ⛔ kernel sibling 必须走 resolveKernelSibling（GOAL-012 A 域 / kernel-sibling-resolution-check 的
+    // P2 target-root 规则：`path.join(<root>, "plugin", "scripts", …)` 是 naive 锚点）。语义上也更对：
+    // 这个 runner 进程就是从**受测检出**加载的（fan-in spawn `<worktree>/plugin/scripts/full-suite-runner.ts`），
+    // 所以「kernel 自己的 scripts 目录」**就是**受测树的那个。
+    const sel = resolveKernelSibling("suite-bucket-select.ts");
+    if (sel === null) {
+      throw new Error("plan probe: --buckets requested but suite-bucket-select.ts is unresolvable — the bucket plan is unreadable");
     }
+    const selectorArgs = [...(sel.stripTypes ? ["--experimental-strip-types"] : []), sel.path];
     const nodeBin = process.execPath;
     const summary = execFileSyncBounded(
       nodeBin,
-      ["--no-warnings", "--experimental-strip-types", selector, "--root", root, "--task", bucketsTask, "--summary"],
+      ["--no-warnings", ...selectorArgs, "--root", root, "--task", bucketsTask, "--summary"],
       root,
     );
     const full = /full=1\b/.test(summary);
@@ -1884,7 +1886,7 @@ export function probePlannedFiles(root: string, argv: string[]): { files: string
     const subset = parsePlanListOrThrow(
       execFileSyncBounded(
         nodeBin,
-        ["--no-warnings", "--experimental-strip-types", selector, "--root", root, "--task", bucketsTask, "--paths-only"],
+        ["--no-warnings", ...selectorArgs, "--root", root, "--task", bucketsTask, "--paths-only"],
         root,
       ),
       root,
