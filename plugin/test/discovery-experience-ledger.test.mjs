@@ -39,7 +39,13 @@ import {
   evidenceLevelOf, isIndependentEvidenceLevel, allowsCaseReuse,
   // The ROUTINE-CARRIER source (task gap-open-discovery-findings-into-portfolio-experience).
   CARRIER_CLUSTER_KIND, clusterVerdict, clusterCaseId,
+  // The STABLE IDENTITY + the second-path dedup (gap-discovery-findings-lack-stable-identity-and-source-
+  // evidence-and-double-ingest-into-experience).
+  conceptKeyOfCluster, CLUSTER_OUTCOME_EXPERIMENT, SKIP_DUPLICATE_CONCEPT_KEY,
 } from "../../docs/analysis/discovery-experience-ledger.mjs";
+// The Portfolio's OWN component normalization, imported for REAL: the concept key must agree with it
+// element for element, and a locally re-stated copy would agree with itself instead (硬规则 5b).
+import { normalizeComponents } from "../../docs/analysis/discovery-portfolio.mjs";
 
 /** The writable "no claim" level, spelled once so the fixtures below cannot drift from the vocabulary. */
 const UNLABELLED = UNLABELLED_EVIDENCE_LEVEL;
@@ -1650,4 +1656,96 @@ test("BOOTSTRAP: the bootstrap does not revive the NAMED-record lookup's absent-
   assert.equal(r.ok, false);
   assert.ok(r.reasons.some((x) => x.startsWith("EVIDENCE_STORE_MISSING:")), r.reasons.join(","));
   assert.equal(fs.existsSync(storeFile(root)), false, "…and a failed lookup leaves no store behind");
+});
+
+// ── THE STABLE IDENTITY AND THE ONE-ENTRY-PER-CLUSTER RULE (gap-discovery-findings-lack-stable-identity-
+//    and-source-evidence-and-double-ingest-into-experience, Plan items 1 and 3) ────────────────────────
+//
+// ⛔ WHAT WAS MEASURED (2026-10-14, this repo's own carriers). `.quay/open-semantic-discovery-findings.
+//    jsonl` held 212 `kind:"cluster"` records with **212 distinct `record_id`s** (identity was per round),
+//    and ONE OSD cluster reached the Experience ledger by TWO paths — the routine's direct carrier→
+//    Experience projection (`source_ref = <cluster record_id>`) and the evidence-store projection of that
+//    same cluster (`source_ref = <outcome id>`, ingested by `ingestNewOutcomes`). The two `source_ref`s
+//    NEVER match, so the source_ref dedup set could not see that they are one finding, and reflection
+//    counted it twice. The concept key is the identity that makes the two recognisable as one.
+
+test("AC(key): the concept key is derived from the NORMALIZED subject, and equals the portfolio's own normalization", () => {
+  // The same components in another order, with a line suffix, are the SAME concept — and the value agrees
+  // element for element with `discovery-portfolio.mjs`'s `normalizeComponents`, which is the normalization
+  // the Portfolio's duplicate rule uses. The two modules cannot import each other (a cycle), so the
+  // agreement is asserted HERE rather than promised (硬规则 5b).
+  const a = conceptKeyOfCluster({ concept_kind: "duplication", components: ["plugin/scripts/b.ts", "plugin/scripts/a.ts:88"] });
+  const b = conceptKeyOfCluster({ concept_kind: "duplication", components: ["plugin/scripts/a.ts", "plugin/scripts/b.ts"] });
+  assert.equal(a, b, "order and a line suffix are locations, not identities");
+  assert.equal(a, `duplication|${normalizeComponents(["plugin/scripts/b.ts", "plugin/scripts/a.ts:88"]).join(",")}`);
+  // A record with NO `concept_kind` is keyed under the routine's own name, the SAME fallback the store
+  // projection already used for `subject_key`.
+  assert.equal(conceptKeyOfCluster({ components: ["x.ts"] }), `${CLUSTER_OUTCOME_EXPERIMENT}|x.ts`);
+  // …and something that is not a record gets NO key rather than a key derived from nothing.
+  assert.equal(conceptKeyOfCluster(null), null);
+});
+
+test("AC1: the SAME cluster through BOTH paths lands ONCE — the second path is skipped BY NAME, not silently", () => {
+  const root = mkTmp();
+  const recordId = "open-semantic-discovery@2026-10-14T02:00:00.000Z#1";
+  const conceptKey = "duplication|plugin/scripts/x.ts";
+  // (i) THE DIRECT PATH — the routine's own carrier→Experience projection.
+  const rec = clusterRec({ record_id: recordId, concept_key: conceptKey });
+  const direct = ingestCluster(root, rec);
+  assert.equal(direct.ok, true, `the direct projection refused: ${direct.reasons?.join(",")}`);
+  assert.equal(direct.record.source_ref, recordId);
+  assert.equal(direct.record.concept_key, conceptKey, "the direct Experience carries the stable identity");
+  // (ii) THE STORE PATH — the projection of that SAME cluster, read by the batch ingester production runs.
+  writeFixtureStore(root, [{
+    experiment: CLUSTER_OUTCOME_EXPERIMENT, experiment_ref: recordId, verdict: "supported",
+    subject_key: conceptKey, concept_key: conceptKey, case_id: recordId,
+  }]);
+  const r = ingestNewOutcomes(root);
+  assert.equal(r.ok, true, `the ingester refused: ${r.reasons?.join(",")}`);
+  assert.equal(r.scanned, 1, "the ingester READ the projected outcome — the capability is not starved");
+  assert.equal(r.ingested, 0, "…and made NO second entry for a cluster this round already ingested");
+  assert.equal(r.concept_duplicates, 1, "…naming the skip by its own code rather than folding it into a total");
+  const entries = readExperienceLedger(root).records;
+  assert.equal(entries.length, 1, "ONE ledger entry for ONE cluster");
+  assert.equal(entries[0].source_ref, recordId);
+  assert.equal(entries[0].concept_key, conceptKey);
+  // The skip is AUDITABLE: it is on the skip carrier with its own reason code (硬规则 3b — a gap that is
+  // counted must also be named).
+  const skips = readIngestSkips(root).records;
+  assert.equal(skips.length, 1);
+  assert.equal(skips[0].reason_code, SKIP_DUPLICATE_CONCEPT_KEY);
+});
+
+test("AC1(pre-fix shape): WITHOUT the key on the store record the same fixture lands TWICE — the fix is load-bearing", () => {
+  // ⛔ THE NEGATIVE CONTROL for the test above. Before the fix the projection carried no concept key, so
+  // this is exactly the shape the old code produced — and it produces the double count. If this reading
+  // ever becomes 1, the dedup has stopped depending on the key (i.e. it became something else).
+  const root = mkTmp();
+  const recordId = "open-semantic-discovery@2026-10-14T03:00:00.000Z#1";
+  const direct = ingestCluster(root, clusterRec({ record_id: recordId, concept_key: "duplication|plugin/scripts/x.ts" }));
+  assert.equal(direct.ok, true);
+  // The PRE-FIX store record: the same outcome, with no `concept_key` (that is the whole difference).
+  writeFixtureStore(root, [{ experiment: CLUSTER_OUTCOME_EXPERIMENT, experiment_ref: recordId, verdict: "supported", subject_key: "duplication|plugin/scripts/x.ts" }]);
+  const r = ingestNewOutcomes(root);
+  assert.equal(r.ingested, 1, "with no key, the SAME cluster is ingested a second time");
+  assert.equal(r.concept_duplicates, 0);
+  const entries = readExperienceLedger(root).records;
+  assert.equal(entries.length, 2, "⇒ TWO entries for ONE cluster — the defect this task closes");
+  assert.notEqual(entries[0].source_ref, entries[1].source_ref, "…and the two source_refs never match, so the old dedup could not see it");
+});
+
+test("AC2: one concept recurring in a LATER round is a NEW occurrence, not a duplicate — the dedup is round-scoped", () => {
+  // The mirror of AC1 that keeps the fix from over-reaching: the ledger's own `recurred-after-fix` reading
+  // is built on a later outcome about the same subject, so a GLOBAL concept-key dedup would delete it.
+  const root = mkTmp();
+  const conceptKey = "hypgen:identity|plugin/scripts/c.ts";
+  writeFixtureStore(root, [{ experiment_ref: "E-FIX cluster 2", verdict: "refuted", subject_key: conceptKey, concept_key: conceptKey }]);
+  const first = ingestNewOutcomes(root);
+  assert.equal(first.ingested, 1, "a refuted outcome on this subject is ingestible (confirmed-negative)");
+  // …and a SECOND round's outcome about the same concept still becomes an Experience of its own.
+  writeFixtureStore(root, [{ experiment_ref: "E-FIX cluster 5", verdict: "refuted", subject_key: conceptKey, concept_key: conceptKey }]);
+  const second = ingestNewOutcomes(root);
+  assert.equal(second.ingested, 1, "the LATER round's occurrence is ingested, not deduped away");
+  assert.equal(second.concept_duplicates, 0);
+  assert.equal(readExperienceLedger(root).records.length, 2, "two occurrences, two entries");
 });

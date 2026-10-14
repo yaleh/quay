@@ -47,7 +47,7 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { createHash } from "node:crypto";
-import { spawnSync } from "node:child_process";
+import { spawnSync, execFileSync } from "node:child_process";
 import { fileURLToPath, pathToFileURL } from "node:url";
 // The same YAML reader the routine parses `.quay/config.yml` with, so an AC3 assertion about a config
 // SECTION is made against the real parse rather than against a hand-built object.
@@ -183,6 +183,13 @@ import {
   readTaskLogContext,
   taskLogContextDirective,
   citeOfferedEvents,
+  // ── the stable identity + the real source evidence (gap-discovery-findings-lack-stable-identity-and-
+  //    source-evidence-and-double-ingest-into-experience) ─────────────────────────────────────────────
+  isPriorProductionCluster,
+  foldConceptOccurrences,
+  citationsFromCallStream,
+  verifyCitation,
+  verifyCitations,
 } from "../scripts/open-semantic-discovery-routine.ts";
 import { ROUTINE_LAST_RUN_REL, readLastRunMap } from "../scripts/probe-routine.ts";
 // The anchor's OWN published start, read through the SAME reader the routine consumes — a re-implementation
@@ -205,7 +212,7 @@ import * as realRegistry from "../../docs/analysis/discovery-method-registry.mjs
 // The store's OWN validator, imported for REAL: the claim under test is «the records this round projects
 // into the evidence store are accepted by the PRODUCTION validator», and a locally re-stated schema would
 // agree with itself instead of with the store (硬规则 5b).
-import { validateRecord, EVIDENCE_STORE_REL } from "../../docs/analysis/architecture-evidence-store.mjs";
+import { validateRecord, EVIDENCE_STORE_REL, appendOutcomeRecord } from "../../docs/analysis/architecture-evidence-store.mjs";
 // The PROMOTION PATH itself, imported for REAL: AC (e) is a claim about what THAT module decides, and a
 // re-implementation of its level rule here would agree with itself rather than with production.
 import { validateGeneralization, promotionStatusForLevel, PROMOTION_REPORT_ONLY_STATUS } from "../../docs/analysis/discovery-reflection.mjs";
@@ -1533,18 +1540,43 @@ test("EVIDENCE STORE — the projection is what makes the next discovery_method 
   const engine = makeEngine();
   await runOpenSemanticDiscovery(ws, { ...runOpts(ws, { engine }), invokedBy: INVOKED_BY_MANUAL, spawnFn: countingSpawn(), pinFn: pinStub() });
 
-  // The store this round wrote is read by the ledger's OWN batch ingester — the reader production uses,
-  // not a stand-in — so «the zero stops being structural» is a reading rather than a claim.
+  // ⛔ THE DOUBLE COUNT, SEEN FROM THE INGESTER'S SIDE (gap-discovery-findings-lack-stable-identity-and-
+  //    source-evidence-and-double-ingest-into-experience, Plan item 3). Every one of these store outcomes
+  //    was projected from a cluster this SAME round already filed into the Experience ledger DIRECTLY, so
+  //    ingesting them again would put TWO entries for ONE cluster in the ledger and reflection would count
+  //    it twice. MEASURED before the fix: the same fixture produced one entry per path (2 per cluster) —
+  //    `ingested >= 1` here WAS that second entry. After the fix the ingester still READS the store (it is
+  //    not starved — `scanned` is the same reading it always was) and names the skip by its own code.
   const ingest = realLedger.ingestNewOutcomes(ws, { enabled: true });
   assert.equal(ingest.ok, true, `the ingester refused: ${JSON.stringify(ingest.reasons)}`);
-  assert.ok(ingest.ingested >= 1, `the store's outcome records became Experiences (got ${ingest.ingested})`);
-  assert.equal(ingest.store_state, realLedger.STORE_STATE_INGESTED, "…and the ingester NAMES that state");
+  const projected = carrierLines(ws).filter((l) => l.kind === "cluster" && l.shadow !== true).length;
+  assert.ok(projected >= 1, "the round projected at least one cluster into the store");
+  assert.equal(ingest.scanned, projected, "the ingester READ every projected outcome (the capability is not starved)");
+  assert.equal(ingest.ingested, 0, `no outcome became a SECOND Experience for a cluster this round already ingested (got ${ingest.ingested})`);
+  assert.equal(ingest.concept_duplicates, projected, `…and each skip is NAMED as the second-path duplicate (got ${ingest.concept_duplicates})`);
+  assert.equal(ingest.store_state, realLedger.STORE_STATE_SCANNED_NONE, "…with the state that says records were read and none was new");
   const experiences = experienceRecords(ws);
-  assert.ok(experiences.length >= 1, "the Experience ledger really holds the ingested entries");
+  assert.equal(experiences.length, projected, "ONE Experience per cluster — not two");
   for (const e of experiences) {
     assert.equal(e.reported_by, "system", "the automatic source, not a human narration");
     assert.ok(String(e.summary ?? "").trim().length >= 40, `each entry carries a real summary (got ${JSON.stringify(e.summary)})`);
+    assert.equal(typeof e.concept_key, "string", "…and the stable identity the dedup keys on");
   }
+
+  // THE NEGATIVE CONTROL (硬规则 4 推论三): the dedup must not be a blanket "never ingest a store outcome".
+  // An outcome this ledger has never seen — a DIFFERENT round, a subject nothing has ingested — still
+  // becomes an Experience, so the reading above is a skip that can take a false value rather than a
+  // capability that has been switched off.
+  appendOutcomeRecord(ws, {
+    ts: "2000-01-01T00:00:00.000Z", experiment: realLedger.CLUSTER_OUTCOME_EXPERIMENT,
+    experiment_ref: `${OPEN_DISCOVERY_REF_PREFIX}2000-01-01T00:00:00.000Z#7`,
+    verdict: "supported", subject_key: "fixture-concept|plugin/scripts/never-seen.ts",
+    concept_key: "fixture-concept|plugin/scripts/never-seen.ts",
+    case_id: "fixture-never-seen",
+  });
+  const ingest2 = realLedger.ingestNewOutcomes(ws, { enabled: true });
+  assert.equal(ingest2.ingested, 1, `a genuinely new outcome STILL becomes an Experience (got ${ingest2.ingested})`);
+  assert.equal(ingest2.concept_duplicates, 0, "…and nothing was skipped as a second-path duplicate");
 });
 
 // ── the ingestion's pure pieces ──────────────────────────────────────────────────────────────────────
@@ -4305,4 +4337,143 @@ test("(o) AC2 NEGATIVE CONTROL — a handoff-ADJACENT round with a retryable fai
   assert.equal(inv.filter((c) => c.retry_of !== undefined).length, 1, "exactly ONE record is a retry");
   // The retryable set itself is untouched: this task added a DIAGNOSIS, not a class.
   assert.deepEqual([...RETRYABLE_CALL_FAILURES], ["no-stdout", "stream-without-result", "api-error-event"]);
+});
+
+// ── THE STABLE IDENTITY ACROSS ROUNDS (Plan item 1) ──────────────────────────────────────────────────
+//
+// ⛔ MEASURED 2026-10-14: the 212 cluster records on this repo's own carrier carried 212 distinct
+//    `record_id`s (identity was PER ROUND), so the same concept rediscovered next round was a NEW finding.
+//    `record_id` stays the per-round OCCURRENCE id; the concept key is the stable identity, and the carrier
+//    is its own fold — every earlier cluster record already carries the subject the key is derived from.
+test("AC(stable identity) — one concept in TWO rounds gets ONE key, with the occurrences LINKED", async () => {
+  const ws = makeWorkspace();
+  writeConfig(ws, cfgYaml());
+  const first = await runOpenSemanticDiscovery(ws, { ...runOpts(ws, { engine: makeEngine({ hyps: [HYPS[0]] }) }), spawnFn: countingSpawn(), pinFn: pinStub() });
+  assert.equal(first.state, "verified", String(first.reason ?? ""));
+  const later = Date.now() + 600_000;
+  // ⛔ A DIFFERENT CLAIM about the SAME subject: if the claim were byte-identical the round's own
+  // MECHANICAL exception would dedup it, and the linkage under test would be that exception's doing
+  // rather than the concept key's.
+  const restated = [{ ...HYPS[0], claim: `${HYPS[0].claim} — restated in the second round` }];
+  const second = await runOpenSemanticDiscovery(ws, { ...runOpts(ws, { engine: makeEngine({ hyps: restated }) }), force: true, now: () => later, spawnFn: countingSpawn(), pinFn: pinStub() });
+  assert.equal(second.state, "verified", String(second.reason ?? ""));
+
+  const clusters = carrierLines(ws).filter((l) => l.kind === "cluster" && l.shadow !== true);
+  assert.equal(clusters.length, 2, "two rounds, two cluster records");
+  const [a, b] = clusters;
+  assert.equal(typeof a.concept_key, "string", "the first occurrence carries a stable identity");
+  assert.equal(b.concept_key, a.concept_key, "the SAME concept in the next round gets the SAME key");
+  assert.equal(a.concept_occurrences, 1);
+  assert.equal(b.concept_occurrences, 2, "…and the second occurrence KNOWS it is the second");
+  assert.deepEqual(b.concept_linked_record_ids, [a.record_id], "…naming the earlier occurrence it is linked to");
+  assert.notEqual(a.record_id, b.record_id, "…while the per-round OCCURRENCE ids stay what they were");
+  // The identity reaches the OTHER two carriers, so a reader can group by concept rather than by round.
+  const rows = portfolioRecords(ws);
+  assert.equal(rows.length, 2);
+  assert.equal(rows[0].concept_key, a.concept_key);
+  assert.equal(rows[1].concept_key, a.concept_key);
+  for (const e of experienceRecords(ws)) assert.equal(e.concept_key, a.concept_key, "the Experience carries it too");
+  process.stdout.write(`    AC2 reading: round1 ${a.record_id} concept_key=${a.concept_key} occurrences=${a.concept_occurrences}; round2 ${b.record_id} concept_key=${b.concept_key} occurrences=${b.concept_occurrences} linked=${JSON.stringify(b.concept_linked_record_ids)}\n`);
+});
+
+// ── REAL SOURCE EVIDENCE (Plan item 2) ───────────────────────────────────────────────────────────────
+//
+// ⛔ MEASURED 2026-10-14: 0 of 212 cluster records carried any evidence field, and the one evidence-shaped
+//    field that DID exist (`evidence_lines`) is the MODEL'S OWN PROSE. A citation must come from what the
+//    call's tools actually READ, and must be re-checked against the pin before it is persisted.
+const TOOL_USE = (id, name, input) => ({ type: "assistant", message: { content: [{ type: "tool_use", id, name, input }] } });
+const TOOL_RESULT = (id, text) => ({ type: "user", message: { content: [{ type: "tool_result", tool_use_id: id, content: [{ type: "text", text }] }] } });
+/** A REAL call capture: the numbered lines `Read` hands back for `plugin/scripts/a.ts` (line 1 really says
+ *  `export const a = 1;` in the pin), plus a FABRICATED pair naming a line the file does not have. */
+const CITATION_RESULT_TEXT = `${FOCUS_MARKER} fixture focus on the carrier helpers\n[]`;
+const citationStream = () => [
+  JSON.stringify({ type: "system", subtype: "init", model: FIXTURE_MODEL }),
+  JSON.stringify(TOOL_USE("t1", "Read", { file_path: "plugin/scripts/a.ts" })),
+  JSON.stringify(TOOL_RESULT("t1", "     1→export const a = 1;\n     2→export const b = 2;\n")),
+  JSON.stringify(TOOL_USE("t2", "Read", { file_path: "plugin/scripts/a.ts" })),
+  JSON.stringify(TOOL_RESULT("t2", "    99→this line is not in the file at the pin\n")),
+  JSON.stringify({
+    type: "result", subtype: "success", num_turns: 4, is_error: false, result: CITATION_RESULT_TEXT,
+    usage: { input_tokens: 10, output_tokens: 5 }, total_cost_usd: 0.02,
+  }),
+].join("\n") + "\n";
+const citationDelegate = (_argv, opts) => ({
+  status: 0, stdout: isNoveltyPrompt(opts) ? NOVELTY_STREAM : citationStream(), stderr: "", error: null,
+});
+
+test("AC(citations) — a cluster's citations are what its OWN calls READ, re-checked at the pin; a fabricated one is DROPPED and counted", async () => {
+  const ws = makeWorkspace();
+  writeConfig(ws, cfgYaml());
+  // ⛔ The cited file is COMMITTED on develop, and the round's pin is a REAL checkout of that commit — so
+  // `file:line@commit` is a claim `git show <commit>:<file>` can settle. A fixture pin that the commit did
+  // not contain would make the recorded commit decorative, which is the shape this AC exists to refuse.
+  fs.mkdirSync(path.join(ws, "plugin", "scripts"), { recursive: true });
+  fs.writeFileSync(path.join(ws, "plugin", "scripts", "a.ts"), "export const a = 1;\nexport const b = 2;\n", "utf8");
+  execFileSync("git", ["-C", ws, "add", "-A"]);
+  execFileSync("git", ["-C", ws, "commit", "-q", "-m", "pin content: the file the round will cite"]);
+  const pinFn = (o) => materializeStrippedPin({ ...o, forbiddenDirs: realHyp.PIN_FORBIDDEN_DIRS, stripCheck: (d) => realHyp.verifyCwdRefusal(d, d) });
+  const spawn = countingSpawn(citationDelegate);
+  const fact = await runOpenSemanticDiscovery(ws, { ...runOpts(ws), spawnFn: spawn, pinFn });
+  assert.equal(fact.state, "verified", String(fact.reason ?? ""));
+  const rev = execFileSync("git", ["-C", ws, "rev-parse", "develop"], { encoding: "utf8" }).trim();
+
+  const clusters = carrierLines(ws).filter((l) => l.kind === "cluster" && l.shadow !== true);
+  assert.ok(clusters.length >= 1, "the round wrote cluster records");
+  for (const c of clusters) {
+    assert.ok(Array.isArray(c.citations) && c.citations.length >= 1, `the cluster carries a REAL citation (got ${JSON.stringify(c.citations)})`);
+    const cite = c.citations[0];
+    assert.equal(cite.file, "plugin/scripts/a.ts");
+    assert.equal(cite.line, 1);
+    assert.equal(cite.quote, "export const a = 1;", "the quote is the LINE's own text, taken from the tool result");
+    assert.equal(cite.commit, rev, "…pinned to the commit the round read");
+    // THE MECHANICAL CHECK, run INDEPENDENTLY of the round: `git show <commit>:<file>`, line N, really
+    // carries the quoted text. This is the check the AC names; nothing here reads the round's own state.
+    const atCommit = execFileSync("git", ["-C", ws, "show", `${cite.commit}:${cite.file}`], { encoding: "utf8" }).split("\n")[cite.line - 1];
+    assert.ok(atCommit.includes(cite.quote), `the cited line really carries the quote AT THE RECORDED COMMIT (got ${JSON.stringify(atCommit)})`);
+    // …and the FABRICATED pair (line 99, which the pin does not have) is dropped and COUNTED, never repaired.
+    assert.equal(c.citations.some((x) => x.line === 99), false, "the fabricated citation was NOT persisted");
+    assert.ok(c.evidence_unverifiable >= 1, `…and it was counted (got ${c.evidence_unverifiable})`);
+    process.stdout.write(`    AC3 reading: ${c.record_id} citations=${JSON.stringify(c.citations)} evidence_unverifiable=${c.evidence_unverifiable} evidence_lines(model prose, NOT citations)=${JSON.stringify(c.evidence_lines)}\n`);
+    process.stdout.write(`    AC3 mechanical check: git show ${cite.commit}:${cite.file} | line ${cite.line} = ${JSON.stringify(atCommit)}\n`);
+    // ⛔ The model's own prose claim is kept SEPARATELY and is NOT the citation list.
+    assert.notDeepEqual(c.evidence_lines, c.citations);
+  }
+});
+
+test("citationsFromCallStream — only a Read RESULT yields a citation; an unpaired or non-Read call yields none", () => {
+  const withTool = (events) => events.map((e) => JSON.stringify(e)).join("\n") + "\n";
+  // An unpaired tool_use (no result) is NOT a reading — nothing was returned to quote.
+  assert.deepEqual(citationsFromCallStream(withTool([TOOL_USE("x", "Read", { file_path: "a.ts" })]).trim()), []);
+  // A Grep result is deliberately NOT mined: its output is a match line, not a numbered line, and a second
+  // citation parse for it would be a second vocabulary (硬规则 5b).
+  const grep = withTool([TOOL_USE("g", "Grep", { pattern: "x", path: "a.ts" }), TOOL_RESULT("g", "a.ts:1:export const a = 1;\n")]);
+  assert.deepEqual(citationsFromCallStream(grep), []);
+  // A blank line is not a citation: every file produces them, and they would pad the count with nothing.
+  const blank = withTool([TOOL_USE("b", "Read", { file_path: "a.ts" }), TOOL_RESULT("b", "     1→\n")]);
+  assert.deepEqual(citationsFromCallStream(blank), []);
+  // The positive control: a real capture DOES yield the position and the text.
+  const real = withTool([TOOL_USE("r", "Read", { file_path: "a.ts" }), TOOL_RESULT("r", "     7→const x = 1;\n")]);
+  assert.deepEqual(citationsFromCallStream(real), [{ file: "a.ts", line: 7, quote: "const x = 1;" }]);
+});
+
+test("verifyCitation — every failure is its OWN code, and a path escaping the pin is refused outright", () => {
+  const dir = tmpDir("osd-cite-");
+  fs.mkdirSync(path.join(dir, "plugin"), { recursive: true });
+  fs.writeFileSync(path.join(dir, "plugin", "a.ts"), "alpha\nbeta\n", "utf8");
+  assert.equal(verifyCitation(dir, { file: "plugin/a.ts", line: 2, quote: "beta" }).ok, true);
+  assert.equal(verifyCitation(dir, { file: "plugin/a.ts", line: 9, quote: "beta" }).reason.startsWith("CITATION_LINE_ABSENT:"), true);
+  assert.equal(verifyCitation(dir, { file: "plugin/a.ts", line: 1, quote: "gamma" }).reason.startsWith("CITATION_TEXT_NOT_AT_LINE:"), true);
+  assert.equal(verifyCitation(dir, { file: "plugin/absent.ts", line: 1, quote: "x" }).reason.startsWith("CITATION_FILE_ABSENT:"), true);
+  assert.equal(verifyCitation(dir, { file: "../outside.ts", line: 1, quote: "x" }).reason.startsWith("CITATION_PATH_UNSAFE:"), true);
+  assert.equal(verifyCitation(dir, { file: "/etc/passwd", line: 1, quote: "x" }).reason.startsWith("CITATION_PATH_UNSAFE:"), true);
+  // The aggregation: verified ones survive, failures are COUNTED, and the carry bound is NOT a failure.
+  const agg = verifyCitations(dir, "deadbeef", [
+    { file: "plugin/a.ts", line: 1, quote: "alpha" },
+    { file: "plugin/a.ts", line: 1, quote: "alpha" },   // the same citation twice is ONE citation
+    { file: "plugin/a.ts", line: 3, quote: "nope" },
+  ]);
+  assert.equal(agg.citations.length, 1);
+  assert.equal(agg.citations[0].commit, "deadbeef");
+  assert.equal(agg.unverifiable, 1);
+  assert.equal(agg.truncated, 0);
 });

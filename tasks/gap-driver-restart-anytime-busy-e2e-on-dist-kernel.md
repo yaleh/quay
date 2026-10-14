@@ -1,7 +1,7 @@
 ---
 id: gap-driver-restart-anytime-busy-e2e-on-dist-kernel
 title: Driver 随时可重启（忙时）E2E 验收：dist 内核上 OSD 在飞 restart、worker 在接管间隙退出、背靠背重启、失败回滚
-status: ready
+status: done
 labels:
   - gap
 parent: null
