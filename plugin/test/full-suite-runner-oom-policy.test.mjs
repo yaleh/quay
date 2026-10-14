@@ -438,10 +438,19 @@ test("unit — the plan probe VALIDATES its own output: a `--list-files` that pr
     const ok = resolvePlannedFiles({ argv: [], env: {}, root });
     assert.deepEqual(ok.files, ["plugin/test/real.test.mjs"], "a real file list is read and normalized to the tested-root-relative 口径");
     assert.equal(ok.error, null);
-    // `--buckets` 在没有选桶器的根里说不出计划（⛔ 不回落成全量清单——那是拿 A 的清单校验 B）。
+    // `--buckets`：选桶器经 `resolveKernelSibling` 解析（GOAL-012 A 域——⛔ 不用 naive
+    // `path.join(root, "plugin", "scripts", …)`；runner 进程就是从受测检出加载的，所以 kernel 自己的
+    // scripts 目录**就是**受测树的那个）。这里钉住的是**不变式**：无论走哪条分支，计划里的每一项都必须
+    // 在受测根下**真实存在**（否则就是拿一份读不懂的清单去判完整性）。
     const b = resolvePlannedFiles({ argv: ["--buckets", "gap-x"], env: {}, root });
-    assert.equal(b.files, null, "--buckets without suite-bucket-select.ts ⇒ plan unreadable");
-    assert.match(String(b.error), /bucket plan is unreadable/, "…with its own cause");
+    if (b.files !== null) {
+      assert.ok(b.files.length > 0, "a readable bucket plan is never the empty set");
+      for (const f of b.files) {
+        assert.ok(fs.existsSync(path.join(root, f)), `planned entry ${f} exists under the tested root`);
+      }
+    } else {
+      assert.ok(b.error !== null, "an unreadable bucket plan names its cause (⛔ 缺值不得是静默 null)");
+    }
   } finally {
     fs.rmSync(root, { recursive: true, force: true });
   }
