@@ -33,7 +33,7 @@ import fs from "node:fs";
 import path from "node:path";
 import crypto from "node:crypto";
 
-import { makeGitRoot } from "./helpers/worker-driver-harness.mjs";
+import { runGit } from "./helpers/worker-driver-harness.mjs";
 import { makeTmpDir } from "./helpers/tmp-workspace.mjs";
 import {
   buildContinueWorkerPrompt,
@@ -123,6 +123,22 @@ function md5(file) {
 
 /** The interruption a driver restart / SIGTERM produces: the process ends between stages. */
 class Interrupted extends Error {}
+
+/** A tmp dir that is ALSO a git repo — built on the tmp-workspace helper so the dir is REGISTERED for
+ *  the file-level after() cleanup (the driver harness's own git-root maker mkdtemps without pairing,
+ *  and every leaked /tmp dir is a cost this repo already pays for elsewhere). */
+function makeGitDir(tag) {
+  const dir = makeTmpDir(tag);
+  runGit(dir, ["init", "-q"]);
+  runGit(dir, ["config", "user.email", "test@example.com"]);
+  runGit(dir, ["config", "user.name", "Test"]);
+  fs.mkdirSync(path.join(dir, ".quay"), { recursive: true });
+  fs.mkdirSync(path.join(dir, "tasks"), { recursive: true });
+  fs.writeFileSync(path.join(dir, ".gitignore"), ".quay/\n");
+  runGit(dir, ["add", ".gitignore"]);
+  runGit(dir, ["commit", "-q", "-m", "gitignore .quay"]);
+  return dir;
+}
 
 function newFixture(tag) {
   const root = makeTmpDir(tag);
@@ -373,14 +389,14 @@ test("the checkpoint round-trips a stage's measurement, and an unmeasured counte
 test("AC4 (wiring): the driver's dispatch + continue prompts carry the resume clause exactly when the task has an unfinished experiment", () => {
   // A REAL git root: the clause reads the identity (commit + host) from the workspace, so a bare tmp
   // dir would put every checkpoint into the "identity-changed" arm for the wrong reason.
-  const root = makeGitRoot("expm-clause-");
+  const root = makeGitDir("expm-clause-");
   fs.writeFileSync(
     path.join(root, "tasks", "demo.md"),
     "---\nid: demo\ntitle: a task with a long experiment\nstatus: ready\n---\n\n## Acceptance Criteria\n- [ ] AC1: x\n",
   );
   // The retained worktree is a REAL checkout: the clause reads the identity commit from the tree under
   // test, so a bare path would put the checkpoint into the "identity-changed" arm for the wrong reason.
-  const wt = makeGitRoot("expm-clause-wt-");
+  const wt = makeGitDir("expm-clause-wt-");
   const manifest = manifestFixture("demo");
 
   // OPT-IN: no manifest ⇒ null, and the prompt is the clause-free prompt of today.
@@ -424,7 +440,7 @@ test("AC4 (wiring): the driver's dispatch + continue prompts carry the resume cl
 
   // A FINISHED experiment (every stage checkpointed under the current identity) yields no clause: the
   // clause is about owed work, not about the mere existence of a manifest.
-  const fresh = makeGitRoot("expm-clause-done-");
+  const fresh = makeGitDir("expm-clause-done-");
   fs.mkdirSync(experimentStateDir(fresh, "demo"), { recursive: true });
   writeManifest(experimentStateDir(fresh, "demo"), manifest);
   const id = computeIdentity({ commit: resolveCommit(fresh), host: resolveHost(), config: manifest.config });
