@@ -499,6 +499,92 @@ export function discardedCommitsAreDisposable(root: string): DiscardabilityVerdi
   return { disposable: true, reason: "disposable", offendingPaths: [] };
 }
 
+// ── 终局解的【工作树】守卫（gap-develop-sync-take-develop-reset-hard-wipes-uncommitted-tracked-edits-
+//    in-shared-checkout）────────────────────────────────────────────────────────────────────────────
+//
+// sibling 任务（gap-develop-sync-reset-hard-destroys-third-party-project-tree）守住了 reset --hard 丢弃
+// 【分支独有提交】的那半边；它不守【工作树】。而 `git reset --hard develop` 同时做两件破坏性的事
+// （2026-10-14 实测，两条负控制见单测）：
+//   ① 静默丢弃**已跟踪文件的未提交改动**（`M tracked.txt` → reset 后内容复原为 develop 版本，exit 0）；
+//   ② 静默覆盖**未跟踪文件**——当该路径存在于 develop 树中时（untracked 文件被 develop 版本替换，
+//      exit 0 无提示；路径不在 develop 树里则保留）。
+// 实测生产（ClaudeCodeUI 2026-10-14）：take-develop 的 reset 抹掉了人已授权、尚未提交的
+// `.quay/config.yml` 启用块（`arch_discovery` / `discovery_method`），**两个 routine 静默停用，无任何
+// 事件点名这次损失**——事件只记 `discardedCount:0`（它数的是提交，不数工作树）。
+// 修法（本任务 Plan 点 1，**拒绝**是保守默认）：reset 前先枚举工作树；有任何 reset 会破坏的状态 ⇒ 拒绝
+// + 落一条可区分的 `…-take-develop-refused` 事件（列出路径）。可保留状态（未跟踪、且不在 develop 树里）
+// 记进事件后照常 reset（point 3：让「reset 没丢东西」成为**测量**而非假设）。
+
+/** 工作树脏态读数（`git status --porcelain`）。三态可区分（硬规则 3b/6）：
+ *   · readable:false            — git status 读不懂（fail-closed：无法证明 reset 安全 ⇒ 不得 reset）。
+ *   · readable:true, 非空数组    — 枚举出的已跟踪改动 / 未跟踪文件（reset --hard 的潜在牺牲品）。
+ *   · readable:true, 空数组      — 干净（reset 不丢任何工作树状态）。 */
+export interface WorkingTreeDirtiness {
+  readable: boolean;
+  /** 已跟踪文件的改动（porcelain 里非 `??` 的行：staged / unstaged / rename）。`reset --hard`
+   *  **静默**丢弃它们（实测生产：未提交的 `.quay/config.yml` 启用被抹掉）。 */
+  trackedDirty: string[];
+  /** 未跟踪文件（porcelain 的 `??` 行）。reset --hard 不删【develop 树里没有的】；
+   *  会**静默覆盖**【develop 树里有的】（实测）。 */
+  untracked: string[];
+}
+
+/** 解析 `git status --porcelain`（v1：`XY<space>PATH`，rename 为 `XY<space>OLD -> NEW`）。纯函数。 */
+export function parsePorcelain(raw: string): { trackedDirty: string[]; untracked: string[] } {
+  const trackedDirty: string[] = [];
+  const untracked: string[] = [];
+  for (const line of raw.split("\n")) {
+    if (!line.trim()) continue;
+    const xy = line.slice(0, 2);
+    let p = line.slice(3);
+    const arrow = p.indexOf(" -> ");
+    if (arrow >= 0) p = p.slice(arrow + 4); // rename：记新路径
+    if (xy === "??") untracked.push(p);
+    else trackedDirty.push(p);
+  }
+  return { trackedDirty, untracked };
+}
+
+/** 工作树脏态读数。⛔ 纯读探测，不改变任何东西。读不懂 ⇒ readable:false（硬规则 6：读不懂 ≠ 干净）。
+ *  `--untracked-files=all`：⛔ 不用裸 porcelain——它会把未跟踪【目录】折叠成一条 `?? dir/`
+ *  （实测：`experiments/x/README.md` → `?? experiments/`），使「路径是否存在于 develop 树」的判据
+ *  失真（折叠后的目录名匹配不上树里的文件路径）。 */
+export function workingTreeDirtiness(root: string): WorkingTreeDirtiness {
+  try {
+    const out = execFileSync("git", ["-C", root, "status", "--porcelain", "--untracked-files=all"], {
+      encoding: "utf8", stdio: ["ignore", "pipe", "ignore"],
+    });
+    const { trackedDirty, untracked } = parsePorcelain(out);
+    return { readable: true, trackedDirty, untracked };
+  } catch {
+    return { readable: false, trackedDirty: [], untracked: [] };
+  }
+}
+
+/** 未跟踪文件里【会被 `reset --hard develop` 静默覆盖】的那些（= 路径存在于 develop 树中）。
+ *  读 develop 树失败 ⇒ null（读不懂 ≠ 无覆盖——硬规则 6）。untracked 为空 ⇒ []（无需读 develop）。 */
+function untrackedOverwrittenByReset(root: string, untracked: string[]): string[] | null {
+  if (untracked.length === 0) return [];
+  const developPaths = lsTreeDir(root, "develop", ".");
+  if (developPaths === null) return null;
+  const tracked = new Set(developPaths);
+  return untracked.filter((p) => tracked.has(p));
+}
+
+/** 落一条 take-develop 拒绝事件（拒绝与「已同步」必须在载体上不同形，硬规则 3b）。⛔ 无论成因为何，
+ *  恒记工作树读数（point 3）——「拒了、工作树本来干净」与「拒了、工作树里正是这些路径」由此可区分。 */
+function refuseTakeDevelop(
+  root: string, cur: string, reason: string, offendingPaths: string[], discarded: string[], resolution: string,
+): void {
+  const dirt = workingTreeDirtiness(root);
+  writeDocDevelopSyncEvent(root, {
+    event: "doc-develop-sync-semantic-take-develop-refused", phase: "take-develop", branch: cur,
+    reason, offendingPaths,
+    workingTree: { trackedDirty: dirt.trackedDirty, untracked: dirt.untracked },
+    discardedCount: discarded.length, discarded, resolution,
+  });
+}
+
 /** 结构冲突下的终局解：硬取 develop，丢弃 doc 侧独有提交（人 2026-09-06 裁定允许）。
  *  **这是让「语义同步必成功、永不卡死」第一次真正成立的那一步**——在此之前结构冲突即
  *  return false 且无升级接线（实测 21/26 卡死在那里）。
@@ -506,7 +592,10 @@ export function discardedCommitsAreDisposable(root: string): DiscardabilityVerdi
  *  再 reset。丢了什么在载体里查得到，⛔ 不是「同步成功」四个字。
  *  ⛔ 允许丢失 ≠ 允许丢任何东西（gap-develop-sync-reset-hard-destroys-third-party-project-tree）：
  *  人 2026-09-06 的裁定是【本仓库 doc 投影分支】的提交可弃，不是一个可以套到任意分支上的通行证。
- *  先过 `discardedCommitsAreDisposable`——不可弃 ⇒ 拒绝 + 落痕 + false，reset 不执行。 */
+ *  先过 `discardedCommitsAreDisposable`——不可弃 ⇒ 拒绝 + 落痕 + false，reset 不执行。
+ *  ⛔ 提交可弃 ≠ 工作树可弃（gap-develop-sync-take-develop-reset-hard-wipes-uncommitted-tracked-
+ *  edits-in-shared-checkout）：`reset --hard` 还静默丢【工作树】——已跟踪文件的未提交改动、以及
+ *  develop 树里有的未跟踪文件。再过一个 `workingTreeDirtiness` 守卫——有会被破坏的状态 ⇒ 同样拒绝。 */
 export function takeDevelopDiscardingDoc(root: string, cur: string): boolean {
   let discarded: string[] = [];
   try {
@@ -521,12 +610,25 @@ export function takeDevelopDiscardingDoc(root: string, cur: string): boolean {
   // 越界面 + 成因】——否则「拒绝了」与「同步成功了」在载体上同形（硬规则 3b）。
   const verdict = discardedCommitsAreDisposable(root);
   if (!verdict.disposable) {
-    writeDocDevelopSyncEvent(root, {
-      event: "doc-develop-sync-semantic-take-develop-refused", phase: "take-develop", branch: cur,
-      reason: verdict.reason, offendingPaths: verdict.offendingPaths,
-      discardedCount: discarded.length, discarded,
-      resolution: "refused-non-disposable-commits",
-    });
+    refuseTakeDevelop(root, cur, verdict.reason, verdict.offendingPaths, discarded, "refused-non-disposable-commits");
+    return false;
+  }
+  // 工作树守卫（本段顶部 ①/②）：`reset --hard` 除丢提交外还静默丢工作树状态。先枚举，任何会被它破坏
+  // 的状态 ⇒ 拒绝（保守默认，Plan 点 1）。判定序：读不懂 > 已跟踪脏 > 未跟踪会被覆盖。
+  const dirt = workingTreeDirtiness(root);
+  const overwritten = dirt.readable ? untrackedOverwrittenByReset(root, dirt.untracked) : [];
+  const wtreeReason =
+    !dirt.readable ? "working-tree-unreadable"
+    : dirt.trackedDirty.length > 0 ? "dirty-working-tree"
+    : overwritten === null ? "working-tree-unreadable"
+    : overwritten.length > 0 ? "untracked-would-be-overwritten"
+    : null;
+  if (wtreeReason !== null) {
+    const paths =
+      wtreeReason === "dirty-working-tree" ? dirt.trackedDirty
+      : wtreeReason === "untracked-would-be-overwritten" ? (overwritten ?? [])
+      : [];
+    refuseTakeDevelop(root, cur, wtreeReason, paths.slice(0, 20), discarded, `refused-${wtreeReason}`);
     return false;
   }
   try {
@@ -535,9 +637,12 @@ export function takeDevelopDiscardingDoc(root: string, cur: string): boolean {
     writeDocDevelopSyncEvent(root, { event: "doc-develop-sync-semantic-take-develop-failed", phase: "reset", branch: cur });
     return false;
   }
+  // 走到这里：trackedDirty 必为空（否则上面已拒绝）⇒「reset 没丢已跟踪工作树状态」是测量出来的。
+  // 若存在未跟踪文件（且都【不在】develop 树里，故 reset 保留它们）⇒ 记进事件（point 3）。
   writeDocDevelopSyncEvent(root, {
     event: "doc-develop-sync-semantic-resolved", phase: "take-develop", branch: cur,
     resolution: "discarded-doc-commits", discardedCount: discarded.length, discarded,
+    ...(dirt.untracked.length > 0 ? { workingTree: { trackedDirty: [], untracked: dirt.untracked } } : {}),
   });
   return true;
 }
