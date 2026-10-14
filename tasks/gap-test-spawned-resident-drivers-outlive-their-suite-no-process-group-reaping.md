@@ -1,7 +1,7 @@
 ---
 id: gap-test-spawned-resident-drivers-outlive-their-suite-no-process-group-reaping
 title: 测试派生的常驻 driver 不随测试回收（无进程组清理），run-u286396 泄漏 18h；共享 spawn helper + 套件结束兜底
-status: todo
+status: ready
 labels:
   - gap
   - defect
